@@ -198,6 +198,18 @@ CBZ.battleWoods = (function () {
     W.trees++;
     return { x: x, z: z, y: y, sc: sc, trunk: trunk, crown: crown, conifer: conifer };
   }
+  // the stump end shatters to splinters and the crown sheds a shower of
+  // leaves in its own green (CBZ.debris: instanced, irregular, settling)
+  function splinter(t) {
+    const Db = CBZ.debris, cam = CBZ.camera && CBZ.camera.position;
+    if (!Db || !Db.chips || !cam || (cam.x - t.x) * (cam.x - t.x) + (cam.z - t.z) * (cam.z - t.z) > 220 * 220) return;
+    const f = foliage(t.x, t.z, t.conifer, h01(t.x * 5, t.z * 5, 405));
+    const leaf = (Math.round(f[0] * 255) << 16) | (Math.round(f[1] * 255) << 8) | Math.round(f[2] * 255);
+    try {
+      Db.chips(t.x, t.y + 1.2 * t.sc, t.z, { kind: "wood", color: 0xb08a58, count: 10, size: 0.16 * t.sc, power: 1.4, spread: 0.8, dust: false });
+      Db.chips(t.x, t.y + 9 * t.sc, t.z, { kind: "foliage", color: leaf, count: 20, size: 0.14, power: 0.9, spread: 4 * t.sc, dust: true, radius: 2.5 * t.sc });
+    } catch (e) {}
+  }
   /* A BOLE IS COVER, and a bole a bomb beats comes down: the crown and trunk
      are put away and a log lies where it stood, felled away from the blast. */
   function bole(t, ctx, collide) {
@@ -208,6 +220,7 @@ CBZ.battleWoods = (function () {
       onDestroy: function (rec) {
         hide(t.trunk); hide(t.crown);
         W.felled++;
+        splinter(t);
         const a = h01(t.x * 11, t.z * 11, 411) * 6.28;
         const L = 13 * t.sc, cx = t.x + Math.cos(a) * L * 0.5, cz = t.z - Math.sin(a) * L * 0.5;
         if (CBZ.battleDress) {

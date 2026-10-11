@@ -412,7 +412,7 @@
       gives: "the shipped military models: fighter jet, bomber, cargo plane, " +
              "helicopter, tank, truck, and the B-2. Real geometry, not boxes",
       needs: ["look"],
-      files: ["city/mil_air.js", "city/island_military.js", "city/strategic.js"],
+      files: ["world/basekit.js", "city/mil_air.js", "city/island_military.js", "city/strategic.js"],
       publishes: ["milModels", "strategicModels"],
     },
 
@@ -478,13 +478,18 @@
     },
     militaryisland: {
       gives: "the REAL military island from the Gang City map, raised at its " +
-             "authored place (centre -620,-700): fenced perimeter, airstrip with " +
-             "parked fighters and the heavy bomber, cargo apron, helipads, motor " +
-             "pool. Load it, then CBZ.studio.raise('militaryisland') builds it. " +
+             "authored place (centre -620,-700), laid out by world/basekit.js: " +
+             "runway, taxiway and apron with fighters in hardened shelters and on " +
+             "the flight line, the heavies on their stands, helo ramp, hangars, " +
+             "tower, fuel farm, HQ, barracks, motor pool, revetted batteries, " +
+             "igloos. Load it, then CBZ.studio.raise('militaryisland') builds it. " +
              "Same files as `military`, named separately so a page that only " +
              "wants the MODELS never raises an island by accident",
-      needs: ["military"],
-      files: ["city/mil_air.js", "city/island_military.js"],
+      // citycore: the HQ, barracks, crash-rescue and ops are real city shells
+      // (cityMakeBuilding). Without it NPC War's island raised none of them —
+      // the try/catch round each one swallowed the missing factory.
+      needs: ["military", "citycore"],
+      files: ["world/basekit.js", "city/mil_air.js", "city/island_military.js"],
       publishes: [],
     },
     airport: {

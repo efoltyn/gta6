@@ -117,6 +117,8 @@ function vehSeatMan(v, man, s) {
       if (b.crew && b.seat === s.seat && !b.man) { b.man = man; b.implicit = false; seat = b; break; }
     }
   }
+  // a passenger who turns up after his carrier has unloaded gets out with the rest
+  if (!seat && !s.crew && v.dismounted) { vehPutOnField(v, man, 0); return; }
   if (!seat) seat = CBZ.vehicleDrive.seat(book, man, s.crew ? null : "passenger");
   if (!seat) { vehPutOnField(v, man, 0); return; }        // no room after all: he walks
   man.inVeh = v;
@@ -211,7 +213,9 @@ function makeVehicle(teamId, i, id) {
   // aircraft come in from their own side's edge, already flying
   let px = at.x, pz = at.z, py = gy;
   if (air) {
-    const back = 700 + (i % 4) * 90;
+    // stats.ingress (m): a bomber starts its run from beyond the horizon, far
+    // enough out that its first pass is a real run (release distance + line-up)
+    const back = (S.ingress || 700) + (i % 4) * 90;
     px = at.x - Math.sin(h) * back; pz = at.z - Math.cos(h) * back;
     // a helicopter comes in low (nap of the earth), a jet at its cruise
     py = MAP.groundAt(px, pz) + (def.drive === "rotor" ? Math.max(S.nap || 10, Math.min(S.alt || 40, 30)) : (S.alt || 300));
@@ -429,7 +433,10 @@ function thinkVehicle(u) {
   const com = teamCOM[enemy];
   const S = u.def.stats || {};
   // carried infantry gets out at the vehicle's dismount range
-  if (!u.dismounted && vehPassengers(u) > 0 && !(u.air && u.def.drive === "rotor" && !u.vs.mobility)) {
+  // (not while the spawn queue is still filling the benches: a truck that
+  // unloads at its first think goes on with half its squad in the back)
+  if (!u.dismounted && vehPassengers(u) > 0 && !(u.air && u.def.drive === "rotor" && !u.vs.mobility) &&
+      (spawnQueue.length === 0 || simT > 5 || u.vs.mobility)) {
     const ref = u.tgt && !u.tgt.dead ? u.tgt.pos : com;
     const d = Math.hypot(ref.x - u.pos.x, ref.z - u.pos.z);
     if (d < (S.dismountAt || 150) || u.vs.mobility) vehDismount(u);
@@ -452,7 +459,7 @@ function thinkVehicle(u) {
     let want = stand;
     if (u.tgt.beast || u.tgt.fists) want = Math.min(stand, 18);
     if (u.tgt.launcher && d < 60) want = 90;
-    if (!u.sees) want = Math.min(want, d * 0.6);
+    if (!u.sees && !vehIndirect(u)) want = Math.min(want, d * 0.6);   // an indirect launcher needs no sight line: it keeps its standoff
     if (d > want * 1.15 || d < want * 0.6) {
       const go = d - want;
       u.target.set(u.pos.x + dx / d * go, 0, u.pos.z + dz / d * go);
@@ -655,8 +662,9 @@ function vehFight(u, sdt) {
   for (let k = 0; k < u.wpn.length; k++) {
     const W = u.wpn[k], w = W.w;
     if (W.off || W.ammo <= 0 || W.cool > 0 || W.reloadT > 0) continue;
-    // a bomb's reach is its fall (vehBombRun), not a range number
-    if (w.kind !== "bombs" && (dist > (w.range || 600) || dist < (w.minRange || 0))) continue;
+    // a bomb's reach is its fall (vehBombRun), not a range number. A gun's
+    // reach is SLANT range: a tank's .50 does not reach a Reaper 4.5 km up
+    if (w.kind !== "bombs" && (Math.hypot(dist, dy) > (w.range || 600) || dist < (w.minRange || 0))) continue;
     if (!vehWeaponFits(u, w, t)) continue;
     const manned = vehSeatManned(u, w);
     if (!manned) continue;                                   // nobody at this gun
@@ -828,7 +836,7 @@ function vehFireKE(u, w, t, dist) {
   if (CBZ.tracer) { try { CBZ.tracer(from, _v, { shooter: u, targetActor: t, muzzle: true, muzzleScale: 2.5 }); } catch (e) {} }
   const dCam = Math.sqrt(camDist2(u.pos));
   if (dCam < 600) { try { CBZ.sfx(w.kind === "cannon" ? "explosion" : "shoot_shotgun", { dist: dCam, ghost: true, volume: 0.9, pitch: w.kind === "cannon" ? 0.55 : 1.2 }); } catch (e) {} }
-  if (!hit) { missImpact(from, _v, camDist2(_v)); return; }
+  if (!hit) { missImpact(from, _v, camDist2(_v), w.kind === "cannon"); return; }
   stats[u.team].hits++; u.hitsF++;
   u._shot = { pen: w.pen || 300, beh: w.beh || 400, he: false, cls: w.kind === "cannon" ? "apfsds" : "ap" };
   hurtMan(t, w.beh || 400, { by: u });
@@ -854,11 +862,15 @@ function vehFireHE(u, w, t, dist) {
   const ch = Math.cos(sol.elev), sh = Math.sin(sol.elev);
   const vel = new THREE.Vector3((tx - from.x) / dd * v0 * ch, v0 * sh, (tz - from.z) / dd * v0 * ch);
   u._he = { pen: he.pen, beh: he.beh, he: true, cls: "he" };
-  rockets.push({
+  const rk = {
     pos: V().copy(from), vel: vel, grav: g, t: 0, by: u, life: Math.max(7, sol.t * 1.5 + 2),
     w: { blastRadius: he.blast || 6, blastPower: (he.power || 1.4) / 0.55, sfx: null },
     trail: CBZ.studio.trail({ length: 12, color: 0xffd9a0, opacity: 0.45, minStep: 2 }),
-  });
+  };
+  rockets.push(rk);
+  // the rig may fly its own round (rig.launched: a guided rocket's profile,
+  // its homing mark, its body): fire.js stepRockets flies whatever it set
+  if (u.rig && u.rig.launched) { try { u.rig.launched(rk, u._firing, t); } catch (e) { console.warn("[war] rig.launched", e); } }
   const dCam = Math.sqrt(camDist2(u.pos));
   if (dCam < 600) { try { CBZ.sfx("explosion", { dist: dCam, ghost: true, volume: 0.7, pitch: 0.6 }); } catch (e) {} }
 }
@@ -1150,7 +1162,10 @@ function stepJet(u, sdt) {
     gx = u.airPt.x; gz = u.airPt.z;
     wantAGL = Math.max(runAlt, cruise * 0.6);
     // far enough out to turn and line up a run that reaches its release point
-    if (dRef > Math.max(1600, R * 2.2, release + R * 1.2)) u.airPhase = "in";
+    // (or the out point is reached: a slow airframe with a long-range
+    // missile, the Reaper, never gets that far out and used to circle the
+    // point for minutes; it turns back in from there, a loiter orbit)
+    if (dRef > Math.max(1600, R * 2.2, release + R * 1.2) || Math.hypot(gx - u.pos.x, gz - u.pos.z) < R * 0.6) u.airPhase = "in";
   } else {
     u.airPhase = "in";
     gx = ref.x; gz = ref.z;
@@ -1210,7 +1225,8 @@ function vehBombRun(u, W, t) {
   const lead = vh * tf;
   const fx = u.pos.x + Math.sin(u.h) * lead, fz = u.pos.z + Math.cos(u.h) * lead;
   const miss = Math.hypot(fx - t.pos.x, fz - t.pos.z);
-  const basket = w.guided ? Math.max(he.blast * 1.5, lead * (w.basket || 0.15)) : Math.max(40, he.blast * 1.5);
+  // w.stick (m): an unguided stick is rippled across the mark, half before it and half past
+  const basket = w.guided ? Math.max(he.blast * 1.5, lead * (w.basket || 0.15)) : Math.max(40, he.blast * 1.5, (w.stick || 0) / 2);
   if (miss > basket) return;
   vehRelease(u, W, he, w.guided ? t : null, tf);
 }
@@ -1234,8 +1250,14 @@ function vehRelease(u, W, he, guideTo, tf) {
   }
   // a guided bomb keeps steering onto the mark all the way down (fire.js stepRockets: `homing`)
   const fall = tf || Math.sqrt(2 * Math.max(10, u.pos.y - MAP.groundAt(u.pos.x, u.pos.z)) / 9.81);
+  // the store leaves its own station (rig.muzzleWorld: the bay clip, the wing
+  // rack) and, with rig.store(shot), is drawn as itself all the way down
+  const p0 = V().set(u.pos.x, u.pos.y - 2, u.pos.z);
+  if (u.rig && u.rig.muzzleWorld) { try { const p = u.rig.muzzleWorld(V(), shot); if (p && isFinite(p.y)) p0.copy(p); } catch (e) {} }
+  let mesh = null;
+  if (u.rig && u.rig.store) { try { mesh = u.rig.store(shot) || null; } catch (e) { mesh = null; } }
   rockets.push({
-    pos: V().set(u.pos.x, u.pos.y - 2, u.pos.z),
+    pos: p0, mesh: mesh,
     vel: vel,
     grav: 9.81, t: 0, by: u, life: Math.max(40, fall * 1.4 + 5), homing: guideTo || null,
     w: { blastRadius: he.blast, blastPower: he.power / 0.55 },
@@ -1255,8 +1277,22 @@ function hurtVehicle(u, dmg, imp) {
   if (imp.fromX != null) { fx = imp.fromX; fz = imp.fromZ; }
   else if (by && by.pos) { fx = by.pos.x; fz = by.pos.z; }
   const above = th.top || (by && by.pos && by.pos.y - u.pos.y > 30 && Math.hypot(fx - u.pos.x, fz - u.pos.z) < (by.pos.y - u.pos.y) * 2);
-  const zn = D.zone(u.h, fx, fz, u.pos.x, u.pos.z, above);
-  const res = D.resolve(u.vs, u.def.stats || {}, zn, th, dmg, lcg);
+  /* THE BELLY. A charge under the hull (an IED, a mine: th.below) meets the
+     floor, and so does a ground blast inside the footprint of a hull that
+     rates its floor (stats.armour.belly: a V-hull). Hulls without one keep
+     the face the blast came from, as they always did. */
+  const S = u.def.stats || {};
+  let under = !!th.below;
+  if (!under && th.he && !above && th.cls !== "heat" && imp.fromX != null && S.armour && S.armour.belly != null) {
+    const ox = fx - u.pos.x, oz = fz - u.pos.z, c = Math.cos(u.h), s = Math.sin(u.h);
+    under = Math.abs(ox * c - oz * s) < u.vwid * 0.6 && Math.abs(ox * s + oz * c) < u.vlen * 0.6;
+  }
+  const zn = under ? "belly" : D.zone(u.h, fx, fz, u.pos.x, u.pos.z, above);
+  // a flown round says where it struck (imp.at): armour by place, and the rig
+  // and the spall line are told the hull point (res.hx/hy/hz)
+  const hp = imp.at ? vehHullPoint(u, imp.at, _vHp) : null;
+  const res = D.resolve(u.vs, vehArmourAt(u, hp), zn, th, dmg, lcg);
+  if (hp) { res.hx = hp[0]; res.hy = hp[1]; res.hz = hp[2]; }
   u.hp = Math.max(0, u.vs.hp);
   u.lastHit = res;
   if (PROBE) { VEH.hits = VEH.hits || { pen: 0, bounced: 0 }; if (res.pen) VEH.hits.pen++; else VEH.hits.bounced++; }
@@ -1268,6 +1304,7 @@ function hurtVehicle(u, dmg, imp) {
   if (u.rig && typeof u.rig.damage === "function") { try { u.rig.damage(u.vs, res); } catch (e) {} }
   // what got through the plate kills the men it passes
   if (res.pen && !u.vs.wreck) vehCrewHits(u, res, th, zn, fx, fz, by);
+  vehHitFx(u, res, th, zn, fx, fz);
   if (u.vs.wreck || u.vs.hp <= 0) { killMan(u, imp); return; }
   // a hull with nobody left alive in it is out of the fight
   if (vehCrewN(u) === 0) { u._abandoned = true; killMan(u, imp); return; }
@@ -1275,6 +1312,29 @@ function hurtVehicle(u, dmg, imp) {
   if (u.vs.mobility && (u.vs.firepower || !u.wpn.length)) { u._abandoned = true; killMan(u, imp); return; }
   if (res.pen && vehPassengers(u) && !(u.air && u.pos.y - MAP.groundAt(u.pos.x, u.pos.z) > 3)) vehDismount(u);
   if (u.air && u.vs.mobility) { u._abandoned = true; killMan(u, imp); }
+}
+/* ARMOUR BY PLACE. stats.armour is per face; stats.plates (optional) refines
+   it by WHERE the round struck, in hull space (x left, y up from the ground,
+   z forward): [{ box: [x0, y0, z0, x1, y1, z1], armour: {front, side, rear,
+   top}, armourCE? }], first match wins, else the face table. The FMTV's
+   LTAS cab stops rifle ball and its canvas-covered bed does not. Only a
+   flown round brings its impact point (fire.js armsHit: imp.at, world); a
+   blast or a table hit takes the face table. */
+const _vHp = [0, 0, 0];
+function vehHullPoint(u, at, out) {
+  const wx = at.x - u.pos.x, wz = at.z - u.pos.z, c = Math.cos(u.h), s = Math.sin(u.h);
+  out[0] = wx * c - wz * s; out[1] = at.y - u.pos.y; out[2] = wx * s + wz * c;
+  return out;
+}
+function vehArmourAt(u, p) {
+  const S = u.def.stats || {}, P = S.plates;
+  if (!P || !p) return S;
+  for (let k = 0; k < P.length; k++) {
+    const b = P[k].box;
+    if (p[0] < b[0] || p[0] > b[3] || p[1] < b[1] || p[1] > b[4] || p[2] < b[2] || p[2] > b[5]) continue;
+    return P[k]._st || (P[k]._st = Object.assign({}, S, { armour: P[k].armour, armourCE: P[k].armourCE || S.armourCE, plates: null }));
+  }
+  return S;
 }
 /* CREW CASUALTIES BY SEAT. A penetration enters through the face it hit
    (`zn`), on the line from whoever fired it, and its spall runs on through
@@ -1292,12 +1352,16 @@ function vehCrewHits(u, res, th, zn, fx, fz, by) {
   const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
   // where it came in, and its path inward
   let ix, iy, iz, px, py, pz;
-  if (zn === "top") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = H; px = 0; py = -1; pz = 0; }
+  if (res.hx != null) {                       // a flown round: it came in where it struck
+    ix = res.hx; iy = res.hy; iz = res.hz;
+    if (zn === "top") { px = 0; py = -1; pz = 0; } else { px = -dx; py = 0; pz = -dz; }
+  } else if (zn === "top") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = H; px = 0; py = -1; pz = 0; }
+  else if (zn === "belly") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = 0.3; px = 0; py = 1; pz = 0; }
   else {
     const tt = Math.min(Wd / Math.max(1e-3, Math.abs(dx)), L / Math.max(1e-3, Math.abs(dz)));
     ix = dx * tt; iz = dz * tt; iy = H * (0.35 + lcg() * 0.45); px = -dx; py = 0; pz = -dz;
   }
-  const reach = zn === "top" ? H : (Math.abs(px) > Math.abs(pz) ? Wd * 2 : L * 2) * 0.8;
+  const reach = zn === "top" || zn === "belly" ? H : (Math.abs(px) > Math.abs(pz) ? Wd * 2 : L * 2) * 0.8;
   const beh = Math.max(th.beh || 0, res.dmg || 0);
   const pk = Math.min(0.9, beh / 600);
   let lost = 0;
@@ -1322,10 +1386,148 @@ function vehCrewHits(u, res, th, zn, fx, fz, by) {
   if (lost) { u.crewLost = (u.crewLost || 0) + lost; if (PROBE) { VEH.crewLost = (VEH.crewLost || 0) + lost; } }
   return lost;
 }
+/* ------------------------------------------------------------- WHAT A HIT THROWS
+   Real wreckage, from the hull that was hit (CBZ.debris.wreckage: instanced,
+   capped, recycled; the shapes are torn plate, track shoes, road wheels and
+   hatch lids, never boxes). The paint is the hull's own, read once off its
+   biggest painted material (colour x map x vertex colour). The rig keeps its
+   own effects (cook-off fire, a turret thrown off its ring by the real
+   turret mesh, the burning shell); this is the metal that leaves it.
+   Visual only, off the sim's RNG: a battle resolves the same with or
+   without a screen. */
+let _fxs = 90217;
+function fxr() { _fxs = (_fxs * 1103515245 + 12345) & 0x7fffffff; return _fxs / 0x7fffffff; }
+const _toneOf = new WeakMap();
+function matTone(m) {
+  if (_toneOf.has(m)) return _toneOf.get(m);
+  const c = [1, 1, 1];
+  if (m.color) { c[0] = m.color.r; c[1] = m.color.g; c[2] = m.color.b; }
+  const img = m.map && m.map.image;
+  if (img && img.width && typeof document !== "undefined") {
+    try {
+      const cv = document.createElement("canvas"); cv.width = cv.height = 8;
+      const cx = cv.getContext("2d");
+      cx.drawImage(img, 0, 0, 8, 8);
+      const d = cx.getImageData(0, 0, 8, 8).data;
+      let r = 0, g = 0, b = 0;
+      for (let i = 0; i < d.length; i += 4) { r += Math.pow(d[i] / 255, 2.2); g += Math.pow(d[i + 1] / 255, 2.2); b += Math.pow(d[i + 2] / 255, 2.2); }
+      c[0] *= r / 64; c[1] *= g / 64; c[2] *= b / 64;
+    } catch (e) {}
+  }
+  _toneOf.set(m, c);
+  return c;
+}
+function hullTone(u) {
+  if (u._paintHex != null) return u._paintHex;
+  let hex = 0x5b6148;
+  if (u.group && u.group.traverse) {
+    // the material that covers the most of the hull is its paint
+    const by = new Map();
+    u.group.traverse(function (o) {
+      if (!o.isMesh || o.isInstancedMesh || !o.geometry || !o.geometry.attributes.position) return;
+      const m = Array.isArray(o.material) ? o.material[0] : o.material;
+      if (!m || m.transparent) return;
+      const e = by.get(m) || { n: 0, g: o.geometry };
+      e.n += o.geometry.attributes.position.count;
+      by.set(m, e);
+    });
+    let best = null, bn = 0;
+    by.forEach(function (e, m) { if (e.n > bn) { bn = e.n; best = { m: m, g: e.g }; } });
+    if (best) {
+      const c = matTone(best.m).slice();
+      const vc = best.m.vertexColors && best.g.attributes.color;
+      if (vc) {
+        let r = 0, g = 0, b = 0, n = 0;
+        const step = Math.max(1, Math.floor(vc.count / 300));
+        for (let i = 0; i < vc.count; i += step, n++) { r += vc.getX(i); g += vc.getY(i); b += vc.getZ(i); }
+        if (n) { c[0] *= r / n; c[1] *= g / n; c[2] *= b / n; }
+      }
+      const L = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
+      if (L > 0.01) hex = (Math.min(255, Math.round(c[0] * 255)) << 16) | (Math.min(255, Math.round(c[1] * 255)) << 8) | Math.min(255, Math.round(c[2] * 255));
+    }
+  }
+  return (u._paintHex = hex);
+}
+// where a hit coming from (fx, fz) meets the hull: on the face toward it,
+// at a height up the side, or on the roof for a top attack
+const _hp = { x: 0, y: 0, z: 0 }, _hn = { x: 0, y: 0, z: 0 };
+function hullHitPoint(u, fx, fz, top) {
+  const H = u.vheight || 2.4;
+  let dx = fx - u.pos.x, dz = fz - u.pos.z;
+  const dl = Math.hypot(dx, dz);
+  if (dl < 1e-3) { dx = Math.sin(u.h); dz = Math.cos(u.h); } else { dx /= dl; dz /= dl; }
+  if (top) {
+    _hp.x = u.pos.x + (fxr() - 0.5) * (u.vwid || 1.5); _hp.z = u.pos.z + (fxr() - 0.5) * (u.vlen || 3); _hp.y = u.pos.y + H;
+    _hn.x = dx * 0.3; _hn.y = 1; _hn.z = dz * 0.3;
+    return _hp;
+  }
+  const sh = Math.sin(u.h), ch = Math.cos(u.h);
+  const along = Math.abs(dx * sh + dz * ch), across = Math.abs(dx * ch - dz * sh);
+  const t = Math.min((u.vwid || 1.5) / Math.max(1e-3, across), (u.vlen || 3) / Math.max(1e-3, along));
+  _hp.x = u.pos.x + dx * t; _hp.z = u.pos.z + dz * t; _hp.y = u.pos.y + H * (0.3 + fxr() * 0.45);
+  _hn.x = dx; _hn.y = 0.35; _hn.z = dz;
+  return _hp;
+}
+function trackSizes(u) {
+  return { link: Math.max(0.38, Math.min(0.7, (u.vwid || 1.6) * 0.36)), wheel: Math.max(0.5, Math.min(0.75, (u.vheight || 2.4) * 0.27)) };
+}
+// a hit that lands: sparks off the plate, and what the round tears off it
+function vehHitFx(u, res, th, zn, fx, fz) {
+  if (!th || th.cls === "small" || th.cls === "teeth" || !u.group || !CBZ.camera) return;
+  if (camDist2(u.pos) > 260 * 260) return;
+  const p = hullHitPoint(u, fx, fz, zn === "top");
+  if (CBZ.bulletImpact) { try { CBZ.bulletImpact(p, _hn, { kind: "spark", power: res.pen ? 2.4 : 1.7 }); } catch (e) {} }
+  const D = CBZ.debris;
+  if (!D || !D.wreckage) return;
+  const tracked = !!(u.def && u.def.drive === "tracked") && !u.air;
+  let plates, size;
+  if (res.slat) { plates = 2 + (fxr() * 2 | 0); size = 0.22; }                  // the cage took it: bent bars and plate
+  else if (th.he) { plates = 2 + (fxr() * 3 | 0); size = 0.3 + Math.min(0.3, (th.beh || 0) / 2000); }   // stowage, skirts, fenders
+  else if (res.pen) { plates = 1 + (fxr() * 2 | 0); size = 0.22; }            // the plate round the hole
+  else { plates = fxr() < 0.5 ? 1 : 0; size = 0.16; }                          // a dart that skipped off takes a flake
+  let links = 0, wheels = 0;
+  // the running gear gone: shoes off the broken track, perhaps a road wheel
+  if (res.mobility && tracked && zn !== "top") { links = 5 + (fxr() * 5 | 0); wheels = fxr() < 0.4 ? 1 : 0; }
+  const TS = trackSizes(u);
+  try {
+    D.wreckage(p.x, p.y, p.z, {
+      color: hullTone(u), plates: plates, plateSize: size, links: links, linkSize: TS.link, wheels: wheels, wheelSize: TS.wheel,
+      dir: _hn, power: th.he ? 1.6 : 1.1, radius: 0.5, dustColor: 0x5a544a,
+      burn: res.burning ? 6 : 0, burnFrac: 0.5,
+    });
+  } catch (e) {}
+}
+// a knockout: the hull sheds its skin; a catastrophic one throws it wide and
+// burning (the rig lifts the real turret off its ring and keeps the fire)
+function vehKillFx(u, catastrophic, at) {
+  const D = CBZ.debris;
+  if (!D || !D.wreckage || !u.group || !CBZ.camera) return;
+  const c = at || u.pos;
+  if (camDist2(c) > 320 * 320) return;
+  const tracked = !!(u.def && u.def.drive === "tracked") && !u.air;
+  const big = Math.max(0.6, Math.min(1.6, (u.vlen || 3) / 3.5));
+  const TS = trackSizes(u);
+  // a scorched paint: the outside of a burnt hull is charred
+  const ph = hullTone(u), k = catastrophic ? 0.55 : 0.8;
+  const col = ((((ph >> 16) & 255) * k) << 16) | ((((ph >> 8) & 255) * k) << 8) | ((ph & 255) * k);
+  try {
+    D.wreckage(c.x, (c.y || 0) + (u.vheight || 2.4) * 0.6, c.z, {
+      color: col,
+      plates: catastrophic ? 9 + (fxr() * 5 | 0) : 3 + (fxr() * 3 | 0), plateSize: 0.45 * big,
+      links: tracked ? (catastrophic ? 8 + (fxr() * 6 | 0) : (fxr() < 0.4 ? 3 : 0)) : 0, linkSize: TS.link,
+      wheels: tracked ? (catastrophic ? 1 + (fxr() * 2 | 0) : 0) : 0, wheelSize: TS.wheel,
+      hatches: catastrophic && !u.air ? (fxr() < 0.6 ? 1 : 0) + (fxr() < 0.3 ? 1 : 0) : 0, hatchSize: 0.8,
+      dir: { x: 0, y: 1, z: 0 }, power: catastrophic ? 2.6 : 1.3, spread: 1.5 * big, radius: 1.6 * big,
+      burn: catastrophic ? 14 : 5, burnFrac: catastrophic ? 0.5 : 0.25, fires: catastrophic ? 2 : 0,
+      dustColor: 0x3d3833,
+    });
+  } catch (e) {}
+}
 // killMan's vehicle half: the crew gets out (or does not), the hull burns
 function vehicleWrecked(u, imp) {
   u.dieT = 0;
   const catastrophic = !!(u.vs.wreck && u.vs.burning) || (u.vs.hp < -u.maxHp * 0.3);
+  if (!u.air) vehKillFx(u, catastrophic);
   vehBailOut(u, catastrophic && !u._abandoned);
   u.burnT = u.vs.burning || catastrophic ? 40 + lcg() * 40 : 0;
   if (u.you) { u.you = false; }
@@ -1352,6 +1554,7 @@ function stepWreck(u, sdt) {
     const g = MAP.groundAt(u.pos.x, u.pos.z);
     if (u.pos.y <= g + 0.5) {
       u.pos.y = g + 0.5; u.crashed = true;
+      vehKillFx(u, true);
       if (CBZ.studio.boom) CBZ.studio.boom({ x: u.pos.x, y: g + 1, z: u.pos.z }, { radius: Math.min(20, 6 + u.vlen * 0.5), power: 1.6, structural: false, by: null });
     }
   }
@@ -1565,5 +1768,5 @@ function stepYouVehicle(u, sdt) {
   if (CBZ.tracer) { try { CBZ.tracer(from, _v, { shooter: u, muzzle: true, muzzleScale: 2 }); } catch (e) {} }
   vehFx(u, from);
   u.actx.firing = shot; u._firing = null;
-  missImpact(from, _v, 0);
+  missImpact(from, _v, 0, W.w.kind === "cannon");
 }

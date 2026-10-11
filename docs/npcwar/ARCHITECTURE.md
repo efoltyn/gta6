@@ -133,7 +133,7 @@ change it only in coordination.
 | `src/battle/arenas/field.js` | `buildMap(id)`: raise a ground, return the MAP record (spawn, ground, sight) | terrain |
 | `src/battle/arenas/erg.js` | the open dunes / snow / fields / wood: the height forms (barchan + transverse dunes off one wind, snow drifts, rolling ground), the crest table, the parcels, the skin and its per-surface shader (ripples, sastrugi, litter + dapple, crops); `FOLD`: the war window is one half turned 180 degrees about the centre, so both start lines get the same ground, cover and sight lines (`foldEmit` / `foldSeg` place every prop, tree, bank and drift in turned pairs while the field is dressed) | terrain |
 | `src/battle/arenas/cover.js` | `CBZ.battleCover`: every cover point (props, walls, crests, crater lips), hit points, destruction; `MAP.coverNear/coverFrom` | terrain |
-| `src/battle/arenas/dress.js` | `CBZ.battleDress`: the real objects (sandbags, hesco, jersey, burnt cars, boulders, logs, dry walls, bales, rubble, containers), instanced, and where they go (open ground, the downtown's streets) | terrain |
+| `src/battle/arenas/dress.js` | `CBZ.battleDress`: the real objects (sandbags, hesco, jersey, burnt cars, boulders, logs, dry walls, bales, rubble, containers), instanced, and where they go (open ground, the downtown's streets). The HESCO basket is `world/basekit.js`'s (`CBZ.baseKit.hescoGeo`, loaded before this file), the same one Fort Brandt's revetments use; the MILITARY ISLAND venue is laid out by that kit's base planner | terrain |
 | `src/battle/arenas/ground.js` | `CBZ.battleGround`: earthworks + craters in groundAt, prints and tracks, scorch, blast spray, blowing sand, the baked dead (remains) | terrain |
 | `src/battle/arenas/woods.js` | `CBZ.battleWoods`: THE WOOD (canopy, understory, bracken, deadfall, canopy map) and the snow's spruce groves | terrain |
 | `src/battle/arenas/fields.js` | `CBZ.battleFields`: farmland (hedgerows on banks, dry walls, wheat, maize, bales, pasture) | terrain |
@@ -222,14 +222,17 @@ CBZ.unitKit.register("m1_abrams", {
   kind: "vehicle", domain: "ground" | "air", drive: "tracked" | "wheeled" | "rotor" | "jet",
   stats:   { hp, mass, speed, turn, armour: { front, side, rear, top },  // armour in mm RHA
              grip,                     // wheeled, opt-in, in g: the driver slows for corners, lock limited at speed
+             plates: [{ box: [x0, y0, z0, x1, y1, z1], armour: { front, side, rear, top } }],  // optional: armour BY PLACE (below)
              dismountAt,               // keep it above 1.15 x standoff, or the carrier parks with its men aboard
-             alt, standoff, nap, popAlt, climb, popWindow, popShots },   // aircraft: see "Flight"
+             alt, standoff, nap, popAlt, climb, popWindow, popShots,     // aircraft: see "Flight"
+             ingress },                // aircraft: spawn this far back (m) so a bomber's first pass is a real run
   crew:    [{ seat: "driver" | "gunner" | "commander" | "loader" | "pilot", pos: [x, y, z] }],
   passengers, passengerPos: [[x, y, z], ...],                          // optional: each bench seat in hull space
   weapons: [{ id, seat, kind: "cannon" | "autocannon" | "mg" | "rockets" | "missile" | "sam" | "bombs",
               rof, dmg, range, minRange, ammo, burst, pause, salvo, reload, vs, needs, indirect,
               mount: "turret" | "slew" | "fixed" | "free", arc, yawMax, tol,       // facing, below
-              guided, basket, alt, dive, pullOut }],                            // air weapons
+              guided, basket, alt, dive, pullOut,                                // air weapons
+              stick }],                // unguided bombs: the stick's ground length (m), rippled across the mark
   build(ctx) -> { group, rig, footW, footL, height },
   animate(veh, dt, ctx),                                // optional: the unit's own look
   tactics: { role, engage, priorities, hullDown, faceThreat, reverseOut, screen, ... },  // for the AI
@@ -284,12 +287,14 @@ Do not read `w.needs` as a "which weapon" signal (the old getter hack): use `sho
 
 | rig hook | when |
 |---|---|
-| `muzzleWorld(out, shot) -> Vector3` | where this round leaves (the gun, the next tube or rail) |
+| `muzzleWorld(out, shot) -> Vector3` | where this round leaves (the gun, the next tube or rail; for a bomb, its bay clip or wing rack) |
 | `fire(shot, from)` | every round of every weapon. A rig with `fire` owns its effects (recoil, flash, the store leaving its rail): the runtime draws none |
 | `fired(scale, shot)` / `spend(i, shot)` | **legacy** (`city/mil_armor.js` rigs), only when there is no `fire`: `fired` for cannon (1) and autocannon (0.3) rounds, `spend` for a launch with `i` = the rig's own `loaded - 1` when it keeps one, else `shot.n` |
 | `reload(shot)` | a salvo's reload has finished: put the rounds back |
+| `launched(rocket, shot, target)` | an HE round / rocket (`vehFireHE`) has just been put in flight: the rig may fly it its own way (velocity, `grav`, `life`, `homing` mark `{ pos, dead }`, warhead `w`, a `mesh`); fire.js `stepRockets` flies whatever it set. The HIMARS uses it for guided GMLRS |
+| `store(shot) -> Object3D` | a released bomb's falling mesh (in the scene, at `muzzleWorld`); the runtime flies it and hands it to `CBZ.munitions.release` on impact, so take it from `CBZ.munitions.acquire` |
 | `canFire(shot) -> bool` | false holds this weapon this step (a TOW only with the launcher up and the hull still) |
-| `damage(vs, res)` | every hit that lands (`vs` = the damage state, `res` = `vehicleDrive.resolve`'s result: `zone pen dmg mobility firepower burning wreck`): show the drooped gun, the thrown track, the fire |
+| `damage(vs, res)` | every hit that lands (`vs` = the damage state, `res` = `vehicleDrive.resolve`'s result: `zone pen dmg mobility firepower burning wreck`, plus `hx hy hz`, the hull-space point a flown round struck, when it has one): show the drooped gun, the thrown track, the fire, the strike on the plate |
 | `aimError(shot) -> rad` | how far a `slew` mount still is from the line; the runtime holds fire until it is under `w.tol` (0.06) |
 | `aimTurret(yaw, elev, dt)`, `aimLauncher(yaw, elev, dt)`, `settle()`, `update(dt, v, w, steer)` | as before |
 
@@ -313,6 +318,13 @@ implicit crew of a hull nobody was assigned to). A weapon with no seat needs any
 weapon (the driver) can climb over to the MAIN gun's seat (weapon 0's) once the hull has
 stopped. He never works the loader's or the commander's machine gun. You, at the controls, are
 the crew.
+
+**Armour by place.** `stats.armour` is per face. `stats.plates` (optional) refines it by WHERE the
+round struck: boxes in hull space (x left, y up from the ground, z forward), first match wins, else
+the face table. A flown round (`fire.js armsHit`) hands its impact point to the hull (`imp.at`); a
+blast or a table hit has none and takes the face table, so make the face table the right fallback.
+The FMTV is the worked example: its LTAS cab stops rifle ball on every face, the bed behind it is
+sheet steel and canvas.
 
 **Crew casualties by seat.** A penetration comes in through the face it hit, on the line from
 whoever fired it, and its spall carries on through the hull. Each man in a seat (crew or
@@ -405,7 +417,7 @@ suspension, rate-limited turret laying, ballistics, armour zones, penetration, d
 the crew seat book; pure maths, node-loadable). The battle side (crew, AI, firing, damage
 states, wrecks, player driving) is `src/battle/vehicles.js`.
 
-The 15 vehicles today, each on the game's existing builder (there is no new art in wave A; the
+The vehicles today, each on the game's existing builder (there is no new art in wave A; the
 vehicle agents redraw):
 
 | id | name | builder | crew | weapons | armour F/S/R/T (mm) |
@@ -413,18 +425,26 @@ vehicle agents redraw):
 | m1_abrams | M1A2 Abrams | milArmor.tank | commander, gunner, loader, driver | 120 mm, coax, .50 | 800/120/50/40 |
 | bradley_ifv | M2A3 Bradley (6 dismounts) | milArmor.ifv | driver, gunner, commander | 25 mm, TOW, coax | 60/30/20/15 |
 | stryker_apc | Stryker (9) | milArmor.apc | driver, commander | .50 RWS | 20/14/12/8 |
-| hmmwv | Humvee (2) | milArmor.luv | driver, gunner | .50 | 10/10/8/5 |
-| m35_truck | M35 (16) | milArmor.truck | driver, commander | none | 2/0/0/0 |
-| m270_mlrs | label "M142 HIMARS" (the model is the wheeled pod) | milArmor.mlrs | 3 | 6 rockets | 8/2/2/2 |
+| hmmwv | Humvee (2) | its own file (hull kit) | driver, gunner | .50 | 10/10/8/5 |
+| maxxpro_mrap | Navistar MaxxPro MRAP (6) | its own file on units/kit/hull.js (V-hull capsule, O-GPK, rear door) | driver, gunner, commander | .50 ring | 30/26/26/12, belly 260 (blast) |
+| jltv | Oshkosh L-ATV JLTV (1) | its own file on units/kit/hull.js (TAK-4i travel, CROWS) | driver, gunner, commander | .50 CROWS | 22/16/14/9, belly 200 |
+| m35_truck | M35 (16) | its own file (hull kit) | driver, commander | M2 .50 ring | 2/0/0/0 |
+| fmtv | FMTV M1083A1 (16; convoy truck) | its own file (hull kit: LTAS cab, 6x6 singles with CTIS, troop seats, bows and canvas) | driver, commander (stands in the cab ring) | M2 .50 ring | cab 11/11/11/6 by `plates`, bed 1 (soft) |
+| m270_mlrs | M142 HIMARS (redrawn on the hull kit: FMTV 6x6, launcher module, one GMLRS pod) | its own file | driver, gunner, commander | 6 x M31A1 GMLRS per pod, guided, reload by pod (18 carried) | 12/9/5/5 |
 | patriot_launcher | Patriot | milArmor.patriot | 2 | SAM (air only) | 6/2/2/2 |
 | technical | MG technical | stand-in in its file (warlord's builder needs CBZ.warlord) | driver, gunner | MG | 1/0/0/0 |
 | ah64_apache | AH-64 | milAir attackHeli | pilot, gunner | 30 mm, Hellfire, Hydra | 20/15/10/8 |
 | uh60_black_hawk | UH-60M (11, fast rope) | its own file (redrawn) | pilot, copilot, gunner, crew chief | 2 x M240H door guns | 3/2/2/2 (unarmoured, hp 820) |
-| f35 | F-35A | milAir fighter | pilot | 2 GBUs/pass, 25 mm | 2 |
+| f35 | F-35A | its own file (redrawn: chined airframe, internal bays) | pilot | 2 x AIM-120C + 2 x GBU-31 (soft marks) or 8 x GBU-39 (armour), 182 x 25 mm | 3/2/2/2 |
 | mq9_reaper | MQ-9 | milAir drone | remote | Hellfire | 0 |
-| b52 | B-52H | milAir bomber | 5 | bomb sticks | 0 |
-| b2_spirit | B-2 | strategicModels.b2 | 2 | heavy bombs | 0 |
+| b52 | B-52H (redrawn: skinned flexing wing) | its own file | pilot, copilot, radar nav, nav, EWO | 27 x Mk-82 stick (bay), 12 x GBU-31 JDAM (HSABs) | 3/2/2/2 (unarmoured, hp 1800) |
+| b2_spirit | B-2A Spirit | its own file (redrawn: real planform, hinged surfaces, two bays with rotary launchers) | pilot, commander | 8 GBU-31 BLU-109 (armour), 8 GBU-31 Mk 84 | 3/2/2/2 (unarmoured) |
 | a400m | A400M (airdrops 116) | milAir cargo | 3 | none | 0 |
+
+**The belly.** A charge under a hull (`imp.cause` `"ied"` / `"mine"`, threat class `ied`, 160 mm
+of blast loading) lands on the zone `"belly"`, and so does any ground blast inside the footprint
+of a hull that rates its floor (`stats.armour.belly`: a V-hull). A hull without a belly figure
+takes it on its roof's armour. The MaxxPro and the JLTV live through it; a Humvee does not.
 
 **Crew rules.** A side's men fill seats in roster order: drivers and pilots first, then gunners,
 copilots, commanders, loaders, then passenger benches. Seated men are off the field (hidden, not
@@ -453,7 +473,7 @@ enters walls, ground, dunes or bodies (camApply). Probe seams: `__battle.take(se
 `youDrive({ax,az,run,atk,yaw})`, `youState()`, `director()`. Shot service: `--cams lens` shoots
 the game's own camera.
 
-**Known gaps.** The HIMARS' indirect fire needs tuning, and there is no per-track split on the
+**Known gaps.** There is no per-track split on the
 rig. Aircraft fly the doctrine above, not `studio.fly`. The `drive` / `aim` / `fight` unit
 hooks are not called yet: a unit drives on the shared tracked / wheeled / air model. In node,
 strategic.js and the A400M build fall back to stand-ins (browser untested).
@@ -866,8 +886,19 @@ charge, a tank in a crowd, a blast, a throw).
   `420 x power x (0.55 / Z)²` with `Z = d / R`, tapering to 0 at R; delta-v
   `9 x power x (0.55 / Z)^1.5 x (80 / kg)^(1/3)`. A man at the core dies and flies; a bull
   elephant at the core takes ~440 and rocks at 2 m/s. Corpses go first through
-  `CBZ.ragdollBlast`; loose debris is kicked (`CBZ.debris.impulse`) and the crater throws
-  grit (`CBZ.debris.chips`). Hulls keep the old ring (inside 0.55 R the armour answers).
+  `CBZ.ragdollBlast`; loose debris is kicked (`CBZ.debris.impulse`). Hulls keep the old ring
+  (inside 0.55 R the armour answers).
+- **Debris is real, never cubes.** One system: `systems/debris.js` grit, shaped by what
+  broke (stone, soil clod, flake, glass shard, torn plate, track shoe, road wheel, hatch lid),
+  instanced per shape, capped per device and ring-recycled. Ground hits: `ground.js` digs
+  the crater, scorches, sprays grain and dust, and throws clods of that ground in the crater
+  wall's colour (`clods`; crashfx's generic grit stands down via `CBZ.groundOwnsEjecta`). A
+  tank round that misses into ground or a wall throws clods or broken stone
+  (`fire.js missImpact(.., heavy)`). Hulls: `vehHitFx` (sparks, plate torn off in the hull's
+  own paint, shoes and a road wheel when the track goes) and `vehKillFx` (a knockout sheds
+  plate, shoes, wheels, hatches, some burning, the first few starting ground fires); the rig
+  itself throws its real turret. Cover breaks into its own stuff (`dress.js breakUp`, trees
+  `woods.js splinter`). Men throw nothing: blood and gore only.
 - **Hulls.** `vehCrush` (vehicles.js): the face of a moving hull is a collision by momentum
   (the hull loses `J / M` of its speed: a Humvee into a bull stops, a tank into a man does
   not notice); a body the hull outweighs 12:1 that is down goes UNDER it (pushVehicle stands

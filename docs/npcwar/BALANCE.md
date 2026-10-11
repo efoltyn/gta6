@@ -61,12 +61,12 @@ can measure the slots themselves.
 30 v 30 identical pro riflemen (AK-47). The table gives red's win share, from the red slot,
 with no swap. Before is origin/main at 81284c57.
 
-| ground | before (40 seeds) | after (40 seeds) |
-|---|---|---|
-| dunes | 3% [0-13] | 53% [37-67] |
-| snow | 28% [16-43] | 53% [37-67] |
-| fields | 8% [3-20] | 55% [40-69] |
-| wood | 3% [0-13] | 55% [40-69] |
+| ground | before (40 seeds) | after (40 seeds) | after, merged with main's round 2 (40 seeds) |
+|---|---|---|---|
+| dunes | 3% [0-13] | 53% [37-67] | 50% [35-65] |
+| snow | 28% [16-43] | 53% [37-67] | 45% [31-60] |
+| fields | 8% [3-20] | 55% [40-69] | 48% [33-63] |
+| wood | 3% [0-13] | 55% [40-69] | 53% [37-67] |
 
 With the swap on, the share for roster A came out at 38-75% over 24-40 seeds (the dunes at
 68% [52-80] over 40). The swap only relabels the same battles by seed parity, so this is a
@@ -80,9 +80,81 @@ Training now shows from either slot. With 30 elite against 30 thugs on the dunes
 The before numbers were the ground. The after numbers are training, which is still weaker
 than real life (see below).
 
-`npcwar-headless` passes 115/115: the resolver names the page's winner 6/7, and holding trades
-at least as well as meeting them in the open 2/3. `front-sim` passes 40/40 and
-`npcwar-balance-check` passes.
+`npcwar-headless` passes 115/115 before the merge and 168/168 after it: the resolver names the
+page's winner 6/7, and holding trades at least as well as meeting them in the open 2/3.
+`front-sim` passes 40/40 and `npcwar-balance-check` passes.
+
+## Round 2 (branch npcwar-balance2): F1-F6, morale, the elephant
+
+**The harness was lying about the ambush.** `--gap N` shifted each side by (map gap - N) / 2,
+but the dunes grid stands each side's first rank 8 m behind its half of the gap, so "tiger v 1
+rifleman at 10 m" was a 26 m charge into an aimed rifle (and every gap row was 16 m wider than
+labelled). The arena now places the front ranks N apart. The "before" column below is origin/main
+at 81284c57 on the corrected harness (the old harness gave the same tree 23 IN / 7 OUT / 6 FAR).
+
+| matchup | band | before | after |
+|---|---|---|---|
+| lion v tiger | 30-60% | 19% OUT | 31% IN |
+| brown bear v tiger | 50-90% | 19% FAR | 75% IN |
+| brown bear v lion | 55-92% | 17% FAR | 83% IN |
+| gorilla v lion | 0-30% | 75% FAR | 33% OUT |
+| gorilla v tiger | 0-25% | 33% OUT | 0% IN |
+| 10 wolves v bear | 25-80% | 75% IN | 25% IN |
+| wolf v dog | 60-98% | 100% OUT | 100% OUT |
+| tiger v 30 unarmed | 35-95% | 75% IN | 58% IN |
+| tiger v 100 unarmed | 5-60% | 63% OUT | 0% OUT |
+| 50 unarmed v gorilla | 60-100% | 0% FAR | 20% FAR |
+| 100 unarmed v gorilla | 85-100% | 0% FAR | 88% IN |
+| tiger v 3 rifles, 12 m | 15-70% | 0% OUT | 0% OUT (kills 0.8 of 3, was 0.1) |
+| tiger v 1 rifle, 10 m | 40-90% | 25% OUT | 56% IN |
+| Abrams v 50, 1 in 4 RPG | 30-95% | 50% IN | 25% OUT (8 seeds, CI 7-59) |
+| Stryker v 30 rifles | 70-100% | 50% OUT, 4 draws | 38% FAR, 5 draws (8 seeds) |
+| 20 elite v 20 thugs | 75-100% | 50% FAR | 50% FAR |
+| every other row | | IN | IN |
+| **tally** | | **22 IN / 8 OUT / 6 FAR** | **28 IN / 5 OUT / 3 FAR** |
+
+What changed and why:
+
+- **F1 tiger** (`bengal_tiger.js`): row hp 340 -> 260. A 220 kg male is ~290 (hpK 1.12), seed 0's
+  1.12 male ~340, a female ~220: mass^0.75 against the lion's 215 at 190 kg. Tiger v lion 19 -> 31%.
+- **F2 bear** (`brown_bear.js`): the first bear on a side (seed 0 / 7919) is an adult male. And
+  red's seed 0 was read as "no seed" (`(seed | 0) || random`), so red's first bear was a random
+  draw. Bear v tiger 19 -> 75%, bear v lion 17 -> 83%.
+- **F3 gorilla** (`gorilla.js`): hp 260 -> 220. Gorilla v tiger 33 -> 0%, v lion 75 -> 33%.
+- **F4 the swung body** (`ape_combat.js`): the club pass is a collision (dv = 0.58 x club speed,
+  2.3-7.5 m/s) through the page's body layer, so a man is knocked down or thrown; the bruise is
+  0.3 of the blow (was 1.15, ~43 hp). Thrown and swatted bodies go through `physics.js`'s
+  `flingBody` (9.81, walls, bowling by momentum, landing speed is the injury), exported as
+  `CBZ.bodyPhys`; the file's own GRAV 21 integrator is now only for hosts with no body layer.
+  Clubbed-with-a-body went from ~43 to ~12 hp a hit.
+- **F6 dead on its feet** (`ballistics.js` `onFeet`, `damage.js` `onItsFeet`, `fire.js`
+  `stepBleed`): a round that would finish an animal without reaching brain or spine leaves it
+  `5 x (kg / 80)^0.25` s (tiger 6.4, elephant 14.7, +-30%) before it drops; more holes shorten
+  it down to a 40% floor; bleeding out to zero starts the same clock. An animal's tissue damage is
+  dep / (mass x 35), not x 20 (a flank hit on a tiger was 37%, more than a heart shot), and a head
+  hit that misses the brain is no longer the man's flat 0.3: one AK round through a tiger's jaw was
+  57-78% of it, through an elephant's face 31% of a 6 t animal; now ~18% and ~1%.
+  A dying predator inside 30 m of its killers charges instead of quitting (`think.js`), an animal
+  inside 25 m does not need a sight line to its mark (it hears and smells; a crest sent the tiger
+  down the flow field away from the men), and the tiger runs on adrenaline, not on its hp, while
+  dying (`bengal_tiger.js`).
+- **Morale** (`brain.js` `armyStep`, `ai/morale.js`, `ai/squad.js`): an odds term,
+  0.1 x log2(own standing power / theirs), +-0.4, kept as a reserve over 1 (a clamp at 1 threw it
+  away), and none of it for riflemen facing armour with no launcher. A mate dropping and the
+  nearness of a big animal rattle a man less in a crowd (sqrt past 4 / 3 mates): 50 civilians
+  round a gorilla were all at the 1.2 rattle cap and 40 of 49 broke in one second. Nobody
+  surrenders to an animal (2-9 men a battle did). 100 civilians v a gorilla 0 -> 88%.
+- **Elephant** (`african_elephant.js`, `physics.js`): the ram, its splash and the trample are
+  the collision's injury, so `contactImpulse` still throws the man by momentum but no longer
+  hurts him a second time (`m.impactBilled`); a man the ram just struck is not trampled again
+  in the same 0.8 s; and the file's clock is the sim clock (`CBZ.now`), not the wall clock.
+
+Left, honestly: **50 civilians v a gorilla** (20%): a fist lands ~2.3 hp on a gorilla (the hide
+threshold) and node men have no grappling, so fifty men deal ~120 hp in 30 s while the silverback
+kills ~15. **Tiger v 3 riflemen at 12 m**: the dying tiger now kills 0.8 of the 3, but killing all
+three inside its window is rare. **Stryker v 30 rifles**: most runs are 300 s draws (the hull
+cannot finish men in cover); pre-existing. **Elite v thugs**: FAR on main before this branch.
+**Wolf v dog** at 100% sits just above a 98% band.
 
 ## The matrix, 2026-10-11
 

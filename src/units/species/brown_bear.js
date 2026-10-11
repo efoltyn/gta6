@@ -352,8 +352,14 @@
   }
   function individual(spec, seed) {
     const r = mkRng(((seed | 0) * 2654435761) ^ 0xbea5);
-    const sex = r() < 0.5 ? "m" : "f";
-    const age = r() < 0.16 ? "y" : "a";
+    /* THE FIRST BEAR ON A SIDE IS AN ADULT MALE (battle/beasts.js seeds a
+       side's spawns i + 0 / i + 7919), as the tiger and lion files do. A
+       "1 brown bear" matchup otherwise fielded a 188 kg sow against a male
+       cat: measured, 17% v a lion and 19% v a tiger. After that, the mix. */
+    const first = seed === 0 || seed === 7919;
+    const rs = r(), ra = r();
+    const sex = first || rs < 0.5 ? "m" : "f";
+    const age = !first && ra < 0.16 ? "y" : "a";
     const coat = spec.coats[Math.floor(r() * spec.coats.length) % spec.coats.length];
     let mass = (sex === "m" ? spec.mass.m : spec.mass.f) * (age === "y" ? 0.5 : 1) * (0.86 + r() * 0.28);
     return { sex: sex, age: age, coat: coat, mass: mass, r: r };
@@ -364,7 +370,8 @@
       const row = CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES[spec.id];   // the bestiary body if the kit is missing
       return row && row.build ? row.build(ctx) : null;
     }
-    const seed = Math.abs(((ctx && ctx.seed) | 0) || Math.floor(((ctx && ctx.rng) ? ctx.rng() : Math.random()) * 1e6));
+    // seed 0 is a real seed (red's first spawn), not "no seed"
+    const seed = (ctx && ctx.seed != null) ? Math.abs(ctx.seed | 0) : Math.floor(((ctx && ctx.rng) ? ctx.rng() : Math.random()) * 1e6);
     const ind = individual(spec, seed);
     const T = tableFor();
     const D = dims(spec, ind.sex, ind.age);

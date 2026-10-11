@@ -37,7 +37,7 @@ assert.match(patriot, /launcherRig\(S,/, "canisters sit on the shared yaw/elevat
 assert.match(patriot, /m\.name = "lm" \+ i/, "one authored muzzle node per canister");
 assert.match(armorKit, /hide\(ud, "patriotMuzzles", rig\.muzzles\)/);
 assert.match(island, /patriot: makePatriot/);
-assert.match(island, /\[makePatriot, "patriot", /);
+assert.match(island, /\[makePatriot, "patriot"[,\]]/);   // the base plan's stands map patriot -> a boardable "patriot"
 
 const pointFire = section(aircraft, "CBZ.cityFireMissileAt = function", "CBZ.cityPatriotMissileAudit");
 assert.match(pointFire, /launchMissile\(/,

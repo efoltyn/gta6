@@ -106,12 +106,22 @@ async function oneBattle(mu, seed) {
      no-man's land (150 m on the dunes). The close-range ambush lives here. */
   if (mu.gap != null) {
     const MAP = vm.runInContext("MAP", sb);
-    const g0 = MAP.gap, cx = MAP.cx;
+    const cx = MAP.cx;
     const sp = MAP.spawnAt;
+    /* THE GAP IS BETWEEN THE FRONT RANKS. It used to shift each side by
+       (map gap - gap) / 2, but the map's grid stands each side's first rank
+       8 m BEHIND its half of the gap (arenas/field.js grid: gap/2 + 8), so
+       "--gap 10" fielded the tiger and the rifleman 26 m apart and the
+       10-12 m ambush rows were measuring a 26-28 m charge into an aimed
+       rifle. Now the first body a side spawns sets that side's shift so its
+       front rank stands gap / 2 from the centre, whatever the map's own
+       spawner does. */
+    const shift = {};
     MAP.spawnAt = function (team, i, r) {
       const at = sp.apply(this, arguments);
       const side = team === "red" ? -1 : 1;   // the slot's side of the field
-      at.x -= side * (g0 - +mu.gap) / 2;
+      if (shift[team] == null) shift[team] = Math.abs(at.x - cx) - +mu.gap / 2;
+      at.x -= side * shift[team];
       return at;
     };
   }

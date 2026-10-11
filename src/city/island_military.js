@@ -2,26 +2,28 @@
    city/island_military.js — THE MILITARY BASE ISLAND.
 
    A walled army installation off the mainland's west edge, joined
-   by a single guarded causeway. WHY each thing exists (owner's
-   #1 law — no prop without an in-world reason):
+   by a guarded causeway (east gate) and the Redhollow logging road
+   (north gate). THE LAYOUT IS world/basekit.js's (CBZ.basePlan — the
+   one base planner, which world/airbase.js uses too), local frame
+   centred on the base, +z toward the airfield:
 
-     • CAUSEWAY + CHECKPOINT — a base is SEALED; there is exactly
-       one way on or off (the bridge), and a manned gate decides
-       who passes. Drive in, the barrier + guard shack + soldiers
-       are the reason you slow down. The perimeter FENCE makes the
-       gate matter (you can't just walk in over open ground).
-     • AIRSTRIP w/ parked JETS + a BOMBER — this is an AIR base;
-       the runway and the hardware on it are why it's here.
-     • HELIPADS w/ HELICOPTERS — rotary wing alongside fixed wing.
-     • MOTOR POOL — tanks, infantry carriers, light vehicles, rocket
-       artillery, missile launchers and cargo trucks (city/mil_armor.js
-       draws them), staged in ranks the way real motor pools do.
-     • HANGARS — enterable sheds that shelter/repair the aircraft.
-     • BARRACKS — soldiers have to sleep somewhere.
-     • COMMAND HQ w/ ARMORY — the brain of the base, and the one
-       reason a player WALKS in: the armory ("Browse the armory").
-     • WATCHTOWERS / SANDBAG BUNKERS / radar / fuel / flag — the
-       texture of a base that's actively defended.
+     • AIRFIELD (south): a 420 m runway sets the axis; a parallel
+       taxiway with hold-short bars feeds the apron. Fighters in three
+       hardened shelters and on the flight line, nose to the taxiway;
+       the B-2 (city/strategic.js), the B-52 and the A400M on their own
+       stands, its ramp toward the cargo lane; helicopters on marked
+       pads on the helo ramp; two arched hangars, the tower, crash-
+       rescue and ops along the back of the apron; the fuel farm
+       bunded and set back at the west end.
+     • GATE ROAD from the east gate across the base.
+     • CANTONMENT (north): HQ with the armory and the flagpole facing
+       the parade field, parking, four barracks on their street, the
+       range on the west wire; the motor pool (sheds, hardstand, three
+       ranks facing the gate road); Patriot/MLRS in HESCO revetments;
+       ammunition igloos behind traverses on the north wire.
+     • WATCHTOWERS at the corners and the gate; HESCO wing walls.
+   tools/base-plan-check.mjs audits the plan: no overlaps, every
+   aircraft on pavement, nothing on the runway.
 
    ENGINE CONTRACT: registers as an archipelago landmass (see
    worldmap.js). Every parked machine is a solid collider so it
@@ -51,6 +53,25 @@
   const CW_MINX = MAXX, CW_MAXX = -133;
   const CW_MINZ = CEN_Z - 12, CW_MAXZ = CEN_Z + 12;
   const CW_CZ = (CW_MINZ + CW_MAXZ) / 2;      // == CEN_Z, lines up with the base gate
+
+  // ---- THE PLAN (world/basekit.js) — computed at load, it is pure data -----
+  // The deep shelter city/bunkers.js digs (zoning.js "brandt-shelter",
+  // authored -762,-872) is reserved so nothing is planned on top of it.
+  // `PLAN` is in the base's LOCAL frame (centre 0,0; +z is the airfield).
+  const PLAN = CBZ.basePlan ? CBZ.basePlan({
+    hx: HX, hz: HZ, northGate: 60, fighters: 5, hangars: 2,
+    reserve: [{ id: "brandt-shelter", x: -762 - -620, z: -872 - -700, w: 36, d: 30 }],
+  }) : null;
+  // THE FIXED HARDWARE OTHER FILES PARK ON THIS BASE, in the AUTHORED frame
+  // city/zoning.js keeps them in (it adds the layout dial itself). The B-2's
+  // stand is the plan's: strategic.js parks it there through protectedSite.
+  if (PLAN && PLAN.fixtures) {
+    CBZ.fortBrandtFixtures = {};
+    Object.keys(PLAN.fixtures).forEach(function (k) {
+      const f = PLAN.fixtures[k];
+      CBZ.fortBrandtFixtures[k] = { ax: -620 + f.x, az: -700 + f.z, w: f.w, d: f.d, yaw: f.yaw };
+    });
+  }
 
   // ---- local seeded RNG (owner rule: deterministic world) ----------------
   // seeded from CBZ.WORLD_SEED via the named-stream registry (core/seed.js)
@@ -606,63 +627,18 @@
       }
     });
   }
+  // the fabric is real chain-link now (world/basekit.js: one alpha-tested
+  // diamond-mesh material for every base fence), under a steel top rail. It
+  // was a 25%-opaque grey slab, which read as fog standing on a line.
   function mkLink(root, cx, cz, w, d) {
+    if (CBZ.baseKit && CBZ.baseKit.chainLink) {
+      const along = w >= d;
+      CBZ.baseKit.chainLink(root, along ? cx - w / 2 : cx, along ? cz : cz - d / 2, along ? cx + w / 2 : cx, along ? cz : cz + d / 2, 2.05, 0.1);
+      box(root, cx, 2.2, cz, along ? w : 0.06, 0.06, along ? 0.06 : d, M.fenceP, { cast: false });
+      return;
+    }
     const m = new THREE.Mesh(bg(w, 1.9, d), new THREE.MeshLambertMaterial({ color: M.fence, transparent: true, opacity: 0.25 }));
     m.position.set(cx, 1.1, cz); m.castShadow = false; m.receiveShadow = false; root.add(m);
-  }
-
-  // ========================================================================
-  //   GROUND PLANES — dirt apron over the whole island, tarmac runway/pads.
-  // ========================================================================
-  function buildGround(root) {
-    // One textured plane owns dirt and runway. The former dirt box plus asphalt
-    // box remained overlapping even after their tops were separated by 8cm;
-    // the flight frustum quantised that gap and produced the recurring runway
-    // flicker. Baking the runway into the land skin removes the hidden faces.
-    const W = MAXX - MINX, D = MAXZ - MINZ;
-    const RW_X = CEN_X, RW_Z = MAXZ - 70, RW_L = 360, RW_W = 26;
-    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1024;
-    const ctx = canvas.getContext("2d");
-    function css(c) { return "#" + (c >>> 0).toString(16).padStart(6, "0"); }
-    function rect(x, z, w, d, color) {
-      ctx.fillStyle = css(color);
-      ctx.fillRect((x - w / 2 - MINX) / W * canvas.width,
-        (z - d / 2 - MINZ) / D * canvas.height,
-        w / W * canvas.width, d / D * canvas.height);
-    }
-    ctx.fillStyle = css(M.dirt); ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.globalAlpha = 0.08;
-    for (let z = MINZ; z < MAXZ; z += 34) rect(CEN_X, z + 8, W, 16, 0x8a7754);
-    ctx.globalAlpha = 1;
-    rect(RW_X, RW_Z, RW_L, RW_W, M.runway);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter;
-    tex.generateMipmaps = true;
-    tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
-    const apron = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex }));
-    apron.rotation.x = -Math.PI / 2;
-    apron.position.set(CEN_X, 0, CEN_Z); apron.receiveShadow = true; apron.castShadow = false;
-    apron.userData.terrain = true; apron.userData.worldSurface = true;
-    apron.userData.surfaceOwner = "military";
-    apron.userData.unifiedSurface = true;
-    apron.name = "military-island-surface";
-    root.add(apron);
-    // RUNWAY: long tarmac strip down the south part of the island, with
-    // centreline dashes (merged into one dash material).
-    // dashed centreline via InstancedMesh (frugal repeat)
-    const nDash = 18, dashGeo = bg(8, 0.02, 0.6);
-    const dim = new THREE.InstancedMesh(dashGeo, cm(M.paint), nDash);
-    const dd = new THREE.Object3D();
-    for (let i = 0; i < nDash; i++) {
-      dd.position.set(RW_X - RW_L / 2 + 18 + i * 18, 0.05, RW_Z);
-      dd.updateMatrix(); dim.setMatrixAt(i, dd.matrix);
-    }
-    dim.instanceMatrix.needsUpdate = true; dim.receiveShadow = true; root.add(dim);
-    // runway threshold piano keys (both ends)
-    [-RW_L / 2 + 6, RW_L / 2 - 6].forEach(function (ex) {
-      for (let k = -3; k <= 3; k++) box(root, RW_X + ex, 0.05, RW_Z + k * 2.6, 5, 0.02, 1.1, M.paint, { cast: false });
-    });
-    return { RW_X: RW_X, RW_Z: RW_Z, RW_L: RW_L, RW_W: RW_W };
   }
 
   // ========================================================================
@@ -695,121 +671,30 @@
       }
     }
 
-    // ---- CHECKPOINT GATE at the base (west) end of the causeway ----
-    const gx = CW_MINX + 6;                               // just inside the base
-    // guard shack — a real one-room building (the city shell: a door you walk
-    // through, windows set in the wall), not a solid olive box with a pane
-    // pushed half into it and no way in
-    if (CBZ.cityMakeBuilding) {
-      CBZ.cityMakeBuilding(root, gx, CW_MAXZ + 4, 3.6, 3.6, 1, typeof M.olive === "number" ? M.olive : 0x4a5238, 0,
-        { dress: false, stairs: false, facade: "office", houseNumber: 1 });
-    }
-    // boom barriers — one raised arm per carriageway at the GATE. THE FLOATING-
-    // YELLOW-LINE FIX (owner: "still a floating yellow line at the highway near
-    // Fort Brandt"): the old code sized the bar with `w` — the causeway LENGTH
-    // (~547m post-move), not the road width — so a single amber box spanned 90%
-    // of the causeway along its centreline at y=1.1 with a 0.04 roll that
-    // floated its far tip ~10m in the air over the deck: THE floating yellow
-    // line. It also dropped a `w*0.9`-long chest-height collider down the whole
-    // median (an invisible wall against lane changes). Real checkpoint grammar
-    // instead: a short striped arm per side pivoting at the kerb, parked RAISED
-    // (the base is open to traffic — matching the old behaviour, where the
-    // median collider never actually blocked the travel lanes), with the pivot
-    // posts as the only (tiny) colliders. Geometry-only + fixed constants —
-    // deterministic, and paint/deck stay solely owned by buildHighway above.
+    // ---- THE CHECKPOINT, at the gate in the wire (the plan's gate) ----
+    // The guardhouse, the overwatch tower and the HESCO wing walls are the
+    // plan's (world/basekit.js). What is drawn here is the barrier itself:
+    // a short striped arm per carriageway pivoting at the kerb, parked RAISED
+    // (the base is open to traffic), the pivot posts the only colliders.
+    // (THE FLOATING-YELLOW-LINE FIX stays fixed: the arm is sized by the
+    // carriageway, never by the causeway's length.)
+    const gx = MAXX - 4;
     const ARM_L = 9.5, ARM_A = 1.15;            // arm length / raised angle (rad)
-    [[CW_MINZ + 1.2, 1], [CW_MAXZ - 1.2, -1]].forEach(function (pv) {
-      const pz = pv[0], toward = pv[1];         // arm reaches toward the median
-      cyl(root, gx, 0.7, pz, 0.16, 0.2, 1.4, M.red, 8);           // pivot post
-      col(gx, pz, 0.5, 0.5, 0, 1.4);
-      const arm = box(root, gx,
-        0.9 + Math.sin(ARM_A) * ARM_L / 2,
-        pz + toward * Math.cos(ARM_A) * ARM_L / 2,
-        0.16, 0.16, ARM_L, M.warn);
-      // rotation.x = r maps the box's +Z to (0, -sin r, cos r): the +Z-reaching
-      // arm raises with r = -a, the -Z-reaching one with r = +a (box symmetry).
-      arm.rotation.x = -toward * ARM_A;         // raised — the gate reads manned but open
-    });
-    // sandbag stack beside the gate (bunkered guard post)
-    sandbagBunker(root, gx + 4, CW_MINZ - 3);
+    function boom(px, pz, dirX, dirZ) {
+      const g = new THREE.Group();
+      g.position.set(px, 0, pz);
+      g.rotation.y = Math.atan2(dirX, dirZ);
+      root.add(g);
+      cyl(g, 0, 0.7, 0, 0.16, 0.2, 1.4, M.red, 8);                 // pivot post
+      box(g, 0, 1.05, -0.35, 0.5, 0.7, 0.5, M.steelD);               // counterweight housing
+      const arm = box(g, 0, 0.9 + Math.sin(ARM_A) * ARM_L / 2, Math.cos(ARM_A) * ARM_L / 2, 0.16, 0.16, ARM_L, M.warn);
+      arm.rotation.x = -ARM_A;                    // +z end raised
+      col(px, pz, 0.5, 0.5, 0, 1.4);
+    }
+    boom(gx, CW_CZ - 10.8, 0, 1);
+    boom(gx, CW_CZ + 10.8, 0, -1);
+    if (PLAN && PLAN.anchors.northGate) boom(CEN_X + PLAN.anchors.northGate.x + 7.6, CEN_Z - PLAN.hz + 4, -1, 0);
     return { gx: gx };
-  }
-
-  // ========================================================================
-  //   SANDBAG BUNKER — instanced sandbag rows in a short L (frugal repeat).
-  // ========================================================================
-  function sandbagBunker(root, cx, cz) {
-    const rows = [];
-    // build an L-shaped low wall of bag positions
-    for (let i = 0; i < 6; i++) rows.push({ x: cx - 3 + i, z: cz, layer: 0 });
-    for (let i = 0; i < 5; i++) rows.push({ x: cx - 3 + i + 0.5, z: cz, layer: 1 });
-    for (let j = 1; j < 5; j++) rows.push({ x: cx - 3, z: cz + j, layer: 0 });
-    const geo = bg(1.0, 0.45, 0.7);
-    const im = new THREE.InstancedMesh(geo, cm(M.sandbag), rows.length);
-    im.castShadow = true; im.receiveShadow = true;
-    const d = new THREE.Object3D();
-    for (let i = 0; i < rows.length; i++) {
-      d.position.set(rows[i].x, 0.22 + rows[i].layer * 0.45, rows[i].z);
-      d.updateMatrix(); im.setMatrixAt(i, d.matrix);
-    }
-    im.instanceMatrix.needsUpdate = true; root.add(im);
-    // what a round meets is SAND (weapons/ballistics.js: a rifle stops in 60 cm of it)
-    col(cx - 0.5, cz, 7, 0.9, 0, 1.0).mat = "sand";      // wall collider
-    col(cx - 3, cz + 2.5, 0.9, 5, 0, 1.0).mat = "sand";
-  }
-
-  // ========================================================================
-  //   WATCHTOWER — four legs, a railed deck at 6.35 m under a roof, and a
-  //   caged ladder up the face toward the base (world/ladderkit.js draws it,
-  //   systems/climb.js climbs it; a soldier can go up it and come down it).
-  //   WHAT IT WAS: a "ladder hint" with no ladder, a SOLID box where the cabin
-  //   should be (the "open sides" were a 3.2 x 1.4 x 3.2 block) and a 3.4 m
-  //   solid column from the ground to the deck, so the patrol spot at a tower
-  //   corner stood inside it. Now the legs are the columns, the ground under
-  //   the tower is ground, the deck is a platform with a waist-high parapet
-  //   you cannot walk off, and the roof is high enough to stand under.
-  //   `inX`: the base's centre x — the ladder goes on the face toward it.
-  // ========================================================================
-  function watchtower(root, cx, cz, inX) {
-    const DECK = 6.35, PAR = 1.0, ROOF = 8.6, HW = 1.7;
-    const s = (inX == null ? CEN_X : inX) >= cx ? 1 : -1;       // the ladder face, +x or -x
-    const g = new THREE.Group(); g.position.set(cx, 0, cz); root.add(g);
-    [-1, 1].forEach(function (sx) {
-      [-1, 1].forEach(function (sz) {
-        box(g, sx * 1.4, (DECK - 0.3) / 2, sz * 1.4, 0.25, DECK - 0.3, 0.25, M.oliveD);
-        col(cx + sx * 1.4, cz + sz * 1.4, 0.3, 0.3, 0, DECK - 0.3);
-        // corner posts, parapet to roof
-        box(g, sx * 1.55, (DECK + PAR + ROOF - 0.15) / 2, sz * 1.55, 0.12, ROOF - 0.15 - DECK - PAR, 0.12, M.oliveD);
-      });
-    });
-    // a brace ring half way up the legs
-    box(g, 0, 3.0, -1.4, 2.8, 0.14, 0.14, M.oliveD); box(g, 0, 3.0, 1.4, 2.8, 0.14, 0.14, M.oliveD);
-    box(g, -1.4, 3.0, 0, 0.14, 0.14, 2.8, M.oliveD); box(g, 1.4, 3.0, 0, 0.14, 0.14, 2.8, M.oliveD);
-    box(g, 0, DECK - 0.15, 0, HW * 2, 0.3, HW * 2, M.olive);                 // deck slab
-    // the parapet: three full walls, and the ladder face split round the gap
-    const py = DECK + PAR / 2;
-    box(g, 0, py, -HW + 0.05, HW * 2, PAR, 0.1, M.olive, { cast: false });
-    box(g, 0, py, HW - 0.05, HW * 2, PAR, 0.1, M.olive, { cast: false });
-    box(g, -s * (HW - 0.05), py, 0, 0.1, PAR, HW * 2, M.olive, { cast: false });
-    const seg = HW - 0.42;
-    box(g, s * (HW - 0.05), py, -(0.42 + seg / 2), 0.1, PAR, seg, M.olive, { cast: false });
-    box(g, s * (HW - 0.05), py, 0.42 + seg / 2, 0.1, PAR, seg, M.olive, { cast: false });
-    box(g, 0, ROOF, 0, 3.6, 0.3, 3.6, M.oliveD);                            // roof
-    // searchlight on the outer parapet, looking out over the wire
-    cyl(g, -s * 1.45, DECK + PAR + 0.25, 0, 0.3, 0.35, 0.5, M.warn, 8).rotation.z = Math.PI / 2;
-    if (CBZ.ladderKit) {
-      CBZ.ladderKit.deck({
-        minX: cx - HW, maxX: cx + HW, minZ: cz - HW, maxZ: cz + HW, top: DECK, rail: PAR,
-        gaps: [{ x: cx + s * HW, z: cz, w: 0.42 }],
-      });
-      CBZ.ladderKit.build(root, {
-        x: cx + s * (HW + 0.05), z: cz, nx: s, nz: 0, y0: 0, y1: DECK,
-        name: "watchtower", tag: "military:watchtower", mode: "city",
-      }, cm(M.steelD));
-      return { x: cx, z: cz, y: DECK };
-    }
-    col(cx, cz, 3.4, 3.4, 0, DECK);            // no ladder kit: the old solid footprint
-    return null;
   }
 
   // ========================================================================
@@ -939,7 +824,6 @@
     // (the militaryvehicles.js registry was cleared by its reset chain).
     placed.length = 0; _reg = false;
 
-    buildGround(root);
     /* THE PERIMETER IS SOLVED AGAINST THE ROAD NETWORK, SO IT WAITS FOR IT.
        buildFence's gate used to be a pair of typed numbers (CW_CZ ± 13, "widened
        to the 24 m highway deck so the road actually passes through") — a hole
@@ -953,85 +837,78 @@
     if (!(CBZ.roadGapAfterRoads && CBZ.roadGapAfterRoads(function () { buildFence(root); }))) buildFence(root);
     const cw = buildCauseway(root);
 
-    // ---- AIRSTRIP: parked fighter jets in a row + a heavy bomber ----
-    const rwZ = MAXZ - 70;                                // runway centre Z
-    const jetZ = rwZ - 22;                                // parked just north of runway
-    for (let i = 0; i < 5; i++) {
-      placeModel(root, makeJet, MINX + 90 + i * 34, jetZ, Math.PI, 1, "plane", "Fighter Jet");   // nose pointing -Z (toward runway)
+    /* ======================================================================
+       THE BASE, LAID OUT. world/basekit.js plans it (the one base planner:
+       world/airbase.js asks the same one) and raises every structure: the
+       painted airfield, hardened shelters, arched hangars, the tower, the
+       bunded fuel farm, the motor-pool sheds, HESCO revetments and walls,
+       the igloos, the range, the watchtowers. This file places the MACHINES
+       on the plan's stands (they are stealable, so they are ours to register)
+       and wires the things only Fort Brandt has: the armory, the troops, the
+       garrison anchors.
+
+       WHAT IT WAS: fighters parked 22 m off the runway with their noses
+       pointed away from it, hangars 300 m from any pavement, helicopters on
+       dirt, the bomber across open ground, office-tower hangars. Every number
+       below now comes from PLAN, and tools/base-plan-check.mjs proves no two
+       footprints overlap and every aircraft stands on pavement.
+    ====================================================================== */
+    const BASE = new THREE.Group();
+    BASE.name = "fort-brandt";
+    BASE.position.set(CEN_X, 0, CEN_Z);
+    root.add(BASE);
+    const host = {
+      root: BASE, y: 0, worldY: 0, axisAligned: true, ladderRoot: root,
+      groundName: "military-island-surface", dirt: "#6b5d44",
+      toWorld: function (lx, lz) { return { x: CEN_X + lx, z: CEN_Z + lz }; },
+      solid: function (lx, lz, w, d, y0, y1) { return col(CEN_X + lx, CEN_Z + lz, w, d, y0, y1); },
+      // the enterable shells (HQ, barracks, crash-rescue, ops, guardhouse) are
+      // the city's own: real doors, stairs, rooms. No shell factory loaded →
+      // the kit stands a plain block in its place.
+      building: function (lx, lz, w, d, storeys, color, door, o) {
+        if (!CBZ.cityMakeBuilding) return null;
+        try {
+          return CBZ.cityMakeBuilding(root, CEN_X + lx, CEN_Z + lz, w, d, storeys, color, door,
+            { facade: o.facade || "office", dress: false, stairs: storeys > 1, houseNumber: 1 });
+        } catch (e) { return null; }
+      },
+    };
+    const KIT = (CBZ.baseKit && CBZ.baseKit.raise && PLAN) ? CBZ.baseKit.raise(PLAN, host) : { towers: [], hangars: [], buildings: {} };
+    if (KIT.ground) {
+      const gnd = KIT.ground;
+      gnd.userData.terrain = true; gnd.userData.worldSurface = true;
+      gnd.userData.surfaceOwner = "military"; gnd.userData.unifiedSurface = true;
     }
-    placeModel(root, makeBomber, MAXX - 95, jetZ - 12, Math.PI, 1, "plane", "Heavy Bomber");      // the big one, set back
-    // THE CARGO LIFTER, on its own loading apron and facing the OTHER WAY on
-    // purpose: nose north up the strip, ramp pointing back down the taxiway
-    // toward the motor pool, because the tanks are the load. A base where the
-    // freighter is parked so its ramp faces a fence is a base nobody thought
-    // about. Placed by its own function — it declares a walk-in HOLD and
-    // deliberately pushes no full-footprint collider (see placeCargoPlane).
-    placeCargoPlane(root, MAXX - 150, jetZ - 34, 0, "Cargo Lifter");
-    // TWO RECON DRONES in the second row behind the fighters: nobody climbs
-    // into a drone, so they are solid scenery, not boardables.
-    for (let i = 0; i < 2; i++) placeModel(root, makeDrone, MINX + 100 + i * 36, jetZ - 30, Math.PI, 1);
+    const W = function (p) { return { x: CEN_X + p.x, z: CEN_Z + p.z }; };
 
-    // ---- HELIPADS: a row, each with a parked helicopter ----
-    const padZ = CEN_Z + 30;
-    for (let i = 0; i < 4; i++) {
-      const px = MINX + 70 + i * 30;
-      // pad disc + painted H
-      const pad = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 0.08, 20), cm(M.tarmac));
-      pad.position.set(px, 0.02, padZ); pad.receiveShadow = true; root.add(pad);
-      // the H stands 3 cm proud of the disc top (0.06): it was 1 cm, both in
-      // shared untextured colours, and the pale paint shimmered through the
-      // tarmac from any height a helicopter flies at
-      box(root, px, 0.075, padZ, 1.0, 0.03, 4.0, M.paint, { cast: false });           // H verticals
-      box(root, px - 1.4, 0.075, padZ, 0.02 + 2.8, 0.03, 0.8, M.paint, { cast: false }); // H crossbar
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(6.2, 0.12, 6, 24), cm(M.paint));
-      ring.rotation.x = Math.PI / 2; ring.position.set(px, 0.05, padZ); root.add(ring);
-      // the two nearest the strip carry the ATTACK helicopters: the wanted-level
-      // gunship scrambles from these (aircraft.js prefers rec.attackHeli)
-      const attack = i < 2;
-      placeModel(root, attack ? makeAttackHeli : makeHeli, px, padZ, rng() * 0.4 - 0.2, 1, "heli", attack ? "Attack Helicopter" : "Helicopter");
-      if (attack) placed[placed.length - 1].attackHeli = true;
-    }
-
-    // ---- MOTOR POOL: three ranks staged nose-east toward the gate --------
-    //   front rank: the tanks; middle: the infantry carriers + the light
-    //   vehicles; rear: the launchers and the cargo trucks.
-    const mpZ = CEN_Z - 70;
-    for (let i = 0; i < 5; i++) placeModel(root, makeTank, MINX + 70 + i * 26, mpZ, Math.PI / 2, 1, "tank", "Main Battle Tank");
-    [
-      [makeIFV, "Infantry Fighting Vehicle"], [makeIFV, "Infantry Fighting Vehicle"],
-      [makeAPC, "Armored Personnel Carrier"], [makeAPC, "Armored Personnel Carrier"],
-      [makeLUV, "Light Utility Vehicle"], [makeLUV, "Light Utility Vehicle"],
-    ].forEach(function (v, i) { placeModel(root, v[0], MINX + 70 + i * 22, mpZ + 18, Math.PI / 2, 1, "ground", v[1]); });
-    [
-      [makePatriot, "patriot", "Missile Launcher"], [makePatriot, "patriot", "Missile Launcher"],
-      [makeMLRS, "mlrs", "Rocket Artillery"],
-      [makeTruck, "ground", "Cargo Truck"], [makeTruck, "ground", "Cargo Truck"],
-    ].forEach(function (v, i) { placeModel(root, v[0], MINX + 70 + i * 26, mpZ - 18, Math.PI / 2, 1, v[1], v[2]); });
-
-    // ---- HANGARS: big enterable sheds (engine building shells) ----
-    // door faces -Z toward the apron/runway. Single big storey.
-    const hangars = [];
-    for (let i = 0; i < 3; i++) {
-      const hx = MINX + 110 + i * 80, hz = CEN_Z - 130;
-      let b = null;
+    // ---- THE MACHINES, on their stands --------------------------------------
+    const MODEL = {
+      fighter: [makeJet, "plane"], drone: [makeDrone, null], bomber: [makeBomber, "plane"],
+      heli: [makeHeli, "heli"], attackHeli: [makeAttackHeli, "heli"],
+      tank: [makeTank, "tank"], ifv: [makeIFV, "ground"], apc: [makeAPC, "ground"], luv: [makeLUV, "ground"],
+      truck: [makeTruck, "ground"], patriot: [makePatriot, "patriot"], mlrs: [makeMLRS, "mlrs"],
+    };
+    (PLAN ? PLAN.stands : []).forEach(function (s) {
+      const w = W(s);
+      if (s.kind === "b2") return;                       // city/strategic.js parks the B-2 on this stand (zoning fixture)
+      if (s.kind === "cargo") { placeCargoPlane(root, w.x, w.z, s.yaw, s.name); return; }
+      const m = MODEL[s.kind];
+      if (!m) return;
       try {
-        b = CBZ.cityMakeBuilding(root, hx, hz, 40, 30, 1, M.hangarRoof, 0, { facade: "office" });
-      } catch (e) { /* keep building the rest of the base */ }
-      hangars.push({ x: hx, z: hz, b: b });
-    }
+        placeModel(root, m[0], w.x, w.z, s.yaw, 1, s.scenery ? null : m[1], s.name);
+        const rec = placed[placed.length - 1];
+        if (rec && rec.group && rec.pos && Math.abs(rec.pos.x - w.x) < 0.01 && Math.abs(rec.pos.z - w.z) < 0.01) {
+          rec.stand = s;
+          if (s.kind === "attackHeli") rec.attackHeli = true;
+        }
+      } catch (e) { /* a missing model must not take the base down with it */ }
+    });
 
-    // ---- BARRACKS: row of long low buildings ----
-    for (let i = 0; i < 4; i++) {
-      const bx = MAXX - 60, bz = MINZ + 60 + i * 34;
-      try { CBZ.cityMakeBuilding(root, bx, bz, 22, 26, 2, 0x6f7560, 3, { facade: "office" }); } catch (e) {}
-    }
-
-    // ---- COMMAND HQ (enterable) + ARMORY interaction inside ----
-    const hqX = CEN_X + 60, hqZ = CEN_Z - 40;
-    let hq = null;
-    try { hq = CBZ.cityMakeBuilding(root, hqX, hqZ, 34, 28, 3, 0x55603f, 1, { facade: "office" }); } catch (e) {}
-    // flagpole + flag in front of HQ (the base's heart reads as the HQ)
-    if (CBZ.flags) CBZ.flags.pole(root, { x: hqX - 12, y: 0, z: hqZ + 18, height: 12, base: true, finial: "eagle" });
+    // ---- THE FLAG, in front of HQ ------------------------------------------
+    const hqW = PLAN ? W(PLAN.anchors.hq) : { x: CEN_X - 110, z: CEN_Z - 108 };
+    const flagW = PLAN ? W(PLAN.anchors.flag) : { x: hqW.x, z: hqW.z + 22 };
+    const hqX = hqW.x, hqZ = hqW.z;
+    if (CBZ.flags) CBZ.flags.pole(root, { x: flagW.x, y: 0, z: flagW.z, height: 12, base: true, finial: "eagle" });
 
     // ARMORY ZONE: a spot just inside the HQ door where the player can browse
     // weapons. WHY a zone, not a wall-store: the engine's gunstore.js is bound
@@ -1039,7 +916,8 @@
     // .gunstore); this island's HQ isn't that lot, so we surface our own
     // interaction. If a real city gun store exists, we hand the player off to
     // it (CBZ.cityOpenShop / the gunstore wall); otherwise it's an in-world note.
-    const armoryX = hqX, armoryZ = hqZ - 4;              // inside, behind the door
+    const armW = PLAN ? W(PLAN.anchors.armory) : { x: hqX, z: hqZ + 6 };
+    const armoryX = armW.x, armoryZ = armW.z;           // inside, behind the door
     let armoryWired = "note";
     try {
       if (CBZ.interactions && CBZ.interactions.registerZone) {
@@ -1073,37 +951,22 @@
       }
     } catch (e) { armoryWired = "note"; }
 
-    // ---- WATCHTOWERS at the four corners (the base is WATCHED) ----
-    // (published on CBZ._militaryBase.towers: garrison.js stands the corner
-    // sentries on these decks, and they climb the ladders to get there)
-    const towers = [
-      watchtower(root, MINX + 18, MINZ + 18, CEN_X),
-      watchtower(root, MAXX - 18, MINZ + 18, CEN_X),
-      watchtower(root, MINX + 18, MAXZ - 18, CEN_X),
-      watchtower(root, MAXX - 18, MAXZ - 18, CEN_X),
-    ].filter(Boolean);
+    // ---- WATCHTOWERS: the kit stood them; the corner decks are published on
+    // CBZ._militaryBase.towers (garrison.js stands the corner sentries on
+    // them, and they climb the ladders to get there)
+    const towers = (KIT.towers || []).filter(function (t) { return t.corner; });
 
-    // ---- SANDBAG BUNKERS scattered at posts ----
-    sandbagBunker(root, CEN_X - 30, MINZ + 40);
-    sandbagBunker(root, CEN_X + 90, CEN_Z + 60);
-
-    // ---- FUEL DEPOT: cylindrical tanks (collider) near the apron ----
-    for (let i = 0; i < 3; i++) {
-      const fx = MAXX - 40, fz = CEN_Z + 80 + i * 14;
-      const t = cyl(root, fx, 3, fz, 4, 4, 6, M.fuel, 16);
-      box(root, fx, 6.3, fz, 8.2, 0.4, 8.2, M.steelD);   // domed top hint
-      col(fx, fz, 8, 8, 0, 6);
+    // ---- SANDBAG POSITIONS at both gates --------------------------------------
+    if (CBZ.baseKit && CBZ.baseKit.sandbags && PLAN) {
+      CBZ.baseKit.sandbags({ root: BASE }, host, PLAN.hx - 26, -19);
+      if (PLAN.anchors.northGate) CBZ.baseKit.sandbags({ root: BASE }, host, PLAN.anchors.northGate.x - 14, -PLAN.hz + 10);
     }
 
-    // ---- RADAR DISH on a mast (the base SEES) ----
-    const radX = CEN_X + 30, radZ = MINZ + 50;
-    cyl(root, radX, 4, radZ, 0.4, 0.5, 8, M.steel, 8);
-    const dish = new THREE.Mesh(new THREE.SphereGeometry(3, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), cm(M.steel));
-    dish.position.set(radX, 8, radZ); dish.rotation.x = -0.6; dish.castShadow = true; root.add(dish);
-    col(radX, radZ, 1.2, 1.2, 0, 8);
-
     // ---- PARADE GROUND — anchors are filled by real troops below ----
-    const paradeAnchors = paradeFormation(CEN_X - 90, CEN_Z + 40);
+    const parW = PLAN ? W(PLAN.anchors.parade) : { x: CEN_X - 110, z: CEN_Z - 46 };
+    const paradeAnchors = paradeFormation(parW.x, parW.z);
+    const barW = PLAN ? W(PLAN.anchors.barracks) : { x: CEN_X - 35, z: CEN_Z - 193 };
+    const mpW = PLAN ? W(PLAN.anchors.motorPool) : { x: CEN_X + 140, z: CEN_Z - 56 };
 
     // ========================================================================
     //   TROOPS — live soldiers via cityMakePed: armed, olive patrol cap (the
@@ -1176,7 +1039,7 @@
           x: g.pos.x, z: g.pos.z, face: Math.atan2(-1, 0), kind: "sentry",
           relaxed: true, job: "soldier", tag: "fort:gate",
           org: "army", verb: "post", alertVerb: "standto",
-          home: { x: MAXX - 60, z: MINZ + 60 },
+          home: { x: barW.x, z: barW.z },
           // THIS file's updater already owns these bodies (aircrew, respawn,
           // the sortie). `driven` keeps garrison.js's own sweep off them so the
           // brain runs exactly once, from the loop that was always here.
@@ -1184,18 +1047,22 @@
         });
       }
     };
-    trooper(cw.gx + 2, CW_MINZ + 2, { aggr: 0.35 }, null, guardSetup);
-    trooper(cw.gx + 2, CW_MAXZ - 2, { aggr: 0.35 }, null, guardSetup);
-    // NO-SPAWN keep-out: the active runway strip (owner's rule — nobody
-    // spawns or idles on a runway, not even patrols). Registered BEFORE the
-    // patrol scatter below so cityScatterInRegion already steers around it.
-    // Rect recomputed from the same anchors the runway build uses
-    // (RW_X=CEN_X, RW_Z=MAXZ-70, RW_L=360, RW_W=26) plus a small margin.
-    if (CBZ.registerNoSpawnZone) {
+    // the two gate sentries stand on the plaza kerbs either side of the booms
+    trooper(cw.gx - 4, CW_CZ - 12, { aggr: 0.35 }, null, guardSetup);
+    trooper(cw.gx - 4, CW_CZ + 12, { aggr: 0.35 }, null, guardSetup);
+    // NO-SPAWN keep-outs: the runway strip (owner's rule — nobody spawns or
+    // idles on a runway, not even patrols) and the parked aircraft's ramp.
+    // Registered BEFORE the patrol scatter below so cityScatterInRegion
+    // already steers around them. Both straight off the plan.
+    if (CBZ.registerNoSpawnZone && PLAN) {
+      const ko = PLAN.keepOut, ap = PLAN.apron;
       CBZ.registerNoSpawnZone(city, {
-        minX: CEN_X - 188, maxX: CEN_X + 188,
-        minZ: (MAXZ - 70) - 17, maxZ: (MAXZ - 70) + 17,
+        minX: CEN_X + ko.x0, maxX: CEN_X + ko.x1, minZ: CEN_Z + ko.z0, maxZ: CEN_Z + ko.z1,
         label: "military-runway",
+      });
+      CBZ.registerNoSpawnZone(city, {
+        minX: CEN_X + ap.x0, maxX: CEN_X + PLAN.hx - 8, minZ: CEN_Z + ap.z0, maxZ: CEN_Z + ap.z1,
+        label: "military-apron",
       });
     }
     // patrolling soldiers scattered across the base
@@ -1359,13 +1226,13 @@
     if (CBZ.registerWorkAnchor) {
       CBZ.registerWorkAnchor({
         biome: "military", kind: "armory", role: "soldier", patrol: true,
-        x: cw.gx + 2, z: CW_CZ, cap: 8,
-        home: { x: MAXX - 60, z: MINZ + 60 },              // the barracks row
+        x: cw.gx - 8, z: CW_CZ, cap: 8,
+        home: { x: barW.x, z: barW.z },                     // the barracks street
         spots: [
-          { x: cw.gx + 2, z: CW_CZ },                       // the checkpoint gate
-          { x: hqX - 12, z: hqZ + 18 },                     // the HQ flagpole
-          { x: CEN_X - 70, z: CEN_Z - 70 },                 // the motor pool
-          { x: MINX + 18, z: MAXZ - 18 },                   // a watchtower corner
+          { x: cw.gx - 8, z: CW_CZ - 12 },                  // the checkpoint gate
+          { x: flagW.x + 6, z: flagW.z },                   // the HQ flagpole
+          { x: mpW.x, z: mpW.z },                           // the motor pool
+          { x: MINX + 24, z: MAXZ - 24 },                   // a watchtower corner
         ],
       });
     }
@@ -1413,18 +1280,38 @@
     // snowSector, biome_farmland's DESERT_MINZ), and it is how a base move
     // silently leaves sentries standing in a field. One object, derived here,
     // where the numbers live.
+    const RWY = PLAN ? PLAN.runway : { x: 0, z: HZ - 65, len: 2 * HX - 60, w: 30 };
     CBZ._militaryBase = {
       center: { x: CEN_X, z: CEN_Z }, minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ,
       armoryWired: armoryWired, boardable: placed.length,
       gate: { x: cw.gx + 2, z: CW_CZ },
       hq: { x: hqX, z: hqZ },
-      flag: { x: hqX - 12, z: hqZ + 18 },
+      flag: { x: flagW.x, z: flagW.z },
       armory: { x: armoryX, z: armoryZ },
-      motorPool: { x: CEN_X - 70, z: CEN_Z - 70 },
-      parade: { x: CEN_X - 90, z: CEN_Z + 40 },
-      barracks: { x: MAXX - 60, z: MINZ + 60 },
-      runway: { x: CEN_X, z: MAXZ - 70, len: 360, w: 26 },
+      motorPool: { x: mpW.x, z: mpW.z },
+      parade: { x: parW.x, z: parW.z },
+      barracks: { x: barW.x, z: barW.z },
+      runway: { x: CEN_X + RWY.x, z: CEN_Z + RWY.z, len: RWY.len, w: RWY.w },
       towers: towers,
+      // THE PLAN ITSELF, local (centre 0,0): games/military.js builds its
+      // night-job props on plan.sites, so it never lands on a hangar again
+      plan: PLAN,
+      sites: PLAN ? PLAN.sites : null,
+      // the way an aircraft on this base gets to the runway: stand -> apron
+      // lane -> taxiway -> threshold, in WORLD metres, and the roll heading
+      // (yaw, models face +z). city/strategic.js taxis the B-2 down it.
+      taxiFrom: function (wx, wz, dir) {
+        if (!PLAN || !CBZ.baseTaxiPath) return null;
+        const lx = wx - CEN_X, lz = wz - CEN_Z;
+        let best = null, bd = 64;
+        PLAN.stands.forEach(function (s) { const d = Math.hypot(s.x - lx, s.z - lz); if (d < bd) { bd = d; best = s; } });
+        if (!best) return null;
+        const t = CBZ.baseTaxiPath(PLAN, best, dir);
+        return {
+          points: t.points.map(function (p) { return { x: CEN_X + p.x, z: CEN_Z + p.z }; }),
+          heading: t.heading, rollLen: t.rollLen,
+        };
+      },
     };
   }, 22);
 })();

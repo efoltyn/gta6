@@ -107,6 +107,7 @@ function updateMorale() {
   moraleT = simT;
   const R = ARMY.red, B = ARMY.blue;
   R.alive = B.alive = R.routing = B.routing = R.beasts = B.beasts = R.down = B.down = 0;
+  R.hulls = B.hulls = R.tubes = B.tubes = 0;
   R.pNow = B.pNow = 0;
   for (let i = men.length - 1; i >= 0; i--) {
     const m = men[i];
@@ -134,6 +135,8 @@ function updateMorale() {
        counted twice, and armies broke on their casualty lists) */
     if (m.downed) { A.down++; continue; }
     A.alive++;
+    if (m.vehicle) A.hulls++;
+    else if (m.launcher) A.tubes++;
     if (m.beast || m.vehicle) A.beasts++;   // machines and animals do not do the arithmetic
     if (m.routed) A.routing++;
     const hf = Math.max(0, Math.min(1, m.hp / (m.maxHp || 1)));
@@ -147,6 +150,10 @@ function updateMorale() {
        BREAK (half routing), latched, and the rally if it genuinely comes
        back (under a quarter). An army of animals does not do arithmetic
        about its chances (fearless). */
+    /* NO ANSWER TO IT: riflemen facing armour with no launcher among them
+       take no heart from their numbers (brain.morale's odds term), because
+       their numbers cannot hurt it. */
+    A.noAnswer = F.hulls > 0 && A.hulls === 0 && A.tubes === 0;
     const ev = MO.armyStep(A, F, dt, _armyOpts(bench || (A.alive && A.beasts === A.alive)));
     if (ev) emitWar(ev, { team: t });
     // nobody left fighting: the clock the win check reads
@@ -178,14 +185,7 @@ function moraleOnDeath(m, aliveMine) {
   const A = ARMY[m.team];
   if (!A) return;
   if (m._mc && !m.beast) MO.deathShock(A, m._mw || 1);      // ~1.8x his share of the army
-  if (!m.beast) {
-    const a = fineNear(m.pos.x, m.pos.z, 7, _mates);
-    for (let i = 0; i < a.length; i++) {
-      const o = a[i];
-      if (o === m || o.dead || o.team !== m.team || o.beast) continue;
-      o.supp = Math.min(SUPP_CAP, (o.supp || 0) + SUPP_MATE);
-    }
-  }
+  if (!m.beast) rattleMates(m);
   if (!A.lastman && aliveMine === 1 && spawnCount[m.team] >= 5 && spawnQueue.length === 0) {
     for (let i = 0; i < men.length; i++) {
       const o = men[i];
@@ -195,6 +195,23 @@ function moraleOnDeath(m, aliveMine) {
         break;
       }
     }
+  }
+}
+/* A MAN DROPPING BESIDE YOU (dead, or down screaming: ai/squad.js) rattles
+   everyone within 7 m. SAFETY IN NUMBERS: in a crowd of thirty each knows the
+   next blow is one in thirty his, so past four mates the rattle is shared
+   out (sqrt). Measured before: 50 civilians round one gorilla, every drop
+   0.22 to everyone within 7 m, the crowd at the 1.2 cap after five, and 40
+   of 49 broke in one second. A section of eight is barely touched. */
+function rattleMates(m) {
+  const a = fineNear(m.pos.x, m.pos.z, 7, _mates);
+  let n = 0;
+  for (let i = 0; i < a.length; i++) { const o = a[i]; if (o !== m && !o.dead && o.team === m.team && !o.beast) n++; }
+  const k = SUPP_MATE * Math.sqrt(Math.min(1, 4 / Math.max(1, n)));
+  for (let i = 0; i < a.length; i++) {
+    const o = a[i];
+    if (o === m || o.dead || o.team !== m.team || o.beast) continue;
+    o.supp = Math.min(SUPP_CAP, (o.supp || 0) + k);
   }
 }
 // his own morale: the army's, less how rattled and how hurt he is

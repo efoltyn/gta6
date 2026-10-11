@@ -1425,9 +1425,11 @@
     //     blast, and paint the grit charcoal whatever the floor was. Ground
     //     that genuinely breaks (systems/craters.js digs the terrain) answers
     //     for itself; here the surface only loses grit, sized as grit by
-    //     CBZ.debris.chips, in the surface's own colour.
+    //     CBZ.debris.chips, in the surface's own colour. A mode that owns its
+    //     ground (NPC War: arenas/ground.js, CBZ.groundOwnsEjecta) throws its
+    //     own clods of it, so this grit stands down there.
     const surf = K.surface || groundKind(x, z);
-    if (CBZ.debris && K.frag > 0) {
+    if (CBZ.debris && K.frag > 0 && !(CBZ.groundOwnsEjecta && CBZ.groundOwnsEjecta(x, z))) {
       try {
         CBZ.debris.chips(x, gy + 0.3, z, {
           kind: surf, count: Math.max(2, Math.round(10 * S * K.frag * q)),

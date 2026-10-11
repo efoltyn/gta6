@@ -178,32 +178,10 @@ CBZ.battleDress = (function () {
       return merge(parts);
     });
   }
+  // the wire basket is the base kit's (world/basekit.js): ONE HESCO in the
+  // repo, the same geometry Fort Brandt's revetments and gate walls stand on
   function hescoGeo() {
-    return once("hesco", function () {
-      const parts = [];
-      const S = 1.07, H = 1.37;
-      for (let i = 0; i < 4; i++) {
-        const g = flat(new THREE.BoxGeometry(S, H, S, 4, 5, 4));
-        const p = g.attributes.position;
-        for (let k = 0; k < p.count; k++) {
-          const x = p.getX(k), y = p.getY(k), z = p.getZ(k);
-          // the fill pushes the mesh out between the corner posts
-          const b = (1 - Math.pow(2 * x / S, 4)) * (1 - Math.pow(2 * z / S, 4)) * (1 - Math.pow(2 * y / H, 6));
-          const bx = Math.abs(x) > S * 0.49 ? Math.sign(x) * 0.05 * b : 0;
-          const bz = Math.abs(z) > S * 0.49 ? Math.sign(z) * 0.05 * b : 0;
-          const top = y > H * 0.49 ? -0.06 * (1 - Math.pow(2 * x / S, 2)) * (1 - Math.pow(2 * z / S, 2)) : 0;
-          p.setXYZ(k, x + bx + (i - 1.5) * S, y + H / 2 + top, z + bz);
-        }
-        g.computeVertexNormals();
-        paint(g, function (x, y, z, ny) {
-          if (ny > 0.8 && y > H - 0.08) return [0.62, 0.5, 0.34];          // the sand fill showing at the top
-          const t = 0.94 + h01(i, Math.round(y * 9), 11) * 0.08;
-          return [0.64 * t, 0.6 * t, 0.49 * t];
-        });
-        parts.push(g);
-      }
-      return merge(parts);
-    });
+    return once("hesco", function () { return CBZ.baseKit.hescoGeo(true); });
   }
   function jerseyGeo() {
     return once("jersey", function () {
@@ -555,6 +533,48 @@ CBZ.battleDress = (function () {
     P.mesh.instanceMatrix.needsUpdate = true;
   }
 
+  /* ---- BREAK-UP: what a destroyed article throws ---------------------------
+     Its own stuff, in its own colour (the pool's vertex paint averaged once):
+     sandbags burst into sand and torn sacking, a gabion spills its fill, a
+     jersey barrier or a dry-stone wall goes to broken stone, a burnt-out hulk
+     sheds torn plate, a log splinters, a bale goes to straw. Irregular
+     instanced shapes from CBZ.debris (never boxes), plus a dust cloud. */
+  const BREAK = {
+    sandbags: [{ kind: "sand", n: 14, size: 0.12 }, { kind: "foliage", shape: "flake", n: 6, size: 0.3 }],
+    hesco:    [{ kind: "dirt", n: 18, size: 0.14 }, { kind: "metal", shape: "plate", n: 3, size: 0.5 }],
+    jersey:   [{ kind: "concrete", n: 14, size: 0.2 }],
+    drywall:  [{ kind: "rock", n: 16, size: 0.18 }],
+    hulk:     [{ kind: "metal", shape: "plate", n: 6, size: 0.6 }],
+    log:      [{ kind: "wood", n: 12, size: 0.16 }],
+    bale:     [{ kind: "foliage", shape: "flake", n: 18, size: 0.2 }],
+  };
+  function poolTone(P) {
+    if (P.tone != null) return P.tone;
+    let hex = 0x8a8478;
+    const g = P.mesh && P.mesh.geometry, vc = g && g.attributes.color;
+    if (vc && vc.count) {
+      let r = 0, gg = 0, b = 0, n = 0;
+      const step = Math.max(1, Math.floor(vc.count / 400));
+      for (let i = 0; i < vc.count; i += step, n++) { r += vc.getX(i); gg += vc.getY(i); b += vc.getZ(i); }
+      hex = (Math.min(255, Math.round(r / n * 255)) << 16) | (Math.min(255, Math.round(gg / n * 255)) << 8) | Math.min(255, Math.round(b / n * 255));
+    }
+    return (P.tone = hex);
+  }
+  function breakUp(P, kind, x, gy, z, hw, hd, h) {
+    const Db = CBZ.debris, list = BREAK[kind];
+    if (!Db || !Db.chips || !list || !P.mesh) return;
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (!cam || (cam.x - x) * (cam.x - x) + (cam.z - z) * (cam.z - z) > 260 * 260) return;
+    const tone = poolTone(P), span = Math.max(hw, hd);
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      try {
+        Db.chips(x, gy + h * 0.6, z, { kind: b.kind, shape: b.shape, color: i === 0 || b.kind === "foliage" ? tone : undefined,
+          count: b.n, size: b.size, power: 1.6, dir: { x: 0, y: 1, z: 0 }, spread: span * 1.6, dust: i === 0, radius: span });
+      } catch (e) {}
+    }
+  }
+
   /* ---- place(kind, x, z, yaw): one article, its collider, its cover ------- */
   const SPEC = {
     sandbags: { hw: 1.2, hd: 0.42, h: 1.05, hp: 170, rubble: 0.45 },
@@ -612,7 +632,7 @@ CBZ.battleDress = (function () {
     D.counts[kind] = (D.counts[kind] || 0) + 1;
     const rec = CBZ.battleCover.add({
       kind: kind, x: x, z: z, yaw: yaw, hw: hw, hd: hd, h: h, hp: S.hp, rubbleH: S.rubble,
-      onDestroy: function () { slump(P, it, kind); if (CBZ.battleGround && CBZ.battleGround.scorch) CBZ.battleGround.scorch(x, z, Math.max(hw, hd) * 1.6); },
+      onDestroy: function () { breakUp(P, kind, x, g, z, hw, hd, h); slump(P, it, kind); if (CBZ.battleGround && CBZ.battleGround.scorch) CBZ.battleGround.scorch(x, z, Math.max(hw, hd) * 1.6); },
     });
     D.placed.push({ kind: kind, x: x, z: z, rec: rec });
     return rec;

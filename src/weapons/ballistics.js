@@ -506,7 +506,14 @@
     const mass = an.mass || 80;
     const tBleed = 8 * Math.pow(mass / 80, 0.25);
     const dep = res.dep;
-    const tissue = dep / (mass * (isMan ? 15 : 20));
+    /* an animal's tissue is not a man's. A man is put out of the fight by the
+       wound (pain, shock, the will to stop); an animal is not, and it runs on
+       its oxygen until the blood or the nerves stop it. At /20 one 7.62x39
+       round through a tiger's flank (no organ) took 37% of it on the spot,
+       more than a heart shot did (31%): three flank hits dropped a 220 kg cat.
+       At /35 that is 21%, and a heart or lung hit is the worse wound, as it
+       is. Men keep /15. */
+    const tissue = dep / (mass * (isMan ? 15 : 35));
     switch (res.organ) {
       case "brain": out.kill = true; out.now = 1; break;
       case "spine": out.now = Math.min(1, 0.55 + tissue); out.bleed = 1 / (tBleed * 1.6); break;
@@ -524,10 +531,29 @@
         out.bleed = dep > 150 ? 1 / (tBleed * (limb ? 18 : 14)) : 0;
       }
     }
-    if (res.zone === "head" && !out.kill) out.now = Math.max(out.now, Math.min(0.9, 0.3 + tissue));
+    /* A HEAD HIT THAT MISSES THE BRAIN. On a man: the face, the jaw, the
+       skull grazed, and he is out of it (0.3 + the energy). On an animal the
+       head is mostly muzzle, jaw and sinus in front of a small brain set far
+       back: a round through it is a terrible wound that does not stop it.
+       The man's flat 0.3 put one AK round through a tiger's jaw at 57-78% of
+       it, and through an elephant's face at 31% of a 6 t animal. An animal's
+       now is the tissue (x1.2 for the shock), capped at 0.6. */
+    if (res.zone === "head" && !out.kill) {
+      out.now = isMan ? Math.max(out.now, Math.min(0.9, 0.3 + tissue)) : Math.max(out.now, Math.min(0.6, tissue * 1.2));
+    }
     if (res.plate) { out.now = Math.min(0.15, dep / (mass * 40)); out.bleed = 0; }
     return out;
   }
+
+  /* DEAD ON ITS FEET. Seconds an animal mortally hit OUTSIDE the brain and
+     spine keeps going before it drops: the oxygen in its brain after the
+     heart stops or the lungs collapse, ~10-15 s in a big mammal, less of it
+     useful. Hunting accounts: a heart-shot deer runs 30-80 m (5-8 s), a
+     heart-shot lion or tiger has finished charges of 50-100 m, a heart-shot
+     elephant goes 100-200 m. 5 x (kg / 80)^0.25: wolf 4.4 s, man-sized 5,
+     tiger 6.4, bear 7, elephant 14.7. Only brain or spine stops it at once.
+     A man is not on this clock: the wound takes him out of the fight. */
+  function onFeet(mass) { return 5 * Math.pow(Math.max(1, mass || 80) / 80, 0.25); }
 
   /* lead: where to put the aim on a mover. Returns the factor of the true
      lead this shooter applies this shot (1 = perfect). */
@@ -567,7 +593,7 @@
     HIDE_EQ: HIDE_EQ, BONE_EQ: BONE_EQ,
     tof: tof, vAt: vAt, drop: drop, poi: poi, reach: reach, energy: energy, depth: depth, pierce: pierce,
     penRHA: penRHA, ricochet: ricochet, suppressR: suppressR, sigma: sigma, moaSigma: moaSigma, gauss: gauss,
-    traceZones: traceZones, wound: wound, harm: harm, anatomyOf: anatomyOf, leadFactor: leadFactor, lob: lob,
+    traceZones: traceZones, wound: wound, harm: harm, onFeet: onFeet, anatomyOf: anatomyOf, leadFactor: leadFactor, lob: lob,
     cartOf: cartOf, muzzleV: muzzleV, dragOf: dragOf, matPen: matPen,
     gun: function (id) { return GUN[id] || null; },
   };

@@ -28,6 +28,9 @@
       fireShot, hand the rifle back; a soldier who is killed goes back to the
       director and is reported down.
    5  snow, fields and the wood: the erg skins build and fight.
+  14  THE CONVOY: an M1, a MaxxPro MRAP and a JLTV v riflemen with RPGs:
+      the troops get out, rifle fire stops on the MRAP, the V-hulls live
+      through an IED under them.
   10  THE GROUND: cover points for the host (crests, props, crater lips), a
       dug-in position's berm in the height function, a bomb that digs a crater
       into groundAt and breaks the sandbags beside it.                    */
@@ -593,10 +596,221 @@ scenario(12, "wheels: a Humvee and a loaded M35 v 30 riflemen", async () => {
   check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ")");
 });
 
+/* 16  THE CONVOY. An M1 leading a MaxxPro MRAP and a JLTV (the troop
+   carriers the US actually uses, both their own files on units/kit/hull.js)
+   against riflemen with RPGs. The MRAP carries six and the JLTV one behind
+   their crews; the men get out (the armies form inside both dismount
+   ranges); rifle ball stops on every face of the MRAP, in the scripted
+   check AND in the battle (every small-arms round that reaches it is
+   counted); the MRAP corners inside its rollover limit and heels further
+   than the JLTV doing it; and a buried charge under each hull: the V-hulls
+   live, the Humvee's flat floor does not. */
+scenario(16, "the convoy: an M1, a MaxxPro and a JLTV v riflemen with RPGs", async () => {
+  const W = boot("?a=m1_abrams*1,maxxpro_mrap*1,jltv*1,men*17&b=men&n=20v60&arena=dunes&aw=carbine&bw=ak47,ak47,ak47,ak47,bazooka&bt=elite&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  run(W, 0.1);
+  const R = W.sb.__battle.roster();
+  const mr = R.find((m) => m.unitId === "maxxpro_mrap"), jl = R.find((m) => m.unitId === "jltv"), tk = R.find((m) => m.unitId === "m1_abrams");
+  check(!!mr && !!jl && !!tk, "the column is on the field (" + R.filter((m) => m.vehicle).map((m) => m.unitId).join(", ") + ")");
+  if (!mr || !jl || !tk) return;
+  check(!mr.group.userData.standIn && !jl.group.userData.standIn && !!(mr.rig && mr.rig.mark && jl.rig && jl.rig.mark),
+    "the MaxxPro and the JLTV are built by their own files on the hull kit (rigs with mark/fire/damage)");
+  const crew = (v) => v.seats.filter((x) => x.crew && x.man).length, pax = (v) => v.seats.filter((x) => !x.crew && x.man).length;
+  // 17 men: 10 take the crew seats (4 in the tank, 3 + 3), 6 the MRAP's benches, 1 the JLTV's back seat
+  const onFoot = R.filter((m) => m.team === "red" && !m.vehicle && !m.inVeh).length;
+  check(crew(tk) === 4 && crew(mr) === 3 && crew(jl) === 3, "crews aboard: tank 4, MaxxPro 3, JLTV 3 (" + crew(tk) + ", " + crew(mr) + ", " + crew(jl) + ")");
+  check(mr.dismounted && jl.dismounted && onFoot === 7 && pax(mr) === 0 && pax(jl) === 0,
+    "the MaxxPro's six and the JLTV's one got out (" + onFoot + " riflemen on foot)");
+  // the scripted check: an AK man 80 m off each face of the MRAP, a sniper off its flank
+  run(W, 1);
+  const blue = R.find((m) => m.team === "blue" && !m.dead && !m.launcher);
+  const sx = blue.pos.x, sz = blue.pos.z, sw = blue.wid;
+  const hp0 = mr.hp, faces = [];
+  for (const [name, a] of [["front", 0], ["side", Math.PI / 2], ["rear", Math.PI], ["other side", -Math.PI / 2]]) {
+    blue.pos.x = mr.pos.x + Math.sin(mr.h + a) * 80; blue.pos.z = mr.pos.z + Math.cos(mr.h + a) * 80;
+    for (let k = 0; k < 10; k++) W.sb.hurtMan(mr, 30, { by: blue });
+    faces.push(name + " " + (mr.lastHit && mr.lastHit.zone));
+  }
+  blue.wid = "sniper";
+  blue.pos.x = mr.pos.x + Math.sin(mr.h + Math.PI / 2) * 300; blue.pos.z = mr.pos.z + Math.cos(mr.h + Math.PI / 2) * 300;
+  for (let k = 0; k < 10; k++) W.sb.hurtMan(mr, 60, { by: blue });
+  blue.wid = sw; blue.pos.x = sx; blue.pos.z = sz;
+  check(mr.hp === hp0 && !mr.dead, "40 AK rounds on all four faces and 10 sniper rounds on the flank do nothing to the MRAP (hp " + hp0 + " -> " + mr.hp + "; " + faces.join(", ") + ")");
+  // the battle: count every round that reaches the MRAP, by what it was
+  const D = W.CBZ.vehicleDrive, hurt0 = W.sb.hurtMan;
+  const led = { small: 0, smallPen: 0, heavy: 0, heavyPen: 0 };
+  W.sb.hurtMan = function (m, dmg, imp) {
+    const live = m === mr && dmg > 0 && !mr.dead;
+    const r = hurt0.apply(this, arguments);
+    if (live) {
+      const th = D.threatOf(imp || {}, imp && imp.by);
+      const pen = !!(mr.lastHit && mr.lastHit.pen);
+      if (th.cls === "small") { led.small++; if (pen) led.smallPen++; } else { led.heavy++; if (pen) led.heavyPen++; }
+    }
+    return r;
+  };
+  let latM = 0, latJ = 0, rollM = 0, rollJ = 0;
+  const a = run(W, 300, () => {
+    if (!mr.dead) { latM = Math.max(latM, Math.abs(mr.ds.v * mr.ds.w)); rollM = Math.max(rollM, Math.abs(mr.rig.roll || 0)); }
+    if (!jl.dead) { latJ = Math.max(latJ, Math.abs(jl.ds.v * jl.ds.w)); rollJ = Math.max(rollJ, Math.abs(jl.rig.roll || 0)); }
+    return true;
+  });
+  W.sb.hurtMan = hurt0;
+  console.log("    MRAP ledger " + JSON.stringify(led) + ", hp " + Math.round(mr.hp) + "/" + mr.maxHp + (mr.dead ? " (knocked out)" : "") + "; JLTV hp " + Math.round(jl.hp) + (jl.dead ? " (knocked out)" : "") +
+    "; guns " + [tk, mr, jl].map((v) => v.unitId + " " + v.shotsF + "/" + v.kills).join(", "));
+  check(led.small > 0 && led.smallPen === 0, "in the fight, " + led.small + " rifle rounds reached the MRAP and none got through");
+  check(mr.shotsF + jl.shotsF > 0, "the .50s on the MRAP's ring and the JLTV's CROWS fired (" + mr.shotsF + " + " + jl.shotsF + " rounds)");
+  check(latM <= 0.42 * 9.8 * 1.05, "the MRAP never cornered past its rollover limit (max " + (latM / 9.8).toFixed(2) + " g of 0.42)");
+  // (sixty against a column can stall into a long fight: the end is reported, not required)
+  check(!mr.dead, "the MRAP came through the fight (" + a.simT + " s, " + (a.over ? "winner " + a.winner : "still fighting") + ", red " + a.red + " blue " + a.blue + ")");
+
+  // A BURIED CHARGE under each hull: the V-hulls take it on the belly and live
+  const W2 = boot("?a=maxxpro_mrap*1,jltv*1,hmmwv*1&b=men&n=3v5&arena=dunes&bw=ak47&auto=1&probe=0");
+  if (W2.err) { check(false, "page threw at boot: " + (W2.err.stack || W2.err)); return; }
+  await settle();
+  run(W2, 0.1);
+  const R2 = W2.sb.__battle.roster();
+  // TOP-HEAVY: each hull floored for 8 s, then full lock for 5 s. The MRAP's
+  // driver is held to its rollover limit (0.42 g) and still heels over
+  // further than the JLTV pulling nearly twice the g
+  const turn = {};
+  for (const id of ["maxxpro_mrap", "jltv"]) {
+    const v = R2.find((m) => m.unitId === id);
+    let lat = 0, roll = 0;
+    for (let k = 0; k < 650; k++) {
+      W2.sb.vehMove(v, 0.02, { throttle: 1, steer: k < 400 ? 0 : 1, brake: 0 });
+      W2.sb.vehAnimate(v, 0.02);
+      if (k >= 400) { lat = Math.max(lat, Math.abs(v.ds.v * v.ds.w)); roll = Math.max(roll, Math.abs(v.rig.roll)); }
+    }
+    turn[id] = { g: lat / 9.8, deg: roll * 57.3 };
+  }
+  console.log("    full lock " + JSON.stringify(turn));
+  check(turn.maxxpro_mrap.g <= 0.42 * 1.02 && turn.maxxpro_mrap.g > 0.3, "the MRAP's driver takes a tight turn at its rollover limit (" + turn.maxxpro_mrap.g.toFixed(2) + " g of 0.42)");
+  check(turn.maxxpro_mrap.deg > turn.jltv.deg * 1.5, "and its body rolls over much further than the JLTV's at " + turn.jltv.g.toFixed(2) + " g (" + turn.maxxpro_mrap.deg.toFixed(1) + " v " + turn.jltv.deg.toFixed(1) + " deg)");
+  const out = {};
+  for (const id of ["maxxpro_mrap", "jltv", "hmmwv"]) {
+    const v = R2.find((m) => m.unitId === id);
+    let pens = 0, zone = null;
+    const hp = v.hp, vs0 = JSON.stringify(v.vs);
+    for (let k = 0; k < 20; k++) {
+      if (v.dead) break;
+      W2.sb.hurtMan(v, 400, { cause: "ied", fromX: v.pos.x, fromZ: v.pos.z });
+      zone = v.lastHit && v.lastHit.zone;
+      if (v.lastHit && v.lastHit.pen) pens++;
+      if (!v.dead) { Object.assign(v.vs, JSON.parse(vs0)); v.hp = hp; }       // the same hull, twenty times over
+    }
+    out[id] = { pens: pens, zone: zone, dead: !!v.dead };
+  }
+  console.log("    IED " + JSON.stringify(out));
+  check(out.maxxpro_mrap.zone === "belly" && out.maxxpro_mrap.pens === 0 && !out.maxxpro_mrap.dead, "twenty IEDs under the MaxxPro: the V-hull takes every one on its belly, nothing through");
+  check(out.jltv.pens <= 2 && !out.jltv.dead, "the JLTV's MRAP-class floor holds (" + out.jltv.pens + " of 20 through)");
+  check(out.hmmwv.pens > 0, "the Humvee's flat floor does not (" + out.hmmwv.pens + " through, " + (out.hmmwv.dead ? "knocked out" : "standing") + ")");
+});
+
+/* 17  THE CONVOY. An Abrams and two FMTV M1083A1s with a squad of sixteen on
+   each bed, against forty riflemen. The trucks are their own file on the hull
+   kit; they fill before they unload (the spawn queue no longer races the
+   dismount), the men ride drawn on the benches, the tailgates drop and the
+   thirty-two get out and fight. Armour by place (stats.plates): rifle ball
+   bounces off the LTAS cab and leaves its strike on it, goes through the bed,
+   and a .50 goes through the cab. */
+scenario(17, "the convoy: an Abrams and two loaded FMTVs v 40 riflemen; the squads dismount and fight", async () => {
+  const W = boot("?a=m1_abrams*1,fmtv*2,men*40&b=men&n=43v40&arena=dunes&aw=ak47&bw=ak47&bt=pro&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  // the moment each truck unloads: who is in the back, and how many its rig draws
+  const most = new Map(), drawn = new Map(), riders = new Set();
+  const unload = W.sb.vehDismount;
+  W.sb.vehDismount = function (u) {
+    if (u.unitId === "fmtv") {
+      const on = u.seats.filter((s) => !s.crew && s.man);
+      on.forEach((s) => riders.add(s.man));
+      most.set(u, on.length);
+      if (u.rig && u.rig.troops) { u.rig.dt = 0.05; u.rig.crew(u); drawn.set(u, u.rig.troops.im.count); }
+    }
+    return unload(u);
+  };
+  run(W, 2);
+  const R = W.sb.__battle.roster();
+  const trucks = R.filter((m) => m.unitId === "fmtv"), tank = R.find((m) => m.unitId === "m1_abrams");
+  check(trucks.length === 2 && !!tank, "the convoy is on the field (" + R.filter((m) => m.vehicle).map((m) => m.unitId).join(", ") + ")");
+  if (trucks.length !== 2 || !tank) return;
+  check(trucks.every((t) => !t.group.userData.standIn && t.rig && t.rig.mark && t.rig.troops && t.rig.tailgate),
+    "built by units/vehicles/fmtv.js on the hull kit (rig with troops, tailgate, mark)");
+  check(trucks.every((t) => t.tactics && t.tactics.role === "transport" && t.tactics.convoy) && trucks[0].def.label !== "",
+    "def.tactics marks it a convoy transport (" + JSON.stringify(trucks[0].tactics.convoy) + ")");
+  check(trucks.every((t) => most.get(t) === 16), "each truck filled its sixteen bench seats before it unloaded (" + trucks.map((t) => most.get(t)).join(", ") + ")");
+  check(trucks.every((t) => drawn.get(t) === 16), "and drew all sixteen on the benches while they rode (" + trucks.map((t) => drawn.get(t)).join(", ") + ")");
+  check(trucks.every((t) => t.seats.filter((s) => s.crew && s.man).length === 2), "driver and commander in each cab");
+  check(trucks.every((t) => t.dismounted && t.seats.every((s) => s.crew || !s.man)), "the squads got out (the armies form inside the 520 m dismount range)");
+  check(trucks.every((t) => t.rig.tailgate.obj.rotation.x < -1.2), "the tailgates are down (" + trucks.map((t) => t.rig.tailgate.obj.rotation.x.toFixed(2)).join(", ") + ")");
+  // ARMOUR BY PLACE: a man 80 m off the face, a round with its impact point
+  const blue = W.sb.__battle.roster().find((m) => m.team === "blue" && !m.dead);
+  const t = trucks[0], sx = blue.pos.x, sz = blue.pos.z;
+  const world = (hx, hy, hz) => {
+    const c = Math.cos(t.h), s = Math.sin(t.h);
+    return { x: t.pos.x + hx * c + hz * s, y: t.pos.y + hy, z: t.pos.z - hx * s + hz * c };
+  };
+  const off = (hx, hz, d) => { const p = world(hx * d, 0, hz * d); blue.pos.x = p.x; blue.pos.z = p.z; };
+  const hp0 = t.hp, strikes = t.group.getObjectByName("strikes");
+  off(0, 1, 80);
+  for (let k = 0; k < 8; k++) W.sb.hurtMan(t, 40, { by: blue, pen: 7, at: world((k % 3 - 1) * 0.5, 2.0 + (k % 2) * 0.5, 3.465) });
+  check(t.hp === hp0, "AK ball on the armoured cab's face bounces (hp " + hp0 + " -> " + t.hp + ", last " + JSON.stringify(t.lastHit && { zone: t.lastHit.zone, armour: t.lastHit.armour, pen: t.lastHit.pen }) + ")");
+  check(!!strikes && strikes.count === 8, "and leaves its strikes on the cab (" + (strikes && strikes.count) + " marks)");
+  off(1, 0, 80);
+  for (let k = 0; k < 4; k++) W.sb.hurtMan(t, 40, { by: blue, pen: 7, at: world(1.22, 2.2, 2.4) });
+  check(t.hp === hp0, "and off the door's B-kit panel (hp " + t.hp + ")");
+  for (let k = 0; k < 3; k++) W.sb.hurtMan(t, 40, { by: blue, pen: 7, at: world(1.22, 1.9, -1.5) });
+  const hpBed = t.hp;
+  check(hpBed < hp0 && t.lastHit.pen && t.lastHit.armour < 2, "but goes straight through the bed's sheet steel (hp " + hp0 + " -> " + Math.round(hpBed) + ", " + t.lastHit.armour + " mm)");
+  off(0, 1, 80);
+  W.sb.hurtMan(t, 120, { by: blue, pen: 19, at: world(0.3, 2.4, 3.465) });
+  check(t.hp < hpBed && t.lastHit.pen && t.lastHit.armour === 11, "a .50 round goes through the cab (" + t.lastHit.armour + " mm, hp " + Math.round(hpBed) + " -> " + Math.round(t.hp) + ")");
+  blue.pos.x = sx; blue.pos.z = sz;
+  // THE FIGHT
+  const a = run(W, 300);
+  const pax = [...riders];
+  const shots = pax.reduce((s, m) => s + (m.shotsF || 0), 0), kills = pax.reduce((s, m) => s + (m.kills || 0), 0);
+  check(pax.length === 32 && shots > 0, "the " + pax.length + " who rode in fought on foot (" + shots + " rounds, " + kills + " kills)");
+  check(kills > 0, "and killed");
+  check(trucks.some((v) => v.shotsF > 0), "the ring .50s fired (" + trucks.map((v) => v.shotsF).join(" + ") + " rounds)");
+  check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ", red " + a.red + " blue " + a.blue + "; trucks " + trucks.map((v) => v.dead ? "lost" : Math.round(v.hp) + " hp").join(", ") + ")");
+});
+
 /* 11  AIRCRAFT. The vehicle contract's air half (docs/npcwar/ARCHITECTURE.md):
    a helicopter fights from battle positions (masked low, up to fire, down,
    sidestep), a jet flies attack runs at a real height; every unit animates
    itself on the battle clock and names the weapon of every round. */
+/* 15  ROCKET ARTILLERY. The M142 HIMARS (src/units/vehicles/m270_mlrs.js)
+   against a company of riflemen: built by its own file on the hull kit, it
+   keeps out of its minimum range, stops, lays the pod, and ripples GUIDED
+   GMLRS (rig.launched sets the homing mark): the rockets land on the group
+   and kill (the old 220 m/s lob flew 45 s and killed nothing). */
+scenario(15, "rocket artillery: a HIMARS fire mission on 40 riflemen", async () => {
+  const W = boot("?a=m270_mlrs*1&b=men&n=1v40&arena=dunes&bw=ak47&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  run(W, 0.1);
+  const R = W.sb.__battle.roster();
+  const h = R.find((m) => m.unitId === "m270_mlrs");
+  check(!!h && !h.group.userData.standIn && !!(h.rig && h.rig.launched && h.rig.canFire), "the HIMARS is built by its own file (rig with launched / canFire)");
+  if (!h) return;
+  let guided = 0, minD = 1e9;
+  const orig = h.rig.launched.bind(h.rig);
+  h.rig.launched = function (rk, shot, t) { orig(rk, shot, t); if (rk.homing) guided++; };
+  const blueDead = () => W.sb.__battle.roster().filter((m) => m.team === "blue" && m.dead).length;
+  const a = run(W, 150, () => {
+    for (const o of W.sb.__battle.roster()) if (o.team === "blue" && !o.dead) minD = Math.min(minD, Math.hypot(o.pos.x - h.pos.x, o.pos.z - h.pos.z));
+    return true;
+  });
+  check(h.shotsF >= 1 && guided === h.shotsF, "it fired, every rocket guided (" + h.shotsF + " fired, " + guided + " guided)");
+  check(h.kills > 0 || blueDead() > 0, "the rockets killed (" + h.kills + " credited, " + blueDead() + " blue dead in " + a.simT + " s, winner " + a.winner + ")");
+});
+
 scenario(11, "aircraft: an Apache's battle positions, an F-35's attack runs", async () => {
   {
     const W = boot("?a=ah64_apache*1&b=men&n=1v30&arena=dunes&bw=ak47&auto=1&probe=0");
@@ -652,19 +866,46 @@ scenario(11, "aircraft: an Apache's battle positions, an F-35's attack runs", as
     check(agl() > 3000, "the F-35 comes in at medium altitude (" + Math.round(agl()) + " m)");
     let relD = 0, lo = 1e9;
     const R = W.sb.__battle.roster();
+    // the weapons by kind, not by place in the list (the unit file orders them)
+    const bombW = () => j.wpn.find((w) => w.w.kind === "bombs" && !w.off) || j.wpn.find((w) => w.w.kind === "bombs");
+    const gunW = () => j.wpn.find((w) => w.w.kind === "autocannon");
     const a = run(W, 300, () => {
       if (!j.dead) lo = Math.min(lo, agl());
-      const W0 = j.wpn[0];
-      if (!relD && W0.n > 0) {
+      const W0 = bombW();
+      if (!relD && W0 && W0.n > 0) {
         const t = j.tgt || R.find((m) => m.team === "blue" && !m.dead);
         relD = t ? Math.hypot(t.pos.x - j.pos.x, t.pos.z - j.pos.z) : -1;
       }
       return true;
     });
-    check(j.wpn[0].n > 0 && relD > 2000, "it released its bombs a stand-off short of the mark (" + j.wpn[0].n + " away, first " + Math.round(relD) + " m out)");
-    check(j.wpn[1].n === 0 || lo < 1400, "the gun run was a dive (" + j.wpn[1].n + " rounds, lowest " + Math.round(lo) + " m)");
+    check(bombW().n > 0 && relD > 2000, "it released its bombs a stand-off short of the mark (" + bombW().n + " " + bombW().w.id + " away, first " + Math.round(relD) + " m out)");
+    check(gunW().n === 0 || lo < 1400, "the gun run was a dive (" + gunW().n + " rounds, lowest " + Math.round(lo) + " m)");
     check(lo >= 59, "never below 60 m over the ground (" + Math.round(lo) + " m)");
     console.log("    (F-35: " + j.kills + " kills, war " + (a.over ? "over at " + a.simT + " s" : "still on") + ")");
+  }
+  {
+    /* THE STEALTH LOAD (src/units/vehicles/f35.js): against armour the jet is
+       tasked with eight SDBs; the bays are open at every release (kilometres
+       out, guided) and shut again once the pass is over. */
+    const W = boot("?a=f35*1&b=m1_abrams*3&n=1v3&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 1);
+    const j = W.sb.__battle.roster().find((m) => m.unitId === "f35");
+    if (!j || !j.rig || !j.rig.state) { check(false, "the F-35 is on the field with its own rig"); return; }
+    const S = j.rig.state, rel = [];
+    const fire0 = j.rig.fire;
+    j.rig.fire = function (shot) {
+      if (shot.kind === "bombs") rel.push({ wid: shot.wid, bay: S.bay, d: shot.target ? Math.round(Math.hypot(shot.target.pos.x - j.pos.x, shot.target.pos.z - j.pos.z)) : -1 });
+      return fire0.apply(this, arguments);
+    };
+    let shutAfter = false, wasOpen = false;
+    run(W, 200, () => { if (S.bay > 0.95) wasOpen = true; else if (wasOpen && j.airPhase === "out" && S.bay < 0.05) shutAfter = true; return true; });
+    check(S.load === "sdb", "armour tasks the SDB load (" + S.load + ")");
+    check(rel.length >= 2 && rel.every((r) => r.wid === "gbu39_sdb" && r.bay > 0.95 && r.d > 2000), "every SDB left an open bay, kilometres out (" + JSON.stringify(rel) + ")");
+    check(shutAfter, "the bays shut again after the pass (stealth)");
+    console.log("    (F-35 v 3 M1: " + j.kills + " kills, " + rel.length + " SDBs)");
   }
 });
 
@@ -719,6 +960,114 @@ scenario(12, "air assault: a Black Hawk fast-ropes its squad in, then its door g
   check(outs.every((o, i) => o.agl > 8 && o.agl < 16 && (i === outs.length - 1 || (o.ph === "insert" && o.v < 3.5))), "every man came down a rope from a hover at ~12 m (" + JSON.stringify(outs.slice(-2)) + ")");
   check(outs.length < 2 || outs.length >= 6, "one at a time over several steps, not all in one frame (" + outs.length + " drops)");
   check(offSector.length === 0, "each door gun fired only inside its own sector (" + (offSector.slice(0, 3).join(", ") || "none out") + ")");
+});
+
+/* 13  THE B-52. It comes in from beyond the horizon at 9 km, opens the bay
+   on the run-in, and walks ONE stick of Mk-82s across the mark from its
+   own bay stations (each bomb drawn falling), released kilometres short. */
+scenario(13, "the B-52: a high-altitude run, the bay opens, a stick walks across the mark", async () => {
+  const W = boot("?a=b52*1&b=men&n=1v60&arena=dunes&bw=ak47&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  run(W, 1);
+  const b = W.sb.__battle.roster().find((m) => m.unitId === "b52");
+  if (!b) { check(false, "the B-52 is on the field"); return; }
+  const MAP = vm.runInContext("MAP", W.sb);
+  const agl = () => b.pos.y - MAP.groundAt(b.pos.x, b.pos.z);
+  const R = b.rig && b.rig.state;
+  check(!!R && !!R.skins && R.skins.length > 0, "its own skinned airframe was built (not the stand-in)");
+  check(agl() > 8500, "it comes in at bombing height (" + Math.round(agl()) + " m)");
+  const enemy = W.sb.__battle.roster().filter((m) => m.team === "blue" && !m.dead);
+  const d0 = Math.min.apply(null, enemy.map((m) => Math.hypot(m.pos.x - b.pos.x, m.pos.z - b.pos.z)));
+  check(d0 > 10500, "from beyond its release distance, so the first pass is a real run (" + Math.round(d0) + " m out)");
+  let doorAtFirst = -1, first = -1, firstD = 0, maxStick = 0, stick = 0, lastN = 0, lastT = 0;
+  const W0 = b.wpn[0];
+  const a = run(W, 160, (t) => {
+    if (W0.n > lastN) {
+      if (first < 0) { first = t; doorAtFirst = R.door; const tg = b.tgt; firstD = tg ? Math.hypot(tg.pos.x - b.pos.x, tg.pos.z - b.pos.z) : 0; }
+      stick = t - lastT < 1.5 ? stick + (W0.n - lastN) : (W0.n - lastN);
+      maxStick = Math.max(maxStick, stick); lastN = W0.n; lastT = t;
+    }
+    return true;
+  });
+  check(first >= 0, "it released (" + W0.n + " Mk-82s)");
+  check(doorAtFirst > 0.9, "the bay doors were open before the first bomb left (" + doorAtFirst.toFixed(2) + ")");
+  check(firstD > 7000, "released kilometres short of the mark (" + Math.round(firstD) + " m)");
+  check(maxStick >= 12, "a stick, not a few bombs a pass (" + maxStick + " in one ripple)");
+  const dead = W.sb.__battle.roster().filter((m) => m.team === "blue" && m.dead).length;
+  console.log("    (B-52: " + dead + " of 60 dead, " + b.kills + " kills, war " + (a.over ? "over at " + a.simT + " s" : "still on at " + a.simT + " s") + ")");
+  check(dead > 0, "the stick killed (" + dead + ")");
+});
+
+/* 14  AIR DEFENCE. A Patriot launcher turns its tail to the threat, emplaces
+   (outriggers down, the launcher up to its fixed 38 degrees), holds its site
+   instead of driving at its mark, and kills helicopters with PAC-3 MSEs that
+   only leave a launcher that is up, slewed and still. */
+scenario(14, "air defence: a Patriot emplaced, two Apaches; then riflemen close in and it displaces", async () => {
+  {
+    const W = boot("?a=patriot_launcher*1&b=ah64_apache*2&n=1v2&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 0.5);
+    const B = W.sb.__battle, wrap = W.CBZ.vehicleDrive.wrap;
+    const p = B.roster().find((m) => m.unitId === "patriot_launcher");
+    check(!!p && !p.group.userData.standIn && !!(p.rig && p.rig.isPatriot), "built by its own file (tractor, articulated trailer, M903)");
+    if (!p) return;
+    const foe = B.roster().filter((m) => m.team !== p.team);
+    const fx = foe.reduce((s, m) => s + m.pos.x, 0) / foe.length, fz = foe.reduce((s, m) => s + m.pos.z, 0) / foe.length;
+    const tail = Math.abs(wrap(p.h - Math.atan2(p.pos.x - fx, p.pos.z - fz)));
+    check(tail < 0.6 && p.rig.jack >= 1 && p.rig.elev > 0.6, "it opens emplaced, tail to the threat (nose " + tail.toFixed(2) + " rad off straight away from it; jacks " + p.rig.jack + ", launcher " + (p.rig.elev * 180 / Math.PI).toFixed(0) + " deg)");
+    const x0 = p.pos.x, z0 = p.pos.z;
+    const bad = [];
+    let fired = 0;
+    const fire0 = p.rig.fire;
+    p.rig.fire = function (shot) {
+      if (shot.kind === "sam") {
+        fired++;
+        if (!(this.jack >= 1 && this.elev > 0.6 && p.speed < 0.5 && Math.abs(wrap(this.travWant - this.trav)) < 0.06)) bad.push("jack " + this.jack.toFixed(2) + " elev " + this.elev.toFixed(2) + " v " + p.speed.toFixed(1));
+      }
+      return fire0.apply(this, arguments);
+    };
+    run(W, 240, () => true);
+    const moved = Math.hypot(p.pos.x - x0, p.pos.z - z0);
+    const ap = B.roster().filter((m) => m.unitId === "ah64_apache");
+    console.log("    (" + fired + " PAC-3 launched, " + p.kills + " kills, moved " + Math.round(moved) + " m, Apaches down " + ap.filter((m) => m.dead).length + ", launcher " + (p.dead ? "knocked out" : "alive, hp " + Math.round(p.hp)) + ")");
+    check(moved < 30, "it held its site instead of driving at the helicopters (" + Math.round(moved) + " m)");
+    check(fired > 0 && bad.length === 0, "PAC-3s left only an emplaced, slewed, still launcher (" + fired + " launched" + (bad.length ? ", " + bad.slice(0, 2).join("; ") : "") + ")");
+    check(ap.some((m) => m.dead), "and an Apache came down (" + ap.filter((m) => m.dead).length + " of 2)");
+    // the trailer's kinematics: a steady turn settles at the real hitch angle
+    const r = p.rig, phi0 = r.phi;
+    r.phi = 0;
+    for (let i = 0; i < 600; i++) r.stepTrailer(1 / 60, 5, 0.3, null);
+    const want = Math.asin((0.3 * (1.45 - 1.34) - 0.3 * 8.2) / 5);
+    check(Math.abs(r.phi - want) < 0.08, "in a steady turn the trailer settles at its hitch angle (" + r.phi.toFixed(2) + " v " + want.toFixed(2) + " rad)");
+    r.phi = phi0;
+  }
+  {
+    const W = boot("?a=patriot_launcher*1&b=men&n=1v8&arena=dunes&bw=ak47&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 0.5);
+    const B = W.sb.__battle;
+    const p = B.roster().find((m) => m.unitId === "patriot_launcher");
+    if (!p) { check(false, "the Patriot is on the field"); return; }
+    const x0 = p.pos.x, z0 = p.pos.z;
+    let movedJacked = 0, stowed = false;
+    const samN = () => p.wpn.filter((W0) => W0.w.kind === "sam").reduce((s, W0) => s + W0.n, 0);
+    const sams = samN();
+    run(W, 90, () => {
+      if (!p.dead && p.rig.jack > 0.02 && p.speed > 0.8) movedJacked++;
+      if (!p.dead && p.rig.jack === 0 && p.rig.elev === 0) stowed = true;
+      return true;
+    });
+    const moved = Math.hypot(p.pos.x - x0, p.pos.z - z0);
+    console.log("    (v riflemen: moved " + Math.round(moved) + " m, mode " + (p.rig.ai && p.rig.ai.mode) + ", .50 rounds " + p.wpn[1].n + ", " + (p.dead ? "knocked out" : "hp " + Math.round(p.hp)) + ")");
+    check(stowed && moved > 60 && movedJacked === 0, "riflemen inside 450 m: it march-ordered (launcher down, jacks up) and only then drove off (" + Math.round(moved) + " m, " + movedJacked + " steps moving jacked)");
+    check(samN() === sams, "no interceptor was wasted on men");
+  }
 });
 
 scenario(9, "sides, best-of, the URL matchup: no colour on screen", async () => {
