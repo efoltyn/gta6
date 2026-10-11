@@ -314,3 +314,22 @@
 /* a voice on the phone: smaller, cooler, by the hand */
 #speech .say.phone{ color:#dff3ff; font-weight:500; font-style:italic; max-width:min(40vw, 260px); }
 body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
+
+/* ---- the settings (src/battle/settingspanel.js) ---- */
+#setp{position:fixed;inset:0;z-index:80;display:none;place-items:center;background:rgba(6,7,9,.72);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:16px}
+#setp.on{display:grid}
+#setp .in{width:min(420px,100%);max-height:100%;overflow-y:auto;background:#101317;border:1px solid rgba(255,255,255,.14);
+  border-radius:14px;padding:18px 18px 14px}
+#setp h2{margin:0 0 2px;font:400 30px/1 "Bebas Neue","Oswald",Impact,sans-serif;letter-spacing:.06em}
+#setp .dev{font-size:11px;opacity:.55;letter-spacing:.08em;margin-bottom:10px}
+#setp label.f{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;
+  border-top:1px solid rgba(255,255,255,.07);font-size:12px;letter-spacing:.06em}
+#setp select{background:#1a1e24;color:inherit;border:1px solid rgba(255,255,255,.16);border-radius:8px;
+  padding:6px 8px;font:600 13px/1.2 ui-sans-serif,system-ui,sans-serif;min-width:120px}
+#setp .acts{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+#setp .acts button{border:1px solid rgba(255,255,255,.18);background:#1a1e24;border-radius:9px;padding:9px 14px;cursor:pointer;
+  font:700 12px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em}
+#setp #setDone{background:#ff7a45;border-color:#ff7a45;color:#140b06}
+#menu .setlink{display:block;margin:8px auto 0;background:none;border:0;opacity:.6;cursor:pointer;
+  font:700 11px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.12em}

@@ -62,8 +62,11 @@
      dressRig(ch, look), rigOpts(look), now(), audit(), layout() }
    Soldier clips (NPC War's armies): rifleIdle, rifleWalk, patrolWalk,
    rifleRun, crouchRun, proneCrawl — CBZ.crowdGPU.clip("rifleWalk").
-   L.add takes (x, y, z, yaw, look, clip, phase, rate, scale, vx, vz): vx/vz is
-   the velocity the GPU carries the body along between cuts.
+   L.add takes (x, y, z, yaw, look, clip, phase, rate, scale, vx, vz, gear): vx/vz is
+   the velocity the GPU carries the body along between cuts; gear is
+   gearCode({helmet: hex, rifle: true}) for kit a host baked in with gear(fn)
+   (0 = none: the bake and the look are what they always were).
+   setTier({d1, d2, cap1, cap2}) moves the LOD bands live (layers rebuild).
    Clip phase is in CYCLES (0..1). rate = cycles/second animated on the GPU
    (0 = the caller drives phase every frame).
 ============================================================ */
@@ -147,11 +150,6 @@
   const BODIES = [
     { build: "m", hairStyle: "short", longHair: false },
     { build: "f", hairStyle: "long", longHair: true },
-    // THE SOLDIER (entities/combatkit.js): the male body in a rifleman's kit,
-    // plate carrier, helmet, knee pads and boots baked into the mesh (the kit
-    // is FIXED-colour vertex paint; the uniform rides the shirt/pants slots,
-    // a look's mean camouflage colour). look({ soldier: true, ... }).
-    { build: "m", hairStyle: "short", longHair: false, kit: "rifleman", nation: "republic" },
   ];
   const SEAT = { cushion: 0.45, floorBelow: 0.45 };   // the seated clips' chair (arena seats read the same kit number)
   // palette slots (aPart.y)
@@ -186,16 +184,15 @@
   const LOOKS = [], LOOK_IX = new Map();
   function look(o) {
     o = o || {};
-    const body = o.soldier ? 2 : (o.build === "f" ? 1 : 0);
+    const body = o.build === "f" ? 1 : 0;
     const skin = o.skin != null ? o.skin : 0xc68642;
     const shirt = o.shirt != null ? o.shirt : 0x444a52;
     const rec = {
       body: body, skin: skin, shirt: shirt, pants: o.pants != null ? o.pants : 0x2a3446,
       hair: o.hair != null ? o.hair : 0x2a1d16, shoes: o.shoes != null ? o.shoes : 0x2b2b2b,
       sleeve: o.sleeve != null ? o.sleeve : shirt,
-      loadout: o.loadout || null, nation: o.nation || null,
     };
-    const key = body + "|" + (rec.loadout || "") + "|" + (rec.nation || "") + "|" + rec.skin + "|" + rec.shirt + "|" + rec.pants + "|" + rec.hair + "|" + rec.shoes + "|" + rec.sleeve;
+    const key = body + "|" + rec.skin + "|" + rec.shirt + "|" + rec.pants + "|" + rec.hair + "|" + rec.shoes + "|" + rec.sleeve;
     let id = LOOK_IX.get(key);
     if (id != null) return id;
     rec.ix = [palIndex(rec.skin), palIndex(rec.shirt), palIndex(rec.pants), palIndex(rec.hair), palIndex(rec.shoes), palIndex(rec.sleeve)];
@@ -204,7 +201,18 @@
   }
 
   // ---------------------------------------------------------------- the bake (pure: runs headless)
-  let BAKE = null;
+  let BAKE = null, BAKE_WHY = "";
+  /* GEAR. gear(fn) registers fn(ch, body) to run on each bake rig right after
+     it is built: it hangs the host's own kit on the rig (NPC War: the helmet
+     its men.js puts on a soldier, the rifle actorweapons.js puts in his hand)
+     and tags each mesh: userData.cgGear = 1 shown with a helmet, 2 shown with
+     a rifle, 3 shown WITHOUT a helmet (the hair a helmet would flatten), 4
+     shown with KIT (entities/combatkit.js's carrier, pouches, knee pads), and
+     optionally userData.cgSlot (8 = the per-instance gear colour). Each
+     instance says what it wears with gearCode({helmet: hex, rifle: true}).
+     Register before the first bake; without any, the bake is what it was. */
+  const GEAR = [];
+  const S_GEAR = 8;
   function damp(c, t, r, dt) { return c + (t - c) * (1 - Math.exp(-r * dt)); }
   function slotOf(mesh, region) {
     const nm = mesh.name || "";
@@ -237,12 +245,15 @@
       if (!geo || !geo.attributes || !geo.attributes.position) continue;
       if (!geo.attributes.normal) { geo = geo.clone(); geo.computeVertexNormals(); }
       const P = geo.attributes.position, N = geo.attributes.normal, base = pos.length / 3;
-      const slot = slotOf(m, region);
-      // kit and other vertex-painted hardware: its own colours, per vertex
-      const VC = slot === S_FIXED && mat.vertexColors && geo.attributes.color ? geo.attributes.color : null;
+      // GEAR (see gear()): a part only some people wear carries its class in
+      // the slot's high bits (slot + 16 * class); the colour slot is the low bits
+      const ud = m.userData || {};
+      const slot = (ud.cgSlot != null ? ud.cgSlot : slotOf(m, region)) + 16 * (ud.cgGear | 0);
       let c = mat.color ? mat.color : new THREE.Color(1, 1, 1);
       // a decal's white base colour means "the texture decides": the eye line is dark
-      if (slot === S_FIXED && mat.map && c.r > 0.9 && c.g > 0.9 && c.b > 0.9) c = new THREE.Color(0x2a2220);
+      if ((slot & 15) === S_FIXED && mat.map && c.r > 0.9 && c.g > 0.9 && c.b > 0.9) c = new THREE.Color(0x2a2220);
+      // vertex-painted hardware (entities/combatkit.js's carrier and pads): its own colours
+      const VC = (slot & 15) === S_FIXED && mat.vertexColors && geo.attributes.color ? geo.attributes.color : null;
       for (let v = 0; v < P.count; v++) {
         pos.push(P.getX(v), P.getY(v), P.getZ(v));
         nrm.push(N.getX(v), N.getY(v), N.getZ(v));
@@ -269,7 +280,9 @@
       const B = BODIES[b];
       const ch = CBZ.human.build({ build: B.build, hairStyle: B.hairStyle, longHair: B.longHair,
         skin: 0xc68642, torso: 0x8a939c, collar: 0x8a939c, arms: 0x8a939c, legs: 0x2a3446, hair: 0x2a1d16, shoes: 0x2b2b2b });
-      if (B.kit && CBZ.combatKit) { try { CBZ.combatKit.wear(ch, { loadout: B.kit, nation: B.nation }); } catch (e) {} }
+      // GEAR: a host page's own kit (NPC War's helmet and rifle) hung on the
+      // bake rig, tagged with the class that shows it per instance
+      for (let gi = 0; gi < GEAR.length; gi++) { try { GEAR[gi](ch, B); } catch (e) { BAKE_WHY = "gear: " + (e && e.message); } }
       // visit both tiers first so every mesh either tier draws exists, then list the bones
       if (ch.setHandLod) { ch.setHandLod(2); ch.setHandLod(1); }
       if (CBZ.human.faceLod) CBZ.human.faceLod(ch, false);
@@ -408,6 +421,11 @@
   // walks on along its own velocity (capped at 0.6 s), its legs on its own
   // rate-driven gait. Not in GLSL_SKIN: the atlas bake has no instances.
   const GLSL_VEL = "attribute vec4 iVel;\nvec3 cgBase() { return iPos.xyz + vec3(iVel.x, 0.0, iVel.y) * clamp(uTime - iVel.z, 0.0, 0.6); }";
+  // WHAT THIS PERSON WEARS: iVel.w = gear code (bit 0 helmet, bit 1 rifle, bit 2 kit,
+  // bits 8..15 the helmet's palette index); a part's class is aPart.y / 16
+  const GLSL_GEAR = "bool cgWorn() {\n  float g = floor(aPart.y / 16.0 + 0.001);\n  if (g < 0.5) return true;\n" +
+    "  bool helm = mod(iVel.w, 2.0) > 0.5, gun = mod(floor(iVel.w / 2.0), 2.0) > 0.5;\n" +
+    "  if (g < 1.5) return helm;\n  if (g < 2.5) return gun;\n  if (g < 3.5) return !helm;\n  return mod(floor(iVel.w / 4.0), 2.0) > 0.5;\n}\n";
 
   function capsOk() {
     const R = CBZ.renderer;
@@ -446,21 +464,23 @@
     mat.onBeforeCompile = function (sh) {
       sh.uniforms.uBones = U.uBones; sh.uniforms.uBoneSize = U.uBoneSize; sh.uniforms.uPalette = U.uPalette; sh.uniforms.uTime = U.uTime;
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\n" + GLSL_SKIN + "\n" + GLSL_VEL + "\nattribute vec2 aPart;\nvec3 cgP; vec3 cgN;\n" +
-          "void cgSkin() {\n  float r1, a; float r0 = cgFrame(r1, a); float c = aPart.x * 3.0;\n" +
+        .replace("#include <common>", "#include <common>\n" + GLSL_SKIN + "\n" + GLSL_VEL + "\nattribute vec2 aPart;\nvec3 cgP; vec3 cgN;\n" + GLSL_GEAR +
+          "void cgSkin() {\n" +
+          "  if (!cgWorn()) { cgP = cgBase(); cgN = vec3(0.0, 1.0, 0.0); return; }\n" +
+          "  float r1, a; float r0 = cgFrame(r1, a); float c = aPart.x * 3.0;\n" +
           "  vec4 m0 = mix(cgT(c, r0), cgT(c, r1), a), m1 = mix(cgT(c + 1.0, r0), cgT(c + 1.0, r1), a), m2 = mix(cgT(c + 2.0, r0), cgT(c + 2.0, r1), a);\n" +
           "  vec4 p = vec4(position, 1.0);\n" +
           "  cgP = cgYaw(vec3(dot(m0, p), dot(m1, p), dot(m2, p))) * iLook2.w + cgBase();\n" +
           "  cgN = normalize(cgYaw(vec3(dot(m0.xyz, normal), dot(m1.xyz, normal), dot(m2.xyz, normal))));\n}\n" +
-          "vec3 cgColor() {\n  float s = aPart.y;\n" +
+          "vec3 cgColor() {\n  float s = mod(aPart.y, 16.0);\n" +
           "  if (s < 0.5) return cgPal(iLook.x);\n  if (s < 1.5) return cgPal(iLook.y);\n  if (s < 2.5) return cgPal(iLook.z);\n" +
           "  if (s < 3.5) return cgPal(iLook.w);\n  if (s < 4.5) return cgPal(iLook2.x);\n  if (s < 5.5) return cgPal(iLook2.y);\n" +
-          "  if (s < 6.5) return color;\n  return cgPal(iLook.x) * vec3(0.80, 0.60, 0.58);\n}")
+          "  if (s < 6.5) return color;\n  if (s < 7.5) return cgPal(iLook.x) * vec3(0.80, 0.60, 0.58);\n  return cgPal(floor(iVel.w / 256.0));\n}")
         .replace("#include <color_vertex>", "")
         .replace("#include <beginnormal_vertex>", "cgSkin();\nvColor = cgColor();\nvec3 objectNormal = cgN;")
         .replace("#include <begin_vertex>", "vec3 transformed = cgP;");
     };
-    mat.customProgramCacheKey = function () { return "crowdgpu-mesh-2"; };
+    mat.customProgramCacheKey = function () { return "crowdgpu-mesh-3"; };
     GPU.mat = mat;
     // ---- the impostor material (LOD3)
     const imp = new THREE.MeshLambertMaterial({ color: 0xffffff });
@@ -469,7 +489,7 @@
       sh.uniforms.uBones = U.uBones; sh.uniforms.uBoneSize = U.uBoneSize; sh.uniforms.uPalette = U.uPalette; sh.uniforms.uTime = U.uTime;
       sh.uniforms.uAtlas = U.uAtlas; sh.uniforms.uAtlasCell = U.uAtlasCell;
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\n" + GLSL_SKIN + "\n" + GLSL_VEL + "\nuniform vec4 uAtlasCell;\nvarying vec2 vImUv; varying vec4 vLookA; varying vec2 vLookB;\nvec3 cgP; vec3 cgN;\n" +
+        .replace("#include <common>", "#include <common>\n" + GLSL_SKIN + "\n" + GLSL_VEL + "\nuniform vec4 uAtlasCell;\nvarying vec2 vImUv; varying vec4 vLookA; varying vec2 vLookB; varying float vGear;\nvec3 cgP; vec3 cgN;\n" +
           "void cgBill() {\n" +
           // the camera in this layer's space (modelView is rigid): -R^T t
           "  vec3 t = modelViewMatrix[3].xyz;\n" +
@@ -483,21 +503,22 @@
           "  float col = mod(floor(rel / 6.2831853 * 8.0 + 0.5), 8.0) + iLook2.z * 8.0;\n" +
           "  float n = max(iAnim.y, 1.0); float row = iAnim.x + floor(fract(iAnim.z + uTime * iAnim.w) * n);\n" +
           "  vImUv = vec2((col + position.x + 0.5) * uAtlasCell.x, (row + position.y) * uAtlasCell.y);\n" +
-          "  vLookA = iLook; vLookB = iLook2.xy;\n}")
+          "  vLookA = iLook; vLookB = iLook2.xy; vGear = iVel.w;\n}")
         .replace("#include <beginnormal_vertex>", "cgBill();\nvec3 objectNormal = cgN;")
         .replace("#include <begin_vertex>", "vec3 transformed = cgP;");
       sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\nuniform sampler2D uAtlas; uniform sampler2D uPalette;\nvarying vec2 vImUv; varying vec4 vLookA; varying vec2 vLookB;\n" +
+        .replace("#include <common>", "#include <common>\nuniform sampler2D uAtlas; uniform sampler2D uPalette;\nvarying vec2 vImUv; varying vec4 vLookA; varying vec2 vLookB; varying float vGear;\n" +
           "vec3 cgPalF(float i) { return texture2D(uPalette, vec2((i + 0.5) / 256.0, 0.5)).rgb; }")
         .replace("#include <color_fragment>",
           "vec4 im = texture2D(uAtlas, vImUv);\nif (im.a < 0.5) discard;\n" +
           "float sl = floor(im.r * 7.0 + 0.5);\nvec3 pc = vec3(1.0);\n" +
           "if (sl < 0.5) pc = cgPalF(vLookA.x); else if (sl < 1.5) pc = cgPalF(vLookA.y); else if (sl < 2.5) pc = cgPalF(vLookA.z);\n" +
-          "else if (sl < 3.5) pc = cgPalF(vLookA.w); else if (sl < 4.5) pc = cgPalF(vLookB.x); else if (sl < 5.5) pc = cgPalF(vLookB.y);\n" +
+          "else if (sl < 3.5) pc = mod(vGear, 2.0) > 0.5 ? cgPalF(floor(vGear / 256.0)) : cgPalF(vLookA.w);\n" +
+          "else if (sl < 4.5) pc = cgPalF(vLookB.x); else if (sl < 5.5) pc = cgPalF(vLookB.y);\n" +
           "else if (sl > 6.5) pc = cgPalF(vLookA.x) * vec3(0.80, 0.60, 0.58);\n" +
           "diffuseColor.rgb *= pc * im.g * 1.6;");
     };
-    imp.customProgramCacheKey = function () { return "crowdgpu-imp-2"; };
+    imp.customProgramCacheKey = function () { return "crowdgpu-imp-3"; };
     GPU.impMat = imp;
     // ---- shared base geometry per (body, lod)
     GPU.geos = B.bodies.map(function (bd) {
@@ -536,8 +557,9 @@
         "void main() {\n  float r1, a; float r0 = cgFrame(r1, a); float c = aPart.x * 3.0;\n" +
         "  vec4 m0 = cgT(c, r0), m1 = cgT(c + 1.0, r0), m2 = cgT(c + 2.0, r0);\n  vec4 p = vec4(position, 1.0);\n" +
         "  vec3 wp = vec3(dot(m0, p), dot(m1, p), dot(m2, p));\n" +
+        "  float gc = floor(aPart.y / 16.0 + 0.001); if (gc > 0.5 && gc < 2.5) wp = vec3(0.0);\n" +
         "  vN = normalize(normalMatrix * vec3(dot(m0.xyz, normal), dot(m1.xyz, normal), dot(m2.xyz, normal)));\n" +
-        "  vSlot = aPart.y; vLum = dot(color, vec3(0.3, 0.59, 0.11));\n" +
+        "  vSlot = mod(aPart.y, 16.0); vLum = dot(color, vec3(0.3, 0.59, 0.11));\n" +
         "  gl_Position = projectionMatrix * modelViewMatrix * vec4(wp, 1.0);\n}",
       fragmentShader: "varying float vSlot; varying vec3 vN; varying float vLum;\n" +
         "void main() {\n  vec3 L = normalize(vec3(0.25, 0.75, 0.6));\n" +
@@ -626,7 +648,7 @@
     const cap = Math.max(1, opts.cap | 0 || 256);
     const sx = new Float32Array(cap), sy = new Float32Array(cap), sz = new Float32Array(cap), syaw = new Float32Array(cap);
     const slook = new Int32Array(cap), sclip = new Uint8Array(cap), sph = new Float32Array(cap), srate = new Float32Array(cap), sscale = new Float32Array(cap);
-    const svx = new Float32Array(cap), svz = new Float32Array(cap);
+    const svx = new Float32Array(cap), svz = new Float32Array(cap), sgear = new Float32Array(cap);
     const sbin = new Uint16Array(cap), order = new Int32Array(cap), binCount = new Int32Array(NBIN + 1);
     let n = 0, built = false, group = null, meshes = null, dead = false;
     const L = {
@@ -635,8 +657,9 @@
       begin: function () { n = 0; },
       // scale: optional uniform size (1 = the real body); warlord's map zoom reads it
       // vx, vz: optional velocity (m/s) the GPU carries the body along until the next cut
-      add: function (x, y, z, yaw, lk, clip, phase, rate, scale, vx, vz) {
+      add: function (x, y, z, yaw, lk, clip, phase, rate, scale, vx, vz, gear) {
         if (n >= cap) return -1;
+        sgear[n] = gear || 0;
         sx[n] = x; sy[n] = y; sz[n] = z; syaw[n] = yaw; slook[n] = lk | 0;
         const C = typeof clip === "number" ? CLIPS[clip] : CLIP_IX[clip];
         sclip[n] = C ? C.index : 0; sph[n] = phase || 0; srate[n] = rate || 0; sscale[n] = scale > 0 ? scale : 1;
@@ -653,6 +676,13 @@
         const k = LAYERS.indexOf(L); if (k >= 0) LAYERS.splice(k, 1);
       },
       get root() { return group; },
+    };
+    L.retier = function () {
+      if (!built || !group) return;
+      if (group.parent) group.parent.remove(group);
+      if (meshes) for (let i = 0; i < meshes.length; i++) meshes[i].P.geo.dispose();
+      const k = LAYERS.indexOf(L); if (k >= 0) LAYERS.splice(k, 1);
+      built = false; group = null; meshes = null;
     };
     function build() {
       if (built) return !!group;
@@ -688,7 +718,7 @@
       const ix = lk.ix;
       A.iLook.array[o] = ix[0]; A.iLook.array[o + 1] = ix[1]; A.iLook.array[o + 2] = ix[2]; A.iLook.array[o + 3] = ix[3];
       A.iLook2.array[o] = ix[4]; A.iLook2.array[o + 1] = ix[5]; A.iLook2.array[o + 2] = body; A.iLook2.array[o + 3] = sscale[i];
-      A.iVel.array[o] = svx[i]; A.iVel.array[o + 1] = svz[i]; A.iVel.array[o + 2] = cutT; A.iVel.array[o + 3] = 0;
+      A.iVel.array[o] = svx[i]; A.iVel.array[o + 1] = svz[i]; A.iVel.array[o + 2] = cutT; A.iVel.array[o + 3] = sgear[i];
     }
     let cutT = 0;
     // cam: optional THREE camera or {x,y,z, fx,fz} in WORLD space; defaults to CBZ.camera
@@ -781,8 +811,6 @@
   function dressRig(ch, id) {
     const lk = LOOKS[id]; if (!ch || !lk) return false;
     try { if (CBZ.human && CBZ.human.dress) CBZ.human.dress(ch, { torso: lk.shirt, collar: lk.shirt, arms: lk.shirt, legs: lk.pants, shoes: lk.shoes }); } catch (e) {}
-    // a soldier walks up in his kit and his army's camouflage
-    if (BODIES[lk.body].kit && CBZ.combatKit) { try { CBZ.combatKit.wear(ch, { loadout: lk.loadout || BODIES[lk.body].kit, nation: lk.nation || BODIES[lk.body].nation }); } catch (e) {} }
     const R = CBZ.human && CBZ.human.regions ? CBZ.human.regions(ch) : null;
     if (R && CBZ.paintMesh) {
       const paint = function (list, hex) { if (list) for (let i = 0; i < list.length; i++) if (list[i]) CBZ.paintMesh(list[i], hex); };
@@ -804,11 +832,25 @@
       return { id: c.id, index: c.index, n: c.n, period: c.period, radPerM: c.radPerM, phase0: c.phase0, speed: c.speed || 0 };
     },
     look: look,
-    lookOf: function (id) { const l = LOOKS[id]; return l ? { soldier: !!BODIES[l.body].kit, loadout: l.loadout, nation: l.nation, build: BODIES[l.body].build, skin: l.skin, shirt: l.shirt, pants: l.pants, hair: l.hair, shoes: l.shoes, sleeve: l.sleeve } : null; },
+    lookOf: function (id) { const l = LOOKS[id]; return l ? { build: BODIES[l.body].build, skin: l.skin, shirt: l.shirt, pants: l.pants, hair: l.hair, shoes: l.shoes, sleeve: l.sleeve } : null; },
     layer: layer,
     rigOpts: rigOpts,
     dressRig: dressRig,
     tier: function () { return Object.assign({ device: DEVICE }, TIER); },
+    // the LOD bands and caps, live (a settings panel): every layer rebuilds
+    // its meshes at the new caps on its next commit
+    setTier: function (o) {
+      let ch = false;
+      for (const k of ["d1", "d2", "cap1", "cap2"]) if (o && o[k] != null && TIER[k] !== +o[k]) { TIER[k] = +o[k]; ch = true; }
+      if (ch) LAYERS.slice().forEach(function (L) { if (L.retier) L.retier(); });
+      return Object.assign({}, TIER);
+    },
+    gear: function (fn) { if (typeof fn === "function" && GEAR.indexOf(fn) < 0) GEAR.push(fn); return !BAKE; },
+    // what one person wears, for layer.add's last argument
+    gearCode: function (o) {
+      if (!o) return 0;
+      return (o.helmet != null ? 1 : 0) + (o.rifle ? 2 : 0) + (o.kit ? 4 : 0) + (o.helmet != null ? 256 * palIndex(o.helmet) : 0);
+    },
     // the GPU clock (s) the shaders animate on: a caller that hands a moving
     // body's gait phase "as of now" converts it with this
     now: clockNow,
@@ -816,7 +858,7 @@
       const drawn = [0, 0, 0, 0];
       for (let i = 0; i < LAYERS.length; i++) for (let k = 1; k < 4; k++) drawn[k] += LAYERS[i].drawn[k];
       return {
-        ok: GPU.ok, why: GPU.why, layers: LAYERS.length, looks: LOOKS.length, palette: palHex.length,
+        ok: GPU.ok, why: GPU.why || BAKE_WHY, layers: LAYERS.length, looks: LOOKS.length, palette: palHex.length, gear: GEAR.length,
         bakeMs: BAKE ? BAKE.ms : null, atlas: !!GPU.atlas, layout: layout(),
         verts: BAKE ? BAKE.bodies.map(function (b) { return [b.lod[0].verts, b.lod[1].verts]; }) : null,
         lod1: drawn[1], lod2: drawn[2], lod3: drawn[3],

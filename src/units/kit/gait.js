@@ -37,6 +37,7 @@
        trans: [ [lo, hi], ... ]   one per gap: gait i -> i+1 between lo*sqrt(K)
                                   and hi*sqrt(K) m/s (smoothstep)
        fMax, f0, fV               cadence f = min(fMax/k, (f0 + fV*|v|/K)/k), k = sqrt(K)
+       fOf(v, K)   (optional)     a cadence curve that replaces the line above (felid.js)
        strideMax                  stride capped at strideMax * legLen (cadence rises)
        vMove, turnMove            moving when |v| > vMove or |turn| > turnMove
        turnF                      on-the-spot turning cadence (/ sqrt(K))
@@ -140,7 +141,10 @@
     for (let i = 0; i < n; i++) { duty += w[i] * gs[i].duty; if (gs[i].key) out[gs[i].key] = w[i]; }
     out.duty = duty;
     for (let j = 0; j < nf; j++) { let o = 0; for (let i = 0; i < n; i++) o += w[i] * gs[i].off[j]; out.off[j] = o; }
-    let f = Math.min(T.fMax / k, (T.f0 + T.fV * av / K) / k);
+    // fOf(v, K) (optional): the table's own cadence curve, for an animal whose
+    // stride frequency is not linear in speed (a cheetah gallops at ~2.3 Hz at
+    // 6 m/s and only ~3 Hz at 25 m/s). Absent = the linear rule, unchanged.
+    let f = T.fOf ? T.fOf(av, K) : Math.min(T.fMax / k, (T.f0 + T.fV * av / K) / k);
     const sMax = T.strideMax * (legLen || 0.4);
     if (av > 0 && out.duty * av / f > sMax) f = out.duty * av / sMax;
     out.f = f;

@@ -72,7 +72,12 @@ change it only in coordination.
 | `src/battle/core/series.js` | `CBZ.battleSeries`: best of 1/3/5/7 | core |
 | `src/battle/core/host.js` | `CBZ.battleHost`: the host interface (§8) | core |
 | `src/battle/core/store.js` | `CBZ.battleStore`: the unit store, typed arrays, one row per unit (§9) | performance / scale |
-| `src/battle/core/lod.js` | `CBZ.battleLod`: tier rules and budgets (§9) | performance / scale |
+| `src/battle/core/lod.js` | `CBZ.battleLod`: tier rules, budgets, the squad scheduler (§9) | performance / scale |
+| `src/battle/core/tiersim.js` | `CBZ.battleTierSim`: the MID and FAR sims (§9) | performance / scale (brains: AI hooks) |
+| `src/battle/core/flow.js` | `CBZ.battleFlow`: the one flow-field solver | physics / scale |
+| `src/battle/core/simworker.js`, `simlink.js` | the sim worker and the page's end of it (§9) | performance / scale |
+| `src/battle/mass.js`, `massdraw.js` | tiered battles: rows, ghosts, promotion, the crowd draw (§9) | performance / scale |
+| `src/battle/settingspanel.js` | `SETTINGS`: the settings panel and AUTO quality (§9) | performance / scale |
 
 ### The units
 | file | what | owner |
@@ -83,7 +88,8 @@ change it only in coordination.
 | `src/units/vehicles/<id>.js` | **one per vehicle**: stats, armour, crew, weapons, body, drive | that vehicle's agent |
 | `src/units/kit/loft.js` | `CBZ.loftKit`: lofted, vertex-coloured, skinned shells | animal agents (coordinate) |
 | `src/units/kit/quadrig.js` | `CBZ.quadRig`: quadruped skeleton, bind points, 2-bone IK, leg posing | animal agents (coordinate) |
-| `src/units/kit/gait.js` | `CBZ.quadGait`: planted-foot gait solver, footfall tables | animal agents (coordinate) |
+| `src/units/kit/gait.js` | `CBZ.quadGait`: planted-foot gait solver, footfall tables (a table may carry its own cadence curve `fOf(v, K)`) | animal agents (coordinate) |
+| `src/units/kit/felid.js` | `CBZ.felidKit.hooks(spec)`: one cat engine (lofted body + pattern shader, rotary gallop with a flexing spine, stalk/sprint/leap brain, trip/throat/pin/nape/grapple fight, ragdoll markers, takeover moves). The cheetah and snow leopard files are pure data on it; any cat can be | cheetah / snow leopard agent (coordinate) |
 | `src/units/kit/vehicle.js` | vehicle drive / turret / armour / crew helpers | vehicle agents (coordinate) |
 | `src/units/kit/moves.js` | `CBZ.unitMoves`: what a possessed animal does on ATTACK (the `moves` hook) | player control (species files override) |
 
@@ -569,34 +575,76 @@ director hooks in `scoring.js`).
 
 ## 9. Scale: 100,000 a side
 
-The goal is 100k men against 100k men without losing quality, logic or looks. The design, and
-what is live today:
+The goal is 100k men against 100k men without losing quality, logic or looks. It is built
+(branch npcwar-scale). A battle no bigger than the FULL cap is all FULL and never enters any of
+this: it is exactly the page it was.
 
-- **Every unit is a row** in `CBZ.battleStore` (`core/store.js`): typed arrays (side, kind,
-  tier, life, x y z heading vx vz hp maxHp morale, squad, crowdRow, unit). They grow by
-  doubling. Today every unit object gets its row at spawn (`m.row`), and `updateCOM` syncs the
-  rows on its 0.6 s tick. Rendering far crowds goes through `entities/crowdstore.js`'s own rows
-  (`crowdRow` links them), not a second render store.
-- **Three tiers** (`core/lod.js`):
-  - **FULL** is a full rig and the full brain: near the lens or the player, the lens subject, the
-    player's target, anything in melee with a FULL unit, anything just hit near the lens, and the
-    crew of a FULL vehicle.
-  - **MID** is a cheaper but faithful individual sim: the same rules on a coarser tick.
-  - **FAR** is a squad/formation sim over the store's columns, held to statistical equivalence
-    (same winner in at least 90% of seeds, loser casualties within 15 points, time to decision
-    within 25%, the same morale break order) by a node check the scale agent writes. It is drawn
-    through `entities/crowdgpu.js` (the real CBZ.human, GPU-instanced with baked animation, the
-    `gta6-no-fake-crowds` rule), with impostors beyond that. There are never box stand-ins.
-- **Promotion and demotion** use distance hysteresis (`HYSTERESIS`) and a `DEMOTE_S` hold. A
-  tier change is a change of the `tier` column, not a new object.
-- **Budgets**: `BUDGET.think` (seconds between decisions per tier), `BUDGET.frameMs` (the
-  time-slice each tier may spend), and `BUDGET.worker`. The FAR squad sim is pure numbers over
-  transferable typed arrays, which is the Web Worker boundary.
-- **Live today**: `animEvery(d2)` is the render LOD (1/2/4 frames at 70/150 m), the same
-  numbers `frame()` always used, now read from the one table. Spatial hashing exists in
-  `physics.js` (`rebuildGrid` / `rebuildFine`).
-- **Not done yet** (the scale agent's job): the MID and FAR sims, the tier scheduler, the
-  crowdgpu path for battle units, the worker, and the equivalence check.
+**The files**
+
+| file | what |
+|---|---|
+| `core/store.js` | `CBZ.battleStore`: one row per unit, typed columns; `S.col()` adds a tier's columns; SharedArrayBuffer-backed when the page is cross-origin isolated |
+| `core/lod.js` | `CBZ.battleLod`: tier rules, caps per device, budgets, and `schedule()` (per squad, nearest first, hysteresis + `DEMOTE_S` hold) |
+| `core/tiersim.js` | `CBZ.battleTierSim`: the MID and FAR sims (page-free; runs in the page, in node, in the worker) |
+| `core/flow.js` | `CBZ.battleFlow`: the one Dial flow-field solver (physics.js `navSolve` and the tier sim both call it) |
+| `core/simworker.js` / `core/simlink.js` | the Web Worker and the page's end of it |
+| `src/battle/mass.js` | the host half: spawns rows, keeps FULL rows current, runs the tiers, ghosts, promotion/demotion, blasts on rows |
+| `src/battle/massdraw.js` | every non-FULL man through `entities/crowdgpu.js` (near / far / dead layers) |
+| `src/battle/settingspanel.js` | `SETTINGS`: the panel, device defaults, AUTO quality |
+
+**The tiers.** Decided per squad (ten men), so a squad never straddles two brains.
+- **FULL**: a real `makeMan` / `makeBeast` object and the page's own brain. Rigs are built inside
+  a per-frame budget (`MASS.promoteMs`), hidden, and the whole squad flips on one frame.
+- **MID** (`tiersim` thinkMid): the page's rules on rows: combat_iq's fire gate (reaction beat, aim
+  settle, burst rhythm, derived damage, hit chance, the running-target and suppression penalties;
+  every profile comes from `CBZ.combatIQ.profile()`), the fire token (2 or 3 guns on a mark),
+  bearing slots, the band, the lane rule, the LOS check at every trigger pull, hull-down on the
+  dunes, stance, the hold, the hunt, the pursuit, morale (brain.js's constants and per-man formula;
+  the ARMY is stepped once by the host over every row), rout, cornered, rally, flight. Walked on a
+  0.1 s slice; a think on the page's own cadence.
+- **FAR** (`tiersim` thinkSquad / updFarMan): the squad's senior man looks for the war (one search
+  per squad per second); until it has contact the squad is a march column visited at the march
+  tick (1 s; the renderer carries each man along his velocity). With contact every man takes his
+  own mark, token, line (on a slower clock), rhythm, magazine, nerve and wounds, on a 0.25 s slice.
+- Shots from both tiers are resolved in a batch at the end of the step. Target search walks a
+  dense per-side grid (only the enemy's rows); separation, the lane and the anti-clump use a
+  hashed 2.4 m body grid of the rows that are doing something.
+- **Seams.** A FULL brain's `pickTarget` also gets rows (`MASS.cands`) as **ghosts**: plain objects
+  with the fields the fire path reads, synced every frame; `hurtMan` on a ghost lands on the row.
+  The tier sim's rounds on a FULL row come back as events and go through `hurtMan`. Kills, the
+  morale shock, the near-miss rattle, tracers and the director's `shotsRing` all follow.
+- **Hooks for the AI agent**: `MASS.T.brain.mid` / `.far` replace a tier's think
+  (`fn(T, row, now, dt)`), `BUDGET` (core/lod.js) sets each tier's tick and milliseconds.
+
+**The proof** (`node tools/npcwar-fidelity.mjs [seeds] [case]`): the same engagement fought by
+the FULL page and with every squad forced MID, FAR, and MIXED (a FULL ring round the lens, MID
+round that, FAR beyond), over N seeds: the winner share within binomial noise, the loser's losses
+within 15 points, the time to decision within 25%. `tools/npcwar-worker-check.mjs` runs the
+worker on a real thread in both modes. `tools/npcwar-scale-bench.mjs` measures 1k/10k/100k a side.
+
+**The worker.** MID + FAR + the grids + the hit batch run in `core/simworker.js` whenever the
+page can host a Worker (not under `?probe`/`?auto` tools unless `?worker=1`). Cross-origin
+isolated: the store is shared. GitHub Pages cannot send COOP/COEP, so the shipped path is
+**transfer**: the worker owns its copy, the page sends the FULL rows each step, the worker sends a
+packed snapshot of every row (ping-ponged transferables, 15 Hz) and the full state of rows the
+page is about to promote. A worker that dies hands the tiers back to the page.
+
+**The drawing.** Every non-FULL man is the real `CBZ.human` through crowdgpu: his skin and hair are
+studio.cast's heritage roll for his role and variant, his uniform men.js's `uniformFor`, and the
+rig's own kit is baked in (`CBZ.crowdGPU.gear()`: men.js's helmet dome, actorweapons' rifle, shown
+per instance by `gearCode`). Clips by speed (rifleIdle / rifleWalk / rifleRun / crouchRun / down);
+the gait phase is handed to the rig's phase at promotion and back at demotion. Impostors only
+past the quality preset's `d2`. Known gaps: one baked rifle (the side's first issue) for the
+crowd, the helmet sits on uncompressed hair, beasts and vehicles have no instanced body yet
+(beast rows are simulated by the MID/FAR melee brain and drawn only once promoted; vehicles and
+their crews are always FULL).
+
+**Settings** (`SETTINGS`, saved as `cbz-npcwar-settings`): army cap, full bodies, near and mid
+range, mid brains, quality (crowd LOD bands/caps, far re-cut, pixel ceiling), shadows
+(off/near/all), draw distance, auto quality (gives back draw distance, the far re-cut, impostor
+range, MID brains, MID range, and the full rigs last). The render scale never drops below one
+pixel per CSS pixel. URL keys win for tools: `?tier=full|mid|far ?fullcap ?midcap ?fullr ?midr
+?worker=0|1`.
 
 ---
 
@@ -724,6 +772,9 @@ node tools/npcwar-headless.mjs     the page's own sim in node: war room, hold, t
                                    series + URL.   node tools/npcwar-headless.mjs 3  runs one.
 node tools/units-kit-check.mjs     the animal kit: planted feet never slide; the dog bit for bit.
 node tools/combatkit-check.mjs     soldier kit fit (every body, every loadout, every carry) + armour rules.
+node tools/npcwar-fidelity.mjs     the tiers fight the page's war (see 9)
+node tools/npcwar-worker-check.mjs the sim worker, both modes
+node tools/npcwar-scale-bench.mjs  1k / 10k / 100k a side, ms per tier
 node tools/front-sim.mjs           the city's front resolver (frontline.js) it is calibrated to.
 node tools/ballistics-check.mjs    the weapon table, and flight / penetration / wounds vs published figures.
 ```

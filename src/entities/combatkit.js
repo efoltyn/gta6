@@ -1066,6 +1066,6 @@
     nation: nation, roleFor: roleFor,
     wear: wear, strip: strip, lod: lod, sling: sling,
     geometry: geometry, kneeGeometry: kneeGeometry, bandGeometry: bandGeometry,
-    material: material, camoMaterial: camoMaterial, crowdLook: crowdLook,
+    material: material, camoMaterial: camoMaterial, crowdLook: crowdLook, lin: lin,
   };
 })();
