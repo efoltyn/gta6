@@ -147,6 +147,11 @@
   const BODIES = [
     { build: "m", hairStyle: "short", longHair: false },
     { build: "f", hairStyle: "long", longHair: true },
+    // THE SOLDIER (entities/combatkit.js): the male body in a rifleman's kit,
+    // plate carrier, helmet, knee pads and boots baked into the mesh (the kit
+    // is FIXED-colour vertex paint; the uniform rides the shirt/pants slots,
+    // a look's mean camouflage colour). look({ soldier: true, ... }).
+    { build: "m", hairStyle: "short", longHair: false, kit: "rifleman", nation: "republic" },
   ];
   const SEAT = { cushion: 0.45, floorBelow: 0.45 };   // the seated clips' chair (arena seats read the same kit number)
   // palette slots (aPart.y)
@@ -181,15 +186,16 @@
   const LOOKS = [], LOOK_IX = new Map();
   function look(o) {
     o = o || {};
-    const body = o.build === "f" ? 1 : 0;
+    const body = o.soldier ? 2 : (o.build === "f" ? 1 : 0);
     const skin = o.skin != null ? o.skin : 0xc68642;
     const shirt = o.shirt != null ? o.shirt : 0x444a52;
     const rec = {
       body: body, skin: skin, shirt: shirt, pants: o.pants != null ? o.pants : 0x2a3446,
       hair: o.hair != null ? o.hair : 0x2a1d16, shoes: o.shoes != null ? o.shoes : 0x2b2b2b,
       sleeve: o.sleeve != null ? o.sleeve : shirt,
+      loadout: o.loadout || null, nation: o.nation || null,
     };
-    const key = body + "|" + rec.skin + "|" + rec.shirt + "|" + rec.pants + "|" + rec.hair + "|" + rec.shoes + "|" + rec.sleeve;
+    const key = body + "|" + (rec.loadout || "") + "|" + (rec.nation || "") + "|" + rec.skin + "|" + rec.shirt + "|" + rec.pants + "|" + rec.hair + "|" + rec.shoes + "|" + rec.sleeve;
     let id = LOOK_IX.get(key);
     if (id != null) return id;
     rec.ix = [palIndex(rec.skin), palIndex(rec.shirt), palIndex(rec.pants), palIndex(rec.hair), palIndex(rec.shoes), palIndex(rec.sleeve)];
@@ -232,13 +238,15 @@
       if (!geo.attributes.normal) { geo = geo.clone(); geo.computeVertexNormals(); }
       const P = geo.attributes.position, N = geo.attributes.normal, base = pos.length / 3;
       const slot = slotOf(m, region);
+      // kit and other vertex-painted hardware: its own colours, per vertex
+      const VC = slot === S_FIXED && mat.vertexColors && geo.attributes.color ? geo.attributes.color : null;
       let c = mat.color ? mat.color : new THREE.Color(1, 1, 1);
       // a decal's white base colour means "the texture decides": the eye line is dark
       if (slot === S_FIXED && mat.map && c.r > 0.9 && c.g > 0.9 && c.b > 0.9) c = new THREE.Color(0x2a2220);
       for (let v = 0; v < P.count; v++) {
         pos.push(P.getX(v), P.getY(v), P.getZ(v));
         nrm.push(N.getX(v), N.getY(v), N.getZ(v));
-        col.push(c.r, c.g, c.b);
+        if (VC) col.push(VC.getX(v), VC.getY(v), VC.getZ(v)); else col.push(c.r, c.g, c.b);
         part.push(b, slot);
       }
       if (geo.index) { const I = geo.index; for (let k = 0; k < I.count; k++) idx.push(base + I.getX(k)); }
@@ -261,6 +269,7 @@
       const B = BODIES[b];
       const ch = CBZ.human.build({ build: B.build, hairStyle: B.hairStyle, longHair: B.longHair,
         skin: 0xc68642, torso: 0x8a939c, collar: 0x8a939c, arms: 0x8a939c, legs: 0x2a3446, hair: 0x2a1d16, shoes: 0x2b2b2b });
+      if (B.kit && CBZ.combatKit) { try { CBZ.combatKit.wear(ch, { loadout: B.kit, nation: B.nation }); } catch (e) {} }
       // visit both tiers first so every mesh either tier draws exists, then list the bones
       if (ch.setHandLod) { ch.setHandLod(2); ch.setHandLod(1); }
       if (CBZ.human.faceLod) CBZ.human.faceLod(ch, false);
@@ -772,6 +781,8 @@
   function dressRig(ch, id) {
     const lk = LOOKS[id]; if (!ch || !lk) return false;
     try { if (CBZ.human && CBZ.human.dress) CBZ.human.dress(ch, { torso: lk.shirt, collar: lk.shirt, arms: lk.shirt, legs: lk.pants, shoes: lk.shoes }); } catch (e) {}
+    // a soldier walks up in his kit and his army's camouflage
+    if (BODIES[lk.body].kit && CBZ.combatKit) { try { CBZ.combatKit.wear(ch, { loadout: lk.loadout || BODIES[lk.body].kit, nation: lk.nation || BODIES[lk.body].nation }); } catch (e) {} }
     const R = CBZ.human && CBZ.human.regions ? CBZ.human.regions(ch) : null;
     if (R && CBZ.paintMesh) {
       const paint = function (list, hex) { if (list) for (let i = 0; i < list.length; i++) if (list[i]) CBZ.paintMesh(list[i], hex); };
@@ -793,7 +804,7 @@
       return { id: c.id, index: c.index, n: c.n, period: c.period, radPerM: c.radPerM, phase0: c.phase0, speed: c.speed || 0 };
     },
     look: look,
-    lookOf: function (id) { const l = LOOKS[id]; return l ? { build: BODIES[l.body].build, skin: l.skin, shirt: l.shirt, pants: l.pants, hair: l.hair, shoes: l.shoes, sleeve: l.sleeve } : null; },
+    lookOf: function (id) { const l = LOOKS[id]; return l ? { soldier: !!BODIES[l.body].kit, loadout: l.loadout, nation: l.nation, build: BODIES[l.body].build, skin: l.skin, shirt: l.shirt, pants: l.pants, hair: l.hair, shoes: l.shoes, sleeve: l.sleeve } : null; },
     layer: layer,
     rigOpts: rigOpts,
     dressRig: dressRig,

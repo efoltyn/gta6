@@ -135,6 +135,9 @@ function stepMan(m, sdt) {
       // band at all — it runs them down. This rule is what ENDS a battle.
       if (m.hunt && tdist < 999) spd = Math.max(spd, 8.0);
     }
+    // the kit weighs (a plate carrier is 12 kg) and a man winded by a round
+    // into his plate walks it off (systems/armour.js, damage.js armourHit)
+    if (!m.beast) spd *= (m.kitSpeed || 1) * (m.windedT > 0 ? 0.5 : 1);
     let nx = dx / d, nz = dz / d;
     if (m.detourT > 0) {
       m.detourT -= sdt;
@@ -169,6 +172,7 @@ function stepMan(m, sdt) {
     }
   }
   m.speed = spd;
+  if (m.windedT > 0) m.windedT -= sdt;
   if (MAP.water) stepDepth(m, sdt);
   m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
 

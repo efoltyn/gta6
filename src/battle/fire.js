@@ -94,6 +94,9 @@ function camDist2(p) {
   return (p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y) + (p.z - c.z) * (p.z - c.z);
 }
 let fxBudget = 0;              // tracers drawn this frame — a salvo cannot flood it
+// where on a standing man (m above his feet) each systems/armour.js zone is
+const ZONE_Y = { skull: 1.68, face: 1.58, neck: 1.48, thorax: 1.33, abdomen: 1.1, side: 1.2, armpit: 1.3,
+  pelvis: 0.95, upperArm: 1.28, forearm: 1.02, thigh: 0.7, shin: 0.36 };
 function fireShot(m, tgt, r) {
   const w = CBZ.weaponById(m.wid);
   m.mag--; m.lastShotT = simT;
@@ -175,12 +178,20 @@ function fireShot(m, tgt, r) {
   if (hit) {
     stats[m.team].hits++;
     m.hitsF++; gunLedger(m.wid).hits++;
-    if (CBZ.bodyWound && cd2 < 90 * 90 && !tgt.vehicle) { try { CBZ.bodyWound(tgt, _v, {}); } catch (e) {} }
     // combat_iq's ladder is authored for fights against the PLAYER, whose
     // fairness cap this page has no player to need. Army-on-army trades at
     // band edge under mutual suppression, so battles read livelier a step
     // hotter — a page rule, applied where damage lands, never inside the IQ.
-    hurtMan(tgt, r.dmg * 1.45 * (head ? 2.2 : 1), { by: m, headshot: head });
+    // The head and the body zones (and what his kit stops) are systems/
+    // armour.js's, through hurtMan; the wound goes where the round landed.
+    const res = hurtMan(tgt, r.dmg * 1.45, { by: m, headshot: head, wid: m.wid, kind: "bullet" });
+    if (cd2 < 90 * 90 && !tgt.vehicle) {
+      if (res && res.zone && ZONE_Y[res.zone] != null) _v.y = tgt.pos.y + ZONE_Y[res.zone] * (tgt.headY || 1.62) / 1.62;
+      if (res && res.stopped) {
+        // the plate or the helmet took it: a spark and a puff of cordura, no blood
+        if (CBZ.bulletImpact) { try { CBZ.bulletImpact(_v, { x: m.pos.x - tgt.pos.x, y: 0.3, z: m.pos.z - tgt.pos.z }, { kind: "spark", power: res.deflect ? 0.9 : 0.5 }); } catch (e) {} }
+      } else if (CBZ.bodyWound) { try { CBZ.bodyWound(tgt, _v, {}); } catch (e) {} }
+    }
   }
 }
 // where did the miss land: walk the line for the first collider, else the

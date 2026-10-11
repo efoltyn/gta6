@@ -3656,8 +3656,22 @@
         a.group && a.group.visible !== false && bodyRegionAt(a, hit.point) === "limb") {
       locMult = LIMB_DMG_MULT;
     }
-    const dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall * locMult));
-    const lethalHead = hit.head && !w.nonlethal;
+    let dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall * locMult));
+    let lethalHead = hit.head && !w.nonlethal;
+    /* A SOLDIER'S KIT (entities/combatkit.js) is armour: systems/armour.js
+       decides whether his helmet or plate stopped this round (raw: this
+       hitscan already priced the head and the limbs). A limb has no plate. */
+    const kitArm = a.char && a.char._combatKit && a.char._combatKit.armour;
+    if (kitArm && CBZ.armour && !w.nonlethal && locMult >= 1) {
+      const ar = CBZ.armour.resolve({ armour: kitArm, dmg: dmg, raw: true, kind: "bullet", wid: w.key,
+        region: hit.head ? "head" : "torso", headshot: !!hit.head,
+        dirX: shotDir ? shotDir.x : undefined, dirZ: shotDir ? shotDir.z : undefined, yaw: a.group ? a.group.rotation.y : 0 });
+      dmg = Math.max(1, Math.round(ar.dmg));
+      if (ar.stopped) {
+        lethalHead = false;
+        if (CBZ.bulletImpact && hit.point) { try { CBZ.bulletImpact(hit.point, { x: -(shotDir ? shotDir.x : 0), y: 0.3, z: -(shotDir ? shotDir.z : 0) }, { kind: "spark", power: 0.6 }); } catch (e) {} }
+      }
+    }
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
     const cal = caliber(w);
     const dir = shotDir ? { x: shotDir.x, y: shotDir.y, z: shotDir.z } : null;

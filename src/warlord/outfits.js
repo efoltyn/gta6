@@ -1262,14 +1262,14 @@
   }
 
   /* The arms carried clear of a carrier `halfW` wide spanning chest-local
-     [yBot, yTop]: city/armor.js's measured solver (CBZ.cityArmorArmClear),
+     [yBot, yTop]: city/armor.js's measured solver (CBZ.humanArmClear),
      asked by name; the rig's own idle carry comes back when the armour does. */
   function armsClear(ch, halfW, chest, yTop, yBot) {
     if (!ch || !ch.profile) return;
     if (ch._wlArmBase == null) ch._wlArmBase = ch.armOutZ != null ? ch.armOutZ : ch.profile.armOutZ;
-    if (!CBZ.cityArmorArmClear || !chest) return;
+    if (!CBZ.humanArmClear || !chest) return;
     const cy = chest.position ? chest.position.y : 0;
-    const a = CBZ.cityArmorArmClear(ch, halfW, cy + yTop, cy + yBot, (clearOf() || 0.01) + 0.005);
+    const a = CBZ.humanArmClear(ch, halfW, cy + yTop, cy + yBot, (clearOf() || 0.01) + 0.005);
     if (a != null) ch.armOutZ = Math.max(ch._wlArmBase, a);
     ch.armWear = Math.max(0, ch.armOutZ - ch._wlArmBase);   // the seated pose adds it too
   }
