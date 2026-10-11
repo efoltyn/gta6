@@ -100,13 +100,13 @@
     m35_truck: V("M35 cargo truck", "M35 cargo trucks", "ground", ["units/kit/hull.js"]),
     m270_mlrs: V("M142 HIMARS", "M142 HIMARS launchers", "ground", ["city/mil_armor.js"]),   // the id keeps the census name; the model is the wheeled six-round pod
     patriot_launcher: V("Patriot launcher", "Patriot launchers", "ground", ["city/mil_armor.js"]),
-    technical: V("technical", "technicals", "ground", []),
+    technical: V("technical", "technicals", "ground", ["units/kit/hull.js"]),
     ah64_apache: V("AH-64 Apache", "AH-64 Apaches", "air", ["city/mil_air.js"]),
     uh60_black_hawk: V("UH-60 Black Hawk", "UH-60 Black Hawks", "air", ["city/mil_air.js"]),
     f35: V("F-35", "F-35s", "air", ["city/mil_air.js"]),
     mq9_reaper: V("MQ-9 Reaper", "MQ-9 Reapers", "air", ["city/mil_air.js"]),
     b52: V("B-52", "B-52s", "air", ["city/mil_air.js"]),
-    b2_spirit: V("B-2 Spirit", "B-2 Spirits", "air", ["city/strategic.js"]),
+    b2_spirit: V("B-2 Spirit", "B-2 Spirits", "air", []),            // draws itself (units/vehicles/b2_spirit.js)
     a400m: V("A400M", "A400Ms", "air", ["city/mil_air.js", "city/mil_armor.js", "city/island_military.js"]),
   };
   // a vehicle row: `domain` ground|air, `needs` engine files its build uses.
