@@ -400,8 +400,8 @@
     for (let s = -1; s <= 1; s += 2) {
       const eb = s < 0 ? BN.earL : BN.earR, E = D.earP, L = 0.25 * K * hs, st = [];
       for (let i = 0; i <= 5; i++) {
-        const t = i / 5, rr = (0.042 + 0.022 * Math.sin(PI * Math.min(1, t * 1.25))) * K * hs;
-        st.push({ x: E.x + 0.04 * K * t, y: E.y + L * t, z: s * (E.z + 0.06 * K * t), rt: rr, rb: rr * 0.85, w: rr * 0.8, wts: [eb, 1], t: t });
+        const t = i / 5, rr = (0.04 + 0.026 * Math.sin(PI * t)) * (1 - 0.5 * t * t) * K * hs;
+        st.push({ x: E.x + 0.04 * K * t, y: E.y + L * t, z: s * (E.z + 0.06 * K * t), rt: rr, rb: rr * 0.85, w: rr * 0.68, wts: [eb, 1], t: t });
       }
       // ring "up" for a vertical tube is +X (forward): the inner colour sits on the forward face
       LK.loft(G, st, 10, C("ear"), { capLen: 0.4, side: [0, 0, 1] });
@@ -652,7 +652,8 @@
     cap *= (0.55 + 0.45 * Math.sqrt(hpK)) * (1 - 0.3 * st.limp) * (m._sizeMul ? Math.pow(m._sizeMul, 0.25) : 1);
     if (D.cls === "young") cap *= 0.94;
     const t = m.tgt, flee = m.state === "flee" || m.slot === "fallback" || m.routed;
-    if (st.display > 0) cap = 0.35;
+    if (m.you) st.display = 0;
+    else if (st.display > 0) cap = 0.35;
     else if (t && !t.dead && !st.noticed && !flee) cap = REAL.walk + 0.3;      // it walks toward what it smells
     if (fightOwns(R)) {
       // fight() moved it with the same limits: just measure
@@ -1042,7 +1043,9 @@
     o = o || {};
     const now = nowMs();
     let F = R.f;
-    if (!F) F = R.f = { at: -1e9, mode: "close", v: 0, passed: false, hit: false, cool: 0.3, hooks: 0, back: 0, atk: null, atkT: 0, atkDur: 1, side: 1, struck: false, tgt: null };
+    if (!F) F = R.f = { at: -1e9, mode: "close", v: 0, passed: false, hit: false, cool: 0.3, hooks: 0, back: 0, atk: null, atkT: 0, atkDur: 1, side: 1, struck: false, tgt: null, you: null };
+    if (o.youMove) return youFight(m, tgt, dt, o, R, F, now);
+    F.you = null;
     // a fresh entry into the bubble: arrive with the body's own speed
     if (now - F.at > 260 || F.tgt !== tgt) {
       F.v = R.st.spd; F.mode = F.v > 3.2 ? "charge" : "close"; F.passed = false; F.hit = false;
@@ -1146,10 +1149,72 @@
     return RES;
   }
 
+  /* A PLAYER'S RHINO (src/battle/player.js): the possessed driver latched a
+     move (m._atkAnim = 0, opts.youMove) and carries the body in on a ram's
+     leap; this plays it as the rhino plays it and runs _atkAnim to the end. */
+  function youFight(m, tgt, dt, o, R, F, now) {
+    const mv = o.youMove;
+    F.at = now;
+    if (F.you !== mv || m._atkAnim === 0) {
+      F.you = mv;
+      const dx = tgt.pos.x - m.pos.x, dz = tgt.pos.z - m.pos.z, h = m.heading || 0;
+      const lat = -dx * Math.sin(h) + dz * Math.cos(h);
+      const kind = mv.id === "trample" ? "trample" : (mv.id === "ram" ? "gore" : (mv.id === "shove" ? "shove" : "hook"));
+      startAtk(F, kind, mv.dur > 0 ? mv.dur : (kind === "gore" ? 0.6 : 0.85), lat >= 0 ? 1 : -1);
+      F.mode = "close";
+    }
+    const dx = tgt.pos.x - m.pos.x, dz = tgt.pos.z - m.pos.z, dist = Math.hypot(dx, dz) || 1e-3;
+    const want = Math.atan2(dz, dx);
+    if (F.atk !== "gore") faceToward(m, want, REAL.pivot, dt);
+    else faceToward(m, want, REAL.pivot * 0.5, dt);
+    F.atkT += dt;
+    const p = F.atkT / F.atkDur, h = m.heading || 0, fx = Math.cos(h), fz = Math.sin(h);
+    const strikeAt = F.atk === "hook" ? 0.47 : (F.atk === "trample" ? 0.55 : 0.4);
+    if (!F.struck && p >= strikeAt) {
+      F.struck = true;
+      const ang = Math.atan2(-dx * fz + dz * fx, dx * fx + dz * fz), tr = tgt.rad || 0.45;
+      const reach = (o.reach || 3.4) * 1.05;
+      if (Math.abs(ang) < (F.atk === "shove" ? 2.2 : 0.9) && dist < reach + tr * 0.5) {
+        const base = o.dmg != null ? o.dmg : STATS.dmg;
+        const v = Math.max(R.st.spd, m.speed || 0), vk = Math.min(1, v / 12);
+        const k = F.atk === "gore" ? 0.7 + 2.3 * vk * vk : (F.atk === "shove" ? 0.45 : (F.atk === "trample" ? 0.9 : 1.0));
+        RES.dealt = landBlow(m, tgt, o, base * k, F.atk);
+        if (!tgt.dummy && F.atk !== "trample") toss(m, tgt, o, fx, fz, F.atk === "gore" ? 1.2 + v * 0.42 : 1.6, F.atk === "gore" ? 0.4 + vk : 0.7);
+      } else RES.missed = true;
+    }
+    if (p >= 1) { m._atkAnim = -1; F.atk = null; F.you = null; }
+    else m._atkAnim = Math.max(0.001, Math.min(0.999, p));
+    RES.inRange = dist <= (o.reach || 3.4);
+    return RES;
+  }
+  /* WHAT THE RHINO THROWS when a player presses attack (src/units/kit/moves.js):
+     at a run with the mark ahead, the CHARGE (the leap carries 2.3 t into it);
+     a man on the floor, the TRAMPLE; something beside it, the SHOVE; else the
+     upward HOOK of the horn. */
+  const YOU_MOVES = {
+    ram: { id: "ram", style: "ram", pow: 1, dur: 0.6, rng: 1.15, leap: 1.6, cd: 1.2 },
+    hook: { id: "hook", style: "gore", pow: 1, dur: 0.85, rng: 1.0, cd: 0.55 },
+    shove: { id: "shove", style: "ram", pow: 0.45, dur: 0.55, rng: 0.9, cd: 0.5 },
+    trample: { id: "trample", style: "stomp", pow: 0.9, dur: 0.8, rng: 1.0, cd: 0.7 },
+  };
+  function moves(m, tgt, ctx) {
+    ctx = ctx || {};
+    const reach = ctx.reach || 3.4, dist = ctx.dist == null ? 99 : ctx.dist;
+    if (tgt && ctx.downed && dist < reach * 1.1) return YOU_MOVES.trample;
+    const running = !!ctx.sprint || (ctx.speed || 0) > 4.5;
+    if (tgt && running && dist > reach * 0.9 && dist < reach * 3.6) return YOU_MOVES.ram;
+    if (tgt && dist < reach) {
+      const h = m.heading || 0, dx = tgt.pos.x - m.pos.x, dz = tgt.pos.z - m.pos.z;
+      const ang = Math.atan2(-dx * Math.sin(h) + dz * Math.cos(h), dx * Math.cos(h) + dz * Math.sin(h));
+      if (Math.abs(ang) > 1.0) return YOU_MOVES.shove;
+    }
+    return YOU_MOVES.hook;
+  }
+
   // ==========================================================================
   //  REGISTER
   // ==========================================================================
-  CBZ.unitKit.register("white_rhino", { kind: "species", stats: STATS, build: build, animate: animate, fight: fight });
+  CBZ.unitKit.register("white_rhino", { kind: "species", stats: STATS, build: build, animate: animate, fight: fight, moves: moves });
   // the mass the battle's body maths reads (CBZ.bodyMass: an authored row wins)
   const row = CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.white_rhino;
   if (row) row.mass = 1900;
