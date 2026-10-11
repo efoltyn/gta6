@@ -30,6 +30,7 @@
     stats: STATS,
     build: function (ctx) { const K = kit(); return K ? K.build(ctx, "white") : null; },
     animate: function (m, dt) { const K = kit(); if (K) K.animate(m, dt); },
+    moves: function (m, tgt, ctx) { const K = kit(); return K ? K.moves(m, tgt, ctx) : null; },
     fight: function (m, tgt, dt, opts) {
       const K = kit();
       return K ? K.fight(m, tgt, dt, opts) : CBZ.creatureFight(m, tgt, dt, opts);

@@ -1241,6 +1241,18 @@
     const R = L.R, rate = Math.max(0.3, o.rate || 1), dmg = (o.dmg || 60) * R.biteK;
     const move = function (step) { if (o.move) o.move(m, ux, uz, step); else slide(m, ux, uz, step, tgt, keep); };
     L.fT += dt; L.cd -= dt;
+    // A PLAYER IS DRIVING (src/battle/player.js): the possessed driver latched
+    // a move from moves() below; play exactly that one and hand back
+    const Y = o.youMove || null;
+    if (Y) {
+      if (L.yMove !== Y || m._atkAnim === 0 && L.yAge > 0.05) {
+        L.yMove = Y; L.yAge = 0;
+        const map = { lion_pounce: "pounce", lion_swat: "swat", lion_bite: "bite", lion_throat: "hold", lion_rear: "rear", lion_mount: "mount" };
+        go(L, map[Y.id] || (Y.style === "pounce" ? "pounce" : Y.style === "bite" ? "bite" : "swat"));
+        L.p0 = d; L.flanked = true;
+      }
+      L.yAge += dt;
+    } else L.yMove = null;
     let want = Math.atan2(dz, dx), turnRate = 7;
     const act = L.act;
     act.side = L.circSide;
@@ -1284,7 +1296,7 @@
         // gather, launch, fly, seize
         const T = 0.95, p = L.fT / T;
         act.kind = "pounce"; act.p = Math.min(1, p);
-        if (p > 0.28 && p < 0.62) move(((L.p0 - keep + 0.25) / (0.34 * T)) * dt);
+        if (p > 0.28 && p < 0.62 && !Y) move(((L.p0 - keep + 0.25) / (0.34 * T)) * dt);
         if (p >= 0.62 && !L.hitDone) {
           L.hitDone = true;
           if (d < keep + 0.7) {
@@ -1340,7 +1352,7 @@
           if (d < keep + 0.8) strike(m, o, dmg * (mount ? 0.2 : 0.3) * Math.sqrt(rate));
           else { go(L, "close"); break; }
         }
-        if (L.fT > (mount ? 10 : 8)) go(L, "recover");
+        if (L.fT > (Y ? 1.4 : mount ? 10 : 8)) go(L, "recover");
         break;
       }
       case "rear": {
@@ -1375,6 +1387,12 @@
       }
       default: go(L, "close");
     }
+    if (Y) {
+      // the driver ends the strike when _atkAnim goes negative
+      const busy = L.f !== "close" && L.f !== "recover" && L.f !== "circle" && L.f !== "threat";
+      if (!busy || L.yAge > 2.5) { m._atkAnim = -1; L.yMove = null; if (L.f !== "close") go(L, "close"); L.cd = 0; }
+      else m._atkAnim = Math.min(0.99, 0.01 + L.yAge / 1.5);
+    }
     // face the work
     let dh = wrapPi(want - (m.heading || 0));
     m.heading = (m.heading || 0) + clamp(dh, -turnRate * dt, turnRate * dt);
@@ -1382,6 +1400,31 @@
     if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(m, m.heading);
     RES.inRange = d < keep + 1;
     return RES;
+  }
+
+  // WHAT A POSSESSED LION THROWS ON ATTACK (src/units/kit/moves.js contract)
+  const YM = {
+    lion_pounce: { id: "lion_pounce", style: "pounce", pow: 1, dur: 0.95, rng: 1.1, leap: 1, cd: 0.9 },
+    lion_swat: { id: "lion_swat", style: "maul", pow: 1, dur: 0.5, rng: 1.0, cd: 0.35 },
+    lion_bite: { id: "lion_bite", style: "bite", pow: 1, dur: 0.55, rng: 1.0, cd: 0.45 },
+    lion_throat: { id: "lion_throat", style: "maul", pow: 1, dur: 1.4, rng: 1.05, cd: 0.6 },
+    lion_rear: { id: "lion_rear", style: "maul", pow: 1, dur: 1.2, rng: 1.05, cd: 0.6 },
+    lion_mount: { id: "lion_mount", style: "maul", pow: 1, dur: 1.4, rng: 1.05, cd: 0.6 },
+  };
+  function moves(m, tgt, ctx) {
+    ctx = ctx || {};
+    const dist = ctx.dist == null ? 99 : ctx.dist, reach = ctx.reach || 2.5, n = ctx.n || 1;
+    const running = !!ctx.sprint || (ctx.chase > 0 && ctx.speed > ctx.chase * 0.5);
+    if (!tgt) return YM.lion_swat;
+    if (dist > reach * 1.05 && dist < reach * 2.8 && running) return YM.lion_pounce;
+    if (ctx.downed) return YM.lion_throat;
+    const kind = kindOf(tgt);
+    if (kind === "big") {
+      const fo = faceOf(tgt, _fo), dx = m.pos.x - tgt.pos.x, dz = m.pos.z - tgt.pos.z, dl = Math.hypot(dx, dz) || 1;
+      return (fo.x * dx + fo.z * dz) / dl < -0.2 ? YM.lion_mount : YM.lion_bite;
+    }
+    if (kind === "cat") return n % 2 === 0 ? YM.lion_bite : YM.lion_rear;
+    return n % 3 === 0 ? YM.lion_bite : YM.lion_swat;
   }
 
   // a posed frame for tools (shot service): CBZ.lionKit.preview(unit, "pounce", 0.5)
@@ -1397,12 +1440,12 @@
     return true;
   }
 
-  CBZ.lionKit = { STATS: STATS, REAL: REAL, dims: dims, build: build, animate: animate, fight: fight, preview: preview, pose: pose, LIVE: LIVE };
+  CBZ.lionKit = { STATS: STATS, REAL: REAL, dims: dims, build: build, animate: animate, fight: fight, moves: moves, preview: preview, pose: pose, LIVE: LIVE };
   if (CBZ.unitKit) {
     CBZ.unitKit.register("lion", {
       kind: "species", stats: STATS,
       build: function (ctx) { return build(ctx, "tawny"); },
-      animate: animate, fight: fight,
+      animate: animate, fight: fight, moves: moves,
     });
   }
   if (typeof module !== "undefined" && module.exports) module.exports = { dims: dims, STATS: STATS };
