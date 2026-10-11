@@ -597,12 +597,12 @@ scenario(12, "wheels: a Humvee and a loaded M35 v 30 riflemen", async () => {
    a helicopter fights from battle positions (masked low, up to fire, down,
    sidestep), a jet flies attack runs at a real height; every unit animates
    itself on the battle clock and names the weapon of every round. */
-/* 13  ROCKET ARTILLERY. The M142 HIMARS (src/units/vehicles/m270_mlrs.js)
+/* 14  ROCKET ARTILLERY. The M142 HIMARS (src/units/vehicles/m270_mlrs.js)
    against a company of riflemen: built by its own file on the hull kit, it
    keeps out of its minimum range, stops, lays the pod, and ripples GUIDED
    GMLRS (rig.launched sets the homing mark): the rockets land on the group
    and kill (the old 220 m/s lob flew 45 s and killed nothing). */
-scenario(13, "rocket artillery: a HIMARS fire mission on 40 riflemen", async () => {
+scenario(14, "rocket artillery: a HIMARS fire mission on 40 riflemen", async () => {
   const W = boot("?a=m270_mlrs*1&b=men&n=1v40&arena=dunes&bw=ak47&auto=1&probe=0");
   if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
   realBoom(W);
@@ -746,6 +746,44 @@ scenario(12, "air assault: a Black Hawk fast-ropes its squad in, then its door g
   check(outs.every((o, i) => o.agl > 8 && o.agl < 16 && (i === outs.length - 1 || (o.ph === "insert" && o.v < 3.5))), "every man came down a rope from a hover at ~12 m (" + JSON.stringify(outs.slice(-2)) + ")");
   check(outs.length < 2 || outs.length >= 6, "one at a time over several steps, not all in one frame (" + outs.length + " drops)");
   check(offSector.length === 0, "each door gun fired only inside its own sector (" + (offSector.slice(0, 3).join(", ") || "none out") + ")");
+});
+
+/* 13  THE B-52. It comes in from beyond the horizon at 9 km, opens the bay
+   on the run-in, and walks ONE stick of Mk-82s across the mark from its
+   own bay stations (each bomb drawn falling), released kilometres short. */
+scenario(13, "the B-52: a high-altitude run, the bay opens, a stick walks across the mark", async () => {
+  const W = boot("?a=b52*1&b=men&n=1v60&arena=dunes&bw=ak47&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  run(W, 1);
+  const b = W.sb.__battle.roster().find((m) => m.unitId === "b52");
+  if (!b) { check(false, "the B-52 is on the field"); return; }
+  const MAP = vm.runInContext("MAP", W.sb);
+  const agl = () => b.pos.y - MAP.groundAt(b.pos.x, b.pos.z);
+  const R = b.rig && b.rig.state;
+  check(!!R && !!R.skins && R.skins.length > 0, "its own skinned airframe was built (not the stand-in)");
+  check(agl() > 8500, "it comes in at bombing height (" + Math.round(agl()) + " m)");
+  const enemy = W.sb.__battle.roster().filter((m) => m.team === "blue" && !m.dead);
+  const d0 = Math.min.apply(null, enemy.map((m) => Math.hypot(m.pos.x - b.pos.x, m.pos.z - b.pos.z)));
+  check(d0 > 10500, "from beyond its release distance, so the first pass is a real run (" + Math.round(d0) + " m out)");
+  let doorAtFirst = -1, first = -1, firstD = 0, maxStick = 0, stick = 0, lastN = 0, lastT = 0;
+  const W0 = b.wpn[0];
+  const a = run(W, 160, (t) => {
+    if (W0.n > lastN) {
+      if (first < 0) { first = t; doorAtFirst = R.door; const tg = b.tgt; firstD = tg ? Math.hypot(tg.pos.x - b.pos.x, tg.pos.z - b.pos.z) : 0; }
+      stick = t - lastT < 1.5 ? stick + (W0.n - lastN) : (W0.n - lastN);
+      maxStick = Math.max(maxStick, stick); lastN = W0.n; lastT = t;
+    }
+    return true;
+  });
+  check(first >= 0, "it released (" + W0.n + " Mk-82s)");
+  check(doorAtFirst > 0.9, "the bay doors were open before the first bomb left (" + doorAtFirst.toFixed(2) + ")");
+  check(firstD > 7000, "released kilometres short of the mark (" + Math.round(firstD) + " m)");
+  check(maxStick >= 12, "a stick, not a few bombs a pass (" + maxStick + " in one ripple)");
+  const dead = W.sb.__battle.roster().filter((m) => m.team === "blue" && m.dead).length;
+  console.log("    (B-52: " + dead + " of 60 dead, " + b.kills + " kills, war " + (a.over ? "over at " + a.simT + " s" : "still on at " + a.simT + " s") + ")");
+  check(dead > 0, "the stick killed (" + dead + ")");
 });
 
 scenario(9, "sides, best-of, the URL matchup: no colour on screen", async () => {

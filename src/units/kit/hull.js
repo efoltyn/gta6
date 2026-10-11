@@ -1073,9 +1073,8 @@
     }
     if (vs.burning && !this.dead) this.burn(dt, E, 10);
   };
-  /* flames licking out of a point (hull space) at `rate` per second. (It was
-     a second RP.fire, which silently replaced the contract's fire(shot): no
-     Humvee or M35 round ever kicked or flashed.) */
+  // the flames (was a second RP.fire, which silently replaced the contract's
+  // fire(shot) above: no rig on this kit ever flashed or kicked on a round)
   RP.burn = function (dt, at, rate) {
     const r = Math.random, a = this._a;
     this.acc.fire += dt * rate;

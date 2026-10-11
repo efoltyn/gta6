@@ -223,13 +223,15 @@ CBZ.unitKit.register("m1_abrams", {
   stats:   { hp, mass, speed, turn, armour: { front, side, rear, top },  // armour in mm RHA
              grip,                     // wheeled, opt-in, in g: the driver slows for corners, lock limited at speed
              dismountAt,               // keep it above 1.15 x standoff, or the carrier parks with its men aboard
-             alt, standoff, nap, popAlt, climb, popWindow, popShots },   // aircraft: see "Flight"
+             alt, standoff, nap, popAlt, climb, popWindow, popShots,     // aircraft: see "Flight"
+             ingress },                // aircraft: spawn this far back (m) so a bomber's first pass is a real run
   crew:    [{ seat: "driver" | "gunner" | "commander" | "loader" | "pilot", pos: [x, y, z] }],
   passengers, passengerPos: [[x, y, z], ...],                          // optional: each bench seat in hull space
   weapons: [{ id, seat, kind: "cannon" | "autocannon" | "mg" | "rockets" | "missile" | "sam" | "bombs",
               rof, dmg, range, minRange, ammo, burst, pause, salvo, reload, vs, needs, indirect,
               mount: "turret" | "slew" | "fixed" | "free", arc, yawMax, tol,       // facing, below
-              guided, basket, alt, dive, pullOut }],                            // air weapons
+              guided, basket, alt, dive, pullOut,                                // air weapons
+              stick }],                // unguided bombs: the stick's ground length (m), rippled across the mark
   build(ctx) -> { group, rig, footW, footL, height },
   animate(veh, dt, ctx),                                // optional: the unit's own look
   tactics: { role, engage, priorities, hullDown, faceThreat, reverseOut, screen, ... },  // for the AI
@@ -284,11 +286,12 @@ Do not read `w.needs` as a "which weapon" signal (the old getter hack): use `sho
 
 | rig hook | when |
 |---|---|
-| `muzzleWorld(out, shot) -> Vector3` | where this round leaves (the gun, the next tube or rail) |
+| `muzzleWorld(out, shot) -> Vector3` | where this round leaves (the gun, the next tube or rail; for a bomb, its bay clip or wing rack) |
 | `fire(shot, from)` | every round of every weapon. A rig with `fire` owns its effects (recoil, flash, the store leaving its rail): the runtime draws none |
 | `fired(scale, shot)` / `spend(i, shot)` | **legacy** (`city/mil_armor.js` rigs), only when there is no `fire`: `fired` for cannon (1) and autocannon (0.3) rounds, `spend` for a launch with `i` = the rig's own `loaded - 1` when it keeps one, else `shot.n` |
 | `reload(shot)` | a salvo's reload has finished: put the rounds back |
 | `launched(rocket, shot, target)` | an HE round / rocket (`vehFireHE`) has just been put in flight: the rig may fly it its own way (velocity, `grav`, `life`, `homing` mark `{ pos, dead }`, warhead `w`, a `mesh`); fire.js `stepRockets` flies whatever it set. The HIMARS uses it for guided GMLRS |
+| `store(shot) -> Object3D` | a released bomb's falling mesh (in the scene, at `muzzleWorld`); the runtime flies it and hands it to `CBZ.munitions.release` on impact, so take it from `CBZ.munitions.acquire` |
 | `canFire(shot) -> bool` | false holds this weapon this step (a TOW only with the launcher up and the hull still) |
 | `damage(vs, res)` | every hit that lands (`vs` = the damage state, `res` = `vehicleDrive.resolve`'s result: `zone pen dmg mobility firepower burning wreck`): show the drooped gun, the thrown track, the fire |
 | `aimError(shot) -> rad` | how far a `slew` mount still is from the line; the runtime holds fire until it is under `w.tol` (0.06) |
@@ -423,7 +426,7 @@ vehicle agents redraw):
 | uh60_black_hawk | UH-60M (11, fast rope) | its own file (redrawn) | pilot, copilot, gunner, crew chief | 2 x M240H door guns | 3/2/2/2 (unarmoured, hp 820) |
 | f35 | F-35A | milAir fighter | pilot | 2 GBUs/pass, 25 mm | 2 |
 | mq9_reaper | MQ-9 | milAir drone | remote | Hellfire | 0 |
-| b52 | B-52H | milAir bomber | 5 | bomb sticks | 0 |
+| b52 | B-52H (redrawn: skinned flexing wing) | its own file | pilot, copilot, radar nav, nav, EWO | 27 x Mk-82 stick (bay), 12 x GBU-31 JDAM (HSABs) | 3/2/2/2 (unarmoured, hp 1800) |
 | b2_spirit | B-2 | strategicModels.b2 | 2 | heavy bombs | 0 |
 | a400m | A400M (airdrops 116) | milAir cargo | 3 | none | 0 |
 
