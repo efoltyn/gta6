@@ -205,13 +205,9 @@
   function seats(def) {
     const out = [];
     (def.crew || []).forEach(function (s) { out.push({ seat: s.seat, pos: s.pos || [0, 1.5, 0], man: null, implicit: false, crew: true }); });
-<<<<<<< HEAD
-    for (let i = 0; i < (def.passengers || 0); i++) out.push({ seat: "passenger", pos: (def.benches && def.benches[i]) || [0, 1.2, -1], man: null, implicit: false, crew: false });
-=======
     // def.passengerPos (optional): each bench seat's own place in hull space
     const pp = def.passengerPos || null;
-    for (let i = 0; i < (def.passengers || 0); i++) out.push({ seat: "passenger", pos: (pp && pp[i]) || [0, 1.2, -1], man: null, implicit: false, crew: false });
->>>>>>> u-hmmwv
+    for (let i = 0; i < (def.passengers || 0); i++) out.push({ seat: "passenger", pos: (pp && pp[i]) || (def.benches && def.benches[i]) || [0, 1.2, -1], man: null, implicit: false, crew: false });
     return out;
   }
   function seat(book, man, which) {

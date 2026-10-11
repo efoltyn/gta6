@@ -57,9 +57,7 @@ const ARMOURY = [
   "systems/wounds.js",         // bodies remember hits (optional, self-capping)
   "world/hull_loft.js",        // the game's own lofted boat hulls (OPEN WATER's fleet)
   "city/flags.js",             // the one flag system: an army fights under its nation's flag
-<<<<<<< HEAD
   "world/textures_surface.js", // groundTurf: the one grass shader (OPEN FIELDS' pasture)
-=======
   // BATTLE PHYSICS (src/battle/physics.js) reuses two engine blocks rather
   // than growing its own: a hull that runs a man down drives his ragdoll
   // with its real profile (carstrike, on the ragdoll pack's solver), and a
@@ -69,7 +67,6 @@ const ARMOURY = [
   // in water.
   "city/carstrike.js",
   "world/water_float.js",
->>>>>>> npcwar-physics
 ];
 /* THE LOAD USED TO BE THIRTY-ONE ROUND TRIPS IN A ROW.
 

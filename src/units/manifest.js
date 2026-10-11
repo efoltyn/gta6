@@ -96,8 +96,8 @@
     m1_abrams: V("M1 Abrams", "M1 Abrams", "ground", ["city/mil_armor.js"]),
     bradley_ifv: V("M2 Bradley", "M2 Bradleys", "ground", ["city/mil_armor.js"]),
     stryker_apc: V("Stryker", "Strykers", "ground"),
-    hmmwv: V("Humvee", "Humvees", "ground", ["city/mil_armor.js"]),
-    m35_truck: V("M35 cargo truck", "M35 cargo trucks", "ground", ["city/mil_armor.js"]),
+    hmmwv: V("Humvee", "Humvees", "ground", ["units/kit/hull.js"]),
+    m35_truck: V("M35 cargo truck", "M35 cargo trucks", "ground", ["units/kit/hull.js"]),
     m270_mlrs: V("M142 HIMARS", "M142 HIMARS launchers", "ground", ["city/mil_armor.js"]),   // the id keeps the census name; the model is the wheeled six-round pod
     patriot_launcher: V("Patriot launcher", "Patriot launchers", "ground", ["city/mil_armor.js"]),
     technical: V("technical", "technicals", "ground", []),
