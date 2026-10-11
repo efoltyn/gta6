@@ -600,6 +600,8 @@ scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawle
     console.log("    (one crewman: drove " + moved.toFixed(1) + " m, fought from where he stood)");
     check(tank.shotsF > 0, "its guns fired (" + tank.shotsF + " rounds, " + tank.hitsF + " hits; " + tank.wpn.map((w) => w.w.id + " " + ((w.w.ammo || 0) - w.ammo)).join(", ") + ")");
     check(tank.kills > 0, "and killed (" + tank.kills + ")");
+    const cmdGun = tank.wpn.filter((w) => w.w.seat && w.w.seat !== tank.wpn[0].w.seat);
+    check(cmdGun.every((w) => w.n === 0), "a lone driver works the main gun's seat, never an empty one's (" + cmdGun.map((w) => w.w.id + " " + w.n).join(", ") + ")");
     check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ", red " + a.red + " blue " + a.blue + ")");
   }
   {

@@ -145,13 +145,20 @@ function vehStandIn(def) {
    flags are the side's own (docs/npcwar/ARCHITECTURE.md, the vehicle
    contract). `flag` is a city/flags.js design (paint it with
    CBZ.flags.paint), or the front spec's own when the war is at THE FRONT. */
+/* THE GROUND A HULL IS PAINTED FOR: the erg's skin (sand / snow / grass) on
+   the open maps, else the map id (city, island, field, arena, water...).
+   rig.mark reads it with a regexp, so a new map needs no table here. */
+function vehGround() {
+  const M = (typeof MAPS !== "undefined" && MAP && MAPS[MAP.id]) || null;
+  return String((M && M.erg) || (MAP && MAP.id) || "");
+}
 function vehSideCtx(teamId) {
   const S = (typeof SIDES !== "undefined" && SIDES[teamId]) || null;
   const nation = S && S.nation || null;
   let flag = null;
   if (FRONT && FRONT[teamId] && FRONT[teamId].flag) flag = FRONT[teamId].flag;
   else if (nation && CBZ.flags && CBZ.flags.designFor) { try { flag = CBZ.flags.designFor(nation); } catch (e) { flag = null; } }
-  return { side: teamId, nation: nation, flagId: nation, flag: flag,
+  return { side: teamId, nation: nation, flagId: nation, flag: flag, ground: vehGround(),
     color: S && S.color != null ? S.color : TEAMS[teamId].color, sideInfo: S };
 }
 /* WHERE EACH WEAPON POINTS. A weapon's `mount` says what has to be on the
@@ -187,9 +194,13 @@ function makeVehicle(teamId, i, id) {
   const sc = vehSideCtx(teamId);
   let b = null;
   try {
-    b = def.build ? def.build({ THREE: THREE, mat: CBZ.cmat, rng: lcg, seed: i, id: id,
+    b = def.build ? def.build({ THREE: THREE, mat: CBZ.cmat, rng: lcg, seed: i, id: id, ground: sc.ground,
       side: sc.side, team: sc.side, nation: sc.nation, flagId: sc.flagId, flag: sc.flag, color: sc.color, sideInfo: sc.sideInfo }) : null;
   } catch (e) { console.warn("[war] vehicle build failed:", id, e); }
+  // THE SIDE'S MARKINGS: paint for the ground, the nation's flag (rig.mark)
+  if (b && b.rig && typeof b.rig.mark === "function") {
+    try { b.rig.mark(sc.nation, sc.ground, sc); } catch (e) { console.warn("[war] " + id + " rig.mark threw:", e); }
+  }
   if (!b || !b.group) b = vehStandIn(def);
   const group = b.group;
   const L = b.footL || S.length || 6, Wd = b.footW || S.width || 2.6, H = b.height || S.height || 2.4;
@@ -243,6 +254,9 @@ function makeVehicle(teamId, i, id) {
     wpn: weapons, shots: [], reach: reach || 600, _firing: null, _hitT: -9, _wantNose: false,
     alt: S.alt || 0, airPhase: "in", airPt: null, egress: false, heli: null,
     side: sc,
+    // what the AI layer reads about how to fight this hull (src/battle/ai/*):
+    // hull-down, face the threat, reverse out, infantry screen, priorities
+    tactics: def.tactics || null,
     home: { x: at.x, z: at.z },
     you: false,
   };
@@ -577,6 +591,10 @@ function vehFight(u, sdt) {
     // a bomb's reach is its fall (vehBombRun), not a range number
     if (w.kind !== "bombs" && (dist > (w.range || 600) || dist < (w.minRange || 0))) continue;
     if (!vehWeaponFits(u, w, t)) continue;
+    const manned = vehSeatManned(u, w);
+    if (!manned) continue;                                   // nobody at this gun
+    if (manned === "halt") { u._wantShot = true; continue; } // the driver stops and climbs over
+    if (u.rig && u.rig.canFire) { let ok = true; try { ok = u.rig.canFire(W.shot) !== false; } catch (e) {} if (!ok) continue; }
     if (w.kind === "bombs") { vehBombRun(u, W, t); continue; }
     // the big gun waits for the kill it was made for when the mark is soft
     // and a machine gun is in range; the machine gun leaves armour alone
@@ -616,6 +634,31 @@ function vehWeaponFits(u, w, t) {
   if (w.vs === "soft" && t.vehicle && ((t.def.stats.armour || {}).side || 0) > 30) return false;
   if (t.air && !(w.vs === "air" || w.kind === "mg" || w.kind === "autocannon" || (u.air && w.kind === "missile"))) return false;
   return true;
+}
+/* WHO WORKS THIS GUN. A weapon fires only when its `seat` is crewed (a man
+   in it, or the implicit crew of a hull nobody was assigned to). A seat-less
+   weapon needs any crew; a remote airframe is always manned. One exception,
+   the old "one man drives OR fights" rule: a crewman whose own seat works no
+   weapon (the driver) can slide over to the MAIN gun's seat (weapon 0's)
+   while the hull is stopped. He never reaches the loader's or the
+   commander's machine gun. */
+function vehSeatManned(u, w) {
+  if (u.you) return true;                            // you are the crew
+  const S = u.def.stats || {};
+  if (S.remote) return true;
+  const seat = w.seat;
+  if (!seat) return vehCrewN(u) > 0;
+  if (vehHasSeat(u, seat)) return true;
+  const main = u.wpn.length ? u.wpn[0].w.seat : null;
+  if (seat !== main) return false;
+  for (let k = 0; k < u.seats.length; k++) {
+    const s = u.seats[k];
+    if (!s.crew || !(s.man || s.implicit)) continue;
+    let armed = false;
+    for (let j = 0; j < u.wpn.length; j++) if (u.wpn[j].w.seat === s.seat) { armed = true; break; }
+    if (!armed) return u.speed > 1.2 ? "halt" : true;
+  }
+  return false;
 }
 function vehIndirect(u) { for (let k = 0; k < u.wpn.length; k++) if (u.wpn[k].w.indirect) return true; return false; }
 function vehHasMG(u, dist) {
@@ -1126,11 +1169,63 @@ function hurtVehicle(u, dmg, imp) {
   if (by && by.team && by.team !== u.team && (!u.tgt || u.tgt.dead || u.tgt.fled)) u.tgt = by;
   u._hitT = simT;                                   // a helicopter under fire ducks (stepRotor)
   if (res.firepower) for (let k = 0; k < u.wpn.length; k++) if (u.wpn[k].w.turret) u.wpn[k].off = true;
+  // the rig shows what this hit did (a drooped gun, a thrown track, a fire)
+  if (u.rig && typeof u.rig.damage === "function") { try { u.rig.damage(u.vs, res); } catch (e) {} }
+  // what got through the plate kills the men it passes
+  if (res.pen && !u.vs.wreck) vehCrewHits(u, res, th, zn, fx, fz, by);
   if (u.vs.wreck || u.vs.hp <= 0) { killMan(u, imp); return; }
+  // a hull with nobody left alive in it is out of the fight
+  if (vehCrewN(u) === 0) { u._abandoned = true; killMan(u, imp); return; }
   // a hull that can neither move nor fight is abandoned
   if (u.vs.mobility && (u.vs.firepower || !u.wpn.length)) { u._abandoned = true; killMan(u, imp); return; }
   if (res.pen && vehPassengers(u)) vehDismount(u);
   if (u.air && u.vs.mobility) { u._abandoned = true; killMan(u, imp); }
+}
+/* CREW CASUALTIES BY SEAT. A penetration enters through the face it hit
+   (`zn`), on the line from whoever fired it, and its spall runs on through
+   the hull. Each crewman (and passenger) is at his seat's `pos` in hull
+   space; the nearer his seat to that line, the likelier he is hit:
+   p = min(0.9, beh / 600) x exp(-distance / 1.1 m). A big round through
+   the turret kills the turret crew, a rifle round through a Humvee door
+   kills the man behind it, the driver up front lives. */
+function vehCrewHits(u, res, th, zn, fx, fz, by) {
+  const L = u.vlen, Wd = u.vwid, H = u.vheight;
+  // the threat's direction in hull space (x port, z forward)
+  const wx = fx - u.pos.x, wz = fz - u.pos.z;
+  const c = Math.cos(u.h), s = Math.sin(u.h);
+  let dx = wx * c - wz * s, dz = wx * s + wz * c;
+  const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+  // where it came in, and its path inward
+  let ix, iy, iz, px, py, pz;
+  if (zn === "top") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = H; px = 0; py = -1; pz = 0; }
+  else {
+    const tt = Math.min(Wd / Math.max(1e-3, Math.abs(dx)), L / Math.max(1e-3, Math.abs(dz)));
+    ix = dx * tt; iz = dz * tt; iy = H * (0.35 + lcg() * 0.45); px = -dx; py = 0; pz = -dz;
+  }
+  const reach = zn === "top" ? H : (Math.abs(px) > Math.abs(pz) ? Wd * 2 : L * 2) * 0.8;
+  const beh = Math.max(th.beh || 0, res.dmg || 0);
+  const pk = Math.min(0.9, beh / 600);
+  let lost = 0;
+  for (let k = 0; k < u.seats.length; k++) {
+    const seat = u.seats[k];
+    if (!seat.man && !seat.implicit) continue;
+    const p = seat.pos || [0, 1.5, 0];
+    // distance from the seat to the spall segment
+    const ax = p[0] - ix, ay = p[1] - iy, az = p[2] - iz;
+    const along = Math.max(0, Math.min(reach, ax * px + ay * py + az * pz));
+    const d = Math.hypot(ax - px * along, ay - py * along, az - pz * along);
+    if (lcg() >= pk * Math.exp(-d / 1.1)) continue;
+    lost++;
+    if (seat.implicit) { seat.implicit = false; continue; }
+    const man = CBZ.vehicleDrive.unseat(u.seats, seat);
+    if (!man) continue;
+    man.dead = true; man.hp = 0; man.inVeh = null;
+    DEADN[man.team] = (DEADN[man.team] || 0) + 1;
+    if (man.group) CBZ.studio.drop(man.group);
+    if (by && by.team && by.team !== u.team) by.kills = (by.kills || 0) + 1;
+  }
+  if (lost) { u.crewLost = (u.crewLost || 0) + lost; if (PROBE) { VEH.crewLost = (VEH.crewLost || 0) + lost; } }
+  return lost;
 }
 // killMan's vehicle half: the crew gets out (or does not), the hull burns
 function vehicleWrecked(u, imp) {
@@ -1308,6 +1403,7 @@ function stepYouVehicle(u, sdt) {
   if (fire) YOU.fireAt = simT;
   const W = vehYouSeatWeapon(u, lock);
   if (!fire || !W || W.cool > 0 || W.reloadT > 0 || W.ammo <= 0 || u.vs.firepower) return;
+  if (u.rig && u.rig.canFire) { let ok = true; try { ok = u.rig.canFire(W.shot) !== false; } catch (e) {} if (!ok) return; }
   /* THE GUN LINE IS THE WEAPON'S MOUNT (vehMountOf): a turret's line is the
      turret's, a slewing mount (a chin gun) follows the look inside its arc,
      a free one (a door gun, a pintle) is the look, a fixed one is the nose. */

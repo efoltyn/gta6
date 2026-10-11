@@ -215,6 +215,7 @@ CBZ.unitKit.register("m1_abrams", {
               guided, basket, alt, dive, pullOut }],                            // air weapons
   build(ctx) -> { group, rig, footW, footL, height },
   animate(veh, dt, ctx),                                // optional: the unit's own look
+  tactics: { role, engage, priorities, hullDown, faceThreat, reverseOut, screen, ... },  // for the AI
 });
 ```
 
@@ -224,11 +225,21 @@ CBZ.unitKit.register("m1_abrams", {
 shared default. A unit file never needs to know the runtime's internals.
 
 **`build(ctx)`** is called once per hull. `ctx` = `{ THREE, mat, rng, seed, id, side, team,
-nation, flagId, flag, color, sideInfo }`. `side` is the slot (`"red"`/`"blue"`). `nation` is
+nation, flagId, flag, color, ground, sideInfo }`. `side` is the slot (`"red"`/`"blue"`). `nation` is
 the `city/flags.js` id the side fights for (null for a side with no army). `flag` is that
 nation's design (paint it with `CBZ.flags.paint(g2d, ctx.flag, w, h)`; at THE FRONT it is the
 front spec's own flag). `color` is the side's mark colour. Markings, roundels and fin flags
 come from here. Return `{ group, rig }`, where `group` has its feet at y = 0 and nose on +Z.
+`ground` is what the hull is painted for: the open maps' skin (`sand`, `snow`, `grass`) or the
+map id (`city`, `island`, `field`, `arena`, `water`...).
+
+**`rig.mark(nation, ground, side)`** is called by the battle right after `build`, when the rig
+has it. It sets the paint scheme for the ground and puts the nation's flag on. The battle calls
+it, so a unit does not also paint from `ctx` in `build`.
+
+**`def.tactics`** is exposed on the hull as `veh.tactics`, for the AI layer (`src/battle/ai/*`)
+to read: role, engagement ranges, target priorities, hull-down, keep the front toward the
+threat, reverse out under fire, infantry screen. The runtime itself does not act on it yet.
 
 **`animate(veh, dt, ctx)`** is called by the battle **every sim step, on the battle clock**,
 for every vehicle kind, alive or wrecked. It stops when the battle is paused and follows the
@@ -260,6 +271,8 @@ Do not read `w.needs` as a "which weapon" signal (the old getter hack): use `sho
 | `fire(shot, from)` | every round of every weapon. A rig with `fire` owns its effects (recoil, flash, the store leaving its rail): the runtime draws none |
 | `fired(scale, shot)` / `spend(i, shot)` | **legacy** (`city/mil_armor.js` rigs), only when there is no `fire`: `fired` for cannon (1) and autocannon (0.3) rounds, `spend` for a launch with `i` = the rig's own `loaded - 1` when it keeps one, else `shot.n` |
 | `reload(shot)` | a salvo's reload has finished: put the rounds back |
+| `canFire(shot) -> bool` | false holds this weapon this step (a TOW only with the launcher up and the hull still) |
+| `damage(vs, res)` | every hit that lands (`vs` = the damage state, `res` = `vehicleDrive.resolve`'s result: `zone pen dmg mobility firepower burning wreck`): show the drooped gun, the thrown track, the fire |
 | `aimError(shot) -> rad` | how far a `slew` mount still is from the line; the runtime holds fire until it is under `w.tol` (0.06) |
 | `aimTurret(yaw, elev, dt)`, `aimLauncher(yaw, elev, dt)`, `settle()`, `update(dt, v, w, steer)` | as before |
 
@@ -276,6 +289,20 @@ runtime lays them on the mark with `CBZ.milAirAim` and the rig follows them at i
 | `free` | always (pintle, door gun, indirect launcher, bombs) | everything else |
 
 When a `fixed` or `slew` weapon is out of arc, the aircraft turns its nose onto the mark.
+
+**Weapons need their seat crewed.** A weapon fires only when its `seat` has a man in it (or the
+implicit crew of a hull nobody was assigned to). A weapon with no seat needs any crew, and a
+`remote` airframe is always crewed. There is one exception: a crewman whose own seat works no
+weapon (the driver) can climb over to the MAIN gun's seat (weapon 0's) once the hull has
+stopped. He never works the loader's or the commander's machine gun. You, at the controls, are
+the crew.
+
+**Crew casualties by seat.** A penetration comes in through the face it hit, on the line from
+whoever fired it, and its spall carries on through the hull. Each man in a seat (crew or
+passenger, at the seat's `pos` in hull space) is killed with
+`p = min(0.9, beh / 600) x exp(-distance from the line / 1.1 m)`. When nobody is left alive in
+the hull, the vehicle is out of the fight (abandoned). The bail-out after a knockout is
+unchanged.
 The player's weapon pick (`vehYouSeatWeapon`) uses the same fit rules (`vehWeaponFits`) and
 puts weapons that cannot bear on the mark second.
 
