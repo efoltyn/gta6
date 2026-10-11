@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "98c4eb0a2e3425e22541d6bac810a69e49ef10e5",
-  "createdAt": "2026-10-11T20:52:57.524Z",
+  "sourceCommit": "581deb659293df07a2db3017b1d63c8134a6441a",
+  "createdAt": "2026-10-11T20:56:05.679Z",
   "fileCount": 1351,
-  "totalBytes": 50047265,
+  "totalBytes": 50082993,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -3513,8 +3513,8 @@
     },
     {
       "file": "src/units/manifest.js",
-      "bytes": 5677,
-      "sha256": "daaf5c455ccf74cc4bcbe22d8baaf4e9ec02d7e9a3d827a361f32295ba7e15a3"
+      "bytes": 5658,
+      "sha256": "d3d722b433ba2bc938996085772802ed0db913b33106d1fb9b64c5cf94944939"
     },
     {
       "file": "src/units/species/african_elephant.js",
@@ -3788,8 +3788,8 @@
     },
     {
       "file": "src/units/vehicles/b2_spirit.js",
-      "bytes": 742,
-      "sha256": "88255d2eda6f2e6d1e64ec6cc32364c2a2d40718a8fdfb83ec8cd1a157223d62"
+      "bytes": 36489,
+      "sha256": "37db93805068f0c4db392daa4a69211c382a62f2bfb7636131428ede686b7d0f"
     },
     {
       "file": "src/units/vehicles/b52.js",
@@ -6679,7 +6679,7 @@
     {
       "file": "games/battle.html",
       "bytes": 13801,
-      "sha256": "584ab70055569ffb71b8f148bc3d204261939a14d3f9bec505ad3ddf9fb8f1c0"
+      "sha256": "215143f16d8355a80965ddcbe4c6ae14901457dc0ccf000f992aa9a366a5ad32"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6689,7 +6689,7 @@
     {
       "file": "games/bomb-survivor.html",
       "bytes": 75914,
-      "sha256": "dfbf7250d396e10cbd6a282bac89123a2d28ecf0d97af163d210c56a99cfb0a9"
+      "sha256": "15ad139f2da1b364838ab1644bf21f2f61620b01c08014dfd5c71c6ffa54ec87"
     },
     {
       "file": "games/dev.html",
@@ -6709,7 +6709,7 @@
     {
       "file": "games/warlord.html",
       "bytes": 73708,
-      "sha256": "c377631f4908465e75f393ef79a4a4d10de0790bb071315309b6074a1d403cc3"
+      "sha256": "a949d8590832ec28802d6cee43e322bef1f4f417893c03cdba197d15a636039e"
     },
     {
       "file": "thumbs/shark-sim.jpg",
