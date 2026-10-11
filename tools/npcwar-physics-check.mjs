@@ -122,17 +122,28 @@ console.log("3  a charge is a collision");
 }
 
 // ---------------------------------------------------------------- 4
+/* STAGED, not left to the AI: whether a tank's brain chooses to drive into a
+   crowd is the AI's and the terrain's business (and it moved with them); this
+   asks what the HULL does when it meets a man at 10 m/s. */
 console.log("4  a hull runs men down");
 {
-  const W = world("?a=m1_abrams*1&b=men&n=1v40&bw=fists&bt=thug&arena=dunes&auto=1&probe=0");
+  const W = world("?a=m1_abrams*1&b=men&n=1v3&bw=fists&bt=thug&arena=dunes&auto=1&probe=0");
   await settle();
-  const B = W.B();
-  for (let t = 0; t < 40; t += 0.5) { B.advance(0.5, 1 / 20); if (B.audit().over) break; }
+  W.B().advance(0.5, 1 / 20);
+  const R = W.B().roster();
+  const tank = R.find((m) => m.vehicle), men = R.filter((m) => !m.vehicle);
+  const fx = Math.sin(tank.h), fz = Math.cos(tank.h);
+  men.forEach((m, k) => { m.pos.x = 5000 + k * 30; m.pos.z = 5000; m._vx = m._vz = 0; });
+  const man = men[0];
+  man.pos.x = tank.pos.x + fx * (tank.vlen + 0.3); man.pos.z = tank.pos.z + fz * (tank.vlen + 0.3);
+  tank.ds.v = 10; tank.speed = 10;
+  G(W, "rebuildFine")();
+  G(W, "vehCrush")(tank, 1 / 20);
   const A = G(W, "PHYS.audit");
-  const tank = B.roster().find((m) => m.vehicle);
-  console.log("    " + JSON.stringify(A) + " tank alive " + !tank.dead);
-  check(A.impacts > 0, "the tank met men with its hull (" + A.impacts + " impacts)");
-  check(A.maxDv > 5, "and threw them (max delta-v " + r2(A.maxDv) + " m/s)");
+  console.log("    " + JSON.stringify(A) + " tank now " + r2(tank.ds.v) + " m/s, man dead " + man.dead);
+  check(A.impacts > 0, "the tank met the man with its hull (" + A.impacts + " impacts)");
+  check(A.maxDv > 10, "and threw him at ~(1+e) x 10 m/s (max delta-v " + r2(A.maxDv) + " m/s)");
+  check(tank.ds.v > 9.7, "and the 60 t hull hardly noticed (" + r2(tank.ds.v) + " m/s)");
 }
 
 // ---------------------------------------------------------------- 5
