@@ -172,149 +172,23 @@
 
   // ==========================================================================
   //  THE GAIT — pure. Feet plant; the body carries the cycle.
+  //  It lives in src/units/kit/gait.js now (CBZ.quadGait, the planted-foot
+  //  solver every animal shares); the DOG footfall table there is this
+  //  file's walk / trot / transverse gallop, number for number
+  //  (tools/units-kit-check.mjs holds it bit for bit against the original).
   // ==========================================================================
-  // per-foot phase offsets [FL, FR, HL, HR]; laid out so walk -> trot -> gallop
-  // blend by sliding the hinds and the right pair, never by a wrap-around.
-  const OFFS = {
-    walk:   [0.25, 0.75, 0.00, 0.50],     // lateral sequence: HL FL HR FR
-    trot:   [0.25, 0.75, -0.25, 0.25],    // FL+HR, FR+HL
-    gallop: [0.25, 0.37, -0.25, -0.13],   // HL HR ... FL FR
-  };
-  function gaitMix(v, K, legLen, out) {
-    out = out || { off: [0, 0, 0, 0] };
-    const k = Math.sqrt(K), av = Math.abs(v);
-    const wG = sstep(4.0 * k, 5.2 * k, av), wW = 1 - sstep(1.3 * k, 2.0 * k, av);
-    const wT = Math.max(0, 1 - wW - wG);
-    out.wW = wW; out.wT = wT; out.wG = wG;
-    out.duty = wW * 0.62 + wT * 0.42 + wG * 0.32;
-    for (let i = 0; i < 4; i++) out.off[i] = wW * OFFS.walk[i] + wT * OFFS.trot[i] + wG * OFFS.gallop[i];
-    let f = Math.min(3.8 / k, (1.05 + 0.38 * av / K) / k);
-    const sMax = 0.62 * (legLen || 0.4);
-    if (av > 0 && out.duty * av / f > sMax) f = out.duty * av / sMax;
-    out.f = f;
-    out.S = av > 0 ? out.duty * av / f : 0;
-    out.lift = (0.05 * wW + 0.08 * wT + 0.11 * wG) * K;
-    return out;
-  }
-  // model-local (lx, lz) <-> world for a body at (gx, gz) heading h (nose = (cos h, sin h))
-  function toWorld(lx, lz, gx, gz, h, out) {
-    const c = Math.cos(h), s = Math.sin(h);
-    out.x = gx + c * lx - s * lz; out.z = gz + s * lx + c * lz; return out;
-  }
-  function toLocal(wx, wz, gx, gz, h, out) {
-    const c = Math.cos(h), s = Math.sin(h), dx = wx - gx, dz = wz - gz;
-    out.x = c * dx + s * dz; out.z = -s * dx + c * dz; return out;
-  }
-  function gaitCreate(D) {
-    const G = { D: D, phase: 0, mix: gaitMix(0, D.K, D.legLen), feet: [], moving: false };
-    for (let i = 0; i < 4; i++) {
-      G.feet.push({ i: i, sw: false, u: 0, init: false, cx: 0, cz: 0, cy: 0,
-        lx: D.feet[i].x, ly: 0, lz: D.feet[i].z, sx: 0, sy: 0, sz: 0, tx: 0, tz: 0, wy: 0, stanceT: 0 });
-    }
-    return G;
-  }
-  const _w = { x: 0, z: 0 }, _l = { x: 0, z: 0 };
-  function plantAt(F, lx, lz, gx, gz, h, ground, gy) {
-    toWorld(lx, lz, gx, gz, h, _w);
-    F.cx = _w.x; F.cz = _w.z;
-    // the contact's ABSOLUTE height: a planted paw stays on its ground while
-    // the body rises or falls over a slope
-    const gyw = ground ? ground(_w.x, _w.z) : null;
-    F.wy = (gyw == null || !isFinite(gyw)) ? gy : gyw;
-  }
-  // One frame. v = forward speed (m/s, measured), turn = yaw rate (rad/s),
-  // (gx, gz, h) = the body's world placement this frame, ground(x, z) -> y or
-  // null, gy = the body's own ground y. Writes each foot's LOCAL target
-  // (F.lx, F.ly, F.lz) and its swing-progress; returns G.
-  function gaitStep(G, dt, v, turn, gx, gz, h, ground, gy) {
-    const D = G.D, M = gaitMix(v, D.K, D.legLen, G.mix);
-    gy = gy || 0;
-    const moving = Math.abs(v) > 0.08 || Math.abs(turn) > 0.35;
-    G.moving = moving;
-    for (let i = 0; i < 4; i++) {
-      const F = G.feet[i];
-      if (!F.init) { F.init = true; F.sw = false; plantAt(F, D.feet[i].x, D.feet[i].z, gx, gz, h, ground, gy); }
-    }
-    if (moving) {
-      // turning on the spot still steps: a short slow cycle with no stride
-      const f = Math.abs(v) > 0.08 ? M.f : 1.5 / Math.sqrt(D.K);
-      const S = Math.abs(v) > 0.08 ? M.S * (v < 0 ? -1 : 1) : 0;
-      G.phase = frac(G.phase + f * dt);
-      for (let i = 0; i < 4; i++) {
-        const F = G.feet[i], base = D.feet[i];
-        const ph = frac(G.phase + M.off[i]);
-        const stance = ph < M.duty;
-        if (stance) {
-          if (F.sw) { F.sw = false; F.u = 0; plantAt(F, F.lx, F.lz, gx, gz, h, ground, gy); F.stanceT = 0; }
-          toLocal(F.cx, F.cz, gx, gz, h, _l);
-          F.lx = _l.x; F.lz = _l.z; F.ly = clamp(F.wy - gy, -0.25, 0.25); F.stanceT += dt;
-        } else {
-          const u = (ph - M.duty) / (1 - M.duty);
-          if (!F.sw) { F.sw = true; F.sx = F.lx; F.sz = F.lz; F.sy = F.ly; }
-          F.tx = base.x + S * 0.5; F.tz = base.z;
-          const e = ease(u);
-          F.u = u;
-          F.lx = lerp(F.sx, F.tx, e); F.lz = lerp(F.sz, F.tz, e);
-          F.ly = lerp(F.sy || 0, 0, e) + M.lift * Math.sin(PI * u);
-        }
-      }
-    } else {
-      // AT REST: swings finish, then the worst-placed foot re-steps under the body
-      let swinging = 0;
-      for (let i = 0; i < 4; i++) {
-        const F = G.feet[i], base = D.feet[i];
-        if (F.sw) {
-          F.u = Math.min(1, F.u + dt * 2.6);
-          F.tx = base.x; F.tz = base.z;
-          const e = ease(F.u);
-          F.lx = lerp(F.sx, F.tx, e); F.lz = lerp(F.sz, F.tz, e);
-          F.ly = lerp(F.sy || 0, 0, e) + 0.045 * D.K * Math.sin(PI * F.u);
-          if (F.u >= 1) { F.sw = false; plantAt(F, F.lx, F.lz, gx, gz, h, ground, gy); }
-          else swinging++;
-        } else {
-          toLocal(F.cx, F.cz, gx, gz, h, _l);
-          F.lx = _l.x; F.lz = _l.z; F.ly = clamp(F.wy - gy, -0.25, 0.25);
-        }
-      }
-      if (!swinging) {
-        let worst = -1, wd = 0.07 * D.K;
-        for (let i = 0; i < 4; i++) {
-          const F = G.feet[i], base = D.feet[i];
-          const dd = Math.hypot(F.lx - base.x, F.lz - base.z);
-          if (dd > wd) { wd = dd; worst = i; }
-        }
-        if (worst >= 0) { const F = G.feet[worst]; F.sw = true; F.u = 0; F.sx = F.lx; F.sz = F.lz; F.sy = F.ly; }
-      }
-    }
-    return G;
-  }
-  // re-anchor every foot where the body now stands (after a sit/lie/teleport)
-  function gaitReset(G, gx, gz, h, ground, gy) {
-    const D = G.D;
-    for (let i = 0; i < 4; i++) {
-      const F = G.feet[i];
-      F.sw = false; F.u = 0; F.init = true;
-      F.lx = D.feet[i].x; F.lz = D.feet[i].z; F.ly = 0;
-      plantAt(F, F.lx, F.lz, gx, gz, h, ground, gy || 0);
-    }
-  }
-  CBZ.dogGait = { create: gaitCreate, step: gaitStep, reset: gaitReset, mix: gaitMix, toWorld: toWorld, toLocal: toLocal, OFFS: OFFS };
+  const QG = CBZ.quadGait, QR = CBZ.quadRig, LK = CBZ.loftKit;
+  if (!QG || !QR || !LK) { if (W.console) console.error("[dogmodel] needs src/units/kit/{gait,quadrig,loft}.js loaded first"); return; }
+  // per-foot phase offsets [FL, FR, HL, HR] of the three dog gaits (read-only)
+  const OFFS = { walk: QG.DOG.gaits[0].off, trot: QG.DOG.gaits[1].off, gallop: QG.DOG.gaits[2].off };
+  function gaitCreate(D) { return QG.create(D); }
+  const gaitStep = QG.step, gaitReset = QG.reset;
+  function gaitMix(v, K, legLen, out) { return QG.mix(v, K, legLen, out); }
+  CBZ.dogGait = { create: gaitCreate, step: gaitStep, reset: gaitReset, mix: gaitMix, toWorld: QG.toWorld, toLocal: QG.toLocal, OFFS: OFFS };
 
-  // 2-bone IK in the sagittal plane: root (jx, jy) -> joint -> end (tx, ty).
-  // bend -1 puts the joint BEHIND the line (the elbow), +1 in front (the stifle).
-  // Writes the two absolute bone direction angles into out[0], out[1].
-  function ik2(jx, jy, tx, ty, a, b, bend, out) {
-    let dx = tx - jx, dy = ty - jy, d = Math.hypot(dx, dy);
-    const dmin = Math.abs(a - b) + 1e-4, dmax = a + b - 1e-4;
-    if (d < 1e-6) { dx = 0; dy = -1; d = dmin; }
-    const dc = clamp(d, dmin, dmax);
-    const base = Math.atan2(dy, dx);
-    const A = Math.acos(clamp((a * a + dc * dc - b * b) / (2 * a * dc), -1, 1));
-    const t1 = base + bend * A;
-    const ex = jx + a * Math.cos(t1), ey = jy + a * Math.sin(t1);
-    out[0] = t1; out[1] = Math.atan2(ty - ey, tx - ex);
-    return out;
-  }
+  // 2-bone IK in the sagittal plane (CBZ.quadRig.ik2): bend -1 puts the
+  // joint BEHIND the line (the elbow), +1 in front (the stifle).
+  const ik2 = QR.ik2;
   CBZ.dogIK = ik2;
 
   if (typeof module !== "undefined" && module.exports) module.exports = { gait: CBZ.dogGait, dims: dims, BREEDS: BREEDS, ik2: ik2 };
@@ -323,127 +197,22 @@
   if (!THREE) return;
 
   // ==========================================================================
-  //  THE SKELETON
+  //  THE SKELETON — the kit's default quadruped table IS the dog's 24 bones
+  //  (CBZ.quadRig.bones(): root pelvis chest neck head jaw ears, 3 tail,
+  //  hackle, 3 per leg FL FR HL HR)
   // ==========================================================================
-  const BN = { root: 0, pelvis: 1, chest: 2, neck: 3, head: 4, jaw: 5, earL: 6, earR: 7, tail0: 8, tail1: 9, tail2: 10, hackle: 11 };
-  const LEGB = [[12, 13, 14], [15, 16, 17], [18, 19, 20], [21, 22, 23]];   // FL FR HL HR: upper, lower, foot
-  const PARENT = [-1, 0, 0, 2, 3, 4, 4, 4, 1, 8, 9, 2, 2, 12, 13, 2, 15, 16, 1, 18, 19, 1, 21, 22];
-  const NB = 24;
-
-  function bindPoints(D) {
-    const K = D.K, P = new Array(NB);
-    P[0] = [0, 0, 0];
-    P[1] = [D.hipX, D.hipH, 0];
-    P[2] = [D.shX, D.sh, 0];
-    P[3] = [D.neckB.x, D.neckB.y, 0];
-    P[4] = [D.headP.x, D.headP.y, 0];
-    P[5] = [D.jawP.x, D.jawP.y, 0];
-    P[6] = [D.earP.x, D.earP.y, -D.earP.z];
-    P[7] = [D.earP.x, D.earP.y, D.earP.z];
-    P[8] = [D.tailP.x, D.tailP.y, 0];
-    P[9] = [D.tailP.x - D.tailL * 0.33, D.tailP.y, 0];
-    P[10] = [D.tailP.x - D.tailL * 0.66, D.tailP.y, 0];
-    P[11] = [D.hackleP.x, D.hackleP.y, 0];
-    for (let L = 0; L < 4; L++) {
-      const front = L < 2, z = (L % 2 === 0 ? -1 : 1) * (front ? D.legZf : D.legZh);
-      const J = front ? D.FJ : D.HJ, a = front ? D.fa : D.ha, b = front ? D.fb : D.hb;
-      const ids = LEGB[L];
-      P[ids[0]] = [J.x, J.y, z];
-      P[ids[1]] = [J.x, J.y - a, z];
-      P[ids[2]] = [J.x, J.y - a - b, z];
-    }
-    void K;
-    return P;
-  }
+  const TABLE = QR.bones();
+  const BN = TABLE.BN, LEGB = TABLE.LEGB, PARENT = TABLE.PARENT, NB = TABLE.NB;
+  const bindPoints = TABLE.bindPoints;
 
   // ==========================================================================
   //  GEOMETRY — lofted shells, vertex-coloured, rigidly or blend skinned
+  //  (CBZ.loftKit; the top of a ring with `hk` blends toward the hackle bone)
   // ==========================================================================
-  function Geo() { this.p = []; this.c = []; this.si = []; this.sw = []; this.ix = []; this.n = 0; }
-  const _cc = new THREE.Color();
-  Geo.prototype.vert = function (x, y, z, hex, wts) {
-    this.p.push(x, y, z);
-    _cc.setHex(hex); this.c.push(_cc.r, _cc.g, _cc.b);
-    let s = 0; for (let k = 1; k < wts.length; k += 2) s += wts[k];
-    s = s || 1;
-    for (let k = 0; k < 4; k++) {
-      const bi = k * 2 < wts.length ? wts[k * 2] : 0, bw = k * 2 < wts.length ? wts[k * 2 + 1] / s : 0;
-      this.si.push(bi); this.sw.push(bw);
-    }
-    return this.n++;
-  };
-  function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; v[0] /= l; v[1] /= l; v[2] /= l; return v; }
-  function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function Geo() { return LK.geo(); }
+  function loft(G, st, S, colour, opts) { LK.loft(G, st, S, colour, Object.assign({ hkBone: BN.hackle }, opts)); }
+  const ellipsoid = LK.ellipsoid;
 
-  // stations: { x, y, z, rt, rb, w, sq?, wts, tag?, hk? }  (rt = radius toward
-  // "up", rb = away from it, w = sideways). capA / capB close the ends.
-  function loft(G, st, S, colour, opts) {
-    opts = opts || {};
-    const side0 = opts.side || [0, 0, 1];
-    const list = st.slice();
-    function tangentAt(arr, i) {
-      const a = arr[Math.max(0, i - 1)], b = arr[Math.min(arr.length - 1, i + 1)];
-      return norm3([b.x - a.x, b.y - a.y, (b.z || 0) - (a.z || 0)]);
-    }
-    function capRings(endIdx, dir) {
-      const s0 = list[endIdx], t = tangentAt(list, endIdx);
-      const len = Math.min(s0.rt, s0.rb, s0.w) * (opts.capLen || 1.0);
-      const out = [];
-      const ks = [0.78, 0.48, 0.12], ds = [0.32, 0.66, 0.95];
-      for (let k = 0; k < 3; k++) {
-        out.push(Object.assign({}, s0, {
-          x: s0.x + t[0] * len * ds[k] * dir, y: s0.y + t[1] * len * ds[k] * dir, z: (s0.z || 0) + t[2] * len * ds[k] * dir,
-          rt: s0.rt * ks[k], rb: s0.rb * ks[k], w: s0.w * ks[k], cap: k + 1,
-        }));
-      }
-      return out;
-    }
-    let rings = list;
-    if (opts.capA !== false) rings = capRings(0, -1).reverse().concat(rings);
-    if (opts.capB !== false) rings = rings.concat(capRings(list.length - 1, 1));
-    const base = [];
-    for (let i = 0; i < rings.length; i++) {
-      const R = rings[i];
-      const t = tangentAt(rings, i);
-      let up = cross3(side0, t);
-      if (Math.hypot(up[0], up[1], up[2]) < 1e-4) up = [0, 1, 0];
-      norm3(up);
-      const sd = norm3(cross3(t, up));
-      const e = R.sq || 1;
-      base.push(G.n);
-      for (let j = 0; j < S; j++) {
-        const a = TAU * j / S, ca = Math.cos(a), sa = Math.sin(a);
-        const pc = Math.sign(ca) * Math.pow(Math.abs(ca), e), ps = Math.sign(sa) * Math.pow(Math.abs(sa), e);
-        const r = ca >= 0 ? R.rt : R.rb;
-        const x = R.x + up[0] * pc * r + sd[0] * ps * R.w;
-        const y = R.y + up[1] * pc * r + sd[1] * ps * R.w;
-        const z = (R.z || 0) + up[2] * pc * r + sd[2] * ps * R.w;
-        let wts = R.wts;
-        if (R.hk && ca > 0.5) {
-          const hw = R.hk * (ca - 0.5) / 0.5 * 0.85, ow = [];
-          for (let k = 0; k < wts.length; k += 2) ow.push(wts[k], wts[k + 1] * (1 - hw));
-          ow.push(BN.hackle, hw); wts = ow;
-        }
-        G.vert(x, y, z, colour(x, y, z, ca, sa, R, i / (rings.length - 1)), wts);
-      }
-    }
-    for (let i = 0; i < rings.length - 1; i++) {
-      const A = base[i], Bb = base[i + 1];
-      for (let j = 0; j < S; j++) {
-        const j1 = (j + 1) % S;
-        G.ix.push(A + j, A + j1, Bb + j);
-        G.ix.push(A + j1, Bb + j1, Bb + j);
-      }
-    }
-  }
-  function ellipsoid(G, cx, cy, cz, rx, ry, rz, S, colour, wts) {
-    const st = [], n = 5;
-    for (let i = 0; i < n; i++) {
-      const t = -0.86 + 1.72 * i / (n - 1), k = Math.sqrt(1 - t * t);
-      st.push({ x: cx + t * rx, y: cy, z: cz, rt: ry * k, rb: ry * k, w: rz * k, wts: wts });
-    }
-    loft(G, st, S, colour, { capLen: 0.55 });
-  }
 
   // ---- COATS: (part, point, up-ness, side-ness) -> hex ---------------------
   function coatFn(D, coat, seed) {
@@ -675,16 +444,7 @@
       ellipsoid(G, x + pr * 0.55, fy - c, z, pr * 1.45, pr * 0.82, pr * 1.12, 10, function (px, py, pz, ca, sa, R) { return col("foot", px, py, pz, ca, sa, R); }, [ids[2], 1]);
     }
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(G.p, 3));
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(G.c, 3));
-    geo.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(G.si, 4));
-    geo.setAttribute("skinWeight", new THREE.Float32BufferAttribute(G.sw, 4));
-    geo.setIndex(G.ix);
-    geo.computeVertexNormals();
-    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, D.withers * 0.55, 0), D.withers * 1.7);
-    geo._shared = true;
-    return geo;
+    return LK.toGeometry(G, { boundingSphere: [0, D.withers * 0.55, 0, D.withers * 1.7] });
   }
 
   // ==========================================================================

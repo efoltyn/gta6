@@ -114,6 +114,29 @@ export async function launchChrome() {
   return B;
 }
 
+/* attachChrome(dbg, pid) — BORROW a Chrome somebody else runs (the shot
+   service's pool, tools/shot/). Same handle as launchChrome; close() closes
+   only the pages this handle opened and leaves the Chrome to its owner. */
+export async function attachChrome(dbg, pid) {
+  const r = await fetch(`http://127.0.0.1:${dbg}/json/version`);
+  if (!r.ok) throw new Error("testbus: no Chrome on :" + dbg);
+  const mine = new Set();
+  return {
+    dbg, pid, profile: null, startMs: 0, borrowed: true,
+    alive() { try { process.kill(pid, 0); return true; } catch (_) { return false; } },
+    async newPage() {
+      const t = await (await fetch(`http://127.0.0.1:${dbg}/json/new?about:blank`, { method: "PUT" })).json();
+      const pg = await connect(t.webSocketDebuggerUrl);
+      pg.targetId = t.id; mine.add(t.id);
+      pg.closeTarget = async () => { mine.delete(t.id); try { pg.ws.close(); } catch (_) {} try { await fetch(`http://127.0.0.1:${dbg}/json/close/${t.id}`); } catch (_) {} };
+      await pg.send("Runtime.enable"); await pg.send("Page.enable"); await pg.send("Log.enable");
+      await pg.send("Page.addScriptToEvaluateOnNewDocument", { source: PRELOAD });
+      return pg;
+    },
+    async close() { for (const id of mine) { try { await fetch(`http://127.0.0.1:${dbg}/json/close/${id}`); } catch (_) {} } mine.clear(); },
+  };
+}
+
 /* connect(wsUrl) -> a page handle: send, evl(expr, ms), errors, closed */
 export async function connect(wsUrl) {
   const ws = new WebSocket(wsUrl);

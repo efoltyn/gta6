@@ -22,7 +22,7 @@ const ROOT = new URL("../", import.meta.url);
 const read = (f) => readFileSync(new URL(f, ROOT), "utf8");
 const FILES = ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
   "src/entities/tattoo.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js", "src/entities/heritage.js",
-  "src/entities/moves.js", "src/entities/poses.js", "src/entities/moves_posture.js", "src/entities/crowdgpu.js"];
+  "src/entities/moves.js", "src/entities/gait.js", "src/entities/poses.js", "src/entities/soldier.js", "src/entities/moves_posture.js", "src/entities/crowdgpu.js"];
 const ctx = vm.createContext({ console, Math, setTimeout, clearTimeout, performance });
 ctx.window = ctx; ctx.self = ctx; ctx.document = fakeDocument();
 ctx.navigator = { userAgent: "node" }; ctx.location = { search: "", href: "" };

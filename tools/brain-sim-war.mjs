@@ -194,7 +194,9 @@ scenario(1, "morale parity: old warlord + NPC War code vs the brain.morale wrapp
 
   // the wrappers are really what the game files run (anti-drift)
   const wl = fs.readFileSync(path.join(ROOT, "src/warlord/battle.js"), "utf8");
-  const bh = fs.readFileSync(path.join(ROOT, "games/battle.html"), "utf8");
+  // games/battle.html is a thin page now: its code is the src/battle/ files it lists
+  const bhPage = fs.readFileSync(path.join(ROOT, "games/battle.html"), "utf8");
+  const bh = bhPage + [...bhPage.matchAll(/<script src="\.\.\/(src\/battle\/[^"?]+)/g)].map((m) => fs.readFileSync(path.join(ROOT, m[1]), "utf8")).join("\n");
   check(/function moraleFrom\(o\) \{ return MO\(\)\.fromLosses\(o\); \}/.test(wl) && /MO\(\)\.stepRout\(m, m\.side\.morale, nerveOf\(m\)\)/.test(wl) &&
     /MO\(\)\.brokenSide\(side, fled\)/.test(wl) && /MO\(\)\.stepRout\(u, s\.morale, u\.nerve\)/.test(wl) && !/mo -= clamp\(o\.routingFrac/.test(wl),
     "warlord/battle.js runs brain.morale (fromLosses / stepRout x2 / brokenSide), its own formula is gone");
