@@ -7,12 +7,12 @@
    itself use (city / external / pool), then asks GL for LINK_STATUS on every
    program the renderer holds.
 
-     node tools/testbus/submit.mjs --probe tools/probes/water-shaders.mjs --world survival
+     node tools/testbus/submit.mjs --probe tools/probes/water-shaders.mjs --world survival   (the world is the request's)
      node tools/testbus/submit.mjs --probe tools/probes/water-shaders.mjs --world battle --query "map=water"
 
    On the battle page it also asserts that NPC War's own sea sheets were
    adopted into the family (world/water_pages.js). */
-export const meta = { world: "survival", fresh: false, dirties: false, timeoutMs: 900000 };
+export const meta = { fresh: false, dirties: false, timeoutMs: 900000 };
 
 export default async function (t) {
   if (t.world !== "battle") await t.step(20);
