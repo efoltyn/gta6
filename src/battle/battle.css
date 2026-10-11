@@ -258,6 +258,17 @@
   #xhair::before,#xhair::after{content:"";position:absolute;background:#fff;box-shadow:0 0 2px #000}
   #xhair::before{left:10px;top:2px;width:2px;height:18px;clip-path:polygon(0 0,100% 0,100% 35%,0 35%,0 65%,100% 65%,100% 100%,0 100%)}
   #xhair::after{top:10px;left:2px;height:2px;width:18px;clip-path:polygon(0 0,35% 0,35% 100%,0 100%,0 0,65% 0,100% 0,100% 100%,65% 100%)}
+  /* the threat you face (player.js youMarkStep): four corner ticks, tighter
+     and hotter once it is in reach */
+  #youMark{position:fixed;left:0;top:0;display:none;z-index:39;pointer-events:none;
+    --mk:rgba(255,255,255,.85);
+    background:
+      linear-gradient(var(--mk),var(--mk)) left top/10px 2px,linear-gradient(var(--mk),var(--mk)) left top/2px 10px,
+      linear-gradient(var(--mk),var(--mk)) right top/10px 2px,linear-gradient(var(--mk),var(--mk)) right top/2px 10px,
+      linear-gradient(var(--mk),var(--mk)) left bottom/10px 2px,linear-gradient(var(--mk),var(--mk)) left bottom/2px 10px,
+      linear-gradient(var(--mk),var(--mk)) right bottom/10px 2px,linear-gradient(var(--mk),var(--mk)) right bottom/2px 10px;
+    background-repeat:no-repeat;filter:drop-shadow(0 0 2px rgba(0,0,0,.8));transition:width .12s,height .12s}
+  #youMark.close{--mk:#ff7a45}
   #ctl button .n{position:absolute;right:-3px;top:-3px;min-width:16px;height:16px;border-radius:8px;padding:0 4px;
     background:#ffb35c;color:#1a0d04;font:800 10px/16px ui-sans-serif,system-ui,sans-serif;text-align:center}
   #ctl button{position:relative}
