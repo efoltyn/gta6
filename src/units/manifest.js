@@ -28,7 +28,7 @@
     men: { kind: "men", name: "man", plural: "men", group: menGroup },
 
     // ---- land -------------------------------------------------------------
-    gorilla: S("gorilla", "gorillas", "troop"),
+    gorilla: Object.assign(S("gorilla", "gorillas", "troop"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     bengal_tiger: S("Bengal tiger", "Bengal tigers", "streak"),
     lion: S("lion", "lions", "pride"),
     white_lion: S("white lion", "white lions", "pride"),
