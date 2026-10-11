@@ -998,6 +998,164 @@
     }
   });
 
+  /* ---- TRACER ROUNDS IN FLIGHT: CBZ.tracerStreak(x0,y0,z0, x1,y1,z1, opts)
+     A tracer is a burning pellet in the base of one round in N. What the eye
+     keeps of it is a short glowing streak travelling at the round's own speed,
+     not a line from the muzzle to the target drawn in one frame. The caller
+     (who flies the round) hands this the streak's tail and head every step;
+     each one lives a few frames and fades. ONE InstancedMesh, one draw call,
+     whatever the battle is doing. The width grows with distance from the
+     lens so a tracer still reads as a line at 400 m (that is what tracers
+     are FOR). opts: {color (hex), life (s), width (m at 10 m)} */
+  const TS_CAP = 192;
+  let tsMesh = null, tsHead = 0;
+  const tsLife = new Float32Array(TS_CAP), tsMax = new Float32Array(TS_CAP), tsCol = new Float32Array(TS_CAP * 3);
+  const _tsM = new THREE.Matrix4(), _tsQ = new THREE.Quaternion(), _tsS = new THREE.Vector3(), _tsP = new THREE.Vector3(), _tsD = new THREE.Vector3();
+  const _tsC = new THREE.Color(), ZERO_M = new THREE.Matrix4().makeScale(0, 0, 0);
+  function ensureTs() {
+    if (tsMesh) return tsMesh;
+    const geo = new THREE.CylinderGeometry(1, 1, 1, 5, 1, true);
+    geo.translate(0, 0.5, 0);                       // base at the tail, +Y to the head
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95,
+      blending: THREE.AdditiveBlending, depthWrite: false });
+    tsMesh = new THREE.InstancedMesh(geo, mat, TS_CAP);
+    tsMesh.name = "gunfx-tracers"; tsMesh.userData.fx = true;
+    tsMesh.frustumCulled = false; tsMesh.renderOrder = 9;
+    for (let i = 0; i < TS_CAP; i++) { tsMesh.setMatrixAt(i, ZERO_M); tsMesh.setColorAt(i, _tsC.setRGB(0, 0, 0)); }
+    tsMesh.instanceMatrix.needsUpdate = true;
+    if (tsMesh.instanceColor) tsMesh.instanceColor.needsUpdate = true;
+    scene.add(tsMesh);
+    return tsMesh;
+  }
+  CBZ.tracerStreak = function (x0, y0, z0, x1, y1, z1, opts) {
+    const M = ensureTs();
+    _tsD.set(x1 - x0, y1 - y0, z1 - z0);
+    const len = _tsD.length();
+    if (len < 0.05) return;
+    _tsD.multiplyScalar(1 / len);
+    const cam = CBZ.camera && CBZ.camera.position;
+    const dc = cam ? Math.hypot(x1 - cam.x, y1 - cam.y, z1 - cam.z) : 30;
+    const w = ((opts && opts.width) || 0.016) * Math.max(1, dc / 32);
+    const i = tsHead; tsHead = (tsHead + 1) % TS_CAP;
+    _tsQ.setFromUnitVectors(UP, _tsD);
+    _tsS.set(w, len, w);
+    _tsP.set(x0, y0, z0);
+    _tsM.compose(_tsP, _tsQ, _tsS);
+    M.setMatrixAt(i, _tsM);
+    _tsC.setHex((opts && opts.color) != null ? opts.color : 0xff6a30);
+    tsCol[i * 3] = _tsC.r; tsCol[i * 3 + 1] = _tsC.g; tsCol[i * 3 + 2] = _tsC.b;
+    M.setColorAt(i, _tsC);
+    tsLife[i] = tsMax[i] = (opts && opts.life) || 0.05;
+    M.instanceMatrix.needsUpdate = true;
+    if (M.instanceColor) M.instanceColor.needsUpdate = true;
+  };
+
+  /* ---- BRASS: CBZ.ejectBrass(pos, right, opts)
+     The case leaves the ejection port to the right and a little forward at a
+     few metres a second, tumbles, hits the ground, skips once or twice and
+     lies there. A battle leaves a carpet of it. Pooled in ONE InstancedMesh
+     (the oldest case recycles), each case sized to its cartridge (opts.mm
+     bore, opts.len case length), shotgun hulls red. opts: {mm, len, shell,
+     groundY, fwd: {x,z} the gun's facing} */
+  const BR_CAP = 360;
+  let brMesh = null, brHead = 0, brLive = 0;
+  const BR = [];
+  const _brE = new THREE.Euler(), _brC = new THREE.Color();
+  function ensureBrass() {
+    if (brMesh) return brMesh;
+    const geo = new THREE.CylinderGeometry(1, 1, 1, 7);
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0x2a1800, emissiveIntensity: 0.25 });
+    brMesh = new THREE.InstancedMesh(geo, mat, BR_CAP);
+    brMesh.name = "gunfx-brass"; brMesh.userData.fx = true;
+    brMesh.frustumCulled = false;
+    brMesh.castShadow = false; brMesh.receiveShadow = false;
+    for (let i = 0; i < BR_CAP; i++) {
+      brMesh.setMatrixAt(i, ZERO_M);
+      brMesh.setColorAt(i, _brC.setHex(0xd6a33b));
+      BR.push({ on: false, rest: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, wx: 0, wz: 0, gy: 0, r: 0.005, l: 0.045, t: 0 });
+    }
+    brMesh.instanceMatrix.needsUpdate = true;
+    if (brMesh.instanceColor) brMesh.instanceColor.needsUpdate = true;
+    scene.add(brMesh);
+    return brMesh;
+  }
+  function brWrite(i) {
+    const b = BR[i];
+    _brE.set(b.rx, b.ry, b.rz);
+    _tsQ.setFromEuler(_brE);
+    _tsS.set(b.r, b.l, b.r);
+    _tsP.set(b.x, b.y, b.z);
+    _tsM.compose(_tsP, _tsQ, _tsS);
+    brMesh.setMatrixAt(i, _tsM);
+  }
+  CBZ.ejectBrass = function (pos, right, opts) {
+    opts = opts || {};
+    const M = ensureBrass();
+    const i = brHead; brHead = (brHead + 1) % BR_CAP;
+    const b = BR[i];
+    const fx = opts.fwd ? opts.fwd.x : 0, fz = opts.fwd ? opts.fwd.z : 0;
+    const sp = 2.6 + rng() * 1.6;
+    b.on = true; b.rest = false; b.t = 0;
+    b.x = pos.x + right.x * 0.06; b.y = pos.y; b.z = pos.z + right.z * 0.06;
+    b.vx = right.x * sp + fx * (0.4 + rng() * 0.6) + (rng() - 0.5) * 0.5;
+    b.vz = right.z * sp + fz * (0.4 + rng() * 0.6) + (rng() - 0.5) * 0.5;
+    b.vy = 1.4 + rng() * 1.4;
+    b.rx = rng() * 6.28; b.ry = rng() * 6.28; b.rz = rng() * 6.28;
+    b.wx = (rng() - 0.5) * 50; b.wz = (rng() - 0.5) * 50;
+    b.gy = opts.groundY != null ? opts.groundY : pos.y - 1.3;
+    const mm = opts.shell ? 20 : (opts.mm || 5.7) * 1.95;      // the CASE is fatter than the bullet
+    b.r = mm / 2000; b.l = opts.len || (opts.shell ? 0.07 : 0.045);
+    M.setColorAt(i, _brC.setHex(opts.shell ? 0xa8231c : 0xd6a33b));
+    if (M.instanceColor) M.instanceColor.needsUpdate = true;
+    brWrite(i);
+    M.instanceMatrix.needsUpdate = true;
+    brLive++;
+  };
+  CBZ.brassReset = function () {
+    if (!brMesh) return;
+    for (let i = 0; i < BR_CAP; i++) { BR[i].on = false; brMesh.setMatrixAt(i, ZERO_M); }
+    brMesh.instanceMatrix.needsUpdate = true; brLive = 0;
+  };
+  CBZ.onAlways(54.5, function (dt) {
+    if (tsMesh) {
+      let any = false;
+      for (let i = 0; i < TS_CAP; i++) {
+        if (tsLife[i] <= 0) continue;
+        tsLife[i] -= dt;
+        any = true;
+        if (tsLife[i] <= 0) { tsMesh.setMatrixAt(i, ZERO_M); tsMesh.instanceMatrix.needsUpdate = true; continue; }
+        const k = tsLife[i] / tsMax[i];
+        _tsC.setRGB(tsCol[i * 3] * k, tsCol[i * 3 + 1] * k, tsCol[i * 3 + 2] * k);
+        tsMesh.setColorAt(i, _tsC);
+      }
+      if (any && tsMesh.instanceColor) tsMesh.instanceColor.needsUpdate = true;
+    }
+    if (brMesh && brLive > 0 && dt > 0) {
+      const h = Math.min(dt, 0.05);
+      let moved = false;
+      for (let i = 0; i < BR_CAP; i++) {
+        const b = BR[i];
+        if (!b.on || b.rest) continue;
+        b.t += h;
+        b.vy -= 9.81 * h;
+        b.x += b.vx * h; b.y += b.vy * h; b.z += b.vz * h;
+        b.rx += b.wx * h; b.rz += b.wz * h;
+        if (b.y <= b.gy + b.r) {
+          b.y = b.gy + b.r;
+          if (Math.abs(b.vy) < 0.7 || b.t > 2.5) {
+            // down: lying on its side, rolled to a stop
+            b.rest = true; b.rx = Math.PI / 2; b.rz = 0; b.ry = rng() * 6.28;
+          } else {
+            b.vy = -b.vy * 0.32; b.vx *= 0.5; b.vz *= 0.5; b.wx *= 0.55; b.wz *= 0.55;
+          }
+        }
+        brWrite(i);
+        moved = true;
+      }
+      if (moved) brMesh.instanceMatrix.needsUpdate = true;
+    }
+  });
+
   // ---- FIRST-SHOT PREWARM (same de-spike as crashfx's first-blast block) ----
   // The tracer Line, the muzzle-flash sprite and the impact textures were all
   // minted lazily on the FIRST shot of a session — and r128 only compiles a

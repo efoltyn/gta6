@@ -1,0 +1,26 @@
+{
+  "channel": "web",
+  "status": "blocked",
+  "repository": "efoltyn/gta6",
+  "branch": "gh-pages",
+  "url": "https://efoltyn.github.io/gta6/prison-escape.html",
+  "baseDeploymentCommit": "791ead127b613d9d3deb5454b872a83858995b11",
+  "manifestSha256": "ac30aacaa854e00b20408bbd51654923d861124ed433f78e22b1f91b859f56c0",
+  "changedFiles": [
+    "src/systems/prisoncars.js",
+    "src/systems/interact.js",
+    "release-manifest.json"
+  ],
+  "checks": [
+    "deployed bytes matched manifest",
+    "JavaScript syntax valid",
+    "six runtime labels and phrases verified",
+    "old car labels absent"
+  ],
+  "published": false,
+  "blockers": [
+    "Shell GitHub access failed: Could not resolve host github.com",
+    "GitHub create_tree rejected: MCP tool call requires approval, but approval policy is never"
+  ],
+  "nextAction": "Publish prepared publication.json through an authorized GitHub write session, then verify the Pages deployment and served manifest."
+}
