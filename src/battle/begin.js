@@ -138,6 +138,11 @@ function begin(asBench) {
   }
   spawnCount.red = SET.redN; spawnCount.blue = SET.blueN;
   spawnTotal = SET.redN + SET.blueN;
+  /* A BATTLE BIGGER THAN THE FULL RIGS THIS DEVICE CARRIES is fought in
+     tiers (src/battle/mass.js): the rows are spawned now, the nearest
+     squads get rigs as the lens reaches them. A smaller one never enters. */
+  MASS.begin(asBench);
+  SETTINGS.apply();                     // shadows, the pixel ceiling, the crowd's bands (src/battle/settingspanel.js)
 
   cam.focus.set(MAP.cx, MAP.groundAt(MAP.cx, MAP.cz) + 2, MAP.cz);
   cam.wFocus.copy(cam.focus);
