@@ -321,7 +321,6 @@
     for (let i = 0; i < b.length; i += 2) m.set(b[i], (m.get(b[i]) || 0) + b[i + 1] * t);
     const out = [];
     m.forEach(function (w, k) { if (w > 1e-4) out.push(k, w); });
-    out.sort(function (u, v) { return 0; });
     // keep the four heaviest
     const pairs = [];
     for (let i = 0; i < out.length; i += 2) pairs.push([out[i], out[i + 1]]);
@@ -575,7 +574,9 @@
     const H = Math.max(D.FJ.y, D.HJ.y) * ind, fr = 0.03 * ind;
     const legs = [];
     for (let Lg = 0; Lg < 4; Lg++) {
-      const f = D.feet[Lg], x = f.x * ind, z = f.z * ind;
+      // the solver merges columns closer than 0.14 m: a narrow-tracked cat's
+      // hind feet would read as one leg, so the markers stand at least 0.16 apart
+      const f = D.feet[Lg], x = f.x * ind, z = Math.sign(f.z) * Math.max(0.08, Math.abs(f.z) * ind);
       proxy(group, 0.05, H, 0.05, x, H / 2, z, "col" + Lg);
       const A = proxy(group, 0.02, 0.02, 0.02, x, H, z, "A" + Lg);
       const Kk = proxy(group, 0.02, 0.02, 0.02, x, (fr + H) / 2, z, "K" + Lg);
@@ -1068,7 +1069,7 @@
       fy -= rootY;
       // overrides (fight poses, the leap)
       const o = ov[Lg];
-      if (o) { fx = o.x; fy = o.y - (leapU >= 0 ? 0 : 0); fa = o.a; abd = o.abd || 0; if (leapU >= 0) fy = o.y; }
+      if (o) { fx = o.x; fy = o.y; fa = o.a; abd = o.abd || 0; }   // in the root's frame (on a leap the legs ride up with it)
       // sphinx
       if (lieK > 0.001) {
         const lx = front ? D.shX + (0.32 + 0.1) * k : pX + 0.2 * k, la = front ? 0.05 : 0.02;
@@ -1259,7 +1260,7 @@
     F.side = side; F.vAtk = Math.abs(st.v); F.kd = false;
   }
   function pickMove(S, m, st, t, cls, R) {
-    const F = st.f, id = S.id, r = R.rng();
+    const F = st.f, r = R.rng();
     if (cls.bigger) return "swat";
     const isDown = downed(t) || F.downT > 0;
     if (S.style === "courser") {
@@ -1272,7 +1273,6 @@
     if (isDown) return "nape";
     if (cls.man || cls.ratio > 1.3) return r < 0.6 ? "grapple" : (r < 0.8 ? "pin" : "swat");
     return r < 0.55 ? "pin" : (r < 0.8 ? "bite" : "swat");
-    void id;
   }
   function knock(t, ux, uz, dur, power) {
     if (!t || t.beast || t.vehicle || t.dead) return false;
@@ -1427,7 +1427,7 @@
     if (!F.hit && p >= F.at) {
       F.hit = true;
       if (t.dummy || cls.veh) RES.missed = true;
-      else if (d <= mouthD + mv.reach * (yv.rng || 1)) deal(S, m, st, t, cls, F, ux, uz, dmgK * (yv.pow || 1) / (S.moves[id] ? 1 : 1), opts, R);
+      else if (d <= mouthD + mv.reach * (yv.rng || 1)) deal(S, m, st, t, cls, F, ux, uz, dmgK * (yv.pow || 1), opts, R);
       else RES.missed = true;
     }
     if (F.youHold && F.hit && !t.dummy && !t.dead && d <= mouthD + 0.9) {
