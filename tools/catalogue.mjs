@@ -156,10 +156,26 @@ function vehicleJs(id, P) {
       var by = { vehicle: true, team: "blue", pos: { x: u.pos.x - Math.sin(u.h) * 60, y: u.pos.y, z: u.pos.z - Math.cos(u.h) * 60 },
         _shot: { pen: 3000, beh: 5000, he: true, cls: "atgm" } };
       for (var i = 0; i < 8 && hurt && !u.dead; i++) hurt(u, 1e9, { byTeam: "blue", by: by, cause: "shot" });
-      // the shot's lens skips the dead: from here the field it frames is the wreck
-      B.roster = function () { return [u]; };
+      /* the shot's lens skips the dead, and the wreck's group bounds can hold
+         thrown parts far off the hull: from here the lens is an invisible hull-
+         sized box that follows the hull's CURRENT position every step */
+      var L = Math.max(2, (u.vlen || 3) * 2), Hh = Math.max(1, u.vheight || 2.5), Wd = Math.max(1.5, (u.vwid || 1.5) * 2);
+      var box = new THREE.Mesh(new THREE.BoxGeometry(Wd, Hh, L), new THREE.MeshBasicMaterial());
+      box.visible = false; box.frustumCulled = false; CBZ.scene.add(box);
+      proxy = { group: box, pos: box.position, unitId: ID, vehicle: true, team: "red", dead: false, i: 0 };
+      follow();
+      B.roster = function () { return [proxy]; };
     } },
   ];
+  var proxy = null;
+  function follow() {
+    if (!proxy) return;
+    proxy.group.position.set(u.pos.x, u.pos.y + proxy.group.geometry.parameters.height / 2, u.pos.z);
+    proxy.group.rotation.set(0, u.group ? u.group.rotation.y : -u.h, 0);
+    proxy.group.updateMatrixWorld(true);
+  }
+  var restore0 = window.__catRestore;
+  window.__catRestore = function () { if (proxy && proxy.group.parent) proxy.group.parent.remove(proxy.group); restore0(); };
   B.advance = function (sec, step) {
     var end = T + sec;
     while (ev.length && ev[0].at <= end + 1e-6) {
@@ -169,6 +185,7 @@ function vehicleJs(id, P) {
     }
     if (end > T) adv.call(B, end - T, step);
     T = end;
+    follow();
   };
 })();`;
 }
@@ -224,12 +241,12 @@ async function bootTree(B, label, commit, map) {
 }
 const decode = (url) => Buffer.from(String(url).split(",")[1] || "", "base64");
 async function shoot(T, cam, file) {
-  const r = await T.pg.evl(`__shot.shot(${JSON.stringify(cam)}, ${W}, ${H}, "image/jpeg")`, 90e3);
+  const r = await T.pg.evl(`__shot.shot(${JSON.stringify(cam)}, ${W}, ${H}, "image/jpeg")`, 180e3);
   if (!r || r.error || !r.url) throw new Error((r && r.error) || "no frame");
   writeFileSync(file, decode(r.url));
 }
 async function stage(T, spec) {
-  const st = await T.pg.evl(`__shot.stage(${JSON.stringify(spec)})`, 120e3);
+  const st = await T.pg.evl(`__shot.stage(${JSON.stringify(spec)})`, 240e3);
   if (!st || !st.ok) throw new Error((st && st.error) || "stage failed");
   return st;
 }
