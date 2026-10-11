@@ -1339,7 +1339,11 @@
     }) : new THREE.MeshLambertMaterial({ color: 0x2f6f9e });
     const ocean = new THREE.Mesh(oceanGeo, oceanMat);
     if (!sharedWater) ocean.rotation.x = -Math.PI / 2;
-    ocean.position.set(cx, OCEAN_Y, cz);
+    // The shared sea is a camera-centred radial disc (world/water_spec.js
+    // re-centres it in the vertex program), so the mesh sits at x = z = 0.
+    const oceanRadial = !!(oceanGeo.userData && oceanGeo.userData.waterDisasterGrid && oceanGeo.userData.waterDisasterGrid.radial);
+    if (oceanRadial) ocean.position.set(0, OCEAN_Y, 0);
+    else ocean.position.set(cx, OCEAN_Y, cz);
     ocean.receiveShadow = false; root.add(ocean);
     ocean.name = "survival-ocean";
     // SEA_TRANSLUCENT: the sea blends now, so it joins the transparent list —
@@ -1393,6 +1397,20 @@
     let dryR = R;
     for (let r = R * 0.6; r < R + 60; r += 0.5) { if (groundHeightAt(cx + r, cz) < OCEAN_Y + 0.35) { dryR = r; break; } }
     const dryU = oceanMat.uniforms && oceanMat.uniforms.uDwDryDisc;
+    /* THE SHORE FIELD (WATER V3). The island sea had no idea where the land
+       was: no surf line, no turquoise over the sand, no caustics in the
+       shallows, and the swell striped up the beach until the dry disc was
+       invented to sink it. The same four-channel field the city bakes from
+       its coastline is baked here from the island's own ground (depth, not
+       distance), a slice per frame while the sea is driven, so it never lands
+       on the load path. Covers the island and its shelf; past that the sea is
+       open water, which is what it is. */
+    if (sharedWater && CBZ.waterBakeField && CBZ.waterSetField) {
+      CBZ.waterSetField(ocean, CBZ.waterBakeField({
+        cx: cx, cz: cz, half: R + 700, size: 512, seaY: OCEAN_Y,
+        groundAt: function (x, z) { return groundHeightAt(x, z); },
+      }));
+    }
     if (CBZ.onUpdate) CBZ.onUpdate(47.9, function () {
       if (!arena || !CBZ.game || !CBZ.islandModeOn(CBZ.game.mode)) return;
       ocean.position.y = arena_meanY();
@@ -1401,7 +1419,7 @@
         dryU.value.set(cx, cz, dryR, 3 * Math.max(0, Math.min(1, 1 - Math.max(0, sg) / 0.5)));
       }
       const cam = CBZ.camera;
-      if (cam) {
+      if (cam && !oceanRadial) {
         ocean.position.x = cx + Math.round((cam.position.x - cx) / oceanPitch) * oceanPitch;
         ocean.position.z = cz + Math.round((cam.position.z - cz) / oceanPitch) * oceanPitch;
       }
@@ -1556,6 +1574,8 @@
       seabed.rotation.x = -Math.PI / 2; seabed.position.set(cx, 0, cz);
       seabed.receiveShadow = true;
       seabed.userData.terrain = true;    // batch.js / farcull.js keep their hands off
+      // sunlight caustics on the sand under the shallows (world/water_spec.js)
+      if (CBZ.waterCausticsApply) CBZ.waterCausticsApply(seabed);
       root.add(seabed);
     })();
 
@@ -1619,6 +1639,7 @@
       mesh.position.set(cx, 0, cz);
       mesh.receiveShadow = true;
       mesh.userData.terrain = true;
+      if (CBZ.waterCausticsApply) CBZ.waterCausticsApply(mesh);
       root.add(mesh);
     })();
 
