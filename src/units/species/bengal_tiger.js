@@ -153,7 +153,7 @@
        ride     claws and teeth on a giant's hindquarters, 35 a stroke
      x (mass/220)^(2/3) for this tiger, x (0.7 + 0.3 hp) wounded, x1.25 from
      behind / 0.85 head-on. battle.html then applies the target's soak. */
-  const HIT = { bite: 85, hold: 45, swipe: 48, pounce: 32, paw: 40, neck: 70, ride: 35, slap: 6 };
+  const HIT = { bite: 120, hold: 55, swipe: 48, pounce: 32, paw: 40, neck: 70, ride: 35, slap: 6 };
 
   // ---- the gait: lateral walk, a rarely used trot, the rotary half-bound
   let TABLE = null;
@@ -580,7 +580,7 @@
   }
   // the ragdoll's handles: invisible boxes it can find by its own leg test
   let _proxMat = null;
-  let KEEL = 0.6;
+  let KEEL = 1.3;
   function proxyGeos(D) {
     const THREE = W.THREE, A = D.A;
     const g = function (w, h, d) { const b = new THREE.BoxGeometry(w, h, d); b._shared = true; return b; };
@@ -727,7 +727,7 @@
       rng: mkRng(hash32(rig.seed * 7 + 3)), clock: 0, now: null,
       stam: 1, chaseCur: 0, mode: "prowl", v: 0, turn: 0, px: null, pz: null, ph: 0,
       lastHp: m.hp, lastHitT: -99, dmgWin: 0, fl: null, limpLeg: -1, limpSev: 0, limp: 0,
-      contactT: 0, mockT: 0, mockCd: 3, faceT: 0, idleT: 0,
+      contactT: 0, flee: 0, tkp: null, tkx: 0, tkz: 0, missT: -9, mockT: 0, mockCd: 3, faceT: 0, idleT: 0,
       coverPt: null, coverBuf: null, coverT: 0, coverCd: 0, seeCd: 0, hidden: false, ambushT: 0,
       mv: null, mvT: 0, mvDur: 1, mvHit: 0, next: null, cd: 0, leap: 0, side: 0, tick: 0,
       tk: null, tkind: null, faced: false, lookY: 0, lookP: 0,
@@ -808,6 +808,15 @@
     const sprint = topNow * lerp(0.42, 1, sstep(0.04, 0.45, T.stam));
     const t = liveTgt(m);
     let want = 1.25, mode = "prowl";
+    if (m.you) {
+      // POSSESSED: the player walks it (march) or runs it (chase); the mind
+      // only keeps the body's limits: stamina, wounds, the limp
+      T.mode = "you"; T.coverPt = null; T.hidden = false;
+      m.tn.chase = sprint; m.tn.march = Math.min(3.4, sprint); m.tn.brave = true;
+      T.chaseCur = Math.abs(T.v);
+      T.idleT = av < 0.2 && !t ? T.idleT + sdt : 0;
+      return;
+    }
     if (!t) {
       if (m.state === "flee") { mode = "flee"; want = sprint * 0.95; }
     } else {
@@ -969,6 +978,11 @@
     const keep = (m.rad || 0.9) + (tgt.rad || 0.45), gap = d - keep;
     const kind = kindOf(T, tgt), want = Math.atan2(dz, dx);
     RES.inRange = gap < 1.2;
+    // how fast the mark is getting away (its velocity along the line)
+    if (T.tkp === tgt) T.flee = approach(T.flee, ((tgt.pos.x - T.tkx) * nx + (tgt.pos.z - T.tkz) * nz) / dt, 8, dt);
+    else { T.tkp = tgt; T.flee = 0; }
+    T.tkx = tgt.pos.x; T.tkz = tgt.pos.z;
+    if (opts && opts.youMove) { fightYou(m, T, tgt, dt, opts, gap, nx, nz, want, kind); return RES; }
     if (T.mv) { runMove(m, T, tgt, dt, opts, gap, nx, nz, want, kind); return RES; }
     turnTo(m, want, dt, 6.5);
     if (T.cd > 0) T.cd -= dt;
@@ -980,8 +994,15 @@
       return RES;
     }
     if (kind === "man" || kind === "small" || kind === "prey") {
-      if (T.cd <= 0 && gap > 1.25 && gap < 5.2 && facing(m, want, 0.5)) { startMove(T, "pounce"); T.leap = gap - 0.1; }
-      else if (gap > 0.45) moveIn(m, opts, nx, nz, (T.mode === "stalk" ? 1.2 : spd) * dt);
+      // a pounce that just missed a runner is followed by a chase, not
+      // another pounce from a standstill
+      // a runner is run down first and only leapt on from close behind
+      const chasing = T.clock - (T.missT || -9) < 1.2 || (T.flee > 2.5 && gap > 2.2);
+      if (T.cd <= 0 && !chasing && gap > 1.25 && gap < 5.2 && facing(m, want, 0.5)) {
+        startMove(T, "pounce"); T.leap = gap - 0.1;
+        if (Math.abs(T.v) > 4) T.mvT = 0.1 * T.mvDur;      // already running: no crouch to load
+      }
+      else if (gap > 0.45) moveIn(m, opts, nx, nz, (T.mode === "stalk" ? 1.2 : Math.max(spd, chasing ? T.top * 0.8 : 0)) * dt);
       else if (T.cd <= 0) {
         if (downed(tgt) || (kind === "prey" && massOf(tgt) < T.M * 1.6)) startMove(T, "hold");
         else startMove(T, r() < 0.55 ? "swipe" : "bite");
@@ -1011,14 +1032,58 @@
     return RES;
   }
 
+  /* THE PLAYER'S ATTACK (src/battle/player.js): the possessed driver chose a
+     move through moves() below and calls this every step with opts.youMove.
+     The same move code runs; the driver carries any leap itself, owns the
+     chaining, and reads the swing's progress off m._atkAnim (-1 = done). */
+  const YOU_MAP = { pounce: "pounce", swipe: "swipe", bite: "bite", throat: "hold", rear: "rear", maul: "swipe", leap: "pounce", snap: "bite" };
+  function fightYou(m, T, t, dt, opts, gap, nx, nz, want, kind) {
+    const ym = opts.youMove;
+    if (T.youMv !== ym) {
+      T.youMv = ym;
+      const nm = YOU_MAP[ym.id] || (ym.style === "pounce" ? "pounce" : ym.style === "bite" ? "bite" : "swipe");
+      startMove(T, nm, nm === "hold" ? 0.8 : (nm === "rear" ? 1.2 : 0));
+      T.leap = 0; T.next = null; T.you = true; T.side = T.rng() < 0.5 ? -1 : 1;
+    }
+    if (!T.mv) { m._atkAnim = -1; return; }
+    const cur = T.mv;
+    runMove(m, T, t, dt, opts, gap, nx, nz, want, kind);
+    if (T.mv !== cur) T.mv = null;                     // no chaining: the player chains
+    m._atkAnim = T.mv ? clamp(T.mvT / T.mvDur, 0, 0.999) : -1;
+    if (!T.mv) { T.you = false; T.youMv = null; }
+  }
+
+  // the moves hook: which of its real attacks a player's ATTACK throws
+  function moves(m, t, ctx) {
+    ctx = ctx || {};
+    const T = brain(m);
+    const reach = ctx.reach || 2.4, dist = ctx.dist == null ? 99 : ctx.dist;
+    const running = !!ctx.sprint || (ctx.chase > 0 && ctx.speed > ctx.chase * 0.5);
+    const M = CBZ.unitMoves && CBZ.unitMoves.MOVES;
+    const mv = function (id, style, pow, dur, rng, leap, cd) { return { id: id, style: style, pow: pow, dur: dur, rng: rng, leap: leap || 0, cd: cd }; };
+    if (t && dist > reach * 1.05 && dist < reach * 2.8 && running) return mv("pounce", "pounce", 1.4, MOVES.pounce, 1.1, 1, 0.9);
+    if (ctx.downed) return mv("throat", "maul", 1.8, 0.8, 1.05, 0, 0.6);
+    const k = T && t ? kindOf(T, t) : "man";
+    if (k === "rival" && (ctx.n || 1) % 3 === 2) return mv("rear", "maul", 1.2, 1.2, 1.0, 0, 0.5);
+    if ((ctx.n || 1) % 3 === 0) return M ? M.bite : mv("bite", "bite", 1.05, MOVES.bite, 1, 0, 0.5);
+    return mv("swipe", "maul", 1.0, MOVES.swipe, 1.0, 0, 0.4);
+  }
+
   function runMove(m, T, t, dt, opts, gap, nx, nz, want, kind) {
     T.mvT += dt;
     const p = T.mvT / T.mvDur, mv = T.mv;
     switch (mv) {
       case "pounce": case "leapon": {
-        turnTo(m, want, dt, p < 0.26 ? 8 : 2.5);
-        if (p >= 0.26 && p < 0.8) moveIn(m, opts, nx, nz, T.leap / (0.54 * T.mvDur) * dt);
-        if (!T.mvHit && p >= 0.8) {
+        turnTo(m, want, dt, p < 0.26 ? 8 : 3.5);
+        // the leap homes on the mark (a running man is caught by the arc, not
+        // by where he stood at take-off): ~10-12 m/s through the air
+        if (p >= 0.26 && p < 0.8 && T.leap > 0) {
+          const st = Math.min(Math.max(0, gap - 0.05), Math.max(11, (T.flee || 0) + 7, T.leap / (0.54 * T.mvDur)) * dt);
+          moveIn(m, opts, nx, nz, st);
+        }
+        // the paws arrive when the body does: contact ends the flight early
+        if (!T.mvHit && p >= 0.45 && p < 0.8 && gap < 0.35 && facing(m, want, 0.95)) T.mvT = T.mvDur * 0.8;
+        if (!T.mvHit && T.mvT >= T.mvDur * 0.8) {
           T.mvHit = 1;
           if (gap < 0.95 && facing(m, want, 0.95)) {
             if (mv === "pounce") {
@@ -1026,14 +1091,14 @@
               knockDown(t, 2.8);
               T.next = (kind === "man" || kind === "small" || (kind === "prey" && massOf(t) < T.M * 1.6)) ? "hold" : "recover";
             } else { deal(m, T, t, HIT.ride, opts, false); T.next = "ride"; }
-          } else { RES.missed = true; T.next = "recover"; }
+          } else { RES.missed = true; T.next = "recover"; T.missT = T.clock; }
         }
         break;
       }
       case "hold": {
         // jaws on the nape or the throat; the body over the victim
         turnTo(m, want, dt, 4);
-        if (gap > 1.2) { T.mvT = T.mvDur; break; }               // it got away
+        if (gap > (downed(t) ? 1.8 : 1.1)) { T.mvT = T.mvDur; break; }   // it got away
         if (gap > 0.1) moveIn(m, opts, nx, nz, Math.min(gap, 1.5 * dt));
         T.tick -= dt;
         if (T.tick <= 0) {
@@ -1042,7 +1107,7 @@
           deal(m, T, t, first ? HIT.bite : HIT.hold * 0.5, opts, true);
           knockDown(t, 1.2);
         }
-        if (!t.beast && !t.vehicle) T.mvT = Math.min(T.mvT, T.mvDur * 0.9);   // a man is held till he is dead
+        if (!t.beast && !t.vehicle && !T.you) T.mvT = Math.min(T.mvT, T.mvDur * 0.9);   // a man is held till he is dead
         break;
       }
       case "swipe": {
@@ -1116,7 +1181,7 @@
     think(m, T, sdt);
     // running for cover steers the body (think() re-aims it at the mark on
     // its own tick; this answers it every frame while the dash lasts)
-    if (T.coverPt && m.target && m.target.set) m.target.set(T.coverPt.x, 0, T.coverPt.z);
+    if (T.coverPt && !m.you && m.target && m.target.set) m.target.set(T.coverPt.x, 0, T.coverPt.z);
     pose(m, T, rig, sdt);
   }
   function measure(m, T, dt) {
@@ -1443,7 +1508,7 @@
 
   CBZ.unitKit.register(ID, {
     kind: "species", stats: STATS, build: build, animate: animate, fight: fight,
-    poseMove: poseMove, dims: dims, SEX: SEX, HIT: HIT,
+    moves: moves, poseMove: poseMove, dims: dims, SEX: SEX, HIT: HIT,
   });
   // the true mass, for systems/bodymass.js (its row value wins over scale^3)
   const row = CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES[ID];
