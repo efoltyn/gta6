@@ -92,9 +92,9 @@ function sandboxRun(src, CBZ) {
   vm.runInNewContext(src, ctx, { timeout: 2000 });
   return ctx;
 }
-function manifest() {
+function manifest(commit = afterC) {
   const C = {};
-  try { sandboxRun(g(["show", `${afterC}:src/units/manifest.js`]), C); } catch (e) { log("manifest threw:", e.message); }
+  try { sandboxRun(g(["show", `${commit}:src/units/manifest.js`]), C); } catch (e) { log("manifest threw:", e.message); }
   return C.UNIT_MANIFEST || {};
 }
 function unitDef(id) {
@@ -257,6 +257,7 @@ async function unstage(T) {
 async function runTree(T, units, withAction, failed) {
   let n = 0;
   for (const U of units) {
+    if (!withAction && U.isNew) continue;          // a new unit has nothing to show on BEFORE
     const dir = path.join(RAW, U.id); mkdirSync(dir, { recursive: true });
     const t0 = Date.now();
     try {
@@ -307,7 +308,7 @@ function squeeze(src, base) {
 }
 function collect(U, failed) {
   const out = { before: {}, after: {}, action: [] }, dir = path.join(RAW, U.id);
-  for (const side of ["before", "after"]) for (const [name] of TT) {
+  for (const side of U.isNew ? ["after"] : ["before", "after"]) for (const [name] of TT) {
     const p = squeeze(path.join(dir, `${side}-tt-${name}.jpg`), `${U.id}-${side}-${name}`);
     if (p) out[side][name] = p; else if (!failed.some((f) => f.startsWith(`${U.id} ${side}`))) failed.push(`${U.id} ${side} ${name}: no frame`);
   }
@@ -420,12 +421,12 @@ function section(U, M, shots, n) {
     ? `<figure><img src="${SRC(shots[side][k], 480)}"${lazy} alt=""><figcaption>${TT_LABEL[k]}</figcaption></figure>` : `<figure class="miss"><figcaption>${TT_LABEL[k]}: no frame</figcaption></figure>`).join("");
   const act = shots.action.map((a) => `<figure><img src="${SRC(a.src, 640)}"${lazy} alt=""><figcaption>${esc(a.label)}</figcaption></figure>`).join("");
   return `<section class="unit" id="${U.id}">
-  <header><div class="num">${String(n).padStart(2, "0")}</div><div><h2>${esc(name)}</h2><p class="sub">${esc(U.title)}</p></div></header>
+  <header><div class="num">${String(n).padStart(2, "0")}</div><div><h2>${esc(name)}${U.isNew ? ` <span class="new">New unit</span>` : ""}</h2><p class="sub">${esc(U.title)}</p></div></header>
   ${ba}
   <div class="grid2">
     <div>
       <h3>Turntable <small>after</small></h3><div class="strip">${tt("after")}</div>
-      ${Object.keys(shots.before).length ? `<h3>Turntable <small>before</small></h3><div class="strip before">${tt("before")}</div>` : `<p class="pend">BEFORE frames missing from this run.</p>`}
+      ${U.isNew ? `<p class="pend">New unit: NPC War had no model for it before this campaign.</p>` : Object.keys(shots.before).length ? `<h3>Turntable <small>before</small></h3><div class="strip before">${tt("before")}</div>` : `<p class="pend">BEFORE frames missing from this run.</p>`}
       <h3>In action <small>after, ${esc(MAP)}</small></h3><div class="strip act">${act || "<p class='miss'>no action frames</p>"}</div>
     </div>
     ${specCard(U)}
@@ -459,6 +460,7 @@ a{color:inherit}
 .num{font:700 64px/1 Fraunces,serif;color:var(--acc)}
 .unit h2{font:700 clamp(30px,4.4vw,54px)/1 Fraunces,Georgia,serif;margin:0}
 .sub{color:var(--mute);margin:6px 0 0}
+.new{font:600 12px Inter;letter-spacing:.14em;text-transform:uppercase;color:var(--bg);background:var(--acc);padding:4px 9px;border-radius:4px;vertical-align:middle;margin-left:10px}
 .ba{position:relative;overflow:hidden;border-radius:12px;border:1px solid var(--line);aspect-ratio:16/10;background:#222;user-select:none}
 .ba img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .ba-b{position:absolute;inset:0;clip-path:inset(0 calc(100% - var(--p)) 0 0)}
@@ -534,6 +536,7 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')lb.classList
 
 /* -------------------------------------------------------------- the run */
 const M = manifest();
+const M0 = manifest(beforeC);
 const ids = val("--ids") ? val("--ids").split(",").map((s) => s.trim()).filter(Boolean)
   : Object.keys(M).filter((k) => M[k].kind === KIND);
 if (!ids.length) { console.error("catalogue: no unit ids (manifest unreadable?)"); process.exit(2); }
@@ -542,6 +545,7 @@ for (const id of ids) {
   const U = unitDef(id);
   if (!U) { pending.push(((M[id] && M[id].name) || id) + " (no file)"); continue; }
   if (U.stub && !has("--all") && !val("--ids")) { pending.push((M[id] && M[id].name) || id); continue; }
+  U.isNew = !M0[id];          // no row on the BEFORE tree: an AFTER-only "new unit" page
   units.push(U);
 }
 log(`${units.length} ${KIND}: ${units.map((u) => u.id).join(", ")}${pending.length ? `; pending: ${pending.join(", ")}` : ""}`);
