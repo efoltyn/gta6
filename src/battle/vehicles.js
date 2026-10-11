@@ -211,7 +211,9 @@ function makeVehicle(teamId, i, id) {
   // aircraft come in from their own side's edge, already flying
   let px = at.x, pz = at.z, py = gy;
   if (air) {
-    const back = 700 + (i % 4) * 90;
+    // stats.ingress (m): a bomber starts its run from beyond the horizon, far
+    // enough out that its first pass is a real run (release distance + line-up)
+    const back = (S.ingress || 700) + (i % 4) * 90;
     px = at.x - Math.sin(h) * back; pz = at.z - Math.cos(h) * back;
     // a helicopter comes in low (nap of the earth), a jet at its cruise
     py = MAP.groundAt(px, pz) + (def.drive === "rotor" ? Math.max(S.nap || 10, Math.min(S.alt || 40, 30)) : (S.alt || 300));
@@ -1214,7 +1216,8 @@ function vehBombRun(u, W, t) {
   const lead = vh * tf;
   const fx = u.pos.x + Math.sin(u.h) * lead, fz = u.pos.z + Math.cos(u.h) * lead;
   const miss = Math.hypot(fx - t.pos.x, fz - t.pos.z);
-  const basket = w.guided ? Math.max(he.blast * 1.5, lead * (w.basket || 0.15)) : Math.max(40, he.blast * 1.5);
+  // w.stick (m): an unguided stick is rippled across the mark, half before it and half past
+  const basket = w.guided ? Math.max(he.blast * 1.5, lead * (w.basket || 0.15)) : Math.max(40, he.blast * 1.5, (w.stick || 0) / 2);
   if (miss > basket) return;
   vehRelease(u, W, he, w.guided ? t : null, tf);
 }
@@ -1238,8 +1241,14 @@ function vehRelease(u, W, he, guideTo, tf) {
   }
   // a guided bomb keeps steering onto the mark all the way down (fire.js stepRockets: `homing`)
   const fall = tf || Math.sqrt(2 * Math.max(10, u.pos.y - MAP.groundAt(u.pos.x, u.pos.z)) / 9.81);
+  // the store leaves its own station (rig.muzzleWorld: the bay clip, the wing
+  // rack) and, with rig.store(shot), is drawn as itself all the way down
+  const p0 = V().set(u.pos.x, u.pos.y - 2, u.pos.z);
+  if (u.rig && u.rig.muzzleWorld) { try { const p = u.rig.muzzleWorld(V(), shot); if (p && isFinite(p.y)) p0.copy(p); } catch (e) {} }
+  let mesh = null;
+  if (u.rig && u.rig.store) { try { mesh = u.rig.store(shot) || null; } catch (e) { mesh = null; } }
   rockets.push({
-    pos: V().set(u.pos.x, u.pos.y - 2, u.pos.z),
+    pos: p0, mesh: mesh,
     vel: vel,
     grav: 9.81, t: 0, by: u, life: Math.max(40, fall * 1.4 + 5), homing: guideTo || null,
     w: { blastRadius: he.blast, blastPower: he.power / 0.55 },
