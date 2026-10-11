@@ -26,8 +26,12 @@ function stepFists(m, tgt, dist, sdt) {
      per blow that actually LANDED on the rig, and IQ.lastBlow(m) says where:
      a jab to the guard and a hook to the jaw are not the same number.
      Feature-detected: 1.0 before systems/melee.js is loaded. */
-  const mk = CBZ.meleeScale ? CBZ.meleeScale(m, tgt) : 1;
+  /* ...AND HOW HARD. The melee layer measures the blow's FORCE (res.force:
+     the swing's power x the body behind it, ~1 a clean full punch), and
+     bodymass.js meets a hide with it: a hide is a threshold the force has to
+     clear, so a jab off an elephant's flank is nothing at all. */
   const lb = CBZ.combatIQ.lastBlow ? CBZ.combatIQ.lastBlow(m) : null;
+  const mk = CBZ.meleeScale ? CBZ.meleeScale(m, tgt, lb && lb.force > 0 ? lb.force : 1) : 1;
   const zm = lb && isFinite(lb.dmgMul) ? lb.dmgMul : 1;
   hurtMan(tgt, m.punch * (0.85 + lcg() * 0.4) * mk * zm, { by: m });
   stats[m.team].shots++; stats[m.team].hits++;   // the ledger counts blows thrown and landed

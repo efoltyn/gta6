@@ -105,7 +105,7 @@ change it only in coordination.
 | `src/battle/vehicles.js` | `makeVehicle`, the vehicle sim, crew mount/dismount | vehicles / armour |
 | `src/battle/damage.js` | `hurtMan`: the one damage funnel (asks `CBZ.armour.resolve`, §9a), reachability | armour / weapons |
 | `src/battle/death.js` | a beast dies, a man dies, the sinking dead | physics / humans |
-| `src/battle/physics.js` | the grid, body separation, pinned pairs, the flow field (`NAV`), COM | physics |
+| `src/battle/physics.js` | the grid, body separation (split by mass), pinned pairs, momentum (`bodyKg`, `contactImpulse`, `addKnock`, `stepKnock`), bodies in the air (`flingBody`, `stepTossed`), the blast (`blastBodies`), hull strikes (`hullForStrike`), the flow field (`NAV`), COM (§9c) | physics |
 | `src/battle/fire.js` | the trigger (aimed / suppressive fire, pairs, bursts, reloads, stoppages, grenades, the gun's stance), flown rounds, penetration, ricochets, wounds, bleeding, rockets, backblast | weapons |
 | `src/weapons/ballistics.js` | `CBZ.ballistics`: cartridges, guns, materials, flight / drop / zero / penetration maths, body zones, species anatomy (node-loadable, shared with Gang City) | weapons |
 | `src/battle/air.js` | air support: bombers, the nuke run, airstrikes | weapons / vehicles (air) |
@@ -786,6 +786,57 @@ skull and heart, the lion's lungs, hit odds by stance).
 
 ---
 
+## 9c. Physics: bodies have mass
+
+`src/battle/physics.js` is the one place that knows what a body weighs and what happens when it
+is hit. `node tools/npcwar-physics-check.mjs` holds it (fists v hide, 100 men v a bull, a
+charge, a tank in a crowd, a blast, a throw).
+
+- **Mass.** `bodyKg(m)`: a hull's `stats.mass`; a species file's own individual (`m._mass`, the
+  number `systems/bodymass.js` reads too); else the anatomy row (`CBZ.ballistics.anatomyOf`)
+  x the individual's size cubed. A man is 80 kg.
+- **Contact.** Separation splits every overlap by mass (each body gives way in proportion to
+  the other's mass). Equal masses split exactly as before, bit for bit. A heavy body MOVING
+  into a light one (masses 3x apart) is a collision: `J = (1 + 0.2) v m1 m2 / (m1 + m2)`, each
+  takes `J / own mass`. Speeds are what a body did under its own legs this sub-step
+  (`physPre` / `physMid`), never the separation's corrections.
+- **Knocks.** `addKnock(b, dvx, dvz, by, {hurt, vy})`: a living body slides on that velocity
+  against friction (0.8 g standing, 0.6 g down); a man past 2.5 m/s goes down (verbs
+  knockdown, else `m.ko`); past 5.5 m/s (or lifted) a body under 450 kg flies. A wall at
+  speed is a second impact.
+- **Flight.** `flingBody(b, vx, vy, vz, {by, carry, lift, dmg})` and `stepTossed`: ballistic
+  at 9.81, swept through the walls, bowls whoever it arrives at by momentum, and the landing
+  speed is the injury. The elephant's possessed trunk throw is an energy (2.7 kJ): a man
+  leaves at ~8 m/s, a lion at ~5.
+- **Injury from a velocity change.** `impactDmg(b, dv) = maxHp x 0.0085 x (dv - 3)²`: nothing
+  under 3 m/s, half a man at 11 m/s (a 6 m fall), all of him at 14. A share of the body's own
+  hp, because hp already carries a body's size.
+- **Death impulse.** `deathDv(m, imp)` (the killing blow's `imp.J / kg`, or the slide or
+  flight it died in) sets the ragdoll's kick, and `imp.dvx/dvz` its direction. A damage source
+  that moved the body passes `J` (kg m/s) and `dvx, dvz` on the `imp`.
+- **Blasts.** NPC War owns its detonation (`blast` on the mode, `damage.js`): damage
+  `420 x power x (0.55 / Z)²` with `Z = d / R`, tapering to 0 at R; delta-v
+  `9 x power x (0.55 / Z)^1.5 x (80 / kg)^(1/3)`. A man at the core dies and flies; a bull
+  elephant at the core takes ~440 and rocks at 2 m/s. Corpses go first through
+  `CBZ.ragdollBlast`; loose debris is kicked (`CBZ.debris.impulse`) and the crater throws
+  grit (`CBZ.debris.chips`). Hulls keep the old ring (inside 0.55 R the armour answers).
+- **Hulls.** `vehCrush` (vehicles.js): the face of a moving hull is a collision by momentum
+  (the hull loses `J / M` of its speed: a Humvee into a bull stops, a tank into a man does
+  not notice); a body the hull outweighs 12:1 that is down goes UNDER it (pushVehicle stands
+  down) and the running gear goes over. A man it kills is handed to `city/carstrike.js`
+  (`CBZ.ragdollStrike`, the hull's real profile drives his ragdoll), and `CBZ.cityCars` lists
+  the moving hulls so a corpse in a tank's path is driven over. `hullForStrike(u)` gives a
+  hull the names carstrike reads (`v` is the drive's own speed).
+- **Fists.** `systems/bodymass.js` (shared with the city): a hide is a THRESHOLD the blow's
+  force has to clear (`hide / 30` of a full punch), not a divisor with a floor. A man on a bull
+  elephant is 0.009 (it was floored at 0.28); on a gorilla 0.41; on a man 1.0. Teeth, claws
+  and tusks put the blow on a point (`meleeAbsorb(target, attacker)`).
+- **Water.** On OPEN WATER a body that dies goes to `world/water_float.js`: a man floats awash
+  and goes under in ~40 s, sharks sink, whales, orcas and dolphins float on their side, other
+  fish float belly up, land animals float and slowly waterlog.
+
+---
+
 ## 10. Checks: node only, no browser
 
 ```
@@ -802,6 +853,7 @@ node tools/npcwar-worker-check.mjs the sim worker, both modes
 node tools/npcwar-scale-bench.mjs  1k / 10k / 100k a side, ms per tier
 node tools/front-sim.mjs           the city's front resolver (frontline.js) it is calibrated to.
 node tools/ballistics-check.mjs    the weapon table, and flight / penetration / wounds vs published figures.
+node tools/npcwar-physics-check.mjs mass, momentum, knocks, flight, blasts, hulls, fists v hide (9c).
 ```
 
 `tools/npcwar-headless.mjs` lifts the page's `src/battle` / `src/units` script tags out of

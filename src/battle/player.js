@@ -528,8 +528,10 @@ function youDowned(t) {
 }
 function youTossable(t) {
   if (!t || t.dead || t.vehicle || t._tossed || t._apeHeld) return false;
-  if (t.beast) return !t.swim && (t.noseR || t.rad || 1) < 1.3;
-  return true;
+  if (t.swim) return false;
+  // what the trunk can LIFT: a real one manages a few hundred kilograms, a
+  // man or a lion, never a buffalo (src/battle/physics.js bodyKg)
+  return bodyKg(t) <= Math.min(450, bodyKg(YOU.m || t) * 0.07);
 }
 function youMoveCtx(m, t) {
   const d = t ? Math.hypot(t.pos.x - m.pos.x, t.pos.z - m.pos.z) : 99;
@@ -551,7 +553,7 @@ function youStrikeOpts(m) {
       const t = S && S.t;
       if (!t || t.dummy || t.dead) return;
       if (S.mv.grab === "toss" && youTossable(t)) { youToss(m, t, dmg); return; }
-      hurtMan(t, dmg * (CBZ.meleeAbsorb ? CBZ.meleeAbsorb(t) : 1), { by: m });
+      hurtMan(t, dmg * (CBZ.meleeAbsorb ? CBZ.meleeAbsorb(t, m) : 1), { by: m });
       if (t.beast && !t.dead && CBZ.creatureFlinch) { try { CBZ.creatureFlinch(t); } catch (e) {} }
       S.hit = true;
       YOU.hits = (YOU.hits || 0) + 1;
@@ -690,54 +692,20 @@ function stepYouBeast(m, sdt) {
 
 /* ---- THE TRUNK: lift, swing, throw ----
    An elephant's trunk takes what it can lift (a man, a wolf, a lion) up to
-   the height of its head and throws it. The landing is the damage. The body
-   in the air is nobody's to steer (step.js stands down on _tossed). */
+   the height of its head and throws it. The throw is an ENERGY, not a
+   speed: the same heave sends a man at ~8 m/s and a lion at ~5, and the
+   flight (src/battle/physics.js flingBody / stepTossed) is ballistic at
+   9.81, stopped by walls, bowls whoever it lands on, and the landing speed
+   is the injury. The squeeze is the trunk's own blow. */
+const TRUNK_THROW_J = 2700;
 function youToss(m, t, dmg) {
   const h = m.heading || 0;
   const side = lcg() < 0.5 ? -1 : 1;
-  t._tossed = {
-    by: m, age: 0, lift: 0.4, dmg: dmg * 2.4 + 18, down: 0,
-    x0: t.pos.x, y0: t.pos.y, z0: t.pos.z,
-    vx: Math.cos(h) * 6.5 - Math.sin(h) * side * 2.2, vz: Math.sin(h) * 6.5 + Math.cos(h) * side * 2.2, vy: 6.8,
-    rx: t.group ? t.group.rotation.x : 0,
-  };
-  if (t.beast && t._atkAnim >= 0 && CBZ.creatureEndAttack) { try { CBZ.creatureEndAttack(t); } catch (e) {} }
+  const v = Math.min(9, Math.sqrt(2 * TRUNK_THROW_J / bodyKg(t)));
+  const vh = v * 0.8, vy = v * 0.6;
+  flingBody(t, Math.cos(h) * vh - Math.sin(h) * side * vh * 0.33, vy, Math.sin(h) * vh + Math.cos(h) * side * vh * 0.33,
+    { by: m, carry: m, lift: 0.4, dmg: dmg * (CBZ.meleeAbsorb ? CBZ.meleeAbsorb(t, m) : 1) });
   if (CBZ.shake) CBZ.shake(0.35);
-}
-function stepTossed(t, sdt) {
-  const T = t._tossed;
-  if (!T) return;
-  if (t.dead) { if (t.group) t.group.rotation.x = T.rx; t._tossed = null; return; }
-  T.age += sdt;
-  const m = T.by;
-  if (T.down > 0) {
-    // on the floor, getting up
-    T.down -= sdt;
-    if (T.down <= 0) { if (t.group) t.group.rotation.x = T.rx; t._tossed = null; t.thinkAt = simT; }
-    return;
-  }
-  if (T.age < T.lift && m && !m.dead) {
-    // up into the trunk, in front of the head
-    const h = m.heading || 0, k = T.age / T.lift;
-    const tx = m.pos.x + Math.cos(h) * (m.noseR || 2) * 1.05, tz = m.pos.z + Math.sin(h) * (m.noseR || 2) * 1.05;
-    const ty = m.pos.y + (m.eyeH || 2.5) * 1.05;
-    t.pos.set(T.x0 + (tx - T.x0) * k, T.y0 + (ty - T.y0) * k, T.z0 + (tz - T.z0) * k);
-    if (t.group) t.group.rotation.x = T.rx + k * 0.9;
-    return;
-  }
-  T.vy -= 18 * sdt;
-  t.pos.x += T.vx * sdt; t.pos.y += T.vy * sdt; t.pos.z += T.vz * sdt;
-  if (t.group) t.group.rotation.x += sdt * 5;
-  const g = MAP.bodyY(t, t.pos.x, t.pos.z);
-  if (t.pos.y <= g && T.vy < 0) {
-    t.pos.y = g;
-    CBZ.micro.resolveCircle(t.pos, t.rad || 0.5, t.pos.y, 1.8);
-    hurtMan(t, T.dmg, { by: m && !m.dead ? m : null, byTeam: m ? m.team : null });
-    if (CBZ.shake && camDist2(t.pos) < 40 * 40) CBZ.shake(0.45);
-    if (t.dead) { t._tossed = null; return; }
-    T.down = 1.3;
-    if (t.group) t.group.rotation.x = T.rx + Math.PI / 2 * (t.beast ? 0.8 : 1);
-  }
 }
 
 /* ------------------------------------------------------------ feel */
