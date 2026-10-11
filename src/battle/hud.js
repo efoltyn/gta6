@@ -137,10 +137,15 @@ CBZ.npcwar.onBoot(function () {
    The cheapest frames in a massive battle are the pixels you stop drawing.
    When the frame rate slips the render scale steps down before anything
    else does; it climbs back when the war thins out. */
-const RES = { steps: [1], idx: 0, t: 0, good: 0 };
+/* SPEED NEVER COSTS HD (owner): the scale never drops under one pixel per CSS
+   pixel. A tiered war (src/battle/mass.js) buys its frames with tiers and
+   the far crowd (src/battle/settingspanel.js AUTO), not with a blurrier
+   picture; the steps that are left are a high-DPI screen's extra density,
+   under the quality preset's ceiling (RES.cap). */
+const RES = { steps: [1], idx: 0, t: 0, good: 0, cap: 2 };
 function initRes(total) {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  RES.steps = [dpr, 1, 0.78, 0.6].filter(function (v, i, a) { return a.indexOf(v) === i; })
+  const dpr = Math.min(window.devicePixelRatio || 1, 2, RES.cap || 2);
+  RES.steps = [dpr, 1.5, 1].filter(function (v, i, a) { return v <= dpr + 1e-6 && a.indexOf(v) === i; })
     .sort(function (a, b) { return b - a; });
   RES.idx = total > 900 && RES.steps.length > 1 ? 1 : 0;
   applyRes();

@@ -313,6 +313,7 @@ async function worldSide(c, req, side, T, warns) {
             .catch((e) => { throw new Error(`shot(${cam}) t=${t} [${pose}]: ${e.message}; page errors: ${p.pg.errors.slice(-3).join(" | ")}`); });
           frames.push({ pose, t, cam, url: r && r.url, error: r && r.error });
           if (r && r.error) warns.add(r.error);
+          if (r && r.info) warns.add("info " + pose + " t=" + t + " " + cam + ": " + r.info);
         }
       }
     }
