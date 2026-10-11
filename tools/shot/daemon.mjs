@@ -246,11 +246,13 @@ async function acquire(c, world, query, commit, T) {
   c.pages.push(p); c.cur = p;
   try {
     const W = WORLDS[world];
-    const b = await bootWorld(pg, srv.origin, `${world}|${W.seed}|${query}`, world === "npcwar" ? CFG.bootMs : 10 * 60e3);
+    const seed = new URLSearchParams(query).get("seed") || W.seed;
+    const b = await bootWorld(pg, srv.origin, `${world}|${seed}|${query}`, world === "npcwar" ? CFG.bootMs : 10 * 60e3);
     p.loaded = new Set(b.loaded);
     knownLoaded.set(wk, p.loaded);
-    const ok = await pg.evl(pageLib(world), 20e3);
+    const ok = await pg.evl(pageLib(libOf(world)), 20e3);
     if (ok !== true) throw new Error("page/" + world + ".js did not install (" + ok + ")");
+    if (libOf(world) === "world") await pg.evl("__shot.warm()", 10 * 60e3);   // shader compile, once, inside the boot
   } catch (e) { await closePage(c, p); throw e; }
   T.bootMs = Date.now() - t0;
   log(`  chrome #${c.n}: booted ${wk} @${base.slice(0, 8)} in ${(T.bootMs / 1000).toFixed(1)} s`);
@@ -277,29 +279,37 @@ function expandTimes(times, period) {
   }
   return out;
 }
-async function npcwarSide(c, req, side, T, warns) {
-  let { p, how } = await acquire(c, "npcwar", req.query, side.commit, T);
+/* which in-page half drives a world: NPC War has its own; every CBZ world
+   (city, president, escape, survival and their aliases) shares page/world.js */
+const libOf = (world) => (world === "npcwar" ? "npcwar" : "world");
+async function worldSide(c, req, side, T, warns) {
+  // a CBZ world's main thread is busy streaming even while frozen: give its calls room
+  const ms = req.world === "npcwar" ? CFG.evalMs : CFG.evalMs * 4;
+  if (!WORLDS[req.world]) throw new Error(`unknown world "${req.world}" (know: ${Object.keys(WORLDS).join(", ")})`);
+  let { p, how } = await acquire(c, req.world, req.query, side.commit, T);
   side.how = how; c.cur = p;
-  if ((await p.pg.evl(pageLib("npcwar"), 20e3)) !== true) throw new Error("page/npcwar.js did not install");
+  if ((await p.pg.evl(pageLib(libOf(req.world)), ms)) !== true) throw new Error(`page/${libOf(req.world)}.js did not install`);
   const frames = [];
   try {
     for (const pose of req.poses) {
       const spec = { ...req.stage, pose, js: req.js || undefined };
-      let st = await p.pg.evl(`__shot.stage(${JSON.stringify(spec)})`, CFG.evalMs);
+      // a CBZ world that will be stepped is changed for good: it is nobody else's afterwards
+      if (req.world !== "npcwar" && expandTimes(req.times, 1).some((t) => t > 0)) p.dirty = true;
+      let st = await p.pg.evl(`__shot.stage(${JSON.stringify(spec)})`, ms);
       if (!st || !st.ok) throw new Error((st && st.error) || "stage failed");
       for (const w of st.warn || []) warns.add(w);
       const times = expandTimes(req.times, st.period || 1);
       for (const t of times) {
-        await p.pg.evl(`__shot.at(${t})`, CFG.evalMs).catch((e) => { throw new Error(`at(${t}) [${pose}]: ${e.message}`); });
+        await p.pg.evl(`__shot.at(${t})`, ms).catch((e) => { throw new Error(`at(${t}) [${pose}]: ${e.message}`); });
         for (const cam of req.cams) {
-          const r = await p.pg.evl(`__shot.shot(${JSON.stringify(cam)}, ${req.W}, ${req.H}, ${JSON.stringify(req.mime)})`, CFG.evalMs)
+          const r = await p.pg.evl(`__shot.shot(${JSON.stringify(cam)}, ${req.W}, ${req.H}, ${JSON.stringify(req.mime)})`, ms)
             .catch((e) => { throw new Error(`shot(${cam}) t=${t} [${pose}]: ${e.message}; page errors: ${p.pg.errors.slice(-3).join(" | ")}`); });
           frames.push({ pose, t, cam, url: r && r.url, error: r && r.error });
           if (r && r.error) warns.add(r.error);
         }
       }
     }
-    await p.pg.evl("__shot.clear()", CFG.evalMs).catch(() => {});
+    await p.pg.evl("__shot.clear()", ms).catch(() => {});
     if (req.js) p.dirty = true;          // arbitrary JS: nobody else gets this page
   } finally {
     await unswap(p);
@@ -320,8 +330,7 @@ async function runJob(c, req) {
   const ext = req.mime === "image/jpeg" ? "jpg" : "png";
   const sides = [];
   for (const s of req.sides) {
-    if (req.world !== "npcwar") throw new Error(`world "${req.world}" is not wired into the shot service yet (npcwar is)`);
-    const frames = await npcwarSide(c, req, s, T, warns);
+    const frames = await worldSide(c, req, s, T, warns);
     sides.push({ ...s, frames });
   }
   T.captureMs = Date.now() - t0 - (T.bootMs || 0);
@@ -349,7 +358,7 @@ async function runJob(c, req) {
       tiles.push({ url: src(f), label: lab(s, f), sub: f.error, tint: s.label === "after" ? "#1d3f6b" : "#3a3c42" });
     }
   }
-  const title = `${req.world}  ${Object.entries(req.stage).map(([k, v]) => k + "=" + v).join(" ")}${req.query !== NPCWAR_BASE_QUERY ? "  [" + req.query + "]" : ""}  ` +
+  const title = `${req.world}  ${Object.entries(req.stage).map(([k, v]) => k + "=" + v).join(" ")}${req.query && req.query !== NPCWAR_BASE_QUERY ? "  [" + req.query + "]" : ""}  ` +
     sides.map((s) => `${s.label}: ${s.branch}@${s.commit.slice(0, 8)} (${s.how})`).join("  |  ");
   const sp = await sheetPage(c);
   const sheet = path.join(out, sides.length > 1 ? "ba.png" : "sheet.png");
@@ -402,8 +411,10 @@ async function work(c, q) {
   c.busy = true; running.set(q.id, q.agent); lastServed.set(q.agent, Date.now()); lastWork = Date.now();
   writeStatus();
   let timer;
+  // a CBZ world's cold boot alone can take minutes on a loaded Mac: its budget includes one
+  const jobMs = q.world === "npcwar" ? CFG.jobMs : CFG.jobMs + 10 * 60e3;
   try {
-    await Promise.race([runJob(c, q), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`request timed out after ${CFG.jobMs / 1000} s`)), CFG.jobMs); })]);
+    await Promise.race([runJob(c, q), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`request timed out after ${jobMs / 1000} s`)), jobMs); })]);
   } catch (e) {
     log(`  ${q.id} ERROR ${e.stack || e.message}`);
     const r = readJson(resultPath(q.id)) || { id: q.id };

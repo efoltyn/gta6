@@ -37,7 +37,7 @@ import { copyFileSync, openSync, existsSync, rmSync, mkdtempSync } from "node:fs
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SD, LOG, OUT_ROOT, PRESETS, NPCWAR_STAGE_KEYS, NPCWAR_BASE_QUERY, CFG, parseSetup, newId, daemonInfo, writeJson, readJson, resultPath, now, sleep } from "./lib.mjs";
+import { SD, LOG, OUT_ROOT, PRESETS, NPCWAR_STAGE_KEYS, WORLD_STAGE_KEYS, NPCWAR_BASE_QUERY, CFG, parseSetup, newId, daemonInfo, writeJson, readJson, resultPath, now, sleep } from "./lib.mjs";
 import { merge2 } from "../testbus/tree.mjs";
 import { mainRepo } from "../testbus/lib.mjs";
 
@@ -107,12 +107,13 @@ const S = parseSetup(val("--setup", ""));
 const params = { ...(P ? P.setup : {}), ...S.params };
 const js = [S.js, val("--js", "")].filter(Boolean).join(";\n");
 const stage = {}, page = new URLSearchParams(world === "npcwar" ? NPCWAR_BASE_QUERY : "");
+const STAGE_KEYS = world === "npcwar" ? NPCWAR_STAGE_KEYS : WORLD_STAGE_KEYS;
 for (const [k, v] of Object.entries(params)) {
-  if (world !== "npcwar" || NPCWAR_STAGE_KEYS.has(k)) stage[k] = v;
-  else page.set(k, v);
+  if (STAGE_KEYS.has(k)) stage[k] = v;
+  else page.set(k, v);         // a page param: map=water, cfg_FLAG=1, seed=7 ...
 }
 page.sort();
-const poses = String(stage.pose || "idle").split(",").filter(Boolean);
+const poses = String(stage.pose || (world === "npcwar" ? "idle" : "still")).split(",").filter(Boolean);
 delete stage.pose;
 const list = (s) => String(s).split(",").map((x) => x.trim()).filter(Boolean);
 const cams = val("--cams") ? list(val("--cams")) : P ? P.cams : ["3q"];

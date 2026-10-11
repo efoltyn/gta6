@@ -48,9 +48,13 @@ export const PRESETS = {
     death:     { setup: { pose: "death" }, cams: ["side", "top"], times: ["0", "0.2", "0.5", "1", "1.6", "2.5", "4"] },
     matchup:   { setup: { pose: "fight" }, cams: ["wide", "hot"], times: ["0", "4", "8", "12", "16", "24"] },
   },
-  city: { glance: { setup: {}, cams: ["chase"], times: ["0"] }, orbit: { setup: {}, cams: ["chase", "orbit:90:20", "orbit:180:20", "top"], times: ["0"] } },
+  city: {
+    glance: { setup: {}, cams: ["chase"], times: ["0"] },
+    orbit:  { setup: {}, cams: ["chase", "orbit:90:20", "orbit:180:20", "orbit:270:20", "top", "fp"], times: ["0"] },
+    timeline: { setup: {}, cams: ["chase"], times: ["0", "2", "5", "10"] },
+  },
 };
-PRESETS.escape = PRESETS.city; PRESETS.disaster = PRESETS.city; PRESETS.president = PRESETS.city;
+for (const w of ["president", "escape", "prison", "survival", "disaster"]) PRESETS[w] = PRESETS.city;
 
 /* --setup is URL params ("species=lion&pose=walk") or a JS snippet. A string
    that is not a clean k=v&k=v list is JS. */
@@ -69,6 +73,8 @@ export function parseSetup(s) {
    (map=water, blood=0, and anything the NPC War architecture defines later:
    an unknown key is a PAGE param, so a new page flag works the day it lands). */
 export const NPCWAR_STAGE_KEYS = new Set(["species", "unit", "n", "vs", "vn", "pose", "style", "speed", "heading", "stage", "grid", "ruler", "rw", "bw", "rt", "bt"]);
+// the CBZ worlds (page/world.js): look point, bearing, orbit radius; the rest is page URL (cfg_X=1, seed=N)
+export const WORLD_STAGE_KEYS = new Set(["at", "heading", "dist", "pose"]);
 export const NPCWAR_BASE_QUERY = "auto=1&map=arena&red=1&blue=1&killcam=0";
 
 export function newId(agent) {

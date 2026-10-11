@@ -339,7 +339,7 @@
       case "top": dirH = f.clone().negate(); elev = 89.5; up = f.clone(); break;
       case "head": {
         var hb = headBox(lead), hs = hb.getSize(V3());
-        target = hb.getCenter(V3()); rad = Math.max(0.1, hs.length() * 0.5);
+        target = hb.getCenter(V3()); rad = Math.max(0.1, hs.length() * 0.38);
         dirH = f.clone().multiplyScalar(0.8).add(right.clone().multiplyScalar(0.6)).normalize(); elev = 12; fov = 28;
         break;
       }

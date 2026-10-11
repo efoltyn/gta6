@@ -79,6 +79,24 @@ measured bounds, so a rabbit and an elephant both fill the frame.
 
 `--size 640x400` is the default, `--big` = 1280x800, `--jpg` for small files.
 
+## Gang City and the other worlds
+
+`--world city|president|escape|survival` (aliases `prison`, `disaster`) boot through the
+testbus world table and are driven by `page/world.js`:
+
+```sh
+node tools/shot/req.mjs --world city --preset orbit --setup 'at=120,-40' --wait 900
+node tools/shot/req.mjs --world president --preset timeline --setup 'cfg_SOME_FLAG=1'
+```
+
+- presets: `glance` (chase), `orbit` (chase, 3 orbits, top, first person), `timeline` (0/2/5/10 s)
+- setup: `at=x,z` (look point, default the player), `heading=deg`, `dist=m`; every other
+  key is a page param (`cfg_FLAG=1`, `seed=7`, `mode=...`), or JS with `S` = `CBZ.player`
+- cams: `chase`, `fp`, `top`, `orbit:<yaw>:<pitch>[:dist]`, `at:<x,y,z>:<lx,ly,lz>`
+- A CBZ world is heavy: a cold boot is 3-5 min on a loaded Mac (it includes one
+  shader-compile render), and a request that steps time (`--times` > 0) uses the page
+  up, so the next request reboots it. Still pictures at t=0 reuse the warm world.
+
 ## How it is fast
 
 - **No checkouts.** Pages are served straight from `.git` (`gitserve.mjs`: `git
@@ -121,15 +139,31 @@ species' `build()`), gait from `CBZ.wildlifeRig.animateGait` / `CBZ.animateSwim`
 
 - `req.mjs` submit, `get.mjs` read (`--status` for the pool), `daemon.mjs` the service
 - `gitserve.mjs` commits over http from the object store
-- `page/npcwar.js` the in-page stage/camera/studio (`window.__shot`), `page/sheet.js` contact sheets
+- `page/npcwar.js` the in-page stage/camera/studio (`window.__shot`) for NPC War, `page/world.js` the same for the CBZ worlds, `page/sheet.js` contact sheets
 - `lib.mjs` dirs, knobs, presets. State: `~/harness/out/gta6/testbus/shot/`
   (`queue/`, `results/`, `daemon.log`, `status.json`); images `~/harness/out/gta6/shots/<id>/`.
 
+## Measured (2026-10-11, M-series, 8 cores, load 18-24 from other agents)
+
+10 simultaneous turntable requests (7 frames each) from 10 branches, each changing a
+different bestiary file:
+
+| | old way: 10 `ba` runs (npcwar-look, 2 subjects), sequential | shot service, cold (no Chrome up) | shot service, warm |
+|---|---|---|---|
+| wall time | 91 s (8-10 s each) | 27.3 s | 3.8 s |
+| per request | 8-10 s, blocking | 23.9-26.9 s (3 parallel boots, then hot swaps of 0.5-1.1 s) | 0.6-3.5 s (work 0.5-1.1 s) |
+| frames | 40 (2 x 2 sides x 10) | 70 | 70 |
+| Chromes | 10 launched one after another (20 page boots) | 3 | 3 (already up) |
+| peak load | 37.3 | 24.1 (from 18.2) | 24.4 (from 23.9) |
+
+A before/after (`--ba`) of an uncommitted species edit on a warm page: 1.4 s. A wrong
+species id: answered in ~0.1 s. Gang City cold: ~4.5 min boot + ~3 min first frame
+under load 30+; warm stills after that.
+
 ## Limits
 
-- NPC War is wired; city / escape / disaster / president are the next worlds (the
-  request is refused with a clear message until then; their boot already lives in
-  `tools/testbus/worlds.mjs`).
+- The CBZ worlds are slow to boot (minutes) and have no studio stage; NPC War is the
+  fast path the service was built for.
 - Hot swap re-registers species; the battle caches per-species tuning (`BEAST_TUNE`:
   chase speed off `spd`) on first spawn, so a changed `spd` shows in a gait preset
   only after a reboot (the puppet walk itself reads the new `spd`).
