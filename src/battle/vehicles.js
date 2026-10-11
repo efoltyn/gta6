@@ -552,15 +552,15 @@ function vehicleMuzzle(u, out) {
   return out.set(u.pos.x + Math.sin(yaw) * u.vlen * 0.8, u.pos.y + u.eyeH * 0.85, u.pos.z + Math.cos(yaw) * u.vlen * 0.8);
 }
 function vehFireMG(u, w, t, dist) {
-  // the page's own round: fireShot draws it, lands it and keeps the ledger
+  // the page's own round: fireShot flies it, lands it and keeps the ledger.
+  // _gunId names the mount, so the round is ITS cartridge (weapons/ballistics.js:
+  // a coax is 7.62 NATO, the commander's gun .50 BMG, with their own belts of
+  // tracer) and a mount's steadiness, not a rifleman's
   const keepWid = u.wid;
   u.wid = w.wid || "lmg"; u.mag = 999;
-  u._shot = { pen: w.pen || 9, beh: w.dmg || 22, he: false, cls: "small" };
-  let hit = Math.max(0.06, Math.min(0.62, 0.62 - dist / 1400));
-  if (u.speed > 2) hit *= 0.7;
-  if (t.air) hit *= 0.5;
-  try { fireShot(u, t, { fire: true, hit: hit, dmg: (w.dmg || 22) / 1.45, cd: 0.1 }); } catch (e) {}
-  u._shot = null; u.wid = keepWid;
+  u._gunId = w.id;
+  try { fireShot(u, t, { mode: "aimed" }); } catch (e) { console.warn("[war] mount fire", e); }
+  u._gunId = null; u.wid = keepWid;
 }
 // a kinetic round at armour: it either hits or it does not, now
 function vehFireKE(u, w, t, dist) {
