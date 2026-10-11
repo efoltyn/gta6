@@ -1922,6 +1922,65 @@
     }
   }
 
+  // CONSUMER 4 — ANIMALS AT THE SURFACE (WATER V3). A dolphin running at the
+  // surface, a shark with its back out, a seal, a turtle: anything aquatic
+  // whose body CUTS the waterline and is moving leaves the same displacement
+  // wake a swimmer does, sized by its own length. The nearest few to the
+  // camera, 10 Hz, deep swimmers skipped (a body two metres down leaves no
+  // mark on the surface).
+  const _aniOpt = { kind: "animal", loa: 2, beam: 0.6, scale: 0.4, x: 0, z: 0, speed: 0, heading: 0 };
+  let aniAcc = 0;
+  const _aniPick = [];
+  function emitAnimalWakes(dt) {
+    if (CFG.WATER_WAKE_ANIMALS === false || typeof CBZ.cityWildlifeList !== "function") return;
+    aniAcc += dt;
+    if (aniAcc < 0.10) return;
+    const step = aniAcc;
+    aniAcc = 0;
+    const cam = CBZ.camera;
+    if (!cam) return;
+    let L;
+    try { L = CBZ.cityWildlifeList(); } catch (e) { return; }
+    if (!L || !L.length) return;
+    const cx = cam.position.x, cz = cam.position.z;
+    _aniPick.length = 0;
+    for (let i = 0; i < L.length; i++) {
+      const a = L[i];
+      if (!a || a.dead || !a.pos || !a.species || !a.species.aquatic) continue;
+      const dx = a.pos.x - cx, dz = a.pos.z - cz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > 140 * 140) continue;
+      _aniPick.push(a); a._wkD2 = d2;
+    }
+    if (!_aniPick.length) return;
+    _aniPick.sort(function (p, q) { return p._wkD2 - q._wkD2; });
+    const sp = frameStamp();
+    let n = 0;
+    for (let i = 0; i < _aniPick.length && n < 6; i++) {
+      const a = _aniPick[i];
+      const x = a.pos.x, z = a.pos.z;
+      const hx = a._wakeOx, hz = a._wakeOz;
+      a._wakeOx = x; a._wakeOz = z;
+      if (!Number.isFinite(hx) || a._wakeStamp === sp) continue;
+      const sc = a.group && a.group.scale ? Math.max(0.2, a.group.scale.x || 1) : 1;
+      let len = 1.6 * sc;
+      if (typeof CBZ.marineBodyLen === "function") { try { len = +CBZ.marineBodyLen(a) || len; } catch (e) {} }
+      // does the body reach the surface? (its origin is mid-body)
+      const sy = surfY(x, z);
+      if (!(a.pos.y + len * 0.12 > sy - 0.15)) continue;
+      const ddx = x - hx, ddz = z - hz;
+      const spd = Math.sqrt(ddx * ddx + ddz * ddz) / step;
+      if (!(spd > 0.5) || spd > 25) continue;
+      _aniOpt.x = x; _aniOpt.z = z;
+      _aniOpt.speed = Math.min(12, spd);
+      _aniOpt.heading = Math.atan2(ddx, ddz);
+      _aniOpt.loa = Math.max(0.6, len);
+      _aniOpt.beam = Math.max(0.25, len * 0.22);
+      _aniOpt.scale = Math.min(0.9, 0.25 + len * 0.05);
+      if (CBZ.waterWakeFor(a, step, _aniOpt)) n++;
+    }
+  }
+
   function emitRain(dt) {
     const w = CBZ.weather;
     if (!w || !w.raining) { rainAcc = 0; return; }
@@ -1985,6 +2044,7 @@
     emitBoatWakes(dt);
     emitSwim(dt);
     emitDriftWakes(dt);
+    emitAnimalWakes(dt);
     emitRain(dt);
     ribTick(dt);
     surfTick(dt);

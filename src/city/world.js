@@ -1089,140 +1089,18 @@
       seaUniforms = U;
       CBZ.citySeaUniforms = U;
 
-      const vs = [
-        CBZ.waterVertexDecl(),
-        "varying vec3 vSeaWorld;",
-        "varying vec3 vSeaNormal;",
-        "varying float vSeaHeight;",
-        "varying float vSeaDist;",
-        "varying float vSeaFade;",
-        "varying float vSeaInland;",
-        "#include <fog_pars_vertex>",
-        "void main() {",
-        CBZ.waterVertexBody("modelMatrix * vec4(position, 1.0)"),
-        "  vSeaWorld = wWorld;",
-        "  vSeaNormal = wNormal;",
-        "  vSeaHeight = wHeightN;",
-        "  vSeaDist = wDist;",
-        "  vSeaFade = wFade;",
-        "  vSeaInland = wInland;",
-        "  vec4 mvPosition = viewMatrix * vec4(wWorld, 1.0);",
-        "  gl_Position = projectionMatrix * mvPosition;",
-        "  #include <fog_vertex>",
-        // Ocean atmosphere accumulates more slowly than city-block fog.
-        // Without this, near water stayed richly shaded while the same mesh
-        // became a flat baby-blue sheet only a kilometre away.
-        "  #ifdef USE_FOG",
-        "    fogDepth *= 0.66;",
-        "  #endif",
-        "}",
-      ].join("\n");
-
-      const fs = [
-        CBZ.waterFragmentDecl(),
-        "varying vec3 vSeaWorld;",
-        "varying vec3 vSeaNormal;",
-        "varying float vSeaHeight;",
-        "varying float vSeaDist;",
-        "varying float vSeaFade;",
-        "varying float vSeaInland;",
-        "#include <fog_pars_fragment>",
-        "void main() {",
-        "  vec4 field = cbzWaterField(vSeaWorld.xz);",
-        // Depth offsets keep the country underlay behind authored roads and
-        // runways, but at a 2.8km flight frustum they can also quantise valid
-        // land BEHIND the sea. Rejecting sea fragments over dry land outright
-        // means water and ground never fight for depth ownership, so there is
-        // no green flicker and no apparent ocean growing around trees.
-        "  if (uSeaHasLandMask > 0.5 && field.r > cbzShoreCutAt(vSeaWorld.xz)) discard;",
-        "  float inland = max(vSeaInland, field.a);",
-        // WATER_SURFACE_LOOK: the ripple field, the streak lanes and the shore
-        // calm band all live in world/water_spec.js so the planar mirror gets
-        // the identical surface. `lane` is 0.5 and `calm` 0 with the flag off,
-        // and cbzSeaNormal then runs the exact two-sample ripple this replaced.
-        "  float calm = cbzShoreCalm(field);",
-        "  float lane = cbzLane(vSeaWorld.xz);",
-        "  float detail = mix(0.60, 0.16, smoothstep(90.0, 1500.0, vSeaDist)) * mix(1.0, 0.42, inland) * (1.0 + uChop * 0.5);",
-        "  vec3 N = cbzSeaNormal(vSeaNormal, vSeaWorld.xz, vSeaDist, detail, calm, lane);",
-        "  vec3 V = normalize(cameraPosition - vSeaWorld);",
-        "  float under = gl_FrontFacing ? 0.0 : 1.0;",
-        "  N = mix(N, -N, under);",             // looking up from below
-        "  vec3 L = normalize(uSunDir);",
-        "  float ndl = max(dot(N, L), 0.0);",
-        // Mirror Fresnel near, rough-surface Fresnel far (see cbzRough): a
-        // faded ripple normal is a MIRROR, and a grazing mirror returns the
-        // brightest band of sky, which is what bleached the far ocean white.
-        "  float fres = cbzFresnel(dot(N, V), vSeaDist);",
-        "  vec3 body = cbzDepthColor(uSeaColor, field, inland);",
-        "  vec3 base = body * mix(vec3(0.96, 1.04, 1.09), vec3(0.95, 1.06, 1.03), step(0.001, uLook.x)) + mix(vec3(0.003, 0.012, 0.020), vec3(0.003, 0.012, 0.018), step(0.001, uLook.x));",
-        "  base *= 0.63 + ndl * 0.37;",
-        // The reflected sky as RADIANCE (horizon band == the live fog colour,
-        // deep cool sky overhead) instead of a brightened copy of the water's
-        // own colour. Off -> the old expression, byte for byte.
-        "  vec3 R = reflect(-V, N);",
-        "  vec3 sky = cbzSkyTone(R, cbzRough(vSeaDist, dot(N, V)) * 0.12);",
-        "  vec3 skyOld = uSeaColor * 1.34 + vec3(0.060, 0.125, 0.190);",
-        "  sky = mix(skyOld, sky * 0.58, step(0.001, uLook.x));",   // REFL_GAIN, water_spec.js
-        "  sky = mix(sky, uSunColor * 0.34 + sky * 0.70, 0.22);",
-        "  vec3 outColor = mix(base, sky, fres * mix(0.66, 0.90, step(0.001, uLook.x)) * mix(1.0, 0.55, inland));",
-        "  outColor += cbzSunGlitter(N, V, L, fres, vSeaFade) * mix(1.0, 0.30, inland);",
-        "  outColor += cbzSheen(N, V, L, lane, vSeaDist, fres) * mix(1.0, 0.35, inland);",
-        // The old foam was a static bake whose only motion was a brightness
-        // pulse. cbzSurf() phases the band by DISTANCE-TO-SHORE minus TIME, so
-        // white water advances up the beach and dies at the waterline.
-        "  float surf = cbzSurf(vSeaWorld.xz, field, vSeaHeight, vSeaFade);",
-        "  float cap = cbzWhitecap(vSeaWorld.xz, vSeaHeight, vSeaFade, inland);",
-        "  float foam = clamp(surf * 0.66 + cap * 0.60, 0.0, 0.92) * (1.0 - under * 0.72);",
-        // Seen from underneath the surface reads as a bright silvery ceiling
-        // that goes mirror-like at grazing angles (total internal reflection).
-        "  vec3 underCol = mix(body * 0.72, sky * 1.20 + uSunColor * 0.16, clamp(fres * 1.45, 0.0, 1.0));",
-        "  outColor = mix(outColor, underCol, under);",
-        "  outColor = mix(outColor, uFoamColor, foam);",
-        // HORIZON FUSE (aerial seam): airborne, the camera far plane cuts this
-        // 16km disc at 7km while the ocean is still mostly unfogged — its fog
-        // runs at 0.66x AND the height fog thins to ~43% at altitude, so the
-        // sea slammed into the sky dome as a hard teal-on-grey edge mid-frame.
-        // Converge on fogColor before the clip: the pixel then rides the SAME
-        // tonemap+encode the graded fog does, landing exactly on the dome's
-        // below-horizon band (core/sky.js's seam law), so the edge vanishes.
-        // Saturates far beyond ground-level fog range — invisible on foot.
-        (CFGW.SEA_HORIZON_FUSE !== false
-          ? "  #ifdef USE_FOG\n  outColor = mix(outColor, fogColor, smoothstep(3600.0, 6400.0, vSeaDist));\n  #endif"
-          : ""),
-        /* SEA_TRANSLUCENT (world/water_spec.js). The sea stops being a painted
-           lid. cbzSeaAlpha is a view-angle switch, not a constant: looking
-           down into water you see through it, looking ACROSS it you do not,
-           and past ~240 m it is 1.0 again — so the horizon fuse two lines up
-           still converges on a fully opaque pixel and the far ocean costs
-           exactly what it always did. Foam is air and stays opaque; the
-           underside (a swimmer looking up) stays a solid silvery ceiling. */
-        "  gl_FragColor = vec4(outColor, cbzSeaAlpha(V, vSeaDist, under, foam));",
-        "  #include <tonemapping_fragment>",
-        "  #include <encodings_fragment>",
-        "  #include <fog_fragment>",
-        "}",
-      ].join("\n");
-
-      const seaClear = CBZ.seaTranslucentOn ? CBZ.seaTranslucentOn() : false;
-      seaMat2 = new THREE.ShaderMaterial({
-        name: "CBZ Ocean Water",
-        uniforms: U,
-        fog: true,
-        // depthWrite STAYS ON while transparent — see the note in
-        // makeDisasterWaterMaterial. The sea must keep owning its depth; all
-        // that changes is that it is now drawn after the opaque bodies it has
-        // to show through, and blends instead of overwriting.
-        depthWrite: true,
-        depthTest: true,
-        transparent: seaClear,
-        side: THREE.DoubleSide,          // you can swim UNDER the sea now
-        vertexShader: vs,
-        fragmentShader: fs,
+      /* THE ONE SEA MATERIAL (world/water_spec.js, CBZ.waterSeaMaterial). The
+         shading that used to be written out here — and again, diverged, in
+         world/waterfx.js's planar-mirror graft and in the disaster sea — now
+         lives once in water_spec.js; this file only hands it the baked shore
+         field. "city" mode: camera-centred disc, coast/lake/depth swell. */
+      seaMat2 = CBZ.waterSeaMaterial({
+        kind: "city", uniforms: U, name: "CBZ Ocean Water",
+        horizonFuse: CFGW.SEA_HORIZON_FUSE !== false,
       });
       // Preserve the old material.color update contract used by the day/night
       // loop above; it aliases the actual shader uniform.
       seaMat2.color = U.uSeaColor.value;
-      seaMat2.userData.waterMode = "fresnel-flow-shore";
 
       const sea = new THREE.Mesh(CBZ.waterBuildSeaGeometry(), seaMat2);
       sea.name = "world-sea";

@@ -396,12 +396,25 @@
     return { pos: pos, target: target, fov: fov, dist: dist, up: up, box: box };
   }
 
-  S.cams = ["front", "side", "back", "left", "3q", "3qb", "top", "head", "feet", "wide", "hot", "orbit:<yawDeg>:<pitchDeg>[:distMul]"];
+  S.cams = ["front", "side", "back", "left", "3q", "3qb", "top", "head", "feet", "wide", "hot", "lens", "orbit:<yawDeg>:<pitchDeg>[:distMul]"];
 
   S.shot = function (cam, W, H, fmt) {
     W = Math.max(64, Math.min(2048, W | 0 || 640)); H = Math.max(64, Math.min(2048, H | 0 || 400));
     var R = CBZ.renderer || (CBZ.micro && CBZ.micro.renderer), C = CBZ.camera, scene = CBZ.scene;
     if (!R || !C) return { error: "no renderer/camera" };
+    /* "lens": THE GAME'S OWN CAMERA, exactly where the page's director / chase
+       cam / free hands left it (camera/camera.js). Every other cam here is
+       the shot service's own framing; this one is for the camera's agent. */
+    if (cam === "lens") {
+      var sa = C.aspect, spr = R.getPixelRatio();
+      try {
+        if (spr !== 1) R.setPixelRatio(1);
+        R.setSize(W, H, false);
+        C.aspect = W / H; C.updateProjectionMatrix(); C.updateMatrixWorld(true);
+        R.render(scene, C);
+        return { url: R.domElement.toDataURL(fmt || "image/png"), dist: 0 };
+      } finally { C.aspect = sa; C.updateProjectionMatrix(); }
+    }
     var F = frame(cam, W / H);
     if (!F) return { error: "unknown cam \"" + cam + "\" (know: " + S.cams.join(", ") + ")" };
     var save = { pos: C.position.clone(), q: C.quaternion.clone(), up: C.up.clone(), fov: C.fov, aspect: C.aspect, near: C.near, far: C.far,
