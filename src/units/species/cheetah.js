@@ -146,6 +146,8 @@
     animate: function (m, dt) { const k = kit(); if (k) k.animate(m, dt); },
     fight: function (m, t, dt, o) { const k = kit(); return k ? k.fight(m, t, dt, o) : CBZ.creatureFight(m, t, dt, o); },
     preview: function (m, move, phase) { const k = kit(); if (k) k.preview(m, move, phase); },
+    // a player who takes this animal over: ATTACK throws its real moves (kit/moves.js)
+    moves: function (m, t, ctx) { const k = kit(); return k ? k.moves(m, t, ctx) : null; },
   });
   // the real mean mass on the species row (bodymass.js: an authored mass wins)
   const row = CBZ.WILDLIFE_SPECIES && CBZ.WILDLIFE_SPECIES.cheetah;

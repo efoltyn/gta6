@@ -728,6 +728,7 @@
 
   function brain(S, m, st, dt, R) {
     const L = S.loco, B = S.mind, tn = m.tn;
+    if (m.you) { brainYou(S, m, st, dt, R); return; }
     // ---- what happened to me
     const lost = st.hp0 - m.hp;
     st.hp0 = m.hp;
@@ -817,6 +818,38 @@
     st.lie = approach(st.lie, st.idleT > S.mind.lieAfter ? 1 : 0, st.idleT > S.mind.lieAfter ? 0.9 : 3, dt);
     for (let i = 0; i < 4; i++) st.limp[i] = Math.max(0, st.limp[i] - dt * 0.004);
   }
+  // POSSESSED: the player has the legs. Nerve, stalking and flight stand down;
+  // what stays real is the body: the top speed it can reach is built up at
+  // its own acceleration, paid for in stamina, cut by wounds and limps
+  function brainYou(S, m, st, dt, R) {
+    const L = S.loco, tn = m.tn;
+    const lost = st.hp0 - m.hp;
+    st.hp0 = m.hp;
+    const bitten = m._flinchT > 0;
+    if (bitten) m._flinchT = 0;
+    if (lost > 0.01) hitReact(S, m, st, lost, bitten, R);
+    if (st.hurtT > 0) st.hurtT -= dt;
+    st.flee = false; st.cornered = false; st.rest = false; st.leap = null; tn.prey = false;
+    st.fear = Math.max(0, st.fear - S.mind.fearDecay * dt);
+    const vTop = L.vmax * st.fit * (1 - 0.5 * Math.max(st.injury * 0.6, Math.max(st.limp[0], st.limp[1], st.limp[2], st.limp[3]) * 0.7))
+      * (st.stam < 0.08 ? 0.18 : (st.stam < 0.2 ? 0.45 : 1));
+    const va = Math.abs(st.v);
+    st.vCap = st.vCap || L.trot * 1.5;
+    if (va > st.vCap - 1.5) st.vCap = Math.min(vTop, st.vCap + L.accel * (1 - 0.55 * st.vCap / (L.vmax * 1.05)) * dt);
+    else st.vCap = Math.max(L.trot * 1.5, Math.min(st.vCap, va + 3));
+    tn.chase = Math.max(L.trot, Math.min(vTop, st.vCap));
+    tn.march = Math.min(L.trot, tn.chase);
+    if (va > L.trot * 1.25) st.stam -= Math.pow(va / L.vmax, 2.4) / L.sprintSecs * dt;
+    else st.stam += L.recover * (1 - va / (L.trot * 1.25)) * dt;
+    st.stam = clamp(st.stam, 0, 1);
+    st.pant = approach(st.pant, clamp((1 - st.stam) * 1.5 + (va > 8 ? 0.3 : 0), 0, 1), 1.5, dt);
+    st.alert = approach(st.alert, 1, 3, dt);
+    st.aggr = approach(st.aggr, st.f.move ? 1 : 0.3, 5, dt);
+    st.crouch = approach(st.crouch, 0, 3, dt);
+    st.lie = approach(st.lie, 0, 3, dt);
+    st.idleT = 0;
+    if (st.land > 0) st.land -= dt;
+  }
   function heightEdge(m, t) {
     // ambush from rocks: higher ground lengthens the pounce
     const dy = (m.pos.y || 0) - (t.pos.y || 0);
@@ -899,7 +932,7 @@
     // extended (hollow, legs stretched) in the extended flight
     const flex = Math.cos(TAU * (ph - S.gait.flexAt));
     const sp = S.gait.spine * gal * (0.6 + 0.4 * wS);
-    pR += 0.42 * sp * flex; cR -= 0.24 * sp * flex;
+    pR += 0.34 * sp * flex; cR -= 0.22 * sp * flex;
     pX += 0.11 * k * sp * flex; cX -= 0.07 * k * sp * flex;
     const gbob = Math.cos(4 * PI * (ph - S.gait.flexAt + 0.5));
     pY += 0.03 * k * gal * gbob - 0.05 * k * wS * moveK; cY += 0.03 * k * gal * gbob - 0.06 * k * wS * moveK;
@@ -1098,6 +1131,7 @@
     const run = clamp(Math.abs(gv) / 6, 0, 1);
     let carry = lerp(TR[0], S.gait.tailRun, run) + 0.25 * cro + 0.2 * st.injury + (st.flee ? 0.15 : 0);
     carry -= 0.25 * gal * Math.sin(TAU * (ph - S.gait.flexAt));
+    carry -= pR * 0.85 * (1 - lieK);                 // held against the pelvis tilt: a counterweight, not a flag
     if (leapU >= 0) carry = lerp(carry, -0.15, 0.8);
     if (lieK > 0) carry = lerp(carry, 1.25, lieK);
     const tb = [BN.tail0, BN.tail1, BN.tail2, BN.tail3, BN.tail4, BN.tail5];
@@ -1286,6 +1320,7 @@
     const dmgK = opts && opts.dmg > 0 && S.stats.dmg > 0 ? opts.dmg / S.stats.dmg : 1;
     const move = opts && opts.move;
     F.cool -= dt; F.downT = Math.max(0, F.downT - dt);
+    if (opts && opts.youMove) return fightYou(S, m, t, dt, opts, R, st, F, cls, isDown, mouthD, dmgK, ux, uz, d, dx, dz);
     // ---- face: away when running, at the mark otherwise
     const want = st.flee && !st.cornered ? Math.atan2(-dz, -dx) : Math.atan2(dz, dx);
     let cur = typeof m.heading === "number" ? m.heading : 0;
@@ -1365,6 +1400,72 @@
     return RES;
   }
 
+  // THE PLAYER'S BLOW. The possessed driver chose the move (moves() below),
+  // latched _atkAnim = 0 and carries the body in on a leap; this plays the
+  // move with its real effects and reports progress through _atkAnim, which
+  // is how the driver knows the blow has ended.
+  function fightYou(S, m, t, dt, opts, R, st, F, cls, isDown, mouthD, dmgK, ux, uz, d, dx, dz) {
+    const yv = opts.youMove, id = yv.id;
+    const mine = S.moves[id] ? id : (isDown ? (S.moves.throat ? "throat" : "nape") : (S.moves.bite ? "bite" : Object.keys(S.moves)[0]));
+    if (F.youMv !== yv || !F.move) {
+      if (F.youMv === yv && !F.move) { m._atkAnim = -1; return RES; }   // this blow is done
+      startMove(S, st, mine, wrapPi(Math.atan2(dz, dx) - (m.heading || 0)) >= 0 ? 1 : -1);
+      F.youMv = yv; F.vAtk = Math.max(F.vAtk, Math.abs(m.speed || 0));
+      // a held bite is a timed worry when a player throws it (press again to keep on)
+      if (F.hold) { F.hold = false; F.youHold = true; F.dur = 1.4; } else F.youHold = false;
+    }
+    // face the mark
+    const want = Math.atan2(dz, dx);
+    let cur = typeof m.heading === "number" ? m.heading : 0;
+    cur += clamp(wrapPi(want - cur), -S.loco.turnRate * dt, S.loco.turnRate * dt);
+    m.heading = cur; m.faceH = cur;
+    if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(m, cur);
+    const mv = S.moves[F.move];
+    F.t += dt;
+    const p = F.t / F.dur;
+    RES.inRange = d <= mouthD + 0.8;
+    if (!F.hit && p >= F.at) {
+      F.hit = true;
+      if (t.dummy || cls.veh) RES.missed = true;
+      else if (d <= mouthD + mv.reach * (yv.rng || 1)) deal(S, m, st, t, cls, F, ux, uz, dmgK * (yv.pow || 1) / (S.moves[id] ? 1 : 1), opts, R);
+      else RES.missed = true;
+    }
+    if (F.youHold && F.hit && !t.dummy && !t.dead && d <= mouthD + 0.9) {
+      F.acc += mv.dps * dmgK * dt; F.accT += dt;
+      if (F.accT >= 0.35) { if (opts.onHit) opts.onHit(F.acc); RES.dealt += F.acc; F.acc = 0; F.accT = 0; }
+      if (cls.man && !downed(t)) knock(t, ux, uz, 1.2, 0.4);
+    }
+    if (p >= 1) { endMove(st); m._atkAnim = -1; }
+    else m._atkAnim = clamp(p, 0, 0.999);
+    return RES;
+  }
+
+  // what a player's ATTACK becomes for this cat, chosen by the moment
+  // (units/kit/moves.js contract): { id, style, pow, dur, rng, leap, cd }
+  function youMoves(S, m, t, ctx) {
+    const M = S.moves, reach = ctx.reach || 2, dist = ctx.dist == null ? 99 : ctx.dist;
+    const far = !t || dist > reach * 1.05, n = ctx.n || 1;
+    const running = !!ctx.sprint || (ctx.chase > 0 && ctx.speed > ctx.chase * 0.5);
+    const mk = function (id, style, extra) {
+      const r = { id: id, style: style, pow: 1, dur: M[id].hold ? 1.4 : M[id].dur, rng: 1, cd: M[id].cool };
+      return extra ? Object.assign(r, extra) : r;
+    };
+    if (S.style === "courser") {
+      if (ctx.downed) return mk("throat", "maul", { cd: 0.15 });
+      // at a run the forepaw hook is thrown from a stride out: the trip
+      if (far && running && dist < reach * 2.6) return mk("trip", "pounce", { leap: 0.7 });
+      if (running) return mk("trip", "maul");
+      return n % 3 === 0 ? mk("bite", "bite") : mk("swat", "maul");
+    }
+    if (ctx.downed) return mk("nape", "maul", { cd: 0.15 });
+    // the ambusher's pounce: from a standstill or a run, out to ~9 m
+    if (far && t && dist < reach * 4.2) return mk("pin", "pounce", { leap: 2.0 });
+    if (ctx.heavy || ctx.crowd > 2) return n % 2 === 0 ? mk("bite", "bite") : mk("swat", "maul");
+    const big = t && !t.beast;
+    if (big) return n % 2 === 0 ? mk("swat", "maul") : mk("grapple", "maul");
+    return n % 2 === 0 ? mk("bite", "bite") : mk("pin", "pounce");
+  }
+
   // ==========================================================================
   //  PREVIEW (the shot service's attack preset): one move at one phase
   // ==========================================================================
@@ -1391,6 +1492,7 @@
       animate: function (m, dt) { animate(S, m, dt, false); },
       fight: function (m, t, dt, opts) { return fight(S, m, t, dt, opts); },
       preview: function (m, move, phase) { preview(S, m, move, phase); },
+      moves: function (m, t, ctx) { return youMoves(S, m, t, ctx || {}); },
     };
   }
   CBZ.felidKit = {
