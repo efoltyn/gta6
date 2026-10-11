@@ -98,7 +98,8 @@ change it only in coordination.
 | `src/battle/damage.js` | `hurtMan`: the one damage funnel, reachability | armour / weapons |
 | `src/battle/death.js` | a beast dies, a man dies, the sinking dead | physics / humans |
 | `src/battle/physics.js` | the grid, body separation, pinned pairs, the flow field (`NAV`), COM | physics |
-| `src/battle/fire.js` | rounds, fire discipline, rockets | weapons |
+| `src/battle/fire.js` | the trigger (aimed / suppressive fire, pairs, bursts, reloads, stoppages, grenades, the gun's stance), flown rounds, penetration, ricochets, wounds, bleeding, rockets, backblast | weapons |
+| `src/weapons/ballistics.js` | `CBZ.ballistics`: cartridges, guns, materials, flight / drop / zero / penetration maths, body zones, species anatomy (node-loadable, shared with Gang City) | weapons |
 | `src/battle/air.js` | air support: bombers, the nuke run, airstrikes | weapons / vehicles (air) |
 | `src/battle/ai/think.js` | one unit's decision (target, slot, cover) | AI |
 | `src/battle/ai/morale.js` | morale, stance, hull-down | AI |
@@ -448,6 +449,54 @@ what is live today:
 
 ---
 
+## 9b. Weapons: the round is flown, not rolled
+
+Every round any gun on this page fires (a man's rifle, YOUR rifle, a vehicle's machine gun) goes
+through `fireShot(m, tgt, {mode})` in `src/battle/fire.js` on the numbers in
+`src/weapons/ballistics.js`. There is no hit chance anywhere.
+
+- **The aim.** The shooter picks a point (the chest of a man, the heart behind an animal's
+  shoulder, the middle of a hull), leads a mover by its measured velocity times the round's
+  time of flight (training sets how well), and holds over for range past his zero (training
+  sets how well he guesses the range; a sniper dials).
+- **The dispersion.** One angular error in mil from the gun (MOA), the man's hold in his stance
+  (standing / kneeling / prone / bipod / a vehicle mount), his training, his feet, how long he
+  has held on this mark, being shot at (`m.supp`) and the recoil the last shots left on the
+  muzzle (it recovers on the training's time constant).
+- **The flight.** `v = v0 e^(-kt)`: the round arrives a real time of flight later and drops.
+  It is traced against the colliders (with their material, thickness along the line, `hollow`
+  or `fill`) and the ground at launch, and against the BODIES when it arrives. A wall or a body
+  it can go through costs it velocity; one it cannot stops it; a grazing hit on something hard
+  can skip it off (a ricochet keeps flying and can still hit somebody).
+- **The wound.** A hit is a path through a body's zones (`MAN` standing / kneeling / prone,
+  `QUAD`, `FISH`, in the measured box of the animal: `bodyL bodyW bodyH bodyX0 bodyY0` from
+  beasts.js). What it reached (brain, spine, heart and lungs, gut, a limb) and the energy it
+  left decide the damage now and the bleeding after. Big animals are deep: a 5.56 does not
+  reach an elephant's heart through its side; a .50 does.
+- **Species numbers** (optional, in a species file's `stats`): `mass` (kg), `hide` (mm),
+  `skull` (mm of bone in front of the brain), `ribs` (mm over the heart), `plan`
+  (`"quad"` | `"fish"`). Missing ones come from `CBZ.ballistics.SPECIES`, then from size.
+- **Collider materials** (arena owners): `addBoxCollider(..., { mat, hollow, fill })`.
+  `mat` is one of `wood sand dirt snow cinder brick concrete steel rha`; `hollow` = wall
+  thickness of a box with air in it (a container, a hull); `fill` = the solid share (a crate).
+  Untagged colliders are concrete.
+- **Armour hook** (the armour agent): `CBZ.battleArmour.layer(unit, zone) -> {mat, mm}` is
+  asked for the zone a round enters; a plate it cannot defeat stops it (blunt trauma only).
+- **For the AI** (read, do not duplicate): `CBZ.battleArms.band(m)` = `{eff, area, max, cls}`;
+  `CBZ.battleArms.liveGrenades()` = `[{x, z, t}]`; `m.supp` rises with every round that cracks
+  past inside its cartridge's suppression radius; `CBZ.battleArms.audit()` has the ledger,
+  including `why` (why a man whose gun was ready did not fire: slot, unseen, ducked, ...),
+  `shotsAt` / `hitsAt` by range band, organs hit, penetrations, ricochets, grenades.
+- **The gun's stance**: `weaponStance()` (asked by stepMan) puts an LMG or a sniper prone past
+  25 m and a rifleman on a knee past 60 m, when he has stopped to fight a mark he can see; the
+  AI's own stances (cover, the fold, a pinned man's crouch) win wherever it has one.
+
+`node tools/ballistics-check.mjs` prints the weapon table and holds the physics to published
+figures (time of flight, drop, zero, penetration of sand / cinder block / steel, the elephant's
+skull and heart, the lion's lungs, hit odds by stance).
+
+---
+
 ## 10. Checks: node only, no browser
 
 ```
@@ -459,6 +508,7 @@ node tools/npcwar-headless.mjs     the page's own sim in node: war room, hold, t
                                    series + URL.   node tools/npcwar-headless.mjs 3  runs one.
 node tools/units-kit-check.mjs     the animal kit: planted feet never slide; the dog bit for bit.
 node tools/front-sim.mjs           the city's front resolver (frontline.js) it is calibrated to.
+node tools/ballistics-check.mjs    the weapon table, and flight / penetration / wounds vs published figures.
 ```
 
 `tools/npcwar-headless.mjs` lifts the page's `src/battle` / `src/units` script tags out of

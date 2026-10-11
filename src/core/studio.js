@@ -817,6 +817,9 @@
   CBZ.studio = {};
   CBZ.studio.PACKS = PACKS;
   CBZ.studio.root = ROOT;
+  // the cache key every file a page pulls rides (a page loading its own engine
+  // files, like NPC War's armoury, appends it so one bump re-fetches them too)
+  CBZ.studio.bust = BUST;
 
   /* ---- THE DOORMAN --------------------------------------------------------
      Depth-first over `needs`, then the pack's own files, each appended once

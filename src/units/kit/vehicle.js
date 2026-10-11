@@ -123,6 +123,10 @@
     by = by || imp.by || null;
     if (imp.cause === "bomb") return { pen: 240, beh: 2400, he: true, cls: "bomb", top: true };
     const blast = imp.fromX != null || imp.cause === "explosion";
+    // a flown round says what it defeats where it arrived (weapons/ballistics.js:
+    // the cartridge's RHA depth at its retained velocity), which beats a table
+    // by weapon name that cannot know a 600 m shot from a 60 m one
+    if (imp.pen != null && !blast) return { pen: imp.pen, beh: 1, he: false, cls: "small" };
     // a vehicle's own weapon says what it was: the round on the trigger
     // (_shot, set for the length of the call) or its last high-explosive
     // round in flight (_he, read when that round's blast arrives)
