@@ -582,9 +582,21 @@
        ribs (gun-hold-check, carry-crouch). */
     const LOW = { pitch: 0.45, yaw: 0.30, blade: 0.26 };
     const LOW_CROUCH = { pitch: 0.22, yaw: 0.30, blade: 0.26 };
+    /* THE OTHER TWO CARRIES (entities/soldier.js asks for them by name): the
+       same hold, the stock still in the pocket and both hands on the gun —
+       only where the muzzle goes differs.
+         HIGH READY  muzzle up ~30 degrees in front of the face, the body
+                     barely bladed: moving through a building, a man who
+                     expects to shoot at head height in the next second.
+         PATROL      the slung carry: muzzle down ~55 degrees and across the
+                     body, the hands resting on it, the torso square — a long
+                     walk with nothing in front of you yet. */
+    const HIGH = { pitch: -0.52, yaw: 0.14, blade: 0.20 };
+    const PATROL = { pitch: 0.95, yaw: 0.62, blade: 0.08 };
+    const CARRY_MODES = { low: LOW, lowc: LOW_CROUCH, high: HIGH, patrol: PATROL };
     function solveReady(ch, prop, spec, C, pitch, mode, force) {
-      const low0 = mode === "low" || mode === "lowc";
-      const LW = mode === "lowc" ? LOW_CROUCH : LOW;
+      const low0 = !!CARRY_MODES[mode];
+      const LW = CARRY_MODES[mode] || LOW;
       const elev = -(low0 ? LW.pitch : (pitch || 0));          // combat's convention: negative pitch = barrel up
       const body = ch.body, ra = ch.parts.ra, la = ch.parts.la;
       const hr = handOf(ch, 1), fit = hr.userData.fit;
@@ -946,6 +958,9 @@
         if (prop.userData._readyLv) prop.userData._readyLv.clear();
       }
       applyReady(ch, prop, C, null, 0, arms);
+      // a rifle at the shoulder: the legs walk soft and level under it
+      // (entities/gait.js reads this; it lapses 0.3 s after the last aim)
+      if (arms) ch._aimHold = 0.3;
       return true;
     }
     /* The ready pose PITCHED onto a target above or below (city/combat.js NPC
@@ -967,6 +982,24 @@
         prop.userData._lowVol = vid; prop.userData._lowMode = mode;
         C = getReady(ch, prop, specOf(prop), hr, 0, true, mode);
         prop.userData._low = C; prop.userData._lowCh = ch;
+      }
+      applyReady(ch, prop, C, null, 0, true);
+      return !!C.hasSupport;
+    }
+    /* carry(ch, prop, mode): any of the named carries ("low" / "high" /
+       "patrol"; a crouched low ready is "lowc"), solved once per body + gun +
+       mode and copied like the ready pose. False when this gun or body can't
+       be held that way (the caller keeps its own arms). */
+    function carry(ch, prop, mode) {
+      if (!CARRY_MODES[mode] || !readyOk(ch, prop)) return false;
+      const hr = handOf(ch, 1);
+      const vid = CBZ.charArmTo && CBZ.charArmTo.bodyVolume ? (CBZ.charArmTo.bodyVolume(ch) || {}).id : 0;
+      const M = prop.userData._carry || (prop.userData._carry = {});
+      let C = M[mode];
+      if (!C || M._ch !== ch || C.s !== hr.userData.fit.s || M._vol !== vid) {
+        if (M._ch !== ch || M._vol !== vid) for (const k in M) if (k[0] !== "_") delete M[k];
+        M._ch = ch; M._vol = vid;
+        C = M[mode] = getReady(ch, prop, specOf(prop), hr, 0, true, mode);
       }
       applyReady(ch, prop, C, null, 0, true);
       return !!C.hasSupport;
@@ -1166,7 +1199,7 @@
       return prop.localToWorld(out);
     }
     return {
-      fire, ready, pitchNpc, lowReady, isLong, gunInBody, readyDecay, support, supportLand, supportOrient, supportPoint, specOf, stockZ, last,
+      fire, ready, pitchNpc, lowReady, carry, isLong, gunInBody, readyDecay, support, supportLand, supportOrient, supportPoint, specOf, stockZ, last,
       BEND_MAX, TILT, ROLL, BLADE, BLADE_NECK,
       math: { solveFrame, clampBend, sized, gripCentreOf },
     };

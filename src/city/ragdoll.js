@@ -187,7 +187,7 @@
       //      direction + buckles at the knees instead of teleporting flat.
       //      dyt counts down; while >0 the solver bends the legs to a brace
       //      then a collapse and shoves the hips along dyx/dyz.
-      dyt: 0, dyMax: 0, dyx: 0, dyz: 0, dyForce: 0, dyHead: false,
+      dyt: 0, dyMax: 0, dyx: 0, dyz: 0, dyForce: 0, dyHead: false, dyLat: 0,
       // the skeleton is authored for the 2.60 u rig; k scales it to THIS body
       // (humanScale x its own hip height), and fwx/fwz is the way he faced
       k: 1, fwx: 0, fwz: 1, hk: 0.95, noBeat: false,
@@ -241,7 +241,7 @@
     s.used = false; s.ped = null; s.ch = null; s.isPlayer = false;
     s.asleep = false; s.still = 0; s.life = 0; s.thud = false;
     s.kicked = false; s.kv.fill(0);
-    s.dyt = 0; s.dyMax = 0; s.dyx = 0; s.dyz = 0; s.dyForce = 0; s.dyHead = false;
+    s.dyt = 0; s.dyMax = 0; s.dyx = 0; s.dyz = 0; s.dyForce = 0; s.dyHead = false; s.dyLat = 0;
     s.pin = null; s.wet = false; s.seaY = 0; s.seaDy = 0;
     s.down = false; s.wallT = 0;
     s.live = false; s.strike = null;
@@ -300,6 +300,9 @@
     if (s.dyt <= 0 && !heavy && !s.noBeat) {
       s.dyMax = s.dyt = Math.max(0.16, Math.min(0.36, 0.36 - (m - 1) * 0.012));
       s.dyx = dx; s.dyz = dz; s.dyForce = m / 6; s.dyHead = hs;
+      // which way across him the round pushes (+ = toward his +x side, the
+      // rl leg): that leg takes the load and folds first
+      s.dyLat = Math.max(-1, Math.min(1, dx * s.fwz - dz * s.fwx));
     }
     // the share of the round the body keeps: a pistol ~0.5 m/s, a rifle ~0.9,
     // a close shotgun ~1.6 (theatrical, but a body not a crate)
@@ -838,8 +841,12 @@
       const kneeF = 1.25 * sk * give, kneeD = 1.1 * sk * give, hipD = 1.9 * sk * give;
       for (let n = 0; n < 2; n++) {
         const hip = (3 + n) * 3, knee = (9 + n) * 3;
-        steer(p, q, knee, s.fwx * kneeF, -kneeD, s.fwz * kneeF, h, 0.55);
-        steer(p, q, hip, NaN, -hipD, NaN, h, 0.55);
+        // ONE LEG GOES FIRST: a round from the side throws the weight onto
+        // the far leg, and that knee buckles harder and earlier than the
+        // other (point 3/9 is the -x leg, 4/10 the +x one)
+        const side = 1 + 0.35 * (s.dyLat || 0) * (n ? 1 : -1);
+        steer(p, q, knee, s.fwx * kneeF * side, -kneeD * side, s.fwz * kneeF * side, h, 0.55);
+        steer(p, q, hip, NaN, -hipD * (0.85 + 0.15 * side), NaN, h, 0.55);
       }
     }
     const gh2 = GRAV() * h * h;

@@ -41,9 +41,9 @@
    · GROUND SPEED: measured from where the body actually ended up (after the
      wall resolver, knockback, anything), damped — that is what the legs
      animate with (`m.gs`), so a held body stands still.
-   · GAITS walk / jog / run with a STRIDE MATCHED TO THE LEG (phaseDelta, which
-     entities/character.js's animChar uses): one footfall covers exactly the
-     ground the planted foot sweeps under the hip, so feet do not slide.
+   · GAITS walk / jog / run: the stride, the cadence and the planted feet are
+     entities/gait.js's (CBZ.gait), which animChar runs on the speed measured
+     here — feet do not slide.
    · LOD: `lod` 0 full, 1 no avoidance, 2 bare integration — callers pick it
      by distance/visibility (`CBZ.moves.lodFor`). 650 city peds stay cheap.
 
@@ -500,36 +500,17 @@
     return 2;
   }
 
-  /* ---- STRIDE: foot-plant-matched gait phase --------------------------------
-     animChar advances ch.phase by PI per footfall. The ground one footfall
-     covers must equal the ground the planted foot sweeps under the hip, or the
-     foot slides: 2 · leg · sin(hipAmp), plus a little heel-to-toe roll-over.
-     The hip amplitude here mirrors animChar's own formula so the two agree.
-     At a run the flight phase carries the body further than the stance sweep,
-     so the step blends back to the rig's authored run stride above ~2 m/s. */
-  const LEG_WORLD_DEFAULT = 0.80;
-  function legWorld(ch) {
-    if (ch._legW > 0) return ch._legW;
-    const pf = ch.profile;
-    const hs = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 0.7;
-    const L = pf ? (pf.legUp + pf.legLo + (pf.shoeH || 0.2) * 0.5) * hs : LEG_WORLD_DEFAULT;
-    ch._legW = L > 0.2 ? L : LEG_WORLD_DEFAULT;
-    return ch._legW;
+  /* ---- STRIDE ---------------------------------------------------------------
+     The stride and the cadence are entities/gait.js's (CBZ.gait): the feet
+     plant and the legs are solved onto them. This is the old entry point kept
+     as a one-line door to it (the legacy stride model that lived here is gone:
+     two stride models is how the feet slid in the first place). */
+  function phaseDelta(ch, speed, dt) {
+    const G = CBZ.gait;
+    if (G) return ch && ch._gv ? G.phaseDelta(ch, speed, dt) : (speed > 0.2 ? G.mix(speed, null, _pdm).fc * TAU * dt : 0);
+    return speed > 0.2 ? (speed * dt / 0.8) * PI : 0;
   }
-  function phaseDelta(ch, speed, dt, walkRef, GA) {
-    if (!(speed > 0.2)) return dt * 0.9;
-    walkRef = walkRef || 6.4;
-    const norm = Math.min(speed / walkRef, 1);
-    const run = clamp((speed - walkRef) / (walkRef * 0.7), 0, 1);
-    const stepMul = GA && GA.step > 0 ? GA.step : 1;
-    const legacy = (1.15 + 0.10 * norm + 0.55 * run) * stepMul;
-    const cb = ch ? (ch._cb || 0) : 0;
-    const A = (0.30 + 0.26 * norm + 0.16 * run) * (1 - 0.35 * cb) * ((GA && GA.hipAmp) || 1);
-    const contact = 2 * (ch ? legWorld(ch) : LEG_WORLD_DEFAULT) * Math.sin(A) * 1.18;
-    const w = clamp((speed - 2.0) / 2.5, 0, 1);
-    const stepLen = Math.max(0.25, contact * (1 - w) + Math.max(contact, legacy) * w);
-    return (speed * dt / stepLen) * PI;
-  }
+  const _pdm = {};
 
   /* ---- FORMATIONS -------------------------------------------------------------
      const F = CBZ.moves.formation();       one per principal
@@ -680,7 +661,7 @@
 
   CBZ.moves = Object.assign(CBZ.moves || {}, {
     GAIT, gaitOf, turnRate, motor, reset, step, face, faceAt, look, lookRelax, lodFor,
-    phaseDelta, legWorld, formation, wrap, turnToward, ground, feet,
+    phaseDelta, formation, wrap, turnToward, ground, feet,
     // collide() band for an AI body: the player's own feet clearance, so a
     // stair's soffit under a climber and a riser box are stood on, not walls
     FEET_CLEAR: 0.42, BODY_H: 1.7,

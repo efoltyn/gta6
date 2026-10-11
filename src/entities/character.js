@@ -5989,20 +5989,22 @@
   // radians; PI radians is one alternating footfall. Distance, not frame count,
   // owns cadence so a metre travelled looks the same at every refresh rate.
   function gaitPhaseDelta(speed, dt, walkRef, stepMul) {
+    // the cadence is entities/gait.js's (a person's, at this speed); the
+    // instanced jail crowd (entities/crowd.js) has no rig to plant, so it
+    // takes the adult mix's cadence directly
+    if (CBZ.gait) {
+      if (!(speed > 0.2)) return dt * 0.9;
+      _gpdO.step = stepMul > 0 ? stepMul : 1;
+      return CBZ.gait.mix(speed, _gpdO, _gpdM).fc * Math.PI * 2 * dt;
+    }
     walkRef = walkRef || ((CBZ.TUNE && CBZ.TUNE.walkSpeed) || 6.4);
     const moving = speed > 0.2;
     const norm = Math.min(speed / walkRef, 1);
     const run = clamp01((speed - walkRef) / (walkRef * 0.7));
-    // CADENCE IS NOT AUTHORED — it falls out of speed ÷ stride, which is
-    // exactly right: the gait literature (Cho 2004) finds cadence essentially
-    // EQUAL between the sexes at preferred speed, with women taking SHORTER
-    // STRIDES. So shortening the stride here is the whole female cadence
-    // effect, and a short-legged child gets a child's quick patter for free.
-    // Omitted stepMul = 1 = the motion this game has always had (the external
-    // caller in entities/crowd.js passes two args and is unaffected).
     const stepLen = (1.15 + 0.10 * norm + 0.55 * run) * (stepMul > 0 ? stepMul : 1);
     return moving ? (speed * dt / stepLen) * Math.PI : dt * 0.9;
   }
+  const _gpdO = {}, _gpdM = {};
 
   /* ---- SKYDIVER / PARACHUTE BODY -----------------------------------------
      city/bailout.js owns the trajectory and publishes only a small visual
@@ -6522,6 +6524,13 @@
       if (!forceLying && -wy * Math.sin(s + lie) + wz * Math.cos(s + lie) < -0.3) lie = fl[1];
       void wx;
       a = lie + (a - lie) * up;
+      // THE FOOT ROLLS ON THE GROUND (entities/gait.js): heel strike, flat,
+      // heel rise to toe-off. The pivot of that roll is what stays planted,
+      // so the pitch is written EXACTLY while the gait owns the foot — a damp
+      // here would lag the rocker and drag the pivot along the floor.
+      const fp = !forceLying && CBZ.gait ? CBZ.gait.footPitch(ch, i) : null;
+      if (fp && fp.w >= 0.98) continue;            // CBZ.gait.post set this foot exactly
+      if (fp && fp.w > 0) a = a + (level + fp.psi - a) * fp.w;
       a = a < fl[0] ? fl[0] : (a > fl[1] ? fl[1] : a);
       const roll = Math.max(-0.2, Math.min(0.2, -leg.rotation.z * up));
       if (dt > 0 && dt < 0.25) {
@@ -6556,6 +6565,7 @@
     jm.userData.torsoPart = next;
     if (jm.geometry && jm.geometry.userData && jm.geometry.userData.torso) jm.geometry = partGeometry(jm);
   }
+  const _gaitBody = {};
   function animChar(ch, speed, dt) {
     animCharBody(ch, speed, dt);
     // THE THIGHS HANG FROM THE PELVIS, IN EVERY POSE: the walk's bob, the
@@ -6565,6 +6575,9 @@
     // pelvis 26 cm below them. The leg roots go where the pelvis draws its
     // hip joints (THE LEGS HANG FROM THE PELVIS'S OWN HIP JOINTS).
     legRootsFollow(ch);
+    // THE FEET PLANT: the legs solved onto their footfalls, after every pose
+    // writer has put the pelvis where it goes (entities/gait.js)
+    if (CBZ.gait) CBZ.gait.post(ch, dt);
     // a held pose that closed a hand ON something (poses.js gripPole: the
     // flag) lets go the frame the pose ends
     if (ch._ikPose && ch._ikPose !== ch.pose) { charArmTo.contactRelease(ch, "both"); ch._ikPose = null; }
@@ -6594,6 +6607,17 @@
        frame's barrel orientation (holsterprops writes it at onAlways 54) costs
        nothing. */
     if (ch === CBZ.playerChar && ch.sockets) gunGroundRest(ch, dt);
+    /* THE LEGS ANIMATE WHAT THE ROOT DID (entities/gait.js): the measured
+       ground speed, not the ordered one, so a body held on a wall stands and a
+       body carried on a deck does not walk. Runs every frame whatever pose
+       follows (it keeps the velocity probe fresh); the planted-foot solve
+       itself runs after the pose writers (animChar -> CBZ.gait.post) and only
+       while the locomotion branch below owns the body (ch._gOn). */
+    ch._gOn = 0;
+    if (CBZ.gait) speed = CBZ.gait.pre(ch, speed, dt);
+    // a soldier's stance (crouch / prone / rush / cover) becomes the rig's own
+    // flags before any branch reads them (entities/soldier.js)
+    if (CBZ.soldier) CBZ.soldier.pre(ch, dt);
     beginCharacterHipFrame(ch);
     const moving = speed > 0.2;
     const walkRef = (CBZ.TUNE && CBZ.TUNE.walkSpeed) || 6.4;
@@ -6606,7 +6630,7 @@
 
     // prone blend — physics.js reads this to sink the rig group; damped ABOVE
     // every early-return branch so it always decays once pronePose clears.
-    ch._proneB = damp(ch._proneB || 0, ch.pronePose ? 1 : 0, 9, dt);
+    ch._proneB = damp(ch._proneB || 0, ch.pronePose ? 1 : 0, ch._proneFast ? 16 : 9, dt);
 
     // A falling/chuting body is neither a walk nor a jump animation. The
     // bailout owner publishes the state; this shared rig owns the joints.
@@ -7480,7 +7504,12 @@
       ch._traverseRecover = 1;
       lockCharacterHips(ch);
       // THE HANDS GO ON THE OBSTACLE (after the hip lock: the shoulders are final)
-      if (tp.kind !== "through") { traversePlants(ch, tp, plantW, true, travPivotY); ch._planted = 1; }
+      if (tp.kind !== "through") {
+        traversePlants(ch, tp, plantW, true, travPivotY); ch._planted = 1;
+        // the plant owns the arms outright this frame: store the joint a
+        // person has (what is DRAWN was already held to it)
+        clampArm(ch);
+      }
       return;
     }
     if (ch._planted) {
@@ -7758,9 +7787,22 @@
       // sinks to the ground via _proneB. Arms carry the weapon FORWARD on
       // planted elbows (the LMG firing position); a slow alternating paddle
       // sells the crawl when moving.
-      const pr = 9;
-      if (speed > 0.2) ch.phase += dt * (2.2 + speed * 2.0);           // crawl cadence (gait phase is idle here)
-      const pad = speed > 0.2 ? Math.sin(ch.phase) : 0;
+      const pr = ch._proneFast ? 16 : 9;
+      // the crawl is entities/soldier.js's leopard crawl (knee up, opposite
+      // elbow forward) when it is loaded; the old paddle otherwise
+      const leopard = !!CBZ.soldier;
+      if (speed > 0.2 && !leopard) ch.phase += dt * (2.2 + speed * 2.0);
+      const pad = speed > 0.2 && !leopard ? Math.sin(ch.phase) : 0;
+      /* AN NPC GOES DOWN TO THE GROUND TOO. physics.js sinks the PLAYER's
+         group by the prone pose's own lowest surface (charProneSink); nothing
+         did it for anybody else, so a soldier told to go prone hung his plank
+         at hip height. The model node carries the same sink for every other
+         rig (refunded by the seat-sink blend-out when he gets up). */
+      if (ch !== CBZ.playerChar && ch.model && !ch.sitting) {
+        const sink = (CBZ.charProneSink && CBZ.charProneSink(ch)) || 0.5;
+        ch.model.position.y = -sink * (ch._proneB || 0);
+        ch._seatSunk = 1;
+      }
       ch.body.position.y = damp(ch.body.position.y, 0.02, pr, dt);
       ch.body.position.z = damp(ch.body.position.z, 0, pr, dt);
       ch.body.rotation.x = damp(ch.body.rotation.x, PRONE_PITCH, pr, dt);     // hinge flat, chest down
@@ -7787,6 +7829,7 @@
       setElbow(J.ra, foreA + rec * 0.10, pr);
       if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (legacyArms ? -1.40 : upperA - 0.08) + pad * 0.05, pr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, -0.15, pr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.30, pr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, legacyArms ? 0.14 : 0, pr, dt); }
       setElbow(J.la, legacyArms ? -0.75 : foreA + 0.06, pr);           // support elbow dug in
+      if (leopard) CBZ.soldier.crawl(ch, dt, speed, J);
       // head comes UP behind the gun once there is a gun to look over
       const neckT = legacyArms ? PRONE_NECK_EMPTY
         : PRONE_NECK_EMPTY + (PRONE_NECK_ARMED - PRONE_NECK_EMPTY) * gunK;
@@ -7820,12 +7863,18 @@
     // else, weighted differently. That is why all ~15 makeCharacter call sites
     // get the new motion without a line of change.
     const GA = ch.gait || GAIT_NEUTRAL;
-    // FOOT-PLANT-MATCHED STRIDE (entities/moves.js): one footfall covers the
-    // ground the planted foot sweeps under THIS rig's hip, so walkers stop
-    // skating. Runs keep the authored stride (flight phase).
-    ch.phase += (CBZ.moves && CBZ.moves.phaseDelta)
-      ? CBZ.moves.phaseDelta(ch, speed, dt, walkRef, GA)
+    // THE FEET PLANT (entities/gait.js): the cadence is a person's at this
+    // measured speed and stature, held to what this leg can sweep, and the
+    // legs are SOLVED onto their footfalls after the pose writers
+    // (CBZ.gait.post). The sine legs below remain the pose the solve blends
+    // from (a fight stance taking the feet, a fall) and the fallback for a
+    // page without gait.js.
+    const GT = CBZ.gait;
+    ch._gOn = 1;
+    ch.phase += GT ? GT.phaseDelta(ch, speed, dt)
       : gaitPhaseDelta(speed, dt, walkRef, GA.step);
+    const GB = GT ? GT.body(ch, _gaitBody) : null;
+    const aimK = GB ? GB.aim : 0;              // a rifle at the shoulder: walk soft and level
     const sinP = Math.sin(ch.phase), cosP = Math.cos(ch.phase);
     // CROUCH is a real pose now (hips drop, knees fold, torso hinges forward),
     // not the old whole-group scale.y accordion squash. cb eases 0→1 so
@@ -7863,35 +7912,43 @@
     // with them, so the fold is the one that keeps the feet on the floor:
     // legUp cos 0.95 + legLo cos(0.95 - 1.9) ~ hipY - 0.38)
     const crouchHip = cb * 0.95;                 // thighs fold toward the chest
-    ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, lSwing - lBend - crouchHip, legRate, dt);
-    ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, rSwing - rBend - crouchHip, legRate, dt);
-    // CROSS-LEG GUARD: pose layers own z/y; recycled corpse splay must not
-    // ride into a fresh walker (animChar only runs on live upright actors).
-    // STEP WIDTH lives on this channel: the guard damps toward the body's OWN
-    // stance instead of a flat zero, so a woman keeps her narrow near-midline
-    // walk and a toddler keeps its wide base every frame. Absent (legacy rig)
-    // reads 0 — the exact old behaviour.
-    const stZ = ch.stanceZ || 0;
-    ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, stZ, 12, dt);
-    ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -stZ, 12, dt);
-    ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, 12, dt);
-    ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, 12, dt);
-    // the old scale.y foot-lift fake dies — real knees carry the clearance
-    ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, 16, dt);
-    ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, 16, dt);
+    /* THE SINE LEGS ARE ONLY THE BLEND SOURCE. While the gait solve has had
+       the legs outright (weight 1 last frame) these targets are overwritten
+       before anything reads them, and every channel write re-derives a
+       quaternion — skip them; they resume the frame the solve starts to
+       hand the legs back (a fight stance, a fall). */
+    const gaitHasLegs = !!(GT && ch._gv && ch._gv.w >= 0.999);
+    if (!gaitHasLegs) {
+      ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, lSwing - lBend - crouchHip, legRate, dt);
+      ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, rSwing - rBend - crouchHip, legRate, dt);
+      // CROSS-LEG GUARD: pose layers own z/y; recycled corpse splay must not
+      // ride into a fresh walker (animChar only runs on live upright actors).
+      // STEP WIDTH lives on this channel: the guard damps toward the body's OWN
+      // stance instead of a flat zero, so a woman keeps her narrow near-midline
+      // walk and a toddler keeps its wide base every frame. Absent (legacy rig)
+      // reads 0 — the exact old behaviour.
+      const stZ = ch.stanceZ || 0;
+      ch.parts.ll.rotation.z = damp(ch.parts.ll.rotation.z, stZ, 12, dt);
+      ch.parts.rl.rotation.z = damp(ch.parts.rl.rotation.z, -stZ, 12, dt);
+      ch.parts.ll.rotation.y = damp(ch.parts.ll.rotation.y, 0, 12, dt);
+      ch.parts.rl.rotation.y = damp(ch.parts.rl.rotation.y, 0, 12, dt);
+      // the old scale.y foot-lift fake dies — real knees carry the clearance
+      ch.parts.ll.scale.y = damp(ch.parts.ll.scale.y, 1, 16, dt);
+      ch.parts.rl.scale.y = damp(ch.parts.rl.scale.y, 1, 16, dt);
 
-    // knees: flex through the swing phase (left swings forward while cosθ<0,
-    // peaking mid-swing), carry a small stance flexion so legs never look
-    // hyper-extended, plus a load-response dip right after heel strike.
-    const kneeAmp = (0.62 + 0.55 * norm + 0.55 * run2) * GA.knee;   // sprint kicks heels up
-    // stanceKnee is ADDED, not multiplied: a new walker never straightens the
-    // knee through stance at all (Sutherland 1980), which is a large part of
-    // why a toddler's walk reads as a toddler's and not a small adult's.
-    const stanceK = (moving ? 0.10 + 0.10 * norm : 0.04) + GA.stanceKnee;
-    const kneeL = moving ? stanceK + kneeAmp * Math.pow(Math.max(0, -cosP), 1.3) * (hurtSide < 0 ? 1 - sev * 0.7 : 1) : 0.04;
-    const kneeR = moving ? stanceK + kneeAmp * Math.pow(Math.max(0, cosP), 1.3) * (hurtSide > 0 ? 1 - sev * 0.7 : 1) : 0.04;
-    setKnee(J.ll, kneeL + lBend * 1.4 + cb * 1.90, legRate);
-    setKnee(J.rl, kneeR + rBend * 1.4 + cb * 1.90, legRate);
+      // knees: flex through the swing phase (left swings forward while cosθ<0,
+      // peaking mid-swing), carry a small stance flexion so legs never look
+      // hyper-extended, plus a load-response dip right after heel strike.
+      const kneeAmp = (0.62 + 0.55 * norm + 0.55 * run2) * GA.knee;   // sprint kicks heels up
+      // stanceKnee is ADDED, not multiplied: a new walker never straightens the
+      // knee through stance at all (Sutherland 1980), which is a large part of
+      // why a toddler's walk reads as a toddler's and not a small adult's.
+      const stanceK = (moving ? 0.10 + 0.10 * norm : 0.04) + GA.stanceKnee;
+      const kneeL = moving ? stanceK + kneeAmp * Math.pow(Math.max(0, -cosP), 1.3) * (hurtSide < 0 ? 1 - sev * 0.7 : 1) : 0.04;
+      const kneeR = moving ? stanceK + kneeAmp * Math.pow(Math.max(0, cosP), 1.3) * (hurtSide > 0 ? 1 - sev * 0.7 : 1) : 0.04;
+      setKnee(J.ll, kneeL + lBend * 1.4 + cb * 1.90, legRate);
+      setKnee(J.rl, kneeR + rBend * 1.4 + cb * 1.90, legRate);
+    }
 
     // ---- arms ----
     if (ch.aimingPose) {
@@ -8112,7 +8169,9 @@
 
     // ---- body: bob (2× stride), side sway, forward lean, counter-rotation --
     // CoM is lowest at double support (feet furthest apart, |sinθ| max).
-    const bobTarget = (moving ? -Math.abs(sinP) * (0.03 + 0.05 * norm + 0.03 * run2) * GA.bob : 0) - cb * 0.38;
+    // (a crouched body that RUNS comes up a little off its deepest squat)
+    const bobTarget = GB ? GB.bob * GA.bob - cb * (0.38 - 0.11 * Math.min(1, speed / 2.6))
+      : (moving ? -Math.abs(sinP) * (0.03 + 0.05 * norm + 0.03 * run2) * GA.bob : 0) - cb * 0.38;
     const idleBreath = moving ? 0 : Math.sin(ch.breath * 2.2) * 0.012;
     ch.bob = damp(ch.bob, bobTarget, 12, dt);
     ch.body.position.y = ch.bob + idleBreath;
@@ -8136,7 +8195,7 @@
         let dy = yaw - ch._prevYaw;
         if (dy > Math.PI) dy -= Math.PI * 2; else if (dy < -Math.PI) dy += Math.PI * 2;
         const yawRate = Math.max(-6, Math.min(6, dy / dt));
-        turnBank = moving ? -yawRate * 0.045 * (0.4 + 0.6 * norm) : 0;
+        turnBank = moving ? -yawRate * 0.045 * (0.4 + 0.6 * norm) * (1 - 0.8 * aimK) : 0;
       }
       ch._prevYaw = yaw;
     }
@@ -8145,17 +8204,25 @@
     // no separate pelvis pivot), and it is the loudest female cue in motion:
     // women carry markedly more pelvic obliquity than men (Cho 2004), and it
     // reads from every angle at 30m where a waistline does not.
-    const swayTarget = (moving ? sinP * (0.015 + 0.03 * norm) * GA.sway : Math.sin(ch.breath * 0.9) * 0.012) + turnBank;
+    const swayTarget = (moving ? sinP * (0.015 + 0.03 * norm) * GA.sway * (1 - 0.7 * aimK) : Math.sin(ch.breath * 0.9) * 0.012) + turnBank + (GB ? GB.roll : 0);
     ch.sway = damp(ch.sway, swayTarget, 10, dt);
     ch.body.rotation.z = ch.sway;
 
-    const leanTarget = norm * 0.12 + run2 * 0.10 + cb * 0.16;   // lean into the run / hunch the crouch
+    // lean into the run / hunch the crouch; a body going BACKWARD leans the
+    // other way, a raised rifle holds the chest still over the hips, and the
+    // gait adds the start/stop weight shift and the hill (CBZ.gait.body)
+    const backK = GT && ch._gv ? ch._gv.back : 0;
+    let leanTarget = (norm * 0.12 + run2 * 0.10) * (1 - 1.4 * backK) + cb * 0.16;
+    if (GB) leanTarget = leanTarget * (1 - 0.6 * aimK) + 0.05 * aimK + GB.lean;
     ch.lean = damp(ch.lean, leanTarget, 8, dt);
     ch.body.rotation.x = ch.lean;
     // shoulders counter-rotate the stride (right shoulder leads the left
     // foot): subtle at a walk, pronounced at a sprint. The punch layer OWNS
     // body.rotation.y while active, so only write it here when not punching.
-    const yGait = moving ? sinP * (0.05 + 0.05 * norm + 0.05 * run2) * GA.yaw : 0;
+    // (zero under a raised rifle: the gun hold owns the chest's yaw; a body
+    // turning on the spot leads with the shoulders)
+    const yTurn = !moving && GT && ch._gv ? Math.max(-0.16, Math.min(0.16, ch._gv.yawRate * 0.05)) : 0;
+    const yGait = (moving ? sinP * (0.05 + 0.05 * norm + 0.05 * run2) * GA.yaw * (1 - aimK) : 0) + yTurn;
 
     // ---- LIMP: the body dips toward the hurt leg as it bears weight ----
     if (sev > 0.02 && moving && !legGone) {
@@ -8166,6 +8233,7 @@
 
     // ---- LEG SEVERED: sink into a low crawl/collapse ----
     if (legGone) {
+      ch._gOn = 0;
       const crawl = moving ? sinP : 0;
       ch.body.position.y = damp(ch.body.position.y, -0.85, 8, dt);
       ch.body.rotation.x = damp(ch.body.rotation.x, 0.95, 8, dt);
@@ -8338,6 +8406,10 @@
       ch.neck.rotation.z = damp(ch.neck.rotation.z, -ch.sway * 0.6, 9, dt);
     }
 
+    // ---- A SOLDIER: the rifle carry, cover, reload, the throw, a round
+    // landing, the dive (entities/soldier.js). Above the falls, below
+    // everything that decides where the body is going.
+    if (CBZ.soldier) CBZ.soldier.pose(ch, dt, moving, J, speed);
     // ---- FALLS AND GET-UPS, the head snap and the taser lock: the LAST pose
     // layer on purpose (CBZ.meleePoses.react, entities/meleeposes.js), so
     // nothing above pulls a man who is going down back upright.
