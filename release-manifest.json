@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "6f54793e71def6b85b1e04f11d96c1219aeaf9a8",
-  "createdAt": "2026-10-11T06:09:48.774Z",
+  "sourceCommit": "34897396303a02165da6b9d830b35e6b4e2d2a77",
+  "createdAt": "2026-10-11T06:31:59.706Z",
   "fileCount": 1331,
-  "totalBytes": 48922409,
+  "totalBytes": 48967647,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -3703,8 +3703,8 @@
     },
     {
       "file": "src/units/vehicles/bradley_ifv.js",
-      "bytes": 1121,
-      "sha256": "b9c929ff469bf080275d3bdd1304b35bb5395b94fcae735eedf5a6889b44a394"
+      "bytes": 46359,
+      "sha256": "86b75b8faa9361781c8049b8c24909b73022badaa6872f2960fe0cf8191110f3"
     },
     {
       "file": "src/units/vehicles/f35.js",
@@ -6579,7 +6579,7 @@
     {
       "file": "games/battle.html",
       "bytes": 12832,
-      "sha256": "2b039d56564112ee34465b00011cffc172bf28053b06f6554df988a0ea618897"
+      "sha256": "712c581c64203888e563aa6223781b6cda49f6a5ca1cb661e043f17fb08440f5"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6589,7 +6589,7 @@
     {
       "file": "games/bomb-survivor.html",
       "bytes": 75915,
-      "sha256": "f12b4d5870f894b27fa07a72288eb4904f8bb8f13f27e49ab9af6f1f37125c31"
+      "sha256": "27fba295e7deeb2f2e32ec684138d422ea9c0c1ede24404ff8bdb7dc410a5e77"
     },
     {
       "file": "games/dev.html",
@@ -6609,7 +6609,7 @@
     {
       "file": "games/warlord.html",
       "bytes": 73709,
-      "sha256": "917892d05c0b19d8d1d37204f8c1c2094d3a3ccbc87fd610f41de86a13d3e6bf"
+      "sha256": "24068340ef3c24d03a0ef80aa9ee25da2934a37b0e2d67f213ae4d1a921e4374"
     },
     {
       "file": "thumbs/shark-sim.jpg",
