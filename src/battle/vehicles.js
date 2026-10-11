@@ -336,6 +336,22 @@ function vehDismount(u) {
   }
   u.dismounted = true;
 }
+/* ONE MAN DOWN A FAST ROPE: the next passenger, at the foot of rope k & 1
+   (port / starboard: 2 m out from the cabin doors), stepping off it. */
+function vehRopeOne(u, k) {
+  for (let s = 0; s < u.seats.length; s++) {
+    const seat = u.seats[s];
+    if (seat.crew || !seat.man) continue;
+    const man = CBZ.vehicleDrive.unseat(u.seats, seat);
+    const side = (k & 1) ? -1 : 1, lx = side * (3.0 + (k >> 1) % 3 * 0.8), lz = 0.1 - ((k >> 1) % 2) * 0.9;
+    const c = Math.cos(u.h), sn = Math.sin(u.h);
+    const x = u.pos.x + lx * c + lz * sn, z = u.pos.z - lx * sn + lz * c;
+    // vehPutOnField puts him (vlen + 1.2 + (k % 3) * 0.9) behind: k = 2, vlen -3 = right here
+    vehPutOnField({ pos: { x: x, y: 0, z: z }, h: u.h, vlen: -3.0 }, man, 2);
+    return man;
+  }
+  return null;
+}
 // the hull is lost: whoever lives climbs out and fights on foot
 function vehBailOut(u, catastrophic) {
   let k = 0;
@@ -412,7 +428,7 @@ function thinkVehicle(u) {
   const com = teamCOM[enemy];
   const S = u.def.stats || {};
   // carried infantry gets out at the vehicle's dismount range
-  if (!u.dismounted && vehPassengers(u) > 0) {
+  if (!u.dismounted && vehPassengers(u) > 0 && !(u.air && u.def.drive === "rotor" && !u.vs.mobility)) {
     const ref = u.tgt && !u.tgt.dead ? u.tgt.pos : com;
     const d = Math.hypot(ref.x - u.pos.x, ref.z - u.pos.z);
     if (d < (S.dismountAt || 150) || u.vs.mobility) vehDismount(u);
@@ -953,12 +969,33 @@ function stepRotor(u, sdt) {
     gx = MAP.cx + (u.team === "red" ? -4200 : 4200); gz = MAP.cz; wantAGL = nap * 2;
     H.ph = "transit";
   } else if (carrying) {
-    // a lift: low and fast to a landing short of the enemy, set down, unload
+    /* A LIFT: low and fast to a landing zone short of the enemy (0.8 x
+       dismountAt), flare, then either set down (1.5 m) and unload at once,
+       or, with stats.fastRope, hover at that height and put the men down
+       two ropes, one man per rope every ropeEvery s after ropeDelay plus
+       the slide (the unit's rig draws the same schedule). The zone is fixed
+       once the aircraft is close, so it does not chase a moving enemy. */
     const sx = ref.x - u.pos.x, sz = ref.z - u.pos.z, sd = Math.hypot(sx, sz) || 1;
-    const lz = Math.max(0, sd - S.dismountAt * 0.8);
-    gx = u.pos.x + sx / sd * lz; gz = u.pos.z + sz / sd * lz;
-    wantAGL = lz < 60 ? 1.5 : nap;
-    H.ph = "transit";
+    if (!H.lz || (H.ph !== "insert" && Math.hypot(H.lz.x - u.pos.x, H.lz.z - u.pos.z) > 150)) {
+      const lz = Math.max(0, sd - S.dismountAt * 0.8);
+      H.lz = { x: u.pos.x + sx / sd * lz, z: u.pos.z + sz / sd * lz };
+    }
+    gx = H.lz.x; gz = H.lz.z;
+    const dl = Math.hypot(gx - u.pos.x, gz - u.pos.z), rope = S.fastRope || 0;
+    const agl = u.pos.y - MAP.groundAt(u.pos.x, u.pos.z);
+    wantAGL = dl < 90 ? (rope || 1.5) : nap;
+    if (H.ph === "insert" || (dl < 10 && u.ds.v < 3 && Math.abs(agl - (rope || 1.5)) < 2.5)) {
+      if (H.ph !== "insert") { H.ph = "insert"; H.insT = 0; H.insK = 0; }
+      else H.insT += sdt;
+      gx = u.pos.x; gz = u.pos.z;                    // hold the hover
+      if (!rope) { if (H.insT > 1.2) vehDismount(u); }
+      else {
+        const first = (S.ropeDelay || 1.6) + rope / (S.ropeSpeed || 6), gap = (S.ropeEvery || 0.9) / 2;
+        while (vehPassengers(u) > 0 && H.insT >= first + H.insK * gap) { vehRopeOne(u, H.insK); H.insK++; }
+        if (!vehPassengers(u)) u.dismounted = true;
+      }
+      if (u.dismounted) { H.ph = "transit"; H.lz = null; H.bp = null; }
+    } else H.ph = "transit";
   } else {
     const stand = heliStand(u, t);
     // the mark has moved off this position's geometry: plan again
@@ -998,6 +1035,8 @@ function stepRotor(u, sdt) {
     // the nose: on the mark at the position (the rockets and the Hellfire
     // need it there), along the track on the way
     if (H.ph !== "transit" || dBp < 400 || u._wantNose) face = Math.atan2(ref.x - u.pos.x, ref.z - u.pos.z);
+    // a door-gun aircraft turns a side to the mark (stats.broadside rad), alternating with the sidestep
+    if (face != null && S.broadside && !u._wantNose) face -= (H.shift >= 0 ? 1 : -1) * S.broadside;
   }
   const dx = gx - u.pos.x, dz = gz - u.pos.z, d = Math.hypot(dx, dz);
   const travel = Math.atan2(dx, dz);
@@ -1178,7 +1217,7 @@ function hurtVehicle(u, dmg, imp) {
   if (vehCrewN(u) === 0) { u._abandoned = true; killMan(u, imp); return; }
   // a hull that can neither move nor fight is abandoned
   if (u.vs.mobility && (u.vs.firepower || !u.wpn.length)) { u._abandoned = true; killMan(u, imp); return; }
-  if (res.pen && vehPassengers(u)) vehDismount(u);
+  if (res.pen && vehPassengers(u) && !(u.air && u.pos.y - MAP.groundAt(u.pos.x, u.pos.z) > 3)) vehDismount(u);
   if (u.air && u.vs.mobility) { u._abandoned = true; killMan(u, imp); }
 }
 /* CREW CASUALTIES BY SEAT. A penetration enters through the face it hit
@@ -1352,6 +1391,12 @@ function vehYouSeatWeapon(u, t) {
   const list = u.wpn.filter(function (W) { return (W.w.kind !== "bombs" || u.air) && !W.off; });
   if (!list.length) return null;
   if (u._youSeat != null || !t) return list[(u._youSeat || 0) % list.length];
+  // the unit file's moves(veh, tgt, ctx) may name the weapon for this mark (a door gun on its side)
+  if (typeof u.def.moves === "function") {
+    let id = null;
+    try { id = u.def.moves(u, t, { dist: Math.hypot(t.pos.x - u.pos.x, t.pos.z - u.pos.z) }); } catch (e) { id = null; }
+    for (let k = 0; id && k < list.length; k++) if (list[k].w.id === id && list[k].ammo > 0) return list[k];
+  }
   const dist = Math.hypot(t.pos.x - u.pos.x, t.pos.z - u.pos.z);
   let best = null, bs = -1e9;
   for (let k = 0; k < list.length; k++) {
