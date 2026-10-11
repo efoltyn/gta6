@@ -43,8 +43,9 @@
       rubble that costs one draw call per material per 16 m cell and zero
       CPU. Live bodies are capped per device (the iPad gets fewer at once,
       never uglier ones); overflow freezes the oldest resting piece first.
-   5. GRIT + DUST. Small chips (irregular convex hulls, instanced, coloured
-      per chip from the source) and a pooled soft-dust cloud in the source's
+   5. GRIT + DUST. Small bits in the shape the material breaks into (stone
+      chips, soil clods, flakes, glass shards, torn plate, track shoes, road
+      wheels, hatch lids — section 5; instanced, coloured per bit from the source) and a pooled soft-dust cloud in the source's
       colour: brick dust is red, plaster white, dirt brown, leaves green.
 
    PUBLIC API (CBZ.debris)
@@ -67,7 +68,11 @@
          opts.solid               settled big pieces register colliders
      chips(x, y, z, opts)         grit + dust only, for a hit with no source
                                   solid (bullet on a wall, blast on asphalt).
-                                  opts {kind, color, count, dir, power, dust}
+                                  opts {kind, color, count, dir, power, dust,
+                                  shape, size, speed, burn, burnFrac, fires}
+     wreckage(x, y, z, opts)      what a holed or killed hull sheds: torn plate
+                                  in its paint, track shoes, road wheels, a
+                                  hatch, some of it burning (see section 5)
      dust(x, y, z, opts)          a colour-matched dust cloud {color, kind, power, radius}
      kindOf(material)             the kind this file would infer
      tag(object, kind)            declare an object's material kind
@@ -299,6 +304,8 @@
     rubber:   { density: 1200, size: 9,    e: 0.45, mu: 0.9, core: 0x222222, coreMix: 0.2, dust: 0x77726a, grit: 0x2a2a2a, drag: 0.03, gritN: 0 },
     rock:     { density: 2600, size: 0.7,  e: 0.18, mu: 0.8, core: 0x8b8378, coreMix: 0.5, coreShade: 0.88, dust: 0xa39684, grit: 0x7d7568, drag: 0.02, gritN: 14 },
     dirt:     { density: 1500, size: 0.35, e: 0.05, mu: 0.95, core: 0x6f5a41, coreMix: 0.5, dust: 0x8c7658, grit: 0x5e4a35, drag: 0.05, gritN: 22 },
+    sand:     { density: 1600, size: 0.3,  e: 0.04, mu: 0.95, core: 0xb39568, coreMix: 0.5, dust: 0xc9b089, grit: 0xa98c60, drag: 0.06, gritN: 24 },
+    snow:     { density: 400,  size: 0.3,  e: 0.03, mu: 0.6, core: 0xe8eef2, coreMix: 0.3, dust: 0xf2f5f8, grit: 0xdfe6ec, drag: 0.4, gritN: 20 },
     asphalt:  { density: 2300, size: 0.45, e: 0.14, mu: 0.85, core: 0x3b3b3b, coreMix: 0.5, dust: 0x7c776e, grit: 0x2f2f30, drag: 0.02, gritN: 18 },
   };
   function K(kind) { return KINDS[kind] || KINDS.concrete; }
@@ -1265,94 +1272,340 @@
     b.mesh.geometry.dispose();
   }
 
-  /* ================= 5. GRIT (instanced chips) ============================ */
+  /* ================= 5. GRIT (instanced loose bits) ======================= */
+  /* Everything too small or too many to be a rigid body: chips off a wall,
+     clods out of a crater, torn plate off a hull. ONE InstancedMesh per shape
+     variant, made the first time that shape is thrown (a page that never
+     breaks metal never builds the plate pool), each a ring that recycles its
+     oldest instance, drawn only up to its high-water mark.
+
+     SHAPES, not cubes. The old chip was a unit box with its corners trimmed,
+     and every settled chip was snapped to a 90-degree grid, so a field after a
+     shelling was strewn with little square blocks. Now each family is the
+     shape the material actually breaks into:
+       stone   an irregular rock cut by fracture planes (concrete, brick,
+               rock, asphalt): angular, no two faces square to each other
+       clod    a lumpy rounded clot of soil (dirt, sand, snow, mud)
+       flake   a thin ragged flake (leaves, paint, splinters of bark)
+       shard   a glass shard
+       plate   torn armour / body plate: a jagged polygon with real
+               thickness, curled where it was bent off
+       link    a track shoe: the plate, its rubber pad, two pin bushings,
+               the guide horn
+       wheel   a road wheel: steel disc, rubber tyre band, hub
+       hatch   a round hatch lid: the disc, its rim, the hinge, the grab bar
+     Pieces fly ballistic, tumble, bounce by their material, and come to rest
+     ON the terrain at whatever angle they fell (flat things lie flat), taking
+     the colour they were handed (the ground's, the paint's, the wall's).
+     A piece handed `burn` seconds glows hot, trails smoke, and the first few
+     to land start a small fire (CBZ.blastFire) where they lie. */
   let grit = null;
   let chunkGeos = null;
-  function chipGeo(glass) {
-    // an irregular convex chip: a unit solid cut by a few random planes —
-    // the same clipper the big pieces use, so a chip is a small piece
-    const t = [];
-    if (glass) boxTris({ minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.04, maxZ: 0.04 }, 0, t);
-    else boxTris({ minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.5, maxZ: 0.5 }, 0, t);
-    let cell = t;
-    const cuts = glass ? 3 : 6;
+  // a SOUP from a geometry (S-stride rows, slot 0, white)
+  function soupOf(geo) {
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    const p = g.attributes.position, t = [];
+    for (let i = 0; i < p.count; i += 3) {
+      const ax = p.getX(i), ay = p.getY(i), az = p.getZ(i);
+      const bx = p.getX(i + 1), by = p.getY(i + 1), bz = p.getZ(i + 1);
+      const cx = p.getX(i + 2), cy = p.getY(i + 2), cz = p.getZ(i + 2);
+      let nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay);
+      let ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+      let nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+      const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+      t.push(ax, ay, az, nx, ny, nz, 0, 0, 1, 1, 1, 0);
+      t.push(bx, by, bz, nx, ny, nz, 0, 0, 1, 1, 1, 0);
+      t.push(cx, cy, cz, nx, ny, nz, 0, 0, 1, 1, 1, 0);
+    }
+    return t;
+  }
+  // a lumpy unit blob: an icosahedron whose vertices are pushed in and out by
+  // a hash of their direction (shared corners move together: no cracks)
+  function lumpGeo(detail, amp, squash) {
+    const g = new THREE.IcosahedronGeometry(0.5, detail);
+    const p = g.attributes.position, seed = rng() * 1000;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      const k = Math.round(x * 97) * 7919 + Math.round(y * 97) * 104729 + Math.round(z * 97) * 1299709 + seed;
+      const h = Math.abs(Math.sin(k) * 43758.5453) % 1;
+      const s = 1 - amp + amp * 2 * h;
+      p.setXYZ(i, x * s, y * s * squash, z * s);
+    }
+    return g;
+  }
+  function normalise(g) {
+    g.computeBoundingSphere();
+    const c = g.boundingSphere.center, r = g.boundingSphere.radius || 0.5;
+    g.translate(-c.x, -c.y, -c.z);
+    g.scale(0.5 / r, 0.5 / r, 0.5 / r);
+    g.computeBoundingSphere();
+    return g;
+  }
+  // stone: a lumpy core cut by fracture planes, each cut a flat broken face
+  function stoneGeo() {
+    let cell = soupOf(lumpGeo(0, 0.22, 0.85));
+    const cuts = 3 + ((rng() * 3) | 0);
     for (let i = 0; i < cuts; i++) {
-      const a = rng() * 6.283, z = glass ? 0 : rr(-1, 1), s = Math.sqrt(1 - z * z);
-      const nx = Math.cos(a) * s, ny = Math.sin(a) * s, nz = z;
-      cell = clipSolid(cell, nx, ny, nz, rr(0.12, 0.34), { r: 1, g: 1, b: 1, slot: 0 });
+      const a = rng() * 6.283, z = rr(-1, 1), s = Math.sqrt(1 - z * z);
+      cell = clipSolid(cell, Math.cos(a) * s, Math.sin(a) * s, z, rr(0.16, 0.36), { r: 1, g: 1, b: 1, slot: 0 });
     }
     const vol = volumeOf(cell);
     const piece = buildPiece({ t: cell, V: vol.V, cx: vol.cx, cy: vol.cy, cz: vol.cz }, [null], 0);
     const g = piece.mesh.geometry; g.clearGroups();
-    // normalise to ~1 m across so scale == size
-    g.computeBoundingSphere(); const r = g.boundingSphere.radius || 0.5; g.scale(0.5 / r, 0.5 / r, 0.5 / r);
-    g.deleteAttribute("color");
+    g.deleteAttribute("color"); g.deleteAttribute("uv");
+    return normalise(g);
+  }
+  // clod: rounded, lumpy, a little flattened — soil does not break square
+  function clodGeo() {
+    const g = lumpGeo(1, 0.3, 0.7);           // (polyhedra are non-indexed: flat facets)
+    g.computeVertexNormals();
+    return normalise(g);
+  }
+  // a ragged outline (star-shaped about its centre) extruded to `thick`,
+  // then curled `bend` along its long axis and twisted a little. Vertex
+  // colour: the faces 1 (painted), the torn edge `edge` (raw, darker).
+  function raggedGeo(nPts, aspect, thick, bend, edge) {
+    const pts = [];
+    for (let i = 0; i < nPts; i++) {
+      const a = (i + rr(-0.3, 0.3)) / nPts * 6.283;
+      let r = rr(0.55, 1.0);
+      if (rng() < 0.3) r *= rr(0.45, 0.7);              // a tear notch
+      pts.push([Math.cos(a) * r * 0.5 * aspect, Math.sin(a) * r * 0.5]);
+    }
+    const P = [], C = [];
+    const h = thick / 2, tw = rr(-0.25, 0.25);
+    const Y = (x, z, s) => s * h + bend * x * x + tw * x * z;
+    const tri = (a, b, c, col) => { P.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); for (let k = 0; k < 3; k++) C.push(col, col, col); };
+    for (let i = 0; i < nPts; i++) {
+      const p = pts[i], q = pts[(i + 1) % nPts];
+      // top and bottom fans from the centre
+      tri([0, Y(0, 0, 1), 0], [q[0], Y(q[0], q[1], 1), q[1]], [p[0], Y(p[0], p[1], 1), p[1]], 1);
+      tri([0, Y(0, 0, -1), 0], [p[0], Y(p[0], p[1], -1), p[1]], [q[0], Y(q[0], q[1], -1), q[1]], 1);
+      // the torn edge
+      const pt = [p[0], Y(p[0], p[1], 1), p[1]], qt = [q[0], Y(q[0], q[1], 1), q[1]];
+      const pb = [p[0], Y(p[0], p[1], -1), p[1]], qb = [q[0], Y(q[0], q[1], -1), q[1]];
+      tri(pt, qt, qb, edge); tri(pt, qb, pb, edge);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
+    g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(C), 3));
+    g.computeVertexNormals();
+    return normalise(g);
+  }
+  function plateGeo() { return raggedGeo(9 + ((rng() * 5) | 0), rr(1.0, 1.7), rr(0.035, 0.07), rr(-0.35, 0.35), 0.62); }
+  function flakeGeo() { return raggedGeo(7 + ((rng() * 3) | 0), rr(1.0, 1.5), 0.04, rr(-0.2, 0.2), 0.8); }
+  // merge non-indexed position/normal/color parts (each part's colour constant)
+  function mergeParts(parts) {
+    let n = 0;
+    const list = parts.map((q) => { const g = q.g.index ? q.g.toNonIndexed() : q.g; if (!g.attributes.normal) g.computeVertexNormals(); n += g.attributes.position.count; return { g, c: q.c }; });
+    const P = new Float32Array(n * 3), N = new Float32Array(n * 3), C = new Float32Array(n * 3);
+    let w = 0;
+    for (const q of list) {
+      const p = q.g.attributes.position, nn = q.g.attributes.normal;
+      for (let i = 0; i < p.count; i++, w++) {
+        P[w * 3] = p.getX(i); P[w * 3 + 1] = p.getY(i); P[w * 3 + 2] = p.getZ(i);
+        N[w * 3] = nn.getX(i); N[w * 3 + 1] = nn.getY(i); N[w * 3 + 2] = nn.getZ(i);
+        C[w * 3] = q.c; C[w * 3 + 1] = q.c; C[w * 3 + 2] = q.c;
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(C, 3));
     return g;
+  }
+  // a track shoe, 1 m across (x) before scale: steel shoe, rubber pad, two
+  // pin bushings, the centre guide horn
+  function linkGeo() {
+    const shoe = new THREE.BoxGeometry(0.9, 0.06, 0.26);
+    const pad = new THREE.BoxGeometry(0.34, 0.07, 0.2); pad.translate(-0.22, -0.06, 0);
+    const pad2 = pad.clone(); pad2.translate(0.44, 0, 0);
+    const pinA = new THREE.CylinderGeometry(0.055, 0.055, 0.98, 8); pinA.rotateZ(Math.PI / 2); pinA.translate(0, 0.01, 0.13);
+    const pinB = pinA.clone(); pinB.translate(0, 0, -0.26);
+    const horn = new THREE.CylinderGeometry(0.03, 0.08, 0.16, 4, 1); horn.rotateY(Math.PI / 4); horn.scale(1, 1, 1.6); horn.translate(0, 0.11, 0);
+    const g = mergeParts([{ g: shoe, c: 1 }, { g: pad, c: 0.16 }, { g: pad2, c: 0.16 }, { g: pinA, c: 0.75 }, { g: pinB, c: 0.75 }, { g: horn, c: 0.9 }]);
+    g.translate(0, 0.02, 0);
+    return g;
+  }
+  // a road wheel lying flat, 1 m across before scale
+  function wheelGeo() {
+    const tyre = new THREE.CylinderGeometry(0.5, 0.5, 0.16, 20, 1, true);
+    const tyreTop = new THREE.RingGeometry(0.4, 0.5, 20); tyreTop.rotateX(-Math.PI / 2); tyreTop.translate(0, 0.08, 0);
+    const tyreBot = tyreTop.clone(); tyreBot.rotateX(Math.PI);
+    const disc = new THREE.CylinderGeometry(0.41, 0.41, 0.1, 20);
+    const hub = new THREE.CylinderGeometry(0.13, 0.15, 0.2, 10); hub.translate(0, 0.04, 0);
+    const bolts = [];
+    for (let i = 0; i < 6; i++) { const b = new THREE.CylinderGeometry(0.02, 0.02, 0.24, 5); const a = i / 6 * 6.283; b.translate(Math.cos(a) * 0.2, 0.03, Math.sin(a) * 0.2); bolts.push({ g: b, c: 0.6 }); }
+    return mergeParts([{ g: tyre, c: 0.13 }, { g: tyreTop, c: 0.13 }, { g: tyreBot, c: 0.13 }, { g: disc, c: 1 }, { g: hub, c: 0.8 }].concat(bolts));
+  }
+  // a hatch lid, 1 m across before scale
+  function hatchGeo() {
+    const lid = new THREE.CylinderGeometry(0.47, 0.5, 0.07, 22);
+    const rim = new THREE.TorusGeometry(0.43, 0.025, 4, 22); rim.rotateX(Math.PI / 2); rim.translate(0, 0.04, 0);
+    const hinge = new THREE.CylinderGeometry(0.04, 0.04, 0.34, 8); hinge.rotateZ(Math.PI / 2); hinge.translate(0, 0.02, 0.52);
+    const lug = new THREE.BoxGeometry(0.3, 0.05, 0.14); lug.translate(0, 0.02, 0.44);
+    const bar = new THREE.TorusGeometry(0.1, 0.014, 4, 10, Math.PI); bar.translate(0, 0.04, -0.2);
+    return mergeParts([{ g: lid, c: 1 }, { g: rim, c: 0.85 }, { g: hinge, c: 0.7 }, { g: lug, c: 0.9 }, { g: bar, c: 0.6 }]);
+  }
+  /* glass shard: a thin slab cut by in-plane fracture lines (kept from the
+     original chip; a pane really does break into flat polygons) */
+  function chipGeo() {
+    const t = [];
+    boxTris({ minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5, minZ: -0.04, maxZ: 0.04 }, 0, t);
+    let cell = t;
+    for (let i = 0; i < 3; i++) {
+      const a = rng() * 6.283;
+      cell = clipSolid(cell, Math.cos(a), Math.sin(a), 0, rr(0.12, 0.34), { r: 1, g: 1, b: 1, slot: 0 });
+    }
+    const vol = volumeOf(cell);
+    const piece = buildPiece({ t: cell, V: vol.V, cx: vol.cx, cy: vol.cy, cz: vol.cz }, [null], 0);
+    const g = piece.mesh.geometry; g.clearGroups();
+    g.rotateX(Math.PI / 2);                       // lies in XZ, thin in Y
+    g.deleteAttribute("color");
+    return normalise(g);
+  }
+  // instances per variant; parts are big and few, grit small and many
+  const PART_K = PHONE ? 0.4 : TABLET ? 0.65 : 1;
+  const FAM = {
+    //        variants  material  rest = resting half-height / size   e = bounce   size jitter
+    stone: { n: 4, mat: "stone", make: stoneGeo, cap: Math.floor(GRIT_CAP * 0.32 / 4), rest: 0.3, e: 0.25, jit: 1 },
+    clod:  { n: 4, mat: "stone", make: clodGeo, cap: Math.floor(GRIT_CAP * 0.36 / 4), rest: 0.18, e: 0.1, jit: 1 },
+    flake: { n: 2, mat: "stone", make: flakeGeo, cap: Math.floor(GRIT_CAP * 0.12 / 2), rest: 0.03, e: 0.05, jit: 1, flat: true, drag: 2.6 },
+    shard: { n: 2, mat: "glass", make: chipGeo, cap: Math.floor(GRIT_CAP * 0.2 / 2), rest: 0.05, e: 0.15, jit: 1, flat: true, drag: 0.4 },
+    plate: { n: 4, mat: "metal", make: plateGeo, cap: Math.max(8, Math.round(36 * PART_K)), rest: 0.05, e: 0.3, jit: [0.55, 1.35], flat: true, drag: 0.03 },
+    link:  { n: 1, mat: "metal", make: linkGeo, cap: Math.max(16, Math.round(90 * PART_K)), rest: 0.07, e: 0.3, jit: [0.97, 1.03], flat: true },
+    wheel: { n: 1, mat: "metal", make: wheelGeo, cap: Math.max(4, Math.round(16 * PART_K)), rest: 0.09, e: 0.35, jit: [0.97, 1.03], flat: true },
+    hatch: { n: 1, mat: "metal", make: hatchGeo, cap: Math.max(4, Math.round(10 * PART_K)), rest: 0.05, e: 0.25, jit: [0.97, 1.03], flat: true },
+  };
+  // what each material breaks into, and how a piece of it is stretched
+  function shapeOf(kind) {
+    const k = K(kind);
+    if (k.glass) return "shard";
+    if (k.leaves) return "flake";
+    if (k.bend) return "plate";
+    if (kind === "dirt" || kind === "sand" || kind === "snow" || kind === "rubber") return "clod";
+    return "stone";
+  }
+  function gritMats() {
+    const stone = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+    const glass = new THREE.MeshPhongMaterial({ color: 0xffffff, specular: 0xffffff, shininess: 120, transparent: true, opacity: 0.55, depthWrite: false });
+    const metal = new THREE.MeshPhongMaterial({ color: 0xffffff, specular: 0x3a3a3a, shininess: 26, vertexColors: true });
+    stone._shared = glass._shared = metal._shared = true;
+    return { stone, glass, metal };
   }
   function ensureGrit() {
     if (grit || !CBZ.scene) return grit;
-    const variants = [];
-    const stoneMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    const glassMat = new THREE.MeshPhongMaterial({ color: 0xffffff, specular: 0xffffff, shininess: 120, transparent: true, opacity: 0.55, depthWrite: false });
-    stoneMat._shared = glassMat._shared = true;
-    const nStone = 5, nGlass = 2;
-    const per = Math.max(16, Math.floor(GRIT_CAP / (nStone + nGlass)));
-    for (let i = 0; i < nStone + nGlass; i++) {
-      const glass = i >= nStone;
-      const im = new THREE.InstancedMesh(chipGeo(glass), glass ? glassMat : stoneMat, per);
-      im.frustumCulled = false; im.castShadow = false; im.receiveShadow = !glass;
-      im.userData.debrisGrit = true;
-      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
-      for (let k = 0; k < per; k++) { im.setMatrixAt(k, zero); im.setColorAt(k, _c.setRGB(1, 1, 1)); }
-      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      CBZ.scene.add(im);
-      variants.push({ im, glass, slots: new Array(per).fill(null), next: 0 });
-    }
-    grit = { variants, moving: [] };
+    grit = { variants: [], fam: {}, mats: gritMats(), moving: [], burning: [] };
     return grit;
   }
+  function famPool(name) {
+    const G0 = ensureGrit(); if (!G0) return null;
+    let pool = G0.fam[name];
+    if (pool) return pool;
+    const F = FAM[name] || FAM.stone;
+    pool = [];
+    for (let i = 0; i < F.n; i++) {
+      const geo = F.make();
+      if (!geo.attributes.color) {
+        const n = geo.attributes.position.count;
+        geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+      }
+      const mat = G0.mats[F.mat];
+      const im = new THREE.InstancedMesh(geo, mat, F.cap);
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(F.cap * 3).fill(1), 3);
+      im.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      im.count = 0;                                   // drawn up to the high-water mark only
+      im.frustumCulled = false; im.castShadow = F.mat === "metal"; im.receiveShadow = F.mat !== "glass";
+      im.userData.debrisGrit = true; im.name = "debris-" + name;
+      CBZ.scene.add(im);
+      const V = { im, fam: name, F, glass: F.mat === "glass", slots: new Array(F.cap).fill(null), next: 0, hi: 0 };
+      pool.push(V); G0.variants.push(V);
+    }
+    G0.fam[name] = pool;
+    return pool;
+  }
+  function jitter(F, size) {
+    if (F.jit === 1) return size * (0.45 + rng() * rng() * 2.2);
+    return size * rr(F.jit[0], F.jit[1]);
+  }
+  const HOT = new THREE.Color(1.9, 0.62, 0.16);
   function spawnGrit(x, y, z, o) {
-    const G0 = ensureGrit(); if (!G0) return 0;
-    const k = K(o.kind);
     const n = Math.round(o.count);
-    if (n <= 0) return 0;
-    const glass = !!k.glass;
-    const pool = G0.variants.filter((v) => v.glass === glass);
+    if (!(n > 0)) return 0;
+    const kind = o.kind || "concrete", k = K(kind);
+    const shape = o.shape && FAM[o.shape] ? o.shape : shapeOf(kind);
+    const pool = famPool(shape); if (!pool) return 0;
+    const F = FAM[shape];
     const col = new THREE.Color(o.color != null ? o.color : (k.grit != null ? k.grit : 0x888888));
-    const dir = o.dir || null, power = o.power || 1, size = o.size || (glass ? 0.05 : 0.07);
+    const dir = o.dir || null, power = o.power || 1, size = o.size || (F.jit === 1 ? (k.glass ? 0.05 : 0.07) : 0.6);
+    const stretch = k.grain ? 1.9 : 1;                 // wood comes off as splinters
+    let fires = o.fires || 0;
     for (let i = 0; i < n; i++) {
       const V = pool[(rng() * pool.length) | 0];
       const slot = V.next; V.next = (V.next + 1) % V.slots.length;
-      const s = size * (0.45 + rng() * rng() * 2.2);
-      const tone = 0.78 + rng() * 0.34;
-      V.im.setColorAt(slot, _c2.copy(col).multiplyScalar(tone));
-      const a = rng() * 6.283, up = rr(0.4, 1.0), sp = rr(1.2, 4.5) * power * (k.leaves ? 0.6 : 1);
+      if (slot + 1 > V.hi) { V.hi = slot + 1; V.im.count = V.hi; }
+      const s = jitter(F, size);
+      const tone = F.mat === "metal" ? 0.88 + rng() * 0.2 : 0.78 + rng() * 0.34;
+      const a = rng() * 6.283, up = rr(0.4, 1.0), sp = rr(1.2, 4.5) * power * (k.leaves ? 0.6 : 1) * (o.speed || 1);
       let vx = Math.cos(a) * sp * 0.7, vz = Math.sin(a) * sp * 0.7, vy = up * sp;
       if (dir) { vx += dir.x * sp * 0.9; vy += (dir.y || 0) * sp; vz += dir.z * sp * 0.9; }
+      const spin = F.jit === 1 ? 14 : 9;
       const q = {
         V, slot, x: x + rr(-0.2, 0.2) * (o.spread || 1), y, z: z + rr(-0.2, 0.2) * (o.spread || 1),
-        vx, vy, vz, s, rx: rng() * 6, ry: rng() * 6, rz: rng() * 6, sx: rr(-14, 14), sy: rr(-14, 14),
-        owner: o.owner || null, t: 0, floor: null, drag: k.leaves ? 2.6 : glass ? 0.4 : 0.1, flat: glass || k.leaves,
+        vx, vy, vz, s, ax: stretch, ay: 1, az: 1 / Math.sqrt(stretch),
+        rx: rng() * 6.283, ry: rng() * 6.283, rz: rng() * 6.283, sx: rr(-spin, spin), sy: rr(-spin, spin), sz: rr(-spin, spin) * 0.5,
+        tx: rr(-0.06, 0.06), tz: rr(-0.06, 0.06),
+        owner: o.owner || null, t: 0, floor: null, drag: F.drag != null ? F.drag : (k.leaves ? 2.6 : 0.1),
+        e: F.e, rest: F.rest, flat: !!F.flat,
+        r: col.r * tone, g: col.g * tone, b: col.b * tone, burn: 0, burn0: 0, fire: false, smokeT: 0,
       };
+      if (o.burn > 0 && rng() < (o.burnFrac == null ? 1 : o.burnFrac)) {
+        q.burn = q.burn0 = o.burn * rr(0.6, 1.2);
+        if (fires > 0) { q.fire = true; fires--; }
+        if (G0burning() < BURN_CAP) grit.burning.push(q);
+        else q.burn = 0;
+      }
       if (V.slots[slot]) { const old = V.slots[slot]; old.dead = true; }
       V.slots[slot] = q;
-      G0.moving.push(q);
+      grit.moving.push(q);
+      paintChip(q);
       writeChip(q);
     }
-    for (const v of pool) if (v.im.instanceColor) v.im.instanceColor.needsUpdate = true;
+    for (const v of pool) v.im.instanceColor.needsUpdate = true;
     return n;
+  }
+  const BURN_CAP = PHONE ? 10 : 24;
+  function G0burning() { return grit ? grit.burning.length : 0; }
+  function paintChip(q) {
+    if (q.burn > 0) {
+      // fresh off a fire: glowing, cooling to char over the burn
+      const f = Math.max(0, q.burn / q.burn0), hot = f * f;
+      _c2.setRGB(q.r * 0.3, q.g * 0.3, q.b * 0.3).lerp(HOT, hot);
+    } else _c2.setRGB(q.r, q.g, q.b);
+    q.V.im.setColorAt(q.slot, _c2);
   }
   const _e = new THREE.Euler(), _s3 = new THREE.Vector3(), _p3 = new THREE.Vector3();
   function writeChip(q) {
     _e.set(q.rx, q.ry, q.rz); _q.setFromEuler(_e);
-    const fl = q.flat ? 0.35 : 1;
-    _s3.set(q.s, q.s * fl, q.s);
+    _s3.set(q.s * q.ax, q.s * q.ay, q.s * q.az);
     _mm.compose(_p3.set(q.x, q.y, q.z), _q, _s3);
     q.V.im.setMatrixAt(q.slot, _mm);
     q.V.im.instanceMatrix.needsUpdate = true;
   }
+  // one rising smoke mote in the shared dust pool
+  function smokeMote(x, y, z, big) {
+    const D = ensureDust(); if (!D) return;
+    const s = D.next; D.next = (D.next + 1) % D.n;
+    const v = 0.1 + rng() * 0.06;
+    D.motes[s] = {
+      x: x + rr(-0.1, 0.1), y: y + 0.1, z: z + rr(-0.1, 0.1),
+      vx: rr(-0.3, 0.3), vy: rr(1.0, 1.8), vz: rr(-0.3, 0.3),
+      t: 0, life: rr(1.6, 2.6), s0: big ? 0.5 : 0.25, s1: big ? 2.6 : 1.4, a0: rr(0.35, 0.55), r: v, g: v * 0.95, b: v * 0.9,
+    };
+  }
   function stepGrit(dt) {
-    if (!grit || !grit.moving.length) return;
+    if (!grit) return;
     const mv = grit.moving;
     for (let i = mv.length - 1; i >= 0; i--) {
       const q = mv[i];
@@ -1361,26 +1614,70 @@
       q.vy -= G * dt;
       if (q.drag) { const f = Math.max(0, 1 - q.drag * dt); q.vx *= f; q.vz *= f; if (q.vy < 0) q.vy *= Math.max(0.2, 1 - q.drag * 0.5 * dt); }
       q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt;
-      q.rx += q.sx * dt; q.ry += q.sy * dt;
+      q.rx += q.sx * dt; q.ry += q.sy * dt; q.rz += q.sz * dt;
       if (q.floor == null || (q.t % 0.25) < dt) {
         q.floor = floorAt(q.x, q.z, q.y + 0.5);
         const h = hfAt(q.x, q.z); if (h > q.floor && h < q.y + 0.4) q.floor = h;
       }
-      const rest = q.floor + q.s * (q.flat ? 0.12 : 0.3);
+      const rest = q.floor + q.s * q.rest;
       if (q.y <= rest) {
         q.y = rest;
-        if (q.vy < -1.2) { q.vy = -q.vy * 0.25; q.vx *= 0.5; q.vz *= 0.5; q.sx *= 0.5; q.sy *= 0.5; }
-        else {
-          // settle flat-ish and stop — an instance that never moves again costs nothing
+        if (q.fire && CBZ.blastFire) { q.fire = false; try { CBZ.blastFire(q.x, q.floor + 0.05, q.z, 8 + rng() * 14, 0.3 + q.s * 0.4); } catch (e) {} }
+        if (q.vy < -1.2) {
+          // a bounce: what it keeps depends on what it is; a tumble goes on
+          q.vy = -q.vy * q.e; q.vx *= 0.55; q.vz *= 0.55; q.sx *= 0.6; q.sy *= 0.6; q.sz *= 0.6;
+        } else {
+          // at rest where it fell — a flat thing lies flat, a lump at its own
+          // angle. An instance that never moves again costs nothing.
           q.vx = q.vy = q.vz = 0;
-          if (q.flat) { q.rx = 0; q.rz = 0; }
-          else { q.rx = Math.round(q.rx / 1.57) * 1.57; q.rz = Math.round(q.rz / 1.57) * 1.57; }
+          if (q.flat) { q.rx = q.tx; q.rz = q.tz; }
           writeChip(q); mv.splice(i, 1); continue;
         }
       }
       if (q.t > 6) { mv.splice(i, 1); }
       writeChip(q);
     }
+    const bn = grit.burning;
+    if (bn.length) {
+      const touched = new Set();
+      for (let i = bn.length - 1; i >= 0; i--) {
+        const q = bn[i];
+        if (q.dead) { bn.splice(i, 1); continue; }
+        q.burn -= dt;
+        q.smokeT -= dt;
+        if (q.smokeT <= 0) { q.smokeT = 0.16 + rng() * 0.12; smokeMote(q.x, q.y, q.z, q.s > 0.4); }
+        if (q.burn <= 0) { q.burn = 0; bn.splice(i, 1); }
+        paintChip(q); touched.add(q.V);
+      }
+      for (const v of touched) v.im.instanceColor.needsUpdate = true;
+    }
+  }
+  /* WRECKAGE — what a hull sheds when it is holed or killed: torn plate in
+     its own paint, track shoes and road wheels off a tracked hull, a hatch
+     lid, the pieces of a knocked-out hull burning. Sparks and the hull's own
+     fire belong to the caller; this is the metal.
+       o.color   paint (hex)         o.dir {x,y,z}   o.power
+       o.plates  o.links  o.wheels  o.hatches       counts
+       o.plateSize  (m, default 0.6) o.linkSize (shoe width) o.wheelSize (diameter)
+       o.trackColor  o.burn (s)  o.burnFrac  o.fires (ground fires)  o.owner */
+  function wreckage(x, y, z, o) {
+    o = o || {};
+    const dir = o.dir ? new THREE.Vector3(o.dir.x || 0, o.dir.y || 0, o.dir.z || 0) : null;
+    if (dir && dir.lengthSq() > 1e-6) dir.normalize();
+    const power = o.power == null ? 1 : o.power, col = o.color != null ? o.color : 0x5b6148;
+    const base = { kind: "metal", dir, power, owner: o.owner, spread: o.spread || 1, burn: o.burn || 0, burnFrac: o.burnFrac };
+    let fires = o.fires || 0, n = 0;
+    const throwSet = (shape, count, size, color, speed) => {
+      if (!(count > 0)) return;
+      const f = Math.min(fires, count); fires -= f;
+      n += spawnGrit(x, y, z, Object.assign({}, base, { shape, count, size, color, speed, fires: f }));
+    };
+    throwSet("plate", o.plates, o.plateSize || 0.6, col, 1);
+    throwSet("hatch", o.hatches, o.hatchSize || 0.8, col, 0.8);
+    throwSet("link", o.links, o.linkSize || 0.6, o.trackColor != null ? o.trackColor : 0x3a3936, 0.9);
+    throwSet("wheel", o.wheels, o.wheelSize || 0.64, col, 0.7);
+    if (o.dust !== false) dust(x, y, z, { color: o.dustColor != null ? o.dustColor : 0x4a443c, power: Math.min(2, power * 0.6), radius: o.radius || 1.2, dir });
+    return n;
   }
 
   /* ================= DUST (pooled soft sprites) =========================== */
@@ -1806,7 +2103,8 @@
     const n = o.count != null ? o.count : Math.round(k.gritN * 0.6 * power);
     const dir = o.dir ? new THREE.Vector3(o.dir.x || 0, o.dir.y || 0, o.dir.z || 0) : null;
     if (dir && dir.lengthSq() > 1e-6) dir.normalize();
-    const got = spawnGrit(x, y, z, { kind, color, count: Math.min(PHONE ? 14 : 40, n), dir, power, size: o.size > 0 ? o.size : SOURCELESS_GRIT, spread: o.spread, owner: o.owner });
+    const got = spawnGrit(x, y, z, { kind, shape: o.shape, color, count: Math.min(PHONE ? 14 : 40, n), dir, power, size: o.size > 0 ? o.size : SOURCELESS_GRIT, spread: o.spread, owner: o.owner,
+      speed: o.speed, burn: o.burn, burnFrac: o.burnFrac, fires: o.fires });
     if (o.dust !== false && k.dust != null) dust(x, y, z, { color: o.dustColor != null ? o.dustColor : (color != null ? new THREE.Color(k.dust).lerp(new THREE.Color(color), 0.3).getHex() : k.dust), power: power * 0.7, radius: o.radius || 0.6, dir });
     return got;
   }
@@ -1888,8 +2186,8 @@
         const zero = new THREE.Matrix4().makeScale(0, 0, 0);
         for (let k = 0; k < v.slots.length; k++) { v.slots[k] = null; v.im.setMatrixAt(k, zero); }
         v.im.instanceMatrix.needsUpdate = true;
-        grit.moving.length = 0;
       }
+      if (grit) { grit.moving.length = 0; grit.burning.length = 0; }
       if (dustSys) { dustSys.motes.fill(null); dustSys.pos.fill(-9999); dustSys.alpha.fill(0); }
     }
   }
@@ -1964,11 +2262,12 @@
     chunkGeo(i) {
       if (!chunkGeos) {
         chunkGeos = [];
-        for (let v = 0; v < 6; v++) { const g = chipGeo(false); g._shared = true; chunkGeos.push(g); }
+        for (let v = 0; v < 6; v++) { const g = stoneGeo(); g._shared = true; chunkGeos.push(g); }
       }
       return chunkGeos[Math.abs(i | 0) % chunkGeos.length];
     },
     chips,
+    wreckage,
     dust: (x, y, z, o) => dust(x, y, z, o),
     kindOf,
     tag(obj, kind) { if (obj) { if (obj.userData) obj.userData.debrisKind = kind; else if (obj.material) obj.material.userData.debrisKind = kind; } return obj; },

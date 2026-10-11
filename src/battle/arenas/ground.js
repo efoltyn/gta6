@@ -20,9 +20,12 @@
                  and stamped by stride as bodies move near the lens. Sand
                  takes them deep, snow takes them blue, grass takes them
                  faint, concrete takes only rubber.
-     SPRAY       every detonation throws the ground it hit: grains and clods
-                 on ballistic arcs and a slow dust ring, GPU-integrated from
-                 one Points buffer (no per-frame CPU per particle).
+     SPRAY       every detonation throws the ground it hit: grains on
+                 ballistic arcs and a slow dust ring, GPU-integrated from
+                 one Points buffer (no per-frame CPU per particle), and real
+                 CLODS of that ground (CBZ.debris grit, rounded lumps of
+                 soil or broken stone in the crater wall's colour) that
+                 tumble, bounce and settle on the crater they came out of.
      BLOWING     sand streaming off dune crests (spindrift off snow): a
                  static Points cloud animated entirely by one time uniform.
      REMAINS     a body or a wreck past the live budget is BAKED — its last
@@ -750,6 +753,35 @@ CBZ.battleGround = (function () {
     return true;
   }
 
+  /* ============================================================ CLODS
+     The spray is the grain and the dust; the clods are the lumps of the
+     ground itself that a shell digs out and throws: rounded soil (sand,
+     earth, snow) or broken stone off a hard surface, in the colour of the
+     crater's own wall, on ballistic arcs, settling where they land on the
+     deformed ground (CBZ.debris grit: instanced, capped, recycled). */
+  function hex3(c) { return (Math.min(255, Math.round(c[0] * 255)) << 16) | (Math.min(255, Math.round(c[1] * 255)) << 8) | Math.min(255, Math.round(c[2] * 255)); }
+  function clods(x, gy, z, cr) {
+    const D = CBZ.debris;
+    if (!D || !D.chips || cr < 0.25) return;
+    if (typeof MAP !== "undefined" && MAP && MAP.water) return;
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (cam && (cam.x - x) * (cam.x - x) + (cam.z - z) * (cam.z - z) > 320 * 320) return;
+    const S = surf(), sf = G.surface;
+    const kind = sf === "snow" ? "snow" : sf === "concrete" ? "concrete" : sf === "sand" ? "sand" : "dirt";
+    const wall = hex3(S.wall), ej = hex3(S.ejecta);
+    const pw = Math.min(3, 1 + cr * 0.55), up = { x: 0, y: 1, z: 0 };
+    try {
+      // a few big lumps out of the bowl, a shower of small ones over the apron
+      D.chips(x, gy + 0.2, z, { kind: kind, color: wall, count: Math.round(4 + cr * 3), size: Math.min(0.24, 0.07 + cr * 0.05),
+        power: pw, dir: up, spread: Math.max(1, cr), dust: false });
+      D.chips(x, gy + 0.2, z, { kind: kind, color: ej, count: Math.round(8 + cr * 8), size: Math.min(0.1, 0.035 + cr * 0.02),
+        power: pw * 1.15, dir: up, spread: Math.max(1, cr * 1.4), dust: false });
+    } catch (e) {}
+  }
+  // the shared city blast (crashfx) throws generic grit off whatever ground it
+  // assumes; on a battlefield the ground's own lumps are thrown here instead
+  CBZ.groundOwnsEjecta = function () { return !!G.ctx; };
+
   /* ============================================================ BLAST */
   // studio.boom scale: radius 2.5-34 m, power 0.5-4. ordnance.blast scale:
   // radius 26-1100, power 110-1800. One crater rule for both, in metres.
@@ -762,6 +794,7 @@ CBZ.battleGround = (function () {
     const onGround = y - g0 < Math.max(3, cr * 1.5);
     const S = surf();
     if (G.gl) spray(x, Math.max(y, g0), z, Math.max(1.5, cr * 2.2), ord ? 2.5 : power);
+    if (G.gl && onGround) clods(x, g0, z, cr);
     if (onGround) {
       if (G.soft && cr >= 0.45) {
         crater(x, z, cr, cr * (G.surface === "snow" ? 0.42 : G.surface === "sand" ? 0.32 : 0.36));

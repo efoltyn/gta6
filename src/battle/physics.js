@@ -835,8 +835,8 @@ function stepTossed(t, sdt) {
               divided by its mass, so a man is thrown and a bull rocks;
      corpses  thrown by city/ragdoll's own blast (CBZ.ragdollBlast) first, so
               a body this blast kills is not thrown twice;
-     debris   loose pieces already lying there are kicked (CBZ.debris.impulse)
-              and the crater throws grit and dust (CBZ.debris.chips).
+     debris   loose pieces already lying there are kicked (CBZ.debris.impulse);
+              the crater and the soil it throws are arenas/ground.js's.
    Hulls keep the old ring: inside 0.55 R the armour answers (hurtVehicle). */
 const BLAST_DMG = 420, BLAST_DV = 9;
 const _blastL = [];
@@ -876,13 +876,10 @@ function blastBodies(x, y, z, R, power, opts) {
     if (!b.dead && dv > 0.3) addKnock(b, ux * dv * 0.9, uz * dv * 0.9, by, { vy: dv * 0.45 });
     n++;
   }
+  // what is already lying there is kicked; what the ground throws up is
+  // arenas/ground.js's (blast -> crater, scorch, spray, clods of that ground)
   const D = CBZ.debris;
-  if (D) {
-    if (D.impulse) { try { D.impulse(x, y || 0, z, R * 1.2, 8 * power); } catch (e) {} }
-    if (D.chips && !(MAP && MAP.water) && camDist2({ x: x, y: y || 0, z: z }) < 400 * 400) {
-      try { D.chips(x, (y || 0) + 0.1, z, { kind: "dirt", count: Math.round(10 + 14 * Math.min(2, power)), power: Math.min(3, power * 1.4), dir: { x: 0, y: 1, z: 0 }, dust: true }); } catch (e) {}
-    }
-  }
+  if (D && D.impulse) { try { D.impulse(x, y || 0, z, R * 1.2, 8 * power); } catch (e) {} }
   return n;
 }
 
