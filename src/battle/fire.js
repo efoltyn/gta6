@@ -250,6 +250,19 @@ function stepRockets(sdt) {
     const r = rockets[i];
     r.t += sdt;
     r.vel.y -= r.grav * sdt;
+    /* A GUIDED ROUND (a laser-guided bomb: src/battle/vehicles.js vehRelease
+       sets `homing`) steers its horizontal velocity so the rest of its fall
+       ends on the mark, wherever the mark has walked to since release. */
+    const hm = r.homing;
+    if (hm && !hm.dead && hm.pos) {
+      const g = MAP.groundAt(r.pos.x, r.pos.z), h = r.pos.y - g, vy = r.vel.y;
+      const tl = (vy + Math.sqrt(Math.max(0, vy * vy + 2 * r.grav * Math.max(0, h)))) / Math.max(1e-3, r.grav);
+      if (tl > 0.3) {
+        const k = Math.min(1, sdt * 1.5);
+        r.vel.x += ((hm.pos.x - r.pos.x) / tl - r.vel.x) * k;
+        r.vel.z += ((hm.pos.z - r.pos.z) / tl - r.vel.z) * k;
+      }
+    }
     r.pos.addScaledVector(r.vel, sdt);
     r.trail.push(r.pos);
     let boom = r.t > (r.life || 7) || r.pos.y <= MAP.groundAt(r.pos.x, r.pos.z) + 0.25;

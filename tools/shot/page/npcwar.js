@@ -294,14 +294,17 @@
       catch (e) { return { ok: false, error: "setup js threw: " + (e && e.message || e) }; }
     }
     if (pose === "fight" || pose === "death") ST.travel = 0;
+    // cam=<unit id>: the game's own camera follows it too (the "lens" cam)
+    if (spec.cam && B.camFollow) { try { B.camFollow(spec.cam); } catch (e) { ST.warn.push("camFollow threw: " + e.message); } }
     var box = boxOf(ST.subj);
     ST.studio = (spec.stage || (fight ? "map" : "studio")) === "studio" ? buildStudio({ grid: spec.grid, ruler: spec.ruler, travel: speed * 3 }, box) : null;
     return {
       ok: true, pose: pose, period: Math.round(ST.period * 1000) / 1000, speed: Math.round(speed * 100) / 100, style: ST.style || null,
       subjects: ST.subj.slice(0, 12).map(function (m) {
         var b = boxOf([m]), s = b.getSize(V3());
-        return { id: m.id, team: m.team, kind: m.beast ? m.species.id : "men", size: [s.x, s.y, s.z].map(function (v) { return Math.round(v * 100) / 100; }) };
+        return { id: m.id, team: m.team, kind: m.beast ? m.species.id : m.vehicle ? m.unitId : "men", size: [s.x, s.y, s.z].map(function (v) { return Math.round(v * 100) / 100; }) };
       }),
+      lens: lensNote(spec),
       warn: ST.warn,
     };
   };
@@ -343,10 +346,38 @@
   };
 
   /* ---- cameras ----------------------------------------------------------- */
+  /* cam=<sel> (the battle page's lens names): the body it names, re-found on
+     every frame so the shot FOLLOWS it through a fight; a side (a | b) is
+     that side's living bodies. null = no lens named, or nothing left of it. */
+  function lensWants(m, sel) {
+    var ix = /^([ab]):(\d+)$/.exec(sel);
+    if (ix) return m.team === (ix[1] === "a" ? "red" : "blue") && m.i === +ix[2];
+    return (m.species && m.species.id === sel) || m.unitId === sel || (sel === "men" && !m.beast && !m.vehicle);
+  }
+  function lensOf(spec) {
+    var sel = spec && spec.cam ? String(spec.cam) : null;
+    if (!sel) return null;
+    var R = B.roster(), out = [];
+    for (var i = 0; i < R.length; i++) {
+      var m = R[i];
+      if (m.dead || m.fled) continue;
+      if (sel === "a" || sel === "b") { if (m.team === (sel === "a" ? "red" : "blue")) out.push(m); }
+      else if (lensWants(m, sel)) return [m];
+    }
+    return out.length ? out : null;
+  }
+  function lensNote(spec) {
+    var L = lensOf(spec);
+    return L ? { cam: spec.cam, id: L[0].id, n: L.length } : (spec && spec.cam ? { cam: spec.cam, id: null } : null);
+  }
   function frame(cam, aspect) {
-    var lead = ST.subj[0];
-    var all = ST.pose === "fight" ? B.roster() : ST.subj;
-    var box = boxOf(ST.pose === "fight" ? all.filter(function (m) { return !m.dead || true; }) : all);
+    var lens = lensOf(ST.spec);
+    var lead = lens ? lens[0] : ST.subj[0];
+    var all = lens ? lens : ST.pose === "fight" ? B.roster() : ST.subj;
+    // a single body in the lens: "wide" takes in its mark too (when it is near enough to share a frame)
+    if (lens && lens.length === 1 && cam === "wide" && lead.tgt && !lead.tgt.dead &&
+        lead.tgt.pos.distanceTo(lead.pos) < Math.max(60, boxOf([lead]).getSize(V3()).length() * 6)) all = [lead, lead.tgt];
+    var box = boxOf(all);
     var c = box.getCenter(V3()), sz = box.getSize(V3());
     var f = lead ? fwdOf(lead) : V3(1, 0, 0), right = f.clone().cross(UP).normalize();
     var fov = 30, target = c.clone(), rad = Math.max(0.3, sz.length() / 2), dirH = f.clone(), elev = 8, dist = 0, up = null, distMul = 1;
@@ -374,6 +405,7 @@
       }
       case "wide": dirH = V3(0.3, 0, 1).normalize(); elev = 38; fov = 40; distMul = 1.05; break;
       case "hot": {
+        if (lens && lens.length === 1) { dirH = f.clone().add(right).normalize(); elev = 16; fov = 36; break; }
         var hsp = null; try { hsp = B.look(30, 0.45); } catch (e) {}
         if (hsp) target = V3(hsp.x, c.y, hsp.z);
         rad = Math.min(rad, 16); dirH = V3(0.3, 0, 1).normalize(); elev = 26; fov = 40;

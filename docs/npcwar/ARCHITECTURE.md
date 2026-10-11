@@ -204,14 +204,102 @@ creatureFight plays it with no extra work.
 
 ```js
 CBZ.unitKit.register("m1_abrams", {
-  kind: "vehicle", domain: "ground" | "air",
-  stats:   { hp, mass, speed, turn, armour: { front, side, rear, top } },   // armour in mm RHA
-  crew:    [{ seat: "driver" | "gunner" | "commander" | "loader", pos: [x, y, z] }],
-  passengers, weapons: [{ id, seat, kind: "cannon" | "mg" | "rockets" | "missile", rof, dmg, range, ammo }],
-  build(ctx) -> { group, turret, gun, ... },
-  drive(unit, dt, ctrl), aim(unit, dt, tx, ty, tz), fight(unit, tgt, dt, opts)
+  kind: "vehicle", domain: "ground" | "air", drive: "tracked" | "wheeled" | "rotor" | "jet",
+  stats:   { hp, mass, speed, turn, armour: { front, side, rear, top },  // armour in mm RHA
+             alt, standoff, nap, popAlt, climb, popWindow, popShots },   // aircraft: see "Flight"
+  crew:    [{ seat: "driver" | "gunner" | "commander" | "loader" | "pilot", pos: [x, y, z] }],
+  passengers,
+  weapons: [{ id, seat, kind: "cannon" | "autocannon" | "mg" | "rockets" | "missile" | "sam" | "bombs",
+              rof, dmg, range, minRange, ammo, burst, pause, salvo, reload, vs, needs, indirect,
+              mount: "turret" | "slew" | "fixed" | "free", arc, yawMax, tol,       // facing, below
+              guided, basket, alt, dive, pullOut }],                            // air weapons
+  build(ctx) -> { group, rig, footW, footL, height },
+  animate(veh, dt, ctx),                                // optional: the unit's own look
 });
 ```
+
+#### The vehicle contract: the hooks the battle calls
+
+`src/battle/vehicles.js` is the only caller. Every hook is optional; a missing one means the
+shared default. A unit file never needs to know the runtime's internals.
+
+**`build(ctx)`** is called once per hull. `ctx` = `{ THREE, mat, rng, seed, id, side, team,
+nation, flagId, flag, color, sideInfo }`. `side` is the slot (`"red"`/`"blue"`). `nation` is
+the `city/flags.js` id the side fights for (null for a side with no army). `flag` is that
+nation's design (paint it with `CBZ.flags.paint(g2d, ctx.flag, w, h)`; at THE FRONT it is the
+front spec's own flag). `color` is the side's mark colour. Markings, roundels and fin flags
+come from here. Return `{ group, rig }`, where `group` has its feet at y = 0 and nose on +Z.
+
+**`animate(veh, dt, ctx)`** is called by the battle **every sim step, on the battle clock**,
+for every vehicle kind, alive or wrecked. It stops when the battle is paused and follows the
+speed dial. Distance LOD applies: a far hull is animated every 2nd or 4th step with the summed
+`dt`. `veh.rig` is what `build` returned. `ctx` is one object per hull, reused:
+
+| field | what |
+|---|---|
+| `t`, `dt` | sim time, this call's dt |
+| `dead`, `wreck`, `burning` | damage state (`dead` = knocked out: wind rotors down, kill lights) |
+| `air`, `agl`, `speed`, `vy`, `yawRate`, `gamma` | motion: height over the ground, forward m/s, climb m/s, rad/s, flight-path angle |
+| `steer`, `throttle`, `turret` | the drive's controls and `{ yaw, elev }` of the turret |
+| `target`, `phase` | the mark, and an aircraft's flight phase (`transit mask pop drop` / `in out`) |
+| `firing` | the shot fired since the last animate (the `shot` below), else null |
+| `side`, `nation`, `groundAt` | who it fights for; `groundAt(x, z)` |
+| `shared(dt)` | run the shared default from inside your own |
+
+With no `animate`, the shared default runs: `rig.update(dt, v, w, steer)`, and for aircraft
+`CBZ.milAirDrive` (control surfaces, props, gear).
+
+**The shot.** Every round, launch and bomb is described by one object per weapon, reused:
+`shot = { wid, wi, n, w, kind, mount, target }` (`wid` = the weapon's id, `wi` its index in
+`weapons`, `n` the round number on that weapon since spawn). Every rig hook below receives it.
+Do not read `w.needs` as a "which weapon" signal (the old getter hack): use `shot.wid`.
+
+| rig hook | when |
+|---|---|
+| `muzzleWorld(out, shot) -> Vector3` | where this round leaves (the gun, the next tube or rail) |
+| `fire(shot, from)` | every round of every weapon. A rig with `fire` owns its effects (recoil, flash, the store leaving its rail): the runtime draws none |
+| `fired(scale, shot)` / `spend(i, shot)` | **legacy** (`city/mil_armor.js` rigs), only when there is no `fire`: `fired` for cannon (1) and autocannon (0.3) rounds, `spend` for a launch with `i` = the rig's own `loaded - 1` when it keeps one, else `shot.n` |
+| `reload(shot)` | a salvo's reload has finished: put the rounds back |
+| `aimError(shot) -> rad` | how far a `slew` mount still is from the line; the runtime holds fire until it is under `w.tol` (0.06) |
+| `aimTurret(yaw, elev, dt)`, `aimLauncher(yaw, elev, dt)`, `settle()`, `update(dt, v, w, steer)` | as before |
+
+A model can also carry `userData.chinGun = { yaw, pitch }` (the names of two empty nodes). The
+runtime lays them on the mark with `CBZ.milAirAim` and the rig follows them at its own rates.
+
+**Facing is per weapon.** `mount` says what has to be on the line before a weapon fires:
+
+| mount | fires when | default for |
+|---|---|---|
+| `turret` | the vehicle's turret has slewed onto the mark (`tol`, 0.05 rad) | `turret: true` |
+| `slew` | the mark is within `yawMax` (default 1.9 rad) of the nose and `rig.aimError` is under `tol` | `chin: true` / `slew: true` |
+| `fixed` | the NOSE is within `arc` of the mark (missile/sam 0.35, rockets 0.05, guns 0.06); a jet's gun and rockets also check the dive angle | an aircraft's non-MG weapons |
+| `free` | always (pintle, door gun, indirect launcher, bombs) | everything else |
+
+When a `fixed` or `slew` weapon is out of arc, the aircraft turns its nose onto the mark.
+The player's weapon pick (`vehYouSeatWeapon`) uses the same fit rules (`vehWeaponFits`) and
+puts weapons that cannot bear on the mark second.
+
+**Flight.** Aircraft fly a doctrine (`stepRotor`, `stepJet` in `src/battle/vehicles.js`):
+
+- **Helicopters** (`drive: "rotor"`) fight from battle positions. The stand-off is the
+  weapon for the mark's `range x 0.75`, capped by `stats.standoff`. The position is on its
+  own side of the mark, where ground or buildings hide it at `nap` m (default 10) but a climb to
+  no more than `popAlt` (default max(alt, 60)) clears the line. Closer rings are tried when
+  nothing sees the mark. The phases are `transit` (nap of the earth, terrain-following), `mask`
+  (hover hidden until a weapon is ready), `pop` (climb at `climb` m/s, default 8, nose on the
+  mark, fire for `popWindow` s, default 7; this is cut short after `popShots` rounds, when hit,
+  or when blind), and `drop` (back down, then sidestep to a new position). With no mask (flat
+  ground) it still shoots and scoots. A transport (`dismountAt`) flies low to a landing short
+  of the enemy and sets down.
+- **Jets** fly attack runs at real heights. Level bombing is flown at the weapon's `alt` (else
+  `stats.alt`) and released where the fall lands on the mark. A `guided` bomb is released
+  inside a basket of `basket` (0.15) x its fall distance and homes all the way down (`homing`
+  on the rocket, `fire.js`). Missiles are fired at cruise inside 0.85 x range with the nose on,
+  and the jet breaks off inside its own stand-off. Gun and rocket runs are DIVES down a line of
+  `dive` rad (0.3) from `alt` (default min(cruise, 1500)), firing inside range and pulling out
+  at `pullOut` m (250). The jet then flies a racetrack out past the mark, wide enough for its
+  turn circle, and comes in again. It never flies below 60 m. The heights today: F-35 4.6 km
+  (gun dive from 1.5 km), MQ-9 4.5 km, B-52 9 km, B-2 12 km, A400M drop 380 m.
 
 ### Lazy loading and cache keys
 
@@ -296,7 +384,8 @@ teeth and fists do nothing to thick plate.
 steer (or the touch stick), the look lays the turret and is pulled onto the auto-target, attack
 (LMB / J / the touch button) fires the right gun for the mark (main gun at armour, MG at men; X
 picks a seat by hand). The round waits until the turret is on. The chase cam rides the turret
-while you gun. G hands it back. In aircraft you work the guns while the AI flies.
+while you gun. G hands it back. In aircraft you work the guns while the AI flies. Your gun
+line is the weapon's mount: the turret, the look (slew within its arc, free), or the nose.
 
 **Take over / camera (player.js, camera/*.js, hud.js).** Any unit, either side: tap it.
 MOVE + ATTACK only (men: CBZ.melee grammar with fists, auto-aimed fire with a gun, rifle butt up
@@ -310,8 +399,9 @@ enters walls, ground, dunes or bodies (camApply). Probe seams: `__battle.take(se
 `youDrive({ax,az,run,atk,yaw})`, `youState()`, `director()`. Shot service: `--cams lens` shoots
 the game's own camera.
 
-**Known gaps.** The HIMARS' indirect fire needs tuning, the F-35 drops few bombs, aircraft fly
-their own pattern (not `studio.fly`), and there is no per-track split on the rig. In node,
+**Known gaps.** The HIMARS' indirect fire needs tuning, and there is no per-track split on the
+rig. Aircraft fly the doctrine above, not `studio.fly`. The `drive` / `aim` / `fight` unit
+hooks are not called yet: a unit drives on the shared tracked / wheeled / air model. In node,
 strategic.js and the A400M build fall back to stand-ins (browser untested).
 
 ### Seeing your work: the shot service
@@ -323,12 +413,18 @@ working tree as it is, uncommitted edits included:
 node tools/shot/req.mjs --preset turntable --setup 'species=bengal_tiger' --wait
 node tools/shot/req.mjs --preset gait --setup 'species=dog' --wait            (also walk|trot|run|attack|death|glance)
 node tools/shot/req.mjs --preset matchup --setup 'a=m1_abrams&b=men&n=1v30' --wait
+node tools/shot/req.mjs --preset matchup --setup 'a=ah64_apache&b=men&n=1v30&arena=dunes&cam=ah64_apache' --wait
 node tools/shot/req.mjs --preset turntable --setup 'species=lion' --ba --wait  (origin/main vs you, one sheet)
 ```
 
 It prints a sheet path: Read it. `--setup` takes the matchup URL names (`a b n=AvB aw at arena`)
-as well as the stage keys (`species unit vs vn pose speed heading stage grid ruler`). Any other
-key goes on the page URL. A change that touches only `src/units/species|vehicles|kit/*.js` (or
+as well as the stage keys (`species unit vs vn pose speed heading stage grid ruler cam`). Any other
+key goes on the page URL. `cam` is the battle page's lens name (`a`, `b`, `a:3`, or a unit id).
+In a full battle every frame frames THAT body (re-found per frame, so the sheet follows it), not
+the whole field. `wide` takes in its mark when that is close, `hot` is a close 3/4, and `lens`
+shoots the game's own camera, which `cam` also points at the body (`__battle.camFollow`). On the
+battle page itself, `?cam=<unit id>` rides the unit closely (the study desk: a hull is followed
+off its rear quarter) and finds the next of its kind if it falls. A change that touches only `src/units/species|vehicles|kit/*.js` (or
 the bestiary's `src/city/wildlife/*.js`) is hot-swapped into a warm page, so a glance takes 1-2 s.
 The stage loads the unit's file and its `needs` through `CBZ.unitKit.need()` first. A glance is
 not a test: look, fix, look.
