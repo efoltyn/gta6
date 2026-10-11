@@ -63,6 +63,8 @@
       "uniform float uAmp;",
       "uniform float uChop;",
       "uniform vec2 uFlow;",
+      // the one wave function (and its live wind weights) the sea itself uses
+      CBZ.waterWaveDecl ? CBZ.waterWaveDecl() : "",
       "attribute vec4 aRect;",          // half-w, half-d, depth k (0..1), seed
       "varying vec2 vL;",
       "varying vec4 vR;",

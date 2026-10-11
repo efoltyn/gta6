@@ -1451,14 +1451,12 @@
   // opens the casino floor, slot bank, bar and cashier cage. OFF → the plain
   // casino retail shell (no dress pass, no table interaction).
   if (CBZ.CONFIG.CASINOS_V1 == null) CBZ.CONFIG.CASINOS_V1 = true;
-  // WATER_REFLECT: the ONE ocean surface (CBZ.citySea) becomes a real
-  // planar-reflection water plane (src/vendor/WaterReflect.js, wired by
-  // src/world/waterfx.js) — the mirror re-renders the scene into a 256px
-  // target and the shader distorts it with a scrolling normal map + sun
-  // specular + fresnel. Half-rate mirror + auto-off below the Balanced
-  // quality tier keep the cost bounded. OFF → world.js's flat animated sea
-  // renders exactly as before (waterfx never touches CBZ.citySea).
-  if (CBZ.CONFIG.WATER_REFLECT == null) CBZ.CONFIG.WATER_REFLECT = true;
+  // (WATER_REFLECT is gone, 2026-10-11: the planar sky mirror and its second,
+  // vendor-patched water shader were retired. Every sea now samples the sky
+  // dome's own texture along the reflected ray in the one water material,
+  // world/water_spec.js — the same clouds, on every tier including phones,
+  // with no second render. ?cfg_WATER_SKY_REFLECT=0 falls back to the
+  // analytic horizon/zenith pair.)
   // ---- console movement tech (systems/physics.js stance machine) ----------
   // PLAYER_SLIDE: sprint + a crouch press = a COD-style momentum slide (burst
   // above sprint speed decaying over ~0.8s, crouch-height hitbox/camera,
