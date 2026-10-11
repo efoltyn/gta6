@@ -355,7 +355,8 @@ function armsTrigger(m, tgt, dist, sdt) {
   if (armsGrenade(m, tgt, dist)) { ARMS.why.nade++; return; }
   if (dist > Math.min(g.area, SIGHT * 1.2)) { ARMS.why.range++; return; }
   if (tgt.vehicle && !armsCanHurtHull(A, tgt, dist)) { ARMS.why.futile++; m.cool = 0.5 + lcg() * 0.5; return; }
-  if (m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" && m.slot !== "sidestep" &&
+  // (the squad's own gate, ai/squad.js tacMayFire, already said yes or no when it has a word)
+  if (m._tacMay == null && m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" && m.slot !== "sidestep" &&
       m.slot !== "hull" && dist > 12) { ARMS.why.slot++; return; }
   if (!m.up) { ARMS.why.ducked++; return; }   // ducked behind his crest (workHull)
   if (A.react > 0) { ARMS.why.react++; m.cool = A.react; return; }
@@ -426,6 +427,9 @@ function armsLauncher(m, tgt, dist) {
     const o = near[i];
     if (o !== m && o.team === m.team && !o.dead && !o.vehicle && Math.hypot(o.pos.x - tgt.pos.x, o.pos.z - tgt.pos.z) < killR) { ARMS.why.lane++; m.cool = 0.6; return; }
   }
+  // DANGER CLOSE (ai/squad.js): never onto his own men, nor over their heads
+  if (dangerClose(m.team, tgt.pos.x, tgt.pos.z, 11) ||
+      dangerClose(m.team, (m.pos.x + tgt.pos.x) / 2, (m.pos.z + tgt.pos.z) / 2, Math.min(11, dist * 0.3))) { m.cool = 0.5; return; }
   if (fireRocket(m, tgt) === false) return;
   const w = CBZ.weaponById(m.wid);
   if (m.mag <= 0) armsReload(m);
@@ -1151,7 +1155,8 @@ function armsGrenade(m, tgt, dist) {
     else if (o.team !== m.team && d < 5) crowd++;
   }
   if (friends) return false;
-  if (!behind && crowd < 4) return false;
+  // ...or his squad asked for one into that cover (ai/squad.js pickNade)
+  if (!behind && crowd < 4 && m.wantNade !== tgt) return false;
   if (lcg() > 0.4) return false;                   // not every man the instant it is possible
   // nothing over his head and in front of his face: a throw needs its arc
   if (CBZ.micro.segmentBlocked(m.pos.x, m.pos.y + 1.7, m.pos.z,

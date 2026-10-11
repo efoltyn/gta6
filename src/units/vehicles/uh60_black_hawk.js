@@ -100,7 +100,7 @@
      1,100 m for area fire. The flown round is ballistics.js's 7.62 NATO
      (an unknown mount id falls back to the m240_coax cartridge). */
   const WEAPONS = GUNS.map(function (g) {
-    return { id: g.id, seat: g.seat, kind: "mg", wid: "lmg", mount: "free", rof: 12.5, burst: 10, pause: 1.1,
+    return { id: g.id, seat: g.seat, kind: "mg", wid: "lmg", mount: "free", yawLo: g.lo, yawHi: g.hi, rof: 12.5, burst: 10, pause: 1.1,
       dmg: 25, pen: 9, range: 1100, ammo: 1500 };
   });
 

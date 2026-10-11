@@ -95,7 +95,14 @@ function hurtMan(m, dmg, imp) {
   // unless he is running, in which case it is only a reason to run faster
   if (!m.routed && imp && imp.by && imp.by.team && imp.by.team !== m.team &&
       (!m.tgt || m.tgt.dead || m.tgt.fled)) m.tgt = imp.by;
-  if (m.hp <= 0) killMan(m, imp);
+  if (m.hp <= 0) {
+    // his mates heard where it came from (ai/squad.js returnFire)
+    if (imp && imp.by && imp.by.team && imp.by.team !== m.team && !m.beast) returnFire(m, imp.by);
+    killMan(m, imp);
+  }
+  // a hit he lives through: maybe DOWN (ai/squad.js); the rig's flinch is
+  // armourHit's when the armour layer resolved the round (res)
+  else tacticsOnHurt(m, dmg, imp, res);
   return res;
 }
 const DEADN = { red: 0, blue: 0 };       // the dead, by side (corpses retire; this does not)

@@ -35,7 +35,7 @@ function nearestEnemy(m, range) {
       if (!a) continue;
       for (let i = 0; i < a.length; i++) {
         const o = a[i];
-        if (o.team === m.team || o.dead) continue;
+        if (o.team === m.team || o.dead || o.downed) continue;
         const d = (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.z - m.pos.z) * (o.pos.z - m.pos.z);
         if (d < bd) { bd = d; best = o; }
       }
@@ -82,7 +82,8 @@ function pickTarget(m, range) {
       if (!a) continue;
       for (let i = 0; i < a.length; i++) {
         const o = a[i];
-        if (o.team === m.team || o.dead) continue;
+        // a wounded man on the ground is out of the fight, not a mark (ai/squad.js)
+        if (o.team === m.team || o.dead || o.downed) continue;
         // an aircraft is only a mark for what can reach it
         if (o.air && !vehicleCanTarget(m, o)) continue;
         const d2 = (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.z - m.pos.z) * (o.pos.z - m.pos.z);
@@ -97,8 +98,11 @@ function pickTarget(m, range) {
   // nearest first, then the first four get asked whether they can be seen
   let bestO = null, bestD = 1e18;
   for (let i = 0; i < _cand.length; i += 2) if (_cand[i + 1] < bestD) { bestD = _cand[i + 1]; bestO = _cand[i]; }
+  // (a MID man asks two sight lines, a FAR one one: the LOD tiers' budget —
+  // m.aiTier from ai/squad.js; a FULL man and everything else asks four)
   let tries = 0;
-  while (tries < 4) {
+  const maxTries = m.aiTier === 2 ? 1 : m.aiTier === 1 ? 2 : 4;
+  while (tries < maxTries) {
     let o = null, od = 1e18, oi = -1;
     for (let i = 0; i < _cand.length; i += 2) {
       if (_cand[i] && _cand[i + 1] < od) { od = _cand[i + 1]; o = _cand[i]; oi = i; }

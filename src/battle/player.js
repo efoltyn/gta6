@@ -69,7 +69,7 @@ function youTeam() {
 }
 // can this body be taken over right now?
 function canTake(u) {
-  if (!u || u.dead || u.fled || u.inVeh || u._apeHeld || u._apeFlying || u._tossed) return false;
+  if (!u || u.dead || u.fled || u.inVeh || u._apeHeld || u._apeFlying || u._tossed || u.downed || u.surrendered) return false;   // a wounded man on the ground is not a body to drive
   if (u.group && !u.group.visible) return false;
   if (u.vehicle && vehCrewN(u) === 0) return false;
   if (FRONT && u.team !== "red") return false;
@@ -92,7 +92,7 @@ function join() {
     for (let i = 0; i < men.length; i++) {
       const o = men[i];
       if (o.team !== team || !canTake(o) || o.routed) continue;
-      const d = Math.hypot(o.pos.x - c.x, o.pos.z - c.z) + (o.beast ? 20 : o.armed ? 0 : 40);
+      const d = Math.hypot(o.pos.x - c.x, o.pos.z - c.z) + (o.beast ? 20 : o.armed ? 0 : 40) + (o.launcher ? 30 : 0);   // the RIFLE button: a rifleman before the launcher crew
       if (d < bd) { bd = d; m = o; }
     }
   }

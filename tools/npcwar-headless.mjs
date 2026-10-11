@@ -353,12 +353,28 @@ scenario(6, "calibration: the headless resolver against the page's own battle", 
   console.log("    ground case                          | page: secs win  red dead/fled  blue dead/fled | resolver: secs win  red dead/fled  blue dead/fled");
   for (const c of CASES) {
     const q = "?map=" + c.g + "&red=" + c.r + "&blue=" + c.b + "&rt=" + c.rt + "&bt=" + c.bt + "&rw=" + encodeURIComponent(c.rw) + "&bw=" + encodeURIComponent(c.bw) + "&auto=1&probe=0";
-    const W = boot(q);
-    if (W.err) { check(false, "page threw: " + W.err); continue; }
-    await settle();
-    run(W, 300);
-    const T = W.sb.__battle.tally();
-    const hold = W.sb.__battle.orders();
+    // the page over three seeds too (one battle on the dunes is decided by who
+    // reached the crest first): its verdict is the majority, its numbers the mean
+    const Ts = [];
+    let hold = null, werr = null;
+    for (let k = 0; k < 3; k++) {
+      const W = boot(q);
+      if (W.err) { werr = W.err; break; }
+      G(W, "_s = " + (421371 + k * 7919));
+      await settle();
+      run(W, 300);
+      Ts.push(W.sb.__battle.tally());
+      hold = W.sb.__battle.orders();
+    }
+    if (werr) { check(false, "page threw: " + werr); continue; }
+    const wins = Ts.map((t) => t.winner || (t.alive.red >= t.alive.blue ? "red" : "blue"));
+    const pW = wins.filter((w) => w === "red").length * 2 > wins.length ? "red" : "blue";
+    const mean = (f) => Ts.reduce((s, t) => s + f(t), 0) / Ts.length;
+    const T = { winner: pW, simT: mean((t) => t.simT),
+      dead: { red: mean((t) => t.dead.red), blue: mean((t) => t.dead.blue) },
+      fled: { red: mean((t) => t.fled.red), blue: mean((t) => t.fled.blue) },
+      routed: { red: mean((t) => t.routed.red), blue: mean((t) => t.routed.blue) },
+      alive: { red: mean((t) => t.alive.red), blue: mean((t) => t.alive.blue) } };
     const spec = { v: 1, ground: c.g, seed: 11, hold: hold.red === "hold" ? "red" : hold.blue === "hold" ? "blue" : null,
       red: { id: "r", name: "R", n: c.r, tier: c.rt, guns: c.rw, air: "none", strikes: 0, queued: 0 },
       blue: { id: "b", name: "B", n: c.b, tier: c.bt, guns: c.bw, air: "none", strikes: 0, queued: 0 } };
@@ -397,8 +413,11 @@ scenario(6, "calibration: the headless resolver against the page's own battle", 
 /* 7  DOES HOLDING THE LINE HELP THE MEN HOLDING IT? The same outnumbered army,
    once told to hold (the default now) and once in the old meeting engagement
    (?hold=0), on each open ground. Holding must not make them die faster:
-   the exchange (attackers killed per holder lost) is printed and held to
-   at least what the meeting engagement got. */
+   the exchange (attackers lost per holder lost) is printed and held to
+   at least what the meeting engagement got. A LOSS is a man out of the
+   fight — dead, fled or taken, or still running at the end — since the
+   squads (src/battle/ai/squad.js) break and fall back long before the last
+   man dies; a man is added to each side so a 6-0 is a number, not infinity. */
 scenario(7, "holding the line: the exchange, held v met", async () => {
   const CASES = [
     { g: "dunes", r: 60, b: 25, rt: "pro", bt: "pro" },
@@ -408,13 +427,21 @@ scenario(7, "holding the line: the exchange, held v met", async () => {
   let better = 0;
   for (const c of CASES) {
     const out = {};
+    // three seeds a side and the losses summed: one battle on the dunes is
+    // decided by who reached the crest first, which is a coin, not a verdict
     for (const hold of ["1", "0"]) {
-      const W = boot("?map=" + c.g + "&red=" + c.r + "&blue=" + c.b + "&rt=" + c.rt + "&bt=" + c.bt + "&rw=ak47&bw=ak47&auto=1&probe=0&hold=" + hold);
-      if (W.err) { check(false, "page threw: " + W.err); continue; }
-      await settle();
-      run(W, 300);
-      const T = W.sb.__battle.tally();
-      out[hold] = { win: T.winner, xr: T.dead.red / Math.max(1, T.dead.blue), rd: T.dead.red, bd: T.dead.blue, secs: Math.round(T.simT) };
+      let rl = 0, bl = 0, rd = 0, bd = 0, wins = "";
+      for (let seed = 0; seed < 3; seed++) {
+        const W = boot("?map=" + c.g + "&red=" + c.r + "&blue=" + c.b + "&rt=" + c.rt + "&bt=" + c.bt + "&rw=ak47&bw=ak47&auto=1&probe=0&hold=" + hold);
+        if (W.err) { check(false, "page threw: " + W.err); continue; }
+        G(W, "_s = " + (421371 + seed * 7919));
+        await settle();
+        run(W, 300);
+        const T = W.sb.__battle.tally();
+        rl += T.dead.red + T.fled.red + T.routed.red; bl += T.dead.blue + T.fled.blue + T.routed.blue;
+        rd += T.dead.red; bd += T.dead.blue; wins += (T.winner || "-")[0];
+      }
+      out[hold] = { wins, xr: Math.round((rl + 1) / (bl + 1) * 100) / 100, rLost: rl, bLost: bl, rd, bd };
     }
     console.log("    " + c.g.padEnd(6) + (c.r + " " + c.rt + " attack " + c.b + " " + c.bt).padEnd(28) +
       " held: " + JSON.stringify(out["1"]) + "   met: " + JSON.stringify(out["0"]));

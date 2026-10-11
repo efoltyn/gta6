@@ -48,6 +48,10 @@ function stepMan(m, sdt) {
   }
   if (m.fled) return;              // off the field; updateMorale splices him out
   if (m.you) { stepYou(m, sdt); return; }
+  // a man on the ground, wounded: he bleeds, crawls, waits for a mate (ai/squad.js)
+  if (m.downed) { downedStep(m, sdt); return; }
+  // over a low wall: the vault owns him until his feet are down (ai/squad.js)
+  if (m.vault) { stepVault(m, sdt); return; }
   if (simT >= m.thinkAt) think(m, simT);
   if (m.fled) return;
   if (m.supp > 0) m.supp = Math.max(0, m.supp - sdt * SUPP_DECAY);
@@ -119,6 +123,8 @@ function stepMan(m, sdt) {
       spd = m.slot === "fallback" ? tn.chase * 0.92 :
             m.slot === "push" ? tn.chase : tn.march;
       if (m.hunt && tdist < 999) spd = Math.max(spd, tn.chase * 1.08);
+    } else if ((spd = tacSpeed(m, hurtish)) >= 0 && m.slot !== "rout") {
+      // the squad's paces (ai/squad.js): march, bound, crawl, drag, withdraw
     } else {
       // a ROUTING man runs a shade faster than a pursuer walks in (6.2) and
       // slower than a sweep (7.6-8.0): a broken line gets away from a line
@@ -150,7 +156,9 @@ function stepMan(m, sdt) {
     CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
     const got = Math.hypot(m.pos.x - ox, m.pos.z - oz);
     const want = spd * sdt;
-    if (want > 0.001 && got < want * 0.25) {
+    if (want > 0.001 && got < want * 0.25 && !m.beast && tryVault(m, nx, nz)) {
+      // a low wall: over it, not round it
+    } else if (want > 0.001 && got < want * 0.25) {
       m.stuckT = (m.stuckT || 0) + sdt;
       if (PROBE) QUAL.wallSeconds += sdt;      // the wall-running metric, held near zero
       if (m.stuckT > 0.8) {
@@ -198,22 +206,29 @@ function stepMan(m, sdt) {
      KNEELS — smaller, and the enemy's rounds pay CROUCH_HIT for it — and
      stands again to move or once the fire comes off him. A running man is
      always up. coverK is what fireShot multiplies a round's hit chance by. */
+  if (m.dragging) dragFollow(m);         // a wounded mate on the end of his arm (ai/squad.js)
   m.up = true;
-  // THE GUN'S OWN STANCE (src/battle/fire.js): a belt-fed gun or a sniper
-  // rifle goes prone on its bipod, a rifleman shooting far takes a knee
+  // a squad's man: posts, the cover cycle, the rush, flat when pinned, the
+  // gun's own bipod stance at an open post (ai/squad.js); else THE GUN'S OWN
+  // STANCE (src/battle/fire.js): a belt-fed gun or a sniper rifle goes prone
+  // on its bipod, a rifleman shooting far takes a knee
   const ws = weaponStance(m, tgt, spd);
-  if (m.routed || m.fists) { if (m.stance !== "stand") setStance(m, "stand"); }
+  if (stanceStep(m, spd, sdt)) { /* set */ }
+  else if (m.routed || m.fists) { if (m.stance !== "stand") setStance(m, "stand"); }
   else if (m.slot === "hull" && m.hull) m.up = workHull(m, sdt);
   else if (ws) { if (m.stance !== ws) setStance(m, ws); }
   else if (m.stance === "prone") setStance(m, spd > 0.1 ? "stand" : "crouch");
-  else if (m.stance === "crouch") {
+  else if (m.stance === "crouch" || m.stance === "rush") {
     const kneel = holding(m) && !m.crouchBlind;        // a holder rises when only standing has the shot (think.js)
     if (spd > 0.1 || (holding(m) && m.crouchBlind) || (!kneel && (!tgt || tgt.dead || (m.supp < 0.12 && m.hp >= m.maxHp * 0.5)))) setStance(m, "stand");
+    else if (m.stance !== "crouch") setStance(m, "crouch");
   } else if (spd <= 0.1 && ((holding(m) && !m.crouchBlind) || (tgt && !tgt.dead && (m.supp > 0.35 || m.hp < m.maxHp * 0.5)))) {
     setStance(m, "crouch");
   }
-  m.coverK = m.stance === "crouch" ? CROUCH_HIT
-    : (m.slot === "hull" && m.hull && m.up) ? HULL_UP_HIT : 1;
+  if (!m.sqd || !TAC.on || m.routed || m.fists) {
+    m.coverK = m.stance === "crouch" ? CROUCH_HIT
+      : (m.slot === "hull" && m.hull && m.up) ? HULL_UP_HIT : 1;
+  }
 
   const engaged = tgt && !tgt.dead && m.sees;
   if (!engaged && spd > 0.1) {
@@ -241,9 +256,16 @@ function stepMan(m, sdt) {
 
   // ---- the trigger ----
   if (m.routed) return;                  // a broken man is not fighting
-  if (!tgt || tgt.dead || tgt.fled || m.reloadT > 0) return;
+  if (!tgt || tgt.dead || tgt.fled || tgt.downed || m.reloadT > 0 || m.dragging) return;
   const dist = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
   if (m.fists) { stepFists(m, tgt, dist, sdt); return; }   // src/battle/melee.js
+  // ducked in cover under heavy fire: rounds over the top, unaimed (ai/squad.js)
+  if (m.blind && !m.up) { blindFire(m, sdt); return; }
+  // the squad's slot gate (ai/squad.js): false = not on this slot, true = yes
+  // whatever the slot says (an animal coming in), null = the gun's own rule
+  const may = tacMayFire(m, dist);
+  if (may === false) return;
+  m._tacMay = may;
   if (m.launcher) { armsLauncher(m, tgt, dist); return; }   // src/battle/fire.js
   armsTrigger(m, tgt, dist, sdt);        // how he uses the gun: src/battle/fire.js
 }

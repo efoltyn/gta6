@@ -248,9 +248,63 @@ export function boot(url, opts) {
   const input = { keys: {}, down: {}, up: {}, mx: 0, mz: 0, wheel: 0, buttons: [false, false, false], clicked: [false, false, false], locked: false, enabled: true };
   input.isDown = (c) => !!input.keys[c]; input.pressed = (c) => !!input.down[c];
   input.axis = (n, p) => (input.keys[p] ? 1 : 0) - (input.keys[n] ? 1 : 0);
+  /* opts.boxes: a field of axis-aligned colliders ({minX,maxX,minZ,maxZ,y0,y1})
+     laid out RELATIVE to the ground's centre (MAP.cx/cz) with y0/y1 over the
+     ground under each box, so cover, sight and the walls can be measured in
+     node (tools/npcwar-ai-metrics.mjs). They become world records — world x/z,
+     world heights, exactly microboot's colliders — the first time anything
+     asks, once the ground is raised. None by default. */
+  const BOXR = ((opts && opts.boxes) || []).map((b) => Object.assign({}, b));
+  const BOX = [];
+  function boxesNow() {
+    if (BOX.length || !BOXR.length) return BOX;
+    let M = null;
+    try { M = vm.runInContext("typeof MAP !== 'undefined' ? MAP : null", sb); } catch (e) { M = null; }
+    if (!M || !M.groundAt) return BOX;
+    for (const r of BOXR) {
+      const b = Object.assign({}, r);
+      b.minX += M.cx || 0; b.maxX += M.cx || 0; b.minZ += M.cz || 0; b.maxZ += M.cz || 0;
+      const g = M.groundAt((b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2);
+      b.y0 = (b.y0 || 0) + g; b.y1 = (b.y1 == null ? 50 : b.y1) + g;
+      BOX.push(b);
+    }
+    return BOX;
+  }
+  function segBox3(ax, ay, az, bx, by, bz, b) {
+    let t0 = 0, t1 = 1;
+    const lo = [b.minX, b.y0, b.minZ], hi = [b.maxX, b.y1, b.maxZ];
+    const a = [ax, ay, az], d = [bx - ax, by - ay, bz - az];
+    for (let k = 0; k < 3; k++) {
+      if (Math.abs(d[k]) < 1e-9) { if (a[k] < lo[k] || a[k] > hi[k]) return false; continue; }
+      let u = (lo[k] - a[k]) / d[k], v = (hi[k] - a[k]) / d[k];
+      if (u > v) { const t = u; u = v; v = t; }
+      if (u > t0) t0 = u; if (v < t1) t1 = v; if (t0 > t1) return false;
+    }
+    return true;
+  }
+  const boxQuery = (x, z, r, out) => {
+    out = out || []; out.length = 0;
+    for (const b of boxesNow()) if (x + r > b.minX && x - r < b.maxX && z + r > b.minZ && z - r < b.maxZ) out.push(b);
+    return out;
+  };
   CBZ.micro = {
     boot() {}, onFrame(fn) { frameHooks.push(fn); }, input, pauseKey: "Space",
-    segmentBlocked: () => false, resolveCircle() {}, addBoxCollider() {}, colliderContains: () => false, queryColliders: () => [],
+    segmentBlocked: BOXR.length ? (ax, ay, az, bx, by, bz) => { for (const b of boxesNow()) if (segBox3(ax, ay, az, bx, by, bz, b)) return true; return false; } : () => false,
+    resolveCircle: BOXR.length ? (p, r, y) => {
+      for (const b of boxesNow()) {
+        if (y != null && b.y1 < y + 0.35) continue;          // a kerb is stepped over
+        const cx = Math.max(b.minX, Math.min(p.x, b.maxX)), cz = Math.max(b.minZ, Math.min(p.z, b.maxZ));
+        let dx = p.x - cx, dz = p.z - cz, d = Math.hypot(dx, dz);
+        if (d >= r) continue;
+        if (d < 1e-6) {
+          const ex = [p.x - b.minX, b.maxX - p.x, p.z - b.minZ, b.maxZ - p.z], k = ex.indexOf(Math.min(...ex));
+          if (k === 0) p.x = b.minX - r; else if (k === 1) p.x = b.maxX + r; else if (k === 2) p.z = b.minZ - r; else p.z = b.maxZ + r;
+        } else { p.x = cx + dx / d * r; p.z = cz + dz / d * r; }
+      }
+    } : () => {},
+    addBoxCollider() {},
+    colliderContains: (c, x, z, pad) => { pad = pad || 0; return x >= c.minX - pad && x <= c.maxX + pad && z >= c.minZ - pad && z <= c.maxZ + pad; },
+    queryColliders: boxQuery,
     sun, skyDome: null, renderer: null, fps: 60, sfx: { tone() {} }, lock() { input.locked = true; }, unlock() { input.locked = false; },
     touch: null, stop() {},
     stepSim(d) {
@@ -260,7 +314,7 @@ export function boot(url, opts) {
       input.mx = input.mz = 0; input.clicked[0] = false;
     },
   };
-  CBZ.queryCollidersNear = () => [];
+  CBZ.queryCollidersNear = boxQuery;
   // gunfx's drawing half: the rounds are drawn, nothing here can see them
   CBZ.tracer = () => {}; CBZ.sfx = () => {}; CBZ.bulletImpact = () => {}; CBZ.bulletHole = () => {}; CBZ.muzzleFlash = () => {};
   CBZ.WILDLIFE_SPECIES = {};
@@ -273,8 +327,7 @@ export function boot(url, opts) {
   catch (e) { return { err: e }; }
   // the combat dice: the page's own lcg, reseeded so a tool can run N seeds
   if (opts.seed != null) vm.runInContext("_s = " + ((opts.seed | 0) & 0x7fffffff), sb);
-  return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE };
-  return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE };
+  return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE, boxes: boxesNow };
 }
 export async function settle() { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); }
 export function run(W, secs, each) {

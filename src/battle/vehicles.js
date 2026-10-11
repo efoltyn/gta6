@@ -242,7 +242,7 @@ function makeVehicle(teamId, i, id) {
     eyeH0: 0, losY0: 0, aimY0: 0, headY0: 0,
     armed: weapons.length > 0, weapon: null, wid: id, launcher: false, fists: false,
     mag: 0, magSize: 0, cool: 0, reloadT: 0, punch: 0,
-    tgt: null, sees: false, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,
+    tgt: null, sees: false, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.05,   /* a hull's first look round is at once (its carried men get out on it); thinkVehicle staggers after */ lastThink: simT,
     dead: false, dieT: 0, dieDir: 1, animF: (i % 4),
     lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
     kills: 0, shotsF: 0, hitsF: 0, reloads: 0,
@@ -423,7 +423,7 @@ function thinkVehicle(u) {
   u.yaw = u.h + u.tur.yaw;
   const t = vehPickTarget(u);
   if (t) { u.tgt = t; u.losBadT = 0; }
-  else if (u.tgt && (u.tgt.dead || u.tgt.fled)) u.tgt = null;
+  else if (u.tgt && (u.tgt.dead || u.tgt.fled || u.tgt.downed)) u.tgt = null;   // a man down is out of the fight (ai/squad.js)
   u.sees = !!(u.tgt && eyeLos(u, u.tgt));
   const enemy = u.team === "red" ? "blue" : "red";
   const com = teamCOM[enemy];
@@ -437,6 +437,9 @@ function thinkVehicle(u) {
   if (u.air) return;
   // where to be: the weapon's standoff from the mark, else at the enemy
   const stand = S.standoff || 200;
+  // a tank leads its infantry, it does not leave it behind; a hull with no
+  // gun pulls out of the fight (ai/squad.js)
+  if (tacticsVehicle(u)) return;
   if (u.vs.mobility) { u.target.set(u.pos.x, 0, u.pos.z); u.slot = "hold"; return; }
   if (holding(u) && u.home) {
     u.target.set(u.home.x, 0, u.home.z); u.slot = "hold";
@@ -474,7 +477,7 @@ function vehPickTarget(u) {
   _vc.length = 0;
   for (let k = 0; k < men.length; k++) {
     const o = men[k];
-    if (o.team === u.team || o.dead || o.fled) continue;
+    if (o.team === u.team || o.dead || o.fled || o.downed) continue;
     if (o.air && !vehCanHitAir(u)) continue;
     const d = Math.hypot(o.pos.x - u.pos.x, o.pos.z - u.pos.z);
     if (d > range) continue;
@@ -664,6 +667,11 @@ function vehFight(u, sdt) {
     // and a machine gun is in range; the machine gun leaves armour alone
     if (w.kind === "mg" && t.vehicle && (t.def.stats.armour.front || 0) > (w.pen || 9) * 2) continue;
     if (w.kind === "cannon" && !t.vehicle && dist < 500 && vehHasMG(u, dist) && lcg() < 0.6) { W.cool = 1; continue; }
+    // DANGER CLOSE: high explosive is not put down on top of our own men (ai/squad.js)
+    if (w.kind !== "mg" && !(w.kind === "cannon" && t.vehicle) && dangerClose(u.team, t.pos.x, t.pos.z, ((w.he && w.he.blast) || 6) * 0.9)) { W.cool = 0.6; continue; }
+    // a gun with its own sector off the hull (a door gun: yawLo..yawHi from
+    // the nose) never fires out of it, whatever its mount
+    if (w.yawLo != null && w.yawHi != null && (rel < w.yawLo || rel > w.yawHi)) continue;
     // ---- is THIS weapon on the line? (its mount, not the vehicle's) ----
     if (!w.indirect) {
       const m = W.mount;

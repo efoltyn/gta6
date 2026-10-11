@@ -93,6 +93,7 @@ function frame(dt) {
         else if (simT - NAV.at.blue > 1.4) navSolve("blue");
       }
       physPre(sdt);                         // how fast every body was going (src/battle/physics.js)
+      tacticsStep(sdt);                    // the squads decide; grenades fly (ai/squad.js)
       for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
       if (MASS.on) MASS.step(sdt);          // the MID and FAR tiers (src/battle/mass.js)
       // the struck slide on their own momentum; hulls drive over what lies in their path
@@ -208,8 +209,10 @@ function frame(dt) {
       // had ever set it, so combat_iq could send a soldier to a real piece
       // of cover and he would stand up straight behind it. One boolean, and
       // the posture the fight brain already chose is finally visible.
-      m.char.crouch = crouchPose(m);     // the stance the fight uses (THE MEN: STANCE)
-      m.char.pronePose = m.stance === "prone";   // flat behind the gun (fire.js weaponStance)
+      // ...and now the whole soldier: carry, stance (prone behind the gun
+      // included), cover peek / lean / blind fire as entities/soldier.js's
+      // ch.soldier record (ai/squad.js)
+      soldierRig(m);
       try { CBZ.animChar(m.char, m.speed * speed, dt * every); } catch (e) {}
     }
     const engaged = m.tgt && !m.tgt.dead && m.sees;
@@ -235,6 +238,7 @@ function frame(dt) {
     // the sling's free runs to the rifle's swivels (entities/combatkit.js), near the lens only
     if (m.char && m.char._kitSling && CBZ.combatKit) CBZ.combatKit.sling(m.char, m._weaponProp, d2 < 40 * 40);
   }
+  if (TAC.captives.length) animCaptives(dt);   // the prisoners kneel, hands up
   if (MASS.on) MASS.frame(realDt);      // promotion, demotion, ghosts, the crowd draw
   stepKill(realDt);                     // ...on WALL time: see THE KILL CAM
   stepCamera(dt);
