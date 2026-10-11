@@ -740,6 +740,11 @@
     out[0] = e[0] * x + e[4] * y + e[8] * z; out[1] = e[1] * x + e[5] * y + e[9] * z; out[2] = e[2] * x + e[6] * y + e[10] * z;
     return out;
   }
+  // particle colours, linear, made once (no allocation per puff)
+  const FXC = {
+    flash: lin(0xffc070), gas: lin(0xb8b4aa), brass: lin(0xc8a040), soot: lin(0x2c2b29), haze: lin(0x8f9294),
+    black: lin(0x1e1d1c), grey: lin(0x6e6c69), fire1: lin(0xff8a2a), fire2: lin(0xffc050),
+  };
   const DUST = {                                        // sRGB of what a tyre throws up
     dunes: [0xcaa77a, 1.0], grass: [0x9a8a68, 0.55], snow: [0xf2f4f6, 0.9], field: [0xb0a894, 0.35],
     island: [0xb5ab92, 0.45], arena: [0xa8a49a, 0.30], city: [0xa29e96, 0.25], gov: [0xa29e96, 0.25],
@@ -759,6 +764,7 @@
     this.t = 0; this.lv = 0; this.pitch = 0; this.pv = 0; this.roll = 0; this.rv = 0;
     this.rec = 0; this.recV = 0; this.aimT = -99; this.lastShot = null; this.dead = false;
     this.acc = { dust: 0, ex: 0, dmg: 0, fire: 0 };
+    this._has = {};
     this.body0 = o.body ? o.body.position.y : 0;
     this.wheels.forEach(function (w) { w.spin = 0; w.off = 0; w.sq = 1; });
     this.smoke = new Fx(160, false); this.glow = new Fx(48, true);
@@ -827,18 +833,20 @@
     const p = this.muzzleWorld(this._p || new THREE.Vector3());
     const e = this.muzzle.matrixWorld.elements, fx = e[8], fy = e[9], fz = e[10];
     const r = Math.random;
-    this.glow.emit(p.x + fx * 0.15, p.y + fy * 0.15, p.z + fz * 0.15, fx * 2, fy * 2, fz * 2, 0.06, 0.55, 0.9, 1.0, lin(0xffc070), 0, 0);
-    this.smoke.emit(p.x + fx * 0.3, p.y + fy * 0.3, p.z + fz * 0.3, fx * 3 + (r() - 0.5), fy * 3 + 0.4, fz * 3 + (r() - 0.5), 0.9 + r() * 0.5, 0.25, 1.4, 0.28, lin(0xb8b4aa), -0.03, 2.5);
+    this.glow.emit(p.x + fx * 0.15, p.y + fy * 0.15, p.z + fz * 0.15, fx * 2, fy * 2, fz * 2, 0.06, 0.55, 0.9, 1.0, FXC.flash, 0, 0);
+    this.smoke.emit(p.x + fx * 0.3, p.y + fy * 0.3, p.z + fz * 0.3, fx * 3 + (r() - 0.5), fy * 3 + 0.4, fz * 3 + (r() - 0.5), 0.9 + r() * 0.5, 0.25, 1.4, 0.28, FXC.gas, -0.03, 2.5);
     // brass and links out of the right side of the receiver
     if (this.gun) {
       const g = this.gun.matrixWorld.elements;
       const bx = g[12] + g[8] * 0.05, by = g[13] + g[9] * 0.05, bz = g[14] + g[10] * 0.05;
-      this.smoke.emit(bx, by, bz, -g[0] * 2.2 + (r() - 0.5), 1.4 + r(), -g[2] * 2.2 + (r() - 0.5), 0.5, 0.05, 0.05, 1.0, lin(0xc8a040), 1, 0.2);
+      this.smoke.emit(bx, by, bz, -g[0] * 2.2 + (r() - 0.5), 1.4 + r(), -g[2] * 2.2 + (r() - 0.5), 0.5, 0.05, 0.05, 1.0, FXC.brass, 1, 0.2);
     }
   };
   RP.crew = function (u) {
     const seats = u.seats || [], F = this.figs || {};
-    let pax = 0, has = {};
+    let pax = 0;
+    const has = this._has;
+    for (const k in has) has[k] = false;
     for (let i = 0; i < seats.length; i++) {
       const s = seats[i], on = !!(s.man || s.implicit);
       if (!s.crew) { if (on) pax++; continue; }
@@ -935,11 +943,12 @@
       const load = clamp(acc * 0.4, 0, 1);
       const rate = 3 + load * 14 + sp * 0.2;
       this.acc.ex += dt * rate;
+      this.acc.ex = Math.min(this.acc.ex, 6);
       while (this.acc.ex >= 1) {
         this.acc.ex -= 1;
         mw(root, E.p[0], E.p[1], E.p[2], a); dw(root, E.d[0], E.d[1], E.d[2], d);
         const soot = load * (E.soot || 0.5);
-        const c = soot > 0.25 ? lin(0x2c2b29) : lin(0x8f9294);
+        const c = soot > 0.25 ? FXC.soot : FXC.haze;
         this.smoke.emit(a[0], a[1], a[2], d[0] * 2.2 + (r() - 0.5) * 0.4, d[1] * 2.2 + 0.35, d[2] * 2.2 + (r() - 0.5) * 0.4,
           1.0 + r() * 0.8 + soot, 0.18, 0.9 + soot * 1.4, 0.10 + soot * 0.5, c, -0.02, 1.6);
       }
@@ -949,6 +958,7 @@
       const ws = this.wheels;
       let rear = ws[0].z;
       for (let i = 1; i < ws.length; i++) if (ws[i].z < rear) rear = ws[i].z;
+      this.acc.dust = Math.min(this.acc.dust, 6);
       while (this.acc.dust >= 1) {
         this.acc.dust -= 1;
         const wh = ws[Math.floor(r() * ws.length)];
@@ -966,29 +976,33 @@
      its gun. */
   RP.damage = function (vs, dt, u) {
     const r = Math.random, a = this._a;
-    const frac = vs.maxHp > 0 ? vs.hp / vs.maxHp : 1;
+    const frac = vs.maxHp > 0 ? clamp(vs.hp / vs.maxHp, 0, 1) : 1;   // a wreck sits far below 0 hp
     if (vs.mobility && this.flat < 0) this.flat = (this.seed || 0) % this.wheels.length;
     if (this.flat >= 0) this.wheels[this.flat].sq = 0.86;
     if (vs.firepower && !this.jammed) { this.jammed = true; if (this.gun) this.gun.rotation.x = 0.22; }
     const E = this.engine || [0, 1, 1];
-    if (frac < 0.55 || vs.burning) {
-      this.acc.dmg += dt * (vs.burning ? 14 : (0.55 - frac) * 16);
+    // burning: the hit set it alight, or it is a wreck still burning out
+    const hot = vs.burning || (this.dead && u && u.burnT > 0);
+    if (frac < 0.55 || hot) {
+      this.acc.dmg += dt * (hot ? 12 : (0.55 - frac) * 16);
+      this.acc.dmg = Math.min(this.acc.dmg, 6);
       while (this.acc.dmg >= 1) {
         this.acc.dmg -= 1;
-        mw(this.root, E[0] + (r() - 0.5) * 0.6, E[1], E[2] + (r() - 0.5) * 0.6, a);
-        const c = vs.burning ? lin(0x1e1d1c) : lin(0x6e6c69);
-        this.smoke.emit(a[0], a[1], a[2], (r() - 0.5) * 0.5, 1.6 + r() * 1.2, (r() - 0.5) * 0.5, 2.5 + r() * 2, 0.4, 3.0, vs.burning ? 0.55 : 0.3, c, -0.06, 0.6);
+        mw(this.root, E[0] + (r() - 0.5) * 0.6, E[1] + 0.3, E[2] + (r() - 0.5) * 0.6, a);
+        if (hot) this.smoke.emit(a[0], a[1], a[2], (r() - 0.5) * 0.6, 2.4 + r() * 1.5, (r() - 0.5) * 0.6, 4 + r() * 3, 0.7, 5.5, 0.6, FXC.black, -0.08, 0.5);
+        else this.smoke.emit(a[0], a[1], a[2], (r() - 0.5) * 0.5, 1.6 + r() * 1.2, (r() - 0.5) * 0.5, 2.5 + r() * 2, 0.4, 3.0, 0.35, FXC.grey, -0.06, 0.6);
       }
     }
-    if (vs.burning) this.fire(dt, E, 10);
+    if (vs.burning && !this.dead) this.fire(dt, E, 10);
   };
   RP.fire = function (dt, at, rate) {
     const r = Math.random, a = this._a;
     this.acc.fire += dt * rate;
+    this.acc.fire = Math.min(this.acc.fire, 6);
     while (this.acc.fire >= 1) {
       this.acc.fire -= 1;
       mw(this.root, at[0] + (r() - 0.5) * 0.9, at[1] + r() * 0.2, at[2] + (r() - 0.5) * 0.9, a);
-      this.glow.emit(a[0], a[1], a[2], (r() - 0.5) * 0.4, 1.2 + r() * 1.8, (r() - 0.5) * 0.4, 0.45 + r() * 0.4, 0.5, 1.3, 0.75, r() < 0.5 ? lin(0xff8a2a) : lin(0xffc050), -0.05, 0.8);
+      this.glow.emit(a[0], a[1], a[2], (r() - 0.5) * 0.4, 1.2 + r() * 1.8, (r() - 0.5) * 0.4, 0.45 + r() * 0.4, 0.5, 1.3, 0.75, r() < 0.5 ? FXC.fire1 : FXC.fire2, -0.05, 0.8);
     }
   };
   /* THE WRECK (called from the sim's wreck step): the crew is gone, the gun

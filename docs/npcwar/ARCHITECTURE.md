@@ -85,6 +85,7 @@ change it only in coordination.
 | `src/units/kit/quadrig.js` | `CBZ.quadRig`: quadruped skeleton, bind points, 2-bone IK, leg posing | animal agents (coordinate) |
 | `src/units/kit/gait.js` | `CBZ.quadGait`: planted-foot gait solver, footfall tables | animal agents (coordinate) |
 | `src/units/kit/vehicle.js` | vehicle drive / turret / armour / crew helpers | vehicle agents (coordinate) |
+| `src/units/kit/hull.js` | `CBZ.hullKit`: wheeled-vehicle bodies: geometry buckets, nation/ground camouflage + flag decals, tyres, the M2, crew figures, particle FX, `WheeledRig` (steer, per-wheel suspension, sprung body, turret, recoil, dust, exhaust, damage, wreck). Load it through the manifest row's `needs` | vehicle agents (coordinate) |
 
 ### The sim and the page (NPC War's host layer today)
 | file | what | owner |
@@ -197,6 +198,17 @@ CBZ.unitKit.register("m1_abrams", {
   drive(unit, dt, ctrl), aim(unit, dt, tx, ty, tz), fight(unit, tgt, dt, opts)
 });
 ```
+
+The build's `ctx` also carries `team`, `nation` (the side's flags.js id, or null) and `arena`
+(the MAP id), so a hull can wear its nation's paint for that ground. The returned `rig` is driven
+by `src/battle/vehicles.js`: `settle()`, `update(dt, v, w, steer, unit)` every animated frame,
+`aimTurret(rel, el, dt)` + `rig.turret`, `muzzleWorld(out)`, `fired(k)` for cannon rounds (a
+machine gun's rounds show as `unit.lastShotT` changing), and `wrecked(dt, unit)` from the wreck
+step once it is dead. `stats.grip` (in g, opt-in) makes the wheeled drive grip-limited: the driver
+slows for a corner and the lock is limited at speed. `tactics` on a def is data for the AI agent
+(roles, keep-away ranges); `standoff` and `dismountAt` are what the runtime reads today. Keep
+`dismountAt` above 1.15 x `standoff`, or the carrier parks on its firing line with its
+passengers still aboard.
 
 ### Lazy loading and cache keys
 

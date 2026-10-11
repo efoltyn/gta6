@@ -34,8 +34,10 @@
    DRIVE     5,900 kg empty, 134 hp: 0-48 km/h in ~14 s, 90 km/h flat out,
              11 m turning radius, ~0.6 g of grip. Every wheel rides its own
              spring over the ground; the body squats, dives and rolls.
-   ARMOUR    none: sheet steel and canvas (the windscreen frame and engine
-             block stop a little from the front). Rifle fire goes through.
+   ARMOUR    none: sheet steel and canvas. Rifle fire goes through anywhere
+             (kept under 2 mm on every face, the kit's soft-skin rule: a round
+             through sheet metal does 0.6 of its damage; a 3 mm "front" would
+             have made the nose the softest face).
    WEAPON    M2HB .50 on the ring, 600 rounds aboard.
 
    TACTICS (src/battle/vehicles.js reads standoff and dismountAt; the rest
@@ -404,7 +406,7 @@
     drive: "wheeled",
     stats: { hp: 260, mass: 6100, speed: 25, reverse: 4, accel: 1.1, turn: 0.55, wheelbase: 3.91, maxSteer: 0.36, grip: 0.6,
       length: L, width: Wd, height: H,
-      armour: { front: 3, side: 0, rear: 0, top: 0 }, standoff: 420, dismountAt: 520 },
+      armour: { front: 1, side: 0, rear: 0, top: 0 }, standoff: 420, dismountAt: 520 },
     turret: { rate: 1.2, elevRate: 1.0, elevMin: -0.30, elevMax: 0.9 },
     crew: [{ seat: "driver", pos: [0.48, 2.1, 1.1] }, { seat: "commander", pos: [-0.48, 2.1, 1.1] }],
     passengers: 16,
