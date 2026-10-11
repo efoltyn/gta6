@@ -36,7 +36,11 @@ function updateCOM() {
      every march goal and every rout direction toward the runners. The
      living are the fallback when nobody is left fighting. */
   const count = { red: 0, blue: 0 }, live = { red: 0, blue: 0 };
-  ["red", "blue"].forEach(function (t) {
+  if (MASS.on) {
+    // a tiered battle: the centre of every fighting row (src/battle/mass.js)
+    const k = MASS.com();
+    count.red = k.red; count.blue = k.blue; live.red = k.liveRed; live.blue = k.liveBlue;
+  } else ["red", "blue"].forEach(function (t) {
     let x = 0, z = 0, n = 0, ax = 0, az = 0, an = 0;
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
