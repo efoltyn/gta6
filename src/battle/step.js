@@ -203,9 +203,9 @@ function stepMan(m, sdt) {
   else if (ws) { if (m.stance !== ws) setStance(m, ws); }
   else if (m.stance === "prone") setStance(m, spd > 0.1 ? "stand" : "crouch");
   else if (m.stance === "crouch") {
-    const kneel = holding(m);
-    if (spd > 0.1 || (!kneel && (!tgt || tgt.dead || (m.supp < 0.12 && m.hp >= m.maxHp * 0.5)))) setStance(m, "stand");
-  } else if (spd <= 0.1 && (holding(m) || (tgt && !tgt.dead && (m.supp > 0.35 || m.hp < m.maxHp * 0.5)))) {
+    const kneel = holding(m) && !m.crouchBlind;        // a holder rises when only standing has the shot (think.js)
+    if (spd > 0.1 || (holding(m) && m.crouchBlind) || (!kneel && (!tgt || tgt.dead || (m.supp < 0.12 && m.hp >= m.maxHp * 0.5)))) setStance(m, "stand");
+  } else if (spd <= 0.1 && ((holding(m) && !m.crouchBlind) || (tgt && !tgt.dead && (m.supp > 0.35 || m.hp < m.maxHp * 0.5)))) {
     setStance(m, "crouch");
   }
   m.coverK = m.stance === "crouch" ? CROUCH_HIT
@@ -219,6 +219,20 @@ function stepMan(m, sdt) {
     while (dy < -Math.PI) dy += Math.PI * 2;
     m.yaw += dy * Math.min(1, sdt * 7);
     m.group.rotation.y = m.yaw;
+  } else if (!engaged && spd <= 0.1 && holding(m)) {
+    /* A HELD LINE FACES THE ENEMY. A holder who stepped back onto his mark
+       stopped facing the way he walked: measured on the snow, the whole line
+       knelt with its back to the attack (yaw 180 deg off) and the brain's
+       200 deg field of view never let it pick a mark. Turn to the enemy's
+       centre of mass while waiting. */
+    const C = teamCOM[m.team === "red" ? "blue" : "red"];
+    if (C) {
+      let dy = Math.atan2(C.x - m.pos.x, C.z - m.pos.z) - m.yaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      m.yaw += dy * Math.min(1, sdt * 3);
+      m.group.rotation.y = m.yaw;
+    }
   }
 
   // ---- the trigger ----

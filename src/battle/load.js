@@ -57,6 +57,7 @@ const ARMOURY = [
   "systems/wounds.js",         // bodies remember hits (optional, self-capping)
   "world/hull_loft.js",        // the game's own lofted boat hulls (OPEN WATER's fleet)
   "city/flags.js",             // the one flag system: an army fights under its nation's flag
+  "world/textures_surface.js", // groundTurf: the one grass shader (OPEN FIELDS' pasture)
 ];
 /* THE LOAD USED TO BE THIRTY-ONE ROUND TRIPS IN A ROW.
 

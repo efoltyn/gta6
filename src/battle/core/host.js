@@ -22,6 +22,13 @@
      queryColliders(x, z, r, out)           colliders near a point (cover)
      colliderContains(c, x, z, pad)
      scene                  the THREE.Scene the units are added to
+   OPTIONAL (a host that has them hands them over; a caller feature-detects)
+     coverNear(x, z, r, out, opts)   cover points near a spot: { x, z, y, nx, nz,
+                                     h, low, kind, rec } -- the cover is on the
+                                     -n side; opts { threat:{x,z}, minH, maxH, kinds }
+                                     keeps only points that hide you from it
+     coverFrom(x, z, tx, tz, r, opts) the one point a man would run to
+                            (NPC War: arenas/cover.js, CBZ.battleCover)
 
    PUBLIC  CBZ.battleHost = { fromArena(map, micro, scene), fromCity(o),
                               validate(host) -> [missing names], KEYS }
@@ -78,6 +85,8 @@
       colliderContains: CBZ.colliderContains || function () { return false; },
       scene: o.scene || CBZ.scene,
     };
+    // the city's cover is the same registry when a page has loaded it
+    if (CBZ.battleCover) { h.coverNear = CBZ.battleCover.near; h.coverFrom = CBZ.battleCover.from; }
     return h;
   }
   CBZ.battleHost = { fromArena: fromArena, fromCity: fromCity, validate: validate, KEYS: KEYS };

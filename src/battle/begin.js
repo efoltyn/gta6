@@ -77,7 +77,21 @@ function begin(asBench) {
       skyColor: 0xa9c2dc, groundColor: 0x5f6e3e },
     sunDir: [0.7, 0.42, 0.52],
   };
-  SKY.island = SKY.field = SKY.city;
+  /* THE WOOD: a high summer sun for the flecks to come through, a short
+     green-grey haze (you cannot see far in a wood, and the belt of trees at
+     the window's edge is where the fog should close), a dark bounce off the
+     litter. */
+  SKY.forest = {
+    fov: 64, far: 9000, exposure: 0.86,
+    sky: { top: 0x3d6a9c, bottom: 0xb9c6c2, fogNear: 140, fogFar: 1300, radius: 9000, exponent: 0.7 },
+    lights: { sun: 1.05, hemi: 0.42, shadowSpan: 160, shadowMap: 2048, sunColor: 0xfff1d6,
+      skyColor: 0xb4c8dc, groundColor: 0x3a3524 },
+    sunDir: [0.55, 0.68, 0.48],
+  };
+  // every raised venue is coastal or downtown light: the desert haze was
+  // only ever the dunes' (harbor, marina, the seat of state and the speedway
+  // all used to fall through to it and stood under an orange sky)
+  SKY.island = SKY.field = SKY.harbor = SKY.marina = SKY.gov = SKY.speedway = SKY.city;
   CBZ.micro.boot(SKY[SET.map] || SKY.dunes);
   CBZ.micro.pauseKey = null;                       // the clock is ours (Space)
   sunRig((SKY[SET.map] || SKY.dunes).sunDir);
@@ -93,7 +107,7 @@ function begin(asBench) {
   // men and the aircraft stay animated through it.
   if (Q.get("settle") !== "0") CBZ.studio.settle(CBZ.scene);
   // the walkable map, once, off the colliders the ground just registered
-  navBuild(MAP.cx, MAP.cz, { city: 330, island: 340, field: 540, arena: 150, dunes: 220, snow: 220, grass: 220, water: 200 }[SET.map] || 260);
+  navBuild(MAP.cx, MAP.cz, { city: 330, island: 340, field: 540, arena: 150, dunes: 220, snow: 220, grass: 220, forest: 220, water: 200 }[SET.map] || 260);
   AIR.on = SET.redS !== "none" || SET.blueS !== "none" ||
     !!(FRONT && ((FRONT.red.strikes | 0) > 0 || (FRONT.red.queued | 0) > 0 || (FRONT.blue.queued | 0) > 0));
   AIRSTRIKE.left = FRONT ? Math.max(0, FRONT.red.strikes | 0) : 0; AIRSTRIKE.used = 0;

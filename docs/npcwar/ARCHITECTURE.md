@@ -128,7 +128,12 @@ change it only in coordination.
 | `src/battle/core.js` | `CBZ.now`, `CBZ.floorAt` shims | core |
 | `src/battle/arenas/maps.js` | `MAPS`: every ground the page offers | terrain |
 | `src/battle/arenas/field.js` | `buildMap(id)`: raise a ground, return the MAP record (spawn, ground, sight) | terrain |
-| `src/battle/arenas/erg.js` | the open dunes / snow / fields | terrain |
+| `src/battle/arenas/erg.js` | the open dunes / snow / fields / wood: the height forms (barchan + transverse dunes off one wind, snow drifts, rolling ground), the crest table, the parcels, the skin and its per-surface shader (ripples, sastrugi, litter + dapple, crops) | terrain |
+| `src/battle/arenas/cover.js` | `CBZ.battleCover`: every cover point (props, walls, crests, crater lips), hit points, destruction; `MAP.coverNear/coverFrom` | terrain |
+| `src/battle/arenas/dress.js` | `CBZ.battleDress`: the real objects (sandbags, hesco, jersey, burnt cars, boulders, logs, dry walls, bales, rubble, containers), instanced, and where they go (open ground, the downtown's streets) | terrain |
+| `src/battle/arenas/ground.js` | `CBZ.battleGround`: earthworks + craters in groundAt, prints and tracks, scorch, blast spray, blowing sand, the baked dead (remains) | terrain |
+| `src/battle/arenas/woods.js` | `CBZ.battleWoods`: THE WOOD (canopy, understory, bracken, deadfall, canopy map) and the snow's spruce groves | terrain |
+| `src/battle/arenas/fields.js` | `CBZ.battleFields`: farmland (hedgerows on banks, dry walls, wheat, maize, bales, pasture) | terrain |
 | `src/battle/arenas/sea.js` | open water: swell, reef, fleet, depth | water |
 | `src/battle/arenas/yard.js` | the kill box | terrain |
 
@@ -566,6 +571,13 @@ segmentBlocked(ax,ay,az, bx,by,bz)     the geometry between two points (sight, f
 queryColliders(x, z, r, out)           colliders near a point (cover search)
 colliderContains(c, x, z, pad)
 ```
+
+Optional (feature-detect them): `coverNear(x, z, r, out, opts)` returns cover points
+`{ x, z, y, nx, nz, h, low, kind, rec }` (the cover is on the -n side; `opts.threat {x,z}`
+keeps only points that hide you from it), and `coverFrom(x, z, tx, tz, r)` returns the one a
+man would run to. Kinds: `crest drift fold crater wall tree hedge sandbags hesco jersey hulk
+boulder log drywall bale rubble container`. Props have hit points; a blast that beats one
+takes its collider and its points away (rubble keeps a low set).
 
 - `fromArena(MAP, CBZ.micro, CBZ.scene)` is NPC War's host: `buildMap()`'s record plus
   microboot's collision world, using the same function objects with no wrapper. `begin.js` sets
