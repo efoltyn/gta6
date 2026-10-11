@@ -344,15 +344,14 @@ CBZ.npcwar.onBoot(function () {
   const g = new THREE.Object3D();
   _yDummy = { pos: g.position, group: g, dead: false, rad: 0.3, hp: 1e9, maxHp: 1e9, dummy: true };
 });
+// nobody in the cone: the round still goes where the rifle points, flown by
+// the same fireShot as every other (src/battle/fire.js: it lands where it lands)
 function youMiss(m, w) {
-  m.mag--; m.lastShotT = simT; stats[m.team].shots++; m.shotsF++;
   let from = CBZ.actorMuzzle ? CBZ.actorMuzzle(m, _yFrom) : null;
   if (!from) from = _yFrom.set(m.pos.x + Math.sin(m.yaw) * 0.5, m.pos.y + 1.42, m.pos.z + Math.cos(m.yaw) * 0.5);
   const reach = 140, drop = (YOU.pitch - 0.24) * 0.6;
   _yTo.set(from.x + Math.sin(YOU.yaw) * reach, from.y - drop * reach * 0.4, from.z + Math.cos(YOU.yaw) * reach);
-  CBZ.tracer(from, _yTo, { shooter: m, muzzle: true, muzzleScale: (w && w.flash ? 0.5 + w.flash : 0.9) });
-  if (w && w.sfx) { try { CBZ.sfx(w.sfx, { dist: 2, ghost: true, volume: (w.sfxVol || 1) * 0.9, pitch: w.sfxPitch || 1 }); } catch (e) {} }
-  missImpact(from, _yTo, 0);
+  fireShot(m, null, { mode: "point", at: _yTo });
 }
 // AIM IS AUTOMATIC: the locked threat if it is near the look, else whoever
 // sits on the crosshair, else the round goes where you look

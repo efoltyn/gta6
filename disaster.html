@@ -617,7 +617,7 @@ document.body.appendChild(b);}}catch(e){}})();
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=hmove1011"></script>
+<script src="src/entities/crowdgpu.js?v=scale1011m"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -671,10 +671,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/brain.js?v=armed1"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=dogs1009b"></script>
+<script src="src/systems/audio.js?v=weap1011m"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
+<script src="src/weapons/ballistics.js?v=weap1011m"></script>
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
 <script src="src/weapons/munitions.js?v=mil0929"></script>
@@ -1199,7 +1200,7 @@ document.body.appendChild(b);}}catch(e){}})();
      actor (pet / stray / guard / K9) and needs both before it. The dog is
      built on the shared animal kit (src/units/kit/: planted-foot gait,
      quadruped rig, lofted skinned shell), which loads first. -->
-<script src="src/units/kit/gait.js?v=npcw1011"></script>
+<script src="src/units/kit/gait.js?v=cheetah1011m"></script>
 <script src="src/units/kit/quadrig.js?v=npcw1011"></script>
 <script src="src/units/kit/loft.js?v=npcw1011"></script>
 <script src="src/city/dogmodel.js?v=npcw1011"></script>
@@ -2010,7 +2011,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
 <script src="src/city/warroom.js?v=fortb1009"></script>
-<script src="src/city/frontline.js?v=flagfix1001"></script>
+<script src="src/city/frontline.js?v=npcai1011b"></script>
 <script src="src/city/perimeter.js?v=gateprotest2"></script>
 <script src="src/city/president_public.js?v=street1009"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):

@@ -41,9 +41,12 @@
    INTERFACE TO THE RUNTIME (src/battle/vehicles.js), all optional calls:
      rig.mark(nation, ground)  paint scheme by ground (desert tan / NATO
                                three-tone / winter) + the nation's flag
-                               (city/flags.js) on the turret sides
-     rig.damage(vs, res)       damage states before death (burning, gun hit)
-     def.tactics               what the AI should do with an MBT (§ TACTICS)
+                               (city/flags.js) on the turret sides; called
+                               by the runtime right after build
+     rig.damage(vs, res)       damage states before death (burning, gun
+                               hit); called on every hit that lands
+     def.tactics               what the AI should do with an MBT (§ TACTICS),
+                               exposed as veh.tactics
    The wreck look is self-driven (the runtime's darkening of the materials is
    the signal), so it works today without any runtime call.
 
@@ -1282,8 +1285,7 @@
       crows: crows, crowsEl: crowsEl, ant: ant, imW: imW, imI: imI, imS: imS, imT: imT, links: P.links,
       paintMeshes: paintMeshes, glassMeshes: glassMeshes, _paint: pm });
     rig.watchWreck(hull);
-    // a nation / ground handed in by the host (the runtime may pass them)
-    if (ctx && (ctx.nation || ctx.ground)) { try { rig.mark(ctx.nation, ctx.ground); } catch (e) {} }
+    // the nation and the ground: the runtime calls rig.mark(nation, ground) after build
     Object.defineProperty(root.userData, "rig", { value: rig, enumerable: false, writable: true, configurable: true });
     return { group: root, rig: rig, footW: 3.66, footL: 7.93, height: 2.44 };
   }
@@ -1326,9 +1328,9 @@
       { id: "m240_coax", seat: "gunner", kind: "mg", wid: "lmg", turret: true, rof: 12, burst: 12, pause: 1.2, dmg: 22, pen: 9, range: 900, ammo: 10800 },
       // M2HB .50 on the CROWS, the commander's
       { id: "m2_50cal", seat: "commander", kind: "mg", wid: "lmg", turret: true, rof: 9, burst: 8, pause: 1.6, dmg: 38, pen: 24, range: 1800, ammo: 900 },
-      /* the loader's M240 is modelled on its skate mount but not listed: the
-         runtime does not yet ask whether a weapon's seat is filled, and a
-         loader at his breech is not on his machine gun in a fight */
+      /* the loader's M240 is modelled on its skate mount but not listed: a
+         loader at his breech is not on his machine gun in a fight (the
+         runtime fires a weapon only from a crewed seat) */
     ],
     /* TACTICS: what an MBT is for, for the AI layer (src/battle/ai/*) to read.
        standoff/engage are metres; a target class list is in priority order. */

@@ -94,6 +94,7 @@ function frame(dt) {
       }
       tacticsStep(sdt);                    // the squads decide; grenades fly (ai/squad.js)
       for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
+      if (MASS.on) MASS.step(sdt);          // the MID and FAR tiers (src/battle/mass.js)
       /* THE HOLD AND EVERYTHING IN THE AIR. This has to be its own call and
          not a seam inside beastFight: the strike bubble above only runs while
          the gorilla has a LIVING target inside reach, and a man being swung
@@ -183,10 +184,9 @@ function frame(dt) {
     const d2 = (m.pos.x - camP.x) * (m.pos.x - camP.x) + (m.pos.z - camP.z) * (m.pos.z - camP.z);
     m.animF = (m.animF + 1) & 1023;
     const every = CBZ.battleLod.animEvery(d2);      // battle/core/lod.js: the one tier table
-    if (m.vehicle) {                     // tracks, wheels, rotors (src/battle/vehicles.js)
-      if ((m.animF % every) === 0) animateVehicle(m, dt * every);
-      continue;
-    }
+    // a vehicle animates itself on the SIM clock, in stepVehicle (its unit
+    // file's animate(veh, dt, ctx), src/battle/vehicles.js vehAnimate)
+    if (m.vehicle) continue;
     if (m.beast) {
       // the species walks on the shared rig — legs swing by distance
       // actually moved, so the charge, the march and the rout all animate
@@ -204,8 +204,9 @@ function frame(dt) {
       // had ever set it, so combat_iq could send a soldier to a real piece
       // of cover and he would stand up straight behind it. One boolean, and
       // the posture the fight brain already chose is finally visible.
-      // ...and now the whole soldier: carry, stance, cover peek / lean /
-      // blind fire as entities/soldier.js's ch.soldier record (ai/squad.js)
+      // ...and now the whole soldier: carry, stance (prone behind the gun
+      // included), cover peek / lean / blind fire as entities/soldier.js's
+      // ch.soldier record (ai/squad.js)
       soldierRig(m);
       try { CBZ.animChar(m.char, m.speed * speed, dt * every); } catch (e) {}
     }
@@ -231,6 +232,7 @@ function frame(dt) {
     }
   }
   if (TAC.captives.length) animCaptives(dt);   // the prisoners kneel, hands up
+  if (MASS.on) MASS.frame(realDt);      // promotion, demotion, ghosts, the crowd draw
   stepKill(realDt);                     // ...on WALL time: see THE KILL CAM
   stepCamera(dt);
   if (SEA.on) seaUnderwater();          // after the camera moved, before the draw

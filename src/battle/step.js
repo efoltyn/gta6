@@ -55,10 +55,7 @@ function stepMan(m, sdt) {
   if (simT >= m.thinkAt) think(m, simT);
   if (m.fled) return;
   if (m.supp > 0) m.supp = Math.max(0, m.supp - sdt * SUPP_DECAY);
-  if (m.reloadT > 0) {
-    m.reloadT -= sdt;
-    if (m.reloadT <= 0) m.mag = m.magSize;
-  }
+  armsTick(m, sdt);                      // the magazine, the stoppage (src/battle/fire.js)
   m.cool -= sdt;
   // a man knocked down is not steered: the knockdown owns him (melee.js)
   if (knockedDown(m)) { m.speed = 0; return; }
@@ -207,11 +204,17 @@ function stepMan(m, sdt) {
      always up. coverK is what fireShot multiplies a round's hit chance by. */
   if (m.dragging) dragFollow(m);         // a wounded mate on the end of his arm (ai/squad.js)
   m.up = true;
-  // a squad's man: posts, the cover cycle, the rush, flat when pinned (ai/squad.js)
+  // a squad's man: posts, the cover cycle, the rush, flat when pinned, the
+  // gun's own bipod stance at an open post (ai/squad.js); else THE GUN'S OWN
+  // STANCE (src/battle/fire.js): a belt-fed gun or a sniper rifle goes prone
+  // on its bipod, a rifleman shooting far takes a knee
+  const ws = weaponStance(m, tgt, spd);
   if (stanceStep(m, spd, sdt)) { /* set */ }
   else if (m.routed || m.fists) { if (m.stance !== "stand") setStance(m, "stand"); }
   else if (m.slot === "hull" && m.hull) m.up = workHull(m, sdt);
-  else if (m.stance !== "stand") {
+  else if (ws) { if (m.stance !== ws) setStance(m, ws); }
+  else if (m.stance === "prone") setStance(m, spd > 0.1 ? "stand" : "crouch");
+  else if (m.stance === "crouch" || m.stance === "rush") {
     const kneel = holding(m);
     if (spd > 0.1 || (!kneel && (!tgt || tgt.dead || (m.supp < 0.12 && m.hp >= m.maxHp * 0.5)))) setStance(m, "stand");
     else if (m.stance !== "crouch") setStance(m, "crouch");
@@ -240,54 +243,11 @@ function stepMan(m, sdt) {
   if (m.fists) { stepFists(m, tgt, dist, sdt); return; }   // src/battle/melee.js
   // ducked in cover under heavy fire: rounds over the top, unaimed (ai/squad.js)
   if (m.blind && !m.up) { blindFire(m, sdt); return; }
-  const may = tacMayFire(m, dist);        // the squad's slot gate (null: the page's own below)
+  // the squad's slot gate (ai/squad.js): false = not on this slot, true = yes
+  // whatever the slot says (an animal coming in), null = the gun's own rule
+  const may = tacMayFire(m, dist);
   if (may === false) return;
-  if (m.launcher) {
-    if (m.cool <= 0 && m.sees && dist > 16 && dist < (tgt.vehicle ? 140 : 95) &&
-        !dangerClose(m.team, tgt.pos.x, tgt.pos.z, 11) &&              // never onto his own men,
-        !dangerClose(m.team, (m.pos.x + tgt.pos.x) / 2, (m.pos.z + tgt.pos.z) / 2, Math.min(11, dist * 0.3))) {   // nor over them
-      const w = CBZ.weaponById(m.wid);
-      fireRocket(m, tgt);
-      if (m.mag <= 0) { m.reloadT = w.reloadTime || w.reload || 2; m.mag = 0; m.reloads++; gunLedger(m.wid).reloads++; soldierReload(m); }
-      m.cool = (w.fireDelay || w.interval || 1.2) + 0.6 + lcg() * 0.8;
-    }
-    return;
-  }
-  const p = CBZ.combatIQ && CBZ.combatIQ.profile ? CBZ.combatIQ.profile(m) : null;
-  let fireMax = p ? Math.min(125, p.hi * 2.6 + 8) : 60;
-  if (m.hunt) fireMax *= 1.6;          // running a man down includes shooting at him
-  if (!m.sees || dist > fireMax) return;
-  if (may === null && m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" && m.slot !== "sidestep" &&
-      m.slot !== "hull" && dist > 12) return;
-  if (!m.up) return;                     // ducked behind his crest (workHull)
-  if (m.cool > 0) return;
-  /* THE LINE IS CHECKED WHEN THE TRIGGER IS PULLED, NOT WHEN HE LAST THOUGHT.
-     `m.sees` is up to half a second old — a think-tick answer about two men
-     who have both been moving since — and stale LOS is how rounds get fired
-     into a wall that closed in between (measured: 2 in the kill box, and it
-     is the walls that move the count, not the men). This test only runs
-     once the cooldown has already expired, so it costs about one segment
-     trace per shot and it is what makes the blind-fire counter honest. */
-  if (!FIRE_OLD) {
-    m.sees = eyeLos(m, tgt);
-    if (!m.sees) { m.cool = 0.12; return; }
-    const side = mateInLane(m, tgt);
-    if (side) { stepOffLine(m, tgt, side); return; }
-  }
-  const w = CBZ.weaponById(m.wid);
-  const r = CBZ.combatIQ && CBZ.combatIQ.shot
-    ? CBZ.combatIQ.shot(m, tgt, dist, 0, w ? w.damage : 14) : null;
-  if (!r) { m.cool = 0.5; return; }
-  m.cool = r.cd;
-  if (!r.fire) return;
-  fireShot(m, tgt, r);
-  if (m.mag <= 0) {
-    m.reloadT = (w && (w.reloadTime || w.reload)) || 1.6;
-    m.reloads++; gunLedger(m.wid).reloads++;
-    soldierReload(m);                    // the mag change on the rig (entities/soldier.js)
-    const dCam = Math.sqrt(camDist2(m.pos));
-    if (dCam < 60 && CBZ.audioManifest && CBZ.audioManifest.effects && CBZ.audioManifest.effects.reload) {
-      try { CBZ.sfx("reload", { dist: dCam, ghost: true }); } catch (e) {}
-    }
-  }
+  m._tacMay = may;
+  if (m.launcher) { armsLauncher(m, tgt, dist); return; }   // src/battle/fire.js
+  armsTrigger(m, tgt, dist, sdt);        // how he uses the gun: src/battle/fire.js
 }

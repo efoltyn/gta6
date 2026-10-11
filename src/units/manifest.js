@@ -20,6 +20,8 @@
   const W = typeof window !== "undefined" ? window : globalThis;
   const CBZ = W.CBZ || (W.CBZ = {});
   function S(name, plural, group) { const r = { kind: "species", name: name, plural: plural }; if (group) r.group = group; return r; }
+  // the cat engine (units/kit/felid.js) and the kit it stands on
+  const FELID = ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/kit/felid.js"];
   // men: the unit word follows the size, as an army counts it
   function menGroup(n) {
     return n <= 12 ? "squad" : n <= 50 ? "platoon" : n <= 250 ? "company" : n <= 1000 ? "battalion" : n <= 5000 ? "brigade" : "division";
@@ -28,20 +30,20 @@
     men: { kind: "men", name: "man", plural: "men", group: menGroup },
 
     // ---- land -------------------------------------------------------------
-    gorilla: S("gorilla", "gorillas", "troop"),
+    gorilla: Object.assign(S("gorilla", "gorillas", "troop"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     bengal_tiger: S("Bengal tiger", "Bengal tigers", "streak"),
-    lion: S("lion", "lions", "pride"),
-    white_lion: S("white lion", "white lions", "pride"),
-    cheetah: S("cheetah", "cheetahs", "coalition"),
-    snow_leopard: S("snow leopard", "snow leopards", "leap"),
+    lion: Object.assign(S("lion", "lions", "pride"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
+    white_lion: Object.assign(S("white lion", "white lions", "pride"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/species/lion.js"] }),
+    cheetah: Object.assign(S("cheetah", "cheetahs", "coalition"), { needs: FELID }),
+    snow_leopard: Object.assign(S("snow leopard", "snow leopards", "leap"), { needs: FELID }),
     gray_wolf: S("gray wolf", "gray wolves", "pack"),
     arctic_wolf: S("Arctic wolf", "Arctic wolves", "pack"),
     coyote: S("coyote", "coyotes", "pack"),
     black_bear: S("black bear", "black bears", "sloth"),
     brown_bear: S("brown bear", "brown bears", "sloth"),
     polar_bear: S("polar bear", "polar bears", "sloth"),
-    african_elephant: S("African elephant", "African elephants", "herd"),
-    white_rhino: S("white rhino", "white rhinos", "crash"),
+    african_elephant: Object.assign(S("African elephant", "African elephants", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
+    white_rhino: Object.assign(S("white rhino", "white rhinos", "crash"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     giraffe: S("giraffe", "giraffes", "tower"),
     zebra: S("zebra", "zebras", "dazzle"),
     bison: S("bison", "bison", "herd"),

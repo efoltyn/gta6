@@ -263,12 +263,20 @@
   const HP = { civ: 90, thug: 100, pro: 120, elite: 140, swat: 160 };       // games/battle.html TRAININGS
   // a line in the page holds past the arithmetic: men are cornered, rally,
   // and mostly die where they stand (MEASURED, tools/npcwar-headless.mjs 6)
-  const NERVE_SLACK = 0.14;
+  const NERVE_SLACK = 0.07;
   const TIER_W = { civ: 0.7, thug: 0.85, pro: 1.0, elite: 1.25, swat: 1.4 }; // brain.morale MK.TIER_W
   const CLASS_OF = { ak47: "rifle", carbine: "rifle", lmg: "lmg", smg: "smg", uzi: "smg", shotgun: "shotgun",
     sniper: "sniper", sidearm: "pistol", revolver: "pistol", deagle: "pistol", taser: "pistol",
     bazooka: "launcher", glauncher: "launcher", fists: "none" };
-  const PAGE_DMG = 1.45 * (1 + 0.12 * 1.2);  // battle.html fireShot: x1.45, 12% heads x2.2
+  const PAGE_DMG = 1.45 * (1 + 0.12 * 1.2);  // the old dice-roll fireShot: x1.45, 12% heads x2.2 (fallback only)
+  // the share of a line's ballistic worth the page actually lands: sight lines
+  // across the crests, men changing magazines and marks. CALIBRATED 2026-10-11
+  // against the page flying real rounds (tools/npcwar-headless.mjs 6), with
+  // NERVE_SLACK, HOLD_COVER and SUPP_SHOT: a held line in the open is worth
+  // less than it was (the attackers' rounds now crack over it too), and men
+  // break sooner under fire that misses them
+  const BALL_K = 0.22;
+  const SUPP_SHOT = 0.25;    // rattle per second, per rifle on him
   // how much of a line has a man in its sights once the lines have met, by
   // ground (dunes cut lanes at the crests, a downtown is corners, a coastal
   // apron is open but cluttered), and how fast the lines close. CALIBRATED
@@ -279,7 +287,7 @@
   const ENGAGE = { dunes: 0.24, snow: 0.24, grass: 0.26, city: 0.09, harbor: 0.16, arena: 0.16, water: 0.24 };
   const CLOSE = { city: 5, harbor: 6.5, arena: 6.5 };   // m/s combined (open ground 8.5: they stop to shoot), one line walks half
   // a man holding the line is down behind something: crest, wall, container
-  const HOLD_COVER = { dunes: 0.72, snow: 0.72, grass: 0.78, city: 0.62, harbor: 0.72, arena: 0.66, water: 1 };
+  const HOLD_COVER = { dunes: 0.62, snow: 0.62, grass: 0.62, city: 0.62, harbor: 0.72, arena: 0.66, water: 1 };
   const GAP = { dunes: 150, snow: 150, grass: 150, city: 170, harbor: 170, arena: 120, water: 110 };
   // the page's squads (battle.html ai/squad.js): of the men a fight puts out,
   // this share is down and dragged clear rather than dead; a cornered man
@@ -319,6 +327,39 @@
     };
   }
   // DPS this man lays on a standing target at fighting range, page rules
+  /* THE PAGE FLIES ITS ROUNDS (src/battle/fire.js on weapons/ballistics.js),
+     so this asks the same physics what a man's gun is worth at a range: the
+     rounds a second the page's cadence fires at that range, the odds one
+     round from his hold (stance, training, on the move or set) lands on the
+     head and chest of a man there, and what a hit costs a man (a rifle hit
+     anywhere on the trunk puts most men down; limbs and grazes do not), as a
+     FRACTION of the man per second. null = no ballistics row (the fallback
+     below, the DPS ladder this file was first calibrated on). */
+  function erf(x) {
+    const s = x < 0 ? -1 : 1; x = Math.abs(x);
+    const t = 1 / (1 + 0.3275911 * x);
+    return s * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x));
+  }
+  const HIT_COST = 0.72;
+  function ballFrac(tier, wid, range, moving) {
+    const B = CBZ.ballistics;
+    const g = B && B.GUN[wid];
+    if (!g || !g.cart) return null;
+    if (range > g.area) return 0;
+    const st = moving ? "stand" : (g.cls === "lmg" || g.cls === "sniper") && range > 25 ? "prone" : range > 60 ? "crouch" : "stand";
+    const sig = B.sigma({ gun: g, tier: tier, stance: st, bipod: !!g.bipod, speed: moving ? 1.8 : 0, settle: 0.85 });
+    const s = Math.max(1e-4, sig * range / 1000);
+    let p = erf(0.21 / (1.4142 * s)) * erf(0.45 / (1.4142 * s));
+    if (B.CART[g.cart].pellets) p = Math.min(1, p * (range < 15 ? 3 : 1.5));
+    const iv = g.cls === "lmg" ? 0.075 : g.cls === "smg" ? 0.07 : 0.1;
+    const rps = g.cls === "sniper" ? 1 / (1.6 + range / 220)
+      : g.cls === "shotgun" ? 1.1
+      : g.cls === "pistol" ? 2 / (0.44 + 0.22 + range / 45)
+      : g.cls === "lmg" ? 5.5 / (5.5 * iv + 0.6 + range / 600)
+      : g.cls === "smg" ? 3.5 / (3.5 * iv + 0.35 + range / 120)
+      : range < 25 ? 3 / (3 * iv + 0.35) : range < 70 ? 2 / (0.22 + 0.45 + range / 220) : 1 / (0.45 + range / 260);
+    return rps * p * HIT_COST;
+  }
   function dpsOf(T, tier, wid, range) {
     const cls = CLASS_OF[wid] || "rifle";
     if (cls === "none") return 0;
@@ -437,10 +478,16 @@
           }
           if (!o || o.dead) continue;
           // a man run down and cornered fights at arm's length, where nobody misses
-          let dps = dpsOf(T, m.tier, m.wid, m.cornered ? 6 : o.routed ? range * 1.3 : range);
+          const rg = m.cornered ? 6 : o.routed ? (BALL_K ? range + Math.min(120, 6 * o.routT) : range * 1.3) : range;   // a man running opens the range at 6 m/s
+          // the attackers walk into the holders' fire and shoot on the move
+          const fr = ballFrac(m.tier, m.wid, rg, !!hold && hold !== team && gap > 16.5);
+          let dps = fr != null ? fr * o.maxHp * BALL_K : dpsOf(T, m.tier, m.wid, rg);
           if (m.supp > 0.5) dps *= 0.75;                                // suppressed shooters shoot worse
           const ck = o.routed ? 1 : coverK[foe];
           hits.push(o, dps * dt * ck * (0.6 + rnd() * 0.8));
+          // and the rounds that miss him still crack past: a man under fire is
+          // rattled by all of it, not only by what lands (fire.js armsNearMiss)
+          if (fr != null) o.supp = Math.min(1.2, o.supp + SUPP_SHOT * dt);
         }
         // the bombers: a stick of five on the densest knot of the enemy line
         while (sticks[team].length && sticks[team][0] <= t) {

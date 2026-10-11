@@ -765,16 +765,20 @@
       const home = S.holdAnchor || holdAnchorOf(S);
       S.anchor = home;
       if (S.postsDirty || !S.postedAt || now - S.postedAt > 12) {
-        if (S.fellBack) linePosts(A, S, S.men, home.x, home.z, tx, tz, sp, true);
-        else {
-          // a held line is held where each man formed: his own spot, or the
-          // nearest box / fold to it
-          const cols = coverCands(A, home.x, home.z, 34);
-          for (let i = 0; i < S.men.length; i++) {
-            const m = S.men[i], h = m.home || m.pos;
-            m.post = postAt(A, S, m, h.x, h.z, tx, tz, cols, true);
-          }
-        }
+        // a held line is held where the squad formed — but as a LINE across
+        // the threat at fighting intervals, not the parade block it formed
+        // up in (three ranks 3 m apart is one grenade's work), each man
+        // snapped to the nearest box or fold
+        // ...and a line that cannot see its enemy edges forward to where it
+        // can (the crest in front of a hollow), never more than 14 m off
+        // where it formed
+        let ax = home.x, az = home.z;
+        if (!S.fellBack && now - (S.lastSeen == null ? -99 : S.lastSeen) > 5 && now - S.taskT > 5) {
+          S.holdPush = Math.min(14, (S.holdPush || 0) + 5);
+        } else if (now - (S.lastSeen == null ? -99 : S.lastSeen) < 2) S.holdPush = S.holdPush || 0;
+        if (S.holdPush) { ax += S.face.x * S.holdPush; az += S.face.z * S.holdPush; }
+        const pl = coverPull(A, ax, az, tx, tz, 12);
+        linePosts(A, S, S.men, pl.x, pl.z, tx, tz, S.fellBack ? sp : 3.8, true);
         S.postedAt = now; S.postsDirty = false;
       }
       return;

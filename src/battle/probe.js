@@ -237,6 +237,7 @@ CBZ.npcwar.onBoot(function () {
         } : null,
         beasts: (function () { let n = 0; for (let i = 0; i < men.length; i++) if (men[i].beast && !men[i].dead) n++; return n; })(),
         steer: STEER_OLD ? "old" : "walls",
+        mass: MASS.audit(),
         swimMode: SWIM_OLD ? "old" : "rig",
         // the ground, as MEASURED off the raised venue (null for the maps that
         // author their own: city, dunes, arena). A checker can finally assert
@@ -387,6 +388,10 @@ CBZ.npcwar.onBoot(function () {
         if (m.dead || m.fled) continue;
         alive[m.team]++; if (m.routed) routed[m.team]++;
       }
+      if (MASS.on) {        // a tiered battle: every row (src/battle/mass.js)
+        const K = MASS.count();
+        alive.red = K.alive[0]; alive.blue = K.alive[1]; routed.red = K.routing[0]; routed.blue = K.routing[1];
+      }
       return { dead: { red: DEADN.red, blue: DEADN.blue }, fled: { red: ARMY.red.fled, blue: ARMY.blue.fled }, alive: alive, routed: routed, simT: simT, winner: winner };
     },
     drift: function () {
@@ -526,6 +531,24 @@ CBZ.npcwar.onBoot(function () {
        STOPS the orbit, because a photograph taken while the lens is drifting
        is a photograph of a different bearing on each side of a comparison.
        Returns what the lens ended up on, so a preset can assert it. */
+    /* ---- THE LENS ON ONE UNIT (?cam= by tool) ----------------------------
+       camFollow(sel): sel is the page's cam name: a unit id ("ah64_apache",
+       "bengal_tiger", "men") or "a:3" / "b:0". The study desk follows it
+       closely (a hull is ridden off its rear quarter, camera/study.js) and
+       finds the next of its kind if it falls. "a" / "b" ride a side's front.
+       Returns what the lens is on. */
+    camFollow: function (sel) {
+      sel = String(sel || "");
+      if (sel === "a" || sel === "b") { setCamMode("follow", sel === "a" ? "red" : "blue"); return { cam: sel }; }
+      const m = studyFind(sel);
+      if (!m) return null;
+      STUDY.m = m; STUDY.want = sel;
+      setCamMode("study");
+      frameStudy(0);
+      cam.focus.copy(cam.wFocus); cam.yaw = cam.wYaw; cam.pitch = cam.wPitch; cam.dist = cam.wDist;
+      camApply(1);
+      return { id: m.id, unit: m.unitId || (m.beast ? m.species.id : "men"), x: Math.round(m.pos.x), y: Math.round(m.pos.y), z: Math.round(m.pos.z) };
+    },
     camMode: function (mode, pick, yaw) {
       if (pick != null) studyPickBy(pick);
       if (yaw != null) { STUDY.orbit = +yaw || 0; STUDY.spin = 0; }
@@ -620,6 +643,10 @@ CBZ.npcwar.onBoot(function () {
         if (i < SET.redN) spawnQueue.push(["red", i]);
         if (i < SET.blueN) spawnQueue.push(["blue", i]);
       }
+      // a war bigger than this device's FULL rigs is fought in tiers here too
+      // (src/battle/mass.js): the rows go down now, the rigs follow the lens
+      MASS.reset();
+      MASS.begin(false, { restage: true });
       // all of them, now: a tool that asked for a matchup wants the matchup,
       // not ten of it per frame for the next four seconds
       if (o.now !== false) { let g = 0; while (spawnQueue.length && g++ < 4000) drainSpawns(); }

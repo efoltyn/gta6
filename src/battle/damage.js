@@ -25,6 +25,8 @@ CBZ.npcwar.onBoot(function () {
 
 /* ============================================================ DAMAGE */
 function hurtMan(m, dmg, imp) {
+  // a ghost is a row in the tier sim (src/battle/mass.js): the round lands there
+  if (m && m.ghost) { if (dmg > 0) MASS.hurtGhost(m, dmg, imp); return; }
   // a hull answers with its armour first (src/battle/vehicles.js)
   if (m && m.vehicle) { hurtVehicle(m, dmg, imp); return; }
   if (!m || m.dead || m.fled || !(dmg > 0) || over) return;
@@ -104,6 +106,7 @@ function killMan(m, imp) {
 // a fled man has been spliced out of `men` by updateMorale, so this is
 // "still on the field", which is what the HUD bars and the win check mean
 function aliveCount(team) {
+  if (MASS.on) return MASS.aliveCount(team);
   let n = 0;
   for (let i = 0; i < men.length; i++) if (men[i].team === team && !men[i].dead && !men[i].fled) n++;
   return n;

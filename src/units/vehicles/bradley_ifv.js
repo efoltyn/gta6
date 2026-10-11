@@ -30,22 +30,19 @@
                                heads out when calm, CIV scan, exhaust, dust
      aimTurret(yaw, elev, dt)  turret slew with drive inertia (60 deg/s),
                                gun -9..+59 deg; the raised TOW box follows
-     muzzleWorld(out)          the 25 mm muzzle, or the TOW tube in use
-     fired(scale) / spend(i)   the runtime's hooks (flash / launch)
-     damage(res)               OPTIONAL hook for the runtime: a resolve()
-                               result -> drooped gun, stopped track, fire
+     muzzleWorld(out, shot)    the 25 mm muzzle, or the TOW tube in use
+     fire(shot)                every round (shot.wid says which gun): the
+                               25 mm recoils and spits its case, the coax
+                               flashes, the TOW leaves its tube
+     canFire(shot)             the TOW only with the launcher up, the hull
+                               still and a round in a tube (the real TOW
+                               cannot be fired on the move)
+     damage(vs, res)           a resolve() result -> drooped gun, stopped
+                               track, fire (every hit that lands)
+     mark(nation, ground)      scheme by ground (woodland on grass / fields
+                               / forest, else desert) + the nation's flag
      setNation(id), setScheme("desert"|"woodland"), ramp(open)
-     ctx.nation / ctx.scheme in build() are read when the runtime passes them.
-
-   HOW THE RIG KNOWS WHICH GUN FIRED. vehicles.js hands the rig nothing but a
-   scale. It does, synchronously, call rig.aimTurret() and then read
-   `w.needs` of exactly the weapon it is firing (vehFire). Each weapon below
-   carries a `needs` getter that tells the rig that just aimed (CUR) "this
-   one fired": the 25 mm recoils and spits its case, the coax flashes, the
-   TOW leaves its tube. The TOW's `minRange` getter (read only by vehFight's
-   firing loop) keeps the missile in its box unless the launcher is up, the
-   hull is still and a round is in a tube: the real TOW cannot be fired on
-   the move. Both getters return the same values as plain fields otherwise.
+   All of it is the vehicle contract in docs/npcwar/ARCHITECTURE.md.
 
    KNOCKED OUT. The runtime clones and darkens every material of a dead
    hull (x0.55 knocked out, x0.28 catastrophic). The hull mesh notices that
@@ -96,26 +93,12 @@
   function zAtTop(y) { return H.glacisZ + (H.roof - y) / (H.roof - H.noseTop) * (H.HL - H.glacisZ); }
 
   /* ---------------------------------------------------------- the weapons */
-  let CUR = null, CUR_T = -1e9;        // the rig that aimed last, and when
-  function curRig() { return CUR && now() - CUR_T < 40 ? CUR : null; }
-  function firing(w) {
-    Object.defineProperty(w, "needs", {
-      enumerable: false, configurable: true,
-      get: function () { const r = curRig(); if (r) r.onFire(this.id); return undefined; },
-    });
-    return w;
-  }
-  const TOW = firing({ id: "tow_2b", seat: "gunner", kind: "missile", turret: true, rof: 0.05, vs: "armour",
-    pen: 900, beh: 950, speed: 190, range: 3750, ammo: 7 });
-  Object.defineProperty(TOW, "minRange", {
-    enumerable: false, configurable: true,
-    // only vehFight's firing loop reads this: the box must be up, the hull still, a round in a tube
-    get: function () { const r = curRig(); return r && !r.towReady() ? 1e9 : 65; },
-  });
-  const M242 = firing({ id: "m242_25mm", seat: "gunner", kind: "autocannon", turret: true, rof: 3.33, burst: 4, pause: 1,
-    pen: 65, beh: 140, he: { pen: 12, beh: 110, blast: 3, power: 0.55 }, speed: 1385, heSpeed: 1100, grav: 9.8, range: 2500, ammo: 900 });
-  const COAX = firing({ id: "m240_coax", seat: "gunner", kind: "mg", wid: "lmg", turret: true, rof: 10, burst: 8, pause: 1.2,
-    dmg: 22, pen: 9, range: 900, ammo: 2200 });
+  const TOW = { id: "tow_2b", seat: "gunner", kind: "missile", turret: true, rof: 0.05, vs: "armour",
+    pen: 900, beh: 950, speed: 190, range: 3750, minRange: 65, ammo: 7 };
+  const M242 = { id: "m242_25mm", seat: "gunner", kind: "autocannon", turret: true, rof: 3.33, burst: 4, pause: 1,
+    pen: 65, beh: 140, he: { pen: 12, beh: 110, blast: 3, power: 0.55 }, speed: 1385, heSpeed: 1100, grav: 9.8, range: 2500, ammo: 900 };
+  const COAX = { id: "m240_coax", seat: "gunner", kind: "mg", wid: "lmg", turret: true, rof: 10, burst: 8, pause: 1.2,
+    dmg: 22, pen: 9, range: 900, ammo: 2200 };
 
   CBZ.unitKit.register("bradley_ifv", {
     kind: "vehicle",
@@ -1050,15 +1033,21 @@
     if (this.gunDroop <= 0) this.gun.rotation.x = -this.elev;
   };
   Rig.prototype.aimTurret = function (wantYaw, wantElev, dt) {
-    CUR = this; CUR_T = now();
     if (this.wrecked) return;
-    this.engT = CUR_T;
+    this.engT = now();
     this.lay(wantYaw, wantElev, clamp(dt || 0, 0, 0.1), 1);
   };
   Rig.prototype.towReady = function () {
     return this.tubes > 0 && this.towRaise > 0.98 && Math.abs(this.v) < 0.3 && this.gunDroop <= 0 && now() >= this.towNext;
   };
-  // the weapon's own getter says which gun this is (see the header)
+  // the runtime's hooks (the vehicle contract): which gun, from the shot
+  Rig.prototype.canFire = function (shot) { return !shot || shot.wid !== "tow_2b" || this.towReady(); };
+  Rig.prototype.fire = function (shot) {
+    const id = shot && shot.wid;
+    // the 25 mm's flash at the muzzle (its smoke and case are onFire's)
+    if (id === "m242_25mm") { const p = this.muzzleWorld(_m.v2, shot); if (p) flash(p, 1.5, 0xffe0a0); }
+    this.onFire(id);
+  };
   Rig.prototype.onFire = function (id) {
     this.firingId = id;
     this.fireT = now();
@@ -1099,23 +1088,15 @@
       }
     }
   };
-  Rig.prototype.muzzleWorld = function (out) {
+  Rig.prototype.muzzleWorld = function (out, shot) {
     out = out || new THREE.Vector3();
     this.root.updateMatrixWorld(true);
-    if (this.firingId === "tow_2b") {
-      this.firingId = null;
-      const i = clamp(this.tubes, 0, 1);       // the tube that just fired
+    if (shot && shot.wid === "tow_2b") {
+      const i = clamp(this.tubes - 1, 0, 1);   // the tube about to fire
       return out.set(i ? 0.135 : -0.135, 0, 0.85).applyMatrix4(this.towBox.matrixWorld);
     }
     return this.muzzle.getWorldPosition(out);
   };
-  Rig.prototype.fired = function (scale) {
-    // the runtime's armour-piercing path: it flashes nothing itself
-    const p = this.muzzleWorld(_m.v2);
-    flash(p, scale != null && scale < 0.5 ? 1.5 : 3, 0xffe0a0);
-    if (this.firingId !== "m242_25mm" || now() - this.fireT > 50) { this.recoilT = 0; this.rockT = 0; }
-  };
-  Rig.prototype.spend = function () { this.loaded = this.tubes; };
   Rig.prototype.settle = function () {
     this.body.rotation.set(0, 0, 0); this.tube.position.z = 0;
     this.recoilT = 9; this.rockT = 9; this.pitch = this.roll = 0; this.lastV = 0; this.accF = 0;
@@ -1123,8 +1104,8 @@
     this.sampleGround(0);
     this.poseGear(); this.poseTow(); this.poseCrew();
   };
-  // OPTIONAL: the runtime may hand over a resolve() result
-  Rig.prototype.damage = function (res) {
+  // every hit that lands: the runtime hands over the damage state and the resolve() result
+  Rig.prototype.damage = function (vs, res) {
     if (!res) return;
     if (res.firepower) this.gunDroop = 0.14;
     if (res.mobility && this.stopSide < 0) this.stopSide = Math.random() < 0.5 ? 0 : 1;
@@ -1132,6 +1113,13 @@
   };
   Rig.prototype.ramp = function () { /* the ramp is drawn shut; a lowered ramp waits on the runtime telling us */ };
   Rig.prototype.setNation = function (id) { applyNation(this.root, this.P.flagMesh, id); };
+  // the side's markings, right after build: the scheme for the ground, the flag
+  Rig.prototype.mark = function (nation, ground) {
+    const g = String(ground || "");
+    const scheme = /grass|field|forest|wood|jungle|farm|island/.test(g) || (nation && WOODLAND[nation] && !/sand|desert|dune/.test(g)) ? "woodland" : "desert";
+    this.setScheme(scheme);
+    if (nation) this.setNation(nation);
+  };
   Rig.prototype.setScheme = function (name) {
     const T = template(SCHEME[name] ? name : "desert");
     const map = this.P.matSlots;
@@ -1299,7 +1287,7 @@
     hideProp(root.userData, "rig", rig);
     hideProp(root.userData, "turret", turret);
     root.userData.armorType = "ifv";
-    if (ctx.nation) applyNation(root, flagMesh, ctx.nation);
+    // the nation and the ground: the runtime calls rig.mark(nation, ground) after build
     rig.settle();
     return { group: root, rig: rig, footW: 3.28, footL: 6.55, height: 2.98 };
   }

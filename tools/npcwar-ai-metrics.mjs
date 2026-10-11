@@ -38,8 +38,7 @@
    of the species' size with a plain charge-and-bite on the unit file's own
    numbers): it measures the MEN's answer to a charging animal, not the
    animal. */
-process.env.NPCWAR_HEADLESS_LIB = "1";
-const H = await import("./npcwar-headless.mjs");
+const H = await import("./lib/npcwar-node.mjs");      // the headless harness (tools/npcwar-headless.mjs uses it too)
 const args = process.argv.slice(2);
 const JSON_OUT = args.includes("--json");
 const OLD = args.includes("--old");          // the same build, squad brain off (?tac=old): the before
@@ -127,7 +126,7 @@ async function measure(C, seed) {
     M.shots++;
     // a man down in cover putting rounds over the top (ai/squad.js blindFire)
     // is doing it on purpose: counted, but not as a shot at nothing
-    if (m._blindShot) M.blindFire = (M.blindFire || 0) + 1;
+    if (m._blindShot || (r && r.mode === "area")) M.blindFire = (M.blindFire || 0) + 1;   // (and the arms layer's suppressive fire into a spot)
     else if (!tgt || tgt.dead || tgt.fled || tgt.surrendered || tgt.downed || !sb.eyeLos(m, tgt)) { M.blindShots++; if (m.vehicle) M.blindVeh = (M.blindVeh || 0) + 1; }
     else if (tgt.vehicle && !m.vehicle && tgt.def && tgt.def.stats && tgt.def.stats.armour && (tgt.def.stats.armour.side || 0) > 30) M.blindShots++;
     if (sb.mateInLane(m, tgt)) M.throughMate++;

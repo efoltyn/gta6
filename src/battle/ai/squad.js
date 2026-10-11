@@ -30,9 +30,8 @@
    Every src/battle file shares ONE script scope. */
 
 const TAC_OLD = Q.get("tac") === "old";
-const TAC = { on: !TAC_OLD, at: -1, tierAt: -1, vehs: { red: [], blue: [] }, nades: [], captives: [],
+const TAC = { on: !TAC_OLD, at: -1, tierAt: -1, vehs: { red: [], blue: [] }, captives: [],
   A: null, home: null, lastTickT: -1 };
-const NADE_CARRY = { civ: 0, thug: 1, pro: 2, elite: 2, swat: 2 };
 const SURRENDER_P = { civ: 0.85, thug: 0.6, pro: 0.42, elite: 0.26, swat: 0.18 };
 function tacClock() {
   try { return typeof window.__tacClock === "function" ? window.__tacClock() : performance.now(); } catch (e) { return 0; }
@@ -98,7 +97,7 @@ function tacFold(x, z, tx, tz) {
    clocks (by the squad's tier), the vehicle lists refresh, grenades fly,
    the wounded bleed and the draggers pull. */
 function tacticsStep(sdt) {
-  if (!TAC.on || bench || over) { stepNades(sdt); return; }
+  if (!TAC.on || bench || over) return;
   const BT = CBZ.battleTactics;
   if (!BT) return;
   const A = tacAdapter();
@@ -111,7 +110,8 @@ function tacticsStep(sdt) {
       if (m.vehicle && !m.dead && !m.air && TAC.vehs[m.team]) TAC.vehs[m.team].push(m);
       else if (!m.vehicle && !m.beast && !m.dead) {
         m.aiTier = BT.tierOf(m, A);
-        if (m.nades == null) m.nades = m.launcher || m.fists ? 0 : (NADE_CARRY[m.tier] || 0);
+        // the squad reads his grenades off the arms layer's own count (fire.js armOf)
+        m.nades = m.launcher || m.fists || !m.armed ? 0 : (armOf(m).nades || 0);
       }
     }
   }
@@ -131,7 +131,7 @@ function tacticsStep(sdt) {
       BT.tick(S, A);
     }
   });
-  stepNades(sdt);
+  nadeWatch();
 }
 
 /* ============================================================ THE MAN
@@ -170,11 +170,13 @@ function squadThink(m, thinkDt) {
   if (beastReflex(m, S)) return true;
 
   const task = m.task || S.task;
-  // a grenade the squad asked him for
-  if (m.wantNade && !m.nadeAt) {
+  // a grenade the squad asked him for: the arms layer throws it (fire.js
+  // armsGrenade honours m.wantNade when it is his mark); the ask lapses
+  if (m.wantNade) {
     const o = m.wantNade;
-    if (tacOut(o) || Math.hypot(o.pos.x - m.pos.x, o.pos.z - m.pos.z) > 34) m.wantNade = null;
-    else { throwNade(m, o); }
+    if (!m.wantNadeT) m.wantNadeT = simT;
+    if (tacOut(o) || Math.hypot(o.pos.x - m.pos.x, o.pos.z - m.pos.z) > 34 || simT - m.wantNadeT > 6) { m.wantNade = null; m.wantNadeT = 0; }
+    else if (m.tgt !== o) { m.tgt = o; tgt = o; }
   }
   if (task === "drag") return dragThink(m, S);
   // THE ROCKET MAN HUNTS ARMOUR: a launcher whose mark is a vehicle does not
@@ -515,56 +517,19 @@ function animCaptives(dt) {
   }
 }
 
-/* ============================================================ GRENADES */
-let _nadeGeo = null, _nadeMat = null;
-function throwNade(m, o) {
-  m.nades = Math.max(0, (m.nades || 0) - 1);
-  m.wantNade = null;
-  // the aim point: where he is, give or take a throw's error
-  const d = Math.hypot(o.pos.x - m.pos.x, o.pos.z - m.pos.z);
-  const err = d * (0.05 + (m.tier === "thug" || m.tier === "civ" ? 0.07 : 0.03));
-  const a = lcg() * Math.PI * 2, r = lcg() * err;
-  const tx = o.pos.x + Math.cos(a) * r, tz = o.pos.z + Math.sin(a) * r;
-  const N = { by: m, team: m.team, x0: m.pos.x, z0: m.pos.z, y0: m.pos.y + 1.7, tx, tz, ty: MAP.groundAt(tx, tz) + 0.08,
-    t: -0.52, fly: 0.8 + d / 26, fuse: 1.2, mesh: null, warned: false };
-  TAC.nades.push(N);
-  m.nadeAt = simT;
-  m.yaw = Math.atan2(tx - m.pos.x, tz - m.pos.z);
-  if (m.char && CBZ.soldier && CBZ.soldier.throwGrenade && camDist2(m.pos) < 150 * 150) {
-    try { CBZ.soldier.throwGrenade(m.char, { dur: 1.25 }); } catch (e) {}
-  }
-}
-function stepNades(sdt) {
-  for (let i = TAC.nades.length - 1; i >= 0; i--) {
-    const N = TAC.nades[i];
-    N.t += sdt;
-    if (N.t < 0) continue;                         // still in his hand (the wind-up)
-    const u = Math.min(1, N.t / N.fly);
-    const x = N.x0 + (N.tx - N.x0) * u, z = N.z0 + (N.tz - N.z0) * u;
-    const y = N.y0 + (N.ty - N.y0) * u + Math.sin(Math.PI * u) * (2 + N.fly * 2.2);
-    if (!N.mesh && typeof THREE !== "undefined" && THREE.SphereGeometry && CBZ.scene && camDist2({ x, y, z }) < 140 * 140) {
-      if (!_nadeGeo) { _nadeGeo = new THREE.SphereGeometry(0.055, 6, 5); _nadeMat = new THREE.MeshLambertMaterial({ color: 0x3b4a2c }); }
-      N.mesh = new THREE.Mesh(_nadeGeo, _nadeMat);
-      CBZ.scene.add(N.mesh);
-    }
-    if (N.mesh) N.mesh.position.set(x, y, z);
-    // the men it lands among see it coming: down, or clear
-    if (u >= 0.7 && !N.warned) { N.warned = true; nadeWarn(N); }
-    if (N.t >= N.fly + N.fuse) {
-      TAC.nades.splice(i, 1);
-      if (N.mesh) { if (N.mesh.parent) N.mesh.parent.remove(N.mesh); N.mesh = null; }
-      try {
-        CBZ.studio.boom({ x: N.tx, y: N.ty + 0.3, z: N.tz }, { radius: 9, power: 0.45, structural: false, by: N.by });
-      } catch (e) {}
-      // and everyone near it is rattled whether it got them or not
-      const a = fineNear(N.tx, N.tz, 14, _dn);
-      for (let k = 0; k < a.length; k++) {
-        const o = a[k];
-        if (o.dead || o.beast || o.vehicle) continue;
-        o.supp = Math.min(SUPP_CAP, (o.supp || 0) + 0.6 * (1 - Math.hypot(o.pos.x - N.tx, o.pos.z - N.tz) / 14));
-      }
-      TAC.booms = (TAC.booms || 0) + 1;
-    }
+/* ============================================================ GRENADES
+   The throw, the flight, the fuse and the blast are the arms layer's
+   (src/battle/fire.js armsGrenade / stepGrenades / NADES). The squad only
+   ASKS (m.wantNade: a man in cover inside a throw, none of ours near it —
+   armsGrenade honours it), and the men where one comes down REACT: they see
+   it land and go flat, or get clear (nadeWatch, from the tick). */
+function nadeWatch() {
+  if (typeof NADES === "undefined") return;
+  for (let i = 0; i < NADES.length; i++) {
+    const N = NADES[i];
+    if (N.state === "held" || N._tacWarned) continue;
+    N._tacWarned = true;
+    nadeWarn({ tx: N.lx != null ? N.lx : N.x, tz: N.lz != null ? N.lz : N.z, team: N.team, t: simT });
   }
 }
 const _nw = [];
@@ -708,10 +673,10 @@ function workCover(m, p, sdt, pinned) {
     const wasUp = m._coverUp;
     if (wasUp) {
       m._coverUp = false;
-      m.popT = 0.8 + (m.i % 5) * 0.18 + supp * 1.6;
+      m.popT = 0.45 + (m.i % 5) * 0.1 + supp * 1.2;       // down: a breath, longer under fire
     } else if (supp < 0.85 && m.tgt) {
       m._coverUp = true;
-      m.popT = 1.3 + (m.i % 7) * 0.16;
+      m.popT = 2.2 + (m.i % 7) * 0.22;                     // up: a few aimed bursts
     } else {
       m.popT = 0.6 + (m.i % 3) * 0.2;
     }
@@ -731,41 +696,31 @@ function coverDown(m, p, tall) {
   else setStance(m, "crouch");
   m._coverUp = false;
 }
-function tacReload(m) {
-  if (m.reloadT > 0 || !m.magSize) return;
-  const w = CBZ.weaponById(m.wid);
-  m.reloadT = (w && (w.reloadTime || w.reload)) || 1.6;
-  m.mag = 0;                    // the half-mag goes in the pouch; the full one goes in
-  m.reloads++; gunLedger(m.wid).reloads++;
-  soldierReload(m);
-}
-// the reload on the rig (step.js calls this for the dry reload too)
-function soldierReload(m) {
-  if (m.char && CBZ.soldier && CBZ.soldier.reload && camDist2(m.pos) < 110 * 110) {
-    try { CBZ.soldier.reload(m.char, { dur: Math.max(1.2, m.reloadT) }); } catch (e) {}
-  }
-}
+// a tactical reload: the arms layer's own (the ammo in his pouches, the rig's
+// mag change: src/battle/fire.js armsReload)
+function tacReload(m) { if (!(m.reloadT > 0) && m.magSize) armsReload(m); }
 
 /* BLIND FIRE: rounds over the top at where he knows the man is. Few of them
    land (0.15 of an aimed round), all of them rattle. stepMan calls this for
    a man down in cover with m.blind set. */
+let _blindAt = null;
 function blindFire(m, sdt) {
-  if (m.cool > 0 || m.reloadT > 0 || !m.mag) return;
+  if (m.cool > 0 || m.reloadT > 0 || !(m.mag > 0)) return;
   const t = m.tgt;
   if (!t || tacOut(t)) return;
   const dist = Math.hypot(t.pos.x - m.pos.x, t.pos.z - m.pos.z);
-  if (dist > 70) return;
-  const w = CBZ.weaponById(m.wid);
-  const r = CBZ.combatIQ && CBZ.combatIQ.shot ? CBZ.combatIQ.shot(m, t, dist, 0, w ? w.damage : 14) : null;
-  if (!r) { m.cool = 0.6; return; }
-  m.cool = r.cd * 1.4;
-  if (!r.fire) return;
-  r.hit *= 0.15;
+  if (dist > 70 || dist < 6) return;
+  // the arms layer's area fire at where he knows the man is, a wild spray:
+  // a round now and then lands, every one cracks over the enemy's heads
+  if (!_blindAt) _blindAt = V();
+  const sp = 2 + dist * 0.06;
+  _blindAt.set(t.pos.x + (lcg() - 0.5) * sp, t.pos.y + 0.6 + lcg() * 1.4, t.pos.z + (lcg() - 0.5) * sp);
   TAC.blind = (TAC.blind || 0) + 1;
   m._blindShot = true;
-  fireShot(m, t, r);
+  fireShot(m, t, { mode: "area", at: _blindAt });
   m._blindShot = false;
-  if (m.mag <= 0) { m.reloadT = (w && (w.reloadTime || w.reload)) || 1.6; m.reloads++; gunLedger(m.wid).reloads++; soldierReload(m); }
+  m.cool = 0.35 + lcg() * 0.5;
+  if (m.mag <= 0) armsReload(m);
 }
 
 /* THE RIG: the state above, as entities/soldier.js's record. loop.js calls
@@ -774,7 +729,7 @@ function blindFire(m, sdt) {
 function soldierRig(m) {
   const ch = m.char;
   if (!ch) return;
-  if (!CBZ.soldier || TAC_OLD) { ch.crouch = crouchPose(m); return; }
+  if (!CBZ.soldier || TAC_OLD) { ch.crouch = crouchPose(m); ch.pronePose = m.stance === "prone"; return; }
   const S = ch.soldier || (ch.soldier = { carry: "low", stance: "stand", cover: null });
   // the stance
   S.stance = m.downed ? "prone" : m.stance === "rush" ? "rush" : m.stance === "prone" ? "prone" :
@@ -895,7 +850,8 @@ function tacticsVehicle(u) {
   const el = Math.hypot(ex, ez) || 1;
   ex /= el; ez /= el;
   const lead = (u.pos.x - S.cx) * ex + (u.pos.z - S.cz) * ez;
-  if (lead > 38) {
+  const ahead = u.tactics && u.tactics.screen && u.tactics.screen.ahead ? Math.min(60, u.tactics.screen.ahead) : 38;
+  if (lead > ahead) {
     u.target.set(u.pos.x, 0, u.pos.z);
     u.slot = u.tgt && u.sees ? "fire" : "hold";
     TAC.paced = (TAC.paced || 0) + 1;
@@ -907,8 +863,7 @@ function tacticsVehicle(u) {
 // a new war (morale.js resetArmies): the last one's squads, bombs and prisoners go
 function tacReset() {
   TAC.home = null; TAC.at = -1;
-  for (let i = 0; i < TAC.nades.length; i++) { const N = TAC.nades[i]; if (N.mesh && N.mesh.parent) N.mesh.parent.remove(N.mesh); }
-  TAC.nades.length = 0; TAC.captives.length = 0;
+  TAC.captives.length = 0;
   TAC.panics = TAC.dodges = TAC.downed = TAC.saved = TAC.booms = TAC.blind = TAC.paced = TAC.vaults = TAC.heldFire = 0;
   if (CBZ.battleTactics) CBZ.battleTactics.reset();
 }
