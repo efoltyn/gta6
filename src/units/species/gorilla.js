@@ -52,6 +52,12 @@
          (muscle cross-section). hp 260 for a silverback is about 2.3 men by
          mass and nothing more: a rifle round to a gorilla is a rifle round.
 
+   POSSESSED  moves(unit, tgt, ctx): a player's ATTACK throws the move the
+         moment calls for (chest beat out of reach, charge from a run, pound
+         the fallen, grab into a crowd, smash / bite / grab on one man). This
+         file's own nerve (display, flight, troop guarding) stands down for a
+         body the player holds.
+
    KIT USE: CBZ.loftKit (shell), CBZ.quadRig.makeSkeleton/skinnedMesh (the
    ape table here is its own: a custom {NB, PARENT, bindPoints}), CBZ.quadGait
    (create/step with GAIT below). `needs` in units/manifest.js loads them.
@@ -569,7 +575,7 @@
         if (o.armed && od < 120) guns++;
       }
       R.troop = troop; R.near = near; R.guns = guns;
-      if (threatened && m.tgt !== threatened && !m.tn.prey) { m.tgt = threatened; R.protT = 3; }
+      if (!m.you && threatened && m.tgt !== threatened && !m.tn.prey) { m.tgt = threatened; R.protT = 3; }
       // vehicles are loud, huge and do not bleed: dread, not a fight
       if (veh) R.fear += 0.35 * veh * 0.5;
       // a target that is a machine is not worth closing on: find a body or go
@@ -578,12 +584,13 @@
     R.fear = Math.max(0, R.fear - dt * (0.07 + (R.near ? 0.05 : 0)));
     // ---- NERVE. A silverback with his troop around him does not run.
     let nerve = V.nerve * (V === VARIANTS.silverback && R.troop ? 2.2 : 1);
+    if (m.you && (R.fleeT > 0 || R.disp > 0)) { R.fleeT = 0; R.disp = 0; tn.prey = false; }
     if (R.fleeT > 0) {
       R.fleeT -= dt;
       // cornered: something is on it, it turns and fights
       if (R.near && d < 2.6 && t) R.fleeT = Math.min(R.fleeT, 0);
       if (R.fleeT <= 0) { R.fear *= 0.45; tn.prey = false; }
-    } else if (R.fear > nerve && !R.disp) {
+    } else if (R.fear > nerve && !R.disp && !m.you) {
       R.fleeT = 5 + Math.random() * 4; tn.prey = true;
     }
     tn.brave = V === VARIANTS.silverback && (R.troop > 0 || m.hp > m.maxHp * 0.2);
@@ -608,7 +615,7 @@
         try { CBZ.apeStrike(m, t, "ape_drum", { reach: m.reach }, 0); } catch (e) {}
       }
       if (R.disp <= 0) { R.disp = 0; R.chargeT = 1.2; }
-    } else if (t && !tn.prey && R.dispCD <= 0 && d > 5 && d < 22 && Math.random() < V.display * dt * 2 &&
+    } else if (!m.you && t && !tn.prey && R.dispCD <= 0 && d > 5 && d < 22 && Math.random() < V.display * dt * 2 &&
                m.hp > m.maxHp * 0.4 && !t.vehicle && !(m._atkAnim >= 0)) {
       R.disp = 1.5 + Math.random() * 0.6; R.drummed = false;
       R.dispCD = 18 + Math.random() * 12;
@@ -1075,7 +1082,7 @@
     const R = ensure(m);
     if (R) {
       if (opts) opts.reach = m.reach;
-      if (R.disp > 0) {
+      if (R.disp > 0 && !m.you) {
         if (tgt && !tgt.dead) faceTo(m, tgt, dt, 6);
         RES.inRange = true; RES.dealt = 0; RES.missed = false;
         return RES;
@@ -1085,12 +1092,48 @@
     return CBZ.creatureFight(m, tgt, dt, opts);
   }
 
+  /* =========================================================================
+     MOVES: what a gorilla does when a PLAYER presses attack (src/units/kit/
+     moves.js). The real repertoire, chosen by the moment:
+       out of reach, not charging      the chest beat (the display IS the
+                                       threat at distance; it rattles men)
+       closing at a run                the charge (a shoulder and an arm)
+       a body on the floor             the two-handed pound
+       three or more inside the arms   the grab (lift, swing, throw/slam) on
+                                       the second blow, else the backhand
+       an animal its size or bigger    hands and canines: bite, smash
+       one man                         smash, bite, grab (the combination)
+     ========================================================================= */
+  function mv(id, leap, cd) {
+    const row = (CBZ.apeMoves && CBZ.apeMoves[id]) || {};
+    return { id: id, style: id, pow: row.pow || 1, dur: row.dur || 0, rng: row.rng || 1, leap: leap || 0, cd: cd };
+  }
+  function moves(unit, tgt, ctx) {
+    ctx = ctx || {};
+    const R = ensure(unit);
+    const dist = ctx.dist == null ? 99 : ctx.dist, reach = ctx.reach || unit.reach || 2.4;
+    const running = !!ctx.sprint || (ctx.chase > 0 && ctx.speed > ctx.chase * 0.55);
+    const n = ctx.n || 1;
+    if (!tgt || dist > reach * 1.1) {
+      if (tgt && running && dist < reach * 3) return mv("ape_charge", 1.2, 0.7);
+      return mv("ape_drum", 0, 1.1);
+    }
+    if (ctx.downed) return mv("ape_smash", 0, 0.75);
+    if (ctx.crowd >= 3) return (n % 2 === 0 && !ctx.heavy) ? mv("ape_grab", 0, 0.6) : mv("ape_sweep", 0, 0.45);
+    if (ctx.heavy) return n % 2 === 0 ? mv("ape_smash", 0, 0.7) : mv("ape_bite", 0, 0.55);
+    // a gorilla with a bad arm fights with its teeth
+    if (R && Math.max(R.inj.arm[0], R.inj.arm[1]) > 0.55) return mv("ape_bite", 0, 0.55);
+    const k = n % 3;
+    return k === 1 ? mv("ape_smash", 0, 0.65) : k === 2 ? mv("ape_bite", 0, 0.55) : mv("ape_grab", 0, 0.6);
+  }
+
   CBZ.unitKit.register("gorilla", {
     kind: "species",
     stats: STATS,
     build: build,
     animate: animate,
     fight: fight,
+    moves: moves,
     // for tools and node checks
     variants: VARIANTS, variantOf: variantOf, gait: GAIT,
   });
