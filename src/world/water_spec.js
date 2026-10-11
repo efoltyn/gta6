@@ -1313,6 +1313,7 @@
       0.30 + Math.min(0.65, v * 0.06) * (moving ? 1 : 0.5));
   }
   const _occ = [];
+  let occTick = 0;
   function gatherFoam() {
     candN = 0;
     const cam = CBZ.camera;
@@ -1339,8 +1340,10 @@
       }
     }
     if (typeof CBZ.waterOccupants === "function") {
-      let L = null;
-      try { L = CBZ.waterOccupants(_occ); } catch (e) { L = null; }
+      // the census is a walk over every ped and car: refresh it at ~20 Hz
+      // and reuse it between (a swimmer moves centimetres a frame)
+      let L = _occ;
+      if ((++occTick % 3) === 1) { try { L = CBZ.waterOccupants(_occ); } catch (e) { L = null; } }
       if (L) for (let i = 0; i < L.length; i++) {
         const o = L[i];
         if (!o || o.kind === "boat") continue;
@@ -3119,11 +3122,15 @@
     let row = 0;
     const h = {
       tex: tex, bounds: bounds, done: typeof groundAt !== "function",
-      // bake `rows` more rows; returns true when complete
-      step: function (rows) {
+      // bake for at most `ms` milliseconds (whole rows); true when complete.
+      // Time-sliced rather than row-counted: a ground function's cost is the
+      // world's business, and the frame budget is ours.
+      step: function (ms) {
         if (h.done) return true;
-        const end = Math.min(N, row + Math.max(1, rows | 0 || 24));
-        for (; row < end; row++) {
+        const now = function () { return typeof performance !== "undefined" ? performance.now() : Date.now(); };
+        const until = now() + Math.max(0.5, +ms || 2);
+        for (; row < N; row++) {
+          if (now() > until) break;
           // texel centres: DataTexture row 0 is v = 0 (flipY is false)
           const z = cz - half + (row + 0.5) / N * half * 2;
           for (let c = 0; c < N; c++) {
@@ -3342,7 +3349,7 @@
     u.uShoreCut.value = CBZ.waterFieldCut(_surge, 0.6);
     // finish baking the field a slice per frame, off the load path
     const fld = mat.userData && mat.userData.waterField;
-    if (fld && !fld.done) fld.step(20);
+    if (fld && !fld.done) fld.step(2.5);
     state = state || {};
     if (Number.isFinite(state.amp)) u.uDisasterAmp.value = +state.amp;
     if (Number.isFinite(state.chop)) u.uDisasterChop.value = +state.chop;
