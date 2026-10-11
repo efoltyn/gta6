@@ -88,7 +88,8 @@ change it only in coordination.
 | `src/units/vehicles/<id>.js` | **one per vehicle**: stats, armour, crew, weapons, body, drive | that vehicle's agent |
 | `src/units/kit/loft.js` | `CBZ.loftKit`: lofted, vertex-coloured, skinned shells | animal agents (coordinate) |
 | `src/units/kit/quadrig.js` | `CBZ.quadRig`: quadruped skeleton, bind points, 2-bone IK, leg posing | animal agents (coordinate) |
-| `src/units/kit/gait.js` | `CBZ.quadGait`: planted-foot gait solver, footfall tables | animal agents (coordinate) |
+| `src/units/kit/gait.js` | `CBZ.quadGait`: planted-foot gait solver, footfall tables (a table may carry its own cadence curve `fOf(v, K)`) | animal agents (coordinate) |
+| `src/units/kit/felid.js` | `CBZ.felidKit.hooks(spec)`: one cat engine (lofted body + pattern shader, rotary gallop with a flexing spine, stalk/sprint/leap brain, trip/throat/pin/nape/grapple fight, ragdoll markers, takeover moves). The cheetah and snow leopard files are pure data on it; any cat can be | cheetah / snow leopard agent (coordinate) |
 | `src/units/kit/vehicle.js` | vehicle drive / turret / armour / crew helpers | vehicle agents (coordinate) |
 | `src/units/kit/moves.js` | `CBZ.unitMoves`: what a possessed animal does on ATTACK (the `moves` hook) | player control (species files override) |
 

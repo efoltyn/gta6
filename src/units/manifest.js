@@ -20,6 +20,8 @@
   const W = typeof window !== "undefined" ? window : globalThis;
   const CBZ = W.CBZ || (W.CBZ = {});
   function S(name, plural, group) { const r = { kind: "species", name: name, plural: plural }; if (group) r.group = group; return r; }
+  // the cat engine (units/kit/felid.js) and the kit it stands on
+  const FELID = ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/kit/felid.js"];
   // men: the unit word follows the size, as an army counts it
   function menGroup(n) {
     return n <= 12 ? "squad" : n <= 50 ? "platoon" : n <= 250 ? "company" : n <= 1000 ? "battalion" : n <= 5000 ? "brigade" : "division";
@@ -32,8 +34,8 @@
     bengal_tiger: S("Bengal tiger", "Bengal tigers", "streak"),
     lion: Object.assign(S("lion", "lions", "pride"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     white_lion: Object.assign(S("white lion", "white lions", "pride"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/species/lion.js"] }),
-    cheetah: S("cheetah", "cheetahs", "coalition"),
-    snow_leopard: S("snow leopard", "snow leopards", "leap"),
+    cheetah: Object.assign(S("cheetah", "cheetahs", "coalition"), { needs: FELID }),
+    snow_leopard: Object.assign(S("snow leopard", "snow leopards", "leap"), { needs: FELID }),
     gray_wolf: S("gray wolf", "gray wolves", "pack"),
     arctic_wolf: S("Arctic wolf", "Arctic wolves", "pack"),
     coyote: S("coyote", "coyotes", "pack"),
