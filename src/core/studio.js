@@ -286,8 +286,10 @@
              "over a rail, off a ledge, into water), plus strike / knockdown / " +
              "getUp and the fighter's timing. CBZ.verbs.grab(a, b) and it plays",
       needs: ["people"],
-      files: ["entities/handcuffs.js", "systems/verbs.js", "entities/verbposes.js", "entities/meleeposes.js", "systems/verbs_strike.js", "systems/bodyfall.js", "systems/verbs_pickup.js"],
-      publishes: ["verbs", "verbPoses", "meleePoses"],
+      // melee.js: who throws what (the fighter, the ring, the one control
+      // grammar) on top of verbs_strike.js (how a blow lands)
+      files: ["entities/handcuffs.js", "systems/verbs.js", "entities/verbposes.js", "entities/meleeposes.js", "systems/verbs_strike.js", "systems/melee.js", "systems/bodyfall.js", "systems/verbs_pickup.js"],
+      publishes: ["verbs", "verbPoses", "meleePoses", "melee"],
     },
 
     ragdoll: {
@@ -825,6 +827,9 @@
   CBZ.studio = {};
   CBZ.studio.PACKS = PACKS;
   CBZ.studio.root = ROOT;
+  // the cache key every file a page pulls rides (a page loading its own engine
+  // files, like NPC War's armoury, appends it so one bump re-fetches them too)
+  CBZ.studio.bust = BUST;
 
   /* ---- THE DOORMAN --------------------------------------------------------
      Depth-first over `needs`, then the pack's own files, each appended once

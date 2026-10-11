@@ -216,8 +216,46 @@
     var ids = R.ids(spec.species || spec.unit || "men").concat(spec.vs ? R.ids(spec.vs) : []);
     return K.need(ids).then(function () { return stageNow(spec); });
   };
+  /* THE WAR AS THE PAGE FIGHTS IT (pose=war). Nothing is restaged: the page
+     booted the battle its own URL asked for (red/blue/map/tier/worker ...;
+     a tiered war is src/battle/mass.js), and the shot steps that battle
+     with __battle.advance. lens=dx,dz[,h] parks the page's own camera that
+     far from the field's centre while time runs, so the FULL ring (it
+     follows the lens) is where the shot looks. Cams: lens (the page's own
+     camera), field (the whole field, high), front (low, along the lines),
+     plus wide / hot. Each frame's stats (tiers, crowd draw, sim ms) come
+     back as the shot's info. */
+  function stageWar(spec) {
+    ST.warn = [];
+    if (ST.studio) { if (ST.studio.parent) ST.studio.parent.remove(ST.studio); ST.studio = null; }
+    ST.spec = spec; ST.pose = "war"; ST.t = 0; ST.subj = B.roster();
+    ST.lens = String(spec.lens || "0,0").split(",").map(Number);
+    parkLens();
+    if (spec.js) {
+      try { new Function("S", "B", "CBZ", "THREE", "spec", spec.js)(ST.subj, B, CBZ, THREE, spec); }
+      catch (e) { return { ok: false, error: "setup js threw: " + (e && e.message || e) }; }
+    }
+    return { ok: true, pose: "war", period: 1, subjects: [], warn: ST.warn };
+  }
+  function parkLens() {
+    try {
+      /* global MAP, cam, setCamMode */
+      var cx = MAP.cx + (ST.lens[0] || 0), cz = MAP.cz + (ST.lens[1] || 0), h = ST.lens[2] || 24;
+      setCamMode("free");
+      cam.focus.set(cx, MAP.groundAt(cx, cz), cz); cam.wFocus.copy(cam.focus);
+      cam.yaw = cam.wYaw = 0.35; cam.pitch = cam.wPitch = Math.atan2(h, 40); cam.dist = cam.wDist = Math.hypot(h, 40);
+    } catch (e) { ST.warn.push("lens: " + e.message); }
+  }
+  function warInfo() {
+    var o = {};
+    try { var a = B.audit(); o.mass = a.mass; o.simT = a.clock; } catch (e) {}
+    try { if (CBZ.massDraw) o.draw = CBZ.massDraw.audit(); } catch (e) {}
+    try { var t = B.tally(); o.alive = t.alive; o.dead = t.dead; } catch (e) {}
+    return o;
+  }
   function stageNow(spec) {
     spec = spec || {};
+    if (spec.pose === "war") return stageWar(spec);
     ST.warn = [];
     if (ST.studio) { if (ST.studio.parent) ST.studio.parent.remove(ST.studio); ST.studio = null; }
     var SP = CBZ.WILDLIFE_SPECIES || {};
@@ -294,14 +332,17 @@
       catch (e) { return { ok: false, error: "setup js threw: " + (e && e.message || e) }; }
     }
     if (pose === "fight" || pose === "death") ST.travel = 0;
+    // cam=<unit id>: the game's own camera follows it too (the "lens" cam)
+    if (spec.cam && B.camFollow) { try { B.camFollow(spec.cam); } catch (e) { ST.warn.push("camFollow threw: " + e.message); } }
     var box = boxOf(ST.subj);
     ST.studio = (spec.stage || (fight ? "map" : "studio")) === "studio" ? buildStudio({ grid: spec.grid, ruler: spec.ruler, travel: speed * 3 }, box) : null;
     return {
       ok: true, pose: pose, period: Math.round(ST.period * 1000) / 1000, speed: Math.round(speed * 100) / 100, style: ST.style || null,
       subjects: ST.subj.slice(0, 12).map(function (m) {
         var b = boxOf([m]), s = b.getSize(V3());
-        return { id: m.id, team: m.team, kind: m.beast ? m.species.id : "men", size: [s.x, s.y, s.z].map(function (v) { return Math.round(v * 100) / 100; }) };
+        return { id: m.id, team: m.team, kind: m.beast ? m.species.id : m.vehicle ? m.unitId : "men", size: [s.x, s.y, s.z].map(function (v) { return Math.round(v * 100) / 100; }) };
       }),
+      lens: lensNote(spec),
       warn: ST.warn,
     };
   };
@@ -313,6 +354,8 @@
       m.pos.x += f.x * ST.speed * dt; m.pos.z += f.z * ST.speed * dt; m.pos.y = y;
       try {
         if (!m.beast) { if (CBZ.animChar && m.char) CBZ.animChar(m.char, ST.speed, dt); }
+        // the species' OWN animate hook first (its unit file owns its gait), then the shared rigs
+        else if (m.kit && m.kit.animate) m.kit.animate(m, dt);
         else if (m.swim) { if (CBZ.animateSwim) CBZ.animateSwim(m, dt); }
         else if (CBZ.wildlifeRig) CBZ.wildlifeRig.animateGait(m, dt);
       } catch (e) { if (ST.warn.length < 5) ST.warn.push("rig threw: " + e.message); }
@@ -338,15 +381,88 @@
       ST.t = t;
     } else if (pose === "death" || pose === "fight") {
       if (t > ST.t) { B.advance(t - ST.t); ST.t = t; }
+    } else if (pose === "war") {
+      // a big war at 1/30 s frames, the lens held where the shot will look
+      while (t > ST.t + 1e-6) {
+        var d = Math.min(1, t - ST.t);
+        parkLens();
+        B.advance(d, 1 / 30);
+        ST.t += d;
+      }
+      ST.subj = B.roster();
+      return { t: ST.t, info: warInfo() };
     }
     return { t: ST.t, alive: ST.subj.filter(function (m) { return !m.dead; }).length };
   };
 
   /* ---- cameras ----------------------------------------------------------- */
+  /* cam=<sel> (the battle page's lens names): the body it names, re-found on
+     every frame so the shot FOLLOWS it through a fight; a side (a | b) is
+     that side's living bodies. null = no lens named, or nothing left of it. */
+  function lensWants(m, sel) {
+    var ix = /^([ab]):(\d+)$/.exec(sel);
+    if (ix) return m.team === (ix[1] === "a" ? "red" : "blue") && m.i === +ix[2];
+    return (m.species && m.species.id === sel) || m.unitId === sel || (sel === "men" && !m.beast && !m.vehicle);
+  }
+  function lensOf(spec) {
+    var sel = spec && spec.cam ? String(spec.cam) : null;
+    if (!sel) return null;
+    var R = B.roster(), out = [];
+    for (var i = 0; i < R.length; i++) {
+      var m = R[i];
+      if (m.dead || m.fled) continue;
+      if (sel === "a" || sel === "b") { if (m.team === (sel === "a" ? "red" : "blue")) out.push(m); }
+      else if (lensWants(m, sel)) return [m];
+    }
+    return out.length ? out : null;
+  }
+  function lensNote(spec) {
+    var L = lensOf(spec);
+    return L ? { cam: spec.cam, id: L[0].id, n: L.length } : (spec && spec.cam ? { cam: spec.cam, id: null } : null);
+  }
+  function frameWar(cam, aspect) {
+    /* global MAP, MASS, STORE */
+    var name = String(cam || "lens").split(":")[0];
+    var C = CBZ.camera;
+    if (name === "lens") return { pos: C.position.clone(), target: C.position.clone().add(C.getWorldDirection(V3()).multiplyScalar(50)), fov: C.fov, dist: 50, up: null, box: null };
+    // the field: every living row (or every man, in an all-FULL war)
+    var x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+    try {
+      if (MASS.on) {
+        var K = STORE.cols;
+        for (var r = 0; r < STORE.rows; r += 7) {
+          if (K.life[r] !== 1 && K.life[r] !== 2) continue;
+          if (K.x[r] < x0) x0 = K.x[r]; if (K.x[r] > x1) x1 = K.x[r]; if (K.z[r] < z0) z0 = K.z[r]; if (K.z[r] > z1) z1 = K.z[r];
+        }
+      }
+    } catch (e) {}
+    if (x0 > x1) { var bb = boxOf(B.roster()); x0 = bb.min.x; x1 = bb.max.x; z0 = bb.min.z; z1 = bb.max.z; }
+    var cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, gy = MAP.groundAt(cx, cz);
+    var fov = 40, vfov = fov * Math.PI / 180;
+    if (name === "field") {
+      var span = Math.max(x1 - x0, (z1 - z0) / aspect) * 0.55;
+      var dist = span / Math.tan(vfov / 2), e = 52 * Math.PI / 180;
+      var tgt = V3(cx, gy, cz);
+      return { pos: tgt.clone().add(V3(0, Math.sin(e) * dist, Math.cos(e) * dist)), target: tgt, fov: fov, dist: dist, up: null, box: null };
+    }
+    if (name === "front") {
+      // low behind the lens's side of the lines, looking across no man's land
+      var lx = MAP.cx + (ST.lens[0] || 0), lz = MAP.cz + (ST.lens[1] || 0);
+      var tg = V3(lx, MAP.groundAt(lx, lz) + 1.5, lz);
+      var p = V3(lx - 70, 0, lz + 28); p.y = MAP.groundAt(p.x, p.z) + 9;
+      return { pos: p, target: tg, fov: 52, dist: 75, up: null, box: null };
+    }
+    return null;
+  }
   function frame(cam, aspect) {
-    var lead = ST.subj[0];
-    var all = ST.pose === "fight" ? B.roster() : ST.subj;
-    var box = boxOf(ST.pose === "fight" ? all.filter(function (m) { return !m.dead || true; }) : all);
+    if (ST.pose === "war") { var fw = frameWar(cam, aspect); if (fw) return fw; }
+    var lens = lensOf(ST.spec);
+    var lead = lens ? lens[0] : ST.subj[0];
+    var all = lens ? lens : ST.pose === "fight" ? B.roster() : ST.subj;
+    // a single body in the lens: "wide" takes in its mark too (when it is near enough to share a frame)
+    if (lens && lens.length === 1 && cam === "wide" && lead.tgt && !lead.tgt.dead &&
+        lead.tgt.pos.distanceTo(lead.pos) < Math.max(60, boxOf([lead]).getSize(V3()).length() * 6)) all = [lead, lead.tgt];
+    var box = boxOf(all);
     var c = box.getCenter(V3()), sz = box.getSize(V3());
     var f = lead ? fwdOf(lead) : V3(1, 0, 0), right = f.clone().cross(UP).normalize();
     var fov = 30, target = c.clone(), rad = Math.max(0.3, sz.length() / 2), dirH = f.clone(), elev = 8, dist = 0, up = null, distMul = 1;
@@ -374,6 +490,7 @@
       }
       case "wide": dirH = V3(0.3, 0, 1).normalize(); elev = 38; fov = 40; distMul = 1.05; break;
       case "hot": {
+        if (lens && lens.length === 1) { dirH = f.clone().add(right).normalize(); elev = 16; fov = 36; break; }
         var hsp = null; try { hsp = B.look(30, 0.45); } catch (e) {}
         if (hsp) target = V3(hsp.x, c.y, hsp.z);
         rad = Math.min(rad, 16); dirH = V3(0.3, 0, 1).normalize(); elev = 26; fov = 40;
@@ -396,12 +513,25 @@
     return { pos: pos, target: target, fov: fov, dist: dist, up: up, box: box };
   }
 
-  S.cams = ["front", "side", "back", "left", "3q", "3qb", "top", "head", "feet", "wide", "hot", "orbit:<yawDeg>:<pitchDeg>[:distMul]"];
+  S.cams = ["front", "side", "back", "left", "3q", "3qb", "top", "head", "feet", "wide", "hot", "lens", "orbit:<yawDeg>:<pitchDeg>[:distMul]"];
 
   S.shot = function (cam, W, H, fmt) {
     W = Math.max(64, Math.min(2048, W | 0 || 640)); H = Math.max(64, Math.min(2048, H | 0 || 400));
     var R = CBZ.renderer || (CBZ.micro && CBZ.micro.renderer), C = CBZ.camera, scene = CBZ.scene;
     if (!R || !C) return { error: "no renderer/camera" };
+    /* "lens": THE GAME'S OWN CAMERA, exactly where the page's director / chase
+       cam / free hands left it (camera/camera.js). Every other cam here is
+       the shot service's own framing; this one is for the camera's agent. */
+    if (cam === "lens") {
+      var sa = C.aspect, spr = R.getPixelRatio();
+      try {
+        if (spr !== 1) R.setPixelRatio(1);
+        R.setSize(W, H, false);
+        C.aspect = W / H; C.updateProjectionMatrix(); C.updateMatrixWorld(true);
+        R.render(scene, C);
+        return { url: R.domElement.toDataURL(fmt || "image/png"), dist: 0 };
+      } finally { C.aspect = sa; C.updateProjectionMatrix(); }
+    }
     var F = frame(cam, W / H);
     if (!F) return { error: "unknown cam \"" + cam + "\" (know: " + S.cams.join(", ") + ")" };
     var save = { pos: C.position.clone(), q: C.quaternion.clone(), up: C.up.clone(), fov: C.fov, aspect: C.aspect, near: C.near, far: C.far,
@@ -426,7 +556,7 @@
       C.updateProjectionMatrix(); C.updateMatrixWorld(true);
       if (C.matrixWorldInverse) C.matrixWorldInverse.copy(C.matrixWorld).invert();
       R.render(scene, C);
-      return { url: R.domElement.toDataURL(fmt || "image/png"), dist: Math.round(F.dist * 100) / 100 };
+      return { url: R.domElement.toDataURL(fmt || "image/png"), dist: Math.round(F.dist * 100) / 100, info: ST.pose === "war" ? JSON.stringify(warInfo()) : undefined };
     } finally {
       if (hidden) for (var h = 0; h < hidden.length; h++) hidden[h].visible = true;
       scene.background = save.bg; scene.fog = save.fog;

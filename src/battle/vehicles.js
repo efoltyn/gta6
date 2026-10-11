@@ -141,13 +141,66 @@ function vehStandIn(def) {
   g.userData.standIn = true;
   return { group: g, rig: null, footW: Wd, footL: L, height: H };
 }
+/* WHO A HULL FIGHTS FOR, handed to build(ctx) so markings, roundels and fin
+   flags are the side's own (docs/npcwar/ARCHITECTURE.md, the vehicle
+   contract). `flag` is a city/flags.js design (paint it with
+   CBZ.flags.paint), or the front spec's own when the war is at THE FRONT. */
+/* THE GROUND A HULL IS PAINTED FOR: the erg's skin (sand / snow / grass) on
+   the open maps, else the map id (city, island, field, arena, water...).
+   rig.mark reads it with a regexp, so a new map needs no table here. */
+function vehGround() {
+  const M = (typeof MAPS !== "undefined" && MAP && MAPS[MAP.id]) || null;
+  return String((M && M.erg) || (MAP && MAP.id) || "");
+}
+function vehSideCtx(teamId) {
+  const S = (typeof SIDES !== "undefined" && SIDES[teamId]) || null;
+  const nation = S && S.nation || null;
+  let flag = null;
+  if (FRONT && FRONT[teamId] && FRONT[teamId].flag) flag = FRONT[teamId].flag;
+  else if (nation && CBZ.flags && CBZ.flags.designFor) { try { flag = CBZ.flags.designFor(nation); } catch (e) { flag = null; } }
+  return { side: teamId, nation: nation, flagId: nation, flag: flag, ground: vehGround(),
+    color: S && S.color != null ? S.color : TEAMS[teamId].color, sideInfo: S };
+}
+/* WHERE EACH WEAPON POINTS. A weapon's `mount` says what has to be on the
+   line before it can fire:
+     turret  the vehicle's turret (def.turret) slews onto the mark
+     slew    its own mount (a chin gun, a remote weapon station): fires when
+             the mark is inside `yawMax` of the nose and the rig reports its
+             mount on the line (rig.aimError)
+     fixed   bolted to the airframe or hull: the NOSE goes on the mark, within
+             `arc` (rockets, a fixed gun, a missile's seeker before lock)
+     free    a pintle or door gun, an indirect launcher, a bomb: no facing
+   Unset, it is read off the old flags (turret / chin), then the domain: an
+   aircraft's machine gun is a door gun, its other weapons are fixed. */
+function vehMountOf(def, w) {
+  if (w.mount) return w.mount;
+  if (w.turret) return "turret";
+  if (w.chin || w.slew) return "slew";
+  if (w.indirect || w.kind === "bombs") return "free";
+  if (def.domain === "air") return w.kind === "mg" ? "free" : "fixed";
+  return "free";
+}
+function vehArcOf(w, mount) {
+  if (w.arc != null) return w.arc;
+  if (mount === "fixed") return w.kind === "missile" || w.kind === "sam" ? 0.35 : w.kind === "rockets" ? 0.05 : 0.06;
+  if (mount === "slew") return w.yawMax != null ? w.yawMax : 1.9;
+  return Math.PI;
+}
 function makeVehicle(teamId, i, id) {
   const def = vehDef(id);
   if (!def) return null;                               // unit file did not load
   const S = def.stats || {};
   const air = def.domain === "air";
+  const sc = vehSideCtx(teamId);
   let b = null;
-  try { b = def.build ? def.build({ THREE: THREE, mat: CBZ.cmat, rng: lcg, seed: i, id: id }) : null; } catch (e) { console.warn("[war] vehicle build failed:", id, e); }
+  try {
+    b = def.build ? def.build({ THREE: THREE, mat: CBZ.cmat, rng: lcg, seed: i, id: id, ground: sc.ground,
+      side: sc.side, team: sc.side, nation: sc.nation, flagId: sc.flagId, flag: sc.flag, color: sc.color, sideInfo: sc.sideInfo }) : null;
+  } catch (e) { console.warn("[war] vehicle build failed:", id, e); }
+  // THE SIDE'S MARKINGS: paint for the ground, the nation's flag (rig.mark)
+  if (b && b.rig && typeof b.rig.mark === "function") {
+    try { b.rig.mark(sc.nation, sc.ground, sc); } catch (e) { console.warn("[war] " + id + " rig.mark threw:", e); }
+  }
   if (!b || !b.group) b = vehStandIn(def);
   const group = b.group;
   const L = b.footL || S.length || 6, Wd = b.footW || S.width || 2.6, H = b.height || S.height || 2.4;
@@ -160,7 +213,8 @@ function makeVehicle(teamId, i, id) {
   if (air) {
     const back = 700 + (i % 4) * 90;
     px = at.x - Math.sin(h) * back; pz = at.z - Math.cos(h) * back;
-    py = MAP.groundAt(px, pz) + (S.alt || 300);
+    // a helicopter comes in low (nap of the earth), a jet at its cruise
+    py = MAP.groundAt(px, pz) + (def.drive === "rotor" ? Math.max(S.nap || 10, Math.min(S.alt || 40, 30)) : (S.alt || 300));
   }
   group.position.set(px, py, pz);
   group.rotation.order = "YXZ";
@@ -168,8 +222,14 @@ function makeVehicle(teamId, i, id) {
   group.userData.dynamic = true;
   CBZ.scene.add(group);
   if (!air) noteBodyRadius(Math.min(4.5, L * 0.5));    // the fine grid must see a whole hull
-  const weapons = (def.weapons || []).map(function (w) {
-    return { w: w, cool: 0.5 + lcg() * 1.5, ammo: w.ammo == null ? 1e9 : w.ammo, burst: 0, salvo: 0, reloadT: 0, off: false };
+  let reach = 0;
+  const weapons = (def.weapons || []).map(function (w, k) {
+    const mount = vehMountOf(def, w);
+    if (!w.indirect) reach = Math.max(reach, w.range || 600);
+    return { w: w, i: k, n: 0, mount: mount, arc: vehArcOf(w, mount),
+      cool: 0.5 + lcg() * 1.5, ammo: w.ammo == null ? 1e9 : w.ammo, burst: 0, salvo: 0, reloadT: 0, off: false,
+      // THE ROUND IN HAND, as every rig hook receives it (one object per weapon, reused)
+      shot: { wid: w.id, wi: k, n: 0, w: w, kind: w.kind, mount: mount, target: null } };
   });
   const u = {
     id: teamId + i, team: teamId, i: i, vehicle: true, unitId: id, def: def, air: air,
@@ -189,13 +249,22 @@ function makeVehicle(teamId, i, id) {
     tier: "elite", nerve: 0, supp: 0, routed: false, fled: false, routT: 0, coverK: 1, up: true, stance: "stand",
     _mass: S.mass || 10000, _w: Math.max(2, (S.hp || 300) / 120),
     seats: CBZ.vehicleDrive.seats(def),
-    ds: { v: 0, w: 0, steer: 0, y: py, pitch: 0, roll: 0, trackL: 0, trackR: 0 },
+    ds: { v: 0, w: 0, steer: 0, throttle: 0, y: py, vy: 0, gamma: 0, pitch: 0, roll: 0, trackL: 0, trackR: 0 },
     tur: { yaw: 0, elev: 0 },
-    wpn: weapons, shots: [],
-    alt: S.alt || 0, airPhase: "in", airPt: null, egress: false,
+    wpn: weapons, shots: [], reach: reach || 600, _firing: null, _hitT: -9, _wantNose: false,
+    alt: S.alt || 0, airPhase: "in", airPt: null, egress: false, heli: null,
+    side: sc,
+    // what the AI layer reads about how to fight this hull (src/battle/ai/*):
+    // hull-down, face the threat, reverse out, infantry screen, priorities
+    tactics: def.tactics || null,
     home: { x: at.x, z: at.z },
     you: false,
   };
+  // what animate(veh, dt, ctx) is handed every sim step (one object, reused)
+  u.actx = { t: 0, dt: 0, dead: false, wreck: false, burning: false, air: air, agl: 0, speed: 0, vy: 0,
+    yawRate: 0, steer: 0, throttle: 0, gamma: 0, turret: u.tur, target: null, phase: "", firing: null,
+    side: sc.side, nation: sc.nation, groundAt: MAP.groundAt,
+    shared: function (dt) { vehAnimShared(u, dt); } };
   u.target.set(at.x, 0, at.z);
   if (u.rig && u.rig.settle) { try { u.rig.settle(); } catch (e) {} }
   // implicit crew, or the men who spawned before their vehicle
@@ -299,24 +368,36 @@ function vehBailOut(u, catastrophic) {
 
 /* ------------------------------------------------------------- the step */
 function stepVehicle(u, sdt) {
-  if (u.dead) { stepWreck(u, sdt); return; }
+  if (u.dead) { stepWreck(u, sdt); vehAnimate(u, sdt); return; }
   if (u.fled) return;
   stepVehShots(u, sdt);
   for (let k = 0; k < u.wpn.length; k++) {
     const W = u.wpn[k];
     W.cool -= sdt;
-    if (W.reloadT > 0) { W.reloadT -= sdt; if (W.reloadT <= 0) W.salvo = 0; }
+    if (W.reloadT > 0) {
+      W.reloadT -= sdt;
+      if (W.reloadT <= 0) {
+        W.salvo = 0;
+        // the rack is full again: the rig puts the rounds back on its rails
+        if (u.rig && u.rig.reload) { try { u.rig.reload(W.shot); } catch (e) {} }
+      }
+    }
   }
-  if (u.you) { stepYouVehicle(u, sdt); return; }
-  if (simT >= u.thinkAt) thinkVehicle(u);
-  if (u.air) { stepAir(u, sdt); vehFight(u, sdt); return; }
-  const crew = vehCrewN(u);
-  // one man drives OR fights: he stops when he has a shot
-  const shoot = u.tgt && !u.tgt.dead && u.sees;
-  const halt = crew <= 1 && shoot && u._wantShot;
-  vehDriveTo(u, sdt, halt);
-  vehCrush(u, sdt);
-  vehFight(u, sdt);
+  if (u.you) stepYouVehicle(u, sdt);
+  else {
+    if (simT >= u.thinkAt) thinkVehicle(u);
+    if (u.air) { stepAir(u, sdt); vehFight(u, sdt); }
+    else {
+      const crew = vehCrewN(u);
+      // one man drives OR fights: he stops when he has a shot
+      const shoot = u.tgt && !u.tgt.dead && u.sees;
+      const halt = crew <= 1 && shoot && u._wantShot;
+      vehDriveTo(u, sdt, halt);
+      vehCrush(u, sdt);
+      vehFight(u, sdt);
+    }
+  }
+  vehAnimate(u, sdt);
 }
 function thinkVehicle(u) {
   u.lastThink = simT;
@@ -368,8 +449,11 @@ const _vc = [];
 function vehPickTarget(u) {
   const main = u.wpn.length ? u.wpn[0].w : null;
   const antiArmour = main && (main.kind === "cannon" || main.kind === "missile" || main.vs === "armour");
-  // a bomber releases kilometres short of the mark, so it has to see that far
-  const range = main && main.range ? Math.min(main.range, u.air ? 6000 : 1600) : 600;
+  // an aircraft looks as far as its longest weapon reaches (a bomber
+  // releases kilometres short of the mark, a Hellfire flies 8 km)
+  // (a jet looks out to 16 km: a B-52 at 9 km lets go 10 km short)
+  const range = u.air ? (u.def.drive === "rotor" ? Math.min(Math.max(u.reach, 1500), 8000) : 16000)
+    : main && main.range ? Math.min(main.range, 1600) : 600;
   _vc.length = 0;
   for (let k = 0; k < men.length; k++) {
     const o = men[k];
@@ -468,6 +552,7 @@ function vehCrush(u, sdt) {
 /* ------------------------------------------------------------- the guns */
 function vehFight(u, sdt) {
   u._wantShot = false;
+  u._wantNose = false;
   const t = u.tgt;
   if (!t || t.dead || t.fled || over) return;
   if (vehCrewN(u) === 0 || u.vs.firepower) return;
@@ -475,7 +560,7 @@ function vehFight(u, sdt) {
   const dx = t.pos.x - u.pos.x, dz = t.pos.z - u.pos.z, dist = Math.hypot(dx, dz);
   const dy = (t.pos.y + (t.aimY || 1)) - (u.pos.y + u.eyeH * 0.85);
   // lay the turret (or the chin gun) on the mark
-  const rel = D.wrap(Math.atan2(dx, dz) - u.h);
+  const rel = D.wrap(Math.atan2(dx, dz) - u.h);      // the mark's bearing off the nose
   const tr = def.turret;
   if (tr) {
     const el = Math.atan2(dy, dist);
@@ -492,31 +577,88 @@ function vehFight(u, sdt) {
       if (gn) gn.rotation.x = -u.tur.elev;
     }
   } else u.tur.yaw = u.air ? 0 : rel;               // fixed guns point where the hull does
-  if (u.air && CBZ.milAirAim && u.group.userData.chinGun) { try { CBZ.milAirAim(u.group, t.pos.x, t.pos.y + 1, t.pos.z, sdt); } catch (e) {} }
+  // a slewing mount the model drew (userData.chinGun: two aim nodes) is laid
+  // by the shared helper; the rig follows those nodes at its own rate
+  if (u.group.userData.chinGun && CBZ.milAirAim) { try { CBZ.milAirAim(u.group, t.pos.x, t.pos.y + (t.aimY || 1), t.pos.z, sdt); } catch (e) {} }
   if (def.launcher && u.rig && u.rig.aimLauncher) { try { u.rig.aimLauncher(rel, def.launcher.elevMax, sdt); } catch (e) {} }
-  const aimErr = tr ? Math.abs(D.wrap(rel - u.tur.yaw)) : (u.air ? 0 : Math.abs(rel));
+  const turErr = tr ? Math.abs(D.wrap(rel - u.tur.yaw)) : 0;
   u.sees = u.sees && simT - u.lastThink < 0.5 ? u.sees : eyeLos(u, t);
   if (!u.sees && !vehIndirect(u)) return;
+  const jet = u.air && def.drive !== "rotor";
   for (let k = 0; k < u.wpn.length; k++) {
     const W = u.wpn[k], w = W.w;
     if (W.off || W.ammo <= 0 || W.cool > 0 || W.reloadT > 0) continue;
-    if (dist > (w.range || 600) || dist < (w.minRange || 0)) continue;
-    if (w.vs === "air" && !t.air) continue;
-    if (w.vs === "armour" && !t.vehicle) continue;
-    if (w.vs === "soft" && t.vehicle && (t.def.stats.armour.side || 0) > 30) continue;
-    if (t.air && !(w.vs === "air" || w.kind === "mg" || w.kind === "autocannon" || (u.air && w.kind === "missile"))) continue;
+    // a bomb's reach is its fall (vehBombRun), not a range number
+    if (w.kind !== "bombs" && (dist > (w.range || 600) || dist < (w.minRange || 0))) continue;
+    if (!vehWeaponFits(u, w, t)) continue;
+    const manned = vehSeatManned(u, w);
+    if (!manned) continue;                                   // nobody at this gun
+    if (manned === "halt") { u._wantShot = true; continue; } // the driver stops and climbs over
+    if (u.rig && u.rig.canFire) { let ok = true; try { ok = u.rig.canFire(W.shot) !== false; } catch (e) {} if (!ok) continue; }
     if (w.kind === "bombs") { vehBombRun(u, W, t); continue; }
     // the big gun waits for the kill it was made for when the mark is soft
     // and a machine gun is in range; the machine gun leaves armour alone
-    if (w.kind === "mg" && t.vehicle && (t.def.stats.armour.front || 0) > w.pen * 2) continue;
+    if (w.kind === "mg" && t.vehicle && (t.def.stats.armour.front || 0) > (w.pen || 9) * 2) continue;
     if (w.kind === "cannon" && !t.vehicle && dist < 500 && vehHasMG(u, dist) && lcg() < 0.6) { W.cool = 1; continue; }
-    if ((w.turret || tr) && aimErr > 0.05 && !w.indirect) { u._wantShot = true; continue; }
-    if (u.air && w.kind !== "missile" && !w.indirect && Math.abs(D.wrap(Math.atan2(dx, dz) - u.h)) > 0.25 && !u.group.userData.chinGun) continue;
+    // ---- is THIS weapon on the line? (its mount, not the vehicle's) ----
+    if (!w.indirect) {
+      const m = W.mount;
+      if (m === "turret" && tr) {
+        if (turErr > (w.tol || 0.05)) { u._wantShot = true; continue; }
+      } else if (m === "slew") {
+        if (Math.abs(rel) > W.arc) { u._wantNose = true; continue; }
+        if (u.rig && u.rig.aimError) {
+          let e = 0; try { e = +u.rig.aimError(W.shot) || 0; } catch (er) { e = 0; }
+          if (e > (w.tol || 0.06)) { u._wantShot = true; continue; }
+        }
+      } else if (m === "fixed") {
+        if (Math.abs(rel) > W.arc) { u._wantNose = true; continue; }
+        // a jet's gun and rockets point where the flight path does: in the
+        // dive, not just on the bearing
+        if (jet && (w.kind !== "missile" && w.kind !== "sam")) {
+          const el = Math.atan2(dy, Math.max(1, dist));
+          if (Math.abs(el - u.ds.gamma) > W.arc + 0.05) { u._wantNose = true; continue; }
+        }
+      }
+    }
     u._wantShot = true;
     if (vehCrewN(u) <= 1 && u.speed > 1.2 && !u.air) continue;          // one man: stop, then shoot
     vehFire(u, W, t, dist);
     break;
   }
+}
+// what a weapon may be pointed at at all (the same rules the AI and the flight planner ask)
+function vehWeaponFits(u, w, t) {
+  if (w.vs === "air" && !t.air) return false;
+  if (w.vs === "armour" && !t.vehicle) return false;
+  if (w.vs === "soft" && t.vehicle && ((t.def.stats.armour || {}).side || 0) > 30) return false;
+  if (t.air && !(w.vs === "air" || w.kind === "mg" || w.kind === "autocannon" || (u.air && w.kind === "missile"))) return false;
+  return true;
+}
+/* WHO WORKS THIS GUN. A weapon fires only when its `seat` is crewed (a man
+   in it, or the implicit crew of a hull nobody was assigned to). A seat-less
+   weapon needs any crew; a remote airframe is always manned. One exception,
+   the old "one man drives OR fights" rule: a crewman whose own seat works no
+   weapon (the driver) can slide over to the MAIN gun's seat (weapon 0's)
+   while the hull is stopped. He never reaches the loader's or the
+   commander's machine gun. */
+function vehSeatManned(u, w) {
+  if (u.you) return true;                            // you are the crew
+  const S = u.def.stats || {};
+  if (S.remote) return true;
+  const seat = w.seat;
+  if (!seat) return vehCrewN(u) > 0;
+  if (vehHasSeat(u, seat)) return true;
+  const main = u.wpn.length ? u.wpn[0].w.seat : null;
+  if (seat !== main) return false;
+  for (let k = 0; k < u.seats.length; k++) {
+    const s = u.seats[k];
+    if (!s.crew || !(s.man || s.implicit)) continue;
+    let armed = false;
+    for (let j = 0; j < u.wpn.length; j++) if (u.wpn[j].w.seat === s.seat) { armed = true; break; }
+    if (!armed) return u.speed > 1.2 ? "halt" : true;
+  }
+  return false;
 }
 function vehIndirect(u) { for (let k = 0; k < u.wpn.length; k++) if (u.wpn[k].w.indirect) return true; return false; }
 function vehHasMG(u, dist) {
@@ -538,35 +680,73 @@ function vehFire(u, W, t, dist) {
   if (w.burst) { W.burst++; if (W.burst >= w.burst) { W.burst = 0; cd += w.pause || 1; } }
   if (w.salvo) { W.salvo++; if (W.salvo >= w.salvo) { W.salvo = 0; W.reloadT = w.reload || 30; } }
   W.cool = cd * (0.9 + lcg() * 0.2);
+  // THE ROUND IN HAND: every rig hook this round reaches (muzzleWorld, fire,
+  // or the legacy fired/spend) is told which weapon it is and which round
+  const shot = vehShotOf(u, W, t);
   const k = w.kind;
-  if (k === "mg") return vehFireMG(u, w, t, dist);
-  if (k === "missile" || k === "sam") return vehLaunch(u, w, t);
-  if ((k === "cannon" || k === "autocannon") && t.vehicle) return vehFireKE(u, w, t, dist);
-  return vehFireHE(u, w, t, dist);
+  if (k === "mg") vehFireMG(u, w, t, dist);
+  else if (k === "missile" || k === "sam") vehLaunch(u, w, t);
+  else if ((k === "cannon" || k === "autocannon") && t.vehicle) vehFireKE(u, w, t, dist);
+  else vehFireHE(u, w, t, dist);
+  u.actx.firing = shot;
+  u._firing = null;
 }
-function vehicleMuzzle(u, out) {
-  if (u.rig && u.rig.muzzleWorld) { try { const p = u.rig.muzzleWorld(out); if (p) return p; } catch (e) {} }
+function vehShotOf(u, W, t) {
+  const s = W.shot;
+  s.n = W.n++; s.target = t || null;
+  u._firing = s;
+  return s;
+}
+/* where the round leaves: the rig answers for the weapon in hand (`shot`,
+   or the one vehFire is firing), else the model's "muzzle" node, else the
+   front of the turret line */
+function vehicleMuzzle(u, out, shot) {
+  shot = shot || u._firing || null;
+  if (u.rig && u.rig.muzzleWorld) { try { const p = u.rig.muzzleWorld(out, shot); if (p) return p; } catch (e) {} }
   const mz = u.group.getObjectByName && u.group.getObjectByName("muzzle");
   if (mz && mz.getWorldPosition) { u.group.updateMatrixWorld(true); return mz.getWorldPosition(out); }
   const yaw = u.h + u.tur.yaw;
   return out.set(u.pos.x + Math.sin(yaw) * u.vlen * 0.8, u.pos.y + u.eyeH * 0.85, u.pos.z + Math.cos(yaw) * u.vlen * 0.8);
 }
+/* THE RIG'S PART IN A SHOT: recoil, flash, the store leaving its rail.
+   A rig with fire(shot, from) owns all of it, for every weapon. A legacy rig
+   (city/mil_armor.js) gets fired(scale, shot) for its guns and spend(i, shot)
+   for a launch, i = the tube (its own `loaded` count when it keeps one, else
+   the weapon's round number). Nobody: a muzzle flash. A machine gun's
+   muzzle is drawn by fireShot's tracer. */
+function vehFx(u, from) {
+  const shot = u._firing, R = u.rig;
+  if (!shot) return;
+  if (R && typeof R.fire === "function") { try { R.fire(shot, from); } catch (e) {} return; }
+  const k = shot.kind;
+  if (k === "mg") return;
+  if (k === "rockets" || k === "missile" || k === "sam") {
+    if (R && R.spend && !(typeof R.loaded === "number" && R.loaded <= 0)) {
+      try { R.spend(typeof R.loaded === "number" ? R.loaded - 1 : shot.n, shot); } catch (e) {}
+      return;
+    }
+  } else if (R && R.fired && (k === "cannon" || k === "autocannon")) {
+    try { R.fired(k === "cannon" ? 1 : 0.3, shot); } catch (e) {}
+    return;
+  }
+  if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash(from, { scale: k === "cannon" ? 4 : k === "autocannon" ? 1.4 : 2 }); } catch (e) {} }
+}
 function vehFireMG(u, w, t, dist) {
-  // the page's own round: fireShot draws it, lands it and keeps the ledger
+  // the page's own round: fireShot flies it, lands it and keeps the ledger.
+  // _gunId names the mount, so the round is ITS cartridge (weapons/ballistics.js:
+  // a coax is 7.62 NATO, the commander's gun .50 BMG, with their own belts of
+  // tracer) and a mount's steadiness, not a rifleman's
   const keepWid = u.wid;
   u.wid = w.wid || "lmg"; u.mag = 999;
-  u._shot = { pen: w.pen || 9, beh: w.dmg || 22, he: false, cls: "small" };
-  let hit = Math.max(0.06, Math.min(0.62, 0.62 - dist / 1400));
-  if (u.speed > 2) hit *= 0.7;
-  if (t.air) hit *= 0.5;
-  try { fireShot(u, t, { fire: true, hit: hit, dmg: (w.dmg || 22) / 1.45, cd: 0.1 }); } catch (e) {}
-  u._shot = null; u.wid = keepWid;
+  vehFx(u, null);                                   // the rig's part (a rig with fire(shot) flashes its own mount)
+  u._gunId = w.id;
+  try { fireShot(u, t, { mode: "aimed" }); } catch (e) { console.warn("[war] mount fire", e); }
+  u._gunId = null; u.wid = keepWid;
 }
 // a kinetic round at armour: it either hits or it does not, now
 function vehFireKE(u, w, t, dist) {
   const from = vehicleMuzzle(u, _muz);
-  if (u.rig && u.rig.fired) { try { u.rig.fired(w.kind === "cannon" ? 1 : 0.3); } catch (e) {} }
-  else if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash(from, { scale: w.kind === "cannon" ? 4 : 1.4 }); } catch (e) {} }
+  vehFx(u, from);
   let p = Math.max(0.25, Math.min(0.95, 0.96 - dist / 3200));
   if (u.speed > 1.5) p *= u.def.drive === "tracked" ? 0.85 : 0.6;
   if (w.kind === "autocannon") p *= 0.75;
@@ -587,9 +767,7 @@ function vehFireKE(u, w, t, dist) {
 function vehFireHE(u, w, t, dist) {
   const he = w.he || { pen: 30, beh: 200, blast: 6, power: 1.4 };
   const from = V().copy(vehicleMuzzle(u, _muz));
-  if (u.rig && u.rig.fired && w.kind === "cannon") { try { u.rig.fired(1); } catch (e) {} }
-  else if (u.rig && u.rig.spend && w.kind === "rockets") { try { u.rig.spend(u.rig.loaded - 1); } catch (e) {} }
-  else if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash(from, { scale: 2 }); } catch (e) {} }
+  vehFx(u, from);
   const spread = (w.indirect ? 0.025 : 0.012) * dist;
   const tx = t.pos.x + (lcg() - 0.5) * spread, tz = t.pos.z + (lcg() - 0.5) * spread;
   const ty = MAP.groundAt(tx, tz) + 0.15;
@@ -615,7 +793,7 @@ function vehFireHE(u, w, t, dist) {
 // a guided round: flies to the mark (or a point near it) and lands its warhead
 function vehLaunch(u, w, t) {
   const from = V().copy(vehicleMuzzle(u, _muz));
-  if (u.rig && u.rig.spend && u.rig.loaded > 0) { try { u.rig.spend(u.rig.loaded - 1); } catch (e) {} }
+  vehFx(u, from);
   u.shots.push({ pos: from, tgt: t, w: w, t: 0, by: u,
     trail: CBZ.studio.trail({ length: 30, color: 0xe8e2d4, opacity: 0.5, minStep: 3 }) });
 }
@@ -646,101 +824,325 @@ function stepVehShots(u, sdt) {
   }
 }
 
-/* ------------------------------------------------------------- the air */
+/* ------------------------------------------------------------- the air
+   HOW AIRCRAFT FIGHT. Two airframes, two doctrines, numbers from the unit
+   file's stats (all optional):
+
+   HELICOPTERS (drive "rotor") fight from BATTLE POSITIONS. The pilot picks
+   a spot at the stand-off of the weapon the mark calls for (its range x
+   0.75, capped by stats.standoff), on his own side of it, where the ground
+   or a building hides him from the mark at `nap` metres (default 10) but a
+   climb of no more than `popAlt` (default max(alt, 45)) clears the line.
+     transit  nap of the earth to the position, following the ground
+     mask     hover low behind the crest; wait for the guns to be ready
+     pop      climb (`climb` m/s, default 8) until the mark is in sight, nose
+              on it, fire; a window of `popWindow` s (default 7), cut short
+              when a salvo is out or he is hit
+     drop     back down behind the mask, then SIDESTEP to a new position:
+              never pop up twice from the same place
+   No mask to be had (open sand, flat water): the position is just the
+   stand-off at nap height, and he still shoots and scoots.
+
+   JETS (everything else) fly ATTACK RUNS at real heights. The weapon for the
+   pass decides the profile:
+     bombs    level at the weapon's `alt` (else stats.alt), released where the
+              fall lands on the mark; a guided bomb (w.guided) steers out a
+              cross-track error up to `basket` x its fall distance (0.15)
+     missile  at cruise, launched inside 0.85 x range with the nose on it
+     gun / rockets  a DIVE: from `alt` (default min(cruise, 1500)) down a line
+              of `dive` rad (0.3) at the mark, firing inside range, pulling
+              out at `pullOut` m above it (250)
+   then out past the mark on a racetrack wide enough for the turn circle, and
+   in again. A jet never flies below 60 m over the ground. */
 function stepAir(u, sdt) {
-  const D = CBZ.vehicleDrive, def = u.def, S = def.stats || {};
-  const enemy = u.team === "red" ? "blue" : "red";
-  const com = teamCOM[enemy];
+  const S = u.def.stats || {};
   // out of ammunition (or a transport that has dropped): it goes home
   if (!u.egress) {
     let left = 0;
     for (let k = 0; k < u.wpn.length; k++) left += u.wpn[k].ammo;
     if ((u.wpn.length && left <= 0) || (S.airdrop && u.dismounted)) u.egress = true;
   }
-  let gx, gz;
-  const rotor = def.drive === "rotor";
   if (u.egress) {
-    gx = MAP.cx + (u.team === "red" ? -4200 : 4200); gz = MAP.cz;
     if (Math.hypot(u.pos.x - MAP.cx, u.pos.z - MAP.cz) > 3200) {
       // off the map: out of the fight, not dead
       u.fled = true; if (u.group) u.group.visible = false;
       return;
     }
-  } else if (rotor) {
-    // hover on a firing station short of the mark, on its own side
-    const ref = u.tgt && !u.tgt.dead ? u.tgt.pos : com;
-    const sx = ref.x - u.pos.x, sz = ref.z - u.pos.z, sd = Math.hypot(sx, sz) || 1;
-    const stand = Math.min(S.standoff || 600, 600);
-    gx = ref.x - sx / sd * stand; gz = ref.z - sz / sd * stand;
-    if (S.dismountAt && vehPassengers(u) > 0) { gx = teamCOM[u.team].x; gz = teamCOM[u.team].z; }
-  } else {
-    // fixed wing: run in on the mark (or the enemy's mass), through, turn, repeat
-    /* a fast jet's turn circle is kilometres wide: chasing the mark's bearing
-       inside it is an orbit that never arrives (air.js measured the same
-       trap). So it flies a racetrack: in on the mark, out past it to twice
-       its turn radius, round, and in again. */
-    const ref = u.tgt && !u.tgt.dead && !S.airdrop ? u.tgt.pos : com;
-    const R = (S.speed || 200) / Math.min(S.turn || 0.3, 9.81 * Math.tan(1.05) / Math.max(30, S.speed || 200));
-    const dRef = Math.hypot(u.pos.x - ref.x, u.pos.z - ref.z);
-    if (u.airPhase === "out") {
-      gx = u.airPt.x; gz = u.airPt.z;
-      if (dRef > Math.max(1600, R * 2.2)) u.airPhase = "in";
-    } else {
-      gx = ref.x; gz = ref.z;
-      const offAxis = Math.abs(D.wrap(Math.atan2(ref.x - u.pos.x, ref.z - u.pos.z) - u.h));
-      if (dRef < 140 || (offAxis > 0.9 && dRef < R * 2)) {
-        u.airPhase = "out";
-        u.airPt = { x: u.pos.x + Math.sin(u.h) * Math.max(1800, R * 2.5), z: u.pos.z + Math.cos(u.h) * Math.max(1800, R * 2.5) };
-        if (S.airdrop && !u.dismounted) vehDismount(u);
-      }
+  }
+  if (u.def.drive === "rotor") stepRotor(u, sdt); else stepJet(u, sdt);
+}
+// the weapon a pass (or a battle position) is planned round: the first one,
+// in the unit's own order, that can hurt this mark and has rounds left
+function vehAirWeapon(u, t) {
+  let best = null;
+  for (let k = 0; k < u.wpn.length; k++) {
+    const W = u.wpn[k];
+    if (W.off || W.ammo <= 0) continue;
+    if (t && t.pos && t.team && !vehWeaponFits(u, W.w, t)) continue;
+    if (W.reloadT > 0) { if (!best) best = W; continue; }
+    return W;
+  }
+  return best;
+}
+/* A SIGHT LINE FOR PLANNING: the buildings exactly (the colliders), the
+   ground sampled every ~12 m (a hill is not a fence; 160 samples at most). */
+function airSightClear(ax, ay, az, bx, by, bz) {
+  if (CBZ.micro.segmentBlocked && CBZ.micro.segmentBlocked(ax, ay, az, bx, by, bz)) return false;
+  const dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz);
+  if (d < 8) return true;
+  const n = Math.min(160, Math.max(4, Math.ceil(d / 12)));
+  for (let i = 1; i < n; i++) {
+    const t = i / n;
+    if (MAP.groundAt(ax + dx * t, az + dz * t) > ay + (by - ay) * t + 0.5) return false;
+  }
+  return true;
+}
+function heliStand(u, t) {
+  const S = u.def.stats || {};
+  const W = vehAirWeapon(u, t);
+  const w = W ? W.w : null;
+  let r = w ? (w.range || 600) * 0.75 : 600;
+  if (S.standoff) r = Math.min(r, S.standoff);
+  if (w && w.minRange) r = Math.max(r, w.minRange * 1.3 + 40);
+  return Math.max(150, r);
+}
+/* the battle position: masked low, clear when popped up. Asked once per
+   position (a dozen candidates, nearest the current bearing first). */
+function heliPlan(u, ref, stand) {
+  const S = u.def.stats || {}, H = u.heli;
+  const nap = S.nap || 10, popMax = Math.max(S.popAlt || Math.max(S.alt || 40, 60), nap + 6);
+  const ty = MAP.groundAt(ref.x, ref.z) + 1.6;          // the mark's eye
+  const b0 = Math.atan2(u.pos.x - ref.x, u.pos.z - ref.z) + H.shift;
+  let fallback = null;
+  const OFF = [0, -1, 1, -2, 2, -3, 3], RING = [1, 0.85, 0.65, 0.45];
+  // the stand-off first; closer in only when nothing on that ring sees the mark
+  for (let q = 0; q < RING.length && !fallback; q++) {
+    for (let j = 0; j < OFF.length; j++) {
+      const b = b0 + OFF[j] * 0.17, r = Math.max(150, stand * RING[q]);
+      const px = ref.x + Math.sin(b) * r, pz = ref.z + Math.cos(b) * r;
+      const g = MAP.groundAt(px, pz);
+      if (!airSightClear(px, g + nap, pz, ref.x, ty, ref.z)) {
+        // masked down low: how high to climb before the mark is in sight?
+        for (let h = nap + 6; h <= popMax; h += 7) {
+          if (airSightClear(px, g + h, pz, ref.x, ty, ref.z)) {
+            return { x: px, z: pz, lo: nap, hi: Math.min(popMax, h + 3), masked: true };
+          }
+        }
+      } else if (!fallback) fallback = { x: px, z: pz, lo: nap, hi: nap, masked: false };
     }
   }
-  const dx = gx - u.pos.x, dz = gz - u.pos.z, d = Math.hypot(dx, dz);
-  const want = Math.atan2(dx, dz);
-  const err = D.wrap(want - u.h);
-  let v;
-  if (rotor) {
-    // a helicopter turns on the spot and creeps onto its station; facing the mark once there
-    const face = u.tgt && !u.tgt.dead && d < 60 ? Math.atan2(u.tgt.pos.x - u.pos.x, u.tgt.pos.z - u.pos.z) : want;
-    u.h = D.lay(u.h, face, S.turn || 0.8, sdt);
-    v = Math.min(S.speed || 70, d * 0.4);
-    u.ds.v += D.clamp(v - u.ds.v, -(S.accel || 6) * sdt, (S.accel || 6) * sdt);
-    if (d > 1) { u.pos.x += dx / d * u.ds.v * sdt; u.pos.z += dz / d * u.ds.v * sdt; }
+  if (fallback) return fallback;
+  // nothing sees the mark from anywhere: close in, high
+  const r = Math.max(150, stand * 0.45), px = ref.x + Math.sin(b0) * r, pz = ref.z + Math.cos(b0) * r;
+  return { x: px, z: pz, lo: popMax, hi: popMax, masked: false };
+}
+function heliReady(u) {
+  for (let k = 0; k < u.wpn.length; k++) { const W = u.wpn[k]; if (!W.off && W.ammo > 0 && W.reloadT <= 0 && W.cool < 1) return true; }
+  return false;
+}
+function stepRotor(u, sdt) {
+  const D = CBZ.vehicleDrive, S = u.def.stats || {};
+  const H = u.heli || (u.heli = { ph: "transit", bp: null, t: 0, win: 0, shift: 0, refX: 0, refZ: 0, fired0: 0 });
+  const enemy = u.team === "red" ? "blue" : "red";
+  const nap = S.nap || 10, climb = S.climb || 8;
+  const t = u.tgt && !u.tgt.dead && !u.tgt.fled ? u.tgt : null;
+  const ref = t ? t.pos : teamCOM[enemy];
+  let gx, gz, wantAGL, face = null;
+  const carrying = S.dismountAt && vehPassengers(u) > 0;
+  if (u.egress) {
+    gx = MAP.cx + (u.team === "red" ? -4200 : 4200); gz = MAP.cz; wantAGL = nap * 2;
+    H.ph = "transit";
+  } else if (carrying) {
+    // a lift: low and fast to a landing short of the enemy, set down, unload
+    const sx = ref.x - u.pos.x, sz = ref.z - u.pos.z, sd = Math.hypot(sx, sz) || 1;
+    const lz = Math.max(0, sd - S.dismountAt * 0.8);
+    gx = u.pos.x + sx / sd * lz; gz = u.pos.z + sz / sd * lz;
+    wantAGL = lz < 60 ? 1.5 : nap;
+    H.ph = "transit";
   } else {
-    const turn = Math.min(S.turn || 0.3, 9.81 * Math.tan(1.05) / Math.max(30, S.speed || 200));
-    u.h = D.lay(u.h, want, turn, sdt);
-    u.ds.v = S.speed || 200;
-    u.pos.x += Math.sin(u.h) * u.ds.v * sdt; u.pos.z += Math.cos(u.h) * u.ds.v * sdt;
-    u.ds.roll += (D.clamp(err * 1.4, -1, 1) - u.ds.roll) * Math.min(1, sdt * 2);
+    const stand = heliStand(u, t);
+    // the mark has moved off this position's geometry: plan again
+    if (H.bp && Math.hypot(ref.x - H.refX, ref.z - H.refZ) > Math.max(80, stand * 0.25) && H.ph !== "pop") H.bp = null;
+    if (!H.bp) {
+      H.bp = heliPlan(u, ref, stand);
+      H.refX = ref.x; H.refZ = ref.z;
+      if (H.ph !== "pop" && H.ph !== "drop") H.ph = "transit";
+    }
+    const bp = H.bp;
+    gx = bp.x; gz = bp.z;
+    const dBp = Math.hypot(gx - u.pos.x, gz - u.pos.z);
+    const agl = u.pos.y - MAP.groundAt(u.pos.x, u.pos.z);
+    if (H.ph === "transit") {
+      wantAGL = bp.lo;
+      if (dBp < 25) { H.ph = "mask"; H.t = simT + (bp.masked ? 1.5 + lcg() * 3 : 0.3); }
+    } else if (H.ph === "mask") {
+      wantAGL = bp.lo;
+      if (simT >= H.t && heliReady(u)) { H.ph = "pop"; H.win = 0; H.t = simT; H.fired0 = u.shotsF; }
+    } else if (H.ph === "pop") {
+      wantAGL = bp.hi;
+      if (u.sees) H.win += sdt;
+      const salvoOut = u.shotsF - H.fired0 >= (S.popShots || 6);
+      const hit = simT - u._hitT < 0.8 && simT - H.t > 1.5;
+      const blind = !u.sees && simT - H.t > 6 && Math.abs(agl - bp.hi) < 3;
+      if (H.win > (S.popWindow || 7) || salvoOut || hit || blind || (!heliReady(u) && H.win > 2)) {
+        H.ph = "drop";
+        if (blind) H.bp.masked = false;            // this hide cannot see: the next one must
+      }
+    } else {                                         // drop: back behind the mask, then sidestep
+      wantAGL = bp.lo;
+      if (Math.abs(agl - bp.lo) < 2.5 || !bp.masked) {
+        H.shift = D.clamp(H.shift * 0.5 + (lcg() < 0.5 ? -1 : 1) * (0.18 + lcg() * 0.22), -1.2, 1.2);
+        H.bp = null; H.ph = "transit";
+      }
+    }
+    // the nose: on the mark at the position (the rockets and the Hellfire
+    // need it there), along the track on the way
+    if (H.ph !== "transit" || dBp < 400 || u._wantNose) face = Math.atan2(ref.x - u.pos.x, ref.z - u.pos.z);
   }
-  const gy = MAP.groundAt(u.pos.x, u.pos.z) + (S.alt || 300);
-  u.pos.y += (gy - u.pos.y) * Math.min(1, sdt * 1.2);
+  const dx = gx - u.pos.x, dz = gz - u.pos.z, d = Math.hypot(dx, dz);
+  const travel = Math.atan2(dx, dz);
+  if (face == null) face = d > 30 ? travel : u.h;
+  const turn = S.turn || 0.8, h0 = u.h;
+  u.h = D.lay(u.h, face, turn, sdt);
+  u.ds.w = sdt > 0 ? D.wrap(u.h - h0) / sdt : 0;
+  // speed: brisk in transit, a crawl onto the spot
+  const vmax = Math.min(S.speed || 70, H.ph === "transit" ? (S.speed || 70) * 0.75 : 12);
+  const v = Math.min(vmax, d * 0.4);
+  u.ds.v += D.clamp(v - u.ds.v, -(S.accel || 6) * sdt, (S.accel || 6) * sdt);
+  if (d > 1) { u.pos.x += dx / d * u.ds.v * sdt; u.pos.z += dz / d * u.ds.v * sdt; }
+  // height: terrain-following (ground under him and 80 m ahead along the track)
+  const g0 = MAP.groundAt(u.pos.x, u.pos.z);
+  let gRef = g0;
+  if (u.ds.v > 5 && d > 40) gRef = Math.max(g0, MAP.groundAt(u.pos.x + dx / d * 80, u.pos.z + dz / d * 80));
+  const wantY = gRef + wantAGL;
+  const vyW = D.clamp((wantY - u.pos.y) * 1.2, -climb, climb);
+  u.ds.vy += D.clamp(vyW - u.ds.vy, -6 * sdt, 6 * sdt);
+  u.pos.y += u.ds.vy * sdt;
+  if (u.pos.y < g0 + 1) { u.pos.y = g0 + 1; u.ds.vy = Math.max(0, u.ds.vy); }
   u.speed = u.ds.v;
-  u.group.rotation.set(rotor ? Math.min(0.25, u.ds.v / 300) : 0, u.h, rotor ? 0 : -u.ds.roll * 0.9);
+  u.airPhase = H.ph;
+  // forward flight is nose-down (the disc tilts the airframe with it)
+  const fwd = d > 1 ? (dx * Math.sin(u.h) + dz * Math.cos(u.h)) / d * u.ds.v : 0;
+  u.ds.pitch += (D.clamp(fwd / 300, -0.12, 0.25) - u.ds.pitch) * Math.min(1, sdt * 2);
+  u.group.rotation.set(u.ds.pitch, u.h, 0);
   u.yaw = u.h; u.heading = u.h;
 }
-// a bomber lets go when the fall lands on the mark
-function vehBombRun(u, W, t) {
-  const w = W.w, he = w.he || { pen: 120, beh: 1500, blast: 18, power: 2.6 };
-  const agl = u.pos.y - MAP.groundAt(u.pos.x, u.pos.z);
-  const tf = Math.sqrt(2 * Math.max(10, agl) / 9.81);
-  const lead = u.ds.v * tf;
-  const fx = u.pos.x + Math.sin(u.h) * lead, fz = u.pos.z + Math.cos(u.h) * lead;
-  if (Math.hypot(fx - t.pos.x, fz - t.pos.z) > Math.max(40, he.blast * 1.5)) return;
-  vehRelease(u, W, he);
+function stepJet(u, sdt) {
+  const D = CBZ.vehicleDrive, S = u.def.stats || {};
+  const enemy = u.team === "red" ? "blue" : "red";
+  const com = teamCOM[enemy];
+  const spd = S.speed || 200;
+  const turn = Math.min(S.turn || 0.3, 9.81 * Math.tan(1.05) / Math.max(30, spd));
+  const R = spd / turn;                                   // the turn circle
+  const cruise = S.alt || 300;
+  const t = u.tgt && !u.tgt.dead && !u.tgt.fled && !S.airdrop ? u.tgt : null;
+  const ref = t ? t.pos : com;
+  const W = S.airdrop ? null : vehAirWeapon(u, t);
+  const w = W ? W.w : null;
+  const kind = w ? w.kind : "none";
+  const dive = kind === "autocannon" || kind === "mg" || kind === "rockets" || kind === "cannon";
+  const runAlt = w && w.alt ? w.alt : (dive ? Math.min(cruise, 1500) : cruise);
+  const dRef = Math.hypot(u.pos.x - ref.x, u.pos.z - ref.z);
+  const gRef = MAP.groundAt(ref.x, ref.z);
+  // where the weapon is let go, horizontally from the mark
+  let release = 300;
+  if (kind === "bombs") release = spd * Math.sqrt(2 * runAlt / 9.81);
+  else if (w && (kind === "missile" || kind === "sam")) release = (w.range || 6000) * 0.85;
+  else if (dive) release = (w.range || 1500);
+  let gx, gz, wantAGL = runAlt;
+  if (u.egress) { gx = MAP.cx + (u.team === "red" ? -4200 : 4200); gz = MAP.cz; wantAGL = cruise; }
+  else if (u.airPhase === "out") {
+    gx = u.airPt.x; gz = u.airPt.z;
+    wantAGL = Math.max(runAlt, cruise * 0.6);
+    // far enough out to turn and line up a run that reaches its release point
+    if (dRef > Math.max(1600, R * 2.2, release + R * 1.2)) u.airPhase = "in";
+  } else {
+    u.airPhase = "in";
+    gx = ref.x; gz = ref.z;
+    if (dive) {
+      // the dive line: height over the mark = distance x tan(dive)
+      const dv = w.dive || 0.3, floor = w.pullOut || 250;
+      wantAGL = D.clamp(dRef * Math.tan(dv), floor, runAlt);
+      if (dRef < floor / Math.tan(dv) * 1.1) vehJetBreak(u, R);
+    }
+    const offAxis = Math.abs(D.wrap(Math.atan2(ref.x - u.pos.x, ref.z - u.pos.z) - u.h));
+    if (dRef < 140 || (offAxis > 0.9 && dRef < R * 2)) vehJetBreak(u, R);
+    // a missile shooter breaks off once it is inside its own stand-off
+    else if ((kind === "missile" || kind === "sam") && dRef < Math.max((w.minRange || 300) * 2, release * 0.35)) vehJetBreak(u, R);
+    if (S.airdrop && !u.dismounted && dRef < 140) vehDismount(u);
+  }
+  const dx = gx - u.pos.x, dz = gz - u.pos.z;
+  const want = Math.atan2(dx, dz);
+  const err = D.wrap(want - u.h);
+  const h0 = u.h;
+  u.h = D.lay(u.h, want, turn, sdt);
+  u.ds.w = sdt > 0 ? D.wrap(u.h - h0) / sdt : 0;
+  u.ds.roll += (D.clamp(err * 1.4, -1, 1) - u.ds.roll) * Math.min(1, sdt * 2);
+  // the flight path angle: climb or dive toward the height this leg wants
+  const g0 = MAP.groundAt(u.pos.x, u.pos.z);
+  const base = u.airPhase === "in" && dRef < 20000 ? gRef : g0;
+  const wantY = Math.max(base + wantAGL, g0 + 60);
+  const gmax = dive ? 0.6 : 0.3;
+  // on the dive line the path angle IS the line's slope (fed forward), plus
+  // a correction back onto it; anywhere else, climb or descend to the height
+  let ff = 0;
+  if (dive && u.airPhase === "in" && !u.egress) { const dv = w.dive || 0.3; if (wantAGL < runAlt - 1 && wantAGL > (w.pullOut || 250) + 1) ff = -dv; }
+  const gWant = D.clamp(ff + Math.atan2(wantY - u.pos.y, Math.max(200, spd * 3)), -gmax, gmax * 0.8);
+  u.ds.gamma += D.clamp(gWant - u.ds.gamma, -0.5 * sdt, 0.5 * sdt);
+  u.ds.v = spd;
+  const vh = spd * Math.cos(u.ds.gamma);
+  u.pos.x += Math.sin(u.h) * vh * sdt; u.pos.z += Math.cos(u.h) * vh * sdt;
+  u.pos.y += spd * Math.sin(u.ds.gamma) * sdt;
+  if (u.pos.y < g0 + 60) { u.pos.y = g0 + 60; if (u.ds.gamma < 0) u.ds.gamma *= 0.5; }
+  u.ds.vy = spd * Math.sin(u.ds.gamma);
+  u.speed = spd;
+  u.group.rotation.set(-u.ds.gamma, u.h, -u.ds.roll * 0.9);
+  u.yaw = u.h; u.heading = u.h;
 }
-function vehRelease(u, W, he) {
+// off the mark: straight on past it, far enough to come round again
+function vehJetBreak(u, R) {
+  u.airPhase = "out";
+  const L = Math.max(1800, R * 2.5);
+  u.airPt = { x: u.pos.x + Math.sin(u.h) * L, z: u.pos.z + Math.cos(u.h) * L };
+}
+// a bomber lets go when the fall lands on the mark (a guided bomb: near enough to steer)
+function vehBombRun(u, W, t) {
+  if (u.airPhase === "out") return;
+  const w = W.w, he = w.he || { pen: 120, beh: 1500, blast: 18, power: 2.6 };
+  const agl = u.pos.y - MAP.groundAt(t.pos.x, t.pos.z);
+  const tf = Math.sqrt(2 * Math.max(10, agl) / 9.81);
+  const vh = u.ds.v * Math.cos(u.ds.gamma || 0);
+  const lead = vh * tf;
+  const fx = u.pos.x + Math.sin(u.h) * lead, fz = u.pos.z + Math.cos(u.h) * lead;
+  const miss = Math.hypot(fx - t.pos.x, fz - t.pos.z);
+  const basket = w.guided ? Math.max(he.blast * 1.5, lead * (w.basket || 0.15)) : Math.max(40, he.blast * 1.5);
+  if (miss > basket) return;
+  vehRelease(u, W, he, w.guided ? t : null, tf);
+}
+function vehRelease(u, W, he, guideTo, tf) {
   const w = W.w;
   stats[u.team].shots++; u.shotsF++; u.lastShotT = simT;
   W.ammo--;
   W.salvo++;
   if (w.salvo && W.salvo >= w.salvo) { W.salvo = 0; W.reloadT = w.reload || 20; }
   W.cool = 1 / Math.max(0.01, w.rof || 4);
+  const shot = vehShotOf(u, W, guideTo);
+  if (u.rig && typeof u.rig.fire === "function") { try { u.rig.fire(shot, u.pos); } catch (e) {} }
+  u._firing = null;
+  u.actx.firing = shot;
   u._he = { pen: he.pen, beh: he.beh, he: true, cls: "bomb" };
+  const vh = u.ds.v * Math.cos(u.ds.gamma || 0);
+  const vel = new THREE.Vector3(Math.sin(u.h) * vh, -2, Math.cos(u.h) * vh);
+  if (guideTo && tf > 0) {
+    // the seeker flies out the cross-track error: the bomb is on the mark's line
+    vel.x = (guideTo.pos.x - u.pos.x) / tf; vel.z = (guideTo.pos.z - u.pos.z) / tf;
+  }
+  // a guided bomb keeps steering onto the mark all the way down (fire.js stepRockets: `homing`)
+  const fall = tf || Math.sqrt(2 * Math.max(10, u.pos.y - MAP.groundAt(u.pos.x, u.pos.z)) / 9.81);
   rockets.push({
     pos: V().set(u.pos.x, u.pos.y - 2, u.pos.z),
-    vel: new THREE.Vector3(Math.sin(u.h) * u.ds.v, -2, Math.cos(u.h) * u.ds.v),
-    grav: 9.81, t: 0, by: u, life: 40,             // a bomb from 650 m falls for 11 s
+    vel: vel,
+    grav: 9.81, t: 0, by: u, life: Math.max(40, fall * 1.4 + 5), homing: guideTo || null,
     w: { blastRadius: he.blast, blastPower: he.power / 0.55 },
     trail: CBZ.studio.trail({ length: 8, color: 0x404040, opacity: 0.25, minStep: 6 }),
   });
@@ -765,12 +1167,65 @@ function hurtVehicle(u, dmg, imp) {
   if (PROBE) { VEH.hits = VEH.hits || { pen: 0, bounced: 0 }; if (res.pen) VEH.hits.pen++; else VEH.hits.bounced++; }
   // getting hit is information: turn the gun on whoever did it
   if (by && by.team && by.team !== u.team && (!u.tgt || u.tgt.dead || u.tgt.fled)) u.tgt = by;
+  u._hitT = simT;                                   // a helicopter under fire ducks (stepRotor)
   if (res.firepower) for (let k = 0; k < u.wpn.length; k++) if (u.wpn[k].w.turret) u.wpn[k].off = true;
+  // the rig shows what this hit did (a drooped gun, a thrown track, a fire)
+  if (u.rig && typeof u.rig.damage === "function") { try { u.rig.damage(u.vs, res); } catch (e) {} }
+  // what got through the plate kills the men it passes
+  if (res.pen && !u.vs.wreck) vehCrewHits(u, res, th, zn, fx, fz, by);
   if (u.vs.wreck || u.vs.hp <= 0) { killMan(u, imp); return; }
+  // a hull with nobody left alive in it is out of the fight
+  if (vehCrewN(u) === 0) { u._abandoned = true; killMan(u, imp); return; }
   // a hull that can neither move nor fight is abandoned
   if (u.vs.mobility && (u.vs.firepower || !u.wpn.length)) { u._abandoned = true; killMan(u, imp); return; }
   if (res.pen && vehPassengers(u)) vehDismount(u);
   if (u.air && u.vs.mobility) { u._abandoned = true; killMan(u, imp); }
+}
+/* CREW CASUALTIES BY SEAT. A penetration enters through the face it hit
+   (`zn`), on the line from whoever fired it, and its spall runs on through
+   the hull. Each crewman (and passenger) is at his seat's `pos` in hull
+   space; the nearer his seat to that line, the likelier he is hit:
+   p = min(0.9, beh / 600) x exp(-distance / 1.1 m). A big round through
+   the turret kills the turret crew, a rifle round through a Humvee door
+   kills the man behind it, the driver up front lives. */
+function vehCrewHits(u, res, th, zn, fx, fz, by) {
+  const L = u.vlen, Wd = u.vwid, H = u.vheight;
+  // the threat's direction in hull space (x port, z forward)
+  const wx = fx - u.pos.x, wz = fz - u.pos.z;
+  const c = Math.cos(u.h), s = Math.sin(u.h);
+  let dx = wx * c - wz * s, dz = wx * s + wz * c;
+  const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+  // where it came in, and its path inward
+  let ix, iy, iz, px, py, pz;
+  if (zn === "top") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = H; px = 0; py = -1; pz = 0; }
+  else {
+    const tt = Math.min(Wd / Math.max(1e-3, Math.abs(dx)), L / Math.max(1e-3, Math.abs(dz)));
+    ix = dx * tt; iz = dz * tt; iy = H * (0.35 + lcg() * 0.45); px = -dx; py = 0; pz = -dz;
+  }
+  const reach = zn === "top" ? H : (Math.abs(px) > Math.abs(pz) ? Wd * 2 : L * 2) * 0.8;
+  const beh = Math.max(th.beh || 0, res.dmg || 0);
+  const pk = Math.min(0.9, beh / 600);
+  let lost = 0;
+  for (let k = 0; k < u.seats.length; k++) {
+    const seat = u.seats[k];
+    if (!seat.man && !seat.implicit) continue;
+    const p = seat.pos || [0, 1.5, 0];
+    // distance from the seat to the spall segment
+    const ax = p[0] - ix, ay = p[1] - iy, az = p[2] - iz;
+    const along = Math.max(0, Math.min(reach, ax * px + ay * py + az * pz));
+    const d = Math.hypot(ax - px * along, ay - py * along, az - pz * along);
+    if (lcg() >= pk * Math.exp(-d / 1.1)) continue;
+    lost++;
+    if (seat.implicit) { seat.implicit = false; continue; }
+    const man = CBZ.vehicleDrive.unseat(u.seats, seat);
+    if (!man) continue;
+    man.dead = true; man.hp = 0; man.inVeh = null;
+    DEADN[man.team] = (DEADN[man.team] || 0) + 1;
+    if (man.group) CBZ.studio.drop(man.group);
+    if (by && by.team && by.team !== u.team) by.kills = (by.kills || 0) + 1;
+  }
+  if (lost) { u.crewLost = (u.crewLost || 0) + lost; if (PROBE) { VEH.crewLost = (VEH.crewLost || 0) + lost; } }
+  return lost;
 }
 // killMan's vehicle half: the crew gets out (or does not), the hull burns
 function vehicleWrecked(u, imp) {
@@ -847,37 +1302,94 @@ function pushVehicle(m, o, k) {
 }
 
 /* ------------------------------------------------------------- the look */
-function animateVehicle(u, dt) {
+/* THE UNIT ANIMATES ITSELF, ON THE BATTLE CLOCK. Every sim step (so it
+   stops when the battle is paused and follows the speed dial), for every
+   vehicle kind, alive or wrecked, the unit file's animate(veh, dt, ctx) is
+   called with what the sim knows about the hull this step (ctx, see the
+   contract in docs/npcwar/ARCHITECTURE.md). Distance LOD as for every other
+   body (battle/core/lod.js): a far hull is animated every 2nd or 4th step
+   with the steps' summed dt. A unit with no animate gets the shared one:
+   its rig's update(dt, v, w, steer), and for an aircraft the milAir surface
+   and rotor helper. ctx.shared(dt) runs that from inside a unit's own. */
+function vehAnimate(u, sdt) {
+  u._animAcc = (u._animAcc || 0) + sdt;
+  u._animN = ((u._animN || 0) + 1) & 1023;
+  const every = CBZ.battleLod ? CBZ.battleLod.animEvery(camDist2(u.pos)) : 1;
+  if (u._animN % every) return;
+  const dt = Math.min(0.25, u._animAcc);
+  u._animAcc = 0;
+  const c = u.actx, gy = MAP.groundAt(u.pos.x, u.pos.z);
+  c.t = simT; c.dt = dt;
+  c.dead = !!u.dead; c.wreck = !!u.vs.wreck; c.burning = !!(u.vs.burning || u.burnT > 0);
+  c.agl = u.pos.y - gy; c.speed = u.ds.v; c.vy = u.ds.vy || 0; c.yawRate = u.ds.w || 0;
+  c.steer = u.ds.steer || 0; c.throttle = u.ds.throttle || 0; c.gamma = u.ds.gamma || 0;
+  c.target = u.tgt && !u.tgt.dead ? u.tgt : null; c.phase = u.airPhase || "";
+  const A = u.def.animate;
+  if (typeof A === "function") {
+    try { A(u, dt, c); }
+    catch (e) { if (!u._animErr) { u._animErr = true; console.warn("[war] " + u.unitId + ".animate threw:", e); } }
+  } else vehAnimShared(u, dt);
+  c.firing = null;                                 // a shot is news for one animate only
+}
+function vehAnimShared(u, dt) {
   if (u.dead) return;
-  if (u.air) {
-    if (CBZ.milAirDrive) { try { CBZ.milAirDrive(u.group, { thr: u.def.drive === "rotor" ? 0.8 : 0.7, agl: u.pos.y - MAP.groundAt(u.pos.x, u.pos.z) }, dt); } catch (e) {} }
-    return;
-  }
   if (u.rig && u.rig.update) { try { u.rig.update(dt, u.ds.v, u.ds.w, u.ds.steer || 0); } catch (e) {} }
+  if (u.air && CBZ.milAirDrive) {
+    try { CBZ.milAirDrive(u.group, { thr: u.def.drive === "rotor" ? 0.8 : 0.7, agl: u.pos.y - MAP.groundAt(u.pos.x, u.pos.z) }, dt); } catch (e) {}
+  }
 }
 
 /* ------------------------------------------------------------- YOU drive */
-/* The rifle button on a side with a vehicle puts you in it (player.js
-   join). Move = drive (W/S throttle, A/D steer, the stick on a phone); the
-   mouse lays the turret; attack fires the gun of your seat: the gunner's
-   main gun, or the machine gun from a machine-gun seat. X changes seat. */
-function vehYouSeatWeapon(u) {
-  const want = u._youSeat || 0;
-  const list = u.wpn.filter(function (W) { return W.w.kind !== "bombs" || u.air; });
-  return list.length ? list[want % list.length] : null;
+/* Tap a vehicle (or the rifle button on a side with one) and you are its
+   crew (player.js takeOver). Move = drive (W/S throttle, A/D steer, the
+   stick on a phone); the look lays the turret, pulled onto the auto-target;
+   attack fires the gun for the mark the way the crew would choose it: the
+   main gun at armour, the machine gun at men in its range, the main gun
+   when it is the only thing that reaches. X takes a seat by hand (and keeps
+   it). The chase cam rides the turret while you work the gun (camera.js
+   frameChase). */
+function vehYouSeatWeapon(u, t) {
+  const list = u.wpn.filter(function (W) { return (W.w.kind !== "bombs" || u.air) && !W.off; });
+  if (!list.length) return null;
+  if (u._youSeat != null || !t) return list[(u._youSeat || 0) % list.length];
+  const dist = Math.hypot(t.pos.x - u.pos.x, t.pos.z - u.pos.z);
+  let best = null, bs = -1e9;
+  for (let k = 0; k < list.length; k++) {
+    const W = list[k], w = W.w;
+    if (W.ammo <= 0 || (w.kind !== "bombs" && (dist > (w.range || 600) || dist < (w.minRange || 0)))) continue;
+    if (!vehWeaponFits(u, w, t)) continue;
+    let s = 0;
+    // a weapon whose mount cannot bear on the mark from here comes second
+    // (the nose is off for a fixed gun, the mark is behind a chin gun's arc)
+    if (W.mount === "fixed" || W.mount === "slew") {
+      if (Math.abs(CBZ.vehicleDrive.wrap(Math.atan2(t.pos.x - u.pos.x, t.pos.z - u.pos.z) - u.h)) > W.arc) s -= 2;
+    }
+    if (t.vehicle) s = (w.kind === "cannon" || w.kind === "missile" || w.kind === "autocannon") ? 3 : (w.pen || 0) * 2 > ((t.def.stats.armour || {}).front || 0) ? 1 : -5;
+    else s = w.kind === "mg" ? 3 : w.kind === "autocannon" ? 2 : 1;
+    if (W.cool <= 0 && W.reloadT <= 0) s += 0.5;
+    if (s > bs) { bs = s; best = W; }
+  }
+  return best || list[0];
 }
 function stepYouVehicle(u, sdt) {
-  const IN = CBZ.micro.input, T = CBZ.micro.touch;
-  let thr = 0, st = 0;
-  if (IN) { thr = IN.axis("KeyS", "KeyW"); st = IN.axis("KeyA", "KeyD"); }
-  if (T && T.active && T.stick && T.stick.mag > 0.12) { thr = -T.stick.y; st = T.stick.x; }
+  // move and attack (player.js): the stick is throttle and steering
+  const I = youInput();
   if (u.air) {
     // an aircraft you ride flies its own pattern; you work the guns
     stepAir(u, sdt);
-  } else vehMove(u, sdt, { throttle: thr, steer: st, brake: 0 });
-  // the turret follows your look
+  } else vehMove(u, sdt, { throttle: I.az, steer: I.ax, brake: 0 });
+  youRetarget(u, sdt);
+  /* THE TURRET FOLLOWS YOUR LOOK, and the look is pulled onto the threat
+     nearest it (the auto-target), so a gunner on a phone with no mouse still
+     lays the gun on the man he is facing. */
   const D = CBZ.vehicleDrive, tr = u.def.turret;
-  const rel = D.wrap(YOU.yaw - u.h);
+  const lock = YOU.tgt && !YOU.tgt.dead ? YOU.tgt : null;
+  let aimYaw = YOU.yaw;
+  if (lock) {
+    const b = Math.atan2(lock.pos.x - u.pos.x, lock.pos.z - u.pos.z);
+    if (Math.abs(D.wrap(b - YOU.yaw)) < 0.5) aimYaw = b;
+  }
+  const rel = D.wrap(aimYaw - u.h);
   if (tr) {
     const el = (YOU.pitch - 0.24) * -0.8;
     if (u.rig && u.rig.aimTurret) { u.rig.aimTurret(rel, el, sdt); if (u.rig.turret) u.tur.yaw = u.rig.turret.rotation.y; }
@@ -887,14 +1399,37 @@ function stepYouVehicle(u, sdt) {
       if (tn) tn.rotation.y = u.tur.yaw;
     }
   }
-  const fire = IN && (IN.isDown("KeyJ") || (!COARSE && IN.locked && IN.buttons[0]));
-  const W = vehYouSeatWeapon(u);
+  const fire = I.atk;
+  if (fire) YOU.fireAt = simT;
+  const W = vehYouSeatWeapon(u, lock);
   if (!fire || !W || W.cool > 0 || W.reloadT > 0 || W.ammo <= 0 || u.vs.firepower) return;
-  // the mark: whoever sits nearest the gun line you can see
-  const yaw = tr ? u.h + u.tur.yaw : u.h;
+  if (u.rig && u.rig.canFire) { let ok = true; try { ok = u.rig.canFire(W.shot) !== false; } catch (e) {} if (!ok) return; }
+  /* THE GUN LINE IS THE WEAPON'S MOUNT (vehMountOf): a turret's line is the
+     turret's, a slewing mount (a chin gun) follows the look inside its arc,
+     a free one (a door gun, a pintle) is the look, a fixed one is the nose. */
+  const yaw = W.mount === "turret" && tr ? u.h + u.tur.yaw
+    : W.mount === "slew" ? u.h + D.clamp(D.wrap(aimYaw - u.h), -W.arc, W.arc)
+    : W.mount === "free" ? aimYaw : u.h;
   const fxw = Math.sin(yaw), fzw = Math.cos(yaw);
+  if (W.mount === "slew" && lock && u.group.userData.chinGun && CBZ.milAirAim) {
+    try { CBZ.milAirAim(u.group, lock.pos.x, lock.pos.y + (lock.aimY || 1), lock.pos.z, sdt); } catch (e) {}
+  }
+  // the gun is still traversing onto the mark you are facing: the round waits
+  // for it (a 6 s reload is not spent on the sand beside him)
+  if (lock && W.mount === "turret" && tr && aimYaw !== YOU.yaw && Math.abs(D.wrap(aimYaw - yaw)) > 0.04) return;
+  if (lock && W.mount === "slew" && u.rig && u.rig.aimError) {
+    let e = 0; try { e = +u.rig.aimError(W.shot) || 0; } catch (er) { e = 0; }
+    if (e > (W.w.tol || 0.06)) return;
+  }
+  if (W.w.kind === "cannon" && CBZ.shake) CBZ.shake(0.5);
+  // the mark: the locked threat once the gun is on it, else whoever sits
+  // nearest the gun line you can see
   let best = null, bs = Infinity;
-  for (let k = 0; k < men.length; k++) {
+  if (lock) {
+    const dx = lock.pos.x - u.pos.x, dz = lock.pos.z - u.pos.z, d = Math.hypot(dx, dz);
+    if (d > 2 && d <= (W.w.range || 900) && (dx * fxw + dz * fzw) / d > 0.985 && eyeLos(u, lock)) { best = lock; bs = -1; }
+  }
+  for (let k = 0; k < men.length && bs >= 0; k++) {
     const o = men[k];
     if (o.dead || o.fled || o.team === u.team) continue;
     const dx = o.pos.x - u.pos.x, dz = o.pos.z - u.pos.z, d = Math.hypot(dx, dz);
@@ -906,27 +1441,16 @@ function stepYouVehicle(u, sdt) {
   }
   if (W.w.kind === "bombs") { if (best) vehRelease(u, W, W.w.he); return; }
   if (best) { vehFire(u, W, best, Math.hypot(best.pos.x - u.pos.x, best.pos.z - u.pos.z)); return; }
-  // nothing on the line: the round goes where the gun points
+  // nothing on the line: the round goes where the gun points (and counts)
   W.cool = 1 / Math.max(0.01, W.w.rof || 1); W.ammo--;
+  stats[u.team].shots++; u.shotsF++; u.lastShotT = simT;
+  if (shotsRing.length > 90) shotsRing.shift();
+  shotsRing.push({ x: u.pos.x, z: u.pos.z, t: simT, m: u });
+  const shot = vehShotOf(u, W, null);
   const from = vehicleMuzzle(u, _muz);
   _v.set(from.x + fxw * 300, MAP.groundAt(from.x + fxw * 300, from.z + fzw * 300), from.z + fzw * 300);
   if (CBZ.tracer) { try { CBZ.tracer(from, _v, { shooter: u, muzzle: true, muzzleScale: 2 }); } catch (e) {} }
-  if (u.rig && u.rig.fired && W.w.kind === "cannon") { try { u.rig.fired(1); } catch (e) {} }
+  vehFx(u, from);
+  u.actx.firing = shot; u._firing = null;
   missImpact(from, _v, 0);
-}
-function frameYouVehicle(u, dt) {
-  const IN = CBZ.micro.input;
-  if (IN) {
-    if (IN.pressed("KeyX")) u._youSeat = (u._youSeat || 0) + 1;
-    YOU.yaw -= IN.mx * 0.0024;
-    YOU.pitch = Math.max(0.05, Math.min(0.85, YOU.pitch + IN.mz * 0.002));
-  }
-  // the chase cam: over the hull, looking down the gun
-  const ry = YOU.yaw;
-  cam.wFocus.set(u.pos.x, u.pos.y + u.vheight + (u.air ? 2 : 1.2), u.pos.z);
-  cam.focus.copy(cam.wFocus);
-  cam.wYaw = cam.yaw = ry + Math.PI;
-  cam.wPitch = cam.pitch = Math.max(0.12, YOU.pitch);
-  cam.wDist = cam.dist = Math.max(9, u.vlen * 2.6);
-  cam.followM = u;
 }

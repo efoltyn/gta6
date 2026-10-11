@@ -237,6 +237,7 @@ CBZ.npcwar.onBoot(function () {
         } : null,
         beasts: (function () { let n = 0; for (let i = 0; i < men.length; i++) if (men[i].beast && !men[i].dead) n++; return n; })(),
         steer: STEER_OLD ? "old" : "walls",
+        mass: MASS.audit(),
         swimMode: SWIM_OLD ? "old" : "rig",
         // the ground, as MEASURED off the raised venue (null for the maps that
         // author their own: city, dunes, arena). A checker can finally assert
@@ -396,6 +397,10 @@ CBZ.npcwar.onBoot(function () {
         if (m.dead || m.fled) continue;
         alive[m.team]++; if (m.routed) routed[m.team]++;
       }
+      if (MASS.on) {        // a tiered battle: every row (src/battle/mass.js)
+        const K = MASS.count();
+        alive.red = K.alive[0]; alive.blue = K.alive[1]; routed.red = K.routing[0]; routed.blue = K.routing[1];
+      }
       return { dead: { red: DEADN.red, blue: DEADN.blue }, fled: { red: ARMY.red.fled, blue: ARMY.blue.fled }, alive: alive, routed: routed, simT: simT, winner: winner };
     },
     drift: function () {
@@ -429,6 +434,39 @@ CBZ.npcwar.onBoot(function () {
       return !!best;
     },
     youHurt: function (n) { if (YOU.m) hurtMan(YOU.m, n, { byTeam: YOU.m.team === "red" ? "blue" : "red" }); return YOU.down; },
+    /* TAKE OVER, by hand (player.js takeOver). sel: a unit, "a:3" / "b:0"
+       (that side's body by spawn index), or a unit id (the first living one;
+       "a:lion" names the side too). */
+    take: function (sel) {
+      let u = sel && sel.pos ? sel : null;
+      if (!u && typeof sel === "string") {
+        const ix = /^([ab]):(\d+)$/.exec(sel), sd = /^([ab]):(.+)$/.exec(sel);
+        for (let i = 0; i < men.length && !u; i++) {
+          const m = men[i];
+          if (m.dead || m.fled || m.inVeh) continue;
+          if (ix) { if (m.team === (ix[1] === "a" ? "red" : "blue") && m.i === +ix[2]) u = m; continue; }
+          const id = sd ? sd[2] : sel;
+          if (sd && m.team !== (sd[1] === "a" ? "red" : "blue")) continue;
+          if ((m.species && m.species.id === id) || m.unitId === id || (id === "men" && !m.beast && !m.vehicle)) u = m;
+        }
+      }
+      return u ? takeOver(u) : false;
+    },
+    // a tool's thumbs: { ax, az, run, atk, yaw } instead of the keys (null = the keys)
+    youDrive: function (d) { YOU.drive = d || null; return true; },
+    youState: function () {
+      const m = YOU.m, t = YOU.tgt;
+      return { on: !!m, kind: youKind(m), id: m ? m.id : null, hp: m ? Math.round(m.hp) : 0,
+        kills: m ? (m.kills || 0) : 0, tgt: t && !t.dead ? t.id : null,
+        tgtDist: t && m ? Math.round(Math.hypot(t.pos.x - m.pos.x, t.pos.z - m.pos.z) * 10) / 10 : null,
+        strike: YOU.strike ? YOU.strike.mv.id : null, beat: !!YOU.beat, down: YOU.down,
+        moves: YOU.moves || null, hits: YOU.hits || 0, whiffs: YOU.whiffs || 0, tossed: men.filter(function (o) { return !!o._tossed; }).length };
+    },
+    // where the director is looking and why
+    director: function () {
+      return { mode: cam.mode, shot: cam.shot, on: cam.followM ? cam.followM.id : null, score: Math.round(cam.score * 10) / 10,
+        cuts: cam.cuts, slow: SLOW.n, fov: Math.round(cam.fov * 10) / 10, events: CAMEV.length };
+    },
     freeze: function () {
       if (CBZ.micro.stop) CBZ.micro.stop();
       lastWall = 0;                       // the next real frame must not see a gap
@@ -502,6 +540,24 @@ CBZ.npcwar.onBoot(function () {
        STOPS the orbit, because a photograph taken while the lens is drifting
        is a photograph of a different bearing on each side of a comparison.
        Returns what the lens ended up on, so a preset can assert it. */
+    /* ---- THE LENS ON ONE UNIT (?cam= by tool) ----------------------------
+       camFollow(sel): sel is the page's cam name: a unit id ("ah64_apache",
+       "bengal_tiger", "men") or "a:3" / "b:0". The study desk follows it
+       closely (a hull is ridden off its rear quarter, camera/study.js) and
+       finds the next of its kind if it falls. "a" / "b" ride a side's front.
+       Returns what the lens is on. */
+    camFollow: function (sel) {
+      sel = String(sel || "");
+      if (sel === "a" || sel === "b") { setCamMode("follow", sel === "a" ? "red" : "blue"); return { cam: sel }; }
+      const m = studyFind(sel);
+      if (!m) return null;
+      STUDY.m = m; STUDY.want = sel;
+      setCamMode("study");
+      frameStudy(0);
+      cam.focus.copy(cam.wFocus); cam.yaw = cam.wYaw; cam.pitch = cam.wPitch; cam.dist = cam.wDist;
+      camApply(1);
+      return { id: m.id, unit: m.unitId || (m.beast ? m.species.id : "men"), x: Math.round(m.pos.x), y: Math.round(m.pos.y), z: Math.round(m.pos.z) };
+    },
     camMode: function (mode, pick, yaw) {
       if (pick != null) studyPickBy(pick);
       if (yaw != null) { STUDY.orbit = +yaw || 0; STUDY.spin = 0; }
@@ -596,6 +652,10 @@ CBZ.npcwar.onBoot(function () {
         if (i < SET.redN) spawnQueue.push(["red", i]);
         if (i < SET.blueN) spawnQueue.push(["blue", i]);
       }
+      // a war bigger than this device's FULL rigs is fought in tiers here too
+      // (src/battle/mass.js): the rows go down now, the rigs follow the lens
+      MASS.reset();
+      MASS.begin(false, { restage: true });
       // all of them, now: a tool that asked for a matchup wants the matchup,
       // not ten of it per frame for the next four seconds
       if (o.now !== false) { let g = 0; while (spawnQueue.length && g++ < 4000) drainSpawns(); }

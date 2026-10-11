@@ -1289,6 +1289,32 @@
   // ============================================================
   let _bouts = 0;
 
+  /* THE REAL FIGHT (systems/melee.js). Where both men have a rig and the
+     strike layer is loaded, the exchange is CBZ.melee's fighter: real blows
+     on the rig (kicks, combinations to what is open, feints, counters, a
+     ring of attackers taking angles, tiring, giving up), and this function
+     only hands it his competence. The state machine below is what is left
+     for a body with no rig.
+       opts.onLand(res) given: the blow's damage is the caller's (city peds);
+         the return is the fighter's action, never "swing".
+       no onLand (games/battle.html): "swing" comes back once per LANDED
+         blow, the call after it lands; IQ.lastBlow(a) says where it landed.
+     A studio page (NPC War) that never asked for the "verbs" pack gets it
+     asked for here, once, the first time a man squares up: the fight runs
+     on the state machine for the second it takes to arrive. */
+  let _meleeAsked = false;
+  function meleeLayer(a, tgt) {
+    const ML = CBZ.melee;
+    if (ML && ML.bout && ML.can && ML.can(a, tgt)) return ML;
+    if (!ML && !_meleeAsked && a.char && a.char.parts &&
+        CBZ.studio && typeof CBZ.studio.need === "function") {
+      _meleeAsked = true;
+      try { const pr = CBZ.studio.need(["verbs"]); if (pr && pr.catch) pr.catch(function () {}); } catch (e) { /* no studio here */ }
+    }
+    return null;
+  }
+  IQ.lastBlow = function (a) { return CBZ.melee && CBZ.melee.lastBlow ? CBZ.melee.lastBlow(a) : null; };
+
   IQ.melee = function (a, tgt, dt, opts) {
     if (!on() || C.NPC_IQ_MELEE === false) return null;
     if (!a || !a.pos || !tgt || !tgt.pos || tgt.dead) return null;
@@ -1296,6 +1322,13 @@
     dt = dt || 0.016;
     const p = profile(a);
     const iq = p ? p.meleeIQ : 0.2;
+    const ML = meleeLayer(a, tgt);
+    if (ML) {
+      if (!a._iqM) { a._iqM = { st: "real", t: 0, side: 1, n: 0 }; _bouts++; }
+      a._iqM.st = "real";
+      return ML.bout(a, tgt, dt, { skill: iq, aggression: a.aggr != null ? a.aggr : 0.3 + 0.6 * iq,
+        onLand: opts.onLand || null, quit: opts.quit, weapon: opts.weapon });
+    }
     const reach = opts.reach != null ? opts.reach : 1.85;
     const dx = tgt.pos.x - a.pos.x, dz = tgt.pos.z - a.pos.z;
     const dist = Math.hypot(dx, dz) || 0.001;
@@ -1373,7 +1406,7 @@
       }
     }
   };
-  IQ.meleeReset = function (a) { if (a) a._iqM = null; };
+  IQ.meleeReset = function (a) { if (!a) return; a._iqM = null; if (a._vfS && a._vfS.leave) a._vfS.leave(); };
 
   // ============================================================
   //  8. HOUSEKEEPING + THE RATCHET

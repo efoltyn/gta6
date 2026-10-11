@@ -152,6 +152,11 @@ function begin(asBench) {
   }
   spawnCount.red = SET.redN; spawnCount.blue = SET.blueN;
   spawnTotal = SET.redN + SET.blueN;
+  /* A BATTLE BIGGER THAN THE FULL RIGS THIS DEVICE CARRIES is fought in
+     tiers (src/battle/mass.js): the rows are spawned now, the nearest
+     squads get rigs as the lens reaches them. A smaller one never enters. */
+  MASS.begin(asBench);
+  SETTINGS.apply();                     // shadows, the pixel ceiling, the crowd's bands (src/battle/settingspanel.js)
 
   cam.focus.set(MAP.cx, MAP.groundAt(MAP.cx, MAP.cz) + 2, MAP.cz);
   cam.wFocus.copy(cam.focus);
@@ -194,15 +199,9 @@ function urlLens() {
   const c = SET.cam;
   if (c === "a" || c === "b") setCamMode("follow", c === "a" ? "red" : "blue");
   else if (c) {
-    let pick = null;
-    const ix = /^([ab]):(\d+)$/.exec(c);
-    for (let i = 0; i < men.length && !pick; i++) {
-      const m = men[i];
-      if (m.dead) continue;
-      if (ix) { if (m.team === (ix[1] === "a" ? "red" : "blue") && m.i === +ix[2]) pick = m; }
-      else if ((m.species && m.species.id === c) || m.unitId === c || (c === "men" && !m.beast && !m.vehicle)) pick = m;
-    }
-    if (pick) { STUDY.m = pick; setCamMode("study"); }
+    // the study desk follows it, and finds the next of its kind if it falls
+    const pick = studyFind(c);
+    if (pick) { STUDY.m = pick; STUDY.want = c; setCamMode("study"); }
   }
   if (SET.freeze) setSpeed(0);
 }

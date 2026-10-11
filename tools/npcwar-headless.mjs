@@ -43,188 +43,7 @@ const only = process.argv[2] ? +process.argv[2] : 0;
 let fails = 0, passes = 0;
 function check(ok, msg) { if (ok) { passes++; console.log("  PASS " + msg); } else { fails++; console.log("  FAIL " + msg); } }
 
-/* The page is src/battle/*.js, loaded in the order games/battle.html lists
-   them (one shared script scope, exactly like the browser: each file runs as
-   its own script in the same context). Any inline <script> blocks still on
-   the page run where they sit. */
-const HTML = fs.readFileSync(path.join(ROOT, "games/battle.html"), "utf8");
-const PAGE_SCRIPTS = [];
-for (const m of HTML.matchAll(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/script>/g)) {
-  const src = m[1];
-  if (src) {
-    const rel = src.replace(/\?.*$/, "").replace(/^\.\.\//, "");
-    if (!/^src\/(battle|units)\//.test(rel)) continue;  // the studio is stubbed below
-    PAGE_SCRIPTS.push({ name: rel, code: fs.readFileSync(path.join(ROOT, rel), "utf8") });
-  } else if (m[2].trim()) PAGE_SCRIPTS.push({ name: "battle.inline.js", code: m[2] });
-}
-const THREE_SRC = fs.readFileSync(path.join(ROOT, "src/vendor/three.r128.min.js"), "utf8");
-
-// ------------------------------------------------------------------ a fake DOM
-function mkEl(tag, doc) {
-  const e = {
-    tagName: String(tag || "div").toUpperCase(), id: "", children: [], parentNode: null, dataset: {},
-    style: { setProperty() {}, removeProperty() {} }, _cls: new Set(), _html: "", textContent: "", value: "",
-    disabled: false, open: false, _ev: {},
-    classList: null, firstChild: null,
-    addEventListener(t, f) { (e._ev[t] = e._ev[t] || []).push(f); },
-    removeEventListener() {},
-    appendChild(c) { c.parentNode = e; e.children.push(c); if (c.tagName === "SCRIPT" && doc._onScript) doc._onScript(c); return c; },
-    insertBefore(c) { c.parentNode = e; e.children.unshift(c); return c; },
-    removeChild(c) { const i = e.children.indexOf(c); if (i >= 0) e.children.splice(i, 1); return c; },
-    querySelector() { return doc._generic(); },
-    querySelectorAll() { return []; },
-    closest() { return null; },
-    getContext() { return ctx2d(); },
-    getBoundingClientRect() { return { left: 0, top: 0, width: 100, height: 100 }; },
-    toDataURL() { return "data:image/png;base64,AAAA"; },
-    setAttribute() {}, focus() {}, click() { (e._ev.click || []).forEach((f) => f({ target: e })); },
-    requestPointerLock() {},
-  };
-  Object.defineProperty(e, "innerHTML", { get() { return e._html; }, set(v) { e._html = String(v); } });
-  Object.defineProperty(e, "firstElementChild", { get() { return e.children[0] || doc._generic(); } });
-  e.classList = { add: (...c) => c.forEach((x) => e._cls.add(x)), remove: (...c) => c.forEach((x) => e._cls.delete(x)),
-    toggle: (c, on) => { const v = on === undefined ? !e._cls.has(c) : !!on; if (v) e._cls.add(c); else e._cls.delete(c); return v; },
-    contains: (c) => e._cls.has(c) };
-  e.width = 0; e.height = 0;
-  return e;
-}
-function ctx2d() {
-  const n = () => {};
-  return new Proxy({}, { get(t, k) { if (k === "measureText") return () => ({ width: 10 }); if (k === "createLinearGradient" || k === "createRadialGradient") return () => ({ addColorStop: n }); if (k === "getImageData") return (x, y, w, h) => ({ data: new Uint8ClampedArray(Math.max(1, w * h * 4)) }); return t[k] !== undefined ? t[k] : n; }, set(t, k, v) { t[k] = v; return true; } });
-}
-function mkDoc() {
-  const doc = { _byId: {} };
-  doc._generic = () => mkEl("div", doc);
-  doc.getElementById = (id) => doc._byId[id] || (doc._byId[id] = Object.assign(mkEl("div", doc), { id }));
-  doc.createElement = (t) => mkEl(t, doc);
-  doc.querySelector = () => doc._generic();
-  doc.querySelectorAll = () => [];
-  doc.addEventListener = () => {};
-  doc.body = mkEl("body", doc); doc.head = mkEl("head", doc);
-  doc.pointerLockElement = null;
-  doc.exitPointerLock = () => {};
-  // the armoury's script tags "load" at once: the real files were run above
-  // ...except a UNIT file (units/unitkit.js tags it data-unit): those are the
-  // species/vehicle files a roster asked for, and they run for real
-  doc._onScript = (c) => {
-    if (c.dataset && c.dataset.unit && doc._runUnit) {
-      try { doc._runUnit(String(c.src).replace(/\?.*$/, "").replace(/^(\.\.\/)?src\//, "")); }
-      catch (e) { console.log("  (unit file " + c.src + " threw: " + e.message + ")"); }
-    }
-    if (c.onload) Promise.resolve().then(() => c.onload());
-  };
-  return doc;
-}
-
-// ------------------------------------------------------------------ one battle
-function boot(url, opts) {
-  opts = opts || {};
-  const doc = mkDoc();
-  const posted = [];
-  let clock = 0;
-  const frameHooks = [];
-  const sb = {
-    console, Math, JSON, Date, Promise, Map, Set, WeakMap, Symbol, Proxy, Reflect, Array, Object, Number, String, Boolean,
-    Float32Array, Float64Array, Uint8Array, Uint16Array, Uint32Array, Int32Array, Int16Array, Uint8ClampedArray, ArrayBuffer, DataView,
-    Error, TypeError, RangeError, parseInt, parseFloat, isFinite, isNaN, Infinity, NaN, undefined,
-    encodeURIComponent, decodeURIComponent, escape, unescape, atob: (s) => Buffer.from(s, "base64").toString("binary"), btoa: (s) => Buffer.from(s, "binary").toString("base64"),
-    setTimeout: (f) => { try { f(); } catch (e) { console.error("[timeout]", e); } return 0; }, clearTimeout() {}, setInterval() { return 0; }, clearInterval() {},
-    requestAnimationFrame() { return 0; }, cancelAnimationFrame() {},
-    URLSearchParams, TextDecoder, TextEncoder,
-    performance: { now: () => clock * 1000 },
-    navigator: { maxTouchPoints: 0, userAgent: "node" },
-    localStorage: { _s: {}, getItem(k) { return this._s[k] == null ? null : this._s[k]; }, setItem(k, v) { this._s[k] = String(v); }, removeItem(k) { delete this._s[k]; } },
-    location: { search: url, pathname: "/games/battle.html", origin: "http://x", href: "" },
-    innerWidth: 1280, innerHeight: 720, devicePixelRatio: 1,
-    matchMedia: () => ({ matches: false, addEventListener() {} }),
-    addEventListener() {}, removeEventListener() {},
-    document: doc,
-    Image: function () { return mkEl("img", doc); },
-  };
-  sb.window = sb; sb.self = sb; sb.globalThis = sb;
-  sb.parent = { postMessage: (m) => posted.push(m) };
-  vm.createContext(sb);
-  doc._runUnit = (rel) => {
-    const f = path.join(ROOT, "src", rel);
-    if (fs.existsSync(f)) vm.runInContext(fs.readFileSync(f, "utf8"), sb, { filename: "src/" + rel });
-  };
-  vm.runInContext(THREE_SRC, sb, { filename: "three.r128.min.js" });
-  const THREE = sb.THREE;
-  // the engine files the armoury would have loaded, for real
-  sb.CBZ = { CONFIG: {}, game: { mode: "studio", state: "playing" }, now: 0 };
-  const CBZ = sb.CBZ;
-  for (const f of ["src/weapons/weapon-data.js", "src/systems/brain.js", "src/systems/combat_iq.js"]) {
-    try { vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), sb, { filename: f }); }
-    catch (e) { console.log("  (load " + f + " threw: " + e.message + ")"); }
-  }
-  // ---- the world the studio would raise: a rolling erg, a downtown-free basin
-  const heightAt = (x, z) => 9 * Math.sin(x * 0.011) * Math.cos(z * 0.009) + 4 * Math.sin((x + z) * 0.03);
-  const terrain = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), new THREE.MeshLambertMaterial());
-  terrain.name = "terrain";
-  CBZ.scene = new THREE.Scene();
-  CBZ.camera = new THREE.PerspectiveCamera(60, 1.6, 0.1, 9000);
-  const sun = new THREE.DirectionalLight(0xffffff, 1);
-  CBZ.seedStream = (name) => { let s = 1234567; for (const c of String(name)) s = (s * 31 + c.charCodeAt(0)) & 0x7fffffff; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; };
-  CBZ.studio = {
-    root: "../src/", touchDevice: false,
-    plan: () => ({ files: [] }), onProgress() {}, warm() {}, prefetch() {},
-    need: () => Promise.resolve(),
-    world: () => { const root = new THREE.Group(); root.add(terrain); return { heightAt, rings: { city: 1050, dune: 2700 }, root, terrain }; },
-    cast: (role, o) => {
-      const g = new THREE.Group();
-      const cap = (o && o.uniform && o.uniform.cap) || 0x222222;
-      for (let i = 0; i < 2; i++) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1 + i * 0.1, 0.3), new THREE.MeshLambertMaterial({ color: cap })); g.add(m); }
-      g.userData.charRig = {};
-      return g;
-    },
-    town: () => null, raise: () => null, heightfield: () => null, settle() {}, hud: () => ({}),
-    // an aircraft is a point with a velocity here; its controls answer and do nothing
-    fly: (k, o) => {
-      const af = { pos: new THREE.Vector3(o && o.at ? o.at.x : 3000, o && o.at ? o.at.y : 330, o && o.at ? o.at.z : 0), vel: new THREE.Vector3(-165, 0, 0), speed: 165, heading: 0 };
-      return { af: new Proxy(af, { get: (t, key) => (key in t ? t[key] : () => {}) }), group: new THREE.Group() };
-    },
-    trail: () => new Proxy({}, { get: () => () => {} }), collapseAt() {}, drop() {}, boom() {}, join() {},
-  };
-  const input = { keys: {}, down: {}, up: {}, mx: 0, mz: 0, wheel: 0, buttons: [false, false, false], clicked: [false, false, false], locked: false, enabled: true };
-  input.isDown = (c) => !!input.keys[c]; input.pressed = (c) => !!input.down[c];
-  input.axis = (n, p) => (input.keys[p] ? 1 : 0) - (input.keys[n] ? 1 : 0);
-  CBZ.micro = {
-    boot() {}, onFrame(fn) { frameHooks.push(fn); }, input, pauseKey: "Space",
-    segmentBlocked: () => false, resolveCircle() {}, addBoxCollider() {}, colliderContains: () => false, queryColliders: () => [],
-    sun, skyDome: null, renderer: null, fps: 60, sfx: { tone() {} }, lock() { input.locked = true; }, unlock() { input.locked = false; },
-    touch: null, stop() {},
-    stepSim(d) {
-      clock += d;
-      for (const f of frameHooks.slice()) f(d);
-      for (const k in input.down) input.down[k] = false;
-      input.mx = input.mz = 0; input.clicked[0] = false;
-    },
-  };
-  CBZ.queryCollidersNear = () => [];
-  // gunfx's drawing half: the rounds are drawn, nothing here can see them
-  CBZ.tracer = () => {}; CBZ.sfx = () => {}; CBZ.bulletImpact = () => {}; CBZ.bulletHole = () => {}; CBZ.muzzleFlash = () => {};
-  CBZ.WILDLIFE_SPECIES = {};
-  CBZ.ordnance = {
-    init() {}, step() {}, addTarget: (t) => t, removeTarget() {}, kinds: {},
-    stick: (o) => { sb._sticks = (sb._sticks || 0) + 1; }, release() {},
-  };
-  // run the page
-  try { for (const s of PAGE_SCRIPTS) vm.runInContext(s.code, sb, { filename: s.name }); }
-  catch (e) { return { err: e }; }
-  return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE };
-}
-async function settle() { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); }
-function run(W, secs, each) {
-  const B = W.B();
-  let t = 0;
-  while (t < secs) {
-    B.advance(0.5, 1 / 20);
-    t += 0.5;
-    if (each && each(t) === false) break;
-    if (B.audit().over) break;
-  }
-  return B.audit();
-}
+import { boot, settle, run, G } from "./lib/npcwar-node.mjs";
 
 const scen = [];
 function scenario(n, name, fn) { scen.push({ n, name, fn }); }
@@ -239,6 +58,8 @@ scenario(1, "the war room: equal riflemen meet and it ends", async () => {
   const a = run(W, 240);
   check(a.over, "it ended (" + a.simT + " s, winner " + a.winner + ", red " + a.red + " blue " + a.blue + ")");
   check(a.stats.red.shots > 0 && a.stats.blue.shots > 0, "both lines fired (" + a.stats.red.shots + "/" + a.stats.blue.shots + ")");
+  // the weapons' own ledger (src/battle/fire.js): ranges, organs, penetrations
+  if (W.CBZ.battleArms && W.CBZ.battleArms.audit) console.log("    arms " + JSON.stringify(W.CBZ.battleArms.audit()));
 });
 
 scenario(2, "the few hold, the many come", async () => {
@@ -322,7 +143,9 @@ scenario(4, "the rifle: be a soldier, fire, hand it back, go down", async () => 
   W.sb.__battle.youFace();
   W.input.locked = true; W.input.buttons[0] = true;
   let shots0 = W.B().audit().stats.red.shots;
-  run(W, 25, () => { W.sb.__battle.youFace(); return !!W.sb.__battle.you().on; });
+  // (until somebody falls, or 12 s: rifle rounds settle a fight fast, and the
+  // battle has to still be on for the last half of this scenario)
+  run(W, 12, () => { W.sb.__battle.youFace(); const y = W.sb.__battle.you(); return !!y.on && !(y.kills > 0); });
   W.input.buttons[0] = false;
   const yr = W.sb.__battle.you();
   check(yr.shots > 0, "the trigger fires the page's own rounds (" + yr.shots + " fired, " + yr.hits + " hit, " + yr.kills + " killed)");
@@ -335,7 +158,126 @@ scenario(4, "the rifle: be a soldier, fire, hand it back, go down", async () => 
   const before = W.sb.__battle.you();
   if (before.on) W.sb.__battle.youHurt(1e6);
   check(W.sb.__battle.you().down, "a soldier killed out there is reported down");
-  check(W.B().audit().cam.mode === "auto", "and the lens goes back to the director");
+  check(W.B().audit().cam.mode === "youdead", "the lens holds the death beat on his body");
+  const fell = before.on ? before : null;
+  run(W, 2.5);
+  const hop = W.sb.__battle.youState();
+  check(hop.on && hop.kind === "man" && W.B().audit().cam.mode === "you" && fell && hop.id !== null,
+    "after the beat you are in the nearest ally's boots (" + JSON.stringify(hop) + ")");
+  W.doc.getElementById("cRifle").click();
+  check(!W.sb.__battle.you().on && W.B().audit().cam.mode === "auto", "and the rifle button still hands the body back");
+});
+
+/* TAKE OVER ANYTHING (player.js) and THE DIRECTOR (camera/camera.js). The
+   node world has no bestiary, so the animals here are honest stand-ins: a
+   box body on a species row, driven by the real unit file's numbers, the
+   real creature_combat strike driver and the real move picker
+   (units/kit/moves.js). What is held is the CONTROL, not the art. */
+function standInAnimals(W, rows) {
+  const T = W.THREE, C = W.CBZ;
+  C.cmat = (c) => new T.MeshLambertMaterial({ color: c });
+  C.boxGeom = (x, y, z) => new T.BoxGeometry(x, y, z);
+  C.faceAnimalHeading = (m, h) => { m.group.rotation.y = -h; };
+  for (const id in rows) {
+    const r = rows[id];
+    C.WILDLIFE_SPECIES[id] = Object.assign({ id, name: id, hp: 160, spd: 3, danger: 0.8, bite: 26, scale: 1 }, r, {
+      build: () => {
+        const g = new T.Group();
+        const b = new T.Mesh(new T.BoxGeometry(r.len, r.h, r.w), new T.MeshLambertMaterial());
+        b.position.y = r.h / 2; g.add(b);
+        // a head at the front, where the jaws are (creature_combat finds the
+        // mouth as the most forward mesh)
+        const hd = new T.Mesh(new T.BoxGeometry(r.len * 0.18, r.h * 0.3, r.w * 0.6), new T.MeshLambertMaterial());
+        hd.position.set(r.len * 0.5, r.h * 0.8, 0); g.add(hd);
+        return g;
+      },
+    });
+  }
+  try { vm.runInContext(fs.readFileSync(path.join(ROOT, "src/city/creature_combat.js"), "utf8"), W.sb, { filename: "creature_combat.js" }); }
+  catch (e) { console.log("  (creature_combat threw: " + e.message + ")"); }
+}
+// hold the stick at the nearest enemy, sprinting, with the attack down
+function chaseNearest(W) {
+  W.sb.__battle.youFace();
+  const st = W.sb.__battle.youState();
+  return st.on;
+}
+scenario(10, "take over anything: an animal, an elephant's trunk, a tank, a tap; the director", async () => {
+  {
+    const W = boot("?a=lion&b=men&n=1v4&bw=fists&bt=civ&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    standInAnimals(W, { lion: { len: 2.2, h: 1.1, w: 0.7 } });
+    await settle();
+    run(W, 1);
+    const ok = W.sb.__battle.take("a:lion");
+    const st = W.sb.__battle.youState();
+    check(ok && st.kind === "beast" && W.B().audit().cam.mode === "you", "a tap on the lion makes you the lion (" + JSON.stringify(st) + ")");
+    const blueHp = () => W.sb.__battle.roster().filter((m) => m.team === "blue").reduce((s, m) => s + Math.max(0, m.hp), 0);
+    const hp0 = blueHp();
+    W.sb.__battle.youDrive({ az: 1, run: true, atk: true });
+    let s2 = null;
+    run(W, 20, () => { s2 = W.sb.__battle.youState(); return chaseNearest(W); });
+    W.sb.__battle.youDrive(null);
+    const mv = s2.moves || {};
+    // a species file may name its own moves (lion_pounce, lion_swat ...): count by kind
+    const kind = (k) => Object.keys(mv).filter((n) => n === k || n.endsWith("_" + k)).reduce((a, n) => a + mv[n], 0);
+    check(kind("pounce") + kind("swipe") + kind("swat") + kind("bite") + kind("throat") > 2,
+      "attack throws the cat's real moves by context (" + JSON.stringify(mv) + ")");
+    check(kind("pounce") > 0, "a sprint into range is a pounce (" + kind("pounce") + ")");
+    const tal = W.sb.__battle.tally();
+    check(s2.hits >= 3 && hp0 - blueHp() > 60, "and the blows land in the page's damage funnel (" + s2.hits + " strikes landed, " + s2.whiffs + " at the air, " +
+      Math.round(hp0 - blueHp()) + " hp off the men, " + tal.dead.blue + " down)");
+  }
+  {
+    const W = boot("?a=african_elephant&b=men&n=1v10&bw=fists&bt=civ&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    standInAnimals(W, { african_elephant: { len: 6, h: 3.2, w: 2.2, hp: 1200, spd: 2.2, bite: 60, scale: 2.6 } });
+    await settle();
+    run(W, 1);
+    check(W.sb.__battle.take("a:african_elephant"), "you are the elephant");
+    W.sb.__battle.youDrive({ az: 0.6, run: false, atk: true });
+    let tossed = 0;
+    run(W, 25, () => { tossed = Math.max(tossed, W.sb.__battle.youState().tossed); return chaseNearest(W); });
+    const mv = W.sb.__battle.youState().moves || {};
+    W.sb.__battle.youDrive(null);
+    check((mv.trunk || 0) > 0 && tossed > 0, "the trunk takes a man and throws him (" + JSON.stringify(mv) + ", " + tossed + " in the air at once)");
+  }
+  {
+    const W = boot("?a=m1_abrams*1&b=men&n=1v20&arena=dunes&bw=ak47&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 2);
+    const tank = W.sb.__battle.roster().find((m) => m.unitId === "m1_abrams");
+    // TAP: project the hull onto the screen and press there
+    const v = new W.THREE.Vector3(tank.pos.x, tank.pos.y + 1.5, tank.pos.z);
+    W.CBZ.camera.updateMatrixWorld();
+    v.project(W.CBZ.camera);
+    const took = v.z < 1 && G(W, "tapTake(" + ((v.x + 1) / 2 * 1280) + "," + ((1 - v.y) / 2 * 720) + ")");
+    if (!took) W.sb.__battle.take(tank);
+    const st = W.sb.__battle.youState();
+    check(took && st.kind === "vehicle", "a tap on the tank puts you in it (" + (took ? "tapped" : "missed the tap") + ", " + JSON.stringify(st) + ")");
+    const p0 = { x: tank.pos.x, z: tank.pos.z };
+    W.sb.__battle.youDrive({ az: 1, atk: false });
+    run(W, 3);
+    check(Math.hypot(tank.pos.x - p0.x, tank.pos.z - p0.z) > 3, "move drives it (" + Math.hypot(tank.pos.x - p0.x, tank.pos.z - p0.z).toFixed(1) + " m)");
+    W.sb.__battle.youDrive({ az: 0, atk: true });
+    const f0 = tank.shotsF;
+    run(W, 12, () => { W.sb.__battle.youFace(); return W.sb.__battle.youState().on; });
+    W.sb.__battle.youDrive(null);
+    check(tank.shotsF > f0, "attack fires the seat's gun at the threat it faces (" + (tank.shotsF - f0) + " rounds, " + tank.kills + " kills" +
+      (tank.shotsF > f0 ? "" : "; " + JSON.stringify(tank.wpn.map((w) => ({ id: w.w.id, cool: +w.cool.toFixed(2), ammo: w.ammo, rl: w.reloadT }))) + " fp " + tank.vs.firepower + " " + JSON.stringify(W.sb.__battle.youState())) + ")");
+  }
+  {
+    const W = boot("?a=men&b=men&n=120v120&rw=ak47&bw=ak47&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    await settle();
+    const shots = new Set();
+    let maxCuts = 0;
+    run(W, 70, () => { const d = W.sb.__battle.director(); shots.add(d.shot); maxCuts = d.cuts; return true; });
+    check(maxCuts >= 3, "the director cuts on its own (" + maxCuts + " cuts)");
+    check(shots.has("hero") && (shots.has("establish") || shots.has("general")), "close follows and wides, by what is happening (" + [...shots].join(", ") + ")");
+  }
 });
 
 scenario(5, "snow, fields and the wood: the skins build and fight", async () => {
@@ -395,6 +337,7 @@ scenario(10, "the ground: cover for the host, earthworks, craters, broken cover"
 
 scenario(6, "calibration: the headless resolver against the page's own battle", async () => {
   globalThis.window = globalThis; globalThis.CBZ = { game: {} };
+  require(path.join(ROOT, "src/weapons/ballistics.js"));   // the resolver asks the same physics the page flies
   require(path.join(ROOT, "src/systems/brain.js"));
   const F = require(path.join(ROOT, "src/city/frontline.js"));
   const CASES = [
@@ -434,8 +377,12 @@ scenario(6, "calibration: the headless resolver against the page's own battle", 
     const nL = L === "red" ? c.r : c.b;
     const pLoseDead = T.dead[L] / nL, rLoseDead = (L === "red" ? acc.rd : acc.bd) / N / nL;
     // an EVEN fight is decided by the ground under it (which side drew the
-    // crest), which the resolver does not model: a coin, not a verdict
-    const even = c.r === c.b && c.rt === c.bt && c.rw === c.bw;
+    // crest), which the resolver does not model: a coin, not a verdict. Since
+    // the rounds are flown (src/battle/fire.js) a rifle exchange is settled in
+    // seconds by who sees whom first, so a 13% edge in men of the same
+    // training with rifles is inside that coin too
+    const even = c.rt === c.bt && Math.abs(c.r - c.b) <= 0.15 * Math.max(c.r, c.b) &&
+      /^(ak47|carbine)$/.test(c.rw) && /^(ak47|carbine)$/.test(c.bw);
     if (rWin === pWin || even) agree++;
     if (Math.abs(pLoseDead - rLoseDead) <= 0.3) close++;
     const f = (x) => String(Math.round(x)).padStart(3);
@@ -523,6 +470,8 @@ scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawle
     console.log("    (one crewman: drove " + moved.toFixed(1) + " m, fought from where he stood)");
     check(tank.shotsF > 0, "its guns fired (" + tank.shotsF + " rounds, " + tank.hitsF + " hits; " + tank.wpn.map((w) => w.w.id + " " + ((w.w.ammo || 0) - w.ammo)).join(", ") + ")");
     check(tank.kills > 0, "and killed (" + tank.kills + ")");
+    const cmdGun = tank.wpn.filter((w) => w.w.seat && w.w.seat !== tank.wpn[0].w.seat);
+    check(cmdGun.every((w) => w.n === 0), "a lone driver works the main gun's seat, never an empty one's (" + cmdGun.map((w) => w.w.id + " " + w.n).join(", ") + ")");
     check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ", red " + a.red + " blue " + a.blue + ")");
   }
   {
@@ -562,6 +511,13 @@ scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawle
     check(out === 1, "the riflemen got out (" + (ifv && ifv.dismounted ? "dismounted" : "never") + ")");
     check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ")");
   }
+});
+
+/* 11  AIRCRAFT. The vehicle contract's air half (docs/npcwar/ARCHITECTURE.md):
+   a helicopter fights from battle positions (masked low, up to fire, down,
+   sidestep), a jet flies attack runs at a real height; every unit animates
+   itself on the battle clock and names the weapon of every round. */
+scenario(11, "aircraft: an Apache's battle positions, an F-35's attack runs", async () => {
   {
     const W = boot("?a=ah64_apache*1&b=men&n=1v30&arena=dunes&bw=ak47&auto=1&probe=0");
     if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
@@ -569,10 +525,66 @@ scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawle
     await settle();
     run(W, 2);
     const h = W.sb.__battle.roster().find((m) => m.unitId === "ah64_apache");
-    check(!!h && h.air && h.pos.y > 20, "the Apache is in the air (" + (h ? Math.round(h.pos.y) : "-") + " m)");
-    const a = run(W, 300);
-    check(h && h.kills > 0, "and it killed from there (" + (h && h.kills) + ")");
+    const agl = () => h.pos.y - vm.runInContext("MAP", W.sb).groundAt(h.pos.x, h.pos.z);
+    check(!!h && h.air && agl() > 3, "the Apache is in the air (" + (h ? Math.round(agl()) : "-") + " m over the ground)");
+    if (!h) return;
+    /* THE VEHICLE CONTRACT (docs/npcwar/ARCHITECTURE.md): the unit's own
+       animate runs on the battle clock, the side's nation reached build(),
+       every round names its weapon, and a fixed weapon only fires with the
+       nose on the mark. Wrapped around the rig's own hooks. */
+    check(h.side && h.side.nation === "kesh" && (h.side.flag || !(W.CBZ.flags && W.CBZ.flags.designFor)), "build(ctx) was told the side: " + (h.side && h.side.nation));
+    const R0 = h.rig.state, clock0 = R0.clock;
+    const fired = {}, offNose = [];
+    const fire0 = h.rig.fire;
+    h.rig.fire = function (shot) {
+      fired[shot.wid] = (fired[shot.wid] || 0) + 1;
+      const W0 = h.wpn[shot.wi];
+      if (W0.mount === "fixed" && shot.target) {
+        const off = Math.abs(W.CBZ.vehicleDrive.wrap(Math.atan2(shot.target.pos.x - h.pos.x, shot.target.pos.z - h.pos.z) - h.h));
+        if (off > W0.arc + 0.02) offNose.push(shot.wid + " " + off.toFixed(2));
+      }
+      return fire0.apply(this, arguments);
+    };
+    const phases = {};
+    let lo = 1e9, hi = -1e9;
+    const a = run(W, 300, () => { phases[h.airPhase] = 1; if (!h.dead) { lo = Math.min(lo, agl()); hi = Math.max(hi, agl()); } return true; });
+    check(R0.clock > clock0 + 1, "its own animate ran on the battle clock (rig clock " + clock0.toFixed(1) + " -> " + R0.clock.toFixed(1) + " s)");
+    check(Object.keys(fired).length > 0 && Object.keys(fired).every((k) => h.wpn.some((w) => w.w.id === k)),
+      "every round named its weapon (" + JSON.stringify(fired) + ")");
+    check(offNose.length === 0, "fixed weapons fired only with the nose on the mark (" + (offNose.slice(0, 4).join(", ") || "none off") + ")");
+    console.log("    (flight: phases " + Object.keys(phases).join(" ") + ", " + Math.round(lo) + "-" + Math.round(hi) + " m over the ground)");
+    check(phases.mask && phases.pop, "it fought from battle positions: masked low, popped up to fire");
+    check(h.kills > 0, "and it killed from there (" + h.kills + ")");
     check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ")");
+  }
+  {
+    /* A JET FLIES ATTACK RUNS AT A REAL HEIGHT: the F-35 bombs from medium
+       altitude (GBU-12s released kilometres short, guided onto the mark),
+       then strafes in a dive with the nose on the mark. */
+    const W = boot("?a=f35*1&b=men&n=1v30&arena=dunes&bw=ak47&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 1);
+    const j = W.sb.__battle.roster().find((m) => m.unitId === "f35");
+    if (!j) { check(false, "the F-35 is on the field"); return; }
+    const agl = () => j.pos.y - vm.runInContext("MAP", W.sb).groundAt(j.pos.x, j.pos.z);
+    check(agl() > 3000, "the F-35 comes in at medium altitude (" + Math.round(agl()) + " m)");
+    let relD = 0, lo = 1e9;
+    const R = W.sb.__battle.roster();
+    const a = run(W, 300, () => {
+      if (!j.dead) lo = Math.min(lo, agl());
+      const W0 = j.wpn[0];
+      if (!relD && W0.n > 0) {
+        const t = j.tgt || R.find((m) => m.team === "blue" && !m.dead);
+        relD = t ? Math.hypot(t.pos.x - j.pos.x, t.pos.z - j.pos.z) : -1;
+      }
+      return true;
+    });
+    check(j.wpn[0].n > 0 && relD > 2000, "it released its bombs a stand-off short of the mark (" + j.wpn[0].n + " away, first " + Math.round(relD) + " m out)");
+    check(j.wpn[1].n === 0 || lo < 1400, "the gun run was a dive (" + j.wpn[1].n + " rounds, lowest " + Math.round(lo) + " m)");
+    check(lo >= 59, "never below 60 m over the ground (" + Math.round(lo) + " m)");
+    console.log("    (F-35: " + j.kills + " kills, war " + (a.over ? "over at " + a.simT + " s" : "still on") + ")");
   }
 });
 
@@ -583,7 +595,6 @@ scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawle
    thing); the new URL names (a b n arena at bt af bf bo sa sb) build the war;
    a best-of-3 at 1-0 scores this round, says the series, and hands the next
    round the score in its URL. Nothing a player reads says RED or BLUE. */
-const G = (W, expr) => vm.runInContext(expr, W.sb);
 scenario(9, "sides, best-of, the URL matchup: no colour on screen", async () => {
   const W = boot("?a=men&b=men&n=20v12&arena=dunes&aw=ak47&bw=ak47&at=elite&bt=thug&af=kesh&bf=veridia&bo=3&sa=1&sb=0&auto=1&probe=0");
   if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }

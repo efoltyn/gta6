@@ -136,7 +136,11 @@ const rows = [];
 const info = {};
 for (const kind of HEAD.concat(BODY)) {
   const reach = V.reachOf(kind);
+  // the vocabulary is the blow's path into a man in his stance with his
+  // hands down (gassed): a guard that is up takes head shots on the
+  // forearms, and that is checked under BLOCK
   const { A, B } = pair(reach - 0.08);
+  if (HEAD.includes(kind)) { B.char.winded = 0.75; run(30); }
   const ch = A.char, bch = B.char;
   const kick = /kick|knee/i.test(kind);
   const rec = { kind, landed: false, zone: null, tContact: null, pContact: null, surf: null, hipTurn: 0, flat: null, lowY: null, guardBack: null, done: false, feet: 9, dmgMul: null };
@@ -177,6 +181,7 @@ for (const kind of HEAD.concat(BODY)) {
   // out of range: the same blow at reach + 0.45 without a step must miss
   {
     const { A: A2, B: B2 } = pair(reach + 0.45);
+    if (HEAD.includes(kind)) { B2.char.winded = 0.75; run(30); }
     let landed = false, whiffed = false;
     V.strike(A2, B2, { kind, lunge: false, onLand() { landed = true; }, onWhiff() { whiffed = true; } });
     run(Math.ceil((dur + 0.3) / DT));
@@ -317,6 +322,20 @@ let blockRow = {}, slipRow = {};
   V.strike(P2.A, P2.B, { kind: "body", lunge: false, onLand(r) { bres = { blocked: r.blocked, zone: r.zone }; r.reaction = "none"; }, onBlocked(r) { bres = { blocked: true, zone: r.zone }; } });
   run(40);
   check(!!(bres && !bres.blocked), "a body shot goes under the high guard (" + JSON.stringify(bres) + ")");
+  // THE STANCE IS A GUARD: a man squared up (no block thrown) takes some
+  // straights on the forearms he carries at his eyes and jaw; an open man
+  // takes them all
+  let onArms = 0, openArms = 0;
+  for (const kind of ["jab", "cross", "jab", "cross", "hook", "cross"]) {
+    for (const guardUp of [true, false]) {
+      const P3 = pair(1.2, { bGuard: guardUp ? undefined : false });
+      let r3 = null;
+      V.strike(P3.A, P3.B, { kind, lunge: false, onLand(r) { r3 = r.blocked; r.reaction = "none"; }, onBlocked(r) { r3 = true; } });
+      run(40);
+      if (r3 === true) { if (guardUp) onArms++; else openArms++; }
+    }
+  }
+  check(onArms >= 1 && openArms === 0, "the fighting stance takes straights on the forearms (" + onArms + "/6 in stance, " + openArms + "/6 open)");
 }
 {
   const { A, B } = pair(1.2);
@@ -481,7 +500,7 @@ if (W.ctx && CBZ.playerChar) {
     const tick = (n) => { for (let i = 0; i < n; i++) { PC.group.position.copy(CBZ.player.pos); CBZ.animChar(PC, 0, DT); W.frame(DT); } };
     tick(10);
     const hps = [B.hp];
-    for (let k = 0; k < 3; k++) { listeners.mousedown({ button: 0, preventDefault() {} }); tick(26); hps.push(B.hp); }
+    for (let k = 0; k < 3; k++) { listeners.mousedown({ button: 0, preventDefault() {} }); if (listeners.mouseup) listeners.mouseup({ button: 0, preventDefault() {} }); tick(26); hps.push(B.hp); }
     const fell = !!(B.char.fall && B.char.fall.on);
     cityRow = { hps, fell, ko: B.ko || 0, backed: B.pos.z - 1.7 };
     check(hps[1] < hps[0] && hps[2] < hps[1], "city: the jab and the cross land through the fist (" + hps.map((h) => h.toFixed(0)).join(" > ") + ")");
