@@ -31,7 +31,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { BUS, DIRS, LOCK, CFG, CORES, sleep, now, load1, writeJson, readJson, pidAlive, daemonInfo, slug, resultPath } from "./lib.mjs";
 import { fetchMain, integrate, chain, checkout, dropSlots, changedFiles } from "./tree.mjs";
-import { launchChrome, serve } from "./browser.mjs";
+import { launchChrome, attachChrome, serve } from "./browser.mjs";
 import { worldKey, parseKey, bootWorld, loadProbe, runProbe } from "./worlds.mjs";
 
 const argv = process.argv.slice(2);
@@ -112,8 +112,15 @@ const isWorld = (q) => (q.probes || []).length > 0;
 async function ensureBrowser() {
   if (browser && browser.alive()) return { fresh: false };
   for (const p of pool.splice(0)) { try { p.srv.close(); } catch (_) {} }
-  browser = await launchChrome();
-  log(`chrome up in ${browser.startMs} ms (pid ${browser.pid}, :${browser.dbg})`);
+  /* ONE BROWSER POOL ON THE MACHINE: when the shot service (tools/shot/) is
+     up, borrow its least-loaded Chrome instead of launching another. */
+  browser = null;
+  const SS = readJson(path.join(BUS, "shot", "status.json"));
+  if (SS && SS.pid && pidAlive(SS.pid)) {
+    const c = (SS.chromes || []).filter((x) => pidAlive(x.pid)).sort((a, b) => a.pages.length - b.pages.length)[0];
+    if (c) { try { browser = await attachChrome(c.dbg, c.pid); log(`borrowed the shot service's chrome #${c.n} (pid ${c.pid}, :${c.dbg})`); } catch (_) { browser = null; } }
+  }
+  if (!browser) { browser = await launchChrome(); log(`chrome up in ${browser.startMs} ms (pid ${browser.pid}, :${browser.dbg})`); }
   return { fresh: true };
 }
 async function loadGate() {

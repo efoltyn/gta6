@@ -66,6 +66,15 @@ export const WORLDS = {
     engine: "!!window.__battle", enter: "0", noFreeze: true,   // the battle runs on rAF: drive it with __battle.speed()
     ready: "!!(window.__battle && __battle.audit().started)",
   },
+  /* NPC War on the cheapest venue (the empty kill box, no packs): what the
+     shot service (tools/shot/) keeps warm for the animal and battle agents.
+     Frozen through the page's own seam (__battle.freeze), stepped with
+     __battle.advance. */
+  npcwar: {
+    page: "games/battle.html", seed: 1, query: "auto=1&map=arena&red=1&blue=1&killcam=0",
+    engine: "!!window.__battle", enter: "0", noFreeze: true, freeze: "__battle.freeze()",
+    ready: "!!(window.__battle && __battle.audit().started)",
+  },
 };
 WORLDS.disaster = WORLDS.survival;
 WORLDS.prison = WORLDS.escape;
@@ -105,6 +114,7 @@ export async function bootWorld(pg, origin, key, timeoutMs = 15 * 60e3) {
   const builtMs = Date.now() - t0;
   pg.bootErrors = pg.errors.length;
   if (!W.noFreeze) await pg.evl("window.__tbFreeze && __tbFreeze()");
+  if (W.freeze) await pg.evl(`(function(){try{${W.freeze}}catch(e){}return 1})()`, 30000);
   await pg.evl(TB_INSTALL);
   const files = await pg.evl("performance.getEntriesByType('resource').map(function(e){try{return new URL(e.name).pathname.replace(/^\\//,'')}catch(_){return ''}}).filter(Boolean)");
   return { bootMs: builtMs, url: u.href, loaded: [...new Set([W.page, ...(files || [])])] };
