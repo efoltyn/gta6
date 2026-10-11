@@ -655,8 +655,9 @@ function vehFight(u, sdt) {
   for (let k = 0; k < u.wpn.length; k++) {
     const W = u.wpn[k], w = W.w;
     if (W.off || W.ammo <= 0 || W.cool > 0 || W.reloadT > 0) continue;
-    // a bomb's reach is its fall (vehBombRun), not a range number
-    if (w.kind !== "bombs" && (dist > (w.range || 600) || dist < (w.minRange || 0))) continue;
+    // a bomb's reach is its fall (vehBombRun), not a range number. A gun's
+    // reach is SLANT range: a tank's .50 does not reach a Reaper 4.5 km up
+    if (w.kind !== "bombs" && (Math.hypot(dist, dy) > (w.range || 600) || dist < (w.minRange || 0))) continue;
     if (!vehWeaponFits(u, w, t)) continue;
     const manned = vehSeatManned(u, w);
     if (!manned) continue;                                   // nobody at this gun
@@ -1150,7 +1151,10 @@ function stepJet(u, sdt) {
     gx = u.airPt.x; gz = u.airPt.z;
     wantAGL = Math.max(runAlt, cruise * 0.6);
     // far enough out to turn and line up a run that reaches its release point
-    if (dRef > Math.max(1600, R * 2.2, release + R * 1.2)) u.airPhase = "in";
+    // (or the out point is reached: a slow airframe with a long-range
+    // missile, the Reaper, never gets that far out and used to circle the
+    // point for minutes; it turns back in from there, a loiter orbit)
+    if (dRef > Math.max(1600, R * 2.2, release + R * 1.2) || Math.hypot(gx - u.pos.x, gz - u.pos.z) < R * 0.6) u.airPhase = "in";
   } else {
     u.airPhase = "in";
     gx = ref.x; gz = ref.z;
