@@ -652,19 +652,46 @@ scenario(11, "aircraft: an Apache's battle positions, an F-35's attack runs", as
     check(agl() > 3000, "the F-35 comes in at medium altitude (" + Math.round(agl()) + " m)");
     let relD = 0, lo = 1e9;
     const R = W.sb.__battle.roster();
+    // the weapons by kind, not by place in the list (the unit file orders them)
+    const bombW = () => j.wpn.find((w) => w.w.kind === "bombs" && !w.off) || j.wpn.find((w) => w.w.kind === "bombs");
+    const gunW = () => j.wpn.find((w) => w.w.kind === "autocannon");
     const a = run(W, 300, () => {
       if (!j.dead) lo = Math.min(lo, agl());
-      const W0 = j.wpn[0];
-      if (!relD && W0.n > 0) {
+      const W0 = bombW();
+      if (!relD && W0 && W0.n > 0) {
         const t = j.tgt || R.find((m) => m.team === "blue" && !m.dead);
         relD = t ? Math.hypot(t.pos.x - j.pos.x, t.pos.z - j.pos.z) : -1;
       }
       return true;
     });
-    check(j.wpn[0].n > 0 && relD > 2000, "it released its bombs a stand-off short of the mark (" + j.wpn[0].n + " away, first " + Math.round(relD) + " m out)");
-    check(j.wpn[1].n === 0 || lo < 1400, "the gun run was a dive (" + j.wpn[1].n + " rounds, lowest " + Math.round(lo) + " m)");
+    check(bombW().n > 0 && relD > 2000, "it released its bombs a stand-off short of the mark (" + bombW().n + " " + bombW().w.id + " away, first " + Math.round(relD) + " m out)");
+    check(gunW().n === 0 || lo < 1400, "the gun run was a dive (" + gunW().n + " rounds, lowest " + Math.round(lo) + " m)");
     check(lo >= 59, "never below 60 m over the ground (" + Math.round(lo) + " m)");
     console.log("    (F-35: " + j.kills + " kills, war " + (a.over ? "over at " + a.simT + " s" : "still on") + ")");
+  }
+  {
+    /* THE STEALTH LOAD (src/units/vehicles/f35.js): against armour the jet is
+       tasked with eight SDBs; the bays are open at every release (kilometres
+       out, guided) and shut again once the pass is over. */
+    const W = boot("?a=f35*1&b=m1_abrams*3&n=1v3&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 1);
+    const j = W.sb.__battle.roster().find((m) => m.unitId === "f35");
+    if (!j || !j.rig || !j.rig.state) { check(false, "the F-35 is on the field with its own rig"); return; }
+    const S = j.rig.state, rel = [];
+    const fire0 = j.rig.fire;
+    j.rig.fire = function (shot) {
+      if (shot.kind === "bombs") rel.push({ wid: shot.wid, bay: S.bay, d: shot.target ? Math.round(Math.hypot(shot.target.pos.x - j.pos.x, shot.target.pos.z - j.pos.z)) : -1 });
+      return fire0.apply(this, arguments);
+    };
+    let shutAfter = false, wasOpen = false;
+    run(W, 200, () => { if (S.bay > 0.95) wasOpen = true; else if (wasOpen && j.airPhase === "out" && S.bay < 0.05) shutAfter = true; return true; });
+    check(S.load === "sdb", "armour tasks the SDB load (" + S.load + ")");
+    check(rel.length >= 2 && rel.every((r) => r.wid === "gbu39_sdb" && r.bay > 0.95 && r.d > 2000), "every SDB left an open bay, kilometres out (" + JSON.stringify(rel) + ")");
+    check(shutAfter, "the bays shut again after the pass (stealth)");
+    console.log("    (F-35 v 3 M1: " + j.kills + " kills, " + rel.length + " SDBs)");
   }
 });
 
