@@ -139,6 +139,14 @@
     hp: 340, spd: 3.2, danger: 0.8, bite: 60, scale: ROW_SCALE,
     chase: 13.5, march: 1.3, dmg: 50, rate: 1.0,
     brave: true, prey: false,
+    /* for weapons/ballistics.js's wound model (anatomyOf reads these first):
+       mass kg (the species mean; each tiger carries its own in m._mass),
+       hide mm (skin 3-5 mm plus the dense coat), skull mm of bone in front of
+       the brain from the usual line: the frontal sinus and the sagittal crest
+       put 25-35 mm of bone and air in front of a small brain set low and far
+       back, which is why a head-on brain shot on a charging tiger is a hard
+       one and glances so often. */
+    mass: 200, hide: 6, skull: 30,
   };
   const MASS_ROW = 190;           // the species mean for systems/bodymass.js (written on the row)
 
@@ -855,7 +863,8 @@
       }
       // morale: in contact it fights to the death; shot to pieces at range,
       // it breaks off (think() flees a non-brave beast under 30%)
-      const cornered = d < 7 || T.contactT > 0;
+      // a charge already at full stretch inside 40 m is finished, hit or not
+      const cornered = d < 7 || T.contactT > 0 || (T.mode === "charge" && av > 9 && d < 40);
       m.tn.brave = cornered || !(T.dmgWin > m.maxHp * 0.12 || kind === "vehicle");
     }
     T.mode = mode;
