@@ -624,7 +624,7 @@
   function build(ctx) {
     const THREE = (ctx && ctx.THREE) || W.THREE;
     if (!THREE || !CBZ.loftKit || !CBZ.quadRig || !CBZ.quadGait) return null;
-    const seed = ((ctx && ctx.seed) | 0) || Math.floor(((ctx && ctx.rng) ? ctx.rng() : Math.random()) * 1e6);
+    const seed = (ctx && ctx.seed != null) ? Math.abs(ctx.seed | 0) : Math.floor(((ctx && ctx.rng) ? ctx.rng() : Math.random()) * 1e6);
     const h = hash32(seed * 3 + 1);
     // the first tiger on a side is a male; after that, an even mix
     const sex = (seed === 0 || seed === 7919) ? "m" : ((h & 1) ? "f" : "m");
@@ -643,7 +643,10 @@
     // the corpse is posed where it is drawn: once the unit is dead nothing
     // else calls this file, so the skin follows the solver from here
     const base = mesh.updateMatrixWorld;
+    const nKids = group.children.length;
     mesh.updateMatrixWorld = function (force) {
+      // a side's collar hung on the group after build rides the neck instead
+      if (group.children.length > nKids) adoptCollars(group, rig);
       const u = rig.unit;
       if (u && u.dead) { try { poseDead(rig, u); } catch (e) {} }
       return base.call(this, force);
@@ -748,13 +751,17 @@
     const Dw = { K: D.K * s, legLen: D.legLen * s, feet: D.feet.map(function (f) { return { x: f.x * s, z: f.z * s, front: f.front }; }) };
     T.G = CBZ.quadGait.create(Dw, tigerTable());
     T.S = s;
-    // the side's collar becomes a band round the neck, riding the neck bone
+    adoptCollars(g, rig);
+    return T;
+  }
+  // the side's collar (battle.html hangs a box on the group) becomes a band
+  // round the neck, riding the neck bone
+  function adoptCollars(g, rig) {
     for (let i = g.children.length - 1; i >= 0; i--) {
       const c = g.children[i];
       if (!c.isMesh || c.isSkinnedMesh || c.userData.tigerProxy) continue;
-      try { collarOnNeck(rig, c); } catch (e) {}
+      try { collarOnNeck(rig, c); } catch (e) { g.remove(c); }
     }
-    return T;
   }
   const _collarGeo = {};
   function collarOnNeck(rig, c) {
@@ -1195,6 +1202,9 @@
     T.turn = approach(T.turn, clamp(turn, -8, 8), 9, dt);
   }
 
+  // the posture's own foot targets, reused (no per-frame arrays)
+  const CF = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], CFON = [false, false, false, false];
+  function setCF(i, x, y, z, a) { const c = CF[i]; c[0] = x; c[1] = y; c[2] = z; c[3] = a; CFON[i] = true; }
   function pose(m, T, rig, dt) {
     const D = rig.D, A = D.A, K = D.K, b = rig.bones, BN = rig.table.BN, bp = rig.bindPos, G = T.G, S = T.S;
     T.t += dt;
@@ -1251,7 +1261,7 @@
     }
     // ---- the moves
     let liftY = 0;
-    const custFeet = [null, null, null, null];
+    CFON[0] = CFON[1] = CFON[2] = CFON[3] = false;
     let neckP = 0, neckY = 0, headP = 0, jaw = 0, earPin = 0, earTwist = 0;
     const L = D.shX - D.hipX;
     if (mv === "pounce" || mv === "leapon") {
@@ -1267,30 +1277,31 @@
         pY = D.hipH - 0.04 * A + liftY; pR = pitch;
         cX = pX + L * Math.cos(pitch); cY = pY + L * Math.sin(pitch); cR = pitch;
         jointOf(rig, 0, cX, cY, cR, _j);
-        for (let i = 0; i < 2; i++) custFeet[i] = [_j.x + 0.48 * A, _j.y - 0.42 * A + 0.12 * A * (1 - s), D.feet[i].z * 1.25, -0.2];
+        for (let i = 0; i < 2; i++) setCF(i, _j.x + 0.48 * A, _j.y - 0.42 * A + 0.12 * A * (1 - s), D.feet[i].z * 1.25, -0.2);
         jointOf(rig, 2, pX, pY, pR, _j);
-        for (let i = 2; i < 4; i++) custFeet[i] = [_j.x - 0.5 * A * (0.4 + 0.6 * s), _j.y - 0.55 * A, D.feet[i].z, -HALF + 1.0];
+        for (let i = 2; i < 4; i++) setCF(i, _j.x - 0.5 * A * (0.4 + 0.6 * s), _j.y - 0.55 * A, D.feet[i].z, -HALF + 1.0);
         neckP = 0.1 - 0.25 * s; jaw = 0.75 * ease(s * 1.6); earPin = 0.6;
       } else {                                          // landing: forepaws on the mark
         const s = (p - 0.8) / 0.2;
         pY = D.hipH - 0.12 * A * (1 - s * 0.5); cY = D.sh - 0.26 * A * (1 - s * 0.4); cX = D.shX + 0.05 * A;
         pR = 0; cR = -0.12;
-        for (let i = 0; i < 2; i++) custFeet[i] = [cX + 0.38 * A, D.pawR + 0.05 * A, D.feet[i].z * 1.2, -HALF + 0.9];
-        for (let i = 2; i < 4; i++) custFeet[i] = [D.feet[i].x - 0.15 * A * (1 - s), D.pawR, D.feet[i].z, -HALF + 0.3];
+        for (let i = 0; i < 2; i++) setCF(i, cX + 0.38 * A, D.pawR + 0.05 * A, D.feet[i].z * 1.2, -HALF + 0.9);
+        for (let i = 2; i < 4; i++) setCF(i, D.feet[i].x - 0.15 * A * (1 - s), D.pawR, D.feet[i].z, -HALF + 0.3);
         neckP = -0.45; jaw = 0.7 * (1 - s); earPin = 0.7;
       }
     } else if (mv === "hold") {
       const sh = Math.sin(T.t * 9.5);
       cY = D.sh - 0.28 * A; pY = D.hipH - 0.12 * A; cX = D.shX + 0.04 * A + 0.01 * A * sh; cR = -0.14;
       neckP = -0.95; headP = -0.2; neckY = 0.13 * sh; jaw = 0.12; earPin = 0.85;
-      for (let i = 0; i < 2; i++) custFeet[i] = [cX + 0.32 * A, D.pawR + 0.03 * A, D.feet[i].z * 1.3, -HALF + 1.1];
+      for (let i = 0; i < 2; i++) setCF(i, cX + 0.32 * A, D.pawR + 0.03 * A, D.feet[i].z * 1.3, -HALF + 1.1);
     } else if (mv === "swipe") {
       const s = T.side > 0 ? 1 : 0;
       let fx, fy;
-      if (p < 0.35) { const k = ease(p / 0.35); fx = lerp(D.feet[s].x, cX + 0.26 * A, k); fy = lerp(D.pawR, 0.62 * A, k); }
-      else if (p < 0.62) { const k = ease((p - 0.35) / 0.27); fx = lerp(cX + 0.26 * A, cX + 0.62 * A, k); fy = lerp(0.62 * A, 0.22 * A, k); }
-      else { const k = ease((p - 0.62) / 0.38); fx = lerp(cX + 0.62 * A, D.feet[s].x, k); fy = lerp(0.22 * A, D.pawR, k); }
-      custFeet[s] = [fx, fy, D.feet[s].z * 1.1, -0.4 + 0.6 * Math.sin(PI * p)];
+      // the paw comes up past the face, then rakes forward and down
+      if (p < 0.35) { const k = ease(p / 0.35); fx = lerp(D.feet[s].x, cX + 0.34 * A, k); fy = lerp(D.pawR, 0.8 * A, k); }
+      else if (p < 0.62) { const k = ease((p - 0.35) / 0.27); fx = lerp(cX + 0.34 * A, cX + 0.7 * A, k); fy = lerp(0.8 * A, 0.25 * A, k); }
+      else { const k = ease((p - 0.62) / 0.38); fx = lerp(cX + 0.7 * A, D.feet[s].x, k); fy = lerp(0.25 * A, D.pawR, k); }
+      setCF(s, fx, fy, D.feet[s].z * 1.1, -0.4 + 0.6 * Math.sin(PI * p));
       const rise = Math.sin(PI * clamp(p * 1.4, 0, 1));
       cY += 0.06 * A * rise; cR += 0.12 * rise; cX -= 0.03 * A * rise;
       yawC += (s ? 0.12 : -0.12) * rise;
@@ -1312,9 +1323,9 @@
       // both forepaws boxing, alternately
       for (let i = 0; i < 2; i++) {
         const box = Math.max(0, Math.sin(T.t * 7.5 + i * PI));
-        custFeet[i] = [lerp(D.feet[i].x, _j.x + (0.32 + 0.22 * box) * A, k), lerp(D.pawR, _j.y - (0.18 - 0.22 * box) * A, k), D.feet[i].z * (1 + 0.4 * k), lerp(-HALF + 0.35, -0.3, k)];
+        setCF(i, lerp(D.feet[i].x, _j.x + (0.44 + 0.2 * box) * A, k), lerp(D.pawR, _j.y - (0.06 - 0.2 * box) * A, k), D.feet[i].z * (1 + 0.4 * k), lerp(-HALF + 0.35, -0.3, k));
       }
-      for (let i = 2; i < 4; i++) custFeet[i] = [D.feet[i].x + 0.12 * A * k, D.pawR, D.feet[i].z * (1 + 0.3 * k), -HALF + 0.3 - 0.25 * k];
+      for (let i = 2; i < 4; i++) setCF(i, D.feet[i].x + 0.12 * A * k, D.pawR, D.feet[i].z * (1 + 0.3 * k), -HALF + 0.3 - 0.25 * k);
       neckP = -theta * 0.8 + 0.1; jaw = 0.65 * k; earPin = 0.95;
       if (mv === "rear" && p > 0.7 && p < 0.86) { neckP -= 0.25; jaw = 0.9; }
     } else if (mv === "evade") {
@@ -1328,9 +1339,10 @@
       cR = lerp(cR, lP, lieK); pR = lerp(pR, lP, lieK);
       for (let i = 0; i < 4; i++) {
         const front = i < 2;
-        const lf = front ? [D.shX + 0.48 * A, D.pawR, D.feet[i].z, 0.05] : [D.hipX + 0.32 * A, D.pawR, D.feet[i].z * 1.9, -0.05];
-        const cf = custFeet[i] || [D.feet[i].x, D.pawR, D.feet[i].z, front ? -HALF + 0.35 : -HALF + 0.3];
-        custFeet[i] = [lerp(cf[0], lf[0], lieK), lerp(cf[1], lf[1], lieK), lerp(cf[2], lf[2], lieK), lerp(cf[3], lf[3], lieK)];
+        const l0 = front ? D.shX + 0.48 * A : D.hipX + 0.32 * A, l2 = front ? D.feet[i].z : D.feet[i].z * 1.9, l3 = front ? 0.05 : -0.05;
+        if (!CFON[i]) setCF(i, D.feet[i].x, D.pawR, D.feet[i].z, front ? -HALF + 0.35 : -HALF + 0.3);
+        const cf = CF[i];
+        setCF(i, lerp(cf[0], l0, lieK), lerp(cf[1], D.pawR, lieK), lerp(cf[2], l2, lieK), lerp(cf[3], l3, lieK));
       }
     }
     // ---- hit reactions, by where it was hit
@@ -1364,7 +1376,7 @@
       const bx = front ? cX : pX, by = front ? cY : pY, brr = front ? cR : pR;
       jointOf(rig, Lg, bx, by, brr, _j);
       let fx, fy, fz, fa;
-      const cf = custFeet[Lg];
+      const cf = CFON[Lg] ? CF[Lg] : null;
       if (cf) { fx = cf[0]; fy = cf[1]; fz = cf[2]; fa = cf[3]; }
       else {
         fx = F.lx / S; fy = F.ly / S + D.pawR; fz = F.lz / S;
