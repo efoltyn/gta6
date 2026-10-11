@@ -316,6 +316,8 @@
       m.pos.x += f.x * ST.speed * dt; m.pos.z += f.z * ST.speed * dt; m.pos.y = y;
       try {
         if (!m.beast) { if (CBZ.animChar && m.char) CBZ.animChar(m.char, ST.speed, dt); }
+        // the species' OWN animate hook first (its unit file owns its gait), then the shared rigs
+        else if (m.kit && m.kit.animate) m.kit.animate(m, dt);
         else if (m.swim) { if (CBZ.animateSwim) CBZ.animateSwim(m, dt); }
         else if (CBZ.wildlifeRig) CBZ.wildlifeRig.animateGait(m, dt);
       } catch (e) { if (ST.warn.length < 5) ST.warn.push("rig threw: " + e.message); }
