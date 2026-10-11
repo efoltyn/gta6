@@ -33,7 +33,6 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
-import { boot, settle, run, realBoom } from "./lib/npcwar-node.mjs";
 
 const require = createRequire(import.meta.url);
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -41,6 +40,7 @@ const only = process.argv[2] ? +process.argv[2] : 0;
 let fails = 0, passes = 0;
 function check(ok, msg) { if (ok) { passes++; console.log("  PASS " + msg); } else { fails++; console.log("  FAIL " + msg); } }
 
+import { boot, settle, run, G } from "./lib/npcwar-node.mjs";
 
 const scen = [];
 function scenario(n, name, fn) { scen.push({ n, name, fn }); }
@@ -216,9 +216,11 @@ scenario(10, "take over anything: an animal, an elephant's trunk, a tank, a tap;
     run(W, 20, () => { s2 = W.sb.__battle.youState(); return chaseNearest(W); });
     W.sb.__battle.youDrive(null);
     const mv = s2.moves || {};
-    check((mv.pounce || 0) + (mv.swipe || 0) + (mv.bite || 0) + (mv.throat || 0) > 2,
+    // a species file may name its own moves (lion_pounce, lion_swat ...): count by kind
+    const kind = (k) => Object.keys(mv).filter((n) => n === k || n.endsWith("_" + k)).reduce((a, n) => a + mv[n], 0);
+    check(kind("pounce") + kind("swipe") + kind("swat") + kind("bite") + kind("throat") > 2,
       "attack throws the cat's real moves by context (" + JSON.stringify(mv) + ")");
-    check(!!mv.pounce, "a sprint into range is a pounce (" + (mv.pounce || 0) + ")");
+    check(kind("pounce") > 0, "a sprint into range is a pounce (" + kind("pounce") + ")");
     const tal = W.sb.__battle.tally();
     check(s2.hits >= 3 && hp0 - blueHp() > 60, "and the blows land in the page's damage funnel (" + s2.hits + " strikes landed, " + s2.whiffs + " at the air, " +
       Math.round(hp0 - blueHp()) + " hp off the men, " + tal.dead.blue + " down)");
@@ -388,6 +390,17 @@ scenario(7, "holding the line: the exchange, held v met", async () => {
    The node world's studio.boom is a stub; here it is given the shape of the
    real one (modecaps blastWorldActors: everyone inside 0.55 R takes the
    blast, with `by` and `fromX/Z`) so a high-explosive round can kill. */
+function realBoom(W) {
+  W.CBZ.studio.boom = function (p, o) {
+    const R = (o && o.radius) || 6, LR = R * 0.55;
+    const list = W.sb.__battle.roster().slice();
+    for (const a of list) {
+      if (a.dead || a.fled || (a.group && a.group.visible === false)) continue;
+      if (Math.hypot(a.pos.x - p.x, a.pos.z - p.z) > LR || Math.abs(a.pos.y - p.y) > LR + 3) continue;
+      W.sb.hurtMan(a, 1e6, { fromX: p.x, fromZ: p.z, by: (o && o.by) || null, cause: "explosion" });
+    }
+  };
+}
 scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawlers", async () => {
   {
     const W = boot("?a=m1_abrams*1,men*1&b=men&n=2v30&arena=dunes&bw=ak47&bt=pro&auto=1&probe=0");
@@ -542,7 +555,6 @@ scenario(11, "aircraft: an Apache's battle positions, an F-35's attack runs", as
    thing); the new URL names (a b n arena at bt af bf bo sa sb) build the war;
    a best-of-3 at 1-0 scores this round, says the series, and hands the next
    round the score in its URL. Nothing a player reads says RED or BLUE. */
-const G = (W, expr) => vm.runInContext(expr, W.sb);
 scenario(9, "sides, best-of, the URL matchup: no colour on screen", async () => {
   const W = boot("?a=men&b=men&n=20v12&arena=dunes&aw=ak47&bw=ak47&at=elite&bt=thug&af=kesh&bf=veridia&bo=3&sa=1&sb=0&auto=1&probe=0");
   if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }

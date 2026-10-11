@@ -1,6 +1,6 @@
 /* tools/lib/npcwar-node.mjs — NPC WAR'S PAGE, IN NODE: the one boot every
-   node tool shares (tools/npcwar-headless.mjs, tools/npcwar-arena.mjs,
-   tools/npcwar-balance-check.mjs). Lifted out of npcwar-headless.mjs so the
+   node tool shares (tools/npcwar-headless.mjs, npcwar-fidelity.mjs, npcwar-scale-bench.mjs,
+   npcwar-arena.mjs, npcwar-balance-check.mjs). Lifted out of npcwar-headless.mjs so the
    arena does not grow a second copy of the fake DOM and the studio stub.
 
    games/battle.html's src/battle/* and src/units/* scripts run in one vm
@@ -25,6 +25,7 @@ import vm from "node:vm";
 const ROOT = process.env.NPCWAR_ROOT ? path.resolve(process.env.NPCWAR_ROOT)
   : path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 export { ROOT };
+export const G = (W, expr) => vm.runInContext(expr, W.sb);
 
 /* THE STUDIO'S PACK TABLE, read off src/core/studio.js itself (run once in a
    throwaway context: PACKS is data), so a pack's file list is never copied. */
@@ -159,7 +160,8 @@ export function boot(url, opts) {
     setTimeout: (f) => { try { f(); } catch (e) { console.error("[timeout]", e); } return 0; }, clearTimeout() {}, setInterval() { return 0; }, clearInterval() {},
     requestAnimationFrame() { return 0; }, cancelAnimationFrame() {},
     URLSearchParams, TextDecoder, TextEncoder,
-    performance: { now: () => clock * 1000 },
+    // the sim clock; opts.realClock hands the page a real one (the bench times the tiers with it)
+    performance: { now: opts.realClock ? () => Number(process.hrtime.bigint()) / 1e6 : () => clock * 1000 },
     navigator: { maxTouchPoints: 0, userAgent: "node" },
     localStorage: { _s: {}, getItem(k) { return this._s[k] == null ? null : this._s[k]; }, setItem(k, v) { this._s[k] = String(v); }, removeItem(k) { delete this._s[k]; } },
     location: { search: url, pathname: "/games/battle.html", origin: "http://x", href: "" },
@@ -170,6 +172,8 @@ export function boot(url, opts) {
     Image: function () { return mkEl("img", doc); },
   };
   sb.window = sb; sb.self = sb; sb.globalThis = sb;
+  // a tool may hand the page more of a browser (a Worker, crossOriginIsolated ...)
+  if (opts.sandbox) Object.assign(sb, opts.sandbox);
   sb.parent = { postMessage: (m) => posted.push(m) };
   vm.createContext(sb);
   doc._runUnit = (rel) => {
@@ -267,6 +271,8 @@ export function boot(url, opts) {
   // run the page
   try { for (const s of PAGE_SCRIPTS) vm.runInContext(s.code, sb, { filename: s.name }); }
   catch (e) { return { err: e }; }
+  // the combat dice: the page's own lcg, reseeded so a tool can run N seeds
+  if (opts.seed != null) vm.runInContext("_s = " + ((opts.seed | 0) & 0x7fffffff), sb);
   return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE };
   return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE };
 }
