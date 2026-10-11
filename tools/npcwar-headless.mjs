@@ -593,6 +593,77 @@ scenario(12, "wheels: a Humvee and a loaded M35 v 30 riflemen", async () => {
   check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ")");
 });
 
+/* 15  THE CONVOY. An Abrams and two FMTV M1083A1s with a squad of sixteen on
+   each bed, against forty riflemen. The trucks are their own file on the hull
+   kit; they fill before they unload (the spawn queue no longer races the
+   dismount), the men ride drawn on the benches, the tailgates drop and the
+   thirty-two get out and fight. Armour by place (stats.plates): rifle ball
+   bounces off the LTAS cab and leaves its strike on it, goes through the bed,
+   and a .50 goes through the cab. */
+scenario(15, "the convoy: an Abrams and two loaded FMTVs v 40 riflemen; the squads dismount and fight", async () => {
+  const W = boot("?a=m1_abrams*1,fmtv*2,men*40&b=men&n=43v40&arena=dunes&aw=ak47&bw=ak47&bt=pro&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  // the moment each truck unloads: who is in the back, and how many its rig draws
+  const most = new Map(), drawn = new Map(), riders = new Set();
+  const unload = W.sb.vehDismount;
+  W.sb.vehDismount = function (u) {
+    if (u.unitId === "fmtv") {
+      const on = u.seats.filter((s) => !s.crew && s.man);
+      on.forEach((s) => riders.add(s.man));
+      most.set(u, on.length);
+      if (u.rig && u.rig.troops) { u.rig.dt = 0.05; u.rig.crew(u); drawn.set(u, u.rig.troops.im.count); }
+    }
+    return unload(u);
+  };
+  run(W, 2);
+  const R = W.sb.__battle.roster();
+  const trucks = R.filter((m) => m.unitId === "fmtv"), tank = R.find((m) => m.unitId === "m1_abrams");
+  check(trucks.length === 2 && !!tank, "the convoy is on the field (" + R.filter((m) => m.vehicle).map((m) => m.unitId).join(", ") + ")");
+  if (trucks.length !== 2 || !tank) return;
+  check(trucks.every((t) => !t.group.userData.standIn && t.rig && t.rig.mark && t.rig.troops && t.rig.tailgate),
+    "built by units/vehicles/fmtv.js on the hull kit (rig with troops, tailgate, mark)");
+  check(trucks.every((t) => t.tactics && t.tactics.role === "transport" && t.tactics.convoy) && trucks[0].def.label !== "",
+    "def.tactics marks it a convoy transport (" + JSON.stringify(trucks[0].tactics.convoy) + ")");
+  check(trucks.every((t) => most.get(t) === 16), "each truck filled its sixteen bench seats before it unloaded (" + trucks.map((t) => most.get(t)).join(", ") + ")");
+  check(trucks.every((t) => drawn.get(t) === 16), "and drew all sixteen on the benches while they rode (" + trucks.map((t) => drawn.get(t)).join(", ") + ")");
+  check(trucks.every((t) => t.seats.filter((s) => s.crew && s.man).length === 2), "driver and commander in each cab");
+  check(trucks.every((t) => t.dismounted && t.seats.every((s) => s.crew || !s.man)), "the squads got out (the armies form inside the 520 m dismount range)");
+  check(trucks.every((t) => t.rig.tailgate.obj.rotation.x < -1.2), "the tailgates are down (" + trucks.map((t) => t.rig.tailgate.obj.rotation.x.toFixed(2)).join(", ") + ")");
+  // ARMOUR BY PLACE: a man 80 m off the face, a round with its impact point
+  const blue = W.sb.__battle.roster().find((m) => m.team === "blue" && !m.dead);
+  const t = trucks[0], sx = blue.pos.x, sz = blue.pos.z;
+  const world = (hx, hy, hz) => {
+    const c = Math.cos(t.h), s = Math.sin(t.h);
+    return { x: t.pos.x + hx * c + hz * s, y: t.pos.y + hy, z: t.pos.z - hx * s + hz * c };
+  };
+  const off = (hx, hz, d) => { const p = world(hx * d, 0, hz * d); blue.pos.x = p.x; blue.pos.z = p.z; };
+  const hp0 = t.hp, strikes = t.group.getObjectByName("strikes");
+  off(0, 1, 80);
+  for (let k = 0; k < 8; k++) W.sb.hurtMan(t, 40, { by: blue, pen: 7, at: world((k % 3 - 1) * 0.5, 2.0 + (k % 2) * 0.5, 3.465) });
+  check(t.hp === hp0, "AK ball on the armoured cab's face bounces (hp " + hp0 + " -> " + t.hp + ", last " + JSON.stringify(t.lastHit && { zone: t.lastHit.zone, armour: t.lastHit.armour, pen: t.lastHit.pen }) + ")");
+  check(!!strikes && strikes.count === 8, "and leaves its strikes on the cab (" + (strikes && strikes.count) + " marks)");
+  off(1, 0, 80);
+  for (let k = 0; k < 4; k++) W.sb.hurtMan(t, 40, { by: blue, pen: 7, at: world(1.22, 2.2, 2.4) });
+  check(t.hp === hp0, "and off the door's B-kit panel (hp " + t.hp + ")");
+  for (let k = 0; k < 3; k++) W.sb.hurtMan(t, 40, { by: blue, pen: 7, at: world(1.22, 1.9, -1.5) });
+  const hpBed = t.hp;
+  check(hpBed < hp0 && t.lastHit.pen && t.lastHit.armour < 2, "but goes straight through the bed's sheet steel (hp " + hp0 + " -> " + Math.round(hpBed) + ", " + t.lastHit.armour + " mm)");
+  off(0, 1, 80);
+  W.sb.hurtMan(t, 120, { by: blue, pen: 19, at: world(0.3, 2.4, 3.465) });
+  check(t.hp < hpBed && t.lastHit.pen && t.lastHit.armour === 11, "a .50 round goes through the cab (" + t.lastHit.armour + " mm, hp " + Math.round(hpBed) + " -> " + Math.round(t.hp) + ")");
+  blue.pos.x = sx; blue.pos.z = sz;
+  // THE FIGHT
+  const a = run(W, 300);
+  const pax = [...riders];
+  const shots = pax.reduce((s, m) => s + (m.shotsF || 0), 0), kills = pax.reduce((s, m) => s + (m.kills || 0), 0);
+  check(pax.length === 32 && shots > 0, "the " + pax.length + " who rode in fought on foot (" + shots + " rounds, " + kills + " kills)");
+  check(kills > 0, "and killed");
+  check(trucks.some((v) => v.shotsF > 0), "the ring .50s fired (" + trucks.map((v) => v.shotsF).join(" + ") + " rounds)");
+  check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ", red " + a.red + " blue " + a.blue + "; trucks " + trucks.map((v) => v.dead ? "lost" : Math.round(v.hp) + " hp").join(", ") + ")");
+});
+
 /* 11  AIRCRAFT. The vehicle contract's air half (docs/npcwar/ARCHITECTURE.md):
    a helicopter fights from battle positions (masked low, up to fire, down,
    sidestep), a jet flies attack runs at a real height; every unit animates

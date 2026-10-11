@@ -222,6 +222,7 @@ CBZ.unitKit.register("m1_abrams", {
   kind: "vehicle", domain: "ground" | "air", drive: "tracked" | "wheeled" | "rotor" | "jet",
   stats:   { hp, mass, speed, turn, armour: { front, side, rear, top },  // armour in mm RHA
              grip,                     // wheeled, opt-in, in g: the driver slows for corners, lock limited at speed
+             plates: [{ box: [x0, y0, z0, x1, y1, z1], armour: { front, side, rear, top } }],  // optional: armour BY PLACE (below)
              dismountAt,               // keep it above 1.15 x standoff, or the carrier parks with its men aboard
              alt, standoff, nap, popAlt, climb, popWindow, popShots,     // aircraft: see "Flight"
              ingress },                // aircraft: spawn this far back (m) so a bomber's first pass is a real run
@@ -292,7 +293,7 @@ Do not read `w.needs` as a "which weapon" signal (the old getter hack): use `sho
 | `reload(shot)` | a salvo's reload has finished: put the rounds back |
 | `store(shot) -> Object3D` | a released bomb's falling mesh (in the scene, at `muzzleWorld`); the runtime flies it and hands it to `CBZ.munitions.release` on impact, so take it from `CBZ.munitions.acquire` |
 | `canFire(shot) -> bool` | false holds this weapon this step (a TOW only with the launcher up and the hull still) |
-| `damage(vs, res)` | every hit that lands (`vs` = the damage state, `res` = `vehicleDrive.resolve`'s result: `zone pen dmg mobility firepower burning wreck`): show the drooped gun, the thrown track, the fire |
+| `damage(vs, res)` | every hit that lands (`vs` = the damage state, `res` = `vehicleDrive.resolve`'s result: `zone pen dmg mobility firepower burning wreck`, plus `hx hy hz`, the hull-space point a flown round struck, when it has one): show the drooped gun, the thrown track, the fire, the strike on the plate |
 | `aimError(shot) -> rad` | how far a `slew` mount still is from the line; the runtime holds fire until it is under `w.tol` (0.06) |
 | `aimTurret(yaw, elev, dt)`, `aimLauncher(yaw, elev, dt)`, `settle()`, `update(dt, v, w, steer)` | as before |
 
@@ -316,6 +317,13 @@ implicit crew of a hull nobody was assigned to). A weapon with no seat needs any
 weapon (the driver) can climb over to the MAIN gun's seat (weapon 0's) once the hull has
 stopped. He never works the loader's or the commander's machine gun. You, at the controls, are
 the crew.
+
+**Armour by place.** `stats.armour` is per face. `stats.plates` (optional) refines it by WHERE the
+round struck: boxes in hull space (x left, y up from the ground, z forward), first match wins, else
+the face table. A flown round (`fire.js armsHit`) hands its impact point to the hull (`imp.at`); a
+blast or a table hit has none and takes the face table, so make the face table the right fallback.
+The FMTV is the worked example: its LTAS cab stops rifle ball on every face, the bed behind it is
+sheet steel and canvas.
 
 **Crew casualties by seat.** A penetration comes in through the face it hit, on the line from
 whoever fired it, and its spall carries on through the hull. Each man in a seat (crew or
@@ -408,7 +416,7 @@ suspension, rate-limited turret laying, ballistics, armour zones, penetration, d
 the crew seat book; pure maths, node-loadable). The battle side (crew, AI, firing, damage
 states, wrecks, player driving) is `src/battle/vehicles.js`.
 
-The 15 vehicles today, each on the game's existing builder (there is no new art in wave A; the
+The vehicles today, each on the game's existing builder (there is no new art in wave A; the
 vehicle agents redraw):
 
 | id | name | builder | crew | weapons | armour F/S/R/T (mm) |
@@ -416,8 +424,9 @@ vehicle agents redraw):
 | m1_abrams | M1A2 Abrams | milArmor.tank | commander, gunner, loader, driver | 120 mm, coax, .50 | 800/120/50/40 |
 | bradley_ifv | M2A3 Bradley (6 dismounts) | milArmor.ifv | driver, gunner, commander | 25 mm, TOW, coax | 60/30/20/15 |
 | stryker_apc | Stryker (9) | milArmor.apc | driver, commander | .50 RWS | 20/14/12/8 |
-| hmmwv | Humvee (2) | milArmor.luv | driver, gunner | .50 | 10/10/8/5 |
-| m35_truck | M35 (16) | milArmor.truck | driver, commander | none | 2/0/0/0 |
+| hmmwv | Humvee (2) | its own file (hull kit) | driver, gunner | .50 | 10/10/8/5 |
+| m35_truck | M35 (16) | its own file (hull kit) | driver, commander | M2 .50 ring | 2/0/0/0 |
+| fmtv | FMTV M1083A1 (16; convoy truck) | its own file (hull kit: LTAS cab, 6x6 singles with CTIS, troop seats, bows and canvas) | driver, commander (stands in the cab ring) | M2 .50 ring | cab 11/11/11/6 by `plates`, bed 1 (soft) |
 | m270_mlrs | label "M142 HIMARS" (the model is the wheeled pod) | milArmor.mlrs | 3 | 6 rockets | 8/2/2/2 |
 | patriot_launcher | Patriot | milArmor.patriot | 2 | SAM (air only) | 6/2/2/2 |
 | technical | MG technical | stand-in in its file (warlord's builder needs CBZ.warlord) | driver, gunner | MG | 1/0/0/0 |

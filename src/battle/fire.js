@@ -912,7 +912,7 @@ function armsHit(r, u, v) {
   if (u.vehicle) {
     // a hull: what the round defeats here is the armour's question
     const E = B.energy(r.c, v);
-    hurtMan(u, Math.max(1, E / 80), { by: by, pen: B.penRHA(r.c, v, r.c.v0) });
+    hurtMan(u, Math.max(1, E / 80), { by: by, pen: B.penRHA(r.c, v, r.c.v0), at: { x: ex, y: ey, z: ez } });
     armsImpactAt(ex, ey, ez, -r.dx, -r.dy, -r.dz, "steel", r.c, v, true);
     return 0;
   }
