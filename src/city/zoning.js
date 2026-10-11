@@ -73,15 +73,19 @@
   //                   north of the strip, nose toward the runway
   //   brandt-shelter  the command bunker, NW quadrant
   const FIXTURES = {
-    "b2-pad":         { base: "military", ax: -560, az: -566, w: 52.4, d: 21 },
+    "b2-pad":         { base: "military", ax: -610, az: -600, w: 52.4, d: 21, yaw: 0 },   // the plan's heavy stand (fallback copy)
     "brandt-shelter": { base: "military", ax: -762, az: -872, w: 36, d: 30 },
   };
+  // Fort Brandt's own plan (world/basekit.js via island_military.js) is the
+  // authority for a stand on that base when it is loaded: the B-2 parks on the
+  // plan's heavy stand, nose to the taxiway, not on a literal typed here.
   function protectedSite(id) {
-    const f = FIXTURES[id];
+    const own = CBZ.fortBrandtFixtures && CBZ.fortBrandtFixtures[id];
+    const f = own ? Object.assign({ base: "military" }, own) : FIXTURES[id];
     if (!f) return null;
     const o = (CBZ.worldOff && CBZ.worldOff(f.base)) || { dx: 0, dz: 0 };
     const cx = f.ax + o.dx, cz = f.az + o.dz;
-    return { id: id, name: id, kind: "fixture", base: f.base, cx: cx, cz: cz, w: f.w, d: f.d,
+    return { id: id, name: id, kind: "fixture", base: f.base, cx: cx, cz: cz, w: f.w, d: f.d, yaw: f.yaw,
       minX: cx - f.w / 2, maxX: cx + f.w / 2, minZ: cz - f.d / 2, maxZ: cz + f.d / 2, buffer: FIXTURE_BUFFER };
   }
   CBZ.protectedSite = protectedSite;

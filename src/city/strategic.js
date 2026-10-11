@@ -996,7 +996,8 @@
     // is protected land now, published once by city/zoning.js.
     const pad = (CBZ.protectedSite && CBZ.protectedSite("b2-pad")) ||
       (function () { const o = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 }; return { cx: -560 + o.dx, cz: -566 + o.dz }; })();
-    const wx = pad.cx, wz = pad.cz, rotY = Math.PI;     // nose toward the runway
+    // nose to the taxiway: the stand's own heading from the base plan (models face +z)
+    const wx = pad.cx, wz = pad.cz, rotY = pad.yaw != null ? pad.yaw : 0;
     made.group.position.set(wx, 0, wz);
     made.group.rotation.y = rotY;
     made.group.userData.milKind = "plane";
@@ -2970,6 +2971,23 @@
       onRelease: opts.onRelease, onEnd: opts.onEnd, label: opts.label || null,
       phase: "inbound", t: 0, sndT: 0, travelled: 0, vx: 0, vy: 0, vz: 0,
     };
+    /* IT TAXIS TO THE RUNWAY FIRST. A bomber parked on Fort Brandt's apron
+       used to start its take-off roll from the stand, straight at the target —
+       across the taxiway, across the runway, over the wire. The base publishes
+       the way out (stand -> apron lane -> taxiway -> threshold, from
+       world/basekit.js's plan); the roll then runs down the runway, toward
+       whichever end faces the mark. A bomber parked anywhere else (a pier, a
+       bought airframe on another field) rolls from where it stands, as before. */
+    const MB = CBZ._militaryBase;
+    if (MB && MB.taxiFrom && home.x > MB.minX && home.x < MB.maxX && home.z > MB.minZ && home.z < MB.maxZ) {
+      const tx0 = MB.taxiFrom(home.x, home.z, dx >= 0 ? 1 : -1);
+      if (tx0 && tx0.points && tx0.points.length) {
+        s.phase = "taxi"; s.taxi = { points: tx0.points, i: 0, heading: tx0.heading };
+        // it leaves the stand facing the way it was parked, not the target
+        s.hTaxi = (rec._aiHome && isFinite(rec._aiHome.heading) ? rec._aiHome.heading : 0) - (rec.modelYawOffset || 0);
+        grp.rotation.set(0, s.hTaxi + (rec.modelYawOffset || 0), 0);
+      }
+    }
     sorties.push(s);
     if (kind === "nuke") {
       note("NUCLEAR SORTIE AIRBORNE, one weapon inbound on " + (opts.label || "your mark") + ". Get underground.", 4.2,
@@ -2988,6 +3006,33 @@
     if (!g || g.mode !== "city" || !s.group || !s.group.parent) { sortieEnd(s, false); return; }
     // Kill the man in the seat and the aeroplane is nobody's — it goes down.
     if (s.pilot && s.pilot.dead) { sortieEnd(s, true); return; }
+    if (s.phase === "taxi") {
+      // 12 m/s along the base's taxi route, turning on the spot at the corners
+      // (it does not crab sideways), then lined up on the runway heading
+      const T = s.taxi, tp = T.points[T.i];
+      const ddx = tp.x - s.pos.x, ddz = tp.z - s.pos.z, dd = Math.hypot(ddx, ddz);
+      let err = (dd > 0.5 ? Math.atan2(ddx, ddz) : s.hTaxi) - s.hTaxi;
+      while (err > Math.PI) err -= 2 * Math.PI;
+      while (err < -Math.PI) err += 2 * Math.PI;
+      s.hTaxi += Math.max(-0.9 * dt, Math.min(0.9 * dt, err));
+      const step = Math.abs(err) < 0.35 ? 12 * dt : 0;
+      if (dd <= Math.max(step, 0.5)) {
+        s.pos.x = tp.x; s.pos.z = tp.z;
+        if (++T.i >= T.points.length) {
+          // on the threshold: line up, then the roll starts from here
+          let e2 = T.heading - s.hTaxi;
+          while (e2 > Math.PI) e2 -= 2 * Math.PI;
+          while (e2 < -Math.PI) e2 += 2 * Math.PI;
+          if (Math.abs(e2) > 0.05) { s.hTaxi += Math.max(-0.9 * dt, Math.min(0.9 * dt, e2)); T.i = T.points.length - 1; }
+          else { s.phase = "inbound"; s.h = T.heading; s.t = 0; s.travelled = 0; }
+        }
+      } else if (step > 0) {
+        s.pos.x += ddx / dd * step; s.pos.z += ddz / dd * step;
+      }
+      s.group.rotation.set(0, s.hTaxi + s.yawOff, 0);
+      s.vx = Math.sin(s.hTaxi) * (step > 0 ? 12 : 0); s.vz = Math.cos(s.hTaxi) * (step > 0 ? 12 : 0); s.vy = 0;
+      return;
+    }
     s.t += dt;
     const spd = s.phase === "inbound"
       ? Math.min(SORTIE.SPD, 25 + s.t * (SORTIE.SPD - 25) / SORTIE.TAKEOFF)   // the take-off roll
