@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("snow_leopard",{kind:"species",stats:{hp:120,spd:3.6,danger:.7,bite:22,scale:1,chase:8.6,march:4.73,dmg:29.700000000000003,rate:1.16,brave:!0,prey:!1}})})();

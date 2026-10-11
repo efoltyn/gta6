@@ -1,0 +1,1 @@
+"use strict";let COARSE;CBZ.npcwar.onBoot(function(){CBZ.now==null&&(CBZ.now=performance.now()),CBZ.floorAt||(CBZ.floorAt=function(x,z){return MAP?MAP.groundAt(x,z):0}),COARSE=CBZ.studio.touchDevice,COARSE&&document.body.classList.add("coarse")});

@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("barracuda",{kind:"species",stats:{hp:34,spd:3.1,danger:.3,bite:10,scale:.45,chase:7.843000000000001,march:4.313650000000001,dmg:13.5,rate:1.44,brave:!1,prey:!1}})})();

@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("mountain_goat",{kind:"species",stats:{hp:50,spd:2.4,danger:.1,scale:.85,chase:6.072,march:3.3396000000000003,dmg:13.5,rate:1.58,brave:!1,prey:!0}})})();

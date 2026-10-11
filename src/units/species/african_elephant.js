@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("african_elephant",{kind:"species",stats:{hp:600,spd:1.4,danger:.5,bite:40,scale:1,chase:4.2,march:2.6,dmg:54,rate:1.2999999999999998,brave:!1,prey:!1}})})();

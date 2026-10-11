@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("lion",{kind:"species",stats:{hp:160,spd:3,danger:.8,bite:26,scale:1.15,chase:7.59,march:4.1745,dmg:35.1,rate:1.0899999999999999,brave:!0,prey:!1}})})();

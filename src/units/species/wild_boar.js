@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("wild_boar",{kind:"species",stats:{hp:65,spd:2.6,danger:.5,bite:14,scale:.9,chase:6.578,march:3.6179000000000006,dmg:18.900000000000002,rate:1.2999999999999998,brave:!1,prey:!1}})})();

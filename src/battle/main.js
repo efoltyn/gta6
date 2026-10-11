@@ -1,0 +1,1 @@
+"use strict";const WARM=Q.get("warm")!=="0";bootst("OPENING THE STUDIO"),WARM&&(CBZ.studio.warm(ARMOURY),CBZ.studio.prefetch(NEED)),CBZ.studio.need(NEED).then(function(){return bootst("OPENING THE ARMOURY"),WARM?loadArmoury():loadArmourySerial()}).then(function(){CBZ.npcwar.runBoot()}).catch(function(e){bootst("LOAD FAILED "+(e&&e.message?e.message:e)),console.error(e)});

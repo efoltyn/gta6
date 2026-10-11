@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("raccoon",{kind:"species",stats:{hp:14,spd:2.2,danger:0,scale:.55,chase:5.566000000000001,march:3.0613000000000006,dmg:13.5,rate:1.65,brave:!1,prey:!0}})})();

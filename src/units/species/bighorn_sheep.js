@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("bighorn_sheep",{kind:"species",stats:{hp:60,spd:2.6,danger:.2,bite:12,scale:.9,chase:6.578,march:3.6179000000000006,dmg:16.200000000000003,rate:1.5099999999999998,brave:!1,prey:!1}})})();

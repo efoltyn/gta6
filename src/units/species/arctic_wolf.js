@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("arctic_wolf",{kind:"species",stats:{hp:60,spd:2.8,danger:.55,bite:14,scale:1,chase:7.084,march:3.8962000000000003,dmg:18.900000000000002,rate:1.265,brave:!1,prey:!1}})})();

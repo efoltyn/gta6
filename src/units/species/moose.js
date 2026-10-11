@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("moose",{kind:"species",stats:{hp:180,spd:2.2,danger:.4,bite:16,scale:1.4,chase:5.566000000000001,march:3.0613000000000006,dmg:21.6,rate:1.3699999999999999,brave:!1,prey:!1}})})();

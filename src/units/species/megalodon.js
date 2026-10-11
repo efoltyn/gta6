@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("megalodon",{kind:"species",stats:{hp:1200,spd:2.4,danger:.8,bite:60,scale:2.6,chase:6.072,march:3.3396000000000003,dmg:81,rate:1.0899999999999999,brave:!0,prey:!1}})})();

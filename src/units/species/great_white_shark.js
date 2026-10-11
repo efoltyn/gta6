@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("great_white_shark",{kind:"species",stats:{hp:140,spd:2.6,danger:.6,bite:30,scale:1.08,chase:6.578,march:3.6179000000000006,dmg:40.5,rate:1.23,brave:!1,prey:!1}})})();

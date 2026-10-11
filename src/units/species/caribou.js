@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("caribou",{kind:"species",stats:{hp:70,spd:2.8,danger:0,scale:1.05,chase:7.084,march:3.8962000000000003,dmg:13.5,rate:1.65,brave:!1,prey:!0}})})();

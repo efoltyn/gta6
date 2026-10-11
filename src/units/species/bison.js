@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("bison",{kind:"species",stats:{hp:200,spd:2.4,danger:.5,bite:20,scale:1.3,chase:6.072,march:3.3396000000000003,dmg:27,rate:1.2999999999999998,brave:!1,prey:!1}})})();

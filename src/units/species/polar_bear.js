@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("polar_bear",{kind:"species",stats:{hp:240,spd:2.2,danger:.75,bite:24,scale:1.45,chase:5.06,march:2.783,dmg:32.400000000000006,rate:1.125,brave:!0,prey:!1}})})();

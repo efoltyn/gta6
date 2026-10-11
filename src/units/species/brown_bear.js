@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("brown_bear",{kind:"species",stats:{hp:200,spd:2.1,danger:.7,bite:22,scale:1.35,chase:4.83,march:2.6565000000000003,dmg:29.700000000000003,rate:1.16,brave:!0,prey:!1}})})();

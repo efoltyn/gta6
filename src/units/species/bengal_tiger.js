@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("bengal_tiger",{kind:"species",stats:{hp:150,spd:3.2,danger:.8,bite:26,scale:1.1,chase:8.096,march:4.452800000000001,dmg:35.1,rate:1.0899999999999999,brave:!0,prey:!1}})})();

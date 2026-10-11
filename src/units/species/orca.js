@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("orca",{kind:"species",stats:{hp:620,spd:3.4,danger:.5,bite:33,scale:.95,chase:8.6,march:4.73,dmg:44.550000000000004,rate:1.2999999999999998,brave:!1,prey:!1}})})();

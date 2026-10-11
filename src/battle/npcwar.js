@@ -1,0 +1,1 @@
+"use strict";(function(){const W=window.CBZ=window.CBZ||{},boots=[];let ran=!1;W.npcwar={onBoot(fn){if(ran){fn();return}boots.push(fn)},runBoot(){if(!ran){ran=!0;for(let i=0;i<boots.length;i++)boots[i]()}}}})();

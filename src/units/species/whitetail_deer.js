@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("whitetail_deer",{kind:"species",stats:{hp:30,spd:2.6,danger:0,scale:1,chase:6.578,march:3.6179000000000006,dmg:13.5,rate:1.65,brave:!1,prey:!0}})})();

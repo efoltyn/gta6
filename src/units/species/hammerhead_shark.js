@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("hammerhead_shark",{kind:"species",stats:{hp:150,spd:2.5,danger:.5,bite:26,scale:.95,chase:6.324999999999999,march:3.47875,dmg:35.1,rate:1.2999999999999998,brave:!1,prey:!1}})})();

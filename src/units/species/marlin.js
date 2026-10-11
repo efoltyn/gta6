@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("marlin",{kind:"species",stats:{hp:130,spd:2.1,danger:.15,scale:1.05,chase:5.313000000000001,march:2.9221500000000007,dmg:13.5,rate:1.545,brave:!1,prey:!1}})})();

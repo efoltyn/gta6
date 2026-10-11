@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("gray_wolf",{kind:"species",stats:{hp:55,spd:2.8,danger:.55,bite:14,scale:.95,chase:7.084,march:3.8962000000000003,dmg:18.900000000000002,rate:1.265,brave:!1,prey:!1}})})();

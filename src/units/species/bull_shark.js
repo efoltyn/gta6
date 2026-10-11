@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("bull_shark",{kind:"species",stats:{hp:110,spd:2.7,danger:.55,bite:24,scale:.76,chase:6.831000000000001,march:3.757050000000001,dmg:32.400000000000006,rate:1.265,brave:!1,prey:!1}})})();

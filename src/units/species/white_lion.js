@@ -1,0 +1,1 @@
+(function(){"use strict";window.CBZ.unitKit.register("white_lion",{kind:"species",stats:{hp:200,spd:3,danger:.85,bite:28,scale:1.2,chase:7.59,march:4.1745,dmg:37.800000000000004,rate:1.055,brave:!0,prey:!1}})})();
