@@ -597,6 +597,33 @@ scenario(12, "wheels: a Humvee and a loaded M35 v 30 riflemen", async () => {
    a helicopter fights from battle positions (masked low, up to fire, down,
    sidestep), a jet flies attack runs at a real height; every unit animates
    itself on the battle clock and names the weapon of every round. */
+/* 13  ROCKET ARTILLERY. The M142 HIMARS (src/units/vehicles/m270_mlrs.js)
+   against a company of riflemen: built by its own file on the hull kit, it
+   keeps out of its minimum range, stops, lays the pod, and ripples GUIDED
+   GMLRS (rig.launched sets the homing mark): the rockets land on the group
+   and kill (the old 220 m/s lob flew 45 s and killed nothing). */
+scenario(13, "rocket artillery: a HIMARS fire mission on 40 riflemen", async () => {
+  const W = boot("?a=m270_mlrs*1&b=men&n=1v40&arena=dunes&bw=ak47&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  run(W, 0.1);
+  const R = W.sb.__battle.roster();
+  const h = R.find((m) => m.unitId === "m270_mlrs");
+  check(!!h && !h.group.userData.standIn && !!(h.rig && h.rig.launched && h.rig.canFire), "the HIMARS is built by its own file (rig with launched / canFire)");
+  if (!h) return;
+  let guided = 0, minD = 1e9;
+  const orig = h.rig.launched.bind(h.rig);
+  h.rig.launched = function (rk, shot, t) { orig(rk, shot, t); if (rk.homing) guided++; };
+  const blueDead = () => W.sb.__battle.roster().filter((m) => m.team === "blue" && m.dead).length;
+  const a = run(W, 150, () => {
+    for (const o of W.sb.__battle.roster()) if (o.team === "blue" && !o.dead) minD = Math.min(minD, Math.hypot(o.pos.x - h.pos.x, o.pos.z - h.pos.z));
+    return true;
+  });
+  check(h.shotsF >= 1 && guided === h.shotsF, "it fired, every rocket guided (" + h.shotsF + " fired, " + guided + " guided)");
+  check(h.kills > 0 || blueDead() > 0, "the rockets killed (" + h.kills + " credited, " + blueDead() + " blue dead in " + a.simT + " s, winner " + a.winner + ")");
+});
+
 scenario(11, "aircraft: an Apache's battle positions, an F-35's attack runs", async () => {
   {
     const W = boot("?a=ah64_apache*1&b=men&n=1v30&arena=dunes&bw=ak47&auto=1&probe=0");

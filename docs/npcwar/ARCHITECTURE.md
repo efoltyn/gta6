@@ -288,6 +288,7 @@ Do not read `w.needs` as a "which weapon" signal (the old getter hack): use `sho
 | `fire(shot, from)` | every round of every weapon. A rig with `fire` owns its effects (recoil, flash, the store leaving its rail): the runtime draws none |
 | `fired(scale, shot)` / `spend(i, shot)` | **legacy** (`city/mil_armor.js` rigs), only when there is no `fire`: `fired` for cannon (1) and autocannon (0.3) rounds, `spend` for a launch with `i` = the rig's own `loaded - 1` when it keeps one, else `shot.n` |
 | `reload(shot)` | a salvo's reload has finished: put the rounds back |
+| `launched(rocket, shot, target)` | an HE round / rocket (`vehFireHE`) has just been put in flight: the rig may fly it its own way (velocity, `grav`, `life`, `homing` mark `{ pos, dead }`, warhead `w`, a `mesh`); fire.js `stepRockets` flies whatever it set. The HIMARS uses it for guided GMLRS |
 | `canFire(shot) -> bool` | false holds this weapon this step (a TOW only with the launcher up and the hull still) |
 | `damage(vs, res)` | every hit that lands (`vs` = the damage state, `res` = `vehicleDrive.resolve`'s result: `zone pen dmg mobility firepower burning wreck`): show the drooped gun, the thrown track, the fire |
 | `aimError(shot) -> rad` | how far a `slew` mount still is from the line; the runtime holds fire until it is under `w.tol` (0.06) |
@@ -415,7 +416,7 @@ vehicle agents redraw):
 | stryker_apc | Stryker (9) | milArmor.apc | driver, commander | .50 RWS | 20/14/12/8 |
 | hmmwv | Humvee (2) | milArmor.luv | driver, gunner | .50 | 10/10/8/5 |
 | m35_truck | M35 (16) | milArmor.truck | driver, commander | none | 2/0/0/0 |
-| m270_mlrs | label "M142 HIMARS" (the model is the wheeled pod) | milArmor.mlrs | 3 | 6 rockets | 8/2/2/2 |
+| m270_mlrs | M142 HIMARS (redrawn on the hull kit: FMTV 6x6, launcher module, one GMLRS pod) | its own file | driver, gunner, commander | 6 x M31A1 GMLRS per pod, guided, reload by pod (18 carried) | 12/9/5/5 |
 | patriot_launcher | Patriot | milArmor.patriot | 2 | SAM (air only) | 6/2/2/2 |
 | technical | MG technical | stand-in in its file (warlord's builder needs CBZ.warlord) | driver, gunner | MG | 1/0/0/0 |
 | ah64_apache | AH-64 | milAir attackHeli | pilot, gunner | 30 mm, Hellfire, Hydra | 20/15/10/8 |
@@ -453,7 +454,7 @@ enters walls, ground, dunes or bodies (camApply). Probe seams: `__battle.take(se
 `youDrive({ax,az,run,atk,yaw})`, `youState()`, `director()`. Shot service: `--cams lens` shoots
 the game's own camera.
 
-**Known gaps.** The HIMARS' indirect fire needs tuning, and there is no per-track split on the
+**Known gaps.** There is no per-track split on the
 rig. Aircraft fly the doctrine above, not `studio.fly`. The `drive` / `aim` / `fight` unit
 hooks are not called yet: a unit drives on the shared tracked / wheeled / air model. In node,
 strategic.js and the A400M build fall back to stand-ins (browser untested).
