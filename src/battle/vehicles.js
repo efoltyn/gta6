@@ -454,7 +454,7 @@ function thinkVehicle(u) {
     let want = stand;
     if (u.tgt.beast || u.tgt.fists) want = Math.min(stand, 18);
     if (u.tgt.launcher && d < 60) want = 90;
-    if (!u.sees) want = Math.min(want, d * 0.6);
+    if (!u.sees && !vehIndirect(u)) want = Math.min(want, d * 0.6);   // an indirect launcher needs no sight line: it keeps its standoff
     if (d > want * 1.15 || d < want * 0.6) {
       const go = d - want;
       u.target.set(u.pos.x + dx / d * go, 0, u.pos.z + dz / d * go);
@@ -657,8 +657,9 @@ function vehFight(u, sdt) {
   for (let k = 0; k < u.wpn.length; k++) {
     const W = u.wpn[k], w = W.w;
     if (W.off || W.ammo <= 0 || W.cool > 0 || W.reloadT > 0) continue;
-    // a bomb's reach is its fall (vehBombRun), not a range number
-    if (w.kind !== "bombs" && (dist > (w.range || 600) || dist < (w.minRange || 0))) continue;
+    // a bomb's reach is its fall (vehBombRun), not a range number. A gun's
+    // reach is SLANT range: a tank's .50 does not reach a Reaper 4.5 km up
+    if (w.kind !== "bombs" && (Math.hypot(dist, dy) > (w.range || 600) || dist < (w.minRange || 0))) continue;
     if (!vehWeaponFits(u, w, t)) continue;
     const manned = vehSeatManned(u, w);
     if (!manned) continue;                                   // nobody at this gun
@@ -856,11 +857,15 @@ function vehFireHE(u, w, t, dist) {
   const ch = Math.cos(sol.elev), sh = Math.sin(sol.elev);
   const vel = new THREE.Vector3((tx - from.x) / dd * v0 * ch, v0 * sh, (tz - from.z) / dd * v0 * ch);
   u._he = { pen: he.pen, beh: he.beh, he: true, cls: "he" };
-  rockets.push({
+  const rk = {
     pos: V().copy(from), vel: vel, grav: g, t: 0, by: u, life: Math.max(7, sol.t * 1.5 + 2),
     w: { blastRadius: he.blast || 6, blastPower: (he.power || 1.4) / 0.55, sfx: null },
     trail: CBZ.studio.trail({ length: 12, color: 0xffd9a0, opacity: 0.45, minStep: 2 }),
-  });
+  };
+  rockets.push(rk);
+  // the rig may fly its own round (rig.launched: a guided rocket's profile,
+  // its homing mark, its body): fire.js stepRockets flies whatever it set
+  if (u.rig && u.rig.launched) { try { u.rig.launched(rk, u._firing, t); } catch (e) { console.warn("[war] rig.launched", e); } }
   const dCam = Math.sqrt(camDist2(u.pos));
   if (dCam < 600) { try { CBZ.sfx("explosion", { dist: dCam, ghost: true, volume: 0.7, pitch: 0.6 }); } catch (e) {} }
 }
@@ -1152,7 +1157,10 @@ function stepJet(u, sdt) {
     gx = u.airPt.x; gz = u.airPt.z;
     wantAGL = Math.max(runAlt, cruise * 0.6);
     // far enough out to turn and line up a run that reaches its release point
-    if (dRef > Math.max(1600, R * 2.2, release + R * 1.2)) u.airPhase = "in";
+    // (or the out point is reached: a slow airframe with a long-range
+    // missile, the Reaper, never gets that far out and used to circle the
+    // point for minutes; it turns back in from there, a loiter orbit)
+    if (dRef > Math.max(1600, R * 2.2, release + R * 1.2) || Math.hypot(gx - u.pos.x, gz - u.pos.z) < R * 0.6) u.airPhase = "in";
   } else {
     u.airPhase = "in";
     gx = ref.x; gz = ref.z;
