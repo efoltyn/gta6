@@ -588,8 +588,12 @@ function buildYard(W, D, gap) {
   blockB.xf(0, 0, hd, Math.PI); legatoRun(blockB, -hw - 0.4, hw + 0.4, 4, true);
   blockB.xf(-hw, 0, 0, Math.PI / 2); legatoRun(blockB, -hd + 0.4, hd - 0.4, 4, false);
   blockB.xf(hw, 0, 0, -Math.PI / 2); legatoRun(blockB, -hd + 0.4, hd - 0.4, 4, false);
-  CBZ.micro.addBoxCollider(0, 1.6, -hd, W + 0.8, 3.2, 0.8); CBZ.micro.addBoxCollider(0, 1.6, hd, W + 0.8, 3.2, 0.8);
-  CBZ.micro.addBoxCollider(-hw, 1.6, 0, 0.8, 3.2, D); CBZ.micro.addBoxCollider(hw, 1.6, 0, 0.8, 3.2, D);
+  // `mat` (and `hollow` / `fill`) is what a round meets (src/battle/fire.js,
+  // weapons/ballistics.js): precast concrete, a steel box with air in it,
+  // timber crates part-full
+  const CONC = { mat: "concrete" };
+  CBZ.micro.addBoxCollider(0, 1.6, -hd, W + 0.8, 3.2, 0.8, CONC); CBZ.micro.addBoxCollider(0, 1.6, hd, W + 0.8, 3.2, 0.8, CONC);
+  CBZ.micro.addBoxCollider(-hw, 1.6, 0, 0.8, 3.2, D, CONC); CBZ.micro.addBoxCollider(hw, 1.6, 0, 0.8, 3.2, D, CONC);
 
   // PLACEMENT: every prop claims its footprint (+ an aisle) and nothing
   // intersects anything; the spawn columns stay open ground
@@ -618,7 +622,7 @@ function buildYard(W, D, gap) {
       containerInto(B, L);
     }
     claim(x, z, ex, ez);
-    CBZ.micro.addBoxCollider(x, tiers * CN.H / 2, z, ex * 2, tiers * CN.H, ez * 2);
+    CBZ.micro.addBoxCollider(x, tiers * CN.H / 2, z, ex * 2, tiers * CN.H, ez * 2, { mat: "steel", hollow: 0.002 });
     SCENERY.push({ kind: "container", x: x, y: tiers * CN.H / 2, z: z, len: L, tiers: tiers });
   };
   const L20 = 6.058, L40 = 12.192;
@@ -664,7 +668,7 @@ function buildYard(W, D, gap) {
       jerseyInto(jB, 3.0, [k, k, k * 0.98]);
     }
     claim(x, z, ex, ez);
-    CBZ.micro.addBoxCollider(x, 0.405, z, ex * 2, 0.81, ez * 2);
+    CBZ.micro.addBoxCollider(x, 0.405, z, ex * 2, 0.81, ez * 2, { mat: "concrete" });
     SCENERY.push({ kind: "barrier", x: x, y: 0.4, z: z });
     runs++;
   }
@@ -686,7 +690,7 @@ function buildYard(W, D, gap) {
       high = Math.max(high, 0.122 + stack * 1.02);
     }
     claim(x, z, ex, ez);
-    CBZ.micro.addBoxCollider(x, high / 2, z, ex * 2, high, ez * 2);
+    CBZ.micro.addBoxCollider(x, high / 2, z, ex * 2, high, ez * 2, { mat: "wood", fill: 0.45 });
     SCENERY.push({ kind: "crates", x: x, y: high / 2, z: z });
     piles++;
   }

@@ -20,7 +20,7 @@
     kind: "vehicle",
     domain: "air",
     drive: "jet",
-    stats: {hp: 900, mass: 120000, speed: 230, accel: 6, turn: 0.15, alt: 650, length: 48.5, width: 56.4, height: 12.4, armour: {front: 0, side: 0, rear: 0, top: 0}, standoff: 0},
+    stats: {hp: 900, mass: 120000, speed: 230, accel: 6, turn: 0.15, alt: 9000, length: 48.5, width: 56.4, height: 12.4, armour: {front: 0, side: 0, rear: 0, top: 0}, standoff: 0},
     crew: [{seat: "pilot", pos: [0, 4, 18]}, {seat: "copilot", pos: [0, 4, 18]}, {seat: "navigator", pos: [0, 3, 17]}, {seat: "radar", pos: [0, 3, 17]}, {seat: "ewo", pos: [0, 4, 16]}],
     passengers: 0,
     weapons: [

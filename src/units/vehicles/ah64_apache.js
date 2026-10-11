@@ -32,9 +32,10 @@
    ONCE per page and shared; an Apache costs one group of meshes, two
    InstancedMeshes per side for the stores, and zero allocation per frame.
 
-   THE RIG (moving parts, all driven from rig.tick):
-     main rotor   spins at 289 rpm on the battle clock (CBZ.now: it stops
-                  when the battle is frozen and follows the speed dial),
+   THE RIG (moving parts, all driven from animate -> tick):
+     main rotor   spins at 289 rpm on the battle clock (the runtime calls
+                  animate every sim step: it stops when the battle is frozen
+                  and follows the speed dial),
                   each blade flaps on its own hinge: droop at rest, coning
                   in flight, the disc tilting forward with speed (cyclic)
      tail rotor   1403 rpm, a faint blur disc on both rotors at speed
@@ -54,21 +55,27 @@
      damage       a wreck's rotor winds down, two blades are snapped off;
                   the battle blackens the paint and lights the fire
 
-   HOW IT IS DRIVEN TODAY. src/battle/vehicles.js does not call rig.update
-   for aircraft (only milAirDrive / milAirAim), so the rig ticks itself from
-   the airframe mesh's onBeforeRender, timed on CBZ.now. If the runtime ever
-   calls rig.update(dt) the self-tick stands down. The chin gun's line of
-   sight comes from CBZ.milAirAim through userData.chinGun (two empty aim
-   nodes); the real turret then lays onto that line at its own rate.
-   WHICH WEAPON IS FIRING: vehFire reads `w.needs` once, on the firing
-   round, before it asks for the muzzle. Each weapon here answers that read
-   with undefined (no loader needed) and notes itself, so muzzleWorld knows
-   to return the chin gun, the next Hydra tube or the next Hellfire rail.
+   HOW IT IS DRIVEN (the vehicle contract, docs/npcwar/ARCHITECTURE.md):
+     animate(veh, dt, ctx)   the runtime calls it every sim step on the battle
+                             clock; ctx.dead winds the rotor down and snaps
+                             two blades
+     rig.muzzleWorld(out, shot)  shot.wid says which weapon: the chin gun's
+                             muzzle brake, the next Hydra tube, the next
+                             Hellfire rail
+     rig.fire(shot)          every round: the gun recoils and flashes, a
+                             Hydra or a Hellfire leaves its tube or rail
+     rig.aimError(shot)      how far the M230 turret still has to slew: the
+                             runtime holds the burst until it is on
+   The chin gun's line of sight comes from CBZ.milAirAim through
+   userData.chinGun (two empty aim nodes); the real turret then lays onto
+   that line at its own rates. The weapons say how they point: the M230 is a
+   SLEWING mount (fires anywhere in its +-110 deg), the Hydras and the
+   Hellfire are FIXED (the nose goes on the mark; the Hellfire's seeker has
+   to see it before lock, +-20 deg).
 
-   NATION. Nothing in the build context says which side the airframe flies
-   for yet. build(ctx) honours ctx.nation (a city/flags.js id) and the rig
-   has setNation(id): the side's flag goes on both faces of the fin (the
-   starboard one reversed, hoist forward, as real aircraft carry it).
+   NATION. build(ctx) paints ctx.flag (the side's city/flags.js design) on
+   both faces of the fin (the starboard one reversed, hoist forward, as real
+   aircraft carry it); the rig's setNation(id) repaints it.
 
    Units: metres, m/s, kg; armour in mm RHA equivalent per face.
 ============================================================ */
@@ -92,26 +99,23 @@
   const GUN = { yawMax: 110 * PI / 180, up: -11 * PI / 180, down: 60 * PI / 180, yawRate: 2.1, elevRate: 1.6 };
   const HF_N = 8, HY_N = 38;
 
-  /* WHICH WEAPON IS ON THE TRIGGER (see the header): vehFire reads w.needs
-     exactly once, for the round it is about to fire, before vehicleMuzzle. */
-  let FIRING = null;
-  function armed(w) {
-    Object.defineProperty(w, "needs", { get: function () { FIRING = w.id; return undefined; }, enumerable: false, configurable: true });
-    return w;
-  }
   /* The order is the engagement order vehFight walks: a Hellfire for armour
-     first; the gun for everything else; the rockets in the gun's pauses. */
+     first; the gun for everything else; the rockets in the gun's pauses.
+     `mount` / `arc` / `yawMax` are the runtime's per-weapon facing rule. */
   const WEAPONS = [
-    // AGM-114K/L: semi-active laser / radar tandem HEAT, Mach 1.3, 0.5-8 km
-    armed({ id: "agm114_hellfire", seat: "gunner", kind: "missile", vs: "armour", rof: 0.25, pen: 1000, beh: 1000,
-      he: { pen: 60, beh: 400, blast: 5, power: 1.4 }, speed: 425, range: 8000, minRange: 500, ammo: HF_N }),
+    // AGM-114K/L: semi-active laser / radar tandem HEAT, Mach 1.3, 0.5-8 km;
+    // the seeker has to see the mark off the nose before it locks
+    { id: "agm114_hellfire", seat: "gunner", kind: "missile", vs: "armour", mount: "fixed", arc: 0.35, rof: 0.25, pen: 1000, beh: 1000,
+      he: { pen: 60, beh: 400, blast: 5, power: 1.4 }, speed: 425, range: 8000, minRange: 500, ammo: HF_N },
     // M230E1 30x113 mm chain gun, 625 rounds/min, M789 HEDP (~25-30 mm RHA,
-    // 4 m lethal radius), 805 m/s, effective to 1.7 km; 1200 rounds
-    armed({ id: "m230_30mm", seat: "gunner", kind: "autocannon", chin: true, rof: 10.4, burst: 16, pause: 1.4, pen: 30, beh: 120,
-      he: { pen: 30, beh: 120, blast: 3, power: 0.7 }, speed: 805, heSpeed: 805, grav: 9.8, range: 1700, ammo: 1200 }),
-    // Hydra 70 with the M151 10 lb HE warhead, rippled in pairs of pairs
-    armed({ id: "hydra70", seat: "pilot", kind: "rockets", vs: "soft", rof: 6, salvo: 4, reload: 9, pen: 20, beh: 300,
-      he: { pen: 20, beh: 300, blast: 9, power: 1.8 }, speed: 740, heSpeed: 600, grav: 9.8, range: 5000, minRange: 200, ammo: HY_N }),
+    // 4 m lethal radius), 805 m/s, effective to 1.7 km; 1200 rounds; the
+    // turret slews +-110 deg
+    { id: "m230_30mm", seat: "gunner", kind: "autocannon", mount: "slew", yawMax: GUN.yawMax, tol: 0.06, rof: 10.4, burst: 16, pause: 1.4, pen: 30, beh: 120,
+      he: { pen: 30, beh: 120, blast: 3, power: 0.7 }, speed: 805, heSpeed: 805, grav: 9.8, range: 1700, ammo: 1200 },
+    // Hydra 70 with the M151 10 lb HE warhead, rippled in pairs of pairs,
+    // unguided off fixed pods: the nose is the aim
+    { id: "hydra70", seat: "pilot", kind: "rockets", vs: "soft", mount: "fixed", arc: 0.05, rof: 6, salvo: 4, reload: 9, pen: 20, beh: 300,
+      he: { pen: 20, beh: 300, blast: 9, power: 1.8 }, speed: 740, heSpeed: 600, grav: 9.8, range: 5000, minRange: 200, ammo: HY_N },
   ];
 
   // =====================================================================
@@ -571,16 +575,18 @@
 
   // ---- nation flags on the fin ------------------------------------------------
   const FLAGM = Object.create(null);
-  function flagMat(id) {
+  // one material per flag: `id` keys the cache, `design` (ctx.flag) wins over a lookup
+  function flagMat(id, design) {
     if (FLAGM[id] !== undefined) return FLAGM[id];
     const THREE = window.THREE, F = CBZ.flags;
     let m = null;
     try {
-      if (THREE && F && F.paint && F.designFor && typeof document !== "undefined") {
+      const d = design || (F && F.designFor ? F.designFor(id) : null);
+      if (THREE && F && F.paint && d && typeof document !== "undefined") {
         const c = document.createElement("canvas"); c.width = 160; c.height = 100;
         const g = c.getContext && c.getContext("2d");
         if (g) {
-          F.paint(g, F.designFor(id), 160, 100, { grain: false });
+          F.paint(g, d, 160, 100, { grain: false });
           const t = new THREE.CanvasTexture(c);
           if (THREE.sRGBEncoding) t.encoding = THREE.sRGBEncoding;
           m = new THREE.MeshLambertMaterial({ map: t, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 });
@@ -594,7 +600,6 @@
   // =====================================================================
   //  BUILD: one airframe, sharing every geometry and material
   // =====================================================================
-  function clockMs() { const n = CBZ.now; return typeof n === "number" && isFinite(n) ? n : (typeof performance !== "undefined" ? performance.now() : Date.now()); }
   const _zero = { m: null };
 
   function build(ctx) {
@@ -664,37 +669,28 @@
 
     const R = {
       group: root, lean: lean, nodes: N, fus: fus, mat0: M.vc, blades: blades, disc: disc, tdisc: tdisc,
-      lamps: lamps, hf: hf, hy: hy, hfPos: hfPos, hyPos: hyPos, hfShot: 0, hyShot: 0, pend: -1, flags: flags,
-      t0: null, px: 0, py: 0, pz: 0, h0: 0, vx: 0, vz: 0, vy: 0, fwdA: 0, yawRate: 0,
+      lamps: lamps, hf: hf, hy: hy, hfPos: hfPos, hyPos: hyPos, hfShot: 0, hyShot: 0, flags: flags,
+      clock: 0, px: 0, py: 0, pz: 0, h0: 0, vx: 0, vz: 0, vy: 0, fwdA: 0, yawRate: 0, dead: false,
       rpm: 1, rotA: (ctx && ctx.seed || 0) * 1.37, tA: 0, cone: 0.03, rec: 0, stabA: -0.44,
-      aimY: 0, aimP: 0, aimT: -1e9, dustT: 0, broken: false, ext: false, seeded: false, wob: (ctx && ctx.seed || 0) * 2.1,
+      aimY: 0, aimP: 0, aimT: -1e9, dustT: 0, broken: false, seeded: false, wob: (ctx && ctx.seed || 0) * 2.1,
     };
     const rig = {
       turret: null,
-      settle: function () { R.seeded = false; tick(R, true); },
-      update: function () { R.ext = true; tick(R, false); },
-      tick: function () { tick(R, false); },
-      fired: function (k) {
-        // the KE path (the gun at a vehicle): recoil + flash at the muzzle
-        if (FIRING === "m230_30mm" || k < 1) {
-          R.rec = 1;
-          if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash(worldAt(N.barrel, 0, 0, 1.48, _w), { scale: 1.4 }); } catch (e) {} }
-        }
+      settle: function () { R.seeded = false; tick(R, true, 0, null); },
+      muzzleWorld: function (out, shot) { return muzzle(R, out, shot); },
+      fire: function (shot) { fire(R, shot); },
+      aimError: function (shot) {
+        if (!shot || shot.wid !== "m230_30mm") return 0;
+        const ay = clamp(N.aimYaw.rotation.y, -GUN.yawMax, GUN.yawMax), ap = clamp(N.aimPitch.rotation.x, GUN.up, GUN.down);
+        return Math.max(Math.abs(ay - N.chinYaw.rotation.y), Math.abs(ap - N.chinPitch.rotation.x));
       },
-      muzzleWorld: function (out) { return muzzle(R, out); },
-      spend: function () { spend(R); },
-      setNation: function (id) {
-        const m = id ? flagMat(String(id)) : null;
+      setNation: function (id, design) {
+        const m = id || design ? flagMat(String(id || "flag"), design) : null;
         for (let i = 0; i < flags.length; i++) { flags[i].material = m || M.vc; flags[i].visible = !!m; }
         return !!m;
       },
       state: R,
     };
-    Object.defineProperty(rig, "loaded", { get: function () {
-      if (FIRING === "agm114_hellfire") return HF_N - R.hfShot;
-      if (FIRING === "hydra70") return HY_N - R.hyShot;
-      return 0;
-    } });
     R.rig = rig;
     // the battle runtime's air hooks: milAirAim lays the two aim nodes; the
     // real turret follows them at its own rate (tick)
@@ -706,9 +702,8 @@
       { job: "Copilot/Gunner", x: 0, y: 1.18, z: 3.82, yaw: 0, cushionH: 0.42, floorBelow: 0.42 },
     ];
     root._milRt = { surf: [], props: [], glow: null, gear: null, cr: 0, cp: 0, cy: 0, r0: null, p0: 0, h0: 0 };
-    if (fus) fus.onBeforeRender = function () { if (!R.ext) tick(R, false); };
-    if (ctx && ctx.nation) rig.setNation(ctx.nation);
-    tick(R, true);
+    if (ctx && (ctx.nation || ctx.flag)) rig.setNation(ctx.nation || ctx.flagId, ctx.flag);
+    tick(R, true, 0, null);
     return { group: root, rig: rig, footW: DIM.rotorSpan, footL: DIM.length, height: DIM.height };
   }
 
@@ -722,32 +717,35 @@
     r.updateMatrixWorld(true);
     return node.localToWorld(out.set(x, y, z));
   }
-  function muzzle(R, out) {
-    const N = R.nodes;
-    R.pend = -1;
-    if (FIRING === "agm114_hellfire" && R.hfShot < HF_N) {
+  // where the round in hand leaves: the next rail, the next tube, else the chin gun
+  function muzzle(R, out, shot) {
+    const N = R.nodes, wid = shot && shot.wid;
+    if (wid === "agm114_hellfire" && R.hfShot < HF_N) {
       const i = R.hfShot, side = i & 1, rail = i >> 1, p = R.hfPos[rail];
-      R.pend = i;
       return worldAt(side ? N.pylOR : N.pylOL, p[0], p[1], p[2] + HF_LEN / 2 + 0.05, out);
     }
-    if (FIRING === "hydra70" && R.hyShot < HY_N) {
+    if (wid === "hydra70" && R.hyShot < HY_N) {
       const i = R.hyShot, side = i & 1, tube = i >> 1, p = R.hyPos[Math.min(tube, R.hyPos.length - 1)];
-      R.pend = i;
       return worldAt(side ? N.pylIR : N.pylIL, p[0], p[1], p[2] + 0.12, out);
     }
-    // the chin gun (and anything else): the muzzle brake; every round kicks the barrel
-    R.rec = 1;
     return worldAt(N.barrel, 0, 0, 1.49, out);
   }
-  function spend(R) {
+  // a round leaves: the gun kicks and flashes; a store leaves its rail or tube
+  function fire(R, shot) {
+    const wid = shot && shot.wid;
+    if (wid !== "agm114_hellfire" && wid !== "hydra70") {
+      R.rec = 1;
+      if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash(worldAt(R.nodes.barrel, 0, 0, 1.48, _w), { scale: 1.4 }); } catch (e) {} }
+      return;
+    }
     const THREE = window.THREE;
     const zero = _zero.m || (_zero.m = new THREE.Matrix4().makeScale(0, 0, 0));
     let p = null;
-    if (FIRING === "agm114_hellfire" && R.hfShot < HF_N) {
+    if (wid === "agm114_hellfire" && R.hfShot < HF_N) {
       const i = R.hfShot++, im = R.hf[i & 1];
       im.setMatrixAt(i >> 1, zero); im.instanceMatrix.needsUpdate = true;
       p = worldAt(i & 1 ? R.nodes.pylOR : R.nodes.pylOL, R.hfPos[i >> 1][0], R.hfPos[i >> 1][1], R.hfPos[i >> 1][2] - 0.6);
-    } else if (FIRING === "hydra70" && R.hyShot < HY_N) {
+    } else if (wid === "hydra70" && R.hyShot < HY_N) {
       const i = R.hyShot++, im = R.hy[i & 1];
       if ((i >> 1) < R.hyPos.length) { im.setMatrixAt(i >> 1, zero); im.instanceMatrix.needsUpdate = true; }
       p = worldAt(i & 1 ? R.nodes.pylIR : R.nodes.pylIL, 0, R.hyPos[0][1], -0.85);
@@ -758,15 +756,15 @@
     try { if (CBZ.cityCrashSmoke) CBZ.cityCrashSmoke(p.x, p.y - 0.8, p.z, { count: 1, scale: 0.6, shade: 0.78 }); } catch (e) {}
   }
 
-  // ---- the rig: every moving part, once per rendered frame ------------------------
-  function tick(R, snap) {
-    const now = clockMs();
-    let dt = R.t0 == null ? 0 : (now - R.t0) / 1000;
-    R.t0 = now;
+  // ---- the rig: every moving part, once per animate (the battle clock) ------------
+  function tick(R, snap, dt, ctx) {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
+    R.clock += dt;
+    const now = R.clock * 1000;
     const g = R.group, N = R.nodes;
-    const wrecked = !!(R.fus && R.fus.material !== R.mat0);
+    if (ctx && ctx.dead) R.dead = true;
+    const wrecked = R.dead;
     // motion, read off the airframe's own transform
     const px = g.position.x, py = g.position.y, pz = g.position.z, h = g.rotation.y;
     if (!R.seeded || snap) { R.px = px; R.py = py; R.pz = pz; R.h0 = h; R.seeded = true; }
@@ -782,9 +780,10 @@
     }
     R.px = px; R.py = py; R.pz = pz; R.h0 = h;
     const spd = Math.hypot(R.vx, R.vz);
-    let gy = 0;
-    try { gy = CBZ.floorAt ? (+CBZ.floorAt(px, pz) || 0) : 0; } catch (e) { gy = 0; }
-    const agl = py - gy;
+    let agl;
+    if (ctx && isFinite(ctx.agl)) agl = ctx.agl;
+    else { let gy0 = 0; try { gy0 = CBZ.floorAt ? (+CBZ.floorAt(px, pz) || 0) : 0; } catch (e) { gy0 = 0; } agl = py - gy0; }
+    const gy = py - agl;
     const flying = agl > 1.2 && !wrecked;
     // ---- rotors: spool, spin, blade flapping -------------------------------------
     const rpmT = wrecked ? 0 : 1;
@@ -873,5 +872,10 @@
     passengers: 0,
     weapons: WEAPONS,
     build: build,
+    // the battle calls this every sim step (src/battle/vehicles.js vehAnimate)
+    animate: function (veh, dt, ctx) {
+      const r = veh && veh.rig;
+      if (r && r.state) tick(r.state, false, dt, ctx);
+    },
   });
 })();
