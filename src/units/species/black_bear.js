@@ -18,7 +18,7 @@
   const CBZ = window.CBZ;
   const SPEC = {
     id: "black_bear",
-    mass: { m: 120, f: 75 }, femaleK: 0.86,
+    mass: { m: 120, f: 75 }, femaleK: 0.86, shag: 0.008, fringe: 0.02,
     stats: {
       hp: 140, spd: 1.3, danger: 0.6, bite: 33, scale: 1, mass: 120,
       chase: 12.5, march: 3.4, dmg: 28, rate: 1.15, brave: false, prey: false,
@@ -45,7 +45,7 @@
         brown: { base: 0x4a3222, sheen: 0x6a4a32, leg: 0x2c1e14 },
         cinnamon: { base: 0x7b4b28, sheen: 0x9c6a3e, leg: 0x4a2c18 },
       }[coat];
-      const MUZ = 0x9a7652, k = D.k;
+      const MUZ = 0x8a6644, k = D.k;
       return function (part, x, y, z, ca, sa, R) {
         if (R && R.tag === "nose") return 0x2a2420;
         if (part === "eye") return 0x0d0907;
@@ -56,7 +56,7 @@
         if (part === "head") {
           if (R && R.muz) c = R.muz >= 4 ? U.mixHex(MUZ, 0x3a2a1c, 0.5) : MUZ;
           if (R && R.muz && ca < -0.55) c = 0x2a1f19;
-        } else if (part === "jaw") c = ca > 0.5 ? 0x6b3b38 : U.mixHex(MUZ, 0x2a1f19, 0.35);
+        } else if (part === "jaw") c = ca > 0.5 ? 0x33201d : U.mixHex(MUZ, 0x2a1f19, 0.35);
         else if (part === "ear") c = ca < -0.2 ? 0x2a2420 : pal.base;
         else if (part === "leg" || part === "paw" || part === "arm" || part === "thigh") c = U.mixHex(c, pal.leg, U.clamp((D.sh - y) / (0.3 * k), 0, 1));
         if (part === "paw" && ca < -0.35) c = 0x1b1512;
@@ -70,7 +70,7 @@
       nerve: 0.45, hitFear: 2.4, hitAnger: 0.8, fearDecay: 0.03, angerHold: 0.4, woundBrave: false,
       gunFear: 0.3, vehicleFear: 1.2, bigFear: 0.8, bluffP: 0.6, bluffRetreat: 0.75, lookP: 0.65,
       chargeDist: 35, predatory: false, toDeathHp: 0.12, rearPitch: 1.28,
-      swat: { mEff: 0.08, v: 7.5 }, slamV: 3.0, biteN: 3000, clawCm: 4.5,
+      swat: { mEff: 0.08, v: 7.5 }, slamV: 3.0, biteN: 3000, clawCm: 4.5, hide: 1.5,
     },
   };
   function kit() { return CBZ.bearKit ? CBZ.bearKit.unit(SPEC) : null; }

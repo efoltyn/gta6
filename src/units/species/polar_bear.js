@@ -19,7 +19,7 @@
   const CBZ = window.CBZ;
   const SPEC = {
     id: "polar_bear",
-    mass: { m: 450, f: 230 }, femaleK: 0.84,
+    mass: { m: 450, f: 230 }, femaleK: 0.84, shag: 0.016, fringe: 0.045,
     stats: {
       hp: 330, spd: 1.5, danger: 0.8, bite: 61, scale: 1, mass: 450,
       chase: 11, march: 3.2, dmg: 103, rate: 1.0, brave: true, prey: false,
@@ -56,7 +56,7 @@
         let c = U.mixHex(pal.base, pal.low, U.clamp(0.5 - ca * 0.6 + n * 0.15, 0, 1) * 0.7);
         if (part === "leg" || part === "paw" || part === "arm" || part === "thigh") c = U.mixHex(c, pal.low, U.clamp((D.sh - y) / (0.4 * k), 0, 1));
         if (part === "head" && R && R.muz && ca < -0.55) c = SKIN;            // black lips
-        if (part === "jaw") c = ca > 0.5 ? 0x5a3236 : (ca > 0.1 ? SKIN : pal.low);
+        if (part === "jaw") c = ca > 0.5 ? 0x2a1c1e : (ca > 0.1 ? SKIN : pal.low);
         if (part === "ear") c = ca < -0.2 ? 0x8f8a80 : pal.base;
         if (part === "paw" && ca < -0.45) c = 0x1a1716;                       // footpads
         return c;
@@ -67,7 +67,7 @@
       nerve: 1.4, hitFear: 0.7, hitAnger: 1.6, fearDecay: 0.04, angerHold: 0.6, woundBrave: true,
       gunFear: 0.03, vehicleFear: 0.6, bigFear: 0.4, bluffP: 0.08, bluffRetreat: 0.3, lookP: 0.45,
       chargeDist: 40, predatory: true, toDeathHp: 0.35, rearPitch: 1.2,
-      swat: { mEff: 0.08, v: 8.5 }, slamV: 3.2, biteN: 5500, clawCm: 6,
+      swat: { mEff: 0.08, v: 8.5 }, slamV: 3.2, biteN: 5500, clawCm: 6, hide: 3.5,
     },
   };
   function kit() { return CBZ.bearKit ? CBZ.bearKit.unit(SPEC) : null; }

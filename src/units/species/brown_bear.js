@@ -195,7 +195,20 @@
       ring(D.shX + 0.13 * k, sl + 0.04 * k, ch, [0.84, 0.86, 0.88], [CH, 1], 0.35, hm * 0.2),
       ring(D.shX + 0.22 * k, sl + 0.08 * k, ch, [0.64, 0.66, 0.70], [CH, 0.65, N0, 0.35]),
     ];
-    LK.loft(G, torso, 22, C("torso"), { capLen: 0.9 });
+    const v0 = G.n;
+    LK.loft(G, torso, 26, C("torso"), { capLen: 0.9 });
+    // THE COAT'S EDGE: a bear is not a smooth tube. Guard hairs break the
+    // silhouette (a few cm of shag), and the belly hangs a ragged fringe.
+    for (let i = v0; i < G.n; i++) {
+      const px = G.p[i * 3], py = G.p[i * 3 + 1], pz = G.p[i * 3 + 2];
+      const cy = lineY(clamp(px, D.hipX, D.shX)) + lerp(rl, sl, clamp((px - D.hipX) / L, 0, 1));
+      const dy = py - cy, rr = Math.hypot(dy, pz) || 1;
+      const up = dy / rr;
+      const shag = (fnoise(px * 3.1, py * 2.3, pz * 3.7, 9 / k) * 0.6 + fnoise(px, py, pz, 31 / k) * 0.4) * (spec.shag || 0.012) * k;
+      const fringe = up < -0.55 ? (0.5 + 0.5 * Math.sin(px * 47 / k + pz * 13 / k)) * (spec.fringe || 0.03) * k * (-up - 0.55) / 0.45 : 0;
+      G.p[i * 3 + 1] += (dy / rr) * shag - fringe;
+      G.p[i * 3 + 2] += (pz / rr) * shag;
+    }
 
     // NECK: thick, short (grizzly) to long (polar), two bones
     const nb = D.neckB, hp = D.headP, nk = D.neck;
@@ -547,7 +560,15 @@
     if (B.threat && (B.threat.dead || B.threat.fled)) B.threat = null;
     const d = tgt ? distTo(m, tgt) : 1e9;
     const dT = B.threat ? distTo(m, B.threat) : 1e9;
-    if (m.hp < B.lastHp) onHurt(m, B, B.lastHp - m.hp);
+    if (m.hp < B.lastHp) {
+      /* THE HIDE: fur, 5-10 cm of fat and a thick skin stop a fixed amount of
+         every blow (a damage threshold, as armour works): a man's fist barely
+         reaches a grizzly, a rifle round hardly notices. Only through the hp
+         seam the battle offers (hurtMan has no per-unit soak yet). */
+      const raw = B.lastHp - m.hp, soak = Math.min(raw * 0.8, bh.hide || 0);
+      m.hp += soak;
+      onHurt(m, B, raw - soak);
+    }
     B.lastHp = m.hp;
     if (tgt && tgt !== B.lastTgt) newThreat(m, B, tgt, d);
     B.lastTgt = tgt;
@@ -658,9 +679,9 @@
      pin: half-rear, both forepaws driven down), hug (stand, clasp, bite).
   ========================================================================== */
   const ACT = {
-    swat: { dur: 0.78, hit: 0.46, style: "swat" },
-    bite: { dur: 0.72, hit: 0.5, style: "maul" },
-    slam: { dur: 1.05, hit: 0.6, style: "swat" },
+    swat: { dur: 0.52, hit: 0.46, style: "swat" },
+    bite: { dur: 0.62, hit: 0.5, style: "maul" },
+    slam: { dur: 0.95, hit: 0.6, style: "swat" },
     hug: { dur: 1.55, hit: 0.56, hit2: 0.8, style: "maul" },
   };
   function forceDmg(B, kind) {
@@ -685,7 +706,7 @@
     let wS = 0.5, wB = 0.3, wL = 0.2, wH = 0;
     if (ratio > 0.55 && tgt.beast) { wH = 0.42; wS = 0.33; wB = 0.25; wL = 0; }
     else if (tgt.beast) { wB = 0.45; wS = 0.35; wL = 0.2; }
-    if (B.vNow > 5) wL += 0.35;                 // a charge arrives as a pin
+    if (B.vNow > 6 && B.flurry === 0) wL += 0.3;   // a charge arrives as a pin
     if (B.pred) wB *= 1.7;
     const tot = wS + wB + wL + wH, r = B.rng() * tot;
     return r < wS ? "swat" : r < wS + wB ? "bite" : r < wS + wB + wL ? "slam" : "hug";
@@ -711,7 +732,7 @@
     // face it
     const want = Math.atan2(dz, dx);
     let h = typeof m.heading === "number" ? m.heading : 0;
-    const turnR = (B.act ? 1.6 : B.bh.turnRate) * dt;
+    const turnR = (B.act ? 2.5 : B.bh.turnRate) * dt;
     h += clamp(wrapPi(want - h), -turnR, turnR);
     m.heading = h; m.faceH = h;
     if (CBZ.faceAnimalHeading) CBZ.faceAnimalHeading(m, h); else m.group.rotation.y = -h;
@@ -737,17 +758,17 @@
       }
       B.cool -= dt;
       const faced = Math.abs(wrapPi(want - h)) < 0.5;
-      if (B.cool <= 0 && d <= close + 0.45 && faced) {
+      if (B.cool <= 0 && d <= close + 0.75 && faced) {
         const kind = chooseAct(m, B, tgt, d);
         B.act = { kind: kind, t: 0, side: B.rng() < 0.5 ? -1 : 1, done: false, done2: false, lunge: 0 };
-        B.flurry++;
+        B.flurry++; B.nAct = (B.nAct || 0) + 1;
       }
       return RES;
     }
     // ---- mid-action
     const A = B.act, def = ACT[A.kind];
     const t0 = A.t;
-    A.t += dt / (def.dur * (1 + 0.25 * (1 - clamp(m.hp / m.maxHp, 0, 1))));
+    A.t += dt / def.dur;
     // the body drives into the blow (a slam carries the bear a body-length)
     if (A.kind === "slam" && A.t > 0.35 && A.t < 0.65 && d > close * 0.8 && opts && opts.move) opts.move(m, dx / d, dz / d, 3.2 * dt);
     if (A.kind === "bite" && A.t > 0.3 && A.t < 0.55 && d > close * 0.85 && opts && opts.move) opts.move(m, dx / d, dz / d, 1.6 * dt);
@@ -757,8 +778,8 @@
     if (A.t >= 1) {
       B.act = null;
       if (A.you) { m._atkAnim = -1; RES.dealt = B._dealt || 0; RES.missed = !!B._missed; B._dealt = 0; B._missed = false; return RES; }
-      if (B.flurry >= B.flurryN) { B.flurry = 0; B.flurryN = 2 + Math.floor(B.rng() * 3); B.cool = 0.6 + B.rng() * 0.9; }
-      else B.cool = 0.06 + B.rng() * 0.18;
+      if (B.flurry >= B.flurryN) { B.flurry = 0; B.flurryN = 2 + Math.floor(B.rng() * 3); B.cool = 0.3 + B.rng() * 0.45; }
+      else B.cool = 0.04 + B.rng() * 0.12;
       // A DEFENSIVE BEAR STOPS when the threat is down: it has made its point
       if (!B.pred && !tgt.beast && tgt.hp < tgt.maxHp * 0.3 && B.t - (B.hurtAt || -9) > 3 && (tgt.routed || !tgt.armed)) { setState(B, "disengage"); B.retT = 2.5 + B.rng() * 2; }
     }
@@ -771,7 +792,7 @@
     const c = Math.cos(h), sn = Math.sin(h);
     const wx = m.pos.x + (c * _sp.x - sn * _sp.z) * s, wz = m.pos.z + (sn * _sp.x + c * _sp.z) * s;
     const miss = Math.hypot(tgt.pos.x - wx, tgt.pos.z - wz) - (tgt.rad || 0.45);
-    if (miss > 0.38 * s) { B._missed = true; return; }
+    if (miss > 0.5 * s) { B._missed = true; B.nMiss = (B.nMiss || 0) + 1; return; }
     if (tgt.dummy) return;                      // a possessed swing at the air
     const hf = clamp(m.hp / Math.max(1, m.maxHp), 0, 1);
     let dmg = forceDmg(B, kind) * (0.65 + 0.35 * hf) * (0.85 + 0.3 * B.rng()) * (mul || 1) * ((B.act && B.act.pow) || 1);
@@ -779,7 +800,7 @@
     B.jaw.x = _sp.x; B.jaw.y = _sp.y; B.jaw.z = _sp.z;
     if (opts && typeof opts.onHit === "function") opts.onHit(dmg);
     else { tgt.hp -= dmg; }
-    B._dealt = (B._dealt || 0) + dmg;
+    B._dealt = (B._dealt || 0) + dmg; B.nHit = (B.nHit || 0) + 1;
     try {
       if (CBZ.creatureBiteBlood) CBZ.creatureBiteBlood(m, tgt, kind === "bite" || kind === "hug" ? "maul" : "strike");
       if (kind === "bite" || kind === "hug") { if (CBZ.creatureBiteWound) CBZ.creatureBiteWound(m, tgt, "maul"); }
@@ -858,8 +879,12 @@
     const G = R.G;
     const gallopW = G.mix && G.mix.wG ? G.mix.wG : 0;
     D.legLen = D.legLen0 * (1 + 0.4 * gallopW);
-    const quad = rearK < 0.35;
-    QG.step(G, dt, quad ? B.v : 0, quad ? B.turn : 0, gx, gz, h, ground, gy);
+    // IN WATER (an arena with a sea: the battle gives the body a swim depth)
+    // a bear dog-paddles: no footfalls, the legs stroke under it
+    const swim = m.swimD != null;
+    const quad = rearK < 0.35 && !swim;
+    if (!swim) QG.step(G, dt, quad ? B.v : 0, quad ? B.turn : 0, gx, gz, h, ground, gy);
+    else { B.swPh = (B.swPh || 0) + dt * TAU * (0.9 + 0.12 * Math.abs(B.v)); }
     const M = G.mix, ph = G.phase * TAU;
     const moveK = clamp(Math.abs(B.v) / 0.5, 0, 1);
     const gal = (M.wG || 0) * moveK, walkK = ((M.wW || 0) + (M.wA || 0)) * moveK;
@@ -978,6 +1003,13 @@
           toeIn = lerp(toeIn, -sd * 1.0, k2);
         }
       }
+      if (swim) {
+        const jx = front ? BODY.cX : BODY.pX, jy = front ? BODY.cY : BODY.pY, lg = front ? D.fa + D.fb : D.ha + D.hb;
+        const q = B.swPh + (sd > 0 ? PI : 0) + (front ? 0 : PI * 0.5);
+        tx = jx + lg * (front ? 0.35 + 0.35 * Math.cos(q) : -0.15 + 0.3 * Math.cos(q));
+        ty = jy - lg * (0.62 - 0.18 * Math.sin(q)); tz = sd * (front ? D.legZf : D.legZh) * 1.15;
+        fa = front ? -0.9 + 0.6 * Math.sin(q) : -0.4 + 0.4 * Math.sin(q);
+      }
       // a hurt foreleg buckles in the flinch
       if (flE > 0 && fp === 1 && front && sd === fs) { ty += 0.05 * k * flE; }
       poseLeg(R, L, BODY, tx, ty, tz, fa, sx, sy, toeIn, roll);
@@ -992,7 +1024,7 @@
     if (st === "look") lookPitch = 0.25 + 0.06 * Math.sin(B.t * 5.3);
     B.lookY = approach(B.lookY, lookYaw, 4, dt);
     B.lookP = approach(B.lookP, lookPitch, 3, dt);
-    let nP = -0.05 * B.aggr - 0.12 * dispK - 0.16 * B.fearK - 0.1 * chg + 0.06 * (st === "bluff" ? 1 : 0);
+    let nP = (swim ? 0.3 : 0) - 0.05 * B.aggr - 0.12 * dispK - 0.16 * B.fearK - 0.1 * chg + 0.06 * (st === "bluff" ? 1 : 0);
     nP += 0.05 * walkK * Math.sin(2 * ph + 0.4) + 0.12 * gal * Math.sin(ph + 1.3);
     nP -= BODY.cR * 0.8;                                  // keep the face level when the chest pitches
     nP += B.lookP;
@@ -1047,6 +1079,8 @@
     const D = R.D, b = R.bones, bp = R.bindPos, BN = R.T.BN, k = D.k;
     const now = (W.performance && W.performance.now) ? W.performance.now() * 0.001 : 0;
     if (!R.dead.t0) R.dead.t0 = now;
+    // a settled corpse keeps the last pose written (the bones hold it): stop
+    if (now - R.dead.t0 > 9) return;
     const tk = clamp((now - R.dead.t0) / 0.6, 0, 1);
     BODY.pX = D.hipX; BODY.pY = D.hip; BODY.pR = 0; BODY.cX = D.shX; BODY.cY = D.sh; BODY.cR = 0;
     b[BN.pelvis].position.set(D.hipX, D.hip, 0); b[BN.pelvis].rotation.set(0, 0, 0);
@@ -1055,7 +1089,11 @@
     for (let L = 0; L < 4; L++) {
       const front = L < 2, sd = L % 2 === 0 ? -1 : 1, f = R.prox.feet[L].position;
       let tx, ty, tz;
-      if (solved) { tx = f.x + (front ? D.fc * 0.6 : D.hc * 0.6); ty = f.y; tz = f.z; }
+      if (solved) {
+        // toward the solved foot, a touch short of it: a dead leg is never locked straight
+        const jx = front ? D.shX : D.hipX, jy = front ? D.sh : D.hip, jz = (front ? D.legZf : D.legZh) * sd;
+        tx = jx + (f.x - jx) * 0.86 + (front ? D.fc * 0.5 : D.hc * 0.5); ty = jy + (f.y - jy) * 0.86; tz = jz + (f.z - jz) * 0.86;
+      }
       else {
         // limp: the legs fold loosely out from the body
         const jx = front ? D.shX : D.hipX, jy = front ? D.sh : D.hip;
@@ -1070,7 +1108,7 @@
       const a0 = Math.atan2(D.headP.y - D.sh, D.headP.x - D.shX);
       const a1 = Math.atan2(hp.y - D.sh, hp.x - D.shX);
       nP = wrapPi(a1 - a0);
-      nY = -Math.atan2(hp.z, Math.max(0.05, hp.x - D.shX));
+      nY = clamp(-0.5 * Math.atan2(hp.z, Math.max(0.05, hp.x - D.shX)), -0.6, 0.6);
     }
     b[BN.neck].rotation.set(0, nY * 0.6, nP * 0.6);
     b[BN.neck1].rotation.set(0, nY * 0.4, nP * 0.4);
@@ -1174,7 +1212,7 @@
           c = R && R.muz ? (R.muz >= 3 ? U.mixHex(pal.muz, 0x2a1f16, (R.muz - 3) * 0.6) : U.mixHex(pal.face, pal.muz, 0.6)) : pal.face;
           if (R && R.brow && ca > 0.3) c = U.mixHex(c, pal.tip, 0.25);
           if (R && R.muz && ca < -0.55) c = 0x2a1a17;                  // lips
-        } else if (part === "jaw") c = ca > 0.5 ? 0x6b3b38 : U.mixHex(pal.muz, 0x3a2a1c, 0.4);
+        } else if (part === "jaw") c = ca > 0.5 ? 0x3a2420 : U.mixHex(pal.muz, 0x3a2a1c, 0.4);
         else if (part === "ear") c = ca < -0.2 ? 0x3a2a1e : U.mixHex(pal.face, 0x2a1d14, 0.4);
         else if (part === "arm" || part === "thigh") c = U.mixHex(pal.base, pal.leg, U.clamp((D.sh - y) / (0.35 * k), 0, 1));
         else if (part === "leg") c = pal.leg;
@@ -1188,7 +1226,7 @@
       nerve: 1.0, hitFear: 1.1, hitAnger: 2.2, fearDecay: 0.035, angerHold: 0.6, woundBrave: true,
       gunFear: 0.08, vehicleFear: 0.9, bigFear: 0.5, bluffP: 0.45, bluffRetreat: 0.5, lookP: 0.6,
       chargeDist: 45, predatory: false, toDeathHp: 0.3, rearPitch: 1.22,
-      swat: { mEff: 0.08, v: 8.5 }, slamV: 3.0, biteN: 5000, clawCm: 8,
+      swat: { mEff: 0.08, v: 8.5 }, slamV: 3.0, biteN: 5000, clawCm: 8, hide: 3,
     },
   };
   CBZ.unitKit.register("brown_bear", unit(SPEC));
