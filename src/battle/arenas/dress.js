@@ -518,7 +518,7 @@ CBZ.battleDress = (function () {
     return m4.compose(new THREE.Vector3(it.x, it.y, it.z), q, new THREE.Vector3(it.sx, it.sy, it.sz));
   }
   // the node sim has the colliders and the cover; it never draws
-  function drawing() { return !!(CBZ.micro && CBZ.micro.renderer) && typeof document !== "undefined"; }
+  function drawing() { return !!(CBZ.renderer || (CBZ.micro && CBZ.micro.renderer)) && typeof document !== "undefined"; }
   function flush() {
     if (!drawing()) return;
     flushContainers();

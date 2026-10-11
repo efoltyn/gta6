@@ -807,7 +807,7 @@ CBZ.battleGround = (function () {
     G.base = ctx.groundAt;
     G.feats.length = 0; G.grid.clear(); G.craters.length = 0;
     U.uCrN.value = 0;
-    G.gl = !!(CBZ.micro && CBZ.micro.renderer) && typeof document !== "undefined";
+    G.gl = !!(CBZ.renderer || (CBZ.micro && CBZ.micro.renderer)) && typeof document !== "undefined";
     const base = ctx.groundAt;
     G.ground = function (x, z) { return base(x, z) + deform(x, z); };
     if (CBZ.battleCover) { CBZ.battleCover.reset(); CBZ.battleCover.ground(G.ground); }
@@ -827,7 +827,7 @@ CBZ.battleGround = (function () {
     if (SP.pts) {
       SP.t = t;
       SP.pts.material.uniforms.uTime.value = t;
-      const R = CBZ.micro && CBZ.micro.renderer;
+      const R = CBZ.renderer || (CBZ.micro && CBZ.micro.renderer);
       if (R) { const h = R.domElement.height || 800; SP.pts.material.uniforms.uScale.value = h * 0.5 / Math.tan((CBZ.camera ? CBZ.camera.fov : 60) * Math.PI / 360); }
     }
     if (G.blow) {

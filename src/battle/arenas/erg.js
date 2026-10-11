@@ -49,7 +49,7 @@ const ERG_PAL = {
             amp: 1, tint: [0.88, 0.91, 0.94], tuft: 0x857e6c, tufts: 160, rough: 0.72 },
   grass:  { form: "roll",  surface: "grass", sand: 0x6c8744, crest: 0x7a9650, trough: 0x5c763a, slip: 0x6c8744, pan: 0x8b8758,
             amp: 1, tint: [0.36, 0.45, 0.25], tuft: 0x5b7832, tufts: 0, rough: 0.93 },
-  forest: { form: "roll",  surface: "forest", sand: 0x5e4a33, crest: 0x66533a, trough: 0x4e3d2a, slip: 0x5e4a33, pan: 0x55452f,
+  forest: { form: "roll",  surface: "forest", sand: 0x46372a, crest: 0x4e3e2d, trough: 0x392d21, slip: 0x46372a, pan: 0x403326,
             amp: 0.85, tint: [0.2, 0.27, 0.15], tuft: 0x4f6b2e, tufts: 0, rough: 0.97 },
 };
 function hash2(ix, iz, salt) {
@@ -319,7 +319,7 @@ function ergSurfaceGLSL(form, surface) {
     "  vec2 cuv = (rel - uCanopyR.xy) / uCanopyR.zw;\n" +
     "  float cov = (cuv.x > 0.0 && cuv.x < 1.0 && cuv.y > 0.0 && cuv.y < 1.0) ? texture2D(uCanopy, cuv).r : 0.0;\n" +
     "  float fleck = smoothstep(0.58, 0.82, egN(vEW.xz * 0.55 + 3.0) * 0.6 + egN(vEW.xz * 1.9) * 0.4);\n" +
-    "  vShade = mix(1.0, 0.36 + 0.95 * fleck, cov);\n" +
+    "  vShade = mix(1.0, min(1.0, 0.34 + 0.72 * fleck), cov);\n" +
     tail;
   // FIELDS: the parcel's crop, by the type table, with rows and furrows
   return head +
@@ -390,7 +390,7 @@ function ergMaterial(P) {
       sh.vertexShader.replace("#include <project_vertex>",
         "#include <project_vertex>\nvED = aD; vEW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
     let surf = ergSurfaceGLSL(form, surface).replace("TURF_CALL",
-      turfOn ? "turf = groundTurf(vEW.xz, dist, 1.0);" : "turf = vec3(0.92 + 0.16 * egN(rel * 0.043) + 0.08 * (egN(vEW.xz * 0.6) - 0.5) * kF);");
+      turfOn ? "turf = groundTurf(vEW.xz, dist, 0.35);" : "turf = vec3(0.92 + 0.16 * egN(rel * 0.043) + 0.08 * (egN(vEW.xz * 0.6) - 0.5) * kF);");
     sh.fragmentShader = "varying vec4 vED;\nvarying vec3 vEW;\nuniform vec2 uC;\nuniform vec2 uW;\n" +
       "uniform sampler2D uCanopy;\nuniform vec4 uCanopyR;\nuniform vec3 uParcel;\nuniform sampler2D uParcelT;\n" +
       ERG_GLSL + "\n" + (turfOn ? CBZ.GROUND_TURF_GLSL + "\n" : "") +

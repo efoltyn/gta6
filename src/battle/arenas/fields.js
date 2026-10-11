@@ -187,7 +187,7 @@ CBZ.battleFields = (function () {
         if (h01(ri, t * 3, 615) < 0.035) oaks.push({ x: x, z: z, y: g(x, z), s: 0.75 + h01(ri, t, 617) * 0.35 });
       }
     });
-    const GL = !!(CBZ.micro && CBZ.micro.renderer) && typeof document !== "undefined";
+    const GL = !!(CBZ.renderer || (CBZ.micro && CBZ.micro.renderer)) && typeof document !== "undefined";
     if (K && GL) {
       const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(), e = new THREE.Euler();
       const pool = function (kind, items, mat, place, name, colour) {
