@@ -711,6 +711,13 @@ node tools/npcwar-worker-check.mjs the sim worker, both modes
 node tools/npcwar-scale-bench.mjs  1k / 10k / 100k a side, ms per tier
 node tools/front-sim.mjs           the city's front resolver (frontline.js) it is calibrated to.
 node tools/ballistics-check.mjs    the weapon table, and flight / penetration / wounds vs published figures.
+node tools/npcwar-arena.mjs        BALANCE: a matchup over N seeds in parallel workers (real bestiary,
+                                   creature_combat, ape_combat, bodymass): win %, time, casualties, who
+                                   dealt what (shots by gun, bites by move, fists, blasts), wound zones,
+                                   morale. Bands in data/npcwar/expectations.json; findings in
+                                   docs/npcwar/BALANCE.md.  --only tiger   --a lion --b men --n 1v10 --gap 12
+node tools/npcwar-balance-check.mjs the fast subset; FAILS when a win rate's whole 95% interval is
+                                   outside its real-world band. Testbus node check.
 ```
 
 `tools/npcwar-headless.mjs` lifts the page's `src/battle` / `src/units` script tags out of

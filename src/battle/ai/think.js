@@ -143,6 +143,16 @@ function thinkBeast(m, tgt, thinkDt) {
     const fl = Math.hypot(fx, fz) || 1;
     m.target.set(m.pos.x + (fx / fl) * 16, 0, m.pos.z + (fz / fl) * 16);
     m.slot = "fallback"; m.state = "flee"; m.tgt = null;
+    /* AND ONE THAT GETS AWAY HAS GOT AWAY: off the field, counted as fled,
+       by the men's own rule (ai/morale.js: FLEE_GAPS start gaps from the
+       enemy, or 45 s of running). Before this a beaten animal that was faster
+       than its pursuer ran in a straight line off the map for ever and the
+       battle could not end: tools/npcwar-arena.mjs measured 1 gray wolf v 1
+       dog as 10 draws in 10 (300 s timeouts, the dog 1,400 m out and
+       running), 10 wolves v a bear 12 draws in 16, an elephant v a lion 9 in
+       10. */
+    m.fleeT = (m.fleeT || 0) + thinkDt;
+    if (FLEE_GAPS && (Math.hypot(m.pos.x - com.x, m.pos.z - com.z) > FLEE_GAPS * (MAP.gap || 150) || (!tn.prey && m.fleeT > 45))) m.fled = true;
     return;
   }
   m.state = "charge";                        // the gait's flee-bound reads this

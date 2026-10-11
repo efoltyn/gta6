@@ -402,10 +402,61 @@ function armsLauncher(m, tgt, dist) {
   if (m.mag <= 0) { if (!armsReload(m) && A.ammo <= 0) { m.launcher = false; m.fists = true; m.armed = false; } return; }
   const g = A.g;
   if (dist < (g.cls === "grenade" ? 22 : 16) || dist > Math.min(g.area, 260)) return;
+  /* NOT THROUGH, AND NOT ONTO, ONE OF HIS OWN. Measured (npcwar-arena, 30 men
+     with RPG-7s v a Bradley): one side's launchers killed ~11 of their own
+     men a battle and the Bradley ~0.5, every rocket that struck a mate in
+     front of the tube going off in the middle of the section. The rifle's
+     lane rule, and the danger-close rule: no friend inside the warhead's
+     kill radius of the mark. */
+  const side = mateInLane(m, tgt);
+  if (side) { ARMS.why.lane++; stepOffLine(m, tgt, side); return; }
+  /* AND NOT INTO THE CREST HE IS STANDING ON. His eye clears the lip by the
+     0.35 m the sight rule allows; a rocket does not. Measured: a section on a
+     dune top firing down at a Bradley 55 m below put every round into the
+     sand 6 m in front of the tube, among themselves. He walks to the lip. */
+  if (!tubeClear(m, tgt)) {
+    ARMS.why.blind++;
+    m.target.set(m.pos.x + (tgt.pos.x - m.pos.x) / dist * 3, 0, m.pos.z + (tgt.pos.z - m.pos.z) / dist * 3);
+    m.slot = "push"; m.cool = 0.4;
+    return;
+  }
+  const killR = rocketBlast(g) * 0.55 + 1;
+  const near = fineNear(tgt.pos.x, tgt.pos.z, killR, _laneNear);
+  for (let i = 0; i < near.length; i++) {
+    const o = near[i];
+    if (o !== m && o.team === m.team && !o.dead && !o.vehicle && Math.hypot(o.pos.x - tgt.pos.x, o.pos.z - tgt.pos.z) < killR) { ARMS.why.lane++; m.cool = 0.6; return; }
+  }
   if (fireRocket(m, tgt) === false) return;
   const w = CBZ.weaponById(m.wid);
   if (m.mag <= 0) armsReload(m);
   m.cool = Math.max(m.cool, (w.fireDelay || w.interval || 1.2) + 0.6 + lcg() * 0.8);
+}
+
+// the tube's line (muzzle at 0.95 of the eye) over the ground, with no slack
+function tubeClear(m, tgt) {
+  if (!MAP || !MAP.groundAt) return true;
+  const ax = m.pos.x, az = m.pos.z, ay = m.pos.y + (m.eyeH || 1.52) * 0.95;
+  const bx = tgt.pos.x, bz = tgt.pos.z, by = tgt.pos.y + (tgt.aimY || 1.28);
+  const d = Math.hypot(bx - ax, bz - az);
+  const n = Math.ceil(d / 1.5);
+  for (let i = 1; i < n; i++) {
+    const t = i / n;
+    if (t * d < 1 || d - t * d < 2) continue;
+    if (MAP.groundAt(ax + (bx - ax) * t, az + (bz - az) * t) > ay + (by - ay) * t - 0.1) return false;
+  }
+  return true;
+}
+
+/* THE WARHEAD'S BLAST RADIUS: the physics table's (ballistics ROCKET /
+   GRENADE: PG-7V 9 m, M433 6 m, of which studio.boom kills inside 0.55),
+   not weapon-data's 13 m, which is the city's gameplay number and made every
+   RPG round a 7 m kill disc. */
+function rocketBlast(g, w) {
+  const B = CBZ.ballistics;
+  const R = g && g.rocket && B && B.ROCKET && B.ROCKET[g.rocket];
+  if (R && R.blast) return R.blast;
+  if (g && g.cls === "grenade" && B && B.GRENADE && B.GRENADE.m433) return B.GRENADE.m433.blast;
+  return (w && w.blastRadius) || 13;
 }
 
 /* ============================================================ THE SHOT
@@ -1383,7 +1434,7 @@ function fireRocket(m, tgt) {
     const rdx = dx * c - dz * s, rdz = dx * s + dz * c;
     const ce = Math.cos(el);
     r = { pos: V().copy(from), vel: new THREE.Vector3(rdx * ce * R.v0, Math.sin(el) * R.v0, rdz * ce * R.v0),
-      grav: 9.81, t: 0, w: w, by: m, motor: R, life: R.life, travelled: 0, arm: 2.5,
+      grav: 9.81, t: 0, w: w, g: A ? A.g : null, by: m, motor: R, life: R.life, travelled: 0, arm: 2.5,
       trail: CBZ.studio.trail({ length: 26, color: 0xd8c39a, opacity: 0.5, minStep: 1.6 }) };
     if (CBZ.munitions && CBZ.munitions.acquire) { try { r.mesh = CBZ.munitions.acquire("pg7"); } catch (e) { r.mesh = null; } }
     backblast(m, from, ux, uz);
@@ -1399,7 +1450,7 @@ function fireRocket(m, tgt) {
     const dx = (tx - from.x) / dd, dz = (tz - from.z) / dd;
     const c = Math.cos(err), s = Math.sin(err);
     r = { pos: V().copy(from), vel: new THREE.Vector3((dx * c - dz * s) * v0 * Math.cos(el), Math.sin(el) * v0, (dx * s + dz * c) * v0 * Math.cos(el)),
-      grav: 9.81, t: 0, w: w, by: m, travelled: 0, arm: (A && A.g.arm) || 0, life: Math.max(7, sol.t * 1.6 + 2),
+      grav: 9.81, t: 0, w: w, g: A ? A.g : null, by: m, travelled: 0, arm: (A && A.g.arm) || 0, life: Math.max(7, sol.t * 1.6 + 2),
       trail: CBZ.studio.trail({ length: 14, color: 0xcfc8b8, opacity: 0.3, minStep: 1.6 }) };
   }
   rockets.push(r);
@@ -1483,7 +1534,7 @@ function stepRockets(sdt) {
         continue;
       }
       CBZ.studio.boom({ x: r.pos.x, y: Math.max(r.pos.y, MAP.groundAt(r.pos.x, r.pos.z) + 0.6), z: r.pos.z }, {
-        radius: r.w.blastRadius || 13, power: (r.w.blastPower || 1.9) * 0.55,
+        radius: rocketBlast(r.g, r.w), power: (r.w.blastPower || 1.9) * 0.55,
         structural: MAP.id !== "arena" && spawnTotal < 700,
         // THE MAN WHO FIRED IT: a launcher crew's kills are credited to it
         by: r.by,
