@@ -156,6 +156,10 @@ function makeBeast(teamId, i, spIdIn) {
        2.47 m reach would have circled each other forever. */
     reach: Math.max(1.2 + s * 1.1, rad * 2 + 0.55, noseR * 0.95),
     noseR: noseR,
+    // THE BODY A ROUND GOES THROUGH (src/battle/fire.js): the measured box in
+    // the animal's own frame, nose +X, so a bullet finds the heart behind the
+    // shoulder and not a circle's centre
+    bodyL: spanX, bodyW: spanZ, bodyH: H, bodyX0: bb.min.x, bodyY0: bb.min.y,
     eyeH: Math.max(0.5, H * 0.8), losY: Math.max(0.35, H * 0.55),
     aimY: Math.max(0.3, H * 0.5), headY: Math.max(0.45, H * 0.8),
     tgt: null, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,

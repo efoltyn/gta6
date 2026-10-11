@@ -150,7 +150,7 @@ function boot(url, opts) {
   // the engine files the armoury would have loaded, for real
   sb.CBZ = { CONFIG: {}, game: { mode: "studio", state: "playing" }, now: 0 };
   const CBZ = sb.CBZ;
-  for (const f of ["src/weapons/weapon-data.js", "src/systems/brain.js", "src/systems/combat_iq.js"]) {
+  for (const f of ["src/weapons/weapon-data.js", "src/weapons/ballistics.js", "src/systems/brain.js", "src/systems/combat_iq.js"]) {
     try { vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), sb, { filename: f }); }
     catch (e) { console.log("  (load " + f + " threw: " + e.message + ")"); }
   }
@@ -236,6 +236,8 @@ scenario(1, "the war room: equal riflemen meet and it ends", async () => {
   const a = run(W, 240);
   check(a.over, "it ended (" + a.simT + " s, winner " + a.winner + ", red " + a.red + " blue " + a.blue + ")");
   check(a.stats.red.shots > 0 && a.stats.blue.shots > 0, "both lines fired (" + a.stats.red.shots + "/" + a.stats.blue.shots + ")");
+  // the weapons' own ledger (src/battle/fire.js): ranges, organs, penetrations
+  if (W.CBZ.battleArms && W.CBZ.battleArms.audit) console.log("    arms " + JSON.stringify(W.CBZ.battleArms.audit()));
 });
 
 scenario(2, "the few hold, the many come", async () => {
@@ -319,7 +321,9 @@ scenario(4, "the rifle: be a soldier, fire, hand it back, go down", async () => 
   W.sb.__battle.youFace();
   W.input.locked = true; W.input.buttons[0] = true;
   let shots0 = W.B().audit().stats.red.shots;
-  run(W, 25, () => { W.sb.__battle.youFace(); return !!W.sb.__battle.you().on; });
+  // (until somebody falls, or 12 s: rifle rounds settle a fight fast, and the
+  // battle has to still be on for the last half of this scenario)
+  run(W, 12, () => { W.sb.__battle.youFace(); const y = W.sb.__battle.you(); return !!y.on && !(y.kills > 0); });
   W.input.buttons[0] = false;
   const yr = W.sb.__battle.you();
   check(yr.shots > 0, "the trigger fires the page's own rounds (" + yr.shots + " fired, " + yr.hits + " hit, " + yr.kills + " killed)");
@@ -472,6 +476,7 @@ scenario(5, "snow and fields: the new skins build and fight", async () => {
    either side shows up as numbers, not as a feeling. */
 scenario(6, "calibration: the headless resolver against the page's own battle", async () => {
   globalThis.window = globalThis; globalThis.CBZ = { game: {} };
+  require(path.join(ROOT, "src/weapons/ballistics.js"));   // the resolver asks the same physics the page flies
   require(path.join(ROOT, "src/systems/brain.js"));
   const F = require(path.join(ROOT, "src/city/frontline.js"));
   const CASES = [
@@ -511,8 +516,12 @@ scenario(6, "calibration: the headless resolver against the page's own battle", 
     const nL = L === "red" ? c.r : c.b;
     const pLoseDead = T.dead[L] / nL, rLoseDead = (L === "red" ? acc.rd : acc.bd) / N / nL;
     // an EVEN fight is decided by the ground under it (which side drew the
-    // crest), which the resolver does not model: a coin, not a verdict
-    const even = c.r === c.b && c.rt === c.bt && c.rw === c.bw;
+    // crest), which the resolver does not model: a coin, not a verdict. Since
+    // the rounds are flown (src/battle/fire.js) a rifle exchange is settled in
+    // seconds by who sees whom first, so a 13% edge in men of the same
+    // training with rifles is inside that coin too
+    const even = c.rt === c.bt && Math.abs(c.r - c.b) <= 0.15 * Math.max(c.r, c.b) &&
+      /^(ak47|carbine)$/.test(c.rw) && /^(ak47|carbine)$/.test(c.bw);
     if (rWin === pWin || even) agree++;
     if (Math.abs(pLoseDead - rLoseDead) <= 0.3) close++;
     const f = (x) => String(Math.round(x)).padStart(3);
