@@ -1297,9 +1297,19 @@ ARMS.audit = function () {
 };
 
 // where did the miss land: walk the line for the first collider, else the
-// ground, and stamp the world (a vehicle's cannon round and YOUR misses)
+// ground, and stamp the world (a vehicle's cannon round and YOUR misses).
+// `heavy` (a tank gun's round): the ground it ploughs into throws clods and
+// dust of itself, a wall it strikes throws broken stone (CBZ.debris shapes)
 const _mq = [];
-function missImpact(from, to, cd2) {
+function heavyThrow(x, y, z, kind, color, dx, dz) {
+  const D = CBZ.debris;
+  if (!D || !D.chips || !kind) return;
+  try {
+    D.chips(x, y + 0.05, z, { kind: kind, color: color, count: 14, size: 0.07, power: 2.4,
+      dir: { x: dx * 0.6, y: 1, z: dz * 0.6 }, spread: 0.8, radius: 1.1 });
+  } catch (e) {}
+}
+function missImpact(from, to, cd2, heavy) {
   if (cd2 > 150 * 150) return;
   const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
   const len = Math.hypot(dx, dy, dz);
@@ -1311,7 +1321,9 @@ function missImpact(from, to, cd2) {
     const g = MAP.groundAt(x, z);
     if (y <= g + 0.05) {
       _v2.set(x, g + 0.03, z);
-      CBZ.bulletImpact(_v2, { x: 0, y: 1, z: 0 }, { kind: "dust", color: groundColor(groundMatAt()), power: 0.8 });
+      const gm = groundMatAt();
+      CBZ.bulletImpact(_v2, { x: 0, y: 1, z: 0 }, { kind: "dust", surface: gm === "water" ? undefined : gm, color: groundColor(gm), power: 0.8 });
+      if (heavy && gm !== "water") heavyThrow(x, g, z, gm, groundColor(gm), dx / len, dz / len);
       return;
     }
     const cols = CBZ.micro.queryColliders(x, z, 0.4, _mq);
@@ -1323,7 +1335,8 @@ function missImpact(from, to, cd2) {
       const nx = Math.abs(x - b.minX) < Math.abs(x - b.maxX) ? -1 : 1;
       const M = CBZ.ballistics && CBZ.ballistics.MAT[colMat(b)];
       CBZ.bulletImpact(_v2, { x: nx, y: 0.2, z: 0 }, M && M.fx === "wood" ? { kind: "wood", power: 1 } : M && M.fx === "spark" ? { kind: "spark", power: 1 } : { kind: "dust", surface: (M && M.surf) || "concrete", power: 1 });
-      if (CBZ.bulletHole) CBZ.bulletHole(_v2, { x: nx, y: 0, z: 0 }, { mm: 8, noProp: true });
+      if (CBZ.bulletHole) CBZ.bulletHole(_v2, { x: nx, y: 0, z: 0 }, { mm: heavy ? 60 : 8, noProp: true });
+      if (heavy && !(M && M.fx === "spark")) heavyThrow(x, y, z, M && M.fx === "wood" ? "wood" : (M && M.surf) || "concrete", undefined, nx, 0);
       return;
     }
   }

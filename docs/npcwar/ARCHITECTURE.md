@@ -869,8 +869,19 @@ charge, a tank in a crowd, a blast, a throw).
   `420 x power x (0.55 / Z)²` with `Z = d / R`, tapering to 0 at R; delta-v
   `9 x power x (0.55 / Z)^1.5 x (80 / kg)^(1/3)`. A man at the core dies and flies; a bull
   elephant at the core takes ~440 and rocks at 2 m/s. Corpses go first through
-  `CBZ.ragdollBlast`; loose debris is kicked (`CBZ.debris.impulse`) and the crater throws
-  grit (`CBZ.debris.chips`). Hulls keep the old ring (inside 0.55 R the armour answers).
+  `CBZ.ragdollBlast`; loose debris is kicked (`CBZ.debris.impulse`). Hulls keep the old ring
+  (inside 0.55 R the armour answers).
+- **Debris is real, never cubes.** One system: `systems/debris.js` grit, shaped by what
+  broke (stone, soil clod, flake, glass shard, torn plate, track shoe, road wheel, hatch lid),
+  instanced per shape, capped per device and ring-recycled. Ground hits: `ground.js` digs
+  the crater, scorches, sprays grain and dust, and throws clods of that ground in the crater
+  wall's colour (`clods`; crashfx's generic grit stands down via `CBZ.groundOwnsEjecta`). A
+  tank round that misses into ground or a wall throws clods or broken stone
+  (`fire.js missImpact(.., heavy)`). Hulls: `vehHitFx` (sparks, plate torn off in the hull's
+  own paint, shoes and a road wheel when the track goes) and `vehKillFx` (a knockout sheds
+  plate, shoes, wheels, hatches, some burning, the first few starting ground fires); the rig
+  itself throws its real turret. Cover breaks into its own stuff (`dress.js breakUp`, trees
+  `woods.js splinter`). Men throw nothing: blood and gore only.
 - **Hulls.** `vehCrush` (vehicles.js): the face of a moving hull is a collision by momentum
   (the hull loses `J / M` of its speed: a Humvee into a bull stops, a tank into a man does
   not notice); a body the hull outweighs 12:1 that is down goes UNDER it (pushVehicle stands

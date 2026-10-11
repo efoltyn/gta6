@@ -830,7 +830,7 @@ function vehFireKE(u, w, t, dist) {
   if (CBZ.tracer) { try { CBZ.tracer(from, _v, { shooter: u, targetActor: t, muzzle: true, muzzleScale: 2.5 }); } catch (e) {} }
   const dCam = Math.sqrt(camDist2(u.pos));
   if (dCam < 600) { try { CBZ.sfx(w.kind === "cannon" ? "explosion" : "shoot_shotgun", { dist: dCam, ghost: true, volume: 0.9, pitch: w.kind === "cannon" ? 0.55 : 1.2 }); } catch (e) {} }
-  if (!hit) { missImpact(from, _v, camDist2(_v)); return; }
+  if (!hit) { missImpact(from, _v, camDist2(_v), w.kind === "cannon"); return; }
   stats[u.team].hits++; u.hitsF++;
   u._shot = { pen: w.pen || 300, beh: w.beh || 400, he: false, cls: w.kind === "cannon" ? "apfsds" : "ap" };
   hurtMan(t, w.beh || 400, { by: u });
@@ -1277,6 +1277,7 @@ function hurtVehicle(u, dmg, imp) {
   if (u.rig && typeof u.rig.damage === "function") { try { u.rig.damage(u.vs, res); } catch (e) {} }
   // what got through the plate kills the men it passes
   if (res.pen && !u.vs.wreck) vehCrewHits(u, res, th, zn, fx, fz, by);
+  vehHitFx(u, res, th, zn, fx, fz);
   if (u.vs.wreck || u.vs.hp <= 0) { killMan(u, imp); return; }
   // a hull with nobody left alive in it is out of the fight
   if (vehCrewN(u) === 0) { u._abandoned = true; killMan(u, imp); return; }
@@ -1331,10 +1332,148 @@ function vehCrewHits(u, res, th, zn, fx, fz, by) {
   if (lost) { u.crewLost = (u.crewLost || 0) + lost; if (PROBE) { VEH.crewLost = (VEH.crewLost || 0) + lost; } }
   return lost;
 }
+/* ------------------------------------------------------------- WHAT A HIT THROWS
+   Real wreckage, from the hull that was hit (CBZ.debris.wreckage: instanced,
+   capped, recycled; the shapes are torn plate, track shoes, road wheels and
+   hatch lids, never boxes). The paint is the hull's own, read once off its
+   biggest painted material (colour x map x vertex colour). The rig keeps its
+   own effects (cook-off fire, a turret thrown off its ring by the real
+   turret mesh, the burning shell); this is the metal that leaves it.
+   Visual only, off the sim's RNG: a battle resolves the same with or
+   without a screen. */
+let _fxs = 90217;
+function fxr() { _fxs = (_fxs * 1103515245 + 12345) & 0x7fffffff; return _fxs / 0x7fffffff; }
+const _toneOf = new WeakMap();
+function matTone(m) {
+  if (_toneOf.has(m)) return _toneOf.get(m);
+  const c = [1, 1, 1];
+  if (m.color) { c[0] = m.color.r; c[1] = m.color.g; c[2] = m.color.b; }
+  const img = m.map && m.map.image;
+  if (img && img.width && typeof document !== "undefined") {
+    try {
+      const cv = document.createElement("canvas"); cv.width = cv.height = 8;
+      const cx = cv.getContext("2d");
+      cx.drawImage(img, 0, 0, 8, 8);
+      const d = cx.getImageData(0, 0, 8, 8).data;
+      let r = 0, g = 0, b = 0;
+      for (let i = 0; i < d.length; i += 4) { r += Math.pow(d[i] / 255, 2.2); g += Math.pow(d[i + 1] / 255, 2.2); b += Math.pow(d[i + 2] / 255, 2.2); }
+      c[0] *= r / 64; c[1] *= g / 64; c[2] *= b / 64;
+    } catch (e) {}
+  }
+  _toneOf.set(m, c);
+  return c;
+}
+function hullTone(u) {
+  if (u._paintHex != null) return u._paintHex;
+  let hex = 0x5b6148;
+  if (u.group && u.group.traverse) {
+    // the material that covers the most of the hull is its paint
+    const by = new Map();
+    u.group.traverse(function (o) {
+      if (!o.isMesh || o.isInstancedMesh || !o.geometry || !o.geometry.attributes.position) return;
+      const m = Array.isArray(o.material) ? o.material[0] : o.material;
+      if (!m || m.transparent) return;
+      const e = by.get(m) || { n: 0, g: o.geometry };
+      e.n += o.geometry.attributes.position.count;
+      by.set(m, e);
+    });
+    let best = null, bn = 0;
+    by.forEach(function (e, m) { if (e.n > bn) { bn = e.n; best = { m: m, g: e.g }; } });
+    if (best) {
+      const c = matTone(best.m).slice();
+      const vc = best.m.vertexColors && best.g.attributes.color;
+      if (vc) {
+        let r = 0, g = 0, b = 0, n = 0;
+        const step = Math.max(1, Math.floor(vc.count / 300));
+        for (let i = 0; i < vc.count; i += step, n++) { r += vc.getX(i); g += vc.getY(i); b += vc.getZ(i); }
+        if (n) { c[0] *= r / n; c[1] *= g / n; c[2] *= b / n; }
+      }
+      const L = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11;
+      if (L > 0.01) hex = (Math.min(255, Math.round(c[0] * 255)) << 16) | (Math.min(255, Math.round(c[1] * 255)) << 8) | Math.min(255, Math.round(c[2] * 255));
+    }
+  }
+  return (u._paintHex = hex);
+}
+// where a hit coming from (fx, fz) meets the hull: on the face toward it,
+// at a height up the side, or on the roof for a top attack
+const _hp = { x: 0, y: 0, z: 0 }, _hn = { x: 0, y: 0, z: 0 };
+function hullHitPoint(u, fx, fz, top) {
+  const H = u.vheight || 2.4;
+  let dx = fx - u.pos.x, dz = fz - u.pos.z;
+  const dl = Math.hypot(dx, dz);
+  if (dl < 1e-3) { dx = Math.sin(u.h); dz = Math.cos(u.h); } else { dx /= dl; dz /= dl; }
+  if (top) {
+    _hp.x = u.pos.x + (fxr() - 0.5) * (u.vwid || 1.5); _hp.z = u.pos.z + (fxr() - 0.5) * (u.vlen || 3); _hp.y = u.pos.y + H;
+    _hn.x = dx * 0.3; _hn.y = 1; _hn.z = dz * 0.3;
+    return _hp;
+  }
+  const sh = Math.sin(u.h), ch = Math.cos(u.h);
+  const along = Math.abs(dx * sh + dz * ch), across = Math.abs(dx * ch - dz * sh);
+  const t = Math.min((u.vwid || 1.5) / Math.max(1e-3, across), (u.vlen || 3) / Math.max(1e-3, along));
+  _hp.x = u.pos.x + dx * t; _hp.z = u.pos.z + dz * t; _hp.y = u.pos.y + H * (0.3 + fxr() * 0.45);
+  _hn.x = dx; _hn.y = 0.35; _hn.z = dz;
+  return _hp;
+}
+function trackSizes(u) {
+  return { link: Math.max(0.38, Math.min(0.7, (u.vwid || 1.6) * 0.36)), wheel: Math.max(0.5, Math.min(0.75, (u.vheight || 2.4) * 0.27)) };
+}
+// a hit that lands: sparks off the plate, and what the round tears off it
+function vehHitFx(u, res, th, zn, fx, fz) {
+  if (!th || th.cls === "small" || th.cls === "teeth" || !u.group || !CBZ.camera) return;
+  if (camDist2(u.pos) > 260 * 260) return;
+  const p = hullHitPoint(u, fx, fz, zn === "top");
+  if (CBZ.bulletImpact) { try { CBZ.bulletImpact(p, _hn, { kind: "spark", power: res.pen ? 2.4 : 1.7 }); } catch (e) {} }
+  const D = CBZ.debris;
+  if (!D || !D.wreckage) return;
+  const tracked = !!(u.def && u.def.drive === "tracked") && !u.air;
+  let plates, size;
+  if (res.slat) { plates = 2 + (fxr() * 2 | 0); size = 0.22; }                  // the cage took it: bent bars and plate
+  else if (th.he) { plates = 2 + (fxr() * 3 | 0); size = 0.3 + Math.min(0.3, (th.beh || 0) / 2000); }   // stowage, skirts, fenders
+  else if (res.pen) { plates = 1 + (fxr() * 2 | 0); size = 0.22; }            // the plate round the hole
+  else { plates = fxr() < 0.5 ? 1 : 0; size = 0.16; }                          // a dart that skipped off takes a flake
+  let links = 0, wheels = 0;
+  // the running gear gone: shoes off the broken track, perhaps a road wheel
+  if (res.mobility && tracked && zn !== "top") { links = 5 + (fxr() * 5 | 0); wheels = fxr() < 0.4 ? 1 : 0; }
+  const TS = trackSizes(u);
+  try {
+    D.wreckage(p.x, p.y, p.z, {
+      color: hullTone(u), plates: plates, plateSize: size, links: links, linkSize: TS.link, wheels: wheels, wheelSize: TS.wheel,
+      dir: _hn, power: th.he ? 1.6 : 1.1, radius: 0.5, dustColor: 0x5a544a,
+      burn: res.burning ? 6 : 0, burnFrac: 0.5,
+    });
+  } catch (e) {}
+}
+// a knockout: the hull sheds its skin; a catastrophic one throws it wide and
+// burning (the rig lifts the real turret off its ring and keeps the fire)
+function vehKillFx(u, catastrophic, at) {
+  const D = CBZ.debris;
+  if (!D || !D.wreckage || !u.group || !CBZ.camera) return;
+  const c = at || u.pos;
+  if (camDist2(c) > 320 * 320) return;
+  const tracked = !!(u.def && u.def.drive === "tracked") && !u.air;
+  const big = Math.max(0.6, Math.min(1.6, (u.vlen || 3) / 3.5));
+  const TS = trackSizes(u);
+  // a scorched paint: the outside of a burnt hull is charred
+  const ph = hullTone(u), k = catastrophic ? 0.55 : 0.8;
+  const col = ((((ph >> 16) & 255) * k) << 16) | ((((ph >> 8) & 255) * k) << 8) | ((ph & 255) * k);
+  try {
+    D.wreckage(c.x, (c.y || 0) + (u.vheight || 2.4) * 0.6, c.z, {
+      color: col,
+      plates: catastrophic ? 9 + (fxr() * 5 | 0) : 3 + (fxr() * 3 | 0), plateSize: 0.45 * big,
+      links: tracked ? (catastrophic ? 8 + (fxr() * 6 | 0) : (fxr() < 0.4 ? 3 : 0)) : 0, linkSize: TS.link,
+      wheels: tracked ? (catastrophic ? 1 + (fxr() * 2 | 0) : 0) : 0, wheelSize: TS.wheel,
+      hatches: catastrophic && !u.air ? (fxr() < 0.6 ? 1 : 0) + (fxr() < 0.3 ? 1 : 0) : 0, hatchSize: 0.8,
+      dir: { x: 0, y: 1, z: 0 }, power: catastrophic ? 2.6 : 1.3, spread: 1.5 * big, radius: 1.6 * big,
+      burn: catastrophic ? 14 : 5, burnFrac: catastrophic ? 0.5 : 0.25, fires: catastrophic ? 2 : 0,
+      dustColor: 0x3d3833,
+    });
+  } catch (e) {}
+}
 // killMan's vehicle half: the crew gets out (or does not), the hull burns
 function vehicleWrecked(u, imp) {
   u.dieT = 0;
   const catastrophic = !!(u.vs.wreck && u.vs.burning) || (u.vs.hp < -u.maxHp * 0.3);
+  if (!u.air) vehKillFx(u, catastrophic);
   vehBailOut(u, catastrophic && !u._abandoned);
   u.burnT = u.vs.burning || catastrophic ? 40 + lcg() * 40 : 0;
   if (u.you) { u.you = false; }
@@ -1361,6 +1500,7 @@ function stepWreck(u, sdt) {
     const g = MAP.groundAt(u.pos.x, u.pos.z);
     if (u.pos.y <= g + 0.5) {
       u.pos.y = g + 0.5; u.crashed = true;
+      vehKillFx(u, true);
       if (CBZ.studio.boom) CBZ.studio.boom({ x: u.pos.x, y: g + 1, z: u.pos.z }, { radius: Math.min(20, 6 + u.vlen * 0.5), power: 1.6, structural: false, by: null });
     }
   }
@@ -1574,5 +1714,5 @@ function stepYouVehicle(u, sdt) {
   if (CBZ.tracer) { try { CBZ.tracer(from, _v, { shooter: u, muzzle: true, muzzleScale: 2 }); } catch (e) {} }
   vehFx(u, from);
   u.actx.firing = shot; u._firing = null;
-  missImpact(from, _v, 0);
+  missImpact(from, _v, 0, W.w.kind === "cannon");
 }
