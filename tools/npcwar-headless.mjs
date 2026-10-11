@@ -735,6 +735,52 @@ scenario(11, "aircraft: an Apache's battle positions, an F-35's attack runs", as
    a best-of-3 at 1-0 scores this round, says the series, and hands the next
    round the score in its URL. Nothing a player reads says RED or BLUE. */
 const G = (W, expr) => vm.runInContext(expr, W.sb);
+/* 12  AIR ASSAULT. A UH-60 carries its squad low to a landing zone short of
+   the enemy, hovers at its fast-rope height and puts them down the ropes
+   one at a time; nobody leaves it while it is flying anywhere else. Then
+   its door guns work the area, each only inside its own sector. */
+scenario(12, "air assault: a Black Hawk fast-ropes its squad in, then its door guns fight", async () => {
+  const W = boot("?a=uh60_black_hawk*1,men*15&b=men&n=16v25&arena=dunes&bw=ak47&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  run(W, 1);
+  const B = W.sb.__battle, MAP = vm.runInContext("MAP", W.sb);
+  const h = B.roster().find((m) => m.unitId === "uh60_black_hawk");
+  check(!!h && h.air, "the Black Hawk is in the air");
+  if (!h) return;
+  const pax0 = h.seats.filter((s) => !s.crew && s.man).length;
+  check(pax0 === 11, "eleven troops on the benches, four crew in their seats (" + pax0 + " aboard, crew " + h.seats.filter((s) => s.crew && (s.man || s.implicit)).length + ")");
+  check(!!(h.rig && h.rig.state), "its own rig was built (not the stand-in box)");
+  const outs = [];
+  let last = pax0, firstDrop = null;
+  const fired = {}, offSector = [];
+  const fire0 = h.rig.fire;
+  h.rig.fire = function (shot) {
+    fired[shot.wid] = (fired[shot.wid] || 0) + 1;
+    if (shot.target) {
+      const rel = W.CBZ.vehicleDrive.wrap(Math.atan2(shot.target.pos.x - h.pos.x, shot.target.pos.z - h.pos.z) - h.h);
+      if ((shot.wid === "m240h_port" && rel < -0.2) || (shot.wid === "m240h_stbd" && rel > 0.2)) offSector.push(shot.wid + " " + rel.toFixed(2));
+    }
+    return fire0.apply(this, arguments);
+  };
+  run(W, 240, () => {
+    const n = h.dead ? last : h.seats.filter((s) => !s.crew && s.man).length;
+    if (n < last) {
+      const agl = h.pos.y - MAP.groundAt(h.pos.x, h.pos.z);
+      outs.push({ t: B.audit().simT, agl: +agl.toFixed(1), v: +h.ds.v.toFixed(1), ph: h.airPhase });
+      if (firstDrop == null) firstDrop = B.audit().simT;
+    }
+    last = n;
+    return true;
+  });
+  console.log("    (drops: " + outs.length + ", e.g. " + JSON.stringify(outs.slice(0, 3)) + "; fired " + JSON.stringify(fired) + ")");
+  check(outs.length > 0, "the squad got out (" + (pax0 - last) + " of " + pax0 + ")");
+  check(outs.every((o, i) => o.agl > 8 && o.agl < 16 && (i === outs.length - 1 || (o.ph === "insert" && o.v < 3.5))), "every man came down a rope from a hover at ~12 m (" + JSON.stringify(outs.slice(-2)) + ")");
+  check(outs.length < 2 || outs.length >= 6, "one at a time over several steps, not all in one frame (" + outs.length + " drops)");
+  check(offSector.length === 0, "each door gun fired only inside its own sector (" + (offSector.slice(0, 3).join(", ") || "none out") + ")");
+});
+
 scenario(9, "sides, best-of, the URL matchup: no colour on screen", async () => {
   const W = boot("?a=men&b=men&n=20v12&arena=dunes&aw=ak47&bw=ak47&at=elite&bt=thug&af=kesh&bf=veridia&bo=3&sa=1&sb=0&auto=1&probe=0");
   if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
