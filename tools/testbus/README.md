@@ -7,6 +7,10 @@ checks to the bus and keep working. The bus merges every queued branch onto
 origin/main, boots each world ONCE in one warm Chrome, runs everybody's probes in it,
 and writes each answer to a file.
 
+Pictures instead of checks: `tools/shot/` (README there) is the bus's capture
+service. It keeps the machine's warm Chrome pool; this batcher borrows a Chrome from
+it when it is up.
+
 ## Builders: submit, keep working, look later
 
 ```sh
