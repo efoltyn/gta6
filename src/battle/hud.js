@@ -15,8 +15,8 @@
    that is already drawing a thousand bodies. */
 const whoC = { on: null, team: "", hp: -1, low: null, mag: -1, rl: null, hasMag: null, hurt: null };
 function stepWho() {
-  const m = (cam.mode === "follow" || cam.mode === "you" || cam.shot === "point" ||
-    cam.shot === "push" || cam.shot === "study" || cam.shot === "kill")
+  const m = (cam.mode === "follow" || cam.mode === "you" || cam.shot === "hero" ||
+    cam.shot === "charge" || cam.shot === "study" || cam.mode === "kill")
     ? cam.followM : null;
   const on = !!m && !m.dead;
   if (on !== whoC.on) { whoC.on = on; el("who").classList.toggle("on", on); }
@@ -54,8 +54,15 @@ function setCamMode(mode, team) {
   if (cam.mode === "kill" && mode !== "kill" && KILL.t > 0) {
     KILL.t = 0; KILL.m = null; setSpeed(KILL.speed);
   }
+  if (SLOW.t > 0 && mode !== cam.mode) { SLOW.t = 0; if (speed > 0) setSpeed(SLOW.back); }
+  // any lens but YOU's: the body you were driving goes back to its brain
+  if (mode !== "you" && YOU.m) leaveYou(false);
+  const was = cam.mode;
   cam.mode = mode;
   if (team) cam.followTeam = team;
+  // the director takes a fresh shot the moment it is handed the lens
+  if (mode === "auto" && was !== "auto") { cam.cutAt = simT; cam.sinceWide = 1; }
+  if (mode !== "you") cam.wFov = cam.fov0;
   // the camera button lights while a director owns the lens, in the
   // followed army's colour when it is riding one of them
   const cb = el("cCam");
@@ -90,45 +97,78 @@ function cycleCam() {
   else if (next === "followBlue") setCamMode("follow", "blue");
   else setCamMode(next);
 }
-// manual orbit: pointers on the page, ignored while the UI owns them
-let drag = null;
-const pinch = { d: 0 };
+/* ============================================================ THE HANDS
+   Spectating, the pointers are the FREE camera and the finger that takes a
+   unit over:
+     tap / click a unit          you are it (player.js takeOver)
+     drag (one finger, left)     orbit
+     right-drag, shift-drag, two fingers   pan (grab the ground)
+     wheel, pinch                zoom
+   A tap that is not a drag never kicks the director off the lens; the first
+   real drag (8 px) hands the camera to your hands. Possessed, a click takes
+   the pointer lock (the mouse is the look, the button is attack) and the
+   phone's thumbs belong to microboot's stick and look layer. */
+const PTR = new Map();
+let gest = null;
 function uiTarget(e) {
-  return e.target && (e.target.closest && e.target.closest("#menu,#ctl,#end,button,select,input"));
+  return e.target && (e.target.closest && e.target.closest("#menu,#ctl,#end,button,select,input,.mt-btn,.mt-stick"));
 }
+function camPan(dx, dy) {
+  const s = cam.dist * 0.0016 * (cam.wPitch > 0.9 ? 1.4 : 1);
+  // screen right on the ground is (cos yaw, -sin yaw); screen up is (-sin, -cos)
+  const rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw), fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw);
+  cam.wFocus.x += (-rx * dx + fx * dy) * s;
+  cam.wFocus.z += (-rz * dx + fz * dy) * s;
+  cam.wFocus.y = MAP.groundAt(cam.wFocus.x, cam.wFocus.z);
+}
+function camOrbit(dx, dy) {
+  cam.wYaw -= dx * 0.0052;
+  cam.wPitch = Math.max(pitchLo(), Math.min(1.42, cam.wPitch + dy * 0.004));
+}
+function camZoom(k) { cam.wDist = Math.max(3, Math.min(600, cam.wDist * k)); }
 CBZ.npcwar.onBoot(function () {
   window.addEventListener("pointerdown", function (e) {
     if (!started || uiTarget(e)) return;
-    // a soldier's mouse is his rifle: a click with no lock takes the lock
+    // a soldier's mouse is his weapon: a click with no lock takes the lock
     if (cam.mode === "you") { if (!COARSE && !CBZ.micro.input.locked) CBZ.micro.lock(); return; }
-    if (cam.mode !== "free") setCamMode("free");
-    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, b: e.button };
+    PTR.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), b: e.button, shift: e.shiftKey });
+    if (!gest) gest = { moved: false, cx: 0, cy: 0, sp: 0, two: false };
+    gest.two = false;                       // a second finger re-seeds the pair
   });
   window.addEventListener("pointermove", function (e) {
-    if (!drag || e.pointerId !== drag.id) return;
-    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-    drag.x = e.clientX; drag.y = e.clientY;
-    if (drag.b === 2) {
-      const s = cam.dist * 0.0016;
-      cam.wFocus.x += (-Math.cos(cam.yaw) * -dx + Math.sin(cam.yaw) * -dy) * s;
-      cam.wFocus.z += (Math.sin(cam.yaw) * -dx + Math.cos(cam.yaw) * -dy) * s;
-    } else {
-      cam.wYaw -= dx * 0.0052;
-      cam.wPitch = Math.max(pitchLo(), Math.min(1.42, cam.wPitch + dy * 0.004));
+    const p = PTR.get(e.pointerId);
+    if (!p || !gest) return;
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    if (!gest.moved && Math.hypot(p.x - p.sx, p.y - p.sy) > 8) {
+      gest.moved = true;
+      if (cam.mode !== "free") setCamMode("free");
     }
+    if (!gest.moved) return;
+    if (PTR.size >= 2) {
+      const it = PTR.values(), a = it.next().value, b = it.next().value;
+      const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, sp = Math.hypot(a.x - b.x, a.y - b.y);
+      if (gest.two) {
+        camPan(cx - gest.cx, cy - gest.cy);
+        if (gest.sp > 4 && sp > 4) camZoom(gest.sp / sp);
+      }
+      gest.two = true; gest.cx = cx; gest.cy = cy; gest.sp = sp;
+    } else if (p.b === 2 || p.shift) camPan(dx, dy);
+    else camOrbit(dx, dy);
   });
-  window.addEventListener("pointerup", function () { drag = null; pinch.d = 0; });
+  const up = function (e) {
+    const p = PTR.get(e.pointerId);
+    PTR.delete(e.pointerId);
+    if (p && gest && !gest.moved && PTR.size === 0 && p.b === 0 && performance.now() - p.t < 450 && started && !over) tapTake(p.x, p.y);
+    if (PTR.size === 0) gest = null;
+    else if (gest) gest.two = false;
+  };
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
   window.addEventListener("wheel", function (e) {
     if (!started || uiTarget(e) || cam.mode === "you") return;
     if (cam.mode !== "free") setCamMode("free");
-    cam.wDist = Math.max(6, Math.min(420, cam.wDist * (e.deltaY > 0 ? 1.13 : 0.885)));
-  }, { passive: true });
-  window.addEventListener("touchmove", function (e) {
-    if (!started || e.touches.length !== 2 || cam.mode === "you") return;
-    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
-      e.touches[0].clientY - e.touches[1].clientY);
-    if (pinch.d) cam.wDist = Math.max(6, Math.min(420, cam.wDist * (pinch.d / d)));
-    pinch.d = d;
+    camZoom(e.deltaY > 0 ? 1.13 : 0.885);
   }, { passive: true });
   window.addEventListener("contextmenu", function (e) { if (started && !uiTarget(e)) e.preventDefault(); });
 });
