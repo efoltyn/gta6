@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "243eb77c7dee42b64e756abc761bc6723098943f",
-  "createdAt": "2026-10-11T05:25:26.269Z",
-  "fileCount": 1330,
-  "totalBytes": 48836527,
+  "sourceCommit": "f20df8fbf3d5e042310088e6b87a15feebde9d4d",
+  "createdAt": "2026-10-11T05:36:31.335Z",
+  "fileCount": 1329,
+  "totalBytes": 48836521,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -43,13 +43,13 @@
     },
     {
       "file": "src/battle/arenas/sea.js",
-      "bytes": 10703,
-      "sha256": "a6e73fb4bfb0d0490ebe33b05855a98ec059d5d71148d730d2ace41fb835b631"
+      "bytes": 9446,
+      "sha256": "043f04ca48658b26b30dddec6d7cf624c53e02d43b5b5eeb6a2acc99fabbcc21"
     },
     {
       "file": "src/battle/arenas/yard.js",
-      "bytes": 25496,
-      "sha256": "e98548713e0727d532037128d4393b39708bcbe28e26a17e53116b7e1c59d801"
+      "bytes": 24500,
+      "sha256": "452f4cc5d09e910d0be23ffc014f05f86d2da09aca8d1eb7488fc5fb6cac2d3f"
     },
     {
       "file": "src/battle/arms.js",
@@ -1098,8 +1098,8 @@
     },
     {
       "file": "src/city/govcomplex.js",
-      "bytes": 167513,
-      "sha256": "4465ea2652a3387fb7001d97851226855f6bfe67a9ff03fb7e9bd21aed77c500"
+      "bytes": 167584,
+      "sha256": "6384e9a0ba1c9b221ce1cfd10490cd6c887c79d455a39a5e83481920002b203d"
     },
     {
       "file": "src/city/gunmods.js",
@@ -1988,8 +1988,8 @@
     },
     {
       "file": "src/city/world.js",
-      "bytes": 24684,
-      "sha256": "c8f1c172e22794315aeb1a9ef8f4b0e5d205a324a194888739b794413253f5ce"
+      "bytes": 21389,
+      "sha256": "07331d4b18a8dcaaafb25011803168ae71ef69f8098eed82c27230ce634386f1"
     },
     {
       "file": "src/city/worldmap.js",
@@ -2018,8 +2018,8 @@
     },
     {
       "file": "src/config.js",
-      "bytes": 22462,
-      "sha256": "77172aceb9f7c9622c3a0bd0fbb6d97e754811fa426a0bdb2561b80dec25fa76"
+      "bytes": 22400,
+      "sha256": "796b217a059d36d28d7da377e8b5ad9432cfa70bd0af912f8094ea350484fc4f"
     },
     {
       "file": "src/core/bakecache.js",
@@ -2028,8 +2028,8 @@
     },
     {
       "file": "src/core/batch.js",
-      "bytes": 26376,
-      "sha256": "1331490ff9ed75e991a7bfde83be66af0f520383044b1c97c7cc2287dbf99d06"
+      "bytes": 26398,
+      "sha256": "0e79b865603ceca3db6f391ab866cc109a03cc75a2d8b5974671708f10e19756"
     },
     {
       "file": "src/core/citystream.js",
@@ -2173,8 +2173,8 @@
     },
     {
       "file": "src/core/studio.js",
-      "bytes": 50308,
-      "sha256": "db6f17749c9fe2e1aabb740a099ba7584b0f8e3f581b0954c28032c86ad81f2d"
+      "bytes": 50671,
+      "sha256": "5877c721aeaee88082e278c5440b91df879f9e2bdca57e679fefb690f622e3b1"
     },
     {
       "file": "src/core/texfree.js",
@@ -3772,11 +3772,6 @@
       "sha256": "f6ba8cf5df528f1fd38b749d46cd7799a40b80d4eb1a5c5c072d31b1eae7f816"
     },
     {
-      "file": "src/vendor/WaterReflect.js",
-      "bytes": 17254,
-      "sha256": "410ac4d0bf1147b1c214c6ff601b3919f33fe7b0f073210f4e85999926c914a6"
-    },
-    {
       "file": "src/vendor/draco/gltf/draco_decoder.js",
       "bytes": 548080,
       "sha256": "bafef89650284d70a1c51bce232cbeffb3f3f57394e7b695908406baf816edc4"
@@ -4153,8 +4148,8 @@
     },
     {
       "file": "src/world/disaster_arena.js",
-      "bytes": 121489,
-      "sha256": "8bcc1ab44ccbf746ed447fd3344214297220317f43e372473d05cfb66ca2441a"
+      "bytes": 121965,
+      "sha256": "2bf18140f4acf55143d1e8c53e3164114d17bbd2917ea3a66cc04b4aebd38aa3"
     },
     {
       "file": "src/world/door.js",
@@ -4348,8 +4343,8 @@
     },
     {
       "file": "src/world/tsunami_flow.js",
-      "bytes": 6578,
-      "sha256": "f901d240a2b33d2f97f297ff99461cacbf2c748c369e08e159488c97865965cd"
+      "bytes": 6619,
+      "sha256": "b13a6c3b58869812e15cf7251bf18bcf056da98a50b44d699496ee6e64c61c6d"
     },
     {
       "file": "src/world/tsunami_scene.js",
@@ -4383,8 +4378,8 @@
     },
     {
       "file": "src/world/water_float.js",
-      "bytes": 10943,
-      "sha256": "6814ff80e71a69bb579da6ac1d705de8ba32a834e8b14268f6f8fbc32743bdfc"
+      "bytes": 11751,
+      "sha256": "496023d0964a415b807cbcf4bce95c21805661e06e3d201d1ecf767ddaf1004b"
     },
     {
       "file": "src/world/water_helm.js",
@@ -4398,13 +4393,18 @@
     },
     {
       "file": "src/world/water_impact.js",
-      "bytes": 18827,
-      "sha256": "44479bd746a88f5f0e4cd191e8538c7b34e980d0e5637a9bffc449d48446015a"
+      "bytes": 19264,
+      "sha256": "28f832b8165f581ad9e36bee27a0e3cd864f47ab45cb00f75107ae75b0254ba4"
+    },
+    {
+      "file": "src/world/water_pages.js",
+      "bytes": 1630,
+      "sha256": "00abeffdac86f8dd40e6eff84f29fadc3dfdf1529292689adac0ffdaa33f4d38"
     },
     {
       "file": "src/world/water_spec.js",
-      "bytes": 82701,
-      "sha256": "7d315296f687984f869e9952d4781c7288e7401fcd0d7500bed25f01b96381fb"
+      "bytes": 110711,
+      "sha256": "9962f24f3dbaa1fed5281098341c64727c4a7483889ef287f8670a255116dc66"
     },
     {
       "file": "src/world/water_stability.js",
@@ -4418,18 +4418,13 @@
     },
     {
       "file": "src/world/water_underwater.js",
-      "bytes": 25848,
-      "sha256": "7d506bd765f8cacb6120795b3667fd4586f6d6f453824d3640a41530dc3311d6"
+      "bytes": 25902,
+      "sha256": "c41ff149d4eb1bf08389897b29a4671127b31e5d3d262f654f6dda6485ff57fd"
     },
     {
       "file": "src/world/water_wake.js",
-      "bytes": 37263,
-      "sha256": "8ce9a7c813a52ef62cc1a902cbf8bf7aac74ec2c94436cac00008a7ee7786f42"
-    },
-    {
-      "file": "src/world/waterfx.js",
-      "bytes": 9991,
-      "sha256": "37715f3b4528fabea3b1a60e9e62a5022f5baf96afa19f5fc31be796260e2373"
+      "bytes": 38732,
+      "sha256": "e6f85e4ea58650ef86797f95ec06972104e29943c4860cd806a8abfe09a8e634"
     },
     {
       "file": "src/world/wildnature.js",
@@ -6548,33 +6543,33 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 62158,
-      "sha256": "f2c11aab31eedea457f2fe80f163391619c672b1aa9ac5caa987cce0df3a4d83"
+      "bytes": 62051,
+      "sha256": "73950e9dd9f916e8260ea1197e45ac07d1367cfd99fbb88b4178a404119d503f"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 62201,
-      "sha256": "09eb50ffab67fb856b94a8c8fd3587cd7ee117a5ce06c878231b340f29115638"
+      "bytes": 62094,
+      "sha256": "5ec9a5d750507f48ffd8aab911cd3945f085c4154b7f509f79d149e3eceeab12"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 62170,
-      "sha256": "609ab56da2c428ad0df832a6bac98adac3f555e83756689b97c5a346e5b1dca5"
+      "bytes": 62063,
+      "sha256": "21455eb1e6cfeef6b29d4209658fcb50b1782c91cac74b04b216c0b085712039"
     },
     {
       "file": "gang-city.html",
-      "bytes": 62125,
-      "sha256": "605376774e5be57de9ba1b57c38ccbe6e4e1f0ec1bdc41614df44f3ca98bb79f"
+      "bytes": 62018,
+      "sha256": "42f1a88f4c8f5d306f1ca18caee0fdf21f7da7e15d1969d0bc443acd1f5d7ece"
     },
     {
       "file": "gun-game.html",
-      "bytes": 62147,
-      "sha256": "c334e54901600e5f584f706c3be5204d3fa007c2a9eadc521c6afdf9dad39950"
+      "bytes": 62040,
+      "sha256": "a63b6902b1da7c5281fc8afd09416d5612bb614193df120ecff2187d90fae918"
     },
     {
       "file": "games/battle.html",
-      "bytes": 12780,
-      "sha256": "3a98e7db0150a24e29f6d322d3d622b08a818f22ae60a7a0caac5063e8bae303"
+      "bytes": 12781,
+      "sha256": "0ebf6a448ffdd993f0de40d9f1b39e8f1bed70ed3647c45fadd44dfd6849ceb1"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6583,8 +6578,8 @@
     },
     {
       "file": "games/bomb-survivor.html",
-      "bytes": 75915,
-      "sha256": "2ae7e5cd2c24029a5eab479bc18c115fb3bdeb56c4aa85b061e4c3eef98c0b56"
+      "bytes": 75916,
+      "sha256": "f457a3cfa0690db5f6071ad010380bc9d39d17eb3ee29ffcd257c2142e2c3d90"
     },
     {
       "file": "games/dev.html",
@@ -6603,8 +6598,8 @@
     },
     {
       "file": "games/warlord.html",
-      "bytes": 73709,
-      "sha256": "25b1732382cd5088eeb21281a10a096869825e438a2c62d9927e17fdeaec4140"
+      "bytes": 73710,
+      "sha256": "2a8477205f0682eeb17226b2280db00974d31ea5f87a3c9dc4b56b8fb58f5b49"
     },
     {
       "file": "thumbs/shark-sim.jpg",
