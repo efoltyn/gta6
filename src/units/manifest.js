@@ -26,6 +26,8 @@
   function menGroup(n) {
     return n <= 12 ? "squad" : n <= 50 ? "platoon" : n <= 250 ? "company" : n <= 1000 ? "battalion" : n <= 5000 ? "brigade" : "division";
   }
+  // the wild dogs share one rig: src/units/kit/canid.js on the animal kit
+  const CANID = ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/kit/canid.js"];
   CBZ.UNIT_MANIFEST = {
     men: { kind: "men", name: "man", plural: "men", group: menGroup },
 
@@ -36,26 +38,26 @@
     white_lion: Object.assign(S("white lion", "white lions", "pride"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/species/lion.js"] }),
     cheetah: Object.assign(S("cheetah", "cheetahs", "coalition"), { needs: FELID }),
     snow_leopard: Object.assign(S("snow leopard", "snow leopards", "leap"), { needs: FELID }),
-    gray_wolf: S("gray wolf", "gray wolves", "pack"),
-    arctic_wolf: S("Arctic wolf", "Arctic wolves", "pack"),
-    coyote: S("coyote", "coyotes", "pack"),
-    black_bear: S("black bear", "black bears", "sloth"),
-    brown_bear: S("brown bear", "brown bears", "sloth"),
-    polar_bear: S("polar bear", "polar bears", "sloth"),
+    gray_wolf: Object.assign(S("gray wolf", "gray wolves", "pack"), { needs: CANID }),
+    arctic_wolf: Object.assign(S("Arctic wolf", "Arctic wolves", "pack"), { needs: CANID }),
+    coyote: Object.assign(S("coyote", "coyotes", "pack"), { needs: CANID }),
+    black_bear: Object.assign(S("black bear", "black bears", "sloth"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/species/brown_bear.js"] }),
+    brown_bear: Object.assign(S("brown bear", "brown bears", "sloth"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
+    polar_bear: Object.assign(S("polar bear", "polar bears", "sloth"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/species/brown_bear.js"] }),
     african_elephant: Object.assign(S("African elephant", "African elephants", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     white_rhino: Object.assign(S("white rhino", "white rhinos", "crash"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     giraffe: S("giraffe", "giraffes", "tower"),
     zebra: S("zebra", "zebras", "dazzle"),
-    bison: S("bison", "bison", "herd"),
-    moose: S("moose", "moose", "herd"),
-    elk: S("elk", "elk", "herd"),
-    caribou: S("caribou", "caribou", "herd"),
+    bison: Object.assign(S("bison", "bison", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
+    moose: Object.assign(S("moose", "moose", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/species/bison.js"] }),
+    elk: Object.assign(S("elk", "elk", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/species/bison.js"] }),
+    caribou: Object.assign(S("caribou", "caribou", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/species/bison.js"] }),
     whitetail_deer: S("whitetail deer", "whitetail deer", "herd"),
     white_stag: S("white stag", "white stags", "herd"),
     wild_boar: S("wild boar", "wild boar", "sounder"),
     mountain_goat: S("mountain goat", "mountain goats", "herd"),
     bighorn_sheep: S("bighorn sheep", "bighorn sheep", "flock"),
-    red_fox: S("red fox", "red foxes", "skulk"),
+    red_fox: Object.assign(S("red fox", "red foxes", "skulk"), { needs: CANID }),
     raccoon: S("raccoon", "raccoons"),
     cottontail_rabbit: S("cottontail rabbit", "cottontail rabbits", "colony"),
     jackrabbit: S("jackrabbit", "jackrabbits"),
@@ -64,7 +66,7 @@
     pig: S("pig", "pigs"),
     sheep: S("sheep", "sheep", "flock"),
     goat: S("goat", "goats", "herd"),
-    horse: S("horse", "horses", "herd"),
+    horse: Object.assign(S("horse", "horses", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     chicken: S("chicken", "chickens", "flock"),
     // the war room's "1000 DOGS": the city's one dog (city/dogmodel.js)
     dog: Object.assign(S("dog", "dogs", "pack"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "city/dogmodel.js"] }),

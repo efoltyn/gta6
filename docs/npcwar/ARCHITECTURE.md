@@ -324,7 +324,17 @@ puts weapons that cannot bear on the mark second.
   mark, fire for `popWindow` s, default 7; this is cut short after `popShots` rounds, when hit,
   or when blind), and `drop` (back down, then sidestep to a new position). With no mask (flat
   ground) it still shoots and scoots. A transport (`dismountAt`) flies low to a landing short
-  of the enemy and sets down.
+  of the enemy and sets down. A rotor transport never unloads in flight: it picks the landing
+  zone (0.8 x `dismountAt` short of the mark, fixed once it is within 150 m), flares into it and
+  either lands and unloads (phase `insert`), or, with `stats.fastRope` (m), hovers at that height
+  and puts the men down two ropes, one man per rope every `ropeEvery` s after `ropeDelay` plus
+  `fastRope / ropeSpeed` (the rig can draw the same schedule off `ctx.phase === "insert"`). A hit
+  that penetrates an airborne transport does not throw its passengers out. With
+  `stats.broadside` (rad) a door-gun aircraft turns that far off the mark at its battle position
+  so a side gun bears (alternating sides with the sidestep).
+- **Vehicles and `moves`.** A vehicle file may define `moves(veh, tgt, ctx) -> weapon id`: the
+  weapon a PLAYER's attack works on this mark (`vehYouSeatWeapon` asks it first; the UH-60 names
+  the door gun on the mark's side).
 - **Jets** fly attack runs at real heights. Level bombing is flown at the weapon's `alt` (else
   `stats.alt`) and released where the fall lands on the mark. A `guided` bomb is released
   inside a basket of `basket` (0.15) x its fall distance and homes all the way down (`homing`
@@ -399,7 +409,7 @@ vehicle agents redraw):
 | patriot_launcher | Patriot | milArmor.patriot | 2 | SAM (air only) | 6/2/2/2 |
 | technical | MG technical | stand-in in its file (warlord's builder needs CBZ.warlord) | driver, gunner | MG | 1/0/0/0 |
 | ah64_apache | AH-64 | milAir attackHeli | pilot, gunner | 30 mm, Hellfire, Hydra | 20/15/10/8 |
-| uh60_black_hawk | UH-60 (11) | milAir utilityHeli | pilot, copilot, door gunner | minigun | 8/6/4/4 |
+| uh60_black_hawk | UH-60M (11, fast rope) | its own file (redrawn) | pilot, copilot, gunner, crew chief | 2 x M240H door guns | 3/2/2/2 (unarmoured, hp 820) |
 | f35 | F-35A | milAir fighter | pilot | 2 GBUs/pass, 25 mm | 2 |
 | mq9_reaper | MQ-9 | milAir drone | remote | Hellfire | 0 |
 | b52 | B-52H | milAir bomber | 5 | bomb sticks | 0 |
