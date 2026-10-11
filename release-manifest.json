@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "5a4f966800c937d9ce4feb495e14438ee7d436de",
-  "createdAt": "2026-10-11T20:51:54.970Z",
+  "sourceCommit": "98c4eb0a2e3425e22541d6bac810a69e49ef10e5",
+  "createdAt": "2026-10-11T20:52:57.524Z",
   "fileCount": 1351,
-  "totalBytes": 50005237,
+  "totalBytes": 50047265,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -308,8 +308,8 @@
     },
     {
       "file": "src/battle/vehicles.js",
-      "bytes": 43419,
-      "sha256": "00b7812e41871334bf6f7ca071fbe4e1c80c30316ee0d4112dcd3af0a9a89908"
+      "bytes": 43647,
+      "sha256": "f4a6c24604a83145c8c55b3ff0cbf6f9a6530d224a215c746b0058d295259c57"
     },
     {
       "file": "src/bootstrap.js",
@@ -3793,8 +3793,8 @@
     },
     {
       "file": "src/units/vehicles/b52.js",
-      "bytes": 808,
-      "sha256": "b28f68ae4b827d540b7def09c03e62a51c0a8dc7f04d53d5e2dc023d42fcea91"
+      "bytes": 42612,
+      "sha256": "cdabb5371b2fdeaf0af6311ac01fa8d73c8fb0c37ba0640dd2fe414deed826ef"
     },
     {
       "file": "src/units/vehicles/bradley_ifv.js",
@@ -6678,8 +6678,8 @@
     },
     {
       "file": "games/battle.html",
-      "bytes": 13803,
-      "sha256": "92028165f54edfadaaa9b8b4304c471ab2fd72f3c6a98c623f63d220589324e3"
+      "bytes": 13801,
+      "sha256": "584ab70055569ffb71b8f148bc3d204261939a14d3f9bec505ad3ddf9fb8f1c0"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6688,8 +6688,8 @@
     },
     {
       "file": "games/bomb-survivor.html",
-      "bytes": 75915,
-      "sha256": "05d1c7e0ba89822f1d24de37c96676c5336047ee19f3beae8288a8c344de3fd4"
+      "bytes": 75914,
+      "sha256": "dfbf7250d396e10cbd6a282bac89123a2d28ecf0d97af163d210c56a99cfb0a9"
     },
     {
       "file": "games/dev.html",
@@ -6708,8 +6708,8 @@
     },
     {
       "file": "games/warlord.html",
-      "bytes": 73709,
-      "sha256": "2059ba24a6b3137fe8c7adcc4d94d17d62f0ec8313e0a3f9d7f52fd212a60fc5"
+      "bytes": 73708,
+      "sha256": "c377631f4908465e75f393ef79a4a4d10de0790bb071315309b6074a1d403cc3"
     },
     {
       "file": "thumbs/shark-sim.jpg",
