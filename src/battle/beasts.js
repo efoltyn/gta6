@@ -262,7 +262,7 @@ function beastFight(m, tgt, sdt) {
          hand it a 70% buff nobody wrote. meleeAbsorb asks only what the
          TARGET soaks, so a beast hitting a man is worth exactly its row (no
          change at all) and a beast hitting another beast finally is not. */
-      hurtMan(t, dmg * (CBZ.meleeAbsorb ? CBZ.meleeAbsorb(t) : 1), { by: m });
+      hurtMan(t, dmg * (CBZ.meleeAbsorb ? CBZ.meleeAbsorb(t, m) : 1), { by: m });
       // a struck beast shudders (creature_combat's own flinch); a struck man
       // already staggers through the damage funnel's suppression
       if (t.beast && !t.dead && CBZ.creatureFlinch) { try { CBZ.creatureFlinch(t); } catch (e) {} }

@@ -57,6 +57,16 @@ const ARMOURY = [
   "systems/wounds.js",         // bodies remember hits (optional, self-capping)
   "world/hull_loft.js",        // the game's own lofted boat hulls (OPEN WATER's fleet)
   "city/flags.js",             // the one flag system: an army fights under its nation's flag
+  "world/textures_surface.js", // groundTurf: the one grass shader (OPEN FIELDS' pasture)
+  // BATTLE PHYSICS (src/battle/physics.js) reuses two engine blocks rather
+  // than growing its own: a hull that runs a man down drives his ragdoll
+  // with its real profile (carstrike, on the ragdoll pack's solver), and a
+  // body that dies at sea floats or sinks on the one float block. Both are
+  // loaded always: the war room picks the ground and the roster after this
+  // list has gone out, and both are idle until a hull moves or a body dies
+  // in water.
+  "city/carstrike.js",
+  "world/water_float.js",
 ];
 /* THE LOAD USED TO BE THIRTY-ONE ROUND TRIPS IN A ROW.
 

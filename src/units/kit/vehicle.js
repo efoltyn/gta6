@@ -28,7 +28,13 @@
                                   firepower, burning, wreck}} armour + damage states
                                   (stats.armourCE, optional: per-face armour vs
                                   shaped charges, used for heat/atgm/hedp)
-     seats(def) / seat(crew, man, seat) / unseat(crew, seat)   crew seat book
+                                  SLAT / BAR ARMOUR (optional): vs.slat (per hull)
+                                  else stats.slat = the chance a cage catches an
+                                  RPG-class warhead (cls "heat") on a side, front
+                                  or rear face; caught -> {slat: true}, no pen
+     seats(def) / seat(crew, man, seat) / unseat(crew, seat)   crew seat book;
+                                  def.benches[i] (optional) = passenger i's seat
+                                  position in hull space (else [0, 1.2, -1])
    }
 ============================================================ */
 (function () {
@@ -64,11 +70,25 @@
     const top = spec.speed || 20, rev = spec.reverse || top * 0.3;
     const acc = spec.accel || 3.5, maxSteer = spec.maxSteer || 0.55;
     const thr = clamp(ctrl.throttle || 0, -1, 1);
-    const want = thr >= 0 ? thr * top : thr * rev;
-    const a = ctrl.brake > 0 ? acc * 2.5 : acc;
+    let want = thr >= 0 ? thr * top : thr * rev;
+    const stCmd = clamp(ctrl.steer || 0, -1, 1);
+    const wb = spec.wheelbase || 3.5;
+    /* GRIP (opt-in: spec.grip, in g). Tyres hold about grip x 9.8 m/s2
+       sideways: a driver lifts to make a corner (the speed at which the
+       commanded lock is still inside the grip circle) and the lock itself is
+       limited at speed, so a truck at 90 km/h cannot turn on a dime. */
+    if (spec.grip > 0) {
+      const ay = spec.grip * 9.8, tl = Math.tan(Math.max(1e-3, Math.abs(stCmd) * maxSteer));
+      const vCorner = Math.sqrt(ay * wb / tl) * 1.15;
+      if (want > vCorner) want = Math.max(vCorner, Math.min(want, 4));
+    }
+    // brakes are stronger than the engine (a grip-aware hull also brakes, not coasts, into a corner)
+    const a = ctrl.brake > 0 || (spec.grip > 0 && Math.abs(want) < Math.abs(s.v || 0) - 0.5) ? acc * 2.5 : acc;
     s.v = (s.v || 0) + clamp(want - (s.v || 0), -a * dt, a * dt);
     if (spec.mobilityKill) s.v *= Math.max(0, 1 - dt * 3);
-    s.steer = (s.steer || 0) + clamp(clamp(ctrl.steer || 0, -1, 1) * maxSteer - (s.steer || 0), -2 * dt, 2 * dt);
+    let lock = stCmd * maxSteer;
+    if (spec.grip > 0 && Math.abs(s.v) > 1) lock = clamp(lock, -Math.atan(spec.grip * 9.8 * wb / (s.v * s.v)), Math.atan(spec.grip * 9.8 * wb / (s.v * s.v)));
+    s.steer = (s.steer || 0) + clamp(lock - (s.steer || 0), -2 * dt, 2 * dt);
     s.w = -s.v * Math.tan(s.steer) / (spec.wheelbase || 3.5);
     return s;
   }
@@ -157,6 +177,9 @@
     const tab = ce ? stats.armourCE : stats.armour;
     const arm = (tab && tab[zn]) != null ? tab[zn] : 0;
     const out = { zone: zn, armour: arm, pen: false, dmg: 0, mobility: false, firepower: false, burning: false, wreck: false };
+    // a slat cage shorts or crushes an RPG's fuze before its jet forms
+    const slat = vs.slat != null ? vs.slat : stats.slat;
+    if (slat > 0 && th.cls === "heat" && zn !== "top" && rnd() < slat) { out.slat = true; return out; }
     const p = th.pen * (0.85 + rnd() * 0.3);
     if (p <= arm && arm > 0) {
       // a blast against a hull it cannot get into still takes a track off
@@ -182,7 +205,9 @@
   function seats(def) {
     const out = [];
     (def.crew || []).forEach(function (s) { out.push({ seat: s.seat, pos: s.pos || [0, 1.5, 0], man: null, implicit: false, crew: true }); });
-    for (let i = 0; i < (def.passengers || 0); i++) out.push({ seat: "passenger", pos: [0, 1.2, -1], man: null, implicit: false, crew: false });
+    // def.passengerPos (optional): each bench seat's own place in hull space
+    const pp = def.passengerPos || null;
+    for (let i = 0; i < (def.passengers || 0); i++) out.push({ seat: "passenger", pos: (pp && pp[i]) || (def.benches && def.benches[i]) || [0, 1.2, -1], man: null, implicit: false, crew: false });
     return out;
   }
   function seat(book, man, which) {

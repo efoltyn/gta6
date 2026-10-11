@@ -48,14 +48,17 @@ const MAPS = {
   harbor:   { label: "CAPE HARBOR", note: "the coastal strip. apron, helipads", packs: ["capeharbor"], raise: ["capeharbor"], sea: true },
   marina:   { label: "THE MARINA", note: "basin, pontoons, moored boats", packs: ["marina"], raise: ["marina"], sea: true },
   speedway: { label: "THE SPEEDWAY", note: "banked oval. a ground that is NOT flat", packs: ["speedway"], raise: ["speedway"], sea: true },
-  dunes:    { label: "OPEN DUNES", note: "rolling sand. crests hide men", packs: ["desert"], featured: true, erg: "sand" },
+  dunes:    { label: "OPEN DUNES", note: "barchans and slip faces. crests hide men", packs: ["desert"], featured: true, erg: "sand" },
   /* THE SAME ERG, TWO MORE SKINS. The honest ground is a height function and
      nothing else, so snow and grass are the same crests under a different
      surface and sky: the snowfield the north's wars are fought on, and the
      rolling fields of the farmland and forest country (softer folds). Both
      exist because Gang City's wars are fought where the front IS. */
   snow:     { label: "OPEN SNOW", note: "the same ground, frozen. crests hide men", packs: ["desert"], erg: "snow" },
-  grass:    { label: "OPEN FIELDS", note: "rolling grass. the folds hide men", packs: ["desert"], erg: "grass" },
+  grass:    { label: "OPEN FIELDS", note: "farmland. hedgerows, walls, crops", packs: ["desert"], erg: "grass" },
+  /* THE WOOD: a real temperate forest on rolling ground (arenas/woods.js):
+     canopy, understory, deadfall, a ride through it. Every bole is cover. */
+  forest:   { label: "THE WOOD", note: "beech and spruce. trunks, deadfall", packs: ["desert"], erg: "forest" },
   /* OPEN WATER — the one venue with NO GROUND IN IT.
 
      Every other row above raises a place. This one raises nothing, on purpose:

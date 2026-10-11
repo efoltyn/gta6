@@ -1644,6 +1644,45 @@
     chinstrap(P, H, MICH_RIM, lod);
     return { P, cover: { band: MICH_RIM, room: () => HA + 0.035 } };
   }
+  /* THE 6B47 "RATNIK": the Russian army's aramid helmet. Fuller cut than a
+     MICH (it comes down over the top of the ears with only a shallow notch),
+     a smooth bowl with no ARC rails, worn under a cloth cover drawn in by an
+     elastic band round the brim, the NVG bracket screwed to the front, and a
+     counterweight pouch on the back of the cover. */
+  const RATNIK_RIM = band([[0, 0.476], [0.6, 0.468], [1.0, 0.44], [1.3, 0.37], [1.57, 0.335], [1.85, 0.33], [2.2, 0.27], [2.6, 0.235], [PI, 0.225]]);
+  function build6b47(lod, form) {
+    const H = Head(form, { ears: true }), P = parts(), seg = Q(lod, 48, 24);
+    H.form = form;
+    const off = (a, t) => 0.056 + 0.016 * sm01(t * 1.3) + 0.006 * (1 - sm01(t * 5)) * (1 - Math.pow(Math.max(0, Math.cos(a)), 2));
+    const G = crownGrid(H, { seg, rowsT: Q(lod, [0, 0.04, 0.09, 0.18, 0.3, 0.44, 0.58, 0.72, 0.86, 1], [0, 0.09, 0.4, 0.75, 1]), band: RATNIK_RIM, off: off });
+    addGrid(P("main"), G, true, HINT_OUT);
+    lipUnder(P("under"), H, G, 0.0045);
+    // the cover's elastic band round the brim: a strip a hair proud of rows 1..2
+    const bandRows = [G[1], G[2]].map((r) => r.map((p) => V.add(p, V.mul(V.norm(V.sub(p, HC)), 0.004))));
+    addGrid(P("accent"), bandRows, true, HINT_OUT);
+    if (!lod) {
+      // the NVG bracket: a curved plate on the front and the mount under it
+      const plate = [];
+      for (let j = 0; j < 3; j++) {
+        const row = [];
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 4 * 2 - 1) * 0.2, e0 = H.bandE(a, RATNIK_RIM(a));
+          const e = e0 + (PI / 2 - e0) * lerp(0.05, 0.22, j / 2);
+          const p = H.hitAE(a, e), n = H.normal(p);
+          row.push(V.add(p, V.mul(n, off(a, 0.12) + 0.007)));
+        }
+        plate.push(row);
+      }
+      slab(P, plate, false, 0.007, (i, j, p) => V.sub(p, HC), { top: "hard", bottom: "hard", edge: "hard" });
+      const mp = plate[0][2], mn = V.norm(V.sub(mp, HC));
+      boxPart(P("hard"), V.add(mp, [0, 0.008, 0]), mn, [0, 1, 0], 0.06, 0.04, 0.03);
+      // the counterweight pouch on the back of the cover
+      const eb = H.bandE(PI, RATNIK_RIM(PI)), bp = H.hitAE(PI, eb + (PI / 2 - eb) * 0.24), bn = H.normal(bp);
+      boxPart(P("main"), V.add(bp, V.mul(bn, off(PI, 0.24) + 0.012)), bn, [0, 1, 0], 0.13, 0.085, 0.04);
+    }
+    chinstrap(P, H, RATNIK_RIM, lod, { frontA: 1.4 });
+    return { P, cover: { band: RATNIK_RIM, room: () => HA + 0.03 } };
+  }
   function buildPasgt(lod, form) {
     // the older full-cut "K-pot": low over the ears, a brow lip, a flared skirt
     const H = Head(form, { ears: true }), P = parts(), seg = Q(lod, 48, 24);
@@ -1831,13 +1870,14 @@
     hijab: (l, f) => buildHijab(l, f),
     ballistic: (l, f, v) => buildBallistic(l, f, v),
     pasgt: (l, f) => buildPasgt(l, f),
+    b6b47: (l, f) => build6b47(l, f),
     riot: (l, f) => buildRiot(l, f),
     moto: (l, f) => buildFullface(l, f, "moto"),
     race: (l, f) => buildFullface(l, f, "race"),
   };
   // legacy / role aliases
   const ALIAS = { cap: "ballcap", snapback: "ballcap", patrol: "peaked", police: "peaked", visor: "peaked", captain: "peaked",
-    helmet: "ballistic", mich: "ballistic", swat: "ballistic", kpot: "pasgt", rag: "headband", sunhat: "sun", smokey: "campaign",
+    helmet: "ballistic", mich: "ballistic", swat: "ballistic", kpot: "pasgt", ratnik: "b6b47", "6b47": "b6b47", ach: "ballistic", ech: "ballistic", rag: "headband", sunhat: "sun", smokey: "campaign",
     stetson: "cowboy", scarf: "hijab", headscarf: "hijab", keffiyeh: "shemagh", fullface: "moto", motorcycle: "moto" };
   const VARIANT_OF = { captain: "captain", snapback: "snap" };
   function canon(kind) { return BUILDERS[kind] ? kind : (ALIAS[kind] || null); }
@@ -1845,7 +1885,7 @@
   // every geometry, cached: kind|form|variant|lod -> { geos: {role: geo}, cover }
   const CACHE = Object.create(null);
   // the kinds whose chinstrap runs under the jaw: built per beard, so the cup sits on it
-  const STRAPPED = { ballistic: 1, pasgt: 1 };
+  const STRAPPED = { ballistic: 1, pasgt: 1, b6b47: 1 };
   function geometry(kind, form, variant, lod, beardGeo) {
     const k = canon(kind);
     if (!k) return null;
@@ -1885,12 +1925,12 @@
   }
   const cm = (hex, o) => (CBZ.cmat ? CBZ.cmat(hex, o) : new THREE.MeshLambertMaterial({ color: hex }));
   const pm = (hex, o) => (CBZ.pbrMat ? CBZ.pbrMat(hex, o) : cm(hex));
-  const GLOSSY = { hardhat: 1, ballistic: 0, riot: 1, moto: 1, race: 1, pasgt: 0 };
+  const GLOSSY = { hardhat: 1, ballistic: 0, riot: 1, moto: 1, race: 1, pasgt: 0, b6b47: 0 };
   const DEFAULTS = {
     ballcap: [0x22262e], peaked: [0x1b2233, 0x0e0f12], milcap: [0x44503a], fedora: [0x3b3a38, 0x151414], trilby: [0x5a5550, 0x1b1a19],
     cowboy: [0x8a6a44, 0x3a2615], bucket: [0x6b7152], sun: [0xe6d3a3, 0x3a2e24], campaign: [0x8a7752, 0x4a3218], hardhat: [0xe8c020],
     beanie: [0x2a2d33], beret: [0x6a1a1e], durag: [0x121316], bandana: [0xa0282a], headband: [0xa0282a], turban: [0x1f3a6b],
-    shemagh: [0xd9d2c0, 0x121212], hijab: [0x2b2d3a], ballistic: [0x4a4d3a], pasgt: [0x4c5236], riot: [0x14161b], moto: [0x121417, 0xc02828], race: [0xe8e8e8, 0xc41e1e],
+    shemagh: [0xd9d2c0, 0x121212], hijab: [0x2b2d3a], ballistic: [0x4a4d3a], pasgt: [0x4c5236], b6b47: [0x55593f, 0x3b3d2e], riot: [0x14161b], moto: [0x121417, 0xc02828], race: [0xe8e8e8, 0xc41e1e],
   };
   function roleMat(kind, role, color, accent) {
     const def = DEFAULTS[kind] || [0x333333];

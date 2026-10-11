@@ -18,19 +18,76 @@ CBZ.npcwar.onBoot(function () {
       return out;
     },
     hurt: function (a, dmg, imp) { hurtMan(a, dmg, imp || {}); return true; },
+    // a detonation is pressure and impulse by distance, on this roster's
+    // real masses: src/battle/physics.js blastBodies
+    blast: function (x, y, z, R, power, opts) { return blastBodies(x, y, z, R, power, opts); },
     hurtPlayer: function () { return true; },   // nobody IS the player here
     route: "npcwar roster + hurtMan",
   });
 });
 
 /* ============================================================ DAMAGE */
+/* THE BODY ANSWERS WITH ITS KIT FIRST. A man's hit goes through
+   systems/armour.js (CBZ.armour.resolve): the zone it landed in, the piece
+   that covers it (plate, soft panel, helmet), stopped or beaten. What it
+   returns is what reaches him, plus a stagger and a winded man behind a
+   plate that held. What kind of hit it is comes from the caller (fire.js
+   says "bullet"; the weapons agent's rounds say their own) or from who did
+   it: a bomb is a blast, a beast bites, a fist is a blow, a hull crushes. */
+function hitKind(imp) {
+  if (!imp) return null;
+  if (imp.kind) return imp.kind;
+  // a flown round (fire.js armsHit) was already resolved against the kit by
+  // CBZ.battleArmour.layer: its damage is final here
+  if (imp.bullet || imp.pen != null) return null;
+  if (imp.cause === "bomb") return "blast";
+  if (imp.cause === "crush") return "crush";
+  const by = imp.by;
+  if (!by) return null;
+  if (by.vehicle) return "blast";
+  if (by.beast) return "bite";
+  return "blunt";
+}
+function armourHit(m, res, imp) {
+  m.lastHit = res;
+  if (res.winded > 0) m.windedT = Math.max(m.windedT || 0, res.winded);
+  const by = imp && imp.by;
+  let dx = 0, dz = 0;
+  if (by && by.pos) { dx = m.pos.x - by.pos.x; dz = m.pos.z - by.pos.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; }
+  const S = CBZ.soldier;
+  if (!m.char || !S || m.hp <= 0) return;
+  if (res.stagger > 0.2 && S.hit && camDist2(m.pos) < 120 * 120) {
+    try { S.hit(m.char, { sev: res.stagger, zone: res.wound || undefined, dirX: dx, dirZ: dz }); } catch (e) {}
+  } else if (res.wound && S.wound && res.dmg > m.maxHp * 0.08) {
+    try { S.wound(m.char, res.wound, Math.min(1, res.dmg / (m.maxHp * 0.5))); } catch (e) {}
+  }
+}
 function hurtMan(m, dmg, imp) {
   // a ghost is a row in the tier sim (src/battle/mass.js): the round lands there
   if (m && m.ghost) { if (dmg > 0) MASS.hurtGhost(m, dmg, imp); return; }
   // a hull answers with its armour first (src/battle/vehicles.js)
-  if (m && m.vehicle) { hurtVehicle(m, dmg, imp); return; }
-  if (!m || m.dead || m.fled || !(dmg > 0) || over) return;
+  if (m && m.vehicle) { hurtVehicle(m, dmg, imp); return null; }
+  if (!m || m.dead || m.fled || !(dmg > 0) || over) return null;
+  let res = null;
+  const kind = hitKind(imp);
+  if (kind && !m.beast && CBZ.armour) {
+    const by = imp.by;
+    res = CBZ.armour.resolve({
+      target: m, dmg: dmg, kind: kind, wid: imp.wid, round: imp.round, zone: imp.zone, headshot: imp.headshot,
+      dirX: by && by.pos ? m.pos.x - by.pos.x : undefined, dirZ: by && by.pos ? m.pos.z - by.pos.z : undefined,
+      yaw: m.yaw, rng: lcg,
+    });
+    dmg = res.dmg;
+  } else if (kind === "bullet" && imp.headshot) dmg *= 2.2;      // a beast's head: the old rule
   m.hp -= dmg;
+  if (res) armourHit(m, res, imp);
+  // ...and what the kit did to that round (systems/armour.js layer: a stop
+  // still winds him and rocks him; fire.js already flinched him)
+  else if (imp && imp.bullet && m.armour && m.armour.last && m.armour.last.t === m.armour.hits) {
+    const L = m.armour.last; m.armour.last = null;
+    if (L.winded > 0) m.windedT = Math.max(m.windedT || 0, L.winded);
+    m.lastHit = L;
+  }
   if (CBZ.combatIQ && CBZ.combatIQ.suppress) CBZ.combatIQ.suppress(m, 0.9);
   // a round that lands rattles harder than one that snaps past
   m.supp = Math.min(SUPP_CAP, (m.supp || 0) + SUPP_HIT);
@@ -39,6 +96,7 @@ function hurtMan(m, dmg, imp) {
   if (!m.routed && imp && imp.by && imp.by.team && imp.by.team !== m.team &&
       (!m.tgt || m.tgt.dead || m.tgt.fled)) m.tgt = imp.by;
   if (m.hp <= 0) killMan(m, imp);
+  return res;
 }
 const DEADN = { red: 0, blue: 0 };       // the dead, by side (corpses retire; this does not)
 function killMan(m, imp) {

@@ -868,7 +868,8 @@
         if (en >= 1.2) { try { CBZ.cityCarImpact(car, P, { x: -e.nx, y: -e.ny, z: -e.nz }, en, { r: head ? 0.3 : 0.45 }); st.dents++; CS.audit.dents++; } catch (err) {} }
       }
       // the screen stars where a head (or a shoulder, harder) went into it
-      if (e.lab === 3 && st.cracks < 2) { if (crackScreen(car, e, head)) { st.cracks++; CS.audit.cracks++; } }
+      // (car.noGlass: a hull with no windscreen, NPC War's armour, has nothing to star)
+      if (e.lab === 3 && st.cracks < 2 && !car.noGlass) { if (crackScreen(car, e, head)) { st.cracks++; CS.audit.cracks++; } }
       // and the blood is where he hit, not where a guess said
       if (CBZ.goreCarStrike && st.blood < 3) {
         try { CBZ.goreCarStrike(car, e.x, e.y, e.z, -e.nx, -e.ny, -e.nz, head ? 0.9 : 0.6); st.blood++; } catch (err) {}

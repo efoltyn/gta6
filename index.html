@@ -602,12 +602,12 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=pf0930c"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=hmove1011"></script>
-  <script src="src/entities/headwear.js?v=hw1"></script>
+  <script src="src/entities/character.js?v=armourm1011"></script>
+  <script src="src/entities/headwear.js?v=armourm1011"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
   <!-- sunglasses FITTED to the head they are worn on (every pair: bling, the detail kit, the portrait, warlord); after character.js + jewelry_kit.js (its street environment) -->
-  <script src="src/entities/eyewear.js?v=shades1009b"></script>
+  <script src="src/entities/eyewear.js?v=armourm1011"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
   <script src="src/entities/watch.js?v=sl0930a"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
@@ -618,7 +618,7 @@ document.body.appendChild(b);}}catch(e){}})();
        profile character.js already builds and the species row's own scale —
        nothing new is authored. MUST follow entities/character.js: it reads
        CBZ.charProfile. -->
-  <script src="src/systems/bodymass.js?v=mass1"></script>
+  <script src="src/systems/bodymass.js?v=physicsm1011"></script>
 <!-- CBZ.moves: THE ONE locomotion layer (velocity, arrival, turn rate,
      avoidance, stuck recovery, foot-matched stride, formations). Pure math;
      every AI mover in every game steps through it. Before poses.js so the
@@ -635,12 +635,18 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/poses.js?v=street1009"></script>
 <!-- A SOLDIER (entities/soldier.js): rifle carries, cover, reload, the throw,
      hit reactions, wounds, the dive and the crawl, on the shared body. -->
-<script src="src/entities/soldier.js?v=hmove1011"></script>
+<!-- SOLDIER KIT (entities/combatkit.js): plate carriers, helmets, eye pro,
+     gloves, knee pads, real camouflage (warlord/camo.js, shared) fitted to the
+     body; and what the kit stops (systems/armour.js, CBZ.armour.resolve). -->
+<script src="src/warlord/camo.js?v=armourm1011"></script>
+<script src="src/systems/armour.js?v=armourm1011"></script>
+<script src="src/entities/combatkit.js?v=armourm1011"></script>
+<script src="src/entities/soldier.js?v=armourm1011"></script>
 <!-- THE REAL CROWD (entities/crowdgpu.js): the CBZ.human mesh GPU-instanced
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=scale1011m"></script>
+<script src="src/entities/crowdgpu.js?v=armourm1011"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -913,7 +919,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (whose LOS/search/flank primitives it composes and never re-implements)
      and BEFORE every consumer: gangs.js, peds.js, police.js, city/combat.js.
      Revert with ?cfg_NPC_COMBAT_IQ=0. -->
-<script src="src/systems/combat_iq.js?v=melee1011"></script>
+<script src="src/systems/combat_iq.js?v=terrainm1011"></script>
 <!-- ONE TASER VISUAL OWNER. Player fire and the prison capture escalation both
      launch its pooled twin probes/wires and electrical body arc; it also draws
      the shared taser appearance in a guard's real weapon socket for that beat. -->
@@ -1022,7 +1028,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ekey2"></script>
-<script src="src/systems/fpsmode.js?v=weap1011m"></script>
+<script src="src/systems/fpsmode.js?v=armourm1011"></script>
 <script src="src/systems/gunfx.js?v=weap1011m"></script>
 <script src="src/systems/intimidate.js?v=jailv1001"></script>
 
@@ -1415,7 +1421,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/mode.js?v=street1009"></script>
 <script src="src/city/economy.js?v=vit3"></script>
 <script src="src/city/clothes.js?v=arms1009b"></script>
-<script src="src/city/outfits.js?v=arms1009b"></script>
+<script src="src/city/outfits.js?v=armourm1011"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <script src="src/city/hunger.js?v=stam1009"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
@@ -1733,7 +1739,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/death.js?v=holes1009b"></script>
 <script src="src/city/camera.js?v=deathcam1009"></script>
 <script src="src/city/ragdoll.js?v=hmove1011"></script>
-<script src="src/city/carstrike.js?v=runover1009b"></script>
+<script src="src/city/carstrike.js?v=physicsm1011"></script>
 <script src="src/city/leaderboard.js?v=rg0929"></script>
 <script src="src/city/zillow.js?v=fac1009"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
@@ -1884,7 +1890,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (registration), citystaff (posts) and wildlife (the sea it sails on). -->
 <script src="src/city/yachts.js?v=cd0929"></script>
 <script src="src/city/seacrew.js?v=yacht1"></script>
-<script src="src/city/armor.js?v=hats1"></script>
+<script src="src/city/armor.js?v=armourm1011"></script>
 <!-- Direct Prison Escape cast through Gang City's canonical painted wardrobe.
      Loaded after clothes/outfits/armor so the adapter only assigns roles; the
      shared garment and fit owners do every actual visual operation. -->

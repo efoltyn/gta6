@@ -266,6 +266,21 @@ function thinkMan(m, now) {
   if (m.beast) { thinkBeast(m, tgt, thinkDt); return; }
   const sees = seesStanding(m, tgt);
   m.sees = sees;
+  /* A HOLDER RISES TO FIRE. A line told to hold kneels where it formed, and
+     on real ground (dunes with 32 deg slip faces, rolling fields, drifts) the
+     kneeling eye is often under the fold in front of it while a standing one
+     clears it: the line saw the enemy (seesStanding) and never fired a
+     round, because fireShot looks from the eye he actually has. Measured on
+     the new dunes and snow: held exchange 0.1-0.25 against 0.3-0.8 met in the
+     open. So the think asks the kneeling eye too, and step.js stands him up
+     for as long as only a standing man has the shot. */
+  m.crouchBlind = false;
+  if (sees && m.eyeH0 != null && holding(m)) {
+    const e = m.eyeH;
+    m.eyeH = m.eyeH0 * (STANCE_K.crouch || 0.64);
+    m.crouchBlind = !eyeLos(m, tgt);
+    m.eyeH = e;
+  }
   if (!sees) {
     m.losBadT += thinkDt;
     // a wall has held this line too long: push up on the mark instead of
@@ -277,6 +292,11 @@ function thinkMan(m, now) {
       // (a body wedged in geometry, a hole nobody can shoot into) — let it
       // go and take the next fight rather than freezing the war on it
       if (m.losBadT > 7) { m.tgt = null; m.losBadT = 0; return; }
+      // a HELD line does not go looking for what the ground hides from it:
+      // on real dunes a crest cuts the sight line every few seconds, and
+      // holders pushing on each lost mark walked 44 m out of their line in
+      // fifteen seconds (measured, 60 v 25). They wait for it on the line.
+      if (m.home && holding(m)) { m.target.set(m.home.x, 0, m.home.z); m.slot = "fire"; return; }
       if (!navStep(m, m.target)) m.target.set(tgt.pos.x, 0, tgt.pos.z);
       m.slot = "push";
       return;
@@ -337,7 +357,13 @@ function thinkMan(m, now) {
      goal out over the lip. */
   const holds = holding(m);
   if (MAP.terrainLos && !m.hunt && (m.supp > 0.3 || m.hull || holds)) {
-    const hd = hullFor(m, tgt);
+    let hd = hullFor(m, tgt);
+    /* ...and a HELD line's fold is a fold ON that line. The search runs
+       from where the man stands, so on a field of real dunes it chained
+       crest to crest: holders walked 46 m out of their line and died in the
+       open (measured: 1 attacker killed for 18 holders). The fold is leashed
+       like every other goal a holder takes (14 m of where he formed). */
+    if (hd && holds && m.home && Math.hypot(hd.x - m.home.x, hd.z - m.home.z) > 14) hd = null;
     if (hd) {
       m.target.set(hd.x, 0, hd.z);
       m.slot = "hull";

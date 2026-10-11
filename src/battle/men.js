@@ -77,39 +77,31 @@ function uniformFor(teamId, trId, i) {
   return { torso: shade(U.torso, k), collar: shade(U.torso, k * 0.95), arms: shade(U.arms, k), legs: shade(U.legs, k),
     cap: U.cap, shoes: U.shoes, belt: U.belt };
 }
-/* A SOLDIER WEARS A HELMET, NOT A BASEBALL CAP. The rig's cap is a flat box
-   with a brim box — right for a cop, a toy on a rifleman. For the trained
-   tiers the cap box is re-shaped into a combat helmet (a low dome that comes
-   down over the brow and the ears) in the team's cover colour, and the brim
-   goes. Found by the colour the uniform just gave it, so nothing in the rig
-   has to learn a new part name. */
-const HELMET_GEO = {};
-function helmetGeometry(w) {
-  const key = Math.round(w * 1000);
-  if (HELMET_GEO[key]) return HELMET_GEO[key];
-  const ck = w / 0.66;
-  const r = w * 0.7;                 // wide enough to swallow the head box's corners
-  const g = new THREE.SphereGeometry(r, 16, 7, 0, Math.PI * 2, 0, Math.PI * 0.5);
-  g.scale(1, 0.62, 1.04);
-  g.translate(0, -0.29 * ck, 0.015 * ck);   // rim just above the brow, crown 5 cm over the skull
-  return (HELMET_GEO[key] = g);
+/* A SOLDIER WEARS KIT. What a man fights in is entities/combatkit.js's (the
+   one kit every game's soldiers wear, fitted to the body): his nation's issue
+   camouflage, a plate carrier with his role's pouches, the nation's helmet,
+   eye pro, gloves, knee pads, boots, and ID tape in the side's mark on both
+   arms. His role comes from his gun and his place in the squad (a gunner, a
+   marksman, the squad's medic, the platoon's officer, riflemen); an untrained
+   side are civilians and a street side militia in a chest rig. The kit is
+   also armour: kit.armour is what systems/armour.js resolves his hits against
+   (damage.js hurtMan). The old cap-box-into-a-dome helmet is gone. */
+function nationOf(teamId) {
+  const S = SIDES[teamId];
+  if (S && S.nation) return S.nation;
+  if (FRONT && FRONT[teamId] && FRONT[teamId].id) return FRONT[teamId].id;
+  return teamId === "red" ? "kesh" : "republic";
 }
-function helmetOn(group, capHex) {
-  const caps = [];
-  group.traverse(function (o) {
-    if (o.isMesh && o.material && o.material.color && o.material.color.getHex() === capHex) caps.push(o);
-  });
-  if (caps.length < 2) return;
-  // the taller of the two boxes is the crown, the flatter one the brim
-  const size = function (o) {
-    if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-    const b = o.geometry.boundingBox; return { w: b.max.x - b.min.x, h: b.max.y - b.min.y };
-  };
-  caps.sort(function (a, b) { return size(b).h - size(a).h; });
-  const crown = caps[0];
-  crown.geometry = helmetGeometry(size(crown).w);
-  crown.castShadow = true;
-  for (let k = 1; k < caps.length; k++) caps[k].visible = false;
+function kitUp(man, teamId, trId, wid, i) {
+  const ch = man.char, K = CBZ.combatKit;
+  if (!ch || !K) return;
+  const nation = nationOf(teamId);
+  const role = K.roleFor({ tier: trId, wid: wid, i: i, nation: nation });
+  const kit = K.wear(ch, { loadout: role, nation: nation, mark: TEAMS[teamId].color,
+    grade: trId === "pro" ? "second" : null, seed: i * 7 + (teamId === "red" ? 1 : 2) });
+  man.role = role;
+  man.armour = kit ? kit.armour : null;
+  man.kitSpeed = kit && kit.weight ? kit.weight : 1;
 }
 function makeMan(teamId, i) {
   const T = TEAMS[teamId];
@@ -119,7 +111,6 @@ function makeMan(teamId, i) {
   const w = fists ? null : (CBZ.weaponById(wid) || CBZ.weaponById("ak47"));
   const group = CBZ.studio.cast(tr.role, { uniform: uniformFor(teamId, tr.id, i), variant: i * 2 + (teamId === "red" ? 0 : 1) });
   if (!group) return null;
-  if (tr.id === "pro" || tr.id === "elite" || tr.id === "swat") helmetOn(group, UNIFORM[teamId].cap);
   const at = MAP.spawnAt(teamId, i);
   group.position.set(at.x, MAP.groundAt(at.x, at.z), at.z);
   group.rotation.y = teamId === "red" ? Math.PI / 2 : -Math.PI / 2;
@@ -161,6 +152,7 @@ function makeMan(teamId, i) {
     tier: tr.id, nerve: nerveFor(tr.id, i), supp: 0,
     routed: false, fled: false, routT: 0, routBest: 0, routStall: 0, rallyT: 0,
   };
+  kitUp(man, teamId, tr.id, wid, i);
   man.target.set(at.x, 0, at.z);
   // where he formed up: the line a HOLD order keeps him on (ORDERS below)
   man.home = { x: at.x, z: at.z };

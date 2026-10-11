@@ -164,7 +164,15 @@
   "use strict";
   const G = (typeof window !== "undefined" ? window : globalThis);
   const CBZ = (G.CBZ = G.CBZ || {});
-  const W = (CBZ.warlord = CBZ.warlord || {});
+  /* SHARED SINCE 2026-10-11 (entities/combatkit.js dresses NPC War's armies and
+     Gang City's soldiers in it): the library publishes CBZ.camo and no longer
+     CREATES CBZ.warlord on a page that is not Desert Warlord. Loaded twice
+     (the people pack, then warlord.html's own list) it registers once. */
+  if (CBZ.camo && CBZ.camo.patterns) {
+    if (CBZ.warlord && CBZ.warlord.module && !CBZ.warlord.camo) CBZ.warlord.module("camo", CBZ.camo);
+    return;
+  }
+  const W = CBZ.warlord || {};
   const THREE = G.THREE;
   CBZ.CONFIG = CBZ.CONFIG || {};
 
@@ -332,6 +340,14 @@
       colors: [0x23252C, 0x1A1C22, 0x33363F] },
     { id: "rag",       label: "Found cloth",
       colors: [0x9A8B6D, 0x6B5F47, 0xA8724A, 0x4E5A4A, 0xB9AC93, 0x75543F] },
+    // REAL ISSUE PATTERNS for the armies of entities/combatkit.js (sRGB, the
+    // cloth as photographed in daylight, a notch under print values)
+    { id: "fleck",     label: "Flecktarn",
+      colors: [0x7C7D5C, 0x5A6338, 0x343F27, 0x5E4632, 0x1E1F18] },
+    { id: "emr",       label: "EMR digital",
+      colors: [0x6F7059, 0x4E5638, 0x3B3428, 0x26261F] },
+    { id: "ocp",       label: "Scorpion OCP",
+      colors: [0x9C8F70, 0x7A7752, 0x5F5A3D, 0xB2A88A, 0x4B4330, 0x3C3322] },
     { id: "robe",      label: "Tribal robe",
       colors: [0xBFB294, 0x2B3A57, 0x8E3427, 0xD6CCB4] },
   ];
@@ -694,6 +710,44 @@
         blobLayer(cc, N, P(3), 0.20, N * 0.11, rnd, { prev: br, bias: 0.82, lobes: 4, elong: 1.3, jag: 0.65 });
         blobLayer(cc, N, P(4), 0.07, N * 0.055, rnd, { prev: br, bias: 0.85, lobes: 3, elong: 1.4, jag: 0.7 });
         wearPass(cc, N, rnd, 0.07, 0.09); weavePass(cc, N, 0.05);
+      } },
+
+    { id: "flecktarn", label: "FLECKTARN", family: "dot", palette: "fleck", metres: 0.45,
+      note: "the Bundeswehr's five colours: dense clumps of small irregular dots that run into each other, black over brown over two greens.",
+      draw: function (cc, N, P, rnd) {
+        cc.fillStyle = P(0); cc.fillRect(0, 0, N, N);
+        /* NOT A SCATTER: flecktarn's dots CLUMP and the clumps of each colour
+           sit where the colour before them is (the dark green inside the
+           olive, the brown beside it, the black last, smallest). spatter() is
+           already exactly that grammar; the radii are what make it read as
+           dots rather than blobs at 0.45 m a tile. */
+        spatter(cc, N, P(1), 70, 9, N * 0.016, rnd);
+        const g2 = [];
+        for (let i = 0; i < 40; i++) g2.push({ x: rnd() * N, y: rnd() * N, r: N * 0.08 });
+        spatter(cc, N, P(2), 64, 8, N * 0.014, rnd, g2);
+        spatter(cc, N, P(3), 46, 7, N * 0.013, rnd, g2);
+        spatter(cc, N, P(4), 40, 5, N * 0.010, rnd, g2);
+        wearPass(cc, N, rnd, 0.06, 0.06); weavePass(cc, N, 0.05);
+      } },
+
+    { id: "emr", label: "EMR DIGITAL", family: "pixel", palette: "emr", metres: 0.60,
+      note: "the Russian 'tsifra': small square pixels in four greens and browns, laid in masses.",
+      draw: function (cc, N, P, rnd) {
+        pixelField(cc, N, [P(0), P(1), P(2), P(3)], [0.36, 0.30, 0.20, 0.14],
+                   Math.max(2, Math.round(N / 72)), 0x6e41, 6, 18, 0.34);
+        wearPass(cc, N, rnd, 0.05, 0.06); weavePass(cc, N, 0.04);
+      } },
+
+    { id: "ocp", label: "OCP", family: "blob", palette: "ocp", metres: 0.75,
+      note: "the US Army's Scorpion W2: multicam's layered masses without the overhead branches, greener and lighter.",
+      draw: function (cc, N, P, rnd) {
+        cc.fillStyle = P(0); cc.fillRect(0, 0, N, N);
+        const a = blobLayer(cc, N, P(1), 0.40, N * 0.15, rnd, { lobes: 6, elong: 1.4, jag: 0.5 });
+        const b = blobLayer(cc, N, P(2), 0.24, N * 0.11, rnd, { prev: a, bias: 0.7, lobes: 5, elong: 1.5, jag: 0.55 });
+        blobLayer(cc, N, P(3), 0.16, N * 0.10, rnd, { lobes: 5, elong: 1.3, jag: 0.5 });
+        spatter(cc, N, P(4), 24, 5, N * 0.012, rnd, b);
+        spatter(cc, N, P(5), 18, 4, N * 0.009, rnd, b);
+        wearPass(cc, N, rnd, 0.07, 0.07); weavePass(cc, N, 0.05);
       } },
 
     { id: "khaki", label: "KHAKI DRILL", family: "field", palette: "khaki", metres: 0.70,
@@ -1282,6 +1336,7 @@
   API.gallery = gallery;
   API.drawMan = drawMan;
 
+  CBZ.camo = API;
   if (W.module) W.module("camo", API);
-  else { CBZ.warlord = W; W.camo = API; }
+  else if (CBZ.warlord) CBZ.warlord.camo = API;
 })();

@@ -122,28 +122,24 @@
     return REF_MASS * stature * stature * stature * Math.sqrt(breadth);
   }
 
+  /* THE ANIMAL'S OWN TABLE FIRST. weapons/ballistics.js keeps the one
+     anatomy row per species (mass kg, hide mm, skull mm), and a species
+     file's stats win over it through CBZ.unitKit.stat. When that file is on
+     the page (NPC War always; the city when the armoury is in) it is the
+     answer, so a punch, a bullet and a body shove all weigh the same
+     elephant. Without it the cube law below stands in. */
+  function anatomy(sp, a) {
+    var B = CBZ.ballistics;
+    if (!B || !B.anatomyOf || !sp || !sp.id) return null;
+    try { return B.anatomyOf(sp.id, a); } catch (e) { return null; }
+  }
+
   function animalMass(sp, a) {
     if (!sp) return REF_MASS;
     var m = num(sp.mass, 0);
     if (m > 0) return m;                       // authored wins, always
-    /* THEN THE GAME'S OTHER STATEMENT OF THE SAME NUMBER. The species' own
-       unit file (NPC War, src/units/species/<id>.js stats.mass) and the
-       weapons' anatomy table (weapons/ballistics.js SPECIES, the mass a round
-       has to go through) both already say what this animal weighs. The cube
-       below is a fallback for an animal nobody weighed, and it is badly wrong
-       at the ends: measured by tools/npcwar-arena.mjs it called an African
-       elephant and a white rhino 125 kg (scale 1, like a man) and a 45 kg
-       wolf, a 50 kg cheetah and a 30 kg dog 107-125 kg, so a fist hurt an
-       elephant like it hurt a big dog and a wolf soaked a bite like a lion. */
-    var id = sp.id;
-    if (id) {
-      if (CBZ.unitKit && CBZ.unitKit.stat) {
-        try { m = num(CBZ.unitKit.stat(id, 'mass', 0), 0); } catch (e) { m = 0; }
-        if (m > 0) return m;
-      }
-      var B = CBZ.ballistics && CBZ.ballistics.SPECIES && CBZ.ballistics.SPECIES[id];
-      if (B && num(B.mass, 0) > 0) return B.mass;
-    }
+    var an = anatomy(sp, a);
+    if (an && an.mass > 0) return an.mass;
     /* THE ROW WINS, and the live group scale is only a fallback. The obvious
        version of this preferred whatever the actor was actually built at —
        which read a gorilla as 125 kg instead of 190, because creature_combat's
@@ -154,6 +150,20 @@
     var s = num(sp.scale, 0);
     if (!(s > 0)) s = (a && a.group && a.group.scale && a.group.scale.x > 0.05) ? a.group.scale.x : 1;
     return ANIMAL_K * s * s * s;
+  }
+
+  /* HIDE, in millimetres: what a blow has to get through before it reaches
+     anything that hurts. People are 0 (skin over muscle is the reference a
+     punch is tuned on). An animal's comes from its anatomy row, else from
+     its mass the way ballistics.js derives it (a thicker animal has a thicker
+     skin: ~6 mm on a 190 kg cat, ~25 mm on a six-tonne elephant). */
+  function hideMm(a) {
+    var sp = a && a.species;
+    if (!sp || typeof sp !== 'object') return 0;
+    if (num(sp.hide, -1) >= 0) return sp.hide;
+    var an = anatomy(sp, a);
+    if (an && num(an.hide, -1) >= 0) return an.hide;
+    return Math.min(25, 1 + Math.cbrt(bodyMass(a)) * 0.9);
   }
 
   function bodyMass(a) {
@@ -190,14 +200,36 @@
      to another man, because a blow that is already enough stops scaling. Man
      on man is exactly 1.0, so nothing that exists today moves.
 
-       civilian (78) on a silverback (190, hide 1.43)   0.40
-       silverback (190) on a man (78)                   1.70
-       a man (78) on a woman (61)                       1.16
-       a man (78) on a ten-year-old (~30)               2.00 (the cap)
+     AND A HIDE IS A THRESHOLD, NOT A DIVISOR. This used to be clamped at
+     0.28 from below, and that floor was the whole bug: a hundred unarmed men
+     beat a six-tonne bull elephant to death in 47 s (measured, node sim),
+     because every punch still took 28% of a man's worth out of it. A blow
+     only hurts with the force that is left once the outside of the animal
+     has taken its share. `force` is the swing's own number (CBZ.melee's
+     res.force, ~1 a clean full punch, up to ~2 a bat's head); the hide takes
+     hide/30 of it off the top (25 mm of elephant skin: 0.83, a gorilla's
+     3 mm: 0.1, a person: nothing) and what arrives is what is left:
 
-     Clamped at both ends because neither a rounding-error tickle nor a
-     one-punch kill is what any of these fights are for. */
-  var LO = 0.28, HI = 2.0;
+       civilian (78) on a silverback (190, 3 mm)         0.37
+       a man on a lion (190, 5 mm)                       0.35
+       a man on a white rhino (2.3 t, 20 mm)             0.03
+       a man on a bull elephant (6 t, 25 mm)             0.009
+       silverback (190) on a man (78)                    1.70
+       a man (78) on a woman (61)                        1.16
+       a man (78) on a ten-year-old (~30)                2.00 (the cap)
+
+     People have no hide, so every person-on-person number above is the one
+     this file always gave. The floor left is a rounding guard, not a rule. */
+  var LO = 0.004, HI = 2.0;
+  var HIDE_F = 30;            // mm of hide that soaks one full punch
+
+  function transmit(force, hide) {
+    if (!(hide > 0)) return 1;
+    var F = force > 0 ? force : 1;
+    var t = (F - hide / HIDE_F) / F;
+    return t < 0 ? 0 : (t > 1 ? 1 : t);
+  }
+  function clampK(k) { return k < LO ? LO : (k > HI ? HI : k); }
 
   /* HOW MUCH A BODY SOAKS, with no attacker in the question at all.
 
@@ -211,21 +243,32 @@
      and the attacker cancels out exactly, leaving what the TARGET absorbs. So a
      species' authored bite stays worth precisely what it says against a person
      (1.0, by construction — no balance moves) while the same animal hitting a
-     bear, or another silverback, correctly finds a body that soaks more. */
-  function meleeAbsorb(target) {
+     bear, or another silverback, correctly finds a body that soaks more.
+
+     TEETH, CLAWS AND TUSKS GO THROUGH A HIDE that a fist bounces off: they
+     put the blow on a point. So the hide threshold is met with the biter's
+     own force, which grows with its size (sqrt of mass, x2 for the point):
+     a lion's bite (3.1) still opens an elephant (0.83 of hide, 73% through),
+     a fox's (0.55) barely marks one. With no attacker named it is a
+     man-sized biter (2.0). */
+  function meleeAbsorb(target, attacker) {
     if (!ON() || !target) return 1;
     var mt = bodyMass(target);
     if (!(mt > 0)) return 1;
-    var k = Math.pow(REF_MASS / mt, 0.6) / hardness(target);
-    return k < LO ? LO : (k > HI ? HI : k);
+    var F = attacker ? 2 * Math.sqrt(bodyMass(attacker) / REF_MASS) : 2;
+    var k = Math.pow(REF_MASS / mt, 0.6) / hardness(target) * transmit(F, hideMm(target));
+    return clampK(k);
   }
 
-  function meleeScale(attacker, target) {
+  // force: optional, the blow's own force (CBZ.melee res.force; 1 = a full
+  // clean punch). Only matters against a hide.
+  function meleeScale(attacker, target, force) {
     if (!ON() || !attacker || !target) return 1;
     var ma = bodyMass(attacker), mt = bodyMass(target);
     if (!(ma > 0) || !(mt > 0)) return 1;
-    var k = Math.pow(ma / mt, 0.6) / hardness(target);
-    return k < LO ? LO : (k > HI ? HI : k);
+    var F = (typeof force === 'number' && force > 0) ? force : 1;
+    var k = Math.pow(ma / mt, 0.6) / hardness(target) * transmit(F, hideMm(target));
+    return clampK(k);
   }
 
   // Forget a cached mass — for a body whose rig or species was swapped after
@@ -234,6 +277,7 @@
 
   CBZ.bodyMass = bodyMass;
   CBZ.bodyHardness = hardness;
+  CBZ.bodyHide = hideMm;
   CBZ.meleeScale = meleeScale;
   CBZ.meleeAbsorb = meleeAbsorb;
   CBZ.bodyMassForget = forget;
@@ -241,7 +285,7 @@
   CBZ.bodyMassAudit = function (a, b) {
     return { on: ON(), massA: a ? Math.round(bodyMass(a)) : null,
       massB: b ? Math.round(bodyMass(b)) : null,
-      hardB: b ? hardness(b) : null,
+      hardB: b ? hardness(b) : null, hideB: b ? hideMm(b) : null,
       scale: (a && b) ? Math.round(meleeScale(a, b) * 100) / 100 : null };
   };
 })();
