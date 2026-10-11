@@ -789,6 +789,28 @@
         });
       } catch (e) {}
     }
+    /* A round and a charge move the water too (WATER V3): a bullet leaves a
+       small, quick dimple and ring on the real surface (not just a sprite over
+       it), and a blast lifts a dome and throws a ring that every swimmer and
+       hull then feels, because the impulse field IS the height query. The
+       impulse pool replaces its weakest slot, so a burst of fire can only
+       ever displace other ripples, never a body's entry. */
+    if (entryOn() && typeof CBZ.waterSurfaceImpulse === "function") {
+      try {
+        if (kind === "bullet") {
+          CBZ.waterSurfaceImpulse(x, z, { amplitude: 0.035, radius: 0.22, speed: 1.6, life: 0.9 });
+        } else if (kind === "blast") {
+          const pw = +opts.power > 0 ? clamp(+opts.power, 0.15, 4) : strength;
+          const sub = clamp(1 - depth / (6 + pw * 6), 0.15, 1);      // a deep charge domes less
+          CBZ.waterSurfaceImpulse(x, z, {
+            amplitude: clamp(0.25 + pw * 0.28, 0.2, 1.25) * sub,
+            radius: clamp(1.6 + pw * 1.6, 1.2, 8.5),
+            speed: clamp(5 + pw * 2.2, 4, 13),
+            life: clamp(2.6 + pw * 0.6, 2.2, 5),
+          });
+        }
+      } catch (e) {}
+    }
 
     // ---- the calibrated vocabulary ---------------------------------------
     if (kind === "bullet") {

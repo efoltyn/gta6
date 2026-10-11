@@ -118,6 +118,14 @@
     gnp:          { dur: 0.34, hand: "lead", path: "ground", level: "ground", hip: 0.42, wind: 0.24, fwd: 0, lean: 0.30, pro: 0.10, roll: 1.10 },
     gnpElbow:     { dur: 0.46, hand: "rear", path: "groundElbow", level: "ground", hip: 0.50, wind: 0.30, fwd: 0, lean: 0.50, pro: 0.04, roll: 0, ext: -2.3 },
     hammer:       { dur: 0.42, hand: "rear", path: "hammer", level: "ground", hip: 0.30, wind: 0.12, fwd: 0, lean: 0.34, pro: 0.06, roll: -1.20 },
+    // WEAPONS IN THE HAND (systems/melee.js picks them off what is held).
+    // bat: both hands on the handle, loaded behind the rear ear, the hips and
+    // shoulders sling it flat through his head (path "swing"); slash: a blade
+    // drawn across on a short fast hook; butt: the rifle's stock driven
+    // straight out off the rear hip with the whole body behind it.
+    bat:          { dur: 0.58, hand: "rear", path: "swing", level: "head", hip: 1.05, wind: 0.50, fwd: 0.10, lean: 0.08, pro: 0.06, roll: 0.20, heel: 1, pivot: 1, ext: -0.30 },
+    slash:        { dur: 0.32, hand: "rear", path: "hook", level: "head", hip: 0.55, wind: 0.22, fwd: 0.06, lean: 0.04, pro: 0.06, roll: 0.60, ext: -0.35 },
+    butt:         { dur: 0.44, hand: "rear", path: "straight", level: "head", hip: 0.62, wind: 0.18, fwd: 0.16, lean: 0.14, pro: 0.14, roll: 0, heel: 1 },
   };
   // legacy spellings other files write into punchKind
   function kindKey(k) {
@@ -681,6 +689,20 @@
         const arc = Math.sin(Math.PI * d);
         W.y += 0.24 * arc; W.x += sx * 0.08 * arc;               // loops over the top of his guard
         P.set(sx * 0.8, 0.7, -0.3);
+        break;
+      }
+      case "swing": {
+        // two hands on the handle: cocked by the rear ear, then the hips and
+        // shoulders sling it FLAT through the line; the lead hand rides the
+        // handle under the rear one the whole way
+        _t.set(sx * 0.36, D.shY + 0.12, -0.16);
+        _C.copy(W).lerp(_t, chamber * (1 - d));
+        W.copy(_C).lerp(aim, d);
+        const sweep = Math.sin(Math.PI * d);
+        W.x += sx * 0.34 * sweep; W.z -= 0.12 * sweep;
+        P.set(sx * 0.9, 0.30 * chamber + 0.20 * d, -0.40);
+        const O = side === "L" ? WR : WL;
+        O.copy(W); O.y -= 0.07; O.x -= sx * 0.04; O.z -= 0.04;
         break;
       }
       case "elbow": {
