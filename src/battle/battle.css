@@ -1,0 +1,305 @@
+/* src/battle/battle.css — NPC War's page styles (moved out of games/battle.html). */
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#0b0d10;overflow:hidden;
+    font:600 15px/1.35 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#f2efe8;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  canvas{display:block}
+  button{font:inherit;color:inherit}
+
+  /* ---- the war room (setup) ----
+     A front end, not a form. The page behind it is dark and empty: no WebGL
+     exists yet while this is up, so everything here is CSS. The backdrop is a
+     stack: a readability wash, then the in-engine battle photo
+     (assets/npcwar/warroom.jpg) when it exists, then a CSS dusk over dune
+     ridges that stands in for it when it does not. */
+  #menu{--disp:"Bebas Neue","Oswald",Impact,"Arial Narrow Bold","Arial Narrow",sans-serif;
+    --red:#ff5a3d;--blue:#3fa8ff;--gold:#ffb35c;--ink:#08090c;--line:rgba(255,255,255,.13);
+    position:fixed;inset:0;z-index:60;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:0 16px;background-color:var(--ink);
+    background-image:
+      linear-gradient(180deg,rgba(8,9,12,.25) 0%,rgba(8,9,12,.5) 34%,rgba(8,9,12,.9) 62%,#08090c 88%),
+      url(../../assets/npcwar/warroom.jpg),
+      radial-gradient(70% 22% at 22% 58%,#2b1a10 58%,transparent 59%),
+      radial-gradient(90% 26% at 86% 62%,#1f130c 58%,transparent 59%),
+      radial-gradient(60% 34% at 62% 30%,rgba(255,168,92,.55),transparent 70%),
+      linear-gradient(180deg,#141722 0%,#3a2a2c 22%,#9a5a36 44%,#d98a4b 52%,#3a2416 53%,#0d0907 80%);
+    background-size:cover,cover,auto,auto,auto,auto;
+    background-position:center,center 32%,0 0,0 0,0 0,0 0;
+    background-repeat:no-repeat}
+  #menu .in{max-width:980px;margin:0 auto;padding:0 0 28px}
+  #menu .hero{padding:calc(9vh + env(safe-area-inset-top,0px)) 0 22px;text-align:center}
+  #menu .kick{font:400 14px/1 var(--disp);letter-spacing:.42em;color:var(--gold);opacity:.9}
+  #menu h1{margin:8px 0 6px;font:400 clamp(76px,19vw,150px)/.82 var(--disp);letter-spacing:.02em;
+    text-shadow:0 6px 40px rgba(0,0,0,.55)}
+  #menu h1 em{font-style:normal;color:#ff6a3d}
+  #menu .sub{margin:0 auto;max-width:440px;font-size:14px;font-weight:500;opacity:.72;letter-spacing:.02em}
+
+  #menu section{margin-top:26px}
+  .lbl{display:flex;align-items:baseline;gap:10px;margin:0 0 12px;font:400 22px/1 var(--disp);letter-spacing:.12em}
+  .lbl b{font-weight:400;color:var(--gold);font-size:15px;letter-spacing:.1em}
+  .lbl i{font:500 12px/1.2 ui-sans-serif,system-ui,sans-serif;font-style:normal;opacity:.5;letter-spacing:.04em;margin-left:auto;text-align:right}
+
+  /* THE QUESTIONS: poster cards. A swipe row on a phone, a wall on a desk. */
+  .mus{display:grid;grid-auto-flow:column;grid-auto-columns:min(74vw,280px);gap:12px;overflow-x:auto;
+    scroll-snap-type:x mandatory;margin:0 -16px;padding:2px 16px 10px;scrollbar-width:none}
+  .mus::-webkit-scrollbar{display:none}
+  @media (min-width:760px){.mus{grid-auto-flow:row;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+    grid-auto-columns:auto;overflow:visible;margin:0;padding:0}}
+  .mu{appearance:none;position:relative;display:flex;flex-direction:column;justify-content:flex-end;min-height:150px;
+    padding:14px 14px 16px;border-radius:16px;border:1px solid var(--line);text-align:left;cursor:pointer;
+    scroll-snap-align:start;overflow:hidden;background:#15171c;transition:transform .15s,border-color .15s,box-shadow .15s}
+  .mu::before{content:"";position:absolute;inset:0;z-index:0;background:var(--art)}
+  .mu::after{content:"";position:absolute;inset:0;z-index:0;background:linear-gradient(180deg,rgba(8,9,12,.05),rgba(8,9,12,.78) 70%)}
+  .mu>*{position:relative;z-index:1}
+  .mu .mg{position:absolute;top:12px;left:14px;font:600 10px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.2em;
+    padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.14)}
+  .mu .mq{font:400 27px/.98 var(--disp);letter-spacing:.03em}
+  .mu .mq em{font-style:normal;color:var(--gold);padding:0 .12em}
+  .mu .ms{margin-top:6px;font-size:12px;font-weight:500;opacity:.72}
+  .mu .mb{position:absolute;left:0;right:0;bottom:0;height:3px;display:flex}
+  .mu .mb s{flex:1}
+  .mu .mb s:first-child{background:var(--red)}
+  .mu .mb s:last-child{background:var(--blue)}
+  .mu:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.3)}
+  .mu.on{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold),0 10px 30px rgba(255,179,92,.18)}
+  .mu.on .mg{background:var(--gold);color:#1a1006;border-color:var(--gold)}
+
+  /* the art each ground carries, on its own card and on every question fought there */
+  .art-dunes{--art:radial-gradient(120% 55% at 28% 112%,#a86a36 58%,transparent 59%),
+    radial-gradient(110% 50% at 88% 118%,#7d4d26 58%,transparent 59%),
+    radial-gradient(90% 60% at 70% -10%,rgba(255,226,170,.55),transparent 60%),
+    linear-gradient(180deg,#e7a468 0%,#c97d44 52%,#9a5c2e 100%)}
+  .art-water{--art:radial-gradient(120% 45% at 50% -8%,rgba(150,215,255,.35),transparent 70%),
+    repeating-linear-gradient(176deg,rgba(255,255,255,.06) 0 2px,transparent 2px 17px),
+    linear-gradient(180deg,#1f6590 0%,#0f3a5e 50%,#061a2c 100%)}
+  .art-arena{--art:repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 1px,transparent 1px 34px),
+    repeating-linear-gradient(0deg,rgba(255,255,255,.04) 0 1px,transparent 1px 34px),
+    linear-gradient(180deg,#4a4f57 0%,#2b2f35 100%)}
+  .art-venue{--art:radial-gradient(90% 70% at 80% -10%,rgba(255,190,120,.18),transparent 60%),
+    linear-gradient(180deg,#262b33 0%,#16191e 100%)}
+
+  /* THE GROUND */
+  .maps{display:grid;gap:12px}
+  .maps .gfeat{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .maps button{appearance:none;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;
+    min-height:64px;padding:14px;border-radius:16px;border:1px solid var(--line);background:#15171c;
+    text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+  .maps button::before{content:"";position:absolute;inset:0;background:var(--art)}
+  .maps button::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 20%,rgba(8,9,12,.72))}
+  .maps button>*{position:relative;z-index:1}
+  .maps button b{display:block;font:400 22px/1 var(--disp);letter-spacing:.08em}
+  .maps button i{display:block;font-style:normal;font-size:12px;font-weight:500;opacity:.72;margin-top:5px}
+  .maps .gfeat button{min-height:clamp(128px,24vw,190px)}
+  .maps .gfeat button b{font-size:clamp(26px,5vw,36px)}
+  .maps button.on{border-color:var(--gold);box-shadow:0 0 0 2px var(--gold)}
+  .maps button.on b::after{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;
+    background:var(--gold);margin-left:10px;vertical-align:middle;transform:translateY(-3px)}
+  .maps details{border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.025)}
+  .maps summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:52px;padding:0 16px;cursor:pointer;
+    font:400 19px/1 var(--disp);letter-spacing:.12em}
+  .maps summary::-webkit-details-marker{display:none}
+  .maps summary::after{content:"+";margin-left:auto;font:300 24px/1 ui-sans-serif,system-ui,sans-serif;opacity:.6}
+  .maps details[open] summary::after{content:"\2212"}
+  .maps summary i{font:500 12px/1 ui-sans-serif,system-ui,sans-serif;font-style:normal;opacity:.5;letter-spacing:.02em}
+  .maps .gmore{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;padding:0 12px 12px}
+  .maps .gmore button{min-height:78px}
+  .maps .gmore button b{font-size:18px}
+
+  /* THE ARMIES: two facing panels and a V between them */
+  .teams{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:stretch}
+  .teams .vs{align-self:center;font:400 44px/1 var(--disp);color:var(--gold);text-shadow:0 0 24px rgba(255,179,92,.35)}
+  @media (max-width:620px){.teams{grid-template-columns:1fr}.teams .vs{justify-self:center;margin:-4px 0;font-size:36px}}
+  .team{border:1px solid var(--line);border-radius:18px;padding:16px;background:rgba(14,16,20,.72);
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+  /* a side's colour is its identity's (its nation's mark): teams.js sets
+     --sc-red / --sc-blue ("r,g,b") on the root; the slot defaults stand until then */
+  .team.red,.callrow .cr,#end .cr,#end h2.red{--sc:var(--sc-red,255,90,61)}
+  .team.blue,.callrow .cb,#end .cb,#end h2.blue{--sc:var(--sc-blue,63,168,255)}
+  .team.red,.team.blue{background:linear-gradient(180deg,rgba(var(--sc),.16),rgba(14,16,20,.72) 42%);border-color:rgba(var(--sc),.38)}
+  .team .th{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .team h3{margin:0;font:400 clamp(20px,5.4vw,30px)/1.05 var(--disp);letter-spacing:.08em}
+  .team.red h3,.team.blue h3{color:rgb(var(--sc));filter:brightness(1.25)}
+  .team .kind{font-size:12px;font-weight:700;letter-spacing:.1em;opacity:.7;text-align:right;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .team .cnt{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+  .team .cnt button{appearance:none;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.07);
+    border-radius:14px;width:54px;height:60px;font:300 28px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;flex:none}
+  .team .cnt button:active{background:rgba(255,255,255,.16)}
+  .team input[type=number]{appearance:none;-moz-appearance:textfield;width:100%;min-width:0;height:60px;border-radius:14px;
+    border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.35);color:inherit;
+    font:400 44px/1 var(--disp);text-align:center;letter-spacing:.04em;padding:4px 0 0;
+    -webkit-user-select:text;user-select:text}
+  .team input::-webkit-inner-spin-button,.team input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+  .team .f{display:block;margin-bottom:8px;transition:opacity .15s}
+  .team .f>span{display:block;font-size:10px;font-weight:700;letter-spacing:.2em;opacity:.5;margin:0 0 4px 2px}
+  .team .f.off{opacity:.32}
+  .team select{appearance:none;-webkit-appearance:none;width:100%;height:46px;border-radius:12px;
+    border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.35) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23f2efe8' stroke-width='1.8' stroke-opacity='.6'/%3E%3C/svg%3E") right 14px center/12px 8px no-repeat;
+    color:inherit;font:700 14px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.06em;padding:0 36px 0 12px;cursor:pointer}
+  .team select:disabled{cursor:default}
+  .team select:focus-visible,.team input:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+  .team select option,.team select optgroup{background:#15171c;color:#f2efe8}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+  .presets>span{font-size:10px;font-weight:700;letter-spacing:.2em;opacity:.5;margin-right:4px}
+  .presets button{appearance:none;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);
+    border-radius:999px;min-height:44px;padding:0 16px;font:400 18px/1 var(--disp);letter-spacing:.08em;cursor:pointer}
+  .presets button:active,.presets button.on{border-color:var(--gold);color:var(--gold)}
+
+  /* THE CALL */
+  .callrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .callrow button{appearance:none;cursor:pointer;min-height:84px;border-radius:18px;padding:12px 14px;text-align:center;
+    border:1px solid var(--line);background:rgba(14,16,20,.7);transition:background .15s,border-color .15s,transform .1s}
+  .callrow button b{display:block;font:400 clamp(18px,5vw,30px)/1.05 var(--disp);letter-spacing:.06em}
+  .callrow button i{display:block;font-style:normal;font-size:12px;font-weight:600;opacity:.6;margin-top:4px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .callrow .cr b,.callrow .cb b{color:rgb(var(--sc));filter:brightness(1.25)}
+  .callrow .cr.on,.callrow .cb.on{background:linear-gradient(180deg,rgba(var(--sc),.45),rgba(var(--sc),.2));border-color:rgb(var(--sc))}
+  .callrow .on b{color:#fff}
+  .callrow button:active{transform:scale(.98)}
+  #streak{margin-top:12px;min-height:14px;white-space:pre;text-align:center;font:400 16px/1 var(--disp);letter-spacing:.2em;color:var(--gold);opacity:.9}
+
+  /* START: docked to the bottom of the screen while you scroll the choices */
+  .dock{position:sticky;bottom:0;z-index:2;margin:26px -16px 0;
+    padding:26px 16px calc(14px + env(safe-area-inset-bottom,0px));
+    background:linear-gradient(180deg,rgba(8,9,12,0),rgba(8,9,12,.92) 34%,#08090c)}
+  .dock .din{max-width:620px;margin:0 auto}
+  #start{appearance:none;border:0;cursor:pointer;display:block;width:100%;min-height:68px;padding:6px 20px 0;border-radius:18px;
+    background:linear-gradient(180deg,#ffc56e,#ff8a3d);color:#1a0d04;font:400 34px/1 var(--disp);letter-spacing:.16em;
+    box-shadow:0 6px 0 #b4531c,0 18px 40px rgba(255,138,61,.28);transition:transform .08s,box-shadow .08s,opacity .2s}
+  #start:hover{filter:brightness(1.06)}
+  #start:active{transform:translateY(4px);box-shadow:0 2px 0 #b4531c,0 8px 20px rgba(255,138,61,.2)}
+  #menu:not(.ready) #start{opacity:.55;cursor:progress}
+  #bootst{margin-top:12px;font-size:10px;font-weight:700;letter-spacing:.24em;opacity:.45;text-align:center;min-height:13px}
+  #boottrack{margin:7px auto 0;max-width:320px;height:3px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden}
+  #bootbar{height:100%;width:0;border-radius:3px;background:linear-gradient(90deg,#ff8a3d,#ffc56e);transition:width .18s linear}
+  #boottrack.done{opacity:0;transition:opacity .5s}
+
+  /* ---- battle chrome ----
+     The armies ARE the scoreboard: no counts, no clock, no ticker, no key
+     legend. What is left is the four things a watcher actually reaches for
+     (leave, pause, speed, camera), wordless, and they fade out of the picture
+     when the mouse is still. */
+  #ctl{position:fixed;left:50%;bottom:calc(12px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+    z-index:42;display:none;gap:6px;align-items:center;transition:opacity .6s}
+  #ctl.idle{opacity:0;pointer-events:none}
+  body.coarse #ctl.idle{opacity:.38;pointer-events:auto}
+  #ctl button{appearance:none;display:grid;place-items:center;border:1px solid rgba(255,255,255,.18);
+    background:rgba(12,14,17,.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+    border-radius:50%;width:44px;height:44px;padding:0;cursor:pointer;
+    font:700 13px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.02em}
+  #ctl button svg{width:18px;height:18px;fill:currentColor}
+  #ctl button.on{border-color:var(--cc,#ff7a45);box-shadow:inset 0 0 0 1px var(--cc,#ff7a45)}
+  #ctl #cBack{margin-right:10px;opacity:.7}
+  body.coarse #ctl button{width:52px;height:52px}
+  /* the bench is the one mode whose answer is a sentence */
+  #banner{position:fixed;left:50%;top:26%;transform:translateX(-50%);z-index:44;pointer-events:none;
+    font:400 clamp(34px,7.4vw,68px)/1 "Bebas Neue","Oswald",Impact,ui-sans-serif,system-ui,sans-serif;
+    letter-spacing:.06em;text-align:center;opacity:0;transition:opacity .45s,transform .6s cubic-bezier(.2,.8,.2,1);
+    text-shadow:0 3px 18px rgba(0,0,0,.75),0 0 2px rgba(0,0,0,.6);white-space:nowrap}
+  #banner.on{opacity:.97;transform:translateX(-50%) scale(1.02)}
+  #banner small{display:block;font:800 12px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.34em;opacity:.75;margin-top:10px}
+  #nflash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55}
+
+  /* ---- THE RESULT: the winner's name over the field, then the way back in.
+     The field stays visible behind it; the buttons arrive a beat later so the
+     verdict lands on its own first. ---- */
+  #end{position:fixed;inset:0;display:none;place-items:center;z-index:62;overflow:auto;
+    background:radial-gradient(90% 70% at 50% 45%,rgba(8,9,12,.25),rgba(6,7,9,.7));
+    padding:calc(22px + env(safe-area-inset-top,0px)) 16px calc(22px + env(safe-area-inset-bottom,0px));
+    animation:endIn .6s ease-out}
+  @keyframes endIn{from{opacity:0}to{opacity:1}}
+  #end .in{text-align:center;max-width:420px;width:100%}
+  #end h2{margin:0 0 8px;font:400 clamp(52px,14vw,104px)/.9 "Bebas Neue","Oswald",Impact,ui-sans-serif,system-ui,sans-serif;
+    letter-spacing:.03em;text-shadow:0 4px 30px rgba(0,0,0,.7)}
+  #end h2.red,#end h2.blue{color:rgb(var(--sc));filter:brightness(1.2);font-size:clamp(40px,10vw,96px)}
+  #endSeries{min-height:16px;font-size:12px;letter-spacing:.2em;font-weight:800;opacity:.8;margin-bottom:8px;white-space:pre-wrap}
+  #endCall{min-height:18px;font-size:13px;letter-spacing:.22em;font-weight:800;margin-bottom:18px}
+  #endCall.right{color:#8fe3a0} #endCall.wrong{color:#ff9a7a}
+  #end .acts{opacity:0;animation:endIn .5s ease-out 1.4s forwards}
+  #end .nl{font-size:10px;letter-spacing:.28em;opacity:.55;margin-bottom:8px}
+  #end .calls{display:flex;gap:10px;justify-content:center;margin-bottom:12px}
+  #end .calls button{flex:0 1 200px;padding:11px 10px;border-radius:12px;white-space:normal;line-height:1.15}
+  #end .calls button.cr.on,#end .calls button.cb.on{background:rgba(var(--sc),.3);border-color:rgb(var(--sc))}
+  #end .row{display:flex;gap:10px;margin-top:10px}
+  #end button{appearance:none;border:1px solid rgba(255,255,255,.25);background:rgba(8,9,12,.4);color:inherit;
+    flex:1;padding:15px 10px;border-radius:999px;font:700 14px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.14em;cursor:pointer}
+  #end button.big{background:#4fbf6a;border:0;color:#07130b}
+  #end button.big2{background:rgba(255,208,138,.14);border-color:rgba(255,208,138,.6);color:#ffd08a}
+  #end .row.small button{flex:0 1 auto;padding:11px 22px;font-size:12px;opacity:.75;margin:0 auto}
+  #end button.x{position:fixed;right:calc(14px + env(safe-area-inset-right,0px));top:calc(14px + env(safe-area-inset-top,0px));
+    flex:none;width:44px;height:44px;padding:0;display:grid;place-items:center;font:300 26px/1 ui-sans-serif,system-ui,sans-serif}
+  .hubLink{position:absolute;left:calc(16px + env(safe-area-inset-left,0px));top:calc(14px + env(safe-area-inset-top,0px));
+    z-index:3;display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border-radius:999px;
+    background:rgba(8,10,12,.45);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(6px);
+    color:#f2efe8;text-decoration:none;font:800 11px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.2em}
+  .hubLink:hover{background:rgba(255,255,255,.1)}
+
+  /* ---- THE MAN ON THE LENS: two thin bars under the picture, in his
+     colour. Blood only once he is hit; the magazine only if he carries one,
+     draining with every shot and refilling orange through a reload. No
+     name, no gun label, no tally. Gone the moment the lens leaves him. ---- */
+  #who{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(74px + env(safe-area-inset-bottom,0px));
+    z-index:41;pointer-events:none;width:132px;opacity:0;transition:opacity .4s}
+  #who.on{opacity:1}
+  #who i{display:block;height:4px;border-radius:2px;background:rgba(0,0,0,.45);margin-top:4px;overflow:hidden;
+    box-shadow:0 0 0 1px rgba(255,255,255,.1)}
+  #who i s{display:block;height:100%;transition:width .1s linear}
+  #whoHp s{background:var(--tc,#4fbf6a)}
+  #whoHp.low s{background:#ff5a3d}
+  #whoMagT s{background:#e8dcc0}
+  #whoMagT.rl s{background:#ff9a3d}
+
+  /* ---- A RIFLE IN YOUR HANDS: the one mark on the glass while you are a
+     soldier. Nothing else: your blood and your magazine are the two bars above. */
+  #xhair{position:fixed;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;z-index:40;
+    pointer-events:none;opacity:0;transition:opacity .2s}
+  #xhair.on{opacity:.85}
+  #xhair::before,#xhair::after{content:"";position:absolute;background:#fff;box-shadow:0 0 2px #000}
+  #xhair::before{left:10px;top:2px;width:2px;height:18px;clip-path:polygon(0 0,100% 0,100% 35%,0 35%,0 65%,100% 65%,100% 100%,0 100%)}
+  #xhair::after{top:10px;left:2px;height:2px;width:18px;clip-path:polygon(0 0,35% 0,35% 100%,0 100%,0 0,65% 0,100% 0,100% 100%,65% 100%)}
+  #ctl button .n{position:absolute;right:-3px;top:-3px;min-width:16px;height:16px;border-radius:8px;padding:0 4px;
+    background:#ffb35c;color:#1a0d04;font:800 10px/16px ui-sans-serif,system-ui,sans-serif;text-align:center}
+  #ctl button{position:relative}
+  #ctl button.hide{display:none}
+
+  /* ---- THE FRONT (city/frontline.js opens this page over Gang City): no war
+     room, no question, no call. Two flags and the road in. ---- */
+  body.front #menu section,body.front #menu .hubLink,body.front #start{display:none}
+  body.front #menu .dock{position:fixed;left:0;right:0;bottom:22vh;margin:0;background:none}
+  .flagimg{height:.72em;width:auto;vertical-align:.02em;border-radius:2px;box-shadow:0 1px 6px rgba(0,0,0,.55)}
+  #end .tally{display:flex;justify-content:center;gap:22px;margin:0 0 16px;font:800 12px/1.3 ui-sans-serif,system-ui,sans-serif;letter-spacing:.18em;opacity:.85}
+  #end .tally img{height:14px;vertical-align:-2px;margin-right:7px;border-radius:2px}
+  .art-snow{--art:radial-gradient(120% 55% at 28% 112%,#dfe6ec 58%,transparent 59%),
+    radial-gradient(110% 50% at 88% 118%,#c9d3dc 58%,transparent 59%),
+    linear-gradient(180deg,#9fb2c6 0%,#dbe3ea 60%,#b9c6d2 100%)}
+  .art-grass{--art:radial-gradient(120% 55% at 28% 112%,#6f8a45 58%,transparent 59%),
+    radial-gradient(110% 50% at 88% 118%,#566d33 58%,transparent 59%),
+    linear-gradient(180deg,#8fb0cf 0%,#a9bf8a 55%,#5d7438 100%)}
+/* ============================================================
+   SPEECH OVER THE SPEAKER'S HEAD (#speech .say, systems/speech.js)
+   The only place a spoken line appears, in every game. One short line per
+   speaker, pinned above his head by projecting the world point through the
+   live camera each frame; scale and --a (distance/occlusion fade) are set
+   there. No box, no name, no stroke, no offset shadow: the zero-offset ink
+   halo, so the words can never render as two layers.
+============================================================ */
+#speech{ position:fixed; inset:0; pointer-events:none; z-index:27; overflow:hidden; }
+#speech .say{
+  position:absolute; left:0; top:0;
+  transform-origin:50% 100%;
+  max-width:min(46vw, 300px); width:max-content;
+  font-family:Fredoka, "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+  font-size:clamp(14px, 1.9vh, 19px);
+  font-weight:600; line-height:1.12; letter-spacing:.005em;
+  color:#fff; text-align:center; text-wrap:balance; white-space:normal;
+  text-shadow:var(--ink-shadow, 0 0 2px #000, 0 0 5px rgba(0,0,0,.7));
+  opacity:var(--a, 1);
+  transition:opacity .3s ease;
+  will-change:transform;
+}
+#speech .say.out{ opacity:0; }
+#speech .say.edge{ font-size:clamp(13px, 1.7vh, 17px); }
+/* a voice on the phone: smaller, cooler, by the hand */
+#speech .say.phone{ color:#dff3ff; font-weight:500; font-style:italic; max-width:min(40vw, 260px); }
+body.full-map-open #speech, body.sim-view #speech{ display:none !important; }

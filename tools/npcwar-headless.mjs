@@ -40,8 +40,20 @@ const only = process.argv[2] ? +process.argv[2] : 0;
 let fails = 0, passes = 0;
 function check(ok, msg) { if (ok) { passes++; console.log("  PASS " + msg); } else { fails++; console.log("  FAIL " + msg); } }
 
+/* The page is src/battle/*.js, loaded in the order games/battle.html lists
+   them (one shared script scope, exactly like the browser: each file runs as
+   its own script in the same context). Any inline <script> blocks still on
+   the page run where they sit. */
 const HTML = fs.readFileSync(path.join(ROOT, "games/battle.html"), "utf8");
-const INLINE = (HTML.match(/<script>([\s\S]*?)<\/script>/g) || []).map((b) => b.replace(/^<script>|<\/script>$/g, "")).join("\n;\n");
+const PAGE_SCRIPTS = [];
+for (const m of HTML.matchAll(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/script>/g)) {
+  const src = m[1];
+  if (src) {
+    const rel = src.replace(/\?.*$/, "").replace(/^\.\.\//, "");
+    if (!/^src\/(battle|units)\//.test(rel)) continue;  // the studio is stubbed below
+    PAGE_SCRIPTS.push({ name: rel, code: fs.readFileSync(path.join(ROOT, rel), "utf8") });
+  } else if (m[2].trim()) PAGE_SCRIPTS.push({ name: "battle.inline.js", code: m[2] });
+}
 const THREE_SRC = fs.readFileSync(path.join(ROOT, "src/vendor/three.r128.min.js"), "utf8");
 
 // ------------------------------------------------------------------ a fake DOM
@@ -89,7 +101,15 @@ function mkDoc() {
   doc.pointerLockElement = null;
   doc.exitPointerLock = () => {};
   // the armoury's script tags "load" at once: the real files were run above
-  doc._onScript = (c) => { if (c.onload) Promise.resolve().then(() => c.onload()); };
+  // ...except a UNIT file (units/unitkit.js tags it data-unit): those are the
+  // species/vehicle files a roster asked for, and they run for real
+  doc._onScript = (c) => {
+    if (c.dataset && c.dataset.unit && doc._runUnit) {
+      try { doc._runUnit(String(c.src).replace(/\?.*$/, "").replace(/^(\.\.\/)?src\//, "")); }
+      catch (e) { console.log("  (unit file " + c.src + " threw: " + e.message + ")"); }
+    }
+    if (c.onload) Promise.resolve().then(() => c.onload());
+  };
   return doc;
 }
 
@@ -121,6 +141,10 @@ function boot(url, opts) {
   sb.window = sb; sb.self = sb; sb.globalThis = sb;
   sb.parent = { postMessage: (m) => posted.push(m) };
   vm.createContext(sb);
+  doc._runUnit = (rel) => {
+    const f = path.join(ROOT, "src", rel);
+    if (fs.existsSync(f)) vm.runInContext(fs.readFileSync(f, "utf8"), sb, { filename: "src/" + rel });
+  };
   vm.runInContext(THREE_SRC, sb, { filename: "three.r128.min.js" });
   const THREE = sb.THREE;
   // the engine files the armoury would have loaded, for real
@@ -182,7 +206,7 @@ function boot(url, opts) {
     stick: (o) => { sb._sticks = (sb._sticks || 0) + 1; }, release() {},
   };
   // run the page
-  try { vm.runInContext(INLINE, sb, { filename: "battle.inline.js" }); }
+  try { for (const s of PAGE_SCRIPTS) vm.runInContext(s.code, sb, { filename: s.name }); }
   catch (e) { return { err: e }; }
   return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE };
 }
@@ -410,6 +434,161 @@ scenario(7, "holding the line: the exchange, held v met", async () => {
     if (out["1"] && out["0"] && out["1"].xr >= out["0"].xr * 0.9) better++;
   }
   check(better >= CASES.length - 1, "holding trades at least as well as meeting them in the open (" + better + "/" + CASES.length + ")");
+});
+
+/* 8  VEHICLES. A tank is a unit on a side (src/battle/vehicles.js): its file
+   (src/units/vehicles/m1_abrams.js) and city/mil_armor.js load at START, the
+   side's men take its seats, it drives, its guns land through the page's own
+   paths, rifle ball does nothing to its front plate, and the war ends.
+   The node world's studio.boom is a stub; here it is given the shape of the
+   real one (modecaps blastWorldActors: everyone inside 0.55 R takes the
+   blast, with `by` and `fromX/Z`) so a high-explosive round can kill. */
+function realBoom(W) {
+  W.CBZ.studio.boom = function (p, o) {
+    const R = (o && o.radius) || 6, LR = R * 0.55;
+    const list = W.sb.__battle.roster().slice();
+    for (const a of list) {
+      if (a.dead || a.fled || (a.group && a.group.visible === false)) continue;
+      if (Math.hypot(a.pos.x - p.x, a.pos.z - p.z) > LR || Math.abs(a.pos.y - p.y) > LR + 3) continue;
+      W.sb.hurtMan(a, 1e6, { fromX: p.x, fromZ: p.z, by: (o && o.by) || null, cause: "explosion" });
+    }
+  };
+}
+scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawlers", async () => {
+  {
+    const W = boot("?a=m1_abrams*1,men*1&b=men&n=2v30&arena=dunes&bw=ak47&bt=pro&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 2);
+    const R = W.sb.__battle.roster();
+    const tank = R.find((m) => m.vehicle && m.unitId === "m1_abrams");
+    check(!!tank, "the Abrams is on the field (" + R.filter((m) => m.vehicle).length + " vehicle, " + R.filter((m) => !m.vehicle && m.team === "red").length + " red men on foot)");
+    if (!tank) return;
+    check(!!tank.group && !tank.group.userData.standIn, "built by city/mil_armor.js, not a stand-in (rig " + !!tank.rig + ")");
+    const crew = tank.seats.filter((s) => s.crew && s.man).map((s) => s.seat);
+    check(crew.length === 1 && crew[0] === "driver", "the side's one man is in the driver's seat (" + JSON.stringify(crew) + ")");
+    const blue = R.find((m) => m.team === "blue" && !m.dead);
+    const hp0 = tank.hp;
+    const sx = blue.pos.x, sz = blue.pos.z;
+    blue.pos.x = tank.pos.x + Math.sin(tank.h) * 60; blue.pos.z = tank.pos.z + Math.cos(tank.h) * 60;
+    for (let k = 0; k < 20; k++) W.sb.hurtMan(tank, 40, { by: blue });
+    blue.pos.x = sx; blue.pos.z = sz;
+    check(tank.hp === hp0 && !tank.dead, "twenty AK hits on the front plate do nothing (hp " + hp0 + " -> " + tank.hp + ", last " + JSON.stringify(tank.lastHit && { zone: tank.lastHit.zone, pen: tank.lastHit.pen }) + ")");
+    const p0 = { x: tank.pos.x, z: tank.pos.z };
+    let moved = 0;
+    const a = run(W, 300, () => { moved = Math.max(moved, Math.hypot(tank.pos.x - p0.x, tank.pos.z - p0.z)); return true; });
+    // one man drives OR fights: with the enemy already inside its standoff
+    // he stops and shoots, so the distance is reported, not held
+    console.log("    (one crewman: drove " + moved.toFixed(1) + " m, fought from where he stood)");
+    check(tank.shotsF > 0, "its guns fired (" + tank.shotsF + " rounds, " + tank.hitsF + " hits; " + tank.wpn.map((w) => w.w.id + " " + ((w.w.ammo || 0) - w.ammo)).join(", ") + ")");
+    check(tank.kills > 0, "and killed (" + tank.kills + ")");
+    check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ", red " + a.red + " blue " + a.blue + ")");
+  }
+  {
+    /* the gorilla half of this is not buildable here: the node world has no
+       bestiary (CBZ.WILDLIFE_SPECIES is empty, so no animal spawns at all).
+       Sixty bare-handed men are the same question to a tank: something that
+       wants to close to arm's length against armour it cannot hurt. */
+    const W = boot("?a=m1_abrams*3&b=men&n=3v60&bw=fists&bt=thug&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 2);
+    const tanks = W.sb.__battle.roster().filter((m) => m.vehicle);
+    check(tanks.length === 3 && tanks.every((t) => t.seats.filter((s) => s.crew && s.implicit).length === 4),
+      "three Abrams, each with its full crew of four (nobody on the side to take the seats)");
+    const p0 = tanks.map((t) => ({ x: t.pos.x, z: t.pos.z }));
+    let moved = 0;
+    const a = run(W, 300, () => { tanks.forEach((t, j) => { moved = Math.max(moved, Math.hypot(t.pos.x - p0[j].x, t.pos.z - p0[j].z)); }); return true; });
+    check(moved > 5, "a crewed tank drives (" + moved.toFixed(1) + " m)");
+    const k = tanks.reduce((s, t) => s + t.kills, 0);
+    check(k > 0, "the tanks killed the mob (" + k + ")");
+    check(tanks.every((t) => !t.dead), "fists do not go through armour (tanks standing: " + tanks.filter((t) => !t.dead).length + ")");
+    check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ")");
+  }
+  {
+    // a carrier: 3 crew + 6 riflemen in the back, against a tank and 10 men
+    const W = boot("?a=bradley_ifv*1,men*9&b=m1_abrams*1,men*10&arena=dunes&rw=ak47&bw=ak47&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 2);
+    const ifv = W.sb.__battle.roster().find((m) => m.unitId === "bradley_ifv");
+    check(!!ifv && ifv.seats.filter((s) => !s.crew && s.man).length === 6 && ifv.seats.filter((s) => s.crew && s.man).length === 3,
+      "the Bradley carries its crew of three and six riflemen");
+    let out = 0;
+    const a = run(W, 300, () => { if (ifv && ifv.dismounted) out = 1; return true; });
+    check(out === 1, "the riflemen got out (" + (ifv && ifv.dismounted ? "dismounted" : "never") + ")");
+    check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ")");
+  }
+  {
+    const W = boot("?a=ah64_apache*1&b=men&n=1v30&arena=dunes&bw=ak47&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 2);
+    const h = W.sb.__battle.roster().find((m) => m.unitId === "ah64_apache");
+    check(!!h && h.air && h.pos.y > 20, "the Apache is in the air (" + (h ? Math.round(h.pos.y) : "-") + " m)");
+    const a = run(W, 300);
+    check(h && h.kills > 0, "and it killed from there (" + (h && h.kills) + ")");
+    check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ")");
+  }
+});
+
+
+/* SIDES, SERIES AND THE URL MATCHUP (docs/npcwar/ARCHITECTURE.md §5-7).
+   A side is what is on it, never a colour: the war room and the end card say
+   "20 SOLDIERS" / "12 MEN" (or the nations, when two sides say the same
+   thing); the new URL names (a b n arena at bt af bf bo sa sb) build the war;
+   a best-of-3 at 1-0 scores this round, says the series, and hands the next
+   round the score in its URL. Nothing a player reads says RED or BLUE. */
+const G = (W, expr) => vm.runInContext(expr, W.sb);
+scenario(9, "sides, best-of, the URL matchup: no colour on screen", async () => {
+  const W = boot("?a=men&b=men&n=20v12&arena=dunes&aw=ak47&bw=ak47&at=elite&bt=thug&af=kesh&bf=veridia&bo=3&sa=1&sb=0&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  await settle();
+  const a0 = W.B().audit();
+  check(a0.started && a0.map === "dunes", "a b n arena booted the war on the dunes");
+  check(G(W, "SET").redN === 20 && G(W, "SET").blueN === 12 && G(W, "SET").redT === "elite" && G(W, "SET").blueT === "thug",
+    "n=20v12, at/bt read (" + G(W, "SET").redN + " v " + G(W, "SET").blueN + ", " + G(W, "SET").redT + "/" + G(W, "SET").blueT + ")");
+  check(G(W, "TEAMS").red.name === "20 SOLDIERS" && G(W, "TEAMS").blue.name === "12 MEN",
+    "the sides are named by what is on them (" + G(W, "TEAMS").red.name + " v " + G(W, "TEAMS").blue.name + ")");
+  check(G(W, "SIDES").red.nation === "kesh" && G(W, "SIDES").blue.nation === "veridia", "each army fights for its nation (af/bf)");
+  const a = run(W, 300);
+  check(a.over && !!a.winner, "the round ended (" + a.simT + " s, " + a.winner + ")");
+  const endT = W.doc.getElementById("endT").textContent;
+  check(endT === (a.winner === "red" ? "20 SOLDIERS WIN" : "12 MEN WIN"), "the end card names the winner (" + endT + ")");
+  const ser = W.doc.getElementById("endSeries").textContent;
+  check(/^BEST OF 3/.test(ser), "the card carries the series (" + ser + ")");
+  const won = a.winner === "red";
+  check(W.doc.getElementById("endAgain").textContent === (won ? "REMATCH" : "NEXT ROUND"),
+    "1-0 up in a best of 3: a win takes the series, a loss plays another round (" + W.doc.getElementById("endAgain").textContent + ")");
+  W.doc.getElementById("endAgain").click();
+  const href = String(W.sb.location.href);
+  check(won ? !/sa=/.test(href) : /bo=3/.test(href) && /sa=1/.test(href) && /sb=1/.test(href), "the next URL carries the score (" + href + ")");
+  // nothing a player reads says red or blue
+  const seen = [];
+  for (const id of Object.keys(W.doc._byId)) {
+    const e = W.doc._byId[id];
+    // the species lists say RED FOX, which is a fox: option rows are names, not sides
+    const t = (String(e.textContent || "") + " " + String(e._html || "")).replace(/<option[^>]*>[^<]*<\/option>/g, "");
+    if (/\b(RED|BLUE)\b/i.test(t.replace(/class="[^"]*"/g, "").replace(/data-[a-z]+="[^"]*"/g, ""))) seen.push(id + ": " + t.slice(0, 60));
+  }
+  check(seen.length === 0, "no RED / BLUE in any text the page wrote (" + JSON.stringify(seen) + ")");
+  // two sides that say the same thing are told apart by their nations
+  const W2 = boot("?a=men&b=men&n=30v30&at=elite&bt=elite&af=solara&bf=mbeya&auto=1&probe=0");
+  if (W2.err) { check(false, "page threw at boot: " + W2.err); return; }
+  await settle();
+  check(G(W2, "TEAMS").red.name !== G(W2, "TEAMS").blue.name, "30 soldiers v 30 soldiers: named by nation (" + G(W2, "TEAMS").red.name + " v " + G(W2, "TEAMS").blue.name + ")");
+  // the counted roster grammar
+  const R = W2.CBZ.battleRoster;
+  check(R.size("m1_abrams*3,men*20") === 23 && R.kindAt("m1_abrams*3,men*20", 2) === "m1_abrams" && R.kindAt("m1_abrams*3,men*20", 3) === "men" &&
+    R.kindAt("men|dolphin", 3) === "dolphin", "roster grammar: counted and alternating");
+  const S = W2.CBZ.battleSeries;
+  const s1 = S.record(S.make(5, 1, 1), "red"), s2 = S.record(s1, "red");
+  check(!s1.over && s1.a === 2 && s2.over && s2.winner === "red" && S.record(S.make(3, 0, 0), null).round === 1,
+    "series: best of 5 goes to 3, a draw replays the round");
 });
 
 for (const s of scen) {

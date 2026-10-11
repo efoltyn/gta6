@@ -60,6 +60,8 @@
      layer({name, cap, parent}) -> L: L.begin(); L.add(x,y,z,yaw,look,clip,
        phase,rate); L.commit(); L.clear(); L.dispose(),
      dressRig(ch, look), rigOpts(look), now(), audit(), layout() }
+   Soldier clips (NPC War's armies): rifleIdle, rifleWalk, patrolWalk,
+   rifleRun, crouchRun, proneCrawl — CBZ.crowdGPU.clip("rifleWalk").
    L.add takes (x, y, z, yaw, look, clip, phase, rate, scale, vx, vz): vx/vz is
    the velocity the GPU carries the body along between cuts.
    Clip phase is in CYCLES (0..1). rate = cycles/second animated on the GPU
@@ -120,6 +122,17 @@
     { id: "phone", gait: false, pose: "phone", period: 4.0, n: 6, impOf: "idle" },
     { id: "phoneWalk", gait: true, speed: 1.3, overlay: "phoneWalk", n: 24, impOf: "walk" },
     { id: "smoke", gait: false, pose: "smoke", period: 5.2, n: 16, impOf: "idle" },
+    // SOLDIERS (entities/soldier.js + gait.js): the same rig with a rifle
+    // carry (`soldier` is copied onto the bake rig as its ch.soldier), the
+    // planted-foot gait, a bound's low run and the prone leopard crawl laid
+    // on the ground by the rig itself (not the standing walk turned over).
+    // Bodies past the mesh tiers share the plain clips' impostor frames.
+    { id: "rifleIdle", gait: false, period: 4.0, n: 12, impOf: "idle", soldier: { carry: "low" } },
+    { id: "rifleWalk", gait: true, speed: 1.4, n: 24, impOf: "walk", soldier: { carry: "low" } },
+    { id: "patrolWalk", gait: true, speed: 1.3, n: 24, impOf: "walk", soldier: { carry: "patrol" } },
+    { id: "rifleRun", gait: true, speed: 4.2, n: 20, impOf: "run", soldier: { carry: "low" } },
+    { id: "crouchRun", gait: true, speed: 2.6, n: 20, impOf: "run", soldier: { carry: "low", stance: "rush" } },
+    { id: "proneCrawl", gait: true, speed: 0.5, n: 20, impOf: "crawl", soldier: { carry: "low", stance: "prone" } },
   ];
   const CLIP_IX = Object.create(null);
   let ROWS = 0, IMP_ROWS = 0;
@@ -293,6 +306,8 @@
         // reset the rig to a clean stand each clip
         ch.sitting = !!C.sit; ch.seatRef = C.sit ? { cushion: SEAT.cushion, floorBelow: SEAT.floorBelow, kind: "seat" } : null;
         ch.pose = (!C.gait && C.pose && !C.sit) ? C.pose : null;
+        ch.soldier = C.soldier ? JSON.parse(JSON.stringify(C.soldier)) : null;
+        if (!C.soldier) { ch.crouch = false; ch.pronePose = false; }
         ch.phase = 0; ch._pubT = 0;
         const speed = C.gait ? C.speed : 0;
         const dt0 = 1 / 60;
@@ -337,6 +352,7 @@
         }
       }
       ch.sitting = false; ch.seatRef = null; ch.pose = null;
+      ch.soldier = null; ch.crouch = false; ch.pronePose = false;
     }
     const t1 = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
     BAKE = {

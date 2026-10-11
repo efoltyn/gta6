@@ -1,0 +1,359 @@
+"use strict";
+/* src/battle/arenas/field.js — NPC War: THE FIELD. buildMap(id) raises the
+   chosen ground (the yard, the erg, the sea, the downtown or a Gang City
+   venue) and returns the MAP record the sim stands on: groundAt, bodyY,
+   camFloor, the centre, the gap between the armies, terrain sight, and
+   spawnAt (out of the geometry, never inside a building).
+
+   This record is the arena half of the battle HOST (battle/core/host.js):
+   a Gang City host answers the same questions about the real world.
+   Split out of games/battle.html (docs/npcwar/ARCHITECTURE.md). Every
+   src/battle file shares ONE script scope. */
+
+/* NOBODY SPAWNS INSIDE A BUILDING. The desert maps could get away without
+   this — a dune has nothing in it — but the moment the ground is a real
+   downtown, a ranked column drawn on paper puts a third of an army inside
+   the Exchange Bank, where nothing can see them and nothing can shoot them.
+   A golden-angle spiral, so the search is a spiral and not a ring: the
+   first free point is genuinely the nearest one, and it is deterministic. */
+const _fs = [];
+function blockedAt(x, z) {
+  const cols = CBZ.micro.queryColliders(x, z, 0.9, _fs);
+  for (let c = 0; c < cols.length; c++) {
+    const b = cols[c];
+    if (!CBZ.micro.colliderContains(b, x, z, 0.55)) continue;   // exact on a turned box
+    if (b.y0 != null && b.y1 != null && (b.y1 < 0.35 || b.y0 > 1.7)) continue;  // a kerb is not a wall
+    return true;
+  }
+  return false;
+}
+/* AND NOT ON TOP OF EACH OTHER EITHER. The spiral above only ever asked the
+   geometry. On an open field that is enough, because the ranked grid never
+   puts two men in the same square — but on a DENSE venue (the seat of state
+   is walls, planters and steps) many grid points are blocked, several men
+   spiral out of their own square and converge on the same first free metre,
+   and they start the battle interpenetrating. Measured on `gov`: one
+   overlapping pair at t=0, which the sweep counts as a fault and should.
+   Claimed points are remembered for the length of one build. */
+/* AND THE CLAIM IS THE BODY'S OWN SIZE. A flat 1.15 m is the right answer
+   for a man and a fiction for a bull elephant: an army of them spawned
+   INSIDE one another and spent the opening seconds of the battle shoving
+   itself apart. Each claim carries the radius that took it, so a pair only
+   has to clear what the two of them actually occupy. */
+/* SPAWN CLAIMS BELONG TO ONE ROSTER. Cleared at buildMap, and again by
+   __battle.restage() below — four hundred sardine claims left standing would
+   push the next matchup out into open water for no reason anybody could see. */
+const _claim = [];
+function clearClaims() { _claim.length = 0; }
+const CLAIM_R = 0.575;         // a man's half of the old 1.15 m pair
+function crowdedAt(x, z, r) {
+  for (let i = 0; i < _claim.length; i++) {
+    const c = _claim[i];
+    const dx = x - c.x, dz = z - c.z, need = r + c.r;
+    if (dx * dx + dz * dz < need * need) return true;
+  }
+  return false;
+}
+function freeSpot(x, z, r) {
+  r = r || CLAIM_R;
+  const take = function (px, pz) { _claim.push({ x: px, z: pz, r: r }); return { x: px, z: pz }; };
+  if (!blockedAt(x, z) && !crowdedAt(x, z, r)) return take(x, z);
+  // the search walks outward in the body's OWN units, so a big animal is
+  // not condemned to test forty man-sized rings it can never fit in
+  const step = 1.35 * Math.max(1, r / CLAIM_R * 0.72);
+  for (let k = 1; k < 40; k++) {
+    const a = k * 2.399963229728653, d = k * step;      // golden angle
+    const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+    if (!blockedAt(px, pz) && !crowdedAt(px, pz, r)) return take(px, pz);
+  }
+  return take(x, z);
+}
+
+/* SPAWN ON THE STREET, NOT ON A GRID. Given the town's own road records,
+   each side forms up in north-south streets on its half and walks in. That
+   is one lookup per man and it is the reason an urban fight reads as an
+   assault down avenues instead of two blocks of men shuffling through
+   masonry.
+
+   AND IT FORMS UP AT THE DECLARED GAP, WHICH IS THE FAULT THIS WAVE FOUND.
+   It used to sort the lanes by distance from the centre DESCENDING and take
+   the outermost three — so on an eight-block downtown 472 m across, the two
+   armies started at opposite edges and `gap` was a number the city map wrote
+   down and then ignored. MEASURED, 26 v 26 on `city`: nearest enemy 304 m at
+   t=0, first round fired at t=10.9 s, and at t=17 s all 52 men were still in
+   slot `march` having managed eleven shots between them. Closure through a
+   grid of blocks runs about 5 m/s combined, not the 12 m/s two marching
+   columns suggest, so three hundred metres is a full minute of watching
+   crowds walk before the war starts. Nobody watches that twice.
+
+   So the lanes are chosen by how near they are to the declared start line
+   (cx ± gap/2) instead of by how far out they can possibly be, and the
+   number in the table above is finally the number on the ground. */
+function streetSpawner(roads, cx, cz, side, gap) {
+  const want = cx + side * gap * 0.5;
+  const lanes = (roads || []).filter(function (r) {
+    return r.vertical && (r.x - cx) * side > 24;
+  }).sort(function (a, b) { return Math.abs(a.x - want) - Math.abs(b.x - want); }).slice(0, 3);
+  if (!lanes.length) return null;
+  return function (i) {
+    const L = lanes[i % lanes.length];
+    const k = (i / lanes.length) | 0;
+    const row = k % 11, rank = (k / 11) | 0;
+    const t = (row - 5) * (L.len / 13);
+    const off = ((rank % 2) ? 1 : -1) * Math.min(L.w * 0.3, 3.4) + (sWorld() - 0.5) * 1.4;
+    const along = ((rank / 2) | 0) * 3.2 * side;         // ranks stack BEHIND
+    return { x: L.x + off + along, z: L.z + t + (sWorld() - 0.5) * 1.4 };
+  };
+}
+
+let MEASURED = null;        // what the heightfield found, for the audit
+function buildMap(id) {
+  /* THE START LINE, and every one of these is a distance a man has to WALK
+     before anything happens. The open maps can be wide because a firing line
+     across sand is a sightline: dunes at 150 m resolved in 32 s and the kill
+     box at 120 m in 51 s, both measured. A city cannot, because a block is
+     not a sightline — `city` used to read 300 here and the two armies spent
+     the first forty seconds marching (see streetSpawner), so it is a
+     three-block approach now that still has to be fought through. */
+  const M = MAPS[id] || MAPS.arena;
+  _claim.length = 0;          // spawn claims belong to ONE build
+  /* ...and OPEN WATER is the shortest of them, measured the same way the
+     others were. Water has no cover, no walls to path around and no crest to
+     climb: closure there is a straight line at the animals' own charge speed
+     (an orca's works out at 6.7 m/s, so 110 m of no-man's land is ~8 s of
+     swimming before contact) and there is nothing to look at on the way. */
+  let gap = { city: 170, island: 175, field: 180, dunes: 150, arena: 120, water: 110 }[id] || 150;
+  let gapOverride = 0;      // measured venues size their own no-man's land
+  let groundAt = function () { return 0; };
+  let cx = 0, cz = 0, spawners = null;
+
+  if (id === "arena") {
+    // a walled container yard, 210 x 150 m inside the block wall (THE YARD above)
+    buildYard(210, 150, gap);
+  } else if (id === "water") {
+    /* OPEN WATER. No world() call, no raise(), no town(): a swell function,
+       a seabed, a reef, and whatever fleet the roster earns. This branch is
+       the map's cost, and it is deliberately the shortest one in the file. */
+    SEA.on = true; SEA.t = 0; SEA.boats.length = 0; SEA.under = null; SEA.fogSurface = null;
+    /* the fourth shim, same pattern as queryCollidersNear/floorAt/collide up
+       top: creature_combat's restY() resolves an aquatic body to
+       CBZ.citySeaHeightAt(x,z) minus its own swimDepth, so without these two
+       names the shared strike driver would rest a shark at CBZ.SEA_Y and
+       fight this page's own depth every frame. Route the name, never fork
+       the file. (stepDepth keeps actor.swimDepth in step with actor.swimD.) */
+    CBZ.citySeaHeightAt = function (x, z) { return swellAt(x, z); };
+    cx = 0; cz = 0;
+    seaBuildSwell();
+    // the bed first, so the surface blends over something and not over sky
+    seabed(SEA.seabed);
+    seaSurface(cx, cz);
+    if (Q.get("reef") !== "0") seaReef(cx, cz);
+    groundAt = function (x, z) { return swellAt(x, z); };
+    // a side of MEN is a side that came off boats — see seaFleet
+    if (Q.get("fleet") !== "0") {
+      if (SET.redU === "men") seaFleet(cx, cz, -1, Math.max(1, Math.min(9, Math.ceil(SET.redN / 8))));
+      if (SET.blueU === "men") seaFleet(cx, cz, 1, Math.max(1, Math.min(9, Math.ceil(SET.blueN / 8))));
+    }
+    /* AND A SHOAL IS NOT A COLUMN. The ranked grid below is right for men
+       walking up a street and wrong for four hundred sardines: water has no
+       ranks, so each side forms a golden-angle disc around its own start
+       point, sized by how many of it there are. Deterministic (sWorld), and
+       it feeds the same freeSpot() claim pass everything else uses. */
+    spawners = (function () {
+      const mk = function (side, n) {
+        const r = Math.max(9, Math.sqrt(Math.max(1, n)) * 3.4);
+        return function (i) {
+          const a = i * 2.399963229728653;
+          const d = Math.sqrt((i + 0.5) / Math.max(1, n)) * r;
+          return { x: cx + side * gap * 0.5 + Math.cos(a) * d + (sWorld() - 0.5) * 2,
+                   z: cz + Math.sin(a) * d * 1.35 + (sWorld() - 0.5) * 2 };
+        };
+      };
+      return { red: mk(-1, SET.redN), blue: mk(1, SET.blueN) };
+    })();
+  } else if (M.erg) {
+    DUNE.pal = ERG_PAL[M.erg] || ERG_PAL.sand;
+    world = CBZ.studio.world("desert", { seed: "npcwar" });
+    groundAt = (world && world.heightAt) || groundAt;
+    /* WALK OUT UNTIL THE GROUND MEASURES AS DUNES. The old centre was a
+       constant — rings.city + 650 — and nothing ever asked what the ground
+       there looked like. Measured: 7.6 m of relief across the whole field,
+       because the dune amplitude ramps up with radius and r=1700 is barely a
+       third of the way up the ramp. A map called OPEN DUNES was a flat plate
+       with the word "dunes" on the menu row.
+
+       So the venue scans the erg and takes the FIRST centre that passes TWO
+       measurements: the battlefield window (±160 m) holds at least 16 m of
+       relief, and the dunes STAND BETWEEN the armies — at least two of the
+       three central spawn lanes are crest-cut at eye height. Relief alone
+       is not enough (measured: the best on-axis window put all of its sand
+       on the flanks and the two firing lines still saw each other spawn to
+       spawn), and the scan is two-dimensional because the erg is a ring,
+       not a bearing — on the shipped terrain the qualifying ground lies off
+       the old axis entirely. The terrain derives from WORLD_SEED alone, so
+       the same URL lands the same war on the same sand. The fallback is the
+       old constant, so a retuned noise field can never strand the map with
+       no centre at all. High ground is not dealt evenly here; neither are
+       the city map's streets. A venue is a place, and a place has a better
+       side. */
+    const rings = (world && world.rings) || { city: 1050, dune: 2700 };
+    cx = rings.city + 650; cz = 0;
+    scan:
+    for (let x = rings.city + 550; x <= rings.dune - 250; x += 50) {
+      for (let z = -450; z <= 450; z += 50) {
+        if (Math.hypot(x, z) + 170 > rings.dune - 60) continue;
+        let lo = 1e9, hi = -1e9;
+        for (let sx = -160; sx <= 160; sx += 16) for (let sz = -160; sz <= 160; sz += 16) {
+          const y = groundAt(x + sx, z + sz);
+          if (y < lo) lo = y; if (y > hi) hi = y;
+        }
+        if (hi - lo < 16) continue;
+        let cut = 0;
+        for (let li = -1; li <= 1; li++) {
+          const lz = z + li * 12, ax = x - 83, bx = x + 83;
+          if (terrainBlocked(ax, groundAt(ax, lz) + 1.52, lz,
+                             bx, groundAt(bx, lz) + 1.35, lz, groundAt)) cut++;
+        }
+        if (cut >= 2) { cx = x; cz = z; break scan; }
+      }
+    }
+    // THE ERG over the chosen window: crests, slip faces, the skin that shows them
+    DUNE.on = true; DUNE.cx = cx; DUNE.cz = cz;
+    const worldGround = groundAt;
+    groundAt = function (x, z) { return worldGround(x, z) + duneDetail(x, z); };
+    MAP_GROUND = groundAt;
+    duneSkin(world);
+  } else if (id === "city") {
+    // THE REAL FABRIC. Eight blocks square is 490 m of street — big enough
+    // that an army has to cross ground it does not own, small enough that
+    // the two sides find each other without a search party.
+    cx = TOWN_AT.x; cz = TOWN_AT.z;
+    town = CBZ.studio.town({
+      at: TOWN_AT, seed: "npcwar-" + (Q.get("seed") || "talloran"), name: "Talloran",
+      cols: 8, rows: 8, blockW: 44, blockD: 44, roadW: 15,
+      // the studio's default downtown palette is authored for the mainland's
+      // own light. Under this map's sun the sidewalks and the square came
+      // out as paper — a white field with a road painted on it — so the
+      // stone comes down to something a camera can still see men against.
+      palette: {
+        ground: 0x5f636a, sidewalk: 0x6d7278, road: 0x2b2e34,
+        plaza: 0x6f747b, wood: 0x4c545d, accent: 0x616a75,
+      },
+    });
+    if (town && town.rect) {
+      // a WIDE apron and no water: the downtown is inland, and the sea plate
+      // this map used to carry was the thing fighting the road for the depth
+      // buffer. Ground that runs out to the fog is the honest answer here.
+      apron(town.rect.minX - 900, town.rect.maxX + 900, town.rect.minZ - 900, town.rect.maxZ + 900, 0x555a61);
+      spawners = {
+        red: streetSpawner(town.roads, cx, cz, -1, gap),
+        blue: streetSpawner(town.roads, cx, cz, 1, gap),
+      };
+    }
+  } else if (M.raise) {
+    /* A REAL GANG CITY VENUE, MEASURED RATHER THAN DECLARED.
+
+       Every raised venue took the same three hand-written constants before
+       this: a centre, an apron rectangle and a flat groundAt. All three were
+       guesses that nothing checked, and all three are readable from the
+       geometry once it exists. Raise into our OWN group so the heightfield
+       casts against the venue and not the skybox, then ask it where it is
+       and how high it stands. A venue that is flat measures flat; the
+       speedway's banking measures as banking, for free. */
+    if (M.sea) seaPlate();
+    const venue = new THREE.Group();
+    CBZ.scene.add(venue);
+    for (let i = 0; i < M.raise.length; i++) {
+      const got = CBZ.studio.raise(M.raise[i], { parent: venue });
+      if (!base) base = got;
+      if (!got) console.error("[battle] nothing raised for pack:", M.raise[i]);
+    }
+    const H = CBZ.studio.heightfield(venue, { step: 6, pad: 30 });
+    if (H) {
+      groundAt = H.heightAt;
+      cx = H.cx; cz = H.cz;
+      // ground out to the fog under the venue's own floor, so its edge is a
+      // quay and not the inside of the sky dome
+      apron(H.box.min.x - 420, H.box.max.x + 420, H.box.min.z - 420, H.box.max.z + 420,
+            M.apronColor || 0x7d7a6c, H.minY);
+      // the armies start half the venue apart, clamped to a distance two
+      // sides can actually cross before the watcher loses interest
+      // ...and 320 m is not that distance. MEASURED on `city` at 304 m: the
+      // first round went off at t=10.9 s, forty-five of fifty-two men were
+      // still in slot `march` at t=13, and the two sides were not inside
+      // 100 m of each other until t=41. Closure through real geometry runs
+      // about 5 m/s combined, not the 12 m/s two marching columns suggest,
+      // so the old ceiling was a full minute of watching crowds walk. 190 is
+      // where the fixed maps measure (Halloran 6.5 s to first contact,
+      // island 7.1) and it still leaves a venue-length approach to fight.
+      gapOverride = Math.max(90, Math.min(190, Math.min(H.spanX, H.spanZ) * 0.5));
+      MEASURED = { cols: H.cols, rows: H.rows, step: +H.step.toFixed(1), miss: H.miss,
+                   minY: +H.minY.toFixed(2), maxY: +H.maxY.toFixed(2),
+                   spanX: Math.round(H.spanX), spanZ: Math.round(H.spanZ) };
+    } else {
+      console.error("[battle] heightfield measured nothing for", id, "— falling back to flat");
+    }
+  }
+
+  if (gapOverride) gap = gapOverride;
+  /* HOW MUCH GROUND IS THERE IN THIS GROUND? One number, measured off the
+     same groundAt the men will stand on, over the same window they will
+     fight in — so the audit can state it and the checker can hold the map
+     named OPEN DUNES to actually having dunes. */
+  let relief = 0;
+  (function () {
+    const span = gap * 0.5 + 120;
+    let lo = 1e9, hi = -1e9;
+    for (let sx = -span; sx <= span; sx += 12) for (let sz = -span; sz <= span; sz += 12) {
+      const y = groundAt(cx + sx, cz + sz);
+      if (y < lo) lo = y; if (y > hi) hi = y;
+    }
+    relief = Math.round((hi - lo) * 10) / 10;
+  })();
+  const grid = function (team, i) {
+    const side = team === "red" ? -1 : 1;
+    const col = (i / 10) | 0, row = i % 10;
+    const x = cx + side * (gap / 2 + 8 + col * 3.1) + (sWorld() - 0.5) * 1.8;
+    const z = cz + (row - 4.5) * 3.4 + (col % 2) * 1.7 + (sWorld() - 0.5) * 1.8;
+    return { x: x, z: z };
+  };
+  /* WHERE A BODY ACTUALLY SITS, which on every other map is the ground and
+     on OPEN WATER is not. groundAt answers "where is the surface" — the
+     camera, the rockets, the bombers and the director all still want that —
+     and bodyY answers "where is THIS body", which is the surface minus its
+     own swim depth. Two questions that used to be one because on land they
+     always had the same answer. */
+  const water = id === "water";
+  const bodyY = water
+    ? function (m, x, z) { return swellAt(x, z) - (m && m.swimD != null ? m.swimD : cruiseDepth(m)); }
+    : function (m, x, z) { return groundAt(x, z); };
+  /* AND HOW LOW THE CAMERA MAY GO. Everywhere else the lens stops 1.6 m over
+     the ground because the ground is opaque. Here the whole point is that you
+     can put the lens UNDER the swell and watch a shark come at it, so the
+     floor is the seabed instead — the sea is not a wall. */
+  const camFloor = (water && !SWIM_OLD)
+    ? function () { return SEA.seabed + 2.2; }
+    : function (x, z) { return groundAt(x, z) + 1.6; };
+  return {
+    id: id, gap: gap, cx: cx, cz: cz, groundAt: groundAt, relief: relief,
+    water: water, bodyY: bodyY, camFloor: camFloor,
+    /* TERRAIN JOINS THE SIGHT LINE — but only where groundAt is genuinely
+       TERRAIN. The dunes map's height function is the desert's own analytic
+       surface, so a sample along the eye line is sand and nothing else. A
+       RAISED venue's groundAt is a raycast heightfield, and a raycast from
+       above cannot tell a roof from a hill — arming terrain sight there
+       would wall off every lane that passes beside a building the grid
+       touched. The buildings already block sight the honest way, through
+       their own colliders. So: dunes only, until a map's ground is measured
+       by something that knows the difference. */
+    terrainTrue: !!M.erg,
+    terrainLos: !!M.erg && relief > 6 && Q.get("tlos") !== "0",
+    // team spawn: down the streets where there are streets, ranked columns
+    // where there are not, and in both cases OUT of the geometry
+    spawnAt: function (team, i, r) {
+      const s = spawners && spawners[team];
+      const p = (s && s(i)) || grid(team, i);
+      return freeSpot(p.x, p.z, r);
+    },
+  };
+}
