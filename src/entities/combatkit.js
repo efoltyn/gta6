@@ -392,7 +392,7 @@
      toward the shoulder): its centre sits clr over the crest at xs, tilted to
      the crest's own sideways slope, and lifted where that would still put its
      inner edge (nearer the neck, higher) into the body. */
-  function shoulderPath(S, xs, zF, yF, zB, yB, clr, n, w) {
+  function shoulderPath(S, xs, zF, yF, zB, yB, clr, n, w, ch) {
     const pts = [], slope = [];
     const e = 0.01, sg = xs < 0 ? -1 : 1;
     for (let k = 0; k <= n; k++) {
@@ -403,7 +403,14 @@
       // the inner edge: where the tilted strap meets the crest nearer the neck
       const yIn = crestY(S, xs - sg * w / 2, z), yTilt = yc - sg * sx * w / 2;
       const y = Math.max(y0, yc + clr + Math.max(0, yIn - yTilt));
-      pts.push([xs, y, z]); slope.push(y > y0 + 1e-6 ? sx : 0);
+      // the crest is the raw ring; the drawn surface carries relief (the
+      // shoulder blades, the spine): never inside THAT either
+      let zz = z;
+      if (ch && y < S.yN) for (const dx of [-w / 2, 0, w / 2]) {
+        const f = ch.torsoFrontZ(xs + dx, y), b = ch.torsoBackZ(xs + dx, y);
+        if (zz < f + clr && zz > b - clr) zz = (zz > (f + b) / 2) ? Math.max(zz, f + clr) : Math.min(zz, b - clr);
+      }
+      pts.push([xs, y, zz]); slope.push(y > y0 + 1e-6 ? sx : 0);
     }
     const nrm = [];
     for (let k = 0; k <= n; k++) {
@@ -431,8 +438,16 @@
     const clr = 0.004 * m;
     const notch = S.yN - S.tf - 0.03 * S.vs;
     const yT = notch - 0.02 * m;
-    const yB = Math.max(yT - 0.31 * m * sz, S.pTop + 0.05 * m);
-    const hw = Math.min(0.125 * m * sz, S.W * 0.62);
+    /* SIZED TO THIS BODY. The rig is drawn broad (an adult chest is ~0.64 m
+       across), so a plate cut to a real 25 x 32 cm SAPI reads as a postage
+       stamp on it. The plate keeps a real plate's PROPORTION of the torso
+       (about 0.58 of the chest's half-width, notch to two thirds of the way
+       to the belt) and everything hung on it scales with it (ps). */
+    const yB = Math.max(yT - 0.66 * (yT - S.pTop), S.pTop + 0.05 * m);
+    const hw = S.W * 0.58;
+    const ps = Math.max(0.8, Math.min(1.8, hw / (0.125 * m)));
+    const mp = m * ps;
+    const md = m * Math.min(ps, 1.12);      // depths stay near real: the arms swing past them
     const NX = far ? 5 : 9, NY = far ? 4 : 7;
     const out = { front: null, back: null };
     const chest = L.carrier === "chest";
@@ -440,9 +455,9 @@
     if (!chest) {
       // ---- the PLATE BAGS: front and back, 3.4 cm of plate and cordura
       const T = 0.034 * m, bev = 0.06;
-      const sf = plateSurface(ch, 1, hw, yB, yT, clr, true, NX, NY, m);
+      const sf = plateSurface(ch, 1, hw, yB, yT, clr + 0.004 * m, true, NX, NY, m);
       F0 = plateBag(B, sf, T, bev, NX - 1, NY - 1, kit, edge);
-      const sb = plateSurface(ch, -1, hw * 1.02, yB + 0.01 * m, yT + 0.02 * m, clr, false, NX, NY, m);
+      const sb = plateSurface(ch, -1, hw * 1.02, yB + 0.01 * m, yT + 0.02 * m, clr + 0.004 * m, false, NX, NY, m);
       B0 = plateBag(B, sb, T * 0.9, bev, NX - 1, NY - 1, kit, edge);
       out.front = F0; out.back = B0;
       if (!far) {
@@ -455,7 +470,7 @@
     }
     // ---- THE CUMMERBUND (or a chest rig's waist band) round the real section
     const cy0 = chest ? S.pTop + 0.07 * m : yB + 0.012 * m;
-    const cy1 = chest ? cy0 + 0.16 * m : Math.min(cy0 + 0.15 * m, yT - 0.07 * m);
+    const cy1 = chest ? cy0 + 0.16 * mp : Math.min(cy0 + 0.13 * mp, yT - 0.07 * m);
     const NS = CBZ.bodySection.NS;
     const span = CBZ.bodySection.span(ch, cy0, cy1, 4).map((p) => p.slice());
     for (let pass = 0; pass < 3; pass++) for (let j = 0; j < NS; j++) {         // a band is stiff: bridge the dips
@@ -490,7 +505,7 @@
       return frame([p[0], (cy0 + cy1) / 2, p[1]], CBZ.bodySection.normal(span, th));
     };
     // ---- SHOULDER STRAPS over the trapezius crest
-    const sw = 0.05 * m, sth = 0.012 * m;
+    const sw = 0.05 * mp, sth = 0.012 * m;
     const xs = Math.max(hw * 0.62, S.nRx + 0.016 * m + sw / 2);
     const paths = {};
     for (const s of [1, -1]) {
@@ -498,12 +513,16 @@
       if (!chest) {
         const uF = 0.5 + 0.5 * s * xs / (hw * 0.66), uB = 0.5 - 0.5 * s * xs / (hw * 0.92);
         const pf = F0.P(Math.min(0.98, Math.max(0.02, uF)), 0.96), pb = B0.P(Math.min(0.98, Math.max(0.02, uB)), 0.96);
-        zF = pf[2] - 0.008 * m; yF = pf[1]; zB = pb[2] + 0.008 * m; yBk = pb[1];
+        yF = pf[1]; yBk = pb[1];
+        // tucked a little under the bag's top edge, but never into the body there
+        let zf = -1e9, zb = 1e9;
+        for (const dx of [-sw / 2, 0, sw / 2]) for (const dy of [0, 0.03, 0.06, 0.09]) { zf = Math.max(zf, ch.torsoFrontZ(s * xs + dx, yF + dy * m)); zb = Math.min(zb, ch.torsoBackZ(s * xs + dx, yBk + dy * m)); }
+        zF = Math.max(pf[2] - 0.008 * m, zf + clr + sth); zB = Math.min(pb[2] + 0.008 * m, zb - clr - sth);
       } else {
         zF = 0; yF = 0; zB = 0; yBk = 0;
       }
       let path;
-      if (!chest) path = shoulderPath(S, s * xs, zF, yF, zB, yBk, clr, far ? 6 : 12, sw);
+      if (!chest) path = shoulderPath(S, s * xs, zF, yF, zB, yBk, clr * 2.5, far ? 8 : 24, sw, ch);
       else {
         /* a chest rig's harness runs UP the chest from the band, over the
            crest, and DOWN the back: on the body's surface the whole way (the
@@ -513,15 +532,16 @@
           for (let k = 0; k <= n; k++) {
             const y = lerp(y0, y1, k / n);
             let z = side > 0 ? -1e9 : 1e9;
-            for (const dx of [-sw / 2, 0, sw / 2]) {
-              const zz = side > 0 ? ch.torsoFrontZ(s * xs + dx, y) : ch.torsoBackZ(s * xs + dx, y);
+            const hy = (y1 - y0) / n * 0.6;
+            for (const dx of [-sw / 2, 0, sw / 2]) for (const dy of [-hy, 0, hy]) {
+              const zz = side > 0 ? ch.torsoFrontZ(s * xs + dx, y + dy) : ch.torsoBackZ(s * xs + dx, y + dy);
               z = side > 0 ? Math.max(z, zz) : Math.min(z, zz);
             }
             pts.push([s * xs, y, z + side * clr]); nrm.push([0, 0, side]);
           }
           return { pts: pts, nrm: nrm };
         };
-        const fr = run(1, cy1 - 0.02 * m, yUp, far ? 3 : 6), bk = run(-1, yUp, yb, far ? 3 : 6);
+        const fr = run(1, cy1 - 0.02 * m, yUp, far ? 4 : 10), bk = run(-1, yUp, yb, far ? 4 : 10);
         bk.pts.reverse(); bk.nrm.reverse();
         const top = shoulderPath(S, s * xs, fr.pts[fr.pts.length - 1][2], yUp, bk.pts[bk.pts.length - 1][2], yUp, clr, far ? 4 : 8, sw);
         bk.pts.reverse(); bk.nrm.reverse();
@@ -552,17 +572,22 @@
       const sp = paths[1].pts.map((p, k) => add(p, paths[1].nrm[k], sth + 0.002 * m));
       const last = sp[sp.length - 1];
       const tail = [];
-      for (let k = 1; k <= 5; k++) {
-        const t = k / 5, x = lerp(last[0], -S.W * 0.85, t), y = lerp(last[1], cy1 + 0.03 * m, t);
-        const z = (chest ? ch.torsoBackZ(x, y) : Math.min(ch.torsoBackZ(x, y), (B0 ? B0.P(lerp(0.5, 0.98, Math.abs(x) / (hw * 1.4)), 0.5)[2] : 0))) - clr - 0.012 * m;
+      for (let k = 1; k <= 10; k++) {
+        const t = k / 10, x = lerp(last[0], -S.W * 0.85, t), y = lerp(last[1], cy1 + 0.03 * m, t);
+        let zb = 1e9;
+        for (const dx of [-0.02, 0, 0.02]) for (const dy of [-0.02, 0, 0.02]) zb = Math.min(zb, ch.torsoBackZ(x + dx * m, y + dy * m));
+        // over the back plate bag where it crosses it, on the shirt beside it
+        const z = zb - clr - (!chest && Math.abs(x) < hw && y > yB && y < yT ? 0.04 * m : 0.004 * m);
         tail.push([x, y, z]);
       }
       const all = sp.concat(tail), nr = all.map((p, k) => k < sp.length ? paths[1].nrm[k] : [0, 0, -1]);
       strap(B, all, nr, 0.032 * m, 0.004 * m, tone(kit, -0.35));
       // ---- a TOURNIQUET on the left strap, front
-      const pf = paths[1].pts[1], nf = paths[1].nrm[1];
-      const Ft = frame(add(pf, nf, sth), nf, [0, 1, 0]);
-      box(B, Ft, 0, -0.02 * m, 0.012 * m, 0.03 * m, 0.11 * m, 0.024 * m, TQ);
+      // (on the front bag's upper left, where a right-hander reaches it with the support hand... his left)
+      if (F0) {
+        const Ft = bagFrame(F0, 0.86, 0.8);
+        box(B, Ft, 0, 0, 0.012 * md, 0.03 * mp, 0.1 * mp, 0.024 * md, TQ);
+      }
     }
     // ---- THE FRONT POUCHES
     const chestFrame = (u, v) => {
@@ -570,7 +595,7 @@
       const x = lerp(-hw * 1.15, hw * 1.15, u), y = lerp(cy0, cy1, v);
       // a chest rig's pouch hangs off its band: clear of the body under its whole face
       let zz = -1e9;
-      for (const dy of [-0.08, -0.04, 0, 0.04, 0.08]) for (const dx of [-0.04, 0, 0.04]) zz = Math.max(zz, ch.torsoFrontZ(x + dx * m, y + dy * m));
+      for (const dy of [-0.08, -0.04, 0, 0.04, 0.08]) for (const dx of [-0.04, 0, 0.04]) zz = Math.max(zz, ch.torsoFrontZ(x + dx * mp, y + dy * mp));
       const ring = CBZ.bodySection.at(outerRing, Math.atan2(x, Math.max(0.01, zz)));
       return frame([x, y, Math.max(zz + clr, ring[1]) + 0.002 * m], [0, 0, 1]);
     };
@@ -578,8 +603,8 @@
       for (let k = 0; k < n; k++) {
         const u = n === 1 ? 0.5 : lerp(0.18, 0.82, k / (n - 1));
         const F = chestFrame(u, v);
-        pouch(B, F, 0, 0, w * m, h * m, d * m, kit, far ? null : dk);
-        if (!far && magW) box(B, F, 0, (h / 2 + rise / 2) * m, d * 0.5 * m, magW * m, rise * m, magD * m, POLY, BLACK);
+        pouch(B, F, 0, 0, w * mp, h * mp, d * md, kit, far ? null : dk);
+        if (!far && magW) box(B, F, 0, (h / 2 + rise / 2) * mp, d * 0.5 * md, magW * mp, rise * mp, magD * md, POLY, BLACK);
       }
     };
     switch (L.front) {
@@ -588,9 +613,9 @@
         magRow(2, 0.072, 0.115, 0.048, 0.28, 0.064, 0.03, 0.024);
         if (!far) {
           const F = chestFrame(0.5, 0.74);
-          pouch(B, F, 0, 0, 0.15 * m, 0.08 * m, 0.055 * m, kit, dk);
-          box(B, F, 0, 0, 0.0565 * m, 0.04 * m, 0.012 * m, 0.003 * m, RED);
-          box(B, F, 0, 0, 0.0565 * m, 0.012 * m, 0.04 * m, 0.003 * m, RED);
+          pouch(B, F, 0, 0, 0.15 * mp, 0.08 * mp, 0.055 * md, kit, dk);
+          box(B, F, 0, 0, 0.0565 * md, 0.04 * mp, 0.012 * mp, 0.003 * md, RED);
+          box(B, F, 0, 0, 0.0565 * md, 0.012 * mp, 0.04 * mp, 0.003 * md, RED);
         }
         break;
       }
@@ -599,59 +624,59 @@
       case "admin": {
         magRow(2, 0.072, 0.115, 0.048, 0.24, 0.064, 0.03, 0.024);
         const F = chestFrame(0.5, 0.7);
-        pouch(B, F, 0, 0, 0.19 * m, 0.11 * m, 0.03 * m, kit, dk);
-        if (!far) for (const a of [-0.05, -0.03, 0.04]) box(B, F, a * m, 0.04 * m, 0.032 * m, 0.008 * m, 0.04 * m, 0.008 * m, a < 0 ? BLACK : 0x585a54);   // pens / a light
+        pouch(B, F, 0, 0, 0.19 * mp, 0.11 * mp, 0.03 * md, kit, dk);
+        if (!far) for (const a of [-0.05, -0.03, 0.04]) box(B, F, a * mp, 0.04 * mp, 0.032 * md, 0.008 * mp, 0.04 * mp, 0.008 * md, a < 0 ? BLACK : 0x585a54);   // pens / a light
         break;
       }
       case "ak4": magRow(4, 0.068, 0.14, 0.045, 0.45, 0.06, 0.032, 0.02); break;
     }
     if (L.rangefinder && !far) {
       const F = chestFrame(0.78, 0.82);
-      pouch(B, F, 0, 0, 0.06 * m, 0.08 * m, 0.045 * m, kit, dk);
+      pouch(B, F, 0, 0, 0.06 * mp, 0.08 * mp, 0.045 * md, kit, dk);
     }
-    // ---- THE SIDES: IFAK on his left, smoke on his right, the radio behind left
+    // ---- THE SIDES, behind the arms' swing: IFAK rear left, smoke rear right;
+    // the radio rides the back panel's upper left with its antenna up
     if (!chest) {
-      const Fi = bandF(102);
-      pouch(B, Fi, 0, -0.01 * m, 0.1 * m, 0.13 * m, 0.06 * m, kit, far ? null : dk);
-      if (!far) { box(B, Fi, 0, 0.04 * m, 0.061 * m, 0.036 * m, 0.012 * m, 0.003 * m, RED); box(B, Fi, 0, 0.04 * m, 0.061 * m, 0.012 * m, 0.036 * m, 0.003 * m, RED); }
-      const Fs = bandF(-100);
-      pouch(B, Fs, 0, 0, 0.065 * m, 0.12 * m, 0.06 * m, kit, far ? null : dk);
-      if (!far) box(B, Fs, 0, 0.07 * m, 0.03 * m, 0.05 * m, 0.02 * m, 0.04 * m, 0x6f726a);   // the smoke's cap
-      if (L.radio === "small") {
-        const Fr = bandF(140);
-        box(B, Fr, 0, 0.03 * m, 0.03 * m, 0.07 * m, 0.17 * m, 0.045 * m, RADIO);
-        if (!far) tube(B, [at(Fr, -0.02 * m, 0.11 * m, 0.03 * m), at(Fr, -0.02 * m, 0.36 * m, 0.0)], 0.005 * m, BLACK, 5);
+      const Fi = bandF(148);
+      pouch(B, Fi, 0, -0.01 * mp, 0.1 * mp, 0.13 * mp, 0.06 * md, kit, far ? null : dk);
+      if (!far) { box(B, Fi, 0, 0.04 * mp, 0.061 * md, 0.036 * mp, 0.012 * mp, 0.003 * md, RED); box(B, Fi, 0, 0.04 * mp, 0.061 * md, 0.012 * mp, 0.036 * mp, 0.003 * md, RED); }
+      const Fs = bandF(-146);
+      pouch(B, Fs, 0, 0, 0.065 * mp, 0.12 * mp, 0.06 * md, kit, far ? null : dk);
+      if (!far) box(B, Fs, 0, 0.07 * mp, 0.03 * md, 0.05 * mp, 0.02 * mp, 0.04 * md, 0x6f726a);   // the smoke's cap
+      if (L.radio === "small" && B0) {
+        const Fr = bagFrame(B0, 0.84, 0.72);
+        box(B, Fr, 0, 0, 0.024 * md, 0.07 * mp, 0.15 * mp, 0.045 * md, RADIO);
+        if (!far) tube(B, [at(Fr, -0.02 * mp, 0.07 * mp, 0.03 * md), at(Fr, -0.03 * mp, 0.34 * mp, 0.09 * md)], 0.005 * m, BLACK, 5);
       }
     }
     // ---- THE BACK
     if (B0 && L.back === "hydration") {
-      const F = bagFrame(B0, 0.5, 0.48);
-      box(B, F, 0, 0, 0.022 * m, 0.2 * m, 0.25 * m, 0.044 * m, kit);
+      const F = bagFrame(B0, 0.4, 0.46);
+      box(B, F, 0, 0, 0.022 * md, 0.2 * mp, 0.25 * mp, 0.044 * md, kit);
       if (!far) {
         // the drink tube up over his right shoulder and down the strap
         const rp = paths[-1];
-        const top = at(F, 0.06 * m, 0.13 * m, 0.03 * m);
+        const top = at(F, 0.06 * mp, 0.13 * mp, 0.03 * mp);
         const pts = [top];
-        for (let k = rp.pts.length - 1; k >= 2; k -= 2) pts.push(add(rp.pts[k], rp.nrm[k], sth + 0.006 * m));
-        tube(B, pts, 0.006 * m, TUBE, 5);
+        for (let k = rp.pts.length - 1; k >= 2; k -= 2) pts.push(add(rp.pts[k], rp.nrm[k], sth + 0.006 * mp));
+        tube(B, pts, 0.006 * mp, TUBE, 5);
       }
     } else if (B0 && L.back === "aidbag") {
       const F = bagFrame(B0, 0.5, 0.42);
-      box(B, F, 0, -0.02 * m, 0.08 * m, 0.3 * m, 0.36 * m, 0.16 * m, kit);
-      box(B, F, 0, 0.12 * m, 0.165 * m, 0.31 * m, 0.1 * m, 0.012 * m, dk);
-      box(B, F, 0, -0.03 * m, 0.1615 * m, 0.11 * m, 0.11 * m, 0.003 * m, WHITE);
-      box(B, F, 0, -0.03 * m, 0.1635 * m, 0.08 * m, 0.024 * m, 0.003 * m, RED);
-      box(B, F, 0, -0.03 * m, 0.1635 * m, 0.024 * m, 0.08 * m, 0.003 * m, RED);
+      box(B, F, 0, -0.02 * mp, 0.08 * md, 0.3 * mp, 0.36 * mp, 0.16 * md, kit);
+      box(B, F, 0, 0.12 * mp, 0.165 * md, 0.31 * mp, 0.1 * mp, 0.012 * md, dk);
+      box(B, F, 0, -0.03 * mp, 0.1615 * md, 0.11 * mp, 0.11 * mp, 0.003 * md, WHITE);
+      box(B, F, 0, -0.03 * mp, 0.1635 * md, 0.08 * mp, 0.024 * mp, 0.003 * md, RED);
+      box(B, F, 0, -0.03 * mp, 0.1635 * md, 0.024 * mp, 0.08 * mp, 0.003 * md, RED);
     } else if (B0 && L.back === "manpack") {
       const F = bagFrame(B0, 0.5, 0.5);
-      box(B, F, 0, 0, 0.055 * m, 0.22 * m, 0.27 * m, 0.1 * m, kit);
-      box(B, F, 0, 0.02 * m, 0.11 * m, 0.17 * m, 0.2 * m, 0.012 * m, RADIO);
+      box(B, F, 0, 0, 0.055 * md, 0.22 * mp, 0.27 * mp, 0.1 * md, kit);
+      box(B, F, 0, 0.02 * mp, 0.11 * md, 0.17 * mp, 0.2 * mp, 0.012 * md, RADIO);
       if (!far) {
-        tube(B, [at(F, 0.07 * m, 0.13 * m, 0.08 * m), at(F, 0.09 * m, 0.4 * m, 0.1 * m), at(F, 0.12 * m, 0.95 * m, 0.16 * m)], 0.004 * m, BLACK, 4);
+        tube(B, [at(F, 0.07 * mp, 0.13 * mp, 0.08 * mp), at(F, 0.09 * mp, 0.4 * mp, 0.1 * mp), at(F, 0.12 * mp, 0.95 * mp, 0.16 * mp)], 0.004 * mp, BLACK, 4);
         // the handset clipped to the left strap
-        const pf = paths[1].pts[2], nf = paths[1].nrm[2];
-        const Fh = frame(add(pf, nf, sth), nf);
-        box(B, Fh, 0, 0, 0.018 * m, 0.05 * m, 0.09 * m, 0.03 * m, RADIO);
+        const Fh = bagFrame(F0, 0.16, 0.8);
+        box(B, Fh, 0, 0, 0.018 * md, 0.05 * mp, 0.09 * mp, 0.03 * md, RADIO);
       }
     }
     const g = B.geometry();
@@ -749,23 +774,30 @@
       mat = cm(hex);
     } else {
       tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      mat = new THREE.MeshLambertMaterial({ color: tint == null ? 0xffffff : tint });
+      // the colour is the tile's mean (what any system that re-tints a body by
+      // its material colour, gore's char and blood, reads); the shader draws
+      // the tile itself, scaled by tint
+      let mean = 0x4d5038;
+      try { mean = C.mean(pattern); } catch (e) {}
+      mat = new THREE.MeshLambertMaterial({ color: lin(mean) });
+      const tintC = new THREE.Color(tint == null ? 0xffffff : tint);
       const scale = 0.7 / rec.metres;
       mat.userData.camo = pattern;
       mat.onBeforeCompile = function (sh) {
         sh.uniforms.uCamo = { value: tex };
         sh.uniforms.uCamoScale = { value: scale };
+        sh.uniforms.uCamoTint = { value: tintC };
         sh.vertexShader = sh.vertexShader
           .replace("#include <common>", "#include <common>\nvarying vec3 vCamoP;\nvarying vec3 vCamoN;")
           .replace("#include <begin_vertex>", "#include <begin_vertex>\nvCamoP = transformed;\nvCamoN = objectNormal;");
         sh.fragmentShader = sh.fragmentShader
-          .replace("#include <common>", "#include <common>\nuniform sampler2D uCamo;\nuniform float uCamoScale;\nvarying vec3 vCamoP;\nvarying vec3 vCamoN;")
+          .replace("#include <common>", "#include <common>\nuniform sampler2D uCamo;\nuniform float uCamoScale;\nuniform vec3 uCamoTint;\nvarying vec3 vCamoP;\nvarying vec3 vCamoN;")
           .replace("vec4 diffuseColor = vec4( diffuse, opacity );",
             "vec4 diffuseColor = vec4( diffuse, opacity );\n" +
             "{ vec3 bw = abs(normalize(vCamoN)); bw = bw * bw * bw * bw; bw /= (bw.x + bw.y + bw.z + 1e-5);\n" +
             "  vec3 q = vCamoP * uCamoScale;\n" +
             "  vec3 cc = texture2D(uCamo, q.zy).rgb * bw.x + texture2D(uCamo, q.xz).rgb * bw.y + texture2D(uCamo, q.xy).rgb * bw.z;\n" +
-            "  diffuseColor.rgb *= sRGBToLinear(vec4(cc, 1.0)).rgb; }");
+            "  diffuseColor.rgb = sRGBToLinear(vec4(cc, 1.0)).rgb * uCamoTint; }");
       };
       mat.customProgramCacheKey = function () { return "cbz-camo"; };
     }

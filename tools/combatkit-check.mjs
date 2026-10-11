@@ -131,7 +131,7 @@ for (const B of BODIES) {
           const zs = side > 0 ? ch.torsoFrontZ(x, y) : ch.torsoBackZ(x, y), d = (z - zs) * side;
           if (d > -0.001 * m && d < touch) touch = d;
         }
-        ok(touch * hs <= 0.008, tag + ": the " + (side > 0 ? "front" : "back") + " plate touches nowhere (" + (touch * hs * 1000).toFixed(1) + " mm)");
+        ok(touch * hs <= 0.012, tag + ": the " + (side > 0 ? "front" : "back") + " plate touches nowhere (" + (touch * hs * 1000).toFixed(1) + " mm)");
       }
       worstFloat = Math.max(worstFloat, gap);
       // over a bust, a belly or the sternum a rigid plate bridges; it never stands off
@@ -167,7 +167,7 @@ for (const B of BODIES) {
       const STATES = [["idle", 0, null], ["walk", 1.4, null], ["run", 4.2, null], ["rifle low", 1.4, { carry: "low" }], ["rifle high", 0, { carry: "high" }], ["patrol", 1.3, { carry: "patrol" }]];
       for (const [nm, spd, sol] of STATES) {
         ch.soldier = sol ? JSON.parse(JSON.stringify(sol)) : null;
-        let worst = 0;
+        let worst = 0, worstWhere = "";
         for (let f = 0; f < 90; f++) {
           CBZ.animChar(ch, spd, 1 / 60);
           if (f < 60 || f % 5) continue;
@@ -182,12 +182,12 @@ for (const B of BODIES) {
               let ol = olc.get(key);
               if (!ol) { ol = CBZ.bodySection.outline(ch, key * 0.01 * m); olc.set(key, ol); }
               if (inPoly(ol, v.x, v.z)) continue;
-              worst = d;
+              worst = d; worstWhere = (seg === arm.userData.main ? "upper" : "fore") + " arm at y " + ((v.y - ch.torsoShape.base) / (ch.torsoShape.yN - ch.torsoShape.base)).toFixed(2) + ", " + Math.round(Math.atan2(v.x, v.z) * 180 / Math.PI) + " deg";
             }
           }
         }
         if (worst > worstArm) { worstArm = worst; worstArmAt = tag + " " + nm; }
-        ok(worst <= 0.025, tag + ": arm " + (worst * 1000).toFixed(1) + " mm into the carrier (" + nm + ")");
+        ok(worst <= 0.025, tag + ": arm " + (worst * 1000).toFixed(1) + " mm into the carrier (" + nm + ", " + worstWhere + ")");
       }
       ch.soldier = null;
     }
