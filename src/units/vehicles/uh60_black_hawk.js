@@ -24,7 +24,7 @@
     crew: [{seat: "pilot", pos: [0.6, 2.2, 3.2]}, {seat: "copilot", pos: [-0.6, 2.2, 3.2]}, {seat: "gunner", pos: [1.1, 1.8, 1.4]}],
     passengers: 11,
     weapons: [
-      {id: "m134_door", seat: "gunner", kind: "mg", wid: "lmg", rof: 50, burst: 40, pause: 2, dmg: 22, pen: 9, range: 900, ammo: 4000},
+      {id: "m134_door", seat: "gunner", kind: "mg", wid: "lmg", mount: "free", rof: 50, burst: 40, pause: 2, dmg: 22, pen: 9, range: 900, ammo: 4000},
     ],
     build: function (ctx) {
     const a = CBZ.milAir;

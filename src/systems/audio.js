@@ -729,6 +729,25 @@
       tail: { g: 0.06, t: 0.4 } },
   };
   GUNS.shoot = GUNS.shoot_pistol; // bare sfx("shoot") = sidearm default
+  /* THE BULLET, NOT THE GUN. A supersonic round passing near you is its own
+     sound: a sharp N-wave CRACK (the shock cone sweeping over the ear) that
+     arrives BEFORE the muzzle report whenever the shooter is far enough off,
+     because the bullet outruns its own sound. Distant fire is "crack ...
+     thump": src/battle/fire.js schedules this at the round's closest
+     approach and the report at distance / 343 m/s. No sample on purpose:
+     the synth crack layer IS the physics. */
+  GUNS.bullet_snap = { sample: "none-snap", cd: 0.012, jit: 0.12, vol: 0.9,
+    crack: { g: 1.25, hp: 2300, t: 0.007 },
+    body: { g: 0.32, f0: 5200, f1: 2100, sweep: 0.012, t: 0.035, q: 0.8 },
+    thump: { g: 0.04, f0: 200, f1: 120, t: 0.02 },
+    tail: { g: 0.025, t: 0.12 } };
+  // a round skipping off stone or steel: the whine is the deformed bullet
+  // tumbling away, a resonant sweep down over a quarter second
+  GUNS.ricochet = { sample: "none-ric", cd: 0.05, jit: 0.15, vol: 0.55,
+    crack: { g: 0.5, hp: 3000, t: 0.01 },
+    body: { g: 0.45, f0: 3600, f1: 900, sweep: 0.32, t: 0.38, q: 7 },
+    thump: { g: 0.02, f0: 300, f1: 200, t: 0.02 },
+    tail: { g: 0.01, t: 0.1 } };
 
   // every shot — recorded or synthesized, every gun, NPC or player — passes
   // through ONE soft compressor so sustained auto fire stacks without clipping

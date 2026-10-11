@@ -753,8 +753,9 @@
       d.updateMatrix(); im.setMatrixAt(i, d.matrix);
     }
     im.instanceMatrix.needsUpdate = true; root.add(im);
-    col(cx - 0.5, cz, 7, 0.9, 0, 1.0);                   // wall collider
-    col(cx - 3, cz + 2.5, 0.9, 5, 0, 1.0);
+    // what a round meets is SAND (weapons/ballistics.js: a rifle stops in 60 cm of it)
+    col(cx - 0.5, cz, 7, 0.9, 0, 1.0).mat = "sand";      // wall collider
+    col(cx - 3, cz + 2.5, 0.9, 5, 0, 1.0).mat = "sand";
   }
 
   // ========================================================================
