@@ -33,7 +33,7 @@
 
     // ---- land -------------------------------------------------------------
     gorilla: Object.assign(S("gorilla", "gorillas", "troop"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
-    bengal_tiger: S("Bengal tiger", "Bengal tigers", "streak"),
+    bengal_tiger: Object.assign(S("Bengal tiger", "Bengal tigers", "streak"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     lion: Object.assign(S("lion", "lions", "pride"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     white_lion: Object.assign(S("white lion", "white lions", "pride"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/species/lion.js"] }),
     cheetah: Object.assign(S("cheetah", "cheetahs", "coalition"), { needs: FELID }),
