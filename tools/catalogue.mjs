@@ -1,54 +1,62 @@
 #!/usr/bin/env node
-/* tools/catalogue.mjs — THE BEFORE/AFTER CATALOGUE of NPC War's units.
+/* tools/catalogue.mjs — THE BEFORE/AFTER CATALOGUE of NPC War's units, in ONE
+   batched capture run.
 
-     node tools/catalogue.mjs --kind vehicle                 every vehicle that has its own art on AFTER
-     node tools/catalogue.mjs --ids m1_abrams,hmmwv          just these
-     node tools/catalogue.mjs --kind vehicle --page-only     rebuild index.html from the shots already taken
+     node tools/catalogue.mjs --kind vehicle          every vehicle with its own art on AFTER
+     node tools/catalogue.mjs --kind species          every animal (same design, its own shot plan)
+     node tools/catalogue.mjs --ids m1_abrams,hmmwv   just these (wave-A stubs included)
+     node tools/catalogue.mjs --page-only             rebuild index.html from the frames on disk
 
-   For every unit it asks the shot service (tools/shot, the warm Chrome pool:
-   this tool never launches a browser) for:
+   ONE BOOT, MANY UNITS. The tool launches its own headless Chrome
+   (tools/testbus/browser.mjs), serves both trees straight out of .git
+   (tools/shot/gitserve.mjs: no checkouts, no worktrees) and boots NPC War ONCE
+   per tree: BEFORE (--before, default 5864f6a5, the NPC War split, where every
+   vehicle was still the generic city model) and AFTER (--after, default
+   origin/main). The two pages run in parallel in the same Chrome. In each live
+   page (rAF frozen, time moves only through __battle.advance) every unit is
+   staged in turn through the shot service's in-page half (tools/shot/page/npcwar.js,
+   window.__shot: restage, studio, cameras), shot from every angle, cleared,
+   next unit. Nothing goes through the shared shot queue.
 
-     BEFORE vs AFTER turntable  one two-sided request: front, side, 3/4, rear,
-                                top, close-up, plus a hero 3/4, on the studio
-                                stage. BEFORE = --before (default 5864f6a5, the
-                                NPC War split, where every vehicle was still the
-                                generic city model), AFTER = --after (origin/main).
-     AFTER in action            ONE request on one sim timeline (a JS request
-                                costs its page and a reboot is held while the Mac
-                                is loaded, so one boot buys the whole story), on
-                                the real ground (--map, default dunes), the lens
-                                on the unit (cam=<id>):
-                                  move      driving / flying in, dust or rotor wash
-                                  fire      foes set out ahead, the main weapon fired
-                                            (vehFire), flash + round in flight
-                                  dismount  (if it carries men) the benches filled
-                                            through the roster grammar, the squad
-                                            out once foes are inside dismountAt
-                                  wreck     killed through the page's own damage route
-     facts                      read from the unit's own file at AFTER (node vm,
-                                a stub registry): dimensions, mass, speed, armour
-                                by facing, crew seats, passengers, weapons
+   PER UNIT
+     turntable, both trees  hero 3/4, front, side, 3/4, rear, top, close-up, on the
+                            studio stage (grey cyclorama, grid, 2 m ruler)
+     action, AFTER only     vehicles: one sim timeline on the real ground (--map,
+                            default dunes), the lens on the unit:
+                              move      driving / flying in: dust, rotor wash
+                              fire      foes set out ahead, the main weapon fired
+                                        (vehFire): flash and the round in flight
+                              dismount  (carriers) the benches filled through the
+                                        roster grammar; the squad out on the ground
+                              wreck     killed through the page's own damage route
+                            species: the run (two gait phases), the strike
+                            (CBZ.predatorPose phases), the death and the corpse
+     facts                  read from the unit's own file at AFTER (node vm with a
+                            stub registry): dimensions, mass, speed, armour by
+                            facing, crew, passengers, weapons (vehicles) or the
+                            stats row (species)
 
-   Output: --out (default ~/harness/out/gta6/catalogue/<kind>s/) holds index.html
-   and img/*.webp (max 1280 px, cwebp; sips JPEG when cwebp is missing). Raw
-   frames are cached under ~/harness/out/gta6/catalogue/_raw/<kind>s/<id>/<req>/,
-   keyed by the unit file's blob at AFTER + the before ref + the request: a rerun
-   only shoots what changed. --fresh reshoots everything.
+   Output: --out (default ~/harness/out/gta6/catalogue/<kind>/) holds index.html
+   and img/*.webp (max 1280 px, cwebp; sips JPEG when cwebp is missing). Raw JPEG
+   frames stay in ~/harness/out/gta6/catalogue/_raw/<kind>/<id>/.
 
-   A unit whose AFTER file is still the wave-A stub (it says "No new art in wave
-   A") is listed as pending and not shot; --all shoots it anyway.
+   A unit whose AFTER file is still the wave-A stub ("No new art in wave A") is
+   listed as pending and not shot, unless named with --ids or --all is given.
 
-   Options: --before REF  --after REF  --map ID  --fresh  --all  --page-only
-            --only turntable,action   --ids a,b (stubs included)   --wait-min N (default 40)
-            --agent NAME (shot fairness queue name, default "catalogue")       */
-import { spawn, execFileSync } from "node:child_process";
+   Options: --before REF  --after REF  --map ID  --all  --page-only  --size WxH
+            --kind vehicle|species  --ids a,b  --out DIR                         */
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
-import { readJson, resultPath } from "./shot/lib.mjs";
+import { launchChrome, CHROME } from "./testbus/browser.mjs";
+import { pathToFileURL } from "node:url";
+import { bootWorld } from "./testbus/worlds.mjs";
+import { serveCommit } from "./shot/gitserve.mjs";
+import { NPCWAR_BASE_QUERY } from "./shot/lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..");
@@ -58,27 +66,26 @@ const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] 
 if (has("--help") || has("-h")) { console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("*/")[0].replace(/^#!.*\n\/\* ?/, "")); process.exit(0); }
 const g = (args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8", maxBuffer: 64 << 20, stdio: ["ignore", "pipe", "pipe"] }).trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const log = (...a) => console.log("[catalogue]", ...a);
+const T0 = Date.now();
+const secs = () => ((Date.now() - T0) / 1000).toFixed(1) + " s";
+const log = (...a) => console.log(`[catalogue ${secs()}]`, ...a);
 
-const KIND = val("--kind", "vehicle");
+const KIND = val("--kind", "vehicle") === "species" || val("--kind") === "animal" ? "species" : "vehicle";
 const BEFORE = val("--before", "5864f6a5");
 const AFTER = val("--after", "origin/main");
 const MAP = val("--map", "dunes");
-const AGENT = val("--agent", "catalogue");
-const ONLY = val("--only") ? new Set(val("--only").split(",")) : null;
-const RETRIES = +val("--retries", 6);
-const WAIT_MS =(+val("--wait-min", 40) || 40) * 60e3;
+const [W, H] = val("--size", "1280x800").split("x").map(Number);
 const ROOT = path.join(os.homedir(), "harness/out/gta6/catalogue");
-const OUT = path.resolve(val("--out", path.join(ROOT, KIND + "s")));
-const RAW = path.join(ROOT, "_raw", KIND + "s");
+const OUT = path.resolve(val("--out", path.join(ROOT, KIND === "vehicle" ? "vehicles" : "animals")));
+const RAW = path.join(ROOT, "_raw", KIND === "vehicle" ? "vehicles" : "animals");
 const IMG = path.join(OUT, "img");
-if (KIND !== "vehicle") { console.error("catalogue: only --kind vehicle is wired so far (animals next: add their request set + facts reader)"); process.exit(2); }
+const UNIT_DIR = KIND === "vehicle" ? "src/units/vehicles" : "src/units/species";
 
+if (AFTER === "origin/main") { try { g(["fetch", "-q", "origin", "main"]); } catch (_) {} }
 const beforeC = g(["rev-parse", BEFORE + "^{commit}"]);
 const afterC = g(["rev-parse", AFTER + "^{commit}"]);
 
 /* ------------------------------------------------------------ the facts */
-// run a file from AFTER in a sandbox whose CBZ only records what it registers
 function sandboxRun(src, CBZ) {
   const ctx = { console: { log() {}, warn() {}, error() {} }, Math, JSON, Object, Array, Number, String, CBZ };
   ctx.window = ctx; ctx.globalThis = ctx; ctx.self = ctx;
@@ -87,44 +94,40 @@ function sandboxRun(src, CBZ) {
 }
 function manifest() {
   const C = {};
-  sandboxRun(g(["show", `${afterC}:src/units/manifest.js`]), C);
-  return C.UNIT_MANIFEST || (C.unitKit && C.unitKit.manifest) || null;
+  try { sandboxRun(g(["show", `${afterC}:src/units/manifest.js`]), C); } catch (e) { log("manifest threw:", e.message); }
+  return C.UNIT_MANIFEST || {};
 }
 function unitDef(id) {
-  const file = `src/units/vehicles/${id}.js`;
+  const file = `${UNIT_DIR}/${id}.js`;
   let src; try { src = g(["show", `${afterC}:${file}`]); } catch (_) { return null; }
   const got = {};
-  try { sandboxRun(src, { unitKit: { register: (k, d) => { got[k] = d; } } }); } catch (e) { log(id, "facts: file threw in the sandbox:", e.message); }
+  const reg = (k, d) => { got[k] = d; };
+  try { sandboxRun(src, { unitKit: { register: reg }, defineSpecies: reg }); } catch (e) { log(id, "facts: file threw in the sandbox:", e.message); }
   const head = (/^\/\*[\s\S]*?\*\//.exec(src) || [""])[0];
-  const title = ((/units\/vehicles\/[\w.]+\s+[—-]+\s+([^\n]+)/.exec(head) || [])[1] || "").replace(/\s+$/, "");
-  const stub = /No new art in wave A/.test(head);
-  let blob = ""; try { blob = g(["rev-parse", `${afterC}:${file}`]); } catch (_) {}
-  return { id, def: got[id] || null, title, stub, blob, lines: src.split("\n").length };
+  const title = ((/units\/(?:vehicles|species)\/[\w.]+\s+[—-]+\s+([^\n]+)/.exec(head) || [])[1] || "").replace(/\s+$/, "");
+  return { id, def: got[id] || null, title, stub: /No new art in wave A/.test(head), lines: src.split("\n").length };
 }
 
-/* ---------------------------------------------------------- the requests */
-const TT = [
-  ["hero", "orbit:38:12:0.62"], ["front", "front"], ["side", "side"], ["3q", "3q"],
-  ["rear", "back"], ["top", "top"], ["close", "orbit:28:14:0.42"],
-];
+/* ---------------------------------------------------------- the shot plans */
 const fnameCam = (c) => c.replace(/[^\w]+/g, "_");
-const fname = (side, pose, t, cam) => `${side ? side + "-" : ""}${pose}-t${String(t).replace(".", "_")}-${fnameCam(cam)}.jpg`;
+const TT = KIND === "vehicle"
+  ? [["hero", "orbit:38:12:0.62"], ["front", "front"], ["side", "side"], ["3q", "3q"], ["rear", "back"], ["top", "top"], ["close", "orbit:28:14:0.42"]]
+  : [["hero", "orbit:38:12:0.8"], ["front", "front"], ["side", "side"], ["3q", "3q"], ["rear", "back"], ["top", "top"], ["close", "head"]];
+const TT_LABEL = { hero: "3/4 hero", front: "Front", side: "Side", "3q": "3/4", rear: "Rear", top: "Top", close: "Close-up" };
+const WIDE = "orbit:125:10:2.4";
 
-/* THE ACTION TIMELINE, one request per unit (a request with JS costs its page,
-   and a fresh boot is held while the Mac is loaded, so one boot buys it all):
-     0 .. FIRE   move: foes far ahead (ground) / the helicopter flying in
-     FIRE        foes set out ahead, the main weapon fired (vehFire)
-     .. KILL     the fight goes on; a carrier's squad dismounts (foes inside dismountAt)
-     KILL        killed through the page's own damage route; the lens stays on the wreck
-   Run once after spawning with S, B, CBZ, THREE in scope; MAP and vehFire are
-   globals of the battle's classic scripts. The events ride B.advance, which
-   __shot.at(t) calls once per frame time. */
-function actJs(id, P) {
+/* THE VEHICLE ACTION TIMELINE, run once after spawning with S, B, CBZ, THREE in
+   scope (MAP and vehFire are globals of the battle's classic scripts). Events
+   ride B.advance, which __shot.at(t) calls once per frame time. Everything it
+   swaps is put back by window.__catRestore() before the next unit. */
+function vehicleJs(id, P) {
   return `(function () {
   var ID = ${JSON.stringify(id)}, P = ${JSON.stringify(P)};
   var R = B.roster(), u = R.filter(function (m) { return m.vehicle && m.team === "red" && m.unitId === ID; })[0];
   if (!u) throw new Error("no " + ID + " on the field");
-  function foes() { return B.roster().filter(function (m) { return m.team === "blue" && !m.inVeh && !m.vehicle && !m.dead; }); }
+  var adv = B.advance, roster = B.roster, T = 0;
+  window.__catRestore = function () { B.advance = adv; B.roster = roster; window.__catRestore = null; };
+  function foes() { return roster.call(B).filter(function (m) { return m.team === "blue" && !m.inVeh && !m.vehicle && !m.dead; }); }
   function place(D) {
     var fx = Math.sin(u.h), fz = Math.cos(u.h);
     foes().forEach(function (m, k) {
@@ -146,12 +149,17 @@ function actJs(id, P) {
     } },
     { at: P.kill, fn: function () {
       var hurt = CBZ.modes && CBZ.modes.npcwar && CBZ.modes.npcwar.hurt;
-      if (hurt) hurt(u, 1e9, { byTeam: "blue", dir: { x: -Math.sin(u.h), z: -Math.cos(u.h) }, cause: "shot" });
+      /* the armour is asked first (units/kit/vehicle.js threatOf/resolve): a bare
+         "shot" is a 6 mm round and bounces off any hull whatever its damage. The
+         kill comes from behind as a heavy round, through the channel a vehicle's
+         own gun uses (by._shot), until the hull is really dead */
+      var by = { vehicle: true, team: "blue", pos: { x: u.pos.x - Math.sin(u.h) * 60, y: u.pos.y, z: u.pos.z - Math.cos(u.h) * 60 },
+        _shot: { pen: 3000, beh: 5000, he: true, cls: "atgm" } };
+      for (var i = 0; i < 8 && hurt && !u.dead; i++) hurt(u, 1e9, { byTeam: "blue", by: by, cause: "shot" });
       // the shot's lens skips the dead: from here the field it frames is the wreck
       B.roster = function () { return [u]; };
     } },
   ];
-  var adv = B.advance, T = 0;
   B.advance = function (sec, step) {
     var end = T + sec;
     while (ev.length && ev[0].at <= end + 1e-6) {
@@ -164,112 +172,111 @@ function actJs(id, P) {
   };
 })();`;
 }
-
-const WIDE = "orbit:125:10:2.4";
-function timeline(U) {
-  const d = U.def || {}, S = d.stats || {}, air = d.domain === "air", carrier = (d.passengers || 0) > 0;
+const r2 = (x) => Math.round(x * 100) / 100;
+/* a plan: [{ stage: <__shot.stage spec>, shots: [[t, cam, label]] }] */
+function actionPlan(U) {
+  const d = U.def || {}, S = d.stats || {}, id = U.id;
+  if (KIND === "species") {
+    return [
+      { stage: { species: id, pose: "run" }, shots: [["0", "side", "At the run"], ["half", "side", "Mid-stride"], ["0", "3q", "Running, 3/4"]] },
+      { stage: { species: id, pose: "attack" }, shots: [["0.25", "3q", "The strike: wind-up"], ["0.5", "3q", "The strike"], ["0.75", "side", "Follow-through"]] },
+      { stage: { species: id, pose: "fight", vs: "men", vn: 6, stage: "map", map: MAP, cam: id }, shots: [["3", "hot", "Into the men"], ["8", "orbit:125:12:2.2", "The fight, wide"]] },
+      { stage: { species: id, pose: "death", stage: "map" }, shots: [["0.5", "side", "Killed"], ["4", "3q", "The body, 4 s on"]] },
+    ];
+  }
+  const air = d.domain === "air", carrier = (d.passengers || 0) > 0;
+  const crewN = (d.crew || []).length, pass = d.passengers || 0;
   const mv = air ? [1.5, 4] : [4, 7];
   const fire = mv[1] + 0.2;
   const fr = [fire + 0.04, fire + 0.25, fire + 0.7];
   const dm = carrier ? (air ? [fire + 5, fire + 9] : [fire + 2.3, fire + 4.3]) : [];
   const kill = (dm.length ? dm[dm.length - 1] : fr[2]) + 0.6;
   const wr = [kill + 0.3, kill + 2.5, kill + 6];
-  const r2 = (x) => Math.round(x * 100) / 100;
-  // the frames the page shows: [time, cam, label]
-  const show = [
-    [mv[0], "hot", "On the move"], [mv[1], WIDE, air ? "Inbound, rotor wash" : "Dust off the tracks"],
+  const P = { moveD: air ? 0 : (S.standoff || 200) + 320, fire: r2(fire), fireD: air ? 220 : 170, kill: r2(kill) };
+  const shots = [
+    [mv[0], "hot", "On the move"], [mv[1], WIDE, air ? "Inbound, rotor wash" : "Dust off the running gear"],
     [fr[0], "hot", "Main weapon fires"], [fr[0], WIDE, "Muzzle flash, wide"], [fr[1], WIDE, "Round downrange"], [fr[2], "hot", "Fight on"],
     ...dm.map((t, i) => [t, WIDE, i ? "Squad on the ground" : "Squad dismounts"]),
     [wr[0], "hot", "Knocked out"], [wr[1], WIDE, "Burning wreck"], [wr[2], "hot", "Wreck, 6 s on"],
   ].map(([t, c, l]) => [String(r2(t)), c, l]);
-  return {
-    P: { moveD: air ? 0 : (S.standoff || 200) + 320, fire: r2(fire), fireD: air ? 220 : 170, kill: r2(kill) },
-    times: [...mv, ...fr, ...dm, ...wr].map((t) => String(r2(t))),
-    show,
-  };
+  const roster = pass > 0 ? `${id}*1,men*${crewN + pass}` : id;
+  return [{ stage: { species: roster, n: pass > 0 ? crewN + pass + 1 : 1, pose: "fight", vs: "men", vn: 8, stage: "map", cam: id, js: vehicleJs(id, P) }, shots }];
 }
 
-function requestsFor(U) {
-  const d = U.def || {}, id = U.id;
-  const crewN = (d.crew || []).length, pass = d.passengers || 0;
-  const roster = pass > 0 ? `${id}*1,men*${crewN + pass}&n=${crewN + pass + 1}` : id;
-  const TL = timeline(U);
-  const R = [
-    { key: "turntable", ba: true, setup: `species=${id}`, cams: TT.map((c) => c[1]), times: ["0"], size: "1280x800" },
-    { key: "action", setup: `species=${roster}&pose=fight&vs=men&vn=8&stage=map&map=${MAP}&cam=${id}`, js: actJs(id, TL.P),
-      cams: ["hot", WIDE], times: TL.times, size: "1280x800", show: TL.show },
-  ];
-  return ONLY ? R.filter((r) => ONLY.has(r.key)) : R;
-}
-
-function expectedFrames(r) {
-  const pose = (/pose=(\w+)/.exec(r.setup) || [0, "idle"])[1], o = [];
-  for (const side of r.ba ? ["before", "after"] : [""]) for (const t of r.times) for (const cam of r.cams) o.push(fname(side, pose, t, cam));
-  return o;
-}
-function framesComplete(U, r, dir) {
-  return expectedFrames(r).every((f) => existsSync(path.join(dir, f)) && statSync(path.join(dir, f)).size > 2000);
-}
-function reqKey(U, r) {
-  return createHash("sha1").update(JSON.stringify([U.blob, r.ba ? beforeC : "", r, 3])).digest("hex").slice(0, 16);
-}
-
-/* ---------------------------------------------------------- the shooting */
-function submit(U, r, dir) {
-  const a = [path.join(HERE, "shot/req.mjs"), "--agent", AGENT, "--branch", afterC, "--no-merge", "--setup", r.setup,
-    "--cams", r.cams.join(","), "--times", r.times.join(","), "--size", r.size, "--jpg", "--out", dir];
-  if (r.ba) a.push("--before", beforeC);
-  if (r.js) a.push("--js", r.js);
-  const out = execFileSync(process.execPath, a, { cwd: REPO, encoding: "utf8" });
-  const m = /shot (\S+) queued/.exec(out);
-  if (!m) throw new Error("req.mjs said: " + out.trim());
-  return m[1];
-}
-async function shootAll(units) {
-  const jobs = [];
-  for (const U of units) for (const r of requestsFor(U)) {
-    const dir = path.join(RAW, U.id, r.key), key = reqKey(U, r), meta = readJson(path.join(dir, "meta.json"));
-    if (!has("--fresh") && meta && meta.key === key && (meta.status === "done" || framesComplete(U, r, dir))) { log(`${U.id}/${r.key}: cached`); continue; }
-    rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
-    jobs.push({ U, r, dir, key });
-  }
-  if (!jobs.length) return;
-  log(`${jobs.length} request(s) to the shot service`);
-  // the service queues fairly (2 in flight per agent): submit everything, then watch
-  for (const j of jobs) {
-    try { j.id = submit(j.U, j.r, j.dir); log(`${j.U.id}/${j.r.key}: ${j.id}`); }
-    catch (e) { j.err = e.message; log(`${j.U.id}/${j.r.key}: submit failed: ${e.message}`); }
-  }
+/* ------------------------------------------------------------ the capture */
+const pageLib = () => {
+  const src = readFileSync(path.join(HERE, "shot/page/npcwar.js"), "utf8");
+  return src.replace('var V = "dev";', `var V = "${createHash("sha1").update(src).digest("hex").slice(0, 12)}";`);
+};
+const QUERY = (map) => { const q = new URLSearchParams(NPCWAR_BASE_QUERY); q.set("map", map); q.sort(); return q.toString(); };
+/* BEFORE only shoots studio turntables (the ground is hidden), so it boots the light
+   arena: the old tree never came up on the dunes in 240 s (measured on 5864f6a5) */
+const BEFORE_MAP = val("--before-map", "arena");
+async function bootTree(B, label, commit, map) {
   const t0 = Date.now();
-  for (;;) {
-    let open = 0;
-    for (const j of jobs) {
-      if (!j.id || j.done) continue;
-      const res = readJson(resultPath(j.id));
-      if (res && (res.status === "done" || res.status === "error")) {
-        /* HARNESS TRAP: on a loaded Mac the service holds world boots (load > 4 x
-           cores) and a request dies at SHOT_JOB_MS while it waits. Nothing was
-           wrong with it: ask again (a few times) instead of shipping a hole. */
-        if (res.status === "error" && !framesComplete(j.U, j.r, j.dir) && (j.tries = (j.tries || 0) + 1) <= RETRIES) {
-          log(`${j.U.id}/${j.r.key}: ${res.error}; asking again (${j.tries}/${RETRIES})`);
-          try { j.id = submit(j.U, j.r, j.dir); open++; continue; } catch (e) { log(`resubmit failed: ${e.message}`); }
-        }
-        j.done = true;
-        writeJson2(path.join(j.dir, "meta.json"), { key: j.key, id: j.id, status: res.status, error: res.error || null, warn: res.warn || [], sides: res.sides, req: j.r });
-        log(`${j.U.id}/${j.r.key}: ${res.status}${res.error ? " " + res.error : ""} (${Math.round((Date.now() - t0) / 1000)} s)`);
-      } else open++;
-    }
-    if (!open) break;
-    if (Date.now() - t0 > WAIT_MS) { log(`gave up waiting after ${WAIT_MS / 60e3} min; ${open} still out (rerun to pick them up)`); break; }
-    await sleep(2000);
-  }
+  const srv = await serveCommit(REPO, commit);
+  const pg = await B.newPage();
+  await bootWorld(pg, srv.origin, `npcwar|1|${QUERY(map)}`, 300e3);
+  const ok = await pg.evl(pageLib(), 30e3);
+  if (ok !== true) throw new Error(`${label}: tools/shot/page/npcwar.js did not install (${ok})`);
+  log(`${label} @${commit.slice(0, 8)} booted in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  return { label, commit, srv, pg, bootMs: Date.now() - t0 };
 }
-function writeJson2(p, o) { mkdirSync(path.dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify(o, null, 1)); }
+const decode = (url) => Buffer.from(String(url).split(",")[1] || "", "base64");
+async function shoot(T, cam, file) {
+  const r = await T.pg.evl(`__shot.shot(${JSON.stringify(cam)}, ${W}, ${H}, "image/jpeg")`, 90e3);
+  if (!r || r.error || !r.url) throw new Error((r && r.error) || "no frame");
+  writeFileSync(file, decode(r.url));
+}
+async function stage(T, spec) {
+  const st = await T.pg.evl(`__shot.stage(${JSON.stringify(spec)})`, 120e3);
+  if (!st || !st.ok) throw new Error((st && st.error) || "stage failed");
+  return st;
+}
+async function unstage(T) {
+  await T.pg.evl("(window.__catRestore && window.__catRestore(), __shot.clear())", 60e3).catch(() => {});
+}
+/* one tree's whole run: every unit's turntable (+ action on AFTER) in its one page */
+async function runTree(T, units, withAction, failed) {
+  let n = 0;
+  for (const U of units) {
+    const dir = path.join(RAW, U.id); mkdirSync(dir, { recursive: true });
+    const t0 = Date.now();
+    try {
+      await stage(T, { species: U.id, pose: "idle" });
+      for (const [name, cam] of TT) {
+        try { await shoot(T, cam, path.join(dir, `${T.label}-tt-${name}.jpg`)); n++; }
+        catch (e) { failed.push(`${U.id} ${T.label} turntable ${name}: ${e.message}`); }
+      }
+    } catch (e) { failed.push(`${U.id} ${T.label} turntable: ${e.message}`); }
+    await unstage(T);
+    if (withAction) {
+      for (const [k, A] of actionPlan(U).entries()) {
+        try {
+          const st = await stage(T, A.stage);
+          for (const w of st.warn || []) log(`  ${U.id} warn: ${w}`);
+          let last = -1;
+          for (const [t0s, cam] of A.shots) {
+            const t = t0s === "half" ? (st.period || 1) / 2 : +t0s;
+            if (t !== last) { await T.pg.evl(`__shot.at(${t})`, 120e3); last = t; }
+            try { await shoot(T, cam, path.join(dir, `act${k}-t${String(t0s).replace(".", "_")}-${fnameCam(cam)}.jpg`)); n++; }
+            catch (e) { failed.push(`${U.id} action t=${t0s} ${cam}: ${e.message}`); }
+          }
+        } catch (e) { failed.push(`${U.id} action ${k}: ${e.message}`); }
+        await unstage(T);
+      }
+    }
+    log(`${T.label}: ${U.id} in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  }
+  return n;
+}
 
 /* ------------------------------------------------------------ the images */
 const CWEBP = (() => { for (const p of ["/opt/homebrew/bin/cwebp", "/usr/local/bin/cwebp", "/usr/bin/cwebp"]) if (existsSync(p)) return p; return null; })();
+const RAWOF = new Map();       // published image -> its raw JPEG (the PDF prints from these)
 function squeeze(src, base) {
   if (!existsSync(src) || statSync(src).size < 2000) return null;     // a blank / failed frame
+  RAWOF.set("img/" + base + (CWEBP ? ".webp" : ".jpg"), src);
   if (CWEBP) {
     const dst = path.join(IMG, base + ".webp");
     if (!existsSync(dst) || statSync(dst).mtimeMs < statSync(src).mtimeMs)
@@ -281,33 +288,64 @@ function squeeze(src, base) {
     execFileSync("/usr/bin/sips", ["-s", "format", "jpeg", "-s", "formatOptions", "70", "-Z", "1280", src, "--out", dst], { stdio: "ignore" });
   return "img/" + base + ".jpg";
 }
-
-const TT_LABEL = { hero: "3/4 hero", front: "Front", side: "Side", "3q": "3/4", rear: "Rear", top: "Top", close: "Close-up" };
-
 function collect(U, failed) {
-  const out = { before: {}, after: {}, action: [] };
-  for (const r of requestsFor(U)) {
-    const dir = path.join(RAW, U.id, r.key), meta = readJson(path.join(dir, "meta.json"));
-    if (!meta) { failed.push(`${U.id}/${r.key}: not shot`); continue; }
-    // HARNESS TRAP: under heavy load a request can time out in its LAST page
-    // call (clear / the sheet) after every frame was written: use what is on disk
-    if (meta.status !== "done" && !framesComplete(U, r, dir)) failed.push(`${U.id}/${r.key}: ${meta.error || meta.status} (partial)`);
-    const pose = /pose=(\w+)/.exec(r.setup) ? /pose=(\w+)/.exec(r.setup)[1] : "idle";
-    if (r.key === "turntable") {
-      for (const side of ["before", "after"]) TT.forEach(([name, cam]) => {
-        const p = squeeze(path.join(dir, fname(side, pose, "0", cam)), `${U.id}-${side}-${name}`);
-        if (p) out[side][name] = p; else failed.push(`${U.id}/${side}/${name}: empty frame`);
-      });
-    } else {
-      // the curated frames (every time x cam is on disk in _raw; the page shows the story)
-      for (const [t, cam, label] of r.show) {
-        const p = squeeze(path.join(dir, fname("", pose, t, cam)), `${U.id}-${r.key}-${String(t).replace(".", "_")}-${fnameCam(cam)}`);
-        if (p) out.action.push({ src: p, label, key: r.key });
-        else failed.push(`${U.id}/${r.key} "${label}" (t=${t} ${cam}): no frame`);
-      }
-    }
+  const out = { before: {}, after: {}, action: [] }, dir = path.join(RAW, U.id);
+  for (const side of ["before", "after"]) for (const [name] of TT) {
+    const p = squeeze(path.join(dir, `${side}-tt-${name}.jpg`), `${U.id}-${side}-${name}`);
+    if (p) out[side][name] = p; else if (!failed.some((f) => f.startsWith(`${U.id} ${side}`))) failed.push(`${U.id} ${side} ${name}: no frame`);
+  }
+  for (const [k, A] of actionPlan(U).entries()) for (const [t, cam, label] of A.shots) {
+    const base = `act${k}-t${String(t).replace(".", "_")}-${fnameCam(cam)}`;
+    const p = squeeze(path.join(dir, base + ".jpg"), `${U.id}-${base}`);
+    if (p) out.action.push({ src: p, label });
   }
   return out;
+}
+
+/* THE PRINT COPY. Chrome stores a WebP in a PDF losslessly (a 60 KB frame
+   becomes MBs), but passes a JPEG through as is: the PDF prints from small
+   JPEGs made off the raw frames (sips), in a temp folder, not the catalogue. */
+const PRINT_DIR = path.join(RAW, "_print");
+function printSrc(rel, w) {
+  const src = RAWOF.get(rel);
+  if (!src) return rel;
+  const dst = path.join(PRINT_DIR, path.basename(rel).replace(/\.\w+$/, `-${w}.jpg`));
+  if (!existsSync(dst) || statSync(dst).mtimeMs < statSync(src).mtimeMs)
+    execFileSync("/usr/bin/sips", ["-s", "format", "jpeg", "-s", "formatOptions", "58", "-Z", String(w), src, "--out", dst], { stdio: "ignore" });
+  return pathToFileURL(dst).href;
+}
+let SRC = (rel) => rel;          // the screen page: the webp as published; the print copy swaps this
+let PRINT = false;
+/* the phone PDF: a fresh headless Chrome prints the print copy (CDP printToPDF
+   can stall after a long WebGL session: tools/visual-compare.mjs found it) */
+async function printPdf(units, M, all, pending, failed, timing) {
+  mkdirSync(PRINT_DIR, { recursive: true });
+  PRINT = true; SRC = printSrc;
+  const html = path.join(PRINT_DIR, "print.html");
+  writeFileSync(html, page(units, M, all, pending, failed, timing));
+  PRINT = false; SRC = (rel) => rel;
+  const pdf = path.join(OUT, "catalogue.pdf"), tmp = path.join(PRINT_DIR, "catalogue.pdf");
+  rmSync(tmp, { force: true });
+  /* HARNESS TRAP: this headless print writes the PDF and then does not always
+     exit (measured: PDF done in seconds, process alive 10+ min later). Wait for
+     the file to land and stop growing, then end the process group ourselves. */
+  const ch = spawn(CHROME, ["--headless=new", "--no-sandbox", "--disable-gpu", "--no-pdf-header-footer", "--virtual-time-budget=15000",
+    `--user-data-dir=${path.join(PRINT_DIR, "profile")}`, `--print-to-pdf=${tmp}`, pathToFileURL(html).href],
+  { stdio: "ignore", detached: true });
+  let exited = false; ch.on("exit", () => { exited = true; });
+  const t0 = Date.now();
+  let last = -1, same = 0;
+  while (Date.now() - t0 < 300e3) {
+    await sleep(500);
+    const sz = existsSync(tmp) ? statSync(tmp).size : -1;
+    if (sz > 0 && sz === last) { if (++same >= 4) break; } else same = 0;
+    last = sz;
+    if (exited && sz <= 0) break;
+  }
+  try { process.kill(-ch.pid, "SIGKILL"); } catch (_) {}
+  if (!existsSync(tmp) || statSync(tmp).size === 0) throw new Error("Chrome wrote no PDF");
+  writeFileSync(pdf, readFileSync(tmp));
+  return pdf;
 }
 
 /* -------------------------------------------------------------- the page */
@@ -317,15 +355,13 @@ function wname(id) {
   return String(id).replace(/_/g, " ").replace(/\b(\d+)mm\b/i, "$1 mm").replace(/\b([a-z]{1,4}\d[\w-]*|m\d+\w*)\b/gi, (m) => m.toUpperCase())
     .replace(/\b50cal\b/i, ".50 cal").replace(/\b(rws|coax|tow|agm|hydra|stbd)\b/gi, (m) => m.toUpperCase());
 }
-function specCard(U, M) {
+const row = (k, v) => `<div class="kv"><span>${esc(k)}</span><b>${v}</b></div>`;
+function vehicleCard(U) {
   const d = U.def || {}, S = d.stats || {}, A = S.armour || {}, CE = S.armourCE || null;
-  const row = (k, v) => `<div class="kv"><span>${esc(k)}</span><b>${v}</b></div>`;
   const arm = ["front", "side", "rear", "top"].map((f) => `<div class="arm"><span>${f}</span><b>${fmt(A[f], 0)}</b>${CE ? `<i>${fmt(CE[f], 0)} CE</i>` : ""}<div class="bar"><div style="width:${Math.min(100, Math.sqrt((A[f] || 0) / 820) * 100).toFixed(1)}%"></div></div></div>`).join("");
   const weapons = (d.weapons || []).map((w) => `<li><b>${esc(wname(w.id))}</b><span>${esc(w.kind)}${w.range ? ` · ${fmt(w.range, 0)} m` : ""}${w.pen ? ` · ${fmt(w.pen, 0)} mm pen` : ""}${w.ammo ? ` · ${fmt(w.ammo, 0)} rds` : ""}${w.rof ? ` · ${fmt(w.rof, 2)}/s` : ""}</span></li>`).join("");
   const crew = (d.crew || []).map((c) => c.seat).join(", ") || (S.remote ? "flown remotely" : "–");
-  return `<aside class="spec">
-    <h4>Specification</h4>
-    ${row("Role", esc((d.tactics && d.tactics.role) || d.drive || d.domain || "–"))}
+  return `${row("Role", esc((d.tactics && d.tactics.role) || d.drive || d.domain || "–"))}
     ${row("Domain / drive", esc(`${d.domain || "–"} / ${d.drive || "–"}`))}
     ${row("Length × width × height", `${fmt(S.length, 2)} × ${fmt(S.width, 2)} × ${fmt(S.height, 2)} m`)}
     ${row("Mass", S.mass ? `${fmt(S.mass / 1000, 1)} t` : "–")}
@@ -337,39 +373,56 @@ function specCard(U, M) {
     <h5>Armour, mm RHA${CE ? " (kinetic / vs shaped charge)" : ""}</h5>
     <div class="arms">${arm}</div>
     <h5>Weapons</h5>
-    <ul class="wpn">${weapons || "<li>unarmed</li>"}</ul>
-    <p class="src">From <code>src/units/vehicles/${esc(U.id)}.js</code> @ ${afterC.slice(0, 8)}</p>
-  </aside>`;
+    <ul class="wpn">${weapons || "<li>unarmed</li>"}</ul>`;
+}
+function speciesCard(U) {
+  const S = (U.def && U.def.stats) || {};
+  const flat = [];
+  (function walk(o, pre) {
+    for (const [k, v] of Object.entries(o || {})) {
+      if (typeof v === "number" || typeof v === "string") flat.push([pre + k, v]);
+      else if (v && typeof v === "object" && !Array.isArray(v) && pre.split(".").length < 2) walk(v, pre + k + ".");
+    }
+  })(S, "");
+  return flat.slice(0, 24).map(([k, v]) => row(k, esc(typeof v === "number" ? fmt(v, 2) : v))).join("") || "<p>no stats row</p>";
+}
+function specCard(U) {
+  return `<aside class="spec"><h4>Specification</h4>${KIND === "vehicle" ? vehicleCard(U) : speciesCard(U)}
+    <p class="src">From <code>${UNIT_DIR}/${esc(U.id)}.js</code> @ ${afterC.slice(0, 8)}</p></aside>`;
 }
 function section(U, M, shots, n) {
-  const name = (M && M[U.id] && M[U.id].name) || U.id;
-  const ba = shots.before.hero && shots.after.hero
-    ? `<div class="ba" style="--p:50%"><img src="${shots.after.hero}" alt="${esc(name)} after" loading="lazy"><div class="ba-b"><img src="${shots.before.hero}" alt="${esc(name)} before" loading="lazy"></div><div class="ba-line"></div><span class="tag l">Before</span><span class="tag r">After</span><input type="range" min="0" max="100" value="50" aria-label="before/after"></div>`
-    : `<div class="ba missing">${shots.after.hero ? `<img src="${shots.after.hero}">` : "no hero frame"}</div>`;
+  const name = (M[U.id] && M[U.id].name) || U.id;
+  const lazy = PRINT ? "" : ` loading="lazy"`;
+  const hb = shots.before.hero, ha = shots.after.hero;
+  const ba = PRINT
+    ? `<div class="pair">${[["Before", hb], ["After", ha]].filter(([, s]) => s).map(([l, s]) => `<figure><img src="${SRC(s, 1000)}" alt=""><figcaption><b>${l}</b></figcaption></figure>`).join("")}</div>`
+    : hb && ha
+    ? `<div class="ba" style="--p:50%"><img src="${SRC(ha)}" alt="${esc(name)} after"><div class="ba-b"><img src="${SRC(hb)}" alt="${esc(name)} before"></div><div class="ba-line"></div><span class="tag l">Before</span><span class="tag r">After</span><input type="range" min="0" max="100" value="50" aria-label="before/after"></div>`
+    : `<div class="ba missing">${ha ? `<img src="${SRC(ha)}" alt="">` : "no hero frame"}</div>`;
   const tt = (side) => TT.filter(([k]) => k !== "hero").map(([k]) => shots[side][k]
-    ? `<figure><img src="${shots[side][k]}" loading="lazy" alt=""><figcaption>${TT_LABEL[k]}</figcaption></figure>` : `<figure class="miss"><figcaption>${TT_LABEL[k]}: no frame</figcaption></figure>`).join("");
-  const act = shots.action.map((a) => `<figure><img src="${a.src}" loading="lazy" alt=""><figcaption>${esc(a.label)}</figcaption></figure>`).join("");
+    ? `<figure><img src="${SRC(shots[side][k], 480)}"${lazy} alt=""><figcaption>${TT_LABEL[k]}</figcaption></figure>` : `<figure class="miss"><figcaption>${TT_LABEL[k]}: no frame</figcaption></figure>`).join("");
+  const act = shots.action.map((a) => `<figure><img src="${SRC(a.src, 640)}"${lazy} alt=""><figcaption>${esc(a.label)}</figcaption></figure>`).join("");
   return `<section class="unit" id="${U.id}">
   <header><div class="num">${String(n).padStart(2, "0")}</div><div><h2>${esc(name)}</h2><p class="sub">${esc(U.title)}</p></div></header>
   ${ba}
   <div class="grid2">
     <div>
       <h3>Turntable <small>after</small></h3><div class="strip">${tt("after")}</div>
-      <h3>Turntable <small>before</small></h3><div class="strip before">${tt("before")}</div>
+      ${Object.keys(shots.before).length ? `<h3>Turntable <small>before</small></h3><div class="strip before">${tt("before")}</div>` : `<p class="pend">BEFORE frames missing from this run.</p>`}
       <h3>In action <small>after, ${esc(MAP)}</small></h3><div class="strip act">${act || "<p class='miss'>no action frames</p>"}</div>
     </div>
-    ${specCard(U, M)}
+    ${specCard(U)}
   </div>
 </section>`;
 }
-function page(units, M, all, pending, failed) {
-  const toc = units.map((U, i) => `<a href="#${U.id}"><span>${String(i + 1).padStart(2, "0")}</span>${esc((M[U.id] || {}).name || U.id)}${all[U.id].after.hero ? `<img src="${all[U.id].after.hero}" alt="">` : ""}</a>`).join("");
-  const kindT = KIND[0].toUpperCase() + KIND.slice(1) + "s";
+function page(units, M, all, pending, failed, timing) {
+  const toc = units.map((U, i) => `<a href="#${U.id}"><span>${String(i + 1).padStart(2, "0")}</span>${esc((M[U.id] || {}).name || U.id)}${all[U.id].after.hero ? `<img src="${SRC(all[U.id].after.hero, 360)}" alt="">` : ""}</a>`).join("");
+  const kindT = KIND === "vehicle" ? "Vehicles" : "Animals", kindW = KIND === "vehicle" ? "vehicle" : "animal";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NPC War ${kindT}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0d0e10;--panel:#15171a;--line:#262a2f;--ink:#e9e6df;--mute:#8d9096;--acc:#d9a441;--red:#c8463c}
+:root{--bg:#0d0e10;--panel:#15171a;--line:#262a2f;--ink:#e9e6df;--mute:#8d9096;--acc:#d9a441}
 *{box-sizing:border-box}html{scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,system-ui,sans-serif}
 a{color:inherit}
@@ -401,7 +454,6 @@ a{color:inherit}
 h3{font:700 22px Fraunces,serif;margin:22px 0 10px}h3 small{font:600 11px Inter;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);margin-left:8px}
 .strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
 .strip.act{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
-.strip.before figure img{filter:saturate(.85)}
 figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
 figure img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;cursor:zoom-in}
 figcaption{font-size:12px;color:var(--mute);padding:6px 9px}
@@ -418,17 +470,39 @@ figure.miss{display:grid;place-items:center;min-height:110px}
 .wpn{list-style:none;margin:0;padding:0}.wpn li{border-bottom:1px solid var(--line);padding:7px 0;font-size:13px}.wpn b{display:block}.wpn span{color:var(--mute);font-size:12px}
 .src{color:var(--mute);font-size:11px;margin:12px 0 0}code{font-size:11px}
 .fail{color:var(--mute);font-size:12px;padding:32px 0 64px}.fail li{margin:2px 0}
+.foot{color:var(--mute);font-size:12px;padding:24px 0 48px}
 #lb{position:fixed;inset:0;background:#000e;display:none;place-items:center;z-index:9;cursor:zoom-out}#lb img{max-width:96vw;max-height:92vh;border-radius:6px}#lb.on{display:grid}
+.pair{display:none}
+@page{size:150mm 266mm;margin:0}
+@media print{
+ html,body{background:var(--bg);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ body{font-size:11px}.wrap{padding:0 7mm}
+ .mast{padding:12mm 0 6mm}.mast h1{font-size:44px}.mast p{font-size:11px}
+ .toc{grid-template-columns:repeat(3,1fr);gap:6px;padding:10px 0 0}.toc a{padding:6px;font-size:10px;break-inside:avoid}
+ .unit{break-before:page;padding:8mm 0 4mm;border:0}
+ .unit header{margin-bottom:8px}.num{font-size:34px}.unit h2{font-size:30px}.sub{font-size:10px}
+ .ba,#lb,input{display:none!important}
+ .pair{display:grid;grid-template-columns:1fr;gap:6px}
+ .pair figcaption b{color:var(--acc);letter-spacing:.14em;text-transform:uppercase}
+ body .grid2{grid-template-columns:1fr;gap:6px;margin-top:6px}
+ h3{font-size:15px;margin:10px 0 5px;break-after:avoid}
+ body .strip{grid-template-columns:repeat(3,1fr);gap:5px}body .strip.act{grid-template-columns:repeat(2,1fr)}figure.miss{display:none}
+ figure{break-inside:avoid}figcaption{font-size:9px;padding:3px 6px}
+ .spec{position:static;break-inside:avoid;padding:10px 12px;margin-top:8px}
+ .kv{font-size:10px;padding:3px 0}.arm b{font-size:15px}.wpn li{font-size:10px;padding:4px 0}
+ .fail{break-before:page}
+}
 @media (max-width:900px){.grid2{grid-template-columns:1fr}.spec{position:static}.num{font-size:44px}.strip{grid-template-columns:repeat(2,minmax(0,1fr))}.strip.act{grid-template-columns:1fr}}
 </style></head><body>
 <div class="wrap">
 <div class="mast"><div class="kick">NPC War · before / after catalogue</div><h1>${kindT}</h1>
-<p>Every ${KIND} as it looked before the campaign (the generic city models at ${beforeC.slice(0, 8)}) and as it is now on main (${afterC.slice(0, 8)}). Drag the line across each hero image. Turntables are on the studio stage, action frames are from the live battle sim on the ${esc(MAP)} ground. Specs are read straight from each unit's file.</p>
+<p>Every ${kindW} as it looked before the campaign (${beforeC.slice(0, 8)}, when the vehicles were still the generic city models) and as it is now on main (${afterC.slice(0, 8)}). Drag the line across each hero image. Turntables are on the studio stage; action frames come from the live battle sim on the ${esc(MAP)} ground. Specs are read straight from each unit's file.</p>
 <nav class="toc">${toc}</nav>
 ${pending.length ? `<p class="pend">Not redrawn yet, so not in this issue: ${pending.map(esc).join(", ")}.</p>` : ""}
 </div>
 ${units.map((U, i) => section(U, M, all[U.id], i + 1)).join("\n")}
 ${failed.length ? `<div class="fail"><h3>Frames that failed</h3><ul>${failed.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></div>` : ""}
+<p class="foot">${esc(timing)}</p>
 </div>
 <div id="lb"><img alt=""></div>
 <script>
@@ -442,25 +516,50 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')lb.classList
 }
 
 /* -------------------------------------------------------------- the run */
-const M = manifest() || {};
-let ids = val("--ids") ? val("--ids").split(",").map((s) => s.trim()).filter(Boolean)
+const M = manifest();
+const ids = val("--ids") ? val("--ids").split(",").map((s) => s.trim()).filter(Boolean)
   : Object.keys(M).filter((k) => M[k].kind === KIND);
 if (!ids.length) { console.error("catalogue: no unit ids (manifest unreadable?)"); process.exit(2); }
 const pending = [], units = [];
 for (const id of ids) {
   const U = unitDef(id);
-  if (!U) { pending.push(id + " (no file)"); continue; }
+  if (!U) { pending.push(((M[id] && M[id].name) || id) + " (no file)"); continue; }
   if (U.stub && !has("--all") && !val("--ids")) { pending.push((M[id] && M[id].name) || id); continue; }
   units.push(U);
 }
-log(`${units.length} ${KIND}(s): ${units.map((u) => u.id).join(", ")}${pending.length ? `; pending: ${pending.join(", ")}` : ""}`);
-log(`before ${BEFORE}@${beforeC.slice(0, 8)}  after ${AFTER}@${afterC.slice(0, 8)}  ground ${MAP}`);
-if (!has("--page-only")) await shootAll(units);
+log(`${units.length} ${KIND}: ${units.map((u) => u.id).join(", ")}${pending.length ? `; pending: ${pending.join(", ")}` : ""}`);
+log(`before ${BEFORE}@${beforeC.slice(0, 8)}  after ${AFTER}@${afterC.slice(0, 8)}  ground ${MAP}  ${W}x${H}`);
+
+const failed = [];
+let timing = `Built ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC from ${afterC.slice(0, 8)}.`;
+if (!has("--page-only")) {
+  for (const U of units) rmSync(path.join(RAW, U.id), { recursive: true, force: true });
+  const B = await launchChrome();
+  log(`chrome up in ${B.startMs} ms (pid ${B.pid})`);
+  const trees = [];
+  try {
+    const [TB, TA] = await Promise.all([bootTree(B, "before", beforeC, BEFORE_MAP), bootTree(B, "after", afterC, MAP)]);
+    trees.push(TB, TA);
+    const t1 = Date.now();
+    const [nb, na] = await Promise.all([runTree(TB, units, false, failed), runTree(TA, units, true, failed)]);
+    const capS = (Date.now() - t1) / 1000;
+    timing = `One run: ${units.length} ${KIND === "vehicle" ? "vehicles" : "animals"}, ${nb + na} frames; boots ${(TB.bootMs / 1000).toFixed(0)} s / ${(TA.bootMs / 1000).toFixed(0)} s (parallel), capture ${capS.toFixed(0)} s, ${secs()} end to end. ` + timing;
+    log(`captured ${nb} before + ${na} after frames in ${capS.toFixed(1)} s`);
+  } finally {
+    for (const T of trees) { try { await T.pg.closeTarget(); } catch (_) {} try { T.srv.close(); } catch (_) {} }
+    await B.close();
+  }
+}
 mkdirSync(IMG, { recursive: true });
-const failed = [], all = {};
+const all = {};
 for (const U of units) all[U.id] = collect(U, failed);
-writeFileSync(path.join(OUT, "index.html"), page(units, M, all, pending, failed));
+writeFileSync(path.join(OUT, "index.html"), page(units, M, all, pending, failed, timing));
 const bytes = readdirSync(IMG).reduce((s, f) => s + statSync(path.join(IMG, f)).size, 0);
 log(`${failed.length} failed frame(s)${failed.length ? ":\n  " + failed.join("\n  ") : ""}`);
-log(`images ${(bytes / 1048576).toFixed(1)} MB in ${readdirSync(IMG).length} files`);
+log(`images ${(bytes / 1048576).toFixed(1)} MB in ${readdirSync(IMG).length} files; ${timing}`);
+if (!has("--no-pdf")) {
+  const t = Date.now();
+  try { const pdf = await printPdf(units, M, all, pending, failed, timing); log(`pdf ${(statSync(pdf).size / 1048576).toFixed(1)} MB in ${((Date.now() - t) / 1000).toFixed(1)} s: ${pdf}`); }
+  catch (e) { log("pdf failed: " + e.message); }
+}
 console.log(path.join(OUT, "index.html"));

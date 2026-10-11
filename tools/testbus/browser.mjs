@@ -17,7 +17,7 @@ import { createReadStream, statSync, rmSync } from "node:fs";
 import path from "node:path";
 import { sleep } from "./lib.mjs";
 
-const CHROME = process.env.CBZ_CHROME || (process.platform === "darwin"
+export const CHROME = process.env.CBZ_CHROME || (process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium");
 
 const TYPES = {
