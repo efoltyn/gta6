@@ -61,11 +61,10 @@ function warEvent(kind, d) {
     // behind it is the picture of the moment the war was decided
     const c = teamCOM[team];
     if (c && cam.mode === "auto" && MAP) {
-      cam.shot = "crane"; cam.followM = null;
-      cam.wFocus.set(c.x, MAP.groundAt(c.x, c.z), c.z);
-      cam.wDist = 58; cam.wPitch = 0.44;
-      cam.wYaw = fightAxis() + Math.PI * 0.75;
-      cam.craneSpin = 0.02; cam.cutAt = simT + 7;
+      cam.shot = "general"; cam.followM = null;
+      cam.anchor = { x: c.x, z: c.z };
+      cam.craneSpin = 0.02; cam.cutAt = simT + 7; cam.snap = true; cam.ease = 0.06;
+      frameDirector(0);
     }
     // a falling horn: the sound of a line giving way
     if (CBZ.micro.sfx && CBZ.micro.sfx.tone) { try { CBZ.micro.sfx.tone(196, 0.9, { type: "sawtooth", slideTo: 110, gain: 0.08 }); } catch (e) {} }
@@ -74,7 +73,8 @@ function warEvent(kind, d) {
     for (let i = 0; i < men.length; i++) if (men[i].id === d.id) { m = men[i]; break; }
     // the lens goes to him: this is the shot the whole war was building to
     if (m && !m.dead && cam.mode === "auto") {
-      cam.shot = "point"; cam.followM = m; cam.holdT = 0; cam.cutAt = simT + 12;
+      cam.shot = "hero"; cam.followM = m; cam.holdT = 0; cam.cutAt = simT + 12;
+      cam.snap = true; cam.ease = 0.012;
     }
   }
 }

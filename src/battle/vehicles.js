@@ -861,27 +861,52 @@ function animateVehicle(u, dt) {
 }
 
 /* ------------------------------------------------------------- YOU drive */
-/* The rifle button on a side with a vehicle puts you in it (player.js
-   join). Move = drive (W/S throttle, A/D steer, the stick on a phone); the
-   mouse lays the turret; attack fires the gun of your seat: the gunner's
-   main gun, or the machine gun from a machine-gun seat. X changes seat. */
-function vehYouSeatWeapon(u) {
-  const want = u._youSeat || 0;
-  const list = u.wpn.filter(function (W) { return W.w.kind !== "bombs" || u.air; });
-  return list.length ? list[want % list.length] : null;
+/* Tap a vehicle (or the rifle button on a side with one) and you are its
+   crew (player.js takeOver). Move = drive (W/S throttle, A/D steer, the
+   stick on a phone); the look lays the turret, pulled onto the auto-target;
+   attack fires the gun for the mark the way the crew would choose it: the
+   main gun at armour, the machine gun at men in its range, the main gun
+   when it is the only thing that reaches. X takes a seat by hand (and keeps
+   it). The chase cam rides the turret while you work the gun (camera.js
+   frameChase). */
+function vehYouSeatWeapon(u, t) {
+  const list = u.wpn.filter(function (W) { return (W.w.kind !== "bombs" || u.air) && !W.off; });
+  if (!list.length) return null;
+  if (u._youSeat != null || !t) return list[(u._youSeat || 0) % list.length];
+  const dist = Math.hypot(t.pos.x - u.pos.x, t.pos.z - u.pos.z);
+  let best = null, bs = -1e9;
+  for (let k = 0; k < list.length; k++) {
+    const W = list[k], w = W.w;
+    if (W.ammo <= 0 || dist > (w.range || 600) || dist < (w.minRange || 0)) continue;
+    if (w.vs === "air" && !t.air) continue;
+    if (w.vs === "armour" && !t.vehicle) continue;
+    let s = 0;
+    if (t.vehicle) s = (w.kind === "cannon" || w.kind === "missile" || w.kind === "autocannon") ? 3 : (w.pen || 0) * 2 > ((t.def.stats.armour || {}).front || 0) ? 1 : -5;
+    else s = w.kind === "mg" ? 3 : w.kind === "autocannon" ? 2 : 1;
+    if (W.cool <= 0 && W.reloadT <= 0) s += 0.5;
+    if (s > bs) { bs = s; best = W; }
+  }
+  return best || list[0];
 }
 function stepYouVehicle(u, sdt) {
-  const IN = CBZ.micro.input, T = CBZ.micro.touch;
-  let thr = 0, st = 0;
-  if (IN) { thr = IN.axis("KeyS", "KeyW"); st = IN.axis("KeyA", "KeyD"); }
-  if (T && T.active && T.stick && T.stick.mag > 0.12) { thr = -T.stick.y; st = T.stick.x; }
+  // move and attack (player.js): the stick is throttle and steering
+  const I = youInput();
   if (u.air) {
     // an aircraft you ride flies its own pattern; you work the guns
     stepAir(u, sdt);
-  } else vehMove(u, sdt, { throttle: thr, steer: st, brake: 0 });
-  // the turret follows your look
+  } else vehMove(u, sdt, { throttle: I.az, steer: I.ax, brake: 0 });
+  youRetarget(u, sdt);
+  /* THE TURRET FOLLOWS YOUR LOOK, and the look is pulled onto the threat
+     nearest it (the auto-target), so a gunner on a phone with no mouse still
+     lays the gun on the man he is facing. */
   const D = CBZ.vehicleDrive, tr = u.def.turret;
-  const rel = D.wrap(YOU.yaw - u.h);
+  const lock = YOU.tgt && !YOU.tgt.dead ? YOU.tgt : null;
+  let aimYaw = YOU.yaw;
+  if (lock) {
+    const b = Math.atan2(lock.pos.x - u.pos.x, lock.pos.z - u.pos.z);
+    if (Math.abs(D.wrap(b - YOU.yaw)) < 0.5) aimYaw = b;
+  }
+  const rel = D.wrap(aimYaw - u.h);
   if (tr) {
     const el = (YOU.pitch - 0.24) * -0.8;
     if (u.rig && u.rig.aimTurret) { u.rig.aimTurret(rel, el, sdt); if (u.rig.turret) u.tur.yaw = u.rig.turret.rotation.y; }
@@ -891,14 +916,24 @@ function stepYouVehicle(u, sdt) {
       if (tn) tn.rotation.y = u.tur.yaw;
     }
   }
-  const fire = IN && (IN.isDown("KeyJ") || (!COARSE && IN.locked && IN.buttons[0]));
-  const W = vehYouSeatWeapon(u);
+  const fire = I.atk;
+  if (fire) YOU.fireAt = simT;
+  const W = vehYouSeatWeapon(u, lock);
   if (!fire || !W || W.cool > 0 || W.reloadT > 0 || W.ammo <= 0 || u.vs.firepower) return;
-  // the mark: whoever sits nearest the gun line you can see
   const yaw = tr ? u.h + u.tur.yaw : u.h;
   const fxw = Math.sin(yaw), fzw = Math.cos(yaw);
+  // the gun is still traversing onto the mark you are facing: the round waits
+  // for it (a 6 s reload is not spent on the sand beside him)
+  if (lock && tr && aimYaw !== YOU.yaw && Math.abs(D.wrap(aimYaw - yaw)) > 0.04) return;
+  if (W.w.kind === "cannon" && CBZ.shake) CBZ.shake(0.5);
+  // the mark: the locked threat once the gun is on it, else whoever sits
+  // nearest the gun line you can see
   let best = null, bs = Infinity;
-  for (let k = 0; k < men.length; k++) {
+  if (lock) {
+    const dx = lock.pos.x - u.pos.x, dz = lock.pos.z - u.pos.z, d = Math.hypot(dx, dz);
+    if (d > 2 && d <= (W.w.range || 900) && (dx * fxw + dz * fzw) / d > 0.985 && eyeLos(u, lock)) { best = lock; bs = -1; }
+  }
+  for (let k = 0; k < men.length && bs >= 0; k++) {
     const o = men[k];
     if (o.dead || o.fled || o.team === u.team) continue;
     const dx = o.pos.x - u.pos.x, dz = o.pos.z - u.pos.z, d = Math.hypot(dx, dz);
@@ -910,27 +945,14 @@ function stepYouVehicle(u, sdt) {
   }
   if (W.w.kind === "bombs") { if (best) vehRelease(u, W, W.w.he); return; }
   if (best) { vehFire(u, W, best, Math.hypot(best.pos.x - u.pos.x, best.pos.z - u.pos.z)); return; }
-  // nothing on the line: the round goes where the gun points
+  // nothing on the line: the round goes where the gun points (and counts)
   W.cool = 1 / Math.max(0.01, W.w.rof || 1); W.ammo--;
+  stats[u.team].shots++; u.shotsF++; u.lastShotT = simT;
+  if (shotsRing.length > 90) shotsRing.shift();
+  shotsRing.push({ x: u.pos.x, z: u.pos.z, t: simT, m: u });
   const from = vehicleMuzzle(u, _muz);
   _v.set(from.x + fxw * 300, MAP.groundAt(from.x + fxw * 300, from.z + fzw * 300), from.z + fzw * 300);
   if (CBZ.tracer) { try { CBZ.tracer(from, _v, { shooter: u, muzzle: true, muzzleScale: 2 }); } catch (e) {} }
   if (u.rig && u.rig.fired && W.w.kind === "cannon") { try { u.rig.fired(1); } catch (e) {} }
   missImpact(from, _v, 0);
-}
-function frameYouVehicle(u, dt) {
-  const IN = CBZ.micro.input;
-  if (IN) {
-    if (IN.pressed("KeyX")) u._youSeat = (u._youSeat || 0) + 1;
-    YOU.yaw -= IN.mx * 0.0024;
-    YOU.pitch = Math.max(0.05, Math.min(0.85, YOU.pitch + IN.mz * 0.002));
-  }
-  // the chase cam: over the hull, looking down the gun
-  const ry = YOU.yaw;
-  cam.wFocus.set(u.pos.x, u.pos.y + u.vheight + (u.air ? 2 : 1.2), u.pos.z);
-  cam.focus.copy(cam.wFocus);
-  cam.wYaw = cam.yaw = ry + Math.PI;
-  cam.wPitch = cam.pitch = Math.max(0.12, YOU.pitch);
-  cam.wDist = cam.dist = Math.max(9, u.vlen * 2.6);
-  cam.followM = u;
 }

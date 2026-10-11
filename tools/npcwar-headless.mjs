@@ -370,7 +370,124 @@ scenario(4, "the rifle: be a soldier, fire, hand it back, go down", async () => 
   const before = W.sb.__battle.you();
   if (before.on) W.sb.__battle.youHurt(1e6);
   check(W.sb.__battle.you().down, "a soldier killed out there is reported down");
-  check(W.B().audit().cam.mode === "auto", "and the lens goes back to the director");
+  check(W.B().audit().cam.mode === "youdead", "the lens holds the death beat on his body");
+  const fell = before.on ? before : null;
+  run(W, 2.5);
+  const hop = W.sb.__battle.youState();
+  check(hop.on && hop.kind === "man" && W.B().audit().cam.mode === "you" && fell && hop.id !== null,
+    "after the beat you are in the nearest ally's boots (" + JSON.stringify(hop) + ")");
+  W.doc.getElementById("cRifle").click();
+  check(!W.sb.__battle.you().on && W.B().audit().cam.mode === "auto", "and the rifle button still hands the body back");
+});
+
+/* TAKE OVER ANYTHING (player.js) and THE DIRECTOR (camera/camera.js). The
+   node world has no bestiary, so the animals here are honest stand-ins: a
+   box body on a species row, driven by the real unit file's numbers, the
+   real creature_combat strike driver and the real move picker
+   (units/kit/moves.js). What is held is the CONTROL, not the art. */
+function standInAnimals(W, rows) {
+  const T = W.THREE, C = W.CBZ;
+  C.cmat = (c) => new T.MeshLambertMaterial({ color: c });
+  C.boxGeom = (x, y, z) => new T.BoxGeometry(x, y, z);
+  C.faceAnimalHeading = (m, h) => { m.group.rotation.y = -h; };
+  for (const id in rows) {
+    const r = rows[id];
+    C.WILDLIFE_SPECIES[id] = Object.assign({ id, name: id, hp: 160, spd: 3, danger: 0.8, bite: 26, scale: 1 }, r, {
+      build: () => {
+        const g = new T.Group();
+        const b = new T.Mesh(new T.BoxGeometry(r.len, r.h, r.w), new T.MeshLambertMaterial());
+        b.position.y = r.h / 2; g.add(b);
+        // a head at the front, where the jaws are (creature_combat finds the
+        // mouth as the most forward mesh)
+        const hd = new T.Mesh(new T.BoxGeometry(r.len * 0.18, r.h * 0.3, r.w * 0.6), new T.MeshLambertMaterial());
+        hd.position.set(r.len * 0.5, r.h * 0.8, 0); g.add(hd);
+        return g;
+      },
+    });
+  }
+  try { vm.runInContext(fs.readFileSync(path.join(ROOT, "src/city/creature_combat.js"), "utf8"), W.sb, { filename: "creature_combat.js" }); }
+  catch (e) { console.log("  (creature_combat threw: " + e.message + ")"); }
+}
+// hold the stick at the nearest enemy, sprinting, with the attack down
+function chaseNearest(W) {
+  W.sb.__battle.youFace();
+  const st = W.sb.__battle.youState();
+  return st.on;
+}
+scenario(10, "take over anything: an animal, an elephant's trunk, a tank, a tap; the director", async () => {
+  {
+    const W = boot("?a=lion&b=men&n=1v4&bw=fists&bt=civ&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    standInAnimals(W, { lion: { len: 2.2, h: 1.1, w: 0.7 } });
+    await settle();
+    run(W, 1);
+    const ok = W.sb.__battle.take("a:lion");
+    const st = W.sb.__battle.youState();
+    check(ok && st.kind === "beast" && W.B().audit().cam.mode === "you", "a tap on the lion makes you the lion (" + JSON.stringify(st) + ")");
+    const blueHp = () => W.sb.__battle.roster().filter((m) => m.team === "blue").reduce((s, m) => s + Math.max(0, m.hp), 0);
+    const hp0 = blueHp();
+    W.sb.__battle.youDrive({ az: 1, run: true, atk: true });
+    let s2 = null;
+    run(W, 20, () => { s2 = W.sb.__battle.youState(); return chaseNearest(W); });
+    W.sb.__battle.youDrive(null);
+    const mv = s2.moves || {};
+    check((mv.pounce || 0) + (mv.swipe || 0) + (mv.bite || 0) + (mv.throat || 0) > 2,
+      "attack throws the cat's real moves by context (" + JSON.stringify(mv) + ")");
+    check(!!mv.pounce, "a sprint into range is a pounce (" + (mv.pounce || 0) + ")");
+    const tal = W.sb.__battle.tally();
+    check(s2.hits >= 3 && hp0 - blueHp() > 60, "and the blows land in the page's damage funnel (" + s2.hits + " strikes landed, " + s2.whiffs + " at the air, " +
+      Math.round(hp0 - blueHp()) + " hp off the men, " + tal.dead.blue + " down)");
+  }
+  {
+    const W = boot("?a=african_elephant&b=men&n=1v10&bw=fists&bt=civ&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    standInAnimals(W, { african_elephant: { len: 6, h: 3.2, w: 2.2, hp: 1200, spd: 2.2, bite: 60, scale: 2.6 } });
+    await settle();
+    run(W, 1);
+    check(W.sb.__battle.take("a:african_elephant"), "you are the elephant");
+    W.sb.__battle.youDrive({ az: 0.6, run: false, atk: true });
+    let tossed = 0;
+    run(W, 25, () => { tossed = Math.max(tossed, W.sb.__battle.youState().tossed); return chaseNearest(W); });
+    const mv = W.sb.__battle.youState().moves || {};
+    W.sb.__battle.youDrive(null);
+    check((mv.trunk || 0) > 0 && tossed > 0, "the trunk takes a man and throws him (" + JSON.stringify(mv) + ", " + tossed + " in the air at once)");
+  }
+  {
+    const W = boot("?a=m1_abrams*1&b=men&n=1v20&arena=dunes&bw=ak47&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 2);
+    const tank = W.sb.__battle.roster().find((m) => m.unitId === "m1_abrams");
+    // TAP: project the hull onto the screen and press there
+    const v = new W.THREE.Vector3(tank.pos.x, tank.pos.y + 1.5, tank.pos.z);
+    W.CBZ.camera.updateMatrixWorld();
+    v.project(W.CBZ.camera);
+    const took = v.z < 1 && G(W, "tapTake(" + ((v.x + 1) / 2 * 1280) + "," + ((1 - v.y) / 2 * 720) + ")");
+    if (!took) W.sb.__battle.take(tank);
+    const st = W.sb.__battle.youState();
+    check(took && st.kind === "vehicle", "a tap on the tank puts you in it (" + (took ? "tapped" : "missed the tap") + ", " + JSON.stringify(st) + ")");
+    const p0 = { x: tank.pos.x, z: tank.pos.z };
+    W.sb.__battle.youDrive({ az: 1, atk: false });
+    run(W, 3);
+    check(Math.hypot(tank.pos.x - p0.x, tank.pos.z - p0.z) > 3, "move drives it (" + Math.hypot(tank.pos.x - p0.x, tank.pos.z - p0.z).toFixed(1) + " m)");
+    W.sb.__battle.youDrive({ az: 0, atk: true });
+    const f0 = tank.shotsF;
+    run(W, 12, () => { W.sb.__battle.youFace(); return W.sb.__battle.youState().on; });
+    W.sb.__battle.youDrive(null);
+    check(tank.shotsF > f0, "attack fires the seat's gun at the threat it faces (" + (tank.shotsF - f0) + " rounds, " + tank.kills + " kills" +
+      (tank.shotsF > f0 ? "" : "; " + JSON.stringify(tank.wpn.map((w) => ({ id: w.w.id, cool: +w.cool.toFixed(2), ammo: w.ammo, rl: w.reloadT }))) + " fp " + tank.vs.firepower + " " + JSON.stringify(W.sb.__battle.youState())) + ")");
+  }
+  {
+    const W = boot("?a=men&b=men&n=40v40&rw=ak47&bw=ak47&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    await settle();
+    const shots = new Set();
+    let maxCuts = 0;
+    run(W, 70, () => { const d = W.sb.__battle.director(); shots.add(d.shot); maxCuts = d.cuts; return true; });
+    check(maxCuts >= 4, "the director cuts on its own (" + maxCuts + " cuts)");
+    check(shots.has("hero") && (shots.has("establish") || shots.has("general")), "close follows and wides, by what is happening (" + [...shots].join(", ") + ")");
+  }
 });
 
 scenario(5, "snow and fields: the new skins build and fight", async () => {

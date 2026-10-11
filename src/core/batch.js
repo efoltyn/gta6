@@ -312,6 +312,9 @@
     // the one ground skin is a shader, not a colour: merged under a shared
     // Lambert it would lose the turf (a lawn back to one flat green)
     if (mat.userData && mat.userData.groundSkin) return null;
+    // a ShaderMaterial (pool water, any custom surface) IS its shader: a
+    // merge re-materials the bucket by colour and would paint it flat
+    if (mat.isShaderMaterial) return null;
     // A depth-ordered surface (ground layer pushed back, decal pulled forward)
     // loses its polygonOffset the moment it is merged under a shared material,
     // and the flat ground it was ordered against z-fights again. Never merge it.
