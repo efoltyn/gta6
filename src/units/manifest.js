@@ -42,7 +42,7 @@
     black_bear: S("black bear", "black bears", "sloth"),
     brown_bear: S("brown bear", "brown bears", "sloth"),
     polar_bear: S("polar bear", "polar bears", "sloth"),
-    african_elephant: S("African elephant", "African elephants", "herd"),
+    african_elephant: Object.assign(S("African elephant", "African elephants", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     white_rhino: Object.assign(S("white rhino", "white rhinos", "crash"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     giraffe: S("giraffe", "giraffes", "tower"),
     zebra: S("zebra", "zebras", "dazzle"),
