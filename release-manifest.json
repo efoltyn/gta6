@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "852e4d9918b831886e494235719017c3a4af41b9",
-  "createdAt": "2026-10-11T06:48:39.060Z",
+  "sourceCommit": "7cead9f01cb83f099bc7806c922c65c6192a1770",
+  "createdAt": "2026-10-11T07:01:25.334Z",
   "fileCount": 1332,
-  "totalBytes": 49120283,
+  "totalBytes": 49153804,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -3418,8 +3418,8 @@
     },
     {
       "file": "src/units/manifest.js",
-      "bytes": 4119,
-      "sha256": "dad85e174811ff8e53a4ef892ebcfae11040a4bf9cf750728f0500c098d6c276"
+      "bytes": 4207,
+      "sha256": "6b831dbebacc4aa40b0aeb37641c8451c91923b6174764e9bcebc30758a0201e"
     },
     {
       "file": "src/units/species/african_elephant.js",
@@ -3653,8 +3653,8 @@
     },
     {
       "file": "src/units/species/white_rhino.js",
-      "bytes": 197,
-      "sha256": "3ff1b9efaa89d1c3501b014891a36af978d41334196ec706bfcfb149b652fbbd"
+      "bytes": 33633,
+      "sha256": "36fc439966bddeb61c16f38effd90c32310d7522336952f117e9619080800480"
     },
     {
       "file": "src/units/species/white_stag.js",
@@ -6583,8 +6583,8 @@
     },
     {
       "file": "games/battle.html",
-      "bytes": 12852,
-      "sha256": "6a19f283d7abfda0c496ef8d7d5bd8a6da40616dc6b511f61e51adcbf8cff86b"
+      "bytes": 12851,
+      "sha256": "a0aac6a92b4758942086a7412bf6676fa0aabaa697ec7af806a785a535c57851"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6593,8 +6593,8 @@
     },
     {
       "file": "games/bomb-survivor.html",
-      "bytes": 75917,
-      "sha256": "4fb654ed9605690188f155223a5628461e3585b69c0cc8ed2ca931da0e3290cf"
+      "bytes": 75916,
+      "sha256": "b69e11ca1fdb78c9ea39884d24eb5fb0c6d5267e2dcb47347923df78678964d5"
     },
     {
       "file": "games/dev.html",
@@ -6613,8 +6613,8 @@
     },
     {
       "file": "games/warlord.html",
-      "bytes": 73711,
-      "sha256": "e20fcf3d2d288cca1dff1724c7a4aace811c301f16513b11822cd5ff52a8cb93"
+      "bytes": 73710,
+      "sha256": "6e1afea4ae63e5dd30db564e17de09f17c20881eb7418489375f32b5959abaf2"
     },
     {
       "file": "thumbs/shark-sim.jpg",
