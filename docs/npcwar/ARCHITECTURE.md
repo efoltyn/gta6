@@ -91,6 +91,7 @@ change it only in coordination.
 | `src/units/kit/gait.js` | `CBZ.quadGait`: planted-foot gait solver, footfall tables (a table may carry its own cadence curve `fOf(v, K)`) | animal agents (coordinate) |
 | `src/units/kit/felid.js` | `CBZ.felidKit.hooks(spec)`: one cat engine (lofted body + pattern shader, rotary gallop with a flexing spine, stalk/sprint/leap brain, trip/throat/pin/nape/grapple fight, ragdoll markers, takeover moves). The cheetah and snow leopard files are pure data on it; any cat can be | cheetah / snow leopard agent (coordinate) |
 | `src/units/kit/vehicle.js` | vehicle drive / turret / armour / crew helpers | vehicle agents (coordinate) |
+| `src/units/kit/hull.js` | `CBZ.hullKit`: wheeled-vehicle bodies (Humvee, M35): geometry buckets, nation/ground camouflage + flag decals, tyres, the M2, crew figures, particle FX, and `WheeledRig` (Ackermann steer, per-wheel suspension, sprung body, turret + scan, recoil, dust, exhaust, damage, wreck) implementing `mark / fire / damage / muzzleWorld / aimTurret`, plus `hullKit.animate` for a def's `animate`. Load it through the manifest row's `needs` | vehicle agents (coordinate) |
 | `src/units/kit/moves.js` | `CBZ.unitMoves`: what a possessed animal does on ATTACK (the `moves` hook) | player control (species files override) |
 
 ### The sim and the page (NPC War's host layer today)
@@ -218,9 +219,11 @@ creatureFight plays it with no extra work.
 CBZ.unitKit.register("m1_abrams", {
   kind: "vehicle", domain: "ground" | "air", drive: "tracked" | "wheeled" | "rotor" | "jet",
   stats:   { hp, mass, speed, turn, armour: { front, side, rear, top },  // armour in mm RHA
+             grip,                     // wheeled, opt-in, in g: the driver slows for corners, lock limited at speed
+             dismountAt,               // keep it above 1.15 x standoff, or the carrier parks with its men aboard
              alt, standoff, nap, popAlt, climb, popWindow, popShots },   // aircraft: see "Flight"
   crew:    [{ seat: "driver" | "gunner" | "commander" | "loader" | "pilot", pos: [x, y, z] }],
-  passengers,
+  passengers, passengerPos: [[x, y, z], ...],                          // optional: each bench seat in hull space
   weapons: [{ id, seat, kind: "cannon" | "autocannon" | "mg" | "rockets" | "missile" | "sam" | "bombs",
               rof, dmg, range, minRange, ammo, burst, pause, salvo, reload, vs, needs, indirect,
               mount: "turret" | "slew" | "fixed" | "free", arc, yawMax, tol,       // facing, below

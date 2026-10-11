@@ -528,7 +528,7 @@ function vehDriveTo(u, sdt, halt) {
 function vehMove(u, sdt, ctrl) {
   const D = CBZ.vehicleDrive, def = u.def, S = def.stats || {};
   const spec = { speed: S.speed, reverse: S.reverse, accel: S.accel, turn: S.turn, width: S.width,
-    wheelbase: S.wheelbase, maxSteer: S.maxSteer, mobilityKill: u.vs.mobility };
+    wheelbase: S.wheelbase, maxSteer: S.maxSteer, grip: S.grip, mobilityKill: u.vs.mobility };
   if (vehCrewN(u) === 0) { ctrl.throttle = 0; ctrl.steer = 0; }
   if (def.drive === "tracked") D.tracked(u.ds, spec, ctrl, sdt); else D.wheeled(u.ds, spec, ctrl, sdt);
   u.h = D.wrap(u.h + u.ds.w * sdt);

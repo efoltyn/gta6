@@ -513,6 +513,59 @@ scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawle
   }
 });
 
+/* 12  WHEELS. A Humvee and a loaded M35 against riflemen: both are their own
+   unit files on units/kit/hull.js (not stand-ins), the M35 carries sixteen,
+   rifle ball bounces off the Humvee's B-kit and goes through the truck's
+   sheet metal, the truck puts its men out BEFORE it parks on its firing line
+   (dismountAt > 1.15 x standoff), the .50s fire, and a wheeled hull never
+   corners harder than its grip. */
+scenario(12, "wheels: a Humvee and a loaded M35 v 30 riflemen", async () => {
+  const W = boot("?a=m35_truck*1,hmmwv*1,men*23&b=men&n=25v30&arena=dunes&aw=ak47&bw=ak47&bt=pro&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  run(W, 0.1);                                   // the spawn queue drains; nobody has thought yet
+  const R = W.sb.__battle.roster();
+  const hm = R.find((m) => m.unitId === "hmmwv"), tr = R.find((m) => m.unitId === "m35_truck");
+  check(!!hm && !!tr, "both are on the field (" + R.filter((m) => m.vehicle).map((m) => m.unitId).join(", ") + ")");
+  if (!hm || !tr) return;
+  check(!hm.group.userData.standIn && !tr.group.userData.standIn && !!(hm.rig && hm.rig.mark && tr.rig && tr.rig.mark),
+    "built by their own files on the hull kit (rigs with mark/fire/damage)");
+  const nearest = () => {
+    let d = 1e9;
+    for (const o of W.sb.__battle.roster()) if (o.team === "blue" && !o.dead) d = Math.min(d, Math.hypot(o.pos.x - tr.pos.x, o.pos.z - tr.pos.z));
+    return d;
+  };
+  const d0 = nearest();
+  // 23 men: 5 take the crew seats (2 drivers, the gunner, 2 commanders), 16
+  // the truck's benches, 2 the Humvee's back seats. The armies form ~160 m
+  // apart, inside the truck's 520 m: the men get out on the first think,
+  // where the truck stands, not after it has driven them into the enemy
+  const onFoot = R.filter((m) => m.team === "red" && !m.vehicle && !m.inVeh).length;
+  const crewN = [hm, tr].reduce((s, v) => s + v.seats.filter((x) => x.crew && x.man).length, 0);
+  check(crewN === 5 && onFoot === 18 && tr.dismounted, "5 crew aboard; the 16 riflemen and the Humvee's 2 got out at once (" + crewN + " crew, " + onFoot + " on foot, enemy " + Math.round(d0) + " m)");
+  run(W, 2);
+  const blue = R.find((m) => m.team === "blue" && !m.dead);
+  const sx = blue.pos.x, sz = blue.pos.z;
+  const hp0 = hm.hp;
+  blue.pos.x = hm.pos.x + Math.sin(hm.h) * 80; blue.pos.z = hm.pos.z + Math.cos(hm.h) * 80;
+  for (let k = 0; k < 12; k++) W.sb.hurtMan(hm, 30, { by: blue });
+  check(hm.hp === hp0, "AK ball off the Humvee's armoured front does nothing (hp " + hp0 + " -> " + hm.hp + ")");
+  const tp0 = tr.hp;
+  blue.pos.x = tr.pos.x + Math.sin(tr.h) * 80; blue.pos.z = tr.pos.z + Math.cos(tr.h) * 80;
+  for (let k = 0; k < 3; k++) W.sb.hurtMan(tr, 30, { by: blue });
+  check(tr.hp < tp0 && !tr.dead, "and goes through the truck's sheet metal (hp " + tp0 + " -> " + Math.round(tr.hp) + ")");
+  blue.pos.x = sx; blue.pos.z = sz;
+  let maxLat = 0;
+  const a = run(W, 300, () => {
+    for (const v of [hm, tr]) if (!v.dead) maxLat = Math.max(maxLat, Math.abs(v.ds.v * v.ds.w));
+    return true;
+  });
+  check(hm.shotsF + tr.shotsF > 0, "the .50s fired (" + hm.shotsF + " + " + tr.shotsF + " rounds, " + (hm.kills + tr.kills) + " kills)");
+  check(maxLat <= 0.75 * 9.8, "no wheeled hull cornered harder than its grip (max " + (maxLat / 9.8).toFixed(2) + " g)");
+  check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ")");
+});
+
 /* 11  AIRCRAFT. The vehicle contract's air half (docs/npcwar/ARCHITECTURE.md):
    a helicopter fights from battle positions (masked low, up to fire, down,
    sidestep), a jet flies attack runs at a real height; every unit animates
