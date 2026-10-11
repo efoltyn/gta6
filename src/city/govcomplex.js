@@ -254,6 +254,10 @@
   // (chalk). One shared material per colour, so core/batch.js still merges.
   const GMAT = {};
   function gm(hex) {
+    // POOLS AND FOUNTAIN BASINS ARE WATER: the shared pool surface (clear,
+    // the sky on top, the tiled floor and its caustic web through it) from
+    // world/water_spec.js, not a flat turquoise card.
+    if (hex === 0x3fa4c8 && CBZ.waterPoolMaterial) return CBZ.waterPoolMaterial();
     if (!CBZ.groundLinear) return cm(hex);
     if (GMAT[hex]) return GMAT[hex];
     // a GREEN pad is a lawn: it wears the one ground skin (the turf), not a

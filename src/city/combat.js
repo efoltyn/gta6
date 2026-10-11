@@ -53,6 +53,7 @@
   let guardT = 0;         // > 0 while holding RMB with no gun (block stance)
   let parryT = 0;         // fresh-guard window: an eaten blow counters instead
   let rmbDown = false;    // RMB currently held (for guard)
+  let lmbGuard = false;   // the one button held past a tap (systems/melee.js): the same guard
   let rmbT = 0;           // how long RMB has been held (tap vs hold)
   let lastTarget = null;  // who you're chaining on (for combo focus)
 
@@ -175,7 +176,9 @@
   function bluntName(feel, kind) {
     if (feel.name === "blunt") return "bat";
     if (feel.name === "melee") return "blunt";
-    return kind === "low" || kind === "front" || kind === "round" ? "kick" : "fist";
+    if (kind === "low" || kind === "front" || kind === "round" || kind === "kick" || kind === "lowKick" || kind === "roundKick") return "kick";
+    if (kind === "knee" || kind === "elbow" || kind === "headbutt") return kind;
+    return "fist";
   }
   function meleeHurt(t, dmg, res, heavy, feel, o) {
     const V = CBZ.vitals;
@@ -288,6 +291,10 @@
     ch.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ch.group.rotation.y, yaw, 0.7) : yaw;
   }
   const BLADE_W = { kind: "knife", blade: true, mass: 0.3 };
+  // a bat / pipe / club: the swing reaches with the weapon and lands heavy
+  // (verbs_strike WEAPON: the contact point rides out along the forearm)
+  const BAT_W = { kind: "bat", mass: 1.0 };
+  function heldW(feel) { return feel.name === "blade" ? BLADE_W : (feel.name === "blunt" || feel.name === "melee") ? BAT_W : null; }
   function swing(kind, tier, dmg) {
     const V = CBZ.verbs, pa = playerActor();
     if (!V || !V.strike || !pa) return null;
@@ -298,7 +305,7 @@
     faceLook();
     const S = V.strike(pa, special, {
       kind, heavy,
-      weapon: feel.name === "blade" ? BLADE_W : null,
+      weapon: heldW(feel),
       candidates: special ? null : cityCandidates,
       onLand: function (res) { landCity(res, dmg, tier, kind); },
       onBlocked: function (res) { blockedCity(res, dmg, kind); },
@@ -315,7 +322,7 @@
         !(CBZ.body && CBZ.body.busy && CBZ.body.busy(T))) {
       const pf = posture(T) / (T._postMax || postureMax(T));
       const blockChance = (T.kind === "cop" ? 0.34 : (T.gang ? 0.30 : 0.22)) * (1 - pf * 0.4);
-      if (Math.random() < blockChance) V.block(T, 0.5);
+      if (Math.random() < blockChance) V.block(T, 0.5, true);   // already up: a cover, never a parry
     }
     return S;
   }
@@ -694,7 +701,7 @@
   }
 
   // ---- LIGHT attack: chains jab → cross → hook (3rd = finisher) -----------
-  function lightAttack() {
+  function lightAttack(spec) {
     if (pBrokenT > 0) return;                    // you're guard-broken, can't swing
     if (staggerT > 0 || tired()) return;         // gassed: the guard sags (ch.winded), the fists stay home
     // on top of him already: the next blow goes into him
@@ -709,7 +716,9 @@
     const finisher = next >= 3;
     // chest to chest there is no room to turn a hook over: the forehead goes in
     const near = finisher ? aimTarget(0.85, 0.5) : null;
-    const kind = finisher ? (near && weaponFeel().name !== "blade" ? "headbutt" : "hook") : KINDS[(next - 1) % 3];
+    // the button's grammar (systems/melee.js M.pick) names the blow; a bare
+    // call keeps the jab-cross-hook rhythm
+    const kind = spec && spec.kind ? spec.kind : finisher ? (near && weaponFeel().name !== "blade" ? "headbutt" : "hook") : KINDS[(next - 1) % 3];
     const base = it() ? it().dmg : 16;
     // jab/cross scale up through the chain; the hook (3rd) is the big one
     const dmg = finisher ? Math.round(base * 1.9) : Math.round(base * (1 + (next - 1) * 0.18));
@@ -722,7 +731,7 @@
   }
 
   // ---- HEAVY attack: slow, costly, staggers/knocks down -------------------
-  function heavyAttack() {
+  function heavyAttack(spec) {
     if (pBrokenT > 0) return;                    // guard-broken — can't swing
     if (heavyCD > 0 || staggerT > 0) return;
     if (tired()) return;
@@ -733,7 +742,7 @@
     markFighting();
     combo = 0; comboT = 0;
     const base = it() ? it().dmg : 16;
-    const S = swing("overhand", "heavy", Math.round(base * 2.4));   // a big looping overhand
+    const S = swing(spec && spec.kind ? spec.kind : "overhand", "heavy", Math.round(base * 2.4));   // the power shot (a looping overhand by default)
     if (!S) return;
     spend(16);
     if (!S.aimT) swingAtWorld(true);
@@ -1367,7 +1376,7 @@
     // GUARD stance: RMB held (no gun, on foot) raises a block; while up you're
     // a touch slower and protected. We keep g.invuln OFF (so the wrapped
     // cityHurtPlayer can apply chip/parry); peds.js sees _blocking for AI.
-    const wantGuard = rmbDown && !CBZ.cityHasGun() && active() && !P.driving && staggerT <= 0;
+    const wantGuard = ((rmbDown && active()) || lmbGuard) && !CBZ.cityHasGun() && !P.driving && staggerT <= 0;
     if (wantGuard) {
       if (guardT <= 0) parryT = PARRY_WINDOW;   // just raised → parry window opens
       guardT = 0.12;                            // refresh while held
@@ -1435,8 +1444,11 @@
     }
     if (CBZ.cityHasGun()) return;            // a gun is out → the engine gun system owns the mouse
     if (e.button === 0) {
-      if (fireCD > 0) return;
       e.preventDefault();
+      // THE ONE BUTTON (systems/melee.js): press throws, hold guards,
+      // releasing a hold throws the power shot; the stick picks the blow
+      if (CBZ.melee && CBZ.melee.trigger) { CBZ.melee.trigger(true); return; }
+      if (fireCD > 0) return;
       lightAttack();
     } else if (e.button === 2) {
       // RMB with no gun: raise guard immediately; a tap-release also throws a heavy
@@ -1447,6 +1459,7 @@
   });
 
   document.addEventListener("mouseup", function (e) {
+    if (e.button === 0) { if (g.mode === "city" && CBZ.melee && CBZ.melee.holding && CBZ.melee.holding()) CBZ.melee.trigger(false); return; }
     if (e.button !== 2) return;
     if (!rmbDown) return;
     rmbDown = false;
@@ -1454,6 +1467,50 @@
     if (rmbT < 0.22 && active() && !cuffedNow() && !CBZ.cityHasGun() && !CBZ.cityMenuOpen) heavyAttack();
     guardT = Math.min(guardT, 0.06);
   });
+
+  /* THE CITY'S ADAPTER for systems/melee.js's one button (mouse LMB here,
+     the touch FIRE button through systems/touch.js): the grammar picks the
+     blow, this file throws it through the street's own costs — posture,
+     stamina, the finisher on an open man, the mount on a man who is down.
+     Holding the button is the same guard RMB raises (parry window and all). */
+  if (CBZ.melee && CBZ.melee.adapt) {
+    CBZ.melee.adapt("city", {
+      ready() {
+        if (g.mode !== "city" || g.state !== "playing" || P.dead || P.driving || !handsFree()) return false;
+        if (CBZ.cityMenuOpen || CBZ.cityHasGun()) return false;
+        return true;
+      },
+      context(c) {
+        c.cuffed = cuffedNow();
+        const feel = weaponFeel();
+        c.weapon = heldW(feel);
+        const t = aimTarget(3.6, 0.5);
+        c.dist = t ? Math.hypot(t.pos.x - P.pos.x, t.pos.z - P.pos.z) : 99;
+        c.down = !!((P._gnpOn && !P._gnpOn.dead) || (t && isDown(t)));
+      },
+      strike(spec) {
+        if (CBZ.cityMountedAnimalAttack && CBZ.cityMountedAnimalAttack(true)) return true;
+        if (cuffedNow()) { if (fireCD > 0) return false; cuffKick(); return true; }
+        if (spec.verb === "tackle") {
+          const t = aimTarget(3.4, 0.6), V = CBZ.verbs, pa = playerActor();
+          if (t && V && V.tackle && pa && !isDown(t) && !tired()) {
+            const S = V.tackle(pa, t, {});
+            if (S) { markFighting(); spend(14); fireCD = 0.6; return true; }
+          }
+          spec = { kind: "cross", heavy: false, lunge: 1 };
+        }
+        if (spec.heavy) { heavyAttack(spec); return true; }
+        if (fireCD > 0) return false;
+        lightAttack(spec);
+        return true;
+      },
+      guard(on) {
+        lmbGuard = !!on;
+        if (on && guardT <= 0) parryT = PARRY_WINDOW;
+        if (on) { guardT = 0.12; P._blocking = 1; }
+      },
+    });
+  }
 
   // ============================================================
   //  THROWABLE GRENADES — an arcing, fused area weapon ([T] to throw)
