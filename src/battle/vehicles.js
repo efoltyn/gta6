@@ -1272,8 +1272,18 @@ function hurtVehicle(u, dmg, imp) {
   if (imp.fromX != null) { fx = imp.fromX; fz = imp.fromZ; }
   else if (by && by.pos) { fx = by.pos.x; fz = by.pos.z; }
   const above = th.top || (by && by.pos && by.pos.y - u.pos.y > 30 && Math.hypot(fx - u.pos.x, fz - u.pos.z) < (by.pos.y - u.pos.y) * 2);
-  const zn = D.zone(u.h, fx, fz, u.pos.x, u.pos.z, above);
-  const res = D.resolve(u.vs, u.def.stats || {}, zn, th, dmg, lcg);
+  /* THE BELLY. A charge under the hull (an IED, a mine: th.below) meets the
+     floor, and so does a ground blast inside the footprint of a hull that
+     rates its floor (stats.armour.belly: a V-hull). Hulls without one keep
+     the face the blast came from, as they always did. */
+  const S = u.def.stats || {};
+  let under = !!th.below;
+  if (!under && th.he && !above && th.cls !== "heat" && imp.fromX != null && S.armour && S.armour.belly != null) {
+    const ox = fx - u.pos.x, oz = fz - u.pos.z, c = Math.cos(u.h), s = Math.sin(u.h);
+    under = Math.abs(ox * c - oz * s) < u.vwid * 0.6 && Math.abs(ox * s + oz * c) < u.vlen * 0.6;
+  }
+  const zn = under ? "belly" : D.zone(u.h, fx, fz, u.pos.x, u.pos.z, above);
+  const res = D.resolve(u.vs, S, zn, th, dmg, lcg);
   u.hp = Math.max(0, u.vs.hp);
   u.lastHit = res;
   if (PROBE) { VEH.hits = VEH.hits || { pen: 0, bounced: 0 }; if (res.pen) VEH.hits.pen++; else VEH.hits.bounced++; }
@@ -1310,11 +1320,12 @@ function vehCrewHits(u, res, th, zn, fx, fz, by) {
   // where it came in, and its path inward
   let ix, iy, iz, px, py, pz;
   if (zn === "top") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = H; px = 0; py = -1; pz = 0; }
+  else if (zn === "belly") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = 0.3; px = 0; py = 1; pz = 0; }
   else {
     const tt = Math.min(Wd / Math.max(1e-3, Math.abs(dx)), L / Math.max(1e-3, Math.abs(dz)));
     ix = dx * tt; iz = dz * tt; iy = H * (0.35 + lcg() * 0.45); px = -dx; py = 0; pz = -dz;
   }
-  const reach = zn === "top" ? H : (Math.abs(px) > Math.abs(pz) ? Wd * 2 : L * 2) * 0.8;
+  const reach = zn === "top" || zn === "belly" ? H : (Math.abs(px) > Math.abs(pz) ? Wd * 2 : L * 2) * 0.8;
   const beh = Math.max(th.beh || 0, res.dmg || 0);
   const pk = Math.min(0.9, beh / 600);
   let lost = 0;

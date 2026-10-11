@@ -28,6 +28,9 @@
       fireShot, hand the rifle back; a soldier who is killed goes back to the
       director and is reported down.
    5  snow, fields and the wood: the erg skins build and fight.
+  14  THE CONVOY: an M1, a MaxxPro MRAP and a JLTV v riflemen with RPGs:
+      the troops get out, rifle fire stops on the MRAP, the V-hulls live
+      through an IED under them.
   10  THE GROUND: cover points for the host (crests, props, crater lips), a
       dug-in position's berm in the height function, a bomb that digs a crater
       into groundAt and breaks the sandbags beside it.                    */
@@ -591,6 +594,119 @@ scenario(12, "wheels: a Humvee and a loaded M35 v 30 riflemen", async () => {
   check(hm.shotsF + tr.shotsF > 0, "the .50s fired (" + hm.shotsF + " + " + tr.shotsF + " rounds, " + (hm.kills + tr.kills) + " kills)");
   check(maxLat <= 0.75 * 9.8, "no wheeled hull cornered harder than its grip (max " + (maxLat / 9.8).toFixed(2) + " g)");
   check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ")");
+});
+
+/* 16  THE CONVOY. An M1 leading a MaxxPro MRAP and a JLTV (the troop
+   carriers the US actually uses, both their own files on units/kit/hull.js)
+   against riflemen with RPGs. The MRAP carries six and the JLTV one behind
+   their crews; the men get out (the armies form inside both dismount
+   ranges); rifle ball stops on every face of the MRAP, in the scripted
+   check AND in the battle (every small-arms round that reaches it is
+   counted); the MRAP corners inside its rollover limit and heels further
+   than the JLTV doing it; and a buried charge under each hull: the V-hulls
+   live, the Humvee's flat floor does not. */
+scenario(16, "the convoy: an M1, a MaxxPro and a JLTV v riflemen with RPGs", async () => {
+  const W = boot("?a=m1_abrams*1,maxxpro_mrap*1,jltv*1,men*17&b=men&n=20v60&arena=dunes&aw=carbine&bw=ak47,ak47,ak47,ak47,bazooka&bt=elite&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  run(W, 0.1);
+  const R = W.sb.__battle.roster();
+  const mr = R.find((m) => m.unitId === "maxxpro_mrap"), jl = R.find((m) => m.unitId === "jltv"), tk = R.find((m) => m.unitId === "m1_abrams");
+  check(!!mr && !!jl && !!tk, "the column is on the field (" + R.filter((m) => m.vehicle).map((m) => m.unitId).join(", ") + ")");
+  if (!mr || !jl || !tk) return;
+  check(!mr.group.userData.standIn && !jl.group.userData.standIn && !!(mr.rig && mr.rig.mark && jl.rig && jl.rig.mark),
+    "the MaxxPro and the JLTV are built by their own files on the hull kit (rigs with mark/fire/damage)");
+  const crew = (v) => v.seats.filter((x) => x.crew && x.man).length, pax = (v) => v.seats.filter((x) => !x.crew && x.man).length;
+  // 17 men: 10 take the crew seats (4 in the tank, 3 + 3), 6 the MRAP's benches, 1 the JLTV's back seat
+  const onFoot = R.filter((m) => m.team === "red" && !m.vehicle && !m.inVeh).length;
+  check(crew(tk) === 4 && crew(mr) === 3 && crew(jl) === 3, "crews aboard: tank 4, MaxxPro 3, JLTV 3 (" + crew(tk) + ", " + crew(mr) + ", " + crew(jl) + ")");
+  check(mr.dismounted && jl.dismounted && onFoot === 7 && pax(mr) === 0 && pax(jl) === 0,
+    "the MaxxPro's six and the JLTV's one got out (" + onFoot + " riflemen on foot)");
+  // the scripted check: an AK man 80 m off each face of the MRAP, a sniper off its flank
+  run(W, 1);
+  const blue = R.find((m) => m.team === "blue" && !m.dead && !m.launcher);
+  const sx = blue.pos.x, sz = blue.pos.z, sw = blue.wid;
+  const hp0 = mr.hp, faces = [];
+  for (const [name, a] of [["front", 0], ["side", Math.PI / 2], ["rear", Math.PI], ["other side", -Math.PI / 2]]) {
+    blue.pos.x = mr.pos.x + Math.sin(mr.h + a) * 80; blue.pos.z = mr.pos.z + Math.cos(mr.h + a) * 80;
+    for (let k = 0; k < 10; k++) W.sb.hurtMan(mr, 30, { by: blue });
+    faces.push(name + " " + (mr.lastHit && mr.lastHit.zone));
+  }
+  blue.wid = "sniper";
+  blue.pos.x = mr.pos.x + Math.sin(mr.h + Math.PI / 2) * 300; blue.pos.z = mr.pos.z + Math.cos(mr.h + Math.PI / 2) * 300;
+  for (let k = 0; k < 10; k++) W.sb.hurtMan(mr, 60, { by: blue });
+  blue.wid = sw; blue.pos.x = sx; blue.pos.z = sz;
+  check(mr.hp === hp0 && !mr.dead, "40 AK rounds on all four faces and 10 sniper rounds on the flank do nothing to the MRAP (hp " + hp0 + " -> " + mr.hp + "; " + faces.join(", ") + ")");
+  // the battle: count every round that reaches the MRAP, by what it was
+  const D = W.CBZ.vehicleDrive, hurt0 = W.sb.hurtMan;
+  const led = { small: 0, smallPen: 0, heavy: 0, heavyPen: 0 };
+  W.sb.hurtMan = function (m, dmg, imp) {
+    const live = m === mr && dmg > 0 && !mr.dead;
+    const r = hurt0.apply(this, arguments);
+    if (live) {
+      const th = D.threatOf(imp || {}, imp && imp.by);
+      const pen = !!(mr.lastHit && mr.lastHit.pen);
+      if (th.cls === "small") { led.small++; if (pen) led.smallPen++; } else { led.heavy++; if (pen) led.heavyPen++; }
+    }
+    return r;
+  };
+  let latM = 0, latJ = 0, rollM = 0, rollJ = 0;
+  const a = run(W, 300, () => {
+    if (!mr.dead) { latM = Math.max(latM, Math.abs(mr.ds.v * mr.ds.w)); rollM = Math.max(rollM, Math.abs(mr.rig.roll || 0)); }
+    if (!jl.dead) { latJ = Math.max(latJ, Math.abs(jl.ds.v * jl.ds.w)); rollJ = Math.max(rollJ, Math.abs(jl.rig.roll || 0)); }
+    return true;
+  });
+  W.sb.hurtMan = hurt0;
+  console.log("    MRAP ledger " + JSON.stringify(led) + ", hp " + Math.round(mr.hp) + "/" + mr.maxHp + (mr.dead ? " (knocked out)" : "") + "; JLTV hp " + Math.round(jl.hp) + (jl.dead ? " (knocked out)" : "") +
+    "; guns " + [tk, mr, jl].map((v) => v.unitId + " " + v.shotsF + "/" + v.kills).join(", "));
+  check(led.small > 0 && led.smallPen === 0, "in the fight, " + led.small + " rifle rounds reached the MRAP and none got through");
+  check(mr.shotsF + jl.shotsF > 0, "the .50s on the MRAP's ring and the JLTV's CROWS fired (" + mr.shotsF + " + " + jl.shotsF + " rounds)");
+  check(latM <= 0.42 * 9.8 * 1.05, "the MRAP never cornered past its rollover limit (max " + (latM / 9.8).toFixed(2) + " g of 0.42)");
+  // (sixty against a column can stall into a long fight: the end is reported, not required)
+  check(!mr.dead, "the MRAP came through the fight (" + a.simT + " s, " + (a.over ? "winner " + a.winner : "still fighting") + ", red " + a.red + " blue " + a.blue + ")");
+
+  // A BURIED CHARGE under each hull: the V-hulls take it on the belly and live
+  const W2 = boot("?a=maxxpro_mrap*1,jltv*1,hmmwv*1&b=men&n=3v5&arena=dunes&bw=ak47&auto=1&probe=0");
+  if (W2.err) { check(false, "page threw at boot: " + (W2.err.stack || W2.err)); return; }
+  await settle();
+  run(W2, 0.1);
+  const R2 = W2.sb.__battle.roster();
+  // TOP-HEAVY: each hull floored for 8 s, then full lock for 5 s. The MRAP's
+  // driver is held to its rollover limit (0.42 g) and still heels over
+  // further than the JLTV pulling nearly twice the g
+  const turn = {};
+  for (const id of ["maxxpro_mrap", "jltv"]) {
+    const v = R2.find((m) => m.unitId === id);
+    let lat = 0, roll = 0;
+    for (let k = 0; k < 650; k++) {
+      W2.sb.vehMove(v, 0.02, { throttle: 1, steer: k < 400 ? 0 : 1, brake: 0 });
+      W2.sb.vehAnimate(v, 0.02);
+      if (k >= 400) { lat = Math.max(lat, Math.abs(v.ds.v * v.ds.w)); roll = Math.max(roll, Math.abs(v.rig.roll)); }
+    }
+    turn[id] = { g: lat / 9.8, deg: roll * 57.3 };
+  }
+  console.log("    full lock " + JSON.stringify(turn));
+  check(turn.maxxpro_mrap.g <= 0.42 * 1.02 && turn.maxxpro_mrap.g > 0.3, "the MRAP's driver takes a tight turn at its rollover limit (" + turn.maxxpro_mrap.g.toFixed(2) + " g of 0.42)");
+  check(turn.maxxpro_mrap.deg > turn.jltv.deg * 1.5, "and its body rolls over much further than the JLTV's at " + turn.jltv.g.toFixed(2) + " g (" + turn.maxxpro_mrap.deg.toFixed(1) + " v " + turn.jltv.deg.toFixed(1) + " deg)");
+  const out = {};
+  for (const id of ["maxxpro_mrap", "jltv", "hmmwv"]) {
+    const v = R2.find((m) => m.unitId === id);
+    let pens = 0, zone = null;
+    const hp = v.hp, vs0 = JSON.stringify(v.vs);
+    for (let k = 0; k < 20; k++) {
+      if (v.dead) break;
+      W2.sb.hurtMan(v, 400, { cause: "ied", fromX: v.pos.x, fromZ: v.pos.z });
+      zone = v.lastHit && v.lastHit.zone;
+      if (v.lastHit && v.lastHit.pen) pens++;
+      if (!v.dead) { Object.assign(v.vs, JSON.parse(vs0)); v.hp = hp; }       // the same hull, twenty times over
+    }
+    out[id] = { pens: pens, zone: zone, dead: !!v.dead };
+  }
+  console.log("    IED " + JSON.stringify(out));
+  check(out.maxxpro_mrap.zone === "belly" && out.maxxpro_mrap.pens === 0 && !out.maxxpro_mrap.dead, "twenty IEDs under the MaxxPro: the V-hull takes every one on its belly, nothing through");
+  check(out.jltv.pens <= 2 && !out.jltv.dead, "the JLTV's MRAP-class floor holds (" + out.jltv.pens + " of 20 through)");
+  check(out.hmmwv.pens > 0, "the Humvee's flat floor does not (" + out.hmmwv.pens + " through, " + (out.hmmwv.dead ? "knocked out" : "standing") + ")");
 });
 
 /* 11  AIRCRAFT. The vehicle contract's air half (docs/npcwar/ARCHITECTURE.md):

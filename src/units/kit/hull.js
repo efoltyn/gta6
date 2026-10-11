@@ -654,6 +654,42 @@
     return 1.46;
   }
 
+  /* THE O-GPK GUNNER'S TURRET (Objective Gunner Protection Kit), in turret
+     space (origin on the ring, front +Z): the traversing ring, the front
+     shield leaning back 8 degrees with its two ballistic windows and the gun
+     slot, angled wings with their own windows, side and rear plates, bolts,
+     the pintle post and cradle the gun sits on (trunnion at y 0.30, z 0.28).
+     The Humvee and the MaxxPro both carry it. `tint` = the wings' paint. */
+  function ogpk(Tg, tint) {
+    const D = tint == null ? 0.92 : tint;
+    Tg.m("dark").c(1).cyl(0, 0.03, 0, 0.68, 0.68, 0.06, "y", 28);                            // traversing ring
+    Tg.m("paint").c(1);
+    const lean = -0.14;
+    Tg.save().tf(0, 0, 0.62, lean, 0, 0);
+    Tg.box(0, 0.16, 0, 1.30, 0.32, 0.04);
+    [-1, 1].forEach(function (s) { Tg.box(s * 0.40, 0.55, 0, 0.50, 0.46, 0.04); });
+    Tg.box(0, 0.72, 0, 0.32, 0.12, 0.04);
+    Tg.m("dark").c(1);
+    [-1, 1].forEach(function (s) { Tg.box(s * 0.40, 0.57, 0.025, 0.36, 0.30, 0.02); });   // window frames
+    Tg.m("glass").c(1);
+    [-1, 1].forEach(function (s) { Tg.box(s * 0.40, 0.57, 0.04, 0.30, 0.24, 0.02); });    // transparent armour
+    Tg.restore();
+    Tg.m("paint").c(D);
+    [-1, 1].forEach(function (s) {
+      Tg.save().tf(s * 0.78, 0, 0.40, 0, s * -0.78, 0);
+      Tg.box(0, 0.38, 0, 0.04, 0.70, 0.52);
+      Tg.m("glass").c(1).box(s * 0.02, 0.56, 0, 0.02, 0.18, 0.22);
+      Tg.restore();
+      Tg.box(s * 0.86, 0.32, -0.12, 0.04, 0.58, 0.58);                                       // side plates
+      Tg.box(s * 0.70, 0.30, -0.56, 0.04, 0.54, 0.36, 0, s * 0.62, 0);                      // rear corners
+    });
+    Tg.m("dark").c(1);
+    for (let i = 0; i < 6; i++) Tg.cyl(-0.55 + i * 0.22, 0.04, 0.60, 0.012, 0.012, 0.02, "z", 6);
+    Tg.cyl(0, 0.13, 0.28, 0.04, 0.05, 0.22, "y", 8);                                         // pintle post
+    Tg.box(0, 0.24, 0.28, 0.12, 0.06, 0.14);                                                 // cradle
+    return Tg;
+  }
+
   /* ================================================================ 5. FX */
   const FX_VS = [
     "attribute float size; attribute float alpha; attribute vec3 tint;",
@@ -777,7 +813,9 @@
   /* o = { root, body, wheels:[{x,y,z,r,steer}], tyreIM, rimIM, wheelbase, track,
            travel:[bump, droop], turret, gun, tube, muzzle, tcfg:{rate,elevRate,elevMin,elevMax},
            figs:{ seatName: Object3D | [Object3D...] }, gunner:{ obj, calm, fight },
-           ringStand:{ seat, standing, seated }, troops:{ im, max }, exhaust:{ p:[x,y,z], d:[x,y,z], soot },
+           pitchK, rollK, pitchMax, rollMax (body lean per m/s2, and its limits, rad),
+           ringStand:{ seat, standing, seated }, troops:{ im, max }, tailgate:{ obj, open, axis: "x"|"y", rate },
+           exhaust:{ p:[x,y,z], d:[x,y,z], soot },
            engine:[x,y,z], cabin:[x,y,z], arena, mass, seed, tailgate, shield, scan }
      dust from the rear-most wheels' contact patches. */
   function WheeledRig(o) {
@@ -954,9 +992,11 @@
       R.standing.visible = on && engaged;
       R.seated.visible = on && !engaged;
     }
+    // the tailgate drops (axis "x", the default) or the rear door swings on
+    // its side hinge (axis "y") when the men get out
     if (this.tailgate) {
-      const want = u.dismounted ? this.tailgate.open : 0;
-      this.tailgate.obj.rotation.x += (want - this.tailgate.obj.rotation.x) * Math.min(1, this.dt * 3);
+      const T = this.tailgate, ax = T.axis || "x", want = u.dismounted ? T.open : 0;
+      T.obj.rotation[ax] += (want - T.obj.rotation[ax]) * Math.min(1, this.dt * (T.rate || 3));
     }
   };
   /* THE FRAME. dt is the animation step, v/w/steer the drive state, u the unit. */
@@ -985,7 +1025,10 @@
     heave /= ws.length;
     // ---- the sprung body: squat under power, dive on the brakes, lean out of a turn
     const acc = clamp((v - this.lv) / dt, -12, 12); this.lv = v;
-    const pt = clamp(-acc * (this.pitchK || 0.006), -0.05, 0.05), rt = clamp(v * w * (this.rollK || 0.006), -0.07, 0.07);
+    // rollMax: how far the body may heel on its springs (a top-heavy MRAP leans
+    // twice as far as a Humvee); pitchMax the same fore and aft
+    const pM = this.pitchMax || 0.05, rM = this.rollMax || 0.07;
+    const pt = clamp(-acc * (this.pitchK || 0.006), -pM, pM), rt = clamp(v * w * (this.rollK || 0.006), -rM, rM);
     this.pv += ((pt - this.pitch) * 70 - this.pv * 10) * dt; this.pitch += this.pv * dt;
     this.rv += ((rt - this.roll) * 60 - this.rv * 9) * dt; this.roll += this.rv * dt;
     if (this.body) {
@@ -1101,6 +1144,8 @@
       if (this.troops) this.troops.im.count = 0;
       if (this.gun) this.gun.rotation.x = 0.3;
       if (this.cat && this.shield) { this.shield.rotation.z = 0.32; this.shield.rotation.x = -0.18; this.shield.position.y -= 0.12; }
+      // the survivors went out the back: the door stands open (blown off its stop if it brewed up)
+      if (this.tailgate) { const T = this.tailgate; T.obj.rotation[T.axis || "x"] = T.open * (this.cat ? 1.12 : 1); }
       this.burnt = 0;
     }
     const burning = u && u.burnT > 0;
@@ -1216,7 +1261,7 @@
     cache: cache, wheelSet: wheelSet, animate: animate, figMesh: figMesh,
     geo: function () { return new Geo(); },
     lin: lin, rng: rngOf, scheme: scheme, mats: mats, flagMat: flagMat, flagRatio: flagRatio,
-    decalGeo: decalGeo, meshes: meshes, tyre: tyre, m2: m2, figure: figure, WheeledRig: WheeledRig, Fx: Fx,
+    decalGeo: decalGeo, meshes: meshes, tyre: tyre, m2: m2, ogpk: ogpk, figure: figure, WheeledRig: WheeledRig, Fx: Fx,
     SCHEMES: SCHEMES, aff: aff, clamp: clamp, wrap: wrap,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = CBZ.hullKit;
