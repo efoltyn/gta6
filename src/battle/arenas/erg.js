@@ -1,41 +1,56 @@
 "use strict";
-/* src/battle/arenas/erg.js — NPC War: THE ERG: open dunes / snow / fields.
+/* src/battle/arenas/erg.js — NPC War: THE ERG: open dunes, snow, fields, forest.
    Split out of games/battle.html (docs/npcwar/ARCHITECTURE.md). Every
    src/battle file shares ONE script scope: top-level names here are visible
    to the other battle files. Anything that needs the loaded engine runs in
-   CBZ.npcwar.onBoot(), in file order, once the armoury is in. */
+   CBZ.npcwar.onBoot(), in file order, once the armoury is in.
 
-/* ============================================================ THE ERG
-   OPEN DUNES USED TO BE A TABLECLOTH. The desert world's terrain is one
-   15 km plane at 63 m a cell, and its dune field is a 420 m fbm swell, so
-   the whole ±200 m window the war is fought in was four flat facets lit per
-   vertex: pale sand with no crest, no slip face, no shadow and no ripple.
-   The owner's favourite map looked like the inside of a lampshade.
+   ============================================================ THE ERG
+   The desert world's terrain is one 15 km plane at 63 m a cell; the war is
+   fought in a 1.2 km window over it whose ground is a FUNCTION added to the
+   world's own heightAt, faded to nothing at the window's edge. The men, the
+   sight lines (terrainLos), the camera floor, the craters and the bombs all
+   read MAP.groundAt, so the shape below is real cover, not paint.
 
-   Real dunes are a WIND shape: a long gentle windward climb (~8°), a sharp
-   crest, and a steep slip face (~30°) falling off it, repeated every hundred
-   metres or so with the crest line wandering. That shape is a function, and
-   this page already stands everything on a function — so the war window
-   gets a transverse dune field ADDED to the desert's own heightAt, faded out
-   to nothing at the window's edge so it meets the world's terrain exactly.
-   The men, the sight lines (terrainLos), the camera floor and the bombs all
-   read MAP.groundAt, so the crests are real cover, not paint.
+   FOUR FORMS, ONE WINDOW.
+     dune   SAND. Real dune morphology from one wind. Transverse ridges every
+            ~118 m whose crest line bends into barchanoid crescents (horns
+            trailing DOWNWIND, cusps between them), and where the sand supply
+            runs low the ridge breaks into separate BARCHANS with flat lag
+            pans between. Each dune has a long windward (stoss) slope at
+            ~11.5 deg that steepens over the brink, a SHARP crest, and a
+            slip face at the angle of repose, 32 deg, ending in a small
+            avalanche apron. Crest heights run 2.5-12 m.
+     drift  SNOW. The same wind making softer forms: lower drifts with a
+            rounded brink and a 26 deg lee over a long swell, plus drift
+            tails in the lee of every rock and wall (ground.js drift()).
+            The surface carries sastrugi in the shader.
+     roll   FIELDS and FOREST. Rolling ground, no wind shape at all: three
+            octaves of smooth hills (260 / 85 / 30 m).
 
-   And it is drawn at the resolution it deserves: a 1.2 km skin at 4 m a
-   cell over the window, with the world's coarse plane discarded underneath
-   it (a shader test, so the two can never fight for the depth buffer), a
-   low sun that throws the slip faces into shadow, and wind ripples in the
-   sand's own shader that fade out before they can shimmer. */
+   THE SKIN is drawn at the resolution the form deserves: a 1.2 km square
+   turned onto the wind, 2 m a cell along the wind (so a crest is one sharp
+   line of vertices) and 4 m across it, lit per pixel (MeshPhongMaterial)
+   so the shader can lay WIND RIPPLES into the normal under a low sun. The
+   world's coarse plane gives up the same turned square under it. */
+/* THE WIND blows from the sun's side (toward -x, -z), so under the dunes'
+   low afternoon sun the long stoss slopes take the light and every slip
+   face falls into its own shade: the crest is a hard line between the two. */
 const DUNE = { on: false, cx: 0, cz: 0, R0: 420, R1: 585, half: 600,
-  wx: Math.cos(0.42), wz: Math.sin(0.42), lam: 92, skin: null, pal: null };
-/* WHAT THE ERG IS WEARING. Sand is the original; snow and grass are the same
-   crests under another surface. `amp` softens the folds (fields roll, they
-   do not slip-face), `tint` is what the desert world's far terrain is worked
-   toward so the horizon matches the window, `tuft` is the low growth. */
+  wa: 0.42 + Math.PI, wx: Math.cos(0.42 + Math.PI), wz: Math.sin(0.42 + Math.PI), lam: 118, phase: 0, skin: null, pal: null, tab: null };
+/* WHAT THE ERG IS WEARING. `form` is the height function, `surface` what the
+   ground layer (ground.js) digs, prints and sprays. Colours are albedo (the
+   skin is lit per pixel now); `tint` is what the world's far terrain is worked
+   toward so the horizon matches the window. */
 const ERG_PAL = {
-  sand:  { sand: 0xc4935a, crest: 0xd8aa6c, trough: 0xa77a48, slip: 0xb07c46, pan: 0xb49a78, amp: 1, tint: null, tuft: 0x9a8a5a, tufts: 900 },
-  snow:  { sand: 0xe6ebef, crest: 0xf5f7f9, trough: 0xcdd6de, slip: 0xb9c6d3, pan: 0xd3d8dc, amp: 1, tint: [0.88, 0.91, 0.94], tuft: 0x857e6c, tufts: 260 },
-  grass: { sand: 0x6c8744, crest: 0x84a053, trough: 0x58713a, slip: 0x627a3e, pan: 0x8b8758, amp: 0.62, tint: [0.36, 0.45, 0.25], tuft: 0x5b7832, tufts: 1600 },
+  sand:   { form: "dune",  surface: "sand", sand: 0xc89a62, crest: 0xdcb47a, trough: 0xa5774a, slip: 0xd1a46a, pan: 0x9d8466,
+            amp: 1, tint: null, tuft: 0x9a8a5a, tufts: 700, rough: 0.96 },
+  snow:   { form: "drift", surface: "snow", sand: 0xe4e9ee, crest: 0xf4f7fa, trough: 0xd1d9e1, slip: 0xc7d3df, pan: 0xd6dce1,
+            amp: 1, tint: [0.88, 0.91, 0.94], tuft: 0x857e6c, tufts: 160, rough: 0.72 },
+  grass:  { form: "roll",  surface: "grass", sand: 0x6c8744, crest: 0x7a9650, trough: 0x5c763a, slip: 0x6c8744, pan: 0x8b8758,
+            amp: 1, tint: [0.36, 0.45, 0.25], tuft: 0x5b7832, tufts: 0, rough: 0.93 },
+  forest: { form: "roll",  surface: "forest", sand: 0x5e4a33, crest: 0x66533a, trough: 0x4e3d2a, slip: 0x5e4a33, pan: 0x55452f,
+            amp: 0.85, tint: [0.2, 0.27, 0.15], tuft: 0x4f6b2e, tufts: 0, rough: 0.97 },
 };
 function hash2(ix, iz, salt) {
   let h = (ix * 374761393 + iz * 668265263 + salt * 2147483647) | 0;
@@ -57,110 +72,434 @@ function duneWeight(x, z) {
   const t = (r - DUNE.R0) / (DUNE.R1 - DUNE.R0);
   return 1 - t * t * (3 - 2 * t);
 }
+
+/* ---- THE DUNE: one crest k at along-wind coordinate u, across-wind v. ----
+   The crest's height comes from the sand supply along it; low supply turns a
+   ridge into a chain of crescents (barchans), high supply into a transverse
+   ridge with only a sinuous crest. Module scratch (no allocation per call:
+   this runs on every terrain-sight sample). */
+let _cH = 0, _cU = 0;
+function duneCrest(k, v, amp, snow) {
+  // supply: this crest's own run, over a regional field — part of the
+  // window is a barchan field, part a train of transverse ridges
+  const loc = vn2(v * 0.0052 + k * 3.7, k * 0.61, 41), reg = vn2(k * 0.18, v * 0.0017, 39);
+  let S = loc * 0.6 + reg * 0.85 - 0.3; S = S < 0 ? 0 : S > 1 ? 1 : S;
+  const Lb = 70 + 60 * hash2(k, 7, 43);
+  let t = v / Lb + hash2(k, 3, 47); t -= Math.floor(t);
+  const c = Math.pow(Math.sin(Math.PI * t), 0.7);
+  let iso = 1.35 - 1.7 * S; iso = iso < 0 ? 0 : iso > 1 ? 1 : iso;
+  const H = (snow ? 1.2 + 4 * S : 2 + 6 * S) * (1 - iso + iso * c) * amp;
+  const warp = (vn2(v * 0.008 + k * 5.1, k * 0.3, 17) - 0.5) * 44 + (vn2(v * 0.03, k * 0.7 + 1, 29) - 0.5) * 9;
+  _cH = H;
+  _cU = k * DUNE.lam + warp + (1 - c) * (6 + 14 * iso);
+}
+/* THE CREST TABLE. A crest's height and its along-wind position depend on
+   (k, v) only, so the window's dozen crests are sampled once a metre along
+   their length when the window is raised and read back by linear
+   interpolation: the ground function every sight line samples every 3 m
+   costs ~60 ns instead of ~1 us. Off the table it computes directly. */
+function duneTable() {
+  const P = DUNE.pal, snow = P.form === "drift", amp = P.amp == null ? 1 : P.amp;
+  const key = DUNE.cx + "," + DUNE.cz + "," + P.form + "," + amp + "," + DUNE.phase;
+  if (DUNE.tab && DUNE.tab.key === key) return DUNE.tab;
+  const u0 = DUNE.cx * DUNE.wx + DUNE.cz * DUNE.wz - DUNE.phase, v0 = -DUNE.cx * DUNE.wz + DUNE.cz * DUNE.wx;
+  const R = DUNE.half * 1.5;
+  const k0 = Math.floor((u0 - R) / DUNE.lam) - 2, nK = Math.ceil(2 * R / DUNE.lam) + 5;
+  const vMin = Math.floor(v0 - R), nV = Math.ceil(2 * R) + 2;
+  const H = new Float32Array(nK * nV), U = new Float32Array(nK * nV);
+  for (let a = 0; a < nK; a++) for (let b = 0; b < nV; b++) {
+    duneCrest(k0 + a, vMin + b, amp, snow);
+    H[a * nV + b] = _cH; U[a * nV + b] = _cU;
+  }
+  return (DUNE.tab = { key: key, k0: k0, nK: nK, vMin: vMin, nV: nV, H: H, U: U, snow: snow, amp: amp });
+}
+function crestAt(T, k, v) {
+  const a = k - T.k0, fb = v - T.vMin, b = Math.floor(fb);
+  if (a < 0 || a >= T.nK || b < 0 || b >= T.nV - 1) { duneCrest(k, v, T.amp, T.snow); return; }
+  const t = fb - b, i = a * T.nV + b;
+  _cH = T.H[i] + (T.H[i + 1] - T.H[i]) * t;
+  _cU = T.U[i] + (T.U[i + 1] - T.U[i]) * t;
+}
+const DS = { h: 0, lee: 0, crest: 0, trough: 0, frac: 0 };     // the last sample's anatomy
+function duneShape(x, z, amp, snow) {
+  const u = x * DUNE.wx + z * DUNE.wz - DUNE.phase, v = -x * DUNE.wz + z * DUNE.wx;
+  const k0 = Math.floor(u / DUNE.lam);
+  const TL = snow ? 0.53 : 0.6249;                 // tan(26 deg) snow lee, tan(32 deg) angle of repose
+  const T = duneTable();
+  let best = 0, bH = 1, bdu = 1e9, blee = 0;
+  for (let k = k0 - 1; k <= k0 + 1; k++) {
+    crestAt(T, k, v);
+    const H = _cH;
+    if (H < 0.25) continue;
+    const du = u - _cU;
+    const Lw = H * 4.9;
+    let h = 0, lee = 0;
+    if (du <= 0) {
+      if (du < -Lw) continue;
+      const t = 1 + du / Lw;
+      h = H * t * t * (1.55 - 0.55 * t);            // the stoss: concave foot, convex brink
+    } else {
+      const rc = snow ? 3 : 0.35;                    // sand breaks sharp; snow rounds over
+      const lin = du < rc ? H - du * du * TL / (2 * rc) : H - TL * (du - rc * 0.5);
+      const a0 = H * 0.1;                            // the avalanche apron at the toe
+      h = lin > a0 ? lin : a0 * Math.exp((lin - a0) / a0);
+      if (h < 0.02) continue;
+      lee = lin > a0 ? 1 : Math.max(0, lin / a0);
+    }
+    if (h > best) { best = h; bH = H; bdu = du; blee = lee; }
+  }
+  DS.lee = blee;
+  DS.crest = Math.exp(-Math.abs(bdu) / (bdu > 0 ? 2.5 : 6));
+  DS.trough = best < 0.6 ? 1 - best / 0.6 : 0;
+  DS.frac = best / Math.max(0.5, bH);
+  // so no slope is a perfect plane: a low cross-lump, and the base level
+  const lump = (vn2(x * 0.045, z * 0.045, 53) - 0.5) * 0.5;
+  const swell = snow ? (vn2(x * 0.0034, z * 0.0034, 59) - 0.5) * 2 : 0;
+  return best - (snow ? 1.6 : 2.8) + lump + swell;
+}
+function rollShape(x, z, amp) {
+  DS.lee = 0; DS.crest = 0; DS.trough = 0;
+  const a = (vn2(x / 260, z / 260, 61) - 0.5) * 8;
+  const b = (vn2(x / 85, z / 85, 67) - 0.5) * 2.6;
+  const c = (vn2(x / 30, z / 30, 71) - 0.5) * 1.1;
+  const h = (a + b + c) * amp;
+  DS.frac = Math.max(0, Math.min(1, 0.5 + h / 14));
+  DS.trough = Math.max(0, Math.min(1, -h / 6));
+  return h;
+}
 function duneDetail(x, z) {
   if (!DUNE.on) return 0;
   const w = duneWeight(x, z);
-  if (w <= 0) return 0;
-  const u = x * DUNE.wx + z * DUNE.wz;           // along the wind
-  const v = -x * DUNE.wz + z * DUNE.wx;          // along the crest
-  // the crest line wanders: long bends plus a short sinuosity
-  const warp = (vn2(v * 0.009, u * 0.003, 17) - 0.5) * 70 + (vn2(v * 0.034, u * 0.011, 29) - 0.5) * 16;
-  const p = (u + warp) / DUNE.lam;
-  const f = p - Math.floor(p);
-  // windward climb over 0..0.74 (eased into the crest), slip face 0.74..1 (~33°, sand at rest)
-  let s;
-  if (f < 0.74) { const t = f / 0.74; s = t * t * (1.7 - 0.7 * t); }
-  else { const t = (f - 0.74) / 0.26; s = 1 - t * t * (3 - 2 * t); }
-  // crests are not all one height, and some die out into flat pan
-  const amp = (2 + 6.4 * vn2(u * 0.0065, v * 0.0045, 41)) * (DUNE.pal ? DUNE.pal.amp : 1);
-  // a small cross-ripple so no slope is a perfect plane
-  const lump = (vn2(x * 0.045, z * 0.045, 53) - 0.5) * 1.1;
-  return ((s - 0.45) * amp + lump) * w;
+  if (w <= 0) { DS.h = 0; DS.lee = 0; DS.crest = 0; DS.trough = 0; DS.frac = 0; return 0; }
+  const P = DUNE.pal || ERG_PAL.sand;
+  const amp = P.amp == null ? 1 : P.amp;
+  let h;
+  if (P.form === "roll") h = rollShape(x, z, amp);
+  else h = duneShape(x, z, amp, P.form === "drift");
+  DS.h = h * w;
+  return DS.h;
 }
-function duneSkin(world) {
-  const N = 300, S = DUNE.half * 2, cell = S / N;
-  const g = new THREE.PlaneGeometry(S, S, N, N);
-  g.rotateX(-Math.PI / 2);
-  const pos = g.attributes.position, n = pos.count;
-  const col = new Float32Array(n * 3);
-  const PAL = DUNE.pal || ERG_PAL.sand;
-  const sand = new THREE.Color(PAL.sand), crest = new THREE.Color(PAL.crest),
-    trough = new THREE.Color(PAL.trough), slip = new THREE.Color(PAL.slip), pan = new THREE.Color(PAL.pan);
-  const tmp = new THREE.Color();
-  for (let i = 0; i < n; i++) {
-    const x = pos.getX(i) + DUNE.cx, z = pos.getZ(i) + DUNE.cz;
-    const y = MAP_GROUND(x, z);
-    pos.setY(i, y);
-    // what kind of sand this is: height in the local dune, and which face
-    const d = duneDetail(x, z);
-    const gx = MAP_GROUND(x + 1.5, z) - MAP_GROUND(x - 1.5, z);
-    const gz = MAP_GROUND(x, z + 1.5) - MAP_GROUND(x, z - 1.5);
-    const lee = -(gx * DUNE.wx + gz * DUNE.wz) / 3;          // >0 on the slip face
-    tmp.copy(sand);
-    tmp.lerp(d > 0 ? crest : trough, Math.min(1, Math.abs(d) / 5) * 0.55);
-    if (lee > 0.18) tmp.lerp(slip, Math.min(1, (lee - 0.18) * 2.2) * 0.5);
-    // hard pan between the dunes: grey-tan flats where the crest died out
-    const flat = vn2(x * 0.012, z * 0.012, 61);
-    if (flat > 0.62 && d < 0.5) tmp.lerp(pan, Math.min(1, (flat - 0.62) * 4) * 0.45);
-    tmp.multiplyScalar(0.95 + vn2(x * 0.21, z * 0.21, 71) * 0.08);
-    // and blend to the world's own vertex colour at the rim so the seam is gone
-    const w = duneWeight(x, z);
-    if (w < 1) tmp.lerp(sand, 1 - w);
-    col[i * 3] = tmp.r; col[i * 3 + 1] = tmp.g; col[i * 3 + 2] = tmp.b;
+/* CREST LINES, for the blowing sand: every crest over 2.5 m inside the box,
+   walked along its length. */
+function duneCrests(cx, cz, hx, hz, step) {
+  const out = [];
+  if (!DUNE.pal || DUNE.pal.form === "roll") return out;
+  const P = DUNE.pal, snow = P.form === "drift";
+  const u0 = cx * DUNE.wx + cz * DUNE.wz - DUNE.phase, v0 = -cx * DUNE.wz + cz * DUNE.wx;
+  const R = Math.max(hx, hz);
+  for (let k = Math.floor((u0 - R) / DUNE.lam) - 1; k <= Math.floor((u0 + R) / DUNE.lam) + 1; k++) {
+    for (let v = v0 - R; v <= v0 + R; v += step) {
+      duneCrest(k, v, P.amp == null ? 1 : P.amp, snow);
+      if (_cH < (snow ? 1.6 : 2.5)) continue;
+      const cu = _cU + DUNE.phase, x = cu * DUNE.wx - v * DUNE.wz, z = cu * DUNE.wz + v * DUNE.wx;
+      if (Math.abs(x - cx) > hx || Math.abs(z - cz) > hz) continue;
+      out.push({ x: x, z: z, y: MAP_GROUND(x, z), h: _cH });
+    }
   }
-  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-  g.computeVertexNormals();
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  return out;
+}
+
+/* ---- THE FIELDS' PARCELS, shared by the skin shader and fields.js -------
+   A turned grid of parcels; each cell's crop is read from a 16 x 16 type
+   table, uploaded as a texture so the shader and the layout agree EXACTLY
+   (no float hash that could round differently on a GPU). */
+const PARCEL = { ang: 0.21, w: 104, d: 78, n: 16, types: null, tex: null };
+const CROP = { pasture: 0, wheat: 1, maize: 2, plough: 3, stubble: 4 };
+function parcelTypes() {
+  if (PARCEL.types) return PARCEL.types;
+  const t = new Uint8Array(PARCEL.n * PARCEL.n);
+  const W = [0.3, 0.22, 0.16, 0.16, 0.16];
+  for (let j = 0; j < PARCEL.n; j++) for (let i = 0; i < PARCEL.n; i++) {
+    let r = hash2(i, j, 211), k = 0;
+    while (k < W.length - 1 && r > W[k]) { r -= W[k]; k++; }
+    t[j * PARCEL.n + i] = k;
+  }
+  PARCEL.types = t;
+  return t;
+}
+function parcelAt(x, z) {
+  const rx = x - DUNE.cx, rz = z - DUNE.cz;
+  const c = Math.cos(PARCEL.ang), s = Math.sin(PARCEL.ang);
+  const a = rx * c + rz * s, b = -rx * s + rz * c;
+  const i = Math.floor(a / PARCEL.w), j = Math.floor(b / PARCEL.d);
+  const T = parcelTypes(), n = PARCEL.n;
+  const ii = Math.max(0, Math.min(n - 1, i + n / 2)), jj = Math.max(0, Math.min(n - 1, j + n / 2));
+  return { i: i, j: j, u: a - i * PARCEL.w, v: b - j * PARCEL.d, type: T[jj * n + ii], rows: hash2(i, j, 223) < 0.5 ? 0 : 1 };
+}
+
+/* ---- THE SKIN ------------------------------------------------------------ */
+const ERG_GLSL = [
+  "float egH(vec2 p) { p = mod(p, 289.0); vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }",
+  "float egN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+  "  return mix(mix(egH(i), egH(i + vec2(1.0, 0.0)), f.x), mix(egH(i + vec2(0.0, 1.0)), egH(i + vec2(1.0, 1.0)), f.x), f.y); }",
+].join("\n");
+// per-form surface work, at <normal_fragment_maps>: it may bend `normal`
+// (view space) and re-colour diffuseColor before the lights read either
+function ergSurfaceGLSL(form, surface) {
+  const head =
+    "{ float dist = length(vEW - cameraPosition);\n" +
+    "  vec2 rel = vEW.xz - uC;\n" +
+    "  vec2 q = vec2(dot(rel, uW), dot(rel, vec2(-uW.y, uW.x)));\n" +
+    "  float lee = vED.x, crest = vED.y, trough = vED.z, frac = vED.w;\n" +
+    "  vec3 wN = vec3(0.0);\n" +
+    "  diffuseColor.rgb *= 0.95 + 0.1 * egN(rel * 0.013) + 0.04 * (egN(rel * 0.07 + 7.0) - 0.5);\n";
+  const tail =
+    "  normal = normalize(normal + (viewMatrix * vec4(wN, 0.0)).xyz);\n" +
+    "  diffuseColor.rgb *= 1.0 - smoothstep(160.0, 800.0, dist) * 0.04; }\n";
+  if (form === "dune") return head +
+    // RIPPLES: wind-transverse, sinuous, bifurcating; gentle stoss, steep lee.
+    // Coarser in the troughs, gone on the slip face (avalanching sand wipes
+    // them), quiet right on the brink.
+    "  float kR = (1.0 - smoothstep(16.0, 70.0, dist)) * (1.0 - smoothstep(0.12, 0.5, lee)) * (1.0 - crest * 0.6);\n" +
+    "  float kC = (1.0 - smoothstep(30.0, 120.0, dist)) * (1.0 - smoothstep(0.12, 0.5, lee));\n" +
+    "  if (kC > 0.0) {\n" +
+    "    float warp = 0.55 * sin(q.y * 0.83 + egN(q * vec2(0.05, 0.3)) * 4.0) + 0.45 * egN(q * vec2(0.11, 0.9));\n" +
+    "    float lam = 0.72 + 0.4 * trough;\n" +
+    "    float ph = (q.x + warp) / lam * 6.2832;\n" +
+    "    float rip = sin(ph) + 0.28 * sin(2.0 * ph);\n" +
+    "    float dr = (cos(ph) + 0.56 * cos(2.0 * ph)) * 6.2832 / lam;\n" +
+    "    wN -= vec3(uW.x, 0.0, uW.y) * dr * 0.016 * kR;\n" +
+    // dark heavy minerals settle in the ripple troughs: ripples read even in flat light
+    "    diffuseColor.rgb *= 1.0 - 0.07 * kC * smoothstep(0.2, 1.1, -rip);\n" +
+    "  }\n" +
+    // wind-sorted bands parallel to the crest on the stoss
+    "  float bands = sin(frac * 26.0 + egN(q * vec2(0.02, 0.006)) * 7.0);\n" +
+    "  diffuseColor.rgb *= 1.0 + 0.035 * bands * (1.0 - lee) * (1.0 - trough);\n" +
+    // the slip face: grainflow tongues down the fall line
+    "  float gf = egN(vec2(q.y * 1.7, q.x * 0.12));\n" +
+    "  diffuseColor.rgb *= 1.0 + 0.07 * (gf - 0.5) * lee;\n" +
+    "  wN += vec3(-uW.y, 0.0, uW.x) * (egN(vec2(q.y * 1.7 + 0.15, q.x * 0.12)) - gf) * 0.9 * lee * (1.0 - smoothstep(20.0, 80.0, dist));\n" +
+    // grain, where the lens is close
+    "  float gr = egH(floor(vEW.xz * 22.0));\n" +
+    "  diffuseColor.rgb *= 1.0 + (gr - 0.5) * 0.06 * (1.0 - smoothstep(4.0, 14.0, dist));\n" +
+    tail;
+  if (form === "drift") return head +
+    // SASTRUGI: sharp wind-carved ridges along the wind, irregular, in fields
+    "  float kS = 1.0 - smoothstep(30.0, 140.0, dist);\n" +
+    "  if (kS > 0.0) {\n" +
+    "    vec2 s = vec2(q.x * 0.32, q.y * 2.1);\n" +
+    "    float field = smoothstep(0.35, 0.7, egN(q * 0.025));\n" +
+    "    float r0 = 1.0 - abs(2.0 * egN(s) - 1.0);\n" +
+    "    float rx = 1.0 - abs(2.0 * egN(s + vec2(0.06, 0.0)) - 1.0);\n" +
+    "    float ry = 1.0 - abs(2.0 * egN(s + vec2(0.0, 0.18)) - 1.0);\n" +
+    "    r0 = r0 * r0 * r0; rx = rx * rx * rx; ry = ry * ry * ry;\n" +
+    "    float a = 0.11 * kS * field * (1.0 - lee);\n" +
+    "    wN -= (vec3(uW.x, 0.0, uW.y) * (rx - r0) / 0.06 * 0.32 + vec3(-uW.y, 0.0, uW.x) * (ry - r0) / 0.18 * 2.1) * a * 0.18;\n" +
+    "    diffuseColor.rgb *= 1.0 - 0.05 * r0 * field * kS;\n" +
+    "  }\n" +
+    // wind crust: glazed patches, a little greyer and smoother
+    "  float crust = smoothstep(0.58, 0.78, egN(rel * 0.031 + 3.0));\n" +
+    "  diffuseColor.rgb *= mix(vec3(1.0), vec3(0.95, 0.965, 0.99), crust);\n" +
+    "  specularStrength *= 1.0 + 2.5 * crust;\n" +
+    // the lee holds blue shade (sky-lit hollows)
+    "  diffuseColor.rgb *= mix(vec3(1.0), vec3(0.9, 0.95, 1.05), lee * 0.7 + trough * 0.3);\n" +
+    // glints: a crystal catches the sun from one angle only
+    "  float gl = egH(floor(vEW.xz * 20.0) + floor(normalize(vEW - cameraPosition).xz * 6.0) * 31.0);\n" +
+    "  vSpark = step(0.9965, gl) * (1.0 - smoothstep(6.0, 40.0, dist));\n" +
+    tail;
+  if (surface === "forest") return head +
+    // LEAF LITTER: duff browns, moss in the damp hollows, fallen leaves, twigs
+    "  float kL = 1.0 - smoothstep(10.0, 45.0, dist);\n" +
+    "  float moss = smoothstep(0.58, 0.78, egN(rel * 0.09 + 11.0) * 0.7 + trough * 0.5);\n" +
+    "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.2, 0.26, 0.11), moss * 0.7);\n" +
+    "  float damp = egN(rel * 0.21 + 4.0);\n" +
+    "  diffuseColor.rgb *= 0.86 + 0.24 * damp;\n" +
+    "  vec2 lc = floor(vEW.xz * 5.0); float lh = egH(lc);\n" +
+    "  vec3 leaf = lh < 0.33 ? vec3(0.55, 0.32, 0.12) : (lh < 0.66 ? vec3(0.62, 0.48, 0.2) : vec3(0.38, 0.24, 0.13));\n" +
+    "  float lf = step(0.55, egH(lc + 17.0)) * (1.0 - moss) * kL;\n" +
+    "  vec2 lp = fract(vEW.xz * 5.0) - 0.5; lf *= 1.0 - smoothstep(0.16, 0.3, length(lp * vec2(1.0, 1.7)));\n" +
+    "  diffuseColor.rgb = mix(diffuseColor.rgb, leaf, lf * 0.75);\n" +
+    // twigs: one thin stick per 1.4 m cell, at its own angle
+    "  vec2 tc = floor(vEW.xz / 1.4); vec2 tp = fract(vEW.xz / 1.4) - 0.5; float ta = egH(tc + 5.0) * 3.14;\n" +
+    "  vec2 td = vec2(cos(ta), sin(ta)); float along = dot(tp, td), off = abs(dot(tp, vec2(-td.y, td.x)));\n" +
+    "  float twig = step(0.45, egH(tc)) * (1.0 - smoothstep(0.006, 0.014, off)) * step(abs(along), 0.32) * kL;\n" +
+    "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.12, 0.08), twig * 0.8);\n" +
+    "  wN += vec3(egN(vEW.xz * 3.1) - 0.5, 0.0, egN(vEW.xz * 3.1 + 9.0) - 0.5) * 0.25 * kL;\n" +
+    // DAPPLED LIGHT: the canopy map over the stand, broken by sun flecks
+    "  vec2 cuv = (rel - uCanopyR.xy) / uCanopyR.zw;\n" +
+    "  float cov = (cuv.x > 0.0 && cuv.x < 1.0 && cuv.y > 0.0 && cuv.y < 1.0) ? texture2D(uCanopy, cuv).r : 0.0;\n" +
+    "  float fleck = smoothstep(0.58, 0.82, egN(vEW.xz * 0.55 + 3.0) * 0.6 + egN(vEW.xz * 1.9) * 0.4);\n" +
+    "  vShade = mix(1.0, 0.36 + 0.95 * fleck, cov);\n" +
+    tail;
+  // FIELDS: the parcel's crop, by the type table, with rows and furrows
+  return head +
+    "  float pc = cos(uParcel.x), ps = sin(uParcel.x);\n" +
+    "  vec2 pa = vec2(rel.x * pc + rel.y * ps, -rel.x * ps + rel.y * pc);\n" +
+    "  vec2 cell = floor(pa / uParcel.yz);\n" +
+    "  vec2 loc = pa - cell * uParcel.yz;\n" +
+    "  vec4 pt = texture2D(uParcelT, (clamp(cell + 8.0, 0.0, 15.0) + 0.5) / 16.0);\n" +
+    "  float ty = floor(pt.r * 255.0 + 0.5); float rowAx = pt.g > 0.5 ? 1.0 : 0.0;\n" +
+    "  float edge = min(min(loc.x, uParcel.y - loc.x), min(loc.y, uParcel.z - loc.y));\n" +
+    "  float rc = mix(loc.x, loc.y, rowAx);\n" +
+    "  float kF = 1.0 - smoothstep(40.0, 200.0, dist);\n" +
+    "  vec3 turf = vec3(1.0);\n" +
+    "  TURF_CALL\n" +
+    "  vec3 col = diffuseColor.rgb * turf;\n" +
+    "  if (ty > 0.5 && edge > 2.5) {\n" +
+    "    float row = 0.5 + 0.5 * cos(rc / 0.76 * 6.2832);\n" +
+    "    if (ty < 1.5) { col = vec3(0.6, 0.5, 0.27) * (0.9 + 0.12 * egN(rel * 0.05)) * (1.0 - 0.08 * row * kF); }\n" +             // wheat stubble ground under the crop
+    "    else if (ty < 2.5) { col = mix(vec3(0.3, 0.24, 0.17), vec3(0.32, 0.4, 0.17), row * 0.6) * (0.92 + 0.12 * egN(rel * 0.04)); }\n" +   // maize: soil between rows
+    "    else if (ty < 3.5) { col = vec3(0.34, 0.26, 0.18) * (0.88 + 0.16 * egN(rel * 0.03)) * (0.86 + 0.2 * row);\n" +           // ploughed furrows
+    "      float d = -sin(rc / 0.76 * 6.2832) * 6.2832 / 0.76; vec2 ax = rowAx > 0.5 ? vec2(-ps, pc) : vec2(pc, ps);\n" +
+    "      wN -= vec3(ax.x, 0.0, ax.y) * d * 0.035 * kF; }\n" +
+    "    else { col = vec3(0.66, 0.6, 0.38) * (0.92 + 0.1 * egN(rel * 0.06)) * (1.0 - 0.1 * step(0.8, fract(rc / 4.5)) * kF); }\n" +  // stubble with windrows
+    "  }\n" +
+    // the farm track along every third boundary
+    "  float trk = 1.0 - smoothstep(1.4, 2.2, abs(loc.y - 1.0));\n" +
+    "  trk *= step(0.5, mod(cell.y, 3.0)) < 0.5 ? 1.0 : 0.0;\n" +
+    "  col = mix(col, vec3(0.42, 0.36, 0.27) * (0.9 + 0.15 * egN(vEW.xz * 0.8)), trk * 0.85);\n" +
+    "  diffuseColor.rgb = col;\n" +
+    tail;
+}
+let ERG_CANOPY = null;      // the forest's canopy-cover texture (forest.js fills it)
+function ergMaterial(P) {
+  // PER-PIXEL, LAMBERT-BRIGHT: Phong lights per fragment (so the ripples
+  // and sastrugi bent into the normal take the sun) on the same diffuse
+  // scale as the Lambert the rest of the page is tuned for; Standard under
+  // r128's legacy lights washed the sand to paper. A dull specular: sand
+  // and litter barely shine, crusted snow a little.
+  const mat = new THREE.MeshPhongMaterial({ vertexColors: true, specular: P.surface === "snow" ? 0x1c1f22 : 0x080808,
+    shininess: P.surface === "snow" ? 18 : 6 });
+  const form = P.form, surface = P.surface;
+  if (!ERG_CANOPY) {
+    const d = new Uint8Array(4); d[0] = 0;
+    ERG_CANOPY = { tex: new THREE.DataTexture(d, 1, 1, THREE.RGBAFormat), rect: new THREE.Vector4(0, 0, 1, 1) };
+    ERG_CANOPY.tex.needsUpdate = true;
+  }
+  let parcelTex = null;
+  if (surface === "grass") {
+    const T = parcelTypes(), n = PARCEL.n, d = new Uint8Array(n * n * 4);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const k = (j * n + i) * 4;
+      d[k] = T[j * n + i]; d[k + 1] = hash2(i - n / 2, j - n / 2, 223) < 0.5 ? 0 : 255; d[k + 3] = 255;
+    }
+    parcelTex = new THREE.DataTexture(d, n, n, THREE.RGBAFormat);
+    parcelTex.magFilter = THREE.NearestFilter; parcelTex.minFilter = THREE.NearestFilter;
+    parcelTex.needsUpdate = true;
+    PARCEL.tex = parcelTex;
+  }
+  const turfOn = surface === "grass" && !!CBZ.GROUND_TURF_GLSL;
   mat.onBeforeCompile = function (sh) {
-    sh.uniforms.uWind = { value: new THREE.Vector2(DUNE.wx, DUNE.wz) };
-    sh.vertexShader = "varying vec3 vSandW;\n" + sh.vertexShader.replace("#include <project_vertex>",
-      "#include <project_vertex>\nvSandW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
-    sh.fragmentShader = "varying vec3 vSandW;\nuniform vec2 uWind;\n" + sh.fragmentShader.replace("#include <color_fragment>",
-      "#include <color_fragment>\n" +
-      "{ float dist = length(vSandW - cameraPosition);\n" +
-      "  float fade = 1.0 - smoothstep(18.0, 95.0, dist);\n" +
-      "  vec2 q = vec2(dot(vSandW.xz, uWind), dot(vSandW.xz, vec2(-uWind.y, uWind.x)));\n" +
-      "  float rip = sin(q.x * 6.3 + sin(q.y * 0.41) * 2.2 + sin(q.y * 1.3 + q.x * 0.35) * 0.7);\n" +
-      "  rip = rip * 0.5 + 0.5; rip = rip * rip;\n" +
-      "  float grain = fract(sin(dot(floor(vSandW.xz * 3.0), vec2(12.9898, 78.233))) * 43758.5453);\n" +
-      "  diffuseColor.rgb *= 1.0 + ((rip - 0.35) * 0.09 + (grain - 0.5) * 0.035) * fade;\n" +
-      "  float far = smoothstep(120.0, 700.0, dist);\n" +
-      "  diffuseColor.rgb *= 1.0 - far * 0.05; }");
+    sh.uniforms.uC = { value: new THREE.Vector2(DUNE.cx, DUNE.cz) };
+    sh.uniforms.uW = { value: new THREE.Vector2(DUNE.wx, DUNE.wz) };
+    sh.uniforms.uCanopy = { value: ERG_CANOPY.tex };
+    sh.uniforms.uCanopyR = { value: ERG_CANOPY.rect };
+    sh.uniforms.uParcel = { value: new THREE.Vector3(PARCEL.ang, PARCEL.w, PARCEL.d) };
+    sh.uniforms.uParcelT = { value: parcelTex || ERG_CANOPY.tex };
+    sh.vertexShader = "attribute vec4 aD;\nvarying vec4 vED;\nvarying vec3 vEW;\n" +
+      sh.vertexShader.replace("#include <project_vertex>",
+        "#include <project_vertex>\nvED = aD; vEW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+    let surf = ergSurfaceGLSL(form, surface).replace("TURF_CALL",
+      turfOn ? "turf = groundTurf(vEW.xz, dist, 1.0);" : "turf = vec3(0.92 + 0.16 * egN(rel * 0.043) + 0.08 * (egN(vEW.xz * 0.6) - 0.5) * kF);");
+    sh.fragmentShader = "varying vec4 vED;\nvarying vec3 vEW;\nuniform vec2 uC;\nuniform vec2 uW;\n" +
+      "uniform sampler2D uCanopy;\nuniform vec4 uCanopyR;\nuniform vec3 uParcel;\nuniform sampler2D uParcelT;\n" +
+      ERG_GLSL + "\n" + (turfOn ? CBZ.GROUND_TURF_GLSL + "\n" : "") +
+      sh.fragmentShader
+        .replace("void main() {", "void main() {\n  float vSpark = 0.0; float vShade = 1.0;")
+        .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" + surf)
+        // dappled shade is light the canopy took away: it darkens what the sun
+        // and sky put on the floor, both
+        .replace("#include <aomap_fragment>", "#include <aomap_fragment>\n" +
+          "reflectedLight.directDiffuse *= vShade; reflectedLight.indirectDiffuse *= mix(1.0, vShade, 0.7);")
+        .replace("#include <tonemapping_fragment>", "gl_FragColor.rgb += vSpark * vec3(0.9, 0.95, 1.0);\n#include <tonemapping_fragment>");
   };
-  const m = new THREE.Mesh(g, mat);
+  mat.customProgramCacheKey = function () { return "npcwar-erg2-" + form + "-" + surface + (turfOn ? "t" : ""); };
+  if (CBZ.battleGround) CBZ.battleGround.patchTerrain(mat);
+  return mat;
+}
+function ergSkin(world) {
+  const P = DUNE.pal || ERG_PAL.sand;
+  const S = DUNE.half * 2;
+  const roll = P.form === "roll";
+  const NU = roll ? 300 : 600, NV = 300;
+  const du = S / NU, dv = S / NV;
+  const n = (NU + 1) * (NV + 1);
+  const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), aD = new Float32Array(n * 4);
+  const sand = new THREE.Color(P.sand), crest = new THREE.Color(P.crest), trough = new THREE.Color(P.trough),
+    slip = new THREE.Color(P.slip), pan = new THREE.Color(P.pan), tmp = new THREE.Color();
+  const W = [DUNE.wx, DUNE.wz], Q = [-DUNE.wz, DUNE.wx];
+  for (let j = 0; j <= NV; j++) {
+    const v = -DUNE.half + j * dv;
+    for (let i = 0; i <= NU; i++) {
+      const u = -DUNE.half + i * du;
+      const lx = u * W[0] + v * Q[0], lz = u * W[1] + v * Q[1];
+      const x = lx + DUNE.cx, z = lz + DUNE.cz;
+      // world + detail + earthworks: what the men stand on. duneDetail ran
+      // inside it for this very point, so DS holds this vertex's anatomy
+      // (the earthworks add height, never anatomy)
+      const y = MAP_GROUND(x, z);
+      const k = j * (NU + 1) + i;
+      pos[k * 3] = lx; pos[k * 3 + 1] = y; pos[k * 3 + 2] = lz;
+      const w = duneWeight(x, z);
+      const lee = DS.lee * w, cr = DS.crest * w, tr = DS.trough * w;
+      tmp.copy(sand);
+      if (roll) {
+        tmp.lerp(DS.h > 0 ? crest : trough, Math.min(1, Math.abs(DS.h) / 6) * 0.5);
+      } else {
+        tmp.lerp(crest, cr * 0.55);
+        tmp.lerp(slip, lee * 0.45);
+        tmp.lerp(trough, tr * 0.6);
+        const flat = vn2(x * 0.012, z * 0.012, 61);
+        if (flat > 0.6) tmp.lerp(pan, Math.min(1, (flat - 0.6) * 4) * tr * 0.7);
+      }
+      tmp.multiplyScalar(0.96 + vn2(x * 0.21, z * 0.21, 71) * 0.06);
+      if (w < 1) tmp.lerp(sand, 1 - w);
+      col[k * 3] = tmp.r; col[k * 3 + 1] = tmp.g; col[k * 3 + 2] = tmp.b;
+      aD[k * 4] = lee; aD[k * 4 + 1] = cr; aD[k * 4 + 2] = tr; aD[k * 4 + 3] = DS.frac;
+    }
+  }
+  const idx = new Uint32Array(NU * NV * 6);
+  let o = 0;
+  for (let j = 0; j < NV; j++) for (let i = 0; i < NU; i++) {
+    const a = j * (NU + 1) + i, b = a + 1, c = a + NU + 1, d = c + 1;
+    idx[o++] = a; idx[o++] = c; idx[o++] = b; idx[o++] = b; idx[o++] = c; idx[o++] = d;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  g.setAttribute("aD", new THREE.BufferAttribute(aD, 4));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.computeVertexNormals();
+  // the winding must face up: flip if the first triangle's normal points down
+  if (g.attributes.normal.getY(0) < 0) {
+    for (let t = 0; t < idx.length; t += 3) { const s = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = s; }
+    g.computeVertexNormals();
+  }
+  g.computeBoundingSphere();
+  const m = new THREE.Mesh(g, ergMaterial(P));
   m.position.set(DUNE.cx, 0, DUNE.cz);
   m.receiveShadow = true; m.castShadow = true;
   m.userData.terrain = true; m.userData.dynamic = true;
   m.name = "duneSkin";
   CBZ.scene.add(m);
   DUNE.skin = m;
-  // the world's own plane gives up the window, per fragment
+  // the world's own plane gives up the turned window, per fragment
   const T = world && world.terrain;
   if (T && T.material) {
     T.userData.dynamic = true;
     T.material.onBeforeCompile = function (sh) {
       sh.uniforms.uHole = { value: new THREE.Vector3(DUNE.cx, DUNE.cz, DUNE.half - 4) };
+      sh.uniforms.uHoleW = { value: new THREE.Vector2(DUNE.wx, DUNE.wz) };
       sh.vertexShader = "varying vec3 vHoleW;\n" + sh.vertexShader.replace("#include <project_vertex>",
         "#include <project_vertex>\nvHoleW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
-      sh.fragmentShader = "varying vec3 vHoleW;\nuniform vec3 uHole;\n" + sh.fragmentShader.replace("void main() {",
-        "void main() {\n if (abs(vHoleW.x - uHole.x) < uHole.z && abs(vHoleW.z - uHole.y) < uHole.z) discard;")
+      sh.fragmentShader = "varying vec3 vHoleW;\nuniform vec3 uHole;\nuniform vec2 uHoleW;\n" + sh.fragmentShader.replace("void main() {",
+        "void main() {\n { vec2 d = vHoleW.xz - uHole.xy; vec2 q = vec2(dot(d, uHoleW), dot(d, vec2(-uHoleW.y, uHoleW.x)));\n" +
+        "   if (abs(q.x) < uHole.z && abs(q.y) < uHole.z) discard; }")
         // the erg beyond the skin wears the skin's sand, so the rim has no seam
         // (the salt pan and the mountains past the dune ring keep their own)
         .replace("#include <color_fragment>", "#include <color_fragment>\n" +
           "diffuseColor.rgb *= mix(vec3(0.9, 0.78, 0.65), vec3(1.0), smoothstep(2650.0, 2900.0, length(vHoleW.xz)));" +
-          // snow and fields: the basin wears the window's ground out to the ring
-          (PAL.tint ? "\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(" + PAL.tint.map(function (v) { return v.toFixed(3); }).join(",") +
+          (P.tint ? "\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(" + P.tint.map(function (v) { return v.toFixed(3); }).join(",") +
             "), 0.82 * (1.0 - smoothstep(2650.0, 2900.0, length(vHoleW.xz))));" : ""));
     };
     T.material.needsUpdate = true;
   }
   // THE CITY LEAVES THE HORIZON. The desert world is a basin with a 200-tower
   // downtown in the middle of it, and from the erg every low shot framed a
-  // grey block skyline behind the war — a war in open dunes, fought in front
-  // of an office park. Everything of the downtown is taken off the scene
-  // (its far colliders are two kilometres from any man and stay harmless);
-  // the terrain, the inland sea and the desert's own rocks, scrub and mesas
-  // stay, and the mountains close the view the way a basin should.
+  // grey block skyline behind the war. Everything of the downtown is taken off
+  // the scene (its far colliders are two kilometres from any man and stay
+  // harmless); the terrain, the inland sea and the desert's own rocks, scrub
+  // and mesas stay, and the mountains close the view the way a basin should.
   if (world && world.root) {
     const drop = [];
     world.root.children.forEach(function (o) {
@@ -176,21 +515,21 @@ function duneSkin(world) {
   }
   reseatDesertDress(world);
 }
+// the old name, kept for anything that still calls it
+function duneSkin(world) { return ergSkin(world); }
 /* THE DRESS ON THE NEW SAND. The desert's rocks and scrub were seated on the
-   coarse heightAt; inside the window the ground moved under them by up to
-   four metres, so each one is re-seated on the ground it actually stands on.
-   And the scrub was a single five-sided cone per bush — the green triangles
-   in every shot. Inside the window those are retired and replaced by dry
-   grass tufts (a spray of thin blades, instanced) that read as a desert
-   plant from the lens height this page shoots from. The rocks get a real
-   rock shape: a lumpy, flattened, half-buried stone instead of a d12. */
+   coarse heightAt; inside the window the ground moved under them by metres,
+   so each one is re-seated on the ground it actually stands on, the scrub
+   cones leave the window, and dry grass tufts (a spray of thin blades,
+   instanced) grow where a desert plant would: in the troughs and on the pan,
+   never on a live slip face. */
 /* A ROCK IS NOT A D12, AND NOT A FACETED BALL EITHER. r128's icosahedron
    is non-indexed, so displacing it and asking for normals gave every face
    its own flat normal: a lumpy disco ball in one flat colour. The shell is
    welded first (smooth normals across the lumps), pushed out by noise at
    three scales plus bedding ledges, and PAINTED per vertex by a caller
    (sandstone strata and desert varnish in the erg, encrusting growth and
-   silt on the reef). */
+   silt on the reef, granite and lichen in the north). */
 function weldGeo(g) {
   const p = g.attributes.position, seen = new Map(), idx = [], pos = [];
   for (let i = 0; i < p.count; i++) {
@@ -264,6 +603,7 @@ function reseatDesertDress(world) {
   if (!world || !world.root) return;
   const mtx = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
   const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  const PAL = DUNE.pal || ERG_PAL.sand;
   world.root.traverse(function (o) {
     if (!o.isInstancedMesh) return;
     const geoT = o.geometry && o.geometry.type;
@@ -271,7 +611,7 @@ function reseatDesertDress(world) {
     const isScrub = geoT === "ConeGeometry" || geoT === "ConeBufferGeometry";
     if (!isRock && !isScrub) return;
     if (isRock) {
-      o.geometry = rockGeometry();
+      o.geometry = PAL.surface === "sand" ? rockGeometry() : CBZ.battleDress.geo.boulder(0, true);
       o.material = new THREE.MeshLambertMaterial({ vertexColors: true });
       o.receiveShadow = true;
     }
@@ -282,22 +622,23 @@ function reseatDesertDress(world) {
         if (w > 0) o.setMatrixAt(i, zero);      // the cones leave the window
         continue;
       }
-      // every rock: sunk a third into its sand, which is how stone sits in an erg
+      // the old rocks in the battle window make way for the dressing's own;
+      // the rest are sunk a third into their sand, which is how stone sits
+      if (Math.abs(p.x - DUNE.cx) < DUNE.R0 && Math.abs(p.z - DUNE.cz) < DUNE.R0 && PAL.surface !== "sand") { o.setMatrixAt(i, zero); continue; }
       p.y = MAP_GROUND(p.x, p.z) + s.y * 0.12;
       mtx.compose(p, q, s); o.setMatrixAt(i, mtx);
     }
     o.instanceMatrix.needsUpdate = true;
   });
   // dry grass, only where a lens can see it
-  const TP = DUNE.pal || ERG_PAL.sand;
-  const N = TP.tufts || 900, tuft = new THREE.InstancedMesh(tuftGeometry(),
-    new THREE.MeshLambertMaterial({ color: TP.tuft }), N);
+  const N = PAL.tufts || 0;
+  if (!N) return;
+  const tuft = new THREE.InstancedMesh(tuftGeometry(), new THREE.MeshLambertMaterial({ color: PAL.tuft }), N);
   let k = 0;
   for (let i = 0; i < N * 3 && k < N; i++) {
     const x = DUNE.cx + (hash2(i, 3, 101) - 0.5) * (DUNE.R0 * 1.8), z = DUNE.cz + (hash2(i, 4, 101) - 0.5) * (DUNE.R0 * 1.8);
-    // tufts grow in the troughs and on the pan, never on a live slip face
-    const d = duneDetail(x, z);
-    if (d > 1.5 || vn2(x * 0.02, z * 0.02, 131) < 0.42) continue;
+    duneDetail(x, z);
+    if (DS.lee > 0.2 || DS.crest > 0.5 || vn2(x * 0.02, z * 0.02, 131) < 0.42) continue;
     const sc = 0.7 + hash2(i, 5, 101) * 1.1;
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), hash2(i, 6, 101) * 6.28);
     mtx.compose(p.set(x, MAP_GROUND(x, z) - 0.05, z), q, s.set(sc, sc * (0.8 + hash2(i, 7, 101) * 0.5), sc));

@@ -197,6 +197,16 @@ function retireOldestCorpse() {
   if (CBZ.quadRagdollDrop) { try { CBZ.quadRagdollDrop(old); } catch (e) {} }
   if (CBZ.ragdollDrop) { try { CBZ.ragdollDrop(old); } catch (e) {} }
   if (old.ragdoll) { old.ragdoll = false; deadSolving = Math.max(0, deadSolving - 1); }
+  /* BODIES AND WRECKS STAY. The budget is on LIVE rigs, not on the dead:
+     the oldest corpse is baked where it lies (its last pose, its colours)
+     into the ground's static remains batch (arenas/ground.js keepBody) and
+     only its live rig leaves. Thousands of dead cost a handful of draws.
+     ?remains=0 is the old sink. */
+  if (Q.get("remains") !== "0" && CBZ.battleGround && CBZ.battleGround.keepBody) {
+    let kept = false;
+    try { kept = CBZ.battleGround.keepBody(old.group); } catch (e) { kept = false; }
+    if (kept) { CBZ.studio.drop(old.group); return; }
+  }
   sinking.push({ g: old.group, t: 0, h: Math.max(0.6, (old.eyeH || 1) * 1.4) });
 }
 // the sink itself: real time, because it is presentation and not simulation

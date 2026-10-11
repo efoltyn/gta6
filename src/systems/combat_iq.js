@@ -535,9 +535,14 @@
     else { let a = (c.minZ - az) / dz, b = (c.maxZ - az) / dz; if (a > b) { const t = a; a = b; b = t; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) return false; }
     return true;
   }
+  // measured from the GROUND under it when the record says where that is
+  // (`gy`: NPC War's dunes put a sandbag wall's foot at y = 23, and "y0 under
+  // 1.2 m" read sea level and called every one of them a floating rail)
   function tallEnough(c) {
     if (c.y1 == null) return true;                              // undeclared span = a wall
-    return (c.y1 - (c.y0 || 0)) >= COVER_MIN_H && (c.y0 || 0) <= 1.2;
+    if (c.gy == null) return (c.y1 - (c.y0 || 0)) >= COVER_MIN_H && (c.y0 || 0) <= 1.2;
+    const y0 = c.y0 != null ? c.y0 : c.gy;
+    return (c.y1 - Math.max(y0, c.gy)) >= COVER_MIN_H && y0 - c.gy <= 1.2;
   }
 
   // the far side of a solid thing, relative to the threat. Cached per actor.

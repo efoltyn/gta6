@@ -27,7 +27,10 @@
    4  the rifle: join a side, walk, fire at the enemy through the page's own
       fireShot, hand the rifle back; a soldier who is killed goes back to the
       director and is reported down.
-   5  snow and fields: the two new erg skins build and fight.            */
+   5  snow, fields and the wood: the erg skins build and fight.
+  10  THE GROUND: cover points for the host (crests, props, crater lips), a
+      dug-in position's berm in the height function, a bomb that digs a crater
+      into groundAt and breaks the sandbags beside it.                    */
 import { createRequire } from "node:module";
 import path from "node:path";
 import fs from "node:fs";
@@ -335,8 +338,8 @@ scenario(4, "the rifle: be a soldier, fire, hand it back, go down", async () => 
   check(W.B().audit().cam.mode === "auto", "and the lens goes back to the director");
 });
 
-scenario(5, "snow and fields: the new skins build and fight", async () => {
-  for (const map of ["snow", "grass"]) {
+scenario(5, "snow, fields and the wood: the skins build and fight", async () => {
+  for (const map of ["snow", "grass", "forest"]) {
     const W = boot("?map=" + map + "&red=20&blue=20&rw=ak47&bw=ak47&rt=pro&bt=pro&auto=1&probe=0");
     if (W.err) { check(false, map + ": page threw at boot: " + (W.err.stack || W.err)); continue; }
     await settle();
@@ -353,6 +356,43 @@ scenario(5, "snow and fields: the new skins build and fight", async () => {
    resolver over the same roster) and held to agreeing on who wins and on
    roughly how hard the loser was hit. Printed as a table so a retune of
    either side shows up as numbers, not as a feeling. */
+/* 10  THE GROUND IS COVER, AND IT REMEMBERS. The host hands the battle core
+   cover points (arenas/cover.js); the dunes carry a dug-in position whose
+   berm is in the height function; a bomb digs a crater INTO groundAt and
+   breaks the sandbag wall beside it (the collider goes, the points die). */
+scenario(10, "the ground: cover for the host, earthworks, craters, broken cover", async () => {
+  const W = boot("?map=dunes&red=20&blue=20&rw=ak47&bw=ak47&rt=pro&bt=pro&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  await settle();
+  const a0 = W.B().audit();
+  const T = a0.terrain || {};
+  check(T.cover && T.cover.points > 200 && T.cover.terrain > 50, "the dunes give cover points (" + JSON.stringify(T.cover) + ")");
+  check(T.dress && T.dress.placed > 10, "and real objects to fight from (" + JSON.stringify(T.dress) + ")");
+  run(W, 1);                                     // the armies come in over the first frames
+  const HOST = vm.runInContext("HOST", W.sb), MAP = vm.runInContext("MAP", W.sb);
+  check(typeof HOST.coverNear === "function" && typeof HOST.coverFrom === "function", "the host interface carries coverNear / coverFrom");
+  const red = vm.runInContext("men", W.sb).find((m) => m.team === "red" && !m.dead);
+  const blue = vm.runInContext("men", W.sb).find((m) => m.team === "blue" && !m.dead);
+  const pt = HOST.coverFrom(red.pos.x, red.pos.z, blue.pos.x, blue.pos.z, 60);
+  check(pt && ((blue.pos.x - pt.x) * pt.nx + (blue.pos.z - pt.z) * pt.nz) < 0,
+    "coverFrom finds a point with the cover between a red man and the blue line (" + (pt ? pt.kind + " " + pt.h.toFixed(2) + " m" : "none") + ")");
+  check(T.ground && T.ground.earthworks >= 6, "the dug-in positions are earthworks in the ground (" + (T.ground && T.ground.earthworks) + ")");
+  // a bomb on a sandbag wall: the ground digs, the wall breaks
+  const G = W.CBZ.battleGround, C = W.CBZ.battleCover;
+  const bag = C.list().find((r) => r.kind === "sandbags" && r.alive);
+  check(!!bag, "there is a sandbag wall to break");
+  if (bag) {
+    const x = bag.x + 3, z = bag.z;
+    const before = MAP.groundAt(x, z);
+    const ptsBefore = C.stats().points;
+    G.blast(x, before, z, 18, 2.8, "boom");
+    const after = MAP.groundAt(x, z);
+    check(before - after > 0.4, "a bomb digs a crater into groundAt (" + (before - after).toFixed(2) + " m deep)");
+    check(!bag.alive, "and breaks the sandbag wall 3 m away (hp " + Math.round(bag.hp) + ")");
+    check(C.stats().destroyed >= 1 && C.stats().points !== ptsBefore, "its cover points changed with it (" + ptsBefore + " -> " + C.stats().points + ")");
+  }
+});
+
 scenario(6, "calibration: the headless resolver against the page's own battle", async () => {
   globalThis.window = globalThis; globalThis.CBZ = { game: {} };
   require(path.join(ROOT, "src/systems/brain.js"));
