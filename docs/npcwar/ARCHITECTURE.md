@@ -85,6 +85,7 @@ change it only in coordination.
 | `src/units/kit/quadrig.js` | `CBZ.quadRig`: quadruped skeleton, bind points, 2-bone IK, leg posing | animal agents (coordinate) |
 | `src/units/kit/gait.js` | `CBZ.quadGait`: planted-foot gait solver, footfall tables | animal agents (coordinate) |
 | `src/units/kit/vehicle.js` | vehicle drive / turret / armour / crew helpers | vehicle agents (coordinate) |
+| `src/units/kit/moves.js` | `CBZ.unitMoves`: what a possessed animal does on ATTACK (the `moves` hook) | player control (species files override) |
 
 ### The sim and the page (NPC War's host layer today)
 | file | what | owner |
@@ -163,8 +164,22 @@ CBZ.unitKit.register("bengal_tiger", {
   build(ctx)            -> THREE.Group   // feet at y=0, nose +X, metres. ctx = { THREE, mat, rng, id, seed }
   animate(unit, dt)     // the per-frame pose: replaces the shared gait or swim rig
   fight(unit, tgt, dt, opts) -> result   // the close fight: replaces CBZ.creatureFight(unit, tgt, dt, opts)
+  moves(unit, tgt, ctx) -> move | id | null   // what it does when a PLAYER presses attack (below)
 });
 ```
+
+**Possessed animals: the `moves` hook** (`src/units/kit/moves.js`, `CBZ.unitMoves`). A player can
+take over any unit (tap it). A possessed animal has MOVE and ATTACK; ATTACK asks the species
+file's `moves(unit, tgt, ctx)` which move to throw, and falls back to the shared picker
+`CBZ.unitMoves.pick` (by family: cats pounce from a sprint, swipe close, throat-bite the
+downed; canids/bears leap and maul; sharks lunge; rhinos/bison ram then gore; elephants
+trunk-grab and throw what they can lift; hoofed animals kick and trample; the gorilla uses
+`ape_combat`'s own repertoire). `ctx = { dist, reach, sprint, speed, chase, downed, crowd, n,
+water, heavy }`. A move is `{ id, style, pow, dur, rng, leap, cd, grab }`; `style` is
+creature_combat's grammar, or return an id from `CBZ.unitMoves.MOVES`. The driver latches the
+move on the body (`_atkAnim = 0`, `_apeStyle`, `_atkDur`, `_atkPow`) and then calls your
+`fight` (or `CBZ.creatureFight`) every step, with `opts.youMove` set: a fight built on
+creatureFight plays it with no extra work.
 
 - **The fallbacks today.** The body is the bestiary's `build()` (`src/city/wildlife/*.js`).
   Legs walk on `CBZ.wildlifeRig.buildGait/animateGait`, swimmers on
@@ -277,10 +292,23 @@ vehicle's dismount range, or when the hull is penetrated or immobilised, and tra
 A knocked-out vehicle's crew bails out as wounded men: 85% survive, 30% if it blew up. Rifles,
 teeth and fists do nothing to thick plate.
 
-**Player.** The rifle button (G) joins a crewed vehicle on your side first. W/S throttle, A/D
-steer (or the touch stick), the mouse lays the turret, attack (LMB / J) fires your seat's weapon,
-X changes seat. The camera is a chase cam. G hands it back. In aircraft you work the guns while
-the AI flies.
+**Player.** Tap/click a vehicle (or the rifle button G on a side with one). W/S throttle, A/D
+steer (or the touch stick), the look lays the turret and is pulled onto the auto-target, attack
+(LMB / J / the touch button) fires the right gun for the mark (main gun at armour, MG at men; X
+picks a seat by hand). The round waits until the turret is on. The chase cam rides the turret
+while you gun. G hands it back. In aircraft you work the guns while the AI flies.
+
+**Take over / camera (player.js, camera/*.js, hud.js).** Any unit, either side: tap it.
+MOVE + ATTACK only (men: CBZ.melee grammar with fists, auto-aimed fire with a gun, rifle butt up
+close; animals: the `moves` hook above; vehicles: drive + seat weapon). Death while possessed: a
+slow beat on the body, then you hop to the nearest ally. Camera modes: `auto` (the director:
+interest score over fights, deaths, charges, big guns, explosions; shots `hero` `charge`
+`establish` `general`; slow-motion on knockouts, kills on the lens, explosions; `?slowmo=0/1`,
+off by default under `probe=1`), `follow`, `study/under/surface`, `kill`, `you` (chase cam),
+`youdead`, `free` (drag orbit, right-drag / two fingers pan, wheel / pinch zoom). The lens never
+enters walls, ground, dunes or bodies (camApply). Probe seams: `__battle.take(sel)`,
+`youDrive({ax,az,run,atk,yaw})`, `youState()`, `director()`. Shot service: `--cams lens` shoots
+the game's own camera.
 
 **Known gaps.** The HIMARS' indirect fire needs tuning, the F-35 drops few bombs, aircraft fly
 their own pattern (not `studio.fly`), and there is no per-track split on the rig. In node,

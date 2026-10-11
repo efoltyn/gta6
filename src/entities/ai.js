@@ -5223,6 +5223,7 @@
      than 4 blows in 2 s. The stat damage lives in boxLanded and is paid only
      by blows that actually land (a blocked one chips through the forearms). */
   const BOX_O = { perform: true, onLand: boxLanded };
+  const BOX_SHANK = { kind: "shank", blade: true, mass: 0.2 };
   // his fighter is made once (seeded off the yard's rng) and kept on him
   function boxer(a) {
     if (a._boxF) return a._boxF;
@@ -5234,7 +5235,10 @@
     const V = CBZ.verbs;
     if (!V || !V.fighter) return;
     // a man your fist just caught does not throw back on the same beat
-    if ((n.hitCD || 0) <= 0) boxer(n).tick(dt, f, BOX_O);
+    // (a shank out in his hand is what he swings: slashes and the point)
+    const bn = boxer(n);
+    bn.weapon = n._shankOut ? BOX_SHANK : null;
+    if ((n.hitCD || 0) <= 0) bn.tick(dt, f, BOX_O);
     // a screw who was swung on answers from here (his own brain is guards.js);
     // an inmate who stood his ground runs his own fight state and his own fighter
     const answers = (f.kind === "guard" || f.kind === "warden") && alive(f) && !(f.aiState === "fight" && f.foe === n);
