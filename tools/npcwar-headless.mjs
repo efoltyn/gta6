@@ -40,8 +40,20 @@ const only = process.argv[2] ? +process.argv[2] : 0;
 let fails = 0, passes = 0;
 function check(ok, msg) { if (ok) { passes++; console.log("  PASS " + msg); } else { fails++; console.log("  FAIL " + msg); } }
 
+/* The page is src/battle/*.js, loaded in the order games/battle.html lists
+   them (one shared script scope, exactly like the browser: each file runs as
+   its own script in the same context). Any inline <script> blocks still on
+   the page run where they sit. */
 const HTML = fs.readFileSync(path.join(ROOT, "games/battle.html"), "utf8");
-const INLINE = (HTML.match(/<script>([\s\S]*?)<\/script>/g) || []).map((b) => b.replace(/^<script>|<\/script>$/g, "")).join("\n;\n");
+const PAGE_SCRIPTS = [];
+for (const m of HTML.matchAll(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/script>/g)) {
+  const src = m[1];
+  if (src) {
+    const rel = src.replace(/\?.*$/, "").replace(/^\.\.\//, "");
+    if (!/^src\/battle\//.test(rel)) continue;          // the studio is stubbed below
+    PAGE_SCRIPTS.push({ name: rel, code: fs.readFileSync(path.join(ROOT, rel), "utf8") });
+  } else if (m[2].trim()) PAGE_SCRIPTS.push({ name: "battle.inline.js", code: m[2] });
+}
 const THREE_SRC = fs.readFileSync(path.join(ROOT, "src/vendor/three.r128.min.js"), "utf8");
 
 // ------------------------------------------------------------------ a fake DOM
@@ -182,7 +194,7 @@ function boot(url, opts) {
     stick: (o) => { sb._sticks = (sb._sticks || 0) + 1; }, release() {},
   };
   // run the page
-  try { vm.runInContext(INLINE, sb, { filename: "battle.inline.js" }); }
+  try { for (const s of PAGE_SCRIPTS) vm.runInContext(s.code, sb, { filename: s.name }); }
   catch (e) { return { err: e }; }
   return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE };
 }
