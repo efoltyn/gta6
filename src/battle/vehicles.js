@@ -147,7 +147,11 @@ function makeVehicle(teamId, i, id) {
   const S = def.stats || {};
   const air = def.domain === "air";
   let b = null;
-  try { b = def.build ? def.build({ THREE: THREE, mat: CBZ.cmat, rng: lcg, seed: i, id: id }) : null; } catch (e) { console.warn("[war] vehicle build failed:", id, e); }
+  // the build is told whose army it is and what ground it is on, so a unit
+  // file can paint the nation's scheme (and flag) for that ground
+  const bctx = { THREE: THREE, mat: CBZ.cmat, rng: lcg, seed: i, id: id, team: teamId,
+    nation: (typeof SIDES !== "undefined" && SIDES[teamId] && SIDES[teamId].nation) || null, arena: MAP && MAP.id };
+  try { b = def.build ? def.build(bctx) : null; } catch (e) { console.warn("[war] vehicle build failed:", id, e); }
   if (!b || !b.group) b = vehStandIn(def);
   const group = b.group;
   const L = b.footL || S.length || 6, Wd = b.footW || S.width || 2.6, H = b.height || S.height || 2.4;
@@ -428,7 +432,7 @@ function vehDriveTo(u, sdt, halt) {
 function vehMove(u, sdt, ctrl) {
   const D = CBZ.vehicleDrive, def = u.def, S = def.stats || {};
   const spec = { speed: S.speed, reverse: S.reverse, accel: S.accel, turn: S.turn, width: S.width,
-    wheelbase: S.wheelbase, maxSteer: S.maxSteer, mobilityKill: u.vs.mobility };
+    wheelbase: S.wheelbase, maxSteer: S.maxSteer, grip: S.grip, mobilityKill: u.vs.mobility };
   if (vehCrewN(u) === 0) { ctrl.throttle = 0; ctrl.steer = 0; }
   if (def.drive === "tracked") D.tracked(u.ds, spec, ctrl, sdt); else D.wheeled(u.ds, spec, ctrl, sdt);
   u.h = D.wrap(u.h + u.ds.w * sdt);
@@ -810,6 +814,8 @@ function stepWreck(u, sdt) {
     u._smokeT = (u._smokeT || 0) - sdt;
     if (u._smokeT <= 0 && CBZ.cityCrashSmoke) { u._smokeT = 0.7; try { CBZ.cityCrashSmoke(u.pos.x, u.pos.y + u.vheight, u.pos.z, { count: 2, scale: 1.2 }); } catch (e) {} }
   }
+  // the unit file draws its own wreck: fire where it was hit, the tyres burning off
+  if (u.rig && u.rig.wrecked) { try { u.rig.wrecked(sdt, u); } catch (e) {} }
 }
 
 /* ------------------------------------------------------------- bodies */
@@ -853,7 +859,8 @@ function animateVehicle(u, dt) {
     if (CBZ.milAirDrive) { try { CBZ.milAirDrive(u.group, { thr: u.def.drive === "rotor" ? 0.8 : 0.7, agl: u.pos.y - MAP.groundAt(u.pos.x, u.pos.z) }, dt); } catch (e) {} }
     return;
   }
-  if (u.rig && u.rig.update) { try { u.rig.update(dt, u.ds.v, u.ds.w, u.ds.steer || 0); } catch (e) {} }
+  // the unit rides along as a 5th argument: crew aboard, damage, the gun's last round
+  if (u.rig && u.rig.update) { try { u.rig.update(dt, u.ds.v, u.ds.w, u.ds.steer || 0, u); } catch (e) {} }
 }
 
 /* ------------------------------------------------------------- YOU drive */

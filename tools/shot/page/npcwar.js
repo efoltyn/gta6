@@ -222,7 +222,8 @@
     if (ST.studio) { if (ST.studio.parent) ST.studio.parent.remove(ST.studio); ST.studio = null; }
     var SP = CBZ.WILDLIFE_SPECIES || {};
     var kind = spec.species || spec.unit || "men";
-    var kinds = String(kind).split("|");
+    // every id the roster names: alternating (a|b) AND counted (m35_truck*1,men*16)
+    var kinds = CBZ.battleRoster && CBZ.battleRoster.ids ? CBZ.battleRoster.ids(kind) : String(kind).split("|");
     for (var i = 0; i < kinds.length; i++) {
       if (!knownUnit(kinds[i])) {
         return { ok: false, error: "unknown species \"" + kinds[i] + "\". Known: " + S.species().join(" ") };

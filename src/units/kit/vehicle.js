@@ -62,11 +62,25 @@
     const top = spec.speed || 20, rev = spec.reverse || top * 0.3;
     const acc = spec.accel || 3.5, maxSteer = spec.maxSteer || 0.55;
     const thr = clamp(ctrl.throttle || 0, -1, 1);
-    const want = thr >= 0 ? thr * top : thr * rev;
-    const a = ctrl.brake > 0 ? acc * 2.5 : acc;
+    let want = thr >= 0 ? thr * top : thr * rev;
+    const stCmd = clamp(ctrl.steer || 0, -1, 1);
+    const wb = spec.wheelbase || 3.5;
+    /* GRIP (opt-in: spec.grip, in g). Tyres hold about grip x 9.8 m/s2
+       sideways: a driver lifts to make a corner (the speed at which the
+       commanded lock is still inside the grip circle) and the lock itself is
+       limited at speed, so a truck at 90 km/h cannot turn on a dime. */
+    if (spec.grip > 0) {
+      const ay = spec.grip * 9.8, tl = Math.tan(Math.max(1e-3, Math.abs(stCmd) * maxSteer));
+      const vCorner = Math.sqrt(ay * wb / tl) * 1.15;
+      if (want > vCorner) want = Math.max(vCorner, Math.min(want, 4));
+    }
+    // brakes are stronger than the engine (a grip-aware hull also brakes, not coasts, into a corner)
+    const a = ctrl.brake > 0 || (spec.grip > 0 && Math.abs(want) < Math.abs(s.v || 0) - 0.5) ? acc * 2.5 : acc;
     s.v = (s.v || 0) + clamp(want - (s.v || 0), -a * dt, a * dt);
     if (spec.mobilityKill) s.v *= Math.max(0, 1 - dt * 3);
-    s.steer = (s.steer || 0) + clamp(clamp(ctrl.steer || 0, -1, 1) * maxSteer - (s.steer || 0), -2 * dt, 2 * dt);
+    let lock = stCmd * maxSteer;
+    if (spec.grip > 0 && Math.abs(s.v) > 1) lock = clamp(lock, -Math.atan(spec.grip * 9.8 * wb / (s.v * s.v)), Math.atan(spec.grip * 9.8 * wb / (s.v * s.v)));
+    s.steer = (s.steer || 0) + clamp(lock - (s.steer || 0), -2 * dt, 2 * dt);
     s.w = -s.v * Math.tan(s.steer) / (spec.wheelbase || 3.5);
     return s;
   }
