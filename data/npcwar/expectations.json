@@ -18,8 +18,7 @@
           0.6
         ]
       },
-      "why": "A male Bengal tiger (~220 kg) outweighs a male lion (~190 kg) by roughly 15%, is a solitary hunter that kills large prey alone, and has the longer canines; the lion is the more practised fighter against its own kind (coalitions fight for prides). Historical staged fights (Roman arenas, 19th-century Indian and circus accounts) are anecdotal and split. Consensus: close to even, the tiger slightly favoured by size.",
-      "known": "tiger file: hp 150 / dmg 35 for a 220 kg cat against the lion's 215 / 60 (BALANCE.md F1)"
+      "why": "A male Bengal tiger (~220 kg) outweighs a male lion (~190 kg) by roughly 15%, is a solitary hunter that kills large prey alone, and has the longer canines; the lion is the more practised fighter against its own kind (coalitions fight for prides). Historical staged fights (Roman arenas, 19th-century Indian and circus accounts) are anecdotal and split. Consensus: close to even, the tiger slightly favoured by size."
     },
     {
       "id": "bear_v_tiger",
@@ -37,7 +36,8 @@
           0.9
         ]
       },
-      "why": "A grizzly/brown bear (~300 kg, up to 400+) has 40% more mass than a Bengal tiger, a heavy skull and thick fur and fat that blunt bites. In the Russian Far East Amur tigers do kill brown bears, but mostly females and young, and adult male bears also displace tigers from kills (Seryodkin, Kostyria et al. on Sikhote-Alin). A big cat against a full-grown bear loses more often than not."
+      "why": "A grizzly/brown bear (~300 kg, up to 400+) has 40% more mass than a Bengal tiger, a heavy skull and thick fur and fat that blunt bites. In the Russian Far East Amur tigers do kill brown bears, but mostly females and young, and adult male bears also displace tigers from kills (Seryodkin, Kostyria et al. on Sikhote-Alin). A big cat against a full-grown bear loses more often than not.",
+      "known": "bears: the first brown bear drawn is a 188 kg sow (hp 177) against a 'seed 0 is male' 347 kg tiger (hp 442); tiger hp is about 1.5x the mass rule (BALANCE.md F1, F2)"
     },
     {
       "id": "bear_v_lion",
@@ -54,7 +54,7 @@
         ]
       },
       "why": "Same argument as the tiger with a lighter cat (190 kg): the bear's mass, reach and the cat's lack of a killing hold on a 300 kg animal. 19th-century Californian bear-and-bull/lion pit accounts favour the bear.",
-      "known": "bears file: brown bear dmg 29.7 against the lion's 60 (BALANCE.md F2)"
+      "known": "bears: sow hp 177, deals 135 dmg a fight against the lion's 178 (F2)"
     },
     {
       "id": "gorilla_v_lion",
@@ -89,8 +89,7 @@
           0.25
         ]
       },
-      "why": "As gorilla v lion, against a heavier (220 kg) cat. The gorilla loses.",
-      "known": "tiger file numbers (F1); gorilla hp 260 for 170 kg (F3)"
+      "why": "As gorilla v lion, against a heavier (220 kg) cat. The gorilla loses."
     },
     {
       "id": "wolves10_v_bear",
@@ -108,8 +107,7 @@
           0.8
         ]
       },
-      "why": "Wolf packs and grizzlies meet over carcasses in Yellowstone; usually the bear takes the kill and nobody dies, and wolves do kill bears, mostly cubs, old or denned animals (Smith et al., Yellowstone wolf project; Gunther & Smith 2004). Ten 45 kg wolves against one 300 kg adult bear in a fight to the finish: genuinely variable.",
-      "known": "canids: a wolf bite does 6 hp to a bear and the pack fights to the death instead of harrying (F5)"
+      "why": "Wolf packs and grizzlies meet over carcasses in Yellowstone; usually the bear takes the kill and nobody dies, and wolves do kill bears, mostly cubs, old or denned animals (Smith et al., Yellowstone wolf project; Gunther & Smith 2004). Ten 45 kg wolves against one 300 kg adult bear in a fight to the finish: genuinely variable."
     },
     {
       "id": "elephant_v_lion",
@@ -211,8 +209,7 @@
           1.0
         ]
       },
-      "why": "Ten men without weapons cannot hurt a 220 kg cat in a way that matters before it kills several of them, and an untrained crowd breaks. The tiger wins (or the men run, which is the same result).",
-      "known": "tiger file: hp 150 (F1); fists land every swing in node (F9)"
+      "why": "Ten men without weapons cannot hurt a 220 kg cat in a way that matters before it kills several of them, and an untrained crowd breaks. The tiger wins (or the men run, which is the same result)."
     },
     {
       "id": "tiger_v_30men_fists",
@@ -230,8 +227,7 @@
           0.95
         ]
       },
-      "why": "Around here numbers start to tell: villagers do kill tigers by mobbing them, though with sticks and stones. Bare hands make it harder. Wide band: the crossover.",
-      "known": "tiger file: hp 150 (F1)"
+      "why": "Around here numbers start to tell: villagers do kill tigers by mobbing them, though with sticks and stones. Bare hands make it harder. Wide band: the crossover."
     },
     {
       "id": "tiger_v_100men_fists",
@@ -290,7 +286,7 @@
         ]
       },
       "why": "The 'hundred men v a gorilla' question (the 2025 internet argument): a gorilla can maim the first several men but does not have the endurance or killing efficiency to beat dozens that pile on. Fifty men should usually win.",
-      "known": "gorilla / ape_combat: body-club kills, civilian morale (F4)"
+      "known": "gorilla / ape_combat: body-club kills ~43 hp per man touched, civilian morale (F4)"
     },
     {
       "id": "men100_fists_v_gorilla",
@@ -327,8 +323,7 @@
           1.0
         ]
       },
-      "why": "300 kg, thick fur and fat, a skull fists cannot hurt. The bear wins.",
-      "known": "bears file: hp 200 / dmg 29.7 for 300 kg (F2)"
+      "why": "300 kg, thick fur and fat, a skull fists cannot hurt. The bear wins."
     },
     {
       "id": "tiger_v_10rifles_150m",
@@ -386,7 +381,7 @@
         ]
       },
       "why": "One man, one tiger, 10 m: the man has one chance to stop it with a brain or spine shot in under a second. The tiger is favoured.",
-      "known": "tiger file: chase 8.1 m/s (a tiger charges at 15+); weapons: a heart-shot animal drops at once (F6)"
+      "known": "tiger charge from a standing start; weapons: a heart-shot animal drops at once (F6)"
     },
     {
       "id": "bear_v_5rifles_150m",
