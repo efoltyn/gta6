@@ -721,6 +721,76 @@ scenario(12, "air assault: a Black Hawk fast-ropes its squad in, then its door g
   check(offSector.length === 0, "each door gun fired only inside its own sector (" + (offSector.slice(0, 3).join(", ") || "none out") + ")");
 });
 
+/* 13  AIR DEFENCE. A Patriot launcher turns its tail to the threat, emplaces
+   (outriggers down, the launcher up to its fixed 38 degrees), holds its site
+   instead of driving at its mark, and kills helicopters with PAC-3 MSEs that
+   only leave a launcher that is up, slewed and still. */
+scenario(13, "air defence: a Patriot emplaced, two Apaches; then riflemen close in and it displaces", async () => {
+  {
+    const W = boot("?a=patriot_launcher*1&b=ah64_apache*2&n=1v2&arena=dunes&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 0.5);
+    const B = W.sb.__battle, wrap = W.CBZ.vehicleDrive.wrap;
+    const p = B.roster().find((m) => m.unitId === "patriot_launcher");
+    check(!!p && !p.group.userData.standIn && !!(p.rig && p.rig.isPatriot), "built by its own file (tractor, articulated trailer, M903)");
+    if (!p) return;
+    const foe = B.roster().filter((m) => m.team !== p.team);
+    const fx = foe.reduce((s, m) => s + m.pos.x, 0) / foe.length, fz = foe.reduce((s, m) => s + m.pos.z, 0) / foe.length;
+    const tail = Math.abs(wrap(p.h - Math.atan2(p.pos.x - fx, p.pos.z - fz)));
+    check(tail < 0.6 && p.rig.jack >= 1 && p.rig.elev > 0.6, "it opens emplaced, tail to the threat (nose " + tail.toFixed(2) + " rad off straight away from it; jacks " + p.rig.jack + ", launcher " + (p.rig.elev * 180 / Math.PI).toFixed(0) + " deg)");
+    const x0 = p.pos.x, z0 = p.pos.z;
+    const bad = [];
+    let fired = 0;
+    const fire0 = p.rig.fire;
+    p.rig.fire = function (shot) {
+      if (shot.kind === "sam") {
+        fired++;
+        if (!(this.jack >= 1 && this.elev > 0.6 && p.speed < 0.5 && Math.abs(wrap(this.travWant - this.trav)) < 0.06)) bad.push("jack " + this.jack.toFixed(2) + " elev " + this.elev.toFixed(2) + " v " + p.speed.toFixed(1));
+      }
+      return fire0.apply(this, arguments);
+    };
+    run(W, 240, () => true);
+    const moved = Math.hypot(p.pos.x - x0, p.pos.z - z0);
+    const ap = B.roster().filter((m) => m.unitId === "ah64_apache");
+    console.log("    (" + fired + " PAC-3 launched, " + p.kills + " kills, moved " + Math.round(moved) + " m, Apaches down " + ap.filter((m) => m.dead).length + ", launcher " + (p.dead ? "knocked out" : "alive, hp " + Math.round(p.hp)) + ")");
+    check(moved < 30, "it held its site instead of driving at the helicopters (" + Math.round(moved) + " m)");
+    check(fired > 0 && bad.length === 0, "PAC-3s left only an emplaced, slewed, still launcher (" + fired + " launched" + (bad.length ? ", " + bad.slice(0, 2).join("; ") : "") + ")");
+    check(ap.some((m) => m.dead), "and an Apache came down (" + ap.filter((m) => m.dead).length + " of 2)");
+    // the trailer's kinematics: a steady turn settles at the real hitch angle
+    const r = p.rig, phi0 = r.phi;
+    r.phi = 0;
+    for (let i = 0; i < 600; i++) r.stepTrailer(1 / 60, 5, 0.3, null);
+    const want = Math.asin((0.3 * (1.45 - 1.34) - 0.3 * 8.2) / 5);
+    check(Math.abs(r.phi - want) < 0.08, "in a steady turn the trailer settles at its hitch angle (" + r.phi.toFixed(2) + " v " + want.toFixed(2) + " rad)");
+    r.phi = phi0;
+  }
+  {
+    const W = boot("?a=patriot_launcher*1&b=men&n=1v8&arena=dunes&bw=ak47&auto=1&probe=0");
+    if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+    realBoom(W);
+    await settle();
+    run(W, 0.5);
+    const B = W.sb.__battle;
+    const p = B.roster().find((m) => m.unitId === "patriot_launcher");
+    if (!p) { check(false, "the Patriot is on the field"); return; }
+    const x0 = p.pos.x, z0 = p.pos.z;
+    let movedJacked = 0, stowed = false;
+    const samN = () => p.wpn.filter((W0) => W0.w.kind === "sam").reduce((s, W0) => s + W0.n, 0);
+    const sams = samN();
+    run(W, 90, () => {
+      if (!p.dead && p.rig.jack > 0.02 && p.speed > 0.8) movedJacked++;
+      if (!p.dead && p.rig.jack === 0 && p.rig.elev === 0) stowed = true;
+      return true;
+    });
+    const moved = Math.hypot(p.pos.x - x0, p.pos.z - z0);
+    console.log("    (v riflemen: moved " + Math.round(moved) + " m, mode " + (p.rig.ai && p.rig.ai.mode) + ", .50 rounds " + p.wpn[1].n + ", " + (p.dead ? "knocked out" : "hp " + Math.round(p.hp)) + ")");
+    check(stowed && moved > 60 && movedJacked === 0, "riflemen inside 450 m: it march-ordered (launcher down, jacks up) and only then drove off (" + Math.round(moved) + " m, " + movedJacked + " steps moving jacked)");
+    check(samN() === sams, "no interceptor was wasted on men");
+  }
+});
+
 scenario(9, "sides, best-of, the URL matchup: no colour on screen", async () => {
   const W = boot("?a=men&b=men&n=20v12&arena=dunes&aw=ak47&bw=ak47&at=elite&bt=thug&af=kesh&bf=veridia&bo=3&sa=1&sb=0&auto=1&probe=0");
   if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
