@@ -3383,6 +3383,19 @@
       } : null,
     });
   }
+  // the street's damage for a blow the ped's fighter landed (one closure per
+  // ped, made once): 16-24 a fist, scaled by where it landed
+  function pedLandFor(att) {
+    if (att._pedLand) return att._pedLand;
+    att._pedLand = function (res) {
+      const t = res.target;
+      if (att.dead || !t || t.dead) { res.reaction = "none"; return; }
+      punchSfx(att, t);
+      const dmg = 16 + rng() * 8;
+      hurtActor(att, t, (t.isPlayer && res.blocked) ? dmg : dmg * res.dmgMul, true, res);
+    };
+    return att._pedLand;
+  }
   // Same law as the yard brawl (entities/ai.js): a punch thrown by someone
   // who is not you is world foley, so it goes through CBZ.worldSfx and
   // carries a distance. A street beef three blocks away used to land at
@@ -3482,7 +3495,10 @@
       // frame dt handed to it, so it must be called every frame or its beats run
       // long by exactly the throttle ratio. (The armed branch above does not need
       // this — posture() ticks that shooter's timers every frame from move().)
-      const beat = IQ && IQ.melee ? IQ.melee(att, tgt, dt || 0.016, { reach: 1.85 }) : null;
+      // With the real fight loaded (systems/melee.js) the exchange throws its
+      // own blows and each LANDED one runs pedLanded (the street's damage);
+      // "swing" only comes back from the rig-less fallback beat.
+      const beat = IQ && IQ.melee ? IQ.melee(att, tgt, dt || 0.016, { reach: 1.85, onLand: pedLandFor(att), quit: true }) : null;
       if (beat && beat !== "swing") { att.attackCD = 0; return; }
       att.attackCD = 0.5 + rng() * 0.4;
       npcSwing(att, tgt, 16 + rng() * 8);
