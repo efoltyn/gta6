@@ -72,7 +72,12 @@ change it only in coordination.
 | `src/battle/core/series.js` | `CBZ.battleSeries`: best of 1/3/5/7 | core |
 | `src/battle/core/host.js` | `CBZ.battleHost`: the host interface (§8) | core |
 | `src/battle/core/store.js` | `CBZ.battleStore`: the unit store, typed arrays, one row per unit (§9) | performance / scale |
-| `src/battle/core/lod.js` | `CBZ.battleLod`: tier rules and budgets (§9) | performance / scale |
+| `src/battle/core/lod.js` | `CBZ.battleLod`: tier rules, budgets, the squad scheduler (§9) | performance / scale |
+| `src/battle/core/tiersim.js` | `CBZ.battleTierSim`: the MID and FAR sims (§9) | performance / scale (brains: AI hooks) |
+| `src/battle/core/flow.js` | `CBZ.battleFlow`: the one flow-field solver | physics / scale |
+| `src/battle/core/simworker.js`, `simlink.js` | the sim worker and the page's end of it (§9) | performance / scale |
+| `src/battle/mass.js`, `massdraw.js` | tiered battles: rows, ghosts, promotion, the crowd draw (§9) | performance / scale |
+| `src/battle/settingspanel.js` | `SETTINGS`: the settings panel and AUTO quality (§9) | performance / scale |
 
 ### The units
 | file | what | owner |
@@ -83,7 +88,8 @@ change it only in coordination.
 | `src/units/vehicles/<id>.js` | **one per vehicle**: stats, armour, crew, weapons, body, drive | that vehicle's agent |
 | `src/units/kit/loft.js` | `CBZ.loftKit`: lofted, vertex-coloured, skinned shells | animal agents (coordinate) |
 | `src/units/kit/quadrig.js` | `CBZ.quadRig`: quadruped skeleton, bind points, 2-bone IK, leg posing | animal agents (coordinate) |
-| `src/units/kit/gait.js` | `CBZ.quadGait`: planted-foot gait solver, footfall tables | animal agents (coordinate) |
+| `src/units/kit/gait.js` | `CBZ.quadGait`: planted-foot gait solver, footfall tables (a table may carry its own cadence curve `fOf(v, K)`) | animal agents (coordinate) |
+| `src/units/kit/felid.js` | `CBZ.felidKit.hooks(spec)`: one cat engine (lofted body + pattern shader, rotary gallop with a flexing spine, stalk/sprint/leap brain, trip/throat/pin/nape/grapple fight, ragdoll markers, takeover moves). The cheetah and snow leopard files are pure data on it; any cat can be | cheetah / snow leopard agent (coordinate) |
 | `src/units/kit/vehicle.js` | vehicle drive / turret / armour / crew helpers | vehicle agents (coordinate) |
 | `src/units/kit/moves.js` | `CBZ.unitMoves`: what a possessed animal does on ATTACK (the `moves` hook) | player control (species files override) |
 
@@ -99,7 +105,8 @@ change it only in coordination.
 | `src/battle/damage.js` | `hurtMan`: the one damage funnel, reachability | armour / weapons |
 | `src/battle/death.js` | a beast dies, a man dies, the sinking dead | physics / humans |
 | `src/battle/physics.js` | the grid, body separation, pinned pairs, the flow field (`NAV`), COM | physics |
-| `src/battle/fire.js` | rounds, fire discipline, rockets | weapons |
+| `src/battle/fire.js` | the trigger (aimed / suppressive fire, pairs, bursts, reloads, stoppages, grenades, the gun's stance), flown rounds, penetration, ricochets, wounds, bleeding, rockets, backblast | weapons |
+| `src/weapons/ballistics.js` | `CBZ.ballistics`: cartridges, guns, materials, flight / drop / zero / penetration maths, body zones, species anatomy (node-loadable, shared with Gang City) | weapons |
 | `src/battle/air.js` | air support: bombers, the nuke run, airstrikes | weapons / vehicles (air) |
 | `src/battle/ai/think.js` | one unit's decision (target, slot, cover) | AI |
 | `src/battle/ai/morale.js` | morale, stance, hull-down | AI |
@@ -204,14 +211,129 @@ creatureFight plays it with no extra work.
 
 ```js
 CBZ.unitKit.register("m1_abrams", {
-  kind: "vehicle", domain: "ground" | "air",
-  stats:   { hp, mass, speed, turn, armour: { front, side, rear, top } },   // armour in mm RHA
-  crew:    [{ seat: "driver" | "gunner" | "commander" | "loader", pos: [x, y, z] }],
-  passengers, weapons: [{ id, seat, kind: "cannon" | "mg" | "rockets" | "missile", rof, dmg, range, ammo }],
-  build(ctx) -> { group, turret, gun, ... },
-  drive(unit, dt, ctrl), aim(unit, dt, tx, ty, tz), fight(unit, tgt, dt, opts)
+  kind: "vehicle", domain: "ground" | "air", drive: "tracked" | "wheeled" | "rotor" | "jet",
+  stats:   { hp, mass, speed, turn, armour: { front, side, rear, top },  // armour in mm RHA
+             alt, standoff, nap, popAlt, climb, popWindow, popShots },   // aircraft: see "Flight"
+  crew:    [{ seat: "driver" | "gunner" | "commander" | "loader" | "pilot", pos: [x, y, z] }],
+  passengers,
+  weapons: [{ id, seat, kind: "cannon" | "autocannon" | "mg" | "rockets" | "missile" | "sam" | "bombs",
+              rof, dmg, range, minRange, ammo, burst, pause, salvo, reload, vs, needs, indirect,
+              mount: "turret" | "slew" | "fixed" | "free", arc, yawMax, tol,       // facing, below
+              guided, basket, alt, dive, pullOut }],                            // air weapons
+  build(ctx) -> { group, rig, footW, footL, height },
+  animate(veh, dt, ctx),                                // optional: the unit's own look
+  tactics: { role, engage, priorities, hullDown, faceThreat, reverseOut, screen, ... },  // for the AI
 });
 ```
+
+#### The vehicle contract: the hooks the battle calls
+
+`src/battle/vehicles.js` is the only caller. Every hook is optional; a missing one means the
+shared default. A unit file never needs to know the runtime's internals.
+
+**`build(ctx)`** is called once per hull. `ctx` = `{ THREE, mat, rng, seed, id, side, team,
+nation, flagId, flag, color, ground, sideInfo }`. `side` is the slot (`"red"`/`"blue"`). `nation` is
+the `city/flags.js` id the side fights for (null for a side with no army). `flag` is that
+nation's design (paint it with `CBZ.flags.paint(g2d, ctx.flag, w, h)`; at THE FRONT it is the
+front spec's own flag). `color` is the side's mark colour. Markings, roundels and fin flags
+come from here. Return `{ group, rig }`, where `group` has its feet at y = 0 and nose on +Z.
+`ground` is what the hull is painted for: the open maps' skin (`sand`, `snow`, `grass`) or the
+map id (`city`, `island`, `field`, `arena`, `water`...).
+
+**`rig.mark(nation, ground, side)`** is called by the battle right after `build`, when the rig
+has it. It sets the paint scheme for the ground and puts the nation's flag on. The battle calls
+it, so a unit does not also paint from `ctx` in `build`.
+
+**`def.tactics`** is exposed on the hull as `veh.tactics`, for the AI layer (`src/battle/ai/*`)
+to read: role, engagement ranges, target priorities, hull-down, keep the front toward the
+threat, reverse out under fire, infantry screen. The runtime itself does not act on it yet.
+
+**`animate(veh, dt, ctx)`** is called by the battle **every sim step, on the battle clock**,
+for every vehicle kind, alive or wrecked. It stops when the battle is paused and follows the
+speed dial. Distance LOD applies: a far hull is animated every 2nd or 4th step with the summed
+`dt`. `veh.rig` is what `build` returned. `ctx` is one object per hull, reused:
+
+| field | what |
+|---|---|
+| `t`, `dt` | sim time, this call's dt |
+| `dead`, `wreck`, `burning` | damage state (`dead` = knocked out: wind rotors down, kill lights) |
+| `air`, `agl`, `speed`, `vy`, `yawRate`, `gamma` | motion: height over the ground, forward m/s, climb m/s, rad/s, flight-path angle |
+| `steer`, `throttle`, `turret` | the drive's controls and `{ yaw, elev }` of the turret |
+| `target`, `phase` | the mark, and an aircraft's flight phase (`transit mask pop drop` / `in out`) |
+| `firing` | the shot fired since the last animate (the `shot` below), else null |
+| `side`, `nation`, `groundAt` | who it fights for; `groundAt(x, z)` |
+| `shared(dt)` | run the shared default from inside your own |
+
+With no `animate`, the shared default runs: `rig.update(dt, v, w, steer)`, and for aircraft
+`CBZ.milAirDrive` (control surfaces, props, gear).
+
+**The shot.** Every round, launch and bomb is described by one object per weapon, reused:
+`shot = { wid, wi, n, w, kind, mount, target }` (`wid` = the weapon's id, `wi` its index in
+`weapons`, `n` the round number on that weapon since spawn). Every rig hook below receives it.
+Do not read `w.needs` as a "which weapon" signal (the old getter hack): use `shot.wid`.
+
+| rig hook | when |
+|---|---|
+| `muzzleWorld(out, shot) -> Vector3` | where this round leaves (the gun, the next tube or rail) |
+| `fire(shot, from)` | every round of every weapon. A rig with `fire` owns its effects (recoil, flash, the store leaving its rail): the runtime draws none |
+| `fired(scale, shot)` / `spend(i, shot)` | **legacy** (`city/mil_armor.js` rigs), only when there is no `fire`: `fired` for cannon (1) and autocannon (0.3) rounds, `spend` for a launch with `i` = the rig's own `loaded - 1` when it keeps one, else `shot.n` |
+| `reload(shot)` | a salvo's reload has finished: put the rounds back |
+| `canFire(shot) -> bool` | false holds this weapon this step (a TOW only with the launcher up and the hull still) |
+| `damage(vs, res)` | every hit that lands (`vs` = the damage state, `res` = `vehicleDrive.resolve`'s result: `zone pen dmg mobility firepower burning wreck`): show the drooped gun, the thrown track, the fire |
+| `aimError(shot) -> rad` | how far a `slew` mount still is from the line; the runtime holds fire until it is under `w.tol` (0.06) |
+| `aimTurret(yaw, elev, dt)`, `aimLauncher(yaw, elev, dt)`, `settle()`, `update(dt, v, w, steer)` | as before |
+
+A model can also carry `userData.chinGun = { yaw, pitch }` (the names of two empty nodes). The
+runtime lays them on the mark with `CBZ.milAirAim` and the rig follows them at its own rates.
+
+**Facing is per weapon.** `mount` says what has to be on the line before a weapon fires:
+
+| mount | fires when | default for |
+|---|---|---|
+| `turret` | the vehicle's turret has slewed onto the mark (`tol`, 0.05 rad) | `turret: true` |
+| `slew` | the mark is within `yawMax` (default 1.9 rad) of the nose and `rig.aimError` is under `tol` | `chin: true` / `slew: true` |
+| `fixed` | the NOSE is within `arc` of the mark (missile/sam 0.35, rockets 0.05, guns 0.06); a jet's gun and rockets also check the dive angle | an aircraft's non-MG weapons |
+| `free` | always (pintle, door gun, indirect launcher, bombs) | everything else |
+
+When a `fixed` or `slew` weapon is out of arc, the aircraft turns its nose onto the mark.
+
+**Weapons need their seat crewed.** A weapon fires only when its `seat` has a man in it (or the
+implicit crew of a hull nobody was assigned to). A weapon with no seat needs any crew, and a
+`remote` airframe is always crewed. There is one exception: a crewman whose own seat works no
+weapon (the driver) can climb over to the MAIN gun's seat (weapon 0's) once the hull has
+stopped. He never works the loader's or the commander's machine gun. You, at the controls, are
+the crew.
+
+**Crew casualties by seat.** A penetration comes in through the face it hit, on the line from
+whoever fired it, and its spall carries on through the hull. Each man in a seat (crew or
+passenger, at the seat's `pos` in hull space) is killed with
+`p = min(0.9, beh / 600) x exp(-distance from the line / 1.1 m)`. When nobody is left alive in
+the hull, the vehicle is out of the fight (abandoned). The bail-out after a knockout is
+unchanged.
+The player's weapon pick (`vehYouSeatWeapon`) uses the same fit rules (`vehWeaponFits`) and
+puts weapons that cannot bear on the mark second.
+
+**Flight.** Aircraft fly a doctrine (`stepRotor`, `stepJet` in `src/battle/vehicles.js`):
+
+- **Helicopters** (`drive: "rotor"`) fight from battle positions. The stand-off is the
+  weapon for the mark's `range x 0.75`, capped by `stats.standoff`. The position is on its
+  own side of the mark, where ground or buildings hide it at `nap` m (default 10) but a climb to
+  no more than `popAlt` (default max(alt, 60)) clears the line. Closer rings are tried when
+  nothing sees the mark. The phases are `transit` (nap of the earth, terrain-following), `mask`
+  (hover hidden until a weapon is ready), `pop` (climb at `climb` m/s, default 8, nose on the
+  mark, fire for `popWindow` s, default 7; this is cut short after `popShots` rounds, when hit,
+  or when blind), and `drop` (back down, then sidestep to a new position). With no mask (flat
+  ground) it still shoots and scoots. A transport (`dismountAt`) flies low to a landing short
+  of the enemy and sets down.
+- **Jets** fly attack runs at real heights. Level bombing is flown at the weapon's `alt` (else
+  `stats.alt`) and released where the fall lands on the mark. A `guided` bomb is released
+  inside a basket of `basket` (0.15) x its fall distance and homes all the way down (`homing`
+  on the rocket, `fire.js`). Missiles are fired at cruise inside 0.85 x range with the nose on,
+  and the jet breaks off inside its own stand-off. Gun and rocket runs are DIVES down a line of
+  `dive` rad (0.3) from `alt` (default min(cruise, 1500)), firing inside range and pulling out
+  at `pullOut` m (250). The jet then flies a racetrack out past the mark, wide enough for its
+  turn circle, and comes in again. It never flies below 60 m. The heights today: F-35 4.6 km
+  (gun dive from 1.5 km), MQ-9 4.5 km, B-52 9 km, B-2 12 km, A400M drop 380 m.
 
 ### Lazy loading and cache keys
 
@@ -296,7 +418,8 @@ teeth and fists do nothing to thick plate.
 steer (or the touch stick), the look lays the turret and is pulled onto the auto-target, attack
 (LMB / J / the touch button) fires the right gun for the mark (main gun at armour, MG at men; X
 picks a seat by hand). The round waits until the turret is on. The chase cam rides the turret
-while you gun. G hands it back. In aircraft you work the guns while the AI flies.
+while you gun. G hands it back. In aircraft you work the guns while the AI flies. Your gun
+line is the weapon's mount: the turret, the look (slew within its arc, free), or the nose.
 
 **Take over / camera (player.js, camera/*.js, hud.js).** Any unit, either side: tap it.
 MOVE + ATTACK only (men: CBZ.melee grammar with fists, auto-aimed fire with a gun, rifle butt up
@@ -310,8 +433,9 @@ enters walls, ground, dunes or bodies (camApply). Probe seams: `__battle.take(se
 `youDrive({ax,az,run,atk,yaw})`, `youState()`, `director()`. Shot service: `--cams lens` shoots
 the game's own camera.
 
-**Known gaps.** The HIMARS' indirect fire needs tuning, the F-35 drops few bombs, aircraft fly
-their own pattern (not `studio.fly`), and there is no per-track split on the rig. In node,
+**Known gaps.** The HIMARS' indirect fire needs tuning, and there is no per-track split on the
+rig. Aircraft fly the doctrine above, not `studio.fly`. The `drive` / `aim` / `fight` unit
+hooks are not called yet: a unit drives on the shared tracked / wheeled / air model. In node,
 strategic.js and the A400M build fall back to stand-ins (browser untested).
 
 ### Seeing your work: the shot service
@@ -323,12 +447,18 @@ working tree as it is, uncommitted edits included:
 node tools/shot/req.mjs --preset turntable --setup 'species=bengal_tiger' --wait
 node tools/shot/req.mjs --preset gait --setup 'species=dog' --wait            (also walk|trot|run|attack|death|glance)
 node tools/shot/req.mjs --preset matchup --setup 'a=m1_abrams&b=men&n=1v30' --wait
+node tools/shot/req.mjs --preset matchup --setup 'a=ah64_apache&b=men&n=1v30&arena=dunes&cam=ah64_apache' --wait
 node tools/shot/req.mjs --preset turntable --setup 'species=lion' --ba --wait  (origin/main vs you, one sheet)
 ```
 
 It prints a sheet path: Read it. `--setup` takes the matchup URL names (`a b n=AvB aw at arena`)
-as well as the stage keys (`species unit vs vn pose speed heading stage grid ruler`). Any other
-key goes on the page URL. A change that touches only `src/units/species|vehicles|kit/*.js` (or
+as well as the stage keys (`species unit vs vn pose speed heading stage grid ruler cam`). Any other
+key goes on the page URL. `cam` is the battle page's lens name (`a`, `b`, `a:3`, or a unit id).
+In a full battle every frame frames THAT body (re-found per frame, so the sheet follows it), not
+the whole field. `wide` takes in its mark when that is close, `hot` is a close 3/4, and `lens`
+shoots the game's own camera, which `cam` also points at the body (`__battle.camFollow`). On the
+battle page itself, `?cam=<unit id>` rides the unit closely (the study desk: a hull is followed
+off its rear quarter) and finds the next of its kind if it falls. A change that touches only `src/units/species|vehicles|kit/*.js` (or
 the bestiary's `src/city/wildlife/*.js`) is hot-swapped into a warm page, so a glance takes 1-2 s.
 The stage loads the unit's file and its `needs` through `CBZ.unitKit.need()` first. A glance is
 not a test: look, fix, look.
@@ -445,34 +575,124 @@ director hooks in `scoring.js`).
 
 ## 9. Scale: 100,000 a side
 
-The goal is 100k men against 100k men without losing quality, logic or looks. The design, and
-what is live today:
+The goal is 100k men against 100k men without losing quality, logic or looks. It is built
+(branch npcwar-scale). A battle no bigger than the FULL cap is all FULL and never enters any of
+this: it is exactly the page it was.
 
-- **Every unit is a row** in `CBZ.battleStore` (`core/store.js`): typed arrays (side, kind,
-  tier, life, x y z heading vx vz hp maxHp morale, squad, crowdRow, unit). They grow by
-  doubling. Today every unit object gets its row at spawn (`m.row`), and `updateCOM` syncs the
-  rows on its 0.6 s tick. Rendering far crowds goes through `entities/crowdstore.js`'s own rows
-  (`crowdRow` links them), not a second render store.
-- **Three tiers** (`core/lod.js`):
-  - **FULL** is a full rig and the full brain: near the lens or the player, the lens subject, the
-    player's target, anything in melee with a FULL unit, anything just hit near the lens, and the
-    crew of a FULL vehicle.
-  - **MID** is a cheaper but faithful individual sim: the same rules on a coarser tick.
-  - **FAR** is a squad/formation sim over the store's columns, held to statistical equivalence
-    (same winner in at least 90% of seeds, loser casualties within 15 points, time to decision
-    within 25%, the same morale break order) by a node check the scale agent writes. It is drawn
-    through `entities/crowdgpu.js` (the real CBZ.human, GPU-instanced with baked animation, the
-    `gta6-no-fake-crowds` rule), with impostors beyond that. There are never box stand-ins.
-- **Promotion and demotion** use distance hysteresis (`HYSTERESIS`) and a `DEMOTE_S` hold. A
-  tier change is a change of the `tier` column, not a new object.
-- **Budgets**: `BUDGET.think` (seconds between decisions per tier), `BUDGET.frameMs` (the
-  time-slice each tier may spend), and `BUDGET.worker`. The FAR squad sim is pure numbers over
-  transferable typed arrays, which is the Web Worker boundary.
-- **Live today**: `animEvery(d2)` is the render LOD (1/2/4 frames at 70/150 m), the same
-  numbers `frame()` always used, now read from the one table. Spatial hashing exists in
-  `physics.js` (`rebuildGrid` / `rebuildFine`).
-- **Not done yet** (the scale agent's job): the MID and FAR sims, the tier scheduler, the
-  crowdgpu path for battle units, the worker, and the equivalence check.
+**The files**
+
+| file | what |
+|---|---|
+| `core/store.js` | `CBZ.battleStore`: one row per unit, typed columns; `S.col()` adds a tier's columns; SharedArrayBuffer-backed when the page is cross-origin isolated |
+| `core/lod.js` | `CBZ.battleLod`: tier rules, caps per device, budgets, and `schedule()` (per squad, nearest first, hysteresis + `DEMOTE_S` hold) |
+| `core/tiersim.js` | `CBZ.battleTierSim`: the MID and FAR sims (page-free; runs in the page, in node, in the worker) |
+| `core/flow.js` | `CBZ.battleFlow`: the one Dial flow-field solver (physics.js `navSolve` and the tier sim both call it) |
+| `core/simworker.js` / `core/simlink.js` | the Web Worker and the page's end of it |
+| `src/battle/mass.js` | the host half: spawns rows, keeps FULL rows current, runs the tiers, ghosts, promotion/demotion, blasts on rows |
+| `src/battle/massdraw.js` | every non-FULL man through `entities/crowdgpu.js` (near / far / dead layers) |
+| `src/battle/settingspanel.js` | `SETTINGS`: the panel, device defaults, AUTO quality |
+
+**The tiers.** Decided per squad (ten men), so a squad never straddles two brains.
+- **FULL**: a real `makeMan` / `makeBeast` object and the page's own brain. Rigs are built inside
+  a per-frame budget (`MASS.promoteMs`), hidden, and the whole squad flips on one frame.
+- **MID** (`tiersim` thinkMid): the page's rules on rows: combat_iq's fire gate (reaction beat, aim
+  settle, burst rhythm, derived damage, hit chance, the running-target and suppression penalties;
+  every profile comes from `CBZ.combatIQ.profile()`), the fire token (2 or 3 guns on a mark),
+  bearing slots, the band, the lane rule, the LOS check at every trigger pull, hull-down on the
+  dunes, stance, the hold, the hunt, the pursuit, morale (brain.js's constants and per-man formula;
+  the ARMY is stepped once by the host over every row), rout, cornered, rally, flight. Walked on a
+  0.1 s slice; a think on the page's own cadence.
+- **FAR** (`tiersim` thinkSquad / updFarMan): the squad's senior man looks for the war (one search
+  per squad per second); until it has contact the squad is a march column visited at the march
+  tick (1 s; the renderer carries each man along his velocity). With contact every man takes his
+  own mark, token, line (on a slower clock), rhythm, magazine, nerve and wounds, on a 0.25 s slice.
+- Shots from both tiers are resolved in a batch at the end of the step. Target search walks a
+  dense per-side grid (only the enemy's rows); separation, the lane and the anti-clump use a
+  hashed 2.4 m body grid of the rows that are doing something.
+- **Seams.** A FULL brain's `pickTarget` also gets rows (`MASS.cands`) as **ghosts**: plain objects
+  with the fields the fire path reads, synced every frame; `hurtMan` on a ghost lands on the row.
+  The tier sim's rounds on a FULL row come back as events and go through `hurtMan`. Kills, the
+  morale shock, the near-miss rattle, tracers and the director's `shotsRing` all follow.
+- **Hooks for the AI agent**: `MASS.T.brain.mid` / `.far` replace a tier's think
+  (`fn(T, row, now, dt)`), `BUDGET` (core/lod.js) sets each tier's tick and milliseconds.
+
+**The proof** (`node tools/npcwar-fidelity.mjs [seeds] [case]`): the same engagement fought by
+the FULL page and with every squad forced MID, FAR, and MIXED (a FULL ring round the lens, MID
+round that, FAR beyond), over N seeds: the winner share within binomial noise, the loser's losses
+within 15 points, the time to decision within 25%. `tools/npcwar-worker-check.mjs` runs the
+worker on a real thread in both modes. `tools/npcwar-scale-bench.mjs` measures 1k/10k/100k a side.
+
+**The worker.** MID + FAR + the grids + the hit batch run in `core/simworker.js` whenever the
+page can host a Worker (not under `?probe`/`?auto` tools unless `?worker=1`). Cross-origin
+isolated: the store is shared. GitHub Pages cannot send COOP/COEP, so the shipped path is
+**transfer**: the worker owns its copy, the page sends the FULL rows each step, the worker sends a
+packed snapshot of every row (ping-ponged transferables, 15 Hz) and the full state of rows the
+page is about to promote. A worker that dies hands the tiers back to the page.
+
+**The drawing.** Every non-FULL man is the real `CBZ.human` through crowdgpu: his skin and hair are
+studio.cast's heritage roll for his role and variant, his uniform men.js's `uniformFor`, and the
+rig's own kit is baked in (`CBZ.crowdGPU.gear()`: men.js's helmet dome, actorweapons' rifle, shown
+per instance by `gearCode`). Clips by speed (rifleIdle / rifleWalk / rifleRun / crouchRun / down);
+the gait phase is handed to the rig's phase at promotion and back at demotion. Impostors only
+past the quality preset's `d2`. Known gaps: one baked rifle (the side's first issue) for the
+crowd, the helmet sits on uncompressed hair, beasts and vehicles have no instanced body yet
+(beast rows are simulated by the MID/FAR melee brain and drawn only once promoted; vehicles and
+their crews are always FULL).
+
+**Settings** (`SETTINGS`, saved as `cbz-npcwar-settings`): army cap, full bodies, near and mid
+range, mid brains, quality (crowd LOD bands/caps, far re-cut, pixel ceiling), shadows
+(off/near/all), draw distance, auto quality (gives back draw distance, the far re-cut, impostor
+range, MID brains, MID range, and the full rigs last). The render scale never drops below one
+pixel per CSS pixel. URL keys win for tools: `?tier=full|mid|far ?fullcap ?midcap ?fullr ?midr
+?worker=0|1`.
+
+---
+
+## 9b. Weapons: the round is flown, not rolled
+
+Every round any gun on this page fires (a man's rifle, YOUR rifle, a vehicle's machine gun) goes
+through `fireShot(m, tgt, {mode})` in `src/battle/fire.js` on the numbers in
+`src/weapons/ballistics.js`. There is no hit chance anywhere.
+
+- **The aim.** The shooter picks a point (the chest of a man, the heart behind an animal's
+  shoulder, the middle of a hull), leads a mover by its measured velocity times the round's
+  time of flight (training sets how well), and holds over for range past his zero (training
+  sets how well he guesses the range; a sniper dials).
+- **The dispersion.** One angular error in mil from the gun (MOA), the man's hold in his stance
+  (standing / kneeling / prone / bipod / a vehicle mount), his training, his feet, how long he
+  has held on this mark, being shot at (`m.supp`) and the recoil the last shots left on the
+  muzzle (it recovers on the training's time constant).
+- **The flight.** `v = v0 e^(-kt)`: the round arrives a real time of flight later and drops.
+  It is traced against the colliders (with their material, thickness along the line, `hollow`
+  or `fill`) and the ground at launch, and against the BODIES when it arrives. A wall or a body
+  it can go through costs it velocity; one it cannot stops it; a grazing hit on something hard
+  can skip it off (a ricochet keeps flying and can still hit somebody).
+- **The wound.** A hit is a path through a body's zones (`MAN` standing / kneeling / prone,
+  `QUAD`, `FISH`, in the measured box of the animal: `bodyL bodyW bodyH bodyX0 bodyY0` from
+  beasts.js). What it reached (brain, spine, heart and lungs, gut, a limb) and the energy it
+  left decide the damage now and the bleeding after. Big animals are deep: a 5.56 does not
+  reach an elephant's heart through its side; a .50 does.
+- **Species numbers** (optional, in a species file's `stats`): `mass` (kg), `hide` (mm),
+  `skull` (mm of bone in front of the brain), `ribs` (mm over the heart), `plan`
+  (`"quad"` | `"fish"`). Missing ones come from `CBZ.ballistics.SPECIES`, then from size.
+- **Collider materials** (arena owners): `addBoxCollider(..., { mat, hollow, fill })`.
+  `mat` is one of `wood sand dirt snow cinder brick concrete steel rha`; `hollow` = wall
+  thickness of a box with air in it (a container, a hull); `fill` = the solid share (a crate).
+  Untagged colliders are concrete.
+- **Armour hook** (the armour agent): `CBZ.battleArmour.layer(unit, zone) -> {mat, mm}` is
+  asked for the zone a round enters; a plate it cannot defeat stops it (blunt trauma only).
+- **For the AI** (read, do not duplicate): `CBZ.battleArms.band(m)` = `{eff, area, max, cls}`;
+  `CBZ.battleArms.liveGrenades()` = `[{x, z, t}]`; `m.supp` rises with every round that cracks
+  past inside its cartridge's suppression radius; `CBZ.battleArms.audit()` has the ledger,
+  including `why` (why a man whose gun was ready did not fire: slot, unseen, ducked, ...),
+  `shotsAt` / `hitsAt` by range band, organs hit, penetrations, ricochets, grenades.
+- **The gun's stance**: `weaponStance()` (asked by stepMan) puts an LMG or a sniper prone past
+  25 m and a rifleman on a knee past 60 m, when he has stopped to fight a mark he can see; the
+  AI's own stances (cover, the fold, a pinned man's crouch) win wherever it has one.
+
+`node tools/ballistics-check.mjs` prints the weapon table and holds the physics to published
+figures (time of flight, drop, zero, penetration of sand / cinder block / steel, the elephant's
+skull and heart, the lion's lungs, hit odds by stance).
 
 ---
 
@@ -486,7 +706,11 @@ node tools/npcwar-headless.mjs     the page's own sim in node: war room, hold, t
                                    rifle, snow/fields, calibration, held v met, vehicles, sides +
                                    series + URL.   node tools/npcwar-headless.mjs 3  runs one.
 node tools/units-kit-check.mjs     the animal kit: planted feet never slide; the dog bit for bit.
+node tools/npcwar-fidelity.mjs     the tiers fight the page's war (see 9)
+node tools/npcwar-worker-check.mjs the sim worker, both modes
+node tools/npcwar-scale-bench.mjs  1k / 10k / 100k a side, ms per tier
 node tools/front-sim.mjs           the city's front resolver (frontline.js) it is calibrated to.
+node tools/ballistics-check.mjs    the weapon table, and flight / penetration / wounds vs published figures.
 ```
 
 `tools/npcwar-headless.mjs` lifts the page's `src/battle` / `src/units` script tags out of
