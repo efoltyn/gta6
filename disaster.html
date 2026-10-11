@@ -1194,8 +1194,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ONE DOG: city/dogmodel.js is the body (skinned lofted shell per breed,
      planted-foot walk/trot/gallop, body language) and CBZ.dogGait; city/
      dogbrain.js is the loyal dog's protector rulebook (pure); dogs.js is the
-     actor (pet / stray / guard / K9) and needs both before it. -->
-<script src="src/city/dogmodel.js?v=dogs1009b"></script>
+     actor (pet / stray / guard / K9) and needs both before it. The dog is
+     built on the shared animal kit (src/units/kit/: planted-foot gait,
+     quadruped rig, lofted skinned shell), which loads first. -->
+<script src="src/units/kit/gait.js?v=npcw1011"></script>
+<script src="src/units/kit/quadrig.js?v=npcw1011"></script>
+<script src="src/units/kit/loft.js?v=npcw1011"></script>
+<script src="src/city/dogmodel.js?v=npcw1011"></script>
 <script src="src/city/dogbrain.js?v=dogs1009b"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->

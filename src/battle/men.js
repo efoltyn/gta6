@@ -184,5 +184,9 @@ function makeMan(teamId, i) {
   else if (tr.id === "thug") man.aggr = 0.92;
   if (!fists && CBZ.syncActorWeapon) CBZ.syncActorWeapon(man);
   if (MAP.water) { man.swimD = cruiseDepth(man); man.pos.y = MAP.bodyY(man, at.x, at.z); }
+  // CREW: a man the roster put in a vehicle's seat rides inside it, off the
+  // field, until he gets out (src/battle/vehicles.js)
+  const seat = vehicleSeatFor(teamId, i);
+  if (seat) { vehBoardAtSpawn(man, seat); return null; }
   return man;
 }

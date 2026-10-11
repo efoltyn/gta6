@@ -24,23 +24,26 @@ function banner(big, small) {
    LOSER +50% is the other half of the loop: it hands the beaten side half
    again and runs it back, which is how "how many men DOES it take to beat a
    gorilla" gets answered in five rounds instead of argued about. */
-function sideName(team) {
-  const u = team === "red" ? SET.redU : SET.blueU;
-  if (u === "men" || typeof kindLabel !== "function") return TEAMS[team].name;
-  return kindLabel(u);
-}
+// what a side is called on screen: "40 GORILLAS", "KINGDOM OF KESH" (teams.js)
+function sideName(team) { return TEAMS[team].name; }
 const STREAK_KEY = "cbz-npcwar-streak";
 function readStreak() {
   try { return Object.assign({ streak: 0, best: 0, calls: 0, right: 0 }, JSON.parse(localStorage.getItem(STREAK_KEY) || "{}")); }
   catch (e) { return { streak: 0, best: 0, calls: 0, right: 0 }; }
 }
 let nextCall = null, callScored = false;
+let SERIES_AFTER = null;        // the series once this round is scored (endWar)
 function warURL(o) {
   const p = new URLSearchParams();
   p.set("map", SET.map);
   p.set("red", o.red != null ? o.red : SET.redN); p.set("blue", o.blue != null ? o.blue : SET.blueN);
   p.set("ru", SET.redU); p.set("bu", SET.blueU); p.set("rw", SET.redW); p.set("bw", SET.blueW);
   p.set("rt", SET.redT); p.set("bt", SET.blueT); p.set("rs", SET.redS); p.set("bs", SET.blueS);
+  p.set("af", SET.nationA); p.set("bf", SET.nationB);
+  // the series rides along: the next round of a best-of-N is this URL with
+  // the score so far (a fresh page is the clean field, see core/series.js)
+  if (o.series && o.series.bo > 1) { p.set("bo", o.series.bo); p.set("sa", o.series.a); p.set("sb", o.series.b); }
+  else if (SET.bo > 1) p.set("bo", SET.bo);
   if (o.call) p.set("call", o.call);
   p.set("auto", "1");
   return location.pathname + "?" + p.toString();
@@ -80,8 +83,20 @@ function endWar(won) {
   over = true;
   winner = won;
   const h = el("endT");
-  h.textContent = won ? sideName(won) + " WIN" : "NOBODY LEFT";
+  h.textContent = won ? sideWins(won) : "NOBODY LEFT";
   h.className = won || "";
+  /* THE SERIES. This round goes on the score; a draw is replayed. The card
+     says the score, and once a side has the rounds it needs, the series. */
+  SERIES_AFTER = CBZ.battleSeries.record(SERIES, won);
+  const es = el("endSeries");
+  if (es) {
+    let t = CBZ.battleSeries.score(SERIES_AFTER, { a: sideName("red"), b: sideName("blue") });
+    if (SERIES_AFTER.over && SERIES_AFTER.bo > 1) t += "     " + sideName(SERIES_AFTER.winner) + (sidePlural(SERIES_AFTER.winner) ? " TAKE" : " TAKES") + " THE SERIES";
+    es.textContent = t;
+  }
+  el("endAgain").textContent = SERIES_AFTER.bo > 1 && !SERIES_AFTER.over ? "NEXT ROUND" : "REMATCH";
+  el("endCallRed").textContent = sideName("red");
+  el("endCallBlue").textContent = sideName("blue");
   // the call, scored once; the streak is only worth saying once it is one
   const ec = el("endCall");
   ec.className = ""; ec.textContent = "";
@@ -100,7 +115,7 @@ function endWar(won) {
   el("endLoser").style.display = loserTeam ? "" : "none";
   if (loserTeam) {
     const n = loserTeam === "red" ? SET.redN : SET.blueN;
-    el("endLoser").textContent = sideName(loserTeam) + " " + n + " TO " + Math.max(n + 1, Math.ceil(n * 1.5));
+    el("endLoser").textContent = "MORE " + kindLabel(loserTeam === "red" ? SET.redU : SET.blueU) + ", " + n + " TO " + Math.max(n + 1, Math.ceil(n * 1.5));
   }
   el("end").style.display = "grid";
   el("ctl").classList.add("idle");
@@ -117,9 +132,13 @@ CBZ.npcwar.onBoot(function () {
   // same war, now, with your next call riding on it.
   el("endAgain").addEventListener("click", function () {
     if (FRONT) { frontPost("end"); return; }
-    location.href = warURL({ call: nextCall });
+    // NEXT ROUND carries the score; a decided series (or a best of 1) is a
+    // REMATCH: the same war from nothing
+    const S = SERIES_AFTER && !SERIES_AFTER.over ? SERIES_AFTER : null;
+    location.href = warURL({ call: nextCall, series: S });
   });
   el("endLoser").addEventListener("click", function () {
+    // a new head count is a new war: the series starts over
     const o = { call: nextCall };
     if (winner === "red") o.blue = Math.max(SET.blueN + 1, Math.ceil(SET.blueN * 1.5));
     else if (winner === "blue") o.red = Math.max(SET.redN + 1, Math.ceil(SET.redN * 1.5));

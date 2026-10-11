@@ -33,6 +33,50 @@ const SET = {
   call:  Q.get("call") || null,
 };
 if (SET.call !== "red" && SET.call !== "blue") SET.call = null;
+/* THE MATCHUP BY URL (docs/npcwar/ARCHITECTURE.md, "Spawn a matchup").
+   Side A and side B, named by what is on them, never by a colour:
+     a / b       the roster: "bengal_tiger", "men", "men|dolphin",
+                 "m1_abrams*1,men*1" (counted: the side's size is the sum)
+     n           "1v1", "100v1", or one number for both sides
+     arena       the ground (alias of map)
+     aw at as    side A's weapon, training, air  (side B: bw bt bs, as always)
+     af bf       the nation a side of men fights for (its flag + colours):
+                 an id city/flags.js knows (republic, kesh, veridia, solara, mbeya)
+     bo          best of 1, 3, 5 or 7; sa / sb the rounds already won
+     cam         the lens: "a" | "b" | a unit id | "a:3" (side A's 4th body)
+     freeze      1 = the clock is stopped once the field is up (visual checks)
+   The old names (ru bu red blue rw rt rs map) still work; these win. */
+(function () {
+  const g = function (k) { const v = Q.get(k); return v == null || v === "" ? null : v; };
+  if (g("a")) SET.redU = g("a");
+  if (g("b")) SET.blueU = g("b");
+  if (g("arena")) SET.map = g("arena");
+  if (g("aw")) SET.redW = g("aw");
+  if (g("at")) SET.redT = g("at");
+  if (g("as")) SET.redS = g("as");
+  const n = g("n");
+  if (n) {
+    const m = /^(\d+)\s*v\s*(\d+)$/i.exec(n);
+    if (m) { SET.redN = Math.max(1, parseInt(m[1], 10)); SET.blueN = Math.max(1, parseInt(m[2], 10)); }
+    else if (/^\d+$/.test(n)) SET.redN = SET.blueN = Math.max(1, parseInt(n, 10));
+  }
+})();
+// the nations two armies fight for by default: Kesh's crimson mark on the
+// first side and the Republic's blue on the second keep the field reading
+// the way it always did
+SET.nationA = Q.get("af") || saved.nationA || "kesh";
+SET.nationB = Q.get("bf") || saved.nationB || "republic";
+SET.cam = Q.get("cam") || null;
+SET.freeze = Q.get("freeze") === "1";
+// THE MATCH FORMAT (battle/core/series.js): best of N, rounds won so far
+SET.bo = parseInt(Q.get("bo") || saved.bo || 1, 10) || 1;
+let SERIES = CBZ.battleSeries.make(SET.bo, Q.get("sa"), Q.get("sb"));
+if (SERIES.over) SERIES = CBZ.battleSeries.make(SET.bo, 0, 0);   // a decided series starts over
+SET.bo = SERIES.bo;
+/* A COUNTED ROSTER CARRIES ITS OWN SIZE: "m1_abrams*3,men*20" is 23 bodies
+   whatever `n` said. */
+if (CBZ.battleRoster.parse(SET.redU).counted) SET.redN = CBZ.battleRoster.size(SET.redU);
+if (CBZ.battleRoster.parse(SET.blueU).counted) SET.blueN = CBZ.battleRoster.size(SET.blueU);
 /* ============================================================ THE FRONT
    city/frontline.js opens this page over Gang City (same tab, an iframe) with
    ?front=<the battle as base64 JSON>: two nations, their committed men, their

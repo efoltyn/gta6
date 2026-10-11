@@ -48,7 +48,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap">
-<link rel="stylesheet" href="../src/battle/battle.css?v=npcw1011">
+<link rel="stylesheet" href="../src/battle/battle.css?v=npcw1011b">
 </head>
 <body>
 
@@ -73,29 +73,34 @@
   <section>
     <div class="lbl"><b>03</b>THE ARMIES</div>
     <div class="teams">
+      <!-- A SIDE IS WHAT IS ON IT. The h3 is filled with "40 GORILLAS" /
+           "200 SOLDIERS" (src/battle/core/sides.js); the "red"/"blue" in the
+           ids and classes are the two slot keys, never shown. -->
       <div class="team red">
-        <div class="th"><h3>RED</h3><span class="kind" id="redK"></span></div>
+        <div class="th"><h3 id="redH"></h3><span class="kind" id="redK"></span></div>
         <div class="cnt">
-          <button data-t="red" data-d="-1" aria-label="fewer red">&minus;</button>
-          <input id="redN" type="number" inputmode="numeric" min="1" value="30" aria-label="red count">
-          <button data-t="red" data-d="1" aria-label="more red">+</button>
+          <button data-t="red" data-d="-1" aria-label="fewer on the first side">&minus;</button>
+          <input id="redN" type="number" inputmode="numeric" min="1" value="30" aria-label="how many on the first side">
+          <button data-t="red" data-d="1" aria-label="more on the first side">+</button>
         </div>
         <label class="f"><span>WHO</span><select id="redU"></select></label>
         <label class="f"><span>ARMED WITH</span><select id="redW"></select></label>
         <label class="f"><span>TRAINING</span><select id="redT"></select></label>
+        <label class="f"><span>FLAG</span><select id="redF"></select></label>
         <label class="f"><span>AIR SUPPORT</span><select id="redS"></select></label>
       </div>
       <div class="vs">V</div>
       <div class="team blue">
-        <div class="th"><h3>BLUE</h3><span class="kind" id="blueK"></span></div>
+        <div class="th"><h3 id="blueH"></h3><span class="kind" id="blueK"></span></div>
         <div class="cnt">
-          <button data-t="blue" data-d="-1" aria-label="fewer blue">&minus;</button>
-          <input id="blueN" type="number" inputmode="numeric" min="1" value="30" aria-label="blue count">
-          <button data-t="blue" data-d="1" aria-label="more blue">+</button>
+          <button data-t="blue" data-d="-1" aria-label="fewer on the second side">&minus;</button>
+          <input id="blueN" type="number" inputmode="numeric" min="1" value="30" aria-label="how many on the second side">
+          <button data-t="blue" data-d="1" aria-label="more on the second side">+</button>
         </div>
         <label class="f"><span>WHO</span><select id="blueU"></select></label>
         <label class="f"><span>ARMED WITH</span><select id="blueW"></select></label>
         <label class="f"><span>TRAINING</span><select id="blueT"></select></label>
+        <label class="f"><span>FLAG</span><select id="blueF"></select></label>
         <label class="f"><span>AIR SUPPORT</span><select id="blueS"></select></label>
       </div>
     </div>
@@ -108,13 +113,20 @@
       <button data-n="200">200 v 200</button>
       <button data-n="500">500 v 500</button>
     </div>
+    <div class="presets" id="bestof">
+      <span>BEST OF</span>
+      <button data-bo="1">1</button>
+      <button data-bo="3">3</button>
+      <button data-bo="5">5</button>
+      <button data-bo="7">7</button>
+    </div>
   </section>
 
   <section>
     <div class="lbl"><b>04</b>WHO WINS?<i>make the call, or leave it open</i></div>
     <div class="callrow" id="callrow">
-      <button class="cr" data-call="red"><b>RED</b><i id="redCallK"></i></button>
-      <button class="cb" data-call="blue"><b>BLUE</b><i id="blueCallK"></i></button>
+      <button class="cr" data-call="red"><b id="redCallN"></b><i id="redCallK"></i></button>
+      <button class="cb" data-call="blue"><b id="blueCallN"></b><i id="blueCallK"></i></button>
     </div>
     <div id="streak"></div>
   </section>
@@ -143,10 +155,11 @@
 <div id="end"><div class="in">
   <button id="endWatch" class="x" aria-label="keep watching">&times;</button>
   <h2 id="endT"></h2>
+  <div id="endSeries"></div>
   <div id="endCall"></div>
   <div class="acts">
     <div class="nl">WHO WINS?</div>
-    <div class="calls"><button data-call="red" class="cr">RED</button><button data-call="blue" class="cb">BLUE</button></div>
+    <div class="calls"><button data-call="red" class="cr" id="endCallRed"></button><button data-call="blue" class="cb" id="endCallBlue"></button></div>
     <div class="row">
       <button id="endAgain" class="big">REMATCH</button>
       <button id="endLoser" class="big2"></button>
@@ -161,45 +174,57 @@
   skips files a page already carries, so the day a "guns" pack ships,
   these lines simply stop being needed.
 ============================================================ -->
-<script src="../src/core/studio.js?v=runm1009"></script>
+<script src="../src/core/studio.js?v=npcw1011b"></script>
 <!-- NPC WAR ITSELF: src/battle/, one shared scope, in this order. The
   file map and who owns what: docs/npcwar/ARCHITECTURE.md -->
-<script src="../src/battle/npcwar.js?v=npcw1011"></script>
-<script src="../src/battle/settings.js?v=npcw1011"></script>
-<script src="../src/battle/arenas/maps.js?v=npcw1011"></script>
-<script src="../src/battle/teams.js?v=npcw1011"></script>
-<script src="../src/battle/arms.js?v=npcw1011"></script>
-<script src="../src/battle/load.js?v=npcw1011"></script>
-<script src="../src/battle/core.js?v=npcw1011"></script>
-<script src="../src/battle/menu.js?v=npcw1011"></script>
-<script src="../src/battle/state.js?v=npcw1011"></script>
-<script src="../src/battle/arenas/yard.js?v=npcw1011"></script>
-<script src="../src/battle/arenas/erg.js?v=npcw1011"></script>
-<script src="../src/battle/arenas/sea.js?v=npcw1011"></script>
-<script src="../src/battle/men.js?v=npcw1011"></script>
-<script src="../src/battle/beasts.js?v=npcw1011"></script>
-<script src="../src/battle/damage.js?v=npcw1011"></script>
-<script src="../src/battle/ai/morale.js?v=npcw1011"></script>
-<script src="../src/battle/death.js?v=npcw1011"></script>
-<script src="../src/battle/physics.js?v=npcw1011"></script>
-<script src="../src/battle/ai/orders.js?v=npcw1011"></script>
-<script src="../src/battle/fire.js?v=npcw1011"></script>
-<script src="../src/battle/air.js?v=npcw1011"></script>
-<script src="../src/battle/ai/think.js?v=npcw1011"></script>
-<script src="../src/battle/step.js?v=npcw1011"></script>
-<script src="../src/battle/player.js?v=npcw1011"></script>
-<script src="../src/battle/camera/camera.js?v=npcw1011"></script>
-<script src="../src/battle/camera/study.js?v=npcw1011"></script>
-<script src="../src/battle/camera/killcam.js?v=npcw1011"></script>
-<script src="../src/battle/hud.js?v=npcw1011"></script>
-<script src="../src/battle/clock.js?v=npcw1011"></script>
-<script src="../src/battle/front.js?v=npcw1011"></script>
-<script src="../src/battle/bench.js?v=npcw1011"></script>
-<script src="../src/battle/spawn.js?v=npcw1011"></script>
-<script src="../src/battle/scoring.js?v=npcw1011"></script>
-<script src="../src/battle/begin.js?v=npcw1011"></script>
-<script src="../src/battle/loop.js?v=npcw1011"></script>
-<script src="../src/battle/probe.js?v=npcw1011"></script>
-<script src="../src/battle/main.js?v=npcw1011"></script>
+<script src="../src/battle/npcwar.js?v=npcw1011b"></script>
+<script src="../src/units/unitkit.js?v=npcw1011b"></script>
+<script src="../src/units/manifest.js?v=npcw1011b"></script>
+<script src="../src/battle/core/roster.js?v=npcw1011b"></script>
+<script src="../src/battle/core/sides.js?v=npcw1011b"></script>
+<script src="../src/battle/core/series.js?v=npcw1011b"></script>
+<script src="../src/battle/core/host.js?v=npcw1011b"></script>
+<script src="../src/battle/core/store.js?v=npcw1011b"></script>
+<script src="../src/battle/core/lod.js?v=npcw1011b"></script>
+<script src="../src/battle/settings.js?v=npcw1011b"></script>
+<script src="../src/battle/arenas/maps.js?v=npcw1011b"></script>
+<script src="../src/battle/teams.js?v=npcw1011b"></script>
+<script src="../src/battle/arms.js?v=npcw1011b"></script>
+<script src="../src/battle/load.js?v=npcw1011b"></script>
+<script src="../src/battle/core.js?v=npcw1011b"></script>
+<script src="../src/battle/menu.js?v=npcw1011b"></script>
+<script src="../src/battle/state.js?v=npcw1011b"></script>
+<script src="../src/battle/arenas/yard.js?v=npcw1011b"></script>
+<script src="../src/battle/arenas/erg.js?v=npcw1011b"></script>
+<script src="../src/battle/arenas/sea.js?v=npcw1011b"></script>
+<script src="../src/battle/arenas/field.js?v=npcw1011b"></script>
+<script src="../src/battle/men.js?v=npcw1011b"></script>
+<script src="../src/battle/beasts.js?v=npcw1011b"></script>
+<script src="../src/battle/damage.js?v=npcw1011b"></script>
+<script src="../src/battle/ai/morale.js?v=npcw1011b"></script>
+<script src="../src/battle/death.js?v=npcw1011b"></script>
+<script src="../src/battle/physics.js?v=npcw1011b"></script>
+<script src="../src/units/kit/vehicle.js?v=npcw1011b"></script>
+<script src="../src/battle/vehicles.js?v=npcw1011b"></script>
+<script src="../src/battle/ai/orders.js?v=npcw1011b"></script>
+<script src="../src/battle/fire.js?v=npcw1011b"></script>
+<script src="../src/battle/air.js?v=npcw1011b"></script>
+<script src="../src/battle/ai/think.js?v=npcw1011b"></script>
+<script src="../src/battle/step.js?v=npcw1011b"></script>
+<script src="../src/battle/melee.js?v=npcw1011b"></script>
+<script src="../src/battle/player.js?v=npcw1011b"></script>
+<script src="../src/battle/camera/camera.js?v=npcw1011b"></script>
+<script src="../src/battle/camera/study.js?v=npcw1011b"></script>
+<script src="../src/battle/camera/killcam.js?v=npcw1011b"></script>
+<script src="../src/battle/hud.js?v=npcw1011b"></script>
+<script src="../src/battle/clock.js?v=npcw1011b"></script>
+<script src="../src/battle/front.js?v=npcw1011b"></script>
+<script src="../src/battle/bench.js?v=npcw1011b"></script>
+<script src="../src/battle/spawn.js?v=npcw1011b"></script>
+<script src="../src/battle/scoring.js?v=npcw1011b"></script>
+<script src="../src/battle/begin.js?v=npcw1011b"></script>
+<script src="../src/battle/loop.js?v=npcw1011b"></script>
+<script src="../src/battle/probe.js?v=npcw1011b"></script>
+<script src="../src/battle/main.js?v=npcw1011b"></script>
 </body>
 </html>

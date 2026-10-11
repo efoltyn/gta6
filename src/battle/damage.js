@@ -25,6 +25,8 @@ CBZ.npcwar.onBoot(function () {
 
 /* ============================================================ DAMAGE */
 function hurtMan(m, dmg, imp) {
+  // a hull answers with its armour first (src/battle/vehicles.js)
+  if (m && m.vehicle) { hurtVehicle(m, dmg, imp); return; }
   if (!m || m.dead || m.fled || !(dmg > 0) || over) return;
   m.hp -= dmg;
   if (CBZ.combatIQ && CBZ.combatIQ.suppress) CBZ.combatIQ.suppress(m, 0.9);
@@ -67,7 +69,8 @@ function killMan(m, imp) {
   if (m.char && CBZ.deathPose) { try { CBZ.deathPose(m.char, m.i * 3.7 + 1.3, lcg()); } catch (e) {} }
   m.dieT = 0.0001;
   m.dieDir = lcg() < 0.5 ? -1 : 1;
-  if (m.beast) beastDeathPhysics(m, imp);
+  if (m.vehicle) vehicleWrecked(m, imp);
+  else if (m.beast) beastDeathPhysics(m, imp);
   else manDeathPhysics(m, imp);
   // the rifle leaves his hands and lands like hardware, not like a prop
   const prop = m._weaponProp;

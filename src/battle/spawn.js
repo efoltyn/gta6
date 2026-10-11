@@ -20,8 +20,17 @@ function drainSpawns() {
   while (spawnQueue.length && n < 10) {
     const s = spawnQueue.shift();
     const kind = kindAt(s[0] === "red" ? SET.redU : SET.blueU, s[1]);
-    const m = kind === "men" ? makeMan(s[0], s[1]) : makeBeast(s[0], s[1], kind);
-    if (m) men.push(m);
+    // one registry says what a unit id IS (units/unitkit.js): men, an animal
+    // species, or a vehicle (src/battle/vehicles.js makes those)
+    const k = kind === "men" ? "men" : CBZ.unitKit ? CBZ.unitKit.kindOf(kind) : "species";
+    const m = k === "men" ? makeMan(s[0], s[1])
+      : k === "vehicle" ? (typeof makeVehicle === "function" ? makeVehicle(s[0], s[1], kind) : null)
+      : makeBeast(s[0], s[1], kind);
+    if (m) {
+      // its row in the unit store (battle/core/store.js), every tier's ledger
+      if (STORE) { m.row = STORE.alloc(s[0], m.vehicle ? "vehicle" : m.beast ? "beast" : "man"); STORE.sync(m.row, m); }
+      men.push(m);
+    }
     n++;
   }
 }

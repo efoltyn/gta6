@@ -12,18 +12,61 @@ const TRAININGS = [
   { id: "elite", label: "SOLDIER",    role: "soldier",  hp: 140 },
   { id: "swat",  label: "SWAT",       role: "agent",    hp: 160 },
 ];
+/* THE TWO SLOTS. "red" and "blue" are slot keys (side A, side B) that every
+   ledger, the front's protocol and the node tools key on; they are never
+   shown. What a side IS (its name, its nation, its flag, its colour) is
+   SIDES below, made by battle/core/sides.js from the roster. `color` here is
+   the slot's fallback mark for a side that has no nation (an animal side). */
 const TEAMS = {
-  red:  { id: "red",  name: "RED",  color: 0xff5a3d },
-  blue: { id: "blue", name: "BLUE", color: 0x3fa8ff },
+  red:  { id: "red",  name: "", color: 0xff5a3d },
+  blue: { id: "blue", name: "", color: 0x3fa8ff },
 };
-// AT THE FRONT A SIDE IS A NATION: its name, and the bright colour its helmet
-// covers and smoke carry (the cloth is set with the uniforms below)
-if (FRONT) {
+const SLOT_COLOR = { red: 0xff5a3d, blue: 0x3fa8ff };
+/* A NATION'S MARK: the bright band on the helmet cover, the collar, the HUD
+   bar. One per nation city/flags.js authors (a front spec brings its own). */
+const NATION_MARK = { republic: 0x3f6fd0, kesh: 0xd23a3a, veridia: 0x2f9a55, solara: 0xe8721c, mbeya: 0xd39a1c };
+const SIDES = { red: null, blue: null };
+/* Recomputed whenever what is on a side can have changed (the war room's
+   controls, readMenu, begin). AT THE FRONT A SIDE IS A NATION: its name and
+   the colour its helmet covers and smoke carry come from the front spec. */
+function refreshSides(src) {
+  const O = src || SET;              // the war room passes its unsaved form
   ["red", "blue"].forEach(function (t) {
-    TEAMS[t].name = String(FRONT[t].name || TEAMS[t].name).toUpperCase();
-    if (isFinite(FRONT[t].mark)) TEAMS[t].color = FRONT[t].mark;
+    const nation = FRONT ? (FRONT[t].id || null) : (t === "red" ? O.nationA : O.nationB);
+    const S = CBZ.battleSides.make({
+      slot: t, roster: t === "red" ? O.redU : O.blueU, n: t === "red" ? O.redN : O.blueN,
+      tier: t === "red" ? O.redT : O.blueT, nation: nation,
+    });
+    if (FRONT) { S.title = String(FRONT[t].name || S.title || ""); S.army = true; }
+    let col = SLOT_COLOR[t];
+    if (FRONT && isFinite(FRONT[t].mark)) col = FRONT[t].mark;
+    else if (S.army && NATION_MARK[S.nation] != null) col = NATION_MARK[S.nation];
+    // two armies of the same nation keep the slot colours, or nobody can tell them apart
+    S.color = col;
+    SIDES[t] = S;
+    TEAMS[t].color = col;
   });
+  if (!FRONT && SIDES.red.army && SIDES.blue.army && SIDES.red.nation === SIDES.blue.nation) {
+    SIDES.red.color = TEAMS.red.color = SLOT_COLOR.red; SIDES.blue.color = TEAMS.blue.color = SLOT_COLOR.blue;
+  }
+  // the page's chrome wears the sides' colours (battle.css reads --sc-red/--sc-blue)
+  const root = typeof document !== "undefined" && document.documentElement;
+  if (root && root.style && root.style.setProperty) {
+    ["red", "blue"].forEach(function (t) {
+      const c = TEAMS[t].color;
+      root.style.setProperty("--sc-" + t, ((c >> 16) & 255) + "," + ((c >> 8) & 255) + "," + (c & 255));
+    });
+  }
+  const vs = CBZ.battleSides.versus(SIDES.red, SIDES.blue);
+  TEAMS.red.name = FRONT ? SIDES.red.title.toUpperCase() : String(vs.a).toUpperCase();
+  TEAMS.blue.name = FRONT ? SIDES.blue.title.toUpperCase() : String(vs.b).toUpperCase();
 }
+refreshSides();
+// "40 GORILLAS WIN" / "THE REPUBLIC OF LIBERTY WINS"
+function sidePlural(t) {
+  return FRONT ? false : CBZ.battleSides.versus(SIDES.red, SIDES.blue).byNation ? false : SIDES[t].plural;
+}
+function sideWins(t) { return CBZ.battleSides.wins(TEAMS[t].name, sidePlural(t)); }
 /* A NATION'S FLAG, painted from its row (city/frontline.js LOOK). The
    republic's is the one over the capital (city/president_public.js). */
 function drawFlag(c, F, w, h) {
@@ -55,7 +98,17 @@ function drawFlag(c, F, w, h) {
 }
 const FLAG_URL = {};
 function flagURL(t) {
-  if (!FRONT || !FRONT[t]) return "";
+  if (!FRONT || !FRONT[t]) {
+    // an ARMY in the war room fights under its nation's flag, painted by the
+    // game's one flag system (city/flags.js, in the armoury). Animals have none.
+    const S = SIDES[t];
+    if (!S || !S.army || !S.nation || !CBZ.flags || !CBZ.flags.dataURL) return "";
+    const key = t + ":" + S.nation;
+    if (FLAG_URL[key]) return FLAG_URL[key];
+    let u = "";
+    try { u = CBZ.flags.dataURL(S.nation, 96) || ""; } catch (e) {}
+    return (FLAG_URL[key] = u);
+  }
   if (FLAG_URL[t]) return FLAG_URL[t];
   // the city's one flag system (city/flags.js) painted it: use that picture as is
   if (FRONT[t].flagUrl) return (FLAG_URL[t] = FRONT[t].flagUrl);

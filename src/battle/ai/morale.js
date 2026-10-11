@@ -65,6 +65,7 @@ CBZ.npcwar.onBoot(function () {
 // combat_iq's ROLE[].nerve for his training, plus a seeded +-0.06
 function nerveFor(tier, i) { return MO.nerveFor(tier, i); }
 function manWeight(m) {
+  if (m.vehicle) return m._w;              // a tank lost is felt like a squad lost
   if (m.beast) return Math.max(0.5, (m.maxHp || 100) / 100);
   let w = MK.TIER_W[m.tier] || 1;
   if (m.launcher) w *= 1.4;
@@ -127,7 +128,7 @@ function updateMorale() {
       continue;
     }
     A.alive++;
-    if (m.beast) A.beasts++;
+    if (m.beast || m.vehicle) A.beasts++;   // machines and animals do not do the arithmetic
     if (m.routed) A.routing++;
     const hf = Math.max(0, Math.min(1, m.hp / (m.maxHp || 1)));
     A.pNow += m._mw * (0.45 + 0.55 * hf);

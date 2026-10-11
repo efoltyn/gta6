@@ -89,7 +89,11 @@ function fillGuns(sel, cur) {
    `sp.aquatic` exactly the way the land group is derived from its absence. */
 function speciesIn(water) {
   const SP = CBZ.WILDLIFE_SPECIES || {};
-  return Object.keys(SP)
+  // a species with a unit file but no bestiary row yet (the dog: its file
+  // defines the row when it loads) is offered on land
+  const MAN = CBZ.UNIT_MANIFEST || {};
+  const extra = water ? [] : Object.keys(MAN).filter(function (id) { return MAN[id].kind === "species" && !SP[id]; });
+  return extra.concat(Object.keys(SP)
     .filter(function (id) {
       const sp = SP[id];
       if (!sp || !sp.build || sp.snake) return false;
@@ -102,7 +106,13 @@ function speciesIn(water) {
       const wet = !!sp.aquatic || sp.biome === "water";
       return water ? wet : !wet;
     })
-    .sort(function (a, b) { return (SP[b].danger || 0) - (SP[a].danger || 0) || (a < b ? -1 : 1); });
+    .sort(function (a, b) { return (SP[b].danger || 0) - (SP[a].danger || 0) || (a < b ? -1 : 1); }));
+}
+// every vehicle a side can field (units/manifest.js), ground first
+function vehiclesIn() {
+  const MAN = CBZ.UNIT_MANIFEST || {};
+  return Object.keys(MAN).filter(function (id) { return MAN[id].kind === "vehicle"; })
+    .sort(function (a, b) { return (MAN[a].domain === "air") - (MAN[b].domain === "air"); });
 }
 /* A SIDE CAN BE TWO THINGS. `?ru=men|great_white_shark` is a mixed roster —
    swimmers with sharks in among them — and it is one string rather than a
@@ -110,17 +120,20 @@ function speciesIn(water) {
    the form for one kind of fight. Alternating by spawn index keeps the split
    even and deterministic; drainSpawns resolves it per body. */
 function kindAt(u, i) {
-  const p = String(u).split("|");
-  return p.length < 2 ? p[0] : p[i % p.length];
+  // the grammar (alternating "a|b", counted "m1_abrams*3,men*20") lives in
+  // battle/core/roster.js, the page-independent half
+  return CBZ.battleRoster.kindAt(u, i);
 }
+// a roster in words, for a select row: "MEN + DOLPHINS", "M1 ABRAMS + MEN"
 function kindLabel(u) {
-  const SP = CBZ.WILDLIFE_SPECIES || {};
-  return String(u).split("|").map(function (k) {
-    return k === "men" ? "MEN" : String((SP[k] || {}).name || k).toUpperCase();
+  const K = CBZ.unitKit;
+  return CBZ.battleRoster.ids(u).map(function (k) {
+    if (k === "men") return "MEN";
+    return String(K ? K.meta(k).plural : k).toUpperCase();
   }).join(" + ");
 }
 function fillKind(sel, cur) {
-  const SP = CBZ.WILDLIFE_SPECIES || {};
+  const K = CBZ.unitKit;
   const opt = function (id, label) {
     return "<option value=\"" + id + "\"" + (cur === id ? " selected" : "") + ">" + label + "</option>";
   };
@@ -128,13 +141,25 @@ function fillKind(sel, cur) {
   const grp = function (title, ids) {
     if (!ids.length) return "";
     return "<optgroup label=\"" + title + "\">" + ids.map(function (id) {
-      return opt(id, String(SP[id].name || id).toUpperCase());
+      return opt(id, String(K ? K.meta(id).plural : id).toUpperCase());
     }).join("") + "</optgroup>";
   };
+  h += grp("MACHINES", vehiclesIn());
   h += grp("THE WATER", speciesIn(true));
   h += grp("THE LAND", speciesIn(false));
   sel.innerHTML = h;
   setKind(sel, cur);
+}
+// the nations an army can fight for (city/flags.js); hidden until it loads
+function fillFlag(sel, cur) {
+  const ids = CBZ.flags && CBZ.flags.ids ? CBZ.flags.ids() : [];
+  const f = sel.closest ? sel.closest(".f") : null;
+  if (!ids.length) { if (f) f.style.display = "none"; return; }
+  sel.innerHTML = ids.map(function (id) {
+    return "<option value=\"" + id + "\"" + (cur === id ? " selected" : "") + ">" +
+      String(CBZ.battleSides.nationName(id)).toUpperCase() + "</option>";
+  }).join("");
+  sel.value = cur;
 }
 /* A MATCHUP MAY HAND THIS A ROSTER THE LIST DOES NOT OFFER (a mixed side, or
    a species a pack has not loaded yet). A select silently showing the wrong
@@ -153,12 +178,16 @@ function setKind(sel, value) {
 // grey out rather than lie. A MIXED side still has men in it, so it keeps
 // both — the men in the water are the ones carrying the rifles.
 function kindRows(team) {
-  const noMen = String(el(team + "U").value).split("|").indexOf("men") < 0;
-  ["W", "T"].forEach(function (k) {
-    const s = el(team + k);
-    s.disabled = noMen;
+  const u = el(team + "U").value;
+  const noMen = !CBZ.battleRoster.has(u, "men");
+  // an army (men or machines) fights under a flag; a pride of lions does not
+  const noArmy = noMen && !CBZ.battleRoster.ids(u).some(function (id) { return CBZ.unitKit.kindOf(id) === "vehicle"; });
+  [["W", noMen], ["T", noMen], ["F", noArmy]].forEach(function (r) {
+    const s = el(team + r[0]);
+    if (!s) return;
+    s.disabled = r[1];
     const f = s.closest(".f") || s;
-    f.classList.toggle("off", noMen);
+    f.classList.toggle("off", r[1]);
   });
   sumUp();
 }
@@ -177,11 +206,23 @@ CBZ.npcwar.onBoot(function () {
   fillTraining(el("redT"), SET.redT); fillTraining(el("blueT"), SET.blueT);
   fillSupport(el("redS"), SET.redS); fillSupport(el("blueS"), SET.blueS);
   fillKind(el("redU"), SET.redU); fillKind(el("blueU"), SET.blueU);
+  fillFlag(el("redF"), SET.nationA); fillFlag(el("blueF"), SET.nationB);
   ["red", "blue"].forEach(function (t) {
     el(t + "U").addEventListener("change", function () { kindRows(t); });
     kindRows(t);
   });
   el("redN").value = SET.redN; el("blueN").value = SET.blueN;
+  // BEST OF: one tap, lit while chosen
+  const boBtns = el("bestof").querySelectorAll("button");
+  const showBo = function () { boBtns.forEach(function (b) { b.classList.toggle("on", +b.dataset.bo === SET.bo); }); };
+  boBtns.forEach(function (b) {
+    b.addEventListener("click", function () {
+      SET.bo = +b.dataset.bo;
+      SERIES = CBZ.battleSeries.make(SET.bo, 0, 0);
+      showBo();
+    });
+  });
+  showBo();
 });
 /* THE QUESTIONS. Each card is a fight people argue about, asked as the
    question itself. A tap fills the form (ground, kind, count, weapon,
@@ -209,6 +250,14 @@ const MATCHUPS = [
     r: { u: "men", n: 100, w: "fists", t: "thug" }, b: { u: "african_elephant", n: 1 } },
   { q: "100 LIONS v 1000 DOGS", sub: "teeth against numbers", map: "dunes",
     r: { u: "lion", n: 100 }, b: { u: "dog", n: 1000 } },
+  /* ARMOUR. A counted roster ("m1_abrams*1,men*1") puts the man IN the tank:
+     a side's men crew its vehicles first (src/battle/vehicles.js). */
+  { q: "1 MAN AND AN M1 ABRAMS v 200 MEN", sub: "one tank, one crewman, two hundred rifles", map: "dunes",
+    r: { u: "m1_abrams*1,men*1", n: 2, w: "ak47", t: "elite" }, b: { u: "men", n: 200, w: "ak47", t: "pro" } },
+  { q: "3 M1 ABRAMS v 20 GORILLAS", sub: "a troop of silverbacks against armour", map: "dunes",
+    r: { u: "m1_abrams*3", n: 3 }, b: { u: "gorilla", n: 20 } },
+  { q: "A STRYKER AND 30 SOLDIERS v 12 LIONS", sub: "infantry and their APC against a pride", map: "dunes",
+    r: { u: "stryker_apc*1,men*30", n: 31, w: "ak47", t: "elite" }, b: { u: "lion", n: 12 } },
   { q: "60 WOLVES v 30 SOLDIERS", sub: "the pack against rifles", map: "dunes",
     r: { u: "gray_wolf", n: 60 }, b: { u: "men", n: 30, w: "ak47", t: "elite" } },
   { q: "12 BEARS v 120 MEN", sub: "and the men have no guns", map: "dunes",
@@ -304,17 +353,36 @@ CBZ.npcwar.onBoot(function () {
   });
 });
 
-/* WHAT EACH SIDE IS, read back in words: under the side's name and on its
-   WHO WINS button, so the call is made on "100 MEN" and not on a colour. */
-function sideWords(t) {
-  const n = Math.max(1, parseInt(el(t + "N").value, 10) || 1);
-  return n + " " + kindLabel(el(t + "U").value);
+/* WHAT EACH SIDE IS, read back in words: as the side's name and on its WHO
+   WINS button, so the call is made on "100 MEN" and not on a colour. The
+   form is read into SET first so the words are exactly the ones the HUD and
+   the end card will use (refreshSides, battle/core/sides.js). */
+// the war room's form as a SET-shaped record (blank controls keep SET's value)
+function formSet() {
+  const v = function (id, d) { const e = el(id); return e && e.value !== "" && e.value != null ? e.value : d; };
+  const o = {
+    redN: Math.max(1, parseInt(v("redN", SET.redN), 10) || 1), blueN: Math.max(1, parseInt(v("blueN", SET.blueN), 10) || 1),
+    redU: v("redU", SET.redU), blueU: v("blueU", SET.blueU),
+    redT: v("redT", SET.redT), blueT: v("blueT", SET.blueT),
+    nationA: v("redF", SET.nationA), nationB: v("blueF", SET.nationB),
+  };
+  // a counted roster carries its own size
+  if (CBZ.battleRoster.parse(o.redU).counted) o.redN = CBZ.battleRoster.size(o.redU);
+  if (CBZ.battleRoster.parse(o.blueU).counted) o.blueN = CBZ.battleRoster.size(o.blueU);
+  return o;
 }
+function formToSet() { Object.assign(SET, formSet()); }
 function sumUp() {
+  refreshSides(formSet());
   ["red", "blue"].forEach(function (t) {
-    const w = sideWords(t);
-    const k = el(t + "K"); if (k) k.textContent = w;
-    const c = el(t + "CallK"); if (c) c.textContent = w;
+    const S = SIDES[t];
+    const h = el(t + "H"); if (h) h.innerHTML = flagImg(t) + " " + esc(TEAMS[t].name);
+    // under the name: the nation when the name is the head count, or the
+    // head count when two armies are told apart by their nations
+    const sub = TEAMS[t].name === String(S.label).toUpperCase() ? (S.title || "") : S.label;
+    const k = el(t + "K"); if (k) k.textContent = String(sub).toUpperCase();
+    const n = el(t + "CallN"); if (n) n.textContent = TEAMS[t].name;
+    const c = el(t + "CallK"); if (c) c.textContent = String(sub).toUpperCase();
   });
 }
 CBZ.npcwar.onBoot(function () {
@@ -346,18 +414,17 @@ CBZ.npcwar.onBoot(function () {
 });
 
 function readMenu() {
-  SET.redN = Math.max(1, parseInt(el("redN").value, 10) || 1);
-  SET.blueN = Math.max(1, parseInt(el("blueN").value, 10) || 1);
-  SET.redU = el("redU").value; SET.blueU = el("blueU").value;
+  formToSet();
   SET.redW = el("redW").value; SET.blueW = el("blueW").value;
-  SET.redT = el("redT").value; SET.blueT = el("blueT").value;
   SET.redS = el("redS").value; SET.blueS = el("blueS").value;
+  refreshSides();
   try {
     localStorage.setItem("cbz-npcwar", JSON.stringify({
       map: SET.map, redN: SET.redN, blueN: SET.blueN,
       redU: SET.redU, blueU: SET.blueU,
       redW: SET.redW, blueW: SET.blueW, redT: SET.redT, blueT: SET.blueT,
       redS: SET.redS, blueS: SET.blueS, call: SET.call,
+      nationA: SET.nationA, nationB: SET.nationB, bo: SET.bo,
     }));
   } catch (e) {}
 }
@@ -366,6 +433,13 @@ function readMenu() {
 // Is either army an animal army? Read once per battle at begin() — it gates
 // the corpse solver's step and the blood pack (see both call sites).
 let HAS_BEASTS = false;
+// an animal anywhere on either side (a vehicle or a man is not one)
+function rosterHasBeasts() {
+  const R = CBZ.battleRoster, K = CBZ.unitKit;
+  return R.ids(SET.redU).concat(R.ids(SET.blueU)).some(function (id) {
+    return id !== "men" && (!K || K.kindOf(id) !== "vehicle");
+  });
+}
 function packsFor() {
   const p = MAPS[SET.map].packs.slice();
   // the General's own sorties need the air stack loaded even with no army air
@@ -385,7 +459,7 @@ function packsFor() {
      the pack is pulled exactly when a side is a beast army, and a battle of
      riflemen loads and costs precisely what it always did — which is what
      tools/battle-check.mjs measures. */
-  HAS_BEASTS = SET.redU !== "men" || SET.blueU !== "men";
+  HAS_BEASTS = rosterHasBeasts();
   // ?blood=1 pulls it for a battle of MEN too — a rifle war that stains the
   // street is a legitimate thing to want, it is just not worth 2.5k lines by
   // default when gunfx already draws every impact. ?blood=0 refuses it even
@@ -428,8 +502,8 @@ CBZ.npcwar.onBoot(function () {
       TOTAL_FILES = Math.max(1, groundPlan.files.length);
       el("boottrack").classList.remove("done");
       bar("BUILDING THE GROUND");
-      CBZ.studio.need(need).then(function () { begin(false); });
-    } else begin(false);
+      CBZ.studio.need(need).then(function () { withUnits(function () { begin(false); }); });
+    } else withUnits(function () { begin(false); });
   });
   el("boottrack").classList.add("done");
   el("menu").classList.add("ready");

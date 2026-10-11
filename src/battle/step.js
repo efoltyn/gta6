@@ -7,6 +7,8 @@
 
 /* ============================================================ SIM STEP */
 function stepMan(m, sdt) {
+  // a vehicle is its own body, brain and guns (src/battle/vehicles.js)
+  if (m.vehicle) { stepVehicle(m, sdt); return; }
   /* A BODY IN A GORILLA'S HAND IS NOT A MARCHER. systems/ape_combat.js owns
      this man's world transform outright while the flag is up — his position,
      his facing and his rig — exactly the way grapple.js's `heldBy` stands the
@@ -52,6 +54,8 @@ function stepMan(m, sdt) {
     if (m.reloadT <= 0) m.mag = m.magSize;
   }
   m.cool -= sdt;
+  // a man knocked down is not steered: the knockdown owns him (melee.js)
+  if (knockedDown(m)) { m.speed = 0; return; }
 
   // ---- THE STRIKE BUBBLE. Inside claw range creature_combat owns the
   // whole beat — approach, facing, windup, the hit, the recover — through
@@ -217,33 +221,7 @@ function stepMan(m, sdt) {
   if (m.routed) return;                  // a broken man is not fighting
   if (!tgt || tgt.dead || tgt.fled || m.reloadT > 0) return;
   const dist = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
-  if (m.fists) {
-    // THE PUNCH EXCHANGE is combat_iq's own melee brain — close, circle,
-    // guard, windup, swing — the same beat structure every brawler in the
-    // city fights with. It writes m.target for the footwork; "swing" is
-    // the one frame a blow lands, through the same funnel as a bullet.
-    const mr = meleeReach(m, tgt);
-    if (dist < mr * 1.9 && CBZ.combatIQ && CBZ.combatIQ.melee) {
-      // `incoming` is how a brawler reads the other man's windup and gets
-      // his guard up — without it two NPCs never block each other
-      const st = CBZ.combatIQ.melee(m, tgt, sdt,
-        { reach: mr, incoming: (tgt._windup || 0) > 0 || (tgt._iqM && tgt._iqM.st === "windup") });
-      if (st === "swing") {
-        /* AND IT MATTERS WHO HE IS HITTING. `m.punch` is a number off the
-           THROWER and nothing else, so a civilian's fist used to take the
-           same bite out of a 190 kg silverback as out of another man — the
-           single reason a hundred unarmed men could hand-wrestle a gorilla
-           down on arithmetic alone. systems/bodymass.js turns the pair into
-           a ratio; man on man is 1.0, so every men-only battle this page has
-           ever run is numerically untouched. */
-        const mk = CBZ.meleeScale ? CBZ.meleeScale(m, tgt) : 1;
-        hurtMan(tgt, m.punch * (0.85 + lcg() * 0.4) * mk, { by: m });
-        stats[m.team].shots++; stats[m.team].hits++;   // the ledger counts blows thrown and landed
-        m.shotsF++; m.hitsF++; gunLedger("fists").shots++; gunLedger("fists").hits++;
-      }
-    }
-    return;
-  }
+  if (m.fists) { stepFists(m, tgt, dist, sdt); return; }   // src/battle/melee.js
   if (m.launcher) {
     if (m.cool <= 0 && m.sees && dist > 16 && dist < 95) {
       const w = CBZ.weaponById(m.wid);

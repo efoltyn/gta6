@@ -14,9 +14,25 @@
    CBZ.creatureFight with this page's ground and damage funnel plugged into
    its seams. */
 const BEAST_TUNE = {};
+/* THE SPECIES' OWN FILE WINS. src/units/species/<id>.js carries the numbers
+   this page fights the animal with (they were derived below, and are baked
+   there now so the animal's agent owns them); the formula is the fallback
+   for a species with no file. */
 function beastTuning(sp) {
   let b = BEAST_TUNE[sp.id];
   if (b) return b;
+  const kit = CBZ.unitKit && CBZ.unitKit.get(sp.id);
+  const ks = kit && kit.stats;
+  if (ks && ks.chase != null) {
+    b = BEAST_TUNE[sp.id] = {
+      chase: ks.chase, march: ks.march != null ? ks.march : Math.max(2.6, ks.chase * 0.55),
+      dmg: ks.dmg != null ? ks.dmg : Math.max(6, (sp.bite || 10) * 1.35),
+      rate: ks.rate != null ? ks.rate : 0.95 + (1 - Math.min(1, sp.danger || 0)) * 0.7,
+      brave: ks.brave != null ? !!ks.brave : (sp.danger || 0) >= 0.7,
+      prey: ks.prey != null ? !!ks.prey : (sp.danger || 0) < 0.15,
+    };
+    return b;
+  }
   const cls = CBZ.wildlifeRig.classify(sp);
   // charge speed off the species' own wander speed and its class's attack
   // multiplier, lifted into the men's speed register (walkers 4.6–8.0) so
@@ -42,7 +58,12 @@ function makeBeast(teamId, i, spIdIn) {
   if (!sp || !sp.build) return null;
   const T = TEAMS[teamId];
   let group = null;
-  try { group = sp.build({ THREE: THREE, mat: CBZ.cmat, rng: lcg }); } catch (e) { console.warn("[war] species build failed:", spId, e); }
+  // the body: the species file's build if it has one, else the bestiary's
+  const kit = CBZ.unitKit ? CBZ.unitKit.get(spId) : null;
+  try {
+    group = kit && kit.build ? kit.build({ THREE: THREE, mat: CBZ.cmat, rng: lcg, id: spId, seed: i + (teamId === "red" ? 0 : 7919) })
+      : sp.build({ THREE: THREE, mat: CBZ.cmat, rng: lcg });
+  } catch (e) { console.warn("[war] species build failed:", spId, e); }
   if (!group) return null;
   /* EVERY ANIMAL IS AN INDIVIDUAL, if a neighbour publishes the draw.
      city/wildlife_traits.js gives each body its own multiplier off a position
@@ -110,7 +131,7 @@ function makeBeast(teamId, i, spIdIn) {
   CBZ.scene.add(group);
   const tn = beastTuning(sp);
   const m = {
-    id: teamId + i, team: teamId, i: i, beast: true, species: sp, tn: tn,
+    id: teamId + i, team: teamId, i: i, beast: true, species: sp, tn: tn, kit: kit,
     group: group, pos: group.position, target: V(),
     heading: teamId === "red" ? 0 : Math.PI, faceH: teamId === "red" ? 0 : Math.PI,
     yaw: 0, speed: 0, state: "wander",           // gait's flee-bound reads .state
@@ -151,7 +172,8 @@ function makeBeast(teamId, i, spIdIn) {
      file, same pack — creature_combat's lunge already reaches for CBZ.swimJaw
      and now finds something on the other end of it. */
   if (CBZ.buildSwimRig && !SWIM_OLD) { try { CBZ.buildSwimRig(m); } catch (e) {} }
-  if (!m.swim && CBZ.wildlifeRig) CBZ.wildlifeRig.buildGait(m);
+  // a species file that animates its own body needs no discovered leg rig
+  if (!m.swim && CBZ.wildlifeRig && !(kit && kit.animate)) CBZ.wildlifeRig.buildGait(m);
   if (MAP.water) { m.swimD = cruiseDepth(m); m.pos.y = MAP.bodyY(m, at.x, at.z); }
   m.target.set(at.x, 0, at.z);
   (squads[teamId][m.sq] = squads[teamId][m.sq] || []).push(m);
@@ -164,6 +186,14 @@ function makeBeast(teamId, i, spIdIn) {
     });
   }
   return m;
+}
+/* ONE ANIMAL'S POSE FOR ONE FRAME (frame()'s render pass, LOD-skipped there).
+   The species file's own animate if it has one; else the body that swims
+   beats its tail and the body with legs walks on the shared discovered rig. */
+function animateBeast(m, dt) {
+  if (m.kit && m.kit.animate) { try { m.kit.animate(m, dt); } catch (e) {} return; }
+  if (m.swim) { if (CBZ.animateSwim) { try { CBZ.animateSwim(m, dt); } catch (e) {} } }
+  else if (CBZ.wildlifeRig) { try { CBZ.wildlifeRig.animateGait(m, dt); } catch (e) {} }
 }
 /* HOW CLOSE TWO BODIES CAN GET, so a fist can always land on what it is
    standing next to. The separation pass holds a pair `radA + radB` apart;
@@ -239,7 +269,8 @@ function beastFight(m, tgt, sdt) {
   o.dmg = m.tn.dmg * (k === 1 ? 1 : Math.pow(k, 1.35));
   o.rate = m.tn.rate * (k === 1 ? 1 : Math.sqrt(k)) * hgM;
   m.speed = 2;                       // close-quarters footwork, for the sprint-target test
-  const res = CBZ.creatureFight(m, tgt, sdt, o);
+  // the species file's own close fight, else the one shared strike driver
+  const res = m.kit && m.kit.fight ? m.kit.fight(m, tgt, sdt, o) : CBZ.creatureFight(m, tgt, sdt, o);
   /* THE TEETH, COUNTED. creature_combat now lands a strike on real jaw
      contact rather than on a centre-to-centre range test, and `missed` is
      its verdict when the animal committed and the jaws closed short. A

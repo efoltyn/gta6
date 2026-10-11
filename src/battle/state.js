@@ -31,6 +31,14 @@ CBZ.npcwar.onBoot(function () {
     _muz = V();
 });
 let world = null, base = null, town = null, MAP = null, hud = null;
+/* THE HOST (battle/core/host.js): the world as the battle core may ask about
+   it. Set when the field is raised; MAP is its arena half. New code asks
+   HOST.groundAt / HOST.resolveCircle / HOST.segmentBlocked ..., never a page
+   global, so the same code can fight on Gang City's own streets. */
+let HOST = null;
+/* THE UNIT STORE (battle/core/store.js): one row per unit, every tier. Each
+   unit object carries its row (m.row); updateCOM syncs the rows. */
+let STORE = null;
 let men = [], corpses = [], rockets = [], dropGuns = [], planes = [];
 const squads = { red: [], blue: [] };
 const AIR = { on: false, nuke: false, nukeAt: 42 };   // nukeAt rescaled at begin: it must land ON a battle, not after one

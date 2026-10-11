@@ -181,7 +181,11 @@ function frame(dt) {
     if (m.dead) continue;
     const d2 = (m.pos.x - camP.x) * (m.pos.x - camP.x) + (m.pos.z - camP.z) * (m.pos.z - camP.z);
     m.animF = (m.animF + 1) & 1023;
-    const every = d2 < 70 * 70 ? 1 : d2 < 150 * 150 ? 2 : 4;
+    const every = CBZ.battleLod.animEvery(d2);      // battle/core/lod.js: the one tier table
+    if (m.vehicle) {                     // tracks, wheels, rotors (src/battle/vehicles.js)
+      if ((m.animF % every) === 0) animateVehicle(m, dt * every);
+      continue;
+    }
     if (m.beast) {
       // the species walks on the shared rig — legs swing by distance
       // actually moved, so the charge, the march and the rout all animate
@@ -190,10 +194,7 @@ function frame(dt) {
          same distance-moved law; the rig picked itself at spawn (buildSwimRig
          on an aquatic species, buildGait on anything with legs), so this is
          one test and not a species table. */
-      if ((m.animF % every) === 0) {
-        if (m.swim) { if (CBZ.animateSwim) { try { CBZ.animateSwim(m, dt * every); } catch (e) {} } }
-        else if (CBZ.wildlifeRig) { try { CBZ.wildlifeRig.animateGait(m, dt * every); } catch (e) {} }
-      }
+      if ((m.animF % every) === 0) animateBeast(m, dt * every);   // beasts.js: the species file's own, or the shared rig
       continue;
     }
     if ((m.animF % every) === 0 && CBZ.animChar && m.char) {

@@ -28,7 +28,14 @@ const YOU = { m: null, yaw: 0, pitch: 0.24, down: false };
 let TB = null;
 function youTeam() {
   if (FRONT) return "red";
-  const menIn = function (u) { return String(u).split("|").indexOf("men") >= 0; };
+  // a side you can join: it has men on it, or a vehicle you can drive
+  const menIn = function (u) {
+    const ids = CBZ.battleRoster ? CBZ.battleRoster.ids(u) : String(u).split("|");
+    for (let k = 0; k < ids.length; k++) {
+      if (ids[k] === "men" || (CBZ.unitKit && CBZ.unitKit.kindOf(ids[k]) === "vehicle")) return true;
+    }
+    return false;
+  };
   if (SET.call && menIn(SET.call === "red" ? SET.redU : SET.blueU)) return SET.call;
   return menIn(SET.redU) ? "red" : menIn(SET.blueU) ? "blue" : null;
 }
@@ -38,6 +45,26 @@ function join() {
   if (!team) return false;
   const c = teamCOM[team];
   let m = null, bd = Infinity;
+  /* A SIDE WITH A VEHICLE PUTS YOU IN IT: the man you become is its crew
+     (src/battle/vehicles.js drives it from your keys). */
+  for (let i = 0; i < men.length; i++) {
+    const o = men[i];
+    if (o.team !== team || !o.vehicle || o.dead || o.fled || vehCrewN(o) === 0) continue;
+    const d = Math.hypot(o.pos.x - c.x, o.pos.z - c.z) + (o.air ? 500 : 0);
+    if (d < bd) { bd = d; m = o; }
+  }
+  if (m) {
+    YOU.m = m; YOU.last = m; YOU.down = false;
+    m.you = true; m.slot = "you";
+    YOU.yaw = m.h; YOU.pitch = 0.3;
+    if (speed !== 1) setSpeed(1);
+    if (KILL.t > 0) { KILL.t = 0; KILL.m = null; }
+    setCamMode("you");
+    if (COARSE) touchOn(); else CBZ.micro.lock();
+    el("xhair").classList.add("on");
+    el("cRifle").classList.add("on");
+    return true;
+  }
   for (let i = 0; i < men.length; i++) {
     const o = men[i];
     if (o.team !== team || o.dead || o.fled || o.beast || o.routed || o._apeHeld || o._apeFlying) continue;
@@ -169,6 +196,40 @@ function youFire(m) {
   } else youMiss(m, w);
   if (m.mag <= 0) youReload(m, w);
 }
+const _youIn = { attack: false, fwd: 0, side: 0, back: 0, sprint: false };
+function youMelee(m, attack, ax, az, run, sdt) {
+  let o = m._youMO;
+  if (!o) {
+    o = m._youMO = {
+      dt: 0,
+      // everyone on the other side within arm's reach of a lunge
+      candidates: function (out) {
+        for (let i = 0; i < men.length; i++) {
+          const q = men[i];
+          if (q.dead || q.fled || q.team === m.team || q.vehicle) continue;
+          if (Math.abs(q.pos.x - m.pos.x) > 4 || Math.abs(q.pos.z - m.pos.z) > 4) continue;
+          out.push(q);
+        }
+      },
+      // the blow landed on his rig: the page's own damage, scaled by who he
+      // hit (bodymass) and where it landed (the layer's zone multiplier)
+      onLand: function (res) {
+        const q = res && res.target;
+        if (!q || q.dead || !q.team || q.team === m.team) return;
+        const mk = CBZ.meleeScale ? CBZ.meleeScale(m, q) : 1;
+        const zm = res.dmgMul != null && isFinite(res.dmgMul) ? res.dmgMul : 1;
+        hurtMan(q, m.punch * (0.9 + lcg() * 0.4) * mk * zm, { by: m });
+        stats[m.team].shots++; stats[m.team].hits++;
+        m.shotsF++; m.hitsF++;
+      },
+    };
+  }
+  o.dt = sdt;
+  _youIn.attack = attack;
+  _youIn.fwd = az > 0 ? az : 0; _youIn.back = az < 0 ? -az : 0;
+  _youIn.side = ax; _youIn.sprint = !!run;
+  try { CBZ.melee.drive(m, _youIn, o); } catch (e) {}
+}
 function youReload(m, w) {
   if (!m.magSize || m.reloadT > 0 || m.mag >= m.magSize) return;
   m.reloadT = (w && (w.reloadTime || w.reload)) || 1.6;
@@ -186,6 +247,8 @@ function stepYou(m, sdt) {
     run = IN.isDown("ShiftLeft") || IN.isDown("ShiftRight");
   }
   if (T && T.active && T.stick && T.stick.mag > 0.12) { ax = T.stick.x; az = -T.stick.y; run = !!T.stick.rim; }
+  // knocked down: the knockdown owns the body until he is up (melee.js)
+  if (knockedDown(m)) { ax = 0; az = 0; }
   const sy = Math.sin(YOU.yaw), cy = Math.cos(YOU.yaw);
   let mx = sy * az - cy * ax, mz = cy * az + sy * ax;
   const ml = Math.hypot(mx, mz);
@@ -205,6 +268,15 @@ function stepYou(m, sdt) {
   m.coverK = m.stance === "crouch" ? CROUCH_HIT : 1;
   m.up = true;
   const fire = IN && (IN.isDown("KeyJ") || (!COARSE && IN.locked && IN.buttons[0]));
+  /* BARE HANDS: the one control grammar every game shares (systems/melee.js).
+     Called EVERY step with the button's held state: a tap is a strike, the
+     movement you are already doing picks which one, a hold is the guard and
+     its release the power shot. Feature-detected: before the melee layer
+     loads, the old swing below still answers. */
+  if (m.fists && CBZ.melee && CBZ.melee.drive) {
+    youMelee(m, !!fire, ax, az, run, sdt);
+    return;
+  }
   const w = CBZ.weaponById(m.wid);
   const semi = w && !w.auto;
   const pull = semi ? (IN && (IN.pressed("KeyJ") || (!COARSE && IN.locked && IN.clicked[0]))) : fire;
@@ -213,6 +285,7 @@ function stepYou(m, sdt) {
 function frameYou(dt) {
   const m = YOU.m;
   if (!m || m.dead) { leaveYou(!!(m && m.dead)); return; }
+  if (m.vehicle) { frameYouVehicle(m, dt); return; }
   const IN = CBZ.micro.input;
   if (IN) {
     // the edge keys, once a FRAME (the step above runs up to eight times one)

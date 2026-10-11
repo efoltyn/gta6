@@ -558,6 +558,7 @@ CBZ.npcwar.onBoot(function () {
         if (g && g.parent) g.parent.remove(g);
       }
       men.length = 0; corpses.length = 0; sinking.length = 0;
+      if (STORE) STORE = CBZ.battleStore.create(STORE.cap);
       dropGuns.length = 0; rockets.length = 0; spawnQueue.length = 0;
       squads.red.length = 0; squads.blue.length = 0;
       deadSolving = 0;
@@ -579,7 +580,7 @@ CBZ.npcwar.onBoot(function () {
       // is water before anything is swimming in it.
       SET.redN = o.rn == null ? SET.redN : Math.max(0, o.rn | 0);
       SET.blueN = o.bn == null ? SET.blueN : Math.max(0, o.bn | 0);
-      HAS_BEASTS = SET.redU !== "men" || SET.blueU !== "men";
+      HAS_BEASTS = rosterHasBeasts();
       spawnCount.red = SET.redN; spawnCount.blue = SET.blueN;
       spawnTotal = SET.redN + SET.blueN;
       for (let i = 0; i < Math.max(SET.redN, SET.blueN); i++) {
@@ -665,7 +666,9 @@ CBZ.npcwar.onBoot(function () {
   // a shared link or a bench run skips the menu; kicked from here so every
   // declaration above is live before begin() touches it
   if (SET.auto || SET.bench) {
-    const go = function () { begin(SET.bench); };
+    // the roster's unit files (a tiger, a tank) first; a men-only war runs on
+    // the same tick (load.js withUnits)
+    const go = function () { withUnits(function () { begin(SET.bench); }); };
     const need = packsFor();
     if (need.length) CBZ.studio.need(need).then(go); else go();
   }

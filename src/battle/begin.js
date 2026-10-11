@@ -13,7 +13,9 @@ function begin(asBench) {
   if (CBZ.apeReset) { try { CBZ.apeReset(); } catch (e) {} }
   // packsFor() sets this on every route that loads ground packs; the bench
   // button reaches begin() without one, so state it here too.
-  HAS_BEASTS = SET.redU !== "men" || SET.blueU !== "men";
+  HAS_BEASTS = rosterHasBeasts();
+  // who is on each side, in words, with the flags now that city/flags.js is in
+  refreshSides();
   /* THE AIR BELONGS TO THE PLACE. One desert haze over all five grounds put
      an orange dust horizon behind a glass downtown and washed the streets
      out to paper. Three skies: a hard flat light for the kill box, a clean
@@ -82,6 +84,8 @@ function begin(asBench) {
   if (!CBZ.groundAt) CBZ.groundAt = function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; };
 
   MAP = buildMap(SET.map);
+  HOST = CBZ.battleHost.fromArena(MAP, CBZ.micro, CBZ.scene);
+  STORE = CBZ.battleStore.create(Math.max(1024, SET.redN + SET.blueN));
   // THE GROUND IS FINISHED — settle it before a single man walks on. The
   // real fabric costs 17 000 draw calls raw and a fraction of that merged,
   // and the pass must run while the scene is still nothing but scenery:
@@ -97,7 +101,7 @@ function begin(asBench) {
   ORDER.red = ORDER.blue = "advance";
   if (FRONT) ORDER[FRONT.hold === "blue" ? "blue" : "red"] = "hold";
   else if (!asBench && Q.get("hold") !== "0") {      // ?hold=0: the old meeting engagement, always
-    const menRed = String(SET.redU).split("|").indexOf("men") >= 0, menBlue = String(SET.blueU).split("|").indexOf("men") >= 0;
+    const menRed = CBZ.battleRoster.has(SET.redU, "men"), menBlue = CBZ.battleRoster.has(SET.blueU, "men");
     if (menBlue && SET.redN >= SET.blueN * 1.5) ORDER.blue = "hold";
     else if (menRed && SET.blueN >= SET.redN * 1.5) ORDER.red = "hold";
   }
@@ -159,6 +163,34 @@ function begin(asBench) {
   if (FRONT) banner(flagImg("red") + " " + TEAMS.red.name + " <em style=\"font-style:normal;color:#ffb35c\">v</em> " + TEAMS.blue.name + " " + flagImg("blue"),
     FRONT.where ? String(FRONT.where).toUpperCase() : "");
   CBZ.micro.onFrame(frame);
+  if (SET.cam || SET.freeze) CBZ.micro.onFrame(urlLens);
+}
+
+/* ?cam= and ?freeze=1: A MATCHUP YOU CAN PHOTOGRAPH BY URL. Once the field
+   is up (every body spawned), the lens goes to the named subject and holds
+   on it (the STUDY desk: it never cuts), and freeze stops the clock there.
+     cam=a | b            ride that side's front (FOLLOW)
+     cam=<unit id>        the first living body of that kind (STUDY)
+     cam=a:3 | b:0        that side's body by spawn index (STUDY)
+   Runs once and stands down. */
+let urlLensDone = false;
+function urlLens() {
+  if (urlLensDone || !started || spawnQueue.length) return;
+  urlLensDone = true;
+  const c = SET.cam;
+  if (c === "a" || c === "b") setCamMode("follow", c === "a" ? "red" : "blue");
+  else if (c) {
+    let pick = null;
+    const ix = /^([ab]):(\d+)$/.exec(c);
+    for (let i = 0; i < men.length && !pick; i++) {
+      const m = men[i];
+      if (m.dead) continue;
+      if (ix) { if (m.team === (ix[1] === "a" ? "red" : "blue") && m.i === +ix[2]) pick = m; }
+      else if ((m.species && m.species.id === c) || m.unitId === c || (c === "men" && !m.beast && !m.vehicle)) pick = m;
+    }
+    if (pick) { STUDY.m = pick; setCamMode("study"); }
+  }
+  if (SET.freeze) setSpeed(0);
 }
 
 /* THE SUN IS AIMED, AND ITS SHADOW FOLLOWS THE LENS'S SUBJECT.

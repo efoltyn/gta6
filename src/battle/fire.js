@@ -151,7 +151,8 @@ function fireShot(m, tgt, r) {
   if (seen && fxBudget < 26) {
     fxBudget++;
     let from = null;
-    if (cd2 < 130 * 130 && CBZ.actorMuzzle) from = CBZ.actorMuzzle(m, _muz);
+    if (m.vehicle) from = vehicleMuzzle(m, _muz);
+    else if (cd2 < 130 * 130 && CBZ.actorMuzzle) from = CBZ.actorMuzzle(m, _muz);
     if (!from) from = _muz.set(m.pos.x + Math.sin(m.yaw) * 0.5, m.pos.y + 1.42, m.pos.z + Math.cos(m.yaw) * 0.5);
     // pellets read as a cone; everything else is one line
     const lines = (w && w.pellets) ? 3 : 1;
@@ -174,7 +175,7 @@ function fireShot(m, tgt, r) {
   if (hit) {
     stats[m.team].hits++;
     m.hitsF++; gunLedger(m.wid).hits++;
-    if (CBZ.bodyWound && cd2 < 90 * 90) { try { CBZ.bodyWound(tgt, _v, {}); } catch (e) {} }
+    if (CBZ.bodyWound && cd2 < 90 * 90 && !tgt.vehicle) { try { CBZ.bodyWound(tgt, _v, {}); } catch (e) {} }
     // combat_iq's ladder is authored for fights against the PLAYER, whose
     // fairness cap this page has no player to need. Army-on-army trades at
     // band edge under mutual suppression, so battles read livelier a step
@@ -251,7 +252,7 @@ function stepRockets(sdt) {
     r.vel.y -= r.grav * sdt;
     r.pos.addScaledVector(r.vel, sdt);
     r.trail.push(r.pos);
-    let boom = r.t > 7 || r.pos.y <= MAP.groundAt(r.pos.x, r.pos.z) + 0.25;
+    let boom = r.t > (r.life || 7) || r.pos.y <= MAP.groundAt(r.pos.x, r.pos.z) + 0.25;
     if (!boom) {
       const cols = CBZ.micro.queryColliders(r.pos.x, r.pos.z, 0.5, _mq);
       for (let c = 0; c < cols.length; c++) {

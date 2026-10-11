@@ -40,7 +40,7 @@ function updateCOM() {
     let x = 0, z = 0, n = 0, ax = 0, az = 0, an = 0;
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
-      if (m.team !== t || m.dead || m.fled) continue;
+      if (m.team !== t || m.dead || m.fled || m.air) continue;
       ax += m.pos.x; az += m.pos.z; an++;
       if (m.routed) continue;
       x += m.pos.x; z += m.pos.z; n++;
@@ -66,4 +66,10 @@ function updateCOM() {
   HUNT.red = count.red > 0 && (count.blue > 0 ? count.red >= count.blue * 3 : live.blue > 0);
   HUNT.blue = count.blue > 0 && (count.red > 0 ? count.blue >= count.red * 3 : live.red > 0);
   comAt = simT;
+  // the unit store's rows follow the full units on this slow tick (the fled
+  // have been spliced out of `men` above and still owe their row a verdict)
+  if (STORE) {
+    for (let i = 0; i < men.length; i++) if (men[i].row != null) STORE.sync(men[i].row, men[i]);
+    for (let i = 0; i < fledMen.length; i++) if (fledMen[i].row != null) STORE.sync(fledMen[i].row, fledMen[i]);
+  }
 }

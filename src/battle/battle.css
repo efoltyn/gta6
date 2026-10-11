@@ -112,12 +112,14 @@
   @media (max-width:620px){.teams{grid-template-columns:1fr}.teams .vs{justify-self:center;margin:-4px 0;font-size:36px}}
   .team{border:1px solid var(--line);border-radius:18px;padding:16px;background:rgba(14,16,20,.72);
     backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
-  .team.red{background:linear-gradient(180deg,rgba(255,90,61,.16),rgba(14,16,20,.72) 42%);border-color:rgba(255,90,61,.38)}
-  .team.blue{background:linear-gradient(180deg,rgba(63,168,255,.16),rgba(14,16,20,.72) 42%);border-color:rgba(63,168,255,.38)}
-  .team .th{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
-  .team h3{margin:0;font:400 30px/1 var(--disp);letter-spacing:.14em}
-  .team.red h3{color:#ff8a70}
-  .team.blue h3{color:#7cc4ff}
+  /* a side's colour is its identity's (its nation's mark): teams.js sets
+     --sc-red / --sc-blue ("r,g,b") on the root; the slot defaults stand until then */
+  .team.red,.callrow .cr,#end .cr,#end h2.red{--sc:var(--sc-red,255,90,61)}
+  .team.blue,.callrow .cb,#end .cb,#end h2.blue{--sc:var(--sc-blue,63,168,255)}
+  .team.red,.team.blue{background:linear-gradient(180deg,rgba(var(--sc),.16),rgba(14,16,20,.72) 42%);border-color:rgba(var(--sc),.38)}
+  .team .th{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .team h3{margin:0;font:400 clamp(20px,5.4vw,30px)/1.05 var(--disp);letter-spacing:.08em}
+  .team.red h3,.team.blue h3{color:rgb(var(--sc));filter:brightness(1.25)}
   .team .kind{font-size:12px;font-weight:700;letter-spacing:.1em;opacity:.7;text-align:right;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
   .team .cnt{display:flex;gap:8px;align-items:center;margin-bottom:12px}
@@ -148,13 +150,11 @@
   .callrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   .callrow button{appearance:none;cursor:pointer;min-height:84px;border-radius:18px;padding:12px 14px;text-align:center;
     border:1px solid var(--line);background:rgba(14,16,20,.7);transition:background .15s,border-color .15s,transform .1s}
-  .callrow button b{display:block;font:400 34px/1 var(--disp);letter-spacing:.14em}
+  .callrow button b{display:block;font:400 clamp(18px,5vw,30px)/1.05 var(--disp);letter-spacing:.06em}
   .callrow button i{display:block;font-style:normal;font-size:12px;font-weight:600;opacity:.6;margin-top:4px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .callrow .cr b{color:#ff8a70}
-  .callrow .cb b{color:#7cc4ff}
-  .callrow .cr.on{background:linear-gradient(180deg,rgba(255,90,61,.45),rgba(255,90,61,.2));border-color:var(--red)}
-  .callrow .cb.on{background:linear-gradient(180deg,rgba(63,168,255,.45),rgba(63,168,255,.2));border-color:var(--blue)}
+  .callrow .cr b,.callrow .cb b{color:rgb(var(--sc));filter:brightness(1.25)}
+  .callrow .cr.on,.callrow .cb.on{background:linear-gradient(180deg,rgba(var(--sc),.45),rgba(var(--sc),.2));border-color:rgb(var(--sc))}
   .callrow .on b{color:#fff}
   .callrow button:active{transform:scale(.98)}
   #streak{margin-top:12px;min-height:14px;white-space:pre;text-align:center;font:400 16px/1 var(--disp);letter-spacing:.2em;color:var(--gold);opacity:.9}
@@ -212,15 +212,15 @@
   #end .in{text-align:center;max-width:420px;width:100%}
   #end h2{margin:0 0 8px;font:400 clamp(52px,14vw,104px)/.9 "Bebas Neue","Oswald",Impact,ui-sans-serif,system-ui,sans-serif;
     letter-spacing:.03em;text-shadow:0 4px 30px rgba(0,0,0,.7)}
-  #end h2.red{color:#ff7a5c} #end h2.blue{color:#7cc4ff}
+  #end h2.red,#end h2.blue{color:rgb(var(--sc));filter:brightness(1.2);font-size:clamp(40px,10vw,96px)}
+  #endSeries{min-height:16px;font-size:12px;letter-spacing:.2em;font-weight:800;opacity:.8;margin-bottom:8px;white-space:pre-wrap}
   #endCall{min-height:18px;font-size:13px;letter-spacing:.22em;font-weight:800;margin-bottom:18px}
   #endCall.right{color:#8fe3a0} #endCall.wrong{color:#ff9a7a}
   #end .acts{opacity:0;animation:endIn .5s ease-out 1.4s forwards}
   #end .nl{font-size:10px;letter-spacing:.28em;opacity:.55;margin-bottom:8px}
   #end .calls{display:flex;gap:10px;justify-content:center;margin-bottom:12px}
-  #end .calls button{flex:0 1 120px;padding:11px 10px;border-radius:12px}
-  #end .calls button.cr.on{background:rgba(255,90,61,.3);border-color:#ff5a3d}
-  #end .calls button.cb.on{background:rgba(63,168,255,.3);border-color:#3fa8ff}
+  #end .calls button{flex:0 1 200px;padding:11px 10px;border-radius:12px;white-space:normal;line-height:1.15}
+  #end .calls button.cr.on,#end .calls button.cb.on{background:rgba(var(--sc),.3);border-color:rgb(var(--sc))}
   #end .row{display:flex;gap:10px;margin-top:10px}
   #end button{appearance:none;border:1px solid rgba(255,255,255,.25);background:rgba(8,9,12,.4);color:inherit;
     flex:1;padding:15px 10px;border-radius:999px;font:700 14px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.14em;cursor:pointer}

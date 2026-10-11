@@ -83,6 +83,8 @@ function pickTarget(m, range) {
       for (let i = 0; i < a.length; i++) {
         const o = a[i];
         if (o.team === m.team || o.dead) continue;
+        // an aircraft is only a mark for what can reach it
+        if (o.air && !vehicleCanTarget(m, o)) continue;
         const d2 = (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.z - m.pos.z) * (o.pos.z - m.pos.z);
         if (d2 < range * range && CBZ.brain.perception.sees(m, o, SPOT)) _cand.push(o, d2);
       }
@@ -210,6 +212,8 @@ function separateSolve(k) {
 }
 function push2(m, o, k) {
   if (o.dead || o === m) return;
+  // a hull is a box and is not shoved by a man (src/battle/vehicles.js)
+  if (m.vehicle || o.vehicle) { pushVehicle(m, o, k); return; }
   // a held or airborne body is somewhere the crowd solver has no say over:
   // shoving it out of the gorilla's fist (or out of its own flight arc) is
   // the pass correcting an "overlap" that is the entire point of the move
@@ -296,6 +300,7 @@ function pinnedPass() {
 }
 function unpin(m, o) {
   if (o.dead || o === m) return;
+  if (m.vehicle || o.vehicle) return;      // pushVehicle already put him outside the hull
   // the PAIR's clearance and the PAIR's overlap line, exactly as push2 and
   // the probe read them — a lion pinned against a hangar is the same fault
   // as a man pinned against a facade, and a man's numbers are still 0.9/0.62

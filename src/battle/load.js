@@ -19,7 +19,13 @@
    city/ragdoll.js is the original of the method the animals' solver copied —
    13 points, sticks, joint limits, a ground clamp — writing back onto the same
    rig meshes, so the wounds and the dropped rifle ride along for free. */
-const NEED = ["caps", "speech", "people", "ragdoll", "fx", "damage", "sound", "batch", "bestiary", "beasts", "meshcol"];
+/* `verbs` rides in the base load for the FISTS: systems/verbs_strike.js lands
+   a blow on the real rig, and (once the melee wave is in) systems/melee.js is
+   the one fighter brain combat_iq hands every fist fight to, the possessed
+   man's included (CBZ.melee.drive in player.js). Preloaded so the first man
+   who squares up does not fight a second on the old state machine while it
+   arrives. */
+const NEED = ["caps", "speech", "people", "ragdoll", "fx", "damage", "sound", "batch", "bestiary", "beasts", "meshcol", "verbs"];
 // ?marine=0 refuses the marine pack even on OPEN WATER (the revert). Its
 // absence is what shipped: models with no hunt, no fin, no blood, no prey.
 const MARINE_Q = Q.get("marine");
@@ -48,6 +54,7 @@ const ARMOURY = [
   "systems/brain.js",          // CBZ.brain: the ONE morale (brain.morale) every army shares
   "systems/wounds.js",         // bodies remember hits (optional, self-capping)
   "world/hull_loft.js",        // the game's own lofted boat hulls (OPEN WATER's fleet)
+  "city/flags.js",             // the one flag system: an army fights under its nation's flag
 ];
 /* THE LOAD USED TO BE THIRTY-ONE ROUND TRIPS IN A ROW.
 
@@ -115,4 +122,22 @@ function loadArmourySerial() {
     });
   });
   return chain;
+}
+
+/* THE UNITS A ROSTER NAMES load at START, not with the page
+   (units/unitkit.js). A men-only war asks for nothing and begins on the same
+   tick it always did; a tiger, a tank or a dog brings its own file (and the
+   engine files that file `needs`) first. */
+function unitsFor() {
+  const R = CBZ.battleRoster, K = CBZ.unitKit;
+  if (!R || !K) return [];
+  return R.ids(SET.redU).concat(R.ids(SET.blueU)).filter(function (id, i, a) {
+    return id !== "men" && a.indexOf(id) === i && !!K.fileOf(id) && !K.has(id);
+  });
+}
+function withUnits(fn) {
+  const ids = unitsFor();
+  if (!ids.length) { fn(); return; }
+  bootst("BRINGING UP THE " + (ids.length === 1 ? "UNIT" : "UNITS"));
+  CBZ.unitKit.need(ids).then(fn);
 }
