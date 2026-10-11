@@ -573,10 +573,10 @@
            just clear of the widest hip section, measured off the body shape
            (city/armor.js's arm solver, by name); clearKit gives them back. */
         const TS2 = rig.torsoShape;
-        if (low && TS2 && TS2.pel && CBZ.cityArmorArmClear && rig.profile) {
+        if (low && TS2 && TS2.pel && CBZ.humanArmClear && rig.profile) {
           let hw = 0;
           for (let j = 0; j <= 6; j++) { const y = TS2.pBot + (TS2.pTop + 0.1 - TS2.pBot) * j / 6; hw = Math.max(hw, (y <= TS2.pTop ? TS2.pel(y).a : TS2.at(y).a)); }
-          const a2 = CBZ.cityArmorArmClear(rig, hw + 0.012, TS2.pTop + 0.1, TS2.pBot, 0.01);
+          const a2 = CBZ.humanArmClear(rig, hw + 0.012, TS2.pTop + 0.1, TS2.pBot, 0.01);
           if (a2 != null) {
             if (rig._wlCuffBase == null) rig._wlCuffBase = rig.armOutZ != null ? rig.armOutZ : rig.profile.armOutZ;
             rig.armOutZ = Math.max(rig.armOutZ != null ? rig.armOutZ : rig._wlCuffBase, a2);

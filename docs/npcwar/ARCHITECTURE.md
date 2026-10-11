@@ -92,6 +92,7 @@ change it only in coordination.
 | `src/units/kit/gait.js` | `CBZ.quadGait`: planted-foot gait solver, footfall tables (a table may carry its own cadence curve `fOf(v, K)`) | animal agents (coordinate) |
 | `src/units/kit/felid.js` | `CBZ.felidKit.hooks(spec)`: one cat engine (lofted body + pattern shader, rotary gallop with a flexing spine, stalk/sprint/leap brain, trip/throat/pin/nape/grapple fight, ragdoll markers, takeover moves). The cheetah and snow leopard files are pure data on it; any cat can be | cheetah / snow leopard agent (coordinate) |
 | `src/units/kit/vehicle.js` | vehicle drive / turret / armour / crew helpers | vehicle agents (coordinate) |
+| `src/units/kit/hull.js` | `CBZ.hullKit`: wheeled-vehicle bodies (Humvee, M35): geometry buckets, nation/ground camouflage + flag decals, tyres, the M2, crew figures, particle FX, and `WheeledRig` (Ackermann steer, per-wheel suspension, sprung body, turret + scan, recoil, dust, exhaust, damage, wreck) implementing `mark / fire / damage / muzzleWorld / aimTurret`, plus `hullKit.animate` for a def's `animate`. Load it through the manifest row's `needs` | vehicle agents (coordinate) |
 | `src/units/kit/moves.js` | `CBZ.unitMoves`: what a possessed animal does on ATTACK (the `moves` hook) | player control (species files override) |
 
 ### The sim and the page (NPC War's host layer today)
@@ -100,12 +101,12 @@ change it only in coordination.
 | `src/battle/menu.js` | the war room: matchups (`MATCHUPS`), grounds, sides, best-of, the call | menu / UX |
 | `src/battle/teams.js` | the two slots, `SIDES`, `refreshSides()`, nation marks, flags | core |
 | `src/battle/arms.js` | the guns on the menu, the mixed issue, punch per training | weapons |
-| `src/battle/men.js` | `makeMan`, uniforms, helmets | humans |
+| `src/battle/men.js` | `makeMan`, uniforms; `kitUp` dresses each man through `CBZ.combatKit` (§9a) | humans / armour |
 | `src/battle/beasts.js` | `makeBeast`, `animateBeast`, `beastFight`: the animal unit, routed through `CBZ.unitKit` | core (species agents edit their species file instead) |
 | `src/battle/vehicles.js` | `makeVehicle`, the vehicle sim, crew mount/dismount | vehicles / armour |
-| `src/battle/damage.js` | `hurtMan`: the one damage funnel, reachability | armour / weapons |
+| `src/battle/damage.js` | `hurtMan`: the one damage funnel (asks `CBZ.armour.resolve`, §9a), reachability | armour / weapons |
 | `src/battle/death.js` | a beast dies, a man dies, the sinking dead | physics / humans |
-| `src/battle/physics.js` | the grid, body separation, pinned pairs, the flow field (`NAV`), COM | physics |
+| `src/battle/physics.js` | the grid, body separation (split by mass), pinned pairs, momentum (`bodyKg`, `contactImpulse`, `addKnock`, `stepKnock`), bodies in the air (`flingBody`, `stepTossed`), the blast (`blastBodies`), hull strikes (`hullForStrike`), the flow field (`NAV`), COM (§9c) | physics |
 | `src/battle/fire.js` | the trigger (aimed / suppressive fire, pairs, bursts, reloads, stoppages, grenades, the gun's stance), flown rounds, penetration, ricochets, wounds, bleeding, rockets, backblast | weapons |
 | `src/weapons/ballistics.js` | `CBZ.ballistics`: cartridges, guns, materials, flight / drop / zero / penetration maths, body zones, species anatomy (node-loadable, shared with Gang City) | weapons |
 | `src/battle/air.js` | air support: bombers, the nuke run, airstrikes | weapons / vehicles (air) |
@@ -130,7 +131,12 @@ change it only in coordination.
 | `src/battle/core.js` | `CBZ.now`, `CBZ.floorAt` shims | core |
 | `src/battle/arenas/maps.js` | `MAPS`: every ground the page offers | terrain |
 | `src/battle/arenas/field.js` | `buildMap(id)`: raise a ground, return the MAP record (spawn, ground, sight) | terrain |
-| `src/battle/arenas/erg.js` | the open dunes / snow / fields | terrain |
+| `src/battle/arenas/erg.js` | the open dunes / snow / fields / wood: the height forms (barchan + transverse dunes off one wind, snow drifts, rolling ground), the crest table, the parcels, the skin and its per-surface shader (ripples, sastrugi, litter + dapple, crops) | terrain |
+| `src/battle/arenas/cover.js` | `CBZ.battleCover`: every cover point (props, walls, crests, crater lips), hit points, destruction; `MAP.coverNear/coverFrom` | terrain |
+| `src/battle/arenas/dress.js` | `CBZ.battleDress`: the real objects (sandbags, hesco, jersey, burnt cars, boulders, logs, dry walls, bales, rubble, containers), instanced, and where they go (open ground, the downtown's streets) | terrain |
+| `src/battle/arenas/ground.js` | `CBZ.battleGround`: earthworks + craters in groundAt, prints and tracks, scorch, blast spray, blowing sand, the baked dead (remains) | terrain |
+| `src/battle/arenas/woods.js` | `CBZ.battleWoods`: THE WOOD (canopy, understory, bracken, deadfall, canopy map) and the snow's spruce groves | terrain |
+| `src/battle/arenas/fields.js` | `CBZ.battleFields`: farmland (hedgerows on banks, dry walls, wheat, maize, bales, pasture) | terrain |
 | `src/battle/arenas/sea.js` | open water: swell, reef, fleet, depth | water |
 | `src/battle/arenas/yard.js` | the kill box | terrain |
 
@@ -215,9 +221,11 @@ creatureFight plays it with no extra work.
 CBZ.unitKit.register("m1_abrams", {
   kind: "vehicle", domain: "ground" | "air", drive: "tracked" | "wheeled" | "rotor" | "jet",
   stats:   { hp, mass, speed, turn, armour: { front, side, rear, top },  // armour in mm RHA
+             grip,                     // wheeled, opt-in, in g: the driver slows for corners, lock limited at speed
+             dismountAt,               // keep it above 1.15 x standoff, or the carrier parks with its men aboard
              alt, standoff, nap, popAlt, climb, popWindow, popShots },   // aircraft: see "Flight"
   crew:    [{ seat: "driver" | "gunner" | "commander" | "loader" | "pilot", pos: [x, y, z] }],
-  passengers,
+  passengers, passengerPos: [[x, y, z], ...],                          // optional: each bench seat in hull space
   weapons: [{ id, seat, kind: "cannon" | "autocannon" | "mg" | "rockets" | "missile" | "sam" | "bombs",
               rof, dmg, range, minRange, ammo, burst, pause, salvo, reload, vs, needs, indirect,
               mount: "turret" | "slew" | "fixed" | "free", arc, yawMax, tol,       // facing, below
@@ -326,7 +334,17 @@ puts weapons that cannot bear on the mark second.
   mark, fire for `popWindow` s, default 7; this is cut short after `popShots` rounds, when hit,
   or when blind), and `drop` (back down, then sidestep to a new position). With no mask (flat
   ground) it still shoots and scoots. A transport (`dismountAt`) flies low to a landing short
-  of the enemy and sets down.
+  of the enemy and sets down. A rotor transport never unloads in flight: it picks the landing
+  zone (0.8 x `dismountAt` short of the mark, fixed once it is within 150 m), flares into it and
+  either lands and unloads (phase `insert`), or, with `stats.fastRope` (m), hovers at that height
+  and puts the men down two ropes, one man per rope every `ropeEvery` s after `ropeDelay` plus
+  `fastRope / ropeSpeed` (the rig can draw the same schedule off `ctx.phase === "insert"`). A hit
+  that penetrates an airborne transport does not throw its passengers out. With
+  `stats.broadside` (rad) a door-gun aircraft turns that far off the mark at its battle position
+  so a side gun bears (alternating sides with the sidestep).
+- **Vehicles and `moves`.** A vehicle file may define `moves(veh, tgt, ctx) -> weapon id`: the
+  weapon a PLAYER's attack works on this mark (`vehYouSeatWeapon` asks it first; the UH-60 names
+  the door gun on the mark's side).
 - **Jets** fly attack runs at real heights. Level bombing is flown at the weapon's `alt` (else
   `stats.alt`) and released where the fall lands on the mark. A `guided` bomb is released
   inside a basket of `basket` (0.15) x its fall distance and homes all the way down (`homing`
@@ -401,7 +419,7 @@ vehicle agents redraw):
 | patriot_launcher | Patriot | milArmor.patriot | 2 | SAM (air only) | 6/2/2/2 |
 | technical | MG technical | stand-in in its file (warlord's builder needs CBZ.warlord) | driver, gunner | MG | 1/0/0/0 |
 | ah64_apache | AH-64 | milAir attackHeli | pilot, gunner | 30 mm, Hellfire, Hydra | 20/15/10/8 |
-| uh60_black_hawk | UH-60 (11) | milAir utilityHeli | pilot, copilot, door gunner | minigun | 8/6/4/4 |
+| uh60_black_hawk | UH-60M (11, fast rope) | its own file (redrawn) | pilot, copilot, gunner, crew chief | 2 x M240H door guns | 3/2/2/2 (unarmoured, hp 820) |
 | f35 | F-35A | milAir fighter | pilot | 2 GBUs/pass, 25 mm | 2 |
 | mq9_reaper | MQ-9 | milAir drone | remote | Hellfire | 0 |
 | b52 | B-52H | milAir bomber | 5 | bomb sticks | 0 |
@@ -559,6 +577,13 @@ queryColliders(x, z, r, out)           colliders near a point (cover search)
 colliderContains(c, x, z, pad)
 ```
 
+Optional (feature-detect them): `coverNear(x, z, r, out, opts)` returns cover points
+`{ x, z, y, nx, nz, h, low, kind, rec }` (the cover is on the -n side; `opts.threat {x,z}`
+keeps only points that hide you from it), and `coverFrom(x, z, tx, tz, r)` returns the one a
+man would run to. Kinds: `crest drift fold crater wall tree hedge sandbags hesco jersey hulk
+boulder log drywall bale rubble container`. Props have hit points; a blast that beats one
+takes its collider and its points away (rubble keeps a low set).
+
 - `fromArena(MAP, CBZ.micro, CBZ.scene)` is NPC War's host: `buildMap()`'s record plus
   microboot's collision world, using the same function objects with no wrapper. `begin.js` sets
   the page's `HOST`.
@@ -650,6 +675,71 @@ pixel per CSS pixel. URL keys win for tools: `?tier=full|mid|far ?fullcap ?midca
 
 ---
 
+## 9a. Kit and armour (shared with Gang City)
+
+A soldier's kit is part of the one human body, not of this page:
+
+| file | what |
+|---|---|
+| `src/entities/combatkit.js` | `CBZ.combatKit`: plate carrier (front/back plate bags on the body's own chest/back, cummerbund round `CBZ.bodySection`, straps over the trapezius crest, MOLLE), role pouches, radio, hydration, IFAK, tourniquet, sling; helmet (`entities/headwear.js` `ballistic` = ACH/ECH, `b6b47` = 6B47, `pasgt`), eye pro (`entities/eyewear.js` `eyepro`), gloves, knee pads, combat boots, ID tape; the nation's camouflage as a triplanar uniform material |
+| `src/warlord/camo.js` | `CBZ.camo`: the camouflage library (OCP, MultiCam, woodland M81, EMR, digital desert, flecktarn, three-colour desert, ...) |
+| `src/systems/armour.js` | `CBZ.armour`: zones, pieces, rounds, `resolve(hit)` |
+
+**Who wears what.** `CBZ.combatKit.roleFor({ tier, wid, i, nation })`: `civ` = civilian (no kit),
+`thug` (or an irregular faction) = militia (chest rig, no plates, no helmet), `swat` = police
+tactical, else by gun and squad slot: `lmg` = machine gunner (100-round box pouches), `sniper` =
+marksman (single 7.62 pouches, rangefinder), every 30th man an officer (admin pouch, manpack radio
+with whip, handset), every squad's tenth a medic (aid bag, IFAK, armband), the rest riflemen
+(three mag pouches, radio, hydration). `pro` wears second-line plates (`grade: "second"`).
+
+**Nations** (`CBZ.combatKit.NATIONS`, by `city/flags.js` id; one look per nation, always):
+republic = OCP + ACH + coyote kit + ESAPI/ESBI; kesh = digital desert + 6B47 + tan + 6B45 Gr.6;
+veridia = flecktarn + ACH + olive + ESAPI; solara = EMR + 6B47 + ranger green + Gr.6; mbeya =
+woodland M81 + PASGT + olive drab + Level III steel. Both arms carry ID tape in the side's mark.
+
+**The armour rules** (`CBZ.armour.resolve(hit) -> res`, documented in full in the file header):
+- A hit lands in a zone: skull, face, neck, thorax, abdomen, side, armpit, pelvis, upper arm,
+  forearm, thigh, shin (area-weighted, or the caller's `zone` / `region` / `headshot`).
+- A zone is covered by a piece or not: plates cover 86% of the thorax and the top of the abdomen,
+  soft armour the rest of the torso, side plates or the soft cummerbund the flanks, the helmet 92%
+  of the skull. The face, neck, armpits, pelvis and limbs are bare: that is where wounds happen.
+- Threat v rating on one NIJ-like scale (9 mm 1.0, IIIA 2.2, 5.56 3.4, 7.62x51 3.7, Level III
+  plate 3.75, ESAPI 4.8, .50 BMG 6.5): a logistic P(pen). Stopped = blunt trauma (10-20% of the
+  damage), a stagger (`CBZ.soldier.hit`) and a winded man (`res.winded` s: half speed). Beaten = the
+  round goes on with 72-90% of its damage and leaves a `CBZ.soldier.wound`.
+- Helmets turn ~23% of rifle rounds (a deflection: stopped, hard stagger).
+- Plates crack: every stop costs integrity in proportion to the energy, and a cracked ceramic
+  plate's rating falls, so a burst into one plate gets through.
+- Blasts are cut by the share of the body the kit covers; blows, bites and crushes keep their
+  own numbers, a plate or helmet only takes some off.
+- Unarmoured, the zone multipliers average exactly 1 for the body and 2.2 for the head, so balance
+  moves only where there is armour.
+
+**The hooks for weapons.** Two doors, one rule book (`systems/armour.js`):
+- **A flown round** (§9b, `fire.js` armsHit): `CBZ.battleArmour.layer(unit, zone, { cart, v, v0, dx, dz })
+  -> {mat, mm} | null`, asked for the ballistics zone the round enters (`head`, `torso`, `gut`; a
+  limb returns null). It rolls which piece covers the point, decides plate v cartridge with the
+  rules above (the round's steel penetration at its speed against the piece's cracked rating as mm
+  of steel, `CBZ.armour.rateMM`; aramid is cut by anything over ~600 m/s; a helmet's deflection),
+  cracks the piece, and answers in ballistics' language: a stop is a layer thicker than the round
+  can cross (ballistics then deals the blunt trauma), a defeat is a layer it crosses losing speed.
+  The stagger and winded seconds are left on `unit.armour.last`, and `hurtMan` (which sees
+  `imp.bullet` and does not resolve again) winds the man.
+- **Anything else** through `hurtMan(m, dmg, imp)`: `CBZ.armour.resolve` runs when `imp.kind` is
+  given or inferred (bomb = blast, beast = bite, hull = blast, fist = blow) and returns `res`. A
+  caller with no ballistics passes `{ kind: "bullet", round: "556" | { threat, energy }, wid, zone? }`.
+- **Gang City's hitscan** (`systems/fpsmode.js` cityGunHit) asks `CBZ.armour.resolve` with
+  `raw: true` (its own head and limb multipliers already applied) for a soldier wearing kit; a stop
+  is a spark and no lethal headshot.
+
+**Gang City.** `city/outfits.js`'s `soldier` fit is `kit: "rifleman", nation: "republic"`;
+recolorRig wears it (and strips it for any other fit). `entities/crowdgpu.js` bakes a third body,
+the kitted soldier: `look({ soldier: true, shirt, pants, shoes })` (`CBZ.combatKit.crowdLook(spec)`
+gives the colours), and `dressRig` puts the kit on the promoted rig.
+
+`node tools/combatkit-check.mjs`: the fit on 8 bodies x 6 loadouts (nothing inside the torso, the
+plates rest on the body, knee pads on the shins, the arms clear the carrier through idle, walk,
+run and the rifle carries) and the armour rules.
 ## 9b. Weapons: the round is flown, not rolled
 
 Every round any gun on this page fires (a man's rifle, YOUR rifle, a vehicle's machine gun) goes
@@ -744,6 +834,57 @@ War's adapter and what each man does with the answer.
 
 ---
 
+## 9c. Physics: bodies have mass
+
+`src/battle/physics.js` is the one place that knows what a body weighs and what happens when it
+is hit. `node tools/npcwar-physics-check.mjs` holds it (fists v hide, 100 men v a bull, a
+charge, a tank in a crowd, a blast, a throw).
+
+- **Mass.** `bodyKg(m)`: a hull's `stats.mass`; a species file's own individual (`m._mass`, the
+  number `systems/bodymass.js` reads too); else the anatomy row (`CBZ.ballistics.anatomyOf`)
+  x the individual's size cubed. A man is 80 kg.
+- **Contact.** Separation splits every overlap by mass (each body gives way in proportion to
+  the other's mass). Equal masses split exactly as before, bit for bit. A heavy body MOVING
+  into a light one (masses 3x apart) is a collision: `J = (1 + 0.2) v m1 m2 / (m1 + m2)`, each
+  takes `J / own mass`. Speeds are what a body did under its own legs this sub-step
+  (`physPre` / `physMid`), never the separation's corrections.
+- **Knocks.** `addKnock(b, dvx, dvz, by, {hurt, vy})`: a living body slides on that velocity
+  against friction (0.8 g standing, 0.6 g down); a man past 2.5 m/s goes down (verbs
+  knockdown, else `m.ko`); past 5.5 m/s (or lifted) a body under 450 kg flies. A wall at
+  speed is a second impact.
+- **Flight.** `flingBody(b, vx, vy, vz, {by, carry, lift, dmg})` and `stepTossed`: ballistic
+  at 9.81, swept through the walls, bowls whoever it arrives at by momentum, and the landing
+  speed is the injury. The elephant's possessed trunk throw is an energy (2.7 kJ): a man
+  leaves at ~8 m/s, a lion at ~5.
+- **Injury from a velocity change.** `impactDmg(b, dv) = maxHp x 0.0085 x (dv - 3)²`: nothing
+  under 3 m/s, half a man at 11 m/s (a 6 m fall), all of him at 14. A share of the body's own
+  hp, because hp already carries a body's size.
+- **Death impulse.** `deathDv(m, imp)` (the killing blow's `imp.J / kg`, or the slide or
+  flight it died in) sets the ragdoll's kick, and `imp.dvx/dvz` its direction. A damage source
+  that moved the body passes `J` (kg m/s) and `dvx, dvz` on the `imp`.
+- **Blasts.** NPC War owns its detonation (`blast` on the mode, `damage.js`): damage
+  `420 x power x (0.55 / Z)²` with `Z = d / R`, tapering to 0 at R; delta-v
+  `9 x power x (0.55 / Z)^1.5 x (80 / kg)^(1/3)`. A man at the core dies and flies; a bull
+  elephant at the core takes ~440 and rocks at 2 m/s. Corpses go first through
+  `CBZ.ragdollBlast`; loose debris is kicked (`CBZ.debris.impulse`) and the crater throws
+  grit (`CBZ.debris.chips`). Hulls keep the old ring (inside 0.55 R the armour answers).
+- **Hulls.** `vehCrush` (vehicles.js): the face of a moving hull is a collision by momentum
+  (the hull loses `J / M` of its speed: a Humvee into a bull stops, a tank into a man does
+  not notice); a body the hull outweighs 12:1 that is down goes UNDER it (pushVehicle stands
+  down) and the running gear goes over. A man it kills is handed to `city/carstrike.js`
+  (`CBZ.ragdollStrike`, the hull's real profile drives his ragdoll), and `CBZ.cityCars` lists
+  the moving hulls so a corpse in a tank's path is driven over. `hullForStrike(u)` gives a
+  hull the names carstrike reads (`v` is the drive's own speed).
+- **Fists.** `systems/bodymass.js` (shared with the city): a hide is a THRESHOLD the blow's
+  force has to clear (`hide / 30` of a full punch), not a divisor with a floor. A man on a bull
+  elephant is 0.009 (it was floored at 0.28); on a gorilla 0.41; on a man 1.0. Teeth, claws
+  and tusks put the blow on a point (`meleeAbsorb(target, attacker)`).
+- **Water.** On OPEN WATER a body that dies goes to `world/water_float.js`: a man floats awash
+  and goes under in ~40 s, sharks sink, whales, orcas and dolphins float on their side, other
+  fish float belly up, land animals float and slowly waterlog.
+
+---
+
 ## 10. Checks: node only, no browser
 
 ```
@@ -754,12 +895,14 @@ node tools/npcwar-headless.mjs     the page's own sim in node: war room, hold, t
                                    rifle, snow/fields, calibration, held v met, vehicles, sides +
                                    series + URL.   node tools/npcwar-headless.mjs 3  runs one.
 node tools/units-kit-check.mjs     the animal kit: planted feet never slide; the dog bit for bit.
+node tools/combatkit-check.mjs     soldier kit fit (every body, every loadout, every carry) + armour rules.
 node tools/npcwar-fidelity.mjs     the tiers fight the page's war (see 9)
 node tools/npcwar-worker-check.mjs the sim worker, both modes
 node tools/npcwar-scale-bench.mjs  1k / 10k / 100k a side, ms per tier
 node tools/front-sim.mjs           the city's front resolver (frontline.js) it is calibrated to.
 node tools/npcwar-ai-metrics.mjs   the soldiers' dumb-behaviour numbers (§9b); --old = ?tac=old.
 node tools/ballistics-check.mjs    the weapon table, and flight / penetration / wounds vs published figures.
+node tools/npcwar-physics-check.mjs mass, momentum, knocks, flight, blasts, hulls, fists v hide (9c).
 ```
 
 `tools/npcwar-headless.mjs` lifts the page's `src/battle` / `src/units` script tags out of

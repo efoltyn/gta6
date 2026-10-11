@@ -254,6 +254,15 @@ CBZ.npcwar.onBoot(function () {
         // build — and whether the ground takes part in the sight lines
         relief: MAP ? MAP.relief : null,
         terrainLos: !!(MAP && MAP.terrainLos),
+        // THE GROUND'S RECORD (arenas/cover.js, ground.js, dress.js): cover
+        // points and props, earthworks and craters, marks, the baked dead
+        terrain: {
+          cover: CBZ.battleCover ? CBZ.battleCover.stats() : null,
+          ground: CBZ.battleGround ? CBZ.battleGround.stats() : null,
+          dress: CBZ.battleDress ? CBZ.battleDress.stats() : null,
+          woods: CBZ.battleWoods ? CBZ.battleWoods.stats() : null,
+          fields: CBZ.battleFields ? CBZ.battleFields.stats() : null,
+        },
         men: men.length, red: aliveCount("red"), blue: aliveCount("blue"),
         // MORALE (read-only): army nerve 0..1, men running, men gone, and the
         // fight's shape — who is down in a fold, who broke, who is pinned

@@ -92,9 +92,14 @@ function frame(dt) {
         if (simT - NAV.at.red > 1.4) navSolve("red");
         else if (simT - NAV.at.blue > 1.4) navSolve("blue");
       }
+      physPre(sdt);                         // how fast every body was going (src/battle/physics.js)
       tacticsStep(sdt);                    // the squads decide; grenades fly (ai/squad.js)
       for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
       if (MASS.on) MASS.step(sdt);          // the MID and FAR tiers (src/battle/mass.js)
+      // the struck slide on their own momentum; hulls drive over what lies in their path
+      if (PHYS.knock.length) stepKnock(sdt);
+      physMid(sdt);
+      if (PHYS.hulls.length) physPost(sdt);
       /* THE HOLD AND EVERYTHING IN THE AIR. This has to be its own call and
          not a seam inside beastFight: the strike bubble above only runs while
          the gorilla has a LIVING target inside reach, and a man being swung
@@ -230,6 +235,8 @@ function frame(dt) {
       const showGun = d2 < 130 * 130;
       if (m._weaponProp.visible !== showGun) m._weaponProp.visible = showGun;
     }
+    // the sling's free runs to the rifle's swivels (entities/combatkit.js), near the lens only
+    if (m.char && m.char._kitSling && CBZ.combatKit) CBZ.combatKit.sling(m.char, m._weaponProp, d2 < 40 * 40);
   }
   if (TAC.captives.length) animCaptives(dt);   // the prisoners kneel, hands up
   if (MASS.on) MASS.frame(realDt);      // promotion, demotion, ghosts, the crowd draw

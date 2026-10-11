@@ -106,6 +106,68 @@ function streetSpawner(roads, cx, cz, side, gap) {
   };
 }
 
+/* THE KEEP-OUTS: where each side forms up stays open ground, so the ranks
+   are not dealt into a hedge or a wood (grid() below: the columns stand
+   gap/2 + 8 m out, ten men a column, 3.1 m apart). */
+function startClearings(cx, cz, gap) {
+  return [
+    { x: cx - gap / 2 - 30, z: cz, hx: 34, hz: 24 },
+    { x: cx + gap / 2 + 30, z: cz, hx: 34, hz: 24 },
+  ];
+}
+/* THE ERG'S DRESSING, by what the ground is. Banks and drifts go in before
+   anything is seated on them; the skin is drawn after, so it shows them.
+   In the node sim (tools/npcwar-headless.mjs) the same earthworks and props
+   go in as heights, colliders and cover; only the meshes are skipped. */
+function ergDress(id, cx, cz, gap, g) {
+  const keepOut = startClearings(cx, cz, gap);
+  const surface = DUNE.pal.surface;
+  const ctx = { id: id, cx: cx, cz: cz, gap: gap, groundAt: g, keepOut: keepOut, seed: 11,
+    theme: surface === "sand" ? "desert" : surface === "snow" ? "snow" : surface === "forest" ? "forest" : "field",
+    granite: surface !== "sand", tol: surface === "sand" ? 1.6 : 1.2 };
+  CBZ.battleDress.begin(ctx);
+  try {
+    /* FORWARD OUTPOSTS: on the sand and the snow, a bulldozed berm with two
+       foxholes behind it, out in front of each side's line and off its axis
+       (a position the attackers must take or pass). Not ACROSS the start
+       lines: measured, a bank in front of a kneeling line blinds it (its eye
+       is under the bank) and the held exchange fell from 30 to 0.7 on the
+       fields. Earthworks are ground, so they go in before anything else.
+       ?dig=0 leaves them out. */
+    if ((surface === "sand" || surface === "snow") && Q.get("dig") !== "0") {
+      for (const side of [-1, 1]) {
+        const x = cx + side * (gap / 2 - 22), z = cz + (side < 0 ? -40 : 38);
+        CBZ.battleGround.berm(x, z - 14, x, z + 14, surface === "sand" ? 1.5 : 1.3, 3.2);
+        CBZ.battleGround.pit(x + side * 4, z - 6, 1.1, 1.2);
+        CBZ.battleGround.pit(x + side * 4, z + 6, 1.1, 1.2);
+      }
+    }
+    if (surface === "grass") CBZ.battleFields.build(ctx);
+    else if (surface === "forest") CBZ.battleWoods.forest(ctx);
+    else if (surface === "snow") CBZ.battleWoods.snow(ctx);
+    CBZ.battleDress.open(ctx);
+  } catch (e) { console.warn("[battle] ground dressing failed:", e); }
+}
+/* A RAISED VENUE / THE DOWNTOWN: cover where the venue left open ground. */
+function venueDress(id, cx, cz, gap, g) {
+  if (id === "arena") return;          // the yard is already a yard
+  const keepOut = startClearings(cx, cz, gap);
+  const blocked = function (x, z, r) {
+    if (blockedAt(x, z)) return true;
+    for (let k = 0; k < 4; k++) {
+      const a = k * Math.PI / 2;
+      if (blockedAt(x + Math.cos(a) * r * 0.8, z + Math.sin(a) * r * 0.8)) return true;
+    }
+    return false;
+  };
+  const ctx = { id: id, cx: cx, cz: cz, gap: gap, groundAt: g, keepOut: keepOut, blocked: blocked, seed: 5, theme: "apron", tol: 0.5 };
+  CBZ.battleDress.begin(ctx);
+  try {
+    if (id === "city" && town && town.roads) { ctx.roads = town.roads; ctx.reach = gap * 0.5 + 110; CBZ.battleDress.city(ctx); }
+    else CBZ.battleDress.open(ctx);
+  } catch (e) { console.warn("[battle] venue dressing failed:", e); }
+}
+
 let MEASURED = null;        // what the heightfield found, for the audit
 function buildMap(id) {
   /* THE START LINE, and every one of these is a distance a man has to WALK
@@ -218,11 +280,43 @@ function buildMap(id) {
       }
     }
     // THE ERG over the chosen window: crests, slip faces, the skin that shows them
-    DUNE.on = true; DUNE.cx = cx; DUNE.cz = cz;
+    DUNE.on = true; DUNE.cx = cx; DUNE.cz = cz; DUNE.phase = 0;
+    /* A FAIR FIELD. The crest train is set along the wind so neither start
+       line is dealt the trough under the other's crest: twelve phases of the
+       lattice are measured and the one that leaves both lines at the most
+       nearly equal height over the ground between them (and neither of them
+       low) wins. The world's own terrain under the window still decides who
+       has the better side, as it always did; the dunes no longer do it by
+       accident. Measured with one phase: the east line sat 10 m above the
+       west on the snow and won every near-even fight from it. */
+    if (DUNE.pal.form !== "roll") {
+      const lineH = function (side) {
+        let s = 0, n = 0;
+        for (let c = 0; c < 4; c++) for (let r = 0; r < 10; r += 3) {
+          s += duneDetail(cx + side * (gap / 2 + 8 + c * 3.1), cz + (r - 4.5) * 3.4); n++;
+        }
+        return s / n;
+      };
+      let bestP = 0, bestS = 1e9;
+      for (let k = 0; k < 12; k++) {
+        DUNE.phase = k * DUNE.lam / 12;
+        let mid = 0, mn = 0;
+        for (let x = -gap / 2 + 20; x <= gap / 2 - 20; x += 10) for (let z = -30; z <= 30; z += 15) { mid += duneDetail(cx + x, cz + z); mn++; }
+        mid /= mn;
+        const a = lineH(-1) - mid, b = lineH(1) - mid;
+        const sc = Math.abs(a - b) * 2 - Math.min(a, b);
+        if (sc < bestS) { bestS = sc; bestP = DUNE.phase; }
+      }
+      DUNE.phase = bestP;
+    }
     const worldGround = groundAt;
-    groundAt = function (x, z) { return worldGround(x, z) + duneDetail(x, z); };
+    const ergGround = function (x, z) { return worldGround(x, z) + duneDetail(x, z); };
+    // ...and the ground REMEMBERS: berms, banks, drifts and the craters to
+    // come are part of the height every man stands on (arenas/ground.js)
+    groundAt = CBZ.battleGround.begin({ id: id, surface: DUNE.pal.surface, soft: true, groundAt: ergGround });
     MAP_GROUND = groundAt;
-    duneSkin(world);
+    ergDress(id, cx, cz, gap, groundAt);
+    ergSkin(world);
   } else if (id === "city") {
     // THE REAL FABRIC. Eight blocks square is 490 m of street — big enough
     // that an army has to cross ground it does not own, small enough that
@@ -296,6 +390,13 @@ function buildMap(id) {
   }
 
   if (gapOverride) gap = gapOverride;
+  /* EVERY OTHER GROUND (the yard, the downtown, a raised venue) is hard:
+     a blast scorches it and breaks what stands on it, it does not dig. The
+     dressing goes where the venue left open ground. */
+  if (id !== "water" && !M.erg) {
+    groundAt = CBZ.battleGround.begin({ id: id, surface: "concrete", soft: false, groundAt: groundAt });
+    venueDress(id, cx, cz, gap, groundAt);
+  }
   /* HOW MUCH GROUND IS THERE IN THIS GROUND? One number, measured off the
      same groundAt the men will stand on, over the same window they will
      fight in — so the audit can state it and the checker can hold the map
@@ -334,8 +435,27 @@ function buildMap(id) {
   const camFloor = (water && !SWIM_OLD)
     ? function () { return SEA.seabed + 2.2; }
     : function (x, z) { return groundAt(x, z) + 1.6; };
+  /* THE COVER, ALL OF IT: the props' points are in; add every wall the
+     venue registered and every place the ground itself hides a man. */
+  if (id !== "water") {
+    const C = CBZ.battleCover;
+    C.fromColliders(cx, cz, gap * 0.5 + 160);
+    if (M.erg) C.scanGround(cx, cz, gap * 0.5 + 60, 150, 6, { min: 0.95, kind: DUNE.pal.form === "dune" ? "crest" : DUNE.pal.form === "drift" ? "drift" : "fold" });
+    CBZ.battleDress.flush();
+    CBZ.battleGround.arm();
+    // sand off the crests, spindrift off the drifts
+    if (M.erg && DUNE.pal.form !== "roll") {
+      const crests = duneCrests(cx, cz, 330, 330, 7);
+      const snowy = DUNE.pal.form === "drift";
+      CBZ.battleGround.blowing(crests, { wx: DUNE.wx, wz: DUNE.wz, per: snowy ? 10 : 8, travel: snowy ? 12 : 8,
+        color: snowy ? [0.95, 0.97, 1.0] : [0.86, 0.7, 0.48], size: snowy ? 0.06 : 0.045, spread: 5 });
+    }
+  }
   return {
     id: id, gap: gap, cx: cx, cz: cz, groundAt: groundAt, relief: relief,
+    // THE COVER the battle core may ask for (battle/core/host.js): points
+    // that hide a man from a threat, props, walls, crests, crater lips
+    coverNear: CBZ.battleCover.near, coverFrom: CBZ.battleCover.from,
     water: water, bodyY: bodyY, camFloor: camFloor,
     /* TERRAIN JOINS THE SIGHT LINE — but only where groundAt is genuinely
        TERRAIN. The dunes map's height function is the desert's own analytic

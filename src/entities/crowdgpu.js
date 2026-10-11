@@ -206,7 +206,8 @@
      it is built: it hangs the host's own kit on the rig (NPC War: the helmet
      its men.js puts on a soldier, the rifle actorweapons.js puts in his hand)
      and tags each mesh: userData.cgGear = 1 shown with a helmet, 2 shown with
-     a rifle, 3 shown WITHOUT a helmet (the hair a helmet would flatten), and
+     a rifle, 3 shown WITHOUT a helmet (the hair a helmet would flatten), 4
+     shown with KIT (entities/combatkit.js's carrier, pouches, knee pads), and
      optionally userData.cgSlot (8 = the per-instance gear colour). Each
      instance says what it wears with gearCode({helmet: hex, rifle: true}).
      Register before the first bake; without any, the bake is what it was. */
@@ -251,10 +252,12 @@
       let c = mat.color ? mat.color : new THREE.Color(1, 1, 1);
       // a decal's white base colour means "the texture decides": the eye line is dark
       if ((slot & 15) === S_FIXED && mat.map && c.r > 0.9 && c.g > 0.9 && c.b > 0.9) c = new THREE.Color(0x2a2220);
+      // vertex-painted hardware (entities/combatkit.js's carrier and pads): its own colours
+      const VC = (slot & 15) === S_FIXED && mat.vertexColors && geo.attributes.color ? geo.attributes.color : null;
       for (let v = 0; v < P.count; v++) {
         pos.push(P.getX(v), P.getY(v), P.getZ(v));
         nrm.push(N.getX(v), N.getY(v), N.getZ(v));
-        col.push(c.r, c.g, c.b);
+        if (VC) col.push(VC.getX(v), VC.getY(v), VC.getZ(v)); else col.push(c.r, c.g, c.b);
         part.push(b, slot);
       }
       if (geo.index) { const I = geo.index; for (let k = 0; k < I.count; k++) idx.push(base + I.getX(k)); }
@@ -418,11 +421,11 @@
   // walks on along its own velocity (capped at 0.6 s), its legs on its own
   // rate-driven gait. Not in GLSL_SKIN: the atlas bake has no instances.
   const GLSL_VEL = "attribute vec4 iVel;\nvec3 cgBase() { return iPos.xyz + vec3(iVel.x, 0.0, iVel.y) * clamp(uTime - iVel.z, 0.0, 0.6); }";
-  // WHAT THIS PERSON WEARS: iVel.w = gear code (bit 0 helmet, bit 1 rifle,
+  // WHAT THIS PERSON WEARS: iVel.w = gear code (bit 0 helmet, bit 1 rifle, bit 2 kit,
   // bits 8..15 the helmet's palette index); a part's class is aPart.y / 16
   const GLSL_GEAR = "bool cgWorn() {\n  float g = floor(aPart.y / 16.0 + 0.001);\n  if (g < 0.5) return true;\n" +
     "  bool helm = mod(iVel.w, 2.0) > 0.5, gun = mod(floor(iVel.w / 2.0), 2.0) > 0.5;\n" +
-    "  if (g < 1.5) return helm;\n  if (g < 2.5) return gun;\n  return !helm;\n}\n";
+    "  if (g < 1.5) return helm;\n  if (g < 2.5) return gun;\n  if (g < 3.5) return !helm;\n  return mod(floor(iVel.w / 4.0), 2.0) > 0.5;\n}\n";
 
   function capsOk() {
     const R = CBZ.renderer;
@@ -846,7 +849,7 @@
     // what one person wears, for layer.add's last argument
     gearCode: function (o) {
       if (!o) return 0;
-      return (o.helmet != null ? 1 : 0) + (o.rifle ? 2 : 0) + (o.helmet != null ? 256 * palIndex(o.helmet) : 0);
+      return (o.helmet != null ? 1 : 0) + (o.rifle ? 2 : 0) + (o.kit ? 4 : 0) + (o.helmet != null ? 256 * palIndex(o.helmet) : 0);
     },
     // the GPU clock (s) the shaders animate on: a caller that hands a moving
     // body's gait phase "as of now" converts it with this

@@ -163,6 +163,7 @@ function rebuildFine() {
   for (let i = 0; i < men.length; i++) {
     const m = men[i];
     if (m.dead) continue;
+    if (!PHYS.mixed && (m.beast || m.vehicle)) PHYS.mixed = true;   // bodies of another weight: momentum matters now
     const k = gridKey(Math.floor(m.pos.x / FINE), Math.floor(m.pos.z / FINE));
     let a = fine.get(k);
     if (!a) { a = []; fine.set(k, a); }
@@ -224,6 +225,7 @@ function push2(m, o, k) {
   // shoving it out of the gorilla's fist (or out of its own flight arc) is
   // the pass correcting an "overlap" that is the entire point of the move
   if (o._apeHeld || m._apeHeld || o._apeFlying || m._apeFlying) return;
+  if (o._tossed || m._tossed) return;      // in a trunk, or in the air (flyStep)
   // clearance is the PAIR's, not the species': a man by a man keeps the old
   // 0.9, a man by a bear keeps more, and the radii are clamped at build so
   // the widest pair (2.2) still fits the FINE cell's completeness bound
@@ -244,9 +246,24 @@ function push2(m, o, k) {
   // wrong for two bodies genuinely inside each other — that has to be gone
   // THIS step or it is on screen. Inside shoulder width the correction is
   // full; outside it, the soft pass keeps the crowd from jittering.
-  const push = (clr - d) * 0.5 * (d < clr * 0.69 ? 1 : k);
-  m.pos.x -= ux * push; m.pos.z -= uz * push;
-  o.pos.x += ux * push; o.pos.z += uz * push;
+  const total = (clr - d) * (d < clr * 0.69 ? 1 : k);
+  /* AND THE SHOVE IS SPLIT BY MASS. It used to be 50/50 whoever the two
+     were, which is how a crowd of men walked a six-tonne bull elephant
+     backwards at up to 13 m/s (measured, 100 men v 1 bull, node sim): every
+     man that touched it moved it as far as it moved him. Contact is a
+     momentum question: each body gives way in proportion to the OTHER one's
+     mass, so a man by a man is still exactly half each (equal masses, the
+     same arithmetic to the last bit, which keeps the riflemen's overlapPeak
+     where it was), a man against an elephant takes 98.7% of it, and a
+     hundred men leaning on a bull move it by what a hundred 80 kg bodies
+     can: about nothing. */
+  const km = bodyKg(m), ko = bodyKg(o);
+  const wm = km === ko ? 0.5 : ko / (km + ko);
+  const pm = total * wm, po = total - pm;
+  m.pos.x -= ux * pm; m.pos.z -= uz * pm;
+  o.pos.x += ux * po; o.pos.z += uz * po;
+  // a heavy body MOVING into a light one is not a shove, it is an impact
+  if (PHYS.mixed && (km > ko * 3 || ko > km * 3)) contactImpulse(m, o, ux, uz, km, ko);
   sepFixed++;
   // a shove is a move, and a move has to answer to the walls. Marking them
   // makes the NEXT step resolve them instead of every one of them now: a
@@ -307,6 +324,7 @@ function pinnedPass() {
 function unpin(m, o) {
   if (o.dead || o === m) return;
   if (m.vehicle || o.vehicle) return;      // pushVehicle already put him outside the hull
+  if (o._tossed || m._tossed || o._apeHeld || m._apeHeld || o._apeFlying || m._apeFlying) return;
   // the PAIR's clearance and the PAIR's overlap line, exactly as push2 and
   // the probe read them — a lion pinned against a hangar is the same fault
   // as a man pinned against a facade, and a man's numbers are still 0.9/0.62
@@ -319,25 +337,31 @@ function unpin(m, o) {
     const ang = ((m.i * 37 + o.i * 91) % 360) * Math.PI / 180;
     ux = Math.cos(ang); uz = Math.sin(ang); d = 1e-4;
   } else { ux = dx / d; uz = dz / d; }
-  const push = (clr - d) * 0.5;
-  const gotM = shove(m, -ux, -uz, push);
-  const gotO = shove(o, ux, uz, push);
-  const owed = Math.max(0, push - gotM) + Math.max(0, push - gotO);
+  // by mass, as push2: the heavy body keeps its ground and the light one
+  // is the one that finds somewhere to go
+  const km = bodyKg(m), ko = bodyKg(o);
+  const wm = km === ko ? 0.5 : ko / (km + ko);
+  const pushM = (clr - d) * wm, pushO = (clr - d) - pushM;
+  const gotM = shove(m, -ux, -uz, pushM);
+  const gotO = shove(o, ux, uz, pushO);
+  const owed = Math.max(0, pushM - gotM) + Math.max(0, pushO - gotO);
   if (owed > 0.01) {
-    if (push - gotM > 0.01) shove(o, ux, uz, owed);
-    else if (push - gotO > 0.01) shove(m, -ux, -uz, owed);
+    if (pushM - gotM > 0.01) shove(o, ux, uz, owed);
+    else if (pushO - gotO > 0.01) shove(m, -ux, -uz, owed);
   }
   dx = o.pos.x - m.pos.x; dz = o.pos.z - m.pos.z;
   if (dx * dx + dz * dz < deep * deep) {
     const sgn = ((m.i * 37 + o.i * 91) & 1) ? 1 : -1;
-    shove(m, uz * sgn, -ux * sgn, deep);                   // along the wall
-    shove(o, -uz * sgn, ux * sgn, deep);
+    shove(m, uz * sgn, -ux * sgn, deep * wm * 2);          // along the wall
+    shove(o, -uz * sgn, ux * sgn, deep * (1 - wm) * 2);
     dx = o.pos.x - m.pos.x; dz = o.pos.z - m.pos.z;
     if (dx * dx + dz * dz < deep * deep) {
       // nowhere left to put them: the frame wins, the world gets the next step
-      const e = (deep - Math.sqrt(dx * dx + dz * dz)) * 0.5 + 0.01;
-      m.pos.x -= ux * e; m.pos.z -= uz * e;
-      o.pos.x += ux * e; o.pos.z += uz * e;
+      const e0 = deep - Math.sqrt(dx * dx + dz * dz);
+      const eM = km === ko ? e0 * 0.5 + 0.01 : (e0 + 0.02) * wm;
+      const eO = km === ko ? eM : (e0 + 0.02) * (1 - wm);
+      m.pos.x -= ux * eM; m.pos.z -= uz * eM;
+      o.pos.x += ux * eO; o.pos.z += uz * eO;
     }
   }
   m.resT = 0; o.resT = 0;
@@ -498,3 +522,397 @@ function navStep(m, out) {
 
 const teamCOM = { red: { x: 0, z: 0 }, blue: { x: 0, z: 0 } };
 const HUNT = { red: false, blue: false };
+
+/* ============================================================ MASS AND MOMENTUM
+   Bodies on this field were circles that pushed each other half and half,
+   flew at whatever speed a move file typed, and fell at 18 m/s². This is the
+   one place that knows what a body WEIGHS and what happens when it is hit:
+
+     bodyKg(m)            kg. A hull's stats.mass, a species file's own
+                          individual (m._mass: the bull is 6 t, the calf
+                          0.4), else the anatomy row (weapons/ballistics.js)
+                          x the individual's size cubed. A man is 80.
+     contactImpulse       a heavy body MOVING into a light one (a charge):
+                          momentum both ways, restitution 0.2. Men bounce off
+                          a bull; the bull does not notice the men.
+     addKnock(b, dvx, dvz, by, o)   a velocity change on a living body: it
+                          slides on its feet against friction (stepKnock), a
+                          man hit past 2.5 m/s goes down, past 5 m/s a body
+                          light enough leaves the ground (flingBody).
+     flingBody / stepTossed   a body in the air: ballistic at 9.81, walls
+                          stop it (and hurt), bodies in its path are bowled by
+                          momentum, the landing speed is the injury.
+     blastBodies          NPC War's own detonation sweep (the mode's `blast`,
+                          see damage.js): overpressure and impulse by scaled
+                          distance, a push of impulse / mass, and the debris.
+     impactDmg(b, dv)     blunt trauma from a velocity change, as a share of
+                          the body's own hp (a big animal's hp already scales
+                          with its size): nothing under 3 m/s, about half a
+                          man at 11 m/s (a 6 m fall), all of him at 14.
+     deathDv(m, imp)      the speed the killing blow left the body with, so
+                          a ragdoll is thrown by momentum and not by cause.
+
+   A WAR OF MEN PAYS NOTHING. Equal masses split a shove exactly as they always
+   did (bit for bit), and the momentum passes only run once a body of another
+   weight is on the field (PHYS.mixed) or something has been knocked. */
+const MAN_KG = 80;
+const PHYS_G = 9.81;            // m/s². The toss used 18: a man thrown by a trunk hung in the air like a stone
+const PHYS = { mixed: false, knock: [], hulls: [], strike: false,
+  audit: { impacts: 0, knocks: 0, downs: 0, flings: 0, landings: 0, wallSlams: 0, bowled: 0, crushes: 0, blasts: 0, maxDv: 0 } };
+function bodyKg(m) {
+  if (!m) return MAN_KG;
+  if (m._mass > 0) return m._mass;
+  if (!m.beast) return MAN_KG;
+  const sp = m.species || {};
+  let kg = 0;
+  const B = CBZ.ballistics;
+  if (B && B.anatomyOf && sp.id) { try { kg = +B.anatomyOf(sp.id, m).mass || 0; } catch (e) {} }
+  if (!(kg > 0) && sp.mass > 0) kg = sp.mass;
+  if (!(kg > 0)) { const s = sp.scale || 1; kg = 125 * s * s * s; }
+  const k = m._sizeMul > 0 ? m._sizeMul : 1;
+  kg *= k * k * k;
+  m._mass = kg;              // one number: systems/bodymass.js reads the same field
+  return kg;
+}
+function impactDmg(b, dv) {
+  const x = dv - 3;
+  if (!(x > 0)) return 0;
+  const hp = (b.maxHp > 0 && b.maxHp < 1e8) ? b.maxHp : 100;
+  return hp * 0.0085 * x * x;
+}
+// the speed a killing blow left a body with: its own momentum change, or the
+// slide / flight it was already in when it died
+function deathDv(m, imp) {
+  let dv = 0;
+  if (imp && imp.J > 0) dv = imp.J / bodyKg(m);
+  const kv = Math.hypot(m.kvx || 0, m.kvz || 0);
+  if (kv > dv) dv = kv;
+  const T = m._tossed;
+  if (T && T.vx != null) { const tv = Math.hypot(T.vx, T.vy, T.vz); if (tv > dv) dv = tv; }
+  return dv;
+}
+
+/* HOW FAST EACH BODY IS GOING, measured as what it did THIS sub-step under
+   its own legs (and its own slide): where it was before stepMan, where it is
+   after. Never across the separation pass: a deep overlap corrected by a
+   metre in one step is not a man running at 20 m/s, and reading it as one
+   fed every shove back in as a collision (measured: 22 m/s "impacts" in a
+   crowd). physPre also lists the hulls a run-over can be asked about. */
+const V_CAP = 16;
+function physPre(sdt) {
+  if (!PHYS.mixed && !PHYS.knock.length) return;
+  PHYS.hulls.length = 0;
+  for (let i = 0; i < men.length; i++) {
+    const m = men[i];
+    if (m.dead) continue;
+    m._px = m.pos.x; m._pz = m.pos.z;
+    if (m.vehicle && !m.air) PHYS.hulls.push(m);
+  }
+}
+function physMid(sdt) {
+  if (!PHYS.mixed && !PHYS.knock.length) return;
+  const inv = 1 / Math.max(1e-4, sdt);
+  for (let i = 0; i < men.length; i++) {
+    const m = men[i];
+    if (m.dead || m._px == null) continue;
+    let vx = (m.pos.x - m._px) * inv, vz = (m.pos.z - m._pz) * inv;
+    const v = Math.hypot(vx, vz);
+    if (v > V_CAP) { vx *= V_CAP / v; vz *= V_CAP / v; }
+    m._vx = vx; m._vz = vz;
+  }
+}
+
+/* A HEAVY BODY MOVING INTO A LIGHT ONE. Called by push2 for a pair whose
+   masses differ by 3x or more. The closing speed along the line between
+   them is a collision: J = (1 + e) v m1 m2 / (m1 + m2), each takes J over
+   its own mass. A bull at 6 m/s into a man: he leaves at 7 m/s and goes
+   down; the bull loses 0.1 m/s. A crowd leaning on a standing bull has no
+   closing speed and is just a shove (mass-split above). */
+const RESTITUTION = 0.2;
+function contactImpulse(m, o, ux, uz, km, ko) {
+  const vrel = ((m._vx || 0) - (o._vx || 0)) * ux + ((m._vz || 0) - (o._vz || 0)) * uz;
+  if (vrel < 1.5) return;
+  const light = km < ko ? m : o, heavy = light === m ? o : m;
+  if (light._impBy === heavy && light._impT > simT) return;
+  light._impBy = heavy; light._impT = simT + 0.45;
+  const J = (1 + RESTITUTION) * vrel * km * ko / (km + ko);
+  const dvO = J / ko, dvM = J / km;
+  PHYS.audit.impacts++;
+  addKnock(o, ux * dvO, uz * dvO, m, { hurt: !o.beast || !m.beast || ko < km });
+  addKnock(m, -ux * dvM, -uz * dvM, o, { hurt: !m.beast || !o.beast || km < ko });
+}
+
+/* A VELOCITY CHANGE ON A LIVING BODY. o = { hurt, vy, noDown } */
+function addKnock(b, dvx, dvz, by, o) {
+  if (!b || b.dead || b.fled || b.vehicle || b.air || b._apeHeld || b._apeFlying) return;
+  o = o || {};
+  const dv = Math.hypot(dvx, dvz, o.vy || 0);
+  if (dv < 0.05) return;
+  if (dv > PHYS.audit.maxDv) PHYS.audit.maxDv = dv;
+  if (o.hurt) {
+    const dmg = impactDmg(b, dv);
+    if (dmg > 0) {
+      hurtMan(b, dmg, { by: by && by.team ? by : null, byTeam: by && by.team, cause: "impact", J: dv * bodyKg(b), dvx: dvx, dvz: dvz,
+        fromX: b.pos.x - dvx, fromZ: b.pos.z - dvz });
+      if (b.dead) return;
+    }
+  }
+  const kg = bodyKg(b);
+  // OFF THE GROUND: hard enough, light enough. A man hit at 7 m/s is thrown;
+  // a lion takes the same as a shove it skids out of; an elephant never flies.
+  if (b._tossed) { const T = b._tossed; if (T.vx != null && T.lift <= T.age) { T.vx += dvx; T.vz += dvz; T.vy += o.vy || 0; } return; }
+  if ((dv > 5.5 || (o.vy || 0) > 2.5) && kg < 450) {
+    flingBody(b, (b.kvx || 0) + dvx, Math.max(o.vy || 0, dv * 0.3), (b.kvz || 0) + dvz, { by: by });
+    b.kvx = 0; b.kvz = 0;
+    return;
+  }
+  b.kvx = (b.kvx || 0) + dvx; b.kvz = (b.kvz || 0) + dvz;
+  if (!b._knock) { b._knock = true; PHYS.knock.push(b); }
+  PHYS.audit.knocks++;
+  // a man struck past what his legs can take goes down along the blow
+  if (!b.beast && !o.noDown && dv > 2.5) knockBody(b, dvx / dv, dvz / dv, 0.8 + dv * 0.18, Math.min(1, dv / 8));
+}
+function knockBody(b, dx, dz, dur, power) {
+  PHYS.audit.downs++;
+  const V = CBZ.verbs;
+  if (V && V.knockdown && b.char && b.char.parts) {
+    try { if (V.knockdown(b, { dir: { x: dx, z: dz }, power: power, dur: dur })) return; } catch (e) {}
+  }
+  b.ko = Math.max(b.ko || 0, dur);
+  b._koMine = true;
+  if (!b._knock) { b._knock = true; PHYS.knock.push(b); }
+}
+/* THE SLIDE. A struck body keeps the velocity it was given and loses it to
+   friction: on its feet, braced, about 0.8 g; a body down skids at 0.6 g.
+   A wall that eats the move at speed is a second impact. */
+function stepKnock(sdt) {
+  const L = PHYS.knock;
+  for (let i = L.length - 1; i >= 0; i--) {
+    const b = L[i];
+    if (b._koMine) {
+      b.ko = (b.ko || 0) - sdt;
+      if (b.ko <= 0) { b.ko = 0; b._koMine = false; }
+    }
+    const kvx = b.kvx || 0, kvz = b.kvz || 0, sp = Math.hypot(kvx, kvz);
+    if (b.dead || b.fled || b._tossed || sp < 0.04) {
+      b.kvx = 0; b.kvz = 0;
+      if (b.dead || b.fled || !b._koMine) { b._knock = false; L.splice(i, 1); }
+      continue;
+    }
+    const ox = b.pos.x, oz = b.pos.z;
+    b.pos.x += kvx * sdt; b.pos.z += kvz * sdt;
+    CBZ.micro.resolveCircle(b.pos, b.rad || 0.45, b.pos.y, 1.8);
+    b.resT = 0;
+    const want = sp * sdt, got = Math.hypot(b.pos.x - ox, b.pos.z - oz);
+    if (sp > 4 && got < want * 0.5) {
+      // into a wall: the wall is the impact now
+      PHYS.audit.wallSlams++;
+      const dmg = impactDmg(b, sp * 0.9);
+      b.kvx = -kvx * 0.15; b.kvz = -kvz * 0.15;
+      if (dmg > 0) hurtMan(b, dmg, { cause: "impact", J: sp * bodyKg(b), fromX: ox - kvx, fromZ: oz - kvz });
+      continue;
+    }
+    const mu = (b.ko > 0 || knockedDown(b)) ? 0.6 : (b.beast ? 1.0 : 0.8);
+    const ns = Math.max(0, sp - mu * PHYS_G * sdt);
+    b.kvx = kvx * ns / sp; b.kvz = kvz * ns / sp;
+  }
+}
+
+/* ============================================================ BODIES IN THE AIR
+   One integrator for anything thrown: the elephant's trunk throw, a man a
+   charge or a blast lifted. Ballistic at 9.81, swept through the walls,
+   bowling whoever is in the way by momentum, hurt by how fast it arrives.
+   The body is nobody else's while it flies (step.js routes _tossed here,
+   push2 and the pinned pass stand down). */
+function flingBody(b, vx, vy, vz, o) {
+  if (!b || b.dead || b.vehicle) return null;
+  o = o || {};
+  PHYS.audit.flings++;
+  if (b.beast && b._atkAnim >= 0 && CBZ.creatureEndAttack) { try { CBZ.creatureEndAttack(b); } catch (e) {} }
+  b._tossed = {
+    by: o.by || null, age: 0, lift: o.lift || 0, carry: o.carry || null, dmg: o.dmg || 0, down: 0,
+    x0: b.pos.x, y0: b.pos.y, z0: b.pos.z, vx: vx, vy: vy, vz: vz, hit: false,
+    rx: b.group ? b.group.rotation.x : 0, spin: o.spin != null ? o.spin : 3 + Math.hypot(vx, vz) * 0.5,
+  };
+  return b._tossed;
+}
+const _flyNear = [];
+function stepTossed(t, sdt) {
+  const T = t._tossed;
+  if (!T) return;
+  if (t.dead) { if (t.group && !t.ragdoll) t.group.rotation.x = T.rx; t._tossed = null; return; }
+  T.age += sdt;
+  if (T.down > 0) {
+    // on the floor, getting up
+    T.down -= sdt;
+    if (T.down <= 0) { if (t.group) t.group.rotation.x = T.rx; t._tossed = null; t.thinkAt = simT; }
+    return;
+  }
+  const c = T.carry;
+  if (T.age < T.lift && c && !c.dead) {
+    // up into the trunk, in front of the head
+    const h = c.heading || 0, k = T.age / T.lift;
+    const tx = c.pos.x + Math.cos(h) * (c.noseR || 2) * 1.05, tz = c.pos.z + Math.sin(h) * (c.noseR || 2) * 1.05;
+    const ty = c.pos.y + (c.eyeH || 2.5) * 1.05;
+    t.pos.set(T.x0 + (tx - T.x0) * k, T.y0 + (ty - T.y0) * k, T.z0 + (tz - T.z0) * k);
+    if (t.group) t.group.rotation.x = T.rx + k * 0.9;
+    return;
+  }
+  T.vy -= PHYS_G * sdt;
+  const ox = t.pos.x, oz = t.pos.z;
+  t.pos.x += T.vx * sdt; t.pos.y += T.vy * sdt; t.pos.z += T.vz * sdt;
+  if (t.group) t.group.rotation.x += sdt * T.spin;
+  // the walls: swept by the same resolve the walkers answer to
+  const vh = Math.hypot(T.vx, T.vz), want = vh * sdt;
+  CBZ.micro.resolveCircle(t.pos, t.rad || 0.45, t.pos.y, 1.8);
+  if (want > 0.02 && Math.hypot(t.pos.x - ox, t.pos.z - oz) < want * 0.5) {
+    PHYS.audit.wallSlams++;
+    const dmg = impactDmg(t, vh);
+    T.vx *= -0.15; T.vz *= -0.15;
+    if (dmg > 0) {
+      hurtMan(t, dmg, { by: T.by && !T.by.dead ? T.by : null, byTeam: T.by && T.by.team, cause: "impact", J: vh * bodyKg(t), fromX: ox - T.vx, fromZ: oz - T.vz });
+      if (t.dead) { t._tossed = null; return; }
+    }
+  }
+  // whoever is standing where it arrives is hit by a body, mass for mass
+  if (!T.hit && vh > 4) {
+    const a = fineNear(t.pos.x, t.pos.z, 2.5, _flyNear);
+    const kt = bodyKg(t);
+    for (let i = 0; i < a.length; i++) {
+      const o = a[i];
+      if (o === t || o.dead || o.vehicle || o._tossed || o._apeHeld || o === T.by) continue;
+      const dx = o.pos.x - t.pos.x, dz = o.pos.z - t.pos.z, d = Math.hypot(dx, dz);
+      const r = (o.rad || 0.45) + (t.rad || 0.45);
+      if (d > r || t.pos.y - o.pos.y > (o.bodyH || 1.8) || t.pos.y < o.pos.y - 0.5) continue;
+      const ux = d > 1e-3 ? dx / d : T.vx / vh, uz = d > 1e-3 ? dz / d : T.vz / vh;
+      const vrel = (T.vx - (o._vx || 0)) * ux + (T.vz - (o._vz || 0)) * uz;
+      if (vrel <= 0) continue;
+      const ko = bodyKg(o);
+      const J = (1 + RESTITUTION) * vrel * kt * ko / (kt + ko);
+      T.vx -= ux * J / kt; T.vz -= uz * J / kt;
+      T.hit = true;
+      PHYS.audit.bowled++;
+      addKnock(o, ux * J / ko, uz * J / ko, T.by, { hurt: true });
+      break;
+    }
+  }
+  const g = MAP.bodyY(t, t.pos.x, t.pos.z);
+  if ((t.pos.y <= g && T.vy < 0) || T.age > 12) {
+    t.pos.y = g;
+    PHYS.audit.landings++;
+    // the landing is the injury: the fall stopped dead, and part of the skid
+    const vImp = Math.abs(T.vy) + 0.3 * Math.hypot(T.vx, T.vz);
+    if (vImp > PHYS.audit.maxDv) PHYS.audit.maxDv = vImp;
+    const by = T.by && !T.by.dead ? T.by : null;
+    const dmg = impactDmg(t, vImp) + (T.dmg || 0);
+    if (dmg > 0) hurtMan(t, dmg, { by: by, byTeam: T.by ? T.by.team : null, cause: "impact", J: vImp * bodyKg(t),
+      dvx: T.vx, dvz: T.vz, fromX: t.pos.x - T.vx, fromZ: t.pos.z - T.vz });
+    if (CBZ.shake && vImp > 6 && camDist2(t.pos) < 40 * 40) CBZ.shake(Math.min(0.5, vImp * 0.04));
+    if (t.dead) { t._tossed = null; return; }
+    T.down = t.beast ? 0.5 + Math.min(1, vImp * 0.06) : 1.0 + Math.min(1.4, vImp * 0.08);
+    if (t.group) t.group.rotation.x = T.rx + Math.PI / 2 * (t.beast ? 0.8 : 1);
+    // and he skids what the ground did not take
+    t.kvx = T.vx * 0.5; t.kvz = T.vz * 0.5;
+    if (!t._knock && Math.hypot(t.kvx, t.kvz) > 0.1) { t._knock = true; PHYS.knock.push(t); }
+    T.vx = T.vy = T.vz = 0;
+  }
+}
+
+/* ============================================================ A DETONATION
+   NPC War owns its blast (modecaps asks the mode's `blast` first). The old
+   shared sweep was one ring: everyone inside 0.55 R took 1e6 and everyone
+   outside it took nothing and did not move, so a grenade killed a six-tonne
+   elephant as dead as a man and the man at 0.6 R stood there untouched.
+
+   Now it is pressure and impulse by scaled distance Z = d / R, with R the
+   page's own radius for the charge:
+     damage   BLAST_DMG x power x (0.55 / Z)² inside the core (a man there
+              dies, as before; hp already carries a body's size, so an
+              elephant at the same spot takes the same number and lives),
+              tapering to nothing at R;
+     impulse  delta-v = BLAST_DV x power x (0.55 / Z)^1.5 x (80 / kg)^(1/3):
+              the impulse goes with the area a body shows (kg^(2/3)) and is
+              divided by its mass, so a man is thrown and a bull rocks;
+     corpses  thrown by city/ragdoll's own blast (CBZ.ragdollBlast) first, so
+              a body this blast kills is not thrown twice;
+     debris   loose pieces already lying there are kicked (CBZ.debris.impulse)
+              and the crater throws grit and dust (CBZ.debris.chips).
+   Hulls keep the old ring: inside 0.55 R the armour answers (hurtVehicle). */
+const BLAST_DMG = 420, BLAST_DV = 9;
+const _blastL = [];
+function blastBodies(x, y, z, R, power, opts) {
+  if (!(R > 0)) return 0;
+  power = power > 0 ? power : 1;
+  opts = opts || {};
+  PHYS.audit.blasts++;
+  if (CBZ.ragdollBlast) { try { CBZ.ragdollBlast(x, z, R, power); } catch (e) {} }
+  rebuildFine();
+  const near = fineNear(x, z, R + 1);
+  _blastL.length = 0;
+  for (let i = 0; i < near.length; i++) _blastL.push(near[i]);
+  const by = opts.by && opts.by.team ? opts.by : null;
+  let n = 0;
+  for (let i = 0; i < _blastL.length; i++) {
+    const b = _blastL[i];
+    if (b.dead || b.fled || b.air) continue;
+    const dx = b.pos.x - x, dz = b.pos.z - z, dy = (b.pos.y + (b.aimY || 1)) - (y || 0);
+    const d = Math.hypot(dx, dz, dy);
+    if (d >= R) continue;
+    const Z = Math.max(0.12, d / R);
+    if (b.vehicle) {
+      if (Z < 0.55) { hurtMan(b, 1e6, { by: by, byTeam: by && by.team, cause: opts.cause || "explosion", fromX: x, fromZ: z }); n++; }
+      continue;
+    }
+    const taper = Z <= 0.55 ? 1 : (1 - Z) / 0.45;
+    const kg = bodyKg(b);
+    const dv = Math.min(30, BLAST_DV * power * Math.pow(0.55 / Z, 1.5) * taper * Math.cbrt(MAN_KG / kg));
+    const dh = Math.hypot(dx, dz);
+    let ux, uz;
+    if (dh > 1e-3) { ux = dx / dh; uz = dz / dh; }
+    else { const a = ((b.i || 0) * 37 % 360) * Math.PI / 180; ux = Math.cos(a); uz = Math.sin(a); }
+    const dmg = BLAST_DMG * power * (0.55 / Z) * (0.55 / Z) * taper;
+    hurtMan(b, dmg, { by: by, byTeam: (by && by.team) || opts.team || null, cause: "bomb", fromX: x, fromZ: z,
+      J: dv * kg, dvx: ux * dv * 0.9, dvz: uz * dv * 0.9, dvy: dv * 0.45 });
+    if (!b.dead && dv > 0.3) addKnock(b, ux * dv * 0.9, uz * dv * 0.9, by, { vy: dv * 0.45 });
+    n++;
+  }
+  const D = CBZ.debris;
+  if (D) {
+    if (D.impulse) { try { D.impulse(x, y || 0, z, R * 1.2, 8 * power); } catch (e) {} }
+    if (D.chips && !(MAP && MAP.water) && camDist2({ x: x, y: y || 0, z: z }) < 400 * 400) {
+      try { D.chips(x, (y || 0) + 0.1, z, { kind: "dirt", count: Math.round(10 + 14 * Math.min(2, power)), power: Math.min(3, power * 1.4), dir: { x: 0, y: 1, z: 0 }, dust: true }); } catch (e) {}
+    }
+  }
+  return n;
+}
+
+/* ============================================================ HULLS RUN THINGS OVER
+   city/carstrike.js already knows what a moving car does to a body: the
+   hull's real side profile, swept every ragdoll sub-step, the bumper
+   driving the shins, the wrap, the throw, the tyres climbing a body under
+   them, and momentum paid back to the car. A tank is a car to it once the
+   hull answers the names it reads: v (the drive's own speed, so the hull
+   genuinely loses the momentum the body takes), dims, a body kind for the
+   profile, a mass factor, and no windscreen to star. And CBZ.cityCars is
+   the list it asks for bodies lying in a moving car's path, so a corpse in
+   front of a tank is driven over by the tank's shape. */
+function hullForStrike(u) {
+  if (u._csReady) return u;
+  u._csReady = true;
+  Object.defineProperty(u, "v", { configurable: true, get: function () { return this.ds ? this.ds.v : 0; },
+    set: function (x) { if (this.ds && isFinite(x)) this.ds.v = x; } });
+  u.dims = { width: u.vwid * 2, length: u.vlen * 2, height: u.vheight || 2.4, wheelbase: u.vlen * 1.2 };
+  u._bk = (u.def && u.def.drive === "wheeled" && (u.vheight || 2) < 2.3) ? "suv" : "semi";
+  u.mass = (u._mass || 10000) / 1350;     // carstrike caps the factor at 12 (16 t): plenty to throw a man
+  u.noGlass = true;
+  return u;
+}
+function physPost(sdt) {
+  if (!PHYS.hulls.length || !CBZ.carStrike) return;
+  if (!CBZ.cityCars) { CBZ.cityCars = PHYS.hullsLive = []; }
+  if (PHYS.hullsLive) {
+    PHYS.hullsLive.length = 0;
+    for (let i = 0; i < PHYS.hulls.length; i++) PHYS.hullsLive.push(hullForStrike(PHYS.hulls[i]));
+  }
+  if (CBZ.ragdollCarPost) { try { CBZ.ragdollCarPost(sdt); } catch (e) {} }
+}

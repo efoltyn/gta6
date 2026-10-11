@@ -27,7 +27,10 @@
    4  the rifle: join a side, walk, fire at the enemy through the page's own
       fireShot, hand the rifle back; a soldier who is killed goes back to the
       director and is reported down.
-   5  snow and fields: the two new erg skins build and fight.            */
+   5  snow, fields and the wood: the erg skins build and fight.
+  10  THE GROUND: cover points for the host (crests, props, crater lips), a
+      dug-in position's berm in the height function, a bomb that digs a crater
+      into groundAt and breaks the sandbags beside it.                    */
 import { createRequire } from "node:module";
 import path from "node:path";
 import fs from "node:fs";
@@ -277,8 +280,8 @@ scenario(10, "take over anything: an animal, an elephant's trunk, a tank, a tap;
   }
 });
 
-scenario(5, "snow and fields: the new skins build and fight", async () => {
-  for (const map of ["snow", "grass"]) {
+scenario(5, "snow, fields and the wood: the skins build and fight", async () => {
+  for (const map of ["snow", "grass", "forest"]) {
     const W = boot("?map=" + map + "&red=20&blue=20&rw=ak47&bw=ak47&rt=pro&bt=pro&auto=1&probe=0");
     if (W.err) { check(false, map + ": page threw at boot: " + (W.err.stack || W.err)); continue; }
     await settle();
@@ -295,6 +298,43 @@ scenario(5, "snow and fields: the new skins build and fight", async () => {
    resolver over the same roster) and held to agreeing on who wins and on
    roughly how hard the loser was hit. Printed as a table so a retune of
    either side shows up as numbers, not as a feeling. */
+/* 10  THE GROUND IS COVER, AND IT REMEMBERS. The host hands the battle core
+   cover points (arenas/cover.js); the dunes carry a dug-in position whose
+   berm is in the height function; a bomb digs a crater INTO groundAt and
+   breaks the sandbag wall beside it (the collider goes, the points die). */
+scenario(10, "the ground: cover for the host, earthworks, craters, broken cover", async () => {
+  const W = boot("?map=dunes&red=20&blue=20&rw=ak47&bw=ak47&rt=pro&bt=pro&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  await settle();
+  const a0 = W.B().audit();
+  const T = a0.terrain || {};
+  check(T.cover && T.cover.points > 200 && T.cover.terrain > 50, "the dunes give cover points (" + JSON.stringify(T.cover) + ")");
+  check(T.dress && T.dress.placed > 10, "and real objects to fight from (" + JSON.stringify(T.dress) + ")");
+  run(W, 1);                                     // the armies come in over the first frames
+  const HOST = vm.runInContext("HOST", W.sb), MAP = vm.runInContext("MAP", W.sb);
+  check(typeof HOST.coverNear === "function" && typeof HOST.coverFrom === "function", "the host interface carries coverNear / coverFrom");
+  const red = vm.runInContext("men", W.sb).find((m) => m.team === "red" && !m.dead);
+  const blue = vm.runInContext("men", W.sb).find((m) => m.team === "blue" && !m.dead);
+  const pt = HOST.coverFrom(red.pos.x, red.pos.z, blue.pos.x, blue.pos.z, 60);
+  check(pt && ((blue.pos.x - pt.x) * pt.nx + (blue.pos.z - pt.z) * pt.nz) < 0,
+    "coverFrom finds a point with the cover between a red man and the blue line (" + (pt ? pt.kind + " " + pt.h.toFixed(2) + " m" : "none") + ")");
+  check(T.ground && T.ground.earthworks >= 6, "the dug-in positions are earthworks in the ground (" + (T.ground && T.ground.earthworks) + ")");
+  // a bomb on a sandbag wall: the ground digs, the wall breaks
+  const G = W.CBZ.battleGround, C = W.CBZ.battleCover;
+  const bag = C.list().find((r) => r.kind === "sandbags" && r.alive);
+  check(!!bag, "there is a sandbag wall to break");
+  if (bag) {
+    const x = bag.x + 3, z = bag.z;
+    const before = MAP.groundAt(x, z);
+    const ptsBefore = C.stats().points;
+    G.blast(x, before, z, 18, 2.8, "boom");
+    const after = MAP.groundAt(x, z);
+    check(before - after > 0.4, "a bomb digs a crater into groundAt (" + (before - after).toFixed(2) + " m deep)");
+    check(!bag.alive, "and breaks the sandbag wall 3 m away (hp " + Math.round(bag.hp) + ")");
+    check(C.stats().destroyed >= 1 && C.stats().points !== ptsBefore, "its cover points changed with it (" + ptsBefore + " -> " + C.stats().points + ")");
+  }
+});
+
 scenario(6, "calibration: the headless resolver against the page's own battle", async () => {
   globalThis.window = globalThis; globalThis.CBZ = { game: {} };
   require(path.join(ROOT, "src/weapons/ballistics.js"));   // the resolver asks the same physics the page flies
@@ -313,12 +353,28 @@ scenario(6, "calibration: the headless resolver against the page's own battle", 
   console.log("    ground case                          | page: secs win  red dead/fled  blue dead/fled | resolver: secs win  red dead/fled  blue dead/fled");
   for (const c of CASES) {
     const q = "?map=" + c.g + "&red=" + c.r + "&blue=" + c.b + "&rt=" + c.rt + "&bt=" + c.bt + "&rw=" + encodeURIComponent(c.rw) + "&bw=" + encodeURIComponent(c.bw) + "&auto=1&probe=0";
-    const W = boot(q);
-    if (W.err) { check(false, "page threw: " + W.err); continue; }
-    await settle();
-    run(W, 300);
-    const T = W.sb.__battle.tally();
-    const hold = W.sb.__battle.orders();
+    // the page over three seeds too (one battle on the dunes is decided by who
+    // reached the crest first): its verdict is the majority, its numbers the mean
+    const Ts = [];
+    let hold = null, werr = null;
+    for (let k = 0; k < 3; k++) {
+      const W = boot(q);
+      if (W.err) { werr = W.err; break; }
+      G(W, "_s = " + (421371 + k * 7919));
+      await settle();
+      run(W, 300);
+      Ts.push(W.sb.__battle.tally());
+      hold = W.sb.__battle.orders();
+    }
+    if (werr) { check(false, "page threw: " + werr); continue; }
+    const wins = Ts.map((t) => t.winner || (t.alive.red >= t.alive.blue ? "red" : "blue"));
+    const pW = wins.filter((w) => w === "red").length * 2 > wins.length ? "red" : "blue";
+    const mean = (f) => Ts.reduce((s, t) => s + f(t), 0) / Ts.length;
+    const T = { winner: pW, simT: mean((t) => t.simT),
+      dead: { red: mean((t) => t.dead.red), blue: mean((t) => t.dead.blue) },
+      fled: { red: mean((t) => t.fled.red), blue: mean((t) => t.fled.blue) },
+      routed: { red: mean((t) => t.routed.red), blue: mean((t) => t.routed.blue) },
+      alive: { red: mean((t) => t.alive.red), blue: mean((t) => t.alive.blue) } };
     const spec = { v: 1, ground: c.g, seed: 11, hold: hold.red === "hold" ? "red" : hold.blue === "hold" ? "blue" : null,
       red: { id: "r", name: "R", n: c.r, tier: c.rt, guns: c.rw, air: "none", strikes: 0, queued: 0 },
       blue: { id: "b", name: "B", n: c.b, tier: c.bt, guns: c.bw, air: "none", strikes: 0, queued: 0 } };
@@ -484,6 +540,59 @@ scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawle
   }
 });
 
+/* 12  WHEELS. A Humvee and a loaded M35 against riflemen: both are their own
+   unit files on units/kit/hull.js (not stand-ins), the M35 carries sixteen,
+   rifle ball bounces off the Humvee's B-kit and goes through the truck's
+   sheet metal, the truck puts its men out BEFORE it parks on its firing line
+   (dismountAt > 1.15 x standoff), the .50s fire, and a wheeled hull never
+   corners harder than its grip. */
+scenario(12, "wheels: a Humvee and a loaded M35 v 30 riflemen", async () => {
+  const W = boot("?a=m35_truck*1,hmmwv*1,men*23&b=men&n=25v30&arena=dunes&aw=ak47&bw=ak47&bt=pro&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  run(W, 0.1);                                   // the spawn queue drains; nobody has thought yet
+  const R = W.sb.__battle.roster();
+  const hm = R.find((m) => m.unitId === "hmmwv"), tr = R.find((m) => m.unitId === "m35_truck");
+  check(!!hm && !!tr, "both are on the field (" + R.filter((m) => m.vehicle).map((m) => m.unitId).join(", ") + ")");
+  if (!hm || !tr) return;
+  check(!hm.group.userData.standIn && !tr.group.userData.standIn && !!(hm.rig && hm.rig.mark && tr.rig && tr.rig.mark),
+    "built by their own files on the hull kit (rigs with mark/fire/damage)");
+  const nearest = () => {
+    let d = 1e9;
+    for (const o of W.sb.__battle.roster()) if (o.team === "blue" && !o.dead) d = Math.min(d, Math.hypot(o.pos.x - tr.pos.x, o.pos.z - tr.pos.z));
+    return d;
+  };
+  const d0 = nearest();
+  // 23 men: 5 take the crew seats (2 drivers, the gunner, 2 commanders), 16
+  // the truck's benches, 2 the Humvee's back seats. The armies form ~160 m
+  // apart, inside the truck's 520 m: the men get out on the first think,
+  // where the truck stands, not after it has driven them into the enemy
+  const onFoot = R.filter((m) => m.team === "red" && !m.vehicle && !m.inVeh).length;
+  const crewN = [hm, tr].reduce((s, v) => s + v.seats.filter((x) => x.crew && x.man).length, 0);
+  check(crewN === 5 && onFoot === 18 && tr.dismounted, "5 crew aboard; the 16 riflemen and the Humvee's 2 got out at once (" + crewN + " crew, " + onFoot + " on foot, enemy " + Math.round(d0) + " m)");
+  run(W, 2);
+  const blue = R.find((m) => m.team === "blue" && !m.dead);
+  const sx = blue.pos.x, sz = blue.pos.z;
+  const hp0 = hm.hp;
+  blue.pos.x = hm.pos.x + Math.sin(hm.h) * 80; blue.pos.z = hm.pos.z + Math.cos(hm.h) * 80;
+  for (let k = 0; k < 12; k++) W.sb.hurtMan(hm, 30, { by: blue });
+  check(hm.hp === hp0, "AK ball off the Humvee's armoured front does nothing (hp " + hp0 + " -> " + hm.hp + ")");
+  const tp0 = tr.hp;
+  blue.pos.x = tr.pos.x + Math.sin(tr.h) * 80; blue.pos.z = tr.pos.z + Math.cos(tr.h) * 80;
+  for (let k = 0; k < 3; k++) W.sb.hurtMan(tr, 30, { by: blue });
+  check(tr.hp < tp0 && !tr.dead, "and goes through the truck's sheet metal (hp " + tp0 + " -> " + Math.round(tr.hp) + ")");
+  blue.pos.x = sx; blue.pos.z = sz;
+  let maxLat = 0;
+  const a = run(W, 300, () => {
+    for (const v of [hm, tr]) if (!v.dead) maxLat = Math.max(maxLat, Math.abs(v.ds.v * v.ds.w));
+    return true;
+  });
+  check(hm.shotsF + tr.shotsF > 0, "the .50s fired (" + hm.shotsF + " + " + tr.shotsF + " rounds, " + (hm.kills + tr.kills) + " kills)");
+  check(maxLat <= 0.75 * 9.8, "no wheeled hull cornered harder than its grip (max " + (maxLat / 9.8).toFixed(2) + " g)");
+  check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ")");
+});
+
 /* 11  AIRCRAFT. The vehicle contract's air half (docs/npcwar/ARCHITECTURE.md):
    a helicopter fights from battle positions (masked low, up to fire, down,
    sidestep), a jet flies attack runs at a real height; every unit animates
@@ -566,6 +675,52 @@ scenario(11, "aircraft: an Apache's battle positions, an F-35's attack runs", as
    thing); the new URL names (a b n arena at bt af bf bo sa sb) build the war;
    a best-of-3 at 1-0 scores this round, says the series, and hands the next
    round the score in its URL. Nothing a player reads says RED or BLUE. */
+/* 12  AIR ASSAULT. A UH-60 carries its squad low to a landing zone short of
+   the enemy, hovers at its fast-rope height and puts them down the ropes
+   one at a time; nobody leaves it while it is flying anywhere else. Then
+   its door guns work the area, each only inside its own sector. */
+scenario(12, "air assault: a Black Hawk fast-ropes its squad in, then its door guns fight", async () => {
+  const W = boot("?a=uh60_black_hawk*1,men*15&b=men&n=16v25&arena=dunes&bw=ak47&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  realBoom(W);
+  await settle();
+  run(W, 1);
+  const B = W.sb.__battle, MAP = vm.runInContext("MAP", W.sb);
+  const h = B.roster().find((m) => m.unitId === "uh60_black_hawk");
+  check(!!h && h.air, "the Black Hawk is in the air");
+  if (!h) return;
+  const pax0 = h.seats.filter((s) => !s.crew && s.man).length;
+  check(pax0 === 11, "eleven troops on the benches, four crew in their seats (" + pax0 + " aboard, crew " + h.seats.filter((s) => s.crew && (s.man || s.implicit)).length + ")");
+  check(!!(h.rig && h.rig.state), "its own rig was built (not the stand-in box)");
+  const outs = [];
+  let last = pax0, firstDrop = null;
+  const fired = {}, offSector = [];
+  const fire0 = h.rig.fire;
+  h.rig.fire = function (shot) {
+    fired[shot.wid] = (fired[shot.wid] || 0) + 1;
+    if (shot.target) {
+      const rel = W.CBZ.vehicleDrive.wrap(Math.atan2(shot.target.pos.x - h.pos.x, shot.target.pos.z - h.pos.z) - h.h);
+      if ((shot.wid === "m240h_port" && rel < -0.2) || (shot.wid === "m240h_stbd" && rel > 0.2)) offSector.push(shot.wid + " " + rel.toFixed(2));
+    }
+    return fire0.apply(this, arguments);
+  };
+  run(W, 240, () => {
+    const n = h.dead ? last : h.seats.filter((s) => !s.crew && s.man).length;
+    if (n < last) {
+      const agl = h.pos.y - MAP.groundAt(h.pos.x, h.pos.z);
+      outs.push({ t: B.audit().simT, agl: +agl.toFixed(1), v: +h.ds.v.toFixed(1), ph: h.airPhase });
+      if (firstDrop == null) firstDrop = B.audit().simT;
+    }
+    last = n;
+    return true;
+  });
+  console.log("    (drops: " + outs.length + ", e.g. " + JSON.stringify(outs.slice(0, 3)) + "; fired " + JSON.stringify(fired) + ")");
+  check(outs.length > 0, "the squad got out (" + (pax0 - last) + " of " + pax0 + ")");
+  check(outs.every((o, i) => o.agl > 8 && o.agl < 16 && (i === outs.length - 1 || (o.ph === "insert" && o.v < 3.5))), "every man came down a rope from a hover at ~12 m (" + JSON.stringify(outs.slice(-2)) + ")");
+  check(outs.length < 2 || outs.length >= 6, "one at a time over several steps, not all in one frame (" + outs.length + " drops)");
+  check(offSector.length === 0, "each door gun fired only inside its own sector (" + (offSector.slice(0, 3).join(", ") || "none out") + ")");
+});
+
 scenario(9, "sides, best-of, the URL matchup: no colour on screen", async () => {
   const W = boot("?a=men&b=men&n=20v12&arena=dunes&aw=ak47&bw=ak47&at=elite&bt=thug&af=kesh&bf=veridia&bo=3&sa=1&sb=0&auto=1&probe=0");
   if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }

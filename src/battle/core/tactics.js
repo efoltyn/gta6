@@ -98,6 +98,7 @@
     FALLBACK_MORALE: 0.36, FALLBACK_DIST: 32,
     FLANK_ODDS: 1.15, FLANK_MAX_T: 30, FLANK_ANG: 1.2,
     ASSAULT_D: 30, ASSAULT_ODDS: 1.7,
+    VIEW_FIGHT: 130,                     // m: a squad with the view fights from it out to here
     FOCUS_SHARE: 0.6,
     NADE_MIN: 8, NADE_MAX: 30, NADE_SAFE: 9, NADE_GAP: 6,
     DRAG_R: 38, DRAG_SUPP: 0.6,
@@ -438,13 +439,13 @@
     S.shock = Math.max(0, S.shock - K.SHOCK_DECAY * (now - (S.lastTick || now)));
     S.lastTick = now;
     // ---- what it knows: every member's mark, and what is shooting at it
-    let best = null, bs = 0, bestVis = null, bvs = 0, beastS = 0, allS = 0, seen = false;
+    let best = null, bs = 0, bestVis = null, bvs = 0, beastS = 0, allS = 0, seen = false, seeN = 0, seeX = 0, seeZ = 0;
     S.hasArmour = false;
     const enemyArmour = [];
     for (let i = 0; i < S.men.length; i++) {
       const m = S.men[i], o = m.tgt;
       if (!o || out(o)) continue;
-      if (m.sees) seen = true;
+      if (m.sees) { seen = true; seeN++; seeX += m.pos.x; seeZ += m.pos.z; }
       const sc = threat(S, o, A);
       allS += sc; if (o.beast) beastS += sc;
       if (armedArmour(o)) enemyArmour.push(o);
@@ -463,6 +464,9 @@
       }
     }
     S.enemyArmour = enemyArmour;
+    S.seeFrac = S.alive ? seeN / S.alive : 0;
+    // where the men who CAN see him stand: the vantage the rest should join
+    S.seeAt = seeN ? { x: seeX / seeN, z: seeZ / seeN } : null;
     S.threatTop = best;
     if (bestVis !== S.focus) { if (bestVis) STATS.focusSwitch++; S.focus = bestVis; }
     S.beastShare = allS > 0 ? beastS / allS : 0;
@@ -540,6 +544,10 @@
       // a squad that is SEEN and shot at inside its guns' reach does not keep
       // running across the open to a better range: it goes down and fights
       if (task === "bound" && blind < 3 && (dEnemy <= band + K.ENGAGE_PAD * 0.4 || (S.supp > 0.12 && dEnemy <= band * 2.1))) task = "fight";
+      // GOOD GROUND IS KEPT: a squad that has the enemy under its guns from
+      // where it stands (most of it can see him, inside a rifle's long reach)
+      // fights from there — it does not walk off its crest into the bowl
+      if (task === "bound" && blind < 2 && S.seeFrac >= 0.5 && dEnemy <= K.VIEW_FIGHT) task = "fight";
       if (task === "bound" && dEnemy < 18 && blind > 3) task = "assault";      // blind and on top of them: go in
       if (task === "fight" && !holding) {
         if (hunting || A.enemyBroken(S.team)) task = "assault";
@@ -552,7 +560,7 @@
           S.focus && ((S.focus.supp || 0) > 0.35 || S.focus.stance === "prone" || S.focus.routed)) {
           task = "flank"; S.flankSide = pickFlankSide(S, A, tx, tz); S.flankFrom = { x: tx, z: tz };
         }
-        else if (dEnemy > band + K.ENGAGE_PAD * 1.6 && S.supp < 0.35) task = "bound";
+        else if (dEnemy > band + K.ENGAGE_PAD * 1.6 && S.supp < 0.35 && (S.seeFrac < 0.3 || now - S.taskT > 20)) task = "bound";
       }
       if (task === "flank" && (now - S.taskT > K.FLANK_MAX_T || !two || S.supp > 0.6)) task = "fight";
       if (task === "assault" && !hunting && odds < 1.1 && S.supp > 0.5) task = "fight";
@@ -764,7 +772,7 @@
     if (t === "hold") {
       const home = S.holdAnchor || holdAnchorOf(S);
       S.anchor = home;
-      if (S.postsDirty || !S.postedAt || now - S.postedAt > 12) {
+      if (S.postsDirty || !S.postedAt || now - S.postedAt > (now - (S.lastSeen == null ? -99 : S.lastSeen) > 4 ? 4 : 12)) {   // a blind line re-sites itself often
         // a held line is held where the squad formed — but as a LINE across
         // the threat at fighting intervals, not the parade block it formed
         // up in (three ranks 3 m apart is one grenade's work), each man
@@ -787,10 +795,17 @@
       // where it stands, slid toward its own sector of the side's front
       if (!S.anchor || S.postsDirty) {
         const sl = (S.latErr || 0) * 0.8, sd = S.depErr || 0;
-        const p = coverPull(A, S.cx + (S.rx || 0) * sl + (S.fwdx || 0) * sd, S.cz + (S.rz || 0) * sl + (S.fwdz || 0) * sd, tx, tz, 22);
+        let bx = S.cx + (S.rx || 0) * sl + (S.fwdx || 0) * sd, bz = S.cz + (S.rz || 0) * sl + (S.fwdz || 0) * sd;
+        // THE VANTAGE: when only a few of it can see the enemy (the point
+        // man on the crest, the rest under the brow), the line forms where
+        // those few are standing, not where the squad happens to be
+        if (S.seeAt && S.seeFrac < 0.5) { bx = S.seeAt.x + (S.rx || 0) * sl; bz = S.seeAt.z + (S.rz || 0) * sl; }
+        const p = coverPull(A, bx, bz, tx, tz, 22);
         S.anchor = { x: p.x, z: p.z };
       }
+      if (S.seeFrac < 0.3 && S.seeAt && now - (S.postedAt || 0) > 3) S.postsDirty = true;   // most of it blind: re-site on the vantage
       if (S.postsDirty || !S.postedAt || now - S.postedAt > 10) {
+        if (S.postsDirty && S.seeAt && S.seeFrac < 0.5) S.anchor = { x: S.seeAt.x, z: S.seeAt.z };
         linePosts(A, S, S.men, S.anchor.x, S.anchor.z, tx, tz, sp, true);
         S.postedAt = now; S.postsDirty = false;
       }

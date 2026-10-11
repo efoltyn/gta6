@@ -161,6 +161,17 @@ function squadThink(m, thinkDt) {
   if (tgt && CBZ.combatIQ && CBZ.combatIQ.aimTick) CBZ.combatIQ.aimTick(m, tgt, thinkDt);
   if (tgt && !m.sees) {
     m.losBadT += thinkDt;
+    /* THE NEAREST MAN IS OFTEN THE ONE IN DEAD GROUND. Looking down off a
+       crest, the closest of them are under the brow and the ones further up
+       the far slope are in plain view: a man with no line to his mark looks
+       for one he can see (pickTarget asks the nearest few) before he keeps
+       staring at a fold. */
+    if (m.losBadT > 0.8) {
+      const o = pickTarget(m, SIGHT);
+      if (o && o !== tgt && !tacOut(o) && (!BT.armoured(o) || m.launcher) && eyeLos(m, o)) {
+        m.tgt = tgt = o; m.sees = true; m.losBadT = 0;
+      }
+    }
     if (m.losBadT > 6) { m.tgt = tgt = null; m.losBadT = 0; }
   } else m.losBadT = 0;
 
@@ -343,10 +354,13 @@ function panicGoal(m) {
 
 /* ============================================================ THE WOUNDED */
 // damage.js calls this for a hit that did not kill (hp still > 0)
-function tacticsOnHurt(m, dmg, imp) {
+function tacticsOnHurt(m, dmg, imp, res) {
   if (!m || m.beast || m.vehicle) return;
   m.lastHitT = simT;
-  if (imp && imp.by && imp.by.team && imp.by.team !== m.team) m.lastHitBy = imp.by;
+  if (imp && imp.by && imp.by.team && imp.by.team !== m.team) {
+    m.lastHitBy = imp.by;
+    returnFire(m, imp.by);
+  }
   // THE BODY TAKES IT: entities/soldier.js's hit reaction (flinch, stumble,
   // a fall; the limp / dead arm / gut hunch it leaves) on a rig near the lens
   const sev = Math.max(0, Math.min(1, dmg / ((m.maxHp || 100) * 0.45)));
@@ -357,7 +371,8 @@ function tacticsOnHurt(m, dmg, imp) {
     zone = r < 0.42 ? "torso" : r < 0.56 ? "gut" : r < 0.66 ? "armL" : r < 0.76 ? "armR" : r < 0.88 ? "legL" : "legR";
   }
   m.lastZone = zone;
-  if (m.char && CBZ.soldier && CBZ.soldier.hit && camDist2(m.pos) < 120 * 120) {
+  if (res && res.wound) zone = res.wound;
+  if (!res && m.char && CBZ.soldier && CBZ.soldier.hit && camDist2(m.pos) < 120 * 120) {
     let dx = 0, dz = 1;
     const src = imp && imp.by && imp.by.pos ? imp.by.pos : (imp && imp.fromX != null ? { x: imp.fromX, z: imp.fromZ } : null);
     if (src) { dx = m.pos.x - src.x; dz = m.pos.z - src.z; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l; }
@@ -383,6 +398,27 @@ function tacticsOnHurt(m, dmg, imp) {
     }
     if (m.char && CBZ.soldier && CBZ.soldier.wound) { try { CBZ.soldier.wound(m.char, zone === "legL" || zone === "legR" ? "legs" : "gut", 0.9); } catch (e) {} }
     TAC.downed = (TAC.downed || 0) + 1;
+  }
+}
+/* THE MUZZLE FLASH. A man shot from a crest he cannot see over still knows
+   where it came from — and so does every mate beside him who heard it. They
+   mark the spot (the arms layer's last-seen, fire.js armOf: seenX/Z/T) and
+   the shooter as the mark of anyone without one, so the arms layer's
+   suppressive fire answers into it instead of a squad dying in silence. */
+function returnFire(m, by) {
+  if (!TAC.on || !by.pos || by.vehicle || typeof armOf !== "function") return;
+  const S = m.sqd, L = S && S.men && S.men.length ? S.men : [m];
+  for (let i = 0; i < L.length; i++) {
+    const o = L[i];
+    if (o.dead || o.routed || o.fists || o.launcher || !o.armed) continue;
+    if (o !== m && Math.hypot(o.pos.x - m.pos.x, o.pos.z - m.pos.z) > 25) continue;
+    let A = null;
+    try { A = armOf(o); } catch (e) { A = null; }
+    if (!A) continue;
+    if (!o.tgt || tacOut(o.tgt) || !o.sees) { o.tgt = by; o.losBadT = 0; }
+    if (o.tgt === by && simT - (A.seenT || -99) > 1) {
+      A.seenX = by.pos.x; A.seenZ = by.pos.z; A.seenY = by.pos.y + (by.aimY || 1.1); A.seenT = simT;
+    }
   }
 }
 /* A DOWNED MAN: bleeds (until a mate has him in cover), crawls a little

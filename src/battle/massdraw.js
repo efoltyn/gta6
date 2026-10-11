@@ -9,9 +9,10 @@
      look     his skin and hair are the heritage roll studio.cast gives the
               rig (role + variant), his uniform is men.js uniformFor(): the
               colours the rig is built with when he is promoted
-     gear     the rig's own kit, baked into the crowd once: the helmet men.js
-              puts on a trained man (pro / elite / swat), in his side's
-              cover colour, and the rifle actorweapons.js puts in his hand
+     gear     the rig's own kit, baked into the crowd once: the soldier's
+              kit (entities/combatkit.js: the nation's helmet in its cover
+              colour, the plate carrier, knee pads) on every man whose role
+              wears it, and the rifle actorweapons.js puts in his hand
               (one baked rifle: the side's first issue; the exact gun shows
               on the rig)
      pose     the soldier clips (rifleIdle / rifleWalk / rifleRun) by his
@@ -42,17 +43,24 @@ CBZ.massDraw = (function () {
   function gearOn(ch) {
     if (!CBZ.human || !CBZ.human.regions) return;
     const R = CBZ.human.regions(ch);
-    // the helmet: men.js's own dome (helmetGeometry), on the head, sized to it
-    const head = R.head && R.head[0];
-    if (head && typeof helmetGeometry === "function") {
-      if (!head.geometry.boundingBox) head.geometry.computeBoundingBox();
-      const b = head.geometry.boundingBox;
-      const w = (b.max.x - b.min.x) * 1.12;
-      const g = helmetGeometry(w).clone();
-      const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: 0x808080 }));
-      mesh.position.set((b.min.x + b.max.x) / 2, b.max.y + w * 0.26, (b.min.z + b.max.z) / 2 - w * 0.02);
-      mesh.userData.cgGear = 1; mesh.userData.cgSlot = 8;
-      head.add(mesh);
+    void R;
+    /* THE KIT: the rig's own (entities/combatkit.js), a rifleman's, worn by
+       the bake rig. The helmet (entities/headwear.js's lid on the neck) is
+       gear class 1 in the per-instance helmet colour; the carrier, pouches,
+       knee pads and ID tape are class 4 (shown on a man whose code says kit),
+       in their own baked colours. */
+    if (CBZ.combatKit && ch.neck) {
+      const before = new Set();
+      ch.group.traverse(function (o) { if (o.isMesh) before.add(o); });
+      let K = null;
+      try { K = CBZ.combatKit.wear(ch, { loadout: "rifleman", nation: nationOf("red") }); } catch (e) { K = null; }
+      if (K) ch.group.traverse(function (o) {
+        if (!o.isMesh || before.has(o)) return;
+        if (o.userData.combatKit) { o.userData.cgGear = 4; return; }
+        let onNeck = false;
+        for (let p = o.parent; p; p = p.parent) if (p === ch.neck) { onNeck = true; break; }
+        if (onNeck && o.name !== "eyewear") { o.userData.cgGear = 1; o.userData.cgSlot = 8; }
+      });
     }
     // the rifle: actorweapons' own prop, seated by its own grip solve
     if (CBZ.syncActorWeapon && ch.sockets) {
@@ -83,7 +91,17 @@ CBZ.massDraw = (function () {
       if (C.kind[r] !== 0) { D.look[r] = -1; continue; }
       const team = C.side[r] ? "blue" : "red", i = C.spawnI[r];
       const tr = trainingOf(team === "red" ? SET.redT : SET.blueT);
-      const U = uniformFor(team, tr.id, i);
+      const u = MASS.unitOf[C.unit[r]] || {};
+      // his kit: the role he would have on the rig (combatkit.js), and his
+      // army's camouflage as the cloth's mean colour
+      const K = CBZ.combatKit, nat = nationOf(team);
+      const role = K ? K.roleFor({ tier: tr.id, wid: u.wid, i: i, nation: nat }) : null;
+      const kitted = !!(K && role && K.LOADOUTS[role] && K.LOADOUTS[role].carrier === "plates");
+      let U = uniformFor(team, tr.id, i);
+      if (K && role && role !== "civilian" && role !== "militia") {
+        const cl = K.crowdLook({ loadout: role, nation: nat });
+        U = { torso: K.lin(cl.shirt), arms: K.lin(cl.sleeve), legs: K.lin(cl.pants), shoes: K.lin(cl.shoes) };
+      }
       let skin = 0xc9a07a, hair = 0x2a1f18;
       const v = i * 2 + (team === "red" ? 0 : 1);
       if (CBZ.heritageRoll) { try { const h = CBZ.heritageRoll(null, "cast|" + tr.role + "|" + v); if (h) { skin = h.skin; hair = h.hair; } } catch (e) {} }
@@ -95,9 +113,8 @@ CBZ.massDraw = (function () {
         cache.set(key, lk);
       }
       D.look[r] = lk;
-      const helm = tr.id === "pro" || tr.id === "elite" || tr.id === "swat";
-      const u = MASS.unitOf[C.unit[r]] || {};
-      D.gear[r] = G.gearCode({ helmet: helm ? UNIFORM[team].cap : null, rifle: u.wid && u.wid !== "fists" });
+      const N = K && kitted ? (role === "swat" ? K.SWAT : K.nation(nat)) : null;
+      D.gear[r] = G.gearCode({ helmet: N && N.helmetHex != null ? K.lin(N.helmetHex) : null, rifle: u.wid && u.wid !== "fists", kit: kitted });
       D.ph[r] = (r * 0.618) % 1;
     }
     D.near = G.layer({ name: "npcwar-near", cap: 8192 });

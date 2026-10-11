@@ -273,8 +273,8 @@
       // built inside makeCharacter
       // eyes.js: how that body SEES when it is hurt (heavy lids, a flinch),
       // the one answer every game has instead of a red screen
-      files: ["systems/fphands.js", "entities/footwear.js", "entities/character.js", "entities/headwear.js", "entities/eyewear.js", "entities/watch.js", "entities/moves.js", "entities/gait.js", "entities/heritage.js", "entities/poses.js", "entities/soldier.js", "entities/crowdgpu.js", "entities/crowdstore.js", "systems/bodymass.js", "systems/eyes.js"],
-      publishes: ["human", "makeCharacter", "headwear", "eyewear", "heritageRoll", "animChar", "moves", "gait", "charPoses", "soldier", "crowdGPU", "crowds", "bodyMass", "meleeScale", "eyes"],
+      files: ["systems/fphands.js", "entities/footwear.js", "entities/character.js", "entities/headwear.js", "entities/eyewear.js", "entities/watch.js", "entities/moves.js", "entities/gait.js", "entities/heritage.js", "entities/poses.js", "entities/soldier.js", "warlord/camo.js", "systems/armour.js", "entities/combatkit.js", "entities/crowdgpu.js", "entities/crowdstore.js", "systems/bodymass.js", "systems/eyes.js"],
+      publishes: ["human", "makeCharacter", "headwear", "eyewear", "heritageRoll", "animChar", "moves", "gait", "charPoses", "soldier", "camo", "armour", "combatKit", "crowdGPU", "crowds", "bodyMass", "meleeScale", "eyes"],
     },
 
     // ---- two people, hands on each other -------------------------------------
@@ -468,7 +468,11 @@
              "cluster. Ask for a downtown with CBZ.studio.town(); nothing in it " +
              "is a stage flat",
       needs: ["look", "seed"],
-      files: ["vendor/BufferGeometryUtils.js", "city/buildings.js", "city/furniture.js",
+      /* facade_openings.js BEFORE buildings.js: every shell asks it for its
+         windows and door at build time (CBZ.facadeOpenings.faces). Missing,
+         makeBuilding threw inside towngen's try and EVERY lot came up empty:
+         the NPC War downtown was 85 bare lawns and not one building. */
+      files: ["vendor/BufferGeometryUtils.js", "city/facade_openings.js", "city/buildings.js", "city/furniture.js",
               "city/cityground.js", "city/streetkit.js", "city/towngen.js"],
       publishes: ["cityMakeBuilding", "buildTown", "streetKit"],
     },
@@ -543,7 +547,11 @@
       // registerCityRegion is fine — studio stubs it above — and
       // cityStaffPost is guarded at the call site.
       needs: ["look"],
-      files: ["systems/airports.js", "city/airport_kit.js", "city/airport_capeharbor.js"],
+      // ...and a THIRD: the kit's mergeGeos() needs THREE.BufferGeometryUtils,
+      // returns null without it, and a stem/pole built from that null threw
+      // "reading 'isBufferGeometry'" out of raise() with half a harbour drawn
+      // and a mesh with no geometry left in the scene (every render threw).
+      files: ["vendor/BufferGeometryUtils.js", "systems/airports.js", "city/airport_kit.js", "city/airport_capeharbor.js"],
       publishes: ["buildAirfield", "airportKit", "registerAirport"],
     },
     speedway: {

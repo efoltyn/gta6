@@ -242,7 +242,7 @@ function makeVehicle(teamId, i, id) {
     eyeH0: 0, losY0: 0, aimY0: 0, headY0: 0,
     armed: weapons.length > 0, weapon: null, wid: id, launcher: false, fists: false,
     mag: 0, magSize: 0, cool: 0, reloadT: 0, punch: 0,
-    tgt: null, sees: false, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.3, lastThink: simT,
+    tgt: null, sees: false, losBadT: 0, slot: "hold", thinkAt: simT + lcg() * 0.05,   /* a hull's first look round is at once (its carried men get out on it); thinkVehicle staggers after */ lastThink: simT,
     dead: false, dieT: 0, dieDir: 1, animF: (i % 4),
     lastShotT: -9, sq: Math.floor(i / 10), sqSlot: i % 10,
     kills: 0, shotsF: 0, hitsF: 0, reloads: 0,
@@ -336,6 +336,22 @@ function vehDismount(u) {
   }
   u.dismounted = true;
 }
+/* ONE MAN DOWN A FAST ROPE: the next passenger, at the foot of rope k & 1
+   (port / starboard: 2 m out from the cabin doors), stepping off it. */
+function vehRopeOne(u, k) {
+  for (let s = 0; s < u.seats.length; s++) {
+    const seat = u.seats[s];
+    if (seat.crew || !seat.man) continue;
+    const man = CBZ.vehicleDrive.unseat(u.seats, seat);
+    const side = (k & 1) ? -1 : 1, lx = side * (3.0 + (k >> 1) % 3 * 0.8), lz = 0.1 - ((k >> 1) % 2) * 0.9;
+    const c = Math.cos(u.h), sn = Math.sin(u.h);
+    const x = u.pos.x + lx * c + lz * sn, z = u.pos.z - lx * sn + lz * c;
+    // vehPutOnField puts him (vlen + 1.2 + (k % 3) * 0.9) behind: k = 2, vlen -3 = right here
+    vehPutOnField({ pos: { x: x, y: 0, z: z }, h: u.h, vlen: -3.0 }, man, 2);
+    return man;
+  }
+  return null;
+}
 // the hull is lost: whoever lives climbs out and fights on foot
 function vehBailOut(u, catastrophic) {
   let k = 0;
@@ -393,10 +409,11 @@ function stepVehicle(u, sdt) {
       const shoot = u.tgt && !u.tgt.dead && u.sees;
       const halt = crew <= 1 && shoot && u._wantShot;
       vehDriveTo(u, sdt, halt);
-      vehCrush(u, sdt);
       vehFight(u, sdt);
     }
   }
+  // what the hull runs into is physics, whoever is driving it
+  if (!u.air) vehCrush(u, sdt);
   vehAnimate(u, sdt);
 }
 function thinkVehicle(u) {
@@ -406,13 +423,13 @@ function thinkVehicle(u) {
   u.yaw = u.h + u.tur.yaw;
   const t = vehPickTarget(u);
   if (t) { u.tgt = t; u.losBadT = 0; }
-  else if (u.tgt && (u.tgt.dead || u.tgt.fled)) u.tgt = null;
+  else if (u.tgt && (u.tgt.dead || u.tgt.fled || u.tgt.downed)) u.tgt = null;   // a man down is out of the fight (ai/squad.js)
   u.sees = !!(u.tgt && eyeLos(u, u.tgt));
   const enemy = u.team === "red" ? "blue" : "red";
   const com = teamCOM[enemy];
   const S = u.def.stats || {};
   // carried infantry gets out at the vehicle's dismount range
-  if (!u.dismounted && vehPassengers(u) > 0) {
+  if (!u.dismounted && vehPassengers(u) > 0 && !(u.air && u.def.drive === "rotor" && !u.vs.mobility)) {
     const ref = u.tgt && !u.tgt.dead ? u.tgt.pos : com;
     const d = Math.hypot(ref.x - u.pos.x, ref.z - u.pos.z);
     if (d < (S.dismountAt || 150) || u.vs.mobility) vehDismount(u);
@@ -515,7 +532,7 @@ function vehDriveTo(u, sdt, halt) {
 function vehMove(u, sdt, ctrl) {
   const D = CBZ.vehicleDrive, def = u.def, S = def.stats || {};
   const spec = { speed: S.speed, reverse: S.reverse, accel: S.accel, turn: S.turn, width: S.width,
-    wheelbase: S.wheelbase, maxSteer: S.maxSteer, mobilityKill: u.vs.mobility };
+    wheelbase: S.wheelbase, maxSteer: S.maxSteer, grip: S.grip, mobilityKill: u.vs.mobility };
   if (vehCrewN(u) === 0) { ctrl.throttle = 0; ctrl.steer = 0; }
   if (def.drive === "tracked") D.tracked(u.ds, spec, ctrl, sdt); else D.wheeled(u.ds, spec, ctrl, sdt);
   u.h = D.wrap(u.h + u.ds.w * sdt);
@@ -533,22 +550,69 @@ function vehMove(u, sdt, ctrl) {
   u.yaw = u.h + u.tur.yaw;
   u.heading = u.h;
 }
-// a hull at speed does not stop for a man in the way
+/* A HULL AT SPEED MEETS WHAT IS IN ITS WAY, AND THAT IS A COLLISION.
+
+   This was `speed x 9 x min(4, mass / 15000)` off any body in front of the
+   nose, the same number for a man and an elephant, and the hull never knew
+   it had hit anything. Now it is momentum (src/battle/physics.js):
+
+     the face: the closing speed along the travel is an impact,
+               J = (1 + e) v M m / (M + m). The body takes J / m along the
+               nose (a man in front of a 60 t tank at 10 m/s leaves at 12 m/s
+               and is thrown; a bull elephant in front of a 2.5 t Humvee at
+               15 m/s takes 5 m/s and a wound), the HULL takes J / M off its
+               own speed (the tank does not notice; the Humvee stops dead).
+               The injury is the velocity change (impactDmg).
+     under:    a body the hull outweighs 12 to 1 that is down (knocked over,
+               or the face just put it there) is not pushed out of the
+               footprint (pushVehicle stands down) and the running gear goes
+               over it: tracks carry the whole weight on a man, wheels part.
+     the dead: a man the strike kills is handed to city/carstrike.js through
+               CBZ.ragdollStrike, so the hull's real profile drives his body
+               (the bumper, the wrap, the throw, the wheels over him). */
 const _vn = [];
 function vehCrush(u, sdt) {
-  if (u.speed < 2.5) return;
-  const a = fineNear(u.pos.x, u.pos.z, u.vlen + 1, _vn);
+  if (u.air || u.speed < 1.2) return;
+  const v = u.ds.v, sgn = v >= 0 ? 1 : -1;
+  const a = fineNear(u.pos.x, u.pos.z, u.vlen + 2.5, _vn);
   const fx = Math.sin(u.h), fz = Math.cos(u.h);
+  const kv = u._mass || 10000;
   for (let k = 0; k < a.length; k++) {
     const o = a[k];
-    if (o === u || o.dead || o.vehicle || o.air) continue;
+    if (o === u || o.dead || o.vehicle || o.air || o.fled || o._tossed || o._apeHeld) continue;
     const rx = o.pos.x - u.pos.x, rz = o.pos.z - u.pos.z;
-    const along = rx * fx + rz * fz, across = rx * fz - rz * fx;
-    if (along < u.vlen * 0.2 || along > u.vlen + (o.rad || 0.45) || Math.abs(across) > u.vwid) continue;
+    const along = (rx * fx + rz * fz) * sgn, across = rx * fz - rz * fx;
+    const r = o.rad || 0.45;
+    if (Math.abs(across) > u.vwid + r * 0.6 || along > u.vlen + r + 0.15 || along < -u.vlen) continue;
     if ((o._crushT || 0) > simT) continue;
-    o._crushT = simT + 0.6;
-    const mk = Math.min(4, u._mass / 15000);
-    hurtMan(o, u.speed * 9 * mk, { by: u, cause: "crush" });
+    const kb = bodyKg(o);
+    if (along > u.vlen * 0.55) {
+      const vrel = Math.abs(u.ds.v) - ((o._vx || 0) * fx + (o._vz || 0) * fz) * sgn;
+      if (vrel < 1.2) continue;
+      o._crushT = simT + 0.5;
+      const J = (1 + RESTITUTION) * vrel * kv * kb / (kv + kb);
+      const dvb = J / kb;
+      u.ds.v -= sgn * Math.min(Math.abs(u.ds.v), J / kv);
+      u.speed = Math.abs(u.ds.v);
+      // along the nose, and a little to the side he was already on
+      const sx = across >= 0 ? 0.22 : -0.22;
+      const dvx = (fx * sgn + fz * sx) * dvb, dvz = (fz * sgn - fx * sx) * dvb;
+      PHYS.audit.impacts++;
+      if (dvb > PHYS.audit.maxDv) PHYS.audit.maxDv = dvb;
+      hurtMan(o, impactDmg(o, dvb), { by: u, cause: "crush", J: J, dvx: dvx, dvz: dvz, fromX: u.pos.x, fromZ: u.pos.z });
+      if (!o.dead) addKnock(o, dvx, dvz, u, { vy: kb < 450 && dvb > 5 ? dvb * 0.3 : 0 });
+      else if (o.ragdoll && CBZ.ragdollStrike && CBZ.carStrike) {
+        try { CBZ.ragdollStrike(o, hullForStrike(u), { x: o.pos.x, y: o.pos.y + 0.9, z: o.pos.z }); } catch (e) {}
+      }
+    } else if (kb * 12 < kv && knockedDown(o)) {
+      // under the running gear
+      o._crushT = simT + 0.5;
+      PHYS.audit.crushes++;
+      const hp = (o.maxHp > 0 && o.maxHp < 1e8) ? o.maxHp : 100;
+      const tracked = u.def && u.def.drive === "tracked";
+      const share = tracked ? 1.2 : Math.min(1, 0.25 + kv / 20000);
+      hurtMan(o, hp * share, { by: u, cause: "crush", fromX: u.pos.x, fromZ: u.pos.z });
+    }
   }
 }
 
@@ -605,6 +669,9 @@ function vehFight(u, sdt) {
     if (w.kind === "cannon" && !t.vehicle && dist < 500 && vehHasMG(u, dist) && lcg() < 0.6) { W.cool = 1; continue; }
     // DANGER CLOSE: high explosive is not put down on top of our own men (ai/squad.js)
     if (w.kind !== "mg" && !(w.kind === "cannon" && t.vehicle) && dangerClose(u.team, t.pos.x, t.pos.z, ((w.he && w.he.blast) || 6) * 0.9)) { W.cool = 0.6; continue; }
+    // a gun with its own sector off the hull (a door gun: yawLo..yawHi from
+    // the nose) never fires out of it, whatever its mount
+    if (w.yawLo != null && w.yawHi != null && (rel < w.yawLo || rel > w.yawHi)) continue;
     // ---- is THIS weapon on the line? (its mount, not the vehicle's) ----
     if (!w.indirect) {
       const m = W.mount;
@@ -958,12 +1025,33 @@ function stepRotor(u, sdt) {
     gx = MAP.cx + (u.team === "red" ? -4200 : 4200); gz = MAP.cz; wantAGL = nap * 2;
     H.ph = "transit";
   } else if (carrying) {
-    // a lift: low and fast to a landing short of the enemy, set down, unload
+    /* A LIFT: low and fast to a landing zone short of the enemy (0.8 x
+       dismountAt), flare, then either set down (1.5 m) and unload at once,
+       or, with stats.fastRope, hover at that height and put the men down
+       two ropes, one man per rope every ropeEvery s after ropeDelay plus
+       the slide (the unit's rig draws the same schedule). The zone is fixed
+       once the aircraft is close, so it does not chase a moving enemy. */
     const sx = ref.x - u.pos.x, sz = ref.z - u.pos.z, sd = Math.hypot(sx, sz) || 1;
-    const lz = Math.max(0, sd - S.dismountAt * 0.8);
-    gx = u.pos.x + sx / sd * lz; gz = u.pos.z + sz / sd * lz;
-    wantAGL = lz < 60 ? 1.5 : nap;
-    H.ph = "transit";
+    if (!H.lz || (H.ph !== "insert" && Math.hypot(H.lz.x - u.pos.x, H.lz.z - u.pos.z) > 150)) {
+      const lz = Math.max(0, sd - S.dismountAt * 0.8);
+      H.lz = { x: u.pos.x + sx / sd * lz, z: u.pos.z + sz / sd * lz };
+    }
+    gx = H.lz.x; gz = H.lz.z;
+    const dl = Math.hypot(gx - u.pos.x, gz - u.pos.z), rope = S.fastRope || 0;
+    const agl = u.pos.y - MAP.groundAt(u.pos.x, u.pos.z);
+    wantAGL = dl < 90 ? (rope || 1.5) : nap;
+    if (H.ph === "insert" || (dl < 10 && u.ds.v < 3 && Math.abs(agl - (rope || 1.5)) < 2.5)) {
+      if (H.ph !== "insert") { H.ph = "insert"; H.insT = 0; H.insK = 0; }
+      else H.insT += sdt;
+      gx = u.pos.x; gz = u.pos.z;                    // hold the hover
+      if (!rope) { if (H.insT > 1.2) vehDismount(u); }
+      else {
+        const first = (S.ropeDelay || 1.6) + rope / (S.ropeSpeed || 6), gap = (S.ropeEvery || 0.9) / 2;
+        while (vehPassengers(u) > 0 && H.insT >= first + H.insK * gap) { vehRopeOne(u, H.insK); H.insK++; }
+        if (!vehPassengers(u)) u.dismounted = true;
+      }
+      if (u.dismounted) { H.ph = "transit"; H.lz = null; H.bp = null; }
+    } else H.ph = "transit";
   } else {
     const stand = heliStand(u, t);
     // the mark has moved off this position's geometry: plan again
@@ -1003,6 +1091,8 @@ function stepRotor(u, sdt) {
     // the nose: on the mark at the position (the rockets and the Hellfire
     // need it there), along the track on the way
     if (H.ph !== "transit" || dBp < 400 || u._wantNose) face = Math.atan2(ref.x - u.pos.x, ref.z - u.pos.z);
+    // a door-gun aircraft turns a side to the mark (stats.broadside rad), alternating with the sidestep
+    if (face != null && S.broadside && !u._wantNose) face -= (H.shift >= 0 ? 1 : -1) * S.broadside;
   }
   const dx = gx - u.pos.x, dz = gz - u.pos.z, d = Math.hypot(dx, dz);
   const travel = Math.atan2(dx, dz);
@@ -1183,7 +1273,7 @@ function hurtVehicle(u, dmg, imp) {
   if (vehCrewN(u) === 0) { u._abandoned = true; killMan(u, imp); return; }
   // a hull that can neither move nor fight is abandoned
   if (u.vs.mobility && (u.vs.firepower || !u.wpn.length)) { u._abandoned = true; killMan(u, imp); return; }
-  if (res.pen && vehPassengers(u)) vehDismount(u);
+  if (res.pen && vehPassengers(u) && !(u.air && u.pos.y - MAP.groundAt(u.pos.x, u.pos.z) > 3)) vehDismount(u);
   if (u.air && u.vs.mobility) { u._abandoned = true; killMan(u, imp); }
 }
 /* CREW CASUALTIES BY SEAT. A penetration enters through the face it hit
@@ -1290,7 +1380,11 @@ function pushVehicle(m, o, k) {
     return;
   }
   const v = m.vehicle ? m : o, b = m.vehicle ? o : m;
-  if (b._apeHeld || b._apeFlying) return;
+  if (b._apeHeld || b._apeFlying || b._tossed) return;
+  const kb = bodyKg(b), kv = v._mass || 10000;
+  // a body down in front of a hull that outweighs it 12 to 1 goes UNDER it
+  // (vehCrush runs the gear over him); a standing one is put outside
+  if (kb * 12 < kv && v.speed > 0.5 && knockedDown(b)) return;
   const fx = Math.sin(v.h), fz = Math.cos(v.h);
   const rx = b.pos.x - v.pos.x, rz = b.pos.z - v.pos.z;
   const along = rx * fx + rz * fz, across = rx * fz - rz * fx;
@@ -1301,6 +1395,14 @@ function pushVehicle(m, o, k) {
   let nx, nz, amt;
   if (pa < pc) { const s = along >= 0 ? 1 : -1; nx = fx * s; nz = fz * s; amt = pa; }
   else { const s = across >= 0 ? 1 : -1; nx = fz * s; nz = -fx * s; amt = pc; }
+  /* BY MASS, like every other contact: a man is put all the way out (the
+     hull's share is under a percent and it keeps its line, exactly as
+     before), a bull elephant leaning on a Humvee moves the Humvee. */
+  const shareV = kb / (kb + kv);
+  if (shareV > 0.02 && !v.air) {
+    v.pos.x -= nx * amt * shareV; v.pos.z -= nz * amt * shareV;
+    amt *= 1 - shareV;
+  }
   b.pos.x += nx * amt; b.pos.z += nz * amt;
   b.resT = 0;
   sepFixed++;
@@ -1357,6 +1459,12 @@ function vehYouSeatWeapon(u, t) {
   const list = u.wpn.filter(function (W) { return (W.w.kind !== "bombs" || u.air) && !W.off; });
   if (!list.length) return null;
   if (u._youSeat != null || !t) return list[(u._youSeat || 0) % list.length];
+  // the unit file's moves(veh, tgt, ctx) may name the weapon for this mark (a door gun on its side)
+  if (typeof u.def.moves === "function") {
+    let id = null;
+    try { id = u.def.moves(u, t, { dist: Math.hypot(t.pos.x - u.pos.x, t.pos.z - u.pos.z) }); } catch (e) { id = null; }
+    for (let k = 0; id && k < list.length; k++) if (list[k].w.id === id && list[k].ammo > 0) return list[k];
+  }
   const dist = Math.hypot(t.pos.x - u.pos.x, t.pos.z - u.pos.z);
   let best = null, bs = -1e9;
   for (let k = 0; k < list.length; k++) {
