@@ -133,6 +133,7 @@ function updateMorale() {
     const hf = Math.max(0, Math.min(1, m.hp / (m.maxHp || 1)));
     A.pNow += m._mw * (0.45 + 0.55 * hf);
   }
+  if (MASS.on) MASS.armies();             // a tiered battle: the army is every row
   ["red", "blue"].forEach(function (t) {
     const A = ARMY[t], F = ARMY[t === "red" ? "blue" : "red"];
     /* brain.morale.armyStep: shock decays over ~7 s, then
@@ -151,6 +152,7 @@ function updateMorale() {
    the living, unless every one of them has been running for BREAK_GRACE
    seconds — a broken army with nobody left fighting has lost. */
 function inFight(team) {
+  if (MASS.on) return MASS.inFight(team);
   let alive = 0, fighting = 0;
   for (let i = 0; i < men.length; i++) {
     const m = men[i];

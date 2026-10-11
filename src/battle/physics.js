@@ -91,6 +91,8 @@ function pickTarget(m, range) {
     }
     if (_cand.length >= 12 && r > 1) break;
   }
+  // a tiered battle: the rows round the ring are marks too, handed over as ghosts
+  if (MASS.on && _cand.length < 24) MASS.cands(m, range, _cand, SPOT);
   if (!_cand.length) return null;
   // nearest first, then the first four get asked whether they can be seen
   let bestO = null, bestD = 1e18;
@@ -430,8 +432,6 @@ function fineNear(x, z, r, out) {
    is re-solved on a slow tick, because men do. */
 const NAV = { cell: 4, x0: 0, z0: 0, w: 0, h: 0, block: null, on: false,
   dist: { red: null, blue: null }, at: { red: -9, blue: -9 }, solves: 0, blocked: 0 };
-const NBX = [1, -1, 0, 0, 1, 1, -1, -1], NBZ = [0, 0, 1, -1, 1, -1, 1, -1];
-const NAV_MAXD = 6000;                        // ~2.4 km of path; past that, no route
 function navBuild(cx, cz, radius) {
   const C = NAV.cell;
   const w = Math.max(8, Math.ceil(radius * 2 / C));
@@ -450,42 +450,31 @@ function navBuild(cx, cz, radius) {
   NAV.at.red = NAV.at.blue = -9;
   return NAV.on;
 }
-const _bk = [];
+/* THE SOLVE ITSELF IS core/flow.js (CBZ.battleFlow): one Dial solver for the
+   FULL brains here and for the MID / FAR sims (core/tiersim.js), which run
+   the same code in the page or in the worker. This side only says where the
+   enemy is: every living body on the other side, and in a tiered battle the
+   rows nobody built a rig for (MASS.seedNav). */
+let _navSeeds = new Int32Array(1024);
 function navSolve(team) {
-  const w = NAV.w, C = NAV.cell, blk = NAV.block, d = NAV.dist[team];
+  const w = NAV.w, C = NAV.cell, d = NAV.dist[team];
   if (!d) return 0;
-  d.fill(65535);
-  for (let i = 0; i < NAV_MAXD; i++) { if (!_bk[i]) _bk[i] = []; else _bk[i].length = 0; }
-  let seeded = 0;
+  let n = 0;
+  const seed = function (x, z) {
+    const ix = ((x - NAV.x0) / C) | 0, iz = ((z - NAV.z0) / C) | 0;
+    if (ix < 0 || iz < 0 || ix >= w || iz >= w) return;
+    if (n >= _navSeeds.length) { const g = new Int32Array(_navSeeds.length * 2); g.set(_navSeeds); _navSeeds = g; }
+    _navSeeds[n++] = iz * w + ix;
+  };
   for (let i = 0; i < men.length; i++) {
     const m = men[i];
     if (m.dead || m.team === team) continue;
-    const ix = ((m.pos.x - NAV.x0) / C) | 0, iz = ((m.pos.z - NAV.z0) / C) | 0;
-    if (ix < 0 || iz < 0 || ix >= w || iz >= w) continue;
-    const k = iz * w + ix;
-    if (d[k] !== 0) { d[k] = 0; _bk[0].push(k); seeded++; }
+    seed(m.pos.x, m.pos.z);
   }
+  if (typeof MASS !== "undefined" && MASS.on) MASS.seedNav(team, seed);
   NAV.at[team] = simT;
-  if (!seeded) return 0;
-  for (let b = 0; b < NAV_MAXD; b++) {
-    const q = _bk[b];
-    if (!q.length) continue;
-    for (let qi = 0; qi < q.length; qi++) {
-      const k = q[qi];
-      if (d[k] !== b) continue;                       // a cheaper route already claimed it
-      const ix = k % w, iz = (k / w) | 0;
-      for (let n = 0; n < 8; n++) {
-        const nx = ix + NBX[n], nz = iz + NBZ[n];
-        if (nx < 0 || nz < 0 || nx >= w || nz >= w) continue;
-        const nk = nz * w + nx;
-        if (blk[nk]) continue;
-        const nd = b + (n < 4 ? 10 : 14);
-        if (nd < d[nk] && nd < NAV_MAXD) { d[nk] = nd; _bk[nd].push(nk); }
-      }
-    }
-    q.length = 0;
-  }
-  NAV.solves++;
+  const seeded = CBZ.battleFlow.solve(NAV.block, w, w, _navSeeds, n, d);
+  if (seeded) NAV.solves++;
   return seeded;
 }
 /* Descend the field a few cells and hand back where that lands. Three steps
@@ -496,24 +485,10 @@ function navStep(m, out) {
   if (!NAV.on) return false;
   const w = NAV.w, C = NAV.cell, d = NAV.dist[m.team];
   if (!d) return false;
-  let ix = ((m.pos.x - NAV.x0) / C) | 0, iz = ((m.pos.z - NAV.z0) / C) | 0;
-  if (ix < 1 || iz < 1 || ix >= w - 1 || iz >= w - 1) return false;
-  if (d[iz * w + ix] === 65535) return false;         // no route from here
-  let moved = false;
-  for (let s = 0; s < 3; s++) {
-    let best = d[iz * w + ix], bx = -1, bz = -1;
-    for (let n = 0; n < 8; n++) {
-      const nx = ix + NBX[n], nz = iz + NBZ[n];
-      if (nx < 1 || nz < 1 || nx >= w - 1 || nz >= w - 1) continue;
-      const v = d[nz * w + nx];
-      if (v < best) { best = v; bx = nx; bz = nz; }
-    }
-    if (bx < 0) break;
-    ix = bx; iz = bz; moved = true;
-    if (best === 0) break;                            // standing on him
-  }
-  if (!moved) return false;
-  out.set(NAV.x0 + (ix + 0.5) * C, 0, NAV.z0 + (iz + 0.5) * C);
+  const ix = ((m.pos.x - NAV.x0) / C) | 0, iz = ((m.pos.z - NAV.z0) / C) | 0;
+  const k = CBZ.battleFlow.step(d, w, w, ix, iz, 3);
+  if (k < 0) return false;
+  out.set(NAV.x0 + ((k % w) + 0.5) * C, 0, NAV.z0 + (((k / w) | 0) + 0.5) * C);
   return true;
 }
 

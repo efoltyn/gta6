@@ -93,6 +93,7 @@ function frame(dt) {
         else if (simT - NAV.at.blue > 1.4) navSolve("blue");
       }
       for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
+      if (MASS.on) MASS.step(sdt);          // the MID and FAR tiers (src/battle/mass.js)
       /* THE HOLD AND EVERYTHING IN THE AIR. This has to be its own call and
          not a seam inside beastFight: the strike bubble above only runs while
          the gorilla has a LIVING target inside reach, and a man being swung
@@ -227,6 +228,7 @@ function frame(dt) {
       if (m._weaponProp.visible !== showGun) m._weaponProp.visible = showGun;
     }
   }
+  if (MASS.on) MASS.frame(realDt);      // promotion, demotion, ghosts, the crowd draw
   stepKill(realDt);                     // ...on WALL time: see THE KILL CAM
   stepCamera(dt);
   if (SEA.on) seaUnderwater();          // after the camera moved, before the draw
