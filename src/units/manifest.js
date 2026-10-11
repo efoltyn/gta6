@@ -66,7 +66,7 @@
     pig: S("pig", "pigs"),
     sheep: S("sheep", "sheep", "flock"),
     goat: S("goat", "goats", "herd"),
-    horse: S("horse", "horses", "herd"),
+    horse: Object.assign(S("horse", "horses", "herd"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js"] }),
     chicken: S("chicken", "chickens", "flock"),
     // the war room's "1000 DOGS": the city's one dog (city/dogmodel.js)
     dog: Object.assign(S("dog", "dogs", "pack"), { needs: ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "city/dogmodel.js"] }),
