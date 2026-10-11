@@ -408,7 +408,7 @@ suspension, rate-limited turret laying, ballistics, armour zones, penetration, d
 the crew seat book; pure maths, node-loadable). The battle side (crew, AI, firing, damage
 states, wrecks, player driving) is `src/battle/vehicles.js`.
 
-The 15 vehicles today, each on the game's existing builder (there is no new art in wave A; the
+The 17 vehicles today, each on the game's existing builder (there is no new art in wave A; the
 vehicle agents redraw):
 
 | id | name | builder | crew | weapons | armour F/S/R/T (mm) |
@@ -417,6 +417,8 @@ vehicle agents redraw):
 | bradley_ifv | M2A3 Bradley (6 dismounts) | milArmor.ifv | driver, gunner, commander | 25 mm, TOW, coax | 60/30/20/15 |
 | stryker_apc | Stryker (9) | milArmor.apc | driver, commander | .50 RWS | 20/14/12/8 |
 | hmmwv | Humvee (2) | milArmor.luv | driver, gunner | .50 | 10/10/8/5 |
+| maxxpro_mrap | Navistar MaxxPro MRAP (6) | its own file on units/kit/hull.js (V-hull capsule, O-GPK, rear door) | driver, gunner, commander | .50 ring | 30/26/26/12, belly 260 (blast) |
+| jltv | Oshkosh L-ATV JLTV (1) | its own file on units/kit/hull.js (TAK-4i travel, CROWS) | driver, gunner, commander | .50 CROWS | 22/16/14/9, belly 200 |
 | m35_truck | M35 (16) | milArmor.truck | driver, commander | none | 2/0/0/0 |
 | m270_mlrs | label "M142 HIMARS" (the model is the wheeled pod) | milArmor.mlrs | 3 | 6 rockets | 8/2/2/2 |
 | patriot_launcher | Patriot | milArmor.patriot | 2 | SAM (air only) | 6/2/2/2 |
@@ -428,6 +430,11 @@ vehicle agents redraw):
 | b52 | B-52H (redrawn: skinned flexing wing) | its own file | pilot, copilot, radar nav, nav, EWO | 27 x Mk-82 stick (bay), 12 x GBU-31 JDAM (HSABs) | 3/2/2/2 (unarmoured, hp 1800) |
 | b2_spirit | B-2A Spirit | its own file (redrawn: real planform, hinged surfaces, two bays with rotary launchers) | pilot, commander | 8 GBU-31 BLU-109 (armour), 8 GBU-31 Mk 84 | 3/2/2/2 (unarmoured) |
 | a400m | A400M (airdrops 116) | milAir cargo | 3 | none | 0 |
+
+**The belly.** A charge under a hull (`imp.cause` `"ied"` / `"mine"`, threat class `ied`, 160 mm
+of blast loading) lands on the zone `"belly"`, and so does any ground blast inside the footprint
+of a hull that rates its floor (`stats.armour.belly`: a V-hull). A hull without a belly figure
+takes it on its roof's armour. The MaxxPro and the JLTV live through it; a Humvee does not.
 
 **Crew rules.** A side's men fill seats in roster order: drivers and pilots first, then gunners,
 copilots, commanders, loaders, then passenger benches. Seated men are off the field (hidden, not
