@@ -99,7 +99,7 @@
     hmmwv: V("Humvee", "Humvees", "ground", ["units/kit/hull.js"]),
     m35_truck: V("M35 cargo truck", "M35 cargo trucks", "ground", ["units/kit/hull.js"]),
     m270_mlrs: V("M142 HIMARS", "M142 HIMARS launchers", "ground", ["city/mil_armor.js"]),   // the id keeps the census name; the model is the wheeled six-round pod
-    patriot_launcher: V("Patriot launcher", "Patriot launchers", "ground", ["city/mil_armor.js"]),
+    patriot_launcher: V("Patriot launcher", "Patriot launchers", "ground", ["units/kit/hull.js"]),
     technical: V("technical", "technicals", "ground", ["units/kit/hull.js"]),
     ah64_apache: V("AH-64 Apache", "AH-64 Apaches", "air", ["city/mil_air.js"]),
     uh60_black_hawk: V("UH-60 Black Hawk", "UH-60 Black Hawks", "air", ["city/mil_air.js"]),
