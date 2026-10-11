@@ -18,14 +18,25 @@ export const meta = { world: "escape", fresh: true, dirties: true, timeoutMs: 12
 
 export default async function (t) {
   const r = await t.fn(`
+    // past the intro (3.55 s of sim), then out into the yard (0, 34) with
+    // the nearest inmate who is not a merchant, and set him on you the way
+    // the game does (CBZ.requestInmateHunt, the one way a man starts on you)
+    for (var w = 0; w < 300; w++) CBZ.stepSim(1 / 60);
     var P = CBZ.player, list = CBZ.npcs || [], n = null, bd = 1e9;
+    var YX = 0, YZ = 34, gy = CBZ.groundAt ? CBZ.groundAt(YX, YZ, 5) : 0;
+    P.pos.set(YX, gy, YZ);
     for (var i = 0; i < list.length; i++) {
       var c = list[i];
-      if (!c || c.dead || c.ko || !c.group || !c.char || c.kind === "guard") continue;
-      var d = Math.hypot(c.group.position.x - P.pos.x, c.group.position.z - P.pos.z);
+      if (!c || c.dead || c.ko || !c.group || !c.char || c.kind === "guard" || c.role === "merchant" || c.cuffed) continue;
+      var d = Math.hypot(c.group.position.x - YX, c.group.position.z - YZ);
       if (d < bd) { bd = d; n = c; }
     }
     if (!n) return { err: "no live inmate" };
+    n.group.position.set(YX + 1.6, gy, YZ);
+    if (n.target) n.target.set(YX, 0, YZ);
+    n._brokenUpT = 0; n.aiState = "wander";
+    var asked = CBZ.requestInmateHunt ? CBZ.requestInmateHunt(n, 30, "wronged") : (n.huntPlayer = 30, true);
+    var trace = [];
     var hits = 0, dmg = 0, blocked = 0, kinds = {}, thrown = 0;
     var realHurt = CBZ.hurtPlayer;
     CBZ.hurtPlayer = function (amt, x, z, o) {
@@ -44,6 +55,7 @@ export default async function (t) {
     try {
       for (var s = 0; s < steps; s++) {
         n.huntPlayer = Math.max(n.huntPlayer || 0, 5);
+        if (s % 120 === 0) trace.push([s / 60, Math.round(Math.hypot(n.group.position.x - P.pos.x, n.group.position.z - P.pos.z) * 100) / 100, n.aiState, Math.round((n.huntPlayer || 0) * 10) / 10]);
         var hp0 = P.hp;
         CBZ.stepSim(1 / 60);
         if (P.hp < hp0) hpLost += hp0 - P.hp;
@@ -54,7 +66,7 @@ export default async function (t) {
     } finally { CBZ.hurtPlayer = realHurt; V.strike = realStrike; }
     var dEnd = Math.hypot(n.group.position.x - P.pos.x, n.group.position.z - P.pos.z);
     return { thrown: thrown, hits: hits, blocked: blocked, dmg: Math.round(dmg * 10) / 10, hpLost: Math.round(hpLost * 10) / 10,
-      kinds: kinds, secs: s / 60, dEnd: Math.round(dEnd * 100) / 100 };`, 600000);
+      kinds: kinds, secs: s / 60, dEnd: Math.round(dEnd * 100) / 100, asked: asked, trace: trace };`, 600000);
   t.log(JSON.stringify(r));
   if (!r || r.err || r.__err) return { ok: false, summary: String(r && (r.err || r.__err)) };
   const rate = r.hpLost / Math.max(1, r.secs);

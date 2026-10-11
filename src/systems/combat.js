@@ -653,7 +653,7 @@
         }
         return punch(null, spec.verb === "ground" ? null : spec).ok;
       },
-      guard(on) { CBZ.player._blocking = on ? 1 : 0; if (CBZ.playerChar) CBZ.playerChar.fightStance = on || CBZ.playerChar.fightStance; },
+      guard(on) { CBZ.player._blocking = on ? 1 : 0; if (CBZ.playerChar) CBZ.playerChar.fightStance = !!on; },
     });
   }
   addEventListener("mousedown", (e) => {
