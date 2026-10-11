@@ -28,7 +28,13 @@
                                   firepower, burning, wreck}} armour + damage states
                                   (stats.armourCE, optional: per-face armour vs
                                   shaped charges, used for heat/atgm/hedp)
-     seats(def) / seat(crew, man, seat) / unseat(crew, seat)   crew seat book
+                                  SLAT / BAR ARMOUR (optional): vs.slat (per hull)
+                                  else stats.slat = the chance a cage catches an
+                                  RPG-class warhead (cls "heat") on a side, front
+                                  or rear face; caught -> {slat: true}, no pen
+     seats(def) / seat(crew, man, seat) / unseat(crew, seat)   crew seat book;
+                                  def.benches[i] (optional) = passenger i's seat
+                                  position in hull space (else [0, 1.2, -1])
    }
 ============================================================ */
 (function () {
@@ -157,6 +163,9 @@
     const tab = ce ? stats.armourCE : stats.armour;
     const arm = (tab && tab[zn]) != null ? tab[zn] : 0;
     const out = { zone: zn, armour: arm, pen: false, dmg: 0, mobility: false, firepower: false, burning: false, wreck: false };
+    // a slat cage shorts or crushes an RPG's fuze before its jet forms
+    const slat = vs.slat != null ? vs.slat : stats.slat;
+    if (slat > 0 && th.cls === "heat" && zn !== "top" && rnd() < slat) { out.slat = true; return out; }
     const p = th.pen * (0.85 + rnd() * 0.3);
     if (p <= arm && arm > 0) {
       // a blast against a hull it cannot get into still takes a track off
@@ -182,7 +191,7 @@
   function seats(def) {
     const out = [];
     (def.crew || []).forEach(function (s) { out.push({ seat: s.seat, pos: s.pos || [0, 1.5, 0], man: null, implicit: false, crew: true }); });
-    for (let i = 0; i < (def.passengers || 0); i++) out.push({ seat: "passenger", pos: [0, 1.2, -1], man: null, implicit: false, crew: false });
+    for (let i = 0; i < (def.passengers || 0); i++) out.push({ seat: "passenger", pos: (def.benches && def.benches[i]) || [0, 1.2, -1], man: null, implicit: false, crew: false });
     return out;
   }
   function seat(book, man, which) {
