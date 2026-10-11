@@ -1169,7 +1169,8 @@
       if (!self.wrecked) {
         if (mesh.material === self._paint) return;
         const c = mesh.material && mesh.material.color;
-        self.wreck(!!(c && c.r < 0.4));
+        if (!c || c.r > 0.9) return;              // someone else's swap, not the runtime's blackening
+        self.wreck(c.r < 0.4);
         return;
       }
       self.stepWreck(dt);
