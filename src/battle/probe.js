@@ -526,6 +526,24 @@ CBZ.npcwar.onBoot(function () {
        STOPS the orbit, because a photograph taken while the lens is drifting
        is a photograph of a different bearing on each side of a comparison.
        Returns what the lens ended up on, so a preset can assert it. */
+    /* ---- THE LENS ON ONE UNIT (?cam= by tool) ----------------------------
+       camFollow(sel): sel is the page's cam name: a unit id ("ah64_apache",
+       "bengal_tiger", "men") or "a:3" / "b:0". The study desk follows it
+       closely (a hull is ridden off its rear quarter, camera/study.js) and
+       finds the next of its kind if it falls. "a" / "b" ride a side's front.
+       Returns what the lens is on. */
+    camFollow: function (sel) {
+      sel = String(sel || "");
+      if (sel === "a" || sel === "b") { setCamMode("follow", sel === "a" ? "red" : "blue"); return { cam: sel }; }
+      const m = studyFind(sel);
+      if (!m) return null;
+      STUDY.m = m; STUDY.want = sel;
+      setCamMode("study");
+      frameStudy(0);
+      cam.focus.copy(cam.wFocus); cam.yaw = cam.wYaw; cam.pitch = cam.wPitch; cam.dist = cam.wDist;
+      camApply(1);
+      return { id: m.id, unit: m.unitId || (m.beast ? m.species.id : "men"), x: Math.round(m.pos.x), y: Math.round(m.pos.y), z: Math.round(m.pos.z) };
+    },
     camMode: function (mode, pick, yaw) {
       if (pick != null) studyPickBy(pick);
       if (yaw != null) { STUDY.orbit = +yaw || 0; STUDY.spin = 0; }

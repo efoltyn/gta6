@@ -72,7 +72,10 @@ export function parseSetup(s) {
 /* NPC War: which params are for the shot stage and which go on the page URL
    (map=water, blood=0, and anything the NPC War architecture defines later:
    an unknown key is a PAGE param, so a new page flag works the day it lands). */
-export const NPCWAR_STAGE_KEYS = new Set(["species", "unit", "n", "vs", "vn", "pose", "style", "speed", "heading", "stage", "grid", "ruler", "rw", "bw", "rt", "bt"]);
+/* `cam` is the battle page's own lens name (a | b | a:3 | <unit id>): on a
+   shot it FRAMES that body (or side) instead of the whole field, follows it
+   from frame to frame, and points the game camera (the "lens" cam) at it. */
+export const NPCWAR_STAGE_KEYS = new Set(["species", "unit", "n", "vs", "vn", "pose", "style", "speed", "heading", "stage", "grid", "ruler", "rw", "bw", "rt", "bt", "cam"]);
 // the CBZ worlds (page/world.js): look point, bearing, orbit radius; the rest is page URL (cfg_X=1, seed=N)
 export const WORLD_STAGE_KEYS = new Set(["at", "heading", "dist", "pose"]);
 export const NPCWAR_BASE_QUERY = "auto=1&map=arena&red=1&blue=1&killcam=0";

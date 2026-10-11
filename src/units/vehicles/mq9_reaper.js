@@ -20,11 +20,11 @@
     kind: "vehicle",
     domain: "air",
     drive: "jet",
-    stats: {hp: 120, mass: 4760, speed: 80, accel: 6, turn: 0.4, alt: 600, length: 11, width: 20, height: 3.8, armour: {front: 0, side: 0, rear: 0, top: 0}, standoff: 3000, remote: true},
+    stats: {hp: 120, mass: 4760, speed: 80, accel: 6, turn: 0.4, alt: 4500, length: 11, width: 20, height: 3.8, armour: {front: 0, side: 0, rear: 0, top: 0}, standoff: 3000, remote: true},
     crew: [],
     passengers: 0,
     weapons: [
-      {id: "agm114_hellfire", seat: null, kind: "missile", vs: "any", rof: 0.125, pen: 1000, beh: 1000, he: {pen: 1000, beh: 1000, blast: 6, power: 1.8}, speed: 425, range: 8000, minRange: 300, ammo: 4},
+      {id: "agm114_hellfire", seat: null, kind: "missile", vs: "any", mount: "fixed", arc: 0.5, rof: 0.125, pen: 1000, beh: 1000, he: {pen: 1000, beh: 1000, blast: 6, power: 1.8}, speed: 425, range: 8000, minRange: 300, ammo: 4},
     ],
     build: function (ctx) {
     const a = CBZ.milAir;
