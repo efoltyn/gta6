@@ -26,6 +26,8 @@
                                   he (true for blast), cls}  what hit us
      resolve(vs, stats, zone, threat, rnd) -> {pen:bool, dmg, kill:{mobility,
                                   firepower, burning, wreck}} armour + damage states
+                                  (stats.armourCE, optional: per-face armour vs
+                                  shaped charges, used for heat/atgm/hedp)
      seats(def) / seat(crew, man, seat) / unseat(crew, seat)   crew seat book
    }
 ============================================================ */
@@ -144,7 +146,12 @@
      and gun, and a big enough one cooks the ammunition (the wreck). */
   function resolve(vs, stats, zn, th, dmg, rnd) {
     rnd = rnd || Math.random;
-    const arm = (stats.armour && stats.armour[zn]) != null ? stats.armour[zn] : 0;
+    // a shaped charge (rocket, ATGM, HEAT) is stopped by composite/ERA far
+    // better than a dart is: stats.armourCE, when a unit gives it, is the
+    // face's chemical-energy figure (additive: units without it are unchanged)
+    const ce = (th.cls === "heat" || th.cls === "atgm" || th.cls === "hedp") && stats.armourCE && stats.armourCE[zn] != null;
+    const tab = ce ? stats.armourCE : stats.armour;
+    const arm = (tab && tab[zn]) != null ? tab[zn] : 0;
     const out = { zone: zn, armour: arm, pen: false, dmg: 0, mobility: false, firepower: false, burning: false, wreck: false };
     const p = th.pen * (0.85 + rnd() * 0.3);
     if (p <= arm && arm > 0) {
