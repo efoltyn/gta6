@@ -24,6 +24,8 @@
   function menGroup(n) {
     return n <= 12 ? "squad" : n <= 50 ? "platoon" : n <= 250 ? "company" : n <= 1000 ? "battalion" : n <= 5000 ? "brigade" : "division";
   }
+  // the wild dogs share one rig: src/units/kit/canid.js on the animal kit
+  const CANID = ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/kit/canid.js"];
   CBZ.UNIT_MANIFEST = {
     men: { kind: "men", name: "man", plural: "men", group: menGroup },
 
@@ -34,9 +36,9 @@
     white_lion: S("white lion", "white lions", "pride"),
     cheetah: S("cheetah", "cheetahs", "coalition"),
     snow_leopard: S("snow leopard", "snow leopards", "leap"),
-    gray_wolf: S("gray wolf", "gray wolves", "pack"),
-    arctic_wolf: S("Arctic wolf", "Arctic wolves", "pack"),
-    coyote: S("coyote", "coyotes", "pack"),
+    gray_wolf: Object.assign(S("gray wolf", "gray wolves", "pack"), { needs: CANID }),
+    arctic_wolf: Object.assign(S("Arctic wolf", "Arctic wolves", "pack"), { needs: CANID }),
+    coyote: Object.assign(S("coyote", "coyotes", "pack"), { needs: CANID }),
     black_bear: S("black bear", "black bears", "sloth"),
     brown_bear: S("brown bear", "brown bears", "sloth"),
     polar_bear: S("polar bear", "polar bears", "sloth"),
@@ -53,7 +55,7 @@
     wild_boar: S("wild boar", "wild boar", "sounder"),
     mountain_goat: S("mountain goat", "mountain goats", "herd"),
     bighorn_sheep: S("bighorn sheep", "bighorn sheep", "flock"),
-    red_fox: S("red fox", "red foxes", "skulk"),
+    red_fox: Object.assign(S("red fox", "red foxes", "skulk"), { needs: CANID }),
     raccoon: S("raccoon", "raccoons"),
     cottontail_rabbit: S("cottontail rabbit", "cottontail rabbits", "colony"),
     jackrabbit: S("jackrabbit", "jackrabbits"),
