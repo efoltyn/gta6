@@ -22,9 +22,12 @@
                 HK.flagMat(nation): the side's flag (city/flags.js) as a decal.
    3. WHEELS    HK.tyre(r, w, o) / HK.rim(...) geometry; the rig poses them as
                 one InstancedMesh per part per vehicle.
-   4. RIG       HK.WheeledRig(o): the per-vehicle controller src/battle/vehicles.js
-                drives: settle(), update(dt, v, w, steer, u), aimTurret(rel, el,
-                dt), muzzleWorld(out), fired(k), wrecked(dt, u). It spins and
+   4. RIG       HK.WheeledRig(o): the per-vehicle controller, on the vehicle
+                contract (docs/npcwar/ARCHITECTURE.md): mark(nation, ground,
+                side), fire(shot), damage(vs, res), muzzleWorld(out),
+                aimTurret(rel, el, dt), settle(); HK.animate(veh, dt, ctx) is a
+                def's animate and runs update(dt, v, w, steer, veh, ctx) alive,
+                wrecked(dt, veh) dead. It spins and
                 steers the wheels (Ackermann), runs each wheel's suspension over
                 the real ground (CBZ.floorAt), springs the body (squat, dive,
                 roll), scans with the gun when nothing is in sight, kicks the gun
@@ -369,10 +372,12 @@
     olive: { base: "#4d4c30", layers: [{ col: "#45442b", n: 8, r: [60, 120], st: 1.2 }], uniform: 0x55553a, vest: 0x46462f, canvas: "#4f4e33", gear: 0x46462f },
     winter: { base: "#dfe2e0", layers: [{ col: "#4d5638", n: 16, r: [14, 46], st: 2.2 }, { col: "#c9cdcc", n: 10, r: [40, 80], st: 1.6 }], uniform: 0xd8dbd8, vest: 0xbfc3c0, canvas: "#d4d7d4", gear: 0x9da199 },
   };
-  function scheme(nation, arena, team) {
+  // ground: the battle's `ground` (the open maps' skin sand|snow|grass, or a
+  // map id: city, island, field, arena, dunes...)
+  function scheme(nation, ground, team) {
     nation = nation || (team === "red" ? "kesh" : "republic");
-    if (arena === "snow") return "winter";
-    const desert = arena === "dunes";
+    if (ground === "snow") return "winter";
+    const desert = ground === "sand" || ground === "dunes";
     switch (nation) {
       case "kesh": return "sand";
       case "veridia": return desert ? "tan" : "splinter";
@@ -567,10 +572,27 @@
       if (!mat) return;
       const m = new THREE.Mesh(geos[k], mat);
       m.name = name ? name + ":" + k : k;
+      m.userData.hkKey = k;                 // rig.mark swaps the scheme's material by this key
       m.castShadow = shadow !== false; m.receiveShadow = true;
       parent.add(m); out.push(m);
     });
     return out;
+  }
+  // a crew figure mesh (or an instanced bench of them) that rig.mark can
+  // re-dress in the scheme's uniform
+  function figMesh(kind, schemeId, skin, M, count, box) {
+    const THREE = T();
+    const geo = figure(kind, schemeId, skin);
+    if (box && !geo._hkBounds) {             // an instanced bench culls with its vehicle
+      geo._hkBounds = true;
+      geo.boundingBox = new THREE.Box3(new THREE.Vector3(box[0], box[1], box[2]), new THREE.Vector3(box[3], box[4], box[5]));
+      geo.boundingSphere = new THREE.Sphere(); geo.boundingBox.getBoundingSphere(geo.boundingSphere);
+    }
+    const m = count ? new THREE.InstancedMesh(geo, M.crew, count) : new THREE.Mesh(geo, M.crew);
+    m.userData.hkFig = { kind: kind, skin: skin };
+    m.userData.hkKey = "crew";
+    m.castShadow = false;
+    return m;
   }
 
   /* ================================================================ 3. WHEELS */
@@ -746,7 +768,7 @@
     black: lin(0x1e1d1c), grey: lin(0x6e6c69), fire1: lin(0xff8a2a), fire2: lin(0xffc050),
   };
   const DUST = {                                        // sRGB of what a tyre throws up
-    dunes: [0xcaa77a, 1.0], grass: [0x9a8a68, 0.55], snow: [0xf2f4f6, 0.9], field: [0xb0a894, 0.35],
+    sand: [0xcaa77a, 1.0], dunes: [0xcaa77a, 1.0], grass: [0x9a8a68, 0.55], snow: [0xf2f4f6, 0.9], field: [0xb0a894, 0.35],
     island: [0xb5ab92, 0.45], arena: [0xa8a49a, 0.30], city: [0xa29e96, 0.25], gov: [0xa29e96, 0.25],
     harbor: [0xb0a894, 0.35], marina: [0xb0a894, 0.30], speedway: [0xa8a49a, 0.35],
   };
@@ -769,9 +791,7 @@
     this.wheels.forEach(function (w) { w.spin = 0; w.off = 0; w.sq = 1; });
     this.smoke = new Fx(160, false); this.glow = new Fx(48, true);
     o.root.add(this.smoke.points); o.root.add(this.glow.points);
-    const d = DUST[o.arena] || DUST.field;
-    const dl = lin(d[0]);
-    this.dustCol = dl; this.dustK = d[1];
+    this.setGround(o.ground || o.arena);
     this._q = new THREE.Quaternion(); this._e = new THREE.Euler(0, 0, 0, "YXZ");
     this._p = new THREE.Vector3(); this._s = new THREE.Vector3(1, 1, 1); this._m = new THREE.Matrix4();
     this._a = [0, 0, 0]; this._b = [0, 0, 0];
@@ -780,6 +800,66 @@
   }
   const RP = WheeledRig.prototype;
   RP.settle = function () { this.poseWheels(0); };
+  RP.setGround = function (g) {
+    const d = DUST[g] || DUST.field;
+    this.dustCol = lin(d[0]); this.dustK = d[1];
+  };
+  /* THE SIDE'S MARKINGS (the battle calls this right after build): the
+     scheme for the nation and the ground goes on every tagged mesh, the crew
+     change into its uniform, the nation's flag goes on the decal spots, the
+     dust takes the ground's colour. Idempotent. */
+  RP.mark = function (nation, ground, side) {
+    const THREE = T();
+    const sid = (side && side.side) || side || this.side || null;
+    const id = scheme(nation, ground, typeof sid === "string" ? sid : null);
+    this.setGround(ground);
+    const flagId = nation || (sid === "red" ? "kesh" : "republic");
+    if (id === this.schemeId && flagId === this.flagId) return;
+    this.schemeId = id; this.flagId = flagId;
+    const M = mats(id);
+    this.root.traverse(function (o) {
+      const ud = o.userData;
+      if (!ud || !ud.hkKey) return;
+      if (ud.hkFig) {
+        const old = o.geometry, g = figure(ud.hkFig.kind, id, ud.hkFig.skin);
+        if (old._hkBounds && !g._hkBounds) {          // an instanced bench keeps its vehicle-sized bounds
+          g._hkBounds = true; g.boundingBox = old.boundingBox.clone(); g.boundingSphere = old.boundingSphere.clone();
+        }
+        o.geometry = g;
+      }
+      if (M[ud.hkKey]) o.material = M[ud.hkKey];
+    });
+    // the flag decals
+    if (this.decal) {
+      const D = this.decal;
+      if (D.mesh && D.mesh.parent) D.mesh.parent.remove(D.mesh);
+      D.mesh = null;
+      const fm = flagMat(flagId);
+      if (fm) {
+        const ratio = flagRatio(flagId), key = ratio.toFixed(3);
+        if (!D.cache[key]) D.cache[key] = decalGeo(D.list, ratio);
+        D.mesh = new THREE.Mesh(D.cache[key], fm); D.mesh.name = "flags";
+        D.parent.add(D.mesh);
+      }
+    }
+  };
+  /* EVERY ROUND (the contract's fire(shot, from)): a rig with fire owns its
+     effects. The .50 kicks, flashes, blows gas and throws brass. */
+  RP.fire = function (shot) {
+    const k = shot && shot.kind;
+    this.fired(k === "cannon" ? 1 : k === "autocannon" ? 0.5 : 0.3);
+  };
+  // EVERY HIT THAT LANDS (contract damage(vs, res)): show it at once
+  RP.damage = function (vs, res) {
+    if (!vs) return;
+    this.hurtLook(vs, 0, null);
+    if (res && res.pen && this.root.parent) {
+      // a penetration: a flash of spall at the hull
+      const a = this._a, E = this.cabin || this.engine || [0, 1, 0];
+      mw(this.root, E[0], E[1], E[2], a);
+      this.glow.emit(a[0], a[1], a[2], 0, 0.5, 0, 0.12, 0.6, 1.6, 0.9, FXC.flash, 0, 0);
+    }
+  };
   RP.poseWheels = function (steer) {
     const ws = this.wheels, wb = this.wheelbase || 3.3, tw = this.track || 1.8;
     // Ackermann: the inside wheel turns tighter
@@ -878,12 +958,12 @@
     }
   };
   /* THE FRAME. dt is the animation step, v/w/steer the drive state, u the unit. */
-  RP.update = function (dt, v, w, steer, u) {
+  RP.update = function (dt, v, w, steer, u, ctx) {
     if (!(dt > 0)) return;
     this.dt = dt; this.t += dt;
     const root = this.root, ws = this.wheels, vs = u && u.vs;
     // ---- wheels: roll by distance, ride the ground on their own springs
-    const ground = CBZ.floorAt, live = !!root.parent;
+    const ground = (ctx && ctx.groundAt) || CBZ.floorAt, live = !!root.parent;
     const bump = this.travel ? this.travel[0] : 0.18, droop = this.travel ? this.travel[1] : 0.18;
     let heave = 0;
     for (let i = 0; i < ws.length; i++) {
@@ -918,10 +998,6 @@
     if (this.rec > 0) { this.rec = 0; this.recV = Math.min(0, this.recV); }
     if (this.tube) this.tube.position.z = this.rec * 0.06;
     if (u) {
-      if (u.lastShotT !== this.lastShot) {
-        if (this.lastShot != null && u.lastShotT > this.lastShot && this.mgKick) this.fired(0.3);
-        this.lastShot = u.lastShotT;
-      }
       this.crew(u);
       if (this.turret && !this.jammed && this.scan !== false && this.t - this.aimT > 2.5 && (!u.tgt || u.tgt.dead)) {
         const tc = this.tcfg || {}, sweep = Math.sin(this.t * 0.22 + (this.seed || 0)) * 1.25;
@@ -929,7 +1005,7 @@
         if (this.gun) this.gun.rotation.x += (-0.04 - this.gun.rotation.x) * Math.min(1, dt * 1.5);
         if (u.tur) u.tur.yaw = this.turret.rotation.y;
       }
-      if (vs) this.damage(vs, dt, u);
+      if (vs) this.hurtLook(vs, dt, u);
     }
     // ---- exhaust and dust
     if (live) this.emitDrive(dt, v, acc, u);
@@ -974,7 +1050,7 @@
   /* DAMAGE STATES: a hit hull smokes from the engine, a burning one burns, a
      mobility kill sits on a flat (or shot-off) wheel, a firepower kill hangs
      its gun. */
-  RP.damage = function (vs, dt, u) {
+  RP.hurtLook = function (vs, dt, u) {
     const r = Math.random, a = this._a;
     const frac = vs.maxHp > 0 ? clamp(vs.hp / vs.maxHp, 0, 1) : 1;   // a wreck sits far below 0 hp
     if (vs.mobility && this.flat < 0) this.flat = (this.seed || 0) % this.wheels.length;
@@ -1035,7 +1111,7 @@
       if (this.body) this.body.position.y = this.body0 + this.sag;
       this.poseWheels(0);
     }
-    if (u && u.vs) this.damage(u.vs, dt * (burning ? 1 : 0.3), u);
+    if (u && u.vs) this.hurtLook(u.vs, dt * (burning ? 1 : 0.3), u);
     this.smoke.step(dt); this.glow.step(dt);
   };
 
@@ -1119,13 +1195,21 @@
     });
     return { tyreIM: tyreIM, rimIMs: rimIMs };
   }
+  /* THE UNIT'S animate(veh, dt, ctx) for a hull on a WheeledRig (the
+     contract: every sim step, on the battle clock, alive or wrecked). */
+  function animate(veh, dt, ctx) {
+    const r = veh && veh.rig;
+    if (!r || !(r instanceof WheeledRig)) { if (ctx && ctx.shared) ctx.shared(dt); return; }
+    if (ctx && ctx.dead) r.wrecked(dt, veh);
+    else r.update(dt, ctx ? ctx.speed : (veh.ds ? veh.ds.v : 0), ctx ? ctx.yawRate : 0, ctx ? ctx.steer : 0, veh, ctx);
+  }
   // per-type geometry built once per LOAD OF THIS KIT: a unit file keeps its
   // body here, not in its own closure, so a hot-swapped kit rebuilds it
   const CACHE = {};
   function cache(key, fn) { return CACHE[key] || (CACHE[key] = fn()); }
 
   CBZ.hullKit = {
-    cache: cache, wheelSet: wheelSet,
+    cache: cache, wheelSet: wheelSet, animate: animate, figMesh: figMesh,
     geo: function () { return new Geo(); },
     lin: lin, rng: rngOf, scheme: scheme, mats: mats, flagMat: flagMat, flagRatio: flagRatio,
     decalGeo: decalGeo, meshes: meshes, tyre: tyre, m2: m2, figure: figure, WheeledRig: WheeledRig, Fx: Fx,

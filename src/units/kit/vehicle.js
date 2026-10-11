@@ -26,6 +26,8 @@
                                   he (true for blast), cls}  what hit us
      resolve(vs, stats, zone, threat, rnd) -> {pen:bool, dmg, kill:{mobility,
                                   firepower, burning, wreck}} armour + damage states
+                                  (stats.armourCE, optional: per-face armour vs
+                                  shaped charges, used for heat/atgm/hedp)
      seats(def) / seat(crew, man, seat) / unseat(crew, seat)   crew seat book
    }
 ============================================================ */
@@ -137,6 +139,10 @@
     by = by || imp.by || null;
     if (imp.cause === "bomb") return { pen: 240, beh: 2400, he: true, cls: "bomb", top: true };
     const blast = imp.fromX != null || imp.cause === "explosion";
+    // a flown round says what it defeats where it arrived (weapons/ballistics.js:
+    // the cartridge's RHA depth at its retained velocity), which beats a table
+    // by weapon name that cannot know a 600 m shot from a 60 m one
+    if (imp.pen != null && !blast) return { pen: imp.pen, beh: 1, he: false, cls: "small" };
     // a vehicle's own weapon says what it was: the round on the trigger
     // (_shot, set for the length of the call) or its last high-explosive
     // round in flight (_he, read when that round's blast arrives)
@@ -158,7 +164,12 @@
      and gun, and a big enough one cooks the ammunition (the wreck). */
   function resolve(vs, stats, zn, th, dmg, rnd) {
     rnd = rnd || Math.random;
-    const arm = (stats.armour && stats.armour[zn]) != null ? stats.armour[zn] : 0;
+    // a shaped charge (rocket, ATGM, HEAT) is stopped by composite/ERA far
+    // better than a dart is: stats.armourCE, when a unit gives it, is the
+    // face's chemical-energy figure (additive: units without it are unchanged)
+    const ce = (th.cls === "heat" || th.cls === "atgm" || th.cls === "hedp") && stats.armourCE && stats.armourCE[zn] != null;
+    const tab = ce ? stats.armourCE : stats.armour;
+    const arm = (tab && tab[zn]) != null ? tab[zn] : 0;
     const out = { zone: zn, armour: arm, pen: false, dmg: 0, mobility: false, firepower: false, burning: false, wreck: false };
     const p = th.pen * (0.85 + rnd() * 0.3);
     if (p <= arm && arm > 0) {
@@ -185,7 +196,9 @@
   function seats(def) {
     const out = [];
     (def.crew || []).forEach(function (s) { out.push({ seat: s.seat, pos: s.pos || [0, 1.5, 0], man: null, implicit: false, crew: true }); });
-    for (let i = 0; i < (def.passengers || 0); i++) out.push({ seat: "passenger", pos: [0, 1.2, -1], man: null, implicit: false, crew: false });
+    // def.passengerPos (optional): each bench seat's own place in hull space
+    const pp = def.passengerPos || null;
+    for (let i = 0; i < (def.passengers || 0); i++) out.push({ seat: "passenger", pos: (pp && pp[i]) || [0, 1.2, -1], man: null, implicit: false, crew: false });
     return out;
   }
   function seat(book, man, which) {

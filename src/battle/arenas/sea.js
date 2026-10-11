@@ -16,11 +16,9 @@
    Three sine trains, seeded off sWorld so the swell is the same swell on
    every reload of the same URL, and one mesh that reads the function.
 
-   WHAT IS DELIBERATELY NOT HERE: world/water_spec.js's real ocean, the
-   waterfield, buoyancy, wakes, foam. All of it exists and all of it belongs
-   to the mainland; pulling it in would cost this venue its entire reason for
-   existing, which is that it boots in a fraction of the city's time. When
-   this arena needs a wake it should ask for the world's, not grow one. */
+   The SHADING is the world's (world/water_spec.js, see seaSurface): one
+   water material for every sea in the game. The HEIGHT is still this page's
+   swellAt(), because the battle's sim clock and its determinism own it. */
 const SEA = {
   on: false, t: 0, y0: 0,
   seabed: -46,                 // where the bottom is. deep enough to READ as depth
@@ -64,47 +62,26 @@ function swellAt(x, z) {
    above the swell and watch a shark's shape move beneath it. */
 function seaSurface(cx, cz) {
   const span = 620, seg = 64;
-  /* THE SEA IS LIT PER PIXEL. A Lambert sheet lit per vertex at ten metres
-     a cell is a blue tarpaulin: no glint, no chop, nothing that says water.
-     Phong puts the sun on it; a few travelling ripples in the shader break
-     the normal up at the scale a lens actually sees (and fade with range so
-     they never shimmer); a fresnel term lets the sky into the grazing view
-     and the deep colour into the steep one. The far plate carries the same
-     material with a hole cut where the live grid is, so the two sheets no
-     longer stack their opacity into a visible square. */
-  const seaShader = function (hole) {
-    return function (sh) {
-      sh.uniforms.uT = SEA.uT;
-      sh.uniforms.uHole = { value: new THREE.Vector3(cx, cz, hole ? span / 2 - 6 : -1) };
-      sh.vertexShader = "varying vec3 vSeaW;\n" + sh.vertexShader.replace("#include <project_vertex>",
-        "#include <project_vertex>\nvSeaW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
-      sh.fragmentShader = "varying vec3 vSeaW;\nuniform float uT;\nuniform vec3 uHole;\n" + sh.fragmentShader
-        .replace("void main() {", "void main() {\n if (uHole.z > 0.0 && abs(vSeaW.x - uHole.x) < uHole.z && abs(vSeaW.z - uHole.y) < uHole.z) discard;")
-        .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" +
-          "{ float dist = length(vSeaW - cameraPosition); float k = 1.0 - smoothstep(40.0, 420.0, dist);\n" +
-          "  vec2 p = vSeaW.xz;\n" +
-          "  float dx = cos(p.x * 0.42 + uT * 1.3) * 0.5 + cos(dot(p, vec2(0.31, 0.27)) + uT * 1.7) * 0.35 + cos(dot(p, vec2(-1.1, 0.7)) + uT * 2.9) * 0.2;\n" +
-          "  float dz = cos(p.y * 0.37 - uT * 1.1) * 0.5 + cos(dot(p, vec2(-0.23, 0.41)) + uT * 1.5) * 0.35 + cos(dot(p, vec2(0.8, 1.3)) - uT * 2.6) * 0.2;\n" +
-          "  normal = normalize(normal + (viewMatrix * vec4(dx, 0.0, dz, 0.0)).xyz * 0.16 * k); }")
-        // r128 has no output_fragment chunk: the colour is written just
-        // before tonemapping, so the fresnel lands there
-        .replace("#include <tonemapping_fragment>",
-          "{ vec3 vdir = normalize(cameraPosition - vSeaW); float fr = pow(1.0 - max(vdir.y, 0.0), 4.0);\n" +
-          "  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.62, 0.74, 0.82), fr * 0.55);\n" +
-          "  gl_FragColor.a = mix(gl_FragColor.a, 0.96, fr); }\n#include <tonemapping_fragment>");
-    };
+  /* THE SEA IS THE GAME'S WATER (2026-10-11). The two sheets used to wear a
+     private Phong shader (a few cosine ripples and a fresnel tint). They are
+     now shaded by the one water material every sea in the game uses
+     (world/water_spec.js via CBZ.waterAdoptSea, "external" mode: THIS file's
+     swell still displaces the live grid on the CPU, so swellAt() stays the
+     one height every body here floats on). Sky reflection off the dome,
+     depth colour, crest glow, glint, foam round every hull, and Snell's
+     window from below. The far plate is clipped where the live grid is, so
+     the two sheets never stack their blend into a visible square.
+
+     transparent + depthWrite:false is still the trick that makes this venue
+     work: r128 draws opaque first, so every animal UNDER the water is
+     already in the buffer when the surface blends over it. */
+  const fallback = function () {
+    return new THREE.MeshPhongMaterial({ color: 0x14506c, specular: 0xbfd4e0, shininess: 70,
+      transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
   };
-  SEA.uT = { value: 0 };
-  const mat = new THREE.MeshPhongMaterial({
-    color: 0x14506c, specular: 0xbfd4e0, shininess: 70, transparent: true, opacity: 0.8,
-    depthWrite: false, side: THREE.DoubleSide,
-  });
-  mat.onBeforeCompile = seaShader(false);
-  const farMat = mat.clone();
-  farMat.onBeforeCompile = seaShader(true);
   const g = new THREE.PlaneGeometry(span, span, seg, seg);
   g.rotateX(-Math.PI / 2);
-  const m = new THREE.Mesh(g, mat);
+  const m = new THREE.Mesh(g, fallback());
   m.position.set(cx, 0, cz);
   m.renderOrder = 4;
   CBZ.scene.add(m);
@@ -112,11 +89,16 @@ function seaSurface(cx, cz) {
   SEA.cx = cx; SEA.cz = cz;
   const far = new THREE.PlaneGeometry(26000, 26000);
   far.rotateX(-Math.PI / 2);
-  const fm = new THREE.Mesh(far, farMat);
+  const fm = new THREE.Mesh(far, fallback());
   fm.position.set(cx, 0, cz);
   fm.renderOrder = 3;
   fm.matrixAutoUpdate = false; fm.updateMatrix();
   CBZ.scene.add(fm);
+  if (CBZ.waterAdoptSea) {
+    CBZ.waterAdoptSea(m, { name: "NPC War Sea", seaY: SEA.y0, depthWrite: false, renderOrder: 4, horizonFuse: false });
+    CBZ.waterAdoptSea(fm, { name: "NPC War Far Sea", seaY: SEA.y0, depthWrite: false, renderOrder: 3,
+      clip: [cx, cz, span / 2 - 6] });
+  }
 }
 /* the live grid, once per FRAME (never per sub-step — the swell is scenery,
    and 4 225 vertices x 3 sines is a real number). Only y moves. */
@@ -130,9 +112,8 @@ function seaStep(dt) {
     a[j + 1] = swellAt(a[j] + cx, a[j + 2] + cz);
   }
   p.needsUpdate = true;
-  // the swell's own slope lights the swell (Phong reads these per pixel)
+  // the swell's own slope lights the swell (the water material reads them)
   SEA.surf.geometry.computeVertexNormals();
-  if (SEA.uT) SEA.uT.value = SEA.t;
   for (let i = 0; i < SEA.boats.length; i++) {
     const b = SEA.boats[i];
     const y = swellAt(b.position.x, b.position.z);
@@ -160,7 +141,8 @@ function seaReef(cx, cz) {
      its bow section torn off below and the mast down. The colliders are
      the same boxes as before: they were always the honest volumes. */
   const rx = cx, rz = cz + 96, bed = SEA.seabed;
-  const collide = function (w, h, d, x, y, z) { CBZ.micro.addBoxCollider(x, y, z, w, h, d); };
+  // a hull is steel plate with a ship's insides behind it (src/battle/fire.js)
+  const collide = function (w, h, d, x, y, z) { CBZ.micro.addBoxCollider(x, y, z, w, h, d, { mat: "steel", hollow: 0.012 }); };
   const reefPaint = function (salt) {
     return function (x, y, z, ny) {
       let c = [0.2, 0.25, 0.23];
@@ -180,6 +162,8 @@ function seaReef(cx, cz) {
     m.scale.set(r[0], r[1], r[2]); m.position.set(rx + r[3], bed + r[4], rz + r[5]); m.rotation.y = r[6];
     m.receiveShadow = true;
     m.matrixAutoUpdate = false; m.updateMatrix();
+    // the sun's caustic web on the pinnacle's shallow shoulders (world/water_spec.js)
+    if (CBZ.waterCausticsApply) CBZ.waterCausticsApply(m);
     CBZ.scene.add(m);
     collide(r[0] * 1.7, r[1] * 1.6, r[2] * 1.7, rx + r[3], bed + r[4], rz + r[5]);
   });

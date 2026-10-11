@@ -1427,7 +1427,7 @@
   "disasters": "systems/disasters.js",
   "disasterAudit": "systems/disasters.js",
   "survHud": "systems/survivalhud.js",
-  "WATER_SWELLS": "world/water_spec.js",
+  "WATER_WAVES": "world/water_spec.js",
   "WATER_SWELL_AMP": "world/water_spec.js",
   "WATER_SWELL_ROWS_AMP": "world/water_spec.js",
   "WATER_CHOP_ROWS_AMP": "world/water_spec.js",

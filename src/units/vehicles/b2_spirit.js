@@ -20,11 +20,11 @@
     kind: "vehicle",
     domain: "air",
     drive: "jet",
-    stats: {hp: 800, mass: 71700, speed: 250, accel: 6, turn: 0.16, alt: 700, length: 21, width: 52.4, height: 5.2, armour: {front: 0, side: 0, rear: 0, top: 0}, standoff: 0},
+    stats: {hp: 800, mass: 71700, speed: 250, accel: 6, turn: 0.16, alt: 12000, length: 21, width: 52.4, height: 5.2, armour: {front: 0, side: 0, rear: 0, top: 0}, standoff: 0},
     crew: [{seat: "pilot", pos: [0, 2.5, 6]}, {seat: "commander", pos: [0, 2.5, 6]}],
     passengers: 0,
     weapons: [
-      {id: "gbu31_jdam", seat: "commander", kind: "bombs", vs: "any", rof: 3.3333333333333335, salvo: 4, reload: 30, pen: 300, beh: 3000, he: {pen: 300, beh: 3000, blast: 34, power: 4}, range: 9000, ammo: 16},
+      {id: "gbu31_jdam", seat: "commander", kind: "bombs", vs: "any", guided: true, rof: 3.3333333333333335, salvo: 4, reload: 30, pen: 300, beh: 3000, he: {pen: 300, beh: 3000, blast: 34, power: 4}, range: 9000, ammo: 16},
     ],
     build: function (ctx) {
     const S = CBZ.strategicModels;

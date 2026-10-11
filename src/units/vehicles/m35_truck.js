@@ -58,6 +58,9 @@
   const TRF = 0.86, TRD = 0.86, DUAL = 0.145;          // front track half, dual-centre half, dual spacing half
   const BED = { z0: 0.32, z1: -3.35, y: 1.32, w: 1.12, side: 1.80 };
   const RING = { x: -0.42, y: 2.92, z: 1.08, r: 0.56 };
+  // the sixteen bench places, hips: left and right alternating, front to back
+  const BENCH = [];
+  for (let i = 0; i < 16; i++) { const s = i % 2 ? -1 : 1; BENCH.push([s * 0.95, 1.80, BED.z0 - 0.40 - Math.floor(i / 2) * 0.42]); }
   const ARCH = [[1.13, 1.80], [1.13, 2.45], [1.06, 2.74], [0.88, 2.94], [0.60, 3.05], [0.22, 3.10]];
 
   function arch(k) {          // the canvas arch, full width, k slightly inflates it
@@ -327,20 +330,14 @@
     const THREE = window.THREE, HK = CBZ.hullKit;
     if (!THREE || !HK) return null;
     const B = HK.cache("m35_truck", body);
-    const sc = HK.scheme(ctx.nation, ctx.arena, ctx.team);
+    // built in this side's scheme for this ground; rig.mark repaints on demand
+    const side = ctx.side || ctx.team || null, ground = ctx.ground || ctx.arena;
+    const sc = HK.scheme(ctx.nation, ground, side);
     const M = HK.mats(sc);
     const root = new THREE.Group(); root.name = "m35";
     const bodyG = new THREE.Group(); bodyG.name = "body"; root.add(bodyG);
     HK.meshes(bodyG, B.geos, M, "hull");
     HK.meshes(bodyG, B.cGeos, M, "cover");
-    const nation = ctx.nation || (ctx.team === "red" ? "kesh" : "republic");
-    const fm = HK.flagMat(nation);
-    if (fm) {
-      const ratio = HK.flagRatio(nation), key = ratio.toFixed(3);
-      if (!B.decals[key]) B.decals[key] = HK.decalGeo([[1.034, 1.50, 1.12, 1, 0, 0.30], [-1.034, 1.50, 1.12, -1, 0, 0.30],
-        [1.15, 1.60, -0.35, 1, 0, 0.36], [-1.15, 1.60, -0.35, -1, 0, 0.36]], ratio);
-      const dm = new THREE.Mesh(B.decals[key], fm); dm.name = "flags"; bodyG.add(dm);
-    }
     // the tailgate on its hinge
     const gate = new THREE.Group(); gate.name = "tailgate"; gate.position.set(0, BED.y, BED.z1 + 0.02); bodyG.add(gate);
     HK.meshes(gate, B.tgGeos, M, "gate");
@@ -354,22 +351,16 @@
     // the crew: driver and commander in the cab; the commander stands in the
     // ring to fight; sixteen riflemen on the benches
     const seed = (ctx.seed | 0) >>> 0;
-    const fig = function (kind, k) { const m = new THREE.Mesh(HK.figure(kind, sc, (seed + k) % 4), M.crew); m.castShadow = false; return m; };
+    const fig = function (kind, k) { return HK.figMesh(kind, sc, (seed + k) % 4, M); };
     const driver = fig("seated", 0); driver.position.set(0.48, 1.72, 1.08); bodyG.add(driver);
     const cdr = fig("seated", 1); cdr.position.set(-0.48, 1.72, 1.08); bodyG.add(cdr);
     const stand = fig("gunner", 2); stand.position.set(0, -0.17, RING.r - 0.02 - 0.62); stand.castShadow = true; turret.add(stand);
-    const benchGeo = HK.figure("bench", sc, seed % 4);
-    if (!benchGeo._hkBounds) {
-      benchGeo._hkBounds = true;
-      benchGeo.boundingBox = new THREE.Box3(new THREE.Vector3(-1.1, 1.3, BED.z1), new THREE.Vector3(1.1, 2.6, BED.z0));
-      benchGeo.boundingSphere = new THREE.Sphere(); benchGeo.boundingBox.getBoundingSphere(benchGeo.boundingSphere);
-    }
-    const troops = new THREE.InstancedMesh(benchGeo, M.crew, 16); troops.name = "troops";
+    const troops = HK.figMesh("bench", sc, seed % 4, M, 16, [-1.1, 1.3, BED.z1, 1.1, 2.6, BED.z0]); troops.name = "troops";
     const tm = new THREE.Matrix4(), tq = new THREE.Quaternion(), tp = new THREE.Vector3(), ts = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
     for (let i = 0; i < 16; i++) {
-      const s = i % 2 ? -1 : 1, k = Math.floor(i / 2);
-      tq.setFromAxisAngle(up, s > 0 ? -PI / 2 : PI / 2);
-      tp.set(s * 0.95, 1.80, BED.z0 - 0.40 - k * 0.42);
+      const p = BENCH[i];
+      tq.setFromAxisAngle(up, p[0] > 0 ? -PI / 2 : PI / 2);
+      tp.set(p[0], p[1], p[2]);
       troops.setMatrixAt(i, tm.compose(tp, tq, ts));
     }
     troops.count = 0;
@@ -394,9 +385,13 @@
       troops: { im: troops, max: 16 },
       tailgate: { obj: gate, open: -1.50 },
       exhaust: { p: [-0.98, 2.86, 0.30], d: [0, 0.6, -0.4], soot: 1.0 },
-      engine: [0, 1.75, 2.4], cabin: [0, 2.0, 1.1], arena: ctx.arena, seed: seed, mgKick: true,
+      engine: [0, 1.75, 2.4], cabin: [0, 2.0, 1.1], ground: ground, side: side, seed: seed,
       pitchK: 0.010, rollK: 0.007,
+      // the nation's flag on both doors and both bed sides
+      decal: { parent: bodyG, cache: B.decals, list: [[1.034, 1.50, 1.12, 1, 0, 0.30], [-1.034, 1.50, 1.12, -1, 0, 0.30],
+        [1.15, 1.60, -0.35, 1, 0, 0.36], [-1.15, 1.60, -0.35, -1, 0, 0.36]] },
     });
+    rig.mark(ctx.nation, ground, side);
     return { group: root, rig: rig, footW: Wd, footL: L, height: H };
   }
 
@@ -408,12 +403,25 @@
       length: L, width: Wd, height: H,
       armour: { front: 1, side: 0, rear: 0, top: 0 }, standoff: 420, dismountAt: 520 },
     turret: { rate: 1.2, elevRate: 1.0, elevMin: -0.30, elevMax: 0.9 },
-    crew: [{ seat: "driver", pos: [0.48, 2.1, 1.1] }, { seat: "commander", pos: [-0.48, 2.1, 1.1] }],
+    // hull-space seats: the crew-casualty line is measured to these (a burst
+    // down the bed reaches the men on the benches)
+    crew: [{ seat: "driver", pos: [0.48, 2.25, 1.10] }, { seat: "commander", pos: [-0.48, 2.25, 1.10] }],
     passengers: 16,
+    passengerPos: BENCH.map(function (p) { return [p[0], p[1] + 0.45, p[2]]; }),
     weapons: [
-      { id: "m2hb_50cal_m36", seat: "commander", kind: "mg", wid: "lmg", turret: true, rof: 8, burst: 7, pause: 1.6, dmg: 38, pen: 24, range: 1500, ammo: 600 },
+      // M2HB on the M36 ring: the ring mount's own ballistics row
+      { id: "m2_50cal_ring", seat: "commander", kind: "mg", wid: "lmg", turret: true, rof: 8, burst: 7, pause: 1.6, dmg: 38, pen: 24, range: 1800, ammo: 600 },
     ],
-    tactics: { role: "transport", keepFrom: { men: 420, launcher: 500 }, avoidArmour: true, dismountAt: 520, lead: false, withdrawAt: 0.5 },
+    tactics: {
+      role: "transport",
+      engage: { soft: 1200, armour: 0, close: 18 },
+      priorities: ["launcher", "mg", "men", "vehicle"],
+      keepFrom: { men: 420, launcher: 500, armour: 1500 },
+      hullDown: false, faceThreat: false, reverseOut: true, lead: false,
+      screen: { need: "men", behind: 80 },             // never ahead of the infantry it carried
+      withdrawAt: 0.5,
+    },
+    animate: function (veh, dt, c) { if (CBZ.hullKit) CBZ.hullKit.animate(veh, dt, c); else if (c && c.shared) c.shared(dt); },
     build: build,
   });
 })();

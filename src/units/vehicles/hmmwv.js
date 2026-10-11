@@ -290,19 +290,14 @@
     const THREE = window.THREE, HK = CBZ.hullKit;
     if (!THREE || !HK) return null;
     const B = HK.cache("hmmwv", body);
-    const sc = HK.scheme(ctx.nation, ctx.arena, ctx.team);
+    // built in the scheme for this side and ground; rig.mark (the battle calls
+    // it after build) repaints it if the side's markings say otherwise
+    const side = ctx.side || ctx.team || null, ground = ctx.ground || ctx.arena;
+    const sc = HK.scheme(ctx.nation, ground, side);
     const M = HK.mats(sc);
     const root = new THREE.Group(); root.name = "hmmwv";
     const bodyG = new THREE.Group(); bodyG.name = "body"; root.add(bodyG);
     HK.meshes(bodyG, B.geos, M, "hull");
-    // the nation's flag on both rear doors and the trunk
-    const fm = HK.flagMat(ctx.nation || (ctx.team === "red" ? "kesh" : "republic"));
-    if (fm) {
-      const ratio = HK.flagRatio(ctx.nation || (ctx.team === "red" ? "kesh" : "republic"));
-      const key = ratio.toFixed(3);
-      if (!B.decals[key]) B.decals[key] = HK.decalGeo([[1.072, 1.06, -0.52, 1, 0, 0.30], [-1.072, 1.06, -0.52, -1, 0, 0.30], [0.55, 1.17, -2.386, 0, -1, 0.26]], ratio);
-      const dm = new THREE.Mesh(B.decals[key], fm); dm.name = "flags"; bodyG.add(dm);
-    }
     // turret on the ring, the gun on its cradle, the tube that recoils
     const turret = new THREE.Group(); turret.name = "turret"; turret.position.set(0, RING.y, RING.z); bodyG.add(turret);
     const shield = new THREE.Group(); shield.name = "shield"; turret.add(shield);
@@ -313,14 +308,13 @@
     const muzzle = new THREE.Object3D(); muzzle.name = "muzzle"; muzzle.position.set(0, 0.03, 1.46); tube.add(muzzle);
     // the crew, each drawn only while his seat is filled
     const seed = (ctx.seed | 0) >>> 0;
-    const fig = function (kind, k) { return new THREE.Mesh(HK.figure(kind, sc, (seed + k) % 4), M.crew); };
+    const fig = function (kind, k) { return HK.figMesh(kind, sc, (seed + k) % 4, M); };
     const driver = fig("seated", 0); driver.position.set(0.48, 1.06, 0.18); bodyG.add(driver);
     const tc = fig("seated", 1); tc.position.set(-0.48, 1.06, 0.18); bodyG.add(tc);
     const p1 = fig("seated", 2); p1.position.set(0.48, 1.06, -0.72); bodyG.add(p1);
     const p2 = fig("seated", 3); p2.position.set(-0.48, 1.06, -0.72); bodyG.add(p2);
     // hips just under the ring: hands on the grips (0.33 up, 0.22 behind the trunnion)
     const gunner = fig("gunner", 4); gunner.position.set(0, -0.14, -0.62); gunner.castShadow = true; turret.add(gunner);
-    [driver, tc, p1, p2].forEach(function (m) { m.castShadow = false; });
     // wheels: one instanced draw per part for the four of them
     const wheels = [
       { x: TR, y: R, z: AXF, r: R, steer: 1 }, { x: -TR, y: R, z: AXF, r: R, steer: 1 },
@@ -334,10 +328,12 @@
       figs: { driver: driver, commander: tc, passenger: [p1, p2] },
       gunner: { obj: gunner, seat: "gunner", calm: 0.02, fight: -0.14 },
       exhaust: { p: [-0.80, 0.55, -2.45], d: [-0.3, -0.1, -1], soot: 0.35 },
-      engine: [0, 1.3, 1.6], cabin: [0, 1.5, -0.3], arena: ctx.arena, seed: seed, mgKick: true,
+      engine: [0, 1.3, 1.6], cabin: [0, 1.5, -0.3], ground: ground, side: side, seed: seed,
       pitchK: 0.008, rollK: 0.0045,
+      // the nation's flag on both rear doors and the trunk lid
+      decal: { parent: bodyG, cache: B.decals, list: [[1.072, 1.06, -0.52, 1, 0, 0.30], [-1.072, 1.06, -0.52, -1, 0, 0.30], [0.55, 1.17, -2.386, 0, -1, 0.26]] },
     });
-    root.userData.rig = null;           // the rig rides the return value, not the clonable userData
+    rig.mark(ctx.nation, ground, side);
     return { group: root, rig: rig, footW: Wd, footL: L, height: 2.69 };
   }
 
@@ -350,12 +346,23 @@
       length: L, width: Wd, height: 2.69,
       armour: { front: 13, side: 12, rear: 10, top: 6 }, standoff: 400, dismountAt: 480 },
     turret: { rate: 1.6, elevRate: 1.3, elevMin: -0.25, elevMax: 0.9 },
-    crew: [{ seat: "driver", pos: [0.48, 1.4, 0.2] }, { seat: "gunner", pos: [0, 2.3, -0.3] }, { seat: "commander", pos: [-0.48, 1.4, 0.2] }],
+    // seat positions in hull space: the crew-casualty line is measured to these
+    crew: [{ seat: "driver", pos: [0.48, 1.55, 0.25] }, { seat: "gunner", pos: [0, 2.30, -0.90] }, { seat: "commander", pos: [-0.48, 1.55, 0.25] }],
     passengers: 2,
     weapons: [
-      { id: "m2hb_50cal", seat: "gunner", kind: "mg", wid: "lmg", turret: true, rof: 8, burst: 8, pause: 1.3, dmg: 38, pen: 24, range: 1500, ammo: 1200 },
+      // M2HB on the O-GPK ring: 450-600 rds/min in bursts; the ring mount's own ballistics row
+      { id: "m2_50cal_ring", seat: "gunner", kind: "mg", wid: "lmg", turret: true, rof: 8, burst: 8, pause: 1.3, dmg: 38, pen: 24, range: 1800, ammo: 1200 },
     ],
-    tactics: { role: "gun truck", keepFrom: { men: 400, launcher: 450 }, avoidArmour: true, dismountAt: 480, withdrawAt: 0.35, screen: "behind infantry once they are out" },
+    tactics: {
+      role: "gun truck",
+      engage: { soft: 1500, armour: 0, close: 18 },        // a .50 for men and soft-skins; armour is someone else's
+      priorities: ["launcher", "mg", "men", "vehicle", "beast"],
+      keepFrom: { men: 400, launcher: 450, armour: 1200 },
+      hullDown: false, faceThreat: true, reverseOut: true,
+      screen: { need: "men", behind: 40 },                 // fights behind its dismounts once they are out
+      withdrawAt: 0.35,
+    },
+    animate: function (veh, dt, c) { if (CBZ.hullKit) CBZ.hullKit.animate(veh, dt, c); else if (c && c.shared) c.shared(dt); },
     build: build,
   });
 })();

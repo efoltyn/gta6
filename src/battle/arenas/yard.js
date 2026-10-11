@@ -588,8 +588,12 @@ function buildYard(W, D, gap) {
   blockB.xf(0, 0, hd, Math.PI); legatoRun(blockB, -hw - 0.4, hw + 0.4, 4, true);
   blockB.xf(-hw, 0, 0, Math.PI / 2); legatoRun(blockB, -hd + 0.4, hd - 0.4, 4, false);
   blockB.xf(hw, 0, 0, -Math.PI / 2); legatoRun(blockB, -hd + 0.4, hd - 0.4, 4, false);
-  CBZ.micro.addBoxCollider(0, 1.6, -hd, W + 0.8, 3.2, 0.8); CBZ.micro.addBoxCollider(0, 1.6, hd, W + 0.8, 3.2, 0.8);
-  CBZ.micro.addBoxCollider(-hw, 1.6, 0, 0.8, 3.2, D); CBZ.micro.addBoxCollider(hw, 1.6, 0, 0.8, 3.2, D);
+  // `mat` (and `hollow` / `fill`) is what a round meets (src/battle/fire.js,
+  // weapons/ballistics.js): precast concrete, a steel box with air in it,
+  // timber crates part-full
+  const CONC = { mat: "concrete" };
+  CBZ.micro.addBoxCollider(0, 1.6, -hd, W + 0.8, 3.2, 0.8, CONC); CBZ.micro.addBoxCollider(0, 1.6, hd, W + 0.8, 3.2, 0.8, CONC);
+  CBZ.micro.addBoxCollider(-hw, 1.6, 0, 0.8, 3.2, D, CONC); CBZ.micro.addBoxCollider(hw, 1.6, 0, 0.8, 3.2, D, CONC);
 
   // PLACEMENT: every prop claims its footprint (+ an aisle) and nothing
   // intersects anything; the spawn columns stay open ground
@@ -618,7 +622,7 @@ function buildYard(W, D, gap) {
       containerInto(B, L);
     }
     claim(x, z, ex, ez);
-    CBZ.micro.addBoxCollider(x, tiers * CN.H / 2, z, ex * 2, tiers * CN.H, ez * 2);
+    CBZ.micro.addBoxCollider(x, tiers * CN.H / 2, z, ex * 2, tiers * CN.H, ez * 2, { mat: "steel", hollow: 0.002 });
     SCENERY.push({ kind: "container", x: x, y: tiers * CN.H / 2, z: z, len: L, tiers: tiers });
   };
   const L20 = 6.058, L40 = 12.192;
@@ -664,7 +668,7 @@ function buildYard(W, D, gap) {
       jerseyInto(jB, 3.0, [k, k, k * 0.98]);
     }
     claim(x, z, ex, ez);
-    CBZ.micro.addBoxCollider(x, 0.405, z, ex * 2, 0.81, ez * 2);
+    CBZ.micro.addBoxCollider(x, 0.405, z, ex * 2, 0.81, ez * 2, { mat: "concrete" });
     SCENERY.push({ kind: "barrier", x: x, y: 0.4, z: z });
     runs++;
   }
@@ -686,7 +690,7 @@ function buildYard(W, D, gap) {
       high = Math.max(high, 0.122 + stack * 1.02);
     }
     claim(x, z, ex, ez);
-    CBZ.micro.addBoxCollider(x, high / 2, z, ex * 2, high, ez * 2);
+    CBZ.micro.addBoxCollider(x, high / 2, z, ex * 2, high, ez * 2, { mat: "wood", fill: 0.45 });
     SCENERY.push({ kind: "crates", x: x, y: high / 2, z: z });
     piles++;
   }
@@ -718,34 +722,18 @@ function buildYard(W, D, gap) {
    it is unambiguous at every camera range, and the apron edge below reads
    as the quay it now is. */
 function seaPlate(y) {
-  /* ...and it is WATER, not a blue sheet. It was one flat Lambert colour
-     lit per vertex, so every island venue sat in a matte blue tablecloth
-     with no sun on it. Phong puts the glint back, a few fixed ripple trains
-     break the normal up near the lens (fading out before they can shimmer),
-     and a fresnel term lets the sky into the grazing view. Still one plane,
-     still opaque, still -9 m. */
+  /* ...and it is WATER, not a blue sheet: the deep plate under the island
+     venues is shaded by the one water material (world/water_spec.js via
+     CBZ.waterAdoptSea) — the dome's sky in it, glint, depth colour — flat
+     and opaque (nothing is drawn under it), at -9 m. */
+  const py = y == null ? -9 : y;
   const g = new THREE.PlaneGeometry(26000, 26000);
-  g.rotateX(-Math.PI / 2); g.translate(0, y == null ? -9 : y, 0);
-  const mat = new THREE.MeshPhongMaterial({ color: 0x1d4a64, specular: 0x9fb6c4, shininess: 64 });
-  mat.onBeforeCompile = function (sh) {
-    sh.vertexShader = "varying vec3 vSpW;\n" + sh.vertexShader.replace("#include <project_vertex>",
-      "#include <project_vertex>\nvSpW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
-    sh.fragmentShader = "varying vec3 vSpW;\n" + sh.fragmentShader
-      .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" +
-        "{ float dist = length(vSpW - cameraPosition); float k = 1.0 - smoothstep(60.0, 600.0, dist);\n" +
-        "  vec2 p = vSpW.xz;\n" +
-        "  float dx = cos(p.x * 0.42) * 0.5 + cos(dot(p, vec2(0.31, 0.27))) * 0.35 + cos(dot(p, vec2(-1.1, 0.7))) * 0.2;\n" +
-        "  float dz = cos(p.y * 0.37) * 0.5 + cos(dot(p, vec2(-0.23, 0.41))) * 0.35 + cos(dot(p, vec2(0.8, 1.3))) * 0.2;\n" +
-        "  normal = normalize(normal + (viewMatrix * vec4(dx, 0.0, dz, 0.0)).xyz * 0.14 * k); }")
-      .replace("#include <tonemapping_fragment>",
-        "{ vec3 vdir = normalize(cameraPosition - vSpW); float fr = pow(1.0 - max(vdir.y, 0.0), 4.0);\n" +
-        "  gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.6, 0.72, 0.8), fr * 0.5); }\n#include <tonemapping_fragment>");
-  };
-  mat.customProgramCacheKey = function () { return "npcwar-seaplate"; };
-  const m = new THREE.Mesh(g, mat);
+  g.rotateX(-Math.PI / 2); g.translate(0, py, 0);
+  const m = new THREE.Mesh(g, new THREE.MeshPhongMaterial({ color: 0x1d4a64, specular: 0x9fb6c4, shininess: 64 }));
   m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
   m.userData.terrain = true;
   CBZ.scene.add(m);
+  if (CBZ.waterAdoptSea) CBZ.waterAdoptSea(m, { name: "NPC War Sea Plate", seaY: py, opaque: true });
 }
 /* OPEN WATER's floor. It used to be the same flat blue plate as the island
    sea, forty metres down: a seabed the colour of the water over it. It is
