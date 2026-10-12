@@ -763,6 +763,9 @@
     }
 
     // ---- let sibling modules furnish the city (buildings, props, lights) ----
+    // the far night lights (core/lodlights.js) start empty with this world;
+    // every builder below registers its own real lights into it
+    if (CBZ.lodLights) CBZ.lodLights.reset(city);
     if (CBZ.bootStep) CBZ.bootStep("city:buildings");
     if (CBZ.cityBuildings) try { CBZ.cityBuildings(city); } catch (e) { console.error("[city buildings]", e); }
     if (CBZ.bootStep) CBZ.bootStep("city:expansion");

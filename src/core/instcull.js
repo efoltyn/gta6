@@ -60,6 +60,11 @@
     let v = matOk.get(m);
     if (v !== undefined && v.obc === m.onBeforeCompile) return v.ok;
     let ok = !(m.isShaderMaterial || m.isRawShaderMaterial || m.displacementMap);
+    // A material that DECLARES its vertex edits stay inside each instance's
+    // prototype bounds (world/treelod.js: a dither band that only collapses
+    // an instance, an impostor quad whose geometry sphere holds every corner
+    // it can emit) is as predictable as a stock one.
+    if (ok && m.userData && m.userData.cbzInstanceBounded) { matOk.set(m, { obc: m.onBeforeCompile, ok: true }); return true; }
     if (ok && m.onBeforeCompile !== DEFAULT_OBC) {
       let src = "";
       try { src = String(m.onBeforeCompile); } catch (e) { src = "gl_Position="; }

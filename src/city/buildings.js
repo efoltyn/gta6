@@ -364,7 +364,16 @@
     });
     // a build landing mid-night flips its lit panes on immediately
     if (glassNightOn) for (const r of litAll) if (!r.shattered) paneShow(r, true);
+    // THE LIT PANES AT DISTANCE (core/lodlights.js): one warm light per lit
+    // pane, handing over by the pane's size on screen (it takes over as the
+    // pane itself goes under a few pixels)
+    if (CBZ.lodLights && litAll.length) {
+      CBZ.lodLights.lights("panes:" + (++_lodPaneBatch), litAll.map(function (r) {
+        return { x: r.x, y: r.y, z: r.z, c: 0xffc77a, s: Math.max(0.8, 2 * Math.max(r.hw, r.hd)), g: 2.6, f: -2.5 };
+      }));
+    }
   }
+  let _lodPaneBatch = 0;
 
   // ---- INTERIOR WINDOW DRESSING POOLS -------------------------------------
   // The room-side "daylight" sky slab + mullion strips behind every window

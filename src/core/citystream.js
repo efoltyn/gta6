@@ -139,7 +139,7 @@
     /* what must be the real thing: core/sight.js's `detail` ring (the ground
        fog's end + 36 m). Past it, out to the airborne horizon, only content
        with a FAR FORM may be seen (metro HLOD, farcull's lot boxes, the
-       forest's far crowns, scenery pools, which never park: core/slice.js
+       forest's mid copies and impostors, scenery pools, which never park: core/slice.js
        isHorizon). The ring is measured from the EYE: keepR adds how far the
        camera stands off the body (a heli boom, a lifted lens). */
     const view = function () { return CBZ.sight().detail; };
