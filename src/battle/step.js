@@ -52,6 +52,8 @@ function stepMan(m, sdt) {
   if (m.downed) { downedStep(m, sdt); return; }
   // over a low wall: the vault owns him until his feet are down (ai/squad.js)
   if (m.vault) { stepVault(m, sdt); return; }
+  // a drone team's pilot: in cover behind the line, flying (src/battle/drones.js)
+  if (m.droneOp && droneOpStep(m, sdt)) return;
   if (simT >= m.thinkAt) think(m, simT);
   if (m.fled) return;
   if (m.supp > 0) m.supp = Math.max(0, m.supp - sdt * SUPP_DECAY);

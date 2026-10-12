@@ -286,6 +286,8 @@ function makeVehicle(teamId, i, id) {
       onDamage: function (dmg, info) { hurtMan(u, dmg, { byTeam: info && info.team, cause: "bomb" }); },
     });
   }
+  // A DRONE (drive "drone") is kit until it flies: src/battle/drones.js
+  if (def.drive === "drone") droneInit(u);
   return u;
 }
 function vehCrewN(u) {
@@ -388,6 +390,7 @@ function vehBailOut(u, catastrophic) {
 
 /* ------------------------------------------------------------- the step */
 function stepVehicle(u, sdt) {
+  if (u.drone) { stepDrone(u, sdt); return; }            // src/battle/drones.js
   if (u.dead) { stepWreck(u, sdt); vehAnimate(u, sdt); return; }
   if (u.fled) return;
   stepVehShots(u, sdt);
@@ -442,6 +445,9 @@ function thinkVehicle(u) {
     if (d < (S.dismountAt || 150) || u.vs.mobility) vehDismount(u);
   }
   if (u.air) return;
+  // a drone carrier: a rack truck holds until its cells are empty, a
+  // Switchblade carrier stops for each launch (src/battle/drones.js)
+  if (u._droneCells && droneCarrierThink(u)) return;
   // where to be: the weapon's standoff from the mark, else at the enemy
   const stand = S.standoff || 200;
   // a tank leads its infantry, it does not leave it behind; a hull with no
@@ -489,7 +495,10 @@ function vehPickTarget(u) {
     const d = Math.hypot(o.pos.x - u.pos.x, o.pos.z - u.pos.z);
     if (d > range) continue;
     let score = d;
-    if (o.vehicle && antiArmour) score -= 600;
+    // AN INCOMING DRONE IS THE THREAT OF THE MOMENT: the guns that can reach
+    // it turn on it (a drone overhead and close, not one orbiting far off)
+    if (o.drone) { if ((u.air && u.def.drive !== "rotor") || !droneSpotted(u, o)) continue; score -= 720; }
+    else if (o.vehicle && antiArmour) score -= 600;
     if (o.launcher) score -= 120;
     if (o.air && vehCanHitAir(u)) score -= 400;
     _vc.push(score, o);
@@ -519,6 +528,8 @@ function vehicleCanTarget(m, o) {
   if (!o.air) return true;
   if (m.vehicle) return vehCanHitAir(m);
   if (m.beast || m.fists) return false;
+  if (m.launcher && o.drone) return false;           // nobody fires an RPG at a drone
+  if (o.drone && !droneSpotted(m, o)) return false;  // seen or heard first (src/battle/drones.js)
   return (o.pos.y - MAP.groundAt(o.pos.x, o.pos.z)) < 140;
 }
 
@@ -658,6 +669,12 @@ function vehFight(u, sdt) {
   const turErr = tr ? Math.abs(D.wrap(rel - u.tur.yaw)) : 0;
   u.sees = u.sees && simT - u.lastThink < 0.5 ? u.sees : eyeLos(u, t);
   if (!u.sees && !vehIndirect(u)) return;
+  // A DRONE HAS TO BE FOUND IN THE SIGHT FIRST: a small fast thing the crew
+  // has just heard takes 1-3 s to pick up and get the mount onto
+  if (t.drone) {
+    if (u._acqOn !== t) { u._acqOn = t; u._acqT = simT + 1.2 + lcg() * 1.8; }
+    if (simT < u._acqT) return;
+  }
   const jet = u.air && def.drive !== "rotor";
   for (let k = 0; k < u.wpn.length; k++) {
     const W = u.wpn[k], w = W.w;
@@ -666,6 +683,13 @@ function vehFight(u, sdt) {
     // reach is SLANT range: a tank's .50 does not reach a Reaper 4.5 km up
     if (w.kind !== "bombs" && (Math.hypot(dist, dy) > (w.range || 600) || dist < (w.minRange || 0))) continue;
     if (!vehWeaponFits(u, w, t)) continue;
+    // AN AIRCRAFT OVERHEAD IS ABOVE A COAX'S ELEVATION: the coaxial gun lays
+    // with the main gun (def.turret.elevMax), a pintle, ring or remote mount
+    // goes to ~60 deg (w.elevMax overrides either)
+    if (t.air && !u.air) {
+      const em = w.elevMax != null ? w.elevMax : /coax/.test(w.id || "") ? ((def.turret && def.turret.elevMax) || 0.35) : 1.1;
+      if (Math.atan2(dy, Math.max(1, dist)) > em) continue;
+    }
     const manned = vehSeatManned(u, w);
     if (!manned) continue;                                   // nobody at this gun
     if (manned === "halt") { u._wantShot = true; continue; } // the driver stops and climbs over
@@ -713,6 +737,13 @@ function vehWeaponFits(u, w, t) {
   if (w.vs === "armour" && !t.vehicle) return false;
   if (w.vs === "soft" && t.vehicle && ((t.def.stats.armour || {}).side || 0) > 30) return false;
   if (t.air && !(w.vs === "air" || w.kind === "mg" || w.kind === "autocannon" || (u.air && w.kind === "missile"))) return false;
+  /* A SAM IS NOT SPENT ON A DRONE ITS RADAR BARELY SEES: an interceptor
+     against a target under its floor (stats.rcs, m2; w.minRcs, default 0.05)
+     is a million-dollar missile on a twenty-thousand-dollar quad. The guns
+     take those. */
+  if (w.kind === "sam" && t.def && t.def.stats && t.def.stats.rcs != null && t.def.stats.rcs < (w.minRcs != null ? w.minRcs : 0.05)) return false;
+  // ...nor an anti-tank missile (a TOW, a Hellfire) on a quad or a Switchblade
+  if (w.kind === "missile" && t.drone && t.def.stats.rcs != null && t.def.stats.rcs < 0.05) return false;
   return true;
 }
 /* WHO WORKS THIS GUN. A weapon fires only when its `seat` is crewed (a man
@@ -830,6 +861,9 @@ function vehFireKE(u, w, t, dist) {
   let p = Math.max(0.25, Math.min(0.95, 0.96 - dist / 3200));
   if (u.speed > 1.5) p *= u.def.drive === "tracked" ? 0.85 : 0.6;
   if (w.kind === "autocannon") p *= 0.75;
+  // a drone is a box a metre or less across, crossing at 30-50 m/s: an
+  // unguided round on it is a long shot
+  if (t.drone) p *= Math.min(1, (t.vlen || 0.3) * 0.5) * 10 / (10 + (t.speed || 0));
   const hit = lcg() < p;
   _v.set(t.pos.x, t.pos.y + (t.aimY || 1), t.pos.z);
   if (!hit) { _v.x += (lcg() - 0.5) * 6; _v.z += (lcg() - 0.5) * 6; _v.y += (lcg() - 0.3) * 2; }
@@ -1525,6 +1559,7 @@ function vehKillFx(u, catastrophic, at) {
 }
 // killMan's vehicle half: the crew gets out (or does not), the hull burns
 function vehicleWrecked(u, imp) {
+  if (u.drone) { droneKilled(u, imp); return; }        // it falls and crashes (src/battle/drones.js)
   u.dieT = 0;
   const catastrophic = !!(u.vs.wreck && u.vs.burning) || (u.vs.hp < -u.maxHp * 0.3);
   if (!u.air) vehKillFx(u, catastrophic);
