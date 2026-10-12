@@ -339,8 +339,8 @@
       onSelect: function (d) { give(d, "hold"); } });
     I.register("dog", { id: "dog-guard", prio: 17, canShow: function (d) { return mine(d) && !(d._order && d._order.kind === "guard"); }, label: "Guard",
       onSelect: function (d) { give(d, "guard"); } });
-    I.register("dog", { id: "dog-attack", prio: 16, bad: true, pick: "person", campaignSafe: true, canShow: mine, label: "Attack",
-      onSelect: function (d, ctx, t) { if (t) give(d, "attack", t); } });
+    // Attack is not on the dog: it is on the man you want bitten (city/orders.js
+    // order-attack sends everyone with you, your dog included).
     I.register("dog", { id: "dog-standdown", prio: 70, canShow: function (d) { return mine(d) && fighting(d); }, label: "Stand down",
       onSelect: function (d) { order(d, "standdown"); } });
     I.register("dog", { id: "dog-feed-own", prio: 12, canShow: function (d) { return mine(d) && d.hp < d.maxHp && !!haveFeed(); }, label: "Feed", onSelect: feed });

@@ -1460,7 +1460,7 @@
       },
       options: [{
         id: "flag-pattern", slot: "e", prio: 20, campaignSafe: true,
-        label: function () { return DZ.draft ? "Change pattern" : "Redesign"; },
+        label: function () { return DZ.draft ? "Restyle" : "Redesign"; },
         canShow: function () { return true; },
         onSelect: function (t) {
           if (!DZ.draft) { const b = t && t.staff ? t.staff : (TAGS.oval || [])[0]; if (b) designer.begin(b, home()); }
@@ -1472,15 +1472,15 @@
         canShow: function () { return !!DZ.draft; },
         onSelect: function () { designer.adopt(); },
       }, {
-        id: "flag-colours", prio: 12, campaignSafe: true, label: "Change colors",
+        id: "flag-colours", prio: 12, campaignSafe: true, label: "Recolor",
         canShow: function () { return !!DZ.draft; },
         onSelect: function () { designer.colours(); },
       }, {
-        id: "flag-emblem", prio: 11, campaignSafe: true, label: "Change emblem",
+        id: "flag-emblem", prio: 11, campaignSafe: true, label: "Emblem",
         canShow: function () { return !!DZ.draft; },
         onSelect: function () { designer.emblem(); },
       }, {
-        id: "flag-putback", prio: 10, campaignSafe: true, label: "Put it back",
+        id: "flag-putback", prio: 10, campaignSafe: true, label: "Put back",
         canShow: function () { return !!DZ.draft; },
         onSelect: function () { designer.cancel(); },
       }],

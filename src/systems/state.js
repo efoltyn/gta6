@@ -410,13 +410,15 @@
   // set as labels and let origins.js resolve a name to a real airframe at
   // run-start (it falls back to any flyable if the pick did not build).
   // These strings must match what the builders actually register as
-  // `model.name` — strategic.js "B-2 SPIRIT", island_military.js "Fighter Jet"
-  // / "Heavy Bomber" / "Helicopter", island_airport.js "Airliner" / "Private
-  // Jet". They are only the TITLE-SCREEN labels (the world is not built yet);
-  // origins.js resolves the chosen name against the live registry at
-  // run-start and matches case-insensitively, so a casing drift here costs a
-  // fallback to another airframe rather than a crash.
-  const FALLBACK_PLANES = ["B-2 SPIRIT", "Heavy Bomber", "Fighter Jet", "Airliner", "Private Jet", "Helicopter"];
+  // `model.name` — strategic.js "B-2 SPIRIT"; Fort Brandt's NPC War units by
+  // their manifest names (src/units/manifest.js: "F-35", "B-52", "AH-64
+  // Apache", "UH-60 Black Hawk", "A400M"); island_airport.js "Airliner" /
+  // "Private Jet". They are only the TITLE-SCREEN labels (the world is not
+  // built yet); origins.js resolves the chosen name against the live registry
+  // at run-start (loading Fort Brandt's fleet if the pick stands there) and
+  // matches case-insensitively, so a drift here costs a fallback to another
+  // airframe rather than a crash.
+  const FALLBACK_PLANES = ["B-2 SPIRIT", "B-52", "F-35", "AH-64 Apache", "UH-60 Black Hawk", "A400M", "Airliner", "Private Jet"];
 
   // ONE SUB-SELECT, TWO STORIES. The pilot picks an airframe and the captain
   // picks a hull (owner, 2026-08-12: "captain like pilot should let me select

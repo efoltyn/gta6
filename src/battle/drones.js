@@ -51,7 +51,7 @@
                 Shahed at ~45 deg onto the point it was sent to
    THE HIT (droneDetonate): the airframe's box meets the hull's box (or the
    aim point, or a man, the ground, a wall). On a hull the charge is the
-   round on the trigger (u._shot: pen, beh, cls, top) at the struck point
+   round's threat (imp.threat: pen, beh, cls, top) at the struck point
    (imp.at): the hull's own armour by place and face answers
    (vehicles.js hurtVehicle -> units/kit/vehicle.js resolve, armourCE for a
    shaped charge), its crew are hit along the jet, an engine deck that is
@@ -219,7 +219,7 @@ function droneBind(u, was) {
         // (the war room has one start line; a drone team's is behind it)
         if (simT < 14 && !was) {
           const P = best.droneOp.post = droneOpPost(best);
-          best.pos.set(P.x, MAP.groundAt(P.x, P.z), P.z);
+          best.pos.set(P.x, HOST.groundAt(P.x, P.z), P.z);
           best.home = { x: P.x, z: P.z };
           best.droneOp.atPost = true;
         }
@@ -244,7 +244,7 @@ function droneSiteEarly(v) {
   if (!tac.holdUntilEmpty || v._droneSite || simT > 14) return;
   const S = v._droneSite = droneHidePoint(v, tac.launchBack || 450, 3);
   const enemy = v.team === "red" ? "blue" : "red", C = teamCOM[enemy];
-  v.pos.set(S.x, MAP.groundAt(S.x, S.z), S.z);
+  v.pos.set(S.x, HOST.groundAt(S.x, S.z), S.z);
   v.h = Math.atan2(S.x - C.x, S.z - C.z);
   v.yaw = v.heading = v.h;
   v.group.rotation.set(0, v.h, 0);
@@ -336,19 +336,19 @@ function droneHidePoint(m, back, hgt) {
     const f = Math.min(0.8, k * 110 / Math.max(1, hl + back));
     eyes.push([C.x + (px - C.x) * f, C.z + (pz - C.z) * f, 2.6]);
   }
-  const H = HOST || MAP;
+  const H = HOST;
   let best = null, bs = Infinity;
   const RING = [0, 30, 60, 100, 150];
   for (let r = 0; r < RING.length; r++) {
     for (let k = 0; k < (r ? 12 : 1); k++) {
       const a = k * Math.PI * 2 / 12 + r * 0.3;
       const x = px + Math.sin(a) * RING[r], z = pz + Math.cos(a) * RING[r];
-      const gy = MAP.groundAt(x, z);
+      const gy = HOST.groundAt(x, z);
       let seen = 0;
       for (let e = 0; e < eyes.length; e++) {
-        const ex = eyes[e][0], ez = eyes[e][1], ey = MAP.groundAt(ex, ez) + eyes[e][2];
+        const ex = eyes[e][0], ez = eyes[e][1], ey = HOST.groundAt(ex, ez) + eyes[e][2];
         const hid = terrainBlocked(ex, ey, ez, x, gy + hgt, z) ||
-          (CBZ.micro.segmentBlocked && CBZ.micro.segmentBlocked(ex, ey, ez, x, gy + hgt, z));
+          (HOST.segmentBlocked && HOST.segmentBlocked(ex, ey, ez, x, gy + hgt, z));
         if (!hid) seen++;
       }
       // a hull in sight of the hole is worse than a man in sight of it
@@ -396,11 +396,11 @@ function droneOpStep(m, sdt) {
     spd = 4.6 * (m.kitSpeed || 1);
     const ox = m.pos.x, oz = m.pos.z;
     m.pos.x += dx / d * spd * sdt; m.pos.z += dz / d * spd * sdt;
-    CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
+    HOST.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
     if (Math.hypot(m.pos.x - ox, m.pos.z - oz) < spd * sdt * 0.2) { O.stuckT = (O.stuckT || 0) + sdt; if (O.stuckT > 2) O.post = { x: m.pos.x, z: m.pos.z, cover: false }; }
   } else O.atPost = true;
   m.speed = spd;
-  m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
+  m.pos.y = HOST.bodyY(m, m.pos.x, m.pos.z);
   m.target.set(m.pos.x, 0, m.pos.z);
   m.slot = "hold"; m.tgt = null;
   // he faces where he walks, the fight, or the drone he is flying
@@ -593,12 +593,12 @@ function droneLaunch(u, tgt) {
     if (dr.frame === "quad") {
       // set down on the ground a stride in front of him
       const x = m.pos.x + fx * 1.6, z = m.pos.z + fz * 1.6;
-      u.pos.set(x, MAP.groundAt(x, z) + 0.02, z);
+      u.pos.set(x, HOST.groundAt(x, z) + 0.02, z);
       u.h = Math.atan2(fx, fz);
       dr.vel.set(0, 0, 0); dr.spd = 0;
     } else {
       // the tube on its legs beside him, 35 deg up toward the fight
-      const x = m.pos.x + fx * 1.4 - fz * 0.8, z = m.pos.z + fz * 1.4 + fx * 0.8, gy = MAP.groundAt(x, z);
+      const x = m.pos.x + fx * 1.4 - fz * 0.8, z = m.pos.z + fz * 1.4 + fx * 0.8, gy = HOST.groundAt(x, z);
       const yaw = Math.atan2(fx, fz), pit = 0.62;
       if (u.rig && u.rig.tube) {
         const T = u.rig.tube;
@@ -642,7 +642,7 @@ function droneLaunch(u, tgt) {
     const hl = Math.hypot(hx, hz) || 1; hx /= hl; hz /= hl;
     const back = dr.frame === "quad" ? 250 : 1500 + (u.i % 5) * 120;
     const x = at.x + hx * back + (lcg() - 0.5) * 60, z = at.z + hz * back + (lcg() - 0.5) * 60;
-    u.pos.set(x, MAP.groundAt(x, z) + (D.agl || 30), z);
+    u.pos.set(x, HOST.groundAt(x, z) + (D.agl || 30), z);
     u.h = Math.atan2(-hx, -hz); dr.gam = 0;
     dr.spd = D.cruise || 30; dr.prop = 1; dr.wings = 1;
     droneVelFrom(u);
@@ -790,7 +790,7 @@ const _dP = { x: 0, y: 0, z: 0 };
 function droneQuad(u, sdt) {
   const dr = u.dr, D = u.def.drone || {};
   const enemy = u.team === "red" ? "blue" : "red";
-  const gy = MAP.groundAt(u.pos.x, u.pos.z);
+  const gy = HOST.groundAt(u.pos.x, u.pos.z);
   const cruise = D.cruise || 30, dash = D.dash || cruise * 1.25, acc = D.accel || 14, agl = D.agl || 15;
   let tx, ty, tz, vmax = cruise, arrive = true;
   if (dr.ph === "launch") {
@@ -809,7 +809,7 @@ function droneQuad(u, sdt) {
     // nothing to hit yet: fly toward the enemy and hold a search orbit over them
     const C = teamCOM[enemy];
     const a = Math.atan2(u.pos.x - C.x, u.pos.z - C.z) + 0.6 * dr.orbitDir;
-    tx = C.x + Math.sin(a) * 180; tz = C.z + Math.cos(a) * 180; ty = MAP.groundAt(tx, tz) + agl + 15;
+    tx = C.x + Math.sin(a) * 180; tz = C.z + Math.cos(a) * 180; ty = HOST.groundAt(tx, tz) + agl + 15;
     if (dr.ph !== "transit") dr.ph = "transit";
     vmax = cruise * 0.7;
   } else if (dr.ph === "terminal" || !t) {
@@ -831,7 +831,7 @@ function droneQuad(u, sdt) {
     tx = S.x; tz = S.z;
     const dS = Math.hypot(S.x - u.pos.x, S.z - u.pos.z);
     // low on the way in (terrain-following), up to the set-up height near it
-    ty = dS > 120 ? Math.max(MAP.groundAt(tx, tz), gy) + agl : S.y;
+    ty = dS > 120 ? Math.max(HOST.groundAt(tx, tz), gy) + agl : S.y;
     vmax = cruise;
     dr.ph = "attack";
     const p = droneAimPoint(u, _dv);
@@ -861,7 +861,7 @@ function droneQuad(u, sdt) {
   droneQuadFly(u, sdt, tx, ty, tz, vmax, acc, arrive);
   // never into the ground on the way: the run goes down to the mark only in
   // its last few metres
-  const g2 = MAP.groundAt(u.pos.x, u.pos.z);
+  const g2 = HOST.groundAt(u.pos.x, u.pos.z);
   let floor = 2;
   if (dr.ph === "terminal") {
     const p = droneAimPoint(u, _dv);
@@ -924,7 +924,7 @@ function droneOrient(u, sdt) {
 function droneWing(u, sdt) {
   const dr = u.dr, D = u.def.drone || {};
   const enemy = u.team === "red" ? "blue" : "red";
-  const gy = MAP.groundAt(u.pos.x, u.pos.z);
+  const gy = HOST.groundAt(u.pos.x, u.pos.z);
   const cruise = D.cruise || 30, dash = D.dash || cruise * 1.4, agl = D.agl || 100;
   let tx, ty, tz, spdW = cruise, rate = D.turn || 0.5, free = false;
   if (dr.ph === "launch") {
@@ -946,7 +946,7 @@ function droneWing(u, sdt) {
     dr.gam -= (1 - lift) * 9.81 * Math.cos(dr.gam) / Math.max(8, dr.spd) * sdt;
     droneVelFrom(u);
     u.pos.addScaledVector(dr.vel, sdt);
-    const g2 = MAP.groundAt(u.pos.x, u.pos.z);
+    const g2 = HOST.groundAt(u.pos.x, u.pos.z);
     if (u.pos.y < g2 + 0.3) { u.pos.y = g2 + 0.3; dr.gam = Math.max(dr.gam, 0.2); }
     u.speed = dr.spd * Math.cos(dr.gam); u.ds.v = dr.spd;
     droneOrient(u, sdt);
@@ -978,20 +978,20 @@ function droneWing(u, sdt) {
     C.x += (teamCOM[enemy].x - C.x) * Math.min(1, sdt * 0.05); C.z += (teamCOM[enemy].z - C.z) * Math.min(1, sdt * 0.05);
     const R = D.loiterR || 300;
     const a = Math.atan2(u.pos.x - C.x, u.pos.z - C.z) + dr.orbitDir * 0.45;
-    tx = C.x + Math.sin(a) * R; tz = C.z + Math.cos(a) * R; ty = MAP.groundAt(C.x, C.z) + (D.loiterAGL || agl);
+    tx = C.x + Math.sin(a) * R; tz = C.z + Math.cos(a) * R; ty = HOST.groundAt(C.x, C.z) + (D.loiterAGL || agl);
     spdW = cruise * 0.85;
   } else if (!t) {
     // a one-way drone with nothing left to go to: on to the enemy's middle
     const C = teamCOM[enemy];
-    tx = C.x; tz = C.z; ty = MAP.groundAt(C.x, C.z) + agl;
+    tx = C.x; tz = C.z; ty = HOST.groundAt(C.x, C.z) + agl;
     dr.ph = "transit";
-    if (D.link === "gnss" && Math.hypot(C.x - u.pos.x, C.z - u.pos.z) < (D.terminal || 1000)) { dr.blindP = new THREE.Vector3(C.x, MAP.groundAt(C.x, C.z) + 0.5, C.z); dr.ph = "terminal"; }
+    if (D.link === "gnss" && Math.hypot(C.x - u.pos.x, C.z - u.pos.z) < (D.terminal || 1000)) { dr.blindP = new THREE.Vector3(C.x, HOST.groundAt(C.x, C.z) + 0.5, C.z); dr.ph = "terminal"; }
   } else {
     // ATTACK: to the mark at its height, then the dive from `terminal` out
     const p = droneAimPoint(u, _dv2);
     tx = p.x; tz = p.z;
     const dH = Math.hypot(p.x - u.pos.x, p.z - u.pos.z), h = u.pos.y - p.y;
-    ty = MAP.groundAt(u.pos.x, u.pos.z) + agl;
+    ty = HOST.groundAt(u.pos.x, u.pos.z) + agl;
     dr.ph = "attack";
     // into the dive once the dive line to the mark is steep enough (top attack)
     const steep = D.dive || 0.8;
@@ -999,7 +999,7 @@ function droneWing(u, sdt) {
     // too close and too low for the dive: go out and come round
     else if (dH < Math.max(60, h / Math.tan(steep) * 0.5)) {
       tx = u.pos.x + Math.sin(u.h) * 400; tz = u.pos.z + Math.cos(u.h) * 400;
-      ty = MAP.groundAt(u.pos.x, u.pos.z) + agl * 1.2;
+      ty = HOST.groundAt(u.pos.x, u.pos.z) + agl * 1.2;
     }
     if (D.link === "gnss" && dr.ph === "terminal") dr.blindP = new THREE.Vector3(p.x, p.y, p.z);
   }
@@ -1022,7 +1022,7 @@ function droneWingFly(u, sdt, tx, ty, tz, spdW, rate, free) {
   dr.spd = droneClampN(dr.spd, 12, spdW * 1.35 + 5);
   droneVelFrom(u);
   u.pos.addScaledVector(dr.vel, sdt);
-  const g = MAP.groundAt(u.pos.x, u.pos.z);
+  const g = HOST.groundAt(u.pos.x, u.pos.z);
   if (dr.ph !== "terminal" && u.pos.y < g + 8) { u.pos.y = g + 8; if (dr.gam < 0) dr.gam = 0.05; }
   u.speed = dr.spd * Math.cos(dr.gam);
   u.ds.v = dr.spd; u.ds.vy = dr.vel.y; u.ds.gamma = dr.gam;
@@ -1062,7 +1062,7 @@ const _dbox = [];
 function droneContact(u, sdt) {
   const dr = u.dr;
   if (dr.ph === "launch" && dr.frame === "quad") return;
-  const g = MAP.groundAt(u.pos.x, u.pos.z);
+  const g = HOST.groundAt(u.pos.x, u.pos.z);
   const t = dr.tgt;
   const live = dr.ph === "terminal" || dr.ph === "lost" || !!dr.blindP;
   // the mark's hull: the airframe inside its box
@@ -1083,11 +1083,11 @@ function droneContact(u, sdt) {
   // warhead goes off only when the fuze takes the blow)
   if (u.pos.y <= g + 0.12 && dr.ph === "lost") { droneCrash(u); return; }
   if (u.pos.y <= g + 0.12 && (live || dr.ph !== "launch")) { droneDetonate(u, null, "ground"); return; }
-  if (CBZ.micro && CBZ.micro.queryColliders) {
-    const cols = CBZ.micro.queryColliders(u.pos.x, u.pos.z, 0.4, _dbox);
+  if (HOST && HOST.queryColliders) {
+    const cols = HOST.queryColliders(u.pos.x, u.pos.z, 0.4, _dbox);
     for (let c = 0; c < cols.length; c++) {
       const b = cols[c];
-      if (!CBZ.micro.colliderContains(b, u.pos.x, u.pos.z)) continue;
+      if (!HOST.colliderContains(b, u.pos.x, u.pos.z)) continue;
       if (b.y0 != null && (u.pos.y < b.y0 || u.pos.y > b.y1)) continue;
       droneDetonate(u, null, "wall"); return;
     }
@@ -1106,7 +1106,7 @@ function droneInHull(u, v, pad) {
 function droneDetonate(u, hit, how) {
   const dr = u.dr, wh = dr.wh, A = DRONES.audit;
   const p = { x: u.pos.x, y: u.pos.y, z: u.pos.z };
-  const g = MAP.groundAt(p.x, p.z);
+  const g = HOST.groundAt(p.x, p.z);
   if (p.y < g + 0.15) p.y = g + 0.15;
   // spent: no longer a body (and not a casualty: it did what it was for)
   dr.ph = "spent";
@@ -1122,9 +1122,7 @@ function droneDetonate(u, hit, how) {
     // is struck from above when it came down onto it
     const onTopFace = hit === dr.tgt && dr.face === "top" && dr.aim && p.y >= hit.pos.y + dr.aim[1] - 0.35 && dr.vel.y < 0;
     const top = steep || onTopFace || (p.y - hit.pos.y) > (hit.vheight || 2.4) * 0.85;
-    u._shot = { pen: wh.pen, beh: wh.beh, he: true, cls: wh.cls, top: top };
-    hurtMan(hit, wh.beh, { by: u, at: p });
-    u._shot = null;
+    hurtMan(hit, wh.beh, { by: u, at: p, threat: { pen: wh.pen, beh: wh.beh, he: true, cls: wh.cls, top: top } });
     const res = hit.lastHit;
     A.hits++; A.byClass[u.unitId].hits++;
     if (res) {
@@ -1145,9 +1143,9 @@ function droneDetonate(u, hit, how) {
   } else A.missed++;
   // THE BLAST: the warhead's own, for everyone round it (a hull inside it
   // takes the blast's figure, not the jet's: that was answered above)
-  u._he = { pen: wh.blastPen || 10, beh: Math.round(wh.beh * 0.3), he: true, cls: "blast", top: true };
-  if (CBZ.studio && CBZ.studio.boom) {
-    try { CBZ.studio.boom(p, { radius: wh.blast || 5, power: wh.power || 1, structural: false, by: u }); } catch (e) {}
+  // (the struck hull was answered above: the resolver's blast passes it by)
+  if (STUDIO && STUDIO.boom) {
+    try { STUDIO.boom(p, { mun: wh.mun, radius: wh.blast || 5, power: wh.power || 1, by: u, direct: hit && hit.vehicle ? hit : null }); } catch (e) {}
   }
   droneBurstFx(u, p, how);
 }
@@ -1175,7 +1173,7 @@ function droneCrash(u) {
   dr.ph = "wreck";
   u.dead = true; u.hp = 0; u.vs.hp = 0;
   DRONES.audit.missed++;
-  const g = MAP.groundAt(u.pos.x, u.pos.z);
+  const g = HOST.groundAt(u.pos.x, u.pos.z);
   u.pos.y = g + 0.02;
   u.group.rotation.set(0.1, u.h, 0.3);
   droneShards(u, u.pos, 0.9);
@@ -1212,7 +1210,7 @@ function droneFall(u, sdt) {
   u.pos.addScaledVector(v, sdt);
   u.group.rotation.x += (dr.spinX || 0) * sdt;
   u.group.rotation.z += (dr.spinZ || 0) * sdt;
-  const g = MAP.groundAt(u.pos.x, u.pos.z);
+  const g = HOST.groundAt(u.pos.x, u.pos.z);
   if (u.pos.y > g + 0.05 && dr.fallT < 60) return;
   // the crash
   u.pos.y = g + 0.02;
@@ -1223,8 +1221,7 @@ function droneFall(u, sdt) {
   const wh = dr.wh;
   if (lcg() > (wh.dud || 0.2) * 2.5) {
     DRONES.audit.crashBooms++;
-    u._he = { pen: wh.blastPen || 10, beh: Math.round(wh.beh * 0.3), he: true, cls: "blast", top: true };
-    if (CBZ.studio && CBZ.studio.boom) { try { CBZ.studio.boom({ x: u.pos.x, y: g + 0.3, z: u.pos.z }, { radius: (wh.blast || 5) * 0.8, power: (wh.power || 1) * 0.8, structural: false, by: u }); } catch (e) {} }
+    if (STUDIO && STUDIO.boom) { try { STUDIO.boom({ x: u.pos.x, y: g + 0.3, z: u.pos.z }, { mun: wh.mun, radius: (wh.blast || 5) * 0.8, power: (wh.power || 1) * 0.8, by: u }); } catch (e) {} }
     u.group.visible = false;
     if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash({ x: u.pos.x, y: g + 0.5, z: u.pos.z }, { scale: 3, life: 0.2, color: 0xffb060 }); } catch (e) {} }
   }

@@ -154,11 +154,11 @@
      M67 hand grenade: 4-5.5 s fuse, 180 g of Comp B, 5 m kill / 15 m wound.
      40 mm M433 HEDP: 76 m/s, arms 14-27 m from the muzzle. */
   const ROCKET = {
-    pg7v: { v0: 115, vMax: 295, ignite: 0.1, burn: 0.45, life: 4.5, blast: 9, power: 1.6, backblast: 30, backKill: 5, sigmaMil: 1.2 },
+    pg7v: { v0: 115, vMax: 295, ignite: 0.1, burn: 0.45, life: 4.5, backblast: 30, backKill: 5, sigmaMil: 1.2, mun: "pg7v" },
   };
   const GRENADE = {
-    m67: { fuse: 4.5, fuseJit: 0.5, throwV: 19, kill: 5, wound: 15, blast: 10, power: 0.9, mass: 0.4 },
-    m433: { v0: 76, arm: 18, blast: 6, power: 0.9 },
+    m67: { fuse: 4.5, fuseJit: 0.5, throwV: 19, kill: 5, wound: 15, mass: 0.4, mun: "m67" },
+    m433: { v0: 76, arm: 18, mun: "m433" },
   };
 
   /* ---- THE MATERIALS -----------------------------------------------------

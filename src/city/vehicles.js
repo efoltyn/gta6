@@ -5881,10 +5881,11 @@
             igniteCar(car, true);
             car._burnsOut = false;
           }
-          if (CBZ.cam) { CBZ.cam.pitch = (CBZ.cam.pitch || 0) - Math.min(0.25, vIn * 0.012); }
+          // A crash is felt through the car (shake, sound, debris, the slew),
+          // never by stopping or slowing the world or by yanking your view
+          // down: the old cam.pitch kick + hit-stop + slow-mo turned every hard
+          // wall hit into a canned cutscene beat you had to sit through.
           if (CBZ.shake) CBZ.shake(catastrophic ? 2.4 : (hard ? 1.3 : 0.2 + vIn * 0.03));
-          if (CBZ.doHitstop) CBZ.doHitstop(catastrophic ? 0.16 : (hard ? 0.085 : 0.028));
-          if (catastrophic && CBZ.doSlowmo) CBZ.doSlowmo(0.34);
           if (CBZ.sfx) { if (hard) { CBZ.sfx("ko"); CBZ.sfx("punch"); } else CBZ.sfx("punch"); }
           crashBurst(ix, iz, vIn, hard, catastrophic, { x: nwx, z: nwz });   // debris sprays back off the wall
           if (hard && CBZ.cityShatter) CBZ.cityShatter(ix, iz, catastrophic ? 10 : 6);
@@ -6126,7 +6127,7 @@
       // The impulse owns the actual velocity change. The player keeps control,
       // but a side impact now slews the car instead of being overwritten by a
       // canned speed multiplier.
-      if (!rammer && hard && CBZ.cam) CBZ.cam.pitch = (CBZ.cam.pitch || 0) - Math.min(0.18, speed * 0.008);
+      // (the camera is yours: no pitch kick here, the crash shake sells it)
       return;
     }
     c.wreckT = Math.max(c.wreckT || 0, catastrophic ? 2.8 : (hard ? 1.8 : 0.72));
@@ -6212,7 +6213,6 @@
       }
       crashBurst(cx, cz, severity, hard, catastrophic, { x: nx, z: nz });
       if (CBZ.shake) CBZ.shake(catastrophic ? 1.45 : (hard ? 0.95 : 0.26));
-      if (CBZ.doHitstop) CBZ.doHitstop(catastrophic ? 0.1 : (hard ? 0.06 : 0.02));
       if (CBZ.sfx) CBZ.sfx(hard ? "ko" : "punch");
       if (hard && CBZ.cityShatter) CBZ.cityShatter(cx, cz, catastrophic ? 8 : 4.5);
     }
@@ -6406,7 +6406,7 @@
         car.playerHitCD = 0.85;
         // you get hit the SAME way you hit others: a fast car FLINGS you into a
         // ragdoll tumble (physics.js owns the airborne state); a slow one knocks
-        // you down. Damage, shake and hitstop all scale hard with speed.
+        // you down. Damage and shake scale hard with speed.
         if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(165, 12 + vmag * 5), car.pos.x, car.pos.z, "run over", false, car.npcDriver || null, vmag < 18);
         if (!P.dead && CBZ.body && CBZ.city) {
           if (vmag > 13) CBZ.body.fling(CBZ.city.playerActor, { fromX: car.pos.x, fromZ: car.pos.z, force: 6 + vmag * 0.5, up: 4 + vmag * 0.24 });
@@ -6414,7 +6414,6 @@
         }
         if (car.npcDriver && CBZ.cityNpcOffense) CBZ.cityNpcOffense(car.npcDriver, 48, "vehicular-assault");
         if (CBZ.shake) CBZ.shake(0.4 + Math.min(1.2, vmag * 0.05));
-        if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.1, 0.03 + vmag * 0.002));
         // the car pays the momentum a 75 kg body takes, not a fixed 30 %
         if (CSp) CSp.cheapLoss(car, 75); else car.v *= 0.7;
       }

@@ -351,18 +351,13 @@
   // remaining ~40 `dot()` calls in this file are each ONE hand-placed button,
   // stud, badge or motif on a known coordinate, which is a different thing.
   // If you want a new print, add a kind HERE and draw it with rect().
-  /* WOOL. A worsted suit is not a flat colour: a fine fleck of lighter and
-     darker fibre, and a faint nap catching the light down the chest and the
-     shoulder blades. Deterministic (a fixed hash), drawn once per atlas. */
-  function woolRow(R, bodyHex) {
-    const hi = rgba(0xffffff, 0.05), lo = rgba(0x000000, 0.07);
-    let h = 0x2545f491;
-    const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h >>> 0) % 10000) / 10000; };
-    for (const col of ["front", "back", "side"]) {
-      for (let i = 0; i < 260; i++) R.rect(col, rnd(), rnd(), 0.012 + rnd() * 0.02, 0.004, (i & 1) ? hi : lo);
-      R.rect(col, 0.18, 0.08, 0.16, 0.5, rgba(0xffffff, 0.035));     // the nap's sheen
-    }
-  }
+  /* NO WOOL FLECK. "wool" used to stamp 260 random 1-texel dashes per column
+     (+5% / -7%) and a lighter nap rectangle on one side of the chest, the
+     back and every sleeve: a scattered motif field, the exact thing banned
+     above. It was only worn by the role suits (the detail, the President, the
+     cabinet, the top floor), and at every distance the game shows a person it
+     read as the owner's "suits are weirdly spotted". A worsted at game range
+     IS a solid; those styles are "solid" now. */
   function patternRow(R, ctx, bodyHex, kind, accentHex) {
     if (kind === "solid" || !kind) return;
     ctx.save(); ctx.globalCompositeOperation = "source-atop";
@@ -372,9 +367,6 @@
       const step = kind === "chalk" ? 0.16 : 0.12, w = kind === "chalk" ? 0.016 : 0.012;
       for (const col of ["front", "back", "side"])
         for (let x = 0.06; x < 1; x += step) R.rect(col, x, 0, w, 1, kind === "chalk" ? rgba(0xffffff, 0.16) : light);
-      if (kind === "chalk") woolRow(R, bodyHex);
-    } else if (kind === "wool") {
-      woolRow(R, bodyHex);
     } else if (kind === "windowpane") {
       for (const col of ["front", "back", "side"]) {
         for (let x = 0.12; x < 1; x += 0.26) R.rect(col, x, 0, 0.016, 1, light);
@@ -469,8 +461,9 @@
     const jc = hx(jacketHex), shirt = hx(shirtHex), shirtLo = tone(shirtHex, -0.1);
     const ctx = opts.ctx, lt = opts.lapelType || "notch", db = !!opts.db;
     const vhex = opts.vest ? (opts.vest === true ? jacketHex : opts.vest) : null;
-    // ---- the SHIRT (torso row): shirt everywhere the shell covers, the
-    //      jacket's skirt below its swept hem (THE SKIRT, below).
+    // ---- the SHIRT (torso row). Painted whole here; buildSet then covers
+    //      every texel the shell hides with the shell's own cloth (THE BODY
+    //      UNDER A SHELL), so only the open V keeps the shirt.
     T.fill(shirt);
     T.rect("front", fx(-0.012), 0.08, 0.024, TAILOR.tBelt - 0.08, shirtLo);   // placket
     if (vhex != null) {
@@ -514,7 +507,6 @@
     // tight panel in jacket cloth over the hips and crotch: on any suit whose
     // trousers were not the jacket's exact colour it was a pair of briefs
     // pulled on over the trousers — the owner's "underwear over pants".)
-    T.rect("side", 0, 0.62, 1, 0.38, jc); T.rect("back", 0, 0.62, 1, 0.38, jc);
     T.shade();
 
     // ---- the JACKET SHELL (jacket row) ----
@@ -2884,17 +2876,17 @@
     { name: "Double-Breasted Peak Tuxedo", tux: true, body: 0x16171c, lapel: "peak", db: true },
     // 22: the protective-detail uniform (outfits.js CAT.detail; warlord's black suit too):
     // near-black two-piece, white shirt, BLACK tie. "Black Suit" (3) wears a banker's grey tie.
-    { name: "Detail Black",             body: 0x121318, tie: 0x08090c, pattern: "wool", legs: 0x101115, pin: "detail" },
+    { name: "Detail Black",             body: 0x121318, tie: 0x08090c, pattern: "solid", legs: 0x101115, pin: "detail" },
     // 23-28: THE ROLE SUITS (owner: "do a run on suits for Gang City,
     // especially for the executive and the president... a ton of suits worn
     // by staff look so fake"). Tailored navy / charcoal worsted for the
     // President and the top floor, a chalk stripe for some executives,
     // light-blue shirts, a real knotted tie, a square and a pin; the staff
     // in cheaper off-the-rack grey or black, cut boxier (`boxy`).
-    { name: "President Navy",           body: 0x1b2540, tie: 0xa3162b, pattern: "wool", legs: 0x19223a, square: true, pin: "flag" },
+    { name: "President Navy",           body: 0x1b2540, tie: 0xa3162b, pattern: "solid", legs: 0x19223a, square: true, pin: "flag" },
     { name: "Executive Charcoal Chalk", body: 0x2a2d35, tie: 0x1f3f7a, pattern: "chalk", legs: 0x272a31, shirt: 0xd6e4f2, square: true, pin: "gold" },
-    { name: "Executive Navy",           body: 0x1d2639, tie: 0x6e1f2b, pattern: "wool", legs: 0x1b2335, shirt: 0xd6e4f2 },
-    { name: "Cabinet Charcoal",         body: 0x2c2f36, tie: 0x24405e, pattern: "wool", legs: 0x292c33, pin: "flag" },
+    { name: "Executive Navy",           body: 0x1d2639, tie: 0x6e1f2b, pattern: "solid", legs: 0x1b2335, shirt: 0xd6e4f2 },
+    { name: "Cabinet Charcoal",         body: 0x2c2f36, tie: 0x24405e, pattern: "solid", legs: 0x292c33, pin: "flag" },
     { name: "Staff Grey",               body: 0x5d6168, tie: 0x2b3d5c, pattern: "solid", legs: 0x585c63, boxy: true },
     { name: "Staff Black",              body: 0x1c1d22, tie: 0x3a3d44, pattern: "solid", legs: 0x1a1b20, boxy: true },
   ];
@@ -3041,6 +3033,57 @@
   CBZ.cityClothMatOk = clothMatOk;
   CBZ.cityClothMeshRenders = clothMeshRenders;
 
+  /* THE BODY UNDER A SHELL WEARS THE SHELL. A jacketed look is two layers:
+     the torso (torso row) and the jacket shell held 3-6 mm off it (jacket row,
+     alpha-cut at the open V). The torso row was the SHIRT all the way round,
+     white on every suit, so anywhere the inner surface reached the outer one
+     — the gap between the stand collar and the shirt collar seen from above,
+     the shoulder where the pad meets the arm, a swinging arm pressing the
+     shell, the depth buffer at range on a phone — white showed through the
+     jacket: the owner's "you can see their undershirt", the white-rimmed
+     shoulders from above, and white speckle on a dark suit. A real jacket
+     hides the shirt everywhere but the V, so the torso row now carries the
+     shell's own cloth wherever the shell is opaque, and keeps what the painter
+     drew (shirt, tie, waistcoat) only where the shell is cut, plus a 2-texel
+     margin so the V never shows a sliver of jacket on the shirt. Same atlas,
+     same material, no geometry: the inner layer is simply invisible where it
+     is covered, whatever the pose, the depth precision or the body.
+     The two rows share columns (u matches: front in body units on a tailored
+     look, face fraction otherwise) but not box spans: v_jacket = 0.028 +
+     0.951 v_torso (TAILORING's landmark table — collarbone 0.09 vs 0.065, hip
+     joint 0.97 vs 0.99, every body within 0.03). */
+  const SHELL_V0 = 0.028, SHELL_VK = 0.951, SHELL_MARGIN = 2;
+  function coverUnderShell(ctx) {
+    if (!ctx || typeof ctx.getImageData !== "function" || typeof ctx.putImageData !== "function") return;
+    const jr = ROWS.jacket, tr = ROWS.torso, jh = jr[1] - jr[0], th = tr[1] - tr[0];
+    let J, T;
+    try { J = ctx.getImageData(0, jr[0], W, jh); T = ctx.getImageData(0, tr[0], W, th); } catch (e) { return; }
+    const jd = J && J.data, td = T && T.data;
+    if (!jd || !td || jd.length !== W * jh * 4 || td.length !== W * th * 4) return;
+    // the shell's cut, grown by the margin INSIDE its own face column (a
+    // column edge is a seam on the body, not the edge of a hole)
+    const cols = [], colOf = new Int16Array(W);
+    for (const k in COLS) cols.push(COLS[k]);
+    for (let x = 0; x < W; x++) for (let c = 0; c < cols.length; c++) if (x >= cols[c][0] && x < cols[c][1]) colOf[x] = c;
+    const open = new Uint8Array(W * jh), M = SHELL_MARGIN;
+    for (let y = 0; y < jh; y++) for (let x = 0; x < W; x++) {
+      if (jd[(y * W + x) * 4 + 3] >= 128) continue;
+      const c = cols[colOf[x]];
+      for (let yy = Math.max(0, y - M); yy <= Math.min(jh - 1, y + M); yy++)
+        for (let xx = Math.max(c[0], x - M); xx <= Math.min(c[1] - 1, x + M); xx++) open[yy * W + xx] = 1;
+    }
+    for (let y = 0; y < th; y++) {
+      const yj = Math.min(jh - 1, Math.max(0, Math.floor((SHELL_V0 + SHELL_VK * (y + 0.5) / th) * jh)));
+      for (let x = 0; x < W; x++) {
+        const j = yj * W + x;
+        if (open[j]) continue;                    // the V: the shirt shows here
+        const ti = (y * W + x) * 4, ji = j * 4;
+        td[ti] = jd[ji]; td[ti + 1] = jd[ji + 1]; td[ti + 2] = jd[ji + 2]; td[ti + 3] = 255;
+      }
+    }
+    ctx.putImageData(T, 0, tr[0]);
+  }
+
   let _deadCanvases = 0;
   function buildSet(key, rec) {
     const cv = document.createElement("canvas");
@@ -3084,6 +3127,7 @@
     else if (SKIN_KEYED[kind]) { const seg = key.split("|"); parts = PAINT[kind](P, Object.assign({}, c, { skin: seg[2] | 0 })); }
     else if (PAINT[kind]) parts = PAINT[kind](P, c);
     if (!parts) return null;
+    if (parts.jacket) coverUnderShell(ctx);
     const tex = new THREE.CanvasTexture(cv);
     tex.magFilter = THREE.LinearFilter;
     // THIS CACHE IS PERMANENT — but nothing else in the engine knows that. Two

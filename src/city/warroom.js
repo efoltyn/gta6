@@ -353,28 +353,35 @@
     let r = null;
     if (type === "b2") r = CBZ.strategicB2Rec ? CBZ.strategicB2Rec() : null;
     else if (type === "heavy") {
+      // Fort Brandt's B-52H (island_military.js parks the unit on its stand)
       const L = CBZ.cityMilitaryVehicles || [];
-      for (let i = 0; i < L.length; i++) if (L[i] && L[i].model && L[i].model.name === "Heavy Bomber") { r = L[i]; break; }
+      for (let i = 0; i < L.length; i++) if (L[i] && L[i].unitId === "b52" && L[i].stand) { r = L[i]; break; }
+      // not on its stand yet: the base fleet loads when the player is near it,
+      // or now, because the republic has a bomber to fly
+      if (!r && CBZ.fortBrandtFleet) { try { CBZ.fortBrandtFleet.ensure(); } catch (e) {} }
     }
     if (!r) return [];
     r.ownCrew = true;            // the air force has its crews; a trooper on the base still takes the seat
     r.owner = r.owner || "republic";
     return [r];
   }
-  function makeAirframe(type) {
+  function makeAirframe(type, id) {
     try {
       if (type === "b2") { const m = CBZ.strategicModels && CBZ.strategicModels.b2 ? CBZ.strategicModels.b2() : null; return m ? { group: m.group, footW: m.dims.span, footL: m.dims.length, height: m.dims.height, colW: 9.2, colL: m.dims.length, dims: m.dims, name: "B-2 SPIRIT" } : null; }
+      // a nation's own B-52H / F-35A: the NPC War unit (CBZ.milModels is null
+      // until its file is on the page; ask for it, and the next sync parks it)
       const M = CBZ.milModels;
       const fn = M && (type === "heavy" ? M.bomber : M.jet);
-      const m = fn ? fn() : null;
-      return m ? { group: m.group, footW: m.footW, footL: m.footL, height: m.height, colW: m.colliderW || Math.min(6, m.footW), colL: m.colliderL || m.footL, dims: m.aircraftDims, name: type === "heavy" ? "B-52 Bomber" : "Strike Jet" } : null;
+      const m = fn ? fn({ nation: id }) : null;
+      if (!m && M && M.load) { M.load([type === "heavy" ? "bomber" : "jet"]); return null; }
+      return m ? { group: m.group, footW: m.footW, footL: m.footL, height: m.height, colW: m.colliderW || Math.min(6, m.footW), colL: m.colliderL || m.footL, dims: m.aircraftDims, name: m.name } : null;
     } catch (e) { return null; }
   }
   function parkAirframe(id, type, slot) {
     const P = buildStation(id), s = stationOf(id);
     const ar = CBZ.city && CBZ.city.arena, root = (ar && ar.root) || CBZ.scene;
     if (!P.built || !root) return null;
-    const made = makeAirframe(type);
+    const made = makeAirframe(type, id);
     if (!made) return null;
     const bomberRow = type !== "jet";
     const x = s.x + (bomberRow ? BOMBER_SLOTS[slot] : JET_SLOTS[slot]);
@@ -411,7 +418,9 @@
     const m = milOf(id);
     if (!m || !THREE) return;
     const wantJets = Math.max(0, Math.min(JET_SLOTS.length, (m.planes | 0) - (OUT[id] | 0)));
-    const nh = nativeBombers(id, "heavy").length, nb = nativeBombers(id, "b2").length;
+    // the republic's B-52 waiting on Fort Brandt's stand counts as owned
+    const nh = nativeBombers(id, "heavy").length || (id === "republic" && CBZ.fortBrandtFleet ? CBZ.fortBrandtFleet.pending("bomber") : 0);
+    const nb = nativeBombers(id, "b2").length;
     const wantHeavy = Math.max(0, (m.heavy | 0) - nh), wantB2 = Math.max(0, (m.b2 | 0) - nb);
     if (!wantJets && !wantHeavy && !wantB2 && !PARK[id]) return;   // nothing to park: build nothing
     const P = buildStation(id);
@@ -1247,18 +1256,18 @@
     if (p._footballWired || !CBZ.interactions || !CBZ.interactions.registerFor) return;
     p._footballWired = true;
     CBZ.interactions.registerFor(p, {
-      id: "football-strike", slot: "e", prio: 46, campaignSafe: true, label: "Order airstrike",
+      id: "football-strike", slot: "e", prio: 46, campaignSafe: true, label: "Airstrike",
       canShow: function () { return FB.ped === p && !p.dead && !!nation(); },
       onSelect: function () { aideSay(p, order("strike", { aim: true })); },
     });
     CBZ.interactions.registerFor(p, {
-      id: "football-nuke", hold: true, prio: 45, campaignSafe: true, label: "Order nuke",
+      id: "football-nuke", hold: true, prio: 45, campaignSafe: true, label: "Nuke",
       // only while the country has BOTH a bomber on its pad and a warhead
       canShow: function () { return FB.ped === p && !p.dead && hasMeans("nuke"); },
       onSelect: function () { aideSay(p, order("nuke")); },
     });
     CBZ.interactions.registerFor(p, {
-      id: "football-bunker", prio: 30, campaignSafe: true, label: "Strike bunker",
+      id: "football-bunker", prio: 30, campaignSafe: true, label: "Bomb",
       canShow: function () { return FB.ped === p && !p.dead && !!nation() && !!bunkerTarget(); },
       onSelect: function () { aideSay(p, bunkerStrike()); },
     });

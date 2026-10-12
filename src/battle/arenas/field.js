@@ -15,18 +15,8 @@
    downtown, a ranked column drawn on paper puts a third of an army inside
    the Exchange Bank, where nothing can see them and nothing can shoot them.
    A golden-angle spiral, so the search is a spiral and not a ring: the
-   first free point is genuinely the nearest one, and it is deterministic. */
-const _fs = [];
-function blockedAt(x, z) {
-  const cols = CBZ.micro.queryColliders(x, z, 0.9, _fs);
-  for (let c = 0; c < cols.length; c++) {
-    const b = cols[c];
-    if (!CBZ.micro.colliderContains(b, x, z, 0.55)) continue;   // exact on a turned box
-    if (b.y0 != null && b.y1 != null && (b.y1 < 0.35 || b.y0 > 1.7)) continue;  // a kerb is not a wall
-    return true;
-  }
-  return false;
-}
+   first free point is genuinely the nearest one, and it is deterministic.
+   (blockedAt itself is the sim's, src/battle/physics.js: every host asks it.) */
 /* AND NOT ON TOP OF EACH OTHER EITHER. The spiral above only ever asked the
    geometry. On an open field that is enough, because the ranked grid never
    puts two men in the same square — but on a DENSE venue (the seat of state
@@ -527,6 +517,9 @@ function buildMap(id) {
     // that hide a man from a threat, props, walls, crests, crater lips
     coverNear: CBZ.battleCover.near, coverFrom: CBZ.battleCover.from,
     water: water, bodyY: bodyY, camFloor: camFloor,
+    // THE ROADS a column routes on (systems/roadgraph.js): the downtown's
+    // street records; every open ground has none and a column plans across it
+    roads: (town && town.roads && town.roads.length) ? town.roads : null,
     /* TERRAIN JOINS THE SIGHT LINE — but only where groundAt is genuinely
        TERRAIN. The dunes map's height function is the desert's own analytic
        surface, so a sample along the eye line is sand and nothing else. A
