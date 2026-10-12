@@ -81,13 +81,13 @@
   CBZ.SLICE_TRACE = !!(q && q.get("sliceTrace"));
 
   if (S) {
-    /* THE VIEW BAND. City fog completes at CBZ.cityFogFar (quality.js); an
-       object past r + fogFar can never be a visible pixel from inside the
-       circle. Read live (the tier is picked before the city builds), with a
-       60 m margin for the fog's own soft edge and the camera boom. */
+    /* THE VIEW BAND: core/sight.js's full-detail ring (the ground fog's end
+       + its soft edge and the camera boom), read live: the tier is picked
+       before the city builds. Past it only far forms (terrain, metro HLOD,
+       scenery pools: isHorizon below) stand. */
     S.view = function () {
       if (Number.isFinite(viewArg) && viewArg >= 0) return viewArg;
-      return Math.max(380, +CBZ.cityFogFar || 760) + 60;
+      return CBZ.sight().detail + 24;
     };
     S.keepR = function () { return S.r + S.view(); };
     CBZ.slice = S;
@@ -130,6 +130,12 @@
   function isHorizon(o) {
     const u = o.userData || {};
     if (u.worldSurface || u.terrain || u.metroFar || u.farLod != null || u.dynamic) return true;
+    // SCENERY POOLS ARE HORIZON TOO (core/sight.js). An instanced wood, a
+    // thicket or a scatter is a few MB of matrices and is seen from the air
+    // kilometres past the keep circle; parked, it came back as a whole stand
+    // planting itself in view ("you see the bare ground, then the trees
+    // spawn in"). core/farcull.js deals it into cells; instcull culls them.
+    if (o.isInstancedMesh && (u.vegetationLayer || u.sceneryScale || u.forestBelt)) return true;
     const m = Array.isArray(o.material) ? o.material[0] : o.material;
     return !!(m && (m.isShaderMaterial || (m.userData && m.userData._cbzFogScaled)));
   }

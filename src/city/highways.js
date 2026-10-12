@@ -58,7 +58,8 @@
   const SHOULDER_OUT = 3.0;      // paved outer shoulder on multi-lane roads
   const BANK = 0.04;             // superelevation cross-slope on network bends
   const RUNOFF = 70;             // metres of bank runoff either side of an arc
-  const DETAIL_FAR = 650;        // paint/furniture chunks beyond this hide
+  // (paint/furniture chunks hide past the eye's fog, core/sight.js: the old
+  //  650 m gate dropped gantry signs and rails inside a 1000-1400 m fog)
 
   let _highways = [];
   let _pending = [];
@@ -1517,7 +1518,7 @@
   // chunk re-shows its detail within one frame of the camera arriving.
   function detailCull(k) {
     return function (renderer, scene, camera) {
-      const far = DETAIL_FAR * ((CBZ.getQualityLevel && CBZ.getQualityLevel() >= 3) ? 1.4 : 1);
+      const far = CBZ.sight ? CBZ.sight().reach : 910;
       const p = camera.position;
       const d = Math.hypot(k.c.x - p.x, k.c.z - p.z, (k.c.y - p.y) * 0.5) - k.r;
       const on = d < far;

@@ -1051,7 +1051,7 @@
     // LET HIM GO: the cuffs come off before the car takes him (whoever gave the order)
     I.register("ped", { id: "cu-let-go", prio: 79, campaignSafe: true, anyone: true,
       canShow: function (t) { const j = jobOf(t); return !!(j && j.cuffed && !j.departed && (j.opts.owner === "player" || j.opts.owner === "president")); },
-      label: "Let him go",
+      label: "Release",
       onSelect: function (t) { const j = jobOf(t); const L = j && lead(j); cancel(t, { free: true }); if (L) say(L, "You're free to go.", 1.8); } });
     return true;
   }

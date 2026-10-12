@@ -67,7 +67,11 @@
   // (Under the alternate AIR_TRAFFIC_CLEARANCE they become a FLOOR instead;
   // see ROOF CLEARANCE below.)
   const ALT_BANDS   = [72, 96, 122, 148];
-  const VIS_RING    = 520;                     // cull update+draw beyond this from the player
+  const VIS_RING    = 520;                     // simulation ring (collision tests) around the player
+  // DRAWN to the eye's fog, not 520 m from the player (core/sight.js): a
+  // traffic aircraft is a big silhouette against the sky and popped into view
+  // at 520 m inside a 560-1400 m fog, and kilometres inside it from the air.
+  function drawRing2() { const r = CBZ.sight ? CBZ.sight().reach : VIS_RING; return r * r; }
   // GA accent stripes / heli bold bodies — classic civilian schemes
   const GA_ACCENTS  = [0x2d5fb0, 0xc0392b, 0xd8821f, 0x1f7a4d];
   const HELI_BODIES = [0xb33636, 0x1f5fa8, 0xd8a11f, 0x1f7a4d];
@@ -845,10 +849,11 @@
       // CLIMB was already taken outright by refreshClear — only the descent
       // is flown at rate).
       easeClear(t, dt);
-      // ring cull: far traffic neither draws nor animates
+      // ring cull: traffic past the eye's fog neither draws nor animates
       if (P) {
-        const dx = x - P.pos.x, dz = z - P.pos.z;
-        if (dx * dx + dz * dz > VIS_RING * VIS_RING) { t.grp.visible = false; continue; }
+        const SG = CBZ.sight ? CBZ.sight() : null;
+        const dx = x - (SG ? SG.x : P.pos.x), dz = z - (SG ? SG.z : P.pos.z);
+        if (dx * dx + dz * dz > drawRing2()) { t.grp.visible = false; continue; }
       }
       t.grp.visible = true;
       t.grp.position.set(x, t.alt, z);

@@ -13,7 +13,7 @@ CBZ.scene = new THREE.Scene();
 const root = new THREE.Group(); CBZ.scene.add(root);
 CBZ.city = { arena: { root, regions: [], roads: [], shops: [] } };
 CBZ.player = { pos: new THREE.Vector3(0, 0, 0) };
-for (const f of ["src/core/slice.js", "src/core/citystream.js", "src/city/placement.js"]) {
+for (const f of ["src/core/slice.js", "src/core/sight.js", "src/core/citystream.js", "src/city/placement.js"]) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), ctx, { filename: f });
 }
 CBZ.streamBegin(0, 0);

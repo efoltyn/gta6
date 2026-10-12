@@ -495,7 +495,7 @@
     s.pressAsked = day();
     let pr = null;
     try {
-      pr = UI.say(p.name, "Press is waiting, sir.", [{ id: "go", label: "Let's go" }, { id: "no", label: "Not today" }], { actor: p });
+      pr = UI.say(p.name, "Press is waiting, sir.", [{ id: "go", label: "Brief" }, { id: "no", label: "Skip" }], { actor: p });
     } catch (e) { pr = null; }
     if (!pr || !pr.then) { brief(false); return true; }
     W.pressAsking = true;
@@ -563,7 +563,7 @@
     rp._pvWired = true;
     rp._iOnly = true;             // at work: the President takes a question, he does not mug the press
     CBZ.interactions.registerFor(rp, { id: "pv-reporter-ask", slot: "e", prio: 30, campaignSafe: true, forceYes: true,
-      label: "Take a question",
+      label: "Take question",
       canShow: function () { return !!seat() && !rp.dead && PRESS.asked[rp._sid || rp.name || "r"] !== day(); },
       onSelect: function () { askQuestion(rp); } });
   }
@@ -748,7 +748,7 @@
     const nm = function () { const n = S().nominee; return n && speakerFor(n.role) && speakerFor(n.role).body === p ? n : null; };
     // what he has for you, said as you come up (no Talk verb)
     CBZ.interactions.registerFor(p, { id: "pres-chief-talk", speak: true, prio: 30, campaignSafe: true, forceYes: true,
-      label: "Talk", canShow: function () { return !!seat() && !nm(); },
+      label: "Listen", canShow: function () { return !!seat() && !nm(); },
       onSelect: function () {
         const O = CBZ.presidentOffice;
         let line = chiefWarning() || "Nothing that can't wait, sir.";

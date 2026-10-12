@@ -37,6 +37,8 @@
                             axis-aligned {x, z, vertical, len, w} or {ax, az, bx, bz, w});
                             null where the ground has none (the terrain planner drives it)
      waterAt(x, z)          true over water a vehicle cannot cross
+     entryAt(x, z)          a point inside a building/compound -> its way in {x, z}
+                            (a vehicle's goal is the kerb there: roadgraph driveTarget)
 
    PUBLIC  CBZ.battleHost = { fromArena(map, micro, scene), fromCity(o),
                               validate(host) -> [missing names], KEYS }
@@ -142,6 +144,8 @@
       scene: o.scene || CBZ.scene,
       roads: (CBZ.city && ((CBZ.city.arena && CBZ.city.arena.roads) || CBZ.city.roads)) || null,
       waterAt: function (x, z) { try { return CBZ.cityWaterAt ? !!CBZ.cityWaterAt(x, z) : false; } catch (e) { return false; } },
+      // a point inside a building or compound -> its way in (city/citynav.js)
+      entryAt: function (x, z) { return CBZ.cityNav && CBZ.cityNav.driveEntry ? CBZ.cityNav.driveEntry(x, z) : null; },
     };
     h.sweep = sweepOn(floor);
     // the city's cover is the same registry when a page has loaded it

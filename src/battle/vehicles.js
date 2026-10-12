@@ -592,6 +592,7 @@ function vehDriveTo(u, sdt, halt) {
   }
   vehMove(u, sdt, { throttle: thr, steer: st, brake: halt ? 1 : 0 });
 }
+const _vEnd = { x: 0, y: 0, z: 0 };
 function vehMove(u, sdt, ctrl) {
   const D = CBZ.vehicleDrive, def = u.def, S = def.stats || {};
   const spec = { speed: S.speed, reverse: S.reverse, accel: S.accel, turn: S.turn, width: S.width,
@@ -603,10 +604,30 @@ function vehMove(u, sdt, ctrl) {
   u.pos.x += Math.sin(u.h) * u.ds.v * sdt;
   u.pos.z += Math.cos(u.h) * u.ds.v * sdt;
   HOST.resolveCircle(u.pos, u.rad, u.pos.y, 2.4);
+  // THE WHOLE HULL IS SOLID, not a circle the width of it at its middle: the
+  // nose and the tail (circles of the half-width at each end) meet a wall
+  // too. One circle let a 6 m truck put its front 1.8 m into a building.
+  const end = u.vlen - u.rad;
+  let hitEnd = false;
+  if (!u.air && end > 0.4) {
+    const fx = Math.sin(u.h) * end, fz = Math.cos(u.h) * end;
+    for (let k = -1; k <= 1; k += 2) {
+      const e = _vEnd; e.x = u.pos.x + fx * k; e.y = u.pos.y; e.z = u.pos.z + fz * k;
+      const ex = e.x, ez = e.z;
+      HOST.resolveCircle(e, u.rad, u.pos.y, 2.4);
+      const px = e.x - ex, pz = e.z - ez;
+      if (px * px + pz * pz > 1e-6) {
+        u.pos.x += px; u.pos.z += pz;
+        // the end that leads into the wall stops the hull
+        if ((k > 0) === (u.ds.v > 0) && (px * fx * k + pz * fz * k) / end < -0.02) hitEnd = true;
+      }
+    }
+    if (hitEnd) HOST.resolveCircle(u.pos, u.rad, u.pos.y, 2.4);
+  }
   const got = Math.hypot(u.pos.x - ox, u.pos.z - oz);
+  // a wall that eats the move stops it: a hull does not grind on into a building
+  if (hitEnd || (Math.abs(u.ds.v) > 1 && got < Math.abs(u.ds.v) * sdt * 0.3)) u.ds.v = 0;
   u.speed = Math.abs(u.ds.v);
-  // a wall that eats the move takes the speed with it
-  if (u.speed > 1 && got < u.speed * sdt * 0.3) u.ds.v *= 0.5;
   D.pose(u.ds, HOST.groundAt, u.pos.x, u.pos.z, u.h, u.vlen * 2, u.vwid * 2, sdt);
   u.pos.y = u.ds.y;
   u.group.rotation.set(-u.ds.pitch, u.h, -u.ds.roll);

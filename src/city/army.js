@@ -214,7 +214,7 @@
       F.rf = R.spawn({
         id: F.id, side: F.side, nation: spec.nation || F.side, hostile: spec.hostile || "never", stars: spec.stars,
         roster: ro.roster, tier: tier, gun: spec.gun || ro.gun || (tier === "thug" ? "ak47" : "carbine"),
-        at: spec.at, heading: F.heading, order: order, name: F.name,
+        at: spec.at, heading: F.heading, order: outside(order), name: F.name,
       });
       if (!F.rf) { console.warn("[army] no room for a third side:", F.side); F.gone = true; return F; }
       F.ready = true;
@@ -226,12 +226,29 @@
     F.promise.catch(function () {});
     return F;
   }
+  /* A FORMATION IS NEVER LAID OUT INSIDE A BUILDING. A move / hold /
+     withdraw at a point inside a building or a walled compound (martial
+     law's point is wherever the President stood: his office) put the
+     force's hulls on slots inside it, and they drove at the walls. The
+     point becomes the kerb by the way in (city/citynav.js driveTarget, the
+     same snap the convoy's routes use); the force faces the building. An
+     attack keeps its point: the men go in after what is there. */
+  function outside(o) {
+    if (!o || !o.at || o.type === "attack" || !isFinite(o.at.x) || !isFinite(o.at.z)) return o;
+    const N = CBZ.cityNav;
+    if (!N || !N.driveEntry || !N.driveTarget || !N.driveEntry(o.at.x, o.at.z)) return o;
+    const t = N.driveTarget(o.at.x, o.at.z, 2);
+    const out = Object.assign({}, o, { at: { x: t.x, z: t.z } });
+    if (!out.face && out.heading == null) out.face = { x: o.at.x, z: o.at.z };
+    return out;
+  }
+  function orderRf(rf, o) { return R.order(rf, outside(o)); }
   function orderForce(F, o) {
     if (!F || F.gone || !o) return false;
     if (!F.ready) { F.pending = o; return true; }
     stopRoute(F);
     if (o.type === "route") return startRoute(F, o);
-    return R.order(F.rf, o);
+    return orderRf(F.rf, o);
   }
   function disband(F) {
     if (!F || F.gone) return false;
@@ -260,8 +277,8 @@
   function routeApi(F) {
     return {
       force: F,
-      move: function (at, o) { o = o || {}; return R.order(F.rf, { type: o.type || "move", at: at, heading: o.heading, face: o.face }); },
-      hold: function (at) { return R.order(F.rf, { type: "hold", at: at || { x: F.rf.cx, z: F.rf.cz } }); },
+      move: function (at, o) { o = o || {}; return orderRf(F.rf, { type: o.type || "move", at: at, heading: o.heading, face: o.face }); },
+      hold: function (at) { return orderRf(F.rf, { type: "hold", at: at || { x: F.rf.cx, z: F.rf.cz } }); },
       status: function () { return status(F); },
       units: function () { return R.units(F.rf); },
       vehicles: function () { return R.units(F.rf).filter(function (u) { return u.vehicle && !u.dead; }); },
@@ -277,7 +294,7 @@
       try { d = routeDriverFn(F, o, routeApi(F)); } catch (e) { console.warn("[army] route driver threw", e); }
       if (d) { F.driver = d; return true; }
     }
-    R.order(F.rf, { type: "move", at: pts[0] });
+    orderRf(F.rf, { type: "move", at: pts[0] });
     return true;
   }
   function stopRoute(F) {
@@ -293,7 +310,7 @@
       const Rt = F.route;
       Rt.k++;
       if (Rt.k >= Rt.pts.length) { F.route = null; emit({ type: "route-done", force: F.id }); continue; }
-      R.order(F.rf, { type: "move", at: Rt.pts[Rt.k] });
+      orderRf(F.rf, { type: "move", at: Rt.pts[Rt.k] });
     }
   }
 

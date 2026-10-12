@@ -411,7 +411,7 @@
       q.controlled = true; q.ammo = gear.ammo; q.maxHp = gear.hp;
       q._protUnit = detail.id;
       // a Secret Service agent is his job: only his own verbs (city/orders.js:
-      // Attack / Guard / Tail / Hold here / Clear the room), never the
+      // Stand down / Hold / Follow / Clear room), never the
       // street's Flirt / Mug / Pickpocket
       if (jobFor(detail) === "secret service") q._iOnly = true;
       // DRESS: the job IS the uniform. "secret service" / "hired security"
@@ -1040,7 +1040,7 @@
     q._protUnit = "mansion"; q._protRole = u.role; q.organization = "state"; q.organizationLoyalty = 100;
     q.nameKnown = false;
     // on post: no street verbs. They take the President's orders about a man
-    // (city/orders.js "Take him down"); the gate officer clears a protest
+    // (city/orders.js Attack); the gate officer clears a protest
     // (city/president_public.js "Clear the gate")
     q._iOnly = true;
     if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(q); } catch (e) {} }

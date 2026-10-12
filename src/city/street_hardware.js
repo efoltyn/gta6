@@ -623,7 +623,9 @@
       for (let i = 0; i < set.meshes.length; i++) {
         const m = set.meshes[i], c = m._cellC;
         let vis = set.enabled;
-        if (vis && set.maxDist && c && cam) vis = Math.hypot(c.x - cam.x, c.z - cam.z) - c.r < set.maxDist;
+        // maxDist "sight": no private radius, the eye's own fog (core/sight.js)
+        const md = set.maxDist === "sight" ? (CBZ.sight ? CBZ.sight().reach : HW_DIST) : set.maxDist;
+        if (vis && md && c && cam) vis = Math.hypot(c.x - cam.x, c.z - cam.z) - c.r < md;
         if (m.visible !== vis) m.visible = vis;
       }
     }

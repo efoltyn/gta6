@@ -822,8 +822,14 @@
   // three terrain builders push onto the list without addLandmass (no bootKey)
   const bkey = function (b) { return b.bootKey || ("order:" + b.order); };
   // passes that run OTHER builders' deferred work (roadrules' gap pass draws
-  // the queued kerb/rail runs of whoever queued them): never skipped
-  const SLICE_ALWAYS = new Set(["lm:roadrules.js#2"]);
+  // the queued kerb/rail runs of whoever queued them): never skipped.
+  // WOODS ARE HORIZON (core/sight.js): Redhollow and the backdrop hills'
+  // forest are seen from the air kilometres past any keep circle, so they are
+  // built at boot like terrain; their tree pools are never pruned (slice.js
+  // isHorizon) while their cabins and props still park with the stream.
+  // Skipped, a whole wood planted itself in view the moment the streamer
+  // reached it ("you see the bare ground, and then the trees spawn in").
+  const SLICE_ALWAYS = new Set(["lm:roadrules.js#2", "lm:biome_forest.js", "lm:wildnature.js"]);
   const REPLAY_ARRAYS = ["regions", "roads", "waterBodies", "noSpawn", "frontierRoads", "frontierLandmarks"];
 
   // A JSON-safe copy: plain numbers/strings/arrays/objects only. Drops
