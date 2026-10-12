@@ -453,7 +453,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/slice.js?v=sight1011"></script>
 <!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
-<script src="src/core/sight.js?v=farform1011m"></script>
+<script src="src/core/sight.js?v=realpop1012"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
 <script src="src/core/citystream.js?v=farform1011m"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
@@ -650,7 +650,7 @@ document.body.appendChild(b);}}catch(e){}})();
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=farform1011m"></script>
+<script src="src/entities/crowdgpu.js?v=realpop1012"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -1381,7 +1381,7 @@ document.body.appendChild(b);}}catch(e){}})();
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
 <script src="src/city/wildlife_traits.js?v=indiv1"></script>
-<script src="src/city/wildlife.js?v=farform1011m"></script>
+<script src="src/city/wildlife.js?v=realpop1012"></script>
 <script src="src/city/wildlife_tame.js?v=ekey2"></script>
 <!-- THE ONE DOG: city/dogmodel.js is the body (skinned lofted shell per breed,
      planted-foot walk/trot/gallop, body language) and CBZ.dogGait; city/
@@ -1447,7 +1447,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=farform1011m"></script>
+<script src="src/city/peds.js?v=realpop1012"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1480,7 +1480,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the crowd store (entities/crowdstore.js) drawn by crowdgpu; the nearest
      few promoted to real peds. Replaced city/crowd.js (48 lone rigs). After
      peds.js (cityPanic / clearCityPeds / cityMakePed it wraps and uses). -->
-<script src="src/city/streetlife.js?v=farform1011m"></script>
+<script src="src/city/streetlife.js?v=realpop1012"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
      no dynamic lights); pushes the shared lamp emissives up after dark.
