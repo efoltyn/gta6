@@ -258,7 +258,8 @@
 
   // ---- player tuning ----
   CBZ.TUNE = {
-    walkSpeed: 2.0,     // brisk adult walk; SHIFT multiplies this to a 6.4m/s sprint
+    walkSpeed: 2.0,     // brisk adult walk (jail default, city gentle stick); SHIFT x sprintMul sprints
+    runSpeed: 5.0,      // Gang City's default on-foot pace: a full push RUNS, no stamina (systems/physics.js gait ladder)
     crouchSpeed: 1.2,
     jumpVel: 6.5,       // ~0.96m ballistic apex at gravity=22
     gravity: 22,
@@ -363,7 +364,7 @@
     tireNight: 0.07,       // tiredness/s gained while up & about at deep night (~15 min of night to get heavy-legged, not one minute)
     tireRest: 5.0,         // tiredness/s recovered while resting (sleeping)
     tireExhaustDmg: 1.4,   // hp/s once you're fully exhausted and still awake
-    sprintMul: 3.2,
+    sprintMul: 3.5,        // x TUNE.walkSpeed = a 7 m/s sprint over the 5 m/s run (physics.js reads THIS in the city; it was dead config and the city sprinted on SURV's)
     staminaMax: 100, staminaDrain: 12, staminaRegen: 18,   // ~8 s sprint from full, refills in ~5.5 s
     // wanted: heat needed to reach each star, and the cop response per star.
     // The top is a CLIFF: 4★ already costs a sustained rampage, and 4→5 is an

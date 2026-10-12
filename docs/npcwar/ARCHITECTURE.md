@@ -21,11 +21,14 @@ src/units/                   THE UNITS: one registry, one file per species / per
 src/battle/*.js              NPC War, the host: menu, HUD, cameras, arenas, and today's sim
 ```
 
-**Two hosts, one core.** NPC War is one host of the battle core. Gang City will be another
-(the president declares war and watches his tanks, men and planes take another city on the real
-streets). That second host is a future task and is not wired. Everything under
-`src/battle/core/` and `src/units/` is already written so it can run there: none of it touches
-the DOM or battle.html's globals, and it reaches the world only through the host interface (§8).
+**Two hosts, one core.** NPC War is one host of the battle sim. Gang City is the other: a war's
+battle, a coup, martial law and Fort Brandt's alarm put the same men, vehicles, squads and flown
+rounds on the city's real streets (`src/city/army.js`, §8). The sim files are NOT forked for it:
+Gang City compiles the same `src/battle/*.js` files into a private scope (a REALM,
+`src/battle/core/realm.js`) between its own page layer and its glue, on its own ground and
+walls. Everything under `src/battle/core/` and `src/units/` is page-free, and the sim files reach
+the world only through `HOST` (§8) and their page only through the names in `PAGE_NAMES`
+(§8, "The page layer").
 
 **The shared scope (src/battle/\*.js).** The old page was one 8,400-line closure. It is now
 split along its seams into files that share ONE classic-script scope: a top-level `function`,
@@ -61,7 +64,7 @@ change it only in coordination.
 | `src/battle/npcwar.js` | `CBZ.npcwar.onBoot/runBoot` | core |
 | `src/battle/main.js` | the kick: packs, then the armoury, then `runBoot()` | core |
 | `src/battle/load.js` | `NEED` packs, the `ARMOURY` list, `withUnits()` (lazy unit files) | core / performance |
-| `src/battle/settings.js` | `SET` (URL + saved setup), the front spec, revert switches, URL params (§6) | core |
+| `src/battle/settings.js` | `SET` (URL + saved setup), `STUDIO` (the studio as the sim asks for it), revert switches, URL params (§6) | core |
 | `src/battle/state.js` | the live battle state: `men`, `MAP`, `HOST`, `STORE`, clocks, ledgers | core |
 
 ### The battle core (page-independent)
@@ -70,7 +73,8 @@ change it only in coordination.
 | `src/battle/core/roster.js` | `CBZ.battleRoster`: the roster grammar (§6) | core |
 | `src/battle/core/sides.js` | `CBZ.battleSides`: a side's identity (name, nation, flag, colour) | core |
 | `src/battle/core/series.js` | `CBZ.battleSeries`: best of 1/3/5/7 | core |
-| `src/battle/core/host.js` | `CBZ.battleHost`: the host interface (§8) | core |
+| `src/battle/core/host.js` | `CBZ.battleHost`: the host interface (§8): `fromArena` (NPC War), `fromCity` (Gang City) | core |
+| `src/battle/core/realm.js` | `CBZ.battleRealm`: the sim compiled into a second host's private scope; `SIM` (the files), `PAGE_NAMES` (what a host's page layer declares) (§8) | core |
 | `src/battle/core/store.js` | `CBZ.battleStore`: the unit store, typed arrays, one row per unit (§9) | performance / scale |
 | `src/battle/core/lod.js` | `CBZ.battleLod`: tier rules, budgets, the squad scheduler (§9) | performance / scale |
 | `src/battle/core/tiersim.js` | `CBZ.battleTierSim`: the MID and FAR sims (§9) | performance / scale (brains: AI hooks) |
@@ -94,6 +98,7 @@ change it only in coordination.
 | `src/units/kit/vehicle.js` | vehicle drive / turret / armour / crew helpers | vehicle agents (coordinate) |
 | `src/units/kit/hull.js` | `CBZ.hullKit`: wheeled-vehicle bodies (Humvee, M35): geometry buckets, nation/ground camouflage + flag decals, tyres, the M2, crew figures, particle FX, and `WheeledRig` (Ackermann steer, per-wheel suspension, sprung body, turret + scan, recoil, dust, exhaust, damage, wreck) implementing `mark / fire / damage / muzzleWorld / aimTurret`, plus `hullKit.animate` for a def's `animate`. Load it through the manifest row's `needs` | vehicle agents (coordinate) |
 | `src/units/kit/moves.js` | `CBZ.unitMoves`: what a possessed animal does on ATTACK (the `moves` hook) | player control (species files override) |
+| `src/units/kit/drone.js` | `CBZ.droneKit`: the drone warheads BY ID (`WARHEAD`: PG-7VL, OG-7V, Switchblade 600 / 300, Shahed-136; move it whole into the shared weapons table when that lands), Switchblade cradles on other hulls (`CARRIERS`), weak spots per hull (`WEAK`), the drone palette, prop blades, the folding-wing Switchblade family, the operator's goggles / radio / ground station | drones |
 
 ### The sim and the page (NPC War's host layer today)
 | file | what | owner |
@@ -104,11 +109,17 @@ change it only in coordination.
 | `src/battle/men.js` | `makeMan`, uniforms; `kitUp` dresses each man through `CBZ.combatKit` (§9a) | humans / armour |
 | `src/battle/beasts.js` | `makeBeast`, `animateBeast`, `beastFight`: the animal unit, routed through `CBZ.unitKit` | core (species agents edit their species file instead) |
 | `src/battle/vehicles.js` | `makeVehicle`, the vehicle sim, crew mount/dismount | vehicles / armour |
+| `src/battle/convoyhost.js` | THE CONVOY ORDER (`?ac=1` / `?bc=1`): NPC War's host for `CBZ.convoy` (hulls, riders walking to their doors, the senses), §9d | convoy |
+| `src/systems/convoy.js` | `CBZ.convoy`: THE ONE COLUMN DRIVER, both games (order of march, intervals, drills, mount/dismount, LOD, the army's "move along route"), §9d | convoy |
+| `src/systems/roadgraph.js` | `CBZ.roadGraph`: THE ONE ROUTER, both games (the road graph out of any map's road records, lanes, closures, the drive path, the terrain planner), §9d | convoy (Gang City's motorcade and map arrows route on it) |
+| `src/battle/drones.js` | THE DRONES (`drive: "drone"`): stowed kit, who flies it (a carrier's cell, a man, or off the map), the operator teams (goggles, out of their squads, back in a hole no hull can see), launch / transit / loiter / attack / terminal, the weak-zone strike, shot down and the crash, `droneSpotted` / `droneTrackK` (counter-drone), `DRONES.audit` | drones |
 | `src/battle/damage.js` | `hurtMan`: the one damage funnel (asks `CBZ.armour.resolve`, §9a), reachability | armour / weapons |
 | `src/battle/death.js` | a beast dies, a man dies, the sinking dead | physics / humans |
 | `src/battle/physics.js` | the grid, body separation (split by mass), pinned pairs, momentum (`bodyKg`, `contactImpulse`, `addKnock`, `stepKnock`), bodies in the air (`flingBody`, `stepTossed`), the blast (`blastBodies`), hull strikes (`hullForStrike`), the flow field (`NAV`), COM (§9c) | physics |
 | `src/battle/fire.js` | the trigger (aimed / suppressive fire, pairs, bursts, reloads, stoppages, grenades, the gun's stance), flown rounds, penetration, ricochets, wounds, bleeding, rockets, backblast | weapons |
 | `src/weapons/ballistics.js` | `CBZ.ballistics`: cartridges, guns, materials, flight / drop / zero / penetration maths, body zones, species anatomy (node-loadable, shared with Gang City) | weapons |
+| `src/weapons/munitiontable.js` | `CBZ.munitionTable`: EVERY munition's real data (calibre, mass, fill, W, pen, fuze, guidance, speed, range, lethal radius), derived blast numbers, `blastOn`, `arm(w)` (§9d; node-loadable, shared with Gang City) | weapons |
+| `src/systems/strike.js` | `CBZ.strike`: THE impact resolver (`studio.boom` is it): fuze, picture, people and hulls, buildings, parked hardware, observers; `strike.sweep` the swept round test (§9d) | weapons |
 | `src/battle/air.js` | air support: bombers, the nuke run, airstrikes | weapons / vehicles (air) |
 | `src/battle/ai/think.js` | one unit's decision (target, slot, cover) | AI |
 | `src/battle/ai/morale.js` | morale, stance, hull-down | AI |
@@ -123,9 +134,9 @@ change it only in coordination.
 | `src/battle/clock.js` | speed dial, controls | HUD |
 | `src/battle/scoring.js` | the end card, the call, the series, `warURL` | menu / UX |
 | `src/battle/begin.js` | raise the field, spawn the armies, `?cam` / `?freeze` | core |
-| `src/battle/spawn.js` | `drainSpawns`: unit id -> `makeMan` / `makeBeast` / `makeVehicle` | core |
-| `src/battle/loop.js` | `frame()`: the core loop, sub-steps, render pass | performance / core |
-| `src/battle/front.js` | THE FRONT: the city's battles (city/frontline.js), the post home | core |
+| `src/battle/spawn.js` | `SPAWN_BOOK` (a side booked in forces: roster, training, gun, force per segment of spawn indices), `unitIdAt` / `trainAt` / `gunChoiceAt` / `spawnHeading` / `bookUnit`, `spawnOne` / `drainSpawns`: unit id -> `makeMan` / `makeBeast` / `makeVehicle` | core |
+| `src/battle/tick.js` | `simSubStep(sdt)` (one sub-step of the whole sim) and `animFrame(dt, realDt)` (the pose pass): what every host's frame runs | performance / core |
+| `src/battle/loop.js` | `frame()`: NPC War's loop: the clock dial, keys, sub-steps through `tick.js`, camera, chrome, the win check | performance / core |
 | `src/battle/bench.js` | `?bench=1`: how many this machine can show | performance |
 | `src/battle/probe.js` | `window.__battle`: the tools' seam, restage | tools |
 | `src/battle/core.js` | `CBZ.now`, `CBZ.floorAt` shims | core |
@@ -229,6 +240,7 @@ CBZ.unitKit.register("m1_abrams", {
   crew:    [{ seat: "driver" | "gunner" | "commander" | "loader" | "pilot", pos: [x, y, z] }],
   passengers, passengerPos: [[x, y, z], ...],                          // optional: each bench seat in hull space
   weapons: [{ id, seat, kind: "cannon" | "autocannon" | "mg" | "rockets" | "missile" | "sam" | "bombs",
+              mun, heMun,          // weapons/munitiontable.js ids: the numbers are the table's (§9d)
               rof, dmg, range, minRange, ammo, burst, pause, salvo, reload, vs, needs, indirect,
               mount: "turret" | "slew" | "fixed" | "free", arc, yawMax, tol,       // facing, below
               guided, basket, alt, dive, pullOut,                                // air weapons
@@ -247,8 +259,7 @@ shared default. A unit file never needs to know the runtime's internals.
 **`build(ctx)`** is called once per hull. `ctx` = `{ THREE, mat, rng, seed, id, side, team,
 nation, flagId, flag, color, ground, sideInfo }`. `side` is the slot (`"red"`/`"blue"`). `nation` is
 the `city/flags.js` id the side fights for (null for a side with no army). `flag` is that
-nation's design (paint it with `CBZ.flags.paint(g2d, ctx.flag, w, h)`; at THE FRONT it is the
-front spec's own flag). `color` is the side's mark colour. Markings, roundels and fin flags
+nation's design (paint it with `CBZ.flags.paint(g2d, ctx.flag, w, h)`). `color` is the side's mark colour. Markings, roundels and fin flags
 come from here. Return `{ group, rig }`, where `group` has its feet at y = 0 and nose on +Z.
 `ground` is what the hull is painted for: the open maps' skin (`sand`, `snow`, `grass`) or the
 map id (`city`, `island`, `field`, `arena`, `water`...).
@@ -289,7 +300,7 @@ Do not read `w.needs` as a "which weapon" signal (the old getter hack): use `sho
 |---|---|
 | `muzzleWorld(out, shot) -> Vector3` | where this round leaves (the gun, the next tube or rail; for a bomb, its bay clip or wing rack) |
 | `fire(shot, from)` | every round of every weapon. A rig with `fire` owns its effects (recoil, flash, the store leaving its rail): the runtime draws none |
-| `fired(scale, shot)` / `spend(i, shot)` | **legacy** (`city/mil_armor.js` rigs), only when there is no `fire`: `fired` for cannon (1) and autocannon (0.3) rounds, `spend` for a launch with `i` = the rig's own `loaded - 1` when it keeps one, else `shot.n` |
+| `fired(scale, shot)` / `spend(i, shot)` | **legacy** (a rig with no `fire`; the M1A2's still uses `fired`): `fired` for cannon (1) and autocannon (0.3) rounds, `spend` for a launch with `i` = the rig's own `loaded - 1` when it keeps one, else `shot.n` |
 | `reload(shot)` | a salvo's reload has finished: put the rounds back |
 | `launched(rocket, shot, target)` | an HE round / rocket (`vehFireHE`) has just been put in flight: the rig may fly it its own way (velocity, `grav`, `life`, `homing` mark `{ pos, dead }`, warhead `w`, a `mesh`); fire.js `stepRockets` flies whatever it set. The HIMARS uses it for guided GMLRS |
 | `store(shot) -> Object3D` | a released bomb's falling mesh (in the scene, at `muzzleWorld`); the runtime flies it and hands it to `CBZ.munitions.release` on impact, so take it from `CBZ.munitions.acquire` |
@@ -417,29 +428,45 @@ suspension, rate-limited turret laying, ballistics, armour zones, penetration, d
 the crew seat book; pure maths, node-loadable). The battle side (crew, AI, firing, damage
 states, wrecks, player driving) is `src/battle/vehicles.js`.
 
-The vehicles today, each on the game's existing builder (there is no new art in wave A; the
-vehicle agents redraw):
+The vehicles today. Every one draws itself in its own file; `needs` is the shared kit it builds
+on (`units/kit/hull.js`, or `city/mil_air.js`'s loft kit for the airframes). Gang City's Fort
+Brandt parks these same units on its stands (see "Gang City parks the units" in section 8):
 
 | id | name | builder | crew | weapons | armour F/S/R/T (mm) |
 |---|---|---|---|---|---|
-| m1_abrams | M1A2 Abrams | milArmor.tank | commander, gunner, loader, driver | 120 mm, coax, .50 | 800/120/50/40 |
-| bradley_ifv | M2A3 Bradley (6 dismounts) | milArmor.ifv | driver, gunner, commander | 25 mm, TOW, coax | 60/30/20/15 |
-| stryker_apc | Stryker (9) | milArmor.apc | driver, commander | .50 RWS | 20/14/12/8 |
+| m1_abrams | M1A2 Abrams | its own file (redrawn: tracks, turret, the 120 mm's blast) | commander, gunner, loader, driver | 120 mm, coax, .50 | 800/120/50/40 |
+| bradley_ifv | M2A3 Bradley (6 dismounts) | its own file (redrawn) | driver, gunner, commander | 25 mm, TOW, coax | 60/30/20/15 |
+| stryker_apc | Stryker (9) | its own file (redrawn) | driver, commander | .50 RWS | 20/14/12/8 |
 | hmmwv | Humvee (2) | its own file (hull kit) | driver, gunner | .50 | 10/10/8/5 |
 | maxxpro_mrap | Navistar MaxxPro MRAP (6) | its own file on units/kit/hull.js (V-hull capsule, O-GPK, rear door) | driver, gunner, commander | .50 ring | 30/26/26/12, belly 260 (blast) |
 | jltv | Oshkosh L-ATV JLTV (1) | its own file on units/kit/hull.js (TAK-4i travel, CROWS) | driver, gunner, commander | .50 CROWS | 22/16/14/9, belly 200 |
 | m35_truck | M35 (16) | its own file (hull kit) | driver, commander | M2 .50 ring | 2/0/0/0 |
 | fmtv | FMTV M1083A1 (16; convoy truck) | its own file (hull kit: LTAS cab, 6x6 singles with CTIS, troop seats, bows and canvas) | driver, commander (stands in the cab ring) | M2 .50 ring | cab 11/11/11/6 by `plates`, bed 1 (soft) |
 | m270_mlrs | M142 HIMARS (redrawn on the hull kit: FMTV 6x6, launcher module, one GMLRS pod) | its own file | driver, gunner, commander | 6 x M31A1 GMLRS per pod, guided, reload by pod (18 carried) | 12/9/5/5 |
-| patriot_launcher | Patriot | milArmor.patriot | 2 | SAM (air only) | 6/2/2/2 |
+| patriot_launcher | Patriot (HEMTT + M903, 12 PAC-3 MSE cells) | its own file on the hull kit | driver, commander | PAC-3 MSE (air only), M2 .50 ring | 10/4/2/2 |
 | technical | MG technical | stand-in in its file (warlord's builder needs CBZ.warlord) | driver, gunner | MG | 1/0/0/0 |
-| ah64_apache | AH-64 | milAir attackHeli | pilot, gunner | 30 mm, Hellfire, Hydra | 20/15/10/8 |
+| ah64_apache | AH-64E | its own file on the mil_air loft kit | pilot, gunner | 30 mm, Hellfire, Hydra | 20/15/10/8 |
 | uh60_black_hawk | UH-60M (11, fast rope) | its own file (redrawn) | pilot, copilot, gunner, crew chief | 2 x M240H door guns | 3/2/2/2 (unarmoured, hp 820) |
 | f35 | F-35A | its own file (redrawn: chined airframe, internal bays) | pilot | 2 x AIM-120C + 2 x GBU-31 (soft marks) or 8 x GBU-39 (armour), 182 x 25 mm | 3/2/2/2 |
-| mq9_reaper | MQ-9 | milAir drone | remote | Hellfire | 0 |
+| mq9_reaper | MQ-9A | its own file on the mil_air loft kit | remote | Hellfire | 0 |
 | b52 | B-52H (redrawn: skinned flexing wing) | its own file | pilot, copilot, radar nav, nav, EWO | 27 x Mk-82 stick (bay), 12 x GBU-31 JDAM (HSABs) | 3/2/2/2 (unarmoured, hp 1800) |
 | b2_spirit | B-2A Spirit | its own file (redrawn: real planform, hinged surfaces, two bays with rotary launchers) | pilot, commander | 8 GBU-31 BLU-109 (armour), 8 GBU-31 Mk 84 | 3/2/2/2 (unarmoured) |
-| a400m | A400M (airdrops 116) | milAir cargo | 3 | none | 0 |
+| a400m | A400M (airdrops 116) | its own file (redrawn: the real hold, ramp and doors) | 3 | none | 0 |
+| fpv_drone | FPV strike drone (7-inch quad) | its own file (drone kit) | a pilot on the ground (goggles) | PG-7VL 93 mm HEAT or OG-7V frag (every third) | 0 (hp 6) |
+| switchblade_600 | Switchblade 600 (tube-launched loiterer) | drone kit family | a gunner with the ground station, or a carrier's crew | Javelin-class tandem HEAT, top attack | 1 (hp 14) |
+| switchblade_300 | Switchblade 300 Block 20 | drone kit family | as the 600 | frag (men, soft vehicles) | 0 (hp 6) |
+| shahed_136 | Shahed-136 / Geran-2 (one-way attack) | its own file | none (GNSS) | ~50 kg HE-frag, dive | 1 (hp 45) |
+| shahed_launcher | KamAZ-43118 five-cell Shahed rack truck | its own file (hull kit) | driver, commander | launches its Shaheds (`def.launches`) | 2/1/1/1 |
+
+**Drones** (`src/battle/drones.js`). A drone unit is kit until it flies (out of `men`). Its numbers
+are `def.drone` (cls fpv / loiter / owa, frame quad / wing, launch hand / tube / rail, link, range,
+endurance, cruise, dash, accel or turn, heights, perOp, prep, warheads by id, carriers), its AI
+`def.tactics` (priorities by warhead, weak zones, operator back distance). Counter-drone lives in the
+existing paths: `vehicleCanTarget` / `vehPickTarget` (seen or heard inside `stats.detect`, half that
+for a crew under armour; an incoming drone first; jets ignore them), `vehWeaponFits` (no SAM below
+`w.minRcs` (0.05 m2) of `stats.rcs`, no ATGM on a small drone), `vehFight` (1-3 s to acquire one;
+a coax only to the main gun's elevation), `fireShot` (`droneTrackK`: the sight picture on a small
+fast drone). JAMMING is not modelled (no EW unit exists); `droneLink()` is where it would answer.
 
 **The belly.** A charge under a hull (`imp.cause` `"ied"` / `"mine"`, threat class `ied`, 160 mm
 of blast loading) lands on the zone `"belly"`, and so does any ground blast inside the footprint
@@ -524,8 +551,8 @@ A side is what is ON it, made by `CBZ.battleSides.make()` from the roster:
   use one where it is correct ("a troop of silverbacks").
 - The menu, the call buttons, the end card ("40 GORILLAS WIN", "KINGDOM OF KESH WINS") and the
   chrome colours (`--sc-red/--sc-blue`) all come from `SIDES`.
-- `"red"` and `"blue"` survive only as **slot keys**: ledgers, `ORDER`, the front's
-  postMessage protocol and the node tools key on them. A player never reads them.
+- `"red"` and `"blue"` survive only as **slot keys**: ledgers, `ORDER`, Gang City's
+  theatre slots and the node tools key on them. A player never reads them.
 
 ---
 
@@ -544,6 +571,9 @@ games/battle.html?a=bengal_tiger&b=lion&n=1v1&arena=dunes&cam=bengal_tiger&freez
 | `af`, `bf` | the nation an army fights for: `republic` `kesh` `veridia` `solara` `mbeya` |
 | `bo`, `sa`, `sb` | best of 1/3/5/7, rounds already won by A / B |
 | `cam` | the lens once the field is up: `a` / `b` (follow that side), a unit id (study the first one), `a:3` (side A's body #3) |
+| `hold` | `a` / `b`: that side holds its ground whatever the numbers (an ambush waits) |
+| `ac`, `bc` | `1`: that side's vehicles move as a CONVOY, riders aboard, along a route past the enemy (§9d) |
+| `aco`, `acp`, `acs` | the convoy's objective `aco` m right of the line of march and `acp` m (350) past the enemy; it forms up `acs` m (700 on open ground) short of him |
 | `freeze=1` | stop the clock once the field is up (visual checks) |
 | `auto=1` | skip the war room (implied by any tool use, as before) |
 
@@ -595,6 +625,7 @@ resolveCircle(pos, r, y, h)            push a body out of the walls
 segmentBlocked(ax,ay,az, bx,by,bz)     the geometry between two points (sight, fire)
 queryColliders(x, z, r, out)           colliders near a point (cover search)
 colliderContains(c, x, z, pad)
+rayColliders(ox,oy,oz, dx,dy,dz, maxT, out, opts)   the first box along a ray (a flown round)
 ```
 
 Optional (feature-detect them): `coverNear(x, z, r, out, opts)` returns cover points
@@ -607,16 +638,100 @@ takes its collider and its points away (rubble keeps a low set).
 - `fromArena(MAP, CBZ.micro, CBZ.scene)` is NPC War's host: `buildMap()`'s record plus
   microboot's collision world, using the same function objects with no wrapper. `begin.js` sets
   the page's `HOST`.
-- `fromCity({id, cx, cz, gap, spawnAt, scene})` is the Gang City seam: the city's own physics
-  names (`CBZ.floorAt`, `CBZ.queryCollidersNear`, ...). It is written but not wired.
+- `fromCity({id, cx, cz, gap, spawnAt, scene, floorAt})` is Gang City's host (wired, `city/armyrealm.js`):
+  the floor is `CBZ.floorAt` (systems/solidground.js), the walls `CBZ.collide` /
+  `CBZ.queryCollidersNear` / `CBZ.rayColliders` (systems/physics.js; `segmentBlocked` is a ray with
+  `any`, `colliderContains` exact on a turned box). Each member reads the city's function when it is
+  called, so later wraps are honoured. The city adds `spawnHeading(side, i)` and `targets`.
+- `rayColliders(ox,oy,oz, dx,dy,dz, maxT, out, opts)` is in the contract (a flown round's path,
+  fire.js `armsTraceWorld`): microboot's and physics.js's share it.
+- `targets(unit, range, out, spot)` (optional): the host's own people who are in this war, pushed as
+  `(mark, d2)` pairs into `pickTarget` and `vehPickTarget`. A mark with `hostActor: true` takes its
+  hits through its own `hurt(dmg, imp)` (damage.js `hurtMan`): Gang City's player.
 - `validate(host)` lists missing members.
 
-**Migration rule.** New code asks `HOST.*`. The existing sim still reads `MAP.*` and
-`CBZ.micro.*` directly. Those are the same functions, so that is a mechanical rename (`MAP.groundAt(` to
-`HOST.groundAt(`, and so on) for whoever lifts a sim file into the core. The page-coupled pieces
-the sim still leans on, which are what a lift has to cut, are `SET` / `FRONT` (settings),
-`el()` (DOM, menu/HUD only), `TEAMS` (colours), and `cam` (the camera's state, read by the
-director hooks in `scoring.js`).
+**Gang City parks the units.** Fort Brandt's machines are these unit files, not a second set of
+models (`city/island_military.js`): each basekit stand kind names its unit (tank `m1_abrams`, ifv
+`bradley_ifv`, apc `stryker_apc`, light vehicles `hmmwv` / `jltv` / `maxxpro_mrap`, trucks `fmtv`
+/ `m35_truck`, `m270_mlrs`, `patriot_launcher`, `f35`, `ah64_apache`, `uh60_black_hawk`,
+`mq9_reaper`, `b52`, `a400m`; the B-2 is still `city/strategic.js`'s own). They load through
+`CBZ.army.loadUnits` when the player comes within 900 m of the wire (or the air response, the
+pilot origin or the war room asks for one), and park one hull a frame. `unitBuild(id)` is
+`makeVehicle` in miniature: `build(ctx)` for the republic on the `city` ground, `rig.mark`, and a
+battle-shaped hull record (`group.userData.unitVeh`: `ds`, `tur`, `vs`, `seats`, `wpn`, `actx`)
+so the unit's own `animate(veh, dt, ctx)` runs unchanged (`CBZ.cityAnimateUnit`). Stolen and
+driven (`city/militaryvehicles.js`), a ground hull drives on `stats` (speed, reverse, accel,
+turn), lays its turret with `aimTurret`, and its heaviest weapon fires through the city's
+ordnance with the rig's `muzzleWorld(out, shot)` / `fire(shot, from)` / `canFire(shot)`: a
+`cannon` is the tank shot, an `autocannon` / `mg` a burst of the weapon's own length and rate, a
+`sam` the map-targeted Patriot (over the tail, once emplaced), `rockets` with `indirect` the
+HIMARS ripple. A flown airframe's look is `group.userData.unitDrive`, reached through
+`CBZ.milAirDrive(group, { thr, agl, speed, vy }, dt)`. `CBZ.milModels.<kind>()` hands the same
+units to any page (null until `milModels.load(kinds)` has brought the file).
+
+**The sim asks HOST.** Every sim file reads the world through `HOST.*` (no `MAP.*`, no
+`CBZ.micro.*`) and the studio through `STUDIO.*` (no `CBZ.studio.*`). On battle.html `HOST` is
+`fromArena(MAP, ...)` (the same function objects) and `STUDIO` is `CBZ.studio`, so the page is
+the page it was.
+
+### The realm and the page layer (one sim, a second host)
+
+`CBZ.battleRealm` (`src/battle/core/realm.js`) compiles `[the host's page file] + SIM + [the
+host's glue]` into one function scope, the same shared scope the files have on battle.html, with
+its own boot kernel. `SIM` is battle.html's sim files in order (teams, arms, state, men, beasts,
+damage, morale, death, physics, vehicles, orders, fire, air, think, squad, step, melee, spawn,
+mass, massdraw, tick); NPC War's war room, arenas, camera, HUD, player, probe and loop are its page
+and are not in it.
+
+`PAGE_NAMES` is every name a sim file reads from a non-sim battle file (`el STUDIO Q SET PROBE
+BATTLE_SEED CORPSE_MAX DEATH_OLD FIRE_OLD SEP_OLD SHARE_OLD STEER_OLD SWIM_OLD MAPS SEA cruiseDepth
+stepDepth killCam STUDY YOU stepYou youDown youInput youRetarget warEvent QUAL SETTINGS
+HAS_BEASTS`). A host's page file declares each with its own meaning. `tools/npcwar-check.mjs`
+computes the set from the code (tools/lib/realm-names.mjs), holds `PAGE_NAMES` to it, holds Gang
+City's `city/armypage.js` to declare every one, and compiles the city realm. **A sim file that
+starts reading a new page global fails that check**: give the name a meaning in the city's page
+layer (or, better, move it into the sim).
+
+### Gang City's army (`src/city/army.js`, `CBZ.army`)
+
+- **Lazy.** Only `city/army.js` (API + loader) is on index.html. `loadUnits(ids)` brings the unit
+  kit and the unit files (Fort Brandt's motor pool, a force with hulls); `load()` brings the core
+  (`core/stage.js`, roster, sides, host, store, lod, flow, tiersim, tactics, realm) as scripts and
+  the sim + `city/armypage.js` + `city/armyrealm.js` as text, compiled into the realm. Every lazy
+  file rides army.js's `?v=` key.
+- **Forces.** `spawnForce({ side, nation, hostile, stars, units, training, gun, at, heading, face,
+  order })` -> a handle at once. A side is a belligerent (a nation id, or "coup"); a theatre holds
+  two (slots red / blue). A force is a booked segment of its side (`SPAWN_BOOK`): its own roster,
+  training, guns, crew plan (its men crew its hulls), formation (hulls on a leading line 14 m apart,
+  men behind in ranks of ten) and order. Its men are rows in the tier sim (FAR until the lens
+  comes, promoted to FULL rigs by `mass.js`, demoted when it goes); its vehicles and their crews
+  are FULL at once. Fresh forces rebase their side's morale books.
+- **Orders.** `orderForce(force, { type, at, heading, face, route })`: `attack` (march on `at`,
+  not the enemy's centre: `objectiveOf`, `farObjective`), `hold` / `move` / `withdraw` (each
+  unit's home is its formation slot round `at`: `holding()`), and `route`. FULL units read
+  `m.order` (ai/orders.js, the squad adapter's `order(team, S)` / `enemyCOM(team, S)`); rows read
+  tiersim's `oK oX oZ` columns and their homes.
+- **THE CONVOY SEAM.** A `route` order (`{ type: "route", route: [{x, z}, ...] }`) is handed to the
+  driver registered with `CBZ.army.routeDriver(fn)`: `fn(force, order, api) -> { step(dt), stop() }`
+  with `api = { move(at, o), hold(at), status(), units(), vehicles(), done() }`. With no driver the
+  force walks the points (`arrived` -> next) and emits `route-done`.
+- **The player.** `hostile: "never" | "always" | "wanted"` (stars >= `stars`); shooting at or
+  blowing up a side makes it hostile for two minutes. His rounds land through
+  `CBZ.army.shot` (systems/fpsmode.js scans `CBZ.cityArmy`); city blasts through
+  `CBZ.army.blast` (city/crashfx.js applyBlastDamage) -> `blastBodies` + `MASS.blast`; the
+  army's own detonations are `CBZ.cityExplosion` (STUDIO.boom in the city).
+- **Callers.** `city/frontline.js` (each day of war: two forces at the front, the holder holds and
+  the attacker attacks; the field is called when a side breaks, after 360 s of contact, or 600 s
+  with none; the dead come off polwar one for one), `city/statecraft.js` (martial law: a squad on
+  two JLTVs routed from Fort Brandt's gate to the point and back), `city/fortresponse.js` (a
+  roused site turns out a quick-reaction section: attack the mark, hold the gate, march back in).
+- **Checks.** `node tools/army-headless.mjs` boots the core with the city host over stub city terrain
+  in node (a street fight, orders, the player both ways, an Abrams with its riflemen, the route
+  seam, disband). `node tools/front-sim.mjs`: polwar + frontline over a stub army.
+- **Gaps.** No sim worker in the city (the tiers run in-page). One theatre: a third belligerent
+  while two hold the field is refused. City peds and cops are not marks for the army (the player
+  is). Fort Brandt's resident troopers are still city peds (they crew the aircraft through
+  aircraft.js's boarding); the base's fighting answer is the army's section.
 
 ---
 
@@ -836,8 +951,7 @@ War's adapter and what each man does with the answer.
 - **Casualties are not only the dead**: a bad hit can put a man DOWN (`m.downed`: bleeding,
   crawling, out of the fight; a mate drags him to cover, which stops the bleeding); a broken man
   who is cornered may surrender (`m.surrendered`, counted with the fled); a beaten brawler yields
-  (systems/melee.js `quit`). `city/frontline.js`'s resolver models both (`WOUNDED_P`,
-  `SURRENDER_P`) and stays calibrated (`npcwar-headless.mjs 6`).
+  (systems/melee.js `quit`).
 - **Tiers**: every unit gets `m.aiTier` (0 FULL / 1 MID / 2 FAR) from `m.lod` when the scale
   scheduler sets it, else the lens distance through `CBZ.battleLod.tierOf`. A MID man thinks on
   `BUDGET.think.mid`, a FAR man on `.far`, with fewer sight lines per target search; the squad
@@ -886,13 +1000,15 @@ charge, a tank in a crowd, a blast, a throw).
   `420 x power x (0.55 / Z)²` with `Z = d / R`, tapering to 0 at R; delta-v
   `9 x power x (0.55 / Z)^1.5 x (80 / kg)^(1/3)`. A man at the core dies and flies; a bull
   elephant at the core takes ~440 and rocks at 2 m/s. Corpses go first through
-  `CBZ.ragdollBlast`; loose debris is kicked (`CBZ.debris.impulse`). Hulls keep the old ring
-  (inside 0.55 R the armour answers).
+  `CBZ.ragdollBlast`; loose debris is kicked (`CBZ.debris.impulse`). R and power are the
+  munition's (§9d). Hulls, parked or flying, are answered by the charge W: the blast's loading
+  on the plate at the hull's distance (`munitionTable.blastOn`) through its own armour.
 - **Debris is real, never cubes.** One system: `systems/debris.js` grit, shaped by what
   broke (stone, soil clod, flake, glass shard, torn plate, track shoe, road wheel, hatch lid),
   instanced per shape, capped per device and ring-recycled. Ground hits: `ground.js` digs
   the crater, scorches, sprays grain and dust, and throws clods of that ground in the crater
-  wall's colour (`clods`; crashfx's generic grit stands down via `CBZ.groundOwnsEjecta`). A
+  wall's colour, all sized by the charge (`munitionTable.ejecta`: a 25 mm flicks grains, a
+  Mk 84 throws half-metre clods; a burst in the open builds no rubble) (`clods`; crashfx's generic grit stands down via `CBZ.groundOwnsEjecta`). A
   tank round that misses into ground or a wall throws clods or broken stone
   (`fire.js missImpact(.., heavy)`). Hulls: `vehHitFx` (sparks, plate torn off in the hull's
   own paint, shoes and a road wheel when the track goes) and `vehKillFx` (a knockout sheds
@@ -916,13 +1032,129 @@ charge, a tank in a crowd, a blast, a throw).
 
 ---
 
+## 9d. Convoys: one column driver, one router (both games)
+
+`src/systems/roadgraph.js` (`CBZ.roadGraph`) is the only road router in either game. It was
+Gang City's motorcade router (`city/motorcade.js` §1-§2), lifted out whole and made
+map-agnostic; the motorcade and the map arrows (`systems/navigation.js`, which had a second,
+O(nodes x roads) graph of its own) both route on it now. It builds a graph from whatever road
+records the map has (axis-aligned `{x, z, vertical, len, w}` or any-heading `{ax, az, bx, bz, w}`),
+routes with the highway preferred, gives the right-hand lane, closes a road or bridge
+(`close(G, x, z, r)`, `G.ver`), fillets the drive path with its speed profile, and where there
+are no roads plans across open ground: an A* on the map's own `groundAt` that keeps off water,
+walls and anything steeper than the column's worst climber.
+
+`src/systems/convoy.js` (`CBZ.convoy`) drives military columns through a HOST (the world and
+the vehicles; every member optional). Doctrine (FM 4-01.45): lead security vehicle, armour,
+carriers with the protected gun trucks among the soft ones, rear security; 25-50 m intervals,
+25 m in towns; the slowest vehicle's march speed; regroup when it stretches; every vehicle
+steered and throttled through its own drive model (pure pursuit). Contact = fired on, or an
+enemy inside 150 m: a near ambush is driven through, a far one is fought from the halt (face
+the threat, gunners engage, sections out on the side away from the fire, remount when clear);
+an IED is halted on, cordoned at 35 m and re-routed round; a destroyed road is re-routed round.
+Contact is reported (`on("contact")`) and air support requested (`on("air")`: a listener that
+returns true has answered). Out of contact and far from the lens (`battleLod.RULES.CONVOY_R`)
+the column is markers advancing at road speed on its route; near, each vehicle drives on from
+there. Every change of state is an order (`CBZ.convoy.order(cv, {kind})`).
+
+- **NPC War**: `src/battle/convoyhost.js` is the host. `?ac=1`
+  makes side A's vehicles a column once the field is up; riders the roster put
+  on the benches walk to their carriers and get in (`men.js` keeps them on the field,
+  `ai/think.js` / `step.js` walk their `cvTask`), `vehicles.js` takes the convoy's controls
+  through `vehMove`, reports every hit, and puts dismounts on the lee side. At the objective
+  every hull goes back to `thinkVehicle`. `__battle.convoy()` is the readout.
+- **Gang City**: `city/army.js` compiles the sim into the city's war realm
+  (`battle/core/realm.js`), `convoyhost.js` included. There it registers itself as the army's
+  route driver (`CBZ.army.routeDriver`): `orderForce(force, { type: "route", route })` makes
+  the force's vehicles a column on the city's roads (the realm's own hulls and `HOST`), its
+  men on foot follow the order to the route's end, and the driver calls `api.done()` there.
+- **Known gaps**: the AI's riflemen hold their fire on armour, so a far ambush of riflemen
+  alone rarely opens fire on a column (an RPG team inside 200 m does); infantry put out at
+  200 m on the dunes rarely get a shot. No war-room button for the order yet (the URL carries
+  it).
+## 9d. Munitions: one table, one resolver (shared with Gang City)
+
+Every round, rocket, missile, bomb and drone warhead in every game is ONE row in
+`src/weapons/munitiontable.js` (`CBZ.munitionTable`), and every impact is resolved by ONE
+function, `src/systems/strike.js` (`CBZ.strike`). Nothing else may carry a copy of a
+munition's numbers.
+
+**The row** (real data, sources in the file): `name, cls` (ke heat hedp he bomb pen blast frag
+sam aam torp), `cal` mm, `mass` kg, `fill` kg + `filler` (its RE) -> **W kg TNT-eq**, `ke` / `ce`
+mm RHA, `jet` (m of concrete a shaped jet perforates), `conc` (m of reinforced concrete a
+penetrating case goes through before its delay fuze), `fuze`, `guide`, `attack` (direct top dive
+lob), `v` m/s, `range` m, `killR` m (published lethal radius), `look`, `shape`. A guidance kit
+on a bomb is the bomb (`base: "mk84"`). `ALIAS` maps every other name a file uses for the
+same warhead ("rpg", "jdam", "buster", "gbu31_jdam", "iron"...).
+
+**Derived** (`fx(id)`): `W`, `R` (battle blast radius, lethal core 0.55 R = killR), `power`
+(0.9 + 0.35 W^(1/3)), `pen` and `beh` for a direct hit, `craterR` (0.8 W^(1/3)), `visPower`
+(the fireball's picture scale). `blastOn(W, d)` is the blast against a hull at distance d
+(220 Z^-1.5 mm RHA-eq, Z = d / W^(1/3)): every hull, parked jet, boat and drone is answered by
+it. `ejecta(W, surface)` sizes a ground burst's crater and clods.
+
+**Unit weapon rows name their munitions**, never their numbers:
+`{ id: "m256_120mm", kind: "cannon", mun: "m829a3", heMun: "m830a1", rof, range, ammo... }`.
+`munitionTable.arm(w)` (called by vehicles.js at spawn) fills `w.pen, w.beh, w.speed, w.he =
+{ pen, beh, blast, power, W, mun }, w.heSpeed, w.top, w.keCls`. A unit file that types
+`he: { pen: ... }` is a second copy: delete it.
+
+**The resolver.** `CBZ.studio.boom(pos, { mun, by, direct, struck, dirx, dirz, contact })` IS
+`CBZ.strike(mun, pos, opts)`:
+1. the fuze: a penetrating case into a building bursts inside, storeys down (it holes the slabs
+   it went through);
+2. the picture (crashfx, sized by the charge) and the sound;
+3. people and hulls: the mode's blast verb (modecaps -> NPC War's `blastBodies`, handed `W`; a
+   hull answers `blastOn` through its own armour; aircraft in the air are hulls too);
+4. the built world, `strike.structure`: the wall is carved by the law (`fracture.blastAt` ->
+   `buildings.js carveHole`), a roof burst opens the roof (`cityCarveShaft`), storeys inside
+   the law's gut radius are blown out (`collapse.gut`), and a building whose banked damage
+   passes its capacity (12 + 7 storeys + plan/26) or that a charge guts across its whole plan
+   comes down (`collapse.play`: its own shell falls as pieces of itself; the building, its
+   colliders and its floors are pulled at the swap). Ruins burn. In the city, the city's own
+   ledger (`blastBuildings` -> `structural.js`) does this with the same law. A burst in the open
+   touches no building and piles no rubble;
+5. the parked hardware, `strike.hardware`: a collider whose ref is a group with
+   `userData.hwKind` / `milKind` (island_military.js stands: plane, heli, tank, ground,
+   patriot, mlrs, drone) takes `blastOn` against its skin; past its hit points it is a wreck
+   (charred, sat down, burning, shedding plate). Gang City's bus (`CBZ.detonate`) calls the
+   same half;
+6. observers, `CBZ.strike.on(fn)`: `arenas/ground.js` digs the crater and throws the ground's
+   own clods at the charge's size.
+
+**Flown rounds are swept.** `CBZ.strike.sweep(ax,ay,az, bx,by,bz)` is the first thing a
+round's path for this step meets: every collider at its OWN height (a band-less one is as
+tall as its record), the roofs and floors (platforms) a falling store comes down through, and
+the ground sampled under the segment and refined. `fire.js stepRockets` sweeps every HE round,
+rocket and bomb, then the bodies on the segment (`rocketBody`: a hull's box, a man's column);
+a direct hit on a hull is first its own penetration (`imp.threat`), then the burst. Guided
+missiles (`stepVehShots`) sweep their path too. A direct-fire HE round is laid on the
+target's centre (`vehHEAim`), not on the ground under it.
+
+**Gang City.** `index.html` loads the table before `systems/breach.js` (whose `CHARGES` are
+now the table's) and `systems/strike.js` after the collapse engine. `CBZ.detonate(x, y, z,
+kind)` accepts any table id (a row is made on first use, priced by the table); in city mode
+`CBZ.strike` hands off to it. `systems/ordnance.js` kinds name their munition (`iron` = Mk 82,
+`heavy` = Mk 84, `rocket` = M31A1) and size their blast from its W; `city/arsenal_data.js`
+payloads name theirs.
+
+**Drone warheads** for the drone builder: `switchblade300`, `switchblade600`, `fpv_pg7vl`,
+`fpv_og7v`, `fpv_tm62`, `drop_vog17`, `drop_rkg3`, `lancet3`, `shahed136`. A drone's weapon
+row names one (`mun`), and its terminal dive lands it through `studio.boom({ mun })`.
+**Naval** rows for the boats: `mk45_he`, `oto76_he`, `mk295`, `mk149`, `rgm84`, `nsm`, `sm2`,
+`essm`, `rim116`, `mk48`, `mk54`. Also `javelin`, `m795` / `m982`, mortars, `tomahawk`,
+`gbu28`, `gbu57`.
+
+
+---
+
 ## 10. Checks: node only, no browser
 
 ```
 node tools/npcwar-check.mjs        <1 s. Every page file parses; no top-level name in two battle
                                    files; every unit file registers exactly its id and has its
                                    manifest row; every manifest row has its file.
-node tools/npcwar-headless.mjs     the page's own sim in node: war room, hold, the front, the
+node tools/npcwar-headless.mjs     the page's own sim in node: war room, hold, the
                                    rifle, snow/fields, calibration, held v met, vehicles, sides +
                                    series + URL.   node tools/npcwar-headless.mjs 3  runs one.
 node tools/units-kit-check.mjs     the animal kit: planted feet never slide; the dog bit for bit.
@@ -930,7 +1162,8 @@ node tools/combatkit-check.mjs     soldier kit fit (every body, every loadout, e
 node tools/npcwar-fidelity.mjs     the tiers fight the page's war (see 9)
 node tools/npcwar-worker-check.mjs the sim worker, both modes
 node tools/npcwar-scale-bench.mjs  1k / 10k / 100k a side, ms per tier
-node tools/front-sim.mjs           the city's front resolver (frontline.js) it is calibrated to.
+node tools/army-headless.mjs      Gang City's army: the core on the city host over stub terrain (§8).
+node tools/front-sim.mjs           the city's wars (polwar + frontline) over a stub army.
 node tools/npcwar-ai-metrics.mjs   the soldiers' dumb-behaviour numbers (§9b); --old = ?tac=old.
 node tools/ballistics-check.mjs    the weapon table, and flight / penetration / wounds vs published figures.
 node tools/npcwar-arena.mjs        BALANCE: a matchup over N seeds in parallel workers (real bestiary,
@@ -958,8 +1191,8 @@ then `node tools/build-disaster-page.mjs` must print "wrote disaster.html".
    `src/units/vehicles/<id>.js`. A kit change (`src/units/kit/*`) is shared: keep it backward
    compatible and say so in your report.
 2. **Search before you build.** The kit, the bestiary, `creature_combat`, `ape_combat`, the
-   wildlife rig, `combat_iq`, `CBZ.human`, `crowdstore`/`crowdgpu`, `mil_armor`, `mil_air` and
-   `flags.js` already exist. Don't stand up a second one.
+   wildlife rig, `combat_iq`, `CBZ.human`, `crowdstore`/`crowdgpu`, `mil_air` (the airframe loft
+   kit) and `flags.js` already exist. Don't stand up a second one.
 3. **No made-up names, no red/blue on screen.** Labels come from the manifest. Text never uses
    em dashes or middle dots.
 4. **Speed never costs looks.** Perf means instancing, culling, tiers and sleeping, never a

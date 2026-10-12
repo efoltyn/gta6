@@ -212,7 +212,7 @@
   // shared geometry/materials — flagged ._shared so any disposer leaves them be
   let G = null;               // lazy geometry/material cache
   // The gunship's searchlight cone + ground pool. The airframes themselves are
-  // the parked base models (city/mil_air.js) that claimMilitary flies.
+  // the parked base units (Fort Brandt's NPC War airframes) that claimMilitary flies.
   function assets() {
     if (G) return G;
     const shared = (o) => { if (o) o._shared = true; return o; };
@@ -282,12 +282,19 @@
       // since the claim is exclusive, could also take the airframe out from
       // under an ordered nuclear sortie. `b2` is the record's own flag.
       if (kind === "plane" && (v.b2 || (v.model && /bomber|b-2/i.test(v.model.name || "")))) continue;
+      // A SCRAMBLE IS A FIGHTER. Fort Brandt's apron is NPC War's units: the
+      // F-35A goes; the B-52H and the A400M are not strike fighters.
+      const uid = v.unitId || (v.group.userData && v.group.userData.unitId);
+      if (kind === "plane" && (v.cargoLifter || (uid && uid !== "f35"))) continue;
       if (!boardOn()) return v;                      // flag off: the original first-free answer
       // the gunship response scrambles an ATTACK helicopter when one is free;
       // a utility ship only goes if no attack ship can be crewed
       const d = nearestFreeCrewDist(v) + (kind === "heli" && !v.attackHeli ? 1000 : 0);
       if (d < bestD) { bestD = d; bestRec = v; }
     }
+    // nothing on the stands yet: the base's fleet loads when the player comes
+    // near it, or now, because the response has asked for a machine
+    if (!bestRec && CBZ.fortBrandtFleet) { try { CBZ.fortBrandtFleet.ensure(); } catch (e) {} }
     return bestRec;
   }
   // ONE ROSTER. `CBZ.cityMilitaryPersonnel` is island_military.js's own 44
@@ -1340,7 +1347,7 @@
     if (CBZ.queryCollidersNear) return CBZ.queryCollidersNear(x, z, 1, out);
     return CBZ.colliders || [];
   }
-  const _colsBlock = [], _colsFacade = [], _colsRoof = [], _colsBeam = [];
+  const _colsBlock = [], _colsFacade = [], _colsBeam = [];
 
   // cheap building check: is the missile tip inside any LOS blocker's AABB?
   const _sweepP = { x: 0, y: 0, z: 0 };   // reusable sample point for the swept test
@@ -1398,9 +1405,9 @@
     const claim = claimMilitary("heli"); if (!claim) return null;
     const a = assets();
     const grp = claim.rec.group;
-    const rotor = grp.userData && grp.userData.rotor;
-    const trotor = grp.userData && grp.userData.tailRotor;
-    if (!rotor || !trotor) {
+    // the airframe is an NPC War unit (island_military.js unitBuild): it turns
+    // its own rotors (heliRotors -> CBZ.milAirDrive -> the unit's animate)
+    if (!grp.userData || typeof grp.userData.unitDrive !== "function") {
       releaseMilitary({ sourceRec: claim.rec, pilot: claim.pilot, crew: claim.crew, home: claim.home, pos: grp.position }, false);
       return null;
     }
@@ -1414,7 +1421,7 @@
     grp.position.set(claim.home.x, claim.home.y, claim.home.z);
     grp.rotation.set(0, claim.home.heading, 0);
     const craft = {
-      group: grp, rotor, trotor, cone, pool,
+      group: grp, cone, pool,
       pos: grp.position, orbit: rng() * 6.28,
       missileCD: 3.5, gunCD: 1.0, leaveT: 0, spotR: 6, climb: 0,
       hp: 140, maxHp: 140, downed: false,           // armoured — ~2 rockets / a sustained burst
@@ -1503,6 +1510,17 @@
     if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, building ? 12 : 8); } catch (e) {} }
     if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(x, y, z); } catch (e) {} }
   }
+  /* THE ROTORS TURN AT THE MACHINE'S OWN RATE. thr 0..1 is the spool (the
+     pad's wind-up, full power aloft, windmilling down); the unit's animate
+     does the rest: rotor rpm, blur, gear, lights. */
+  const _heliDrive = { thr: 0, agl: 0, speed: 0, vy: 0 };
+  function heliRotors(h, dt, thr) {
+    if (!h || !h.group || !CBZ.milAirDrive) return;
+    _heliDrive.thr = thr;
+    _heliDrive.agl = h.pos.y - (CBZ.floorAt ? (+CBZ.floorAt(h.pos.x, h.pos.z) || 0) : 0);
+    _heliDrive.speed = Math.abs(h.speed || 0); _heliDrive.vy = h.vy || 0;
+    CBZ.milAirDrive(h.group, _heliDrive, dt);
+  }
   function fallHeli(dt) {
     if (!heli) return;
     heli.vy -= 17 * dt;                                     // gravity takes over
@@ -1510,8 +1528,7 @@
     heli.group.rotation.y += heli.yawRate * dt;             // flat spin
     heli.group.rotation.z += dt * 1.7;                      // roll belly-up as it dies
     heli.group.rotation.x = Math.sin((heli.spin += dt * 4) * 0.6) * 0.45;   // pitch lurch
-    if (heli.rotor) heli.rotor.rotation.y += dt * 16;       // rotor windmilling down
-    if (heli.trotor) heli.trotor.rotation.x += dt * 7;
+    heliRotors(heli, dt, 0.35);                             // rotor windmilling down
     // black smoke trail + the odd flame lick
     heli.smokeCD -= dt;
     if (heli.smokeCD <= 0) {
@@ -1663,16 +1680,12 @@
   // y1 = roof height, so this is the rooftop the gunship must stay ABOVE (no more
   // flying through towers) and the surface a crashing heli detonates ON (not the
   // street six storeys below). Same collider data the spotlight roof-scan uses.
+  // the highest solid top under (x,z) seen from the sky: the one rest-on
+  // query (systems/physics.js CBZ.surfaceTopAt). A roof is a CBZ.platforms
+  // slab, not a collider — the old collider-only scan missed every roof
+  // middle, so the gunship orbited and crashed THROUGH towers.
   function roofTopAt(x, z) {
-    let topY = 0;
-    const cols = collidersAt(x, z, _colsRoof);
-    for (let ci = 0; ci < cols.length; ci++) {
-      const c = cols[ci];
-      if (c.y1 == null || c.y1 <= topY) continue;
-      if (x < c.minX - 1 || x > c.maxX + 1 || z < c.minZ - 1 || z > c.maxZ + 1) continue;
-      topY = c.y1;
-    }
-    return topY;
+    return CBZ.surfaceTopAt ? Math.max(0, CBZ.surfaceTopAt(x, z, 1e6, 1)) : 0;
   }
 
   function updateHeli(dt, r) {
@@ -1721,15 +1734,14 @@
       if (stars < HELI_STAR || g.state !== "playing") { despawnHeli(false); return; }
       heli.launchT -= dt;
       const k = 1 - Math.max(0, heli.launchT) / 4.5;
-      heli.rotor.rotation.y += dt * (2 + k * 40);
-      heli.trotor.rotation.x += dt * (3 + k * 57);
+      heliRotors(heli, dt, 0.05 + k * 0.95);
       if (heli.launchT <= 0) heli.phase = "takeoff";
       return;
     }
     if (heli.phase === "takeoff") {
       if (stars < HELI_STAR || g.state !== "playing") { heli.phase = "return"; }
       else {
-        heli.rotor.rotation.y += dt * 42; heli.trotor.rotation.x += dt * 60;
+        heliRotors(heli, dt, 1);
         // A real rotorcraft leaves the pad at ~1200-1800 fpm, not 9 m/s. It
         // climbs to a departure height here and keeps climbing on the inbound
         // leg, so the pad beat stays short without teleporting it to altitude.
@@ -1753,7 +1765,7 @@
       }
       heli.group.rotation.y = turnToward(heli.group.rotation.y, Math.atan2(dx, dz), dt * 1.8);
       heli.group.rotation.z += (0 - heli.group.rotation.z) * Math.min(1, dt * 2.5);
-      heli.rotor.rotation.y += dt * 42; heli.trotor.rotation.x += dt * 60;
+      heliRotors(heli, dt, 1);
       if (d < 0.8 && Math.abs(heli.pos.y - heli.home.y) < 0.3) despawnHeli(false);
       return;
     }
@@ -1847,8 +1859,7 @@
     // the same equation airtraffic.js already flew its fleet on.
     const bankT = inbound ? 0 : -heliOrbitBank(vOrb, R);
     heli.group.rotation.z += (bankT - heli.group.rotation.z) * Math.min(1, dt * 2.2);
-    heli.rotor.rotation.y += dt * 42;
-    heli.trotor.rotation.x += dt * 60;
+    heliRotors(heli, dt, 1);
     if (inbound) {
       if (Math.hypot(heli.pos.x - tx, heli.pos.z - tz) < 38) {
         heli.phase = "orbit";
@@ -1990,8 +2001,10 @@
         };
         // off a real rail: the airframe publishes its launch points
         const lp = CBZ.milAirPoint ? CBZ.milAirPoint(heli.group, "rail", (heli.shotN = (heli.shotN || 0) + 1), _heliLaunch) : null;
-        if (lp) launchMissile(lp.x, lp.y, lp.z, t, false, seekHeli, "atgm");
-        else launchMissile(heli.pos.x + side, heli.pos.y - 0.4, heli.pos.z, t, false, seekHeli, "atgm");
+        if (lp) {
+          launchMissile(lp.x, lp.y, lp.z, t, false, seekHeli, "atgm");
+          if (CBZ.milAirFire) CBZ.milAirFire(heli.group, "rail", heli.shotN);   // the Hellfire leaves its rail
+        } else launchMissile(heli.pos.x + side, heli.pos.y - 0.4, heli.pos.z, t, false, seekHeli, "atgm");
         // (no text — the missile has a smoke trail you can see)
       }
     }
@@ -2093,13 +2106,13 @@
     }
   }
 
-  const _jetDrive = { thr: 0, agl: 0 };
+  const _jetDrive = { thr: 0, agl: 0, speed: 0, vy: 0 };
   function updateJets(dt, r) {
     const stars = g.wanted | 0;
     function plume(j, power) {
       // control surfaces follow the airframe, the nozzle glows with the
       // burner, the gear folds away once it is off the runway
-      if (CBZ.milAirDrive) { _jetDrive.thr = power; _jetDrive.agl = j.pos.y; CBZ.milAirDrive(j.group, _jetDrive, dt); }
+      if (CBZ.milAirDrive) { _jetDrive.thr = power; _jetDrive.agl = j.pos.y; _jetDrive.speed = Math.abs(j.speed || 0); CBZ.milAirDrive(j.group, _jetDrive, dt); }
       if (!j.burn) return;
       if (CBZ.setRocketPlume && j.burn.userData && j.burn.userData.rocketPlume) {
         CBZ.setRocketPlume(j.burn, power, j.life, 1.2, 1.05);
@@ -2257,11 +2270,6 @@
     }
   }
 
-  // ---- studio hook: the airframes the response actually flies ----
-  CBZ.debugBuildPoliceAir = {
-    gunship: function () { return CBZ.milAir.make("attackHeli").group; },
-    jet: function () { return CBZ.milAir.make("fighter").group; },
-  };
 
 
   // ----------------------------------------------------------- main tick -----

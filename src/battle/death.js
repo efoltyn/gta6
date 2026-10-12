@@ -40,7 +40,7 @@ function beastDeathPhysics(m, imp) {
   const grp = m.group;
   if (!grp) return "none";
   if (DEATH_OLD) { m.dieT = 0.0001; return "topple"; }
-  if (MAP.water && floatCorpse(m)) return "float";
+  if (HOST.water && floatCorpse(m)) return "float";
   // WHICH WAY IT GOES OVER. A body does not fall over its own facing, it
   // falls away from whatever hit it: the way the killing blow pushed it if
   // that is known (a charge, a hull, a blast), the shooter's line if we have
@@ -113,7 +113,7 @@ function beastDeathPhysics(m, imp) {
    is left when it declines (budget full, too far, no rig). */
 function manDeathPhysics(m, imp) {
   if (DEATH_OLD || !m.group || !m.char) { m.dieT = 0.0001; return "topple"; }
-  if (MAP.water && floatCorpse(m)) return "float";
+  if (HOST.water && floatCorpse(m)) return "float";
   let dx = 0, dz = 0;
   const by = imp && imp.by;
   if (imp && (imp.dvx || imp.dvz)) { dx = imp.dvx; dz = imp.dvz; }
@@ -198,7 +198,7 @@ function retireOldestCorpse() {
     if (!gone) return;
     const j = men.indexOf(gone);
     if (j >= 0) men.splice(j, 1);
-    if (gone.group) CBZ.studio.drop(gone.group);
+    if (gone.group) STUDIO.drop(gone.group);
     return;
   }
   let pick = -1;
@@ -226,7 +226,7 @@ function retireOldestCorpse() {
   if (Q.get("remains") !== "0" && CBZ.battleGround && CBZ.battleGround.keepBody) {
     let kept = false;
     try { kept = CBZ.battleGround.keepBody(old.group); } catch (e) { kept = false; }
-    if (kept) { CBZ.studio.drop(old.group); return; }
+    if (kept) { STUDIO.drop(old.group); return; }
   }
   sinking.push({ g: old.group, t: 0, h: Math.max(0.6, (old.eyeH || 1) * 1.4) });
 }
@@ -237,7 +237,7 @@ function stepSinking(dt) {
     const s = sinking[i];
     s.t += dt;
     s.g.position.y -= dt * s.h * 0.55;
-    if (s.t > 2.2) { CBZ.studio.drop(s.g); sinking.splice(i, 1); }
+    if (s.t > 2.2) { STUDIO.drop(s.g); sinking.splice(i, 1); }
   }
 }
 
@@ -263,8 +263,8 @@ function floatCorpse(m) {
   if (!CBZ.waterFloat || !m.group) return false;
   // the float block asks three questions of the world; on this map the
   // answers are "everywhere", "the swell" and "the bed" (sea.js)
-  if (!CBZ.cityWaterAt) CBZ.cityWaterAt = function () { return !!(MAP && MAP.water); };
-  if (!CBZ.waterModeOn) CBZ.waterModeOn = function () { return !!(MAP && MAP.water); };
+  if (!CBZ.cityWaterAt) CBZ.cityWaterAt = function () { return !!(HOST && HOST.water); };
+  if (!CBZ.waterModeOn) CBZ.waterModeOn = function () { return !!(HOST && HOST.water); };
   if (!CBZ.cityWaterDepthAt) CBZ.cityWaterDepthAt = function () { return typeof SEA !== "undefined" && SEA.seabed != null ? -SEA.seabed : 14; };
   const id = (m.species && m.species.id) || "";
   let buoy = 1, log = 0, tilt = Math.PI / 2, ride = -0.1;

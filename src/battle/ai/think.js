@@ -26,7 +26,7 @@ function marchGoal(m) {
     m.slot = "march";
     return;
   }
-  const com = teamCOM[m.team === "red" ? "blue" : "red"];
+  const com = objectiveOf(m);
   const sq = squads[m.team][m.sq];
   let lead = null;
   if (sq) for (let i = 0; i < sq.length; i++) if (!sq[i].dead && !sq[i].fled && !sq[i].routed) { lead = sq[i]; break; }
@@ -37,7 +37,7 @@ function marchGoal(m) {
     m.target.set(
       lead.pos.x - Math.sin(my) * row * 2.0 + Math.cos(my) * col, 0,
       lead.pos.z - Math.cos(my) * row * 2.0 - Math.sin(my) * col);
-  } else if (!navStep(m, m.target)) {
+  } else if (farObjective(m) || !navStep(m, m.target)) {
     const j = m.hunt ? 0 : 14;      // a hunt marches STRAIGHT at them
     m.target.set(com.x + (lcg() - 0.5) * j, 0, com.z + (lcg() - 0.5) * j);
   }
@@ -54,9 +54,9 @@ function marchGoal(m) {
    per think; when the line is walled, descend the flow field instead — the
    same "around, not through" the marches already use. ?steer=old reverts. */
 function goalBlocked(m) {
-  return CBZ.micro.segmentBlocked(
+  return HOST.segmentBlocked(
     m.pos.x, m.pos.y + 1.1, m.pos.z,
-    m.target.x, MAP.groundAt(m.target.x, m.target.z) + 1.1, m.target.z);
+    m.target.x, HOST.groundAt(m.target.x, m.target.z) + 1.1, m.target.z);
 }
 function steerAroundWalls(m) {
   if (STEER_OLD) return;
@@ -113,7 +113,7 @@ function beastEscaped(m, dt) {
   if (m.state !== "flee") { m.fleeT = 0; return false; }
   m.fleeT = (m.fleeT || 0) + dt;
   const com = teamCOM[m.team === "red" ? "blue" : "red"];
-  const far = Math.hypot(m.pos.x - com.x, m.pos.z - com.z) > FLEE_GAPS * (MAP.gap || 150);
+  const far = Math.hypot(m.pos.x - com.x, m.pos.z - com.z) > FLEE_GAPS * (HOST.gap || 150);
   if (far || m.fleeT > 45) { m.fled = true; return true; }
   return false;
 }
@@ -252,6 +252,9 @@ function thinkMan(m, now) {
   m.hunt = HUNT[m.team];
   // HIS NERVE FIRST: a man who has broken is not deciding anything else
   if (routCheck(m, thinkDt)) return;
+  // a convoy's rider on his way to his seat, or out of it on a cordon
+  // (src/battle/convoyhost.js): he walks the task and nothing else
+  if (m.cvTask && convoyManThink(m)) return;
   if (m.beast && beastEscaped(m, thinkDt)) return;
   // a man stepping off his own man's firing line finishes the step. Half a
   // second of not re-deciding is the whole point: re-deciding is what put
@@ -391,7 +394,7 @@ function thinkMan(m, now) {
      the body-scale spread, not the 2.6 m anti-clump, which could shove the
      goal out over the lip. */
   const holds = holding(m);
-  if (MAP.terrainLos && !m.hunt && (m.supp > 0.3 || m.hull || holds)) {
+  if (HOST.terrainLos && !m.hunt && (m.supp > 0.3 || m.hull || holds)) {
     let hd = hullFor(m, tgt);
     /* ...and a HELD line's fold is a fold ON that line. The search runs
        from where the man stands, so on a field of real dunes it chained

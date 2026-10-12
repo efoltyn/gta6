@@ -984,10 +984,19 @@
   function wantMil() {
     if (milState !== "idle") return;
     if (NO_MIL || OLD) { milState = "absent"; return; }
-    if (CBZ.milModels || (CBZ.studio && CBZ.studio.model && CBZ.studio.models().length)) { milState = "ready"; return; }
+    // the wrecks are NPC War's units (CBZ.milModels, island_military.js):
+    // the pack brings the kit, milModels.load the three unit files
+    const units = function () {
+      return CBZ.milModels && CBZ.milModels.load ? CBZ.milModels.load(["truck", "tank", "cargo"]) : null;
+    };
+    if (CBZ.milModels) {
+      milState = "loading";
+      Promise.resolve(units()).then(function () { milState = "ready"; flushMil(); }, function () { milState = "absent"; flushMil(); });
+      return;
+    }
     if (!CBZ.studio || !CBZ.studio.need) { milState = "absent"; return; }
     milState = "loading";
-    CBZ.studio.need(["military"]).then(function () {
+    CBZ.studio.need(["military"]).then(units).then(function () {
       milState = CBZ.milModels ? "ready" : "absent";
       flushMil();
     }).catch(function (e) {

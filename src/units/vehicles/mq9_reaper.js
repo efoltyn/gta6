@@ -86,12 +86,11 @@
   const WEAPONS = [
     // AGM-114R "Romeo": multi-purpose (HEAT + blast-frag), Mach 1.3,
     // 0.5-8 km off a Reaper; fired one at a time, a few seconds apart
-    { id: "agm114_hellfire", seat: null, kind: "missile", vs: "any", mount: "fixed", arc: 0.5, rof: 0.25, pen: 900, beh: 1000,
-      he: { pen: 900, beh: 900, blast: 7, power: 1.7 }, speed: 425, range: 8000, minRange: 500, ammo: HF_N },
+    { id: "agm114_hellfire", seat: null, kind: "missile", vs: "any", mount: "fixed", arc: 0.5, rof: 0.25,
+      mun: "agm114r", range: 8000, minRange: 500, ammo: HF_N },
     // GBU-12 Paveway II: Mk 82 (89 kg tritonal) on a laser seeker; released
     // level from cruise where the fall reaches the mark, steered all the way down
-    { id: "gbu12", seat: null, kind: "bombs", vs: "any", guided: true, basket: 0.15, rof: 0.4, pen: 120, beh: 1500,
-      he: { pen: 120, beh: 1500, blast: 20, power: 2.5 }, ammo: GB_N },
+    { id: "gbu12", seat: null, kind: "bombs", vs: "any", guided: true, basket: 0.15, rof: 0.4, mun: "gbu12", ammo: GB_N },
   ];
 
   // =====================================================================
@@ -783,13 +782,19 @@
        MANPADS brings it down. It strikes from 4.5 km, out of reach of any
        rifle; the bank is held to ~40 deg (turn rate g tan(bank) / v). */
     stats: { hp: 240, mass: 4760, speed: 87, accel: 3, turn: 0.09, alt: 4500, length: DIM.length, width: DIM.span, height: DIM.height,
-      armour: { front: 2, side: 2, rear: 2, top: 2 }, standoff: 3000, remote: true },
+      armour: { front: 2, side: 2, rear: 2, top: 2 }, standoff: 3000, remote: true,
+      rcs: 1.0 },                       // m2: a SAM's radar sees it (units/vehicles/fpv_drone.js and the small ones it does not)
     crew: [],
     passengers: 0,
     weapons: WEAPONS,
     tactics: {
       role: "strike-isr",               // hunter-killer: finds, lases and kills from altitude
-      loiter: true,
+      loiter: true,                     // the racetrack over the fight IS its loiter orbit (stepJet)
+      // THE OPERATOR: a ground control station off the field (pilot and sensor
+      // operator) over SATCOM, the same remote-operator model as the battle's
+      // other drones (src/battle/drones.js): nobody on the field to kill, no
+      // tactical link to jam; it is a JET in the runtime's terms (stepJet)
+      operator: { gcs: true, link: "satcom" },
       engage: { missile: 8000, bombs: 2700 },
       priorities: ["armour", "sam", "launcher", "mg", "men"],
       designates: true,                 // the MTS-B lases for its own Hellfires and GBU-12s

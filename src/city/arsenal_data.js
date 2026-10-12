@@ -39,24 +39,26 @@
     // ---- STORES: what a payload consumes. A warhead is the big move: the
     // world reacts to the purchase (relations, sanctions on a first bomb).
     stores: {
-      warhead: { name: "nuclear warhead", label: "Buy warhead", field: "warheads",
+      warhead: { name: "nuclear warhead", label: "Buy warhead", field: "warheads", mun: "b61",
                  price: 150000, days: 6, upkeep: 25,
                  relations: 15,        // every other nation sours this much, per warhead
                  firstRelations: 30,   // ...and this much more for a country going nuclear
                  sanctionDays: 8, sanctionPerDay: 0.04 },   // of the treasury, per day, going nuclear
-      mop:     { name: "bunker buster", label: "Buy MOP", field: "mops",
+      mop:     { name: "bunker buster", label: "Buy MOP", field: "mops", mun: "gbu57",
                  price: 20000, days: 2, upkeep: 0 },
     },
     // ---- PAYLOADS: which aircraft may carry it (in order of preference),
+    // `mun` the weapons/munitiontable.js row it drops (`kind` is the ordnance
+    // bus's name for the same warhead; both resolve to that row),
     // how many fly, how many stores each drops, and what it consumes.
     //   flight: "jets"   -> city/playerair.js CBZ.cityStrikeFlight (spawned
     //                       strike jets, counted against mil.planes)
     //   flight: "bomber" -> city/strategic.js CBZ.strategicSortie (ONE parked
     //                       bomber takes off from its own pad)
     payloads: {
-      strike: { name: "airstrike", carriers: ["jet"], flight: "jets", aircraft: 2, each: 3, kind: "bomb" },
-      nuke:   { name: "nuclear strike", carriers: ["heavy", "b2"], flight: "bomber", aircraft: 1, each: 1, kind: "nuke", store: "warhead" },
-      bunker: { name: "bunker strike", carriers: ["b2"], flight: "bomber", aircraft: 1, each: 2, kind: "buster", store: "mop" },
+      strike: { name: "airstrike", carriers: ["jet"], flight: "jets", aircraft: 2, each: 3, kind: "bomb", mun: "mk84" },
+      nuke:   { name: "nuclear strike", carriers: ["heavy", "b2"], flight: "bomber", aircraft: 1, each: 1, kind: "nuke", store: "warhead", mun: "b61" },
+      bunker: { name: "bunker strike", carriers: ["b2"], flight: "bomber", aircraft: 1, each: 2, kind: "buster", store: "mop", mun: "gbu57" },
     },
     // ---- the one line a General says when an order cannot fly. Short.
     lines: {
