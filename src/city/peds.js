@@ -3316,7 +3316,7 @@
       hurtActor(att, p, 12 + rng() * 12, false);
       if (CBZ.tracer) {
         const f = { x: ax, y: 1.4, z: az }, t2 = { x: p.pos.x, y: 1.3, z: p.pos.z };
-        CBZ.tracer(f, t2, { muzzleScale: 0.0 });
+        CBZ.tracer(f, t2, { muzzleScale: 0.0, hit: true, shooter: att, weapon: att.weapon, targetActor: p, brass: false });
       }
       // a stray hit on an innocent terrifies the block (panic → witnesses scatter +
       // remember the shooter). hurtActor already racked the shooter's NPC heat via
@@ -3455,20 +3455,22 @@
       att.attackCD = shot ? shot.cd : (prof.cd + rng() * prof.cspr);
       att.ammo--;
       const to = { x: tgt.pos.x, y: ty, z: tgt.pos.z };
-      if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 1.0 });
+      // accuracy falls off with the TRUE 3D distance (a long, steep up-shot is hard;
+      // a clean close line lands). LOS is already guaranteed above. The roll is
+      // made BEFORE the round is drawn so the round you see does what it did:
+      // it stops in the target, or it goes past and lands behind (gunfx.js).
+      const d3 = Math.hypot(dh, to.y - from.y);
+      const hit = shot ? (rng() < shot.hit) : (rng() < Math.max(0.15, 0.8 - d3 * 0.03));
+      if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 1.0, hit: hit, shooter: att, weapon: att.weapon, targetActor: tgt.isPlayer ? CBZ.player : tgt });
       else if (CBZ.muzzleFlash) CBZ.muzzleFlash(from, {});
       // the shot SPEAKS its gun (AK bark vs pistol crack) and muffles with distance
       if (CBZ.gunVoice) CBZ.gunVoice(att.weapon, CBZ.player ? Math.hypot(from.x - CBZ.player.pos.x, from.z - CBZ.player.pos.z) : 0);
       else if (CBZ.sfx) CBZ.sfx("report");
-      // accuracy falls off with the TRUE 3D distance (a long, steep up-shot is hard;
-      // a clean close line lands). LOS is already guaranteed above.
-      const d3 = Math.hypot(dh, to.y - from.y);
       // the round is REAL to glass: any intact pane across the lane bursts
       // (force=true, exactly like player fire) — so an NPC's first shot
       // through a showroom front or a half-broken window BREAKS it, and the
       // follow-ups fly through the hole (cityShotHole lets LOS/tracers pass).
       if (CBZ.cityShatterRay) CBZ.cityShatterRay(from.x, from.y, from.z, to.x - from.x, to.y - from.y, to.z - from.z, d3 + 0.6, true);
-      const hit = shot ? (rng() < shot.hit) : (rng() < Math.max(0.15, 0.8 - d3 * 0.03));
       if (hit) hurtActor(att, tgt, shot ? shot.dmg : baseDmg, false);
       // INCOMING IS A THING THAT HAPPENS TO YOU. A round that goes past an
       // armed bystander's ear makes THEM shoot worse and want the wall — the

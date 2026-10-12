@@ -1840,13 +1840,15 @@
     // can't spray a target up on a roof or behind a building through the wall.
     if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(from.x, from.y, from.z, v.pos.x, ty, v.pos.z)) return false;
     const weapon = (shooter && shooter.weapon) || "SMG";
-    if (CBZ.tracer) CBZ.tracer(from, { x: v.pos.x, y: ty, z: v.pos.z }, { muzzleScale: 0.9 });
+    const dd = Math.hypot(v.pos.x - from.x, v.pos.z - from.z, ty - from.y);   // true 3D gap
+    // the roll first: the round you see stops in him or flies on past
+    const hitRoll = rng() < Math.max(0.18, 0.62 - dd * 0.02);
+    if (CBZ.tracer) CBZ.tracer(from, { x: v.pos.x, y: ty, z: v.pos.z }, { muzzleScale: 0.9, hit: hitRoll, shooter: shooter || db, weapon: weapon, targetActor: v.isPlayer ? CBZ.player : v });
     // a drive-by two blocks over reads as distant ambience, not in-ear
     if (CBZ.gunVoice) CBZ.gunVoice(weapon, CBZ.player ? Math.hypot(from.x - CBZ.player.pos.x, from.z - CBZ.player.pos.z) : 0);
     else if (CBZ.sfx) CBZ.sfx("shoot_smg");
     if (shooter && shooter.ammo > 0) shooter.ammo--;          // a magazine is finite; a long pass runs dry
-    const dd = Math.hypot(v.pos.x - from.x, v.pos.z - from.z, ty - from.y);   // true 3D gap
-    if (rng() >= Math.max(0.18, 0.62 - dd * 0.02)) return true;
+    if (!hitRoll) return true;
     const dmg = (weapon === "AK-47" ? 14 : 10) + rng() * 9;
     if (v.isPlayer) {
       if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, from.x, from.z, "killed in a drive-by", false, shooter || db.gang.name, false);

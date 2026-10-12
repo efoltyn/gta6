@@ -75,10 +75,8 @@
 
    WRAPPERS IT INSTALLS (all lazy-retried, all chain-preserving)
    ------------------------------------------------------------
-     CBZ.tracer                  -> the universal bullet hook. Intersects the
-                                    shot segment with the LIVE sea surface and
-                                    emits the bullet hit at the true crossing.
      CBZ.bulletImpact            -> over water: no dust/sparks, water hit instead
+                                    (a flown round lands through this: gunfx.js)
      CBZ.bulletHole              -> over water: no decal (kills the floating hole)
      CBZ.cityExplosion           -> over water: depth-charge staging + a tight,
      CBZ.cityAirstrikeExplosion     reliably lethal radius against submerged
@@ -188,18 +186,6 @@
 
   const GRAV = 9.2;                 // must match water_wake.js's droplet gravity
 
-  // Peak displacement above mean sea level anywhere in the world right now.
-  // Degrade-safe: with water_spec.js absent (or WATER_DEEP_SWELL off, where
-  // both gains collapse to 1) this is exactly the historical 0.42m.
-  function crestCeiling() {
-    const sw = +CBZ.WATER_SWELL_ROWS_AMP || 0.355;
-    const ch = +CBZ.WATER_CHOP_ROWS_AMP || 0.065;
-    const gs = CBZ.waterDeepGain ? (+CBZ.waterDeepGain() || 1) : 1;
-    const gc = CBZ.waterChopGain ? (+CBZ.waterChopGain() || 1) : 1;
-    const w = CBZ.waterWeatherAmp ? (+CBZ.waterWeatherAmp() || 1) : 1;
-    const peak = Math.max(+CBZ.WATER_SWELL_AMP || 0.42, sw * gs + ch * gc) * w;
-    return Number.isFinite(peak) && peak > 0 ? peak : 0.42;
-  }
 
   // ============================================================
   //  1. THE KIND TABLE — defaults, gates and the momentum reference
@@ -852,14 +838,11 @@
     return wrapped;
   }
 
-  // Re-entry flag: while the ORIGINAL CBZ.tracer is running, its own pavement-
-  // plane stamp (gunfx.js:288-295) calls CBZ.bulletHole + CBZ.bulletImpact — the
-  // two functions we also wrap. Over water we still want those suppressed, but
-  // we do NOT want two water hits for one round: the tracer wrap emits the one
-  // true hit at the real surface crossing afterwards, which is metres from the
-  // y=0.09 pavement point on a shallow shot.
-  let inTracer = false;
-
+  // (There is no tracer wrap any more. A round FLIES now (systems/gunfx.js)
+  // and lands where it lands through CBZ.bulletImpact, which is wrapped
+  // below: a round that comes down on the sea splashes THERE, on arrival,
+  // once. The old wrap splashed at the instant of firing, before the round
+  // could have got there, and a second time when the round landed.)
   // Shared test for the bulletImpact/bulletHole wraps.
   // Returns true when the land FX must be suppressed.
   function bulletOverWater(pos, opts) {
@@ -870,65 +853,11 @@
     if (!overWater(x, z)) return false;
     const sy = surfY(x, z);
     if (y - sy > 1.2) return false;               // genuinely clear of the water
-    if (inTracer) return true;                    // the tracer wrap owns this round
     return CBZ.waterHit(x, Math.min(y, sy), z, {
       kind: "bullet",
       speed: opts && +opts.speed > 0 ? +opts.speed : undefined,
       by: (opts && (opts.shooter || opts.by)) || null,
     });
-  }
-
-  // THE UNIVERSAL BULLET HOOK. Every shot in the game — player, NPC, cop,
-  // chopper, turret — draws a tracer, so this segment IS the round's whole
-  // path. Intersect it with the LIVE sea surface (not a flat plane: the swell
-  // moves +-0.42m and the entry must land on the crest you can see) and emit
-  // the hit at the true crossing. This is what catches the very common case
-  // where a round hit nothing at all — hitscan resolution has no final else,
-  // so those shots previously produced no impact call anywhere.
-  function shotWaterEntry(from, to) {
-    if (off() || !from || !to) return;
-    const g = CBZ.game;
-    if (!g || !(CBZ.waterModeOn ? CBZ.waterModeOn() : g.mode === "city")) return;
-    const y0 = +from.y, y1 = +to.y;
-    if (!Number.isFinite(y0) || !Number.isFinite(y1)) return;
-    // The highest crest ANYWHERE right now. This used to be the flat
-    // WATER_SWELL_AMP (0.42m, the SHORE amplitude); world/water_spec.js's
-    // depth-scaled swell makes the open ocean up to ~2.7x that in calm weather
-    // and ~1.6m in a squall, so the old constant rejected genuine hits on a
-    // deep-water crest and every round fired into open sea went unsplashed.
-    // Derived live from the same two gains the vertex program multiplies by.
-    if (y1 > seaY() + crestCeiling()) return;                  // never reached the water
-    if (y0 <= y1) return;                                      // rising shot: no entry
-    // first pass against the mean sea plane, then refine against the live swell
-    // at the resulting XZ — one iteration is plenty for a 0.42m amplitude.
-    let t = (y0 - seaY()) / (y0 - y1);
-    if (!(t >= 0 && t <= 1)) return;
-    let px = from.x + (to.x - from.x) * t;
-    let pz = from.z + (to.z - from.z) * t;
-    if (!overWater(px, pz)) return;
-    const sy = surfY(px, pz);
-    t = (y0 - sy) / (y0 - y1);
-    if (!(t >= 0 && t <= 1)) return;
-    px = from.x + (to.x - from.x) * t;
-    pz = from.z + (to.z - from.z) * t;
-    if (!overWater(px, pz)) return;
-    CBZ.waterHit(px, surfY(px, pz), pz, { kind: "bullet" });
-  }
-
-  function wrapTracer() {
-    const orig = CBZ.tracer;
-    if (typeof orig !== "function") return false;
-    if (orig._waterWrapped) return true;
-    const wrapped = function (from, to, opts) {
-      const prev = inTracer;
-      inTracer = true;
-      let r;
-      try { r = orig.apply(this, arguments); } finally { inTracer = prev; }
-      try { shotWaterEntry(from, to); } catch (e) {}
-      return r;
-    };
-    CBZ.tracer = chain(orig, wrapped, "_waterWrapped");
-    return true;
   }
 
   function wrapBulletImpact() {
@@ -1055,7 +984,6 @@
   // of the chain. Retry on a short interval, capped, so re-installs can never
   // stack without bound.
   const WRAPS = [
-    { name: "tracer", fn: wrapTracer, n: 0 },
     { name: "bulletImpact", fn: wrapBulletImpact, n: 0 },
     { name: "bulletHole", fn: wrapBulletHole, n: 0 },
     { name: "cityExplosion", fn: function () { return wrapBoom("cityExplosion"); }, n: 0 },

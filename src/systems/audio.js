@@ -741,6 +741,14 @@
     body: { g: 0.32, f0: 5200, f1: 2100, sweep: 0.012, t: 0.035, q: 0.8 },
     thump: { g: 0.04, f0: 200, f1: 120, t: 0.02 },
     tail: { g: 0.025, t: 0.12 } };
+  /* A SUBSONIC round (a .45, a slow 9 mm at range, a round that has bled
+     below Mach 1) has no shock cone to crack: what passes your ear is the
+     bullet itself, a short buzzing whiz falling in pitch as it goes by. */
+  GUNS.bullet_whiz = { sample: "none-whiz", cd: 0.015, jit: 0.18, vol: 0.7,
+    crack: { g: 0.12, hp: 4000, t: 0.004 },
+    body: { g: 0.5, f0: 2600, f1: 700, sweep: 0.13, t: 0.16, q: 3.5 },
+    thump: { g: 0.01, f0: 200, f1: 120, t: 0.02 },
+    tail: { g: 0.01, t: 0.06 } };
   // a round skipping off stone or steel: the whine is the deformed bullet
   // tumbling away, a resonant sweep down over a quarter second
   GUNS.ricochet = { sample: "none-ric", cd: 0.05, jit: 0.15, vol: 0.55,

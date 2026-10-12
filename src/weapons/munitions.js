@@ -150,7 +150,7 @@
     mk84:    { L: 3.28, D: 0.458 },
     jdam:    { L: 3.88, D: 0.458 },
     gbu28:   { L: 5.84, D: 0.368 },
-    pg7:     { L: 0.90, D: 0.085 },
+    pg7:     { L: 0.90, D: 0.085, burn: 0, flare: 0.35, trail: { s0: 0.28, s1: 2.0, life: 3.4, a0: 0.5, shade: 0.74, spacing: 1.2 } },
     g40:     { L: 0.11, D: 0.040 },
   };
 
@@ -487,7 +487,7 @@
       spinV: new Float32Array(n), windK: new Float32Array(n), fadeIn: new Float32Array(n),
     };
   }
-  const SMOKE_CAP = 420, FIRE_CAP = 96, FLARE_CAP = 32;
+  const SMOKE_CAP = 420, FIRE_CAP = 96, FLARE_CAP = 64;
   let smoke = null, fire = null, flaresClaimed = 0;
   function clouds() {
     if (!smoke) {
@@ -616,6 +616,85 @@
     st.x += ux * n * spacing; st.y += uy * n * spacing; st.z += uz * n * spacing;
   }
 
+  /* ---- A ROUND IN FLIGHT: one record, every launcher ----------------------
+     What a rocket, a missile or a shell looks like while it flies: its own
+     body (the pooled shape), the motor flare at the nozzle for as long as the
+     motor burns, and the smoke ribbon laid by distance that billows and
+     drifts downwind after it has gone. NPC War's rockets and guided rounds
+     used to draw a one-pixel line behind an invisible point (core/stage.js
+     trail); they fly through this now, as the city's aircraft missiles do.
+
+       const f = MU.flight("atgm", { wobble: 0, body: true });
+       MU.flightStep(f, x, y, z, dx, dy, dz, speed, dt);   // every step it flies
+       MU.flightEnd(f);                                     // it landed
+
+     opts: body (false: the caller draws its own), burn / ignite (s; default
+     the spec's), flare (m), trail (a trail spec, or null for none), wobble
+     (m: the RPG's spin-stabilised corkscrew around its true path, drawn on
+     the body only; the round's real path is the caller's), spin (rev/s). */
+  const flarePairs = [];                    // pairs handed back by finished flights
+  function flight(type, o) {
+    o = o || {};
+    const sp = SPEC[type] || null;
+    const f = {
+      type: type, spec: sp, body: null, flare: -1, st: { x: 0, y: 0, z: 0, on: false },
+      age: 0, out: false, roll: 0,
+      burn: o.burn != null ? o.burn : (sp && sp.burn) || 0,
+      ignite: o.ignite || 0,
+      flareSize: o.flare || (sp && sp.flare) || 0.4,
+      trail: o.trail !== undefined ? o.trail : (sp && sp.trail) || null,
+      wobble: o.wobble || 0, spin: o.spin != null ? o.spin : (type === "pg7" ? 4.5 : type === "shell" ? 0 : 1.2),
+      half: sp ? sp.L / 2 : 0.5,
+    };
+    if (o.body !== false && sp && CBZ.scene) {
+      f.body = acquire(type);
+      if (f.body) CBZ.scene.add(f.body);
+    }
+    if (f.burn > 0) f.flare = flarePairs.length ? flarePairs.pop() : claimFlares(2);
+    return f;
+  }
+  function flightStep(f, x, y, z, dx, dy, dz, speed, dt) {
+    if (!f) return;
+    f.age += dt;
+    let bx = x, by = y, bz = z;
+    if (f.wobble > 0) {
+      // the corkscrew: a small circle about the true path, at the spin rate
+      let ux = dz, uz = -dx;
+      const ul = Math.hypot(ux, uz) || 1; ux /= ul; uz /= ul;
+      const vx = dy * uz, vy = dz * ux - dx * uz, vz = -dy * ux;
+      const a = f.age * 6.283 * f.spin * 0.5, amp = f.wobble * Math.min(1, f.age / 0.25);
+      bx += (ux * Math.cos(a) + vx * Math.sin(a)) * amp;
+      by += vy * Math.sin(a) * amp;
+      bz += (uz * Math.cos(a) + vz * Math.sin(a)) * amp;
+    }
+    if (f.body) {
+      f.body.position.set(bx, by, bz);
+      f.body.lookAt(bx + dx, by + dy, bz + dz);
+      if (f.spin) { f.roll += dt * 6.283 * f.spin; f.body.rotateZ(f.roll); }
+      if (f.body.userData.vane || f.body.userData.wings) dressBomb(f.body, f.age, dt, speed);
+    }
+    const tx = bx - dx * f.half, ty = by - dy * f.half, tz = bz - dz * f.half;
+    const lit = f.age >= f.ignite && f.age < f.ignite + f.burn;
+    if (lit) {
+      if (f.flare >= 0) motorFlare(f.flare, tx, ty, tz, dx, dy, dz, f.flareSize);
+      if (f.trail) trail(f.st, tx, ty, tz, dx, dy, dz, f.trail, speed);
+    } else if (f.age >= f.ignite + f.burn && !f.out) {
+      f.out = true; f.st.on = false;
+      if (f.flare >= 0) flareOff(f.flare, 2);
+    }
+  }
+  function flightEnd(f) {
+    if (!f) return;
+    if (f.body) { release(f.body); f.body = null; }
+    if (f.flare >= 0) { flareOff(f.flare, 2); flarePairs.push(f.flare); f.flare = -1; }
+    f.st.on = false;
+  }
+  // the munition row a launcher names (weapons/munitiontable.js) → the shape drawn
+  function shapeOf(mun) {
+    const T = CBZ.munitionTable, r = T && mun ? T.get(mun) : null;
+    return r && r.shape && SPEC[r.shape] ? r.shape : null;
+  }
+
   // ---- the one per-frame step (after fpsmode's rockets at 52) ------------
   function step(dt) {
     if (!smoke) return;
@@ -723,6 +802,10 @@
     flareOff: flareOff,
     motorFlare: motorFlare,
     trail: trail,
+    flight: flight,
+    flightStep: flightStep,
+    flightEnd: flightEnd,
+    shapeOf: shapeOf,
     step: step,
     rand: fxr,
     kit: { latheZ: latheZ, fin: fin, fins: fins, box: box, band: band, ogive: ogive, merge: merge },

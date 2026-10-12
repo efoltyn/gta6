@@ -576,7 +576,7 @@
       return old;
     };
     P.stepFlights = function (dt) {
-      const MU = CBZ.munitions, spec = MU && MU.spec ? MU.spec("mlrs") : null;
+      // (the flights only steer now: the round draws itself)
       for (let i = this.flights.length - 1; i >= 0; i--) {
         const fl = this.flights[i], r = fl.r;
         fl.age += dt;
@@ -589,13 +589,8 @@
           areaAim(this.u || r.by, fl.tgt, fl.mark.pos);
           fl.mark.pos.y = groundY(this.u, fl.mark.pos.x, fl.mark.pos.z);
         }
-        // the motor burns for the climb: flame and its smoke trail
-        if (fl.age < 3.2 && MU) {
-          const sp = r.vel.length() || 1, ux = r.vel.x / sp, uy = r.vel.y / sp, uz = r.vel.z / sp;
-          const nx = r.pos.x - ux * 2.0, ny = r.pos.y - uy * 2.0, nz = r.pos.z - uz * 2.0;
-          if (spec && spec.trail && MU.trail) MU.trail(fl.st, nx, ny, nz, ux, uy, uz, spec.trail, sp);
-          if (MU.fire) MU.fire(nx, ny, nz, -ux * 6, -uy * 6, -uz * 6, 0.9, 0.3, 0.12, 0.95, 1, 0.62, 0.22, { drag: 3, rise: 0, wind: 0 });
-        }
+        // (the motor flare and its smoke ribbon are the round's own flight:
+        // src/battle/fire.js stepRockets flies it through weapons/munitions.js)
       }
     };
 

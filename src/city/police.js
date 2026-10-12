@@ -1904,12 +1904,16 @@
     // 140 m it is ~0.19, which is what a carbine off a moving skid is worth.
     const rng3 = Math.hypot(chopper.pos.x - P.pos.x, chopper.pos.y - 1.5, chopper.pos.z - P.pos.z);
     const spread = Math.max(2, rng3 * 0.014);
-    if (CBZ.tracer) CBZ.tracer(from, { x: P.pos.x + (rng() - 0.5) * spread, y: 1.5, z: P.pos.z + (rng() - 0.5) * spread }, { muzzleScale: 1.2 });
+    const ox = (rng() - 0.5) * spread, oz = (rng() - 0.5) * spread;
+    const hitP = Math.max(0.08, Math.min(0.45, 0.45 * (60 / Math.max(60, rng3))));
+    const hitRoll = rng() < hitP;
+    // a hit is drawn into you; a miss is the spread shot, landing past you
+    if (CBZ.tracer) CBZ.tracer(from, hitRoll ? { x: P.pos.x, y: (P.pos.y || 0) + 1.2, z: P.pos.z } : { x: P.pos.x + ox, y: 1.5, z: P.pos.z + oz },
+      { muzzleScale: 1.2, hit: hitRoll, shooter: chopper, weapon: "carbine", targetActor: P });
     if (CBZ.gunVoice) CBZ.gunVoice("carbine", Math.hypot(chopper.pos.x - P.pos.x, chopper.pos.z - P.pos.z));
     else if (CBZ.sfx) CBZ.sfx("report");
     CBZ.cityGunshot(chopper.pos.x, chopper.pos.z, chopper, 70);
-    const hitP = Math.max(0.08, Math.min(0.45, 0.45 * (60 / Math.max(60, rng3))));
-    if (rng() < hitP && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(8 + rng() * 6, chopper.pos.x, chopper.pos.z, "shot from a police chopper", rng() < 0.02, "a police helicopter");
+    if (hitRoll && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(8 + rng() * 6, chopper.pos.x, chopper.pos.z, "shot from a police chopper", rng() < 0.02, "a police helicopter");
   }
   CBZ.cityClearChopper = despawnChopper;
 
@@ -3783,9 +3787,15 @@
       c.sees = false; c.lostT = (c.lostT || 0) + 0.25;   // treat as a momentary loss → flank/reposition
       return false;
     }
-    if (CBZ.tracer) CBZ.tracer(from, { x: tgt.pos.x, y: ty, z: tgt.pos.z }, { muzzleScale: c.swat ? 1.15 : 0.95 });
+    // the roll first, so the round drawn does what it did (gunfx.js: it stops
+    // in the target, or goes past and lands behind it)
+    const hitP = _shot ? _shot.hit
+      : Math.max(0.18, 0.85 - dist * 0.02 - (tgt.isPlayer && CBZ.player.sprint ? 0.18 : 0));
+    const hitRoll = rng() < hitP;
+    const cw = c.weapon || (c.swat ? "smg" : "sidearm");
+    if (CBZ.tracer) CBZ.tracer(from, { x: tgt.pos.x, y: ty, z: tgt.pos.z }, { muzzleScale: c.swat ? 1.15 : 0.95, hit: hitRoll, shooter: c, weapon: cw, targetActor: tgt.isPlayer ? CBZ.player : tgt });
     // distance to the LISTENER (the player), not to the cop's target
-    if (CBZ.gunVoice) CBZ.gunVoice(c.weapon || (c.swat ? "smg" : "sidearm"), CBZ.player ? Math.hypot(c.pos.x - CBZ.player.pos.x, c.pos.z - CBZ.player.pos.z) : 0);
+    if (CBZ.gunVoice) CBZ.gunVoice(cw, CBZ.player ? Math.hypot(c.pos.x - CBZ.player.pos.x, c.pos.z - CBZ.player.pos.z) : 0);
     else if (CBZ.sfx) CBZ.sfx("report");
     CBZ.cityGunshot(c.pos.x, c.pos.z, c, 48);
     // the burst rhythm is the shooter's, not this call site's
@@ -3794,9 +3804,7 @@
     // is what turns two units trading fire into one pinning while the other
     // moves — the officer's own posture already reads _iqSupp.
     if (M && M.suppress && !tgt.isPlayer && tgt.armed) M.suppress(tgt, 1.4);
-    const hitP = _shot ? _shot.hit
-      : Math.max(0.18, 0.85 - dist * 0.02 - (tgt.isPlayer && CBZ.player.sprint ? 0.18 : 0));
-    if (rng() >= hitP) return true;
+    if (!hitRoll) return true;
     let dmg = _shot ? _shot.dmg : ((c.swat ? 10 : 7) + rng() * 5);
     if (tgt.isPlayer) {
       // a REMOTE player (multiplayer): the wound travels over the wire and is

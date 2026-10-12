@@ -273,7 +273,7 @@
         if (m.armed && CBZ.tracer) {
           if (CBZ.actorAimAt) CBZ.actorAimAt(m, cop);
           const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(m) : { x: m.pos.x, y: 1.4, z: m.pos.z };
-          CBZ.tracer(from, { x: cop.pos.x, y: 1.3, z: cop.pos.z }, { muzzleScale: 1.0 });
+          CBZ.tracer(from, { x: cop.pos.x, y: 1.3, z: cop.pos.z }, { muzzleScale: 1.0, hit: true, shooter: m, weapon: m.weapon, targetActor: cop });
         }
         if (CBZ.cityHurtCop) CBZ.cityHurtCop(cop, m.armed ? 11 : 6, { fromX: m.pos.x, fromZ: m.pos.z, attacker: m, byPlayer: false });
       }
