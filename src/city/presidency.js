@@ -1291,7 +1291,7 @@
       find: function (px, pz) { return thing(ROOM.redPhones && ROOM.redPhones[1], 1.6, px, pz, "presnukephone"); },
       options: [{
         id: "pres-nuke", slot: "e", prio: 20, campaignSafe: true, bad: true,
-        label: "Order nuke",
+        label: "Nuke",
         // a verb only while the country has BOTH a bomber on its pad and a
         // warhead (city/arsenal_data.js payloads.nuke); what is missing is
         // the General's one line when you Talk to him
@@ -1304,7 +1304,7 @@
       find: function (px, pz) { return thing(ROOM.mapPt, 1.7, px, pz, "preswarmap"); },
       options: [{
         id: "pres-map-strike", slot: "e", prio: 20, campaignSafe: true,
-        label: function () { return CBZ.warroom && CBZ.warroom.target() ? "Order airstrike" : "Mark"; },
+        label: function () { return CBZ.warroom && CBZ.warroom.target() ? "Airstrike" : "Mark"; },
         onSelect: function () {
           if (!CBZ.warroom.target()) { markMap(); return; }
           warAnswer(pressButton("strike"), "general");
@@ -1326,7 +1326,7 @@
         // leader's, the cell's once the Bureau has them). No B-2 or no MOPs
         // and the General says so in one line.
         id: "pres-map-bunker", prio: 16, campaignSafe: true,
-        label: "Strike bunker",
+        label: "Bomb",
         canShow: function () { return !!(CBZ.warroom && CBZ.warroom.bunkerTarget()); },
         onSelect: function () { warAnswer(pressButton("bunker"), "general"); },
       }],
@@ -1446,12 +1446,12 @@
       if (cabinetDead("general")) return { line: "" };
       if (rec && rec.govType === "dictatorship" && gateOk("crown")) return {
         line: "The officers would kneel" + sir + ". A crown settles the question of who comes after you, for good.",
-        key: "crown", yes: "Then crown me", no: "No crowns", ok: "It will be done in the morning.", nope: "As you wish.",
+        key: "crown", yes: "Crown me", no: "Refuse", ok: "It will be done in the morning.", nope: "As you wish.",
       };
       if ((ATT.armed || lastAttackNear()) && gateOk("martial")) return {
         line: (ATT.armed ? "They are coming again, " + (ATT.armed.at && ATT.armed.at.gate ? "for this gate" : "for the market") : "They hit us yesterday") +
           ". Give me soldiers on the streets and I'll have checkpoints up before dark.",
-        key: "martial", yes: "Put the soldiers out", no: "Not on our own streets", ok: "Trucks are rolling.", nope: "Then we wait for the next one.",
+        key: "martial", yes: "Deploy", no: "Refuse", ok: "Trucks are rolling.", nope: "Then we wait for the next one.",
       };
       // THE WAR (city/warroom.js): at war he wants to hit them; at peace with
       // a country that has stopped talking to us, he wants to go.
@@ -1461,32 +1461,32 @@
         const bk = WR.bunkerTarget();
         if (bk && bk.owner === WR.enemy() && gateOk("bunker")) return {
           line: "Their leader is in his bunker" + sir + ". The B-2 can put two bunker busters in one hole.",
-          key: "bunker", yes: "Do it", no: "Not yet", ok: "The B-2 is rolling.", nope: "He'll stay down there.",
+          key: "bunker", yes: "Strike", no: "Wait", ok: "The B-2 is rolling.", nope: "He'll stay down there.",
         };
         if (t && gateOk("strike")) return {
           line: "I have a package on " + (t.label || "their capital") + sir + ". Two jets, six bombs. Say go.",
-          key: "strike", yes: "Go", no: "Hold", ok: "Wheels up.", nope: "Holding.",
+          key: "strike", yes: "Strike", no: "Wait", ok: "Wheels up.", nope: "Holding.",
         };
       } else if (WR && gateOk("war")) {
         const cw = WR.canWar();
         const rel = (cw.ok && CBZ.relations && CBZ.relations.get && seat()) ? (CBZ.relations.get(seat().id, cw.foe) || 0) : 0;
         if (cw.ok && rel <= -45) return {
           line: cw.name + " won't even take our calls" + sir + ". Say the word and we are at war.",
-          key: "war", yes: "War", no: "Not yet", ok: "God help them.", nope: "They won't wait forever.",
+          key: "war", yes: "Declare war", no: "Wait", ok: "God help them.", nope: "They won't wait forever.",
         };
       }
       const mil = militiaName();
       if (mil && gateOk("crackdown")) return {
         line: "There's a private army out of " + mil + " answering to nobody. I can break it up this week.",
-        key: "crackdown", yes: "Break it up", no: "Leave them", ok: "My men move tonight.", nope: "They'll only grow.",
+        key: "crackdown", yes: "Disband", no: "Leave", ok: "My men move tonight.", nope: "They'll only grow.",
       };
       if (T.threat.members > 0 && T.emergency < 50 && gateOk("emergency")) return {
         line: "Every order I get goes through three committees. Declare an emergency and I stop asking permission.",
-        key: "emergency", yes: "Declare it", no: "The law stands", ok: "Understood. The papers will scream.", nope: "Then the committees can fight the cell.",
+        key: "emergency", yes: "Declare", no: "Refuse", ok: "Understood. The papers will scream.", nope: "Then the committees can fight the cell.",
       };
       if (T.emergency >= 50 && gateOk("fascism")) return {
         line: "The emergency has held. The men want one flag and no parties. Say it and it's done.",
-        key: "fascism", yes: "One state", no: "Not that", ok: "One state.", nope: "They'll be disappointed.",
+        key: "fascism", yes: "One state", no: "Refuse", ok: "One state.", nope: "They'll be disappointed.",
       };
       // what the arsenal is missing is the first thing he tells you
       const miss = WR && WR.missingLine ? WR.missingLine("nuke") : "";
@@ -1497,11 +1497,11 @@
       if (RAID.phase) return { line: "My people are already moving. Pray it's clean." };
       if (gateOk("bureau")) return {
         line: "We have a thread on the Sons of the Dune. " + T.threat.members + " of them, a safehouse in Dry Gulch. Give me the word and my people go in.",
-        key: "bureau", yes: "Go in", no: "Keep watching", ok: "Cars are leaving the gate now.", nope: "We keep watching. They keep planning.",
+        key: "bureau", yes: "Raid", no: "Watch", ok: "Cars are leaving the gate now.", nope: "We keep watching. They keep planning.",
       };
       if (gateOk("wall") && T.threat.supply > 0) return {
         line: "Their supply walks across the Saltlands at night. A wall along that line starves them.",
-        key: "wall", yes: "Build the wall", no: "No wall", ok: "I'll tell the engineers.", nope: "Then the runners keep running.",
+        key: "wall", yes: "Build wall", no: "Refuse", ok: "I'll tell the engineers.", nope: "Then the runners keep running.",
       };
       if (!T.threat.intel && T.threat.members > 0) return { line: "Nothing actionable. The cell hasn't surfaced yet. When they move, we'll see them." };
       return { line: T.threat.members > 0 ? "We're watching " + T.threat.members + " of them. Nothing moves yet." : "The board is clear. For now." };
@@ -1513,19 +1513,19 @@
       if (pub && pub.protests) { try { protests = (pub.protests() || []).length; } catch (e) {} }
       if ((protests > 0 || murders >= 5) && gateOk("curfew")) return {
         line: protests > 0 ? "There are people at your gate and more coming. A curfew clears the streets after dark." : murders + " killings this week. A curfew empties the streets after dark.",
-        key: "curfew", yes: "Impose the curfew", no: "No curfew", ok: "Sirens at sundown.", nope: "Then we take our chances at night.",
+        key: "curfew", yes: "Curfew", no: "Refuse", ok: "Sirens at sundown.", nope: "Then we take our chances at night.",
       };
       if ((ATT.armed || lastAttackNear() || T.approval < 35) && gateOk("surge")) return {
         line: "I can put a lot more cars where the trouble is. Today, if you want it.",
-        key: "surge", yes: "Put them out", no: "Keep it normal", ok: "You'll see them within the hour.", nope: "Normal it is.",
+        key: "surge", yes: "Surge", no: "Refuse", ok: "You'll see them within the hour.", nope: "Normal it is.",
       };
       if (gateOk("police")) return {
         line: "I'm short on every shift. Fund six more officers and you'll see them on the corners.",
-        key: "police", yes: "Fund them", no: "Not this year", ok: "Thank you" + sir + ".", nope: "The corners stay empty, then.",
+        key: "police", yes: "Fund", no: "Refuse", ok: "Thank you" + sir + ".", nope: "The corners stay empty, then.",
       };
       if (gateOk("amnesty") && T.approval < 45) return {
         line: "The cells are full of small cases. An amnesty clears them and buys some goodwill on the street.",
-        key: "amnesty", yes: "Grant it", no: "They stay in", ok: "The doors open at noon.", nope: "Understood.",
+        key: "amnesty", yes: "Pardon all", no: "Refuse", ok: "The doors open at noon.", nope: "Understood.",
       };
       return { line: "The force is where it should be. Quiet day, as quiet as they get." };
     }
@@ -1607,7 +1607,7 @@
         // answers are the campaign card's replies pinned on him.
         CBZ.interactions.registerFor(p, {
           id: "pres-officer-" + role, speak: true, speakCD: 25, prio: 40, campaignSafe: true, forceYes: true,
-          label: function () { return "Talk to " + c.display; },
+          label: "Listen",
           canShow: function () { return on() && !!seat() && !CONV && !p.dead; },
           onSelect: function () { talkTo(role); },
         });

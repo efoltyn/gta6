@@ -806,7 +806,7 @@
     const I = CBZ.interactions;
     if (!I || !I.registerFor) return;
     if (role === "pro") {
-      I.registerFor(ped, { id: "pv-hear-out", slot: "e", prio: 30, campaignSafe: true, forceYes: true, label: "Hear out",
+      I.registerFor(ped, { id: "pv-hear-out", slot: "e", prio: 30, campaignSafe: true, forceYes: true, label: "Listen",
         canShow: function () { return playerPres() && !ped.dead && !ped._heard; },
         onSelect: function () { heard(ped); } });
       return;
@@ -838,7 +838,7 @@
     const line = (CHANTS[sl] ? "Mr. President! " + CHANTS[sl].split("!")[0] + "!" : "Mr. President! Look at us!");
     const ped = best;
     let pr = null;
-    try { pr = UI.say(ped.name || "Protester", line, [{ id: "hear", label: "Hear out" }, { id: "out", label: "Escort out" }], { actor: ped }); } catch (e) { pr = null; }
+    try { pr = UI.say(ped.name || "Protester", line, [{ id: "hear", label: "Listen" }, { id: "out", label: "Escort out" }], { actor: ped }); } catch (e) { pr = null; }
     if (pr && pr.then) pr.then(function (c) {
       if (c === "hear") heard(ped);
       else if (c === "out" && CBZ.cityOrders2 && CBZ.cityOrders2.takeDown) CBZ.cityOrders2.takeDown(ped, "escort");
@@ -858,7 +858,7 @@
     const I = CBZ.interactions;
     if (gateWired || !I || !I.register) return;
     gateWired = true;
-    I.register("ped", { id: "pv-clear-gate", slot: "e", prio: 30, campaignSafe: true, forceYes: true, anyone: true, label: "Clear the gate",
+    I.register("ped", { id: "pv-clear-gate", slot: "e", prio: 30, campaignSafe: true, forceYes: true, anyone: true, label: "Clear",
       canShow: function (t) { return !!(t && !t.dead && t._protRole === "gate" && PROT.active && playerPres()); },
       onSelect: function (t) {
         say(t, "Clear the road! Move!", "#dfe7ff", 2.4);
@@ -1333,8 +1333,8 @@
       O.offer({
         id: "pub:" + it.id, via: "aide", urgent: true, topic: "schedule", who: cabinetChief(), expires: 40,
         line: line,
-        yes: { label: "On my way", reply: "They're ready for you." },
-        no: { label: "Cancel it", reply: "I'll tell them.", run: function () { cancelItem(it, "cancelled"); } },
+        yes: { label: "Go", reply: "They're ready for you." },
+        no: { label: "Cancel", reply: "I'll tell them.", run: function () { cancelItem(it, "cancelled"); } },
       });
     } catch (e) {}
   }
@@ -1505,26 +1505,26 @@
     if (recentAttack) beats.push({
       line: "They came for us. They came for this city, for your streets, for your children.",
       a: { label: "Promise justice", say: "We will find every one of them. Every one.", fit: threat ? 2.4 : 1.4 },
-      b: { label: "Call for calm", say: "Grieve, then go back to your lives. That is how we beat them.", fit: a >= 45 ? 1.4 : 0.4 },
+      b: { label: "Urge calm", say: "Grieve, then go back to your lives. That is how we beat them.", fit: a >= 45 ? 1.4 : 0.4 },
     });
     if (curfewLive()) beats.push({
       line: "I know the curfew is hard. I know what it costs a family to be locked in after dark.",
-      a: { label: "Defend the curfew", say: "It stays until the streets are safe. Not one day longer.", fit: (recentAttack || threat) ? 0.6 : -2.0 },
-      b: { label: "Promise to lift it", say: "It will be lifted. You have my word.", fit: 1.8, pro: true },
+      a: { label: "Keep curfew", say: "It stays until the streets are safe. Not one day longer.", fit: (recentAttack || threat) ? 0.6 : -2.0 },
+      b: { label: "Lift curfew", say: "It will be lifted. You have my word.", fit: 1.8, pro: true },
     });
     if (dep.martial) beats.push({
       line: "There are soldiers on our streets tonight. I put them there.",
-      a: { label: "The soldiers stay", say: "They stay until the job is done.", fit: recentAttack ? 1.0 : -1.8 },
-      b: { label: "Bring them home soon", say: "They'll be home soon. That is a promise.", fit: 1.6, pro: true },
+      a: { label: "Keep troops", say: "They stay until the job is done.", fit: recentAttack ? 1.0 : -1.8 },
+      b: { label: "Recall troops", say: "They'll be home soon. That is a promise.", fit: 1.6, pro: true },
     });
     if (broke || taxed) beats.push({
       line: "Everyone here has asked me the same question. Where is the money going?",
       a: { label: "Promise jobs", say: "Into jobs. Into your jobs. Starting this month.", fit: broke ? -0.6 : 1.8 },
-      b: { label: "Tighten the belt", say: "The state spends less, starting with this house.", fit: broke ? 1.4 : 0.2 },
+      b: { label: "Cut spending", say: "The state spends less, starting with this house.", fit: broke ? 1.4 : 0.2 },
     });
     if ((S.emergency || 0) >= 40) beats.push({
       line: "Some say this government has taken too much power.",
-      a: { label: "Defend the emergency", say: "Extraordinary times. Extraordinary measures.", fit: recentAttack ? 0.5 : -1.8 },
+      a: { label: "Keep emergency", say: "Extraordinary times. Extraordinary measures.", fit: recentAttack ? 0.5 : -1.8 },
       b: { label: "Promise elections", say: "The republic will vote. Nobody is above that.", fit: 1.6, pro: true },
     });
     // the openers and the close always exist, so there are always three beats
@@ -1535,13 +1535,13 @@
     };
     const close = {
       line: "I will finish with this.",
-      a: { label: "Ask for their trust", say: "Give me your trust, and I will not waste it.", fit: a >= 40 ? 1.2 : 0.3 },
-      b: { label: "Go after the opposition", say: "The people who oppose us want this country weak.", fit: a >= 55 ? 1.5 : -1.6 },
+      a: { label: "Earn trust", say: "Give me your trust, and I will not waste it.", fit: a >= 40 ? 1.2 : 0.3 },
+      b: { label: "Attack rivals", say: "The people who oppose us want this country weak.", fit: a >= 55 ? 1.5 : -1.6 },
     };
     const filler = {
       line: "People ask me what this government is for.",
-      a: { label: "Blame the cell", say: "It is for hunting down the men who threaten you.", fit: threat ? 1.6 : -0.4 },
-      b: { label: "Talk about the future", say: "It is for your children, and their children.", fit: 0.9 },
+      a: { label: "Blame cell", say: "It is for hunting down the men who threaten you.", fit: threat ? 1.6 : -0.4 },
+      b: { label: "Look ahead", say: "It is for your children, and their children.", fit: 0.9 },
     };
     const first = beats.length ? beats.shift() : open;
     const second = beats.length ? beats.shift() : (first === open ? filler : open);

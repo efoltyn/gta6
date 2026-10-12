@@ -89,11 +89,11 @@ const DT = 1 / 30;
 const step = () => { clock += DT; for (const u of upd) u.fn(DT); };
 const reg = (id) => regs.find((r) => r.id === id);
 const CU = CBZ.custody;
-ok(!!CU && !!reg("pv-detain"), "custody.js and the President's Detain verb are loaded");
+ok(!!CU && !!reg("order-detain"), "custody.js and the President's Detain verb are loaded");
 
 // ---- 1. the word ------------------------------------------------------------------------
-ok(reg("pv-detain").canShow(citizen), "Detain shows on a citizen");
-reg("pv-detain").onSelect(citizen);
+ok(reg("order-detain").canShow(citizen), "Detain shows on a citizen");
+reg("order-detain").onSelect(citizen);
 const job = CU.jobOf(citizen);
 ok(!!job && job.officers.length === 2, "the two nearest agents take the job");
 ok(acts.length === 0, "the order is not the act: nothing priced at the word");
@@ -134,11 +134,11 @@ ok(detail.every((a) => !a._custodyJob && !a._order), "the agents are handed back
 ok(!cars.some((c) => c._custodyUnit) && maxCarD > 90, "the unit drove out of sight (" + maxCarD.toFixed(0) + " m) and is gone");
 
 // ---- 7. Stand down before the cuffs ---------------------------------------------------------
-reg("pv-detain").onSelect(bystander);
+reg("order-detain").onSelect(bystander);
 for (let i = 0; i < 6; i++) step();
 const j2 = CU.jobOf(bystander);
-ok(!!j2 && !j2.cuffed && reg("pv-call-off").canShow(bystander), "a second Detain is under way, Stand down offered");
-reg("pv-call-off").onSelect(bystander);
+ok(!!j2 && !j2.cuffed && reg("order-call-off").canShow(bystander), "a second Detain is under way, Stand down offered");
+reg("order-call-off").onSelect(bystander);
 for (let i = 0; i < 30; i++) step();
 ok(!CU.jobOf(bystander) && !bystander.restraint && !bystander.controlled && peds.includes(bystander), "Stand down before the cuffs: he is free and still there");
 

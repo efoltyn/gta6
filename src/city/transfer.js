@@ -218,7 +218,7 @@
       id: "tr:concede:" + T.seatId + ":" + day() + ":" + (T.asks | 0), via: channel(), urgent: true, topic: "election", who: person("chief"), expires: 180,
       line: "It's over, sir. They've called it for " + T.winner + ".",
       yes: { label: "Concede", run: function () { concede("chief"); }, reply: "I'll call his people." },
-      no: { label: "I won't concede", run: function () { refuse(); }, reply: "Then we need the cameras." },
+      no: { label: "Refuse", run: function () { refuse(); }, reply: "Then we need the cameras." },
     });
   }
   function concede(why) {
@@ -243,8 +243,8 @@
     offer({
       id: "tr:cameras:" + T.seatId + ":" + day(), via: channel(), urgent: true, topic: "address", who: person("press"), expires: 160,
       line: "Cameras are ready, sir. The country is waiting to hear from you.",
-      yes: { label: "Go on air", run: function () { if (CBZ.address && CBZ.address.begin) CBZ.address.begin({ reason: "refused" }); } },
-      no: { label: "Not yet", reply: "They'll be ready when you are." },
+      yes: { label: "Address", run: function () { if (CBZ.address && CBZ.address.begin) CBZ.address.begin({ reason: "refused" }); } },
+      no: { label: "Not now", reply: "They'll be ready when you are." },
     });
     return true;
   }
@@ -419,8 +419,8 @@
     offer({
       id: "tr:guard:" + T.seatId + ":" + day(), via: "phone", urgent: true, topic: "guard", who: person("general"), expires: GUARD_AUTO - GUARD_ASK,
       line: "The Capitol is overrun, sir. The Guard is on the plaza. Your orders?",
-      yes: { label: "Hold it for us", run: function () { guardOrder("president"); } },
-      no: { label: "Clear the building", run: function () { guardOrder("constitution"); } },
+      yes: { label: "Hold it", run: function () { guardOrder("president"); } },
+      no: { label: "Clear it", run: function () { guardOrder("constitution"); } },
       ifIgnored: function () { guardOrder(null); },
     });
   }
