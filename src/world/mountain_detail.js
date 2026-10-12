@@ -791,6 +791,40 @@
     return geo;
   };
 
+  /* CBZ.mtnGridSampler(geo, ox, oz) -> fn(x, z) = THE DRAWN HEIGHT, or null
+     off the grid. A massif is drawn as flat triangles between its (adaptive,
+     2-16 m) grid points; physics used to stand bodies on the analytic field
+     between them, which lies UNDER every concave triangle — in each gully,
+     cirque floor and valley a walker stood in the slope. This reads the
+     triangles themselves, off the live position buffer (a baked height is
+     the drawn height by construction), with the split mtnGridGeometry
+     emits: (a,c,b)/(b,c,d), a=(i,j) b=(i+1,j) c=(i,j+1) — the diagonal b-c
+     is u + v = 1 in cell coordinates. Two binary searches + 3 reads. */
+  CBZ.mtnGridSampler = function (geo, ox, oz) {
+    if (!geo || !geo.userData || !geo.userData.cols) return null;
+    const nx = geo.userData.cols, nz = geo.userData.rows;
+    const PA = geo.attributes.position, P0 = PA.array;
+    const xs = new Float64Array(nx), zs = new Float64Array(nz);
+    for (let i = 0; i < nx; i++) xs[i] = P0[i * 3] + ox;
+    for (let j = 0; j < nz; j++) zs[j] = P0[j * nx * 3 + 2] + oz;
+    function cell(A, n, v) {
+      let lo = 0, hi = n - 2;
+      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (A[m] <= v) lo = m; else hi = m - 1; }
+      return lo;
+    }
+    return function (x, z) {
+      if (!(x >= xs[0] && x <= xs[nx - 1] && z >= zs[0] && z <= zs[nz - 1])) return null;
+      const P = PA.array;                 // live: a CPU copy the streamer freed answers null
+      if (!P) return null;
+      const i = cell(xs, nx, x), j = cell(zs, nz, z);
+      const u = (x - xs[i]) / ((xs[i + 1] - xs[i]) || 1), v = (z - zs[j]) / ((zs[j + 1] - zs[j]) || 1);
+      const a = j * nx + i;
+      const yb = P[(a + 1) * 3 + 1], yc = P[(a + nx) * 3 + 1];
+      if (u + v <= 1) { const ya = P[a * 3 + 1]; return ya + (yb - ya) * u + (yc - ya) * v; }
+      return P[(a + nx + 1) * 3 + 1] * (u + v - 1) + yc * (1 - u) + yb * (1 - v);
+    };
+  };
+
   /* CBZ.mtnIndexLod(mesh, opts) — A FAR LOD THAT COSTS NO VERTEX MEMORY.
 
      The two massifs are ~110k-vertex grids drawn TWICE a frame (colour pass

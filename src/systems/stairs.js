@@ -115,9 +115,10 @@
                         n-th of the run, top y0 + i·(y1-y0)/n). Without it the
                         surface is the straight line from nosing to nosing,
                         which lies UNDER every tread by up to one riser: feet
-                        in the marble on every flight. Physics pays each
-                        riser out visually (_stepLag), so it still reads as
-                        a glide.
+                        in the marble on every flight. Going down, physics
+                        pays each riser out visually (_stepLag) as a glide;
+                        going up the body rises with the tread (an eased
+                        rise drew the soles inside it).
        head             clear height to keep over every tread (reported by
                         CBZ.stairs.headAudit; default 2.05)
      returns { plat, cols, link } */

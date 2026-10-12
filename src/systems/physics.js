@@ -3094,18 +3094,21 @@
           // all without a hover or a bounce. (SNAP_DOWN is the tight band that
           // makes the continuous ramp un-fall-through-able; STEP_DOWN extends it
           // for forgiving curb/landing step-downs.)
-          // A STEP IS NOT A TELEPORT. A snap up that is steeper than any ramp
-          // (a solid step, a kerb, a riser without a ramp under it) is paid
-          // out visually over ~0.1 s: the body keeps its old height and eases
-          // up (the rig reads _stepLag below), the camera follows the rig.
-          // ...and so is a step DOWN (a stepped flight's tread, a kerb): the
-          // body keeps its old height and eases down, so descending a stair
-          // is a glide and not a 17 cm drop per tread. Signed lag: + = the
-          // rig is drawn below the feet (eases up), - = above (eases down).
+          // A STEP DOWN IS NOT A DROP: on a step down (a stepped flight's
+          // tread, a kerb) the body keeps its old height and eases down, so
+          // descending a stair is a glide and not a 17 cm drop per tread.
+          // _stepLag < 0 = the rig is drawn above the feet, easing down.
+          // ONLY THE STEP DOWN IS PAID OUT. The step up used to be eased
+          // too (a + lag: the rig drawn BELOW the feet), so for ~0.1 s at
+          // every kerb, stylobate and stair riser the body stood in the
+          // surface it had just stepped onto — the owner's "feet look like
+          // they're underground". The camera already follows player.pos (the
+          // snapped height), so a rise is taken the frame it happens; a rig
+          // still gliding down from a step it left snaps up with it.
           const dUp = support - player.pos.y;
           const stepGate = Math.hypot(desX, desZ) * subDt * 1.2;
-          if (dUp > 0.06 && dUp > stepGate) {
-            player._stepLag = Math.min(0.5, (player._stepLag || 0) + dUp);
+          if (dUp > 0) {
+            if (player._stepLag < 0) player._stepLag = Math.min(0, player._stepLag + dUp);
           } else if (dUp < -0.06 && -dUp > stepGate && dUp >= -SNAP_DOWN) {
             player._stepLag = Math.max(-0.5, (player._stepLag || 0) + dUp);
           }
@@ -3210,8 +3213,9 @@
     // that puts the lowest surface exactly ON the floor, per body. The literal
     // stays as the degrade path for a rig that cannot be measured.
     const sink = (CBZ.charProneSink && CBZ.charProneSink(playerChar)) || PRONE_SINK;
-    // the step-up ease (see the ground snap): pay the lag out over ~0.1 s
-    let stepLag = player._stepLag || 0;
+    // the step-down glide (see the ground snap): pay the lag out over ~0.1 s.
+    // Never positive: a rig drawn under the floor is the bug it replaced.
+    let stepLag = Math.min(0, player._stepLag || 0);
     if (stepLag !== 0) {
       stepLag *= Math.exp(-fdt * 18);
       if (Math.abs(stepLag) < 0.004 || !player.grounded) stepLag = 0;

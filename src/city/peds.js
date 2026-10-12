@@ -5992,12 +5992,23 @@
     if (ped._occupyY > 0.2 && !ped._floorReal) return;
     const P = CBZ.player && CBZ.player.pos;
     const near = !P || ((pos.x - P.x) * (pos.x - P.x) + (pos.z - P.z) * (pos.z - P.z)) < FEET_NEAR2;
-    // a body that is far, or standing still, reuses its last sample for a while
-    if (!near || !(ped.speed > 0.05)) {
+    // a body that is far, or standing still, reuses its last sample for a
+    // while — but ONLY on the spot it was sampled. The sample is a height at
+    // an (x,z); a "standing" body is moved all the time by things that are
+    // not its walk (a punch's stagger step, a shove, a knockback slide, the
+    // crowd's depenetration), and a far one walks. Reused anywhere else it
+    // was the road's height under a man now on the kerb: the victim of a
+    // beating stood in the footway to the shins for a quarter second.
+    // (a far walker re-asks every quarter metre — a kerb is never crossed
+    // more than a stride on a stale height — instead of every frame)
+    const tol = near ? 0.03 : 0.25;
+    const still = ped._feetX != null && Math.abs(pos.x - ped._feetX) < tol && Math.abs(pos.z - ped._feetZ) < tol;
+    if ((!near || !(ped.speed > 0.05)) && still) {
       ped._feetT = (ped._feetT || 0) - (dt || 0);
       if (ped._feetT > 0 && ped._feetY != null) { if (!near) pos.y = ped._feetY; return; }
-      ped._feetT = near ? 0.25 : FEET_FAR_T;
     }
+    ped._feetT = near ? 0.25 : FEET_FAR_T;
+    ped._feetX = pos.x; ped._feetZ = pos.z;
     const M = CBZ.moves;
     if (near && M && M.feet) {
       const g = M.feet(ped, pos, dt);
@@ -7000,10 +7011,15 @@
       // never as billboard prose over a person's head.
       if (p.tag) p.tag.visible = false;
       if (CBZ.body && CBZ.body.busy && CBZ.body.busy(p)) continue;
-      if (p.ko > 0) { p.speed = 0; if (p._mv) CBZ.moves.reset(p._mv, p.pos); if (d2 < ANIM_D2) animChar(p.char, 0, dt); continue; }
+      // A man knocked out by a strike (the rig's own fall, entities/
+      // meleeposes.js — grapple stands aside for it) or wrapping a wound is
+      // still a body on the ground: the stagger that put him down carried him
+      // off the road onto the kerb, and nothing re-asked the floor under him
+      // until he got up. He lay in the footway for the whole knockout.
+      if (p.ko > 0) { p.speed = 0; if (p._mv) CBZ.moves.reset(p._mv, p.pos); settleFeet(p, dt); if (d2 < ANIM_D2) animChar(p.char, 0, dt); continue; }
       // wrapping his own wound (systems/vitals.js): he stands where he is,
       // hands on it, until it is done or somebody hits him
-      if (p._vt && CBZ.vitals && CBZ.vitals.busy(p)) { p.speed = 0; if (p._mv) CBZ.moves.reset(p._mv, p.pos); if (d2 < ANIM_D2) animChar(p.char, 0, dt); continue; }
+      if (p._vt && CBZ.vitals && CBZ.vitals.busy(p)) { p.speed = 0; if (p._mv) CBZ.moves.reset(p._mv, p.pos); settleFeet(p, dt); if (d2 < ANIM_D2) animChar(p.char, 0, dt); continue; }
       const near = d2 < ANIM_D2;
       // `important` is a SIMULATION policy, not permission to draw forever.
       // Passive guards and anybody who happens to own a gun must keep thinking
