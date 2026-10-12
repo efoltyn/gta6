@@ -501,9 +501,31 @@
     "medic":   ROW_MEDIC,
   };
 
+  /* YOUR OWN STAFF DO NOT SELL TO YOU. Every row above is a stranger's trade:
+     a price, a wage, a fare. The people who work for the President (his
+     household, his office: city/presidency.js serves(), the one answer) are
+     not his shopkeepers. His cook serves him; his groundskeeper does not put
+     him on the clock for an hour's wage. One table, one check. */
+  const ROW_SERVE_PLATE = {
+    id: "rv-serve",
+    can: function () { return !!(econ() && econ().ITEMS && econ().ITEMS[PLATE] && CBZ.cityEat) && (g.hunger || 0) < 96; },
+    label: function () { return "Eat"; },
+    run: function (p) {
+      econ().add(PLATE, 1);
+      CBZ.cityEat(PLATE);                                // the ONE eat path
+      say(p, "Right away, sir.");
+    },
+  };
+  const HOUSE_VERBS = { "estate cook": ROW_SERVE_PLATE, "line cook": ROW_SERVE_PLATE };
+  function ownStaff(p) {
+    const Pz = CBZ.presidency;
+    return !!(Pz && typeof Pz.serves === "function" && Pz.serves(p));
+  }
+
   function rowFor(p) {
     const job = jobOf(p);
     if (!job) return null;
+    if (ownStaff(p)) return HOUSE_VERBS[job] || null;
     if (ROLE_VERBS[job]) return ROLE_VERBS[job];
     return CLASS_FALL[classOf(p)] || null;
   }

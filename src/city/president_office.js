@@ -2302,7 +2302,7 @@
       } catch (e) {}
     });
   }
-  let wasCity = false;
+  let wasCity = false, runEl = 0;
   if (CBZ.onUpdate) CBZ.onUpdate(38.785, function (dt) {
     if (!inCity()) {
       if (wasCity) {
@@ -2318,6 +2318,12 @@
     if (g.state !== "playing") return;
     dt = Math.min(0.1, dt || 0);
     CLOCK += dt;
+    // A NEW RUN (mode.js zeroes the run clock): "you start at your desk" is
+    // asked again, not once per page. A President restarted in the same
+    // session used to wake wherever the save left him, out of his own office.
+    const el = g.elapsed || 0;
+    if (el < runEl) SPAWN.sessionChecked = false;
+    runEl = el;
     wire();
     wireZones();
 
@@ -2352,6 +2358,13 @@
       }
     }
   });
+
+  // THE BUS IS HEARD FROM THE START. The swearing-in fires "sworn" inside
+  // the very first run's mode reset, BEFORE any frame has ticked, and this
+  // used to subscribe lazily from its own tick: the first President of a
+  // page session missed his own oath (no desk, no folders, no Chief of
+  // Staff walking in). presidency.js parses before this file.
+  wire();
 
   // ============================================================
   //  §13  PUBLIC.

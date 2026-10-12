@@ -670,7 +670,8 @@
       if (CBZ.cityGangsReset) CBZ.cityGangsReset();
       if (CBZ.cityFamilyReset) CBZ.cityFamilyReset();   // households re-cast after peds spawn
       if (CBZ.cityFamilyTreeReset) CBZ.cityFamilyTreeReset(); // W6: fresh run starts with no kinship edges
-      if (CBZ.polityReset) CBZ.polityReset(); // P1: fresh run rebuilds the jurisdiction roster + worldDay=0
+      if (CBZ.dayRestart) CBZ.dayRestart();   // a run opens in the morning, never at the last life's hour
+      if (CBZ.polityReset) CBZ.polityReset(); // P1: fresh run rebuilds the jurisdiction roster, then puts this character's seats back
       if (CBZ.relationsReset) CBZ.relationsReset(); // X6: fresh run reseeds the affinity matrix
       // THE SEVEN SIBLINGS relationsReset WAS ALONE AMONG (found 2026-07-29 by
       // the trash census). Every one of these modules exports a reset and this
@@ -686,6 +687,10 @@
       if (CBZ.migrationReset) CBZ.migrationReset(); // borders reopen
       if (CBZ.approvalReset) CBZ.approvalReset();   // you are nobody again
       if (CBZ.govReset) CBZ.govReset();             // policies back to default
+      // the presidency's own book, back to THIS character's (after polity has
+      // put the seats back): before the origin runs, so a swearing-in below
+      // is the last word on it, never a later frame's hydrate
+      if (CBZ.presidencyReset) CBZ.presidencyReset();
       if (CBZ.cityBirthsReset) CBZ.cityBirthsReset();     // W11: fresh cadence timer for the birth tick
       if (CBZ.cityMarriageReset) CBZ.cityMarriageReset(); // W13: fresh run starts with zero marriage strain
       if (CBZ.citySocialReset) CBZ.citySocialReset();

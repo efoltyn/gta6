@@ -83,7 +83,15 @@
   // change above moves every timetable and nothing has to be retyped.
   CBZ.dayCycleSeconds = cycleSecs;
   CBZ.hourSeconds = function () { return cycleSecs() / 24; };
-  let t = 0.18;             // start mid-morning
+  const START_PHASE = 0.18; // mid-morning (~10:20)
+  let t = START_PHASE;
+  /* EVERY RUN STARTS IN THE MORNING, not only the first one of a page. The
+     sky clock was set once at parse and then simply ran on across runs, so a
+     story restarted forty minutes into a session ("sworn in this morning")
+     opened at whatever hour the last life had reached: often night, and a
+     new-moon night is a black sky. A mode that starts a run calls this; the
+     pace clock (gameplay rhythm) is untouched. */
+  CBZ.dayRestart = function () { t = START_PHASE; };
   // the sky clock, exposed for the multiplayer world save (net/netpersist.js):
   // no arg reads the phase 0..1; a number sets it (host restoring a saved day)
   CBZ.dayPhase = function (v) { if (v != null && isFinite(v)) t = (((+v) % 1) + 1) % 1; return t; };

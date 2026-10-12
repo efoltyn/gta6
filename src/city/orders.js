@@ -57,7 +57,14 @@
   }
   // who takes orders from you: the people you pay, lead or are protected by
   function worksForYou(p) {
-    if (!p || p.dead || p.player || p.vendor || p.kind === "cop") return false;
+    if (!p || p.dead || p.player || p.vendor) return false;
+    // THE PRESIDENT'S OWN GUNS: his detail, the Mansion's gate and roof and
+    // wall walk, the motorcade's agents, the curfew's uniforms. One answer,
+    // presidency.js's (it used to be his detail alone, so the officers at his
+    // own gate offered him nothing at all).
+    const Pz = CBZ.presidency;
+    if (Pz && typeof Pz.serves === "function" && Pz.serves(p) === "security") return true;
+    if (p.kind === "cop") return false;
     // YOUR DOG is a protector body in this same order system (city/dogs.js)
     if (p.kind === "dog") return !!p.tamed;
     if (p._iOnly && !p._protUnit) return false;      // a staffer is his job, not your muscle
@@ -66,7 +73,6 @@
     if (p._protUnit && CBZ.protection && CBZ.protection.get) {
       let d = null; try { d = CBZ.protection.get(p._protUnit); } catch (e) { d = null; }
       if (d && d.principal && d.principal.kind === "player") return true;
-      if (d && d.id === presDetailId()) return true;
     }
     return false;
   }
@@ -132,6 +138,9 @@
     LIVE.forEach(function (a) {
       const o = a._order;
       if (!o || a.dead) { clear(a); return; }
+      // a Mansion post went off shift with the compound behind you (its body
+      // left the world): nothing is left to order
+      if (a._protUnit === "mansion" && CBZ.cityPeds && CBZ.cityPeds.indexOf(a) < 0) { clear(a); return; }
       o.t += dt || 0;
       // HOLD HERE: he keeps the spot you gave him (back to it if pushed off)
       if (o.kind === "hold") { follow(a, o.spot, 0.7, dt); return; }
@@ -609,8 +618,13 @@
     // HOLD / FOLLOW: one of your men keeps a spot (a door, a corridor), or
     // comes back to you. A follower (your crew walking with you) holds through
     // the follower engine (boarding.js "wait"), everyone else through _order.
+    // A MAN ON HIS OWN POST (the Mansion's gate, its wall walk): he is
+    // already holding it, so his one decision is to leave it and walk with
+    // the President. Stand down (above) sends him back: protection.js hands
+    // his body to this file while the order stands, and takes it back after.
+    const posted = function (p) { return !!(p && !p.dead && p._protUnit === "mansion" && p._protRole !== "counter-sniper" && !p._order); };
     I.register("ped", { id: "order-hold", prio: 27, campaignSafe: true, anyone: true,
-      canShow: function (p) { return on(p) && !(p._order && p._order.kind === "hold") && !p._cbzWait && !p._cbzSeat; }, label: "Hold",
+      canShow: function (p) { return on(p) && !posted(p) && !(p._order && p._order.kind === "hold") && !p._cbzWait && !p._cbzSeat; }, label: "Hold",
       onSelect: function (a) {
         if (a.companion && CBZ.followerOrder && CBZ.followerOrder(a, "wait", {})) { say(a, "I'll hold here."); return; }
         if (!a._order) a._orderWas = { companion: !!a.companion };
@@ -622,10 +636,19 @@
       canShow: function (p) {
         if (!p || p.dead) return false;
         if ((p._order && p._order.kind === "hold") || (p._cbzWait && on(p))) return true;
+        if (posted(p) && on(p)) return true;
         // a gang member at his own post walks with you on the word
         return !p.companion && !p._order && !!(CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p));
       }, label: "Follow",
       onSelect: function (a) {
+        if (a._protUnit === "mansion") {
+          // off his post and at the President's shoulder: the guard order
+          // (follows him, fights whoever goes for him)
+          if (a._order) clear(a);
+          give(a, "guard", (CBZ.city && CBZ.city.playerActor) || CBZ.player, true);
+          say(a, "With you, sir.");
+          return;
+        }
         if (a._cbzWait && CBZ.followerOrder) CBZ.followerOrder(a, "follow", {});
         if (a._order) clear(a);
         if (CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(a)) { a.companion = true; a.guard = null; a.rage = null; }

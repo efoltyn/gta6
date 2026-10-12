@@ -344,8 +344,15 @@
     };
   }
   function st() { if (!g.presWorld) g.presWorld = fresh(); return g.presWorld; }
+  /* A RUN STARTS FROM THE CHARACTER'S OWN PRESIDENCY, synchronously.
+     mode.js calls this on every run start (after polity has put the seats
+     back), so the state below is the ledger's, never the last run's leftovers
+     (a new life used to inherit a pending arrest or an impeachment) and never
+     wiped until a later frame's hydrate happens to notice the ledger. */
   function reset() {
     g.presWorld = fresh(); teardownRoom();
+    _hydrated = null;
+    hydrate();
     ballotPending = false; _einfo = null; _einfoKey = "";
     RAID.phase = null; RAID.agents = []; RAID.car = null; RAID.target = null;
     ATT.armed = null; OCC.done = {}; OCC.arena = null; _safehouses = null;
@@ -391,15 +398,22 @@
   }
   function presidencyBegin() {
     if (!on()) return null;
-    const S = st();
     const rec = countryRecAny();
     if (!rec) return null;
-    let ok = false;
-    if (CBZ.cityRun && CBZ.cityRun.swearIn) {
+    // the seat is already his (the world this life starts in has him in it):
+    // that IS the swearing-in, not a refusal
+    const held = seat();
+    let ok = !!(held && held.id === rec.id);
+    if (!ok && CBZ.cityRun && CBZ.cityRun.swearIn) {
       const r = CBZ.cityRun.swearIn(rec.id, { quiet: true });
       ok = !!(r && r.ok);
     }
     if (!ok) return null;                       // no parallel holder write, ever
+    // sworn in THIS MORNING: a new presidency, not the last one's pending
+    // arrest, impeachment day or lockdown
+    g.presWorld = fresh();
+    SEAM.lock.active = false; SEAM.lock.reason = null;
+    const S = st();
     S.began = true;
     S.wasPresident = true;
     S.lastSeatId = rec.id;
@@ -426,6 +440,27 @@
     const L = CBZ.govComplexes;
     if (!Array.isArray(L)) return null;
     for (let i = 0; i < L.length; i++) if (L[i] && L[i].id === "execmansion" && L[i].rect) return L[i];
+    return null;
+  }
+  /* THE PRESIDENT'S PEOPLE — the ONE answer to "does this person work for
+     the man in the chair". Every file that treats the President differently
+     from a stranger asks this instead of keeping its own list of flags:
+     city/orders.js (who takes his orders) and city/roleverbs.js (who never
+     sells him anything) today.
+       "security"  his detail, the Mansion's posts (gate, roof, wall walk),
+                   the motorcade's agents, the curfew's uniforms
+       "staff"     the office (Chief of Staff, press secretary, driver), the
+                   Situation Room's officers and the Mansion's household
+     null when the player holds no seat: then they are the state's, and the
+     state does not work for him. */
+  function serves(p) {
+    if (!p || p.dead || p.player || p.isPlayer) return null;
+    const h = seat();
+    if (!h) return null;
+    if (p._protUnit === "mansion" || p._protUnit === "off_" + h.id || p._occupySrc === "motorcade" || p._presPublic) return "security";
+    if (p._presStaff || p._presOfficer) return "staff";
+    const site = mansionSite();
+    if (site && p._govSite === site.id && p !== site.actor) return "staff";
     return null;
   }
   function agencySite() {
@@ -3361,6 +3396,7 @@
       return out;
     },
     seat: seat,
+    serves: serves,
     // THE SEAM (§10) — stable names other modes (Hitman) code against.
     current: current,
     schedule: schedule,

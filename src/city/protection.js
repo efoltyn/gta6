@@ -667,6 +667,37 @@
     if (CBZ.cityFeed) CBZ.cityFeed("" + (ped.name || "A guard") + " steps aside for " + SUBORN_WINDOW + "s.", "#7ed957");
     return { ok: true, cost, seconds: SUBORN_WINDOW };
   }
+  function subornPrice(ped) {
+    const rel = CBZ.cityRel ? CBZ.cityRel(ped) : null;
+    return Math.round(SUBORN_BASE_COST * (1 + Math.max(0, (rel && rel.loyalty) || 0) / 100));
+  }
+  /* THE GATE, FOR EVERYBODY WHO IS NOT THE PRESIDENT. A uniformed officer at
+     the Mansion's gate is on post (`_iOnly`: no street verbs), and to a
+     visitor his one open question is the envelope: Bribe, and he steps aside
+     for SUBORN_WINDOW seconds (suborn() above, the same price and the same
+     fear+respect bar as any detail man) or he says no to your face. The
+     President's verbs on the same man are city/orders.js's (Follow / Stand
+     down): he works for the President. */
+  function wireGateVerbs() {
+    const I = CBZ.interactions;
+    if (!I || !I.register) return false;
+    const presHolds = function () {
+      const Pz = pres();
+      try { return !!(Pz && typeof Pz.seat === "function" && Pz.seat()); } catch (e) { return false; }
+    };
+    I.register("ped", { id: "gate-bribe", prio: 30, campaignSafe: true, anyone: true,
+      canShow: function (p) {
+        if (!p || p.dead || p._protUnit !== "mansion" || p._protRole !== "gate" || (p._subornT || 0) > 0 || presHolds()) return false;
+        return !!(CBZ.city && CBZ.city.canAfford && CBZ.city.canAfford(subornPrice(p)));
+      },
+      label: function (p) { return "Bribe $" + subornPrice(p).toLocaleString(); },
+      onSelect: function (p) {
+        const r = suborn(p);
+        say(p, r.ok ? "You have thirty seconds." : "Not for any money. Step back.", r.ok ? "#ffe0a8" : "#ff9aa2");
+      } });
+    return true;
+  }
+  if (!wireGateVerbs()) { const tw = setInterval(function () { if (wireGateVerbs()) clearInterval(tw); }, 250); }
 
   // ============================================================
   //  GANGS — read-only adapter, NOT a create()d record (see header: gangs.js
@@ -2092,6 +2123,9 @@
       for (let i = 0; i < MS.units.length; i++) {
         const u = MS.units[i];
         if (!u.ped || u.ped.dead) continue;
+        // the President took him off his post (city/orders.js Follow): that
+        // file walks him until Stand down, then the post brain has him again
+        if (u.ped._order) continue;
         if (u.role === "gate") driveGateUnit(u, dt);
         else if (u.role === "patrol") drivePatrolUnit(u, dt);
         else driveRoofUnit(u, dt);

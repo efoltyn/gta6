@@ -4432,10 +4432,13 @@
       // THE RESIDENCE HALF OF "residence AND workplace". Five words per job,
       // no coordinates — §5b derives every station from the rect, the gate
       // and the threshold this builder already published.
+      // NO HOUSEHOLD CHAUFFEUR HERE. The President's driver is his office's
+      // (city/president_staff.js posts him at the state car: Drive, free,
+      // the real motorcade). A second one on this motor court sold the
+      // President a $2,000 teleport across town in his own driveway.
       household: [
         { job: "butler", at: "door", pose: "foldarms", outfit: 0x23262c },
         { job: "estate cook", at: "yard", outfit: 0xe8eaec },
-        { job: "chauffeur", at: "court", pose: "foldarms", outfit: 0x2b2f36 },
         { job: "groundskeeper", at: "garden", outfit: 0x4f6a3a },
         { job: "nanny", at: "yard", outfit: 0xc8d4e0 },
       ],
@@ -5927,6 +5930,10 @@
         // guard and must never read as one. Unarmed, low aggression, and
         // powerReactionTo is untouched because we declare no principal here.
         opts: { wealth: 0.3, aggr: 0.08, armed: false, outfit: h.outfit || 0xd8dce0 },
+        // whose house they keep: the gate waves them through (protection.js)
+        // and the man who holds this seat is their employer, never their
+        // customer (presidency.js serves())
+        after: function (ped) { ped._govSite = site.id; },
       });
       n++;
     }

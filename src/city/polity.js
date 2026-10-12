@@ -495,11 +495,23 @@
   }
   // fresh run: rebuild every record to its seed values AND zero worldDay —
   // see header ("worldDay does NOT survive reset").
+  /* ...AND THEN THE CHARACTER'S OWN WORLD COMES STRAIGHT BACK. mode.js runs
+     this on every run start, AFTER worldstate has loaded the character's
+     ledger. The seats used to come back only on the next frame's hydrate
+     tick, and only if the ledger OBJECT had changed since the last hydrate:
+     restart the same character in one session and every seat stayed wiped
+     (a sitting President woke up holding nothing, an NPC President was put
+     back on the perron and nobody treated him as anything); switch character
+     at the title and the outgoing ledger was committed with the wiped seats
+     before the tick ever ran. A fresh life has no ledger here (death and
+     newlife null it), so it still gets the seed world. */
   function reset() {
     buildRecords();
     day = 0;
     lastPhase = null;
     lastPace = null;
+    _hydratedLedger = null;
+    hydrateFromLedger();
   }
 
   buildRecords(); // boot-time build so CBZ.polity.of/get/etc. work immediately
