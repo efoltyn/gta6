@@ -197,8 +197,7 @@
   const UPKEEP_SOLDIER = 0.5, UPKEEP_PLANE = 15, UPKEEP_MISSILE = 3;
   const ESCALATION_T = 0.6, WAR_ROLL_CHANCE = 0.35;
   const ALLY_T = 40, ALLY_INSULT_MAG = 10;
-  const FRONT_MAX_SHIFT = 0.08;
-  const SOLDIER_RATE = 6, MISSILE_RATE = 2, PLANE_RATE = 1;   // matériel lost/day per side, × war.intensity
+  const MISSILE_RATE = 2, PLANE_RATE = 1;   // matériel spent/day per side, × war.intensity (soldiers die in battles: city/frontline.js)
   const FATIGUE_T = 100, FATIGUE_BASE = 3, DEM_FATIGUE_MUL = 1.6, MON_FATIGUE_MUL = 1.1, DEFAULT_MISERY = 0.3;
   const CONSCRIPT_FLOOR_FRAC = 0.45, CONSCRIPT_BATCH_FRAC = 0.12, CONSCRIPT_COOLDOWN_DAYS = 3;
   const CONSCRIPT_ECON_HIT = 0.06, CONSCRIPT_COHORT_HIT = 0.04, CONSCRIPT_RELEASE_DAYS = 6;
@@ -479,19 +478,6 @@
   }
 
   // ============================================================
-  //  FRONT RESOLUTION — position 0..1 pushes toward the weaker side.
-  // ============================================================
-  function tickFront(front, war, milA, milB) {
-    if (front.collapsedSide) return;
-    const cpA = combatPower(milA), cpB = combatPower(milB);
-    const denom = cpA + cpB || 1;
-    const delta = FRONT_MAX_SHIFT * (cpA - cpB) / denom;
-    front.position = clampNum(0, 1, front.position + delta);
-    if (front.position <= 0) front.collapsedSide = war.sides[0];
-    else if (front.position >= 1) front.collapsedSide = war.sides[1];
-  }
-
-  // ============================================================
   //  FATIGUE — grows daily, faster for democracies + the miserable side.
   // ============================================================
   function tickFatigue(war, id) {
@@ -693,19 +679,20 @@
     const milA = ensureMilitary(aId), milB = ensureMilitary(bId);
 
     // THE GROUND WAR IS A BATTLE (city/frontline.js): the day's fight on the
-    // front (NPC War's, watched or headless) decides the soldiers lost and the
-    // ground; the even-losses dice and the ratio slide only run without one.
-    const fought = !!(CBZ.frontline && CBZ.frontline.dayOfBattle && CBZ.frontline.dayOfBattle(war, day));
+    // front is fought in the world by the battle core (city/army.js), and the
+    // bodies on the ground are the soldiers lost; the ground moves by how it
+    // went (frontline apply -> pushFront). Nothing about the ground war is
+    // rolled here any more. The day's missiles and sorties are spent at the
+    // war's intensity.
+    if (CBZ.frontline && CBZ.frontline.dayOfBattle) CBZ.frontline.dayOfBattle(war, day);
     if (war.ended) return;
-    const sLoss = fought ? 0 : Math.round(SOLDIER_RATE * war.intensity);
     const mLoss = Math.round(MISSILE_RATE * war.intensity);
     const pLoss = Math.round(PLANE_RATE * war.intensity);
-    applyCasualties(aId, milA, sLoss, mLoss, pLoss);
-    applyCasualties(bId, milB, sLoss, mLoss, pLoss);
+    applyCasualties(aId, milA, 0, mLoss, pLoss);
+    applyCasualties(bId, milB, 0, mLoss, pLoss);
 
     for (let i = 0; i < war.fronts.length; i++) {
       const f = war.fronts[i];
-      if (!f.collapsedSide && !fought) tickFront(f, war, milA, milB);
       if (f.collapsedSide) { endWar(war.id, f.collapsedSide, "front collapse"); return; }
     }
 
@@ -767,7 +754,7 @@
   function pushFront(w, attackerId, shift) {
     const f = w.fronts[0];
     if (!f || f.collapsedSide) return;
-    // position -> 1 means sides[0] is winning (tickFront's own sign)
+    // position -> 1 means sides[0] is winning
     f.position = clampNum(0, 1, f.position + (w.sides[0] === attackerId ? shift : -shift));
     if (f.position <= 0) f.collapsedSide = w.sides[0];
     else if (f.position >= 1) f.collapsedSide = w.sides[1];
@@ -888,14 +875,14 @@
     pushFront: function (warId, winnerId, shift) { const w = warOf(warId); if (w && !w.ended) pushFront(w, winnerId, shift); },
     reset: reset,
     TUNING: {
-      GOV_MUL: Object.assign({}, GOV_MUL), SOLDIER_RATE: SOLDIER_RATE, MISSILE_RATE: MISSILE_RATE, PLANE_RATE: PLANE_RATE,
+      GOV_MUL: Object.assign({}, GOV_MUL), MISSILE_RATE: MISSILE_RATE, PLANE_RATE: PLANE_RATE,
       UPKEEP_SOLDIER: UPKEEP_SOLDIER, UPKEEP_PLANE: UPKEEP_PLANE, UPKEEP_MISSILE: UPKEEP_MISSILE,
       FATIGUE_T: FATIGUE_T, FATIGUE_BASE: FATIGUE_BASE, DEM_FATIGUE_MUL: DEM_FATIGUE_MUL, MON_FATIGUE_MUL: MON_FATIGUE_MUL,
       CONSCRIPT_FLOOR_FRAC: CONSCRIPT_FLOOR_FRAC, CONSCRIPT_BATCH_FRAC: CONSCRIPT_BATCH_FRAC, CONSCRIPT_APPROVAL: Object.assign({}, CONSCRIPT_APPROVAL),
       LOSING_RATIO: LOSING_RATIO, DESPERATE_DAYS_T: DESPERATE_DAYS_T, NATIONALIZE_FRAC: NATIONALIZE_FRAC, CHILD_SOLDIER_FRAC: CHILD_SOLDIER_FRAC,
       COST_PER_PLANE: COST_PER_PLANE, COST_PER_MISSILE: COST_PER_MISSILE, PROC_BASE: PROC_BASE,
       REPARATIONS_FRAC: REPARATIONS_FRAC, REPARATIONS_DAYS: REPARATIONS_DAYS, CONSCRIPT_RELEASE_DAYS: CONSCRIPT_RELEASE_DAYS,
-      FRONT_MAX_SHIFT: FRONT_MAX_SHIFT, ESCALATION_T: ESCALATION_T,
+      ESCALATION_T: ESCALATION_T,
     },
     // harness/test-only hooks — not part of the public contract (mirrors
     // regimes.js's own _forceGov / militia.js's own _forceCrackdown precedent).

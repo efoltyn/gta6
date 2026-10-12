@@ -701,7 +701,6 @@
       { job: "Pilot", x: 0, y: 1.60, z: 2.25, yaw: 0, cushionH: 0.42, floorBelow: 0.42 },
       { job: "Copilot/Gunner", x: 0, y: 1.18, z: 3.82, yaw: 0, cushionH: 0.42, floorBelow: 0.42 },
     ];
-    root._milRt = { surf: [], props: [], glow: null, gear: null, cr: 0, cp: 0, cy: 0, r0: null, p0: 0, h0: 0 };
     if (ctx && (ctx.nation || ctx.flag)) rig.setNation(ctx.nation || ctx.flagId, ctx.flag);
     tick(R, true, 0, null);
     return { group: root, rig: rig, footW: DIM.rotorSpan, footL: DIM.length, height: DIM.height };

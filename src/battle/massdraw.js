@@ -70,6 +70,51 @@ CBZ.massDraw = (function () {
       if (prop) prop.traverse(function (o) { if (o.isMesh) o.userData.cgGear = 2; });
     }
   }
+  /* the per-row arrays follow the store's capacity */
+  D.grow = function () {
+    const n = STORE.cap;
+    if (D.look.length >= n) return;
+    const g = function (A, T) { const b = new T(n); b.set(A); return b; };
+    D.look = g(D.look, Int32Array); D.gear = g(D.gear, Float32Array); D.ph = g(D.ph, Float32Array); D.clipOf = g(D.clipOf, Uint8Array);
+  };
+  /* WHO ROW r LOOKS LIKE: the same man the rig is when he is promoted */
+  function lookRow(r) {
+    const G = CBZ.crowdGPU, C = STORE.cols, cache = D.cache;
+    if (C.kind[r] !== 0) { D.look[r] = -1; return; }
+    const team = C.side[r] ? "blue" : "red", i = C.spawnI[r];
+    const tr = trainingOf(trainAt(team, i));
+    const u = MASS.unitOf[C.unit[r]] || {};
+    // his kit: the role he would have on the rig (combatkit.js), and his
+    // army's camouflage as the cloth's mean colour
+    const K = CBZ.combatKit, nat = nationOf(team);
+    const role = K ? K.roleFor({ tier: tr.id, wid: u.wid, i: i, nation: nat }) : null;
+    const kitted = !!(K && role && K.LOADOUTS[role] && K.LOADOUTS[role].carrier === "plates");
+    let U = uniformFor(team, tr.id, i);
+    if (K && role && role !== "civilian" && role !== "militia") {
+      const cl = K.crowdLook({ loadout: role, nation: nat });
+      U = { torso: K.lin(cl.shirt), arms: K.lin(cl.sleeve), legs: K.lin(cl.pants), shoes: K.lin(cl.shoes) };
+    }
+    let skin = 0xc9a07a, hair = 0x2a1f18;
+    const v = i * 2 + (team === "red" ? 0 : 1);
+    if (CBZ.heritageRoll) { try { const h = CBZ.heritageRoll(null, "cast|" + tr.role + "|" + v); if (h) { skin = h.skin; hair = h.hair; } } catch (e) {} }
+    const key = skin + "|" + hair + "|" + U.torso + "|" + U.legs + "|" + U.arms + "|" + U.shoes;
+    let lk = cache.get(key);
+    if (lk == null) {
+      lk = G.look({ build: "m", skin: skin, hair: hair, shirt: U.torso, sleeve: U.arms != null ? U.arms : U.torso,
+        pants: U.legs != null ? U.legs : 0x3a4152, shoes: U.shoes != null ? U.shoes : 0x2a2622 });
+      cache.set(key, lk);
+    }
+    D.look[r] = lk;
+    const N = K && kitted ? (role === "swat" ? K.SWAT : K.nation(nat)) : null;
+    D.gear[r] = G.gearCode({ helmet: N && N.helmetHex != null ? K.lin(N.helmetHex) : null, rifle: u.wid && u.wid !== "fists", kit: kitted });
+    D.ph[r] = (r * 0.618) % 1;
+  }
+  /* rows a host added after begin (MASS.addRows): their looks */
+  D.added = function (rows) {
+    if (!D.on) return;
+    D.grow();
+    for (let k = 0; k < rows.length; k++) lookRow(rows[k]);
+  };
   D.begin = function () {
     D.on = false;
     const G = CBZ.crowdGPU;
@@ -83,43 +128,15 @@ CBZ.massDraw = (function () {
       idle: G.clip("rifleIdle"), walk: G.clip("rifleWalk"), run: G.clip("rifleRun"),
       crouch: G.clip("crouchRun"), down: G.clip("down"),
     };
-    const n = STORE.cap;
-    D.look = new Int32Array(n); D.gear = new Float32Array(n); D.ph = new Float32Array(n);
-    D.clipOf = new Uint8Array(n);
-    const C = STORE.cols, cache = new Map();
-    for (let r = 0; r < STORE.rows; r++) {
-      if (C.kind[r] !== 0) { D.look[r] = -1; continue; }
-      const team = C.side[r] ? "blue" : "red", i = C.spawnI[r];
-      const tr = trainingOf(team === "red" ? SET.redT : SET.blueT);
-      const u = MASS.unitOf[C.unit[r]] || {};
-      // his kit: the role he would have on the rig (combatkit.js), and his
-      // army's camouflage as the cloth's mean colour
-      const K = CBZ.combatKit, nat = nationOf(team);
-      const role = K ? K.roleFor({ tier: tr.id, wid: u.wid, i: i, nation: nat }) : null;
-      const kitted = !!(K && role && K.LOADOUTS[role] && K.LOADOUTS[role].carrier === "plates");
-      let U = uniformFor(team, tr.id, i);
-      if (K && role && role !== "civilian" && role !== "militia") {
-        const cl = K.crowdLook({ loadout: role, nation: nat });
-        U = { torso: K.lin(cl.shirt), arms: K.lin(cl.sleeve), legs: K.lin(cl.pants), shoes: K.lin(cl.shoes) };
-      }
-      let skin = 0xc9a07a, hair = 0x2a1f18;
-      const v = i * 2 + (team === "red" ? 0 : 1);
-      if (CBZ.heritageRoll) { try { const h = CBZ.heritageRoll(null, "cast|" + tr.role + "|" + v); if (h) { skin = h.skin; hair = h.hair; } } catch (e) {} }
-      const key = skin + "|" + hair + "|" + U.torso + "|" + U.legs + "|" + U.arms + "|" + U.shoes;
-      let lk = cache.get(key);
-      if (lk == null) {
-        lk = G.look({ build: "m", skin: skin, hair: hair, shirt: U.torso, sleeve: U.arms != null ? U.arms : U.torso,
-          pants: U.legs != null ? U.legs : 0x3a4152, shoes: U.shoes != null ? U.shoes : 0x2a2622 });
-        cache.set(key, lk);
-      }
-      D.look[r] = lk;
-      const N = K && kitted ? (role === "swat" ? K.SWAT : K.nation(nat)) : null;
-      D.gear[r] = G.gearCode({ helmet: N && N.helmetHex != null ? K.lin(N.helmetHex) : null, rifle: u.wid && u.wid !== "fists", kit: kitted });
-      D.ph[r] = (r * 0.618) % 1;
-    }
+    D.look = new Int32Array(0); D.gear = new Float32Array(0); D.ph = new Float32Array(0); D.clipOf = new Uint8Array(0);
+    D.cache = new Map();
+    D.grow();
+    for (let r = 0; r < STORE.rows; r++) lookRow(r);
+    // a host that adds rows as it goes (MASS.open) says how many to make room for
+    const cap = Math.max(1024, STORE.rows, D.capHint || 0);
     D.near = G.layer({ name: "npcwar-near", cap: 8192 });
-    D.far = G.layer({ name: "npcwar-far", cap: Math.max(1024, STORE.rows) });
-    D.dead = G.layer({ name: "npcwar-dead", cap: Math.max(1024, STORE.rows) });
+    D.far = G.layer({ name: "npcwar-far", cap: cap });
+    D.dead = G.layer({ name: "npcwar-dead", cap: cap });
     D.applySettings();
     D.on = true;
     return true;

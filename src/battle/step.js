@@ -75,7 +75,7 @@ function stepMan(m, sdt) {
        swing thinks it is. */
     if (CBZ.apeOwns && CBZ.apeOwns(m)) {
       m.resT = (m.resT || 0) - sdt;
-      if (m.resT <= 0) { m.resT = 0.25; CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8); }
+      if (m.resT <= 0) { m.resT = 0.25; HOST.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8); }
       return;
     }
     const bt = m.tgt;
@@ -88,7 +88,7 @@ function stepMan(m, sdt) {
         // used to skip the standing resolve for the whole swing — measured
         // as one gorilla probed inside an arena crate mid-maul
         m.resT = (m.resT || 0) - sdt;
-        if (m.resT <= 0) { m.resT = 0.25; CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8); }
+        if (m.resT <= 0) { m.resT = 0.25; HOST.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8); }
         return;
       }
     } else if (m._atkAnim != null && m._atkAnim >= 0 && CBZ.creatureEndAttack) {
@@ -153,7 +153,7 @@ function stepMan(m, sdt) {
     const ox = m.pos.x, oz = m.pos.z;
     m.pos.x += nx * spd * sdt;
     m.pos.z += nz * spd * sdt;
-    CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
+    HOST.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
     const got = Math.hypot(m.pos.x - ox, m.pos.z - oz);
     const want = spd * sdt;
     if (want > 0.001 && got < want * 0.25 && !m.beast && tryVault(m, nx, nz)) {
@@ -175,13 +175,13 @@ function stepMan(m, sdt) {
     m.resT = (m.resT || 0) - sdt;
     if (m.resT <= 0) {
       m.resT = 0.25;
-      CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
+      HOST.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
     }
   }
   m.speed = spd;
   if (m.windedT > 0) m.windedT -= sdt;
-  if (MAP.water) stepDepth(m, sdt);
-  m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
+  if (HOST.water) stepDepth(m, sdt);
+  m.pos.y = HOST.bodyY(m, m.pos.x, m.pos.z);
 
   // face the fight when there is one, else the walk
   const tgt = m.tgt;

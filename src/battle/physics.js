@@ -94,6 +94,9 @@ function pickTarget(m, range) {
   }
   // a tiered battle: the rows round the ring are marks too, handed over as ghosts
   if (MASS.on && _cand.length < 24) MASS.cands(m, range, _cand, SPOT);
+  // the host's own people who are in this war (Gang City: the player, when
+  // this side is hostile to him): pushed as (mark, d2) pairs like the rest
+  if (HOST.targets && _cand.length < 24) HOST.targets(m, range, _cand, SPOT);
   if (!_cand.length) return null;
   // nearest first, then the first four get asked whether they can be seen
   let bestO = null, bestD = 1e18;
@@ -277,7 +280,7 @@ function push2(m, o, k) {
 function shove(m, ux, uz, amt) {
   const x0 = m.pos.x, z0 = m.pos.z;
   m.pos.x += ux * amt; m.pos.z += uz * amt;
-  CBZ.micro.resolveCircle(m.pos, (m.rad || 0.45) + 0.05, m.pos.y, 1.8);
+  HOST.resolveCircle(m.pos, (m.rad || 0.45) + 0.05, m.pos.y, 1.8);
   return (m.pos.x - x0) * ux + (m.pos.z - z0) * uz;
 }
 /* ---- THE PINNED PAIR, and it is why walls were the last overlap left ----
@@ -458,6 +461,22 @@ function fineNear(x, z, r, out) {
    22 500 cells, which Dial's bucket queue clears in about a millisecond.
    The blocked map is built ONCE, because buildings do not move; the field
    is re-solved on a slow tick, because men do. */
+/* IS THIS SPOT INSIDE A WALL. The host's colliders (HOST; while an arena is
+   still being raised there is no HOST yet and the page's microboot answers):
+   exact on a turned box, a kerb is not a wall. The spawn spiral, the nav map
+   and the morale's run-away search all ask it. */
+const _fs = [];
+function blockedAt(x, z) {
+  const H = HOST || CBZ.micro;
+  const cols = H.queryColliders(x, z, 0.9, _fs);
+  for (let c = 0; c < cols.length; c++) {
+    const b = cols[c];
+    if (!H.colliderContains(b, x, z, 0.55)) continue;   // exact on a turned box
+    if (b.y0 != null && b.y1 != null && (b.y1 < 0.35 || b.y0 > 1.7)) continue;  // a kerb is not a wall
+    return true;
+  }
+  return false;
+}
 const NAV = { cell: 4, x0: 0, z0: 0, w: 0, h: 0, block: null, on: false,
   dist: { red: null, blue: null }, at: { red: -9, blue: -9 }, solves: 0, blocked: 0 };
 function navBuild(cx, cz, radius) {
@@ -706,7 +725,7 @@ function stepKnock(sdt) {
     }
     const ox = b.pos.x, oz = b.pos.z;
     b.pos.x += kvx * sdt; b.pos.z += kvz * sdt;
-    CBZ.micro.resolveCircle(b.pos, b.rad || 0.45, b.pos.y, 1.8);
+    HOST.resolveCircle(b.pos, b.rad || 0.45, b.pos.y, 1.8);
     b.resT = 0;
     const want = sp * sdt, got = Math.hypot(b.pos.x - ox, b.pos.z - oz);
     if (sp > 4 && got < want * 0.5) {
@@ -769,7 +788,7 @@ function stepTossed(t, sdt) {
   if (t.group) t.group.rotation.x += sdt * T.spin;
   // the walls: swept by the same resolve the walkers answer to
   const vh = Math.hypot(T.vx, T.vz), want = vh * sdt;
-  CBZ.micro.resolveCircle(t.pos, t.rad || 0.45, t.pos.y, 1.8);
+  HOST.resolveCircle(t.pos, t.rad || 0.45, t.pos.y, 1.8);
   if (want > 0.02 && Math.hypot(t.pos.x - ox, t.pos.z - oz) < want * 0.5) {
     PHYS.audit.wallSlams++;
     const dmg = impactDmg(t, vh);
@@ -801,7 +820,7 @@ function stepTossed(t, sdt) {
       break;
     }
   }
-  const g = MAP.bodyY(t, t.pos.x, t.pos.z);
+  const g = HOST.bodyY(t, t.pos.x, t.pos.z);
   if ((t.pos.y <= g && T.vy < 0) || T.age > 12) {
     t.pos.y = g;
     PHYS.audit.landings++;
