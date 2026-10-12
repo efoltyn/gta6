@@ -1247,18 +1247,18 @@
     if (p._footballWired || !CBZ.interactions || !CBZ.interactions.registerFor) return;
     p._footballWired = true;
     CBZ.interactions.registerFor(p, {
-      id: "football-strike", slot: "e", prio: 46, campaignSafe: true, label: "Order airstrike",
+      id: "football-strike", slot: "e", prio: 46, campaignSafe: true, label: "Airstrike",
       canShow: function () { return FB.ped === p && !p.dead && !!nation(); },
       onSelect: function () { aideSay(p, order("strike", { aim: true })); },
     });
     CBZ.interactions.registerFor(p, {
-      id: "football-nuke", hold: true, prio: 45, campaignSafe: true, label: "Order nuke",
+      id: "football-nuke", hold: true, prio: 45, campaignSafe: true, label: "Nuke",
       // only while the country has BOTH a bomber on its pad and a warhead
       canShow: function () { return FB.ped === p && !p.dead && hasMeans("nuke"); },
       onSelect: function () { aideSay(p, order("nuke")); },
     });
     CBZ.interactions.registerFor(p, {
-      id: "football-bunker", prio: 30, campaignSafe: true, label: "Strike bunker",
+      id: "football-bunker", prio: 30, campaignSafe: true, label: "Bomb",
       canShow: function () { return FB.ped === p && !p.dead && !!nation() && !!bunkerTarget(); },
       onSelect: function () { aideSay(p, bunkerStrike()); },
     });

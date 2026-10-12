@@ -55,7 +55,9 @@ const sysFiles = walk(path.join(ROOT, "src/systems"), []).filter((p) => {
 // KEY-BINDING / PRESIDENT-HIRING files belong to the input agent (branch
 // e-key-interactions); their labels are theirs to word. Speech in them is
 // still scanned.
-const LABEL_EXEMPT = /(^|\/)(presidency|president_[a-z_]+|protection|origins)\.js$/;
+// (2026-10-11: the President's files are no longer exempt; their answers
+// printed as "Let's", "Not", "The" because nobody checked them)
+const LABEL_EXEMPT = /(^|\/)(origins)\.js$/;
 const FILES = cityFiles.concat(sysFiles);
 
 // ---- a small JS tokenizer ----------------------------------------------------
@@ -252,7 +254,44 @@ const speech = [];   // {file, line, s}
 const labels = [];   // {file, line, s}
 const seen = new Set();
 function addSpeech(file, t) { const key = file + ":" + t.line + ":" + t.value; if (seen.has(key)) return; seen.add(key); speech.push({ file, line: t.line, s: t.value }); }
-function addLabel(file, t) { const key = "L" + file + ":" + t.line + ":" + t.value; if (seen.has(key)) return; seen.add(key); labels.push({ file, line: t.line, s: t.value }); }
+function addLabel(file, t, decision) { const key = "L" + file + ":" + t.line + ":" + t.value; if (seen.has(key)) return; seen.add(key); labels.push({ file, line: t.line, s: t.value, decision: !!decision }); }
+// an ANSWER record (`yes: { label }` / `no: { label }`): a decision about a
+// matter, so its object may ride along ("Raise taxes", "Hold calls")
+function opener(toks, k) {
+  let depth = 0;
+  for (let j = k - 1; j >= 0; j--) {
+    const u = toks[j];
+    if (u.type !== "punc") continue;
+    if (u.value === "}" || u.value === ")" || u.value === "]") depth++;
+    else if (u.value === "{" || u.value === "(" || u.value === "[") { if (!depth) return j; depth--; }
+  }
+  return -1;
+}
+// a reply offered through campaign_ui's say(who, line, [{ id, label }, ...])
+function isSayChoice(toks, k) {
+  const o = opener(toks, k);
+  if (o < 0 || toks[o].value !== "{") return false;
+  const a = opener(toks, o);
+  if (a < 0 || toks[a].value !== "[") return false;
+  const c = opener(toks, a);
+  if (c < 0 || toks[c].value !== "(") return false;
+  const fn = toks[c - 1];
+  return !!fn && fn.type === "id" && fn.value === "say";
+}
+function isDecisionRecord(toks, k) {
+  let depth = 0;
+  for (let j = k - 1; j >= 0; j--) {
+    const u = toks[j];
+    if (u.type !== "punc") continue;
+    if (u.value === "}" || u.value === ")" || u.value === "]") depth++;
+    else if (u.value === "{" || u.value === "(" || u.value === "[") {
+      if (depth) { depth--; continue; }
+      const c = toks[j - 1], id = toks[j - 2];
+      return u.value === "{" && !!c && c.value === ":" && !!id && id.type === "id" && (id.value === "yes" || id.value === "no");
+    }
+  }
+  return false;
+}
 
 // the files whose WHOLE purpose is line tables
 const LINE_TABLE_FILES = new Set(["src/city/read.js", "src/city/dialogue.js"]);
@@ -296,7 +335,10 @@ for (const abs of FILES) {
     }
     // ---- labels on option records (an object that also carries onSelect;
     // a zone's own `label` is its name plate, not a button)
-    if (registers && t.type === "id" && (t.value === "label") && toks[k + 1] && toks[k + 1].value === ":" && isOptionRecord(toks, k)) {
+    // an answer given as a bare string: `yes: "Raid", no: "Watch"`
+    if (t.type === "id" && (t.value === "yes" || t.value === "no") && toks[k + 1] && toks[k + 1].value === ":" && toks[k + 2] && toks[k + 2].type === "str" && /campaignUI|ui\.say|UI\.say/.test(src)) addLabel(rel, toks[k + 2], true);
+    if (t.type === "id" && (t.value === "label") && toks[k + 1] && toks[k + 1].value === ":" && !LABEL_EXEMPT.test(rel) &&
+        ((registers && isOptionRecord(toks, k)) || isDecisionRecord(toks, k) || isSayChoice(toks, k))) {
       // read the expression to the next comma / closing brace at depth 0
       let depth = 0, j = k + 2;
       for (; j < toks.length; j++) {
@@ -307,7 +349,8 @@ for (const abs of FILES) {
           else if (u.value === "," && !depth) break;
         }
       }
-      for (const s of valueStrings(toks, k + 2, j)) addLabel(rel, s);
+      const dec = isDecisionRecord(toks, k) || isSayChoice(toks, k);
+      for (const s of valueStrings(toks, k + 2, j)) addLabel(rel, s, dec);
     }
   }
   // named pools referenced by a mouth, plus hinted pool names, plus the
@@ -356,16 +399,19 @@ for (const r of speech) {
   if (UI_WORDS.test(s)) flag("speech", r, "UI word");
   if (/^[“"‘…]|[”"’…]$/.test(s.trim()) && s.trim().length > 1) flag("speech", r, "quotes or trailing dots (narration shape)");
 }
-function labelVerdict(s) {
+function labelVerdict(s, decision) {
   const clean = s.replace(/\{x\}/g, "").replace(/\s*\$[\d,.]*[kKmM]?\s*/g, " ").replace(/\s+\d[\d,.]*\s*$/, "").replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
   if (!clean) return null;
   if (DASHES.test(s)) return "dash or dot";
   if (EMOJI.test(s)) return "emoji";
   if (UI_WORDS.test(clean)) return "UI word";
+  // a button is a DECISION, never words (owner 2026-10-11 / gta6-buttons-are-decisions)
+  if (/\blet['’]?s\b/i.test(clean) || /\?/.test(s)) return "words, not a decision (Let's / a question)";
+  if (/^(talk|ask|threaten|say|tell|chat|greet|flirt|compliment|insult)\b/i.test(clean)) return "words, not a decision (" + clean.split(/\s+/)[0] + ")";
   if (DETERMINERS.test(clean)) return "carries a noun (determiner)";
   const w = clean.split(/\s+/);
-  if (w.length > 3) return "more than a verb (" + w.length + " words)";
-  if (w.length >= 2) {
+  if (w.length > 2) return "more than a verb (" + w.length + " words)";
+  if (w.length >= 2 && !decision) {
     // verb + particle(s) is a verb; verb + noun is a noun on the button
     const tail = w.slice(1);
     if (!tail.every((x) => PARTICLES.has(x.toLowerCase()) || /^(follow|wait|go|run|home|here|guard|me|quiet|loose|free|down|still|cover|open|shut|rob|scare|tail|guard|hide)$/i.test(x))) return "carries a noun";
@@ -379,8 +425,9 @@ const require = createRequire(import.meta.url);
 const verbWord = require(path.join(ROOT, "src/city/verbword.js"));
 for (const r of labels) {
   if (verbWord.WHOLE.includes(r.s.trim())) continue;   // a verb that needs its object, printed as authored
-  const why = labelVerdict(r.s);
+  const why = labelVerdict(r.s, r.decision);
   if (why) { flag("label", r, why); continue; }
+  if (r.decision) continue;               // an answer prints as authored (verbword keep)
   const whole = r.s.trim();
   if (!whole || /\{x\}|\$$|^\s|\s$/.test(r.s) || /^[a-z]/.test(whole)) continue;
   const out = verbWord(whole);
@@ -420,6 +467,9 @@ let BOOK_TOPICS = 0;
       const b = CBZ.cityLine(p, topic, {});
       if (b && a === b && (book[topic].base || []).length > 1) fails.push("topic " + topic + " repeated itself: " + a);
     }
+    // the "talk" topic went with the Talk verb (owner 2026-10-09); its
+    // assertions run only while a book still carries it
+    if (book.talk) {
     // a person you robbed says so
     const v = ped(3);
     v._wronged = { kind: "robbed", t: CBZ.now };
@@ -434,6 +484,7 @@ let BOOK_TOPICS = 0;
     const seen = new Set();
     for (let i = 0; i < 5; i++) seen.add(CBZ.cityLine(ped(40 + i), "talk"));
     if (seen.size < 5) fails.push("five strangers shared lines: " + [...seen].join(" / "));
+    }
   }
   for (const f of fails) console.log("FAIL book " + f);
   BOOK_TOPICS = book ? Object.keys(book).length : 0;
