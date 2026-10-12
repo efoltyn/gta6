@@ -865,7 +865,7 @@ CBZ.npcwar.onBoot(function () {
   if (boom && !boom._mass) {
     STUDIO.boom = function (p, o) {
       const res = boom.apply(this, arguments);
-      try { if (MASS.on && p) MASS.blast(p.x, p.z, (o && o.radius) || 6, o && o.by); } catch (e) {}
+      try { if (MASS.on && p) MASS.blast(p.x, p.z, (res && res.R) || (o && o.radius) || 6, o && o.by); } catch (e) {}
       return res;
     };
     STUDIO.boom._mass = true;

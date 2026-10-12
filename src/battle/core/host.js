@@ -59,6 +59,16 @@
     if (!isFinite(h.cx) || !isFinite(h.cz)) miss.push("cx/cz");
     return miss;
   }
+  /* sweep(ax,ay,az, bx,by,bz) -> hit | null: the first thing a flown round's
+     step meets (walls at their own height, roofs and floors, this host's
+     ground): systems/strike.js's swept test on this host's floor. Asked when
+     CALLED, so a host built before the damage pack loaded still answers. */
+  function sweepOn(floor) {
+    const o = { groundAt: floor };
+    return function (ax, ay, az, bx, by, bz) {
+      return CBZ.strike && CBZ.strike.sweep ? CBZ.strike.sweep(ax, ay, az, bx, by, bz, o) : null;
+    };
+  }
   // NPC War: the MAP record buildMap() returns + microboot's collision world.
   // The functions are the SAME function objects (no wrapper on a hot path).
   function fromArena(map, micro, scene) {
@@ -70,6 +80,7 @@
     h.rayColliders = micro.rayColliders || function () { return null; };
     h.scene = scene || CBZ.scene;
     h.map = map;
+    h.sweep = sweepOn(function (x, z) { return h.groundAt(x, z); });
     return h;
   }
 
@@ -132,6 +143,7 @@
       roads: (CBZ.city && ((CBZ.city.arena && CBZ.city.arena.roads) || CBZ.city.roads)) || null,
       waterAt: function (x, z) { try { return CBZ.cityWaterAt ? !!CBZ.cityWaterAt(x, z) : false; } catch (e) { return false; } },
     };
+    h.sweep = sweepOn(floor);
     // the city's cover is the same registry when a page has loaded it
     if (CBZ.battleCover) { h.coverNear = CBZ.battleCover.near; h.coverFrom = CBZ.battleCover.from; }
     return h;

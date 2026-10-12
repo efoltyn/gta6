@@ -88,20 +88,20 @@
   const WEAPONS = [
     // AIM-120C AMRAAM: active radar, Mach 4, 22 kg blast-frag; launched from
     // the inboard bay station, fire-and-forget off boresight (±60 deg)
-    { id: "aim120c", seat: "pilot", kind: "missile", vs: "air", mount: "fixed", arc: 1.0, rof: 0.5, pen: 60, beh: 900,
-      he: { pen: 20, beh: 600, blast: 8, power: 1.6 }, speed: 1200, range: 15000, minRange: 800, ammo: 2 },
+    { id: "aim120c", seat: "pilot", kind: "missile", vs: "air", mount: "fixed", arc: 1.0, rof: 0.5,
+      mun: "aim120c", range: 15000, minRange: 800, ammo: 2 },
     // GBU-31(V)1: Mk 84 (429 kg tritonal) + JDAM GPS/INS kit, one per bay;
     // both can go in one pass on two aim points
     { id: "gbu31_jdam", seat: "pilot", kind: "bombs", vs: "any", guided: true, basket: 0.15, rof: 2, salvo: 2, reload: 20,
-      pen: 400, beh: 3000, he: { pen: 400, beh: 3000, blast: 55, power: 5.5 }, range: 15000, ammo: 2 },
+      mun: "gbu31v1", range: 15000, ammo: 2 },
     // GBU-39 SDB: 113 kg glide bomb, 17 kg AFX-757 penetrating warhead, four
     // abreast-and-tandem on a BRU-61 per bay; four per pass on four marks
     { id: "gbu39_sdb", seat: "pilot", kind: "bombs", vs: "any", guided: true, basket: 0.22, rof: 1.2, salvo: 4, reload: 20,
-      pen: 300, beh: 1500, he: { pen: 300, beh: 1500, blast: 14, power: 2.2 }, range: 15000, ammo: 8 },
+      mun: "gbu39", range: 15000, ammo: 8 },
     // GAU-22/A 25 mm four-barrel, 3,300 rounds/min, 182 rounds (PGU-32 SAPHEI):
     // gun runs are DIVES (alt, dive, pullOut), about 0.8 s bursts
     { id: "gau22_25mm", seat: "pilot", kind: "autocannon", mount: "fixed", alt: 1500, dive: 0.3, pullOut: 300, rof: 55, burst: 45, pause: 3,
-      pen: 40, beh: 100, he: { pen: 40, beh: 100, blast: 2.5, power: 0.8 }, speed: 1040, heSpeed: 1040, grav: 9.8, range: 1800, ammo: 182 },
+      mun: "pgu32", grav: 9.8, range: 1800, ammo: 182 },
   ];
   const BOMB_IDS = { gbu31_jdam: "jdam", gbu39_sdb: "sdb" };
 

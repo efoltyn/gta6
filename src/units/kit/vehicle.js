@@ -26,6 +26,8 @@
                                   read off stats.armour.belly, else the roof's figure)
      threatOf(imp, weaponPen)     -> {pen (mm RHA), beh (damage behind armour),
                                   he (true for blast), cls}  what hit us
+                                  (imp.threat, when the caller read it off the
+                                  munition table, is the answer)
      resolve(vs, stats, zone, threat, rnd) -> {pen:bool, dmg, kill:{mobility,
                                   firepower, burning, wreck}} armour + damage states
                                   (stats.armourCE, optional: per-face armour vs
@@ -144,6 +146,11 @@
   };
   function threatOf(imp, by) {
     imp = imp || {};
+    // THE ROUND SAYS WHAT IT IS. Every vehicle weapon, every blast and every
+    // flown round that reaches a hull through the battle carries its own
+    // threat, read off weapons/munitiontable.js by the caller (the munition's
+    // pen/beh for a direct hit, munitionTable.blastOn for a blast at range).
+    if (imp.threat) return imp.threat;
     by = by || imp.by || null;
     if (imp.cause === "bomb") return { pen: 240, beh: 2400, he: true, cls: "bomb", top: true };
     // a buried charge (IED, mine) goes off UNDER the hull: it meets the belly.
@@ -155,13 +162,6 @@
     // the cartridge's RHA depth at its retained velocity), which beats a table
     // by weapon name that cannot know a 600 m shot from a 60 m one
     if (imp.pen != null && !blast) return { pen: imp.pen, beh: 1, he: false, cls: "small" };
-    // a vehicle's own weapon says what it was: the round on the trigger
-    // (_shot, set for the length of the call) or its last high-explosive
-    // round in flight (_he, read when that round's blast arrives)
-    if (by && by.vehicle) {
-      if (blast && by._he) return by._he;
-      if (!blast && by._shot) return by._shot;
-    }
     if (by && by.wid && HEAVY[by.wid] && (blast || by.launcher)) return HEAVY[by.wid];
     if (blast) return { pen: 120, beh: 600, he: true, cls: "blast" };
     if (by && by.beast) return { pen: 0, beh: 1, he: false, cls: "teeth" };

@@ -143,9 +143,9 @@
 
   const WEAPONS = [
     { id: "mk82_stick", seat: "radar", kind: "bombs", vs: "soft", store: "mk82", alt: ALT,
-      rof: 8.5, stick: 820, pen: 120, beh: 1800, he: { pen: 120, beh: 1800, blast: 18, power: 2.8 }, range: 12000, ammo: 27 },
+      rof: 8.5, stick: 820, mun: "mk82", range: 12000, ammo: 27 },
     { id: "gbu31_jdam", seat: "radar", kind: "bombs", vs: "any", store: "jdam", alt: ALT, guided: true, basket: 0.15,
-      rof: 1.2, pen: 300, beh: 2600, he: { pen: 300, beh: 2600, blast: 30, power: 4.4 }, range: 12000, ammo: 12 },
+      rof: 1.2, mun: "gbu31v1", range: 12000, ammo: 12 },
   ];
 
   // =====================================================================

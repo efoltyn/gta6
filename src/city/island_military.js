@@ -627,6 +627,11 @@
     // that stops a tank driving up its ramp; its solidity is the hold rig's
     // LOCAL walls (city/vehicle_hold.js), which also stay right when it flies.
     const solid = atlas ? null : col(wx, wz, sideways ? bl : bw, sideways ? bw : bl, 0, made.height, g);
+    // what it is when a bomb lands beside it (systems/strike.js hardware),
+    // boardable or scenery alike: its skin and hit points by what it is
+    const D0 = made.def || {}, A0 = (D0.stats && D0.stats.armour) || {};
+    g.userData.hwKind = D0.drive === "rotor" ? "heli" : D0.domain === "air" ? (D0.stats && D0.stats.remote ? "drone" : "plane")
+      : (A0.front || 0) > 300 ? "tank" : (A0.side || 0) >= 9 ? "ground" : "truck";
     const kind = s.scenery ? null : takeKind(made.unitId, made.def);
     if (!kind) return null;
     g.userData.milKind = kind;

@@ -55,22 +55,31 @@
      anti    what it is for: "armour" | "men" | "point"
      dud     the share that do not go off on a bad strike (shot down, a
              graze): the piezo fuze of an RPG head wants a nose-on blow */
+  /* THE WARHEADS ARE THE MUNITION TABLE'S (weapons/munitiontable.js): each
+     drone warhead names its row (`mun`) and keeps only what is the drone's
+     own business (what it is for, how often it duds, how the armour reads
+     the jet). pen / beh / blast / power / blastPen are filled from the
+     table the first time a warhead is asked for. */
   const WARHEAD = {
-    // PG-7VL: the RPG-7's 93 mm single shaped charge (~500 mm RHA), the round
-    // whose head is taped under most Ukrainian strike FPVs, motor removed
-    pg7vl_fpv: { name: "PG-7VL 93 mm HEAT", pen: 500, beh: 520, cls: "heat", blast: 5, power: 0.9, blastPen: 12, anti: "armour", dud: 0.25 },
-    // OG-7V: the 40 mm fragmentation round of the same launcher, for men in
-    // trenches and dugouts (the FPV dives into the trench with it)
-    og7v_fpv: { name: "OG-7V 40 mm frag", pen: 10, beh: 200, cls: "blast", blast: 12, power: 1.2, blastPen: 6, anti: "men", dud: 0.2 },
-    // Switchblade 600: the Javelin's tandem shaped charge in the nose (a
-    // precursor for ERA, then the main charge), top attack in the dive
-    sb600_tandem: { name: "Switchblade 600 tandem HEAT (Javelin-derived)", pen: 800, beh: 900, cls: "atgm", blast: 7, power: 1.5, blastPen: 18, anti: "armour", dud: 0.1 },
-    // Switchblade 300 Block 20: a forward-firing fragmentation charge,
-    // anti-personnel with a little anti-materiel bite (light vehicles)
-    sb300_frag: { name: "Switchblade 300 frag", pen: 20, beh: 260, cls: "blast", blast: 10, power: 1.1, blastPen: 8, anti: "men", dud: 0.1 },
-    // Shahed-136 / Geran-2: up to ~50 kg of HE-fragmentation in the nose
-    shahed136_he: { name: "Shahed-136 HE-frag (~50 kg)", pen: 120, beh: 1700, cls: "bomb", blast: 30, power: 2.8, blastPen: 30, anti: "point", dud: 0.3 },
+    // PG-7VL: the RPG-7's 93 mm single shaped charge, taped under most strike FPVs, motor removed
+    pg7vl_fpv: { mun: "fpv_pg7vl", cls: "heat", anti: "armour", dud: 0.25 },
+    // OG-7V: the 40 mm fragmentation round of the same launcher, for men in trenches and dugouts
+    og7v_fpv: { mun: "fpv_og7v", cls: "blast", anti: "men", dud: 0.2 },
+    // Switchblade 600: the Javelin's tandem shaped charge, top attack in the dive
+    sb600_tandem: { mun: "switchblade600", cls: "atgm", anti: "armour", dud: 0.1 },
+    // Switchblade 300 Block 20: a forward-firing fragmentation charge
+    sb300_frag: { mun: "switchblade300", cls: "blast", anti: "men", dud: 0.1 },
+    // Shahed-136 / Geran-2: HE-fragmentation in the nose
+    shahed136_he: { mun: "shahed136", cls: "bomb", anti: "point", dud: 0.3 },
   };
+  function armWarhead(w) {
+    if (!w || w._armed || !CBZ.munitionTable) return w;
+    const f = CBZ.munitionTable.fx(w.mun);
+    if (!f) return w;
+    w._armed = true;
+    w.name = f.name; w.pen = f.pen; w.beh = f.beh; w.blast = f.R; w.power = f.power; w.blastPen = Math.round(f.contact); w.W = f.W;
+    return w;
+  }
 
   /* ================================================================ 2. CARRIERS
      Switchblade canisters on hulls whose files are not the drones'. Slots
@@ -542,7 +551,7 @@
 
   CBZ.droneKit = {
     WARHEAD: WARHEAD, CARRIERS: CARRIERS, WEAK: WEAK,
-    warhead: function (id) { return WARHEAD[id] || null; },
+    warhead: function (id) { return armWarhead(WARHEAD[id]) || null; },
     carrierOf: carrierOf, weakOf: weakOf,
     mats: mats, paintMat: paintMat, meshes: meshes, repaint: repaint, lin: lin, cache: cache,
     blades: blades, discGeo: discGeo, switchblade: switchblade,

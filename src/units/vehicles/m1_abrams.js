@@ -1333,8 +1333,8 @@
          armour, M830A1 MPAT HEAT-MP (1,410 m/s) at everything else; 42
          rounds, 36 of them in the bustle behind the blast doors; a good
          loader keeps ~6-7 s a round. */
-      { id: "m256_120mm", seat: "gunner", kind: "cannon", turret: true, rof: 0.15, needs: "loader", pen: 750, beh: 900,
-        he: { pen: 480, beh: 700, blast: 9, power: 2.4 }, speed: 1555, heSpeed: 1410, grav: 9.8, range: 4000, minRange: 15, ammo: 42 },
+      { id: "m256_120mm", seat: "gunner", kind: "cannon", turret: true, rof: 0.15, needs: "loader",
+        mun: "m829a3", heMun: "m830a1", grav: 9.8, range: 4000, minRange: 15, ammo: 42 },
       // coaxial M240C 7.62 mm, 10,800 rounds
       { id: "m240_coax", seat: "gunner", kind: "mg", wid: "lmg", turret: true, rof: 12, burst: 12, pause: 1.2, dmg: 22, pen: 9, range: 900, ammo: 10800 },
       // M2HB .50 on the CROWS, the commander's
