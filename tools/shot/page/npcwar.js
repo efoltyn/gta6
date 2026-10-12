@@ -455,7 +455,20 @@
     }
     return null;
   }
+  /* at:x:y:z:yawDeg:pitchDeg:dist[:fov] — a fixed lens on a POINT, not a body:
+     looks at (x,y,z) from the compass yaw (0 = from +z, 90 = from +x), pitch
+     above the horizon, dist metres off. The impact catalogue frames a hit
+     point with it, whatever is (or is no longer) standing there. */
+  function frameAt(cam) {
+    var p = String(cam).split(":").map(Number);
+    var tgt = V3(p[1], p[2], p[3]), yaw = (p[4] || 0) * Math.PI / 180, pitch = (p[5] || 15) * Math.PI / 180;
+    var dist = p[6] > 0 ? p[6] : 30;
+    var pos = tgt.clone().add(V3(Math.sin(yaw) * Math.cos(pitch) * dist, Math.sin(pitch) * dist, Math.cos(yaw) * Math.cos(pitch) * dist));
+    try { var gy = MAP.groundAt(pos.x, pos.z) + 0.4; if (pos.y < gy) pos.y = gy; } catch (e) {}
+    return { pos: pos, target: tgt, fov: p[7] > 0 ? p[7] : 40, dist: dist, up: null, box: null };
+  }
   function frame(cam, aspect) {
+    if (/^at:/.test(String(cam))) return frameAt(cam);
     if (ST.pose === "war") { var fw = frameWar(cam, aspect); if (fw) return fw; }
     var lens = lensOf(ST.spec);
     var lead = lens ? lens[0] : ST.subj[0];
@@ -514,7 +527,7 @@
     return { pos: pos, target: target, fov: fov, dist: dist, up: up, box: box };
   }
 
-  S.cams = ["front", "side", "back", "left", "3q", "3qb", "top", "head", "feet", "wide", "hot", "lens", "orbit:<yawDeg>:<pitchDeg>[:distMul]"];
+  S.cams = ["front", "side", "back", "left", "3q", "3qb", "top", "head", "feet", "wide", "hot", "lens", "orbit:<yawDeg>:<pitchDeg>[:distMul]", "at:<x>:<y>:<z>:<yawDeg>:<pitchDeg>:<dist>[:fov]"];
 
   S.shot = function (cam, W, H, fmt) {
     W = Math.max(64, Math.min(2048, W | 0 || 640)); H = Math.max(64, Math.min(2048, H | 0 || 400));
