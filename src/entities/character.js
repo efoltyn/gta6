@@ -3617,7 +3617,9 @@
   function jacketFlankN(S, y, r, gap) {
     const t = S.at(y), p = (y >= S.pBot && y <= S.pTop + 0.03) ? S.pel(Math.min(y, S.pTop)) : null;
     const sx = (a, zz, n, z) => (z >= zz ? 0 : a * Math.pow(1 - Math.pow(z / zz, n), 1 / n));
-    const body = (z, fr) => Math.max(sx(t.a, fr ? t.zf : t.zb, t.n, z), p ? sx(p.a, fr ? p.zf : p.zb, p.n, z) : 0);
+    // (the seat: the glutes stand out of the pelvis section, pelvisFeatZ)
+    const seat = p ? S.glute * 0.16 * S.pd * gss(y - (S.hipY - 0.015 * S.pk), 0.055 * S.pk) : 0;
+    const body = (z, fr) => Math.max(sx(t.a, fr ? t.zf : t.zb, t.n, z), p ? sx(p.a, fr ? p.zf : p.zb + seat, p.n, z) : 0);
     const zArm = 1.3 * S.R;
     let best = r.n, bestBad = Infinity;
     for (let n = r.n; n >= 1.5; n -= 0.05) {
@@ -3662,7 +3664,7 @@
       const x = out[0], zr = out[1] - R.zc;
       const zz = zr >= 0 ? R.zf : R.zb;
       const cz = Math.max(-1, Math.min(1, zr / zz));
-      const zb = zr - (R === secs[0] ? featZ(S, k, x / R.a, cz) : 0);   // the body's own relief at this spot
+      const zb = zr - (R === secs[0] ? featZ(S, k, x / R.a, cz) : pelvisFeatZ(S, y, x / R.a, cz));   // the body's own relief at this spot (the pelvis: its seat)
       const F = Math.pow(Math.abs(x) / R.a, R.n) + Math.pow(Math.abs(zb) / zz, R.n);
       const rho = Math.pow(F, 1 / R.n), rad = Math.hypot(x, zb);
       const need = 1 + m / Math.max(rad, 1e-4);
@@ -3897,6 +3899,7 @@
     g.computeBoundingBox(); g.computeBoundingSphere();
     g.parameters = { width: box.w, height: box.h, depth: box.d };   // the box this part replaced
     g.userData.torso = { part, box, origin: oy, face: Fc.slice(0, nUsed), u: Uq.slice(0, nUsed), v: Vq.slice(0, nUsed), rings: rings.length, nq };
+    if (part === "jacket" && lod < 2) jacketFollowMorph(g, S, oy);
     g.name = "torso~" + part + "~" + lod;
     g._shared = true;
     return (TORSO_GEO[key] = g);
@@ -3952,6 +3955,101 @@
     if (paint !== undefined) ud.limbPaint = paint || null;
     return torsoBake(spec, spec.lod, ud.limbPaint || null);
   }
+  /* ==== THE JACKET'S SHOULDER IS SKINNED TO THE ARM ======================
+     The jacket shell rode the CHEST, rigid, while the arm swung under it.
+     The padded shoulder (jacketPad: a sphere round the arm's pivot, cut off
+     PAD_LO under it), the armhole under the pad and the flare below stood
+     still, so a swinging arm carried the back of the upper arm OUT through
+     the pad's underside and the back of the armpit (tools/overlap-audit.mjs:
+     17.5 mm mid-stride), the sleeve bursting out of the shoulder seen from
+     above. A real sleeve head moves with the arm, so the near shell is
+     SKINNED: the region round each arm's pivot rotates with that arm.
+     This rig has no skinning (rigid parts on joints), so the skin is morph
+     targets — the hair's HAIR FOLLOW mechanism, r128's whole budget of eight
+     relative position targets, no normals. An arm's drawn rotation relative
+     to its rest carry is a SWING about x (the outermost of its Euler XYZ:
+     exactly a rotation about the body x axis through the pivot) and an
+     ABDUCTION about z. A rotation by t about axis k through the pivot moves r
+     by sin t (k x r) + (1 - cos t) k x (k x r), so each joint axis is TWO
+     targets — w (k x r) and w^2 k x (k x r) — and the influences sin t and
+     1 - cos t make it the exact rotation wherever w is 0 or 1, at any angle
+     (no chord error; r128 takes negative influences). 2 axes x 2 terms x 2
+     arms = 8. Weights: 1 on the pad and on the shell lateral of the arm's
+     inner line (its FOOTPRINT: a swing keeps every arm point's x), from the
+     pivot down past the flare; 0 medially (the back and chest panels stay on
+     the chest) and far from the pivot; smooth between, so the cloth stretches
+     across the shoulder blade instead of tearing. jacketFollowSync reads each
+     arm's DRAWN rotation (its local matrix: the shoulder limits are honoured)
+     right before the shell draws. The FAR shell has no targets and pools as
+     before; pedinstance.js refuses a morph geometry, so a near suited rig
+     draws its own shell (one call), like long hair. */
+  function jacketFollowW(S, x, yB, z, side) {
+    const R = S.R, rP = padR(S);
+    const dx = side * x - S.AX, h = yB - S.shoulderY;
+    if (dx < -1.05 * R || h < -1.6 * R) return 0;
+    const wl = sm01((dx + 1.05 * R) / (0.15 * R));                // the arm's footprint
+    const wv = sm01((h + 1.6 * R) / (0.5 * R));                  // below the flare: hangs from the chest
+    const wr = 1 - sm01((Math.hypot(dx, h, z) - (rP + 0.8 * R)) / (0.5 * R));   // far from the pivot: the panels
+    return wl * wv * wr;
+  }
+  function jacketFollowMorph(g, S, oy) {
+    const pos = g.attributes.position, n = pos.count, A = pos.array, py = S.shoulderY - oy;
+    const tp = [];
+    for (const side of [1, -1]) {
+      const X1 = new Float32Array(n * 3), X2 = new Float32Array(n * 3), Z1 = new Float32Array(n * 3), Z2 = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const x = A[i * 3], y = A[i * 3 + 1], z = A[i * 3 + 2];
+        const w = jacketFollowW(S, x, y + oy, z, side);
+        if (!w) continue;
+        const rx = x - side * S.AX, ry = y - py, w2 = w * w;
+        // about x: k x r = (0, -rz, ry), k x (k x r) = (0, -ry, -rz)
+        X1[i * 3 + 1] = -w * z; X1[i * 3 + 2] = w * ry;
+        X2[i * 3 + 1] = -w2 * ry; X2[i * 3 + 2] = -w2 * z;
+        // about z: k x r = (-ry, rx, 0), k x (k x r) = (-rx, -ry, 0)
+        Z1[i * 3] = -w * ry; Z1[i * 3 + 1] = w * rx;
+        Z2[i * 3] = -w2 * rx; Z2[i * 3 + 1] = -w2 * ry;
+      }
+      for (const a of [X1, X2, Z1, Z2]) tp.push(new THREE.BufferAttribute(a, 3));
+    }
+    g.morphAttributes.position = tp;
+    g.morphTargetsRelative = true;
+    g.userData.jacketFollow = { armOutZ: S.P.armOutZ || 0 };
+  }
+  // [+x arm: sin swing, 1-cos swing, sin abduction, 1-cos abduction, then the -x arm]
+  function jacketFollowSync(mesh) {
+    const inf = mesh.morphTargetInfluences;
+    if (!inf || inf.length < 8) return;
+    const g = mesh.geometry, jf = g && g.userData && g.userData.jacketFollow;
+    const on = jf && g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length >= 8;
+    for (let i = 0; i < inf.length; i++) inf[i] = 0;
+    const chest = mesh.parent, body = chest && chest.parent;
+    if (!on || !body) return;
+    const kids = body.children;
+    for (let k = 0; k < kids.length; k++) {
+      const a = kids[k];
+      if (a._armBody !== body) continue;
+      a.updateMatrix();
+      const e = a.matrix.elements, side = a.position.x >= 0 ? 1 : -1, i0 = side > 0 ? 0 : 4;
+      // the arm's local y axis = Rx(x) Rz(z) e_y = (-sin z, cos z cos x, cos z sin x)
+      const sw = Math.atan2(e[6], e[5]), ab = Math.atan2(-e[4], Math.hypot(e[5], e[6])) - side * jf.armOutZ;
+      inf[i0] = Math.sin(sw); inf[i0 + 1] = 1 - Math.cos(sw);
+      inf[i0 + 2] = Math.sin(ab); inf[i0 + 3] = 1 - Math.cos(ab);
+    }
+    const m = mesh.material;
+    if (m && !Array.isArray(m) && !m.morphTargets) { m.morphTargets = true; m.needsUpdate = true; }
+  }
+  function jacketFollowRender() { jacketFollowSync(this); }
+  // city/clothes.js hands every shell it builds or re-bakes here
+  function jacketFollowWear(mesh) {
+    if (!mesh) return;
+    mesh.updateMorphTargets();
+    if (!mesh.morphTargetInfluences) mesh.morphTargetInfluences = [];
+    while (mesh.morphTargetInfluences.length < 8) mesh.morphTargetInfluences.push(0);
+    mesh.userData.jacketFollow = true;
+    mesh.onBeforeRender = jacketFollowRender;
+    jacketFollowSync(mesh);
+  }
+  CBZ.humanJacketFollow = jacketFollowWear;
   function setTorsoLod(rig, lod) {
     lod = lod >= 2 ? 2 : 1;
     const s = rig && rig.skinSlots;
@@ -5834,9 +5932,12 @@
   // toddler's actual waist. rig.hipY carries the real value; a legacy rig with
   // no profile falls back to the old constant, so nothing can regress.
   const CHARACTER_HIP_Y = 0.95;
-  // a seated body leans its shoulders toward the lap a touch (was 0.06: the
-  // sleeve's shoulder ball slid 4 cm out of a jacket's padded shoulder)
-  const SEAT_PROTRACT = 0.015;
+  // a seated arm's pivot stays IN the shoulder (was 0.06, then 0.015: the
+  // pivot slid forward out of the body it hangs from, and a jacket's shoulder
+  // is skinned to the arm about that pivot — THE JACKET'S SHOULDER IS SKINNED
+  // TO THE ARM — so any slide is the sleeve leaving the shoulder). The lean
+  // toward the lap is the torso's, not a dislocated shoulder.
+  const SEAT_PROTRACT = 0;
   const hipYOf = (ch) => (ch && ch.hipY > 0 ? ch.hipY : CHARACTER_HIP_Y);
   const LEG_KEYS = ["ll", "rl"];
   const _hipPivot = new THREE.Vector3();
@@ -9433,6 +9534,8 @@
     // HAIR FOLLOW: sync one hair mesh's morph influences to its neck's yaw now
     // (the renderer does it in onBeforeRender; tools call it after posing)
     hairFollow: hairFollowSync,
+    // THE JACKET FOLLOWS THE ARMS: sync one shell's influences to the arms now
+    jacketFollow: jacketFollowSync,
     hairFollowSpec: HAIR_FOLLOW,
     // THE NECK HAS A RANGE: the limits (radians), an in-place clamp for
     // absolute writers, and the test the drawn neck uses
