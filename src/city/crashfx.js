@@ -650,42 +650,20 @@
   }
   function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
   // FX_BLAST_FIRSTFRAME (owner: "the explosion takes too long after i
-  // shoot"). Two MEASURED impact-side thieves, both fixed under this flag:
-  //   (1) a puff's opacity is written only by updatePuffs — onAlways(9.5),
-  //       which runs BEFORE the rocket updater (onAlways 52) whose detonate
-  //       spawns the blast — so the flash rendered its birth frame at
-  //       opacity 0: one structurally guaranteed DEAD FRAME between "the
-  //       game decided the explosion happened" and anything visible.
-  //       spawnPuff now seeds the exact envelope updatePuffs would produce
-  //       one full-speed tick in (same ramp, same colour), so the
-  //       detonation frame already shows the flash at ~93%.
-  //   (2) the blast fired doHitstop(0.18)+doSlowmo(0.34) in the SAME call
-  //       stack that spawned the fireball, so its own time dilation
-  //       stretched its own first instants ~3x (30% fireball growth at
-  //       ~610ms real instead of ~215ms). blastPunch defers the freeze two
-  //       frames: the flash and first fireball step land at full speed,
-  //       THEN the stop punctuates them. Same total juice.
-  // Flip false → opacity-0 birth frame + same-frame stop, byte-identical.
+  // shoot"): a puff's opacity is written only by updatePuffs — onAlways(9.5),
+  // which runs BEFORE the rocket updater (onAlways 52) whose detonate spawns
+  // the blast — so the flash rendered its birth frame at opacity 0. spawnPuff
+  // now seeds the exact envelope updatePuffs would produce one full-speed tick
+  // in, so the detonation frame already shows the flash.
+  //
+  // NO TIME DILATION ON A BLAST. Every explosion used to fire a hit-stop +
+  // slow-mo (0.18 s freeze + 0.34 s at a third speed; an airstrike 0.26 + 0.5,
+  // at ANY range). A gunship's missiles bursting round your helicopter froze
+  // and slowed the whole world on every round: the owner's "it switches to a
+  // cinematic mode". A real blast is light, a boom that arrives late, a
+  // shove and debris; time does not stop for it. Those stay; the freeze is gone.
   if (CBZ.CONFIG.FX_BLAST_FIRSTFRAME == null) CBZ.CONFIG.FX_BLAST_FIRSTFRAME = true;
   function firstFrameOn() { return CBZ.CONFIG.FX_BLAST_FIRSTFRAME !== false; }
-  const punchQ = [];
-  function blastPunch(hs, sm) {
-    if (!firstFrameOn()) {
-      if (CBZ.doSlowmo && sm) CBZ.doSlowmo(sm);
-      if (CBZ.doHitstop && hs) CBZ.doHitstop(hs);
-      return;
-    }
-    punchQ.push({ t: 2 / 60, hs: hs, sm: sm });
-  }
-  function pumpPunch(dt) {
-    for (let i = punchQ.length - 1; i >= 0; i--) {
-      const q = punchQ[i]; q.t -= dt;
-      if (q.t > 0) continue;
-      if (CBZ.doSlowmo && q.sm) CBZ.doSlowmo(q.sm);
-      if (CBZ.doHitstop && q.hs) CBZ.doHitstop(q.hs);
-      punchQ.splice(i, 1);
-    }
-  }
   /* A puff is one pooled sprite with a small motion law. The original fields
      (base, pop, life, maxOp, spin, vx/vy/vz, shade, smoke, delay) behave exactly as before;
      the explosion added the ones below, all optional:
@@ -1603,9 +1581,6 @@
       CBZ.sfx("explosion", so);
     }
     if (CBZ.shake && att > 0.02) CBZ.shake(3.2 * Math.min(2, power) * att);
-    // punch is DEFERRED two frames (blastPunch) so the flash renders before
-    // time stops — see the FX_BLAST_FIRSTFRAME block.
-    if (att > 0.5) blastPunch(0.18, 0.34);
     try { const fl = CBZ.el && CBZ.el.flash; if (fl && att > 0.4) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); } } catch (e) {}
     // blast damage in radius — crowd, peds, cops, and the player (shared path).
     // An elevated blast only reaches the street where its SPHERE does: the
@@ -1735,7 +1710,7 @@
   // cityExplosion for incoming missiles and called-in airstrikes. Same pooled
   // sprite system, same shared damage path; just dialed up: a larger white-hot
   // fireball that balloons up into a mushroom head, a tall lingering black smoke
-  // COLUMN, more debris + sparks, a heavier shake and a touch more slow-mo.
+  // COLUMN, more debris + sparks and a heavier shake.
   // opts: { power, radius, byPlayer, y, noVisual } — y = optional detonation
   // height (air-burst). noVisual lets a purpose-built composer own the picture
   // while this shared path still owns damage, structure damage, sound and shake.
@@ -1771,26 +1746,24 @@
     }
     if (CBZ.cityPropsBlast) { try { CBZ.cityPropsBlast(x, cy, z, R, power, { byPlayer: byPlayer, cause: opts.cause || "airstrike" }); } catch (e) {} }
 
-    // ---- IMPACT FEEDBACK: bigger boom, harder shake, more slow-mo, screen flash --
-    // Same treatment as cityExplosion above: distance in, power-scaled volume
-    // out, through the shared CBZ.blastVolume curve. Heavy ordnance is a
-    // BIGGER `power` than a car blast by construction, so this is where "a
-    // JDAM is louder than a grenade" actually becomes audible. The SHAKE is
-    // deliberately left alone — every airstrike in the game is tuned against
-    // its unattenuated value, and quieting it is a different change.
+    // ---- IMPACT FEEDBACK: bigger boom, harder shake, screen flash, all by
+    // DISTANCE to the lens, exactly like cityExplosion above. Heavy ordnance
+    // is a BIGGER `power` than a car blast by construction, so this is where
+    // "a JDAM is louder than a grenade" becomes audible. The shake and flash
+    // used to be UNATTENUATED: a strike across the map hit the camera with
+    // the same 3.5 m jolt and full-screen white as one at your feet, so every
+    // missile the gunship loosed at your helicopter yanked the lens about
+    // wherever it burst. Full strength at your feet, nothing far off.
+    const scd = camDist(x, cy, z);
     if (CBZ.sfx) {
-      let sd = 0;
-      const scam = CBZ.camera;
-      if (scam && scam.position) sd = Math.hypot(x - scam.position.x, cy - scam.position.y, z - scam.position.z);
-      const so = { dist: sd, volume: CBZ.blastVolume ? CBZ.blastVolume(power) : 1 };
-      const dl = PURE.soundDelay(sd);                 // the boom arrives at 343 m/s
+      const so = { dist: scd, volume: CBZ.blastVolume ? CBZ.blastVolume(power) : 1 };
+      const dl = PURE.soundDelay(scd);                // the boom arrives at 343 m/s
       if (dl > 0) so.delay = dl;
       CBZ.sfx("explosion", so);
     }
-    if (CBZ.shake) CBZ.shake(5.5 * Math.min(2.4, power));
-    // deferred like cityExplosion's — the fireball exists before time stops
-    blastPunch(0.26, 0.5);
-    try { const fl = CBZ.el && CBZ.el.flash; if (fl) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); } } catch (e) {}
+    const satt = PURE.shakeAtten(scd, R);
+    if (CBZ.shake && satt > 0.02) CBZ.shake(5.5 * Math.min(2.4, power) * satt);
+    try { const fl = CBZ.el && CBZ.el.flash; if (fl && satt > 0.4) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); } } catch (e) {}
 
     // blast damage — SAME shared path as cityExplosion, just flings bodies harder
     const cause = opts.cause ||
@@ -2465,7 +2438,6 @@
   };
 
   CBZ.onAlways(9.5, function (dt) {
-    if (punchQ.length) pumpPunch(dt);
     if (puffs.length) updatePuffs(dt);
     // wall-blast scars: snap in, hold ~80–120s, fade out. Empty unless
     // FX_WALL_WOUNDS is flipped back on — the pool and this loop are kept so the

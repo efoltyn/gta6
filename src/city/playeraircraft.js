@@ -606,11 +606,57 @@
   // damage fallback (autorotation for the heli; a stall/dive bias for the
   // jet) so a skilled player can still fight it down instead of a guaranteed
   // death the instant the bar empties.
-  function damageCraft(craft, dmg) {
+  //
+  // GETTING SHOT AT FEELS LIKE THE AIRFRAME TAKING IT, NOT A CUTSCENE: rounds
+  // ring off the skin (a metallic smack + the whine of a skip), the airframe
+  // jolts (camera shake on the chase view, a seat jolt in the cockpit), a
+  // wedge on the screen rim points where it came from (eyes.js), and a hurt
+  // airframe trails smoke (tickDamageSmoke). The camera stays yours.
+  function damageCraft(craft, dmg, fromX, fromZ) {
     if (!craft || craft.destroyed || dmg <= 0) return;
     craft.hp = Math.max(0, craft.hp - dmg);
     if (CBZ.shake) { try { CBZ.shake(Math.min(0.5, 0.08 + dmg * 0.01)); } catch (e) {} }
-    if (CBZ.hitFlash) { try { CBZ.hitFlash(); } catch (e) {} }
+    if (CBZ.cockpitHitJolt) { try { CBZ.cockpitHitJolt(Math.min(1, 0.2 + dmg / 30)); } catch (e) {} }
+    if (CBZ.hitFlash) { try { CBZ.hitFlash(Math.min(1, 0.25 + dmg / 40)); } catch (e) {} }
+    if (fromX != null && fromZ != null && CBZ.eyes && CBZ.eyes.hitFrom) {
+      try { CBZ.eyes.hitFrom(fromX, fromZ, Math.min(1, dmg / 30)); } catch (e) {}
+    }
+    if (CBZ.sfx) {
+      try {
+        CBZ.sfx("hit", { volume: Math.min(1.2, 0.5 + dmg * 0.04) });
+        if (dmg < 25 && Math.random() < 0.45) CBZ.sfx("ricochet");
+      } catch (e) {}
+    }
+  }
+  // A HURT AIRFRAME SMOKES. Below 60% a thin grey wisp off the engine deck,
+  // thicker and darker as it drops, flame licks at the root once the engine
+  // is nearly gone. Throttled puffs on crashfx's pooled smoke sprites
+  // (cityCrashSmoke caps every call), so a limping bird costs a few sprites.
+  const SMOKE_AT = 0.6;
+  const _smokeWorld = { x: 0, y: 0, z: 0 };
+  function _setW(x, y, z) { _smokeWorld.x = x; _smokeWorld.y = y; _smokeWorld.z = z; }
+  function tickDamageSmoke(craft, dt) {
+    if (!CBZ.cityCrashSmoke || !craft || !craft.maxHp) return;
+    const frac = craft.hp / craft.maxHp;
+    if (frac >= SMOKE_AT) { craft._smokeT = 0; return; }
+    const hurt = 1 - frac / SMOKE_AT;                       // 0 at the threshold .. 1 wrecked
+    craft._smokeT = (craft._smokeT || 0) - dt;
+    if (craft._smokeT > 0) return;
+    craft._smokeT = 0.42 - 0.24 * hurt;                     // denser as it gets worse
+    // the engine sits aft of the cabin, behind the nose along the heading
+    // (the shared rig's nose is (sin h, cos h); airport meshes carry a model
+    // yaw offset in their group, so the group's local axes are not trusted)
+    const h = craft.heading || 0;
+    const back = craft.kind === "heli" ? 1.2 : Math.max(2.6, (craft.cameraAhead || 8) * 0.3);
+    _setW(craft.pos.x - Math.sin(h) * back, craft.pos.y + 0.9, craft.pos.z - Math.cos(h) * back);
+    try {
+      CBZ.cityCrashSmoke(_smokeWorld.x, _smokeWorld.y, _smokeWorld.z, {
+        count: hurt > 0.6 ? 2 : 1,
+        scale: 0.55 + hurt * 0.8,
+        shade: 0.42 - hurt * 0.32,                          // grey wisp -> black
+        flame: frac < 0.2,
+      });
+    } catch (e) {}
   }
   // 0..1 multiplier applied to the pilot's control inputs (thrust/yaw/climb/
   // bank) — degrades gently from CTRL_DEGRADE_AT down to CTRL_FLOOR, never to
@@ -628,7 +674,7 @@
   CBZ.cityPlayerAircraftDamage = function (dmg, fromX, fromZ) {
     const craft = _aircraftFlying();
     if (!craft) return false;
-    damageCraft(craft, dmg);
+    damageCraft(craft, dmg, fromX, fromZ);
     return true;
   };
   CBZ.cityPlayerAircraftHp = function () {
@@ -2329,6 +2375,7 @@
     // a wall strike / slammed touchdown crashed the craft this frame —
     // crashCraft already ran exitAircraft, so the pilot owns the transform
     if (craft.destroyed || !P._aircraft) return;
+    tickDamageSmoke(craft, dt);
     // ---- KEEP-GATE: land a HOT stolen F-22 inside a hangar you OWN, slow, and
     // it becomes permanently yours. This is the only way to keep the trophy.
     if (craft.hot && !craft.fromProp && craft.kind === "jet" && craft.speed < 16 && hangarKeepHit(craft.pos.x, craft.pos.z)) {
@@ -2518,7 +2565,7 @@
         if (craft && !craft.destroyed && dmg > 0) {
           const toCraft = dmg * CRAFT_ABSORB;
           const toPilot = dmg - toCraft;
-          damageCraft(craft, toCraft);
+          damageCraft(craft, toCraft, fromX, fromZ);
           if (toPilot > 0.05) return orig.call(this, toPilot, fromX, fromZ, reason, headshot, attacker, nonlethal);
           return; // fully absorbed by the airframe this hit
         }
