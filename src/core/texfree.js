@@ -49,7 +49,23 @@
       configurable: true,
       get: desc.get,
       set: function (v) {
-        if (v === true && this._cbzFreed) { A.repaintedAfterFree++; if (A.repaintedAfterFree < 8) console.warn("[texfree] a released canvas was repainted:", this.name || "(unnamed)"); }
+        if (v === true && this._cbzFreed) {
+          /* IT WAS LIVE AFTER ALL. The sweep's "not repainted for 30 s" read
+             a canvas painted on EVENTS (the sky dome, which repaints only
+             when the light moves: a still mid-morning on the title screen
+             is minutes; a TV nobody is near; a board) as settled and shrank
+             it, and this repaint just drew onto 1x1. Uploading that is the
+             black sky (the whole dome one corner pixel). Instead: give the
+             canvas its size back, never sweep it again, and SKIP this upload,
+             so the GPU keeps the last good picture until the painter's next
+             paint lands on a full-size canvas. */
+          A.repaintedAfterFree++;
+          const c = this.image;
+          if (c && this._cbzW) { c.width = this._cbzW; c.height = this._cbzH; }
+          this._cbzFreed = false; this._cbzKeep = true;
+          if (typeof this._cbzRepaint === "function") { try { this._cbzRepaint(); } catch (e) {} }
+          return;
+        }
         desc.set.call(this, v);
       },
     });
@@ -62,7 +78,7 @@
     let w = 0;
     for (let i = 0; i < tracked.length; i++) {
       const t = tracked[i].deref();
-      if (!t || t._cbzFreed) continue;              // gone, or done: drop the ref
+      if (!t || t._cbzFreed || t._cbzKeep) continue;   // gone, done, or live: drop the ref
       tracked[w++] = tracked[i];
       const c = t.image;
       if (!c || typeof c.getContext !== "function" || !(c.width * c.height >= MIN_PX)) continue;
@@ -75,6 +91,7 @@
       // uploaded would upload the 1x1)
       if (c._cbzTexCount && c._cbzTexCount > 1) continue;
       const mb = c.width * c.height * 4 / 1048576;
+      t._cbzW = c.width; t._cbzH = c.height;
       c.width = 1; c.height = 1;
       t._cbzFreed = true;
       A.freed++; A.freedMB += mb;
@@ -143,10 +160,20 @@
       if (!c || typeof c.getContext !== "function" || c.isConnected || tex._cbzFreed) return;
       if (c._cbzTexCount && c._cbzTexCount > 1) return;
       const mb = c.width * c.height * 4 / 1048576;
+      tex._cbzW = c.width; tex._cbzH = c.height;
       c.width = 1; c.height = 1;
       tex._cbzFreed = true; A.freed++; A.freedMB += mb;
       CBZ.freedStaticArrays = true;
     };
+    return t;
+  };
+  /* A canvas its owner repaints on events, at any interval (the sky): never
+     swept. repaint (optional) is called if it was ever released anyway, so the
+     owner can draw it again at once. */
+  CBZ.texKeep = function (t, repaint) {
+    if (!t) return t;
+    t._cbzKeep = true;
+    if (typeof repaint === "function") t._cbzRepaint = repaint;
     return t;
   };
   CBZ.texFreeAudit = function () { sweep(); return { tracked: tracked.length, created: A.tracked, freed: A.freed, freedMB: +A.freedMB.toFixed(1), lazyPainted: A.lazyPainted, lazyReleased: A.lazyReleased, repaintedAfterFree: A.repaintedAfterFree, sample: A.names.slice() }; };

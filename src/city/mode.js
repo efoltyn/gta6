@@ -680,13 +680,16 @@
       // civil war, the crown, border policy, the approval rating and every
       // statecraft policy all survived a fresh start. Each is a null-checked
       // one-liner, so a world that never loaded the module costs a comparison.
-      if (CBZ.regimesReset) CBZ.regimesReset();     // govType back to the seed's own
+      // (each of these comes back as THIS character's book at once: RunStart
+      // resets and re-reads the ledger in the same call)
+      if (CBZ.regimesRunStart) CBZ.regimesRunStart(); else if (CBZ.regimesReset) CBZ.regimesReset();
       if (CBZ.polwarReset) CBZ.polwarReset();       // no inherited state wars
       if (CBZ.civilwarReset) CBZ.civilwarReset();   // no inherited insurgency
       if (CBZ.crownReset) CBZ.crownReset();         // the throne is not hereditary across lives
       if (CBZ.migrationReset) CBZ.migrationReset(); // borders reopen
-      if (CBZ.approvalReset) CBZ.approvalReset();   // you are nobody again
-      if (CBZ.govReset) CBZ.govReset();             // policies back to default
+      if (CBZ.protectionRunStart) CBZ.protectionRunStart(); // details: this character's, not the last life's
+      if (CBZ.approvalRunStart) CBZ.approvalRunStart(); else if (CBZ.approvalReset) CBZ.approvalReset();
+      if (CBZ.govRunStart) CBZ.govRunStart(); else if (CBZ.govReset) CBZ.govReset();
       // the presidency's own book, back to THIS character's (after polity has
       // put the seats back): before the origin runs, so a swearing-in below
       // is the last word on it, never a later frame's hydrate

@@ -96,7 +96,7 @@
 
   let CLOCK = 0;
   const OUT = [];               // people walking out: { ped, t, door, max }
-  const W = { chief: null, press: null, driver: null, ringAt: -1e9, greeted: null };
+  const W = { chief: null, press: null, ringAt: -1e9, greeted: null };
 
   // ---- seams --------------------------------------------------------------
   function Pz() { return CBZ.presidency || null; }
@@ -787,29 +787,10 @@
     if (!O || !O._M || !O.audit) return null;
     try { const a = O.audit(); return a.aide ? a.aideRole || null : null; } catch (e) { return null; }
   }
-  // the driver waits at the state car (motorcade.js drives the column)
-  function tickDriver() {
-    const s = S(), M = CBZ.motorcade, P = CBZ.player;
-    const car = s.driver && M && M.car ? M.car() : null;
-    const busy = !!(M && M.active && M.active());
-    const want = !!(car && car.pos && !busy && P && P.pos && Math.hypot(P.pos.x - car.pos.x, P.pos.z - car.pos.z) < 70 && Math.abs((P.pos.y || 0) - (car.pos.y || 0)) < 4);
-    if (!want) { if (W.driver) { unpost(W.driver); W.driver = null; } return; }
-    if (W.driver && !W.driver.dead) return;
-    const h = car.heading != null ? car.heading : (car.group ? car.group.rotation.y : 0);
-    const x = car.pos.x + Math.cos(h) * 1.6, z = car.pos.z - Math.sin(h) * 1.6;
-    let p = null;
-    try { p = CBZ.cityPostNpc(x, z, { job: "chauffeur", archetype: "professional", armed: false, pin: true, face: h, floorY: car.pos.y || 0, src: "presstaff:driver" }); } catch (e) { p = null; }
-    if (!p) return;
-    p.name = s.driver.name; p.nameKnown = true; p.organization = "state"; p._presStaff = "driver"; p._iOnly = true;
-    W.driver = p;
-    // E: "Where to, sir?" The places ride on him (motorcade.js ask)
-    if (CBZ.interactions && CBZ.interactions.registerFor) {
-      CBZ.interactions.registerFor(p, { id: "pv-driver-drive", slot: "e", prio: 30, campaignSafe: true, forceYes: true,
-        label: "Drive",
-        canShow: function () { return !!seat() && !p.dead && !!(M && M.car && M.car()) && !(M.active && M.active()); },
-        onSelect: function () { if (!(M.ask && M.ask(p))) say(p, "Not now, sir.", 2); } });
-    }
-  }
+  // THE DRIVER IS NOT POSTED HERE. His record (name, sid) is the office's;
+  // his body is the agent at the state car's door (city/motorcade.js reads
+  // driverRecord()), the one man who asks where to and drives you there.
+
   function releaseOffice() {
     if (W.chief) { unpost(W.chief); W.chief = null; }
     if (W.press) { unpost(W.press); W.press = null; }
@@ -822,7 +803,7 @@
     CLOCK += dt;
     if (!playing()) return;
     hook();
-    if (!seat()) { if (W.chief || W.press || W.driver) { releaseOffice(); if (W.driver) { unpost(W.driver); W.driver = null; } } return; }
+    if (!seat()) { if (W.chief || W.press) releaseOffice(); return; }
     ensureStaffed();
     for (let i = OUT.length - 1; i >= 0; i--) {
       const o = OUT[i]; o.t += dt;
@@ -842,7 +823,6 @@
     acc += dt;
     if (acc < 0.5) return;
     acc = 0;
-    tickDriver();
     tickPress();
     // in the office she comes to get you; anywhere else she goes alone
     if (!W.pressAsking && !(W.press && r && nearOffice(r) && pressAsk())) brief();
@@ -860,6 +840,8 @@
 
   CBZ.presidentStaff = {
     vacant: vacant,
+    // the driver's record: his body is motorcade.js's door agent
+    driverRecord: function () { const s = S(); return s.driver ? { name: s.driver.name, sid: s.driver.sid } : null; },
     person: person,
     has: function (role) { return !vacant(role); },
     dismiss: dismiss,

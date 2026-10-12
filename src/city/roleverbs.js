@@ -420,20 +420,12 @@
     },
   };
 
-  /* -------------------------------------------------------------- the lift */
-  // THE CHAUFFEUR REUSES THE FARE. shops.js owns the only "somebody drives you
-  // across town" effect in this game (the cab's meter + crosstown drop); it is
-  // exported now, so an estate driver hires out on the SAME meter instead of a
-  // second teleport-and-charge. Refused at 2 stars for the cab's own reason: a
-  // driver with a licence does not carry a manhunt.
-  const ROW_LIFT = {
-    id: "rv-lift",
-    can: function (p, ctx) {
-      return !!(CBZ.cityCabRide && CBZ.cityCabFare && CBZ.cityCabFare() > 0 && (ctx.wanted | 0) < 2);
-    },
-    label: function () { return "Ride " + money(CBZ.cityCabFare()); },
-    run: function (p) { CBZ.cityCabRide(p); },
-  };
+  /* NO LIFT. The chauffeur row used to sell a ride across town that was a
+     teleport with a fare on it (shops.js's cab drop): no car, no drive, and
+     any "chauffeur" on a pavement or at an estate gate would do it. A man
+     with that job has no trade verb until he has a car to drive you in; the
+     President's driver at the state car is the one who does
+     (city/president_staff.js: Drive, the real motorcade). */
 
   /* ------------------------------------------------------------- the counter */
   // THE DESK JOBS DELEGATE. city/insurance.js owns the branch, the ladder, the
@@ -443,8 +435,8 @@
   // verb you get is a rank question and the owning file answers it, so a new
   // rung never touches this file either.
   //
-  // Written as a delegate rather than inline for the same reason ROW_LIFT calls
-  // shops.js's fare: the effect belongs to whoever owns the balance it moves.
+  // Written as a delegate rather than inline: the effect belongs to whoever
+  // owns the balance it moves.
   const ROW_INSURANCE = {
     id: "rv-insurance",
     can: function (p, ctx) { return !!(CBZ.insuranceVerb && CBZ.insuranceVerb(p, ctx)); },
@@ -481,8 +473,6 @@
     // --- somebody's parcel, somebody's address
     "courier": ROW_RUN, "delivery driver": ROW_RUN,
     "catering driver": ROW_RUN, "airfield driver": ROW_RUN,
-    // --- the wheel
-    "chauffeur": ROW_LIFT,
     // --- the counter that pays when the roof comes in (city/insurance.js)
     "insurance clerk": ROW_INSURANCE, "insurance adjuster": ROW_INSURANCE,
     "underwriter": ROW_INSURANCE, "claims manager": ROW_INSURANCE,

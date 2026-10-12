@@ -4476,7 +4476,6 @@
       household: [
         { job: "housekeeper", at: "door", outfit: 0xd8dce0 },
         { job: "estate cook", at: "yard", outfit: 0xe8eaec },
-        { job: "chauffeur", at: "court", pose: "foldarms", outfit: 0x2b2f36 },
         { job: "groundskeeper", at: "garden", outfit: 0x4f6a3a },
       ],
       build: function (c) {
@@ -4843,7 +4842,6 @@
       interiors: { main: ["room:lounge", "bosssuite"], aux: ["storage"] },
       household: [
         { job: "housekeeper", at: "door", outfit: 0xd8dce0 },
-        { job: "chauffeur", at: "court", pose: "foldarms", outfit: 0x2b2f36 },
         { job: "groundskeeper", at: "garden", outfit: 0x4f6a3a },
       ],
       build: function (c) {

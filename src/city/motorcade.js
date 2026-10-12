@@ -1576,7 +1576,7 @@
 
   // the E press beside a column car, for the President, is a word with the
   // agent, never a carjack (the ride router fires before any card)
-  // the office comes with a driver (city/president_staff.js posts him at the car)
+  // the office's driver is the door agent (tickDoorAgent, president_staff.js's record)
   function wantsAgent() {
     const P = CBZ.player;
     if (!P || !P.pos || P.dead || P.driving || P._vehicle || BOARD) return false;
@@ -1743,7 +1743,25 @@
       const p = carPoint(sc, 1.9, -1.0);
       if (!unseen(p.x, p.z) && d2(P.pos.x, P.pos.z, p.x, p.z) < 40) return;   // never materialise in view
       const ped = postPed(p.x, p.z, "agent", { pin: true, face: Math.atan2(-Math.cos(sc.heading), Math.sin(sc.heading)) });
-      if (ped) { MC.doorAgent = ped; if (CBZ.setCharPose && ped.char) { try { CBZ.setCharPose(ped.char, "foldarms"); } catch (e) {} } }
+      if (ped) {
+        MC.doorAgent = ped;
+        if (CBZ.setCharPose && ped.char) { try { CBZ.setCharPose(ped.char, "foldarms"); } catch (e) {} }
+        // ONE MAN FOR ONE JOB. The office's driver (city/president_staff.js
+        // keeps his name and his record) IS this agent: he stands at the
+        // door, asks where to, opens it, and takes the front seat for the
+        // ride. There used to be a second body, a chauffeur posted beside
+        // the same car with his own Drive button.
+        const S = CBZ.presidentStaff;
+        let rec = null; try { rec = S && S.driverRecord ? S.driverRecord() : null; } catch (e) { rec = null; }
+        if (rec && rec.name) { ped.name = rec.name; ped.nameKnown = true; }
+        ped._presStaff = "driver";
+        if (CBZ.interactions && CBZ.interactions.registerFor) {
+          CBZ.interactions.registerFor(ped, { id: "mc-door-drive", slot: "e", prio: 30, campaignSafe: true, forceYes: true, anyone: true,
+            label: "Drive",
+            canShow: function () { return !ped.dead && playerPresident() && !!stateCar() && !BOARD && !(RUN && (RUN.phase === "drive" || RUN.phase === "evac")); },
+            onSelect: function () { askWhere(ped); } });
+        }
+      }
     } else if (!want && a && !a._npcAttached && P && P.pos && d2(P.pos.x, P.pos.z, a.pos.x, a.pos.z) > AGENT_R + 40) {
       unpost(a); MC.doorAgent = null;
     }

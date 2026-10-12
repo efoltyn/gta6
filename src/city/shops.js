@@ -2067,13 +2067,6 @@
     if (P.vel) { P.vel.x = 0; P.vel.z = 0; }
     CBZ.city.note("Dropped across town · " + fmt$(fare) + " on the meter.", 2.2);
   }
-  // A CAB IS A FARE, AND A FARE IS NOT A CAB DRIVER. The crosstown drop above
-  // is the only "somebody drives you" effect in the game; a chauffeur standing
-  // at an estate gate wants exactly it and should never re-author the meter.
-  // Exported (not restructured) so city/roleverbs.js can hang a second trade
-  // on the same fare instead of typing a third teleport-and-charge.
-  CBZ.cityCabFare = cabFare;
-  CBZ.cityCabRide = cabRide;
 
   // is this counter shut for the night? (interact.js hides Buy on a shut shop)
   CBZ.cityShopShut = shopShutSoft;

@@ -132,17 +132,24 @@
   // page all resolve to CBZ.sqlitedb being absent/inert and this file
   // behaving exactly as it always has.
   function load() {
+    // THE NEWER OF THE TWO. sqlite is the primary once it is up, but a
+    // session in which it never came up wrote only the mirror, and a mirror
+    // over the quota stopped being written at all: whichever copy was saved
+    // last is the character.
+    let cached = null, mirror = null;
     try {
       if (CBZ.sqlitedb && CBZ.sqlitedb.isAvailable && CBZ.sqlitedb.isAvailable()) {
-        const cached = CBZ.sqlitedb.cachedWorld();
-        if (cached && cached.version === 2) return cached;
+        const c = CBZ.sqlitedb.cachedWorld();
+        if (c && c.version === 2) cached = c;
       }
-      if (!window.localStorage) return null;
-      const raw = localStorage.getItem(STORE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      return parsed && parsed.version === 2 ? parsed : null;
-    } catch (e) { return null; }
+    } catch (e) { cached = null; }
+    try {
+      const raw = window.localStorage ? localStorage.getItem(STORE_KEY) : null;
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && parsed.version === 2) mirror = parsed;
+    } catch (e) { mirror = null; }
+    if (cached && mirror) return (+mirror.lastSaved || 0) > (+cached.lastSaved || 0) ? mirror : cached;
+    return cached || mirror;
   }
 
   function save(w) {
@@ -169,11 +176,63 @@
     }
   }
 
+  /* THE SAVE STORE COMES UP BEFORE THE RUN DOES. sqlite (src/net/sqlitedb.js)
+     is the primary store once its async init finishes, and the localStorage
+     copy is only a mirror, one that STOPS being written the moment the save
+     outgrows the quota (Safari: ~5 MB, so an iPad hits it first). Before
+     this, a Play pressed while sqlite was still coming up (a fresh page on an
+     iPad: the OPFS worker and the wasm take seconds) loaded that stale mirror,
+     and anything that touched the ledger on the title screen pinned it for
+     the whole session: a President resumed into an old world that never
+     seated him, and the autosave then wrote that old world over the real one.
+     Now: the human start waits for the store (CBZ.cityWorldStoreReady, used by
+     systems/state.js), and a ledger read from the mirror before the store
+     settled is dropped when it does, as long as no run has started on it. */
+  let fromMirror = false, runBegun = false, storeSettled = false;
+  function storePending() {
+    const S = CBZ.sqlitedb;
+    return !!(S && typeof S.ready === "function" && !storeSettled);
+  }
   function ensure() {
-    if (!g.cityWorld || g.cityWorld.version !== 2) g.cityWorld = load() || fresh();
+    if (!g.cityWorld || g.cityWorld.version !== 2) {
+      fromMirror = storePending();
+      g.cityWorld = load() || fresh();
+    }
     return g.cityWorld;
   }
   CBZ.cityWorldEnsure = ensure;
+  /* HAND THE ACTIVE SLOT TO ANOTHER LEDGER (city/origins.js's character
+     switch). It used to write the localStorage key by hand and set
+     g.cityWorld = null for a never-played character, and the next ensure()
+     then asked load(), which prefers sqlite's cached copy: the OUTGOING
+     character. Picking a new story with sqlite up resumed the old life. The
+     slot now changes hands in both stores at once; null mints a fresh one. */
+  CBZ.cityWorldSet = function (w) {
+    g.cityWorld = (w && w.version === 2) ? w : fresh();
+    fromMirror = false;
+    save(g.cityWorld);
+    return g.cityWorld;
+  };
+  let storePromise = null;
+  CBZ.cityWorldStoreReady = function (timeoutMs) {
+    if (!storePromise) {
+      const S = CBZ.sqlitedb;
+      const init = (S && typeof S.ready === "function") ? Promise.resolve().then(function () { return S.ready(); }).catch(function () { return null; }) : Promise.resolve(null);
+      storePromise = init.then(function () {
+        storeSettled = true;
+        // a mirror ledger nobody has played on yet: read it again from the store
+        if (fromMirror && !runBegun && g.cityWorld && S && S.isAvailable && S.isAvailable() && S.cachedWorld && S.cachedWorld()) {
+          g.cityWorld = null;
+          fromMirror = false;
+        }
+        return true;
+      });
+    }
+    const t = timeoutMs > 0 ? timeoutMs : 6000;
+    return Promise.race([storePromise, new Promise(function (res) { setTimeout(function () { res(false); }, t); })]);
+  };
+  // kick it off at parse: by the time anybody presses Play it is usually done
+  setTimeout(function () { try { CBZ.cityWorldStoreReady(); } catch (e) {} }, 0);
 
   function commit() {
     const w = ensure();
@@ -244,6 +303,7 @@
   CBZ.cityWorldCommit = commit;
 
   function applyToGame() {
+    runBegun = true;
     const w = ensure();
     const restoreWeapon = w.weapon || null;
     g.cash = w.cash || 0;

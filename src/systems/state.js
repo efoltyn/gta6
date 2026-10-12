@@ -667,6 +667,18 @@
   // during boot still can't build a half-registered world.
   function startRunPresented() {
     if (!CBZ.bootComplete || bootBusy) return;
+    // A CITY RUN STARTS ON THE REAL SAVE. sqlite comes up asynchronously
+    // (seconds on an iPad: the OPFS worker and the wasm), and a Play pressed
+    // before it settled ran on the stale localStorage mirror (city/
+    // worldstate.js cityWorldStoreReady). Wait for it, capped, then start.
+    if (g.mode === "city" && CBZ.cityWorldStoreReady) {
+      bootBusy = true;
+      CBZ.cityWorldStoreReady(6000).then(function () {
+        bootBusy = false;
+        if (!bootMeterOn()) startRun(); else present(g.mode, false, startRun);
+      });
+      return;
+    }
     if (!bootMeterOn()) { startRun(); return; }
     present(g.mode, false, startRun);
   }

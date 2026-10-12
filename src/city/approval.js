@@ -567,6 +567,12 @@
     _decayShocks: decayShocks,
   };
   CBZ.approvalReset = reset;
+  // A RUN STARTS ON THIS CHARACTER'S OWN BOOK, synchronously (city/mode.js).
+  // The hydrate below used to be the only way back, on a later frame and
+  // only when the ledger OBJECT changed: a same-session restart kept the
+  // wiped state, and a title-screen switch committed it into the outgoing
+  // character's save before the tick ever ran.
+  CBZ.approvalRunStart = function () { reset(); _hydratedLedger = null; hydrateFromLedger(); };
 
   // ============================================================
   //  SINGLE-PLAYER PERSIST — the same g.cityWorld pattern every P/E/X-wave

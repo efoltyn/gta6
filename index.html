@@ -446,7 +446,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=gait1011"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
-<script src="src/core/texfree.js?v=pf0930a"></script>
+<script src="src/core/texfree.js?v=boot1013"></script>
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=memfit1008"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
@@ -532,7 +532,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
 <script src="src/systems/digsite.js?v=dig1"></script>
 <script src="src/core/lights.js?v=flicker1009b"></script>
-<script src="src/core/sky.js?v=w09290204"></script>
+<script src="src/core/sky.js?v=boot1013"></script>
 <script src="src/core/daynight.js?v=pres1012"></script>
 
 <!-- 2. world geometry -->
@@ -1002,7 +1002,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=army1013m"></script>
+<script src="src/systems/state.js?v=boot1013"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1428,7 +1428,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=solid1011b"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
-<script src="src/city/mode.js?v=pres1012"></script>
+<script src="src/city/mode.js?v=boot1013"></script>
 <script src="src/city/economy.js?v=vit3"></script>
 <script src="src/city/clothes.js?v=armhole1011"></script>
 <script src="src/city/outfits.js?v=armourm1011"></script>
@@ -1440,7 +1440,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/law.js?v=brainmoves1"></script>
 <script src="src/city/wanted.js?v=dogs1009b"></script>
 <script src="src/city/identity.js?v=perm1"></script>
-<script src="src/city/worldstate.js?v=onebar0930"></script>
+<script src="src/city/worldstate.js?v=boot1013"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
@@ -1630,7 +1630,7 @@ document.body.appendChild(b);}}catch(e){}})();
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
 <script src="src/systems/tornado.js?v=street1009"></script>
 <script src="src/city/aircraftimpact.js?v=street1009"></script>
-<script src="src/city/shops.js?v=verbs2b"></script>
+<script src="src/city/shops.js?v=boot1013"></script>
 <script src="src/city/gunstore.js?v=tap0929"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
@@ -1732,7 +1732,7 @@ document.body.appendChild(b);}}catch(e){}})();
      prop rummage (interact.js), all of which are already loaded here.
      CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
-<script src="src/city/roleverbs.js?v=pres1012"></script>
+<script src="src/city/roleverbs.js?v=boot1013"></script>
 <script src="src/city/restrain.js?v=btn1011"></script>
 <script src="src/city/custody.js?v=btn1011"></script>
 <script src="src/city/combat.js?v=rounds1013m"></script>
@@ -1953,7 +1953,7 @@ document.body.appendChild(b);}}catch(e){}})();
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=army1013m"></script>
+<script src="src/city/origins.js?v=boot1013"></script>
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
@@ -2203,9 +2203,9 @@ document.body.appendChild(b);}}catch(e){}})();
      decisions (roles, stable slots, smoothed follow, sector scans, the panic
      protocol, counter-snipers) for every detail in the city. -->
 <script src="src/city/brain_protection.js?v=standdown1009b"></script>
-<script src="src/city/protection.js?v=pres1012"></script>
+<script src="src/city/protection.js?v=boot1013"></script>
 <script src="src/city/officials.js?v=polsim1008b"></script>
-<script src="src/city/approval.js?v=polsim1008b"></script>
+<script src="src/city/approval.js?v=boot1013"></script>
 <script src="src/city/elections.js?v=address1008"></script>
 
 <!-- X-wave: the world -->
@@ -2247,7 +2247,7 @@ document.body.appendChild(b);}}catch(e){}})();
      LAST in the P/X-wave block: it reads CBZ.relations.warPressure +
      CBZ.hunger.miseryIndex (both above) on top of polity/approval/elections
      (also above), so every dependency is already live by the time it parses. -->
-<script src="src/city/regimes.js?v=polsim1008b"></script>
+<script src="src/city/regimes.js?v=boot1013"></script>
 <!-- P6b: the crown as a bloodline (monarchy succession/legitimacy/royal
      marriages) — regimes.js's own tickCountry() deliberately never enters
      monarchy; this file owns that regime entirely. Loads LAST in the P/X-
@@ -2336,7 +2336,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/officialdom.js?v=cd0929"></script>
 <script src="src/city/candidacy.js?v=cd0929"></script>
 <script src="src/city/civic.js?v=nodash1"></script>
-<script src="src/city/statecraft.js?v=army1013m"></script>
+<script src="src/city/statecraft.js?v=boot1013"></script>
 
 <!-- THE PROTECTION LAYER (owner: "a mob boss and soldiers protecting, or gov
      and police protecting — see how NPCs interact based on roles and levels
@@ -2402,7 +2402,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=pres1012"></script>
+<script src="src/city/govcomplex.js?v=boot1013"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2414,7 +2414,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=pres1012"></script>
+<script src="src/city/presidency.js?v=boot1013"></script>
 <script src="src/city/politics.js?v=btn1011"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
@@ -2425,14 +2425,14 @@ document.body.appendChild(b);}}catch(e){}})();
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=pres1012"></script>
-<script src="src/city/motorcade.js?v=farform1011m"></script>
+<script src="src/city/motorcade.js?v=boot1013"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
      readiness, the Bureau's thread, a former who comes back; the Chief of
      Staff fills a chair with two names (loyal or good); refusals feed
      loyalty, loyalty feeds the coup. After presidency.js,
      president_office.js, protection.js, motorcade.js. -->
-<script src="src/city/president_staff.js?v=btn1011"></script>
+<script src="src/city/president_staff.js?v=boot1013"></script>
 <!-- THE COMMANDER IN CHIEF (city/warroom.js): war / peace / airstrike / nuke
      for a sitting President, ordered from the Situation Room's red phones and
      map (presidency.js) or the detail agent carrying the football. Rides

@@ -209,6 +209,13 @@
   skyCanvas.width = SKY_W; skyCanvas.height = SKY_H;
   const skyCtx = skyCanvas.getContext("2d");
   const skyTex = new THREE.CanvasTexture(skyCanvas);
+  // THE DOME IS LIVE. It is repainted only when the light moves, and a still
+  // mid-morning (the title screen, a role being picked) moves nothing for
+  // minutes: core/texfree.js's sweep took that for a settled canvas, shrank
+  // it to 1x1 after 30 s, and the first repaint of the run (Play moves the
+  // camera and the fog) uploaded one pixel: the black sky at the start of a
+  // fresh page. Never swept.
+  if (CBZ.texKeep) CBZ.texKeep(skyTex);
   const dome = new THREE.Mesh(
     // 48x32 rather than 32x20: at altitude the horizon ramp compresses to a
     // few degrees (see hazeK below) and a 9°-tall latitude band was wide

@@ -457,7 +457,7 @@
     if (!p || p.dead || p.player || p.isPlayer) return null;
     const h = seat();
     if (!h) return null;
-    if (p._protUnit === "mansion" || p._protUnit === "off_" + h.id || p._occupySrc === "motorcade" || p._presPublic) return "security";
+    if (p._protUnit === "mansion" || p._protUnit === "off_" + h.id || p._occupySrc === "motorcade" || p._motorcade || p._presPublic) return "security";
     if (p._presStaff || p._presOfficer) return "staff";
     const site = mansionSite();
     if (site && p._govSite === site.id && p !== site.actor) return "staff";
@@ -3295,6 +3295,22 @@
     if (!led || led === _hydrated) return;
     _hydrated = led;
     if (led.pres) apply(led.pres);
+    reseatIfLost();
+  }
+  /* A SAVE THAT LOST HIS SEAT. Saves written by the old run-start race (the
+     seats wiped at reset, committed before they came back) hold a sitting
+     President's country with nobody in the chair: no deputy, no winner, no
+     junta, just null. Nothing legitimate leaves it that way while he lives
+     (an election seats its winner, an impeachment the deputy or a vacuum
+     with the Senate's verdict on him, a coup its general), so a presidency
+     that began, was never removed and finds its seat simply empty is put
+     back through the one swear-in path. */
+  function reseatIfLost() {
+    const S = st();
+    if (!S.began || !S.wasPresident || S.impeached || S.arrestArmed || !S.lastSeatId || seat()) return;
+    const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(S.lastSeatId) : null;
+    if (!rec || !rec.office || rec.office.holder != null || rec.vacuum != null) return;
+    if (CBZ.cityRun && CBZ.cityRun.swearIn) { try { CBZ.cityRun.swearIn(rec.id, { quiet: true }); } catch (e) {} }
   }
   // 46.27 — free by grep (46.18 polwar, 46.19 migration, 46.2 countries,
   // 46.21 civilwar, 46.22-46.26 the sim family). Sits after every record we

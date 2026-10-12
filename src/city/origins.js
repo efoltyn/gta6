@@ -270,7 +270,16 @@
     return v;
   }
   function saveVault(v) {
-    try { localStorage.setItem(VAULT_KEY, JSON.stringify(v)); } catch (e) {}
+    try { localStorage.setItem(VAULT_KEY, JSON.stringify(v)); }
+    catch (e) { console.error("[origins] the character vault did not save (storage full?): a parked life may be lost", e); }
+  }
+  // the active slot changes hands in BOTH stores (city/worldstate.js
+  // cityWorldSet): a hand-written localStorage key left sqlite holding the
+  // outgoing character, and the next load() handed that one back
+  function setActive(w) {
+    if (CBZ.cityWorldSet) { CBZ.cityWorldSet(w); return; }
+    g.cityWorld = w;
+    try { if (w) localStorage.setItem(MAIN_KEY, JSON.stringify(w)); else localStorage.removeItem(MAIN_KEY); } catch (e) {}
   }
   function carryShared(from, to) {
     if (!from || !to) return;
@@ -307,16 +316,14 @@
     if (incoming) {
       carryShared(g.cityWorld, incoming);                 // the city moved on while they were away
       saveVault(v);
-      g.cityWorld = incoming;
-      try { localStorage.setItem(MAIN_KEY, JSON.stringify(incoming)); } catch (e) {}
+      setActive(incoming);
     } else {
-      // never played: park the shared world; the fresh ledger is minted by
-      // the next cityWorldEnsure() (inside cityOriginApply) and receives it.
+      // never played: park the shared world; a fresh ledger takes the slot
+      // now (cityOriginApply's consumeShared hands it the shared world)
       pendingShared = {};
       carryShared(g.cityWorld, pendingShared);
       saveVault(v);
-      g.cityWorld = null;
-      try { localStorage.removeItem(MAIN_KEY); } catch (e) {}
+      setActive(null);
     }
     g.cityOrigin = id;
     if (CBZ.setCityOrigin) CBZ.setCityOrigin(id);
@@ -346,8 +353,7 @@
       saveVault(v);
       pendingShared = {};
       carryShared(w, pendingShared);                    // the city rides across
-      g.cityWorld = null;
-      try { localStorage.removeItem(MAIN_KEY); } catch (e) {}
+      setActive(null);
       return true;
     } catch (e) { return false; }
   }

@@ -1152,6 +1152,12 @@
   };
   CBZ.govAudit = audit;
   CBZ.govReset = reset;
+  // A RUN STARTS ON THIS CHARACTER'S OWN BOOK, synchronously (city/mode.js).
+  // The hydrate below used to be the only way back, on a later frame and
+  // only when the ledger OBJECT changed: a same-session restart kept the
+  // wiped state, and a title-screen switch committed it into the outgoing
+  // character's save before the tick ever ran.
+  CBZ.govRunStart = function () { reset(); _hydrated = null; hydrate(); };
 
   // ============================================================
   //  PERSISTENCE — deployed BODIES are runtime-only (the repo-wide
