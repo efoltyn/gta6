@@ -207,15 +207,38 @@
   function world(cv) {
     const H = cv.host;
     return { groundAt: H.groundAt, waterAt: H.waterAt, blockedAt: H.blockedAt,
-      roads: H.roads ? H.roads() : null, avoid: cv.avoid };
+      entryAt: H.entryAt, roads: H.roads ? H.roads() : null, avoid: cv.avoid };
   }
+  // A ROUTE IS WAYPOINTS, NOT A STRAIGHT LINE. It was driven verbatim, start
+  // to point to point in straight legs: martial law's one-point route from
+  // Fort Brandt's gate to the President drove a JLTV across the city in a
+  // straight line and into the Mansion. Every leg is planned on the roads
+  // (RG.plan, whose goal is driveTarget: the kerb by the door, never inside).
   function planLeg(cv, from, to) {
     const R = RG();
-    if (cv.route && !cv.routeUsed) {
+    if (cv.route && !cv.routeUsed && cv.route.length > 1) {
       cv.routeUsed = true;
-      const pts = [{ x: from.x, z: from.z }].concat(cv.route.map(function (p) { return { x: p.x, z: p.z }; }));
-      return { pts: pts, radii: pts.map(function (p, i) { return i === 0 || i === pts.length - 1 ? 0 : 14; }), junctions: [], kind: "route", ok: true };
+      let pts = [], radii = [], junctions = [], at = from, ok = true;
+      for (let i = 0; i < cv.route.length; i++) {
+        const L = planOne(cv, at, cv.route[i]);
+        const k0 = pts.length ? 1 : 0;
+        for (let k = k0; k < L.pts.length; k++) { pts.push(L.pts[k]); radii.push(k === L.pts.length - 1 && i < cv.route.length - 1 ? 14 : L.radii[k]); }
+        junctions = junctions.concat(L.junctions || []);
+        ok = ok && L.ok;
+        at = L.pts[L.pts.length - 1];
+      }
+      radii[0] = 0; radii[radii.length - 1] = 0;
+      cv.to = { x: at.x, z: at.z };
+      return { pts: pts, radii: radii, junctions: junctions, kind: "route", ok: ok };
     }
+    cv.routeUsed = true;
+    const L = planOne(cv, from, to);
+    const e = L.pts[L.pts.length - 1];
+    if (e && cv.to === to) cv.to = { x: e.x, z: e.z };      // the column's objective is where it can park
+    return L;
+  }
+  function planOne(cv, from, to) {
+    const R = RG();
     const G = cv.host.roads ? R.of(cv.host.roads()) : null;
     return R.plan(world(cv), from, to, {
       maxGrade: cv.maxGrade, r: cv.bodyR, offRoad: 160, radius: 16,

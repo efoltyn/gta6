@@ -81,6 +81,7 @@ const CONVOY_HOST = {
     return false;
   },
   roads: function () { return HOST.roads || null; },
+  entryAt: function (x, z) { return HOST.entryAt ? HOST.entryAt(x, z) : null; },
   town: function () { return !!HOST.roads; },                  // the downtown is all town
   camPos: function () { return CONVOY.camAt || (CBZ.camera && CBZ.camera.position) || null; },
   // WHAT THE COLUMN'S CREWS SEE: each hull's mark (vehicles.js vehPickTarget,
