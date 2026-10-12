@@ -2943,7 +2943,7 @@
       HWSET.lum = { set: HW.chunked("mast-luminaire", lumGeo, M, lumItems, { cast: true }).addTo(root), geo: lumGeo, mat: M, items: lumItems };
       const lenses = HW.chunked("lamp-lens", HW.lampLens(), headLampM, lampBulbSpots.map(function (sp) {
         return { x: sp.x + Math.sin(sp.ang) * LO.bulbZ, y: sp.y0 + LO.bellyY - 0.004, z: sp.z + Math.cos(sp.ang) * LO.bulbZ, ry: sp.ang };
-      }), { cast: false, receive: false, maxDist: 600 }).addTo(root);
+      }), { cast: false, receive: false, maxDist: { px: 0.5 } }).addTo(root);    // the lens's own size (core/sight.js)
       lampPools.bulb = lenses;
     }
     if (HW) {
@@ -3714,16 +3714,18 @@
       for (const kind in ITEMS) {
         const Kd = KIT[kind];
         if (!Kd || !ITEMS[kind].length) continue;
-        KERB_SETS[kind] = HW.chunked("kerb-" + kind, Kd.whole, VC, ITEMS[kind], { cast: kind !== "grate", maxDist: 320 }).addTo(root);
+        KERB_SETS[kind] = HW.chunked("kerb-" + kind, Kd.whole, VC, ITEMS[kind], { cast: kind !== "grate", maxDist: { px: 0.9 } }).addTo(root);   // a bin/hydrant/bench is still a pixel at ~1 km (it was cut at 320 m)
         KERB_STATS.drawSets += KERB_SETS[kind].meshes.length;
       }
+      // street trees stand to the eye's fog ("sight", core/sight.js): a 420 m gate
+      // planted every kerb tree in view inside a 560-1400 m fog
       if (GRAM && trunkItems.length) {
-        KERB_SETS._trunk = HW.chunked("kerb-tree-trunk", trunkGeo, trunkM, trunkItems, { cast: true, maxDist: 420 }).addTo(root);
+        KERB_SETS._trunk = HW.chunked("kerb-tree-trunk", trunkGeo, trunkM, trunkItems, { cast: true, maxDist: "sight" }).addTo(root);
         KERB_STATS.drawSets += KERB_SETS._trunk.meshes.length;
         for (let c = 0; c < 2; c++) {
           if (!crownItems[c].length) continue;
           const dm = VKIT && VKIT.depthMaterial && crownGeo.userData && crownGeo.userData.leafCards ? VKIT.depthMaterial("foliage") : null;
-          KERB_SETS["_crown" + c] = HW.chunked("kerb-tree-crown" + c, crownGeo, crownMs[c], crownItems[c], { cast: true, maxDist: 420,
+          KERB_SETS["_crown" + c] = HW.chunked("kerb-tree-crown" + c, crownGeo, crownMs[c], crownItems[c], { cast: true, maxDist: "sight",
             perMesh: function (im) { if (dm) im.customDepthMaterial = dm; } }).addTo(root);
           KERB_STATS.drawSets += KERB_SETS["_crown" + c].meshes.length;
         }

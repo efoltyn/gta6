@@ -342,71 +342,23 @@
     const focus = CBZ.player && CBZ.player.pos ? CBZ.player.pos : A.center;
     if (CBZ.lightRig && CBZ.lightRig.cityFrame) CBZ.lightRig.cityFrame(focus);
     // Fog is atmospheric depth over the REAL coast, terrain and buildings.
-    // It no longer meets or hides a painted skyline ring. The range rides the
-    // quality tier and farcull starts only after full fog dissolution.
-    // Aircraft are explicitly an aerial sightseeing mode. Keeping the normal
-    // street-level fog/cull envelope while the player is 70m up made whole
-    // districts disappear outside a small bubble — the "Truman Show" effect
-    // in the flight screenshot. Expand only while an aircraft owns the player;
-    // ground play keeps the normal quality-tier budget.
-    // AIRBORNE IS AN ALTITUDE, NOT A VEHICLE (owner, from a canopy at 185m:
-    // "the horizon, certain things like cities look blue and kinda dumb").
-    //
-    // This test used to require P._aircraft — but the moment you BAIL OUT you
-    // no longer have one, so a player under a parachute (or in freefall) got
-    // the 1000m GROUND fog while hanging a couple of hundred metres up looking
-    // at the whole map. The comment right below has always said what that does:
-    // a short fog wall "painted dry land into a uniform cyan sheet". That sheet
-    // is precisely what he screenshotted, and it was never a fog-colour problem
-    // — it was the wrong fog distance for where he actually was.
-    //
-    // What matters is height above ground, whatever is or is not carrying you.
-    const P_ = CBZ.player;
-    const chuting = !!(CBZ.cityChuteState && CBZ.cityChuteState());
-    const highUp = !!(P_ && P_.pos && P_.pos.y > 24 && !P_.grounded);
-    // THE AIR IS AROUND THE EYE, NOT THE BODY. A camera hanging far above a
-    // player on the ground (a drone / photo / cinematic lens, every aerial
-    // tool shot) used to get the GROUND fog: fog.far 760 with the aerial
-    // melt (core/renderer.js) at full strength, so everything past ~400 m
-    // went to the horizon white: the metro tour's "washed white" frames.
-    const camY = CBZ.camera ? CBZ.camera.position.y : -1e9;
-    const lifted = !!(P_ && P_.pos && camY - P_.pos.y > 60);
-    const airborne = !!(P_ && P_.pos && ((P_.pos.y > 24 && (P_._aircraft || chuting || highUp)) || lifted));
-    // HOW FAR A CLEAR DAY SEES FROM UP THERE. Real air on a clear day has a
-    // meteorological visibility of 25-40 km; the kilometres in between are
-    // carried by the physical haze on the ground, the metro and the plate
-    // (terrain_overhaul.js aerialHaze: Koschmieder extinction through a
-    // 1.4 km haze layer, 7.5 km e-folding along the ground). THREE.Fog here
-    // only closes the world where it ends, and the aerial melt forces it to
-    // the horizon colour from fog.far/2 on. At 4200 m flat that put a white
-    // wall 2-4 km out from any altitude (owner's flyover: "colors look weird
-    // from a distance"), where real air still shows the ground at 60-70%
-    // contrast. So the closing distance grows with the eye's height, from
-    // 4200 m skimming the roofs to 11 km at 760 m and above (the far side of
-    // the continent from its middle); the ocean disc (world/water_spec.js)
-    // reaches past it.
-    const eyeY = Math.max(camY, P_ && P_.pos ? P_.pos.y : 0);
-    const airT = Math.max(0, Math.min(1, (eyeY - 60) / 700));
-    const airFar = 4200 + 6800 * airT * airT * (3 - 2 * airT);
-    if (CBZ.scene.fog) {
-      // A 1.8km fog wall is inside the authored Mercy range and painted dry
-      // land into a uniform cyan sheet. Aircraft need continental visibility;
-      // static detail still obeys farcull/LOD, so this mostly reveals the one
-      // country mesh, one ocean mesh and the landmark terrain draws.
-      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, airFar) : (CBZ.cityFogFar || 1000);
-      CBZ.scene.fog.near = Math.max(90, Math.round(ff * 0.16)); CBZ.scene.fog.far = ff;
-    }
+    // AIRBORNE IS AN ALTITUDE, NOT A VEHICLE (a plane, a heli, a chute, a
+    // freefall), and THE AIR IS AROUND THE EYE, NOT THE BODY (a lens hung far
+    // above a body on the ground sees the airborne range too). How far a
+    // clear day sees from up there, 4200 m skimming the roofs to 11 km at
+    // 760 m and above, is core/sight.js's: ONE answer that the fog, the far
+    // plane, the streamer, farcull and every scatter read, so nothing can be
+    // built, shown or swapped inside the picture (owner 2026-10-11: "I don't
+    // like things spawning in view"). sightPublish also refreshes the shared
+    // near/far hand-over uniforms for this frame.
+    const SG = CBZ.sightPublish();
+    const airborne = SG.airborne;
+    if (CBZ.scene.fog) { CBZ.scene.fog.near = SG.near; CBZ.scene.fog.far = SG.far; }
     if (CBZ.camera) {
-      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, airFar) : (CBZ.cityFogFar || 1000);
-      // Distant landmarks may request projection room without widening city
-      // fog or the full-detail cull bubble. Mount Mercy is a single terrain
-      // draw; keeping it through the airfield view has negligible scene cost.
-      // The metro cities are REAL to the horizon (city/metro.js): while one
-      // is in view the plane reaches its farthest tile, where its haze is
-      // complete. Precision stays where it was: at a 0.1 m near plane depth
-      // resolution is set by the near plane, not the far one.
-      const landmarkFar = Math.max(CBZ.cityDistantLandmarkFar || 0, CBZ.metroViewFar || 0);
-      const wantFar = airborne ? Math.max(7000, ff + 900, landmarkFar) : Math.max(1400, ff + 180, landmarkFar);
+      // Distant landmarks (Mount Mercy, the metro HLOD tiles) get projection
+      // room past the fog through SG.camFar; precision stays with the near
+      // plane, not the far one.
+      const wantFar = SG.camFar;
       // A 0.1m near plane paired with a 2800m flight far plane throws away
       // most depth precision. At altitude the 0.42m land/sea separation then
       // quantises to the same value and water wins over valid ground. Nothing

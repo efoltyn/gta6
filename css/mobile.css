@@ -494,9 +494,47 @@ body.touch #interact .iopt.tverb.tno .ilab { font-size: 13.5px; font-weight: 700
 #tveh .tvbtn.on, #tveh .tvbtn:active { transform: translateY(4px); box-shadow: 0 1px 0 rgba(0,0,0,.35); background: rgba(255,122,26,.62); }
 #tveh .tv-big { min-height: 72px; min-width: 128px; font-size: 20px; }
 #tveh .tv-sm { min-height: 46px; min-width: 92px; font-size: 14px; opacity: .92; }
-/* the helicopter's pedals: one row, left pedal on the left */
-#tveh .tv-yaw { display: flex; gap: 10px; }
-#tveh .tv-yaw .tvbtn { min-width: 84px; min-height: 60px; padding: 8px 12px; }
+/* ---- THE FLIGHT DECK (heli + every fixed wing) ------------------------------
+   Every control, the dial and the stores strip are placed by ONE layout table,
+   systems/touch_layout.js flightDeck, which writes left/top/width/height on
+   each of them. Nothing here positions a flight control; these rules only
+   take them out of the flex column and dress them. --tvs is the deck's scale. */
+#tveh.tv-deck #tvBtns, #tveh.tv-deck #tvAux { display: block; }
+#tveh.tv-deck .tvbtn, #tveh.tv-deck #tvDial, #tveh.tv-deck .tv-stores {
+  position: fixed; right: auto; bottom: auto; min-width: 0; min-height: 0; padding: 0; box-sizing: border-box;
+}
+#tveh .tv-ico svg { width: 52%; height: 52%; display: block; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+#tveh .tv-ico.tv-sm svg { width: 60%; height: 60%; }
+#tveh .tv-round { border-radius: 50%; }
+/* the pickle: amber-rimmed like a guarded release, the store half-filled */
+#tveh .tv-bomb { border-color: rgba(255,176,76,.8); background: rgba(120,58,18,.6); }
+#tveh .tv-bomb svg { width: 58%; height: 58%; }
+#tveh .tv-bomb svg .fill { fill: currentColor; fill-opacity: .28; }
+/* THE STORES STRIP: a stores-management page. One cell per station, the
+   designation over the count, the selected station lit in the dial's cyan. */
+#tveh .tv-stores {
+  display: flex; gap: calc(3px * var(--tvs, 1)); padding: calc(3px * var(--tvs, 1));
+  border-radius: 10px; border: 1px solid rgba(232,236,242,.18); background: rgba(8,12,18,.74);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); pointer-events: auto;
+}
+#tveh .tv-store {
+  flex: 1 1 0; min-width: 0; padding: 0; margin: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: calc(3px * var(--tvs, 1));
+  border: 1px solid transparent; border-radius: 7px; background: rgba(232,236,242,.05); color: #e8ecf2;
+  font-family: Fredoka, system-ui, sans-serif; touch-action: none; -webkit-tap-highlight-color: transparent; pointer-events: auto;
+}
+#tveh .tv-store b { font-weight: 600; font-size: calc(11.5px * var(--tvs, 1)); line-height: 1; letter-spacing: .6px; color: rgba(159,176,198,.95); white-space: nowrap; }
+#tveh .tv-store i { font-style: normal; font-weight: 700; font-size: calc(19px * var(--tvs, 1)); line-height: 1; font-variant-numeric: tabular-nums; }
+#tveh .tv-store.sel { border-color: #7de7ff; background: rgba(125,231,255,.14); }
+#tveh .tv-store.sel b { color: #7de7ff; }
+#tveh .tv-store.empty { opacity: .38; }
+#tveh .tv-store.on { background: rgba(255,122,26,.4); }
+/* a refused release covers the strip for its flash */
+#tveh .tv-stores[data-msg]::after {
+  content: attr(data-msg); position: absolute; inset: 0; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; background: rgba(8,12,18,.92); color: #ffb04c;
+  font: 700 calc(13px * var(--tvs, 1))/1 Fredoka, system-ui, sans-serif; letter-spacing: 1px; pointer-events: none;
+}
 #tveh .tv-warn { border-color: rgba(255,160,90,.7); background: rgba(150,60,20,.55); }
 #tveh .tv-go { border-color: rgba(90,220,140,.65); background: rgba(30,110,60,.5); }
 #tveh .tv-fire {

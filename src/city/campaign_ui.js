@@ -1085,11 +1085,15 @@
      still gets the old reply strip. */
   const REPLY = { actor: null, at: null, opts: [], zone: null };
   function replyOptions(list) {
+    const VW = CBZ.cityVerbWord;
     return list.map(function (c, i) {
+      // an answer prints as authored (city/verbword.js keep), never chopped
+      // to its first word
+      const label = VW && VW.keep ? VW.keep(c.label) : c.label;
       return {
         id: "reply-" + i, _reply: true, prio: 900 - i, campaignSafe: true, forceYes: true,
         slot: i === 0 ? "e" : undefined, hold: i === 1,
-        label: c.label,
+        label: label,
         onSelect: function () { choose(c.id); },
       };
     });

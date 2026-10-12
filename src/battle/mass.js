@@ -470,7 +470,7 @@ function massEvents(E, n) {
         _evV.x = C.x[a] + Math.sin(C.heading[a]) * 0.5; _evV.y = C.y[a] + 1.42; _evV.z = C.z[a] + Math.cos(C.heading[a]) * 0.5;
         _evW.x = C.x[b]; _evW.y = C.y[b] + (v ? 1.28 : 1.6 + Math.random()); _evW.z = C.z[b];
         if (!v) { _evW.x += (Math.random() - 0.5) * 3; _evW.z += (Math.random() - 0.5) * 3; }
-        try { CBZ.tracer(_evV, _evW, { muzzle: true, muzzleScale: 0.9 }); } catch (e) {}
+        try { CBZ.tracer(_evV, _evW, { muzzle: true, muzzleScale: 0.9, weapon: "carbine", hit: !!v }); } catch (e) {}
       }
     } else if (ty === EV.fled) {
       const team = C.side[a] ? "blue" : "red";

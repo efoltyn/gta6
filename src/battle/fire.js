@@ -567,11 +567,12 @@ function fireShot(m, tgt, r) {
 }
 /* ---- the muzzle: flash, smoke, brass, the report, and the man's shoulder ---- */
 // per-frame caps on the cosmetic half (wall clock: a frame may hold eight sub-steps)
-let fxSmoke = 0, fxBrass = 0, fxImpact = 0, fxSnap = 0, fxAt = 0;
+let fxSmoke = 0, fxBrass = 0, fxImpact = 0, fxSnap = 0, fxBall = 0, fxAt = 0;
 function fxTick() {
   const t = performance.now();
-  if (t - fxAt > 15) { fxAt = t; fxSmoke = 0; fxBrass = 0; fxImpact = 0; fxSnap = 0; }
+  if (t - fxAt > 15) { fxAt = t; fxSmoke = 0; fxBrass = 0; fxImpact = 0; fxSnap = 0; fxBall = 0; }
 }
+const _mzDir = { x: 0, y: 0, z: 0 };
 function armsMuzzle(m, A, w, from, hx, hz, cd2) {
   if (cd2 > 900 * 900) return;
   const c = A.c, E = CBZ.ballistics.energy(c, A.v0) * (c.pellets || 1);
@@ -586,7 +587,8 @@ function armsMuzzle(m, A, w, from, hx, hz, cd2) {
   }
   if (cd2 > 320 * 320 || fxBudget >= 34) return;
   fxBudget++;
-  CBZ.muzzleFlash(from, { scale: 0.45 + Math.sqrt(E) / 55 });
+  _mzDir.x = hx; _mzDir.y = 0; _mzDir.z = hz;
+  CBZ.muzzleFlash(from, { scale: 0.45 + Math.sqrt(E) / 55, dir: _mzDir });
   // the smoke a burst leaves hanging at the muzzle
   if (CBZ.munitions && cd2 < 140 * 140 && fxSmoke < 16) {
     fxSmoke++;
@@ -1070,18 +1072,23 @@ function stepRounds(sdt) {
   for (let i = ROUNDS.length - 1; i >= 0; i--) {
     const r = ROUNDS[i];
     if (!r.resolved && simT >= r.tRes) resolveRound(r);
-    // a tracer burns along its real path at its real speed
-    if (r.tracer && cam && CBZ.tracerStreak) {
+    /* WHAT THE ROUND LOOKS LIKE IN THE AIR, at its real speed along its real
+       path: a tracer burns (and reads at 900 m); a ball round is a faint few
+       metres of motion blur, seen only near the lens, the way a real one is
+       (systems/gunfx.js tracerStreak draws both, one instanced mesh). */
+    if (cam && CBZ.roundStreak && (r.tracer || fxBall < 48)) {
       const t = simT - r.t0;
       let s = (r.k > 1e-4 ? (r.v0 / r.k) * (1 - Math.exp(-r.k * t)) : r.v0 * t) / r.hk;
       if (s > r.sVis) s = r.sVis;
       const v = roundV(r, s);
-      const tail = Math.max(0, s - Math.min(14, v * 0.016));
+      const tail = Math.max(0, s - (r.tracer ? Math.min(14, v * 0.016) : Math.min(8, Math.max(2.5, v * 0.011))));
       if (s > tail + 0.2) {
         const hx = r.ox + r.dx * s, hz = r.oz + r.dz * s;
-        if ((hx - cam.x) * (hx - cam.x) + (hz - cam.z) * (hz - cam.z) < 900 * 900) {
-          CBZ.tracerStreak(r.ox + r.dx * tail, roundY(r, tail), r.oz + r.dz * tail, hx, roundY(r, s), hz,
-            { color: r.c.tracer || 0xff6a30, life: Math.max(0.03, sdt * 1.2), width: 0.016 });
+        const dc2 = (hx - cam.x) * (hx - cam.x) + (hz - cam.z) * (hz - cam.z);
+        if (r.tracer ? dc2 < 900 * 900 : dc2 < 110 * 110) {
+          if (!r.tracer) fxBall++;
+          CBZ.roundStreak(r.ox + r.dx * tail, roundY(r, tail), r.oz + r.dz * tail, hx, roundY(r, s), hz,
+            r.tracer, r.c.tracer || 0xff6a30, r.c.mm, sdt);
         }
       }
     }
@@ -1465,8 +1472,9 @@ function fireRocket(m, tgt) {
     const ce = Math.cos(el);
     r = { pos: V().copy(from), vel: new THREE.Vector3(rdx * ce * R.v0, Math.sin(el) * R.v0, rdz * ce * R.v0),
       grav: 9.81, t: 0, w: w, g: A ? A.g : null, by: m, motor: R, life: R.life, travelled: 0, arm: 2.5,
-      trail: STUDIO.trail({ length: 26, color: 0xd8c39a, opacity: 0.5, minStep: 1.6 }) };
-    if (CBZ.munitions && CBZ.munitions.acquire) { try { r.mesh = CBZ.munitions.acquire("pg7"); } catch (e) { r.mesh = null; } }
+      // the PG-7V itself, its sustainer flare and the smoke it lays: the
+      // spin-stabilised round corkscrews a few centimetres about its path
+      fx: rocketFlight("pg7", { wobble: 0.05, ignite: R.ignite, burn: R.burn }) };
     backblast(m, from, ux, uz);
   } else {
     // the 40 mm lob (and anything else that leaves on a plain arc)
@@ -1481,7 +1489,7 @@ function fireRocket(m, tgt) {
     const c = Math.cos(err), s = Math.sin(err);
     r = { pos: V().copy(from), vel: new THREE.Vector3((dx * c - dz * s) * v0 * Math.cos(el), Math.sin(el) * v0, (dx * s + dz * c) * v0 * Math.cos(el)),
       grav: 9.81, t: 0, w: w, g: A ? A.g : null, by: m, travelled: 0, arm: (A && A.g.arm) || 0, life: Math.max(7, sol.t * 1.6 + 2),
-      trail: STUDIO.trail({ length: 14, color: 0xcfc8b8, opacity: 0.3, minStep: 1.6 }) };
+      fx: rocketFlight("g40", { burn: 0, trail: null }) };
   }
   rockets.push(r);
   const dCam = Math.sqrt(camDist2(m.pos));
@@ -1490,6 +1498,27 @@ function fireRocket(m, tgt) {
     if (dCam < 300) CBZ.muzzleFlash(from, { scale: 1.6 });
   }
   return true;
+}
+/* WHAT A ROUND LOOKS LIKE IN THE AIR: weapons/munitions.js flight (its
+   body, the motor flare while it burns, the smoke ribbon that drifts
+   downwind). A round a rig already drew (rig.launched / rig.store: r.mesh)
+   keeps its body and gets only the motor and the smoke. Every other round
+   (a tank's HE, a jet's Hydra, an artillery shell, a bomb) is the shape its
+   munition row names. */
+function rocketFlight(shape, o) {
+  const MU = CBZ.munitions;
+  if (!MU || !MU.flight) return null;
+  try { return MU.flight(shape, o); } catch (e) { return null; }
+}
+function rocketFlightOf(r) {
+  const MU = CBZ.munitions;
+  if (!MU || !MU.flight) return null;
+  const named = MU.shapeOf && MU.shapeOf(r.mun);
+  // a cannon's small HE round (25-40 mm HEI-T) has no body worth a mesh: it
+  // is its tracer, drawn as one (systems/gunfx.js roundStreak)
+  const row = !named && !r.bomb && !r.mesh && CBZ.munitionTable ? CBZ.munitionTable.get(r.mun) : null;
+  if (row && row.cal > 0 && row.cal < 60) { r.streak = row.cal; return null; }
+  return rocketFlight(named || (r.bomb ? "mk82" : "shell"), { body: !r.mesh });
 }
 function stepRockets(sdt) {
   fxTick();
@@ -1504,9 +1533,6 @@ function stepRockets(sdt) {
       // the sustainer: thrust along the round's own axis
       const sp = r.vel.length() || 1, acc = (M.vMax - M.v0) / M.burn;
       r.vel.addScaledVector(r.vel, acc * sdt / sp);
-      if (CBZ.munitions && camDist2(r.pos) < 260 * 260 && (r.t * 40 | 0) % 2 === 0) {
-        try { CBZ.munitions.smoke(r.pos.x, r.pos.y, r.pos.z, 0, 0.3, 0, 0.12, 0.9, 1.6, 0.35, 0.86, 0.85, 0.82, { drag: 2, rise: 0.2 }); } catch (e) {}
-      }
     }
     r.vel.y -= r.grav * sdt;
     /* A GUIDED ROUND (a laser-guided bomb: src/battle/vehicles.js vehRelease
@@ -1526,7 +1552,11 @@ function stepRockets(sdt) {
     r.travelled = (r.travelled || 0) + step;
     const px = r.pos.x, py = r.pos.y, pz = r.pos.z;
     r.pos.addScaledVector(r.vel, sdt);
-    r.trail.push(r.pos);
+    if (r.fx === undefined) r.fx = rocketFlightOf(r);
+    if (r.fx && step > 1e-6) {
+      const iv = sdt / step;
+      CBZ.munitions.flightStep(r.fx, r.pos.x, r.pos.y, r.pos.z, r.vel.x * iv, r.vel.y * iv, r.vel.z * iv, step / sdt, sdt);
+    } else if (r.streak && CBZ.roundStreak) CBZ.roundStreak(px, py, pz, r.pos.x, r.pos.y, r.pos.z, true, 0xff8a3c, r.streak, sdt);
     if (r.mesh) {
       r.mesh.position.copy(r.pos);
       _v2.copy(r.pos).add(r.vel);
@@ -1546,8 +1576,8 @@ function stepRockets(sdt) {
     let boom = tHit <= 1 || r.t > (r.life || 7);
     if (!HOST.sweep && !boom) boom = r.pos.y <= HOST.groundAt(r.pos.x, r.pos.z) + 0.25;
     if (boom) {
-      r.trail.dispose();
       rockets.splice(i, 1);
+      if (r.fx) { CBZ.munitions.flightEnd(r.fx); r.fx = null; }
       if (r.mesh && CBZ.munitions && CBZ.munitions.release) { try { CBZ.munitions.release(r.mesh); } catch (e) {} r.mesh = null; }
       // where on the segment it struck (backed off a hand's breadth along its path)
       if (tHit <= 1) {

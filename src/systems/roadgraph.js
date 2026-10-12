@@ -52,7 +52,12 @@
          world { groundAt(x, z), waterAt?(x, z), blockedAt?(x, z, r), avoid?: [{x, z, r}] }
          opts  { maxGrade (0.36), cell, margin (160), maxCells (60000), r (body radius) }
      plan(world, from, to, opts?) -> { pts, radii, junctions, kind: "road"|"terrain"|"direct", ok, segs }
-         world.roads (array) is used when both ends are within opts.offRoad (140 m) of one
+         world.roads (array) is used when both ends are within opts.offRoad (140 m) of one;
+         `to` goes through driveTarget first, so a column never drives into a building
+     driveTarget(world, x, z, opts?) -> { x, z, road, entry }   THE ONE PLACE a
+         "drive to this point / this man" goal is made drivable: a point inside a
+         building or compound (world.entryAt) becomes its way in, then the kerb
+         beside it; open ground off the road is kept only when the drive is clear
    }
 ============================================================ */
 (function () {
@@ -608,11 +613,56 @@
     return { pts: pts, radii: radii, ok: true, kind: "terrain" };
   }
 
+  /* WHERE A VEHICLE MAY DRIVE TO, for a point somebody wants it at (a man, a
+     building, a mark on the map). A vehicle never takes a building interior
+     or a point it cannot reach off the road as its goal: it drives to the
+     kerb by the way in, parks, and the people go on through the door on foot.
+       1. world.entryAt(x, z) -> { x, z } | null: the point is inside a
+          building or a walled compound, so the goal is its way in (the step
+          outside the door, the compound's gate).
+       2. snapped to the road network: the kerb lane beside the road point
+          nearest that goal, on the goal's side.
+       3. a goal off the road (a yard, open ground) is kept only when it is
+          not itself inside something and the straight drive from the kerb
+          to it is clear (world.blockedAt over the hull's radius).
+     Returns { x, z, road, entry }: road = the goal is the kerb. */
+  function blockedLine(world, ax, az, bx, bz, r) {
+    if (!world.blockedAt) return false;
+    const n = Math.max(1, Math.ceil(d2(ax, az, bx, bz) / 2));
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      if (world.blockedAt(ax + (bx - ax) * t, az + (bz - az) * t, r)) return true;
+    }
+    return false;
+  }
+  function driveTarget(world, x, z, opts) {
+    const r = opts && opts.r != null ? opts.r : 1.6;
+    let gx = x, gz = z, entry = false;
+    if (world && world.entryAt) {
+      let e = null;
+      try { e = world.entryAt(x, z); } catch (err) { e = null; }
+      if (e && isFinite(e.x) && isFinite(e.z)) { gx = e.x; gz = e.z; entry = true; }
+    }
+    const G = world && world.roads ? of(world.roads) : null;
+    const S = G ? snap(G, gx, gz) : null;
+    if (!S) return { x: gx, z: gz, road: false, entry: entry };
+    if (S.d <= 3) return { x: S.x, z: S.z, road: true, entry: entry };
+    const sg = G.segs[S.si], nx = -sg.uz, nz = sg.ux;
+    const side = (gx - S.x) * nx + (gz - S.z) * nz >= 0 ? 1 : -1;
+    const k = Math.max(0, sg.hw - Math.max(1.6, r + 0.4));
+    const kx = S.x + nx * side * k, kz = S.z + nz * side * k;
+    if (!entry && !(world.blockedAt && world.blockedAt(gx, gz, r)) && !blockedLine(world, kx, kz, gx, gz, r)) {
+      return { x: gx, z: gz, road: false, entry: false };
+    }
+    return { x: kx, z: kz, road: true, entry: entry };
+  }
+
   /* ROAD WHERE THERE IS ROAD, GROUND WHERE THERE IS NOT. */
   function plan(world, from, to, opts) {
     opts = opts || {};
     const G = world.roads ? of(world.roads) : null;
     const offRoad = opts.offRoad != null ? opts.offRoad : 140;
+    if (G) to = driveTarget(world, to.x, to.z, { r: opts.r });
     if (G) {
       const A = snap(G, from.x, from.z), B = snap(G, to.x, to.z);
       if (A && B && A.d <= offRoad && B.d <= offRoad) {
@@ -642,7 +692,7 @@
     close: function (G, x, z, r) { return close(G, x, z, r, false); },
     reopen: function (G, x, z, r) { return close(G, x, z, r, true); },
     path: path, pathAt: pathAt, capAt: capAt, projectS: projectS, pathSlice: pathSlice, segIdx: segIdx,
-    terrain: terrain, plan: plan, segCost: segCost,
+    terrain: terrain, plan: plan, segCost: segCost, driveTarget: driveTarget,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = CBZ.roadGraph;
 })();

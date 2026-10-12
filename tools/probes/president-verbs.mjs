@@ -295,7 +295,7 @@ export default async function (t) {
     __pv.step(10);
     out.wheel = __pv.wheelIds(a);
     out.force = __pv.allForce().length;
-    out.fired = __pv.fireId(a, 'pv-take-down');
+    out.fired = __pv.fireId(a, 'order-attack');
     __pv.step(20);
     out.after = __pv.forceState();
     for (var i = 0; i < 40 && !a.dead; i++) __pv.step(30);
@@ -311,10 +311,10 @@ export default async function (t) {
     // ordered, then called off
     var b = __pv.citizen('Ruth Vale', -2.5);
     __pv.step(10);
-    __pv.fireId(b, 'pv-take-down');
+    __pv.fireId(b, 'order-attack');
     __pv.step(20);
     out.drawn2 = __pv.forceState().drawn;
-    out.callOff = __pv.fireId(b, 'pv-call-off');
+    out.callOff = __pv.fireId(b, 'order-call-off');
     __pv.step(30);
     var f = __pv.allForce();
     out.stillOrdered = f.filter(function (q) { return q._order && q._order.force; }).length;
@@ -348,7 +348,7 @@ export default async function (t) {
     // detain
     var c = __pv.citizen('Ned Harlow', 3.5);
     __pv.step(10);
-    out.detainFired = __pv.fireId(c, 'pv-detain');
+    out.detainFired = __pv.fireId(c, 'order-detain');
     for (var j = 0; j < 40 && !(c.restraint && c.restraint.state); j++) __pv.step(30);
     out.cuffed = c.restraint ? c.restraint.state : null;
     out.cAlive = !c.dead;
@@ -362,7 +362,7 @@ export default async function (t) {
   const chk = (c, m) => { if (!c) bad++; t.log((c ? "  ok  " : "FAIL  ") + m); };
   if (r4.err) chk(false, r4.err);
   else {
-    chk(r4.wheel.includes("hold e:pv-take-down"), `the verb is on him, hold E (wheel: ${r4.wheel.join(", ")})`);
+    chk(r4.wheel.includes("hold e:order-attack"), `the verb is on him, hold E (wheel: ${r4.wheel.join(", ")})`);
     chk(r4.force > 0, `${r4.force} men take the order`);
     chk(r4.after && r4.after.drawn > 0, `agents draw on the order (${r4.after ? r4.after.drawn : 0} of ${r4.after ? r4.after.crew : 0})`);
     chk(r4.dead, "the target dies" + (r4.whyAlive ? " (" + r4.whyAlive + ")" : ""));

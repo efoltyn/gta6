@@ -398,8 +398,6 @@
     redShell: new THREE.MeshLambertMaterial({ color: 0x9d2523, emissive: 0x210000, emissiveIntensity: 0.12 }),
     skin: new THREE.MeshLambertMaterial({ color: 0xf0c39a }),
   };
-  const brass = mat.brass;
-  const redShell = mat.redShell;
 
   function box(parent, sx, sy, sz, mat, x, y, z, rx, ry, rz) {
     const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
@@ -726,11 +724,6 @@
   }));
   muzzle.visible = false;
   gun.add(muzzle);
-  const worldMuzzle = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: flashTex, transparent: true, depthTest: false, blending: THREE.AdditiveBlending,
-  }));
-  worldMuzzle.visible = false;
-  CBZ.scene.add(worldMuzzle);
 
   /* UNARMED FIRST PERSON — TWO HANDS THAT FIGHT, ON TWO REAL ARMS.
      A relaxed right hand when nothing is happening; both fists up in a guard
@@ -826,7 +819,7 @@
   })();
   vm.position.set(0.36, -0.34, -0.72);
 
-  let recoil = 0, recoilSide = 0, vmPunch = 0, bobPhase = 0, muzzleT = 0, worldMuzzleT = 0, pumpT = 0;
+  let recoil = 0, recoilSide = 0, vmPunch = 0, bobPhase = 0, muzzleT = 0, pumpT = 0;
   // seconds since a BOLT gun's shot: its bolt is worked by the firing hand
   // (published as CBZ.fpsBoltCycle 0..1; systems/gunhands.js CBZ.gunReload)
   let boltT = -1;
@@ -1622,31 +1615,35 @@
   let qWasDown = false;    // edge-detect Q in the frame loop (not per keydown event)
   let introWantsFPS = false;
 
-  // ---- tracer pool ----
-  const tracerGeo = new THREE.CylinderGeometry(1, 1, 1, 6);
-  const tracerMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.9, depthWrite: false });
-  const tracers = [];
-  let tracerIdx = 0;
-  for (let i = 0; i < 22; i++) {
-    const mesh = new THREE.Mesh(tracerGeo, tracerMat.clone());
-    mesh.visible = false;
-    CBZ.scene.add(mesh);
-    tracers.push({ mesh, life: 0, max: 0.055 });
+  /* ---- THE ROUND YOU FIRED, SEEN (systems/gunfx.js) ----
+     This file used to keep its own 22 cylinders and draw every shot as one,
+     muzzle to impact, in the frame the trigger broke. Every gun in the game
+     now flies through ONE system: a hitscan round (pistol, SMG, shotgun) is
+     handed to CBZ.tracer as a flown round (its own speed, its own look); a
+     rifle round already flies here (updateBullets) and draws each frame's
+     segment through CBZ.roundStreak. Tracer or ball is the weapon's belt
+     (weapons/ballistics.js GUN: one in N; a rifle's last rounds), counted on
+     your own trigger. */
+  let _pRoundN = 0;
+  function nextIsTracer(w) {
+    const G = CBZ.ballistics && CBZ.ballistics.GUN ? CBZ.ballistics.GUN[w.key] : null;
+    _pRoundN++;
+    if (G && G.tracer > 0) return _pRoundN % G.tracer === 0;
+    if (G && G.tracerLast > 0) return (fps.rounds[fps.weapon] || 0) < G.tracerLast;
+    return false;
   }
-
-  function fireTracer(from, to, radius, life) {
-    const d = tmp.copy(to).sub(from);
-    const len = d.length();
-    if (len < 0.1) return;
-    const t = tracers[tracerIdx];
-    tracerIdx = (tracerIdx + 1) % tracers.length;
-    t.mesh.position.copy(from).addScaledVector(d, 0.5);
-    t.mesh.scale.set(radius, len, radius);
-    t.mesh.quaternion.setFromUnitVectors(UP, d.normalize());
-    t.mesh.material.opacity = 0.9;
-    t.mesh.visible = true;
-    t.life = life || 0.055;
-    t.max = t.life;
+  function tracerColorOf(w) {
+    const B = CBZ.ballistics, G = B && B.GUN ? B.GUN[w.key] : null, c = G && G.cart && B.CART ? B.CART[G.cart] : null;
+    return c && c.tracer ? c.tracer : 0xff5a2a;
+  }
+  function boreOf(w) {
+    const B = CBZ.ballistics, G = B && B.GUN ? B.GUN[w.key] : null, c = G && G.cart && B.CART ? B.CART[G.cart] : null;
+    return c ? c.mm : 9;
+  }
+  function fireTracer(from, to, w, tracer) {
+    if (!CBZ.tracer) return;
+    CBZ.tracer(from, to, { byPlayer: true, shooter: CBZ.player, weapon: w.key, v: w.v0 || undefined,
+      muzzle: false, brass: false, tracer: !!tracer });
   }
 
   // ---- REAL ROCKET FLIGHT (b) -------------------------------------------------
@@ -2251,32 +2248,6 @@
   };
 
 
-  // ---- impact puff pool ----
-  function radialTexture(stops) {
-    const c = document.createElement("canvas"); c.width = c.height = 64;
-    const x = c.getContext("2d");
-    const g = x.createRadialGradient(32, 32, 1, 32, 32, 30);
-    stops.forEach((s) => g.addColorStop(s[0], s[1]));
-    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-    return new THREE.CanvasTexture(c);
-  }
-  const sparkTex = radialTexture([
-    [0, "rgba(255,255,235,1)"], [0.35, "rgba(255,178,74,.88)"], [1, "rgba(90,90,90,0)"],
-  ]);
-  const dustTex = radialTexture([
-    [0, "rgba(215,40,34,.95)"], [0.45, "rgba(125,10,10,.75)"], [1, "rgba(80,0,0,0)"],
-  ]);
-  const impacts = [];
-  let impactIdx = 0;
-  for (let i = 0; i < 18; i++) {
-    const mesh = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: sparkTex, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending,
-    }));
-    mesh.visible = false;
-    CBZ.scene.add(mesh);
-    impacts.push({ mesh, life: 0, max: 0.14 });
-  }
-
   /* What a round actually hit: the struck mesh, its material (the face's own
      slot of a multi-material mesh), and its colour AT the hit (the face's
      vertex colour times the material colour, since merged city facades are
@@ -2310,47 +2281,21 @@
     return out;
   }
 
-  function spawnImpact(pos, blood, big, power) {
-    const p = impacts[impactIdx];
-    impactIdx = (impactIdx + 1) % impacts.length;
-    p.mesh.material.map = blood ? dustTex : sparkTex;
-    p.mesh.material.blending = blood ? THREE.NormalBlending : THREE.AdditiveBlending;
-    p.mesh.position.copy(pos);
-    const k = Math.max(0.55, Math.min(1.7, power == null ? 1 : power));
-    p.mesh.scale.setScalar((big ? 0.92 : 0.5) * k);
-    p.mesh.material.opacity = 1;
-    p.mesh.visible = true;
-    p.life = blood ? 0.18 : 0.12;
-    p.max = p.life;
-  }
-
-  // ---- casing pool ----
-  const casingGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.085, 8);
-  const casings = [];
-  let casingIdx = 0;
-  for (let i = 0; i < 28; i++) {
-    const mesh = new THREE.Mesh(casingGeo, brass);
-    mesh.visible = false;
-    CBZ.scene.add(mesh);
-    casings.push({ mesh, vel: new THREE.Vector3(), life: 0 });
-  }
-
+  const _casP = { x: 0, y: 0, z: 0 }, _casR = { x: 0, y: 0, z: 0 }, _casF = { x: 0, z: 0 };
   function ejectCasing(w) {
     aimForward(fwd); buildBasis(fwd);
-    const c = casings[casingIdx];
-    casingIdx = (casingIdx + 1) % casings.length;
-    c.mesh.material = w.key === "shotgun" ? redShell : brass;
-    c.mesh.scale.setScalar(w.key === "shotgun" ? 1.45 : 1);
-    c.mesh.position.copy(muzzleWorld(tmp2))
-      .addScaledVector(right, 0.18)
-      .addScaledVector(aimUp, -0.16)
-      .addScaledVector(fwd, -0.08);
-    c.vel.copy(right).multiplyScalar(2.4 + rng() * 1.2)
-      .addScaledVector(aimUp, 1.0 + rng() * 0.9)
-      .addScaledVector(fwd, -0.25 + rng() * 0.25);
-    c.mesh.rotation.set(rng() * 4, rng() * 4, rng() * 4);
-    c.mesh.visible = true;
-    c.life = 1.5;
+    // the case leaves the port (systems/gunfx.js CBZ.ejectBrass: one instanced
+    // pool for every gun in the game, sized to the cartridge; it lands, skips
+    // and STAYS, so a firefight leaves its carpet of brass)
+    if (CBZ.ejectBrass) {
+      const mp = muzzleWorld(tmp2).addScaledVector(right, 0.12).addScaledVector(aimUp, -0.12).addScaledVector(fwd, -0.12);
+      let gy = (CBZ.player && CBZ.player.pos ? CBZ.player.pos.y : mp.y - 1.4);
+      if (CBZ.floorAt) { try { const f = +CBZ.floorAt(mp.x, mp.z, mp.y); if (isFinite(f) && f < mp.y) gy = f; } catch (e) { /* keep */ } }
+      _casP.x = mp.x; _casP.y = mp.y; _casP.z = mp.z;
+      _casR.x = right.x; _casR.y = 0; _casR.z = right.z;
+      _casF.x = fwd.x; _casF.z = fwd.z;
+      CBZ.ejectBrass(_casP, _casR, { mm: boreOf(w), shell: w.key === "shotgun" || !!w.pellets, groundY: gy, fwd: _casF });
+    }
     if (CBZ.sfx && w.key !== "carbine") setTimeout(() => CBZ.sfx("shell"), 90 + rng() * 80);
   }
 
@@ -3487,15 +3432,14 @@
         const exitHit = { actor: beyondActor.actor, head: beyondActor.head, dist: hit.dist + thickness + beyondActor.dist, point: beyondActor.point };
         const penW = Object.create(w); penW.damage = w.damage * PEN_DMG_MUL;   // cheap prototype override — never mutates the shared weapon table
         gunHit(exitHit, penW, shotDir);
-        spawnImpact(beyondActor.point, true, false, cal * 0.75);
         if (CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(beyondActor.point, 0.4, shotDir, goreOpts(beyondActor, w, cal, true));
-        fireTracer(exitPt, beyondActor.point, w.tracer * 0.8, 0.05);
+        fireTracer(exitPt, beyondActor.point, w, false);
       } else {
         // nothing behind it: still show the round carrying through the cover —
         // a short, visibly DIFFERENT exit puff so a penetration clearly reads
         // as "that went through", not a second impossible impact on the wall.
         const farPt = exitPt.clone().addScaledVector(shotDir, Math.min(remaining, 6));
-        fireTracer(exitPt, farPt, w.tracer * 0.7, 0.04);
+        fireTracer(exitPt, farPt, w, false);
       }
       return;
     }
@@ -3512,7 +3456,7 @@
       const rl = Math.hypot(rx, rz) || 1;
       const deflectDir = new THREE.Vector3(rx / rl, shotDir.y * 0.4, rz / rl).normalize();
       const deflectEnd = hit.point.clone().addScaledVector(deflectDir, 7 + rng() * 5);
-      fireTracer(hit.point, deflectEnd, w.tracer * 0.6, 0.06);
+      fireTracer(hit.point, deflectEnd, w, false);
       if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: fnx, y: 0.25, z: fnz }, { kind: "spark", power: cal * 1.2 });
       CBZ.sfx && CBZ.sfx("hit", { pitch: 1.3, volume: 0.5 });
       // tiny stray-damage roll: a nearby actor along the deflection MIGHT eat
@@ -3523,7 +3467,6 @@
         if (strayHit && strayHit.actor) {
           const strayW = Object.create(w); strayW.damage = RICOCHET_STRAY_DMG; strayW.headMult = 1;
           gunHit({ actor: strayHit.actor, head: false, dist: strayHit.dist, point: strayHit.point }, strayW, deflectDir);
-          spawnImpact(strayHit.point, true, false, 0.65);
         }
       }
     }
@@ -4036,7 +3979,8 @@
         acc.down = acc.down || r.down;
         // taserfx owns the contact glow/arcs; the generic round impact is a
         // large white bullet spark that visually erases the two probe contacts.
-        if (w.key !== "taser") spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
+        // a non-lethal round (beanbag) on a body: a puff off the cloth, no blood
+        if (w.nonlethal && w.key !== "taser" && CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.3, z: -shotDir.z }, { kind: "dust", color: 0x9a948a, power: 0.5 });
         // One small flesh response per round/pellet. The death path already emits
         // its single full gore event; calling that here as well used to create a
         // pool-sized explosion for every pellet in a shotgun blast.
@@ -4067,7 +4011,6 @@
           if (CBZ.bodyWound) CBZ.bodyWound(hit.corpse, hit.point, { head: hit.head, cal, dir: shotDir });
           if (CBZ.vitals) CBZ.vitals.wound(hit.corpse, { kind: "bullet", point: hit.point, head: hit.head, cal });   // the pool grows
         }
-        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
         if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, w.pellets ? 0.28 : 0.42 * cal, shotDir, goreOpts(hit, w, cal));
         // Only a muzzle-close shotgun headshot can sever even post-mortem
         // (gore.js's decap read), guarded so one head only severs once. Live kills
@@ -4087,13 +4030,11 @@
         acc.head = acc.head || hit.head;
         // a child in the crowd (the store's prot row) is never hurt: no blood
         const kidRow = !!(CBZ.crowds && CBZ.crowds.S.prot && CBZ.crowds.S.prot[hit.crowdRow]);
-        spawnImpact(hit.point, !w.nonlethal && !kidRow, w.key === "shotgun", cal);
         if (!w.nonlethal && !kidRow && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, shotDir, goreOpts(hit, w, cal));
       } else if (hit.aircraft) {
         // bullets chip the gunship — sparks off the hull, damage routed to the heli
         acc.hitSomething = true;
         if (CBZ.cityAircraftDamage) CBZ.cityAircraftDamage(w.damage, origin.x, origin.z);
-        spawnImpact(hit.point, false, true);
         if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
       } else if (hit.lightAir) {
         // plain gunfire on Air-1 / the ambient GA fleet: route the round into the
@@ -4102,14 +4043,12 @@
         // decal feedback as the gunship; the module owns the wounded-smoke + down arc.
         acc.hitSomething = true;
         if (hit.lightAir.hitBullet) hit.lightAir.hitBullet(w.damage, origin.x, origin.z, hit.lightAir.rec);
-        spawnImpact(hit.point, false, true);
         if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.4, z: -shotDir.z }, { kind: "spark", power: 1.3 });
       } else if (hit.civilAircraft) {
         // The parked gate plane itself takes the round. Damage, boarding and
         // later flight all share this record, so a wreck can never be hijacked.
         acc.hitSomething = true;
         if (CBZ.cityDamageCivilAircraft) CBZ.cityDamageCivilAircraft(hit.civilAircraft, w.damage, hit.point, { byPlayer: true });
-        spawnImpact(hit.point, false, true);
         if (CBZ.bulletImpact) CBZ.bulletImpact(hit.point, { x: -shotDir.x, y: 0.35, z: -shotDir.z }, { kind: "spark", power: Math.max(1, cal) });
       } else if (hit.car) {
         // CALIBER vs SHEET METAL: real engine damage (rifle rounds punch panels
@@ -4117,7 +4056,6 @@
         // chips in THIS car's coat, and a persistent hole that RIDES the panel.
         const car = hit.car;
         if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, (w.pellets ? 1.7 : 4.2) * cal, { byPlayer: true, crumple: cal >= 1.0, point: hit.point, normal: hit.normal, cal: cal });
-        spawnImpact(hit.point, false, cal >= 1.3);
         if (CBZ.bulletImpact) {
           CBZ.bulletImpact(hit.point, hit.normal, { kind: "spark", power: cal });
           if (hit.dist < 45) CBZ.bulletImpact(hit.point, hit.normal, { kind: "chip", power: cal * 0.8, color: car.color });
@@ -4145,7 +4083,6 @@
         const wallObj = hit.wallHit && hit.wallHit.object;
         const pieceId = wallObj && wallObj.userData && wallObj.userData.pieceId;
         if (pieceId != null && CBZ.structDamage) CBZ.structDamage.hit(pieceId, w.damage, "bullet");
-        spawnImpact(hit.point, false, cal >= 1.3);
         // surface normal of the struck wall (faces back toward the shooter):
         // walls in this game are near-vertical, so reflect the shot dir onto the
         // horizontal plane for a believable ricochet cone + a persistent hole.
@@ -4270,10 +4207,12 @@
     b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
   }
   const _bPrev = new THREE.Vector3(), _bNow = new THREE.Vector3(), _bDir = new THREE.Vector3();
+  const _bGnd = { x: 0, y: 0, z: 0 }, _UPN = { x: 0, y: 1, z: 0 };
   function launchBullet(w, origin, dir, cal) {
     const b = bullets[bulletIdx];
     bulletIdx = (bulletIdx + 1) % bullets.length;
     b.live = true; b.w = w; b.cal = cal; b.t = 0; b.dist = 0;
+    b.tracer = nextIsTracer(w); b.tcol = tracerColorOf(w); b.mm = boreOf(w);
     b.max = w.range;
     b.x = origin.x; b.y = origin.y; b.z = origin.z;
     const v = w.v0 || 800;
@@ -4303,7 +4242,8 @@
         // the visible round IS the tracer: one short streak per frame along the
         // segment it actually covered, so the streak travels instead of drawing
         // the whole flight path in the frame the trigger was pulled.
-        fireTracer(_bPrev, struck && hit.point ? hit.point : _bNow, w.tracer, 0.055);
+        const bh = struck && hit.point ? hit.point : _bNow;
+        if (CBZ.roundStreak) CBZ.roundStreak(_bPrev.x, _bPrev.y, _bPrev.z, bh.x, bh.y, bh.z, b.tracer, b.tcol, b.mm, dt);
         if (struck) {
           /* hit.dist IS MEASURED FROM THE SEGMENT, and everything downstream
              means "how far has this round flown": the damage falloff curve,
@@ -4326,6 +4266,19 @@
         if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
           CBZ.cityShatterRay(_bPrev.x, _bPrev.y, _bPrev.z, _bDir.x, _bDir.y, _bDir.z, seg,
             true, { directPlayer: true });
+        }
+        /* THE GROUND STOPS IT. The shot resolver tests walls, cars and bodies;
+           a round that comes down in the street (or the dirt) used to fly on
+           under it. It lands there now: dust and a pock where it went in. */
+        const gy = typeof CBZ.groundAt === "function" ? +CBZ.groundAt(_bNow.x, _bNow.z) : 0.09;
+        if (isFinite(gy) && _bNow.y <= gy && _bPrev.y > gy) {
+          const k = (_bPrev.y - gy) / Math.max(1e-6, _bPrev.y - _bNow.y);
+          _bGnd.x = _bPrev.x + (_bNow.x - _bPrev.x) * k; _bGnd.y = gy + 0.02; _bGnd.z = _bPrev.z + (_bNow.z - _bPrev.z) * k;
+          const surf = CBZ.game.mode === "city" ? "asphalt" : "dirt";
+          if (CBZ.bulletImpact) CBZ.bulletImpact(_bGnd, _UPN, { kind: "dust", surface: surf, power: b.cal });
+          if (CBZ.bulletHole) CBZ.bulletHole(_bGnd, _UPN, { mm: b.mm, noProp: true, surface: surf });
+          b.live = false;
+          continue;
         }
       }
       if (b.dist >= b.max || b.t > 4) b.live = false;   // out of range / lost
@@ -4497,13 +4450,10 @@
       muzzle.rotation.z = rng() * Math.PI * 2;
       muzzle.visible = flashScale > 0.02;
       muzzleT = flashT;
-    } else {
-      worldMuzzle.position.copy(muzzleWorld(tmp2));
-      worldMuzzle.material.map = taserShot ? taserFlashTex : flashTex;
-      worldMuzzle.scale.setScalar(flashScale * 1.2);
-      worldMuzzle.material.opacity = 1;
-      worldMuzzle.visible = flashScale > 0.02;
-      worldMuzzleT = flashT;
+    } else if (flashScale > 0.02 && CBZ.muzzleFlash) {
+      aimForward(fwd);
+      CBZ.muzzleFlash(muzzleWorld(tmp2), { scale: flashScale * 1.2, dir: taserShot ? null : fwd, life: flashT,
+        color: taserShot ? 0x9fdcff : undefined });
     }
 
     if (CBZ.sfx) {
@@ -4892,7 +4842,7 @@
         // fireTracer() instant line all the way to `pt`, which would visibly
         // spoil the flight by drawing the whole path before the rocket arrives.
       } else {
-        fireTracer(origin, pt, w.tracer, 0.07);
+        fireTracer(origin, pt, w, false);
         detonate();
       }
       // firing still raises wanted: replicate the witnessed-crime block below so
@@ -4950,7 +4900,7 @@
         if (w.key === "taser" && CBZ.taserFx && CBZ.taserFx.fire) {
           // Twin physical probe wires + body arc replace the firearm tracer.
           CBZ.taserFx.fire(origin, end, { target: hit.actor || null });
-        } else fireTracer(origin, end, w.tracer, w.key === "shotgun" ? 0.045 : 0.055);
+        } else fireTracer(origin, end, w, i === 0 && nextIsTracer(w));
       }
       landRound(w, hit, shotDir, origin, cal, acc);
     }
@@ -5530,44 +5480,9 @@
     if (qNow && !qWasDown && switchCD <= 0 && aiming && armed() && CBZ.game.mode !== "city") switchWeapon(1);
     qWasDown = qNow;
 
-    for (let i = 0; i < tracers.length; i++) {
-      const t = tracers[i];
-      if (t.life > 0) {
-        t.life -= dt;
-        t.mesh.material.opacity = Math.max(0, t.life / t.max) * 0.9;
-        if (t.life <= 0) t.mesh.visible = false;
-      }
-    }
     updateRockets(dt);   // (b) in-flight RPG projectiles: fly the arc, detonate on arrival
     updateRocketSmoke(dt);
     updateBullets(dt);   // rounds in flight: step, raycast the segment, land
-    for (let i = 0; i < impacts.length; i++) {
-      const p = impacts[i];
-      if (p.life > 0) {
-        p.life -= dt;
-        p.mesh.material.opacity = Math.max(0, p.life / p.max);
-        p.mesh.scale.multiplyScalar(1 + dt * 5.5);
-        if (p.life <= 0) p.mesh.visible = false;
-      }
-    }
-    for (let i = 0; i < casings.length; i++) {
-      const c = casings[i];
-      if (c.life > 0) {
-        c.life -= dt;
-        c.vel.y -= 8.5 * dt;
-        c.mesh.position.addScaledVector(c.vel, dt);
-        c.mesh.rotation.x += dt * 9;
-        c.mesh.rotation.z += dt * 6;
-        if (c.mesh.position.y < 0.06) {
-          c.mesh.position.y = 0.06;
-          c.vel.y = Math.abs(c.vel.y) * 0.22;
-          c.vel.x *= 0.72;
-          c.vel.z *= 0.72;
-        }
-        if (c.life <= 0) c.mesh.visible = false;
-      }
-    }
-
     // PANEL SHUDDER decay: shot cars wobble then settle dead-flat. Runs here
     // (above the !aiming early-out) so a shudder finishes even if the player
     // holsters the instant after the burst.
@@ -5581,11 +5496,6 @@
       ud.body.rotation.x = Math.sin(s.t * 72) * s.amp * (1 - k);
     }
 
-    if (worldMuzzleT > 0) {
-      worldMuzzleT -= dt;
-      worldMuzzle.material.opacity = Math.max(0, worldMuzzleT / 0.065);
-      if (worldMuzzleT <= 0) worldMuzzle.visible = false;
-    }
 
     // DEATH DROP — runs in the unconditional zone so it finishes even though
     // view.js flips fps off the instant you die. The viewmodel pitches forward,

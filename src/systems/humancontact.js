@@ -1126,6 +1126,11 @@
     cityList.length = 0;
     for (let i = 0; i < CBZ.cityPeds.length; i++) {
       const p = CBZ.cityPeds[i];
+      // ONLY WHAT YOU CAN SEE IS IN YOUR WAY. A body minted spawn-hidden
+      // (peds.js `_spawnHidden`, not yet drawn) or a pooled rig parked off
+      // the map is not a person on the street yet: solid while undrawn, it
+      // was an invisible wall (a mob's freshly promoted front rows).
+      if (p._spawnHidden || p._parked) continue;
       if (!p.dead && !p.culled && !p.inCar && !p._traversal &&
           !(CBZ.body && CBZ.body.busy(p))) cityList.push(p);
     }

@@ -1101,6 +1101,7 @@
     bushInst.frustumCulled = rockInst.frustumCulled = false;
     bushInst.userData.vegetationLayer = SCENERY ? "near-thicket" : "bush";
     bushInst.userData.sceneryScale = SCENERY;
+    rockInst.userData.sceneryScale = true;     // horizon scenery (core/sight.js)
     root.add(bushInst); root.add(rockInst);
 
     const farThickets = [];
@@ -1230,35 +1231,13 @@
       };
     };
 
-    // ================================================================
-    //  SIMPLE DISTANCE LOD — fine ground clutter (bushes/ferns/rocks) reads
-    //  at point-blank but is wasted fill-rate + vertex cost when the player
-    //  is nowhere near this biome (the forest is a big chunk of the far
-    //  archipelago; a player in the city or on the desert highway is paying
-    //  for ~1160 instances of detail they can't see). A throttled distance
-    //  check (one sqrt, not per-instance) flips both InstancedMeshes
-    //  invisible past LOD_FAR and back on inside LOD_NEAR — cheap hysteresis
-    //  band so it doesn't flicker at the boundary. Trees/landmarks stay
-    //  visible always (the canopy silhouette reads from far away and is the
-    //  point of the biome); this only trims the close-range clutter layer.
-    // ================================================================
-    (function groundDetailLOD() {
-      if (!CBZ.onUpdate) return;
-      const LOD_NEAR = HX + 260, LOD_FAR = HX + 420;   // hysteresis band (forest half-extent + margin)
-      let detailOn = true;
-      CBZ.onUpdate(46.25, function () {
-        const P = CBZ.player;
-        if (!P || !P.pos) return;
-        const d = Math.hypot(P.pos.x - CX, P.pos.z - CZ);
-        if (detailOn && d > LOD_FAR) {
-          detailOn = false; bushInst.visible = false; rockInst.visible = false;
-          if (farThicketMesh) farThicketMesh.visible = false;
-        } else if (!detailOn && d < LOD_NEAR) {
-          detailOn = true; bushInst.visible = true; rockInst.visible = true;
-          if (farThicketMesh) farThicketMesh.visible = true;
-        }
-      });
-    })();
+    // (THE PRIVATE DISTANCE LOD IS GONE, 2026-10-11. It hid the bushes, rocks
+    // and the FAR thicket once the PLAYER was 420 m past the biome's edge,
+    // a ring the helicopter's fog is kilometres beyond: the far thicket, the
+    // very layer meant to read from a distance, planted itself in view on the
+    // way in. What it saved is now the shared rule's job: core/farcull.js
+    // deals these pools into cells, core/instcull.js culls each cell to the
+    // frustum and the phone reach pass drops cells past core/sight.js's fog.)
 
     // ================================================================
     //  FALLEN LOGS — a few plain meshes (small count). One is the bridge.

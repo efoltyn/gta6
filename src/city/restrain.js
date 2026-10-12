@@ -672,7 +672,7 @@
     id: "rs-call-unit", slot: "j", prio: 84,
     canShow: (p, ctx) => (st(p) === "cuffed" || st(p) === "escorted") && p.restraint.by === "player" && !ctx.driving &&
       !!(CBZ.custody && CBZ.custody.take) && !CBZ.custody.jobOf(p),
-    label: "Call a unit",
+    label: "Radio in",
     onSelect: (p) => {
       const pres = !!(CBZ.presidency && CBZ.presidency.seat && CBZ.presidency.seat());
       CBZ.custody.take(p, { by: pres ? "ss" : "police", verb: pres ? "detain" : "arrest", handsOff: true, owner: "player" });

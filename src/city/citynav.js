@@ -216,6 +216,42 @@
   };
 
   // ======================================================================
+  //  1c) driveEntry(x, z) -> {x,z} | null      driveWorld() -> world
+  //     WHERE A VEHICLE STOPS FOR SOMEBODY INSIDE. A point inside a walled
+  //     government compound (the Mansion, the capitol: CBZ.govComplexes) is
+  //     reached through its gate; a point inside a building lot through the
+  //     step outside its door. Null = the point is not inside anything.
+  //     driveWorld() is the city as systems/roadgraph.js's driveTarget reads
+  //     it (roads + this), so every "drive to that man" goal in the city goes
+  //     through ONE snap: the kerb by the way in, never the building.
+  // ======================================================================
+  const _entryOut = { x: 0, z: 0 };
+  CBZ.cityNav.driveEntry = function (x, z) {
+    const S = CBZ.govComplexes || [];
+    for (let i = 0; i < S.length; i++) {
+      const s = S[i], R = s && s.rect;
+      if (!R || !s.gate || !isFinite(s.gate.x)) continue;
+      if (x > R.minX && x < R.maxX && z > R.minZ && z < R.maxZ) { _entryOut.x = s.gate.x; _entryOut.z = s.gate.z; return _entryOut; }
+    }
+    const lot = CBZ.cityNav.indoorLotAt(x, z);
+    const d = lot ? CBZ.cityNav.doorFor(lot) : null;
+    if (!d) return null;
+    _entryOut.x = d.x - d.nx * 2; _entryOut.z = d.z - d.nz * 2;
+    return _entryOut;
+  };
+  const _driveWorld = { roads: null, entryAt: CBZ.cityNav.driveEntry };
+  CBZ.cityNav.driveWorld = function () {
+    const a = arenaNow();
+    _driveWorld.roads = (a && a.roads) || (CBZ.city && CBZ.city.roads) || null;
+    return _driveWorld;
+  };
+  // the drivable goal for a vehicle sent to (x, z): { x, z, road, entry }
+  CBZ.cityNav.driveTarget = function (x, z, r) {
+    if (!CBZ.roadGraph || !CBZ.roadGraph.driveTarget) return { x: x, z: z, road: false, entry: false };
+    return CBZ.roadGraph.driveTarget(CBZ.cityNav.driveWorld(), x, z, { r: r });
+  };
+
+  // ======================================================================
   //  2) nearestExit(x, z, awayX, awayZ) -> {x,z,nx,nz} | null
   //     EQS over the <=5 nearest building doors. Score each door's
   //     OUTSIDE step-point by:

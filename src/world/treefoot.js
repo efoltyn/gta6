@@ -53,6 +53,7 @@
   if (!CBZ) return;
 
   const N = 64;
+  const FADE_END = 1300;      // metres: the decal has faded out completely here (fade())
   const stats = { pools: 0, ao: 0, mulch: 0 };
   function sm(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
   function hash(x, y, s) {
@@ -124,7 +125,7 @@
         .replace("#include <project_vertex>", "#include <project_vertex>\nvTfD = length( mvPosition.xyz );");
       sh.fragmentShader = sh.fragmentShader
         .replace("#include <common>", "#include <common>\nvarying float vTfD;")
-        .replace("#include <map_fragment>", "#include <map_fragment>\ndiffuseColor.a *= 1.0 - smoothstep( 380.0, 1300.0, vTfD );");
+        .replace("#include <map_fragment>", "#include <map_fragment>\ndiffuseColor.a *= 1.0 - smoothstep( 380.0, " + FADE_END.toFixed(1) + ", vTfD );");
     };
     mat.customProgramCacheKey = function () { return key; };
   }
@@ -224,6 +225,7 @@
 
   CBZ.treeFoot = {
     add: add,
+    FADE_END: FADE_END,       // past this range the decal is gone: a pool beyond it may be skipped
     stats: function () { return Object.assign({}, stats); },
     _profile: aoProfile,      // plain-node checks
   };

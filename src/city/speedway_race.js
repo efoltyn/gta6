@@ -400,13 +400,18 @@
     if (!g || g.mode !== "city") return;
     const sw = SW(), P = CBZ.player;
     if (!sw || !P || !P.pos) return;
-    const dist = sw.distance(P.pos.x, P.pos.z);
+    // the field is built while the bowl can be seen (core/sight.js, from the
+    // eye), not 700 m from the body: from the stands' far side or the air the
+    // ten cars used to appear on the track
+    const SG = CBZ.sight ? CBZ.sight() : null;
+    const dist = Math.min(sw.distance(P.pos.x, P.pos.z), SG ? sw.distance(SG.x, SG.z) : Infinity);
+    const fieldR = Math.max(FIELD_R, SG ? SG.reach + 420 : 0);
     const inRace = !!(P.driving && P._vehicle && P._vehicle._raceCar);
     if (!F.built) {
-      if (dist < FIELD_R && sw.ready()) buildField();
+      if (dist < fieldR && sw.ready()) buildField();
       return;
     }
-    if (sw.stadium.root !== F.root || (dist > DROP_R && !inRace)) { dropField(); return; }
+    if (sw.stadium.root !== F.root || (dist > Math.max(DROP_R, fieldR + 600) && !inRace)) { dropField(); return; }
     const S = F.ses;
     for (const fc of F.cars) { const vis = sw.stadium.shown; if (fc.visual.group.visible !== vis) fc.visual.group.visible = vis; }
     if (S.me && !inRace) playerLeft();

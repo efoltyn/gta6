@@ -1,25 +1,24 @@
 /* ============================================================
-   systems/gunfx.js — lightweight, mode-AGNOSTIC gunfire visuals
-   (tracer beams + muzzle flashes) for the prison/escape game,
-   where the survival VFX kit (CBZ.fx) is gated off.
+   systems/gunfx.js — THE ROUND YOU SEE. Every game, every gun.
 
-   Used by the watch-tower armed response (systems/capture.js) and
-   by armed inmates returning fire in a stand-off (systems/
-   intimidate.js). Everything is pooled and self-animating on a
-   single always-updater; no per-frame allocation.
+   One system draws what a gunshot looks like, from the muzzle to whatever
+   stops the round: Gang City (NPCs, cops, gunships, the player's own
+   rounds through fpsmode.js), NPC War (src/battle/fire.js flies its own
+   ballistics and draws through here), the prison and Warlord. Missiles,
+   rockets and shells in flight are weapons/munitions.js (their bodies,
+   motor flares and smoke), which every launcher shares the same way.
 
-     CBZ.tracer(from, to, opts)  — a fading line + (by default) a
-                                   muzzle flash at `from`.
-     CBZ.muzzleFlash(pos, opts)  — a brief additive glow.
-
-   INCOMING FIRE READS (owner demand: "make it clearer when you're
-   getting shot" — with NO UI): tracer() detects a round travelling
-   AT the player and answers with a bigger/brighter/longer two-layer
-   muzzle flash at the shooter plus a thick additive BOLT down the
-   shot line (a head-on 1px line foreshortens to a dot; a cylinder
-   still reads). All of it swells after dark, when the flash is the
-   only thing visible at 40u. The flash IS the "you're being shot"
-   indicator.
+     CBZ.tracer(from, to, opts)  — a FLOWN round: it leaves at its cartridge's
+                                   speed, is drawn as a tracer or a faint ball
+                                   streak, and on arrival stops in its target
+                                   or flies on to the wall/ground behind it
+                                   (see THE ROUND below). Returns its record.
+     CBZ.roundStreak(...)        — the one look of a round in flight (tracer /
+                                   ball), for callers that fly their own.
+     CBZ.muzzleFlash(pos, opts)  — a hot core + (opts.dir) a plume of burning
+                                   gas thrown down the bore, sized by the gun.
+     CBZ.ejectBrass(pos, r, o)   — the spent case: instanced, it lands and stays.
+     CBZ.tracerStreak(...)       — the raw instanced streak those draw with.
 
    SUPPRESSION (combat-realism pass): being shot AT and missed should still
    cost you something, or "incoming fire" is purely cosmetic. tracer()
@@ -59,9 +58,6 @@
    bigger than a 9mm (o.mm / o.size carries the caliber). What it must
    NOT do is read bigger than the thing it hit: see boreMm()/SPREAD for the
    25-46 cm craters this used to stamp for a pistol round.
-
-   `from`/`to` are any {x,y,z}. opts: {color, life, muzzle:false,
-   muzzleScale, scale}.
 ============================================================ */
 (function () {
   "use strict";
@@ -148,23 +144,7 @@
     return miss < 3.4 ? 1 - miss / 3.4 : 0;
   }
 
-  // ---- pooled fading tracer lines ----
-  const linePool = [];
-  const liveLines = [];
-  function takeLine() {
-    let m = linePool.pop();
-    if (!m) {
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
-      const mat = new THREE.LineBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.95, depthWrite: false });
-      m = new THREE.Line(geo, mat);
-      m.frustumCulled = false; m.renderOrder = 8;
-      scene.add(m);
-    }
-    return m;
-  }
-
-  // ---- pooled muzzle-flash sprites (a soft additive glow) ----
+  // ---- pooled muzzle-flash sprites (the hot core: a soft additive glow) ----
   let flashTex = null;
   function makeFlashTex() {
     const c = document.createElement("canvas"); c.width = c.height = 64;
@@ -192,11 +172,48 @@
     return s;
   }
 
+  /* ---- THE FLASH HAS A SHAPE. A muzzle flash is not a ball: it is a hot
+     core at the crown and a plume of burning gas thrown FORWARD down the
+     line of fire, longer and fatter the more powder the cartridge burns (a
+     9 mm spits a hand's length, a rifle a forearm, a .50 or a tank gun
+     metres). The plume is a spindle along the bore, one InstancedMesh for
+     every gun in the game, faded by instance colour; the core stays the
+     camera-facing sprite. opts.dir is the bore (a unit vector); without it
+     the flash is the core alone. ---- */
+  const PL_CAP = 64;
+  let plMesh = null, plHead = 0;
+  const plLife = new Float32Array(PL_CAP), plMax = new Float32Array(PL_CAP);
+  function ensurePlume() {
+    if (plMesh) return plMesh;
+    const prof = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      // fat just past the crown, tapering to a point downrange
+      const r = Math.sin(Math.PI * Math.pow(t, 0.55)) * (1 - t * 0.35);
+      prof.push(new THREE.Vector2(Math.max(0.001, r), t));
+    }
+    const geo = new THREE.LatheGeometry(prof, 7);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    plMesh = new THREE.InstancedMesh(geo, mat, PL_CAP);
+    plMesh.name = "gunfx-flash-plumes"; plMesh.userData.fx = true;
+    plMesh.frustumCulled = false; plMesh.renderOrder = 9;
+    for (let i = 0; i < PL_CAP; i++) { plMesh.setMatrixAt(i, ZERO_M); plMesh.setColorAt(i, _plC.setRGB(0, 0, 0)); }
+    plMesh.instanceMatrix.needsUpdate = true;
+    if (plMesh.instanceColor) plMesh.instanceColor.needsUpdate = true;
+    scene.add(plMesh);
+    return plMesh;
+  }
+  const _plC = new THREE.Color(), _plQ = new THREE.Quaternion(), _plS = new THREE.Vector3(), _plP = new THREE.Vector3(), _plD = new THREE.Vector3(), _plM = new THREE.Matrix4();
+
   CBZ.muzzleFlash = function (pos, opts) {
     opts = opts || {};
     const s = takeFlash();
     s.position.set(pos.x, pos.y, pos.z);
-    const sc = (opts.scale || 1) * (0.7 + rng() * 0.5);
+    const base = opts.scale || 1;
+    const dir = opts.dir;
+    // with a plume the core is the crown only: a third of the old ball
+    const sc = base * (dir ? 0.45 : 1) * (0.7 + rng() * 0.5);
     s.scale.set(sc, sc, sc);
     // pooled sprites keep their last tint/peak — reset both every take
     s.material.color.setHex(opts.color != null ? opts.color : 0xffffff);
@@ -205,128 +222,364 @@
     s.visible = true;
     const life = opts.life || 0.06;
     liveFlashes.push({ spr: s, life: life, max: life, peak: peak });
+    if (dir) {
+      const M = ensurePlume();
+      _plD.set(dir.x, dir.y, dir.z);
+      if (_plD.lengthSq() > 1e-6) {
+        _plD.normalize();
+        const i = plHead; plHead = (plHead + 1) % PL_CAP;
+        const len = base * (0.55 + rng() * 0.35), r = base * (0.09 + rng() * 0.05);
+        _plQ.setFromUnitVectors(UP, _plD);
+        _plS.set(r, len, r);
+        _plP.set(pos.x, pos.y, pos.z);
+        _plM.compose(_plP, _plQ, _plS);
+        M.setMatrixAt(i, _plM);
+        M.setColorAt(i, _plC.setHex(0xffc870));
+        plLife[i] = plMax[i] = life * 0.9;
+        M.instanceMatrix.needsUpdate = true;
+        if (M.instanceColor) M.instanceColor.needsUpdate = true;
+      }
+    }
     return s;
   };
 
-  // ---- INCOMING-fire bolt pool: thin additive cylinders. A head-on tracer
-  // LINE foreshortens to a single pixel, which is why you couldn't tell who
-  // was shooting at you — a cylinder keeps its radius from every angle. ----
-  const beamGeo = new THREE.CylinderGeometry(1, 1, 1, 6);
-  beamGeo._shared = true;
-  const beams = [];
-  let beamIdx = 0;
-  function takeBeam() {
-    let b;
-    if (beams.length < 10) {
-      const bm = new THREE.MeshBasicMaterial({
-        color: 0xffe9b8, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
-      });
-      bm._shared = true;
-      b = { mesh: new THREE.Mesh(beamGeo, bm), life: 0, max: 0.001, peak: 1 };
-      b.mesh.visible = false; b.mesh.frustumCulled = false; b.mesh.renderOrder = 9;
-      scene.add(b.mesh);
-      beams.push(b);
-    } else {
-      b = beams[beamIdx];
-      beamIdx = (beamIdx + 1) % beams.length;
-    }
-    return b;
+  /* ============================================================ THE ROUND
+     CBZ.tracer(from, to, opts) — EVERY SHOT THE GAME DRAWS FOR A GUN THAT
+     IS NOT THE PLAYER'S OWN (and the player's own hitscan pistols, SMGs and
+     shotguns, through fpsmode.js).
+
+     WHAT WAS SLOP. A shot was a 1-pixel line from the muzzle to the target,
+     drawn whole in the frame the trigger broke and faded 70 ms later: a
+     laser, not a bullet. A round coming AT you foreshortened to a dot, so a
+     fat additive "bolt" and a flash three times too big were bolted on to
+     make incoming fire legible. A round that missed you simply ended in the
+     air beside you: no dust, no crack, no hole in the wall behind you.
+
+     WHAT IT IS NOW. The round FLIES: it leaves the muzzle at its cartridge's
+     velocity (weapons/ballistics.js CART, by the shooter's weapon) and
+     covers the distance in the time it takes. What the eye keeps of it is
+     what a real one leaves:
+       - a BALL round (every pistol, every civilian rifle) is a faint warm
+         streak, a few metres of motion blur, visible only near the lens;
+       - a TRACER (every Nth round of a belt: GUN.tracer, the last rounds of
+         a rifle magazine: GUN.tracerLast, or opts.tracer) is a burning red
+         or green line that reads at 400 m, coloured by the cartridge.
+     Where it ends depends on what it did (opts.hit, decided by the caller's
+     own roll BEFORE it draws):
+       hit true    it stops in the target. If the target is YOU in a car or
+                   an aircraft it strikes the machine: sparks off the body, a
+                   hole that rides the panel, a spider web in the glass.
+       hit false   it goes past and flies on until the world stops it (the
+                   LOS grid, the ground): dust off the dirt, chips off the
+                   wall, a hole that stays. One passing within a couple of
+                   metres of your head CRACKS (supersonic) or WHIZZES.
+       undefined   it ends at `to` (callers that resolve their own impact).
+     opts: weapon (a GUN key or an NPC weapon name), mm, v (m/s), tracer,
+     belt (every Nth), color, hit, shooter, targetActor, muzzle (false: no
+     flash), muzzleScale, brass (false: no case), byPlayer.
+     ======================================================================== */
+  const RD_CAP = 160;
+  const RD = [];
+  for (let i = 0; i < RD_CAP; i++) {
+    RD.push({ on: false, ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0, len: 0, s: 0, v: 0, end: 0,
+      tracer: false, col: 0, mm: 9, hit: undefined, phase: 0, snap: false, mine: false, tgtP: false,
+      bx: 0, by: 0, bz: 0, nx: 0, ny: 0, nz: 0, obj: null, ground: false });
   }
-  const _beamDir = new THREE.Vector3();
-  function fireIncomingBeam(from, to, inc, night) {
-    _beamDir.set(to.x - from.x, to.y - from.y, to.z - from.z);
-    const len = _beamDir.length();
-    if (len < 2.5) return;
-    _beamDir.multiplyScalar(1 / len);
-    const L = Math.max(2, len - 2.2);   // stop short of the lens — never a screen-filling smear
-    const b = takeBeam();
-    b.mesh.position.set(from.x + _beamDir.x * L * 0.5, from.y + _beamDir.y * L * 0.5, from.z + _beamDir.z * L * 0.5);
-    b.mesh.quaternion.setFromUnitVectors(UP, _beamDir);
-    // thicker with range + after dark so it still reads head-on at 40u
-    const r = 0.035 + len * 0.0014 + night * 0.025;
-    b.mesh.scale.set(r, L, r);
-    b.peak = 0.55 + inc * 0.3 + night * 0.15;
-    b.mesh.material.opacity = b.peak;
-    b.mesh.visible = true;
-    b.life = b.max = 0.09 + inc * 0.05 + night * 0.05;
+  let rdHead = 0;
+  const belts = new WeakMap();
+  let beltAnon = 0;
+  // a city NPC's weapon name → the gun row in weapons/ballistics.js
+  function gunKeyOf(w) {
+    if (!w) return null;
+    const B = CBZ.ballistics, G = B && B.GUN;
+    if (G && G[w]) return w;
+    const k = String(w).toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (G && G[k]) return k;
+    if (/ak|kalash|762/.test(k)) return "ak47";
+    if (/m4|ar15|rifle|carbine|m16|556|scar/.test(k)) return "carbine";
+    if (/lmg|m249|saw|pkm|minigun|m134|door/.test(k)) return /m134|door|minigun/.test(k) ? "m134_door" : "lmg";
+    if (/50|m2|browning/.test(k)) return "m2_50cal";
+    if (/sniper|m24|dragunov|marksman/.test(k)) return "sniper";
+    if (/shot|12g|pump/.test(k)) return "shotgun";
+    if (/uzi|mac/.test(k)) return "uzi";
+    if (/smg|mp5|mp7|ump|vector/.test(k)) return "smg";
+    if (/deagle|eagle/.test(k)) return "deagle";
+    if (/revolver|357|magnum/.test(k)) return "revolver";
+    if (/taser/.test(k)) return "taser";
+    return "sidearm";
+  }
+  const _spec = { mm: 9, v: 360, tcol: 0, belt: 0, last: 0, pellets: 0 };
+  function roundSpec(opts) {
+    const B = CBZ.ballistics;
+    _spec.mm = 9; _spec.v = 360; _spec.tcol = 0; _spec.belt = 0; _spec.last = 0; _spec.pellets = 0;
+    const gk = gunKeyOf(opts.weapon || (opts.shooter && opts.shooter.weapon));
+    const g = gk && B && B.GUN ? B.GUN[gk] : null;
+    const c = g && g.cart && B.CART ? B.CART[g.cart] : null;
+    if (c) { _spec.mm = c.mm; _spec.v = c.v0; _spec.tcol = c.tracer || 0; _spec.pellets = c.pellets || 0; }
+    if (g) { _spec.belt = g.tracer || 0; _spec.last = g.tracerLast || 0; }
+    if (opts.mm > 0) _spec.mm = opts.mm;
+    if (opts.v > 0) _spec.v = opts.v;
+    if (opts.belt > 0) _spec.belt = opts.belt;
+    return _spec;
+  }
+  // is THIS round of the shooter's a tracer? (belts: one in N; rifles: the
+  // last few of a 30-round magazine, counted on the shooter's own trigger)
+  function isTracer(opts, sp) {
+    if (opts.tracer != null) return !!opts.tracer;
+    const who = opts.shooter && typeof opts.shooter === "object" ? opts.shooter : null;
+    let n;
+    if (who) { n = (belts.get(who) || 0) + 1; belts.set(who, n); } else n = ++beltAnon;
+    if (sp.belt > 0) return n % sp.belt === 0;
+    if (sp.last > 0) return (n % 30) >= 30 - sp.last;
+    return false;
   }
 
   CBZ.tracer = function (from, to, opts) {
     opts = opts || {};
+    if (!from || !to) return null;
     // ---- is this round travelling AT the player? Closest approach of the
-    // shot segment to the player's chest line decides; the boost scales with
-    // how dead-on the shot is (inc 0..1). Player-origin / point-blank-adjacent
-    // shots are excluded so your own allies' barrels don't flare in your face.
-    // (closestApproachInc factors out the exact math that used to live inline
-    // here — SAME numbers for the player — so it can also drive SUPPRESSION
-    // below without duplicating the geometry test.)
+    // shot segment to the player's chest line (inc 0..1). It drives the
+    // SUPPRESSION below, and a muzzle flash seen from the front is the
+    // brightest one there is (a flash is thrown down the bore).
     let inc = 0;
     const P = CBZ.player;
-    if (P && P.pos && from && to) {
-      inc = closestApproachInc(from, to, P.pos.x, P.pos.y + 1.45, P.pos.z);
-    }
+    const mine = opts.byPlayer === true || (P && opts.shooter === P);
+    if (P && P.pos && !mine) inc = closestApproachInc(from, to, P.pos.x, P.pos.y + 1.45, P.pos.z);
     // SUPPRESSION (c): a round that buzzed the PLAYER rattles their own aim
-    // for a few seconds (fpsmode.js reads CBZ.suppressionAccuracyMul(CBZ.player)
-    // into its spread cone). opts.shooter excludes the player's own outgoing
-    // fire from suppressing themselves (mirrors the existing "player-origin
-    // shots are excluded" muzzle-flash rule above).
-    if (inc >= SUPPRESS_THRESH && P && opts.shooter !== P) noteSuppressed(P, inc);
-    // GENERIC near-miss for any other target (NPC defenders, guards, cops…):
-    // shooters that know WHO they're aiming at pass opts.targetActor (an
-    // object with .pos) so that actor gets rattled too, independent of the
-    // player-only `inc` above. Computed separately (NOT reusing `inc`) since
-    // the target here is rarely the player and the test must run against the
-    // target's own position, not the camera's.
-    if (opts.targetActor && opts.targetActor !== opts.shooter && opts.targetActor.pos && from && to) {
+    // for a few seconds (fpsmode.js reads CBZ.suppressionAccuracyMul(CBZ.player)).
+    if (inc >= SUPPRESS_THRESH && P && !mine) noteSuppressed(P, inc);
+    // GENERIC near-miss for any other target (NPC defenders, guards, cops…).
+    if (opts.targetActor && opts.targetActor !== opts.shooter && opts.targetActor.pos) {
       const ta = opts.targetActor.pos;
       const tInc = closestApproachInc(from, to, ta.x, (ta.y || 0) + 1.4, ta.z);
       if (tInc >= SUPPRESS_THRESH) noteSuppressed(opts.targetActor, tInc);
     }
-    const night = inc > 0 ? Math.min(1, CBZ.nightAmount || 0) : 0;
 
-    // ---- THE CITY REACTS to the round itself ------------------------------
-    // Every shot in the game draws a tracer, so this segment IS the bullet's
-    // whole path — route it once at the street furniture (props.js reacts:
-    // lamps shatter dark, hydrants geyser, cans go flying), and stamp the
-    // ROAD when the line carries below the pavement plane: the shot resolver
-    // only raycasts walls/cars, so a round fired into the asphalt used to
-    // vanish without a mark. Player pellets, NPC guns and cop fire all pass
-    // through here, so the whole firefight leaves evidence.
+    // ---- THE CITY REACTS to the round itself (props.js: lamps shatter,
+    // hydrants geyser; cityevents.js: a gunshot is a wide sharp scare)
     if (CBZ.game && CBZ.game.mode === "city" && opts.muzzle !== false) {
       if (CBZ.cityShootProp) CBZ.cityShootProp(from, to);
-      if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "gunshot", pos: from, radius: 40, intensity: 0.9 });   // crowd panic bus (cityevents.js): a gunshot is a wide, sharp scare
-      const GY = 0.09;                                  // pavement top (sidewalk 0.08 / lot pad 0.10)
-      if (to.y < GY && from.y > GY + 0.3) {
-        const gt = (from.y - GY) / (from.y - to.y);
-        const gp = { x: from.x + (to.x - from.x) * gt, y: GY, z: from.z + (to.z - from.z) * gt };
-        CBZ.bulletHole(gp, { x: 0, y: 1, z: 0 }, { size: 0.2, noProp: true, surface: "asphalt" });
-        CBZ.bulletImpact(gp, { x: 0, y: 1, z: 0 }, { kind: "dust", surface: "asphalt", power: 0.8 });
-      }
+      if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "gunshot", pos: from, radius: 40, intensity: 0.9 });
     }
 
-    const m = takeLine();
-    const p = m.geometry.attributes.position.array;
-    p[0] = from.x; p[1] = from.y; p[2] = from.z;
-    p[3] = to.x;   p[4] = to.y;   p[5] = to.z;
-    m.geometry.attributes.position.needsUpdate = true;
-    m.material.color.setHex(opts.color != null ? opts.color : (inc > 0 ? 0xfff7d6 : 0xfff2b0));
-    m.material.opacity = 0.95;
-    m.visible = true;
-    const life = opts.life || (inc > 0 ? 0.07 + inc * 0.05 : 0.07);
-    liveLines.push({ mesh: m, life: life, max: life });
-    if (opts.muzzle !== false) {
-      if (inc > 0) {
-        const base = opts.muzzleScale || 0.9;
-        // hot core — bigger, brighter, a beat longer than an outgoing flash
-        CBZ.muzzleFlash(from, { scale: base * (1.9 + inc * 0.9 + night * 0.8), life: 0.1 + inc * 0.05 + night * 0.05 });
-        // wide pale halo blooming around it — the "that one's aimed at YOU" flare
-        CBZ.muzzleFlash(from, { scale: base * (3.1 + inc * 1.5 + night * 1.4), life: 0.16 + night * 0.07, color: 0xfff4da, peak: 0.4 + night * 0.25 });
-        // the round itself: a hot volumetric bolt down the shot line at you
-        fireIncomingBeam(from, to, inc, night);
-      } else CBZ.muzzleFlash(from, { scale: opts.muzzleScale || 0.9 });
+    // A MISS IS DRAWN MISSING. A caller whose roll said "missed" but who aims
+    // the picture at the target's chest would show a round flying through a
+    // body untouched: put it past him, a body's half-width and a hand aside.
+    const ta = opts.hit === false && opts.targetActor && opts.targetActor.pos ? opts.targetActor.pos : null;
+    if (ta) {
+      const ax = to.x - from.x, az = to.z - from.z, al = Math.hypot(ax, az) || 1;
+      const ux = -az / al, uz = ax / al;                     // across the line
+      const off = (ta.x - to.x) * ux + (ta.z - to.z) * uz;   // how far the line already passes him
+      if (Math.abs(off) < 0.5) {
+        const side = off > 0 ? -1 : off < 0 ? 1 : (rng() < 0.5 ? -1 : 1);
+        const push = 0.6 + rng() * 0.7 - Math.abs(off);
+        _missTo.x = to.x + ux * side * push; _missTo.y = to.y + (rng() - 0.4) * 0.5; _missTo.z = to.z + uz * side * push;
+        to = _missTo;
+      }
     }
-    return m;
+    const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+    const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const sp = roundSpec(opts);
+    const tr = isTracer(opts, sp);
+    // ---- the gun: flash down the bore, and the case out of the port
+    if (opts.muzzle !== false && len > 1e-3) {
+      _rdDir.set(dx / len, dy / len, dz / len);
+      const ms = opts.muzzleScale != null ? opts.muzzleScale : 0.9;
+      if (ms > 0) {
+        // the plume grows with the powder the cartridge burns (bore as its proxy)
+        const k = ms * (0.75 + Math.min(1.6, sp.mm / 9) * 0.35);
+        const night = Math.min(1, CBZ.nightAmount || 0);
+        CBZ.muzzleFlash(from, { scale: k * (1 + inc * 0.5 + night * 0.3), dir: _rdDir, life: 0.05 + inc * 0.03 });
+      }
+      if (opts.brass !== false && !mine) ejectFor(from, _rdDir, sp);
+    }
+    if (len < 0.05) return null;
+    const r = RD[rdHead]; rdHead = (rdHead + 1) % RD_CAP;
+    r.on = true; r.ox = from.x; r.oy = from.y; r.oz = from.z;
+    r.dx = dx / len; r.dy = dy / len; r.dz = dz / len;
+    r.len = len; r.end = len; r.s = 0;
+    r.v = Math.max(120, sp.v * 0.97);
+    r.mm = sp.mm; r.tracer = tr;
+    r.col = opts.color != null ? opts.color : (sp.tcol || 0xff5a2a);
+    r.hit = opts.hit; r.phase = 0; r.snap = mine; r.mine = mine; r.obj = null; r.ground = false;
+    r.tgtP = !!(P && (opts.targetActor === P || (opts.targetActor == null && P.pos &&
+      Math.abs(to.x - P.pos.x) < 2.5 && Math.abs(to.z - P.pos.z) < 2.5)));
+    // a caller that resolves its own impact, firing into the street: the
+    // shot resolvers only test walls and cars, so the round that carries
+    // below the pavement plane lands THERE (dust, and a pock in the asphalt)
+    if (r.hit === undefined && CBZ.game && CBZ.game.mode === "city" && to.y < 0.09 && from.y > 0.39) {
+      const gt = (from.y - 0.09) / (from.y - to.y);
+      r.len = r.end = len * gt; r.phase = 1; r.ground = true; r.obj = null;
+      r.bx = from.x + dx * gt; r.by = 0.09; r.bz = from.z + dz * gt; r.nx = 0; r.ny = 1; r.nz = 0;
+    }
+    return r;
   };
+  const _rdDir = new THREE.Vector3(), _missTo = { x: 0, y: 0, z: 0 };
+
+  // the shooter's spent case, for a shot near enough the lens to see it land
+  function ejectFor(from, dir, sp) {
+    if (!CBZ.ejectBrass || sp.mm >= 14) return;
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (!cam || (from.x - cam.x) * (from.x - cam.x) + (from.z - cam.z) * (from.z - cam.z) > 28 * 28) return;
+    let rx = -dir.z, rz = dir.x;
+    const rl = Math.hypot(rx, rz) || 1; rx /= rl; rz /= rl;
+    let gy = from.y - 1.35;
+    if (CBZ.floorAt) { try { const f = +CBZ.floorAt(from.x, from.z, from.y); if (isFinite(f) && f < from.y) gy = f; } catch (e) { /* keep */ } }
+    _ejR.x = rx; _ejR.y = 0; _ejR.z = rz; _ejF.x = dir.x; _ejF.z = dir.z;
+    _ejP.x = from.x - dir.x * 0.3; _ejP.y = from.y + 0.02; _ejP.z = from.z - dir.z * 0.3;
+    CBZ.ejectBrass(_ejP, _ejR, { mm: sp.mm, shell: sp.pellets > 0, groundY: gy, fwd: _ejF });
+  }
+  const _ejR = { x: 0, y: 0, z: 0 }, _ejF = { x: 0, z: 0 }, _ejP = { x: 0, y: 0, z: 0 };
+
+  // ---- where a round that went past its mark comes down -------------------
+  const _bkRay = new THREE.Raycaster();
+  const BACKSTOP = 70;                              // m past the mark a stray round is followed
+  function backstop(r) {
+    const x0 = r.ox + r.dx * r.len, y0 = r.oy + r.dy * r.len, z0 = r.oz + r.dz * r.len;
+    let best = BACKSTOP;
+    r.obj = null; r.ground = false;
+    // the walls (the LOS grid every shooter already tests its line against)
+    if (CBZ.losRaycast && CBZ.losBlockers && CBZ.losBlockers.length) {
+      _bkRay.ray.origin.set(x0, y0, z0);
+      _bkRay.ray.direction.set(r.dx, r.dy, r.dz);
+      _bkRay.near = 0.05; _bkRay.far = BACKSTOP;
+      const hs = CBZ.losRaycast(_bkRay, CBZ.losBlockers);
+      for (let i = 0; hs && i < hs.length; i++) {
+        const h = hs[i];
+        if (h.distance >= best) continue;
+        const n = h.face && h.face.normal;
+        if (CBZ.cityShotHole && CBZ.cityShotHole(h.point.x, h.point.y, h.point.z, n ? n.x : 0, n ? n.z : 0)) continue;
+        best = h.distance; r.obj = h.object || null;
+        r.nx = n ? n.x : -r.dx; r.ny = n ? n.y : 0; r.nz = n ? n.z : -r.dz;
+      }
+    }
+    // the ground: a terrain where the game has one, else the pavement plane
+    const gAt = CBZ.groundAt;
+    if (r.dy < -1e-4) {
+      if (typeof gAt === "function") {
+        for (let t = 1.5; t < best; t += 1.5) {
+          const y = y0 + r.dy * t, gy = +gAt(x0 + r.dx * t, z0 + r.dz * t);
+          if (isFinite(gy) && y <= gy) { best = t; r.obj = null; r.ground = true; r.nx = 0; r.ny = 1; r.nz = 0; break; }
+        }
+      } else {
+        const t = (y0 - 0.09) / -r.dy;
+        if (t > 0 && t < best) { best = t; r.obj = null; r.ground = true; r.nx = 0; r.ny = 1; r.nz = 0; }
+      }
+    }
+    if (best >= BACKSTOP) return false;
+    r.end = r.len + best;
+    r.bx = x0 + r.dx * best; r.by = y0 + r.dy * best; r.bz = z0 + r.dz * best;
+    return true;
+  }
+  // what the round does to what stopped it
+  const _hp3 = { x: 0, y: 0, z: 0 }, _hn3 = { x: 0, y: 0, z: 0 };
+  function strikeWorld(r) {
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (cam && Math.hypot(r.bx - cam.x, r.by - cam.y, r.bz - cam.z) > 160) return;
+    _hp3.x = r.bx; _hp3.y = r.by; _hp3.z = r.bz;
+    _hn3.x = r.nx; _hn3.y = r.ny; _hn3.z = r.nz;
+    const pw = Math.min(2, 0.55 + r.mm / 14);
+    if (r.ground) {
+      _hp3.y += 0.02;
+      const surf = CBZ.game && CBZ.game.mode === "city" ? "asphalt" : "dirt";
+      CBZ.bulletImpact(_hp3, _hn3, { kind: "dust", surface: surf, power: pw });
+      CBZ.bulletHole(_hp3, _hn3, { mm: r.mm, noProp: true, surface: surf });
+      return;
+    }
+    let mat = null;
+    const o = r.obj;
+    if (o && o.material) mat = Array.isArray(o.material) ? o.material[0] : o.material;
+    CBZ.bulletImpact(_hp3, _hn3, { kind: "spark", power: pw, material: mat || undefined, object: o || undefined });
+    CBZ.bulletHole(_hp3, _hn3, { mm: r.mm, noProp: true, material: mat || undefined, object: o || undefined });
+  }
+  // a round that found YOU inside a machine: it strikes the machine
+  function strikeYourRide(r) {
+    const P = CBZ.player;
+    if (!P) return;
+    const V = P._aircraft && !P._aircraft.destroyed ? P._aircraft : (P.driving && P._vehicle ? P._vehicle : null);
+    const grp = V && (V.group || V.grp || V.mesh);
+    if (!grp) return;
+    _hp3.x = r.ox + r.dx * r.len; _hp3.y = r.oy + r.dy * r.len; _hp3.z = r.oz + r.dz * r.len;
+    _hn3.x = -r.dx; _hn3.y = -r.dy; _hn3.z = -r.dz;
+    const pw = Math.min(2, 0.6 + r.mm / 12);
+    CBZ.bulletImpact(_hp3, _hn3, { kind: "spark", power: pw });
+    if (V.color != null) CBZ.bulletImpact(_hp3, _hn3, { kind: "chip", power: pw * 0.8, color: V.color });
+    CBZ.bulletHole(_hp3, _hn3, { mm: r.mm, parent: grp, car: true, noProp: true });
+    if (CBZ.sfx) { try { CBZ.sfx("ricochet", { volume: 0.35 + Math.min(0.4, r.mm / 40) }); } catch (e) { /* audio off */ } }
+  }
+  // the crack (or the whiz) of a round passing your head
+  function passBy(r, s0, s1) {
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (!cam) return;
+    const qx = cam.x - r.ox, qy = cam.y - r.oy, qz = cam.z - r.oz;
+    const t = qx * r.dx + qy * r.dy + qz * r.dz;
+    if (t < s0 || t >= s1 || t > r.end) return;
+    r.snap = true;
+    const mx = qx - r.dx * t, my = qy - r.dy * t, mz = qz - r.dz * t;
+    const miss = Math.sqrt(mx * mx + my * my + mz * mz);
+    if (miss > 3 || miss < 0.25) return;
+    const vol = Math.min(1, 1.25 - miss / 3) * Math.min(1.3, 0.6 + r.mm / 12);
+    if (CBZ.sfx) { try { CBZ.sfx(r.v > 360 ? "bullet_snap" : "bullet_whiz", { dist: miss, ghost: true, volume: vol }); } catch (e) { /* audio off */ } }
+  }
+  /* HOW A ROUND READS IN FLIGHT — the one look, for every round every game
+     draws (gunfx's own flown rounds, NPC War's fire.js, the player's rifle
+     rounds in fpsmode.js). The caller hands the streak's tail and head (it
+     knows the round's speed and path); this decides what that streak is:
+       tracer  the burning compound: its cartridge's colour, a line that
+               keeps reading out to a kilometre (width grows with range)
+       ball    no compound: a faint warm blur a few metres long, seen only
+               within ~110 m of the lens and dimmer with distance
+     CBZ.roundStreak(x0,y0,z0, x1,y1,z1, tracer, color, mm, dt) */
+  const _rdC = new THREE.Color();
+  const _rsO = { color: 0, life: 0, width: 0, ball: false };
+  CBZ.roundStreak = function (x0, y0, z0, x1, y1, z1, tracer, color, mm, dt) {
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (!cam) return;
+    const dc = Math.hypot(x1 - cam.x, y1 - cam.y, z1 - cam.z);
+    mm = mm || 7;
+    if (tracer) {
+      if (dc > 1100) return;
+      _rsO.color = color != null ? color : 0xff5a2a; _rsO.width = 0.014 + mm * 0.0011; _rsO.ball = false;
+    } else {
+      if (dc > 110) return;
+      const k = 0.5 * (1 - dc / 130);
+      _rdC.setRGB(0.95 * k, 0.88 * k, 0.74 * k);
+      _rsO.color = _rdC.getHex(); _rsO.width = 0.0035 + mm * 0.00025; _rsO.ball = true;
+    }
+    _rsO.life = Math.max(0.024, (dt || 0.016) * 1.25);
+    CBZ.tracerStreak(x0, y0, z0, x1, y1, z1, _rsO);
+  };
+  // a round's own streak this frame: a tracer's burning trace, a ball round's blur
+  function drawRound(r, s0, s1, dt) {
+    const tail = r.tracer ? Math.max(s0, s1 - Math.min(24, Math.max(3, r.v * 0.03)))
+      : Math.max(0, s1 - Math.min(9, Math.max(2.5, r.v * 0.011)));
+    if (s1 - tail < 0.05) return;
+    CBZ.roundStreak(r.ox + r.dx * tail, r.oy + r.dy * tail, r.oz + r.dz * tail,
+      r.ox + r.dx * s1, r.oy + r.dy * s1, r.oz + r.dz * s1, r.tracer, r.col, r.mm, dt);
+  }
+  function stepRounds(dt) {
+    if (!(dt > 0)) return;
+    for (let i = 0; i < RD_CAP; i++) {
+      const r = RD[i];
+      if (!r.on) continue;
+      const s0 = r.s;
+      r.s += r.v * dt;
+      const s1 = Math.min(r.s, r.end);
+      drawRound(r, s0, s1, dt);
+      if (!r.snap) passBy(r, s0, s1);
+      if (r.s < r.end) continue;
+      if (r.phase === 0) {
+        // it reached its mark
+        if (r.hit === true) { if (r.tgtP) strikeYourRide(r); r.on = false; continue; }
+        if (r.hit === false && backstop(r)) { r.phase = 1; continue; }
+        r.on = false; continue;
+      }
+      strikeWorld(r);
+      r.on = false;
+    }
+  }
+  CBZ.roundsLive = function () { let n = 0; for (let i = 0; i < RD_CAP; i++) if (RD[i].on) n++; return n; };
+  CBZ.roundsReset = function () { for (let i = 0; i < RD_CAP; i++) RD[i].on = false; };
 
   // ---- JUICY bullet impacts: a short-lived burst of debris streaks that fly
   // out along the surface normal (GTA/Max-Payne style stretched billboards),
@@ -951,25 +1204,12 @@
   // one always-updater fades + recycles every transient (runs in all modes,
   // like the rig/facial layers, so brief bursts never freeze mid-fade).
   CBZ.onAlways(54, function (dt) {
-    for (let i = liveLines.length - 1; i >= 0; i--) {
-      const t = liveLines[i];
-      t.life -= dt;
-      t.mesh.material.opacity = Math.max(0, t.life / t.max) * 0.95;
-      if (t.life <= 0) { t.mesh.visible = false; linePool.push(t.mesh); liveLines.splice(i, 1); }
-    }
+    stepRounds(dt);
     for (let i = liveFlashes.length - 1; i >= 0; i--) {
       const f = liveFlashes[i];
       f.life -= dt;
       f.spr.material.opacity = Math.max(0, f.life / f.max) * (f.peak != null ? f.peak : 1);
       if (f.life <= 0) { f.spr.visible = false; flashPool.push(f.spr); liveFlashes.splice(i, 1); }
-    }
-    // incoming-fire bolts fade fast (round's already landed)
-    for (let i = 0; i < beams.length; i++) {
-      const b = beams[i];
-      if (b.life <= 0) continue;
-      b.life -= dt;
-      b.mesh.material.opacity = Math.max(0, b.life / b.max) * b.peak;
-      if (b.life <= 0) b.mesh.visible = false;
     }
     // bullet-impact streaks: integrate velocity + gravity, stretch along motion
     for (let i = 0; i < streaks.length; i++) {
@@ -1035,7 +1275,9 @@
     _tsD.multiplyScalar(1 / len);
     const cam = CBZ.camera && CBZ.camera.position;
     const dc = cam ? Math.hypot(x1 - cam.x, y1 - cam.y, z1 - cam.z) : 30;
-    const w = ((opts && opts.width) || 0.016) * Math.max(1, dc / 32);
+    // a tracer keeps reading as a line at 400 m (that is what tracers are FOR);
+    // a ball round's faint blur may not outgrow what a real one shows
+    const w = ((opts && opts.width) || 0.016) * (opts && opts.ball ? Math.min(2, Math.max(1, dc / 20)) : Math.max(1, dc / 32));
     const i = tsHead; tsHead = (tsHead + 1) % TS_CAP;
     _tsQ.setFromUnitVectors(UP, _tsD);
     _tsS.set(w, len, w);
@@ -1117,6 +1359,18 @@
     brMesh.instanceMatrix.needsUpdate = true; brLive = 0;
   };
   CBZ.onAlways(54.5, function (dt) {
+    if (plMesh) {
+      let anyP = false;
+      for (let i = 0; i < PL_CAP; i++) {
+        if (plLife[i] <= 0) continue;
+        plLife[i] -= dt;
+        anyP = true;
+        if (plLife[i] <= 0) { plMesh.setMatrixAt(i, ZERO_M); plMesh.instanceMatrix.needsUpdate = true; continue; }
+        const k = plLife[i] / plMax[i];
+        plMesh.setColorAt(i, _plC.setRGB(1 * k, 0.78 * k, 0.44 * k));
+      }
+      if (anyP && plMesh.instanceColor) plMesh.instanceColor.needsUpdate = true;
+    }
     if (tsMesh) {
       let any = false;
       for (let i = 0; i < TS_CAP; i++) {
@@ -1187,11 +1441,6 @@
     s.renderOrder = 9; s.visible = false;
     scene.add(s);
     flashPool.push(s);
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
-    const m = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.95, depthWrite: false }));
-    m.frustumCulled = false; m.renderOrder = 8; m.visible = false;
-    scene.add(m);
-    linePool.push(m);
   }
+  try { ensurePlume(); ensureTs(); } catch (e) { /* headless: built on first shot */ }
 })();

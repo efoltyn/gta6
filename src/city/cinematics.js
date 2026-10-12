@@ -435,7 +435,7 @@
           const w = seatWorld(rideCtx.car, seatLocal.rearP);
           return Math.hypot(px - w.x, pz - w.z) < 2.6 ? { x: w.x, z: w.z, pos: new THREE.Vector3(w.x, 1, w.z) } : null;
         },
-        options: [{ id: "cine-back-i", slot: "i", label: "Get in back", onSelect: () => beginRide("back") }],
+        options: [{ id: "cine-back-i", slot: "i", label: "Ride back", onSelect: () => beginRide("back") }],
       });
       S.zones.push("cine-ride-front", "cine-ride-back");
     }

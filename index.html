@@ -17,7 +17,7 @@
 <link rel="stylesheet" href="css/hud.css?v=desk1009c">
 <link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
-<link rel="stylesheet" href="css/mobile.css?v=heli1009">
+<link rel="stylesheet" href="css/mobile.css?v=deck1011">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=onebar0930">
 <link rel="stylesheet" href="css/city.css?v=desk1009c">
@@ -450,9 +450,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=memfit1008"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=maplabels1009"></script>
+<script src="src/core/slice.js?v=sight1011"></script>
+<!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
+     the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
+<script src="src/core/sight.js?v=farform1011m"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=sdoor0930"></script>
+<script src="src/core/citystream.js?v=farform1011m"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -482,10 +485,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=ground1001"></script>
+<script src="src/world/vegetation.js?v=sight1011"></script>
 <!-- where a tree meets the ground: instanced contact shade + mulch rings every
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
-<script src="src/world/treefoot.js?v=ground1001"></script>
+<script src="src/world/treefoot.js?v=sight1011"></script>
 <script src="src/world/forestlook.js?v=wreal0929"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/lightpin.js?v=w09290242x"></script>
@@ -647,7 +650,7 @@ document.body.appendChild(b);}}catch(e){}})();
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=armourm1011"></script>
+<script src="src/entities/crowdgpu.js?v=farform1011m"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -684,7 +687,7 @@ document.body.appendChild(b);}}catch(e){}})();
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
 <!-- CBZ.eyes: how a hurt body sees. No red screen anywhere: near death the
      a light red rim, grey colour and a heartbeat; the view never closes while alive (lids are for the dead). -->
-<script src="src/systems/eyes.js?v=deathcam1009"></script>
+<script src="src/systems/eyes.js?v=rounds1013"></script>
 <script src="src/systems/vitals.js?v=deathcam1009"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
 <script src="src/entities/player.js?v=pf0930c"></script>
@@ -703,7 +706,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=weap1011m"></script>
+<script src="src/systems/audio.js?v=rounds1013m"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 <script src="src/systems/economy.js?v=jailv1001"></script>
 
@@ -722,7 +725,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/weapons/appearances/grenade.js?v=anchor1"></script>
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
-<script src="src/weapons/munitions.js?v=mil0929"></script>
+<script src="src/weapons/munitions.js?v=rounds1013m"></script>
 <script src="src/weapons/appearances/ak47.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/revolver.js?v=mce86a5"></script>
 <script src="src/weapons/appearances/deagle.js?v=mce86a5"></script>
@@ -883,7 +886,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=planes1009b"></script>
-<script src="src/systems/physics.js?v=solid1011b"></script>
+<script src="src/systems/physics.js?v=nukecost1013"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -1018,19 +1021,19 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
 <script src="src/systems/runstats.js?v=end1"></script>
-<script src="src/systems/touch.js?v=gait1011"></script>
-<script src="src/systems/touch_vehicle.js?v=planes1009b"></script>
+<script src="src/systems/touch.js?v=btn1011m"></script>
+<script src="src/systems/touch_vehicle.js?v=deck1011"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <!-- where a floating touch button may go (the verb column, the way out): pure rect math -->
-<script src="src/systems/touch_layout.js?v=tui0929"></script>
-<script src="src/systems/seat_exit.js?v=seats1009b"></script>
+<script src="src/systems/touch_layout.js?v=deck1011"></script>
+<script src="src/systems/seat_exit.js?v=deck1011"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ekey2"></script>
-<script src="src/systems/fpsmode.js?v=army1013m"></script>
-<script src="src/systems/gunfx.js?v=weap1011m"></script>
+<script src="src/systems/fpsmode.js?v=rounds1013m"></script>
+<script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=jailv1001"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
@@ -1038,7 +1041,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
-<script src="src/systems/debris.js?v=debris1012"></script>
+<script src="src/systems/debris.js?v=nukecost1013"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -1148,7 +1151,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/streetkit.js?v=metro0929"></script>
 <script src="src/city/world.js?v=water1011"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
-<script src="src/city/flags.js?v=polsim1008b"></script>
+<script src="src/city/flags.js?v=btn1011m"></script>
 <script src="src/city/interior_programs.js?v=solid1011b"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
@@ -1165,7 +1168,7 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=flicker1009b"></script>
-<script src="src/city/buildings.js?v=solid1011b"></script>
+<script src="src/city/buildings.js?v=farform1011m"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1216,9 +1219,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facade_demo.js?v=fk2"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=flicker1009b"></script>
-<script src="src/city/citynav.js?v=metro0929"></script>
-<script src="src/city/fracture.js?v=mil0929"></script>
-<script src="src/city/demolition.js?v=mil0929"></script>
+<script src="src/city/citynav.js?v=curb1013"></script>
+<script src="src/city/fracture.js?v=nukecost1013"></script>
+<script src="src/city/demolition.js?v=nukecost1013"></script>
 <script src="src/city/elevators.js?v=stairs1009b"></script>
 <script src="src/city/exec_office.js?v=pf0930a"></script>
 <script src="src/city/escalators.js?v=air0929r"></script>
@@ -1227,12 +1230,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/expansion.js?v=ground1001"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=speedway1009"></script>
+<script src="src/city/worldmap.js?v=sight1011"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
 <script src="src/city/waterfield.js?v=pf0930g"></script>
-<script src="src/city/highways.js?v=ground1001"></script>
+<script src="src/city/highways.js?v=sight1011"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
@@ -1318,8 +1321,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/race/race_ai.js?v=speedway1009"></script>
 <script src="src/race/race_session.js?v=speedway1009"></script>
 <script src="src/race/race_car.js?v=ric0929"></script>
-<script src="src/city/island_speedway.js?v=speedway1009"></script>
-<script src="src/city/speedway_race.js?v=speedway1009"></script>
+<script src="src/city/island_speedway.js?v=mobwall1013"></script>
+<script src="src/city/speedway_race.js?v=farform1011m"></script>
 <!-- CIVIL AIRFRAMES. The loft/aerofoil/lathe kit and every civil aircraft
      type drawn from it at real dimensions (narrowbody, widebody, turboprop,
      business jet, light single, helicopter variants), shared per type, with
@@ -1342,12 +1345,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
 <script src="src/world/basekit.js?v=army1013m"></script>
 <!-- ONE ARMY (city/army.js): the door to NPC War's battle core, sim and unit kit. Only the API + loader ride the page; the unit files and the war engine load when a force or Fort Brandt's motor pool needs them. -->
-<script src="src/city/army.js?v=convoy1013"></script>
+<script src="src/city/army.js?v=rounds1013"></script>
 <script src="src/city/island_military.js?v=strike1013m"></script>
-<script src="src/city/biome_desert.js?v=layout2m"></script>
-<script src="src/city/biome_forest.js?v=ground1001"></script>
+<script src="src/city/biome_desert.js?v=sight1011m"></script>
+<script src="src/city/biome_forest.js?v=sight1011m"></script>
 <script src="src/city/biome_farmland.js?v=layout2b"></script>
-<script src="src/city/biome_snow.js?v=maplabels1009"></script>
+<script src="src/city/biome_snow.js?v=sight1011"></script>
 <script src="src/city/snowboard.js?v=ric0929"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -1356,7 +1359,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
-<script src="src/world/wildnature.js?v=ground1001"></script>
+<script src="src/world/wildnature.js?v=sight1011"></script>
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
@@ -1378,7 +1381,7 @@ document.body.appendChild(b);}}catch(e){}})();
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
 <script src="src/city/wildlife_traits.js?v=indiv1"></script>
-<script src="src/city/wildlife.js?v=pf0930g"></script>
+<script src="src/city/wildlife.js?v=farform1011m"></script>
 <script src="src/city/wildlife_tame.js?v=ekey2"></script>
 <!-- THE ONE DOG: city/dogmodel.js is the body (skinned lofted shell per breed,
      planted-foot walk/trot/gallop, body language) and CBZ.dogGait; city/
@@ -1391,7 +1394,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/units/kit/loft.js?v=npcw1011"></script>
 <script src="src/city/dogmodel.js?v=npcw1011"></script>
 <script src="src/city/dogbrain.js?v=dogs1009b"></script>
-<script src="src/city/dogs.js?v=dogs1009b"></script>
+<script src="src/city/dogs.js?v=sight1011m"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <!-- THE ANGLE LAW loads first because it is the one thing all three biters
@@ -1411,8 +1414,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/arena_fights.js?v=gnp0930"></script>
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
-<script src="src/city/street_hardware.js?v=tlights1009"></script>
-<script src="src/city/props.js?v=tlights1009"></script>
+<script src="src/city/street_hardware.js?v=farform1011m"></script>
+<script src="src/city/props.js?v=farform1011m"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=w09290219"></script>
@@ -1421,7 +1424,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=solid1011b"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
-<script src="src/city/mode.js?v=street1009"></script>
+<script src="src/city/mode.js?v=sight1011"></script>
 <script src="src/city/economy.js?v=vit3"></script>
 <script src="src/city/clothes.js?v=jacketskin1011"></script>
 <script src="src/city/outfits.js?v=armourm1011"></script>
@@ -1438,13 +1441,13 @@ document.body.appendChild(b);}}catch(e){}})();
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=verbs2b"></script>
-<script src="src/city/gangs.js?v=cd0929"></script>
+<script src="src/city/gangs.js?v=rounds1013m"></script>
 <script src="src/city/social.js?v=verbs2b"></script>
 <script src="src/city/realestate.js?v=tap0929"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=melee1011"></script>
+<script src="src/city/peds.js?v=farform1011m"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1477,7 +1480,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the crowd store (entities/crowdstore.js) drawn by crowdgpu; the nearest
      few promoted to real peds. Replaced city/crowd.js (48 lone rigs). After
      peds.js (cityPanic / clearCityPeds / cityMakePed it wraps and uses). -->
-<script src="src/city/streetlife.js?v=street1009"></script>
+<script src="src/city/streetlife.js?v=farform1011m"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
      no dynamic lights); pushes the shared lamp emissives up after dark.
@@ -1487,10 +1490,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=fit1"></script>
 <script src="src/city/security.js?v=verbs2b"></script>
 <script src="src/city/vips.js?v=popup1009b"></script>
-<script src="src/city/police.js?v=custody1009b"></script>
+<script src="src/city/police.js?v=rounds1013m"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
-<script src="src/city/aircraft.js?v=solid1011b"></script>
-<script src="src/city/traffic.js?v=metro0929"></script>
+<script src="src/city/aircraft.js?v=rounds1013m"></script>
+<script src="src/city/traffic.js?v=farform1011m"></script>
 <script src="src/city/carparts.js?v=cars2"></script>
 <script src="src/city/carbody.js?v=cars2"></script>
 <script src="src/city/carwheels.js?v=cars2"></script>
@@ -1499,7 +1502,7 @@ document.body.appendChild(b);}}catch(e){}})();
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=w09290242x"></script>
 <script src="src/city/playercars.js?v=sl0930b"></script>
-<script src="src/city/crashfx.js?v=army1013m"></script>
+<script src="src/city/crashfx.js?v=nocine1011m"></script>
 <script src="src/city/crashdeform.js?v=carblood930"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
@@ -1508,10 +1511,10 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=pf0930e"></script>
-<script src="src/city/vehicles.js?v=street1009"></script>
+<script src="src/city/vehicles.js?v=sight1011m"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
-<script src="src/city/playeraircraft.js?v=solid1011b"></script>
+<script src="src/city/playeraircraft.js?v=rounds1013"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1525,7 +1528,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/cockpit_panel.js?v=cockpit1"></script>
 <script src="src/city/cockpit_shapes.js?v=cockpit1x0"></script>
 <script src="src/city/cockpit.js?v=af0929"></script>
-<script src="src/city/cockpit_view.js?v=me6f1ee"></script>
+<script src="src/city/cockpit_view.js?v=nocine1011"></script>
 <!-- BAILOUT: stepping out of a FLYING aircraft. exitAircraft() was written for
      a parked machine — it zeroes attitude and velocity and forces onGround, so
      bailing at 500m teleported the plane flat and landed it. This file owns
@@ -1594,7 +1597,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
-<script src="src/city/airtraffic.js?v=pf0930r"></script>
+<script src="src/city/airtraffic.js?v=sight1011"></script>
 <!-- ORDNANCE + STRUCTURE. impactbus.js: CBZ.detonate(x,y,z,kind,opts) — new
      ordnance is a TABLE ROW, not a file. structural.js: CBZ.structure, the ONE
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
@@ -1614,8 +1617,8 @@ document.body.appendChild(b);}}catch(e){}})();
      debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
 <script src="src/city/collapse.js?v=mil0929"></script>
 <script src="src/systems/strike.js?v=strike1013m"></script>
-<script src="src/city/structural.js?v=street1009"></script>
-<script src="src/city/nukefx.js?v=nukevol1"></script>
+<script src="src/city/structural.js?v=nukecost1013"></script>
+<script src="src/city/nukefx.js?v=nukecost1013"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
@@ -1641,12 +1644,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/heists.js?v=tap0929"></script>
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
-<script src="src/city/verbword.js?v=presverbs1008"></script>
-<script src="src/city/interactions.js?v=desk1009c"></script>
+<script src="src/city/verbword.js?v=btn1011"></script>
+<script src="src/city/interactions.js?v=btn1011"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=dogs1009b"></script>
+<script src="src/city/verbwheel.js?v=btn1011"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1713,10 +1716,10 @@ document.body.appendChild(b);}}catch(e){}})();
      with real per-segment limits it wins automatically with no edit here.
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <script src="src/city/carcluster.js?v=speedunit1"></script>
-<script src="src/city/interact.js?v=verbs2b"></script>
+<script src="src/city/interact.js?v=btn1011"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=standdown1009c"></script>
+<script src="src/city/orders.js?v=btn1011"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -1726,9 +1729,9 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=verbs2b"></script>
-<script src="src/city/restrain.js?v=custody1009b"></script>
-<script src="src/city/custody.js?v=street1009"></script>
-<script src="src/city/combat.js?v=melee1011"></script>
+<script src="src/city/restrain.js?v=btn1011"></script>
+<script src="src/city/custody.js?v=btn1011"></script>
+<script src="src/city/combat.js?v=rounds1013m"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
      entries above). Loads right after city/combat.js, whose lightAttack/
@@ -1740,7 +1743,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/explosives.js?v=mil0929"></script>
 <script src="src/systems/helditems.js?v=arms1009b"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
-<script src="src/city/death.js?v=holes1009b"></script>
+<script src="src/city/death.js?v=rounds1013"></script>
 <script src="src/city/camera.js?v=deathcam1009"></script>
 <script src="src/city/ragdoll.js?v=hmove1011"></script>
 <script src="src/city/carstrike.js?v=physicsm1011"></script>
@@ -1776,7 +1779,7 @@ document.body.appendChild(b);}}catch(e){}})();
      on CBZ.cityTsunami() unless ?cfg_TSUNAMI_AUTO=1. After swim.js and
      waterfield.js. Revert with ?cfg_TSUNAMI=0. -->
 <script src="src/city/tsunami.js?v=news0930"></script>
-<script src="src/city/empire.js?v=nodash1"></script>
+<script src="src/city/empire.js?v=rounds1013m"></script>
 <script src="src/city/construction.js?v=news0930"></script>
 <script src="src/city/companies.js?v=fallstay1"></script>
 <script src="src/city/citystaff.js?v=staff1s"></script>
@@ -1791,11 +1794,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/turf.js?v=news0930"></script>
 <script src="src/city/gangops.js?v=cd0929"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
-<script src="src/city/militaryvehicles.js?v=army1013m"></script>
+<script src="src/city/militaryvehicles.js?v=rounds1013m"></script>
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
      seam above), the bunker-buster and the nuke. Conventional blasts use the
      wrapped explosion chain; the nuke uses impactbus's analytic field. -->
-<script src="src/city/strategic.js?v=army1013m"></script>
+<script src="src/city/strategic.js?v=deck1011"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=cd0929"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
@@ -1829,11 +1832,11 @@ document.body.appendChild(b);}}catch(e){}})();
      registry filters every street verb through, the one-line title over a
      person (card + tap wheel), and the role verbs Threaten / Bribe / Take
      card. After interactions.js + interact.js; everything else lazily. -->
-<script src="src/city/roles.js?v=popup1009b"></script>
+<script src="src/city/roles.js?v=btn1011"></script>
 <!-- A MAN WITH WORK PITCHES IT AS YOU COME UP (no Talk verb): his line over
      his head, Take is the verb, walking off is the no. After the registry;
      contracts.js + phone.js read lazily. -->
-<script src="src/city/dialogue.js?v=verbs2b"></script>
+<script src="src/city/dialogue.js?v=btn1011"></script>
 <!-- THE STORE RACKET — rob-or-extort at every counter, protection as the
      conquerable territory layer, owner memory, and the NPC crews playing the
      same game. Loads after interactions/interact (registers its verbs), after
@@ -1961,15 +1964,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/agency.js?v=street1009"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
-<script src="src/city/campaign_ui.js?v=presverbs1008"></script>
+<script src="src/city/campaign_ui.js?v=btn1011"></script>
 <script src="src/city/campaign.js?v=ekey2"></script>
-<script src="src/city/cinematics.js?v=cd0929"></script>
-<script src="src/systems/humancontact.js?v=gnp0930"></script>
+<script src="src/city/cinematics.js?v=btn1011"></script>
+<script src="src/systems/humancontact.js?v=mobwall1013"></script>
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
      (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
      the army's "route" order) route on it. Pure maths, loads first. -->
-<script src="src/systems/roadgraph.js?v=convoy1011"></script>
-<script src="src/systems/convoy.js?v=convoy1013"></script>
+<script src="src/systems/roadgraph.js?v=curb1013"></script>
+<script src="src/systems/convoy.js?v=curb1013"></script>
 <script src="src/systems/navigation.js?v=convoy1011"></script>
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
      a wall falling real physics and then finding door etc". The mover is a
@@ -2006,7 +2009,7 @@ document.body.appendChild(b);}}catch(e){}})();
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
      same brain. After wounds.js (routes through CBZ.bodyBite). -->
-<script src="src/systems/predator.js?v=sweep0929"></script>
+<script src="src/systems/predator.js?v=nocine1011"></script>
 <!-- The LAND sibling of the swim rig. Land animals had no jaw articulation and
      no spine bend at all — a bear grabbing you moved nothing. Discovery is
      geometric (no species table), so all 45 species animate from one change.
@@ -2196,7 +2199,7 @@ document.body.appendChild(b);}}catch(e){}})();
      decisions (roles, stable slots, smoothed follow, sector scans, the panic
      protocol, counter-snipers) for every detail in the city. -->
 <script src="src/city/brain_protection.js?v=standdown1009b"></script>
-<script src="src/city/protection.js?v=standdown1009c"></script>
+<script src="src/city/protection.js?v=rounds1013m"></script>
 <script src="src/city/officials.js?v=polsim1008b"></script>
 <script src="src/city/approval.js?v=polsim1008b"></script>
 <script src="src/city/elections.js?v=address1008"></script>
@@ -2229,7 +2232,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/river.js?v=wreal0929"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=ground1008c"></script>
+<script src="src/city/continent.js?v=sight1011"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
@@ -2342,7 +2345,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the level+role the pill already shows. After officials.js/officialdom.js
      (it binds real officeholders) and police.js (state principals inherit the
      posted-officer brain). Revert with ?cfg_POWER_PROTECTION=0. -->
-<script src="src/city/power.js?v=verbs2b"></script>
+<script src="src/city/power.js?v=btn1011"></script>
 <!-- GARRISON. A stationed job is a job that requires you to BE SOMEWHERE.
      Fourth consumer of police.js's `_post` standing brain (roadblock,
      checkpoints, power details were the first three) — soldiers, sentries and
@@ -2407,8 +2410,8 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=verbs2b"></script>
-<script src="src/city/politics.js?v=desk1009c"></script>
+<script src="src/city/presidency.js?v=btn1011"></script>
+<script src="src/city/politics.js?v=btn1011"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides
@@ -2417,15 +2420,15 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=desk1009c"></script>
-<script src="src/city/motorcade.js?v=convoy1011"></script>
+<script src="src/city/president_office.js?v=btn1011m"></script>
+<script src="src/city/motorcade.js?v=farform1011m"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
      readiness, the Bureau's thread, a former who comes back; the Chief of
      Staff fills a chair with two names (loyal or good); refusals feed
      loyalty, loyalty feeds the coup. After presidency.js,
      president_office.js, protection.js, motorcade.js. -->
-<script src="src/city/president_staff.js?v=verbs2b"></script>
+<script src="src/city/president_staff.js?v=btn1011"></script>
 <!-- THE COMMANDER IN CHIEF (city/warroom.js): war / peace / airstrike / nuke
      for a sitting President, ordered from the Situation Room's red phones and
      map (presidency.js) or the detail agent carrying the football. Rides
@@ -2433,10 +2436,10 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=army1013m"></script>
+<script src="src/city/warroom.js?v=btn1011m"></script>
 <script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=gateprotest2"></script>
-<script src="src/city/president_public.js?v=street1009"></script>
+<script src="src/city/president_public.js?v=btn1011"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on
@@ -2448,15 +2451,15 @@ document.body.appendChild(b);}}catch(e){}})();
      breaches. The one mass crowd for every political crowd (the gate protest,
      a rally the President calls, the Capitol march): the nearest are ordinary
      rigs, the rest one instanced fill, capped per device. -->
-<script src="src/city/mob.js?v=street1009"></script>
+<script src="src/city/mob.js?v=mobwall1013"></script>
 <!-- THE NATIONAL ADDRESS (city/address.js): the address order puts the
      President on every TV (newsroom.js live feed); 3 to 5 statements, verb x
      target off the real world, each one a CBZ.politics.act. After politics.js. -->
-<script src="src/city/address.js?v=gateprotest2"></script>
+<script src="src/city/address.js?v=btn1011"></script>
 <!-- THE TRANSFER OF POWER (city/transfer.js): election night on every TV, the
      held count, concede or refuse, the Capitol march and breach, the Guard's
      decision, seized / convicted / certified. After elections.js. -->
-<script src="src/city/transfer.js?v=address1008"></script>
+<script src="src/city/transfer.js?v=btn1011"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's
@@ -2565,7 +2568,7 @@ document.body.appendChild(b);}}catch(e){}})();
      it spends. -->
 <script src="src/world/sea_craft.js?v=sharkfix2"></script>
 <script src="src/world/sea_scene.js?v=sharkscene1"></script>
-<script src="src/world/water_impact.js?v=water1011"></script>
+<script src="src/world/water_impact.js?v=rounds1013m"></script>
 <!-- ONE WATER ORACLE, BOTH WORLDS. Wraps CBZ.cityWaterAt / citySeaHeightAt /
      citySeaBedDepthAt / citySeaBedYAt so they answer with the survival island's
      numbers in survival mode, and publishes CBZ.waterModeOn() — the predicate
@@ -2592,13 +2595,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/street_furniture.js?v=deslop1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>
 <script src="src/world/building_dress.js?v=roof1-st1"></script>
-<script src="src/core/farcull.js?v=fac1009"></script>
+<script src="src/core/farcull.js?v=farform1011m"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=w09290242x"></script>
-<script src="src/core/losgrid.js?v=lg1"></script>
+<script src="src/core/losgrid.js?v=nukecost1013"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=water1011"></script>
+<script src="src/core/batch.js?v=nukecost1013"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder

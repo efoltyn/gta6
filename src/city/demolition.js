@@ -416,11 +416,16 @@
       // over a 328-lot nuke's rebuild arc, each one previously a full 123k
       // indexOf + a 123k memmove. One compaction pass replaces both, and the
       // shape is now identical to destroy()'s so there is one idiom to read.
-      const purge = fastPurge();
-      if (purge) purge(CBZ.colliders, new Set(rec.propCols));
-      else for (const c of rec.propCols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+      // In place (systems/physics.js): a compaction + markCollidersDirty made
+      // the next query rebuild the whole ~142k-box grid for 0-2 boxes.
+      if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(rec.propCols);
+      else {
+        const purge = fastPurge();
+        if (purge) purge(CBZ.colliders, new Set(rec.propCols));
+        else for (const c of rec.propCols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      }
       rec.propCols = [];
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
   }
 
@@ -559,8 +564,11 @@
       A.root.add(built.group);
       rec.propGroup = built.group;
       rec.propCols = built.cols.concat(built.solids || []);
-      for (const c of rec.propCols) CBZ.colliders.push(c);
-      if (rec.propCols.length && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (CBZ.colliderAddMany) CBZ.colliderAddMany(rec.propCols);   // indexed in place
+      else {
+        for (const c of rec.propCols) CBZ.colliders.push(c);
+        if (rec.propCols.length && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      }
     }
     if (anim && (oldGroup || built)) {
       startTween({
@@ -645,6 +653,11 @@
       const deadCols = bt ? bt.cols : new Set();
       const deadPlats = bt ? bt.plats : new Set();
       const deadLos = bt ? bt.los : new Set();
+      // structural.js hideReal() already took this building out (the animated
+      // collapse's swap, or finishCollapse's snap one call ago): its lists hold
+      // nothing that is still registered, so walking the city's arrays again
+      // to remove nothing is skipped.
+      if (!b._tornDown) {
       for (const gp of b.windows || []) {
         if (gp.shattered) continue;
         gp.shattered = true;
@@ -659,10 +672,16 @@
         dr.demolished = true;
         if (dr.colIn) { deadCols.add(dr.col); dr.colIn = false; }
       }
+      }
       if (!bt) {
-        purge(CBZ.colliders, deadCols);
-        purge(CBZ.platforms, deadPlats);
-        purge(CBZ.losBlockers, deadLos);
+        // in place: no city-wide grid rebuild (structural.js takeOut)
+        if (CBZ.structuralTakeOut) CBZ.structuralTakeOut(deadCols, deadPlats, deadLos);
+        else {
+          purge(CBZ.colliders, deadCols);
+          purge(CBZ.platforms, deadPlats);
+          purge(CBZ.losBlockers, deadLos);
+          if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        }
       }
     } else {
       // ---- LEGACY PATH (flag off, or structural.js not loaded) — verbatim ----
@@ -682,8 +701,8 @@
         dr.demolished = true;
         if (dr.colIn) { const i = CBZ.colliders.indexOf(dr.col); if (i >= 0) CBZ.colliders.splice(i, 1); dr.colIn = false; }
       }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     // 4) the lot's obligations pause while it's a hole in the ground
     lot.demolished = true;
     if (CBZ.stairs) CBZ.stairs.setOwnerActive(b, false);   // no AI routes up a building that is rubble
@@ -734,6 +753,7 @@
     // any piece of the old building still lying on the lot goes before it stands again
     if (CBZ.debris) { try { CBZ.debris.clear(rec.k); } catch (e) {} }
     lot.demolished = false;
+    b._tornDown = false;             // its colliders/platforms/LOS are re-seated below
     if (CBZ.stairs) CBZ.stairs.setOwnerActive(b, true);
     restoreAir(b);             // the rebuild calendar gives the pad/hangar back
     if (CBZ.batchShowGroup) CBZ.batchShowGroup(b.group);

@@ -339,8 +339,8 @@
       onSelect: function (d) { give(d, "hold"); } });
     I.register("dog", { id: "dog-guard", prio: 17, canShow: function (d) { return mine(d) && !(d._order && d._order.kind === "guard"); }, label: "Guard",
       onSelect: function (d) { give(d, "guard"); } });
-    I.register("dog", { id: "dog-attack", prio: 16, bad: true, pick: "person", campaignSafe: true, canShow: mine, label: "Attack",
-      onSelect: function (d, ctx, t) { if (t) give(d, "attack", t); } });
+    // Attack is not on the dog: it is on the man you want bitten (city/orders.js
+    // order-attack sends everyone with you, your dog included).
     I.register("dog", { id: "dog-standdown", prio: 70, canShow: function (d) { return mine(d) && fighting(d); }, label: "Stand down",
       onSelect: function (d) { order(d, "standdown"); } });
     I.register("dog", { id: "dog-feed-own", prio: 12, canShow: function (d) { return mine(d) && d.hp < d.maxHp && !!haveFeed(); }, label: "Feed", onSelect: feed });
@@ -859,7 +859,10 @@
     if (!gangDogsDone && clock > 3) { try { spawnGangDogs(); } catch (e) { gangDogsDone = true; } }
     if (g.mode === "city") k9Manager(dt);
     const P = CBZ.player && CBZ.player.pos;
-    const fe = ((CBZ.scene && CBZ.scene.fog && CBZ.scene.fog.far) || CBZ.cityFogFar || 760) + 30;
+    // drawn to the eye's fog (core/sight.js), measured from the eye
+    const SG = CBZ.sight ? CBZ.sight() : null;
+    const fe = (SG ? SG.reach : ((CBZ.scene && CBZ.scene.fog && CBZ.scene.fog.far) || CBZ.cityFogFar || 760)) + 30;
+    const EX = SG ? SG.x : (P ? P.x : 0), EZ = SG ? SG.z : (P ? P.z : 0);
     for (let i = 0; i < dogs.length; i++) {
       const d = dogs[i], grp = d.group;
       if (d.dead) {
@@ -875,7 +878,7 @@
         if (d.fadeT <= 0) { removeDog(d); i--; }
         continue;
       }
-      if (P) { const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z; grp.visible = vdx * vdx + vdz * vdz < fe * fe; }
+      if (P) { const vdx = grp.position.x - EX, vdz = grp.position.z - EZ; grp.visible = vdx * vdx + vdz * vdz < fe * fe; }
       // timers + per-frame intents reset
       d.biteCD -= dt; d.barkCD -= dt; if (d._hurtT > 0) d._hurtT -= dt;
       if (d.shakeT > 0) d.shakeT -= dt;

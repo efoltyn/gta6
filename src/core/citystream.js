@@ -136,10 +136,13 @@
   const lastP = { x: 0, z: 0, t: 0 };
   CBZ.streamBegin = function (cx, cz) {
     if (!streamWanted() || CBZ.slice) return false;
-    /* what can be drawn: core/farcull.js draws everything to the fog's end
-       + 30 m, measured from the player; + 6 m for the camera boom behind them.
-       (It was fog + 60: 24 m more ring than anything draws.) */
-    const view = function () { return Math.max(380, +CBZ.cityFogFar || 760) + 36; };
+    /* what must be the real thing: core/sight.js's `detail` ring (the ground
+       fog's end + 36 m). Past it, out to the airborne horizon, only content
+       with a FAR FORM may be seen (metro HLOD, farcull's lot boxes, the
+       forest's far crowns, scenery pools, which never park: core/slice.js
+       isHorizon). The ring is measured from the EYE: keepR adds how far the
+       camera stands off the body (a heli boom, a lifted lens). */
+    const view = function () { return CBZ.sight().detail; };
     const S = {
       name: "stream", stream: true, x: cx, z: cz, r: 300,
       label: "Gang City (streamed)",
@@ -152,7 +155,7 @@
          whole playable radius again on top, ~35% more city in memory at the
          downtown spawn for ground nobody could see yet. */
       lead: 0,
-      keepR: function () { return RECENTRE_M + S.view() + S.lead; },
+      keepR: function () { return RECENTRE_M + S.view() + S.lead + Math.min(400, CBZ.sight().eyeOff); },
     };
     CBZ.slice = S;
     S.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(cx, cz, view()) : 300;
@@ -596,11 +599,27 @@
      and came back as thousands of draw calls. Each parked cell's root-level
      subtrees are batched here, exactly as a streamed job's are when it
      settles: static parts merge into a few buffers, live parts stay. */
+  /* THE PASSES SEE THE REFERENCES THE BOOT BATCH SEES. The prune takes a
+     parked subtree's LOS blockers out of CBZ.losBlockers (job.los) BEFORE
+     this runs, and core/batch.js / localinst decide "keep this mesh's
+     identity" from that very list. So every mesh known only as a blocker
+     (a floor slab, the carved slab a stair opened, a parapet) was merged as
+     inert deco here and its original thrown away. When the stair core was
+     built on the way in (elevators.js cityStairCore, the first time anybody
+     walks up) buildings.js carved the slab: the walk surface left, but
+     batchWallHide had no slice for a mesh that went down the inert path, so
+     the drawn slab stayed across the stairwell in the merged buffer.
+     OWNER (iPad, the Mansion): "there's this white floor in the stairwell,
+     and you have to walk through the floor". Every parked building on a
+     streamed boot had it. The parked blockers are put back in the list for
+     the two passes (walls path: hidden originals with their own slices, LOS
+     raycasts keep a mesh that is in the graph) and taken out again after. */
   CBZ.streamCompactParked = function (root) {
     if (!root || !window.THREE || !CBZ.batchStaticUnder) return 0;
     root.updateWorldMatrix(true, false);
     if (!root.matrixWorld.equals(new window.THREE.Matrix4())) return 0;   // merged verts are root-space
     let n = 0;
+    const L = CBZ.losBlockers;
     prunedCells.forEach(function (job) {
       if (job.state !== "parked" || !job.objs || !job.objs.length) return;
       const mine = job.objs.filter(function (it) { return it.parent === root && it.o && !it.o.parent; });
@@ -608,8 +627,12 @@
       const G = new window.THREE.Group();
       G.name = "stream-job";
       for (const it of mine) G.add(it.o);
+      const los = L && job.los && job.los.length ? job.los : null;
+      const base = L ? L.length : 0;
+      if (los) for (let i = 0; i < los.length; i++) L.push(los[i]);
       try { CBZ.batchStaticUnder(G); } catch (e) { console.error("[park batch " + job.name + "]", e); }
       try { if (CBZ.instanceStaticUnder) CBZ.instanceStaticUnder(G); } catch (e) {}
+      if (los) L.length = base;           // (nothing else touches the list between: the passes only read it)
       root.remove(G);
       job.objs = job.objs.filter(function (it) { return mine.indexOf(it) < 0; });
       job.objs.push({ o: G, parent: root });
@@ -641,9 +664,48 @@
   const STEP_SOON_MS = 16;          // ... while something will be in sight within a few ticks
   let acc = 0;
   CBZ.streamStats = { built: 0, parked: 0, queued: 0, recentres: 0, lastJobMs: 0, maxJobMs: 0 };
+  /* ---- THE FAR CENSUS (once per build-shaping version, at load) ----------
+     A landmass builder the boot skipped (a minicity, a country town, the
+     airfield, the military island) has no buildings in memory, so nothing
+     could stand on its ground when it is seen from the air: the town then
+     assembled itself in view the moment the streamer reached it. Its far
+     form is core/farcull.js's far skyline (one box per building, the
+     building's own colour and window rhythm), and that needs each building's
+     numbers once. So on the first visit after a building-shaping change every
+     skipped builder runs ONCE behind the loading card, its buildings are
+     measured (CBZ.farSkylineHarvest: built shells, and the lot records of
+     the parcels it defers) and it is freed at once, exactly as the streamer
+     frees a far job. The measurements go to core/bakecache.js; every later
+     load reads them and runs nothing. */
+  let censusDone = false;
+  function nameHash(s) { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; }
+  function farCensus() {
+    if (censusDone) return; censusDone = true;
+    if (CFG.FAR_CENSUS === false || !CBZ.farSkylineHarvest || !CBZ.farSkylineSig) return;
+    const sig = CBZ.farSkylineSig();
+    const hit = CBZ.bakeGet ? CBZ.bakeGet("far-census", sig) : null;
+    const seen = new Set(hit && hit.h ? Array.from(hit.h) : []);
+    CBZ.farSkylineHarvest();                     // the boot's own buildings + the baked skyline
+    let ran = 0;
+    const t0 = performance.now();
+    for (const j of jobs.slice()) {
+      if (!j.builder || j.state !== "queued" || !j.fn) continue;
+      const h = nameHash(j.name || "");
+      if (seen.has(h)) continue;
+      runCaptured(j);
+      try { CBZ.farSkylineHarvest(); } catch (e) { console.error("[far census " + j.name + "]", e); }
+      freeJob(j);
+      seen.add(h); ran++;
+    }
+    CBZ.streamStats.census = { ran: ran, ms: Math.round(performance.now() - t0) };
+    // the skyline first, then the census that says it is complete
+    if (ran && CBZ.bakePut) { if (CBZ.farSkylineSave) CBZ.farSkylineSave(); CBZ.bakePut("far-census", sig, { h: Uint32Array.from(seen) }); }
+  }
+
   CBZ.streamTick = function (force) {
     const s = CBZ.slice; if (!s || !s.stream) return;
     const P = CBZ.player; if (!P || !P.pos) return;
+    if (force && !censusDone) farCensus();
     const dx = P.pos.x - s.x, dz = P.pos.z - s.z;
     // how far a moving player gets before the next few ticks (vehicle or feet)
     // (measured from the position between ticks: a car, a plane, a horse,
@@ -692,15 +754,17 @@
     // next few ticks (inside view + the speed lead) raises it to STEP_SOON_MS,
     // so the queue drains BEFORE anything reaches view distance (a build that
     // only happens inside view is a pop: counted in streamStats.urgent).
+    // (in sight = from the EYE, core/sight.js; the body is where colliders matter)
+    const EYE = CBZ.sight();
     const VIEW = s.view(), V2 = VIEW * VIEW, SOON = VIEW + s.lead + 60, SOON2 = SOON * SOON;
     let budget = STEP_MS;
     for (const j of order) {
       if (j.state === "parked") { unpark(j); continue; }
-      if (distTo(j.rect, P.pos.x, P.pos.z) < SOON2) budget = STEP_SOON_MS;
+      if (distTo(j.rect, EYE.x, EYE.z) < SOON2 || distTo(j.rect, P.pos.x, P.pos.z) < SOON2) budget = STEP_SOON_MS;
     }
     for (const j of order) {
       if (j.state !== "queued") continue;
-      const urgent = distTo(j.rect, P.pos.x, P.pos.z) < V2;
+      const urgent = distTo(j.rect, EYE.x, EYE.z) < V2 || distTo(j.rect, P.pos.x, P.pos.z) < V2;
       if (!force && !urgent && performance.now() - t0 > budget) break;
       runCaptured(j); settle(j); noteAdd(j, urgent ? "build!" : "build");
       CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms));

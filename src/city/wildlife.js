@@ -607,6 +607,105 @@
     a._mp = null; a._bodyMesh = undefined; a._bellyQ = undefined;
   }
   CBZ.wildlifeFillBody = fillBody;
+
+  /* ---- THE FAR HERD: an animal exists out to the eye's fog --------------
+     Owner 2026-10-11: nothing may appear inside the visible range. An animal
+     used to exist for the camera only inside its quality-tier radius (90-360
+     m, x1.6 for the big ones) and simply popped in there, while the fog runs
+     560-1400 m on the ground and kilometres from the air. Past that radius
+     it is now drawn by ONE instanced draw per species, out to core/sight.js's
+     reach: the species' OWN body (sp.build, every visible part merged, each
+     part in its own material colour), at the animal's own position, heading
+     and size. What the hand-over removes is fur texture and the gait's leg
+     swing, both a pixel or two at that range. Land animals only: a fish or a
+     shark under the water is the sea's to hide. */
+  const farGeo = new Map();
+  const farPools = new Map();
+  let farMatW = null, farAcc = 0;
+  const _fd = new THREE.Object3D();
+  function farGeometryOf(sp) {
+    if (farGeo.has(sp)) return farGeo.get(sp);
+    let g = null;
+    try {
+      const b = sp.build({ THREE: THREE, mat: mat, rng: seededRng(0, 0) });
+      if (b) {
+        b.position.set(0, 0, 0); b.rotation.set(0, 0, 0); b.scale.set(1, 1, 1);
+        b.updateMatrixWorld(true);
+        const parts = [];
+        b.traverse(function (o) {
+          if (!o.isMesh || o.isSkinnedMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position || o.visible === false) return;
+          const m = Array.isArray(o.material) ? o.material[0] : o.material;
+          if (m && m.transparent && m.opacity < 0.5) return;
+          const q = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+          q.applyMatrix4(o.matrixWorld);
+          if (!q.attributes.normal) q.computeVertexNormals();
+          const pos = q.attributes.position, c = (m && m.color) ? m.color : new THREE.Color(0x777777);
+          const vc = m && m.vertexColors && q.attributes.color && q.attributes.color.itemSize >= 3 ? q.attributes.color : null;
+          const col = new Float32Array(pos.count * 3);
+          for (let i = 0; i < pos.count; i++) {
+            col[i * 3] = c.r * (vc ? vc.getX(i) : 1); col[i * 3 + 1] = c.g * (vc ? vc.getY(i) : 1); col[i * 3 + 2] = c.b * (vc ? vc.getZ(i) : 1);
+          }
+          const out = new THREE.BufferGeometry();
+          out.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos.array), 3));
+          out.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(q.attributes.normal.array), 3));
+          out.setAttribute("color", new THREE.BufferAttribute(col, 3));
+          parts.push(out);
+          q.dispose();
+        });
+        const BGU = THREE.BufferGeometryUtils;
+        g = parts.length === 1 ? parts[0] : (parts.length && BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(parts, false) : null);
+        if (g) { g.computeBoundingSphere(); g._shared = true; g.name = "far-animal:" + (sp.id || "?"); }
+      }
+    } catch (e) { g = null; }
+    farGeo.set(sp, g);
+    return g;
+  }
+  function farPool(sp, g, need) {
+    let P = farPools.get(sp);
+    if (P && P.cap >= need && P.mesh.parent === root) return P;
+    if (P) { if (P.mesh.parent) P.mesh.parent.remove(P.mesh); P.mesh.dispose && P.mesh.dispose(); }
+    if (!farMatW) { farMatW = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }); farMatW._shared = true; }
+    const cap = Math.max(8, Math.ceil(need * 1.3));
+    const mesh = new THREE.InstancedMesh(g, farMatW, cap);
+    mesh.name = "far-herd:" + (sp.id || "?");
+    mesh.frustumCulled = false;
+    mesh.castShadow = false; mesh.receiveShadow = false;
+    mesh.userData.dynamic = true;               // batch/farcull/freezer leave it alone
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.count = 0;
+    root.add(mesh);
+    P = { mesh: mesh, cap: cap, n: 0 };
+    farPools.set(sp, P);
+    return P;
+  }
+  function farHerd(dt) {
+    farAcc += (dt && dt < 0.5 ? dt : 0.016);
+    if (farAcc < 0.1) return;                    // 10 Hz: a far animal moves a pixel a second
+    farAcc = 0;
+    if (!root || (CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_FAR === false) || !CBZ.sight) return;
+    const SG = CBZ.sight(), R2 = SG.reach * SG.reach;
+    const want = new Map();
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i], sp = a.species, grp = a.group;
+      if (a.external || a.dead || !sp || sp.aquatic || !grp || grp.visible !== false || a.ridden || a.tamed) continue;
+      const dx = grp.position.x - SG.x, dz = grp.position.z - SG.z;
+      if (dx * dx + dz * dz > R2) continue;
+      let L = want.get(sp); if (!L) want.set(sp, L = []);
+      L.push(a);
+    }
+    farPools.forEach(function (P, sp) { if (!want.has(sp) && P.mesh.count) { P.mesh.count = 0; } });
+    want.forEach(function (L, sp) {
+      const g = farGeometryOf(sp); if (!g) return;
+      const P = farPool(sp, g, L.length);
+      for (let i = 0; i < L.length; i++) {
+        const grp = L[i].group;
+        _fd.position.copy(grp.position); _fd.quaternion.copy(grp.quaternion); _fd.scale.copy(grp.scale);
+        _fd.updateMatrix(); P.mesh.setMatrixAt(i, _fd.matrix);
+      }
+      P.mesh.count = L.length;
+      P.mesh.instanceMatrix.needsUpdate = true;
+    });
+  }
   /* ...AND GIVEN BACK when the animal is far again (draw radius + 400 m):
      its own geometries leave the GPU, the group is empty again, the record
      keeps living. A drive used to leave every animal it passed built. */
@@ -1249,8 +1348,11 @@
         }
         // a newborn is born where nobody can see it appear (owner: nothing may
         // generate within view): past the fog's end, not 50 m off
-        const born = Math.max(50, (+CBZ.cityFogFar || 0) + 30);
-        if (P && Math.hypot(nx - P.x, nz - P.z) < born) continue;
+        // (core/sight.js: from the EYE, out to the fog it has: from the air that
+        // is kilometres, and the ground fog put births inside the picture)
+        const SG = CBZ.sight ? CBZ.sight() : null;
+        const born = Math.max(50, (SG ? SG.reach : (+CBZ.cityFogFar || 0)) + 30);
+        if (SG ? Math.hypot(nx - SG.x, nz - SG.z) < born : (P && Math.hypot(nx - P.x, nz - P.z) < born)) continue;
         const kid = makeActor(sp, nx, nz);
         kid.grow = 0;                            // born tiny; grows up in tick()
         applyScale(kid, 0);                      // small from frame one, at ITS OWN size
@@ -4269,6 +4371,7 @@
     // (you SHOULD spot an elephant across the savanna before a rabbit).
     const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : ANIMAL_VIS.length - 1;
     const visR = ANIMAL_VIS[Math.max(0, Math.min(ANIMAL_VIS.length - 1, q))];
+    const EYE = CBZ.sight ? CBZ.sight() : (P || { x: 0, z: 0 });
     npcHunts = 0;
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i], sp = a.species, grp = a.group;
@@ -4302,11 +4405,15 @@
       let pd2 = 0;
       if (P) {
         const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z;
-        pd2 = vdx * vdx + vdz * vdz;
+        pd2 = vdx * vdx + vdz * vdz;              // the body's distance: simulation
+        // what the camera draws is measured from the EYE (core/sight.js): from
+        // a heli boom or a lifted lens that is not where the body stands
+        const edx = grp.position.x - EYE.x, edz = grp.position.z - EYE.z, ed2 = edx * edx + edz * edz;
         const vr = visR * (SZ(a) >= 1.3 ? 1.6 : 1);
-        if (a._lazyBody && (a.ridden || a.tamed || pd2 < (vr + 80) * (vr + 80))) fillBody(a);
-        else if (!a._lazyBody && a._lazyEligible && !a.dead && !a.ridden && !a.tamed && pd2 > (vr + 400) * (vr + 400)) unfillBody(a);
-        grp.visible = a.ridden || a.tamed || pd2 < vr * vr;
+        if (a._lazyBody && (a.ridden || a.tamed || ed2 < (vr + 80) * (vr + 80))) fillBody(a);
+        else if (!a._lazyBody && a._lazyEligible && !a.dead && !a.ridden && !a.tamed && ed2 > (vr + 400) * (vr + 400)) unfillBody(a);
+        // inside vr the animal draws itself; past it the FAR HERD draws it
+        grp.visible = a.ridden || a.tamed || ed2 < vr * vr;
       }
       // matrix LOD: hidden animals stop paying r128's per-frame matrix math
       // (the saving staticfreeze.js was after) and thaw the moment they show.
@@ -4775,6 +4882,7 @@
       let breedAcc = 0;
       CBZ.onUpdate(47.1, function (dt) {
         tick(dt);
+        farHerd(dt);
         breedAcc += (dt && dt < 0.5 ? dt : 0.016);
         if (breedAcc >= BREED_EVERY) { breedAcc = 0; breed(); }
       });

@@ -2400,6 +2400,8 @@
         new THREE.Vector3((MINX + MAXX) / 2, 6, (MINZ + MAXZ) / 2),
         Math.hypot(MAXX - MINX, MAXZ - MINZ) / 2 + 14);
       trunkG.boundingSphere = bs.clone(); canopyG.boundingSphere = bs.clone(); capG.boundingSphere = bs.clone();
+      // scenery: never parked by the streamer, dealt into culled cells (core/sight.js)
+      trunkIM.userData.sceneryScale = canopyIM.userData.sceneryScale = capIM.userData.sceneryScale = true;
       root.add(trunkIM); root.add(canopyIM); root.add(capIM);
       if (pineFeet && pineFeet.length) CBZ.treeFoot.add(root, pineFeet, { name: "resort-pines", heightAt: mountainHeightAt, fogScale: 0.12 });
 
@@ -2582,6 +2584,7 @@
       }
       rockIM.count = rn; driftIM.count = dn;
       rockIM.instanceMatrix.needsUpdate = driftIM.instanceMatrix.needsUpdate = true;
+      rockIM.userData.sceneryScale = driftIM.userData.sceneryScale = true;
       root.add(rockIM); root.add(driftIM);
     })();
 

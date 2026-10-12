@@ -2044,7 +2044,13 @@
     // nor phantom-misses one it can plainly see from above). LOS is to the player's
     // real position (the lead only nudges the visible tracer + hit roll).
     if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(from.x, from.y, from.z, P.pos.x, py, P.pos.z)) return;
-    if (CBZ.tracer) CBZ.tracer(from, to, { muzzleScale: 1.25 });
+    const hitP = Math.max(0.10, Math.min(0.55, 0.55 * (60 / Math.max(60, rng3))));
+    const hitRoll = rng() < hitP;
+    // a hit is drawn into you (sparks off your car or your airframe), a miss
+    // is the dispersed round walking the street round you; the chin gun's
+    // belt carries a tracer every fifth round (weapons/ballistics.js m134)
+    if (CBZ.tracer) CBZ.tracer(from, hitRoll ? { x: P.pos.x, y: py, z: P.pos.z } : to,
+      { muzzleScale: 1.25, hit: hitRoll, shooter: heli, weapon: "m134_door", targetActor: P });
     if (CBZ.sfx) CBZ.sfx("shoot_carbine");
     // a led shot connects more often — but keep per-round damage LOW (it's a fast
     // burst), so a 5-star air rake stays survivable (the hitstop/missile caps are
@@ -2052,8 +2058,7 @@
     // ...and the hit ROLL falls off with range for the same reason. 0.55 stays
     // the point-blank figure (nothing the player already knew got harder); by
     // 190 m it is ~0.17, which is what buys the longer engagement range above.
-    const hitP = Math.max(0.10, Math.min(0.55, 0.55 * (60 / Math.max(60, rng3))));
-    if (rng() < hitP && CBZ.cityHurtPlayer) {
+    if (hitRoll && CBZ.cityHurtPlayer) {
       CBZ.cityHurtPlayer(6 + rng() * 6, heli.pos.x, heli.pos.z, "raked by a gunship", rng() < 0.02, "a military gunship");
     }
   }
