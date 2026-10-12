@@ -45,14 +45,15 @@
 
    Options: --before REF  --after REF  --map ID  --all  --page-only  --size WxH
             --kind vehicle|species  --ids a,b  --out DIR                         */
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
-import { launchChrome, CHROME } from "./testbus/browser.mjs";
+import { launchChrome } from "./testbus/browser.mjs";
+import { printHtmlToPdf } from "./printpdf.mjs";
 import { pathToFileURL } from "node:url";
 import { bootWorld } from "./testbus/worlds.mjs";
 import { serveCommit } from "./shot/gitserve.mjs";
@@ -65,7 +66,6 @@ const has = (f) => argv.includes(f);
 const val = (f, d) => { const i = argv.indexOf(f); return i >= 0 && argv[i + 1] != null && !argv[i + 1].startsWith("--") ? argv[i + 1] : d; };
 if (has("--help") || has("-h")) { console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("*/")[0].replace(/^#!.*\n\/\* ?/, "")); process.exit(0); }
 const g = (args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8", maxBuffer: 64 << 20, stdio: ["ignore", "pipe", "pipe"] }).trim();
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const T0 = Date.now();
 const secs = () => ((Date.now() - T0) / 1000).toFixed(1) + " s";
 const log = (...a) => console.log(`[catalogue ${secs()}]`, ...a);
@@ -342,28 +342,7 @@ async function printPdf(units, M, all, pending, failed, timing) {
   const html = path.join(PRINT_DIR, "print.html");
   writeFileSync(html, page(units, M, all, pending, failed, timing));
   PRINT = false; SRC = (rel) => rel;
-  const pdf = path.join(OUT, "catalogue.pdf"), tmp = path.join(PRINT_DIR, "catalogue.pdf");
-  rmSync(tmp, { force: true });
-  /* HARNESS TRAP: this headless print writes the PDF and then does not always
-     exit (measured: PDF done in seconds, process alive 10+ min later). Wait for
-     the file to land and stop growing, then end the process group ourselves. */
-  const ch = spawn(CHROME, ["--headless=new", "--no-sandbox", "--disable-gpu", "--no-pdf-header-footer", "--virtual-time-budget=15000",
-    `--user-data-dir=${path.join(PRINT_DIR, "profile")}`, `--print-to-pdf=${tmp}`, pathToFileURL(html).href],
-  { stdio: "ignore", detached: true });
-  let exited = false; ch.on("exit", () => { exited = true; });
-  const t0 = Date.now();
-  let last = -1, same = 0;
-  while (Date.now() - t0 < 300e3) {
-    await sleep(500);
-    const sz = existsSync(tmp) ? statSync(tmp).size : -1;
-    if (sz > 0 && sz === last) { if (++same >= 4) break; } else same = 0;
-    last = sz;
-    if (exited && sz <= 0) break;
-  }
-  try { process.kill(-ch.pid, "SIGKILL"); } catch (_) {}
-  if (!existsSync(tmp) || statSync(tmp).size === 0) throw new Error("Chrome wrote no PDF");
-  writeFileSync(pdf, readFileSync(tmp));
-  return pdf;
+  return printHtmlToPdf(html, path.join(OUT, "catalogue.pdf"), { workDir: PRINT_DIR });
 }
 
 /* -------------------------------------------------------------- the page */
