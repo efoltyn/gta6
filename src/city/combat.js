@@ -1004,7 +1004,7 @@
   // jitter the endpoint around the true muzzle→target direction by a per-slot
   // angle, then clip the JITTERED ray against the LOS grid so a spread round
   // that now grazes a corner ends at the wall instead of poking through it.
-  function jitterEndpoint(from, to, slot, shooter) {
+  function jitterEndpoint(from, to, slot, shooter, miss) {
     let dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
     const dist = Math.hypot(dx, dy, dz) || 0.001;
     dx /= dist; dy /= dist; dz /= dist;
@@ -1027,8 +1027,17 @@
     }
     // runtime-only FX randomness (NEVER the shared seeded rng streams — the
     // fire paths draw from those and extra draws would shift world state)
-    if (Math.random() < SPREAD_CENTER_FRAC) s *= SPREAD_CENTER_MUL;
-    const au = s * (Math.random() * 2 - 1), av = s * (Math.random() * 2 - 1);
+    if (!miss && Math.random() < SPREAD_CENTER_FRAC) s *= SPREAD_CENTER_MUL;
+    let au = s * (Math.random() * 2 - 1), av = s * (Math.random() * 2 - 1);
+    // A ROUND THE ROLL SAID MISSED must be drawn missing: at least a body's
+    // half-width plus a hand off the aim point at the target's range
+    if (miss) {
+      const need = 0.55 / dist, got = Math.hypot(au, av);
+      if (got < need) {
+        const a = got > 1e-6 ? 1 : 0, k = need / Math.max(1e-6, got);
+        if (a) { au *= k; av *= k; } else { au = need; }
+      }
+    }
     let nx = dx + ux * au + vx * av, ny = dy + vy * av, nz = dz + uz * au + vz * av;
     const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
     let end = dist;
@@ -1229,8 +1238,11 @@
                          from.x === _pendingShot.x && from.y === _pendingShot.y && from.z === _pendingShot.z)
                          ? _pendingShot.a : null;
         _pendingShot.a = null;   // consume regardless
-        if (shooter && CBZ.CONFIG.NPC_TRACER_SPREAD) {
-          to = jitterEndpoint(from, to, slotOf(shooter), shooter);
+        // the caller's roll decides the picture: a hit flies true into the
+        // target, a miss is spread off it and flies on (systems/gunfx.js)
+        const rolled = opts && opts.hit;
+        if (shooter && CBZ.CONFIG.NPC_TRACER_SPREAD && rolled !== true) {
+          to = jitterEndpoint(from, to, slotOf(shooter), shooter, rolled === false);
         }
       }
       return _origTracer.call(this, from, to, opts);

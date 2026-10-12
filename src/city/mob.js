@@ -762,7 +762,7 @@
       }
       if (near) {
         _fd.x = hitAt ? hitAt.x : ox + dx * 60; _fd.y = hitAt ? hitAt.y : oy + dy * 60; _fd.z = hitAt ? hitAt.z : oz + dz * 60;
-        if (CBZ.tracer) { try { CBZ.tracer({ x: ox, y: oy, z: oz }, _fd, {}); } catch (e) {} }
+        if (CBZ.tracer) { try { CBZ.tracer({ x: ox, y: oy, z: oz }, _fd, { hit: hitAt ? true : false, weapon: "rifle", shooter: shooter || null }); } catch (e) {} }
         if (CBZ.gunVoice && (k & 1) === 0) { try { CBZ.gunVoice("rifle", Math.hypot(P.x - ox, P.z - oz)); } catch (e) {} }
       }
     }

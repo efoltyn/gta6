@@ -1189,12 +1189,13 @@
     _to.x = t.pos.x; _to.y = (t.pos.y || 0) + (isP ? 1.4 : 1.25); _to.z = t.pos.z;
     if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(_from.x, _from.y, _from.z, _to.x, _to.y, _to.z)) return false;
     if (CBZ.actorAimAt) { try { CBZ.actorAimAt(q, t); } catch (e) {} }
-    if (CBZ.tracer) { try { CBZ.tracer(_from, _to, { muzzleScale: 1.2 }); } catch (e) {} }
     const P = CBZ.player;
-    if (CBZ.gunVoice) { try { CBZ.gunVoice("Sniper", P ? hyp(_from.x, _from.z, P.pos.x, P.pos.z) : 0); } catch (e) {} }
     let pHit = 0.92 - d / 480;
     if (isP && P && P._protSpeed > 3.5) pHit -= 0.2;               // a running man is a hard shot
-    if (Math.random() > Math.max(0.2, pHit)) return true;          // runtime feel: a miss
+    const hitRoll = !(Math.random() > Math.max(0.2, pHit));
+    if (CBZ.tracer) { try { CBZ.tracer(_from, _to, { muzzleScale: 1.2, hit: hitRoll, shooter: q, weapon: "sniper", targetActor: isP ? P : t }); } catch (e) {} }
+    if (CBZ.gunVoice) { try { CBZ.gunVoice("Sniper", P ? hyp(_from.x, _from.z, P.pos.x, P.pos.z) : 0); } catch (e) {} }
+    if (!hitRoll) return true;                                      // runtime feel: a miss
     if (isP) {
       if (CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(72, q.pos.x, q.pos.z, "shot by a counter-sniper", false, q); } catch (e) {} }
     } else {

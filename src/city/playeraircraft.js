@@ -2526,6 +2526,9 @@
           const toCraft = dmg * CRAFT_ABSORB;
           const toPilot = dmg - toCraft;
           damageCraft(craft, toCraft);
+          // the airframe took it, and you still need to know from where
+          if (toPilot <= 0.05 && fromX != null && CBZ.eyes && CBZ.eyes.hitFrom && P.pos &&
+              Math.hypot(fromX - P.pos.x, fromZ - P.pos.z) > 1.5) CBZ.eyes.hitFrom(fromX, fromZ, Math.min(1, dmg / 40));
           if (toPilot > 0.05) return orig.call(this, toPilot, fromX, fromZ, reason, headshot, attacker, nonlethal);
           return; // fully absorbed by the airframe this hit
         }

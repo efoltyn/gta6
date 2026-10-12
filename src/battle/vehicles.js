@@ -912,12 +912,67 @@ function vehFireKE(u, w, t, dist) {
   const hit = lcg() < p;
   _v.set(t.pos.x, t.pos.y + (t.aimY || 1), t.pos.z);
   if (!hit) { _v.x += (lcg() - 0.5) * 6; _v.z += (lcg() - 0.5) * 6; _v.y += (lcg() - 0.3) * 2; }
-  if (CBZ.tracer) { try { CBZ.tracer(from, _v, { shooter: u, targetActor: t, muzzle: true, muzzleScale: 2.5 }); } catch (e) {} }
+  gunShot(u, w, from, _v, t);
   const dCam = Math.sqrt(camDist2(u.pos));
   if (dCam < 600) { try { CBZ.sfx(w.kind === "cannon" ? "explosion" : "shoot_shotgun", { dist: dCam, ghost: true, volume: 0.9, pitch: w.kind === "cannon" ? 0.55 : 1.2 }); } catch (e) {} }
   if (!hit) { missImpact(from, _v, camDist2(_v), w.kind === "cannon"); return; }
   stats[u.team].hits++; u.hitsF++;
   hurtMan(t, w.beh || 400, { by: u, threat: { pen: w.pen || 300, beh: w.beh || 400, he: false, cls: w.keCls || (w.kind === "cannon" ? "apfsds" : "ap") } });
+}
+/* A GUN'S SHOT, SEEN (systems/gunfx.js flies it). The round is its
+   munition row's: its calibre and its velocity, and a tank or IFV round
+   burns a tracer in its base (APFSDS-T, HEAT-T, APDS-T), so it reads as a
+   hot streak crossing the field at a kilometre and a half a second. A
+   sabot round throws its petals a few metres out of the muzzle; a tank
+   gun's blast lifts the ground's dust round the hull. The flash itself is
+   the rig's (vehFx). */
+function gunShot(u, w, from, to, t) {
+  const MT = CBZ.munitionTable, row = MT && w && w.mun ? MT.get(w.mun) : null;
+  const cannon = w && w.kind === "cannon";
+  const cal = row && row.cal > 0 ? row.cal : cannon ? 120 : 25;
+  const v = row && row.v > 0 ? row.v : (w && w.speed) || 1400;
+  if (CBZ.tracer) {
+    // a machine gun's belt is one tracer in five, and its mount has no rig flash
+    const mg = w && w.kind === "mg";
+    try { CBZ.tracer(from, to, { shooter: u, targetActor: t, muzzle: mg, muzzleScale: 1.6, brass: false, mm: mg ? undefined : cal, v: mg ? undefined : v,
+      weapon: mg ? (w.wid || "m240_coax") : undefined, belt: mg ? 5 : undefined, tracer: mg ? undefined : true, color: mg ? undefined : 0xff8a3c }); } catch (e) {}
+  }
+  const cd2 = camDist2(from);
+  if (cd2 > 450 * 450) return;
+  const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z, d = Math.hypot(dx, dy, dz) || 1;
+  const ux = dx / d, uy = dy / d, uz = dz / d;
+  // the sabot: a sub-calibre dart leaves its petals a few metres downrange
+  if (row && row.cls === "ke" && row.sub > 0 && row.sub < row.mass && CBZ.debris && CBZ.debris.chips && cd2 < 260 * 260) {
+    try {
+      CBZ.debris.chips(from.x + ux * 3, from.y + uy * 3, from.z + uz * 3, { kind: "metal", color: 0x8b8f93,
+        count: 3, size: Math.min(0.3, cal / 1000 * 1.7), dir: { x: ux, y: uy + 0.35, z: uz }, power: cannon ? 2.6 : 1.4,
+        spread: 1.1, dust: false });
+    } catch (e) {}
+  }
+  // the blast on the ground: a ring of dust thrown out from under the muzzle
+  const MU = CBZ.munitions;
+  if (cannon && MU && MU.smoke) {
+    const gy = HOST.groundAt(from.x, from.z);
+    const h = from.y - gy;
+    if (h < 5) {
+      const dc = typeof groundColor === "function" ? groundColor(groundMatAt()) : 0xb8a888;
+      const cr = ((dc >> 16) & 255) / 255, cg = ((dc >> 8) & 255) / 255, cb = (dc & 255) / 255;
+      const k = 1 - h / 5;
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * 6.283 + lcg() * 0.4, fwd = 0.6 + 0.4 * Math.max(0, Math.cos(a - Math.atan2(ux, uz)));
+        const sp = (6 + lcg() * 8) * fwd * k;
+        const sx = Math.sin(a), sz = Math.cos(a);
+        try { MU.smoke(from.x + ux * 2 + sx * 1.5, gy + 0.4, from.z + uz * 2 + sz * 1.5, sx * sp, 0.6 + lcg() * 0.8, sz * sp,
+          0.8, 4 + lcg() * 3, 2.5 + lcg() * 2, 0.42 * k + 0.1, cr, cg, cb, { drag: 2.2, rise: 0.15, wind: 1 }); } catch (e) {}
+      }
+      // and the muzzle's own gas, rolling forward off the crown
+      for (let i = 0; i < 6; i++) {
+        const sp = 8 + lcg() * 10;
+        try { MU.smoke(from.x, from.y, from.z, ux * sp + (lcg() - 0.5) * 3, uy * sp + 0.5, uz * sp + (lcg() - 0.5) * 3,
+          0.6, 3 + lcg() * 2.5, 1.8 + lcg() * 1.5, 0.45, 0.8, 0.78, 0.74, { drag: 2.8, rise: 0.3, wind: 1 }); } catch (e) {}
+      }
+    }
+  }
 }
 /* THE AIM POINT OF A DIRECT-FIRE HIGH-EXPLOSIVE ROUND. A gunner lays on
    the target's centre of mass, not on the ground under it: a flat 1.4 km/s
@@ -970,7 +1025,6 @@ function vehFireHE(u, w, t, dist) {
     pos: V().copy(from), vel: vel, grav: g, t: 0, by: u, life: Math.max(7, sol.t * 1.5 + 2),
     mun: he.mun || null, he: he, tgt: t.fake ? null : t,
     w: { blastRadius: he.blast || 6, blastPower: (he.power || 1.4) / 0.55, sfx: null },
-    trail: STUDIO.trail({ length: 12, color: 0xffd9a0, opacity: 0.45, minStep: 2 }),
   };
   rockets.push(rk);
   // the rig may fly its own round (rig.launched: a guided rocket's profile,
@@ -983,9 +1037,35 @@ function vehFireHE(u, w, t, dist) {
 function vehLaunch(u, w, t) {
   const from = V().copy(vehicleMuzzle(u, _muz));
   vehFx(u, from);
-  u.shots.push({ pos: from, tgt: t, w: w, t: 0, by: u,
-    trail: STUDIO.trail({ length: 30, color: 0xe8e2d4, opacity: 0.5, minStep: 3 }) });
+  const MU = CBZ.munitions;
+  const shape = (MU && MU.shapeOf && MU.shapeOf(w.mun)) || (w.kind === "sam" ? "aam" : "atgm");
+  const row = CBZ.munitionTable && CBZ.munitionTable.get(w.mun);
+  const d0 = Math.hypot(t.pos.x - from.x, t.pos.z - from.z);
+  /* THE FLIGHT PROFILE IS THE MUNITION'S (its row's `attack`). A top-attack
+     round (Javelin, TOW-2B) climbs well over the line and comes down on the
+     roof; a dive round fired from low (Hellfire off a ground rail) lofts and
+     dives; a missile fired up at an aircraft climbs because its mark is up
+     there. The loft is drawn on the round's own path above the straight
+     line the guidance flies, and comes back to it at the mark, so the hit
+     and its timing stay exactly the guidance's. */
+  const att = row && row.attack;
+  const loft = t.air || u.air ? 0 : att === "top" ? Math.min(150, Math.max(20, d0 * 0.18)) : att === "dive" ? Math.min(60, d0 * 0.08) : 0;
+  u.shots.push({ pos: from, tgt: t, w: w, t: 0, by: u, d0: Math.max(1, d0), loft: loft, vp: { x: from.x, y: from.y, z: from.z },
+    fx: MU && MU.flight ? MU.flight(shape, {}) : null });
 }
+// where the round is DRAWN: its guided point plus the profile's loft
+function vehShotDraw(s, sdt) {
+  const MU = CBZ.munitions;
+  if (!s.fx || !MU) return;
+  const t = s.tgt, dh = Math.hypot(t.pos.x - s.pos.x, t.pos.z - s.pos.z);
+  const u = Math.max(0, Math.min(1, 1 - dh / s.d0));
+  const lift = s.loft * Math.sin(Math.PI * Math.pow(u, 0.7));
+  const x = s.pos.x, y = s.pos.y + lift, z = s.pos.z;
+  const dx = x - s.vp.x, dy = y - s.vp.y, dz = z - s.vp.z, d = Math.hypot(dx, dy, dz);
+  if (d > 1e-4) MU.flightStep(s.fx, x, y, z, dx / d, dy / d, dz / d, d / Math.max(1e-3, sdt), sdt);
+  s.vp.x = x; s.vp.y = y; s.vp.z = z;
+}
+function vehShotEnd(s) { if (s.fx && CBZ.munitions) { CBZ.munitions.flightEnd(s.fx); s.fx = null; } }
 function stepVehShots(u, sdt) {
   for (let k = u.shots.length - 1; k >= 0; k--) {
     const s = u.shots[k], w = s.w, t = s.tgt;
@@ -999,13 +1079,13 @@ function stepVehShots(u, sdt) {
     const sw = HOST.sweep && s.t > 0.15 ? HOST.sweep(s.pos.x, s.pos.y, s.pos.z,
       s.pos.x + dx / d * go, s.pos.y + dy / d * go, s.pos.z + dz / d * go) : null;
     if (sw && (step < d - 1.5)) {
-      s.trail.dispose();
+      vehShotEnd(s);
       u.shots.splice(k, 1);
       vehShotLand(u, w, null, sw.x - dx / d * 0.15, sw.y - dy / d * 0.15, sw.z - dz / d * 0.15, dx / d, dz / d, sw);
       continue;
     }
     if (step >= d || s.t > 30 || t.dead) {
-      s.trail.dispose();
+      vehShotEnd(s);
       u.shots.splice(k, 1);
       if (t.dead) continue;
       const MT = CBZ.munitionTable, f = MT && MT.fx(w.mun);
@@ -1023,7 +1103,7 @@ function stepVehShots(u, sdt) {
       continue;
     }
     s.pos.x += dx / d * step; s.pos.y += dy / d * step; s.pos.z += dz / d * step;
-    s.trail.push(s.pos);
+    vehShotDraw(s, sdt);
   }
 }
 /* A GUIDED ROUND LANDS: a direct hit is its own penetration on the hull it
@@ -1396,7 +1476,6 @@ function vehRelease(u, W, he, guideTo, tf) {
     vel: vel,
     grav: 9.81, t: 0, by: u, life: Math.max(40, fall * 1.4 + 5), homing: guideTo || null, mun: he.mun || w.mun || null, he: he, bomb: true,
     w: { blastRadius: he.blast, blastPower: he.power / 0.55 },
-    trail: STUDIO.trail({ length: 8, color: 0x404040, opacity: 0.25, minStep: 6 }),
   });
 }
 
@@ -1906,7 +1985,7 @@ function stepYouVehicle(u, sdt) {
   const shot = vehShotOf(u, W, null);
   const from = vehicleMuzzle(u, _muz);
   _v.set(from.x + fxw * 300, HOST.groundAt(from.x + fxw * 300, from.z + fzw * 300), from.z + fzw * 300);
-  if (CBZ.tracer) { try { CBZ.tracer(from, _v, { shooter: u, muzzle: true, muzzleScale: 2 }); } catch (e) {} }
+  gunShot(u, W.w, from, _v, null);
   vehFx(u, from);
   u.actx.firing = shot; u._firing = null;
   missImpact(from, _v, 0, W.w.kind === "cannon");

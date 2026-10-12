@@ -85,6 +85,11 @@ function hurtMan(m, dmg, imp) {
   if (m.beast && imp && imp.bullet && m.hp - dmg <= 0 && imp.organ !== "brain" && imp.organ !== "spine" &&
       m.maxHp < 1e8 && onItsFeet(m, dmg, imp)) dmg = 0;
   m.hp -= dmg;
+  // YOU were hit: where from (systems/eyes.js arc), as bold as the hit
+  if (m === YOU.m && dmg > 0 && imp && CBZ.eyes && CBZ.eyes.hitFrom) {
+    const src = imp.by && imp.by.pos ? imp.by.pos : imp.at;
+    if (src && Math.hypot(src.x - m.pos.x, src.z - m.pos.z) > 1.5) CBZ.eyes.hitFrom(src.x, src.z, Math.min(1, dmg / Math.max(20, (m.maxHp > 1e8 ? 100 : m.maxHp) * 0.4)));
+  }
   if (res) armourHit(m, res, imp);
   // ...and what the kit did to that round (systems/armour.js layer: a stop
   // still winds him and rocks him; fire.js already flinched him)

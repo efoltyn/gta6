@@ -785,7 +785,15 @@
       if (tg > 0 && tg < t) t = tg;
     }
     const hx = wp.x + d.x * t, hy = wp.y + d.y * t, hz = wp.z + d.z * t;
-    if (CBZ.tracer) { try { CBZ.tracer({ x: wp.x, y: wp.y, z: wp.z }, { x: hx, y: hy, z: hz }, { byPlayer: true }); } catch (e) {} }
+    // the round, seen: its munition's calibre and speed, a tracer in every
+    // autocannon round's base and one in five of a machine gun's belt; the
+    // flash is the rig's (rigFire)
+    if (CBZ.tracer) {
+      const MT = CBZ.munitionTable, row = MT && W.w.mun ? MT.get(W.w.mun) : null, mg = W.w.kind === "mg";
+      try { CBZ.tracer({ x: wp.x, y: wp.y, z: wp.z }, { x: hx, y: hy, z: hz }, { byPlayer: true, muzzleScale: 0, brass: false,
+        weapon: mg ? (W.w.wid || "m2_50cal") : undefined, belt: mg ? 5 : undefined, tracer: mg ? undefined : true,
+        mm: !mg && row ? row.cal : undefined, v: !mg && row ? row.v : undefined }); } catch (e) {}
+    }
     if (t < B.range - 1 && CBZ.detonate) {
       try { CBZ.detonate(hx, hy, hz, B.warhead, { byPlayer: true, dirx: d.x, dirz: d.z }); } catch (e) {}
     }

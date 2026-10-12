@@ -135,6 +135,10 @@
     P.hp -= dmg;
     P._hurtT = 3.5;                     // pause regen briefly, then it ramps back
     if (CBZ.hitFlash) CBZ.hitFlash(Math.min(1, dmg / 60));
+    // WHERE IT CAME FROM (systems/eyes.js): an arc pointing at the source,
+    // unless the source is where you stand (a crash, a fall)
+    if (fromX != null && fromZ != null && CBZ.eyes && CBZ.eyes.hitFrom && P.pos &&
+        Math.hypot(fromX - P.pos.x, fromZ - P.pos.z) > 1.5) CBZ.eyes.hitFrom(fromX, fromZ, Math.min(1, dmg / 40));
     if (CBZ.shake) CBZ.shake(Math.min(0.4, 0.12 + dmg * 0.01));
     // THE BODY (systems/vitals.js): a fist dazes and can knock you out, a
     // round or a blade opens a bleed where it went in. A hit that runs the

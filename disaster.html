@@ -661,7 +661,7 @@ document.body.appendChild(b);}}catch(e){}})();
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
 <!-- CBZ.eyes: how a hurt body sees. No red screen anywhere: near death the
      a light red rim, grey colour and a heartbeat; the view never closes while alive (lids are for the dead). -->
-<script src="src/systems/eyes.js?v=deathcam1009"></script>
+<script src="src/systems/eyes.js?v=rounds1013"></script>
 <script src="src/systems/vitals.js?v=deathcam1009"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
 <script src="src/entities/player.js?v=pf0930c"></script>
@@ -678,14 +678,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/brain.js?v=bal2m1012"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=weap1011m"></script>
+<script src="src/systems/audio.js?v=rounds1013"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/ballistics.js?v=strike1013m"></script>
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
-<script src="src/weapons/munitions.js?v=mil0929"></script>
+<script src="src/weapons/munitions.js?v=rounds1013"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -1184,7 +1184,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/mil_air.js?v=army1013m"></script>
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
 <!-- ONE ARMY (city/army.js): the door to NPC War's battle core, sim and unit kit. Only the API + loader ride the page; the unit files and the war engine load when a force or Fort Brandt's motor pool needs them. -->
-<script src="src/city/army.js?v=convoy1013"></script>
+<script src="src/city/army.js?v=rounds1013"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
@@ -2038,7 +2038,7 @@ document.body.appendChild(b);}}catch(e){}})();
      breaches. The one mass crowd for every political crowd (the gate protest,
      a rally the President calls, the Capitol march): the nearest are ordinary
      rigs, the rest one instanced fill, capped per device. -->
-<script src="src/city/mob.js?v=street1009"></script>
+<script src="src/city/mob.js?v=rounds1013"></script>
 <!-- THE NATIONAL ADDRESS (city/address.js): the address order puts the
      President on every TV (newsroom.js live feed); 3 to 5 statements, verb x
      target off the real world, each one a CBZ.politics.act. After politics.js. -->
