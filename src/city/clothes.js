@@ -3623,6 +3623,33 @@
     put(s.arms, sleeve); put(s.armsLower, skin);
   }
 
+  /* THE SLEEVE HEADS (entities/character.js THE ARMHOLE AND THE SLEEVE HEAD):
+     a shaped jacket shell stops at two armholes, and each is filled by a cap
+     hung on its ARM, in the garment's own sleeve cloth. They show exactly
+     when the shell does: material null takes them off. */
+  const CAP_UV = limbPainter("arm", null).fn("side", 0.3, 0.2);
+  function sleeveHeads(ch, m) {
+    const P = ch && ch.parts;
+    if (!P) return;
+    const caps = ch._sleeveHeads || (m ? (ch._sleeveHeads = []) : null);
+    if (!caps) return;
+    [P.la, P.ra].forEach(function (arm, i) {
+      let c = caps[i];
+      const side = arm && arm.position && arm.position.x < 0 ? -1 : 1;
+      const g = m && arm && CBZ.humanSleeveCap ? CBZ.humanSleeveCap(ch, side, CAP_UV) : null;
+      if (!g) { if (c) c.visible = false; return; }
+      if (!c) {
+        c = caps[i] = new THREE.Mesh(g, m);
+        c.name = "sleeve-head";
+        c.userData.clothingPart = "sleeve-head";
+        c.castShadow = false; c.receiveShadow = false;
+      }
+      if (c.parent !== arm) arm.add(c);
+      c.geometry = g; c.material = m; c.visible = true;
+    });
+  }
+  CBZ.citySleeveHeads = sleeveHeads;
+
   function applyClothes(ch, rec, opts) {
     if (!ch || !ch.skinSlots) return null;
     fitTorso(ch);                                    // chest+waist → ONE garment column
@@ -3634,6 +3661,7 @@
         restore(s.torso); restore(s.arms); restore(s.legs); restore(s.pelvis);
         restore(s.armsLower); restore(s.legsLower); restore(s.collar);
         if (ch._jacketMesh) ch._jacketMesh.visible = false;
+        sleeveHeads(ch, null);
         if (CBZ.humanSeatBadge && s.badge && s.badge.length) CBZ.humanSeatBadge(ch, 0);   // off the shell, back onto the shirt
         ch._clothesKey = null;
         // …and the MATERIAL memo with it. Behaviourally a no-op today (the
@@ -3708,9 +3736,12 @@
       if (spec) { jm.userData.torsoPart = spec; jm.geometry = CBZ.humanLimbGeometry(jm, xr > 0 ? fpPainter("jacket", null, xr) : limbPainter("jacket", null)); }
       else if (jf) jm.geometry = clothGeom("jacket", jf.dims);
       jm.material = m;
-      if (CBZ.humanJacketFollow) CBZ.humanJacketFollow(jm);   // the shoulder moves with the arm (character.js)
       jm.visible = true;
-    } else if (ch._jacketMesh) ch._jacketMesh.visible = false;
+      sleeveHeads(ch, spec ? m : null);
+    } else {
+      if (ch._jacketMesh) ch._jacketMesh.visible = false;
+      sleeveHeads(ch, null);
+    }
     // a c.badge (character.js) sits on the OUTERMOST layer: on the shell when
     // one is on (its clearance), on the shirt when not
     if (CBZ.humanSeatBadge && s.badge && s.badge.length) {
@@ -3845,7 +3876,7 @@
     // the shell is a garment too — a dead atlas leaves an open jacket drawing
     // nothing at all, and no jacket is a better look than a hole in a chest.
     const jm = ch._jacketMesh;
-    if (jm && jm.visible && !clothMatOk(jm.material)) { jm.visible = false; n++; }
+    if (jm && jm.visible && !clothMatOk(jm.material)) { jm.visible = false; sleeveHeads(ch, null); n++; }
     return n;
   }
   CBZ.cityClothesRepairRig = cityClothesRepairRig;

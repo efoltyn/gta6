@@ -3576,7 +3576,8 @@
      dome (padR). The dome is a ball about that same pivot, so whatever the
      arm does — swing, raise, cuffs — it turns INSIDE the pad and the seam
      never opens; a raised arm leaves through the pad like a real sleeve. */
-  function padR(S) { return 0.97 * S.R + 0.016 * S.vs; }
+  // (the sleeve head under the pad clears the arm's fullest section, ~R deep at the top)
+  function padR(S) { return S.R + 0.016 * S.vs; }
   const PAD_LO = -0.15;                 // the pad's underside, as a share of padR below the pivot
   function jacketPad(S, x, y, z, out) {
     const r = padR(S), dy = y - S.shoulderY;
@@ -3820,6 +3821,7 @@
     const shellRelief = part === "jacket" ? 0.8 : (part === "vest" ? (spec.flat ? 0.35 : 0.7) : 1);
     const lap = part === "jacket" && spec.lapel && spec.lapel.xr > 0 ? spec.lapel : null;
     const armIn = part === "jacket" ? jacketArmIn(S) : null;
+    const hole = new Uint8Array(nv);
     let o = 0;
     const put = function (x, y, z, f, u, v) { Pp[o * 3] = x; Pp[o * 3 + 1] = y - oy; Pp[o * 3 + 2] = z; Fc[o] = f; Uq[o] = u; Vq[o] = v; return o++; };
     const ringStart = [];
@@ -3838,14 +3840,16 @@
         let x = p.x, y = p.y;
         if (R.lift) y += R.lift * sm01((p.c + 0.15) / 0.55);   // the jacket's cutaway front (partRings)
         if (armIn) { _jc[0] = x; _jc[1] = z; jacketFit(S, y, _jc, armIn); x = _jc[0]; z = _jc[1]; }
-        if (armIn && jacketPad(S, x, y, z, _jp)) { x = _jp[0]; y = _jp[1]; z = _jp[2]; }
+        if (armIn && jacketArmhole(S, x, y, z, _jp)) hole[o] = 1;
+        else if (armIn && jacketPad(S, x, y, z, _jp)) { x = _jp[0]; y = _jp[1]; z = _jp[2]; }
         put(x, y, z, f, u, v);
       }
     }
     const idx = [];
+    const tri = (a, b, c) => { if (!(hole[a] || hole[b] || hole[c])) idx.push(a, b, c); };   // the armholes stay open
     for (let i = 0; i < rings.length - 1; i++) for (let f = 0; f < 4; f++) for (let k = 0; k < nq; k++) {
       const c = ringStart[i] + f * (nq + 1) + k, b = c + RV;
-      idx.push(b, b + 1, c, b + 1, c + 1, c);
+      tri(b, b + 1, c); tri(b + 1, c + 1, c);
     }
     // FAN CAPS on duplicated rims (shrunk a hair so the smooth-normal weld
     // leaves the visible rim's normals alone)
@@ -3882,7 +3886,21 @@
       } else cap(0, true);
     }
     if (capBot) cap(rings.length - 1, false);
-    const nUsed = o;
+    let nUsed = o;
+    // the armholes' vertices are not part of the garment: compact them away
+    // (a vertex no triangle uses still exists for every tool that reads one)
+    if (part === "jacket") {
+      const used = new Int32Array(nUsed).fill(-1);
+      for (let i = 0; i < idx.length; i++) used[idx[i]] = 0;
+      let n2 = 0;
+      for (let i = 0; i < nUsed; i++) if (used[i] === 0) {
+        used[i] = n2;
+        Pp[n2 * 3] = Pp[i * 3]; Pp[n2 * 3 + 1] = Pp[i * 3 + 1]; Pp[n2 * 3 + 2] = Pp[i * 3 + 2];
+        Fc[n2] = Fc[i]; Uq[n2] = Uq[i]; Vq[n2] = Vq[i]; n2++;
+      }
+      for (let i = 0; i < idx.length; i++) idx[i] = used[idx[i]];
+      nUsed = n2;
+    }
     g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(Pp.slice(0, nUsed * 3), 3));
     g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(nUsed * 3), 3));
@@ -3899,7 +3917,6 @@
     g.computeBoundingBox(); g.computeBoundingSphere();
     g.parameters = { width: box.w, height: box.h, depth: box.d };   // the box this part replaced
     g.userData.torso = { part, box, origin: oy, face: Fc.slice(0, nUsed), u: Uq.slice(0, nUsed), v: Vq.slice(0, nUsed), rings: rings.length, nq };
-    if (part === "jacket" && lod < 2) jacketFollowMorph(g, S, oy);
     g.name = "torso~" + part + "~" + lod;
     g._shared = true;
     return (TORSO_GEO[key] = g);
@@ -3955,101 +3972,98 @@
     if (paint !== undefined) ud.limbPaint = paint || null;
     return torsoBake(spec, spec.lod, ud.limbPaint || null);
   }
-  /* ==== THE JACKET'S SHOULDER IS SKINNED TO THE ARM ======================
-     The jacket shell rode the CHEST, rigid, while the arm swung under it.
-     The padded shoulder (jacketPad: a sphere round the arm's pivot, cut off
-     PAD_LO under it), the armhole under the pad and the flare below stood
-     still, so a swinging arm carried the back of the upper arm OUT through
-     the pad's underside and the back of the armpit (tools/overlap-audit.mjs:
-     17.5 mm mid-stride), the sleeve bursting out of the shoulder seen from
-     above. A real sleeve head moves with the arm, so the near shell is
-     SKINNED: the region round each arm's pivot rotates with that arm.
-     This rig has no skinning (rigid parts on joints), so the skin is morph
-     targets — the hair's HAIR FOLLOW mechanism, r128's whole budget of eight
-     relative position targets, no normals. An arm's drawn rotation relative
-     to its rest carry is a SWING about x (the outermost of its Euler XYZ:
-     exactly a rotation about the body x axis through the pivot) and an
-     ABDUCTION about z. A rotation by t about axis k through the pivot moves r
-     by sin t (k x r) + (1 - cos t) k x (k x r), so each joint axis is TWO
-     targets — w (k x r) and w^2 k x (k x r) — and the influences sin t and
-     1 - cos t make it the exact rotation wherever w is 0 or 1, at any angle
-     (no chord error; r128 takes negative influences). 2 axes x 2 terms x 2
-     arms = 8. Weights: 1 on the pad and on the shell lateral of the arm's
-     inner line (its FOOTPRINT: a swing keeps every arm point's x), from the
-     pivot down past the flare; 0 medially (the back and chest panels stay on
-     the chest) and far from the pivot; smooth between, so the cloth stretches
-     across the shoulder blade instead of tearing. jacketFollowSync reads each
-     arm's DRAWN rotation (its local matrix: the shoulder limits are honoured)
-     right before the shell draws. The FAR shell has no targets and pools as
-     before; pedinstance.js refuses a morph geometry, so a near suited rig
-     draws its own shell (one call), like long hair. */
-  function jacketFollowW(S, x, yB, z, side) {
-    const R = S.R, rP = padR(S);
-    const dx = side * x - S.AX, h = yB - S.shoulderY;
-    if (dx < -1.05 * R || h < -1.6 * R) return 0;
-    const wl = sm01((dx + 1.05 * R) / (0.15 * R));                // the arm's footprint
-    const wv = sm01((h + 1.6 * R) / (0.5 * R));                  // below the flare: hangs from the chest
-    const wr = 1 - sm01((Math.hypot(dx, h, z) - (rP + 0.8 * R)) / (0.5 * R));   // far from the pivot: the panels
-    return wl * wv * wr;
+  /* ==== THE ARMHOLE AND THE SLEEVE HEAD ===================================
+     A jacket is a body with two ARMHOLES and two sleeves sewn into them. The
+     shell was one closed loft round the torso, so between the pad (a sphere
+     round the arm's pivot, jacketPad) and the flank under the arm its rings
+     had to cross the top of the arm to get round it: a membrane through the
+     sleeve 10-14 mm deep STANDING STILL (tools/overlap-audit.mjs), more as the
+     arm swung, and the shoulder that looked broken from above.
+     Now each side has a real armhole: the SLEEVE HEAD (sleeveCapGeometry) is
+     a sphere cap round the arm's own pivot, hung on the ARM, covering the
+     lateral side of that ball out to a plane x = AX - CAP_IN R. A sphere
+     about its centre is the same sphere however the arm turns, and a swing
+     keeps every point's x, so the cap fills exactly the same place in every
+     pose and its medial edge never moves. The torso shell STOPS at the
+     armhole: every shell vertex in that ball lateral of HOLE_IN (and medial
+     of it, whatever lies inside the arm at rest) is in the hole, every
+     triangle touching one is dropped and the vertices are compacted away
+     (torsoBake), so no shell surface is left where the arm can be. The sleeve
+     below is the arm's own painted loft, coming out of the cap (whose lower
+     band tucks into the loft rather than running tangent down it); the pad's
+     medial part is still the shell's (jacketPad), 6 mm outside the cap's
+     edge, so the seam is covered from above. Measured (overlap-audit): arm vs
+     jacket 13.9 mm standing / 17.5 mm mid-stride -> 3.7 mm worst in every
+     pose. Nothing to sync per frame, no morph targets on the shell. */
+  const CAP_IN = 0.30;               // the cap's medial edge, in arm radii medial of the pivot
+  const HOLE_IN = 0.25;              // the shell's armhole: lateral of this, inside the ball
+  function capR(S) { return padR(S) - 0.006 * S.vs; }
+  // a shell vertex in the armhole: true, and `out` is where it sits on the
+  // hole's rim (just outside the cap). torsoBake drops every triangle whose
+  // three corners are all in the hole, so the shell really is OPEN there.
+  function jacketArmhole(S, x, y, z, out) {
+    const dx = Math.abs(x) - S.AX, dy = y - S.shoulderY, R = S.R;
+    const d = Math.hypot(dx, dy, z);
+    if (d >= padR(S) + 0.025 * S.vs || d < 1e-6) return false;
+    // medial of the cap's edge the hole still takes whatever lies INSIDE the
+    // arm at rest (the shell over the body's own shoulder end, which is
+    // buried in the deltoid): there the sleeve and the body show, both the
+    // garment's cloth (city/clothes.js THE BODY UNDER A SHELL)
+    if (dx < -HOLE_IN * R) {
+      const q = dy <= 0 ? (dx * dx) / (0.97 * R * 0.97 * R) + (z * z) / (0.92 * R * 0.92 * R)
+        : (dx * dx + z * z) / (R * R) + (dy * dy) / (0.9 * R * 0.9 * R);
+      if (q >= 1) return false;
+    }
+    const k = (capR(S) + 0.003 * S.vs) / d;
+    out[0] = Math.sign(x || 1) * (S.AX + dx * k); out[1] = S.shoulderY + dy * k; out[2] = z * k;
+    return true;
   }
-  function jacketFollowMorph(g, S, oy) {
-    const pos = g.attributes.position, n = pos.count, A = pos.array, py = S.shoulderY - oy;
-    const tp = [];
-    for (const side of [1, -1]) {
-      const X1 = new Float32Array(n * 3), X2 = new Float32Array(n * 3), Z1 = new Float32Array(n * 3), Z2 = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) {
-        const x = A[i * 3], y = A[i * 3 + 1], z = A[i * 3 + 2];
-        const w = jacketFollowW(S, x, y + oy, z, side);
-        if (!w) continue;
-        const rx = x - side * S.AX, ry = y - py, w2 = w * w;
-        // about x: k x r = (0, -rz, ry), k x (k x r) = (0, -ry, -rz)
-        X1[i * 3 + 1] = -w * z; X1[i * 3 + 2] = w * ry;
-        X2[i * 3 + 1] = -w2 * ry; X2[i * 3 + 2] = -w2 * z;
-        // about z: k x r = (-ry, rx, 0), k x (k x r) = (-rx, -ry, 0)
-        Z1[i * 3] = -w * ry; Z1[i * 3 + 1] = w * rx;
-        Z2[i * 3] = -w2 * rx; Z2[i * 3 + 1] = -w2 * ry;
+  /* The sleeve head of one arm, in that ARM's frame (its group origin is the
+     pivot; its rest carry rotation.z = side * armOutZ is undone so the cap's
+     edge plane is the body's x plane). Lateral pole, lat-long rings out to
+     the edge plane. uv: one cloth texel of the garment (the sleeve's). */
+  const SLEEVE_CAP_GEO = Object.create(null);
+  function sleeveCapGeometry(S, side, armOutZ, uv) {
+    const key = S.key + "|" + side + "|" + (+armOutZ).toFixed(4) + "|" + uv[0].toFixed(5) + "," + uv[1].toFixed(5);
+    let g = SLEEVE_CAP_GEO[key];
+    if (g) return g;
+    const r = capR(S), aMax = Math.acos(Math.max(-1, Math.min(1, -CAP_IN * S.R / r)));
+    const NA = 10, NB = 20, c = Math.cos(-side * armOutZ), sn = Math.sin(-side * armOutZ);
+    const P = [], N = [], U = [], I = [];
+    for (let i = 0; i <= NA; i++) {
+      const a = aMax * i / NA;
+      for (let j = 0; j <= NB; j++) {
+        const b = 2 * Math.PI * j / NB;
+        const nx = side * Math.cos(a), ny = Math.sin(a) * Math.cos(b), nz = Math.sin(a) * Math.sin(b);
+        // body orientation -> arm local: Rz(-rest carry)
+        const lx = c * nx - sn * ny, ly = sn * nx + c * ny;
+        // below the shoulder the sleeve is the arm's own loft: the cap tucks
+        // into it there instead of running tangent down its side
+        const rr = ny < -0.35 ? r * 0.55 : r;
+        P.push(lx * rr, ly * rr, nz * rr); N.push(lx, ly, nz); U.push(uv[0], uv[1]);
       }
-      for (const a of [X1, X2, Z1, Z2]) tp.push(new THREE.BufferAttribute(a, 3));
     }
-    g.morphAttributes.position = tp;
-    g.morphTargetsRelative = true;
-    g.userData.jacketFollow = { armOutZ: S.P.armOutZ || 0 };
-  }
-  // [+x arm: sin swing, 1-cos swing, sin abduction, 1-cos abduction, then the -x arm]
-  function jacketFollowSync(mesh) {
-    const inf = mesh.morphTargetInfluences;
-    if (!inf || inf.length < 8) return;
-    const g = mesh.geometry, jf = g && g.userData && g.userData.jacketFollow;
-    const on = jf && g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length >= 8;
-    for (let i = 0; i < inf.length; i++) inf[i] = 0;
-    const chest = mesh.parent, body = chest && chest.parent;
-    if (!on || !body) return;
-    const kids = body.children;
-    for (let k = 0; k < kids.length; k++) {
-      const a = kids[k];
-      if (a._armBody !== body) continue;
-      a.updateMatrix();
-      const e = a.matrix.elements, side = a.position.x >= 0 ? 1 : -1, i0 = side > 0 ? 0 : 4;
-      // the arm's local y axis = Rx(x) Rz(z) e_y = (-sin z, cos z cos x, cos z sin x)
-      const sw = Math.atan2(e[6], e[5]), ab = Math.atan2(-e[4], Math.hypot(e[5], e[6])) - side * jf.armOutZ;
-      inf[i0] = Math.sin(sw); inf[i0 + 1] = 1 - Math.cos(sw);
-      inf[i0 + 2] = Math.sin(ab); inf[i0 + 3] = 1 - Math.cos(ab);
+    for (let i = 0; i < NA; i++) for (let j = 0; j < NB; j++) {
+      const a0 = i * (NB + 1) + j, a1 = a0 + 1, b0 = a0 + NB + 1, b1 = b0 + 1;
+      if (side > 0) I.push(a0, b0, a1, a1, b0, b1); else I.push(a0, a1, b0, a1, b1, b0);
     }
-    const m = mesh.material;
-    if (m && !Array.isArray(m) && !m.morphTargets) { m.morphTargets = true; m.needsUpdate = true; }
+    g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(N, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(U, 2));
+    g.setIndex(I);
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    g.name = "sleeve-cap";
+    g._shared = true;
+    return (SLEEVE_CAP_GEO[key] = g);
   }
-  function jacketFollowRender() { jacketFollowSync(this); }
-  // city/clothes.js hands every shell it builds or re-bakes here
-  function jacketFollowWear(mesh) {
-    if (!mesh) return;
-    mesh.updateMorphTargets();
-    if (!mesh.morphTargetInfluences) mesh.morphTargetInfluences = [];
-    while (mesh.morphTargetInfluences.length < 8) mesh.morphTargetInfluences.push(0);
-    mesh.userData.jacketFollow = true;
-    mesh.onBeforeRender = jacketFollowRender;
-    jacketFollowSync(mesh);
-  }
-  CBZ.humanJacketFollow = jacketFollowWear;
+  // CBZ.humanSleeveCap(rig, side, uv) -> the sleeve head for the arm on `side`
+  // (+1 = the +x arm), or null on a rig with no shaped torso
+  CBZ.humanSleeveCap = function (rig, side, uv) {
+    const S = rig && rig.torsoShape;
+    if (!S || !uv) return null;
+    return sleeveCapGeometry(S, side, S.P.armOutZ || 0, uv);
+  };
   function setTorsoLod(rig, lod) {
     lod = lod >= 2 ? 2 : 1;
     const s = rig && rig.skinSlots;
@@ -9534,8 +9548,6 @@
     // HAIR FOLLOW: sync one hair mesh's morph influences to its neck's yaw now
     // (the renderer does it in onBeforeRender; tools call it after posing)
     hairFollow: hairFollowSync,
-    // THE JACKET FOLLOWS THE ARMS: sync one shell's influences to the arms now
-    jacketFollow: jacketFollowSync,
     hairFollowSpec: HAIR_FOLLOW,
     // THE NECK HAS A RANGE: the limits (radians), an in-place clamp for
     // absolute writers, and the test the drawn neck uses
