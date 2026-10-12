@@ -2089,13 +2089,25 @@
         g.computeVertexNormals();
         const len2 = dx * dx + dz * dz || 1;
         const dir2 = depthDir.x * depthDir.x + depthDir.z * depthDir.z || 1;
+        /* THE DRAWN PAD, NOT THE FIELD. The pad is drawn as flat triangles
+           between its (cols x rows) grid points, (A,C,B)/(B,C,D) per cell with
+           A=(c,r) B=(c+1,r) C=(c,r+1): the diagonal B-C is tu + tv = 1. The
+           analytic field between grid points lies under every concave
+           triangle (a body in a gully stood in the slope), so physics reads
+           the grid heights the triangles were built from. */
         function heightAt(x, z) {
           const rx = x - p0.x, rz = z - p0.z;
           const u = (rx * dx + rz * dz) / len2;
           if (u < 0 || u > 1) return 0;
           const bx = p0.x + dx * u, bz = p0.z + dz * u;
           const v = ((x - bx) * depthDir.x + (z - bz) * depthDir.z) / (depthLen * dir2);
-          return sampleHeight(u, v, bx + depthDir.x * v * depthLen, bz + depthDir.z * v * depthLen);
+          if (v < 0 || v > 1) return 0;
+          const fu = u * cols, fv = v * rows;
+          const c0 = Math.min(cols - 1, Math.floor(fu)), r0 = Math.min(rows - 1, Math.floor(fv));
+          const tu = fu - c0, tv = fv - r0;
+          const yB = gy[r0][c0 + 1], yC = gy[r0 + 1][c0];
+          if (tu + tv <= 1) { const yA = gy[r0][c0]; return yA + (yB - yA) * tu + (yC - yA) * tv; }
+          return gy[r0 + 1][c0 + 1] * (tu + tv - 1) + yC * (1 - tu) + yB * (1 - tv);
         }
         return { geo: g, spine, heightAt };
       }
