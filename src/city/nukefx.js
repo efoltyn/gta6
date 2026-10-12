@@ -693,6 +693,16 @@
     return mesh;
   }
 
+  /* THE VOLUME EXISTS FROM BOOT, hidden. It used to be built on the
+     detonation frame, so its shader — the heaviest program in the game: a
+     140-step march with three envelope evaluations and two noise fetches per
+     step — was compiled and linked by the driver inside the frame the flash
+     went off, the moment every other system was also at its busiest. Built
+     here (one unit box, no draw while visible=false), core/fxwarm.js's
+     play-start pass compiles it with the rest of the world's programs, and
+     the first nuke only reads it back. Same shader, same uniforms. */
+  try { buildMesh(); } catch (e) {}
+
   /* ============================================================
      THE FLASH (#nukeFlash, one DOM layer). A double pulse: first maximum,
      the dip while the shock front is opaque, then the longer second pulse.
@@ -905,6 +915,7 @@
     const P = STYLE[styleName] || STYLE.nuke;
     if (!noise.done) noiseStep(null);          // under the whiteout: finish the atlas now
     if (!buildMesh()) return null;
+    if (!mesh.parent) scene.add(mesh);
     const gy = floorAt(x, z);
     const radius = fireR(row, opts);
     const R = Math.max(5, radius * P.rFrac);

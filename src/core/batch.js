@@ -243,27 +243,121 @@
     const R = CBZ.renderer, gl = R && R.getContext && R.getContext();
     return !!(gl && self.__cbzGLAttr && typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext);
   };
+  /* A PARKED BUFFER IS HIDDEN IN ITS OWN 16-BIT STEPS. core/citystream.js
+     keeps a parked job's merged positions quantized across their box (_cbzQ:
+     q, origin o, step s) and no float array at all. A slice hide on one used
+     to EXPAND the whole geometry first — every position and normal of the
+     tile back to Float32 — and nothing packed it again until the job was
+     parked anew, so a nuke condemning the buildings of every parked tile
+     inside its 2 km reach re-inflated all of them at once. A zeroed step puts
+     every vertex of the slice on the box origin: degenerate triangles that
+     rasterize nothing, exactly like the float path's zeros. The stash keeps
+     the steps and the box they were cut on, so it restores into whichever
+     form the buffer is in by then (floats after an unpark, or steps). */
+  function dequant(q, o, sc) {
+    const f = new Float32Array(q.length);
+    for (let i = 0; i < q.length; i += 3) { f[i] = o[0] + q[i] * sc[0]; f[i + 1] = o[1] + q[i + 1] * sc[1]; f[i + 2] = o[2] + q[i + 2] * sc[2]; }
+    return f;
+  }
+  function stashFloats(holder) {
+    const st = holder._stash;
+    if (st && st.glBuf) {                       // a GPU-side stash restored into a CPU form (rare)
+      const gl = CBZ.renderer && CBZ.renderer.getContext && CBZ.renderer.getContext();
+      const f = new Float32Array(st.n);
+      try {
+        gl.bindBuffer(gl.COPY_READ_BUFFER, st.glBuf);
+        gl.getBufferSubData(gl.COPY_READ_BUFFER, 0, f);
+        gl.bindBuffer(gl.COPY_READ_BUFFER, null);
+        gl.deleteBuffer(st.glBuf);
+      } catch (e) {}
+      return f;
+    }
+    return holder._stashQ ? dequant(st, holder._stashQ.o, holder._stashQ.s) : st;
+  }
+  // one shared run of zeros for GPU slice hides (grown, never per call)
+  let _zeros = new Float32Array(0);
+  function zeros(n) { if (_zeros.length < n) _zeros = new Float32Array(Math.max(n, _zeros.length * 2)); return _zeros.subarray(0, n); }
+  /* UPLOAD THE SLICE, NOT THE TILE. needsUpdate alone makes r128 re-send the
+     whole attribute (bufferSubData of the full array): one building hidden in
+     a street tile re-uploaded every vertex of that tile, and a nuke's teardown
+     queue hides one or more buildings a frame for seconds. updateRange sends
+     just the touched span; several slices hidden in one frame upload as their
+     union. Only a range THIS function set is ever widened: if anything else
+     bumped the attribute since (its own full update may still be pending),
+     the range is cleared and three uploads the whole array as before. */
+  function uploadRange(attr, i0, n) {
+    const ur = attr.updateRange;
+    if (ur && attr._cbzRV !== undefined && attr._cbzRV === attr.version) {
+      if (ur.count > 0) {
+        const a = Math.min(ur.offset, i0), b = Math.max(ur.offset + ur.count, i0 + n);
+        ur.offset = a; ur.count = b - a;
+      } else { ur.offset = i0; ur.count = n; }
+    } else if (ur) ur.count = -1;
+    attr.needsUpdate = true;
+    attr._cbzRV = attr.version;
+  }
   function rangeSet(attr, start, count, hidden, holder, geo) {
     const i0 = start * 3, n = count * 3;
     if (hidden ? holder._stash : !holder._stash) return true;       // already there
-    if (!attr.array && attr._cbzQ) { if (geo && CBZ.geoExpandAll) CBZ.geoExpandAll(geo); else if (CBZ.geoExpand) CBZ.geoExpand(attr); }   // a parked, compacted buffer (core/citystream.js)
+    const Q = !attr.array && attr._cbzQ;
+    if (Q) {
+      if (hidden) {
+        holder._stash = Q.q.slice(i0, i0 + n); holder._stashQ = { o: Q.o.slice(), s: Q.s.slice() };
+        Q.q.fill(0, i0, i0 + n);
+      } else {
+        const P = holder._stashQ;
+        if (P && P.o[0] === Q.o[0] && P.o[1] === Q.o[1] && P.o[2] === Q.o[2] && P.s[0] === Q.s[0] && P.s[1] === Q.s[1] && P.s[2] === Q.s[2]) {
+          Q.q.set(holder._stash, i0);
+        } else {
+          const f = stashFloats(holder);
+          for (let i = 0; i < n; i += 3) for (let c = 0; c < 3; c++) {
+            Q.q[i0 + i + c] = Math.max(0, Math.min(65535, Math.round((f[i + c] - Q.o[c]) / Q.s[c])));
+          }
+        }
+        holder._stash = null; holder._stashQ = null;
+      }
+      return true;
+    }
     if (attr.array) {
-      if (hidden) { holder._stash = attr.array.slice(i0, i0 + n); attr.array.fill(0, i0, i0 + n); }
-      else { attr.array.set(holder._stash, i0); holder._stash = null; }
-      attr.needsUpdate = true;
+      if (hidden) { holder._stash = attr.array.slice(i0, i0 + n); holder._stashQ = null; attr.array.fill(0, i0, i0 + n); }
+      else { attr.array.set(stashFloats(holder), i0); holder._stash = null; holder._stashQ = null; }
+      uploadRange(attr, i0, n);
       return true;
     }
     const g = gpuBuffer(attr);
     if (!g) return false;
     const gl = g.gl;
-    gl.bindBuffer(gl.ARRAY_BUFFER, g.buf);
+    /* GPU TO GPU, NO READBACK. The slice used to be read back to JS with
+       getBufferSubData before it was zeroed, and that call cannot return until
+       the GPU has finished every command already queued: a full pipeline
+       drain per hidden range. "Hides are rare" stopped being true the day a
+       nuke started tearing a building down every frame (each one several
+       ranges), with the heaviest frames in the game in flight. The verts are
+       now copied into a small stash buffer on the GPU (copyBufferSubData is
+       queued like a draw) and copied back on restore. */
     if (hidden) {
-      holder._stash = new Float32Array(n);
-      gl.getBufferSubData(gl.ARRAY_BUFFER, i0 * 4, holder._stash);
-      gl.bufferSubData(gl.ARRAY_BUFFER, i0 * 4, new Float32Array(n));
+      const st = gl.createBuffer();
+      gl.bindBuffer(gl.COPY_WRITE_BUFFER, st);
+      gl.bufferData(gl.COPY_WRITE_BUFFER, n * 4, gl.STATIC_COPY);
+      gl.bindBuffer(gl.COPY_READ_BUFFER, g.buf);
+      gl.copyBufferSubData(gl.COPY_READ_BUFFER, gl.COPY_WRITE_BUFFER, i0 * 4, 0, n * 4);
+      gl.bindBuffer(gl.COPY_READ_BUFFER, null); gl.bindBuffer(gl.COPY_WRITE_BUFFER, null);
+      gl.bindBuffer(gl.ARRAY_BUFFER, g.buf);
+      gl.bufferSubData(gl.ARRAY_BUFFER, i0 * 4, zeros(n));
+      holder._stash = { glBuf: st, n: n }; holder._stashQ = null;
     } else {
-      gl.bufferSubData(gl.ARRAY_BUFFER, i0 * 4, holder._stash);
-      holder._stash = null;
+      const st = holder._stash;
+      if (st && st.glBuf) {
+        gl.bindBuffer(gl.COPY_READ_BUFFER, st.glBuf);
+        gl.bindBuffer(gl.COPY_WRITE_BUFFER, g.buf);
+        gl.copyBufferSubData(gl.COPY_READ_BUFFER, gl.COPY_WRITE_BUFFER, 0, i0 * 4, n * 4);
+        gl.bindBuffer(gl.COPY_READ_BUFFER, null); gl.bindBuffer(gl.COPY_WRITE_BUFFER, null);
+        gl.deleteBuffer(st.glBuf);
+      } else {
+        gl.bindBuffer(gl.ARRAY_BUFFER, g.buf);
+        gl.bufferSubData(gl.ARRAY_BUFFER, i0 * 4, stashFloats(holder));
+      }
+      holder._stash = null; holder._stashQ = null;
     }
     return true;
   }

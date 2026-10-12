@@ -808,7 +808,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/camera.js?v=planes1009b"></script>
-<script src="src/systems/physics.js?v=solid1011b"></script>
+<script src="src/systems/physics.js?v=nukecost1013"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -929,7 +929,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
-<script src="src/systems/debris.js?v=debris1012"></script>
+<script src="src/systems/debris.js?v=nukecost1013"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -1374,7 +1374,7 @@ document.body.appendChild(b);}}catch(e){}})();
      debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
 <script src="src/city/collapse.js?v=mil0929"></script>
 <script src="src/systems/strike.js?v=strike1013m"></script>
-<script src="src/city/structural.js?v=street1009"></script>
+<script src="src/city/structural.js?v=nukecost1013"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
@@ -2163,7 +2163,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=water1011"></script>
+<script src="src/core/batch.js?v=nukecost1013"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
