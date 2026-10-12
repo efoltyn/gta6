@@ -33,6 +33,10 @@
                                      keeps only points that hide you from it
      coverFrom(x, z, tx, tz, r, opts) the one point a man would run to
                             (NPC War: arenas/cover.js, CBZ.battleCover)
+     roads                  the road records a column routes on (systems/roadgraph.js:
+                            axis-aligned {x, z, vertical, len, w} or {ax, az, bx, bz, w});
+                            null where the ground has none (the terrain planner drives it)
+     waterAt(x, z)          true over water a vehicle cannot cross
 
    PUBLIC  CBZ.battleHost = { fromArena(map, micro, scene), fromCity(o),
                               validate(host) -> [missing names], KEYS }
@@ -125,6 +129,8 @@
         return CBZ.rayColliders ? CBZ.rayColliders(ox, oy, oz, dx, dy, dz, maxT, out, opts || undefined) : null;
       },
       scene: o.scene || CBZ.scene,
+      roads: (CBZ.city && ((CBZ.city.arena && CBZ.city.arena.roads) || CBZ.city.roads)) || null,
+      waterAt: function (x, z) { try { return CBZ.cityWaterAt ? !!CBZ.cityWaterAt(x, z) : false; } catch (e) { return false; } },
     };
     // the city's cover is the same registry when a page has loaded it
     if (CBZ.battleCover) { h.coverNear = CBZ.battleCover.near; h.coverFrom = CBZ.battleCover.from; }

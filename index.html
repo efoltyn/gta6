@@ -1341,7 +1341,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
 <script src="src/world/basekit.js?v=army1013m"></script>
 <!-- ONE ARMY (city/army.js): the door to NPC War's battle core, sim and unit kit. Only the API + loader ride the page; the unit files and the war engine load when a force or Fort Brandt's motor pool needs them. -->
-<script src="src/city/army.js?v=army1013m"></script>
+<script src="src/city/army.js?v=convoy1013"></script>
 <script src="src/city/island_military.js?v=army1013m"></script>
 <script src="src/city/biome_desert.js?v=layout2m"></script>
 <script src="src/city/biome_forest.js?v=ground1001"></script>
@@ -1963,7 +1963,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/campaign.js?v=ekey2"></script>
 <script src="src/city/cinematics.js?v=cd0929"></script>
 <script src="src/systems/humancontact.js?v=gnp0930"></script>
-<script src="src/systems/navigation.js?v=sharkmode1"></script>
+<!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
+     (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
+     the army's "route" order) route on it. Pure maths, loads first. -->
+<script src="src/systems/roadgraph.js?v=convoy1011"></script>
+<script src="src/systems/convoy.js?v=convoy1013"></script>
+<script src="src/systems/navigation.js?v=convoy1011"></script>
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
      a wall falling real physics and then finding door etc". The mover is a
      straight line and actorcollide.js always said so ("an NPC may bump a wall
@@ -2411,7 +2416,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=desk1009c"></script>
-<script src="src/city/motorcade.js?v=presverbs1008"></script>
+<script src="src/city/motorcade.js?v=convoy1011"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
      readiness, the Bureau's thread, a former who comes back; the Chief of

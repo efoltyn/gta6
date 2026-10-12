@@ -517,6 +517,9 @@ function buildMap(id) {
     // that hide a man from a threat, props, walls, crests, crater lips
     coverNear: CBZ.battleCover.near, coverFrom: CBZ.battleCover.from,
     water: water, bodyY: bodyY, camFloor: camFloor,
+    // THE ROADS a column routes on (systems/roadgraph.js): the downtown's
+    // street records; every open ground has none and a column plans across it
+    roads: (town && town.roads && town.roads.length) ? town.roads : null,
     /* TERRAIN JOINS THE SIGHT LINE — but only where groundAt is genuinely
        TERRAIN. The dunes map's height function is the desert's own analytic
        surface, so a sample along the eye line is sand and nothing else. A

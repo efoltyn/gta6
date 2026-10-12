@@ -157,6 +157,9 @@ function makeMan(teamId, i) {
   // field, until he gets out (src/battle/vehicles.js)
   bookUnit(man);                       // his force and its order, when a host fields forces (spawn.js)
   const seat = vehicleSeatFor(teamId, i);
-  if (seat) { vehBoardAtSpawn(man, seat); return null; }
+  // ...except a convoy side's riders: they WALK to their carrier and get in
+  // (src/battle/convoyhost.js); the crews are already at their stations
+  if (seat && !seat.crew && convoyWalks(teamId)) convoyRiderSpawned(man, seat.vi);
+  else if (seat) { vehBoardAtSpawn(man, seat); return null; }
   return man;
 }
