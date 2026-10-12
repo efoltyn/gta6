@@ -3081,6 +3081,14 @@
       for (const st of stands) for (let z = L.taxiZ + 40; z < st.stopZ - 2; z += 7.5) inset.push([st.lx, z, "g"]);
       P.edgeLights(F, edge, root).name = "airfield-lights:" + ap.id;
       P.insetLights(F, inset, root);
+      // the same lamps as the field's LOD lights (core/lodlights.js): the
+      // runway reads from the air, kilometres out, the way a real one does
+      if (CBZ.lodLights) {
+        const far = [];
+        for (const p of edge) { const w = toW(p[0], p[1]); far.push({ x: w.x, y: 0.4, z: w.z, c: LENS[p[2]] || LENS.w, s: 0.9, g: 9, f: 35 }); }
+        for (const p of inset) { const w = toW(p[0], p[1]); far.push({ x: w.x, y: 0.1, z: w.z, c: LENS[p[2]] || LENS.w, s: 0.6, g: 6, f: 30 }); }
+        CBZ.lodLights.lights("airfield:" + ap.id, far);
+      }
       // PAPI at the aiming point of each end, on the pilot's left
       const plan = P.runwayPlan(H0 * 2, RW);
       for (const e of ap.ends) {
@@ -3513,6 +3521,20 @@
         stations.push({ d: dd, x: lx, z: 0, dirx: sg, dirz: 0, y0: inB(lx, 0) ? 0 : -3.5, kind: "flash" });
       }
       P.approachLights(D, stations, D);
+      // the approach lights at distance (core/lodlights.js): the barrettes
+      // steady, the flashers a strobe running toward the threshold twice a
+      // second (approachLights' own sequence: far one first, 0.35 s run)
+      if (CBZ.lodLights) {
+        const far = [], fl = stations.filter(function (q) { return q.kind === "flash"; }).sort(function (a2, b2) { return b2.d - a2.d; });
+        for (const q of stations) {
+          if (q.kind === "flash") continue;
+          const offs = [-1.8, -0.9, 0, 0.9, 1.8];
+          if (q.kind === "cross") for (const sgn of [-1, 1]) for (let k = 0; k < 5; k++) offs.push(sgn * (6 + k * 1.5));
+          for (const o of offs) { const w = ap.toWorldL(q.x - q.dirz * o, q.z + q.dirx * o); far.push({ x: w.x, y: 1.34, z: w.z, c: 0xfff1d2, s: 0.9, g: 9, f: 35 }); }
+        }
+        fl.forEach(function (q, i) { const w = ap.toWorldL(q.x, q.z); far.push({ x: w.x, y: 1.34, z: w.z, c: 0xffffff, s: 1.4, g: 14, b: -2, p: 1 - i * (0.7 / fl.length), f: 35 }); });
+        CBZ.lodLights.lights("approach:" + ap.id + ":" + e.name, far);
+      }
       ap.approach = ap.approach || [];
       ap.approach.push({ end: e.name, stations: stations.length });
     }

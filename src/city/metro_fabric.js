@@ -153,7 +153,7 @@
 
   const MF_PARS = [
     MF_VARY,
-    "uniform float uMfNight;", "uniform float uMfLate;", "uniform vec3 uMfSky;", "uniform vec3 uMfZen;",
+    "uniform float uMfNight;", "uniform float uMfLate;", "uniform vec3 uMfSky;", "uniform vec3 uMfZen;", "uniform float uMfProj;",
     "float mfH( vec3 p ) {",
     "  p = fract( p * vec3( 0.1031, 0.1030, 0.0973 ) );",
     "  p += dot( p, p.yzx + 33.33 );",
@@ -607,7 +607,14 @@
     "    float warm = step( 0.32, mfH( vec3( cellH * 7.0, seed * 0.37, 11.0 ) ) );",
     "    vec3 lc = mix( vec3( 0.62, 0.74, 1.0 ), vec3( 1.0, 0.74, 0.42 ), warm ) * ( 0.55 + 0.6 * mfH( vec3( cellH * 3.3, 1.0, seed ) ) );",
     "    lc *= mix( 0.7 + 0.5 * clamp( lvl, 0.0, 1.0 ), 0.95, blur );",
-    "    mfEmit += lc * litOn * g * uMfNight * 1.25 * litK;",
+    // THE FAR WINDOWS ARE LIGHTS. Once a window cell is a few pixels wide
+    // its own lit dot (core/lodlights.js, the same hash per cell) carries it,
+    // so the averaged emission that used to paint the whole far facade as one
+    // flat lit wall keeps only the room glow between the dots. The fade is
+    // the cell's width on screen, the measure the dots fade in by.
+    "    float mfPx = bw * uMfProj / max( length( vMfV ), 1.0 );",
+    "    float mfDot = ( step( 3.5, mode ) * ( 1.0 - step( 8.5, mode ) ) + step( 9.5, mode ) * ( 1.0 - step( 11.5, mode ) ) + step( 19.5, mode ) * ( 1.0 - step( 20.5, mode ) ) ) * ( 1.0 - vVac );",
+    "    mfEmit += lc * litOn * g * uMfNight * 1.25 * litK * ( 1.0 - 0.8 * mfDot * ( 1.0 - smoothstep( 2.5, 6.0, mfPx ) ) );",
     "  }",
     // ---- THE ALBEDO IS DECODED. Every colour above (the plan's district
     //      palettes, the deck/plant tables, the shader's own trims) is an
@@ -632,7 +639,7 @@
   //  MATERIALS
   // ---------------------------------------------------------------------
   const U = {
-    uMfNight: { value: 0 }, uMfLate: { value: 0 },
+    uMfNight: { value: 0 }, uMfLate: { value: 0 }, uMfProj: { value: 1000 },
     uMfSky: { value: new THREE.Color(0.62, 0.7, 0.8) }, uMfZen: { value: new THREE.Color(0.36, 0.5, 0.7) },
   };
   let mat = null, hooked = false;
@@ -664,7 +671,11 @@
           "vMfC = aMfC; vMfG = aMfG; vMfP = aMfP;",
           "vMfU = vec4( aMfU.x / 32.0, aMfU.y / 16.0, aMfU.z / 16.0, aMfU.w );",
           "vec4 mfW = modelMatrix * vec4( transformed, 1.0 );",
-          "vMfV = cameraPosition - mfW.xyz;",
+          // the eye from viewMatrix: r128 never uploads cameraPosition to a
+          // Lambert program (WebGLRenderer.setProgram), so it read (0,0,0)
+          // and every facade took its fresnel, its sky reflection and its
+          // window depth from the world origin instead of the camera
+          "vMfV = -( viewMatrix[ 3 ].xyz * mat3( viewMatrix ) ) - mfW.xyz;",
           "vMfN = normalize( mat3( modelMatrix ) * objectNormal );",
         ].join("\n"));
     };
@@ -689,6 +700,8 @@
     if (n > 0.85) lateT = Math.min(1, lateT + dt / (hour * 5));
     else if (n < 0.3) lateT = Math.max(0, lateT - dt / (hour * 2));
     U.uMfLate.value = lateT;
+    // pixels per metre at 1 m (the far windows' hand-over to their lights)
+    U.uMfProj.value = CBZ.sightPixelRange ? CBZ.sightPixelRange(1) : 1000;
     const sc = CBZ.scene;
     if (sc && sc.fog && sc.fog.color) {
       U.uMfSky.value.copy(sc.fog.color);
@@ -849,8 +862,63 @@
       bBays = bays;
       const ax = ox + f.lx * hw, az = oz + f.lz * hd, bx = ax + f.rx * len, bz = az + f.rz * len;
       quad(ax, y0, az, bx, y0, bz, bx, y1, bz, ax, y1, az, f.nx, 0, f.nz, 0, y0 - GY, bays, y1 - GY);
+      if (FAR) winCells(ax, az, bx, bz, f.nx, f.nz, y0, y1, bays);
     }
     bFl = fl0; bDoor = d0;
+  }
+  /* THE FAR TILE'S WINDOWS AS LIGHTS (core/lodlights.js). One point per
+     window cell of a lit-window facade, 0.35 m out from its centre, carrying
+     what the facade shader hashes the cell by (building seed, mode, column,
+     floor, the face's normal) so the light's own vertex shader lights it
+     exactly when MF_MAIN lights that window. A cell whose hash is past the
+     highest lit share any hour can reach (0.66 offices, 0.52 the rest) is
+     never lit, so it is not written (the JS hash is the shader's in float32,
+     with a margin). Vacant buildings and blank faces have no lit windows. */
+  const WIN_MODES = { 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 10: 1, 11: 1, 20: 1 };
+  let WN = 0, WCAP = 0, WP = null, WA = null, WB = null;
+  function winNeed(n) {
+    if (WN + n <= WCAP) return;
+    let c = Math.max(WCAP * 2, 8192);
+    while (c < WN + n) c *= 2;
+    const p = new Float32Array(c * 3), a = new Uint8Array(c * 4), b = new Uint8Array(c * 4);
+    if (WP) { p.set(WP.subarray(0, WN * 3)); a.set(WA.subarray(0, WN * 4)); b.set(WB.subarray(0, WN * 4)); }
+    WP = p; WA = a; WB = b; WCAP = c;
+  }
+  const f32 = Math.fround;
+  function fr(x) { return f32(x - Math.floor(x)); }
+  function mfHjs(x, y, z) {               // MF_PARS mfH, in float32
+    let a = fr(f32(f32(x) * f32(0.1031))), b = fr(f32(f32(y) * f32(0.1030))), c = fr(f32(f32(z) * f32(0.0973)));
+    const d = f32(f32(f32(a * f32(b + 33.33)) + f32(b * f32(c + 33.33))) + f32(c * f32(a + 33.33)));
+    a = f32(a + d); b = f32(b + d); c = f32(c + d);
+    return fr(f32(f32(a + b) * c));
+  }
+  function winCells(ax, az, bx, bz, nx, nz, y0, y1, bays) {
+    if (!WIN_MODES[bMode] || (bFl & F_BLANK) || ((bVar >> 4) & 1) || bays > 255 || !CBZ.lodLights) return;
+    const fh = bFh / 10, top = bTop / 16;
+    const storeys = Math.floor(top / fh + 0.02);
+    const f0 = Math.max(0, Math.floor(Math.max(0, y0 - GY) / fh)), f1 = Math.min(storeys - 1, Math.floor((y1 - GY) / fh - 0.05), 255);
+    if (f1 < f0) return;
+    const wnx = nx * tC + nz * tS, wnz = -nx * tS + nz * tC;
+    const qx = n8(wnx), qz = n8(wnz);
+    const L = Math.hypot(qx, qz) || 1;
+    const faceId = Math.floor((((Math.atan2(qz / L, qx / L) * 0.63662 + 4.5) % 4) + 4) % 4);
+    const key = bSeed + faceId * 37 + bMode * 5;
+    const office = (bFl & F_OFFICE) ? 1 : 0, maxP = (office ? 0.66 : 0.52) + 0.03;
+    const keep = CBZ.lodLights.windowKeep ? CBZ.lodLights.windowKeep() : 1;
+    winNeed((f1 - f0 + 1) * bays);
+    for (let fl = f0; fl <= f1; fl++) {
+      const y = GY + (fl + 0.55) * fh;
+      for (let c = 0; c < bays; c++) {
+        if (mfHjs(key, c, fl) > maxP) continue;
+        const t = (c + 0.5) / bays;
+        const lx = ax + (bx - ax) * t + nx * 0.35, lz = az + (bz - az) * t + nz * 0.35;
+        if (keep < 1 && hq(lx + tX, lz + tZ + fl * 3.1, 77) > keep) continue;
+        const k = WN++, k3 = k * 3, k4 = k * 4;
+        WP[k3] = tX + lx * tC + lz * tS; WP[k3 + 1] = y; WP[k3 + 2] = tZ - lx * tS + lz * tC;
+        WA[k4] = bSeed; WA[k4 + 1] = bMode; WA[k4 + 2] = c; WA[k4 + 3] = fl;
+        WB[k4] = qx + 128; WB[k4 + 1] = qz + 128; WB[k4 + 2] = bBay; WB[k4 + 3] = office;
+      }
+    }
   }
   function topQuad(ox, oz, hw, hd, y) {
     quad(ox - hw, y, oz - hd, ox + hw, y, oz - hd, ox + hw, y, oz + hd, ox - hw, y, oz + hd, 0, 1, 0, 0, 0, 2 * hw, 2 * hd);
@@ -2670,6 +2738,7 @@
     if (kit) { oX = (tile.ix + 0.5) * KIT_CELL; oZ = (tile.iz + 0.5) * KIT_CELL; }
     else { oX = (tile.x0 + tile.x1) / 2; oZ = (tile.z0 + tile.z1) / 2; }
     COLS = []; REF = kit ? null : far ? tile.far : tile.mesh;
+    WN = 0;
     return J;
   }
   // run up to `budget` ms of a job; returns the job's result when it finishes
@@ -2783,6 +2852,10 @@
     mesh.geometry = g;
     if (old && old !== g) old.dispose();
     if (far) tile.farBuilt = true; else tile.built = true;
+    // the far tile's window lights replace this tile's last set (a GPU-lost
+    // rebuild writes the same key)
+    if (far && CBZ.lodLights) CBZ.lodLights.windows(J.P.id + ":" + tile.key, WN, WP || new Float32Array(0), WA || new Uint8Array(0), WB || new Uint8Array(0));
+    WN = 0;
     mesh.visible = false;                         // metro.js decides which of the pair is drawn
     const cols = COLS; COLS = null; REF = null;
     const out = { colliders: far ? [] : cols, empty: nv === 0,

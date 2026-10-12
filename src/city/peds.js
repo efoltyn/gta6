@@ -981,7 +981,7 @@
     // makeCharacter paints it skin-colored when shortSleeve is set, which
     // reads as a tee ending mid-bicep and bends correctly at the elbow
     // (the old bolt-on forearm box detached the moment the elbow bent).
-    const _cs = {
+    const ch = makeCharacter({
       legs: pick(PANTS, r()), torso: outfit, collar: outfit, arms: outfit, skin, hair: hairFor(r()),
       shoes: r() < 0.3 ? 0xd8d8d8 : 0x2b2b2b, cap: capCol, capKind: capKind, shortSleeve: shortSleeve,
       build: gender === "f" ? "f" : "m", longHair,
@@ -1003,8 +1003,7 @@
         seed: (skin ^ outfit) | 0, sex: gender, band: (ageYears == null ? "adult" : null),
         age: ageYears, job: opts.job, archetype: opts.archetype, cop: !!opts.cop,
       }) : null),
-    };
-    const ch = makeCharacter(_cs);
+    });
     ch.group.position.set(x, 0, z);
     ch.group.rotation.y = r() * 6.28;
     // Leg length relative to the adult rig, floored so a baby that somehow ends
@@ -1202,9 +1201,6 @@
       !CBZ.npcTransitionSafe(x, z, { minDistance: 18, maxDistance: 150 });
     const ped = {
       char: ch, group: ch.group, pos: ch.group.position, name: nm, gender,
-      // what this body wears, as the crowd's GPU humans spell it: the far form
-      // past the rig's draw band (FAR PEOPLE below) wears the same clothes
-      _lookSpec: { build: _cs.build, skin: _cs.skin, shirt: _cs.torso, pants: _cs.legs, hair: _cs.hair, shoes: _cs.shoes, sleeve: _cs.shortSleeve ? _cs.skin : _cs.torso },
       // AGE is a first-class field on a person now. `child` is the fast read
       // every other system wants (systems/childsafe.js seals a child's hp
       // against all ~32 raw `.hp -=` sites off exactly this). Adults carry
@@ -7031,7 +7027,19 @@
       // brain/movement responsive without forcing its 16-20 mesh rig to draw.
       // Important actors remain visible regardless of distance; enterT owns
       // visibility while inside.
-      const vis = !p._spawnHidden && (renderImportant || d2 < VIS_D2);
+      // ...and a rig you are WATCHING never blinks out at the band's edge
+      // (GTA: people go only where the camera cannot see). Past VIS_D2 a drawn
+      // rig keeps drawing until the camera cannot see it (off the padded
+      // screen; asked at 4 Hz) or it is 1.6x the band out, a few pixels tall.
+      let vis = !p._spawnHidden && (renderImportant || d2 < VIS_D2);
+      if (vis) p._seenT = 0;
+      if (!vis && !p._spawnHidden && p.enterT <= 0 && p.group.visible !== false && d2 < VIS_D2 * 2.56) {
+        if ((p._seenT = (p._seenT || 0) - dt) <= 0) {
+          p._seenT = 0.25;
+          p._seenK = !CBZ.sightCanSee || CBZ.sightCanSee(p.pos.x, p.pos.y + 1, p.pos.z, 1);
+        }
+        vis = p._seenK !== false;
+      }
       if (p.enterT <= 0) p.group.visible = vis;
       // far rigs stop casting shadows (their shadow is sub-pixel anyway); flip
       // only on a threshold crossing so the per-frame cost is a single compare.
@@ -7245,53 +7253,4 @@
     }
   });
 
-  /* ---- FAR PEOPLE: a person exists out to the eye's fog ------------------
-     Owner 2026-10-11: nothing may appear or vanish inside the visible range.
-     A full 16-mesh rig draws inside the tier's band (45-110 m) and used to
-     simply blink out past it: a cop chasing you, a dealer on the corner,
-     anyone you were watching walked off the edge of the world at 95 m. Past
-     the band the SAME person is now drawn by the crowd's GPU humans (one
-     crowd-store group in frame mode): at their position and heading, walking
-     or standing as they are, in their own clothes (the rig's colours, kept on
-     the ped as _lookSpec), out to where a person is still a pixel inside the
-     fog (core/sight.js). The hand-over removes the rig's face and fingers,
-     a few pixels at 100 m. Not hit-tested here: shots and blasts reach the
-     real ped through peds.js as always. */
-  (function farPeople() {
-    if (!CBZ.onUpdate) return;
-    let FG = null, acc = 0;
-    const W = { walk: -1, idle: -1 };
-    CBZ.onUpdate(47.3, function (dt) {
-      acc += (dt && dt < 0.5 ? dt : 0.016);
-      if (acc < 0.2) return;
-      acc = 0;
-      const ST = CBZ.crowds, C = CBZ.crowdGPU, game = CBZ.game;
-      if (!ST || !ST.group || !C || !C.look || !CBZ.sightPersonRange) return;
-      const peds = CBZ.cityPeds;
-      const on = game && game.mode === "city" && peds && peds.length;
-      if (!FG || FG.gone) {
-        if (!on) return;
-        FG = ST.group({ name: "peds-far", kind: "street", who: "pedestrians", mode: "city", cap: 1024, maxDraw: 6000, own: true, moving: true, life: false, cutDt: 0.2, aff: "public" });
-        if (!FG) return;
-      }
-      if (W.walk < 0) { W.walk = ST.clip ? ST.clip("walk") : 0; W.idle = ST.clip ? ST.clip("idle") : 0; }
-      FG.begin();
-      if (on) {
-        const S = CBZ.sight(), R = CBZ.sightPersonRange(), R2 = R * R;
-        for (let i = 0; i < peds.length && FG.k < FG.cap; i++) {
-          const p = peds[i];
-          if (!p || !p.group || p.dead || p.inCar || p._parked || p._spawnHidden || p.enterT > 0 || !p._lookSpec) continue;
-          if (p.group.visible !== false) continue;                 // the rig draws itself
-          if (!p.group.parent) continue;                           // not in the world
-          const dx = p.pos.x - S.x, dz = p.pos.z - S.z, d2 = dx * dx + dz * dz;
-          if (d2 > R2) continue;
-          if (p._farLook == null) { try { p._farLook = C.look(p._lookSpec); } catch (e) { p._farLook = 0; } }
-          const yaw = p.group.rotation.y, spd = p.speed > 0.3 ? Math.min(6, p.speed) : 0;
-          const vx = Math.sin(yaw) * spd, vz = Math.cos(yaw) * spd;
-          FG.put(p.pos.x, p.pos.y, p.pos.z, yaw, p._farLook, spd ? W.walk : W.idle, (i * 0.137) % 1, spd ? spd * 0.7 : 0.25, 1, vx, vz);
-        }
-      }
-      FG.end(CBZ.camera || null);
-    });
-  })();
 })();

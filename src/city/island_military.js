@@ -816,6 +816,7 @@
     const host = {
       root: BASE, y: 0, worldY: 0, axisAligned: true, ladderRoot: root,
       groundName: "military-island-surface", dirt: "#6b5d44",
+      lodLights: "fort-brandt",        // the field's lights join the city's LOD lights (core/lodlights.js)
       toWorld: function (lx, lz) { return { x: CEN_X + lx, z: CEN_Z + lz }; },
       solid: function (lx, lz, w, d, y0, y1) { return col(CEN_X + lx, CEN_Z + lz, w, d, y0, y1); },
       // the enterable shells (HQ, barracks, crash-rescue, ops, guardhouse) are

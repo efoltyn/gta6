@@ -1280,6 +1280,7 @@
         lampPools.glow.instanceMatrix.needsUpdate = true;
       }
     }
+    if (s.lampIdx != null && CBZ.lodLights) CBZ.lodLights.kill("city-lamps", s.lampIdx);
     if (s.bulb) s.bulb.material = deadLampM;
     if (s.glow) s.glow.visible = false;
   }
@@ -2943,8 +2944,26 @@
       HWSET.lum = { set: HW.chunked("mast-luminaire", lumGeo, M, lumItems, { cast: true }).addTo(root), geo: lumGeo, mat: M, items: lumItems };
       const lenses = HW.chunked("lamp-lens", HW.lampLens(), headLampM, lampBulbSpots.map(function (sp) {
         return { x: sp.x + Math.sin(sp.ang) * LO.bulbZ, y: sp.y0 + LO.bellyY - 0.004, z: sp.z + Math.cos(sp.ang) * LO.bulbZ, ry: sp.ang };
-      }), { cast: false, receive: false, maxDist: { px: 0.5 } }).addTo(root);    // the lens's own size (core/sight.js)
+      // THE LENS IS A NEAR THING. A flat glass facing straight down is edge-on
+      // from any distance, so past ~250 m it drew nothing but its cells' draw
+      // calls; the lamp's far form is its LOD light (core/lodlights.js, below),
+      // which is fully up by 154 m. The cell gate measures to a cell's nearest
+      // point, so a lens is never gone before its light is in.
+      }), { cast: false, receive: false, maxDist: 250 }).addTo(root);
       lampPools.bulb = lenses;
+    }
+    // EVERY LAMP HEAD IS A LIGHT AT DISTANCE (core/lodlights.js): the kerb and
+    // mast lamps in lampIdx order (a shot-out lamp goes dark by that index,
+    // killLamp), then the town heads (towngen.js), which nobody shoots out.
+    if (CBZ.lodLights) {
+      const far = [];
+      for (const sp of lampBulbSpots) {
+        far.push({ x: sp.x + Math.sin(sp.ang) * LO.bulbZ, y: sp.y0 + LO.bulbY - 0.15, z: sp.z + Math.cos(sp.ang) * LO.bulbZ, c: 0xffd29a, s: 1.5, g: 10, f: 70 });
+      }
+      CBZ.lodLights.lights("city-lamps", far);
+      CBZ.lodLights.lights("town-lamps", (city._townLampHeads || []).map(function (t) {
+        return { x: t.x, y: t.y - 0.1, z: t.z, c: 0xffd29a, s: 1.3, g: 10, f: 60 };
+      }));
     }
     if (HW) {
       const items = [];

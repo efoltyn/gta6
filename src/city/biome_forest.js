@@ -1316,6 +1316,9 @@
       const leg = new THREE.Mesh(new THREE.CylinderGeometry(legR, legR, twH, 6), towerWoodA);
       leg.position.set(twX + o[0], twH / 2, twZ + o[1]);
       leg.castShadow = true; root.add(leg);
+      // the leg is the solid: under the deck is open ground you can walk
+      // through (this used to be one 8 x 8 m box, an invisible slab between legs)
+      CBZ.colliders.push({ minX: twX + o[0] - legR, maxX: twX + o[0] + legR, minZ: twZ + o[1] - legR, maxZ: twZ + o[1] + legR, y0: 0, y1: twH, ref: leg });
     });
     // deck
     const deckHalf = 4.25;
@@ -1326,7 +1329,6 @@
     tcab.position.set(twX, twH + 1.7, twZ); tcab.castShadow = true; root.add(tcab);
     const roof = new THREE.Mesh(new THREE.ConeGeometry(6, 2.4, 4), mat(0x3a2c1a));
     roof.rotation.y = Math.PI / 4; roof.position.set(twX, twH + 4.4, twZ); roof.castShadow = true; root.add(roof);
-    CBZ.colliders.push({ minX: twX - 4, maxX: twX + 4, minZ: twZ - 4, maxZ: twZ + 4, y0: 0, y1: 1.2 });
     if (CBZ.makeLabelSprite) {
       const ts = CBZ.makeLabelSprite("FIRE LOOKOUT");
       ts.position.set(twX, twH + 7, twZ); ts.scale.set(9, 2.2, 1); root.add(ts);

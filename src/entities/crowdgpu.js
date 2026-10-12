@@ -748,9 +748,7 @@
       }
       // counting sort by distance
       binCount.fill(0);
-      // a crowd stands out to where a person is still a pixel inside the
-      // eye's fog (core/sight.js, Gang City), never ends at a private radius
-      const maxD = Math.max(L.maxDraw, CBZ.sightPersonRange ? CBZ.sightPersonRange() : 0), maxD2 = maxD * maxD;
+      const maxD = L.maxDraw, maxD2 = maxD * maxD;
       let m = 0;
       for (let i = 0; i < n; i++) {
         const dx = sx[i] - cx, dz = sz[i] - cz, d2 = dx * dx + dz * dz;

@@ -602,6 +602,7 @@
         job: FAN_JOBS[(i * 7 + 3) % FAN_JOBS.length], kind: "civilian", archetype: "resident",
         aggr: 0.2 + ((i * 37) % 100) / 100 * 0.6, wealth: 0.3 + ((i * 13) % 40) / 100,
         face: yaw, armed: false, src: "speedway:fan",
+        allowVisibleSpawn: true,          // a hand-off: the GPU fan in this seat is already on screen (mob.js makeRig)
       }, lo));
     } catch (e) { ped = null; }
     if (!ped) return false;

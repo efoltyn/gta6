@@ -688,6 +688,7 @@
         }
       } catch (e) { console.error("[metro ground solve] " + id, e); }
     }
+    lodLights(M);
     // ---- tiles (no geometry yet: a near and a far mesh each) + trees
     M.fabric = null; M.ground = null; M.tiles = []; M.trees = [];
     const heavy = function () {
@@ -719,6 +720,31 @@
       if (job) job.noFree = true;                    // its meshes live under the city's own group, which stays
       else if (!F) heavy();
     } else heavy();
+  }
+
+  /* THE CITY'S LIGHTS AT DISTANCE (core/lodlights.js), from the plan, at
+     registration: every street lamp head the ground solve placed (the near
+     tile's instanced lamp: an 8.2 m pole, the head 2.25 m out along the
+     lamp's local +x, both scaled by its H) and a red aviation beacon on the
+     roof of every tower over 70 m (the spire's tip on a spired one). The
+     lit windows come from the far tiles as they are built (metro_fabric.js). */
+  function lodLights(M) {
+    const LL = CBZ.lodLights;
+    if (!LL) return;
+    const lamps = [];
+    for (const l of (M.solve && M.solve.lamps) || []) {
+      const c = Math.cos(l.yaw), s = Math.sin(l.yaw), k = l.H || 1;
+      lamps.push({ x: l.x + c * 2.25 * k, y: l.y + 8.2 * k, z: l.z - s * 2.25 * k, c: 0xffd29a, s: 1.5, g: 10, f: 70 });
+    }
+    LL.lights("metro-lamps:" + M.id, lamps);
+    const tops = [];
+    const hsh = CBZ.hash01 || function () { return 0.5; };
+    for (const b of M.plan.bldgs || []) {
+      if (!(b.h >= 70)) continue;
+      const tip = b.roof === "spire" && b.type === "tower" ? b.h + Math.max(28, 0.2 * b.h) + 11 : b.h + 1.6;
+      tops.push({ x: b.x, y: 0.16 + tip, z: b.z, c: 0xff2412, s: 1.3, g: 12, b: 0.6, p: hsh(b.x, b.z, 902), f: 45 });
+    }
+    LL.lights("metro-beacons:" + M.id, tops);
   }
 
   // THE COUNTRYSIDE: no regions (it owns no place), no roads of its own, no
