@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "e5da0658dd67c4994f31d09ba971d5fa9a85d2d1",
-  "createdAt": "2026-10-12T03:59:38.530Z",
+  "sourceCommit": "b82e506f3613241b2f334fb03773b2b1d2dbdbae",
+  "createdAt": "2026-10-12T04:02:43.323Z",
   "fileCount": 1374,
-  "totalBytes": 50554941,
+  "totalBytes": 50557471,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -1198,8 +1198,8 @@
     },
     {
       "file": "src/city/govcomplex.js",
-      "bytes": 167584,
-      "sha256": "6384e9a0ba1c9b221ce1cfd10490cd6c887c79d455a39a5e83481920002b203d"
+      "bytes": 167566,
+      "sha256": "fa7120c9e9a5c0483149b40f89cbdd7ff44ba18c0ed4323b3071995afeb11dea"
     },
     {
       "file": "src/city/gunmods.js",
@@ -1473,8 +1473,8 @@
     },
     {
       "file": "src/city/mode.js",
-      "bytes": 19818,
-      "sha256": "15199c41b266f60ebffce08887aab089b69b2ad9150d66d10a75e31026604527"
+      "bytes": 19894,
+      "sha256": "9a4d2669c0492550b75a20dcca20392af5d15dea3e0812de506281abe1d84635"
     },
     {
       "file": "src/city/modshop.js",
@@ -1533,8 +1533,8 @@
     },
     {
       "file": "src/city/orders.js",
-      "bytes": 18190,
-      "sha256": "c0dbfae9659b5f21e07ad9f5a847ca3e3f289440fb1b2f85de23d48badeee3b9"
+      "bytes": 18641,
+      "sha256": "f44e45cb08cc8e59af37c14019641002bb1608001837787a1ed92da1cc7dd4fd"
     },
     {
       "file": "src/city/origins.js",
@@ -1633,8 +1633,8 @@
     },
     {
       "file": "src/city/polity.js",
-      "bytes": 9662,
-      "sha256": "d911c8e50785b1108abaa8215db0d08c743fcaa5d2848cf2df835f19ba979250"
+      "bytes": 9703,
+      "sha256": "0314117e85fd2f48357e5f515132bc5bf0cdd2b110b1e87a3b793e8208bc9311"
     },
     {
       "file": "src/city/polwar.js",
@@ -1648,13 +1648,13 @@
     },
     {
       "file": "src/city/presidency.js",
-      "bytes": 95661,
-      "sha256": "e19c3fca6122776bf25971d8cdbcd4c2033ebaa00f592b095aba49c82baccb9c"
+      "bytes": 96156,
+      "sha256": "0f6ce342b93522721d7f7db5a1534148489f644fc29d836abdf3df880681894d"
     },
     {
       "file": "src/city/president_office.js",
-      "bytes": 75707,
-      "sha256": "ac89c307f9c2b18c86478adf9c834837a2ef63f195fb976e734e229679d458cf"
+      "bytes": 75789,
+      "sha256": "7bcf28d71471f0a6af5b0b534224f6c676765986c3c25759014a44f4554e61e8"
     },
     {
       "file": "src/city/president_public.js",
@@ -1693,8 +1693,8 @@
     },
     {
       "file": "src/city/protection.js",
-      "bytes": 58652,
-      "sha256": "2964f15e203bce68b6bcaa175e9ac68233e2bacdf466e4b86f0baae92f6f017c"
+      "bytes": 59572,
+      "sha256": "450ab428b1e4675a313c00c71ce4d346b023b0029fee49daa698f474412d3796"
     },
     {
       "file": "src/city/pullout.js",
@@ -1758,8 +1758,8 @@
     },
     {
       "file": "src/city/roleverbs.js",
-      "bytes": 17219,
-      "sha256": "2e13d29bde4d16903eb71dd226bf4b28747f4e8219ec2af086aac1badcf3f046"
+      "bytes": 17671,
+      "sha256": "a77a552e6d0b286e05db9de797a809505a1a85bf55feff3ded8111745e7c0aea"
     },
     {
       "file": "src/city/roofloot.js",
@@ -2133,8 +2133,8 @@
     },
     {
       "file": "src/core/daynight.js",
-      "bytes": 4021,
-      "sha256": "483d4d7830116f9b29b29ed562a6d41203f1de62540118f1320335c4fdb4be0a"
+      "bytes": 4092,
+      "sha256": "eca628079d852fc3280e24dcf8647d7e9d05a697e6c775944bfbe472c10b58a2"
     },
     {
       "file": "src/core/drawcheck.js",
@@ -6768,33 +6768,33 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 62910,
-      "sha256": "cf688805efd4e057a968bc26a7cbb010b40b655f0abf490eed11fa27a007d0c2"
+      "bytes": 62901,
+      "sha256": "4a7092f713978927bbae7989048a19e97962900240f8d80454c3d5b9485e733a"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 62953,
-      "sha256": "e4d326100f59859a1c5c921cb762f0cd4a9fd62f24da46dc20ba9a5f0964e574"
+      "bytes": 62944,
+      "sha256": "0b5bb909f3b4e2f19d523702bdf8b1043b33ba65374363ad69a5ab14f848a60a"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 62922,
-      "sha256": "85e9c809581366cc1798ff704e8b313db0fdd521eb2f2c2e1663f81399e6a0f3"
+      "bytes": 62913,
+      "sha256": "a31d90bb04d673160452f9ba6c65beca2aa1f83a7dc7b11f6be6b58c32d90864"
     },
     {
       "file": "gang-city.html",
-      "bytes": 62877,
-      "sha256": "5dd64da1f80d813adfb1aa4a02dc9673fe0ad1ee5570355c0744037c9f3a9eda"
+      "bytes": 62868,
+      "sha256": "a8000df75a2c88c1839eb148ee4c25799b1ce5dbf961ea84ed1058b3dd3eb20c"
     },
     {
       "file": "gun-game.html",
-      "bytes": 62899,
-      "sha256": "aa851011224cef4d1f14f91f23bad9f8702bcf4a1166d14be231a2d4ee85c2dc"
+      "bytes": 62890,
+      "sha256": "6e58586a3c74e36fcbf978115e774836c1c11a8879cb1d68f35707e706cda0f0"
     },
     {
       "file": "games/battle.html",
-      "bytes": 13586,
-      "sha256": "b436e18dcf98246c81086799a014bfca2436ffe0004d401089d1d447fdfb39e1"
+      "bytes": 13589,
+      "sha256": "797e8e88490a6fbf31472e39d84a0b57decbb14b12944ee9e0e3b9a97f03846b"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6803,8 +6803,8 @@
     },
     {
       "file": "games/bomb-survivor.html",
-      "bytes": 75970,
-      "sha256": "bb2cf5d566432d385e5fcfca0e8ac6ebc42cb8365fe3bbf2735d29d0461f126e"
+      "bytes": 75971,
+      "sha256": "604758896856d1eb0d00fa7fba839f486de823002f9fc291187f93a6c89cdc4e"
     },
     {
       "file": "games/dev.html",
@@ -6823,8 +6823,8 @@
     },
     {
       "file": "games/warlord.html",
-      "bytes": 73764,
-      "sha256": "18474b6eb57c7e709cbf0c11ab30ed1344113e8167860269bc219e890e234dae"
+      "bytes": 73765,
+      "sha256": "80c1174eb131ee5b7984a642ad049e2e2bdf4e6562d28c34bcfe504e36b68c43"
     },
     {
       "file": "thumbs/shark-sim.jpg",
