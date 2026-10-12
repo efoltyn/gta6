@@ -450,14 +450,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=memfit1008"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=sight1011"></script>
+<script src="src/core/slice.js?v=farcopy1013"></script>
 <!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
-<script src="src/core/sight.js?v=treelod1012m"></script>
+<script src="src/core/sight.js?v=farcopy1013"></script>
 <!-- the far night lights (GTA "LOD lights"): one sprite per real lamp, lit window, car, beacon and airfield light; three draws, to the horizon -->
 <script src="src/core/lodlights.js?v=lodlight1012"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=treelod1012"></script>
+<script src="src/core/citystream.js?v=farcopy1013"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -489,7 +489,7 @@ document.body.appendChild(b);}}catch(e){}})();
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
 <script src="src/world/vegetation.js?v=treelod1012"></script>
 <!-- one tree at every distance: near -> mid copy -> octahedral impostor, dithered crossfades (CBZ.treeLod) -->
-<script src="src/world/treelod.js?v=treelod1012"></script>
+<script src="src/world/treelod.js?v=farcopy1013"></script>
 <!-- where a tree meets the ground: instanced contact shade + mulch rings every
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
 <script src="src/world/treefoot.js?v=sight1011"></script>
@@ -1172,7 +1172,7 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=flicker1009b"></script>
-<script src="src/city/buildings.js?v=lodlight1012b"></script>
+<script src="src/city/buildings.js?v=farcopy1013"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1234,7 +1234,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/expansion.js?v=ground1001"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=sight1011"></script>
+<script src="src/city/worldmap.js?v=farcopy1013"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1308,7 +1308,7 @@ document.body.appendChild(b);}}catch(e){}})();
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
 <script src="src/city/settlements.js?v=pres0929b"></script>
-<script src="src/city/towngen.js?v=flagm1001"></script>
+<script src="src/city/towngen.js?v=farcopy1013"></script>
 <!-- THE ONE BET SLIP (city/betslip.js): every wager in the city is written on
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
@@ -1809,7 +1809,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=cpd1"></script>
 <script src="src/city/citytemplates.js?v=pres0929b"></script>
-<script src="src/city/minicities.js?v=layout2b"></script>
+<script src="src/city/minicities.js?v=farcopy1013"></script>
 <!-- REAL CITIES AT REAL SCALE (owner: "realistically large ... not just one mass of tall buildings"):
      metroplan.js is the pure urban planner (land value -> zoning -> arterials -> blocks -> parcels),
      metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
@@ -1821,13 +1821,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
 <script src="src/city/countryside.js?v=fortb1009"></script>
-<script src="src/city/metro_fabric.js?v=lodlight1012"></script>
+<script src="src/city/metro_fabric.js?v=farcopy1013"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
 <script src="src/city/metro_ground.js?v=ground1008c"></script>
-<script src="src/city/metro.js?v=lodlight1012"></script>
+<script src="src/city/metro.js?v=farcopy1013"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
@@ -2217,7 +2217,7 @@ document.body.appendChild(b);}}catch(e){}})();
      this keeps the "assets define before buildTown reads them" contract
      honest for any future eager caller. -->
 <script src="src/city/villagekit.js?v=fac1009"></script>
-<script src="src/city/countries.js?v=arsenal0930"></script>
+<script src="src/city/countries.js?v=farcopy1013"></script>
 <!-- REAL CASINOS — order-90 dress pass over every casino lot (mainland Golden
      Ace + composed town casinos): marquee/mast exterior, felt tables with
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after
@@ -2599,7 +2599,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/street_furniture.js?v=deslop1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>
 <script src="src/world/building_dress.js?v=roof1-st1"></script>
-<script src="src/core/farcull.js?v=farform1011m"></script>
+<script src="src/core/farcull.js?v=farcopy1013"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/losgrid.js?v=nukecost1013"></script>

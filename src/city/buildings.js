@@ -4941,7 +4941,8 @@
     // ASSEMBLY, NOT A BOX. Nothing else may treat this as an ownership edge;
     // it is a read-only back-pointer to a record this function already made.
     bgroup.userData.bld = built;
-    // ---- THE SHELL REGISTRY (read by core/farcull.js's distance skyline) ----
+    // ---- THE SHELL REGISTRY (read by city/metro.js BUILT: every shell's far
+    //      copy in the metro HLOD, and when the shell itself is in the scene) ----
     // WHAT BUILDINGS EXIST had only ever been answerable through `arena.lots`,
     // and a lot is an ECONOMY record — Zillow, shops, jobs, map POIs. Four
     // builders raise real shells and sell nothing, so they wrote no lot:

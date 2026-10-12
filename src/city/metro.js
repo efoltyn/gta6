@@ -1261,7 +1261,7 @@
   const BUILT = {
     M: null, arena: null, P: null, prep: null, group: null, mat: null, recs: [], grid: new Map(),
     tex: null, data: null, W: 256, H: 0, mapU: { value: null }, sizeU: { value: null }, dirty: false,
-    shellsSeen: 0, lotsN: -1, reach: 1400, ramp: new Set(), covered: new WeakSet(),
+    shellsSeen: 0, lotsN: -1, reach: 1400, ramp: new Set(), covered: new WeakMap(), byKey: new Map(),
     src: { shells: 0, plans: 0, replay: 0, lots: 0, late: 0 }, tries: 0,
   };
   const BUILT_READY_S = 0.5;
@@ -1270,7 +1270,7 @@
     if (BUILT.tex) { try { BUILT.tex.dispose(); } catch (e) {} }
     const i = STREAMED.indexOf(BUILT.M); if (i >= 0) STREAMED.splice(i, 1);
     BUILT.M = BUILT.arena = BUILT.P = BUILT.prep = BUILT.group = BUILT.tex = BUILT.data = null;
-    BUILT.recs = []; BUILT.grid.clear(); BUILT.ramp.clear(); BUILT.covered = new WeakSet();
+    BUILT.recs = []; BUILT.grid.clear(); BUILT.ramp.clear(); BUILT.covered = new WeakMap(); BUILT.byKey.clear();
     BUILT.shellsSeen = 0; BUILT.lotsN = -1; BUILT.H = 0; BUILT.tries = 0;
     BUILT.src = { shells: 0, plans: 0, replay: 0, lots: 0, late: 0 };
   }
@@ -1323,7 +1323,7 @@
     const rec = { x: r.x, z: r.z, w: r.w, d: r.d, grp: r.grp || null, lot: r.lot || null, ready: 0, gone: false, slot: BUILT.recs.length, fab: fabricOf(r) };
     BUILT.recs.push(rec);
     BUILT.grid.set(bgk(Math.round(r.x / 4), Math.round(r.z / 4)), rec);
-    if (rec.grp) BUILT.covered.add(rec.grp);
+    if (rec.grp) BUILT.covered.set(rec.grp, rec);
     BUILT.src[src]++;
     return rec;
   }
@@ -1362,7 +1362,9 @@
     if (D[o] !== r || D[o + 1] !== g) { D[o] = r; D[o + 1] = g; BUILT.dirty = true; }
   }
   function builtTileRec(tile) {
-    return { key: "built:" + tile.key, x0: tile.x0, z0: tile.z0, x1: tile.x1, z1: tile.z1, fab: tile, gnd: null, built: false, cols: null, bw: true };
+    const t = { key: "built:" + tile.key, x0: tile.x0, z0: tile.z0, x1: tile.x1, z1: tile.z1, fab: tile, gnd: null, built: false, cols: null, bw: true };
+    BUILT.byKey.set(tile.key, t);
+    return t;
   }
   // gather every building and lay the far plan (once per world)
   function builtBuild(A) {
@@ -1374,7 +1376,12 @@
     const lots = arenaLots(A);
     const lotOf = new Map();
     for (const lot of lots) if (lot && lot.building && lot.building.group) lotOf.set(lot.building.group, lot);
-    for (const b of shells) if (b && b.group && !b.park) builtPut(shellRec(b, lotOf.get(b.group)), "shells");
+    // (newest first: a streamed job that ran twice left its old shell in the
+    // registry, and the live one is the later)
+    for (let i = shells.length - 1; i >= 0; i--) {
+      const b = shells[i];
+      if (b && b.group && !b.park) builtPut(shellRec(b, lotOf.get(b.group)), "shells");
+    }
     BUILT.shellsSeen = shells.length;
     // the plans of towns whose builder may not have run
     for (const fn of CBZ.farPlans || []) {
@@ -1384,12 +1391,17 @@
     }
     // the manifest's measured records of skipped builders
     for (const r of CBZ.farReplay || []) builtPut({ x: +r.x, z: +r.z, y: +r.y || 0, w: +r.w, d: +r.d, h: +r.h, storeys: r.storeys, fh: r.fh, color: r.color, facade: r.facade, masonry: !!r.masonry }, "replay");
-    // lots whose shells are not built yet
+    // lots: a building some other builder raised (its own numbers), or a
+    // shell not built yet (the lot's footprint, height and future colour)
     for (const lot of lots) {
       const b = lot && lot.building;
-      if (!b || b.park || b.group) continue;
-      const w = +b.w || +lot.w, d = +b.d || +lot.d;
-      const rec = builtPut({ x: +lot.cx, z: +lot.cz, y: 0, w: w, d: d, h: +b.h, storeys: b.storeys, color: b.farWall != null ? b.farWall : b.sign, facade: "office" }, "lots");
+      if (!b || b.park) continue;
+      let rec;
+      if (b.group) rec = builtPut(shellRec(b, lot), "lots");
+      else {
+        const w = +b.w || +lot.w, d = +b.d || +lot.d;
+        rec = builtPut({ x: +lot.cx, z: +lot.cz, y: 0, w: w, d: d, h: +b.h, storeys: b.storeys, color: b.farWall != null ? b.farWall : b.sign, facade: "office" }, "lots");
+      }
       if (rec) rec.lot = lot;
     }
     if (!BUILT.recs.length) return false;
@@ -1416,7 +1428,6 @@
   function builtLate(b) {
     const rec = builtPut(shellRec(b, null), "late");
     if (!rec || !BUILT.prep) return;
-    BUILT.src.late = (BUILT.src.late || 0);
     BUILT.P.bldgs.push(rec.fab);
     builtTexture(BUILT.recs.length);
     const r = BUILT.prep.add(rec.slot);
@@ -1445,9 +1456,9 @@
     const shells = (root.userData && root.userData.shells) || [];
     for (let i = BUILT.shellsSeen; i < shells.length; i++) {
       const b = shells[i];
-      if (!b || !b.group || b.park) continue;
-      const rec = builtFind(Number.isFinite(b.ox) ? b.ox : 0, Number.isFinite(b.oz) ? b.oz : 0);
-      if (rec) { rec.grp = b.group; BUILT.covered.add(b.group); }
+      if (!b || !b.group || b.park || !Number.isFinite(b.ox) || !Number.isFinite(b.oz)) continue;
+      const rec = builtFind(b.ox, b.oz);
+      if (rec) { rec.grp = b.group; BUILT.covered.set(b.group, rec); }
       else builtLate(b);
     }
     BUILT.shellsSeen = shells.length;
@@ -1458,7 +1469,7 @@
       for (const lot of lots) {
         if (!lot || !lot.building || !isFinite(lot.cx)) continue;
         const rec = builtFind(+lot.cx, +lot.cz);
-        if (rec && !rec.lot) rec.lot = lot;
+        if (rec) rec.lot = lot;                      // the live record (a re-run job makes a new one)
       }
     }
     for (const rec of BUILT.recs) {
@@ -1490,8 +1501,14 @@
     const on = !!(f.farBuilt && !t.farEmpty) && rectDist(t, _cx, _cz) < BUILT.reach;
     if (f.far.visible !== on) f.far.visible = on;
   }
-  // core/farcull.js: a shell whose far copy is here may be dropped past the swap
-  CBZ.metroBuiltCovers = function (grp) { return !!(grp && BUILT.covered.has(grp)); };
+  // core/farcull.js: a shell whose far copy is drawn (its tile written) may
+  // be dropped past the swap
+  CBZ.metroBuiltCovers = function (grp) {
+    const rec = grp && BUILT.covered.get(grp);
+    if (!rec) return false;
+    const t = BUILT.byKey.get(Math.floor(rec.fab.x / TILE) + "," + Math.floor(rec.fab.z / TILE));
+    return !!(t && t.fab && t.fab.farBuilt && !t.farEmpty);
+  };
   function builtAudit() {
     if (!BUILT.M) return null;
     let ready = 0, gone = 0;
