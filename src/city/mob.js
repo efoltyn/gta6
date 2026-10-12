@@ -972,7 +972,7 @@
       if (cop) {
         const L = lineOf(i);
         if (L && (L.kind === "guard" || L.kind === "army") && CBZ.cityPostNpc) {
-          ped = CBZ.cityPostNpc(x, z, { job: "soldier", archetype: "military", kind: "security", armed: true, weapon: "Rifle", aggr: 0.3, face: ahd[i], src: "mob:guard" });
+          ped = CBZ.cityPostNpc(x, z, { job: "soldier", archetype: "military", kind: "security", armed: true, weapon: "Rifle", aggr: 0.3, face: ahd[i], src: "mob:guard", allowVisibleSpawn: true });
           if (ped) ped.organization = "military";
         } else if (CBZ.citySpawnCop) {
           ped = CBZ.citySpawnCop(x, z, false);
@@ -990,6 +990,13 @@
           job: JOBS[(h01(k, m.seed, 31) * JOBS.length) | 0], kind: "civilian", archetype: "resident", face: ahd[i],
           armed: false, aggr: arole[i] === ROLE.fighter ? 0.6 : 0.15 + m.violent * 0.2, wealth: 0.35 + h01(k, m.seed, 32) * 0.3,
           gender: abody[i] ? "f" : "m", skin: askin[i], outfit: ashirt[i], src: "mob:" + m.id,
+          // A HAND-OFF, NOT A SPAWN. This person is already on screen (the
+          // GPU human at this spot, hidden below the moment the rig exists).
+          // Minted spawn-hidden, the rig stayed invisible until the camera
+          // looked away (forever at 45-150 m, 1.2 s up close) while its body
+          // was solid: the front rows and the ring round the player were an
+          // invisible wall a few metres in front of the visible crowd.
+          allowVisibleSpawn: true,
         }, lo));
         if (ped && ped.char && G && alook[i] >= 0) {
           G.dressRig(ped.char, alook[i]);

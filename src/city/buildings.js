@@ -7491,9 +7491,17 @@
     v.position.set(lx, ly - minY, lz);                 // rest the wheels on the floor
     if (v.traverse) v.traverse(function (o) { if (o) o.castShadow = false; });   // scenery: no shadow cost
     b.group.add(v);
-    if (solid && CBZ.colliders) {                      // keep the parked car solid (footprint = length along z)
+    if (solid && CBZ.colliders) {
+      // the parked car is solid AS DRAWN: its 2.1 x 4.7 m footprint turned
+      // with the car (an unrotated box round a car at an angle was a slab of
+      // invisible wall off its corners and a gap through its nose)
       const bx = b.ox != null ? b.ox : 0, bz = b.oz != null ? b.oz : 0;
-      CBZ.colliders.push({ minX: bx + lx - 1.05, maxX: bx + lx + 1.05, minZ: bz + lz - 2.35, maxZ: bz + lz + 2.35, y0: ly, y1: ly + 1.5 });
+      const gy = (b.group.rotation && b.group.rotation.y) || 0, gc = Math.cos(gy), gs = Math.sin(gy);
+      const wx = bx + lx * gc + lz * gs, wz = bz - lx * gs + lz * gc, yaw = (rotY || 0) + gy;
+      const c = CBZ.orientedCollider ? CBZ.orientedCollider(wx, wz, 1.05, 2.35, yaw, ly, ly + 1.5)
+        : { minX: wx - 1.05, maxX: wx + 1.05, minZ: wz - 2.35, maxZ: wz + 2.35, y0: ly, y1: ly + 1.5 };
+      c.ref = v;
+      CBZ.colliders.push(c);
     }
     return true;
   }
