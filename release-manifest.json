@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "5300b18530cfc3e6df6cd1ed2bb8f9f3d77066cd",
-  "createdAt": "2026-10-12T02:34:51.207Z",
+  "sourceCommit": "0e6e4e2c0b301e100807e09c299e345d0388c31a",
+  "createdAt": "2026-10-12T02:35:58.470Z",
   "fileCount": 1372,
-  "totalBytes": 50462763,
+  "totalBytes": 50472861,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -1853,8 +1853,8 @@
     },
     {
       "file": "src/city/strategic.js",
-      "bytes": 72985,
-      "sha256": "fef3a790dc494f7e0f86027a6064437a04b1fa0fd83083da9367c85afaf67a88"
+      "bytes": 73642,
+      "sha256": "4c22cf694b664db8aaf7a2cf60df262c72d579bbb3fdbd169ecc2beb0fcae1f5"
     },
     {
       "file": "src/city/street_hardware.js",
@@ -3373,8 +3373,8 @@
     },
     {
       "file": "src/systems/seat_exit.js",
-      "bytes": 6670,
-      "sha256": "2f771f1e0b351d7807f6a8c667d3525e6ca87517ba8cafd786f9057615f935a0"
+      "bytes": 6864,
+      "sha256": "303896d88f3909879ce4fc746425098d084cecc069a4b7ecdc7a9e033bd6d38e"
     },
     {
       "file": "src/systems/settings.js",
@@ -3468,13 +3468,13 @@
     },
     {
       "file": "src/systems/touch_layout.js",
-      "bytes": 4855,
-      "sha256": "9bd6443410777df34f3a0b7268612dedb01e03d9f7f5756f9c295a8740b6f078"
+      "bytes": 8111,
+      "sha256": "35692d4218c336095a735e33977976dccb22ab12515c9050751a7911a22c1780"
     },
     {
       "file": "src/systems/touch_vehicle.js",
-      "bytes": 22282,
-      "sha256": "a861192f9f375d3c8831da0579a28caf47816a4c8bb0cbe018a760f9307b8b11"
+      "bytes": 26440,
+      "sha256": "e373213416f3f00722a27e2306782e2945e68a101a254b899f679684784a5235"
     },
     {
       "file": "src/systems/trauma.js",
@@ -4703,8 +4703,8 @@
     },
     {
       "file": "css/mobile.css",
-      "bytes": 17740,
-      "sha256": "c449d8978b78ec115d46c71ab1707a7a1494dceede6faae2413192c8478cd647"
+      "bytes": 19603,
+      "sha256": "2e9ba542acf873e96d42530ec0a0f8d4d521c64bc5179881722ee57f3f9722c8"
     },
     {
       "file": "css/screens.css",
@@ -6758,33 +6758,33 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 62687,
-      "sha256": "2f6b5e4bb1c612abb3aa236b83de0470b60118bd9fd5ebbe5006522f035e4812"
+      "bytes": 62682,
+      "sha256": "1bbeed6b9599e7b99e932c8b17f71fb468a9483da1f1ba7eaa623b2525c54995"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 62730,
-      "sha256": "f85672c038c9e9a8859fb35a1c33821096904900111f937c5de785c6bf83b2bb"
+      "bytes": 62725,
+      "sha256": "65b7dae0a3db35b6d47c5c32c3d1183e33e593227ac88c808bb0fa14230e2dec"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 62699,
-      "sha256": "d330500a3499bdc2f050549679069f98f9a23faf885da9416bc3fba550abdde5"
+      "bytes": 62694,
+      "sha256": "eb5966a1000ab07df62b777880573a16c49ab535795ca49c0814d576c56c640f"
     },
     {
       "file": "gang-city.html",
-      "bytes": 62654,
-      "sha256": "5074970a21435376177381361cf238a1166911efab2d7187a86a344aeaf806e9"
+      "bytes": 62649,
+      "sha256": "a5c01350391fc7de46ef745f1aaec7bc3d77e6c0e6fd4b22e63e266b90b0cc1d"
     },
     {
       "file": "gun-game.html",
-      "bytes": 62676,
-      "sha256": "826c987a2cdb4d1f00abd031fc58c8055e59df54ee42d330ecfd332d42f72231"
+      "bytes": 62671,
+      "sha256": "7fae4ba061231b8e02b5864fda0f1e1eb58122fe86d9d03b25087a5cf114bc45"
     },
     {
       "file": "games/battle.html",
-      "bytes": 13584,
-      "sha256": "449907fb5059f21d499ee8647ecedf7a8d243f6933cf6b17c62d1c84e0452631"
+      "bytes": 13581,
+      "sha256": "176eff44861a78cb97f1b02ec0376b63a96bbd7eca2a6fb16047ce2e0ca756a7"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6793,8 +6793,8 @@
     },
     {
       "file": "games/bomb-survivor.html",
-      "bytes": 75972,
-      "sha256": "0468b2fc99fd41e6244e95bed15587ade99eb81dbb332ac6e55eb6aad3c6837c"
+      "bytes": 75971,
+      "sha256": "c5b247cded39655dfd82ce3e5b136274819c370e8b2e7da5d4361328f854e3d4"
     },
     {
       "file": "games/dev.html",
@@ -6813,8 +6813,8 @@
     },
     {
       "file": "games/warlord.html",
-      "bytes": 73766,
-      "sha256": "e9ee012f6a86cbe6f132a1bdbd03d84d76352b326a101ef2059feb359eba1897"
+      "bytes": 73765,
+      "sha256": "af218ffca9f0896072450c0c1a1e1afab62aeadbd7c71d187aa26ed09da484b6"
     },
     {
       "file": "thumbs/shark-sim.jpg",
