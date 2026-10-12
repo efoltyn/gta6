@@ -1151,6 +1151,44 @@
   const buckets = new Map();
   let staticCount = 0, pieceSeq = 0;
   const dirtyQ = [];
+  // piece id -> the solid collider freeze() registered for it, so the piece's
+  // physics leaves with its picture (eviction, clear, clearNear) by an O(1)
+  // lookup and an in-place grid edit, never a city-wide collider scan.
+  const colOf = new Map();
+  // Evicted pieces' boxes leave in batches: one compaction of the city's
+  // collider array per batch, not per frame of a rubble stream. A batch waits
+  // at most half a second (a box under rubble already gone from view).
+  const lateCols = [];
+  let lateT = 0;
+  function flushLateCols() {
+    if (!lateCols.length) return;
+    const list = lateCols.splice(0, lateCols.length);
+    removeCols(list);
+  }
+  function dropCols(ids, late) {
+    if (!ids || !ids.size || !colOf.size) return;
+    const list = [];
+    for (const id of ids) { const c = colOf.get(id); if (c) { list.push(c); colOf.delete(id); } }
+    if (!list.length) return;
+    if (late) {
+      if (!lateCols.length) lateT = nowT;
+      for (let i = 0; i < list.length; i++) lateCols.push(list[i]);
+      return;
+    }
+    flushLateCols();
+    removeCols(list);
+  }
+  function removeCols(list) {
+    if (!list.length || !CBZ.colliders) return;
+    if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(list);
+    else {
+      const drop = new Set(list);
+      let w = 0; const cols = CBZ.colliders;
+      for (let i = 0; i < cols.length; i++) if (!drop.has(cols[i])) cols[w++] = cols[i];
+      cols.length = w;
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
+  }
   function bucketKey(owner, x, z, mat) {
     return (owner || "") + "|" + Math.floor(x / CELL) + "," + Math.floor(z / CELL) + "|" + mat.uuid;
   }
@@ -1179,6 +1217,9 @@
     const P = geo.attributes.position.array, N = geo.attributes.normal.array, U = geo.attributes.uv.array, C = geo.attributes.color.array;
     const id = ++pieceSeq;
     const pos = m.position;
+    // the buckets that will draw this piece: its own mesh retires as soon as
+    // they have all been rebuilt with it (see update)
+    b.bks = [];
     for (const g of groups) {
       const mat = mats[g.materialIndex || 0];
       const n = g.count, p = new Float32Array(n * 3), nn = new Float32Array(n * 3), u = new Float32Array(n * 2), c = new Float32Array(n * 3);
@@ -1196,6 +1237,7 @@
       if (!bk) { bk = { key, mat, root, parts: [], mesh: null, dirty: false, owner: b.owner }; buckets.set(key, bk); }
       bk.parts.push({ id, p, n: nn, u, c, x: pos.x, z: pos.z, t: nowT, perm: !!b.permanent });
       if (!bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
+      b.bks.push(bk);
     }
     // the height-field learns this piece's top so the next one piles on it
     _mm.compose(pos, m.quaternion, _one);
@@ -1219,6 +1261,7 @@
       // indexed in place: a full broadphase rebuild per settling piece was a
       // steady trickle of 142k-collider rebuilds for seconds after a blast
       CBZ.colliderAdd(col);
+      colOf.set(id, col);
     }
     staticCount++;
     b.pendingId = id;
@@ -1255,8 +1298,11 @@
     if (staticCount <= STATIC_CAP) return;
     let want = staticCount - STATIC_CAP + 20;
     const cand = [];
-    for (const bk of buckets.values()) for (const q of bk.parts) if (!q.perm) cand.push(q);
-    cand.sort((a, b) => (camD2(b.x, b.z) > 3600 ? 1 : 0) - (camD2(a.x, a.z) > 3600 ? 1 : 0) || a.t - b.t);
+    // out-of-view first, then oldest: the camera test is taken once per piece
+    // here, not twice per comparison inside the sort (this runs every frame a
+    // stream of rubble keeps the cap exceeded)
+    for (const bk of buckets.values()) for (const q of bk.parts) if (!q.perm) { q.far = camD2(q.x, q.z) > 3600 ? 1 : 0; cand.push(q); }
+    cand.sort((a, b) => b.far - a.far || a.t - b.t);
     const drop = new Set();
     for (const q of cand) { if (want-- <= 0) break; drop.add(q.id); }
     for (const bk of buckets.values()) {
@@ -1265,6 +1311,10 @@
       if (bk.parts.length !== before && !bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
     }
     staticCount = Math.max(0, staticCount - drop.size);
+    // An evicted piece is gone from the picture; its solid box used to stay in
+    // CBZ.colliders for the rest of the session (an invisible kerb where the
+    // rubble had been, and one more box on every city-wide collider walk).
+    dropCols(drop, true);
   }
 
   function retire(b) {
@@ -2136,8 +2186,26 @@
       if (!dirtyQ.length) {
         for (const b of frozenPending) retire(b);
         frozenPending.length = 0;
+      } else if (frozenPending.length) {
+        /* A frozen piece's own mesh stays up only until the buckets that draw
+           it have been rebuilt with it. It used to wait for the WHOLE queue to
+           empty, and a stream of fresh rubble (a nuke's teardown queue lays a
+           pile every frame, each eviction re-dirties more buckets) kept the
+           queue from ever emptying: every frozen piece stayed in the scene as
+           its own mesh, geometry and draw call on top of its merged copy for as
+           long as the stream lasted. Same picture: the merged copy already
+           draws it. */
+        let w = 0;
+        for (let i = 0; i < frozenPending.length; i++) {
+          const b = frozenPending[i], bk = b.bks;
+          let drawn = !!bk;
+          if (bk) for (let j = 0; j < bk.length; j++) if (bk[j].dirty) { drawn = false; break; }
+          if (drawn) retire(b); else frozenPending[w++] = b;
+        }
+        frozenPending.length = w;
       }
     }
+    if (lateCols.length && (lateCols.length >= 64 || nowT - lateT > 0.5)) flushLateCols();
     stepGrit(dt);
     stepDust(dt);
   }
@@ -2164,13 +2232,11 @@
     if (owner != null) { const ks = hfOwned.get(owner); if (ks) { for (const k of ks) hf.delete(k); hfOwned.delete(owner); } }
     else hfOwned.clear();
     staticCount = Math.max(0, staticCount - gone.size);
-    if (CBZ.colliders) {
-      let changed = false;
-      for (let i = CBZ.colliders.length - 1; i >= 0; i--) {
-        const c = CBZ.colliders[i];
-        if (c && c.debris && (owner == null || c.debrisOwner === owner)) { CBZ.colliders.splice(i, 1); changed = true; }
-      }
-      if (changed && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    {
+      // every solid box this owner's pieces registered (colOf), out in place
+      const ids = new Set();
+      colOf.forEach(function (c, id) { if (owner == null || c.debrisOwner === owner) ids.add(id); });
+      dropCols(ids);
     }
     if (owner != null && grit) {
       const zero = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -2229,14 +2295,7 @@
         if (dirty) v.im.instanceMatrix.needsUpdate = true;
       }
     }
-    if (CBZ.colliders) {
-      let changed = false;
-      for (let i = CBZ.colliders.length - 1; i >= 0; i--) {
-        const c = CBZ.colliders[i];
-        if (c && c.debris && gone.has(c.debrisId)) { CBZ.colliders.splice(i, 1); changed = true; }
-      }
-      if (changed && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    }
+    dropCols(gone);
     return n;
   }
   // a fresh scene (mode switch) drops the old pools: they belong to its scene

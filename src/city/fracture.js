@@ -147,6 +147,7 @@
   }
 
   function enqueueDefer(j) {
+    if (!deferQ.length) storeyFx = 3;      // a fresh event: its first gut bays pour dust
     for (let i = 0; i < deferQ.length; i++) {
       const d = deferQ[i];
       if (Math.abs(d.x - j.x) < DEFER_CELL && Math.abs(d.y - j.y) < DEFER_CELL && Math.abs(d.z - j.z) < DEFER_CELL) {
@@ -159,12 +160,25 @@
     deferQ.push(j);
   }
 
+  /* DRAINED ON A CLOCK, NOT ALL AT ONCE. One rocket queues one carve; a nuke's
+     front wounds up to eight buildings a frame and structural.js's stage skin
+     queues two to six bays for each, so "everything next frame" was dozens of
+     carve monoliths (geometry builds, merges, collider and glass edits) in one
+     frame, every frame the front advanced. The same carves land, in the same
+     order, a few frames apart. At least one per frame, so a lone blast is
+     exactly as before. */
+  const DEFER_BUDGET_MS = 4;
   function drainDefer() {
     if (!deferQ.length) return;
     if (!CBZ.cityCarveWall || !mayBreach() || !CBZ.colliders || !CBZ.colliders.length) { deferQ.length = 0; return; }
-    const todo = deferQ.splice(0, deferQ.length);
-    storeyFx = 3;
-    for (let i = 0; i < todo.length; i++) { try { carveNow(todo[i], false); } catch (e) {} }
+    const t0 = performance.now();
+    let k = 0;
+    while (k < deferQ.length) {
+      try { carveNow(deferQ[k], false); } catch (e) {}
+      k++;
+      if (performance.now() - t0 > DEFER_BUDGET_MS) break;
+    }
+    deferQ.splice(0, k);
   }
 
   // did a blast just land at a wall here? (cityBreach asks, so the same event

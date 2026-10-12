@@ -234,7 +234,173 @@
     return best;
   }
 
-  const api = { verbColumn: verbColumn, exitSlot: exitSlot, overlaps: overlaps, inside: inside };
+  /* ---- THE FLIGHT DECK --------------------------------------------------------
+     OWNER (iPad + iPhone, flying the B-2): "the bomb selection is very slop-
+     looking, and it's blocked by the turn-left button." Root cause: the flight
+     controls were two layouts that never knew about each other. The thumb
+     column (#tvBtns) was a CSS flex stack off the right edge, and the bomb rail
+     (#tvAux) was a second stack at a hard-coded right:140/bottom:142, written
+     for a column 128 px wide. The rudder pair is 178 px wide, so TURN L sat on
+     BOMB and the payload pill on every screen.
+
+     Now every flight control has ONE rect, computed here from ONE table, for
+     the helicopter and every fixed-wing aircraft alike. Each row of the table
+     says where a control goes ACROSS (against the right edge, left of another
+     control, centred over one) and then DROPS it from the bottom of the safe
+     area until it rests on nothing: no other control, not the stick, not any
+     other HUD rect the caller passes. Things stack the way they would in a
+     real cockpit panel instead of being nailed to pixel offsets.
+
+     Two tables: WIDE (one long bottom row; any screen with the width) and TALL
+     (two narrow columns; a phone held upright, where the stick owns the
+     bottom-left). Each is tried at the screen's own scale and then smaller,
+     and the first clean fit wins; if nothing is clean the least bad does.
+
+     o.W, o.H        viewport (CSS px)
+     o.safe          {top,right,bottom,left} safe-area insets
+     o.present       {id:true} which controls exist right now (see DECK_SIZE)
+     o.stores        number of cells in the stores strip
+     o.avoid         [rect] the stick and any other HUD the deck must not cover
+   -> { table, s, rects:{id:rect}, score }                                    */
+  // Sizes at scale 1 (an iPad). Every control is at least 44 px at the
+  // smallest scale the solver will use, Apple's minimum touch target.
+  const DECK_SIZE = {
+    pwrUp: { w: 100, h: 66 }, pwrDn: { w: 100, h: 66 },
+    yawL: { w: 76, h: 60 }, yawR: { w: 76, h: 60 },
+    fire: { w: 70, h: 70 }, bomb: { w: 70, h: 70 },
+    view: { w: 60, h: 48 }, dial: { w: 118, h: 118 },
+  };
+  const STORE_CELL = { w: 66, h: 46, gap: 3, pad: 3 };
+  const EXIT_SLOT = { w: 136, h: 56 };      // #tExit is not scaled; its slot is not either
+  // x rules: "R" against the right margin, "L" against the left margin,
+  // {left:[ids]} left of the leftmost present id, {over:[ids]} centred over
+  // the first present id, {flush:[ids]} right-aligned with it. y is always the
+  // drop; rows sharing `row` drop together and keep one bottom line. `floor`
+  // marks the thumb's resting row: if it cannot sit on the bottom margin the
+  // table does not fit this screen. `stack` drops from ON TOP of everything
+  // already in its column (the strip and the way out cap the cluster; they
+  // never wedge into a gap inside it).
+  const DECK_TABLES = {
+    wide: [
+      { id: "pwrUp", x: "R", floor: 1 },
+      { id: "yawR", x: { left: ["pwrUp"] }, floor: 1 },
+      { id: "yawL", x: { left: ["yawR"] }, floor: 1 },
+      { id: "dial", x: { left: ["yawL"] } },
+      { id: "pwrDn", x: { flush: ["pwrUp"] } },
+      { id: "fire", x: { over: ["yawR"] } },
+      { id: "bomb", x: { over: ["yawL"] } },
+      { id: "view", x: { over: ["dial"] } },
+      { id: "stores", x: "R", stack: 1 },
+      { id: "exit", x: "R", stack: 1 },
+    ],
+    tall: [
+      { id: "pwrUp", x: "R", floor: 1 },
+      { id: "fire", x: { left: ["pwrUp"] }, floor: 1 },
+      { id: "pwrDn", x: { flush: ["pwrUp"] } },
+      { id: "bomb", x: { over: ["fire"] } },
+      { id: "yawR", x: "R", row: "yaw" },
+      { id: "yawL", x: { left: ["yawR"] }, row: "yaw" },
+      { id: "view", x: "R" },
+      { id: "dial", x: "L" },
+      { id: "stores", x: "R", stack: 1 },
+      { id: "exit", x: "R", stack: 1 },
+    ],
+  };
+  function deckSize(id, s, nStores) {
+    if (id === "exit") return { w: EXIT_SLOT.w, h: EXIT_SLOT.h };
+    if (id === "stores") {
+      const n = Math.max(1, nStores | 0);
+      return {
+        w: Math.round((n * STORE_CELL.w + (n - 1) * STORE_CELL.gap + 2 * STORE_CELL.pad) * s),
+        h: Math.round((STORE_CELL.h + 2 * STORE_CELL.pad) * s),
+      };
+    }
+    const z = DECK_SIZE[id];
+    return { w: Math.round(z.w * s), h: Math.round(z.h * s) };
+  }
+  function solveDeck(o, name, s) {
+    const W = o.W, H = o.H, m = margins(o.safe && {
+      top: 10 + (o.safe.top || 0), right: 12 + (o.safe.right || 0),
+      bottom: 12 + (o.safe.bottom || 0), left: 12 + (o.safe.left || 0),
+    });
+    const gap = Math.round(10 * s);
+    const avoid = (o.avoid || []).filter(Boolean);
+    const present = o.present || {};
+    const rects = {}, placed = [];
+    const first = function (ids) { for (const id of ids) if (rects[id]) return rects[id]; return null; };
+    function xFor(e, w) {
+      if (e.x === "R") return W - m.right - w;
+      if (e.x === "L") return m.left;
+      if (e.x.left) {
+        let lo = Infinity;
+        for (const id of e.x.left) if (rects[id]) lo = Math.min(lo, rects[id].x);
+        return lo === Infinity ? W - m.right - w : lo - gap - w;
+      }
+      const r = first(e.x.over || e.x.flush);
+      if (!r) return W - m.right - w;
+      return e.x.over ? r.x + (r.w - w) / 2 : r.x + r.w - w;
+    }
+    // THE DROP: a group (one control, or a row that keeps one bottom line)
+    // starts on the bottom margin and rises past whatever is in the way
+    function drop(group, stack) {
+      const obst = placed.concat(avoid);
+      let yb = H - m.bottom;
+      if (stack) for (const r of group) for (const b of placed) {
+        if (r.x < b.x + b.w + gap && r.x + r.w + gap > b.x) yb = Math.min(yb, b.y - gap);
+      }
+      for (let guard = 0; guard < 64; guard++) {
+        let hit = null;
+        for (const r of group) {
+          r.y = yb - r.h;
+          for (const b of obst) if (overlaps(r, b, gap - 0.5) && (!hit || b.y < hit.y)) hit = b;
+        }
+        if (!hit) break;
+        yb = hit.y - gap;
+      }
+      for (const r of group) { r.y = yb - r.h; placed.push(r); }
+    }
+    const table = DECK_TABLES[name];
+    for (let i = 0; i < table.length; ) {
+      const row = table[i].row, stack = !!table[i].stack;
+      const group = [];
+      do {
+        const e = table[i++];
+        if (!present[e.id]) continue;
+        const z = deckSize(e.id, s, o.stores);
+        const r = { x: xFor(e, z.w), y: 0, w: z.w, h: z.h };
+        if (e.floor) r.floor = 1;
+        rects[e.id] = r; group.push(r);
+      } while (row && i < table.length && table[i].row === row);
+      if (group.length) drop(group, stack);
+    }
+    let score = 0;
+    const ids = Object.keys(rects);
+    for (let i = 0; i < ids.length; i++) {
+      const r = rects[ids[i]];
+      r.x = Math.round(r.x); r.y = Math.round(r.y);
+      if (!inside(r, W, H, m)) score += 1000;
+      if (r.floor) { if (r.y + r.h < H - m.bottom - 0.5) score += 300; delete r.floor; }
+      for (let j = i + 1; j < ids.length; j++) if (overlaps(r, rects[ids[j]], 2)) score += 100;
+      score += hits(r, avoid, 2) * 50;
+    }
+    return { table: name, s: s, rects: rects, score: score };
+  }
+  function flightDeck(o) {
+    // the screen's own scale: an iPad is 1, a phone ~0.8
+    const s0 = clamp(Math.min(o.W, o.H) / 480, 0.74, 1);
+    let best = null;
+    // a narrow screen (a phone held upright) tries the two-column table first
+    for (const name of (o.W < 600 ? ["tall", "wide"] : ["wide", "tall"])) {
+      for (let s = s0; s >= 0.7 - 1e-6; s -= 0.04) {
+        const r = solveDeck(o, name, +s.toFixed(3));
+        if (r.score === 0) return r;
+        if (!best || r.score < best.score) best = r;
+      }
+    }
+    return best;
+  }
+
+  const api = { verbColumn: verbColumn, exitSlot: exitSlot, flightDeck: flightDeck, STORE_CELL: STORE_CELL, overlaps: overlaps, inside: inside };
   if (typeof module === "object" && module && module.exports) module.exports = api;
   if (root) {
     const CBZ = root.CBZ || (root.CBZ = {});

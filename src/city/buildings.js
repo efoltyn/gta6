@@ -967,19 +967,41 @@
     if (winOpenQ.length >= WINOPENQ_CAP || winOpenQ.indexOf(gp) !== -1) return;
     winOpenQ.push(gp);
   }
+  /* A WIDE SHATTER BREAKS OVER A FEW FRAMES. Every burst is a real fracture
+     of the pane into shards (debris.js), and a big radius — a nuke's pressure
+     receipts, a collapse's ground impact, a tornado — selects up to 51 panes,
+     so 51 fractures used to run inside one frame. The first BURST_NOW break
+     on the call (every small event is exactly as before); the rest queue and
+     break within the next frames under a time budget, in the same order. */
+  const BURST_NOW = 8, BURST_BUDGET_MS = 3;
+  const burstQ = [];
+  function drainBursts() {
+    const t0 = performance.now();
+    let k = 0;
+    while (k < burstQ.length) {
+      const it = burstQ[k++];
+      it.gp._burstQ = false;
+      try { burstPane(it.gp, it.hit); } catch (e) {}
+      if (k >= BURST_NOW && performance.now() - t0 > BURST_BUDGET_MS) break;
+    }
+    burstQ.splice(0, k);
+  }
+  function dropBursts() { for (const it of burstQ) it.gp._burstQ = false; burstQ.length = 0; }
   CBZ.cityShatter = function (x, z, r, opts) {
     opts = opts || {};
     const r2 = r * r; let n = 0, near = null, nearD = 1e9;
     const cand = [];   // window-sized in-radius panes eligible to carve an opening
     for (let i = 0; i < cityGlass.length; i++) {
-      const gp = cityGlass[i]; if (gp.shattered) continue;
+      const gp = cityGlass[i]; if (gp.shattered || gp._burstQ) continue;
       const dx = gp.x - x, dz = gp.z - z, dd = dx * dx + dz * dz;
       if (dd <= r2) {
         // gather BEFORE bursting (burstPane marks shattered): pooled (no mesh),
         // above the sill, window-sized — so we open windows, not transoms
         if (!gp.mesh && gp.y > 1.0 && Math.max(gp.hw, gp.hd) * 2 >= 0.7) cand.push({ gp, dd });
         { const d = Math.sqrt(dd) || 1, fall = Math.max(0.35, 1.6 - d / Math.max(1, r));
-          burstPane(gp, { x: gp.x, y: gp.y, z: gp.z, dx: (gp.x - x) / d, dz: (gp.z - z) / d, power: Math.min(2.2, fall * (opts.power || 1.2)) }); }
+          const hit = { x: gp.x, y: gp.y, z: gp.z, dx: (gp.x - x) / d, dz: (gp.z - z) / d, power: Math.min(2.2, fall * (opts.power || 1.2)) };
+          if (n < BURST_NOW) burstPane(gp, hit);
+          else { gp._burstQ = true; burstQ.push({ gp: gp, hit: hit }); } }
         if (dd < nearD) { nearD = dd; near = gp; } if (++n > 50) break;
       }
     }
@@ -1142,6 +1164,7 @@
   CBZ.cityGlassReset = function () {
     shatteredPanes = 0; shatteredList.length = 0;
     winOpenQ.length = 0;   // never carve a fresh arena from a stale pre-reset queue
+    dropBursts();
     /* CBZ.CONFIG.DEMO_FAST_PURGE (declared in city/demolition.js, which loads
        after this file — so it is read here at CALL time, never at parse time,
        and an absent demolition.js simply leaves it undefined => legacy path).
@@ -1763,6 +1786,27 @@
   // something else nearby" without walking the scene graph.
   CBZ.cityBreachAudit = function () { return Object.assign({ live: cityBreaches.length }, carveDbg); };
 
+  const _carveNear = [], _carveLip = [], _carveClr = [], _carveRef = [];   // carveHole's broadphase scratch
+  const _refBox = new THREE.Box3();
+  /* Does any live collider still carry this mesh? Its boxes lie on the mesh,
+     so the grid cells under the mesh's own world bounds (+2 m) hold every one
+     of them; the old answer walked the whole city per swept box. */
+  function refStillCarried(ref) {
+    if (CBZ.queryCollidersNear) {
+      try {
+        _refBox.setFromObject(ref);
+        if (!_refBox.isEmpty()) {
+          const cx = (_refBox.min.x + _refBox.max.x) / 2, cz = (_refBox.min.z + _refBox.max.z) / 2;
+          const rad = Math.max(_refBox.max.x - _refBox.min.x, _refBox.max.z - _refBox.min.z) / 2 + 2;
+          const list = CBZ.queryCollidersNear(cx, cz, rad, _carveRef);
+          for (let k = 0; k < list.length; k++) if (list[k].ref === ref) return true;
+          return false;
+        }
+      } catch (e) {}
+    }
+    for (let k = 0; k < CBZ.colliders.length; k++) if (CBZ.colliders[k].ref === ref) return true;
+    return false;
+  }
   function carveHole(x, y, z, r, opts) {
     opts = opts || {};
     r = r || 1.2;
@@ -1780,8 +1824,15 @@
     // --- nearest WALL box whose y-span contains the hit ---
     const sr = opts.search != null ? opts.search : 2.6, sr2 = sr * sr;
     let best = null, bestD = 1e9, bestY0 = 0, bestY1 = 0, bestSy0 = 0, bestSy1 = 0;
-    for (let i = 0; i < CBZ.colliders.length; i++) {
-      const c = CBZ.colliders[i];
+    /* THE BROADPHASE, NOT THE CITY. Every box that can pass the `dd > sr2`
+       reach test below lies in the collider grid's cells under (x,z) +- sr
+       (systems/physics.js files each box into every cell it reaches), so the
+       candidates are those cells' boxes, not a walk of all ~142k. A nuke
+       carves a wound into every building its front wounds, several bays each:
+       that was one full city walk per bay (plus the lip walk below). */
+    const near = CBZ.queryCollidersNear ? CBZ.queryCollidersNear(x, z, sr + 0.01, _carveNear) : CBZ.colliders;
+    for (let i = 0; i < near.length; i++) {
+      const c = near[i];
       if (!c.ref) continue;                                 // no mesh: nothing to hide or remnant
       // THE PERIMETER HOLDS. A wall the world declares un-breachable is not a
       // candidate at any radius — see world/yard.js. The blast still scars,
@@ -2016,10 +2067,15 @@
     const v0Lip = v0;
     if (walkOpen && v0 > 0.02) {
       let openBottom = v0;
+      // the boxes under the opening in this wall plane, from the grid (the
+      // same set the old whole-city walk could ever accept)
+      const lipU = (u0 + u1) / 2, lipR = Math.max((u1 - u0) / 2, thick / 2 + 0.35) + 0.1;
+      const lipList = CBZ.queryCollidersNear
+        ? CBZ.queryCollidersNear(horiz ? lipU : fixed, horiz ? fixed : lipU, lipR, _carveLip) : CBZ.colliders;
       for (let pass = 0; pass < 4; pass++) {
         let stepTo = null;
-        for (let i = 0; i < CBZ.colliders.length; i++) {
-          const o = CBZ.colliders[i];
+        for (let i = 0; i < lipList.length; i++) {
+          const o = lipList[i];
           if (o === c || !o || !o.ref || o.y0 == null || o.y1 == null || o.noBreach) continue;
           const oF = horiz ? (o.minZ + o.maxZ) / 2 : (o.minX + o.maxX) / 2;
           if (Math.abs(oF - fixed) > thick / 2 + 0.35) continue;      // in this wall, not behind it
@@ -2057,7 +2113,11 @@
     // slice there too (visible=false only silences the already-hidden original).
     wall.visible = false;
     if (CBZ.batchWallHide) CBZ.batchWallHide(wall);
-    if (CBZ.losBlockers) { const li = CBZ.losBlockers.indexOf(wall); if (li >= 0) { CBZ.losBlockers.splice(li, 1); rec.wallWasLos = true; } }
+    // (in place: core/losgrid.js keeps its grid instead of rebuilding ~17k walls)
+    if (CBZ.losBlockers) {
+      if (CBZ.losRemoveMany) { if (CBZ.losRemoveMany([wall])) rec.wallWasLos = true; }
+      else { const li = CBZ.losBlockers.indexOf(wall); if (li >= 0) { CBZ.losBlockers.splice(li, 1); rec.wallWasLos = true; } }
+    }
 
     // --- SURVIVING REMNANTS: full-height flanks either side of the gap plus
     //     partial-height sill/header boxes across it (parented to the building
@@ -2082,7 +2142,7 @@
       rec.extras.push(m);
       const col = { minX: wx - bw / 2, maxX: wx + bw / 2, minZ: wz - bd / 2, maxZ: wz + bd / 2, ref: m, y0: ry0, y1: ry1 };
       CBZ.colliderAdd(col); rec.remnCols.push(col);
-      if (rec.wallWasLos && CBZ.losBlockers) CBZ.losBlockers.push(m);
+      if (rec.wallWasLos && CBZ.losBlockers) { if (CBZ.losAdd) CBZ.losAdd(m); else CBZ.losBlockers.push(m); }
     }
     /* The neighbour form of addRemnant: hide a course that runs past the
        opening and rebuild the surviving run(s) from its OWN band, material and
@@ -2181,8 +2241,15 @@
     rec.clippedCols = [];      // {c, minX, maxX, minZ, maxZ} originals to restore
     rec.hidRefs = [];          // meshes hidden because they sat inside the hole
     const planeTol = thick / 2 + 0.35;   // "in this wall", not "behind it"
-    for (let oi = CBZ.colliders.length - 1; oi >= 0; oi--) {
-      const o = CBZ.colliders[oi];
+    // Only boxes in this wall plane across the opening can be swept: they are
+    // the grid's boxes around it (a snapshot, so the edits below never skip
+    // or revisit one), not a reverse walk of all ~142k.
+    const clrU = (u0 + u1) / 2, clrR = Math.max((u1 - u0) / 2, planeTol) + 0.1;
+    const clrList = CBZ.queryCollidersNear
+      ? CBZ.queryCollidersNear(horiz ? clrU : fixed, horiz ? fixed : clrU, clrR, _carveClr).slice()
+      : CBZ.colliders.slice();
+    for (let ci = clrList.length - 1; ci >= 0; ci--) {
+      const o = clrList[ci], oi = undefined;
       if (o === c || !o || rec.remnCols.indexOf(o) >= 0) continue;
       // A WALL THAT REFUSES TO BE BREACHED ALSO REFUSES TO BE DELETED BY ITS
       // NEIGHBOUR'S BREACH. Caught by tools/mode-engine-check.mjs the first run
@@ -2220,9 +2287,7 @@
           shedBox(oU0, oU1, o.y0, o.y1, o.ref.material);          // it went; it falls
         }
         if (o.ref && o.ref.visible !== false && o.ref !== wall) {
-          let shared = false;
-          for (let k = 0; k < CBZ.colliders.length && !shared; k++) if (CBZ.colliders[k].ref === o.ref) shared = true;
-          if (!shared) { o.ref.visible = false; rec.hidRefs.push(o.ref); }
+          if (!refStillCarried(o.ref)) { o.ref.visible = false; rec.hidRefs.push(o.ref); }
         }
         continue;
       }
@@ -2598,7 +2663,7 @@
       minZ: g.horiz ? g.fixed - g.thick / 2 : g.u0, maxZ: g.horiz ? g.fixed + g.thick / 2 : g.u1,
       ref: board, y0: g.v0, y1: g.v1 };
     CBZ.colliderAdd(col); rec.remnCols.push(col);
-    if (CBZ.losBlockers) CBZ.losBlockers.push(board);
+    if (CBZ.losBlockers) { if (CBZ.losAdd) CBZ.losAdd(board); else CBZ.losBlockers.push(board); }
   };
 
   // ---- SHOT-OUT WINDOWS YOU CAN CLIMB THROUGH -----------------------------
@@ -2861,6 +2926,7 @@
     if (CBZ.game.mode !== "city") {
       if (glassNightOn) CBZ.cityGlassNight(false);
       if (winOpenQ.length) winOpenQ.length = 0;   // arena gone — drop queued window carves
+      if (burstQ.length) dropBursts();
       return;
     }
     // fold any freshly-registered panes into instanced pools (first city frame
@@ -2877,6 +2943,7 @@
     for (let wq = WINOPEN_BUDGET; wq > 0 && winOpenQ.length; wq--) {
       try { tryWindowOpening(winOpenQ.shift()); } catch (e) {}
     }
+    if (burstQ.length) drainBursts();          // the wide shatters' remaining panes
     // the dusk/dawn LIT-PANE flip — the same hysteresis thresholds as
     // view.js's emissive night pass so the whole night look lands together.
     const n = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;

@@ -48,7 +48,7 @@
   if (CBZ.CONFIG && CBZ.CONFIG.LOS_GRID == null) CBZ.CONFIG.LOS_GRID = true;
 
   const CELL = 24;                 // world units per grid cell (city blocks ~18-30u)
-  let builtFor = null, builtLen = 0, dirty = true;
+  let builtFor = null, builtLen = 0, dirty = true, buildId = 0;
 
   // packed blocker data (parallel arrays — cache-friendly slab tests)
   let n = 0;
@@ -114,39 +114,54 @@
     return false;
   }
 
+  // a blocker the fast path mirrors exactly: an axis-aligned FrontSide box
+  function gridOk(m) {
+    const mat = Array.isArray(m.material) ? m.material[0] : m.material;
+    const geoOk = m.geometry.parameters && m.geometry.parameters.width != null; // Box(Buffer)Geometry
+    const sideOk = !mat || (mat.side || 0) === 0;   // FrontSide only
+    return geoOk && sideOk && isIdentityRot(m.matrixWorld) && !isMover(m);
+  }
+  // bake one gridded blocker into slot n and file it into its cells
+  function fileGrid(m) {
+    const g = m.geometry;
+    if (!g.boundingBox) g.computeBoundingBox();
+    _box.copy(g.boundingBox).applyMatrix4(m.matrixWorld);
+    const j = n++;
+    objs[j] = m;
+    m._losJ = j; m._losB = buildId;
+    minX[j] = _box.min.x; minY[j] = _box.min.y; minZ[j] = _box.min.z;
+    maxX[j] = _box.max.x; maxY[j] = _box.max.y; maxZ[j] = _box.max.z;
+    const cx0 = Math.floor(_box.min.x / CELL), cx1 = Math.floor(_box.max.x / CELL);
+    const cz0 = Math.floor(_box.min.z / CELL), cz1 = Math.floor(_box.max.z / CELL);
+    for (let cx = cx0; cx <= cx1; cx++) {
+      for (let cz = cz0; cz <= cz1; cz++) {
+        const k = cx * 100003 + cz;
+        let arr = cells.get(k);
+        if (!arr) { arr = []; cells.set(k, arr); }
+        arr.push(j);
+      }
+    }
+  }
+  // Slots kept free past the built length, so a carve's remnant flanks or a
+  // plywood board can be appended in place (losAdd) instead of re-arming a
+  // whole-grid rebuild.
+  const SPARE = 1024;
+  let capN = 0;
   function build(blk) {
-    builtFor = blk; builtLen = blk.length; dirty = false;
+    builtFor = blk; builtLen = blk.length; dirty = false; buildId++;
     n = 0; objs.length = 0; exact.length = 0; cells = new Map();
-    const cap = blk.length;
+    const cap = blk.length + SPARE;
+    capN = cap;
     minX = new Float64Array(cap); minY = new Float64Array(cap); minZ = new Float64Array(cap);
     maxX = new Float64Array(cap); maxY = new Float64Array(cap); maxZ = new Float64Array(cap);
     for (let i = 0; i < blk.length; i++) {
       const m = blk[i];
       if (!m || !m.geometry) continue;
       m.updateWorldMatrix(true, false);
-      const mat = Array.isArray(m.material) ? m.material[0] : m.material;
-      const geoOk = m.geometry.parameters && m.geometry.parameters.width != null; // Box(Buffer)Geometry
-      const sideOk = !mat || (mat.side || 0) === 0;   // FrontSide only
-      if (!geoOk || !sideOk || !isIdentityRot(m.matrixWorld) || isMover(m)) { exact.push(m); continue; }
-      const g = m.geometry;
-      if (!g.boundingBox) g.computeBoundingBox();
-      _box.copy(g.boundingBox).applyMatrix4(m.matrixWorld);
-      const j = n++;
-      objs[j] = m;
-      minX[j] = _box.min.x; minY[j] = _box.min.y; minZ[j] = _box.min.z;
-      maxX[j] = _box.max.x; maxY[j] = _box.max.y; maxZ[j] = _box.max.z;
-      const cx0 = Math.floor(_box.min.x / CELL), cx1 = Math.floor(_box.max.x / CELL);
-      const cz0 = Math.floor(_box.min.z / CELL), cz1 = Math.floor(_box.max.z / CELL);
-      for (let cx = cx0; cx <= cx1; cx++) {
-        for (let cz = cz0; cz <= cz1; cz++) {
-          const k = cx * 100003 + cz;
-          let arr = cells.get(k);
-          if (!arr) { arr = []; cells.set(k, arr); }
-          arr.push(j);
-        }
-      }
+      if (!gridOk(m)) { exact.push(m); continue; }
+      fileGrid(m);
     }
-    stamps = new Uint32Array(n);
+    stamps = new Uint32Array(cap);
     stamp = 0;
     exAabb = new Float64Array(exact.length * 6);
     exMat = new Float64Array(exact.length * 16);
@@ -300,7 +315,7 @@
     if (!arr) return nHits;
     for (let i = 0; i < arr.length; i++) {
       const j = arr[i];
-      if (stamps[j] === stamp) continue;
+      if (stamps[j] === stamp || objs[j] === null) continue;   // null: removed in place (losRemoveMany)
       stamps[j] = stamp;
       const t = slab(j, ox, oy, oz, dx, dy, dz, near, far);
       if (t < 0) continue;
@@ -381,4 +396,48 @@
   };
 
   CBZ.losGridDirty = function () { dirty = true; };
+
+  /* REMOVE IN PLACE. A building teardown (city/structural.js hideReal,
+     city/demolition.js) drops its walls from CBZ.losBlockers; the length
+     change used to re-derive the whole grid (~17k meshes: a world-matrix walk,
+     a Box3 and six fresh Float64Arrays) on the next cast, and a nuke tears a
+     building down every frame for seconds. A gridded blocker is simply retired
+     from its slot (the cell walk skips a null slot), so the grid stays the
+     answer a rebuild would give. An `exact`-list member still forces the lazy
+     rebuild (that list is the movers and odd shapes: walls never are). */
+  /* APPEND IN PLACE: push one blocker onto CBZ.losBlockers and, when the grid
+     is current, file it into a spare slot. Anything the fast path cannot
+     mirror (a mover, a rotated or non-box mesh) or a full spare pool re-arms
+     the lazy rebuild exactly as a plain push did. */
+  CBZ.losAdd = function (m) {
+    const blk = CBZ.losBlockers;
+    if (!blk || !m) return;
+    const inSync = !dirty && blk === builtFor && blk.length === builtLen;
+    blk.push(m);
+    if (!inSync) return;
+    if (m.geometry) {
+      m.updateWorldMatrix(true, false);
+      if (n >= capN || !gridOk(m)) { dirty = true; return; }
+      fileGrid(m);
+    }
+    builtLen = blk.length;
+  };
+  CBZ.losRemoveMany = function (list) {
+    const blk = CBZ.losBlockers;
+    if (!blk || !list || !(list.length || list.size)) return 0;
+    const drop = list instanceof Set ? list : new Set(list);
+    const inSync = !dirty && blk === builtFor && blk.length === builtLen;
+    let w = 0, removed = 0;
+    for (let i = 0; i < blk.length; i++) {
+      const m = blk[i];
+      if (!drop.has(m)) { blk[w++] = m; continue; }
+      removed++;
+      if (!inSync) continue;
+      if (m && m._losB === buildId && objs[m._losJ] === m) objs[m._losJ] = null;
+      else dirty = true;                                      // an exact-list member
+    }
+    blk.length = w;
+    if (inSync && !dirty) builtLen = w;
+    return removed;
+  };
 })();

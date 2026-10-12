@@ -1427,6 +1427,30 @@
      this file simply not being loaded degrades to the old behaviour. */
   CBZ.structuralPurge = purge;
 
+  /* TAKE A BUILDING OUT OF THE WORLD'S THREE INDICES IN PLACE. The teardown
+     used to compact the shared arrays and then call markCollidersDirty(), and
+     the LOS and platform grids re-armed on the length change, so the NEXT
+     query rebuilt all three from scratch: the ~142k-box collider grid (tens of
+     ms and a few MB of fresh bucket arrays), every platform and every ~17k LOS
+     wall. A nuke's condemnation queue tears a building down every frame for
+     seconds, so that was three city-wide rebuilds a frame for the whole queue.
+     The bulk removers (systems/physics.js, core/losgrid.js) unfile just this
+     building's boxes and leave each grid exactly as a rebuild would make it.
+     Published for city/demolition.js (resolved lazily there: it loads first). */
+  function takeOut(cols, plats, los) {
+    if (cols && cols.size) {
+      if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(cols);
+      else { purge(CBZ.colliders, cols); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+    }
+    if (plats && plats.size) {
+      if (CBZ.platformRemoveMany) CBZ.platformRemoveMany(plats); else purge(CBZ.platforms, plats);
+    }
+    if (los && los.size) {
+      if (CBZ.losRemoveMany) CBZ.losRemoveMany(los); else purge(CBZ.losBlockers, los);
+    }
+  }
+  CBZ.structuralTakeOut = takeOut;
+
   function hideReal(rec) {
     const b = rec.b;
     try {
@@ -1447,10 +1471,8 @@
         dr.demolished = true;
         if (dr.colIn) { deadCols.add(dr.col); dr.colIn = false; }
       }
-      purge(CBZ.colliders, deadCols);
-      purge(CBZ.platforms, deadPlats);
-      purge(CBZ.losBlockers, deadLos);
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      takeOut(deadCols, deadPlats, deadLos);
+      b._tornDown = true;              // demolition.destroy() must not pay this again
     } catch (e) {}
     killInside(rec);
   }

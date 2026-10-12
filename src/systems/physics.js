@@ -130,9 +130,10 @@
     for (let i = 0; i < list.length; i++) { cols.push(list[i]); if (sync) gridInsert(list[i]); }
     if (sync) colCount = cols.length;
   };
+  // `list` may be an array or a Set (a building teardown already holds one).
   CBZ.colliderRemoveMany = function (list) {
-    if (!list || !list.length) return;
-    const cols = CBZ.colliders, sync = gridInSync(), drop = new Set(list);
+    if (!list || !(list.length || list.size)) return 0;
+    const cols = CBZ.colliders, sync = gridInSync(), drop = list instanceof Set ? list : new Set(list);
     let w = 0, n = 0;
     for (let i = 0; i < cols.length; i++) { const c = cols[i]; if (drop.has(c)) { n++; if (sync && !gridRemove(c, cellRange(c))) colDirty = true; } else cols[w++] = c; }
     cols.length = w;
@@ -2180,6 +2181,63 @@
      prop's NEW position looks in a cell the record was never filed under and
      finds nothing. Same fix, same name, same one-liner as markCollidersDirty. */
   CBZ.markPlatformsDirty = function () { platDirty = true; };
+  /* BULK EDITS IN PLACE, the platform twin of colliderRemoveMany/AddMany. A
+     building teardown (city/structural.js hideReal, city/demolition.js) takes
+     its floors, roofs and stairs out of CBZ.platforms; the length change above
+     then re-bucketed EVERY platform in the city on the next query, and a nuke
+     tears a building down every frame for seconds. These touch only the cells
+     the removed/added records cover and leave each bucket in array order, so
+     the grid is the one a full rebuild would make. A stale grid falls back to
+     the lazy rebuild. */
+  function platInSync() { return !platDirty && platCount === CBZ.platforms.length; }
+  function platRange(p) {
+    return [Math.floor(p.minX / PLAT_CELL), Math.floor(p.maxX / PLAT_CELL),
+            Math.floor(p.minZ / PLAT_CELL), Math.floor(p.maxZ / PLAT_CELL)];
+  }
+  function platGiantOf(p) { return (p.maxX - p.minX) > PLAT_GIANT || (p.maxZ - p.minZ) > PLAT_GIANT; }
+  function platInsert(p) {
+    if (platGiantOf(p)) { platGiant.push(p); return; }
+    const r = platRange(p);
+    for (let gx = r[0]; gx <= r[1]; gx++) for (let gz = r[2]; gz <= r[3]; gz++) {
+      const k = colKey(gx, gz);
+      let b = platBuckets.get(k);
+      if (!b) { b = []; platBuckets.set(k, b); }
+      b.push(p);
+    }
+  }
+  function platUnfile(p) {
+    if (platGiantOf(p)) { const i = platGiant.indexOf(p); if (i < 0) return false; platGiant.splice(i, 1); return true; }
+    const r = platRange(p);
+    let ok = true;
+    for (let gx = r[0]; gx <= r[1]; gx++) for (let gz = r[2]; gz <= r[3]; gz++) {
+      const k = colKey(gx, gz), b = platBuckets.get(k), i = b ? b.indexOf(p) : -1;
+      if (i < 0) { ok = false; continue; }
+      b.splice(i, 1);
+      if (!b.length) platBuckets.delete(k);
+    }
+    return ok;
+  }
+  CBZ.platformRemoveMany = function (list) {
+    const plats = CBZ.platforms;
+    if (!plats || !list || !(list.length || list.size)) return 0;
+    const sync = platInSync(), drop = list instanceof Set ? list : new Set(list);
+    let w = 0, n = 0;
+    for (let i = 0; i < plats.length; i++) {
+      const p = plats[i];
+      if (drop.has(p)) { n++; if (sync && p && !platUnfile(p)) platDirty = true; }
+      else plats[w++] = p;
+    }
+    plats.length = w;
+    if (sync && !platDirty) platCount = w;
+    return n;
+  };
+  CBZ.platformAddMany = function (list) {
+    const plats = CBZ.platforms;
+    if (!plats || !list || !list.length) return;
+    const sync = platInSync();
+    for (let i = 0; i < list.length; i++) { plats.push(list[i]); if (sync && list[i]) platInsert(list[i]); }
+    if (sync) platCount = plats.length;
+  };
   // The candidate list under a point: one Map lookup plus the giants.
   function platsAt(x, z) {
     const plats = CBZ.platforms;
