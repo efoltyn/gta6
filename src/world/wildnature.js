@@ -581,6 +581,17 @@
         CBZ.treeFoot.add(root, feet, { name: "wildnature-" + (opts.kind || "trees"), heightAt: groundY, fogScale: true });
       }
       lodIMs.push({ im: trunkIM, full: N }, { im: crownIM, full: N });
+      adoptLod([{ im: trunkIM, slot: 1 }, { im: crownIM, slot: 0 }], "wildnature-" + opts.kind, crownGeo.uuid, N);
+    }
+    // ONE TREE AT EVERY DISTANCE (world/treelod.js): the pools above are the
+    // near form; a mid cut of the same crown and an impostor baked from this
+    // species carry it to the fog. The quality slider thins all three alike.
+    function adoptLod(parts, name, key, N) {
+      if (!CBZ.treeLod) return;
+      const L = CBZ.treeLod.adopt({ parts: parts, name: name, key: "wildnature-" + key, root: root, size: 256 });
+      if (!L) return;
+      for (let i = 0; i < L.mid.length; i++) lodIMs.push({ im: L.mid[i], full: N });
+      if (L.imp) lodIMs.push({ im: L.imp, full: N });
     }
 
     // CONIFER — dark blue-green needles, brown bark
@@ -649,6 +660,7 @@
       root.add(snagIM);
       snagIMs.push(snagIM);
       lodIMs.push({ im: snagIM, full: N });
+      adoptLod([{ im: snagIM, slot: 0 }], "wildnature-snag", snagGeo.uuid, N);
     }
 
     // ============================================================

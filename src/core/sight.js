@@ -29,9 +29,9 @@
              equals `far`, so nothing changes form inside view. In the air,
              `far` outruns it, and whatever stands between the two must be
              drawn by a FAR FORM of the same thing (metro HLOD tiles, which
-             carry the far copy of every building in the world, the
-             forest's far crowns) that crossfades to the near form at
-             `detail`.
+             carry the far copy of every building in the world; trees:
+             world/treelod.js's mid copies and impostors) that crossfades to
+             the near form.
 
    A system asks:
      CBZ.sight()                     -> { far, near, detail, reach, camFar,
@@ -41,10 +41,13 @@
                                      a pixel short of full fog (within reach)?
      CBZ.sightNeedsDetail(x, z, r)   ... inside detail?
      CBZ.sightFade(mat, which, opts) the dithered near/far crossfade (below)
+     CBZ.SIGHT_DITHER_GLSL           its screen dither, cbzDither(): the ONE
+                                     dither every crossfade uses (treelod.js)
      CBZ.sightAhead(T)               where the body will be after T s of
                                      travel (streamers build there first)
-     CBZ.sightU                      the shared fade uniforms, refreshed every
-                                     frame by CBZ.sightPublish().
+     CBZ.sightU                      the shared fade uniforms (cbzSightEye:
+                                     the eye), refreshed every frame by
+                                     CBZ.sightPublish().
 
    Loads right after core/slice.js (THREE is in by then); touches nothing at
    load. Gang City only: the other modes own their fog.
@@ -145,10 +148,10 @@
      never a hard cut". A far form and a near form of the same thing both
      cover a place; across a BAND (30 m) round the swap distance each pixel
      is drawn by exactly one of them, chosen by a 4x4 ordered (Bayer)
-     threshold on the screen: the near form keeps a pixel where the fade t
-     is under the threshold, the far form where it is at or over it, so the
-     two are complementary (no hole, no double) and the share moves smoothly
-     from all-near to all-far across the band. A discard in the fragment
+     threshold on the screen (cbzDither below): the near form keeps a pixel
+     whose threshold is at or over the fade t, the far form one under it, so
+     the two are complementary (no hole, no double) and the share moves
+     smoothly from all-near to all-far across the band. A discard in the fragment
      shader through onBeforeCompile: r128, WebGL1, phones.
 
        t = clamp((distance from the eye - (swap - band/2)) / band, 0, 1)
@@ -176,8 +179,6 @@
                 near form (polygon offset), so it can dissolve OVER a near
                 form that is not itself dithered (a building shell is a
                 hundred materials; its far copy is one).
-     CBZ.sightSwapMaterial(mat, which) = sightFade(mat, which, {anchor:
-     "instance"}): the per-instance scatter hand-over (trees).
      CBZ.sightFadeT(d, swap) is the same t on the CPU, and
      CBZ.SIGHT_FADE_BAND the band, for owners deciding what to draw. */
   const BAND = 30;
@@ -236,11 +237,18 @@
     return S;
   };
 
-  // 4x4 ordered dither, 16 levels in [0, 1) (no arrays: GLSL ES 1.0)
-  const GLSL_BAYER = [
+  /* THE DITHER: a 4x4 ordered (Bayer) threshold per screen pixel, 16
+     levels in [0, 1), centred in its step (no arrays: GLSL ES 1.0). A form
+     KEEPS a pixel whose cbzDither falls in its keep window [lo, hi); the
+     forms either side of a seam use complementary windows (near [t, 1),
+     far [0, t)), so every pixel is drawn by exactly one of them. Every
+     crossfade in the game calls this one function (world/treelod.js's
+     bands too: CBZ.SIGHT_DITHER_GLSL). */
+  const GLSL_DITHER = [
     "float cbzBayer2( vec2 a ) { a = floor( a ); return fract( a.x * 0.5 + a.y * a.y * 0.75 ); }",
-    "float cbzBayer4( vec2 a ) { return cbzBayer2( 0.5 * a ) * 0.25 + cbzBayer2( a ); }",
+    "float cbzDither( vec2 p ) { return cbzBayer2( 0.5 * p ) * 0.25 + cbzBayer2( p ) + 0.03125; }",
   ].join("\n");
+  CBZ.SIGHT_DITHER_GLSL = GLSL_DITHER;
   CBZ.sightFade = function (mat, which, o) {
     if (!mat || (mat.userData && mat.userData._cbzSightFade)) return mat;
     o = o || {};
@@ -300,7 +308,7 @@
       }
       if (RM) { vHead += "attribute float " + idAttr + ";\nvarying float vCbzId;\n"; vBody += "  vCbzId = " + idAttr + ";\n"; }
       sh.vertexShader = vHead + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\n" + vBody);
-      let fHead = head + GLSL_BAYER + "\n" + (anchor === "world" ? "varying vec2 vCbzW;\n" : "varying float vCbzT;\n");
+      let fHead = head + GLSL_DITHER + "\n" + (anchor === "world" ? "varying vec2 vCbzW;\n" : "varying float vCbzT;\n");
       let fBody = "{\n  float cbzT = " + (anchor === "world" ? fadeOf("length( vCbzW - cbzSightEye.xz )") : "vCbzT") + ";\n";
       if (RM) {
         fHead += "uniform sampler2D cbzReadyMap;\nuniform vec2 cbzReadySize;\nvarying float vCbzId;\n";
@@ -310,13 +318,12 @@
           "  if ( cbzR.g > 0.5 ) discard;\n" +
           "  cbzT = max( cbzT, 1.0 - cbzR.r );\n";
       }
-      fBody += "  float cbzThr = cbzBayer4( gl_FragCoord.xy ) + 0.03125;\n" +
-        (far ? "  if ( cbzT < cbzThr ) discard;\n" : "  if ( cbzT >= cbzThr ) discard;\n") + "}\n";
+      // near keeps [t, 1), far keeps [0, t)
+      fBody += "  float cbzDn = cbzDither( gl_FragCoord.xy );\n" +
+        (far ? "  if ( cbzDn >= cbzT ) discard;\n" : "  if ( cbzDn < cbzT ) discard;\n") + "}\n";
       sh.fragmentShader = fHead + sh.fragmentShader.replace("#include <clipping_planes_fragment>", fBody + "#include <clipping_planes_fragment>");
     };
     mat.needsUpdate = true;
     return mat;
   };
-  // the per-instance scatter hand-over (world/vegetation.js lodMaterial)
-  CBZ.sightSwapMaterial = function (mat, which) { return CBZ.sightFade(mat, which, { anchor: "instance" }); };
 })();

@@ -410,7 +410,7 @@ document.body.appendChild(b);}}catch(e){}})();
      loaded, recoverable from git history if a migration is ever attempted.) -->
 <script src="src/vendor/three.r128.min.js?v=pf0930e"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
-<script src="src/core/instcull.js?v=w09290242x"></script>
+<script src="src/core/instcull.js?v=treelod1012"></script>
 <script src="src/vendor/BufferGeometryUtils.js"></script>
 <!-- Official Three.js sample loaders used by the farm truck / BIM campus.
      fflate must precede ThreeMFLoader because .3mf is a ZIP container. -->
@@ -452,9 +452,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/slice.js?v=sight1011"></script>
 <!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
-<script src="src/core/sight.js?v=realpop1012"></script>
+<script src="src/core/sight.js?v=treelod1012m"></script>
+<!-- the far night lights (GTA "LOD lights"): one sprite per real lamp, lit window, car, beacon and airfield light; three draws, to the horizon -->
+<script src="src/core/lodlights.js?v=lodlight1012"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=farform1011m"></script>
+<script src="src/core/citystream.js?v=treelod1012"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -481,7 +483,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=sight1011"></script>
+<script src="src/world/vegetation.js?v=treelod1012"></script>
+<!-- one tree at every distance: near -> mid copy -> octahedral impostor, dithered crossfades (CBZ.treeLod) -->
+<script src="src/world/treelod.js?v=treelod1012"></script>
 <!-- where a tree meets the ground: instanced contact shade + mulch rings every
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
 <script src="src/world/treefoot.js?v=sight1011"></script>
@@ -1517,13 +1521,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
 <script src="src/city/countryside.js?v=fortb1009"></script>
-<script src="src/city/metro_fabric.js?v=fac1009"></script>
+<script src="src/city/metro_fabric.js?v=lodlight1012"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
 <script src="src/city/metro_ground.js?v=ground1008c"></script>
-<script src="src/city/metro.js?v=fortb1009"></script>
+<script src="src/city/metro.js?v=lodlight1012"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- WHO A PERSON IS AND WHAT YOU CAN DO TO HIM: the role -> verbs table the
      registry filters every street verb through, the one-line title over a

@@ -312,6 +312,8 @@
     if (h >= 19 || h < 2) return 0.8;                            // evening (19:00-02:00)
     return 1.0;                                                  // day (5:00-7:00, 9:00-16:00)
   }
+  // the far traffic's lamps (core/lodlights.js) thin out on the same clock
+  CBZ.trafficHourDensity = hourDensityMul;
   function computeTarget(A) {
     // base on number of road segments (≈ block grid) — bigger grid → more cars.
     const roads = (A.roads && A.roads.length) || 16;
