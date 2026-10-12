@@ -251,7 +251,7 @@
     return btn;
   }
   // THE SPOT: on top of (or beside) the right-thumb cluster that is live now.
-  const CLUSTER = ["#tbtns .tbtn", "#tveh .tvbtn", "#tveh #tvDial"];
+  const CLUSTER = ["#tbtns .tbtn", "#tveh .tvbtn", "#tveh #tvDial", "#tveh .tv-stores"];
   const AVOID = ["#tstick", "#cWpn", "#hotbar", "#hudPauseBtn", "#cRadar", "#cTopRight", "#cCluster"];
   function rectsOf(sels) {
     const out = [];
@@ -274,6 +274,15 @@
     placeAt = t;
     const W = window.innerWidth || 800, H = window.innerHeight || 600;
     const size = { w: Math.ceil(btn.offsetWidth) || 120, h: Math.ceil(btn.offsetHeight) || 54 };
+    // IN A COCKPIT the flight deck's layout table (systems/touch_layout.js
+    // flightDeck) already kept a slot for the way out, on top of the cluster:
+    // the exit is one row of that table, not a guess around it.
+    const deck = CBZ.touchDeckExit ? CBZ.touchDeckExit() : null;
+    if (deck) {
+      btn.style.left = Math.round(deck.x + deck.w - size.w) + "px";
+      btn.style.top = Math.round(deck.y + deck.h - size.h) + "px";
+      return;
+    }
     const slot = L.exitSlot({ W: W, H: H, size: size, gap: 12, cluster: rectsOf(CLUSTER), avoid: rectsOf(AVOID),
       margin: { top: 12, right: 12, bottom: 12, left: 12 } });
     if (!slot) return;
