@@ -1158,26 +1158,62 @@
     if (k === "buster") return invCount("Bunker Buster");
     return c ? (c.nukeAmmo | 0) : 0;
   }
-  // Instrument names — short enough to sit in the flight strip's one line
-  // beside the altitude and the missile count.
-  const PAY_SHORT = { bomb: "MK-84", jdam: "JDAM", buster: "GBU-57", nuke: "NUKE" };
-  function payloadLabel(k, c) {
-    if (k === "bomb") return "Payload: Mk-84 bombs (" + payloadCount("bomb", c) + ")";
-    if (k === "jdam") return "Payload: GBU-31 JDAM, guided (" + payloadCount("jdam", c) + ")";
-    if (k === "buster") return "Payload: GBU-57 BUNKER BUSTER (" + payloadCount("buster", c) + ")";
-    return "Payload: NUCLEAR WEAPON (" + payloadCount("nuke", c) + ")";
+  // THE STORES TABLE: the designation every readout prints (the desktop
+  // flight strip, the touch stores strip, the Flight Ops note). Real names,
+  // as a stores-management page shows them: the iron bomb is a Mk 84, the
+  // guided round is the Mk 84 with its JDAM kit, i.e. a GBU-31, the
+  // penetrator is the GBU-57 MOP, and the B-2's nuclear store is the B61
+  // (the casing below is drawn from the B61's own proportions).
+  // When weapons/munitiontable.js lands, these names belong there.
+  const STORES = {
+    bomb: { name: "MK 84", full: "Mk 84 2,000 lb bombs" },
+    jdam: { name: "GBU-31", full: "GBU-31 JDAM, GPS guided" },
+    buster: { name: "GBU-57", full: "GBU-57 Massive Ordnance Penetrator" },
+    nuke: { name: "B61", full: "B61 nuclear bomb" },
+  };
+  function payloadLabel(k, c) { return STORES[k].full + " (" + payloadCount(k, c) + ")"; }
+  // Is this station on the aircraft at all (a spent rack is still a station,
+  // and the strip shows it at 0; a penetrator you never collected is not)?
+  function stationLoaded(k, c) {
+    if (k === "jdam") return CBZ.CONFIG.STRAT_JDAM !== false;
+    if (k === "buster") return CBZ.CONFIG.STRAT_BUNKER_BUSTER !== false && payloadCount("buster", c) > 0;
+    if (k === "nuke") return CBZ.CONFIG.STRAT_NUKE !== false && !!c && (c.maxNukeAmmo | 0) > 0;
+    return true;
+  }
+  // PICK one store. The cycle below and the touch strip's tap both land here,
+  // so a selection made by thumb and one made by [X] say and sound the same.
+  function selectPayload(k, c) {
+    payload = k;
+    payloadFlash("SELECTED", 2.0);
+    note(payloadLabel(payload, c), 1.6, { from: "Flight Ops", app: "messages" });
+    // The two SPECIALS are genuine headlines and belong in the record; the two
+    // ordinary racks are not, and a news push per keypress would be spam.
+    if ((payload === "buster" || payload === "nuke") && CBZ.city && CBZ.city.big) {
+      try { CBZ.city.big(payload === "nuke" ? "BAY ARMED · B61 NUCLEAR" : "BAY ARMED · GBU-57 PENETRATOR"); } catch (e) {}
+    }
+    sfx("switch", { pitch: 1.2, volume: 0.3 });
+    return payload;
+  }
+  function pickPayload(k) {
+    const c = flyingB2();
+    if (!c || !STORES[k]) return payload;
+    _b2Legend = 0;
+    if (k === payload) return payload;
+    if (!payloadAvailable(k, c)) { payloadFlash(STORES[k].name + " EMPTY", 1.6); return payload; }
+    return selectPayload(k, c);
   }
   function cyclePayload() {
     const c = flyingB2();
     if (!c) return payload;
     const before = payload;
     const i = PAYLOADS.indexOf(payload);
+    let next = payload;
     for (let k = 1; k <= PAYLOADS.length; k++) {
       const cand = PAYLOADS[(i + k) % PAYLOADS.length];
-      if (payloadAvailable(cand, c)) { payload = cand; break; }
+      if (payloadAvailable(cand, c)) { next = cand; break; }
     }
     _b2Legend = 0;                          // you found the key; stop teaching it
-    if (payload === before) {
+    if (next === before) {
       // [X] with nothing to switch TO must say WHY, or it reads as a dead key
       // (owner: "theres no way to change payload"). Name where the other
       // stores come from instead of silently re-picking the same rack.
@@ -1192,15 +1228,7 @@
         3.2, { from: "Flight Ops", app: "messages" });
       return payload;
     }
-    payloadFlash("SELECTED", 2.0);
-    note(payloadLabel(payload, c), 1.6, { from: "Flight Ops", app: "messages" });
-    // The two SPECIALS are genuine headlines and belong in the record; the two
-    // ordinary racks are not, and a news push per keypress would be spam.
-    if ((payload === "buster" || payload === "nuke") && CBZ.city && CBZ.city.big) {
-      try { CBZ.city.big(payload === "nuke" ? "BAY ARMED · NUCLEAR WEAPON" : "BAY ARMED · GBU-57 PENETRATOR"); } catch (e) {}
-    }
-    sfx("switch", { pitch: 1.2, volume: 0.3 });
-    return payload;
+    return selectPayload(next, c);
   }
 
   /* ---- THE ORDNANCE READOUT — the ONE surface a pilot can actually see -----
@@ -1247,7 +1275,7 @@
   function payloadFlash(tag, secs) { _payTag = tag || ""; _payFlash = secs || 2; }
   function payloadHudText(c) {
     const n = payloadCount(payload, c);
-    return HUD_MARK + PAY_SHORT[payload] + " ×" + n +
+    return HUD_MARK + STORES[payload].name + " ×" + n +
       (_payFlash > 0 && _payTag ? "  " + _payTag : "") +
       (bombCine.active ? "   BOMB CAM · IMPACTS " + bombCine.impacts + " · DEATHS " + bombCineDeaths() : "") +
       // A 14 s legend, then silence. The permanent tutorial this repo bans is a
@@ -3523,6 +3551,19 @@
   // the touch layer (touch_vehicle.js agent) wires these to pills/buttons
   CBZ.strategicBombDrop = dropPayload;
   CBZ.strategicPayloadCycle = cyclePayload;
+  CBZ.strategicPayloadSelect = pickPayload;
+  // The stations as the touch stores strip draws them: every store this jet
+  // carries, in rack order, with what is left and which one is selected.
+  CBZ.strategicStores = function () {
+    const c = flyingB2();
+    if (!c) return null;
+    const out = [];
+    for (const k of PAYLOADS) {
+      if (!stationLoaded(k, c)) continue;
+      out.push({ k: k, name: STORES[k].name, n: payloadCount(k, c), sel: k === payload });
+    }
+    return out;
+  };
   // slide-hold seam for systems/touch_vehicle.js: press-and-hold the bomb pill
   // and you get the carpet run, exactly like holding [B] on a keyboard.
   CBZ.strategicBombHold = function (down) {
@@ -3626,7 +3667,7 @@
   CBZ.strategicPayloadReadout = function () {
     const c = flyingB2();
     return {
-      b2: !!c, payload: payload, short: PAY_SHORT[payload],
+      b2: !!c, payload: payload, short: STORES[payload].name,
       count: payloadCount(payload, c),
       strip: c ? payloadHudText(c) : "",
       flash: +_payFlash.toFixed(2), tag: _payTag, legend: +_b2Legend.toFixed(2),

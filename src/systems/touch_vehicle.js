@@ -19,28 +19,31 @@
      BOAT     stick = steer/throttle (unchanged). ASTERN = hold → Ctrl
               (water_helm's crash-stop; Space is the get-up now).
               VIEW = the [V] wheel view, same handler as the car's.
+     THE FLIGHT DECK (heli + wing). Every flight control is a symbol button,
+              never a word (owner: "why should it be the word BOMB?"), and
+              every one of them, the dial, the stores strip and the slot for
+              the way out are placed by ONE layout table,
+              CBZ.touchLayout.flightDeck (systems/touch_layout.js), from the
+              live screen, its safe-area insets and the stick's rect. Nothing
+              in flight is positioned by CSS offsets any more: the old thumb
+              column and the bomb rail were two layouts that never knew about
+              each other, and TURN L sat on BOMB on every iPad and iPhone.
      HELI     stick = the CYCLIC, analog (CBZ.touchStickAxis): push to fly
               that way; at speed a sideways push banks into a turn, like the
-              planes' stick. It used to be yaw/thrust through the WASD
-              switches, so any slightly-off forward push held a full pedal
-              and the helicopter flew circles.
-              TURN L / TURN R = hold → CBZ.keys["q"] / ["e"] (pedals: the
-                       nose turns in place)
-              UP     = hold  → CBZ.keys[" "]        (collective up)
-              DOWN   = hold  → CBZ.keys["control"]  (collective down —
-                       "control" on purpose: it never collides with the
-                       on-foot sprint logic that owns "shift")
-              FIRE   = tap   → CBZ.cityAircraftFireMissile() (armed craft)
+              planes' stick.
+              pedals (curved arrows) = hold → CBZ.keys["q"] / ["e"] (the nose
+                       turns in place)
+              power up / down (chevrons) = hold → CBZ.keys[" "] / ["control"]
+                       (collective; "control" on purpose: it never collides
+                       with the on-foot sprint logic that owns "shift")
+              fire (reticle) = tap → CBZ.cityAircraftFireMissile() (armed craft)
      WING     stick = the joystick, ANALOG (CBZ.touchStickAxis, with a dead
-              zone and a curve in playeraircraft.js): sideways = bank (the
-              plane turns the way it banks), forward = nose down, back = nose
-              up. It used to fly through the WASD switches, full bank or none.
-              Throttle is the right-thumb hold-pair, the heli's power grammar:
-              THR+   = hold  → CBZ.keys[" "]        (throttle up)
-              THR−   = hold  → CBZ.keys["control"]  (throttle down / wheel brakes)
-              TURN L / TURN R = hold → CBZ.keys["q"] / ["e"] (rudder, and the
-                       nosewheel on the runway; the heli's pedal pills)
-              FIRE as heli.
+              zone and a curve in playeraircraft.js): sideways = bank, forward
+              = nose down, back = nose up.
+              throttle up / down (chevrons) = hold → Space / Ctrl (throttle,
+                       wheel brakes)
+              rudder (curved arrows) = hold → Q / E (and the nosewheel)
+              fire as heli.
 
      ARMOR    the tank / armoured truck (city/militaryvehicles.js). It sets
               P.driving but NOT P._vehicle — it keeps a module-local record —
@@ -55,25 +58,21 @@
               #tExit, in ONE place, owned by systems/seat_exit.js. This layer
               used to draw its own EXIT / JUMP OUT / GET UP / DISMOUNT pill in
               a different spot per context.
-     AUX RAIL (#tvAux) — a SECOND column standing directly above the dial, in
-              the dial's own footprint, so weapon/ordnance controls never grow
-              the primary thumb column past a thumb's reach. It carries the
-              controls that are about the PAYLOAD rather than the airframe:
+     AUX RAIL (#tvAux) — the mount's DIVE/RISE column (and Shark Sim's). Not
+              used in flight: the flight deck places everything there.
 
-     B-2 ORDNANCE (city/strategic.js). The bomber shipped with four seams
-              published FOR THIS FILE — strategicBombDrop, strategicPayloadCycle,
-              strategicBombHold, strategicBombCameraHold — and not one of them
-              had a caller anywhere in the repo, so on an iPad the B-2 was a
-              plane with a bay you could not open:
-              BOMB    = hold → CBZ.strategicBombHold(down). Tap releases one,
-                        hold walks a carpet: the SAME tap/hold arc [B] runs,
-                        because it IS that state machine, not a copy of it.
-              PAYLOAD = tap  → CBZ.strategicPayloadCycle(), and the pill is
-                        also the READOUT ("MK-84 ×16"). That second job is not
-                        decoration: mobile.css hides #cityFlightHud under
-                        body.tveh-on, so the strip that teaches the payload on
-                        desktop is invisible on touch — the switch had no label
-                        AND no state.
+     B-2 ORDNANCE (city/strategic.js):
+              release (the pickle: a slung bomb under its rack) = hold →
+                        CBZ.strategicBombHold(down). Tap releases one, hold
+                        walks a carpet: the SAME tap/hold arc [B] runs.
+              STORES STRIP (#tvStores) = the stores-management page: one cell
+                        per station the jet carries (CBZ.strategicStores: MK 84,
+                        GBU-31, GBU-57, B61) with the count left, the selected
+                        store lit. Tap a cell to select it (CBZ.strategic
+                        PayloadSelect); tap the lit one to step to the next.
+                        It is also the refusal channel: "TOO LOW · CLIMB" /
+                        "BAY EMPTY" cover the strip for their flash, because
+                        mobile.css hides #cityFlightHud under body.tveh-on.
      Deliberately NOT on the glass: HOMING (lockon defaults to homing; the
               toggle stays on [H]), BOMB CAM (a cinematic, [C] hold), the Q/E
               trim pair (bank covers the turn), LOOK BACK (the look drag already
@@ -109,7 +108,9 @@
   // touchend (system edge swipe, notification shade) left the chase camera
   // pinned backwards with no button down to explain it.
   const heldFns = [];
-  let lastDraw = 0, lastSpeed = -1, lastSub = "", lastPay = "", lastAuxT = 0;
+  let lastDraw = 0, lastSpeed = -1, lastSub = "", lastAuxT = 0;
+  // the flight deck's cache: placement signature, the exit slot it kept, the stores strip
+  let deckSig = "", deckExit = null, storesSig = "", lastStoresPaint = "", safeProbe = null;
 
   // ---- optional car tilt steering -------------------------------------------
   // Tilt does not synthesize twitchy A/D taps. It publishes one gentle analog
@@ -320,6 +321,21 @@
 
   // fire reticle (same glyph language as touch.js's icon cluster)
   const FIRE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>';
+  // THE FLIGHT SYMBOLS: one stroke family with the reticle above (24 grid,
+  // round caps, currentColor), so the whole deck reads as one instrument set.
+  const svg = (d) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + d + "</svg>";
+  const ICON = {
+    up: svg('<path d="M6 12.5l6-6 6 6"/><path d="M6 18.5l6-6 6 6"/>'),
+    down: svg('<path d="M6 5.5l6 6 6-6"/><path d="M6 11.5l6 6 6-6"/>'),
+    yawL: svg('<path d="M18.5 19v-5a6 6 0 0 0-6-6H5.5"/><path d="M9 4.5L5.5 8 9 11.5"/>'),
+    yawR: svg('<path d="M5.5 19v-5a6 6 0 0 1 6-6h7"/><path d="M15 4.5L18.5 8 15 11.5"/>'),
+    view: svg('<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.6"/>'),
+    // the pickle: a store hanging nose-down from its rack
+    bomb: svg('<path d="M4.5 3h15"/><path d="M12 6v1.5"/><path class="fill" d="M12 22c-2.1-1.7-3.3-4.2-3.3-7.2V11h6.6v3.8c0 3-1.2 5.5-3.3 7.2z"/><path d="M8.7 11L7.2 7.5h9.6L15.3 11"/>'),
+  };
+  function ico(id, label, icon, cls) {
+    return '<button type="button" id="' + id + '" class="tvbtn tv-ico ' + (cls || "") + '" aria-label="' + label + '">' + icon + "</button>";
+  }
 
   /* THE DISASTER SWIMMER HAS NO DIAL (owner, 2026-08-16: "when swimming in nat
      disaster I don't want that meter thing").
@@ -347,11 +363,16 @@
     // empty FIRE/JUMP corner as round thumb buttons. Class, not a second
     // layout — the pills, their order and their handlers are identical.
     if (root) root.classList.toggle("tv-shark", next === "mount" && CBZ.game.mode === "sharksim");
+    const deck = next === "heli" || next === "wing";
+    if (root) root.classList.toggle("tv-deck", deck);
+    deckSig = ""; deckExit = null; storesSig = ""; lastStoresPaint = "";
+    if (!deck && dial) { dial.style.left = dial.style.top = dial.style.width = dial.style.height = ""; }
     clearHeld();
     heldFns.length = 0;          // the DOM these released is about to be replaced
     if (!btnWrap) return;
     btnWrap.className = next === "drive" ? "tv-car" : "";
-    if (auxWrap) { auxWrap.innerHTML = ""; lastPay = ""; lastAuxT = 0; }
+    if (auxWrap) auxWrap.innerHTML = "";
+    lastAuxT = 0;
     if (!next) { btnWrap.innerHTML = ""; ammoEl = null; resetTiltCenter(); setDialOff(false); return; }
     // #tvBtns is column-REVERSE: the FIRST button here sits at the BOTTOM,
     // nearest the resting thumb — so the big primary hold goes first.
@@ -401,19 +422,18 @@
       // Only an actually armed hull gets FIRE. Tanks aim through the look drag;
       // Patriots use the shared full-map target and launch through the same verb.
       html = isArmedArmor() ? FIRE_BTN : "";
-    } else if (next === "heli") {
-      // The stick is the CYCLIC (analog, read through CBZ.touchStickAxis):
-      // push to fly that way, and at speed a sideways push banks into a turn,
-      // the same stick the planes use. The right thumb holds the power (UP /
-      // DOWN) and the PEDALS, which turn the nose in place (Q/E, the planes'
-      // rudder keys).
-      html = pill("tvUp", "UP", "tv-big tv-go") + pill("tvDown", "DOWN", "tv-big") +
-        '<div class="tv-yaw">' + pill("tvYawL", "TURN L", "") + pill("tvYawR", "TURN R", "") + "</div>" +
-        FIRE_BTN + VIEW_BTN;
-    } else if (next === "wing") {
-      html = pill("tvThrUp", "THR +", "tv-big tv-go") + pill("tvThrDn", "THR −", "tv-big") +
-        '<div class="tv-yaw">' + pill("tvYawL", "TURN L", "") + pill("tvYawR", "TURN R", "") + "</div>" +
-        FIRE_BTN + VIEW_BTN;
+    } else if (next === "heli" || next === "wing") {
+      // THE FLIGHT DECK. Order here is irrelevant: refreshDeck() places every
+      // one of these by the rect touchLayout.flightDeck computes for it.
+      const heli = next === "heli";
+      html = (heli ? ico("tvUp", "Collective up", ICON.up, "tv-go") + ico("tvDown", "Collective down", ICON.down, "")
+                   : ico("tvThrUp", "Throttle up", ICON.up, "tv-go") + ico("tvThrDn", "Throttle down", ICON.down, "")) +
+        ico("tvYawL", heli ? "Pedal left" : "Rudder left", ICON.yawL, "") +
+        ico("tvYawR", heli ? "Pedal right" : "Rudder right", ICON.yawR, "") +
+        '<button type="button" id="tvFire" class="tvbtn tv-fire" aria-label="Fire missile" style="display:none">' + FIRE_SVG + '<span id="tvAmmo" class="tvAmmo"></span></button>' +
+        ico("tvView", "Cockpit view", ICON.view, "tv-sm") +
+        ico("tvBomb", "Release", ICON.bomb, "tv-round tv-bomb") +
+        '<div id="tvStores" class="tv-stores" style="display:none"></div>';
     } else if (next === "chute") {
       // Falling out of an aircraft is a CONTEXT, not a vehicle, but it is the
       // same problem this layer exists to solve: a keyboard verb the thumb
@@ -451,6 +471,7 @@
     // stick is free to be the pitch+roll joystick (FLIGHT_CONTROLS_V2).
     if (q("tvThrUp")) holdBtn(q("tvThrUp"), " ");
     if (q("tvThrDn")) holdBtn(q("tvThrDn"), "control");
+    if (q("tvBomb")) holdFn(q("tvBomb"), (down) => { if (CBZ.strategicBombHold) CBZ.strategicBombHold(down); });
     if (q("tvFire")) {
       if (mode === "drive") holdFn(q("tvFire"), function (down) {
         if (CBZ.carLeanOut) CBZ.carLeanOut(down);
@@ -491,13 +512,7 @@
   // after boarding still get its bay controls without a second layout pass.
   function layoutAux(next) {
     if (!auxWrap || !airV2()) return;
-    const air = next === "heli" || next === "wing";
-    const drv = next === "drive" || next === "armor";
-    // A boat builds an aux rail for exactly ONE pill (DETONATE, below) — the
-    // rest of its layout is deliberately untouched, so it still gets no
-    // RECENTER and keeps the joystick helm exactly as it was.
-    const boat = next === "boat";
-    if (!air && !drv && !boat && next !== "mount") return;
+    if (next !== "mount") return;
     let h = "";
     // A MOUNT IS NOT A VEHICLE and must not be dressed as one — see the mount
     // branch in the watcher. It gets ONE pill, in the aux rail, well clear of
@@ -516,19 +531,8 @@
       // human is hidden, and shark_sim.js force-remounts every frame, so the
       // pill was a button that did nothing but flicker. No pill, no lie.
     }
-    if (air) {
-      // Bottom-up (column-reverse): the release sits nearest the thumb, its own
-      // readout directly above it.
-      h += pill("tvBomb", "BOMB", "tv-big tv-warn");
-      h += pill("tvPay", "PAYLOAD", "tv-sm");
-    }
-    // (the DETONATE pill is gone: the detonator is a held object now, and the
-    // phone keeps its own DETONATE for the getaway boom from a car)
     auxWrap.innerHTML = h;
     const q = (id) => auxWrap.querySelector("#" + id);
-    // BOMB — hold, not tap: strategicBombHold IS the [B] state machine (tap
-    // releases one, past 0.4 s it becomes a carpet run), so the thumb inherits
-    // the whole arc instead of re-implementing half of it.
     // The mount's vertical axis. Two paths on purpose and BOTH are honest: the
     // key hold is the same one every other pill in this file uses (the mount
     // reads Space/Ctrl off CBZ.keys exactly as the swimmer does), and the named
@@ -543,19 +547,6 @@
       held[" "] = down; if (!down) { const k = CBZ.keys; if (k) k[" "] = false; }
       if (CBZ.cityAquaticMountVertical) CBZ.cityAquaticMountVertical(down ? 1 : 0);
     });
-    if (q("tvBomb")) holdFn(q("tvBomb"), (down) => { if (CBZ.strategicBombHold) CBZ.strategicBombHold(down); });
-    if (q("tvPay")) tapBtn(q("tvPay"), () => {
-      if (CBZ.strategicPayloadCycle) CBZ.strategicPayloadCycle();
-      lastPay = "";                      // repaint the label on the next tick
-    });
-    // DETONATE — a HOLD on the module's own logical key (touch.js's
-    // touchKeyHold), because [B] in a seat is already exactly this verb:
-    // explosives.js refuses the plant half while driving and detonates past
-    // 0.5 s, so the pill inherits the arm delay — the thing that makes a
-    // mis-brush of the glass NOT send the whole street up — instead of
-    // reimplementing a faster, more dangerous copy of it. holdFn registers
-    // the release, so blur/app-switch lands the keyup a lost touchend never
-    // sends and the hold can never wedge armed.
   }
 
   // Is the touch vehicle layer currently OWNING the bottom-right instrument
@@ -706,54 +697,125 @@
     if (sub) { c.font = "600 19px Fredoka, system-ui, sans-serif"; c.fillText(sub, cx, cy - 44); }
   }
 
-  // ---- aux rail refresh -----------------------------------------------------
-  // Show/hide by what the world can actually DO right now, and let each label
-  // carry its own state. Nothing here is a second source of truth: the payload
-  // name and count come from strategic.js's own readout (the exact function its
-  // desktop strip reads).
+  // ---- THE FLIGHT DECK: what is on the glass, and where ----------------------
+  // Show/hide by what the world can actually DO right now; place by the one
+  // layout table (touchLayout.flightDeck). Nothing here is a second source of
+  // truth: the stores and the selection are strategic.js's own.
   function show(el, want) {
     if (!el) return;
     const v = want ? "" : "none";
     if (el.style.display !== v) el.style.display = v;
   }
-  function refreshAux() {
-    if (!auxWrap || !airV2()) return;
-    // ~11 Hz, the dial's own budget. strategicPayloadReadout builds a small
-    // object and a string per call; at 60 Hz that is 60 throwaway objects a
-    // second to answer a question whose answer changes on a button press.
+  function safeInsets() {
+    if (!safeProbe) {
+      safeProbe = document.createElement("div");
+      safeProbe.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;" +
+        "padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)";
+      document.body.appendChild(safeProbe);
+    }
+    const cs = getComputedStyle(safeProbe);
+    return { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0,
+      bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
+  }
+  // The rest of the glass the deck must stay off: the stick first, then the
+  // HUD that lives in the corners and the bar along the bottom (on touch the
+  // hotbar stays up in a seat; it is the input).
+  const DECK_AVOID = ["#tstick", "#hotbar", "#hudPauseBtn", "#cRadar", "#cTopRight"];
+  function avoidRects() {
+    const out = [];
+    for (const sel of DECK_AVOID) {
+      const el = document.querySelector(sel);
+      if (!el || el.style.display === "none") continue;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) out.push({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) });
+    }
+    return out;
+  }
+  // the stores strip: one cell per station, rebuilt only when the stations change
+  function paintStores(el, stores, pay) {
+    const keys = stores.map((st) => st.k).join(",");
+    if (keys !== storesSig) {
+      storesSig = keys; lastStoresPaint = "";
+      el.innerHTML = stores.map((st) =>
+        '<button type="button" class="tv-store" data-k="' + st.k + '" aria-label="' + st.name + '"><b>' + st.name + "</b><i></i></button>").join("");
+      el.querySelectorAll(".tv-store").forEach((cell) => tapBtn(cell, () => {
+        const k = cell.getAttribute("data-k");
+        const sel = cell.classList.contains("sel");
+        // tap a store to select it; tap the lit one to step to the next
+        if (sel) { if (CBZ.strategicPayloadCycle) CBZ.strategicPayloadCycle(); }
+        else if (CBZ.strategicPayloadSelect) CBZ.strategicPayloadSelect(k);
+        lastAuxT = 0; lastStoresPaint = "";
+      }));
+    }
+    // A refused release (TOO LOW · CLIMB, BAY EMPTY, NUCLEAR CHANNEL BUSY)
+    // covers the strip for its flash: on touch this is the only place it can
+    // be said, and a silent refusal reads as a broken button.
+    const msg = (pay && pay.flash > 0 && pay.tag && pay.tag !== "SELECTED") ? String(pay.tag) : "";
+    const paint = stores.map((st) => st.k + st.n + (st.sel ? "*" : "")).join(",") + "|" + msg;
+    if (paint === lastStoresPaint) return;
+    lastStoresPaint = paint;
+    const cells = el.children;
+    for (let i = 0; i < cells.length && i < stores.length; i++) {
+      const st = stores[i], cell = cells[i];
+      cell.classList.toggle("sel", st.sel);
+      cell.classList.toggle("empty", st.n <= 0);
+      const n = cell.lastChild; if (n && n.textContent !== String(st.n)) n.textContent = String(st.n);
+    }
+    if (msg) el.setAttribute("data-msg", msg); else el.removeAttribute("data-msg");
+  }
+  function refreshDeck() {
+    if (!btnWrap || !(mode === "heli" || mode === "wing")) return;
+    // ~11 Hz, the dial's own budget: the answers change on a button press.
     const nowA = performance.now();
     if (nowA - lastAuxT < 90) return;
     lastAuxT = nowA;
-    const air = mode === "heli" || mode === "wing";
-    // THE BOMBER IS THE CONTEXT, not the aircraft. Every other airframe in the
-    // game — the gunship, the airliner, the Raptor, Fort Brandt's heavy bomber
-    // — has no bay at all (strategic.js says so in as many words when [B] is
-    // pressed in one), so these three controls exist only while the B-2 is the
-    // thing you are flying.
-    const pay = (air && CBZ.strategicPayloadReadout) ? CBZ.strategicPayloadReadout() : null;
-    const b2 = !!(pay && pay.b2);
-    show(auxWrap.querySelector("#tvBomb"), b2 && !!CBZ.strategicBombHold);
-    show(auxWrap.querySelector("#tvPay"), b2 && !!CBZ.strategicPayloadCycle);
-    const pb = auxWrap.querySelector("#tvPay");
-    if (pb && b2) {
-      // The pill IS the payload strip on touch: mobile.css hides
-      // #cityFlightHud under body.tveh-on, so without this label the switch
-      // would have neither a name nor a count — the exact "there's no way to
-      // change payload" complaint, one layer down.
-      //
-      // AND IT IS THE REFUSAL CHANNEL. strategic.js answers a refused release
-      // with payloadFlash("TOO LOW — CLIMB" / "BAY EMPTY") because its own
-      // comment says the matching note() is deleted upstream by mode.js — so
-      // on touch, where the strip that carries the flash is display:none, a
-      // refused BOMB was completely silent. It reads as a broken button, which
-      // is the exact failure that comment was written to prevent. The flash
-      // takes the pill for its duration; `count` carries the rest.
-      const flash = (pay.flash > 0 && pay.tag) ? String(pay.tag) : "";
-      const lab = flash || ((pay.short || "PAYLOAD") + " ×" + (pay.count | 0));
-      if (lab !== lastPay) { lastPay = lab; pb.textContent = lab; }
-      pb.classList.toggle("tv-warn", !!flash || (pay.count | 0) <= 0);
+    const P = CBZ.player, craft = P && P._aircraft;
+    const q = (id) => btnWrap.querySelector("#" + id);
+    const heli = mode === "heli";
+    const els = {
+      pwrUp: q(heli ? "tvUp" : "tvThrUp"), pwrDn: q(heli ? "tvDown" : "tvThrDn"),
+      yawL: q("tvYawL"), yawR: q("tvYawR"), fire: q("tvFire"), view: q("tvView"),
+      bomb: q("tvBomb"), stores: q("tvStores"), dial: dial,
+    };
+    // THE BOMBER IS THE CONTEXT, not the aircraft: only the B-2 has a bay
+    // (strategic.js answers [B] in anything else with NO BOMB BAY), so the
+    // release and the stores strip exist only while it is what you fly.
+    const pay = CBZ.strategicPayloadReadout ? CBZ.strategicPayloadReadout() : null;
+    const stores = (pay && pay.b2 && CBZ.strategicStores) ? CBZ.strategicStores() : null;
+    const present = {
+      pwrUp: 1, pwrDn: 1, yawL: 1, yawR: 1, dial: 1, exit: 1,
+      fire: !!(craft && craft.armed !== false),
+      view: !!CBZ.cockpitToggleView,
+      bomb: !!(stores && CBZ.strategicBombHold),
+      stores: !!(stores && stores.length),
+    };
+    for (const id in els) if (id !== "dial") show(els[id], present[id]);
+    if (present.stores) paintStores(els.stores, stores, pay);
+    const L = CBZ.touchLayout;
+    if (!L || !L.flightDeck) return;
+    const W = window.innerWidth || 800, H = window.innerHeight || 600;
+    const avoid = avoidRects();
+    let sig = mode + "|" + W + "x" + H + "|" + (stores ? stores.length : 0);
+    for (const id in present) if (present[id]) sig += "," + id;
+    for (const r of avoid) sig += "|" + r.x + "," + r.y + "," + r.w + "," + r.h;
+    if (sig === deckSig) return;
+    deckSig = sig;
+    const out = L.flightDeck({ W: W, H: H, safe: safeInsets(), present: present,
+      stores: stores ? stores.length : 0, avoid: avoid });
+    if (!out) return;
+    root.style.setProperty("--tvs", String(out.s));
+    for (const id in out.rects) {
+      const r = out.rects[id], el = els[id];
+      if (id === "exit") { deckExit = r; continue; }
+      if (!el) continue;
+      el.style.left = r.x + "px"; el.style.top = r.y + "px";
+      el.style.width = r.w + "px"; el.style.height = r.h + "px";
     }
   }
+  // systems/seat_exit.js asks for the slot the deck kept free for the way out
+  // of the cockpit, so the exit is part of the same table and can never land
+  // on a flight control.
+  CBZ.touchDeckExit = function () { return (mode === "heli" || mode === "wing") && on() ? deckExit : null; };
 
   // ---- key pump: held buttons win over a released stick ---------------------
   // Runs at 10, just before player driving (11) / flight (12) read CBZ.keys.
@@ -805,7 +867,7 @@
     }
     if (!next) return;
 
-    refreshAux();
+    refreshDeck();
     // VIEW appears only once the file that owns THIS context's inside view is
     // present (merge-order safety — the button may
     // assume its API exists). In a car the pill also stands down when the car
@@ -836,16 +898,12 @@
         if (cb.style.display !== want) cb.style.display = want;
       }
     }
-    // fire button + ammo badge only on armed craft
+    // the missile count on the fire button (refreshDeck owns whether it shows)
     if (mode === "heli" || mode === "wing") {
-      const craft = P._aircraft, fb = btnWrap.querySelector("#tvFire");
-      if (fb) {
-        const armed = craft && craft.armed !== false;
-        fb.style.display = armed ? "" : "none";
-        if (armed && ammoEl) {
-          const a = String(craft.ammo == null ? "" : craft.ammo);
-          if (a !== ammoEl.textContent) ammoEl.textContent = a;
-        }
+      const craft = P._aircraft;
+      if (craft && ammoEl && craft.armed !== false) {
+        const a = String(craft.ammo == null ? "" : craft.ammo);
+        if (a !== ammoEl.textContent) ammoEl.textContent = a;
       }
     } else if (mode === "drive") {
       // the seat view with a firearm: the window is a firing position
@@ -990,8 +1048,9 @@
     V("swim-vertical", { ctx: "swim", key: "Space/Ctrl", hook: null }); W("swim-vertical", "#tvRise/#tvDive");
     V("bomb-release", { ctx: "b2", key: "B tap", hook: "strategicBombHold" }); W("bomb-release", "#tvBomb");
     V("bomb-carpet", { ctx: "b2", key: "B hold", hook: "strategicBombHold" }); W("bomb-carpet", "#tvBomb");
-    V("payload-cycle", { ctx: "b2", key: "X", hook: "strategicPayloadCycle" }); W("payload-cycle", "#tvPay");
-    V("payload-readout", { ctx: "b2", key: "#cityFlightHud", hook: "strategicPayloadReadout" }); W("payload-readout", "#tvPay label");
+    V("payload-cycle", { ctx: "b2", key: "X", hook: "strategicPayloadCycle" }); W("payload-cycle", "#tvStores lit cell");
+    V("payload-select", { ctx: "b2", key: "X", hook: "strategicPayloadSelect" }); W("payload-select", "#tvStores cell");
+    V("payload-readout", { ctx: "b2", key: "#cityFlightHud", hook: "strategicStores" }); W("payload-readout", "#tvStores");
     V("armor-exit", { ctx: "armor", key: "E", hook: "seatExit" }); W("armor-exit", "#tExit");
     V("armor-fire", { ctx: "armor", key: "LMB", hook: "cityArmorFire" }); W("armor-fire", "#tvFire");
     V("mount", { ctx: "foot", key: "I / panel", hook: "cityMountAnimal" }); W("mount", "world tap");
