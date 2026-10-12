@@ -95,13 +95,10 @@
   if (C.YACHT_AFLOAT == null) C.YACHT_AFLOAT = true;
   if (C.YACHT_HELIDECK == null) C.YACHT_HELIDECK = true;
   // YACHT_HELI_PARKED — put an AIRFRAME on the aft pad, separately from the
-  // pads themselves. It is its own flag because of an honest limitation, and
-  // the limitation is worth stating rather than hiding: the ONLY rotorcraft
-  // builder this repo exports is CBZ.debugBuildPoliceAir.gunship(), so the
-  // helicopter sitting on a billionaire's sun deck is an attack helicopter.
-  // It is a REAL one — boardable and flyable through the existing air system,
-  // which is the part that matters — but it is not what the reference photo
-  // shows. Flip this false for bare pads until a civil light twin exists.
+  // pads themselves: the civil executive twin (playeraircraft.js
+  // debugBuildAircraft.vip), boardable and flyable through the existing air
+  // system. (It used to be an attack helicopter, the only rotorcraft builder
+  // there was; a billionaire's sun deck does not carry an Apache.)
   if (C.YACHT_HELI_PARKED == null) C.YACHT_HELI_PARKED = true;
   if (C.YACHT_GARAGE == null) C.YACHT_GARAGE = true;
   if (C.YACHT_DECKS == null) C.YACHT_DECKS = true;
@@ -2499,14 +2496,15 @@
   function fitHelideck(g) {
     if (C.YACHT_HELIDECK === false || C.YACHT_HELI_PARKED === false) return;
     if (!g || !g.pads || !g.pads.length) return;
-    if (!CBZ.cityRegisterMilitaryVehicle || !CBZ.debugBuildPoliceAir) return;
+    const AB = CBZ.debugBuildAircraft;
+    if (!CBZ.cityRegisterMilitaryVehicle || !AB || !AB.vip) return;
     // The AFT pad carries the ship's helicopter (the reference photo); the
     // forward pad is left clear, which is what a forward pad is FOR.
     const pad = g.pads.length > 1 ? g.pads[1] : g.pads[0];
     let grp = null;
-    try { grp = CBZ.debugBuildPoliceAir.gunship ? CBZ.debugBuildPoliceAir.gunship() : null; } catch (e) { grp = null; }
+    try { grp = AB.vip({ name: "Yacht Helicopter" }); } catch (e) { grp = null; }
     if (!grp) return;
-    grp.position.set(pad.x, pad.y + 0.55, pad.z);
+    grp.position.set(pad.x, pad.y + ((grp.userData && +grp.userData.belly) || 1.2), pad.z);   // on its skids (the measured belly)
     grp.rotation.y = Math.PI;
     grp.userData.dynamic = true;
     g.car.group.add(grp);

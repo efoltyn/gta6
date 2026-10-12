@@ -1,22 +1,23 @@
 #!/usr/bin/env node
 /* tools/front-sim.mjs — THE FRONT, HEADLESS. Plain node, no browser, no THREE.
 
-   Loads src/systems/brain.js (the one morale), src/city/polwar.js (the war)
-   and src/city/frontline.js (the battles) over a stubbed polity layer, then:
+   Loads src/systems/brain.js, src/city/polwar.js (the war) and
+   src/city/frontline.js (the battles) over a stubbed polity layer and a
+   stubbed CBZ.army that records what it is asked and lets the test say how a
+   battle went (the battle itself is the battle core's, fought in the world:
+   tools/army-headless.mjs holds that half).
 
-     1  resolve(): deterministic (same spec, same answer), symmetric armies
-        split both ways over seeds, a battle ends inside the cap, nobody dies
-        twice (dead + fled <= committed).
-     2  resolve(): the ladder matters — soldiers beat street fighters of the
-        same size, and a line that HOLDS beats the same men attacking it.
-     3  polwar + frontline: a war declared and ticked day by day is decided by
-        battles (one logged per day, dead come off polwar's soldiers one for
-        one, the front moves, weariness grows), the even-losses dice no longer
-        run, battle-started / battle-ended reach the bus with text, and the war
-        ends.
-     4  the President's battle: a watched result posted back (end and leave)
-        is applied once, the day is not fought twice, and a leave is finished
-        from the men still standing.
+     1  the armies: what a nation sends is read off what it is (a rich army
+        rides Bradleys behind Abrams, a middling one Strykers, a poor one
+        technicals); the President's nation is RED; who holds the ground.
+     2  polwar + frontline: each day of war starts ONE battle in the world
+        (two forces through CBZ.army.spawnForce: the holder holds, the
+        attacker attacks its line), polwar rolls no soldiers' dice while it is
+        fought, and when the field is called the bodies on the ground come off
+        polwar one for one, the front moves, the bus hears it, the loser falls
+        back and the field is cleared once nobody is watching.
+     3  the President's front: F: Front marks today's battle on his map (and
+        starts it if it has not), never a second one.
 
      node tools/front-sim.mjs        # all
      node tools/front-sim.mjs 2      # one                                   */
@@ -35,17 +36,17 @@ const bus = [];
 const records = {
   republic: { id: "republic", kind: "country", name: "The Republic", govType: "democracy", wealthLevel: 1, treasury: 900000 },
   kesh: { id: "kesh", kind: "country", name: "Kingdom of Kesh", govType: "monarchy", wealthLevel: 0.35, treasury: 200000 },
-  veridia: { id: "veridia", kind: "country", name: "Republic of Veridia", govType: "democracy", wealthLevel: 0.85, treasury: 500000 },
+  veridia: { id: "veridia", kind: "country", name: "Republic of Veridia", govType: "democracy", wealthLevel: 0.65, treasury: 500000 },
   libertyville: { id: "libertyville", kind: "city", name: "Libertyville", rect: { cx: 0, cz: 0, hx: 300, hz: 300 } },
 };
 let DAY = 10;
-const newDay = [];
+const newDay = [], ticks = [];
 globalThis.window = globalThis;
 globalThis.CBZ = {
   game: {},
   worldDay: () => DAY,
   onNewDay: (fn) => newDay.push(fn),
-  onUpdate: () => {},
+  onUpdate: (o, fn) => ticks.push(fn),
   polity: {
     get: (id) => records[id] || null,
     list: (k) => Object.values(records).filter((r) => r.kind === k),
@@ -58,161 +59,115 @@ globalThis.CBZ = {
   relations: { get: () => -80, event: () => {}, set: () => {}, warPressure: () => 0 },
   presidency: { emit: (evt, p) => bus.push({ evt, p }), on: () => {} },
   cityPopulationDie: () => {},
+  player: { pos: { x: 99999, z: 99999 }, hp: 200, maxHp: 200 },
 };
 const CBZ = globalThis.CBZ;
-// the one flag system (city/flags.js) paints each nation's flag; the page gets its picture
-CBZ.flags = { dataURL: (id) => "data:image/png;flag=" + id };
+/* THE ARMY, STUBBED: every force it is asked for, every order, every disband;
+   status() reads what the test wrote into force.st */
+const ARMY = { spawned: [], orders: [], disbanded: [], simT: 0 };
+CBZ.army = {
+  realm: { get simT() { return ARMY.simT; } },
+  spawnForce(spec) {
+    const n = spec.units.map((u) => u.split("*")).filter((p) => p[0] === "men").reduce((s, p) => s + (+p[1] || 1), 0);
+    const F = { id: spec.id, spec, n, st: { ready: true, alive: n, dead: 0, fled: 0, routed: 0, vehicles: 0, x: spec.at.x, z: spec.at.z, contact: false } };
+    ARMY.spawned.push(F);
+    return F;
+  },
+  orderForce(F, o) { ARMY.orders.push({ id: F.id, o }); return true; },
+  disband(F) { ARMY.disbanded.push(F.id); return true; },
+  status(F) { return F.st; },
+};
+const waypoints = [];
+CBZ.fullMap = { setWaypoint: (x, z, label) => { waypoints.push({ x, z, label }); return {}; } };
 require(path.join(ROOT, "src/systems/brain.js"));
 require(path.join(ROOT, "src/city/polwar.js"));
-const F = require(path.join(ROOT, "src/city/frontline.js"));
+const FL = require(path.join(ROOT, "src/city/frontline.js"));
 const W = CBZ.polwar;
-
-function spec(o) {
-  const side = (s) => Object.assign({ id: "x", name: "X", n: 40, tier: "elite", guns: "ak47", air: "none", strikes: 0, queued: 0 }, s);
-  return Object.assign({ v: 1, ground: "dunes", hold: null, seed: 7 }, o, { red: side(o.red || {}), blue: side(o.blue || {}) });
+// one second of play: the frontline's watcher runs on the city's update
+function second(n) { for (let k = 0; k < (n || 1); k++) { ARMY.simT += 1; for (const t of ticks) t(1); } }
+// a battle the test decides: the loser's men die and run, the winner's stand
+function fight(B, winT, deadW, deadL) {
+  const L = winT === "red" ? "blue" : "red";
+  const fw = B.forces[winT], fl = B.forces[L];
+  fw.st.contact = fl.st.contact = true;
+  second(3);
+  fw.st.dead = deadW; fw.st.alive = fw.n - deadW;
+  fl.st.dead = Math.min(fl.n, deadL); fl.st.fled = Math.max(0, Math.floor((fl.n - fl.st.dead) / 2));
+  fl.st.alive = fl.n - fl.st.dead - fl.st.fled; fl.st.routed = fl.st.alive;
+  second(2);
 }
 const scen = [];
 function scenario(n, name, fn) { scen.push({ n, name, fn }); }
 
-scenario(1, "resolve: deterministic, ends, conserves men", () => {
-  const s = spec({ red: { id: "a" }, blue: { id: "b" } });
-  const r1 = F.resolve(s), r2 = F.resolve(s);
-  check(JSON.stringify(r1) === JSON.stringify(r2), "same spec, same result " + JSON.stringify(r1));
-  let redWins = 0, capped = 0, ok = true;
-  for (let seed = 1; seed <= 40; seed++) {
-    const r = F.resolve(spec({ seed, red: { id: "a" }, blue: { id: "b" } }));
-    if (r.winner === "red") redWins++;
-    if (r.secs >= 240) capped++;
-    for (const t of ["red", "blue"]) if (r.dead[t] + r.fled[t] > 40) ok = false;
-  }
-  check(redWins >= 10 && redWins <= 30, "40 v 40 equal armies split both ways (red won " + redWins + "/40)");
-  check(capped <= 4, "battles end on the field, not on the clock (" + capped + " capped)");
-  check(ok, "dead + fled never exceeds the men sent");
+scenario(1, "the armies: read off what the nation is", () => {
+  W.reset();
+  const rich = FL.unitsFor("republic", 60, { planes: 8 }), mid = FL.unitsFor("veridia", 44, { planes: 1 }), poor = FL.unitsFor("kesh", 45, { planes: 0 });
+  check(rich.some((u) => /^m1_abrams\*/.test(u)) && rich.some((u) => /^bradley_ifv\*6/.test(u)) && rich.some((u) => /^ah64_apache/.test(u)),
+    "a rich army rides Bradleys behind Abrams, an Apache overhead (" + rich.join(", ") + ")");
+  check(mid.some((u) => /^stryker_apc\*4/.test(u)) && mid.some((u) => /^hmmwv/.test(u)), "a middling one Strykers and a Humvee (" + mid.join(", ") + ")");
+  check(poor.some((u) => /^technical\*3/.test(u)) && !poor.some((u) => /abrams|bradley|stryker/.test(u)), "a poor one technicals (" + poor.join(", ") + ")");
+  check(rich[rich.length - 1] === "men*60", "the men are the crews and the dismounts, counted once");
+  const war = W.declareWar("republic", "kesh", { byPlayer: true });
+  CBZ.warroom = { nation: () => "republic", nationAt: () => null };
+  const sp = FL.specFor(war, DAY, { you: "republic" });
+  check(sp && sp.red.id === "republic" && sp.you === "red", "the President's nation is RED (" + (sp && sp.red.name + " v " + sp.blue.name) + ")");
+  check(sp && (sp.hold === "red" || sp.hold === "blue") && isFinite(sp.x) && isFinite(sp.z), "a holder and a place (" + (sp && sp.hold + " at " + sp.x + "," + sp.z) + ")");
 });
 
-scenario(2, "resolve: training and holding the line matter", () => {
-  let eliteWins = 0, holdWins = 0, holdLoss = 0, atkLoss = 0;
-  for (let seed = 1; seed <= 30; seed++) {
-    const r = F.resolve(spec({ seed, red: { id: "a", tier: "elite" }, blue: { id: "b", tier: "thug" } }));
-    if (r.winner === "red") eliteWins++;
-    const h = F.resolve(spec({ seed, hold: "blue", red: { id: "a" }, blue: { id: "b" } }));
-    if (h.winner === "blue") holdWins++;
-    holdLoss += h.dead.blue; atkLoss += h.dead.red;
-  }
-  check(eliteWins >= 26, "soldiers beat street fighters of the same size (" + eliteWins + "/30)");
-  check(holdWins >= 20, "the line that holds beats the same men attacking it (" + holdWins + "/30)");
-  check(atkLoss > holdLoss, "the attacker bleeds more (" + atkLoss + " v " + holdLoss + " dead over 30)");
-  const big = F.resolve(spec({ seed: 3, hold: "blue", red: { id: "a", n: 120, tier: "pro" }, blue: { id: "b", n: 40, tier: "pro" } }));
-  check(big.winner === "red", "three to one carries a held line anyway (" + JSON.stringify(big) + ")");
-  const air = (q) => { let w = 0; for (let s = 1; s <= 30; s++) if (F.resolve(spec({ seed: s, red: { id: "a", queued: q } , blue: { id: "b" } })).winner === "red") w++; return w; };
-  const a0 = air(0), a2 = air(2);
-  check(a2 > a0, "the President's sorties over the line swing it (" + a0 + " -> " + a2 + " of 30)");
-});
-
-scenario(3, "polwar + frontline: the war is fought day by day", () => {
-  W.reset(); bus.length = 0;
+scenario(2, "polwar + frontline: one battle a day, fought in the world", () => {
+  W.reset(); bus.length = 0; ARMY.spawned.length = 0; ARMY.orders.length = 0; ARMY.disbanded.length = 0;
+  CBZ.warroom = { nation: () => "republic", nationAt: () => null };
   const war = W.declareWar("republic", "kesh", { byPlayer: true });
   check(!!war, "war declared");
-  const rep0 = W.militaryOf("republic").soldiers, kesh0 = W.militaryOf("kesh").soldiers;
   const pos0 = war.fronts[0].position;
-  let days = 0, battles = 0, deadSum = { republic: 0, kesh: 0 };
-  while (!war.ended && days < 80) {
+  const rep0 = W.militaryOf("republic").soldiers, kesh0 = W.militaryOf("kesh").soldiers;
+  DAY++; for (const fn of newDay) fn(DAY);
+  const B = FL.battles()[war.id];
+  check(!!B && ARMY.spawned.length === 2, "the day's battle started in the world: two forces (" + ARMY.spawned.map((f) => f.spec.side + " " + f.spec.units.join("+")).join(" v ") + ")");
+  const hold = B.spec.hold, atk = hold === "red" ? "blue" : "red";
+  const fh = B.forces[hold].spec, fa = B.forces[atk].spec;
+  check(fh.order.type === "hold" && fa.order.type === "attack" && Math.hypot(fa.order.at.x - fh.at.x, fa.order.at.z - fh.at.z) < 1,
+    "the holder holds its line, the attacker attacks it (" + fh.side + " holds, " + fa.side + " attacks)");
+  check(fh.hostile !== undefined && (fh.side === "republic" ? fh.hostile === "never" : fh.hostile === "always"), "the President's men are his; the enemy's shoot him");
+  check(W.militaryOf("republic").soldiers === rep0 && W.militaryOf("kesh").soldiers === kesh0, "no soldiers' dice while it is fought (" + rep0 + "/" + kesh0 + " unchanged)");
+  check(bus.some((b) => b.evt === "battle-started"), "battle-started on the bus");
+  DAY++; for (const fn of newDay) fn(DAY);
+  check(ARMY.spawned.length === 2, "a battle still being fought is not started twice");
+  fight(B, "red", 3, 21);
+  const keshDead = B.forces.blue.st.dead;
+  check(!!B.called, "the field was called when a side broke");
+  check(W.militaryOf("kesh").soldiers === kesh0 - keshDead && W.militaryOf("republic").soldiers === rep0 - 3,
+    "the bodies on the ground came off polwar one for one (kesh -" + keshDead + ", republic -3)");
+  check(war.fronts[0].position !== pos0, "the front moved (" + pos0 + " -> " + war.fronts[0].position.toFixed(3) + ")");
+  const en = bus.filter((b) => b.evt === "battle-ended");
+  check(en.length === 1 && /Republic/.test(en[0].p.text), "battle-ended with text: \"" + (en[0] && en[0].p.text) + "\"");
+  const fb = ARMY.orders.filter((o) => o.id === B.forces.blue.id && o.o.type === "withdraw");
+  check(fb.length === 1, "the loser falls back toward home");
+  second(130);
+  check(ARMY.disbanded.length === 2 && !FL.battles()[war.id], "the field is cleared once nobody is watching");
+  let days = 0;
+  while (!war.ended && days < 60) {
     DAY++; days++;
-    const repB = W.militaryOf("republic").soldiers, keshB = W.militaryOf("kesh").soldiers;
     for (const fn of newDay) fn(DAY);
-    const last = war.log[war.log.length - 1];
-    const b = war.log.filter((l) => l.kind === "battle" && l.day === DAY - 1);
-    if (b.length === 1) {
-      battles++;
-      deadSum.republic += b[0].dead.republic || 0; deadSum.kesh += b[0].dead.kesh || 0;
-    }
-    if (days === 1) {
-      const e = b[0];
-      check(!!e, "day one: a battle is logged for the day that ended (" + (e && e.text) + ")");
-      const dRep = repB - W.militaryOf("republic").soldiers, dKesh = keshB - W.militaryOf("kesh").soldiers;
-      check(e && dRep >= (e.dead.republic || 0) && dKesh >= (e.dead.kesh || 0),
-        "the dead come off polwar's soldiers (republic -" + dRep + ", kesh -" + dKesh + ")");
-      check(dRep !== Math.round(6 * war.intensity) || dKesh !== Math.round(6 * war.intensity), "and it is not the old even-losses dice");
-    }
+    const b2 = FL.battles()[war.id];
+    if (b2 && !b2.called) { fight(b2, "red", 2, 18); second(130); }
   }
-  check(battles >= Math.min(days, 3), "one battle per day of war (" + battles + " in " + days + " days)");
-  check(war.ended, "the war ended (" + war.endReason + ", winner " + war.winner + ", day " + days + ")");
-  check(war.fronts[0].position !== pos0, "the front moved (" + pos0 + " -> " + war.fronts[0].position.toFixed(2) + ")");
-  check(deadSum.kesh > 0 && deadSum.republic >= 0, "battle dead summed: " + JSON.stringify(deadSum) + " of " + rep0 + "/" + kesh0);
-  const st = bus.filter((x) => x.evt === "battle-started"), en = bus.filter((x) => x.evt === "battle-ended");
-  check(st.length >= 1 && en.length >= 1 && st.length === en.length, "battle-started/ended on the bus (" + st.length + "/" + en.length + ")");
-  check(en.every((x) => typeof x.p.text === "string" && x.p.text.length > 8), "every battle-ended has text: \"" + (en[0] && en[0].p.text) + "\"");
-  check(war.winner === "republic", "the richer, readier army won the war (" + war.winner + ")");
+  check(war.ended && war.winner === "republic", "the war was decided by its battles (" + war.endReason + ", " + war.winner + ", " + days + " more days)");
 });
 
-scenario(4, "the President's battle: posted back once, leave finished headless", () => {
-  W.reset(); bus.length = 0;
+scenario(3, "the President's front: marked on his map, never twice", () => {
+  W.reset(); bus.length = 0; ARMY.spawned.length = 0; waypoints.length = 0;
+  CBZ.warroom = { nation: () => "republic", nationAt: () => null };
   const war = W.declareWar("republic", "veridia", { byPlayer: true });
-  CBZ.warroom = { nation: () => "republic", nationAt: () => null, STRIKE_COST: 12000 };
-  const sp = F.specFor(war, DAY, { you: "republic" });
-  check(sp && sp.you === "red" && sp.red.id === "republic", "spec: the President's nation is RED (" + (sp && sp.red.name) + " v " + (sp && sp.blue.name) + ", " + (sp && sp.ground) + ")");
-  check(sp && sp.red.flagUrl && sp.blue.flagUrl && sp.red.flagUrl !== sp.blue.flagUrl && sp.red.mark !== sp.blue.mark, "each side carries its own flag and colour");
-  // fake the overlay (no DOM): open state by hand, then post an END
-  const before = W.militaryOf("veridia").soldiers;
-  const treas0 = records.republic.treasury;
-  // simulate onResult through the module's own path
-  const o = { warId: war.id, spec: sp };
-  F._onResult && (function () {
-    // open() needs a document; emulate its bookkeeping by calling the internal through a minimal shim
-  })();
-  const res = { winner: "red", dead: { red: 5, blue: 19 }, fled: { red: 0, blue: 7 }, watched: true, strikesUsed: 1 };
-  F.apply(war, sp, res);
-  check(W.militaryOf("veridia").soldiers === before - 19, "19 Veridian dead come off their army");
-  check(records.republic.treasury === treas0 - 12000, "one sortie flown, one sortie paid for");
-  check(F.foughtOn(war, DAY), "the day is marked fought");
-  const n0 = war.log.filter((l) => l.kind === "battle").length;
-  DAY++; for (const fn of newDay) fn(DAY);
-  const n1 = war.log.filter((l) => l.kind === "battle").length;
-  check(n1 === n0, "the next tick does not fight that day again (" + n0 + " -> " + n1 + ")");
-  DAY++; for (const fn of newDay) fn(DAY);
-  check(war.log.filter((l) => l.kind === "battle").length === n1 + 1 || war.ended, "and the day after is fought headless");
-  // a LEAVE is finished from the men still standing
-  const rest = JSON.parse(JSON.stringify(sp)); rest.red.n = 12; rest.blue.n = 30; rest.seed = 99;
-  const r2 = F.resolve(rest);
-  check(r2.dead.red + r2.fled.red <= 12 && r2.dead.blue + r2.fled.blue <= 30, "a leave resolves from what is left (" + JSON.stringify(r2) + ")");
-});
-
-scenario(5, "the overlay: go to the front, the city holds, the result comes home", () => {
-  // a document that only remembers what was put in it
-  const body = { kids: [], appendChild(f) { this.kids.push(f); f.parentNode = this; return f; }, removeChild(f) { this.kids.splice(this.kids.indexOf(f), 1); f.parentNode = null; } };
-  globalThis.document = { body, pointerLockElement: null, exitPointerLock() {},
-    createElement: () => ({ style: {}, setAttribute() {}, focus() {}, contentWindow: {} }) };
-  W.reset(); bus.length = 0;
-  CBZ.game.state = "playing";
-  const states = [];
-  CBZ.setState = (st) => { states.push(st); CBZ.game.state = st; };
-  CBZ.warroom = { nation: () => "republic", nationAt: () => null, STRIKE_COST: 12000 };
-  const war = W.declareWar("republic", "kesh", { byPlayer: true });
-  const g = F.canGo();
+  const g = FL.canGo();
   check(g.ok, "at war: the Front verb is open (" + (g.why || "ok") + ")");
-  const r = F.go();
-  check(r.ok && body.kids.length === 1 && /games\/battle\.html\?v=[^&]+&front=/.test(body.kids[0].src), "the battle page opens over the city: " + (body.kids[0] && body.kids[0].src.slice(0, 48)) + "...");
-  check(CBZ.game.state === "front" && CBZ.drawHeld === true, "the city holds its breath (state front, no draw)");
-  // the page's own decode (games/battle.html FRONT) reads back what the city sent
-  const raw = body.kids[0].src.split("front=")[1];
-  const b = raw.replace(/-/g, "+").replace(/_/g, "/");
-  const back = JSON.parse(decodeURIComponent(escape(Buffer.from(b + "===".slice((b.length + 3) % 4), "base64").toString("binary"))));
-  check(back.red.id === "republic" && back.blue.id === "kesh" && back.red.flagUrl === "data:image/png;flag=republic" && back.hold && back.ground,
-    "the page decodes the spec the city sent (" + back.red.name + " v " + back.blue.name + " on " + back.ground + ", " + back.hold + " holds)");
-  check(bus.some((b) => b.evt === "battle-started" && b.p.watched), "battle-started on the bus, watched");
-  check(!F.canGo().ok, "and you cannot open a second one");
-  // the page posts a LEAVE mid-battle: 12 of ours and 9 of theirs dead, the rest still out there
-  const sp = F.status().spec;
-  const kesh0 = W.militaryOf("kesh").soldiers;
-  F._onResult({ type: "cbz-front", kind: "leave", dead: { red: 4, blue: 9 }, fled: { red: 0, blue: 0 }, alive: { red: sp ? sp.red.n - 4 : 30, blue: sp ? sp.blue.n - 9 : 20 }, strikesUsed: 0, youDown: true });
-  check(CBZ.game.state === "playing" && !CBZ.drawHeld && body.kids.length === 0, "home: the page is gone, the city plays and draws again");
-  const e = bus.filter((b) => b.evt === "battle-ended").pop();
-  check(!!e && e.p.watched && e.p.dead.kesh >= 9, "the battle the President left was finished from the men still standing (" + (e && e.p.text) + ")");
-  check(W.militaryOf("kesh").soldiers <= kesh0 - 9, "and Kesh's dead came off its army (" + kesh0 + " -> " + W.militaryOf("kesh").soldiers + ")");
-  check(bus.some((b) => b.evt === "president-wounded"), "the President was hit out there, and the country hears it");
-  check(F.foughtOn(war, DAY), "today is fought");
-  check(!F.canGo().ok, "and the Front waits for tomorrow (" + F.canGo().why + ")");
-  delete globalThis.document;
+  const r = FL.go();
+  check(r.ok && ARMY.spawned.length === 2 && waypoints.length === 1 && waypoints[0].label === "The front", "F: Front starts today's battle and marks it on his map (" + r.line + ")");
+  const r2 = FL.go();
+  check(r2.ok && ARMY.spawned.length === 2 && waypoints.length === 2, "asking again marks the same battle, it does not start another");
+  DAY++; for (const fn of newDay) fn(DAY);
+  check(ARMY.spawned.length === 2, "the daily tick finds it being fought");
+  void war;
 });
 
 for (const s of scen) {

@@ -2570,6 +2570,31 @@
                                  // which drops sprint a beat before the press lands
   const PRONE_WINDOW = 0.4;      // s after entering crouch in which a 2nd press = prone
   const PRONE_SPEED = 0.35;      // × walkSpeed crawl (0.7 m/s)
+  /* THE GAIT LADDER (Gang City). The city used to have two speeds: the
+     2 m/s walk that every WASD press and every non-rim stick push produced,
+     and a 6.4 m/s sprint that only Shift / a rammed stick reached, that
+     drained the tank in ~8 s and was switched OFF outright whenever hunger
+     sat under 30 (systems/hunger.js zeroes stamina) or the bag was carried.
+     So the default way to cross the city was a 2 m/s stroll ("walking super
+     slow instead of being able to run"). Now a full push RUNS (TUNE.runSpeed,
+     no stamina), Shift / the stick rim SPRINTS (walkSpeed x CITY.sprintMul,
+     stamina-limited), and a gentle stick push still WALKS. Running out of
+     wind or being hungry drops a sprint to the run, never to a walk.
+     Other modes keep walk-by-default (jail sneaks, survival is tuned against
+     its 6.4 sprint in systems/predator.js). */
+  const RUN_STICK = 0.55;        // touch stick deflection at/above which you run
+  function cityGait() { return !!(CBZ.game && CBZ.game.mode === "city"); }
+  function sprintMulNow() {
+    const S = cityGait() ? CBZ.CITY : CBZ.SURV;
+    return (S && S.sprintMul) || (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
+  }
+  // the speed a held direction produces without Shift
+  function cruiseSpeed() {
+    if (!cityGait()) return T.walkSpeed;
+    const ax = CBZ.touchStickAxis && CBZ.touchStickAxis();
+    if (ax && Math.hypot(ax.x, ax.y) < RUN_STICK) return T.walkSpeed;
+    return T.runSpeed || T.walkSpeed;
+  }
   const CROUCH_BODY_H = 1.2;     // stance-crouch/slide collision height (standing BODY_H 1.7)
   const PRONE_BODY_H = 0.5;      // prone collision height — crawl under height-gated walls
   const PRONE_SINK = 0.62;       // rig group drop so the hip-hinged plank lies ON the ground
@@ -2633,7 +2658,7 @@
         if (slideOK) {
           // SLIDE: carry the sprint you brought in, slightly hotter, along the
           // direction you're pushing (else the one you were moving on, else facing).
-          const sMul = (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
+          const sMul = sprintMulNow();
           st.slideT = 0;
           // floor = the wound-scaled sprint speed, for the same-frame desktop
           // press where the memory hasn't sampled yet — a limping player must
@@ -2872,7 +2897,7 @@
     player.sprint = !overview && !mapOpen && !stunned && !player.crouch && hitSlow === 1 &&
       !!keys["shift"] && len > 0 && staminaReady &&
       !(CBZ.vitals && CBZ.vitals.weak(player) > 0.5);            // too much blood gone to run
-    const sprintMul = (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
+    const sprintMul = sprintMulNow();
     // a leg wound (city/death.js injury model) publishes player._moveScale (&lt;1)
     // so a shot-up player can't run away — the limp you SEE is also the limp you FEEL.
     // _rideScale (>1) = mounted on an animal (city/wildlife_tame.js publishes
@@ -2887,7 +2912,7 @@
       (CBZ.vitals ? CBZ.vitals.speedMul(player) : 1);            // groggy, bled, a shot leg, wrapping a wound (systems/vitals.js)
     const moveSpeed = (player.prone ? T.walkSpeed * PRONE_SPEED
       : player.crouch ? T.crouchSpeed
-      : (player.sprint ? T.walkSpeed * sprintMul : T.walkSpeed)) * woundScale * hitSlow;
+      : (player.sprint ? T.walkSpeed * sprintMul : cruiseSpeed())) * woundScale * hitSlow;
     let desX = 0, desZ = 0;
     if (len > 0) { mx /= len; mz /= len; }
     if (sliding) {

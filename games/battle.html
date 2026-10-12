@@ -39,21 +39,20 @@
       of a man on your side; the same button hands it back.
     • Two open grounds. Snow and fields are the same honest erg under
       another surface and sky.
-    • THE FRONT: Gang City's wars are fought here (city/frontline.js opens
-      this page over the city with ?front=<the battle>): two nations, their
-      men, rifles, colours and flags, who holds, the General's HOLD/ADVANCE
-      and his airstrikes, and the result posted home.
+    • Gang City fights its wars with this page's own sim on its own streets
+      (city/army.js: the same files, compiled into the city's realm).
   tools/npcwar-headless.mjs runs this page's sim in node and holds all of it.
 ============================================================ -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap">
-<link rel="stylesheet" href="../src/battle/battle.css?v=take1011">
+<link rel="stylesheet" href="../src/battle/battle.css?v=army1013m">
 </head>
 <body>
 
 <div id="menu"><div class="in">
   <a class="hubLink" href="../index.html">MAIN MENU</a>
+<script src="../src/core/stage.js?v=army1013m"></script>
   <header class="hero">
     <div class="kick">A BATTLE YOU WATCH</div>
     <h1>NPC <em>WAR</em></h1>
@@ -146,8 +145,6 @@
   <button id="cSpeed" aria-label="speed"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l8 6-8 6zM12 6l8 6-8 6z"/></svg></button>
   <button id="cCam" aria-label="camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5C6.5 5 2.7 9.4 1.5 12c1.2 2.6 5 7 10.5 7s9.3-4.4 10.5-7C21.3 9.4 17.5 5 12 5zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"/></svg></button>
   <button id="cRifle" aria-label="take a rifle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 13h11l1.5-2H21v2.5h-4l-1 1.5h-3.5l-1.6 4H8.6l1.2-4H2z"/></svg></button>
-  <button id="cHold" class="hide" aria-label="hold or advance"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2h2v20H5zM8 3h11l-2.5 4L19 11H8z"/></svg></button>
-  <button id="cAir" class="hide" aria-label="airstrike"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15.5v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0v5l-8 5v2l8-2.5V18l-2 1.5V21l3.5-1 3.5 1v-1.5L13 18v-5z"/></svg><span class="n" id="cAirN"></span></button>
 </div>
 <div id="xhair"></div>
 <div id="banner"></div>
@@ -176,72 +173,73 @@
   skips files a page already carries, so the day a "guns" pack ships,
   these lines simply stop being needed.
 ============================================================ -->
-<script src="../src/core/studio.js?v=basem1012"></script>
+<script src="../src/core/studio.js?v=army1013m"></script>
 <!-- NPC WAR ITSELF: src/battle/, one shared scope, in this order. The
   file map and who owns what: docs/npcwar/ARCHITECTURE.md -->
 <script src="../src/battle/npcwar.js?v=npcw1011b"></script>
-<script src="../src/units/unitkit.js?v=basem1012"></script>
-<script src="../src/units/manifest.js?v=basem1012"></script>
+<script src="../src/units/unitkit.js?v=army1013m"></script>
+<script src="../src/units/manifest.js?v=army1013m"></script>
 <script src="../src/units/kit/moves.js?v=take1011"></script>
-<script src="../src/battle/core/roster.js?v=npcw1011b"></script>
-<script src="../src/battle/core/sides.js?v=npcw1011b"></script>
-<script src="../src/battle/core/series.js?v=npcw1011b"></script>
-<script src="../src/battle/core/host.js?v=terrainm1011"></script>
-<script src="../src/battle/core/store.js?v=scale1011"></script>
-<script src="../src/battle/core/lod.js?v=scale1011"></script>
-<script src="../src/battle/core/flow.js?v=scale1011"></script>
-<script src="../src/battle/core/tiersim.js?v=scale1011"></script>
-<script src="../src/battle/core/simlink.js?v=scale1011"></script>
-<script src="../src/battle/core/tactics.js?v=aim1012"></script>
-<script src="../src/battle/settings.js?v=balancem1012"></script>
-<script src="../src/battle/arenas/maps.js?v=terrainm1011"></script>
-<script src="../src/battle/teams.js?v=npcw1011b"></script>
-<script src="../src/battle/arms.js?v=npcw1011b"></script>
-<script src="../src/battle/load.js?v=physicsm1011"></script>
-<script src="../src/battle/core.js?v=npcw1011b"></script>
-<script src="../src/battle/menu.js?v=npcw1011b"></script>
-<script src="../src/battle/state.js?v=balancem1012"></script>
-<script src="../src/battle/arenas/yard.js?v=fairm1012"></script>
-<script src="../src/battle/arenas/erg.js?v=fairm1012"></script>
-<script src="../src/battle/arenas/cover.js?v=terrainm1011"></script>
-<script src="../src/world/basekit.js?v=basem1012"></script>
-<script src="../src/battle/arenas/dress.js?v=fairm1012"></script>
-<script src="../src/battle/arenas/ground.js?v=fairm1012"></script>
-<script src="../src/battle/arenas/woods.js?v=fairm1012"></script>
-<script src="../src/battle/arenas/fields.js?v=fairm1012"></script>
-<script src="../src/battle/arenas/sea.js?v=water1011"></script>
-<script src="../src/battle/arenas/field.js?v=fairm1012"></script>
-<script src="../src/battle/men.js?v=armourm1011"></script>
-<script src="../src/battle/beasts.js?v=balancem1012"></script>
-<script src="../src/battle/damage.js?v=balm1012"></script>
-<script src="../src/battle/ai/morale.js?v=balm1012"></script>
-<script src="../src/battle/death.js?v=physicsm1011"></script>
-<script src="../src/battle/physics.js?v=balm1012"></script>
+<script src="../src/battle/core/roster.js?v=army1013"></script>
+<script src="../src/battle/core/sides.js?v=army1013"></script>
+<script src="../src/battle/core/series.js?v=army1013"></script>
+<script src="../src/battle/core/host.js?v=army1013m"></script>
+<script src="../src/battle/core/store.js?v=army1013"></script>
+<script src="../src/battle/core/lod.js?v=army1013"></script>
+<script src="../src/battle/core/flow.js?v=army1013"></script>
+<script src="../src/battle/core/tiersim.js?v=army1013m"></script>
+<script src="../src/battle/core/simlink.js?v=army1013"></script>
+<script src="../src/battle/core/tactics.js?v=army1013m"></script>
+<script src="../src/battle/settings.js?v=army1013m"></script>
+<script src="../src/battle/arenas/maps.js?v=army1013"></script>
+<script src="../src/battle/teams.js?v=army1013m"></script>
+<script src="../src/battle/arms.js?v=army1013"></script>
+<script src="../src/battle/load.js?v=army1013"></script>
+<script src="../src/battle/core.js?v=army1013"></script>
+<script src="../src/battle/menu.js?v=army1013m"></script>
+<script src="../src/battle/state.js?v=army1013"></script>
+<script src="../src/battle/arenas/yard.js?v=army1013"></script>
+<script src="../src/battle/arenas/erg.js?v=army1013"></script>
+<script src="../src/battle/arenas/cover.js?v=army1013"></script>
+<script src="../src/world/basekit.js?v=army1013m"></script>
+<script src="../src/battle/arenas/dress.js?v=army1013"></script>
+<script src="../src/battle/arenas/ground.js?v=army1013"></script>
+<script src="../src/battle/arenas/woods.js?v=army1013"></script>
+<script src="../src/battle/arenas/fields.js?v=army1013"></script>
+<script src="../src/battle/arenas/sea.js?v=army1013"></script>
+<script src="../src/battle/arenas/field.js?v=army1013m"></script>
+<script src="../src/battle/men.js?v=army1013m"></script>
+<script src="../src/battle/beasts.js?v=army1013m"></script>
+<script src="../src/battle/damage.js?v=army1013m"></script>
+<script src="../src/battle/ai/morale.js?v=army1013m"></script>
+<script src="../src/battle/death.js?v=army1013m"></script>
+<script src="../src/battle/physics.js?v=army1013m"></script>
 <script src="../src/units/kit/vehicle.js?v=mrapm1012"></script>
-<script src="../src/battle/vehicles.js?v=debm1012"></script>
-<script src="../src/battle/ai/orders.js?v=npcw1011b"></script>
-<script src="../src/battle/fire.js?v=balm1012"></script>
-<script src="../src/battle/air.js?v=npcw1011b"></script>
-<script src="../src/battle/ai/think.js?v=balm1012"></script>
-<script src="../src/battle/ai/squad.js?v=balm1012"></script>
-<script src="../src/battle/step.js?v=aim1012"></script>
-<script src="../src/battle/melee.js?v=aim1012"></script>
-<script src="../src/battle/player.js?v=aim1012"></script>
-<script src="../src/battle/camera/camera.js?v=take1011"></script>
-<script src="../src/battle/camera/study.js?v=vehsys1011d"></script>
-<script src="../src/battle/camera/killcam.js?v=take1011"></script>
-<script src="../src/battle/hud.js?v=take1011"></script>
-<script src="../src/battle/clock.js?v=npcw1011b"></script>
-<script src="../src/battle/front.js?v=npcw1011b"></script>
-<script src="../src/battle/bench.js?v=npcw1011b"></script>
-<script src="../src/battle/spawn.js?v=npcw1011b"></script>
-<script src="../src/battle/mass.js?v=scale1011"></script>
-<script src="../src/battle/massdraw.js?v=armourm1011"></script>
-<script src="../src/battle/settingspanel.js?v=scale1011"></script>
-<script src="../src/battle/scoring.js?v=take1011"></script>
-<script src="../src/battle/begin.js?v=terrainm1011"></script>
-<script src="../src/battle/loop.js?v=aim1012"></script>
-<script src="../src/battle/probe.js?v=aim1012"></script>
-<script src="../src/battle/main.js?v=npcw1011b"></script>
+<script src="../src/battle/vehicles.js?v=army1013m"></script>
+<script src="../src/battle/drones.js?v=army1013m"></script>
+<script src="../src/battle/ai/orders.js?v=army1013m"></script>
+<script src="../src/battle/fire.js?v=army1013m"></script>
+<script src="../src/battle/air.js?v=army1013m"></script>
+<script src="../src/battle/ai/think.js?v=army1013m"></script>
+<script src="../src/battle/ai/squad.js?v=army1013m"></script>
+<script src="../src/battle/step.js?v=army1013m"></script>
+<script src="../src/battle/melee.js?v=army1013"></script>
+<script src="../src/battle/player.js?v=army1013m"></script>
+<script src="../src/battle/camera/camera.js?v=army1013"></script>
+<script src="../src/battle/camera/study.js?v=army1013"></script>
+<script src="../src/battle/camera/killcam.js?v=army1013"></script>
+<script src="../src/battle/hud.js?v=army1013"></script>
+<script src="../src/battle/clock.js?v=army1013m"></script>
+<script src="../src/battle/bench.js?v=army1013"></script>
+<script src="../src/battle/spawn.js?v=army1013m"></script>
+<script src="../src/battle/mass.js?v=army1013m"></script>
+<script src="../src/battle/massdraw.js?v=army1013m"></script>
+<script src="../src/battle/settingspanel.js?v=army1013"></script>
+<script src="../src/battle/scoring.js?v=army1013m"></script>
+<script src="../src/battle/begin.js?v=army1013m"></script>
+<script src="../src/battle/tick.js?v=army1013m"></script>
+<script src="../src/battle/loop.js?v=army1013m"></script>
+<script src="../src/battle/probe.js?v=army1013"></script>
+<script src="../src/battle/main.js?v=army1013"></script>
 </body>
 </html>

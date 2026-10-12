@@ -53,7 +53,7 @@ function beastTuning(sp) {
   return b;
 }
 function makeBeast(teamId, i, spIdIn) {
-  const spId = spIdIn || kindAt(teamId === "red" ? SET.redU : SET.blueU, i);
+  const spId = spIdIn || unitIdAt(teamId, i);
   const sp = (CBZ.WILDLIFE_SPECIES || {})[spId];
   if (!sp || !sp.build) return null;
   const T = TEAMS[teamId];
@@ -135,8 +135,8 @@ function makeBeast(teamId, i, spIdIn) {
     CBZ.cmat(T.color));
   collar.position.set((bb.max.x * 0.55) / s, (H * 0.7) / s, 0);
   group.add(collar);
-  const at = MAP.spawnAt(teamId, i, rad);
-  group.position.set(at.x, MAP.groundAt(at.x, at.z), at.z);
+  const at = HOST.spawnAt(teamId, i, rad);
+  group.position.set(at.x, HOST.groundAt(at.x, at.z), at.z);
   CBZ.scene.add(group);
   const tn = beastTuning(sp);
   const m = {
@@ -187,7 +187,7 @@ function makeBeast(teamId, i, spIdIn) {
   if (CBZ.buildSwimRig && !SWIM_OLD) { try { CBZ.buildSwimRig(m); } catch (e) {} }
   // a species file that animates its own body needs no discovered leg rig
   if (!m.swim && CBZ.wildlifeRig && !(kit && kit.animate)) CBZ.wildlifeRig.buildGait(m);
-  if (MAP.water) { m.swimD = cruiseDepth(m); m.pos.y = MAP.bodyY(m, at.x, at.z); }
+  if (HOST.water) { m.swimD = cruiseDepth(m); m.pos.y = HOST.bodyY(m, at.x, at.z); }
   m.target.set(at.x, 0, at.z);
   (squads[teamId][m.sq] = squads[teamId][m.sq] || []).push(m);
   if (AIR.on && CBZ.ordnance && CBZ.ordnance.addTarget) {
@@ -241,8 +241,8 @@ function beastMove(a, dx, dz, step) {
   if (step <= 0) return;
   a.pos.x += dx * step;
   a.pos.z += dz * step;
-  CBZ.micro.resolveCircle(a.pos, a.rad || 0.6, a.pos.y, 1.8);
-  a.pos.y = MAP.bodyY(a, a.pos.x, a.pos.z);
+  HOST.resolveCircle(a.pos, a.rad || 0.6, a.pos.y, 1.8);
+  a.pos.y = HOST.bodyY(a, a.pos.x, a.pos.z);
 }
 function beastFight(m, tgt, sdt) {
   let o = m._bf;
