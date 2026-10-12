@@ -94,9 +94,9 @@
 
   /* ---------------------------------------------------------- the weapons */
   const TOW = { id: "tow_2b", seat: "gunner", kind: "missile", turret: true, rof: 0.05, vs: "armour",
-    pen: 900, beh: 950, speed: 190, range: 3750, minRange: 65, ammo: 7 };
+    mun: "tow2b", range: 3750, minRange: 65, ammo: 7 };
   const M242 = { id: "m242_25mm", seat: "gunner", kind: "autocannon", turret: true, rof: 3.33, burst: 4, pause: 1,
-    pen: 65, beh: 140, he: { pen: 12, beh: 110, blast: 3, power: 0.55 }, speed: 1385, heSpeed: 1100, grav: 9.8, range: 2500, ammo: 900 };
+    mun: "m791", heMun: "m792", grav: 9.8, range: 2500, ammo: 900 };
   const COAX = { id: "m240_coax", seat: "gunner", kind: "mg", wid: "lmg", turret: true, rof: 10, burst: 8, pause: 1.2,
     dmg: 22, pen: 9, range: 900, ammo: 2200 };
 

@@ -76,6 +76,18 @@ const STUDIO = {
      on the soldiers and MASS.blast on the rows. One sweep, nobody twice. */
   boom: function (pos, o) {
     o = o || {};
+    /* A ROUND THAT NAMES ITS MUNITION is the city's ordnance bus
+       (CBZ.detonate), priced by weapons/munitiontable.js: the same fireball,
+       wall, roof, collapse and parked-hardware damage the one resolver
+       (systems/strike.js) gives it in NPC War, through the same sweep. */
+    const MT = CBZ.munitionTable, f = o.mun && MT ? MT.fx(o.mun) : null;
+    if (f && f.W > 0 && CBZ.detonate) {
+      try {
+        CBZ.detonate(pos.x, pos.y || 0, pos.z, f.id, { by: o.by || null, byPlayer: !!o.byPlayer, dirx: o.dirx, dirz: o.dirz,
+          contact: !!o.contact });
+      } catch (e) { console.warn("[army] detonate", e); }
+      return { drew: true, hit: 0, struck: null, W: f.W, R: f.R, power: f.power };
+    }
     const R = o.radius > 0 ? o.radius : 18, power = o.power > 0 ? o.power : 1;
     if (CBZ.cityExplosion) {
       try {

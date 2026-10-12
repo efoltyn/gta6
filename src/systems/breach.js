@@ -227,29 +227,24 @@
      row id; they are here so the check and any game can ask "what is a Mk-84"
      without loading the bus. shaped/jetPen: metres of concrete the jet
      perforates. */
-  const CHARGES = {
-    grenade:   { W: 0.2 },                                  // M67-class, Comp B fill
-    rpg:       { W: 0.7, shaped: true, jetPen: 1.5 },       // PG-7-class HEAT
-    tank:      { W: 4.0 },                                  // 120/125 mm HE-frag
-    tankHeat:  { W: 3.0, shaped: true, jetPen: 1.2 },       // 120 mm HEAT-MP
-    hellfire:  { W: 9.0, shaped: true, jetPen: 2.0 },       // AGM-114-class
-    missile:   { W: 9.0, shaped: true, jetPen: 2.0 },       // the shared missile pool = Hellfire class
-    atgm:      { W: 9.0, shaped: true, jetPen: 2.0 },       // the gunship's Hellfire-class round
-    shell:     { W: 3.0, shaped: true, jetPen: 1.2 },       // the tank main gun's 120 mm HEAT
-    hydra:     { W: 1.4 },                                  // 70 mm unguided rocket, HE warhead
-    aam:       { W: 8.0 },                                  // air-to-air blast-frag warhead
-    patriot:   { W: 70 },                                   // SAM blast-frag warhead
-    rocket227: { W: 90 },                                   // 227 mm unitary guided rocket
-    mk82:      { W: 89 },                                   // 500 lb GP bomb
-    airstrike: { W: 89 },                                   // a called-in strike: Mk-82 class
-    mk84:      { W: 430 },                                  // 2000 lb GP bomb
-    bomb:      { W: 430 },                                  // the B-2's unguided Mk-84
-    jdam:      { W: 430 },                                  // guidance kit on the same Mk-84 fill
-    buster:    { W: 2400 },                                 // GBU-57-class penetrator
-    moab:      { W: 11000 },                                // H6 fill, TNT-equivalent
-    c4:        { W: lbToKg(5) },                            // the 5 lb brick
-    carcook:   { W: 2.0 },                                  // a car's fuel deflagration
-  };
+  /* THE CHARGES ARE THE MUNITION TABLE'S (weapons/munitiontable.js, loaded
+     before this file): every munition id there, and every name the ordnance
+     bus and the old callers use for one ("rpg" is the PG-7V, "jdam" the
+     GBU-31(V)1, "buster" the GBU-57...), answers here with its W = fill x
+     RE and its shaped jet. The only row that is not a munition is a car's
+     fuel deflagration. */
+  const CHARGES = { carcook: { W: 2.0 } };
+  (function fromTable() {
+    const MT = CBZ.munitionTable;
+    if (!MT) return;
+    const put = function (name, id) {
+      const f = MT.fx(id);
+      // the nuclear row keeps its own field (impactbus.js), it has no charge here
+      if (f && f.W > 0 && f.cls !== "nuke") CHARGES[name] = { W: f.W, shaped: f.shaped || undefined, jetPen: f.shaped ? f.jet : undefined, mun: f.id };
+    };
+    MT.list().forEach(function (id) { put(id, id); });
+    Object.keys(MT.ALIAS).forEach(function (name) { put(name, MT.ALIAS[name]); });
+  })();
 
   const law = CBZ.blastLaw = {
     Z_GLASS: Z_GLASS, Z_GUT: Z_GUT, Z_FRAME: Z_FRAME, GUT_MIN_R: GUT_MIN_R,

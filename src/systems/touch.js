@@ -1221,12 +1221,6 @@
     // a tap anywhere but on a prison person puts away the verbs on whoever had them
     if (CBZ.prisonPeople && CBZ.game.mode === "escape" && !(target && target.kind === "inmate")) CBZ.prisonPeople.select(null);
 
-    // AN ORDER IS WAITING FOR ITS "WHO" (city/verbwheel.js): the person you
-    // tap is who it is about, near or far.
-    if (target && target.kind === "ped" && CBZ.verbWheel && CBZ.verbWheel.ordering()) {
-      CBZ.verbWheel.pickTarget(target.rec);
-      return true;
-    }
     // THE ONE TAP PIPELINE (city/interactions.js tapPick): the registry the
     // keys read is asked what is under the finger, near or across the room.
     // A body the ray hit (a car, a person) keeps its own flow below (the

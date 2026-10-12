@@ -21,6 +21,7 @@ function simSubStep(sdt) {
   }
   physPre(sdt);                         // how fast every body was going (src/battle/physics.js)
   tacticsStep(sdt);                    // the squads decide; grenades fly (ai/squad.js)
+  convoyStep(sdt);                     // the columns drive (src/battle/convoyhost.js, systems/convoy.js)
   for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
   if (DRONES.list.length) droneTick(sdt);   // drones in packs, tubes and racks (src/battle/drones.js)
   if (MASS.on) MASS.step(sdt);          // the MID and FAR tiers (src/battle/mass.js)

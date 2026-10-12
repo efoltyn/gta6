@@ -109,12 +109,17 @@ change it only in coordination.
 | `src/battle/men.js` | `makeMan`, uniforms; `kitUp` dresses each man through `CBZ.combatKit` (§9a) | humans / armour |
 | `src/battle/beasts.js` | `makeBeast`, `animateBeast`, `beastFight`: the animal unit, routed through `CBZ.unitKit` | core (species agents edit their species file instead) |
 | `src/battle/vehicles.js` | `makeVehicle`, the vehicle sim, crew mount/dismount | vehicles / armour |
+| `src/battle/convoyhost.js` | THE CONVOY ORDER (`?ac=1` / `?bc=1`): NPC War's host for `CBZ.convoy` (hulls, riders walking to their doors, the senses), §9d | convoy |
+| `src/systems/convoy.js` | `CBZ.convoy`: THE ONE COLUMN DRIVER, both games (order of march, intervals, drills, mount/dismount, LOD, the army's "move along route"), §9d | convoy |
+| `src/systems/roadgraph.js` | `CBZ.roadGraph`: THE ONE ROUTER, both games (the road graph out of any map's road records, lanes, closures, the drive path, the terrain planner), §9d | convoy (Gang City's motorcade and map arrows route on it) |
 | `src/battle/drones.js` | THE DRONES (`drive: "drone"`): stowed kit, who flies it (a carrier's cell, a man, or off the map), the operator teams (goggles, out of their squads, back in a hole no hull can see), launch / transit / loiter / attack / terminal, the weak-zone strike, shot down and the crash, `droneSpotted` / `droneTrackK` (counter-drone), `DRONES.audit` | drones |
 | `src/battle/damage.js` | `hurtMan`: the one damage funnel (asks `CBZ.armour.resolve`, §9a), reachability | armour / weapons |
 | `src/battle/death.js` | a beast dies, a man dies, the sinking dead | physics / humans |
 | `src/battle/physics.js` | the grid, body separation (split by mass), pinned pairs, momentum (`bodyKg`, `contactImpulse`, `addKnock`, `stepKnock`), bodies in the air (`flingBody`, `stepTossed`), the blast (`blastBodies`), hull strikes (`hullForStrike`), the flow field (`NAV`), COM (§9c) | physics |
 | `src/battle/fire.js` | the trigger (aimed / suppressive fire, pairs, bursts, reloads, stoppages, grenades, the gun's stance), flown rounds, penetration, ricochets, wounds, bleeding, rockets, backblast | weapons |
 | `src/weapons/ballistics.js` | `CBZ.ballistics`: cartridges, guns, materials, flight / drop / zero / penetration maths, body zones, species anatomy (node-loadable, shared with Gang City) | weapons |
+| `src/weapons/munitiontable.js` | `CBZ.munitionTable`: EVERY munition's real data (calibre, mass, fill, W, pen, fuze, guidance, speed, range, lethal radius), derived blast numbers, `blastOn`, `arm(w)` (§9d; node-loadable, shared with Gang City) | weapons |
+| `src/systems/strike.js` | `CBZ.strike`: THE impact resolver (`studio.boom` is it): fuze, picture, people and hulls, buildings, parked hardware, observers; `strike.sweep` the swept round test (§9d) | weapons |
 | `src/battle/air.js` | air support: bombers, the nuke run, airstrikes | weapons / vehicles (air) |
 | `src/battle/ai/think.js` | one unit's decision (target, slot, cover) | AI |
 | `src/battle/ai/morale.js` | morale, stance, hull-down | AI |
@@ -235,6 +240,7 @@ CBZ.unitKit.register("m1_abrams", {
   crew:    [{ seat: "driver" | "gunner" | "commander" | "loader" | "pilot", pos: [x, y, z] }],
   passengers, passengerPos: [[x, y, z], ...],                          // optional: each bench seat in hull space
   weapons: [{ id, seat, kind: "cannon" | "autocannon" | "mg" | "rockets" | "missile" | "sam" | "bombs",
+              mun, heMun,          // weapons/munitiontable.js ids: the numbers are the table's (§9d)
               rof, dmg, range, minRange, ammo, burst, pause, salvo, reload, vs, needs, indirect,
               mount: "turret" | "slew" | "fixed" | "free", arc, yawMax, tol,       // facing, below
               guided, basket, alt, dive, pullOut,                                // air weapons
@@ -565,6 +571,9 @@ games/battle.html?a=bengal_tiger&b=lion&n=1v1&arena=dunes&cam=bengal_tiger&freez
 | `af`, `bf` | the nation an army fights for: `republic` `kesh` `veridia` `solara` `mbeya` |
 | `bo`, `sa`, `sb` | best of 1/3/5/7, rounds already won by A / B |
 | `cam` | the lens once the field is up: `a` / `b` (follow that side), a unit id (study the first one), `a:3` (side A's body #3) |
+| `hold` | `a` / `b`: that side holds its ground whatever the numbers (an ambush waits) |
+| `ac`, `bc` | `1`: that side's vehicles move as a CONVOY, riders aboard, along a route past the enemy (§9d) |
+| `aco`, `acp`, `acs` | the convoy's objective `aco` m right of the line of march and `acp` m (350) past the enemy; it forms up `acs` m (700 on open ground) short of him |
 | `freeze=1` | stop the clock once the field is up (visual checks) |
 | `auto=1` | skip the war room (implied by any tool use, as before) |
 
@@ -991,13 +1000,15 @@ charge, a tank in a crowd, a blast, a throw).
   `420 x power x (0.55 / Z)²` with `Z = d / R`, tapering to 0 at R; delta-v
   `9 x power x (0.55 / Z)^1.5 x (80 / kg)^(1/3)`. A man at the core dies and flies; a bull
   elephant at the core takes ~440 and rocks at 2 m/s. Corpses go first through
-  `CBZ.ragdollBlast`; loose debris is kicked (`CBZ.debris.impulse`). Hulls keep the old ring
-  (inside 0.55 R the armour answers).
+  `CBZ.ragdollBlast`; loose debris is kicked (`CBZ.debris.impulse`). R and power are the
+  munition's (§9d). Hulls, parked or flying, are answered by the charge W: the blast's loading
+  on the plate at the hull's distance (`munitionTable.blastOn`) through its own armour.
 - **Debris is real, never cubes.** One system: `systems/debris.js` grit, shaped by what
   broke (stone, soil clod, flake, glass shard, torn plate, track shoe, road wheel, hatch lid),
   instanced per shape, capped per device and ring-recycled. Ground hits: `ground.js` digs
   the crater, scorches, sprays grain and dust, and throws clods of that ground in the crater
-  wall's colour (`clods`; crashfx's generic grit stands down via `CBZ.groundOwnsEjecta`). A
+  wall's colour, all sized by the charge (`munitionTable.ejecta`: a 25 mm flicks grains, a
+  Mk 84 throws half-metre clods; a burst in the open builds no rubble) (`clods`; crashfx's generic grit stands down via `CBZ.groundOwnsEjecta`). A
   tank round that misses into ground or a wall throws clods or broken stone
   (`fire.js missImpact(.., heavy)`). Hulls: `vehHitFx` (sparks, plate torn off in the hull's
   own paint, shoes and a road wheel when the track goes) and `vehKillFx` (a knockout sheds
@@ -1018,6 +1029,122 @@ charge, a tank in a crowd, a blast, a throw).
 - **Water.** On OPEN WATER a body that dies goes to `world/water_float.js`: a man floats awash
   and goes under in ~40 s, sharks sink, whales, orcas and dolphins float on their side, other
   fish float belly up, land animals float and slowly waterlog.
+
+---
+
+## 9d. Convoys: one column driver, one router (both games)
+
+`src/systems/roadgraph.js` (`CBZ.roadGraph`) is the only road router in either game. It was
+Gang City's motorcade router (`city/motorcade.js` §1-§2), lifted out whole and made
+map-agnostic; the motorcade and the map arrows (`systems/navigation.js`, which had a second,
+O(nodes x roads) graph of its own) both route on it now. It builds a graph from whatever road
+records the map has (axis-aligned `{x, z, vertical, len, w}` or any-heading `{ax, az, bx, bz, w}`),
+routes with the highway preferred, gives the right-hand lane, closes a road or bridge
+(`close(G, x, z, r)`, `G.ver`), fillets the drive path with its speed profile, and where there
+are no roads plans across open ground: an A* on the map's own `groundAt` that keeps off water,
+walls and anything steeper than the column's worst climber.
+
+`src/systems/convoy.js` (`CBZ.convoy`) drives military columns through a HOST (the world and
+the vehicles; every member optional). Doctrine (FM 4-01.45): lead security vehicle, armour,
+carriers with the protected gun trucks among the soft ones, rear security; 25-50 m intervals,
+25 m in towns; the slowest vehicle's march speed; regroup when it stretches; every vehicle
+steered and throttled through its own drive model (pure pursuit). Contact = fired on, or an
+enemy inside 150 m: a near ambush is driven through, a far one is fought from the halt (face
+the threat, gunners engage, sections out on the side away from the fire, remount when clear);
+an IED is halted on, cordoned at 35 m and re-routed round; a destroyed road is re-routed round.
+Contact is reported (`on("contact")`) and air support requested (`on("air")`: a listener that
+returns true has answered). Out of contact and far from the lens (`battleLod.RULES.CONVOY_R`)
+the column is markers advancing at road speed on its route; near, each vehicle drives on from
+there. Every change of state is an order (`CBZ.convoy.order(cv, {kind})`).
+
+- **NPC War**: `src/battle/convoyhost.js` is the host. `?ac=1`
+  makes side A's vehicles a column once the field is up; riders the roster put
+  on the benches walk to their carriers and get in (`men.js` keeps them on the field,
+  `ai/think.js` / `step.js` walk their `cvTask`), `vehicles.js` takes the convoy's controls
+  through `vehMove`, reports every hit, and puts dismounts on the lee side. At the objective
+  every hull goes back to `thinkVehicle`. `__battle.convoy()` is the readout.
+- **Gang City**: `city/army.js` compiles the sim into the city's war realm
+  (`battle/core/realm.js`), `convoyhost.js` included. There it registers itself as the army's
+  route driver (`CBZ.army.routeDriver`): `orderForce(force, { type: "route", route })` makes
+  the force's vehicles a column on the city's roads (the realm's own hulls and `HOST`), its
+  men on foot follow the order to the route's end, and the driver calls `api.done()` there.
+- **Known gaps**: the AI's riflemen hold their fire on armour, so a far ambush of riflemen
+  alone rarely opens fire on a column (an RPG team inside 200 m does); infantry put out at
+  200 m on the dunes rarely get a shot. No war-room button for the order yet (the URL carries
+  it).
+## 9d. Munitions: one table, one resolver (shared with Gang City)
+
+Every round, rocket, missile, bomb and drone warhead in every game is ONE row in
+`src/weapons/munitiontable.js` (`CBZ.munitionTable`), and every impact is resolved by ONE
+function, `src/systems/strike.js` (`CBZ.strike`). Nothing else may carry a copy of a
+munition's numbers.
+
+**The row** (real data, sources in the file): `name, cls` (ke heat hedp he bomb pen blast frag
+sam aam torp), `cal` mm, `mass` kg, `fill` kg + `filler` (its RE) -> **W kg TNT-eq**, `ke` / `ce`
+mm RHA, `jet` (m of concrete a shaped jet perforates), `conc` (m of reinforced concrete a
+penetrating case goes through before its delay fuze), `fuze`, `guide`, `attack` (direct top dive
+lob), `v` m/s, `range` m, `killR` m (published lethal radius), `look`, `shape`. A guidance kit
+on a bomb is the bomb (`base: "mk84"`). `ALIAS` maps every other name a file uses for the
+same warhead ("rpg", "jdam", "buster", "gbu31_jdam", "iron"...).
+
+**Derived** (`fx(id)`): `W`, `R` (battle blast radius, lethal core 0.55 R = killR), `power`
+(0.9 + 0.35 W^(1/3)), `pen` and `beh` for a direct hit, `craterR` (0.8 W^(1/3)), `visPower`
+(the fireball's picture scale). `blastOn(W, d)` is the blast against a hull at distance d
+(220 Z^-1.5 mm RHA-eq, Z = d / W^(1/3)): every hull, parked jet, boat and drone is answered by
+it. `ejecta(W, surface)` sizes a ground burst's crater and clods.
+
+**Unit weapon rows name their munitions**, never their numbers:
+`{ id: "m256_120mm", kind: "cannon", mun: "m829a3", heMun: "m830a1", rof, range, ammo... }`.
+`munitionTable.arm(w)` (called by vehicles.js at spawn) fills `w.pen, w.beh, w.speed, w.he =
+{ pen, beh, blast, power, W, mun }, w.heSpeed, w.top, w.keCls`. A unit file that types
+`he: { pen: ... }` is a second copy: delete it.
+
+**The resolver.** `CBZ.studio.boom(pos, { mun, by, direct, struck, dirx, dirz, contact })` IS
+`CBZ.strike(mun, pos, opts)`:
+1. the fuze: a penetrating case into a building bursts inside, storeys down (it holes the slabs
+   it went through);
+2. the picture (crashfx, sized by the charge) and the sound;
+3. people and hulls: the mode's blast verb (modecaps -> NPC War's `blastBodies`, handed `W`; a
+   hull answers `blastOn` through its own armour; aircraft in the air are hulls too);
+4. the built world, `strike.structure`: the wall is carved by the law (`fracture.blastAt` ->
+   `buildings.js carveHole`), a roof burst opens the roof (`cityCarveShaft`), storeys inside
+   the law's gut radius are blown out (`collapse.gut`), and a building whose banked damage
+   passes its capacity (12 + 7 storeys + plan/26) or that a charge guts across its whole plan
+   comes down (`collapse.play`: its own shell falls as pieces of itself; the building, its
+   colliders and its floors are pulled at the swap). Ruins burn. In the city, the city's own
+   ledger (`blastBuildings` -> `structural.js`) does this with the same law. A burst in the open
+   touches no building and piles no rubble;
+5. the parked hardware, `strike.hardware`: a collider whose ref is a group with
+   `userData.hwKind` / `milKind` (island_military.js stands: plane, heli, tank, ground,
+   patriot, mlrs, drone) takes `blastOn` against its skin; past its hit points it is a wreck
+   (charred, sat down, burning, shedding plate). Gang City's bus (`CBZ.detonate`) calls the
+   same half;
+6. observers, `CBZ.strike.on(fn)`: `arenas/ground.js` digs the crater and throws the ground's
+   own clods at the charge's size.
+
+**Flown rounds are swept.** `CBZ.strike.sweep(ax,ay,az, bx,by,bz)` is the first thing a
+round's path for this step meets: every collider at its OWN height (a band-less one is as
+tall as its record), the roofs and floors (platforms) a falling store comes down through, and
+the ground sampled under the segment and refined. `fire.js stepRockets` sweeps every HE round,
+rocket and bomb, then the bodies on the segment (`rocketBody`: a hull's box, a man's column);
+a direct hit on a hull is first its own penetration (`imp.threat`), then the burst. Guided
+missiles (`stepVehShots`) sweep their path too. A direct-fire HE round is laid on the
+target's centre (`vehHEAim`), not on the ground under it.
+
+**Gang City.** `index.html` loads the table before `systems/breach.js` (whose `CHARGES` are
+now the table's) and `systems/strike.js` after the collapse engine. `CBZ.detonate(x, y, z,
+kind)` accepts any table id (a row is made on first use, priced by the table); in city mode
+`CBZ.strike` hands off to it. `systems/ordnance.js` kinds name their munition (`iron` = Mk 82,
+`heavy` = Mk 84, `rocket` = M31A1) and size their blast from its W; `city/arsenal_data.js`
+payloads name theirs.
+
+**Drone warheads** for the drone builder: `switchblade300`, `switchblade600`, `fpv_pg7vl`,
+`fpv_og7v`, `fpv_tm62`, `drop_vog17`, `drop_rkg3`, `lancet3`, `shahed136`. A drone's weapon
+row names one (`mun`), and its terminal dive lands it through `studio.boom({ mun })`.
+**Naval** rows for the boats: `mk45_he`, `oto76_he`, `mk295`, `mk149`, `rgm84`, `nsm`, `sm2`,
+`essm`, `rim116`, `mk48`, `mk54`. Also `javelin`, `m795` / `m982`, mortars, `tomahawk`,
+`gbu28`, `gbu57`.
+
 
 ---
 

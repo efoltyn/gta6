@@ -51,7 +51,7 @@
                 Shahed at ~45 deg onto the point it was sent to
    THE HIT (droneDetonate): the airframe's box meets the hull's box (or the
    aim point, or a man, the ground, a wall). On a hull the charge is the
-   round on the trigger (u._shot: pen, beh, cls, top) at the struck point
+   round's threat (imp.threat: pen, beh, cls, top) at the struck point
    (imp.at): the hull's own armour by place and face answers
    (vehicles.js hurtVehicle -> units/kit/vehicle.js resolve, armourCE for a
    shaped charge), its crew are hit along the jet, an engine deck that is
@@ -1122,9 +1122,7 @@ function droneDetonate(u, hit, how) {
     // is struck from above when it came down onto it
     const onTopFace = hit === dr.tgt && dr.face === "top" && dr.aim && p.y >= hit.pos.y + dr.aim[1] - 0.35 && dr.vel.y < 0;
     const top = steep || onTopFace || (p.y - hit.pos.y) > (hit.vheight || 2.4) * 0.85;
-    u._shot = { pen: wh.pen, beh: wh.beh, he: true, cls: wh.cls, top: top };
-    hurtMan(hit, wh.beh, { by: u, at: p });
-    u._shot = null;
+    hurtMan(hit, wh.beh, { by: u, at: p, threat: { pen: wh.pen, beh: wh.beh, he: true, cls: wh.cls, top: top } });
     const res = hit.lastHit;
     A.hits++; A.byClass[u.unitId].hits++;
     if (res) {
@@ -1145,9 +1143,9 @@ function droneDetonate(u, hit, how) {
   } else A.missed++;
   // THE BLAST: the warhead's own, for everyone round it (a hull inside it
   // takes the blast's figure, not the jet's: that was answered above)
-  u._he = { pen: wh.blastPen || 10, beh: Math.round(wh.beh * 0.3), he: true, cls: "blast", top: true };
+  // (the struck hull was answered above: the resolver's blast passes it by)
   if (STUDIO && STUDIO.boom) {
-    try { STUDIO.boom(p, { radius: wh.blast || 5, power: wh.power || 1, structural: false, by: u }); } catch (e) {}
+    try { STUDIO.boom(p, { mun: wh.mun, radius: wh.blast || 5, power: wh.power || 1, by: u, direct: hit && hit.vehicle ? hit : null }); } catch (e) {}
   }
   droneBurstFx(u, p, how);
 }
@@ -1223,8 +1221,7 @@ function droneFall(u, sdt) {
   const wh = dr.wh;
   if (lcg() > (wh.dud || 0.2) * 2.5) {
     DRONES.audit.crashBooms++;
-    u._he = { pen: wh.blastPen || 10, beh: Math.round(wh.beh * 0.3), he: true, cls: "blast", top: true };
-    if (STUDIO && STUDIO.boom) { try { STUDIO.boom({ x: u.pos.x, y: g + 0.3, z: u.pos.z }, { radius: (wh.blast || 5) * 0.8, power: (wh.power || 1) * 0.8, structural: false, by: u }); } catch (e) {} }
+    if (STUDIO && STUDIO.boom) { try { STUDIO.boom({ x: u.pos.x, y: g + 0.3, z: u.pos.z }, { mun: wh.mun, radius: (wh.blast || 5) * 0.8, power: (wh.power || 1) * 0.8, by: u }); } catch (e) {} }
     u.group.visible = false;
     if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash({ x: u.pos.x, y: g + 0.5, z: u.pos.z }, { scale: 3, life: 0.2, color: 0xffb060 }); } catch (e) {} }
   }

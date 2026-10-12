@@ -32,6 +32,9 @@
   const RULES = {
     ANIM_NEAR: 70, ANIM_MID: 150,     // render LOD: full rate / every 2nd / every 4th frame
     FULL_R: 90, MID_R: 400, HYSTERESIS: 1.15, DEMOTE_S: 3, HIT_S: 4,
+    // a convoy out of contact this far from the lens moves as markers on its
+    // route at road speed (systems/convoy.js), and drives again inside it
+    CONVOY_R: 450,
     // full rigs alive at once. MEASURED (tools/npcwar-scale-bench.mjs): the
     // page's full brain is ~15-20 us a man a frame before its rig is animated
     // or drawn, ~7x a MID row; 320 is ~6 ms of brain on a desktop core

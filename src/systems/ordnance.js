@@ -147,12 +147,27 @@
   //      are linked on purpose: the heavy store falls straighter (less drag
   //      per unit mass) AND hurts more, so choosing it is a real trade
   //      against the number you can carry.
+  /* Each kind IS a munition (weapons/munitiontable.js `mun`), and its blast
+     is that munition's charge: radius = 10.3 W^(1/3) m (the reach of this
+     file's (1 - d/R)^2 falloff at which a Mk 82's 93 kg puts a man down),
+     damage = 42.6 W^(1/3). A cluster is an AREA weapon (202 bomblets over a
+     field), so its one-blast stand-in keeps its own footprint. */
   const KINDS = {
-    iron: { radius: 46, power: 190, drag: 0.00022, size: 1.25, len: 4.2, color: 0x59616b, fuse: 0, name: "500 lb IRON" },
-    heavy: { radius: 78, power: 320, drag: 0.00014, size: 1.9, len: 6.2, color: 0x4b5058, fuse: 0, name: "2000 lb HEAVY" },
-    cluster: { radius: 30, power: 110, drag: 0.00030, size: 0.9, len: 2.8, color: 0x6b6250, fuse: 0, name: "CLUSTER" },
-    rocket: { radius: 26, power: 130, drag: 0.00010, size: 0.6, len: 2.4, color: 0xa9a294, fuse: 0, name: "ROCKET" },
+    iron: { mun: "mk82", drag: 0.00022, size: 1.25, len: 4.2, color: 0x59616b, fuse: 0, name: "500 lb IRON" },
+    heavy: { mun: "mk84", drag: 0.00014, size: 1.9, len: 6.2, color: 0x4b5058, fuse: 0, name: "2000 lb HEAVY" },
+    cluster: { mun: "cbu87", radius: 30, power: 110, drag: 0.00030, size: 0.9, len: 2.8, color: 0x6b6250, fuse: 0, name: "CLUSTER" },
+    rocket: { mun: "m31a1", drag: 0.00010, size: 0.6, len: 2.4, color: 0xa9a294, fuse: 0, name: "ROCKET" },
   };
+  (function charges() {
+    const MT = CBZ.munitionTable;
+    Object.keys(KINDS).forEach(function (k) {
+      const K = KINDS[k];
+      if (K.radius != null) return;
+      const W = MT ? MT.W(K.mun) : 0;
+      const c = Math.cbrt(W > 0 ? W : 93);
+      K.radius = Math.round(10.3 * c); K.power = Math.round(42.6 * c); K.W = W;
+    });
+  })();
 
   // ---- THE ONE THAT IS NOT A STORE. Everything above is a claim about
   //      weight and lethality; this row also claims a different BODY and a

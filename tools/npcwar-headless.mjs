@@ -279,7 +279,7 @@ scenario(10, "the ground: cover for the host, earthworks, craters, broken cover"
     const x = bag.x + 3, z = bag.z;
     const before = MAP.groundAt(x, z);
     const ptsBefore = C.stats().points;
-    G.blast(x, before, z, 18, 2.8, "boom");
+    G.blast(x, before, z, W.CBZ.munitionTable.W("mk82"), {});   // a Mk 82 (the charge: weapons/munitiontable.js)
     const after = MAP.groundAt(x, z);
     check(before - after > 0.4, "a bomb digs a crater into groundAt (" + (before - after).toFixed(2) + " m deep)");
     check(!bag.alive, "and breaks the sandbag wall 3 m away (hp " + Math.round(bag.hp) + ")");

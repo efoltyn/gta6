@@ -451,7 +451,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
 <script src="src/core/slice.js?v=maplabels1009"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=sdoor0930"></script>
+<script src="src/core/citystream.js?v=parklos1011"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -467,6 +467,7 @@ document.body.appendChild(b);}}catch(e){}})();
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
      the same unit. Must precede any file registering a breach target. -->
+<script src="src/weapons/munitiontable.js?v=strike1013m"></script>
 <!-- THE AIRPORT REGISTRY (CBZ.registerAirport / CBZ.airports / the local
      airfield frame). An airport stops being a rectangle of the map and becomes
      a RECORD with an origin, a bearing and a runway, so a second field is a
@@ -660,7 +661,7 @@ document.body.appendChild(b);}}catch(e){}})();
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
 <!-- CBZ.eyes: how a hurt body sees. No red screen anywhere: near death the
      a light red rim, grey colour and a heartbeat; the view never closes while alive (lids are for the dead). -->
-<script src="src/systems/eyes.js?v=deathcam1009"></script>
+<script src="src/systems/eyes.js?v=nocine1011"></script>
 <script src="src/systems/vitals.js?v=deathcam1009"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
 <script src="src/entities/player.js?v=pf0930c"></script>
@@ -681,7 +682,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/hud.js?v=nored0930"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/ballistics.js?v=bal2m1012"></script>
+<script src="src/weapons/ballistics.js?v=strike1013m"></script>
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
 <script src="src/weapons/munitions.js?v=mil0929"></script>
@@ -913,7 +914,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
-<script src="src/systems/touch.js?v=gait1011"></script>
+<script src="src/systems/touch.js?v=btn1011m"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <!-- where a floating touch button may go (the verb column, the way out): pure rect math -->
@@ -1034,7 +1035,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
-<script src="src/city/flags.js?v=polsim1008b"></script>
+<script src="src/city/flags.js?v=btn1011m"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1183,7 +1184,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/mil_air.js?v=army1013m"></script>
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
 <!-- ONE ARMY (city/army.js): the door to NPC War's battle core, sim and unit kit. Only the API + loader ride the page; the unit files and the war engine load when a force or Fort Brandt's motor pool needs them. -->
-<script src="src/city/army.js?v=army1013m"></script>
+<script src="src/city/army.js?v=curb1013"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
@@ -1359,7 +1360,7 @@ document.body.appendChild(b);}}catch(e){}})();
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
-<script src="src/systems/impactbus.js?v=street1009"></script>
+<script src="src/systems/impactbus.js?v=strike1013m"></script>
 <!-- THE COLLAPSE ENGINE. The ONE answer to "what does a building look like
      while it is being destroyed", shared by the city ledger (structural.js),
      the disaster island (systems/disasters.js) and anything else that
@@ -1372,6 +1373,7 @@ document.body.appendChild(b);}}catch(e){}})();
      to the collapse they had) · ?cfg_COLLAPSE_FRAGMENTS=0 (motion without
      debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
 <script src="src/city/collapse.js?v=mil0929"></script>
+<script src="src/systems/strike.js?v=strike1013m"></script>
 <script src="src/city/structural.js?v=street1009"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
@@ -1388,12 +1390,12 @@ document.body.appendChild(b);}}catch(e){}})();
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
-<script src="src/city/verbword.js?v=presverbs1008"></script>
-<script src="src/city/interactions.js?v=desk1009c"></script>
+<script src="src/city/verbword.js?v=btn1011"></script>
+<script src="src/city/interactions.js?v=btn1011"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=dogs1009b"></script>
+<script src="src/city/verbwheel.js?v=btn1011"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1454,7 +1456,7 @@ document.body.appendChild(b);}}catch(e){}})();
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=standdown1009c"></script>
+<script src="src/city/orders.js?v=btn1011"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -1626,6 +1628,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/agency.js?v=street1009"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
+<!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
+     (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
+     the army's "route" order) route on it. Pure maths, loads first. -->
+<script src="src/systems/roadgraph.js?v=curb1013"></script>
+<script src="src/systems/convoy.js?v=curb1013"></script>
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
      a wall falling real physics and then finding door etc". The mover is a
      straight line and actorcollide.js always said so ("an NPC may bump a wall
@@ -1881,7 +1888,7 @@ document.body.appendChild(b);}}catch(e){}})();
      carries which payload, prices, delivery days, each nation's starting
      fleet and warheads, bunker hardness. polwar.js seeds from it; warroom.js
      gates, sells and flies off it. -->
-<script src="src/city/arsenal_data.js?v=arsenal0930"></script>
+<script src="src/city/arsenal_data.js?v=strike1013m"></script>
 <!-- P9: migration — policy per country (president legislates over
      LEGISLATE_DAYS days + an approval cost if unpopular; every other govType
      decrees instantly), daily individual-migration-evaluation propensity
@@ -1992,7 +1999,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/politics.js?v=desk1009c"></script>
+<script src="src/city/politics.js?v=btn1011"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides
@@ -2001,15 +2008,15 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=desk1009c"></script>
-<script src="src/city/motorcade.js?v=presverbs1008"></script>
+<script src="src/city/president_office.js?v=btn1011m"></script>
+<script src="src/city/motorcade.js?v=convoy1011"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
      readiness, the Bureau's thread, a former who comes back; the Chief of
      Staff fills a chair with two names (loyal or good); refusals feed
      loyalty, loyalty feeds the coup. After presidency.js,
      president_office.js, protection.js, motorcade.js. -->
-<script src="src/city/president_staff.js?v=verbs2b"></script>
+<script src="src/city/president_staff.js?v=btn1011"></script>
 <!-- THE COMMANDER IN CHIEF (city/warroom.js): war / peace / airstrike / nuke
      for a sitting President, ordered from the Situation Room's red phones and
      map (presidency.js) or the detail agent carrying the football. Rides
@@ -2017,10 +2024,10 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=army1013m"></script>
+<script src="src/city/warroom.js?v=btn1011m"></script>
 <script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=gateprotest2"></script>
-<script src="src/city/president_public.js?v=street1009"></script>
+<script src="src/city/president_public.js?v=btn1011"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on
@@ -2035,11 +2042,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE NATIONAL ADDRESS (city/address.js): the address order puts the
      President on every TV (newsroom.js live feed); 3 to 5 statements, verb x
      target off the real world, each one a CBZ.politics.act. After politics.js. -->
-<script src="src/city/address.js?v=gateprotest2"></script>
+<script src="src/city/address.js?v=btn1011"></script>
 <!-- THE TRANSFER OF POWER (city/transfer.js): election night on every TV, the
      held count, concede or refuse, the Capitol march and breach, the Guard's
      decision, seized / convicted / certified. After elections.js. -->
-<script src="src/city/transfer.js?v=address1008"></script>
+<script src="src/city/transfer.js?v=btn1011"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's

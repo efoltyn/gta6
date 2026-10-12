@@ -73,6 +73,17 @@ SET.nationA = Q.get("af") || saved.nationA || "kesh";
 SET.nationB = Q.get("bf") || saved.nationB || "republic";
 SET.cam = Q.get("cam") || null;
 SET.freeze = Q.get("freeze") === "1";
+/* THE CONVOY ORDER (src/battle/convoyhost.js, systems/convoy.js): ?ac=1 moves
+   side A's vehicles as a column, riders aboard, along a route past the enemy
+   to an objective beyond it; ?bc=1 side B. ?aco=<m> puts the objective that
+   far to the right of the line of march (a route that passes the enemy
+   instead of running into him), ?acp=<m> that far past him (350), ?acs=<m>
+   where it forms up, that far short of him (700 on open ground). */
+SET.convoyA = Q.get("ac") || null;
+SET.convoyB = Q.get("bc") || null;
+SET.convoyOff = parseFloat(Q.get("aco") || Q.get("bco") || "0") || 0;
+SET.convoyPast = (Q.get("acp") || Q.get("bcp")) ? (parseFloat(Q.get("acp") || Q.get("bcp")) || 350) : null;
+SET.convoyStart = (Q.get("acs") || Q.get("bcs")) ? (parseFloat(Q.get("acs") || Q.get("bcs")) || 0) : null;
 // THE MATCH FORMAT (battle/core/series.js): best of N, rounds won so far
 SET.bo = parseInt(Q.get("bo") || saved.bo || 1, 10) || 1;
 let SERIES = CBZ.battleSeries.make(SET.bo, Q.get("sa"), Q.get("sb"));

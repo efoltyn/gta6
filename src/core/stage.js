@@ -178,63 +178,25 @@
     return freed;
   };
 
-  /* structureAt(x, z, reach) — WHAT IS STANDING HERE.
-
-     Reads CBZ.colliders, which is the registry the whole engine already writes
-     and reads, and returns the nearest full-height box's own record — its
-     centre, its extents and its height — or null over open ground. A world
-     declares a building by registering one collider with a `ref`; nothing here
-     knows what a lot, a district or a city is, so the prison, the desert and
-     the city all answer the same way.
-
-     `reach` lets a near miss still find the wall it went off beside, which is
-     what a bomb actually does to a building. */
+  /* structureAt(x, z, reach) / collapseAt(pos, opts) — THE BUILT WORLD'S HALF
+     OF A DETONATION, answered by the one impact resolver (systems/strike.js):
+     structureAt is the building shell standing here (city/buildings.js's
+     record, found through its walls), collapseAt prices the strike's wall,
+     roof, gut and collapse, and the parked machines beside it, from the
+     munition (opts.mun) or a bare charge (opts.W, else the old radius/power).
+     A store whose own system already drew the fireball and swept the people
+     (systems/ordnance.js sticks) calls collapseAt for the rest. Open ground
+     answers null: no rubble is invented where nothing stood. */
   ST.structureAt = function (x, z, reach) {
-    const list = CBZ.colliders;
-    if (!list || !list.length) return null;
-    const R = reach > 0 ? reach : 0;
-    let best = null, bd = Infinity;
-    for (let i = 0; i < list.length; i++) {
-      const c = list[i];
-      if (!c || c.y0 != null) continue;                 // height-gated: a rail, a roof, not a structure
-      const r = c.ref;
-      if (!r || !(r.w > 0) || !(r.h > 0)) continue;     // a record that cannot describe itself
-      if (r.alive === false) continue;
-      const dx = Math.max(c.minX - x, 0, x - c.maxX);
-      const dz = Math.max(c.minZ - z, 0, z - c.maxZ);
-      const d = Math.hypot(dx, dz);
-      if (d > R) continue;
-      if (d < bd) { bd = d; best = r; }
-    }
-    return best;
+    return CBZ.strike ? CBZ.strike.buildingAt(x, null, z, reach > 0 ? reach : 1) : null;
   };
-
-  /* collapseAt(pos, opts) — THE STRUCTURAL HALF ON ITS OWN.
-
-     systems/ordnance.js already draws its own fireball and applies its own
-     damage when a store goes off, so a page hooking onDetonate and calling
-     boom() there gets the explosion TWICE: two fireballs, two bangs, and the
-     sound stacking seven deep across a stick. What ordnance does not do is
-     bring the building down, and that is the only part such a hook wants.
-
-     cityAirstrikeCollapse resolves a facade out of whatever it is given, and
-     given only a point it has to guess the footprint. The world already knows:
-     the structure under the impact is a collider with a `ref` carrying its own
-     extents. Hand over the real lot and the collapse lands on the real face at
-     the real roofline. Returns the struck record, or null over open ground. */
   ST.collapseAt = function (pos, opts) {
     opts = opts || {};
-    if (!CBZ.cityAirstrikeCollapse || !pos) return null;
-    const R = opts.radius > 0 ? opts.radius : 18;
-    const s = ST.structureAt(pos.x, pos.z, opts.reach != null ? opts.reach : R);
-    const lot = s ? { cx: s.x, cz: s.z, w: s.w, d: s.d } : { x: pos.x, z: pos.z };
-    try {
-      CBZ.cityAirstrikeCollapse(lot, {
-        at: pos, top: s ? s.h : undefined,
-        power: opts.power > 0 ? opts.power : 1, radius: R,
-      });
-    } catch (e) { return null; }
-    return s;
+    if (!CBZ.strike || !pos) return null;
+    const N = CBZ.strike.numbers(opts.mun || null, opts);
+    const r = CBZ.strike.structure(pos, N.W, { shaped: N.shaped, jet: N.jet });
+    try { CBZ.strike.hardware(pos, N.W, N, opts); } catch (e) {}
+    return r && r.b ? r.b : null;
   };
 
   /* ==========================================================================

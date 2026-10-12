@@ -39,7 +39,7 @@
     "battle/teams.js", "battle/arms.js", "battle/state.js",
     "battle/men.js", "battle/beasts.js", "battle/damage.js", "battle/ai/morale.js", "battle/death.js",
     "battle/physics.js", "battle/vehicles.js", "battle/drones.js", "battle/ai/orders.js", "battle/fire.js", "battle/air.js",
-    "battle/ai/think.js", "battle/ai/squad.js", "battle/step.js", "battle/melee.js",
+    "battle/ai/think.js", "battle/ai/squad.js", "battle/convoyhost.js", "battle/step.js", "battle/melee.js",
     "battle/spawn.js", "battle/mass.js", "battle/massdraw.js", "battle/tick.js",
   ];
   /* the names the sim reads from NPC War's page files: a host's page layer

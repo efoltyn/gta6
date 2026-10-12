@@ -483,7 +483,7 @@
   I.register("ped:civ", {
     id: "dlg-talk", speak: true, speakCD: 30, prio: 80, forceYes: true,
     canShow: canOpen,
-    label: "Talk",
+    label: "Listen",
     onSelect: function (p) { openDialogue(p); },
   });
 

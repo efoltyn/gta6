@@ -208,7 +208,27 @@
     TABLE[id] = row;
     return row;
   };
-  I.row = function (id) { return TABLE[id] || null; };
+  /* EVERY MUNITION IS A ROW. A kind this table has not been told about but
+     weapons/munitiontable.js knows ("gbu57", "m795", "javelin", a drone's
+     "fpv_pg7vl") becomes a row on first use, with the numbers the battle
+     uses for it: power 0.9 + 0.35 W^(1/3), a near field of radius x power =
+     the munition's blast radius, its charge, its jet, a penetrating case's
+     concrete as `pen`. One table, every game, no second copy. */
+  function tableRow(kind) {
+    const MT = CBZ.munitionTable;
+    const f = MT && MT.fx(kind);
+    if (!f || !(f.W > 0) || f.cls === "nuke") return null;
+    if (TABLE[f.id]) { TABLE[kind] = TABLE[f.id]; return TABLE[f.id]; }
+    const vis = Math.max(0.5, f.visPower);
+    const row = I.define(f.id, {
+      power: vis, radius: f.R / vis, charge: f.W, shaped: f.shaped, jetPen: f.shaped ? f.jet : 0,
+      pen: f.conc > 0 ? Math.round(f.conc * 3) : f.shaped ? 2 : 1, fire: f.W >= 20 ? 0.3 : 0.1,
+      fx: f.W >= 50 ? "heavy" : "blast", quake: f.W >= 80 ? Math.min(4, 0.4 * Math.cbrt(f.W)) : 0,
+    });
+    if (kind !== f.id) TABLE[kind] = row;
+    return row;
+  }
+  I.row = function (id) { return TABLE[id] || tableRow(id) || null; };
   I.list = function () { return Object.keys(TABLE); };
 
   /* ---- conventional ordnance (migrated from existing call sites) ----------
@@ -692,7 +712,7 @@
      ============================================================ */
   CBZ.detonate = I.detonate = function (x, y, z, kind, opts) {
     opts = opts || {};
-    const row = TABLE[kind];
+    let row = TABLE[kind] || tableRow(kind);
     if (!row) {
       // Unknown warhead: never throw into a caller. Fall back to the plain
       // blast so a typo degrades to "something exploded" instead of silence.
@@ -839,6 +859,14 @@
     //        the near field at t=0. Queued, tick-bounded, quality-capped.
     if (row.wave && !opts.noDamage) {
       queueWave(x, y, z, row, opts, fxScale, strScale);
+    }
+
+    // ---- 5) THE PARKED HARDWARE. A jet on its stand, a helicopter on its
+    //        pad, a tank in the motor pool are props, not cars: the one
+    //        resolver's hardware half (systems/strike.js) answers them by the
+    //        same charge, so they are wrecked in the city as in NPC War.
+    if (!opts.noDamage && W > 0 && CBZ.strike && CBZ.strike.hardware) {
+      try { CBZ.strike.hardware({ x: x, y: y, z: z }, W, CBZ.strike.numbers(row.id, { W: W }), opts); } catch (e) {}
     }
 
     // Return a SUMMARY, never the ledger's own record — handing callers a live

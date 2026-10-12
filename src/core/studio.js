@@ -749,8 +749,8 @@
              "cannot disagree, overhead cover, and blast that walks a snapshot " +
              "so a kill mid-sweep cannot skip the next body",
       needs: ["boot", "look"],
-      files: ["systems/ordnance.js"],
-      publishes: ["ordnance"],
+      files: ["weapons/munitiontable.js", "systems/ordnance.js"],
+      publishes: ["munitionTable", "ordnance"],
     },
     nukefx: {
       gives: "the researched mushroom: stem, cap, surge, collar, whiteout, and " +
@@ -805,9 +805,14 @@
              "wall ruin, rebar, ejecta cone, dust, and cityAirstrikeCollapse, " +
              "the verb that brings a section of a building down. None of it " +
              "reads a city record any more",
+      /* THE ONE IMPACT RESOLVER rides here: the munition table, the charge
+         law, the picture (crashfx), the wall carve's ledger (fracture), the
+         collapse engine, and systems/strike.js on top, which studio.boom is */
       needs: ["fx"],
-      files: ["city/crashfx.js"],
-      publishes: ["cityBlastCore", "cityAirstrikeCollapse", "cityWallRuin"],
+      files: ["weapons/munitiontable.js", "systems/breach.js", "city/crashfx.js", "city/fracture.js",
+        "city/collapse.js", "systems/strike.js"],
+      publishes: ["munitionTable", "blastLaw", "cityBlastCore", "cityAirstrikeCollapse", "cityWallRuin",
+        "cityFracture", "collapse", "strike"],
     },
     sound: {
       gives: "the shared audio bus: positional effects, ducking, and the " +
@@ -1575,52 +1580,16 @@
   // structureAt(x, z, reach): what is standing here (core/stage.js)
   CBZ.studio.structureAt = function (x, z, reach) { return CBZ.stage ? CBZ.stage.structureAt(x, z, reach) : null; };
 
-  /* boom(pos, opts) — a detonation, through the best route that is loaded.
-     ordnance owns the shape of one; crashfx owns what it looks like; modecaps
-     owns whose people it reaches. A page should never grow its own fireball.
-     CBZ.cityExplosion is deliberately NOT used: it is a wrapper chain six city
-     files hang couplings on, so outside the city the core is the honest call. */
+  /* boom(pos, opts) — THE ONE IMPACT RESOLVER'S DOOR. Every detonation on
+     every page is systems/strike.js (CBZ.strike): the munition's row in
+     weapons/munitiontable.js (opts.mun) prices the fireball, the sound, the
+     people and hulls it reaches, the wall it opens, the roof it holes, the
+     storeys it guts, the building it brings down and the parked machines it
+     wrecks. A caller with no munition may pass opts.W (kg TNT-eq) or its old
+     radius/power. The resolver rides the `damage` pack. */
   CBZ.studio.boom = function (pos, opts) {
     opts = opts || {};
-    const R = opts.radius > 0 ? opts.radius : 18;
-    const power = opts.power > 0 ? opts.power : 1;
-    let drew = false;
-    // cityExplosionCore's signature is (x, z, opts) with the detonation HEIGHT
-    // riding opts.y — this call used to pass (x, y, z, opts), so every slice
-    // page's fireball drew at z≈1 with the default 6 m radius and its own
-    // mis-aimed damage sweep. Measured from games/battle.html: rockets whose
-    // blast damage landed (boom's own sweep below is aimed right) while the
-    // flame bloomed a map away. noDamage because the roster sweep is done
-    // HERE, once, through modecaps — the core's internal applyBlastDamage
-    // would run the same blastWorldActors again and double-kill.
-    if (CBZ.cityBlastCore) {
-      try {
-        CBZ.cityBlastCore(pos.x, pos.z, {
-          power: power, radius: R / Math.max(0.2, power),
-          y: pos.y || 1, noDamage: true, byPlayer: !!opts.byPlayer,
-        });
-        drew = true;
-      } catch (e) {}
-    }
-    // IT MUST ALSO BE HEARD, and the falloff is the bank's own job rather than
-    // every caller's. A detonation across the basin should be a thud, not the
-    // same bang as one in the street.
-    const S = CBZ.micro && CBZ.micro.sfx;
-    if (opts.silent !== true && S && S.boom) {
-      let gain = 0.75 * Math.min(1.6, power);
-      if (CBZ.camera && S.gainAt) {
-        const c = CBZ.camera.position;
-        const d = Math.sqrt((c.x - pos.x) * (c.x - pos.x) + (c.y - (pos.y || 0)) * (c.y - (pos.y || 0)) + (c.z - pos.z) * (c.z - pos.z));
-        gain *= S.gainAt(d, opts.earshot || 420);
-      }
-      if (gain > 0.015) {
-        try { S.boom({ gain: gain, dur: 1.2 + power * 0.5, sub: 96 - power * 12, bright: R < 12 }); } catch (e) {}
-      }
-    }
-    let hit = 0;
-    if (CBZ.blastWorldActors) { try { hit = CBZ.blastWorldActors(pos.x, pos.y || 1, pos.z, R, power, opts) || 0; } catch (e) {} }
-    const struck = opts.structural === false ? null : CBZ.studio.collapseAt(pos, opts);
-    return { drew: drew, hit: hit, struck: struck };
+    return CBZ.strike ? CBZ.strike(opts.mun || null, pos, opts) : null;
   };
 
   // collapseAt(pos, opts): the structural half of a detonation (core/stage.js)

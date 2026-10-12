@@ -871,22 +871,53 @@ function blastBodies(x, y, z, R, power, opts) {
   PHYS.audit.blasts++;
   if (CBZ.ragdollBlast) { try { CBZ.ragdollBlast(x, z, R, power); } catch (e) {} }
   rebuildFine();
-  const near = fineNear(x, z, R + 1);
+  /* HULLS ARE ANSWERED BY THE CHARGE, not by a ring: the blast's loading on
+     the plate at the hull's distance (weapons/munitiontable.js blastOn: a
+     Mk 84 inside ~10 m kills a tank, a 155 mm shell beside a Humvee kills
+     it, a 25 mm HEI does nothing to a Bradley), through the hull's own
+     armour (hurtVehicle -> vehicleDrive.resolve). A hull reaches further
+     than a man's lethal ring, so the search does too. Aircraft are hulls
+     like any other, parked or in the air: the burst's 3D distance decides. */
+  const MT = CBZ.munitionTable;
+  const W = opts.W > 0 ? opts.W : Math.pow(0.55 * R / 4.2, 3);
+  const hullReach = MT ? Math.max(R, 12 * Math.cbrt(W)) : R;
+  const near = fineNear(x, z, hullReach + 6);
   _blastL.length = 0;
   for (let i = 0; i < near.length; i++) _blastL.push(near[i]);
+  // the airframes are not on the fine grid: every hull in the air near the burst
+  for (let i = 0; i < men.length; i++) {
+    const a = men[i];
+    if (a.air && !a.dead && Math.abs(a.pos.x - x) < hullReach + 20 && Math.abs(a.pos.z - z) < hullReach + 20 && _blastL.indexOf(a) < 0) _blastL.push(a);
+  }
   const by = opts.by && opts.by.team ? opts.by : null;
   let n = 0;
   for (let i = 0; i < _blastL.length; i++) {
     const b = _blastL[i];
-    if (b.dead || b.fled || b.air) continue;
-    const dx = b.pos.x - x, dz = b.pos.z - z, dy = (b.pos.y + (b.aimY || 1)) - (y || 0);
+    if (b.dead || b.fled) continue;
+    const dx = b.pos.x - x, dz = b.pos.z - z;
+    if (b.vehicle) {
+      if (opts.direct === b) continue;                 // the direct hit is the caller's (its own pen)
+      // distance to the hull, not its centre: off the box in hull space
+      const c = Math.cos(b.h || 0), s = Math.sin(b.h || 0);
+      const lx = dx * c - dz * s, lz = dx * s + dz * c;
+      const ex = Math.max(0, Math.abs(lx) - (b.vwid || 1.2)), ez = Math.max(0, Math.abs(lz) - (b.vlen || 2.5));
+      const top = b.pos.y + (b.vheight || 2.4), yy = y || 0, ey = Math.max(0, b.pos.y - yy, yy - top);
+      const dh = Math.hypot(ex, ez, ey);
+      if (dh > hullReach) continue;
+      const th = MT ? MT.blastOn(W, dh) : (dh < R * 0.55 ? { pen: 120, beh: 600 } : null);
+      if (!th) continue;
+      // a burst over the roof (a bomb on the deck) loads the roof
+      const over = yy > top - 0.4 && ex < 0.5 && ez < 0.5;
+      hurtMan(b, th.beh, { by: by, byTeam: by && by.team, cause: opts.cause || "explosion", fromX: x, fromZ: z,
+        threat: { pen: th.pen, beh: th.beh, he: true, cls: "blast", top: over } });
+      n++;
+      continue;
+    }
+    if (b.air) continue;
+    const dy = (b.pos.y + (b.aimY || 1)) - (y || 0);
     const d = Math.hypot(dx, dz, dy);
     if (d >= R) continue;
     const Z = Math.max(0.12, d / R);
-    if (b.vehicle) {
-      if (Z < 0.55) { hurtMan(b, 1e6, { by: by, byTeam: by && by.team, cause: opts.cause || "explosion", fromX: x, fromZ: z }); n++; }
-      continue;
-    }
     const taper = Z <= 0.55 ? 1 : (1 - Z) / 0.45;
     const kg = bodyKg(b);
     const dv = Math.min(30, BLAST_DV * power * Math.pow(0.55 / Z, 1.5) * taper * Math.cbrt(MAN_KG / kg));

@@ -1158,19 +1158,20 @@
     if (k === "buster") return invCount("Bunker Buster");
     return c ? (c.nukeAmmo | 0) : 0;
   }
-  // THE STORES TABLE: the designation every readout prints (the desktop
-  // flight strip, the touch stores strip, the Flight Ops note). Real names,
-  // as a stores-management page shows them: the iron bomb is a Mk 84, the
-  // guided round is the Mk 84 with its JDAM kit, i.e. a GBU-31, the
-  // penetrator is the GBU-57 MOP, and the B-2's nuclear store is the B61
-  // (the casing below is drawn from the B61's own proportions).
-  // When weapons/munitiontable.js lands, these names belong there.
-  const STORES = {
-    bomb: { name: "MK 84", full: "Mk 84 2,000 lb bombs" },
-    jdam: { name: "GBU-31", full: "GBU-31 JDAM, GPS guided" },
-    buster: { name: "GBU-57", full: "GBU-57 Massive Ordnance Penetrator" },
-    nuke: { name: "B61", full: "B61 nuclear bomb" },
-  };
+  // THE STORES: the designation every readout prints (the desktop flight
+  // strip, the touch stores strip, the Flight Ops note) comes from the ONE
+  // munition table (weapons/munitiontable.js), whose aliases already name
+  // these four bay keys: bomb = Mk 84, jdam = GBU-31(V)1, buster = GBU-57A/B,
+  // nuke = B61. The strip shows the designation a stores page would ("MK 84",
+  // "GBU-31", "GBU-57", "B61"), the note the row's full name.
+  const DESIG = /^(mk\s*\d+|[a-z]+-\d+|[a-z]\d+)/i;
+  const STORES = {};
+  for (const k of PAYLOADS) {
+    const row = CBZ.munitionTable && CBZ.munitionTable.get(k);
+    const full = row ? row.name : k;
+    const m = DESIG.exec(full);
+    STORES[k] = { name: (m ? m[1] : full).toUpperCase(), full: full };
+  }
   function payloadLabel(k, c) { return STORES[k].full + " (" + payloadCount(k, c) + ")"; }
   // Is this station on the aircraft at all (a spent rack is still a station,
   // and the strip shows it at 0; a penetrator you never collected is not)?

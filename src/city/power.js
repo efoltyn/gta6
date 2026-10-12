@@ -1264,7 +1264,7 @@
         const rec = recOf(p);
         return !!rec && !p.dead && reactionTo(p) === "welcome";
       },
-      label: "Greet",
+      label: "Meet",
       onSelect: function (p) {
         const rec = recOf(p);
         if (!rec) return;
