@@ -2041,32 +2041,10 @@
   }
   function fixPrice(c) { return Math.round(60 + (100 - Math.max(0, c.engineHp)) * 1.6 * (c.repair || 1)); }
 
-  // a CAB ride: the fare scales with the crosstown distance; the arrival is a
-  // straight drop at the far-side intersection (fade-arrive — the ride itself
-  // isn't the show, being ACROSS town in five seconds is).
-  function cabDest() {
-    const A = CBZ.city && CBZ.city.arena;
-    if (!A || !A.nearestIntersection) return null;
-    const P = CBZ.player;
-    return A.nearestIntersection(-P.pos.x, -P.pos.z);   // mirror across the city core
-  }
-  function cabFare() {
-    const it = cabDest(); if (!it) return 0;
-    const P = CBZ.player;
-    return Math.max(30, Math.round(Math.hypot(it.x - P.pos.x, it.z - P.pos.z) * 0.5));
-  }
-  function cabRide(p) {
-    const it = cabDest(); if (!it) return;
-    const P = CBZ.player;
-    const dist = Math.hypot(it.x - P.pos.x, it.z - P.pos.z);
-    if (dist < 40) { if (CBZ.citySay) CBZ.citySay(p, "That's a walk, not a fare.", "#cfe6ff", 2); return; }
-    const fare = Math.max(30, Math.round(dist * 0.5));
-    if (!CBZ.city.spend(fare)) { if (CBZ.citySay) CBZ.citySay(p, "No cash, no cab.", "#cfe6ff", 2); return; }
-    p.cash = (p.cash | 0) + fare;
-    P.pos.x = it.x + 2; P.pos.z = it.z + 2;
-    if (P.vel) { P.vel.x = 0; P.vel.z = 0; }
-    CBZ.city.note("Dropped across town · " + fmt$(fare) + " on the meter.", 2.2);
-  }
+  // NO CAB RIDE. A "cab driver" here is a man on the pavement with no car,
+  // and his Ride verb charged a fare and teleported you to the mirror point
+  // across the city core: teleport-for-money. Deleted until a cab is a car
+  // that drives you on the roads (systems/roadgraph.js routes it).
 
   // is this counter shut for the night? (interact.js hides Buy on a shut shop)
   CBZ.cityShopShut = shopShutSoft;
@@ -2186,14 +2164,6 @@
         if (CBZ.citySay) CBZ.citySay(p, "Runs better than it looks. We're square.", "#cfe6ff", 2.2);
         CBZ.city.note("Engine patched, she'll run.", 1.8);
       },
-    });
-    // a cab driver takes a fare across town (they won't carry a hot one)
-    I.register("ped:civ", {
-      id: "ped-cab-ride", slot: "k", prio: 43,
-      canShow: (p, ctx) => !ctx.driving && !p.dead && !p.rage && p.state !== "flee" &&
-        _jobOf(p) === "cab driver" && (ctx.wanted | 0) < 2,
-      label: () => "Ride " + fmt$(cabFare()),
-      onSelect: (p) => cabRide(p),
     });
     // a cart vendor sells off the cart — cheap calories without a counter
     I.register("ped:civ", {

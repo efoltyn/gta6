@@ -244,11 +244,18 @@
   const liveSession = {};                   // ids vaulted THIS session — their exact lastPos.y is trustworthy
 
   function loadVault() {
+    let primary = null, mirror = null;
+    try {
+      const S = CBZ.sqlitedb;
+      const raw = S && S.isAvailable && S.isAvailable() && S.cachedVault ? S.cachedVault() : null;
+      if (raw) { const v = JSON.parse(raw); if (v && v.chars) primary = v; }
+    } catch (e) { primary = null; }
     try {
       const raw = localStorage.getItem(VAULT_KEY);
-      if (raw) { const v = JSON.parse(raw); if (v && v.chars) return migrateVault(v); }
-    } catch (e) {}
-    return { active: null, chars: {} };
+      if (raw) { const v = JSON.parse(raw); if (v && v.chars) mirror = v; }
+    } catch (e) { mirror = null; }
+    const v = (primary && mirror) ? ((+mirror.savedAt || 0) > (+primary.savedAt || 0) ? mirror : primary) : (primary || mirror);
+    return v ? migrateVault(v) : { active: null, chars: {} };
   }
   // A parked ledger under a RETIRED id would be unreachable — the wheel walks
   // ORIGINS keys and `hitman` is no longer one. Idempotent, nothing destroyed:
@@ -269,9 +276,18 @@
     }
     return v;
   }
+  // THE VAULT IS STORED WHERE THE MAIN SAVE IS (src/net/sqlitedb.js, a blob
+  // with no quota worth the name), localStorage riding as a mirror. Stamped,
+  // so a read takes whichever copy was written last (a session in which
+  // sqlite never came up wrote only the mirror).
   function saveVault(v) {
-    try { localStorage.setItem(VAULT_KEY, JSON.stringify(v)); }
-    catch (e) { console.error("[origins] the character vault did not save (storage full?): a parked life may be lost", e); }
+    v.savedAt = Date.now();
+    let json = null;
+    try { json = JSON.stringify(v); } catch (e) { console.error("[origins] the character vault could not be serialised", e); return; }
+    const S = CBZ.sqlitedb;
+    const primary = !!(S && S.saveVault && S.saveVault(json));
+    try { localStorage.setItem(VAULT_KEY, json); }
+    catch (e) { if (!primary) console.error("[origins] the character vault did not save (storage full?): a parked life may be lost", e); }
   }
   // the active slot changes hands in BOTH stores (city/worldstate.js
   // cityWorldSet): a hand-written localStorage key left sqlite holding the

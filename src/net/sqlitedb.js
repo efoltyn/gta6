@@ -492,6 +492,15 @@
   const DB_NAME = "cbz-cityworld";
   const WORLD_BLOB_KIND = "world", WORLD_BLOB_ID = "cityworld";
   const LEGACY_STORE_KEY = "CBZ_CITY_WORLD_V2"; // city/worldstate.js's own STORE_KEY
+  // THE CHARACTER VAULT (city/origins.js: every parked story character's
+  // whole ledger) lives here too. In localStorage alone it outgrew Safari's
+  // ~5 MB quota first (several full ledgers in one key), and a failed write
+  // on a character switch lost the outgoing life. Stored as one JSON blob,
+  // its localStorage key kept as a mirror (imported once if sqlite is empty).
+  const VAULT_BLOB_KIND = "vault", VAULT_BLOB_ID = "chars";
+  const LEGACY_VAULT_KEY = "CBZ_CITY_CHARS_V1";
+  let vaultCache = null;    // the last known-good vault JSON string
+  let vaultChain = Promise.resolve();
 
   let backendKind = null;   // "opfs-sahpool" | "kvvfs" | null, once decided
   let cache = null;         // in-memory copy of the last known-good world object
@@ -626,7 +635,7 @@
       }).then(function (haveBackend) {
         logBackendOnce();
         if (!haveBackend) return null;
-        return loadWorldAndMaybeMigrate();
+        return loadWorldAndMaybeMigrate().then(function (k) { return loadVault().then(function () { return k; }); });
       });
     });
     return runInit;
@@ -737,6 +746,25 @@
     });
   }
 
+  function loadVault() {
+    return blobGet(VAULT_BLOB_KIND, VAULT_BLOB_ID).then(function (json) {
+      if (json) { vaultCache = json; return; }
+      let legacy = null;
+      try { legacy = window.localStorage ? localStorage.getItem(LEGACY_VAULT_KEY) : null; } catch (e) { legacy = null; }
+      if (!legacy) return;
+      vaultCache = legacy;
+      return backend.run(blobPutStatements(VAULT_BLOB_KIND, VAULT_BLOB_ID, legacy)).then(function () {}, function () {});
+    }).catch(function (e) { console.warn("[sqlitedb] vault load failed (" + (e && e.message) + ")"); });
+  }
+  function saveVaultJson(json) {
+    if (writesBlocked || !backendKind || !backend || typeof json !== "string") return false;
+    vaultCache = json;
+    vaultChain = vaultChain.then(function () {
+      return backend.run(blobPutStatements(VAULT_BLOB_KIND, VAULT_BLOB_ID, json));
+    }).catch(function (e) { console.error("[sqlitedb] vault save failed (" + (e && e.message) + ")"); });
+    return true;
+  }
+
   // ---- public write path: called from city/worldstate.js's save(w). Pure
   // fire-and-forget — never throws, never awaited by the caller. A single
   // in-flight write at a time (single-player has exactly one writer, the
@@ -784,7 +812,9 @@
         { sql: "DELETE FROM polity", params: [] },
         { sql: "DELETE FROM blobs WHERE kind = ? AND id = ?", params: [WORLD_BLOB_KIND, WORLD_BLOB_ID] },
         { sql: "DELETE FROM blob_meta WHERE kind = ? AND id = ?", params: [WORLD_BLOB_KIND, WORLD_BLOB_ID] },
-      ]).then(function () { cache = null; return true; });
+        { sql: "DELETE FROM blobs WHERE kind = ? AND id = ?", params: [VAULT_BLOB_KIND, VAULT_BLOB_ID] },
+        { sql: "DELETE FROM blob_meta WHERE kind = ? AND id = ?", params: [VAULT_BLOB_KIND, VAULT_BLOB_ID] },
+      ]).then(function () { cache = null; vaultCache = null; return true; });
     });
   }
 
@@ -793,6 +823,9 @@
     isAvailable: function () { return !!backendKind; },
     backend: function () { return backendKind; },
     cachedWorld: function () { return cache; },
+    // the character vault (city/origins.js loadVault/saveVault)
+    cachedVault: function () { return vaultCache; },
+    saveVault: saveVaultJson,
     // saveWorld: city/worldstate.js's save() calls this on every write. A
     // no-op (returns false) until the backend is ready — the caller must
     // NOT depend on this for durability until then; localStorage is still

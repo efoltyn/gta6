@@ -100,7 +100,7 @@
     "ped-pickpocket": "pickpocket",
     "official-lean": "threaten", "vip-bench-lean": "threaten",
     "dlg-talk": "talk",
-    "rv-role": "service", "rv-score": "service", "ped-mechanic-fix": "service", "ped-cab-ride": "service",
+    "rv-role": "service", "rv-score": "service", "ped-mechanic-fix": "service",
     "ped-cart-bite": "service", "ped-sell": "service",
     "ped-recruit": "recruit", "loyal-prisoner-join": "recruit",
     "ped-prospect": "gang", "ped-claim-crew": "gang", "ped-put-in-work": "gang", "ped-crew-favor": "gang", "ped-leave-crew": "gang",

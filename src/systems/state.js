@@ -667,6 +667,14 @@
   // during boot still can't build a half-registered world.
   function startRunPresented() {
     if (!CBZ.bootComplete || bootBusy) return;
+    // THE PERMISSIONS ARE TAKEN INSIDE THE TAP. Everything below defers the
+    // start (two frames for the meter, the save store, a 30 s build), and
+    // iOS Safari only opens an AudioContext, and a browser only grants
+    // pointer lock, while the user's gesture is still live. So both are
+    // asked for here, synchronously, before anything waits; startRun's own
+    // calls afterwards are then no-ops (a running context, a held lock).
+    if (CBZ.initAudio) { try { CBZ.initAudio(); } catch (e) {} }
+    if (CBZ.requestLock) { try { CBZ.requestLock(); } catch (e) {} }
     // A CITY RUN STARTS ON THE REAL SAVE. sqlite comes up asynchronously
     // (seconds on an iPad: the OPFS worker and the wasm), and a Play pressed
     // before it settled ran on the stale localStorage mirror (city/

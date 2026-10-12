@@ -2696,6 +2696,9 @@
          OWNER (verbatim): "in front there can be a line of taxis waiting to
          pick people up — they dont have to move — full of taxi drivers."
 
+         (2026-10-13: shops.js's `ped-cab-ride` is DELETED: it was a fare and a
+         teleport, not a drive. These cabs carry no verb until a cab drives you
+         on the roads. The note below is how the rank was wired to it.)
          And it costs no new verb. `cab driver` is already a CITY_JOBS trade
          (aigoals.js) and shops.js already registers `ped-cab-ride` — "Flag a
          cab" — on the ped:civ layer, gated only on the job string, the player

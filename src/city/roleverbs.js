@@ -799,7 +799,7 @@
      ========================================================================== */
   // trades another file already gives a verb to — counted as covered, named so
   // the coverage claim can be checked (shops.js's WORKERS ON THE STREET block).
-  const FOREIGN_JOBS = { "mechanic": "shops.js:ped-mechanic-fix", "cab driver": "shops.js:ped-cab-ride", "street vendor": "shops.js:ped-cart-bite" };
+  const FOREIGN_JOBS = { "mechanic": "shops.js:ped-mechanic-fix", "street vendor": "shops.js:ped-cart-bite" };
   // prop types another file already gives an interaction VERB to. `patio` is
   // in here for a reason worth knowing: its chairs are registered as propuse
   // SEATS (interact.js's SEAT_NAMES carries "patio"), so the sit arc already
