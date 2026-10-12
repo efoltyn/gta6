@@ -6,6 +6,8 @@
      node tools/catalogue.mjs --kind species          every animal (same design, its own shot plan)
      node tools/catalogue.mjs --ids m1_abrams,hmmwv   just these (wave-A stubs included)
      node tools/catalogue.mjs --page-only             rebuild index.html from the frames on disk
+     node tools/catalogue.mjs --kind impacts          munitions x targets: ~30 real shots, AFTER only
+                                                      (see IMPACTS below; --ids picks pairings)
 
    ONE BOOT, MANY UNITS. The tool launches its own headless Chrome
    (tools/testbus/browser.mjs), serves both trees straight out of .git
@@ -70,14 +72,16 @@ const T0 = Date.now();
 const secs = () => ((Date.now() - T0) / 1000).toFixed(1) + " s";
 const log = (...a) => console.log(`[catalogue ${secs()}]`, ...a);
 
-const KIND = val("--kind", "vehicle") === "species" || val("--kind") === "animal" ? "species" : "vehicle";
+const KARG = val("--kind", "vehicle");
+const KIND = /^impacts?$/.test(KARG) ? "impacts" : KARG === "species" || KARG === "animal" ? "species" : "vehicle";
+const SUB = { vehicle: "vehicles", species: "animals", impacts: "impacts" }[KIND];
 const BEFORE = val("--before", "5864f6a5");
 const AFTER = val("--after", "origin/main");
 const MAP = val("--map", "dunes");
 const [W, H] = val("--size", "1280x800").split("x").map(Number);
 const ROOT = path.join(os.homedir(), "harness/out/gta6/catalogue");
-const OUT = path.resolve(val("--out", path.join(ROOT, KIND === "vehicle" ? "vehicles" : "animals")));
-const RAW = path.join(ROOT, "_raw", KIND === "vehicle" ? "vehicles" : "animals");
+const OUT = path.resolve(val("--out", path.join(ROOT, SUB)));
+const RAW = path.join(ROOT, "_raw", SUB);
 const IMG = path.join(OUT, "img");
 const UNIT_DIR = KIND === "vehicle" ? "src/units/vehicles" : "src/units/species";
 
@@ -336,12 +340,11 @@ let SRC = (rel) => rel;          // the screen page: the webp as published; the 
 let PRINT = false;
 /* the phone PDF: a fresh headless Chrome prints the print copy (CDP printToPDF
    can stall after a long WebGL session: tools/visual-compare.mjs found it) */
-async function printPdf(units, M, all, pending, failed, timing) {
+async function printPdf(build) {
   mkdirSync(PRINT_DIR, { recursive: true });
   PRINT = true; SRC = printSrc;
   const html = path.join(PRINT_DIR, "print.html");
-  writeFileSync(html, page(units, M, all, pending, failed, timing));
-  PRINT = false; SRC = (rel) => rel;
+  try { writeFileSync(html, build()); } finally { PRINT = false; SRC = (rel) => rel; }
   const pdf = path.join(OUT, "catalogue.pdf"), tmp = path.join(PRINT_DIR, "catalogue.pdf");
   rmSync(tmp, { force: true });
   /* HARNESS TRAP: this headless print writes the PDF and then does not always
@@ -534,7 +537,319 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')lb.classList
 </body></html>`;
 }
 
+/* ============================================================ IMPACTS
+   --kind impacts: what each munition does to each kind of thing it hits, AFTER
+   only (--after, default origin/main), one Chrome, two live pages: the dunes
+   (sand, cover, vehicles) and the island (Fort Brandt's buildings, its parked
+   aircraft). Every pairing fires the REAL weapon path through the in-page half
+   tools/shot/page/impacts.js (window.__imp): the round flies, lands, resolves
+   against the armour, and the blast, fx and debris are the game's own. The
+   lens is fixed on the mark (the shot service's at: cam). Frames: one step
+   before the impact, the impact, +0.3 s, +1.5 s, settled at +6 s, and a
+   close-up of what lies there at +6 s.
+   A pairing that fails is listed and skipped: the run ships anyway. */
+const IMP_MAPS = { dunes: "dunes", island: "island" };
+// the shot cams per subject size: d metres off, p pitch, yaw relative to the
+// bearing the round came in on (ay: absolute compass yaw), cp close-up pitch
+const CAM = {
+  veh: { d: 24, p: 13, yaw: 60 }, cover: { d: 17, p: 16, yaw: 55 }, bigcover: { d: 30, p: 18, yaw: 70 },
+  bomb: { d: 75, p: 16, yaw: 120 }, bombveh: { d: 45, p: 16, yaw: 110 }, air: { d: 45, p: 4, yaw: 80, cp: 6 },
+};
+let _site = 0;
+// the dunes: every pairing on its own patch of sand, 170 m apart
+const site = () => { const k = _site++; return [1400 + (k % 6) * 170, -260 + Math.floor(k / 6) * 170]; };
+const ABRAMS_GUN = { shooter: "m1_abrams", wid: "m256_120mm" };
+const M242 = { shooter: "bradley_ifv", wid: "m242_25mm" };
+const APACHE = (wid, alt, range, from) => ({ shooter: "ah64_apache", wid, alt, range, from });
+const RPG = { shooter: "men", rw: "bazooka", how: "rpg" };
+/* mun: the round's name; tgt: the target's; by: who fires it; kg: the warhead as
+   the weapon's own file states it (its comment), never invented */
+const PAIRS = [
+  { id: "sabot-abrams-front", mun: "120 mm M829A3 APFSDS", by: "M1 Abrams, M256", tgt: "M1 Abrams, front", cam: CAM.veh, instant: true,
+    P: { ...ABRAMS_GUN, target: { unit: "m1_abrams", h: 0 }, from: 0, range: 800, force: true, noLine: true } },
+  { id: "sabot-abrams-side", mun: "120 mm M829A3 APFSDS", by: "M1 Abrams, M256", tgt: "M1 Abrams, side", cam: CAM.veh, instant: true,
+    P: { ...ABRAMS_GUN, target: { unit: "m1_abrams", h: 0 }, from: 90, range: 800, force: true, noLine: true } },
+  { id: "sabot-bradley", mun: "120 mm M829A3 APFSDS", by: "M1 Abrams, M256", tgt: "M2 Bradley, side", cam: CAM.veh, instant: true,
+    P: { ...ABRAMS_GUN, target: { unit: "bradley_ifv", h: 0 }, from: 90, range: 800, force: true, noLine: true } },
+  { id: "mpat-bradley", mun: "120 mm M830A1 MPAT (HEAT-MP)", by: "M1 Abrams, M256", tgt: "M2 Bradley", cam: CAM.veh,
+    P: { ...ABRAMS_GUN, how: "he", target: { unit: "bradley_ifv", h: 0 }, from: 30, range: 300 } },
+  { id: "mpat-jersey", mun: "120 mm M830A1 MPAT (HEAT-MP)", by: "M1 Abrams, M256", tgt: "Concrete jersey barrier", cam: CAM.cover,
+    P: { ...ABRAMS_GUN, how: "he", target: { cover: "jersey", h: 0 }, from: 0, range: 250 } },
+  { id: "25mm-apds-humvee", mun: "25 mm M791 APDS-T x4", by: "M2 Bradley, M242", tgt: "HMMWV, side", cam: CAM.veh, instant: true,
+    P: { ...M242, target: { unit: "hmmwv", h: 90 }, from: 0, range: 500, force: true, noLine: true, burst: 4, burstDt: 0.3 } },
+  { id: "25mm-he-sand", mun: "25 mm HEI-T x4", by: "M2 Bradley, M242", tgt: "Open sand", cam: { d: 18, p: 18, yaw: 70 },
+    P: { ...M242, how: "he", target: { ground: true }, from: 0, range: 300, burst: 4, burstDt: 0.3 } },
+  { id: "50cal-fmtv", mun: ".50 BMG M2HB, 10-round burst", by: "HMMWV ring mount", tgt: "FMTV truck, cab", cam: CAM.veh, instant: true,
+    P: { shooter: "hmmwv", wid: "m2_50cal_ring", target: { unit: "fmtv", h: 0 }, from: 15, range: 150, burst: 10, burstDt: 0.125 } },
+  { id: "50cal-technical", mun: ".50 BMG M2HB, 10-round burst", by: "Stryker RWS", tgt: "Technical (pickup)", cam: CAM.veh, instant: true,
+    P: { shooter: "stryker_apc", wid: "m2_50cal_rws", target: { unit: "technical", h: 90 }, from: 0, range: 200, burst: 10, burstDt: 0.11 } },
+  { id: "rpg-humvee", mun: "RPG-7, PG-7V", by: "rifleman", tgt: "HMMWV, side", cam: CAM.veh,
+    P: { ...RPG, target: { unit: "hmmwv", h: 90 }, from: 0, range: 90 } },
+  { id: "rpg-bradley", mun: "RPG-7, PG-7V", by: "rifleman", tgt: "M2 Bradley, front", cam: CAM.veh,
+    P: { ...RPG, target: { unit: "bradley_ifv", h: 0 }, from: 0, range: 120 } },
+  { id: "rpg-mrap", mun: "RPG-7, PG-7V", by: "rifleman", tgt: "MaxxPro MRAP, side", cam: CAM.veh,
+    P: { ...RPG, target: { unit: "maxxpro_mrap", h: 90 }, from: 0, range: 100 } },
+  { id: "tow-abrams", mun: "BGM-71 TOW-2B", by: "M2 Bradley", tgt: "M1 Abrams, side", cam: CAM.veh,
+    P: { shooter: "bradley_ifv", wid: "tow_2b", target: { unit: "m1_abrams", h: 0 }, from: 80, range: 600, force: true } },
+  { id: "hellfire-abrams-top", mun: "AGM-114 Hellfire, top attack", by: "AH-64 Apache", tgt: "M1 Abrams", cam: CAM.veh,
+    P: { ...APACHE("agm114_hellfire", 400, 500, 200), target: { unit: "m1_abrams", h: 0 }, force: true } },
+  { id: "hellfire-fmtv", mun: "AGM-114 Hellfire", by: "AH-64 Apache", tgt: "FMTV truck", cam: CAM.veh,
+    P: { ...APACHE("agm114_hellfire", 250, 2000, 200), target: { unit: "fmtv", h: 30 }, force: true } },
+  { id: "hellfire-r-jltv", mun: "AGM-114R Hellfire Romeo", by: "MQ-9 Reaper", tgt: "JLTV", cam: CAM.veh,
+    P: { shooter: "mq9_reaper", wid: "agm114_hellfire", alt: 900, range: 2500, from: 140, target: { unit: "jltv", h: 0 }, force: true } },
+  { id: "30mm-m35", mun: "30 mm M789 HEDP, 8-round burst", by: "AH-64 Apache, M230", tgt: "M35 cargo truck", cam: CAM.veh, instant: true,
+    P: { ...APACHE("m230_30mm", 150, 800, 220), target: { unit: "m35_truck", h: 90 }, force: true, burst: 8, burstDt: 0.1 } },
+  { id: "hydra-hesco", mun: "Hydra 70, M151 HE x4", by: "AH-64 Apache", tgt: "HESCO bastion", cam: CAM.bigcover, kg: "M151: 10 lb HE warhead (ah64_apache.js)",
+    P: { ...APACHE("hydra70", 150, 1200, 180), how: "he", target: { cover: "hesco", h: 0 }, burst: 4, burstDt: 0.17 } },
+  { id: "gmlrs-hesco", mun: "M31A1 GMLRS", by: "M270 MLRS", tgt: "HESCO bastion", cam: CAM.bigcover,
+    P: { shooter: "m270_mlrs", wid: "m31a1_gmlrs", how: "he", target: { cover: "hesco", h: 0 }, from: 150, range: 2500 } },
+  { id: "gbu12-sandbags", mun: "GBU-12 Paveway II", by: "MQ-9 Reaper", tgt: "Sandbag wall", cam: CAM.bigcover, kg: "Mk 82, 89 kg tritonal (mq9_reaper.js)",
+    P: { shooter: "mq9_reaper", wid: "gbu12", how: "bomb", alt: 700, range: 250, speed: 80, from: 270, target: { cover: "sandbags", h: 0 } } },
+  { id: "mk82-sand", mun: "Mk 82 500 lb (one of the stick)", by: "B-52H", tgt: "Open sand", cam: CAM.bomb,
+    P: { shooter: "b52", wid: "mk82_stick", how: "bomb", alt: 700, range: 300, speed: 220, from: 270, target: { ground: true } } },
+  { id: "jdam-sand", mun: "GBU-31(V)1 JDAM, Mk 84", by: "F-35A", tgt: "Open sand", cam: CAM.bomb, kg: "Mk 84, 429 kg tritonal (f35.js)",
+    P: { shooter: "f35", wid: "gbu31_jdam", how: "bomb", alt: 600, range: 300, speed: 220, from: 270, target: { ground: true } } },
+  { id: "blu109-abrams", mun: "GBU-31(V)3 JDAM, BLU-109", by: "B-2A", tgt: "M1 Abrams", cam: CAM.bombveh,
+    P: { shooter: "b2_spirit", wid: "gbu31_blu109", how: "bomb", alt: 700, range: 300, speed: 220, from: 270, target: { unit: "m1_abrams", h: 0 } } },
+  { id: "sdb-bradley", mun: "GBU-39 SDB", by: "F-35A", tgt: "M2 Bradley", cam: CAM.bombveh, kg: "17 kg AFX-757 penetrating warhead (f35.js)",
+    P: { shooter: "f35", wid: "gbu39_sdb", how: "bomb", alt: 600, range: 300, speed: 220, from: 270, target: { unit: "bradley_ifv", h: 0 } } },
+  { id: "pac3-apache", mun: "PAC-3 MSE, hit-to-kill", by: "Patriot launcher", tgt: "AH-64 Apache in flight", cam: CAM.air,
+    P: { shooter: "patriot_launcher", wid: "pac3_mse", target: { unit: "ah64_apache", h: 0, alt: 150 }, from: 120, range: 3000, force: true } },
+  // ---- Fort Brandt (map=island): the base's own buildings and parked aircraft
+  { id: "jdam-barracks", map: "island", mun: "GBU-31(V)1 JDAM, Mk 84", by: "F-35A", tgt: "Barracks, 2 storeys (Fort Brandt)", kg: "Mk 84, 429 kg tritonal (f35.js)",
+    cam: { d: 85, p: 22, ay: 200, cp: 14 },
+    P: { shooter: "f35", wid: "gbu31_jdam", how: "bomb", alt: 600, range: 300, speed: 220, from: 270, site: [-620, -914], skipR: 25, target: { ground: true, aimY: 4 } } },
+  { id: "mk84-hq", map: "island", mun: "GBU-31 JDAM, Mk 84", by: "B-2A", tgt: "HQ, 3 storeys (Fort Brandt)",
+    cam: { d: 90, p: 22, ay: 20, cp: 14 },
+    P: { shooter: "b2_spirit", wid: "gbu31_mk84", how: "bomb", alt: 700, range: 300, speed: 220, from: 270, site: [-730, -808], skipR: 25, target: { ground: true, aimY: 5 } } },
+  { id: "hellfire-hq", map: "island", mun: "AGM-114 Hellfire", by: "AH-64 Apache", tgt: "HQ wall (Fort Brandt)",
+    cam: { d: 42, p: 12, ay: 12, cp: 10 },
+    P: { ...APACHE("agm114_hellfire", 200, 2000, 20), site: [-730, -797.5], skipR: 25, target: { ground: true, aimY: 4 } } },
+  { id: "mpat-ops", map: "island", mun: "120 mm M830A1 MPAT (HEAT-MP)", by: "M1 Abrams, M256", tgt: "Ops building wall (Fort Brandt)",
+    cam: { d: 42, p: 12, yaw: 25, cp: 10 },
+    P: { ...ABRAMS_GUN, how: "he", site: [-556, -664], target: { ground: true, aimY: 3, past: 40 }, from: 180, range: 250, skipR: 16 } },
+  { id: "sdb-parked-f35", map: "island", mun: "GBU-39 SDB", by: "F-35A", tgt: "Parked F-35 on the apron", kg: "17 kg AFX-757 penetrating warhead (f35.js)",
+    cam: { d: 45, p: 18, ay: 150 },
+    P: { shooter: "f35", wid: "gbu39_sdb", how: "bomb", alt: 600, range: 300, speed: 220, from: 270, site: [-654, -588], skipR: 9, target: { ground: true, aimY: 1.5 } } },
+  { id: "gmlrs-parked-apache", map: "island", mun: "M31A1 GMLRS", by: "M270 MLRS", tgt: "Parked AH-64 on its pad",
+    cam: { d: 45, p: 18, ay: 160 },
+    P: { shooter: "m270_mlrs", wid: "m31a1_gmlrs", how: "he", site: [-406, -604], skipR: 9, target: { ground: true, aimY: 1.5 }, from: 300, range: 2500 } },
+];
+for (const X of PAIRS) { X.map = X.map || "dunes"; if (!X.P.site) X.P.site = site(); }
+
+const impLib = () => readFileSync(path.join(HERE, "shot/page/impacts.js"), "utf8");
+const IMP_FRAMES = [["pre", "Just before"], ["hit", "Impact"], ["t03", "+0.3 s"], ["t15", "+1.5 s"], ["t6", "Settled, +6 s"], ["close", "Close-up, +6 s"]];
+async function shootPair(T, X, failed) {
+  const dir = path.join(RAW, X.id); mkdirSync(dir, { recursive: true });
+  const C = X.cam;
+  const st = await T.pg.evl(`__imp.setup(${JSON.stringify(X.P)})`, 240e3);
+  if (!st || !st.ok) throw new Error((st && st.error) || "setup failed");
+  const aim = st.aim;
+  const yaw = C.ay != null && !st.turned ? C.ay : (st.from || 0) + (C.yaw != null ? C.yaw : 60);
+  if (st.blocked) log(`  ${X.id}: no clear line of fire found near the site; fired anyway`);
+  // the lens on a point, swung (in page: __imp.cam) until no dune or wall stands in the way
+  const lens = {};
+  const snap = async (name, d, p, at) => {
+    at = at || aim;
+    const key = `${at.map((v) => v.toFixed(1)).join(",")}|${d}|${p}`;
+    const c = lens[key] || (lens[key] = await T.pg.evl(`__imp.cam(${at.join(",")}, ${yaw}, ${p}, ${d})`, 30e3));
+    return shoot(T, `at:${at.map((v) => (+v).toFixed(2)).join(":")}:${c.yaw}:${c.pitch}:${d}`, path.join(dir, name + ".jpg"));
+  };
+  const focus = () => T.pg.evl("__imp.focus()", 30e3);
+  let flight = null;
+  if (X.instant) { await snap("pre", C.d, C.p); flight = await T.pg.evl("__imp.fire()", 60e3); }
+  else {
+    flight = await T.pg.evl("__imp.fire()", 60e3);
+    flight.to = await T.pg.evl("__imp.toImpact(90)", 300e3);
+    // the round struck before it was one step out (it met something early): no "before" frame
+    if (flight.to && flight.to.near) await snap("pre", C.d, C.p);
+    else failed.push(`${X.id}: no "just before" frame (the round landed ${flight.to && flight.to.hit ? "early" : "late"})`);
+  }
+  const h = await T.pg.evl("__imp.stepHit(12)", 120e3);
+  if (!h || !h.hit) throw new Error("no impact within 12 s of the round's last step");
+  await snap("hit", C.d, C.p);
+  // after the impact the lens stays on the target where it now is (a unit), else the mark
+  await T.pg.evl("__imp.after(0.3)", 60e3); await snap("t03", C.d, C.p, await focus());
+  await T.pg.evl("__imp.after(1.5)", 60e3); await snap("t15", C.d, C.p, await focus());
+  await T.pg.evl("__imp.after(6)", 120e3);
+  const f6 = await focus();
+  await snap("t6", C.d, C.p, f6);
+  // the close-up: on the hit point when it landed near the mark, else the mark
+  const unitT = !!X.P.target.unit;
+  const at = unitT ? f6 : h.at && Math.hypot(h.at.x - aim[0], h.at.z - aim[2]) < 12
+    ? [h.at.x, Math.max(st.ground + 0.8, Math.min(h.at.y, aim[1])), h.at.z] : aim;
+  await snap("close", Math.max(7, C.d * 0.4), C.cp != null ? C.cp : 30, at);
+  const res = await T.pg.evl("__imp.result()", 30e3), facts = await T.pg.evl("__imp.facts()", 30e3);
+  const rec = { id: X.id, commit: afterC, setup: st, flight, hit: h, res, facts };
+  writeFileSync(path.join(dir, "result.json"), JSON.stringify(rec, null, 1));
+  return rec;
+}
+async function runImpactTree(T, list, failed, done) {
+  for (const X of list) {
+    const t0 = Date.now();
+    try { done[X.id] = await shootPair(T, X, failed); log(`${T.label}: ${X.id} in ${((Date.now() - t0) / 1000).toFixed(1)} s (${done[X.id].res.how})`); }
+    catch (e) { failed.push(`${X.mun} → ${X.tgt} (${X.id}): ${e.message}`); log(`${T.label}: ${X.id} FAILED: ${e.message}`); }
+    await T.pg.evl("__shot.clear()", 60e3).catch(() => {});
+  }
+}
+const ZN = { front: "front", side: "side", rear: "rear", top: "roof", belly: "belly" };
+function impactFacts(X, R) {
+  const f = (R && R.facts) || {}, w = f.weapon || {}, he = w.he || {}, out = [];
+  // the round actually fired: a gun's HE path (how "he") is its HE/HEAT round, its
+  // kinetic path (a vehicle target, how "fire") the dart; blast is shown for the rounds that burst
+  const heRound = ["he", "bomb", "rpg"].includes(X.P.how) || ["missile", "sam", "rockets"].includes(w.kind);
+  const pen = X.P.how === "he" || X.P.how === "bomb" ? (he.pen || w.pen) : w.pen;
+  if (pen) out.push(`${fmt(pen, 0)} mm RHA pen`);
+  if (heRound && he.blast) out.push(`blast radius ${fmt(he.blast, 0)} m, power ${fmt(he.power, 1)}`);
+  if (X.kg) out.push(X.kg);
+  const spd = X.P.how === "he" ? (w.heSpeed || w.speed) : w.speed;
+  if (spd && X.P.how !== "bomb") out.push(`${fmt(spd, 0)} m/s`);
+  if (w.v0) out.push(`${w.v0} → ${w.vMax} m/s`);
+  const z = R && R.res && R.res.zone;
+  if (f.armour && z && f.armour[z] != null) out.push(`target ${ZN[z] || z} armour ${fmt(f.armour[z], 0)} mm${f.armourCE && f.armourCE[z] != null ? ` (${fmt(f.armourCE[z], 0)} vs HEAT)` : ""}`);
+  if (f.cover && f.cover.hp) out.push(`${f.cover.kind} ${fmt(f.cover.hp, 0)} hp`);
+  return out.join(" · ");
+}
+function impactResult(X, R) {
+  const r = (R && R.res) || {}, d = r.debris || {};
+  let s;
+  if (r.maxHp != null || r.dead != null) {
+    if (r.dead) s = `Knocked out${r.burning ? ", burning" : ""}${r.crewLost ? `, ${r.crewLost} crew lost` : ""}`;
+    else if (r.pen) s = `Penetrated${r.zone ? ` (${ZN[r.zone] || r.zone})` : ""}${r.firepower ? ", firepower kill" : ""}${r.mobility ? ", mobility kill" : ""}${r.burning ? ", on fire" : ""}; ${fmt(r.hp, 0)}/${fmt(r.maxHp, 0)} hp left`;
+    else if (r.zone) s = `No penetration (${ZN[r.zone] || r.zone}${r.armour ? `, ${fmt(r.armour, 0)} mm` : ""}); ${fmt(r.hp, 0)}/${fmt(r.maxHp, 0)} hp`;
+    else s = `No damage to the hull (${r.how === "hull" ? "hit" : "the round landed beside it"})`;
+  } else if (r.cover) s = r.cover.alive ? `${r.cover.kind} still standing (${fmt(Math.max(0, r.cover.hp), 0)}/${fmt(r.cover.hp0, 0)} hp)` : `${r.cover.kind} destroyed`;
+  else {
+    // how far from the mark it went off: a round that tunnelled through a wall or overflew lands far off
+    const a = R && R.setup && R.setup.aim, at = r.at;
+    const off = a && at ? Math.hypot(at.x - a[0], at.z - a[2]) : null;
+    s = (r.how === "blast" ? "Detonated" : "Struck") + (off == null ? "" : off < 3 ? " on the mark" : ` ${fmt(off, 0)} m from the mark`);
+  }
+  return `${s} · debris on the ground: ${fmt(d.pieces || 0, 0)} fractured pieces, ${fmt(d.grit || 0, 0)} grit`;
+}
+function impactSection(X, R, n) {
+  const dir = path.join(RAW, X.id), img = {};
+  for (const [k] of IMP_FRAMES) { const p = squeeze(path.join(dir, k + ".jpg"), `${X.id}-${k}`); if (p) img[k] = p; }
+  const lazy = PRINT ? "" : ` loading="lazy"`;
+  const strip = IMP_FRAMES.filter(([k]) => k !== "t6").map(([k, l]) => img[k]
+    ? `<figure><img src="${SRC(img[k], 520)}"${lazy} alt=""><figcaption>${l}</figcaption></figure>` : `<figure class="miss"><figcaption>${l}: no frame</figcaption></figure>`).join("");
+  return `<section class="pair" id="${X.id}">
+  <header><div class="num">${String(n).padStart(2, "0")}</div><div><h2>${esc(X.mun)} <span class="arr">→</span> ${esc(X.tgt)}</h2><p class="sub">Fired by ${esc(X.by)} · ${esc(X.map === "island" ? "Fort Brandt (map island)" : "open dunes")}</p></div></header>
+  <div class="hero">${img.t6 ? `<img src="${SRC(img.t6, 1100)}" alt="">` : "no settled frame"}<span class="tag">Settled, +6 s</span></div>
+  <p class="facts">${esc(impactFacts(X, R))}</p>
+  <p class="res">${esc(impactResult(X, R))}</p>
+  <div class="strip">${strip}</div>
+</section>`;
+}
+function impactPage(list, results, failed, timing) {
+  const ok = list.filter((X) => results[X.id]);
+  const toc = ok.map((X, i) => `<a href="#${X.id}"><span>${String(i + 1).padStart(2, "0")}</span>${esc(X.mun)} → ${esc(X.tgt)}</a>`).join("");
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NPC War Impacts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d0e10;--panel:#15171a;--line:#262a2f;--ink:#e9e6df;--mute:#8d9096;--acc:#d9a441}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,system-ui,sans-serif}
+a{color:inherit}.wrap{max-width:1100px;margin:0 auto;padding:0 16px}
+.mast{padding:64px 0 28px;border-bottom:1px solid var(--line)}
+.kick{color:var(--acc);letter-spacing:.2em;text-transform:uppercase;font-size:12px;font-weight:600}
+.mast h1{font:700 clamp(40px,7vw,88px)/.95 Fraunces,Georgia,serif;margin:12px 0 16px;letter-spacing:-.02em}
+.mast p{color:var(--mute);max-width:760px;margin:0}
+.toc{columns:2 320px;gap:24px;padding:22px 0 4px;font-size:13px}.toc a{display:block;text-decoration:none;padding:3px 0;break-inside:avoid}.toc a span{color:var(--acc);font:700 12px Fraunces,serif;margin-right:8px}
+.pair{padding:56px 0 20px;border-bottom:1px solid var(--line)}
+.pair header{display:flex;gap:18px;align-items:flex-end;margin-bottom:16px}
+.num{font:700 56px/1 Fraunces,serif;color:var(--acc)}
+.pair h2{font:700 clamp(24px,3.6vw,40px)/1.05 Fraunces,Georgia,serif;margin:0}.arr{color:var(--acc)}
+.sub{color:var(--mute);margin:6px 0 0;font-size:13px}
+.hero{position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#222;aspect-ratio:16/10}
+.hero img{width:100%;height:100%;object-fit:cover;display:block}
+.tag{position:absolute;top:12px;left:12px;font:600 11px Inter;letter-spacing:.14em;text-transform:uppercase;background:#000a;padding:4px 9px;border-radius:4px;color:var(--acc)}
+.facts{color:var(--mute);font-size:13px;margin:12px 0 2px}.res{font-weight:600;margin:0 0 12px}
+.strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+figure img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;cursor:zoom-in}
+figcaption{font-size:12px;color:var(--mute);padding:5px 8px}figure.miss{display:grid;place-items:center;min-height:90px}
+.fail{color:var(--mute);font-size:13px;padding:28px 0 8px}.foot{color:var(--mute);font-size:12px;padding:20px 0 48px}
+#lb{position:fixed;inset:0;background:#000e;display:none;place-items:center;z-index:9;cursor:zoom-out}#lb img{max-width:96vw;max-height:92vh;border-radius:6px}#lb.on{display:grid}
+@media (max-width:760px){.strip{grid-template-columns:repeat(2,minmax(0,1fr))}.num{font-size:40px}}
+@page{size:150mm 266mm;margin:0}
+@media print{
+ html,body{background:var(--bg);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ body{font-size:11px}.wrap{padding:0 7mm}#lb{display:none!important}
+ .mast{padding:12mm 0 6mm}.mast h1{font-size:44px}.mast p{font-size:11px}.toc{columns:1;font-size:10px;padding-top:8px}
+ .pair{break-before:page;padding:8mm 0 0;border:0}.pair header{margin-bottom:8px}.num{font-size:32px}.pair h2{font-size:22px}.sub{font-size:10px}
+ .facts{font-size:10px;margin:8px 0 2px}.res{font-size:11.5px;margin:0 0 8px}
+ .strip{grid-template-columns:repeat(3,1fr);gap:5px}figure{break-inside:avoid}figcaption{font-size:9px;padding:3px 6px}figure.miss{display:none}
+ .fail{break-before:page}
+}
+</style></head><body><div class="wrap">
+<div class="mast"><div class="kick">NPC War · impact catalogue</div><h1>What hits do</h1>
+<p>Each page is one round fired through the game's own weapon path at ${afterC.slice(0, 8)}: the shooter's real weapon, its real flight, the armour roll, blast, fire and debris as the battle makes them. The lens is fixed on the mark. Frames run from the step before impact to six seconds after, when the debris has come to rest. Numbers are read from each weapon's own file; "debris" counts are CBZ.debris's own (fractured pieces on the ground, small grit).</p>
+<nav class="toc">${toc}</nav></div>
+${ok.map((X, i) => impactSection(X, results[X.id], i + 1)).join("\n")}
+${failed.length ? `<div class="fail"><h3>Failed pairings (skipped) and missing frames</h3><ul>${failed.map((f) => `<li>${esc(f)}</li>`).join("")}</ul></div>` : ""}
+<p class="foot">${esc(timing)}</p>
+</div><div id="lb"><img alt=""></div>
+<script>
+var lb=document.getElementById('lb');
+document.querySelectorAll('figure img,.hero img').forEach(function(i){i.addEventListener('click',function(){lb.firstChild.src=i.src;lb.classList.add('on')})});
+lb.addEventListener('click',function(){lb.classList.remove('on')});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')lb.classList.remove('on')});
+</script></body></html>`;
+}
+async function impactsMain() {
+  const ids = val("--ids") ? val("--ids").split(",").map((s) => s.trim()) : null;
+  const list = ids ? PAIRS.filter((X) => ids.includes(X.id)) : PAIRS;
+  log(`impacts: ${list.length} pairings at ${AFTER}@${afterC.slice(0, 8)}, ${W}x${H}`);
+  const failed = [], results = {};
+  let timing = `Built ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC from ${afterC.slice(0, 8)}.`;
+  if (!has("--page-only")) {
+    for (const X of list) rmSync(path.join(RAW, X.id), { recursive: true, force: true });
+    const B = await launchChrome();
+    log(`chrome up in ${B.startMs} ms (pid ${B.pid})`);
+    const trees = [];
+    try {
+      const maps = [...new Set(list.map((X) => X.map))];
+      const booted = await Promise.all(maps.map(async (m) => {
+        try {
+          const T = await bootTree(B, m, afterC, IMP_MAPS[m] || m);
+          const ok = await T.pg.evl(impLib(), 30e3);
+          if (ok !== true) throw new Error(`tools/shot/page/impacts.js did not install (${ok})`);
+          trees.push(T);
+          return T;
+        } catch (e) {
+          for (const X of list) if (X.map === m) failed.push(`${X.mun} → ${X.tgt} (${X.id}): the ${m} page did not boot: ${e.message}`);
+          return null;
+        }
+      }));
+      const t1 = Date.now();
+      await Promise.all(booted.filter(Boolean).map((T) => runImpactTree(T, list.filter((X) => X.map === T.label), failed, results)));
+      timing = `One run: ${Object.keys(results).length}/${list.length} pairings, ${booted.filter(Boolean).map((T) => `${T.label} boot ${(T.bootMs / 1000).toFixed(0)} s`).join(", ")}, capture ${((Date.now() - t1) / 1000).toFixed(0)} s, ${secs()} end to end. ` + timing;
+    } finally {
+      for (const T of trees) { try { await T.pg.closeTarget(); } catch (_) {} try { T.srv.close(); } catch (_) {} }
+      await B.close();
+    }
+  } else {
+    for (const X of list) { const f = path.join(RAW, X.id, "result.json"); if (existsSync(f)) results[X.id] = JSON.parse(readFileSync(f, "utf8")); }
+  }
+  mkdirSync(IMG, { recursive: true });
+  const commits = [...new Set(Object.values(results).map((R) => R.commit).filter(Boolean))];
+  if (commits.length > 1) timing += ` Frames from ${commits.map((c) => c.slice(0, 8)).join(" and ")} (pairings reshot after main moved).`;
+  writeFileSync(path.join(OUT, "index.html"), impactPage(list, results, failed, timing));
+  const bytes = readdirSync(IMG).reduce((s, f) => s + statSync(path.join(IMG, f)).size, 0);
+  log(`${failed.length} failed pairing(s)${failed.length ? ":\n  " + failed.join("\n  ") : ""}`);
+  log(`images ${(bytes / 1048576).toFixed(1)} MB in ${readdirSync(IMG).length} files; ${timing}`);
+  if (!has("--no-pdf")) {
+    const t = Date.now();
+    try { const pdf = await printPdf(() => impactPage(list, results, failed, timing)); log(`pdf ${(statSync(pdf).size / 1048576).toFixed(1)} MB in ${((Date.now() - t) / 1000).toFixed(1)} s: ${pdf}`); }
+    catch (e) { log("pdf failed: " + e.message); }
+  }
+  console.log(path.join(OUT, "index.html"));
+}
+
 /* -------------------------------------------------------------- the run */
+if (KIND === "impacts") { await impactsMain(); process.exit(0); }
 const M = manifest();
 const M0 = manifest(beforeC);
 const ids = val("--ids") ? val("--ids").split(",").map((s) => s.trim()).filter(Boolean)
@@ -580,7 +895,7 @@ log(`${failed.length} failed frame(s)${failed.length ? ":\n  " + failed.join("\n
 log(`images ${(bytes / 1048576).toFixed(1)} MB in ${readdirSync(IMG).length} files; ${timing}`);
 if (!has("--no-pdf")) {
   const t = Date.now();
-  try { const pdf = await printPdf(units, M, all, pending, failed, timing); log(`pdf ${(statSync(pdf).size / 1048576).toFixed(1)} MB in ${((Date.now() - t) / 1000).toFixed(1)} s: ${pdf}`); }
+  try { const pdf = await printPdf(() => page(units, M, all, pending, failed, timing)); log(`pdf ${(statSync(pdf).size / 1048576).toFixed(1)} MB in ${((Date.now() - t) / 1000).toFixed(1)} s: ${pdf}`); }
   catch (e) { log("pdf failed: " + e.message); }
 }
 console.log(path.join(OUT, "index.html"));
