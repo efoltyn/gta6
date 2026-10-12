@@ -1159,6 +1159,13 @@
       K.root.add(im);
     };
     put(white, 0xfff2c0); put(blue, 0x3a6dff);
+    // a city host's field also shines at distance (core/lodlights.js)
+    if (host.lodLights && CBZ.lodLights && host.toWorld) {
+      const far = [];
+      const add = function (pts, col) { pts.forEach(function (p) { const w = host.toWorld(p[0], p[1]); far.push({ x: w.x, y: y + 0.5, z: w.z, c: col, s: 0.9, g: 9, f: 35 }); }); };
+      add(white, 0xfff2c0); add(blue, 0x3a6dff);
+      CBZ.lodLights.lights("base:" + host.lodLights, far);
+    }
     // a windsock beside the touchdown zone
     const B = new Batch();
     B.box(cm(C.steel), RW.x0 + 70, 3, RW.z - RW.w / 2 - 22, 0.15, 6, 0.15);
