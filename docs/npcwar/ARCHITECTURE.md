@@ -946,7 +946,7 @@ it. `ejecta(W, surface)` sizes a ground burst's crater and clods.
 `{ id: "m256_120mm", kind: "cannon", mun: "m829a3", heMun: "m830a1", rof, range, ammo... }`.
 `munitionTable.arm(w)` (called by vehicles.js at spawn) fills `w.pen, w.beh, w.speed, w.he =
 { pen, beh, blast, power, W, mun }, w.heSpeed, w.top, w.keCls`. A unit file that types
-`he: { pen: ... }` fails `tools/strike-check.mjs`.
+`he: { pen: ... }` is a second copy: delete it.
 
 **The resolver.** `CBZ.studio.boom(pos, { mun, by, direct, struck, dirx, dirz, contact })` IS
 `CBZ.strike(mun, pos, opts)`:
@@ -994,10 +994,6 @@ row names one (`mun`), and its terminal dive lands it through `studio.boom({ mun
 `essm`, `rim116`, `mk48`, `mk54`. Also `javelin`, `m795` / `m982`, mortars, `tomahawk`,
 `gbu28`, `gbu57`.
 
-`node tools/strike-check.mjs` fires every munition class at every target class (ground, walls,
-roofs, a bunker, every vehicle's real armour, men, parked aircraft, boats, drones, aircraft in
-flight) and asserts the damage; `node tools/npcwar-headless.mjs 18` does it in the page's own
-sim.
 
 ---
 
@@ -1026,7 +1022,6 @@ node tools/npcwar-arena.mjs        BALANCE: a matchup over N seeds in parallel w
 node tools/npcwar-balance-check.mjs the fast subset; FAILS when a win rate's whole 95% interval is
                                    outside its real-world band. Testbus node check.
 node tools/npcwar-physics-check.mjs mass, momentum, knocks, flight, blasts, hulls, fists v hide (9c).
-node tools/strike-check.mjs        every munition class at every target class through the one table and resolver (9d).
 ```
 
 `tools/npcwar-headless.mjs` lifts the page's `src/battle` / `src/units` script tags out of
