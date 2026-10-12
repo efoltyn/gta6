@@ -859,7 +859,10 @@
     if (!gangDogsDone && clock > 3) { try { spawnGangDogs(); } catch (e) { gangDogsDone = true; } }
     if (g.mode === "city") k9Manager(dt);
     const P = CBZ.player && CBZ.player.pos;
-    const fe = ((CBZ.scene && CBZ.scene.fog && CBZ.scene.fog.far) || CBZ.cityFogFar || 760) + 30;
+    // drawn to the eye's fog (core/sight.js), measured from the eye
+    const SG = CBZ.sight ? CBZ.sight() : null;
+    const fe = (SG ? SG.reach : ((CBZ.scene && CBZ.scene.fog && CBZ.scene.fog.far) || CBZ.cityFogFar || 760)) + 30;
+    const EX = SG ? SG.x : (P ? P.x : 0), EZ = SG ? SG.z : (P ? P.z : 0);
     for (let i = 0; i < dogs.length; i++) {
       const d = dogs[i], grp = d.group;
       if (d.dead) {
@@ -875,7 +878,7 @@
         if (d.fadeT <= 0) { removeDog(d); i--; }
         continue;
       }
-      if (P) { const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z; grp.visible = vdx * vdx + vdz * vdz < fe * fe; }
+      if (P) { const vdx = grp.position.x - EX, vdz = grp.position.z - EZ; grp.visible = vdx * vdx + vdz * vdz < fe * fe; }
       // timers + per-frame intents reset
       d.biteCD -= dt; d.barkCD -= dt; if (d._hurtT > 0) d._hurtT -= dt;
       if (d.shakeT > 0) d.shakeT -= dt;

@@ -1096,6 +1096,8 @@
     });
     trunkIM.instanceMatrix.needsUpdate = true; armIM.instanceMatrix.needsUpdate = true;
     trunkIM.matrixAutoUpdate = false; armIM.matrixAutoUpdate = false;
+    // scenery: never parked by the streamer, dealt into culled cells (core/sight.js)
+    trunkIM.userData.sceneryScale = armIM.userData.sceneryScale = true;
     root.add(trunkIM); if (armCount) root.add(armIM);
     } // DESERT_CACTI
 
@@ -1133,7 +1135,7 @@
       if (b.s > 2.2) solid(b.x, b.z, b.s * 1.4, b.s * 1.4, b.s);
     });
     if (rockIM) {
-      rockIM.instanceMatrix.needsUpdate = true; rockIM.matrixAutoUpdate = false;
+      rockIM.instanceMatrix.needsUpdate = true; rockIM.matrixAutoUpdate = false; rockIM.userData.sceneryScale = true;
       root.add(rockIM);
     }
     // published for CBZ.worldScaleAudit(): 0 is the owner's answer.
@@ -1210,7 +1212,7 @@
       dummy.scale.set(s, s * 0.7, s); dummy.rotation.set(0, rot, 0);
       dummy.updateMatrix(); scrubIM.setMatrixAt(i, dummy.matrix);
     }
-    scrubIM.instanceMatrix.needsUpdate = true; scrubIM.matrixAutoUpdate = false;
+    scrubIM.instanceMatrix.needsUpdate = true; scrubIM.matrixAutoUpdate = false; scrubIM.userData.sceneryScale = true;
     scrubIM.castShadow = true; root.add(scrubIM);
 
     const tumbleGeo = new THREE.IcosahedronGeometry(0.7, 1);
@@ -1222,7 +1224,7 @@
       dummy.scale.set(s, s, s); dummy.rotation.set(rx, ry, rz);
       dummy.updateMatrix(); tumbleIM.setMatrixAt(i, dummy.matrix);
     }
-    tumbleIM.instanceMatrix.needsUpdate = true; tumbleIM.matrixAutoUpdate = false;
+    tumbleIM.instanceMatrix.needsUpdate = true; tumbleIM.matrixAutoUpdate = false; tumbleIM.userData.sceneryScale = true;
     root.add(tumbleIM);
 
     // =====================================================================
@@ -1256,7 +1258,7 @@
       dummy.scale.set(1, rr(0.5, 1.0), 1); dummy.rotation.set(0, rng() * Math.PI, Math.PI / 2);
       dummy.updateMatrix(); boneIM.setMatrixAt(bi, dummy.matrix);
     }
-    boneIM.instanceMatrix.needsUpdate = true; boneIM.matrixAutoUpdate = false;
+    boneIM.instanceMatrix.needsUpdate = true; boneIM.matrixAutoUpdate = false; boneIM.userData.sceneryScale = true;
     boneIM.castShadow = true; root.add(boneIM);
     } // DESERT_PROP_SCATTER
 

@@ -571,6 +571,7 @@
       crownIM.instanceColor = new THREE.InstancedBufferAttribute(cCol, 3);
       trunkIM.instanceMatrix.needsUpdate = true;
       crownIM.instanceMatrix.needsUpdate = true;
+      trunkIM.userData.sceneryScale = crownIM.userData.sceneryScale = true;   // horizon scenery (core/sight.js)
       root.add(trunkIM); root.add(crownIM);
       speciesIMs.push(trunkIM, crownIM);
       // contact: each crown's footprint in shade, laid on the relief's own slope
@@ -644,6 +645,7 @@
       }
       snagIM.instanceColor = new THREE.InstancedBufferAttribute(sCol, 3);
       snagIM.instanceMatrix.needsUpdate = true;
+      snagIM.userData.sceneryScale = true;
       root.add(snagIM);
       snagIMs.push(snagIM);
       lodIMs.push({ im: snagIM, full: N });
@@ -681,6 +683,7 @@
       if (rockIM) {
         rockIM.instanceColor = new THREE.InstancedBufferAttribute(rCol, 3);
         rockIM.instanceMatrix.needsUpdate = true;
+        rockIM.userData.sceneryScale = true;
         root.add(rockIM);
         lodIMs.push({ im: rockIM, full: NR });
       }
@@ -712,6 +715,7 @@
       }
       grassIM.instanceColor = new THREE.InstancedBufferAttribute(gCol, 3);
       grassIM.instanceMatrix.needsUpdate = true;
+      grassIM.userData.sceneryScale = true;
       root.add(grassIM);
       lodIMs.push({ im: grassIM, full: NG });
     }

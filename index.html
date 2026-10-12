@@ -450,9 +450,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=memfit1008"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=maplabels1009"></script>
+<script src="src/core/slice.js?v=sight1011"></script>
+<!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
+     the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
+<script src="src/core/sight.js?v=sight1011"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=sdoor0930"></script>
+<script src="src/core/citystream.js?v=sight1011"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -481,10 +484,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=ground1001"></script>
+<script src="src/world/vegetation.js?v=sight1011"></script>
 <!-- where a tree meets the ground: instanced contact shade + mulch rings every
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
-<script src="src/world/treefoot.js?v=ground1001"></script>
+<script src="src/world/treefoot.js?v=sight1011"></script>
 <script src="src/world/forestlook.js?v=wreal0929"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/lightpin.js?v=w09290242x"></script>
@@ -1226,12 +1229,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/expansion.js?v=ground1001"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=speedway1009"></script>
+<script src="src/city/worldmap.js?v=sight1011"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
 <script src="src/city/waterfield.js?v=pf0930g"></script>
-<script src="src/city/highways.js?v=ground1001"></script>
+<script src="src/city/highways.js?v=sight1011"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
@@ -1343,10 +1346,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
 <script src="src/world/basekit.js?v=base1012"></script>
 <script src="src/city/island_military.js?v=base1012"></script>
-<script src="src/city/biome_desert.js?v=layout2m"></script>
-<script src="src/city/biome_forest.js?v=ground1001"></script>
+<script src="src/city/biome_desert.js?v=sight1011"></script>
+<script src="src/city/biome_forest.js?v=sight1011"></script>
 <script src="src/city/biome_farmland.js?v=layout2b"></script>
-<script src="src/city/biome_snow.js?v=maplabels1009"></script>
+<script src="src/city/biome_snow.js?v=sight1011"></script>
 <script src="src/city/snowboard.js?v=ric0929"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -1355,7 +1358,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
-<script src="src/world/wildnature.js?v=ground1001"></script>
+<script src="src/world/wildnature.js?v=sight1011"></script>
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
@@ -1377,7 +1380,7 @@ document.body.appendChild(b);}}catch(e){}})();
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
 <script src="src/city/wildlife_traits.js?v=indiv1"></script>
-<script src="src/city/wildlife.js?v=pf0930g"></script>
+<script src="src/city/wildlife.js?v=sight1011"></script>
 <script src="src/city/wildlife_tame.js?v=ekey2"></script>
 <!-- THE ONE DOG: city/dogmodel.js is the body (skinned lofted shell per breed,
      planted-foot walk/trot/gallop, body language) and CBZ.dogGait; city/
@@ -1390,7 +1393,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/units/kit/loft.js?v=npcw1011"></script>
 <script src="src/city/dogmodel.js?v=npcw1011"></script>
 <script src="src/city/dogbrain.js?v=dogs1009b"></script>
-<script src="src/city/dogs.js?v=dogs1009b"></script>
+<script src="src/city/dogs.js?v=sight1011"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <!-- THE ANGLE LAW loads first because it is the one thing all three biters
@@ -1410,8 +1413,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/arena_fights.js?v=gnp0930"></script>
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
-<script src="src/city/street_hardware.js?v=tlights1009"></script>
-<script src="src/city/props.js?v=tlights1009"></script>
+<script src="src/city/street_hardware.js?v=sight1011"></script>
+<script src="src/city/props.js?v=sight1011"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=w09290219"></script>
@@ -1420,7 +1423,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=po0930"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
-<script src="src/city/mode.js?v=street1009"></script>
+<script src="src/city/mode.js?v=sight1011"></script>
 <script src="src/city/economy.js?v=vit3"></script>
 <script src="src/city/clothes.js?v=arms1009b"></script>
 <script src="src/city/outfits.js?v=armourm1011"></script>
@@ -1507,7 +1510,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=pf0930e"></script>
-<script src="src/city/vehicles.js?v=street1009"></script>
+<script src="src/city/vehicles.js?v=sight1011"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
 <script src="src/city/playeraircraft.js?v=planes1009b"></script>
@@ -1593,7 +1596,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
-<script src="src/city/airtraffic.js?v=pf0930r"></script>
+<script src="src/city/airtraffic.js?v=sight1011"></script>
 <!-- ORDNANCE + STRUCTURE. impactbus.js: CBZ.detonate(x,y,z,kind,opts) — new
      ordnance is a TABLE ROW, not a file. structural.js: CBZ.structure, the ONE
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
@@ -2222,7 +2225,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/river.js?v=wreal0929"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=ground1008c"></script>
+<script src="src/city/continent.js?v=sight1011"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
@@ -2585,7 +2588,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/street_furniture.js?v=deslop1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>
 <script src="src/world/building_dress.js?v=roof1-st1"></script>
-<script src="src/core/farcull.js?v=fac1009"></script>
+<script src="src/core/farcull.js?v=sight1011"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/losgrid.js?v=lg1"></script>

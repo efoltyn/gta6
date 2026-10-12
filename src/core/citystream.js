@@ -136,10 +136,13 @@
   const lastP = { x: 0, z: 0, t: 0 };
   CBZ.streamBegin = function (cx, cz) {
     if (!streamWanted() || CBZ.slice) return false;
-    /* what can be drawn: core/farcull.js draws everything to the fog's end
-       + 30 m, measured from the player; + 6 m for the camera boom behind them.
-       (It was fog + 60: 24 m more ring than anything draws.) */
-    const view = function () { return Math.max(380, +CBZ.cityFogFar || 760) + 36; };
+    /* what must be the real thing: core/sight.js's `detail` ring (the ground
+       fog's end + 36 m). Past it, out to the airborne horizon, only content
+       with a FAR FORM may be seen (metro HLOD, farcull's lot boxes, the
+       forest's far crowns, scenery pools, which never park: core/slice.js
+       isHorizon). The ring is measured from the EYE: keepR adds how far the
+       camera stands off the body (a heli boom, a lifted lens). */
+    const view = function () { return CBZ.sight().detail; };
     const S = {
       name: "stream", stream: true, x: cx, z: cz, r: 300,
       label: "Gang City (streamed)",
@@ -152,7 +155,7 @@
          whole playable radius again on top, ~35% more city in memory at the
          downtown spawn for ground nobody could see yet. */
       lead: 0,
-      keepR: function () { return RECENTRE_M + S.view() + S.lead; },
+      keepR: function () { return RECENTRE_M + S.view() + S.lead + Math.min(400, CBZ.sight().eyeOff); },
     };
     CBZ.slice = S;
     S.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(cx, cz, view()) : 300;
@@ -692,15 +695,17 @@
     // next few ticks (inside view + the speed lead) raises it to STEP_SOON_MS,
     // so the queue drains BEFORE anything reaches view distance (a build that
     // only happens inside view is a pop: counted in streamStats.urgent).
+    // (in sight = from the EYE, core/sight.js; the body is where colliders matter)
+    const EYE = CBZ.sight();
     const VIEW = s.view(), V2 = VIEW * VIEW, SOON = VIEW + s.lead + 60, SOON2 = SOON * SOON;
     let budget = STEP_MS;
     for (const j of order) {
       if (j.state === "parked") { unpark(j); continue; }
-      if (distTo(j.rect, P.pos.x, P.pos.z) < SOON2) budget = STEP_SOON_MS;
+      if (distTo(j.rect, EYE.x, EYE.z) < SOON2 || distTo(j.rect, P.pos.x, P.pos.z) < SOON2) budget = STEP_SOON_MS;
     }
     for (const j of order) {
       if (j.state !== "queued") continue;
-      const urgent = distTo(j.rect, P.pos.x, P.pos.z) < V2;
+      const urgent = distTo(j.rect, EYE.x, EYE.z) < V2 || distTo(j.rect, P.pos.x, P.pos.z) < V2;
       if (!force && !urgent && performance.now() - t0 > budget) break;
       runCaptured(j); settle(j); noteAdd(j, urgent ? "build!" : "build");
       CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms));

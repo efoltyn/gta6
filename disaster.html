@@ -449,9 +449,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=memfit1008"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=maplabels1009"></script>
+<script src="src/core/slice.js?v=sight1011"></script>
+<!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
+     the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
+<script src="src/core/sight.js?v=sight1011"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=sdoor0930"></script>
+<script src="src/core/citystream.js?v=sight1011"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -477,10 +480,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=ground1001"></script>
+<script src="src/world/vegetation.js?v=sight1011"></script>
 <!-- where a tree meets the ground: instanced contact shade + mulch rings every
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
-<script src="src/world/treefoot.js?v=ground1001"></script>
+<script src="src/world/treefoot.js?v=sight1011"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
@@ -1098,7 +1101,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facades/brickhouse.js?v=fac1009"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=speedway1009"></script>
+<script src="src/city/worldmap.js?v=sight1011"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1200,7 +1203,7 @@ document.body.appendChild(b);}}catch(e){}})();
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
-<script src="src/city/wildlife.js?v=pf0930g"></script>
+<script src="src/city/wildlife.js?v=sight1011"></script>
 <!-- THE ONE DOG: city/dogmodel.js is the body (skinned lofted shell per breed,
      planted-foot walk/trot/gallop, body language) and CBZ.dogGait; city/
      dogbrain.js is the loyal dog's protector rulebook (pure); dogs.js is the
@@ -1227,7 +1230,7 @@ document.body.appendChild(b);}}catch(e){}})();
      so either order works — keep them adjacent, still landmass order 40. -->
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
-<script src="src/city/street_hardware.js?v=tlights1009"></script>
+<script src="src/city/street_hardware.js?v=sight1011"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
@@ -2151,7 +2154,7 @@ document.body.appendChild(b);}}catch(e){}})();
        - detail_kit.js FIRST; the other four only register passes into it.
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
-<script src="src/core/farcull.js?v=fac1009"></script>
+<script src="src/core/farcull.js?v=sight1011"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>

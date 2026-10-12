@@ -6715,7 +6715,9 @@
      sub-pixel twins), which costs no per-car work, so it can go all the way
      out; it only sleeps (hidden) where the fog has already made it
      invisible. CBZ.carSleepD2 is the one number both files read. */
-  CBZ.carSleepD2 = function () { const f = Math.max(150, (+CBZ.cityFogFar || 150) + 30); return f * f; };
+  // (the fog THIS EYE has, core/sight.js: from the air it is kilometres,
+  // and the ground fog left every parked car below a helicopter vanishing)
+  CBZ.carSleepD2 = function () { const f = Math.max(150, (CBZ.sight ? CBZ.sight().far : (+CBZ.cityFogFar || 150)) + 30); return f * f; };
   let SLEEP_D2 = 150 * 150, WAKE_D2 = 140 * 140;
   const WAKE_SLICE = 24;
   function sleepRing() { SLEEP_D2 = CBZ.carSleepD2(); const w = Math.sqrt(SLEEP_D2) - 10; WAKE_D2 = w * w; }

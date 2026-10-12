@@ -440,27 +440,19 @@
     lastSweepAt = now;
     const g = CBZ.game;
     const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
-    // City player state lives in `.pos`, not `.position`. Falling back to the
-    // camera made street culling follow the look rig rather than the actor and
-    // masked the true player location whenever the camera was offset.
-    const P = CBZ.player && (CBZ.player.pos || CBZ.player.position)
-      ? (CBZ.player.pos || CBZ.player.position)
-      : (CBZ.camera ? CBZ.camera.position : null);
-    const airborne = !!(CBZ.player && CBZ.player._aircraft && CBZ.player.pos && CBZ.player.pos.y > 24);
-    // Aircraft see farther, but they no longer need every room/window from the
-    // entire world. Keep a wider full-detail bubble in flight and let the real
-    // measured building proxies carry the rest of the skyline in one draw.
+    /* WHAT THE CAMERA SEES (core/sight.js): measured from the EYE, out to
+       the fog this eye has. It was the player's feet and a private airborne
+       radius; from a heli boom or a lifted lens that hid groups standing in
+       the picture. NO SWAP INSIDE THE FOG (owner: "nothing may visibly
+       generate or pop within view"): every group, a lot building included, is
+       drawn as itself out to the fog's end; the measured LOD box only stands
+       in past it, where the fog has made the difference invisible. */
+    const SG = CBZ.sight();
+    const P = (CBZ.camera || CBZ.player) ? { x: SG.x, z: SG.z } : null;
     const baseR = (CBZ.CONFIG && CBZ.CONFIG.CITY_FAR_CULL !== false && g && g.mode === "city")
       ? (CBZ.cityCullRadius || 0) : 0;
-    const R0 = airborne && baseR ? Math.max(700, baseR + 180) : baseR;
-    const fogEnd = ((CBZ.scene && CBZ.scene.fog && CBZ.scene.fog.far) || CBZ.cityFogFar || R0) + 30;
-    /* NO SWAP INSIDE THE FOG (owner: "nothing may visibly generate or pop
-       within view", "near and far look the same, only the horizon changes").
-       Every group, a lot building included, is drawn as itself out to the
-       fog's end; the measured LOD box only ever stands in past it, where the
-       fog has already made the difference invisible (the airborne radius
-       stays wider, as before). */
-    const RV = R0 ? (fogEnd > R0 ? fogEnd : R0) : 0;      // a NaN fog far falls back to R0, never hides the world
+    const R0 = baseR;
+    const RV = R0 ? Math.max(SG.far + 30, R0) : 0;
     if (!root) return;
     const kids = root.children;
     // amortize: at most ~1/4 of the children measured/tested per sweep → the
@@ -877,14 +869,13 @@
      exempts them (terrain-flagged, r > 400), and continent.js's forest disc
      keeps chunks out to 3.5 km whatever the fog says.
      On a desktop that is a fair price for a horizon. On a tablet at the Fast
-     tier the fog ends at 560 m, and a low tree 1.5 km away is ~86% fog even
-     under the height fog's floor: a faint smudge that still costs its whole
-     vertex pass, every frame, in the main pass and the shadow pass. So here a
-     scenery pool whose NEAREST point is further than 1.8x fog.far is removed
-     from rendering via layers (never .visible, which continent.js and the
-     tier gates own), and put back the moment it comes within reach. Mountains
-     are plain meshes and are left to their own tier gates; airborne (camera
-     above 250 m) the fog opens up and nothing is held back. */
+     tier the fog ends at 560 m, and a low tree 1.5 km away is fog colour that
+     still costs its whole vertex pass, every frame, in the main pass and the
+     shadow pass. So here a scenery pool (or cell) whose NEAREST point is past
+     the eye's fog (core/sight.js: the airborne range once the eye is up) is
+     removed from rendering via layers (never .visible, which the owners and
+     the tier gates own), and put back before it comes within reach. Mountains
+     are plain meshes and are left to their own tier gates. */
   if (CBZ.isMobileDevice) {
     const reachHidden = new Set();
     let reachT = 0;
@@ -943,14 +934,15 @@
       reachT = now;
       const g = CBZ.game, root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
       const cam = CBZ.camera, fog = CBZ.scene && CBZ.scene.fog;
-      if (!g || g.mode !== "city" || !root || !cam || !fog || !(fog.far > 0) ||
-          cam.position.y > 250 || (CBZ.CONFIG && CBZ.CONFIG.MOBILE_FOG_REACH === false)) {
+      if (!g || g.mode !== "city" || !root || !cam || (CBZ.CONFIG && CBZ.CONFIG.MOBILE_FOG_REACH === false)) {
         if (reachHidden.size) restoreReach();
         return;
       }
-      // A raised eye (a rooftop, a hill road) thins the height fog along the
-      // line of sight (renderer.js cbzAir), so the reach grows with altitude.
-      const reach = fog.far * 1.8 + Math.max(0, cam.position.y) * 2;
+      // core/sight.js: the fog this eye has (the airborne range once it is
+      // up). Past it a pool is fog colour; the height fog's floor leaves a
+      // tall hill a trace of contrast there, which is the terrain's (never
+      // held back), not a pool's.
+      const reach = CBZ.sight().reach;
       const kids = root.children;
       let cands = 0;
       const hold = function (o, b) {
