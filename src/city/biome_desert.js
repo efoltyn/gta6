@@ -907,6 +907,33 @@
         dressErg(new THREE.Mesh(geo, duneMat), k, total);
       };
     }
+    /* THE SAND YOU SEE IS THE SAND YOU STAND ON. The erg is drawn as flat
+       triangles between lattice points (MINX + i·STEP_X, MINZ + j·STEP_Z),
+       5-7 m apart; physics used to read the analytic field between them. On
+       a convex crest the triangles lie under the field (feet float a little),
+       in every concave trough they lie OVER it — and a body walking a dune
+       hollow stood in the sand to the ankles. This reads the drawn surface:
+       the field at the three corners of the drawn triangle, split the way
+       r128 PlaneGeometry splits a cell (a,b,d)/(b,c,d) — the diagonal is
+       tx + tz = 1 — exactly as continent.js's TERRAIN_PHYSICS_MATCH does for
+       the plate. Both bakes (one plane, or ERG_TILES² tiles) share this one
+       global lattice, so one sampler is exact for either. */
+    function ergSurfaceAt(x, z) {
+      if (x < MINX || x > MAXX || z < MINZ || z > MAXZ) return 0;
+      const fx = (x - MINX) / STEP_X, fz = (z - MINZ) / STEP_Z;
+      let i0 = Math.floor(fx), j0 = Math.floor(fz);
+      if (i0 >= GRID_X) i0 = GRID_X - 1;
+      if (j0 >= GRID_Z) j0 = GRID_Z - 1;
+      const tx = fx - i0, tz = fz - j0;
+      const x0 = MINX + i0 * STEP_X, x1 = MINX + (i0 + 1) * STEP_X;
+      const z0 = MINZ + j0 * STEP_Z, z1 = MINZ + (j0 + 1) * STEP_Z;
+      const b = desertHeightAt(x0, z1), d = desertHeightAt(x1, z0);
+      if (tx + tz <= 1) {
+        const a = desertHeightAt(x0, z0);
+        return a + (d - a) * tx + (b - a) * tz;
+      }
+      return desertHeightAt(x1, z1) * (tx + tz - 1) + b * (1 - tx) + d * (1 - tz);
+    }
     // the PlaneGeometry(…, GSEG_X, GSEG_Z) triangle order, shared by every tile
     let _ergIdx = null;
     function ergIndex(sx, sz) {
@@ -927,7 +954,7 @@
       ? buildErgTiles() : buildErgSinglePlane();
     for (let mi = 0; mi < ergMeshes.length; mi++) dressErg(ergMeshes[mi], mi, ergMeshes.length);
     if (CFG.DESERT_TERRAIN_V2 !== false && CBZ.registerCityGroundHeight) {
-      CBZ.registerCityGroundHeight(desertHeightAt, { name: "Saltlands dunes and mesas", biome: "desert" });
+      CBZ.registerCityGroundHeight(ergSurfaceAt, { name: "Saltlands dunes and mesas", biome: "desert" });
       CBZ.desertTerrainHeightAt = desertHeightAt;
       CBZ.desertTerrainNormalAt = desertNormalAt;
       // Read-only component probes keep screenshot/physics QA honest: a dune

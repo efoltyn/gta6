@@ -1639,7 +1639,12 @@
       // summits, 4 m at 1.5 km is well under a pixel); same vertex buffers
       if (CBZ.mtnIndexLod) CBZ.mtnIndexLod(g, { stride: 2, near: 1500 });
       if (CBZ.registerCityGroundHeight) {
-        CBZ.registerCityGroundHeight(mountainHeightAt, { name: "Mount Mercy terrain", biome: "snow" });
+        // the DRAWN triangles where the grid is, the field off it (see
+        // CBZ.mtnGridSampler: the field runs under every concave triangle)
+        const mDrawn = CBZ.mtnGridSampler ? CBZ.mtnGridSampler(geo, CX, CZ) : null;
+        CBZ.registerCityGroundHeight(mDrawn
+          ? function (x, z) { const y = mDrawn(x, z); return y == null ? mountainHeightAt(x, z) : y; }
+          : mountainHeightAt, { name: "Mount Mercy terrain", biome: "snow" });
       }
       CBZ.cityDistantLandmarkFar = Math.max(CBZ.cityDistantLandmarkFar || 0, 5600);
       // Feather only beyond the snow plateau; a larger full plane underneath
@@ -1917,7 +1922,10 @@
       // haze); the strip rule above is re-applied to the coarse cells
       if (CBZ.mtnIndexLod) CBZ.mtnIndexLod(mesh, { stride: 2, near: 2200, keepY: 0.8 });
       if (CBZ.registerCityGroundHeight) {
-        CBZ.registerCityGroundHeight(greaterMercyHeightAt, {
+        const gDrawn = CBZ.mtnGridSampler ? CBZ.mtnGridSampler(geo, gcx, gcz) : null;
+        CBZ.registerCityGroundHeight(gDrawn
+          ? function (x, z) { const y = gDrawn(x, z); return y == null ? greaterMercyHeightAt(x, z) : y; }
+          : greaterMercyHeightAt, {
           name: "Greater Mercy Range terrain", biome: "snow",
         });
       }

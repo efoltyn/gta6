@@ -634,6 +634,12 @@
      a roof. `feet(a, pos, dt)` walks pos.y onto it: eased inside a step
      (a stair ramp, a kerb: no pop), a real fall with gravity when the ground
      drops more than a step away (the gallery edge), never a teleport.
+     THE EASE ONLY EVER GOES DOWN. A rise (a kerb, a stylobate, a riser) is
+     taken the frame the centre is over it: easing UP paid the step out with
+     the body's soles under the surface — a man stepping onto the footway, or
+     a victim shoved onto it, stood in the kerb to the ankles for a fifth of a
+     second ("looks like he's underground"). Easing down only ever floats a
+     body a few cm for a few frames over the lower surface, never into it.
      Returns the ground it used (null when the world has no ground query). */
   const FEET_STEP = 0.45, FEET_EASE = 18, FALL_G = 19.6;
   function ground(x, z, fromY) {
@@ -649,7 +655,7 @@
     const d = g - pos.y;
     if (d >= -FEET_STEP) {
       if (a) a._fallV = 0;
-      pos.y = (d < FEET_STEP && dt > 0) ? pos.y + d * Math.min(1, dt * FEET_EASE) : g;
+      pos.y = (d < 0 && dt > 0) ? pos.y + d * Math.min(1, dt * FEET_EASE) : g;
     } else {
       const v = (a && a._fallV ? a._fallV : 0) + FALL_G * (dt > 0 ? dt : 0.016);
       if (a) a._fallV = v;
