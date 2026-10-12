@@ -57,18 +57,21 @@
 
   /* ======================================================================
      THE HARDWARE'S FOOTPRINTS (span across x, length along z, at yaw 0).
-     Read from the models' own published dims (city/mil_air.js B.finish,
-     city/mil_armor.js spec, the A400M in island_military.js). `oz` is the
+     The machines are NPC War's units (src/units/vehicles/*.js; Fort Brandt
+     parks them, island_military.js): these are their published sizes, the
+     largest unit that stands on each kind of stand (F-35A, MQ-9A, B-2A,
+     B-52H, A400M, UH-60M rotor, AH-64E rotor, M1A2 gun forward, M2A3,
+     Stryker, MaxxPro, FMTV, M142, the Patriot's HEMTT + M903). `oz` is the
      model-origin offset of the footprint centre along z.
   ====================================================================== */
   const DIMS = {
-    fighter: { w: 10.7, l: 15.9 }, drone: { w: 20.1, l: 11.1 },
+    fighter: { w: 10.7, l: 15.7 }, drone: { w: 20.1, l: 11.0 },
     b2: { w: 52.4, l: 21 }, bomber: { w: 56.4, l: 48.5 },
-    cargo: { w: 42.4, l: 43.5, oz: -1.85 },
+    cargo: { w: 42.4, l: 45.1 },
     heli: { w: 16.4, l: 19.8 }, attackHeli: { w: 14.6, l: 17.7 },
-    tank: { w: 3.7, l: 9.8 }, ifv: { w: 3.3, l: 6.8 }, apc: { w: 2.9, l: 7.2 },
-    luv: { w: 2.3, l: 4.9 }, truck: { w: 2.5, l: 8.4 }, mlrs: { w: 2.5, l: 7.6 },
-    patriot: { w: 2.5, l: 9.4 },
+    tank: { w: 3.7, l: 9.8 }, ifv: { w: 3.3, l: 6.6 }, apc: { w: 2.9, l: 7.0 },
+    luv: { w: 2.6, l: 6.5 }, truck: { w: 2.5, l: 7.0 }, mlrs: { w: 2.4, l: 7.0 },
+    patriot: { w: 2.5, l: 16.5 },
   };
   const AIR = { fighter: 1, drone: 1, b2: 1, bomber: 1, cargo: 1, heli: 1, attackHeli: 1 };
 

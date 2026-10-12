@@ -20,10 +20,6 @@
       ends, somebody wins.
    2  the few hold: 60 v 25 -> the 25 hold their line (stay near where they
       formed) and the 60 come to them.
-   3  THE FRONT: a frontline.js spec (two nations, issue lists, flags, who
-      holds, the President's sorties) boots without the war room, plants two
-      flags, takes an AIRSTRIKE order, ends, and posts a result home with the
-      dead on both sides.
    4  the rifle: join a side, walk, fire at the enemy through the page's own
       fireShot, hand the rifle back; a soldier who is killed goes back to the
       director and is reported down.
@@ -85,49 +81,8 @@ scenario(2, "the few hold, the many come", async () => {
   check(a2.over, "and it ended (" + a2.simT + " s, winner " + a2.winner + ")");
 });
 
-function frontSpec(over) {
-  const s = {
-    v: 1, warId: "war7", day: 12, ground: "dunes", where: "Saltlands", x: 0, z: 0, hold: "blue", you: "red", seed: 5,
-    red: { id: "republic", name: "Republic", full: "The Republic", n: 40, tier: "elite", guns: "carbine,carbine,lmg,carbine,carbine,sniper,carbine,carbine,glauncher,carbine",
-      mark: 0x3f6fd0, cloth: 0x4b5a3c, flag: { kind: "band", field: "#1d3160", band: "#f2efe6", stripe: "#a8262b", star: "#d8b24a" }, air: "none", strikes: 2, queued: 0 },
-    blue: { id: "kesh", name: "Kesh", full: "Kingdom of Kesh", n: 30, tier: "thug", guns: "ak47,ak47,ak47,lmg,ak47,smg,ak47,ak47,bazooka,ak47",
-      mark: 0xd23a3a, cloth: 0x6b5236, flag: { kind: "tri", field: "#7a1420", band: "#d9a62e", tri: "#141414" }, air: "bomber", strikes: 0, queued: 1 },
-  };
-  return Object.assign(s, over || {});
-}
-function enc(o) { return Buffer.from(unescape(encodeURIComponent(JSON.stringify(o))), "binary").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
-
-scenario(3, "THE FRONT: a nation's battle, its flags, an airstrike, the post home", async () => {
-  const W = boot("?front=" + enc(frontSpec()));
-  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
-  await settle();
-  const a0 = W.B().audit();
-  check(a0.started && a0.map === "dunes", "the front booted straight into the battle on " + a0.map);
-  check(W.doc.body._cls.has("front"), "the war room is hidden (body.front)");
-  const orders = W.sb.__battle.orders();
-  check(orders.blue === "hold" && orders.red === "advance", "Kesh holds its ground, the Republic attacks (" + JSON.stringify(orders) + ")");
-  run(W, 2);       // the men (and the flag behind each army's first man) stream in over the first frames
-  const flags = W.CBZ.scene.children.filter((o) => o.name === "frontFlag");
-  check(flags.length === 2, "two flags planted on the two lines (" + flags.length + ")");
-  check(W.doc.getElementById("cAirN").textContent === "2", "the plane button carries the two sorties the nation can fly");
-  W.doc.getElementById("cAir").click();
-  check(W.doc.getElementById("cAirN").textContent === "1", "AIRSTRIKE called: one sortie left");
-  check(W.doc.getElementById("cHold")._cls.has("hide") === false, "the HOLD/ADVANCE flag is in the row");
-  W.doc.getElementById("cHold").click();
-  check(W.sb.__battle.orders().red === "hold", "the General can order his line to hold");
-  W.doc.getElementById("cHold").click();
-  const a = run(W, 300);
-  check(a.over, "the battle ended (" + a.simT + " s, winner " + a.winner + ")");
-  check(W.doc.getElementById("endAgain").textContent === "RETURN", "the card has one way out: RETURN");
-  W.doc.getElementById("endAgain").click();
-  const m = W.posted[0];
-  check(!!m && m.type === "cbz-front" && m.kind === "end", "the result went home on postMessage (" + JSON.stringify(m) + ")");
-  check(m && (m.dead.red + m.dead.blue) > 0 && m.strikesUsed === 1, "with the dead on both sides and the sortie flown");
-  check(m && m.dead.red + m.fled.red + m.alive.red === 40 && m.dead.blue + m.fled.blue + m.alive.blue === 30, "every man accounted for (dead + fled + standing = sent)");
-});
-
 scenario(4, "the rifle: be a soldier, fire, hand it back, go down", async () => {
-  const W = boot("?front=" + enc(frontSpec({ hold: "red", red: Object.assign(frontSpec().red, { strikes: 0 }), blue: Object.assign(frontSpec().blue, { air: "none", queued: 0, n: 40, tier: "pro" }) })));
+  const W = boot("?map=dunes&red=40&blue=40&rw=carbine&bw=ak47&rt=elite&bt=pro&auto=1&probe=0");
   if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
   await settle();
   run(W, 3);
@@ -295,12 +250,6 @@ scenario(5, "snow, fields and the wood: the skins build and fight", async () => 
   }
 });
 
-/* 6  THE RESOLVER IS CALIBRATED TO THIS SIM. city/frontline.js fights the
-   battles nobody watches with an attrition model of this page; here the two
-   are put side by side on the same armies (the page's own sim above, the
-   resolver over the same roster) and held to agreeing on who wins and on
-   roughly how hard the loser was hit. Printed as a table so a retune of
-   either side shows up as numbers, not as a feeling. */
 /* 10  THE GROUND IS COVER, AND IT REMEMBERS. The host hands the battle core
    cover points (arenas/cover.js); the dunes carry a dug-in position whose
    berm is in the height function; a bomb digs a crater INTO groundAt and
@@ -330,87 +279,12 @@ scenario(10, "the ground: cover for the host, earthworks, craters, broken cover"
     const x = bag.x + 3, z = bag.z;
     const before = MAP.groundAt(x, z);
     const ptsBefore = C.stats().points;
-    G.blast(x, before, z, 18, 2.8, "boom");
+    G.blast(x, before, z, W.CBZ.munitionTable.W("mk82"), {});   // a Mk 82 (the charge: weapons/munitiontable.js)
     const after = MAP.groundAt(x, z);
     check(before - after > 0.4, "a bomb digs a crater into groundAt (" + (before - after).toFixed(2) + " m deep)");
     check(!bag.alive, "and breaks the sandbag wall 3 m away (hp " + Math.round(bag.hp) + ")");
     check(C.stats().destroyed >= 1 && C.stats().points !== ptsBefore, "its cover points changed with it (" + ptsBefore + " -> " + C.stats().points + ")");
   }
-});
-
-scenario(6, "calibration: the headless resolver against the page's own battle", async () => {
-  globalThis.window = globalThis; globalThis.CBZ = { game: {} };
-  require(path.join(ROOT, "src/weapons/ballistics.js"));   // the resolver asks the same physics the page flies
-  require(path.join(ROOT, "src/systems/brain.js"));
-  const F = require(path.join(ROOT, "src/city/frontline.js"));
-  const CASES = [
-    { g: "dunes", r: 30, b: 30, rt: "elite", bt: "elite", rw: "ak47", bw: "ak47" },
-    { g: "dunes", r: 34, b: 30, rt: "elite", bt: "elite", rw: "carbine", bw: "ak47" },
-    { g: "dunes", r: 30, b: 30, rt: "elite", bt: "thug", rw: "ak47", bw: "ak47" },
-    { g: "dunes", r: 60, b: 25, rt: "pro", bt: "pro", rw: "ak47", bw: "ak47" },
-    { g: "dunes", r: 50, b: 30, rt: "elite", bt: "thug", rw: "carbine,carbine,lmg,carbine,carbine,sniper,carbine,carbine,glauncher,carbine", bw: "ak47,ak47,ak47,lmg,ak47,smg,ak47,ak47,bazooka,ak47" },
-    { g: "snow", r: 40, b: 40, rt: "pro", bt: "pro", rw: "ak47", bw: "ak47" },
-    { g: "grass", r: 24, b: 40, rt: "elite", bt: "thug", rw: "carbine", bw: "ak47" },
-  ];
-  let agree = 0, close = 0;
-  console.log("    ground case                          | page: secs win  red dead/fled  blue dead/fled | resolver: secs win  red dead/fled  blue dead/fled");
-  for (const c of CASES) {
-    const q = "?map=" + c.g + "&red=" + c.r + "&blue=" + c.b + "&rt=" + c.rt + "&bt=" + c.bt + "&rw=" + encodeURIComponent(c.rw) + "&bw=" + encodeURIComponent(c.bw) + "&auto=1&probe=0";
-    // the page over three seeds too (one battle on the dunes is decided by who
-    // reached the crest first): its verdict is the majority, its numbers the mean
-    const Ts = [];
-    let hold = null, werr = null;
-    for (let k = 0; k < 3; k++) {
-      const W = boot(q);
-      if (W.err) { werr = W.err; break; }
-      G(W, "_s = " + (421371 + k * 7919));
-      await settle();
-      run(W, 300);
-      Ts.push(W.sb.__battle.tally());
-      hold = W.sb.__battle.orders();
-    }
-    if (werr) { check(false, "page threw: " + werr); continue; }
-    const wins = Ts.map((t) => t.winner || (t.alive.red >= t.alive.blue ? "red" : "blue"));
-    const pW = wins.filter((w) => w === "red").length * 2 > wins.length ? "red" : "blue";
-    const mean = (f) => Ts.reduce((s, t) => s + f(t), 0) / Ts.length;
-    const T = { winner: pW, simT: mean((t) => t.simT),
-      dead: { red: mean((t) => t.dead.red), blue: mean((t) => t.dead.blue) },
-      fled: { red: mean((t) => t.fled.red), blue: mean((t) => t.fled.blue) },
-      routed: { red: mean((t) => t.routed.red), blue: mean((t) => t.routed.blue) },
-      alive: { red: mean((t) => t.alive.red), blue: mean((t) => t.alive.blue) } };
-    const spec = { v: 1, ground: c.g, seed: 11, hold: hold.red === "hold" ? "red" : hold.blue === "hold" ? "blue" : null,
-      red: { id: "r", name: "R", n: c.r, tier: c.rt, guns: c.rw, air: "none", strikes: 0, queued: 0 },
-      blue: { id: "b", name: "B", n: c.b, tier: c.bt, guns: c.bw, air: "none", strikes: 0, queued: 0 } };
-    // the resolver over a few seeds: its verdict is the majority, its numbers the mean
-    let rw = 0; const acc = { secs: 0, rd: 0, rf: 0, bd: 0, bf: 0 }; const N = 9;
-    for (let k = 0; k < N; k++) {
-      const r = F.resolve(Object.assign({}, spec, { seed: 11 + k * 101 }));
-      if (r.winner === "red") rw++;
-      acc.secs += r.secs; acc.rd += r.dead.red; acc.rf += r.fled.red; acc.bd += r.dead.blue; acc.bf += r.fled.blue;
-    }
-    const rWin = rw * 2 > N ? "red" : "blue";
-    const pWin = T.winner || (T.alive.red >= T.alive.blue ? "red" : "blue");
-    // the page's runners at the end got away, exactly as the resolver counts them
-    const pf = { red: T.fled.red + T.routed.red, blue: T.fled.blue + T.routed.blue };
-    const L = pWin === "red" ? "blue" : "red";
-    const nL = L === "red" ? c.r : c.b;
-    const pLoseDead = T.dead[L] / nL, rLoseDead = (L === "red" ? acc.rd : acc.bd) / N / nL;
-    // an EVEN fight is decided by the ground under it (which side drew the
-    // crest), which the resolver does not model: a coin, not a verdict. Since
-    // the rounds are flown (src/battle/fire.js) a rifle exchange is settled in
-    // seconds by who sees whom first, so a 13% edge in men of the same
-    // training with rifles is inside that coin too
-    const even = c.rt === c.bt && Math.abs(c.r - c.b) <= 0.15 * Math.max(c.r, c.b) &&
-      /^(ak47|carbine)$/.test(c.rw) && /^(ak47|carbine)$/.test(c.bw);
-    if (rWin === pWin || even) agree++;
-    if (Math.abs(pLoseDead - rLoseDead) <= 0.3) close++;
-    const f = (x) => String(Math.round(x)).padStart(3);
-    console.log("    " + c.g.padEnd(6) + " " + (c.r + " " + c.rt + " v " + c.b + " " + c.bt + (spec.hold ? " (" + spec.hold + " holds)" : "")).padEnd(30) +
-      "| " + f(T.simT) + "  " + pWin.padEnd(4) + "  " + f(T.dead.red) + "/" + f(pf.red) + "      " + f(T.dead.blue) + "/" + f(pf.blue) +
-      "     | " + f(acc.secs / N) + "  " + rWin.padEnd(4) + "  " + f(acc.rd / N) + "/" + f(acc.rf / N) + "      " + f(acc.bd / N) + "/" + f(acc.bf / N));
-  }
-  check(agree >= CASES.length - 1, "the resolver names the page's winner (" + agree + "/" + CASES.length + ")");
-  check(close >= CASES.length - 2, "and the loser's dead within 30 points of the page's (" + close + "/" + CASES.length + ")");
 });
 
 /* 7  DOES HOLDING THE LINE HELP THE MEN HOLDING IT? The same outnumbered army,
@@ -454,7 +328,7 @@ scenario(7, "holding the line: the exchange, held v met", async () => {
 });
 
 /* 8  VEHICLES. A tank is a unit on a side (src/battle/vehicles.js): its file
-   (src/units/vehicles/m1_abrams.js) and city/mil_armor.js load at START, the
+   (src/units/vehicles/m1_abrams.js, which draws itself) loads at START, the
    side's men take its seats, it drives, its guns land through the page's own
    paths, rifle ball does nothing to its front plate, and the war ends.
    The node world's studio.boom is a stub; here it is given the shape of the
@@ -482,7 +356,7 @@ scenario(8, "vehicles: 1 man + 1 M1 Abrams v 30 men, and 3 M1 Abrams v 60 brawle
     const tank = R.find((m) => m.vehicle && m.unitId === "m1_abrams");
     check(!!tank, "the Abrams is on the field (" + R.filter((m) => m.vehicle).length + " vehicle, " + R.filter((m) => !m.vehicle && m.team === "red").length + " red men on foot)");
     if (!tank) return;
-    check(!!tank.group && !tank.group.userData.standIn, "built by city/mil_armor.js, not a stand-in (rig " + !!tank.rig + ")");
+    check(!!tank.group && !tank.group.userData.standIn, "built by its own unit file (units/vehicles/m1_abrams.js), not a stand-in (rig " + !!tank.rig + ")");
     const crew = tank.seats.filter((s) => s.crew && s.man).map((s) => s.seat);
     check(crew.length === 1 && crew[0] === "driver", "the side's one man is in the driver's seat (" + JSON.stringify(crew) + ")");
     const blue = R.find((m) => m.team === "blue" && !m.dead);

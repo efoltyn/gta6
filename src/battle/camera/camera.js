@@ -519,7 +519,9 @@ function camKill(m) {
 // an explosion: heat for the director, a kick for the lens, a beat if close
 function camBoom(at, o) {
   if (!at || !started || !cam) return;
-  const pw = (o && o.power) || 1, rad = (o && o.radius) || 5;
+  // the munition's own size when the round names one (weapons/munitiontable.js)
+  const mf = o && o.mun && CBZ.munitionTable ? CBZ.munitionTable.fx(o.mun) : null;
+  const pw = (mf && mf.power) || (o && o.power) || 1, rad = (mf && mf.R) || (o && o.radius) || 5;
   camEvent("boom", at.x, at.z, 4 + pw * 3 + rad * 0.3, null);
   const d = Math.sqrt(camDist2(at));
   if (CBZ.shake && d < 160) CBZ.shake(Math.min(1.6, (pw * 0.6 + rad * 0.05) * (1 - d / 160) * 1.6));

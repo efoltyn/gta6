@@ -58,6 +58,8 @@
    PUBLIC  CBZ.battleTierSim.create(S, cfg) -> T
      T.profile(spec) -> profile index       (spec from CBZ.combatIQ.profile)
      T.addUnit(row, prof, spawnI, nerve, weight, homeX, homeZ)
+     cfg.groundAt(x, z)                      optional, in-page: the ground when
+                                            there is no sampled cfg.ground grid
      T.squads()                             rebuild squad lists from S.squad
      T.step(dt, ctx)                        ctx: { morale:[a,b], hunt:[a,b],
                                             hold:[a,b], broken:[a,b], com:[ax,az,bx,bz],
@@ -119,6 +121,10 @@
       S.col("bslot", Int16Array); S.col("bslotT", Int32Array, -1); S.col("pkN", Int16Array);
       S.col("hullX", Float32Array, NaN); S.col("hullZ", Float32Array); S.col("hullT", Float32Array);
       S.col("popT", Float32Array); S.col("up", Uint8Array, 1);
+      // a force's order (a host that fields forces: Gang City). oK 0 = the side's
+      // order; 1 hold / 2 move / 4 withdraw = his home (hx, hz) is where he
+      // goes and stays; 3 attack = march on (oX, oZ) instead of the enemy's centre
+      S.col("oK", Uint8Array); S.col("oX", Float32Array); S.col("oZ", Float32Array);
     }
     cols();
     const T = { S: S, profs: [], nEv: 0, events: new Float32Array(4096 * 4), ms: { hash: 0, mid: 0, far: 0, hits: 0, squads: 0 },
@@ -175,8 +181,11 @@
     };
 
     // ---------------------------------------------------------------- the ground
+    // a host with no sampled grid (Gang City: the field is wherever its forces
+    // are) hands its ground function instead (in-page only, never to a worker)
+    const groundFn = typeof cfg.groundAt === "function" ? cfg.groundAt : null;
     function hAt(x, z) {
-      if (!ground) return 0;
+      if (!ground) return groundFn ? groundFn(x, z) : 0;
       const fx = (x - ground.x0) / ground.cell, fz = (z - ground.z0) / ground.cell;
       let ix = Math.floor(fx), iz = Math.floor(fz);
       const w = ground.w, h = ground.h;
@@ -498,10 +507,24 @@
     }
 
     // ---------------------------------------------------------------- goals
-    function holding(r) { return CTX.hold[G.side[r]] && !CTX.hunt[G.side[r]] && !CTX.broken[G.side[r] ? 0 : 1]; }
+    // orders.js holding(): a force's order first (oK), else the side's
+    function holding(r) {
+      const k = G.oK[r];
+      if (k) return k !== 3 && !CTX.hunt[G.side[r]] && (k !== 1 || !CTX.broken[G.side[r] ? 0 : 1]);
+      return CTX.hold[G.side[r]] && !CTX.hunt[G.side[r]] && !CTX.broken[G.side[r] ? 0 : 1];
+    }
     // think.js marchGoal: the senior man navigates, the column trails him
     function marchGoal(r) {
       if (holding(r)) { G.gx[r] = G.hx[r]; G.gz[r] = G.hz[r]; G.slot[r] = SL.march; return; }
+      // an attack order marches on its objective until it is close (then the
+      // flow field finds the enemy that is actually there)
+      if (G.oK[r] === 3 && Math.hypot(G.oX[r] - G.x[r], G.oZ[r] - G.z[r]) > 120) {
+        const q0 = G.sq[r], ld0 = q0 >= 0 ? lead(q0) : -1;
+        if (ld0 < 0 || ld0 === r) {
+          G.gx[r] = G.oX[r] + (rnd() - 0.5) * 14; G.gz[r] = G.oZ[r] + (rnd() - 0.5) * 14; G.slot[r] = SL.march;
+          return;
+        }
+      }
       const q = G.sq[r], ld = q >= 0 ? lead(q) : -1;
       if (ld >= 0 && ld !== r) {
         const my = Math.atan2(G.gx[ld] - G.x[ld], G.gz[ld] - G.z[ld]);

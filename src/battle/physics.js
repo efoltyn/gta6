@@ -94,6 +94,9 @@ function pickTarget(m, range) {
   }
   // a tiered battle: the rows round the ring are marks too, handed over as ghosts
   if (MASS.on && _cand.length < 24) MASS.cands(m, range, _cand, SPOT);
+  // the host's own people who are in this war (Gang City: the player, when
+  // this side is hostile to him): pushed as (mark, d2) pairs like the rest
+  if (HOST.targets && _cand.length < 24) HOST.targets(m, range, _cand, SPOT);
   if (!_cand.length) return null;
   // nearest first, then the first four get asked whether they can be seen
   let bestO = null, bestD = 1e18;
@@ -277,7 +280,7 @@ function push2(m, o, k) {
 function shove(m, ux, uz, amt) {
   const x0 = m.pos.x, z0 = m.pos.z;
   m.pos.x += ux * amt; m.pos.z += uz * amt;
-  CBZ.micro.resolveCircle(m.pos, (m.rad || 0.45) + 0.05, m.pos.y, 1.8);
+  HOST.resolveCircle(m.pos, (m.rad || 0.45) + 0.05, m.pos.y, 1.8);
   return (m.pos.x - x0) * ux + (m.pos.z - z0) * uz;
 }
 /* ---- THE PINNED PAIR, and it is why walls were the last overlap left ----
@@ -458,6 +461,22 @@ function fineNear(x, z, r, out) {
    22 500 cells, which Dial's bucket queue clears in about a millisecond.
    The blocked map is built ONCE, because buildings do not move; the field
    is re-solved on a slow tick, because men do. */
+/* IS THIS SPOT INSIDE A WALL. The host's colliders (HOST; while an arena is
+   still being raised there is no HOST yet and the page's microboot answers):
+   exact on a turned box, a kerb is not a wall. The spawn spiral, the nav map
+   and the morale's run-away search all ask it. */
+const _fs = [];
+function blockedAt(x, z) {
+  const H = HOST || CBZ.micro;
+  const cols = H.queryColliders(x, z, 0.9, _fs);
+  for (let c = 0; c < cols.length; c++) {
+    const b = cols[c];
+    if (!H.colliderContains(b, x, z, 0.55)) continue;   // exact on a turned box
+    if (b.y0 != null && b.y1 != null && (b.y1 < 0.35 || b.y0 > 1.7)) continue;  // a kerb is not a wall
+    return true;
+  }
+  return false;
+}
 const NAV = { cell: 4, x0: 0, z0: 0, w: 0, h: 0, block: null, on: false,
   dist: { red: null, blue: null }, at: { red: -9, blue: -9 }, solves: 0, blocked: 0 };
 function navBuild(cx, cz, radius) {
@@ -706,7 +725,7 @@ function stepKnock(sdt) {
     }
     const ox = b.pos.x, oz = b.pos.z;
     b.pos.x += kvx * sdt; b.pos.z += kvz * sdt;
-    CBZ.micro.resolveCircle(b.pos, b.rad || 0.45, b.pos.y, 1.8);
+    HOST.resolveCircle(b.pos, b.rad || 0.45, b.pos.y, 1.8);
     b.resT = 0;
     const want = sp * sdt, got = Math.hypot(b.pos.x - ox, b.pos.z - oz);
     if (sp > 4 && got < want * 0.5) {
@@ -769,7 +788,7 @@ function stepTossed(t, sdt) {
   if (t.group) t.group.rotation.x += sdt * T.spin;
   // the walls: swept by the same resolve the walkers answer to
   const vh = Math.hypot(T.vx, T.vz), want = vh * sdt;
-  CBZ.micro.resolveCircle(t.pos, t.rad || 0.45, t.pos.y, 1.8);
+  HOST.resolveCircle(t.pos, t.rad || 0.45, t.pos.y, 1.8);
   if (want > 0.02 && Math.hypot(t.pos.x - ox, t.pos.z - oz) < want * 0.5) {
     PHYS.audit.wallSlams++;
     const dmg = impactDmg(t, vh);
@@ -801,7 +820,7 @@ function stepTossed(t, sdt) {
       break;
     }
   }
-  const g = MAP.bodyY(t, t.pos.x, t.pos.z);
+  const g = HOST.bodyY(t, t.pos.x, t.pos.z);
   if ((t.pos.y <= g && T.vy < 0) || T.age > 12) {
     t.pos.y = g;
     PHYS.audit.landings++;
@@ -852,22 +871,53 @@ function blastBodies(x, y, z, R, power, opts) {
   PHYS.audit.blasts++;
   if (CBZ.ragdollBlast) { try { CBZ.ragdollBlast(x, z, R, power); } catch (e) {} }
   rebuildFine();
-  const near = fineNear(x, z, R + 1);
+  /* HULLS ARE ANSWERED BY THE CHARGE, not by a ring: the blast's loading on
+     the plate at the hull's distance (weapons/munitiontable.js blastOn: a
+     Mk 84 inside ~10 m kills a tank, a 155 mm shell beside a Humvee kills
+     it, a 25 mm HEI does nothing to a Bradley), through the hull's own
+     armour (hurtVehicle -> vehicleDrive.resolve). A hull reaches further
+     than a man's lethal ring, so the search does too. Aircraft are hulls
+     like any other, parked or in the air: the burst's 3D distance decides. */
+  const MT = CBZ.munitionTable;
+  const W = opts.W > 0 ? opts.W : Math.pow(0.55 * R / 4.2, 3);
+  const hullReach = MT ? Math.max(R, 12 * Math.cbrt(W)) : R;
+  const near = fineNear(x, z, hullReach + 6);
   _blastL.length = 0;
   for (let i = 0; i < near.length; i++) _blastL.push(near[i]);
+  // the airframes are not on the fine grid: every hull in the air near the burst
+  for (let i = 0; i < men.length; i++) {
+    const a = men[i];
+    if (a.air && !a.dead && Math.abs(a.pos.x - x) < hullReach + 20 && Math.abs(a.pos.z - z) < hullReach + 20 && _blastL.indexOf(a) < 0) _blastL.push(a);
+  }
   const by = opts.by && opts.by.team ? opts.by : null;
   let n = 0;
   for (let i = 0; i < _blastL.length; i++) {
     const b = _blastL[i];
-    if (b.dead || b.fled || b.air) continue;
-    const dx = b.pos.x - x, dz = b.pos.z - z, dy = (b.pos.y + (b.aimY || 1)) - (y || 0);
+    if (b.dead || b.fled) continue;
+    const dx = b.pos.x - x, dz = b.pos.z - z;
+    if (b.vehicle) {
+      if (opts.direct === b) continue;                 // the direct hit is the caller's (its own pen)
+      // distance to the hull, not its centre: off the box in hull space
+      const c = Math.cos(b.h || 0), s = Math.sin(b.h || 0);
+      const lx = dx * c - dz * s, lz = dx * s + dz * c;
+      const ex = Math.max(0, Math.abs(lx) - (b.vwid || 1.2)), ez = Math.max(0, Math.abs(lz) - (b.vlen || 2.5));
+      const top = b.pos.y + (b.vheight || 2.4), yy = y || 0, ey = Math.max(0, b.pos.y - yy, yy - top);
+      const dh = Math.hypot(ex, ez, ey);
+      if (dh > hullReach) continue;
+      const th = MT ? MT.blastOn(W, dh) : (dh < R * 0.55 ? { pen: 120, beh: 600 } : null);
+      if (!th) continue;
+      // a burst over the roof (a bomb on the deck) loads the roof
+      const over = yy > top - 0.4 && ex < 0.5 && ez < 0.5;
+      hurtMan(b, th.beh, { by: by, byTeam: by && by.team, cause: opts.cause || "explosion", fromX: x, fromZ: z,
+        threat: { pen: th.pen, beh: th.beh, he: true, cls: "blast", top: over } });
+      n++;
+      continue;
+    }
+    if (b.air) continue;
+    const dy = (b.pos.y + (b.aimY || 1)) - (y || 0);
     const d = Math.hypot(dx, dz, dy);
     if (d >= R) continue;
     const Z = Math.max(0.12, d / R);
-    if (b.vehicle) {
-      if (Z < 0.55) { hurtMan(b, 1e6, { by: by, byTeam: by && by.team, cause: opts.cause || "explosion", fromX: x, fromZ: z }); n++; }
-      continue;
-    }
     const taper = Z <= 0.55 ? 1 : (1 - Z) / 0.45;
     const kg = bodyKg(b);
     const dv = Math.min(30, BLAST_DV * power * Math.pow(0.55 / Z, 1.5) * taper * Math.cbrt(MAN_KG / kg));

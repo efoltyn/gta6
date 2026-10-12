@@ -105,8 +105,7 @@
   const GMLRS = {
     id: "m31a1_gmlrs", seat: "gunner", kind: "rockets", mount: "free", indirect: true, guided: true,
     rof: 0.2, salvo: 6, reload: RELOAD, ammo: 18,
-    pen: 60, beh: 900, he: { pen: 60, beh: 900, blast: 30, power: 3.2 },
-    speed: 300, heSpeed: 300, grav: 9.8,
+    mun: "m31a1", speed: 300, heSpeed: 300, grav: 9.8,
     range: 1600, minRange: 250,
   };
 
@@ -560,7 +559,7 @@
       rk.grav = g;
       rk.life = T * 1.6 + 4;
       rk.homing = fl.mark;
-      const he = (shot && shot.w && shot.w.he) || GMLRS.he;
+      const he = (shot && shot.w && shot.w.he) || CBZ.munitionTable.arm(GMLRS).he;
       rk.w = { blastRadius: he.blast, blastPower: he.power / 0.55, sfx: null };
       const MU = CBZ.munitions;
       if (MU && MU.acquire && CBZ.scene) {
@@ -708,7 +707,7 @@
       sx += o.pos.x; sz += o.pos.z; n++;
     }
     if (n < 2) return out;
-    const cx = sx / n, cz = sz / n, keep = GMLRS.he.blast * 0.8;
+    const cx = sx / n, cz = sz / n, keep = (GMLRS.he ? GMLRS.he.blast : CBZ.munitionTable.fx(GMLRS.mun).R) * 0.8;
     for (let i = 0; i < M.length; i++) {
       const o = M[i];
       if (o.dead || o.team !== u.team || o.vehicle || !o.pos) continue;

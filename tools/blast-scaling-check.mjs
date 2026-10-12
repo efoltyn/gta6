@@ -35,7 +35,11 @@ const f2 = (v) => (+v).toFixed(2);
 const CBZ = { CONFIG: { CITY_DEMOLITION: true, COLLAPSE_V2: true }, onUpdate() {}, game: { mode: "city" } };
 const ctx = vm.createContext({ window: { CBZ }, CBZ, console, Math, performance: { now: () => 0 },
   Map, Set, Float32Array, Object, Array, JSON, Number, isFinite, Date });
+// the charges are the munition table's (weapons/munitiontable.js), loaded first as on every page
+vm.runInContext(src("src/weapons/munitiontable.js"), ctx, { filename: "munitiontable.js" });
 vm.runInContext(src("src/systems/breach.js"), ctx, { filename: "breach.js" });
+const MT = CBZ.munitionTable;
+ok(!!MT, "weapons/munitiontable.js did not publish CBZ.munitionTable");
 const L = CBZ.blastLaw;
 ok(!!L, "systems/breach.js did not publish CBZ.blastLaw");
 
@@ -80,7 +84,9 @@ ok(CBZ.breachSpec(10).holeR > CBZ.breachSpec(5).holeR, "10 lb opens wider than 5
 }
 
 // ---- 2. glass / gut / frame / crater ---------------------------------------
-const W = { grenade: 0.2, rpg: 0.7, tank: 4, hellfire: 9, mk82: 89, rocket227: 90, mk84: 430, buster: 2400 };
+const W = {};
+for (const k of ["grenade", "rpg", "tank", "hellfire", "rocket227", "mk82", "mk84", "buster"]) W[k] = MT.W(MT.aliasOf(k));
+const WMK84 = W.mk84;
 let prevG = 0;
 for (const k of Object.keys(W)) {
   const g = L.glassR(W[k]);
@@ -92,11 +98,11 @@ for (const k of ["grenade", "rpg", "tank"]) ok(!L.guts(W[k]), `${k} must not gut
 for (const k of ["hellfire", "rocket227", "mk82", "mk84", "buster"]) ok(L.guts(W[k]), `${k} must gut the struck storey (gutR ${f2(L.gutR(W[k]))} m)`);
 ok(L.sever(0.7, 6) === 0, "an RPG severs nothing, even across a 6 m house");
 ok(L.sever(4, 6) === 0, "a tank round severs nothing");
-ok(L.sever(430, 28) >= 0.5, `a Mk-84 severs most of a 28 m lot frame (got ${f2(L.sever(430, 28))})`);
-ok(Math.abs(L.craterR(430) - 0.8 * Math.cbrt(430)) < 1e-9 && L.craterR(430) > 5.5 && L.craterR(430) < 6.5,
-  `Mk-84 apparent crater radius ~6 m (got ${f2(L.craterR(430))})`);
-ok(L.craterR(4) < 1.5 && L.craterR(9) >= 1.5, "tank rounds scuff, a Hellfire digs (the 1.5 m crater line)");
-ok(L.ejectaR(0.2) < 1.2 && L.ejectaR(430) > 12, "ejecta ring scales from a scuff to a blackened disc");
+ok(L.sever(WMK84, 28) >= 0.5, `a Mk-84 severs most of a 28 m lot frame (got ${f2(L.sever(WMK84, 28))})`);
+ok(Math.abs(L.craterR(WMK84) - 0.8 * Math.cbrt(WMK84)) < 1e-9 && L.craterR(WMK84) > 5.5 && L.craterR(WMK84) < 6.5,
+  `Mk-84 apparent crater radius ~6 m (got ${f2(L.craterR(WMK84))})`);
+ok(L.craterR(W.tank) < 1.5 && L.craterR(W.hellfire) >= 1.5, "tank rounds scuff, a Hellfire digs (the 1.5 m crater line)");
+ok(L.ejectaR(W.grenade) < 1.2 && L.ejectaR(WMK84) > 12, "ejecta ring scales from a scuff to a blackened disc");
 
 // ---- 3. props are not walls -------------------------------------------------
 const lamp = { minX: -0.17, maxX: 0.17, minZ: -0.17, maxZ: 0.17 };
@@ -121,7 +127,12 @@ ok(!L.isProp(lamp, true), "a collider that DECLARES its band is a wall whatever 
       if (row) ok(row.charge > 0, `row "${id}" carries no charge`);
     }
     ok(I.row("rpg").shaped === true && I.row("rpg").jetPen > 0, "the rpg row is a shaped charge with a jet");
-    ok(Math.abs(I.row("mk84").charge - 430) < 1e-6, "mk84 = 430 kg");
+    ok(Math.abs(I.row("mk84").charge - WMK84) < 1e-6, "mk84 carries the table's charge (" + f2(WMK84) + " kg)");
+    // a munition the bus was never told about is a row on first use, priced by the table
+    for (const id of ["gbu57", "m795", "javelin", "tomahawk", "fpv_pg7vl", "mk45_he"]) {
+      const row = I.row(id);
+      ok(!!row && Math.abs(row.charge - MT.W(id)) < 1e-6, `the bus prices "${id}" off the munition table`);
+    }
     ok(!(I.row("nuke").charge > 0), "the nuke is a field, not a charge");
   } catch (e) { fails.push("impactbus.js did not load in the VM: " + e.message); }
 }

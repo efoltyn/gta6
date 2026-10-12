@@ -58,10 +58,12 @@
    already use on those exact two names. No call site in the game is edited to
    make a base hear a gunshot.
 
-   ONE ANSWER. Roused soldiers CONVERGE on the mark using the only steering
-   contract peds.js exposes — `target` / `state` / `pause` — and fight through
-   `combat_iq.posture` and `cityShapeSquad` when there is somebody to fight.
-   Not one line of locomotion or combat is written here.
+   ONE ANSWER, FROM THE ONE ARMY (2026-10-12). A roused site turns out a
+   quick-reaction section of the battle core's soldiers (city/army.js:
+   CBZ.army.spawnForce) and ORDERS it (orderForce: attack the mark, hold the
+   gate, march back in). The section fights with the core's squads, kit and
+   flown rounds. Not one line of locomotion or combat is written here, and
+   the base's resident peds are no longer steered into fights.
 
    AND ONE ORDER IS WITHDRAWN. The 5-star beeline is DELETED, not replaced with
    a better beeline. When the trouble is on the reservation the garrison
@@ -100,10 +102,6 @@
   if (C.FORT_RALLY == null) C.FORT_RALLY = true;
   if (C.FORT_STANDTO == null) C.FORT_STANDTO = true;
   if (C.FORT_CONVOY == null) C.FORT_CONVOY = false;   // declared; see the header
-  // A ceiling on bodies this file drives at once. The base has 44 and every one
-  // of them converging would be a mob, not a response — and a mob is the thing
-  // squadai.js was written to stop shipping.
-  if (C.FORT_MAX_RESPOND == null) C.FORT_MAX_RESPOND = 12;
 
   function on() { return C.FORT_RESPONSE !== false; }
   function alertOn() { return on() && C.FORT_ALERT !== false; }
@@ -115,8 +113,6 @@
   }
 
   const ALERT_HOLD = 26;        // s a site stays roused after the last event
-  const ENGAGE_R = 38;          // m at which a converging soldier takes a target
-  const CONVERGE_SPREAD = 7;    // m of lateral fan across the arriving line
   const LEASH_PAD = 40;         // m past the wire a responder may be pulled back from
 
   /* =========================================================================
@@ -344,46 +340,63 @@
   }
 
   /* =========================================================================
-     §5  THE ANSWER — converge, or stand to.
+     §5  THE ANSWER — a quick-reaction force, through the one army.
 
-     Runs at 38.72: after island_military.js's own troop tick (38.7) so the
-     transform we write is the one that survives the frame, and after peds.js's
-     think/move (34) so we are steering a body that has already been walked.
+     The base answers with SOLDIERS OF THE ONE ARMY (city/army.js: the battle
+     core's men, their kit, their squads, their rounds), not by steering its
+     resident peds. When a site is roused a section turns out of its barracks
+     (CBZ.army.spawnForce) and is ORDERED: attack the mark while the trouble
+     is on the reservation, hold the gate when it is a manhunt somewhere else
+     (STAND-TO), and march back in and stand down when it is over. The same
+     verbs a war, a coup or martial law uses; nothing here moves a body.
+
+     Runs at 38.72, after island_military.js's own troop tick (38.7).
      ========================================================================= */
   const STATS = { converged: 0, engaged: 0, stoodTo: 0, impossible: 0, alerts: 0, released: 0 };
+  const QRF_MEN = 8;           // a rifle section
+  const QRF_SECTION = ["hmmwv*1"];
+  const REORDER_M = 15;        // the mark moved this far: the order follows it
 
   function distXZ(a, x, z) { const dx = a.pos.x - x, dz = a.pos.z - z; return Math.sqrt(dx * dx + dz * dz); }
 
-  function releaseBody(p) {
-    if (!p || !p._fortResp) return;
-    p._fortResp = null;
-    if (p.dead) return;
-    p.rage = null; p.targetActor = null;
-    p.path = null; p.finalGoal = null;
-    // Hand him back to whoever had him. island_military.js's own tick yields
-    // to us while `_fortResp` is set and reclaims a `_stationed` body the frame
-    // after we drop it (walking him to his parade anchor); anybody else just
-    // rejoins the ordinary crowd. Either way we leave him WALKING, never
-    // frozen mid-order.
-    p.state = "walk";
-    p.pause = 0;
-    p.activityState = null;
-    STATS.released++;
+  // the section, turned out of the barracks (once per alert)
+  function turnOut(s) {
+    const A = CBZ.army;
+    if (!A || !A.spawnForce || s.qrf) return s.qrf;
+    const B = CBZ._militaryBase;
+    const from = (s.id === "fort-brandt" && B && (B.barracks || B.gate)) || s.gate || { x: s.x, z: s.z };
+    s.qrf = A.spawnForce({
+      side: "republic", nation: "republic", hostile: "wanted", stars: 2, name: s.name + " quick reaction force",
+      units: QRF_SECTION.concat(["men*" + QRF_MEN]), training: "elite", gun: "carbine",
+      at: { x: from.x, z: from.z }, face: s.mark || s.gate,
+      order: { type: "hold", at: { x: from.x, z: from.z } },
+    });
+    s.qrfOrder = null;
+    s.home = { x: from.x, z: from.z };
+    return s.qrf;
   }
-
-  // The mark, fanned so an arriving section is a line and not a stack.
-  function convergePoint(s, i, n) {
-    const m = s.mark || { x: s.x, z: s.z };
-    if (n <= 1) return { x: m.x, z: m.z };
-    const dx = m.x - s.x, dz = m.z - s.z;
-    const d = Math.hypot(dx, dz) || 1;
-    const lx = -dz / d, lz = dx / d;                    // perpendicular to the approach
-    const t = (i / (n - 1) - 0.5) * 2;                  // -1..1
-    return { x: m.x + lx * t * CONVERGE_SPREAD, z: m.z + lz * t * CONVERGE_SPREAD };
+  function order(s, kind, at) {
+    const A = CBZ.army, o = s.qrfOrder;
+    if (!s.qrf || !A) return;
+    if (o && o.type === kind && Math.hypot(o.at.x - at.x, o.at.z - at.z) < REORDER_M) return;
+    s.qrfOrder = { type: kind, at: { x: at.x, z: at.z } };
+    A.orderForce(s.qrf, s.qrfOrder);
+  }
+  // it is over: back in through the gate, and off the map once it is home
+  function standDown(s) {
+    const A = CBZ.army;
+    if (!s.qrf || !A) return;
+    const F = s.qrf, home = s.home || s.gate;
+    s.qrf = null; s.qrfOrder = null;
+    STATS.released++;
+    A.orderForce(F, { type: "move", at: home });
+    const off = A.on(function (e) {
+      if (e.force !== F.id) return;
+      if (e.type === "arrived" || e.type === "destroyed") { off(); A.disband(F); }
+    });
   }
 
   function tickSite(s, dt) {
-    const roster = CBZ.militaryPersonnel();
     const P = CBZ.player;
     const playerOnSite = !!(P && P.pos && siteHit(s, P.pos.x, P.pos.z, 60));
     const stars = (CBZ.game && CBZ.game.wanted) | 0;
@@ -397,21 +410,10 @@
     } else if (s.by && (s.by.dead || !s.by.pos || !siteHit(s, s.by.pos.x, s.by.pos.z, 220))) {
       s.by = null;                                       // dead, gone, or a body with no position left
     }
-
-    // A WANTED MAN STANDING ON A DEFENCE RESERVATION *IS* THE ALARM.
-    //
-    // Two things depend on this and both were broken before it. (a) The base
-    // could not defend its own hardware: stealing a tank forces 3 stars and a
-    // jet 4 (militaryvehicles.js:434), the garrison's only floor was 5, and
-    // `cityCrime` never rang `cityAlarm` — so you could fly a fighter off the
-    // strip and the parade ground kept saluting. (b) Deleting the 5-star
-    // beeline would otherwise have taken away the ONE case it got right: a
-    // player standing in the middle of the base, where the men are close
-    // enough that posture actually works.
-    //
-    // TWO STARS is garrison.js's own bar for a rifleman on a defence compound
-    // (`minStars: 2`, "a soldier does not open up on a shoplifter"), reused
-    // rather than re-chosen so the wire and the roster answer to one number.
+    // A WANTED MAN STANDING ON A DEFENCE RESERVATION *IS* THE ALARM. Two stars
+    // is garrison.js's own bar for a rifleman on a defence compound
+    // (`minStars: 2`, "a soldier does not open up on a shoplifter"), and it is
+    // the bar the section's rifles answer to (hostile: wanted, 2 stars).
     if (P && !P.dead && playerOnSite && stars >= 2) {
       s.level = Math.max(s.level, 1 + stars * 0.2);
       s.t = Math.max(s.t, 8);
@@ -421,117 +423,27 @@
     }
 
     const hot = s.t > 0;
-    // STAND-TO: the manhunt is real but it is not HERE. The base does not send
-    // men on a walk they cannot finish (see the header); it mans its own wire.
+    // STAND-TO: the manhunt is real but it is not HERE. The base mans its gate
+    // rather than send a section down a road it has no orders to take.
     const stand = standOn() && stars >= 5 && !playerOnSite && !hot;
+    if (!hot && !stand) { if (s.qrf) standDown(s); s.roused = 0; return; }
 
-    if (!hot && !stand) {
-      for (let i = 0; i < roster.length; i++) {
-        const p = roster[i];
-        if (p && p._fortResp && p._fortResp.site === s) releaseBody(p);
-      }
-      s.roused = 0;
-      return;
+    if (!s.qrf) {
+      if (!turnOut(s)) return;
+      if (stand) STATS.stoodTo++; else STATS.converged++;
     }
-
-    // ---- pick the section -------------------------------------------------
-    const mark = s.mark || { x: s.x, z: s.z };
-    const cap = C.FORT_MAX_RESPOND | 0;
-    const pool = [];
-    for (let i = 0; i < roster.length; i++) {
-      const p = roster[i];
-      if (!ownable(p)) { if (p && p._fortResp) p._fortResp = null; continue; }
-      if (!siteHit(s, p.pos.x, p.pos.z, LEASH_PAD + 60)) continue;
-      pool.push(p);
+    s.roused = QRF_MEN;
+    s.peak = Math.max(s.peak, QRF_MEN);
+    if (stand) order(s, "hold", s.gate);
+    else {
+      const mark = s.mark || { x: s.x, z: s.z };
+      // THE LEASH: a base's men defend the base. A mark past the wire plus a
+      // margin is answered from the gate, never chased down the first road.
+      if (siteHit(s, mark.x, mark.z, LEASH_PAD)) {
+        if (!s.qrfOrder || s.qrfOrder.type !== "attack") STATS.engaged++;
+        order(s, "attack", mark);
+      } else order(s, "hold", s.gate);
     }
-    // NEAREST FIRST, deterministically — the men who can actually get there
-    // are the men who go, and a sort on a measured distance is the same order
-    // every replay.
-    const ref = stand ? { x: s.gate.x, z: s.gate.z } : mark;
-    pool.sort(function (a, b) { return distXZ(a, ref.x, ref.z) - distXZ(b, ref.x, ref.z); });
-    const n = Math.min(pool.length, cap);
-    s.roused = n;
-    s.peak = Math.max(s.peak, n);
-
-    // ---- drive them -------------------------------------------------------
-    const foe = (s.by && !s.by.dead) ? s.by : null;
-    const shaped = [];
-    for (let i = 0; i < pool.length; i++) {
-      const p = pool[i];
-      if (i >= n) { if (p._fortResp && p._fortResp.site === s) releaseBody(p); continue; }
-      // COUNT ROUSALS, NOT FRAMES. These are session counters read by the math
-      // gate; incrementing one per body per frame would make "the base answered
-      // once" and "the base answered for a minute" the same unreadable number.
-      if (!p._fortResp) { p._fortResp = { site: s, since: 0 }; if (stand) STATS.stoodTo++; else STATS.converged++; }
-      p._fortResp.site = s;
-      p._fortResp.since += dt;
-      p.alarmed = Math.max(p.alarmed || 0, 8);
-
-      if (stand) {
-        // ON THE WIRE. A slot each, facing out, and no target — the difference
-        // between a perimeter and martial law, and the same distinction
-        // garrison.js draws for a post that may not stand to.
-        const w = s.wire[i % s.wire.length];
-        p.rage = null; p.targetActor = null;
-        const d = distXZ(p, w.x, w.z);
-        if (d > 2.4) {
-          p.path = null; p.finalGoal = null;
-          if (p.target && p.target.set) p.target.set(w.x, 0, w.z);
-          p.state = "walk"; p.pause = 0;
-        } else {
-          p.state = "idle"; p.speed = 0;
-          p.pause = Math.max(p.pause || 0, 2);
-          if (p.group) {
-            p.group.rotation.y = CBZ.lerpAngle
-              ? CBZ.lerpAngle(p.group.rotation.y, w.face, 1 - Math.pow(0.02, dt || 0.016))
-              : w.face;
-          }
-        }
-        p.activityState = "stand-to";
-        continue;
-      }
-
-      // CONVERGE. He goes to the noise; he only takes a TARGET when the target
-      // is close enough that the order is one he can obey. That distinction is
-      // the whole of the impossible-order bug, and it is why `impossible` is
-      // the ratchet this file is pinned on.
-      const dFoe = foe ? distXZ(p, foe.pos.x, foe.pos.z) : Infinity;
-      if (foe && dFoe < ENGAGE_R) {
-        if (p.rage !== foe) STATS.engaged++;
-        p.rage = foe; p.state = "fight"; p.pause = 0;
-        p.targetActor = foe;
-        shaped.push(p);
-      } else {
-        if (p.rage && !siteHit(s, p.rage.pos ? p.rage.pos.x : s.x, p.rage.pos ? p.rage.pos.z : s.z, 400)) {
-          p.rage = null; p.targetActor = null;               // never hold a target off the map
-        }
-        const cp = convergePoint(s, i, n);
-        p.path = null; p.finalGoal = null;
-        if (p.target && p.target.set) p.target.set(cp.x, 0, cp.z);
-        if (p.state !== "fight") { p.state = "walk"; p.pause = 0; }
-        p.activityState = "converge";
-      }
-
-      // THE LEASH. A base's men defend the base. Past the wire plus a margin
-      // the site wins over the fight — the same law garrison.js applies to a
-      // post, for the same reason: a perimeter that empties itself down the
-      // first road is not a perimeter.
-      if (!siteHit(s, p.pos.x, p.pos.z, LEASH_PAD)) {
-        p.rage = null; p.targetActor = null;
-        p.path = null; p.finalGoal = null;
-        if (p.target && p.target.set) p.target.set(s.gate.x, 0, s.gate.z);
-        p.state = "walk"; p.pause = 0;
-        p.activityState = "return-to-wire";
-      }
-    }
-
-    // SHAPE, don't blob. squadai.js already owns "a group of armed people is
-    // a firing arc with a focus-fire mark, not a scrum" — it is the same call
-    // gang wars and VIP details make, and it needed no edit to take soldiers.
-    if (shaped.length > 1 && foe && CBZ.cityShapeSquad) {
-      try { CBZ.cityShapeSquad(shaped[0], shaped, foe); } catch (e) {}
-    }
-
     s.t -= dt;
     if (s.t <= 0) { s.t = 0; s.level = 0; s.mark = null; s.by = null; }
   }
@@ -621,7 +533,6 @@
       if (!p || p.dead || !p.pos) continue;
       if (p.milRank) ranked++;
       if (ownable(p)) rousable++;
-      if (p._fortResp) responding++;
       const r = p.rage;
       if (!r || r.dead || !r.pos) continue;
       // A MAN IN A SEAT IS NOT A MAN ON FOOT. This ratchet is about an order
@@ -644,6 +555,7 @@
     const sites = [];
     for (let i = 0; i < SITES.length; i++) {
       const s = SITES[i];
+      if (s.qrf) responding += QRF_MEN;
       sites.push({ id: s.id, name: s.name, hot: s.t > 0, level: +s.level.toFixed(2), rings: s.rings, roused: s.roused, peak: s.peak });
     }
     return {
@@ -668,7 +580,11 @@
 
   // A CITY REBUILD DROPS EVERY BODY — forget the ground with them.
   CBZ.fortResponseReset = function () {
-    for (let i = 0; i < SITES.length; i++) { SITES[i].t = 0; SITES[i].level = 0; SITES[i].mark = null; SITES[i].by = null; }
+    for (let i = 0; i < SITES.length; i++) {
+      const s = SITES[i];
+      if (s.qrf && CBZ.army) { try { CBZ.army.disband(s.qrf); } catch (e) {} }
+      s.qrf = null; s.qrfOrder = null; s.t = 0; s.level = 0; s.mark = null; s.by = null;
+    }
     SITES.length = 0; sitesArena = null;
   };
 })();

@@ -73,6 +73,9 @@
     lowc:   { ra: [-0.72, 0.10, 0.16, 0.06, -1.10], la: [-1.02, -0.26, -0.36, 0.15, -0.70] },
     high:   { ra: [-0.86, 0.12, 0.20, 0.06, -1.78], la: [-1.24, -0.30, -0.40, 0.16, -1.22] },
     patrol: { ra: [-0.34, 0.08, 0.16, 0.04, -1.20], la: [-0.62, -0.22, -0.34, 0.10, -0.98] },
+    // a drone pilot: both hands together in front of the chest on the radio
+    // or the ground station (src/battle/drones.js; no rifle in the hands)
+    fpv:    { ra: [-0.52, 0.20, 0.34, 0.06, -1.52], la: [-0.52, -0.20, -0.34, 0.06, -1.52] },
   };
   function setArm(part, low, A, k, dt, rate) {
     if (!part) return;
@@ -171,7 +174,7 @@
     const mode0 = S && S.carry;
     if (mode0 && !aimed && !(A && (A.kind === "throw"))) {
       const mode = mode0 === "low" && ch.crouch ? "lowc" : mode0;
-      const prop = gunOf(ch);
+      const prop = mode === "fpv" ? null : gunOf(ch);
       let held = false;
       if (prop && CBZ.gunHold && CBZ.gunHold.carry) { try { held = CBZ.gunHold.carry(ch, prop, mode); } catch (e) { held = false; } }
       if (!held) {

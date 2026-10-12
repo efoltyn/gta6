@@ -28,16 +28,15 @@ assert.doesNotMatch(crash, /function reinforcedRuinFrame|jaggedSlabGeo/,
   "no invented concrete teeth around an opening");
 assert.match(crash, /CBZ\.cityRuinAudit/);
 
-// The launcher truck is city/mil_armor.js's: the canonical 6x6 chassis, a
-// yaw → elevation launcher rig, one muzzle node per canister.
-const armorKit = await read("src/city/mil_armor.js");
-const patriot = section(armorKit, "function buildPatriot", "// ============================================================ THE LUV");
-assert.match(patriot, /truckChassis\(K, \{\}\)/, "Patriot must ride the canonical truck chassis");
-assert.match(patriot, /launcherRig\(S,/, "canisters sit on the shared yaw/elevation launcher rig");
-assert.match(patriot, /m\.name = "lm" \+ i/, "one authored muzzle node per canister");
-assert.match(armorKit, /hide\(ud, "patriotMuzzles", rig\.muzzles\)/);
-assert.match(island, /patriot: makePatriot/);
-assert.match(island, /\[makePatriot, "patriot"[,\]]/);   // the base plan's stands map patriot -> a boardable "patriot"
+// The launcher is NPC War's unit (src/units/vehicles/patriot_launcher.js: an
+// M903 on its HEMTT, twelve PAC-3 MSE cells) and Fort Brandt parks it: the
+// round leaves the next loaded cell (muzzleWorld) and fire() spends that cell.
+const unit = await read("src/units/vehicles/patriot_launcher.js");
+assert.match(unit, /P\.muzzleWorld = function \(out, shot\) \{\s*if \(shot && shot\.kind === "sam"\) \{\s*const i = this\.nextCell\(\);/,
+  "a SAM round leaves the next loaded cell");
+assert.match(unit, /this\.loaded\[i\] = false; this\.left--;/, "firing spends that cell");
+assert.match(island, /patriot: \["patriot_launcher"\]/, "the base plan's patriot stands park the unit");
+assert.match(island, /patriot_launcher: "patriot"/, "...as a boardable \"patriot\"");
 
 const pointFire = section(aircraft, "CBZ.cityFireMissileAt = function", "CBZ.cityPatriotMissileAudit");
 assert.match(pointFire, /launchMissile\(/,
@@ -58,8 +57,9 @@ assert.match(aircraft, /const row = ROUND_ROW\[type\] \|\| "missile";[\s\S]*?CBZ
 
 const fire = section(armor, "function firePatriot", "CBZ.cityPatriotAudit");
 assert.match(fire, /fullMap/);
-assert.match(fire, /rig\.launcherMuzzle\(slot, _patriotMuzzle\)/,
-  "launch must leave the authored tube transform");
+assert.match(fire, /muzzleOf\(rec, veh, shot, _patriotMuzzle\)/,
+  "launch must leave the authored cell transform (the rig's muzzleWorld)");
+assert.match(fire, /rigFire\(veh, shot, from\)/, "the launch is the rig's to show (the cell cover bursts)");
 assert.match(fire, /cityFireMissileAt/);
 assert.match(armor, /CBZ\.cityArmorCanFire/);
 
