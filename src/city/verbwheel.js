@@ -18,17 +18,16 @@
    overlapped one another and sat on the man's face. Now the pills are
    measured, then laid out by systems/touch_layout.js verbColumn: one column
    beside his body (never over his head), on screen, off every other control.
-   At most four verbs plus More (tools/verb-cluster-layout-check.mjs).
+   At most three verbs plus More (tools/verb-cluster-layout-check.mjs).
 
    The wheel is not a menu that names systems. It is the thing's own verbs
-   (Talk, Hire, Mug, Follow me, Attack...), beside the thing.
+   (Hire, Rob, Follow, Attack...), beside the thing.
 
-   ORDERS ABOUT SOMEONE ELSE (the delegation thesis). An option registered
-   with `pick: "person"` is an order whose object is a third person ("Go
-   after", "Guard", "Tail"). Choosing it does not fire yet: the wheel closes,
-   and whoever you now look at wears that verb, pinned over his head. E (or a
-   tap on him) gives the order: onSelect(agent, ctx, target). Q or Esc drops
-   it. The agent is the thing the wheel was opened on.
+   ORDERS ABOUT SOMEONE ELSE sit on HIM, not on your man (owner 2026-10-11:
+   "I should be able to tell my security to attack someone with a button on
+   the person I want attacked"). city/orders.js registers Attack / Detain /
+   Tail on any person while you have people; there is no agent-first "who?"
+   pick any more.
 
    INPUT
      keyboard  tap Q: the verbs stay up; move the mouse down the column, click
@@ -45,7 +44,7 @@
      pad       D-pad left opens (a Q tap), D-pad right fires (an E).
 
    PUBLIC: CBZ.verbWheel = { open(cand), openFor(obj), close(), isOpen(),
-            ordering(), pickTarget(ped), audit() }
+            audit() }
 ============================================================ */
 (function () {
   "use strict";
@@ -54,12 +53,10 @@
   const g = CBZ.game;
 
   const MAX = 10;              // everything a thing offers, "More" included
-  const FEW = 4;               // verbs shown before "More" (the likely one + three)
+  const FEW = 3;               // verbs shown before "More" (the likely one + two)
   const HOLD_PICK = 0.28;      // s: a Q held this long is hold-and-release
   const STEER = 22;            // px of mouse travel before a verb is highlighted
   const STEP = 34;             // px of mouse travel per verb down the column
-  const ORDER_TTL = 12;        // s to pick who an order is about
-  const ORDER_REACH = 45;      // m: you can point at someone across the street
   const RETAP_MS = 450;        // a tap that closed the verbs on a person does not reopen them
   const WALK_OFF = 1.4;        // x REACH: past this the verbs close
 
@@ -68,7 +65,6 @@
     held: false, t0: 0, my: 0,
     side: "right", sizes: null, avoid: [],
     closedAt: 0, closedT: null,
-    order: null,               // { cand, item, t } while picking a target
   };
   let root = null, ring = null, nameEl = null, btns = [];
 
@@ -97,7 +93,7 @@
      first), so tapping the big pill and pressing E are the same thing. The
      rest keep the registry's own order (its priority is its guess at the
      likely verb) nudged by who this is right now:
-       your man      orders (Guard, Tail, Attack, Stand down) come up
+       your man      his orders (Hold, Follow, Stand down) come up
        angry at you  the hostile verbs come up
        your gun out  robbing comes up
      Two verbs that print the same word are one pill. */
@@ -117,7 +113,7 @@
       const it = items[i], id = String((it.opt && it.opt.id) || ""), word = short(it.label);
       let s = i;
       if (crew) {
-        if (it.pick || /^order-/.test(id)) s -= 100;
+        if (/^order-/.test(id)) s -= 100;
         else if (it.bad) s += 40;
       }
       if (angry && it.bad) s -= 60;
@@ -232,7 +228,7 @@
     const spoke = ii.approach ? ii.approach(cand) : false;
     const items = ii.wheelOf(cand);
     if (!items.length) return !!spoke;
-    if (items.length === 1 && !items[0].pick) { ii.fireOn(cand, items[0].opt); return true; }
+    if (items.length === 1) { ii.fireOn(cand, items[0].opt); return true; }
     return open(cand);
   }
   function close() {
@@ -249,63 +245,8 @@
     close();
     W.closedT = null;                      // a verb was chosen: the next tap is a new tap
     if (!it || !cand) return;
-    if (it.pick === "person") { beginOrder(cand, it); return; }
     const ii = I();
     if (ii && ii.fireOn) ii.fireOn(cand, it.opt);
-  }
-
-  // ---- ORDERS: "tell him to do it to HIM" -----------------------------------
-  function agentOf(cand) { return cand && cand.t && cand.t.group ? cand.t : null; }
-  function beginOrder(cand, item) {
-    W.order = { cand: cand, item: item, t: 0 };
-    const a = agentOf(cand);
-    if (a && a.kind !== "dog" && CBZ.citySay) { try { CBZ.citySay(a, "Who?", null, 1.6); } catch (e) {} }
-  }
-  function endOrder() {
-    W.order = null;
-    if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("wheel-order");
-  }
-  // the person you are LOOKING at, near or far (an order can point across a street)
-  function lookedPerson() {
-    const P = CBZ.player;
-    if (!P || !P.pos) return null;
-    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-    const agent = W.order ? agentOf(W.order.cand) : null;
-    let best = null, bs = 0.965;
-    const scan = function (list) {
-      if (!list) return;
-      for (let i = 0; i < list.length; i++) {
-        const p = list[i];
-        if (!p || p.dead || p === agent || p.player || !p.pos || !p.group) continue;
-        const dx = p.pos.x - P.pos.x, dz = p.pos.z - P.pos.z, d = Math.hypot(dx, dz);
-        if (d < 0.5 || d > ORDER_REACH) continue;
-        const s = (dx / d) * fx + (dz / d) * fz - d * 0.0006;
-        if (s > bs) { bs = s; best = p; }
-      }
-    };
-    scan(CBZ.cityPeds); scan(CBZ.cityCops);
-    return best;
-  }
-  function pickTarget(ped) {
-    const o = W.order;
-    if (!o || !ped || ped.dead) return false;
-    const ii = I();
-    endOrder();
-    if (ii && ii.fireOn) ii.fireOn(o.cand, o.item.opt, ped);
-    return true;
-  }
-  // the pinned verb's act (systems/interactions.js @fn): E on him, or a tap on the pill
-  CBZ.verbWheelPickTarget = function () { const p = lookedPerson(); if (p) pickTarget(p); };
-  function tickOrder(dt) {
-    const o = W.order;
-    if (!o) return;
-    o.t += dt;
-    const a = agentOf(o.cand);
-    if (!live() || o.t > ORDER_TTL || (a && a.dead)) { endOrder(); return; }
-    const p = lookedPerson();
-    if (!p || !CBZ.prisonPrompt) return;
-    CBZ.prisonPrompt("wheel-order", "@verbWheelPickTarget", short(o.item.label),
-      { at: { x: p.pos.x, y: (p.pos.y || 0) + 2.15, z: p.pos.z }, key: "E", bind: true, d2: 0, city: true });
   }
 
   // ---- placement + upkeep ---------------------------------------------------------
@@ -383,7 +324,6 @@
   if (CBZ.onAlways) CBZ.onAlways(97, function () {
     const t = now(), dt = lastT ? Math.min(0.1, t - lastT) : 0;
     lastT = t;
-    tickOrder(dt);
     if (!W.open) return;
     if (!live() || stale()) { close(); return; }
     place();
@@ -396,13 +336,11 @@
     if (k === "q") {
       e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation();
       if (e.repeat) return;
-      if (W.order) { endOrder(); return; }
       if (W.open) { close(); return; }
       const ii = I(), cand = ii && ii.wheelCand ? ii.wheelCand() : null;
       if (open(cand)) { W.held = true; W.t0 = now(); }
       return;
     }
-    if (W.order && k === "escape") { e.preventDefault(); endOrder(); return; }
     if (!W.open) return;
     if (k === "escape") { e.preventDefault(); close(); return; }
     if (k === "e") { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); fire(W.sel >= 0 ? W.sel : 0); return; }
@@ -459,12 +397,10 @@
   CBZ.verbWheel = {
     open: open, openFor: openFor, close: close,
     isOpen: function () { return W.open; },
-    ordering: function () { return !!W.order; },
-    pickTarget: pickTarget,
     audit: function () {
       return { open: W.open, verbs: W.items.map(function (it) { return it.more ? "More" : short(it.label); }),
         all: W.all.length, more: W.more, side: W.side, sel: W.sel,
-        ordering: W.order ? short(W.order.item.label) : null };
+      };
     },
   };
 })();

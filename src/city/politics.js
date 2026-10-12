@@ -1342,19 +1342,19 @@
         const tgt = A.id;
         m = { id: "pol:eo:deploy:" + d, topic: "deploy", line: "The " + A.name.toLowerCase() + " are organising, sir. The General can put the army on them.",
           memo: { dept: "Office of the Chief of Staff", subject: "Executive order: the army against the " + A.name, body: ["The movement is " + A.adj + ".", "The Army would have to be loyal to do it."], rec: "Sign to deploy." },
-          yes: { label: "Sign", run: function () { executive("deploy", tgt); } }, no: { label: "Send it back" } };
+          yes: { label: "Sign", run: function () { executive("deploy", tgt); } }, no: { label: "Send back" } };
       } else if (instLoyalty("fbi") < 65 || instLoyalty("cia") < 65) {
         m = { id: "pol:eo:surv:" + d, topic: "surveillance", line: "The agencies want wider powers, sir.", memo: { dept: "Office of the Chief of Staff", subject: "Executive order: surveillance", body: ["Wider powers for the Bureau and the Agency.", "Civil liberties groups will howl."], rec: "Sign it." },
-          yes: { label: "Sign", run: function () { executive("surveillance"); } }, no: { label: "Send it back" } };
+          yes: { label: "Sign", run: function () { executive("surveillance"); } }, no: { label: "Send back" } };
       } else if (rec && (rec.treasury || 0) < 20000) {
         m = { id: "pol:eo:nat:" + d, topic: "nationalise", line: "We could take the big firms, sir.", memo: { dept: "Treasury", subject: "Executive order: nationalisation", body: ["The state takes the largest firms.", "The money comes in. Business will not forgive it."], rec: "Sign it." },
-          yes: { label: "Sign", run: function () { executive("nationalise"); } }, no: { label: "Send it back" } };
+          yes: { label: "Sign", run: function () { executive("nationalise"); } }, no: { label: "Send back" } };
       } else {
         let low = null, lv = 70;
         INST_IDS.forEach(function (k) { if (instLoyalty(k) < lv) { lv = instLoyalty(k); low = k; } });
         if (low) {
           m = { id: "pol:eo:pay:" + low + ":" + d, topic: "pay", line: INST[low].Name + " wants a raise, sir.", memo: { dept: "Office of the Chief of Staff", subject: "Pay for " + INST[low].name, body: ["A ten percent raise.", "It costs the treasury."], rec: "Sign it." },
-            yes: { label: "Sign", run: function () { pay(low, 0.1); } }, no: { label: "Send it back" } };
+            yes: { label: "Sign", run: function () { pay(low, 0.1); } }, no: { label: "Send back" } };
         }
       }
       if (m) { s.fx.eoDay = d; m.via = "folder"; m.who = chiefWho(); m.expires = 1e9; deliver(m); }
@@ -1367,7 +1367,7 @@
       s.fx.dealDay[k] = d;
       deliver({ id: "pol:deal:" + k + ":" + d, via: "any", topic: "deal", who: { name: head.name, role: role }, expires: 300,
         line: "Sir, my people are restless. Something quiet would settle them. Forty thousand.",
-        yes: { label: "Arrange it", run: function () { deal(k, { kind: "bribe", amount: 40000 }); } }, no: { label: "No", run: function () { personLoyalty(head, -4); } } });
+        yes: { label: "Arrange it", run: function () { deal(k, { kind: "bribe", amount: 40000 }); } }, no: { label: "Refuse", run: function () { personLoyalty(head, -4); } } });
     });
     // the held ask for a pardon through someone
     const HL = heldList();
@@ -1379,7 +1379,7 @@
       deliver({ id: "pol:pardon:" + H.sid, via: "folder", topic: "pardon", who: { name: via, role: "aide" }, expires: 1e9,
         line: via + " asks for a pardon for " + surname(H.name) + ", sir.",
         memo: { dept: "Office of the Pardon Attorney", subject: "Pardon: " + H.name, body: [(H.title ? H.title + ". " : "") + "Held since day " + H.day + ".", via + " asks for clemency."], rec: "Sign the pardon." },
-        yes: { label: "Pardon", run: function () { pardon(H.sid); } }, no: { label: "Send it back" } });
+        yes: { label: "Pardon", run: function () { pardon(H.sid); } }, no: { label: "Send back" } });
       break;
     }
   }
@@ -1487,7 +1487,7 @@
       BODIES.peds[m.sid] = p;
       if (CBZ.interactions && CBZ.interactions.registerFor) {
         try {
-          CBZ.interactions.registerFor(p, { id: "pol-senator-talk", speak: true, prio: 30, campaignSafe: true, label: "Talk",
+          CBZ.interactions.registerFor(p, { id: "pol-senator-talk", speak: true, prio: 30, campaignSafe: true, label: "Listen",
             canShow: function () { return !!seat() && !p.dead; },
             onSelect: function () { const L2 = partyLoyalty(m.party); const line = L2 >= 65 ? "Mr. President. We're with you." : L2 >= 45 ? "Mr. President." : L2 >= 25 ? "We're watching you, sir." : "You'll get nothing from us."; if (CBZ.citySay) CBZ.citySay(p, line, "#dfe7ff", 2.6); } });
         } catch (e) {}

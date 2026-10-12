@@ -36,8 +36,8 @@
                  a horse, a plane, the state car) and the ride router; the
                  way out of any seat is systems/seat_exit.js's, also on F
          Q       the wheel: EVERYTHING you can do to this thing, laid round
-                 it (city/verbwheel.js). Orders about a third person start
-                 there (an option with `pick:"person"`).
+                 it (city/verbwheel.js). An order to your people about a
+                 man sits on that man (city/orders.js).
        Touch collapses all four into "tap the thing" (systems/touch.js).
      • TARGETING — facing-weighted proximity scoring (the camera ray in
        this engine IS the yaw cone) with HYSTERESIS: the current target
@@ -423,7 +423,7 @@
     // `_iOnly`: a person who is his job (the President's staff, an agent of
     // the detail) offers only his own verbs, never the street's. An option
     // flagged `anyone` still reaches him: the President's orders about a man
-    // (city/orders.js "Take him down") work on literally anyone.
+    // (city/orders.js Attack / Detain) work on literally anyone.
     const only = !!(t && t._iOnly);
     // WHAT A PERSON OFFERS IS WHAT HE IS: city/roles.js's table (role ->
     // verbs). A guard is bribed and robbed of his card, a keeper sells and is
@@ -467,7 +467,7 @@
     if (!pass.length && !speak) return null;
     let tap = null, hold = null, ride = null;
     for (const o of pass) {
-      if (o.pick || o.wheel) continue;      // an order about someone else (or `wheel`) is a wheel verb, never a key
+      if (o.wheel) continue;                // a `wheel` verb is never a key
       if (isRide(o)) { if (!ride) ride = o; }
       else if (o.hold) { if (!hold) hold = o; }
       else if (!tap) tap = o;
@@ -600,9 +600,8 @@
   function releasePanel() { dom(); if (panel) { panel.style.display = ""; panel.classList.remove("show"); } current = null; currentRows = []; shownRows = []; fingerprint = ""; currentScore = -1; }
 
   // ONE dispatch for every input: the E / F keys (a row), the Q wheel and a
-  // touch tap (an option on a candidate), and an ORDER about a third person
-  // (`arg` = the person picked as the target, handed to onSelect's 3rd param).
-  function fireOn(cand, opt, arg) {
+  // touch tap (an option on a candidate).
+  function fireOn(cand, opt) {
     if (!cand || !opt || typeof opt.onSelect !== "function") return false;
     const ctx = buildCtx();
     // Re-check ownership at dispatch too. This closes the sub-100ms window in
@@ -622,7 +621,7 @@
       return false;
     }
     rememberChoice(t, verb, true);
-    opt.onSelect(t, ctx, arg);
+    opt.onSelect(t, ctx);
     dirty = true;              // verbs change state → re-resolve next pass
     return true;
   }
@@ -766,7 +765,7 @@
     const shown = (SILENT_RIDE[pick.kind] ? rows.filter((r) => r.key !== "f") : rows)
       .map((r) => (r.hold ? Object.assign({}, r, { key: "hold " + r.key }) : r));
     const loneSeat = pick.kind === "seat" && rows._pass && rows._pass.length === 1;
-    if (!shown.length || loneSeat || CBZ.touchMode || (CBZ.verbWheel && (CBZ.verbWheel.isOpen() || CBZ.verbWheel.ordering())) || useOwner("e") === "pill") {
+    if (!shown.length || loneSeat || CBZ.touchMode || (CBZ.verbWheel && CBZ.verbWheel.isOpen()) || useOwner("e") === "pill") {
       quietPanel(pick.kind);
       return;
     }
@@ -824,7 +823,6 @@
      capture-phase binder asks this before it consumes a press. */
   function useOwner(key) {
     key = String(key || "e").toLowerCase();
-    if (key === "e" && CBZ.verbWheel && CBZ.verbWheel.ordering()) return "pill";   // "who?": the order's pin owns E
     const pin = CBZ.prisonPromptShownFor ? CBZ.prisonPromptShownFor(key) : null;
     let mine = false;
     for (let i = 0; i < currentRows.length; i++) if (currentRows[i].key === key) { mine = true; break; }
@@ -884,7 +882,7 @@
     }
     if (k !== "e" || !current || !currentRows.length) return;
     // the wheel is modal, and an order waiting for its "who" owns E (its pin)
-    if (CBZ.verbWheel && (CBZ.verbWheel.isOpen() || CBZ.verbWheel.ordering())) return;
+    if (CBZ.verbWheel && CBZ.verbWheel.isOpen()) return;
     if (e.repeat) { if (k === holdKey) e.preventDefault(); return; }
     const tap = rowFor("e", false), hold = rowFor("e", true);
     if (!tap && !hold) return;
@@ -935,7 +933,7 @@
     const add = function (o, label, bad) {
       if (!o || seen.has(o)) return;
       seen.add(o);
-      out.push({ opt: o, label: label, bad: !!bad, key: keyOf(o), pick: o.pick || null });
+      out.push({ opt: o, label: label, bad: !!bad, key: keyOf(o) });
     };
     // what E / hold E / F would do comes first (the obvious verb is the lead,
     // and a provider's answers are not pool options), then everything else
