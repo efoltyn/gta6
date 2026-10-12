@@ -701,6 +701,89 @@
     return g;
   }
 
+  /* ======================================================================
+     THE FAR CROWN — the same tree, for where a leaf card is a pixel.
+
+     Owner, 2026-10-11, from a helicopter on the iPad: "you can see the bare
+     ground, and then the trees spawn in." A wood has to stand out to the
+     fog the eye has (core/sight.js), which from the air is kilometres, and
+     a full crown + bole there is ~270 triangles a tree. So a far form, and
+     the law it obeys is "near and far look the same; only sub-pixel detail
+     goes" (memory: one world, all distances):
+
+       • it is CUT FROM the near crown, never drawn anew: same variant, same
+         lobes, same cards in the same places with the same uvs, lighting
+         normals and baked shade. Every other card is kept and grown 1.3x
+         about its own centre, so the crown's coverage and silhouette stay
+         where they were while the overlapping interior cards (the part only
+         a close eye resolves) halve. With the atlas's far-mip body a crown
+         past a few hundred metres is one solid shaded mass either way.
+       • the BOLE is left out: under a crown seen from the hand-over range
+         (core/sight.js `detail`, >= the ground fog's end) it is a fraction of
+         a pixel wide, and from above the crown hides it.
+     Result: ~88 instead of ~270 triangles a tree, one draw per cell. */
+  const farCache = Object.create(null);
+  function farGeometry(kind, variant) {
+    const near = geometry(kind, variant);
+    const key = near.uuid;
+    if (farCache[key]) return farCache[key];
+    const P = near.attributes.position, N = near.attributes.normal, T = near.attributes.uv, C = near.attributes.color;
+    const per = 12;                         // a card: front + back quad, non-indexed
+    const cards = (P.count / per) | 0;
+    if (!N || !T || !C || cards < 4 || P.count % per) { farCache[key] = near; return near; }
+    const keep = [];
+    for (let c = 0; c < cards; c += 2) keep.push(c);
+    const n = keep.length * per;
+    const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3), uv = new Float32Array(n * 2), col = new Float32Array(n * 3);
+    const GROW = 1.3;
+    let w = 0;
+    for (const c of keep) {
+      const v0 = c * per;
+      let cx = 0, cy = 0, cz = 0;
+      for (let k = 0; k < per; k++) { cx += P.getX(v0 + k); cy += P.getY(v0 + k); cz += P.getZ(v0 + k); }
+      cx /= per; cy /= per; cz /= per;
+      for (let k = 0; k < per; k++, w++) {
+        const i = v0 + k;
+        pos[w * 3] = cx + (P.getX(i) - cx) * GROW;
+        pos[w * 3 + 1] = cy + (P.getY(i) - cy) * GROW;
+        pos[w * 3 + 2] = cz + (P.getZ(i) - cz) * GROW;
+        nrm[w * 3] = N.getX(i); nrm[w * 3 + 1] = N.getY(i); nrm[w * 3 + 2] = N.getZ(i);
+        uv[w * 2] = T.getX(i); uv[w * 2 + 1] = T.getY(i);
+        col[w * 3] = C.getX(i); col[w * 3 + 1] = C.getY(i); col[w * 3 + 2] = C.getZ(i);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g.computeBoundingBox(); g.computeBoundingSphere();
+    g.name = (near.name || "cbz-crown") + "-far";
+    g.userData.vegetationArchetype = near.userData.vegetationArchetype;
+    g.userData.vegetationVariant = near.userData.vegetationVariant;
+    g.userData.leafCards = keep.length;
+    g.userData.farOf = near.name || kind;
+    g._shared = true;
+    farCache[key] = g;
+    return g;
+  }
+
+  // The kit material, handed over per instance between a near and a far
+  // form at core/sight.js's `detail` ring: "near" draws an instance only
+  // inside it, "far" only outside. Same map, cutoff and colours as
+  // material(kind): the hand-over is a change of triangle count, not of look.
+  function lodMaterial(kind, which) {
+    const base = material(kind);
+    const key = "lod#" + (isWood(kind) ? "wood" : "foliage") + "#" + which;
+    if (mats[key]) return mats[key];
+    if (!CBZ.sightSwapMaterial) return base;
+    const m = base.clone();
+    m.name = base.name + " (" + which + ")"; m._shared = true;
+    CBZ.sightSwapMaterial(m, which);
+    mats[key] = m;
+    return m;
+  }
+
   /* THE RATCHET. `cloned` counts SITES that drew a real stand out of a single
      variant while the kit was offering more than one. It may only go down. */
   const CLONE_MIN = 40;
@@ -931,8 +1014,10 @@
     palmTrunk: palmTrunk,
     palmCrown: palmCrown,
     geometry: geometry,
+    farGeometry: farGeometry,
     customCrown: customCrown,
     material: material,
+    lodMaterial: lodMaterial,
     depthMaterial: depthMaterial,
     leafTexture: leafTexture,
     barkTexture: barkTexture,

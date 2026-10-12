@@ -35,7 +35,8 @@
 
    2. SEIZE (the grab/maul state machine).  wind -> strike -> hold -> resolve.
       The victim is held at a jaw anchor on the attacker, the attacker thrashes,
-      the camera is possessed, and the whole thing ends in exactly one of
+      the camera stays the player's own (it shakes with every thrash; it is
+      never taken away), and the whole thing ends in exactly one of
       "escaped" / "killed" / "released" / "aborted".
 
       NO MASH METER. The base design called for one and the research came back
@@ -77,10 +78,10 @@
       hits are gentle, big hits are disproportionately violent, rotation is
       capped at a couple of degrees (sustained rotational shake is what
       actually makes people sick), translation does the work, decay is
-      sub-second. Plus a dolly-zoom on commit.
-      EVERY FOV write yields to CBZ.fpsScopeFov(). A scope-blind FOV writer
-      re-creates the "fake scope" bug; if a scope owns the lens we do the dolly
-      translation only and leave the FOV alone.
+      sub-second. That is ALL it does to the lens: the commit dolly-zoom and
+      the orbit around the jaw that used to possess the camera on a seize are
+      gone (owner: an automatic camera takeover when you get hit is slop; the
+      player keeps the camera, the hit is felt, not filmed).
 
    REVERT: CBZ.CONFIG.PREDATOR_HORROR = false turns the entire file into
    no-ops — every public entry point returns immediately, nothing is scheduled,
@@ -96,12 +97,12 @@
                      transform for the frame is final before we anchor to it)
      onAlways(52.5)  camera post-pass. AFTER camera.js's onAlways(50) AND after
                      systems/fpsmode.js's onAlways(52), which fully owns the FP
-                     camera position/look/FOV. At 50.5 the trauma shake and the
-                     dolly were silently overwritten by fpsmode every frame —
-                     i.e. dead in city first person, the default combat view.
-                     It is also the stale-seize watchdog: onAlways runs while
-                     the gameplay updaters do NOT, so this is the only place
-                     that can un-strand a possessed camera (see cameraPost).
+                     camera position/look/FOV. At 50.5 the trauma shake was
+                     silently overwritten by fpsmode every frame — i.e. dead
+                     in city first person, the default combat view. It is
+                     also the stale-seize watchdog: onAlways runs while the
+                     gameplay updaters do NOT, so this is the only place that
+                     can end a seize stranded by a pause (see cameraPost).
 ============================================================ */
 (function () {
   "use strict";
@@ -114,7 +115,7 @@
   if (CFG.PREDATOR_HORROR == null) CFG.PREDATOR_HORROR = true;   // the whole file
   if (CFG.PREDATOR_AUDIO == null) CFG.PREDATOR_AUDIO = true;     // the dread mix
   if (CFG.PREDATOR_VIGNETTE == null) CFG.PREDATOR_VIGNETTE = true; // the overlay
-  if (CFG.PREDATOR_CAMERA == null) CFG.PREDATOR_CAMERA = true;   // trauma + dolly
+  if (CFG.PREDATOR_CAMERA == null) CFG.PREDATOR_CAMERA = true;   // trauma shake
   if (CFG.PREDATOR_LOS == null) CFG.PREDATOR_LOS = true;         // menace LOS term
   if (CFG.PREDATOR_KIT == null) CFG.PREDATOR_KIT = true;         // derived opts bundles
   if (CFG.PREDATOR_PACK == null) CFG.PREDATOR_PACK = true;       // one-committer packs
@@ -254,7 +255,6 @@
   const TRAUMA_TRANS = 0.42;   // metres at trauma == 1 (translation does the work)
   const TRAUMA_ROT = 0.035;    // radians (~2 degrees) HARD CAP
   const TRAUMA_SHAKE_FEED = 0.25; // fraction handed to camera.js's own shake
-  const DOLLY_T = 0.40, DOLLY_FOV = 16, DOLLY_PUSH = 1.9;
 
   // --- audio
   const MOTIF_FAST = 0.105, MOTIF_SLOW = 0.62;   // seconds between notes
@@ -939,7 +939,7 @@
   }
 
   // ============================================================
-  //  1e/§E. CAMERA — trauma-squared shake + the commit dolly.
+  //  1e/§E. CAMERA — trauma-squared shake. Nothing else touches the lens.
   //
   //  trauma is the stored energy; the APPLIED shake is trauma*trauma, which is
   //  what makes a graze feel like a graze and a bite feel like a car crash.
@@ -948,11 +948,6 @@
   //  where the violence should live.
   // ============================================================
   let trauma = 0;
-  let dollyT = 0, dollyX = 0, dollyY = 0, dollyZ = 0;
-  // THE BASE FOV THE DOLLY WIDENS FROM, and the seize that owns the dolly.
-  // -1 means "not captured yet" (also the state while a scope owns the lens, in
-  // which case we never touch the FOV at all).
-  let dollyFov0 = -1, dollyOwner = 0;
 
   function predatorTrauma(a) {
     if (!on()) return;
@@ -965,45 +960,13 @@
   }
   CBZ.predatorTrauma = predatorTrauma;
 
-  function startDolly(x, y, z, owner) {
-    if (CFG.PREDATOR_CAMERA === false) return;
-    // restore whatever a previous dolly was still holding before re-basing
-    endDolly();
-    dollyT = DOLLY_T; dollyX = x; dollyY = y; dollyZ = z;
-    dollyOwner = owner || 0;
-  }
-
-  // THE FOV MUST BE WRITTEN ABSOLUTELY, NEVER `+=`.
-  // During a seize possessCamera() sets cineCam.active, and camera.js's cine
-  // branch returns BEFORE any camera.fov write — so nothing restores the lens
-  // and a per-frame `cam.fov += DOLLY_FOV * k` compounds: ~+246 degrees onto a
-  // 66-degree lens across the 0.40s dolly. fov >= 180 is not representable and
-  // the projection degenerates for exactly the length of the strike. So we
-  // capture a base (lazily, on the first frame we are actually allowed to write
-  // the FOV — a scope may own the lens at dolly start), write base + offset, and
-  // put the base back when the dolly ends or the seize exits by any path.
-  function endDolly() {
-    dollyT = 0; dollyOwner = 0;
-    if (dollyFov0 < 0) return;
-    const cam = CBZ.camera;
-    const base = dollyFov0;
-    dollyFov0 = -1;
-    if (!cam || cam.fov == null) return;
-    if (cam.fov !== base) {
-      cam.fov = base;
-      if (cam.updateProjectionMatrix) cam.updateProjectionMatrix();
-    }
-  }
-
   function cameraPost(dt) {
     // ---- THE STALE-SEIZE WATCHDOG. This is an onAlways, which is the whole
     // point: core/loop.js runs CBZ.updaters (and therefore seizeTick) ONLY
     // while game.state === "playing". If the game leaves that state mid-seize
     // — pause, mode transition, the game-over card — seizeTick simply stops,
     // and the identical guard that used to live inside it was dead code: a
-    // possessed cineCam stayed active forever, physics.js kept zeroing WASD off
-    // CBZ.cineActive() and camera.js kept hard-returning to the cine branch.
-    // Camera frozen on a jaw, player unable to move, no recovery. So the check
+    // seize held the player at the jaw forever with no recovery. So the check
     // lives HERE, where it always runs.
     if (SEIZES.length) {
       const okState = playing();
@@ -1013,7 +976,7 @@
         if (h.mode0 && CBZ.game && CBZ.game.mode !== h.mode0) { endSeize(h, "aborted"); continue; }
       }
     }
-    if (!on() || CFG.PREDATOR_CAMERA === false) { trauma = 0; endDolly(); return; }
+    if (!on() || CFG.PREDATOR_CAMERA === false) { trauma = 0; return; }
     if (trauma > 0) trauma = Math.max(0, trauma - TRAUMA_DECAY * dt);
     const cam = CBZ.camera;
     if (!cam || !cam.position) return;
@@ -1027,35 +990,6 @@
       // rotation LAST and TINY. camera.js has already run its lookAt, so this
       // roll survives the frame instead of being overwritten.
       cam.rotation.z += noise1(4, t) * s * TRAUMA_ROT;
-    }
-
-    if (dollyT > 0) {
-      dollyT = Math.max(0, dollyT - dt);
-      if (dollyT <= 0) { endDolly(); return; }         // the base fov goes back
-      const k = Math.sin(clamp(1 - dollyT / DOLLY_T, 0, 1) * Math.PI);   // in and out
-      // push the lens toward the attacker...
-      let dx = dollyX - cam.position.x, dy = dollyY - cam.position.y, dz = dollyZ - cam.position.z;
-      const l = Math.hypot(dx, dy, dz);
-      if (l > 0.001) {
-        const push = Math.min(DOLLY_PUSH * k, l * 0.5);
-        cam.position.x += (dx / l) * push;
-        cam.position.y += (dy / l) * push;
-        cam.position.z += (dz / l) * push;
-      }
-      // ...while WIDENING the FOV. Vertigo without moving the subject.
-      // A SCOPE ALWAYS WINS THE LENS. If fpsScopeFov() has an opinion we do the
-      // dolly translation only — a scope-blind FOV writer is the "fake scope" bug.
-      let scoped = null;
-      if (CBZ.fpsScopeFov) { try { scoped = CBZ.fpsScopeFov(); } catch (e) { scoped = null; } }
-      if (scoped == null && cam.isPerspectiveCamera !== false && cam.fov != null) {
-        // capture the pre-dolly lens the first time we are allowed to write it
-        if (dollyFov0 < 0) dollyFov0 = (isFinite(cam.fov) && cam.fov > 0) ? cam.fov : 66;
-        const want = clamp(dollyFov0 + DOLLY_FOV * k, 5, 170);   // ABSOLUTE, never +=
-        if (cam.fov !== want) {
-          cam.fov = want;
-          if (cam.updateProjectionMatrix) cam.updateProjectionMatrix();
-        }
-      }
     }
   }
 
@@ -1362,66 +1296,6 @@
     }
   }
 
-  // CAMERA POSSESSION — we write CBZ.cineCam directly (the seam camera.js
-  // yields to at the top of updateCamera), but we NEVER race the authored
-  // director in city/cinematics.js. If a scene is already playing (the mob-boss
-  // summons, the car ride — permadeath story beats), the seize simply runs
-  // without a camera: two writers to cineCam in one frame produce a lens that
-  // jitters between two shots and would corrupt the scene.
-  //
-  // The check cannot be a one-off at seize start, either: cinematics.js's
-  // startScene() does not ask US anything, so a scene beginning mid-hold would
-  // otherwise have both directors writing cineCam every frame. yieldCamera()
-  // re-asks every frame and, the moment an authored scene takes over, we stop
-  // writing FOR GOOD and never touch cc.active again — the scene owns the flag
-  // from then on and clearing it on our way out would soft-lock it.
-  //
-  // (cc.active is false whenever we can take the lens at all — the guard above
-  // returns otherwise — so there is no prior value worth restoring.)
-  function possessCamera(h) {
-    const cc = CBZ.cineCam;
-    if (!cc) return false;
-    if (CBZ.cineBusy) { try { if (CBZ.cineBusy()) return false; } catch (e) {} }
-    if (cc.active) return false;
-    cc.active = true; cc.snap = false;
-    h.camOwned = true; h.camYield = false;
-    return true;
-  }
-  // true once an authored scene has taken the lens: we are out, permanently.
-  function yieldCamera(h) {
-    if (h.camYield) return true;
-    if (CBZ.cineBusy) {
-      try { if (CBZ.cineBusy()) { h.camYield = true; h.camOwned = false; return true; } } catch (e) {}
-    }
-    return false;
-  }
-  function releaseCamera(h) {
-    const owned = h.camOwned, yielded = h.camYield;
-    h.camOwned = false;
-    if (!owned || yielded) return;   // never clear a flag an authored scene owns
-    const cc = CBZ.cineCam;
-    if (cc) cc.active = false;
-  }
-
-  function driveCamera(h, dt) {
-    if (!h.camOwned) return;
-    if (yieldCamera(h)) return;
-    const cc = CBZ.cineCam;
-    const ap = actorPos(h.attacker);
-    if (!cc || !ap) return;
-    const _jaw = h.jaw;
-    // orbit slowly around the jaw, looking straight down the attacker's throat.
-    h.camPh += dt * (0.55 + h.thrash * 0.5);
-    const s = actorScale(h.attacker) || 1;
-    const r = 2.4 + s * 1.1;
-    cc.x = _jaw.x + Math.cos(h.camPh) * r;
-    cc.y = _jaw.y + 1.15 + Math.sin(h.camPh * 0.7) * 0.35;
-    cc.z = _jaw.z + Math.sin(h.camPh) * r;
-    cc.lx = ap.x + (_jaw.x - ap.x) * 0.55;
-    cc.ly = ap.y + 0.6 * s;
-    cc.lz = ap.z + (_jaw.z - ap.z) * 0.55;
-  }
-
   function newHandle() {
     const h = {
       active: false, phase: "", t: 0, id: 0,
@@ -1437,9 +1311,8 @@
       // goreAtJaw draws nothing, and killVictim is never reached. Defaults
       // FALSE, so every existing caller is byte-identical.
       nonLethal: false,
-      medium: "air", cam: true, cause: "", style: "shake",
+      medium: "air", cause: "", style: "shake",
       onEnd: null, mode0: "", result: "",
-      camOwned: false, camYield: false, camPh: 0,
       qteN: 0, qteState: "", qteAt: 0, qteOpenAt: 0, qteOpenT: 0, promptHTML: "",
       pulseT: 0, thrashPh: 0, pinned: false, atFn: null,
       dmgAcc: 0, dmgT: 0,
@@ -1492,13 +1365,12 @@
     h.escape = opts.escape != null ? clamp(opts.escape, 0, 1) : S_ESCAPE;
     h.thrash = opts.thrash != null ? clamp(opts.thrash, 0, 2) : 1;
     h.medium = opts.medium || predatorMedium(ap.x, ap.y != null ? ap.y : 0, ap.z);
-    h.cam = opts.cam != null ? !!opts.cam : isP;
     h.cause = opts.cause || ("mauled by a " + actorName(attacker));
     h.nonLethal = !!opts.nonLethal;
     h.style = opts.style || "shake";
     h.onEnd = typeof opts.onEnd === "function" ? opts.onEnd : null;
     h.mode0 = (CBZ.game && CBZ.game.mode) || "";
-    h.result = ""; h.camOwned = false; h.camYield = false; h.camPh = Math.random() * 6.283;
+    h.result = "";
     h.qteN = 0; h.qteState = ""; h.qteAt = 0; h.qteOpenAt = 0; h.qteOpenT = 0;
     h.pulseT = 0; h.thrashPh = 0; h.pinned = false;
     h.dmgAcc = 0; h.dmgT = 0.28;
@@ -1559,8 +1431,6 @@
       predatorTrauma(0.30);
       predatorDread(attacker, 1, dreadOptsFor(attacker, 0, h.medium === "water"));
     }
-    if (h.cam && isP) possessCamera(h);
-    startDolly(h.jaw.x, h.jaw.y + 0.8, h.jaw.z, h.id);
     return h;
   }
   CBZ.predatorSeize = predatorSeize;
@@ -1576,10 +1446,6 @@
     const a = h.attacker, v = h.victim;
     if (a && a._seizing === h) a._seizing = null;
     if (v && v._seizedBy === h) v._seizedBy = null;
-    releaseCamera(h);
-    // EVERY exit path puts the lens back: aborted, escaped, killed, released.
-    // Leaving a live dolly behind is how the FOV used to survive the seize.
-    if (dollyOwner === h.id) endDolly();
     h.qteState = "";
     // hand the attacker's pose back to whoever owns it (creature_combat's
     // restPose or the caller's own animator) — never leave it rolled over.
@@ -1956,7 +1822,6 @@
       // a poisoned jaw would be written into the player's position — bail out
       // of the seize rather than launder a NaN into the world.
       if (!jawWorld(h, h.jaw)) { endSeize(h, "aborted"); continue; }
-      driveCamera(h, dt);
       // the seize keeps the bus pinned at maximum for as long as it lasts
       predatorDread(a, 1, dreadOptsFor(a, 0, h.medium === "water"));
 
@@ -2162,9 +2027,6 @@
     goreAtJaw(h, 1.8);
     predatorTrauma(0.7);
     if (h.isPlayer) {
-      // the death cam owns the lens from here; get out of its way immediately
-      // (camera.js gives cineCam priority over cityCam.death).
-      releaseCamera(h);
       endSeize(h, "killed");
       return;
     }
@@ -3062,7 +2924,6 @@
     so.escape = src.escape;
     so.thrash = src.thrash;
     so.style = src.style;
-    so.cam = src.cam;
     so.onEnd = src.onEnd;
     so.qteMax = src.qteMax;
     so.medium = src.medium || medium;
@@ -3698,10 +3559,8 @@
   // onAlways(52.5): AFTER camera.js's onAlways(50) AND after fpsmode.js's
   // onAlways(52). At 50.5 this only beat camera.js — but in city FIRST PERSON,
   // which is the default combat view, fpsmode fully owns camera position, look
-  // and FOV at 52 and simply overwrote the trauma shake and the dolly every
-  // frame. The amendment's core camera technique was silently dead exactly
-  // where it matters most. 52.5 lands after every lens writer in the chain and
-  // still composes with the seize's cineCam possession (camera.js's cine branch
-  // runs at 50 and returns; we add our offset on top of whatever won).
+  // and FOV at 52 and simply overwrote the trauma shake every frame. 52.5
+  // lands after every lens writer in the chain; we add our offset on top of
+  // whatever won.
   if (CBZ.onAlways) CBZ.onAlways(52.5, cameraPost);
 })();

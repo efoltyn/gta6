@@ -3276,25 +3276,13 @@
       const cTrunkMat = cTrunkG ? VKIT.material("conifer-wood") : null;
       const ctbb = cTrunkG && TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(cTrunkG) : null;
 
-      /* ---- THE DRAWN SET IS A DISC, NOT A COUNTRY ----------------------
-         The whole reason a canopy this dense is affordable. One InstancedMesh
-         spanning 14.5 x 13 km cannot be frustum-culled by r128 (the test is a
-         bounding sphere off the GEOMETRY, so an InstancedMesh either draws
-         every instance or none — which is why every scatter in this file is
-         `frustumCulled = false`), and the camera's far plane is ~2.2 km. So a
-         country-wide forest was paying vertex cost for ~190 km² of trees to
-         render the ~15 km² anyone can see.
-
-         The forest is therefore built as a grid of 1.2 km CHUNKS, each with
-         its own meshes, and a throttled updater shows only the chunks within
-         reach of the camera. Cost of the split: a handful of extra draw calls
-         for the chunks actually on screen (this frame already issues
-         thousands); saving: ~90% of the instances never enter a vertex
-         shader. The chunk is deliberately bigger than the fade distance so a
-         chunk switching on is always already behind fog.
-
-         Determinism is untouched — chunking only decides WHICH mesh an
-         instance lands in, never whether it exists.                        */
+      /* ---- CHUNKS -------------------------------------------------------
+         One InstancedMesh spanning 14.5 x 13 km cannot be frustum-culled by
+         r128 (it tests the GEOMETRY's sphere), so the forest is dealt into
+         1.6 km CHUNKS: each is one unit of the streamer (its near form) and
+         one far set (built at boot). Which form draws is core/sight.js's
+         rule, below. Determinism is untouched — chunking only decides WHICH
+         mesh an instance lands in, never whether it exists.                */
       const CHUNK = 1600;
       const chunkMap = new Map();
       function chunkAt(x, z) {
@@ -3353,6 +3341,50 @@
       }
       let ti = 0, ri = 0, solids = 0;
 
+      /* ---- THE CROWN OF A STEM, as one transform + one colour -----------
+         Shared by the near tree (plantStem) and the far crown (plantFar), so
+         the two forms of one tree can never disagree about where its crown
+         is, how big, or what green. Leaves the crown matrix in `dummy` and
+         the canopy tint in `col`. Pure position hashes + the relief. */
+      function stemCrown(st, spires) {
+        const px = st.x, pz = st.z, conifer = !!st.conifer;
+        const gy = st.gy != null ? st.gy : (st.gy = reliefAt(px, pz));
+        const hs = CBZ.hash01 ? CBZ.hash01(px, pz, 8808) : 0.5;
+        const rot = (CBZ.hash01 ? CBZ.hash01(px, pz, 8807) : 0.3) * Math.PI * 2;
+        const sc = (0.68 + hs * hs * 0.66) * (st.sc || 1);   // st.sc: avenue/hedgerow/specimen sizing
+        const crownJ = CBZ.hash01 ? CBZ.hash01(px, pz, 8809) : 0.5;
+        const spire = conifer && spires;
+        let footR;
+        if (spire) {
+          // The spire carries its foliage down the bole and its tip 30-45%
+          // above the broadleaf roof — that overshoot IS the reference's
+          // skyline, so it is derived from the same sc the roof uses rather
+          // than typed as a separate height.
+          const sy = sc * (0.86 + crownJ * 0.20);
+          const w = sc * (0.92 + crownJ * 0.34);
+          dummy.position.set(px, gy + 2.6 * sc, pz);
+          dummy.rotation.set(0, rot, 0);
+          dummy.scale.set(w, sy, w);
+          footR = VKIT.nominal.spireRadius * w * 1.05;
+        } else {
+          const cr = sc * (1.14 + crownJ * 0.28);
+          const ch = sc * (0.86 + hs * 0.20);
+          dummy.position.set(px, gy + 6.4 * sc, pz);
+          dummy.rotation.set(0, rot, 0);
+          dummy.scale.set(cr, ch, cr);
+          // the ground the crown roofs over: darkest at the bole, faint at the drip line
+          footR = VKIT.nominal.matureCrownRadius * cr * 0.5;
+        }
+        dummy.updateMatrix();
+        // COLOUR — the block owns the whole ramp now (see world/forestlook.js).
+        const topt = {
+          conifer: conifer, alt: st.grad ? st.grad.alt : 0, closure: st.c, site: "continent",
+          gx: st.grad ? st.grad.gx : null, gz: st.grad ? st.grad.gz : null,
+        };
+        FLOOK.tint(col, px, pz, topt);
+        return { gy: gy, hs: hs, rot: rot, sc: sc, spire: spire, footR: footR, topt: topt };
+      }
+
       /* ---- ONE STEM, PLANTED -------------------------------------------
          The two species share this whole body — seating, collider, audit
          chain, bark — and differ in four numbers: how narrow the bole is,
@@ -3363,10 +3395,15 @@
          two forests that disagree about the ground.                       */
       function plantStem(st, C) {
         const px = st.x, pz = st.z, conifer = !!st.conifer;
-        const gy = reliefAt(px, pz);
-        const hs = CBZ.hash01 ? CBZ.hash01(px, pz, 8808) : 0.5;
-        const rot = (CBZ.hash01 ? CBZ.hash01(px, pz, 8807) : 0.3) * Math.PI * 2;
-        const sc = (0.68 + hs * hs * 0.66) * (st.sc || 1);   // st.sc: avenue/hedgerow/specimen sizing
+        // the crown first (it fixes gy/sc/rot for the bole), then the bole
+        const K = stemCrown(st, !!C.spires);
+        const gy = K.gy, sc = K.sc, rot = K.rot;
+        let idx;
+        if (K.spire) { C.spires.setMatrixAt(C.ci, dummy.matrix); idx = C.ci; }
+        else { C.canopies.setMatrixAt(C.bi, dummy.matrix); idx = C.bi; }
+        const dst = K.spire ? C.sCol : C.cCol;
+        dst[idx * 3] = col.r; dst[idx * 3 + 1] = col.g; dst[idx * 3 + 2] = col.b;
+        const crownM = _crownM.copy(dummy.matrix);
         const narrow = conifer ? 0.74 : 1;              // spruce bole reads thin
         // A COASTAL WOOD IS NOT A SAVANNA. The kit's landscape archetype is
         // a 20 m bole carrying its crown from 13 m up — emergent-rainforest
@@ -3395,76 +3432,147 @@
         const trunkR = 0.76 * sc * narrow;          // both boles have a 0.76 m base
         solidAt(px, pz, trunkR, trunkR, 0, TM, seatY, trunkTop);
         solids++;
-        let parts = null;
         const tb = conifer && C.cTrunks ? ctbb : tbb;
-        if (tb) {
-          parts = [];
+        const bb = K.spire ? (C.sbb || sbb) : (C.cbb || cbb);
+        if (tb && bb) {
+          const parts = [];
           CBZ.treeAabbPush(parts, dummy.matrix, tb.min.x, tb.min.y, tb.min.z, tb.max.x, tb.max.y, tb.max.z);
-        }
-        const crownJ = CBZ.hash01 ? CBZ.hash01(px, pz, 8809) : 0.5;
-        const alt = st.grad ? st.grad.alt : 0;
-        let bb = C.cbb || cbb, idx;
-        if (conifer && C.spires) {
-          // The spire carries its foliage down the bole and its tip 30-45%
-          // above the broadleaf roof — that overshoot IS the reference's
-          // skyline, so it is derived from the same sc the roof uses rather
-          // than typed as a separate height.
-          const sy = sc * (0.86 + crownJ * 0.20);
-          const base = gy + 2.6 * sc;
-          if (C.feet) C.feet.push(px, gy, pz, VKIT.nominal.spireRadius * sc * (0.92 + crownJ * 0.34) * 1.05, 0);
-          dummy.position.set(px, base, pz);
-          dummy.rotation.set(0, rot, 0);
-          dummy.scale.set(sc * (0.92 + crownJ * 0.34), sy, sc * (0.92 + crownJ * 0.34));
-          dummy.updateMatrix(); C.spires.setMatrixAt(C.ci, dummy.matrix);
-          bb = C.sbb || sbb; idx = C.ci;
-        } else {
-          const cr = sc * (1.14 + crownJ * 0.28);
-          const ch = sc * (0.86 + hs * 0.20);
-          // the ground the crown roofs over: darkest at the bole, faint at the drip line
-          if (C.feet) C.feet.push(px, gy, pz, VKIT.nominal.matureCrownRadius * cr * 0.5, 0);
-          dummy.position.set(px, gy + 6.4 * sc, pz);
-          dummy.rotation.set(0, rot, 0);
-          dummy.scale.set(cr, ch, cr);
-          dummy.updateMatrix(); C.canopies.setMatrixAt(C.bi, dummy.matrix);
-          bb = C.cbb || cbb; idx = C.bi;
-        }
-        if (parts && bb) {
-          CBZ.treeAabbPush(parts, dummy.matrix, bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
+          CBZ.treeAabbPush(parts, crownM, bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z);
           CBZ.treeRegisterTree("continent", seatRef, parts);
         }
-        // COLOUR — the block owns the whole ramp now (see world/forestlook.js).
-        const topt = {
-          conifer: conifer, alt: alt, closure: st.c, site: "continent",
-          gx: st.grad ? st.grad.gx : null, gz: st.grad ? st.grad.gz : null,
-        };
-        FLOOK.tint(col, px, pz, topt);
-        const dst = conifer && C.spires ? C.sCol : C.cCol;
-        dst[idx * 3] = col.r; dst[idx * 3 + 1] = col.g; dst[idx * 3 + 2] = col.b;
-        FLOOK.bark(col, px, pz, topt);
+        FLOOK.bark(col, px, pz, K.topt);
         const TC = conifer && C.cTrunks ? C.ctCol : C.tCol;
         TC[tIdx * 3] = col.r; TC[tIdx * 3 + 1] = col.g; TC[tIdx * 3 + 2] = col.b;
-        if (conifer && C.spires) C.ci++; else C.bi++;
+        if (K.spire) C.ci++; else C.bi++;
         if (conifer && C.cTrunks) C.cti++; else C.ti++;
       }
+      const _crownM = new THREE.Matrix4();
 
       // KRUMMHOLZ — the scrub band that turns a treeline into a gradient.
       // Under physics.js's 0.45 STEP_UP is not the point here (it is waist
       // high); it gets no collider because a shrub is something you push
       // through, and a wall of AABBs on an alpine slope is a snag field.
-      function plantScrub(s, i, C) {
-        const gy = reliefAt(s.x, s.z);
+      // (transform + tint only: the near and the far scrub share it)
+      function scrubXform(s) {
+        const gy = s.gy != null ? s.gy : (s.gy = reliefAt(s.x, s.z));
         const hs = CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8838) : 0.5;
         const rot = (CBZ.hash01 ? CBZ.hash01(s.x, s.z, 8839) : 0.5) * Math.PI * 2;
         const ks = 0.65 + hs * 1.05;
         dummy.position.set(s.x, gy - 0.15, s.z);
         dummy.rotation.set(0, rot, 0);
         dummy.scale.set(ks, ks * (0.7 + hs * 0.5), ks);
-        dummy.updateMatrix(); C.scrubs.setMatrixAt(i, dummy.matrix);
+        dummy.updateMatrix();
         FLOOK.tint(col, s.x, s.z, {
           conifer: hs < 0.55, alt: s.grad ? s.grad.alt : 1, closure: 0.1, site: "continent",
           gx: s.grad ? s.grad.gx : null, gz: s.grad ? s.grad.gz : null,
         });
+      }
+      function plantScrub(s, i, C) {
+        scrubXform(s);
+        C.scrubs.setMatrixAt(i, dummy.matrix);
         C.kCol[i * 3] = col.r; C.kCol[i * 3 + 1] = col.g; C.kCol[i * 3 + 2] = col.b;
+      }
+
+      /* ---- THE FOREST STANDS TO THE HORIZON (owner 2026-10-11) ----------
+         "If you're in a helicopter, the forest spawns in view, but cities
+         don't. You can see the bare ground, and then the trees spawn in."
+         ROOT CAUSE: the backcountry existed only as streamer jobs and a disc.
+         On the phone/iPad (streamed by default) a 1.6 km chunk was planted
+         when it came inside the streamer's keep circle, the GROUND fog's end
+         (~600-800 m) around the player, while from the air the fog opens to
+         4-11 km (city/mode.js): the ground and the far plate were there, the
+         trees arrived in front of the camera. On the desktop the 3.5 km disc
+         did the same thing a few kilometres further out.
+         THE FIX IS THE CITIES' RULE (core/sight.js), applied to trees: every
+         tree in the country exists from boot in a FAR FORM (its own crown, cut
+         from the near crown by world/vegetation.js farGeometry: same variant,
+         same transform, same tint; no bole, which is sub-pixel there), and the
+         near form, with its bole, collider and audit, is the streamed part.
+         The hand-over is PER TREE in the vertex shader at sight's `detail`
+         ring (the ground fog's end): inside it the near crown draws, outside
+         it the far one, never both and never neither. A chunk whose near form
+         is not planted yet draws its far form everywhere, so a lagging
+         streamer shows a slightly simpler crown, never bare ground. The
+         contact layer (tree feet) belongs to the far set: it is the same at
+         every distance and fades by itself.
+         Memory: matrices + colours only (~90 B a tree); triangles: ~88 a far
+         tree against ~270 near, culled per cell (core/farcull.js deals the
+         pools, core/instcull.js culls them, the phone reach pass drops cells
+         past the eye's fog). */
+      const FARK = !!(SCENERY && VKIT && VKIT.farGeometry && VKIT.lodMaterial && CBZ.sightSwapMaterial);
+      const nearCrownMat = FARK ? VKIT.lodMaterial("landscape-crown", "near") : canopyMat;
+      const nearTrunkMat = FARK ? VKIT.lodMaterial("landscape-wood", "near") : trunkMat;
+      const nearCTrunkMat = FARK && cTrunkMat ? VKIT.lodMaterial("conifer-wood", "near") : cTrunkMat;
+      const farSwapMat = FARK ? VKIT.lodMaterial("landscape-crown", "far") : null;
+      function chunkVariant(ch, kind) {
+        if (!SCENERY || !VKIT || !VKIT.variantAt) return 0;
+        return VKIT.variantAt(ch.cx, ch.cz, kind);
+      }
+      function finishPool(m, colors, layer, nameTag) {
+        // The colour buffer travels WITH its mesh. Reading it out of a fixed
+        // five-slot array is how a chunk with no broadleaf hands the conifer
+        // buffer to the spires and the world build dies.
+        m.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+        m.instanceMatrix.needsUpdate = true;
+        // Never frustum-culled by r128 (it tests the prototype's sphere):
+        // core/farcull.js deals the pool into cells, core/instcull.js culls them.
+        m.frustumCulled = false;
+        m.userData.terrain = true;
+        m.userData.sceneryScale = true;
+        m.userData.vegetationLayer = layer;
+        if (nameTag) m.name = nameTag;
+        city.root.add(m);
+        forestMeshes++;
+      }
+      // the far set of one chunk: crowns + scrub + the contact layer, at boot
+      function plantFar(ch) {
+        const nT = ch.stems.length, spires = !!spireG;
+        let cone = 0;
+        if (spires) for (let i = 0; i < nT; i++) if (ch.stems[i].conifer) cone++;
+        const broad = nT - cone;
+        const F = ch.far = { meshes: [], feet: [] };
+        let bI = 0, sI = 0;
+        const bM = broad ? new THREE.InstancedMesh(VKIT.farGeometry("landscape-crown", chunkVariant(ch, "landscape-crown")), canopyMat, broad) : null;
+        const sM = cone ? new THREE.InstancedMesh(VKIT.farGeometry("conifer-spire", chunkVariant(ch, "conifer-spire")), canopyMat, cone) : null;
+        const bC = bM ? new Float32Array(broad * 3) : null, sC = sM ? new Float32Array(cone * 3) : null;
+        const feet = CBZ.treeFoot ? [] : null;
+        for (let i = 0; i < nT; i++) {
+          const st = ch.stems[i];
+          const K = stemCrown(st, spires);
+          if (K.spire) { sM.setMatrixAt(sI, dummy.matrix); sC[sI * 3] = col.r; sC[sI * 3 + 1] = col.g; sC[sI * 3 + 2] = col.b; sI++; }
+          else { bM.setMatrixAt(bI, dummy.matrix); bC[bI * 3] = col.r; bC[bI * 3 + 1] = col.g; bC[bI * 3 + 2] = col.b; bI++; }
+          if (feet) feet.push(st.x, K.gy, st.z, K.footR, 0);
+        }
+        if (bM) { finishPool(bM, bC, "landscape-crown", "backcountry-far-canopies"); F.meshes.push(bM); }
+        if (sM) { finishPool(sM, sC, "conifer-spire", "backcountry-far-spires"); F.meshes.push(sM); }
+        if (ch.scrub.length && scrubG) {
+          const kM = new THREE.InstancedMesh(VKIT.farGeometry("krummholz", chunkVariant(ch, "krummholz")), canopyMat, ch.scrub.length);
+          const kC = new Float32Array(ch.scrub.length * 3);
+          for (let i = 0; i < ch.scrub.length; i++) {
+            scrubXform(ch.scrub[i]);
+            kM.setMatrixAt(i, dummy.matrix);
+            kC[i * 3] = col.r; kC[i * 3 + 1] = col.g; kC[i * 3 + 2] = col.b;
+          }
+          finishPool(kM, kC, "krummholz", "backcountry-far-krummholz");
+          F.meshes.push(kM);
+        }
+        if (feet && feet.length) for (const m of CBZ.treeFoot.add(city.root, feet, { name: "backcountry-" + ch.cx + "," + ch.cz, heightAt: reliefAt, fogScale: 0.08 })) {
+          m.userData.terrain = true; F.feet.push(m);
+        }
+        F.swap = false;
+      }
+      // the far crowns of a chunk hand over to its near trees (planted) or
+      // stand everywhere (not planted). Cells dealt by core/farcull.js wear
+      // their pool's material: set them too, or the hand-over lags a second.
+      function farMode(ch, swap) {
+        const F = ch.far; if (!F || F.swap === swap) return;
+        F.swap = swap;
+        const mat = swap ? farSwapMat : canopyMat;
+        for (const m of F.meshes) {
+          m.material = mat;
+          const cells = m.userData.cells;
+          if (cells) for (let k = 0; k < cells.length; k++) cells[k].material = mat;
+        }
       }
 
       // ---- build one chunk's worth of forest ---------------------------
@@ -3478,31 +3586,25 @@
           for (let i = 0; i < nT; i++) if (ch.stems[i].conifer) cone++;
           const broad = nT - cone;
           forestChunks.push(ch);
-          // CITY SLICES: a chunk is the unit of the stream. Its stems are
-          // already decided (the plan above is position-hash only); planting
-          // them is what waits until the chunk can be seen.
+          ch.planted = false;
+          if (FARK) plantFar(ch);
+          // CITY SLICES: a chunk's NEAR form is the unit of the stream. Its
+          // stems are already decided (the plan above is position-hash only);
+          // planting the boles, colliders and audit chain is what waits.
           const plant = function () {
           ch.meshes.length = 0;
-          const C = { ti: 0, bi: 0, ci: 0, cti: 0, feet: CBZ.treeFoot ? [] : null };
+          const C = { ti: 0, bi: 0, ci: 0, cti: 0 };
           /* ---- A COUNTRY THAT IS NOT ONE TREE ---------------------------
-             world/vegetation.js now grows K structurally different crowns per
-             archetype. Redhollow splits its stand PER INSTANCE because you
-             walk through it; out here the forest is already one mesh set per
-             1.6 km CHUNK, so the variant is chosen per chunk instead — the
-             silhouette changes across the country for exactly ZERO extra draw
-             calls, and the visible disc (~3.5 km) always spans a dozen-odd
-             chunks, so every variant is on screen at once anyway. Honest
-             limitation: two neighbouring trees inside one chunk still share a
-             mesh, which at these ranges is a sub-pixel fact.
-             The choice is a POSITION hash on the chunk centre — no draw on
-             any sequential stream, so not one stem, cabin or animal moves. */
+             world/vegetation.js grows K structurally different crowns per
+             archetype. Out here the forest is one mesh set per 1.6 km CHUNK,
+             so the variant is chosen per chunk (a POSITION hash on the chunk
+             centre: no draw on any sequential stream). The far set uses the
+             same pick, so a tree keeps its crown across the hand-over. */
           function chunkGeo(kind, base) {
             if (!SCENERY || !VKIT || !VKIT.variantAt) return base;
-            const v = VKIT.variantAt(ch.cx, ch.cz, kind);
+            const v = chunkVariant(ch, kind);
             // Variant 0 is noted too — the audit's question is "how many
-            // variants did this site actually draw", and a site that reported
-            // only its non-zero picks would read as cloned however well it
-            // mixed.
+            // variants did this site actually draw".
             if (VKIT.noteUse) VKIT.noteUse("continent", kind, v, 1);
             if (!v) return base;
             return VKIT.geometry(kind, v) || base;
@@ -3510,34 +3612,36 @@
           const splitBole = !!(cone && spireG && cTrunkG);
           const nBroadBole = splitBole ? broad : nT;
           if (nBroadBole) {
-            C.trunks = new THREE.InstancedMesh(trunkG, trunkMat, nBroadBole);
+            C.trunks = new THREE.InstancedMesh(trunkG, nearTrunkMat, nBroadBole);
             C.tCol = new Float32Array(nBroadBole * 3);
             C.trunks.name = "backcountry-tree-trunks";
             C.trunks.userData.forestColors = C.tCol;
             ch.meshes.push(C.trunks);
           }
           if (splitBole) {
-            C.cTrunks = new THREE.InstancedMesh(cTrunkG, cTrunkMat, cone);
+            C.cTrunks = new THREE.InstancedMesh(cTrunkG, nearCTrunkMat, cone);
             C.ctCol = new Float32Array(cone * 3);
             C.cTrunks.name = "backcountry-conifer-trunks";
             C.cTrunks.userData.forestColors = C.ctCol;
             ch.meshes.push(C.cTrunks);
           }
-          if (broad) {
+          const spires = cone && spireG;
+          const nBroadCrown = spires ? broad : nT;
+          if (nBroadCrown) {
             const g = chunkGeo("landscape-crown", canopyG);
-            C.canopies = new THREE.InstancedMesh(g, canopyMat, broad);
+            C.canopies = new THREE.InstancedMesh(g, nearCrownMat, nBroadCrown);
             // every variant shares variant 0's bounding box by construction,
             // but the audit chain is proved from the geometry that actually
             // draws — never from a stand-in.
             C.cbb = g === canopyG ? cbb : (TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(g) : null);
-            C.cCol = new Float32Array(broad * 3);
+            C.cCol = new Float32Array(nBroadCrown * 3);
             C.canopies.name = "backcountry-tree-canopies";
             C.canopies.userData.forestColors = C.cCol;
             ch.meshes.push(C.canopies);
           }
-          if (cone && spireG) {
+          if (spires) {
             const g = chunkGeo("conifer-spire", spireG);
-            C.spires = new THREE.InstancedMesh(g, canopyMat, cone);
+            C.spires = new THREE.InstancedMesh(g, nearCrownMat, cone);
             C.sbb = g === spireG ? sbb : (TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(g) : null);
             C.sCol = new Float32Array(cone * 3);
             C.spires.name = "backcountry-conifer-spires";
@@ -3545,7 +3649,7 @@
             ch.meshes.push(C.spires);
           }
           if (ch.scrub.length && scrubG) {
-            C.scrubs = new THREE.InstancedMesh(chunkGeo("krummholz", scrubG), canopyMat, ch.scrub.length);
+            C.scrubs = new THREE.InstancedMesh(chunkGeo("krummholz", scrubG), nearCrownMat, ch.scrub.length);
             C.kCol = new Float32Array(ch.scrub.length * 3);
             C.scrubs.name = "backcountry-krummholz";
             C.scrubs.userData.forestColors = C.kCol;
@@ -3555,64 +3659,69 @@
           if (C.scrubs) for (let i = 0; i < ch.scrub.length; i++) plantScrub(ch.scrub[i], i, C);
           for (let i = 0; i < ch.meshes.length; i++) {
             const m = ch.meshes[i];
-            // The colour buffer travels WITH its mesh. Reading it out of a
-            // fixed five-slot array is how a chunk with no broadleaf hands
-            // the conifer buffer to the spires and the world build dies.
-            m.instanceColor = new THREE.InstancedBufferAttribute(m.userData.forestColors, 3);
-            m.instanceMatrix.needsUpdate = true;
-            // Never frustum-culled for the reason in the chunk note above;
-            // the chunk's own distance test is what culls it.
-            m.frustumCulled = false;
-            m.userData.terrain = true;
-            m.userData.sceneryScale = true;
-            m.userData.vegetationLayer = m === C.trunks ? "landscape-wood"
-              : m === C.cTrunks ? "conifer-wood"
-              : (m === C.canopies ? "landscape-crown"
-                : (m === C.spires ? "conifer-spire" : "krummholz"));
-            city.root.add(m);
-            forestMeshes++;
+            finishPool(m, m.userData.forestColors,
+              m === C.trunks ? "landscape-wood" : m === C.cTrunks ? "conifer-wood"
+                : (m === C.canopies ? "landscape-crown" : (m === C.spires ? "conifer-spire" : "krummholz")));
           }
-          // the contact layer rides the chunk: same slice, same distance disc
-          if (C.feet && C.feet.length) for (const m of CBZ.treeFoot.add(city.root, C.feet, { name: "backcountry-" + ch.cx + "," + ch.cz, heightAt: reliefAt, fogScale: 0.08 })) {
-            m.userData.terrain = true; ch.meshes.push(m);
+          // without a far set (kit off) the near form carries its own feet
+          if (!FARK && CBZ.treeFoot) {
+            const feet = [];
+            for (let i = 0; i < nT; i++) { const K = stemCrown(ch.stems[i], !!C.spires); feet.push(ch.stems[i].x, K.gy, ch.stems[i].z, K.footR, 0); }
+            if (feet.length) for (const m of CBZ.treeFoot.add(city.root, feet, { name: "backcountry-" + ch.cx + "," + ch.cz, heightAt: reliefAt, fogScale: 0.08 })) {
+              m.userData.terrain = true; ch.meshes.push(m);
+            }
           }
           ti += C.ti + C.cti;
+          // the near form is in: its far crowns hand over at the detail ring
+          ch.planted = true;
+          if (FARK) farMode(ch, true);
           };
           if (CBZ.slice && CBZ.sliceAt) {
             const h = CHUNK / 2 + 40;          // crowns overhang the chunk edge
-            CBZ.sliceAt({ minX: ch.cx - h, maxX: ch.cx + h, minZ: ch.cz - h, maxZ: ch.cz + h }, plant,
+            const job = CBZ.sliceAt({ minX: ch.cx - h, maxX: ch.cx + h, minZ: ch.cz - h, maxZ: ch.cz + h }, plant,
               { name: "backcountry forest " + ch.cx + "," + ch.cz });
+            ch.job = job;
           } else plant();
         });
-        // ---- THE DISC. One throttled distance test per chunk, not per
-        // tree: 90-odd numbers a few times a second against ~45k instances
-        // that would otherwise be submitted every frame from 12 km away.
-        // The radius is generously past the camera's far plane so a chunk is
-        // always deep in fog before it switches, and it is checked against
-        // the CAMERA rather than the player so a helicopter or a long lens
-        // never flies into an empty country.
-        const SEE = 2350 + CHUNK * 0.71;
+        /* ---- WHICH FORM DRAWS (core/sight.js, from the EYE) ---------------
+           Per chunk, a few times a second: the near meshes are submitted only
+           while some of the chunk is inside the hand-over ring; the far set
+           only while some of it is past that ring and inside the eye's fog.
+           (The per-tree decision itself is the vertex shader's.) A chunk
+           whose near job was parked or freed by the streamer goes back to its
+           far form everywhere. The old private disc (2350 m + 0.71 chunk,
+           union of player and camera) is gone: it was the edge the owner saw
+           the forest plant itself at, a few kilometres out from the air. */
+        const HALF_DIAG = CHUNK * 0.7072 + 40;
+        const FOOT_END = (CBZ.treeFoot && CBZ.treeFoot.FADE_END) || 1300;
         const chunkList = forestChunks;
-        let lastCx = 1e9, lastCz = 1e9, lastPx = 1e9, lastPz = 1e9;
+        let lastX = 1e9, lastZ = 1e9, lastDet = 0, lastReach = 0;
         CBZ.onAlways(97.4, function () {
-          const cam = CBZ.camera;
-          const p = CBZ.player && CBZ.player.pos;
-          if (!cam && !p) return;
-          // Both eyes, and the union of their discs. A camera can be flown
-          // hundreds of metres off the body (aircraft chase, cutscene rigs,
-          // a screenshot tool posing a lens), and a chunk hidden because the
-          // BODY is far away is a hole in the photograph.
-          const cx = cam ? cam.position.x : p.x, cz = cam ? cam.position.z : p.z;
-          const px = p ? p.x : cx, pz = p ? p.z : cz;
-          if (Math.abs(cx - lastCx) < 90 && Math.abs(cz - lastCz) < 90 &&
-              Math.abs(px - lastPx) < 90 && Math.abs(pz - lastPz) < 90) return;
-          lastCx = cx; lastCz = cz; lastPx = px; lastPz = pz;
+          if (!CBZ.camera && !(CBZ.player && CBZ.player.pos)) return;
+          const SG = CBZ.sight();
+          // planted state can change on any streamer tick: re-read it here
+          let changed = false;
           for (let i = 0; i < chunkList.length; i++) {
             const ch = chunkList[i];
-            const dx = ch.cx - cx, dz = ch.cz - cz;
-            const ex = ch.cx - px, ez = ch.cz - pz;
-            const on = (dx * dx + dz * dz) < SEE * SEE || (ex * ex + ez * ez) < SEE * SEE;
-            for (let k = 0; k < ch.meshes.length; k++) ch.meshes[k].visible = on;
+            const planted = !!(ch.planted && (!ch.job || ch.job.state === "built"));
+            if (planted !== !!ch.wasPlanted) { ch.wasPlanted = planted; changed = true; if (FARK) farMode(ch, planted); }
+          }
+          if (!changed && Math.abs(SG.x - lastX) < 60 && Math.abs(SG.z - lastZ) < 60 &&
+              Math.abs(SG.detail - lastDet) < 20 && Math.abs(SG.reach - lastReach) < 120) return;
+          lastX = SG.x; lastZ = SG.z; lastDet = SG.detail; lastReach = SG.reach;
+          for (let i = 0; i < chunkList.length; i++) {
+            const ch = chunkList[i];
+            const d = Math.hypot(ch.cx - SG.x, ch.cz - SG.z);
+            const dNear = d - HALF_DIAG, dFar = d + HALF_DIAG;
+            const planted = !!ch.wasPlanted;
+            const nearOn = planted && dNear < (FARK ? SG.detail : SG.reach);
+            for (let k = 0; k < ch.meshes.length; k++) ch.meshes[k].visible = nearOn;
+            if (ch.far) {
+              const farOn = dNear < SG.reach && !(planted && dFar < SG.detail);
+              for (let k = 0; k < ch.far.meshes.length; k++) ch.far.meshes[k].visible = farOn;
+              const feetOn = dNear < FOOT_END;
+              for (let k = 0; k < ch.far.feet.length; k++) ch.far.feet[k].visible = feetOn;
+            }
           }
         });
       }

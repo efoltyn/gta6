@@ -1299,18 +1299,13 @@
   I.register("ped:civ", { id: "ped-mug", slot: "i", prio: 10, bad: true, label: "Mug", onSelect: (p) => mug(p) });
 
   // ---- LIVING PED, slot J ----
-  I.register("ped:civ", {
-    id: "ped-hold-corner", slot: "j", prio: 60, canShow: (p) => inMyGang(p),
-    label: "Tell to wait",
-    onSelect: (p, ctx) => { if (CBZ.cityPlayerGangOrder) { p.companion = false; p.guard = { x: ctx.pos.x, z: ctx.pos.z }; p.homeGuard = { x: ctx.pos.x, z: ctx.pos.z }; p.rage = null; p.target.set(p.pos.x, 0, p.pos.z); if (CBZ.citySayTopic) CBZ.citySayTopic(p, "crewWait"); } },
-  });
+  // (your gang member's Hold / Follow are city/orders.js's, one verb each)
   I.register("ped:civ", { id: "ped-put-in-work", slot: "j", prio: 50, canShow: (p) => crewmate(p), label: "Check in", onSelect: (p) => prospectOrWork(p) });
   I.register("ped:civ", { id: "ped-swing", slot: "j", prio: 10, bad: true, label: "Punch", onSelect: (p) => attack(p) });
 
   // ---- LIVING PED, slot K: the crew ladder (claim-crew > prospect >
   //      shakedown > recruit > sell). Which of these a person can offer at
   //      all is city/roles.js's table (role -> verbs); prio only orders them.
-  I.register("ped:civ", { id: "ped-roll", slot: "k", prio: 60, canShow: (p) => inMyGang(p), label: "Tell to follow", onSelect: (p) => { p.companion = true; p.guard = null; p.rage = null; if (CBZ.citySayTopic) CBZ.citySayTopic(p, "crewFollow"); } });
   I.register("ped:civ", {
     id: "ped-crew-favor", slot: "k", prio: 50,
     canShow: (p) => crewmate(p) && !!(CBZ.cityCanBefriend && CBZ.cityCanBefriend(p) && CBZ.cityDoFavor),
@@ -1600,18 +1595,9 @@
       if (!CBZ.followerOrder(p, "board", { veh: v, run: true })) CBZ.city.note("No seat left for them.", 1.6);
     },
   });
-  I.register("ped:civ", {
-    id: "fol-wait", slot: "k", prio: 74,
-    canShow: (p) => mine(p) && !p._cbzSeat && !p._cbzWait,
-    label: "Wait here",
-    onSelect: (p) => { CBZ.followerOrder(p, "wait", {}); CBZ.city.note(((p && p.name) || "They") + " holds this spot.", 1.6); },
-  });
-  I.register("ped:civ", {
-    id: "fol-onme", slot: "k", prio: 75,
-    canShow: (p) => mine(p) && !!p._cbzWait,
-    label: "On me",
-    onSelect: (p) => { CBZ.followerOrder(p, "follow", {}); },
-  });
+  // Hold / Follow for your people are city/orders.js's (one verb each, the
+  // follower engine underneath for a follower); "Wait here" / "On me" here
+  // were the same two orders a second time.
   I.register("ped:civ", {
     id: "fol-bags", slot: "i", prio: 44,
     canShow: (p) => mine(p) && !p._cbzSeat && !p._cbzHeldBag &&

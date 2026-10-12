@@ -179,7 +179,8 @@ function stage(W, opts) {
   I.register("ped:civ", { id: "ped-line", speak: true, prio: 80, label: "Talk", onSelect: () => act("said") });
   I.register("ped:civ", { id: "ped-hire", slot: "k", prio: 37, label: "Hire", onSelect: () => act("hire") });
   I.register("ped:civ", { id: "ped-mug", slot: "i", prio: 10, bad: true, label: "Mug", onSelect: () => act("mug") });
-  I.register("ped", { id: "order-attack", prio: 30, pick: "person", label: "Attack", onSelect: (a, c, t) => act("order:" + (t && t.name)) });
+  // your people's order sits ON the man it is about (city/orders.js): hold E
+  I.register("ped", { id: "order-attack", prio: 60, hold: true, bad: true, label: "Attack", onSelect: (t) => act("order:" + (t && t.name)) });
   I.register("vehicle", { id: "car-get-in", slot: "e", ride: true, label: "Get in", onSelect: () => act("get-in") });
   I.register("animal", { id: "animal-pet", slot: "e", prio: 18, label: "Pet", onSelect: () => act("pet") });
   I.register("animal", { id: "animal-tame", slot: "e", hold: true, prio: 20, label: "Feed & tame", onSelect: () => act("tame") });
@@ -289,7 +290,7 @@ function look(W, x, z) { const P = W.P.pos; W.CBZ.cam.yaw = Math.atan2(-(x - P.x
   a = W.press("q"); ok(a.length === 0 && !W.CBZ.verbWheel.isOpen(), "piloting: Q opens nothing (rudder): " + a);
   a = W.press("f"); ok(a.length === 1 && a[0] === "exit-air", "piloting: F is the one exit: " + a);
 }
-// 7. an order about somebody else: agent first, then the mark, then E
+// 7. an order about somebody else sits on HIM: no agent first, no "who?"
 {
   const W = makePage(); stage(W, { man: true });
   const mark = { name: "Vic Lane", pos: { x: 0, y: 0, z: -20 }, group: {}, kind: "civilian" };
@@ -300,11 +301,8 @@ function look(W, x, z) { const P = W.P.pos; W.CBZ.cam.yaw = Math.atan2(-(x - P.x
   if (!verbs.includes("Attack") && verbs.includes("More")) { W.press(String(verbs.indexOf("More") + 1)); verbs = W.CBZ.verbWheel.audit().verbs; }
   const n = verbs.indexOf("Attack") + 1;
   let a = W.press(String(n));
-  ok(a.length === 0 && W.CBZ.verbWheel.ordering(), "choosing an order does not fire yet: it waits for who: " + a);
-  look(W, 0, -20);                                     // the verb is pinned over whoever you look at
-  let e0 = W.press("e");
-  ok(e0.length === 1 && e0[0] === "order:Vic Lane", "E on the man you point at gives the order about HIM (nothing else fires): " + e0);
-  ok(!W.CBZ.verbWheel.ordering(), "and the order is spent");
+  ok(a.length === 1 && a[0] === "order:Ray Cole", "the order is on the man it is about: picked on HIS verbs, it goes at once, about him: " + a);
+  ok(!W.CBZ.verbWheel.isOpen(), "and the verbs close");
 }
 // 8. the E row, per candidate, is unique: no two E taps, no pick on a key
 {
@@ -314,7 +312,7 @@ function look(W, x, z) { const P = W.P.pos; W.CBZ.cam.yaw = Math.atan2(-(x - P.x
     const rows = W.I.rowsFor();
     const sig = rows.map((r) => r.key + (r.hold ? "H" : ""));
     ok(new Set(sig).size === sig.length, "one row per key at (" + x + "," + z + "): " + sig.join(" "));
-    ok(rows.every((r) => r.id !== "order-attack"), "an order about someone else is never on a key");
+    ok(rows.every((r) => r.id !== "order-attack" || r.hold), "an order on a man rides hold E, never the E tap");
     ok(rows.every((r) => r.key === "e" || r.key === "f"), "only E and F are keys: " + sig.join(" "));
   }
 }

@@ -31,15 +31,27 @@
   /* A FEW VERBS NEED THEIR OBJECT. The rule above strips the noun because the
      noun is the thing the button sits on. When the object is NOT that thing
      (the cigarette you ask him for, the way you ask him for) the bare verb
-     is a riddle: "Ask" meant three different things and "Bum one" was the
-     slang that stood in for "ask for a smoke" (owner 2026-09-29: verbs in
-     plain words). These whole phrases print as authored. Keep it short. */
-  // the President's: an order about a man, and two answers that are not verbs
-  const WHOLE = ["Ask for a smoke", "Ask the way", "Take him down", "Clear the room", "No comment", "Shake hands", "Take a question"];
+     is a riddle. These whole phrases print as authored. Keep it short. */
+  const WHOLE = ["Clear room", "No comment", "Shake hands", "Take question"];
+  /* AN ANSWER IS A DECISION, NOT A VERB ON A THING. The replies a person
+     waits on (city/campaign_ui.js pins them on him: E, hold E, the wheel)
+     are authored as one or two words ("Raid", "Go on air", "Not now") and
+     print exactly as authored. Run through the rule below they were chopped
+     to their first word: "Let's get to work." printed "Let's", "Not yet.
+     Hold them." printed "Not", "The wall stands." printed "The" (owner
+     2026-10-11: "a lot of slop buttons that don't make sense, like a Let's
+     button"). campaign_ui registers each reply label here as it pins it. */
+  const KEEP = new Set();
+  function keep(label) {
+    const s = String(label == null ? "" : label).replace(/[?.!]+$/, "").replace(/\s+/g, " ").trim();
+    if (s) KEEP.add(s.toLowerCase());
+    return s;
+  }
   function verbWord(text) {
     let s = String(text == null ? "" : text).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     if (!s) return "";
     for (let i = 0; i < WHOLE.length; i++) if (s.toLowerCase() === WHOLE[i].toLowerCase()) return WHOLE[i];
+    if (KEEP.size) { const k = s.replace(/[?.!]+$/, "").trim(); if (KEEP.has(k.toLowerCase())) return k; }
     const price = (s.match(PRICE) || [""])[0].replace(/\s+/g, "");
     // an order prefix ("Order: take the helm") is the verb's own frame
     s = s.replace(/^(order|tell|ask)\s*:\s*/i, "");
@@ -68,6 +80,7 @@
     return v;
   }
   verbWord.WHOLE = WHOLE;
+  verbWord.keep = keep;
   if (typeof module === "object" && module && module.exports) module.exports = verbWord;
   if (root) {
     const CBZ = root.CBZ || (root.CBZ = {});

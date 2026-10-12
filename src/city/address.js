@@ -802,7 +802,7 @@
         if (!q || !P || !P.pos || Math.abs((P.pos.y || 0) - q.y) > 1.4) return null;
         return Math.hypot(q.x - px, q.z - pz) < 1.6 ? { x: q.x, y: q.y, z: q.z, kind: "addresspodium" } : null;
       },
-      options: [{ id: "address-podium-go", slot: "e", label: "Address the nation", onSelect: go }],
+      options: [{ id: "address-podium-go", slot: "e", label: "Address", onSelect: go }],
     });
     I.registerZone({
       id: "address-desk", kind: "addressdesk", radius: 1.8, prio: 8,
@@ -812,7 +812,7 @@
         if (!q || !P || !P.pos || Math.abs((P.pos.y || 0) - (q.y || 0)) > 1.6) return null;
         return Math.hypot(q.x - px, q.z - pz) < 1.8 ? { x: q.x, y: q.y, z: q.z, kind: "addressdesk" } : null;
       },
-      options: [{ id: "address-desk-go", label: "Address the nation", onSelect: go }],
+      options: [{ id: "address-desk-go", label: "Address", onSelect: go }],
     });
   }
 

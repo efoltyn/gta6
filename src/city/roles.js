@@ -98,13 +98,13 @@
     "gp-rob": "gunpoint", "gp-hostage": "gunpoint", "gp-ransom": "gunpoint", "gp-execute": "gunpoint",
     "milli-shakedown": "gunpoint",
     "ped-pickpocket": "pickpocket",
-    "ped-threaten": "threaten", "official-lean": "threaten", "vip-bench-lean": "threaten",
+    "official-lean": "threaten", "vip-bench-lean": "threaten",
     "dlg-talk": "talk",
     "rv-role": "service", "rv-score": "service", "ped-mechanic-fix": "service", "ped-cab-ride": "service",
     "ped-cart-bite": "service", "ped-sell": "service",
     "ped-recruit": "recruit", "loyal-prisoner-join": "recruit",
     "ped-prospect": "gang", "ped-claim-crew": "gang", "ped-put-in-work": "gang", "ped-crew-favor": "gang", "ped-leave-crew": "gang",
-    "ped-promote": "crew", "ped-hold-corner": "crew", "ped-roll": "crew",
+    "ped-promote": "crew",
     "vendor-shop": "buy", "vendor-fence": "sell", "vendor-retainer": "job", "rk-collect": "racket",
     "guard-bribe": "bribe", "official-grease": "bribe", "vip-bench-pay": "bribe",
     "guard-card": "keycard",
@@ -219,42 +219,6 @@
   CBZ.cityPersonTitle = titleOf;
 
   /* ======================================================================
-     THREATEN — a civilian you plainly outrank (12+ levels on the street
-     read) backs off; one who dares squares up. Fear is leverage that lasts:
-     a feared mark folds to a shakedown later (interact.js ped-shakedown).
-     ====================================================================== */
-  function lvl(a) { return CBZ.cityLevel ? CBZ.cityLevel(a) : 10; }
-  function myLvl() { return CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : lvl(CBZ.player); }
-  function threatenable(p, ctx) {
-    if (!p || p.dead || p.vendor || p.surrender || p.rage || p.restraint || p.hostage) return false;
-    if (p.state === "fight" || p.state === "flee" || (ctx && (ctx.driving || ctx.gunDrawn))) return false;
-    return myLvl() >= lvl(p) + 12;
-  }
-  function threaten(p) {
-    if (CBZ.cityMeet) { try { CBZ.cityMeet(p); } catch (e) {} }
-    const P = pa();
-    act("threaten", p);
-    const dares = P && CBZ.citySizeUp && CBZ.citySizeUp(p, P) && ((p.aggr || 0.3) >= 0.6 || p.armed);
-    if (dares) {
-      if (CBZ.cityRelShift) CBZ.cityRelShift(p, "snubbed", 0.6);
-      p.rage = P; p.state = "confront"; p.fear = 0;
-      sayT(p, "scoffFight", "You threatening me?");
-      return;
-    }
-    if (CBZ.cityRelShift) CBZ.cityRelShift(p, "intimidated", 1.3);
-    p.alarmed = Math.max(p.alarmed || 0, 4);
-    p.fear = Math.min(10, (p.fear || 0) + 3);
-    sayT(p, "cower", "Okay, okay.");
-    if (P && CBZ.cityScare) { try { CBZ.cityScare(p, P, { bias: 0.25 }); } catch (e) {} }
-  }
-  I.register("ped:civ", {
-    id: "ped-threaten", prio: 12, bad: true,
-    canShow: function (p, ctx) { return threatenable(p, ctx); },
-    label: "Threaten",
-    onSelect: function (p) { threaten(p); },
-  });
-
-  /* ======================================================================
      BRIBE — what the money buys depends on what he guards:
        a cop        one star off your file (wanted.js), 1-3 stars only
        a guard on an occupied building (occupy.js)
@@ -356,7 +320,7 @@
   I.register("ped:civ", {
     id: "guard-card", prio: 28, bad: true,
     canShow: function (p, ctx) { return !(ctx && ctx.driving) && !p.dead && roleOf(p) === "security" && hasCard(p); },
-    label: "Take card",
+    label: "Take",
     onSelect: function (p) { takeCard(p); },
   });
 

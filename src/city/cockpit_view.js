@@ -102,6 +102,16 @@
 
   // head motion state
   const head = { y: 0, vy: 0, z: 0, x: 0, yawX: 0, buzz: 0, rumble: 0, t: 0, _g: 0 };
+  // A ROUND HITTING THE AIRFRAME (playeraircraft.js damageCraft): the seat
+  // kicks — one spring impulse into the same touchdown spring, plus a short
+  // burst of hard vibration. Seated, this IS the hit; camera.js's chase
+  // shake is overwritten by this file's eye write, so it has to live here.
+  let hitBuzz = 0;
+  CBZ.cockpitHitJolt = function (k) {
+    k = clamp(fin(k, 0.5), 0, 1);
+    head.vy += (Math.random() < 0.5 ? -1 : 1) * (0.05 + 0.12 * k);
+    hitBuzz = Math.max(hitBuzz, 0.004 + 0.014 * k);
+  };
   let lastSpeed = 0, wasGround = true;
 
   // ---- overlay scene -----------------------------------------------------
@@ -306,6 +316,10 @@
     head.rumble += (rTarget - head.rumble) * Math.min(1, dt * 6);
     amp += head.rumble * 0.007 * sc;
     head.buzz = Math.sin(head.t * freq) * amp + Math.sin(head.t * freq * 2.37) * amp * 0.45;
+    if (hitBuzz > 0.0002) {
+      head.buzz += Math.sin(head.t * 61) * hitBuzz + Math.sin(head.t * 97.3) * hitBuzz * 0.6;
+      hitBuzz *= Math.exp(-9 * dt);
+    } else hitBuzz = 0;
 
     // --- touchdown: one spring impulse the size of the sink rate. The
     // spring (not a decay curve) is what makes a firm landing overshoot and

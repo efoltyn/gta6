@@ -1249,8 +1249,11 @@
         }
         // a newborn is born where nobody can see it appear (owner: nothing may
         // generate within view): past the fog's end, not 50 m off
-        const born = Math.max(50, (+CBZ.cityFogFar || 0) + 30);
-        if (P && Math.hypot(nx - P.x, nz - P.z) < born) continue;
+        // (core/sight.js: from the EYE, out to the fog it has: from the air that
+        // is kilometres, and the ground fog put births inside the picture)
+        const SG = CBZ.sight ? CBZ.sight() : null;
+        const born = Math.max(50, (SG ? SG.reach : (+CBZ.cityFogFar || 0)) + 30);
+        if (SG ? Math.hypot(nx - SG.x, nz - SG.z) < born : (P && Math.hypot(nx - P.x, nz - P.z) < born)) continue;
         const kid = makeActor(sp, nx, nz);
         kid.grow = 0;                            // born tiny; grows up in tick()
         applyScale(kid, 0);                      // small from frame one, at ITS OWN size

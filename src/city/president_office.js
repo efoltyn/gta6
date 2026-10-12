@@ -942,8 +942,8 @@
     m.via = m.via || "any";
     m.expires = (m.expires > 0) ? m.expires : 150;
     m.born = CLOCK;
-    m.yes = m.yes || { label: "Do it." };
-    m.no = m.no || { label: "Not now." };
+    m.yes = m.yes || { label: "Approve" };
+    m.no = m.no || { label: "Not now" };
     m.who = { name: String(m.who.name || "An aide"), role: m.who.role || "aide" };
     if (!m.kind) m.kind = /wall|cell|attack|raid|curfew|surge|martial|guard|crackdown|security|emergency/.test(m.topic) ? "security"
       : /tax|treasury|budget|police|economy|aid/.test(m.topic) ? "economy" : "people";
@@ -1458,7 +1458,7 @@
     // without waiting for him to reach the desk. No Talk verb: it is his line.
     if (CBZ.interactions && CBZ.interactions.registerFor) {
       CBZ.interactions.registerFor(ped, { id: "pv-aide-hear", speak: true, speakCD: 4, prio: 30, campaignSafe: true, forceYes: true,
-        label: "Talk",
+        label: "Listen",
         canShow: function () { return AIDE.ped === ped && !ped.dead && (AIDE.phase === "wait" || AIDE.phase === "enter") && !M.onCall && !READ.f; },
         onSelect: function () { aideTalk(); } });
     }
@@ -1565,7 +1565,7 @@
     if (CBZ.interactions && CBZ.interactions.registerFor) {
       // what is waiting for you, in one line, as you come up to her desk
       CBZ.interactions.registerFor(ped, { id: "pv-sec-talk", speak: true, prio: 30, campaignSafe: true, forceYes: true,
-        label: "Talk", canShow: function () { return !ped.dead; },
+        label: "Listen", canShow: function () { return !ped.dead; },
         onSelect: function () { SEC.lastLine = CLOCK; if (CBZ.citySay) { try { CBZ.citySay(ped, secLine(), "#e8e2cf", 3.0); } catch (e) {} } } });
       // a call you missed: she puts the caller back on your line
       CBZ.interactions.registerFor(ped, { id: "pv-sec-call-back", hold: true, prio: 28, campaignSafe: true, forceYes: true,
@@ -1679,7 +1679,7 @@
           "Their supply stands at " + (T.supply | 0) + " of 9. " + attacksLine(),
           "Construction is paid from the treasury, section by section, until the line is closed."],
         rec: "Order construction of the wall." },
-      yes: { label: "Sign it", order: "wall" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "wall" }, no: { label: "Send back" },
       ifIgnored: function () { news("Border chiefs say the frontier is wide open", { cat: "BORDER" }); },
     });
     if ((M.counts.attacks > 0 || M.counts.protests > 0) && btn("curfew").ok) out.push({
@@ -1689,7 +1689,7 @@
           "A curfew clears the streets after dark. It applies to everyone, you included.",
           "Expect complaints. Expect fewer bodies."],
         rec: "Impose a night curfew in the capital." },
-      yes: { label: "Sign it", order: "curfew" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "curfew" }, no: { label: "Send back" },
     });
     if (T.armed || T.members > 0) {
       if (btn("surge").ok) out.push({
@@ -1699,7 +1699,7 @@
             T.armed ? "They are moving. The target is " + (T.target || "not known") + "." : "They have not moved yet. They will.",
             "A surge puts extra officers where the threat is."],
           rec: "Surge the police." },
-        yes: { label: "Sign it", order: "surge" }, no: { label: "Send it back" },
+        yes: { label: "Sign", order: "surge" }, no: { label: "Send back" },
       });
     }
     if (btn("guard").ok) out.push({
@@ -1709,7 +1709,7 @@
           T.members > 0 ? "The cell counts " + T.members + " members and the gate is on their list." : "The cell has no names on the board today.",
           "More agents cost money every day they stand next to you."],
         rec: "Enlarge the President's detail." },
-      yes: { label: "Sign it", order: "guard" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "guard" }, no: { label: "Send back" },
     });
     if (M.counts.attacks >= 2 && (s.emergency || 0) < 50 && btn("emergency").ok) out.push({
       id: "f:emergency:" + d, topic: "emergency", kind: "security", who: whoOf("general"),
@@ -1717,7 +1717,7 @@
         body: [attacksLine(), "Emergency powers stand at " + Math.round(s.emergency || 0) + "%.",
           "A declaration lets us move without asking. The republic will remember who signed it."],
         rec: "Declare a state of emergency." },
-      yes: { label: "Sign it", order: "emergency" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "emergency" }, no: { label: "Send back" },
     });
     return pickOf(out, d, 1);
   }
@@ -1731,7 +1731,7 @@
           "Every standing order draws on that account daily.",
           "Approval is " + ap + "%. A tax rise will cost some of it."],
         rec: "Raise the tax rate." },
-      yes: { label: "Sign it", order: "taxup" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "taxup" }, no: { label: "Send back" },
       ifIgnored: function () { news("Treasury warns the state is running dry", { cat: "ECONOMY" }); },
     });
     if (ap < 45 && tr > 20000 && btn("taxdown").ok) out.push({
@@ -1740,7 +1740,7 @@
         body: ["Approval is " + ap + "%. The treasury holds " + money(tr) + ".",
           "We can afford to give some of it back.", "A cut is popular now and expensive later."],
         rec: "Cut the tax rate." },
-      yes: { label: "Sign it", order: "taxdown" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "taxdown" }, no: { label: "Send back" },
     });
     if (btn("police").ok) out.push({
       id: "f:police:" + d, topic: "police", kind: "economy", who: whoOf("police"),
@@ -1749,14 +1749,14 @@
           "The treasury holds " + money(tr) + ".",
           "Money for the police puts more officers on the street for good."],
         rec: "Fund the police." },
-      yes: { label: "Sign it", order: "police" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "police" }, no: { label: "Send back" },
     });
     if (!out.length && btn("taxup").ok) out.push({
       id: "f:taxup2:" + d, topic: "taxup", kind: "economy", who: whoOf("treasury"),
       memo: { dept: "The Treasury", subject: "The tax rate",
         body: ["The treasury holds " + money(tr) + ".", "Approval is " + ap + "%.", "A modest rise keeps the orders funded."],
         rec: "Raise the tax rate." },
-      yes: { label: "Sign it", order: "taxup" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "taxup" }, no: { label: "Send back" },
     });
     return pickOf(out, d, 2);
   }
@@ -1769,7 +1769,7 @@
         body: ["Approval is " + ap + "%." + ((s.scandal || 0) > 20 ? " The papers have a story and they are not letting go." : ""),
           attacksLine(), "Airtime costs $2,000. A country in crisis listens; a calm one shrugs."],
         rec: "Address the nation tonight." },
-      yes: { label: "Sign it", order: "address" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "address" }, no: { label: "Send back" },
     });
     if (btn("amnesty").ok) out.push({
       id: "f:amnesty:" + d, topic: "amnesty", kind: "people", who: whoOf("chief"),
@@ -1777,7 +1777,7 @@
         body: ["The courts are full of small cases.", "An amnesty clears warrants across the country.",
           "Approval is " + ap + "%. Some will call it mercy. Some will call it weakness."],
         rec: "Declare a general amnesty." },
-      yes: { label: "Sign it", order: "amnesty" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "amnesty" }, no: { label: "Send back" },
     });
     if (btn("pardon").ok) out.push({
       id: "f:pardon:" + d, topic: "pardon", kind: "people", who: whoOf("chief"),
@@ -1785,7 +1785,7 @@
         body: ["There are open warrants that name you.", "A pardon closes them. It will be reported.",
           "Your approval is " + ap + "%."],
         rec: "Sign the pardon." },
-      yes: { label: "Sign it", order: "pardon" }, no: { label: "Send it back" },
+      yes: { label: "Sign", order: "pardon" }, no: { label: "Send back" },
     });
     return pickOf(out, d, 3);
   }
@@ -1818,8 +1818,8 @@
       id: "p:attack:" + day() + ":" + M.counts.attacks, via: "phone", topic: key, who: who, expires: 120,
       line: "Mr. President. The attack at " + at + " is over. " + (T.members > 0 ? T.members + " of them still walk free. " : "") +
         (martialOk ? "I want soldiers on the streets tonight, on your order." : "I want the police surged where they struck, on your order."),
-      yes: { label: martialOk ? "Put them on the streets." : "Surge the police.", order: key, reply: "Yes, sir. They move within the hour." },
-      no: { label: "Not yet. Hold them.", reply: "Understood. We hold." },
+      yes: { label: martialOk ? "Deploy" : "Surge", order: key, reply: "Yes, sir. They move within the hour." },
+      no: { label: "Wait", reply: "Understood. We hold." },
       ifIgnored: function () { news("General says the army waited for orders that never came", { cat: "SECURITY" }); shock(-1); },
       missedLine: "The General called after the attack. Nobody picked up, so the army sat on its hands.",
     });
@@ -1830,8 +1830,8 @@
       id: "p:raid:" + day(), via: "phone", topic: "bureau", who: whoOf("bureau"), expires: 150,
       line: "Sir, we have the safehouse. " + T.members + (T.members === 1 ? " member" : " members") + " of the cell, supply at " + (T.supply | 0) +
         ". My agents can go in tonight. A raid costs six thousand.",
-      yes: { label: "Go in.", order: "bureau", reply: "Agents are moving. I'll call when it's done." },
-      no: { label: "Keep watching them.", reply: "We'll keep eyes on it. They move house often." },
+      yes: { label: "Raid", order: "bureau", reply: "Agents are moving. I'll call when it's done." },
+      no: { label: "Watch", reply: "We'll keep eyes on it. They move house often." },
       ifIgnored: function () { news("Bureau sources say a raid was ready and never ordered", { cat: "SECURITY" }); },
       missedLine: "The Bureau Director had the safehouse and wanted your word. He never got it.",
     });
@@ -1842,8 +1842,8 @@
       id: "p:protest:" + day(), via: "phone", topic: "curfew", who: whoOf("police"), expires: 120,
       line: "Mr. President, " + (size ? "there are about " + size + " people" : "there's a crowd") + " in the streets and it's getting dark. " +
         "A curfew would clear them by nightfall.",
-      yes: { label: "Impose the curfew.", order: "curfew", reply: "The order goes out now." },
-      no: { label: "Let them march.", reply: "We'll keep our distance and keep the peace." },
+      yes: { label: "Curfew", order: "curfew", reply: "The order goes out now." },
+      no: { label: "Allow", reply: "We'll keep our distance and keep the peace." },
       ifIgnored: function () { news("Protesters hold the streets into the night", { cat: "THE PEOPLE" }); },
       missedLine: "The Commissioner wanted a curfew for the protest. You didn't take the call.",
     });
@@ -1853,8 +1853,8 @@
     return offer({
       id: "p:tax:" + day(), via: "phone", topic: "taxup", who: whoOf("treasury"), expires: 150,
       line: "Sir, the treasury is down to " + money(s.treasury) + ". I need a tax rise.",
-      yes: { label: "Raise them.", order: "taxup", reply: "Thank you. It won't be popular." },
-      no: { label: "Find it somewhere else.", reply: "There is nowhere else, sir. But understood." },
+      yes: { label: "Raise taxes", order: "taxup", reply: "Thank you. It won't be popular." },
+      no: { label: "Refuse", reply: "There is nowhere else, sir. But understood." },
       ifIgnored: function () { news("Treasury warns the state is running dry", { cat: "ECONOMY" }); },
       missedLine: "The Treasury Secretary called about the money. The account is still empty.",
     });
@@ -1864,8 +1864,8 @@
     return offer({
       id: "p:whip:" + day(), via: "phone", topic: "address", who: whoOf("whip"), expires: 150,
       line: "Mr. President, you're at " + Math.round(s.approval || 0) + "%. The party is getting nervous. You need to go on air and talk to them.",
-      yes: { label: "Book the airtime.", order: "address", reply: "Good. Keep it short and look them in the eye." },
-      no: { label: "Not yet.", reply: "Then the party will start talking without you." },
+      yes: { label: "Address", order: "address", reply: "Good. Keep it short and look them in the eye." },
+      no: { label: "Not now", reply: "Then the party will start talking without you." },
       ifIgnored: function () { news("Party figures question the President's silence", { cat: "POLITICS" }); shock(-1); },
       missedLine: "The party whip called about the numbers. He'll be talking to the papers instead.",
     });
@@ -1876,8 +1876,8 @@
     return offer({
       id: "p:election:" + E.voteDay, via: "phone", topic: "address", who: whoOf("whip"), expires: 150,
       line: "Sir, the country votes on day " + E.voteDay + ". We're polling at " + pol + ". One more address before the vote could move it.",
-      yes: { label: "Put me on air.", order: "address", reply: "I'll tell the networks." },
-      no: { label: "My record speaks.", reply: "I hope it's loud, sir." },
+      yes: { label: "Address", order: "address", reply: "I'll tell the networks." },
+      no: { label: "Decline", reply: "I hope it's loud, sir." },
     });
   }
   function ambassadorWall() {
@@ -1885,8 +1885,8 @@
     return offer({
       id: "p:foreign:wall", via: "phone", topic: "foreign", who: { name: "The ambassador of " + f.name, role: "foreign" }, expires: 150,
       line: "Mr. President, my government has seen your wall on the Saltlands line. Our traders use those crossings. We ask that they stay open.",
-      yes: { label: "The wall stands.", run: function () { rel("border", 8, f); shock(1); }, reply: "Then I will report that to my government." },
-      no: { label: "The crossings stay open.", run: function () { rel("trade", 6, f); }, reply: "Thank you. That will be remembered." },
+      yes: { label: "Refuse", run: function () { rel("border", 8, f); shock(1); }, reply: "Then I will report that to my government." },
+      no: { label: "Concede", run: function () { rel("trade", 6, f); }, reply: "Thank you. That will be remembered." },
       ifIgnored: function () { rel("insult", 4, f); news(f.name + " complains the President would not take its call", { cat: "WORLD" }); },
       missedLine: "The ambassador of " + f.name + " called about the wall. Being ignored will cost us with them.",
     });
@@ -1896,8 +1896,8 @@
     return offer({
       id: "p:foreign:aid:" + day(), via: "phone", topic: "aid", who: { name: "The ambassador of " + f.name, role: "foreign" }, expires: 120,
       line: "Mr. President, we saw the news. My government offers help: money for the victims and for your police. Five thousand, today.",
-      yes: { label: "We accept, with thanks.", run: function () { const h = seatH(); if (h && h.rec) h.rec.treasury = (h.rec.treasury || 0) + 5000; rel("aid", 6, f); news(f.name + " sends aid after the attack", { cat: "WORLD" }); }, reply: "It will be wired within the hour." },
-      no: { label: "We can look after ourselves.", run: function () { rel("insult", 3, f); }, reply: "As you wish." },
+      yes: { label: "Accept", run: function () { const h = seatH(); if (h && h.rec) h.rec.treasury = (h.rec.treasury || 0) + 5000; rel("aid", 6, f); news(f.name + " sends aid after the attack", { cat: "WORLD" }); }, reply: "It will be wired within the hour." },
+      no: { label: "Decline", run: function () { rel("insult", 3, f); }, reply: "As you wish." },
     });
   }
   function armedAide(e) {
@@ -1905,8 +1905,8 @@
     return offer({
       id: "a:armed:" + day(), via: "aide", urgent: true, topic: "surge", who: whoOf("aide"), expires: 45,
       line: "Sir, the detail wants you away from the windows. We have word the cell is moving" + (T.target ? " on " + T.target : "") + ". Police at the gate would help.",
-      yes: { label: "Put police on the gate.", order: "surge", reply: "Right away. Please stay inside, sir." },
-      no: { label: "I'm staying at my desk.", reply: "Then we'll stand in the doorway." },
+      yes: { label: "Send police", order: "surge", reply: "Right away. Please stay inside, sir." },
+      no: { label: "Stay", reply: "Then we'll stand in the doorway." },
     });
   }
   function pressAide(drop) {
@@ -1914,8 +1914,8 @@
     return offer({
       id: "a:press:" + day(), via: "aide", urgent: true, topic: "address", who: whoOf("press"), expires: 120,
       line: "Sir, it's been a bad news day. You're down " + drop + " points, " + Math.round(s.approval || 0) + "% now. The networks will give you ten minutes tonight.",
-      yes: { label: "I'll take them.", order: "address", reply: "I'll draft something. Nothing long." },
-      no: { label: "Let it blow over.", reply: "It won't. But it's your call." },
+      yes: { label: "Address", order: "address", reply: "I'll draft something. Nothing long." },
+      no: { label: "Decline", reply: "It won't. But it's your call." },
     });
   }
   function scheduleWords() {
@@ -1968,8 +1968,8 @@
     return offer({
       id: "a:chief:" + day() + (first ? ":first" : ""), via: "aide", urgent: true, topic: "schedule", who: whoOf("chief"), expires: 200,
       line: bits.join(" "),
-      yes: { label: "Let's get to work.", reply: "I'll be down the hall." },
-      no: { label: "Hold my calls for a while.", run: function () { M.holdUntil = CLOCK + 75; }, reply: "Nobody gets through for a few minutes." },
+      yes: { label: "Take calls", reply: "I'll be down the hall." },
+      no: { label: "Hold calls", run: function () { M.holdUntil = CLOCK + 75; }, reply: "Nobody gets through for a few minutes." },
     });
   }
 
@@ -2194,7 +2194,10 @@
   function verbWord(label, dflt) {
     const s = clean(label || "").replace(/[.!]+$/, "").trim();
     if (!s) return dflt;
-    return s.replace(/^send it back$/i, "Send back").replace(/^(\w+) it$/i, "$1");
+    const w = s.replace(/^send it back$/i, "Send back").replace(/^(\w+) it$/i, "$1");
+    // a decision prints as authored ("Raise taxes", not "Raise")
+    const VW = CBZ.cityVerbWord;
+    return VW && VW.keep ? VW.keep(w) : w;
   }
   const FOLDER_TGTS = [];
   function wireZones() {

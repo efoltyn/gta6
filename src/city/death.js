@@ -107,6 +107,11 @@
       return;
     }
     if ((g.invuln || 0) > 0) return;
+    // WHERE IT CAME FROM: a wedge on the rim pointing at the shooter (eyes.js),
+    // on foot, at the wheel or at the stick alike. Nothing takes your camera.
+    if (fromX != null && fromZ != null && dmg > 0 && CBZ.eyes && CBZ.eyes.hitFrom) {
+      try { CBZ.eyes.hitFrom(fromX, fromZ, Math.min(1, dmg / 40)); } catch (e) {}
+    }
     if (attacker) {
       // an ACTOR (has .pos) can be SPECTATED after WASTED; a bare string just names
       // the killer. g._cityKiller STAYS a display string either way (killfeed.js +

@@ -3717,13 +3717,15 @@
         KERB_SETS[kind] = HW.chunked("kerb-" + kind, Kd.whole, VC, ITEMS[kind], { cast: kind !== "grate", maxDist: 320 }).addTo(root);
         KERB_STATS.drawSets += KERB_SETS[kind].meshes.length;
       }
+      // street trees stand to the eye's fog ("sight", core/sight.js): a 420 m gate
+      // planted every kerb tree in view inside a 560-1400 m fog
       if (GRAM && trunkItems.length) {
-        KERB_SETS._trunk = HW.chunked("kerb-tree-trunk", trunkGeo, trunkM, trunkItems, { cast: true, maxDist: 420 }).addTo(root);
+        KERB_SETS._trunk = HW.chunked("kerb-tree-trunk", trunkGeo, trunkM, trunkItems, { cast: true, maxDist: "sight" }).addTo(root);
         KERB_STATS.drawSets += KERB_SETS._trunk.meshes.length;
         for (let c = 0; c < 2; c++) {
           if (!crownItems[c].length) continue;
           const dm = VKIT && VKIT.depthMaterial && crownGeo.userData && crownGeo.userData.leafCards ? VKIT.depthMaterial("foliage") : null;
-          KERB_SETS["_crown" + c] = HW.chunked("kerb-tree-crown" + c, crownGeo, crownMs[c], crownItems[c], { cast: true, maxDist: 420,
+          KERB_SETS["_crown" + c] = HW.chunked("kerb-tree-crown" + c, crownGeo, crownMs[c], crownItems[c], { cast: true, maxDist: "sight",
             perMesh: function (im) { if (dm) im.customDepthMaterial = dm; } }).addTo(root);
           KERB_STATS.drawSets += KERB_SETS["_crown" + c].meshes.length;
         }
