@@ -1024,12 +1024,7 @@
     passengers: 0,
     weapons: WEAPONS,
     build: function (ctx) {
-      let b = null;
-      try { b = build(ctx); } catch (e) { if (window.console) console.warn("[f35] build failed, using mil_air's fighter:", e); b = null; }
-      if (b) return b;
-      const a = CBZ.milAir;
-      const f = a && a.make ? a.make("fighter") : null;
-      return f ? { group: f.group, rig: null, footW: f.footW, footL: f.footL, height: f.height } : null;
+      try { return build(ctx); } catch (e) { if (window.console) console.warn("[f35] build failed:", e); return null; }
     },
     animate: function (veh, dt, ctx) {
       const r = veh && veh.rig;

@@ -1,43 +1,24 @@
 #!/usr/bin/env node
-// tools/mil-air-check.mjs — plain-node check of the military airframes
-// (src/city/mil_air.js + island_military.js's CBZ.milModels) on the game's
-// own r128 build. No browser.
+// tools/mil-air-check.mjs — plain-node check of what city/mil_air.js still
+// is (the airframe KIT and the runtime calls the city makes on a flying
+// military airframe) and of the airframes Gang City flies: NPC War's units
+// (src/units/vehicles/*.js) as city/island_military.js builds them
+// (CBZ.milModels / unitBuild), plus strategic.js's B-2. No browser.
 //   · every kit primitive winds OUTWARD (positive signed volume), mirrored too
-//   · each airframe's bounding box matches its real reference class
-//   · wheels on y = 0, nose toward +Z, draw calls per airframe
-//   · the contracts other files read: rotor / tailRotor / gear / canopy /
-//     plume / muzzle / crewSeats / cabin.seats / launchLocal / cargoRamp
-//   · two placements share geometry (template + clone), plumes do not
+//   · each airframe: the record contract (footW = span, footL = length,
+//     colliderW/L the body, aircraftDims, rig, the battle-shaped hull record),
+//     measured size against its published dims, wheels on y = 0
+//   · milAirDrive runs the unit's own animate (a rotorcraft's rotors turn),
+//     milAirAim / milAirPoint / milAirFire on the Apache's chin gun and rails
+//   · a second placement shares geometry
 // Run: node tools/mil-air-check.mjs
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import vm from "node:vm";
+import { sandbox, census } from "./lib/units-sandbox.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const G = { console, Math, Date, JSON, Float32Array, Uint16Array, Uint32Array, Uint8Array, Int32Array, Array, Object, Map, Set, WeakMap };
-G.window = G; G.self = G;
-// a 2D context where every call is a no-op and every gradient takes stops
-// (the B-2's painted skin draws a whole planform through it)
-const ctx2d = new Proxy({}, { get: (t, k) => (k in t ? t[k] : (k === "createRadialGradient" || k === "createLinearGradient") ? () => ({ addColorStop() {} }) : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
-G.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d }) };
-vm.createContext(G);
-vm.runInContext(readFileSync(path.join(root, "src/vendor/three.r128.min.js"), "utf8"), G);
-const THREE = G.THREE;
-const mats = new Map();
-G.CBZ = {
-  CONFIG: {}, colliders: [], onUpdate() {},
-  cmat: (hex, o) => { const k = hex + JSON.stringify(o || {}); if (!mats.has(k)) mats.set(k, new THREE.MeshLambertMaterial({ color: hex })); return mats.get(k); },
-};
-G.CBZ.mat = G.CBZ.cmat;
-for (const f of ["src/world/carfx.js", "src/weapons/munitions.js", "src/city/mil_air.js", "src/city/island_military.js", "src/city/strategic.js"]) {
-  try { vm.runInContext(readFileSync(path.join(root, f), "utf8"), G, { filename: f }); }
-  catch (e) { if (!/strategic|munitions/.test(f)) throw e; if (/strategic/.test(f)) G.__strategicErr = String(e && e.stack || e).slice(0, 300); }
-}
-const CBZ = G.CBZ;
+const { CBZ, THREE, errors } = sandbox({ strategic: true });
 let fails = 0;
-const _b2err = [];
 const ok = (c, m) => { if (!c) { fails++; console.log("FAIL " + m); } else console.log("ok   " + m); };
+for (const f in errors) console.log("     (load) " + f + ": " + errors[f]);
+ok(!errors["src/city/mil_air.js"] && !errors["src/city/island_military.js"], "mil_air.js and island_military.js load");
 
 // ---- 1. winding ----------------------------------------------------------
 function vol(g) {
@@ -57,85 +38,60 @@ ok(vol(Kt.mir(wg)) > 0, "mirrored wing still winds outward");
 ok(vol(Kt.xf(wg.clone(), 0, 2, 0, 0, 0, Math.PI / 2 - 0.4)) > 0, "fin (rotated wing) winds outward");
 const st = Kt.missile(3.6, 0.09).reduce((s, g) => s + vol(g), 0);
 ok(st > 0, "missile store winds outward");
+ok(!CBZ.milAir.make && !CBZ.milAir.define, "no generic airframe templates left in mil_air.js (the units are the airframes)");
 
-// ---- 2. airframes --------------------------------------------------------
-const REF = {
-  fighter:     { L: [15.0, 16.4], W: [10.2, 11.2], H: [4.1, 4.8], name: "F-35-class 15.7 x 10.7 x 4.4" },
-  attackHeli:  { L: [15.6, 18.2], W: [14.0, 15.0], H: [4.4, 5.2], R: [7.1, 7.5], name: "AH-64-class rotor 14.6, 17.7 overall, 4.9 to tail-rotor tip" },
-  utilityHeli: { L: [18.0, 20.2], W: [15.4, 16.8], H: [4.8, 5.4], R: [8.0, 8.4], name: "UH-60-class rotor 16.4, 19.8 overall, 5.13 tall" },
-  drone:       { L: [10.5, 11.8], W: [19.6, 20.6], H: [2.8, 4.0], name: "MQ-9-class 11 x 20.1" },
-  bomber:      { L: [47.8, 49.2], W: [55.8, 57.0], H: [12.0, 12.8], name: "B-52H 48.5 x 56.4 x 12.4" },
-};
-const bb = (o) => { o.updateMatrixWorld(true); return new THREE.Box3().setFromObject(o); };
-function census(g) {
-  let meshes = 0, tris = 0; const geos = new Set();
-  g.traverse((o) => { if (o.isMesh || o.isSprite) { meshes++; if (o.geometry && o.geometry.index) { tris += o.geometry.index.count / 3; geos.add(o.geometry); } } });
-  return { meshes, tris: Math.round(tris), geos };
+// ---- 2. the airframes: the units, as the city builds them ----------------
+// the drawn size, visible meshes only (a stowed rope or a hidden crewman is not the airframe)
+function seen(g) {
+  g.updateMatrixWorld(true);
+  const b = new THREE.Box3();
+  g.traverseVisible((o) => {
+    if (!o.isMesh || o.isInstancedMesh || !o.geometry || !o.geometry.attributes.position) return;
+    o.geometry.computeBoundingBox();
+    b.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld));
+  });
+  return b;
 }
-for (const t of Object.keys(REF)) {
-  const r = CBZ.milAir.make(t), g = r.group, R = REF[t];
-  // measure without the invisible plume sprites/cones
-  const plumes = g.userData.plume || []; plumes.forEach((p) => g.remove(p));
-  const b = bb(g), s = b.getSize(new THREE.Vector3());
-  plumes.forEach((p) => g.add(p));
-  const c = census(g);
-  console.log(`---- ${t} (${R.name}): L ${s.z.toFixed(2)} W ${s.x.toFixed(2)} H ${s.y.toFixed(2)} · ${c.meshes} draws · ${c.tris} tris`);
-  ok(s.z >= R.L[0] && s.z <= R.L[1], `${t} length ${s.z.toFixed(2)} in ${R.L}`);
-  ok(s.x >= R.W[0] && s.x <= R.W[1], `${t} span ${s.x.toFixed(2)} in ${R.W}`);
-  ok(s.y >= R.H[0] && s.y <= R.H[1], `${t} height ${s.y.toFixed(2)} in ${R.H}`);
-  ok(Math.abs(b.min.y) < 0.03, `${t} stands on y=0 (min ${b.min.y.toFixed(3)})`);
-  ok(c.meshes <= 40, `${t} draw calls ${c.meshes} <= 40`);
-  ok(r.footW > 0 && r.footL > 0 && r.height > 0 && r.aircraftDims, `${t} record {footW, footL, height, aircraftDims}`);
-  ok(g.scale.x === 1, `${t} authored in metres (scale 1)`);
-  const mz = g.userData.muzzle;
-  if (t !== "drone") ok(mz && mz.isObject3D && mz.position.z > s.z * 0.3, `${t} muzzle on the nose (+Z)`);
-  const r2 = CBZ.milAir.make(t);
-  const c2 = census(r2.group);
-  let shared = 0; c2.geos.forEach((x) => { if (c.geos.has(x)) shared++; });
-  ok(shared >= c2.geos.size - 2, `${t} second placement shares ${shared}/${c2.geos.size} geometries`);
-  if (t === "fighter") {
-    ok(g.userData.plume && g.userData.plume.length === 1 && g.userData.plume[0] !== r2.group.userData.plume[0], "fighter: own afterburner plume per instance");
-    ok(g.userData.canopy && g.userData.canopy.isObject3D, "fighter: canopy node (aircraft_doors lifts it)");
-    ok(g.userData.gear && g.userData.gear.isObject3D, "fighter: gear node (hidden above 9 m AGL)");
-    ok(g._milRt.surf.length === 6, `fighter: 6 control-surface pivots (${g._milRt.surf.length})`);
-    ok(g.userData.cabin.seats[0].cockpit, "fighter: cockpit seat published");
-    // drive: a roll-right step deflects the ailerons opposite ways
-    g.rotation.z = 0; CBZ.milAirDrive(g, { thr: 1 }, 1 / 60); g.rotation.z = 0.05; CBZ.milAirDrive(g, { thr: 1 }, 1 / 60);
-    const ail = g._milRt.surf.filter((q) => q.role === "ail");
-    ok(ail.length === 2 && Math.abs(ail[0].node.rotation.x) > 0.01, `fighter: roll moves the flaperons (${ail[0].node.rotation.x.toFixed(3)})`);
-    ok(g._milRt.glow.color.r > 0.8, "fighter: nozzle glows at full throttle");
-  }
-  if (/Heli/.test(t)) {
-    ok(g.userData.rotor && g.userData.rotor.isObject3D, `${t}: userData.rotor`);
-    ok(g.userData.tailRotor && g.userData.tailRotor.isObject3D && g.userData.trotor === g.userData.tailRotor, `${t}: userData.tailRotor (+trotor)`);
-    ok(Array.isArray(g.userData.crewSeats) && g.userData.crewSeats[0].job === "Pilot", `${t}: crewSeats with a Pilot`);
-    let rad = 0; const rot = g.userData.rotor, P = new THREE.Vector3();
-    rot.traverse((o) => { if (!o.isMesh) return; const a = o.geometry.attributes.position; for (let i = 0; i < a.count; i++) { P.fromBufferAttribute(a, i); rad = Math.max(rad, Math.hypot(P.x, P.z)); } });
-    ok(rad >= R.R[0] && rad <= R.R[1], `${t}: rotor radius ${rad.toFixed(2)} in ${R.R}`);
-  }
-  if (t === "attackHeli") {
-    const p = CBZ.milAirPoint(g, "gun", 0);
-    ok(p && p.z > 5.5 && p.y < 1.1, `attackHeli: chin-gun muzzle under the nose (${p && p.toArray().map((v) => v.toFixed(2))})`);
-    ok(CBZ.milAirAim(g, 0, 0, 40), "attackHeli: chin turret slews");
-    ok(g.userData.launchLocal.length >= 4, "attackHeli: pod/rail launch points");
-  }
-}
-
-// ---- 3. the published base models --------------------------------------
+function pose(g) { const out = []; g.traverse((o) => out.push(o.quaternion.x, o.quaternion.y, o.quaternion.z, o.quaternion.w)); return out; }
 const MM = CBZ.milModels;
-for (const k of ["jet", "bomber", "cargo", "heli", "attackHeli", "drone"]) {
-  const r = MM[k] && MM[k]();
-  ok(r && r.group && r.footW > 0, `milModels.${k} returns a record`);
-  if (r) { const c = census(r.group); console.log(`     milModels.${k}: ${c.meshes} draws · ${c.tris} tris`); }
-}
-{
-  const r = MM.cargo(), g = r.group;
-  ok(g.userData.cargoRamp && g.userData.cargoRamp.isObject3D && r.ramp === g.userData.cargoRamp, "cargo: ramp node contract");
-  ok(g.userData.cabin && g.userData.cabin.seats.length === 2, "cargo: two flight-deck seats");
-  ok(g.userData.milAir && g.userData.milAir.props.length === 4, "cargo: four spinning propellers");
-  const b = bb(g), s = b.getSize(new THREE.Vector3());
-  console.log(`     cargo: L ${s.z.toFixed(2)} W ${s.x.toFixed(2)} H ${s.y.toFixed(2)}`);
-  ok(s.x > 40 && s.x < 44 && s.z > 40 && s.z < 46 && s.y > 13 && s.y < 15.5, "cargo: A400M-class 45 x 42.4 x 14.7 envelope");
+ok(MM && Object.keys(MM).length === 13 && typeof MM.load === "function" && Object.keys(MM).indexOf("load") < 0,
+  "CBZ.milModels: 13 model kinds, load() off the enumeration");
+const AIR = { jet: "f35", attackHeli: "ah64_apache", heli: "uh60_black_hawk", drone: "mq9_reaper", bomber: "b52", cargo: "a400m" };
+for (const k of Object.keys(AIR)) {
+  ok(MM.unitOf(k) === AIR[k], `milModels.${k} is the ${AIR[k]} unit`);
+  const r = MM[k](), g = r && r.group;
+  ok(!!g, `milModels.${k} builds`);
+  if (!g) continue;
+  const D = r.aircraftDims, b = seen(g), s = b.getSize(new THREE.Vector3()), c = census(THREE, g);
+  console.log(`---- ${k} = ${r.name} (${D ? D.family : "?"} ${D ? D.length + " x " + D.span : ""}): drawn L ${s.z.toFixed(2)} W ${s.x.toFixed(2)} H ${s.y.toFixed(2)} · ${c.meshes} draws · ${c.tris} tris`);
+  ok(D && r.footW === D.span && r.footL === D.length && r.height > 0, `${k}: boards by its span and length (${r.footW} x ${r.footL})`);
+  ok(r.colliderW > 0 && r.colliderL > 0 && r.colliderW <= r.footW, `${k}: its solid is the body (${r.colliderW} x ${r.colliderL})`);
+  ok(Math.abs(s.z - D.length) / D.length < 0.1 && Math.abs(s.x - D.span) / D.span < 0.12, `${k}: drawn size within 10% of ${D.length} x ${D.span}`);
+  ok(b.min.y > -0.3 && b.min.y < 0.3, `${k}: stands on y = 0 (min ${b.min.y.toFixed(2)})`);
+  ok(g.userData.unitId === AIR[k] && typeof g.userData.unitDrive === "function" && r.veh && r.veh.seats.length > 0 || AIR[k] === "mq9_reaper",
+    `${k}: userData.unitId + unitDrive + the battle-shaped hull record`);
+  ok(Array.isArray(g.userData.crewSeats), `${k}: crewSeats (the air response seats its crew in them)`);
+  // fly it a second: the unit's own animate, off what the flight is doing
+  const p0 = pose(g);
+  let drove = true;
+  for (let i = 0; i < 30; i++) { g.rotation.y += 0.004; drove = CBZ.milAirDrive(g, { thr: 1, agl: 140, speed: 60, vy: 0 }, 1 / 30) && drove; }
+  const p1 = pose(g);
+  let moved = 0; for (let i = 0; i < p0.length; i++) if (Math.abs(p0[i] - p1[i]) > 1e-4) moved++;
+  ok(drove && !r.veh._animErr, `${k}: milAirDrive runs the unit's animate (${moved} pose values moved)`);
+  if (g.userData.rotorcraft) ok(moved > 0, `${k}: the rotors turn in flight`);
+  const r2 = MM[k](), c2 = census(THREE, r2.group);
+  let shared = 0; c2.geos.forEach((x) => { if (c.geos.has(x)) shared++; });
+  ok(shared >= c2.geos.size * 0.5, `${k}: a second placement shares ${shared}/${c2.geos.size} geometries`);
+  if (k === "attackHeli") {
+    g.position.set(0, 0, 0); g.rotation.set(0, 0, 0); g.updateMatrixWorld(true);
+    const p = CBZ.milAirPoint(g, "gun", 0);
+    ok(p && p.z > 4 && p.y < 2.2, `attackHeli: chin-gun muzzle under the nose (${p && p.toArray().map((v) => v.toFixed(2))})`);
+    ok(CBZ.milAirAim(g, 0, 0, 40, 1 / 30), "attackHeli: chin turret slews (milAirAim)");
+    const rail = CBZ.milAirPoint(g, "rail", 0);
+    ok(rail && Math.abs(rail.x) > 1, `attackHeli: a Hellfire rail out on a stub wing (${rail && rail.toArray().map((v) => v.toFixed(2))})`);
+    const S = r.rig && r.rig.state, n0 = S ? S.hfShot : -1;
+    ok(CBZ.milAirFire(g, "rail", 0) && S && S.hfShot === n0 + 1, "attackHeli: milAirFire takes the round off its rail");
+  }
 }
 
 // ---- 3. THE B-2 (city/strategic.js CBZ.strategicModels.b2) ---------------
@@ -174,7 +130,7 @@ if (CBZ.strategicModels && CBZ.strategicModels.b2) {
   ok(!!(ud.doorRig && ud.b2Hatch && ud.b2Ladder), "b2 crew hatch + ladder contract");
   ok(ud.cockpitClass === "bomber" && ud.bombBay === true, "b2 bomber cockpit class + bomb bay flag");
 } else {
-  ok(false, "strategic.js publishes CBZ.strategicModels.b2" + (G.__strategicErr ? " — " + G.__strategicErr : ""));
+  ok(false, "strategic.js publishes CBZ.strategicModels.b2" + (errors["src/city/strategic.js"] ? " — " + errors["src/city/strategic.js"] : ""));
 }
 console.log(fails ? `\n${fails} FAIL` : "\nall ok");
 process.exit(fails ? 1 : 0);

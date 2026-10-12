@@ -1,9 +1,9 @@
 /* ============================================================
    units/vehicles/m1_abrams.js — M1A2 SEP v2 ABRAMS main battle tank (USA).
 
-   Drawn here from the real vehicle, not borrowed (wave A borrowed
-   city/mil_armor.js buildMBT; that builder is still the fallback when this one
-   cannot run, and its muzzle blast is reused).
+   Drawn here from the real vehicle, not borrowed (wave A borrowed the city's
+   generic tank; that builder is deleted, and this is the tank Gang City's
+   Fort Brandt parks too).
 
    THE REAL NUMBERS this is built to (metres; nose is local +Z, left is +X):
      hull 7.93 long (9.77 gun forward), 3.66 wide over the skirts, 2.44 to the
@@ -925,9 +925,20 @@
     }
     this.recoilT = 0; this.rockT = 0; this.rockYaw = this.turret.rotation.y;
     const T = this.T, p = this.muzzleWorld(new T.Vector3()), d = this.gunDirWorld(new T.Vector3());
-    if (CBZ.milArmor && CBZ.milArmor.blast) { try { CBZ.milArmor.blast(p, d, scale * 1.15); } catch (e) {} }
-    else if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash(p, { scale: 6 }); } catch (e) {} }
+    const k = scale * 1.15;
+    if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash(p, { scale: 5.5 * k, life: 0.10, color: 0xffe0a0 }); } catch (e) {} }
+    if (CBZ.cityCrashSmoke) { try { CBZ.cityCrashSmoke(p.x + d.x * 1.5 * k, p.y, p.z + d.z * 1.5 * k, { count: 4, scale: 0.75 * k }); } catch (e) {} }
     if (fxInit(T)) {
+      // the smoke RING blown down the line of fire (the look of a big gun):
+      // a circle of puffs round the bore, thrown out and forward
+      const ul = Math.hypot(d.x, d.z) || 1, ux = -d.z / ul, uz = d.x / ul;
+      const bx = d.y * uz, by = d.z * ux - d.x * uz, bz = -d.y * ux;
+      for (let i = 0; i < 14; i++) {
+        const a = i / 14 * TAU, ca = Math.cos(a), sa = Math.sin(a);
+        const rx = ux * ca + bx * sa, ry = by * sa, rz = uz * ca + bz * sa;
+        fxEmit(p.x + d.x * 0.6 + rx * 0.35, p.y + d.y * 0.6 + ry * 0.35, p.z + d.z * 0.6 + rz * 0.35,
+          d.x * 9 * k + rx * 3.2, d.y * 9 * k + ry * 3.2, d.z * 9 * k + rz * 3.2, 0.6, 2.4, 0.55, 1.3 + 0.25 * (i % 3), EXH);
+      }
       const gy = groundAt(p.x, p.z, this.root.position.y);
       // obturation blast: a ring of dust off the ground under and ahead of the muzzle
       for (let i = 0; i < 18; i++) {
@@ -1345,14 +1356,10 @@
       crush: true,              // men and beasts in the way are run down at speed
       buttonUp: "contact",      // commander's head goes in at the first shot or mark
     },
+    // a build that throws is a bug to see, not a second tank to hide it behind:
+    // the battle stands its honest box in, the city parks nothing
     build: function (ctx) {
-      let b = null;
-      try { b = build(ctx); } catch (e) { if (W.console) console.warn("[m1_abrams] build failed, using mil_armor:", e); b = null; }
-      if (b) return b;
-      const a = CBZ.milArmor;
-      if (!a || !a.tank) return null;
-      const t = a.tank();
-      return { group: t.group, rig: t.group.userData.rig || null, footW: t.footW, footL: t.footL, height: t.height };
+      try { return build(ctx); } catch (e) { if (W.console) console.warn("[m1_abrams] build failed:", e); return null; }
     },
   });
 })();

@@ -25,6 +25,13 @@
    tools/base-plan-check.mjs audits the plan: no overlaps, every
    aircraft on pavement, nothing on the runway.
 
+   THE MACHINES are NPC War's units (src/units/vehicles/*.js), the
+   republic's: M1A2 Abrams, M2A3 Bradley, Stryker, Humvee / JLTV /
+   MaxxPro, FMTV and M35 trucks, M142 HIMARS, Patriot, F-35A, AH-64,
+   UH-60M, MQ-9 (in the hangar, scenery), B-52H, A400M (its hold is a
+   room). They load and park when the player comes within 900 m of the
+   wire (FLEET below); CBZ.milModels publishes the same units to any page.
+
    ENGINE CONTRACT: registers as an archipelago landmass (see
    worldmap.js). Every parked machine is a solid collider so it
    reads as real and blocks movement. Repeats (fence posts, parade
@@ -78,7 +85,6 @@
   let rng = null;
   function armRng() { rng = CBZ.seedStream ? CBZ.seedStream("military") : (function () { let s = 0x5eed ^ 0x4d494c54; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; })(); }
   armRng();
-  function rr(a, b) { return a + rng() * (b - a); }
 
   // ---- shared material palette (one material per colour, reused) ----------
   // cmat() is the engine's CACHED-material factory: identical colour → same
@@ -106,7 +112,7 @@
   }
   // a vertical-span world collider (engine AABB). wx/wz are WORLD coords.
   // Returns the collider object so callers can keep a handle to it (a stolen
-  // vehicle must take its parked collider WITH it — see placeModel).
+  // vehicle must take its parked collider WITH it — see placeUnit).
   function col(wx, wz, w, d, y0, y1, ref) {
     const c = { minX: wx - w / 2, maxX: wx + w / 2, minZ: wz - d / 2, maxZ: wz + d / 2, y0: y0 || 0, y1: y1 == null ? 0 : y1, ref: ref || null };
     CBZ.colliders.push(c);
@@ -119,378 +125,256 @@
     return m;
   }
 
-  // ---- vehicle-detail helpers (the "look at all vehicles" pass) ------------
-  // NEW MATERIAL API (world/carfx.js loads before the islands): military hulls
-  // stay deliberately MATTE Lambert (army paint doesn't gleam) — vehicleMat is
-  // only for the accents that SHOULD catch light: canopy glass, gun steel,
-  // rubber. All three roles are shared carfx singletons → zero extra material
-  // cost per vehicle. Falls back to flat Lambert when carfx is absent.
-  // The second argument is the COLOUR — it was only ever used as the no-carfx
-  // fallback and was never handed to the factory, so M.canopy (0x2a3b4d) and
-  // M.glassDark (0x223044) never reached a single pane: every canopy on the
-  // base wore whatever tint the first vehicle in the world happened to pick.
-  // Forwarding it is the whole fix; every other vmat wrapper in the game
-  // (aircraft.js, playeraircraft.js, airtraffic.js, vehicles.js…) already did.
-  function vmat(role, hex, opts) {
-    if (CBZ.vehicleMat) {
-      try { const m = CBZ.vehicleMat(role, hex, opts); if (m && m.isMaterial) return m; } catch (e) {}
-    }
-    return cm(hex != null ? hex : M.dark);
-  }
-  // box/cylinder with an EXPLICIT material (glass, gun steel, rubber)
-  function mbox(parent, x, y, z, w, h, d, material) {
-    const m = new THREE.Mesh(bg(w, h, d), material);
-    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m);
-    return m;
-  }
-  function mcyl(parent, x, y, z, rt, rb, h, material, seg) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg || 12), material);
-    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m);
-    return m;
-  }
-  // small static emissive marker (wingtip nav lights) — cached per colour.
-  function navBox(parent, x, y, z, s, hex) {
-    return box(parent, x, y, z, s, s, s, hex, { matOpts: { emissive: hex, ei: 0.9 }, cast: false });
-  }
-
-  // The rocket exhaust (CBZ.createRocketPlume / setRocketPlume) lives in
-  // weapons/munitions.js with every other munition flare and trail.
-  // SHAPE HELPERS (r128 idiom — sculpt the position attribute, recompute
-  // normals; same pattern as aircraft.js taperBox/bladeGeo). Fully constant
-  // per inputs → deterministic worlds.
-  // taperBox: scales each vertex's X/Y by a factor of its Z (nose=+Z → nz,
-  // tail=-Z → tz) with optional roofline (top) / keel (bot) narrowing.
-  // taperBox lives ONCE in world/carfx.js now (was copied into 6 builders).
-  function taperBox(w, h, d, opt) { return CBZ.taperBox(w, h, d, opt); }
-  // sculpted taperBox mesh (fuselage fairings, canopies, hulls)
-  function tbox(parent, x, y, z, w, h, d, opt, material) {
-    const m = new THREE.Mesh(taperBox(w, h, d, opt), material);
-    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m);
-    return m;
-  }
-  // WING slab rooted at the fuselage flank, reaching outboard along ±X
-  // (side −1/+1): as a vertex goes outboard (t 0→1) the chord narrows (taper),
-  // shifts rearward (sweep), the slab thins (thin) and optionally droops
-  // (rotor blades). Root edge sits AT the mesh position → bury it in the hull.
-  function wingGeo(side, span, chord, thick, sweep, taper, thin, droop) {
-    const geo = new THREE.BoxGeometry(span, thick, chord, 6, 1, 2);
-    const pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), t = (x + span / 2) / span;    // 0 root → 1 tip
-      pos.setX(i, side * (x + span / 2));                  // root edge at x=0
-      pos.setZ(i, pos.getZ(i) * (1 - (taper || 0) * t) - (sweep || 0) * t);
-      pos.setY(i, pos.getY(i) * (1 - (thin || 0) * t) - (droop || 0) * t * t);
-    }
-    pos.needsUpdate = true; geo.computeVertexNormals();
-    return geo;
-  }
-  function wing(parent, x, y, z, side, span, chord, thick, sweep, taper, thin, hexOrMat, droop) {
-    const mat = (hexOrMat && hexOrMat.isMaterial) ? hexOrMat : cm(hexOrMat);
-    const m = new THREE.Mesh(wingGeo(side, span, chord, thick, sweep, taper, thin, droop), mat);
-    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m);
-    return m;
-  }
-
   // ========================================================================
-  //   THE AIRCRAFT. Every airframe is a lofted surface from city/mil_air.js
-  //   (real metres, nose +Z, wheels on y = 0, built once and cloned per
-  //   placement). What stays here is the one airframe with a ROOM in it.
-  // ========================================================================
-  function makeJet() { return CBZ.milAir.make("fighter"); }
-  function makeBomber() { return CBZ.milAir.make("bomber"); }
-  function makeHeli() { return CBZ.milAir.make("utilityHeli"); }
-  function makeAttackHeli() { return CBZ.milAir.make("attackHeli"); }
-  function makeDrone() { return CBZ.milAir.make("drone"); }
-
-  // ========================================================================
-  //  CARGO LIFTER — A400M-class, built from the INSIDE OUT.
+  //   THE MACHINES ARE NPC WAR'S UNITS.
   //
-  //  OWNER: "a cargo plane where you can open and close the back and even a
-  //  tank can drive into the back — but like elevators it must actually have a
-  //  back of plane that exists, so other players can be inside the plane like a
-  //  room." The hold is authored first as a 4.4 x 19 x 3.0 m room sized off
-  //  the tank (3.5 wide, 6.4 long, 2.7 tall) and the aeroplane is wrapped
-  //  around it: a 5.6 m lofted fuselage (the real A400M's), a high wing so no
-  //  spar crosses the room, gear in sponsons so the deck stays flat at 1.35 m,
-  //  an aft body that is an OPEN-BOTTOMED shell so the ramp has somewhere to
-  //  stow, four turboprops with eight-blade props, and a T-tail.
+  //   Every tank, truck, launcher and airframe on this base is the unit file
+  //   NPC War fights with (src/units/vehicles/<id>.js): the same M1A2 with the
+  //   same tracks, crew seats, armour and gun, in the battle, on these stands,
+  //   and under the player who steals it. There is no second model of any of
+  //   them here. What this file used to build (city/mil_armor.js's seven
+  //   generic hulls, city/mil_air.js's five generic airframes and its own
+  //   cargo lifter) is deleted.
   //
-  //  The ramp is its own group (userData.cargoRamp) hinged at the deck sill, so
-  //  city/vehicle_hold.js poses it by rotating ONE node and solves the walkable
-  //  slope from its live angle.
+  //   NOTHING LOADS WITH THE CITY. The unit files are not on the page at
+  //   boot: they load through CBZ.army.loadUnits (city/army.js) the first
+  //   time the player comes within FLEET_NEAR of the wire (or something asks
+  //   for a machine: the air response, the pilot origin, the war room), and
+  //   the hulls are built one per frame after that. A city nobody drives to
+  //   Fort Brandt in never pays for an Abrams.
   // ========================================================================
-  const CARGO = {
-    deckY: 1.35,          // cargo floor top, model+world metres
-    roofY: 4.35,          // hold ceiling
-    halfW: 2.2,           // hold interior half-width (tank is 3.5 wide)
-    holdZ0: -11.5,        // aft sill (the aperture)
-    holdZ1: 7.5,          // forward bulkhead
-    rampLen: 3.7,
-    rampW: 3.9,
-    rampOpenRx: -0.3648,  // toe on the tarmac: asin((1.35-0.03)/3.7) = 20.9°
-    rampClosedRx: 1.24,   // stood up across the aperture (71°); toe ends 1.2 m aft, 3.5 m up, inside the aft shell
+  // what stands on each kind of stand. A kind with several takes them in
+  // turn down the row (the motor pool's light rank is JLTV, MaxxPro, ...;
+  // the HQ lot keeps the Humvee, which is what fits a 6 m stall).
+  const UNITS = {
+    tank: ["m1_abrams"], ifv: ["bradley_ifv"], apc: ["stryker_apc"],
+    luv: ["hmmwv"], luvPool: ["jltv", "maxxpro_mrap"],
+    truck: ["fmtv", "m35_truck"], mlrs: ["m270_mlrs"], patriot: ["patriot_launcher"],
+    fighter: ["f35"], attackHeli: ["ah64_apache"], heli: ["uh60_black_hawk"], drone: ["mq9_reaper"],
+    bomber: ["b52"], cargo: ["a400m"],
   };
-  if (CBZ.milAir) CBZ.milAir.define("cargo", function () {
-    const K$ = CBZ.milAir.kit, B = new K$.Build("cargo");
-    const loft = K$.loft, wingG = K$.wing, xf = K$.xf, mir = K$.mir, bx = K$.box;
-    const HULL = cm(0x6d7681), SHADE = cm(0x4d545c), PANEL = cm(M.jetGrey);
-    const GLASS = vmat("glass", M.canopy), RUBBER = vmat("tire", M.tire), GUN = vmat("plastic", M.dark);
-    // A HOLD IS A LIT ROOM: painted as lit, the ceiling carries its own
-    // emissive (a downward face never sees the sun).
-    const BAY = cm(0x9aa1a9), DECKM = cm(0x666c74), CEIL = cm(0xb4bbc2, { emissive: 0x39434b, ei: 0.85 });
-    const STRIP = cm(0xeef3f6, { emissive: 0xcfe2ec, ei: 0.9 }), WEB = cm(0x8a3f34);
-    const DECKI = vmat("interior", 0x0d0e10), GLOW = cm(0x0c1a1c, { emissive: 0x2f6f6a, ei: 0.5 });
-    const WARN = cm(M.warn), STEELD = cm(M.steelD), BLADE = cm(0x23272c);
-    const Z0 = CARGO.holdZ0, Z1 = CARGO.holdZ1, DY = CARGO.deckY, RY = CARGO.roofY, HW = CARGO.halfW;
-    const holdMidZ = (Z0 + Z1) / 2, holdLen = Z1 - Z0;
-    const K = B.main;
-    const S = function (z, y, w, t, b, p, pb, open) { const s = { z: z, y: y, w: w, t: t, b: b, p: p || 2, pb: pb || p || 2 }; if (open != null) s.open = open; return s; };
-
-    // ===================== FUSELAGE — nose to aperture ======================
-    // 5.6 m wide, 0.95-6.2 m tall; the squared bottom (pb 4.5) is what keeps
-    // the deck corners inside the skin. Windscreen and flight-deck side
-    // windows are the hull's own quads re-emitted as glass.
-    const FUS = [
-      S(19.6, 3.35, 0.25, 0.25, 0.25, 2),
-      S(19.0, 3.40, 1.20, 1.15, 1.10, 2.2),
-      S(17.8, 3.50, 2.05, 1.95, 1.75, 2.4, 3.0),
-      S(16.2, 3.55, 2.60, 2.50, 2.10, 2.7, 3.6),
-      S(14.2, 3.55, 2.80, 2.65, 2.30, 3.0, 4.2),
-      S(11.0, 3.45, 2.80, 2.75, 2.50, 3.0, 4.5),
-      S(Z1, 3.45, 2.80, 2.75, 2.50, 3.0, 4.5),
-      S(Z0, 3.45, 2.80, 2.75, 2.50, 3.0, 4.5),
-    ];
-    const fus = loft(FUS, {
-      n: 32, capBack: false, split: function (z, th) {
-        const s = Math.sin(th);
-        if (z > 15.4 && z < 18.2) return s > 0.5;
-        if (z > 13.0 && z < 15.2) return s > 0.42 && s < 0.78;
-        return false;
-      },
-    });
-    K.add(fus[0], HULL); if (fus[1]) K.add(fus[1], GLASS);
-    // flight-deck liner so the glass looks into a room, not out the far side
-    K.add(loft(FUS.slice(1, 6).map(function (s) { return S(s.z, s.y, s.w - 0.1, s.t - 0.1, s.b - 0.1, s.p, s.pb); }), { n: 32, caps: false, flipped: true }), DECKI);
-    // ===================== AFT BODY — the open-bottomed ramp tunnel ==========
-    const AFT = [
-      S(Z0, 3.45, 2.80, 2.75, 2.50, 3.0, 4.5, 0.9),
-      S(-14.0, 4.00, 2.62, 2.20, 2.10, 3.0, 3.6, 0.9),
-      S(-17.0, 4.70, 2.10, 1.55, 1.45, 2.8, 3.0, 0.9),
-      S(-19.5, 5.20, 1.40, 0.95, 0.80, 2.5, 2.5, 0.55),
-      S(-22.0, 5.60, 0.70, 0.55, 0.45, 2.2, 2.2, 0.2),
-      S(-23.3, 5.80, 0.12, 0.12, 0.10, 2, 2, 0.2),
-    ];
-    K.add(loft(AFT, { n: 32 }), HULL);
-    K.add(loft(AFT.slice(0, 4).map(function (s) { return S(s.z, s.y, s.w - 0.12, s.t - 0.12, s.b - 0.12, s.p, s.pb, s.open); }), { n: 32, flipped: true }), BAY);
-    // the cut face at the aperture: hull ring down to the hold's doorway
-    K.add(K$.annulus(FUS[FUS.length - 1], S(Z0, (DY + RY) / 2, HW + 0.02, (RY - DY) / 2 + 0.02, (RY - DY) / 2 + 0.25, 8), 32, [0, 0, -1]), SHADE);
-    // ===================== THE HOLD ITSELF ==================================
-    K.add(xf(bx(HW * 2, 0.12, holdLen), 0, DY - 0.06, holdMidZ), DECKM);
-    K.add(xf(bx(0.30, 0.02, holdLen - 0.4), 0, DY + 0.012, holdMidZ), WARN);
-    [-1.55, -0.55, 0.55, 1.55].forEach(function (rx) { K.add(xf(bx(0.16, 0.07, holdLen - 0.6), rx, DY + 0.035, holdMidZ), STEELD); });
-    for (let i = 0; i < 10; i++) {
-      const tz = Z0 + 1.2 + i * ((holdLen - 2.4) / 9);
-      [-1.9, 1.9].forEach(function (tx) { K.add(xf(bx(0.20, 0.10, 0.20), tx, DY + 0.05, tz), GUN); });
-    }
-    [-1, 1].forEach(function (s) {
-      K.add(xf(bx(0.06, RY - DY, holdLen), s * (HW - 0.03), (DY + RY) / 2, holdMidZ), BAY);             // wall liner
-      for (let i = 0; i < 11; i++) {
-        const rz = Z0 + 0.9 + i * ((holdLen - 1.8) / 10);
-        K.add(xf(bx(0.10, RY - DY - 0.4, 0.16), s * (HW - 0.09), (DY + RY) / 2 + 0.1, rz), SHADE);     // frames
-      }
-      K.add(xf(bx(0.56, 0.09, holdLen - 4.5), s * (HW - 0.32), DY + 0.50, holdMidZ + 0.5), WEB);         // troop bench
-      K.add(xf(bx(0.07, 0.75, holdLen - 4.5), s * (HW - 0.07), DY + 0.92, holdMidZ + 0.5), WEB);
-      K.add(xf(bx(0.30, 0.08, holdLen - 1.6), s * 1.02, RY - 0.09, holdMidZ), STRIP);                   // light strip
-      K.add(xf(bx(0.10, 0.20, holdLen - 1.6), s * (HW - 0.04), RY - 0.30, holdMidZ), cm(0x3b4148));      // duct run
-    });
-    K.add(xf(bx(HW * 2 - 0.1, 0.06, holdLen), 0, RY - 0.03, holdMidZ), CEIL);
-    K.add(xf(bx(HW * 2, RY - DY, 0.36), 0, (DY + RY) / 2, Z1 + 0.18), cm(0x767d85));                    // fwd bulkhead
-    K.add(xf(bx(0.90, 2.0, 0.10), -1.25, DY + 1.0, Z1 - 0.02), cm(0x2b3037));                             // doorway to the flight deck
-    K.add(xf(bx(1.5, 1.1, 0.10), 0.85, DY + 1.4, Z1 - 0.02), cm(0x565d66));                               // stowed pallet
-    K.add(xf(bx(0.14, 0.60, 0.45), -(HW - 0.14), DY + 1.5, Z0 + 1.6), cm(0x2f353c));                     // loadmaster panel
-    K.add(xf(bx(0.04, 0.34, 0.30), -(HW - 0.20), DY + 1.5, Z0 + 1.6), cm(0x14343a, { emissive: 0x2f8f8a, ei: 0.55 }));
-    K.add(xf(bx(HW * 2 + 0.6, DY - 0.95, 0.2), 0, (DY + 0.95) / 2, Z0 + 0.1), SHADE);                     // under-deck bulkhead
-    // ===================== FLIGHT DECK ======================================
-    // Two real chairs: city/cockpit.js derives the pilot's eye from them
-    // (0.72 m over the cushion → 5.62, inside the windscreen band).
-    const SEATY = 4.90;
-    K.add(xf(bx(2.6, 0.5, 4.4), 0, 4.30, 13.3), DECKI);                                                    // deck sole
-    K.add(xf(bx(2.8, 1.8, 0.2), 0, 5.45, 11.1), DECKI);                                                    // rear bulkhead
-    K.add(xf(bx(1.70, 0.40, 0.09), 0, 5.17, 15.05, -0.28), GLOW);                                         // main panel
-    K.add(xf(bx(1.66, 0.10, 0.32), 0, 5.43, 14.85), DECKI);                                                // glareshield
-    K.add(xf(bx(0.34, 0.52, 0.72), 0, 4.93, 14.2), DECKI);                                                 // pedestal
-    [-1, 1].forEach(function (s) {
-      K.add(xf(bx(0.52, 0.12, 0.54), s * 0.46, SEATY - 0.06, 13.55), DECKI);
-      K.add(xf(bx(0.52, 0.86, 0.11), s * 0.46, SEATY + 0.38, 13.24, -0.12), DECKI);
-    });
-    B.ud.cabin = { seats: [
-      { id: "seat-captain", role: "pilot", cockpit: true, x: 0.46, y: SEATY, z: 13.55 },
-      { id: "seat-firstofficer", role: "copilot", cockpit: true, x: -0.46, y: SEATY, z: 13.55 },
-    ] };
-    // crew door, port (+X) side forward
-    K.add(xf(bx(0.08, 2.0, 0.95), 2.74, 2.4, 9.6), SHADE);
-    // ===================== HIGH WING + FAIRING ==============================
-    const WK = [{ x: 0, le: 3.6, te: -2.4, tc: 0.15, y: 6.25 }, { x: 2.9, le: 3.4, te: -2.35, tc: 0.15, y: 6.28 }, { x: 21.2, le: -1.4, te: -3.9, tc: 0.11, y: 6.85 }];
-    const W = wingG([K$.planAt(WK, 0), K$.planAt(WK, 2.9), K$.planAt(WK, 21.2)], { K: 7 });
-    K.add([W, mir(W)], HULL);
-    K.add(loft([S(5.8, 6.0, 0.3, 0.2, 0.2), S(4.6, 6.05, 1.8, 0.55, 0.3, 2.6), S(-3.2, 6.05, 1.8, 0.5, 0.3, 2.6), S(-5.0, 6.0, 0.4, 0.2, 0.2)], { n: 20 }), SHADE);
-    // ===================== FOUR TURBOPROPS ==================================
-    const ENG = [[6.6, 5.95, 7.4, -2.2], [12.2, 6.2, 5.9, -2.9]];
-    let pi = 0;
-    ENG.forEach(function (e) {
-      const x = e[0], y = e[1], zf = e[2], za = e[3];
-      const nac = loft([S(zf, y, 0.55, 0.55, 0.62, 2, 2), S(zf - 1.0, y, 0.68, 0.7, 0.95, 2.2, 2.6), S(zf - 4.2, y + 0.05, 0.66, 0.72, 0.9, 2.2, 2.6), S(za + 1.2, y + 0.2, 0.46, 0.45, 0.55, 2.2, 2.2), S(za, y + 0.3, 0.12, 0.12, 0.12)].map(function (s) { s.x = x; return s; }), { n: 18 });
-      K.add([nac, mir(nac)], PANEL);
-      const inl = xf(new THREE.CircleGeometry(0.28, 10), x, y - 0.6, zf - 0.5);
-      K.add([inl, mir(inl)], GUN);
-      [1, -1].forEach(function (s) {
-        const prop = B.node("prop" + pi, s * x, y, zf + 0.25); B.ud.milAir.props.push("prop" + pi); pi++;
-        const PK = B.kit(prop);
-        PK.add(loft([K$.rnd(zf + 1.35, 0.03, y, s * x), K$.rnd(zf + 0.9, 0.36, y, s * x), K$.rnd(zf + 0.1, 0.55, y, s * x)], { n: 14 }), SHADE);  // spinner
-        for (let b = 0; b < 8; b++) {
-          const bl = xf(wingG([{ x: 0.45, le: 0.2, c: 0.42, tc: 0.12 }, { x: 1.8, le: 0.16, c: 0.4, tc: 0.08 }, { x: 2.65, le: -0.18, c: 0.2, tc: 0.07 }], { K: 3 }), 0, 0, 0, 1.2);
-          PK.add(xf(bl, s * x, y, zf + 0.25, 0, 0, b * Math.PI / 4 + (s > 0 ? 0 : Math.PI / 8)), BLADE);
-        }
-      });
-    });
-    // ===================== T-TAIL ===========================================
-    K.add(xf(wingG([{ x: 0, le: -15.2, c: 7.0, tc: 0.12 }, { x: 7.45, le: -19.6, c: 3.4, tc: 0.10 }], { K: 6 }), 0, 5.9, 0, 0, 0, Math.PI / 2), PANEL);
-    const TP = wingG([{ x: 0.2, le: -19.4, c: 3.7, tc: 0.10, y: 13.35 }, { x: 9.75, le: -21.4, c: 1.8, tc: 0.09, y: 13.5 }], { K: 5 });
-    K.add([TP, mir(TP)], PANEL);
-    K.add(loft([S(-18.6, 13.35, 0.05, 0.05, 0.05), S(-19.3, 13.36, 0.42, 0.4, 0.34), S(-22.6, 13.36, 0.42, 0.4, 0.34), S(-23.9, 13.36, 0.06, 0.06, 0.06)], { n: 14 }), SHADE);
-    // ===================== GEAR — sponsons + nose leg =======================
-    [-1, 1].forEach(function (s) {
-      K.add(loft([S(5.4, 1.55, 0.12, 0.12, 0.12), S(4.4, 1.6, 0.8, 1.0, 0.8, 2.6, 3.2), S(-1.8, 1.6, 0.8, 1.0, 0.8, 2.6, 3.2), S(-3.0, 1.6, 0.12, 0.12, 0.12)].map(function (q) { q.x = s * 2.95; return q; }), { n: 16 }), HULL);
-      [-0.9, 1.2, 3.3].forEach(function (wz) {
-        [3.42, 2.68].forEach(function (wx) {
-          const w = K$.wheel(0.70, 0.36);
-          K.add(xf(w.tire, s * wx, 0.70, wz), RUBBER).add(xf(w.hub, s * wx, 0.70, wz), STEELD);
-        });
-      });
-    });
-    K.add(K$.rod([0, 1.4, 13.2], [0, 0.55, 13.25], 0.12), STEELD).add(K$.rod([0, 1.35, 12.2], [0, 0.7, 13.2], 0.07), STEELD);
-    [-1, 1].forEach(function (s) { const w = K$.wheel(0.55, 0.3); K.add(xf(w.tire, s * 0.3, 0.55, 13.25), RUBBER).add(xf(w.hub, s * 0.3, 0.55, 13.25), STEELD); });
-    // ===================== THE RAMP =========================================
-    // Hinged at the deck sill; built lying flat aft (rotation.x 0 =
-    // horizontal) and stowed upright by the hold on declaration.
-    const ramp = B.node("cargoRamp", 0, DY, Z0); B.refs.cargoRamp = "cargoRamp";
-    const RK = B.kit(ramp);
-    const RL = CARGO.rampLen, RW = CARGO.rampW;
-    RK.add(xf(bx(RW, 0.20, RL), 0, DY - 0.10, Z0 - RL / 2), DECKM);
-    RK.add(xf(bx(0.30, 0.02, RL - 0.3), 0, DY + 0.02, Z0 - RL / 2), WARN);
-    [-1, 1].forEach(function (s) {
-      RK.add(xf(bx(0.16, 0.10, RL - 0.2), s * (RW / 2 - 0.14), DY + 0.06, Z0 - RL / 2), STEELD);
-      RK.add(xf(bx(0.08, 0.36, RL - 0.6), s * (RW / 2 + 0.03), DY + 0.14, Z0 - RL / 2), SHADE);
-      for (let i = 0; i < 4; i++) RK.add(xf(bx(0.14, 0.20, 0.80), s * 0.85, DY - 0.24, Z0 - 0.6 - i * 0.90), SHADE);
-    });
-    for (let i = 0; i < 6; i++) RK.add(xf(bx(RW - 0.5, 0.02, 0.20), 0, DY + 0.015, Z0 - 0.42 - i * 0.60), cm(0x3f454c));
-    RK.add(xf(bx(RW - 0.2, 0.10, 0.30), 0, DY - 0.13, Z0 - RL - 0.12), STEELD);
-    K$.navLights(B, [[21.2, 6.85, -2.2, 0xff4a3d], [-21.2, 6.85, -2.2, 0x37d67a], [0, 5.85, -23.35, 0xf2f4ff], [0, 6.15, 15.4, 0xf2f4ff]]);
-    B.finish({ family: "A400M-class", length: 43.5, span: 42.4, height: 13.9 });
-    // the ramp is posed per placement, so it is stowed on the template
-    ramp.rotation.x = CARGO.rampClosedRx;
-    return B;
-  });
-  function makeCargoPlane() {
-    const r = CBZ.milAir.make("cargo");
-    r.ramp = r.group.userData.cargoRamp;
-    return r;
+  function unitForStand(s, n) {
+    const list = s.kind === "luv" && s.rank ? UNITS.luvPool : UNITS[s.kind];
+    return list ? list[n % list.length] : null;
   }
+  // militaryvehicles.js's taxonomy: how it boards (air = the flight path),
+  // what the verb says, which fire control the seat gets
+  const TAKE = { m1_abrams: "tank", patriot_launcher: "patriot", m270_mlrs: "mlrs" };
+  function takeKind(id, def) {
+    if (TAKE[id]) return TAKE[id];
+    if (def.domain === "air") return def.drive === "rotor" ? "heli" : "plane";
+    return "ground";
+  }
+  const NATION = "republic";            // Fort Brandt is the republic's (city/flags.js)
 
-  // ---- PLACE ONE, AND DECLARE ITS HOLD ------------------------------------
-  // Deliberately NOT placeModel(): that pushes one full-footprint world AABB,
-  // and a solid rectangle over the whole aeroplane is precisely the wall that
-  // stops a tank driving up the ramp. This airframe's solidity comes from the
-  // HOLD RIG instead (LOCAL walls on systems/platforms_moving.js), which is the
-  // strictly better answer anyway — a static AABB is a lie the moment the
-  // aeroplane turns, and this one is meant to fly with people inside it.
-  // (The one case that DOES get a world AABB is the flag-off path at the
-  // bottom of this function, where there is no rig to be solid with.)
-  function placeCargoPlane(root, wx, wz, rotY, name) {
-    const made = makeCargoPlane();
-    made.group.position.set(wx, 0, wz);
-    made.group.rotation.y = rotY || 0;
-    made.group.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    root.add(made.group);
-    made.group.userData.milKind = "plane";
-    made.group.userData.milName = name || "Cargo Lifter";
-    made.group.userData.dynamic = true;
-    made.group.userData.aircraftDims = made.aircraftDims;
-    const rec = {
-      group: made.group, pos: made.group.position, heading: rotY || 0,
-      kind: "plane", model: { name: name || "Cargo Lifter" },
-      collider: null,                       // see the note above — the rig owns it
-      modelYawOffset: 0, groundOffset: 0,
-      aircraftDims: made.aircraftDims,
-      footW: made.footW, footL: made.footL, taken: false, hot: true,
-      cargoLifter: true,
-      // it flies like the heavy it is, and it carries no missiles — a freighter
-      // with air-to-air rails would be the "military = fighter" assumption the
-      // whole airframe exists to break (playeraircraft.js honours both fields)
-      airClass: "airliner", armed: false,
+  // ---- ONE UNIT, BUILT FOR THE CITY -------------------------------------
+  // The battle's makeVehicle (src/battle/vehicles.js) in miniature: build(ctx)
+  // with the side's identity, rig.mark for the ground and the flag, and a
+  // hull record (`unitVeh`) shaped like the battle's so the unit's own
+  // animate(veh, dt, ctx) runs here unchanged: wheels on the real ground,
+  // rotors, gear, the crew who are aboard.
+  function lcgOf(seed) {
+    let s = ((seed | 0) * 2654435761 + 0x5eed) >>> 0 || 1;
+    return function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+  }
+  function groundAt(x, z) {
+    if (!CBZ.floorAt) return 0;
+    try { const y = +CBZ.floorAt(x, z); return isFinite(y) ? y : 0; } catch (e) { return 0; }
+  }
+  function unitVeh(id, def, g, rig, sc) {
+    const S = def.stats || {}, hp = S.hp || 300, D = CBZ.vehicleDrive;
+    const veh = {
+      id: "brandt:" + id, unitId: id, def: def, rig: rig, group: g, pos: g.position, team: sc.side, side: sc,
+      vehicle: true, air: def.domain === "air",
+      h: g.rotation.y, yaw: g.rotation.y, heading: g.rotation.y, speed: 0,
+      hp: hp, maxHp: hp, vs: { hp: hp, maxHp: hp, mobility: false, firepower: false, burning: false, wreck: false },
+      ds: { v: 0, w: 0, steer: 0, throttle: 0, y: 0, vy: 0, gamma: 0, pitch: 0, roll: 0, trackL: 0, trackR: 0 },
+      tur: { yaw: 0, elev: 0 },
+      // the crew seat book; nobody aboard a parked machine
+      seats: D && D.seats ? D.seats(def) : [],
+      // the weapons as the battle keeps them, so the rig hooks get its shot shape
+      wpn: (def.weapons || []).map(function (w, k) {
+        const mount = w.mount || (w.turret ? "turret" : (w.chin || w.slew) ? "slew" : "free");
+        return { w: w, i: k, n: 0, mount: mount, cool: 0, ammo: w.ammo == null ? 1e9 : w.ammo, burst: 0, salvo: 0, reloadT: 0, off: false,
+          shot: { wid: w.id, wi: k, n: 0, w: w, kind: w.kind, mount: mount, target: null } };
+      }),
+      shots: [], target: new THREE.Vector3(), tgt: null, sees: false,
+      dead: false, fled: false, egress: false, dismounted: false, burnT: 0, slot: "hold", airPhase: "",
+      you: false, tactics: def.tactics || null,
     };
-    placed.push(rec);
+    veh.actx = { t: 0, dt: 0, dead: false, wreck: false, burning: false, air: veh.air, agl: 0, speed: 0, vy: 0,
+      yawRate: 0, steer: 0, throttle: 0, gamma: 0, turret: veh.tur, target: null, phase: "", firing: null,
+      side: sc.side, nation: sc.nation, groundAt: groundAt,
+      shared: function (dt) { sharedAnim(veh, dt); } };
+    return veh;
+  }
+  function sharedAnim(veh, dt) {
+    if (veh.dead || !veh.rig || !veh.rig.update) return;
+    try { veh.rig.update(dt, veh.ds.v, veh.ds.w, veh.ds.steer || 0); } catch (e) {}
+  }
+  /* THE UNIT'S LOOK, one step (the battle's vehAnimate). `agl` is the flight's
+     own height when somebody flies it, else measured. */
+  function animateUnit(veh, dt, agl) {
+    if (!veh || !(dt > 0)) return;
+    const c = veh.actx;
+    c.t += dt; c.dt = dt;
+    c.dead = !!veh.dead; c.wreck = !!veh.vs.wreck; c.burning = !!(veh.vs.burning || veh.burnT > 0);
+    c.agl = agl != null ? agl : veh.pos.y - groundAt(veh.pos.x, veh.pos.z);
+    c.speed = veh.ds.v; c.vy = veh.ds.vy || 0; c.yawRate = veh.ds.w || 0;
+    c.steer = veh.ds.steer || 0; c.throttle = veh.ds.throttle || 0; c.gamma = veh.ds.gamma || 0;
+    c.target = veh.tgt && !veh.tgt.dead ? veh.tgt : null; c.phase = veh.airPhase || "";
+    const A = veh.def.animate;
+    if (typeof A === "function") {
+      try { A(veh, dt, c); }
+      catch (e) { if (!veh._animErr) { veh._animErr = true; console.warn("[fort] " + veh.unitId + ".animate threw:", e); } }
+    } else sharedAnim(veh, dt);
+    c.firing = null;
+  }
+  CBZ.cityAnimateUnit = animateUnit;
+  // the crew who are aboard: a hull you drive shows its crew at their posts
+  // ("you, at the controls, are the crew"); parked, nobody
+  function crewAboard(veh, on) {
+    const S = veh && veh.seats;
+    if (!S) return;
+    for (let i = 0; i < S.length; i++) if (S[i].crew) S[i].implicit = !!on;
+    veh.you = !!on;
+  }
+  CBZ.cityUnitCrew = crewAboard;
 
-    // ---- ONE CALL. This is the whole adoption. --------------------------
-    if (CBZ.vehicleHold) {
-      const Z0 = CARGO.holdZ0, Z1 = CARGO.holdZ1, DY = CARGO.deckY, RY = CARGO.roofY, HW = CARGO.halfW;
-      const midZ = (Z0 + Z1) / 2, len = Z1 - Z0;
-      rec.hold = CBZ.vehicleHold(rec, {
-        id: "cargo-lifter-" + placed.length,
-        label: "Cargo hold",
-        scale: 1,
-        floor: { x: 0, z: midZ, w: HW * 2, d: len, top: DY },
-        roof: RY,
-        walls: [
-          { x: -(HW + 0.2), z: midZ, w: 0.45, d: len, y0: 0, y1: RY + 0.6 },     // port flank
-          { x: (HW + 0.2), z: midZ, w: 0.45, d: len, y0: 0, y1: RY + 0.6 },      // starboard flank
-          { x: 0, z: Z1 + 0.2, w: HW * 2 + 0.9, d: 0.5, y0: 0, y1: RY + 0.6 },   // forward bulkhead
-          { x: 0, z: 12.0, w: 5.2, d: 9.0, y0: 0, y1: 6.6 },                     // forward fuselage
-          { x: -3.05, z: 1.2, w: 1.3, d: 7.4, y0: 0, y1: 2.6 },                  // gear sponsons
-          { x: 3.05, z: 1.2, w: 1.3, d: 7.4, y0: 0, y1: 2.6 },
-          /* NO WALL FOR THE UPSWEPT TAIL, and this is a measured decision, not
-             an omission. A y-gated box at y0 4.7 over the ramp mouth is free
-             for a pedestrian (standing on the 1.35 m deck your head is at 3.15
-             — you can never touch it) and it is a SEALED DOOR for a tank:
-             systems/physics.js collide() documents that a caller omitting
-             feetY/headY gets every collider at FULL HEIGHT, and vehicles.js's
-             cityCollideVehicle omits both. Measured with the wall in: the tank
-             stopped dead 7 m short of the ramp toe at full throttle. */
-        ],
-        ramp: {
-          node: made.ramp, w: CARGO.rampW, len: CARGO.rampLen, x: 0,
-          sillZ: Z0, sillTop: DY, dir: -1,
-          closedRx: CARGO.rampClosedRx, openRx: CARGO.rampOpenRx, seconds: 3.0,
-        },
-      });
-    }
-    // FLAG OFF (or the hold block absent) = NO RIG, and therefore no walls at
-    // all — a 37-metre aeroplane you can walk straight through, which is a
-    // worse revert than the feature is a risk. So the degraded path buys back
-    // a conventional world AABB: the FUSELAGE box only, never the 42 m span,
-    // so it is solid where the aeroplane is and you can still walk under the
-    // wings. It carries on `rec.collider`, the field the theft path already
-    // detaches, exactly as placeModel's does.
-    if (!rec.hold || rec.hold.inert) {
-      const sideways = Math.abs(Math.sin(rotY || 0)) > 0.5;
-      rec.collider = col(wx, wz, sideways ? made.footL : 5.4, sideways ? 5.4 : made.footL,
-                         0, made.height != null ? made.height : 13.4, made.group);
-    }
-    return rec;
+  function unitBuild(id, o) {
+    o = o || {};
+    const K = CBZ.unitKit, def = K && K.get ? K.get(id) : null;
+    if (!def || typeof def.build !== "function") return null;
+    const nation = o.nation || NATION, ground = o.ground || "city";
+    let flag = null;
+    try { flag = CBZ.flags && CBZ.flags.designFor ? CBZ.flags.designFor(nation) : null; } catch (e) { flag = null; }
+    const sc = { side: o.side || "blue", nation: nation, flagId: nation, flag: flag, ground: ground,
+      color: o.color != null ? o.color : 0x4a5238, sideInfo: null };
+    let b = null;
+    try {
+      b = def.build({ THREE: THREE, mat: CBZ.cmat, rng: lcgOf(o.seed), seed: o.seed | 0, id: id, ground: ground,
+        side: sc.side, team: sc.side, nation: nation, flagId: nation, flag: flag, color: sc.color, sideInfo: null });
+    } catch (e) { console.warn("[fort] " + id + " build failed:", e); b = null; }
+    if (!b || !b.group) return null;
+    const g = b.group, rig = b.rig || g.userData.rig || null;
+    if (rig && typeof rig.mark === "function") { try { rig.mark(nation, ground, sc); } catch (e) {} }
+    if (rig && rig.settle) { try { rig.settle(); } catch (e) {} }
+    g.rotation.order = "YXZ";
+    g.userData.unitId = id;
+    if (rig) g.userData.rig = rig;
+    const veh = unitVeh(id, def, g, rig, sc);
+    g.userData.unitVeh = veh;
+    // whoever FLIES it (playeraircraft.js, aircraft.js) drives its look
+    // through CBZ.milAirDrive(group, { thr, agl, speed, vy }, dt)
+    g.userData.unitDrive = function (s, dt) {
+      const h = g.rotation.y;
+      let dh = h - veh.h; while (dh > Math.PI) dh -= 2 * Math.PI; while (dh < -Math.PI) dh += 2 * Math.PI;
+      veh.ds.w = dt > 0 ? dh / dt : 0;
+      veh.h = veh.yaw = veh.heading = h;
+      const top = (def.stats && def.stats.speed) || 60;
+      veh.ds.throttle = s.thr != null ? s.thr : 0;
+      veh.ds.v = veh.speed = s.speed != null ? s.speed : veh.ds.throttle * top;
+      veh.ds.vy = s.vy || 0;
+      veh.ds.gamma = -g.rotation.x;
+      animateUnit(veh, dt, s.agl);
+    };
+    if (def.drive === "rotor") g.userData.rotorcraft = true;
+    // first look: parked, the crew out, wheels down on the stand
+    animateUnit(veh, 1 / 30, 0);
+    const air = def.domain === "air";
+    const dims = g.userData.aircraftDims || null;
+    const meta = K.meta ? K.meta(id) : null;
+    return {
+      group: g, rig: rig, def: def, unitId: id, veh: veh,
+      name: (meta && meta.name) || id,
+      // an airframe boards by its span; its SOLID is the body it has
+      footW: air && dims ? dims.span : (b.footW || 3), footL: air && dims ? dims.length : (b.footL || 5),
+      height: b.height || (dims && dims.height) || 3,
+      colliderW: air && dims ? (dims.bodyW || b.footW) : null, colliderL: air && dims ? (dims.bodyL || b.footL) : null,
+      aircraftDims: dims,
+    };
   }
 
-  // GROUND ARMOR lives in city/mil_armor.js (real-dimension plate-lofted
-  // hulls, instanced running gear, turret/gun/launcher rigs). These are the
-  // names the base, CBZ.milModels, world/airbase.js and the warlord wrecks
-  // already call, so they stay — as one line each.
-  function armor(kind, opts) { return CBZ.milArmor[kind](opts); }
-  function makeTank() { return armor("tank"); }
-  function makeTruck(opts) { return armor("truck", opts); }
-  function makePatriot() { return armor("patriot"); }
-  function makeIFV() { return armor("ifv"); }
-  function makeAPC() { return armor("apc"); }
-  function makeLUV() { return armor("luv"); }
-  function makeMLRS() { return armor("mlrs"); }
+  /* ---- THE A400M'S HOLD IS A ROOM (city/vehicle_hold.js) ------------------
+     OWNER: "a cargo plane where you can open and close the back and even a
+     tank can drive into the back." The unit's Atlas has the real hold (17.7 m
+     + the 5.4 m ramp, 4.0 m wide, the floor at 1.55 m) and a ramp node hinged
+     at the sill. vehicle_hold poses a ramp by rotation.x with 0 = lying flat
+     aft, so the ramp goes on a pivot at its hinge with a fixed flattening
+     node between: the unit file still owns the ramp node itself (its CDS run
+     swings it), and the hold owns the pivot. Numbers are the unit file's. */
+  const ATLAS = { floorTop: 1.55, z0: -6.40, z1: 14.80, halfW: 2.0, roof: 5.40, hingeY: 1.32,
+    rampLen: 5.71, rampW: 3.95, rest: 0.304 };
+  function atlasHold(rec, made) {
+    if (!CBZ.vehicleHold) return null;
+    const N = made.rig && made.rig.state && made.rig.state.nodes;
+    const ramp = N && N.ramp;
+    let pivot = null;
+    if (ramp && ramp.parent) {
+      const body = ramp.parent;
+      pivot = new THREE.Group(); pivot.name = "a400m-ramp-pivot";
+      pivot.position.copy(ramp.position);
+      const flat = new THREE.Group(); flat.name = "a400m-ramp-flat";
+      flat.rotation.x = -ATLAS.rest;                 // the closed skin, laid flat
+      body.add(pivot); pivot.add(flat);
+      body.remove(ramp); ramp.position.set(0, 0, 0); flat.add(ramp);
+    }
+    const A = ATLAS, mid = (A.z0 + A.z1) / 2, len = A.z1 - A.z0;
+    return CBZ.vehicleHold(rec, {
+      id: "a400m-" + placed.length,
+      label: "Cargo hold",
+      scale: 1,
+      floor: { x: 0, z: mid, w: A.halfW * 2, d: len, top: A.floorTop },
+      roof: A.roof,
+      walls: [
+        { x: -(A.halfW + 0.3), z: mid, w: 0.45, d: len, y0: 0, y1: A.roof + 0.6 },     // port side
+        { x: (A.halfW + 0.3), z: mid, w: 0.45, d: len, y0: 0, y1: A.roof + 0.6 },       // starboard side
+        { x: 0, z: A.z1 + 0.3, w: A.halfW * 2 + 0.9, d: 0.5, y0: 0, y1: A.roof + 0.6 }, // the flight-deck bulkhead
+        { x: 0, z: 18.9, w: 5.6, d: 7.0, y0: 0, y1: 7.0 },                              // the nose
+        { x: -3.2, z: -0.4, w: 1.2, d: 8.0, y0: 0, y1: 2.6 },                            // the gear sponsons
+        { x: 3.2, z: -0.4, w: 1.2, d: 8.0, y0: 0, y1: 2.6 },
+        /* no wall for the upswept tail over the ramp: systems/physics.js
+           collide() treats a vehicle's collider at full height, so a y-gated
+           box over the ramp mouth seals it against a tank (measured with the
+           old lifter: the tank stopped 7 m short of the toe). */
+      ],
+      ramp: pivot ? {
+        node: pivot, w: A.rampW, len: A.rampLen, x: 0,
+        sillZ: A.z0, sillTop: A.floorTop, dir: -1,
+        closedRx: A.rest, openRx: -Math.asin((A.floorTop - 0.02) / A.rampLen), seconds: 3.0,
+      } : null,
+    });
+  }
+
+  // ---- THE PUBLISHED MODELS ---------------------------------------------
+  // CBZ.milModels.<kind>() hands any page the unit's model as a record
+  // {group, footW, footL, height, aircraftDims, colliderW, colliderL, rig}:
+  // world/airbase.js parks it on its slab, the war room parks a nation's
+  // bombers, warlord/props.js chars it into a wreck. It is null until the
+  // unit file is on the page: milModels.load(kinds) brings them (the page
+  // falls back to its own primitives in the meantime, and says so).
+  const MODEL_UNIT = {
+    jet: "f35", bomber: "b52", cargo: "a400m", heli: "uh60_black_hawk", attackHeli: "ah64_apache",
+    drone: "mq9_reaper", tank: "m1_abrams", truck: "fmtv", patriot: "patriot_launcher",
+    ifv: "bradley_ifv", apc: "stryker_apc", luv: "hmmwv", mlrs: "m270_mlrs",
+  };
+  function loadUnits(ids) {
+    if (CBZ.army && CBZ.army.loadUnits) return CBZ.army.loadUnits(ids);
+    const K = CBZ.unitKit;
+    if (K && K.need) return K.need(ids).then(function () { return ids.filter(function (id) { return K.has(id); }); });
+    return Promise.resolve([]);
+  }
+  let _milSeed = 0;
+  CBZ.milModels = {};
+  Object.keys(MODEL_UNIT).forEach(function (k) {
+    CBZ.milModels[k] = function (o) { return unitBuild(MODEL_UNIT[k], Object.assign({ seed: ++_milSeed }, o || {})); };
+  });
+  Object.defineProperty(CBZ.milModels, "load", { enumerable: false, value: function (kinds) {
+    const ids = (kinds && kinds.length ? kinds : Object.keys(MODEL_UNIT)).map(function (k) { return MODEL_UNIT[k] || k; });
+    return loadUnits(ids);
+  } });
+  Object.defineProperty(CBZ.milModels, "unitOf", { enumerable: false, value: function (k) { return MODEL_UNIT[k] || null; } });
+  Object.defineProperty(CBZ.milModels, "build", { enumerable: false, value: unitBuild });
 
   // ========================================================================
   //   PERIMETER FENCE — InstancedMesh posts (the draw-call-frugal repeat)
@@ -717,95 +601,167 @@
   }
 
   // ========================================================================
-  //   STATIC HARDWARE PLACEMENT — drop a model, register a solid collider.
+  //   THE MOTOR POOL AND THE FLIGHT LINE — the units, on their stands.
   // ========================================================================
-  // module-local capture of every BOARDABLE machine placed on the base, so we can
-  // hand them to militaryvehicles.js as stealable vehicles. _reg guards the
-  // one-shot deferred registration (the islands load BEFORE militaryvehicles.js).
+  // module-local capture of every BOARDABLE machine placed on the base; each
+  // is handed to militaryvehicles.js (CBZ.cityRegisterMilitaryVehicle) the
+  // moment it stands on its stand.
   const placed = [];
-  let _reg = false;
 
-  // kind/name (optional) tag a placed group as a boardable military vehicle:
-  //   kind 'tank' | 'heli' | 'plane' | 'ground' (the militaryvehicles.js taxonomy)
-  function placeModel(root, modelFn, wx, wz, rotY, footScale, kind, name) {
-    const made = modelFn();
-    made.group.position.set(wx, 0, wz);
-    made.group.rotation.y = rotY || 0;
-    made.group.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    root.add(made.group);
-    // collider: rotate the footprint roughly by snapping to nearest axis.
-    // Height is PER MODEL (each maker measures itself): the old flat y1=3.0
-    // let you jump straight through the bomber's ~7m tail fin.
-    const fw = made.footW * (footScale || 1), fl = made.footL * (footScale || 1);
-    // a rotor disc or a glider wing is not a wall: airframes publish the
-    // solid body they actually have (colliderW/L); footW stays the true span
-    const bw = (made.colliderW || made.footW) * (footScale || 1), bl = (made.colliderL || made.footL) * (footScale || 1);
-    const sideways = Math.abs(Math.sin(rotY || 0)) > 0.5;
-    const cw = sideways ? bl : bw, cd = sideways ? bw : bl;
-    const solid = col(wx, wz, cw, cd, 0, made.height != null ? made.height : 3.0, made.group);
-    if (kind) {
-      made.group.userData.milKind = kind;
-      made.group.userData.milName = name || kind;
-      // Parked hardware can become a live, moving machine under a named pilot.
-      // Keep the authored group out of the static world merger so dispatch can
-      // move THIS helicopter/tank instead of spawning a visual copy.
-      made.group.userData.dynamic = true;
-      if (made.aircraftDims) made.group.userData.aircraftDims = made.aircraftDims;
-      placed.push({
-        group: made.group, pos: made.group.position, heading: rotY || 0,
-        kind: kind, model: { name: name || kind },
-        // the parked collider rides on the record so STEALING the machine can
-        // remove it (militaryvehicles/playeraircraft detach it via the shared
-        // rec._colliderDetached protocol; without this an invisible solid
-        // block haunted the empty slot forever). Same field the airport uses.
-        collider: solid,
-        // flight-model hints for playeraircraft's fly-the-actual-prop path:
-        // these models face +Z = flight forward (no yaw offset) and park on
-        // their gear/tracks at y=0 (no ground offset).
-        modelYawOffset: 0, groundOffset: 0,
-        aircraftDims: made.aircraftDims || null,
-        footW: fw, footL: fl, taken: false, hot: true,
-      });
+  // the hull on its stand: a solid collider, and (unless the stand is
+  // scenery, the two drones in the hangar) a stealable record
+  function placeUnit(root, made, s, wx, wz) {
+    const g = made.group, rotY = s.yaw || 0;
+    g.position.set(wx, 0, wz);
+    g.rotation.y = rotY;
+    made.veh.h = made.veh.yaw = made.veh.heading = rotY;
+    // parked hardware can become a live, moving machine under a named pilot:
+    // keep it out of the static world merger
+    g.userData.dynamic = true;
+    root.add(g);
+    const atlas = made.unitId === "a400m";
+    // a rotor disc or a wing is not a wall: the solid is the body
+    const bw = made.colliderW || made.footW, bl = made.colliderL || made.footL;
+    const sideways = Math.abs(Math.sin(rotY)) > 0.5;
+    // THE ATLAS IS NOT A BOX. One full-footprint AABB is precisely the wall
+    // that stops a tank driving up its ramp; its solidity is the hold rig's
+    // LOCAL walls (city/vehicle_hold.js), which also stay right when it flies.
+    const solid = atlas ? null : col(wx, wz, sideways ? bl : bw, sideways ? bw : bl, 0, made.height, g);
+    // what it is when a bomb lands beside it (systems/strike.js hardware),
+    // boardable or scenery alike: its skin and hit points by what it is
+    const D0 = made.def || {}, A0 = (D0.stats && D0.stats.armour) || {};
+    g.userData.hwKind = D0.drive === "rotor" ? "heli" : D0.domain === "air" ? (D0.stats && D0.stats.remote ? "drone" : "plane")
+      : (A0.front || 0) > 300 ? "tank" : (A0.side || 0) >= 9 ? "ground" : "truck";
+    const kind = s.scenery ? null : takeKind(made.unitId, made.def);
+    if (!kind) return null;
+    g.userData.milKind = kind;
+    g.userData.milName = made.name;
+    if (made.aircraftDims) g.userData.aircraftDims = made.aircraftDims;
+    const rec = {
+      group: g, pos: g.position, heading: rotY,
+      kind: kind, model: { name: made.name },
+      unitId: made.unitId, unit: made,
+      // the parked collider rides on the record so STEALING the machine can
+      // remove it (the shared rec._colliderDetached protocol)
+      collider: solid, colliderW: made.colliderW || null, colliderL: made.colliderL || null,
+      // these models face +Z and stand on their wheels/tracks at y = 0
+      modelYawOffset: 0, groundOffset: 0,
+      aircraftDims: made.aircraftDims || null,
+      footW: made.footW, footL: made.footL, taken: false, hot: true,
+      stand: s,
+    };
+    if (s.kind === "attackHeli") rec.attackHeli = true;
+    if (atlas) {
+      rec.cargoLifter = true;
+      // it flies like the heavy it is and carries no missiles
+      // (playeraircraft.js honours both)
+      rec.airClass = "airliner"; rec.armed = false;
+      rec.hold = atlasHold(rec, made);
+      // no hold rig = no walls at all, which is worse than a box: buy back a
+      // fuselage AABB (never the 42 m span, so you can walk under the wings)
+      if (!rec.hold || rec.hold.inert) {
+        rec.collider = col(wx, wz, sideways ? made.footL : 5.6, sideways ? 5.6 : made.footL, 0, made.height, g);
+      }
     }
-    return made.group;
+    placed.push(rec);
+    if (CBZ.cityRegisterMilitaryVehicle) CBZ.cityRegisterMilitaryVehicle(rec);
+    return rec;
   }
 
-  /* ========================================================================
-     THE HARDWARE, PUBLISHED.
-
-     Everything above this line is a MODEL FACTORY: makeJet, makeBomber,
-     makeCargoPlane, makeHeli, makeTank, makeTruck each return a THREE.Group
-     (nose +Z, standing on its wheels at y=0) and know nothing about Fort
-     Brandt. Everything BELOW it is the base — the placement, the landmass
-     registration, the causeway, the militia. Only the second half needs the
-     city; the first half never did.
-
-     Until now there was no way to say so. Anything that wanted a fighter
-     jet had to boot the entire archipelago to get one, which is why a
-     slice page ended up modelling its own — the hardware was in here, and
-     in here was unreachable. These four lines are the whole fix, and they
-     cost the shipped game nothing: the base below still calls the same
-     local functions it always did.
-
-     `world/airbase.js` asks for CBZ.milModels FIRST and only falls back to
-     its own primitives when this file is absent. So loading this file is
-     what upgrades every standalone page to the real hardware.
-  ======================================================================== */
-  CBZ.milModels = {
-    jet: makeJet,
-    bomber: makeBomber,
-    cargo: makeCargoPlane,
-    heli: makeHeli,
-    attackHeli: makeAttackHeli,
-    drone: makeDrone,
-    tank: makeTank,
-    truck: makeTruck,
-    patriot: makePatriot,
-    ifv: makeIFV,
-    apc: makeAPC,
-    luv: makeLUV,
-    mlrs: makeMLRS,
+  /* THE FLEET LOADS WHEN YOU COME TO IT. FLEET_NEAR is measured off the wire
+     the base publishes (CBZ._militaryBase min/max), not its centre: 900 m is
+     the far shore of the causeway and a fast jet's run-in, so every hull is on
+     its stand before the player can see the apron. Built one per frame. */
+  const FLEET_NEAR = 900;
+  const FLEET = { gen: 0, state: "idle", stands: null, root: null, queue: [], promise: null, checkT: 0 };
+  function fleetIds() {
+    const out = [];
+    (FLEET.stands || []).forEach(function (q) { if (out.indexOf(q.id) < 0) out.push(q.id); });
+    return out;
+  }
+  function fleetEnsure() {
+    if (!FLEET.stands) return null;
+    if (FLEET.state !== "idle") return FLEET.promise;
+    FLEET.state = "loading";
+    const gen = FLEET.gen;
+    FLEET.promise = loadUnits(fleetIds()).then(function (got) {
+      if (gen !== FLEET.gen) return;
+      FLEET.queue = FLEET.stands.filter(function (q) { return got.indexOf(q.id) >= 0; });
+      FLEET.state = "building";
+    }).catch(function (e) {
+      console.warn("[fort] the motor pool did not load:", e);
+      if (gen === FLEET.gen) FLEET.state = "idle";
+    });
+    return FLEET.promise;
+  }
+  /* A PARKED HULL PAST THE FOG IS NOT DRAWN. The apron is ~40 machines and a
+     few thousand draw calls in full view; beyond the fog's far plane every one
+     of them is fogged to nothing anyway, so it costs a phone the calls and
+     buys no pixels. Twice a second, a distance test per stand. A machine somebody has taken (the player, the air response) is
+     never hidden. */
+  let sleepT = 0;
+  function fleetSleep(dt) {
+    if ((sleepT -= dt) > 0) return;
+    sleepT = 0.5;
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (!cam) return;
+    const fog = CBZ.scene && CBZ.scene.fog;
+    const R = (fog && fog.far > 0 ? fog.far : 1400) + 80, R2 = R * R;
+    for (let i = 0; i < placed.length; i++) {
+      const r = placed[i], g = r && r.group;
+      if (!g || r.taken || r._aiActive || r._heldBy) { if (g && g.userData.fleetAsleep) { g.visible = true; g.userData.fleetAsleep = false; } continue; }
+      const dx = r.pos.x - cam.x, dz = r.pos.z - cam.z;
+      const far = dx * dx + dz * dz > R2;
+      if (far && g.visible) { g.visible = false; g.userData.fleetAsleep = true; }
+      else if (!far && g.userData.fleetAsleep) { g.visible = true; g.userData.fleetAsleep = false; }
+    }
+  }
+  CBZ.fortBrandtFleet = {
+    ensure: fleetEnsure,
+    state: function () { return FLEET.state; },
+    near: FLEET_NEAR,
+    // stands of this kind (basekit's: "bomber", "heli"...) not built yet
+    pending: function (kind) {
+      if (FLEET.state === "ready") return 0;
+      let n = 0;
+      (FLEET.stands || []).forEach(function (q) { if (q.s.kind === kind && !q.done && !q.s.scenery) n++; });
+      return n;
+    },
+    records: function () { return placed.slice(); },
   };
+  if (CBZ.onUpdate) {
+    CBZ.onUpdate(55.1, function (dt) {
+      if (!FLEET.stands) return;
+      if (FLEET.state === "idle") {
+        // a page that raised the island without the city (NPC War's
+        // `militaryisland` map) asked for the base: park it at once
+        if (!CBZ.army) { fleetEnsure(); return; }
+        if ((FLEET.checkT -= dt) > 0) return;
+        FLEET.checkT = 0.5;
+        const P = CBZ.player, B = CBZ._militaryBase;
+        if (!P || !P.pos || !B) return;
+        const dx = Math.max(B.minX - P.pos.x, 0, P.pos.x - B.maxX);
+        const dz = Math.max(B.minZ - P.pos.z, 0, P.pos.z - B.maxZ);
+        if (dx * dx + dz * dz < FLEET_NEAR * FLEET_NEAR) fleetEnsure();
+        return;
+      }
+      if (FLEET.state === "ready") { fleetSleep(dt); return; }
+      if (FLEET.state !== "building") return;
+      // one hull a frame: an Abrams' first build lofts its geometry
+      const q = FLEET.queue.shift();
+      if (q) {
+        try {
+          const made = unitBuild(q.id, { seed: q.n });
+          if (made) placeUnit(FLEET.root, made, q.s, q.x, q.z);
+        } catch (e) { console.warn("[fort] could not park " + q.id, e); }
+        q.done = true;
+      }
+      if (!FLEET.queue.length) {
+        FLEET.state = "ready";
+        if (CBZ._militaryBase) CBZ._militaryBase.boardable = placed.length;
+      }
+    });
+  }
 
   // ========================================================================
   //   MAIN BUILDER
@@ -820,9 +776,9 @@
     const root = city.root || (CBZ.scene);
 
     // a city rebuild re-runs this whole builder → fresh prop groups. Clear the
-    // boardable capture + the one-shot guard so the rebuilt hardware re-registers
-    // (the militaryvehicles.js registry was cleared by its reset chain).
-    placed.length = 0; _reg = false;
+    // boardable capture; the fleet re-parks on the new stands when the player
+    // next comes near (the militaryvehicles.js registry prunes the old ones).
+    placed.length = 0;
 
     /* THE PERIMETER IS SOLVED AGAINST THE ROAD NETWORK, SO IT WAITS FOR IT.
        buildFence's gate used to be a pair of typed numbers (CW_CZ ± 13, "widened
@@ -881,30 +837,18 @@
     }
     const W = function (p) { return { x: CEN_X + p.x, z: CEN_Z + p.z }; };
 
-    // ---- THE MACHINES, on their stands --------------------------------------
-    const MODEL = {
-      fighter: [makeJet, "plane"], drone: [makeDrone, null], bomber: [makeBomber, "plane"],
-      heli: [makeHeli, "heli"], attackHeli: [makeAttackHeli, "heli"],
-      tank: [makeTank, "tank"], ifv: [makeIFV, "ground"], apc: [makeAPC, "ground"], luv: [makeLUV, "ground"],
-      truck: [makeTruck, "ground"], patriot: [makePatriot, "patriot"], mlrs: [makeMLRS, "mlrs"],
-    };
+    // ---- THE MACHINES: which unit stands on which stand. Nothing is built
+    // here: the fleet loads and parks when the player comes near (FLEET).
+    FLEET.gen++; FLEET.root = root; FLEET.queue = []; FLEET.promise = null;
+    FLEET.state = "idle"; FLEET.checkT = 0; FLEET.stands = [];
+    const perKind = {};
     (PLAN ? PLAN.stands : []).forEach(function (s) {
-      const w = W(s);
       if (s.kind === "b2") return;                       // city/strategic.js parks the B-2 on this stand (zoning fixture)
-      if (s.kind === "cargo") { placeCargoPlane(root, w.x, w.z, s.yaw, s.name); return; }
-      const m = MODEL[s.kind];
-      if (!m) return;
-      try {
-        const pg = placeModel(root, m[0], w.x, w.z, s.yaw, 1, s.scenery ? null : m[1], s.name);
-        // what it is when a bomb lands beside it (systems/strike.js hardware),
-        // boardable or scenery alike
-        if (pg && pg.userData) pg.userData.hwKind = s.kind === "drone" ? "drone" : (m[1] || "ground");
-        const rec = placed[placed.length - 1];
-        if (rec && rec.group && rec.pos && Math.abs(rec.pos.x - w.x) < 0.01 && Math.abs(rec.pos.z - w.z) < 0.01) {
-          rec.stand = s;
-          if (s.kind === "attackHeli") rec.attackHeli = true;
-        }
-      } catch (e) { /* a missing model must not take the base down with it */ }
+      const key = s.kind === "luv" && s.rank ? "luvPool" : s.kind;
+      const id = unitForStand(s, (perKind[key] = (perKind[key] || 0) + 1) - 1);
+      if (!id) return;
+      const w = W(s);
+      FLEET.stands.push({ s: s, id: id, n: FLEET.stands.length, x: w.x, z: w.z, done: false });
     });
 
     // ---- THE FLAG, in front of HQ ------------------------------------------
@@ -1137,13 +1081,6 @@
           }
           const combat = !!(t.rage || t.npcWanted || t.state === "fight" || t.state === "flee" || t.state === "shoot");
           if (combat) { t.pause = 0; t.activityState = t.state; continue; }
-          // THE BASE IS ANSWERING AN ALARM. city/fortresponse.js drives this
-          // body this frame (converging on a mark, or holding a stand-to slot
-          // on the wire) and it ticks at 38.72, AFTER us — so without this
-          // yield we would walk him back to his parade anchor every frame and
-          // he would jitter between the two orders forever. Same yield, and
-          // for the same reason, as the `_post` branch below.
-          if (t._fortResp) { t.pause = 0; continue; }
           if (t._stationed) {
             // THE SHARED BRAIN OWNS THE NON-DRILL POSTS. A body carrying a
             // garrison.js record gets the full stationed arc there (scare,
@@ -1254,23 +1191,6 @@
     // give traffic a road across the causeway (runs along X → not vertical)
     if (city.roads) {
       city.roads.push({ x: (CW_MINX + CW_MAXX) / 2, z: CW_CZ, vertical: false, len: CW_MAXX - CW_MINX, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
-    }
-
-    // ========================================================================
-    //   MAKE THE HARDWARE STEALABLE — register every parked tank / heli / jet /
-    //   bomber / truck as a boardable so the player can climb in and TAKE it (the
-    //   #1 law: a machine you can only walk around is a dead prop). militaryvehicles
-    //   .js loads AFTER this island, so DEFER the hand-off one tick (onUpdate 55.1,
-    //   after worldgen) and run it ONCE. Feature-detected: no module → the props
-    //   are still solid scenery, nothing throws.
-    // ========================================================================
-    if (CBZ.onUpdate) {
-      CBZ.onUpdate(55.1, function () {
-        if (_reg) return;
-        if (!CBZ.cityRegisterMilitaryVehicle) return;
-        placed.forEach(function (p) { CBZ.cityRegisterMilitaryVehicle(p); });
-        _reg = true;
-      });
     }
 
     // expose a tiny debug handle (no UI, no hidden stats — just a console aid)

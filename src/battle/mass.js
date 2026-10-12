@@ -57,17 +57,18 @@ MASS.reset = function () {
   if (CBZ.massDraw && CBZ.massDraw.reset) CBZ.massDraw.reset();
   MASS.on = false; MASS.T = null; MASS.rows = 0; MASS.sq = null; MASS.pending.length = 0;
   MASS.ghosts.clear(); MASS.schedAt = -9; MASS.cnt.at = -1;
+  MASS.sqIds = null; MASS.profCache = null;
 };
 MASS.begin = function (asBench, how) {
   // the settings panel's choices (src/battle/settingspanel.js) under any URL key
   const S = typeof SETTINGS !== "undefined" ? SETTINGS.cur : null;
-  if (S && !asBench && !FRONT) SETTINGS.clampArmy();
+  if (S && !asBench) SETTINGS.clampArmy();
   const total = SET.redN + SET.blueN;
   const cp = CBZ.battleLod.caps();
   MASS.caps = { full: MASS.opt.fullcap || (S && S.fullcap) || cp.full, mid: MASS.opt.midcap || (S && S.midcap) || cp.mid, promote: cp.promote };
   if (!MASS.opt.fullr && S) MASS.opt.fullr = S.fullr;
   if (!MASS.opt.midr && S) MASS.opt.midr = S.midr;
-  MASS.on = !asBench && !MAP.water && (MASS.force != null ? MASS.force > 0 : total > MASS.caps.full) && !!CBZ.battleTierSim;
+  MASS.on = !asBench && !HOST.water && (MASS.force != null ? MASS.force > 0 : total > MASS.caps.full) && !!CBZ.battleTierSim;
   if (!MASS.on) return false;
   // a restaged field starts its armies' books from nothing
   if (how && how.restage && typeof resetArmies === "function") resetArmies();
@@ -82,12 +83,12 @@ MASS.begin = function (asBench, how) {
   const ext = massExtent();
   const cell = 4, gw = Math.ceil((ext.x1 - ext.x0) / cell) + 2, gh = Math.ceil((ext.z1 - ext.z0) / cell) + 2;
   const hgt = new Float32Array(gw * gh);
-  for (let iz = 0; iz < gh; iz++) for (let ix = 0; ix < gw; ix++) hgt[iz * gw + ix] = MAP.groundAt(ext.x0 + ix * cell, ext.z0 + iz * cell);
+  for (let iz = 0; iz < gh; iz++) for (let ix = 0; ix < gw; ix++) hgt[iz * gw + ix] = HOST.groundAt(ext.x0 + ix * cell, ext.z0 + iz * cell);
   MASS.ground = { x0: ext.x0, z0: ext.z0, cell: cell, w: gw, h: gh, hgt: hgt };
   MASS.nav = NAV.block ? { x0: NAV.x0, z0: NAV.z0, cell: NAV.cell, w: NAV.w, h: NAV.w, block: NAV.block, on: NAV.on } : null;
   const cfg = {
-    morale: MK, spread: CBZ.NPC_SPREAD || null, gap: MAP.gap || 150, ground: MASS.ground,
-    terrainLos: !!MAP.terrainLos, nav: MASS.nav, seed: (lcg() * 0x7ffffffe) | 0 || 1,   // the page's own dice pick the tier sim's
+    morale: MK, spread: CBZ.NPC_SPREAD || null, gap: HOST.gap || 150, ground: MASS.ground,
+    terrainLos: !!HOST.terrainLos, nav: MASS.nav, seed: (lcg() * 0x7ffffffe) | 0 || 1,   // the page's own dice pick the tier sim's
     tick: { mid: CBZ.battleLod.BUDGET.tick.mid, far: CBZ.battleLod.BUDGET.tick.far, squad: CBZ.battleLod.BUDGET.think.far },
     budgetMs: { mid: CBZ.battleLod.BUDGET.frameMs.mid, far: CBZ.battleLod.BUDGET.frameMs.far },
   };
@@ -111,6 +112,137 @@ MASS.begin = function (asBench, how) {
   if (CBZ.massDraw) CBZ.massDraw.begin();
   return true;
 };
+/* A HOST THAT FIELDS FORCES AS IT GOES (Gang City's CBZ.army): the tiers open
+   on an empty field and each force's bodies are added as rows when it is
+   spawned (MASS.addRows). Every row starts FAR; the scheduler promotes the
+   squads near the lens to FULL rigs and demotes the ones it leaves, exactly
+   as in a war-room battle. o = { fullcap, midcap, fullr, midr, capHint,
+   groundAt } (groundAt: the host's ground; no sampled grid, the field is
+   wherever the forces are). In-page only (no worker). */
+MASS.open = function (o) {
+  o = o || {};
+  MASS.reset();
+  const cp = CBZ.battleLod.caps();
+  MASS.caps = { full: o.fullcap || cp.full, mid: o.midcap || cp.mid, promote: cp.promote };
+  if (o.fullr) MASS.opt.fullr = o.fullr;
+  if (o.midr) MASS.opt.midr = o.midr;
+  if (!CBZ.battleTierSim) return false;
+  MASS.on = true;
+  MASS.total = 0;
+  MASS.wantWorker = false;
+  STORE.reserve(o.capHint || 256);
+  MASS.ground = null;
+  MASS.nav = NAV.block ? { x0: NAV.x0, z0: NAV.z0, cell: NAV.cell, w: NAV.w, h: NAV.w, block: NAV.block, on: NAV.on } : null;
+  const cfg = {
+    morale: MK, spread: CBZ.NPC_SPREAD || null, gap: HOST.gap || 150, ground: null, groundAt: o.groundAt || HOST.groundAt,
+    terrainLos: false, nav: MASS.nav, seed: (lcg() * 0x7ffffffe) | 0 || 1,
+    tick: { mid: CBZ.battleLod.BUDGET.tick.mid, far: CBZ.battleLod.BUDGET.tick.far, squad: CBZ.battleLod.BUDGET.think.far },
+    budgetMs: { mid: CBZ.battleLod.BUDGET.frameMs.mid, far: CBZ.battleLod.BUDGET.frameMs.far },
+  };
+  MASS.cfg = cfg;
+  MASS.T = CBZ.battleTierSim.create(STORE, cfg);
+  MASS.unitOf = [];
+  MASS.T.squads();
+  MASS.buildSquads();
+  if (CBZ.massDraw) { CBZ.massDraw.capHint = o.capHint || 0; CBZ.massDraw.begin(); }
+  return true;
+};
+/* One booked segment of a side (spawn.js SPAWN_BOOK) onto the field: its men
+   and animals as rows (FAR until the lens comes), its vehicles and their crews
+   FULL at once (vehicles.js owns armour, crews and guns). Returns the rows. */
+MASS.addRows = function (team, from, n) {
+  if (!MASS.on) return [];
+  const T = MASS.T, C = STORE.cols, s = team === "blue" ? 1 : 0;
+  const prof = MASS.profCache || (MASS.profCache = {});
+  const rows = [];
+  STORE.reserve(STORE.rows + n + 16);
+  let p0 = 0;
+  for (let j = 0; j < n; j++) {
+    const i = from + j;
+    const kind = unitIdAt(team, i);
+    const k = kind === "men" ? "men" : CBZ.unitKit ? CBZ.unitKit.kindOf(kind) : "species";
+    if (k === "vehicle" || (k === "men" && vehicleSeatFor(team, i))) {
+      const m = spawnOne(team, i);
+      if (m && m.row != null) C.squad[m.row] = massSquadId(team, m.sq);   // its side's squad, in the one table
+      continue;
+    }
+    const u = massUnit(team, i, kind, k, prof);
+    if (!u) continue;
+    const at = HOST.spawnAt(team, i);
+    const r = STORE.alloc(team, k === "men" ? "man" : "beast");
+    C.x[r] = at.x; C.z[r] = at.z; C.y[r] = HOST.groundAt(at.x, at.z);
+    C.heading[r] = spawnHeading(team, i);
+    C.hp[r] = C.maxHp[r] = u.hp;
+    // a squad is ten bodies of ONE force: spawn indices are booked in tens
+    C.squad[r] = massSquadId(team, (i / 10) | 0);
+    C.tier[r] = 2;
+    C.unit[r] = u.idx;
+    T.addUnit(r, u.prof, i, u.nerve, u.w, at.x, at.z);
+    STORE.cols.sqSlot[r] = i % 10;
+    p0 += u.w;
+    MASS.rows++;
+    rows.push(r);
+  }
+  ARMY[team].p0 += p0;
+  ARMY[team].men0 += n;
+  MASS.total += n;
+  massRebuildSquads();
+  if (CBZ.massDraw && CBZ.massDraw.added) CBZ.massDraw.added(rows);
+  return rows;
+};
+// the tier sim's squad id for a side's squad (sequential, both sides in one table)
+function massSquadId(team, sq) {
+  const M = MASS.sqIds || (MASS.sqIds = new Map());
+  const key = team + ":" + sq;
+  let id = M.get(key);
+  if (id == null) { id = M.size; M.set(key, id); }
+  return id;
+}
+/* A force taken off the field (a host disbands it): its rows freed, the rig
+   of any that were FULL dropped, its ghosts forgotten. */
+MASS.removeRows = function (rows) {
+  if (!MASS.on) return;
+  const C = STORE.cols;
+  for (let j = 0; j < rows.length; j++) {
+    const r = rows[j];
+    const m = STORE.ref[r];
+    if (m) {
+      const k = men.indexOf(m);
+      if (k >= 0) men.splice(k, 1);
+      massDropObj(m);
+      STORE.ref[r] = null;
+    }
+    MASS.ghosts.delete(r);
+    C.tier[r] = 2;
+    STORE.free(r);
+  }
+  massRebuildSquads();
+  if (CBZ.massDraw) CBZ.massDraw.died();
+};
+// the squad table again after rows came or went, keeping every squad's tier
+function massRebuildSquads() {
+  MASS.T.squads();
+  MASS.buildSquads();
+  const Q2 = MASS.sq, C = STORE.cols;
+  for (let q = 0; q < Q2.n; q++) {
+    let t = 2;
+    for (let j = 0; j < Q2.cnt[q]; j++) { const r = Q2.mem[q * 10 + j]; if (r >= 0 && C.tier[r] < t) t = C.tier[r]; }
+    Q2.tier[q] = Q2.want[q] = t;
+  }
+}
+MASS.rebuildSquads = massRebuildSquads;
+/* A FORCE'S ORDER ON ITS ROWS (tiersim's oK/oX/oZ, and each row's home) */
+const ORDER_K = { hold: 1, move: 2, attack: 3, withdraw: 4 };
+MASS.orderRows = function (rows, order, homeOf) {
+  if (!MASS.on) return;
+  const C = STORE.cols, k = order ? (ORDER_K[order.type] || 0) : 0;
+  for (let j = 0; j < rows.length; j++) {
+    const r = rows[j];
+    C.oK[r] = k;                                   // (a FULL man reads m.order; his row keeps it for his demotion)
+    if (order && order.at) { C.oX[r] = order.at.x; C.oZ[r] = order.at.z; }
+    if (homeOf && k && k !== 3) { const h = homeOf(r, C.spawnI[r]); if (h) { C.hx[r] = h.x; C.hz[r] = h.z; } }
+  }
+};
 // the page takes the tiers back from a worker that stopped: its own tier sim
 // picks up every row where the store last said it was
 function massTakeBack() {
@@ -124,21 +256,21 @@ function massTakeBack() {
 function massExtent() {
   const n = Math.max(SET.redN, SET.blueN), rows = massRows(n);
   const depth = Math.ceil(n / rows) * 3.1, width = rows * 3.4;
-  const runR = MK.FLEE_GAPS * (MAP.gap || 150) + 60;
-  const hx = (MAP.gap || 150) / 2 + 8 + depth + runR, hz = width / 2 + runR;
-  return { x0: MAP.cx - hx, x1: MAP.cx + hx, z0: MAP.cz - hz, z1: MAP.cz + hz };
+  const runR = MK.FLEE_GAPS * (HOST.gap || 150) + 60;
+  const hx = (HOST.gap || 150) / 2 + 8 + depth + runR, hz = width / 2 + runR;
+  return { x0: HOST.cx - hx, x1: HOST.cx + hx, z0: HOST.cz - hz, z1: HOST.cz + hz };
 }
 // ranks across: ten (the page's own grid) until an army is too deep for it,
 // then a block that grows wider as fast as it grows deep
 function massRows(n) { return n <= 2000 ? 10 : Math.max(10, Math.ceil(1.9 * Math.sqrt(n))); }
 function massAt(team, i, n) {
   const rows = massRows(n);
-  if (rows === 10) return MAP.spawnAt(team, i);
+  if (rows === 10) return HOST.spawnAt(team, i);
   const side = team === "red" ? -1 : 1;
   const col = (i / rows) | 0, row = i % rows;
   return {
-    x: MAP.cx + side * (MAP.gap / 2 + 8 + col * 3.1) + (sWorld() - 0.5) * 1.8,
-    z: MAP.cz + (row - (rows - 1) / 2) * 3.4 + (col % 2) * 1.7 + (sWorld() - 0.5) * 1.8,
+    x: HOST.cx + side * (HOST.gap / 2 + 8 + col * 3.1) + (sWorld() - 0.5) * 1.8,
+    z: HOST.cz + (row - (rows - 1) / 2) * 3.4 + (col % 2) * 1.7 + (sWorld() - 0.5) * 1.8,
   };
 }
 /* ---------------------------------------------------------------- the rows */
@@ -153,7 +285,7 @@ MASS.spawnAll = function () {
     for (let s = 0; s < 2; s++) {
       const team = s ? "blue" : "red";
       if (i >= (s ? SET.blueN : SET.redN)) continue;
-      const kind = kindAt(s ? SET.blueU : SET.redU, i);
+      const kind = unitIdAt(team, i);
       const k = kind === "men" ? "men" : CBZ.unitKit ? CBZ.unitKit.kindOf(kind) : "species";
       // vehicles (and the men who crew them) are FULL objects always: their
       // armour, crews and guns live in vehicles.js and nowhere else
@@ -162,8 +294,8 @@ MASS.spawnAll = function () {
       if (!u) continue;
       const at = massAt(team, i, s ? SET.blueN : SET.redN);
       const r = STORE.alloc(team, k === "men" ? "man" : "beast");
-      C.x[r] = at.x; C.z[r] = at.z; C.y[r] = MAP.groundAt(at.x, at.z);
-      C.heading[r] = team === "red" ? Math.PI / 2 : -Math.PI / 2;
+      C.x[r] = at.x; C.z[r] = at.z; C.y[r] = HOST.groundAt(at.x, at.z);
+      C.heading[r] = spawnHeading(team, i);
       C.hp[r] = C.maxHp[r] = u.hp;
       C.squad[r] = sqBase[team] + ((i / 10) | 0);
       C.tier[r] = 2;
@@ -184,9 +316,9 @@ MASS.spawnAll = function () {
 // what a row IS: its profile in tiersim (the page's own combat_iq numbers),
 // its nerve, its weight to its army, its hit points, and how to draw it
 function massUnit(team, i, kind, k, cache) {
-  const tr = trainingOf(team === "red" ? SET.redT : SET.blueT);
+  const tr = trainingOf(trainAt(team, i));
   if (k === "men") {
-    const wid = pickGun(team === "red" ? SET.redW : SET.blueW, i);
+    const wid = pickGun(gunChoiceAt(team, i), i);
     const key = "m|" + tr.id + "|" + wid;
     let u = cache[key];
     if (!u) {
@@ -262,7 +394,7 @@ function massSyncFull() {
   }
 }
 MASS.ctxNow = function () {
-  const cp = CBZ.camera ? CBZ.camera.position : { x: MAP.cx, z: MAP.cz };
+  const cp = CBZ.camera ? CBZ.camera.position : { x: HOST.cx, z: HOST.cz };
   const c = MASS.ctx || (MASS.ctx = { morale: [1, 1], hunt: [0, 0], hold: [0, 0], broken: [0, 0], com: [0, 0, 0, 0], cam: [0, 0], visR: 0, crowd: 0, over: false });
   c.morale[0] = ARMY.red.morale; c.morale[1] = ARMY.blue.morale;
   c.hunt[0] = HUNT.red ? 1 : 0; c.hunt[1] = HUNT.blue ? 1 : 0;
@@ -488,7 +620,7 @@ MASS.cands = function (m, range, out, spot) {
 };
 // the rows near the FULL ring, hashed for the FULL brains' search (0.35 s)
 function massCandGrid() {
-  const C = STORE.cols, cp = CBZ.camera ? CBZ.camera.position : { x: MAP.cx, z: MAP.cz };
+  const C = STORE.cols, cp = CBZ.camera ? CBZ.camera.position : { x: HOST.cx, z: HOST.cz };
   const reach = (MASS.opt.fullr || CBZ.battleLod.RULES.FULL_R) * 1.3 + SIGHT * 2 + 20, r2 = reach * reach;
   const cells = _mcG ? _mcG.cells : new Map();
   cells.forEach(function (a) { a.length = 0; });
@@ -544,7 +676,7 @@ function massSchedule(dt) {
     Q2.men[q] = k;
     if (k) { Q2.cx[q] = x / k; Q2.cz[q] = z / k; }
   }
-  const cp = CBZ.camera ? CBZ.camera.position : { x: MAP.cx, z: MAP.cz };
+  const cp = CBZ.camera ? CBZ.camera.position : { x: HOST.cx, z: HOST.cz };
   CBZ.battleLod.schedule(Q2, cp.x, cp.z, dt, MASS.caps, { force: MASS.force, fullR: MASS.opt.fullr || 0, midR: MASS.opt.midr || 0 });
   for (let q = 0; q < Q2.n; q++) {
     const w = Q2.want[q], cur = Q2.tier[q];
@@ -618,7 +750,7 @@ function massMakeObj(r) {
   const u = MASS.unitOf[C.unit[r]];
   const m = u && u.kind === "men" ? makeMan(team, i) : makeBeast(team, i, u ? u.kind : null);
   if (!m) return null;
-  return m;
+  return bookUnit(m);
 }
 function massPromote(q) {
   const Q2 = MASS.sq, C = STORE.cols;
@@ -708,7 +840,7 @@ function massDropObj(m) {
   }
   if (m.group) {
     if (m.group.parent) m.group.parent.remove(m.group);
-    try { CBZ.studio.drop(m.group); } catch (e) {}
+    try { STUDIO.drop(m.group); } catch (e) {}
   }
 }
 /* A BLAST REACHES THE ROWS TOO. studio.boom sweeps the FULL roster through
@@ -729,14 +861,14 @@ MASS.blast = function (x, z, R, by) {
 };
 CBZ.npcwar.onBoot(function () {
   // every boom on this page (rockets, ordnance, the nuke) also sweeps the rows
-  const boom = CBZ.studio && CBZ.studio.boom;
+  const boom = STUDIO && STUDIO.boom;
   if (boom && !boom._mass) {
-    CBZ.studio.boom = function (p, o) {
+    STUDIO.boom = function (p, o) {
       const res = boom.apply(this, arguments);
       try { if (MASS.on && p) MASS.blast(p.x, p.z, (res && res.R) || (o && o.radius) || 6, o && o.by); } catch (e) {}
       return res;
     };
-    CBZ.studio.boom._mass = true;
+    STUDIO.boom._mass = true;
   }
 });
 /* the probe's view of a tiered battle */

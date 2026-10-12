@@ -275,9 +275,35 @@
       say(4, "coup", "The army seizes " + capitalName(rec), { sub: "The President is missing", breaking: true });
       if (Po) { Po.instFloor("army", 100); Po.event("coup", { fear: 60, all: 4 }); }
     }
+    if (kind !== "failure") juntaTakesTheSeat(rec);
     s.stage = 0;
     return { kind: kind, result: out };
   }
+  /* THE COUP IS SOLDIERS, NOT A HEADLINE. A coup that lands puts the junta's
+     troops on the Executive Mansion (city/army.js: the one army, a side of its
+     own, the country's uniform): two Strykers and a platoon, ordered to take
+     the seat and hold it, shooting the man they came for. They stand down the
+     first day nobody is there to see them. */
+  let junta = null;
+  function juntaTakesTheSeat(rec) {
+    const A = CBZ.army, Pr = CBZ.presidency;
+    const site = Pr && Pr.site ? Pr.site() : null;
+    if (!A || !A.spawnForce || !site || !isFinite(site.cx)) return;
+    if (junta) { try { A.disband(junta); } catch (e) {} }
+    const seat = { x: site.cx, z: site.cz };
+    junta = A.spawnForce({
+      side: "junta", nation: rec.id, hostile: "always", name: "the junta",
+      units: ["stryker_apc*2", "men*24"], training: "elite", gun: "carbine",
+      at: { x: seat.x, z: seat.z + 180 }, face: seat,
+      order: { type: "attack", at: seat },
+    });
+  }
+  if (CBZ.onNewDay) CBZ.onNewDay(function () {
+    if (!junta || !CBZ.army) return;
+    const P = CBZ.player, st = CBZ.army.status(junta);
+    const far = !P || !P.pos || !st || !st.ready || Math.hypot(P.pos.x - st.x, P.pos.z - st.z) > 400;
+    if (far) { CBZ.army.disband(junta); junta = null; }
+  });
 
   // ---------------------------------------------------------------- the President's answers
   function press(key) {
