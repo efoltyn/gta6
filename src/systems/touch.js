@@ -1384,7 +1384,7 @@
     CBZ.cam.yaw = Math.atan2(-dx, -dz);
     const k = CBZ.keys;
     k["w"] = true; k["a"] = k["s"] = k["d"] = false;
-    k["shift"] = dist > 5;    // jog most of the way, ease to a walk for the last few metres
+    k["shift"] = dist > 5;    // sprint most of the way, the default run (physics gait ladder) for the last few metres
   });
 
   // Stance routing for the L3 stick-press: in city/survival (with the physics

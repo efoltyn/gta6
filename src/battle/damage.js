@@ -10,7 +10,7 @@ CBZ.npcwar.onBoot(function () {
      One join and the engine's shared verbs can find these men: a rocket's
      studio.boom sweeps THIS roster (both sides — a blast has no team), and
      the hurt funnel is the same one the scoreboard reads. */
-  CBZ.studio.join({
+  STUDIO.join({
     id: "npcwar", label: "NPC War",
     caps: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1, breach: 1 },
     actors: function (out) {
@@ -63,6 +63,8 @@ function armourHit(m, res, imp) {
   }
 }
 function hurtMan(m, dmg, imp) {
+  // a host's actor (HOST.targets: Gang City's player) takes it through the host
+  if (m && m.hostActor) { if (dmg > 0 && m.hurt) m.hurt(dmg, imp || {}); return null; }
   // a ghost is a row in the tier sim (src/battle/mass.js): the round lands there
   if (m && m.ghost) { if (dmg > 0) MASS.hurtGhost(m, dmg, imp); return; }
   // a hull answers with its armour first (src/battle/vehicles.js)
@@ -73,7 +75,7 @@ function hurtMan(m, dmg, imp) {
   if (kind && !m.beast && CBZ.armour) {
     const by = imp.by;
     res = CBZ.armour.resolve({
-      target: m, dmg: dmg, kind: kind, wid: imp.wid, round: imp.round, zone: imp.zone, headshot: imp.headshot,
+      target: m, dmg: dmg, kind: kind, wid: imp.wid, round: imp.round, zone: imp.zone, headshot: imp.headshot, raw: imp.raw,
       dirX: by && by.pos ? m.pos.x - by.pos.x : undefined, dirZ: by && by.pos ? m.pos.z - by.pos.z : undefined,
       yaw: m.yaw, rng: lcg,
     });
@@ -147,12 +149,12 @@ function killMan(m, imp) {
     m.ordTgt = null;
   }
   const byT = (imp && imp.by && imp.by.team) || (imp && imp.byTeam) || null;
-  if (byT && byT !== m.team) stats[byT].kills++;
+  if (byT && byT !== m.team) { if (stats[byT]) stats[byT].kills++; }   // (a host actor, the city's player, is no side)
   else if (!byT) stats[m.team === "red" ? "blue" : "red"].kills++;   // blast with no author still scores the other side
   // fratricide (a bomb is a blunt tool) credits nobody
   // and the man who did it keeps his own tally, with his gun
   const by = imp && imp.by;
-  if (by && by.team && by.team !== m.team) {
+  if (by && by.team && by.team !== m.team && !by.hostActor) {
     by.kills = (by.kills || 0) + 1;
     if (by.wid) gunLedger(by.wid).kills++;
     // A MAN ON A RUN is a thing the HUD can point at

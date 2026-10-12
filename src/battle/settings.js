@@ -1,11 +1,16 @@
 "use strict";
-/* src/battle/settings.js — NPC War: SETTINGS: URL params + saved setup (SET), THE FRONT spec, revert switches, THE DEAD tunables.
+/* src/battle/settings.js — NPC War: SETTINGS: URL params + saved setup (SET), revert switches, THE DEAD tunables.
    Split out of games/battle.html (docs/npcwar/ARCHITECTURE.md). Every
    src/battle file shares ONE script scope: top-level names here are visible
    to the other battle files. Anything that needs the loaded engine runs in
    CBZ.npcwar.onBoot(), in file order, once the armoury is in. */
 
 const el = function (id) { return document.getElementById(id); };
+/* THE STUDIO AS THE SIM SEES IT: cast a man, a boom, drop a body, a smoke
+   trail, an aircraft, a collapse, join the caps bus. The sim files ask
+   STUDIO, never CBZ.studio, so a host with no studio (Gang City,
+   city/armyrealm.js) hands its own routes to the same names. */
+const STUDIO = CBZ.studio;
 const bootst = function (t) { const n = el("bootst"); if (n) n.textContent = t; };
 
 /* ============================================================ SETTINGS
@@ -73,8 +78,7 @@ SET.freeze = Q.get("freeze") === "1";
    to an objective beyond it; ?bc=1 side B. ?aco=<m> puts the objective that
    far to the right of the line of march (a route that passes the enemy
    instead of running into him), ?acp=<m> that far past him (350), ?acs=<m>
-   where it forms up, that far short of him (700 on open ground). A front
-   spec carries the same as red/blue `convoy: { off, past }`. */
+   where it forms up, that far short of him (700 on open ground). */
 SET.convoyA = Q.get("ac") || null;
 SET.convoyB = Q.get("bc") || null;
 SET.convoyOff = parseFloat(Q.get("aco") || Q.get("bco") || "0") || 0;
@@ -97,43 +101,11 @@ const BATTLE_SEED = (parseInt(Q.get("seed"), 10) || 0) + (Q.get("seed") ? 0 : (S
    whatever `n` said. */
 if (CBZ.battleRoster.parse(SET.redU).counted) SET.redN = CBZ.battleRoster.size(SET.redU);
 if (CBZ.battleRoster.parse(SET.blueU).counted) SET.blueN = CBZ.battleRoster.size(SET.blueU);
-/* ============================================================ THE FRONT
-   city/frontline.js opens this page over Gang City (same tab, an iframe) with
-   ?front=<the battle as base64 JSON>: two nations, their committed men, their
-   training and rifles, their colours and flags, the ground under the front,
-   who holds the line, and the air each side can fly. The war room is skipped;
-   the result goes back to the city on postMessage (frontPost below). */
-const FRONT = (function () {
-  const raw = Q.get("front");
-  if (!raw) return null;
-  try {
-    const b = raw.replace(/-/g, "+").replace(/_/g, "/");
-    const f = JSON.parse(decodeURIComponent(escape(atob(b + "===".slice((b.length + 3) % 4)))));
-    return f && f.red && f.blue ? f : null;
-  } catch (e) { console.warn("[war] bad front spec", e); return null; }
-})();
-if (FRONT) {
-  SET.map = FRONT.ground || "dunes";
-  SET.redN = Math.max(1, FRONT.red.n | 0); SET.blueN = Math.max(1, FRONT.blue.n | 0);
-  SET.redU = SET.blueU = "men";
-  SET.redW = FRONT.red.guns || "ak47"; SET.blueW = FRONT.blue.guns || "ak47";
-  SET.redT = FRONT.red.tier || "pro"; SET.blueT = FRONT.blue.tier || "pro";
-  SET.redS = FRONT.red.air || "none"; SET.blueS = FRONT.blue.air || "none";
-  SET.auto = true; SET.bench = false; SET.call = null;
-  ["red", "blue"].forEach(function (t) {
-    const c = FRONT[t].convoy;
-    if (!c) return;
-    if (t === "red") SET.convoyA = "1"; else SET.convoyB = "1";
-    if (c.off != null) SET.convoyOff = +c.off || 0;
-    if (c.past != null) SET.convoyPast = +c.past || 350;
-  });
-  document.body.classList.add("front");
-}
 /* The quality counters cost a segment test and a lane scan on every trigger
    pull, which is worth paying when a tool is watching and worth nothing when
    a person is. On for ?auto=1 and ?bench=1 (both are tools), on for ?probe=1,
    off otherwise. */
-const PROBE = Q.get("probe") === "1" || (Q.get("probe") !== "0" && !FRONT && (SET.auto || SET.bench));
+const PROBE = Q.get("probe") === "1" || (Q.get("probe") !== "0" && (SET.auto || SET.bench));
 const SEP_OLD = Q.get("sep") === "old";      // the revert switch — see separateOld()
 const FIRE_OLD = Q.get("fire") === "old";    // ditto, for fire discipline
 const STEER_OLD = Q.get("steer") === "old";  // ditto, for wall-aware goal projection

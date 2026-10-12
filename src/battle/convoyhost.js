@@ -4,7 +4,7 @@
    this file is that host: the hulls, the men, the ground, the senses.
 
    THE ORDER. A side told to move as a convoy (?ac=1 for side A, ?bc=1 for
-   side B; the front spec's `convoy`; or CBZ.convoy.order from any system)
+   side B; or CBZ.convoy.order from any system)
    does not stand on its start line. Its vehicles form up in column on their
    route (lead security vehicle, armour, carriers, tail; FM 4-01.45), the
    riders the roster put on the benches walk to their carriers' doors and get
@@ -30,7 +30,7 @@
      vehicles.js stepVehicle  the convoy's control through vehMove (its own drive model)
      vehicles.js hurtVehicle  every hit is reported (contact, IED); no automatic bail-out
      vehicles.js vehDismount  out on the side away from the fire (lee)
-     loop.js frame           convoyStep(sdt) before the men are stepped */
+     tick.js battleTick      convoyStep(sdt) before the men are stepped */
 
 const CONVOY = { on: false, want: { red: null, blue: null }, cv: { red: null, blue: null }, made: { red: false, blue: false },
   camAt: null, events: [] };
@@ -58,30 +58,30 @@ const CONVOY_HOST = {
   place: function (u, x, z, h, v) {
     u.pos.x = x; u.pos.z = z; u.h = h;
     u.ds.v = v || 0; u.ds.w = 0; u.ds.steer = 0;
-    CBZ.vehicleDrive.pose(u.ds, MAP.groundAt, x, z, h, u.vlen * 2, u.vwid * 2, 0);
+    CBZ.vehicleDrive.pose(u.ds, HOST.groundAt, x, z, h, u.vlen * 2, u.vwid * 2, 0);
     u.pos.y = u.ds.y;
     u.group.rotation.set(-u.ds.pitch, h, -u.ds.roll);
     u.yaw = h + u.tur.yaw; u.heading = h; u.speed = Math.abs(v || 0);
     if (!v) { u.target.set(x, 0, z); }
   },
   marker: function (u, on) { u._cvMarker = !!on; },
-  groundAt: function (x, z) { return MAP.groundAt(x, z); },
-  // water: open water is all water; a map that knows its own (MAP.waterAt) says where
-  waterAt: function (x, z) { return !!(MAP.water || (MAP.waterAt && MAP.waterAt(x, z))); },
+  groundAt: function (x, z) { return HOST.groundAt(x, z); },
+  // water: open water is all water; a map that knows its own (HOST.waterAt) says where
+  waterAt: function (x, z) { return !!(HOST.water || (HOST.waterAt && HOST.waterAt(x, z))); },
   // a wall, a hesco line, a container: anything a hull cannot drive over
   blockedAt: function (x, z, r) {
-    const a = CBZ.micro.queryColliders(x, z, r + 0.5, _cvq);
+    const a = HOST.queryColliders(x, z, r + 0.5, _cvq);
     if (!a.length) return false;
-    const g = MAP.groundAt(x, z);
+    const g = HOST.groundAt(x, z);
     for (let i = 0; i < a.length; i++) {
       const c = a[i];
       if (c.y1 != null && c.y1 < g + 0.6) continue;           // a kerb, a log: driven over
-      if (CBZ.micro.colliderContains(c, x, z, r)) return true;
+      if (HOST.colliderContains(c, x, z, r)) return true;
     }
     return false;
   },
-  roads: function () { return MAP.roads || null; },
-  town: function () { return !!MAP.roads; },                  // the downtown is all town
+  roads: function () { return HOST.roads || null; },
+  town: function () { return !!HOST.roads; },                  // the downtown is all town
   camPos: function () { return CONVOY.camAt || (CBZ.camera && CBZ.camera.position) || null; },
   // WHAT THE COLUMN'S CREWS SEE: each hull's mark (vehicles.js vehPickTarget,
   // asked along real sight lines), and anybody inside 80 m of a hull
@@ -94,7 +94,7 @@ const CONVOY_HOST = {
       const t = u.tgt;
       if (t && !t.dead && !t.fled && t.team !== u.team && u.sees && !seen.has(t)) { seen.add(t); out.push({ x: t.pos.x, z: t.pos.z, unit: t, launcher: !!t.launcher }); }
     }
-    const team = cv.side;
+    const team = cv.members[0].u.team;                // the slot key ("red"/"blue"), whatever the side is called
     for (let k = 0; k < men.length; k++) {
       const o = men[k];
       if (o.team === team || o.dead || o.fled || o.air || seen.has(o)) continue;
@@ -128,8 +128,6 @@ const CONVOY_HOST = {
     if (kind === "phase" || kind === "lod") return;
     CONVOY.events.push(Object.assign({ side: cv.side }, e));
     if (CONVOY.events.length > 200) CONVOY.events.shift();
-    // the director: a column under fire is the story on the field
-    if (kind === "contact" && cv.contact) camEvent("convoy", cv.contact.x, cv.contact.z, 3);
   },
   now: function () { return simT; },
 };
@@ -179,7 +177,7 @@ function convoyMake(team) {
   vs.forEach(function (u) { cx += u.pos.x; cz += u.pos.z; });
   cx /= vs.length; cz /= vs.length;
   for (let i = 0; i < men.length; i++) { const o = men[i]; if (o.team === enemy && !o.dead && !o.air) { ex += o.pos.x; ez += o.pos.z; en++; } }
-  if (en) { ex /= en; ez /= en; } else { ex = MAP.cx; ez = MAP.cz; }
+  if (en) { ex /= en; ez /= en; } else { ex = HOST.cx; ez = HOST.cz; }
   let dx = ex - cx, dz = ez - cz;
   const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
   // the driver's right of the line of march is (-dz, dx)
@@ -189,7 +187,7 @@ function convoyMake(team) {
      range: on open ground it stands `start` metres short of him (?acs=,
      700: beyond the 600 m at which fire becomes its fight), on a map with
      roads it forms where its side spawned (the streets decide the rest). */
-  const start = SET.convoyStart != null ? SET.convoyStart : (MAP.roads ? 0 : 700);
+  const start = SET.convoyStart != null ? SET.convoyStart : (HOST.roads ? 0 : 700);
   let from = { x: cx, z: cz };
   if (start > d) from = { x: ex - dx * start, z: ez - dz * start };
   const riders = [];
@@ -216,7 +214,7 @@ function convoyMake(team) {
       const fx = Math.sin(u.h), fz = Math.cos(u.h), rx = -Math.cos(u.h), rz = Math.sin(u.h);   // nose, the driver's right
       const out = u.vwid + 6 + (j % 2) * 1.6, along = u.vlen - 1 - ((j >> 1) % 8) * 1.4;
       const x = u.pos.x + rx * out + fx * along, z = u.pos.z + rz * out + fz * along;
-      r.man.pos.set(x, MAP.groundAt(x, z), z);
+      r.man.pos.set(x, HOST.groundAt(x, z), z);
       r.man.target.set(x, 0, z);
       if (r.man.cvTask) { r.man.cvTask.x = x; r.man.cvTask.z = z; }
       r.man.yaw = Math.atan2(-rx, -rz);
@@ -242,3 +240,29 @@ function convoyReadout() {
     events: CONVOY.events.slice(-60),
   };
 }
+
+/* ---------------------------------------------------------------- Gang City's army
+   This file runs in the war realm Gang City compiles (battle/core/realm.js)
+   as well as on battle.html. There CBZ.army's "route" order (a road
+   movement) is handed to the convoy: the force's vehicles become a column on
+   the city's roads (this host, the realm's own hulls and HOST), its men on
+   foot follow the order to the route's end, and the column reports back
+   through api.done() when it is there. A force with no vehicles walks the
+   points the army's own way (the driver declines it). */
+function convoyRouteDriver(F, o, api) {
+  const vs = api.vehicles().filter(function (u) { return !u.air; });
+  const pts = (o.route || []).filter(function (p) { return p && isFinite(p.x) && isFinite(p.z); });
+  if (!vs.length || !pts.length) return null;
+  const end = pts[pts.length - 1];
+  const cv = CBZ.convoy.create({ side: F.side, units: vs, host: CONVOY_HOST, route: pts, to: end, dismountAtEnd: o.dismount !== false });
+  if (!cv) return null;
+  cv.members.forEach(function (m) { m.u.cv = cv.id; });
+  api.move(end, { type: "move" });                         // the men on foot
+  return {
+    convoy: cv,
+    step: function (dt) { if (!cv.done) CBZ.convoy.step(cv, dt); else api.done(); },
+    stop: function () { CBZ.convoy.order(cv, { kind: "release" }); },
+  };
+}
+if (CBZ.army && typeof CBZ.army.routeDriver === "function" && CBZ.convoy) CBZ.army.routeDriver(convoyRouteDriver);
+

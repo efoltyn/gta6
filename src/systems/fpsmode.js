@@ -3246,7 +3246,7 @@
         if (bd < bestDist) { bestActor = a; bestDist = bd; bestHead = false; bestOcc = false; }
       }
     };
-    if (CBZ.game.mode === "city") { scan(CBZ.cityPeds); scan(CBZ.cityCops); if (CBZ.cityMedics) scan(CBZ.cityMedics); if (CBZ.cityWildlife) scan(CBZ.cityWildlife); }   // same gun, city targets (wildlife are huntable too)
+    if (CBZ.game.mode === "city") { scan(CBZ.cityPeds); scan(CBZ.cityCops); if (CBZ.cityMedics) scan(CBZ.cityMedics); if (CBZ.cityWildlife) scan(CBZ.cityWildlife); if (CBZ.cityArmy) scan(CBZ.cityArmy); }   // same gun, city targets (wildlife are huntable too)
     else { scan(CBZ.guards); scan(CBZ.npcs); }
     // multiplayer: remote player avatars + host-synced puppet NPCs are real targets
     if (CBZ.net && CBZ.net.active && CBZ.net.targetList) scan(CBZ.net.targetList());
@@ -3643,6 +3643,9 @@
     // multiplayer target (remote player or synced puppet): authority is over the
     // wire — net code routes the damage and plays the local juice.
     if (a.netKind && CBZ.net && CBZ.net.localGunHit) return CBZ.net.localGunHit(a, hit, w);
+    // a soldier of the war (city/army.js): the battle core's own funnel takes
+    // the round below, once its range and head have been priced here
+    const armyUnit = !!(a.armyUnit && CBZ.army && CBZ.army.shot);
     // (e) per-weapon-CLASS falloff SHAPE, not one shared linear ramp — the
     // shotgun/sniper/smg/rifle curves live once in weapon-data.js and every
     // shooter (this + the prison gunHit below) calls the same evaluator.
@@ -3658,6 +3661,12 @@
     }
     let dmg = Math.max(1, Math.round(w.damage * (hit.head ? w.headMult : 1) * fall * locMult));
     let lethalHead = hit.head && !w.nonlethal;
+    if (armyUnit) {
+      const r = CBZ.army.shot(a, dmg, hit, w) || { head: !!hit.head, down: false, dmg: dmg };
+      if (CBZ.body && CBZ.body.flash) CBZ.body.flash(a);
+      if (CBZ.doHitstop) CBZ.doHitstop(hit.head ? 0.085 : 0.05);
+      return r;
+    }
     /* A SOLDIER'S KIT (entities/combatkit.js) is armour: systems/armour.js
        decides whether his helmet or plate stopped this round (raw: this
        hitscan already priced the head and the limbs). A limb has no plate. */

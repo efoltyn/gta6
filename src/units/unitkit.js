@@ -143,6 +143,17 @@
       return q ? "?v=" + q[1] : "";
     } catch (e) { return ""; }
   })();
+  /* THE SOURCE ROOT is where this file itself was loaded from (".../src/"),
+     so one loader serves games/battle.html ("../src/") and Gang City's
+     index.html ("src/", which has no studio). */
+  const SELF_ROOT = (function () {
+    try {
+      const s = typeof document !== "undefined" && document.currentScript;
+      const a = s && s.getAttribute && s.getAttribute("src");
+      const m = a && /^(.*\/)units\/unitkit\.js/.exec(a);
+      return m ? m[1] : null;
+    } catch (e) { return null; }
+  })();
   function fileOf(id) {
     const k = kindOf(id);
     if (k !== "species" && k !== "vehicle") return null;
@@ -153,7 +164,7 @@
     if (loading[id]) return loading[id];
     const rel = fileOf(id);
     if (!rel || typeof document === "undefined") return Promise.resolve();
-    const root = (CBZ.studio && CBZ.studio.root) || "../src/";
+    const root = (CBZ.studio && CBZ.studio.root) || SELF_ROOT || "../src/";
     const extra = (manifest()[id] && manifest()[id].needs) || [];
     // already registered (a tool swapped the file in): its engine files still
     // have to be there before anything builds it

@@ -106,5 +106,42 @@ if (C.battleRoster && C.battleSides && C.battleSeries && C.battleStore && C.batt
   check(C.battleLod.animEvery(69 * 69) === 1 && C.battleLod.animEvery(149 * 149) === 2 && C.battleLod.animEvery(151 * 151) === 4, "render LOD table (70 / 150 m)");
   check(C.battleHost.validate(C.battleHost.fromCity({})).length === 0, "the city host seam satisfies the host contract");
 }
+
+// 6: ONE SIM, TWO HOSTS (src/battle/core/realm.js). Gang City compiles the
+// sim files into a realm between its page layer (city/armypage.js) and its
+// glue (city/armyrealm.js). Held here: every sim file is on battle.html in
+// the realm's order; the names the sim reads from NPC War's page files are
+// exactly the realm's PAGE_NAMES; the city's page layer declares every one;
+// and the whole realm compiles (a name declared twice across the city's
+// files and the sim is a SyntaxError here, not on a phone).
+{
+  const { pageNames, topNames } = await import("./lib/realm-names.mjs");
+  vm.runInContext(fs.readFileSync(path.join(ROOT, "src/battle/core/realm.js"), "utf8"), core, { filename: "realm.js" });
+  const RM = core.CBZ.battleRealm;
+  check(!!RM && Array.isArray(RM.SIM), "battle/core/realm.js loads page-free");
+  if (RM) {
+    const order = battle.map((r) => r.replace(/^src\//, ""));
+    let last = -1, inOrder = true;
+    for (const f of RM.SIM) {
+      const k = order.indexOf(f);
+      check(k >= 0, "realm SIM file " + f + " is not on games/battle.html");
+      if (k < last) inOrder = false;
+      last = k;
+    }
+    check(inOrder, "realm SIM files are in games/battle.html's order");
+    const used = pageNames(ROOT, RM.SIM);
+    const miss = [...used.keys()].filter((k) => RM.PAGE_NAMES.indexOf(k) < 0);
+    const extra = RM.PAGE_NAMES.filter((k) => !used.has(k));
+    check(!miss.length, "the sim reads page names the realm does not list: " + miss.map((k) => k + " (" + used.get(k).owner + " <- " + used.get(k).by.join(", ") + ")").join("; "));
+    check(!extra.length, "realm PAGE_NAMES lists names the sim no longer reads: " + extra.join(", "));
+    const pageSrc = fs.readFileSync(path.join(ROOT, "src/city/armypage.js"), "utf8");
+    const declared = new Set(topNames(pageSrc));
+    const undecl = RM.PAGE_NAMES.filter((k) => !declared.has(k));
+    check(!undecl.length, "city/armypage.js must declare every page name: missing " + undecl.join(", "));
+    const files = ["city/armypage.js"].concat(RM.SIM, ["city/armyrealm.js"]).map((rel) => ({ name: rel, code: fs.readFileSync(path.join(ROOT, "src", rel), "utf8") }));
+    const comp = RM.compile(files, { name: "city-war" });
+    check(!!comp.fn, "Gang City's realm compiles: " + (comp.err ? comp.err.message : "ok"));
+  }
+}
 console.log("\n" + passes + " passed, " + fails + " failed");
 process.exit(fails ? 1 : 0);

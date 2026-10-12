@@ -15,18 +15,8 @@
    downtown, a ranked column drawn on paper puts a third of an army inside
    the Exchange Bank, where nothing can see them and nothing can shoot them.
    A golden-angle spiral, so the search is a spiral and not a ring: the
-   first free point is genuinely the nearest one, and it is deterministic. */
-const _fs = [];
-function blockedAt(x, z) {
-  const cols = CBZ.micro.queryColliders(x, z, 0.9, _fs);
-  for (let c = 0; c < cols.length; c++) {
-    const b = cols[c];
-    if (!CBZ.micro.colliderContains(b, x, z, 0.55)) continue;   // exact on a turned box
-    if (b.y0 != null && b.y1 != null && (b.y1 < 0.35 || b.y0 > 1.7)) continue;  // a kerb is not a wall
-    return true;
-  }
-  return false;
-}
+   first free point is genuinely the nearest one, and it is deterministic.
+   (blockedAt itself is the sim's, src/battle/physics.js: every host asks it.) */
 /* AND NOT ON TOP OF EACH OTHER EITHER. The spiral above only ever asked the
    geometry. On an open field that is enough, because the ranked grid never
    puts two men in the same square — but on a DENSE venue (the seat of state

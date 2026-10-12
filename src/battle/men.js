@@ -12,7 +12,7 @@ const trainingOf = function (id) {
 };
 function pickGun(choice, i) {
   if (choice === "fists") return "fists";
-  // A NATION'S ISSUE is a list (city/frontline.js: "carbine,carbine,lmg,..."),
+  // A NATION'S ISSUE is a list ("carbine,carbine,lmg,..."),
   // dealt out man by man on the same cycle MIXED uses
   if (String(choice).indexOf(",") > 0) {
     const L = String(choice).split(",");
@@ -45,27 +45,6 @@ function shade(hex, k) {
   return (r << 16) | (g << 8) | b;
 }
 CBZ.npcwar.onBoot(function () {
-  /* AT THE FRONT A UNIFORM IS A NATION'S, in the ground's colours: its own
-     cloth worked toward the camouflage of the place (white over-smocks in the
-     snow, tan on the sand), and the helmet cover in the nation's bright mark
-     so a crane shot still sorts the two lines. */
-  if (FRONT) {
-    const CAMO = { dunes: 0xb39a72, snow: 0xe8ecef, grass: 0x55603e, city: 0x5c5f63, harbor: 0x4c5560 };
-    const mixHex = function (a, b, t) {
-      const ch = function (sh) { return Math.round(((a >> sh) & 255) * (1 - t) + ((b >> sh) & 255) * t) & 255; };
-      return (ch(16) << 16) | (ch(8) << 8) | ch(0);
-    };
-    ["red", "blue"].forEach(function (t) {
-      const S = FRONT[t], tone = CAMO[SET.map] != null ? CAMO[SET.map] : 0x6b6b5a;
-      const k = SET.map === "snow" ? 0.72 : 0.38;
-      const cloth = mixHex(isFinite(S.cloth) ? S.cloth : 0x4d4a3a, tone, k);
-      UNIFORM[t] = {
-        torso: cloth, arms: shade(cloth, 0.94), legs: shade(mixHex(isFinite(S.cloth) ? S.cloth : 0x4d4a3a, tone, k * 0.8), 0.82),
-        cap: TEAMS[t].color, shoes: 0x1e1c19, belt: 0x2a2620,
-        shirt: mixHex(TEAMS[t].color, 0x3a3a3a, 0.4), swatT: shade(cloth, 0.62),
-      };
-    });
-  }
 });
 function uniformFor(teamId, trId, i) {
   const U = UNIFORM[teamId];
@@ -89,7 +68,6 @@ function uniformFor(teamId, trId, i) {
 function nationOf(teamId) {
   const S = SIDES[teamId];
   if (S && S.nation) return S.nation;
-  if (FRONT && FRONT[teamId] && FRONT[teamId].id) return FRONT[teamId].id;
   return teamId === "red" ? "kesh" : "republic";
 }
 function kitUp(man, teamId, trId, wid, i) {
@@ -105,15 +83,15 @@ function kitUp(man, teamId, trId, wid, i) {
 }
 function makeMan(teamId, i) {
   const T = TEAMS[teamId];
-  const tr = trainingOf(teamId === "red" ? SET.redT : SET.blueT);
-  const wid = pickGun(teamId === "red" ? SET.redW : SET.blueW, i);
+  const tr = trainingOf(trainAt(teamId, i));
+  const wid = pickGun(gunChoiceAt(teamId, i), i);
   const fists = wid === "fists";
   const w = fists ? null : (CBZ.weaponById(wid) || CBZ.weaponById("ak47"));
-  const group = CBZ.studio.cast(tr.role, { uniform: uniformFor(teamId, tr.id, i), variant: i * 2 + (teamId === "red" ? 0 : 1) });
+  const group = STUDIO.cast(tr.role, { uniform: uniformFor(teamId, tr.id, i), variant: i * 2 + (teamId === "red" ? 0 : 1) });
   if (!group) return null;
-  const at = MAP.spawnAt(teamId, i);
-  group.position.set(at.x, MAP.groundAt(at.x, at.z), at.z);
-  group.rotation.y = teamId === "red" ? Math.PI / 2 : -Math.PI / 2;
+  const at = HOST.spawnAt(teamId, i);
+  group.position.set(at.x, HOST.groundAt(at.x, at.z), at.z);
+  group.rotation.y = spawnHeading(teamId, i);
   CBZ.scene.add(group);
   const man = {
     id: teamId + i, team: teamId, i: i,
@@ -131,7 +109,7 @@ function makeMan(teamId, i) {
        systems/bodymass.js exists to have stopped. A quarter is a judgement,
        not a measurement, and ?swimpunch=N is the dial. */
     fists: fists, rad: 0.45,
-    punch: (PUNCH[tr.id] || 8) * (MAP.water ? SWIM_PUNCH : 1),
+    punch: (PUNCH[tr.id] || 8) * (HOST.water ? SWIM_PUNCH : 1),
     launcher: !!(w && w.explosive),
     mag: w ? (w.magSize || w.mag || 30) : 0, magSize: w ? (w.magSize || w.mag || 30) : 0,
     cool: 0.4 + lcg() * 1.2, reloadT: 0,
@@ -156,7 +134,6 @@ function makeMan(teamId, i) {
   man.target.set(at.x, 0, at.z);
   // where he formed up: the line a HOLD order keeps him on (ORDERS below)
   man.home = { x: at.x, z: at.z };
-  if (FRONT && i === 0) plantFlag(teamId, at.x, at.z);
   (squads[teamId][man.sq] = squads[teamId][man.sq] || []).push(man);
   // when there is an air war, every man is a thing a bomb can find — through
   // ordnance's OWN cover rules, so a roof or a wall between the bang and the
@@ -175,9 +152,10 @@ function makeMan(teamId, i) {
   else if (tr.id === "pro") man.kind = "guard";
   else if (tr.id === "thug") man.aggr = 0.92;
   if (!fists && CBZ.syncActorWeapon) CBZ.syncActorWeapon(man);
-  if (MAP.water) { man.swimD = cruiseDepth(man); man.pos.y = MAP.bodyY(man, at.x, at.z); }
+  if (HOST.water) { man.swimD = cruiseDepth(man); man.pos.y = HOST.bodyY(man, at.x, at.z); }
   // CREW: a man the roster put in a vehicle's seat rides inside it, off the
   // field, until he gets out (src/battle/vehicles.js)
+  bookUnit(man);                       // his force and its order, when a host fields forces (spawn.js)
   const seat = vehicleSeatFor(teamId, i);
   // ...except a convoy side's riders: they WALK to their carrier and get in
   // (src/battle/convoyhost.js); the crews are already at their stations

@@ -1683,6 +1683,8 @@
     // running and counts the dead for the news. Its groups carry their own
     // world, so this is safe in every mode.
     if (CBZ.crowds) { try { CBZ.crowds.blast(x, z, R, power, { cause: cause, byPlayer: byPlayer }); } catch (e) {} }
+    // THE WAR (city/army.js): the battle sim's own blast on its soldiers, hulls and rows
+    if (CBZ.army && CBZ.army.ready) { try { CBZ.army.blast(x, z, R, power, { cause: cause, byPlayer: byPlayer }); } catch (e) {} }
     const LR = R * 0.55, LR2 = LR * LR;
     // CITY ROSTERS ONLY. The prison arena overlaps the city's coordinate space
     // around the origin — the same overlap city/mode.js stamps `_city` on its

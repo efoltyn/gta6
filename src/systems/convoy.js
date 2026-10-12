@@ -2,8 +2,9 @@
    systems/convoy.js — CBZ.convoy: ONE DRIVER FOR MILITARY COLUMNS, on any
    map, in both games. Pure logic: no THREE, no DOM. It reaches the world and
    the vehicles only through a HOST (below), so NPC War (src/battle/
-   convoyhost.js), Gang City's army (CBZ.army's "move along route" order,
-   through moveForce) and node tools all drive columns with this one file.
+   convoyhost.js) and Gang City's army (CBZ.army's "route" order: the same
+   convoyhost.js, compiled into the city's war realm, is the army's
+   registered route driver) drive columns with this one file.
 
    THE ROUTE. CBZ.roadGraph.plan: the road graph where the map has roads
    (right-hand lane, junctions, a closed road or bridge never used), the
@@ -102,9 +103,9 @@
      release?(u)  report?(cv, kind, data)  now?()
 
    PUBLIC  CBZ.convoy = { create(spec), order(cv, o), tick(dt), control(u), hit(u, imp),
-     roadClosed(x, z, r), moveForce(force, order), fulfil(force, order), handles(kind),
+     step(cv, dt), roadClosed(x, z, r),
      on(evt, fn), off(evt, fn), request(kind, data), list(), audit(cv?), roleOf(def),
-     cityHost(over), coreOps, DOCTRINE }
+     DOCTRINE }
 ============================================================ */
 (function () {
   "use strict";
@@ -888,6 +889,7 @@
       case "dismount": col.forEach(function (m) { dismount(cv, m, leeOf(m, cv.T), "order"); }); return true;
       case "mount": setPhase(cv, "remount", "order"); return true;
       case "reroute": replan(cv, col[0].s, "order"); return true;
+      case "release": finish(cv, "released"); return true;
     }
     return false;
   }
@@ -916,78 +918,11 @@
     };
   }
 
-  /* ---------------------------------------------------------------- THE ARMY SEAM
-     CBZ.army.orderForce(force, { kind: "move along route", to | route }) hands
-     a force with vehicles here. force = { side, units: [vehicle units],
-     riders?: [{ man, u }], host? }. A unit is a battle-core vehicle (def,
-     pos, h, ds; units/kit/vehicle.js's drive) unless the force brings its own
-     host. Returns the convoy (or null: nothing here can drive). */
-  function moveForce(force, o) {
-    if (!force || !o) return null;
-    const units = force.units || force.vehicles || [];
-    if (!units.length) return null;
-    return create({
-      side: force.side || null, units: units, riders: force.riders || null,
-      host: force.host || o.host || cityHost(),
-      to: o.to || null, route: o.route || null, stage: !!o.stage, dismountAtEnd: o.dismount !== false,
-    });
-  }
-  const HANDLES = { "move along route": moveForce, "convoy": moveForce };
-  function handles(kind) { return !!HANDLES[kind]; }
-  function fulfil(force, o) { const f = o && HANDLES[o.kind]; return f ? f(force, o) : null; }
-
-  /* THE CORE VEHICLE, driven here (Gang City's army; node tools): a unit with
-     def, pos {x,y,z}, h, ds (units/kit/vehicle.js's state), optional group. */
-  const coreOps = {
-    def: function (u) { return u.def; },
-    dims: function (u) { const S = (u.def && u.def.stats) || {}; return { len: u.vlen ? u.vlen * 2 : S.length || 6, wid: u.vwid ? u.vwid * 2 : S.width || 2.5 }; },
-    pose: function (u) { return { x: u.pos.x, z: u.pos.z, h: u.h || 0, v: u.ds ? u.ds.v || 0 : 0 }; },
-    alive: function (u) { return !u.dead; },
-    mobile: function (u) { return !u.dead && !(u.vs && u.vs.mobility); },
-    apply: function (u, ctrl, dt) {
-      const D = CBZ.vehicleDrive; if (!D || ctrl.skip) return;
-      const S = (u.def && u.def.stats) || {};
-      u.ds = u.ds || { v: 0, w: 0, steer: 0 };
-      const spec = { speed: S.speed, reverse: S.reverse, accel: S.accel, turn: S.turn, width: S.width, wheelbase: S.wheelbase,
-        maxSteer: S.maxSteer, grip: S.grip, mobilityKill: !!(u.vs && u.vs.mobility) };
-      if (u.def && u.def.drive === "tracked") D.tracked(u.ds, spec, ctrl, dt); else D.wheeled(u.ds, spec, ctrl, dt);
-      u.h = D.wrap((u.h || 0) + u.ds.w * dt);
-      u.pos.x += Math.sin(u.h) * u.ds.v * dt; u.pos.z += Math.cos(u.h) * u.ds.v * dt;
-      if (this.collide) this.collide(u);
-      if (this.groundAt) { D.pose(u.ds, this.groundAt, u.pos.x, u.pos.z, u.h, S.length || 6, S.width || 2.5, dt); u.pos.y = u.ds.y; }
-      if (u.group) { u.group.position.set(u.pos.x, u.pos.y || 0, u.pos.z); u.group.rotation.set(-(u.ds.pitch || 0), u.h, -(u.ds.roll || 0)); }
-    },
-    place: function (u, x, z, h, v) {
-      u.pos.x = x; u.pos.z = z; u.h = h;
-      u.ds = u.ds || {}; u.ds.v = v || 0; u.ds.w = 0; u.ds.steer = 0;
-      if (this.groundAt) u.pos.y = this.groundAt(x, z);
-      if (u.group) { u.group.position.set(u.pos.x, u.pos.y || 0, u.pos.z); u.group.rotation.y = h; }
-    },
-  };
-  // Gang City's world, read through its own names (every one guarded)
-  function cityHost(over) {
-    const H = Object.assign({}, coreOps, {
-      groundAt: function (x, z) {
-        try { if (CBZ.cityCarGroundY) { const y = +CBZ.cityCarGroundY(x, z); if (isFinite(y)) return y; } } catch (e) {}
-        try { return CBZ.floorAt ? (+CBZ.floorAt(x, z) || 0) : 0; } catch (e) { return 0; }
-      },
-      waterAt: function (x, z) { try { return CBZ.cityWaterAt ? !!CBZ.cityWaterAt(x, z) : false; } catch (e) { return false; } },
-      roads: function () { const c = CBZ.city; return c ? ((c.arena && c.arena.roads) || c.roads || null) : null; },
-      speedLimit: function (x, z) { try { return CBZ.roadSpeedLimit ? CBZ.roadSpeedLimit(x, z) * 0.44704 : 0; } catch (e) { return 0; } },
-      town: function (x, z) {
-        try { const r = CBZ.roadSegmentAt ? CBZ.roadSegmentAt(x, z, 3) : null; return !!(r && r.district && r.district !== "highway" && r.district !== "freeway" && !r.frontier); } catch (e) { return false; }
-      },
-      camPos: function () { const c = CBZ.camera; return c && c.position ? c.position : null; },
-      collide: function (u) { try { if (CBZ.collide) CBZ.collide(u.pos, Math.max(1.2, ((u.def && u.def.stats && u.def.stats.width) || 2.5) * 0.5)); } catch (e) {} },
-    });
-    return Object.assign(H, over || {});
-  }
-
   CBZ.convoy = {
-    create: create, order: order, tick: tick, control: control, member: member, hit: hit, roadClosed: roadClosed,
-    moveForce: moveForce, fulfil: fulfil, handles: handles, on: on, off: off, request: request,
+    create: create, order: order, tick: tick, step: function (cv, dt) { if (cv && !cv.done && dt > 0) stepCv(cv, dt); },
+    control: control, member: member, hit: hit, roadClosed: roadClosed, on: on, off: off, request: request,
     list: function () { return LIVE.slice(); }, audit: audit, roleOf: roleOf, marchOrder: marchOrder,
-    cityHost: cityHost, coreOps: coreOps, DOCTRINE: DOCTRINE, ORDER: "move along route",
+    DOCTRINE: DOCTRINE,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = CBZ.convoy;
 })();

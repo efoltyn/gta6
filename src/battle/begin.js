@@ -108,19 +108,16 @@ function begin(asBench) {
   if (Q.get("settle") !== "0") CBZ.studio.settle(CBZ.scene);
   // the walkable map, once, off the colliders the ground just registered
   navBuild(MAP.cx, MAP.cz, { city: 330, island: 340, field: 540, arena: 150, dunes: 220, snow: 220, grass: 220, forest: 220, water: 200 }[SET.map] || 260);
-  AIR.on = SET.redS !== "none" || SET.blueS !== "none" ||
-    !!(FRONT && ((FRONT.red.strikes | 0) > 0 || (FRONT.red.queued | 0) > 0 || (FRONT.blue.queued | 0) > 0));
-  AIRSTRIKE.left = FRONT ? Math.max(0, FRONT.red.strikes | 0) : 0; AIRSTRIKE.used = 0;
-  // WHO HOLDS (ORDERS): the front says; on the war room the outnumbered men
+  AIR.on = SET.redS !== "none" || SET.blueS !== "none";
+  // WHO HOLDS (ORDERS): the outnumbered men
   ORDER.red = ORDER.blue = "advance";
-  if (FRONT) ORDER[FRONT.hold === "blue" ? "blue" : "red"] = "hold";
-  else if (!asBench && Q.get("hold") !== "0") {      // ?hold=0: the old meeting engagement, always
+  if (!asBench && Q.get("hold") !== "0") {      // ?hold=0: the old meeting engagement, always
     const menRed = CBZ.battleRoster.has(SET.redU, "men"), menBlue = CBZ.battleRoster.has(SET.blueU, "men");
     if (menBlue && SET.redN >= SET.blueN * 1.5) ORDER.blue = "hold";
     else if (menRed && SET.blueN >= SET.redN * 1.5) ORDER.red = "hold";
   }
   // ?hold=a|b: that side holds its ground whatever the numbers (an ambush waits)
-  if (!FRONT && (Q.get("hold") === "a" || Q.get("hold") === "b")) { ORDER.red = Q.get("hold") === "a" ? "hold" : "advance"; ORDER.blue = Q.get("hold") === "b" ? "hold" : "advance"; }
+  if ((Q.get("hold") === "a" || Q.get("hold") === "b")) { ORDER.red = Q.get("hold") === "a" ? "hold" : "advance"; ORDER.blue = Q.get("hold") === "b" ? "hold" : "advance"; }
   // A SIDE MOVING AS A CONVOY (src/battle/convoyhost.js): ?ac=1 / ?bc=1
   convoyBegin();
   // a small war is short: the warhead arms early enough to matter
@@ -181,10 +178,7 @@ function begin(asBench) {
   initRes(spawnTotal);
   started = true;
   if (AIR.on) spawnPlanes();
-  paintFrontCtl();
-  // AT THE FRONT the two flags and the place, once, over the opening crane
-  if (FRONT) banner(flagImg("red") + " " + TEAMS.red.name + " <em style=\"font-style:normal;color:#ffb35c\">v</em> " + TEAMS.blue.name + " " + flagImg("blue"),
-    FRONT.where ? String(FRONT.where).toUpperCase() : "");
+  paintCtl();
   CBZ.micro.onFrame(frame);
   if (SET.cam || SET.freeze) CBZ.micro.onFrame(urlLens);
 }
