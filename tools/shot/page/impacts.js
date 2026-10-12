@@ -300,7 +300,8 @@
     } else if (I.P.how === "rpg") {
       try {
         var R = CBZ.ballistics.ROCKET.pg7v || {};
-        o.weapon = { id: "pg7v", kind: "rocket", v0: R.v0, vMax: R.vMax, he: { blast: R.blast || null, power: R.power || null } };
+        var F = CBZ.munitionTable ? CBZ.munitionTable.fx("pg7v") : {};
+        o.weapon = { id: "pg7v", kind: "rocket", v0: R.v0, vMax: R.vMax, pen: F.pen || null, he: { blast: F.R || null, power: F.power || null } };
       } catch (e) {}
     }
     if (I.tgtU && I.tgtU.def) {
