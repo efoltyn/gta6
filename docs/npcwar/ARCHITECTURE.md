@@ -104,6 +104,9 @@ change it only in coordination.
 | `src/battle/men.js` | `makeMan`, uniforms; `kitUp` dresses each man through `CBZ.combatKit` (§9a) | humans / armour |
 | `src/battle/beasts.js` | `makeBeast`, `animateBeast`, `beastFight`: the animal unit, routed through `CBZ.unitKit` | core (species agents edit their species file instead) |
 | `src/battle/vehicles.js` | `makeVehicle`, the vehicle sim, crew mount/dismount | vehicles / armour |
+| `src/battle/convoyhost.js` | THE CONVOY ORDER (`?ac=1` / `?bc=1`): NPC War's host for `CBZ.convoy` (hulls, riders walking to their doors, the senses), §9d | convoy |
+| `src/systems/convoy.js` | `CBZ.convoy`: THE ONE COLUMN DRIVER, both games (order of march, intervals, drills, mount/dismount, LOD, the army's "move along route"), §9d | convoy |
+| `src/systems/roadgraph.js` | `CBZ.roadGraph`: THE ONE ROUTER, both games (the road graph out of any map's road records, lanes, closures, the drive path, the terrain planner), §9d | convoy (Gang City's motorcade and map arrows route on it) |
 | `src/battle/damage.js` | `hurtMan`: the one damage funnel (asks `CBZ.armour.resolve`, §9a), reachability | armour / weapons |
 | `src/battle/death.js` | a beast dies, a man dies, the sinking dead | physics / humans |
 | `src/battle/physics.js` | the grid, body separation (split by mass), pinned pairs, momentum (`bodyKg`, `contactImpulse`, `addKnock`, `stepKnock`), bodies in the air (`flingBody`, `stepTossed`), the blast (`blastBodies`), hull strikes (`hullForStrike`), the flow field (`NAV`), COM (§9c) | physics |
@@ -544,6 +547,9 @@ games/battle.html?a=bengal_tiger&b=lion&n=1v1&arena=dunes&cam=bengal_tiger&freez
 | `af`, `bf` | the nation an army fights for: `republic` `kesh` `veridia` `solara` `mbeya` |
 | `bo`, `sa`, `sb` | best of 1/3/5/7, rounds already won by A / B |
 | `cam` | the lens once the field is up: `a` / `b` (follow that side), a unit id (study the first one), `a:3` (side A's body #3) |
+| `hold` | `a` / `b`: that side holds its ground whatever the numbers (an ambush waits) |
+| `ac`, `bc` | `1`: that side's vehicles move as a CONVOY, riders aboard, along a route past the enemy (§9d) |
+| `aco`, `acp`, `acs` | the convoy's objective `aco` m right of the line of march and `acp` m (350) past the enemy; it forms up `acs` m (700 on open ground) short of him |
 | `freeze=1` | stop the clock once the field is up (visual checks) |
 | `auto=1` | skip the war room (implied by any tool use, as before) |
 
@@ -916,6 +922,49 @@ charge, a tank in a crowd, a blast, a throw).
 
 ---
 
+## 9d. Convoys: one column driver, one router (both games)
+
+`src/systems/roadgraph.js` (`CBZ.roadGraph`) is the only road router in either game. It was
+Gang City's motorcade router (`city/motorcade.js` §1-§2), lifted out whole and made
+map-agnostic; the motorcade and the map arrows (`systems/navigation.js`, which had a second,
+O(nodes x roads) graph of its own) both route on it now. It builds a graph from whatever road
+records the map has (axis-aligned `{x, z, vertical, len, w}` or any-heading `{ax, az, bx, bz, w}`),
+routes with the highway preferred, gives the right-hand lane, closes a road or bridge
+(`close(G, x, z, r)`, `G.ver`), fillets the drive path with its speed profile, and where there
+are no roads plans across open ground: an A* on the map's own `groundAt` that keeps off water,
+walls and anything steeper than the column's worst climber.
+
+`src/systems/convoy.js` (`CBZ.convoy`) drives military columns through a HOST (the world and
+the vehicles; every member optional). Doctrine (FM 4-01.45): lead security vehicle, armour,
+carriers with the protected gun trucks among the soft ones, rear security; 25-50 m intervals,
+25 m in towns; the slowest vehicle's march speed; regroup when it stretches; every vehicle
+steered and throttled through its own drive model (pure pursuit). Contact = fired on, or an
+enemy inside 150 m: a near ambush is driven through, a far one is fought from the halt (face
+the threat, gunners engage, sections out on the side away from the fire, remount when clear);
+an IED is halted on, cordoned at 35 m and re-routed round; a destroyed road is re-routed round.
+Contact is reported (`on("contact")`) and air support requested (`on("air")`: a listener that
+returns true has answered). Out of contact and far from the lens (`battleLod.RULES.CONVOY_R`)
+the column is markers advancing at road speed on its route; near, each vehicle drives on from
+there. Every change of state is an order (`CBZ.convoy.order(cv, {kind})`).
+
+- **NPC War**: `src/battle/convoyhost.js` is the host. `?ac=1` (or a front spec's
+  `red.convoy`) makes side A's vehicles a column once the field is up; riders the roster put
+  on the benches walk to their carriers and get in (`men.js` keeps them on the field,
+  `ai/think.js` / `step.js` walk their `cvTask`), `vehicles.js` takes the convoy's controls
+  through `vehMove`, reports every hit, and puts dismounts on the lee side. At the objective
+  every hull goes back to `thinkVehicle`. `__battle.convoy()` is the readout.
+- **Gang City**: the army's force API hands a force over with
+  `CBZ.convoy.fulfil(force, { kind: "move along route", to | route })` (`handles(kind)` says
+  yes). `force = { side, units, riders?, host? }`; without a host the units are battle-core
+  vehicles (`def`, `pos`, `h`, `ds`) driven by `units/kit/vehicle.js` on the city's own
+  ground, roads, limits and water (`CBZ.convoy.cityHost()`).
+- **Known gaps**: the AI's riflemen hold their fire on armour, so in node a far ambush is
+  opened by the harness's first volley; infantry put out at 200 m on the dunes rarely get a
+  shot. No HUD for the order yet (the war room has no convoy button; the URL and the front
+  spec carry it).
+
+---
+
 ## 10. Checks: node only, no browser
 
 ```
@@ -941,6 +990,8 @@ node tools/npcwar-arena.mjs        BALANCE: a matchup over N seeds in parallel w
 node tools/npcwar-balance-check.mjs the fast subset; FAILS when a win rate's whole 95% interval is
                                    outside its real-world band. Testbus node check.
 node tools/npcwar-physics-check.mjs mass, momentum, knocks, flight, blasts, hulls, fists v hide (9c).
+node tools/convoy-check.mjs        the road graph (routes, right-hand lanes, closures), the terrain
+                                   planner, and a column on city roads through the army seam (9d).
 ```
 
 `tools/npcwar-headless.mjs` lifts the page's `src/battle` / `src/units` script tags out of

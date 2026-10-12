@@ -123,6 +123,8 @@ function stepMan(m, sdt) {
       spd = m.slot === "fallback" ? tn.chase * 0.92 :
             m.slot === "push" ? tn.chase : tn.march;
       if (m.hunt && tdist < 999) spd = Math.max(spd, tn.chase * 1.08);
+    } else if (m.cvTask && (spd = convoyManPace(m)) >= 0) {
+      // a convoy task's own pace (src/battle/convoyhost.js): a brisk walk to the door
     } else if ((spd = tacSpeed(m, hurtish)) >= 0 && m.slot !== "rout") {
       // the squad's paces (ai/squad.js): march, bound, crawl, drag, withdraw
     } else {

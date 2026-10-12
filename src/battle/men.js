@@ -179,6 +179,9 @@ function makeMan(teamId, i) {
   // CREW: a man the roster put in a vehicle's seat rides inside it, off the
   // field, until he gets out (src/battle/vehicles.js)
   const seat = vehicleSeatFor(teamId, i);
-  if (seat) { vehBoardAtSpawn(man, seat); return null; }
+  // ...except a convoy side's riders: they WALK to their carrier and get in
+  // (src/battle/convoyhost.js); the crews are already at their stations
+  if (seat && !seat.crew && convoyWalks(teamId)) convoyRiderSpawned(man, seat.vi);
+  else if (seat) { vehBoardAtSpawn(man, seat); return null; }
   return man;
 }

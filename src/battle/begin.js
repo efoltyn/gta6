@@ -119,6 +119,10 @@ function begin(asBench) {
     if (menBlue && SET.redN >= SET.blueN * 1.5) ORDER.blue = "hold";
     else if (menRed && SET.blueN >= SET.redN * 1.5) ORDER.red = "hold";
   }
+  // ?hold=a|b: that side holds its ground whatever the numbers (an ambush waits)
+  if (!FRONT && (Q.get("hold") === "a" || Q.get("hold") === "b")) { ORDER.red = Q.get("hold") === "a" ? "hold" : "advance"; ORDER.blue = Q.get("hold") === "b" ? "hold" : "advance"; }
+  // A SIDE MOVING AS A CONVOY (src/battle/convoyhost.js): ?ac=1 / ?bc=1
+  convoyBegin();
   // a small war is short: the warhead arms early enough to matter
   AIR.nukeAt = 20 + Math.min(22, (SET.redN + SET.blueN) / 36);
   if (AIR.on && CBZ.ordnance && CBZ.ordnance.init) {

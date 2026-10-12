@@ -252,6 +252,9 @@ function thinkMan(m, now) {
   m.hunt = HUNT[m.team];
   // HIS NERVE FIRST: a man who has broken is not deciding anything else
   if (routCheck(m, thinkDt)) return;
+  // a convoy's rider on his way to his seat, or out of it on a cordon
+  // (src/battle/convoyhost.js): he walks the task and nothing else
+  if (m.cvTask && convoyManThink(m)) return;
   if (m.beast && beastEscaped(m, thinkDt)) return;
   // a man stepping off his own man's firing line finishes the step. Half a
   // second of not re-deciding is the whole point: re-deciding is what put

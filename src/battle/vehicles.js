@@ -93,8 +93,9 @@ function vehicleSeatFor(team, i) {
   if (!s) return false;
   return s;
 }
-function vehBoardAtSpawn(man, s) {
-  // off the field: hidden, out of the squads and out of the bomb list
+// off the field: hidden, out of the squads and out of the bomb list (a man
+// seated at spawn, or a convoy's rider climbing in: src/battle/convoyhost.js)
+function vehStow(man) {
   if (man.group) man.group.visible = false;
   const sq = squads[man.team][man.sq];
   if (sq) { const k = sq.indexOf(man); if (k >= 0) sq.splice(k, 1); }
@@ -103,6 +104,9 @@ function vehBoardAtSpawn(man, s) {
     if (CBZ.ordnance && CBZ.ordnance.removeTarget) { try { CBZ.ordnance.removeTarget(man.ordTgt); } catch (e) {} }
     man.ordTgt = null;
   }
+}
+function vehBoardAtSpawn(man, s) {
+  vehStow(man);
   let v = VEH.byIndex[man.team + ":" + s.vi];
   if (v && (v.dead || men.indexOf(v) < 0)) v = null;   // a hull from a restaged war is not this one
   if (v) vehSeatMan(v, man, s);
@@ -305,12 +309,24 @@ function vehPassengers(u) {
 }
 
 /* ------------------------------------------------------------- getting out */
-function vehPutOnField(u, man, k) {
+function vehPutOnField(u, man, k, lee) {
   man.inVeh = null;
   // behind the hull, spread across its width
   const back = u.vlen + 1.2 + (k % 3) * 0.9, side = ((k % 5) - 2) * 1.1;
-  const x = u.pos.x - Math.sin(u.h) * back + Math.cos(u.h) * side;
-  const z = u.pos.z - Math.cos(u.h) * back - Math.sin(u.h) * side;
+  let x = u.pos.x - Math.sin(u.h) * back + Math.cos(u.h) * side;
+  let z = u.pos.z - Math.cos(u.h) * back - Math.sin(u.h) * side;
+  /* AWAY FROM THE FIRE (a convoy's dismount, systems/convoy.js): out of the
+     door on the corner of the hull away from the threat, then a few steps
+     to a spot along that flank with the hull between him and the fire */
+  let cover = null;
+  if (lee && u.vlen != null) {
+    const fx = Math.sin(u.h), fz = Math.cos(u.h), lx = Math.cos(u.h), lz = -Math.sin(u.h);   // nose, the hull's left (+X)
+    const sideSign = (lee.x * lx + lee.z * lz) >= 0 ? 1 : -1;
+    x = u.pos.x - fx * (u.vlen + 0.6) + lx * sideSign * u.vwid * 0.5;
+    z = u.pos.z - fz * (u.vlen + 0.6) + lz * sideSign * u.vwid * 0.5;
+    const along = (((k >> 1) % 4) - 1.5) * Math.min(1.7, u.vlen * 0.45), out = u.vwid + 1.0 + (k % 2) * 0.9;
+    cover = { x: u.pos.x + fx * along + lx * sideSign * out, z: u.pos.z + fz * along + lz * sideSign * out };
+  }
   man.pos.set(x, MAP.groundAt(x, z), z);
   if (man.group) { man.group.visible = true; man.group.rotation.y = u.h; }
   man.yaw = u.h;
@@ -326,9 +342,12 @@ function vehPutOnField(u, man, k) {
     });
   }
   men.push(man);
+  if (cover) man.cvTask = { kind: "cover", x: cover.x, z: cover.z, pace: 3.4, until: simT + 4 };
 }
-function vehDismount(u) {
+// lee (optional, a unit vector): get out on the side away from the fire
+function vehDismount(u, lee) {
   let k = 0;
+  const out = [];
   for (let s = 0; s < u.seats.length; s++) {
     const seat = u.seats[s];
     if (seat.crew || !seat.man) continue;
@@ -336,9 +355,11 @@ function vehDismount(u) {
     if (u.air) {                                  // an airdrop: they come down under the aircraft
       const x = u.pos.x + (lcg() - 0.5) * 30, z = u.pos.z + (lcg() - 0.5) * 30;
       vehPutOnField({ pos: { x: x, y: 0, z: z }, h: u.h, vlen: 0 }, man, k++);
-    } else vehPutOnField(u, man, k++);
+    } else vehPutOnField(u, man, k++, lee);
+    out.push(man);
   }
   u.dismounted = true;
+  return out;
 }
 /* ONE MAN DOWN A FAST ROPE: the next passenger, at the foot of rope k & 1
    (port / starboard: 2 m out from the cabin doors), stepping off it. */
@@ -412,7 +433,11 @@ function stepVehicle(u, sdt) {
       // one man drives OR fights: he stops when he has a shot
       const shoot = u.tgt && !u.tgt.dead && u.sees;
       const halt = crew <= 1 && shoot && u._wantShot;
-      vehDriveTo(u, sdt, halt);
+      // a hull in a column takes the convoy's controls through its own drive
+      // model (or, far from the lens, the convoy has set it on its route)
+      const cc = u.cv && CBZ.convoy ? CBZ.convoy.control(u) : null;
+      if (cc) { if (!cc.skip) vehMove(u, sdt, cc); }
+      else vehDriveTo(u, sdt, halt);
       vehFight(u, sdt);
     }
   }
@@ -429,6 +454,9 @@ function thinkVehicle(u) {
   if (t) { u.tgt = t; u.losBadT = 0; }
   else if (u.tgt && (u.tgt.dead || u.tgt.fled || u.tgt.downed)) u.tgt = null;   // a man down is out of the fight (ai/squad.js)
   u.sees = !!(u.tgt && eyeLos(u, u.tgt));
+  // a hull in a column: the crew picks its marks, the convoy drives it and
+  // decides when its men get out (systems/convoy.js, src/battle/convoyhost.js)
+  if (u.cv) return;
   const enemy = u.team === "red" ? "blue" : "red";
   const com = teamCOM[enemy];
   const S = u.def.stats || {};
@@ -1270,6 +1298,8 @@ function vehRelease(u, W, he, guideTo, tf) {
 function hurtVehicle(u, dmg, imp) {
   if (!u || u.dead || u.fled || !(dmg > 0) || over) return;
   imp = imp || {};
+  // a column under fire knows it (contact, an IED under a hull: systems/convoy.js)
+  if (u.cv && CBZ.convoy) CBZ.convoy.hit(u, imp);
   const D = CBZ.vehicleDrive;
   const by = imp.by || null;
   const th = D.threatOf(imp, by);
@@ -1310,7 +1340,9 @@ function hurtVehicle(u, dmg, imp) {
   if (vehCrewN(u) === 0) { u._abandoned = true; killMan(u, imp); return; }
   // a hull that can neither move nor fight is abandoned
   if (u.vs.mobility && (u.vs.firepower || !u.wpn.length)) { u._abandoned = true; killMan(u, imp); return; }
-  if (res.pen && vehPassengers(u) && !(u.air && u.pos.y - MAP.groundAt(u.pos.x, u.pos.z) > 3)) vehDismount(u);
+  // (a convoy's carriers keep their men aboard through a kill zone: the
+  // convoy puts them out when the hull stops, away from the fire)
+  if (res.pen && vehPassengers(u) && !u.cv && !(u.air && u.pos.y - MAP.groundAt(u.pos.x, u.pos.z) > 3)) vehDismount(u);
   if (u.air && u.vs.mobility) { u._abandoned = true; killMan(u, imp); }
 }
 /* ARMOUR BY PLACE. stats.armour is per face; stats.plates (optional) refines

@@ -188,88 +188,19 @@
     return finish("escape", points, to, "grid");
   }
 
-  // ---- city: route along actual road centerlines, including bridge/island ----
-  let cityGraphCache = null;
-  function cityGraph() {
-    const A = CBZ.city && CBZ.city.arena;
-    if (!A || !A.roads || !A.roads.length) return null;
-    if (cityGraphCache && cityGraphCache.arena === A && cityGraphCache.roadCount === A.roads.length && cityGraphCache.intersectionCount === A.intersections.length) return cityGraphCache;
-    const nodes = [], byKey = new Map(), edges = [];
-    function addNode(x, z) {
-      const key = Math.round(x * 10) + ":" + Math.round(z * 10);
-      let id = byKey.get(key);
-      if (id != null) return id;
-      id = nodes.length; byKey.set(key, id); nodes.push(point(x, z)); edges.push([]);
-      return id;
-    }
-    function link(a, b) {
-      if (a === b) return;
-      const w = distance(nodes[a], nodes[b]);
-      edges[a].push({ id: b, cost: w }); edges[b].push({ id: a, cost: w });
-    }
-    for (const r of A.roads) {
-      if (r.vertical) { addNode(r.x, r.z - r.len / 2); addNode(r.x, r.z + r.len / 2); }
-      else { addNode(r.x - r.len / 2, r.z); addNode(r.x + r.len / 2, r.z); }
-    }
-    for (const it of A.intersections || []) addNode(it.x, it.z);
-    for (const r of A.roads) {
-      const along = [];
-      for (let id = 0; id < nodes.length; id++) {
-        const p = nodes[id];
-        if (r.vertical) {
-          if (Math.abs(p.x - r.x) < 0.25 && Math.abs(p.z - r.z) <= r.len / 2 + 0.25) along.push(id);
-        } else if (Math.abs(p.z - r.z) < 0.25 && Math.abs(p.x - r.x) <= r.len / 2 + 0.25) along.push(id);
-      }
-      along.sort((a, b) => r.vertical ? nodes[a].z - nodes[b].z : nodes[a].x - nodes[b].x);
-      for (let i = 1; i < along.length; i++) link(along[i - 1], along[i]);
-    }
-    cityGraphCache = { arena: A, roadCount: A.roads.length, intersectionCount: A.intersections.length, nodes, edges, roads: A.roads };
-    return cityGraphCache;
-  }
-
-  function projectRoad(graph, p) {
-    let best = copyPoint(p), bd = Infinity;
-    for (const r of graph.roads) {
-      let x = p.x, z = p.z;
-      if (r.vertical) { x = r.x; z = Math.max(r.z - r.len / 2, Math.min(r.z + r.len / 2, z)); }
-      else { z = r.z; x = Math.max(r.x - r.len / 2, Math.min(r.x + r.len / 2, x)); }
-      const d = (x - p.x) * (x - p.x) + (z - p.z) * (z - p.z);
-      if (d < bd) { bd = d; best = point(x, z); }
-    }
-    return best;
-  }
-
-  function nearestNode(graph, p) {
-    let best = 0, bd = Infinity;
-    for (let i = 0; i < graph.nodes.length; i++) {
-      const q = graph.nodes[i], d = (q.x - p.x) * (q.x - p.x) + (q.z - p.z) * (q.z - p.z);
-      if (d < bd) { bd = d; best = i; }
-    }
-    return best;
-  }
-
+  // ---- city: the one road graph (systems/roadgraph.js), the same router the
+  // motorcade and every convoy drives. This file used to build its own graph
+  // here, scanning every node against every road (O(nodes x roads) on an
+  // eight-kilometre city) and missing every crossing nobody had listed in
+  // arena.intersections. ----
   function cityRoute(from, to) {
-    const graph = cityGraph();
-    if (!graph) return direct("city", from, to);
-    const a = projectRoad(graph, from), b = projectRoad(graph, to);
-    const start = nearestNode(graph, a), goal = nearestNode(graph, b);
-    const heap = new MinHeap(), cost = new Float64Array(graph.nodes.length), parent = new Int32Array(graph.nodes.length);
-    cost.fill(Infinity); parent.fill(-1); cost[start] = 0; heap.push(start, 0);
-    while (heap.a.length) {
-      const cur = heap.pop().id;
-      if (cur === goal) break;
-      for (const e of graph.edges[cur]) {
-        const next = cost[cur] + e.cost;
-        if (next >= cost[e.id]) continue;
-        cost[e.id] = next; parent[e.id] = cur;
-        heap.push(e.id, next + distance(graph.nodes[e.id], graph.nodes[goal]));
-      }
-    }
-    if (parent[goal] < 0 && goal !== start) return direct("city", from, to, "fallback");
-    const ids = []; let at = goal;
-    while (at >= 0) { ids.push(at); if (at === start) break; at = parent[at]; }
-    ids.reverse();
-    return finish("city", [copyPoint(from), a].concat(ids.map((id) => copyPoint(graph.nodes[id])), [b, copyPoint(to)]), to, "streets");
+    const A = CBZ.city && CBZ.city.arena, RG = CBZ.roadGraph;
+    const G = A && RG ? RG.of(A.roads) : null;
+    if (!G) return direct("city", from, to);
+    let R = null;
+    try { R = RG.route(G, from, to); } catch (e) { R = null; }
+    if (!R || !R.ok) return direct("city", from, to, "fallback");
+    return finish("city", [copyPoint(from)].concat(R.pts.map(copyPoint), [copyPoint(to)]), to, "streets");
   }
 
   // ---- survival: the terrain is traversable, but the ocean is not ----

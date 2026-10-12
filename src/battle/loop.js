@@ -94,6 +94,7 @@ function frame(dt) {
       }
       physPre(sdt);                         // how fast every body was going (src/battle/physics.js)
       tacticsStep(sdt);                    // the squads decide; grenades fly (ai/squad.js)
+      convoyStep(sdt);                     // the columns drive (src/battle/convoyhost.js, systems/convoy.js)
       for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
       if (MASS.on) MASS.step(sdt);          // the MID and FAR tiers (src/battle/mass.js)
       // the struck slide on their own momentum; hulls drive over what lies in their path

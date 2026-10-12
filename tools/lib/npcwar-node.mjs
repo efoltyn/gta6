@@ -74,7 +74,9 @@ for (const m of HTML.matchAll(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/scri
   const src = m[1];
   if (src) {
     const rel = src.replace(/\?.*$/, "").replace(/^\.\.\//, "");
-    if (!/^src\/(battle|units)\//.test(rel)) continue;  // the studio is stubbed below
+    // the page's own files, plus the shared systems it lists by name (the road
+    // graph, the convoy); the studio is stubbed below
+    if (!/^src\/(battle|units)\//.test(rel) && !/^src\/systems\/(roadgraph|convoy)\.js$/.test(rel)) continue;
     PAGE_SCRIPTS.push({ name: rel, code: fs.readFileSync(path.join(ROOT, rel), "utf8") });
   } else if (m[2].trim()) PAGE_SCRIPTS.push({ name: "battle.inline.js", code: m[2] });
 }

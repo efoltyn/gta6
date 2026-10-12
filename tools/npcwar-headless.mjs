@@ -31,6 +31,10 @@
   14  THE CONVOY: an M1, a MaxxPro MRAP and a JLTV v riflemen with RPGs:
       the troops get out, rifle fire stops on the MRAP, the V-hulls live
       through an IED under them.
+  18  THE CONVOY ORDER (systems/convoy.js): order of march, boarding, the
+      intervals and the slowest vehicle's speed, a near ambush driven
+      through, a far one fought from the halt with the sections out on the
+      lee side, an IED cordoned and re-routed round, LOD markers.
   10  THE GROUND: cover points for the host (crests, props, crater lips), a
       dug-in position's berm in the height function, a bomb that digs a crater
       into groundAt and breaks the sandbags beside it.                    */
@@ -778,6 +782,246 @@ scenario(17, "the convoy: an Abrams and two loaded FMTVs v 40 riflemen; the squa
   check(kills > 0, "and killed");
   check(trucks.some((v) => v.shotsF > 0), "the ring .50s fired (" + trucks.map((v) => v.shotsF).join(" + ") + " rounds)");
   check(a.over, "the war ended (" + a.simT + " s, winner " + a.winner + ", red " + a.red + " blue " + a.blue + "; trucks " + trucks.map((v) => v.dead ? "lost" : Math.round(v.hp) + " hp").join(", ") + ")");
+});
+
+/* 18  THE CONVOY ORDER (systems/convoy.js, the one column driver of both
+   games; src/battle/convoyhost.js, NPC War's host). ?ac=1: side A's Humvee,
+   Abrams, two MaxxPros and two FMTVs form up out of rifle range in the
+   order of march, the sections walk to their trucks and climb in, and the
+   column drives the terrain planner's route across the dunes past the
+   enemy. The harness stands the ambushers on that route (where the column
+   will meet them is the column's business, not the test's).
+     A  a NEAR ambush (12 riflemen with RPGs, 70 m off the road): reported,
+        CAS asked for, and the column drives through it without stopping;
+     B  a FAR one (260 m off): halt, the tracked hull pivots to face it, the
+        carriers' sections get out on the side away from the fire;
+     C  no enemy near: the intervals and the speed of the slowest; far from
+        the lens the column is markers at road speed and comes back without a
+        jump; an IED under a MaxxPro: halt, cordon, re-route round the site,
+        remount, move on. No vehicle and no walking man ever moves further in
+        a tenth of a second than its own speed allows. */
+const CONVOY_ROSTER = "a=hmmwv*1,m1_abrams*1,fmtv*2,maxxpro_mrap*2,men*48";
+const CONVOY_MARCH = ["hmmwv", "m1_abrams", "maxxpro_mrap", "fmtv", "fmtv", "maxxpro_mrap"];
+async function convoyBoot(blue, extra) {
+  const W = boot("?" + CONVOY_ROSTER + "&b=men&n=54v" + blue + "&arena=dunes&aw=carbine&bw=ak47,ak47,ak47,bazooka&bt=pro&ac=1&hold=b&auto=1&probe=0" + (extra || ""));
+  if (W.err) return { W: W, err: W.err };
+  realBoom(W);
+  await settle();
+  const B = W.sb.__battle;
+  let cv = null;
+  for (let t = 0; t < 6 && !cv; t += 0.1) { B.advance(0.1, 1 / 20); cv = B.convoys().red; }
+  return { W: W, B: B, cv: cv };
+}
+// the harness's ambush: every man of side B on a line `off` m to the right of
+// the route, centred `ahead` m along it from the lead, and told that is his line
+function convoyAmbush(W, cv, ahead, off) {
+  const RG = W.CBZ.roadGraph, lead = cv.members[0], P = cv.P;
+  const blue = W.sb.__battle.roster().filter((m) => m.team === "blue" && !m.dead);
+  // the route winds round the dunes: take the stretch (and the side of it)
+  // from which no other part of the route comes nearer than `off`
+  const nearest = (x, z) => { let d = Infinity; for (let i = 0; i < P.n; i++) d = Math.min(d, Math.hypot(P.x[i] - x, P.z[i] - z)); return d; };
+  let pick = { a: ahead, side: 1 };
+  search: for (let a = ahead; a < ahead + 400; a += 25) for (const side of [1, -1]) {
+    const q = RG.pathAt(P, Math.min(P.len - 5, lead.s + a));
+    const x = q.x - Math.cos(q.h) * off * side, z = q.z + Math.sin(q.h) * off * side;
+    if (nearest(x, z) > off * 0.92) { pick = { a: a, side: side }; break search; }
+  }
+  blue.forEach((m, i) => {
+    const q = RG.pathAt(P, Math.min(P.len - 5, lead.s + pick.a + ((i % 6) - 2.5) * 9));
+    const rx = -Math.cos(q.h) * pick.side, rz = Math.sin(q.h) * pick.side, d = off + ((i / 6) | 0) * 5;
+    const x = q.x + rx * d, z = q.z + rz * d;
+    m.pos.set(x, W.CBZ.groundAt(x, z), z); m.target.set(x, 0, z); m.home = { x: x, z: z };
+  });
+  return blue;
+}
+// one tenth of a second, with the no-teleport ledger: a hull moves no further
+// than its speed carried it, a man on foot no further than a run
+function convoyStep(W, cv, led) {
+  const B = W.sb.__battle;
+  const before = cv.members.map((m) => ({ x: m.u.pos.x, z: m.u.pos.z, v: Math.abs(m.u.ds.v) }));
+  const feet = cv.manifest.filter((r) => !r.man.inVeh && !r.man.dead).map((r) => ({ m: r.man, x: r.man.pos.x, z: r.man.pos.z }));
+  B.advance(0.1, 1 / 20);
+  if (cv.lod === "marker" || cv.done) return;
+  cv.members.forEach((m, k) => {
+    if (m.u.dead) return;
+    const d = Math.hypot(m.u.pos.x - before[k].x, m.u.pos.z - before[k].z);
+    const allow = Math.max(before[k].v, Math.abs(m.u.ds.v)) * 0.1 * 1.3 + 0.3;
+    if (d > allow) led.jumps.push(m.def.id + " " + d.toFixed(2) + "m in 0.1 s (allowed " + allow.toFixed(2) + ")");
+    led.vMax = Math.max(led.vMax, Math.abs(m.u.ds.v));
+  });
+  feet.forEach((f) => {
+    if (f.m.inVeh || f.m.dead) return;
+    const d = Math.hypot(f.m.pos.x - f.x, f.m.pos.z - f.z);
+    if (d > 1.3) led.jumps.push("a rider " + d.toFixed(2) + "m in 0.1 s");
+  });
+}
+function convoyEvents(cv, kind) { return cv.log.filter((e) => e.kind === kind); }
+
+scenario(18, "the convoy order: march order, boarding, intervals, a near ambush driven through, a far one fought, an IED, markers", async () => {
+  // ---------------------------------------------------------------- A: near ambush
+  const A = await convoyBoot(12);
+  if (A.err) { check(false, "page threw at boot: " + (A.err.stack || A.err)); return; }
+  const { W, B, cv } = A;
+  check(!!cv, "?ac=1 made a convoy of side A's vehicles once the field was up");
+  if (!cv) return;
+  const air = [];
+  W.CBZ.convoy.on("air", (r) => { air.push(r); return false; });
+  const ids = cv.members.map((m) => m.def.id), roles = cv.members.map((m) => m.role);
+  check(JSON.stringify(ids) === JSON.stringify(CONVOY_MARCH),
+    "order of march: lead security, armour, the carriers with a MaxxPro among the soft trucks, a MaxxPro at the tail (" + ids.join(" > ") + "; " + roles.join(", ") + ")");
+  check(cv.plan.kind === "terrain" && cv.plan.ok && cv.P.len > 900, "no roads on the dunes: the terrain planner found a route (" + Math.round(cv.P.len) + " m)");
+  const V0 = Math.min(...cv.members.map((m) => m.cruise)) * W.CBZ.convoy.DOCTRINE.OFFROAD_K;
+  check(Math.abs(cv.V - V0) < 0.05 && cv.V <= cv.members.find((m) => m.def.id === "m1_abrams").cruise,
+    "the column's speed is its slowest vehicle's march speed off the road (" + cv.V.toFixed(1) + " m/s, the Abrams' " + V0.toFixed(1) + ")");
+  const riders = cv.manifest.length, onFoot0 = cv.manifest.filter((r) => !r.man.inVeh && !r.man.dead).length;
+  check(riders >= 30 && onFoot0 === riders && cv.phase === "board", "the " + riders + " riders start on foot and the column waits for them (" + cv.phase + ")");
+  convoyAmbush(W, cv, 400, 1500);                  // out of the way until it springs
+  const led = { jumps: [], vMax: 0 };
+  let tBoard = 0;
+  while (cv.phase === "board" && tBoard < 90) { convoyStep(W, cv, led); tBoard += 0.1; }
+  const aboard = cv.manifest.filter((r) => r.seated && !r.dead && !r.left).length;
+  check(cv.phase !== "board" && aboard >= riders * 0.9, "they walked to their doors and got in (" + aboard + "/" + riders + " aboard in " + tBoard.toFixed(1) + " s)");
+  check(cv.members.filter((m) => m.def.id === "fmtv").every((m) => m.u.seats.filter((s) => !s.crew && s.man).length >= 12),
+    "the FMTVs carry their sections on the benches (" + cv.members.filter((m) => m.def.id === "fmtv").map((m) => m.u.seats.filter((s) => !s.crew && s.man).length).join(", ") + ")");
+  // the march to the contact
+  const gaps = [], leadV = [];
+  let tMove = 0;
+  while (cv.phase === "move" && tMove < 45) {
+    convoyStep(W, cv, led); tMove += 0.1;
+    if (tMove > 15 && Math.round(tMove * 10) % 5 === 0) { const a = W.CBZ.convoy.audit(cv); gaps.push(...a.gaps); leadV.push(cv.members[0].v); }
+  }
+  // THE AMBUSH SPRINGS: twelve men rise 55 m off the road, 130 m ahead of the lead
+  convoyAmbush(W, cv, 130, 55);
+  while (cv.phase === "move" && tMove < 90) { convoyStep(W, cv, led); tMove += 0.1; }
+  const gMean = gaps.reduce((s, g) => s + g, 0) / Math.max(1, gaps.length);
+  check(gaps.length > 20 && gMean >= 25 && gMean <= 55 && gaps.every((g) => g >= 18 && g <= 75),
+    "25-50 m intervals bumper to bumper on the march (mean " + gMean.toFixed(0) + " m, " + Math.min(...gaps) + "-" + Math.max(...gaps) + ")");
+  check(leadV.length > 5 && Math.max(...leadV) <= cv.V * 1.12, "the lead holds the column's speed (max " + Math.max(...leadV).toFixed(1) + " of " + cv.V.toFixed(1) + " m/s)");
+  const C = cv.contact;
+  check(!!C && C.drill === "push" && C.near, "contact reported: " + JSON.stringify(C));
+  check(air.length > 0 && air[0].kind === "cas", "and an air support request went out for anyone to answer (" + JSON.stringify(air[0] && { kind: air[0].kind, range: Math.round(air[0].range) }) + ")");
+  if (!C) return;
+  const sC = cv.members[0].s, shots0 = cv.members.reduce((s, m) => s + (m.u.shotsF || 0), 0);
+  let tPush = 0, vSum = 0, n = 0;
+  while (tPush < 60 && !cv.done) {
+    convoyStep(W, cv, led); tPush += 0.1;
+    if (cv.phase === "push") { vSum += cv.members.filter((m) => m.state !== "lost").reduce((s, m) => s + m.v, 0) / cv.members.filter((m) => m.state !== "lost").length; n++; }
+  }
+  const clear = convoyEvents(cv, "clear")[0];
+  const lead = cv.members.find((m) => m.state !== "lost");
+  check(n > 0 && vSum / n > 5, "it drove through the kill zone without stopping (mean " + (vSum / Math.max(1, n)).toFixed(1) + " m/s while pushing)");
+  check(!!clear || (lead && lead.s - sC > 250), "and out of it: " + (clear ? "clear at " + clear.t + " s, " + clear.lost + " lost" : "") + " (lead " + Math.round(lead ? lead.s - sC : 0) + " m on)");
+  check(lead && lead.s - sC > 150 && cv.phase !== "react", "the column kept moving (" + cv.phase + ", " + Math.round(lead ? lead.s - sC : 0) + " m since contact)");
+  const shots = cv.members.reduce((s, m) => s + (m.u.shotsF || 0), 0) - shots0;
+  check(shots > 0, "its gunners fired on the move (" + shots + " rounds)");
+  check(led.jumps.length === 0, "nothing slid or jumped (" + (led.jumps.slice(0, 3).join("; ") || "max " + led.vMax.toFixed(1) + " m/s") + ")");
+
+  // ---------------------------------------------------------------- B: far ambush
+  const Bf = await convoyBoot(12);
+  if (Bf.err || !Bf.cv) { check(false, "far ambush: no convoy"); return; }
+  const W2 = Bf.W, cv2 = Bf.cv;
+  const outs = [];
+  W2.CBZ.convoy.on("dismount", (c, d) => {
+    if (c !== cv2) return;
+    const u = d.m.u, T = c.TF || c.T || c.contact;
+    d.men.forEach((man) => outs.push({ why: d.why, u: u, man: man, T: T ? { x: T.x, z: T.z } : null, at: { x: man.pos.x, z: man.pos.z }, ux: u.pos.x, uz: u.pos.z }));
+  });
+  convoyAmbush(W2, cv2, 400, 1500);
+  const led2 = { jumps: [], vMax: 0 };
+  let t2 = 0;
+  while ((cv2.phase === "board" || t2 < 30) && t2 < 120) { convoyStep(W2, cv2, led2); t2 += 0.1; }
+  // ...and this one is laid 210 m off the road and OPENS FIRE: the first
+  // volley (the harness fires it through the page's own damage funnel; the
+  // AI's riflemen hold their fire on armour) hits the lead
+  const amb2 = convoyAmbush(W2, cv2, 60, 210).filter((m) => !m.launcher);
+  for (let k = 0; k < 3; k++) W2.sb.hurtMan(cv2.members[k].u, 30, { by: amb2[k] });         // rifle ball: it rings off the hulls
+  while (!cv2.contact && t2 < 200) { convoyStep(W2, cv2, led2); t2 += 0.1; }
+  const C2 = cv2.contact;
+  check(!!C2 && C2.drill === "react" && !C2.near, "a far ambush is reported and fought from the halt (" + JSON.stringify(C2) + ")");
+  if (!C2) return;
+  let t3 = 0;
+  while (t3 < 14) { convoyStep(W2, cv2, led2); t3 += 0.1; }
+  const mob = cv2.members.filter((m) => m.state !== "lost");
+  check(mob.every((m) => Math.abs(m.u.ds.v) < 0.7), "the column halted (" + mob.map((m) => m.def.id + " " + Math.abs(m.u.ds.v).toFixed(1)).join(", ") + ")");
+  const tank = mob.find((m) => m.def.id === "m1_abrams");
+  if (tank) {
+    const T = cv2.T || cv2.contact, err = Math.abs(W2.CBZ.vehicleDrive.wrap(Math.atan2(T.x - tank.u.pos.x, T.z - tank.u.pos.z) - tank.u.h));
+    check(err < 0.35, "the Abrams pivoted to put its front armour on the fire (" + (err * 57.3).toFixed(0) + " deg off)");
+  }
+  const contactOuts = outs.filter((o) => o.why === "contact" && o.T);
+  const lee = contactOuts.filter((o) => (o.at.x - o.ux) * (o.T.x - o.ux) + (o.at.z - o.uz) * (o.T.z - o.uz) < 0);
+  check(contactOuts.length >= 20 && lee.length === contactOuts.length,
+    "the carriers' sections got out on the side away from the fire (" + lee.length + "/" + contactOuts.length + " men lee of their hull)");
+  // the cover beat by the hull is a few seconds; then the squads have them
+  let t4 = 0;
+  while (t4 < 6) { convoyStep(W2, cv2, led2); t4 += 0.1; }
+  const roster2 = W2.sb.__battle.roster(), sq2 = W2.sb.__battle && G(W2, "squads");
+  const live2 = contactOuts.filter((o) => !o.man.dead && !o.man.fled);              // (a man who broke and ran is off the field)
+  const squadded = live2.filter((o) => !o.man.inVeh && !o.man.cvTask && roster2.indexOf(o.man) >= 0 && sq2.red[o.man.sq] && sq2.red[o.man.sq].indexOf(o.man) >= 0).length;
+  while (t4 < 30) { convoyStep(W2, cv2, led2); t4 += 0.1; }
+  const fired2 = contactOuts.filter((o) => (o.man.shotsF || 0) > 0).length;
+  check(live2.length > 0 && squadded === live2.length,
+    "and are on the field under their squads' orders (" + squadded + "/" + live2.length + "; " + fired2 + " have fired 30 s on)" +
+    (squadded < live2.length ? " " + JSON.stringify(live2.filter((o) => !(!o.man.inVeh && !o.man.cvTask && roster2.indexOf(o.man) >= 0 && sq2.red[o.man.sq] && sq2.red[o.man.sq].indexOf(o.man) >= 0)).map((o) => [!!o.man.inVeh, o.man.cvTask && o.man.cvTask.kind, roster2.indexOf(o.man) >= 0, !!(sq2.red[o.man.sq] && sq2.red[o.man.sq].indexOf(o.man) >= 0)])) : ""));
+  check(led2.jumps.length === 0, "nothing slid or jumped (" + (led2.jumps.slice(0, 3).join("; ") || "ok") + ")");
+
+  // ---------------------------------------------------------------- C: IED, markers
+  const Cf = await convoyBoot(4);
+  if (Cf.err || !Cf.cv) { check(false, "IED run: no convoy"); return; }
+  const W3 = Cf.W, B3 = Cf.B, cv3 = Cf.cv;
+  convoyAmbush(W3, cv3, 400, 1500);                // nobody anywhere near the road
+  const led3 = { jumps: [], vMax: 0 };
+  let t5 = 0;
+  while ((cv3.phase === "board" || t5 < 35) && t5 < 140) { convoyStep(W3, cv3, led3); t5 += 0.1; }
+  check(cv3.phase === "move" && !cv3.contact, "the column is on the march with nobody in reach (" + cv3.phase + ")");
+  // LOD: the lens 5 km away
+  const lead3 = cv3.members[0];
+  B3.convoyCam({ x: lead3.u.pos.x + 4000, z: lead3.u.pos.z + 4000 });
+  for (let k = 0; k < 12; k++) convoyStep(W3, cv3, led3);
+  check(cv3.lod === "marker", "far from the lens the column became markers (" + cv3.lod + ")");
+  const s0 = lead3.s;
+  for (let k = 0; k < 60; k++) convoyStep(W3, cv3, led3);
+  const vM = (lead3.s - s0) / 6;
+  const a3 = W3.CBZ.convoy.audit(cv3);
+  check(Math.abs(vM - cv3.V) < cv3.V * 0.3, "markers move at the column's road speed (" + vM.toFixed(1) + " m/s, column " + cv3.V.toFixed(1) + ")");
+  check(a3.gaps.every((g) => g >= 24 && g <= 51), "at their intervals (" + a3.gaps.join(", ") + " m)");
+  B3.convoyCam({ x: lead3.u.pos.x, z: lead3.u.pos.z });
+  const before = cv3.members.map((m) => ({ x: m.u.pos.x, z: m.u.pos.z }));
+  for (let k = 0; k < 8 && cv3.lod === "marker"; k++) convoyStep(W3, cv3, led3);
+  const led3b = { jumps: [], vMax: 0 };
+  for (let k = 0; k < 20; k++) convoyStep(W3, cv3, led3b);
+  check(cv3.lod === "full" && led3b.jumps.length === 0 && cv3.members.every((m) => Math.abs(m.u.ds.v) > 2),
+    "and back near it they drive on from there under their own drive models, no jump (" + cv3.lod + ", " + (led3b.jumps[0] || cv3.members.map((m) => Math.abs(m.u.ds.v).toFixed(1)).join(" ")) + ")");
+  // THE IED under the first MaxxPro
+  const mrap = cv3.members.find((m) => m.def.id === "maxxpro_mrap");
+  const site = { x: mrap.u.pos.x, z: mrap.u.pos.z };
+  W3.sb.hurtMan(mrap.u, 400, { cause: "ied", fromX: site.x, fromZ: site.z });
+  check(cv3.phase === "ied", "an IED under the MaxxPro: the column halts (" + cv3.phase + ")");
+  let t6 = 0;
+  while (t6 < 12) { convoyStep(W3, cv3, led3); t6 += 0.1; }
+  const live3 = cv3.members.filter((m) => m.state !== "lost");
+  check(live3.every((m) => Math.abs(m.u.ds.v) < 0.7), "every vehicle stopped (" + live3.map((m) => Math.abs(m.u.ds.v).toFixed(1)).join(", ") + ")");
+  const cordon = convoyEvents(cv3, "cordon")[0];
+  check(!!cordon && cordon.men >= 20, "the sections dismounted and threw a cordon (" + JSON.stringify(cordon) + ")");
+  while (t6 < 26) { convoyStep(W3, cv3, led3); t6 += 0.1; }
+  const ring = cv3.manifest.filter((r) => !r.man.inVeh && !r.man.dead).map((r) => Math.hypot(r.man.pos.x - site.x, r.man.pos.z - site.z));
+  const onRing = ring.filter((d) => Math.abs(d - 35) < 14).length;
+  check(ring.length > 0 && onRing >= ring.length * 0.6, "round the site at 35 m (" + onRing + "/" + ring.length + " on the ring)");
+  while (cv3.phase === "ied" && t6 < 60) { convoyStep(W3, cv3, led3); t6 += 0.1; }
+  const rr = convoyEvents(cv3, "reroute").find((e) => e.why === "IED");
+  const sLead = cv3.members.find((m) => m.state !== "lost").s;
+  let nearSite = Infinity;
+  for (let i = 0; i < cv3.P.n; i++) if (cv3.P.s[i] > sLead + 5) nearSite = Math.min(nearSite, Math.hypot(cv3.P.x[i] - site.x, cv3.P.z[i] - site.z));
+  check(!!rr && rr.ok && nearSite >= 40, "after the cordon the route was re-planned round the site (" + JSON.stringify(rr) + ", the new road passes " + Math.round(nearSite) + " m from it)");
+  let t7 = 0;
+  while (cv3.phase === "remount" && t7 < 90) { convoyStep(W3, cv3, led3); t7 += 0.1; }
+  const aboard3 = cv3.manifest.filter((r) => r.seated && !r.dead && !r.left).length;
+  check(cv3.phase === "move" && aboard3 >= cv3.manifest.filter((r) => !r.dead).length * 0.85, "the sections walked back and remounted (" + aboard3 + " aboard, " + t7.toFixed(0) + " s)");
+  let t8 = 0;
+  while (t8 < 25) { convoyStep(W3, cv3, led3); t8 += 0.1; }
+  const ld = cv3.members.find((m) => m.state !== "lost");
+  check(ld && Math.abs(ld.u.ds.v) > 2, "and the column moved on (" + cv3.phase + ", lead " + (ld ? Math.abs(ld.u.ds.v).toFixed(1) : "-") + " m/s)");
+  check(led3.jumps.length === 0, "nothing slid or jumped (" + (led3.jumps.slice(0, 3).join("; ") || "ok") + ")");
 });
 
 /* 11  AIRCRAFT. The vehicle contract's air half (docs/npcwar/ARCHITECTURE.md):
