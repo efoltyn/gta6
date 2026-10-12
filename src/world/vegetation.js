@@ -323,10 +323,10 @@
     return g;
   }
 
-  function matureWood() {
-    const parts = [bole(0.34, 0.82, 20, 9)];
+  function matureWood(mid) {
+    const parts = [bole(0.34, 0.82, 20, mid ? 6 : 9)];
     // Buttress roots, real metres so they stay broad when uniformly scaled.
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < (mid ? 0 : 5); i++) {
       const a = i * GOLDEN + 0.4, r = 2.2 + (i % 2) * 0.7;
       // the tip goes INTO the ground (it ended 5 cm above the trunk's base,
       // so on any seat shallower than that a 2-3 m root hung in the air)
@@ -341,26 +341,26 @@
       [[0, 13.2, 0], [4.6, 15.0, -2.6], 0.24, 0.09],
     ];
     for (let i = 0; i < limbs.length; i++) {
-      const b = limbs[i]; parts.push(cylinderBetween(b[0], b[1], b[2], b[3], 6, true));
+      const b = limbs[i]; parts.push(cylinderBetween(b[0], b[1], b[2], b[3], mid ? 3 : 6, true));
     }
     const g = shadeByHeight(merged(parts, parts[0]), 0.55, 0.8);
-    g.name = "cbz-mature-tree-wood";
+    g.name = "cbz-mature-tree-wood" + (mid ? "-mid" : "");
     g.userData.vegetationArchetype = "mature-wood";
     return g;
   }
 
-  function landscapeWood() {
+  function landscapeWood(mid) {
     // The country-wide bole: fewer sides, four limbs, four low roots. The
     // root footprint stays inside the 0.82 m seating samples.
-    const parts = [bole(0.25, 0.76, 20, 7)];
+    const parts = [bole(0.25, 0.76, 20, mid ? 5 : 7)];
     for (let i = 0; i < 4; i++) {
       const a = i * GOLDEN;
-      parts.push(cylinderBetween([0, 0.28, 0], [Math.cos(a) * 0.76, -0.08, Math.sin(a) * 0.76], 0.37, 0.06, 5, true));
+      if (!mid) parts.push(cylinderBetween([0, 0.28, 0], [Math.cos(a) * 0.76, -0.08, Math.sin(a) * 0.76], 0.37, 0.06, 5, true));
       parts.push(cylinderBetween([0, 11.5 + i * 1.2, 0],
-        [Math.cos(a) * 3.8, 16.4 + i * 1.2, Math.sin(a) * 3.8], 0.27, 0.07, 5, true));
+        [Math.cos(a) * 3.8, 16.4 + i * 1.2, Math.sin(a) * 3.8], 0.27, 0.07, mid ? 3 : 5, true));
     }
     const g = shadeByHeight(merged(parts, parts[0]), 0.55, 0.82);
-    g.name = "cbz-landscape-tree-wood";
+    g.name = "cbz-landscape-tree-wood" + (mid ? "-mid" : "");
     g.userData.vegetationArchetype = "landscape-wood";
     return g;
   }
@@ -375,14 +375,14 @@
   // its foliage: the bole is a straight taper with roots and nothing else.
   // Same 20 m height and 0.76 m base as landscape-wood, so seating, the
   // collider radius and the audit chain are unchanged.
-  function coniferWood() {
-    const parts = [bole(0.14, 0.76, 20, 7)];
-    for (let i = 0; i < 4; i++) {
+  function coniferWood(mid) {
+    const parts = [bole(0.14, 0.76, 20, mid ? 5 : 7)];
+    for (let i = 0; i < (mid ? 0 : 4); i++) {
       const a = i * GOLDEN + 0.7;
       parts.push(cylinderBetween([0, 0.28, 0], [Math.cos(a) * 0.76, -0.08, Math.sin(a) * 0.76], 0.37, 0.06, 5, true));
     }
     const g = shadeByHeight(merged(parts, parts[0]), 0.50, 0.85);
-    g.name = "cbz-conifer-tree-wood";
+    g.name = "cbz-conifer-tree-wood" + (mid ? "-mid" : "");
     g.userData.vegetationArchetype = "conifer-wood";
     return g;
   }
@@ -655,7 +655,11 @@
     rec.n += count == null ? 1 : count;
   }
 
-  const builders = { "mature-wood": matureWood, "landscape-wood": landscapeWood, "conifer-wood": coniferWood };
+  const builders = {
+    "mature-wood": function () { return matureWood(false); },
+    "landscape-wood": function () { return landscapeWood(false); },
+    "conifer-wood": function () { return coniferWood(false); },
+  };
 
   function geometry(kind, variant) {
     let v = variant == null ? 0 : (variant | 0);
@@ -702,35 +706,33 @@
   }
 
   /* ======================================================================
-     THE FAR CROWN — the same tree, for where a leaf card is a pixel.
+     THE MID FORM — the same tree, simplified, for the middle distance
+     (world/treelod.js owns the distances and the crossfades; past them the
+     tree is an octahedral impostor baked from the NEAR form).
 
-     Owner, 2026-10-11, from a helicopter on the iPad: "you can see the bare
-     ground, and then the trees spawn in." A wood has to stand out to the
-     fog the eye has (core/sight.js), which from the air is kilometres, and
-     a full crown + bole there is ~270 triangles a tree. So a far form, and
-     the law it obeys is "near and far look the same; only sub-pixel detail
-     goes" (memory: one world, all distances):
-
-       • it is CUT FROM the near crown, never drawn anew: same variant, same
+     Owner, 2026-10-12, on the far crowns that stood here: trunkless half-leaf
+     crowns are not the tree. A mid form is a faithful simplified copy:
+       • CROWN: cut FROM the near crown, never drawn anew: same variant, same
          lobes, same cards in the same places with the same uvs, lighting
          normals and baked shade. Every other card is kept and grown 1.3x
-         about its own centre, so the crown's coverage and silhouette stay
-         where they were while the overlapping interior cards (the part only
-         a close eye resolves) halve. With the atlas's far-mip body a crown
-         past a few hundred metres is one solid shaded mass either way.
-       • the BOLE is left out: under a crown seen from the hand-over range
-         (core/sight.js `detail`, >= the ground fog's end) it is a fraction of
-         a pixel wide, and from above the crown hides it.
-     Result: ~88 instead of ~270 triangles a tree, one draw per cell. */
-  const farCache = Object.create(null);
-  function farGeometry(kind, variant) {
-    const near = geometry(kind, variant);
+         about its own centre, so the silhouette and coverage stay where they
+         were while the overlapping interior cards (what only a close eye
+         resolves) halve. ~88 instead of ~176 triangles.
+       • WOOD: the same bole, same taper, same limbs, with fewer sides; the
+         ground roots (sub-pixel there) go. The trunk stays: a crown floating
+         over bare ground was exactly what the owner saw.
+     midOf(g) applies the crown cut to any leaf-card crown (the kit's custom
+     crowns: wildnature, the island grove); null for anything else, whose
+     near form is already cheap enough to carry the mid range itself. */
+  const midCache = Object.create(null);
+  function midOf(near) {
+    if (!near || !near.attributes || !near.attributes.position) return null;
     const key = near.uuid;
-    if (farCache[key]) return farCache[key];
+    if (midCache[key] !== undefined) return midCache[key];
     const P = near.attributes.position, N = near.attributes.normal, T = near.attributes.uv, C = near.attributes.color;
     const per = 12;                         // a card: front + back quad, non-indexed
     const cards = (P.count / per) | 0;
-    if (!N || !T || !C || cards < 4 || P.count % per) { farCache[key] = near; return near; }
+    if (near.index || !N || !T || !C || !near.userData.leafCards || cards < 4 || P.count % per) { midCache[key] = null; return null; }
     const keep = [];
     for (let c = 0; c < cards; c += 2) keep.push(c);
     const n = keep.length * per;
@@ -758,30 +760,27 @@
     g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
     g.setAttribute("color", new THREE.BufferAttribute(col, 3));
     g.computeBoundingBox(); g.computeBoundingSphere();
-    g.name = (near.name || "cbz-crown") + "-far";
+    g.name = (near.name || "cbz-crown") + "-mid";
     g.userData.vegetationArchetype = near.userData.vegetationArchetype;
     g.userData.vegetationVariant = near.userData.vegetationVariant;
     g.userData.leafCards = keep.length;
-    g.userData.farOf = near.name || kind;
+    g.userData.midOf = near.name || "";
     g._shared = true;
-    farCache[key] = g;
+    midCache[key] = g;
     return g;
   }
-
-  // The kit material, handed over per instance between a near and a far
-  // form at core/sight.js's `detail` ring: "near" draws an instance only
-  // inside it, "far" only outside. Same map, cutoff and colours as
-  // material(kind): the hand-over is a change of triangle count, not of look.
-  function lodMaterial(kind, which) {
-    const base = material(kind);
-    const key = "lod#" + (isWood(kind) ? "wood" : "foliage") + "#" + which;
-    if (mats[key]) return mats[key];
-    if (!CBZ.sightSwapMaterial) return base;
-    const m = base.clone();
-    m.name = base.name + " (" + which + ")"; m._shared = true;
-    CBZ.sightSwapMaterial(m, which);
-    mats[key] = m;
-    return m;
+  const midWoods = {
+    "mature-wood": function () { return matureWood(true); },
+    "landscape-wood": function () { return landscapeWood(true); },
+    "conifer-wood": function () { return coniferWood(true); },
+  };
+  function midGeometry(kind, variant) {
+    if (midWoods[kind]) {
+      const key = kind + "#mid";
+      if (!cache[key]) { cache[key] = midWoods[kind](); cache[key]._shared = true; }
+      return cache[key];
+    }
+    return midOf(geometry(kind, variant)) || geometry(kind, variant);
   }
 
   /* THE RATCHET. `cloned` counts SITES that drew a real stand out of a single
@@ -1014,10 +1013,10 @@
     palmTrunk: palmTrunk,
     palmCrown: palmCrown,
     geometry: geometry,
-    farGeometry: farGeometry,
+    midGeometry: midGeometry,
+    midOf: midOf,
     customCrown: customCrown,
     material: material,
-    lodMaterial: lodMaterial,
     depthMaterial: depthMaterial,
     leafTexture: leafTexture,
     barkTexture: barkTexture,

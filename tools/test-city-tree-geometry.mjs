@@ -75,4 +75,13 @@ for (let i = 0; i < p.count; i += 3) {
 assert.ok(cut > p.count / 5, 'fracturing reaches the rendered surface');
 assert.ok([...edgeUse.values()].every(n => n === 2), 'welded rock has no open seams');
 const lc = C.vegetationKit.geometry('landscape-crown'), lw = C.vegetationKit.geometry('landscape-wood');
-console.log(`PASS: r${T.REVISION}; leaf-card crowns (landscape ${lc.userData.leafCards} cards / ${tris(lc)} tris, wood ${tris(lw)} tris); deterministic, closed fractured rocks (${cut}/${p.count} cut corners).`);
+// THE MID FORM is the same tree, simplified: a cut of the same crown that
+// keeps its box, and a bole that is still there (no trunkless crowns)
+const mc = C.vegetationKit.midGeometry('landscape-crown', 1), mw = C.vegetationKit.midGeometry('landscape-wood');
+const nc = C.vegetationKit.geometry('landscape-crown', 1);
+assert.ok(mc !== nc && tris(mc) < tris(nc) * 0.6, 'mid crown halves the cards');
+assert.ok(mc.userData.midOf === nc.name, 'mid crown is cut from the near crown of the same variant');
+assert.ok(Math.abs(mc.boundingBox.max.y - nc.boundingBox.max.y) < nc.boundingBox.max.y * 0.12, 'mid crown keeps the silhouette height');
+assert.ok(mw !== lw && tris(mw) < tris(lw) && mw.boundingBox.max.y > 19, 'mid wood is the full-height bole with fewer sides');
+assert.ok(C.vegetationKit.midGeometry('conifer-wood') && C.vegetationKit.midGeometry('conifer-spire', 0).userData.leafCards > 4, 'spruce has a mid form');
+console.log(`PASS: r${T.REVISION}; leaf-card crowns (landscape ${lc.userData.leafCards} cards / ${tris(lc)} tris, wood ${tris(lw)} tris; mid ${tris(mc)} + ${tris(mw)} tris); deterministic, closed fractured rocks (${cut}/${p.count} cut corners).`);

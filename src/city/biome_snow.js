@@ -2404,6 +2404,10 @@
       trunkIM.userData.sceneryScale = canopyIM.userData.sceneryScale = capIM.userData.sceneryScale = true;
       root.add(trunkIM); root.add(canopyIM); root.add(capIM);
       if (pineFeet && pineFeet.length) CBZ.treeFoot.add(root, pineFeet, { name: "resort-pines", heightAt: mountainHeightAt, fogScale: 0.12 });
+      // ONE TREE AT EVERY DISTANCE (world/treelod.js): the pine itself to
+      // the impostor range, then this pine baked into an octahedral impostor
+      if (CBZ.treeLod) CBZ.treeLod.adopt({ parts: [{ im: trunkIM, slot: -1 }, { im: canopyIM, slot: -1 }, { im: capIM, slot: -1 }],
+        name: "resort-pines", key: "snow-resort-pines", root: root, size: 256 });
 
       /* ---- THE FOREST BELT: the flanks are wooded up to the treeline ------
          130 pines in a 55 ha valley is a car park, not a forest. The owner's
@@ -2515,6 +2519,8 @@
           tIM.name = o.name + "-trunks"; cIM.name = o.name + "-crowns"; kIM.name = o.name + "-caps";
           tIM.userData.forestBelt = cIM.userData.forestBelt = kIM.userData.forestBelt = o.name;
           root.add(tIM); root.add(cIM); root.add(kIM);
+          if (CBZ.treeLod && k) CBZ.treeLod.adopt({ parts: [{ im: tIM, slot: -1 }, { im: cIM, slot: -1 }, { im: kIM, slot: -1 }],
+            name: o.name, key: "snow-belt-pines", root: root, size: 256 });
           // tree wells: the snow under a spruce is shaded and shallow
           if (feet && feet.length) CBZ.treeFoot.add(root, feet, { name: o.name, heightAt: o.heightAt, fogScale: 0.12 });
           return k;

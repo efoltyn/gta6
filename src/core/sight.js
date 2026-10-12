@@ -29,8 +29,8 @@
              equals `far`, so nothing changes form inside view. In the air,
              `far` outruns it, and whatever stands between the two must be
              drawn by a FAR FORM of the same thing (metro HLOD tiles, the
-             farcull lot boxes, the forest's far crowns) that hands over to
-             the near form at `detail`.
+             farcull lot boxes; trees: world/treelod.js's mid copies and
+             impostors) that hands over to the near form.
 
    A system asks:
      CBZ.sight()                     -> { far, near, detail, reach, camFar,
@@ -39,10 +39,10 @@
      CBZ.sightSees(x, z, r)          could a thing of radius r at x,z still be
                                      a pixel short of full fog (within reach)?
      CBZ.sightNeedsDetail(x, z, r)   ... inside detail?
-     CBZ.sightU                      shared shader uniforms { cbzSightEye,
-                                     cbzSightSwap } for a near/far per-instance
-                                     hand-over in the vertex shader (refreshed
-                                     every frame by CBZ.sightPublish()).
+     CBZ.sightU                      shared shader uniform { cbzSightEye }: the
+                                     eye, for per-instance distance work in a
+                                     shader (world/treelod.js's crossfades),
+                                     refreshed every frame by sightPublish().
 
    Loads right after core/slice.js (THREE is in by then); touches nothing at
    load. Gang City only: the other modes own their fog.
@@ -140,48 +140,14 @@
     return _sv.z >= -1.05 && _sv.z <= 1.05 && Math.abs(_sv.x) <= 1.3 && Math.abs(_sv.y) <= 1.4;
   };
 
-  /* ---- the per-instance near/far hand-over ------------------------------
-     A far form and a near form of the same scatter both cover a place; the
-     vertex shader draws each instance from exactly one of them: near inside
-     `detail` of the eye, far outside. One shared uniform pair for every
-     material that adopts it, written once a frame. */
+  /* ---- the eye, for shaders (world/treelod.js) ---------------------- */
   const U = CBZ.sightU = {
     cbzSightEye: { value: THREE ? new THREE.Vector3() : { x: 0, y: 0, z: 0 } },
-    cbzSightSwap: { value: 1036 },
   };
   CBZ.sightPublish = function () {
     CBZ.sight();
     const e = U.cbzSightEye.value;
     if (e.set) e.set(S.x, S.y, S.z); else { e.x = S.x; e.y = S.y; e.z = S.z; }
-    U.cbzSightSwap.value = S.detail;
     return S;
-  };
-  // which: "near" draws an instance only inside detail, "far" only outside
-  CBZ.sightSwapMaterial = function (mat, which) {
-    if (!mat || mat.userData && mat.userData._cbzSightSwap) return mat;
-    mat.userData = mat.userData || {};
-    mat.userData._cbzSightSwap = which;
-    const prevKey = mat.customProgramCacheKey;
-    mat.customProgramCacheKey = function () { return (prevKey ? prevKey.call(this) : "") + "|sight-" + which; };
-    const prev = mat.onBeforeCompile;
-    mat.onBeforeCompile = function (sh, r) {
-      if (prev) prev.call(this, sh, r);
-      sh.uniforms.cbzSightEye = U.cbzSightEye;
-      sh.uniforms.cbzSightSwap = U.cbzSightSwap;
-      const test = which === "near" ? "cbzD2 > cbzSightSwap * cbzSightSwap" : "cbzD2 <= cbzSightSwap * cbzSightSwap";
-      sh.vertexShader = "uniform vec3 cbzSightEye;\nuniform float cbzSightSwap;\n" + sh.vertexShader.replace(
-        "#include <project_vertex>",
-        "#include <project_vertex>\n" +
-        "#ifdef USE_INSTANCING\n" +
-        "  vec2 cbzRoot = ( modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xz;\n" +
-        "#else\n" +
-        "  vec2 cbzRoot = ( modelMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xz;\n" +
-        "#endif\n" +
-        "  vec2 cbzDv = cbzRoot - cbzSightEye.xz;\n" +
-        "  float cbzD2 = dot( cbzDv, cbzDv );\n" +
-        "  if ( " + test + " ) gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 );\n");
-    };
-    mat.needsUpdate = true;
-    return mat;
   };
 })();

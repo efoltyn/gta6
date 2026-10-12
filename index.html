@@ -400,7 +400,7 @@ document.body.appendChild(b);}}catch(e){}})();
      loaded, recoverable from git history if a migration is ever attempted.) -->
 <script src="src/vendor/three.r128.min.js?v=pf0930e"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
-<script src="src/core/instcull.js?v=w09290242x"></script>
+<script src="src/core/instcull.js?v=treelod1012"></script>
 <script src="src/vendor/DRACOLoader.js"></script>
 <script src="src/vendor/GLTFLoader.js"></script>
 <script src="src/vendor/BufferGeometryUtils.js"></script>
@@ -453,9 +453,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/slice.js?v=sight1011"></script>
 <!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
-<script src="src/core/sight.js?v=farform1011m"></script>
+<script src="src/core/sight.js?v=treelod1012"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=farform1011m"></script>
+<script src="src/core/citystream.js?v=treelod1012"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -485,7 +485,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=sight1011"></script>
+<script src="src/world/vegetation.js?v=treelod1012"></script>
+<!-- one tree at every distance: near -> mid copy -> octahedral impostor, dithered crossfades (CBZ.treeLod) -->
+<script src="src/world/treelod.js?v=treelod1012"></script>
 <!-- where a tree meets the ground: instanced contact shade + mulch rings every
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
 <script src="src/world/treefoot.js?v=sight1011"></script>
@@ -1350,7 +1352,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/biome_desert.js?v=sight1011m"></script>
 <script src="src/city/biome_forest.js?v=sight1011m"></script>
 <script src="src/city/biome_farmland.js?v=layout2b"></script>
-<script src="src/city/biome_snow.js?v=sight1011"></script>
+<script src="src/city/biome_snow.js?v=treelod1012"></script>
 <script src="src/city/snowboard.js?v=ric0929"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -1359,7 +1361,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
-<script src="src/world/wildnature.js?v=sight1011"></script>
+<script src="src/world/wildnature.js?v=treelod1012"></script>
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
@@ -2232,7 +2234,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/river.js?v=wreal0929"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=sight1011"></script>
+<script src="src/city/continent.js?v=treelod1012"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already

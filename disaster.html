@@ -410,7 +410,7 @@ document.body.appendChild(b);}}catch(e){}})();
      loaded, recoverable from git history if a migration is ever attempted.) -->
 <script src="src/vendor/three.r128.min.js?v=pf0930e"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
-<script src="src/core/instcull.js?v=w09290242x"></script>
+<script src="src/core/instcull.js?v=treelod1012"></script>
 <script src="src/vendor/BufferGeometryUtils.js"></script>
 <!-- Official Three.js sample loaders used by the farm truck / BIM campus.
      fflate must precede ThreeMFLoader because .3mf is a ZIP container. -->
@@ -452,9 +452,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/slice.js?v=sight1011"></script>
 <!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
-<script src="src/core/sight.js?v=farform1011m"></script>
+<script src="src/core/sight.js?v=treelod1012"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=farform1011m"></script>
+<script src="src/core/citystream.js?v=treelod1012"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -481,7 +481,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=sight1011"></script>
+<script src="src/world/vegetation.js?v=treelod1012"></script>
+<!-- one tree at every distance: near -> mid copy -> octahedral impostor, dithered crossfades (CBZ.treeLod) -->
+<script src="src/world/treelod.js?v=treelod1012"></script>
 <!-- where a tree meets the ground: instanced contact shade + mulch rings every
      tree spawner lays beside its own pools (CBZ.treeFoot) -->
 <script src="src/world/treefoot.js?v=sight1011"></script>
