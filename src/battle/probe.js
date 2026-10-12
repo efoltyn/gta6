@@ -671,6 +671,11 @@ CBZ.npcwar.onBoot(function () {
     roster: function () { return men; },
     // the squad brain's ledger: tasks, tactics fired, per-tier think cost (ai/squad.js)
     tactics: function () { return tacticsReadout(); },
+    // the columns (src/battle/convoyhost.js): their audit, the live convoy
+    // objects, and a lens override for the LOD (tools set where the camera is)
+    convoy: function () { return convoyReadout(); },
+    convoys: function () { return { red: CONVOY.cv.red, blue: CONVOY.cv.blue }; },
+    convoyCam: function (p) { CONVOY.camAt = p || null; },
     /* WHICH PAIRS, AND WHAT WERE THEY DOING. An overlap COUNT tells you the
        bodies are wrong; it never tells you which rule put them there, and
        three rules can produce the same number. This lists the live offenders

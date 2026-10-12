@@ -90,13 +90,12 @@
     sea_turtle: S("green sea turtle", "green sea turtles", "bale"),
 
     // ---- vehicles ---------------------------------------------------------
-    /* The ground hulls are built by city/mil_armor.js (one builder per class)
-       and nothing in a studio pack loaded it outside the full city, so every
-       one of them threw in NPC War. `needs` pulls it with the unit. Air
-       frames come from city/mil_air.js (the `military` pack) and the B-2
-       from city/strategic.js. */
-    m1_abrams: V("M1 Abrams", "M1 Abrams", "ground", ["city/mil_armor.js"]),
-    bradley_ifv: V("M2 Bradley", "M2 Bradleys", "ground", ["city/mil_armor.js"]),
+    /* Every vehicle draws itself in its own file. `needs` is the shared kit
+       it builds on: units/kit/hull.js (the wheeled-body kit) or city/mil_air.js
+       (the airframe loft kit). The same files are Gang City's: Fort Brandt
+       parks these units (city/island_military.js). */
+    m1_abrams: V("M1 Abrams", "M1 Abrams", "ground", []),
+    bradley_ifv: V("M2 Bradley", "M2 Bradleys", "ground", []),
     stryker_apc: V("Stryker", "Strykers", "ground"),
     hmmwv: V("Humvee", "Humvees", "ground", ["units/kit/hull.js"]),
     jltv: V("JLTV", "JLTVs", "ground", ["units/kit/hull.js"]),

@@ -23,7 +23,7 @@
    network to the place, in real time, with the camera riding along. Nobody
    types a coordinate: the route is the shortest path over the game's own
    road records (every road builder pushes the same axis-aligned segment onto
-   city.roads; §1 turns that flat list into a graph once per world).
+   city.roads; systems/roadgraph.js turns that flat list into a graph once per world, the same graph every convoy and the map arrows route on).
 
    On the way: police cruisers stand across the side streets at a few
    junctions with an officer or two beside each, the lights going; ambient
@@ -141,8 +141,6 @@
   function carGround(x, z) { try { if (CBZ.cityCarGroundY) { const y = +CBZ.cityCarGroundY(x, z); if (isFinite(y)) return y; } } catch (e) {} return floorY(x, z); }
   function d2(ax, az, bx, bz) { return Math.hypot(ax - bx, az - bz); }
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
-  function wrapA(a) { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; }
-  function lerpAng(a, b, t) { return a + wrapA(b - a) * t; }
   let SIMT = 0;                                    // engine-clock seconds (stepSim-safe)
 
   let presCache = null, presT = -1;
@@ -182,397 +180,52 @@
   }
 
   /* ============================================================
-     §1  THE ROAD GRAPH — the flat city.roads list, asked a routing question.
-     Every record is axis-aligned {x, z, vertical, len, w}. Nodes are segment
-     ends, crossings of a vertical with a horizontal (within half a road width
-     of each other's ends, so T-junctions meet), and the projection of any end
-     that stops within a road-width of another segment (causeway docks, spurs).
-     Edges run between consecutive nodes along each segment. Pure: no rng, no
-     THREE, deterministic per road list. Built once per world (keyed on the
-     list and its length) — a few ms on thousands of segments.
+     §1-§2  THE ROAD GRAPH AND THE DRIVE PATH live in systems/roadgraph.js
+     (CBZ.roadGraph), the one router every vehicle in both games asks: the
+     flat city.roads list as a graph (ends, crossings, docks), Dijkstra with
+     the highway preferred, the right-hand lane polyline, and the filleted
+     drive path with its speed profile. This file used to own all of it; it
+     was lifted out whole so NPC War's convoys and the map arrows
+     (navigation.js) route on the same graph instead of growing their own.
+     What stays here is the motorcade's own speed numbers on that path.
      ============================================================ */
-  const CELL = 64;
-  function ckey(cx, cz) { return (cx + 32768) * 65536 + (cz + 32768); }
-  function segCost(r) {
-    if (r.access === "service") return 2.5;            // other compounds' private spurs
-    if (r.district === "highway") return 0.85;         // a motorcade takes the fast road
-    return 1;
-  }
-  function buildGraph(roads) {
-    const segs = [];
-    for (let i = 0; i < roads.length; i++) {
-      const r = roads[i];
-      if (!r || !isFinite(r.x) || !isFinite(r.z) || !(r.len > 1)) continue;
-      const v = !!r.vertical, m = v ? r.z : r.x;
-      segs.push({ r: r, v: v, c: v ? r.x : r.z, lo: m - r.len / 2, hi: m + r.len / 2,
-        hw: Math.max(2, (r.w != null ? +r.w : 18) / 2), cost: segCost(r), st: [] });
-    }
-    const nx = [], nz = [], adj = [];
-    function node(x, z) { nx.push(x); nz.push(z); adj.push([]); return nx.length - 1; }
-    function edge(a, b, w, si) { adj[a].push(b, w, si); adj[b].push(a, w, si); }
-    function pt(sg, t) { return sg.v ? { x: sg.c, z: t } : { x: t, z: sg.c }; }
-    function cells(sg, pad, fn) {
-      const x0 = sg.v ? sg.c - sg.hw - pad : sg.lo - pad, x1 = sg.v ? sg.c + sg.hw + pad : sg.hi + pad;
-      const z0 = sg.v ? sg.lo - pad : sg.c - sg.hw - pad, z1 = sg.v ? sg.hi + pad : sg.c + sg.hw + pad;
-      const cx0 = Math.floor(x0 / CELL), cx1 = Math.floor(x1 / CELL);
-      const cz0 = Math.floor(z0 / CELL), cz1 = Math.floor(z1 / CELL);
-      for (let cx = cx0; cx <= cx1; cx++) for (let cz = cz0; cz <= cz1; cz++) fn(ckey(cx, cz));
-    }
-    const grid = new Map();
-    for (let i = 0; i < segs.length; i++) {
-      cells(segs[i], 4, function (k) { let a = grid.get(k); if (!a) grid.set(k, (a = [])); a.push(i); });
-    }
-    for (let i = 0; i < segs.length; i++) {
-      const sg = segs[i], a = pt(sg, sg.lo), b = pt(sg, sg.hi);
-      sg.na = node(a.x, a.z); sg.nb = node(b.x, b.z);
-      sg.st.push({ t: sg.lo, n: sg.na }, { t: sg.hi, n: sg.nb });
-    }
-    // crossings (vertical x horizontal)
-    const mark = new Int32Array(segs.length).fill(-1);
-    for (let i = 0; i < segs.length; i++) {
-      const V = segs[i]; if (!V.v) continue;
-      cells(V, 4, function (k) {
-        const a = grid.get(k); if (!a) return;
-        for (let q = 0; q < a.length; q++) {
-          const j = a[q]; if (mark[j] === i) continue; mark[j] = i;
-          const H = segs[j]; if (H.v) continue;
-          if (V.c < H.lo - V.hw - 2 || V.c > H.hi + V.hw + 2) continue;
-          if (H.c < V.lo - H.hw - 2 || H.c > V.hi + H.hw + 2) continue;
-          const n = node(V.c, H.c);
-          V.st.push({ t: H.c, n: n }); H.st.push({ t: V.c, n: n });
-        }
-      });
-    }
-    // loose ends: an end within a road width of another segment docks onto it
-    const stamp = new Int32Array(segs.length).fill(-1);
-    let sid = 0;
-    for (let i = 0; i < segs.length; i++) {
-      const A = segs[i];
-      for (let e = 0; e < 2; e++) {
-        const t = e ? A.hi : A.lo, n = e ? A.nb : A.na, p = pt(A, t);
-        const cx = Math.floor(p.x / CELL), cz = Math.floor(p.z / CELL);
-        sid++;
-        for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
-          const a = grid.get(ckey(cx + ox, cz + oz)); if (!a) continue;
-          for (let q = 0; q < a.length; q++) {
-            const j = a[q]; if (j === i || stamp[j] === sid) continue; stamp[j] = sid;
-            const B = segs[j];
-            const tb = clamp(B.v ? p.z : p.x, B.lo, B.hi), qp = pt(B, tb);
-            const d = d2(p.x, p.z, qp.x, qp.z);
-            if (d > Math.max(6, B.hw + 2)) continue;
-            const m = node(qp.x, qp.z);
-            B.st.push({ t: tb, n: m });
-            edge(n, m, Math.max(0.01, d), -1);
-          }
-        }
-      }
-    }
-    for (let i = 0; i < segs.length; i++) {
-      const sg = segs[i], st = sg.st;
-      st.sort(function (a, b) { return a.t - b.t || a.n - b.n; });
-      for (let k = 0; k + 1 < st.length; k++) edge(st[k].n, st[k + 1].n, Math.max(0.001, (st[k + 1].t - st[k].t) * sg.cost), i);
-    }
-    return { segs: segs, nx: nx, nz: nz, adj: adj, grid: grid, pt: pt };
-  }
-
-  function snapTo(G, x, z) {
-    let best = null, bd = Infinity;
-    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
-    const seen = new Set();
-    function test(i) {
-      if (seen.has(i)) return; seen.add(i);
-      const sg = G.segs[i];
-      const t = clamp(sg.v ? z : x, sg.lo, sg.hi), p = G.pt(sg, t);
-      const d = d2(x, z, p.x, p.z) * (sg.r.access === "service" ? 1.6 : 1);
-      if (d < bd) { bd = d; best = { si: i, t: t, x: p.x, z: p.z, d: d }; }
-    }
-    const RINGS = [1, 3, 8, 20];
-    for (let r = 0; r < RINGS.length; r++) {
-      const R = RINGS[r];
-      for (let ox = -R; ox <= R; ox++) for (let oz = -R; oz <= R; oz++) {
-        const a = G.grid.get(ckey(cx + ox, cz + oz)); if (!a) continue;
-        for (let q = 0; q < a.length; q++) test(a[q]);
-      }
-      if (best && bd <= R * CELL) return best;
-    }
-    for (let i = 0; i < G.segs.length; i++) test(i);
-    return best;
-  }
-
-  // Dijkstra from a snapped point to a snapped point. Returns the point chain
-  // (start, nodes..., end), the segment of each leg (-1 = a dock connector)
-  // and the junction nodes passed (degree >= 3).
-  function routeNodes(G, from, to) {
-    const A = snapTo(G, from.x, from.z), B = snapTo(G, to.x, to.z);
-    if (!A || !B) return null;
-    const N = G.nx.length;
-    const dist = new Float64Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1), pseg = new Int32Array(N).fill(-2);
-    const hk = [], hn = [];
-    function push(k, n) {
-      let i = hk.length; hk.push(k); hn.push(n);
-      while (i > 0) { const p = (i - 1) >> 1; if (hk[p] <= hk[i]) break; let t = hk[p]; hk[p] = hk[i]; hk[i] = t; t = hn[p]; hn[p] = hn[i]; hn[i] = t; i = p; }
-    }
-    function pop() {
-      const n = hn[0], lk = hk.pop(), ln = hn.pop();
-      if (hk.length) {
-        hk[0] = lk; hn[0] = ln; let i = 0;
-        for (;;) { const l = i * 2 + 1, r = l + 1; let m = i; if (l < hk.length && hk[l] < hk[m]) m = l; if (r < hk.length && hk[r] < hk[m]) m = r; if (m === i) break; let t = hk[m]; hk[m] = hk[i]; hk[i] = t; t = hn[m]; hn[m] = hn[i]; hn[i] = t; i = m; }
-      }
-      return n;
-    }
-    function bracket(sn) {
-      const sg = G.segs[sn.si], st = sg.st;
-      let lo = st[0], hi = st[st.length - 1];
-      for (let k = 0; k < st.length; k++) {
-        if (st[k].t <= sn.t + 1e-6) lo = st[k];
-        if (st[k].t >= sn.t - 1e-6) { hi = st[k]; break; }
-      }
-      return [{ n: lo.n, c: Math.abs(sn.t - lo.t) * sg.cost }, { n: hi.n, c: Math.abs(hi.t - sn.t) * sg.cost }];
-    }
-    const srcs = bracket(A), dsts = bracket(B);
-    for (let i = 0; i < srcs.length; i++) {
-      const s = srcs[i];
-      if (s.c < dist[s.n]) { dist[s.n] = s.c; prev[s.n] = -1; pseg[s.n] = A.si; push(s.c, s.n); }
-    }
-    let best = Infinity, bestN = -1;
-    if (A.si === B.si) best = Math.abs(A.t - B.t) * G.segs[A.si].cost;
-    const tgt = new Map();
-    for (let i = 0; i < dsts.length; i++) { const o = tgt.get(dsts[i].n); if (o == null || dsts[i].c < o) tgt.set(dsts[i].n, dsts[i].c); }
-    const done = new Uint8Array(N);
-    while (hk.length) {
-      const k = hk[0], n = pop();
-      if (done[n]) continue; done[n] = 1;
-      if (k >= best) break;
-      const tc = tgt.get(n);
-      if (tc != null && k + tc < best) { best = k + tc; bestN = n; }
-      const a = G.adj[n];
-      for (let q = 0; q < a.length; q += 3) {
-        const m = a[q], w = a[q + 1], nk = k + w;
-        if (nk < dist[m]) { dist[m] = nk; prev[m] = n; pseg[m] = a[q + 2]; push(nk, m); }
-      }
-    }
-    const pts = [{ x: A.x, z: A.z }], legs = [], junctions = [];
-    if (bestN < 0) {
-      pts.push({ x: B.x, z: B.z }); legs.push(A.si === B.si ? A.si : -1);
-      return { pts: pts, legs: legs, junctions: junctions, from: A, to: B };
-    }
-    const chain = [];
-    for (let n = bestN; n >= 0; n = prev[n]) chain.push(n);
-    chain.reverse();
-    for (let i = 0; i < chain.length; i++) {
-      const n = chain[i];
-      pts.push({ x: G.nx[n], z: G.nz[n] });
-      legs.push(i === 0 ? A.si : pseg[n]);
-      if (G.adj[n].length >= 9) junctions.push({ x: G.nx[n], z: G.nz[n] });
-    }
-    pts.push({ x: B.x, z: B.z }); legs.push(B.si);
-    return { pts: pts, legs: legs, junctions: junctions, from: A, to: B };
-  }
-
-  // the drivable lane polyline for a node chain: each axis leg shifted onto
-  // the innermost lane for its direction (the same roadLaneCenter traffic
-  // uses), corners where a vertical leg meets a horizontal one.
-  function laneOff(r, dir) {
-    if (CBZ.roadLaneCenter) { try { const o = +CBZ.roadLaneCenter(r, dir, 0); if (isFinite(o)) return o; } catch (e) {} }
-    return CBZ.roadLaneSide(r, dir) * 2.1;
-  }
-  function lanePolyline(G, R) {
-    const legs = [];
-    for (let i = 0; i + 1 < R.pts.length; i++) {
-      const a = R.pts[i], b = R.pts[i + 1];
-      if (d2(a.x, a.z, b.x, b.z) < 0.3) continue;
-      const si = R.legs[i], sg = si >= 0 ? G.segs[si] : null;
-      let A = { x: a.x, z: a.z }, B = { x: b.x, z: b.z }, axis = null, dir = 0;
-      if (sg && (sg.v ? Math.abs(b.x - a.x) < 0.5 : Math.abs(b.z - a.z) < 0.5)) {
-        dir = sg.v ? Math.sign(b.z - a.z) : Math.sign(b.x - a.x);
-        const o = laneOff(sg.r, dir);
-        if (sg.v) { A.x += o; B.x += o; } else { A.z += o; B.z += o; }
-        axis = sg.v;
-      }
-      const L = legs[legs.length - 1];
-      if (L && L.si === si && si >= 0 && L.dir === dir && L.axis === axis) { L.b = B; continue; }
-      legs.push({ a: A, b: B, si: si, axis: axis, dir: dir, hw: sg ? sg.r.district === "highway" : false });
-    }
-    if (!legs.length) return { pts: R.pts.slice(), radii: R.pts.map(function () { return 10; }) };
-    const pts = [legs[0].a], radii = [0];
-    for (let i = 0; i + 1 < legs.length; i++) {
-      const A = legs[i], B = legs[i + 1];
-      if (A.axis != null && B.axis != null && A.axis !== B.axis) {
-        pts.push(A.axis ? { x: A.a.x, z: B.a.z } : { x: B.a.x, z: A.a.z });
-        radii.push(A.hw && B.hw ? 45 : 11);
-      } else {
-        pts.push(A.b); radii.push(5);
-        pts.push(B.a); radii.push(5);
-      }
-    }
-    pts.push(legs[legs.length - 1].b); radii.push(0);
-    // drop near-duplicates (keep the larger radius)
-    const op = [pts[0]], orad = [radii[0]];
-    for (let i = 1; i < pts.length; i++) {
-      const q = op[op.length - 1];
-      if (d2(q.x, q.z, pts[i].x, pts[i].z) < 0.6) { orad[orad.length - 1] = Math.max(orad[orad.length - 1], radii[i]); continue; }
-      op.push(pts[i]); orad.push(radii[i]);
-    }
-    return { pts: op, radii: orad };
-  }
-
-  const GRAPH = { roads: null, n: -1, G: null };
+  const RG = CBZ.roadGraph;
+  let LAST_G = null;
+  const ROUTE_CACHE = new Map();
   function graph() {
-    const c = CBZ.city; if (!c) return null;
+    const c = CBZ.city; if (!c || !RG) return null;
     const A = c.arena && c.arena.roads ? c.arena : c;
-    const roads = A.roads;
-    if (!Array.isArray(roads) || !roads.length) return null;
-    if (GRAPH.G && GRAPH.roads === roads && GRAPH.n === roads.length) return GRAPH.G;
-    let G = null;
-    try { G = buildGraph(roads); } catch (e) { G = null; if (window.console) console.error("[motorcade] road graph", e); }
-    GRAPH.roads = roads; GRAPH.n = roads.length; GRAPH.G = G;
-    ROUTE_CACHE.clear();
+    const G = RG.of(A.roads);
+    if (G !== LAST_G) { LAST_G = G; ROUTE_CACHE.clear(); }
     return G;
   }
-  const ROUTE_CACHE = new Map();
   // the road part of a trip: lane polyline + per-vertex fillet radius + junctions
   function roadRoute(from, to) {
     const G = graph();
-    const key = Math.round(from.x) + "," + Math.round(from.z) + ">" + Math.round(to.x) + "," + Math.round(to.z);
+    const key = Math.round(from.x) + "," + Math.round(from.z) + ">" + Math.round(to.x) + "," + Math.round(to.z) + "#" + (G ? G.ver : 0);
     if (ROUTE_CACHE.has(key)) return ROUTE_CACHE.get(key);
     let out = null;
     if (G) {
       let R = null;
-      try { R = routeNodes(G, from, to); } catch (e) { R = null; }
-      if (R) { const L = lanePolyline(G, R); out = { pts: L.pts, radii: L.radii, junctions: R.junctions }; }
+      try { R = RG.route(G, from, to); } catch (e) { R = null; }
+      if (R) { const L = RG.lanes(G, R); out = { pts: L.pts, radii: L.radii, junctions: R.junctions }; }
     }
     if (!out) out = { pts: [{ x: from.x, z: from.z }, { x: to.x, z: to.z }], radii: [0, 0], junctions: [] };
     if (ROUTE_CACHE.size > 48) ROUTE_CACHE.clear();
     ROUTE_CACHE.set(key, out);
     return out;
   }
-
-  /* ============================================================
-     §2  THE DRIVE PATH — fillet the corners, measure it, and know how fast
-     every metre of it can be taken.
-     ============================================================ */
+  // the shared path, with the motorcade's two speed profiles on it
   function makePath(pts, radii, zones) {
-    // fillet: each corner becomes a sampled quadratic arc of its radius,
-    // never eating more than 48 % of either leg
-    const fx = [], fz = [];
-    function add(x, z) {
-      const n = fx.length;
-      if (n && Math.abs(fx[n - 1] - x) < 0.05 && Math.abs(fz[n - 1] - z) < 0.05) return;
-      fx.push(x); fz.push(z);
-    }
-    add(pts[0].x, pts[0].z);
-    for (let i = 1; i + 1 < pts.length; i++) {
-      const A = pts[i - 1], B = pts[i], C = pts[i + 1];
-      const l1 = d2(A.x, A.z, B.x, B.z), l2 = d2(B.x, B.z, C.x, C.z);
-      if (l1 < 0.01 || l2 < 0.01) { add(B.x, B.z); continue; }
-      const u1x = (B.x - A.x) / l1, u1z = (B.z - A.z) / l1, u2x = (C.x - B.x) / l2, u2z = (C.z - B.z) / l2;
-      const dot = clamp(u1x * u2x + u1z * u2z, -1, 1), th = Math.acos(dot);
-      const R = (radii && radii[i]) || 0;
-      if (th < 0.02 || th > 2.9 || R <= 0) { add(B.x, B.z); continue; }
-      let T = R * Math.tan(th / 2);
-      T = Math.min(T, l1 * 0.48, l2 * 0.48);
-      const p1x = B.x - u1x * T, p1z = B.z - u1z * T, p2x = B.x + u2x * T, p2z = B.z + u2z * T;
-      const Reff = T / Math.tan(th / 2);
-      const m = Math.max(2, Math.ceil(th * Reff / 1.5));
-      for (let k = 0; k <= m; k++) {
-        const t = k / m, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
-        add(a * p1x + b * B.x + c * p2x, a * p1z + b * B.z + c * p2z);
-      }
-    }
-    const last = pts[pts.length - 1]; add(last.x, last.z);
-    // densify long straights to <= 8 m so zone limits and braking curves are
-    // sampled along them, not just at their ends
-    for (let i = fx.length - 1; i > 0; i--) {
-      const L = d2(fx[i], fz[i], fx[i - 1], fz[i - 1]);
-      if (L <= 8) continue;
-      const m = Math.ceil(L / 8), ins = [], inz = [];
-      for (let k = 1; k < m; k++) { ins.push(fx[i - 1] + (fx[i] - fx[i - 1]) * k / m); inz.push(fz[i - 1] + (fz[i] - fz[i - 1]) * k / m); }
-      fx.splice.apply(fx, [i, 0].concat(ins)); fz.splice.apply(fz, [i, 0].concat(inz));
-    }
-    const n = fx.length, s = new Float64Array(n), hv = new Float64Array(n), k = new Float64Array(n);
-    for (let i = 1; i < n; i++) s[i] = s[i - 1] + d2(fx[i], fz[i], fx[i - 1], fz[i - 1]);
-    const hs = [];
-    for (let i = 0; i + 1 < n; i++) hs.push(Math.atan2(fx[i + 1] - fx[i], fz[i + 1] - fz[i]));
-    if (!hs.length) hs.push(0);
-    for (let i = 0; i < n; i++) {
-      const a = hs[Math.max(0, i - 1)], b = hs[Math.min(hs.length - 1, i)];
-      hv[i] = i === 0 ? hs[0] : i === n - 1 ? hs[hs.length - 1] : lerpAng(a, b, 0.5);
-      if (i > 0 && i < n - 1) {
-        const ds = Math.max(0.3, (s[i + 1] - s[i - 1]) / 2);
-        k[i] = Math.abs(wrapA(b - a)) / ds;
-      }
-    }
-    // zone caps (compounds): any vertex inside a slow rect
-    const zc = new Float64Array(n).fill(Infinity);
-    if (zones) for (let i = 0; i < n; i++) for (let q = 0; q < zones.length; q++) {
-      const Z = zones[q];
-      if (fx[i] >= Z.minX && fx[i] <= Z.maxX && fz[i] >= Z.minZ && fz[i] <= Z.maxZ) zc[i] = Math.min(zc[i], Z.v);
-    }
-    function caps(vmax, lat, brake, zoneMul) {
-      const c = new Float64Array(n);
-      for (let i = 0; i < n; i++) {
-        let v = vmax;
-        if (k[i] > 1e-4) v = Math.min(v, Math.sqrt(lat / k[i]));
-        if (zc[i] < Infinity) v = Math.min(v, zc[i] * zoneMul);
-        c[i] = Math.max(2.5, v);
-      }
-      for (let i = n - 2; i >= 0; i--) c[i] = Math.min(c[i], Math.sqrt(c[i + 1] * c[i + 1] + 2 * brake * (s[i + 1] - s[i])));
-      return c;
-    }
-    return {
-      x: fx, z: fz, s: s, h: hv, n: n, len: s[n - 1],
-      capN: caps(V_ROAD, LAT_N, BRAKE_N, 1), capE: caps(V_EVAC, LAT_E, BRAKE_E, 1.5),
-    };
+    const P = RG.path(pts, radii, zones);
+    P.capN = P.caps(V_ROAD, LAT_N, BRAKE_N, 1);
+    P.capE = P.caps(V_EVAC, LAT_E, BRAKE_E, 1.5);
+    return P;
   }
-  function segIdx(P, s) {
-    let lo = 0, hi = P.n - 1;
-    if (s <= 0) return 0;
-    if (s >= P.len) return Math.max(0, P.n - 2);
-    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (P.s[m] <= s) lo = m; else hi = m; }
-    return lo;
-  }
-  // position + heading at arc length s (extrapolated straight past either end)
-  function pathAt(P, s) {
-    if (P.n < 2) return { x: P.x[0], z: P.z[0], h: P.h[0] || 0 };
-    const i = segIdx(P, s), j = i + 1;
-    const L = P.s[j] - P.s[i] || 1e-6;
-    const f = (s - P.s[i]) / L;
-    const x = P.x[i] + (P.x[j] - P.x[i]) * f, z = P.z[i] + (P.z[j] - P.z[i]) * f;
-    const h = (f <= 0 || f >= 1) ? Math.atan2(P.x[j] - P.x[i], P.z[j] - P.z[i]) : lerpAng(P.h[i], P.h[j], f);
-    return { x: x, z: z, h: h };
-  }
-  function capAt(P, s, panic) {
-    const c = panic ? P.capE : P.capN;
-    if (s <= 0) return c[0];
-    if (s >= P.len) return c[P.n - 1];
-    // v^2 is linear in s under constant braking, so interpolate the square
-    const i = segIdx(P, s), L = P.s[i + 1] - P.s[i] || 1e-6, f = clamp((s - P.s[i]) / L, 0, 1);
-    return Math.sqrt(c[i] * c[i] + (c[i + 1] * c[i + 1] - c[i] * c[i]) * f);
-  }
-  // nearest arc length to a point (optionally within [s0, s1])
-  function projectS(P, x, z, s0, s1) {
-    let best = 0, bd = Infinity;
-    const a = s0 == null ? 0 : s0, b = s1 == null ? P.len : s1;
-    for (let i = 0; i + 1 < P.n; i++) {
-      if (P.s[i + 1] < a || P.s[i] > b) continue;
-      const ax = P.x[i], az = P.z[i], bx = P.x[i + 1], bz = P.z[i + 1];
-      const L2 = (bx - ax) * (bx - ax) + (bz - az) * (bz - az) || 1e-9;
-      const t = clamp(((x - ax) * (bx - ax) + (z - az) * (bz - az)) / L2, 0, 1);
-      const px = ax + (bx - ax) * t, pz = az + (bz - az) * t;
-      const d = d2(x, z, px, pz);
-      if (d < bd) { bd = d; best = P.s[i] + t * (P.s[i + 1] - P.s[i]); }
-    }
-    return best;
-  }
-  // the points of P between two arc lengths (used to keep the formation on
-  // the old path while a new route is appended ahead of it)
-  function pathSlice(P, s0, s1) {
-    const out = [], rad = [];
-    const a = pathAt(P, s0); out.push({ x: a.x, z: a.z }); rad.push(0);
-    for (let i = 0; i < P.n; i++) if (P.s[i] > s0 + 0.2 && P.s[i] < s1 - 0.2) { out.push({ x: P.x[i], z: P.z[i] }); rad.push(0); }
-    const b = pathAt(P, s1); out.push({ x: b.x, z: b.z }); rad.push(0);
-    return { pts: out, radii: rad };
-  }
+  function pathAt(P, s) { return RG.pathAt(P, s); }
+  function capAt(P, s, panic) { return RG.capAt(P, s, panic ? P.capE : P.capN); }
+  function projectS(P, x, z, s0, s1) { return RG.projectS(P, x, z, s0, s1); }
+  function pathSlice(P, s0, s1) { return RG.pathSlice(P, s0, s1); }
 
   /* ============================================================
      §3  THE MANSION'S MOTOR COURT, from govcomplex.js's own layout
@@ -2276,10 +1929,10 @@
     _convoy: convoyList,
     _stage: function () { return ensureStaged(true); },
     _teardown: function () { teardown(true); },
-    _math: { buildGraph: buildGraph, routeNodes: routeNodes, lanePolyline: lanePolyline, makePath: makePath, pathAt: pathAt, capAt: capAt, projectS: projectS, uTurn: uTurn },
+    _math: { makePath: makePath, pathAt: pathAt, capAt: capAt, projectS: projectS, uTurn: uTurn },
   };
   CBZ.motorcadeAudit = function () {
-    const G = GRAPH.G;
+    const G = graph();
     return {
       car: !!stateCar(), cars: convoyList().length, where: MC.where, phase: RUN ? RUN.phase : MC.phase,
       destinations: choicesFor(null).map(function (d) { return d.id; }),

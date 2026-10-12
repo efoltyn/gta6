@@ -467,6 +467,7 @@ document.body.appendChild(b);}}catch(e){}})();
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
      the same unit. Must precede any file registering a breach target. -->
+<script src="src/weapons/munitiontable.js?v=strike1013m"></script>
 <!-- THE AIRPORT REGISTRY (CBZ.registerAirport / CBZ.airports / the local
      airfield frame). An airport stops being a rectangle of the map and becomes
      a RECORD with an origin, a bearing and a runway, so a second field is a
@@ -681,7 +682,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/hud.js?v=nored0930"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/ballistics.js?v=bal2m1012"></script>
+<script src="src/weapons/ballistics.js?v=strike1013m"></script>
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
 <script src="src/weapons/munitions.js?v=mil0929"></script>
@@ -807,7 +808,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/camera.js?v=planes1009b"></script>
-<script src="src/systems/physics.js?v=gait1011"></script>
+<script src="src/systems/physics.js?v=solid1011b"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -892,7 +893,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=bootflash1"></script>
+<script src="src/systems/state.js?v=army1013m"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1179,11 +1180,11 @@ document.body.appendChild(b);}}catch(e){}})();
      dressing through the city streamer. island_airport.js (Halloran) and
      airport_capeharbor.js are specs; both builders run at worldgen, after
      this file has parsed. -->
-<!-- MILITARY AIRFRAMES: lofted fighter / attack + utility helicopters / drone / bomber and the kit the cargo lifter is built with. Before island_military (its model factories call CBZ.milAir). -->
-<script src="src/city/mil_air.js?v=nuke1009b"></script>
-<!-- GROUND ARMOR: tank / IFV / 8x8 / 6x6 truck / light vehicle / rocket artillery / missile launcher at real dimensions, instanced running gear + turret/launcher rigs. Before island_military (makeTank/makeTruck/makePatriot delegate to CBZ.milArmor). -->
-<script src="src/city/mil_armor.js?v=mil0929"></script>
+<!-- THE AIRFRAME KIT (loft / wing / merge) the NPC War airframes build on, and milAirDrive / milAirAim / milAirPoint, the calls the city makes on a flying unit. The machines themselves are the unit files Fort Brandt parks (island_military.js). -->
+<script src="src/city/mil_air.js?v=army1013m"></script>
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
+<!-- ONE ARMY (city/army.js): the door to NPC War's battle core, sim and unit kit. Only the API + loader ride the page; the unit files and the war engine load when a force or Fort Brandt's motor pool needs them. -->
+<script src="src/city/army.js?v=convoy1013"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
@@ -1233,7 +1234,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
-<script src="src/entities/moves_posture.js?v=po0930"></script>
+<script src="src/entities/moves_posture.js?v=solid1011b"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
@@ -1359,7 +1360,7 @@ document.body.appendChild(b);}}catch(e){}})();
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
-<script src="src/systems/impactbus.js?v=street1009"></script>
+<script src="src/systems/impactbus.js?v=strike1013m"></script>
 <!-- THE COLLAPSE ENGINE. The ONE answer to "what does a building look like
      while it is being destroyed", shared by the city ledger (structural.js),
      the disaster island (systems/disasters.js) and anything else that
@@ -1372,6 +1373,7 @@ document.body.appendChild(b);}}catch(e){}})();
      to the collapse they had) · ?cfg_COLLAPSE_FRAGMENTS=0 (motion without
      debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
 <script src="src/city/collapse.js?v=mil0929"></script>
+<script src="src/systems/strike.js?v=strike1013m"></script>
 <script src="src/city/structural.js?v=street1009"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
@@ -1626,6 +1628,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/agency.js?v=street1009"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
+<!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
+     (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
+     the army's "route" order) route on it. Pure maths, loads first. -->
+<script src="src/systems/roadgraph.js?v=convoy1011"></script>
+<script src="src/systems/convoy.js?v=convoy1013"></script>
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
      a wall falling real physics and then finding door etc". The mover is a
      straight line and actorcollide.js always said so ("an NPC may bump a wall
@@ -1881,7 +1888,7 @@ document.body.appendChild(b);}}catch(e){}})();
      carries which payload, prices, delivery days, each nation's starting
      fleet and warheads, bunker hardness. polwar.js seeds from it; warroom.js
      gates, sells and flies off it. -->
-<script src="src/city/arsenal_data.js?v=arsenal0930"></script>
+<script src="src/city/arsenal_data.js?v=strike1013m"></script>
 <!-- P9: migration — policy per country (president legislates over
      LEGISLATE_DAYS days + an approval cost if unpopular; every other govType
      decrees instantly), daily individual-migration-evaluation propensity
@@ -2002,7 +2009,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=desk1009c"></script>
-<script src="src/city/motorcade.js?v=presverbs1008"></script>
+<script src="src/city/motorcade.js?v=convoy1011"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
      readiness, the Bureau's thread, a former who comes back; the Chief of
@@ -2017,8 +2024,8 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=fortb1009"></script>
-<script src="src/city/frontline.js?v=aim1012"></script>
+<script src="src/city/warroom.js?v=army1013m"></script>
+<script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=gateprotest2"></script>
 <script src="src/city/president_public.js?v=street1009"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):

@@ -72,8 +72,9 @@
      fold(x, z, tx, tz)              a reverse-slope spot near (x, z) hidden
                                      from (tx, tz), or null (budgeted)
      near(x, z, r, out)              bodies near a point
-     enemyCOM(team) / homeDir(team)  the enemy's centre; a unit vector rearward
-     order(team) / hunting(team) / enemyBroken(team)
+     enemyCOM(team, S) / homeDir(team) where the squad marches (the enemy's centre, or its
+                                     force's objective); a unit vector rearward
+     order(team, S) / hunting(team) / enemyBroken(team)   ("hold" | "advance": the side's, or the squad's force's)
      odds(team)                      own fighting power / the enemy's
      camera()                        {x, z} of the lens (for tiers)
      vehicles(team)                  that side's live ground vehicles
@@ -486,11 +487,11 @@
     S.morale = Math.max(0, Math.min(1, 1 - lostF * 1.1 - S.shock - S.supp * 0.32 - Math.min(0.3, S.pinnedT * 0.012) + (odds - 1) * 0.12));
 
     // ---- the decision
-    const enemy = A.enemyCOM(S.team);
+    const enemy = A.enemyCOM(S.team, S);
     const tgtRef = S.focus || best;
     const tx = tgtRef ? tgtRef.pos.x : enemy.x, tz = tgtRef ? tgtRef.pos.z : enemy.z;
     const dEnemy = Math.hypot(tx - S.cx, tz - S.cz);
-    const holding = A.order(S.team) === "hold" && !A.enemyBroken(S.team);
+    const holding = A.order(S.team, S) === "hold" && !A.enemyBroken(S.team);
     const hunting = A.hunting(S.team);
     const band = bandOf(S);
     // escort: a friendly armoured vehicle near, and nobody else riding it
