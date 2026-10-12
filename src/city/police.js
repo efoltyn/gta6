@@ -1005,7 +1005,7 @@
     carSuspects.length = 0;
     for (const c of pursuers) if (c && !c.dead && !c.player) { c._pursuit = false; c.ai = true; c.reckless = false; }
     pursuers.length = 0;
-    rbReset();    // drop wall colliders + dispose pooled cruiser/officer rigs (posted cops were in cityCops → already disposed above)
+    rbReset();    // dispose pooled cruiser/officer rigs (posted cops were in cityCops → already disposed above)
     patrolCarsReset();   // clear patrol-cruiser handles (the cars are disposed by vehicles.js clearCars)
     swatVanReset();      // drop the SWAT-van handle (the van itself is a cityCars record — clearCars owns it)
     if (typeof despawnChopper === "function") despawnChopper();
@@ -2608,7 +2608,7 @@
     state: 0,                 // 0 idle · 1 staged · 2 leaving
     armed: false, cd: 0,      // cadence (ticks down in maintain's 1.1s beat)
     x: 0, z: 0, ux: 0, uz: 1, // wall centre + road direction (unit, pointing DOWNSTREAM of the suspect's travel)
-    cars: [], cops: [], cols: [],
+    cars: [], cops: [],
     carPool: [], copPool: [], // detached, reusable records — never rebuilt per staging
     flashT: 0, leaveT: 0, age: 0,
   };
@@ -2729,13 +2729,6 @@
     if (RB.copPool.length < 4) RB.copPool.push(c);
     else rbDispose(c.group);
   }
-  function rbDropCol(i) {
-    const col = RB.cols[i];
-    const k = CBZ.colliders.indexOf(col); if (k >= 0) CBZ.colliders.splice(k, 1);
-    RB.cols.splice(i, 1);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-  }
-  function rbDropCols() { for (let i = RB.cols.length - 1; i >= 0; i--) rbDropCol(i); }
 
   // stage the wall 120-200u DOWN THE ROAD the suspect is actually running —
   // snapped to the street's centre-line and kept out of the intersection box so
@@ -2788,12 +2781,10 @@
       c.v = 0; c.vx = 0; c.vz = 0; c.baseV = 0; c.reckless = false; c._pursuit = false;
       c._roadblock = CBZ.now; c._rbLeave = 0;
       RB.cars.push(c);
-      // TEMPORARY collider over the parked hull — on-foot actors can't ghost the
-      // wall. It dies with the parking spot (see rbUpdate), never outlives it.
-      const col = { minX: cx - 2.0, maxX: cx + 2.0, minZ: cz - 2.0, maxZ: cz + 2.0, ref: c.group, noCam: true, _rb: c, _px: cx, _pz: cz };
-      CBZ.colliders.push(col); RB.cols.push(col);
     }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // (no box over the hulls: the cruisers are cityCars, solid to people
+    // through physics.js carSolid at their real rotated shape; the old 4x4 m
+    // square round each angled car was an invisible wall past its paint)
     // ---- 3-4 officers posted behind the engine blocks (5★ posts NOOSE bodies
     //      behind the same cruisers — heavier line, same pooled cars) ----
     const lanes = stars >= 4 ? [-3.2, -1.1, 1.1, 3.2] : [-2.6, 0, 2.6];
@@ -2821,7 +2812,6 @@
     return true;
   }
   function rbAbort() {        // a half-staged wall is torn straight back down
-    rbDropCols();
     for (const c of RB.cops.splice(0)) if (c) rbDetachCop(c);
     for (const c of RB.cars.splice(0)) rbParkCar(c);
     RB.state = 0;
@@ -2836,11 +2826,10 @@
     if (RB.carPool.length < 2) RB.carPool.push(c);
     else rbDispose(c.group);
   }
-  // wall comes down: colliders die first (the cars are about to MOVE), cruisers
+  // wall comes down: cruisers
   // light out down the closed road, officers jog to mount up.
   function rbTeardown() {
     if (RB.state !== 1) return;
-    rbDropCols();
     RB.state = 2; RB.leaveT = 5;
     for (const c of RB.cops) if (c && !c.dead && c._post) { c._post.mount = RB.cars.find(rbCarUsable) || null; c._post.mountT = 0; }
     for (const c of RB.cars) if (rbCarUsable(c)) c._rbLeave = 0.9 + rng() * 0.8;   // a beat to load up, then roll
@@ -2901,13 +2890,6 @@
     }
     if (RB.state === 2) { rbLeaveTick(dt); return; }
     RB.age += dt;
-    // a cruiser knocked off its spot (rammed aside / stolen / wrecked) stops
-    // blocking — the collider dies with the parking spot, it NEVER goes stale.
-    for (let i = RB.cols.length - 1; i >= 0; i--) {
-      const c = RB.cols[i]._rb;
-      if (!c || c.dead || c.player || c.wreckT > 0 ||
-          Math.hypot(c.pos.x - RB.cols[i]._px, c.pos.z - RB.cols[i]._pz) > 1.2) rbDropCol(i);
-    }
     // shoved cruisers still need to MOVE (ai=false cars skip the traffic loop):
     // integrate the crash impulse the car-car pass gave them so they skid aside.
     for (const c of RB.cars) {
@@ -2921,22 +2903,15 @@
       c.group.position.set(c.pos.x, 0, c.pos.z);
       c.group.rotation.y = c.heading;
     }
-    // suspect coming in HOT: drop the static boxes and let the car-car crash
-    // pass own the contact — the cruisers can be shoved, your front end pays.
-    if (P.driving && P._vehicle && RB.cols.length) {
-      const v = P._vehicle;
-      if (Math.hypot(v.vx || 0, v.vz || 0) > 9 && Math.hypot(v.pos.x - RB.x, v.pos.z - RB.z) < 18) rbDropCols();
-    }
     // teardown: heat broke, suspect bailed on foot / got far / blew past the
     // wall, or the wall went stale — pack up and roll out
     const pdx = P.pos.x - RB.x, pdz = P.pos.z - RB.z, pd = Math.hypot(pdx, pdz);
     const past = (pdx * RB.ux + pdz * RB.uz) > 26;
     if (stars < 3 || P.dead || pd > 230 || past || (!P.driving && pd > 60) || RB.age > 60 || g.state !== "playing") rbTeardown();
   }
-  // full reset (mode teardown): colliders out, pooled rigs disposed. Posted
+  // full reset (mode teardown): pooled rigs disposed. Posted
   // officers live in CBZ.cityCops, so clearCityCops' own loop disposes them.
   function rbReset() {
-    rbDropCols();
     for (const c of RB.cops) if (c) c._post = null;
     RB.cops.length = 0;
     for (const c of RB.cars) {

@@ -685,6 +685,7 @@
   }
   function unpost(ped) {
     if (!ped || ped.dead) return;
+    ped._pubWalk = null;
     if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(ped); return; } catch (e) {} }
     try {
       if (ped.group && ped.group.parent) ped.group.parent.remove(ped.group);
@@ -739,19 +740,61 @@
 
   const SUP_JOBS = ["teacher", "nurse", "office worker", "student", "retiree", "shop assistant", "electrician", "bus driver"];
   const PRO_JOBS = ["student", "activist", "labourer", "teacher", "nurse", "unemployed"];
+  /* PEOPLE ARRIVE; THEY DO NOT APPEAR. A slot the player can see is never
+     spawned on: the person is minted out of view (behind the crowd, off the
+     padded screen or behind a wall) and WALKS to his place. This used to post
+     him on the slot anyway once the fill was "late" (or forced), so peds.js
+     minted him spawn-hidden: an invisible man standing in the crowd until the
+     camera looked away. */
+  function entryFor(x, z) {
+    const st = CROWD.stage || PROT.at || null;
+    const ox = st ? st.x : x, oz = st ? st.z : z;
+    let ax = x - ox, az = z - oz, L = Math.hypot(ax, az);
+    if (L < 1e-3) { ax = 0; az = 1; L = 1; }
+    ax /= L; az /= L;
+    const DIRS = [0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9, Math.PI];
+    for (let r = 22; r <= 110; r += 11) {
+      for (let k = 0; k < DIRS.length; k++) {
+        const a = DIRS[k], c = Math.cos(a), si = Math.sin(a);
+        const dx = ax * c + az * si, dz = -ax * si + az * c;
+        let ex = x + dx * r, ez = z + dz * r;
+        const q = publicPoint(ex, ez); ex = q.x; ez = q.z;
+        if (CBZ.cityKeepOutAt && CBZ.cityKeepOutAt(ex, ez, 0.6, true)) continue;
+        if (CBZ.queryCollidersNear) {
+          const cs = CBZ.queryCollidersNear(ex, ez, 0.6, _entryCols);
+          let inside = false;
+          for (let i = 0; i < cs.length && !inside; i++) { const b = cs[i]; if (b.yaw == null && ex > b.minX - 0.5 && ex < b.maxX + 0.5 && ez > b.minZ - 0.5 && ez < b.maxZ + 0.5 && !(b.y0 > 1.5)) inside = true; }
+          if (inside) continue;
+        }
+        if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(ex, ez, { minDistance: 18, maxDistance: 150, occlusion: true })) continue;
+        return { x: ex, z: ez };
+      }
+    }
+    return null;
+  }
+  const _entryCols = [];
+  const WALKING = [];
   function postMember(x, z, face, role, idx, force) {
     if (!CBZ.cityPostNpc || owned() >= BUDGET) return null;
-    if (!spawnSafe(x, z, force)) return null;
+    if (CBZ.citySpawnDraining) return null;
+    let at = { x: x, z: z }, walk = false;
+    if (!spawnSafe(x, z, false)) {
+      if (!force) return null;
+      at = entryFor(x, z);
+      if (!at) return null;                     // nowhere unseen to come from yet: try next tick
+      walk = true;
+    }
     let ped = null;
     try {
-      ped = CBZ.cityPostNpc(x, z, {
+      ped = CBZ.cityPostNpc(at.x, at.z, {
         job: role === "pro" ? PRO_JOBS[idx % PRO_JOBS.length] : SUP_JOBS[idx % SUP_JOBS.length],
-        kind: "civilian", archetype: "resident", pin: true, face: face, armed: false, aggr: 0.08,
+        kind: "civilian", archetype: "resident", pin: !walk, face: face, armed: false, aggr: 0.08,
         wealth: role === "pro" ? 0.3 : 0.5, src: "prespublic:" + role,
       });
     } catch (e) { ped = null; }
     if (!ped) return null;
-    const fy = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
+    if (walk) { ped._pubWalk = { x: x, z: z, face: face, t: 0, prop: null }; WALKING.push(ped); }
+    const fy = CBZ.floorAt ? CBZ.floorAt(at.x, at.z) : 0;
     if (ped.pos && isFinite(fy)) ped.pos.y = fy;
     ped._pubRole = role;
     ped._iOnly = true;              // here for the President: his verbs, not the street's
@@ -1009,6 +1052,7 @@
   // has gone a way off or enough time has passed.
   function startDrift(ped, list, from, flee) {
     if (!ped || ped.dead) return;
+    ped._pubWalk = null;                 // no longer walking in (tickWalkIn lets go)
     ped.staffPost = null;
     ped.controlled = false;
     lowerProp(ped);
@@ -1084,6 +1128,48 @@
       for (let i = 0; i < pro.length; i++) hype(pro[i].ped, 3.5);
       const b = frontOf(pro.length ? pro : sup);
       if (b) say(b.ped, pro.length ? rpick(BOOS) : "Come on...", "#ffb4a8");
+    }
+  }
+  // the walk in: a standing order to the slot each frame (peds.js moveOrder
+  // seam), the sign carried low on the way, posted and raised on arrival
+  function tickWalkIn(dt) {
+    const now = CBZ.now || 0;
+    for (let i = WALKING.length - 1; i >= 0; i--) {
+      const ped = WALKING[i], W = ped && ped._pubWalk;
+      if (!W || ped.dead || !ped.group || !ped.group.parent || ped.state === "flee" || ped.rage || ped.controlled || ped.restraint) {
+        if (ped) { if (ped.moveOrder && ped.moveOrder._pubWalk) ped.moveOrder = null; ped._pubWalk = null; }
+        WALKING.splice(i, 1); continue;
+      }
+      W.t += dt;
+      if (ped._pubProp && !W.prop) {
+        const pr = ped._pubProp;
+        W.prop = { pos: pr.position.clone(), rot: pr.rotation.clone(), pose: ped._sign ? "pubPlacard" : "pubFlag" };
+        lowerProp(ped); setPose(ped, null);
+      }
+      const d = Math.hypot(W.x - ped.pos.x, W.z - ped.pos.z);
+      // stuck on the way (a wall the straight line never cleared): after 40 s
+      // he is put on his slot, but only in a moment neither spot is seen
+      const stuck = W.t > 40 && CBZ.npcTransitionSafe &&
+        CBZ.npcTransitionSafe(ped.pos.x, ped.pos.z, { minDistance: 18, maxDistance: 150, occlusion: true }) &&
+        CBZ.npcTransitionSafe(W.x, W.z, { minDistance: 18, maxDistance: 150, occlusion: true });
+      if (d < 0.5 || stuck) {
+        if (d >= 0.5) { ped.pos.x = W.x; ped.pos.z = W.z; }
+        ped.moveOrder = null;
+        ped.staffPost = { x: W.x, z: W.z, face: W.face || 0 };
+        ped.state = "idle"; ped.speed = 0;
+        if (ped.group) ped.group.rotation.y = W.face || 0;
+        const fy = CBZ.floorAt ? CBZ.floorAt(W.x, W.z) : 0;
+        if (isFinite(fy)) ped.pos.y = fy;
+        if (W.prop && ped._pubProp) {
+          ped._pubProp.position.copy(W.prop.pos); ped._pubProp.rotation.copy(W.prop.rot);
+          if (ped.char) ped.char._pubProp = ped._pubProp;
+          setPose(ped, W.prop.pose);
+        }
+        ped._pubWalk = null; WALKING.splice(i, 1); continue;
+      }
+      let o = ped.moveOrder;
+      if (!o || !o._pubWalk) o = ped.moveOrder = { _pubWalk: true, x: 0, z: 0, speed: 1.4, stop: 0.3, t: 0 };
+      o.x = W.x; o.z = W.z; o.speed = d > 6 ? 1.5 : 1.1; o.t = now;
     }
   }
   function tickCrowdPoses(dt) {
@@ -2301,6 +2387,7 @@
     }
     T4 -= dt;
     tickCrowdPoses(dt);
+    if (WALKING.length) tickWalkIn(dt);
     if (PANIC.length) tickPanic(dt);
     if (APP.live) tickLive(dt);
     if (T4 > 0) return;
