@@ -596,11 +596,27 @@
      and came back as thousands of draw calls. Each parked cell's root-level
      subtrees are batched here, exactly as a streamed job's are when it
      settles: static parts merge into a few buffers, live parts stay. */
+  /* THE PASSES SEE THE REFERENCES THE BOOT BATCH SEES. The prune takes a
+     parked subtree's LOS blockers out of CBZ.losBlockers (job.los) BEFORE
+     this runs, and core/batch.js / localinst decide "keep this mesh's
+     identity" from that very list. So every mesh known only as a blocker
+     (a floor slab, the carved slab a stair opened, a parapet) was merged as
+     inert deco here and its original thrown away. When the stair core was
+     built on the way in (elevators.js cityStairCore, the first time anybody
+     walks up) buildings.js carved the slab: the walk surface left, but
+     batchWallHide had no slice for a mesh that went down the inert path, so
+     the drawn slab stayed across the stairwell in the merged buffer.
+     OWNER (iPad, the Mansion): "there's this white floor in the stairwell,
+     and you have to walk through the floor". Every parked building on a
+     streamed boot had it. The parked blockers are put back in the list for
+     the two passes (walls path: hidden originals with their own slices, LOS
+     raycasts keep a mesh that is in the graph) and taken out again after. */
   CBZ.streamCompactParked = function (root) {
     if (!root || !window.THREE || !CBZ.batchStaticUnder) return 0;
     root.updateWorldMatrix(true, false);
     if (!root.matrixWorld.equals(new window.THREE.Matrix4())) return 0;   // merged verts are root-space
     let n = 0;
+    const L = CBZ.losBlockers;
     prunedCells.forEach(function (job) {
       if (job.state !== "parked" || !job.objs || !job.objs.length) return;
       const mine = job.objs.filter(function (it) { return it.parent === root && it.o && !it.o.parent; });
@@ -608,8 +624,12 @@
       const G = new window.THREE.Group();
       G.name = "stream-job";
       for (const it of mine) G.add(it.o);
+      const los = L && job.los && job.los.length ? job.los : null;
+      const base = L ? L.length : 0;
+      if (los) for (let i = 0; i < los.length; i++) L.push(los[i]);
       try { CBZ.batchStaticUnder(G); } catch (e) { console.error("[park batch " + job.name + "]", e); }
       try { if (CBZ.instanceStaticUnder) CBZ.instanceStaticUnder(G); } catch (e) {}
+      if (los) L.length = base;           // (nothing else touches the list between: the passes only read it)
       root.remove(G);
       job.objs = job.objs.filter(function (it) { return mine.indexOf(it) < 0; });
       job.objs.push({ o: G, parent: root });
