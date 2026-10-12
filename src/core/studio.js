@@ -745,8 +745,8 @@
              "cannot disagree, overhead cover, and blast that walks a snapshot " +
              "so a kill mid-sweep cannot skip the next body",
       needs: ["boot", "look"],
-      files: ["systems/ordnance.js"],
-      publishes: ["ordnance"],
+      files: ["weapons/munitiontable.js", "systems/ordnance.js"],
+      publishes: ["munitionTable", "ordnance"],
     },
     nukefx: {
       gives: "the researched mushroom: stem, cap, surge, collar, whiteout, and " +
@@ -801,9 +801,14 @@
              "wall ruin, rebar, ejecta cone, dust, and cityAirstrikeCollapse, " +
              "the verb that brings a section of a building down. None of it " +
              "reads a city record any more",
+      /* THE ONE IMPACT RESOLVER rides here: the munition table, the charge
+         law, the picture (crashfx), the wall carve's ledger (fracture), the
+         collapse engine, and systems/strike.js on top, which studio.boom is */
       needs: ["fx"],
-      files: ["city/crashfx.js"],
-      publishes: ["cityBlastCore", "cityAirstrikeCollapse", "cityWallRuin"],
+      files: ["weapons/munitiontable.js", "systems/breach.js", "city/crashfx.js", "city/fracture.js",
+        "city/collapse.js", "systems/strike.js"],
+      publishes: ["munitionTable", "blastLaw", "cityBlastCore", "cityAirstrikeCollapse", "cityWallRuin",
+        "cityFracture", "collapse", "strike"],
     },
     sound: {
       gives: "the shared audio bus: positional effects, ducking, and the " +
@@ -1716,111 +1721,33 @@
     return freed;
   };
 
-  /* structureAt(x, z, reach) — WHAT IS STANDING HERE.
-
-     Reads CBZ.colliders, which is the registry the whole engine already writes
-     and reads, and returns the nearest full-height box's own record — its
-     centre, its extents and its height — or null over open ground. A world
-     declares a building by registering one collider with a `ref`; nothing here
-     knows what a lot, a district or a city is, so the prison, the desert and
-     the city all answer the same way.
-
-     `reach` lets a near miss still find the wall it went off beside, which is
-     what a bomb actually does to a building. */
-  CBZ.studio.structureAt = function (x, z, reach) {
-    const list = CBZ.colliders;
-    if (!list || !list.length) return null;
-    const R = reach > 0 ? reach : 0;
-    let best = null, bd = Infinity;
-    for (let i = 0; i < list.length; i++) {
-      const c = list[i];
-      if (!c || c.y0 != null) continue;                 // height-gated: a rail, a roof, not a structure
-      const r = c.ref;
-      if (!r || !(r.w > 0) || !(r.h > 0)) continue;     // a record that cannot describe itself
-      if (r.alive === false) continue;
-      const dx = Math.max(c.minX - x, 0, x - c.maxX);
-      const dz = Math.max(c.minZ - z, 0, z - c.maxZ);
-      const d = Math.hypot(dx, dz);
-      if (d > R) continue;
-      if (d < bd) { bd = d; best = r; }
-    }
-    return best;
-  };
-
-  /* boom(pos, opts) — a detonation, through the best route that is loaded.
-     ordnance owns the shape of one; crashfx owns what it looks like; modecaps
-     owns whose people it reaches. A page should never grow its own fireball.
-     CBZ.cityExplosion is deliberately NOT used: it is a wrapper chain six city
-     files hang couplings on, so outside the city the core is the honest call. */
+  /* boom / collapseAt / structureAt — THE ONE IMPACT RESOLVER'S DOOR.
+     Every detonation on every page is systems/strike.js (CBZ.strike): the
+     munition's row in weapons/munitiontable.js (opts.mun) prices the
+     fireball, the sound, the people and hulls it reaches, the wall it opens,
+     the roof it holes, the storeys it guts, the building it brings down and
+     the parked machines it wrecks. A caller with no munition may pass opts.W
+     (kg TNT-eq) or its old radius/power. The resolver rides the `damage`
+     pack; a page without it has no explosions to draw, and these answer null.
+       boom(pos, opts)           the whole strike
+       collapseAt(pos, opts)     the built-world half alone (a store whose own
+                                 system already drew the fireball and swept
+                                 the people: systems/ordnance.js sticks)
+       structureAt(x, z, reach)  the building shell standing here, or null */
   CBZ.studio.boom = function (pos, opts) {
     opts = opts || {};
-    const R = opts.radius > 0 ? opts.radius : 18;
-    const power = opts.power > 0 ? opts.power : 1;
-    let drew = false;
-    // cityExplosionCore's signature is (x, z, opts) with the detonation HEIGHT
-    // riding opts.y — this call used to pass (x, y, z, opts), so every slice
-    // page's fireball drew at z≈1 with the default 6 m radius and its own
-    // mis-aimed damage sweep. Measured from games/battle.html: rockets whose
-    // blast damage landed (boom's own sweep below is aimed right) while the
-    // flame bloomed a map away. noDamage because the roster sweep is done
-    // HERE, once, through modecaps — the core's internal applyBlastDamage
-    // would run the same blastWorldActors again and double-kill.
-    if (CBZ.cityBlastCore) {
-      try {
-        CBZ.cityBlastCore(pos.x, pos.z, {
-          power: power, radius: R / Math.max(0.2, power),
-          y: pos.y || 1, noDamage: true, byPlayer: !!opts.byPlayer,
-        });
-        drew = true;
-      } catch (e) {}
-    }
-    // IT MUST ALSO BE HEARD, and the falloff is the bank's own job rather than
-    // every caller's. A detonation across the basin should be a thud, not the
-    // same bang as one in the street.
-    const S = CBZ.micro && CBZ.micro.sfx;
-    if (opts.silent !== true && S && S.boom) {
-      let gain = 0.75 * Math.min(1.6, power);
-      if (CBZ.camera && S.gainAt) {
-        const c = CBZ.camera.position;
-        const d = Math.sqrt((c.x - pos.x) * (c.x - pos.x) + (c.y - (pos.y || 0)) * (c.y - (pos.y || 0)) + (c.z - pos.z) * (c.z - pos.z));
-        gain *= S.gainAt(d, opts.earshot || 420);
-      }
-      if (gain > 0.015) {
-        try { S.boom({ gain: gain, dur: 1.2 + power * 0.5, sub: 96 - power * 12, bright: R < 12 }); } catch (e) {}
-      }
-    }
-    let hit = 0;
-    if (CBZ.blastWorldActors) { try { hit = CBZ.blastWorldActors(pos.x, pos.y || 1, pos.z, R, power, opts) || 0; } catch (e) {} }
-    const struck = opts.structural === false ? null : CBZ.studio.collapseAt(pos, opts);
-    return { drew: drew, hit: hit, struck: struck };
+    return CBZ.strike ? CBZ.strike(opts.mun || null, pos, opts) : null;
   };
-
-  /* collapseAt(pos, opts) — THE STRUCTURAL HALF ON ITS OWN.
-
-     systems/ordnance.js already draws its own fireball and applies its own
-     damage when a store goes off, so a page hooking onDetonate and calling
-     boom() there gets the explosion TWICE: two fireballs, two bangs, and the
-     sound stacking seven deep across a stick. What ordnance does not do is
-     bring the building down, and that is the only part such a hook wants.
-
-     cityAirstrikeCollapse resolves a facade out of whatever it is given, and
-     given only a point it has to guess the footprint. The world already knows:
-     the structure under the impact is a collider with a `ref` carrying its own
-     extents. Hand over the real lot and the collapse lands on the real face at
-     the real roofline. Returns the struck record, or null over open ground. */
   CBZ.studio.collapseAt = function (pos, opts) {
     opts = opts || {};
-    if (!CBZ.cityAirstrikeCollapse || !pos) return null;
-    const R = opts.radius > 0 ? opts.radius : 18;
-    const s = CBZ.studio.structureAt(pos.x, pos.z, opts.reach != null ? opts.reach : R);
-    const lot = s ? { cx: s.x, cz: s.z, w: s.w, d: s.d } : { x: pos.x, z: pos.z };
-    try {
-      CBZ.cityAirstrikeCollapse(lot, {
-        at: pos, top: s ? s.h : undefined,
-        power: opts.power > 0 ? opts.power : 1, radius: R,
-      });
-    } catch (e) { return null; }
-    return s;
+    if (!CBZ.strike || !pos) return null;
+    const N = CBZ.strike.numbers(opts.mun || null, opts);
+    const r = CBZ.strike.structure(pos, N.W, { shaped: N.shaped, jet: N.jet });
+    try { CBZ.strike.hardware(pos, N.W, N, opts); } catch (e) {}
+    return r && r.b ? r.b : null;
+  };
+  CBZ.studio.structureAt = function (x, z, reach) {
+    return CBZ.strike ? CBZ.strike.buildingAt(x, null, z, reach > 0 ? reach : 1) : null;
   };
 
   /* ==========================================================================

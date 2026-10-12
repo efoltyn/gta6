@@ -228,6 +228,8 @@ function makeVehicle(teamId, i, id) {
   if (!air) noteBodyRadius(Math.min(4.5, L * 0.5));    // the fine grid must see a whole hull
   let reach = 0;
   const weapons = (def.weapons || []).map(function (w, k) {
+    // the row names its munitions (w.mun / w.heMun); their numbers are the table's
+    if (CBZ.munitionTable) CBZ.munitionTable.arm(w);
     const mount = vehMountOf(def, w);
     if (!w.indirect) reach = Math.max(reach, w.range || 600);
     return { w: w, i: k, n: 0, mount: mount, arc: vehArcOf(w, mount),
@@ -838,19 +840,43 @@ function vehFireKE(u, w, t, dist) {
   if (dCam < 600) { try { CBZ.sfx(w.kind === "cannon" ? "explosion" : "shoot_shotgun", { dist: dCam, ghost: true, volume: 0.9, pitch: w.kind === "cannon" ? 0.55 : 1.2 }); } catch (e) {} }
   if (!hit) { missImpact(from, _v, camDist2(_v), w.kind === "cannon"); return; }
   stats[u.team].hits++; u.hitsF++;
-  u._shot = { pen: w.pen || 300, beh: w.beh || 400, he: false, cls: w.kind === "cannon" ? "apfsds" : "ap" };
-  hurtMan(t, w.beh || 400, { by: u });
-  u._shot = null;
+  hurtMan(t, w.beh || 400, { by: u, threat: { pen: w.pen || 300, beh: w.beh || 400, he: false, cls: w.keCls || (w.kind === "cannon" ? "apfsds" : "ap") } });
+}
+/* THE AIM POINT OF A DIRECT-FIRE HIGH-EXPLOSIVE ROUND. A gunner lays on
+   the target's centre of mass, not on the ground under it: a flat 1.4 km/s
+   round laid on the ground beneath a hull on the dunes grazes the crest in
+   front of it or skips past the one behind (it landed 15-25 m off the mark).
+   An indirect weapon (artillery, rockets) is laid on the ground. */
+// a weapon row with no `he` of its own: the named munition's blast, from the table
+function vehHeOf(id) {
+  const f = CBZ.munitionTable && CBZ.munitionTable.fx(id);
+  return f ? { pen: f.pen, beh: f.beh, blast: f.R, power: f.power, W: f.W, mun: f.id } : { pen: 30, beh: 200, blast: 6, power: 1.2 };
+}
+const _heAim = { x: 0, y: 0, z: 0 };
+function vehHEAim(u, w, t, out) {
+  const ind = !!w.indirect;
+  let ty;
+  if (ind || t.fake) ty = MAP.groundAt(t.pos.x, t.pos.z) + (t.aimY != null && t.fake ? t.aimY : 0.15);
+  else if (t.vehicle) ty = t.pos.y + (t.vheight || 2.2) * 0.45;
+  else ty = t.pos.y + (t.aimY || 1.0);
+  out.x = t.pos.x; out.y = ty; out.z = t.pos.z;
+  return out;
 }
 // a high-explosive round (or rocket, or shell) at people: the page's own
 // rocket path flies it and studio.boom lands it on BOTH sides
 function vehFireHE(u, w, t, dist) {
-  const he = w.he || { pen: 30, beh: 200, blast: 6, power: 1.4 };
+  const he = w.he || vehHeOf("m792");
   const from = V().copy(vehicleMuzzle(u, _muz));
   vehFx(u, from);
-  const spread = (w.indirect ? 0.025 : 0.012) * dist;
-  const tx = t.pos.x + (lcg() - 0.5) * spread, tz = t.pos.z + (lcg() - 0.5) * spread;
-  const ty = MAP.groundAt(tx, tz) + 0.15;
+  /* DISPERSION, in mils of the range: a stabilised tank or IFV gun ~0.3 mil
+     plus the crew's laying error (0.8 mil together), an aircraft's gun or
+     rockets in a dive ~3 mil, unguided artillery and rockets ~5 mil, a
+     guided round its CEP (a few metres, whatever the range) */
+  const mil = w.guided ? 0 : w.indirect ? 0.005 : u.air ? 0.003 : 0.0008;
+  const spread = w.guided ? 6 : mil * dist * 2;
+  const aim = vehHEAim(u, w, t, _heAim);
+  const tx = aim.x + (lcg() - 0.5) * spread, tz = aim.z + (lcg() - 0.5) * spread;
+  const ty = w.indirect || t.fake ? MAP.groundAt(tx, tz) + 0.15 : aim.y + (lcg() - 0.5) * spread * 0.5;
   const v0 = w.heSpeed || w.speed || 300, g = w.grav == null ? 9.8 : w.grav;
   const dd = Math.hypot(tx - from.x, tz - from.z) || 1;
   let sol = CBZ.vehicleDrive.ballistic(ty - from.y, dd, v0, g);
@@ -861,9 +887,11 @@ function vehFireHE(u, w, t, dist) {
   }
   const ch = Math.cos(sol.elev), sh = Math.sin(sol.elev);
   const vel = new THREE.Vector3((tx - from.x) / dd * v0 * ch, v0 * sh, (tz - from.z) / dd * v0 * ch);
-  u._he = { pen: he.pen, beh: he.beh, he: true, cls: "he" };
+  // the round in flight carries its munition: fire.js stepRockets lands it
+  // through CBZ.strike (a direct hit on a hull is its own pen, the rest blast)
   const rk = {
     pos: V().copy(from), vel: vel, grav: g, t: 0, by: u, life: Math.max(7, sol.t * 1.5 + 2),
+    mun: he.mun || null, he: he, tgt: t.fake ? null : t,
     w: { blastRadius: he.blast || 6, blastPower: (he.power || 1.4) / 0.55, sfx: null },
     trail: CBZ.studio.trail({ length: 12, color: 0xffd9a0, opacity: 0.45, minStep: 2 }),
   };
@@ -888,24 +916,56 @@ function stepVehShots(u, sdt) {
     const tx = t.pos.x, ty = t.pos.y + (t.aimY || 1), tz = t.pos.z;
     const dx = tx - s.pos.x, dy = ty - s.pos.y, dz = tz - s.pos.z, d = Math.hypot(dx, dy, dz) || 1;
     const step = (w.speed || 300) * sdt;
+    // THE PATH IS SWEPT: a wall or a roof between the missile and its mark
+    // takes it there (it does not fly through the HQ to the man behind it)
+    const go = Math.min(step, d);
+    const sw = CBZ.strike && s.t > 0.15 ? CBZ.strike.sweep(s.pos.x, s.pos.y, s.pos.z,
+      s.pos.x + dx / d * go, s.pos.y + dy / d * go, s.pos.z + dz / d * go, { groundAt: MAP.groundAt }) : null;
+    if (sw && (step < d - 1.5)) {
+      s.trail.dispose();
+      u.shots.splice(k, 1);
+      vehShotLand(u, w, null, sw.x - dx / d * 0.15, sw.y - dy / d * 0.15, sw.z - dz / d * 0.15, dx / d, dz / d, sw);
+      continue;
+    }
     if (step >= d || s.t > 30 || t.dead) {
       s.trail.dispose();
       u.shots.splice(k, 1);
       if (t.dead) continue;
-      const hit = lcg() < (t.air ? 0.85 : 0.92);
-      if (CBZ.studio.boom && w.he) CBZ.studio.boom({ x: tx, y: ty, z: tz }, { radius: w.he.blast || 5, power: (w.he.power || 1.4), structural: false, by: u });
-      else if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash({ x: tx, y: ty, z: tz }, { scale: 3 }); } catch (e) {} }
-      if (hit) {
-        stats[u.team].hits++; u.hitsF++;
-        u._shot = { pen: w.pen || 600, beh: w.beh || 800, he: false, cls: "atgm", top: !!t.air };
-        hurtMan(t, w.beh || 800, { by: u });
-        u._shot = null;
+      const MT = CBZ.munitionTable, f = MT && MT.fx(w.mun);
+      // a proximity fuze bursts beside the mark; a contact round hits it or
+      // (the seeker lost it in the last metres) lands a few metres off
+      const prox = !!(f && f.fuze === "prox");
+      const hit = !prox && lcg() < (t.air ? 0.85 : 0.92);
+      let bx = tx, by = ty, bz = tz;
+      if (!hit) {
+        const a = lcg() * 6.283, r = prox ? 1 + lcg() * 5 : 2 + lcg() * 6;
+        bx += Math.cos(a) * r; bz += Math.sin(a) * r;
+        if (!t.air) by = MAP.groundAt(bx, bz) + 0.3; else by += (lcg() - 0.5) * r;
       }
+      vehShotLand(u, w, hit ? t : null, bx, by, bz, dx / d, dz / d, null);
       continue;
     }
     s.pos.x += dx / d * step; s.pos.y += dy / d * step; s.pos.z += dz / d * step;
     s.trail.push(s.pos);
   }
+}
+/* A GUIDED ROUND LANDS: a direct hit is its own penetration on the hull it
+   struck (top attack on the roof: TOW-2B, Javelin, Hellfire's dive), then
+   its warhead bursts there through CBZ.strike for everybody else, the wall
+   it is against and the parked machine beside it. */
+function vehShotLand(u, w, t, x, y, z, dirx, dirz, sw) {
+  const MT = CBZ.munitionTable, f = MT && MT.fx(w.mun);
+  if (t && !t.dead) {
+    stats[u.team].hits++; u.hitsF++;
+    const shaped = f ? f.shaped : true;
+    hurtMan(t, w.beh || 800, { by: u, at: { x: x, y: y, z: z }, threat: { pen: w.pen || 600, beh: w.beh || 800, he: !!(f && f.W > 0),
+      cls: shaped ? (w.kind === "missile" ? "atgm" : "heat") : f && f.W > 0 ? "he" : "ke", top: !!(t.air || w.top) } });
+  }
+  if (CBZ.studio.boom && (w.he || (f && f.W > 0))) {
+    CBZ.studio.boom({ x: x, y: y, z: z }, { mun: (w.he && w.he.mun) || w.mun, by: u, direct: t || null, dirx: dirx, dirz: dirz,
+      struck: sw ? { kind: sw.ground ? "ground" : "collider", c: sw.c } : t ? { kind: t.air ? "air" : "body", target: t } : null,
+      contact: !!(sw && !sw.ground), radius: (w.he && w.he.blast) || 5, power: (w.he && w.he.power) || 1.4 });
+  } else if (CBZ.muzzleFlash) { try { CBZ.muzzleFlash({ x: x, y: y, z: z }, { scale: 3 }); } catch (e) {} }
 }
 
 /* ------------------------------------------------------------- the air
@@ -1218,7 +1278,7 @@ function vehJetBreak(u, R) {
 // a bomber lets go when the fall lands on the mark (a guided bomb: near enough to steer)
 function vehBombRun(u, W, t) {
   if (u.airPhase === "out") return;
-  const w = W.w, he = w.he || { pen: 120, beh: 1500, blast: 18, power: 2.6 };
+  const w = W.w, he = w.he || vehHeOf("mk82");
   const agl = u.pos.y - MAP.groundAt(t.pos.x, t.pos.z);
   const tf = Math.sqrt(2 * Math.max(10, agl) / 9.81);
   const vh = u.ds.v * Math.cos(u.ds.gamma || 0);
@@ -1241,7 +1301,6 @@ function vehRelease(u, W, he, guideTo, tf) {
   if (u.rig && typeof u.rig.fire === "function") { try { u.rig.fire(shot, u.pos); } catch (e) {} }
   u._firing = null;
   u.actx.firing = shot;
-  u._he = { pen: he.pen, beh: he.beh, he: true, cls: "bomb" };
   const vh = u.ds.v * Math.cos(u.ds.gamma || 0);
   const vel = new THREE.Vector3(Math.sin(u.h) * vh, -2, Math.cos(u.h) * vh);
   if (guideTo && tf > 0) {
@@ -1259,7 +1318,7 @@ function vehRelease(u, W, he, guideTo, tf) {
   rockets.push({
     pos: p0, mesh: mesh,
     vel: vel,
-    grav: 9.81, t: 0, by: u, life: Math.max(40, fall * 1.4 + 5), homing: guideTo || null,
+    grav: 9.81, t: 0, by: u, life: Math.max(40, fall * 1.4 + 5), homing: guideTo || null, mun: he.mun || w.mun || null, he: he, bomb: true,
     w: { blastRadius: he.blast, blastPower: he.power / 0.55 },
     trail: CBZ.studio.trail({ length: 8, color: 0x404040, opacity: 0.25, minStep: 6 }),
   });
@@ -1555,7 +1614,8 @@ function stepWreck(u, sdt) {
     if (u.pos.y <= g + 0.5) {
       u.pos.y = g + 0.5; u.crashed = true;
       vehKillFx(u, true);
-      if (CBZ.studio.boom) CBZ.studio.boom({ x: u.pos.x, y: g + 1, z: u.pos.z }, { radius: Math.min(20, 6 + u.vlen * 0.5), power: 1.6, structural: false, by: null });
+      // the fuel and what was left aboard go up: a deflagration by the airframe's weight
+      if (CBZ.studio.boom) CBZ.studio.boom({ x: u.pos.x, y: g + 1, z: u.pos.z }, { W: Math.min(40, 0.0008 * (u._mass || 10000)), kind: "carcook", by: null });
     }
   }
   if (u.burnT > 0) {

@@ -895,7 +895,10 @@
       const m = MODEL[s.kind];
       if (!m) return;
       try {
-        placeModel(root, m[0], w.x, w.z, s.yaw, 1, s.scenery ? null : m[1], s.name);
+        const pg = placeModel(root, m[0], w.x, w.z, s.yaw, 1, s.scenery ? null : m[1], s.name);
+        // what it is when a bomb lands beside it (systems/strike.js hardware),
+        // boardable or scenery alike
+        if (pg && pg.userData) pg.userData.hwKind = s.kind === "drone" ? "drone" : (m[1] || "ground");
         const rec = placed[placed.length - 1];
         if (rec && rec.group && rec.pos && Math.abs(rec.pos.x - w.x) < 0.01 && Math.abs(rec.pos.z - w.z) < 0.01) {
           rec.stand = s;

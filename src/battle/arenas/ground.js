@@ -33,14 +33,15 @@
                  static vertex batch — instead of sinking out of the world.
                  Thousands of dead cost a handful of draw calls.
 
-   Blasts reach here through studio.boom and ordnance.blast (wrapped once at
-   begin), so every rocket, shell, bomb and wreck explosion digs, scorches,
-   sprays and breaks cover (CBZ.battleCover.damage) by the same path.
+   Blasts reach here with their charge W (kg TNT-eq): every strike through
+   systems/strike.js's observer, a bomber's stick through ordnance.blast, so
+   every rocket, shell, bomb and wreck explosion digs, scorches, sprays and
+   breaks cover (CBZ.battleCover.damage) by the same law, at its own size.
 
    PUBLIC  CBZ.battleGround = {
      begin(ctx) -> groundAt         ctx = { id, surface, soft, groundAt, tint }
      deform(x, z), berm(ax,az,bx,bz,h,w), pit(x,z,r,d), drift(x,z,dx,dz,len,w,h)
-     crater(x, z, r, depth), scorch(x, z, r), blast(x, y, z, R, power, src)
+     crater(x, z, r, depth), scorch(x, z, r), blast(x, y, z, W, ev)
      patchTerrain(material)         make a terrain material give up crater discs
      mark(x, z, yaw, tile, w, l, strength)
      blowing(points, opts)          crest points [{x,y,z}] -> streaming grains
@@ -756,60 +757,64 @@ CBZ.battleGround = (function () {
     return true;
   }
 
-  /* ============================================================ CLODS
-     The spray is the grain and the dust; the clods are the lumps of the
-     ground itself that a shell digs out and throws: rounded soil (sand,
-     earth, snow) or broken stone off a hard surface, in the colour of the
-     crater's own wall, on ballistic arcs, settling where they land on the
-     deformed ground (CBZ.debris grit: instanced, capped, recycled). */
   function hex3(c) { return (Math.min(255, Math.round(c[0] * 255)) << 16) | (Math.min(255, Math.round(c[1] * 255)) << 8) | Math.min(255, Math.round(c[2] * 255)); }
-  function clods(x, gy, z, cr) {
+  /* THE CLODS ARE SIZED BY THE CHARGE. What a burst throws out of the ground
+     is the ground: rounded lumps of soil, sand or snow (broken slab off
+     concrete) in the colour of the crater's own wall, the biggest no more
+     than a fifth of the crater across and the count rising with the volume
+     dug (W). A 25 mm HEI flicks a handful of grains; a Mk 84 throws a shower
+     of clods to 40 m. (CBZ.debris grit: instanced, capped, recycled.) */
+  function clods(x, gy, z, cr, W) {
     const D = CBZ.debris;
-    if (!D || !D.chips || cr < 0.25) return;
+    if (!D || !D.chips || cr < 0.12) return;
     if (typeof MAP !== "undefined" && MAP && MAP.water) return;
     const cam = CBZ.camera && CBZ.camera.position;
     if (cam && (cam.x - x) * (cam.x - x) + (cam.z - z) * (cam.z - z) > 320 * 320) return;
     const S = surf(), sf = G.surface;
     const kind = sf === "snow" ? "snow" : sf === "concrete" ? "concrete" : sf === "sand" ? "sand" : "dirt";
     const wall = hex3(S.wall), ej = hex3(S.ejecta);
-    const pw = Math.min(3, 1 + cr * 0.55), up = { x: 0, y: 1, z: 0 };
+    // the sizes are the charge's (weapons/munitiontable.js ejecta)
+    const E = CBZ.munitionTable ? CBZ.munitionTable.ejecta(W, sf) : { lump: 0.08, lumpN: 4, fine: 0.03, fineN: 8, power: 1 };
+    const up = { x: 0, y: 1, z: 0 };
     try {
-      // a few big lumps out of the bowl, a shower of small ones over the apron
-      D.chips(x, gy + 0.2, z, { kind: kind, color: wall, count: Math.round(4 + cr * 3), size: Math.min(0.24, 0.07 + cr * 0.05),
-        power: pw, dir: up, spread: Math.max(1, cr), dust: false });
-      D.chips(x, gy + 0.2, z, { kind: kind, color: ej, count: Math.round(8 + cr * 8), size: Math.min(0.1, 0.035 + cr * 0.02),
-        power: pw * 1.15, dir: up, spread: Math.max(1, cr * 1.4), dust: false });
+      // a few lumps out of the bowl, a shower of small ones over the apron
+      D.chips(x, gy + 0.1, z, { kind: kind, color: wall, count: E.lumpN, size: E.lump,
+        power: E.power, dir: up, spread: Math.max(0.6, cr), dust: false });
+      D.chips(x, gy + 0.1, z, { kind: kind, color: ej, count: E.fineN, size: E.fine,
+        power: E.power * 1.15, dir: up, spread: Math.max(0.8, cr * 1.4), dust: true, dustColor: ej });
     } catch (e) {}
   }
   // the shared city blast (crashfx) throws generic grit off whatever ground it
   // assumes; on a battlefield the ground's own lumps are thrown here instead
   CBZ.groundOwnsEjecta = function () { return !!G.ctx; };
 
-  /* ============================================================ BLAST */
-  // studio.boom scale: radius 2.5-34 m, power 0.5-4. ordnance.blast scale:
-  // radius 26-1100, power 110-1800. One crater rule for both, in metres.
-  function blast(x, y, z, R, power, src) {
-    if (!G.ctx) return;
-    const ord = src === "ordnance";
-    let cr = ord ? 0.085 * R : 0.085 * R * Math.sqrt(Math.max(0.1, power));
-    cr = Math.min(42, cr);
+  /* ============================================================ BLAST
+     One crater rule, from the charge: the law's apparent crater radius on
+     soil (0.8 W^(1/3), systems/breach.js), shallower in loose sand and deep
+     in snow. A burst well above the ground (an airburst, a round that went
+     off on a wall or a roof) does not dig. Cover in reach is broken by the
+     same charge (CBZ.battleCover.damage): a shaped charge against it
+     (contact) adds its jet. */
+  function blast(x, y, z, W, src) {
+    if (!G.ctx || !(W > 0)) return;
+    const ev = src && typeof src === "object" ? src : null;
+    const c3 = Math.cbrt(W);
+    const cr = Math.min(42, 0.8 * c3);
     const g0 = G.ground(x, z);
-    const onGround = y - g0 < Math.max(3, cr * 1.5);
-    const S = surf();
-    if (G.gl) spray(x, Math.max(y, g0), z, Math.max(1.5, cr * 2.2), ord ? 2.5 : power);
-    if (G.gl && onGround) clods(x, g0, z, cr);
+    const onGround = y - g0 < Math.max(1.5, cr * 1.2) && !(ev && ev.airburst);
+    if (G.gl) spray(x, Math.max(y, g0), z, Math.max(1.2, cr * 2.2), Math.min(4, 0.6 + c3 * 0.5));
+    if (G.gl && onGround) clods(x, g0, z, cr, W);
     if (onGround) {
-      if (G.soft && cr >= 0.45) {
+      if (G.soft && cr >= 0.3) {
         crater(x, z, cr, cr * (G.surface === "snow" ? 0.42 : G.surface === "sand" ? 0.32 : 0.36));
         scorch(x, z, cr * (G.surface === "snow" ? 1.6 : 1.25));
-      } else scorch(x, z, Math.max(0.8, cr * 1.4));
+      } else scorch(x, z, Math.max(0.5, cr * 1.4));
     }
     if (CBZ.battleCover) {
-      const coverR = ord ? R * 0.22 : R * 0.5;
-      const pw = ord ? Math.min(40, power / 30) : power;
-      CBZ.battleCover.damage(x, z, coverR, pw);
+      const contact = !!(ev && ev.struck && ev.struck.kind === "collider");
+      const jet = ev && ev.shaped && contact && CBZ.munitionTable ? (CBZ.munitionTable.fx(ev.mun) || {}).jet || 0 : 0;
+      CBZ.battleCover.damage(x, z, Math.max(1, 1.5 * c3), 1.6 * c3 + jet * 2);
     }
-    void S;
   }
 
   /* ============================================================ BEGIN */
@@ -817,21 +822,21 @@ CBZ.battleGround = (function () {
   function wrapBlasts() {
     if (wrapped) return;
     wrapped = true;
-    const st = CBZ.studio;
-    if (st && st.boom) {
-      const boom0 = st.boom;
-      st.boom = function (pos, opts) {
-        const r = boom0.apply(this, arguments);
-        try { if (pos) blast(pos.x, pos.y || 0, pos.z, (opts && opts.radius) || 18, (opts && opts.power) || 1, "boom"); } catch (e) { console.warn("[ground] boom", e); }
-        return r;
-      };
+    // every strike (systems/strike.js) tells the ground its charge
+    if (CBZ.strike && CBZ.strike.on) {
+      CBZ.strike.on(function (ev) {
+        try { blast(ev.x, ev.y || 0, ev.z, ev.W, ev); } catch (e) { console.warn("[ground] strike", e); }
+      });
     }
+    // a bomber's stick (systems/ordnance.js) draws its own blast; its kinds'
+    // radius is 10.3 W^(1/3) (the row it names in the munition table), so the
+    // charge it dug with is that radius inverted
     const O = CBZ.ordnance;
     if (O && O.blast) {
       const b0 = O.blast;
-      O.blast = function (x, y, z, radius, power) {
+      O.blast = function (x, y, z, radius) {
         const r = b0.apply(this, arguments);
-        try { blast(x, y, z, radius || 46, power || 190, "ordnance"); } catch (e) { console.warn("[ground] ordnance", e); }
+        try { blast(x, y, z, Math.pow((radius || 46) / 10.3, 3), "ordnance"); } catch (e) { console.warn("[ground] ordnance", e); }
         return r;
       };
     }

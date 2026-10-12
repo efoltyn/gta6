@@ -451,16 +451,11 @@ function tubeClear(m, tgt) {
   return true;
 }
 
-/* THE WARHEAD'S BLAST RADIUS: the physics table's (ballistics ROCKET /
-   GRENADE: PG-7V 9 m, M433 6 m, of which studio.boom kills inside 0.55),
-   not weapon-data's 13 m, which is the city's gameplay number and made every
-   RPG round a 7 m kill disc. */
+/* THE WARHEAD'S BLAST RADIUS is the munition's (weapons/munitiontable.js:
+   rocketLand names it, CBZ.strike prices it). This is only the radius of a
+   round that names no munition at all. */
 function rocketBlast(g, w) {
-  const B = CBZ.ballistics;
-  const R = g && g.rocket && B && B.ROCKET && B.ROCKET[g.rocket];
-  if (R && R.blast) return R.blast;
-  if (g && g.cls === "grenade" && B && B.GRENADE && B.GRENADE.m433) return B.GRENADE.m433.blast;
-  return (w && w.blastRadius) || 13;
+  return (w && w.blastRadius) || 6;
 }
 
 /* ============================================================ THE SHOT
@@ -1247,7 +1242,7 @@ function detonateGrenade(n) {
   const B = CBZ.ballistics, G = B.GRENADE.m67;
   const y = Math.max(n.y, MAP.groundAt(n.x, n.z) + 0.1);
   if (CBZ.studio && CBZ.studio.boom) {
-    try { CBZ.studio.boom({ x: n.x, y: y + 0.2, z: n.z }, { radius: G.blast, power: G.power, structural: false, by: n.by }); } catch (e) {}
+    try { CBZ.studio.boom({ x: n.x, y: y + 0.2, z: n.z }, { mun: "m67", by: n.by }); } catch (e) {}
   }
   // THE FRAGMENTS. ~1,500 notched-wire splinters thrown out in a sphere; the
   // number that meets a body falls with the square of the distance and the
@@ -1526,6 +1521,7 @@ function stepRockets(sdt) {
     }
     const step = r.vel.length() * sdt;
     r.travelled = (r.travelled || 0) + step;
+    const px = r.pos.x, py = r.pos.y, pz = r.pos.z;
     r.pos.addScaledVector(r.vel, sdt);
     r.trail.push(r.pos);
     if (r.mesh) {
@@ -1533,44 +1529,107 @@ function stepRockets(sdt) {
       _v2.copy(r.pos).add(r.vel);
       r.mesh.lookAt(_v2);
     }
-    let boom = r.t > (r.life || 7) || r.pos.y <= MAP.groundAt(r.pos.x, r.pos.z) + 0.25;
-    if (!boom) {
-      const cols = CBZ.micro.queryColliders(r.pos.x, r.pos.z, 0.5, _mq);
-      for (let c = 0; c < cols.length; c++) {
-        const b = cols[c];
-        if (!CBZ.micro.colliderContains(b, r.pos.x, r.pos.z)) continue;
-        if (b.y0 != null && (r.pos.y < b.y0 || r.pos.y > b.y1)) continue;
-        boom = true; break;
-      }
-    }
-    // a direct hit on a body: the round's own point inside its box
-    if (!boom && r.motor) {
-      const a = fineNear(r.pos.x, r.pos.z, 2.5, _fineQ);
-      for (let k = 0; k < a.length && !boom; k++) {
-        const u = a[k];
-        if (u === r.by || u.dead || u.fled) continue;
-        const dx = r.pos.x - u.pos.x, dz = r.pos.z - u.pos.z, dy = r.pos.y - u.pos.y;
-        if (u.vehicle) {
-          const h = u.h || 0, f = dx * Math.sin(h) + dz * Math.cos(h), s = dx * Math.cos(h) - dz * Math.sin(h);
-          if (Math.abs(f) < (u.vlen || 3) && Math.abs(s) < (u.vwid || 1.5) && dy > -0.2 && dy < (u.vheight || 2.4)) boom = true;
-        } else if (Math.hypot(dx, dz) < (u.beast ? Math.max(0.4, (u.bodyW || 1) * 0.5) : 0.35) && dy > 0 && dy < (u.beast ? (u.bodyH || 1.2) : (u.eyeH || 1.52) + 0.25)) boom = true;
-      }
-    }
+    /* THE PATH IS SWEPT, NOT SAMPLED. A 120 mm round makes ~23 m a step and
+       a bomb ~5 m: testing only where it ends up let fast rounds tunnel a
+       building, and a band-less collider (a building is one) stopped a
+       falling bomb at any height over its footprint. The segment this step
+       flew is tested against every collider's own height and the ground
+       (CBZ.strike.sweep), then against the bodies on it. */
+    const sw = CBZ.strike ? CBZ.strike.sweep(px, py, pz, r.pos.x, r.pos.y, r.pos.z, { groundAt: MAP.groundAt }) : null;
+    let tHit = sw ? sw.t : Infinity;
+    const direct = rocketBody(r, px, py, pz, tHit);
+    if (direct) tHit = direct.t;
+    let boom = tHit <= 1 || r.t > (r.life || 7);
+    if (!CBZ.strike && !boom) boom = r.pos.y <= MAP.groundAt(r.pos.x, r.pos.z) + 0.25;
     if (boom) {
       r.trail.dispose();
       rockets.splice(i, 1);
       if (r.mesh && CBZ.munitions && CBZ.munitions.release) { try { CBZ.munitions.release(r.mesh); } catch (e) {} r.mesh = null; }
+      // where on the segment it struck (backed off a hand's breadth along its path)
+      if (tHit <= 1) {
+        const t = Math.max(0, tHit - 0.1 / Math.max(0.1, step));
+        r.pos.set(px + (r.pos.x - px) * t, py + (r.pos.y - py) * t, pz + (r.pos.z - pz) * t);
+      }
       // the 40 mm has not armed inside its arming distance: it thuds, it does not go off
       if (r.arm && r.travelled < r.arm) {
         if (camDist2(r.pos) < 150 * 150) CBZ.bulletImpact({ x: r.pos.x, y: MAP.groundAt(r.pos.x, r.pos.z) + 0.05, z: r.pos.z }, { x: 0, y: 1, z: 0 }, { kind: "dust", color: groundColor(groundMatAt()), power: 1.6 });
         continue;
       }
-      CBZ.studio.boom({ x: r.pos.x, y: Math.max(r.pos.y, MAP.groundAt(r.pos.x, r.pos.z) + 0.6), z: r.pos.z }, {
-        radius: rocketBlast(r.g, r.w), power: (r.w.blastPower || 1.9) * 0.55,
-        structural: MAP.id !== "arena" && spawnTotal < 700,
-        // THE MAN WHO FIRED IT: a launcher crew's kills are credited to it
-        by: r.by,
-      });
+      rocketLand(r, direct ? direct.u : null, direct ? null : sw);
     }
   }
+}
+// what this step's segment met first among the bodies: a hull's box or a
+// body's column, before tMax (the first collider or the ground)
+function rocketBody(r, px, py, pz, tMax) {
+  const ex = r.pos.x, ey = r.pos.y, ez = r.pos.z;
+  const dx = ex - px, dy = ey - py, dz = ez - pz, L = Math.hypot(dx, dz);
+  const a = fineNear((px + ex) / 2, (pz + ez) / 2, L / 2 + 5, _fineQ);
+  // aircraft are not on the body grid: the few in the air near this segment
+  if (!r.bomb) for (let k = 0; k < men.length; k++) {
+    const o = men[k];
+    if (o.air && !o.dead && Math.abs(o.pos.x - (px + ex) / 2) < L / 2 + 20 && Math.abs(o.pos.z - (pz + ez) / 2) < L / 2 + 20 && a.indexOf(o) < 0) a.push(o);
+  }
+  let best = null, bt = Math.min(1, tMax);
+  for (let k = 0; k < a.length; k++) {
+    const u = a[k];
+    if (u === r.by || u.dead || u.fled) continue;
+    if (r.bomb && u.air) continue;
+    let t = null;
+    if (u.vehicle) {
+      // the segment in hull space against the hull's box
+      const h = u.h || 0, c = Math.cos(h), s = Math.sin(h);
+      const ox = px - u.pos.x, oz = pz - u.pos.z;
+      const lx = ox * c - oz * s, lz = ox * s + oz * c, ldx = dx * c - dz * s, ldz = dx * s + dz * c;
+      let t0 = 0, t1 = 1, ok = true;
+      const slab = function (o, d, lo, hi) {
+        if (Math.abs(d) < 1e-9) { if (o < lo || o > hi) ok = false; return; }
+        let p = (lo - o) / d, q = (hi - o) / d;
+        if (p > q) { const w = p; p = q; q = w; }
+        if (p > t0) t0 = p;
+        if (q < t1) t1 = q;
+        if (t0 > t1) ok = false;
+      };
+      slab(lx, ldx, -(u.vwid || 1.5), u.vwid || 1.5);
+      if (ok) slab(py - u.pos.y, dy, -0.2, u.vheight || 2.4);
+      if (ok) slab(lz, ldz, -(u.vlen || 3), u.vlen || 3);
+      if (ok && t1 >= 0 && t0 <= 1) t = t0;
+    } else {
+      // a body's column: the closest approach of the segment, in plan
+      const rad = u.beast ? Math.max(0.4, (u.bodyW || 1) * 0.5) : 0.35;
+      const ox = u.pos.x - px, oz = u.pos.z - pz, L2 = dx * dx + dz * dz;
+      const tc = L2 > 1e-9 ? Math.max(0, Math.min(1, (ox * dx + oz * dz) / L2)) : 0;
+      const cx = px + dx * tc - u.pos.x, cz = pz + dz * tc - u.pos.z;
+      const yy = py + dy * tc - u.pos.y;
+      if (cx * cx + cz * cz < rad * rad && yy > 0 && yy < (u.beast ? (u.bodyH || 1.2) : (u.eyeH || 1.52) + 0.25)) t = tc;
+    }
+    if (t != null && t <= bt) { bt = t; best = { u: u, t: t }; }
+  }
+  return best;
+}
+/* A ROUND LANDS. Its munition (r.mun, from the weapon's row; the RPG's and
+   the 40 mm's from their launcher) resolves through CBZ.strike: a direct hit
+   on a hull is first its own penetration on the plate it struck (a shaped
+   jet, a dart, a bomb on the deck), then the warhead bursts for everyone. */
+function rocketLand(r, direct, sw) {
+  const MT = CBZ.munitionTable;
+  const mun = r.mun || (r.motor ? "pg7v" : (r.g && r.g.cls === "grenade") ? "m433" : null);
+  const f = MT && mun ? MT.fx(mun) : null;
+  const g0 = MAP.groundAt(r.pos.x, r.pos.z);
+  const at = { x: r.pos.x, y: Math.max(r.pos.y, g0 + 0.3), z: r.pos.z };
+  const vl = r.vel.length() || 1;
+  if (direct && direct.vehicle && f && !direct.dead) {
+    const down = r.vel.y < -0.5 * vl;
+    hurtMan(direct, f.beh, { by: r.by, at: at, threat: { pen: f.pen, beh: f.beh, he: f.W > 0,
+      cls: f.shaped ? "heat" : f.W > 0 ? (r.bomb ? "bomb" : "he") : "ke", top: !!(down || (f.top && r.bomb)) } });
+  }
+  CBZ.studio.boom(at, {
+    mun: mun, radius: rocketBlast(r.g, r.w), power: (r.w.blastPower || 1.9) * 0.55,
+    structural: MAP.id !== "arena" && spawnTotal < 700,
+    direct: direct || null, dirx: r.vel.x / vl, dirz: r.vel.z / vl,
+    struck: direct ? { kind: direct.air ? "air" : "body", target: direct } : sw ? { kind: sw.ground ? "ground" : "collider", c: sw.c, nx: sw.nx, ny: sw.ny, nz: sw.nz } : null,
+    contact: !!(sw && !sw.ground),
+    // THE MAN WHO FIRED IT: a launcher crew's kills are credited to it
+    by: r.by,
+  });
 }

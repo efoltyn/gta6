@@ -105,17 +105,17 @@
   const WEAPONS = [
     // AGM-114K/L: semi-active laser / radar tandem HEAT, Mach 1.3, 0.5-8 km;
     // the seeker has to see the mark off the nose before it locks
-    { id: "agm114_hellfire", seat: "gunner", kind: "missile", vs: "armour", mount: "fixed", arc: 0.35, rof: 0.25, pen: 1000, beh: 1000,
-      he: { pen: 60, beh: 400, blast: 5, power: 1.4 }, speed: 425, range: 8000, minRange: 500, ammo: HF_N },
+    { id: "agm114_hellfire", seat: "gunner", kind: "missile", vs: "armour", mount: "fixed", arc: 0.35, rof: 0.25,
+      mun: "agm114k", range: 8000, minRange: 500, ammo: HF_N },
     // M230E1 30x113 mm chain gun, 625 rounds/min, M789 HEDP (~25-30 mm RHA,
     // 4 m lethal radius), 805 m/s, effective to 1.7 km; 1200 rounds; the
     // turret slews +-110 deg
-    { id: "m230_30mm", seat: "gunner", kind: "autocannon", mount: "slew", yawMax: GUN.yawMax, tol: 0.06, rof: 10.4, burst: 16, pause: 1.4, pen: 30, beh: 120,
-      he: { pen: 30, beh: 120, blast: 3, power: 0.7 }, speed: 805, heSpeed: 805, grav: 9.8, range: 1700, ammo: 1200 },
+    { id: "m230_30mm", seat: "gunner", kind: "autocannon", mount: "slew", yawMax: GUN.yawMax, tol: 0.06, rof: 10.4, burst: 16, pause: 1.4,
+      mun: "m789", grav: 9.8, range: 1700, ammo: 1200 },
     // Hydra 70 with the M151 10 lb HE warhead, rippled in pairs of pairs,
     // unguided off fixed pods: the nose is the aim
-    { id: "hydra70", seat: "pilot", kind: "rockets", vs: "soft", mount: "fixed", arc: 0.05, rof: 6, salvo: 4, reload: 9, pen: 20, beh: 300,
-      he: { pen: 20, beh: 300, blast: 9, power: 1.8 }, speed: 740, heSpeed: 600, grav: 9.8, range: 5000, minRange: 200, ammo: HY_N },
+    { id: "hydra70", seat: "pilot", kind: "rockets", vs: "soft", mount: "fixed", arc: 0.05, rof: 6, salvo: 4, reload: 9,
+      mun: "m151", grav: 9.8, range: 5000, minRange: 200, ammo: HY_N },
   ];
 
   // =====================================================================

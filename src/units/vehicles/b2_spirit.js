@@ -202,11 +202,9 @@
      distance, homing all the way down (src/battle/vehicles.js vehBombRun). */
   const WEAPONS = [
     { id: WID_PEN, seat: "commander", kind: "bombs", vs: "armour", guided: true, basket: 0.15,
-      rof: 2, salvo: 2, reload: 25, range: 24000, ammo: 8,
-      pen: 900, beh: 3200, he: { pen: 900, beh: 3200, blast: 26, power: 3.4 } },
+      rof: 2, salvo: 2, reload: 25, range: 24000, ammo: 8, mun: "gbu31v3" },
     { id: WID_MK84, seat: "commander", kind: "bombs", vs: "any", guided: true, basket: 0.15,
-      rof: 2.5, salvo: 4, reload: 30, range: 24000, ammo: 8,
-      pen: 300, beh: 3000, he: { pen: 300, beh: 3000, blast: 60, power: 4.6 } },
+      rof: 2.5, salvo: 4, reload: 30, range: 24000, ammo: 8, mun: "gbu31v1" },
   ];
   const BAY_OF = { gbu31_blu109: 0, gbu31_mk84: 1 };   // left (port, +X) bay, right bay
 

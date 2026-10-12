@@ -330,7 +330,7 @@ scenario(10, "the ground: cover for the host, earthworks, craters, broken cover"
     const x = bag.x + 3, z = bag.z;
     const before = MAP.groundAt(x, z);
     const ptsBefore = C.stats().points;
-    G.blast(x, before, z, 18, 2.8, "boom");
+    G.blast(x, before, z, W.CBZ.munitionTable.W("mk82"), {});   // a Mk 82 (the charge: weapons/munitiontable.js)
     const after = MAP.groundAt(x, z);
     check(before - after > 0.4, "a bomb digs a crater into groundAt (" + (before - after).toFixed(2) + " m deep)");
     check(!bag.alive, "and breaks the sandbag wall 3 m away (hp " + Math.round(bag.hp) + ")");
@@ -998,6 +998,89 @@ scenario(13, "the B-52: a high-altitude run, the bay opens, a stick walks across
   const dead = W.sb.__battle.roster().filter((m) => m.team === "blue" && m.dead).length;
   console.log("    (B-52: " + dead + " of 60 dead, " + b.kills + " kills, war " + (a.over ? "over at " + a.simT + " s" : "still on at " + a.simT + " s") + ")");
   check(dead > 0, "the stick killed (" + dead + ")");
+});
+
+/* 18  MUNITIONS: ONE TABLE, ONE RESOLVER. The page's own rounds land through
+   systems/strike.js (studio.boom is the resolver; its people-and-hulls half
+   is this page's blastBodies, as the browser's modecaps hands it), priced by
+   weapons/munitiontable.js. An Abrams's 120 mm HE laid on a Bradley 300 m
+   off on the rolling erg bursts on the hull (it landed 15-25 m off: it was
+   laid on the ground under the mark), and kills it; a 2,000 lb JDAM 8 m off
+   an Abrams kills it; an SDB beside an Apache sat on the ground kills it (a
+   parked or landed airframe takes damage); a 25 mm HEI in the open sand
+   bursts and touches no building; the unit rows armed from the table. */
+scenario(18, "munitions: one table, one resolver (HE on the hull, bombs on hulls and a landed Apache)", async () => {
+  const W = boot("?a=m1_abrams*1,men*4&b=bradley_ifv*1,m1_abrams*1,ah64_apache*1,men*1&n=5v4&arena=dunes&aw=ak47&bw=ak47&auto=1&probe=0");
+  if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
+  const C = W.CBZ;
+  check(!!(C.munitionTable && C.strike && C.blastLaw), "the table, the law and the resolver are loaded");
+  // the browser's chain: studio.boom IS the resolver; modecaps hands its actor sweep to blastBodies
+  C.studio.boom = function (p, o) { o = o || {}; return C.strike(o.mun || null, p, o); };
+  C.blastWorldActors = function (x, y, z, R, power, o) { return W.sb.blastBodies(x, y, z, R, power, o); };
+  const evs = [];
+  C.strike.on(function (ev) { evs.push(ev); });
+  await settle();
+  run(W, 0.1);
+  const R = W.sb.__battle.roster();
+  const tank = R.find((m) => m.unitId === "m1_abrams" && m.team === "red");
+  const brad = R.find((m) => m.unitId === "bradley_ifv"), mbt = R.find((m) => m.unitId === "m1_abrams" && m.team === "blue");
+  const heli = R.find((m) => m.unitId === "ah64_apache");
+  check(!!(tank && brad && mbt && heli), "the hulls are on the field");
+  if (!(tank && brad && mbt && heli)) return;
+  const w = tank.wpn[0].w;
+  check(w.mun === "m829a3" && w.he && w.he.mun === "m830a1" && w.pen === 750 && w.he.W > 1,
+    "the M256 row armed from the table (dart pen " + w.pen + ", HE " + (w.he && w.he.mun) + " W " + (w.he && w.he.W.toFixed(2)) + " kg)");
+  const gy = (x, z) => G(W, "MAP.groundAt(" + x + "," + z + ")");
+  const place = (u, x, z, h) => { u.pos.set(x, gy(x, z), z); u.h = h || 0; u.speed = 0; if (u.ds) u.ds.v = 0; if (u.group) u.group.position.copy(u.pos); };
+  for (const u of R) if (u.wpn) for (const k of u.wpn) k.off = true;
+  // ---- the 120 mm HE laid on a hull 300 m off, ten rounds. The mark is the
+  // blue Abrams turned to face the gun (its 820 mm front shrugs the 480 mm
+  // jet off, so the same hull stands for every round) ----
+  let near = 0, n = 0, worst = 0;
+  // a gunner fires on what he can see: shots with the erg between them are not laid
+  const clear = (ax, az, ay, bx2, bz2, by2) => { for (let k = 1; k < 60; k++) { const f = k / 60; if (gy(ax + (bx2 - ax) * f, az + (bz2 - az) * f) > ay + (by2 - ay) * f - 0.3) return false; } return true; };
+  let tries = 0;
+  for (let i = 0; i < 10 && tries < 400; tries++) {
+    const a = tries * 0.37, bx = 40 + (tries % 17) * 37, bz = -120 + (tries % 13) * 23;
+    const tx = bx - 300 * Math.sin(a), tz = bz - 300 * Math.cos(a);
+    if (!clear(tx, tz, gy(tx, tz) + 2.6, bx, bz, gy(bx, bz) + 1.2)) continue;
+    const face = Math.atan2(tx - bx, tz - bz);
+    place(mbt, bx, bz, face);
+    place(tank, tx, tz, a);
+    i++;
+    evs.length = 0;
+    W.sb.vehFireHE(tank, w, mbt, Math.hypot(mbt.pos.x - tank.pos.x, mbt.pos.z - tank.pos.z));
+    for (let s = 0; s < 120 && !evs.length; s++) { place(mbt, bx, bz, face); W.sb.rebuildFine(); W.sb.__battle.advance(1 / 60, 1 / 60); }
+    if (!evs.length) continue;
+    n++;
+    const e = evs[0], d = Math.hypot(e.x - bx, e.z - bz);
+    worst = Math.max(worst, d);
+    if (d < 5) near++;
+  }
+  check(n === 10 && near >= 9, "120 mm HE laid on a hull at 300 m bursts on it: " + near + "/" + n + " on the hull's face (worst " + worst.toFixed(1) + " m from its centre; was 15-25 m)");
+  check(!mbt.dead && mbt.lastHit && mbt.lastHit.zone === "front", "the jet struck the front plate it was fired at (" + (mbt.lastHit && mbt.lastHit.zone) + ") and the 820 mm held");
+  // ---- one 120 mm HE on a Bradley's side ----
+  let bx0 = 200, bz0 = 200;
+  for (let k = 0; k < 60; k++) { bx0 = 200 + k * 31; bz0 = 200 - k * 17; if (clear(bx0 + 120, bz0, gy(bx0 + 120, bz0) + 2.6, bx0, bz0, gy(bx0, bz0) + 1.2)) break; }
+  place(brad, bx0, bz0, 0);
+  place(tank, bx0 + 120, bz0, -Math.PI / 2);
+  W.sb.rebuildFine();
+  W.sb.vehFireHE(tank, w, brad, 120);
+  for (let s = 0; s < 60 && !brad.dead && !(brad.lastHit && brad.lastHit.pen); s++) { place(brad, bx0, bz0, 0); W.sb.rebuildFine(); W.sb.__battle.advance(1 / 60, 1 / 60); }
+  check(!!(brad.lastHit && brad.lastHit.pen), "a 120 mm HEAT round through a Bradley's 35 mm side penetrates (" + JSON.stringify(brad.lastHit && { zone: brad.lastHit.zone, pen: brad.lastHit.pen }) + ")");
+  // ---- a JDAM 8 m off a blue Abrams ----
+  place(mbt, 600, 300, 0);
+  C.studio.boom({ x: 608, y: gy(608, 300) + 0.3, z: 300 }, { mun: "gbu31v1" });
+  check(mbt.dead || mbt.vs.wreck || mbt.vs.hp < mbt.maxHp, "a Mk 84 JDAM 8 m from an Abrams knocks it out (" + (mbt.dead ? "dead" : "hp " + Math.round(mbt.vs.hp)) + ")");
+  // ---- an SDB beside an Apache sat on the ground ----
+  place(heli, 800, -300, 0); heli.pos.y = gy(800, -300); heli.dead = false;
+  const hp0 = heli.vs.hp;
+  C.studio.boom({ x: 803, y: gy(803, -300) + 0.3, z: -300 }, { mun: "gbu39" });
+  check(heli.dead || heli.vs.hp < hp0, "an SDB 3 m from an Apache on the ground damages it (" + (heli.dead ? "dead" : "hp " + Math.round(hp0) + " -> " + Math.round(heli.vs.hp)) + ")");
+  // ---- a 25 mm HEI in the open sand ----
+  evs.length = 0;
+  const r = C.studio.boom({ x: -500, y: gy(-500, 500) + 0.2, z: 500 }, { mun: "m792" });
+  check(evs.length === 1 && evs[0].W > 0 && evs[0].craterR < 0.4 && r && !r.struck, "a 25 mm HEI in the open bursts (W " + (evs[0] ? evs[0].W.toFixed(3) : "-") + " kg, crater " + (evs[0] ? evs[0].craterR.toFixed(2) : "-") + " m) and strikes no building");
 });
 
 /* 14  AIR DEFENCE. A Patriot launcher turns its tail to the threat, emplaces

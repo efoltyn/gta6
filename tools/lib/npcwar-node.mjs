@@ -185,7 +185,10 @@ export function boot(url, opts) {
   // the engine files the armoury would have loaded, for real
   sb.CBZ = { CONFIG: {}, game: { mode: "studio", state: "playing" }, now: 0 };
   const CBZ = sb.CBZ;
-  for (const f of ["src/weapons/weapon-data.js", "src/weapons/ballistics.js", "src/systems/brain.js", "src/systems/combat_iq.js"]) {
+  // the munition table, the charge law and the impact resolver are the `damage`
+  // pack's pure half: the rounds, rockets and bombs land through them here too
+  for (const f of ["src/weapons/weapon-data.js", "src/weapons/ballistics.js", "src/weapons/munitiontable.js", "src/systems/breach.js",
+    "src/systems/strike.js", "src/systems/brain.js", "src/systems/combat_iq.js"]) {
     try { vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), sb, { filename: f }); }
     catch (e) { console.log("  (load " + f + " threw: " + e.message + ")"); }
   }

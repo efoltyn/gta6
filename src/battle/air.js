@@ -93,7 +93,9 @@ function dropStick(p) {
     },
     onDetonate: function (b) {
       if (b && b.impact && MAP.id !== "arena") {
-        CBZ.studio.collapseAt(b.impact, { radius: b.radius, power: b.power });
+        // the stick is Mk 82s (ordnance.js "iron" names the row): the
+        // building it lands on answers to that charge (systems/strike.js)
+        CBZ.studio.collapseAt(b.impact, { mun: "mk82" });
       }
     },
   });
@@ -115,7 +117,7 @@ function releaseNuke(p) {
         for (let r = 0; r < 9; r++) {
           const a = (r / 9) * Math.PI * 2, d = b.radius * 0.5;
           CBZ.studio.collapseAt({ x: b.impact.x + Math.cos(a) * d, y: b.impact.y, z: b.impact.z + Math.sin(a) * d },
-            { radius: d * 0.5, power: 3 });
+            { mun: "b61" });
         }
       }
     },

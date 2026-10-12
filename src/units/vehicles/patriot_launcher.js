@@ -1061,7 +1061,7 @@
     weapons: [
       // PAC-3 MSE: hit-to-kill, a two-round ripple, no reload in battle
       { id: "pac3_mse", seat: "commander", kind: "sam", vs: "air", mount: "free", rof: 0.5, burst: 2, pause: 5,
-        pen: 300, beh: 2400, speed: 1600, range: 35000, minRange: 0, ammo: 12, he: { blast: 3, power: 0.6 } },
+        mun: "pac3mse", range: 35000, minRange: 0, ammo: 12 },
       // M2HB .50 on the cab's ring: the ring mount's own ballistics row
       { id: "m2_50cal_ring", seat: "commander", kind: "mg", wid: "lmg", turret: true, rof: 8, burst: 7, pause: 1.6, dmg: 38, pen: 24, range: 1800, ammo: 600 },
     ],
