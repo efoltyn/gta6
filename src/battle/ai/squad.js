@@ -789,7 +789,7 @@ function soldierRig(m) {
   // the carry: slung on a quiet march, low ready in contact, high in close
   const sq = m.sqd;
   const near = m.tgt && !m.tgt.dead ? Math.hypot(m.tgt.pos.x - m.pos.x, m.tgt.pos.z - m.pos.z) : 1e9;
-  S.carry = m.downed || m.fists || !m.armed ? null :
+  S.carry = m.flying ? "fpv" : m.downed || m.fists || !m.armed ? null :
     near < 18 ? "high" : (sq && sq.task === "march" && !m.tgt) ? "patrol" : "low";
   // cover: behind a wall, up over it / out round it, or blind
   const p = m.post;
