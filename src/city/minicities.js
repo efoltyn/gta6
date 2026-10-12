@@ -272,12 +272,44 @@
   }
 
   // ---- build ONE mini-city from a placement record + its template -----------
-  function buildMiniCity(city, place) {
+  /* THE TOWN'S RECIPE AS buildTown TAKES IT: one answer for the build below
+     and for its far copy (CBZ.planTown, read by city/metro.js BUILT before
+     the builder has run: a streamed boot skips every mini-city the player
+     cannot see). A fresh rng each call. */
+  function townCfg(place) {
     const tpl = CBZ.CITY_TEMPLATES && CBZ.CITY_TEMPLATES[place.id];
-    if (!tpl || typeof CBZ.buildTown !== "function") return;   // nothing to do without the recipe + generator
-    const root = city.root; if (!root) return;
+    if (!tpl) return null;
     const cx = place.cx, cz = place.cz, hx = place.hx, hz = place.hz;
     const rect = { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz };
+    const seedX = (LAYOUT_V2() && place.ax != null) ? place.ax : cx;
+    const seedZ = (LAYOUT_V2() && place.az != null) ? place.az : cz;
+    const rng = lcg((Math.abs(seedX) * 73856093) ^ (Math.abs(seedZ) * 19349663) ^ (CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170));
+    return { tpl: tpl, rect: rect, cfg: Object.assign({}, tpl, {
+      cx: cx, cz: cz, rng: rng, region: rect,
+      name: tpl.name, district: place.id,
+      // SIZE GRADIENT: a fresh skyline block (never a mutation of the shared
+      // template — CITY_TEMPLATES is pure data every other consumer reads).
+      skyline: skylineForPlace(tpl, cx, cz),
+      // towngen chooses central skyline lots before it creates geometry. This
+      // replaces the former post-build pass that constructed a second shell at
+      // the exact same lot centre and guaranteed interpenetrating buildings.
+      integratedSkyline: true,
+    }) };
+  }
+  (CBZ.farPlans = CBZ.farPlans || []).push(function () {
+    if (!CBZ.planTown) return [];
+    let out = [];
+    for (const place of PLACEMENTS) { const T = townCfg(place); if (T) out = out.concat(CBZ.planTown(T.cfg)); }
+    return out;
+  });
+
+  function buildMiniCity(city, place) {
+    const T = townCfg(place);
+    if (!T || typeof CBZ.buildTown !== "function") return;   // nothing to do without the recipe + generator
+    const tpl = T.tpl;
+    const root = city.root; if (!root) return;
+    const cx = place.cx, cz = place.cz, hx = place.hx, hz = place.hz;
+    const rect = T.rect;
     // AUTHORED-FRAME SEEDING (WORLD_LAYOUT_V2). This stream used to be keyed
     // on the town's WORLD centre, so the world-layout dial doubled as a
     // re-roll button: sliding a city 300m re-dealt its whole street plan and
@@ -285,10 +317,8 @@
     // comment — "recal: snow move re-rolled Pinecrest" — is the scar). Keying
     // on the AUTHORED anchor decouples WHERE a place is from WHAT it is:
     // layout work is now free of generator churn, and the flag-off world is
-    // byte-identical because at zero offset authored == world.
-    const seedX = (LAYOUT_V2() && place.ax != null) ? place.ax : cx;
-    const seedZ = (LAYOUT_V2() && place.az != null) ? place.az : cz;
-    const rng = lcg((Math.abs(seedX) * 73856093) ^ (Math.abs(seedZ) * 19349663) ^ (CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : 0x53170));
+    // byte-identical because at zero offset authored == world. (townCfg
+    // seeds from the authored anchor.)
 
     // (a) GROUND PAD — a settled town floor under the whole footprint, a touch
     //     above grade so it reads as reclaimed land/plaza, then seed placement so
@@ -302,17 +332,7 @@
 
     // (b)+(c) GROW THE TOWN — now that T1 wired the arena, all shops/homes/roads
     //     register automatically into Zillow/shops/jobs/vendor-staffing.
-    const town = CBZ.buildTown(root, Object.assign({}, tpl, {
-      cx: cx, cz: cz, rng: rng, region: rect,
-      name: tpl.name, district: place.id,
-      // SIZE GRADIENT: a fresh skyline block (never a mutation of the shared
-      // template — CITY_TEMPLATES is pure data every other consumer reads).
-      skyline: skylineForPlace(tpl, cx, cz),
-      // towngen chooses central skyline lots before it creates geometry. This
-      // replaces the former post-build pass that constructed a second shell at
-      // the exact same lot centre and guaranteed interpenetrating buildings.
-      integratedSkyline: true,
-    }));
+    const town = CBZ.buildTown(root, T.cfg);
     if (!town) return;
 
     // (e) REGISTER the walkable region + a causeway to the network, so the

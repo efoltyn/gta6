@@ -9,9 +9,10 @@
    individually), so a distant tower still costs hundreds of draw calls
    to paint pure fog. This module hides whole top-level city groups
    (building shells + their windows + towns + islands) once they sit
-   entirely past the full-detail radius. Real lot buildings continue through
-   the atmospheric range as the measured instanced LOD below; only their
-   unseen panes/interiors are removed (see core/quality.js's QUALITY table).
+   entirely past the full-detail radius. A building continues through the
+   atmospheric range as its own far copy in the metro HLOD (city/metro.js
+   BUILT), so its shell may go once past the swap (see core/quality.js's
+   QUALITY table for the tier radii).
 
    SAFETY RULES (why this can't break gameplay):
      • visible=false does NOT affect r128 raycasts (LOS keeps hitting),
@@ -118,334 +119,9 @@
     _lastPX = P.x; _lastPZ = P.z; _lastSpdT = now;
   }
 
-  // ---- THE FAR SKYLINE: EVERY BUILDING, BUILT OR NOT --------------------
-  // One box per real building, instanced in ONE draw, painted with that
-  // building's own wall colour and its own window rhythm (below). It is the
-  // far form of a shell, the way a metro tile has its far HLOD:
-  //   • a shell that is in the scene draws itself out to the fog's end and
-  //     its box stands in past it (the sweep's radius);
-  //   • a shell that is NOT in the scene (the streamer has not built its
-  //     job yet, parked it or freed it) is drawn by its box at every
-  //     distance, so a town seen from a helicopter is a town, never bare
-  //     ground that a town then assembles on (owner 2026-10-11: "I don't like
-  //     things spawning in view").
-  // WHERE THE RECORDS COME FROM, best first:
-  //   live   a shell that was built this session (root.userData.shells,
-  //          every cityMakeBuilding; lots for the demolished flag);
-  //   lot    a lot whose shell is deferred to a streamer job (buildings.js
-  //          streamed apartment blocks, towngen parcels): footprint, height
-  //          and sign colour are decided before the shell exists;
-  //   baked  what earlier visits measured, kept in core/bakecache.js under a
-  //          signature of the seed + every script that shapes a building, so
-  //          a skipped builder (a minicity, a country town, an estate) has
-  //          its skyline from the first frame. A first visit after such a
-  //          change measures it once at load (core/citystream.js census).
-  // A record is matched to its shell by position (4 m grid, best source
-  // wins), never by identity, so the baked box and the built shell of one
-  // building are one record.
-  let proxyArena = null, proxyMesh = null, proxyRecords = [], proxyCap = 0;
-  const winU = { uWinNight: { value: 0 } };
-  const proxyDummy = new THREE.Object3D();
-  const proxyColor = new THREE.Color();
-  const RANK = { baked: 1, lot: 2, live: 3 };
-  const recGrid = new Map();
-  let recArena = null;
-  let scanned = { lots: -1, shells: -1, annex: -1 }, recsDirty = false, lastRebuild = 0, bakeLoaded = false, bakeDirtyAt = 0;
-  const FAR_BAKE = "far-skyline";
-  const SHAPING = /\/(buildings|towngen|minicities|countries|settlements|citytemplates|facade_[a-z]+|govcomplex|island_[a-z]+|airport[a-z_]*|biome_[a-z]+|estate[a-z_]*|metroplan|worldmap|layout|expansion|plots)\.js/;
-  let _farSig = null;
-  function farSig() {
-    if (_farSig) return _farSig;
-    let s = "farsky1";
-    if (typeof document !== "undefined" && document.getElementsByTagName) {
-      const tags = document.getElementsByTagName("script");
-      for (let i = 0; i < tags.length; i++) { const src = tags[i].getAttribute("src") || ""; if (SHAPING.test(src)) s += "|" + src.replace(/^.*\/src\//, ""); }
-    }
-    return (_farSig = CBZ.bakeSig ? CBZ.bakeSig(s) : s);
-  }
-  function gk(x, z) { return Math.round(x / 4) + "," + Math.round(z / 4); }
-  function findRec(x, z) {
-    const ix = Math.round(x / 4), iz = Math.round(z / 4);
-    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
-      const r = recGrid.get((ix + a) + "," + (iz + b));
-      if (r && Math.abs(r.x - x) < 3 && Math.abs(r.z - z) < 3) return r;
-    }
-    return null;
-  }
-  function hexOf(wc) {
-    if (wc && wc.isColor) return wc.getHex();
-    if (typeof wc === "number" && isFinite(wc)) return wc & 0xffffff;
-    if (typeof wc === "string") { try { return proxyColor.set(wc).getHex(); } catch (_) {} }
-    return 0x8a8a86;
-  }
-  // the window rhythm a far box paints: the shell's own (FO.pattern), or for
-  // a shell not cut yet the street's typical punched rhythm (a bay ~3.4 m,
-  // 45 % glazed, sill 0.9 / head 2.2 in a 3.2 m storey)
-  function winOf(P, w, d, h) {
-    const f = new Float32Array(12);
-    if (P && P.faces) {
-      const pair = function (A, B, span, o) {
-        const L = [A, B].filter(function (q) { return q && q.n > 0 && q.t1 > q.t0; });
-        if (!L.length) return;
-        let n = 0, t0 = 0, t1 = 0, fr = 0;
-        for (const q of L) { n += q.n; t0 += q.t0; t1 += q.t1; fr += q.frac * span / Math.max(0.1, q.t1 - q.t0); }
-        n /= L.length; t0 /= L.length; t1 /= L.length; fr /= L.length;
-        f[o] = Math.max(1, Math.round(n)); f[o + 1] = Math.min(0.98, fr);
-        f[8 + o] = (t0 + span / 2) / span; f[8 + o + 1] = (t1 + span / 2) / span;
-      };
-      pair(P.faces[0], P.faces[1], w, 0);
-      pair(P.faces[2], P.faces[3], d, 2);
-      let sl = 0, hd = 0, c = 0;
-      for (const q of P.faces) if (q && q.n > 0) { sl += q.sill; hd += q.head; c++; }
-      f[4] = c ? sl / c : 0; f[5] = c ? hd / c : 0; f[6] = c ? (P.fh || 3.2) : 0; f[7] = P.storeys || 1;
-      return f;
-    }
-    const fh = 3.2;
-    f[0] = Math.max(1, Math.round((w - 2) / 3.4)); f[1] = 0.45; f[2] = Math.max(1, Math.round((d - 2) / 3.4)); f[3] = 0.45;
-    f[4] = 0.9; f[5] = 2.2; f[6] = fh; f[7] = Math.max(1, Math.round(h / fh));
-    f[8] = 1 / w; f[9] = 1 - 1 / w; f[10] = 1 / d; f[11] = 1 - 1 / d;
-    return f;
-  }
-  function putRec(rec) {
-    const old = findRec(rec.x, rec.z);
-    if (old) {
-      if (RANK[old.src] > RANK[rec.src]) return false;
-      if (old.src === rec.src && old.grp === rec.grp && old.lot === rec.lot && old.h === rec.h) return false;
-      recGrid.delete(old.key);
-    }
-    rec.key = gk(rec.x, rec.z); rec.shown = false;
-    recGrid.set(rec.key, rec);
-    recsDirty = true;
-    return true;
-  }
-  function groundAt(A, x, z) {
-    try { if (A && A.groundHeightAt) { const y = A.groundHeightAt(x, z); if (isFinite(y)) return y; } } catch (e) {}
-    return 0;
-  }
-  // harvest what the arena holds now (cheap: only when a list grew)
-  function harvest(A, force) {
-    if (!A || !A.root) return;
-    // a rebuilt city is a new arena: its records start over
-    if (A !== recArena) { recArena = A; recGrid.clear(); scanned = { lots: -1, shells: -1, annex: -1 }; bakeLoaded = false; }
-    // (read once the bake has landed: a read before that would miss it)
-    if (!bakeLoaded && !(CBZ.bakeStats && !CBZ.bakeStats.ready)) {
-      bakeLoaded = true;
-      const hit = CBZ.bakeGet ? CBZ.bakeGet(FAR_BAKE, farSig()) : null;
-      const F = hit && hit.f;
-      if (F) for (let i = 0; i + 20 <= F.length; i += 20) {
-        putRec({ src: "baked", grp: null, lot: null, x: F[i], z: F[i + 1], y: F[i + 2], w: F[i + 3], d: F[i + 4], h: F[i + 5],
-          col: F[i + 6] | 0, win: F.slice(i + 7, i + 19), r: Math.hypot(F[i + 3], F[i + 4]) * 0.5 });
-      }
-    }
-    let lots = A.lots || [];
-    const annex = A.annex && Array.isArray(A.annex.lots) ? A.annex.lots : null;
-    const shells = (A.root.userData && A.root.userData.shells) || [];
-    if (!force && scanned.lots === lots.length && scanned.shells === shells.length && scanned.annex === (annex ? annex.length : 0)) return;
-    scanned = { lots: lots.length, shells: shells.length, annex: annex ? annex.length : 0 };
-    if (annex && annex.length) lots = lots.concat(annex);
-    const lotOfGroup = new Map();
-    for (let i = 0; i < lots.length; i++) {
-      const lot = lots[i], b = lot && lot.building;
-      if (!b || b.park) continue;
-      if (b.group) { lotOfGroup.set(b.group, lot); continue; }
-      // a deferred shell: its far box from the lot's own numbers
-      const w = +b.w || +lot.w, d = +b.d || +lot.d, h = +b.h || (+b.storeys > 0 ? b.storeys * 3.2 : 0);
-      if (!(w > 1 && d > 1 && h > 1)) continue;
-      const x = +lot.cx, z = +lot.cz;
-      if (!isFinite(x) || !isFinite(z)) continue;
-      putRec({ src: "lot", grp: null, lot: lot, x: x, z: z, y: groundAt(A, x, z), w: w, d: d, h: h, col: hexOf(b.wallColor || b.sign), win: winOf(null, w, d, h), r: Math.hypot(w, d) * 0.5 });
-    }
-    const add = function (b, lot) {
-      if (!b || b.park || !b.group) return;
-      const w = +b.w, d = +b.d, h = +b.h;
-      if (!(w > 1 && d > 1 && h > 1)) return;
-      const x = Number.isFinite(b.ox) ? b.ox : ((lot && +lot.cx) || 0);
-      const z = Number.isFinite(b.oz) ? b.oz : ((lot && +lot.cz) || 0);
-      // buildings stand on the ground: the arena's own height there
-      const y = Number.isFinite(b.oy) ? b.oy : groundAt(A, x, z);
-      putRec({ src: "live", grp: b.group, lot: lot || lotOfGroup.get(b.group) || null, x: x, z: z, y: y, w: w, d: d, h: h, col: hexOf(b.wallColor), win: winOf(b.facadePattern, w, d, h), r: Math.hypot(w, d) * 0.5 });
-    };
-    for (let i = 0; i < lots.length; i++) if (lots[i] && lots[i].building && lots[i].building.group) add(lots[i].building, lots[i]);
-    for (let i = 0; i < shells.length; i++) add(shells[i], null);
-  }
-  CBZ.farSkylineSig = farSig;
-  CBZ.farSkylineSave = function () { bakeDirtyAt = 0; saveBake(); };
-  CBZ.farSkylineHarvest = function () {
-    const A = CBZ.city && CBZ.city.arena;
-    harvest(A, true);
-    bakeDirtyAt = performance.now();
-    return recGrid.size;
-  };
-  function saveBake() {
-    if (!CBZ.bakePut || !recGrid.size) return;
-    const F = new Float32Array(recGrid.size * 20);
-    let i = 0;
-    recGrid.forEach(function (r) {
-      F[i] = r.x; F[i + 1] = r.z; F[i + 2] = r.y; F[i + 3] = r.w; F[i + 4] = r.d; F[i + 5] = r.h; F[i + 6] = r.col;
-      F.set(r.win, i + 7); i += 20;
-    });
-    CBZ.bakePut(FAR_BAKE, farSig(), { f: F });
-  }
-
-  function disposeProxy() {
-    if (proxyMesh && proxyMesh.parent) proxyMesh.parent.remove(proxyMesh);
-    if (proxyMesh && proxyMesh.geometry) proxyMesh.geometry.dispose();
-    if (proxyMesh && proxyMesh.material) proxyMesh.material.dispose();
-    proxyMesh = null; proxyRecords = []; proxyArena = null; proxyCap = 0;
-  }
-
-  let proxyMat = null;
-  function farMaterial() {
-    if (proxyMat) return proxyMat;
-    // NO vertexColors: BoxGeometry has no `color` attribute, and r128 then
-    // multiplies every instance colour by the attribute's default (0,0,0).
-    // instanceColor needs no flag (USE_INSTANCING_COLOR is set by the mesh).
-    /* THE SAME WINDOWS AT EVERY DISTANCE (owner: "near and far must look the
-       same"). Every shell publishes the rhythm of the openings it actually cut
-       (city/facade_openings.js FO.pattern: per face the openings per storey,
-       the extent they occupy, the share of it they glaze, sill and head in
-       the storey); the box paints exactly that rhythm per pixel: glass where
-       the near shell has glass, wall where it has wall, lit rooms at night. */
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, fog: true });
-    mat.onBeforeCompile = function (sh) {
-      sh.uniforms.uWinNight = winU.uWinNight;
-      sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 aWinA;\nattribute vec4 aWinB;\nattribute vec4 aWinC;\nattribute float aWinBase;\nvarying vec4 vWinA;\nvarying vec4 vWinB;\nvarying vec4 vWinC;\nvarying vec3 vWinT;")
-        .replace("#include <project_vertex>", [
-          "#include <project_vertex>",
-          "vWinA = aWinA; vWinB = aWinB; vWinC = aWinC;",
-          // across the face 0..1, metres above the building's own base, and
-          // which way the face looks
-          "vWinT = vec3( position.x + 0.5, ( instanceMatrix * vec4( position, 1.0 ) ).y - aWinBase, abs( normal.z ) > 0.5 ? 1.0 : ( abs( normal.x ) > 0.5 ? 2.0 : 0.0 ) );",
-          "if ( vWinT.z > 1.5 ) vWinT.x = position.z + 0.5;",
-        ].join("\n"));
-      sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\nuniform float uWinNight;\nvarying vec4 vWinA;\nvarying vec4 vWinB;\nvarying vec4 vWinC;\nvarying vec3 vWinT;\nfloat winH( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }")
-        .replace("#include <color_fragment>", [
-          "#include <color_fragment>",
-          "vec3 winEmit = vec3( 0.0 );",
-          "if ( vWinB.z > 0.5 && vWinT.z > 0.5 ) {",
-          "  bool xf = vWinT.z < 1.5;",
-          "  float n = xf ? vWinA.x : vWinA.z, fr = xf ? vWinA.y : vWinA.w;",
-          "  float a0 = xf ? vWinC.x : vWinC.z, a1 = xf ? vWinC.y : vWinC.w;",
-          "  float tn = vWinT.x;",
-          "  if ( n > 0.5 && tn > a0 && tn < a1 ) {",
-          "    float fh = vWinB.z;",
-          "    float k = floor( vWinT.y / fh ), cy = vWinT.y - k * fh;",
-          "    float u = ( tn - a0 ) / max( 1e-3, a1 - a0 ) * n;",
-          "    float bay = fract( u );",
-          "    float win = step( abs( bay - 0.5 ), clamp( fr, 0.05, 0.98 ) * 0.5 ) * step( vWinB.x, cy ) * step( cy, vWinB.y ) * step( 0.0, k ) * step( k, vWinB.w - 1.0 );",
-          "    if ( win > 0.5 ) {",
-          "      diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.15, 0.19, 0.23 ), 0.86 );",
-          "      float h = winH( vec2( floor( u ) + vWinT.z * 31.0, k + n * 7.0 + a0 * 13.0 ) );",
-          "      winEmit = vec3( 1.0, 0.78, 0.48 ) * step( h, 0.28 ) * uWinNight * 0.85;",
-          "    }",
-          "  }",
-          "}",
-        ].join("\n"))
-        .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += winEmit;");
-    };
-    mat.customProgramCacheKey = function () { return "cbz-far-windows2"; };
-    return (proxyMat = mat);
-  }
-
-  // (re)build the one instanced draw from the record set: when the set grew
-  // past the mesh's capacity or its membership changed (at most once a second)
-  function ensureProxy(A) {
-    if (!A || !A.root || !THREE.InstancedMesh) return;
-    if (proxyArena !== A) { disposeProxy(); proxyArena = A; }
-    harvest(A, false);
-    const now = performance.now();
-    if (proxyMesh && !recsDirty) return;
-    if (proxyMesh && now - lastRebuild < 1000) return;
-    lastRebuild = now; recsDirty = false;
-    if (bakeDirtyAt === 0) bakeDirtyAt = now;
-    proxyRecords = Array.from(recGrid.values());
-    const nP = proxyRecords.length;
-    if (!nP) return;
-    if (!proxyMesh || nP > proxyCap) {
-      if (proxyMesh) { if (proxyMesh.parent) proxyMesh.parent.remove(proxyMesh); proxyMesh.geometry.dispose(); }
-      proxyCap = Math.max(64, Math.ceil(nP * 1.25));
-      const geo = new THREE.BoxGeometry(1, 1, 1);
-      geo.setAttribute("aWinA", new THREE.InstancedBufferAttribute(new Float32Array(proxyCap * 4), 4));
-      geo.setAttribute("aWinB", new THREE.InstancedBufferAttribute(new Float32Array(proxyCap * 4), 4));
-      geo.setAttribute("aWinC", new THREE.InstancedBufferAttribute(new Float32Array(proxyCap * 4), 4));
-      geo.setAttribute("aWinBase", new THREE.InstancedBufferAttribute(new Float32Array(proxyCap), 1));
-      proxyMesh = new THREE.InstancedMesh(geo, farMaterial(), proxyCap);
-      proxyMesh.name = "real-building-distance-lod";
-      proxyMesh.userData.dynamic = true;       // batch/farcull must not consume its one draw
-      proxyMesh.frustumCulled = false;          // prototype bounds do not span all instances in r128
-      proxyMesh.castShadow = false; proxyMesh.receiveShadow = false;
-      proxyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      proxyMesh.setColorAt(0, proxyColor.setHex(0x8a8a86));
-      A.root.add(proxyMesh);
-    }
-    const g = proxyMesh.geometry;
-    const wa = g.attributes.aWinA.array, wb = g.attributes.aWinB.array, wc = g.attributes.aWinC.array, base = g.attributes.aWinBase.array;
-    for (let i = 0; i < nP; i++) {
-      const r = proxyRecords[i];
-      r.shown = false;
-      wa.set(r.win.subarray(0, 4), i * 4); wb.set(r.win.subarray(4, 8), i * 4); wc.set(r.win.subarray(8, 12), i * 4);
-      base[i] = r.y || 0;
-      proxyDummy.position.set(r.x, -10000, r.z);
-      proxyDummy.scale.set(0.001, 0.001, 0.001);
-      proxyDummy.rotation.set(0, 0, 0); proxyDummy.updateMatrix();
-      proxyMesh.setMatrixAt(i, proxyDummy.matrix);
-      // THE BUILDING'S OWN WALL COLOUR (buildings.js `wallColor`, the final
-      // colourway the shell was painted with), one colour at every distance
-      proxyMesh.setColorAt(i, proxyColor.setHex(r.col));
-    }
-    proxyMesh.count = nP;
-    g.attributes.aWinA.needsUpdate = g.attributes.aWinB.needsUpdate = g.attributes.aWinC.needsUpdate = g.attributes.aWinBase.needsUpdate = true;
-    proxyMesh.instanceMatrix.needsUpdate = true;
-    if (proxyMesh.instanceColor) proxyMesh.instanceColor.needsUpdate = true;
-    CBZ.realBuildingLOD = { total: nP, visible: 0, drawCalls: 1, detailRadius: 0 };
-  }
-
-  // is the shell itself in the scene (so it can draw itself)?
-  function inScene(grp, root) {
-    let p = grp, n = 0;
-    while (p && n++ < 12) { if (p === root) return true; p = p.parent; }
-    return false;
-  }
-  function updateProxy(A, P, R) {
-    ensureProxy(A);
-    if (!proxyMesh || !P) return;
-    const root = A.root;
-    let dirty = false, visible = 0;
-    // The box must ALWAYS be up before its shell goes down, so it reads the
-    // same derived band the shell sweep uses — never its own literal.
-    const enter = Math.max(0, R - hysBand()); // overlap while inset: the box is hidden inside the full shell
-    for (let i = 0; i < proxyRecords.length; i++) {
-      const r = proxyRecords[i];
-      const d = Math.hypot(r.x - P.x, r.z - P.z) - r.r;
-      // r.lot is null for a shell that never registered a lot (govcomplex, the
-      // military island, the airport terminal, forest cabins) — and those are
-      // precisely the ones demolition never touches, since it walks city.lots.
-      const own = !!(r.grp && inScene(r.grp, root));
-      const show = !(r.lot && r.lot.demolished) && (!own || (!!R && d > enter));
-      if (show) visible++;
-      if (show === r.shown) continue;
-      r.shown = show; dirty = true;
-      if (show) {
-        // A slight inset makes the transition overlap depth-safe: while the
-        // detailed shell still exists, it fully covers this box.
-        proxyDummy.position.set(r.x, (r.y || 0) + r.h * 0.49, r.z);
-        proxyDummy.scale.set(r.w * 0.92, r.h * 0.98, r.d * 0.92);
-      } else {
-        proxyDummy.position.set(r.x, -10000, r.z);
-        proxyDummy.scale.set(0.001, 0.001, 0.001);
-      }
-      proxyDummy.rotation.set(0, 0, 0); proxyDummy.updateMatrix();
-      proxyMesh.setMatrixAt(i, proxyDummy.matrix);
-    }
-    proxyMesh.visible = visible > 0;
-    winU.uWinNight.value = CBZ.nightAmount == null ? 0 : Math.max(0, Math.min(1, CBZ.nightAmount));
-    if (dirty) proxyMesh.instanceMatrix.needsUpdate = true;
-    // the measured skyline goes to the bake a few seconds after it changed
-    if (bakeDirtyAt && performance.now() - bakeDirtyAt > 5000) { bakeDirtyAt = 0; try { saveBake(); } catch (e) {} }
-    CBZ.realBuildingLOD = { total: proxyRecords.length, visible, drawCalls: visible ? 1 : 0, detailRadius: R };
-  }
+  // (THE FAR SKYLINE OF PAINTED BOXES IS GONE. A building's far form is a
+  // copy of its own shell in the metro HLOD: city/metro.js BUILT. This file
+  // only drops what the fog or that copy has made invisible.)
 
   function boundsFor(o) {
     let b = bounds.get(o);
@@ -565,16 +241,17 @@
     /* WHAT THE CAMERA SEES (core/sight.js): measured from the EYE, out to
        the fog this eye has. It was the player's feet and a private airborne
        radius; from a heli boom or a lifted lens that hid groups standing in
-       the picture. NO SWAP INSIDE THE FOG (owner: "nothing may visibly
-       generate or pop within view"): every group, a lot building included, is
-       drawn as itself out to the fog's end; the measured LOD box only stands
-       in past it, where the fog has made the difference invisible. */
+       the picture. Every group is drawn as itself out to the fog's end. A
+       building shell whose far copy stands in the metro HLOD (city/metro.js
+       BUILT) goes earlier: once past the swap and its 30 m crossfade (the
+       `detail` ring, core/sight.js), where the copy is whole over it. */
     const SG = CBZ.sight();
     const P = (CBZ.camera || CBZ.player) ? { x: SG.x, z: SG.z } : null;
     const baseR = (CBZ.CONFIG && CBZ.CONFIG.CITY_FAR_CULL !== false && g && g.mode === "city")
       ? (CBZ.cityCullRadius || 0) : 0;
     const R0 = baseR;
     const RV = R0 ? Math.max(SG.far + 30, R0) : 0;
+    const covers = CBZ.metroBuiltCovers || null;
     if (!root) return;
     const kids = root.children;
     // amortize: at most ~1/4 of the children measured/tested per sweep → the
@@ -584,7 +261,11 @@
     const slice = Math.max(64, Math.ceil(kids.length / 4));
     // measure the viewer BEFORE anything reads hysBand() this tick
     trackViewer(P, now, kids.length, slice);
-    updateProxy(CBZ.city && CBZ.city.arena, P, RV);
+    // a covered shell goes past the swap band, and comes back (at RB minus
+    // the hysteresis) before the band begins: inside the band its copy
+    // leaves pixels to it, so it must be there (never nearer than the tier's
+    // radius, never farther than the fog)
+    const RB = R0 ? Math.max(SG.detail + (CBZ.SIGHT_FADE_BAND || 30) / 2 + hysBand() + 10, R0) : 0;
     if (!R0) {                      // OFF (high tiers / flag) — restore and idle
       if (hidByUs.size) { hidByUs.forEach(function (o) { o.visible = true; }); hidByUs.clear(); }
       return;
@@ -623,8 +304,9 @@
       }
       const dx = b.x - P.x, dz = b.z - P.z;
       const d = Math.sqrt(dx * dx + dz * dz) - b.r;   // nearest possible point
-      // (RV: see above. Everything is held to the fog's end.)
-      const R = RV;
+      // (RV: see above. Everything is held to the fog's end; a shell with a
+      // far copy only to the swap band, RB.)
+      const R = covers && o.userData && o.userData.bld && covers(o) ? Math.min(RV, RB) : RV;
       if (d > R) {
         // no `!hidByUs.has(o)` guard: if another system handed visibility back
         // (a quality tier restoring the masonry veneer), the sweep must be able
@@ -907,9 +589,9 @@
                      mullion strips, masonry veneer) that boundsFor marks
                      dynamic, i.e. can never be dropped with the wall it
                      is stuck to. MUST BE 0.
-       unproxied   — buildings with no distance-LOD box, so past the cull
-                     radius they leave nothing but their fittings. MUST
-                     BE 0.
+       unproxied   — buildings with no far copy in the metro HLOD
+                     (city/metro.js BUILT), so past the cull radius they
+                     leave nothing but their fittings. MUST BE 0.
        shells/lots/proxied/pools are printed BESIDE them so neither can
        be zeroed by building or drawing less.
 
@@ -930,7 +612,7 @@
       // world-pool dressing suppressed at altitude (the fittings-without-walls
       // ghost); null when world/detail_kit.js is absent
       dressingAloft: air ? !!air.aloft : null,
-      shells: 0, lots: 0, proxied: proxyRecords.length, unproxied: 0,
+      shells: 0, lots: 0, proxied: 0, unproxied: 0,
       pools: 0, poolsExempt: 0, poolsIdle: 0, worldPools: 0,
     };
     if (!root) return out;
@@ -939,11 +621,9 @@
     let lots = (A.lots || []);
     if (A.annex && Array.isArray(A.annex.lots)) lots = lots.concat(A.annex.lots);
     out.lots = lots.length;
-    // A building is "proxied" when the live proxy carries its group — an
-    // identity test, not a coordinate one, so two towers on one spot can never
-    // cover for each other.
-    const have = new Set();
-    for (let i = 0; i < proxyRecords.length; i++) have.add(proxyRecords[i].grp);
+    // A building is "proxied" when its far copy in the metro HLOD (city/metro.js
+    // BUILT) is matched to its group: an identity test, not a coordinate one.
+    const covers = CBZ.metroBuiltCovers || function () { return false; };
     const all = [];
     for (let i = 0; i < lots.length; i++) if (lots[i] && lots[i].building) all.push(lots[i].building);
     for (let i = 0; i < shells.length; i++) all.push(shells[i]);
@@ -953,7 +633,7 @@
       if (!b || b.park || !b.group || seenB.has(b.group)) continue;
       if (!(+b.w > 1 && +b.d > 1 && +b.h > 1)) continue;
       seenB.add(b.group);
-      if (!have.has(b.group)) out.unproxied++;
+      if (covers(b.group)) out.proxied++; else out.unproxied++;
     }
     // pooled facade geometry: buildings.js tags every one of its pools.
     // A pool at count 0 submits nothing (the warm night panes by day), so it

@@ -28,9 +28,10 @@
              (+36 m for its soft edge and the camera boom). On the ground it
              equals `far`, so nothing changes form inside view. In the air,
              `far` outruns it, and whatever stands between the two must be
-             drawn by a FAR FORM of the same thing (metro HLOD tiles, the
-             farcull lot boxes, the forest's far crowns) that hands over to
-             the near form at `detail`.
+             drawn by a FAR FORM of the same thing (metro HLOD tiles, which
+             carry the far copy of every building in the world, the
+             forest's far crowns) that crossfades to the near form at
+             `detail`.
 
    A system asks:
      CBZ.sight()                     -> { far, near, detail, reach, camFar,
@@ -39,10 +40,11 @@
      CBZ.sightSees(x, z, r)          could a thing of radius r at x,z still be
                                      a pixel short of full fog (within reach)?
      CBZ.sightNeedsDetail(x, z, r)   ... inside detail?
-     CBZ.sightU                      shared shader uniforms { cbzSightEye,
-                                     cbzSightSwap } for a near/far per-instance
-                                     hand-over in the vertex shader (refreshed
-                                     every frame by CBZ.sightPublish()).
+     CBZ.sightFade(mat, which, opts) the dithered near/far crossfade (below)
+     CBZ.sightAhead(T)               where the body will be after T s of
+                                     travel (streamers build there first)
+     CBZ.sightU                      the shared fade uniforms, refreshed every
+                                     frame by CBZ.sightPublish().
 
    Loads right after core/slice.js (THREE is in by then); touches nothing at
    load. Gang City only: the other modes own their fog.
@@ -138,48 +140,183 @@
     return _sv.z >= -1.05 && _sv.z <= 1.05 && Math.abs(_sv.x) <= 1.3 && Math.abs(_sv.y) <= 1.4;
   };
 
-  /* ---- the per-instance near/far hand-over ------------------------------
-     A far form and a near form of the same scatter both cover a place; the
-     vertex shader draws each instance from exactly one of them: near inside
-     `detail` of the eye, far outside. One shared uniform pair for every
-     material that adopts it, written once a frame. */
+  /* ---- THE CROSSFADE: every near/far hand-over is a dithered fade ------
+     Owner + research (2026-10-12): "every near/far switch is a CROSSFADE,
+     never a hard cut". A far form and a near form of the same thing both
+     cover a place; across a BAND (30 m) round the swap distance each pixel
+     is drawn by exactly one of them, chosen by a 4x4 ordered (Bayer)
+     threshold on the screen: the near form keeps a pixel where the fade t
+     is under the threshold, the far form where it is at or over it, so the
+     two are complementary (no hole, no double) and the share moves smoothly
+     from all-near to all-far across the band. A discard in the fragment
+     shader through onBeforeCompile: r128, WebGL1, phones.
+
+       t = clamp((distance from the eye - (swap - band/2)) / band, 0, 1)
+       t = max(t, 1 - ready)          ready: is the near form there? (0..1)
+
+     READY is the time half of the fade. A far form whose near form has not
+     loaded yet has ready 0: it draws everywhere, up to the camera, so a
+     thing still loading is shown as ITS OWN simplified copy, never as
+     nothing. When the near form arrives its owner ramps ready to 1 over half
+     a second and the two dissolve into each other; when it leaves, ready
+     drops to 0 at once (the far form is whole the same frame).
+
+     CBZ.sightFade(mat, which, opts)   which "near" | "far"; opts:
+       anchor   "world" (each pixel by its own ground position: a big merged
+                tile), "instance" (each instance by its root: a scatter) or
+                "object" (each mesh by its origin). Default "world".
+       swap     a uniform {value} with the swap distance (metres from the
+                eye); default the shared `detail` ring (CBZ.sightU.cbzSightSwap)
+       ready    a uniform {value} 0..1 for this material (default 1)
+       readyMap { map: uniform(texture), size: uniform(vec2), attr } a per-
+                building ready read from a texture by a vertex attribute id
+                (r = ready, g > 0.5 = gone: never drawn). city/metro.js's far
+                form of the built world uses it.
+       cover    true: the far form wins the depth test against a coplanar
+                near form (polygon offset), so it can dissolve OVER a near
+                form that is not itself dithered (a building shell is a
+                hundred materials; its far copy is one).
+     CBZ.sightSwapMaterial(mat, which) = sightFade(mat, which, {anchor:
+     "instance"}): the per-instance scatter hand-over (trees).
+     CBZ.sightFadeT(d, swap) is the same t on the CPU, and
+     CBZ.SIGHT_FADE_BAND the band, for owners deciding what to draw. */
+  const BAND = 30;
+  CBZ.SIGHT_FADE_BAND = BAND;
   const U = CBZ.sightU = {
     cbzSightEye: { value: THREE ? new THREE.Vector3() : { x: 0, y: 0, z: 0 } },
     cbzSightSwap: { value: 1036 },
+    cbzSightBand: { value: BAND },
   };
+  const ONE = { value: 1 };
+  CBZ.sightFadeT = function (d, swap) {
+    const s = swap == null ? S.detail : swap;
+    return Math.max(0, Math.min(1, (d - (s - BAND / 2)) / BAND));
+  };
+
+  /* ---- WHERE THE BODY IS GOING (streaming ahead) ------------------------
+     The body's ground velocity, measured on GAME time (dt clamped like the
+     game's: a phone at 20 fps moving a car at 30 m/s reads 30 m/s), smoothed
+     over ~half a second; a jump of more than 400 m (a teleport) resets it.
+     CBZ.sightAhead(T) -> { x, z, lead, hx, hz, speed }: where the body will
+     be after T seconds of travel, capped (450 m on the ground, 2 km in the
+     air: a plane at 200 m/s). Every streamer reads this one answer. */
+  const MV = { t: 0, wall: 0, x: 0, z: 0, at: 0, has: false };
+  S.vx = 0; S.vz = 0; S.speed = 0; S.hx = 0; S.hz = 0;
+  function track() {
+    const P = CBZ.player, pos = P && P.pos;
+    if (!pos) return;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const step = MV.wall ? Math.min(0.05, Math.max(0, (now - MV.wall) / 1000)) : 0;
+    MV.wall = now; MV.t += step;
+    if (!MV.has) { MV.has = true; MV.x = pos.x; MV.z = pos.z; MV.at = MV.t; return; }
+    const dt = MV.t - MV.at;
+    if (dt < 0.1) return;
+    const dx = pos.x - MV.x, dz = pos.z - MV.z, d = Math.hypot(dx, dz);
+    MV.x = pos.x; MV.z = pos.z; MV.at = MV.t;
+    if (d > 400) { S.vx = S.vz = S.speed = 0; return; }
+    const k = Math.min(1, dt / 0.5);
+    S.vx += (dx / dt - S.vx) * k; S.vz += (dz / dt - S.vz) * k;
+    S.speed = Math.hypot(S.vx, S.vz);
+    if (S.speed > 0.5) { S.hx = S.vx / S.speed; S.hz = S.vz / S.speed; }
+  }
+  const AHEAD = { x: 0, z: 0, lead: 0, hx: 0, hz: 0, speed: 0 };
+  CBZ.sightAhead = function (T) {
+    const lead = S.speed > 3 ? Math.min(S.airborne ? 2000 : 450, S.speed * (T == null ? 6 : T)) : 0;
+    AHEAD.hx = S.hx; AHEAD.hz = S.hz; AHEAD.speed = S.speed; AHEAD.lead = lead;
+    AHEAD.x = S.px + S.hx * lead; AHEAD.z = S.pz + S.hz * lead;
+    return AHEAD;
+  };
+
   CBZ.sightPublish = function () {
     CBZ.sight();
+    track();
     const e = U.cbzSightEye.value;
     if (e.set) e.set(S.x, S.y, S.z); else { e.x = S.x; e.y = S.y; e.z = S.z; }
     U.cbzSightSwap.value = S.detail;
     return S;
   };
-  // which: "near" draws an instance only inside detail, "far" only outside
-  CBZ.sightSwapMaterial = function (mat, which) {
-    if (!mat || mat.userData && mat.userData._cbzSightSwap) return mat;
+
+  // 4x4 ordered dither, 16 levels in [0, 1) (no arrays: GLSL ES 1.0)
+  const GLSL_BAYER = [
+    "float cbzBayer2( vec2 a ) { a = floor( a ); return fract( a.x * 0.5 + a.y * a.y * 0.75 ); }",
+    "float cbzBayer4( vec2 a ) { return cbzBayer2( 0.5 * a ) * 0.25 + cbzBayer2( a ); }",
+  ].join("\n");
+  CBZ.sightFade = function (mat, which, o) {
+    if (!mat || (mat.userData && mat.userData._cbzSightFade)) return mat;
+    o = o || {};
+    const far = which === "far";
+    const anchor = o.anchor === "instance" || o.anchor === "object" ? o.anchor : "world";
+    const swapU = o.swap || U.cbzSightSwap, readyU = o.ready || ONE;
+    const RM = o.readyMap && o.readyMap.map ? o.readyMap : null;
+    const idAttr = RM ? (RM.attr || "aFarId") : null;
     mat.userData = mat.userData || {};
-    mat.userData._cbzSightSwap = which;
-    const prevKey = mat.customProgramCacheKey;
-    mat.customProgramCacheKey = function () { return (prevKey ? prevKey.call(this) : "") + "|sight-" + which; };
+    mat.userData._cbzSightFade = which;
+    if (far && o.cover) {
+      // the far form wins a tie with the near form it stands over
+      mat.polygonOffset = true;
+      mat.polygonOffsetFactor = Math.min(mat.polygonOffsetFactor || 0, -1);
+      mat.polygonOffsetUnits = Math.min(mat.polygonOffsetUnits || 0, -4);
+    }
+    const tag = "|fade-" + which + "-" + anchor + (RM ? "-rm" : "");
+    // r128's default key is this.onBeforeCompile.toString(), which after the
+    // wrap below is the same text for every faded material: key on the
+    // material's own key, else on the hook it had before (two materials with
+    // different hooks must never share a program)
     const prev = mat.onBeforeCompile;
+    const ownKey = Object.prototype.hasOwnProperty.call(mat, "customProgramCacheKey") ? mat.customProgramCacheKey : null;
+    const prevSrc = prev ? String(prev) : "";
+    mat.customProgramCacheKey = function () { return (ownKey ? ownKey.call(this) : prevSrc) + tag; };
     mat.onBeforeCompile = function (sh, r) {
       if (prev) prev.call(this, sh, r);
+      if (sh.vertexShader.indexOf("#include <project_vertex>") < 0 || sh.fragmentShader.indexOf("#include <clipping_planes_fragment>") < 0) return;
       sh.uniforms.cbzSightEye = U.cbzSightEye;
-      sh.uniforms.cbzSightSwap = U.cbzSightSwap;
-      const test = which === "near" ? "cbzD2 > cbzSightSwap * cbzSightSwap" : "cbzD2 <= cbzSightSwap * cbzSightSwap";
-      sh.vertexShader = "uniform vec3 cbzSightEye;\nuniform float cbzSightSwap;\n" + sh.vertexShader.replace(
-        "#include <project_vertex>",
-        "#include <project_vertex>\n" +
-        "#ifdef USE_INSTANCING\n" +
-        "  vec2 cbzRoot = ( modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xz;\n" +
-        "#else\n" +
-        "  vec2 cbzRoot = ( modelMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xz;\n" +
-        "#endif\n" +
-        "  vec2 cbzDv = cbzRoot - cbzSightEye.xz;\n" +
-        "  float cbzD2 = dot( cbzDv, cbzDv );\n" +
-        "  if ( " + test + " ) gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 );\n");
+      sh.uniforms.cbzSightBand = U.cbzSightBand;
+      sh.uniforms.cbzFadeSwap = swapU;
+      sh.uniforms.cbzFadeReady = readyU;
+      if (RM) { sh.uniforms.cbzReadyMap = RM.map; sh.uniforms.cbzReadySize = RM.size; }
+      const head = "uniform vec3 cbzSightEye;\nuniform float cbzSightBand;\nuniform float cbzFadeSwap;\nuniform float cbzFadeReady;\n";
+      const fadeOf = function (d) {
+        return "max( clamp( ( " + d + " - ( cbzFadeSwap - 0.5 * cbzSightBand ) ) / cbzSightBand, 0.0, 1.0 ), 1.0 - cbzFadeReady )";
+      };
+      let vHead = head, vBody = "";
+      if (anchor === "world") {
+        vHead += "varying vec2 vCbzW;\n";
+        vBody =
+          "#ifdef USE_INSTANCING\n" +
+          "  vCbzW = ( modelMatrix * instanceMatrix * vec4( transformed, 1.0 ) ).xz;\n" +
+          "#else\n" +
+          "  vCbzW = ( modelMatrix * vec4( transformed, 1.0 ) ).xz;\n" +
+          "#endif\n";
+      } else {
+        vHead += "varying float vCbzT;\n";
+        vBody =
+          (anchor === "instance" ? "#ifdef USE_INSTANCING\n  vec2 cbzRoot = ( modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xz;\n#else\n" : "") +
+          "  vec2 cbzRoot = ( modelMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xz;\n" +
+          (anchor === "instance" ? "#endif\n" : "") +
+          "  vCbzT = " + fadeOf("length( cbzRoot - cbzSightEye.xz )") + ";\n" +
+          // wholly the other form's: not even a vertex of it
+          (far ? "  if ( vCbzT <= 0.0 ) gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 );\n"
+               : "  if ( vCbzT >= 1.0 ) gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 );\n");
+      }
+      if (RM) { vHead += "attribute float " + idAttr + ";\nvarying float vCbzId;\n"; vBody += "  vCbzId = " + idAttr + ";\n"; }
+      sh.vertexShader = vHead + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\n" + vBody);
+      let fHead = head + GLSL_BAYER + "\n" + (anchor === "world" ? "varying vec2 vCbzW;\n" : "varying float vCbzT;\n");
+      let fBody = "{\n  float cbzT = " + (anchor === "world" ? fadeOf("length( vCbzW - cbzSightEye.xz )") : "vCbzT") + ";\n";
+      if (RM) {
+        fHead += "uniform sampler2D cbzReadyMap;\nuniform vec2 cbzReadySize;\nvarying float vCbzId;\n";
+        fBody +=
+          "  float cbzI = floor( vCbzId + 0.5 );\n" +
+          "  vec4 cbzR = texture2D( cbzReadyMap, vec2( ( mod( cbzI, cbzReadySize.x ) + 0.5 ) / cbzReadySize.x, ( floor( cbzI / cbzReadySize.x ) + 0.5 ) / cbzReadySize.y ) );\n" +
+          "  if ( cbzR.g > 0.5 ) discard;\n" +
+          "  cbzT = max( cbzT, 1.0 - cbzR.r );\n";
+      }
+      fBody += "  float cbzThr = cbzBayer4( gl_FragCoord.xy ) + 0.03125;\n" +
+        (far ? "  if ( cbzT < cbzThr ) discard;\n" : "  if ( cbzT >= cbzThr ) discard;\n") + "}\n";
+      sh.fragmentShader = fHead + sh.fragmentShader.replace("#include <clipping_planes_fragment>", fBody + "#include <clipping_planes_fragment>");
     };
     mat.needsUpdate = true;
     return mat;
   };
+  // the per-instance scatter hand-over (world/vegetation.js lodMaterial)
+  CBZ.sightSwapMaterial = function (mat, which) { return CBZ.sightFade(mat, which, { anchor: "instance" }); };
 })();

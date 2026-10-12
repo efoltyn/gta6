@@ -131,9 +131,24 @@
   // =========================================================================
   //  THE GENERATOR
   // =========================================================================
+  // the buildings a town would raise, without raising anything (see PLAN ONLY)
+  CBZ.planTown = function (cfg) {
+    if (!cfg || typeof cfg.rng !== "function") return [];
+    try { return CBZ.buildTown(null, Object.assign({}, cfg, { planOnly: true })) || []; }
+    catch (e) { console.error("[planTown] " + (cfg.name || ""), e); return []; }
+  };
   CBZ.buildTown = function (root, cfg) {
-    if (!root || !cfg || typeof cfg.rng !== "function") return null;
+    if (!cfg || typeof cfg.rng !== "function" || (!root && !cfg.planOnly)) return null;
     const rng = cfg.rng;
+    /* PLAN ONLY (CBZ.planTown): the same street plan, lots, picks and
+       storeys, drawn from the same rng in the same order, and NOTHING built
+       or registered: no ground, no street, no reservation, no arena record,
+       no shell job. It returns the buildings the town would raise, so a
+       town whose builder has not run (a streamed boot skips every town the
+       player cannot see) still has its far copy on the horizon (city/metro.js
+       BUILT). One code path: the plan IS the town's own. */
+    const PLAN = !!cfg.planOnly;
+    const planned = PLAN ? [] : null;
     // KEYSTONE (T1): the lots/roads/shopLots a town builds must reach the SAME
     // arena arrays the mainland writes to (world.js:511 — lots/roads live on the
     // built `city` object, which mode.js stores as CBZ.city.arena). The old code
@@ -150,7 +165,7 @@
     // traffic on their streets). settlements.js wraps cityWorldGeo and stashes
     // the LIVE under-construction city object here; cfg.arena is a per-call
     // override for direct callers.
-    const A = cfg.arena || CBZ._settlementArena
+    const A = PLAN ? null : cfg.arena || CBZ._settlementArena
       || (CBZ.city && CBZ.city.arena) || (CBZ.cityState && CBZ.cityState.arena) || null;
     const V2 = !CBZ.CONFIG || CBZ.CONFIG.SETTLEMENTS_V2 !== false;
     const cx = cfg.cx, cz = cfg.cz;
@@ -258,12 +273,12 @@
     }
 
     // ----- placement-API feature detect -----
-    const P = CBZ.placement || null;
+    const P = PLAN ? null : (CBZ.placement || null);
     if (P && P.seedFromColliders) { try { P.seedFromColliders(); } catch (e) {} }
     function reserveRect(r) { if (P && P.reserve) { try { P.reserve(r); } catch (e) {} } }
 
     // the settled ground the town stands on (and what shows outside the grid)
-    mergeAdd(root, [planeGeo(cx, cz, maxX - minX + 6, maxZ - minZ + 6, 0.03)], cmat(RURAL ? GROUND : (pal.verge != null ? pal.verge : GROUND)), { receive: true });
+    if (!PLAN) mergeAdd(root, [planeGeo(cx, cz, maxX - minX + 6, maxZ - minZ + 6, 0.03)], cmat(RURAL ? GROUND : (pal.verge != null ? pal.verge : GROUND)), { receive: true });
 
     // ----- the street RECORDS: exactly the cross-section that is drawn, so
     // traffic, lamps, approaches and the junction solver read the real street
@@ -293,7 +308,7 @@
     //  2) THE STREET SURFACE
     // =====================================================================
     let kit = null;
-    if (!RURAL) {
+    if (!RURAL && !PLAN) {
       const baseV = townRoads[0], baseH = townRoads.find(function (r) { return !r.vertical && !r.main; }) || townRoads[cols + 1];
       try {
         kit = CBZ.streetKit.build({
@@ -307,7 +322,7 @@
         });
       } catch (e) { try { console.error("[towngen] street kit", cfg.name, e); } catch (e2) {} kit = null; }
     }
-    if (!kit) {
+    if (!kit && !PLAN) {
       // RURAL LANES: swept dirt, flush with the ground, no kerb and no paint
       const roadGeoms = [];
       for (const s of townRoads) roadGeoms.push(s.vertical ? planeGeo(s.x, s.z, s.w, s.len, 0.05) : planeGeo(s.x, s.z, s.len, s.w, 0.05));
@@ -621,6 +636,14 @@
         const sideArg = V2 && SIDE_IDX[lt.doorSide] != null ? SIDE_IDX[lt.doorSide] : lt.doorSide;
         const shellOpts = pick.opts || (V2 && !isShop ? { stairs: true } : { retail: true });
         const doorPt = { x: lt.door.x + lt.door.nx * 1.6, z: lt.door.z + lt.door.nz * 1.6, nx: lt.door.nx, nz: lt.door.nz };
+        if (PLAN) {
+          // the shell this lot will raise, as cityMakeBuilding will raise it
+          // (its colour: buildings.js shellColorway, the shell's own answer)
+          const cw = CBZ.cityShellColorway ? CBZ.cityShellColorway(lt.cx, lt.cz, color, shellOpts) : null;
+          planned.push({ x: lt.cx, z: lt.cz, w: w, d: d, storeys: storeys, color: cw ? cw.color : color,
+            facade: cw ? cw.facade : "office", masonry: !!(cw && cw.masonry), shop: isShop, fh: (shellOpts && shellOpts.fh > 2.4 && shellOpts.fh < 8) ? +shellOpts.fh : 3.2 });
+          continue;
+        }
         // is this a commercial lot or a home? (zone default, prefab override)
         // CONTRACT: shops.js reads lot.kind DIRECTLY (no b.shop.kind fallback) and
         // the mainland sets lot.kind = the TRADE (buildings.js:4788). So a town
@@ -747,6 +770,11 @@
         filled.push(lotRec);
         lt._rec = lotRec;
       } else if (pick.asset && CBZ.assets && CBZ.assets.has && CBZ.assets.has(pick.asset)) {
+        // a prop's own builder draws from the town rng as it builds: a plan
+        // that does not build it cannot follow the stream past it, so the
+        // plan stops here (every lot before it is exact; village huts are
+        // under a pixel from afar)
+        if (PLAN) return planned;
         // X5 FINDING: this used to route through P.placeAsset (respects
         // occupancy) — but step 3 above ALREADY reserved this exact lot's
         // full rect via reserveRect(), so placeAsset's own isFree() check
@@ -786,6 +814,7 @@
         }
       }
     }
+    if (PLAN) return planned;
     flushCanopies();
 
     // =====================================================================

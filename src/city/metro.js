@@ -65,6 +65,30 @@
    so no single frame pays for a whole tile. Trees are instanced at load (a
    few thousand matrices) and dealt into cells by core/farcull.js.
 
+   THE NEAR/FAR SWAP IS A CROSSFADE (core/sight.js sightFade): across 30 m
+   round the swap distance each pixel is the near tile's or the far tile's
+   by a 4x4 ordered dither, and a near tile that has just been built
+   dissolves in over half a second (its tile's `ready`); never a hard cut.
+
+   THE BUILT WORLD'S FAR FORM (BUILT, below). Every building that is not a
+   metro plan building (the Gang City downtown and its estates, the
+   streamed apartment lots, every town and mini-city, the compounds, the
+   island buildings) gets the SAME kind of far form: a fabric copy of its
+   own shell (its footprint, height, parapet and headhouse, its wall
+   colour, its window rhythm), merged per 800 m tile, one draw a tile. It
+   is drawn wherever the shell is not: past the swap, and up close while
+   the shell is still loading (then the shell's arrival dissolves the copy
+   away), so a building is never a box and never missing. The copies come
+   from data, never from running a builder: the shells that exist, the lot
+   records of shells not built yet, the town plans (CBZ.planTown) of towns
+   a streamed boot skipped, and the measured records the slice manifest
+   replays for any other skipped builder.
+
+   STREAMING AHEAD: near tiles are wanted round where the camera will be
+   (core/sight.js sightAhead: speed x 6 s along the heading, aircraft
+   included), and a tile's far form is queued before its near work, so
+   the copy is there first.
+
    DETERMINISM: plans are pure functions of (world seed, city id, the live
    region layout). Nothing here draws from an rng stream.
 
@@ -603,6 +627,7 @@
     // a rebuilt world: let go of the last one's cities
     for (const m of CBZ.metroCities.concat(STREAMED)) { try { if (m.group && m.group.parent) m.group.parent.remove(m.group); } catch (e) {} }
     CBZ.metroCities.length = 0;
+    builtReset();
     if (!CBZ.metroPlan || !city || !city.root) return;
     const T0 = performance.now();
     const planned = [];
@@ -832,24 +857,67 @@
     const dx = Math.max(Math.abs(t.x0 - x), Math.abs(t.x1 - x)), dz = Math.max(Math.abs(t.z0 - z), Math.abs(t.z1 - z));
     return Math.hypot(dx, dz);
   }
-  // WHICH OF THE PAIR IS DRAWN. The near tile inside its build radius (plus
-  // a band so a tile on the edge doesn't flip), the far tile everywhere
-  // else in view; never both, never neither while either exists.
-  let _cx = 0, _cz = 0, _showR = BUILD_R + 300, _viewR = 1e9;
+  // WHICH OF THE PAIR IS DRAWN, AND HOW THEY HAND OVER. The swap is at
+  // _showR (the build radius plus a margin) from the camera, and it is a
+  // CROSSFADE (core/sight.js sightFade): across the 30 m band round it the
+  // near tile and the far tile each draw the pixels the 4x4 dither gives
+  // them (complementary: never a hole, never both), so a tile whose rect
+  // straddles the band draws both meshes and each discards the other's
+  // share. TIME is the other half: a near tile just built has `ready` 0 and
+  // dissolves in over READY_S while its far tile dissolves out; a tile with
+  // no near build draws its far tile everywhere (its own copy, up to the
+  // camera); a tile with no far build draws its near tile everywhere.
+  let _cx = 0, _cz = 0, _showR = BUILD_R + 150, _viewR = 1e9;
+  const SWAP_U = { value: BUILD_R + 150 };         // the metro's swap distance, for its fade materials
+  const READY_S = 0.5;
+  const _ramp = new Set();
+  function fadeMats(t, on) {
+    const f = t.fab, MF = CBZ.metroFabric;
+    if (!f || !f.mesh || !f.far || !MF || !MF.fadeMaterial) return;
+    if (on) {
+      if (!t.readyU) t.readyU = { value: 0 };
+      if (!t.fadeNear) { t.fadeNear = MF.fadeMaterial("near", { ready: t.readyU, swap: SWAP_U }); t.fadeFar = MF.fadeMaterial("far", { ready: t.readyU, swap: SWAP_U }); }
+      if (f.mesh.material !== t.fadeNear) f.mesh.material = t.fadeNear;
+      if (f.far.material !== t.fadeFar) f.far.material = t.fadeFar;
+    } else {
+      const m = MF.material();
+      if (f.mesh.material !== m) f.mesh.material = m;
+      if (f.far.material !== m) f.far.material = m;
+    }
+  }
   function showTile(t, x, z) {
+    if (t.bw) { builtShow(t); return; }              // the built world's far copies (BUILT)
     const f = t.fab;
     const d = rectDist(t, x, z);
     const nearOK = !!(f && t.fabBuilt && !t.nearEmpty);
     const farOK = !!(f && f.farBuilt && !t.farEmpty);
     const inView = d < _viewR;
-    const nearOn = nearOK && inView && (d < _showR || !farOK);
-    const farOn = farOK && inView && !nearOn;
+    const both = nearOK && farOK;
+    fadeMats(t, both);
+    // the near tile's time fade: 0 until it is built (at once), then up
+    if (!nearOK && t.readyU && t.readyU.value !== 0) { t.readyU.value = 0; _ramp.delete(t); }
+    if (both && t.readyU && t.readyU.value < 1) _ramp.add(t);
+    const ready = both ? t.readyU.value : (nearOK ? 1 : 0);
+    const B2 = (CBZ.SIGHT_FADE_BAND || 30) / 2;
+    const nearOn = nearOK && inView && (!farOK || (ready > 0 && d < _showR + B2));
+    const farOn = farOK && inView && (!nearOK || ready < 1 || rectFar(t, x, z) > _showR - B2);
     if (f && f.mesh && f.mesh.visible !== nearOn) f.mesh.visible = nearOn;
     if (f && f.far && f.far.visible !== farOn) f.far.visible = farOn;
     // the streets go with the near buildings: past the swap the far tile's
     // city stands on the continent plate (flattened under it at load)
     const gOn = inView && !!t.gndBuilt && d < _showR;
     if (t.gnd && t.gnd.meshes) for (const m of t.gnd.meshes) if (m.visible !== gOn) m.visible = gOn;
+  }
+  // every frame: the tiles whose near build is dissolving in
+  function rampTiles(dt) {
+    if (!_ramp.size) return;
+    const k = Math.min(0.25, Math.max(0, +dt || 0.016)) / READY_S;
+    _ramp.forEach(function (t) {
+      if (!t.readyU) { _ramp.delete(t); return; }
+      t.readyU.value = Math.min(1, t.readyU.value + k);
+      if (t.readyU.value >= 1) _ramp.delete(t);
+      showTile(t, _cx, _cz);
+    });
   }
 
   let _lastSweep = 0;
@@ -990,14 +1058,18 @@
     _audit.farMapMs = Math.round(order.reduce(function (s, m) { return s + m.ms; }, 0));
   }
 
-  CBZ.onAlways && CBZ.onAlways(58, function () {
+  CBZ.onAlways && CBZ.onAlways(58, function (dt) {
     const g = CBZ.game;
-    if (!g || g.mode !== "city" || !STREAMED.length) return;
+    if (!g || g.mode !== "city") return;
+    rampTiles(dt);
+    builtFrame(dt);
+    if (!STREAMED.length && !BUILT.M) { builtSweep(); return; }
     if (_cur || _pending.length) pump();
     else if (!_mapsDone) farMapPump();
     const now = performance.now();
     if (now - _lastSweep < 400) return;
     _lastSweep = now;
+    builtSweep();
     const cam = CBZ.camera, P = CBZ.player;
     const x = cam ? cam.position.x : (P ? P.x : 0), z = cam ? cam.position.z : (P ? P.z : 0);
     const alt = cam ? cam.position.y : 2;
@@ -1011,13 +1083,14 @@
     const SEE = fogFar + 60;
     const BR = Math.min(air ? BUILD_R_AIR : BUILD_R, SEE + 200), DR = Math.max(BR + 600, air ? DROP_R_AIR : DROP_R);
     _showR = BR + 150;
+    SWAP_U.value = _showR;
     _viewR = Math.min(VIEW_MAX, fogFar / HAZE_SCALE);
     // high up the aerial melt (core/renderer.js) completes the fog at
     // fog.far on true depth: past it a tile is pure fog colour, not drawn
     if (alt > 900) _viewR = Math.min(_viewR, fogFar + 100);
     let reach = 0;
     for (const M of STREAMED) {
-      if (!M.group) continue;
+      if (!M.group || M.built) continue;
       const F = M.plan.stats.footprint;
       const dc = rectDist({ x0: F.minX, z0: F.minZ, x1: F.maxX, z1: F.maxZ }, x, z);
       const on = dc < _viewR;
@@ -1035,19 +1108,37 @@
     // the camera's far plane must reach the farthest tile in view
     CBZ.metroViewFar = reach > 0 && !(CBZ.CONFIG && CBZ.CONFIG.METRO_VIEW_FAR === false) ? Math.min(_viewR, reach) + 60 : 0;
     _pending.length = 0;
-    const want = [], wantFar = [];
+    // STREAMING AHEAD (core/sight.js): a tile is wanted by its distance from
+    // the camera OR from where the body will be in 6 s, so the near tile is
+    // built before the camera arrives, at any speed, in a car or a plane
+    const AH = CBZ.sightAhead ? CBZ.sightAhead(6) : null;
+    const ahead = !!(AH && AH.lead > 20);
+    const want = [], wantFar = [], farFirst = [];
     for (const M of STREAMED) {
       if (!M.group || !M.tiles) continue;
+      if (M.built) {
+        // the built world's far copies: every tile within the eye's reach
+        for (const t of M.tiles) {
+          const d = rectDist(t, x, z);
+          if (t.fab && !t.fab.farBuilt && d < BUILT.reach) farFirst.push({ M: M, t: t, d: d - 1e6 });
+        }
+        continue;
+      }
       for (const t of M.tiles) {
-        const d = rectDist(t, x, z);
+        const d0 = rectDist(t, x, z);
+        const d = ahead ? Math.min(d0, rectDist(t, AH.x, AH.z)) : d0;
         if (!t.built && d < BR) want.push({ M: M, t: t, d: d });
         // a near tile is let go only once its far tile can stand in
         else if ((t.gndBuilt || t.fabBuilt) && d > DR && (!t.fab || t.fab.farBuilt)) dropTile(M, t);
-        if (t.fab && !t.fab.farBuilt && (d < _viewR || t.fabBuilt)) wantFar.push({ M: M, t: t, d: d });
+        if (t.fab && !t.fab.farBuilt && (d0 < _viewR || t.fabBuilt || d < BR)) (d < BR ? farFirst : wantFar).push({ M: M, t: t, d: d });
       }
     }
     want.sort(function (a, b) { return a.d - b.d; });
     wantFar.sort(function (a, b) { return a.d - b.d; });
+    farFirst.sort(function (a, b) { return a.d - b.d; });
+    // THE COPY FIRST: a tile about to be wanted near gets its far form before
+    // its near work, so while it loads its own simplified copy stands there
+    for (const w of farFirst) _pending.push({ M: w.M, t: w.t, part: "far" });
     for (const w of want) {
       if (!w.t.gndBuilt) _pending.push({ M: w.M, t: w.t, part: "gnd" });
       if (!w.t.fabBuilt) _pending.push({ M: w.M, t: w.t, part: "fab" });
@@ -1104,6 +1195,288 @@
     _pending.length = 0; _cur = null;
   };
 
+  /* ==================================================================
+     BUILT — THE FAR FORM OF EVERY BUILDING THAT IS NOT A METRO PLAN'S.
+
+     Owner + research (2026-10-12): far versions must be "a faithful
+     simplified copy of THAT exact object, never a generic stand-in", and
+     the painted far boxes (core/farcull.js, removed) were hated. The metro
+     tile HLOD is the right model, so every other building joins it: a
+     PLAN of fabric buildings (one per shell: its footprint, its height in
+     its own storeys, its parapet, a headhouse, its wall colour, its window
+     rhythm, standing on its own ground) tiled 800 m and written by
+     metro_fabric.js's far writer, one draw a tile, kept on the GPU only.
+
+     WHERE THE BUILDINGS COME FROM (data, never a builder run):
+       shells   every cityMakeBuilding there is (root.userData.shells): the
+                exact numbers, colour and window pattern;
+       plans    CBZ.farPlans: the towns and mini-cities a streamed boot
+                skipped, planned by their own code without building
+                anything (towngen.js CBZ.planTown: same lots, same picks,
+                same storeys, the colour buildings.js will paint);
+       replay   the slice manifest's measured records of any other builder
+                the boot skipped (city/worldmap.js, CBZ.farReplay);
+       lots     the lot records of shells not built yet (the streamed
+                apartment blocks carry their footprint, height and colour).
+     One record per building (4 m grid, first source wins). A shell nobody
+     planned joins its tile when it appears and the tile is rewritten.
+
+     WHEN THE COPY SHOWS. Each vertex carries its building's index; a small
+     texture holds each building's `ready` (core/sight.js readyMap): 1 while
+     its shell is in the scene, 0 while it is not (queued, parked, freed).
+     The copy is the core/sight.js "far" form with that ready: past the
+     swap it is whole, inside it only while the shell is missing, and when
+     the shell arrives the copy dissolves off it over half a second (the
+     copy wins a tie with the shell's coplanar walls, so the dissolve
+     reveals the shell rather than z-fighting it). A demolished lot's copy
+     is gone. Fog: the shell's own (not the metro's scaled haze), and the
+     shell's colours as its Lambert material sends them (MF_RAW).
+  ================================================================== */
+  const BUILT = {
+    M: null, arena: null, P: null, prep: null, group: null, mat: null, recs: [], grid: new Map(),
+    tex: null, data: null, W: 256, H: 0, mapU: { value: null }, sizeU: { value: null }, dirty: false,
+    shellsSeen: 0, lotsN: -1, reach: 1400, ramp: new Set(), covered: new WeakSet(),
+    src: { shells: 0, plans: 0, replay: 0, lots: 0, late: 0 }, tries: 0,
+  };
+  const BUILT_READY_S = 0.5;
+  function builtReset() {
+    try { if (BUILT.group && BUILT.group.parent) BUILT.group.parent.remove(BUILT.group); } catch (e) {}
+    if (BUILT.tex) { try { BUILT.tex.dispose(); } catch (e) {} }
+    const i = STREAMED.indexOf(BUILT.M); if (i >= 0) STREAMED.splice(i, 1);
+    BUILT.M = BUILT.arena = BUILT.P = BUILT.prep = BUILT.group = BUILT.tex = BUILT.data = null;
+    BUILT.recs = []; BUILT.grid.clear(); BUILT.ramp.clear(); BUILT.covered = new WeakSet();
+    BUILT.shellsSeen = 0; BUILT.lotsN = -1; BUILT.H = 0; BUILT.tries = 0;
+    BUILT.src = { shells: 0, plans: 0, replay: 0, lots: 0, late: 0 };
+  }
+  function bgk(ix, iz) { return ix + "," + iz; }
+  function builtFind(x, z) {
+    const ix = Math.round(x / 4), iz = Math.round(z / 4);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+      const r = BUILT.grid.get(bgk(ix + a, iz + b));
+      if (r && Math.abs(r.x - x) < 3 && Math.abs(r.z - z) < 3) return r;
+    }
+    return null;
+  }
+  function hexOf(c, dflt) {
+    if (c && c.isColor) return c.getHex();
+    if (typeof c === "number" && isFinite(c)) return c & 0xffffff;
+    if (typeof c === "string" && THREE) { try { return new THREE.Color(c).getHex(); } catch (e) {} }
+    return dflt == null ? 0x8a8a86 : dflt;
+  }
+  /* one building as a fabric plan building: the shell's own numbers. The
+     window rhythm is the shell's (FO.pattern: openings per storey per face,
+     their glazed share), else the street's usual punched bay */
+  function fabricOf(r) {
+    const fh = r.fh > 2.4 && r.fh < 8 ? r.fh : 3.2;
+    const st = Math.max(1, r.storeys > 0 ? Math.round(r.storeys) : Math.round(r.h / fh));
+    const h = r.h > 1 ? r.h : st * fh;
+    let bay = 3.4, glaze = 0.45;
+    const Pt = r.pattern;
+    if (Pt && Pt.faces) {
+      let bs = 0, gs = 0, c = 0;
+      for (let k = 0; k < 4; k++) {
+        const q = Pt.faces[k];
+        if (!q || !(q.n > 0)) continue;
+        bs += (k < 2 ? r.w : r.d) / q.n; gs += +q.frac || 0; c++;
+      }
+      if (c) { bay = Math.max(1.2, Math.min(8, bs / c)); glaze = gs / c; }
+    }
+    const style = r.masonry ? (r.facade === "civic" || r.facade === "fortified" ? "stone" : "brick")
+      : (glaze >= 0.55 ? "glass" : "concrete");
+    return {
+      type: (r.facade === "office" || r.facade === "retail") && st >= 4 ? "office" : "apt",
+      x: r.x, z: r.z, y: r.y || 0, w: r.w, d: r.d, h: h, st: st, fh: fh,
+      style: style, wall: hexOf(r.color), glass: 0x46505a, roof: "flat", uniform: true,
+      v: { bay: bay, par: r.par > 0.2 && r.par < 3 ? r.par : 0.9, vbits: 0 },
+    };
+  }
+  // a record into the set, unless the place already has one (first wins)
+  function builtPut(r, src) {
+    if (!(r.w > 1 && r.d > 1) || !(r.h > 1 || r.storeys > 0) || !isFinite(r.x) || !isFinite(r.z)) return null;
+    if (builtFind(r.x, r.z)) return null;
+    const rec = { x: r.x, z: r.z, w: r.w, d: r.d, grp: r.grp || null, lot: r.lot || null, ready: 0, gone: false, slot: BUILT.recs.length, fab: fabricOf(r) };
+    BUILT.recs.push(rec);
+    BUILT.grid.set(bgk(Math.round(r.x / 4), Math.round(r.z / 4)), rec);
+    if (rec.grp) BUILT.covered.add(rec.grp);
+    BUILT.src[src]++;
+    return rec;
+  }
+  function shellRec(b, lot) {
+    const g = b.group;
+    return { x: Number.isFinite(b.ox) ? b.ox : (lot ? +lot.cx : NaN), z: Number.isFinite(b.oz) ? b.oz : (lot ? +lot.cz : NaN),
+      y: g && g.position ? g.position.y : 0, w: +b.w, d: +b.d, h: +b.h, storeys: b.storeys, fh: b.FH,
+      color: b.wallColor, facade: b.facade, masonry: !!b.masonry, pattern: b.facadePattern, par: b.parapetH, grp: g, lot: lot || null };
+  }
+  function arenaLots(A) {
+    let lots = A.lots || [];
+    if (A.annex && Array.isArray(A.annex.lots) && A.annex.lots.length) lots = lots.concat(A.annex.lots);
+    return lots;
+  }
+  // the ready texture: r = ready, g = gone; one texel per building
+  function builtTexture(n) {
+    const cap = Math.max(256, Math.ceil(n * 1.25));
+    const H = Math.ceil(cap / BUILT.W);
+    if (BUILT.tex && H <= BUILT.H) return;
+    const data = new Uint8Array(BUILT.W * H * 4);
+    if (BUILT.data) data.set(BUILT.data.subarray(0, Math.min(BUILT.data.length, data.length)));
+    const tex = new THREE.DataTexture(data, BUILT.W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
+    tex.magFilter = tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false; tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    if (BUILT.tex) BUILT.tex.dispose();
+    BUILT.tex = tex; BUILT.data = data; BUILT.H = H;
+    BUILT.mapU.value = tex;
+    if (!BUILT.sizeU.value) BUILT.sizeU.value = new THREE.Vector2();
+    BUILT.sizeU.value.set(BUILT.W, H);
+  }
+  function texel(rec) {
+    const o = rec.slot * 4, D = BUILT.data;
+    if (!D || o + 3 >= D.length) return;
+    const r = Math.round(rec.ready * 255), g = rec.gone ? 255 : 0;
+    if (D[o] !== r || D[o + 1] !== g) { D[o] = r; D[o + 1] = g; BUILT.dirty = true; }
+  }
+  function builtTileRec(tile) {
+    return { key: "built:" + tile.key, x0: tile.x0, z0: tile.z0, x1: tile.x1, z1: tile.z1, fab: tile, gnd: null, built: false, cols: null, bw: true };
+  }
+  // gather every building and lay the far plan (once per world)
+  function builtBuild(A) {
+    const MF = CBZ.metroFabric;
+    if (!MF || !MF.prepare || !MF.fadeMaterial || !THREE) return false;
+    // shells first: the exact numbers
+    const root = A.root;
+    const shells = (root.userData && root.userData.shells) || [];
+    const lots = arenaLots(A);
+    const lotOf = new Map();
+    for (const lot of lots) if (lot && lot.building && lot.building.group) lotOf.set(lot.building.group, lot);
+    for (const b of shells) if (b && b.group && !b.park) builtPut(shellRec(b, lotOf.get(b.group)), "shells");
+    BUILT.shellsSeen = shells.length;
+    // the plans of towns whose builder may not have run
+    for (const fn of CBZ.farPlans || []) {
+      let list = [];
+      try { list = fn() || []; } catch (e) { console.error("[metro built plan]", e); }
+      for (const r of list) builtPut({ x: r.x, z: r.z, y: 0, w: r.w, d: r.d, storeys: r.storeys, fh: r.fh, color: r.color, facade: r.facade, masonry: r.masonry }, "plans");
+    }
+    // the manifest's measured records of skipped builders
+    for (const r of CBZ.farReplay || []) builtPut({ x: +r.x, z: +r.z, y: +r.y || 0, w: +r.w, d: +r.d, h: +r.h, storeys: r.storeys, fh: r.fh, color: r.color, facade: r.facade, masonry: !!r.masonry }, "replay");
+    // lots whose shells are not built yet
+    for (const lot of lots) {
+      const b = lot && lot.building;
+      if (!b || b.park || b.group) continue;
+      const w = +b.w || +lot.w, d = +b.d || +lot.d;
+      const rec = builtPut({ x: +lot.cx, z: +lot.cz, y: 0, w: w, d: d, h: +b.h, storeys: b.storeys, color: b.farWall != null ? b.farWall : b.sign, facade: "office" }, "lots");
+      if (rec) rec.lot = lot;
+    }
+    if (!BUILT.recs.length) return false;
+    let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
+    for (const r of BUILT.recs) { minX = Math.min(minX, r.x - r.w); maxX = Math.max(maxX, r.x + r.w); minZ = Math.min(minZ, r.z - r.d); maxZ = Math.max(maxZ, r.z + r.d); }
+    const P = BUILT.P = {
+      id: "built", name: "Built world", bldgs: BUILT.recs.map(function (r) { return r.fab; }), stations: [], districts: [], blocks: [],
+      uniform: true, farIds: true, trees: [], landmarks: [], stats: { footprint: { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ } },
+    };
+    const g = BUILT.group = new THREE.Group();
+    g.name = "metro-built"; g.userData.terrain = true; g.userData.metro = "built";
+    root.add(g);
+    builtTexture(BUILT.recs.length);
+    BUILT.mat = MF.fadeMaterial("far", { plain: true, raw: true, cover: true, readyMap: { map: BUILT.mapU, size: BUILT.sizeU, attr: "aFarId" } });
+    BUILT.prep = MF.prepare(P, { root: g, tile: TILE, name: "built", noKit: true });
+    const M = BUILT.M = { id: "built", name: "Built world", tier: "built", biome: null, plan: P, regions: [], group: g, tiles: [], site: null, lakes: [],
+      fabric: BUILT.prep, ground: null, trees: [], built: true };
+    for (const t of BUILT.prep.tiles) { t.far.material = BUILT.mat; M.tiles.push(builtTileRec(t)); }
+    STREAMED.push(M);
+    for (const r of BUILT.recs) texel(r);
+    return true;
+  }
+  // a shell nobody planned: its record joins its tile and the tile is rewritten
+  function builtLate(b) {
+    const rec = builtPut(shellRec(b, null), "late");
+    if (!rec || !BUILT.prep) return;
+    BUILT.src.late = (BUILT.src.late || 0);
+    BUILT.P.bldgs.push(rec.fab);
+    builtTexture(BUILT.recs.length);
+    const r = BUILT.prep.add(rec.slot);
+    if (!r) return;
+    if (r.fresh) { r.tile.far.material = BUILT.mat; BUILT.M.tiles.push(builtTileRec(r.tile)); }
+    else if (!(_cur && _cur.t && _cur.t.fab === r.tile)) r.tile.farBuilt = false;   // rewritten by the sweep (the old one draws till then)
+    texel(rec);
+  }
+  function inScene(o, root) {
+    let p = o, n = 0;
+    while (p && n++ < 16) { if (p === root) return true; p = p.parent; }
+    return false;
+  }
+  // 2.5 Hz with the metro sweep: build once, match new shells, the targets
+  function builtSweep() {
+    const A = CBZ.city && CBZ.city.arena;
+    if (!A || !A.root || !CBZ.metroFabric) return;
+    if (BUILT.arena !== A) { builtReset(); BUILT.arena = A; }
+    if (!BUILT.M) {
+      if (BUILT.tries++ > 3) return;                 // nothing to copy in this world
+      if (!builtBuild(A)) return;
+    }
+    const SG = CBZ.sight ? CBZ.sight() : null;
+    BUILT.reach = SG ? SG.reach + 60 : 1400;
+    const root = A.root;
+    const shells = (root.userData && root.userData.shells) || [];
+    for (let i = BUILT.shellsSeen; i < shells.length; i++) {
+      const b = shells[i];
+      if (!b || !b.group || b.park) continue;
+      const rec = builtFind(Number.isFinite(b.ox) ? b.ox : 0, Number.isFinite(b.oz) ? b.oz : 0);
+      if (rec) { rec.grp = b.group; BUILT.covered.add(b.group); }
+      else builtLate(b);
+    }
+    BUILT.shellsSeen = shells.length;
+    // lots come and go with their town's job: link each to its record (demolition reads it)
+    const lots = arenaLots(A);
+    if (lots.length !== BUILT.lotsN) {
+      BUILT.lotsN = lots.length;
+      for (const lot of lots) {
+        if (!lot || !lot.building || !isFinite(lot.cx)) continue;
+        const rec = builtFind(+lot.cx, +lot.cz);
+        if (rec && !rec.lot) rec.lot = lot;
+      }
+    }
+    for (const rec of BUILT.recs) {
+      const gone = !!(rec.lot && rec.lot.demolished);
+      const target = !gone && rec.grp && inScene(rec.grp, root) ? 1 : 0;
+      rec.gone = gone;
+      if (target < 1) { rec.ready = 0; BUILT.ramp.delete(rec); }
+      else if (rec.ready < 1) BUILT.ramp.add(rec);
+      texel(rec);
+    }
+    for (const t of BUILT.M.tiles) builtShow(t);
+  }
+  // every frame: arriving shells dissolve their copies away; the texture goes up
+  function builtFrame(dt) {
+    if (!BUILT.M) return;
+    if (BUILT.ramp.size) {
+      const k = Math.min(0.25, Math.max(0, +dt || 0.016)) / BUILT_READY_S;
+      BUILT.ramp.forEach(function (rec) {
+        rec.ready = Math.min(1, rec.ready + k);
+        if (rec.ready >= 1) BUILT.ramp.delete(rec);
+        texel(rec);
+      });
+    }
+    if (BUILT.dirty && BUILT.tex) { BUILT.tex.needsUpdate = true; BUILT.dirty = false; }
+  }
+  function builtShow(t) {
+    const f = t.fab;
+    if (!f || !f.far) return;
+    const on = !!(f.farBuilt && !t.farEmpty) && rectDist(t, _cx, _cz) < BUILT.reach;
+    if (f.far.visible !== on) f.far.visible = on;
+  }
+  // core/farcull.js: a shell whose far copy is here may be dropped past the swap
+  CBZ.metroBuiltCovers = function (grp) { return !!(grp && BUILT.covered.has(grp)); };
+  function builtAudit() {
+    if (!BUILT.M) return null;
+    let ready = 0, gone = 0;
+    for (const r of BUILT.recs) { if (r.ready >= 1) ready++; if (r.gone) gone++; }
+    return { buildings: BUILT.recs.length, sources: Object.assign({}, BUILT.src), tiles: BUILT.M.tiles.length,
+      farBuilt: BUILT.M.tiles.filter(function (t) { return t.fab && t.fab.farBuilt; }).length,
+      drawn: BUILT.M.tiles.filter(function (t) { return t.fab && t.fab.far && t.fab.far.visible; }).length,
+      shellsIn: ready, gone: gone, reach: Math.round(BUILT.reach) };
+  }
+
+
   // ------------------------------------------------------------------
   //  AUDIT — what the tools (and the report) read
   // ------------------------------------------------------------------
@@ -1116,6 +1489,7 @@
       sliceMsMax: Math.round(_audit.sliceMsMax * 10) / 10, farBuilds: _audit.farBuilds, farMB: +(_audit.farBytes / 1048576).toFixed(1),
       farMap: _mapsDone ? { MB: _audit.farMapMB || 0, ms: _audit.farMapMs || 0 } : null,
       viewFar: CBZ.metroViewFar || 0, viewR: Math.round(_viewR), showR: Math.round(_showR),
+      built: builtAudit(),
       // the facade cells: built / drawn now, their triangles, and the work so far
       facades: (function () {
         let built = 0, drawn = 0, tris = 0, shadow = 0;

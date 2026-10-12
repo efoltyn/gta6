@@ -83,7 +83,12 @@
      CBZ.metroFabric.disposeTile(P, tile) (the near tile; far tiles are kept)
      CBZ.metroFabric.build(P, opts)    -> { meshes, colliders, stats, tiles }  (prepare + every tile, near + far)
      CBZ.metroFabric.material()
-   opts = { root: THREE.Group, tile: 800, name: P.id }
+     CBZ.metroFabric.fadeMaterial(which, o) a fabric material with core/sight.js's
+                                          dithered near/far crossfade
+   opts = { root: THREE.Group, tile: 800, name: P.id, noKit }
+   A plan building may carry `y` (its ground: the far copy of a shell on a
+   hill) and a plan `farIds` (each far vertex carries its building's index,
+   aFarId, so city/metro.js can fade one building at a time).
    A tile mesh is invisible until buildTile fills it (and again after
    disposeTile), so an unbuilt placeholder never reaches the renderer.
    The night / late-night / sky-tint uniforms are driven here from
@@ -623,8 +628,15 @@
     //      gravel roofs are 50-170, glass reads dark. Near and far are one
     //      material, so the swap still matches.
     "  col = max( col, vec3( 0.0 ) );",
+    // MF_RAW (the far copy of a building.js shell, city/metro.js BUILT): the
+    // shell's own wall colour goes to the lights as its Lambert material
+    // sends it (no decode, no ease), so the copy is the colour of the shell
+    "#ifdef MF_RAW",
+    "  diffuseColor.rgb = col;",
+    "#else",
     "  col = col * ( col * ( col * 0.305306011 + 0.682171111 ) + 0.012522878 );",
     "  diffuseColor.rgb = mix( vec3( dot( col, vec3( 0.2126, 0.7152, 0.0722 ) ) ), col, 0.7 );",
+    "#endif",
     "}",
   ].join("\n");
 
@@ -647,14 +659,18 @@
     return sh.vertexShader.indexOf("#include <project_vertex>") >= 0 && sh.fragmentShader.indexOf("#include <color_fragment>") >= 0 &&
       sh.fragmentShader.indexOf("#include <emissivemap_fragment>") >= 0;
   }
-  function material() {
-    if (mat) return mat;
-    mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    mat.name = "metro-fabric";
-    mat.fog = true;
-    mat.extensions = { derivatives: true };           // WebGL1: fwidth (r128 reads material.extensions.derivatives)
-    mat.userData.metroFabric = true;
-    mat.onBeforeCompile = function (sh) {
+  /* one fabric material. opts.plain: the ordinary fog (a far copy of a
+     shell that fogs like the shell), else the ground's scaled fog + air;
+     opts.raw: MF_RAW colours (above) */
+  function makeMaterial(opts) {
+    opts = opts || {};
+    const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    m.name = "metro-fabric" + (opts.raw ? "-raw" : "") + (opts.plain ? "-plain" : "");
+    m.fog = true;
+    m.extensions = { derivatives: true };           // WebGL1: fwidth (r128 reads material.extensions.derivatives)
+    m.userData.metroFabric = true;
+    if (opts.raw) m.defines = { MF_RAW: "" };
+    m.onBeforeCompile = function (sh) {
       if (!okShader(sh)) return;
       injectFrag(sh);
       sh.vertexShader = sh.vertexShader
@@ -668,14 +684,29 @@
           "vMfN = normalize( mat3( modelMatrix ) * objectNormal );",
         ].join("\n"));
     };
-    mat.customProgramCacheKey = function () { return "cbzMetroFabric4"; };
+    const key = "cbzMetroFabric4" + (opts.raw ? "r" : "") + (opts.plain ? "p" : "");
+    m.customProgramCacheKey = function () { return key; };
     // atmospheric perspective of the land it stands on (see the header):
     // the fog's scale, and with it the air (terrain_overhaul.js aerialHaze)
     // that fills the kilometres the scaled fog never reaches: blue-grey,
     // not white
-    if (CBZ.terrainFogScale) CBZ.terrainFogScale(mat, FOG_SCALE);
+    if (!opts.plain && CBZ.terrainFogScale) CBZ.terrainFogScale(m, FOG_SCALE);
     hook();
-    return mat;
+    return m;
+  }
+  function material() {
+    if (mat) return mat;
+    return (mat = makeMaterial(null));
+  }
+  /* A FABRIC MATERIAL THAT CROSSFADES (core/sight.js sightFade): which
+     "near" | "far", o = { ready, swap, readyMap, cover, plain, raw }.
+     A new material per call (same program for the same options), so an
+     owner can give each tile its own `ready`. */
+  function fadeMaterial(which, o) {
+    o = o || {};
+    const m = makeMaterial({ plain: !!o.plain, raw: !!o.raw });
+    if (CBZ.sightFade) CBZ.sightFade(m, which, { anchor: "world", ready: o.ready, swap: o.swap, readyMap: o.readyMap, cover: !!o.cover });
+    return m;
   }
   // per-frame: night, "how late", and the sky the glass reflects (the fog
   // colour IS the horizon every other system matches)
@@ -710,6 +741,9 @@
   // every mass, roof and setback at its true size, minus the parts under a
   // pixel past ~1 km (AC boxes, awnings, stoops, soffits, parapet returns)
   let FAR = false;
+  // IDS: the job writes each vertex's building index (aFarId) for a far copy
+  // whose buildings fade one by one (city/metro.js BUILT); FID grows with POS
+  let IDS = false, FID = null, bId = 0;
   let POS = null, NRM = null, AC = null, AG = null, AP = null, AU = null, IDX = null;
   function growV(n) {
     let c = Math.max(CAP * 2, 65536); while (c < n) c *= 2;
@@ -717,6 +751,7 @@
       ap = new Uint8Array(c * 4), au = new Int16Array(c * 4);
     if (POS) { p.set(POS); nr.set(NRM); ac.set(AC); ag.set(AG); ap.set(AP); au.set(AU); }
     POS = p; NRM = nr; AC = ac; AG = ag; AP = ap; AU = au; CAP = c;
+    if (FID) { const f = new Uint16Array(c); f.set(FID.subarray(0, Math.min(FID.length, c))); FID = f; }
   }
   function growI(n) {
     let c = Math.max(ICAP * 2, 131072); while (c < n) c *= 2;
@@ -730,8 +765,10 @@
   // bVar: the building variant on a facade (0 on everything else); BVAR:
   // the variant of the building being written (facade() picks it up)
   let bVar = 0, BVAR = 0;
-  // transform: local (x,z) -> world, then minus the tile origin
-  let tX = 0, tZ = 0, tC = 1, tS = 0, oX = 0, oZ = 0;
+  // transform: local (x,z) -> world, then minus the tile origin; tY lifts a
+  // building onto its own ground (a plan building's `y`; the metro's lots
+  // are all at 0)
+  let tX = 0, tZ = 0, tC = 1, tS = 0, oX = 0, oZ = 0, tY = 0;
   function frame(x, z, rot) { tX = x; tZ = z; tC = Math.cos(rot || 0); tS = Math.sin(rot || 0); }
   function i16(x) { x = Math.round(x); return x < -32768 ? -32768 : x > 32767 ? 32767 : x; }
   function n8(x) { return (x * 127 + (x < 0 ? -0.5 : 0.5)) | 0; }
@@ -739,7 +776,8 @@
   function vert(lx, ly, lz, nx, ny, nz, u, v) {
     const k = nv++;
     const k3 = k * 3, k4 = k * 4;
-    POS[k3] = tX + lx * tC + lz * tS - oX; POS[k3 + 1] = ly; POS[k3 + 2] = tZ - lx * tS + lz * tC - oZ;
+    POS[k3] = tX + lx * tC + lz * tS - oX; POS[k3 + 1] = ly + tY; POS[k3 + 2] = tZ - lx * tS + lz * tC - oZ;
+    if (IDS) FID[k] = bId;
     NRM[k4] = n8(nx * tC + nz * tS); NRM[k4 + 1] = n8(ny); NRM[k4 + 2] = n8(-nx * tS + nz * tC); NRM[k4 + 3] = 0;
     AC[k4] = bC0; AC[k4 + 1] = bC1; AC[k4 + 2] = bC2; AC[k4 + 3] = bSeed;
     AG[k4] = bG0; AG[k4 + 1] = bG1; AG[k4 + 2] = bG2; AG[k4 + 3] = bFl;
@@ -2624,7 +2662,7 @@
       t.idx.push(i);
       if (b.x - r < t.bx0) t.bx0 = b.x - r; if (b.x + r > t.bx1) t.bx1 = b.x + r;
       if (b.z - r < t.bz0) t.bz0 = b.z - r; if (b.z + r > t.bz1) t.bz1 = b.z + r;
-      t.by1 = Math.max(t.by1, GY + roofReach(b));
+      t.by1 = Math.max(t.by1, GY + (+b.y || 0) + roofReach(b));
     }
     for (let i = 0; i < (P.stations || []).length; i++) {
       const s = P.stations[i], t = tileOf(s.x, s.z), r = Math.hypot(s.w, s.d) / 2 + 2;
@@ -2641,8 +2679,33 @@
     }
     // the facade cells (no geometry, no mesh until one streams in)
     let kit = [];
-    try { kit = kitPrepare(P, masks, opts.root); } catch (e) { if (typeof console !== "undefined") console.warn("[metro_fabric] facade cells", e); }
-    return { tiles: tiles, material: m, kit: kit };
+    if (!opts.noKit) { try { kit = kitPrepare(P, masks, opts.root); } catch (e) { if (typeof console !== "undefined") console.warn("[metro_fabric] facade cells", e); } }
+    /* a building appended to P.bldgs after prepare (city/metro.js BUILT: a
+       shell nobody planned) joins its tile; returns { tile, fresh } (fresh: a
+       tile that did not exist, its meshes now under opts.root) */
+    const add = function (i) {
+      const b = B[i];
+      if (!b) return null;
+      const had = byKey.has(Math.floor(b.x / T) + "," + Math.floor(b.z / T));
+      const t = tileOf(b.x, b.z), r = Math.hypot(b.w, b.d) / 2 + 4;
+      t.idx.push(i);
+      if (b.x - r < t.bx0) t.bx0 = b.x - r; if (b.x + r > t.bx1) t.bx1 = b.x + r;
+      if (b.z - r < t.bz0) t.bz0 = b.z - r; if (b.z + r > t.bz1) t.bz1 = b.z + r;
+      t.by1 = Math.max(t.by1, GY + (+b.y || 0) + roofReach(b));
+      t.sphere = tileSphere(t);
+      if (!had) {
+        t.mesh = tileMesh(P, t, name, false);
+        t.far = tileMesh(P, t, name, true);
+        if (opts.root) { opts.root.add(t.mesh); opts.root.add(t.far); }
+        tiles.push(t);
+      } else {
+        if (t.mesh && t.mesh.geometry) t.mesh.geometry.boundingSphere = t.sphere.clone();
+        if (t.far && t.far.geometry && !t.farBuilt) t.far.geometry.boundingSphere = t.sphere.clone();
+      }
+      if (P.__mfVar) delete P.__mfVar;
+      return { tile: t, fresh: !had };
+    };
+    return { tiles: tiles, material: m, kit: kit, add: add };
   }
   function tileSphere(t) {
     const cx = (t.x0 + t.x1) / 2, cz = (t.z0 + t.z1) / 2;
@@ -2663,7 +2726,7 @@
   function job(P, tile, far) {
     if (JOB) runJob(JOB, Infinity);            // a sync caller cut in: finish the one in flight first
     const kit = far === "kit";
-    const J = { P: P, tile: tile, far: far === true, kit: kit, lod: kit ? (tile.lod | 0) : 0, anchor: kit ? tile.anchor || null : null,
+    const J = { P: P, tile: tile, far: far === true, kit: kit, ids: far === true && !!P.farIds, lod: kit ? (tile.lod | 0) : 0, anchor: kit ? tile.anchor || null : null,
       chunks: kit ? [] : null, vbase: 0, k: 0, st: 0, ms: 0, done: false, result: null, marks: null };
     JOB = J;
     nv = 0; ni = 0;
@@ -2678,8 +2741,11 @@
     if (JOB !== J) throw new Error("metro_fabric: job run out of order");
     const t0 = now(), end = t0 + (budget > 0 ? budget : 0);
     const P = J.P, tile = J.tile, B = P.bldgs, masks = tile.masks || streetMasks(P);
+    // (a building appended after prepare has no street mask: 0, no shop face)
     const stations = J.kit ? [] : tile.stations;
     FAR = J.far;
+    IDS = !!J.ids;
+    if (IDS && (!FID || FID.length < CAP)) { const f = new Uint16Array(Math.max(CAP, 65536)); if (FID) f.set(FID.subarray(0, Math.min(FID.length, f.length))); FID = f; }
     try {
       if (J.kit) {
         // a facade cell: one building at a time, resumable inside it
@@ -2704,15 +2770,16 @@
         const v0 = nv;
         const vb = vbOf(P, i);
         BVAR = vb.v ? vb.v.vbits | 0 : 0;
+        tY = +vb.y || 0; bId = i;
         try { emit(P, vb, masks[i]); }
         catch (e) { if (typeof console !== "undefined") console.warn("[metro_fabric] building", B[i] && B[i].id, e); }
-        BVAR = 0;
+        BVAR = 0; tY = 0;
         frame(0, 0, 0);
         if (J.marks) J.marks.push(i, v0, nv);
         if (now() >= end) break;
       }
       if (J.k >= tile.idx.length) while (J.st < stations.length) { station(P, P.stations[stations[J.st++]]); frame(0, 0, 0); }
-    } finally { FAR = false; }
+    } finally { FAR = false; IDS = false; tY = 0; }
     J.ms += now() - t0;
     if (J.k < tile.idx.length || J.kb || J.st < stations.length) return null;
     J.done = true;
@@ -2722,7 +2789,7 @@
   }
   function freeArray() { this.array = null; }
   // the writer's arrays so far, as a geometry with its own bounds
-  function writtenGeometry(sphere, free) {
+  function writtenGeometry(sphere, free, ids) {
     const g = new THREE.BufferGeometry();
     const pos = POS ? POS.slice(0, nv * 3) : new Float32Array(0);
     const attrs = [
@@ -2733,6 +2800,7 @@
       ["aMfP", new THREE.BufferAttribute(nv ? AP.slice(0, nv * 4) : new Uint8Array(0), 4, false)],
       ["aMfU", new THREE.BufferAttribute(nv ? AU.slice(0, nv * 4) : new Int16Array(0), 4, false)],
     ];
+    if (ids) attrs.push(["aFarId", new THREE.BufferAttribute(nv && FID ? FID.slice(0, nv) : new Uint16Array(0), 1, false)]);
     for (const a of attrs) g.setAttribute(a[0], a[1]);
     const index = nv < 65536 ? Uint16Array.from(ni ? IDX.subarray(0, ni) : []) : IDX.slice(0, ni);
     g.setIndex(new THREE.BufferAttribute(index, 1));
@@ -2755,7 +2823,7 @@
       for (const a of attrs) a[1].onUpload(freeArray);
       g.index.onUpload(freeArray);
     }
-    const bytes = nv * (12 + 4 + 4 + 4 + 4 + 8) + index.byteLength;
+    const bytes = nv * (12 + 4 + 4 + 4 + 4 + 8 + (ids ? 2 : 0)) + index.byteLength;
     return { g: g, bytes: bytes, vertices: nv, triangles: ni / 3 };
   }
   /* A FACADE CELL IS WRITTEN IN CHUNKS. Once the writer holds KIT_FLUSH_V
@@ -2778,7 +2846,7 @@
     // (the streamed/phone city drops a NEAR tile's JS copy after upload too:
     // it is never raycast either (its colliders are boxes, COLS), and metro
     // tiles a drive passed held ~50 MB of JS after it, memscope/abtrack)
-    const w = writtenGeometry(tile.sphere, far || !!(CBZ.slice && CBZ.slice.stream)), g = w.g;
+    const w = writtenGeometry(tile.sphere, far || !!(CBZ.slice && CBZ.slice.stream), J.ids), g = w.g;
     const old = mesh.geometry;
     mesh.geometry = g;
     if (old && old !== g) old.dispose();
@@ -2845,7 +2913,7 @@
     tile.mesh.visible = false;
   }
   // release the writer's scratch (after a burst of tile builds)
-  function trim() { if (JOB) return; POS = NRM = AC = AG = AP = AU = IDX = null; CAP = ICAP = 0; }
+  function trim() { if (JOB) return; POS = NRM = AC = AG = AP = AU = IDX = FID = null; CAP = ICAP = 0; }
 
   // ---------------------------------------------------------------------
   //  BUILD EVERYTHING (node checks, small towns)
@@ -2877,7 +2945,7 @@
 
   const API = {
     build: build, prepare: prepare, buildTile: buildTile, buildFarTile: buildFarTile, job: job, runJob: runJob,
-    disposeTile: disposeTile, trim: trim, material: material, tick: tick, uniforms: U,
+    disposeTile: disposeTile, trim: trim, material: material, fadeMaterial: fadeMaterial, tick: tick, uniforms: U,
     // facade cells: prepare() returns them as .kit; build one with
     // job(P, cell, "kit") + runJob, drop it with disposeKit
     // the fabric's view of every building of a plan (variants; the plan's own

@@ -899,6 +899,9 @@
       for (const x of d[k]) { const c = Object.assign({}, x); arr.push(c); note(k, c); }
     }
     for (const bl of (d.biomeBlends || [])) { const c = Object.assign({}, bl); CBZ._biomeBlendSpecs.push(c); note("biomeBlends", c); }
+    // THE BUILDINGS IT WOULD RAISE (measured by the trace): their far copies
+    // stand on the horizon before the builder runs (city/metro.js BUILT)
+    if (d.farBldgs && d.farBldgs.length) { CBZ.farReplay = CBZ.farReplay || []; for (const f of d.farBldgs) CBZ.farReplay.push(f); }
     return out;
   }
 
@@ -914,7 +917,8 @@
     const box = new THREE.Box3(), v = new THREE.Vector3(), m4 = new THREE.Matrix4();
     function mark(root) { if (root) root.traverse(function (o) { seen.add(o); }); }
     mark(CBZ.scene);
-    let lens = null, provN = 0, blendN = 0, colN = 0, platN = 0;
+    let lens = null, provN = 0, blendN = 0, colN = 0, platN = 0, shellN = 0;
+    const shellsOf = function () { return (city.root && city.root.userData && city.root.userData.shells) || []; };
     function isTerrain(o) {
       const u = o.userData || {};
       if (u.worldSurface || u.terrain || u.terrainFar || u.horizon || u.metroFar || u.farLod != null) return true;
@@ -927,6 +931,7 @@
         for (const k of REPLAY_ARRAYS) lens[k] = city[k] ? city[k].length : 0;
         provN = CBZ._cityGroundHeightProviders.length; blendN = CBZ._biomeBlendSpecs.length;
         colN = (CBZ.colliders || []).length; platN = (CBZ.platforms || []).length;
+        shellN = shellsOf().length;
       },
       after: function (b, ms) {
         const cells = new Set(); let wide = false, surface = false, meshes = 0, tris = 0;
@@ -977,6 +982,17 @@
           if (arr.length > lens[k]) data[k] = arr.slice(lens[k]).map(function (x) { return sliceClone(x, 0, new WeakSet()); });
         }
         if (CBZ._biomeBlendSpecs.length > blendN) data.biomeBlends = CBZ._biomeBlendSpecs.slice(blendN).map(function (x) { return sliceClone(x, 0, new WeakSet()); });
+        // every shell it raised, as its far copy needs it (city/metro.js BUILT)
+        const sh = shellsOf();
+        if (sh.length > shellN) {
+          data.farBldgs = [];
+          for (let i = shellN; i < sh.length; i++) {
+            const q = sh[i];
+            if (!q || q.park || !(q.w > 1 && q.d > 1 && q.h > 1)) continue;
+            data.farBldgs.push({ x: Math.round(q.ox * 100) / 100, z: Math.round(q.oz * 100) / 100, y: q.group && q.group.position ? q.group.position.y : 0,
+              w: q.w, d: q.d, h: q.h, storeys: q.storeys, fh: q.FH, color: q.wallColor, facade: q.facade, masonry: !!q.masonry });
+          }
+        }
         out.builders[bkey(b)] = {
           order: b.order, ms: Math.round(ms), terrain: terrain, oracle: oracle, surface: surface, wide: wide, meshes: meshes, tris: Math.round(tris),
           colliders: cols.length - colN, cells: [...cells].map(function (s) { return s.split(",").map(Number); }), data: data,
@@ -1022,6 +1038,7 @@
       L.length = k;
     }
     CBZ._worldGeoRan = true;
+    CBZ.farReplay = [];               // the skipped builders' buildings, replayed below
     CBZ.cityWorkAnchorsReset();       // anchors are rebuilt by the biome builders
     // World geometry is assembled by several modules. Start every pass with
     // one shared, idempotent occupancy view seeded from the already-built

@@ -99,17 +99,37 @@
 
   /* ---- the questions every consumer asks. All answer "keep" with no slice. */
   // does the axis-aligned rect touch the KEEP circle (what may be seen)?
+  /* A MOVING STREAMED SLICE KEEPS A CAPSULE: the keep circle swept from its
+     centre along (s.ax, s.az), where the player will be after a few seconds
+     of travel (core/citystream.js, core/sight.js sightAhead), so the road
+     ahead is built before the camera reaches it. Tested at points along the
+     sweep no more than 100 m apart (the circle is ~800 m+ wide, so the
+     sampled capsule is the capsule to within a metre or two). */
+  function sweepSteps(s) {
+    const L = Math.hypot(s.ax || 0, s.az || 0);
+    return L > 1 ? Math.ceil(L / 100) : 0;
+  }
   CBZ.sliceKeepsRect = function (minX, maxX, minZ, maxZ, pad) {
     const s = CBZ.slice; if (!s) return true;
-    const R = s.keepR() + (pad || 0);
-    const cx = Math.max(minX, Math.min(s.x, maxX)), cz = Math.max(minZ, Math.min(s.z, maxZ));
-    return (cx - s.x) * (cx - s.x) + (cz - s.z) * (cz - s.z) <= R * R;
+    const R = s.keepR() + (pad || 0), R2 = R * R;
+    const n = sweepSteps(s);
+    for (let i = 0; i <= n; i++) {
+      const px = s.x + (n ? (s.ax * i) / n : 0), pz = s.z + (n ? (s.az * i) / n : 0);
+      const cx = Math.max(minX, Math.min(px, maxX)), cz = Math.max(minZ, Math.min(pz, maxZ));
+      if ((cx - px) * (cx - px) + (cz - pz) * (cz - pz) <= R2) return true;
+    }
+    return false;
   };
-  // does a circle (x, z, radius) touch the KEEP circle?
+  // does a circle (x, z, radius) touch the KEEP circle (capsule)?
   CBZ.sliceKeeps = function (x, z, rad) {
     const s = CBZ.slice; if (!s) return true;
-    const R = s.keepR() + (rad || 0);
-    return (x - s.x) * (x - s.x) + (z - s.z) * (z - s.z) <= R * R;
+    const R = s.keepR() + (rad || 0), R2 = R * R;
+    const n = sweepSteps(s);
+    for (let i = 0; i <= n; i++) {
+      const px = s.x + (n ? (s.ax * i) / n : 0), pz = s.z + (n ? (s.az * i) / n : 0);
+      if ((x - px) * (x - px) + (z - pz) * (z - pz) <= R2) return true;
+    }
+    return false;
   };
   // is the point inside the PLAYABLE circle (where actors spawn)?
   CBZ.sliceHolds = function (x, z, pad) {

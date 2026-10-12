@@ -3568,6 +3568,66 @@
     return g;
   }
 
+  /* WHAT A SHELL IS BUILT OF AND WHAT COLOUR ITS WALLS ARE, from its
+     position, its caller's colour and opts alone (no geometry, no rng): the
+     facade family (office / retail / brick / civic / fortified), the masonry
+     colourway, and the final wall colour. makeBuilding builds with it, and
+     the far copy of a shell that is not built yet (city/metro.js BUILT: a
+     streamed town's parcel, a deferred apartment block) is painted with it,
+     so the copy is the colour the shell will be. */
+  function shellColorway(ox, oz, color, opts) {
+    opts = opts || {};
+    const DKIT = DISTRICT_KITS[opts.district] || DEFAULT_KIT;
+    const MASONRY_ON = !(CBZ.CONFIG && CBZ.CONFIG.BLD_MASONRY_V1 === false);
+    let FACADE = opts.facade ||
+      (opts.retail || opts.showroom ? "retail"
+        : "office");
+    if (FACADE === "residential") FACADE = MASONRY_ON ? "brick" : "office";
+    // A civic owner may opt one landmark back into the monumental grammar
+    // without reviving the retired citywide brick/masonry pass. This is the
+    // narrow seam used by the Executive Mansion: a declared dome and Doric
+    // order must not collapse into a curtain-wall office merely because
+    // residential masonry is disabled globally.
+    const landmarkCivic = FACADE === "civic" && opts.civic && opts.civic.monumental === true;
+    if (!MASONRY_ON && !landmarkCivic &&
+        (FACADE === "brick" || FACADE === "civic" || FACADE === "fortified")) FACADE = "office";
+    // (A 45% position-hashed "masonry share" for callers with no facade
+    // preference used to flip town shells to punched brick one by one. The
+    // facade kit's neighbourhood pick — facadeAutoDress, below — now decides
+    // what a street is built of, for the whole street at once.)
+    const punched = FACADE === "brick";
+    const civicF = FACADE === "civic";
+    const fortified = FACADE === "fortified";
+    const MASONRY = punched || civicF || fortified;
+    // MASONRY PALETTE — a SMALL fixed colourway set (world/textures_masonry.js)
+    // deliberately shared city-wide so the flat structural walls still bucket
+    // together for core/batch.js. Position-hashed pick (never rng), so lot #23's
+    // brick colour is decidable without building lots 0..22.
+    const civicSpec = opts.civic || null;
+    let MPAL = null;
+    if (MASONRY && CBZ.masonryPalette) {
+      // ashlar STONE for the monumental trades; the humbler civic kinds that
+      // declare stone:false (a records office, a fire house) are brick, because
+      // that is what the real ones are built of.
+      const fam = (civicSpec && civicSpec.stone === false) ? "brick"
+        : ((civicF || fortified || (civicSpec && civicSpec.stone)) ? "ashlar" : "brick");
+      const cwid = opts.masonry || (CBZ.masonryPick ? CBZ.masonryPick(fam, ox, oz, 0xb21c) : null);
+      if (cwid) MPAL = CBZ.masonryPalette(cwid);
+    }
+    // DISTRICT WALL KIT: hue-locked jitter so buildings in the same district
+    // read as a coherent palette family (core cool/clean, projects/industrial
+    // grimier/desaturated) while still varying building-to-building. Applied
+    // only when a district was actually threaded in, so callers that don't
+    // pass one (island buildings, the flagship's raw 0x223040, etc.) render
+    // exactly as before. MASONRY buildings skip it: their colourway IS the
+    // curated family, and jittering it would break the wall↔veneer colour match
+    // the batching split depends on.
+    if (MPAL) color = MPAL.wall;
+    else if (opts.district) color = districtWallColor(color, DKIT, ox, oz);
+    return { facade: FACADE, punched: punched, civicF: civicF, fortified: fortified, masonry: MASONRY, mpal: MPAL, color: color };
+  }
+  CBZ.cityShellColorway = shellColorway;
+
   // ---- the enterable building (one group; switchback stairs to the roof) ----
   // opts: { boarded:bool (board windows instead of glass), grime:bool }
   function makeBuilding(root, ox, oz, w, d, storeys, color, doorSide, opts) {
@@ -3628,31 +3688,11 @@
     // ?cfg_BLD_MASONRY_V1=0) collapses every masonry request back to the exact
     // prior office/retail shell — the hard-off guard the old code had, kept as
     // a flag instead of a literal.
-    const MASONRY_ON = !(CBZ.CONFIG && CBZ.CONFIG.BLD_MASONRY_V1 === false);
-    let FACADE = opts.facade ||
-      (opts.retail || opts.showroom ? "retail"
-        : "office");
-    if (FACADE === "residential") FACADE = MASONRY_ON ? "brick" : "office";
-    // A civic owner may opt one landmark back into the monumental grammar
-    // without reviving the retired citywide brick/masonry pass. This is the
-    // narrow seam used by the Executive Mansion: a declared dome and Doric
-    // order must not collapse into a curtain-wall office merely because
-    // residential masonry is disabled globally.
-    const landmarkCivic = FACADE === "civic" && opts.civic && opts.civic.monumental === true;
-    if (!MASONRY_ON && !landmarkCivic &&
-        (FACADE === "brick" || FACADE === "civic" || FACADE === "fortified")) FACADE = "office";
-    // (A 45% position-hashed "masonry share" for callers with no facade
-    // preference used to flip town shells to punched brick one by one. The
-    // facade kit's neighbourhood pick — facadeAutoDress, below — now decides
-    // what a street is built of, for the whole street at once.)
-    const punched = FACADE === "brick";
-    const civicF = FACADE === "civic";
-    const fortified = FACADE === "fortified";
-    const MASONRY = punched || civicF || fortified;
-    // MASONRY PALETTE — a SMALL fixed colourway set (world/textures_masonry.js)
-    // deliberately shared city-wide so the flat structural walls still bucket
-    // together for core/batch.js. Position-hashed pick (never rng), so lot #23's
-    // brick colour is decidable without building lots 0..22.
+    // THE FACADE FAMILY, THE MASONRY COLOURWAY AND THE FINAL WALL COLOUR:
+    // shellColorway (above makeBuilding), the one answer the far copy of a
+    // shell that is not built yet (city/metro.js BUILT) reads too
+    const CW = shellColorway(ox, oz, color, opts);
+    const FACADE = CW.facade, punched = CW.punched, civicF = CW.civicF, fortified = CW.fortified, MASONRY = CW.masonry;
     const civicSpec = opts.civic || null;
     // FACADE KIT: does the requested facade crown the roof? This has to be
     // answered HERE, before the roofline code below, because the shell decides
@@ -3669,26 +3709,8 @@
           opts.showroom || opts.garageGround ? "showroom" : opts.retail ? "shop" : null) : null));
     const facadeTakesRoof = !!(CBZ.facadeCrownsRoof && CBZ.facadeCrownsRoof(DRESS,
       function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; }, storeys));
-    let MPAL = null;
-    if (MASONRY && CBZ.masonryPalette) {
-      // ashlar STONE for the monumental trades; the humbler civic kinds that
-      // declare stone:false (a records office, a fire house) are brick, because
-      // that is what the real ones are built of.
-      const fam = (civicSpec && civicSpec.stone === false) ? "brick"
-        : ((civicF || fortified || (civicSpec && civicSpec.stone)) ? "ashlar" : "brick");
-      const cwid = opts.masonry || (CBZ.masonryPick ? CBZ.masonryPick(fam, ox, oz, 0xb21c) : null);
-      if (cwid) MPAL = CBZ.masonryPalette(cwid);
-    }
-    // DISTRICT WALL KIT: hue-locked jitter so buildings in the same district
-    // read as a coherent palette family (core cool/clean, projects/industrial
-    // grimier/desaturated) while still varying building-to-building. Applied
-    // only when a district was actually threaded in, so callers that don't
-    // pass one (island buildings, the flagship's raw 0x223040, etc.) render
-    // exactly as before. MASONRY buildings skip it: their colourway IS the
-    // curated family, and jittering it would break the wall↔veneer colour match
-    // the batching split depends on.
-    if (MPAL) color = MPAL.wall;
-    else if (opts.district) color = districtWallColor(color, DKIT, ox, oz);
+    const MPAL = CW.mpal;
+    color = CW.color;
     // trim palette: darks derived from the wall colour (shared palettes →
     // shared colour buckets, so the batcher still collapses trim city-wide)
     const MULL = 0x262b31;                 // mullion-frame dark
@@ -8633,9 +8655,10 @@
         const HS = CBZ.slice;
         if (!listed && HS && HS.stream && CBZ.sliceAt) {
           lot.kind = "tower";
-          // (w, d: the shell's own footprint, so core/farcull.js stands its far box
-          // before the shell exists: a deferred block is still on the skyline)
-          lot.building = { name: "Apartments", sign: color, side, door: doorPt, storeys: storeys, h: storeys * FH, w: w, d: d, deferred: true };
+          // (w, d and the wall colour the shell will have: city/metro.js
+          // BUILT draws the block's far copy before the shell exists)
+          lot.building = { name: "Apartments", sign: color, side, door: doorPt, storeys: storeys, h: storeys * FH, w: w, d: d, deferred: true,
+            farWall: shellColorway(lot.cx, lot.cz, color, { district: dk, facade: "office" }).color };
           lot.building.home = {
             tier: tierDef.tier, id: tierDef.id, name: tierDef.name, price: 0, rent: tierDef.rent || 0,
             sqft: tierDef.sqft, beds: tierDef.beds || 1, garage: tierDef.garage, elevator: !!tierDef.elevator,

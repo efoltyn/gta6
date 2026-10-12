@@ -133,28 +133,29 @@
      re-centres cheaply). It was r * 0.3 (45 m at r 150): every metre of it is
      a ring of city built all round that nobody can see. */
   const RECENTRE_M = 30;
-  const lastP = { x: 0, z: 0, t: 0 };
   CBZ.streamBegin = function (cx, cz) {
     if (!streamWanted() || CBZ.slice) return false;
     /* what must be the real thing: core/sight.js's `detail` ring (the ground
        fog's end + 36 m). Past it, out to the airborne horizon, only content
-       with a FAR FORM may be seen (metro HLOD, farcull's lot boxes, the
-       forest's far crowns, scenery pools, which never park: core/slice.js
-       isHorizon). The ring is measured from the EYE: keepR adds how far the
+       with a FAR FORM may be seen (the metro HLOD, which carries the far
+       copy of every building, city/metro.js BUILT; the forest's far crowns,
+       scenery pools, which never park: core/slice.js isHorizon). The ring is measured from the EYE: keepR adds how far the
        camera stands off the body (a heli boom, a lifted lens). */
     const view = function () { return CBZ.sight().detail; };
     const S = {
       name: "stream", stream: true, x: cx, z: cz, r: 300,
       label: "Gang City (streamed)",
       view: view,
-      /* THE KEEP CIRCLE IS WHAT CAN BE SEEN, NO MORE. The player is never
-         more than RECENTRE (half the playable radius) from the centre (the
-         centre follows at that distance), and sees `view` (fog + 60 m) from
-         there; `lead` adds the ground a moving player covers before the next
-         tick builds it (speed x 2.5 s, up to 250 m). It was r + view: the
-         whole playable radius again on top, ~35% more city in memory at the
-         downtown spawn for ground nobody could see yet. */
-      lead: 0,
+      /* THE KEEP CIRCLE IS WHAT CAN BE SEEN, NO MORE, PLUS WHERE THE PLAYER
+         IS GOING. The player is never more than RECENTRE from the centre
+         (the centre follows at that distance) and sees `view` from there.
+         A moving player keeps a CAPSULE (core/slice.js): the circle swept
+         along (ax, az), where the body will be after 6 s of travel at its
+         speed and heading (core/sight.js sightAhead: up to 450 m on the
+         ground, 2 km in a plane), so everything ahead is built before the
+         camera gets there. `lead` is a quarter of that on every side (a
+         turn). It was r + view: the whole playable radius again on top. */
+      lead: 0, ax: 0, az: 0,
       keepR: function () { return RECENTRE_M + S.view() + S.lead + Math.min(400, CBZ.sight().eyeOff); },
     };
     CBZ.slice = S;
@@ -664,68 +665,19 @@
   const STEP_SOON_MS = 16;          // ... while something will be in sight within a few ticks
   let acc = 0;
   CBZ.streamStats = { built: 0, parked: 0, queued: 0, recentres: 0, lastJobMs: 0, maxJobMs: 0 };
-  /* ---- THE FAR CENSUS (once per build-shaping version, at load) ----------
-     A landmass builder the boot skipped (a minicity, a country town, the
-     airfield, the military island) has no buildings in memory, so nothing
-     could stand on its ground when it is seen from the air: the town then
-     assembled itself in view the moment the streamer reached it. Its far
-     form is core/farcull.js's far skyline (one box per building, the
-     building's own colour and window rhythm), and that needs each building's
-     numbers once. So on the first visit after a building-shaping change every
-     skipped builder runs ONCE behind the loading card, its buildings are
-     measured (CBZ.farSkylineHarvest: built shells, and the lot records of
-     the parcels it defers) and it is freed at once, exactly as the streamer
-     frees a far job. The measurements go to core/bakecache.js; every later
-     load reads them and runs nothing. */
-  let censusDone = false;
-  function nameHash(s) { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; }
-  function farCensus() {
-    if (censusDone) return; censusDone = true;
-    if (CFG.FAR_CENSUS === false || !CBZ.farSkylineHarvest || !CBZ.farSkylineSig) return;
-    const sig = CBZ.farSkylineSig();
-    const hit = CBZ.bakeGet ? CBZ.bakeGet("far-census", sig) : null;
-    const seen = new Set(hit && hit.h ? Array.from(hit.h) : []);
-    CBZ.farSkylineHarvest();                     // the boot's own buildings + the baked skyline
-    let ran = 0;
-    const t0 = performance.now();
-    for (const j of jobs.slice()) {
-      if (!j.builder || j.state !== "queued" || !j.fn) continue;
-      const h = nameHash(j.name || "");
-      if (seen.has(h)) continue;
-      runCaptured(j);
-      try { CBZ.farSkylineHarvest(); } catch (e) { console.error("[far census " + j.name + "]", e); }
-      freeJob(j);
-      seen.add(h); ran++;
-    }
-    CBZ.streamStats.census = { ran: ran, ms: Math.round(performance.now() - t0) };
-    // the skyline first, then the census that says it is complete
-    if (ran && CBZ.bakePut) { if (CBZ.farSkylineSave) CBZ.farSkylineSave(); CBZ.bakePut("far-census", sig, { h: Uint32Array.from(seen) }); }
-  }
-
   CBZ.streamTick = function (force) {
     const s = CBZ.slice; if (!s || !s.stream) return;
     const P = CBZ.player; if (!P || !P.pos) return;
-    if (force && !censusDone) farCensus();
     const dx = P.pos.x - s.x, dz = P.pos.z - s.z;
-    // how far a moving player gets before the next few ticks (vehicle or feet)
-    // (measured from the position between ticks: a car, a plane, a horse,
-    // a teleport all count the same way; a jump of > 400 m is a teleport)
-    // (GAME time, not wall time: a slow frame is not a slow car. Measured on
-    // wall time, a phone at 20 fps read a 30 m/s car as 12 m/s and built the
-    // road ahead too late: chunks assembling in view on the road drive.)
-    const tNow = simTime;
-    let V = 0;
-    if (lastP.t && tNow > lastP.t) {
-      const mdx = P.pos.x - lastP.x, mdz = P.pos.z - lastP.z, d = Math.sqrt(mdx * mdx + mdz * mdz);
-      if (d < 400) V = d / (tNow - lastP.t);
-    }
-    lastP.x = P.pos.x; lastP.z = P.pos.z; lastP.t = tNow;
-    const lead = Math.min(320, V * 4.5);
-    // the heading, for the build order below (what is AHEAD is built first)
-    if (lastP.hx == null) { lastP.hx = 0; lastP.hz = 0; }
-    if (lastP.px != null) { const hx = P.pos.x - lastP.px, hz = P.pos.z - lastP.pz, hl = Math.hypot(hx, hz); if (hl > 0.5) { lastP.hx = hx / hl; lastP.hz = hz / hl; } }
-    lastP.px = P.pos.x; lastP.pz = P.pos.z;
-    if (lead > s.lead + 20 || lead < s.lead - 60) s.lead = lead;     // grows at once, shrinks lazily
+    // WHERE THE PLAYER IS GOING (core/sight.js sightAhead: the body's speed
+    // and heading on GAME time, a car, a horse, a plane alike): the keep
+    // capsule reaches 6 s of travel ahead (core/slice.js tests it), a
+    // quarter of that on every side for a turn
+    const AH = CBZ.sightAhead ? CBZ.sightAhead(6) : null;
+    const V = AH ? AH.speed : 0;
+    const lead = AH ? AH.lead : 0;
+    if (lead > s.lead * 4 + 20 || lead < s.lead * 4 - 60) s.lead = lead / 4;     // grows at once, shrinks lazily
+    s.ax = AH ? AH.hx * lead : 0; s.az = AH ? AH.hz * lead : 0;
     if (force || dx * dx + dz * dz > RECENTRE_M * RECENTRE_M) {
       s.x = P.pos.x; s.z = P.pos.z;
       s.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(s.x, s.z, s.view()) : s.r;
@@ -737,7 +689,7 @@
     // nearest first, but what lies AHEAD of a moving player counts as nearer
     // (at 30 m/s the road ahead reaches view distance in seconds; the ground
     // beside and behind can wait): distance minus half its forward reach
-    const hx = V > 3 ? lastP.hx : 0, hz = V > 3 ? lastP.hz : 0;
+    const hx = V > 3 && AH ? AH.hx : 0, hz = V > 3 && AH ? AH.hz : 0;
     const keyOf = function (r) {
       const d = Math.sqrt(distTo(r, P.pos.x, P.pos.z));
       if (!hx && !hz) return d;
@@ -756,11 +708,12 @@
     // only happens inside view is a pop: counted in streamStats.urgent).
     // (in sight = from the EYE, core/sight.js; the body is where colliders matter)
     const EYE = CBZ.sight();
-    const VIEW = s.view(), V2 = VIEW * VIEW, SOON = VIEW + s.lead + 60, SOON2 = SOON * SOON;
+    const VIEW = s.view(), V2 = VIEW * VIEW, SOON = VIEW + lead + 60, SOON2 = SOON * SOON;
     let budget = STEP_MS;
     for (const j of order) {
       if (j.state === "parked") { unpark(j); continue; }
-      if (distTo(j.rect, EYE.x, EYE.z) < SOON2 || distTo(j.rect, P.pos.x, P.pos.z) < SOON2) budget = STEP_SOON_MS;
+      if (distTo(j.rect, EYE.x, EYE.z) < SOON2 || distTo(j.rect, P.pos.x, P.pos.z) < SOON2 ||
+          (lead > 20 && distTo(j.rect, AH.x, AH.z) < V2)) budget = STEP_SOON_MS;
     }
     for (const j of order) {
       if (j.state !== "queued") continue;
@@ -788,13 +741,13 @@
   }
   // registered when the first streamed city builds (the loop exists by then;
   // this file loads right after config.js, before core/)
-  let ticking = false, simTime = 0;
+  let ticking = false;
   function armTicker() {
     if (ticking || !CBZ.onUpdate) return;
     ticking = true;
     CBZ.onUpdate(0.05, function (dt) {
       if (!CBZ.slice || !CBZ.slice.stream || !CBZ.game || CBZ.game.mode !== "city") return;
-      acc += dt || 0; simTime += Math.min(0.25, dt || 0);
+      acc += dt || 0;
       if (acc < 0.1) return;           // 10 Hz: a fast car covers 4 m a tick
       acc = 0;
       CBZ.streamTick(false);

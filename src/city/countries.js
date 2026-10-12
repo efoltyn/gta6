@@ -390,19 +390,39 @@
   // is the capital (task: "registerWorkAnchor per capital"). NO causeway —
   // separate countries, reached by air/boat (comment: ferries/flights are
   // later work; Halloran Field already physically exists).
-  function buildSettlement(city, cd, s) {
-    const root = city.root; if (!root) return;
+  /* THE SETTLEMENT'S RECIPE AS buildTown TAKES IT: one answer for the build
+     below and for its far copy (CBZ.planTown, city/metro.js BUILT: a streamed
+     boot skips every town the player cannot see). A fresh rng each call. */
+  function settlementCfg(cd, s) {
     const tpl = countrySettlementTemplate(s, cd.wealthLevel);
-    if (!tpl || typeof CBZ.buildTown !== "function") return;
+    if (!tpl) return null;
     const cx = s.cx, cz = s.cz, hx = s.hx, hz = s.hz;
     const rect = { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz };
-    const rng = rngFor(cx, cz);
+    return { tpl: tpl, rect: rect, cfg: Object.assign({}, tpl, { cx: cx, cz: cz, rng: rngFor(cx, cz), region: rect }) };
+  }
+  (CBZ.farPlans = CBZ.farPlans || []).push(function () {
+    if (!CBZ.planTown) return [];
+    let out = [];
+    for (const cd of COUNTRIES) for (const st of (cd.settlements || [])) {
+      const T = settlementCfg(cd, st);
+      if (T) out = out.concat(CBZ.planTown(T.cfg));
+    }
+    return out;
+  });
+
+  function buildSettlement(city, cd, s) {
+    const root = city.root; if (!root) return;
+    const T = settlementCfg(cd, s);
+    if (!T || typeof CBZ.buildTown !== "function") return;
+    const tpl = T.tpl;
+    const cx = s.cx, cz = s.cz, hx = s.hx, hz = s.hz;
+    const rect = T.rect;
 
     const P0 = tpl.palette || {};
     addPad(root, cx, cz, hx * 2 + 16, hz * 2 + 16, P0.verge != null ? P0.verge : (P0.ground != null ? P0.ground : 0x6f7480), 0.018);
     if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
 
-    const town = CBZ.buildTown(root, Object.assign({}, tpl, { cx: cx, cz: cz, rng: rng, region: rect }));
+    const town = CBZ.buildTown(root, T.cfg);
     if (!town) return;
 
     CBZ.registerCityRegion(city, {
