@@ -1790,11 +1790,16 @@
     }
     if (pres.kind === "player") ensureHeli(); else if (HELI.rec && !HELI.rec.taken) dropHeli();
     const P = CBZ.player, pp = P && P.pos;
-    const dHome = pp ? d2(pp.x, pp.z, site.cx, site.cz) : Infinity;
+    // the parked column is staged while the estate can be seen (core/sight.js,
+    // from the EYE), not 500 m from the body: from a heli or the far end of
+    // the lawn it used to appear on the drive
+    const SG = CBZ.sight ? CBZ.sight() : null;
+    const dHome = Math.min(pp ? d2(pp.x, pp.z, site.cx, site.cz) : Infinity, SG ? d2(SG.x, SG.z, site.cx, site.cz) : Infinity);
+    const stageR = Math.max(STAGE_R, SG ? SG.reach + 60 : 0), dropR = Math.max(STAGE_DROP_R, stageR + 150);
     if (!RUN) {
       if (MC.where === "home" || MC.where === "none") {
-        if (dHome < STAGE_R) ensureStaged(MC.where === "none" && dHome > 140);
-        else if (dHome > STAGE_DROP_R && MC.where !== "none") teardown(false);
+        if (dHome < stageR) ensureStaged(MC.where === "none" && dHome > 140);
+        else if (dHome > dropR && MC.where !== "none") teardown(false);
       } else if (MC.where === "away") {
         const sc = stateCar();
         const far = !sc || !pp || d2(pp.x, pp.z, sc.pos.x, sc.pos.z) > 600;

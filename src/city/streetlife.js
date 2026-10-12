@@ -498,7 +498,7 @@
   function storeGroup() {
     if (GS && !GS.gone) return GS;
     GS = ST.group({ name: "street", kind: "street", who: "pedestrians", mode: "city", cap: BUD.rows + 260,
-      maxDraw: R + 20, own: true, moving: true, cutDt: 0.1, aff: "public", onLife: onLife,
+      maxDraw: R + 140, own: true, moving: true, cutDt: 0.1, aff: "public", onLife: onLife,
       // the store's hand-over (a round, a blast, a car near the lens): the
       // struck person becomes a real body on that call
       promote: function (r) { return promoteNow(r); } });
@@ -705,8 +705,9 @@
           const mx = (site.nx[site.ea[e]] + site.nx[site.eb[e]]) / 2, mz = (site.nz[site.ea[e]] + site.nz[site.eb[e]]) / 2;
           const d = Math.hypot(mx - px, mz - pz);
           if (d > R) continue;
-          const fall = d < 0.45 * R ? 1 : 1 - 0.65 * (d - 0.45 * R) / (0.55 * R);
-          const w = site.edens[e] * site.elen[e] * fall;
+          // (no fall-off toward R: past R the FAR STREET carries the same
+          //  density on, so a thinning ring would be a visible edge)
+          const w = site.edens[e] * site.elen[e];
           if (!(w > 0)) continue;
           if (act.e.length >= act.cum.length) { const c2 = new Float64Array(act.cum.length * 2); c2.set(act.cum); act.cum = c2; }
           tot += w;
@@ -720,7 +721,11 @@
     let alive = 1;
     if (CBZ.cityPopulation) { try { const P = CBZ.cityPopulation(); if (P && P.total > 0) alive = clamp(P.alive / P.total, 0.15, 1); } catch (e) {} }
     target = Math.round(Math.min(BUD.rows, tot) * alive);
+    // people per unit of pavement density the near street actually carries
+    // (the budget caps a dense downtown): the far street matches it
+    densK = tot > 0 ? target / tot : alive;
   }
+  let densK = 1;
   const _seen = new Set();
   function sampleEdge() {
     if (!act.n) return -1;
@@ -1960,7 +1965,8 @@
     for (const mc of L) {
       const P = mc && mc.plan, B = P && P.bounds;
       if (!P || !B || !P.blocks || !P.blocks.length) continue;
-      const near = px > B.minX - R - 200 && px < B.maxX + R + 200 && pz > B.minZ - R - 200 && pz < B.maxZ + R + 200;
+      const RR = Math.max(R, farR()) + 200;
+      const near = px > B.minX - RR && px < B.maxX + RR && pz > B.minZ - RR && pz < B.maxZ + RR;
       let k = -1;
       for (let i = 0; i < SITES.length; i++) if (SITES[i] && SITES[i].src === P) k = i;
       if (near && k < 0) { const s = siteForMetro(mc); if (s) addSite(s); }
@@ -1987,6 +1993,101 @@
   function clearAll() {
     for (let g = 0; g < gHi; g++) if (gUsed[g]) removeGroup(g);
     liveRows = 0;
+    if (FG && !FG.gone) { FG.begin(); FG.end(null); }
+  }
+
+  /* ================================================================ THE FAR STREET
+     Owner 2026-10-11: nothing may appear inside the visible range. The
+     street's people lived inside R (240 / 170 / 120 m by device) of the body
+     and the instanced draw ended at R + 20, while the fog runs 380-1400 m:
+     every long street emptied out ahead of you and filled as you walked.
+     Past R the same pavements now carry walkers out to where a person is
+     still a pixel tall (core/sight.js's reach, capped by the pixel range of
+     a 1.75 m body): the same crowd store and GPU bodies (real humans, the
+     street's own dress), the same pavement density the near street carries
+     there (edens x the near budget's own scale), walking the pavement's own
+     centreline at a walking pace. No CPU per person: positions are a pure
+     function of the clock (a ping-pong along the edge), recut twice a second,
+     and the GPU walks them on their velocity between cuts. An edge belongs to
+     the near street if its middle is inside R of the body, else to this one,
+     so no pavement is ever peopled twice. Not interactable (life off): at
+     that range they are a few pixels; the near street is where people are. */
+  const FAR_CAP = ({ desktop: 6000, tablet: 2600, phone: 1000 })[DEVICE] || 6000;
+  let FG = null, farT = 9, farLooks = null, farLookH = -1;
+  // past this a person is under a pixel, or in full fog (core/sight.js)
+  function farR() { return CBZ.sightPersonRange ? CBZ.sightPersonRange() : R; }
+  function farGroup() {
+    if (FG && !FG.gone) return FG;
+    FG = ST.group({ name: "street-far", kind: "street", who: "pedestrians", mode: "city", cap: FAR_CAP,
+      maxDraw: 6000, own: true, moving: true, life: false, cutDt: 0.5, aff: "public" });
+    return FG;
+  }
+  function h32(a, b, c) {
+    let h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263) ^ Math.imul(c | 0, 2246822519);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  const _far = [];
+  function farStreet(dt, P) {
+    farT += dt;
+    if (farT < 0.5) return;
+    farT = 0;
+    const G = farGroup(); if (!G) return;
+    const C = clips();
+    G.begin();
+    const RF = farR();
+    const SG = CBZ.sight ? CBZ.sight() : { x: P.x, z: P.z };
+    if (RF > R && densK > 0) {
+      if (!farLooks || farLookH !== Math.floor(HOUR)) {
+        farLookH = Math.floor(HOUR); farLooks = [];
+        const mix = { o: 0.35, s: 0.35, n: 0.25 };
+        for (let i = 0; i < 48; i++) farLooks.push(dress(i % 5 === 4 ? KIND.WORK : KIND.SOLO, i & 1, false, mix, HOUR));
+      }
+      _far.length = 0;
+      const RF2 = (RF + 60) * (RF + 60), R2n = R * R;
+      for (let si = 0; si < SITES.length; si++) {
+        const site = SITES[si];
+        if (!site || SG.x < site.minX - RF || SG.x > site.maxX + RF || SG.z < site.minZ - RF || SG.z > site.maxZ + RF) continue;
+        const nE = site.ea.length;
+        for (let e = 0; e < nE; e++) {
+          if (site.ek[e] !== 0 || !(site.edens[e] > 0)) continue;
+          const mx = (site.nx[site.ea[e]] + site.nx[site.eb[e]]) / 2, mz = (site.nz[site.ea[e]] + site.nz[site.eb[e]]) / 2;
+          const pdx = mx - P.x, pdz = mz - P.z;
+          if (pdx * pdx + pdz * pdz <= R2n) continue;          // the near street's
+          const edx = mx - SG.x, edz = mz - SG.z, d2 = edx * edx + edz * edz;
+          if (d2 > RF2) continue;
+          _far.push(d2, si, e);
+        }
+      }
+      // nearest pavements first, so the cap (if it bites) thins the horizon
+      const idx = [];
+      for (let i = 0; i < _far.length; i += 3) idx.push(i);
+      idx.sort(function (a, b) { return _far[a] - _far[b]; });
+      const rpm = C.rpm[C.walk] || 4.4;
+      let n = 0;
+      for (let q = 0; q < idx.length && n < FAR_CAP; q++) {
+        const si = _far[idx[q] + 1], e = _far[idx[q] + 2], site = SITES[si];
+        const L = site.elen[e];
+        const want = site.edens[e] * L * densK;
+        const cnt = Math.floor(want + h32(si * 131 + 7, e, 991));
+        const hw = site.ehw[e] || 0.85;
+        for (let j = 0; j < cnt && n < FAR_CAP; j++) {
+          const a = h32(si, e, j * 4 + 1), b = h32(si, e, j * 4 + 2), c = h32(si, e, j * 4 + 3);
+          const spd = 1.15 + b * 0.4;
+          const pos = (a * 2 * L + spd * CLOCK) % (2 * L);
+          const fwd = pos < L, u = fwd ? pos : 2 * L - pos;
+          const dir = (c < 0.5 ? 1 : -1) * (fwd ? 1 : -1);
+          const uu = c < 0.5 ? u : L - u;
+          const v = (h32(si, e, j * 4 + 4) - 0.5) * hw * 1.2;
+          const x = eX(site, e, uu, v), z = eZ(site, e, uu, v), y = edgeY(site, e, uu);
+          const vx = site.etx[e] * spd * dir, vz = site.etz[e] * spd * dir;
+          const rate = spd * rpm / TAU;
+          G.put(x, y, z, Math.atan2(vx, vz), farLooks[(j * 7 + e) % farLooks.length], C.walk, (pos * rpm / TAU) % 1, rate, 1, vx, vz);
+          n++;
+        }
+      }
+    }
+    G.end(CBZ.camera || null);
   }
   function frame(dt) {
     dt = Math.min(0.1, Math.max(0, dt || 0));
@@ -2021,7 +2122,9 @@
         const d = Math.hypot(gX[g] - P.x, gZ[g] - P.z);
         let rig = false;
         for (let k = 0; k < GM; k++) { const r = gMem[g * GM + k]; if (r >= 0 && mRig[r] >= 0) rig = true; }
-        if (d > R + 25 && !rig) { removeGroup(g); continue; }
+        // a group that walked off the near street goes home where the camera
+        // cannot see it go (core/sight.js); a far street carries the pavement on
+        if (d > R + 25 && !rig && (d > R + 120 || !(CBZ.sightCanSee && CBZ.sightCanSee(gX[g], null, gZ[g], 2)))) { removeGroup(g); continue; }
         n += gN[g]; if (gMode[g] === MODE.STAND) st += gN[g];
         if (d > farD && !rig && d > 45) { farD = d; far = g; }
       }
@@ -2031,6 +2134,7 @@
       const initial = !spawnedOnce || liveRows < target * 0.45;
       if (target > 0) { spawnTick(initial); spawnedOnce = true; }
     }
+    farStreet(dt, P);
     // the groups: near every frame, mid at 10 Hz, far at ~3 Hz
     for (let g = 0; g < gHi; g++) {
       if (!gUsed[g] || CLOCK < gNext[g]) continue;

@@ -118,118 +118,205 @@
     _lastPX = P.x; _lastPZ = P.z; _lastSpdT = now;
   }
 
-  // ---- REAL DISTANT-BUILDING LOD ----------------------------------------
-  // The old 430m fog wall hid every distant building. Merely lifting it made
-  // the renderer submit every pane, room and prop from a kilometre away
-  // (~8k calls at q3). Keep the *real* skyline cheaply instead: one box per
-  // actual lot building, instanced in a single draw. Full enterable/glass
-  // groups remain untouched nearby and are culled only once this measured
-  // proxy is already present. Nothing is invented: position, footprint and
-  // height all come from the live lot.building record.
-  let proxyArena = null, proxyMesh = null, proxyRecords = [];
+  // ---- THE FAR SKYLINE: EVERY BUILDING, BUILT OR NOT --------------------
+  // One box per real building, instanced in ONE draw, painted with that
+  // building's own wall colour and its own window rhythm (below). It is the
+  // far form of a shell, the way a metro tile has its far HLOD:
+  //   • a shell that is in the scene draws itself out to the fog's end and
+  //     its box stands in past it (the sweep's radius);
+  //   • a shell that is NOT in the scene (the streamer has not built its
+  //     job yet, parked it or freed it) is drawn by its box at every
+  //     distance, so a town seen from a helicopter is a town, never bare
+  //     ground that a town then assembles on (owner 2026-10-11: "I don't like
+  //     things spawning in view").
+  // WHERE THE RECORDS COME FROM, best first:
+  //   live   a shell that was built this session (root.userData.shells,
+  //          every cityMakeBuilding; lots for the demolished flag);
+  //   lot    a lot whose shell is deferred to a streamer job (buildings.js
+  //          streamed apartment blocks, towngen parcels): footprint, height
+  //          and sign colour are decided before the shell exists;
+  //   baked  what earlier visits measured, kept in core/bakecache.js under a
+  //          signature of the seed + every script that shapes a building, so
+  //          a skipped builder (a minicity, a country town, an estate) has
+  //          its skyline from the first frame. A first visit after such a
+  //          change measures it once at load (core/citystream.js census).
+  // A record is matched to its shell by position (4 m grid, best source
+  // wins), never by identity, so the baked box and the built shell of one
+  // building are one record.
+  let proxyArena = null, proxyMesh = null, proxyRecords = [], proxyCap = 0;
   const winU = { uWinNight: { value: 0 } };
   const proxyDummy = new THREE.Object3D();
   const proxyColor = new THREE.Color();
+  const RANK = { baked: 1, lot: 2, live: 3 };
+  const recGrid = new Map();
+  let recArena = null;
+  let scanned = { lots: -1, shells: -1, annex: -1 }, recsDirty = false, lastRebuild = 0, bakeLoaded = false, bakeDirtyAt = 0;
+  const FAR_BAKE = "far-skyline";
+  const SHAPING = /\/(buildings|towngen|minicities|countries|settlements|citytemplates|facade_[a-z]+|govcomplex|island_[a-z]+|airport[a-z_]*|biome_[a-z]+|estate[a-z_]*|metroplan|worldmap|layout|expansion|plots)\.js/;
+  let _farSig = null;
+  function farSig() {
+    if (_farSig) return _farSig;
+    let s = "farsky1";
+    if (typeof document !== "undefined" && document.getElementsByTagName) {
+      const tags = document.getElementsByTagName("script");
+      for (let i = 0; i < tags.length; i++) { const src = tags[i].getAttribute("src") || ""; if (SHAPING.test(src)) s += "|" + src.replace(/^.*\/src\//, ""); }
+    }
+    return (_farSig = CBZ.bakeSig ? CBZ.bakeSig(s) : s);
+  }
+  function gk(x, z) { return Math.round(x / 4) + "," + Math.round(z / 4); }
+  function findRec(x, z) {
+    const ix = Math.round(x / 4), iz = Math.round(z / 4);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+      const r = recGrid.get((ix + a) + "," + (iz + b));
+      if (r && Math.abs(r.x - x) < 3 && Math.abs(r.z - z) < 3) return r;
+    }
+    return null;
+  }
+  function hexOf(wc) {
+    if (wc && wc.isColor) return wc.getHex();
+    if (typeof wc === "number" && isFinite(wc)) return wc & 0xffffff;
+    if (typeof wc === "string") { try { return proxyColor.set(wc).getHex(); } catch (_) {} }
+    return 0x8a8a86;
+  }
+  // the window rhythm a far box paints: the shell's own (FO.pattern), or for
+  // a shell not cut yet the street's typical punched rhythm (a bay ~3.4 m,
+  // 45 % glazed, sill 0.9 / head 2.2 in a 3.2 m storey)
+  function winOf(P, w, d, h) {
+    const f = new Float32Array(12);
+    if (P && P.faces) {
+      const pair = function (A, B, span, o) {
+        const L = [A, B].filter(function (q) { return q && q.n > 0 && q.t1 > q.t0; });
+        if (!L.length) return;
+        let n = 0, t0 = 0, t1 = 0, fr = 0;
+        for (const q of L) { n += q.n; t0 += q.t0; t1 += q.t1; fr += q.frac * span / Math.max(0.1, q.t1 - q.t0); }
+        n /= L.length; t0 /= L.length; t1 /= L.length; fr /= L.length;
+        f[o] = Math.max(1, Math.round(n)); f[o + 1] = Math.min(0.98, fr);
+        f[8 + o] = (t0 + span / 2) / span; f[8 + o + 1] = (t1 + span / 2) / span;
+      };
+      pair(P.faces[0], P.faces[1], w, 0);
+      pair(P.faces[2], P.faces[3], d, 2);
+      let sl = 0, hd = 0, c = 0;
+      for (const q of P.faces) if (q && q.n > 0) { sl += q.sill; hd += q.head; c++; }
+      f[4] = c ? sl / c : 0; f[5] = c ? hd / c : 0; f[6] = c ? (P.fh || 3.2) : 0; f[7] = P.storeys || 1;
+      return f;
+    }
+    const fh = 3.2;
+    f[0] = Math.max(1, Math.round((w - 2) / 3.4)); f[1] = 0.45; f[2] = Math.max(1, Math.round((d - 2) / 3.4)); f[3] = 0.45;
+    f[4] = 0.9; f[5] = 2.2; f[6] = fh; f[7] = Math.max(1, Math.round(h / fh));
+    f[8] = 1 / w; f[9] = 1 - 1 / w; f[10] = 1 / d; f[11] = 1 - 1 / d;
+    return f;
+  }
+  function putRec(rec) {
+    const old = findRec(rec.x, rec.z);
+    if (old) {
+      if (RANK[old.src] > RANK[rec.src]) return false;
+      if (old.src === rec.src && old.grp === rec.grp && old.lot === rec.lot && old.h === rec.h) return false;
+      recGrid.delete(old.key);
+    }
+    rec.key = gk(rec.x, rec.z); rec.shown = false;
+    recGrid.set(rec.key, rec);
+    recsDirty = true;
+    return true;
+  }
+  function groundAt(A, x, z) {
+    try { if (A && A.groundHeightAt) { const y = A.groundHeightAt(x, z); if (isFinite(y)) return y; } } catch (e) {}
+    return 0;
+  }
+  // harvest what the arena holds now (cheap: only when a list grew)
+  function harvest(A, force) {
+    if (!A || !A.root) return;
+    // a rebuilt city is a new arena: its records start over
+    if (A !== recArena) { recArena = A; recGrid.clear(); scanned = { lots: -1, shells: -1, annex: -1 }; bakeLoaded = false; }
+    // (read once the bake has landed: a read before that would miss it)
+    if (!bakeLoaded && !(CBZ.bakeStats && !CBZ.bakeStats.ready)) {
+      bakeLoaded = true;
+      const hit = CBZ.bakeGet ? CBZ.bakeGet(FAR_BAKE, farSig()) : null;
+      const F = hit && hit.f;
+      if (F) for (let i = 0; i + 20 <= F.length; i += 20) {
+        putRec({ src: "baked", grp: null, lot: null, x: F[i], z: F[i + 1], y: F[i + 2], w: F[i + 3], d: F[i + 4], h: F[i + 5],
+          col: F[i + 6] | 0, win: F.slice(i + 7, i + 19), r: Math.hypot(F[i + 3], F[i + 4]) * 0.5 });
+      }
+    }
+    let lots = A.lots || [];
+    const annex = A.annex && Array.isArray(A.annex.lots) ? A.annex.lots : null;
+    const shells = (A.root.userData && A.root.userData.shells) || [];
+    if (!force && scanned.lots === lots.length && scanned.shells === shells.length && scanned.annex === (annex ? annex.length : 0)) return;
+    scanned = { lots: lots.length, shells: shells.length, annex: annex ? annex.length : 0 };
+    if (annex && annex.length) lots = lots.concat(annex);
+    const lotOfGroup = new Map();
+    for (let i = 0; i < lots.length; i++) {
+      const lot = lots[i], b = lot && lot.building;
+      if (!b || b.park) continue;
+      if (b.group) { lotOfGroup.set(b.group, lot); continue; }
+      // a deferred shell: its far box from the lot's own numbers
+      const w = +b.w || +lot.w, d = +b.d || +lot.d, h = +b.h || (+b.storeys > 0 ? b.storeys * 3.2 : 0);
+      if (!(w > 1 && d > 1 && h > 1)) continue;
+      const x = +lot.cx, z = +lot.cz;
+      if (!isFinite(x) || !isFinite(z)) continue;
+      putRec({ src: "lot", grp: null, lot: lot, x: x, z: z, y: groundAt(A, x, z), w: w, d: d, h: h, col: hexOf(b.wallColor || b.sign), win: winOf(null, w, d, h), r: Math.hypot(w, d) * 0.5 });
+    }
+    const add = function (b, lot) {
+      if (!b || b.park || !b.group) return;
+      const w = +b.w, d = +b.d, h = +b.h;
+      if (!(w > 1 && d > 1 && h > 1)) return;
+      const x = Number.isFinite(b.ox) ? b.ox : ((lot && +lot.cx) || 0);
+      const z = Number.isFinite(b.oz) ? b.oz : ((lot && +lot.cz) || 0);
+      // buildings stand on the ground: the arena's own height there
+      const y = Number.isFinite(b.oy) ? b.oy : groundAt(A, x, z);
+      putRec({ src: "live", grp: b.group, lot: lot || lotOfGroup.get(b.group) || null, x: x, z: z, y: y, w: w, d: d, h: h, col: hexOf(b.wallColor), win: winOf(b.facadePattern, w, d, h), r: Math.hypot(w, d) * 0.5 });
+    };
+    for (let i = 0; i < lots.length; i++) if (lots[i] && lots[i].building && lots[i].building.group) add(lots[i].building, lots[i]);
+    for (let i = 0; i < shells.length; i++) add(shells[i], null);
+  }
+  CBZ.farSkylineSig = farSig;
+  CBZ.farSkylineSave = function () { bakeDirtyAt = 0; saveBake(); };
+  CBZ.farSkylineHarvest = function () {
+    const A = CBZ.city && CBZ.city.arena;
+    harvest(A, true);
+    bakeDirtyAt = performance.now();
+    return recGrid.size;
+  };
+  function saveBake() {
+    if (!CBZ.bakePut || !recGrid.size) return;
+    const F = new Float32Array(recGrid.size * 20);
+    let i = 0;
+    recGrid.forEach(function (r) {
+      F[i] = r.x; F[i + 1] = r.z; F[i + 2] = r.y; F[i + 3] = r.w; F[i + 4] = r.d; F[i + 5] = r.h; F[i + 6] = r.col;
+      F.set(r.win, i + 7); i += 20;
+    });
+    CBZ.bakePut(FAR_BAKE, farSig(), { f: F });
+  }
 
   function disposeProxy() {
     if (proxyMesh && proxyMesh.parent) proxyMesh.parent.remove(proxyMesh);
     if (proxyMesh && proxyMesh.geometry) proxyMesh.geometry.dispose();
     if (proxyMesh && proxyMesh.material) proxyMesh.material.dispose();
-    proxyMesh = null; proxyRecords = []; proxyArena = null;
+    proxyMesh = null; proxyRecords = []; proxyArena = null; proxyCap = 0;
   }
 
-  function ensureProxy(A) {
-    if (proxyArena === A && proxyMesh) return;
-    disposeProxy();
-    if (!A || !A.root || !THREE.InstancedMesh) return;
-    // THE COMMERCE ANNEX HAD NO DISTANCE SKYLINE. `A.lots` is the mainland +
-    // every town (towngen pushes into it), but city/expansion.js keeps the
-    // island's ~20 buildings — including the 38- and 32-storey twin towers —
-    // on its OWN `annex.lots` and never merged them in. So past the cull
-    // radius the annex's whole skyline popped out and the island read as a
-    // bare green disc beside downtown while every other settlement in the
-    // world kept its proxy. Same records, same shape, one concat.
-    //
-    // AND THE CONCAT WAS THE TELL. A LOT is an ECONOMY record (Zillow, shops,
-    // jobs, map POIs), not a census of what stands in the world — so keying the
-    // distance skyline on it makes every builder that raises a shell without
-    // selling one invisible past the radius. FOUR do, and they are exactly the
-    // ones standing on empty ground where a missing skyline shows most:
-    // govcomplex.js's nine complexes, island_military.js, island_airport.js's
-    // terminal and biome_forest.js's cabins. `root.userData.shells` is
-    // city/buildings.js's own registry — every cityMakeBuilding return, pushed
-    // by the one function that mints a shell, so nobody opts in and a fifth
-    // builder cannot re-open this. LOTS GO IN FIRST so a lot-backed record wins
-    // the dedupe and keeps its `demolished` flag (demolition only ever walks
-    // city.lots); shells merely fill the gaps. Degrade-safe: no registry, no
-    // change.
-    const seen = new Set();
-    let lots = A.lots || [];
-    if (A.annex && Array.isArray(A.annex.lots) && A.annex.lots.length) lots = lots.concat(A.annex.lots);
-    const src = [];
-    for (let i = 0; i < lots.length; i++) src.push({ lot: lots[i], b: lots[i] && lots[i].building });
-    const shells = (A.root.userData && A.root.userData.shells) || null;
-    if (shells) for (let i = 0; i < shells.length; i++) src.push({ lot: null, b: shells[i] });
-    for (let i = 0; i < src.length; i++) {
-      const lot = src[i].lot, b = src[i].b;
-      if (!b || b.park || !b.group || seen.has(b.group)) continue;
-      const w = +b.w, d = +b.d, h = +b.h;
-      if (!(w > 1 && d > 1 && h > 1)) continue;
-      seen.add(b.group);
-      const x = Number.isFinite(b.ox) ? b.ox : ((lot && +lot.cx) || 0);
-      const z = Number.isFinite(b.oz) ? b.oz : ((lot && +lot.cz) || 0);
-      proxyRecords.push({ lot, grp: b.group, x, z, w, d, h, r: Math.hypot(w, d) * 0.5, shown: false, wall: b.wallColor, pat: b.facadePattern || null });
-    }
-    if (!proxyRecords.length) { proxyArena = A; return; }
-
-    const geo = new THREE.BoxGeometry(1, 1, 1);
+  let proxyMat = null;
+  function farMaterial() {
+    if (proxyMat) return proxyMat;
     // NO vertexColors: BoxGeometry has no `color` attribute, and r128 then
-    // multiplies every instance colour by the attribute's default (0,0,0):
-    // every distant downtown and town building drew BLACK. instanceColor
-    // needs no flag (USE_INSTANCING_COLOR is set by the InstancedMesh itself).
+    // multiplies every instance colour by the attribute's default (0,0,0).
+    // instanceColor needs no flag (USE_INSTANCING_COLOR is set by the mesh).
     /* THE SAME WINDOWS AT EVERY DISTANCE (owner: "near and far must look the
        same"). Every shell publishes the rhythm of the openings it actually cut
        (city/facade_openings.js FO.pattern: per face the openings per storey,
        the extent they occupy, the share of it they glaze, sill and head in
-       the storey); the proxy box paints exactly that rhythm per pixel: glass
-       where the near shell has glass, wall where it has wall, lit rooms at
-       night. Three instance attributes and a few lines of shader; one draw. */
-    const nP = proxyRecords.length;
-    const aWinA = new Float32Array(nP * 4), aWinB = new Float32Array(nP * 4), aWinC = new Float32Array(nP * 4);
-    for (let i = 0; i < nP; i++) {
-      const R = proxyRecords[i], P = R.pat;
-      if (!P || !P.faces) continue;
-      // faces 0/1 run along x (width w), faces 2/3 along z (depth d)
-      const pair = function (A, B, span, o) {
-        const L = [A, B].filter(function (f) { return f && f.n > 0 && f.t1 > f.t0; });
-        if (!L.length) return;
-        let n = 0, t0 = 0, t1 = 0, fr = 0;
-        for (const f of L) { n += f.n; t0 += f.t0; t1 += f.t1; fr += f.frac * span / Math.max(0.1, f.t1 - f.t0); }
-        n /= L.length; t0 /= L.length; t1 /= L.length; fr /= L.length;
-        aWinA[i * 4 + o] = Math.max(1, Math.round(n)); aWinA[i * 4 + o + 1] = Math.min(0.98, fr);
-        aWinC[i * 4 + o] = (t0 + span / 2) / span; aWinC[i * 4 + o + 1] = (t1 + span / 2) / span;
-      };
-      pair(P.faces[0], P.faces[1], R.w, 0);
-      pair(P.faces[2], P.faces[3], R.d, 2);
-      let sl = 0, hd = 0, c = 0;
-      for (const f of P.faces) if (f && f.n > 0) { sl += f.sill; hd += f.head; c++; }
-      aWinB[i * 4] = c ? sl / c : 0; aWinB[i * 4 + 1] = c ? hd / c : 0;
-      aWinB[i * 4 + 2] = c ? (P.fh || 3.2) : 0; aWinB[i * 4 + 3] = P.storeys || 1;
-    }
-    geo.setAttribute("aWinA", new THREE.InstancedBufferAttribute(aWinA, 4));
-    geo.setAttribute("aWinB", new THREE.InstancedBufferAttribute(aWinB, 4));
-    geo.setAttribute("aWinC", new THREE.InstancedBufferAttribute(aWinC, 4));
+       the storey); the box paints exactly that rhythm per pixel: glass where
+       the near shell has glass, wall where it has wall, lit rooms at night. */
     const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, fog: true });
     mat.onBeforeCompile = function (sh) {
       sh.uniforms.uWinNight = winU.uWinNight;
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 aWinA;\nattribute vec4 aWinB;\nattribute vec4 aWinC;\nvarying vec4 vWinA;\nvarying vec4 vWinB;\nvarying vec4 vWinC;\nvarying vec3 vWinT;")
+        .replace("#include <common>", "#include <common>\nattribute vec4 aWinA;\nattribute vec4 aWinB;\nattribute vec4 aWinC;\nattribute float aWinBase;\nvarying vec4 vWinA;\nvarying vec4 vWinB;\nvarying vec4 vWinC;\nvarying vec3 vWinT;")
         .replace("#include <project_vertex>", [
           "#include <project_vertex>",
           "vWinA = aWinA; vWinB = aWinB; vWinC = aWinC;",
-          // across the face 0..1 (x for faces along x, z for faces along z),
-          // metres above the ground, and which way the face looks
-          "vWinT = vec3( position.x + 0.5, ( instanceMatrix * vec4( position, 1.0 ) ).y, abs( normal.z ) > 0.5 ? 1.0 : ( abs( normal.x ) > 0.5 ? 2.0 : 0.0 ) );",
+          // across the face 0..1, metres above the building's own base, and
+          // which way the face looks
+          "vWinT = vec3( position.x + 0.5, ( instanceMatrix * vec4( position, 1.0 ) ).y - aWinBase, abs( normal.z ) > 0.5 ? 1.0 : ( abs( normal.x ) > 0.5 ? 2.0 : 0.0 ) );",
           "if ( vWinT.z > 1.5 ) vWinT.x = position.z + 0.5;",
         ].join("\n"));
       sh.fragmentShader = sh.fragmentShader
@@ -258,59 +345,92 @@
         ].join("\n"))
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += winEmit;");
     };
-    mat.customProgramCacheKey = function () { return "cbz-far-windows"; };
-    proxyMesh = new THREE.InstancedMesh(geo, mat, proxyRecords.length);
-    proxyMesh.name = "real-building-distance-lod";
-    proxyMesh.userData.dynamic = true;       // batch/farcull must not consume its one draw
-    proxyMesh.frustumCulled = false;          // prototype bounds do not span all instances in r128
-    proxyMesh.castShadow = false; proxyMesh.receiveShadow = false;
-    proxyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    for (let i = 0; i < proxyRecords.length; i++) {
+    mat.customProgramCacheKey = function () { return "cbz-far-windows2"; };
+    return (proxyMat = mat);
+  }
+
+  // (re)build the one instanced draw from the record set: when the set grew
+  // past the mesh's capacity or its membership changed (at most once a second)
+  function ensureProxy(A) {
+    if (!A || !A.root || !THREE.InstancedMesh) return;
+    if (proxyArena !== A) { disposeProxy(); proxyArena = A; }
+    harvest(A, false);
+    const now = performance.now();
+    if (proxyMesh && !recsDirty) return;
+    if (proxyMesh && now - lastRebuild < 1000) return;
+    lastRebuild = now; recsDirty = false;
+    if (bakeDirtyAt === 0) bakeDirtyAt = now;
+    proxyRecords = Array.from(recGrid.values());
+    const nP = proxyRecords.length;
+    if (!nP) return;
+    if (!proxyMesh || nP > proxyCap) {
+      if (proxyMesh) { if (proxyMesh.parent) proxyMesh.parent.remove(proxyMesh); proxyMesh.geometry.dispose(); }
+      proxyCap = Math.max(64, Math.ceil(nP * 1.25));
+      const geo = new THREE.BoxGeometry(1, 1, 1);
+      geo.setAttribute("aWinA", new THREE.InstancedBufferAttribute(new Float32Array(proxyCap * 4), 4));
+      geo.setAttribute("aWinB", new THREE.InstancedBufferAttribute(new Float32Array(proxyCap * 4), 4));
+      geo.setAttribute("aWinC", new THREE.InstancedBufferAttribute(new Float32Array(proxyCap * 4), 4));
+      geo.setAttribute("aWinBase", new THREE.InstancedBufferAttribute(new Float32Array(proxyCap), 1));
+      proxyMesh = new THREE.InstancedMesh(geo, farMaterial(), proxyCap);
+      proxyMesh.name = "real-building-distance-lod";
+      proxyMesh.userData.dynamic = true;       // batch/farcull must not consume its one draw
+      proxyMesh.frustumCulled = false;          // prototype bounds do not span all instances in r128
+      proxyMesh.castShadow = false; proxyMesh.receiveShadow = false;
+      proxyMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      proxyMesh.setColorAt(0, proxyColor.setHex(0x8a8a86));
+      A.root.add(proxyMesh);
+    }
+    const g = proxyMesh.geometry;
+    const wa = g.attributes.aWinA.array, wb = g.attributes.aWinB.array, wc = g.attributes.aWinC.array, base = g.attributes.aWinBase.array;
+    for (let i = 0; i < nP; i++) {
       const r = proxyRecords[i];
+      r.shown = false;
+      wa.set(r.win.subarray(0, 4), i * 4); wb.set(r.win.subarray(4, 8), i * 4); wc.set(r.win.subarray(8, 12), i * 4);
+      base[i] = r.y || 0;
       proxyDummy.position.set(r.x, -10000, r.z);
       proxyDummy.scale.set(0.001, 0.001, 0.001);
       proxyDummy.rotation.set(0, 0, 0); proxyDummy.updateMatrix();
       proxyMesh.setMatrixAt(i, proxyDummy.matrix);
       // THE BUILDING'S OWN WALL COLOUR (buildings.js `wallColor`, the final
-      // colourway the shell was painted with, read by the same Lambert
-      // pipeline), not an invented teal: one building, one colour, at every
-      // distance. A shell with no recorded colour keeps a concrete grey.
-      const wc = r.wall;
-      if (wc && wc.isColor) proxyColor.copy(wc);
-      else if (typeof wc === "number" && isFinite(wc)) proxyColor.setHex(wc);
-      else if (typeof wc === "string") { try { proxyColor.set(wc); } catch (_) { proxyColor.setHex(0x8a8a86); } }
-      else proxyColor.setHex(0x8a8a86);
-      proxyMesh.setColorAt(i, proxyColor);
+      // colourway the shell was painted with), one colour at every distance
+      proxyMesh.setColorAt(i, proxyColor.setHex(r.col));
     }
+    proxyMesh.count = nP;
+    g.attributes.aWinA.needsUpdate = g.attributes.aWinB.needsUpdate = g.attributes.aWinC.needsUpdate = g.attributes.aWinBase.needsUpdate = true;
     proxyMesh.instanceMatrix.needsUpdate = true;
     if (proxyMesh.instanceColor) proxyMesh.instanceColor.needsUpdate = true;
-    A.root.add(proxyMesh);
-    proxyArena = A;
-    CBZ.realBuildingLOD = { total: proxyRecords.length, visible: 0, drawCalls: 1, detailRadius: 0 };
+    CBZ.realBuildingLOD = { total: nP, visible: 0, drawCalls: 1, detailRadius: 0 };
   }
 
+  // is the shell itself in the scene (so it can draw itself)?
+  function inScene(grp, root) {
+    let p = grp, n = 0;
+    while (p && n++ < 12) { if (p === root) return true; p = p.parent; }
+    return false;
+  }
   function updateProxy(A, P, R) {
     ensureProxy(A);
     if (!proxyMesh || !P) return;
+    const root = A.root;
     let dirty = false, visible = 0;
-    // The proxy must ALWAYS be up before its shell goes down, so it reads the
-    // same derived band the shell sweep uses — never its own literal. A second
-    // 20 here is how the two drift apart the day one of them is retuned.
-    const enter = Math.max(0, R - hysBand()); // overlap while inset: proxy is hidden inside the full shell
+    // The box must ALWAYS be up before its shell goes down, so it reads the
+    // same derived band the shell sweep uses — never its own literal.
+    const enter = Math.max(0, R - hysBand()); // overlap while inset: the box is hidden inside the full shell
     for (let i = 0; i < proxyRecords.length; i++) {
       const r = proxyRecords[i];
       const d = Math.hypot(r.x - P.x, r.z - P.z) - r.r;
       // r.lot is null for a shell that never registered a lot (govcomplex, the
       // military island, the airport terminal, forest cabins) — and those are
       // precisely the ones demolition never touches, since it walks city.lots.
-      const show = !!R && !(r.lot && r.lot.demolished) && d > enter;
+      const own = !!(r.grp && inScene(r.grp, root));
+      const show = !(r.lot && r.lot.demolished) && (!own || (!!R && d > enter));
       if (show) visible++;
       if (show === r.shown) continue;
       r.shown = show; dirty = true;
       if (show) {
         // A slight inset makes the transition overlap depth-safe: while the
-        // detailed shell still exists, it fully covers this proxy.
-        proxyDummy.position.set(r.x, r.h * 0.49, r.z);
+        // detailed shell still exists, it fully covers this box.
+        proxyDummy.position.set(r.x, (r.y || 0) + r.h * 0.49, r.z);
         proxyDummy.scale.set(r.w * 0.92, r.h * 0.98, r.d * 0.92);
       } else {
         proxyDummy.position.set(r.x, -10000, r.z);
@@ -319,9 +439,11 @@
       proxyDummy.rotation.set(0, 0, 0); proxyDummy.updateMatrix();
       proxyMesh.setMatrixAt(i, proxyDummy.matrix);
     }
-    proxyMesh.visible = !!R;
+    proxyMesh.visible = visible > 0;
     winU.uWinNight.value = CBZ.nightAmount == null ? 0 : Math.max(0, Math.min(1, CBZ.nightAmount));
     if (dirty) proxyMesh.instanceMatrix.needsUpdate = true;
+    // the measured skyline goes to the bake a few seconds after it changed
+    if (bakeDirtyAt && performance.now() - bakeDirtyAt > 5000) { bakeDirtyAt = 0; try { saveBake(); } catch (e) {} }
     CBZ.realBuildingLOD = { total: proxyRecords.length, visible, drawCalls: visible ? 1 : 0, detailRadius: R };
   }
 

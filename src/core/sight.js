@@ -111,6 +111,35 @@
   CBZ.sightSees = function (x, z, r) { CBZ.sight(); return eyeDist(x, z, r) < S.reach; };
   CBZ.sightNeedsDetail = function (x, z, r) { CBZ.sight(); return eyeDist(x, z, r) < S.detail; };
 
+  /* ---- how far a thing of `size` metres is still a pixel ----------------
+     size x (drawing-buffer height / (2 tan(fov/2))). A person (1.75 m) is a
+     pixel at ~1.6-2.4 km; past min(that, reach) nothing about them can be
+     seen, so a crowd or a street may end there and nowhere nearer. */
+  CBZ.sightPixelRange = function (size) {
+    let k = 1000;
+    const cam = CBZ.camera, cv = CBZ.renderer && CBZ.renderer.domElement;
+    if (cam && cam.isPerspectiveCamera && cv && cv.height > 0) k = cv.height / (2 * Math.tan((cam.fov || 60) * Math.PI / 360));
+    return size * k;
+  };
+  CBZ.sightPersonRange = function () { CBZ.sight(); return Math.min(S.reach, CBZ.sightPixelRange(1.75)); };
+
+  /* ---- could the camera see a thing there right now? --------------------
+     For anything that is about to appear, vanish or be moved (a recycled
+     car, a despawned group): inside the eye's reach AND on a padded screen
+     (the frame plus a margin for the turn the next half second makes).
+     Occlusion is not asked: a wall the camera might clear next frame is no
+     licence to pop something behind it. y defaults to 1 m over the ground
+     at the eye's height. */
+  const _sv = THREE ? new THREE.Vector3() : null;
+  CBZ.sightCanSee = function (x, y, z, r) {
+    CBZ.sight();
+    if (eyeDist(x, z, r || 0) > S.reach) return false;
+    const cam = CBZ.camera;
+    if (!cam || !_sv || !cam.projectionMatrix || !cam.matrixWorldInverse) return true;
+    _sv.set(x, y == null ? (CBZ.player && CBZ.player.pos ? CBZ.player.pos.y + 1 : 1) : y, z).project(cam);
+    return _sv.z >= -1.05 && _sv.z <= 1.05 && Math.abs(_sv.x) <= 1.3 && Math.abs(_sv.y) <= 1.4;
+  };
+
   /* ---- the per-instance near/far hand-over ------------------------------
      A far form and a near form of the same scatter both cover a place; the
      vertex shader draws each instance from exactly one of them: near inside

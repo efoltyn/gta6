@@ -8558,7 +8558,9 @@
         const HS = CBZ.slice;
         if (!listed && HS && HS.stream && CBZ.sliceAt) {
           lot.kind = "tower";
-          lot.building = { name: "Apartments", sign: color, side, door: doorPt, storeys: storeys, h: storeys * FH, deferred: true };
+          // (w, d: the shell's own footprint, so core/farcull.js stands its far box
+          // before the shell exists: a deferred block is still on the skyline)
+          lot.building = { name: "Apartments", sign: color, side, door: doorPt, storeys: storeys, h: storeys * FH, w: w, d: d, deferred: true };
           lot.building.home = {
             tier: tierDef.tier, id: tierDef.id, name: tierDef.name, price: 0, rent: tierDef.rent || 0,
             sqft: tierDef.sqft, beds: tierDef.beds || 1, garage: tierDef.garage, elevator: !!tierDef.elevator,

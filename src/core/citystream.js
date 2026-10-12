@@ -664,9 +664,48 @@
   const STEP_SOON_MS = 16;          // ... while something will be in sight within a few ticks
   let acc = 0;
   CBZ.streamStats = { built: 0, parked: 0, queued: 0, recentres: 0, lastJobMs: 0, maxJobMs: 0 };
+  /* ---- THE FAR CENSUS (once per build-shaping version, at load) ----------
+     A landmass builder the boot skipped (a minicity, a country town, the
+     airfield, the military island) has no buildings in memory, so nothing
+     could stand on its ground when it is seen from the air: the town then
+     assembled itself in view the moment the streamer reached it. Its far
+     form is core/farcull.js's far skyline (one box per building, the
+     building's own colour and window rhythm), and that needs each building's
+     numbers once. So on the first visit after a building-shaping change every
+     skipped builder runs ONCE behind the loading card, its buildings are
+     measured (CBZ.farSkylineHarvest: built shells, and the lot records of
+     the parcels it defers) and it is freed at once, exactly as the streamer
+     frees a far job. The measurements go to core/bakecache.js; every later
+     load reads them and runs nothing. */
+  let censusDone = false;
+  function nameHash(s) { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; }
+  function farCensus() {
+    if (censusDone) return; censusDone = true;
+    if (CFG.FAR_CENSUS === false || !CBZ.farSkylineHarvest || !CBZ.farSkylineSig) return;
+    const sig = CBZ.farSkylineSig();
+    const hit = CBZ.bakeGet ? CBZ.bakeGet("far-census", sig) : null;
+    const seen = new Set(hit && hit.h ? Array.from(hit.h) : []);
+    CBZ.farSkylineHarvest();                     // the boot's own buildings + the baked skyline
+    let ran = 0;
+    const t0 = performance.now();
+    for (const j of jobs.slice()) {
+      if (!j.builder || j.state !== "queued" || !j.fn) continue;
+      const h = nameHash(j.name || "");
+      if (seen.has(h)) continue;
+      runCaptured(j);
+      try { CBZ.farSkylineHarvest(); } catch (e) { console.error("[far census " + j.name + "]", e); }
+      freeJob(j);
+      seen.add(h); ran++;
+    }
+    CBZ.streamStats.census = { ran: ran, ms: Math.round(performance.now() - t0) };
+    // the skyline first, then the census that says it is complete
+    if (ran && CBZ.bakePut) { if (CBZ.farSkylineSave) CBZ.farSkylineSave(); CBZ.bakePut("far-census", sig, { h: Uint32Array.from(seen) }); }
+  }
+
   CBZ.streamTick = function (force) {
     const s = CBZ.slice; if (!s || !s.stream) return;
     const P = CBZ.player; if (!P || !P.pos) return;
+    if (force && !censusDone) farCensus();
     const dx = P.pos.x - s.x, dz = P.pos.z - s.z;
     // how far a moving player gets before the next few ticks (vehicle or feet)
     // (measured from the position between ticks: a car, a plane, a horse,

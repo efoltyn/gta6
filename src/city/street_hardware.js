@@ -492,10 +492,23 @@
   // part (draw calls), small enough that the frustum still drops most tris.
   const CELL = 550;
   // DISTANCE GATE (invisible-distance only): every set registers here and a
-  // 2 Hz tick hides any cell whose nearest point is beyond its set's maxDist:
-  // hardware 700 m (a lamp post there is a few pixels), lenses 600, pools
-  // 420. resetSets() at the start of each world build.
-  const HW_DIST = 700;
+  // 2 Hz tick hides any cell whose nearest point is past where it can be seen.
+  // No private radii (owner 2026-10-11: nothing may appear in view): a set
+  // states its SIZE, { px: metres }, and core/sight.js says how far a thing
+  // that size is still a pixel (and inside the eye's fog); "sight" = to the
+  // fog. A lamp post's head (0.6 m) is the default. resetSets() at the start
+  // of each world build.
+  const HW_DIST = { px: 0.6 };
+  function gateOf(set) {
+    const m = set.maxDist;
+    if (!m) return 0;
+    if (typeof m === "number") return m;
+    if (!CBZ.sight) return 700;
+    const reach = CBZ.sight().reach;
+    if (m === "sight") return reach;
+    if (m.px > 0) return Math.min(reach, CBZ.sightPixelRange ? CBZ.sightPixelRange(m.px) : 700);
+    return reach;
+  }
   let live = [], tickOn = false;
   function resetSets() { live = []; }
   function register(set) {
@@ -620,11 +633,10 @@
   function cullSets(sets, cam) {
     for (let s = 0; s < sets.length; s++) {
       const set = sets[s];
+      const md = gateOf(set);
       for (let i = 0; i < set.meshes.length; i++) {
         const m = set.meshes[i], c = m._cellC;
         let vis = set.enabled;
-        // maxDist "sight": no private radius, the eye's own fog (core/sight.js)
-        const md = set.maxDist === "sight" ? (CBZ.sight ? CBZ.sight().reach : HW_DIST) : set.maxDist;
         if (vis && md && c && cam) vis = Math.hypot(c.x - cam.x, c.z - cam.z) - c.r < md;
         if (m.visible !== vis) m.visible = vis;
       }
@@ -733,7 +745,7 @@
     const set = chunked("light-pools", poolGeometry(), mat, items.map(function (it) {
       return { x: it.x, y: it.y, z: it.z, ry: it.ry, sx: it.sx, sy: 1, sz: it.sz };
     }), {
-      cast: false, receive: false, order: 3, maxDist: 420,
+      cast: false, receive: false, order: 3, maxDist: "sight",     // a pool of light reads from far at night
       // batch-exempt (batch.js would drop polygonOffset)
       userData: { roadPaint: true },
       perMesh: function (im, count) {

@@ -56,7 +56,17 @@
   const toCore = toCity;
   const yawToCity = (y) => { let a = y + Math.PI; if (a > Math.PI) a -= Math.PI * 2; return a; };
 
-  const BUILD_R = 1300, SHOW_R = 2600;
+  // THE BOWL STANDS WHEREVER IT CAN BE SEEN (core/sight.js, owner 2026-10-11:
+  // nothing may build in view). It was built 1300 m from the BODY and shown
+  // to 2600, so from the air (a 4-11 km fog) the stadium assembled itself in
+  // front of the camera. Now: built and shown while any of it is inside the
+  // eye's reach (BOWL_R is the venue's own half-extent with its car parks),
+  // the old numbers only as a floor on the ground.
+  const BOWL_R = 420;
+  function eyeD() { const S = CBZ.sight ? CBZ.sight() : null; return S ? Math.hypot(S.x - VX, S.z - VZ) : Infinity; }
+  function buildR() { return Math.max(1300, (CBZ.sight ? CBZ.sight().reach : 0) + BOWL_R + 150); }
+  function showR() { return Math.max(2600, (CBZ.sight ? CBZ.sight().reach : 0) + BOWL_R); }
+  const SHOW_R = 2600;          // (the floor; the race file reads it)
   const QUALITY = ("ontouchstart" in window) || navigator.maxTouchPoints > 0 ? "low" : "high";
 
   // ---- the causeway leaves the annex (expansion.js reads annexPorts) -------
@@ -454,12 +464,12 @@
   CBZ.onUpdate(55.5, function (dt) {
     if (!g || g.mode !== "city" || !STAD.root || !RC) return;
     const P = CBZ.player; if (!P || !P.pos) return;
-    const d = Math.hypot(P.pos.x - VX, P.pos.z - VZ);
+    const d = Math.min(Math.hypot(P.pos.x - VX, P.pos.z - VZ), eyeD());
     if (STAD.built !== STAD.root) {
-      if (d > BUILD_R) return;
+      if (d > buildR()) return;
       buildStadium();
     }
-    const show = d < SHOW_R;
+    const show = d < showR();
     STAD.shown = show;
     if (STAD.group.visible !== show) STAD.group.visible = show;
     if (!show) return;

@@ -2943,7 +2943,7 @@
       HWSET.lum = { set: HW.chunked("mast-luminaire", lumGeo, M, lumItems, { cast: true }).addTo(root), geo: lumGeo, mat: M, items: lumItems };
       const lenses = HW.chunked("lamp-lens", HW.lampLens(), headLampM, lampBulbSpots.map(function (sp) {
         return { x: sp.x + Math.sin(sp.ang) * LO.bulbZ, y: sp.y0 + LO.bellyY - 0.004, z: sp.z + Math.cos(sp.ang) * LO.bulbZ, ry: sp.ang };
-      }), { cast: false, receive: false, maxDist: 600 }).addTo(root);
+      }), { cast: false, receive: false, maxDist: { px: 0.5 } }).addTo(root);    // the lens's own size (core/sight.js)
       lampPools.bulb = lenses;
     }
     if (HW) {
@@ -3714,7 +3714,7 @@
       for (const kind in ITEMS) {
         const Kd = KIT[kind];
         if (!Kd || !ITEMS[kind].length) continue;
-        KERB_SETS[kind] = HW.chunked("kerb-" + kind, Kd.whole, VC, ITEMS[kind], { cast: kind !== "grate", maxDist: 320 }).addTo(root);
+        KERB_SETS[kind] = HW.chunked("kerb-" + kind, Kd.whole, VC, ITEMS[kind], { cast: kind !== "grate", maxDist: { px: 0.9 } }).addTo(root);   // a bin/hydrant/bench is still a pixel at ~1 km (it was cut at 320 m)
         KERB_STATS.drawSets += KERB_SETS[kind].meshes.length;
       }
       // street trees stand to the eye's fog ("sight", core/sight.js): a 420 m gate

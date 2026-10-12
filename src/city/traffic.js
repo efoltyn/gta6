@@ -331,7 +331,13 @@
     return Math.max(6, Math.min(56, Math.round(scaled * 0.6 * qmul * hourDensityMul())));
   }
   const NEAR2 = 80 * 80;     // "near the camera" radius²
-  const FAR2 = 150 * 150;    // "way off, fair to recycle" radius² (past the cull)
+  const FAR2 = 150 * 150;    // "way off" radius² (past the per-car draw; pools draw it beyond)
+  // A CAR THE CAMERA CAN SEE IS NEVER MOVED (owner 2026-10-11: nothing may
+  // vanish or appear in view). 150 m is not out of sight: the instanced car
+  // pools draw traffic out to the fog, so a recycled car used to blink out
+  // mid-avenue. core/sight.js answers "could the camera see it" (inside the
+  // eye's reach and on a padded screen).
+  function seen(c) { return !!(CBZ.sightCanSee && CBZ.sightCanSee(c.pos.x, (c.pos.y || 0) + 1, c.pos.z, 3)); }
   function countNear() {
     const cam = CBZ.camera.position;
     let near = 0;
@@ -358,7 +364,7 @@
       // in progress, not spare rolling stock.
       if (c._occRigged || (c.occ && c.occ.jacked)) continue;
       const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z, d = dx * dx + dz * dz;
-      if (d > pd) { pd = d; pick = c; }
+      if (d > pd && !seen(c)) { pd = d; pick = c; }
     }
     if (!pick) return false;
     // ADOPTED: roadrules.js's CBZ.roadPick + CBZ.roadPlace. The annulus, the
@@ -426,7 +432,7 @@
     const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z;
     if (dx * dx + dz * dz < FAR2) return false;
     const P = CBZ.player.pos, px = c.pos.x - P.x, pz = c.pos.z - P.z;
-    return px * px + pz * pz >= FAR2;
+    return px * px + pz * pz >= FAR2 && !seen(c);
   }
   let _reclaimScan = 0;
   function reclaimOne() {
@@ -1495,14 +1501,14 @@
           e.tz = rr.vertical ? rr.z + e.roadDir * rr.len / 2 : rr.z;
           steerEmergency(e, dt, A);
           const cam = CBZ.camera.position;
-          const far = Math.hypot(e.pos.x - cam.x, e.pos.z - cam.z) > 175;
+          // gone only where the camera cannot see it (core/sight.js), not at 175 m
+          const far = Math.hypot(e.pos.x - cam.x, e.pos.z - cam.z) > 175 && !(CBZ.sightCanSee && CBZ.sightCanSee(e.pos.x, (e.pos.y || 0) + 1.5, e.pos.z, 5));
           const pa = rr.vertical ? e.pos.z - rr.z : e.pos.x - rr.x;
           const atEnd = pa * e.roadDir > rr.len / 2 - 8;
           if (far || ((atEnd || e.stuckT > 3 || e.t > 20) && !(CBZ.roadInView && CBZ.roadInView(e.pos.x, e.pos.z)))) {
             if (e.target) e.target._emgClaimed = false; despawnEmergency(e); emg.splice(i, 1); continue;
           }
           emgCollide(e, dt);
-          e.grp.visible = !far;
           continue;
         }
         // exit along the dominant axis, but down a real road line (the router
@@ -1525,10 +1531,8 @@
 
       emgCollide(e, dt);   // solid to the player, on foot or behind the wheel
 
-      // distance cull (cheap LOD: hide the body when far off camera)
-      const cam = CBZ.camera.position;
-      const dd = (e.pos.x - cam.x) * (e.pos.x - cam.x) + (e.pos.z - cam.z) * (e.pos.z - cam.z);
-      e.grp.visible = dd < 170 * 170;
+      // drawn out to the eye's fog (core/sight.js), not hidden at 170 m
+      e.grp.visible = !CBZ.sightSees || CBZ.sightSees(e.pos.x, e.pos.z, 6);
     }
   });
 })();
