@@ -94,6 +94,7 @@ change it only in coordination.
 | `src/units/kit/vehicle.js` | vehicle drive / turret / armour / crew helpers | vehicle agents (coordinate) |
 | `src/units/kit/hull.js` | `CBZ.hullKit`: wheeled-vehicle bodies (Humvee, M35): geometry buckets, nation/ground camouflage + flag decals, tyres, the M2, crew figures, particle FX, and `WheeledRig` (Ackermann steer, per-wheel suspension, sprung body, turret + scan, recoil, dust, exhaust, damage, wreck) implementing `mark / fire / damage / muzzleWorld / aimTurret`, plus `hullKit.animate` for a def's `animate`. Load it through the manifest row's `needs` | vehicle agents (coordinate) |
 | `src/units/kit/moves.js` | `CBZ.unitMoves`: what a possessed animal does on ATTACK (the `moves` hook) | player control (species files override) |
+| `src/units/kit/drone.js` | `CBZ.droneKit`: the drone warheads BY ID (`WARHEAD`: PG-7VL, OG-7V, Switchblade 600 / 300, Shahed-136; move it whole into the shared weapons table when that lands), Switchblade cradles on other hulls (`CARRIERS`), weak spots per hull (`WEAK`), the drone palette, prop blades, the folding-wing Switchblade family, the operator's goggles / radio / ground station | drones |
 
 ### The sim and the page (NPC War's host layer today)
 | file | what | owner |
@@ -104,6 +105,7 @@ change it only in coordination.
 | `src/battle/men.js` | `makeMan`, uniforms; `kitUp` dresses each man through `CBZ.combatKit` (§9a) | humans / armour |
 | `src/battle/beasts.js` | `makeBeast`, `animateBeast`, `beastFight`: the animal unit, routed through `CBZ.unitKit` | core (species agents edit their species file instead) |
 | `src/battle/vehicles.js` | `makeVehicle`, the vehicle sim, crew mount/dismount | vehicles / armour |
+| `src/battle/drones.js` | THE DRONES (`drive: "drone"`): stowed kit, who flies it (a carrier's cell, a man, or off the map), the operator teams (goggles, out of their squads, back in a hole no hull can see), launch / transit / loiter / attack / terminal, the weak-zone strike, shot down and the crash, `droneSpotted` / `droneTrackK` (counter-drone), `DRONES.audit` | drones |
 | `src/battle/damage.js` | `hurtMan`: the one damage funnel (asks `CBZ.armour.resolve`, §9a), reachability | armour / weapons |
 | `src/battle/death.js` | a beast dies, a man dies, the sinking dead | physics / humans |
 | `src/battle/physics.js` | the grid, body separation (split by mass), pinned pairs, momentum (`bodyKg`, `contactImpulse`, `addKnock`, `stepKnock`), bodies in the air (`flingBody`, `stepTossed`), the blast (`blastBodies`), hull strikes (`hullForStrike`), the flow field (`NAV`), COM (§9c) | physics |
@@ -440,6 +442,21 @@ vehicle agents redraw):
 | b52 | B-52H (redrawn: skinned flexing wing) | its own file | pilot, copilot, radar nav, nav, EWO | 27 x Mk-82 stick (bay), 12 x GBU-31 JDAM (HSABs) | 3/2/2/2 (unarmoured, hp 1800) |
 | b2_spirit | B-2A Spirit | its own file (redrawn: real planform, hinged surfaces, two bays with rotary launchers) | pilot, commander | 8 GBU-31 BLU-109 (armour), 8 GBU-31 Mk 84 | 3/2/2/2 (unarmoured) |
 | a400m | A400M (airdrops 116) | milAir cargo | 3 | none | 0 |
+| fpv_drone | FPV strike drone (7-inch quad) | its own file (drone kit) | a pilot on the ground (goggles) | PG-7VL 93 mm HEAT or OG-7V frag (every third) | 0 (hp 6) |
+| switchblade_600 | Switchblade 600 (tube-launched loiterer) | drone kit family | a gunner with the ground station, or a carrier's crew | Javelin-class tandem HEAT, top attack | 1 (hp 14) |
+| switchblade_300 | Switchblade 300 Block 20 | drone kit family | as the 600 | frag (men, soft vehicles) | 0 (hp 6) |
+| shahed_136 | Shahed-136 / Geran-2 (one-way attack) | its own file | none (GNSS) | ~50 kg HE-frag, dive | 1 (hp 45) |
+| shahed_launcher | KamAZ-43118 five-cell Shahed rack truck | its own file (hull kit) | driver, commander | launches its Shaheds (`def.launches`) | 2/1/1/1 |
+
+**Drones** (`src/battle/drones.js`). A drone unit is kit until it flies (out of `men`). Its numbers
+are `def.drone` (cls fpv / loiter / owa, frame quad / wing, launch hand / tube / rail, link, range,
+endurance, cruise, dash, accel or turn, heights, perOp, prep, warheads by id, carriers), its AI
+`def.tactics` (priorities by warhead, weak zones, operator back distance). Counter-drone lives in the
+existing paths: `vehicleCanTarget` / `vehPickTarget` (seen or heard inside `stats.detect`, half that
+for a crew under armour; an incoming drone first; jets ignore them), `vehWeaponFits` (no SAM below
+`w.minRcs` (0.05 m2) of `stats.rcs`, no ATGM on a small drone), `vehFight` (1-3 s to acquire one;
+a coax only to the main gun's elevation), `fireShot` (`droneTrackK`: the sight picture on a small
+fast drone). JAMMING is not modelled (no EW unit exists); `droneLink()` is where it would answer.
 
 **The belly.** A charge under a hull (`imp.cause` `"ied"` / `"mine"`, threat class `ied`, 160 mm
 of blast loading) lands on the zone `"belly"`, and so does any ground blast inside the footprint

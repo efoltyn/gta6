@@ -369,7 +369,7 @@ function armsTrigger(m, tgt, dist, sdt) {
        on a nearly empty magazine, not beyond the gun's area range. */
     const age = simT - A.seenT;
     ARMS.why.unseen++;
-    if (age > 6 || (g.cls !== "lmg" && g.cls !== "rifle")) return;
+    if (age > 6 || (g.cls !== "lmg" && g.cls !== "rifle") || tgt.drone) return;   // nobody suppresses a drone
     if (g.cls === "rifle" && m.mag < m.magSize * 0.45) return;
     const sd = Math.hypot(A.seenX - m.pos.x, A.seenZ - m.pos.z);
     if (sd > g.area || sd < 8) return;
@@ -548,6 +548,9 @@ function fireShot(m, tgt, r) {
     speed: m.vehicle ? (m.speed || 0) * 0.3 : (m.speed || 0), settle: m.vehicle ? 1 : settle,
     supp: Math.min(1.2, m.supp || 0), heat: A.heat });
   if (mode === "area") sig += 5;
+  // a drone is a small thing moving fast across the sky: keeping a sight on it
+  // is the hard part (src/battle/drones.js droneTrackK)
+  if (tgt && tgt.drone) sig *= droneTrackK(m, tgt);
   const climb = A.heat;
   A.heat += (g.recoil || 2) * (m.vehicle ? 0.5 : m.stance === "prone" ? (g.bipod ? 0.45 : 0.6) : m.stance === "crouch" ? 0.8 : 1);
   A.lastT = simT;

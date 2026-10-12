@@ -28,6 +28,8 @@
   }
   // the wild dogs share one rig: src/units/kit/canid.js on the animal kit
   const CANID = ["units/kit/gait.js", "units/kit/quadrig.js", "units/kit/loft.js", "units/kit/canid.js"];
+  // every drone draws on the hull kit's geometry and the drone kit
+  const DRONE = ["units/kit/hull.js", "units/kit/drone.js"];
   CBZ.UNIT_MANIFEST = {
     men: { kind: "men", name: "man", plural: "men", group: menGroup },
 
@@ -111,6 +113,12 @@
     b52: V("B-52", "B-52s", "air", ["city/mil_air.js"]),
     b2_spirit: V("B-2 Spirit", "B-2 Spirits", "air", []),            // draws itself (units/vehicles/b2_spirit.js)
     a400m: V("A400M", "A400Ms", "air", []),                         // draws itself (units/vehicles/a400m.js)
+    // ---- drones (src/battle/drones.js flies them; units/kit/drone.js: warheads, carriers, weak spots, the Switchblade family)
+    fpv_drone: V("FPV strike drone", "FPV strike drones", "air", DRONE),
+    switchblade_600: V("Switchblade 600", "Switchblade 600s", "air", DRONE),
+    switchblade_300: V("Switchblade 300", "Switchblade 300s", "air", DRONE),
+    shahed_136: V("Shahed-136", "Shahed-136s", "air", DRONE),
+    shahed_launcher: V("Shahed-136 launcher truck", "Shahed-136 launcher trucks", "ground", ["units/kit/hull.js"]),
   };
   // a vehicle row: `domain` ground|air, `needs` engine files its build uses.
   // A group of vehicles is a platoon (4 tanks) / troop / flight: left to the
