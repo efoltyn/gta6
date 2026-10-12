@@ -3218,17 +3218,21 @@
       //    actor lingering in the gap, so this is safe to tighten.
       if (playerNear) doorPalm(dr);
       else if (dr._palmL) dr._palmL = null;
+      // (IN PLACE: colliderRemove/colliderAdd edit only the door's grid
+      // cells. This used to splice the 140k-box array and mark the whole
+      // broadphase dirty, so every door that swung near you cost a full
+      // grid rebuild — tens of ms — on the next collide: a hitch per door.)
       if (dr.colIn && dr.t > 0.30) {
-        const idx = CBZ.colliders.indexOf(dr.col); if (idx >= 0) CBZ.colliders.splice(idx, 1);
-        dr.colIn = false; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        CBZ.colliderRemove(dr.col);
+        dr.colIn = false;
       } else if (!dr.colIn && dr.t < 0.25) {
         // leaf is shut. If someone is still standing in the gap, hold it open a
         // beat longer rather than trapping them; otherwise re-solidify the wall.
         if (doorOccupied(dr, true)) {
           dr.open = true; dr.hold = Math.max(dr.hold, 0.4);
         } else {
-          if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliders.push(dr.col);
-          dr.colIn = true; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+          if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliderAdd(dr.col);
+          dr.colIn = true;
         }
       }
     }

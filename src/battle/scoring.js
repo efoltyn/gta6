@@ -79,7 +79,6 @@ function warEvent(kind, d) {
   }
 }
 function endWar(won) {
-  if (FRONT) { frontEnd(won); return; }
   over = true;
   winner = won;
   const h = el("endT");
@@ -131,7 +130,6 @@ CBZ.npcwar.onBoot(function () {
   // (no ?auto) dropped you straight back on the setup card. A rematch is the
   // same war, now, with your next call riding on it.
   el("endAgain").addEventListener("click", function () {
-    if (FRONT) { frontPost("end"); return; }
     // NEXT ROUND carries the score; a decided series (or a best of 1) is a
     // REMATCH: the same war from nothing
     const S = SERIES_AFTER && !SERIES_AFTER.over ? SERIES_AFTER : null;

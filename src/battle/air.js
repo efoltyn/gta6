@@ -29,17 +29,12 @@ function densestCellOf(team) {
 function spawnPlanes() {
   ["red", "blue"].forEach(function (team) {
     const opt = team === "red" ? SET.redS : SET.blueS;
-    // the President's airstrikes on the front that were already in the air
-    // when it went in (city/frontline.js: `queued`) are over it at the start
-    const q = FRONT && FRONT[team] ? (FRONT[team].queued | 0) : 0;
-    for (let k = 0; k < q; k++) spawnBomber(team, k + 1, false, 2600);
     if (opt === "none") return;
     const count = opt === "bomber2" ? 2 : 1;
     for (let i = 0; i < count; i++) spawnBomber(team, i, opt === "nuke" && i === 0, 0);
   });
 }
-/* ONE BOMBER, for either side, whenever: the opening's air support, and
-   the General's AIRSTRIKE mid-battle (callAir), through the same racetrack. */
+/* ONE BOMBER, for either side: the opening's air support, on its racetrack. */
 function spawnBomber(team, i, isNuke, near) {
     {
       const side = team === "red" ? -1 : 1;
@@ -51,35 +46,20 @@ function spawnBomber(team, i, isNuke, near) {
       // thrown at 165 m/s travels): the spawn distance buys the seconds
       // that put each plane's FIRST window after its own opening gate
       const dist = isNuke ? Math.max(2800, 165 * (AIR.nukeAt + 6)) : (near || 3400);
-      const sx = MAP.cx + side * dist, sz = MAP.cz + (300 + i * 340) * side;
-      const flown = CBZ.studio.fly("bomber", {
-        groundAt: MAP.groundAt,
+      const sx = HOST.cx + side * dist, sz = HOST.cz + (300 + i * 340) * side;
+      const flown = STUDIO.fly("bomber", {
+        groundAt: HOST.groundAt,
         at: { x: sx, y: 330 + i * 45, z: sz },
-        heading: Math.atan2(sx - MAP.cx, sz - MAP.cz), speed: 165,
+        heading: Math.atan2(sx - HOST.cx, sz - HOST.cz), speed: 165,
       });
       if (!flown || !flown.af) return;
       planes.push({
         team: team, af: flown.af, group: flown.group,
         mode: "in", outPt: null, runPt: null,
         nuke: isNuke, egress: false, dropCool: 1 + i * 2,
-        trail: CBZ.studio.trail({ length: 60, color: TEAMS[team].color, opacity: 0.35, minStep: 24 }),
+        trail: STUDIO.trail({ length: 60, color: TEAMS[team].color, opacity: 0.35, minStep: 24 }),
       });
     }
-}
-/* THE GENERAL'S AIRSTRIKE (the plane button at the front): one of his
-   nation's sorties, flown at the densest knot of the enemy line now. The
-   count is what the nation can fly and pay for (city/frontline.js), and
-   every one used is billed to its treasury when the result goes home. */
-const AIRSTRIKE = { left: 0, used: 0 };
-function callAir() {
-  if (!AIR.on || AIRSTRIKE.left <= 0 || over || !started) return false;
-  AIRSTRIKE.left--; AIRSTRIKE.used++;
-  airAim.red = densestCellOf("blue");
-  spawnBomber("red", 3 + AIRSTRIKE.used, false, 2600);
-  const p = planes[planes.length - 1];
-  if (p) p.dropCool = 0;
-  paintFrontCtl();
-  return true;
 }
 function dropStick(p) {
   // five bombs a pass on a long cooldown: air PUNCTUATES an infantry fight.
@@ -92,8 +72,10 @@ function dropStick(p) {
     getState: function () { return p.af ? { pos: p.af.pos, vel: p.af.vel } : null;
     },
     onDetonate: function (b) {
-      if (b && b.impact && MAP.id !== "arena") {
-        CBZ.studio.collapseAt(b.impact, { radius: b.radius, power: b.power });
+      if (b && b.impact && HOST.id !== "arena") {
+        // the stick is Mk 82s (ordnance.js "iron" names the row): the
+        // building it lands on answers to that charge (systems/strike.js)
+        STUDIO.collapseAt(b.impact, { mun: "mk82" });
       }
     },
   });
@@ -111,11 +93,11 @@ function releaseNuke(p) {
         f.style.transition = "none"; f.style.opacity = "1";
         setTimeout(function () { f.style.transition = "opacity 2.6s"; f.style.opacity = "0"; }, 90);
       }
-      if (b && b.impact && MAP.id !== "arena") {
+      if (b && b.impact && HOST.id !== "arena") {
         for (let r = 0; r < 9; r++) {
           const a = (r / 9) * Math.PI * 2, d = b.radius * 0.5;
-          CBZ.studio.collapseAt({ x: b.impact.x + Math.cos(a) * d, y: b.impact.y, z: b.impact.z + Math.sin(a) * d },
-            { radius: d * 0.5, power: 3 });
+          STUDIO.collapseAt({ x: b.impact.x + Math.cos(a) * d, y: b.impact.y, z: b.impact.z + Math.sin(a) * d },
+            { mun: "b61" });
         }
       }
     },
@@ -148,7 +130,7 @@ function stepPlanes(sdt) {
                 predict gate spends the precision; the line spends none. */
     let hx, hz, phase = p.egress ? "egress" : p.mode;
     if (phase === "egress") {
-      hx = MAP.cx + (p.team === "red" ? -4200 : 4200); hz = MAP.cz;
+      hx = HOST.cx + (p.team === "red" ? -4200 : 4200); hz = HOST.cz;
     } else if (phase === "out") {
       hx = p.outPt.x; hz = p.outPt.z;
       if (distAim > 1900) { p.mode = "turn"; phase = "turn"; }
@@ -187,9 +169,9 @@ function stepPlanes(sdt) {
     if (p.group) p.af.applyTo(p.group);
     if (p.trail) p.trail.push(p.af.pos);
     if (p.egress) {
-      if (Math.hypot(p.af.pos.x - MAP.cx, p.af.pos.z - MAP.cz) > 3200) {
+      if (Math.hypot(p.af.pos.x - HOST.cx, p.af.pos.z - HOST.cz) > 3200) {
         if (p.trail) p.trail.dispose();
-        if (p.group) CBZ.studio.drop(p.group);
+        if (p.group) STUDIO.drop(p.group);
         if (p.af.dispose) p.af.dispose();
         planes.splice(i, 1);
       }

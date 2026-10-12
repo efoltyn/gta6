@@ -88,7 +88,7 @@ function resetArmies() {
   ARMY.red = armyRec(); ARMY.blue = armyRec();
   for (let i = 0; i < fledMen.length; i++) {
     const g = fledMen[i].group;
-    if (g) { try { CBZ.studio.drop(g); } catch (e) {} }
+    if (g) { try { STUDIO.drop(g); } catch (e) {} }
   }
   fledMen.length = 0;
   moraleT = -1;
@@ -262,7 +262,7 @@ function routCheck(m, dt) {
     }
     // FLED: far enough that this war is no longer his (or he has outrun
     // it for most of a minute)
-    if (fd > FLEE_GAPS * (MAP.gap || 150) || m.routT > 45) {
+    if (fd > FLEE_GAPS * (HOST.gap || 150) || m.routT > 45) {
       m.fled = true;
       return true;
     }
@@ -325,7 +325,7 @@ function seesStanding(m, o) {
 
 /* ============================================================ HULL DOWN
    THE GROUND IS COVER (ported from the warlord fork's hullDown). On a map
-   whose sand takes part in the sight lines (MAP.terrainLos), a man under
+   whose sand takes part in the sight lines (HOST.terrainLos), a man under
    fire looks for a reverse-slope position: somewhere a CROUCHED man is
    hidden from the threat by the crest but a STANDING one can see over it.
    Per bearing (fanned away from the threat) march out until the crouched
@@ -346,7 +346,7 @@ let hullTokens = 20, hullTokT = 0, hullQ = 0, hullHit = 0;
 // nb: how many of the bearings to try (a squad's post search asks the three
 // nearest straight back; a rattled man's own search asks all seven)
 function hullDown(x, z, tx, tz, nb) {
-  const gA = MAP.groundAt;
+  const gA = HOST.groundAt;
   const ty = gA(tx, tz) + HULL_STAND_EYE;
   const away = Math.atan2(x - tx, z - tz);
   const dThreat = Math.hypot(x - tx, z - tz);

@@ -3476,9 +3476,9 @@
     if (!g || g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen) return;
     const craft = flyingB2();
     if (!craft) {
-      // A DEAD KEY MUST SAY SO. Fort Brandt parks a "Heavy Bomber"
-      // (island_military.js:1218) that looks exactly like the aircraft these
-      // keys belong to and has no bay at all — same for the gunship, the
+      // A DEAD KEY MUST SAY SO. Fort Brandt parks a B-52H (the NPC War unit,
+      // island_military.js) that looks like the aircraft these keys belong to
+      // and is not flown on this bomb-bay path — same for the gunship, the
       // airliner and the Raptor. Pressing [B] in one of them was silent, which
       // reads as a broken control rather than the wrong airframe. We do NOT
       // preventDefault here: the key still belongs to whoever else wants it.

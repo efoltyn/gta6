@@ -16,15 +16,44 @@
               slope of the nearest crest when there is one, fire from it,
               and only go forward to run down a broken enemy (or when the
               sweep, 3:1, says the fight is over)
-   Who holds: at THE FRONT, the nation whose ground it is (city/frontline.js
-   says), and the General can change his own side's order. On the war room,
-   the smaller army of MEN digs in when the other side outnumbers it half
-   again — the few hold, the many come — and equal armies still meet. */
+   Who holds: on the war room, the smaller army of MEN digs in when the
+   other side outnumbers it half again — the few hold, the many come — and
+   equal armies still meet. A host that fields forces (Gang City) gives each
+   force its own order (below). */
 const ORDER = { red: "advance", blue: "advance" };
+/* A FORCE'S ORDER. A host that fields forces (Gang City's CBZ.army) gives
+   every unit of a force one shared order object, m.order = { type, at }:
+     attack    march on `at` (not the enemy's centre) and fight what is there
+     hold      stay on the homes the host laid out round `at`
+     move      go to those homes (they fight back from them, they do not chase)
+     withdraw  the same, to a rally point away from the fight
+   A unit with no order follows its side's ORDER, as the war room always did. */
 function holding(m) {
-  if (m.beast || m.you || ORDER[m.team] !== "hold" || m.hunt) return false;
+  if (m.beast || m.you || m.hunt) return false;
+  const o = m.order;
+  if (o ? o.type === "attack" : ORDER[m.team] !== "hold") return false;
+  if (o && o.type !== "hold") return true;     // sent somewhere: it goes, broken enemy or not
   const F = ARMY[m.team === "red" ? "blue" : "red"];
   return !(F && F.broken);                 // a broken enemy is run down
+}
+// where a unit marches when nobody is in front of it
+function objectiveOf(m) {
+  const o = m && m.order;
+  if (o && o.type === "attack" && o.at) return o.at;
+  return teamCOM[m.team === "red" ? "blue" : "red"];
+}
+// an attack still far from its objective marches on it, not down the flow
+// field to whichever enemy happens to be nearest
+function farObjective(m) {
+  const o = m.order;
+  return !!(o && o.type === "attack" && o.at && Math.hypot(o.at.x - m.pos.x, o.at.z - m.pos.z) > 120);
+}
+// a squad's word for the squad brain (core/tactics.js asks the adapter)
+function squadOrderOf(t, S) {
+  const m = S && S.men && S.men[0];
+  const o = m && m.order;
+  if (!o) return ORDER[t];
+  return o.type === "attack" ? "advance" : "hold";
 }
 let comAt = -1;
 function updateCOM() {

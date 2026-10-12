@@ -70,12 +70,12 @@
      surge         CBZ.cityPoliceForceAdd + CBZ.CITY.policeForce, temporary,
                    treasury-funded, and it DECAYS on the daily tick with a
                    tracked restore path.
-     martial       Real troopers off CBZ.cityMilitaryPersonnel (every one
-                   carries organization === "military", so CBZ.factions.of()
-                   answers "army" for free) walked out of Fort Brandt and
-                   posted at a real point with ped.guard. World.js's own
-                   clampToCity treats mainland+regions as ONE walkable
-                   union, so a soldier ordered into the city stays there.
+     martial       A real force of the seat country's army (city/army.js,
+                   the battle core's soldiers and JLTVs: the one soldier
+                   system) drives out of Fort Brandt's gate and down the
+                   roads to the point, holds it, and drives home when the
+                   order lapses. It shoots whoever the city has made its
+                   enemy (three stars) and nobody else.
                    The order also DEBITS real matériel:
                    CBZ.polwar.militaryOf(country).soldiers/.readiness, which
                    feed polwar's combatPower(), its aggressor test, AND
@@ -644,21 +644,30 @@
     }
     return null;
   }
-  function garrison() {
-    const out = [];
-    const T = CBZ.cityMilitaryPersonnel;
-    if (!Array.isArray(T)) return out;
-    for (let i = 0; i < T.length; i++) {
-      const p = T[i];
-      if (!p || p.dead || p._govDeployed || !p.pos) continue;
-      if (p.organization !== "military") continue;
-      if (CBZ.factions && CBZ.factions.of) {
-        const ids = CBZ.factions.of(p);
-        if (ids && ids.length && ids.indexOf("army") < 0) continue;
-      }
-      out.push(p);
+  /* THE COLUMN (city/army.js): a rifle squad of the seat country's army on
+     two JLTVs, out of Fort Brandt's gate and down the roads to the point,
+     the same force any war or coup fields. It fights whoever the city has
+     made its enemy (three stars) and stands its ground otherwise. */
+  const MARTIAL_UNITS = ["jltv*2"];
+  function martialForce(h, pt) {
+    const A = CBZ.army, B = CBZ._militaryBase;
+    if (!A || !A.spawnForce || !B) return null;
+    const c = seatCountry(h);
+    const from = B.gate || B.center;
+    const F = A.spawnForce({
+      side: (c && c.id) || "republic", nation: (c && c.id) || "republic", hostile: "wanted", stars: 3,
+      units: MARTIAL_UNITS.concat(["men*" + MARTIAL_BODIES]), training: "elite", gun: "carbine",
+      at: { x: from.x, z: from.z }, face: pt, name: "Fort Brandt garrison",
+      order: { type: "route", route: [pt] },
+    });
+    // at the point: they stand there, facing the street they came down
+    if (F && A.on) {
+      const off = A.on(function (e) {
+        if (e.force !== F.id) return;
+        if (e.type === "route-done") { A.orderForce(F, { type: "hold", at: pt }); off(); }
+      });
     }
-    return out;
+    return F;
   }
   // A REFUSED ORDER IS THE POINT. It does not just print a line: the
   // garrison decays (mil.readiness), and readiness under READINESS_T with a
@@ -747,8 +756,9 @@
     // NOT OFFERED without a reason the simulation can name.
     if (!reason) return { ok: false, why: "No war, no fracture, no unrest. The garrison has no reason to leave the wire." };
     if (!CBZ._militaryBase) return { ok: false, why: "Fort Brandt is not on the map." };
-    const troops = garrison();
-    if (troops.length < MARTIAL_BODIES) return { ok: false, why: "Fort Brandt cannot field " + MARTIAL_BODIES + " right now." };
+    if (!CBZ.army) return { ok: false, why: "The army is not answering." };
+    const milNow = militaryOf(h);
+    if (milNow && isFinite(milNow.soldiers) && milNow.soldiers < MARTIAL_BODIES) return { ok: false, why: "Fort Brandt cannot field " + MARTIAL_BODIES + " right now." };
     if ((h.rec.treasury || 0) < MARTIAL_COST) return { ok: false, why: "Moving the garrison costs " + money(MARTIAL_COST) + "." };
     for (let i = 0; i < S.deployments.length; i++) if (S.deployments[i].kind === "martial") return { ok: false, why: "The garrison is already deployed." };
 
@@ -766,19 +776,9 @@
     if (!inJurisdiction(h, pt.x, pt.z)) return { ok: false, why: "That point is outside " + h.rec.name + "." };
 
     payFromTreasury(h.rec, MARTIAL_COST);
-    const bodies = [];
-    for (let i = 0; i < MARTIAL_BODIES && i < troops.length; i++) {
-      const p = troops[i];
-      const ang = (i / MARTIAL_BODIES) * Math.PI * 2;
-      p._govHome = { x: p.pos.x, z: p.pos.z, guard: p.guard || null };
-      p._govDeployed = true;
-      p.pos.x = pt.x + Math.cos(ang) * 4.5;
-      p.pos.z = pt.z + Math.sin(ang) * 4.5;
-      p.guard = { x: pt.x, z: pt.z };
-      p.path = null; p.state = "idle"; p.speed = 0;
-      if (p.target && p.target.set) p.target.set(p.pos.x, 0, p.pos.z);
-      bodies.push(p);
-    }
+    const force = martialForce(h, pt);
+    if (!force) return { ok: false, why: "The army is not answering." };
+    const n = MARTIAL_BODIES;
     // REAL MATERIEL, DEBITED. polwar's combatPower() and aggressor test and
     // civilwar's coupEligible() all read these; both are refunded on
     // stand-down, and the held amounts ride the save so a reload refunds
@@ -791,21 +791,21 @@
         mil.readiness -= heldR;
       }
       if (isFinite(mil.soldiers)) {
-        heldS = Math.min(bodies.length, Math.max(0, mil.soldiers));
+        heldS = Math.min(n, Math.max(0, mil.soldiers));
         mil.soldiers -= heldS;
       }
     }
     S.readinessHeld = (S.readinessHeld || 0) + heldR;
     S.soldiersOut = (S.soldiersOut || 0) + heldS;
-    S.deployments.push({ kind: "martial", at: pt, day: day(), until: day() + MARTIAL_DAYS, bodies: bodies, n: bodies.length });
+    S.deployments.push({ kind: "martial", at: pt, day: day(), until: day() + MARTIAL_DAYS, force: force, n: n });
 
     shock(h.id, -11);
     addTyranny(18, "put soldiers on the street");
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("TROOPS DEPLOYED · " + String(h.rec.name).toUpperCase());
+    if (CBZ.city && CBZ.city.big) CBZ.city.big("TROOPS DEPLOYED IN " + String(h.rec.name).toUpperCase());
     news(h.title + " orders the Fort Brandt garrison into " + h.rec.name + " over " + reason + ". "
-      + bodies.length + " soldiers on the street for " + MARTIAL_DAYS + " days.");
-    orders(generalName(), "Column moving. " + bodies.length + " under arms, " + MARTIAL_DAYS + " days, and then they come home whatever you say.", 2);
-    return { ok: true, why: "", bodies: bodies.length, reason: reason };
+      + n + " soldiers on the street for " + MARTIAL_DAYS + " days.");
+    orders(generalName(), "Column moving. " + n + " under arms, " + MARTIAL_DAYS + " days, and then they come home whatever you say.", 2);
+    return { ok: true, why: "", bodies: n, reason: reason };
   }
 
   function deploy(kind, at) {
@@ -832,7 +832,7 @@
   //  this is where each one is walked. Traced by hand, one at a time:
   //    CBZ.CITY.policeForce  -> S.origPoliceForce            (restorePolice)
   //    police.js forcePool   -> S.forceAdded, subtracted     (restorePolice)
-  //    trooper pos/guard     -> ped._govHome                 (sendHome)
+  //    the column            -> d.force, driven home, disbanded (sendHome)
   //    mil.readiness         -> S.readinessHeld, added back  (refundMil)
   //    mil.soldiers          -> S.soldiersOut, added back    (refundMil)
   //    curfew                -> S.curfewUntil = 0
@@ -840,22 +840,18 @@
   //  tyranny (all really spent) and rec.taxRate (a policy the successor
   //  inherits — regimes.js writes that same field the same way).
   // ============================================================
+  // the column drives back to the gate and stands down there (city/army.js)
   function sendHome(d) {
-    const bodies = d.bodies || [];
-    for (let i = 0; i < bodies.length; i++) {
-      const p = bodies[i];
-      if (!p) continue;
-      const home = p._govHome;
-      p._govDeployed = false;
-      if (!p.dead && home && p.pos) {
-        p.pos.x = home.x; p.pos.z = home.z;
-        p.guard = home.guard || null;
-        p.path = null; p.state = "idle"; p.speed = 0;
-        if (p.target && p.target.set) p.target.set(home.x, 0, home.z);
-      }
-      p._govHome = null;
-    }
-    d.bodies = [];
+    const A = CBZ.army, F = d.force, B = CBZ._militaryBase;
+    d.force = null;
+    if (!A || !F) return;
+    const gate = B && (B.gate || B.center);
+    if (!gate) { A.disband(F); return; }
+    A.orderForce(F, { type: "route", route: [{ x: gate.x, z: gate.z }] });
+    const off = A.on(function (e) {
+      if (e.force !== F.id || e.type !== "route-done") return;
+      off(); A.disband(F);
+    });
   }
   function refundMil() {
     const S = st();
@@ -1110,7 +1106,7 @@
     pardon: ["CBZ.cityWantedReset / CBZ.cityReduceWanted -> g.wanted/g.heat", "approvalShock", "tyranny"],
     guard: ["CBZ.protection detail off_<id>.memberCount -> real spawned bodies", "rec.treasury", "militia.js escalation threshold"],
     surge: ["police.js forcePool via cityPoliceForceAdd", "rec.treasury", "approvalShock"],
-    martial: ["CBZ.cityMilitaryPersonnel ped.pos/ped.guard", "CBZ.polwar militaryOf().soldiers", "CBZ.polwar militaryOf().readiness -> combatPower + civilwar coupEligible", "rec.treasury", "approvalShock"],
+    martial: ["CBZ.army force (city/army.js): a squad on two JLTVs, Fort Brandt gate to the point and back", "CBZ.polwar militaryOf().soldiers", "CBZ.polwar militaryOf().readiness -> combatPower + civilwar coupEligible", "rec.treasury", "approvalShock"],
     refusal: ["CBZ.polwar militaryOf().readiness -> civilwar.js coupEligible", "approvalShock", "tyranny"],
     tyranny: ["legitimacy() gate on every deploy order", "daily approvalShock drag"],
   };
