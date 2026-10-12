@@ -6,28 +6,34 @@
    Default is REMOVE; what survives earns its place by being needed at that
    moment, and it leaves again when it is not.
 
+   2026-10-11, THE PURGE WENT TOO FAR (owner: "a lot of the HUD is hidden.
+   It's just dumb."). The purge left a player who could not tell how hurt he
+   was, how many stars he had or how much money he carried without waiting
+   for something to change. The instruments came back; the prose did not.
+
    WHAT IS ON SCREEN, AND WHEN
-     • MINIMAP (#cRadar), bottom-left, 132px. Heading-up; streets, turf wash,
-       your car, crew, threats, cops, waypoint, mission, chopper. No labels,
-       no POI pictograms, no star row. The heat ring on its rim is the only
-       wanted read it carries.
-     • CASH (#cMoney + floating delta), top-right, INVISIBLE at rest. It
-       appears when the number changes, holds ~3 s, fades.
-     • WANTED: no stars, no pill, no screen wash. The minimap's heat ring and
-       the world: sirens, cruisers, the chopper, the roadblock.
-     • HEALTH: no bar, no hearts, no full red wash (owner, 2026-09-30: "the
-       red, what does that even mean?"). Your body tells you: a flinch on
-       every hit, and near the end a light red rim, grey colour, a heartbeat, loud
-       breath and a stagger (systems/eyes.js fed by systems/vitals.js).
+     • MINIMAP (#cRadar), bottom-left, 132px (touch: top-left). Heading-up;
+       streets, turf wash, your car, crew, threats, cops, waypoint, mission,
+       chopper. No labels, no POI pictograms. The heat ring is still there.
+     • HEALTH + ARMOR ride the minimap's RIM (drawn in drawRadar, so they go
+       wherever the radar goes: desktop corner, the touch column, the
+       campaign's radar restore): health is the left half-ring, green
+       through amber to red; armor the right half-ring, blue, only with a
+       vest on. The body still tells you too (systems/eyes.js).
+     • CASH (#cMoney + floating delta), top-right, ALWAYS on (dim at rest,
+       lit for ~3 s when it changes).
+     • WANTED STARS (#cStarsWrap, under the cash): five stars while you are
+       wanted, hidden at 0; they blink while the cops have lost sight of you.
      • AMMO is not this file: the one gauge every game draws (systems/fpsmode.js
        #ammo), only while a gun is in your hands.
      • THE BAR is not this file: systems/inventory.js's #hotbar, the prison's
        inventory, is the one inventory of every game (2026-09-30).
-     • NEXT STEP (#cObj): shows when a NEW objective line arrives, ~6 s, fades.
+     • NEXT STEP (#cObj): lit when a NEW objective line arrives, then stays
+       on screen dimmed for as long as that step is the live one.
      • RETICLE (#cCross): only with a gun out on foot when fpsmode is not
        already drawing one.
 
-   GONE: the stars pill, crew count, level line, population pill, turf pay,
+   GONE: crew count, level line, population pill, turf pay,
    kill feed, event feed, gang badge, relationship chip, melee posture bars,
    hearts/food/armor/stamina rows, the carried-loot row, the fallback
    speedometer (carcluster.js owns the car), the job distance pill (the
@@ -41,7 +47,7 @@
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  let root, hudEl, cashEl, deltaEl, objEl, radar, crossEl;
+  let root, hudEl, cashEl, deltaEl, objEl, radar, crossEl, starsEl;
   let dirty = true;
 
 
@@ -56,6 +62,14 @@
         // every surviving element rests INVISIBLE and is lifted by .on
         "#cHud .fade{opacity:0;transition:opacity .8s ease;pointer-events:none}" +
         "#cHud .fade.on{opacity:.9;transition:opacity .15s ease}" +
+        // instruments that stay up: dim at rest, lit (.on) when they change
+        "#cHud .rest{opacity:.62;transition:opacity .8s ease;pointer-events:none}" +
+        "#cHud .rest.on{opacity:.95;transition:opacity .15s ease}" +
+        "#cStarsWrap{margin-top:2px;font-size:22px;letter-spacing:1px;line-height:1;white-space:nowrap;display:none}" +
+        "#cStarsWrap b{color:rgba(232,236,242,.28);text-shadow:0 1px 3px rgba(0,0,0,.8);font-weight:700}" +
+        "#cStarsWrap b.on{color:#ffd451}" +
+        "#cStarsWrap.lost b.on{animation:cStarBlink .9s steps(2,start) infinite}" +
+        "@keyframes cStarBlink{to{color:rgba(232,236,242,.28)}}" +
         "#cMoney{font-size:26px;font-weight:700;color:var(--money);text-shadow:0 2px 0 #1f5a2a,0 0 12px rgba(0,0,0,.45)}" +
         "#cDelta{position:absolute;right:0;top:-18px;font-size:16px;font-weight:700;opacity:0;pointer-events:none;white-space:nowrap}" +
         "@keyframes cDeltaUp{0%{opacity:0;transform:translateY(6px)}18%{opacity:1}100%{opacity:0;transform:translateY(-14px)}}" +
@@ -63,7 +77,7 @@
         // bottom-centre: the live ammo count, riding just above the one bar
         // (systems/inventory.js #hotbar, css/inventory.css: bottom 16 + cells)
         "#cRadar{position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);width:132px;height:132px;border-radius:50%;opacity:.9;box-shadow:0 4px 14px rgba(0,0,0,.45)}" +
-        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}}";
+        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}#cStarsWrap{font-size:18px}}";
       document.head.appendChild(st);
     }
     root = document.createElement("div");
@@ -73,9 +87,10 @@
       "<div id='cHud' style='position:absolute;inset:0'>" +
       // #cTopRight keeps its name: css/mobile.css + css/campaign.css key off it
       "<div id='cTopRight' style='position:absolute;top:var(--hud-pad-t);right:var(--hud-pad-r);text-align:right'>" +
-      "  <div class='fade' id='cCash' style='position:relative;display:inline-block'><div id='cMoney'>$0</div><div id='cDelta'></div></div>" +
+      "  <div class='rest' id='cCash' style='position:relative;display:inline-block'><div id='cMoney'>$0</div><div id='cDelta'></div></div>" +
+      "  <div id='cStarsWrap'><b>&#9733;</b><b>&#9733;</b><b>&#9733;</b><b>&#9733;</b><b>&#9733;</b></div>" +
       "</div>" +
-      "<div id='cObj' class='fade'></div>" +
+      "<div id='cObj' class='fade'></div>" +   // + .rest while a step is live
       "<canvas id='cRadar' width='190' height='190'></canvas>" +
       "<div id='cCross' style='position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-4px 0 0 -4px;border:2px solid rgba(232,236,242,.85);border-radius:50%;display:none'></div>" +
       "</div>";
@@ -85,6 +100,7 @@
     objEl = root.querySelector("#cObj");
     radar = root.querySelector("#cRadar");
     crossEl = root.querySelector("#cCross");
+    starsEl = root.querySelector("#cStarsWrap");
   }
 
   // ---- reveal-then-fade: an element lifts to .on and drops back after holdMs
@@ -462,6 +478,7 @@
     // brass ring, translated into the HUD's cyan-not-sepia design language)
     ctx.strokeStyle = wanted >= 4 ? "rgba(255,70,55,.75)" : "rgba(10,13,18,.85)"; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.arc(cx, cy, W / 2 - 2, 0, 6.28); ctx.stroke();
+    rimGauges(ctx, cx, cy, W / 2 - 3, P);
     ctx.strokeStyle = wanted >= 4 ? "rgba(255,120,100,.5)" : "rgba(125,231,255,.22)"; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(cx, cy, W / 2 - 4.5, 0, 6.28); ctx.stroke();
     // NORTH pip — rotates with the heading-up map so it always points true north.
@@ -487,6 +504,28 @@
     ctx.beginPath(); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx + 5.5, cy + 6); ctx.lineTo(cx, cy + 2.5); ctx.lineTo(cx - 5.5, cy + 6); ctx.closePath();
     ctx.fill(); ctx.stroke();
     ctx.restore();
+  }
+  // ---- HEALTH + ARMOR on the radar rim. Left half-ring = health (from the
+  //      bottom up), right half-ring = armor (only with a vest on). A dark
+  //      track under each so an empty bar still reads as a bar. ----
+  function rimArc(ctx, cx, cy, r, from, to, frac, col) {
+    ctx.lineWidth = 7; ctx.lineCap = "butt";
+    ctx.strokeStyle = "rgba(6,8,12,.8)";
+    ctx.beginPath(); ctx.arc(cx, cy, r, from, to, from > to); ctx.stroke();
+    if (frac <= 0) return;
+    ctx.strokeStyle = col; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(cx, cy, r, from, from + (to - from) * Math.min(1, frac), from > to); ctx.stroke();
+  }
+  function rimGauges(ctx, cx, cy, r, P) {
+    if (!P) return;
+    const GAP = 0.2;                                     // rad of air at top and bottom
+    const hpMax = P.maxHp || 200;
+    const hp = Math.max(0, Math.min(1, (P.hp == null ? hpMax : P.hp) / hpMax));
+    const hcol = hp > 0.5 ? "#5ad17a" : hp > 0.25 ? "#ffb347" : "#ff4b3e";
+    // canvas angles: PI/2 = bottom, 3PI/2 = top; health runs bottom -> top up the LEFT side
+    rimArc(ctx, cx, cy, r, Math.PI / 2 + GAP, Math.PI * 1.5 - GAP, P.dead ? 0 : hp, hcol);
+    const aMax = P._armorMax || 0;
+    if (aMax > 0) rimArc(ctx, cx, cy, r, Math.PI / 2 - GAP, -Math.PI / 2 + GAP, Math.max(0, Math.min(1, (P._armor || 0) / aMax)), "#5bb8ff");
   }
   // little top-down helicopter glyph with spinning rotor — reads as "air threat"
   function drawChopper(ctx, x, y, now) {
@@ -525,10 +564,11 @@
     if (sig === objSig) return;
     const first = objSig === null;
     objSig = sig;
-    if (!title) { objEl.classList.remove("on"); return; }
+    if (!title) { objEl.classList.remove("on"); objEl.classList.remove("rest"); return; }
+    objEl.classList.add("rest");
     objEl.textContent = title;
     objEl.style.color = L.flash ? "var(--money,#7ed957)" : "";
-    reveal(objEl, first ? 7000 : 6000);
+    reveal(objEl, first ? 7000 : 6000);   // lit, then dims to .rest (stays up)
   }
 
   // ---- AMMO — the one number the city keeps under the gun. The things you
@@ -538,8 +578,8 @@
   //      fallback (CBZ.weaponSlotsHTML). Deleted 2026-09-30. What is left is
   //      the live mag / reserve of the gun in your hands, read from the same
   //      engine store fpsmode's setAmmoHud() reads. -----------------------------
-  // ---- cash: invisible at rest; a change shows the total + a floating delta
-  //      for ~3 s, then it fades. ----
+  // ---- cash: always on, dim at rest; a change lights it with a floating
+  //      delta for ~3 s. ----
   let lastCash = null;
   function showMoney() {
     const c = g.cash || 0;
@@ -556,6 +596,24 @@
     lastCash = c;
   }
 
+  // ---- wanted stars: up while wanted, blinking while the law has lost you
+  //      (city/wanted.js holds _wantedPeak one above the live stars then) ----
+  let starSig = "";
+  function showStars() {
+    if (!starsEl) return;
+    let w = g.wanted | 0;
+    try { if (CBZ.cityStars) w = CBZ.cityStars() | 0; } catch (e) {}
+    w = Math.max(0, Math.min(5, w));
+    const lost = w > 0 && (g._wantedPeak | 0) > w;
+    const sig = w + (lost ? "l" : "");
+    if (sig === starSig) return;
+    starSig = sig;
+    starsEl.style.display = w > 0 ? "block" : "none";
+    starsEl.classList.toggle("lost", lost);
+    const b = starsEl.children;
+    for (let i = 0; i < b.length; i++) b[i].classList.toggle("on", i < w);
+  }
+
   CBZ.onAlways(46, function () {
     build();
     const show = g.mode === "city";
@@ -567,6 +625,7 @@
     if (!show) return;
     const P = CBZ.player;
     showMoney();
+    showStars();
     if (dirty) dirty = false;
     // radar + objective poll, throttled (quality slider: tier0 7Hz, Best 14Hz)
     radarAcc += 1 / 60;

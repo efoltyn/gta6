@@ -95,6 +95,7 @@ function frame(dt) {
       physPre(sdt);                         // how fast every body was going (src/battle/physics.js)
       tacticsStep(sdt);                    // the squads decide; grenades fly (ai/squad.js)
       for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
+      if (DRONES.list.length) droneTick(sdt);   // drones in packs, tubes and racks (src/battle/drones.js)
       if (MASS.on) MASS.step(sdt);          // the MID and FAR tiers (src/battle/mass.js)
       // the struck slide on their own momentum; hulls drive over what lies in their path
       if (PHYS.knock.length) stepKnock(sdt);
@@ -232,7 +233,7 @@ function frame(dt) {
       }
     }
     if (m._weaponProp) {
-      const showGun = d2 < 130 * 130;
+      const showGun = d2 < 130 * 130 && !m.flying;    // a drone pilot's rifle is slung while he flies
       if (m._weaponProp.visible !== showGun) m._weaponProp.visible = showGun;
     }
     // the sling's free runs to the rifle's swivels (entities/combatkit.js), near the lens only
