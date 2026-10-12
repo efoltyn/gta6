@@ -518,6 +518,7 @@ function measure(ch, labels, tag, pose, opts) {
     const fr = frameOf(m, J);
     const ws = worldScale(m);
     if (m.userData.hairFollow && CBZ.human && CBZ.human.hairFollow) CBZ.human.hairFollow(m);
+    if (m.userData.jacketFollow && CBZ.human && CBZ.human.jacketFollow) CBZ.human.jacketFollow(m);
     const S0 = samplesOf(g, SAMPLE_M / ws);
     const S = morphed(m, S0);
     g.computeBoundingBox();

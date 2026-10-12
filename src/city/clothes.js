@@ -3708,6 +3708,7 @@
       if (spec) { jm.userData.torsoPart = spec; jm.geometry = CBZ.humanLimbGeometry(jm, xr > 0 ? fpPainter("jacket", null, xr) : limbPainter("jacket", null)); }
       else if (jf) jm.geometry = clothGeom("jacket", jf.dims);
       jm.material = m;
+      if (CBZ.humanJacketFollow) CBZ.humanJacketFollow(jm);   // the shoulder moves with the arm (character.js)
       jm.visible = true;
     } else if (ch._jacketMesh) ch._jacketMesh.visible = false;
     // a c.badge (character.js) sits on the OUTERMOST layer: on the shell when

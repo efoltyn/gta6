@@ -112,16 +112,14 @@
   CBZ.sightNeedsDetail = function (x, z, r) { CBZ.sight(); return eyeDist(x, z, r) < S.detail; };
 
   /* ---- how far a thing of `size` metres is still a pixel ----------------
-     size x (drawing-buffer height / (2 tan(fov/2))). A person (1.75 m) is a
-     pixel at ~1.6-2.4 km; past min(that, reach) nothing about them can be
-     seen, so a crowd or a street may end there and nowhere nearer. */
+     size x (drawing-buffer height / (2 tan(fov/2))). Street hardware sizes
+     its draw range by this. */
   CBZ.sightPixelRange = function (size) {
     let k = 1000;
     const cam = CBZ.camera, cv = CBZ.renderer && CBZ.renderer.domElement;
     if (cam && cam.isPerspectiveCamera && cv && cv.height > 0) k = cv.height / (2 * Math.tan((cam.fov || 60) * Math.PI / 360));
     return size * k;
   };
-  CBZ.sightPersonRange = function () { CBZ.sight(); return Math.min(S.reach, CBZ.sightPixelRange(1.75)); };
 
   /* ---- could the camera see a thing there right now? --------------------
      For anything that is about to appear, vanish or be moved (a recycled
