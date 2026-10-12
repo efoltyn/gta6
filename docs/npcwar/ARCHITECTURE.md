@@ -958,10 +958,10 @@ there. Every change of state is an order (`CBZ.convoy.order(cv, {kind})`).
   yes). `force = { side, units, riders?, host? }`; without a host the units are battle-core
   vehicles (`def`, `pos`, `h`, `ds`) driven by `units/kit/vehicle.js` on the city's own
   ground, roads, limits and water (`CBZ.convoy.cityHost()`).
-- **Known gaps**: the AI's riflemen hold their fire on armour, so in node a far ambush is
-  opened by the harness's first volley; infantry put out at 200 m on the dunes rarely get a
-  shot. No HUD for the order yet (the war room has no convoy button; the URL and the front
-  spec carry it).
+- **Known gaps**: the AI's riflemen hold their fire on armour, so a far ambush of riflemen
+  alone rarely opens fire on a column (an RPG team inside 200 m does); infantry put out at
+  200 m on the dunes rarely get a shot. No war-room button for the order yet (the URL and the
+  front spec carry it).
 
 ---
 
@@ -990,8 +990,6 @@ node tools/npcwar-arena.mjs        BALANCE: a matchup over N seeds in parallel w
 node tools/npcwar-balance-check.mjs the fast subset; FAILS when a win rate's whole 95% interval is
                                    outside its real-world band. Testbus node check.
 node tools/npcwar-physics-check.mjs mass, momentum, knocks, flight, blasts, hulls, fists v hide (9c).
-node tools/convoy-check.mjs        the road graph (routes, right-hand lanes, closures), the terrain
-                                   planner, and a column on city roads through the army seam (9d).
 ```
 
 `tools/npcwar-headless.mjs` lifts the page's `src/battle` / `src/units` script tags out of
