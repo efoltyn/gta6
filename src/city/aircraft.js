@@ -1340,7 +1340,7 @@
     if (CBZ.queryCollidersNear) return CBZ.queryCollidersNear(x, z, 1, out);
     return CBZ.colliders || [];
   }
-  const _colsBlock = [], _colsFacade = [], _colsRoof = [], _colsBeam = [];
+  const _colsBlock = [], _colsFacade = [], _colsBeam = [];
 
   // cheap building check: is the missile tip inside any LOS blocker's AABB?
   const _sweepP = { x: 0, y: 0, z: 0 };   // reusable sample point for the swept test
@@ -1663,16 +1663,12 @@
   // y1 = roof height, so this is the rooftop the gunship must stay ABOVE (no more
   // flying through towers) and the surface a crashing heli detonates ON (not the
   // street six storeys below). Same collider data the spotlight roof-scan uses.
+  // the highest solid top under (x,z) seen from the sky: the one rest-on
+  // query (systems/physics.js CBZ.surfaceTopAt). A roof is a CBZ.platforms
+  // slab, not a collider — the old collider-only scan missed every roof
+  // middle, so the gunship orbited and crashed THROUGH towers.
   function roofTopAt(x, z) {
-    let topY = 0;
-    const cols = collidersAt(x, z, _colsRoof);
-    for (let ci = 0; ci < cols.length; ci++) {
-      const c = cols[ci];
-      if (c.y1 == null || c.y1 <= topY) continue;
-      if (x < c.minX - 1 || x > c.maxX + 1 || z < c.minZ - 1 || z > c.maxZ + 1) continue;
-      topY = c.y1;
-    }
-    return topY;
+    return CBZ.surfaceTopAt ? Math.max(0, CBZ.surfaceTopAt(x, z, 1e6, 1)) : 0;
   }
 
   function updateHeli(dt, r) {

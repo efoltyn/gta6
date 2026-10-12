@@ -1447,9 +1447,13 @@
       const udX = craft.group && craft.group.userData;
       if (udX && udX.gear) udX.gear.visible = true;         // parked = gear down
       powerJetPlumes(udX, 0, 0);                            // engines back to cold
-      const gy = floorY(craft.pos.x, craft.pos.z);
       const ox = Math.sin(craft.heading) * 2.2, oz = Math.cos(craft.heading) * 2.2;
-      P.pos.set(craft.pos.x + ox, Math.max(gy, craft.pos.y - craft.belly), craft.pos.z + oz);
+      const ex = craft.pos.x + ox, ez = craft.pos.z + oz;
+      // ON what the skids stand on: the roof / deck / ground at the door
+      // (it was max(terrain, belly height) — 1.2 m of air over a rooftop)
+      const gy = floorY(ex, ez);
+      const sy = CBZ.surfaceTopAt ? CBZ.surfaceTopAt(ex, ez, craft.pos.y - craft.belly + 0.2, 0) : gy;
+      P.pos.set(ex, Math.max(gy, sy), ez);
       P.vy = 0; P.grounded = true;
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
     }
@@ -1738,49 +1742,25 @@
 
   // tallest collider top at/below the craft's belly — the surface it can land
   // on (terrain OR a rooftop). Same CBZ.colliders data aircraft.js's AI uses.
-  function roofUnder(craft) {
-    // null means "no roof". Zero is a legitimate authored deck height, so it
-    // cannot also be the sentinel — especially with the sea at -0.48.
-    let topY = null;
-    const cols = CBZ.colliders || [];
+  /* THE SURFACE UNDER THE SKIDS: CBZ.surfaceTopAt (systems/physics.js), the
+     one rest-on query — terrain, every CBZ.platforms slab (a building's ROOF
+     is a platform, not a collider), moving decks, and banded box tops.
+     This used to scan CBZ.colliders alone for a banded box within 0.5 m:
+     over the middle of a roof there is no collider, only the slab, so it
+     answered "no roof" and the helicopter settled through the building.
+     `fromY` is the belly's height — the caller passes the HIGHER of last
+     frame's and this frame's, so a roof the craft sank past inside one step
+     (a fast descent) is still the one it lands on.
+     null means "nothing above the terrain"; zero is a legitimate deck height
+     so it cannot also be the sentinel (the sea sits at -0.48). */
+  function roofUnder(craft, fromY) {
+    if (!CBZ.surfaceTopAt) return null;
     const x = craft.pos.x, z = craft.pos.z;
-    const yRef = craft.pos.y - craft.belly + 0.6;    // only tops at/under the belly count
-    for (let i = 0; i < cols.length; i++) {
-      const c = cols[i];
-      if (c.y1 == null || (topY != null && c.y1 <= topY) || c.y1 > yRef) continue;
-      if (x < c.minX - 0.5 || x > c.maxX + 0.5 || z < c.minZ - 0.5 || z > c.maxZ + 0.5) continue;
-      topY = c.y1;
-    }
-    return topY;
+    if (fromY == null) fromY = craft.pos.y - craft.belly;
+    const top = CBZ.surfaceTopAt(x, z, fromY + 0.15, 0.5);
+    const base = CBZ.floorAt ? (+CBZ.floorAt(x, z) || 0) : 0;
+    return top > base + 0.01 ? top : null;
   }
-  // is the craft's nose about to bury itself in a building FACE? (a collider
-  // whose span covers the nose point at the nose's own altitude — a roof we
-  // are safely above never triggers, because the y-range test fails there)
-  function wallAhead(craft) {
-    const cols = CBZ.colliders || [];
-    const dims = (craft.sourceRec && craft.sourceRec.aircraftDims) || (craft.group && craft.group.userData && craft.group.userData.aircraftDims);
-    const hullLength = dims && dims.length ? dims.length : Math.max(
-      (craft.sourceRec && craft.sourceRec.footW) || 0,
-      (craft.sourceRec && craft.sourceRec.footL) || 0,
-      craft.kind === "jet" ? 8 : 5
-    );
-    // Probe the actual nose, not a fixed 2.5m point from the centre. The old
-    // probe put an A320's sensor inside its own cabin, so its nose could pass
-    // deep into a tower before the centre finally registered a collision.
-    const reach = Math.max(2.5 + (craft.speed || 0) * 0.06, hullLength * 0.5 - 0.35);
-    const cp = Math.cos(craft.pitch || 0);
-    const nx = craft.pos.x + Math.sin(craft.heading) * cp * reach;
-    const ny = craft.pos.y + Math.sin(craft.pitch || 0) * reach;
-    const nz = craft.pos.z + Math.cos(craft.heading) * cp * reach;
-    for (let i = 0; i < cols.length; i++) {
-      const c = cols[i];
-      if (nx < c.minX || nx > c.maxX || nz < c.minZ || nz > c.maxZ) continue;
-      const y0 = c.y0 != null ? c.y0 : 0, y1 = c.y1 != null ? c.y1 : 18;
-      if (ny >= y0 && ny <= y1) return { x: nx, y: ny, z: nz, collider: c };
-    }
-    return null;
-  }
-
   function aircraftColliderRef(c) {
     let o = c && c.ref;
     while (o) {
@@ -1878,8 +1858,21 @@
 
   const _seat0 = { x: 0, y: 0, z: 0 }, _seat1 = { x: 0, y: 0, z: 0 };
 
+  /* BROADPHASE FIRST. This walked ALL of CBZ.colliders (~140k in the city)
+     once per airframe sample — five full passes, every flying frame, ~700k
+     box tests. The frame it cost is what a fast craft then crossed in one
+     step. The collider grid answers "what is near this swept path" for the
+     price of a few buckets; same boxes, same tests, a tiny list. */
+  const _sweepCols = [];
+  function sweepCandidates(from, to, dims) {
+    if (!CBZ.queryCollidersNear) return CBZ.colliders || [];
+    const cx = (from.x + to.x) * 0.5, cz = (from.z + to.z) * 0.5;
+    const half = Math.hypot(to.x - from.x, to.z - from.z) * 0.5;
+    const body = Math.max(dims.length || 0, dims.span || 0) * 0.5 + Math.max(0.35, (dims.fuselage || 1) * 0.45);
+    return CBZ.queryCollidersNear(cx, cz, half + body + 0.5, _sweepCols);
+  }
   function sweepWorld(craft, from, to, dims, best) {
-    const cols = CBZ.colliders || [];
+    const cols = sweepCandidates(from, to, dims);
     for (let s = 0; s < AIRFRAME_SAMPLES.length; s++) {
       const spec = AIRFRAME_SAMPLES[s];
       sampleSeat(from, craft, dims, spec, _seat0); sampleSeat(to, craft, dims, spec, _seat1);
@@ -2282,9 +2275,9 @@
     attempted.copy(craft.pos);
     const airframeHit = sweptAirframeImpact(craft, sweepFrom, attempted);
     if (airframeHit && resolveAirframeImpact(craft, sweepFrom, attempted, airframeHit)) return;
-    // landing surface: terrain OR the tallest rooftop under us (throttled scan)
-    craft._surfT = (craft._surfT || 0) - dt;
-    if (craft._surfT <= 0) { craft._surfT = 0.12; craft._roof = roofUnder(craft); }
+    // landing surface: terrain OR the roof / deck under us, every frame (the
+    // query is a grid lookup now), swept from the higher of the two bellies
+    craft._roof = roofUnder(craft, Math.max(sweepFrom.y, craft.pos.y) - craft.belly);
     const gy = floorY(craft.pos.x, craft.pos.z);
     const surfY = craft._roof == null ? gy : Math.max(gy, craft._roof);
     const minY = surfY + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);

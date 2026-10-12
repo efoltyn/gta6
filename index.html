@@ -882,7 +882,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=planes1009b"></script>
-<script src="src/systems/physics.js?v=gnp0930"></script>
+<script src="src/systems/physics.js?v=solid1011"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -1148,7 +1148,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/world.js?v=water1011"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
 <script src="src/city/flags.js?v=polsim1008b"></script>
-<script src="src/city/interior_programs.js?v=stairs1009b"></script>
+<script src="src/city/interior_programs.js?v=solid1011"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1164,7 +1164,7 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=flicker1009b"></script>
-<script src="src/city/buildings.js?v=flicker1009b"></script>
+<script src="src/city/buildings.js?v=solid1011"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1418,7 +1418,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
-<script src="src/entities/moves_posture.js?v=po0930"></script>
+<script src="src/entities/moves_posture.js?v=solid1011"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=street1009"></script>
 <script src="src/city/economy.js?v=vit3"></script>
@@ -1488,7 +1488,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/vips.js?v=popup1009b"></script>
 <script src="src/city/police.js?v=custody1009b"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
-<script src="src/city/aircraft.js?v=mil0929"></script>
+<script src="src/city/aircraft.js?v=solid1011"></script>
 <script src="src/city/traffic.js?v=metro0929"></script>
 <script src="src/city/carparts.js?v=cars2"></script>
 <script src="src/city/carbody.js?v=cars2"></script>
@@ -1510,7 +1510,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/vehicles.js?v=street1009"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
-<script src="src/city/playeraircraft.js?v=planes1009b"></script>
+<script src="src/city/playeraircraft.js?v=solid1011"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1566,7 +1566,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
-<script src="src/city/boarding.js?v=desk1009c"></script>
+<script src="src/city/boarding.js?v=solid1011"></script>
 <!-- city/pullout.js: THE ONE PULL-OUT VERB. Any human drags whoever sits in
      a stopped car seat out through the real door (CBZ.moves.board beats,
      boarding.js carSpec): the player carjacking, a cop pulling the player or

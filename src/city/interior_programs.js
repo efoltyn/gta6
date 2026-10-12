@@ -986,11 +986,11 @@
     // left OPEN when you drove off is still open (not an invisible wall in an
     // open doorway) when you come back.
     if (d.col) d.col._out = !on;
+    // in place (physics.js colliderAdd/colliderRemove): a push/splice +
+    // markCollidersDirty rebuilt the whole ~140k-box grid per door swing
     const i = cols.indexOf(d.col);
-    if (on && i < 0) cols.push(d.col);
-    else if (!on && i >= 0) cols.splice(i, 1);
-    else return;
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (on && i < 0) CBZ.colliderAdd(d.col);
+    else if (!on && i >= 0) CBZ.colliderRemove(d.col, i);
   }
   // by: "body" (somebody walking a route), "push" (the player walking into
   // it, systems/bodydoors.js), else the player's own [E]

@@ -367,6 +367,105 @@
     return true;
   }
 
+  /* ---- CARS ARE SOLID TO PEOPLE (2026-10-11) ----------------------------
+     OWNER: "players phase through cars ... a person standing looks like
+     they're inside a car, standing through the hood."
+
+     ROOT CAUSE: nothing in the single-player game ever told a walking body
+     that a car was there. collide() resolved against CBZ.colliders, and no
+     car is in CBZ.colliders (it moves; the static grid cannot hold it). The
+     only car-vs-person contact was the run-over (city/carstrike.js), which
+     fires on a MOVING car's swept footprint — so a parked car, a car in a
+     jam, a wreck, or a car that crept into you was air: you walked through
+     the bonnet, peds stood inside doors, a cop stood in the boot. (Remote
+     players' cars were solid — net/networld.js wrote its own push-out for
+     those — and local cars, the commonest case, were not.)
+
+     Now every car in CBZ.cityCars is an oriented box IN THIS resolver: the
+     same vehicleDims footprint every other system reads, heading-oriented,
+     banded from just above the road to its roof. It joins the SAME
+     deepest-first, two-plane solve as the walls, so a body pinned between a
+     car and a wall comes out of both in one call instead of being shoved
+     back and forth by two resolvers on alternate frames (the jitter).
+
+     Who it applies to: UPRIGHT bodies — radius <= CAR_BODY_R and a feet-to-
+     head band of a standing person (or no band). Ragdoll points and corpse
+     probes (tiny bands) keep their own car contact in carstrike.js, which
+     wraps a body over a bonnet that a full-height box would shove off. Car
+     calls (radius >= 1) never see cars here — car-vs-car is vehicles.js's
+     SAT. A body never collides with the car it is in (the player's
+     _vehicle, its npcDriver) or the car it is boarding (pos.skipCar). */
+  const CAR_BODY_R = 0.75;
+  const CAR_CELL = 8, CAR_PAD = 3;        // pad: a car may move this far after the per-frame bucket
+  const carBuckets = new Map();
+  let carStale = true;
+  const _carNear = [];
+  CBZ.onUpdate(0.02, function () { carStale = true; });
+  function carDimsOf(car) { return car._visualDims || car.dims || null; }
+  function rebuildCarGrid() {
+    carStale = false;
+    carBuckets.clear();
+    const cars = (!CBZ.game || CBZ.game.mode === "city") ? CBZ.cityCars : null;
+    if (!cars) return;
+    for (let i = 0; i < cars.length; i++) {
+      const car = cars[i];
+      if (!car || !car.pos || !carDimsOf(car)) continue;
+      const g = car.group;
+      if (g && (!g.parent || g.visible === false)) continue;     // despawned / parked out of the scene
+      if (car._roadBody == null) car._roadBody = isTraversalRoadCar(car);
+      if (!car._roadBody) continue;                              // boats + aircraft have their own hulls
+      const d = carDimsOf(car);
+      const r = Math.hypot((+d.width || 2) * 0.5, (+d.length || 4.4) * 0.5) + CAR_PAD;
+      const x0 = Math.floor((car.pos.x - r) / CAR_CELL), x1 = Math.floor((car.pos.x + r) / CAR_CELL);
+      const z0 = Math.floor((car.pos.z - r) / CAR_CELL), z1 = Math.floor((car.pos.z + r) / CAR_CELL);
+      for (let gx = x0; gx <= x1; gx++) for (let gz = z0; gz <= z1; gz++) {
+        const k = colKey(gx, gz);
+        let b = carBuckets.get(k);
+        if (!b) { b = []; carBuckets.set(k, b); }
+        b.push(car);
+      }
+    }
+  }
+  // the car's solid, rewritten in place from its LIVE pose (it may have moved
+  // since the bucket was filed) in the record shape pushOut already reads
+  function carSolid(car) {
+    let r = car._solid;
+    if (!r) r = car._solid = { minX: 0, maxX: 0, minZ: 0, maxZ: 0, cx: 0, cz: 0, hw: 1, hd: 2, yaw: 0, y0: 0, y1: 1.5, ref: null, _car: car, noStep: true };
+    const d = carDimsOf(car);
+    const yaw = +car.heading || 0;
+    const x = car.pos.x, z = car.pos.z, base = +car.pos.y || 0;
+    if (r._d === d && r.yaw === yaw && r.cx === x && r.cz === z && r._base === base &&
+        r._w === d.width && r._l === d.length) return r;    // unmoved since last ask
+    r._d = d; r._base = base; r._w = d.width; r._l = d.length;
+    const hw = Math.max(0.3, (+d.width || 2) * 0.5), hd = Math.max(hw, (+d.length || 4.4) * 0.5);
+    const co = Math.abs(Math.cos(yaw)), si = Math.abs(Math.sin(yaw));
+    const ex = hw * co + hd * si, ez = hw * si + hd * co;
+    r.cx = x; r.cz = z; r.hw = hw; r.hd = hd; r.yaw = yaw;
+    r.minX = x - ex; r.maxX = x + ex; r.minZ = z - ez; r.maxZ = z + ez;
+    const h = +d.height;
+    r.y0 = base + 0.18;                                     // a body lying under the sill is the strike's business
+    r.y1 = base + (h > 0.6 ? h : 1.5);
+    r.ref = car.group || null;
+    return r;
+  }
+  function carsNear(pos, x, z, reach) {
+    if (carStale) rebuildCarGrid();
+    _carNear.length = 0;
+    if (!carBuckets.size) return 0;
+    const b = carBuckets.get(colKey(Math.floor(x / CAR_CELL), Math.floor(z / CAR_CELL)));
+    if (!b) return 0;
+    const P = CBZ.player, own = P && pos === P.pos ? P._vehicle : null;
+    for (let i = 0; i < b.length; i++) {
+      const car = b[i];
+      if (car === own || car.pos === pos || (pos.skipCar && (pos.skipCar === car || pos.skipCar === car.group))) continue;
+      if (car.npcDriver && car.npcDriver.pos === pos) continue;
+      const c = carSolid(car);
+      if (x < c.minX - reach || x > c.maxX + reach || z < c.minZ - reach || z > c.maxZ + reach) continue;
+      _carNear.push(c);
+    }
+    return _carNear.length;
+  }
+
   const MAX_PASSES = 4;
   const CT_MAX = 16, NEAR_MAX = 32;
   const PEN_EPS = 1e-4;                  // 0.1 mm: below this a contact is resolved
@@ -386,20 +485,25 @@
     const reach = radius + slack;
     let gx = pos.x, gz = pos.z;            // where `cols` was gathered
     let cols = gatherColliders(gx, gz, reach);
+    // the cars round an UPRIGHT body (see CARS ARE SOLID TO PEOPLE above)
+    const carsOn = cityOn && radius <= CAR_BODY_R && !(headY - feetY < 1.0) && !!CBZ.cityCars;
+    let carN = carsOn ? carsNear(pos, gx, gz, reach) : 0;
     let nearN = -1;                         // -1: scan the whole gathered list
     let moved = false;
     for (let pass = 0; pass < MAX_PASSES; pass++) {
       const x = pos.x, z = pos.z;
       if (pass && (x - gx > slack || gx - x > slack || z - gz > slack || gz - z > slack)) {
         gx = x; gz = z; cols = gatherColliders(x, z, reach); nearN = -1;
+        if (carsOn) carN = carsNear(pos, x, z, reach);
       }
       let n = 0;
       if (nearN < 0) {
         // FULL SCAN: find the contacts, and remember the few boxes within
         // `reach` — the only ones a later pass can possibly touch
         let nn = 0, over = false;
-        for (let i = 0; i < cols.length; i++) {
-          const c = cols[i];
+        const nCol = cols.length;
+        for (let i = 0, N = nCol + carN; i < N; i++) {
+          const c = i < nCol ? cols[i] : _carNear[i - nCol];
           if (c._city && !cityOn) continue;
           if (c.y0 != null && (headY <= c.y0 || feetY >= c.y1)) continue; // body clears this box
           if (!(x >= c.minX - reach && x <= c.maxX + reach && z >= c.minZ - reach && z <= c.maxZ + reach)) continue;
@@ -458,6 +562,7 @@
       }
     }
     if (cols === _gather) _gather.length = 0;   // do not pin removed boxes in the scratch
+    if (carN) _carNear.length = 0;
     // MOVING WALLS (systems/platforms_moving.js): same shortest-exit resolver,
     // run in a moving parent's LOCAL frame (a boat's gunwales, a gangway's
     // handrails). Feature-detected + flagged.
@@ -2218,6 +2323,46 @@
     return s > g ? s : g;
   }
   CBZ.walkGroundAt = walkGroundAt;
+
+  /* ---- WHAT A BODY THAT IS NOT WALKING COMES TO REST ON ------------------
+     CBZ.surfaceTopAt(x, z, fromY, pad) -> the highest solid top at (x,z) at
+     or below fromY + STEP_UP: terrain, every PLATFORM (building roofs,
+     floors, decks, helipads), moving decks, and the top of any height-banded
+     collider within `pad` of the point (a roof plant box, a parapet, a
+     container stack). The landing gear of everything that flies reads this.
+
+     WHY: the aircraft asked the wrong question. playeraircraft.js and the
+     police gunship (aircraft.js) each found "the roof" by scanning
+     CBZ.colliders for a banded box within half a metre of the craft. A
+     building's ROOF is not a collider at all — it is a CBZ.platforms slab
+     (buildings.js slabPiece, the same record the player stands on). The
+     only colliders up there are the perimeter wall bands, so over the middle
+     of any roof the scan found nothing, the landing surface fell to the
+     terrain, and the helicopter settled through the slab to the street.
+     One ground for a foot and a skid: groundAt is the platform query the
+     player has always used; this adds the banded-box tops and nothing else. */
+  const _surfCols = [];
+  CBZ.surfaceTopAt = function (x, z, fromY, pad) {
+    if (fromY == null || !(fromY === fromY)) fromY = 1e6;
+    pad = pad || 0;
+    let best = groundAt(x, z, fromY);
+    const reach = fromY + STEP_UP;
+    const cols = CBZ.queryCollidersNear(x, z, pad, _surfCols);
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.y1 == null || c.y1 > reach || c.y1 <= best) continue;
+      if (x < c.minX - pad || x > c.maxX + pad || z < c.minZ - pad || z > c.maxZ + pad) continue;
+      if (c.yaw) {
+        oriTrig(c);
+        const rx = x - c.cx, rz = z - c.cz;
+        const lx = rx * c._co - rz * c._si, lz = rx * c._si + rz * c._co;
+        if (lx < -c.hw - pad || lx > c.hw + pad || lz < -c.hd - pad || lz > c.hd + pad) continue;
+      }
+      best = c.y1;
+    }
+    _surfCols.length = 0;
+    return best;
+  };
   function resolveCollisions() { collide(player.pos, player.radius, player.pos.y + STEP_SOLID, player.pos.y + playerBodyH()); }
 
   // ---- FEEL: local wall-clock player motion (slow-mo-under-load fix) --------

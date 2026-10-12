@@ -357,8 +357,10 @@
     _p.x = R.x; _p.z = R.z;
     MV.step(Q.m, _p, R.yaw, tx, tz, o, dt);
     if (CBZ.collideSlide && !o.strafe) {
-      const s = { x: _p.x, y: R.y, z: _p.z };
-      try { CBZ.collideSlide(s, 0.30, R.y, R.y + 1.7, 3); } catch (e) {}
+      // the car this body is getting into/out of is not a wall to it (cars
+      // are solid to people in physics.js collide) — every other car is
+      const s = { x: _p.x, y: R.y, z: _p.z, skipCar: (R.V && R.V.veh) || null };
+      try { CBZ.collideSlide(s, 0.30, R.y, R.y + 1.7); } catch (e) {}
       _p.x = s.x; _p.z = s.z;
     }
     R.x = _p.x; R.z = _p.z; R.yaw = Q.m.yaw; R.spd = Q.m.gs;

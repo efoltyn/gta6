@@ -1212,6 +1212,7 @@
     const ref = { cushion: Math.max(0.05, cushionY - floorY) / fit, floorBelow: 0, kind: kind, _fit: fit, _seat: seat.id };
     const V = {
       side: s,
+      veh: veh,
       toWorld: function (lx, ly, lz, out) {
         f.updateWorldMatrix(true, false);
         _v.set(lx, ly, lz).applyMatrix4(f.matrixWorld);
