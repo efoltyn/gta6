@@ -52,7 +52,7 @@ const SIGHT = 175;
    first because they are cheaper and usually the answer. ?tlos=0 turns the
    sand transparent again, so the difference is measurable. */
 function terrainBlocked(ax, ay, az, bx, by, bz, ground) {
-  const g = ground || MAP.groundAt;   // buildMap scans before MAP exists
+  const g = ground || HOST.groundAt;   // buildMap scans before MAP exists
   const dx = bx - ax, dz = bz - az;
   const d = Math.hypot(dx, dz);
   if (d < 8) return false;
@@ -69,8 +69,8 @@ function terrainBlocked(ax, ay, az, bx, by, bz, ground) {
 // measured box each beast carries says so, and the default is the man.
 function eyeLos(m, o) {
   const ay = m.pos.y + (m.eyeH || 1.52), by = o.pos.y + (o.losY || 1.35);
-  if (CBZ.micro.segmentBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z)) return false;
-  return !(MAP.terrainLos && terrainBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z));
+  if (HOST.segmentBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z)) return false;
+  return !(HOST.terrainLos && terrainBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z));
 }
 /* IS ONE OF MINE STANDING IN THIS LANE? The whole line out to the mark (90 m
    at most), in a cone as wide as the round's spread. Cheap enough to ask on
@@ -167,7 +167,7 @@ function armOf(m) {
     heat: 0, lastT: -9, n: 0, jamT: 0,
     aimOn: null, aimT: 0, react: 0, burst: 0,
     ammo: m.vehicle ? 1e9 : (g.carry || 0),
-    nades: m.vehicle || m.you || MAP.water ? 0 : (tier === "civ" ? 0 : tier === "thug" ? 1 : 2), nadeT: 0,
+    nades: m.vehicle || m.you || HOST.water ? 0 : (tier === "civ" ? 0 : tier === "thug" ? 1 : 2), nadeT: 0,
     seenX: 0, seenY: 0, seenZ: 0, seenT: -99, supT: 0, resT: 0,
   };
   return A;
@@ -275,7 +275,7 @@ function armsResupply(m, A) {
    he has stopped to fight a mark he can see; the AI's own stances (its cover,
    its fold in the dunes, the crouch of a pinned man) win wherever it has one. */
 function weaponStance(m, tgt, spd) {
-  if (m.vehicle || m.beast || m.fists || m.routed || m.you || m.launcher || MAP.water) return null;
+  if (m.vehicle || m.beast || m.fists || m.routed || m.you || m.launcher || HOST.water) return null;
   if (spd > 0.1 || !tgt || tgt.dead || tgt.fled) return null;
   if (m.slot === "cover" || m.slot === "peek" || m.slot === "hull" || m.slot === "sidestep") return null;
   const dist = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
@@ -438,7 +438,7 @@ function armsLauncher(m, tgt, dist) {
 
 // the tube's line (muzzle at 0.95 of the eye) over the ground, with no slack
 function tubeClear(m, tgt) {
-  if (!MAP || !MAP.groundAt) return true;
+  if (!HOST || !HOST.groundAt) return true;
   const ax = m.pos.x, az = m.pos.z, ay = m.pos.y + (m.eyeH || 1.52) * 0.95;
   const bx = tgt.pos.x, bz = tgt.pos.z, by = tgt.pos.y + (tgt.aimY || 1.28);
   const d = Math.hypot(bx - ax, bz - az);
@@ -446,7 +446,7 @@ function tubeClear(m, tgt) {
   for (let i = 1; i < n; i++) {
     const t = i / n;
     if (t * d < 1 || d - t * d < 2) continue;
-    if (MAP.groundAt(ax + (bx - ax) * t, az + (bz - az) * t) > ay + (by - ay) * t - 0.1) return false;
+    if (HOST.groundAt(ax + (bx - ax) * t, az + (bz - az) * t) > ay + (by - ay) * t - 0.1) return false;
   }
   return true;
 }
@@ -504,7 +504,7 @@ function fireShot(m, tgt, r) {
   if (PROBE && mode === "aimed" && tgt) {
     if (!eyeLos(m, tgt)) QUAL.blindFire++;
     if (mateInLane(m, tgt)) QUAL.throughMate++;
-    if (MAP.terrainTrue && terrainBlocked(m.pos.x, m.pos.y + (m.eyeH || 1.52), m.pos.z,
+    if (HOST.terrainTrue && terrainBlocked(m.pos.x, m.pos.y + (m.eyeH || 1.52), m.pos.z,
       tgt.pos.x, tgt.pos.y + (tgt.losY || 1.35), tgt.pos.z)) QUAL.throughSand++;
   }
   if (shotsRing.length > 90) shotsRing.shift();
@@ -607,7 +607,7 @@ function armsMuzzle(m, A, w, from, hx, hz, cd2) {
     _rq2.set(-hz, 0, hx);                          // the gun's right, in the world
     try {
       CBZ.ejectBrass({ x: from.x - hx * 0.35, y: from.y + 0.02, z: from.z - hz * 0.35 }, _rq2,
-        { mm: A.c.mm, shell: !!A.c.pellets, groundY: MAP.groundAt(m.pos.x, m.pos.z), fwd: { x: hx, z: hz } });
+        { mm: A.c.mm, shell: !!A.c.pellets, groundY: HOST.groundAt(m.pos.x, m.pos.z), fwd: { x: hx, z: hz } });
     } catch (e) {}
   }
 }
@@ -628,10 +628,10 @@ const _rh2 = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 
 let _onlyC = null;
 const RAY_ONLY = { filter: function (c) { return c === _onlyC; } };
 function groundMatAt() {
-  if (MAP.water) return "water";
-  const mp = (typeof MAPS !== "undefined" && MAPS[MAP.id]) || null;
+  if (HOST.water) return "water";
+  const mp = (typeof MAPS !== "undefined" && MAPS[HOST.id]) || null;
   const erg = mp && mp.erg;
-  return erg === "snow" ? "snow" : erg === "grass" ? "dirt" : erg === "sand" ? "sand" : MAP.terrainTrue ? "sand" : "concrete";
+  return erg === "snow" ? "snow" : erg === "grass" ? "dirt" : erg === "sand" ? "sand" : HOST.terrainTrue ? "sand" : "concrete";
 }
 function groundColor(mat) {
   return mat === "snow" ? 0xeef1f5 : mat === "dirt" ? 0x6a5a40 : mat === "sand" ? 0xcdb48a : mat === "water" ? 0xe8f2f6 : 0x8f8b84;
@@ -708,7 +708,7 @@ function roundY(r, s) {
    go through costs it velocity (weapons/ballistics.js pierce); one it cannot
    stops it, or, at a grazing angle on something hard, skips it off. */
 function armsTraceWorld(r) {
-  const B = CBZ.ballistics, M = CBZ.micro;
+  const B = CBZ.ballistics, M = HOST;
   let s = 0.25, layers = 0;
   const ray = M && M.rayColliders;
   let sGround = groundHit(r, 1.5, r.sEnd);
@@ -755,7 +755,7 @@ function armsTraceWorld(r) {
 }
 // first point along the line under the ground (3 m steps, refined)
 function groundHit(r, s0, s1) {
-  const g = MAP.groundAt;
+  const g = HOST.groundAt;
   const step = Math.max(2.5, (s1 - s0) / 120);
   let prev = s0;
   for (let s = s0; s <= s1; s += step) {
@@ -1153,7 +1153,7 @@ function nadeMesh() {
 const NADE_SQ = {};
 function armsGrenade(m, tgt, dist) {
   const A = armOf(m);
-  if (A.nades <= 0 || simT < A.nadeT || m.vehicle || m.you || m.stance === "prone" || MAP.water) return false;
+  if (A.nades <= 0 || simT < A.nadeT || m.vehicle || m.you || m.stance === "prone" || HOST.water) return false;
   if (dist < 9 || dist > 30 || tgt.vehicle || tgt.air || tgt.dead) return false;
   A.nadeT = simT + 1.5 + lcg() * 1.5;              // asked at most this often
   const sqKey = m.team + (m.sq || 0);
@@ -1173,7 +1173,7 @@ function armsGrenade(m, tgt, dist) {
   if (!behind && crowd < 4 && m.wantNade !== tgt) return false;
   if (lcg() > 0.4) return false;                   // not every man the instant it is possible
   // nothing over his head and in front of his face: a throw needs its arc
-  if (CBZ.micro.segmentBlocked(m.pos.x, m.pos.y + 1.7, m.pos.z,
+  if (HOST.segmentBlocked(m.pos.x, m.pos.y + 1.7, m.pos.z,
     m.pos.x + (tgt.pos.x - m.pos.x) * 0.25, m.pos.y + 4.5, m.pos.z + (tgt.pos.z - m.pos.z) * 0.25)) return false;
   A.nades--; A.nadeT = simT + 7 + lcg() * 4;
   NADE_SQ[sqKey] = simT + 9 + lcg() * 5;
@@ -1207,7 +1207,7 @@ function stepGrenades(sdt) {
         // released over the shoulder, on the solved arc
         const hx = m.pos.x + Math.sin(m.yaw) * 0.25, hz = m.pos.z + Math.cos(m.yaw) * 0.25, hy = m.pos.y + (m.eyeH || 1.52) + 0.25;
         const dx = n.lx - hx, dz = n.lz - hz, d = Math.hypot(dx, dz) || 1;
-        const dy = MAP.groundAt(n.lx, n.lz) + 0.05 - hy;
+        const dy = HOST.groundAt(n.lx, n.lz) + 0.05 - hy;
         // a soldier lobs at about 40 degrees: the speed that lands it there,
         // capped at what an arm can do (then the low arc)
         const th = 0.7, c2 = Math.cos(th) * Math.cos(th), den = 2 * c2 * (d * Math.tan(th) - dy);
@@ -1223,9 +1223,9 @@ function stepGrenades(sdt) {
       n.vy -= 9.81 * sdt;
       const px = n.x, pz = n.z;
       n.x += n.vx * sdt; n.y += n.vy * sdt; n.z += n.vz * sdt;
-      const gy = MAP.groundAt(n.x, n.z);
+      const gy = HOST.groundAt(n.x, n.z);
       // a wall: it bounces back off it
-      if (CBZ.micro.segmentBlocked(px, n.y, pz, n.x, n.y, n.z)) { n.x = px; n.z = pz; n.vx *= -0.3; n.vz *= -0.3; }
+      if (HOST.segmentBlocked(px, n.y, pz, n.x, n.y, n.z)) { n.x = px; n.z = pz; n.vx *= -0.3; n.vz *= -0.3; }
       if (n.y <= gy + 0.04) {
         n.y = gy + 0.04;
         if (Math.abs(n.vy) > 1.2) { n.vy = -n.vy * 0.28; n.vx *= 0.45; n.vz *= 0.45; }
@@ -1248,9 +1248,9 @@ function stepGrenades(sdt) {
 }
 function detonateGrenade(n) {
   const B = CBZ.ballistics, G = B.GRENADE.m67;
-  const y = Math.max(n.y, MAP.groundAt(n.x, n.z) + 0.1);
-  if (CBZ.studio && CBZ.studio.boom) {
-    try { CBZ.studio.boom({ x: n.x, y: y + 0.2, z: n.z }, { radius: G.blast, power: G.power, structural: false, by: n.by }); } catch (e) {}
+  const y = Math.max(n.y, HOST.groundAt(n.x, n.z) + 0.1);
+  if (STUDIO && STUDIO.boom) {
+    try { STUDIO.boom({ x: n.x, y: y + 0.2, z: n.z }, { radius: G.blast, power: G.power, structural: false, by: n.by }); } catch (e) {}
   }
   // THE FRAGMENTS. ~1,500 notched-wire splinters thrown out in a sphere; the
   // number that meets a body falls with the square of the distance and the
@@ -1264,8 +1264,8 @@ function detonateGrenade(n) {
     const cy = u.pos.y + (u.losY || 1) * 0.7;
     const d = Math.hypot(u.pos.x - n.x, cy - y, u.pos.z - n.z);
     if (d > G.wound || d < 0.3) continue;
-    if (CBZ.micro.segmentBlocked(n.x, y + 0.25, n.z, u.pos.x, cy, u.pos.z)) continue;
-    if (MAP.terrainLos && terrainBlocked(n.x, y + 0.25, n.z, u.pos.x, cy, u.pos.z)) continue;
+    if (HOST.segmentBlocked(n.x, y + 0.25, n.z, u.pos.x, cy, u.pos.z)) continue;
+    if (HOST.terrainLos && terrainBlocked(n.x, y + 0.25, n.z, u.pos.x, cy, u.pos.z)) continue;
     const area = u.beast ? (u.bodyL || 1.5) * (u.bodyH || 1) * 0.55 : u.stance === "prone" ? 0.12 : u.stance === "crouch" ? 0.45 : 0.7;
     const lambda = 1500 * area / (4 * Math.PI * d * d) * 0.5;
     // Poisson draw (Knuth), capped: nobody needs to count the eleventh splinter
@@ -1332,7 +1332,7 @@ function missImpact(from, to, cd2, heavy) {
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
     const x = from.x + dx * t, y = from.y + dy * t, z = from.z + dz * t;
-    const g = MAP.groundAt(x, z);
+    const g = HOST.groundAt(x, z);
     if (y <= g + 0.05) {
       _v2.set(x, g + 0.03, z);
       const gm = groundMatAt();
@@ -1340,10 +1340,10 @@ function missImpact(from, to, cd2, heavy) {
       if (heavy && gm !== "water") heavyThrow(x, g, z, gm, groundColor(gm), dx / len, dz / len);
       return;
     }
-    const cols = CBZ.micro.queryColliders(x, z, 0.4, _mq);
+    const cols = HOST.queryColliders(x, z, 0.4, _mq);
     for (let c = 0; c < cols.length; c++) {
       const b = cols[c];
-      if (!CBZ.micro.colliderContains(b, x, z)) continue;
+      if (!HOST.colliderContains(b, x, z)) continue;
       if (b.y0 != null && (y < b.y0 || y > b.y1)) continue;
       _v2.set(x, y, z);
       const nx = Math.abs(x - b.minX) < Math.abs(x - b.maxX) ? -1 : 1;
@@ -1470,7 +1470,7 @@ function fireRocket(m, tgt) {
     const ce = Math.cos(el);
     r = { pos: V().copy(from), vel: new THREE.Vector3(rdx * ce * R.v0, Math.sin(el) * R.v0, rdz * ce * R.v0),
       grav: 9.81, t: 0, w: w, g: A ? A.g : null, by: m, motor: R, life: R.life, travelled: 0, arm: 2.5,
-      trail: CBZ.studio.trail({ length: 26, color: 0xd8c39a, opacity: 0.5, minStep: 1.6 }) };
+      trail: STUDIO.trail({ length: 26, color: 0xd8c39a, opacity: 0.5, minStep: 1.6 }) };
     if (CBZ.munitions && CBZ.munitions.acquire) { try { r.mesh = CBZ.munitions.acquire("pg7"); } catch (e) { r.mesh = null; } }
     backblast(m, from, ux, uz);
   } else {
@@ -1478,7 +1478,7 @@ function fireRocket(m, tgt) {
     const v0 = (A && A.g.v0) || (w.projSpeed || 60);
     const tx = tx0, tz = tz0;
     const dd = Math.hypot(tx - from.x, tz - from.z) || 1;
-    const groundY = MAP.groundAt(tx, tz) + 0.1;
+    const groundY = HOST.groundAt(tx, tz) + 0.1;
     const sol = (B && B.lob(v0, dd, groundY - from.y, false)) || { elev: 0.6, t: dd / v0 };
     const err = A ? B.gauss(lcg) * A.T.hold * 4 / 1000 : 0;
     const el = sol.elev + (A ? B.gauss(lcg) * A.T.hold * 3 / 1000 : 0);
@@ -1486,7 +1486,7 @@ function fireRocket(m, tgt) {
     const c = Math.cos(err), s = Math.sin(err);
     r = { pos: V().copy(from), vel: new THREE.Vector3((dx * c - dz * s) * v0 * Math.cos(el), Math.sin(el) * v0, (dx * s + dz * c) * v0 * Math.cos(el)),
       grav: 9.81, t: 0, w: w, g: A ? A.g : null, by: m, travelled: 0, arm: (A && A.g.arm) || 0, life: Math.max(7, sol.t * 1.6 + 2),
-      trail: CBZ.studio.trail({ length: 14, color: 0xcfc8b8, opacity: 0.3, minStep: 1.6 }) };
+      trail: STUDIO.trail({ length: 14, color: 0xcfc8b8, opacity: 0.3, minStep: 1.6 }) };
   }
   rockets.push(r);
   const dCam = Math.sqrt(camDist2(m.pos));
@@ -1519,7 +1519,7 @@ function stepRockets(sdt) {
        ends on the mark, wherever the mark has walked to since release. */
     const hm = r.homing;
     if (hm && !hm.dead && hm.pos) {
-      const g = MAP.groundAt(r.pos.x, r.pos.z), h = r.pos.y - g, vy = r.vel.y;
+      const g = HOST.groundAt(r.pos.x, r.pos.z), h = r.pos.y - g, vy = r.vel.y;
       const tl = (vy + Math.sqrt(Math.max(0, vy * vy + 2 * r.grav * Math.max(0, h)))) / Math.max(1e-3, r.grav);
       if (tl > 0.3) {
         const k = Math.min(1, sdt * 1.5);
@@ -1536,12 +1536,12 @@ function stepRockets(sdt) {
       _v2.copy(r.pos).add(r.vel);
       r.mesh.lookAt(_v2);
     }
-    let boom = r.t > (r.life || 7) || r.pos.y <= MAP.groundAt(r.pos.x, r.pos.z) + 0.25;
+    let boom = r.t > (r.life || 7) || r.pos.y <= HOST.groundAt(r.pos.x, r.pos.z) + 0.25;
     if (!boom) {
-      const cols = CBZ.micro.queryColliders(r.pos.x, r.pos.z, 0.5, _mq);
+      const cols = HOST.queryColliders(r.pos.x, r.pos.z, 0.5, _mq);
       for (let c = 0; c < cols.length; c++) {
         const b = cols[c];
-        if (!CBZ.micro.colliderContains(b, r.pos.x, r.pos.z)) continue;
+        if (!HOST.colliderContains(b, r.pos.x, r.pos.z)) continue;
         if (b.y0 != null && (r.pos.y < b.y0 || r.pos.y > b.y1)) continue;
         boom = true; break;
       }
@@ -1565,12 +1565,12 @@ function stepRockets(sdt) {
       if (r.mesh && CBZ.munitions && CBZ.munitions.release) { try { CBZ.munitions.release(r.mesh); } catch (e) {} r.mesh = null; }
       // the 40 mm has not armed inside its arming distance: it thuds, it does not go off
       if (r.arm && r.travelled < r.arm) {
-        if (camDist2(r.pos) < 150 * 150) CBZ.bulletImpact({ x: r.pos.x, y: MAP.groundAt(r.pos.x, r.pos.z) + 0.05, z: r.pos.z }, { x: 0, y: 1, z: 0 }, { kind: "dust", color: groundColor(groundMatAt()), power: 1.6 });
+        if (camDist2(r.pos) < 150 * 150) CBZ.bulletImpact({ x: r.pos.x, y: HOST.groundAt(r.pos.x, r.pos.z) + 0.05, z: r.pos.z }, { x: 0, y: 1, z: 0 }, { kind: "dust", color: groundColor(groundMatAt()), power: 1.6 });
         continue;
       }
-      CBZ.studio.boom({ x: r.pos.x, y: Math.max(r.pos.y, MAP.groundAt(r.pos.x, r.pos.z) + 0.6), z: r.pos.z }, {
+      STUDIO.boom({ x: r.pos.x, y: Math.max(r.pos.y, HOST.groundAt(r.pos.x, r.pos.z) + 0.6), z: r.pos.z }, {
         radius: rocketBlast(r.g, r.w), power: (r.w.blastPower || 1.9) * 0.55,
-        structural: MAP.id !== "arena" && spawnTotal < 700,
+        structural: HOST.id !== "arena" && spawnTotal < 700,
         // THE MAN WHO FIRED IT: a launcher crew's kills are credited to it
         by: r.by,
       });

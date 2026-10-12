@@ -40,21 +40,18 @@ function wakeCtl() {
   ctlIdleAt = performance.now() + 3000;
   el("ctl").classList.remove("idle");
 }
+/* THE RIFLE BUTTON: only where there are men (or a crewed hull) to carry one */
+function paintCtl() {
+  const r = el("cRifle");
+  if (r) r.classList.toggle("hide", !youTeam() || !!bench);
+}
 CBZ.npcwar.onBoot(function () {
   ["pointermove", "pointerdown", "keydown", "wheel"].forEach(function (ev) {
     window.addEventListener(ev, wakeCtl, { passive: true });
   });
   // out of the war: back to the war room (which carries MAIN MENU to the hub)
   el("cBack").addEventListener("click", function () {
-    if (FRONT) { frontPost(over ? "end" : "leave"); return; }
     location.href = location.pathname;
   });
   el("cRifle").addEventListener("click", function () { toggleRifle(); });
-  el("cHold").addEventListener("click", function () {
-    ORDER.red = ORDER.red === "hold" ? "advance" : "hold";
-    // a man told to go is told now, not on his next think
-    for (let i = 0; i < men.length; i++) if (men[i].team === "red") men[i].thinkAt = simT;
-    paintFrontCtl();
-  });
-  el("cAir").addEventListener("click", function () { callAir(); });
 });

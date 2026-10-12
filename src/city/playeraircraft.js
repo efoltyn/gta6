@@ -498,6 +498,7 @@
   function groupHasRotor(grp) {
     const ud = grp && grp.userData;
     if (ud && ud.rotor && ud.rotor.isObject3D) return true;    // builder-style pointer tag
+    if (ud && ud.rotorcraft && ud.unitDrive) return true;      // an NPC War unit: it spins its own
     return collectTaggedRotors(grp).mains.length > 0;          // island-style mesh tags
   }
 
@@ -573,7 +574,7 @@
   const _craftEuler = new THREE.Euler();
   const _craftYawQ = new THREE.Quaternion();
   const _craftUp = new THREE.Vector3(0, 1, 0);
-  const _milDrive = { thr: 0 };
+  const _milDrive = { thr: 0, agl: 0, speed: 0, vy: 0 };
   // pitch + = nose UP, roll + = RIGHT wing down, heading about world Y: the
   // one convention every flight step (heliStep, planeStep), the bailout
   // spiral and the chase cam share. Euler order YXZ is the aircraft order
@@ -1698,9 +1699,14 @@
       // another module's model (military, the Raptor): its own simple hooks
       if (ud && ud.gear) ud.gear.visible = agl < 9;
       if (ud && ud.prop) ud.prop.rotation.z += dt * (6 + 55 * (craft.thr || 0));
-      // military airframes (city/mil_air.js): control surfaces follow the
-      // attitude, the nozzle glows with the throttle, every prop spins
-      if (CBZ.milAirDrive && grp._milRt) { _milDrive.thr = craft.thr || 0; CBZ.milAirDrive(grp, _milDrive, dt); }
+      // a military airframe is an NPC War unit (island_military.js unitBuild):
+      // its own animate moves it (rotors, props, gear, surfaces, lights) off
+      // what this flight is doing
+      if (CBZ.milAirDrive && ud && ud.unitDrive) {
+        _milDrive.thr = craft.thr || 0; _milDrive.agl = agl;
+        _milDrive.speed = Math.abs(craft.speed || 0); _milDrive.vy = craft.vy || 0;
+        CBZ.milAirDrive(grp, _milDrive, dt);
+      }
       return;
     }
     const st = craft._afs || (craft._afs = { gear: 1, running: true, _r: craft.roll || 0, _p: craft.pitch || 0, _h: craft.heading || 0 });
@@ -2267,6 +2273,14 @@
     spinRotors(craft, dt, craft.rotorRate);
     craft.speed = Math.hypot(craft.vx, craft.vz);
     craft.aoa = 0; craft.stalled = false;
+    // an NPC War rotorcraft (the UH-60, the AH-64) turns its own rotors at
+    // their real rpm and works its own gear and lights off the flight
+    const ud = craft.group && craft.group.userData;
+    if (CBZ.milAirDrive && ud && ud.unitDrive) {
+      _milDrive.thr = craft.rotorRate / 30; _milDrive.agl = agl;
+      _milDrive.speed = craft.speed; _milDrive.vy = craft.vy || 0;
+      CBZ.milAirDrive(craft.group, _milDrive, dt);
+    }
   }
 
   // ---- V2 integrator: rooftop-aware ground clamp, wall strikes, touchdown

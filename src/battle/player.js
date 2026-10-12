@@ -56,7 +56,6 @@ let _yFrom, _yTo, _yMark = null, _yDummy = null, _yv = null;
 /* ------------------------------------------------------------ who you are */
 function youKind(u) { return !u ? null : u.vehicle ? "vehicle" : u.beast ? "beast" : "man"; }
 function youTeam() {
-  if (FRONT) return "red";
   const menIn = function (u) {
     const ids = CBZ.battleRoster ? CBZ.battleRoster.ids(u) : String(u).split("|");
     for (let k = 0; k < ids.length; k++) {
@@ -72,7 +71,6 @@ function canTake(u) {
   if (!u || u.dead || u.fled || u.inVeh || u._apeHeld || u._apeFlying || u._tossed || u.downed || u.surrendered) return false;   // a wounded man on the ground is not a body to drive
   if (u.group && !u.group.visible) return false;
   if (u.vehicle && vehCrewN(u) === 0) return false;
-  if (FRONT && u.team !== "red") return false;
   return true;
 }
 /* THE RIFLE BUTTON: a crewed vehicle of your side first, else the man in the
@@ -809,41 +807,3 @@ function tapTake(x, y) {
   return u ? takeOver(u) : false;
 }
 
-/* A NATION'S FLAG ON ITS OWN LINE (the front only): a pole behind where its
-   army formed up, the flag painted off its row. */
-function plantFlag(team, x, z) {
-  if (!FRONT || !FRONT[team] || !MAP) return;
-  const bx = x + (team === "red" ? -8 : 8), bz = z;
-  const gy = MAP.groundAt(bx, bz);
-  const grp = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.065, 8.5, 8), new THREE.MeshLambertMaterial({ color: 0x8c8f93 }));
-  pole.position.y = 4.25; pole.castShadow = true;
-  grp.add(pole);
-  const cv = document.createElement("canvas"); cv.width = 192; cv.height = 128;
-  drawFlag(cv.getContext("2d"), FRONT[team].flag, 192, 128);
-  const tex = new THREE.CanvasTexture(cv);
-  if (FRONT[team].flagUrl) {           // the nation's real flag (city/flags.js), drawn over the fallback once it decodes
-    const im = new Image();
-    im.onload = function () { cv.getContext("2d").drawImage(im, 0, 0, 192, 128); tex.needsUpdate = true; };
-    im.src = FRONT[team].flagUrl;
-  }
-  tex.encoding = THREE.sRGBEncoding;
-  const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6, 8, 1),
-    new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }));
-  // a little set in the cloth, so it hangs and does not read as a sign
-  const p = flag.geometry.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const u = (p.getX(i) + 1.2) / 2.4;
-    p.setZ(i, Math.sin(u * 5.2) * 0.14 * u);
-    p.setY(i, p.getY(i) - u * u * 0.18);
-  }
-  p.needsUpdate = true; flag.geometry.computeVertexNormals();
-  flag.position.set(1.22, 7.6, 0);
-  flag.castShadow = true;
-  grp.add(flag);
-  grp.position.set(bx, gy, bz);
-  grp.rotation.y = team === "red" ? Math.PI / 2 : -Math.PI / 2;
-  grp.userData.dynamic = true;
-  grp.name = "frontFlag";
-  CBZ.scene.add(grp);
-}

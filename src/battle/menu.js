@@ -118,12 +118,7 @@ function vehiclesIn() {
    swimmers with sharks in among them — and it is one string rather than a
    second unit select per team because the alternative is two more controls on
    the form for one kind of fight. Alternating by spawn index keeps the split
-   even and deterministic; drainSpawns resolves it per body. */
-function kindAt(u, i) {
-  // the grammar (alternating "a|b", counted "m1_abrams*3,men*20") lives in
-  // battle/core/roster.js, the page-independent half
-  return CBZ.battleRoster.kindAt(u, i);
-}
+   even and deterministic; drainSpawns resolves it per body (kindAt, spawn.js). */
 // a roster in words, for a select row: "MEN + DOLPHINS", "M1 ABRAMS + MEN"
 function kindLabel(u) {
   const K = CBZ.unitKit;
@@ -443,11 +438,10 @@ function rosterHasBeasts() {
 function packsFor() {
   const p = MAPS[SET.map].packs.slice();
   // the General's own sorties need the air stack loaded even with no army air
-  if (FRONT && ((FRONT.red.strikes | 0) > 0 || (FRONT.red.queued | 0) > 0 || (FRONT.blue.queued | 0) > 0)) p.push("military", "airbase", "air", "ordnance");
   // airbase rides along for its aircraft FACTORIES, not for a base: raw
-  // milModels.bomber returns a {group, footprint} record, and airbase.js is
-  // the layer that hands back a seated THREE.Group — the exact reason
-  // studio.model asks it first.
+  // milModels.bomber (the B-52H unit) returns a {group, footprint} record,
+  // and airbase.js is the layer that hands back a seated THREE.Group — the
+  // exact reason studio.model asks it first.
   if (SET.redS !== "none" || SET.blueS !== "none") p.push("military", "airbase", "air", "ordnance");
   if (SET.redS === "nuke" || SET.blueS === "nuke") p.push("nukefx");
   /* BLOOD RIDES WITH THE ANIMALS. creature_combat's bite now draws real

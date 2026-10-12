@@ -1832,6 +1832,7 @@
      the ground with a feed line rather than hanging forever on a world that
      built no aircraft at all (a minimal/headless city). */
   const PENDING_AIR_SEC = 6;
+  const PENDING_FLEET_SEC = 20;      // a phone fetching and building the base's fleet
   let pendingAir = null;
 
   function tryAirborne() {
@@ -1839,7 +1840,7 @@
     const comp = pendingAir.comp;
     const want = CBZ.cityOriginPlane && CBZ.cityOriginPlane();
     const planes = CBZ.cityOriginPlanes ? CBZ.cityOriginPlanes() : [];
-    if (!planes.length) return false;
+    if (!planes.length) { if (want && CBZ.fortBrandtFleet) CBZ.fortBrandtFleet.ensure(); return false; }
     // Name match first (the title-screen pick), then a same-class fallback, then
     // anything that flies — the player asked for a bomber, and being handed a
     // helicopter because the bomber did not build is better than being handed
@@ -1848,6 +1849,14 @@
     const wantLc = want ? String(want).toLowerCase() : null;
     if (wantLc) for (let i = 0; i < planes.length; i++) {
       if (String(planes[i].id).toLowerCase() === wantLc) { choice = planes[i]; break; }
+    }
+    // FORT BRANDT'S AIRFRAMES LOAD WHEN ASKED FOR (island_military.js FLEET).
+    // A pick that is not on the apron yet waits for the fleet to park rather
+    // than taking the first other aircraft; the wait has its own clock.
+    const F = CBZ.fortBrandtFleet;
+    if (!choice && wantLc && F && F.state() !== "ready") {
+      F.ensure();
+      if (pendingAir.t < PENDING_FLEET_SEC) return false;
     }
     if (!choice) for (let i = 0; i < planes.length; i++) if (planes[i].kind === "plane") { choice = planes[i]; break; }
     if (!choice) choice = planes[0];
@@ -1876,7 +1885,8 @@
     if (!pendingAir) return;
     pendingAir.t += dt;
     if (tryAirborne()) return;
-    if (pendingAir.t > PENDING_AIR_SEC) {
+    const F = CBZ.fortBrandtFleet, waiting = F && F.state() !== "ready" && F.state() !== "idle";
+    if (pendingAir.t > (waiting ? PENDING_FLEET_SEC : PENDING_AIR_SEC)) {
       pendingAir = null;
     }
   }

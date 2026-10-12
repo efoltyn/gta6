@@ -274,13 +274,7 @@
   #ctl button{position:relative}
   #ctl button.hide{display:none}
 
-  /* ---- THE FRONT (city/frontline.js opens this page over Gang City): no war
-     room, no question, no call. Two flags and the road in. ---- */
-  body.front #menu section,body.front #menu .hubLink,body.front #start{display:none}
-  body.front #menu .dock{position:fixed;left:0;right:0;bottom:22vh;margin:0;background:none}
   .flagimg{height:.72em;width:auto;vertical-align:.02em;border-radius:2px;box-shadow:0 1px 6px rgba(0,0,0,.55)}
-  #end .tally{display:flex;justify-content:center;gap:22px;margin:0 0 16px;font:800 12px/1.3 ui-sans-serif,system-ui,sans-serif;letter-spacing:.18em;opacity:.85}
-  #end .tally img{height:14px;vertical-align:-2px;margin-right:7px;border-radius:2px}
   .art-snow{--art:radial-gradient(120% 55% at 28% 112%,#dfe6ec 58%,transparent 59%),
     radial-gradient(110% 50% at 88% 118%,#c9d3dc 58%,transparent 59%),
     linear-gradient(180deg,#9fb2c6 0%,#dbe3ea 60%,#b9c6d2 100%)}

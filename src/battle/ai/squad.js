@@ -44,14 +44,15 @@ function tacAdapter() {
   TAC.A = {
     now: function () { return simT; },
     rand: lcg, clock: tacClock,
-    get host() { return HOST || MAP; },
+    get host() { return HOST; },
     sees: eyeLos,
     fold: tacFold,
     near: function (x, z, r, out) { return fineNear(x, z, r, out); },
     enemyTeam: function (t) { return t === "red" ? "blue" : "red"; },
-    enemyCOM: function (t) { return teamCOM[t === "red" ? "blue" : "red"]; },
+    // where a squad marches: its force's objective (Gang City), else the enemy's centre
+    enemyCOM: function (t, S) { const m = S && S.men && S.men[0]; return m ? objectiveOf(m) : teamCOM[t === "red" ? "blue" : "red"]; },
     homeDir: tacHomeDir,
-    order: function (t) { return ORDER[t]; },
+    order: squadOrderOf,
     hunting: function (t) { return !!HUNT[t]; },
     enemyBroken: function (t) { const F = ARMY[t === "red" ? "blue" : "red"]; return !!(F && F.broken); },
     odds: function (t) {
@@ -82,7 +83,7 @@ function tacHomeDir(t) {
 }
 // the reverse-slope search (morale.js hullDown) under the same global budget
 function tacFold(x, z, tx, tz) {
-  if (!MAP.terrainLos) return null;
+  if (!HOST.terrainLos) return null;
   if (simT > hullTokT) {
     hullTokens = Math.min(HULL_RATE * 0.5, hullTokens + (simT - hullTokT) * HULL_RATE);
     hullTokT = simT;
@@ -213,7 +214,7 @@ function squadThink(m, thinkDt) {
      nearest his post, and he fights from behind it instead. This is what a
      held line on the dunes IS; the squad's own post search only has the
      budget for a couple of folds per assignment. */
-  if (p.kind === "open" && MAP.terrainLos && tgt && !m.hunt &&
+  if (p.kind === "open" && HOST.terrainLos && tgt && !m.hunt &&
       (task === "hold" || task === "fight" || task === "overwatch")) {
     const hd = hullFor(m, tgt);
     if (hd && Math.hypot(hd.x - p.x, hd.z - p.z) < 12) {
@@ -268,8 +269,8 @@ function squadThink(m, thinkDt) {
 // a sight line from his eyes at a given height (the stance he is not in yet)
 function losFrom(m, o, eye) {
   const ay = m.pos.y + eye, by = o.pos.y + (o.losY || 1.35);
-  if (CBZ.micro.segmentBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z)) return false;
-  return !(MAP.terrainLos && terrainBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z));
+  if (HOST.segmentBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z)) return false;
+  return !(HOST.terrainLos && terrainBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z));
 }
 function fireStanceFor(m, o) {
   const e0 = m.eyeH0 || 1.52;
@@ -444,8 +445,8 @@ function downedStep(m, sdt) {
     const h = tacHomeDir(m.team);
     m.pos.x += h.x * 0.35 * sdt; m.pos.z += h.z * 0.35 * sdt;
     m.speed = 0.35;
-    CBZ.micro.resolveCircle(m.pos, m.rad || 0.45, m.pos.y, 1.8);
-    m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
+    HOST.resolveCircle(m.pos, m.rad || 0.45, m.pos.y, 1.8);
+    m.pos.y = HOST.bodyY(m, m.pos.x, m.pos.z);
   }
   // overrun: an enemy on top of him and none of his own near
   m._dnT = (m._dnT || 0) - sdt;
@@ -497,7 +498,7 @@ function dragFollow(m) {
   const l = Math.hypot(dx, dz) || 1;
   w.pos.x = m.pos.x + dx / l * 1.05;
   w.pos.z = m.pos.z + dz / l * 1.05;
-  w.pos.y = MAP.bodyY(w, w.pos.x, w.pos.z);
+  w.pos.y = HOST.bodyY(w, w.pos.x, w.pos.z);
   if (w.group) w.group.rotation.y = Math.atan2(-dx, -dz);
 }
 
@@ -810,14 +811,14 @@ function soldierRig(m) {
 const _vq = [], _vq2 = [];
 function tryVault(m, nx, nz) {
   if (!TAC.on || m.beast || m.vehicle || m.downed || m.dragging || m.stance === "prone" || m.vault) return false;
-  const H = HOST || MAP;
+  const H = HOST;
   if (!H || !H.queryColliders) return false;
   const cols = H.queryColliders(m.pos.x + nx * 0.8, m.pos.z + nz * 0.8, 0.35, _vq) || [];
   for (let i = 0; i < cols.length; i++) {
     const c = cols[i];
     if (c.minX == null) continue;
     const cx = (c.minX + c.maxX) * 0.5, cz = (c.minZ + c.maxZ) * 0.5;
-    const gy = MAP.groundAt(cx, cz);
+    const gy = HOST.groundAt(cx, cz);
     const top = (c.y1 == null ? 9 : c.y1) - gy;
     if (top < 0.4 || top > 1.3) continue;
     const thick = Math.abs(nx) * (c.maxX - c.minX) + Math.abs(nz) * (c.maxZ - c.minZ);
@@ -828,7 +829,7 @@ function tryVault(m, nx, nz) {
     let blocked = false;
     for (let k = 0; k < land.length; k++) {
       const o = land[k];
-      if (H.colliderContains && H.colliderContains(o, bx, bz, 0.4) && (o.y1 == null ? 9 : o.y1) - MAP.groundAt(bx, bz) > 0.35) { blocked = true; break; }
+      if (H.colliderContains && H.colliderContains(o, bx, bz, 0.4) && (o.y1 == null ? 9 : o.y1) - HOST.groundAt(bx, bz) > 0.35) { blocked = true; break; }
     }
     if (blocked) continue;
     const dur = 0.5 + top * 0.18;
@@ -851,11 +852,11 @@ function stepVault(m, sdt) {
   m.pos.x = V0.ax + (V0.bx - V0.ax) * u;
   m.pos.z = V0.az + (V0.bz - V0.az) * u;
   const arc = CBZ.soldier && CBZ.soldier.vaultArc ? CBZ.soldier.vaultArc(u, V0.h) : (V0.h + 0.12) * Math.sin(Math.PI * u);
-  m.pos.y = MAP.groundAt(m.pos.x, m.pos.z) + arc;
+  m.pos.y = HOST.groundAt(m.pos.x, m.pos.z) + arc;
   m.speed = Math.hypot(V0.bx - V0.ax, V0.bz - V0.az) / V0.dur;
   if (u >= 1) {
     m.vault = null; m.stuckT = 0; m.detourT = 0;
-    m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
+    m.pos.y = HOST.bodyY(m, m.pos.x, m.pos.z);
   }
 }
 
@@ -891,7 +892,7 @@ function tacticsVehicle(u) {
     if (!u.vs.mobility) u.target.set(u.pos.x + h.x * 60, 0, u.pos.z + h.z * 60);
     else u.target.set(u.pos.x, 0, u.pos.z);
     u.slot = "fallback";
-    if (Math.hypot(u.pos.x - foe.x, u.pos.z - foe.z) > FLEE_GAPS * (MAP.gap || 150)) u.fled = true;
+    if (Math.hypot(u.pos.x - foe.x, u.pos.z - foe.z) > FLEE_GAPS * (HOST.gap || 150)) u.fled = true;
     return true;
   }
   const S = u._escortBy;
