@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "69e20a15b9971baaeb3a15850617af9aa42c921d",
-  "createdAt": "2026-10-12T03:03:24.519Z",
-  "fileCount": 1372,
-  "totalBytes": 50502707,
+  "sourceCommit": "b8e514c0fb4e86ac38a733d6cb8f1709c95c0097",
+  "createdAt": "2026-10-12T03:19:51.165Z",
+  "fileCount": 1373,
+  "totalBytes": 50520533,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -398,8 +398,8 @@
     },
     {
       "file": "src/city/airport_kit.js",
-      "bytes": 104931,
-      "sha256": "0c40146e02f9a5e81378b835549e984fe81128d9208e098f64a3a7d7bfa1ea7f"
+      "bytes": 105844,
+      "sha256": "d8d1a3fac3d36d1b1734a9566e0f42fe82136c4622cdc6e204300728292047af"
     },
     {
       "file": "src/city/airside.js",
@@ -548,8 +548,8 @@
     },
     {
       "file": "src/city/buildings.js",
-      "bytes": 218361,
-      "sha256": "43bd2642734b3dcaba6806c41ed1cbdf319dc3dca6010a6bc0f4318471cb12ca"
+      "bytes": 218571,
+      "sha256": "8489714443d99409815703591e3751090af2ca628a2ff2c32b78ca5d19f6689f"
     },
     {
       "file": "src/city/buildings_civic.js",
@@ -1323,8 +1323,8 @@
     },
     {
       "file": "src/city/island_military.js",
-      "bytes": 26143,
-      "sha256": "67bb4955d2147fcefe5fe45af877b89d0cba47962948c9036a76fc8bbde29955"
+      "bytes": 26167,
+      "sha256": "700b95790cd53b28bf21be0e04ff2358303bd3ccff3689a73e8bec394149458a"
     },
     {
       "file": "src/city/island_speedway.js",
@@ -1413,13 +1413,13 @@
     },
     {
       "file": "src/city/metro.js",
-      "bytes": 31969,
-      "sha256": "1929e1f1e82cd5a143a598ef7c0b9fd572052bfec2c5df9242973ae30314222b"
+      "bytes": 32582,
+      "sha256": "1b6bf3bd0769368242fc733426163ccefaf6d9156e2259df7102bd9c980b11d4"
     },
     {
       "file": "src/city/metro_fabric.js",
-      "bytes": 97233,
-      "sha256": "1fe463b3f1159c508c592368a3716e3435712568736a0d2e3c8fd9c2ba5f0583"
+      "bytes": 99593,
+      "sha256": "4a8b9cb9d4f41c68f51d85ba148ef1e7bb27dba21ef45333c5e64f3129aac3c2"
     },
     {
       "file": "src/city/metro_ground.js",
@@ -1683,8 +1683,8 @@
     },
     {
       "file": "src/city/props.js",
-      "bytes": 107598,
-      "sha256": "260006569c5e0ed3aa7a887a78a0f9dabf220e011c22ee22df13a91cbfa3cf23"
+      "bytes": 108030,
+      "sha256": "0791b7c71cdeed524e6e4c524fee1558f711feae5a7693c61dae2afb0a245eff"
     },
     {
       "file": "src/city/propuse.js",
@@ -1908,8 +1908,8 @@
     },
     {
       "file": "src/city/traffic.js",
-      "bytes": 31256,
-      "sha256": "5bde980f1a090c3356090928a0351cc9cfbe5e040c4c40865e12af1cf75a447b"
+      "bytes": 31294,
+      "sha256": "24f3575ee5feb2eb623a4c02fe03cb8625d3f85d8fc9df4e424d0fb9c795dd0f"
     },
     {
       "file": "src/city/transfer.js",
@@ -2083,8 +2083,8 @@
     },
     {
       "file": "src/city/world.js",
-      "bytes": 21389,
-      "sha256": "07331d4b18a8dcaaafb25011803168ae71ef69f8098eed82c27230ce634386f1"
+      "bytes": 21430,
+      "sha256": "a216387f8fd6a930b4e8e6f7e94ce5004a44363b921bb28dcddd61ea651a84be"
     },
     {
       "file": "src/city/worldmap.js",
@@ -2180,6 +2180,11 @@
       "file": "src/core/lights.js",
       "bytes": 6550,
       "sha256": "ddbce3f0e8e4388bdfc28cf8ba8e721975f178e1624a2905913c17f9a0a0f397"
+    },
+    {
+      "file": "src/core/lodlights.js",
+      "bytes": 12522,
+      "sha256": "2180ca65de5a7166ef11a3d5243c68f616029a11241e1b4b0766bbaa98ac40b9"
     },
     {
       "file": "src/core/loop.js",
@@ -4313,8 +4318,8 @@
     },
     {
       "file": "src/world/basekit.js",
-      "bytes": 43522,
-      "sha256": "338994d09fc89e80344d021e0c3b5251dfc3e23123b0a58cdf70b87cc60d52c7"
+      "bytes": 43802,
+      "sha256": "ec949bbad5cace2c69d003196e8e76aeedcde3cbd52bd6f6c5c0002b68b60740"
     },
     {
       "file": "src/world/building_dress.js",
@@ -6758,33 +6763,33 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 62780,
-      "sha256": "61f7bfb5a10491dbf6f5f44a711933a374e0def271af1cfef239f2bb12f6aaa9"
+      "bytes": 62858,
+      "sha256": "cf79d2ee741563648ad7cc75d5e34711c0bdbe444b3ebb330c797f8f7bdcb8f7"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 62823,
-      "sha256": "d762b71ce8b77ce7ad5800159bd91bd896964ea5a093bbfac1cc022b283402b6"
+      "bytes": 62901,
+      "sha256": "4ccb7ad9cd1089049c958ca9e09e71110bf3299793d672a44efc5d9c72b5877b"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 62792,
-      "sha256": "93a68d59c9f93b33dd46f4b5248df606a713e3daaf655c0f6084e16c9eefc3b0"
+      "bytes": 62870,
+      "sha256": "e70e69d40da63c9f0f25c6da54d5f0859e95a8e75815434100af8a67f44ecb23"
     },
     {
       "file": "gang-city.html",
-      "bytes": 62747,
-      "sha256": "8a6e217e8e33ab987b2fdcf8b6993308f3878fb6d185aaea586a1810bbc6023d"
+      "bytes": 62825,
+      "sha256": "c0441a45bfd7e129fd5b15b3f69bfa8a28ae5f4e7b8b3cde4230823a69f4ead0"
     },
     {
       "file": "gun-game.html",
-      "bytes": 62769,
-      "sha256": "d2c0da3912c218b72a5d57152ed34e89291f2f291296d6c4271f3aa9e2ffc07d"
+      "bytes": 62847,
+      "sha256": "6184ff5ee9f1c0ff31f02e7021a9b970027ec41c5e3b191465804f6a49be26df"
     },
     {
       "file": "games/battle.html",
-      "bytes": 13598,
-      "sha256": "1d7ad434a7197c1e088b7461e835675574b4538f64538b2008ca73fa726d5f86"
+      "bytes": 13601,
+      "sha256": "e97fc14cd14bea9d89e7031b2b832b6788503c60eda232733f3e1b8b98b92fc6"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6794,7 +6799,7 @@
     {
       "file": "games/bomb-survivor.html",
       "bytes": 75975,
-      "sha256": "651da42f1a427cade4a71c14bb64bd9d470a6f413622b8a8b6ca5e64de132102"
+      "sha256": "107b09f647ba5071226816ecd8ad5ee5dd65d86635bd8ad9f09046c9f300f475"
     },
     {
       "file": "games/dev.html",
@@ -6814,7 +6819,7 @@
     {
       "file": "games/warlord.html",
       "bytes": 73769,
-      "sha256": "1a8669439085ee9afd5b29c12b3bfc89b7d7ab0450d8ee3020c4d67ab632c9b7"
+      "sha256": "f55d29f38e79dc72246c4f63f6139ee94decb96403da6030028976d6c89f85ca"
     },
     {
       "file": "thumbs/shark-sim.jpg",
