@@ -91,7 +91,7 @@ const cellJob = () => CBZ.streamJobs.find(j => j.name === "cell");
 const frame = (dt) => { for (const u of CBZ.updaters) u.fn(dt); };
 const partsIn = () => root.children.filter(o => /^part/.test(o.name)).length;
 // approach from far enough that it is not in view (the frames build it)
-CBZ.player.pos.set(39990 - CBZ.slice.view() - 15, 0, 0); CBZ.streamTick(false);
+CBZ.player.pos.set(39990 - CBZ.slice.view() - 75, 0, 0); CBZ.streamTick(false);   // (past the view by more than an unbuilt job's 60 m spill pad)
 let sawHalf = false, frames = 0;
 while (cellJob().state !== "built" && frames < 200) { frame(1 / 60); frames++; if (cellJob().state === "building" && partsIn() > 0) sawHalf = true; }
 const stepped = { state: cellJob().state, frames, runs: stepRuns.join(""), inScene: partsIn(), sawHalf };

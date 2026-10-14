@@ -171,7 +171,8 @@
   // { ox, oy, oz: sphere centre relative to the root's position, r, safe, at }
   const fogCache = new WeakMap();
   const FOG_REMEASURE_MS = 4000;           // an actor's own parts move (a crew, a rotor)
-  const FOG_REMEASURE_STATIC_MS = 15000;   // a group a builder adds to later (a town's late parcels)
+  // (a static group is measured again only when its child count changes: a
+  // town adding a late parcel; a whole-subtree walk on a timer was a spike)
   function isIdentity(m) { const e = m.elements; return e[0] === 1 && e[5] === 1 && e[10] === 1 && e[15] === 1 && !e[1] && !e[2] && !e[4] && !e[6] && !e[8] && !e[9] && !e[12] && !e[13] && !e[14]; }
   function fogSafeMat(m) {
     if (!m) return true;
@@ -183,7 +184,7 @@
   function fogSphere(o, now) {
     let f = fogCache.get(o);
     const keepSafe = f ? f.safe : null;
-    f = { ox: 0, oy: 0, oz: 0, r: 0, safe: true, ok: false, dyn: !!(o.userData && o.userData.dynamic), at: now };
+    f = { ox: 0, oy: 0, oz: 0, r: 0, safe: true, ok: false, dyn: !!(o.userData && o.userData.dynamic), at: now, kids: o.children.length };
     try {
       let safe = keepSafe == null ? true : keepSafe;
       if (keepSafe == null) {
@@ -223,7 +224,8 @@
   const hidden = [];
   const viewF = new THREE.Frustum(), sunF = new THREE.Frustum();
   const _m = new THREE.Matrix4(), _s = new THREE.Sphere();
-  const A = CBZ.viewScopeStats = { frames: 0, shadowFrames: 0, tested: 0, hidden: 0, measures: 0, lastHidden: 0, fogHidden: 0, lastFogHidden: 0 };
+  const A = CBZ.viewScopeStats = { frames: 0, shadowFrames: 0, tested: 0, hidden: 0, measures: 0, lastHidden: 0, fogHidden: 0, lastFogHidden: 0, fogMeasures: 0 };
+  const FOG_MEASURES_PER_FRAME = 32;   // the fog half's own (it must never starve the frustum half's)
   const MEASURES_PER_FRAME = 24;   // fresh Box3 subtree walks allowed per frame (the 30-50 ms hitch-stack farcull budgets against)
 
   function restore() {
@@ -271,7 +273,7 @@
     const reach = rootId && SG && SG.reach > 0 ? SG.reach : Infinity;
     const now = performance.now();
     const kids = root.children;
-    let n = 0, nf = 0, measures = MEASURES_PER_FRAME;
+    let n = 0, nf = 0, measures = MEASURES_PER_FRAME, fogMeasures = FOG_MEASURES_PER_FRAME;
     for (let i = 0; i < kids.length; i++) {
       const o = kids[i];
       if (!o.visible) continue;                                   // farcull's (or anyone's) hide — theirs
@@ -279,7 +281,7 @@
       if (o.isGroup && !o.children.length) continue;
       if (reach < Infinity && !o.isInstancedMesh) {
         let f = fogCache.get(o);
-        if ((!f || (f.safe && now - f.at >= (f.dyn ? FOG_REMEASURE_MS : FOG_REMEASURE_STATIC_MS))) && measures > 0) { measures--; A.measures++; f = fogSphere(o, now); }
+        if ((!f || (f.safe && (f.dyn ? now - f.at >= FOG_REMEASURE_MS : o.children.length !== f.kids))) && fogMeasures > 0) { fogMeasures--; A.fogMeasures++; f = fogSphere(o, now); }
         if (f && f.safe && f.ok) {
           const cx = o.position.x + f.ox, cz = o.position.z + f.oz;
           if (Math.hypot(cx - SG.x, cz - SG.z) - f.r > reach) {
@@ -318,7 +320,7 @@
     return {
       on: CBZ.CONFIG.VIEW_SCOPE !== false, frames: A.frames, shadowFrames: A.shadowFrames,
       lastHidden: A.lastHidden, avgHidden: A.frames ? +(A.hidden / A.frames).toFixed(1) : 0,
-      lastFogHidden: A.lastFogHidden, avgFogHidden: A.frames ? +(A.fogHidden / A.frames).toFixed(1) : 0,
+      lastFogHidden: A.lastFogHidden, avgFogHidden: A.frames ? +(A.fogHidden / A.frames).toFixed(1) : 0, fogMeasures: A.fogMeasures,
       tested: A.tested, measures: A.measures, arenaChildren: root ? root.children.length : 0,
     };
   };

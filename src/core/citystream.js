@@ -170,6 +170,36 @@
   CBZ.streamJobs = jobs;
 
   function rectKeeps(r, pad) { return CBZ.sliceKeepsRect(r.minX, r.maxX, r.minZ, r.maxZ, pad || 0); }
+  /* WHAT A JOB DRAWS IS NOT ITS RECT. A builder's rect is where it was asked
+     to build; what it builds can stand past it (a lot's forecourt, a town's
+     edge parcels, a pruned cell's long buildings): measured, up to 60 m and
+     more. Wanted and judged "in view" by its rect alone, such a job was built
+     at the edge of the keep circle with its near edge already inside the view
+     (a pop, measured on the drive). So a job is wanted, and counted in view,
+     by its rect grown by its SPILL: measured when it settles (its objects'
+     bounds past the rect, +10 m), SPILL_UNKNOWN until it has been built. */
+  const SPILL_UNKNOWN = 60;
+  function spillOf(j) { return j.spill != null ? j.spill : SPILL_UNKNOWN; }
+  const _sb = window.THREE ? new window.THREE.Box3() : null, _gb = window.THREE ? new window.THREE.Box3() : null;
+  function measureSpill(job) {
+    if (!_sb || !job.rect || !job.objs || !job.objs.length) return;
+    _sb.makeEmpty();
+    for (const it of job.objs) {
+      const o = it.o; if (!o) continue;
+      o.updateWorldMatrix(true, true);
+      o.traverse(function (c) {
+        if (!c.isMesh || c.isInstancedMesh) return;            // a pool's box is its prototype's, not its spread
+        const g = c.geometry; if (!g) return;
+        if (!g.boundingBox) { const p = g.attributes && g.attributes.position; if (!p || !p.array) return; try { g.computeBoundingBox(); } catch (e) { return; } }
+        if (!g.boundingBox || g.boundingBox.isEmpty()) return;
+        _gb.copy(g.boundingBox).applyMatrix4(c.matrixWorld); _sb.union(_gb);
+      });
+    }
+    if (_sb.isEmpty()) { job.spill = 0; return; }
+    const r = job.rect;
+    const sp = Math.max(0, r.minX - _sb.min.x, _sb.max.x - r.maxX, r.minZ - _sb.min.z, _sb.max.z - r.maxZ);
+    job.spill = Math.min(400, Math.round(sp)) + (sp > 0 ? 10 : 0);
+  }
 
   function cityRoot() { const A = CBZ.city && CBZ.city.arena; return (A && A.root) || (CBZ._cityRootBuilding || null); }
 
@@ -609,6 +639,7 @@
         job.objs.push({ o: G, parent: root });
       }
     }
+    if (job.spill == null) { try { measureSpill(job); } catch (e) {} }
     for (const it of job.objs || []) {
       try { CBZ.freeStaticArrays(it.o); } catch (e) {}
       try { if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(it.o); } catch (e) {}
@@ -806,7 +837,7 @@
   }
   function takeOut(j) {
     const t0 = performance.now();
-    if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST)) { park(j); CBZ.streamStats.ms.park += performance.now() - t0; }
+    if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST + (j.spill || 0))) { park(j); CBZ.streamStats.ms.park += performance.now() - t0; }
     if (j.state === "parked" && j.fn && !j.noFree && !rectKeeps(j.rect, FREE_DIST)) { freeJob(j); CBZ.streamStats.ms.free += performance.now() - t0; }
   }
   // THE PLAN (10 Hz): re-centre, what is wanted (nearest first, what lies
@@ -831,7 +862,7 @@
       CBZ.streamStats.recentres++;
     }
     const want = [];
-    for (let i = 0; i < jobs.length; i++) { const j = jobs[i]; if (j.state !== "built" && rectKeeps(j.rect)) want.push(j); }
+    for (let i = 0; i < jobs.length; i++) { const j = jobs[i]; if (j.state !== "built" && rectKeeps(j.rect, spillOf(j))) want.push(j); }
     // nearest first, but what lies AHEAD of a moving player counts as nearer
     // (at 30 m/s the road ahead reaches view distance in seconds; the ground
     // beside and behind can wait): distance minus half its forward reach
@@ -856,15 +887,16 @@
     for (const j of want) {
       if (j.state === "built") continue;           // a parent's run built it inline
       if (force) { while (!bringIn(j, false)) {} continue; }
-      if (distTo(j.rect, EYE.x, EYE.z) < V2 || distTo(j.rect, P.pos.x, P.pos.z) < V2) { bringIn(j, true); continue; }
-      if (!soon && (distTo(j.rect, EYE.x, EYE.z) < SOON2 || distTo(j.rect, P.pos.x, P.pos.z) < SOON2 ||
-          (lead > 20 && distTo(j.rect, AH.x, AH.z) < V2))) soon = true;
+      const sp = spillOf(j), Vs = (VIEW + sp) * (VIEW + sp), Ss = (SOON + sp) * (SOON + sp);
+      if (distTo(j.rect, EYE.x, EYE.z) < Vs || distTo(j.rect, P.pos.x, P.pos.z) < Vs) { bringIn(j, true); continue; }
+      if (!soon && (distTo(j.rect, EYE.x, EYE.z) < Ss || distTo(j.rect, P.pos.x, P.pos.z) < Ss ||
+          (lead > 20 && distTo(j.rect, AH.x, AH.z) < Vs))) soon = true;
       rest.push(j);
     }
     plan.want = rest; plan.wi = 0; plan.soon = soon;
     const out = [];
     for (const j of jobs) {
-      if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST)) out.push(j);
+      if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST + (j.spill || 0))) out.push(j);
       // a parked job this far out is freed outright (it re-runs if the player
       // comes back); pruned boot content has no fn and stays parked
       else if (j.state === "parked" && j.fn && !j.noFree && !rectKeeps(j.rect, FREE_DIST)) out.push(j);
@@ -891,7 +923,7 @@
     while (!stepping && plan.wi < plan.want.length) {
       if (did && performance.now() - t0 >= share) break;
       const j = plan.want[plan.wi++];
-      if (j.state === "built" || !rectKeeps(j.rect)) continue;       // done meanwhile, or left range since the plan
+      if (j.state === "built" || !rectKeeps(j.rect, spillOf(j))) continue;   // done meanwhile, or left range since the plan
       if (j.parent && jobs.indexOf(j) < 0) continue;                 // a freed parent's child
       if (!bringIn(j, false)) stepping = j;
       did = true;
