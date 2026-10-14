@@ -131,6 +131,9 @@
      on a desk in a closed room: no canvas at all until someone sees it.
      opts.keep: keep the canvas after upload (a texture read as a SOURCE by
      other code). The painter must be pure: same picture every call. */
+  // a canvas handed back is shrunk at once: its backing store goes now, not
+  // whenever the collector gets to the element (a canvas on the page is left)
+  function giveBack(c) { if (c && !c.isConnected && c.width * c.height > 1) { c.width = 1; c.height = 1; } }
   CBZ.lazyCanvasTexture = function (w, h, paint, opts) {
     opts = opts || {};
     const t = new Orig(undefined);          // not Watched: this one frees itself
@@ -151,11 +154,11 @@
     t._cbzLazyPaint = { w: w, h: h, paint: paint, opts: opts };   // (clone() makes another lazy one)
     // a reader that copied the pixels out (entities/pedinstance.js's atlas)
     // hands the canvas back; the next read paints it again
-    t._cbzRelease = function () { if (cv) { cv = null; A.lazyReleased++; } };
+    t._cbzRelease = function () { if (cv) { giveBack(cv); cv = null; A.lazyReleased++; } };
     if (opts.name) t.name = opts.name;
     if (opts.eager) void t.image;             // painted now (an idle-time painter), still given back after use
     if (CFG.TEX_FREE !== false && !opts.keep) {
-      t.onUpdate = function () { cv = null; A.lazyReleased++; };
+      t.onUpdate = function () { if (cv) giveBack(cv); cv = null; A.lazyReleased++; };
     }
     return t;                                 // (CanvasTexture's constructor flagged it for upload)
   };
@@ -196,7 +199,7 @@
       },
       set: function (v) { if (v && typeof v.getContext === "function") { cv = v; cc = null; } },
     });
-    tex.onUpdate = function () { if (tex._cbzDropAfter) { tex._cbzDropAfter = false; cv = null; cc = null; A.lazyReleased++; } };
+    tex.onUpdate = function () { if (tex._cbzDropAfter) { tex._cbzDropAfter = false; if (cv) giveBack(cv); cv = null; cc = null; A.lazyReleased++; } };
     tex._cbzLazyW = w; tex._cbzLazyH = h;
     const rec = { tex: tex, w: w, h: h,
       paint: function () { if (!inPaint) tex.needsUpdate = true; return rec; },

@@ -3216,6 +3216,10 @@
         set.partsY = Object.assign({}, parts, { collar: 1 });
       }
     }
+    // its colours are read: the canvas goes now, and the first upload or page
+    // copy paints it again (an outfit is often built for a body nobody sees
+    // for a while: the boot builds ~70 of them before the first frame)
+    if (tex._cbzRelease) tex._cbzRelease();
     return set;
   }
 
