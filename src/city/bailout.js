@@ -844,7 +844,11 @@
       P.pos.y = gy;
       const hard = (F.phase !== "canopy");
       endFall(true);
-      if (hard && CBZ.cityHurtPlayer) {
+      // outside Gang City the island's own player funnel (modecaps.js)
+      const other = CBZ.game && CBZ.game.mode !== "city" && CBZ.hurtWorldPlayer;
+      if (hard && other) {
+        try { CBZ.hurtWorldPlayer(9999, P.pos.x, P.pos.z, "fell without a parachute"); } catch (e) {}
+      } else if (hard && CBZ.cityHurtPlayer) {
         try { CBZ.cityHurtPlayer(9999, { cause: "fell", fatal: true }); } catch (e) {}
       } else if (CBZ.sfx) { try { CBZ.sfx("land"); } catch (e) {} }
     }

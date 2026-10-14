@@ -2084,7 +2084,7 @@
             }
             a._twSafe = false;
           }
-          if (_s.gust > 60 && d < t.R * 0.9) { try { CBZ.surv.hurt(a, 1e6, { fromX: t.x, fromZ: t.z, fling: 8 }); } catch (e) {} return; }
+          if (_s.gust > 60 && d < t.R * 0.9) { try { CBZ.surv.hurt(a, 1e6, { fromX: t.x, fromZ: t.z, fling: 8 }); } catch (e) {} return; }   // only a >60 m/s (EF2+) core kills outright, and disasterhurt.js warns first
           const drag = Math.min(9, _s.gust * 0.10);
           if (a.isPlayer) dragPlayer(t, dt, drag);
           else {

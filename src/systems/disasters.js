@@ -3912,7 +3912,7 @@
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
       if (b.platforms) for (const p of b.platforms) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
       // crush anyone in the footprint
-      surv().hurtRadius(b.x, b.z, Math.max(b.w, b.d) * 0.62, 1e6);
+      surv().hurtRadius(b.x, b.z, Math.max(b.w, b.d) * 0.62, 1e6, { box: b, cause: "crushed under a collapsing building" });   // the footprint, not a circle past its walls
       // blow every window out of the building as it goes
       if (CBZ.shatterGlass) CBZ.shatterGlass(b.x, b.z, Math.max(b.w, b.d) * 0.85);
       if (b.group) b.group.visible = false;
@@ -4277,7 +4277,7 @@
       else {
         // step voltage falls away with distance: survivable, and it hurts
         const k = 1 - (d - GROUND_LETHAL) / (GROUND_R - GROUND_LETHAL);
-        surv().hurt(a, 18 + 62 * k * k, { fromX: bx, fromZ: bz, cause: "killed by the ground current" });
+        surv().hurt(a, 30 * k * k + 8 * k, { fromX: bx, fromZ: bz, cause: "killed by the ground current" });   // 38 at the lethal edge (no worse than disasterhurt's warning inside it), ~0 at GROUND_R (was 18-80: an 18 hp cliff at 11 m)
         if (a.dead) kills++;
         hit.push(a);
       }

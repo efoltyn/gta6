@@ -255,6 +255,9 @@
       // active disaster's default, else a generic fallback
       const cause = (imp && imp.cause) || surv._cause || null;
       if (actor.isPlayer) {
+        // THE FAIRNESS LAW (systems/disasterhurt.js) prices every hit on the
+        // player first and comes back through here with what it decided
+        if (CBZ.disasterHurt && CBZ.disasterHurt.active() && !CBZ.disasterHurt.passing()) { CBZ.disasterHurt(dmg, imp || cause || null); return; }
         if (g.invuln > 0) return;
         CBZ.player.hp -= dmg;
         if (CBZ.player.hp <= 0) { surv._lastImp = imp || null; killPlayer(cause || "eliminated"); }
@@ -267,15 +270,20 @@
     hurtRadius(x, z, radius, dmg, opts) {
       opts = opts || {};
       const r2 = radius * radius;
+      // opts.box {w, d} (a building record works): the hit is the FOOTPRINT,
+      // not the circle round it — a collapse crushes who is under it, not who
+      // is standing on the pavement past its corner. opts.y: the height the
+      // hazard is at (disasterhurt.js ignores a ground hit a floor away).
+      const B = opts.box, bx = B ? (B.w || 0) * 0.5 + 0.3 : 0, bz = B ? (B.d || 0) * 0.5 + 0.3 : 0;
       surv.forEachActor(function (a) {
         const dx = a.pos.x - x, dz = a.pos.z - z;
         const d2 = dx * dx + dz * dz;
-        if (d2 <= r2) {
+        if (B ? (Math.abs(dx) <= bx && Math.abs(dz) <= bz) : d2 <= r2) {
           // physically BLAST everyone in the radius — real knockback / fling
           if (CBZ.body && (opts.knockback || opts.fling)) {
             CBZ.body.hit(a, { fromX: x, fromZ: z, force: opts.knockback || 7, fling: opts.fling || 0 });
           }
-          surv.hurt(a, opts.instakill ? 1e6 : dmg, { fromX: x, fromZ: z, fling: opts.fling || (opts.instakill ? 5 : 0), cause: opts.cause });
+          surv.hurt(a, opts.instakill ? 1e6 : dmg, { fromX: x, fromZ: z, fromY: opts.y, fling: opts.fling || (opts.instakill ? 5 : 0), cause: opts.cause });
         }
       });
     },
@@ -573,6 +581,7 @@
       // never bleeds again" seal) must not follow you into this one. Bots are
       // built fresh by spawnSurvivorBots, so only the player carries state over.
       if (CBZ.trauma) CBZ.trauma.reset(playerActor);
+      if (CBZ.disasterHurt) CBZ.disasterHurt.reset();   // a new round: no grace, i-frames or ledger carried over
       if (CBZ.vitals) CBZ.vitals.reset(CBZ.player);
       if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
       surv.spectating = false; if (CBZ.clearSpectate) CBZ.clearSpectate();

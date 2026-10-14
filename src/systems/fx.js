@@ -383,7 +383,7 @@
           b.y = floor; b.landed = true;
           if (b.mesh) b.mesh.position.y = floor;
           if (CBZ.shake) CBZ.shake(b.mesh ? 0.18 : 0.1);
-          if (b.dmg > 0 && CBZ.surv) CBZ.surv.hurtRadius(b.x, b.z, b.radius + 0.6, b.dmg, { instakill: b.dmg >= 999 });
+          if (b.dmg > 0 && CBZ.surv) CBZ.surv.hurtRadius(b.x, b.z, b.radius + 0.6, b.dmg, { instakill: b.dmg >= 999, y: floor });
           if (b.onLand) try { b.onLand(b.x, b.z); } catch (e) {}
           if (!b.mesh) { debris.splice(i, 1); continue; }
           // a rock lands in its own dust

@@ -164,7 +164,10 @@
   let _lastHeliFlag = false, _lastJetFlag = false;   // for ownership-flip detection
   let _hudEl = null;
 
+  // the live vehicle world's root (city/vehicles.js CBZ.vehicleRoot: Gang
+  // City's arena, or the disaster island's)
   function arenaRoot() {
+    if (CBZ.vehicleRoot) return CBZ.vehicleRoot();
     const a = CBZ.city && CBZ.city.arena;
     return a ? a.root : null;
   }
@@ -991,6 +994,105 @@
     return craft;
   };
 
+  /* ============================================================
+     FLYABLES PARKED BY ANOTHER WORLD.
+     Gang City's own birds are the penthouse heli and the Raptor (ownership
+     flags, the mega-tower pad). Another vehicle world (config.js
+     CBZ.VEHICLE_MODES: the disaster island, world/island_vehicles.js) parks
+     its own machine somewhere it built, and flies it with exactly this file:
+     the same airframe (city/airframes.js), the same heliStep, the same door
+     arc, the same seat exit, the same crash. Nothing here knows about the
+     island; the island says where, this file says how.
+
+       CBZ.airParkFlyable({x, y, z, heading, variant, name, livery})
+           -> craft   y is the SURFACE the skids stand on
+       CBZ.airUnpark(craft)        tear it down (match reset)
+       CBZ.airBoard(craft)         board it (the door arc, then the seat)
+       CBZ.airParkedCraft()        the live list (for a world's prompts)
+     A parked craft is solid to people on foot (one collider round the
+     fuselage, `noAircraft` so no flight sweep ever crashes into it) and is
+     never in the city's ownership/keep/hot-jet machinery.
+     ============================================================ */
+  const worldParked = [];
+  function parkCollider(craft) {
+    const len = 8.2, wid = 2.1, ht = 2.6;
+    const h = craft.heading || 0, ca = Math.abs(Math.cos(h)), sa = Math.abs(Math.sin(h));
+    // the cabin, not the tail boom's full reach: walk round the tail, not into the cab
+    const ex = (ca * wid / 2 + sa * len / 2) * 0.8, ez = (sa * wid / 2 + ca * len / 2) * 0.8;
+    const base = craft.pos.y - (craft.groundOffset != null ? craft.groundOffset : craft.belly);
+    const c = craft._parkCol || (craft._parkCol = { minX: 0, maxX: 0, minZ: 0, maxZ: 0, y0: 0, y1: 0, ref: null, noAircraft: true });
+    c.minX = craft.pos.x - ex; c.maxX = craft.pos.x + ex;
+    c.minZ = craft.pos.z - ez; c.maxZ = craft.pos.z + ez;
+    c.y0 = base + 0.25; c.y1 = base + ht;
+    if (CBZ.colliders && CBZ.colliders.indexOf(c) < 0) CBZ.colliders.push(c);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  function unparkCollider(craft) {
+    const c = craft && craft._parkCol;
+    const i = c && CBZ.colliders ? CBZ.colliders.indexOf(c) : -1;
+    if (i >= 0) { CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+  }
+  function parkFlyable(o) {
+    o = o || {};
+    if (!arenaRoot() || !CBZ.airframes) return null;
+    const grp = buildHeliAirframe({ variant: o.variant || "vip", name: o.name || "Helicopter", livery: o.livery, pilot: false });
+    const craft = makeCraft("heli", { group: grp, armed: false, name: o.name || "Helicopter" });
+    if (!craft) return null;
+    craft.externalGroup = false;          // ours, built here: no airport registry behind it
+    craft.rotorParts = null;
+    craft.worldParked = true;
+    craft._world = g.mode;
+    // THE SKIDS ON THE DECK. The flight clamp's default rest height is the
+    // belly plus GROUND_PAD, a margin for typed belly numbers; this
+    // airframe's belly is MEASURED (buildHeliAirframe), so it rests on its skids.
+    craft.groundOffset = craft.belly + 0.02;
+    craft.heading = o.heading || 0; craft.pitch = 0; craft.roll = 0;
+    craft.pos.set(o.x, (o.y || 0) + craft.groundOffset, o.z);
+    craft.group.position.copy(craft.pos);
+    setCraftRotation(craft, 0, craft.heading, 0);
+    craft.rotorRate = 0;
+    craft._parked = true;
+    worldParked.push(craft);
+    parkCollider(craft);
+    return craft;
+  }
+  CBZ.airParkFlyable = parkFlyable;
+  CBZ.airUnpark = function (craft) {
+    const i = worldParked.indexOf(craft);
+    if (i < 0) return false;
+    if (_aircraftFlying() === craft) exitAircraft();
+    worldParked.splice(i, 1);
+    unparkCollider(craft);
+    disposeGroup(craft.group);
+    return true;
+  };
+  CBZ.airBoard = function (craft) {
+    if (!craft || craft.destroyed || worldParked.indexOf(craft) < 0) return false;
+    boardCraft(craft);
+    return true;
+  };
+  CBZ.airParkedCraft = function () { return worldParked; };
+  CBZ.airCraftDamage = function (craft, dmg, fromX, fromZ) { damageCraft(craft, dmg, fromX, fromZ); };
+  // a craft torn apart by the world: flown, it is the full crash; parked, it
+  // becomes a burnt, unboardable wreck where it stands
+  CBZ.airWreck = function (craft) {
+    if (!craft || craft.destroyed) return false;
+    if (_aircraftFlying() === craft) { crashCraft(craft); return true; }
+    craft.destroyed = true; craft.hp = 0; craft.rotorRate = 0;
+    charAircraftWreck(craft.group);
+    return true;
+  };
+  // the parked bird's collider leaves with the pilot and comes back where
+  // it is set down (the exit settles it flat first)
+  CBZ.onUpdate(12.6, function () {
+    for (let i = 0; i < worldParked.length; i++) {
+      const c = worldParked[i];
+      const flown = _aircraftFlying() === c;
+      if (flown || c.destroyed) { if (c._parked) { unparkCollider(c); c._parked = false; } continue; }
+      if (!c._parked && c.onGround) { parkCollider(c); c._parked = true; }
+    }
+  });
+
   // ============================================================
   //  ENTER / EXIT (the vehicles.js board pattern)
   // ============================================================
@@ -1488,7 +1590,7 @@
       // settle the craft flat where it is, then drop the player onto the surface
       // beside it, never through the ground
       setCraftRotation(craft, 0, craft.heading, 0);
-      craft.pitch = craft.roll = 0; craft.vx = craft.vy = craft.vz = 0; craft.speed = craft.kind === "jet" ? JET_MIN : 0;
+      craft.pitch = craft.roll = 0; craft.vx = craft.vy = craft.vz = 0; craft._windAppliedX = craft._windAppliedY = craft._windAppliedZ = 0; craft.speed = craft.kind === "jet" ? JET_MIN : 0;
       if (craft.kind === "jet") craft.throttle = JET_MIN;
       craft.airspeed = 0; craft.thr = null; craft.sag = 0; craft.onGround = true;
       const udX = craft.group && craft.group.userData;
@@ -1530,7 +1632,8 @@
   CBZ.cityAircraftFireMissile = function () { const c = _aircraftFlying(); if (c) fireMissile(c); };
   CBZ.cityAircraftBoardNearest = function () {
     const P = CBZ.player;
-    if (!P || P._aircraft || P.driving || g.mode !== "city" || g.state !== "playing") return false;
+    if (!P || P._aircraft || P.driving || g.state !== "playing") return false;
+    if (!(CBZ.vehicleModeOn ? CBZ.vehicleModeOn(g.mode) : g.mode === "city")) return false;
     const c = nearestBoardable(P.pos.x, P.pos.z, 6.5);
     if (!c) return false;
     boardCraft(c);
@@ -1540,8 +1643,9 @@
   // nearest owned, on-ground aircraft to the player (on foot)
   function nearestBoardable(x, z, maxd) {
     let best = null, bd = (maxd || 6) * (maxd || 6);
-    [heli, jet].forEach((c) => {
-      if (!c || !c.group) return;
+    const list = g.mode === "city" ? [heli, jet] : worldParked;
+    list.forEach((c) => {
+      if (!c || !c.group || c.destroyed || (c._world && c._world !== g.mode)) return;
       const dx = c.pos.x - x, dz = c.pos.z - z, dd = dx * dx + dz * dz;
       if (dd < bd) { bd = dd; best = c; }
     });
@@ -1689,7 +1793,7 @@
 
   // left-click fires while flying (pointer-locked). activeCtx was called here
   // but never defined in this file: every mousedown anywhere threw.
-  function activeCtx() { return g.mode === "city" && g.state === "playing"; }
+  function activeCtx() { return (CBZ.vehicleModeOn ? CBZ.vehicleModeOn(g.mode) : g.mode === "city") && g.state === "playing"; }
   addEventListener("mousedown", function (e) {
     if (e.button !== 0) return;
     if (!activeCtx()) return;
@@ -2083,7 +2187,11 @@
       ((impact.collider.y1 == null ? 18 : impact.collider.y1) - (impact.collider.y0 || 0)) > 2.5);
     const major = buildingHit && impactSpeed >= (heavy ? 24 : 30);
     const power = heavy ? 3.2 : 2.4, radius = heavy ? 18 : 13;
-    if (CBZ.cityAirstrikeExplosion) { try { CBZ.cityAirstrikeExplosion(x, z, { power, radius, byPlayer: true, y }); } catch (e) {} }
+    // outside Gang City the crash is the shared ordnance bus's blast
+    // (systems/impactbus.js -> modecaps.js): it hurts whoever stands there
+    // through THAT mode's own damage path, never the city's
+    if (g.mode !== "city" && CBZ.detonate) { try { CBZ.detonate(x, y, z, "missile", { scale: heavy ? 1.3 : 0.7 }); } catch (e) {} }
+    else if (CBZ.cityAirstrikeExplosion) { try { CBZ.cityAirstrikeExplosion(x, z, { power, radius, byPlayer: true, y }); } catch (e) {} }
     else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: heavy ? 2.7 : 2.0, radius: heavy ? 15 : 10, byPlayer: true, y }); } catch (e) {} }
     if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, radius + 5); } catch (e) {} }
     if (buildingHit && CBZ.cityDamageBuilding) {
@@ -2170,6 +2278,17 @@
       craft.pitch -= (heavy ? 0.10 : 0.18) + Math.min(0.18, impactSpeed * 0.002);
       setCraftRotation(craft, craft.pitch, craft.heading, craft.roll);
       if (stolenAir === craft) stolenAir = null;
+    } else if (craft.worldParked) {
+      // a world-parked flyable (the island's helipad bird) stays where it
+      // fell as a burnt, unboardable wreck: the world that parked it owns it
+      charAircraftWreck(craft.group);
+      craft.roll += 0.42; craft.pitch -= 0.12;
+      setCraftRotation(craft, craft.pitch, craft.heading, craft.roll);
+      const gy = floorY(craft.pos.x, craft.pos.z);
+      craft.pos.y = Math.max(gy + 0.4, Math.min(craft.pos.y, gy + craft.belly));
+      craft.group.position.copy(craft.pos);
+      if (craft.group.userData && craft.group.userData.rotorDisc) craft.group.userData.rotorDisc.visible = false;
+      craft.rotorRate = 0;
     } else if (heli === craft) { disposeGroup(heli.group); heli = null; placeHeli(); }
     else if (jet === craft) { disposeGroup(jet.group); jet = null; placeJet(); }
     else { disposeGroup(craft.group); if (stolenAir === craft) stolenAir = null; }
@@ -2301,7 +2420,22 @@
       env.sink = -AUTOROTATE_SINK + flareT * (AUTOROTATE_SINK - FLARE_SINK) * Math.max(0, inp.coll);
     }
     if (!A || !A.heliStep) return;
+    /* THE AIR MASS MOVES. heliStep flies the craft through the AIR: its
+       velocity is what the cyclic and collective ask of the rotor relative
+       to the air around it. A world with weather (the disaster island's
+       hurricane and tornado, world/island_vehicles.js) writes the air's own
+       velocity on the craft (windX/windZ/windY, m/s) and the ground track is
+       air velocity + wind, exactly as for a real helicopter: hover in a
+       40 m/s wind and you are carried 40 m/s downwind unless you fly into
+       it. Skids on the ground hold (friction), so a parked or landed craft
+       is not blown about here; nothing written = still air = unchanged. */
+    craft.vx -= craft._windAppliedX || 0; craft.vz -= craft._windAppliedZ || 0; craft.vy -= craft._windAppliedY || 0;
     A.heliStep(craft, inp, dt, env);
+    const wOn = !craft.onGround || (craft.windY || 0) > 2;
+    craft._windAppliedX = wOn ? (craft.windX || 0) : 0;
+    craft._windAppliedZ = wOn ? (craft.windZ || 0) : 0;
+    craft._windAppliedY = wOn ? (craft.windY || 0) : 0;
+    craft.vx += craft._windAppliedX; craft.vz += craft._windAppliedZ; craft.vy += craft._windAppliedY;
 
     // rotor spin-up/down: the commanded rate is eased, so lifting off from
     // cold visibly winds the disc up and settling down lets it sigh back
@@ -2364,10 +2498,18 @@
   }
 
   CBZ.onUpdate(12, function (dt) {
-    if (g.mode !== "city") return;
+    if (!(CBZ.vehicleModeOn ? CBZ.vehicleModeOn(g.mode) : g.mode === "city")) return;
     // idle rotor spin for a parked-but-owned heli (it reads as "ready" — slow
     // enough that spinRotors keeps the blur disc fully faded out)
     if (heli && _aircraftFlying() !== heli && heli.group) spinRotors(heli, dt, 6);
+    // a world-parked flyable left with its rotor still turning winds DOWN
+    // (rotorRate eases toward zero, the disc fades) instead of freezing
+    for (let i = 0; i < worldParked.length; i++) {
+      const c = worldParked[i];
+      if (c === _aircraftFlying() || c.destroyed || !c.group || !(c.rotorRate > 0.05)) continue;
+      c.rotorRate += (0 - c.rotorRate) * Math.min(1, dt * 0.35);
+      spinRotors(c, dt, c.rotorRate);
+    }
     const P = CBZ.player;
     const craft = P && P._aircraft;
     if (!craft || P.dead) {
@@ -2476,7 +2618,13 @@
   // a light watchdog: re-place/refresh when a city is (re)built or ownership
   // flips, and tear down the jet meshes if a flag drops. Runs cheap.
   CBZ.onUpdate(13, function () {
-    if (g.mode !== "city") { hideHud(); return; }
+    if (g.mode !== "city") {
+      // another vehicle world flies its own parked craft: the readout stays
+      // up while one of them is flown, and nothing below (Gang City's
+      // ownership flags, the penthouse pad) applies there
+      if (!(CBZ.vehicleModeOn && CBZ.vehicleModeOn(g.mode)) || !_aircraftFlying()) hideHud();
+      return;
+    }
     if (!arenaRoot()) return;
     const heliFlag = !!g.cityOwnsHeli, jetFlag = !!g.cityOwnsJet;
     // ownership flip (bought penthouse / jet, or a flag was cleared)
