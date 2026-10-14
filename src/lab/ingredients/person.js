@@ -26,7 +26,7 @@
    npc brain.
 
    opts: at [x, z], yaw (deg), role civilian|gang|cop|guard|inmate|thug|soldier|
-         worker|exec, nerve 0..1 (absolute break point), weapon "Pistol"|"SMG"|...
+         worker|exec|agent|crew, nerve 0..1 (absolute break point), weapon "Pistol"|"SMG"|...
          (armed, holstered until the brain or the kit draws it), brain false
          (a puppet: walks and sits, decides nothing), speed (walk m/s),
          cityPed true (moved by the city's layers, peds.js-style: see the mover)
@@ -44,6 +44,8 @@
     guard:    { cast: "guard",    arch: "guard",    faction: "law", weapon: "Pistol" },
     inmate:   { cast: "civilian", arch: "inmate",   faction: "inmates" },
     soldier:  { cast: "soldier",  arch: "swat",     faction: "army", weapon: "Pistol" },
+    // the President's detail (city/protection.js): the black suit
+    agent:    { cast: "agent",    arch: "guard",    faction: "law", weapon: "Pistol" },
     // one of YOUR people (careers.js cityRecruit's shooter): the crew archetype,
     // the player's side, a pistol on the belt
     crew:     { cast: "thug",     arch: "crew",     faction: "player", weapon: "Pistol" },

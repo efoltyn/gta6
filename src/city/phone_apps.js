@@ -117,10 +117,19 @@
   function enemy() { const w = W(); try { return w && w.enemy ? w.enemy() : null; } catch (e) { return null; } }
   function cabinet() { const p = Pres(); try { return p && p.cabinet ? p.cabinet() : {}; } catch (e) { return {}; } }
   function dissentStage() { try { return CBZ.dissent ? CBZ.dissent.stage() | 0 : 0; } catch (e) { return 0; } }
-  function press(key) {
+  function press(key, opts) {
     const p = Pres();
     if (!p || !p.press) return { ok: false, why: "Nobody is answering." };
-    try { return p.press(key) || { ok: false, why: "" }; } catch (e) { return { ok: false, why: "It didn't go through." }; }
+    try { return p.press(key, opts) || { ok: false, why: "" }; } catch (e) { return { ok: false, why: "It didn't go through." }; }
+  }
+  // A STRIKE IS AIMED BY YOU: the war room's target board (CBZ.warroom.pick)
+  // opens over the call, and the order goes once a spot is chosen; the
+  // answer comes back down the line
+  function strike(key) {
+    const Wr = W();
+    if (!Wr || !Wr.pick) return press(key);
+    const r = Wr.pick(key, { onPick: function (tg) { speak(said(press(key, { target: tg }))); } });
+    return r && r.ok ? { ok: true, line: "Show me where." } : r;
   }
   function emit(evt, payload) {
     const p = Pres();
@@ -561,13 +570,13 @@
       const ch = [];
       // the army is plotting: letting him go is the first thing on the line
       if (st >= 3) ch.push(resign("general"));
-      if (foe) ch.push({ id: "strike", label: "Airstrike", run: function () { return press("strike"); } });
+      if (foe) ch.push({ id: "strike", label: "Airstrike", run: function () { return strike("strike"); } });
       else {
         let cw = null;
         try { cw = Wr.canWar(); } catch (e) { cw = null; }
         if (cw && cw.ok) ch.push({ id: "war", label: "War on " + shortName(cw.foe), run: function () { return Wr.war({ foe: cw.foe }); } });
       }
-      if (Wr.warheads && Wr.warheads() > 0) ch.push({ id: "nuke", label: "Nuke", run: function () { return press("nuke"); } });
+      if (Wr.warheads && Wr.warheads() > 0) ch.push({ id: "nuke", label: "Nuke", run: function () { return strike("nuke"); } });
       if (st >= 1 && ch.length < 3) ch.push({ id: "streets", label: "Clear the streets", run: function () { return CBZ.dissent.crackdown(); } });
       const line = st >= 3 ? "Yes?" : foe ? shortName(foe) + " is still fighting. Orders?" : "Go ahead, sir.";
       const out = ch.slice(0, st >= 3 ? 3 : 2);
@@ -894,7 +903,7 @@
       ], "dissent:coup:" + day(), "Call me. Troops are moving.");
     } else if (evt === "war-declared" && d.defender === me && !d.byPlayer) {
       staffCall("general", "They hit first. I need orders.", [
-        { id: "strike", label: "Hit back", run: function () { return press("strike"); } },
+        { id: "strike", label: "Hit back", run: function () { return strike("strike"); } },
         { id: "hold", label: "Hold", run: function () { return { ok: true, line: "Holding." }; } },
       ], "war:" + (d.warId || d.attacker), "Call me. It's " + shortName(d.attacker) + ".");
     }

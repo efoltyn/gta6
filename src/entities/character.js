@@ -6700,7 +6700,163 @@
     if (ch._jacketMesh) jacketPosture(ch);
     ankleSolve(ch, dt, false);
     if (ch._mounts) slingPose(ch);     // after every pose branch: see "A SLING GIVES"
+    if (ch.handCarry) handCarryFrame(ch, dt);   // after every pose writer: CBZ.handCarry
   }
+
+  /* ---- CBZ.handCarry — A CASE CARRIED BY ITS HANDLE ------------------------
+     OWNER (President mode): "The Secret Service guy carrying the briefcase
+     looks dumb. He doesn't carry it correctly." The case was a child of the
+     hand socket and nothing else: it took every rotation of the forearm, so
+     the walk's arm swing and elbow bend tipped it 30 degrees fore and aft,
+     the idle carry tilted it into the thigh, and the rig's 0.70 scale shrank
+     it to a lunch box.
+
+     A real case hangs from the fist by its handle. Gravity keeps it vertical;
+     the grip lets it lag the hand a little and swing back. So:
+       · the OBJECT is authored with its origin at the handle grip, hanging
+         down -y, long axis along +z, thickness along x, in REAL METRES (the
+         parent's world scale is divided out on attach);
+       · the ARM (animCharBody, "A CASE IN THE HAND") hangs straight and a
+         little wide, with a third of the free arm's swing;
+       · every frame the case is turned to hang plumb under the grip, as a
+         damped pendulum driven by the grip's own acceleration (it lags a
+         start, swings back on a stop, leans out of a turn) and never swings
+         in toward the leg past a hair. The handle never leaves the fist
+         because the pendulum pivots on it.
+     PRESENT: the carrier holds the case flat in front of him, both hands
+     under it (CBZ.charArmTo), and its lid (obj.userData.lid, a hinge about
+     local z) opens to `open` (0..1). Used for the nuclear football's "the
+     aide opens the case" beat (city/warroom.js), usable by any case.
+
+       CBZ.handCarry(ch, obj, side)     side "l" | "r"; obj null = let go
+       CBZ.handCarry.present(ch, on)    hold it out in front / back to the hand
+       CBZ.handCarry.open(ch, k)        the lid, 0 shut .. 1 open
+       CBZ.handCarry.state(ch)          { mode, pitch, roll, open } for probes */
+  const _hcQ = new THREE.Quaternion(), _hcQ2 = new THREE.Quaternion(), _hcQ3 = new THREE.Quaternion();
+  const _hcP = new THREE.Vector3(), _hcS = new THREE.Vector3(), _hcE = new THREE.Euler(0, 0, 0, "YXZ");
+  const _hcM = new THREE.Matrix4(), _hcA = new THREE.Vector3(), _hcB = new THREE.Vector3(), _hcC = new THREE.Vector3();
+  const HC_L = 0.24, HC_G = 9.8, HC_DAMP = 15, HC_DRIVE = 0.45, HC_GRIP = 0.06;
+  function hcWorldScale(o) { o.updateWorldMatrix(true, false); o.getWorldScale(_hcS); return (Math.abs(_hcS.x) + Math.abs(_hcS.y) + Math.abs(_hcS.z)) / 3 || 1; }
+  function hcAttach(ch, hc) {
+    const o = hc.obj;
+    const par = hc.mode === "present" ? ch.group : hc.sock;
+    if (!par) return;
+    if (o.parent !== par) { if (o.parent) o.parent.remove(o); par.add(o); }
+    const ps = hcWorldScale(par);
+    o.scale.setScalar(1 / ps);
+    // the socket is out at the fingertips: the handle sits in the fist, up the hand
+    if (hc.mode !== "present") o.position.set(0, HC_GRIP / ps, 0);
+    hc.px = null;
+  }
+  function handCarry(ch, obj, side) {
+    if (!ch) return null;
+    if (!obj) { ch.handCarry = null; return null; }
+    const sd = side === "r" ? "r" : "l";
+    const sock = ch.sockets && (sd === "l" ? ch.sockets.leftHand : ch.sockets.rightHand);
+    if (!sock) return null;
+    const old = ch.handCarry;
+    const hc = old && old.obj === obj ? old : { obj: obj, mode: "hang", th: 0, thv: 0, ph: 0, phv: 0, px: null, pz: 0, vx: 0, vz: 0, open: 0, openTo: 0, k: 0 };
+    hc.side = sd; hc.sock = sock;
+    ch.handCarry = hc;
+    hcAttach(ch, hc);
+    return hc;
+  }
+  handCarry.present = function (ch, on) {
+    const hc = ch && ch.handCarry;
+    if (!hc) return false;
+    const want = on ? "present" : "hang";
+    if (hc.mode === want) return true;
+    hc.mode = want;
+    if (!on) { hc.openTo = 0; hc.open = 0; const lid = hc.obj.userData.lid; if (lid) lid.rotation.z = 0; }
+    hc.k = 0;
+    hcAttach(ch, hc);
+    return true;
+  };
+  handCarry.open = function (ch, k) { const hc = ch && ch.handCarry; if (hc) hc.openTo = Math.max(0, Math.min(1, +k || 0)); };
+  handCarry.state = function (ch) {
+    const hc = ch && ch.handCarry;
+    return hc ? { mode: hc.mode, side: hc.side, pitch: +hc.th.toFixed(3), roll: +hc.ph.toFixed(3), open: +hc.open.toFixed(2) } : null;
+  };
+  function handCarryFrame(ch, dt) {
+    const hc = ch.handCarry, o = hc.obj;
+    if (!o) return;
+    if (hc.mode === "present") { hcPresent(ch, hc, dt); return; }
+    if (o.parent !== hc.sock) return;                  // a rig that no longer holds it
+    const sock = hc.sock;
+    sock.updateWorldMatrix(true, false);
+    sock.getWorldPosition(_hcP);
+    // the body's yaw: the frame the case's long axis follows
+    (ch.group || sock).getWorldQuaternion(_hcQ);
+    _hcE.setFromQuaternion(_hcQ, "YXZ");
+    const yaw = _hcE.y, sy = Math.sin(yaw), cy = Math.cos(yaw);
+    const h = Math.max(1e-4, Math.min(0.1, dt || 0));
+    let af = 0, al = 0;
+    if (hc.px != null && dt > 1e-4) {
+      const vx = (_hcP.x - hc.px) / h, vz = (_hcP.z - hc.pz) / h;
+      let ax = (vx - hc.vx) / h, az = (vz - hc.vz) / h;
+      const am = Math.hypot(ax, az);
+      if (am > 30) { ax *= 30 / am; az *= 30 / am; }  // a teleport is not a jolt
+      af = ax * sy + az * cy;                          // forward (+z of the body)
+      al = ax * cy - az * sy;                          // lateral (+x of the body)
+      hc.vx = vx; hc.vz = vz;
+    } else { hc.vx = 0; hc.vz = 0; }
+    hc.px = _hcP.x; hc.pz = _hcP.z;
+    // pitch th about the body's x (+ = bottom swings back), roll ph about its
+    // z (+ = bottom swings to +x). Semi-implicit Euler in small steps.
+    const n = Math.max(1, Math.ceil(h / 0.008)), s = h / n, w2 = HC_G / HC_L;
+    for (let i = 0; i < n; i++) {
+      hc.thv += (-w2 * Math.sin(hc.th) + (HC_DRIVE * af / HC_L) * Math.cos(hc.th) - HC_DAMP * hc.thv) * s;
+      hc.phv += (-w2 * Math.sin(hc.ph) - (HC_DRIVE * al / HC_L) * Math.cos(hc.ph) - HC_DAMP * hc.phv) * s;
+      hc.th += hc.thv * s; hc.ph += hc.phv * s;
+    }
+    if (!Number.isFinite(hc.th + hc.ph + hc.thv + hc.phv)) { hc.th = hc.ph = hc.thv = hc.phv = 0; }
+    hc.th = Math.max(-0.55, Math.min(0.55, hc.th));
+    // never in toward the leg: the left hand's case may not swing to -x
+    const inMax = 0.05;
+    if (hc.side === "l") { if (hc.ph < -inMax) { hc.ph = -inMax; hc.phv = Math.max(0, hc.phv); } if (hc.ph > 0.4) hc.ph = 0.4; }
+    else { if (hc.ph > inMax) { hc.ph = inMax; hc.phv = Math.min(0, hc.phv); } if (hc.ph < -0.4) hc.ph = -0.4; }
+    // world orientation wanted: yaw, then the swing; expressed in the socket
+    _hcE.set(hc.th, yaw, hc.ph, "YXZ");
+    _hcQ2.setFromEuler(_hcE);
+    sock.getWorldQuaternion(_hcQ3);
+    o.quaternion.copy(_hcQ3.invert()).multiply(_hcQ2);
+  }
+  // held out flat in front of the belt, handle toward him, lid up; both hands under it
+  const HC_PRESENT_BASIS = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0));
+  const HC_PRESENT_Q = new THREE.Quaternion().setFromRotationMatrix(HC_PRESENT_BASIS);
+  function hcPresent(ch, hc, dt) {
+    const o = hc.obj, g = ch.group;
+    if (!g || o.parent !== g) return;
+    const ud = o.userData || {};
+    const H = ud.caseH || 0.34, T = ud.caseT || 0.13, top = ud.handleH || 0.06;
+    hc.k = Math.min(1, hc.k + (dt || 0) / 0.45);
+    const e = hc.k * hc.k * (3 - 2 * hc.k);
+    const gs = hcWorldScale(g);
+    // the grip point (the object's origin) in the root's frame, metres -> rig units
+    const fwd = 0.22, up = 0.9 + T * 0.5;
+    const sx = (hc.side === "l" ? 0.26 : -0.26), sy0 = 0.78;
+    o.position.set(sx * (1 - e) / gs, (sy0 + (up - sy0) * e) / gs, (fwd * e) / gs);
+    _hcQ.identity().slerp(HC_PRESENT_Q, e);
+    o.quaternion.copy(_hcQ);
+    // the lid follows once the case is up
+    const want = e > 0.95 ? hc.openTo : 0;
+    hc.open += Math.max(-1, Math.min(1, want - hc.open)) * Math.min(1, (dt || 0) * 2.4);
+    if (ud.lid) ud.lid.rotation.z = -hc.open * 1.92;
+    // both hands under the near corners of the case
+    if (CBZ.charArmTo) {
+      o.updateWorldMatrix(true, false);
+      const L = ud.caseL || 0.46;
+      _hcA.set(-T * 0.5 - 0.03, -top - H * 0.22, L * 0.40);
+      _hcB.set(-T * 0.5 - 0.03, -top - H * 0.22, -L * 0.40);
+      o.localToWorld(_hcA); o.localToWorld(_hcB);
+      // which corner is on which side of the body: test against the body's x
+      g.worldToLocal(_hcC.copy(_hcA));
+      const aIsLeft = _hcC.x > 0;
+      CBZ.charArmTo(ch, aIsLeft ? _hcA : _hcB, "l", e);
+      CBZ.charArmTo(ch, aIsLeft ? _hcB : _hcA, "r", e);
+    }
+  }
+  CBZ.handCarry = handCarry;
   function animCharBody(ch, speed, dt) {
     if (ch._legRootsMoved) legRootsHome(ch);           // back on its feet: the leg roots go home
     // BODY LOD for every rig nobody manages (prison, warlord, disasters...):
@@ -8270,6 +8426,21 @@
       const foldR = moving ? Math.max(0, -raTarget) * 0.8 : 0;
       setElbow(J.la, -(elbBase + foldL + gd * 0.55), armRate - 2);
       setElbow(J.ra, -(elbBase + foldR + gd * 0.55), armRate - 2);
+    }
+    /* A CASE IN THE HAND (CBZ.handCarry, below animChar). The arm that holds
+       a loaded case by its handle hangs STRAIGHT: the elbow locks, the swing
+       drops to a third of the free arm's, and the shoulder carries it a
+       little wide so the case clears the thigh. Whatever branch posed the
+       arm above (walk, idle, a held pose) is overridden on that arm only;
+       aiming / cuffed / hands-up never carry (the case is set down first). */
+    const HC = ch.handCarry;
+    if (HC && HC.mode === "hang" && !ch.aimingPose && !ch.cuffed && !ch.surrender && !ch.handsUp && !ch.carryPose) {
+      const side = HC.side === "r" ? "ra" : "la", sg = side === "la" ? 1 : -1;
+      const A = ch.parts[side];
+      const sw = moving ? sg * swing * 0.34 * (1 - 0.35 * run2) : 0;
+      A.rotation.x = damp(A.rotation.x, sw + 0.03, armRate, dt);
+      A.rotation.z = damp(A.rotation.z, sg * (0.11 + 0.05 * run2), 8, dt);
+      setElbow(J[side], -(0.05 + 0.10 * run2), armRate);
     }
     // a held pose that turns the humerus (poses.js `twist: true`, folded
     // arms) owns rotation.y; everything else hands it back to zero
