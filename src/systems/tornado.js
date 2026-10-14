@@ -1686,7 +1686,7 @@
             }
             a._twSafe = false;
           }
-          if (d < kill) { try { CBZ.surv.hurt(a, 1e6, { fromX: t.x, fromZ: t.z, fling: 8 }); } catch (e) {} return; }
+          if (d < kill && t.vmax > 50) { try { CBZ.surv.hurt(a, 1e6, { fromX: t.x, fromZ: t.z, fling: 8 }); } catch (e) {} return; }   // only an EF2+ core kills outright (and disasterhurt.js warns first): an EF0/EF1 core drags and wounds
           // dragged toward the axis, and hurt in proportion to the wind
           const drag = Math.min(9, _scratch.speed * 0.10);
           if (a.isPlayer) dragPlayer(t, dt, drag);

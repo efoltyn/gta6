@@ -1,0 +1,204 @@
+/* lab kit "damage-fairness": the player stood at 0 / 5 / 15 / 40 / 100 m from
+   each disaster's hazard, for SAMPLE seconds a case, and what it cost him —
+   once on the OLD law (CBZ.disasterHurt switched off, the pre-2026-10-14
+   call-site constants) and once on the NEW one (systems/disasterhurt.js +
+   the edited call sites). The question is the owner's: "the player dies too
+   easily". Far away must cost ~0; the real mistakes (stood in the lava, at
+   ground zero, inside a collapsing building, in the pyroclastic head) must
+   still kill.
+
+   WHAT IS REAL
+     the damage path   modes/survival.js CBZ.surv.hurt / hurtRadius (the box
+                       footprint, the y), systems/disasterhurt.js (warning,
+                       i-frames, chip floor, shelter, wall ray, regen)
+     the player        entities/player.js on systems/physics.js, so the wall
+                       case's ray hits a real collider in CBZ.colliders
+   WHAT IS THE KIT'S
+     the hazards       each row calls surv.hurt / hurtRadius with the SAME
+                       arguments its disaster's call site does (file:line in
+                       the row's `at`), at the distance under test. Booting
+                       disasters.js needs the whole island; the laws are a
+                       line each and they are what is being priced.
+   The player is re-pinned to his spot every frame: this measures STANDING
+   IN IT (the mistake), so a shove that would have saved him in the game
+   does not here.
+
+   params: sample (s a case, default 3)
+   probe:  ok when every hazard costs < 1 hp at 40 m and 100 m on the new law,
+           the mistakes still kill, and the shelter rows cost 0. */
+(function () {
+  const D = [0, 5, 15, 40, 100];
+  const tornado = function (vmax, R) {
+    const outer = R * 4.5, kill = R * 0.75;
+    return function (a, d, dt, old) {
+      const S = CBZ.surv;
+      if (d > outer) return;
+      const r = Math.max(0.35, d);
+      let vt = r <= R ? vmax * (r / R) : vmax * (R / r);
+      if (r > R) { const tail = 1 - (r - R) / (outer - R); vt *= Math.max(0, tail) * Math.max(0, tail); }
+      if (d < kill && (old || vmax > 50)) { S.hurt(a, 1e6, { fromX: 0, fromZ: 0, fling: 8, cause: "torn apart by the tornado" }); return; }
+      if (vt > 26) S.hurt(a, vt * 0.22 * dt, { cause: "torn apart by the tornado" });
+    };
+  };
+  const once = function (fn) { return function (a, d, dt, old, t) { if (t >= 0.1 && !this._done) { this._done = true; fn(a, d, dt, old); } }; };
+  const ground = function (a, d, dt, old) {
+    const S = CBZ.surv;
+    if (d < 0.5) { S.hurt(a, 1e6, { fromX: 0, fromZ: 0, fling: 1.4, cause: "struck by lightning" }); return; }
+    if (d > 11) return;
+    if (d <= 4.5) { S.hurt(a, 1e6, { fromX: 0, fromZ: 0, fling: 1.4, cause: "killed by the ground current" }); return; }
+    const k = 1 - (d - 4.5) / (11 - 4.5);
+    S.hurt(a, old ? 18 + 62 * k * k : 30 * k * k + 8 * k, { fromX: 0, fromZ: 0, cause: "killed by the ground current" });
+  };
+  const HAZ = [
+    { id: "lava flow", at: "disasters.js volcano 3)", mistake: 0, law: function (a, d) { if (d < 2) CBZ.surv.hurt(a, 1e6, { cause: "incinerated by lava", fromX: 0, fromZ: 0 }); } },
+    { id: "pyroclastic flow", at: "disasters.js volcano 1)", mistake: 0, far: 100, law: function (a, d, dt) {
+      if (d < 6) CBZ.surv.hurt(a, 1e6, { cause: "incinerated by the pyroclastic flow", fromX: 0, fromZ: 0, fling: 9 });
+      else if (d < 50) CBZ.surv.hurt(a, 30 * dt, { cause: "asphyxiated in the ash cloud", fromX: 0, fromZ: 0 });
+    } },
+    { id: "crater vent", at: "disasters.js volcano 2)", mistake: 0, law: function (a, d) { if (d < 3.4) CBZ.surv.hurt(a, 1e6, { cause: "swallowed by the crater", fromX: 0, fromZ: 0 }); } },
+    { id: "tornado EF0", at: "tornado.js hitPeople", law: tornado(33, 26) },
+    { id: "tornado EF2", at: "tornado.js hitPeople", far: 100, law: tornado(55, 40) },
+    { id: "lightning bolt", at: "disasters.js conduct()", once: true, law: ground },
+    { id: "meteor impact", at: "disasters.js meteor impact()", mistake: 0, once: true, law: function () { CBZ.surv.hurtRadius(0, 0, 6, 1e6, { cause: "flattened by a meteor", knockback: 14, fling: 7 }); } },
+    { id: "meteor airburst", at: "disasters.js meteor front()", once: true, far: 100, law: function (a, d, dt, old) {
+      const k = Math.max(0, 1 - d / 200);
+      if (old) { if (k > 0.18) CBZ.surv.hurt(a, 6 + 30 * k, { fromX: 0, fromZ: 0, cause: "caught in the meteor airburst" }); }
+      else if (k > 0.5) CBZ.surv.hurt(a, (k - 0.5) * 76, { fromX: 0, fromZ: 0, cause: "caught in the meteor airburst" });
+    } },
+    { id: "volcanic bomb", at: "fx.js dropDebris + disasters.js kinetic", once: true, law: function (a, d, dt, old) {
+      CBZ.surv.hurtRadius(0, 0, 1.7, 999, { instakill: true, y: old ? undefined : 0.55 });
+      CBZ.surv.hurtRadius(0, 0, 8, 34, { cause: "caught by a volcanic bomb", knockback: 12, fling: 6 });
+    } },
+    { id: "burning tree", at: "disasters.js wildfire", law: function (a, d, dt) { CBZ.surv.hurtRadius(0, 0, 3.4, 20 * dt); } },
+    { id: "gas fire", at: "quake.js gas fire", law: function (a, d, dt) { if (d < 3.4) CBZ.surv.hurt(a, 26 * dt, { cause: "burned in a gas fire", fromX: 0, fromZ: 0 }); } },
+    { id: "downed line", at: "quake.js downed line", law: function (a, d, dt) { if (d < 1.25) CBZ.surv.hurt(a, 44 * dt, { cause: "electrocuted on a downed line", fromX: 0, fromZ: 0 }); } },
+    // a 20 x 8 m block: the player walks off its LONG wall along z
+    { id: "building collapse 20x8", at: "disasters.js collapse yank", mistake: 0, once: true, axis: "z", law: function (a, d, dt, old) {
+      const b = { x: 0, z: 0, w: 20, d: 8 };
+      if (old) CBZ.surv.hurtRadius(b.x, b.z, Math.max(b.w, b.d) * 0.62, 1e6);
+      else CBZ.surv.hurtRadius(b.x, b.z, Math.max(b.w, b.d) * 0.62, 1e6, { box: b, cause: "crushed under a collapsing building" });
+    } },
+  ];
+  // shelter rows: one distance each
+  const SHELTER = [
+    { id: "ground current, in a car", d: 6, once: true, law: ground, car: true },
+    { id: "ground current, indoors", d: 6, once: true, law: ground, roof: true },
+    { id: "volcanic bomb behind a wall", d: 5, once: true, wall: true, law: function () { CBZ.surv.hurtRadius(0, 0, 8, 34, { cause: "caught by a volcanic bomb" }); } },
+    { id: "lava, flying 30 m up", d: 0, law: function (a) { CBZ.surv.hurt(a, 1e6, { cause: "incinerated by lava", fromX: 0, fromZ: 0 }); }, air: 30 },
+  ];
+
+  CBZ.lab.kit("damage-fairness", {
+    about: "the player at 0/5/15/40/100 m from each disaster's hazard, old law vs CBZ.disasterHurt: damage per second, who dies",
+    uses: ["player"],
+    files: ["src/modes/survival.js", "src/systems/disasterhurt.js"],
+    params: { sample: 3 },
+    // every case at the default 3 s sample (another sample: pass --seconds)
+    duration: (HAZ.length * D.length * 2 + SHELTER.length * 2) * 3 + 4,
+    setup: function (W, P) {
+      W.add("player", { name: "you", at: [0, 200] });
+      const Pl = CBZ.player;
+      Pl.maxHp = 1e9; Pl.hp = 1e9;
+      const DH = CBZ.disasterHurt;
+      if (DH) DH.on = true;
+      W.DH = DH;
+      const cases = [];
+      for (const old of [true, false]) {
+        for (const h of HAZ) for (const d of D) cases.push({ h: h, d: d, old: old });
+        for (const s of SHELTER) cases.push({ h: s, d: s.d, old: old, shelter: true });
+      }
+      W.cases = cases; W.ci = -1; W.ct = 0; W.rows = [];
+      const SAMPLE = +P.sample || 3;
+      let roof = null, wall = null;
+      function setShelter(c) {
+        const h = c.h;
+        if (roof) { const i = CBZ.platforms.indexOf(roof); if (i >= 0) CBZ.platforms.splice(i, 1); roof = null; }
+        if (wall) { const i = CBZ.colliders.indexOf(wall); if (i >= 0) CBZ.colliders.splice(i, 1); wall = null; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+        Pl.driving = !!h.car; Pl._vehicle = h.car ? { lab: true } : null;
+        Pl.flying = !!h.air;
+        if (h.roof) { roof = { minX: c.d - 6, maxX: c.d + 6, minZ: -6, maxZ: 6, top: 3.2 }; (CBZ.platforms || (CBZ.platforms = [])).push(roof); }
+        if (h.wall) { wall = { minX: c.d * 0.5 - 0.15, maxX: c.d * 0.5 + 0.15, minZ: -4, maxZ: 4, y0: 0, y1: 3, ref: null }; CBZ.colliders.push(wall); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+      }
+      function begin(c) {
+        c.h._done = false;
+        CBZ.disasterHurt = c.old ? null : DH;      // the OLD law: surv.hurt straight to hp
+        if (DH) DH.reset();
+        setShelter(c);
+        Pl.hp = 1e9; Pl.dead = false;
+        c.hp0 = Pl.hp; c.lost = 0; c.dead = false; c.deadAt = null;
+      }
+      function end(c) {
+        W.rows.push({ id: c.h.id, d: c.d, old: c.old, once: !!c.h.once, lost: c.lost, dead: c.dead, deadAt: c.deadAt, shelter: !!c.shelter, mistake: c.h.mistake === 0 && c.d < 1 });
+        W.event("you", (c.old ? "OLD " : "NEW ") + c.h.id + " @" + c.d + "m: " + (c.dead ? "DEAD at " + c.deadAt.toFixed(2) + " s" : c.lost.toFixed(1) + " hp"));
+      }
+      W.every(function (dt) {
+        if (W.ci >= W.cases.length) return;
+        if (W.ci < 0 || W.ct >= SAMPLE) {
+          if (W.ci >= 0) end(W.cases[W.ci]);
+          W.ci++; W.ct = 0;
+          if (W.ci >= W.cases.length) { CBZ.disasterHurt = DH; setShelter({ h: {}, d: 0 }); return; }
+          begin(W.cases[W.ci]);
+        }
+        const c = W.cases[W.ci];
+        W.ct += dt;
+        const ax = c.h.axis === "z" ? 0 : c.d, az = c.h.axis === "z" ? c.d : 0;
+        Pl.pos.x = ax; Pl.pos.z = az; Pl.pos.y = c.h.air || 0;
+        if (Pl._phys) { Pl._phys.kx = 0; Pl._phys.kz = 0; }
+        const before = Pl.hp;
+        c.h.law(CBZ.surv.playerActor, c.d, dt, c.old, W.ct);
+        const took = Math.max(0, before - Pl.hp);
+        c.lost += took;
+        if (!c.dead && c.lost >= 100) { c.dead = true; c.deadAt = W.ct; }
+        Pl.hp = 1e9;    // he never actually dies: the kit keeps count
+      });
+      // once-per-case laws: the wrapper fires at t >= 0.1
+      for (const h of HAZ.concat(SHELTER)) if (h.once) h.law = once(h.law);
+    },
+    probe: function (W, P) {
+      const SAMPLE = +P.sample || 3;
+      const rows = W.rows;
+      // a standing hazard reads in hp a second; a one-shot (a bolt, a blast) in hp
+      const fmt = function (r) { if (!r) return "-".padEnd(10); return r.dead ? ("DEAD " + r.deadAt.toFixed(1) + "s").padEnd(10) : (r.once ? r.lost.toFixed(1) + " hp" : (r.lost / SAMPLE).toFixed(1) + "/s").padEnd(10); };
+      const get = function (id, d, old) { return rows.find(function (r) { return r.id === id && r.d === d && r.old === old; }); };
+      const lines = [];
+      lines.push("hazard".padEnd(30) + D.map(function (d) { return (d + " m").padEnd(21); }).join(""));
+      lines.push("".padEnd(30) + D.map(function () { return "old       new       "; }).join(" "));
+      const fails = [];
+      for (const h of HAZ) {
+        let ln = h.id.padEnd(30);
+        for (const d of D) {
+          const o = get(h.id, d, true), n = get(h.id, d, false);
+          ln += fmt(o) + fmt(n) + " ";
+          // FAR is the hazard's own scale: 40 m, or 100 m for the ones that are bigger than that (a 50 m flow lane, an EF2's 40 m wind ring, a 200 m airburst ring)
+          if (d >= (h.far || 40) && n && (n.dead || n.lost >= 1)) fails.push(h.id + " @" + d + " m costs " + n.lost.toFixed(1));
+          if (h.mistake === 0 && d === 0 && n && !n.dead) fails.push(h.id + " @0 m no longer kills (it is the mistake)");
+        }
+        lines.push(ln);
+      }
+      lines.push("shelter".padEnd(30) + "old       new");
+      for (const s of SHELTER) {
+        const o = get(s.id, s.d, true), n = get(s.id, s.d, false);
+        lines.push((s.id + " @" + s.d + "m").padEnd(30) + fmt(o) + fmt(n));
+        if (n && n.lost > (s.wall ? 34 * 0.25 : 0.01)) fails.push(s.id + " costs " + n.lost.toFixed(1));
+      }
+      // the two laws no distance shows: i-frames and regen, on the real function
+      const DH = W.DH, Pl = CBZ.player;
+      let ifr = null, regen = null;
+      if (DH) {
+        CBZ.disasterHurt = DH; DH.reset(); Pl.dead = false; Pl.maxHp = 100; Pl.hp = 100;
+        Pl.driving = false; Pl._vehicle = null; Pl.flying = false;
+        const a1 = DH(30, "lab: a big hit"), a2 = DH(30, "lab: a second big hit");
+        ifr = { first: a1, second: a2 };
+        if (!(a2 < a1 * 0.5)) fails.push("no i-frames: second hit " + a2);
+        Pl.hp = 50; DH.tick(4); const h4 = Pl.hp; DH.tick(2); regen = { at4s: h4, at6s: Math.round(Pl.hp) };
+        if (!(h4 === 50 && Pl.hp > 55)) fails.push("regen wrong: " + JSON.stringify(regen));
+        lines.push("i-frames: a 30 hp hit then another at once -> " + a1 + " + " + a2.toFixed(1) + "   regen: 50 hp, after 4 s quiet " + h4 + ", after 6 s " + regen.at6s);
+      }
+      const ok = rows.length === W.cases.length && fails.length === 0 && !!W.DH;
+      return {
+        ok: ok,
+        summary: (W.DH ? "" : "CBZ.disasterHurt MISSING; ") + rows.length + "/" + W.cases.length + " cases, " + SAMPLE + " s each" + (fails.length ? "; FAIL: " + fails.join("; ") : "") + "\n" + lines.join("\n"),
+        data: { rows: rows, iframes: ifr, regen: regen, law: W.DH && W.DH.LAW },
+      };
+    },
+  });
+})();
