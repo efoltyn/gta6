@@ -753,6 +753,9 @@
        mass over the shaft, and says which volume the real build must leave
        hollow so the car can get there (city/facade_kit.js, KEEP-CLEAR COLUMNS). */
     let lift = null;
+    // a roof kept clear (the helipad tower's) is clear for the lift probe too:
+    // with no crown over the shaft the lift's top stop is the roof itself
+    if (dressed && o.keepClear) ctx.keepClear = o.keepClear.slice();
     if (dressed && o.liftShaft && CBZ.facadeLiftTop) {
       try {
         lift = CBZ.facadeLiftTop(ctx, o.liftShaft, { ring: 1.2 });
@@ -3660,8 +3663,6 @@
         color: color, style: style, plats: plats,
         shellMerge: shellMerge, glassList: glassList, doorHalf: DOORW / 2 + 0.35, walls: walls,
         fence: localFence(bo.lot, ox, oz, yaw),
-        // a helipad roof: the grammar's crown is kept off the pad
-        keepClear: bo.helipad ? [{ x0: -w / 2 + WT + SW + 0.6, x1: w / 2 - WT - 0.4, z0: -d / 2 + WT + 0.4, z1: d / 2 - WT - 0.4, y0: storeys * FH - 0.3, y1: storeys * FH + 60 }] : null,
       });
       for (const gp of glassList) allGlass.push(gp);
 
@@ -3676,24 +3677,9 @@
       flushLateShell(bgroup, shellMerge, gy);
 
       /* THE ROOF, as data: the slab you can stand on (everything but the
-         stair strip, which carries the bulkhead), reached by the stair. A
-         helipad roof gets its marking: the yellow touchdown circle and the
-         white H, centred on the clear slab the facade was kept off. */
-      const rTopL = storeys * FH, padX = (ixMin + SW + ixMax) / 2;
-      const padR = Math.max(0, Math.min((ixMax - ixMin - SW) / 2, (izMax - izMin) / 2) - 0.6);
-      const roofPt = { x: ox + padX, y: gy + rTopL, z: oz };
-      if (bo.helipad && padR > 4) {
-        const ring = new THREE.RingGeometry(padR - 0.4, padR, 48, 1);
-        ring.rotateX(-Math.PI / 2); ring.translate(padX, rTopL + 0.025, 0);
-        const rm = new THREE.Mesh(ring, finishMat(0xd2a838, gy)); rm.receiveShadow = true; bgroup.add(rm);
-        const H = padR * 0.42, BW = Math.max(0.5, padR * 0.11);
-        // [centre x, size x, size z]: the two uprights, then the crossbar
-        for (const pc of [[padX - H * 0.55, BW, H * 2], [padX + H * 0.55, BW, H * 2], [padX, H * 1.1, BW]]) {
-          const g2 = new THREE.BoxGeometry(pc[1], 0.012, pc[2]);
-          g2.translate(pc[0], rTopL + 0.026, 0);
-          const hm = new THREE.Mesh(g2, finishMat(0xe8e5dc, gy)); hm.receiveShadow = true; bgroup.add(hm);
-        }
-      }
+         stair strip, which carries the bulkhead), reached by the stair. */
+      const rTopL = storeys * FH;
+      const roofPt = { x: ox + (ixMin + SW + ixMax) / 2, y: gy + rTopL, z: oz };
 
       // turn it to face its street (records and all), then draw its static
       // shell in one call (see bakeShell)
@@ -3714,9 +3700,8 @@
         // turned rotY (a quarter turn at a time) to face its street
         lw: w, ld: d, rotY: yaw,
         roofY: gy + rTopL, roofHex: color, roofAccess: true,
-        roof: Object.assign(roofHalf(ixMin + SW + 0.1, ixMax, izMin, izMax), { y: gy + rTopL, access: "stairs" }),
-        helipadCandidate: !!(bo.helipad && padR > 4),
-        helipad: bo.helipad && padR > 4 ? { x: roofPt.x, y: roofPt.y, z: roofPt.z, r: padR } : null,
+        roof: Object.assign(roofHalf(ixMin + SW + 0.1, ixMax, izMin, izMax), { y: gy + rTopL, access: "stairs", x: roofPt.x, z: roofPt.z }),
+        helipadCandidate: false, helipad: null,
         facadeStyle: style || null,        // so a tool can photograph "the pagoda one"
         color: color,                      // the shell's real wall colour — city/collapse.js
                                            // builds its proxy out of it, so the frame where
@@ -3987,7 +3972,8 @@
       return g2;
     }
 
-    function makeTower(ox, oz, w, d, h, color, style, lot) {
+    function makeTower(ox, oz, w, d, h, color, style, lot, to) {
+      to = to || {};
       const gy = groundHeightAt(ox, oz);
       const g = new THREE.Group();
       g.position.set(ox, gy, oz);
@@ -4087,6 +4073,9 @@
         shellMerge: shellMerge, glassList: glassT, doorHalf: DW / 2 + 0.35, tower: true,
         walls: walls, liftShaft: { x0: -s, x1: s, z0: -s, z1: s },
         fence: localFence(lot, ox, oz, 0),
+        // THE HELIPAD TOWER: no crown at all, so its lift stops at a flat
+        // open roof (world/island_vehicles.js stands the pad over it)
+        keepClear: to.helipad ? [{ x0: -w / 2 - 1, x1: w / 2 + 1, z0: -d / 2 - 1, z1: d / 2 + 1, y0: realH - 0.3, y1: realH + 120 }] : null,
       });
       const lift = dressedT && dressedT.lift;
       for (const gp of glassT) allGlass.push(gp);
@@ -4177,8 +4166,12 @@
         lw: w, ld: d, rotY: 0,
         // the roof: the lift's top stop is the way up (its shaft opens in
         // the middle of the slab, so this roof is no helipad)
-        roofY: gy + realH, roofHex: color, roofAccess: true, helipadCandidate: false,
-        roof: { x0: ox - iw, x1: ox + iw, z0: oz - id, z1: oz + id, y: gy + realH, access: "lift" },
+        roofY: gy + realH, roofHex: color, roofAccess: true,
+        roof: { x0: ox - iw, x1: ox + iw, z0: oz - id, z1: oz + id, y: gy + realH, access: "lift", x: ox, z: oz },
+        // the flat, crown-free roof a helipad stands on (over the lift's
+        // roof stop: the pad deck clears the car)
+        helipadCandidate: !!(to.helipad && !(lift && (lift.raised || lift.headhouse))),
+        helipad: to.helipad && !(lift && (lift.raised || lift.headhouse)) ? { x: ox, y: gy + realH, z: oz, r: Math.min(iw, id) } : null,
         facadeStyle: style || null, color: color,   // see makeBuilding: the collapse proxy is built from it
         floorTop: gy + lobbyTop,                    // the lobby's walk surface (see THE LOBBY FLOOR)
         colliders: cols, platforms: plats, glass: glassT, fallen: false,
@@ -4690,8 +4683,8 @@
       if (l.kind === "showroom") {
         makeShowroom(l.x, l.z);
         dl1 = { x: l.x, z: l.z };
-      } else if (l.kind === "tower") {
-        b = makeTower(l.x, l.z, l.w, l.d, l.storeys * FH, color, l.style, l.lot);
+      } else if (l.kind === "tower" || l.kind === "hotel") {
+        b = makeTower(l.x, l.z, l.w, l.d, l.storeys * FH, color, l.style, l.lot, { helipad: !!l.helipad });
       } else {
         b = makeBuilding(l.x, l.z, l.w, l.d, l.storeys, color, l.gy, l.style, l.yaw, { helipad: !!l.helipad, lot: l.lot });
       }
