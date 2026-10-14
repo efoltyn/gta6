@@ -932,7 +932,8 @@ async function newPage(B, salt = newNonce()) {
     await s("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
     if (DEVICE === "phone") await s("Emulation.setUserAgentOverride", { userAgent: PHONE_UA, platform: "iPhone", acceptLanguage: "en-US" });
   }
-  if (PRELOAD_EXTRA) pre += "\n;" + fs.readFileSync(path.resolve(PRELOAD_EXTRA), "utf8");
+  // a comma list loads several (e.g. abtrack.js,textrack.js)
+  if (PRELOAD_EXTRA) for (const f of PRELOAD_EXTRA.split(",")) pre += "\n;" + fs.readFileSync(path.resolve(f), "utf8");
   await s("Page.addScriptToEvaluateOnNewDocument", { source: pre });
   return { s, ev, salt, close: async () => { try { await B.send("Target.closeTarget", { targetId }); } catch (_) {} try { await B.send("Target.disposeBrowserContext", { browserContextId }); } catch (_) {} } };
 }

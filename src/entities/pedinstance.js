@@ -1386,7 +1386,8 @@
   CBZ.pedInstanceAudit = function () {
     let active = 0, capacity = 0, live = 0, boxPools = 0, unitPools = 0, blackPools = 0, pagedPools = 0;
     let pages = 0, pageSlots = 0, pageTexels = 0;
-    pageClasses.forEach(function (C) { if (!C) return; pages += C.pages.length; for (const P of C.pages) { pageSlots += P.next; pageTexels += C.PW * P.PH; } });
+    const pageList = [];
+    pageClasses.forEach(function (C) { if (!C) return; pages += C.pages.length; for (const P of C.pages) { pageSlots += P.next; pageTexels += C.PW * P.PH; pageList.push(C.w + "x" + C.h + " slots " + P.next + "/" + P.cap + " rows " + P.PH + (P.gpuOnly ? " gpu-only" : "")); } });
     pools.forEach(function (p) {
       capacity += p.cap;
       if (p.paged && p.mesh && p.next > 0) pagedPools++;
@@ -1408,6 +1409,7 @@
       pagedPools: pagedPools,           // active pools sampling a texture PAGE (one pool per shape, not per outfit)
       pages: pages, pageSlots: pageSlots, // page textures and the source textures copied into them
       pageMB: Math.round(pageTexels * 4 / 1e5) / 10, // level-0 RGBA bytes of every page (mips add a third)
+      pageList: pageList,               // per page: source size, slots used / capacity, height
       pageCopies: pageCopies, pageFullUploads: pageFullUploads,
       pageRefused: pageRefused,         // sources left unpaged: unreadable, or read back with no opaque texel (a dead canvas)
       blackPools: blackPools,           // RATCHET: pools that would render black. Pin at 0.

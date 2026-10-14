@@ -8,7 +8,8 @@
    is printed beside Chrome's ArrayBuffers figure. */
 (function () {
   "use strict";
-  var sites = new Map(), live = 0, n = 0, allocTot = 0;
+  var sites = new Map(), live = 0, n = 0, allocTot = 0, postTot = 0, rev = false;
+  function revealed() { if (rev) return true; var C = window.CBZ; rev = !!(C && C.city && C.city.arena && C.city.arena.root && C.city.arena.root.visible); return rev; }
   var reg = new FinalizationRegistry(function (h) { var e = sites.get(h[0]); if (e) { e.b -= h[1]; e.n--; } live -= h[1]; });
   var MIN = 1024;
   function site() {
@@ -22,8 +23,10 @@
   }
   function track(buf, arr) {
     var b = buf.byteLength; if (b < MIN) return;
-    var k = site(), e = sites.get(k); if (!e) sites.set(k, e = { b: 0, n: 0, s: [], tot: 0 });
+    var k = site(), e = sites.get(k); if (!e) sites.set(k, e = { b: 0, n: 0, s: [], tot: 0, post: 0 });
     e.tot += b; allocTot += b;
+    // after the reveal (the city is on screen): the frames where the phone peak lives
+    if (revealed()) { e.post += b; postTot += b; }
     if (e.s.length < 64) e.s.push(new WeakRef(arr || buf));
     e.b += b; e.n++; live += b; n++;
     reg.register(buf, [k, b]);
@@ -75,6 +78,13 @@
     var rows = []; sites.forEach(function (e, k) { rows.push([k, +(e.tot / 1048576).toFixed(1), +((e.tot - e.b) / 1048576).toFixed(1), e.n]); });
     rows.sort(function (a, b) { return b[2] - a[2]; });
     return JSON.stringify({ allocMB: +(allocTot / 1048576).toFixed(0), liveMB: +(live / 1048576).toFixed(0), cols: "site, allocated MB, dead MB, live count", top: rows.slice(0, top || 40) });
+  };
+  // CBZ_AB_POST(): bytes allocated per site AFTER the reveal (the first
+  // frames, idle jobs, the streamer): what stacks on the phone's peak
+  window.CBZ_AB_POST = function (top) {
+    var rows = []; sites.forEach(function (e, k) { if (e.post > 0) rows.push([k, +(e.post / 1048576).toFixed(1), +(e.b / 1048576).toFixed(1)]); });
+    rows.sort(function (a, b) { return b[1] - a[1]; });
+    return JSON.stringify({ postMB: +(postTot / 1048576).toFixed(0), cols: "site, allocated after reveal MB, live MB (all time)", top: rows.slice(0, top || 40) });
   };
   window.CBZ_AB = function (top) {
     var rows = []; sites.forEach(function (e, k) { if (e.b > 0) rows.push([k, +(e.b / 1048576).toFixed(1), e.n]); });
