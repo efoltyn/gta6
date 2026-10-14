@@ -1065,6 +1065,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
 <script src="src/modes/survival.js?v=noring1013"></script>
+<!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
+     instant death, i-frames, no chip, physical shelter, regen. survival.js's
+     surv.hurt hands the player to it. -->
+<script src="src/systems/disasterhurt.js?v=fair1014"></script>
 <script src="src/modes/shark_sim.js?v=nored0930"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
