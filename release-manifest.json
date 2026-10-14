@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "0da9d2395e8d643033481444bfe0168ee7a517cc",
-  "createdAt": "2026-10-14T14:45:42.001Z",
-  "fileCount": 1366,
-  "totalBytes": 50026432,
+  "sourceCommit": "08a367289eb838adec8b20645ed1a4baef3626da",
+  "createdAt": "2026-10-14T15:12:09.413Z",
+  "fileCount": 1383,
+  "totalBytes": 50409493,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -1933,8 +1933,8 @@
     },
     {
       "file": "src/city/vehicles.js",
-      "bytes": 167249,
-      "sha256": "cf7f963463274721b89226d7576f1e081a5d1088d705935ad9ef84164a6d588e"
+      "bytes": 167281,
+      "sha256": "c1fe2e6646f15bb51c39949e373121cc14a461eae1c2fa21f647ef54ffb9a89b"
     },
     {
       "file": "src/city/verbwheel.js",
@@ -2520,6 +2520,91 @@
       "file": "src/integrations/index.js",
       "bytes": 10,
       "sha256": "4e09a0f8480138f585236ba4fb6d319ee94253f850a2c0b7c9d30fe1fa262a29"
+    },
+    {
+      "file": "src/lab/closure.js",
+      "bytes": 2877,
+      "sha256": "a0957753c773eaf4a67f61d3dfb3fd2261ef1e5df447b68dd29cfa0bf03cd2a0"
+    },
+    {
+      "file": "src/lab/deps.json",
+      "bytes": 332194,
+      "sha256": "4e9827bf48ab65c6b49d4ffc0814e8068b5f90af57ac2329c7126f9013360d21"
+    },
+    {
+      "file": "src/lab/ingredients/building.js",
+      "bytes": 2074,
+      "sha256": "05edaee2848948eba5aa9844c9316c99a744f95b8efd9f470b1acbf547637ae4"
+    },
+    {
+      "file": "src/lab/ingredients/car.js",
+      "bytes": 3386,
+      "sha256": "6f00bd4c7561e60cf70b0fde636ded3216d15df1e0b28d0d6c6e37a4ef55650f"
+    },
+    {
+      "file": "src/lab/ingredients/chair.js",
+      "bytes": 1954,
+      "sha256": "58cde04792b048fcf234593e79c52ecb844b482df902c48cb008d73b4ea3d8db"
+    },
+    {
+      "file": "src/lab/ingredients/gun.js",
+      "bytes": 1831,
+      "sha256": "d4303ae00784e33dfec4d79bea12a80d1f88155c1095c879292c7cfa5eae605b"
+    },
+    {
+      "file": "src/lab/ingredients/person.js",
+      "bytes": 10943,
+      "sha256": "3c8a5edc1e4cf0105b3a74216bdd05c92ab62eaefbf45ac387c40708c162839f"
+    },
+    {
+      "file": "src/lab/ingredients/player.js",
+      "bytes": 1659,
+      "sha256": "8c3b4fb8f48a44f077eea85138d08701eaa5786f135efa2ac196f2626777be14"
+    },
+    {
+      "file": "src/lab/ingredients/street.js",
+      "bytes": 1387,
+      "sha256": "8ed37b0afa9fcd6f0c3f4686f40ae8819bb323aa5dee5e2c996b592d1194aefa"
+    },
+    {
+      "file": "src/lab/kits/building.js",
+      "bytes": 3046,
+      "sha256": "0e7609a91322aa08cb26777d752ad748762371c13fa8eac242643428d07a36e3"
+    },
+    {
+      "file": "src/lab/kits/car-chair.js",
+      "bytes": 2203,
+      "sha256": "a27ffd7f361f24a5fdedf2e163edbe580be51d6b8f27d8712c4e40745ec72ecc"
+    },
+    {
+      "file": "src/lab/kits/chair-tip.js",
+      "bytes": 543,
+      "sha256": "d8344adaf645a28c0cb2ce7fb650e5a496850dff236388453bdcea182b1a978f"
+    },
+    {
+      "file": "src/lab/kits/empty.js",
+      "bytes": 209,
+      "sha256": "5cab5294b49bf9324646b75fb29e8fc9bca6f4925009d90ae4b2768e2689e77d"
+    },
+    {
+      "file": "src/lab/kits/person-chair.js",
+      "bytes": 2189,
+      "sha256": "601758bc364373fd60346f32cd5213026cdda48c9da17f49f4a6e8ec5c7877e6"
+    },
+    {
+      "file": "src/lab/kits/standoff.js",
+      "bytes": 1762,
+      "sha256": "9576b12db8c0403be3b8292a78bb6b72c9b25f01a25144e41782bc8a7700a729"
+    },
+    {
+      "file": "src/lab/labworld.js",
+      "bytes": 12935,
+      "sha256": "42215c3e4b145d9c0f0937a90ce2b9c73bc004590765a73834f1446f4cdf0060"
+    },
+    {
+      "file": "src/lab/registry.js",
+      "bytes": 1837,
+      "sha256": "056a3a7af7b6b79f7729b8d2770016f4ff6684d42aa8e1886947726f4aa8dfa6"
     },
     {
       "file": "src/main.js",

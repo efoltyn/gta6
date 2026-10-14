@@ -1,0 +1,1 @@
+CBZ.lab.kit("empty",{about:"the bare lab world: floor, sky, lights, config.js and the frame loop",uses:[],duration:1,probe:function(W){return{ok:!0,summary:"empty world stepped to "+W.t().toFixed(2)+" s"}}});
