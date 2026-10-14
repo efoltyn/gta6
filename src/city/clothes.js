@@ -3657,17 +3657,25 @@
   /* THE SLEEVE HEADS (entities/character.js THE ARMHOLE AND THE SLEEVE HEAD):
      a shaped jacket shell stops at two armholes, and each is filled by a cap
      hung on its ARM, in the garment's own sleeve cloth. They show exactly
-     when the shell does: material null takes them off. */
-  const CAP_UV = limbPainter("arm", null).fn("side", 0.3, 0.2);
+     when the shell does: material null takes them off. The cap wears the
+     upper sleeve's own painter (its row band), so the cloth — a pinstripe,
+     a check — runs on over the shoulder instead of one flat texel. */
   function sleeveHeads(ch, m) {
     const P = ch && ch.parts;
     if (!P) return;
     const caps = ch._sleeveHeads || (m ? (ch._sleeveHeads = []) : null);
     if (!caps) return;
+    const upper = (ch.skinSlots && ch.skinSlots.arms) || [];
     [P.la, P.ra].forEach(function (arm, i) {
       let c = caps[i];
       const side = arm && arm.position && arm.position.x < 0 ? -1 : 1;
-      const g = m && arm && CBZ.humanSleeveCap ? CBZ.humanSleeveCap(ch, side, CAP_UV) : null;
+      let band = null;
+      for (let j = 0; j < upper.length; j++) {
+        let o = upper[j];
+        while (o && o !== arm) o = o.parent;
+        if (o) { band = upper[j].userData.clothBand || null; break; }
+      }
+      const g = m && arm && CBZ.humanSleeveCap ? CBZ.humanSleeveCap(ch, side, limbPainter("arm", band)) : null;
       if (!g) { if (c) c.visible = false; return; }
       if (!c) {
         c = caps[i] = new THREE.Mesh(g, m);
