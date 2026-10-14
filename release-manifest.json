@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "73c5e027630daa5cf9d66db454c35a7a6e7910ab",
-  "createdAt": "2026-10-14T16:24:27.086Z",
+  "sourceCommit": "544b40d45b5cb88320af4b1151564627c0e629c9",
+  "createdAt": "2026-10-14T16:45:26.522Z",
   "fileCount": 1383,
-  "totalBytes": 50414255,
+  "totalBytes": 50418657,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -548,8 +548,8 @@
     },
     {
       "file": "src/city/buildings.js",
-      "bytes": 223365,
-      "sha256": "0a2c8f5588203356da806c15269a79ca595e61e98ef7dec3372402171c628dbb"
+      "bytes": 220841,
+      "sha256": "d829ccc0de731a8f66b48607342b849835cc045a7d837788c341da8675833606"
     },
     {
       "file": "src/city/buildings_civic.js",
@@ -843,8 +843,8 @@
     },
     {
       "file": "src/city/demolition.js",
-      "bytes": 20019,
-      "sha256": "3ae53ce26b90ab5924c294fafd2b220a34915ae8293fef3783e2a2047b15d9dc"
+      "bytes": 20182,
+      "sha256": "5cf656ee1cea472d30a430a2d09f9d7d0be0c3d5d68a5fe5fc154e1c37bf9150"
     },
     {
       "file": "src/city/dialogue.js",
@@ -933,8 +933,8 @@
     },
     {
       "file": "src/city/facade_openings.js",
-      "bytes": 24339,
-      "sha256": "7abfc543fceddc3ddd9dae1bac13b71c9711b40c3be25ed43648843629aebad5"
+      "bytes": 24353,
+      "sha256": "f64007621313fe9b30bec5f53773cf0f77477517e943e77fcc95e2fbae0721ed"
     },
     {
       "file": "src/city/facades/adobe.js",
@@ -1303,13 +1303,8 @@
     },
     {
       "file": "src/city/interiorlight.js",
-      "bytes": 7177,
-      "sha256": "e170e9cebb92d37e80dfb34e059048c2a10723c9879f32c5a354b9f1bf24518e"
-    },
-    {
-      "file": "src/city/interiormap.js",
-      "bytes": 6808,
-      "sha256": "1746e54093c4ec0d5a625377fbff922af8afd9c844747cc0c7ff1ae241f770df"
+      "bytes": 14143,
+      "sha256": "c7cbbe0e5903dabb100fbde51f242125ba3818284dca97326cbc7d2f8040278e"
     },
     {
       "file": "src/city/inventory.js",
@@ -2528,8 +2523,8 @@
     },
     {
       "file": "src/lab/deps.json",
-      "bytes": 332194,
-      "sha256": "4e9827bf48ab65c6b49d4ffc0814e8068b5f90af57ac2329c7126f9013360d21"
+      "bytes": 332407,
+      "sha256": "466f9416fb0a029a6a6795a2ee45ef2061f246c567a81d3cc9c22255b46df8d1"
     },
     {
       "file": "src/lab/ingredients/building.js",
@@ -2595,6 +2590,11 @@
       "file": "src/lab/kits/standoff.js",
       "bytes": 1762,
       "sha256": "9576b12db8c0403be3b8292a78bb6b72c9b25f01a25144e41782bc8a7700a729"
+    },
+    {
+      "file": "src/lab/kits/window-break.js",
+      "bytes": 6613,
+      "sha256": "752da37062723b5d521e73e727b4f2c8b42e3e199a9ecc3a8ec4b2d7a2a56c96"
     },
     {
       "file": "src/lab/labworld.js",
@@ -6853,28 +6853,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 62964,
-      "sha256": "f390a92619f929e34d0c7d971f72ca24a92f93b3d832a103edd4cd843bb682b8"
+      "bytes": 62917,
+      "sha256": "e26c92daf343e9321d63edfd971a3c5fbd2d85b1c05154e4c1ab50bf939f5534"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 63007,
-      "sha256": "a06e257a981ae2e51d36fded15595973ddfe252931466cea0ef87cb56b9711ab"
+      "bytes": 62960,
+      "sha256": "1f777a5efb877a66ba3fc42df15945a194ee489cbfd9f7de1925009c31d6fd12"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 62976,
-      "sha256": "916c04c85770feda732e92b89b486fcfca58282286804c866dd87952e6e77ab5"
+      "bytes": 62929,
+      "sha256": "ff3c6a3c20f057d4d024a392944edcc34bd0abc3fe23af66e79dfeeee7ea9021"
     },
     {
       "file": "gang-city.html",
-      "bytes": 62931,
-      "sha256": "44690bffdbd9f27ced91fa40469e027c699c909b099471521e94a38daf0a9b1a"
+      "bytes": 62884,
+      "sha256": "bf0113d579a09d2d14de7703bbe13c58cc87f2de30b827ffc4005357702d669c"
     },
     {
       "file": "gun-game.html",
-      "bytes": 62953,
-      "sha256": "044d471fce691fecdaaaf589dbb5f69001fda47458b568ce3aebbc2e543f21fa"
+      "bytes": 62906,
+      "sha256": "4df6b8a4a478204fcbfd9cdbe846a4a02b4ec40fbea34e86e3910e2b3c7115c5"
     },
     {
       "file": "games/battle.html",
