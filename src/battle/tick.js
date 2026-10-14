@@ -148,8 +148,6 @@ function animFrame(dt, realDt) {
       const showGun = d2 < 130 * 130 && !m.flying;    // a drone pilot's rifle is slung while he flies
       if (m._weaponProp.visible !== showGun) m._weaponProp.visible = showGun;
     }
-    // the sling's free runs to the rifle's swivels (entities/combatkit.js), near the lens only
-    if (m.char && m.char._kitSling && CBZ.combatKit) CBZ.combatKit.sling(m.char, m._weaponProp, d2 < 40 * 40);
   }
   if (TAC.captives.length) animCaptives(dt);   // the prisoners kneel, hands up
   if (MASS.on) MASS.frame(realDt);      // promotion, demotion, ghosts, the crowd draw
