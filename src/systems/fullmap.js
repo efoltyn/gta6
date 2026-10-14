@@ -60,6 +60,60 @@
   }
   map.patriotContext = patriotContext;
 
+  /* ---- THE TARGET BOARD (CBZ.fullMap.pick) ----------------------------------
+     OWNER (President mode): an order to strike "just does it at a random
+     location. It should ask you where. You should pick a spot." The map is
+     already the one place a spot is chosen, so an order borrows it for one
+     pick instead of growing a second picker: city/warroom.js pick() opens
+     this with the weapon's blast rings, a tap or click puts the aimpoint
+     EXACTLY there (no snap to a door: a strike does not land on the kerb of
+     the place you meant), the rings are drawn on it at true scale, and the
+     footer's one button confirms (Launch / Send). Closing the map any other
+     way (Close/Cancel, Esc, M, the phone) is the cancel. No how-to text: a
+     title, the place under the mark and how far it is from you, one button.
+       map.pick({ title, confirm, rings:[{r, kind:"core"|"mid"|"outer"}],
+                  at:{x,z} (pre-placed, e.g. the enemy capital), labelAt(x,z),
+                  tone:"nuke"|"strike", onPick(x,z,label), onCancel() })
+       map.picking() -> the open session or null */
+  let PICK = null;
+  map.picking = function () { return PICK ? { x: PICK.x, z: PICK.z, label: PICK.label, title: PICK.title } : null; };
+  function pickLabel(x, z) {
+    if (PICK && PICK.labelAt) { try { return PICK.labelAt(x, z) || ""; } catch (e) {} }
+    return "";
+  }
+  function pickSet(x, z) {
+    const b = boundsFor("city");
+    PICK.x = Math.max(b.minX, Math.min(b.maxX, x));
+    PICK.z = Math.max(b.minZ, Math.min(b.maxZ, z));
+    PICK.label = pickLabel(PICK.x, PICK.z);
+    if (map.active) draw();
+  }
+  function pickConfirm() {
+    if (!PICK || PICK.x == null) return false;
+    const P = PICK;
+    PICK = null;
+    close();
+    if (P.onPick) { try { P.onPick(P.x, P.z, P.label); } catch (e) {} }
+    return true;
+  }
+  map.pick = function (o) {
+    o = o || {};
+    if (mode() !== "city") return false;
+    if (PICK) { const old = PICK; PICK = null; if (old.onCancel) { try { old.onCancel(); } catch (e) {} } }
+    PICK = {
+      title: o.title || "TARGET", confirm: o.confirm || "Launch", rings: (o.rings || []).slice(),
+      tone: o.tone || "nuke", labelAt: o.labelAt || null, onPick: o.onPick || null, onCancel: o.onCancel || null,
+      x: null, z: null, label: "",
+    };
+    if (o.at && isFinite(o.at.x) && isFinite(o.at.z)) pickSet(o.at.x, o.at.z);
+    if (!map.active && !open()) { PICK = null; return false; }
+    pickFrame();
+    draw();
+    return true;
+  };
+  map.pickSpot = function (x, z) { if (!PICK) return false; pickSet(x, z); return true; };   // (map.pickAt is the tooltip hit-test)
+  map.pickConfirm = pickConfirm;
+
   // ---- MAP_V2 (owner's overhaul flag) + the wanted-star read -----------------
   // MAP_V2 on ⇒ icons/marks/labels draw LIVE at the current zoom (never baked
   // into the zoom-magnified plate) and the map draws the REAL road network +
@@ -176,6 +230,24 @@
     map.view.ox = Math.max(b.minX - m, Math.min(b.maxX + m, map.view.ox));
     map.view.oz = Math.max(b.minZ - m, Math.min(b.maxZ + m, map.view.oz));
   }
+  // a pick frames the weapon: the aimpoint (else you) with its outer ring
+  // and you both on the board, never tighter than the street view
+  function pickFrame() {
+    if (!PICK) return;
+    const b = boundsFor("city"), pos = CBZ.player && CBZ.player.pos;
+    const sw = b.maxX - b.minX, sh = b.maxZ - b.minZ;
+    const sc0 = Math.min((W - PAD * 2) / sw, (H - PAD * 2) / sh);
+    let R = 0;
+    for (let i = 0; i < PICK.rings.length; i++) R = Math.max(R, PICK.rings[i].r || 0);
+    const cx = PICK.x != null ? PICK.x : (pos ? pos.x : (b.minX + b.maxX) / 2);
+    const cz = PICK.z != null ? PICK.z : (pos ? pos.z : (b.minZ + b.maxZ) / 2);
+    let span = Math.max(260, R * 2.6);
+    if (pos && PICK.x != null) span = Math.max(span, Math.hypot(pos.x - cx, pos.z - cz) * 2.3);
+    map.view.ox = cx; map.view.oz = cz;
+    map.view.z = clampZoom(((H - PAD * 2) / span) / sc0);
+    map.view.fitted = true;
+    clampPan();
+  }
   // frame the view on the player (default) or fit the whole archipelago (F).
   function setCityView(fitAll) {
     const b = boundsFor("city");
@@ -258,9 +330,10 @@
   // The footer chip is the clear-waypoint verb itself, not a caption of the
   // Space handler below — that key is what a hand on a keyboard reaches for,
   // and this is what a thumb reaches for. Both land on clearWaypoint().
-  if (clearBtn) clearBtn.addEventListener("click", function (e) { e.preventDefault(); clearWaypoint(); });
+  if (clearBtn) clearBtn.addEventListener("click", function (e) { e.preventDefault(); if (PICK) close(); else clearWaypoint(); });
   if (launchBtn) launchBtn.addEventListener("click", function (e) {
     e.preventDefault();
+    if (PICK) { pickConfirm(); return; }
     if (!patriotContext() || !activeWaypoint("city") || !CBZ.cityArmorFire) return;
     let fired = false;
     try { fired = CBZ.cityArmorFire() !== false; } catch (err) { fired = false; }
@@ -340,6 +413,7 @@
   }
 
   function setWaypoint(x, z, label) {
+    if (PICK) { pickSet(x, z); return null; }
     const which = mode(), b = boundsFor(which);
     x = Math.max(b.minX, Math.min(b.maxX, x));
     z = Math.max(b.minZ, Math.min(b.maxZ, z));
@@ -422,6 +496,8 @@
   function close(relock) {
     if (!map.active) return;
     map.active = false;
+    if (PICK) { const P = PICK; PICK = null; if (P.onCancel) { try { P.onCancel(); } catch (e) {} } }
+    root.classList.remove("fullmap-picking");
     releasePlates();
     sizeCanvas(false);
     map._cursor = null; map._sel = null; map._hoverKey = "";
@@ -488,7 +564,36 @@
     ctx.restore();
   }
 
+  // the weapon's reach, at true scale: filled core, rings outward, a crosshair
+  const PICK_TONE = {
+    nuke:   { core: "rgba(255,236,170,.55)", mid: "rgba(255,120,40,.22)", outer: "rgba(255,70,40,.08)", line: "#ffb04a", cross: "#fff3d6" },
+    strike: { core: "rgba(255,150,60,.45)", mid: "rgba(255,120,40,.16)", outer: "rgba(255,90,40,.08)", line: "#ff9b3d", cross: "#fff3d6" },
+  };
+  function drawPick(p) {
+    if (!PICK || PICK.x == null) return;
+    const T = PICK_TONE[PICK.tone] || PICK_TONE.nuke;
+    const x = p.x(PICK.x), z = p.z(PICK.z);
+    const rs = PICK.rings.slice().sort(function (a, b) { return b.r - a.r; });
+    for (let i = 0; i < rs.length; i++) {
+      const rp = Math.max(2, rs[i].r * p.sc);
+      ctx.fillStyle = T[rs[i].kind] || T.mid;
+      ctx.beginPath(); ctx.arc(x, z, rp, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = T.line; ctx.globalAlpha = rs[i].kind === "outer" ? 0.45 : 0.8;
+      ctx.lineWidth = rs[i].kind === "core" ? 2 : 1.4;
+      if (rs[i].kind === "outer") ctx.setLineDash([6, 5]);
+      ctx.beginPath(); ctx.arc(x, z, rp, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+    const k = 9 + Math.sin(performance.now() * 0.008) * 1.5;
+    ctx.beginPath(); ctx.moveTo(x - 16, z); ctx.lineTo(x - 5, z); ctx.moveTo(x + 5, z); ctx.lineTo(x + 16, z);
+    ctx.moveTo(x, z - 16); ctx.lineTo(x, z - 5); ctx.moveTo(x, z + 5); ctx.lineTo(x, z + 16);
+    ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = 4; ctx.stroke();
+    ctx.strokeStyle = T.cross; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, z, k, 0, Math.PI * 2); ctx.stroke();
+    if (PICK.label) mapLabel(PICK.label, x, z - 22, { size: 12, fill: "#fff3d6", haloC: "rgba(0,0,0,.85)", force: true });
+  }
   function drawWaypoint(p) {
+    if (PICK) { drawPick(p); return; }
     const wp = activeWaypoint();
     if (!wp) return;
     const fireControl = patriotContext();
@@ -2738,14 +2843,20 @@
   function draw() {
     if (!ctx) return;
     const which = mode(), p = map.projection = makeProjection(boundsFor(which));
-    const fireControl = patriotContext();
-    if (titleEl) titleEl.textContent = fireControl ? "PATRIOT FIRE CONTROL" : (MODE_TITLE[which] || "AREA MAP");
+    const fireControl = !PICK && patriotContext();
+    if (titleEl) titleEl.textContent = PICK ? PICK.title : fireControl ? "PATRIOT FIRE CONTROL" : (MODE_TITLE[which] || "AREA MAP");
     if (placeHint && fireControl) placeHint.textContent = CBZ.touchMode ? "Tap the map to designate an impact point" : "Click the map to designate an impact point";
+    if (placeHint && PICK && placeHint.textContent) placeHint.textContent = "";
     if (launchBtn) {
-      launchBtn.hidden = !fireControl;
-      launchBtn.disabled = !activeWaypoint("city");
-      launchBtn.textContent = CBZ.touchMode ? "LAUNCH PATRIOT" : "LAUNCH PATRIOT [L-CLICK]";
+      launchBtn.hidden = !fireControl && !PICK;
+      launchBtn.disabled = PICK ? PICK.x == null : !activeWaypoint("city");
+      launchBtn.textContent = PICK ? PICK.confirm : CBZ.touchMode ? "LAUNCH PATRIOT" : "LAUNCH PATRIOT [L-CLICK]";
     }
+    if (clearBtn) {
+      if (PICK) { if (clearBtn.textContent !== "Cancel") clearBtn.textContent = "Cancel"; }
+      else if (clearBtn.textContent === "Cancel") keycaps();
+    }
+    root.classList.toggle("fullmap-picking", !!PICK);
     // one frame, one census: every icon, label, overlap and pick below is
     // counted from scratch, which is what makes CBZ.mapAudit() a measurement
     // rather than an opinion.
@@ -2780,6 +2891,13 @@
     }
     const wp = activeWaypoint();
     const route = activeRoute();
+    if (PICK) {
+      const pp = CBZ.player && CBZ.player.pos;
+      const d = PICK.x != null && pp ? Math.hypot(PICK.x - pp.x, PICK.z - pp.z) : 0;
+      if (readout) readout.textContent = PICK.x == null ? "" : (PICK.label ? PICK.label + " - " : "") + (d >= 1000 ? (d / 1000).toFixed(1) + " km" : Math.round(d) + " m");
+      if (legend && map._legendHTML !== "") { map._legendHTML = ""; legend.innerHTML = ""; }
+      return;
+    }
     if (readout) readout.textContent = wp
       ? (fireControl ? "Impact point: " : "Route: ") + waypointDistance(wp) + "m - " + wp.label + (!fireControl && route && route.kind === "fallback" ? " (direct)" : "")
       : (fireControl ? "No impact point designated" : "No waypoint set");
@@ -2906,7 +3024,7 @@
   // dismisses the label and drops a waypoint exactly as it always did.
   // Returns true when the tap was consumed by the icon layer.
   function touchTap(c) {
-    if (!CBZ.touchMode || !ICONS_V2()) return false;
+    if (PICK || !CBZ.touchMode || !ICONS_V2()) return false;
     const hit = pickAt(c.x, c.y);
     if (!hit) { if (map._sel) { map._sel = null; draw(); } return false; }
     const same = map._sel && Math.abs(map._sel.wx - hit.wx) < 0.01 && Math.abs(map._sel.wz - hit.wz) < 0.01;
@@ -3101,7 +3219,7 @@
       // still runs, because the card only preventDefaults; input.js latched the
       // key before it either way.
       const cardUp = !!(CBZ.controls && CBZ.controls.open && CBZ.controls.open());
-      if (!e.repeat && !cardUp) clearWaypoint();
+      if (!e.repeat && !cardUp) { if (PICK) { PICK.x = null; PICK.z = null; PICK.label = ""; draw(); } else clearWaypoint(); }
       return;
     }
     if (e.repeat) return;
@@ -3117,6 +3235,7 @@
       map.toggle(); e.preventDefault();
     }
     else if (map.active && e.key === "Escape") { close(); e.preventDefault(); }
+    else if (map.active && PICK && e.key === "Enter") { pickConfirm(); e.preventDefault(); }
     else if (map.active && (e.key === "Backspace" || e.key === "Delete")) { clearWaypoint(); e.preventDefault(); }
     else if (map.active && mode() === "city" && k === "f") { setCityView(true); draw(); e.preventDefault(); }   // F = fit the whole archipelago
   });

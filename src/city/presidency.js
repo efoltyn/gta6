@@ -1241,11 +1241,12 @@
     return {
       group: "WAR", name: name, moves: moves,
       live: function () { return !!(CBZ.warroom && CBZ.warroom.enemy()); },
-      gate: function () {
+      // o.target: a spot picked on the target board (CBZ.warroom.pick)
+      gate: function (h, o) {
         const W = CBZ.warroom;
-        return W && W[gateFn] ? W[gateFn]() : { ok: false, why: "The army is not answering." };
+        return W && W[gateFn] ? W[gateFn](o && o.target ? { target: o.target } : undefined) : { ok: false, why: "The army is not answering." };
       },
-      run: function () { return CBZ.warroom[fnName](); },
+      run: function (h, o) { return CBZ.warroom[fnName](o && o.target ? { target: o.target } : undefined); },
     };
   }
   function doctrineGate(gov) {
@@ -1268,13 +1269,13 @@
     return { ok: true, why: "" };
   }
 
-  function pressButton(key) {
+  function pressButton(key, opts) {
     if (!on()) return { ok: false, why: "Presidency is switched off." };
     const B = BUTTONS[key];
     if (!B) return { ok: false, why: "No such order." };
     const h = seat();
     if (!h) return { ok: false, why: "You do not hold the country." };
-    const gt = B.gate(h);
+    const gt = B.gate(h, opts);
     // A REFUSAL IS RETURNED, NEVER ANNOUNCED. Every caller now is a person
     // (an officer at the table, a minister on the phone, an aide at the desk)
     // and that person says why in his own words. No phone text from a room.
@@ -1294,7 +1295,7 @@
     // is absorbed; the act table (city/politics.js ORDERS) is what the
     // country feels. The war room's orders report themselves (warroom.js).
     let r;
-    const runIt = function () { try { return B.run(h); } catch (e) { return { ok: false, why: "The order did not go through." }; } };
+    const runIt = function () { try { return B.run(h, opts); } catch (e) { return { ok: false, why: "The order did not go through." }; } };
     r = Pol && Pol.during && !WAR_KEYS[key] ? Pol.during(runIt) : runIt();
     paintBoard();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -1321,13 +1322,22 @@
     // ---- THE WAR IS ORDERED FROM THE TABLE (city/warroom.js) -------------
     // The left red phone is the army: War, or Peace while there is a war.
     // The right red phone is the nuclear line: it has a verb only while the
-    // country has warheads. The map: E aims nothing and orders the strike on
-    // what is marked (no mark and no war: E is Mark, which opens the map).
+    // country has warheads. The map table is the airstrike. Both strikes
+    // open the TARGET BOARD (CBZ.warroom.pick -> CBZ.fullMap.pick): you tap
+    // the spot, see what the weapon reaches, and Launch / Send. Nothing is
+    // ever flown at a place nobody chose.
     // The answer comes back down the line, or from the General at the table.
     const thing = function (pt, r, px, pz, kind) {
       if (!pt || !on() || !CFG.PRESIDENCY_SITROOM || !seat() || CONV || !onRoomFloor() || !CBZ.warroom) return null;
       const dx = pt.x - px, dz = pt.z - pz;
       return dx * dx + dz * dz < r * r ? { x: pt.x, y: (ROOM.floorY || 0) + 0.95, z: pt.z, kind: kind } : null;
+    };
+    // the target board first; the order (and its answer) once a spot is chosen
+    const pickStrike = function (key, role) {
+      const W = CBZ.warroom;
+      const r = W && W.pick ? W.pick(key, { onPick: function (tg) { warAnswer(pressButton(key, { target: tg }), role); } })
+        : pressButton(key);
+      if (!r || !r.ok || !r.picking) warAnswer(r, role);
     };
     const markMap = function () { if (CBZ.fullMap && CBZ.fullMap.open) { try { CBZ.fullMap.open(); } catch (e) {} } };
     CBZ.interactions.registerZone({
@@ -1349,7 +1359,7 @@
         // warhead (city/arsenal_data.js payloads.nuke); what is missing is
         // the General's one line when you Talk to him
         canShow: function () { return !!(CBZ.warroom && CBZ.warroom.hasMeans("nuke")); },
-        onSelect: function () { warAnswer(pressButton("nuke"), null); },
+        onSelect: function () { pickStrike("nuke", null); },
       }],
     });
     CBZ.interactions.registerZone({
@@ -1357,11 +1367,8 @@
       find: function (px, pz) { return thing(ROOM.mapPt, 1.7, px, pz, "preswarmap"); },
       options: [{
         id: "pres-map-strike", slot: "e", prio: 20, campaignSafe: true,
-        label: function () { return CBZ.warroom && CBZ.warroom.target() ? "Airstrike" : "Mark"; },
-        onSelect: function () {
-          if (!CBZ.warroom.target()) { markMap(); return; }
-          warAnswer(pressButton("strike"), "general");
-        },
+        label: "Airstrike",
+        onSelect: function () { pickStrike("strike", "general"); },
       }, {
         // THE FRONT (city/frontline.js): today's battle on the line, in NPC
         // War, with you in it. Only while there is a war to go to.

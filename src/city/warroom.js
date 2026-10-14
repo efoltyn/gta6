@@ -73,7 +73,7 @@
   const PEND = [];               // ordered nukes in the air: {x,z,attacker,target,label,byPlayer,t}
   const RAID = { t: null, n: 0, foe: null };
   let RET = null;                // {foe, us, at}
-  const FB = { ped: null, mesh: null, down: null };   // the football: carrier, the case, a case set down (THE FOOTBALL below)
+  const FB = { ped: null, ch: null, mesh: null, down: null, op: null };   // the football: carrier, his rig, the case, a case set down, the order in hand (THE FOOTBALL below)
   const PARK = Object.create(null);    // nation -> { built, jet:[recs], heavy:[recs], b2:[recs], meshes:[] }
   const OUT = Object.create(null);     // nation -> strike jets in the air
 
@@ -191,15 +191,10 @@
       return (w && isFinite(w.x) && isFinite(w.z)) ? w : null;
     } catch (e) { return null; }
   }
-  function aimPoint() {
-    const P = CBZ.player;
-    if (!P || !P.pos) return null;
-    const y = (CBZ.cam && CBZ.cam.yaw) || 0;
-    const x = P.pos.x - Math.sin(y) * 140, z = P.pos.z - Math.cos(y) * 140;
-    return { x: x, z: z, label: placeName(x, z) || "the mark", nation: nationAt(x, z), src: "aim" };
-  }
-  // THE TARGET: the map's mark, else (at war) the enemy capital, else (only
-  // when the caller allows it) where you are looking.
+  // THE TARGET when nobody picked one: the map's mark, else (at war) the
+  // enemy capital, else nothing. (There was a third: 140 m down the camera's
+  // yaw, which is how the aide's airstrike landed "at a random location".
+  // Every order a person gives now goes through the target board, pick().)
   function target(opts) {
     opts = opts || {};
     const wp = waypoint();
@@ -209,7 +204,7 @@
       const c = capitalPoint(foe);
       if (c) return { x: c.x, z: c.z, label: c.name, nation: foe, src: "war" };
     }
-    return opts.aim ? aimPoint() : null;
+    return null;
   }
   function mostHostile(us) {
     if (!CBZ.polity || !CBZ.polity.list) return null;
@@ -499,7 +494,7 @@
       // the cell's dug-out is on our own soil but it is not our country we are bombing
       tgt = { x: b.interior.cx, z: b.interior.cz, label: b.name, nation: b.owner === "cell" ? null : b.owner, bunker: b };
     } else {
-      tgt = opts.target || target({ aim: !!opts.aim, nation: us });
+      tgt = opts.target || target({ nation: us });
       if (!tgt) return { ok: false, why: line("noTarget") };
     }
     return { ok: true, us: us, pl: pl, carrier: carrier, tgt: tgt };
@@ -1155,21 +1150,59 @@
     const t = r && r.ok ? (r.line || "Yes, sir.") : String((r && r.why) || "Not now.");
     if (CBZ.citySay) { try { CBZ.citySay(p, t, "#dfe7ff", 3); } catch (e) {} }
   }
+  /* THE CASE. The real one is a Zero Halliburton aluminium attache case in a
+     black leather jacket: ~46 x 34 x 13 cm, a carry handle on the top edge
+     with a latch either side of it, and a stub of antenna by the handle. It
+     opens like a book (a deep base, a shallow lid hinged on the bottom edge).
+     Authored for CBZ.handCarry (entities/character.js): origin AT THE HANDLE
+     GRIP, the case hanging down -y, long axis +z, thickness x, real metres.
+     userData.lid is the hinge (rotation.z opens it); inside: the black book
+     of options, the secure handset, the authenticator card. */
+  const CASE = { L: 0.46, H: 0.34, T: 0.13, top: 0.055, lidT: 0.04 };
   function briefcase() {
     if (!THREE) return null;
     const grp = new THREE.Group();
     grp.name = "nuclear-football";
-    const box = (w, h, d, x, y, z, m) => { const b = new THREE.Mesh(CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); grp.add(b); return b; };
-    const leather = mat(0x17181b), brass = mat(0xb08a3e);
-    // built in the HAND socket's frame: -y runs down the forearm past the
-    // fist, so the handle sits in the grip and the case hangs below it,
-    // edge-down by his leg, swinging with his arm
-    box(0.12, 0.34, 0.46, 0, -0.22, 0, leather);      // the case
-    box(0.035, 0.04, 0.14, 0, -0.03, 0, leather);     // handle, in the fist
-    box(0.03, 0.035, 0.02, 0, -0.06, 0.06, leather);  // handle posts
-    box(0.03, 0.035, 0.02, 0, -0.06, -0.06, leather);
-    box(0.125, 0.03, 0.05, 0, -0.1, 0.15, brass);     // the two latches
-    box(0.125, 0.03, 0.05, 0, -0.1, -0.15, brass);
+    const geo = (w, h, d) => CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d);
+    const box = (par, w, h, d, x, y, z, m) => { const b = new THREE.Mesh(geo(w, h, d), m); b.position.set(x, y, z); par.add(b); return b; };
+    const leather = mat(0x131417), seam = mat(0x24262b), steel = mat(0xa9adb3), felt = mat(0x3a3d44);
+    const book = mat(0x0b0b0d), card = mat(0xd9d4c3), phone = mat(0x1d1f22);
+    const L = CASE.L, H = CASE.H, T = CASE.T, top = CASE.top, lt = CASE.lidT;
+    const y0 = -top - H, yc = -top - H / 2;        // bottom edge, centre
+    const baseT = T - lt, bx = -T / 2 + baseT / 2;  // the base: the inner (leg) side
+    // THE BASE: walls round an open tray, so an open case has an inside
+    box(grp, 0.012, H, L, -T / 2 + 0.006, yc, 0, leather);                      // its back
+    box(grp, baseT, 0.012, L, bx, -top - 0.006, 0, leather);                    // top wall
+    box(grp, baseT, 0.012, L, bx, y0 + 0.006, 0, leather);                      // bottom wall
+    box(grp, baseT, H - 0.024, 0.012, bx, yc, L / 2 - 0.006, leather);          // end walls
+    box(grp, baseT, H - 0.024, 0.012, bx, yc, -L / 2 + 0.006, leather);
+    box(grp, 0.004, H - 0.03, L - 0.03, -T / 2 + 0.014, yc, 0, felt);           // the lining
+    // inside: the black book, the handset in its cradle, the card
+    box(grp, 0.03, 0.24, 0.17, -T / 2 + 0.031, yc + 0.01, -0.11, book);
+    box(grp, 0.026, 0.07, 0.16, -T / 2 + 0.029, yc + 0.01, 0.11, phone);
+    box(grp, 0.03, 0.05, 0.035, -T / 2 + 0.031, yc + 0.01, 0.17, phone);
+    box(grp, 0.004, 0.055, 0.085, -T / 2 + 0.018, yc - 0.12, 0.10, card);
+    // the leather welt round the join
+    box(grp, 0.012, H + 0.006, L + 0.006, T / 2 - lt - 0.006, yc, 0, seam);
+    // THE LID, hinged on the bottom edge at the join
+    const lid = new THREE.Group();
+    lid.name = "football-lid";
+    lid.position.set(T / 2 - lt, y0, 0);
+    grp.add(lid);
+    box(lid, lt, H, L, lt / 2, H / 2, 0, leather);
+    box(lid, 0.004, H - 0.04, L - 0.04, 0.001, H / 2, 0, felt);                // its inside face
+    // THE HANDLE on the top edge, in the fist: a leather grip on two posts
+    box(grp, 0.03, 0.026, 0.13, bx + 0.01, -0.004, 0, leather);
+    box(grp, 0.024, top, 0.022, bx + 0.01, -top / 2, 0.066, seam);
+    box(grp, 0.024, top, 0.022, bx + 0.01, -top / 2, -0.066, seam);
+    // two latches spanning the join, either side of the handle
+    box(grp, 0.05, 0.016, 0.045, T / 2 - lt, -top + 0.004, 0.15, steel);
+    box(grp, 0.05, 0.016, 0.045, T / 2 - lt, -top + 0.004, -0.15, steel);
+    // the antenna stub by the handle
+    box(grp, 0.01, 0.075, 0.01, bx, -top + 0.037, -0.2, leather);
+    grp.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
+    grp.userData.lid = lid;
+    grp.userData.caseL = L; grp.userData.caseH = H; grp.userData.caseT = T; grp.userData.handleH = top;
     return grp;
   }
   /* THE MAN WITH THE FOOTBALL IS NOT A SHOOTER.
@@ -1195,81 +1228,182 @@
          FB_REISSUE seconds), so the case never teleports between hands;
        · the carrier is STICKY: once a man has it he keeps it until he is
          dead or out of the detail. It used to be re-picked every second from
-         the roster order, and a rig swap (near/far) dropped and rebuilt it. */
+         the roster order, and a rig swap (near/far) dropped and rebuilt it.
+     HOW HE CARRIES IT is the rig's: CBZ.handCarry (entities/character.js)
+     hangs it plumb from his left fist by the handle, his arm straight. */
   const FB_REACH = 1.6;          // m: close enough to pick a set-down case up
   const FB_REISSUE = 30;         // s a case may lie unclaimed before the backup comes up
+  function carry(ch, obj) { if (ch && CBZ.handCarry) { try { return CBZ.handCarry(ch, obj, "l"); } catch (e) {} } return null; }
   function detachCarrier() {
     const p = FB.ped;
     if (p && p._carries && p._carries.what === "football") p._carries = null;
-    FB.ped = null;
+    if (FB.op) endOp();
+    if (FB.ch && FB.ch.handCarry && FB.ch.handCarry.obj === FB.mesh) carry(FB.ch, null);
+    FB.ped = null; FB.ch = null;
   }
   function dropFootball() {
     if (FB.mesh && FB.mesh.parent) FB.mesh.parent.remove(FB.mesh);
     if (FB.down && FB.down.mesh && FB.down.mesh.parent) FB.down.mesh.parent.remove(FB.down.mesh);
-    FB.mesh = null; FB.down = null;
     detachCarrier();
+    FB.mesh = null; FB.down = null;
   }
   // THE CASE GOES DOWN: off his hand onto the ground under it, lying on its
   // broad side, a real thing in the world (never a case in a shooting hand)
   function setDownFootball(why) {
     const p = FB.ped, m = FB.mesh;
+    const w = new THREE.Vector3();
+    if (m && m.parent) { m.parent.updateWorldMatrix(true, false); m.getWorldPosition(w); }
+    else if (p && p.pos) w.set(p.pos.x, p.pos.y || 0, p.pos.z);
     detachCarrier();
     FB.mesh = null;
     if (!m) return;
-    const root = (p && p.group && p.group.parent) || (m.parent && m.parent.parent) || CBZ.scene;
-    const w = new THREE.Vector3();
-    if (m.parent) { m.parent.updateWorldMatrix(true, false); m.getWorldPosition(w); m.parent.remove(m); }
-    else if (p && p.pos) w.set(p.pos.x, p.pos.y || 0, p.pos.z);
+    const root = (p && p.group && p.group.parent) || CBZ.scene;
+    if (m.parent) m.parent.remove(m);
     let y = 0;
     try { y = CBZ.groundAt ? CBZ.groundAt(w.x, w.z, w.y + 0.5) : (CBZ.floorAt ? CBZ.floorAt(w.x, w.z) : 0); } catch (e) { y = 0; }
     if (!isFinite(y)) y = p && p.pos ? (p.pos.y || 0) : 0;
     if (!root) return;
-    // the case is built hanging in a fist: its 0.12 m thickness on local x,
-    // centred 0.22 below the handle. Lie it on that broad side.
+    // the case is authored hanging from its handle (thickness on local x,
+    // centred top + H/2 below the grip). Lie it on its broad side, lid up.
     m.position.set(0, 0, 0); m.rotation.set(0, 0, 0); m.scale.set(1, 1, 1);
+    if (m.userData.lid) m.userData.lid.rotation.z = 0;
     const holder = new THREE.Group();
     holder.name = "nuclear-football-down";
     holder.position.set(w.x, y, w.z);
     holder.rotation.y = p && p.group ? p.group.rotation.y : 0;
     m.rotation.z = Math.PI / 2;                    // local x (thickness) -> world up
-    m.position.set(-0.22, 0.06, 0);                // case centre over the spot, resting on the ground
+    m.position.set(-(CASE.top + CASE.H / 2), CASE.T / 2, 0);   // case centre over the spot, resting on the ground
     holder.add(m);
     root.add(holder);
     FB.down = { mesh: holder, x: w.x, z: w.z, t: CLOCK, why: why || "" };
   }
-  function giveFootball(p, hand) {
+  function giveFootball(p) {
     FB.ped = p;
     p._carries = { what: "football", release: function (why) { if (FB.ped === p) setDownFootball(why); } };
     wireFootball(p);
     if (FB.down) {                                  // he picks up the one on the ground
       const held = FB.down.mesh.children[0] || null;
       if (FB.down.mesh.parent) FB.down.mesh.parent.remove(FB.down.mesh);
+      if (held && held.parent) held.parent.remove(held);
       FB.down = null;
       FB.mesh = held;
       if (FB.mesh) { FB.mesh.position.set(0, 0, 0); FB.mesh.rotation.set(0, 0, 0); }
     }
     if (!FB.mesh) FB.mesh = briefcase();
-    if (FB.mesh && hand) hand.add(FB.mesh);
-    else if (FB.mesh && FB.mesh.parent) FB.mesh.parent.remove(FB.mesh);
+    holdFootball();
+  }
+  // the case into the carrier's CURRENT rig (a near/far rig swap moves it)
+  function holdFootball() {
+    const p = FB.ped, ch = p && p.char;
+    if (!p || !FB.mesh) return;
+    if (FB.ch && FB.ch !== ch && FB.ch.handCarry && FB.ch.handCarry.obj === FB.mesh) carry(FB.ch, null);
+    FB.ch = ch || null;
+    if (!ch) { if (FB.mesh.parent) FB.mesh.parent.remove(FB.mesh); return; }
+    if (!ch.handCarry || ch.handCarry.obj !== FB.mesh || !FB.mesh.parent) carry(ch, FB.mesh);
+  }
+
+  /* ---- THE ORDER THE CASE IS FOR -------------------------------------------
+     OWNER: "the whole point of the briefcase isn't an airstrike. Your Secret
+     Service doesn't do airstrikes. The briefcase could be a nuke. Right now
+     when you tell him to do it, it just does it at a random location. It
+     should ask you where. You should pick a spot."
+     The aide had three verbs (Airstrike on E, Nuke on hold, Bomb) and the
+     airstrike, with no mark on the map and no war, flew at aimPoint(): 140 m
+     down the camera's yaw, wherever that was. Now he has ONE verb, Nuke, and
+     it is the nuclear order: the aide raises the case and opens it
+     (CBZ.handCarry present/open), the map comes up as the target board
+     (CBZ.fullMap.pick: tap a spot, the blast rings are drawn on it, Launch
+     or close), and the order goes through the same button the Situation
+     Room's red phone presses (presidency.js press -> order("nuke") -> the
+     bomber off its pad, the warhead, the sirens, nukefx, the news and the
+     country's verdict). Airstrikes are the General's: the Situation Room's
+     map table, through the same board. */
+  const FB_OPEN_S = 1.1, FB_CLOSE_S = 0.8;
+  function payloadRings(key) {
+    if (key === "nuke") {
+      const R = CBZ.nukeRings ? CBZ.nukeRings() : null;
+      return R ? [{ r: R.psi1, kind: "outer" }, { r: R.psi5, kind: "mid" }, { r: R.fireball, kind: "core" }]
+        : [{ r: 1100, kind: "mid" }, { r: 130, kind: "core" }];
+    }
+    const T = A(), r = (T && T.leaderExposedR && T.leaderExposedR.bomb) || 45;
+    return [{ r: r * 2, kind: "mid" }, { r: r, kind: "core" }];
+  }
+  function labelAt(x, z) { return placeName(x, z) || nameOf(nationAt(x, z)) || "Open water"; }
+  // OPEN THE TARGET BOARD for a payload. The means are checked FIRST (no
+  // bomber or no warhead: the refusal comes back and no map opens). o.onPick
+  // gets a war-room target; o.onCancel when the board is closed without one.
+  function pick(key, o) {
+    o = o || {};
+    const us = nation();
+    const ready = gate(key, { nation: us, target: { x: 0, z: 0, label: "", nation: null } });
+    if (!ready.ok) return ready;
+    const FM = CBZ.fullMap;
+    if (!FM || !FM.pick) return { ok: false, why: "There's no map in front of me, sir." };
+    const pre = target({ nation: us });
+    const ok = FM.pick({
+      title: key === "nuke" ? "TARGET" : "STRIKE",
+      confirm: key === "nuke" ? "Launch" : "Send",
+      rings: payloadRings(key), tone: key === "nuke" ? "nuke" : "strike",
+      at: pre ? { x: pre.x, z: pre.z } : null,
+      labelAt: labelAt,
+      onPick: function (x, z) {
+        const tg = { x: x, z: z, label: labelAt(x, z), nation: nationAt(x, z), src: "pick" };
+        if (o.onPick) o.onPick(tg);
+      },
+      onCancel: function () { if (o.onCancel) o.onCancel(); },
+    });
+    return ok ? { ok: true, picking: true } : { ok: false, why: "Not now, sir." };
+  }
+  // the order through the President's own button when the presidency is
+  // loaded (Congress, the act table, the bus), the war room's directly when not
+  function press(key, tg) {
+    const P = CBZ.presidency;
+    if (P && typeof P.press === "function") { try { return P.press(key, { target: tg }); } catch (e) {} }
+    return order(key, { target: tg });
+  }
+  function endOp() {
+    const op = FB.op; FB.op = null;
+    if (op && op.ch && CBZ.handCarry) { try { CBZ.handCarry.present(op.ch, false); } catch (e) {} }
+  }
+  function footballNuke(p) {
+    if (FB.op || FB.ped !== p || p.dead) return;
+    const ch = p.char;
+    // the means, before the case comes up (the refusal is his, in one line)
+    const ready = gate("nuke", { target: { x: 0, z: 0, label: "", nation: null } });
+    if (!ready.ok) { aideSay(p, { ok: false, why: missingLine("nuke") || ready.why }); return; }
+    FB.op = { phase: "open", t: 0, ped: p, ch: ch };
+    if (ch && CBZ.handCarry && ch.handCarry && ch.handCarry.obj === FB.mesh) {
+      CBZ.handCarry.present(ch, true);
+      CBZ.handCarry.open(ch, 1);
+    }
+    aideSay(p, { ok: true, line: "Sir." });
+  }
+  function closeCase(op) { op.phase = "close"; op.t = 0; if (op.ch && CBZ.handCarry) CBZ.handCarry.open(op.ch, 0); }
+  function tickOp(dt) {
+    const op = FB.op;
+    if (!op) return;
+    if (op.ped !== FB.ped || !op.ped || op.ped.dead) { endOp(); return; }
+    op.t += dt;
+    if (op.phase === "open" && op.t >= FB_OPEN_S) {
+      op.phase = "pick";
+      const r = pick("nuke", {
+        onPick: function (tg) {
+          if (FB.op !== op) return;
+          aideSay(op.ped, press("nuke", tg));
+          closeCase(op);
+        },
+        onCancel: function () { if (FB.op === op) closeCase(op); },
+      });
+      if (!r.ok) { aideSay(op.ped, r); closeCase(op); }
+    } else if (op.phase === "close" && op.t >= FB_CLOSE_S) endOp();
   }
   function wireFootball(p) {
     if (p._footballWired || !CBZ.interactions || !CBZ.interactions.registerFor) return;
     p._footballWired = true;
     CBZ.interactions.registerFor(p, {
-      id: "football-strike", slot: "e", prio: 46, campaignSafe: true, label: "Airstrike",
-      canShow: function () { return FB.ped === p && !p.dead && !!nation(); },
-      onSelect: function () { aideSay(p, order("strike", { aim: true })); },
-    });
-    CBZ.interactions.registerFor(p, {
-      id: "football-nuke", hold: true, prio: 45, campaignSafe: true, label: "Nuke",
-      // only while the country has BOTH a bomber on its pad and a warhead
-      canShow: function () { return FB.ped === p && !p.dead && hasMeans("nuke"); },
-      onSelect: function () { aideSay(p, order("nuke")); },
-    });
-    CBZ.interactions.registerFor(p, {
-      id: "football-bunker", prio: 30, campaignSafe: true, label: "Bomb",
-      canShow: function () { return FB.ped === p && !p.dead && !!nation() && !!bunkerTarget(); },
-      onSelect: function () { aideSay(p, bunkerStrike()); },
+      id: "football-nuke", slot: "e", prio: 46, campaignSafe: true, bad: true, label: "Nuke",
+      canShow: function () { return FB.ped === p && !p.dead && !FB.op && !!nation(); },
+      onSelect: function () { footballNuke(p); },
     });
   }
   // may this man take the case? hands free: alive, a rig, gun away, not fighting
@@ -1290,24 +1424,14 @@
     const p = FB.ped;
     // the carrier fell or left the detail: the case goes down where he was
     if (p && (p.dead || refs.indexOf(p) < 0)) setDownFootball(p.dead ? "killed" : "left");
-    if (FB.ped) {
-      // CARRIED, in his LEFT hand (the gun hand stays free), never strapped to
-      // the hip: it rides the hand socket, so it swings with the arm. A rig
-      // swap (near/far) only moves the same case to the new hand.
-      const hand = FB.ped.char && FB.ped.char.sockets ? FB.ped.char.sockets.leftHand : null;
-      if (FB.mesh && FB.mesh.parent !== hand) {
-        if (FB.mesh.parent) FB.mesh.parent.remove(FB.mesh);
-        if (hand) hand.add(FB.mesh);
-      }
-      return;
-    }
+    if (FB.ped) { holdFootball(); return; }
     // nobody has it: a case on the ground goes to the first free hand in reach
     if (FB.down) {
       for (let i = 0; i < refs.length; i++) {
         const q = refs[i];
         if (!freeHands(q) || !q.pos) continue;
         if (Math.hypot(q.pos.x - FB.down.x, q.pos.z - FB.down.z) > FB_REACH) continue;
-        giveFootball(q, q.char && q.char.sockets ? q.char.sockets.leftHand : null);
+        giveFootball(q);
         return;
       }
       if (CLOCK - FB.down.t < FB_REISSUE) return;
@@ -1318,7 +1442,7 @@
     let want = null;
     for (let i = 0; i < refs.length && !want; i++) { const q = refs[i]; if (freeHands(q) && q._protRole !== "shift-leader") want = q; }
     for (let i = 0; i < refs.length && !want; i++) { const q = refs[i]; if (freeHands(q)) want = q; }
-    if (want) giveFootball(want, want.char && want.char.sockets ? want.char.sockets.leftHand : null);
+    if (want) giveFootball(want);
   }
 
   // ================================================================ THE TICK
@@ -1357,6 +1481,7 @@
     }
     if (g.state !== "playing") return;
     CLOCK += dt;
+    if (FB.op) { try { tickOp(dt); } catch (e) { FB.op = null; } }
     _acc += dt;
     if (_acc < 1) return;
     _acc = 0;
@@ -1389,6 +1514,11 @@
     canStrike: function (o) { return gate("strike", o); }, strike: function (o) { return order("strike", o); },
     canNuke: function (o) { return gate("nuke", o); }, nuke: function (o) { return order("nuke", o); },
     canBunker: function (o) { return gate("bunker", o); }, bunkerStrike: bunkerStrike, bunkerTarget: bunkerTarget,
+    // THE TARGET BOARD: pick(key, {onPick(target), onCancel}) checks the means,
+    // then opens CBZ.fullMap.pick with the payload's blast rings
+    pick: pick, rings: payloadRings,
+    // the football: the case model (lab kits shoot it), and the aide's order
+    footballCase: briefcase, footballOrder: function () { if (FB.ped) footballNuke(FB.ped); return !!FB.op; },
     // procurement
     canBuy: canBuy, buy: buy, buyables: function () {
       const T = A(); if (!T) return [];
