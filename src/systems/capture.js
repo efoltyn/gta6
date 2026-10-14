@@ -432,10 +432,62 @@
     }
     return { zone: zone, point: point };
   }
+  /* ---- A BLAST IS NOT A BULLET (2026-10-13). Owner: "when I shoot an RPG
+     ... my player does this dumb slow fall and death." A blast came in here
+     as weapon "gun": one random-zone bullet hole, and when the hp ran out
+     vitals put you DOWN CRITICAL (a held KO fall, the whole rig tipped over
+     on its heels) to bleed out on the floor, or rolled a "heart" and you
+     were "Shot". An explosion does neither. It throws you:
+       · survived: lifted and hurled away from the seat (physics.js flies
+         player._phys.air; you land on your back and get up), stunned, a
+         fragment wound that bleeds;
+       · killed: dead NOW, and the body is a real verlet ragdoll launched by
+         the blast (city/ragdoll.js, the same one the city's dead fly on),
+         not a plank rotating about its feet. No slow motion. */
+  function blastHit(dmg, fromX, fromZ, opts) {
+    if ((g.invuln || 0) > 0) return false;
+    if (!down && player.captureState && player.captureState !== "normal" && player.captureT > 0) return false;
+    playerHits++;
+    lastHurtT = clock();
+    let dx = 0, dz = 0;
+    if (fromX != null && isFinite(fromX)) { dx = player.pos.x - fromX; dz = player.pos.z - (fromZ || 0); }
+    const dl = Math.hypot(dx, dz);
+    if (dl > 1e-3) { dx /= dl; dz /= dl; }
+    else {   // standing on the seat: it throws you back the way you face
+      const yaw = CBZ.playerChar && CBZ.playerChar.group ? CBZ.playerChar.group.rotation.y : 0;
+      dx = -Math.sin(yaw); dz = -Math.cos(yaw);
+    }
+    player.hp = (player.hp == null ? 100 : player.hp) - (dmg || 30);
+    if (CBZ.sfx) CBZ.sfx("hit");
+    if (player.hp <= 0) {
+      die("Killed by the blast", { blast: true, dirX: dx, dirZ: dz, dmg: dmg, fromX, fromZ, by: opts.by || null });
+      return true;
+    }
+    // SURVIVED: the hole, then the throw
+    const V = VIT();
+    const hole = playerWound("blast", opts, dx, dz);
+    if (V) V.wound(player, { kind: "blast", zone: hole.zone, point: hole.point, by: opts.by || null,
+      dirX: dx, dirZ: dz, fromX, fromZ, noKill: true });
+    const k = Math.max(0, Math.min(1, (dmg || 30) / 80));
+    if (k > 0.15 && !down) {
+      const ph = CBZ.body && CBZ.body.phys ? CBZ.body.phys(player) : player._phys;
+      if (ph) {
+        ph.air = true; ph.down = 0; ph.kx = ph.kz = 0;
+        const v = 2.5 + 6.5 * k;
+        ph.vx = dx * v; ph.vz = dz * v;
+        ph.vy = 2.2 + 4.2 * k;
+        ph.spin = -(2.2 + 3.5 * k);       // over backwards, away from the seat
+      }
+    }
+    player.stun = Math.max(player.stun || 0, 0.4 + 0.9 * k);
+    if (CBZ.shake) CBZ.shake(opts.shake || (0.7 + 0.7 * k));
+    return false;
+  }
   CBZ.hurtPlayer = function (dmg, fromX, fromZ, opts) {
     opts = opts || {};
     if (player.dead) return false;
     const weapon = weaponOf(opts);
+    if (weapon === "blast") return blastHit(dmg, fromX, fromZ, opts);
     const steel = weapon !== "fist";
     const V = VIT();
     // ON THE FLOOR: fists stop (SOCIAL honours playerDowned); steel into a
@@ -654,7 +706,26 @@
     player.dead = true;
     g._deathLine = cause || "Dead";
     deathT = 2.6;                       // you see it happen before the card
-    if (CBZ.shake) CBZ.shake(0.9);
+    if (CBZ.shake) CBZ.shake(opts && opts.blast ? 1.6 : 0.9);
+    if (opts && opts.blast) blastBody(opts);
+  }
+  // the body a blast kills: thrown by the blow, a real ragdoll (city/ragdoll.js)
+  let ragged = false;
+  const _bp = { x: 0, y: 0, z: 0 }, _bd = { x: 0, y: 0, z: 0 };
+  function blastBody(o) {
+    const ch = CBZ.playerChar;
+    if (!ch || !ch.group) return;
+    ch.group.visible = true;
+    ch.cuffed = false;
+    if (player._phys) { player._phys.air = false; player._phys.down = 0; player._phys.kx = player._phys.kz = 0; }
+    const dx = o.dirX || 0, dz = o.dirZ || 0;
+    _bd.x = dx; _bd.y = 0.35; _bd.z = dz;
+    // the push lands low on the side facing the seat: the body leaves the floor
+    _bp.x = player.pos.x - dx * 0.25; _bp.y = (player.pos.y || 0) + 0.9; _bp.z = player.pos.z - dz * 0.25;
+    ragged = !!(CBZ.playerRagdoll && CBZ.playerRagdoll(WOUND_ACTOR, _bp, _bd, 24));
+    if (CBZ.gore) {
+      try { CBZ.gore(player.pos.x, (player.pos.y || 0) + 1.0, player.pos.z, { dir: { x: dx, z: dz }, amount: 1.4, player: true }); } catch (e) {}
+    }
   }
 
   // ============================================================
@@ -1924,7 +1995,10 @@
       confineT = 0; confineShown = -1;
       releasePlayerCell();          // never leave a corpse sealed in
       CBZ.playerChar.cuffed = false;
-      CBZ.playerChar.group.rotation.z = CBZ.damp(CBZ.playerChar.group.rotation.z, Math.PI / 2, 11, dt);
+      // a ragdolled body is posed by its points (city/ragdoll.js, order 25);
+      // tipping the group over here would twist the pose it just wrote
+      if (ragged && !(CBZ.ragdollPoints && CBZ.ragdollPoints(WOUND_ACTOR))) ragged = false;
+      if (!ragged) CBZ.playerChar.group.rotation.z = CBZ.damp(CBZ.playerChar.group.rotation.z, Math.PI / 2, 11, dt);
       if (fadeEl) fadeEl.style.opacity = "0";
       // A REAL LOSS, seen first: the body drops, then the card (state.js
       // styleLossCard reads reason "dead").

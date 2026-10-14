@@ -554,7 +554,9 @@
     if (P._phys) { P._phys.air = false; P._phys.down = 0; P._phys.kx = P._phys.kz = 0; }
     if (CBZ.shake) CBZ.shake(splatDeath ? 1.9 : Math.min(1.8, 0.85 + 0.35 * fK));
     if (CBZ.sfx) CBZ.sfx("ko");
-    if (CBZ.doSlowmo) CBZ.doSlowmo(splatDeath ? 0.55 : 0.5);
+    // a blast death plays at full speed: the body is thrown by the blow, fast.
+    // Slow motion there read as a slow, dumb tip-over (owner, 2026-10-13).
+    if (CBZ.doSlowmo && !isExplosionCause(reason)) CBZ.doSlowmo(splatDeath ? 0.55 : 0.5);
     if (CBZ.doHitstop && splatDeath) CBZ.doHitstop(0.2);
     let gdir = imp && imp.dir ? { x: imp.dir.x || 0, z: imp.dir.z || 0 }
       : (imp && imp.fromX != null ? { x: P.pos.x - imp.fromX, z: P.pos.z - imp.fromZ } : null);

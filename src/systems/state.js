@@ -160,7 +160,7 @@
     if (player._bandMesh) player._bandMesh.visible = false; // drop gang colours
     if (playerChar.cuffed) playerChar.cuffed = false;
     playerChar.group.position.copy(spawn);
-    playerChar.group.rotation.z = 0;
+    playerChar.group.rotation.x = 0; playerChar.group.rotation.z = 0;   // a ragdolled death leaves the group at any angle
     cam.yaw = 0; cam.pitch = CBZ.CAM_DEFAULT_PITCH || 0.28;
     if (CBZ.resetZoom) CBZ.resetZoom();
     if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();

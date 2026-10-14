@@ -244,7 +244,7 @@
     s.dyt = 0; s.dyMax = 0; s.dyx = 0; s.dyz = 0; s.dyForce = 0; s.dyHead = false; s.dyLat = 0;
     s.pin = null; s.wet = false; s.seaY = 0; s.seaDy = 0;
     s.down = false; s.wallT = 0;
-    s.live = false; s.strike = null;
+    s.live = false; s.strike = null; s.anyMode = false;
   }
 
   // grounded-corpse contract: down=9999 keeps CBZ.body.busy true forever (peds.js
@@ -358,8 +358,8 @@
     return true;
   }
 
-  function start(target, point, dir, imp, fromNet, live) {
-    if (!allowed()) return false;
+  function start(target, point, dir, imp, fromNet, live, anyMode) {
+    if (!anyMode && !allowed()) return false;
     if (!target) return false;
     if (fromNet) target.dead = true;          // the host's word is law — the rag ev beats the snapshot row
     else if (!target.dead && !live) return false;   // the living only by a car strike (CBZ.ragdollStrike)
@@ -455,7 +455,7 @@
     if (wasDown && CBZ.bodyFall) CBZ.bodyFall.clear(target);
     s.noBeat = wasDown;
     s.used = true; s.ped = target; s.ch = ch; s.isPlayer = !!target.isPlayer;
-    s.live = !target.dead; s.strike = null;
+    s.live = !target.dead; s.strike = null; s.anyMode = !!anyMode;
     s.age = ++seq; s.still = 0; s.asleep = false; s.life = 0; s.thud = false;
     s.dyt = 0;                                       // cleared so kick() arms a fresh beat
     s.cx = grp.position.x; s.cy = grp.position.y; s.cz = grp.position.z;
@@ -1094,7 +1094,7 @@
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       if (!s.used) continue;
-      if (!live) { releaseSlot(s); continue; }
+      if (!live && !s.anyMode) { releaseSlot(s); continue; }
       const t = s.ped;
       if (!t) { releaseSlot(s); continue; }
       if (s.isPlayer) {
@@ -1199,6 +1199,16 @@
   };
 
   CBZ.cityRagdoll = function (target, point, dir, imp) { return start(target, point, dir, imp, false); };
+  /* YOUR OWN BODY, IN ANY MODE. The mode gate above is about who else gets a
+     solved corpse; the player's death is one body, always near the camera,
+     and the prison's was a plank tipped over on its heels (capture.js rotated
+     the whole group about the feet). A mode that kills you hands the dead
+     player actor here (isPlayer, group, pos, dead) and the body is thrown by
+     the blow; the slot lets go the moment you are alive again. */
+  CBZ.playerRagdoll = function (target, point, dir, imp) {
+    if (!target || !target.isPlayer) return false;
+    return start(target, point, dir, imp, false, false, true);
+  };
   // the 13 solver points of a body this file owns (head, shoulders, hips,
   // elbows, hands, knees, feet; x,y,z each), or null. A live view, not a
   // copy: probes read it, nothing should write it.

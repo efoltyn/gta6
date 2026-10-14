@@ -1649,7 +1649,14 @@
       for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, cause); }
       for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }
       const PL = CBZ.player;
-      if (PL && !PL.dead) { const dx = PL.pos.x - x, dz = PL.pos.z - z, d2 = dx * dx + dz * dz; if (d2 < R * R) { const dmg = Math.round(85 * power * (1 - Math.sqrt(d2) / (R + 0.01))); if (dmg > 0 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, x, z, cause === "nuclear blast" ? "killed by a nuclear blast" : "caught in an explosion", false, null, false); } }
+      // the player's law is systems/modecaps.js blastPlayerDamage (one law, every mode)
+      if (PL && !PL.dead) {
+        const dx = PL.pos.x - x, dz = PL.pos.z - z, d = Math.sqrt(dx * dx + dz * dz);
+        // (a nuke's reach is its own field, never the conventional cap)
+        const dmg = CBZ.blastPlayerDamage && cause !== "nuclear blast" ? CBZ.blastPlayerDamage(d, R, power)
+          : (d < R ? Math.round(85 * power * (1 - d / (R + 0.01))) : 0);
+        if (dmg > 0 && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(dmg, x, z, cause === "nuclear blast" ? "killed by a nuclear blast" : "caught in an explosion", false, null, false);
+      }
     }
 
     // ---- B5: STRUCTURAL BLAST DAMAGE — every player-built piece (systems/
