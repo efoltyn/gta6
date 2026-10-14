@@ -22,6 +22,10 @@
 
   let ctx = cv.getContext("2d");   // let: helpers retarget onto the offscreen plates
   const W = cv.width, H = cv.height, PAD = 26;
+  // the map's own canvas holds pixels only while the map is open, like its
+  // plates below (960x620 = 2.3 MB of canvas the phone held for the session)
+  function sizeCanvas(open) { const w = open ? W : 1, h = open ? H : 1; if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; } }
+  sizeCanvas(false);
   const closeBtn = document.getElementById("fullMapClose");
   const titleEl = document.getElementById("fullMapTitle");
   const readout = document.getElementById("fullMapReadout");
@@ -409,6 +413,7 @@
     // them regardless — CSS only reveals the stack under body.touch.
     if (zoomWrap) zoomWrap.style.display = (mode() === "city" && (!CBZ.CONFIG || CBZ.CONFIG.MAP_ZOOM_BUTTONS !== false)) ? "" : "none";
     if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
+    sizeCanvas(true);
     draw();
     updateGuide();
     return true;
@@ -418,6 +423,7 @@
     if (!map.active) return;
     map.active = false;
     releasePlates();
+    sizeCanvas(false);
     map._cursor = null; map._sel = null; map._hoverKey = "";
     zoomRepeatStop();   // a held zoom chip must never keep repeating past the map
     root.setAttribute("aria-hidden", "true");
