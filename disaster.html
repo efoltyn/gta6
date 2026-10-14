@@ -23,13 +23,14 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=desk1009c">
+<link rel="stylesheet" href="css/hud.css?v=spec1014">
+<link rel="stylesheet" href="css/survival_hud.css?v=spec1014">
 <link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=deck1011">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
-<link rel="stylesheet" href="css/city.css?v=pin1013">
+<link rel="stylesheet" href="css/city.css?v=spec1014">
 <link rel="stylesheet" href="css/campaign.css?v=neck1001b">
 <link rel="stylesheet" href="css/interact_touch.css?v=jailside1001">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
@@ -100,14 +101,12 @@ document.body.appendChild(b);}}catch(e){}})();
   <canvas id="minimap" class="panel" width="112" height="168"></canvas>
   <div id="simHud" class="panel"></div>
 
-  <!-- SURVIVAL mode HUD (shown only in disaster mode). #survTop moved up into
-       #topright beside the clock — see the comment there. -->
-  <div id="survStatus" class="panel"><span id="survStatusText"></span></div>
+  <!-- SURVIVAL mode bars (systems/survivalhud.js builds the rest of the
+       disaster HUD itself; css/survival_hud.css styles it). -->
   <div id="survBars">
     <div class="sbar"><span class="slab">HEALTH</span><div class="sbarbg"><div id="hpBar"></div></div></div>
     <div class="sbar"><span class="slab">STAMINA</span><div class="sbarbg"><div id="stamBar"></div></div></div>
   </div>
-  <div id="disasterBanner"></div>
 
   <div id="toast"></div>
   <div id="hitfx"></div>
@@ -819,7 +818,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisonvoice.js?v=jailv1001"></script>
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
-<script src="src/systems/camera.js?v=planes1009b"></script>
+<script src="src/systems/camera.js?v=spec1014"></script>
 <script src="src/systems/physics.js?v=rail1014"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
@@ -955,11 +954,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
-<script src="src/modes/survival.js?v=noring1013"></script>
+<script src="src/modes/survival.js?v=spec1014"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
 <script src="src/modes/shark_title.js?v=uicut1"></script>
-<script src="src/systems/title_hub.js?v=end1"></script>
+<script src="src/systems/title_hub.js?v=spec1014"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
@@ -1013,12 +1012,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=noring1013"></script>
+<script src="src/systems/disasters.js?v=spec1014"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>
 <script src="src/systems/survival_interact.js?v=jailv1001"></script>
-<script src="src/systems/survivalhud.js?v=deathcam1009"></script>
+<script src="src/systems/survivalhud.js?v=spec1014"></script>
+<!-- THE DEAD PLAYER'S CAMERA on the disaster island: death orbit, pull-back,
+     then free flight (WASD / touch) while the round keeps running. -->
+<script src="src/systems/spectator.js?v=spec1014"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
      have to be true before a transport is worth writing: every actor carries a
      stable id, the whole match serialises to one ArrayBuffer and back

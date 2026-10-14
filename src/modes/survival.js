@@ -129,14 +129,31 @@
     }
   }
 
+  /* ---- DEATH, THEN THE ISLAND IS YOURS TO WATCH --------------------------
+     Owner: "when you die, after showing your death, zoom out and you're like
+     Minecraft creative mode where you can zoom in and out and basically watch
+     the rest of the natural disaster".
+
+     So a death is: the body flung into a ragdoll (physics.js integrates
+     _death), one hard jolt, ONE slow-mo (trauma.js's, priced per cause: none
+     for a blast), and the lens handed to systems/spectator.js, which orbits
+     the body for a beat, rises off it and gives you a free camera. The round
+     does not end and does not wait: the director keeps rolling disasters, the
+     crowd keeps thinning, and the HUD keeps naming what is happening
+     (systems/survivalhud.js draws the small ELIMINATED panel and the one
+     PLAY AGAIN button). When the field is decided the panel says who won;
+     nothing is forced on you. Play again is R or Enter on a keyboard, the
+     button on a phone.
+
+     The run is recorded at the moment of death (placement is final then),
+     not when you leave, so walking away mid-spectate still counts it. */
   function killPlayer(reason) {
     if (CBZ.player.dead) return;
     CBZ.player.dead = true;
     CBZ.player.hp = 0;
     surv.stats.placement = liveBots() + 1;     // everyone still alive beat you
-    // DRAMATIC death: fling the body into a spinning ragdoll tumble that
-    // physics.js integrates, a hard shake, an impact poof, a brief slow-mo,
-    // then a death-cam + spectate takeover (NOT an instant cut to a screen).
+    surv.stats.survivedT = g.elapsed || 0;
+    surv.stats.round = CBZ.disasters && CBZ.disasters.round ? CBZ.disasters.round() : 0;
     const a = Math.random() * 6.28;
     CBZ.player._death = {
       vx: Math.cos(a) * (3 + Math.random() * 3), vz: Math.sin(a) * (3 + Math.random() * 3),
@@ -144,133 +161,62 @@
       t: 0, landed: false, seed: Math.random() * 6.28,
     };
     if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
-    if (CBZ.shake) CBZ.shake(1.2);
+    if (CBZ.shake) CBZ.shake(0.9);
     if (CBZ.sfx) CBZ.sfx("ko");
-    if (CBZ.doSlowmo) CBZ.doSlowmo(0.5);
     deathBurst(CBZ.player.pos.x, CBZ.player.pos.z);
     surv._deathCause = reason || "eliminated";
     reportDeath(playerActor, reason, surv._lastImp);
-    enterSpectate(reason);
+    if (g.mode === "survival") recordSurvRun(surv.stats.placement);
+    enterSpectate();
   }
 
-  // ---- spectate takeover: you stay in the still-running world (death-cam +
-  //      slow orbit) while disasters keep going. A compact overlay shows your
-  //      placement and keeps counting the field down; the round does NOT
-  //      freeze until you press RESULTS or a winner is decided — then the
-  //      REAL end screen (#survlose via CBZ.loseGame, systems/state.js) takes
-  //      over with its already-bound Try Again / Main Menu buttons.
-  if (CBZ.CONFIG.SURV_SPECTATE == null) CBZ.CONFIG.SURV_SPECTATE = true;   // false → death cuts straight to the lose card
-  if (CBZ.CONFIG.SURV_DEATHCAM == null) CBZ.CONFIG.SURV_DEATHCAM = true;   // false → skip the death replay: banner + chaos drift immediately (the pre-replay flow)
-  let overlay = null, titleEl = null, subEl = null, btnRow = null;
-  let overlayHoldT = 0;    // ELIMINATED held back while the death replay's first beat plays
-  function buildOverlay() {
-    if (overlay) return;
-    overlay = document.createElement("div");
-    overlay.id = "spectate";
-    overlay.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;flex-direction:column;align-items:center;gap:10px;padding:18px 0 26px;pointer-events:none;font-family:Fredoka,system-ui,sans-serif;text-align:center;background:linear-gradient(to top,rgba(8,10,16,.82),rgba(8,10,16,0))";
-    titleEl = document.createElement("div");
-    titleEl.style.cssText = "font-size:clamp(30px,6vw,52px);font-weight:700;color:#ff5b5b;letter-spacing:2px;text-shadow:0 4px 0 #7c0c1a,0 6px 14px rgba(0,0,0,.5);opacity:0;transition:opacity .8s ease,transform .8s ease;transform:translateY(14px)";
-    titleEl.textContent = "ELIMINATED";
-    subEl = document.createElement("div");
-    subEl.style.cssText = "color:#dfe6f0;font-size:15px;opacity:0;transition:opacity .9s ease .25s";
-    btnRow = document.createElement("div");
-    btnRow.style.cssText = "display:flex;gap:14px;opacity:0;transition:opacity .6s ease .9s;pointer-events:auto";
-    const mkBtn = (label, bg, sh) => {
-      const b = document.createElement("button");
-      b.textContent = label;
-      b.style.cssText = "font-family:inherit;font-weight:600;font-size:16px;color:#fff;border:0;border-radius:14px;padding:12px 22px;cursor:pointer;background:" + bg + ";box-shadow:0 6px 0 " + sh + ",0 10px 18px rgba(0,0,0,.3)";
-      return b;
-    };
-    const resultsBtn = mkBtn("Results ➜", "#39c06a", "#1f8a45");
-    btnRow.appendChild(resultsBtn);
-    overlay.appendChild(titleEl); overlay.appendChild(subEl); overlay.appendChild(btnRow);
-    document.body.appendChild(overlay);
-    resultsBtn.addEventListener("click", finishRound);
-  }
-  // The spectate status line: your placement and nothing else. The running
-  // "N left" tail was a second live counter under the ELIMINATED title; the
-  // world you are watching is the count now.
-  function spectateLine() {
-    const s = surv.stats;
-    return "#" + (s.placement || 1) + " of " + (s.total || "?");
-  }
-  function showSpectateOverlay() {
-    buildOverlay();
-    subEl.textContent = spectateLine();
-    overlay.style.display = "flex";
-    void overlay.offsetWidth;                  // reflow so the fade-in plays
-    titleEl.style.opacity = "1"; titleEl.style.transform = "translateY(0)";
-    subEl.style.opacity = "1"; btnRow.style.opacity = "1";
-  }
-  function enterSpectate(reason) {
+  function enterSpectate() {
     if (surv.spectating) return;
-    // nothing left to watch (a lone survivor or a full wipe decides the round
-    // instantly), or spectate disabled → straight to the results card
-    if (CBZ.CONFIG.SURV_SPECTATE === false || liveBots() <= 1) { finishRound(); return; }
-    surv.spectating = true; surv.spectateT = 0;
-    if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
-    // THE DEATH REPLAY (parity with Gang City — owner: the city "goes to third
-    // person and shows me my death", the disaster game should too). Arm the
-    // close WASTED-style orbit for systems/camera.js and hold the ELIMINATED
-    // banner back the same ~1.8s beat the city holds WASTED, so the ragdoll
-    // fling plays out clean before any UI lands on it. The watcher below drops
-    // the banner in while the orbit is still circling; the camera pulls out to
-    // the chaos view on its own when the replay's beat is spent.
-    if (CBZ.CONFIG.SURV_DEATHCAM !== false) {
-      surv.deathCam = { t: 0, dur: 5.2 };
-      overlayHoldT = 1.8;
-    } else showSpectateOverlay();
-  }
-  // resolve the round for a dead player: leave spectate, record the run in
-  // the persistent survival stats, fill the lose card's flavor line (cause,
-  // round winner, lifetime record), and hand over to CBZ.loseGame() — the
-  // proper #survlose screen whose buttons state.js already wired.
-  function finishRound() {
-    if (g.state === "won" || g.state === "lost") return;
-    let winner = null;
-    if (liveBots() === 1) { const b = CBZ.bots; for (let i = 0; i < b.length; i++) if (!b[i].dead) { winner = b[i].name; break; } }
-    clearSpectate();
-    // Only DISASTER rounds land in the persistent survival record (and show
-    // its lifetime line) — a shark-sim death is a different game's loss.
-    if (g.mode === "survival") recordSurvRun(surv.stats.placement || (liveBots() + 1));
-    // the lose card says how it ended; the lifetime Wins/best tally is gone
-    // from every screen (a record readout nobody asked to be shown)
-    const sub = document.querySelector("#survlose .sub");
-    if (sub) sub.textContent = "You were " + (surv._deathCause || "eliminated") + "." + (winner ? " " + winner + " outlasted everyone." : "");
-    if (CBZ.loseGame) CBZ.loseGame(surv._deathCause || "eliminated");
+    surv.spectating = true; surv.spectateT = 0; surv.decided = null;
+    if (g.mode === "survival" && CBZ.spectator) { CBZ.spectator.begin(); return; }
+    // any other island mode that routes a death here (none ships today) gets
+    // camera.js's orbit of the body, the grammar Shark Sim uses
+    surv.deathCam = { t: 0, dur: 5.2 };
   }
   function clearSpectate() {
-    surv.spectating = false;
-    surv.deathCam = null; overlayHoldT = 0;   // reset() routes here too — no replay leaks into the next match
-    if (overlay) {
-      overlay.style.display = "none";
-      titleEl.style.opacity = "0"; titleEl.style.transform = "translateY(14px)";
-      subEl.style.opacity = "0"; btnRow.style.opacity = "0";
-    }
+    surv.spectating = false; surv.deathCam = null; surv.decided = null;
+    if (CBZ.spectator) CBZ.spectator.end();
   }
   CBZ.clearSpectate = clearSpectate;
+  // the field is down to one (or none) while you watch: say who, force nothing
+  function decide() {
+    let winner = null;
+    const b = CBZ.bots;
+    for (let i = 0; i < b.length; i++) if (!b[i].dead) { winner = b[i].name || "A survivor"; break; }
+    surv.decided = { winner, t: g.elapsed || 0 };
+  }
+  function playAgain() {
+    if (g.mode !== "survival") return;
+    clearSpectate();
+    if (CBZ.startRunPresented) CBZ.startRunPresented();
+    else if (CBZ.modes && CBZ.modes.survival) CBZ.modes.survival.reset(g);
+  }
 
-  /* ONE KEY TO GO AGAIN. A round is a few minutes and dying is the common
-     ending, so the restart has to be as fast as the death: Enter or R on
-     the result card starts the next match, and while you are spectating
-     Enter skips to the results. (The buttons still work; touch uses them.) */
+  /* ONE KEY TO GO AGAIN. Enter or R: on the result card (the shared
+     #survwin card after a win), and while you are watching as a ghost. */
   document.addEventListener("keydown", function (e) {
     if (g.mode !== "survival" || e.repeat) return;
     const k = e.key;
+    if (k !== "Enter" && k !== "r" && k !== "R") return;
     if (g.state === "lost" || g.state === "won") {
-      if (k === "Enter" || k === "r" || k === "R") {
-        const btn = document.getElementById(g.state === "won" ? "survAgainBtn" : "loseAgainBtn");
-        if (btn) { e.preventDefault(); btn.click(); }
-      }
-    } else if (g.state === "playing" && surv.spectating && k === "Enter") { e.preventDefault(); finishRound(); }
+      const btn = document.getElementById(g.state === "won" ? "survAgainBtn" : "loseAgainBtn");
+      if (btn) { e.preventDefault(); btn.click(); }
+    } else if (g.state === "playing" && surv.spectating) { e.preventDefault(); playAgain(); }
   });
 
   const surv = {
     arena: null,
     built: false,
-    spectating: false,     // true after the player dies until they pick a button
-    deathCam: null,        // {t, dur} while the city-style death replay orbits (read by systems/camera.js)
+    spectating: false,     // true from your death until the next round (systems/spectator.js flies the lens)
+    deathCam: null,        // {t, dur}: camera.js's body orbit, for an island mode without spectator.js
+    decided: null,         // {winner, t} once the field is decided while you watch
     playerActor,
+    playAgain,
     stats: { total: 0, placement: 0, disastersSurvived: 0 },
 
     /* THE GROUND YOU SEE IS THE GROUND YOU STAND ON — INCLUDING WHERE IT IS
@@ -397,7 +343,7 @@
 
   // ---- persistent survival record (mirrors systems/save.js's localStorage
   //      pattern, own key). state.js's winGame() calls CBZ.recordSurvWin();
-  //      the death path calls recordSurvRun(placement) via finishRound().
+  //      killPlayer calls recordSurvRun(placement) the moment you die.
   //      Guarded by surv._runRecorded so each round counts exactly once.
   //      Kept as data (CBZ.survStats); no screen prints it any more. ----
   const STATS_KEY = "cellblockz_surv_stats";
@@ -543,19 +489,13 @@
       return;
     }
 
-    // spectating: keep the overlay's field count live; the moment a single
-    // survivor remains the round is decided → the real results screen.
-    // DISASTER ONLY. Shark Sim borrows surv.spectating for its death replay
-    // (the camera orbit in systems/camera.js reads that flag and nothing
-    // else), and it must not inherit the battle royale bolted to it: there is
-    // no field to count down there, the beach crowd is FOOD that respawns,
-    // and a restock lagging one frame would have handed a dead shark
-    // survival's "last one standing" results card.
+    // watching as a ghost: the round runs on; when the field is decided the
+    // HUD says who won and the island keeps going until you play again.
+    // DISASTER ONLY: Shark Sim borrows surv.spectating for its own replay
+    // (systems/camera.js reads the flag) and has no field to decide.
     if (surv.spectating && g.state === "playing" && g.mode === "survival") {
       surv.spectateT += dt;
-      if (liveBots() <= 1) { finishRound(); return; }
-      // the held-back ELIMINATED banner lands once the fling has played out
-      if (overlayHoldT > 0) { overlayHoldT -= dt; if (overlayHoldT <= 0) showSpectateOverlay(); }
+      if (!surv.decided && liveBots() <= 1) decide();
     }
   });
 
