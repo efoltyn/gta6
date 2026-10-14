@@ -936,21 +936,52 @@
 
     // bucket + probe (bridge walks and grade rail are added after the land
     // probe below, so a bridge walk is only laid where there is no footway)
-    let buckets = new Map(), BB = { minX: 1e9, maxX: -1e9, minZ: 1e9, maxZ: -1e9 }, bucketed = 0;
+    /* TWO LEVELS. Every item used to be listed in every 32 m cell it touched,
+       for the whole city at once: a street is a dozen cells, a field fifty,
+       and the city the player stands in held 22 MB of lists (the largest
+       live V8 site of the phone boot, speed.mjs --heap-sites). Items are
+       listed per COARSE cell (8 x 8 fine cells) and a fine cell's list is
+       cut from its coarse list the first time a question lands in it: items
+       in insertion order, then a stable sort by priority, exactly the order
+       the full fine lists had. Only the fine cells someone asks about exist
+       (capped: past FINE_MAX the cache starts over). */
+    const COARSE = CELL * 8, FINE_MAX = 6144;
+    let buckets = new Map(), fine = new Map(), BB = { minX: 1e9, maxX: -1e9, minZ: 1e9, maxZ: -1e9 }, bucketed = 0;
     function rebucket() {
-      const touched = new Set();
       for (let i = bucketed; i < items.length; i++) {
         const it = items[i];
         if (it.minX < BB.minX) BB.minX = it.minX; if (it.maxX > BB.maxX) BB.maxX = it.maxX;
         if (it.minZ < BB.minZ) BB.minZ = it.minZ; if (it.maxZ > BB.maxZ) BB.maxZ = it.maxZ;
-        for (let ix = Math.floor(it.minX / CELL); ix <= Math.floor(it.maxX / CELL); ix++)
-          for (let iz = Math.floor(it.minZ / CELL); iz <= Math.floor(it.maxZ / CELL); iz++) {
+        for (let ix = Math.floor(it.minX / COARSE); ix <= Math.floor(it.maxX / COARSE); ix++)
+          for (let iz = Math.floor(it.minZ / COARSE); iz <= Math.floor(it.maxZ / COARSE); iz++) {
             const k = ix * 65536 + iz; let l = buckets.get(k); if (!l) buckets.set(k, l = []);
-            l.push(it); touched.add(l);
+            l.push(it);
           }
       }
       bucketed = items.length;
-      touched.forEach(function (l) { if (l.length > 1) l.sort(function (a, b) { return a.pri - b.pri; }); });
+      fine = new Map();
+    }
+    const EMPTY = [];
+    function fineCell(fx, fz) {
+      const k = fx * 65536 + fz;
+      let l = fine.get(k);
+      if (l !== undefined) return l;
+      const C = buckets.get(Math.floor(fx / 8) * 65536 + Math.floor(fz / 8));
+      l = EMPTY;
+      if (C) {
+        const x0 = fx * CELL, z0 = fz * CELL, x1 = x0 + CELL, z1 = z0 + CELL;
+        let out = null;
+        for (let i = 0; i < C.length; i++) {
+          const it = C[i];
+          // (the fine-cell test of the old index: floor(min/CELL) <= f <= floor(max/CELL))
+          if (it.maxX < x0 || it.minX >= x1 || it.maxZ < z0 || it.minZ >= z1) continue;
+          (out || (out = [])).push(it);
+        }
+        if (out) { if (out.length > 1) out.sort(function (a, b) { return a.pri - b.pri; }); l = out; }
+      }
+      if (fine.size >= FINE_MAX) fine = new Map();
+      fine.set(k, l);
+      return l;
     }
     /* THE BUCKETS ARE MADE BY THE FIRST QUESTION THAT LANDS IN THIS CITY.
        A city nobody stands in (or queries) never builds them: they were
@@ -981,8 +1012,8 @@
       K = FK.none; RIB = null;
       if (x < BB.minX || x > BB.maxX || z < BB.minZ || z > BB.maxZ) return null;
       if (bucketed < items.length) rebucket();
-      const l = buckets.get(Math.floor(x / CELL) * 65536 + Math.floor(z / CELL));
-      if (!l) return null;
+      const l = fineCell(Math.floor(x / CELL), Math.floor(z / CELL));
+      if (!l.length) return null;
       for (let i = 0; i < l.length; i++) {
         const it = l[i];
         if (x < it.minX || x > it.maxX || z < it.minZ || z > it.maxZ) continue;
@@ -1365,7 +1396,7 @@
     // the solve itself needed the floor (lamps, drives, tile bins); the city
     // may never be stood in: let the buckets go, the first question in it
     // makes them again (probe above)
-    buckets = new Map(); bucketed = 0;
+    buckets = new Map(); fine = new Map(); bucketed = 0;
     if (CACHE) CACHE.set(P, S);
     return S;
 
