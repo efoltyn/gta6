@@ -261,6 +261,7 @@
      pose that used to live here are DELETED. Bots keep a cheap paddle (99 of
      them cannot each afford the full solve) and drown through the same cause
      strings, and corpses float and drift like any other body in water. */
+  const _actFlow = { x: 0, z: 0, speed: 0 };
   function floodActors(dt, ctx, current, cause, dirx, dirz) {
     // the drift bearing: a tsunami's travel direction, a flash flood's storm
     // bearing — whichever the caller is running. Never a private default.
@@ -277,9 +278,13 @@
       const depth = surface - floor(a.pos.x, a.pos.z) - (a._survSwim ? 0 : (a._lift || 0));
       if (depth <= 1.35) { a._survSwim = 0; continue; }
       if (!a._survSwim) { a._survSwim = 1; a._survPh = rnd() * 6.28; a._survLX = a.pos.x; a._survLZ = a.pos.z; }
-      // paddle: halve the brain's step, ride the current
-      a.pos.x = a._survLX + (a.pos.x - a._survLX) * 0.55 + wx * current * dt;
-      a.pos.z = a._survLZ + (a.pos.z - a._survLZ) * 0.55 + wz * current * dt;
+      // paddle: halve the brain's step, ride the current — the LOCAL current
+      // where a routed flood is running (it goes where the channel goes),
+      // else the event's one bearing
+      const fl = CBZ.groundWaterFlowAt ? CBZ.groundWaterFlowAt(a.pos.x, a.pos.z, _actFlow) : null;
+      const cvx = fl && fl.speed > 0.05 ? fl.x : wx * current, cvz = fl && fl.speed > 0.05 ? fl.z : wz * current;
+      a.pos.x = a._survLX + (a.pos.x - a._survLX) * 0.55 + cvx * dt;
+      a.pos.z = a._survLZ + (a.pos.z - a._survLZ) * 0.55 + cvz * dt;
       a._survLX = a.pos.x; a._survLZ = a.pos.z;
       a.pos.y = surface - 1.12 + Math.sin(CBZ.now * 0.004 + a._survPh) * 0.12;
       const ch = a.char;                        // flail (animChar at 23 already ran)
@@ -302,8 +307,9 @@
       const surface = seaY(b.pos.x, b.pos.z);
       if (surface - floor(b.pos.x, b.pos.z) > 1.4) {
         b.group.position.y = surface - 0.32 + Math.sin(CBZ.now * 0.003 + i) * 0.08;
-        b.group.position.x += wx * current * 0.55 * dt;
-        b.group.position.z += wz * current * 0.55 * dt;
+        const fl = CBZ.groundWaterFlowAt ? CBZ.groundWaterFlowAt(b.group.position.x, b.group.position.z, _actFlow) : null;
+        b.group.position.x += (fl && fl.speed > 0.05 ? fl.x : wx * current) * 0.55 * dt;
+        b.group.position.z += (fl && fl.speed > 0.05 ? fl.z : wz * current) * 0.55 * dt;
       }
     }
   }
@@ -813,201 +819,100 @@
 
     // ---- TSUNAMI: assigned right after this roster (DEFS.flood, below). ----
 
-    /* ---- FLASH FLOOD, REBUILT AS RAIN-FED (2026-08-03) -----------------------
+    /* ---- FLASH FLOOD: ROUTED DOWN THE ISLAND'S OWN DRAINAGE (2026-10-14) ----
        OWNER: "rain makes flash flood which is gang city water slowly filling
-       the ground." The old arc was a storm TIDE — it raised the sea and let the
-       coast drown, which is a regional flood, not a flash flood. A flash flood
-       is what the RAIN does: it falls faster than the ground can take it, it
-       collects in the low channel, and it arrives there as a front with almost
-       no warning.
+       the ground." A flash flood is what a cloudburst over high ground does:
+       it falls faster than the ground can take it, the slopes shed it into
+       the channels, and it arrives downstream as a front with almost no
+       warning. systems/flashflood.js owns the water: a 2-D shallow-water solve
+       over the island's terrain (rain on the storm cell + the rivers' inflow
+       from the catchment), installed as THE ground-water field, so swimming,
+       drowning, the knock-down physics and the bots all stand in it. Cars,
+       debris, bridges, manholes and the silt left behind live there too.
 
-       So the water now comes from two places at once and both are engine levers
-       this file does not own:
-         · CBZ.weatherDrive({rain, pool}) — the rain that is falling IS the rain
-           filling the streets. `pool` is metres of standing water; the level is
-           integrated by systems/weather.js and answered by city/waterfield.js's
-           mask, which is why swimming, the 28 s breath meter, drowning through
-           the killfeed, buoyancy, floating corpses and the gore medium all
-           arrive here with no code written for any of them.
-         · CBZ.waterSurgeSet — the sea, still, because a coastal island in a
-           storm genuinely gets both.
-       And a FRONT (CBZ.groundWaterFrontSet) races down the channel: dry ground
-       twenty metres ahead of a wall of water, which is the thing that actually
-       kills people in the real event. It is a term in the depth field, never a
-       mesh — CBZ.groundWaterAudit().privateWaterPlanes stays 0.
-
-       THE KILL MODES ARE PHYSICS, and they are priced in systems/weather.js so
-       the gang city gets every one of them too: six inches of moving water
-       knocks you flat, two feet floats a car, immersion runs a hypothermia
-       clock, and a submerged street light electrifies the water it stands in.
-       This def only sets the stage those read. -------------------------------- */
+       This def only does what is the weather's and the sea's: the sky opens
+       (CBZ.weatherDrive), the coast rises a little (waterSurgeSet: a coastal
+       island in a storm really gets both) and the sea takes the mud. The old
+       straight-line front (a plane swept across the island at 9.5 m/s
+       whatever the ground did) and the fling-the-car-at-60-cm are deleted. */
     flashflood: {
-      name: "FLASH FLOOD", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "swept away by the flash flood", tint: 0x59636b,
-      // THE RAIN ARRIVES FIRST. That is the whole warning and it is honest:
-      // the sky opens, the light goes, and the gutters start to stand before
-      // anything else happens. A player who reads it is already walking uphill.
+      name: "FLASH FLOOD", emoji: "", warnSecs: 8, activeSecs: 34, gap: 6, cause: "swept away by the flash flood", tint: 0x59636b,
+      // THE RAIN ARRIVES FIRST, over the hills. The warning is the honest
+      // one: the sky goes, the channels start to run brown, and the roar
+      // upstream is the only sign of the wall before it arrives.
       warn(ctx) {
         narrate("hint", "FLASH FLOOD, water rising, get HIGH!", 3); sound("water");
-        // THE CHANNEL, not a random bearing: water runs the way the ground
-        // falls. Sample a ring and take the LOWEST — that is where the front
-        // will run and where the water will stand deepest when it stops.
-        let lo = 1e9, la = 0;
-        for (let i = 0; i < 16; i++) {
-          const a = (i / 16) * Math.PI * 2;
-          const h = floor(ctx.cx + Math.cos(a) * ctx.R * 0.8, ctx.cz + Math.sin(a) * ctx.R * 0.8);
-          if (h < lo) { lo = h; la = a; }
+        const FF = CBZ.flashflood;
+        ctx.st.ff = false;
+        ctx.st.wx = 1; ctx.st.wz = 0;
+        if (FF) {
+          try {
+            const W = FF.islandWorld(ctx);
+            ctx.st.ff = FF.start(W, { warnSecs: this.warnSecs, activeSecs: this.activeSecs,
+              // the storm's water budget grows with the round
+              volume: null, volumeScale: (0.85 + ctx.intensity) / 1.35 });
+            // the wind runs from the storm cell out over the island
+            const st = FF.storm();
+            if (st) { const dx = ctx.cx - st.x, dz = ctx.cz - st.z, d = Math.hypot(dx, dz); if (d > 1) { ctx.st.wx = dx / d; ctx.st.wz = dz / d; } }
+          } catch (e) { console.error("[flashflood start]", e); ctx.st.ff = false; }
         }
-        ctx.st.wx = Math.cos(la); ctx.st.wz = Math.sin(la);
-        /* V2 (systems/flashflood.js): the sea stays a COASTAL detail. The old
-           3.5-5.6 m surge put the whole island under the ocean plane — a
-           regional sea flood wearing the flash flood's name, and it visually
-           erased the channel front this def computes (measured 2026-08-23:
-           the "lake" frame was open sea with a cone poking out). The flash
-           flood is the RAIN's water — the groundwater field, which runs the
-           channel, carries the front and takes the mud — so V2 gives the sea
-           only the modest rise a coast really sees in a cloudburst. */
-        const v2 = CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.flashflood;
-        // (legacy: deliberately UNDER the smallest hill's peak (7) and every
-        // building floor slab — the flood takes the streets, never the refuges)
-        ctx.st.peak = v2 ? Math.min(1.6, 0.7 + scale(0.45, ctx)) : Math.min(5.6, 3.5 + scale(2.2, ctx));
-        // metres of standing water in the channel at the height of it: well
-        // over two feet, so cars float and the low streets genuinely swim
-        ctx.st.pool = Math.min(2.4, 1.15 + scale(0.62, ctx));
-        // The front STARTS just upstream of the middle, because the water has
-        // already taken the low ground it came from — a flash flood does not
-        // begin at the map edge, it arrives from the catchment that is already
-        // under. At ~10 m/s it sweeps the centre in the first seconds, which is
-        // the beat the player has to survive.
-        ctx.st.frontS = -40;
-        ctx.st.frontV = 9.5 + scale(2.5, ctx);   // m/s — a real flash-flood front
+        // the sea: only the modest rise a coast sees in a cloudburst
+        ctx.st.peak = Math.min(1.6, 0.7 + scale(0.45, ctx));
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
-        // the sky opens AND the streets start to stand. `pool` is the second
-        // half of the telegraph and it is the half you can only read by
-        // looking DOWN — which is exactly where the danger is about to be.
         weather({ rain: 0.25 + k * 0.72, wind: 4 + k * 5, windDir: { x: ctx.st.wx, z: ctx.st.wz },
-          fog: k * 0.5, fogColor: 0x59636b, pool: 0.02 + k * 0.16 });
-        // the gutters BROWN as they fill — runoff carries sediment before it
-        // carries anything else, and it is the honest half of the telegraph
-        if (CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.weatherFloodLook)
-          CBZ.weatherFloodLook({ mud: 0.35 * k, crest: 0, band: 0, flow: 0 });
+          fog: k * 0.5, fogColor: 0x59636b, pool: 0.05 });
+        if (ctx.st.ff) CBZ.flashflood.tick(dt);
         if (rnd() < dt * 3 * k) sound("water");
       },
       start(ctx) {
-        // NO MESH. The flood is a level and a front, and both are numbers.
         ctx.st.t = 0;
-        ctx.st.level0 = CBZ.waterSurge ? CBZ.waterSurge() : 0;
         if (CBZ.shake) CBZ.shake(0.4);
         sound("water");
       },
       active(dt, ctx) {
         ctx.env.fog = 0x59636b; ctx.env.fogNear = 22; ctx.env.fogFar = 150; ctx.env.sunInt = 0.55; ctx.env.hemiColor = 0x97a6b3;
         ctx.st.t += dt;
-        /* THE HYDROGRAPH RAN BACKWARDS. The comment here has always claimed
-           "water goes UP fast and out slowly" and the numbers have always done
-           the opposite: rise 0.42, drain 0.32 — the flood took LONGER to
-           arrive than to leave, which is a bathtub filling, not a flash flood.
-           A real one is the most asymmetric curve in hydrology: minutes of
-           rise, a sharp peak, then an exponential recession measured in hours.
-           rise 0.16 → stand 0.10 → recession 0.74, and the recession is an
-           actual exp(-3.1 r) limb rather than an eased ramp, normalised so it
-           still reaches dry at the horn instead of stepping off a residue.
-           This is what makes the DRAIN the part that strands you: by the time
-           you decide the worst is over you are still standing in it. */
         const u = Math.min(1, ctx.st.t / Math.max(1, ctx.activeSecs));
+        // the coast: up fast, a short stand, an exponential recession limb
         const peak = ctx.st.peak;
-        let s, pk;
-        // the rise CONTINUES from what the warning already put on the ground
-        // (0.18 m of standing rain) — starting the ramp at zero would drain the
-        // streets for a beat at the exact moment the flood arrives
-        if (u < 0.16) { const e = ease(u / 0.16); s = peak * e; pk = 0.18 + (ctx.st.pool - 0.18) * e; }
-        else if (u < 0.26) { s = peak * (1 - 0.06 * ((u - 0.16) / 0.10)); pk = ctx.st.pool; }
-        else {
-          const r = (u - 0.26) / 0.74;
-          const e = (Math.exp(-3.1 * r) - RECESS_END) / (1 - RECESS_END);
-          s = peak * 0.94 * e; pk = ctx.st.pool * e;
-        }
-        // THE STREETS AND THE SEA, moved together through the two sanctioned
-        // levers and nothing else.
-        weather({ rain: 1, wind: 8, windDir: { x: ctx.st.wx, z: ctx.st.wz },
-          fog: 0.55, fogColor: 0x59636b, pool: pk });
+        let s;
+        if (u < 0.16) s = peak * ease(u / 0.16);
+        else if (u < 0.26) s = peak * (1 - 0.06 * ((u - 0.16) / 0.10));
+        else { const r = (u - 0.26) / 0.74; s = peak * 0.94 * (Math.exp(-3.1 * r) - RECESS_END) / (1 - RECESS_END); }
+        // the rain eases off as the storm cell spends itself (the flood's own
+        // hydrograph lives in flashflood.js; this is only the sky)
+        const rain = u < 0.45 ? 1 : Math.max(0.15, 1 - (u - 0.45) * 2);
+        // `pool` is a SHEEN here, not a level: the routed field is the water,
+        // and this keeps weather.js's water hazards (knock-down, cold,
+        // trapped-in-a-car) running on it
+        weather({ rain: rain, wind: 8, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.55, fogColor: 0x59636b, pool: 0.05 });
         surgeSet(s);
-        // THE FRONT crosses the arena in the first seconds and then stands
-        // down, leaving the level behind it — a wall, and then a lake.
-        if (CBZ.groundWaterFrontSet) {
-          ctx.st.frontS += ctx.st.frontV * dt;
-          // past the halfway mark the wall has done its work and the event is
-          // a lake: dropping the front lets the level stand everywhere
-          const v2 = CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.flashflood;
-          const frontLive = !(u > 0.55 || ctx.st.frontS > ctx.R + 60);
-          const front = frontLive ? {
-            x: ctx.cx, z: ctx.cz, dx: ctx.st.wx, dz: ctx.st.wz,
-            // V2 stands the crest visibly proud of the water behind it — the
-            // "wall" is a real term in the shared depth field, never a mesh
-            s: ctx.st.frontS, width: 15, crest: v2 ? 0.95 : 0.6, speed: ctx.st.frontV,
-          } : null;
-          CBZ.groundWaterFrontSet(front);
-          /* THE FRONT'S FACE — systems/flashflood.js: the churn spray thrown
-             off the crest, the entrained debris tumbling behind it, the mud
-             that makes the water opaque and the roar that places the wall by
-             ear. All read the SAME front descriptor and the SAME depth field;
-             none of it is a water plane. Degrade-safe: without the file (or
-             with FLASHFLOOD_V2=0) this def plays the flood it always played. */
-          if (v2) CBZ.flashflood.drive(front, { dt: dt, pool: pk, u: u });
-          /* THE SEA TAKES THE SAME MUD. The runoff that browned the streets
-             discharges at the coast, and the ocean shader already owns a
-             sediment palette (world/water_spec.js's turbid block, the
-             tsunami's landfall soup) driven off the arena's own wave record —
-             so the flooded shoreline cannot render clean holiday blue beside
-             a chocolate street. Same lever the tsunami uses, nothing new. */
-          if (v2) {
-            const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
-            if (W) {
-              W.sediment = Math.min(1, 0.55 + pk * 0.3);
-              W.frontC = [ctx.cx, ctx.cz];
-              W.frontDir = [ctx.st.wx, ctx.st.wz];
-              W.frontS = frontLive ? ctx.st.frontS : ctx.R * 2;
-              W.frontRun = 130;
-              /* ...and the flow with it, or the sheet keeps whatever the last
-                 event left in these (they live on the one shared wave record).
-                 A silty sea off a flooded coast is STANDING brown water, not a
-                 bore: it drifts, so the streaks stand down and the scum stays. */
-              W.flowDir = [ctx.st.wx, ctx.st.wz];
-              W.flowSpeed = 0.5;
-              W.stand = 1;
-            }
-          }
+        if (ctx.st.ff) CBZ.flashflood.tick(dt);
+        // THE SEA TAKES THE MUD the flood discharges at the coast
+        const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
+        if (W) {
+          W.sediment = Math.min(1, 0.45 + 0.4 * Math.min(1, ctx.st.t / 8));
+          W.frontC = [ctx.cx, ctx.cz]; W.frontDir = [ctx.st.wx, ctx.st.wz];
+          W.frontS = ctx.R * 2; W.frontRun = 130;
+          W.flowDir = [ctx.st.wx, ctx.st.wz]; W.flowSpeed = 0.5; W.stand = 1;
         }
-        // a real downhill current in the inundation, published on the ONE
-        // water-event descriptor so the swimmer and the debris both feel it
-        publishSheetFlood(ctx, u < 0.68 ? "flooded" : "drain", s, u < 0.68 ? 1.4 : -1.1);
-        floodActors(dt, ctx, u < 0.68 ? 1.4 : -1.1, "drowned in the floodwater");
-        // TWO FEET FLOATS A CAR — the same threshold the gang city uses, read
-        // off the same depth field, so a car in the channel is picked up and
-        // carried instead of sitting in a puddle looking bolted down.
-        const gw = CBZ.groundWaterAt;
-        if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
-          const car = ctx.arena.cars[i];
-          if (car.flung) continue;
-          const d = Math.max(floodDepth(car.x, car.z), gw ? gw(car.x, car.z) : 0);
-          if (d > 0.6) flingCar(car, ctx.st.wx, ctx.st.wz, 3.5 + scale(2.5, ctx), 1.2);
-        }
+        publishSheetFlood(ctx, u < 0.68 ? "flooded" : "drain", s, 0);
+        floodActors(dt, ctx, 0, "drowned in the floodwater");
         if (rnd() < dt * 5) sound("water");
       },
       end(ctx) {
         weatherOff(); surgeSet(0);
-        if (CBZ.groundWaterFrontSet) CBZ.groundWaterFrontSet(null);
-        if (CBZ.flashflood) CBZ.flashflood.clear();
+        // the water goes; the mud, the stranded wrecks and the tide marks stay
+        if (CBZ.flashflood) CBZ.flashflood.clear({ keepSilt: true });
         const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
-        // the sea settles back down — and the sediment goes with it (one
-        // match's soup must never tint the next event's clean water)
         if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.sediment = 0; W.flowSpeed = 0; W.stand = 0; }
         if (CBZ.waterEventClear) CBZ.waterEventClear("survival-flood");
       },
       threat(x, z, ctx) {
-        const gw = CBZ.groundWaterAt ? CBZ.groundWaterAt(x, z) : 0;
-        if (gw > 0.1) return Math.max(0.4, Math.min(1, 0.4 + gw * 0.35));
+        const t = CBZ.flashflood ? CBZ.flashflood.threatAt(x, z) : 0;
+        if (t > 0) return t;
         const d = floodDepth(x, z);
         if (d > -1) return Math.max(0.35, Math.min(1, 0.4 + d * 0.25));
         return 0.18;                                    // it is still raining on you
@@ -1062,7 +967,69 @@
           cx: ctx.cx, cz: ctx.cz, R: ctx.R, catF: this._catF,
           duration: this.warnSecs + this.activeSecs,
           bearing: a, offset: (rnd() - 0.5) * ctx.R * 0.35,
+          world: this._world(ctx),
         });
+      },
+      /* THE TOWN THE STORM ACTS ON (systems/hurricane.js's WORLD CONTRACT).
+         Read off the island, never typed in: CBZ.island's lists when the
+         island publishes them, the arena record otherwise. The damage that
+         decides who lives (a crushing tree, a sheet through a body) comes
+         back through the same hurt + body pipes as everything else here. */
+      _world(ctx) {
+        const A = ctx.arena;
+        const I = CBZ.island || null;
+        const from = function (k, fallback) {
+          return function () {
+            if (I && I[k]) return typeof I[k] === "function" ? I[k]() : I[k];
+            return fallback ? fallback() : (A[k] || null);
+          };
+        };
+        const release = function (c) {
+          const k = CBZ.colliders.indexOf(c);
+          if (k >= 0) { CBZ.colliders.splice(k, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+        };
+        return {
+          cx: ctx.cx, cz: ctx.cz, R: ctx.R, root: A.root,
+          groundAt: floor,
+          seaRest: A.oceanY != null ? A.oceanY : -0.8,
+          seaAt: seaY,
+          trees: from("trees", function () { return A.flammable; }),
+          buildings: from("buildings", function () { return A.fragile; }),
+          cars: from("cars", function () { return A.cars; }),
+          boats: from("boats", function () { return A.boats || (A.dressing && A.dressing.boats) || null; }),
+          signs: from("signs"),
+          districts: from("districts"),
+          harbour: from("harbour", function () {
+            const pr = A.dressing && A.dressing.pier;
+            return pr ? [{ x: pr.x1, z: pr.z1 }, { x: (pr.x0 + pr.x1) / 2, z: (pr.z0 + pr.z1) / 2 }] : null;
+          }),
+          shatter: CBZ.shatterGlass || null,
+          structure: function (b, amount, dirx, dirz) { structureHit(b, amount, ctx, { kind: "wind", dirx: dirx, dirz: dirz }); },
+          fling: flingCar,
+          release: release,
+          actors: function (fn) { surv().forEachActor(fn); },
+          // a REAL piece (a roof sheet, a plank) moving fast through a body
+          hit: function (a, o) {
+            if (sheltered(a) || (CBZ.body && CBZ.body.busy(a))) return;
+            CBZ.hurricane.count("debrisStrikes", 1);
+            if (CBZ.body) CBZ.body.hit(a, { dir: { x: o.dirx, z: o.dirz }, force: 6 + o.speed * 0.25, knockdown: o.speed > 24 ? 1.0 : 0 });
+            const wasDead = !!a.dead;
+            surv().hurt(a, scale(8 + o.speed * 0.35, ctx), { cause: "killed by hurricane debris", dir: { x: o.dirx, z: o.dirz } });
+            if (!wasDead && a.dead) CBZ.hurricane.count("debrisKills", 1);
+          },
+          // a windthrown tree comes down across whoever is in its length
+          hurtLine: function (x0, z0, x1, z1, w, cause) {
+            const dx = x1 - x0, dz = z1 - z0, L2 = dx * dx + dz * dz || 1;
+            surv().forEachActor(function (a) {
+              if (a.dead) return;
+              const u = Math.max(0, Math.min(1, ((a.pos.x - x0) * dx + (a.pos.z - z0) * dz) / L2));
+              const ex = a.pos.x - (x0 + dx * u), ez = a.pos.z - (z0 + dz * u);
+              if (ex * ex + ez * ez > w * w) return;
+              if (CBZ.body) CBZ.body.hit(a, { dir: { x: dx, z: dz }, force: 8, knockdown: 1.0 });
+              surv().hurt(a, scale(55, ctx), { cause: cause });
+            });
+          },
+        };
       },
       warnTick(dt, ctx) {
         if (!ctx.st.h2) return;
@@ -1122,8 +1089,11 @@
           ctx.env.sunInt = 0.45 + 0.75 * u * open;
           ctx.env.hemiColor = 0xc2d3e0; ctx.env.hemiInt = 0.5 + 0.35 * open;
         } else {
-          ctx.env.fog = 0x46505a; ctx.env.fogNear = 14;
-          ctx.env.fogFar = Math.max(55, 200 - lw.wind * 3.2);
+          // VISIBILITY is the rain you are in: a band's squall or the wall's
+          // whiteout closes it to a few dozen metres, a slot between bands
+          // opens it back up (sideways rain + spray, not just wind)
+          ctx.env.fog = 0x46505a; ctx.env.fogNear = Math.max(5, 15 - lw.wind * 0.12);
+          ctx.env.fogFar = Math.max(36, 240 - lw.wind * 2.3 - lw.rain * 80);
           ctx.env.sunInt = 0.45; ctx.env.hemiColor = 0x8a98a6;
         }
         if (CBZ.shake) CBZ.shake(Math.min(0.42, lw.wind * 0.009));
@@ -1149,13 +1119,16 @@
           let dead1 = 0;
           for (let i = 0; i < CBZ.bots.length; i++) if (CBZ.bots[i].dead) dead1++;
           H.count("drownings", Math.max(0, dead1 - dead0));
-          // TWO FEET FLOATS A CAR — same threshold as the flash flood
-          if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
-            const car = ctx.arena.cars[i];
-            if (car.flung) continue;
-            if (floodDepth(car.x, car.z) > 0.6) flingCar(car, S.fwdX, S.fwdZ, 3.2 + scale(2.2, ctx), 1.1);
-          }
+          // (TWO FEET FLOATS A CAR: systems/hurricane.js floats it, nose-down,
+          // drifting with the water — not tossed like a tsunami's)
           if (rnd() < dt * 3) sound("water");
+        }
+        // ---- the sea ON TOP of the surge: whipped white by the wind you are
+        //      standing in (the sheet flood's own floor still holds under it) ----
+        {
+          const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
+          const ss = H.seaState(camPos().x, camPos().z);
+          if (W) { W.amp = Math.max(W.amp, ss.amp); W.chop = Math.max(W.chop, ss.chop); W.foam = Math.max(W.foam, ss.foam); }
         }
         // ---- wind loads on every body, from the field at THEIR feet ----
         surv().forEachActor(function (a) {
@@ -1205,53 +1178,12 @@
             if (down) H.count("knockdowns", 1);
             if (CBZ.body) CBZ.body.hit(a, { dir: { x: w.x, z: w.z }, force: 4 + w.speed * 0.24, knockdown: down ? 1.0 : 0 });
           });
-          // A CAT-4/5 GUST AT EYEWALL SPEEDS TAKES A CAR: same fling path the
-          // surge uses, so the collider leaves with the body. Below that the
-          // per-frame shiver below is all a parked car does — its collider is
-          // the truth until the wind actually wins.
-          if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
-            const car = ctx.arena.cars[i];
-            if (car.flung) continue;
-            const w = H.windAt(car.x, car.z);
-            if (w.speed > 48 && rnd() < 0.22) {
-              flingCar(car, w.x, w.z, 3.5 + (w.speed - 48) * 0.2, 1.4);
-              H.count("carsFlung", 1);
-            }
-          }
         }
-        // ---- parked cars SHIVER on their springs in real wind (visual only;
-        //      restored to rest when the wind lets go) ----
-        if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
-          const car = ctx.arena.cars[i];
-          if (car.flung || !car.group) continue;
-          const w = H.windAt(car.x, car.z);
-          if (w.speed > 26) {
-            const k = Math.min(1, (w.speed - 26) / 30);
-            car._windRock = 1;
-            car.group.position.x = car.x + w.x * 0.09 * k * Math.sin(CBZ.now * 0.011 + i * 1.7);
-            car.group.position.z = car.z + w.z * 0.09 * k * Math.sin(CBZ.now * 0.013 + i * 2.1);
-            car.group.rotation.z = 0.045 * k * Math.sin(CBZ.now * 0.009 + i);
-          } else if (car._windRock) {
-            car._windRock = 0;
-            car.group.position.x = car.x; car.group.position.z = car.z;
-            car.group.rotation.z = 0;
-          }
-        }
-        // ---- the EYEWALL scours the roofs it is standing over — an annulus
-        //      that walks across the town with the storm, so damage maps the
-        //      track. Budget: wall-dwell ≈ glass-out + some spall, never a
-        //      levelled town (the ledger is shared with the quake and the
-        //      wave). Batched to 4 Hz — per-frame ring walks were the single
-        //      biggest V2 sim cost and the ledger integrates the same total.
-        ctx.st.scourCd = (ctx.st.scourCd || 0) - dt;
-        if (ctx.st.scourCd <= 0) {
-          ctx.st.scourCd += 0.25;
-          // category prices the scour: a cat-1 rattles glass, a cat-5 takes
-          // the roofs — while the shared ledger still stops short of a
-          // levelled town (the quake and the wave draw on the same budget)
-          structureSweepRing(ctx, S.eyeX, S.eyeZ, S.eyeR, S.rmw * 2.3,
-            (0.013 + 0.011 * S.catF) * 0.25);
-        }
+        /* Cars (rocking, shoved, flipped, floated), trees, roofs, windows,
+           signs, boats, the grid and the frame load on every building are
+           systems/hurricane.js's town pass, run inside H.tick above off the
+           wind AT each object — the old eyewall-annulus scour and the
+           private car shiver/fling that lived here are gone. */
       },
       end(ctx) {
         weatherOff();
@@ -4915,21 +4847,23 @@
         root: root(), floor, rnd,
         cx: ctx.cx, cz: ctx.cz, R: ctx.R, intensity: ctx.intensity,
         damage: {
-          // A GROUND STRIKE: the same kinetic pricing the old shower had —
+          // A GROUND STRIKE: the kinetic pricing on the mode's own roster —
           // the bus draws the fireball (quiet: the bang is scheduled late by
-          // meteor.js), the mode prices its own roster and ledger.
+          // meteor.js). Buildings are NOT swept here: the front reaches them
+          // through meteor.js's damageBuilding() at their own overpressure.
           impact(x, z, spec) {
             const c = mCtx; if (!c) return;
+            const big = spec.cls === "impact";
             survBlast("meteor", x, z, {
               r: spec.r || 6, cause: "flattened by a meteor", ctx: c, quiet: true,
-              mass: 4000 + 4000 * c.intensity, speed: 190 + 60 * c.intensity,
-              struct: 0.55 + 0.35 * c.intensity, structR: (spec.r || 6) * 2.4,
-              fling: 7, knockback: 14, color: 0xffcaa0,
+              mass: big ? 300 : 4000 + 4000 * c.intensity, speed: big ? 13000 : 190 + 60 * c.intensity,
+              struct: 0, fling: big ? 12 : 7, knockback: big ? 22 : 14, color: 0xffcaa0,
             });
           },
           // THE PRESSURE FRONT: an annulus sweeping outward at the speed of
-          // sound. Chelyabinsk's model — it knocks you down and cuts you
-          // with the glass, it does not vaporise you.
+          // sound, `k` from its real overpressure. Chelyabinsk's model — it
+          // knocks you down and cuts you with the glass, it does not
+          // vaporise you; a ground impact's near field does far worse.
           front(x, z, r0, r1, k) {
             const c = mCtx; if (!c || !surv().forEachActor) return;
             surv().forEachActor((a) => {
@@ -4941,12 +4875,19 @@
                  open it knocks you flat and flings you. */
               const roofed = sheltered(a);
               if (CBZ.body) CBZ.body.hit(a, { fromX: x, fromZ: z, force: (5 + 13 * k) * (roofed ? 0.3 : 1), fling: !roofed && k > 0.45 ? 2.5 + 4 * k : 0 });
-              if (k > 0.18) surv().hurt(a, (6 + 30 * k) * (roofed ? 0.25 : 1), { fromX: x, fromZ: z, cause: "caught in the meteor airburst" });
+              if (k > 0.12) surv().hurt(a, (6 + 10 * k + 40 * k * k) * (roofed ? 0.25 : 1), { fromX: x, fromZ: z, cause: "caught in the meteor airburst" });
             });
-            if (k > 0.25) structureSweepRing(c, x, z, r0, r1, 0.06 * k);
+          },
+          // the island's structural ledger, reached through meteor.js's one
+          // building adapter (CBZ.collapse.damage wins there when it exists)
+          building(b, amount, dir) {
+            structureHit(b, amount, mCtx, { kind: "meteor", dirx: dir ? dir.x : 0, dirz: dir ? dir.z : 0 });
           },
         },
       });
+      // THE SHOWER: the debris stream itself, streaks and a few low pops all
+      // event long; the ground strikes below are the def's (seeded, marked)
+      CBZ.meteor.shower({ rate: 2 + 2.5 * (ctx.intensity || 0), pop: 0.1, ground: 0 });
     }
     // a low bolide is BRIGHTER THAN THE SUN: feed meteor.js's light into the
     // scene so the flash visibly lights the island before it makes a sound
@@ -4957,6 +4898,19 @@
         ctx.env.hemiInt = Math.min(1.6, ctx.env.hemiInt + b * 0.9);
       }
     }
+    /* THE HEADLINE BODY escalates with the arc: early rounds get the
+       Chelyabinsk airburst (glass across the island, people knocked flat),
+       later ones a low Tunguska burst (the forest flattened radially) or an
+       iron that reaches the ground (the crater). CONFIG.METEOR_HEADLINE pins
+       it (?cfg_METEOR_HEADLINE=impact). */
+    function headlineClass(ctx) {
+      const pin = CBZ.CONFIG.METEOR_HEADLINE;
+      if (pin && CBZ.meteor.law.CLASSES[pin]) return pin;
+      const u = rnd(), I = ctx.intensity || 0;
+      if (I < 0.35) return u < 0.8 ? "chelyabinsk" : "tunguska";
+      if (I < 0.7) return u < 0.35 ? "chelyabinsk" : u < 0.7 ? "tunguska" : "impact";
+      return u < 0.3 ? "tunguska" : "impact";
+    }
     function activeV2(dt, ctx) {
       mCtx = ctx;
       // a thin haze, not a 240 m soup: the flashes need a sky to light
@@ -4964,26 +4918,39 @@
       CBZ.meteor.tick(dt);
       lightV2(ctx);
       ctx.st.clock = (ctx.st.clock || 0) + dt;
-      /* THE CHELYABINSK MOMENT, once per event on a fixed beat (so every
-         seed and both storyboard sides stage the same second): one huge
-         bolide crossing low, terminating in a high airburst whose flash
-         whites the island — and then NOTHING, for the seconds the bang
-         takes to crawl down, before the front knocks the crowd flat. */
+      /* THE HEADLINE, once per event on a fixed beat (so every seed and both
+         storyboard sides stage the same second): one big body crossing low.
+         The flash whites the island, and then NOTHING for the seconds the
+         front takes to crawl out to you. */
       if (!ctx.st.big && ctx.st.clock >= 5) {
         ctx.st.big = true;
-        const a = rnd() * 6.28, d0 = ctx.R * (0.2 + 0.35 * rnd());
-        CBZ.meteor.strike({
-          x: ctx.cx + Math.cos(a) * d0, z: ctx.cz + Math.sin(a) * d0,
-          air: true, alt: 95 + 40 * rnd(), size: 2.6, eta: 3.2, big: true,
-        });
+        const cls = headlineClass(ctx);
+        let p = null;
+        if (cls === "impact") {
+          // an iron needs ground a crater can be dug in (flat, dry, clear)
+          for (let k2 = 0; k2 < 10 && !p; k2++) {
+            const q = ctx.arena.randomPoint(ctx.R * 0.1, ctx.R * 0.6);
+            if (!CBZ.groundShaftCanOpen || CBZ.groundShaftCanOpen(q.x, q.z, 18).ok) p = q;
+          }
+        }
+        if (!p) { const a = rnd() * 6.28, d0 = ctx.R * (0.15 + 0.35 * rnd()); p = { x: ctx.cx + Math.cos(a) * d0, z: ctx.cz + Math.sin(a) * d0 }; }
+        const eta = 3.2;
+        CBZ.meteor.strike({ x: p.x, z: p.z, cls, eta });
+        ctx.st.headline = { cls, x: p.x, z: p.z };
+        // an impact's shadow is a place you can run from: marked at 2.5 crater radii
+        if (cls === "impact") {
+          const C = CBZ.meteor.law.CLASSES.impact, cr = CBZ.meteor.law.craterOf(C.L, C.dens, C.v, 0.8);
+          const r = Math.min(18, cr.R) * 2.5;
+          ctx.st.pending.push({ x: p.x, z: p.z, r, t: eta, t0: eta, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
+        }
       }
       ctx.st.cd -= dt;
       if (ctx.st.cd <= 0) {
         ctx.st.cd = (1.25 - 0.5 * ctx.prog) * (0.6 + rnd());
         const r = 5 + scale(2, ctx);
         // MOST OF A METEOR EVENT NEVER TOUCHES THE GROUND. The first strike
-        // is guaranteed a ground hit (the event must leave a hole); after
-        // that the majority burst in the air, which is the real energy split.
+        // is a ground hit (the event must be felt); after that the majority
+        // pop in the air, which is the real energy split.
         const ground = !ctx.st.first || rnd() < 0.4;
         ctx.st.first = true;
         let p = ctx.arena.randomPoint(0, ctx.R * 0.9);
@@ -4993,14 +4960,13 @@
         const hunt = ground && !PL.dead && !underRoof(PL.pos.x, PL.pos.z, PL.pos.y) && rnd() < 0.25;
         if (hunt) { const a4 = rnd() * 6.28, d4 = 8 + rnd() * 8; p = { x: PL.pos.x + Math.cos(a4) * d4, z: PL.pos.z + Math.sin(a4) * d4 }; }
         else if (ground && CBZ.groundShaftCanOpen) {
-          // prefer ground a crater can actually be dug in (flat, dry, clear)
           for (let k2 = 0; k2 < 5; k2++) {
             const q = ctx.arena.randomPoint(0, ctx.R * 0.8);
             if (CBZ.groundShaftCanOpen(q.x, q.z, 6).ok) { p = q; break; }
           }
         }
         const eta = 1.5 + rnd() * 0.6;
-        CBZ.meteor.strike({ x: p.x, z: p.z, air: !ground, alt: 30 + 45 * rnd(), size: 0.9 + 0.9 * ctx.intensity, eta, r });
+        CBZ.meteor.strike({ x: p.x, z: p.z, cls: ground ? "small" : "pop", alt: 30 + 45 * rnd(), eta, r });
         // the marker is the bolide's shadow — ground strikes only; you
         // cannot stand clear of an airburst and the map should not pretend
         if (ground) ctx.st.pending.push({ x: p.x, z: p.z, r, t: eta, t0: eta, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
@@ -5310,6 +5276,12 @@
       if (dir.cur && dir.cur.end && dir.state === "active") { try { dir.cur.end(makeCtx(0)); } catch (e) {} }
       // a fresh match starts on a flat sea, clear weather and no open holes
       surgeSet(0); weatherOff();
+      // the hurricane's town (felled trees, peeled roofs, dark districts,
+      // beached boats, debris) stands back up for the new match
+      if (CBZ.hurricane && CBZ.hurricane.resetWorld) {
+        CBZ.hurricane.resetWorld();
+        try { if (CBZ.surv && CBZ.surv.arena) CBZ.hurricane.prewire(DEFS.hurricane._world(makeCtx(0))); } catch (e) {}
+      }
       if (CBZ.survHoles) CBZ.survHoles.length = 0;
       said.banners = said.hints = said.toasts = 0;
       // a fresh SEEDED arc for this run: world seed + run counter → the same
@@ -5558,13 +5530,11 @@
       } else if (id === "nuke") {
         if (st.gx != null) out.push(!st.r ? { x: st.gx, z: st.gz, r: 9 } : { x: st.gx, z: st.gz, r: st.r, fill: false });
       } else if (id === "flashflood") {
-        // the def RUNS a front down the channel (CBZ.groundWaterFrontSet) —
-        // while that wall is live the map marks it as the travelling line it
-        // is, exactly like the tsunami's. The old comment here claimed "no
-        // front any more"; it was describing a build two rewrites ago.
-        if (!warn && CBZ.CONFIG.FLASHFLOOD_V2 !== false && CBZ.groundWaterFront) {
-          const F = CBZ.groundWaterFront();
-          if (F) out.push({ line: true, x: F.x + F.dx * F.s, z: F.z + F.dz * F.s, dx: F.dx, dz: F.dz });
+        // the routed front is not a line: it is wherever the water is
+        // arriving right now, down each channel it found (flashflood.js)
+        if (!warn && CBZ.flashflood) {
+          const fp = CBZ.flashflood.frontPoints(8);
+          for (let i = 0; i < fp.length; i++) out.push({ x: fp[i].x, z: fp[i].z, r: 6 });
         }
         // ...and the low ground that is already under stays ringed
         if (!warn) for (let i = 0; i < A.hills.length; i++) {
@@ -5662,10 +5632,9 @@
       surgeDriven: surgeWrites > 0,
       surgeWrites: surgeWrites,
       surge: CBZ.waterSurge ? +CBZ.waterSurge().toFixed(3) : 0,
-      // ---- THE FLASH FLOOD'S FRONT (systems/flashflood.js) ----
-      // live evidence the wall has a face: churn spray in the air, entrained
-      // debris riding the depth field, mud opacity on the coat — and still
-      // zero private water planes, which groundWaterAudit checks separately.
+      // ---- THE FLASH FLOOD (systems/flashflood.js) ----
+      // live evidence the flood was routed, not scripted: its depth and front
+      // speed, cars swept, bridges failed, lids blown, the field installed.
       flashflood: CBZ.flashflood ? CBZ.flashflood.audit() : null,
       // ---- ONE SWIM ----
       privateSwim: privateSwim,

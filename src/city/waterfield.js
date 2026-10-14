@@ -348,7 +348,7 @@
   const GW_SWIM = 1.35;
   const gwCache = new Map();
   let gwStage = 0;           // metres above the local drainage floor
-  let gwFront = null;        // optional advancing torrent front
+  let gwField = null;        // a routed flood (systems/flashflood.js), when live
   let gwPeak = 0;            // deepest stage this event (audit evidence)
 
   function gwFloorAt(x, z) {
@@ -385,43 +385,29 @@
   };
   CBZ.groundWater = function () { return gwStage; };
 
-  /* THE TORRENT FRONT. A flash flood is not a level that rises politely —
-     it is a wall coming down a channel with the ground still dry twenty
-     metres ahead of it. Rather than draw that wall (a private plane, which
-     this engine bans), the front is a term in the SAME depth field: dry
-     ahead of `s`, a raised crest in the first `width` metres behind it, the
-     standing level after that. Swimming, drowning, buoyancy and the gore
-     medium all meet the wall because they are all asking this function. */
-  CBZ.groundWaterFrontSet = function (f) {
-    if (!f) { gwFront = null; return null; }
-    const m = Math.hypot(+f.dx || 0, +f.dz || 0) || 1;
-    gwFront = {
-      x: +f.x || 0, z: +f.z || 0, dx: (+f.dx || 1) / m, dz: (+f.dz || 0) / m,
-      s: +f.s || 0, width: Math.max(2, +f.width || 14),
-      crest: Math.max(0, f.crest == null ? 0.55 : +f.crest),
-      speed: Math.max(0, +f.speed || 0),
-    };
-    return gwFront;
+  /* A ROUTED FLOOD (2026-10-14). The scalar stage above is rain standing in
+     the low spots; a flash flood is water MOVING down the drainage, and that
+     is a 2-D solve (systems/flashflood.js: local-inertial shallow water over
+     the terrain). While one is live it IS the ground water: every query in
+     this block answers from it, so the swimmer, the knock-down physics, the
+     bots, buoyancy and gore all meet the same water the player sees. The
+     field object carries depthAt / levelAt / flowAt. It replaced the old
+     straight-line "front" term (a plane swept across the island at a fixed
+     speed regardless of the ground), which is deleted. */
+  CBZ.groundWaterFieldSet = function (f) {
+    gwField = f && typeof f.depthAt === "function" ? f : null;
+    return gwField;
   };
-  CBZ.groundWaterFront = function () { return gwFront; };
+  CBZ.groundWaterField = function () { return gwField; };
 
   // metres of standing water at (x,z) — 0 on dry land and 0 at sea.
   function groundWaterAt(x, z) {
-    if (gwStage <= 0.001 || CFG.WEATHER_GROUND_WATER === false) return 0;
+    if (CFG.WEATHER_GROUND_WATER === false) return 0;
+    if (gwField) { const d = +gwField.depthAt(x, z); if (d > gwPeak) gwPeak = d; return d > 0.002 ? d : 0; }
+    if (gwStage <= 0.001) return 0;
     // the sea is the sea; a puddle is what sits ON land
     if (coastAt(x, z) < 0) return 0;
-    let stage = gwStage;
-    if (gwFront) {
-      const u = (x - gwFront.x) * gwFront.dx + (z - gwFront.z) * gwFront.dz;
-      const behind = gwFront.s - u;
-      if (behind <= 0) return 0;                       // still dry ahead of it
-      if (behind < gwFront.width) {
-        // the crest: the leading metres of a flash flood stand HIGHER than
-        // the water that follows, which is why the first hit knocks you flat
-        const k = behind / gwFront.width;
-        stage *= (0.25 + 0.75 * k) * (1 + gwFront.crest * Math.sin(k * Math.PI));
-      }
-    }
+    const stage = gwStage;
     const F = CBZ.floorAt;
     const h = F ? +F(x, z) : 0;
     const rel = h - gwFloorAt(x, z);
@@ -441,31 +427,27 @@
   // water climbing the kerb, and asking "how deep is it where I stand" (zero,
   // he is dry) would erase the flood the moment he stepped up out of it.
   CBZ.groundWaterLevelY = function (x, z) {
+    // a routed flood has no single pond level: its surface is drawn from the
+    // field itself (systems/flashflood.js), so the coat's pond stands down
+    if (gwField) return -Infinity;
     if (gwStage <= 0.001 || CFG.WEATHER_GROUND_WATER === false) return -Infinity;
     if (coastAt(x, z) < 0) return -Infinity;
     return gwFloorAt(x, z) + gwStage;
   };
 
-  /* THE CURRENT IN THE STREET. Floodwater runs DOWNHILL, and once a front is
-     live it runs the way the front is travelling — which is the number that
-     knocks a person down at shin depth and floats a car at two feet. One
-     allocation-free out-vector; magnitude is metres/sec. */
+  /* THE CURRENT IN THE STREET. Floodwater runs DOWNHILL — the number that
+     knocks a person down at shin depth and floats a car at two feet. A routed
+     flood answers with its own solved velocity; standing rain runs off the
+     slope of the ground. One allocation-free out-vector; magnitude m/s. */
   const _flow = { x: 0, z: 0, speed: 0 };
   CBZ.groundWaterFlowAt = function (x, z, out) {
     out = out || _flow;
     out.x = 0; out.z = 0; out.speed = 0;
+    if (gwField) { if (CFG.WEATHER_GROUND_WATER !== false) gwField.flowAt(x, z, out); return out; }
     const d = groundWaterAt(x, z);
     if (d <= 0) return out;
     let vx = 0, vz = 0;
-    if (gwFront) {
-      // near the front the whole column is moving with it
-      const u = (x - gwFront.x) * gwFront.dx + (z - gwFront.z) * gwFront.dz;
-      const behind = gwFront.s - u;
-      const k = behind < gwFront.width * 3 ? 1 - behind / (gwFront.width * 3) : 0;
-      vx += gwFront.dx * gwFront.speed * k;
-      vz += gwFront.dz * gwFront.speed * k;
-    }
-    // plus the terrain's own downhill push (the slope of the ground, not of
+    // the terrain's own downhill push (the slope of the ground, not of
     // the water — the water surface is level over a drainage cell)
     const F = CBZ.floorAt;
     if (F) {
@@ -524,7 +506,7 @@
   const GW_SHELF_SLOPE = 1.10;  // MUST match city/swim.js's SHELF_SLOPE
   function shoreAt(x, z) {
     const c = coastAt(x, z);
-    if (gwStage > 0.001 && c >= 0) {
+    if ((gwStage > 0.001 || gwField) && c >= 0) {
       const d = groundWaterAt(x, z);
       if (d >= GW_WET) return -d / GW_SHELF_SLOPE;
     }
@@ -1158,7 +1140,7 @@
       on: CFG.WEATHER_GROUND_WATER !== false,
       stage: +gwStage.toFixed(3),
       peak: +gwPeak.toFixed(3),
-      front: gwFront ? { s: +gwFront.s.toFixed(1), speed: +gwFront.speed.toFixed(1) } : null,
+      field: gwField ? gwField.owner || "live" : null,
       cells: gwCache.size,
       wetThreshold: GW_WET,
       swimThreshold: GW_SWIM,
