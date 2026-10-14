@@ -1154,7 +1154,7 @@
     apply: apply,
     // harness/test-only hooks — not part of the public contract (regimes.js's
     // own _forceGov / polwar.js's _forceDesperate precedent).
-    _state: st, _martialReason: martialReason, _garrison: garrison,
+    _state: st, _martialReason: martialReason,
     _refuse: refuse, _dailyTick: dailyTick,
   };
   CBZ.govAudit = audit;
