@@ -327,7 +327,7 @@
       // to re-take it, or the object stays drawn forever while the set still
       // claims we own it. Re-adding to a Set is free.
       if (o.visible) { o.visible = false; hidByUs.add(o); }
-      if (d > R + H + EVICT && hidByUs.has(o) && !evicted.has(o) && !(o.userData && o.userData.streamJob)) evict(o);
+      if (d > R + H + EVICT && hidByUs.has(o) && !evicted.has(o) && !(o.userData && o.userData.streamJob && !CBZ.isMobileDevice)) evict(o);
     } else if (d < R) {
       // userData.cullLocked = "another system wants this hidden at this
       // quality tier" (city/buildings.js's masonry veneer is dropped whole at
@@ -348,8 +348,10 @@
      fog colour, hidden by the next sweep, and its GPU-only buffers were then
      READ BACK for eviction, to be uploaded again on approach. Judged at
      once, it is never drawn or uploaded until it comes within the fog.
-     (Stream-job groups are never evicted: the streamer parks and frees them
-     itself, past the keep circle.) */
+     (On the desktop stream-job groups are not evicted: the streamer parks
+     and frees them itself, past the keep circle, and the read-back is churn.
+     A phone evicts them as before: its GPU memory is the budget, +6% on the
+     drive in the paired A/B without it.) */
   CBZ.farcullAdopt = function (o) {
     const g = CBZ.game, root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
     if (!o || !root || o.parent !== root || !g || g.mode !== "city") return;
