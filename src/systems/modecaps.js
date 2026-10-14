@@ -384,7 +384,9 @@
     }
     if (m === "escape") {
       if (!CBZ.hurtPlayer) return false;
-      CBZ.hurtPlayer(dmg, x, z, { heat: 0, shake: 0.9, haulMsg: "CAUGHT IN A BLAST" });
+      // a BLAST (capture.js blastHit): it throws you, and if it kills you it
+      // kills you there, not a bullet hole you bleed out from on the floor
+      CBZ.hurtPlayer(dmg, x, z, { weapon: "blast", heat: 0, cause: cause });
       return true;
     }
     return false;
@@ -444,18 +446,45 @@
       })) hitCount++;
     }
     blastScratch.length = 0;
-    // the player takes the SAME linear falloff city/crashfx.js gives them
+    // the player takes the SAME law city/crashfx.js gives them (blastPlayerDamage)
     const P = CBZ.player;
     if (P && !P.dead && P.pos) {
-      const dx = P.pos.x - x, dz = P.pos.z - z, d2 = dx * dx + dz * dz;
-      if (d2 < R * R) {
-        const dmg = Math.round(85 * power * (1 - Math.sqrt(d2) / (R + 0.01)));
-        if (dmg > 0 && hurtWorldPlayer(dmg, x, z, cause)) hitCount++;
-      }
+      const dx = P.pos.x - x, dz = P.pos.z - z;
+      const d = Math.sqrt(dx * dx + dz * dz);
+      // (a nuke's reach is its own field, never the conventional cap)
+      const dmg = cause === "nuclear blast" ? (d < R ? Math.round(85 * power * (1 - d / (R + 0.01))) : 0)
+        : blastPlayerDamage(d, R, power);
+      if (dmg > 0 && hurtWorldPlayer(dmg, x, z, cause)) hitCount++;
     }
     return hitCount;
   }
   CBZ.blastWorldActors = blastWorldActors;
+
+  /* ---- WHAT A BLAST DOES TO YOU, by distance ------------------------------
+     OWNER (2026-10-13): "when I shoot an RPG ... my player does this dumb
+     slow fall and death." The rocket killed its own shooter at any range a
+     prison room has. The old law was 85 x power, falling off LINEARLY to R,
+     and R is radius x power: the RPG's 13 x 1.9 = 24.7 m. Half damage at
+     12 m, 96 hp at 10 m, dead inside ~9 m. A rocket into the far wall of the
+     mess hall was suicide.
+     A blast is brutal near the charge and falls away fast (overpressure goes
+     roughly with the inverse cube of distance; fragments thin with the
+     square). So: the same 85 x power at the seat, but the reach is the blast
+     radius capped at ~5.5 m per unit of power (RPG 10.5 m, grenade its own
+     6 m, an airstrike 16.5 m), and the fall is (1-x)^1.5, steep near, long
+     tail. RPG: dead inside ~2.7 m, ~97 at 3 m, ~69 at 4.5 m, ~37 at 6.5 m,
+     ~8 at 9 m. Point-blank into a wall still kills you; across the
+     room it throws you and hurts. One law, both sweeps (city + every other
+     mode), so the player is never priced two ways. ------------------------ */
+  function blastPlayerDamage(d, R, power) {
+    power = power > 0 ? power : 1;
+    if (!(R > 0) || !(d >= 0)) return 0;
+    const reach = Math.min(R, Math.max(6, 5.5 * power));
+    if (d >= reach) return 0;
+    const x = 1 - d / reach;
+    return Math.round(85 * power * x * Math.sqrt(x));
+  }
+  CBZ.blastPlayerDamage = blastPlayerDamage;
 
   /* ---- RATCHET (Block Law rule 5) -----------------------------------------
      THE NUMBER THAT MAY ONLY GO DOWN: for every mode this block declares

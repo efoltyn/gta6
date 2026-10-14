@@ -464,7 +464,7 @@ document.body.appendChild(b);}}catch(e){}})();
      prison, gun game and the disaster island reuse Gang City's engine instead
      of being refused by a mode enum. Loads before every consumer; flag
      MODE_CAPS_V1=false restores the old city-only answers everywhere at once. -->
-<script src="src/systems/modecaps.js?v=caps1"></script>
+<script src="src/systems/modecaps.js?v=rpgblast1013"></script>
 <!-- SPEECH OVER THE SPEAKER'S HEAD: the one mouth of every game (CBZ.speech).
      A spoken line is a few words pinned above the speaker in world space; there
      is no subtitle band. Loads before every caller (social.js, interact.js,
@@ -939,7 +939,7 @@ document.body.appendChild(b);}}catch(e){}})();
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
-<script src="src/systems/capture.js?v=holes1009b"></script>
+<script src="src/systems/capture.js?v=rpgblast1013"></script>
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
@@ -1002,7 +1002,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=vault1013"></script>
+<script src="src/systems/state.js?v=rpgblast1013"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1036,7 +1036,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ekey2"></script>
-<script src="src/systems/fpsmode.js?v=rounds1013m"></script>
+<script src="src/systems/fpsmode.js?v=rpgblast1013"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=jailv1001"></script>
 
@@ -1506,7 +1506,7 @@ document.body.appendChild(b);}}catch(e){}})();
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=w09290242x"></script>
 <script src="src/city/playercars.js?v=sl0930b"></script>
-<script src="src/city/crashfx.js?v=nocine1011m"></script>
+<script src="src/city/crashfx.js?v=rpgblast1013"></script>
 <script src="src/city/crashdeform.js?v=carblood930"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
@@ -1747,9 +1747,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/explosives.js?v=mil0929"></script>
 <script src="src/systems/helditems.js?v=arms1009b"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
-<script src="src/city/death.js?v=rounds1013"></script>
+<script src="src/city/death.js?v=rpgblast1013"></script>
 <script src="src/city/camera.js?v=deathcam1009"></script>
-<script src="src/city/ragdoll.js?v=hmove1011"></script>
+<script src="src/city/ragdoll.js?v=rpgblast1013"></script>
 <script src="src/city/carstrike.js?v=physicsm1011"></script>
 <script src="src/city/leaderboard.js?v=rg0929"></script>
 <script src="src/city/zillow.js?v=fac1009"></script>
@@ -2008,7 +2008,7 @@ document.body.appendChild(b);}}catch(e){}})();
      nothing itself. After gore.js + wounds.js (routes through CBZ.goreImpact,
      CBZ.gore and CBZ.bodyWound), before core/loop.js so its clock makes the
      boot sort. Consumers: grapple.js, physics.js, modes/survival.js. -->
-<script src="src/systems/trauma.js?v=vit3"></script>
+<script src="src/systems/trauma.js?v=rpgblast1013"></script>
 <!-- PREDATOR GRAMMAR — the shared answer to "a thing hunts you and takes you":
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the

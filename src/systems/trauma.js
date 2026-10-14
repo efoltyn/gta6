@@ -186,7 +186,7 @@
     // nothing off a person.
     [/beaten|punch|melee|fists/, { amount: 1.0, limbs: 0, style: "blunt" }],
     // ordnance proper (never reached by the nuke rows above)
-    [/explosion|ordnance|\bbomb\b|\bblast\b|shell/, { amount: 1.3, limbs: 1, style: "boom" }],
+    [/explosion|ordnance|\bbomb\b|\bblast\b|shell/, { amount: 1.3, limbs: 1, style: "boom", slowmo: 0 }],   // a blast is fast: no slow-mo on your death
   ];
   function profile(cause) {
     const c = ("" + (cause || "")).toLowerCase();
@@ -381,7 +381,7 @@
         // real limb off it instead of throwing anonymous boxes. The player's
         // own corpse is never dismembered (gore.js refuses isPlayer).
         actor: a, imp: imp || null, limbs: a.isPlayer ? 0 : (pr.limbs || 0),
-        slowmo: a.isPlayer ? (pr.slowmo || 0.4) : (pr.slowmo || 0),
+        slowmo: a.isPlayer ? (pr.slowmo != null ? pr.slowmo : 0.4) : (pr.slowmo || 0),
       };
       /* WHAT THE KILL SITE ALREADY KNEW. A death that arrives with a real
          contact point, a real mouth width or a stated medium has no reason to
