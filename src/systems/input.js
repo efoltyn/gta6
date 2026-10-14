@@ -2,9 +2,10 @@
    systems/input.js — keyboard state map, and THE ONE ANSWER to
    "is there a physical keyboard?"
 
-   HAS A KEYBOARD: <html class="kbd">. CSS keys every keyboard-only hint off
+   HAS A KEYBOARD: <html class="has-kbd">. CSS keys every keyboard-only hint off
    that class (the hotbar's slot digits, css/inventory.css), JS reads
-   CBZ.hasKeyboard(). It is on when:
+   CBZ.hasKeyboard(). (Not "kbd": css/screens.css's .kbd is the title's key
+   cap chip, and on <html> it turned the whole page into one.) It is on when:
      · the primary pointer is a mouse/trackpad that hovers
        (hover:hover and pointer:fine) — a desktop, a laptop;
      · or the first REAL key arrives: a trusted keydown that did not come
@@ -29,7 +30,7 @@
   function setKbd(on) {
     if (on === hasKbd) return;
     hasKbd = on;
-    if (root && root.classList) root.classList.toggle("kbd", on);
+    if (root && root.classList) root.classList.toggle("has-kbd", on);
   }
   let mq = null;
   try { mq = window.matchMedia ? window.matchMedia("(hover: hover) and (pointer: fine)") : null; } catch (e) { mq = null; }

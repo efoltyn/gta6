@@ -122,7 +122,7 @@ for (const n of [0, 1, 3, 9, 14]) {
   ok(cells === n + 3, `render n=${n}: ${cells} cells (want guns + flashlight + keycard + key)`);
   ok(bar.style["--hb-n"] === String(n + 3), `render n=${n}: --hb-n=${bar.style["--hb-n"]}`);
   // the digit that picks a cell rides as data-k on usable cells only (CSS
-  // draws it under html.kbd); passive belt items carry none
+  // draws it under html.has-kbd); passive belt items carry none
   const ks = [...html.matchAll(/<div class='hb ([^']*)' data-i='\d+'(?: data-k='(\d)')?>/g)];
   ok(ks.length === cells, `render n=${n}: cell markup unparsed`);
   let want = 0;
@@ -177,7 +177,7 @@ for (const n of [0, 1, 3, 9, 14]) {
   ok(bar.style.display === "none", "city: the bar must leave while you drive (keyboard)");
 }
 
-// ---- 4. the keys: systems/input.js (digitKey, html.kbd) + the bar's handler ----
+// ---- 4. the keys: systems/input.js (digitKey, html.has-kbd) + the bar's handler ----
 {
   const cls = new Set();
   const il = {};
@@ -198,22 +198,22 @@ for (const n of [0, 1, 3, 9, 14]) {
   ok(dk({ code: "Numpad9", key: "9" }) === 9, "digitKey: numpad 9");
   ok(dk({ code: "Digit0", key: "0" }) === 0 && dk({ code: "KeyE", key: "e" }) === 0, "digitKey: 0 / letters are not slots");
   ok(dk({ code: "Digit1", key: "1", metaKey: true }) === 0, "digitKey: Cmd+1 belongs to the browser");
-  ok(!I.hasKeyboard() && !cls.has("kbd"), "kbd: a touch-only device starts without html.kbd");
+  ok(!I.hasKeyboard() && !cls.has("has-kbd"), "kbd: a touch-only device starts without html.has-kbd");
   const kd = (e) => iwin.listeners.keydown.forEach((f) => f(Object.assign({ key: "a", code: "KeyA", isTrusted: true, preventDefault() {} }, e)));
   kd({ isTrusted: false });
-  ok(!cls.has("kbd"), "kbd: a synthetic key is not a keyboard");
+  ok(!cls.has("has-kbd"), "kbd: a synthetic key is not a keyboard");
   kd({ target: { tagName: "INPUT" } });
-  ok(!cls.has("kbd"), "kbd: typing into a field (on-screen keyboard) is not a keyboard");
+  ok(!cls.has("has-kbd"), "kbd: typing into a field (on-screen keyboard) is not a keyboard");
   kd({ key: "Unidentified", keyCode: 229 });
-  ok(!cls.has("kbd"), "kbd: Android soft keys are not a keyboard");
+  ok(!cls.has("has-kbd"), "kbd: Android soft keys are not a keyboard");
   kd({});
-  ok(I.hasKeyboard() && cls.has("kbd"), "kbd: the first real key reveals the digits");
+  ok(I.hasKeyboard() && cls.has("has-kbd"), "kbd: the first real key reveals the digits");
   const dwin = { CBZ: {}, addEventListener() {}, matchMedia: () => ({ matches: true, addEventListener() {} }) };
   dwin.window = dwin;
   dwin.document = { documentElement: { classList: { toggle(c, on) { if (on) dwin.on = c; } } } };
   vm.createContext(dwin);
   vm.runInContext(readFileSync(path.join(root, "src/systems/input.js"), "utf8"), dwin);
-  ok(dwin.CBZ.hasKeyboard() && dwin.on === "kbd", "kbd: a desktop (hover + fine pointer) shows the digits from boot");
+  ok(dwin.CBZ.hasKeyboard() && dwin.on === "has-kbd", "kbd: a desktop (hover + fine pointer) shows the digits from boot");
 
   // the bar's own handler, fed Shift+2 on a Mac: the 2nd usable cell
   CBZ.digitKey = I.digitKey;

@@ -444,19 +444,42 @@
     b.addEventListener("mousedown", (e) => { e.preventDefault(); flash(); fn(); });
   }
 
-  // The trigger itself: in first-person it shoots/punches via the FPS module;
-  // otherwise it's the third-person panic-fire / unarmed melee (desktop L-click).
+  // The trigger itself: WHAT IS IN YOUR HANDS decides, not the camera.
+  // A gun out (first or third person) -> the FPS module fires it. Empty hands
+  // or a bat/knife -> systems/melee.js's one button. The prison's first-person
+  // fists still go through fpsmode (its shoot() throws the jail punch there).
+  //
+  // THE CITY BUG THIS FIXES: this used to send every first-person press to
+  // CBZ.fpsFire, and fpsmode's shoot() deliberately drops an unarmed press in
+  // the city ("city/combat.js owns unarmed melee") because on a desktop the
+  // city's own mousedown throws the punch. A finger has no mousedown, so in
+  // Gang City with empty hands (or a bat) in first person, FIRE did nothing.
+  let fireRoute = null;   // the path the press took; its release goes the same way
+  function gunOwnsTrigger() {
+    if (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive()) return true;
+    if (!(CBZ.fps && CBZ.fps.active)) return false;
+    if (CBZ.game.mode === "city") return !!(CBZ.fpsArmed && CBZ.fpsArmed());
+    return true;
+  }
   function fireAction(down) {
     // A mounted shark's mouth is its weapon. Consume both press and release so
     // the same iPad FIRE touch can never also punch or discharge a held gun.
     if (CBZ.cityMountedAnimalAttack && CBZ.cityMountedAnimalAttack(down)) return;
     // a charge / the detonator / a frag in hand (systems/helditems.js): FIRE is its use
     if (CBZ.heldItem && CBZ.heldItem.use(down)) return;
-    if (((CBZ.fps && CBZ.fps.active) || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive())) && CBZ.fpsFire) CBZ.fpsFire(down);
-    else if (CBZ.islandModeOn(CBZ.game.mode)) { if (down && CBZ.grapple) CBZ.grapple.punch(); }
+    let route = !down && fireRoute ? fireRoute : null;
+    if (!route) {
+      if (gunOwnsTrigger() && CBZ.fpsFire) route = "gun";
+      else if (CBZ.islandModeOn(CBZ.game.mode)) route = "grapple";
+      else if (CBZ.melee && CBZ.melee.trigger) route = "melee";
+      else route = "punch";
+    }
+    fireRoute = down ? route : null;
+    if (route === "gun") CBZ.fpsFire(down);
+    else if (route === "grapple") { if (down && CBZ.grapple) CBZ.grapple.punch(); }
     // the fists: systems/melee.js's one button (press throws, hold guards,
     // releasing a hold throws the power shot; the stick picks the blow)
-    else if (CBZ.melee && CBZ.melee.trigger) CBZ.melee.trigger(down);
+    else if (route === "melee") CBZ.melee.trigger(down);
     else if (down && CBZ.punch) CBZ.punch();
   }
   // Refcounted trigger: every way FIRE can be down (the physical button, each
