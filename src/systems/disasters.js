@@ -4915,21 +4915,23 @@
         root: root(), floor, rnd,
         cx: ctx.cx, cz: ctx.cz, R: ctx.R, intensity: ctx.intensity,
         damage: {
-          // A GROUND STRIKE: the same kinetic pricing the old shower had —
+          // A GROUND STRIKE: the kinetic pricing on the mode's own roster —
           // the bus draws the fireball (quiet: the bang is scheduled late by
-          // meteor.js), the mode prices its own roster and ledger.
+          // meteor.js). Buildings are NOT swept here: the front reaches them
+          // through meteor.js's damageBuilding() at their own overpressure.
           impact(x, z, spec) {
             const c = mCtx; if (!c) return;
+            const big = spec.cls === "impact";
             survBlast("meteor", x, z, {
               r: spec.r || 6, cause: "flattened by a meteor", ctx: c, quiet: true,
-              mass: 4000 + 4000 * c.intensity, speed: 190 + 60 * c.intensity,
-              struct: 0.55 + 0.35 * c.intensity, structR: (spec.r || 6) * 2.4,
-              fling: 7, knockback: 14, color: 0xffcaa0,
+              mass: big ? 300 : 4000 + 4000 * c.intensity, speed: big ? 13000 : 190 + 60 * c.intensity,
+              struct: 0, fling: big ? 12 : 7, knockback: big ? 22 : 14, color: 0xffcaa0,
             });
           },
           // THE PRESSURE FRONT: an annulus sweeping outward at the speed of
-          // sound. Chelyabinsk's model — it knocks you down and cuts you
-          // with the glass, it does not vaporise you.
+          // sound, `k` from its real overpressure. Chelyabinsk's model — it
+          // knocks you down and cuts you with the glass, it does not
+          // vaporise you; a ground impact's near field does far worse.
           front(x, z, r0, r1, k) {
             const c = mCtx; if (!c || !surv().forEachActor) return;
             surv().forEachActor((a) => {
@@ -4941,12 +4943,19 @@
                  open it knocks you flat and flings you. */
               const roofed = sheltered(a);
               if (CBZ.body) CBZ.body.hit(a, { fromX: x, fromZ: z, force: (5 + 13 * k) * (roofed ? 0.3 : 1), fling: !roofed && k > 0.45 ? 2.5 + 4 * k : 0 });
-              if (k > 0.18) surv().hurt(a, (6 + 30 * k) * (roofed ? 0.25 : 1), { fromX: x, fromZ: z, cause: "caught in the meteor airburst" });
+              if (k > 0.12) surv().hurt(a, (6 + 10 * k + 40 * k * k) * (roofed ? 0.25 : 1), { fromX: x, fromZ: z, cause: "caught in the meteor airburst" });
             });
-            if (k > 0.25) structureSweepRing(c, x, z, r0, r1, 0.06 * k);
+          },
+          // the island's structural ledger, reached through meteor.js's one
+          // building adapter (CBZ.collapse.damage wins there when it exists)
+          building(b, amount, dir) {
+            structureHit(b, amount, mCtx, { kind: "meteor", dirx: dir ? dir.x : 0, dirz: dir ? dir.z : 0 });
           },
         },
       });
+      // THE SHOWER: the debris stream itself, streaks and a few low pops all
+      // event long; the ground strikes below are the def's (seeded, marked)
+      CBZ.meteor.shower({ rate: 2 + 2.5 * (ctx.intensity || 0), pop: 0.1, ground: 0 });
     }
     // a low bolide is BRIGHTER THAN THE SUN: feed meteor.js's light into the
     // scene so the flash visibly lights the island before it makes a sound
@@ -4957,6 +4966,19 @@
         ctx.env.hemiInt = Math.min(1.6, ctx.env.hemiInt + b * 0.9);
       }
     }
+    /* THE HEADLINE BODY escalates with the arc: early rounds get the
+       Chelyabinsk airburst (glass across the island, people knocked flat),
+       later ones a low Tunguska burst (the forest flattened radially) or an
+       iron that reaches the ground (the crater). CONFIG.METEOR_HEADLINE pins
+       it (?cfg_METEOR_HEADLINE=impact). */
+    function headlineClass(ctx) {
+      const pin = CBZ.CONFIG.METEOR_HEADLINE;
+      if (pin && CBZ.meteor.law.CLASSES[pin]) return pin;
+      const u = rnd(), I = ctx.intensity || 0;
+      if (I < 0.35) return u < 0.8 ? "chelyabinsk" : "tunguska";
+      if (I < 0.7) return u < 0.35 ? "chelyabinsk" : u < 0.7 ? "tunguska" : "impact";
+      return u < 0.3 ? "tunguska" : "impact";
+    }
     function activeV2(dt, ctx) {
       mCtx = ctx;
       // a thin haze, not a 240 m soup: the flashes need a sky to light
@@ -4964,26 +4986,39 @@
       CBZ.meteor.tick(dt);
       lightV2(ctx);
       ctx.st.clock = (ctx.st.clock || 0) + dt;
-      /* THE CHELYABINSK MOMENT, once per event on a fixed beat (so every
-         seed and both storyboard sides stage the same second): one huge
-         bolide crossing low, terminating in a high airburst whose flash
-         whites the island — and then NOTHING, for the seconds the bang
-         takes to crawl down, before the front knocks the crowd flat. */
+      /* THE HEADLINE, once per event on a fixed beat (so every seed and both
+         storyboard sides stage the same second): one big body crossing low.
+         The flash whites the island, and then NOTHING for the seconds the
+         front takes to crawl out to you. */
       if (!ctx.st.big && ctx.st.clock >= 5) {
         ctx.st.big = true;
-        const a = rnd() * 6.28, d0 = ctx.R * (0.2 + 0.35 * rnd());
-        CBZ.meteor.strike({
-          x: ctx.cx + Math.cos(a) * d0, z: ctx.cz + Math.sin(a) * d0,
-          air: true, alt: 95 + 40 * rnd(), size: 2.6, eta: 3.2, big: true,
-        });
+        const cls = headlineClass(ctx);
+        let p = null;
+        if (cls === "impact") {
+          // an iron needs ground a crater can be dug in (flat, dry, clear)
+          for (let k2 = 0; k2 < 10 && !p; k2++) {
+            const q = ctx.arena.randomPoint(ctx.R * 0.1, ctx.R * 0.6);
+            if (!CBZ.groundShaftCanOpen || CBZ.groundShaftCanOpen(q.x, q.z, 18).ok) p = q;
+          }
+        }
+        if (!p) { const a = rnd() * 6.28, d0 = ctx.R * (0.15 + 0.35 * rnd()); p = { x: ctx.cx + Math.cos(a) * d0, z: ctx.cz + Math.sin(a) * d0 }; }
+        const eta = 3.2;
+        CBZ.meteor.strike({ x: p.x, z: p.z, cls, eta });
+        ctx.st.headline = { cls, x: p.x, z: p.z };
+        // an impact's shadow is a place you can run from: marked at 2.5 crater radii
+        if (cls === "impact") {
+          const C = CBZ.meteor.law.CLASSES.impact, cr = CBZ.meteor.law.craterOf(C.L, C.dens, C.v, 0.8);
+          const r = Math.min(18, cr.R) * 2.5;
+          ctx.st.pending.push({ x: p.x, z: p.z, r, t: eta, t0: eta, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
+        }
       }
       ctx.st.cd -= dt;
       if (ctx.st.cd <= 0) {
         ctx.st.cd = (1.25 - 0.5 * ctx.prog) * (0.6 + rnd());
         const r = 5 + scale(2, ctx);
         // MOST OF A METEOR EVENT NEVER TOUCHES THE GROUND. The first strike
-        // is guaranteed a ground hit (the event must leave a hole); after
-        // that the majority burst in the air, which is the real energy split.
+        // is a ground hit (the event must be felt); after that the majority
+        // pop in the air, which is the real energy split.
         const ground = !ctx.st.first || rnd() < 0.4;
         ctx.st.first = true;
         let p = ctx.arena.randomPoint(0, ctx.R * 0.9);
@@ -4993,14 +5028,13 @@
         const hunt = ground && !PL.dead && !underRoof(PL.pos.x, PL.pos.z, PL.pos.y) && rnd() < 0.25;
         if (hunt) { const a4 = rnd() * 6.28, d4 = 8 + rnd() * 8; p = { x: PL.pos.x + Math.cos(a4) * d4, z: PL.pos.z + Math.sin(a4) * d4 }; }
         else if (ground && CBZ.groundShaftCanOpen) {
-          // prefer ground a crater can actually be dug in (flat, dry, clear)
           for (let k2 = 0; k2 < 5; k2++) {
             const q = ctx.arena.randomPoint(0, ctx.R * 0.8);
             if (CBZ.groundShaftCanOpen(q.x, q.z, 6).ok) { p = q; break; }
           }
         }
         const eta = 1.5 + rnd() * 0.6;
-        CBZ.meteor.strike({ x: p.x, z: p.z, air: !ground, alt: 30 + 45 * rnd(), size: 0.9 + 0.9 * ctx.intensity, eta, r });
+        CBZ.meteor.strike({ x: p.x, z: p.z, cls: ground ? "small" : "pop", alt: 30 + 45 * rnd(), eta, r });
         // the marker is the bolide's shadow — ground strikes only; you
         // cannot stand clear of an airburst and the map should not pretend
         if (ground) ctx.st.pending.push({ x: p.x, z: p.z, r, t: eta, t0: eta, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
