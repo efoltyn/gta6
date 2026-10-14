@@ -56,6 +56,35 @@ Still open: streaming is still behind `?stream=1`; the city core's shops, office
 hideouts are built at boot; a building's LOD box stands in from 230 m on the phone (a swap
 inside the fog); the drive's heap sawtooth (build garbage) sets the peak.
 
+## Phone boot peak (2026-10-14, the "reloads at 100%" bug)
+
+speed.mjs's PHONE TOTAL now adds the live 2D canvases (an iPhone kills the tab on the
+sum of heap, GPU and canvases). One paired run, `--device phone --load --against 73c5e027`:
+
+| MB | main | after |
+|---|---|---|
+| true phone peak (heap + GPU + canvases) | 1440 | 1366 |
+| live after a GC | 1176 | 1092 |
+| 2D canvases | 150 | 83 (68 live) |
+| JS heap peak (V8 + ArrayBuffers) | 995 | 980 |
+| GPU (drawing buffer 47 of it) | 298 | 305 |
+
+What went: canvases painted at the boot for things nobody had looked at yet (the
+speedway's surfaces, signs, skyline and car liveries, the agency's 10 MB newspaper,
+the speedway ground, the fuel atlas, arena boards, package signs, plot signs) are
+painted when first drawn; tattoo scratch canvases are freed when composited; the
+road field's 16 MB float raster; metro_ground's 22 MB per-32-m floor index (two
+levels now). MSAA was measured at the phone's 780x1688 buffer: off would save 37 MB
+but changes 0.5-1.9 % of pixels by more than 8 levels (edges), so it stays.
+
+Still over the ~800 MB target. What is left, largest first: ~160 MB of dead
+ArrayBuffers the collector has not taken at the peak (batch merge positions freed
+after upload, ped atlas readbacks, stream compaction); V8 300 MB live (structural
+`lbox` meshes kept for LOS 22 MB, characters 22 MB, placement 16 MB); scene geometry
+CPU arrays ~215 MB, mostly never uploaded (hidden originals for raycasts, packed
+interiors, unmerged meshes out of view), only ~16 MB of it normal/colour/uv
+duplicates of uploaded buffers.
+
 ## What is built (branch city-slice)
 
 - **Tool slices** (`src/core/slice.js`): `?mode=city&slice=<name>|x,z,r`. Everything visible
