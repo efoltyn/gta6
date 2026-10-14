@@ -13,8 +13,11 @@
      lava      each flow: where it started, where its nose is, metres run,
                metres descended, whether it ran in a valley (the nose's ground
                vs the mean ground at the same radius), its live front speed
-     fire      houses set alight (by lava contact / radiant heat / bombs),
-               houses down, trees lit, cars engulfed and burning
+     fire      the island's one fire (systems/wildfire.js as a service):
+               ground fires the lava / bombs / density current lit, trees
+               they lit directly and trees burnt in all (the bed carries it),
+               m2 of bed ignited and burnt out, houses set alight and down,
+               cars engulfed and burning, the fire's own ms per frame
      ash       peak deposit, the heaviest roof and car load, roofs failed
      bombs     lithics + juvenile bombs thrown, landed, max range and muzzle
                speed, craters, what they hit
@@ -29,7 +32,7 @@
         bombs landed, and a sim step stays under 4 ms mean. */
 CBZ.lab.kit("eruption", {
   about: "the volcano's eruption sequence on a slope with houses, trees and cars: lava path, fires, ash, bombs, frame cost",
-  files: ["src/world/volcanofx.js", "src/world/eruption.js", "src/systems/lightningfx.js"],
+  files: ["src/world/volcanofx.js", "src/world/eruption.js", "src/systems/lightningfx.js", "src/systems/wildfire.js"],
   params: { mag: 0.8, q: 4, wind: 8 },
   duration: 48,
   setup: function (W, P) {
@@ -140,27 +143,32 @@ CBZ.lab.kit("eruption", {
     W.town = { buildings: buildings, trees: trees, cars: cars };
     // ---- the lab's hooks: the visible consequences, and a log of them ----
     const log = W.marks = { fires: [], falls: [], bombs: [], strikes: 0, trees: 0 };
-    const burnt = new THREE.Color(0x140d08);
+    const wind = function () { return { x: ux, z: uz, speed: 6 }; };
+    /* THE FIRE IS THE GAME'S: the town handed to systems/wildfire.js as a
+       service, the way disasters.js hands it the island (the arena record
+       shape; the bare upper cone carries no bed), and the eruption's hooks
+       light it exactly as the island's do */
+    W.fireArena = {
+      lab: true, root: host, center: { x: VX, z: VZ }, radius: REGION, oceanY: -100,
+      groundHeightAt: groundAt, volcano: { x: VX, z: VZ, r: VR * 0.7 },
+      flammable: trees, fragile: buildings, cars: cars,
+    };
+    const WF = CBZ.wildfire;
+    WF.attach(W.fireArena, {
+      hitBuilding: function (b, amount) { return W.erHooks.damageBuilding(b, amount, "fire"); },
+      blast: function (kind) { log.blasts = (log.blasts || 0) + 1; },
+      wind: wind, mag: 0.3 + 0.3 * Math.min(1, +P.mag || 0.8),
+    });
     W.erHooks = {
-      wind: function () { return { x: ux, z: uz, speed: 6 }; },
+      wind: wind,
       night: function () { return 0; },
       shake: function () {},
       sound: function () {},
-      igniteTree: function (t) {
-        if (t.burnt || t.burning) return;
-        t.burning = 5 + Math.random() * 3; log.trees++;
-        t.foliage.material.color.setHex(0x0c0705);
-        t.foliage.material.emissive && t.foliage.material.emissive.setHex(0x5a1c04);
-      },
-      treeBurnOut: function (t) {
-        t.foliage.material.color.copy(burnt);
-        t.foliage.material.emissive && t.foliage.material.emissive.setHex(0);
-        t.foliage.scale.set(0.34, 0.28, 0.34); t.trunk.material.color.copy(burnt);
-      },
-      burnBuilding: function (b) {
-        if (b.burning || b.fallen) return false;
-        b.burning = W.t(); log.fires.push({ b: b.name, t: +W.t().toFixed(2) });
-        b.group.children[0].material = new THREE.MeshLambertMaterial({ color: 0x3a2a20, emissive: 0x401204 });
+      igniteTree: function (t, why) { const ok = WF.igniteTree(t, why); if (ok) log.trees++; return ok; },
+      igniteGround: function (x, z, r, why) { return WF.igniteAt(x, z, why, r); },
+      burnBuilding: function (b, how) {
+        if (!WF.igniteBuilding(b, how)) return false;
+        log.fires.push({ b: b.name, by: how, t: +W.t().toFixed(2) });
         return true;
       },
       damageBuilding: function (b, amount, kind) {
@@ -172,7 +180,7 @@ CBZ.lab.kit("eruption", {
         }
         return b.fallen ? 3 : (b._dmg >= 0.5 ? 2 : (b._dmg >= 0.2 ? 1 : 0));
       },
-      carFire: function (c) { c.burning = W.t(); },
+      carFire: function (c, why) { WF.igniteCar(c, why); },
       bombLand: function (info) {
         log.bombs.push({ x: +info.x.toFixed(1), z: +info.z.toFixed(1), hot: info.hot, v: +info.speed.toFixed(1), m: Math.round(info.mass), hit: info.hit ? info.hit.kind : "ground" });
       },
@@ -269,8 +277,8 @@ CBZ.lab.kit("eruption", {
       laneValley = vn ? r1(vs / vn) : 0;
     }
     const T = W.town;
-    const houses = T.buildings;
-    const lit = houses.filter(function (b) { return b.burning; }).map(function (b) { return b.name; });
+    const lit = W.marks.fires.map(function (f) { return f.b; });
+    const FA = CBZ.wildfire.audit();
     const down = W.marks.falls;
     const bs = E.bombStats;
     const cost = {};
@@ -321,8 +329,12 @@ CBZ.lab.kit("eruption", {
       mag: st.mag, phases: st.phase, t: +W.t().toFixed(2),
       lava: { flows: flows, liveFlows: audit.lavaFlows, scars: audit.lavaScars, branches: audit.lavaBranches },
       fire: { housesLit: lit, housesInLava: st.buildingsInLava, housesDown: down, treesLit: st.treesLit,
-        treesBurnt: T.trees.filter(function (t) { return t.burnt; }).length,
-        carsEngulfed: st.carsEngulfed, carsBurning: st.carsBurning },
+        treesLitBy: st.treesBy, groundFires: st.groundFires, pdcHousesLit: st.pdcBuildingsLit,
+        treesBurning: FA.treesBurning, treesBurnt: FA.treesBurnt, treesTotal: FA.treesTotal, treesTorched: FA.treesTorched,
+        bedIgnitedM2: FA.ignitedM2, bedBurntM2: FA.scarM2, cellsIgnited: FA.cellsIgnited, spotFires: FA.spotFires,
+        firesStillBurning: FA.serving, housesFloorsBurnt: FA.floorsBurnt, housesCollapsedByFire: FA.buildingsCollapsed,
+        carsEngulfed: st.carsEngulfed, carsBurning: st.carsBurning, carsBurnt: FA.carsBurnt, carsExploded: FA.carsExploded,
+        fireSimMsAvg: FA.simMsAvg, fireSimMsMax: FA.simMsMax, fireFxMsAvg: FA.fxMsAvg, fireFxMsMax: FA.fxMsMax },
       ash: { peakGround: ashPeak, roofMax: st.roofAshPeak, carMax: st.carAshPeak, roofsFailed: st.roofsFailed, left: audit.ashPeakDepth || 0 },
       bombs: { lithics: st.lithics, juvenile: st.bombs, thrown: bs ? bs.thrown : 0, landed: bs ? bs.landed : 0,
         maxRange: bs ? r1(bs.maxRange) : 0, maxMuzzle: bs ? r1(bs.maxSpeed) : 0, craters: bs ? bs.craters : 0,
@@ -340,7 +352,9 @@ CBZ.lab.kit("eruption", {
     return {
       ok: ok,
       summary: "M" + st.mag + ": " + flows.length + " lava stems (noses at r " + flows.map(function (f) { return f.noseR; }).join("/") + " m, in barrancos " + flows.map(function (f) { return f.valleyDepth; }).join("/") + " m deep), " +
-        lit.length + " houses alight, " + down.length + " down, " + st.treesLit + " trees lit, " + st.carsEngulfed + " cars engulfed; ash peak " + ashPeak +
+        lit.length + " houses alight, " + down.length + " down, " + st.treesLit + " trees lit (lava " + st.treesBy.lava + ", bomb " + st.treesBy.bomb + ", pdc " + st.treesBy.pdc + "), " +
+        FA.treesBurnt + "/" + FA.treesTotal + " trees burnt + " + FA.treesBurning + " burning; bed fires lit lava " + st.groundFires.lava + " / bomb " + st.groundFires.bomb + " / pdc " + st.groundFires.pdc +
+        ", " + FA.ignitedM2 + " m2 ignited, " + FA.scarM2 + " m2 burnt out (fire " + FA.simMsAvg + "+" + FA.fxMsAvg + " ms/frame); " + st.carsEngulfed + " cars engulfed; ash peak " + ashPeak +
         " m (roof " + data.ash.roofMax + ", car " + data.ash.carMax + ", " + st.roofsFailed + " roofs failed); bombs " + (bs ? bs.landed : 0) + " landed (" + st.lithics + " lithic, " + st.bombs +
         " juvenile, " + (bs ? bs.craters : 0) + " craters, max " + data.bombs.maxRange + " m); " + st.pdcRuns + " PDC, umbrella " + st.umbrellaR + " m, " + st.lightningIC + "+" + st.lightningCG +
         " bolts; plinian step " + (cost.plinian ? cost.plinian.mean + " ms mean / " + cost.plinian.p95 + " p95" : "?") + ", peak " + W.peak.draws + " draws",

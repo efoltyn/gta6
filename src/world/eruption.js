@@ -49,11 +49,18 @@
    UMBRELLA's analytic footprint is the one authority on where the sky is
    dark and the air is full of falling grit.
 
+   FIRE IS NOT THIS FILE'S. Lava, hot bombs and the density current only
+   say WHERE heat arrives; the host lights it on the island's one fire
+   (systems/wildfire.js as a service: the fuel bed spreads it, the crowns
+   torch and char, the houses burn floor by floor into the structural
+   ledger, the cars cook off). Nothing here ticks a burning tree.
+
    Hooks (all optional; the defaults are flag-only so the lab can count):
      shake(k) sound(name,x,z) night()->0..1 wind()->{x,z,speed}
-     igniteTree(t) treeFlicker(t) treeBurnOut(t)
-     burnBuilding(b)->bool  damageBuilding(b, amount, kind)->stage(0..3)
-     carFire(c)  bombLand(info)  groundStrike(x,z)
+     igniteTree(t, why)->bool  igniteGround(x, z, r, why)->bool
+     burnBuilding(b, how)->bool  damageBuilding(b, amount, kind)->stage(0..3)
+     carFire(c, why)  bombLand(info)  groundStrike(x,z)
+   why/how: "lava" | "bomb" | "pdc"
 ============================================================ */
 (function () {
   "use strict";
@@ -131,9 +138,8 @@
       sound: function (name, x, z) { if (x != null && CBZ.sfxAt) CBZ.sfxAt(name, x, z); else if (CBZ.sfx) CBZ.sfx(name); },
       night: function () { return 0; },
       wind: function () { return CBZ.weatherWind ? CBZ.weatherWind() : { x: 1, z: 0, speed: 4 }; },
-      igniteTree: function (t) { if (!t.burnt && !t.burning) t.burning = 5 + rnd() * 3; },
-      treeFlicker: function () {},
-      treeBurnOut: function (t) { t.burning = 0; t.burnt = true; },
+      igniteTree: function (t) { if (t.burnt || t.burning) return false; t.burning = 1; return true; },
+      igniteGround: function () { return false; },
       burnBuilding: function (b) { if (b.burning) return false; b.burning = true; return true; },
       damageBuilding: function (b, amount) {
         if (b.fallen) return 3;
@@ -151,6 +157,8 @@
       lithics: 0, bombs: 0, lightningIC: 0, lightningCG: 0,
       pdcRuns: 0, laharRuns: 0, columnCollapses: 0,
       treesLit: 0, buildingsLit: 0, buildingsInLava: 0, buildingsLavaFallen: 0,
+      // fires set on the fuel bed, by what set them
+      groundFires: { lava: 0, bomb: 0, pdc: 0 }, treesBy: { lava: 0, bomb: 0, pdc: 0 }, pdcBuildingsLit: 0,
       roofsFailed: 0, carsEngulfed: 0, carsBurning: 0,
       bombHits: { roof: 0, car: 0, ground: 0, trees: 0, fires: 0 },
       surgeR: 0, umbrellaR: 0,
@@ -170,7 +178,6 @@
     if (!E.lane) E.lane = lane(S, E.collapseBearing, groundAt, reg.R);
 
     let steam = null;
-    const lit = [];              // trees this eruption set burning
     const sinking = [];          // cars the lava is swallowing
     let bombCd = 0, lithicLeft = 0, lithicCd = 0, icCd = 0, cgCd = 0, pyroCd = 0, laharCd = 0, roofT = 0;
     let fieldT = 0;
@@ -283,12 +290,15 @@
         // a tonne of rock through a roof: the ledger prices it, and a HOT
         // bomb lodged in the rafters sets the house alight
         H.damageBuilding(hit.ref, Math.min(0.5, 0.08 + info.mass * info.speed / 4e5), "bomb");
-        if (info.hot && rnd() < 0.45 && H.burnBuilding(hit.ref)) { stats.buildingsLit++; stats.bombHits.fires++; }
+        if (info.hot && rnd() < 0.45 && H.burnBuilding(hit.ref, "bomb")) { stats.buildingsLit++; stats.bombHits.fires++; }
       } else if (hit && hit.kind === "car") {
         stats.bombHits.car++;
-        if (info.hot && !hit.ref._erFire && rnd() < 0.5) { hit.ref._erFire = true; H.carFire(hit.ref); stats.carsBurning++; }
+        if (info.hot && !hit.ref._erFire && rnd() < 0.5) { hit.ref._erFire = true; H.carFire(hit.ref, "bomb"); stats.carsBurning++; }
       } else {
         stats.bombHits.ground++;
+        // a juvenile bomb lands at ~1000 C: the grass and litter round the
+        // crater catch, and the bed carries it from there
+        if (info.hot && H.igniteGround(info.x, info.z, 1.2 + info.size * 2.2, "bomb")) stats.groundFires.bomb++;
       }
       // hot rock in dry brush: the trees around the impact catch
       if (info.hot) {
@@ -296,16 +306,17 @@
           const t = trees[i];
           if (t.burnt || t.burning) continue;
           const d = Math.hypot(t.x - info.x, t.z - info.z);
-          if (d < 2.5 + info.size * 2 && rnd() < 0.7) { lightTree(t); stats.bombHits.trees++; }
+          if (d < 2.5 + info.size * 2 && rnd() < 0.7 && lightTree(t, "bomb")) stats.bombHits.trees++;
         }
       }
       try { H.bombLand(info); } catch (e) {}
     }
 
-    function lightTree(t) {
-      if (t.burnt || t.burning) return;
-      H.igniteTree(t);
-      if (t.burning) { lit.push(t); stats.treesLit++; }
+    function lightTree(t, why) {
+      if (t.burnt || t.burning) return false;
+      if (!H.igniteTree(t, why)) return false;
+      stats.treesLit++; stats.treesBy[why] = (stats.treesBy[why] || 0) + 1;
+      return true;
     }
 
     function throwBomb(hot, big) {
@@ -492,6 +503,7 @@
             speed: 28 + 26 * M, width: 14 + 24 * M, height: 11 + 17 * M,
             tail: 58, salt: 8100 + stats.pdcRuns * 311,
           });
+          E.pyro._erHalfW = (14 + 24 * M) * 0.5;
           stats.pdcRuns++;
           pyroCd = 14 - 6 * M - 2 * prog;
           H.shake(1.15);
@@ -536,7 +548,7 @@
       // ---- what the lava and the fires do to the world (4 Hz) ----
       fieldT -= dt;
       if (fieldT <= 0) { const step = 0.25 - fieldT; fieldT = 0.25; worldTick(step); }
-      tickFires(dt);
+      tickCars(dt);
       return E;
     };
 
@@ -585,8 +597,41 @@
       }
     }
 
+    /* THE DENSITY CURRENT IS HOT ASH AT A FEW HUNDRED DEGREES: what its
+       front rolls over chars and catches. Trees inside its core torch, the
+       grass under the front lights, and a timber house in its path goes up
+       from the ground floor (most of them; a dilute edge can pass one by). */
+    const _pf = new THREE.Vector3();
+    function pdcTick() {
+      const P = E.pyro, Ln = E.lane;
+      if (!P || !Ln || !VF.pathAt) return;
+      const s = Math.min(P.frontS, Ln.total);
+      if (!(s > S.rim)) return;
+      VF.pathAt(Ln, s, _pf);
+      const hw = P._erHalfW || 10;
+      if (!P._erIgnS || s - P._erIgnS > hw * 0.6) {
+        P._erIgnS = s;
+        if (H.igniteGround(_pf.x, _pf.z, hw * 0.55, "pdc")) stats.groundFires.pdc++;
+      }
+      for (let i = 0; i < trees.length; i++) {
+        const t = trees[i];
+        if (t.burnt || t.burning || t._erPdc) continue;
+        if (Math.hypot(t.x - _pf.x, t.z - _pf.z) > hw * 0.8) continue;
+        t._erPdc = true;
+        if (rnd() < 0.8) lightTree(t, "pdc");
+      }
+      for (let i = 0; i < buildings.length; i++) {
+        const b = buildings[i];
+        if (b.fallen || b._erPdc) continue;
+        if (Math.hypot(b.x - _pf.x, b.z - _pf.z) > hw * 0.7 + Math.max(b.w, b.d) * 0.5) continue;
+        b._erPdc = true;
+        if (rnd() < 0.6 && H.burnBuilding(b, "pdc")) { stats.buildingsLit++; stats.pdcBuildingsLit++; }
+      }
+    }
+
     // the lava against everything it reaches: buildings, trees, cars
     function worldTick(step) {
+      pdcTick();
       const L = E.lava;
       if (!L) return;
       for (let i = 0; i < buildings.length; i++) {
@@ -603,20 +648,31 @@
         if (touch) {
           if (!b._erLava) { b._erLava = true; stats.buildingsInLava++; }
           // the flow pushes in under the walls and burns the floors out
-          if (!b._erLit && H.burnBuilding(b)) { stats.buildingsLit++; }
+          if (!b._erLit && H.burnBuilding(b, "lava")) { stats.buildingsLit++; }
           b._erLit = true;
           H.damageBuilding(b, 0.06 * step, "lava");
           if (b.fallen) stats.buildingsLavaFallen++;
         } else if (near && !b._erLit) {
           // radiant heat off the margin: timber a metre from 1100 C rock goes up
           b._erHeat = (b._erHeat || 0) + step;
-          if (b._erHeat > 3 && H.burnBuilding(b)) { b._erLit = true; stats.buildingsLit++; }
+          if (b._erHeat > 3 && H.burnBuilding(b, "lava")) { b._erLit = true; stats.buildingsLit++; }
         }
       }
       for (let i = 0; i < trees.length; i++) {
         const t = trees[i];
         if (t.burnt || t.burning) continue;
-        for (let k = 0; k < L.length; k++) if (L[k].hitTest(t.x, t.z, 2.2)) { lightTree(t); break; }
+        for (let k = 0; k < L.length; k++) if (L[k].hitTest(t.x, t.z, 2.2)) { lightTree(t, "lava"); break; }
+      }
+      /* THE MARGIN LIGHTS THE BED: wherever a live front has got to, the
+         grass round its nose catches (once per 3 m of advance), and the fuel
+         bed carries the fire out across the hillside from there. */
+      for (let k = 0; k < L.length; k++) {
+        const f = L[k];
+        if (f.quenched) continue;
+        const tp = f.tip;
+        if (f._erIgn && Math.hypot(tp.x - f._erIgn.x, tp.z - f._erIgn.z) < 3) continue;
+        f._erIgn = { x: tp.x, z: tp.z };
+        if (H.igniteGround(tp.x, tp.z, 4.5, "lava")) stats.groundFires.lava++;
       }
       for (let i = 0; i < cars.length; i++) {
         const c = cars[i];
@@ -633,14 +689,7 @@
       }
     }
 
-    function tickFires(dt) {
-      for (let i = lit.length - 1; i >= 0; i--) {
-        const t = lit[i];
-        if (!t.burning || t.burnt) { lit.splice(i, 1); continue; }
-        t.burning -= dt;
-        try { H.treeFlicker(t); } catch (e) {}
-        if (t.burning <= 0) { try { H.treeBurnOut(t); } catch (e) {} t.burning = 0; t.burnt = true; lit.splice(i, 1); }
-      }
+    function tickCars(dt) {
       /* A CAR IN LAVA: the tyres go first, the body settles into the flow
          by most of a wheel's height and lists, and the fuel goes up. */
       for (let i = sinking.length - 1; i >= 0; i--) {
@@ -651,7 +700,7 @@
           c.group.position.y = s.y0 - 0.62 * e;
           c.group.rotation.z = s.tilt * e;
         }
-        if (!s.fire && s.t > 1.4) { s.fire = true; if (!c._erFire) { c._erFire = true; H.carFire(c); stats.carsBurning++; } }
+        if (!s.fire && s.t > 1.4) { s.fire = true; if (!c._erFire) { c._erFire = true; H.carFire(c, "lava"); stats.carsBurning++; } }
         if (E.carRoofs.length) for (let j = 0; j < E.carRoofs.length; j++) if (E.carRoofs[j].c === c && E.ash) E.ash.clearCell(E.carRoofs[j].id);
         if (k >= 1) sinking.splice(i, 1);
       }
@@ -755,8 +804,8 @@
           if (col && !col.done) col.update(dt, E.windX, E.windZ, { night: night });
           if (umb && !umb.done) umb.update(dt, E.windX, E.windZ, { night: night, windSpeed: w.speed > 0 ? w.speed : 6 });
           if (ph && !ph.done) ph.update(dt, { night: night });
-          tickFires(dt);
-          if ((!col || col.done) && (!umb || umb.done) && (!ph || ph.done) && !lit.length && !sinking.length) sky.done = true;
+          tickCars(dt);
+          if ((!col || col.done) && (!umb || umb.done) && (!ph || ph.done) && !sinking.length) sky.done = true;
         },
         dispose: function () { if (col) col.dispose(); if (umb) umb.dispose(); if (ph) ph.dispose(); },
       };
