@@ -7,6 +7,13 @@
 ============================================================ */
 (function () {
   "use strict";
+  const CBZ0 = window.CBZ;
+  if (!CBZ0) return;
+  /* BUILT WITH THE PRISON (core/prisonlazy.js), as if at this script's parse
+     point: the inmate crowd's 48 full rigs (2.7k objects, in CBZ.npcs, under
+     the prison root) were built on every page, the Gang City phone boot
+     included, for a prison it never shows. Body left at its old indent. */
+  (CBZ0.definePrison || function (n, f) { f(); })("entities/crowd.js", function () {
   const CBZ = window.CBZ, S = CBZ.ambient;
   if (!CBZ || !S || !S.total || !THREE.InstancedMesh || !THREE.Points) return;
 
@@ -907,4 +914,5 @@
     }
   });
   CBZ.onUpdate(23.5, step);
+  });
 })();
