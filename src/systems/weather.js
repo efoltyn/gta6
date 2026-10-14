@@ -126,7 +126,7 @@
      so a disaster ending does not snap the sky. Nothing accumulates, so a
      driver that dies mid-event simply stops being re-asserted. */
   const RELEASE = 3.5;          // seconds to bleed a lapsed drive back to ambient
-  const drv = { rain: 0, snow: 0, wind: 0, wx: 1, wz: 0, fog: 0, fogColor: -1, lightning: 0, pool: 0, cover: -1 };
+  const drv = { rain: 0, snow: 0, wind: 0, wx: 1, wz: 0, fog: 0, fogColor: -1, lightning: 0, pool: 0, cover: -1, clear: 0 };
   let drvHold = 0;              // seconds of assertion left
   /* ASH KEEPS ITS OWN CLOCK. The deposit outlives the sky by design — the
      eruption's fog has to bleed back in three and a half seconds while the
@@ -160,6 +160,13 @@
     if (Number.isFinite(spec.fog)) drv.fog = Math.max(0, Math.min(1, +spec.fog));
     if (spec.fogColor != null) drv.fogColor = +spec.fogColor;
     if (Number.isFinite(spec.lightning)) drv.lightning = Math.max(0, Math.min(1, +spec.lightning));
+    /* `clear`: 0..1, the cloud deck OPEN overhead here — a hurricane's eye.
+       The overcast is normally rain-implied and clears over half a minute
+       (WEATHER_SLOW_CLEAR), which would keep a grey lid over an eye that
+       passes in seconds. A driver asserting `clear` caps the deck at
+       1 - clear and opens it on the FAST ease; it closes again on the fast
+       ease the moment the driver stops asserting it (the back wall). */
+    drv.clear = Number.isFinite(spec.clear) ? Math.max(0, Math.min(1, +spec.clear)) : 0;
     /* `ash`: ashfall LYING ON THE GROUND, as a wedge rather than a scalar —
        the fall has a source, a bearing and an outside, and a caller that
        handed over one number could only ever paint the whole map. amount is
@@ -218,7 +225,21 @@
     seedDrop(i, cam.position.x, cam.position.z, true);
   }
 
-  function seedDrop(i, cx, cz, anywhere) {
+  function seedDrop(i, cx, cz, anywhere, upwind) {
+    if (upwind) {
+      /* DRIVEN RAIN is born UPWIND, at any height in the column, and blown
+         THROUGH the ring: at hurricane speeds a drop crosses the 16 m ring
+         sideways long before it falls, so reseeding at the column top (the
+         still-air rule) would starve the street and pile the rain overhead. */
+      const sp = (rng() * 2 - 1) * RADIUS;
+      const back = RADIUS * (0.7 + rng() * 0.3);
+      const o = i * 3;
+      positions[o]     = cx + fwdX * FWD_BIAS - windX * back - windZ * sp;
+      positions[o + 1] = BOTTOM + 1 + rng() * (TOP - BOTTOM);
+      positions[o + 2] = cz + fwdZ * FWD_BIAS - windZ * back + windX * sp;
+      velY[i] = FALL_MIN + rng() * (FALL_MAX - FALL_MIN);
+      return;
+    }
     const a = rng() * Math.PI * 2;
     // ANNULUS, not a disc. The old full disc seeded drops centimetres from
     // the eye — with sizeAttenuation a 0.16 point at 0.2 m is a huge bright
@@ -273,6 +294,28 @@
   rain.renderOrder = 5;
   rain.visible = false;
   scene.add(rain);
+
+  /* ---- RAIN IS A STREAK, NOT A DOT ---------------------------------------
+     A falling drop photographs as a short line along its velocity (the eye
+     and the shutter both integrate it), and sideways driven rain reads as
+     sideways ONLY if the line lies down with the wind. So rain draws as
+     LineSegments: each live drop is head + tail = head - velocity x STREAK_T,
+     the same positions the dots use, the same draw range, one draw call.
+     Snow keeps the soft dots (a flake is a blob, and it drifts). */
+  const STREAK_T = 0.02;     // seconds of travel one streak shows
+  const streakPos = new Float32Array(MAX_BUF * 6);
+  const streakGeo = new THREE.BufferGeometry();
+  const streakAttr = new THREE.BufferAttribute(streakPos, 3);
+  streakAttr.setUsage && streakAttr.setUsage(THREE.DynamicDrawUsage);
+  streakGeo.setAttribute("position", streakAttr);
+  streakGeo.setDrawRange(0, 0);
+  const streakMat = new THREE.LineBasicMaterial({ color: 0xc8d6e4, transparent: true, opacity: 0, depthWrite: false, fog: true });
+  const streaks = new THREE.LineSegments(streakGeo, streakMat);
+  streaks.frustumCulled = false;
+  streaks.renderOrder = 5;
+  streaks.visible = false;
+  streaks.name = "weather-rain-streaks";
+  scene.add(streaks);
 
   // ---- indoor suppression ---------------------------------------------
   // The cloud is camera-centred and "never runs dry", so without a guard it
@@ -1221,6 +1264,7 @@
       drv.rain -= drv.rain * k; drv.snow -= drv.snow * k;
       drv.wind -= drv.wind * k; drv.fog -= drv.fog * k;
       drv.lightning -= drv.lightning * k;
+      drv.clear = 0;
       // the flood recedes with the storm that made it; the snow it laid down
       // goes back to melting on its own clock rather than snapping away
       drv.pool -= drv.pool * k;
@@ -1268,8 +1312,12 @@
     const live = Math.round(intensity * maxDrops());
     // suppress the cloud entirely while under a roof — re-shows the instant the
     // next throttled test clears `indoors` after stepping back outside.
-    rain.visible = live > 0 && !indoors;
-    mat.opacity = Math.min(0.55, 0.18 + intensity * 0.5);
+    // dots for snow, streaks for rain (crossfaded through the snow lerp)
+    const streakK = 1 - Math.min(1, snowMix * 2);
+    rain.visible = live > 0 && !indoors && streakK < 0.98;
+    streaks.visible = live > 0 && !indoors && streakK > 0.02;
+    mat.opacity = Math.min(0.55, 0.18 + intensity * 0.5) * (1 - streakK);
+    streakMat.opacity = Math.min(0.5, 0.16 + intensity * 0.42) * streakK;
 
     if (live > 0 && !indoors) {
       const cx = cam.position.x, cz = cam.position.z;
@@ -1289,20 +1337,31 @@
         positions[o + 2] += driftZ * dt;
 
         let recycle = positions[o + 1] < BOTTOM;
+        let drifted = false;
         if (!recycle) {
           // if a drop has drifted out of the ring, recycle it too so the
           // cloud stays centred on the player (cheap distance check).
           const dx = positions[o] - cx, dz = positions[o + 2] - cz;
-          if (dx * dx + dz * dz > r2) recycle = true;
+          if (dx * dx + dz * dz > r2) { recycle = true; drifted = true; }
         }
         if (recycle) {
-          seedDrop(i, cx, cz, false); // resets to a fresh column top
+          // still air: a fresh column top; driven rain: the upwind rim
+          seedDrop(i, cx, cz, false, drifted && wind > 6);
+        }
+        if (streakK > 0.02) {
+          const so = i * 6, fy = velY[i] * fallK * STREAK_T;
+          streakPos[so] = positions[o]; streakPos[so + 1] = positions[o + 1]; streakPos[so + 2] = positions[o + 2];
+          streakPos[so + 3] = positions[o] - driftX * STREAK_T;
+          streakPos[so + 4] = positions[o + 1] + fy;
+          streakPos[so + 5] = positions[o + 2] - driftZ * STREAK_T;
         }
       }
       geo.setDrawRange(0, live);
       attr.needsUpdate = true;
+      if (streakK > 0.02) { streakGeo.setDrawRange(0, live * 2); streakAttr.needsUpdate = true; }
     } else {
       geo.setDrawRange(0, 0);
+      streakGeo.setDrawRange(0, 0);
     }
 
     // ---- the cloud deck overhead (read by core/sky.js) ----
@@ -1311,11 +1370,14 @@
     // asserting `lightning` IS declaring a storm whatever the rain says; and
     // a driver's own `fog` is its mood dial, which a whiteout uses to bring
     // the ceiling down without raining harder.
-    const ocTarget = Math.min(1, Math.max(
+    let ocTarget = Math.min(1, Math.max(
       intensity * 1.25 - 0.05,
       drv.lightning * 0.95,
       drv.fog * 0.9));
-    const ocEase = (ocTarget < overcast && CFG.WEATHER_SLOW_CLEAR !== false) ? OC_EASE_DOWN : OC_EASE;
+    // an EYE overhead: the deck is open here whatever the rain implies
+    if (drv.clear > 0) ocTarget = Math.min(ocTarget, 1 - drv.clear);
+    const ocEase = drv.clear > 0 ? OC_EASE * 1.6
+      : (ocTarget < overcast && CFG.WEATHER_SLOW_CLEAR !== false) ? OC_EASE_DOWN : OC_EASE;
     overcast += (ocTarget - overcast) * Math.min(1, dt * ocEase);
     if (overcast < 0.0004) overcast = 0;
 

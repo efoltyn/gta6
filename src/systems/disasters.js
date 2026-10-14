@@ -1062,7 +1062,69 @@
           cx: ctx.cx, cz: ctx.cz, R: ctx.R, catF: this._catF,
           duration: this.warnSecs + this.activeSecs,
           bearing: a, offset: (rnd() - 0.5) * ctx.R * 0.35,
+          world: this._world(ctx),
         });
+      },
+      /* THE TOWN THE STORM ACTS ON (systems/hurricane.js's WORLD CONTRACT).
+         Read off the island, never typed in: CBZ.island's lists when the
+         island publishes them, the arena record otherwise. The damage that
+         decides who lives (a crushing tree, a sheet through a body) comes
+         back through the same hurt + body pipes as everything else here. */
+      _world(ctx) {
+        const A = ctx.arena;
+        const I = CBZ.island || null;
+        const from = function (k, fallback) {
+          return function () {
+            if (I && I[k]) return typeof I[k] === "function" ? I[k]() : I[k];
+            return fallback ? fallback() : (A[k] || null);
+          };
+        };
+        const release = function (c) {
+          const k = CBZ.colliders.indexOf(c);
+          if (k >= 0) { CBZ.colliders.splice(k, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+        };
+        return {
+          cx: ctx.cx, cz: ctx.cz, R: ctx.R, root: A.root,
+          groundAt: floor,
+          seaRest: A.oceanY != null ? A.oceanY : -0.8,
+          seaAt: seaY,
+          trees: from("trees", function () { return A.flammable; }),
+          buildings: from("buildings", function () { return A.fragile; }),
+          cars: from("cars", function () { return A.cars; }),
+          boats: from("boats", function () { return A.boats || (A.dressing && A.dressing.boats) || null; }),
+          signs: from("signs"),
+          districts: from("districts"),
+          harbour: from("harbour", function () {
+            const pr = A.dressing && A.dressing.pier;
+            return pr ? [{ x: pr.x1, z: pr.z1 }, { x: (pr.x0 + pr.x1) / 2, z: (pr.z0 + pr.z1) / 2 }] : null;
+          }),
+          shatter: CBZ.shatterGlass || null,
+          structure: function (b, amount, dirx, dirz) { structureHit(b, amount, ctx, { kind: "wind", dirx: dirx, dirz: dirz }); },
+          fling: flingCar,
+          release: release,
+          actors: function (fn) { surv().forEachActor(fn); },
+          // a REAL piece (a roof sheet, a plank) moving fast through a body
+          hit: function (a, o) {
+            if (sheltered(a) || (CBZ.body && CBZ.body.busy(a))) return;
+            CBZ.hurricane.count("debrisStrikes", 1);
+            if (CBZ.body) CBZ.body.hit(a, { dir: { x: o.dirx, z: o.dirz }, force: 6 + o.speed * 0.25, knockdown: o.speed > 24 ? 1.0 : 0 });
+            const wasDead = !!a.dead;
+            surv().hurt(a, scale(8 + o.speed * 0.35, ctx), { cause: "killed by hurricane debris", dir: { x: o.dirx, z: o.dirz } });
+            if (!wasDead && a.dead) CBZ.hurricane.count("debrisKills", 1);
+          },
+          // a windthrown tree comes down across whoever is in its length
+          hurtLine: function (x0, z0, x1, z1, w, cause) {
+            const dx = x1 - x0, dz = z1 - z0, L2 = dx * dx + dz * dz || 1;
+            surv().forEachActor(function (a) {
+              if (a.dead) return;
+              const u = Math.max(0, Math.min(1, ((a.pos.x - x0) * dx + (a.pos.z - z0) * dz) / L2));
+              const ex = a.pos.x - (x0 + dx * u), ez = a.pos.z - (z0 + dz * u);
+              if (ex * ex + ez * ez > w * w) return;
+              if (CBZ.body) CBZ.body.hit(a, { dir: { x: dx, z: dz }, force: 8, knockdown: 1.0 });
+              surv().hurt(a, scale(55, ctx), { cause: cause });
+            });
+          },
+        };
       },
       warnTick(dt, ctx) {
         if (!ctx.st.h2) return;
@@ -1122,8 +1184,11 @@
           ctx.env.sunInt = 0.45 + 0.75 * u * open;
           ctx.env.hemiColor = 0xc2d3e0; ctx.env.hemiInt = 0.5 + 0.35 * open;
         } else {
-          ctx.env.fog = 0x46505a; ctx.env.fogNear = 14;
-          ctx.env.fogFar = Math.max(55, 200 - lw.wind * 3.2);
+          // VISIBILITY is the rain you are in: a band's squall or the wall's
+          // whiteout closes it to a few dozen metres, a slot between bands
+          // opens it back up (sideways rain + spray, not just wind)
+          ctx.env.fog = 0x46505a; ctx.env.fogNear = Math.max(5, 15 - lw.wind * 0.12);
+          ctx.env.fogFar = Math.max(36, 240 - lw.wind * 2.3 - lw.rain * 80);
           ctx.env.sunInt = 0.45; ctx.env.hemiColor = 0x8a98a6;
         }
         if (CBZ.shake) CBZ.shake(Math.min(0.42, lw.wind * 0.009));
@@ -1149,13 +1214,16 @@
           let dead1 = 0;
           for (let i = 0; i < CBZ.bots.length; i++) if (CBZ.bots[i].dead) dead1++;
           H.count("drownings", Math.max(0, dead1 - dead0));
-          // TWO FEET FLOATS A CAR — same threshold as the flash flood
-          if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
-            const car = ctx.arena.cars[i];
-            if (car.flung) continue;
-            if (floodDepth(car.x, car.z) > 0.6) flingCar(car, S.fwdX, S.fwdZ, 3.2 + scale(2.2, ctx), 1.1);
-          }
+          // (TWO FEET FLOATS A CAR: systems/hurricane.js floats it, nose-down,
+          // drifting with the water — not tossed like a tsunami's)
           if (rnd() < dt * 3) sound("water");
+        }
+        // ---- the sea ON TOP of the surge: whipped white by the wind you are
+        //      standing in (the sheet flood's own floor still holds under it) ----
+        {
+          const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
+          const ss = H.seaState(camPos().x, camPos().z);
+          if (W) { W.amp = Math.max(W.amp, ss.amp); W.chop = Math.max(W.chop, ss.chop); W.foam = Math.max(W.foam, ss.foam); }
         }
         // ---- wind loads on every body, from the field at THEIR feet ----
         surv().forEachActor(function (a) {
@@ -1205,53 +1273,12 @@
             if (down) H.count("knockdowns", 1);
             if (CBZ.body) CBZ.body.hit(a, { dir: { x: w.x, z: w.z }, force: 4 + w.speed * 0.24, knockdown: down ? 1.0 : 0 });
           });
-          // A CAT-4/5 GUST AT EYEWALL SPEEDS TAKES A CAR: same fling path the
-          // surge uses, so the collider leaves with the body. Below that the
-          // per-frame shiver below is all a parked car does — its collider is
-          // the truth until the wind actually wins.
-          if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
-            const car = ctx.arena.cars[i];
-            if (car.flung) continue;
-            const w = H.windAt(car.x, car.z);
-            if (w.speed > 48 && rnd() < 0.22) {
-              flingCar(car, w.x, w.z, 3.5 + (w.speed - 48) * 0.2, 1.4);
-              H.count("carsFlung", 1);
-            }
-          }
         }
-        // ---- parked cars SHIVER on their springs in real wind (visual only;
-        //      restored to rest when the wind lets go) ----
-        if (ctx.arena.cars) for (let i = 0; i < ctx.arena.cars.length; i++) {
-          const car = ctx.arena.cars[i];
-          if (car.flung || !car.group) continue;
-          const w = H.windAt(car.x, car.z);
-          if (w.speed > 26) {
-            const k = Math.min(1, (w.speed - 26) / 30);
-            car._windRock = 1;
-            car.group.position.x = car.x + w.x * 0.09 * k * Math.sin(CBZ.now * 0.011 + i * 1.7);
-            car.group.position.z = car.z + w.z * 0.09 * k * Math.sin(CBZ.now * 0.013 + i * 2.1);
-            car.group.rotation.z = 0.045 * k * Math.sin(CBZ.now * 0.009 + i);
-          } else if (car._windRock) {
-            car._windRock = 0;
-            car.group.position.x = car.x; car.group.position.z = car.z;
-            car.group.rotation.z = 0;
-          }
-        }
-        // ---- the EYEWALL scours the roofs it is standing over — an annulus
-        //      that walks across the town with the storm, so damage maps the
-        //      track. Budget: wall-dwell ≈ glass-out + some spall, never a
-        //      levelled town (the ledger is shared with the quake and the
-        //      wave). Batched to 4 Hz — per-frame ring walks were the single
-        //      biggest V2 sim cost and the ledger integrates the same total.
-        ctx.st.scourCd = (ctx.st.scourCd || 0) - dt;
-        if (ctx.st.scourCd <= 0) {
-          ctx.st.scourCd += 0.25;
-          // category prices the scour: a cat-1 rattles glass, a cat-5 takes
-          // the roofs — while the shared ledger still stops short of a
-          // levelled town (the quake and the wave draw on the same budget)
-          structureSweepRing(ctx, S.eyeX, S.eyeZ, S.eyeR, S.rmw * 2.3,
-            (0.013 + 0.011 * S.catF) * 0.25);
-        }
+        /* Cars (rocking, shoved, flipped, floated), trees, roofs, windows,
+           signs, boats, the grid and the frame load on every building are
+           systems/hurricane.js's town pass, run inside H.tick above off the
+           wind AT each object — the old eyewall-annulus scour and the
+           private car shiver/fling that lived here are gone. */
       },
       end(ctx) {
         weatherOff();
@@ -5310,6 +5337,12 @@
       if (dir.cur && dir.cur.end && dir.state === "active") { try { dir.cur.end(makeCtx(0)); } catch (e) {} }
       // a fresh match starts on a flat sea, clear weather and no open holes
       surgeSet(0); weatherOff();
+      // the hurricane's town (felled trees, peeled roofs, dark districts,
+      // beached boats, debris) stands back up for the new match
+      if (CBZ.hurricane && CBZ.hurricane.resetWorld) {
+        CBZ.hurricane.resetWorld();
+        try { if (CBZ.surv && CBZ.surv.arena) CBZ.hurricane.prewire(DEFS.hurricane._world(makeCtx(0))); } catch (e) {}
+      }
       if (CBZ.survHoles) CBZ.survHoles.length = 0;
       said.banners = said.hints = said.toasts = 0;
       // a fresh SEEDED arc for this run: world seed + run counter → the same
