@@ -168,11 +168,16 @@
   };
 
   // ---- past the fog: can this subtree only ever paint fog colour? ---------
-  // { ox, oy, oz: sphere centre relative to the root's position, r, safe, at }
-  const fogCache = new WeakMap();
-  const FOG_REMEASURE_MS = 4000;           // an actor's own parts move (a crew, a rotor)
-  // (a static group is measured again only when its child count changes: a
-  // town adding a late parcel; a whole-subtree walk on a timer was a spike)
+  /* WHERE it is: a static group uses the frustum half's own cached sphere
+     (no second subtree walk); a mover (userData.dynamic, or a group seen to
+     move) has a sphere of its own that rides o.position (a hidden node's
+     matrixWorld is not kept up to date, core/matrixskip.js), re-measured
+     every few seconds since its parts move (a crew, a rotor).
+     WHETHER it may go: checked once, lazily, only for a subtree that is past
+     the reach, and again if its child count changes. */
+  const fogCache = new WeakMap();          // mover -> { ox, oy, oz, r, ok, at }
+  const safeCache = new WeakMap();         // subtree -> { safe, kids }
+  const FOG_REMEASURE_MS = 4000;
   function isIdentity(m) { const e = m.elements; return e[0] === 1 && e[5] === 1 && e[10] === 1 && e[15] === 1 && !e[1] && !e[2] && !e[4] && !e[6] && !e[8] && !e[9] && !e[12] && !e[13] && !e[14]; }
   function fogSafeMat(m) {
     if (!m) return true;
@@ -181,41 +186,32 @@
     const u = m.userData;
     return !(u && u._cbzFogScaled);
   }
-  function fogSphere(o, now) {
-    let f = fogCache.get(o);
-    const keepSafe = f ? f.safe : null;
-    f = { ox: 0, oy: 0, oz: 0, r: 0, safe: true, ok: false, dyn: !!(o.userData && o.userData.dynamic), at: now, kids: o.children.length };
+  function fogSafeTree(o) {
+    let safe = true;
+    o.traverse(function (x) {
+      if (!safe) return;
+      if (x.isSprite) { if (!fogSafeMat(x.material)) safe = false; return; }
+      if (!(x.isMesh || x.isPoints || x.isLine)) return;
+      if (x.isInstancedMesh) { safe = false; return; }          // footprint is its instances, not its box
+      const mats = Array.isArray(x.material) ? x.material : [x.material];
+      for (let i = 0; i < mats.length; i++) if (!fogSafeMat(mats[i])) { safe = false; return; }
+    });
+    return safe;
+  }
+  function moverSphere(o, now) {
+    const f = { ox: 0, oy: 0, oz: 0, r: 0, ok: false, at: now };
     try {
-      let safe = keepSafe == null ? true : keepSafe;
-      if (keepSafe == null) {
-        o.traverse(function (x) {
-          if (!safe) return;
-          if (x.isLight || x.isSprite) { if (x.isSprite && !fogSafeMat(x.material)) safe = false; return; }
-          if (!(x.isMesh || x.isPoints || x.isLine)) return;
-          if (x.isInstancedMesh) { safe = false; return; }        // footprint is its instances, not its box
-          const mats = Array.isArray(x.material) ? x.material : [x.material];
-          for (let i = 0; i < mats.length; i++) if (!fogSafeMat(mats[i])) { safe = false; return; }
-        });
+      o.updateWorldMatrix(true, true);
+      _box.setFromObject(o);
+      if (isFinite(_box.min.x) && isFinite(_box.max.x)) {
+        _box.getCenter(_v);
+        // root-space (the city root is the identity, checked by the pass); a
+        // mover turns, so its centre's offset is folded into the radius
+        const ox = _v.x - o.position.x, oy = _v.y - o.position.y, oz = _v.z - o.position.z;
+        f.r = Math.hypot(_box.max.x - _box.min.x, _box.max.y - _box.min.y, _box.max.z - _box.min.z) * 0.5 + PAD + Math.hypot(ox, oy, oz) + 20;
+        f.ok = true;
       }
-      f.safe = safe;
-      if (safe) {
-        o.updateWorldMatrix(true, true);
-        _box.setFromObject(o);
-        if (isFinite(_box.min.x) && isFinite(_box.max.x)) {
-          _box.getCenter(_v);
-          // root-space (the city root is the identity: core/citystream.js
-          // checks the same thing): the sphere rides o.position, which the
-          // owner moves every frame (a hidden node's matrixWorld is not kept
-          // up to date, core/matrixskip.js). A mover turns, so its centre's
-          // offset is folded into the radius instead of being carried.
-          f.ox = _v.x - o.position.x; f.oy = _v.y - o.position.y; f.oz = _v.z - o.position.z;
-          f.r = Math.hypot(_box.max.x - _box.min.x, _box.max.y - _box.min.y, _box.max.z - _box.min.z) * 0.5 + PAD;
-          // a moving subtree's parts can swing out between measures
-          if (f.dyn) { f.r += Math.hypot(f.ox, f.oy, f.oz) + 20; f.ox = f.oy = f.oz = 0; }
-          f.ok = true;
-        }
-      }
-    } catch (e) { f.safe = false; }
+    } catch (e) { f.ok = false; }
     fogCache.set(o, f);
     return f;
   }
@@ -225,7 +221,8 @@
   const viewF = new THREE.Frustum(), sunF = new THREE.Frustum();
   const _m = new THREE.Matrix4(), _s = new THREE.Sphere();
   const A = CBZ.viewScopeStats = { frames: 0, shadowFrames: 0, tested: 0, hidden: 0, measures: 0, lastHidden: 0, fogHidden: 0, lastFogHidden: 0, fogMeasures: 0 };
-  const FOG_MEASURES_PER_FRAME = 32;   // the fog half's own (it must never starve the frustum half's)
+  const FOG_MEASURES_PER_FRAME = 8;    // movers' spheres a frame (the fog half's own: never the frustum half's)
+  const FOG_SAFE_PER_FRAME = 8;        // material walks a frame, only for subtrees already past the reach
   const MEASURES_PER_FRAME = 24;   // fresh Box3 subtree walks allowed per frame (the 30-50 ms hitch-stack farcull budgets against)
 
   function restore() {
@@ -273,19 +270,26 @@
     const reach = rootId && SG && SG.reach > 0 ? SG.reach : Infinity;
     const now = performance.now();
     const kids = root.children;
-    let n = 0, nf = 0, measures = MEASURES_PER_FRAME, fogMeasures = FOG_MEASURES_PER_FRAME;
+    let n = 0, nf = 0, measures = MEASURES_PER_FRAME, fogMeasures = FOG_MEASURES_PER_FRAME, safeChecks = FOG_SAFE_PER_FRAME;
     for (let i = 0; i < kids.length; i++) {
       const o = kids[i];
       if (!o.visible) continue;                                   // farcull's (or anyone's) hide — theirs
       if (!o.isGroup && !o.isMesh) continue;
       if (o.isGroup && !o.children.length) continue;
       if (reach < Infinity && !o.isInstancedMesh) {
-        let f = fogCache.get(o);
-        if ((!f || (f.safe && (f.dyn ? now - f.at >= FOG_REMEASURE_MS : o.children.length !== f.kids))) && fogMeasures > 0) { fogMeasures--; A.fogMeasures++; f = fogSphere(o, now); }
-        if (f && f.safe && f.ok) {
-          const cx = o.position.x + f.ox, cz = o.position.z + f.oz;
-          if (Math.hypot(cx - SG.x, cz - SG.z) - f.r > reach) {
-            _s.center.set(cx, o.position.y + f.oy, cz); _s.radius = f.r;
+        const b = cache.get(o);
+        let cx = 0, cy = 0, cz = 0, r = -1;
+        if (b && !b.dyn && !b.loose) { cx = b.x; cy = b.y; cz = b.z; r = b.r + PAD; }
+        else if ((b && b.dyn && !(b.r > MAX_R)) || (!b && o.userData && o.userData.dynamic)) {
+          let f = fogCache.get(o);
+          if ((!f || now - f.at >= FOG_REMEASURE_MS) && fogMeasures > 0) { fogMeasures--; A.fogMeasures++; f = moverSphere(o, now); }
+          if (f && f.ok) { cx = o.position.x; cy = o.position.y; cz = o.position.z; r = f.r; }
+        }
+        if (r >= 0 && Math.hypot(cx - SG.x, cz - SG.z) - r > reach) {
+          let sc = safeCache.get(o);
+          if ((!sc || sc.kids !== o.children.length) && safeChecks > 0) { safeChecks--; sc = { safe: fogSafeTree(o), kids: o.children.length }; safeCache.set(o, sc); }
+          if (sc && sc.safe && sc.kids === o.children.length) {
+            _s.center.set(cx, cy, cz); _s.radius = r;
             if (!(shadowFrame && sunF.intersectsSphere(_s))) {
               o.visible = false; o._cbzScopeHidden = true; hidden.push(o); nf++;
               continue;
