@@ -697,16 +697,33 @@
   });
   ensureWeaponModel(0);                      // the default slot (and holsterprops' carried-gun parent)
   ensureWeaponModel(curSlot);
-  // THE REST, IN IDLE TIME (config.js CBZ.afterBoot): one slot per idle
-  // slice once a run is playing, each slot's programs queued (core/fxwarm.js)
-  for (let i = 0; i < WEAPONS.length; i++) {
-    if (!CBZ.afterBoot) break;
-    CBZ.afterBoot(function () {
-      if (weaponModels[i]) return;
+  /* THE GUNS YOU HAVE, IN IDLE TIME (config.js CBZ.afterBoot): one slot per
+     idle slice once a run is playing, each slot's programs queued
+     (core/fxwarm.js), so the first draw of a gun you can draw is free. Only
+     the guns you HAVE: every slot of the arsenal (two models each, the
+     viewmodel's two grasp hands) was built at the start of every run, ~10 MB
+     on the phone for guns the player did not own. A gun you pick up later is
+     built in the next idle slice after you have it (the 1 s sweep below), and
+     one equipped before that is built by the slot setter, as before. */
+  function prebuildOwned() {
+    for (let i = 0; i < WEAPONS.length; i++) {
+      if (weaponModels[i] || !hasWeaponIndex(i)) continue;
       ensureWeaponModel(i);
       if (CBZ.shaderQueue) { CBZ.shaderQueue(gun); CBZ.shaderQueue(carriedGun); }
-    });
+      return true;                                  // one per slice
+    }
+    return false;
   }
+  if (CBZ.afterBoot) CBZ.afterBoot(function () {
+    let t = 0, busy = false;
+    const idle = typeof requestIdleCallback === "function" ? function (f) { requestIdleCallback(f, { timeout: 2000 }); } : function (f) { setTimeout(f, 0); };
+    CBZ.onAlways(97.5, function (dt) {
+      if ((t += dt) < 1 || busy) return;
+      t = 0; busy = true;
+      idle(function () { busy = false; try { prebuildOwned(); } catch (e) { console.error("[fps prebuild]", e); } });
+    });
+    prebuildOwned();
+  });
   carriedGun.position.set(0.02, 0.02, 0.03);
   // Local orientation so the barrel lies along the socket -Y (down the forearm):
   // rotation.x ≈ -π/2 (no Math.PI on Y). Paired with animChar's -1.571 arm
