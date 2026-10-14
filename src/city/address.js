@@ -627,10 +627,12 @@
     return Math.round(clamp(n * (stolen ? 1.6 : 1), 400, 120000));
   }
   function slogansFor(stolen, side) {
-    const sn = surname(playerName()).toUpperCase();
-    if (side === "opposition") return ["NO KINGS", "RESPECT THE VOTE", "NOT MY PRESIDENT", "NO DICTATOR", "DEMOCRACY"];
-    if (stolen) return ["STOP THE STEAL", (sn && sn.length <= 9 ? sn + " WON" : "WE WON"), "WE THE PEOPLE", "COUNT LEGAL VOTES", "TAKE IT BACK"];
-    return ["FOUR MORE YEARS", (sn && sn.length <= 9 ? sn + " FOR US" : "WE STAND WITH YOU"), "WE STAND WITH YOU", "SAFE STREETS"];
+    // a name goes on a board only when it fits one (a plain surname)
+    let sn = surname(playerName()).toUpperCase();
+    if (!(sn.length <= 9 && /^[A-Z'-]+$/.test(sn))) sn = "";
+    if (side === "opposition") return ["NO KINGS", "RESPECT THE VOTE", sn ? sn + " OUT" : "NOT MY PRESIDENT", "NOT MY PRESIDENT", "NO DICTATOR"];
+    if (stolen) return ["STOP THE STEAL", sn ? sn + " WON" : "WE WON", "COUNT LEGAL VOTES", "WE THE PEOPLE", "TAKE IT BACK"];
+    return ["FOUR MORE YEARS", sn ? "WE LOVE " + sn : "FOUR MORE YEARS", sn ? "I STAND WITH " + sn : "LAW AND ORDER", "LAW AND ORDER"];
   }
   function colorOf(p) {
     const c = p && p.color;

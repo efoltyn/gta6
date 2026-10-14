@@ -193,6 +193,9 @@
     try { paint(cc, w, h); } catch (e) {}
     const t = new THREE.CanvasTexture(c);
     t.anisotropy = 2;
+    // painted colour, so it is sRGB like the renderer's output (core/renderer.js);
+    // uploaded linear it washed every sign and seal out pale
+    if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
     TEX[key] = t;
     return t;
   }
@@ -218,35 +221,136 @@
       }
     });
   }
-  // A SIGN IS A PIECE OF CARD SOMEBODY LETTERED BY HAND. Short plain words.
+  /* A SIGN IS A PIECE OF BOARD SOMEBODY LETTERED BY HAND the night before:
+     brown corrugated cardboard or white foam board, the words in thick
+     marker, letters a little uneven (each its own size, tilt and baseline,
+     gone over twice where the pen ran thin), sized to fill the board the way
+     a person fills it. Painted ONCE per slogan on a 512x256 canvas (power of
+     two, drawn in the board's own 0.72:0.50 aspect) and cached. Everything
+     random is seeded off the text, so one slogan is one board everywhere. */
+  function seeded(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return function () {
+      h = Math.imul(h ^ (h >>> 15), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); h ^= h >>> 16;
+      return (h >>> 0) / 4294967296;
+    };
+  }
+  function marker(px) { return "900 " + px.toFixed(1) + "px 'Arial Black', 'Helvetica Neue', Impact, sans-serif"; }
+  function boardPaint(cc, w, h, r, foam) {
+    if (foam) {
+      cc.fillStyle = "#f1efe8"; cc.fillRect(0, 0, w, h);
+      // foam board: smooth, a faint bloom and the smudges of handling
+      for (let i = 0; i < 6; i++) {
+        const x = r() * w, y = r() * h, g = cc.createRadialGradient(x, y, 0, x, y, 40 + r() * 90);
+        g.addColorStop(0, "rgba(120,115,100,0.08)"); g.addColorStop(1, "rgba(120,115,100,0)");
+        cc.fillStyle = g; cc.fillRect(0, 0, w, h);
+      }
+    } else {
+      cc.fillStyle = "#b98d5c"; cc.fillRect(0, 0, w, h);
+      // the corrugation shows through the liner as soft vertical ribs
+      for (let x = 0; x < w; x += 7) { cc.fillStyle = "rgba(90,60,30," + (0.05 + r() * 0.04).toFixed(3) + ")"; cc.fillRect(x, 0, 3, h); }
+      // fibre speckle and a water mark
+      for (let i = 0; i < 900; i++) { cc.fillStyle = r() < 0.5 ? "rgba(70,45,20,0.18)" : "rgba(235,210,170,0.16)"; cc.fillRect(r() * w, r() * h, 1 + r() * 2, 1); }
+      const sx = r() * w, sy = r() * h, g = cc.createRadialGradient(sx, sy, 4, sx, sy, 50 + r() * 60);
+      g.addColorStop(0, "rgba(80,50,20,0)"); g.addColorStop(0.8, "rgba(80,50,20,0.12)"); g.addColorStop(1, "rgba(80,50,20,0)");
+      cc.fillStyle = g; cc.fillRect(0, 0, w, h);
+    }
+    // the cut edge: a darker rim, ragged where the box was cut down
+    cc.strokeStyle = foam ? "rgba(150,145,130,0.6)" : "rgba(95,62,30,0.55)"; cc.lineWidth = 5;
+    cc.beginPath();
+    const P = [[3, 3], [w - 3, 3], [w - 3, h - 3], [3, h - 3]];
+    for (let k = 0; k < 4; k++) {
+      const p0 = P[k], p1 = P[(k + 1) % 4];
+      for (let i = 0; i <= 8; i++) {
+        const f = i / 8, x = p0[0] + (p1[0] - p0[0]) * f + (r() - 0.5) * 3, y = p0[1] + (p1[1] - p0[1]) * f + (r() - 0.5) * 3;
+        if (!k && !i) cc.moveTo(x, y); else cc.lineTo(x, y);
+      }
+    }
+    cc.stroke();
+  }
+  // the words into 1..3 lines: the split that lets the letters be biggest
+  function signLayout(cc, text, W, H) {
+    const words = text.split(/\s+/).filter(Boolean);
+    if (!words.length) return null;
+    let best = null;
+    for (let n = 1; n <= Math.min(3, words.length); n++) {
+      const lines = [];
+      let i = 0;
+      for (let l = 0; l < n; l++) {
+        const want = words.slice(i).join(" ").length / (n - l);
+        let line = words[i++];
+        while (i < words.length && words.length - i > n - l - 1 &&
+               Math.abs((line + " " + words[i]).length - want) <= Math.abs(line.length - want)) line += " " + words[i++];
+        lines.push(line);
+      }
+      if (i < words.length) lines[lines.length - 1] += " " + words.slice(i).join(" ");
+      cc.font = marker(100);
+      let wide = 1;
+      for (let k = 0; k < lines.length; k++) wide = Math.max(wide, cc.measureText(lines[k]).width + lines[k].length * 4);
+      const size = Math.min(100 * W / wide, H / (n * 1.1), 150);
+      if (!best || size > best.size) best = { lines: lines, size: size };
+    }
+    return best;
+  }
   function signTex(text, support) {
+    text = String(text || "").toUpperCase();
     const key = "sign:" + (support ? "s:" : "p:") + text;
-    return canvasTex(key, 256, 160, function (cc, w, h) {
-      cc.fillStyle = support ? "#f4f1e8" : "#efe6cf"; cc.fillRect(0, 0, w, h);
-      cc.strokeStyle = support ? "#1d3160" : "#2a2622"; cc.lineWidth = 6; cc.strokeRect(5, 5, w - 10, h - 10);
-      cc.fillStyle = support ? "#1d3160" : (text.length % 3 === 0 ? "#b32620" : "#1c1a18");
-      cc.textAlign = "center"; cc.textBaseline = "middle";
-      const words = text.split(" ");
-      let lines = [text];
-      if (text.length > 10 && words.length > 1) {
-        const half = Math.ceil(words.length / 2);
-        lines = [words.slice(0, half).join(" "), words.slice(half).join(" ")];
+    return canvasTex(key, 512, 256, function (cc, w, h) {
+      const r = seeded(key);
+      const LW = 512, LH = 356;                       // the board's aspect, squeezed onto the POT canvas
+      cc.save(); cc.scale(w / LW, h / LH);
+      const foam = support ? r() < 0.75 : r() < 0.35;
+      boardPaint(cc, LW, LH, r, foam);
+      const inks = support ? ["#1d3474", "#1d3474", "#a81e18", "#161616"] : ["#161616", "#161616", "#a81e18", "#1d3474"];
+      const ink = inks[(r() * inks.length) | 0];
+      const L = signLayout(cc, text, LW - 70, LH - 60);
+      if (!L) { cc.restore(); return; }
+      const lh = L.size * 1.06, top = LH / 2 - (L.lines.length - 1) * lh / 2 + (r() - 0.5) * 10;
+      cc.textBaseline = "middle"; cc.lineJoin = "round"; cc.lineCap = "round";
+      for (let li = 0; li < L.lines.length; li++) {
+        const line = L.lines[li];
+        const slope = (r() - 0.5) * 0.05;             // a hand runs a little uphill or down
+        cc.font = marker(L.size);
+        const adv = [];
+        let tot = 0;
+        for (let k = 0; k < line.length; k++) { const a = cc.measureText(line[k]).width + (line[k] === " " ? 0 : 4); adv.push(a); tot += a; }
+        let x = LW / 2 - tot / 2 + (r() - 0.5) * 14;
+        const y = top + li * lh;
+        for (let k = 0; k < line.length; k++) {
+          if (line[k] !== " ") {
+            const sz = L.size * (0.93 + r() * 0.12);
+            cc.save();
+            cc.translate(x + adv[k] / 2, y + (x - LW / 2) * slope + (r() - 0.5) * L.size * 0.07);
+            cc.rotate((r() - 0.5) * 0.10);
+            cc.font = marker(sz); cc.textAlign = "center";
+            cc.fillStyle = ink; cc.strokeStyle = ink;
+            cc.lineWidth = Math.max(2, sz * 0.05);    // the felt tip rounds every corner
+            cc.globalAlpha = 0.92;
+            cc.strokeText(line[k], 0, 0); cc.fillText(line[k], 0, 0);
+            if (r() < 0.45) { cc.globalAlpha = 0.35; cc.fillText(line[k], (r() - 0.5) * 3, (r() - 0.5) * 3); }
+            cc.restore();
+          }
+          x += adv[k];
+        }
       }
-      const size = lines.length > 1 ? 44 : 52;
-      cc.font = "bold " + size + "px Impact, 'Arial Black', sans-serif";
-      for (let i = 0; i < lines.length; i++) {
-        let s = size;
-        while (s > 22 && cc.measureText(lines[i]).width > w - 26) { s -= 3; cc.font = "bold " + s + "px Impact, 'Arial Black', sans-serif"; }
-        cc.fillText(lines[i], w / 2, h / 2 + (i - (lines.length - 1) / 2) * (size + 6));
+      // a one-line slogan often gets the underline people add at the end
+      if (L.lines.length === 1 && text.length <= 9 && r() < 0.6) {
+        const y = top + L.size * 0.6, x0 = LW * 0.18 + r() * 20, x1 = LW * 0.82 - r() * 20;
+        cc.strokeStyle = ink; cc.globalAlpha = 0.85; cc.lineWidth = Math.max(4, L.size * 0.07);
+        cc.beginPath(); cc.moveTo(x0, y + (r() - 0.5) * 6); cc.quadraticCurveTo((x0 + x1) / 2, y + (r() - 0.5) * 12, x1, y + (r() - 0.5) * 8); cc.stroke();
       }
+      cc.restore();
     });
   }
   const SIGN_MATS = {};
   function signMats(text, support) {
+    text = String(text || "").toUpperCase();
     const key = (support ? "s:" : "p:") + text;
     if (SIGN_MATS[key]) return SIGN_MATS[key];
     const face = new THREE.MeshLambertMaterial({ map: signTex(text, support) });
-    const edge = cm(0xb99a6a);
+    const edge = cm(0x9a7a52);                       // the board's cut edge
+    // lettered both sides: a sign is read coming and going
     SIGN_MATS[key] = [edge, edge, edge, edge, face, face];
     return SIGN_MATS[key];
   }
@@ -700,21 +804,35 @@
   }
 
   // ---- props (shared geometry, cached materials) -------------------------
-  let _stickGeo = null, _boardGeo = null;
+  let _stickGeo = null;
   function stickGeo() { return _stickGeo || (_stickGeo = new THREE.CylinderGeometry(0.017, 0.017, 1.0, 6)); }
-  function boardGeo() { return _boardGeo || (_boardGeo = new THREE.BoxGeometry(0.82, 0.52, 0.02)); }
+  /* THE PLACARD: a 0.72 x 0.50 board stapled to the front of a 1.25 m
+     furring strip. The prop's ORIGIN is the lower fist's grip on the stick
+     and its +y runs up the stick, so entities/poses.js pubPlacard can put it
+     on the solved hands every frame, mob.js can draw the same thing
+     instanced, and a dropped one falls as ONE rigid body (systems/debris.js
+     adopt, whole "all"). */
+  const PLACARD = { stickBot: -0.30, stickLen: 1.25, stickW: 0.03, boardW: 0.72, boardH: 0.50, boardT: 0.012, boardY: 0.72, boardZ: 0.026,
+                    gripY: 1.29, gripZ: 0.35 };          // the grip on an adult, in metres over the feet (poses.js PLACARD, measured)
+  let _plStickGeo = null, _plBoardGeo = null;
   function giveSign(ped, text, support) {
     if (!ped || !ped.group) return;
+    text = String(text || "ENOUGH").toUpperCase();
     const pr = new THREE.Group();
-    pr.position.set(0, 1.8, 0.2);                   // where both hands meet on the stick
-    const st = new THREE.Mesh(stickGeo(), cm(0x8a6a44));
-    st.position.y = -0.12; pr.add(st);
-    const bd = new THREE.Mesh(boardGeo(), signMats(text, support));
-    bd.position.y = 0.6; pr.add(bd);
+    pr.name = "placard";
+    pr.position.set(0, PLACARD.gripY, PLACARD.gripZ);  // until the pose puts it on the fists
+    if (!_plStickGeo) _plStickGeo = new THREE.BoxGeometry(PLACARD.stickW, PLACARD.stickLen, PLACARD.stickW * 0.6);
+    if (!_plBoardGeo) _plBoardGeo = new THREE.BoxGeometry(PLACARD.boardW, PLACARD.boardH, PLACARD.boardT);
+    const st = new THREE.Mesh(_plStickGeo, cm(0x9c7a4e));
+    st.position.y = PLACARD.stickBot + PLACARD.stickLen / 2; pr.add(st);
+    const bd = new THREE.Mesh(_plBoardGeo, signMats(text, support));
+    bd.position.set(0, PLACARD.boardY, PLACARD.boardZ); pr.add(bd);
     ped.group.add(pr);
     ped._pubProp = pr; ped._sign = text;
     if (ped.char) { ped.char._pubProp = pr; ped.char._pubPh = Math.random() * 6; }
     setPose(ped, "pubPlacard");
+    // mob.js watches every held prop: it leaves the hands on a fall or a run
+    if (CBZ.heldPropWatch) { try { CBZ.heldPropWatch(ped); } catch (e) {} }
   }
   function giveFlag(ped) {
     if (!ped || !ped.group) return;
@@ -729,12 +847,15 @@
     if (ped.char) { ped.char._pubProp = pr; ped.char._pubPh = Math.random() * 6; }
     setPose(ped, "pubFlag");
   }
-  // a sign carried at the side while walking away (the gait owns the arms)
+  // a sign carried home: the stick in the hand at the side, sloped back,
+  // the board edge-on behind the hip (the gait owns the arms); a flag stays
+  // upright at the side
   function lowerProp(ped) {
     const pr = ped && ped._pubProp;
     if (!pr) return;
     if (ped.char) ped.char._pubProp = null;
-    pr.position.set(0.34, 0.55, 0.05); pr.rotation.set(0, 0, 0.12);
+    if (ped._sign) { pr.position.set(0.40, 0.80, 0.02); pr.rotation.set(-1.75, Math.PI / 2, 0); }
+    else { pr.position.set(0.34, 0.55, 0.05); pr.rotation.set(0, 0, 0.12); }
   }
   function hype(ped, t) { if (ped && ped.char) ped.char._pubHype = t || 3; }
 
@@ -833,7 +954,7 @@
     const sl = (PROT.slogans && PROT.slogans[0]) || "ENOUGH";
     const line = { "NO CURFEW": "Let us walk our own streets.", "SOLDIERS OUT": "Get the soldiers off my street.", "RESIGN": "You promised us. You lied.",
       "WHERE IS THE MONEY": "Where did our money go?", "NO DICTATOR": "We voted. Remember that.", "BRING THEM HOME": "Bring my son home.",
-      "STOP THE CRACKDOWN": "They beat my brother.", "KEEP US SAFE": "We're scared. Do something." }[ped._sign || sl] || "We just want to be heard.";
+      "STOP THE CRACKDOWN": "They beat my brother.", "PROTECT US": "We are scared. Do something." }[ped._sign || sl] || "We just want to be heard.";
     say(ped, line, "#ffd9c8", 3.2);
     if (!polAct("hear-out", ped)) shock(0.4);
     const d = Math.floor(now());
@@ -909,32 +1030,53 @@
         disperseProtest();
       } });
   }
+  /* WHAT IS ON THE BOARDS. What a person would actually write the night
+     before with a marker: one to four words, about THIS president, THIS
+     country and the thing he just did (the order bus, ORD). A name goes on a
+     board only when it fits one (a plain surname, a short country name). */
+  function signName(s) {
+    s = String(s || "").toUpperCase().trim();
+    return s && s.length <= 10 && /^[A-Z'-]+$/.test(s) ? s : "";
+  }
+  function presSurname() { const c = current(); return c && c.kind !== "vacant" ? signName(surname(c.name)) : ""; }
+  function landName() {
+    const r = countryRec();
+    const n = String((r && r.name) || "").replace(/^(the\s+)?(republic|kingdom|federation|empire|state|commonwealth|union|people's republic)\s+of\s+/i, "")
+      .replace(/\s+(federation|republic|kingdom|empire|union)$/i, "").trim();
+    return /\s/.test(n) ? "" : signName(n);
+  }
   function slogansNow() {
     const out = [];
     const T = now();
     const S = status();
     const recent = function (k, days) { return ORD[k] != null && T - ORD[k] < pace(days || 1.6); };
     const dep = deployments();
-    if (curfewLive() || recent("curfew")) out.push("NO CURFEW", "OUR STREETS AT NIGHT");
-    if (dep.martial || recent("martial")) out.push("SOLDIERS OUT", "NO TANKS ON OUR STREETS");
-    if (recent("crackdown")) out.push("STOP THE CRACKDOWN");
-    if ((S.emergency || 0) >= 40 || recent("emergency") || recent("fascism") || recent("crown")) out.push("NO DICTATOR", "RESTORE THE REPUBLIC");
-    if (recent("taxup") || (S.seat && (S.treasury || 0) < 20000)) out.push("WHERE IS THE MONEY", "TAX THE PALACE");
-    if (ATTACK.t != null && T - ATTACK.t < pace(1.5)) out.push("KEEP US SAFE", "NEVER AGAIN");
+    const sn = presSurname(), land = landName();
+    if (curfewLive() || recent("curfew")) out.push("NO CURFEW", "LIFT THE CURFEW");
+    if (dep.martial || recent("martial")) out.push("SOLDIERS OUT", "TROOPS OFF OUR STREETS");
+    if (recent("crackdown")) out.push("STOP THE CRACKDOWN", "FREE THEM ALL");
+    if (recent("crown")) out.push("NO KINGS", sn ? "NO KING " + sn : "NO KING");
+    if (recent("fascism")) out.push("NO DICTATOR", land ? "FREE " + land : "NEVER AGAIN");
+    if ((S.emergency || 0) >= 40 || recent("emergency")) out.push("END THE EMERGENCY", "NO DICTATOR");
+    if (recent("taxup")) out.push("NO NEW TAXES", "TAX THE PALACE");
+    else if (S.seat && (S.treasury || 0) < 20000) out.push("WHERE IS THE MONEY");
+    if (recent("war") || recent("strike") || recent("nuke")) out.push("NO WAR", "NOT IN OUR NAME");
     if (recent("bureau", 2) || recent("martial", 3)) out.push("BRING THEM HOME");
-    if (approval() < 35) out.push("RESIGN", "NOT MY PRESIDENT", "ENOUGH");
+    if (ATTACK.t != null && T - ATTACK.t < pace(1.5)) out.push("NEVER AGAIN", "PROTECT US");
+    if (approval() < 35) out.push(sn ? sn + " OUT" : "RESIGN", sn ? "IMPEACH " + sn : "NOT MY PRESIDENT", "RESIGN");
     // the angriest people carry their own boards (city/politics.js)
     const Pol = CBZ.politics;
     const A = Pol && Pol.angriest ? (function () { try { return Pol.angriest(); } catch (e) { return null; } })() : null;
     if (A && A.anger >= 55 && A.slogans) for (let i = 0; i < A.slogans.length; i++) out.push(A.slogans[i]);
-    if (!out.length) out.push("HEAR US", "RESIGN");
-    return out;
+    if (!out.length) out.push(sn ? sn + " OUT" : "ENOUGH", "ENOUGH IS ENOUGH");
+    // one board per slogan, never the same words twice in the pool
+    return out.filter(function (s, i) { return s && out.indexOf(s) === i; });
   }
   function supportSlogans() {
-    const c = current();
-    const n = surname(c.name).toUpperCase();
-    const out = ["FOUR MORE YEARS", "WE STAND WITH YOU", "SAFE STREETS"];
-    if (n && n.length <= 10 && /^[A-Z' -]+$/.test(n)) out.push(n + " FOR US");
+    const sn = presSurname(), land = landName();
+    const out = ["FOUR MORE YEARS"];
+    if (sn) out.push("WE LOVE " + sn, "I STAND WITH " + sn);
+    out.push(land ? land + " FIRST" : "COUNTRY FIRST", "LAW AND ORDER");
     return out;
   }
 
@@ -1055,9 +1197,12 @@
     ped._pubWalk = null;                 // no longer walking in (tickWalkIn lets go)
     ped.staffPost = null;
     ped.controlled = false;
+    const fx = from ? from.x : ped.pos.x, fz = from ? from.z : ped.pos.z;
+    // a man who RUNS lets go of his sign (it falls, mob.js dropHeldProp);
+    // one who walks home carries it
+    if (flee && ped._sign && CBZ.dropHeldProp) { try { CBZ.dropHeldProp(ped, { fromX: fx, fromZ: fz }); } catch (e) {} }
     lowerProp(ped);
     setPose(ped, null);
-    const fx = from ? from.x : ped.pos.x, fz = from ? from.z : ped.pos.z;
     if (flee && CBZ.cityFleeFrom) { try { CBZ.cityFleeFrom(ped, fx, fz); } catch (e) {} ped.fear = Math.max(ped.fear || 0, 4); }
     else {
       const dx = ped.pos.x - fx, dz = ped.pos.z - fz, L = Math.hypot(dx, dz) || 1;
@@ -1926,7 +2071,7 @@
       PROT.souls = souls;
       PROT.mob = CBZ.mob.form({
         at: { x: pen.at.x, z: pen.at.z }, face: pen.face, size: souls, side: "opposition", kind: "protest", place: "the Mansion", hold: true, quiet: true,
-        slogans: PROT.slogans, chants: PROT.slogans.map(function (sl) { return CHANTS[sl] || (sl.charAt(0) + sl.slice(1).toLowerCase() + "!"); }),
+        slogans: PROT.slogans, chants: PROT.slogans.map(chantOf),
         groups: G && G.length ? G : null, violent: 0.04 + a * 0.18, anger: a, width: 20,
       });
     }
@@ -2050,8 +2195,24 @@
   const CHANTS = {
     "NO CURFEW": "No curfew! No curfew!", "SOLDIERS OUT": "Soldiers out! Soldiers out!", "RESIGN": "Resign! Resign!",
     "WHERE IS THE MONEY": "Where's the money?", "NO DICTATOR": "No dictator! No dictator!", "BRING THEM HOME": "Bring them home!",
-    "STOP THE CRACKDOWN": "Stop the crackdown!", "KEEP US SAFE": "Keep us safe!", "ENOUGH": "Enough! Enough!",
+    "STOP THE CRACKDOWN": "Stop the crackdown!", "PROTECT US": "Protect us!", "ENOUGH": "Enough! Enough!",
+    "LIFT THE CURFEW": "Lift the curfew!", "TROOPS OFF OUR STREETS": "Troops out! Troops out!", "FREE THEM ALL": "Free them all!",
+    "NO KINGS": "No kings! No kings!", "END THE EMERGENCY": "End it now!", "NO NEW TAXES": "No new taxes!",
+    "NO WAR": "No war! No war!", "NOT IN OUR NAME": "Not in our name!", "ENOUGH IS ENOUGH": "Enough is enough!",
+    "NEVER AGAIN": "Never again!", "FOUR MORE YEARS": "Four more years!", "LAW AND ORDER": "Law and order!",
   };
+  // the chant for a board: its own line, or the words said out loud with
+  // the names still capitalised ("VOSS OUT" -> "Voss out!")
+  function chantOf(sl) {
+    sl = String(sl || "");
+    if (CHANTS[sl]) return CHANTS[sl];
+    const names = [presSurname(), landName()].filter(Boolean);
+    const words = sl.toLowerCase().split(" ").map(function (w, i) {
+      const up = w.toUpperCase();
+      return i === 0 || names.indexOf(up) >= 0 || w === "i" ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+    });
+    return words.join(" ") + "!";
+  }
   function tickProtest(dt) {
     const T = now();
     if (PROT.active) {
@@ -2070,7 +2231,7 @@
         PROT.chantT = 5 + Math.random() * 3;
         const m = PROT.members[(Math.random() * PROT.members.length) | 0];
         const sl = PROT.slogans[(Math.random() * PROT.slogans.length) | 0];
-        say(m.ped, CHANTS[sl] || (sl.charAt(0) + sl.slice(1).toLowerCase() + "!"), "#ffb4a8", 2.8);
+        say(m.ped, chantOf(sl), "#ffb4a8", 2.8);
         for (let i = 0; i < PROT.members.length; i++) if (Math.random() < 0.5) hype(PROT.members[i].ped, 2.4);
       }
       return;
@@ -2442,7 +2603,7 @@
     // THE PROPS AND THE ROAR ARE SHARED (city/mob.js, city/address.js): a
     // marcher's sign, a supporter's flag, the placard and cheer poses, the
     // card the sign is lettered on, and the speech crowd's answer.
-    props: { sign: giveSign, flag: giveFlag, lower: lowerProp, hype: hype, pose: setPose, signMats: signMats, signTex: signTex },
+    props: { sign: giveSign, flag: giveFlag, lower: lowerProp, hype: hype, pose: setPose, signMats: signMats, signTex: signTex, placard: PLACARD },
     react: function (kind) { if (CROWD.members.length) react(kind === "boo" ? "boo" : "cheer", false); return CROWD.members.length; },
     // harness/test hooks only, not part of the public contract
     _startNow: function (kind) {

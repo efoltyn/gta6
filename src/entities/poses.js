@@ -100,6 +100,11 @@
     cap.updateMatrixWorld(true);
     return !!cap.localToWorld(out.set(pc[0] * (cap.userData.side < 0 ? -1 : 1), pc[1], pc[2]));
   }
+  // the placard's grip in the body frame (rig units): the stick a forearm out
+  // in front of the chest, the left fist just over the shoulder line, the
+  // right one above it; `pump` is the chant's lift, `bob` the idle one
+  const PLACARD = { z: 0.50, lo: 0.10, hi: 0.36, pump: 0.16, bob: 0.025 };
+  const _plA = new THREE.Quaternion(), _plB = new THREE.Quaternion(), _Z = new THREE.Vector3(0, 0, 1);
   // the body's own measures (rig units, body frame)
   function M(ch) {
     const S = ch.torsoShape, P = ch.profile || {};
@@ -151,26 +156,42 @@
     // a person far away and the same person as a full rig hold the same pose.
     // ch._pubT is the pose clock, ch._pubPh a per-body offset, ch._pubHype a
     // timed burst, ch._pubProp the held prop (a sign board rides the pump).
-    // a board held up over the head by its two lower corners (both arms up,
-    // a hand under each corner); a hype burst pumps it. The board RIDES the
-    // hands: it is placed on them every frame, not beside them.
+    // THE PLACARD (owner: "the way they are held and dropped is dumb"). A
+    // real one is a board stapled to the top of a wooden stick, and the STICK
+    // is what the hands hold: both fists round it upright in front of the
+    // chest, right over left, a forearm's reach out from the body. The board
+    // then rides above the head and a hand's width in front of the face, so
+    // it never cuts the head, the arms or the fists. A chant (ch._pubHype)
+    // pumps the whole thing up on the beat; otherwise it bobs and sways a
+    // little. Both fists are SOLVED onto the stick (charArmTo grip), and the
+    // prop (president_public.js giveSign: its origin is the lower grip, its
+    // +y the stick) is placed on that same line every frame.
     pubPlacard(ch, dt) {
       ch._pubT = (ch._pubT || 0) + dt;
       const hype = (ch._pubHype || 0) > 0;
       if (hype) ch._pubHype -= dt;
-      const pump = hype ? Math.sin(ch._pubT * 9) * 0.2 : Math.sin(ch._pubT * 1.4 + (ch._pubPh || 0)) * 0.04;
-      crowdArms(ch, dt, -2.72 + pump, -0.2, -2.72 + pump, 0.2, -0.3, -0.3);
+      const t = ch._pubT, ph = ch._pubPh || 0;
+      const lift = hype ? PLACARD.pump * Math.max(0, Math.sin(t * 4.6 + ph)) : PLACARD.bob * Math.sin(t * 1.4 + ph);
+      const sway = hype ? 0.07 * Math.sin(t * 2.3 + ph) : 0.035 * Math.sin(t * 0.7 + ph * 1.7);
+      const m = M(ch);
+      if (!m || !ch.body) {
+        // a rig without its measures: arms up, nothing placed
+        crowdArms(ch, dt, -2.4, -0.25, -2.4, 0.25, -0.6, -0.6);
+        return;
+      }
+      const y0 = m.sh + PLACARD.lo + lift, gap = PLACARD.hi - PLACARD.lo, gz = PLACARD.z;
+      // the stick leans with the sway: the upper fist rides off the line
+      gripPole(ch, "l", 0, y0, gz, 14, dt);
+      gripPole(ch, "r", Math.sin(sway) * gap, y0 + Math.cos(sway) * gap, gz, 14, dt);
       const pr = ch._pubProp;
-      if (pr && pr.parent && ch.sockets) {
-        ch.group.updateMatrixWorld(true);
-        ch.sockets.leftHand.getWorldPosition(_ikW); ch.sockets.rightHand.getWorldPosition(_ikF);
-        _ikW.add(_ikF).multiplyScalar(0.5);
-        pr.parent.worldToLocal(_ikW);
-        // (the prop's origin is its grip point: the board's bottom edge sits
-        // 0.34 above it; the stick hangs below and is not in anybody's hand)
-        pr.position.set(_ikW.x, _ikW.y - 0.30, _ikW.z);
-        pr.rotation.set(0, 0, pump * 0.15);
-        if (pr.children[0] && pr.children[0].geometry && pr.children[0].geometry.type === "CylinderGeometry") pr.children[0].visible = false;
+      if (pr && pr.parent) {
+        ch.body.updateWorldMatrix(true, false);
+        pr.parent.updateWorldMatrix(true, false);
+        bodyPt(ch, 0, y0, gz, _ikW);
+        pr.position.copy(pr.parent.worldToLocal(_ikW));
+        ch.body.getWorldQuaternion(_plA); pr.parent.getWorldQuaternion(_plB);
+        pr.quaternion.copy(_plB.invert().multiply(_plA));
+        pr.quaternion.multiply(_plA.setFromAxisAngle(_Z, -sway));
       }
     },
     // a little flag on a stick in the right hand, held up at the side of the
