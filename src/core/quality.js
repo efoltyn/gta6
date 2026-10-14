@@ -82,7 +82,8 @@
   const DEVICE = CBZ.deviceClass || "desktop";
   const MOBILE = DEVICE !== "desktop";
   const MOBILE_PR = DEVICE === "phone"
-    ? [0.9, 1.0, 1.15, 1.3, 1.5]   // phone CSS viewports are tiny (390x844): 1.0 alone reads soft
+    ? [2, 2, 2, 2, 2]              // phone: 2x (measured 2026-10-14, phone profile: the frame is CPU-bound,
+                                   // pr 0.9 -> half saved nothing, -> 3x cost ~25%; 2x is sharp at arm's length)
     : [2, 2, 2, 2, 2];             // tablet: the panel's own pixels (owner 2026-10-14: "blurry as shit
                                    // for a tiny saving"); speed comes from logic, never from blur
   if (MOBILE) for (let i = 0; i < QUALITY.length; i++) QUALITY[i].pr = Math.min(devicePixelRatio || 1, MOBILE_PR[i]);
