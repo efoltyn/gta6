@@ -31,6 +31,7 @@ By hand in a browser: `lab.html?kit=person-chair&live=1&cam=3q` (any static serv
 | `car-chair` | a real car (cityMakeCar + cardyn.js) drives into a loose chair | `speed`, `offset`, `chair`, `model`, `brakeAt` |
 | `building` | one facade style on a lot with real footway, kerb and road (streetKit); the probe measures any spill past the lot line | `style`, `lot=WxD`, `storeys`, `door`, `setback`, `retail`, `fit=0` (the pre-43abc8af sizing) |
 | `window-break` | a real building (city mode); N of its windows shot (`cityShatterRay`, a round) or punched (two swings); the probe looks through each hole from the street: what stands in it (object, material, colour, depth behind the glass), SLAB (a flat thing < 0.6 m in: the owner's grey slab), room seen, teeth left in the frame, glass pieces | `style`, `floor` (storey), `how` shoot/punch, `n`, `side`, `retail`, `storeys`, `x`/`z` (lot centre, default 40,60) |
+| `detain` | a man is cuffed and taken in on the real pipeline (city/restrain.js, CBZ.verbs, city/custody.js, city/boarding.js, mode city): the player's collar + Radio in (a cruiser pulls up, back seat, drives off), an officer's arrest, or the precinct desk (walked through a door). The camera is the player's eyes on him the whole way; FAIL if the body ever stops being drawn in view | `flow` player/officer/desk, `eyes` stare/free, `car=0` (no unit: walked off) |
 | `chair-tip` | one loose chair knocked over through pushables' own tip: the smallest smoke test | |
 | `empty` | the bare lab world | |
 

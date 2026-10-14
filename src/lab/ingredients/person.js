@@ -28,7 +28,8 @@
    opts: at [x, z], yaw (deg), role civilian|gang|cop|guard|inmate|thug|soldier|
          worker|exec, nerve 0..1 (absolute break point), weapon "Pistol"|"SMG"|...
          (armed, holstered until the brain or the kit draws it), brain false
-         (a puppet: walks and sits, decides nothing), speed (walk m/s)
+         (a puppet: walks and sits, decides nothing), speed (walk m/s),
+         cityPed true (moved by the city's layers, peds.js-style: see the mover)
    handle: walkTo(x,z,speed) sit(chairHandle) stand() draw() holster()
            aimAt(handle) lower() say(line) pose() response() */
 (function () {
@@ -241,6 +242,16 @@
         CBZ.actorAimAt(a, t, dt);
         a.poseAimBack = true;
       } else if (a.poseAimBack && !a._aimAt) a.poseAimBack = false;
+      /* A CITY PED (opts.cityPed) moves by peds.js's contract, not the lab's
+         orders: the city's own layers (city/custody.js, city/restrain.js,
+         CBZ.verbs, city/boarding.js, npclife) move a controlled body
+         themselves, and peds.js's move() only walks it to `target` while a
+         boarding arc's WALK beat asks it to (the crossing to the car door). */
+      if (a._cityPed) {
+        const arc = a._cbzArc;
+        if (!(arc && arc.phase === "walk") || (M && M.busy(a))) continue;
+        a._spd = a._boardRun ? 3.6 : 1.4;
+      }
       // MOVE (unless a posture sequence owns the body)
       const post = M ? M.posture(a) : "stand";
       // a body a posture owns DRIVES nothing: systems/pushables.js reads an
@@ -330,6 +341,7 @@
         _lab: { W: W }, _labWeapon: o.weapon !== undefined ? (o.weapon && o.weapon !== "none" && o.weapon !== "0" ? o.weapon : null) : (R.weapon || null),
       };
       if (a._labWeapon) { a.weapon = a._labWeapon; a._beltGun = a._labWeapon; a._holstered = true; }
+      if (o.cityPed) { a._cityPed = true; a.state = "walk"; a.speed = 0; }
       people.push(a);
       (CBZ.npcs || (CBZ.npcs = [])).push(a);
       a._brainOn = o.brain !== false && !!CBZ.brain;
