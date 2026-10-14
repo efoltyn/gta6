@@ -3565,37 +3565,144 @@
   // upper loft's fullest section (0.99 R), 1.25x the drop for a swung arm
   // reaching the same height from further down its length; above it the
   // loft's top dome (~0.81 R high), which a swing turns about the pivot.
-  /* THE SHOULDER IS THE JACKET'S, NOT A BALL. The shell used to stop INSIDE
-     the arm's top dome all the way round (the clamp below, above the pivot
-     too), so what a suit showed at the shoulder was the SLEEVE'S end dome — a
-     ball sitting on the end of a sloping trapezius, ringed by the painted
-     sleeve-head seam. A tailored jacket has a structured shoulder: the line
-     runs out level from the collar to past the arm and the sleeve hangs from
-     under it. So over the pivot the shell takes the union with a sphere
-     round the arm's own pivot, a pad's thickness bigger than the arm's top
-     dome (padR). The dome is a ball about that same pivot, so whatever the
-     arm does — swing, raise, cuffs — it turns INSIDE the pad and the seam
-     never opens; a raised arm leaves through the pad like a real sleeve. */
-  // (the sleeve head under the pad clears the arm's fullest section, ~R deep at the top)
-  function padR(S) { return S.R + 0.016 * S.vs; }
-  const PAD_LO = -0.15;                 // the pad's underside, as a share of padR below the pivot
+  /* THE SHOULDER OF A JACKET. The pad and the sleeve head were spheres round
+     the arm's pivot, a pad's thickness bigger than the arm's top dome — a
+     BALL as tall above the pivot as it was wide (1.1 arm radii), so its top
+     stood 6 cm (model) above the neck base and every suit wore two inflated
+     balloons. Worse, the shell's rings in that band were widened to the
+     ball's width ALL THE WAY UP TO THE NECK (partRings), so the shell's top
+     ring and the stand collar on it were as wide as the shoulders: the flat
+     plank across the back with the neck poking out of the middle.
+     Now ONE tailored shoulder shape, about the same pivot, serves the pad (on
+     the shell), the armhole and the sleeve head (on the arm):
+       - a superellipsoid, squared in the front view (SH_N) so the top runs
+         out level and turns down at a crisp shoulder point;
+       - its TOP is only a cloth layer and a thin pad over the arm's own dome
+         (~0.81 R), its SIDE and depth a cloth layer over the arm (R) —
+         structure, not bulk;
+       - the shell above it is a ROOF (jacketShoulderRings) from the pad top
+         in to the collar, rising a little to the neck, and the collar stands
+         against the neck.
+     The section across a swing (y-z) is no longer a circle, so a swung or
+     raised arm turns its sleeve head a little out through the pad: the
+     cloth bunching at a lifted shoulder, the same cloth on both. */
+  const SH_N = 2.6;                     // front-view squareness of the shoulder (2 = round)
+  const PAD_GROW = 0.003;               // the shell's pad stands this far (x vs) outside the sleeve head
+  const ROOF_RISE = 0.036;              // the shoulder line rises this much (x vs) from the sleeve head to the neck
+  const SH_SLOPE = 0.2;                 // ...and falls this much per unit out over the sleeve head (the arm's dome still clears)
+  const SH_TOP_N = 1.6;                 // the section across the top of the shoulders (2 = ellipse, lower = a lens)
+  // semi-axes of the shoulder about the arm pivot, `g` (x vs) further out:
+  // g = 0 the sleeve head, PAD_GROW the shell's pad
+  function shAxes(S, g) {
+    const R = S.R, v = S.vs, c = g * v;
+    return { out: R + 0.005 * v + c, up: 0.81 * R + 0.008 * v + c, dz: R + 0.005 * v + c, down: R + 0.005 * v + c };
+  }
+  // the shape's level set (1 on the surface; homogeneous of degree 2, so a
+  // point p projects onto the surface along its ray as p / sqrt(F))
+  function shF(A, dx, dy, z) {
+    if (dx > 0) dy += SH_SLOPE * dx;     // the shoulder line runs on DOWN over the sleeve head
+    const ay = dy >= 0 ? A.up : A.down;
+    return Math.pow(Math.pow(Math.abs(dx) / A.out, SH_N) + Math.pow(Math.abs(dy) / ay, SH_N), 2 / SH_N) + (z / A.dz) * (z / A.dz);
+  }
+  const PAD_LO = -0.15;                 // the pad's underside, as a share of its down axis below the pivot
   function jacketPad(S, x, y, z, out) {
-    const r = padR(S), dy = y - S.shoulderY;
-    if (dy < PAD_LO * r) return false;
-    const dx = Math.abs(x) - S.AX, d = Math.hypot(dx, dy, z);
-    if (d >= r || d < 1e-6) return false;
-    // medial of the pivot the pad merges into the trapezius: a vertex there is
+    const A = shAxes(S, PAD_GROW), dy = y - S.shoulderY;
+    if (dy < PAD_LO * A.down) return false;
+    const dx = Math.abs(x) - S.AX, F = shF(A, dx, dy, z);
+    if (F >= 1 || F < 1e-9) return false;
+    // medial of the pivot the pad merges into the roof: a vertex there is
     // never pushed toward the neck (it would go in through the body)
-    if (dx < -0.3 * r && dy < 0.6 * r) return false;
-    const k = r / d;
+    if (dx < -0.3 * A.out && dy < 0.6 * A.up) return false;
+    const k = 1 / Math.sqrt(F);
     out[0] = Math.sign(x || 1) * (S.AX + dx * k); out[1] = S.shoulderY + dy * k; out[2] = z * k;
     return true;
   }
+  /* THE TOP OF THE JACKET, from the pad's underside to the collar, top
+     first: the pad band (rings as wide as the shoulder shape at their own
+     height) and then the ROOF — the shoulder seam's line from the pad top
+     over the pivot in to the neck point, rising ROOF_RISE, steepening only
+     near the neck (a real shoulder seam curves up into the collar). The
+     roof's depth goes from the shell's own at the pad top to a collar's
+     clearance round the neck; partRings drops the column's rings above the
+     band's bottom and the stand collar goes on top of the last ring. */
+  /* HOW HIGH THE TOP MAY GO: the roof's rise and the stand collar share the
+     room between the pad top and the head's pivot (an adult has ~6 cm, a
+     child's head sits down on its shoulders and has ~1); a body without the
+     room wears a level shoulder line and a lower collar, never a collar up
+     through its jaw. */
+  function jacketTop(S) {
+    const yTop = S.shoulderY + shAxes(S, PAD_GROW).up, room = Math.max(0, S.pivotY - yTop - 0.006 * S.vs);
+    const collar = Math.min(0.02 * S.vs, Math.max(0.008 * S.vs, 0.4 * room));
+    return { rise: Math.max(0, Math.min(ROOF_RISE * S.vs, room - collar)), collar };
+  }
+  function jacketShoulderRings(S, ringAt, far) {
+    const A = shAxes(S, PAD_GROW), yP = S.shoulderY, yTop = yP + A.up;
+    // the collar seam clears the shirt's collar (its band is the neck + 2.2 cm,
+    // flaring 7% at its foot) and, behind, the body's own nape (the column's
+    // back is held behind the buried neck: torsoSpec THE NECK IS CARRIED BY THE BACK)
+    const nk = S.at(S.yTop);
+    const xN = S.nRx + 0.030 * S.vs, zN = S.nRz + 0.030 * S.vs, zbN = Math.max(zN, nk.zb + 0.014 * S.vs);
+    const yNk = yTop + jacketTop(S).rise;
+    // the shirt collar's band (partRings "collar": neck + 2.2 cm, x1.07 at its
+    // foot 5 cm under the neck ring, x0.99 at its top): no ring cuts into it
+    const cRx = S.nRx + 0.022 * S.vs, cRz = S.nRz + 0.022 * S.vs, cl = 0.008 * S.vs;
+    const clearCollar = function (r) {
+      const t = cl01((r.y - (S.yN - 0.05 * S.vs)) / (0.088 * S.vs)), k = r.y > S.yN + 0.045 * S.vs ? 0 : 1.07 - 0.08 * t;
+      if (!k) return;
+      r.a = Math.max(r.a, cRx * k + cl);
+      r.zf = Math.max(r.zf, S.nZc + cRz * k + cl - r.zc);
+      r.zb = Math.max(r.zb, r.zc - S.nZc + cRz * k + cl);
+    };
+    const xIn = S.AX - 0.28 * S.R;         // just over the sleeve head's medial edge (CAP_IN)
+    // THE BAND: level sections across the shoulders (no neck tilt), only out
+    // to xIn — lateral of that the shell is the armhole (cut) or the pad
+    // (jacketPad puts the vertices on the shape). A ring as wide as the
+    // whole shoulder is a superellipse that bulges its front and back out
+    // over the arm: the slab with a shelf under it that every jacket wore.
+    // Front and back ROLL OVER onto the top of the shoulder (the section
+    // through a shoulder is round fore and aft; only the front view is square).
+    const band = [];
+    for (const f of (far ? [1, 0.75, 0.4, 0, PAD_LO] : [1, 0.95, 0.88, 0.78, 0.66, 0.52, 0.35, 0.15, -0.05, PAD_LO])) {
+      const dy = f >= 0 ? f * A.up : f * A.down, y = yP + dy;
+      const r = ringAt(y);
+      r.y = y;
+      r.a = Math.max(r.a, xIn);
+      r.tw = 0;
+      const q = Math.max(0, dy) / A.up, m = 0.5 + 0.5 * Math.sqrt(1 - q * q);
+      r.zf *= m; r.zb = Math.max(r.zb * m, nk.zb + 0.014 * S.vs);   // (never in through the nape)
+      clearCollar(r);
+      // seen from above a shoulder is deep at the neck and thin at its point:
+      // the top sections turn from a box toward a lens (jacketFit still holds
+      // every vertex off the body)
+      r.n = r.n + (SH_TOP_N - r.n) * sm01(q);
+      band.push(r);
+    }
+    // THE ROOF: from the band's top in to the collar, rising to the neck
+    const ref = band[0], out = [];
+    for (const s of (far ? [1, 0.6, 0.25] : [1, 0.85, 0.7, 0.55, 0.4, 0.25, 0.12])) {
+      const y = yTop + (yNk - yTop) * Math.pow(s, 1.15);
+      const r = ringAt(Math.min(y, S.yTop));
+      r.y = y;
+      r.a = xIn - (xIn - xN) * s;
+      r.zf = ref.zf + (zN - ref.zf) * s; r.zb = ref.zb + (zbN - ref.zb) * s;
+      r.zc = ref.zc + (nk.zc - ref.zc) * s;
+      // the neck ring's tilt (front down to the collarbone notch, back up the
+      // nape) belongs to the collar, not to the whole width of the shoulders
+      r.tw = s * s;
+      // (the roof already rises to the neck: the nape's own rise on top of it
+      // put the back of the collar into the back of the head)
+      r.tb = (r.tb || 0) * 0.4;
+      r.n = SH_TOP_N + (2 - SH_TOP_N) * s * s;                   // the lens of the shoulders, round at the collar
+      clearCollar(r);
+      out.push(r);
+    }
+    return out.concat(band);
+  }
   function jacketArmIn(S) {
-    const tilt = Math.min(0, S.P.armOutZ || 0) - 0.02, R = S.R, pad = 0.004 * S.vs, rP = padR(S);
+    const tilt = Math.min(0, S.P.armOutZ || 0) - 0.02, R = S.R, pad = 0.004 * S.vs, lo = PAD_LO * shAxes(S, PAD_GROW).down;
     return function (y) {
       const h = y - S.shoulderY;
-      if (h >= PAD_LO * rP) return Infinity;                    // the pad (jacketPad) owns it
+      if (h >= lo) return Infinity;                    // the pad (jacketPad) owns it
       if (h <= 0) return S.AX - 0.99 * R + 1.25 * tilt * -h - pad;
       // (an arm held out — armour pushes it, ch.armWear — tips the dome in)
       const q = h / R;
@@ -3739,8 +3846,7 @@
           const aFree = r.a;
           r.a = Math.max(aHere + jacketHug(S, y), Math.min(r.a, armIn(y)));
           if (r.a < aFree - 1e-6) r.n = jacketFlankN(S, y, r, r.a - aHere);
-          const rP = padR(S), h = y - S.shoulderY;
-          if (h >= PAD_LO * rP && h < rP) r.a = Math.max(r.a, S.AX + rP * Math.sqrt(1 - (h / rP) * (h / rP)));
+          // (over the shoulder the section is jacketShoulderRings')
         }
         // the shoulder top rises with the shell (a jacket's rise eases in: a
         // step in ring height would stretch one band across the shoulder cap)
@@ -3765,11 +3871,6 @@
       const take = (p) => { for (const r of partRings({ S, part: p }, lod)) if (r.y > y0 && r.y < y1) at.push(r.y); };
       take("chest"); take("pelvis");
       if (S.chestBot > S.base + 0.001) take("waist");
-      const rP = padR(S);                                       // the pad's own sections
-      for (const k of [PAD_LO, -0.05, 0.15, 0.35, 0.52, 0.66, 0.78, 0.88, 0.95]) {
-        const y = S.shoulderY + k * rP;
-        if (y > y0 && y < y1) at.push(y);
-      }
       for (const k of [0.25, 0.5, 0.75]) at.push(y0 + k * (S.hipY - y0));   // the skirt
       at.sort((a, b) => a - b);
       ys = at.filter((y, i) => i === 0 || y - at[i - 1] > 0.002 * S.vs);
@@ -3794,9 +3895,16 @@
       }
       rings.push(r);
     }
-    if (part === "jacket") {                                     // the jacket's stand collar, higher at the back
+    if (part === "jacket") {
+      // the shoulders and the roof to the collar (jacketShoulderRings), in
+      // place of the column's rings above the pad's underside
+      const top = jacketShoulderRings(S, ringAt, far), yCut = top[top.length - 1].y + 0.002 * S.vs;
+      while (rings.length && rings[0].y >= yCut) rings.shift();
+      rings.unshift.apply(rings, top);
+      // the stand collar, against the neck, higher at the back
       const t = rings[0];
-      rings.unshift(Object.assign({}, t, { y: t.y + 0.03 * S.vs, a: t.a + 0.004, zf: t.zf + 0.004, zb: t.zb + 0.004, tf: t.tf + 0.03 * S.vs }));
+      const ch = jacketTop(S).collar;
+      rings.unshift(Object.assign({}, t, { y: t.y + ch, a: t.a - 0.002, zf: t.zf - 0.002, zb: t.zb - 0.002, tf: t.tf + ch }));
     }
     return rings;
   }
@@ -3974,37 +4082,34 @@
   }
   /* ==== THE ARMHOLE AND THE SLEEVE HEAD ===================================
      A jacket is a body with two ARMHOLES and two sleeves sewn into them. The
-     shell was one closed loft round the torso, so between the pad (a sphere
+     shell was one closed loft round the torso, so between the pad (then a sphere
      round the arm's pivot, jacketPad) and the flank under the arm its rings
      had to cross the top of the arm to get round it: a membrane through the
      sleeve 10-14 mm deep STANDING STILL (tools/overlap-audit.mjs), more as the
      arm swung, and the shoulder that looked broken from above.
      Now each side has a real armhole: the SLEEVE HEAD (sleeveCapGeometry) is
-     a sphere cap round the arm's own pivot, hung on the ARM, covering the
-     lateral side of that ball out to a plane x = AX - CAP_IN R. A sphere
-     about its centre is the same sphere however the arm turns, and a swing
-     keeps every point's x, so the cap fills exactly the same place in every
-     pose and its medial edge never moves. The torso shell STOPS at the
-     armhole: every shell vertex in that ball lateral of HOLE_IN (and medial
-     of it, whatever lies inside the arm at rest) is in the hole, every
-     triangle touching one is dropped and the vertices are compacted away
-     (torsoBake), so no shell surface is left where the arm can be. The sleeve
-     below is the arm's own painted loft, coming out of the cap (whose lower
-     band tucks into the loft rather than running tangent down it); the pad's
-     medial part is still the shell's (jacketPad), 6 mm outside the cap's
-     edge, so the seam is covered from above. Measured (overlap-audit): arm vs
-     jacket 13.9 mm standing / 17.5 mm mid-stride -> 3.7 mm worst in every
-     pose. Nothing to sync per frame, no morph targets on the shell. */
+     the tailored shoulder shape round the arm's own pivot (THE SHOULDER OF A
+     JACKET: shAxes / shF), hung on the ARM, covering its lateral side out to
+     a plane x = AX - CAP_IN R. The torso shell STOPS at the armhole: every
+     shell vertex inside the shape grown by the hole's margin lateral of
+     HOLE_IN (and medial of it, whatever lies inside the arm at rest) is in
+     the hole, every triangle touching one is dropped and the vertices are
+     compacted away (torsoBake), so no shell surface is left where the arm
+     can be. The sleeve below is the arm's own painted loft: the cap's lower
+     band narrows onto it (a sleeve head eased into the sleeve, not a ledge
+     standing proud of it); the pad's medial part is still the shell's
+     (jacketPad), PAD_GROW outside the cap, so the seam is covered from above.
+     Nothing to sync per frame, no morph targets on the shell. */
   const CAP_IN = 0.30;               // the cap's medial edge, in arm radii medial of the pivot
-  const HOLE_IN = 0.25;              // the shell's armhole: lateral of this, inside the ball
-  function capR(S) { return padR(S) - 0.006 * S.vs; }
+  const HOLE_IN = 0.25;              // the shell's armhole: lateral of this, inside the shape
+  const HOLE_GROW = PAD_GROW + 0.025;   // the hole reaches this far (x vs) outside the sleeve head
   // a shell vertex in the armhole: true, and `out` is where it sits on the
   // hole's rim (just outside the cap). torsoBake drops every triangle whose
   // three corners are all in the hole, so the shell really is OPEN there.
   function jacketArmhole(S, x, y, z, out) {
     const dx = Math.abs(x) - S.AX, dy = y - S.shoulderY, R = S.R;
-    const d = Math.hypot(dx, dy, z);
-    if (d >= padR(S) + 0.025 * S.vs || d < 1e-6) return false;
+    const F = shF(shAxes(S, HOLE_GROW), dx, dy, z);
+    if (F >= 1 || F < 1e-9) return false;
     // medial of the cap's edge the hole still takes whatever lies INSIDE the
     // arm at rest (the shell over the body's own shoulder end, which is
     // buried in the deltoid): there the sleeve and the body show, both the
@@ -4014,51 +4119,80 @@
         : (dx * dx + z * z) / (R * R) + (dy * dy) / (0.9 * R * 0.9 * R);
       if (q >= 1) return false;
     }
-    const k = (capR(S) + 0.003 * S.vs) / d;
+    const k = 1 / Math.sqrt(shF(shAxes(S, 0.003), dx, dy, z));
     out[0] = Math.sign(x || 1) * (S.AX + dx * k); out[1] = S.shoulderY + dy * k; out[2] = z * k;
     return true;
   }
   /* The sleeve head of one arm, in that ARM's frame (its group origin is the
      pivot; its rest carry rotation.z = side * armOutZ is undone so the cap's
-     edge plane is the body's x plane). Lateral pole, lat-long rings out to
-     the edge plane. uv: one cloth texel of the garment (the sleeve's). */
+     edge plane is the body's x plane). Laid out like the arm's own loft —
+     rings down the arm, four faces round it with their seams duplicated — so
+     it wears the SLEEVE'S cloth (`paint`: the arm row's painter, stripes and
+     all, running on down the sleeve), not one flat texel: the dome from the
+     top of the shape, the shoulder point, then the band below the pivot
+     easing in onto the loft (0.97 R at its hem, inside the sleeve). */
   const SLEEVE_CAP_GEO = Object.create(null);
-  function sleeveCapGeometry(S, side, armOutZ, uv) {
-    const key = S.key + "|" + side + "|" + (+armOutZ).toFixed(4) + "|" + uv[0].toFixed(5) + "," + uv[1].toFixed(5);
+  const CAP_FACE = ["front", "side", "back", "side"];
+  function sleeveCapGeometry(S, side, armOutZ, paint) {
+    const fixed = Array.isArray(paint) ? paint : null;
+    const pkey = fixed ? fixed[0].toFixed(5) + "," + fixed[1].toFixed(5) : (paint && paint.key) || "-";
+    const key = S.key + "|" + side + "|" + (+armOutZ).toFixed(4) + "|" + pkey;
     let g = SLEEVE_CAP_GEO[key];
     if (g) return g;
-    const r = capR(S), aMax = Math.acos(Math.max(-1, Math.min(1, -CAP_IN * S.R / r)));
-    const NA = 10, NB = 20, c = Math.cos(-side * armOutZ), sn = Math.sin(-side * armOutZ);
-    const P = [], N = [], U = [], I = [];
-    for (let i = 0; i <= NA; i++) {
-      const a = aMax * i / NA;
-      for (let j = 0; j <= NB; j++) {
-        const b = 2 * Math.PI * j / NB;
-        const nx = side * Math.cos(a), ny = Math.sin(a) * Math.cos(b), nz = Math.sin(a) * Math.sin(b);
-        // body orientation -> arm local: Rz(-rest carry)
-        const lx = c * nx - sn * ny, ly = sn * nx + c * ny;
-        // below the shoulder the sleeve is the arm's own loft: the cap tucks
-        // into it there instead of running tangent down its side
-        const rr = ny < -0.35 ? r * 0.55 : r;
-        P.push(lx * rr, ly * rr, nz * rr); N.push(lx, ly, nz); U.push(uv[0], uv[1]);
+    const A = shAxes(S, 0), R = S.R, edge = -CAP_IN * R;
+    const c = Math.cos(-side * armOutZ), sn = Math.sin(-side * armOutZ);
+    const nq = 6, RV = 4 * (nq + 1);
+    // ring heights over the pivot: the dome (cos-spaced to the top), then the
+    // band below easing onto the sleeve
+    const hs = [];
+    for (let i = 0; i <= 7; i++) hs.push(A.up * Math.cos((Math.PI / 2) * i / 7));
+    for (const f of [0.12, 0.25, 0.38, 0.5]) hs.push(-f * R);
+    const rHem = 0.86 * R;               // inside the sleeve: the band crosses it steeply (no coplanar z-fight)
+    // the horizontal radius of the shape at height dy in direction (sx, cz)
+    const rho = function (dy, sx, cz) {
+      if (dy >= A.up) return 0;
+      let lo = 0, hi = 2.5 * R;
+      for (let it = 0; it < 30; it++) { const m = 0.5 * (lo + hi); if (shF(A, m * sx, dy, m * cz) < 1) lo = m; else hi = m; }
+      return lo;
+    };
+    const P = [], U = [], I = [], keep = [];
+    for (let i = 0; i < hs.length; i++) {
+      const dy = hs[i];
+      // below the pivot the band narrows onto the arm's own loft
+      const w = dy < 0 ? sm01(-dy / (0.4 * R)) : 0;
+      for (let f = 0; f < 4; f++) for (let k = 0; k <= nq; k++) {
+        const al = -Math.PI / 4 + f * Math.PI / 2 + (k / nq) * Math.PI / 2;
+        const sx = Math.sin(al), cz = Math.cos(al);
+        let r = rho(Math.max(dy, -0.999 * A.down), sx, cz);
+        if (w > 0) r = r + (rHem - r) * w;
+        const bx = r * sx, by = dy, bz = r * cz;       // body orientation, about the pivot
+        keep.push(side * bx >= edge - 1e-6 ? 1 : 0);
+        P.push(c * bx - sn * by, sn * bx + c * by, bz);
+        const uv = fixed ? fixed : (paint ? paint.fn(CAP_FACE[f], k / nq, 0.93) : [0, 0]);
+        U.push(uv[0], uv[1]);
       }
     }
-    for (let i = 0; i < NA; i++) for (let j = 0; j < NB; j++) {
-      const a0 = i * (NB + 1) + j, a1 = a0 + 1, b0 = a0 + NB + 1, b1 = b0 + 1;
-      if (side > 0) I.push(a0, b0, a1, a1, b0, b1); else I.push(a0, a1, b0, a1, b1, b0);
+    // the medial side past the edge plane is the shell's (the pad): a quad
+    // with a corner past it is dropped, the rest stays
+    for (let i = 0; i < hs.length - 1; i++) for (let f = 0; f < 4; f++) for (let k = 0; k < nq; k++) {
+      const a0 = i * RV + f * (nq + 1) + k, a1 = a0 + 1, b0 = a0 + RV, b1 = b0 + 1;
+      if (!(keep[a0] && keep[a1] && keep[b0] && keep[b1])) continue;
+      I.push(a0, b0, a1, a1, b0, b1);
     }
     g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
-    g.setAttribute("normal", new THREE.Float32BufferAttribute(N, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(new Array(P.length).fill(0), 3));
     g.setAttribute("uv", new THREE.Float32BufferAttribute(U, 2));
     g.setIndex(I);
+    finishGeo(g);
     g.computeBoundingBox(); g.computeBoundingSphere();
     g.name = "sleeve-cap";
     g._shared = true;
     return (SLEEVE_CAP_GEO[key] = g);
   }
-  // CBZ.humanSleeveCap(rig, side, uv) -> the sleeve head for the arm on `side`
-  // (+1 = the +x arm), or null on a rig with no shaped torso
+  // CBZ.humanSleeveCap(rig, side, paint) -> the sleeve head for the arm on
+  // `side` (+1 = the +x arm), or null on a rig with no shaped torso. paint:
+  // the sleeve's painter {key, fn(face, u, v)} (or one [u, v] texel)
   CBZ.humanSleeveCap = function (rig, side, uv) {
     const S = rig && rig.torsoShape;
     if (!S || !uv) return null;

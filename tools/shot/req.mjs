@@ -109,7 +109,27 @@ const sides = [];
 const beforeRef = val("--before", has("--ba") ? "origin/main" : null);
 if (beforeRef) {
   let bc; try { bc = g(["rev-parse", beforeRef + "^{commit}"]); } catch (_) { die("no such ref " + beforeRef); }
-  sides.push({ label: "before", branch: beforeRef, commit: bc });
+  let note = "";
+  /* THE LAB IS THE CAMERA, NOT THE SUBJECT. A --ba of a kit written on this
+     branch (or a kit/ingredient changed here) failed on the before side:
+     "no kit 'x'". The before side shoots the OLD GAME through TODAY'S lab:
+     its tree with src/lab/ taken from the after side. */
+  const isLab = val("--world") === "lab" || (!val("--world") && worldForPreset(val("--preset", null)) === "lab");
+  if (isLab) {
+    try {
+      const tmp = path.join(mkdtempSync(path.join(os.tmpdir(), "shot-ba-")), "index");
+      const env = { ...process.env, GIT_INDEX_FILE: tmp };
+      try {
+        g(["read-tree", bc], { env });
+        const had = g(["ls-files", "--", "src/lab"], { env }).split("\n").filter(Boolean);
+        if (had.length) g(["update-index", "--force-remove", "--", ...had], { env });
+        g(["read-tree", "--prefix=src/lab/", after.commit + ":src/lab"], { env });
+        const tree = g(["write-tree"], { env });
+        if (tree !== g(["rev-parse", bc + "^{tree}"])) { bc = g(["commit-tree", tree, "-p", bc, "-m", "shot: before side with the after side's src/lab"]); note = "+lab"; }
+      } finally { try { rmSync(path.dirname(tmp), { recursive: true, force: true }); } catch (_) {} }
+    } catch (e) { console.error("shot: could not carry src/lab to the before side: " + String(e.stderr || e.message).trim()); }
+  }
+  sides.push({ label: "before", branch: beforeRef + note, commit: bc });
 }
 sides.push({ label: beforeRef ? "after" : "shot", branch: branch + (after.wip ? "+wip" : ""), commit: after.commit });
 
