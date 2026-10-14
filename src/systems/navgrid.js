@@ -187,6 +187,29 @@
     _dw.length = 0;
   }
 
+  /* GROUND THAT IS GONE IS NOT A FLOOR. A sinkhole (world/sinkhole.js) or
+     any other open hole publishes CBZ.navVoids = [{x, z, r}], and every cell
+     inside one is blocked — nobody plans a walk across a 40 m drop. A moved
+     CBZ.navVoidsVersion makes focus() rebuild, the same as a moved window. */
+  let builtVoids = 0;
+  function markVoids(J) {
+    const V = CBZ.navVoids;
+    builtVoids = CBZ.navVoidsVersion || 0;
+    if (!V || !V.length) return;
+    const N = J.n, buf = J.buf;
+    for (let i = 0; i < V.length; i++) {
+      const v = V[i];
+      if (!v || !(v.r > 0)) continue;
+      const R = v.r + BODY_R;
+      const x0 = Math.max(0, ((v.x - R - J.oX) / STEP) | 0), x1 = Math.min(N - 1, ((v.x + R - J.oX) / STEP) | 0);
+      const z0 = Math.max(0, ((v.z - R - J.oZ) / STEP) | 0), z1 = Math.min(N - 1, ((v.z + R - J.oZ) / STEP) | 0);
+      for (let k = z0; k <= z1; k++) for (let j = x0; j <= x1; j++) {
+        const cx = J.oX + (j + 0.5) * STEP - v.x, cz = J.oZ + (k + 0.5) * STEP - v.z;
+        if (cx * cx + cz * cz < R * R) buf[k * N + j] = 1;
+      }
+    }
+  }
+
   // mark one budget's worth of boxes; returns true when the window is finished
   function pumpBuild() {
     if (!job) return false;
@@ -222,6 +245,7 @@
     job.ms += ((window.performance && performance.now) ? performance.now() : Date.now()) - t0;
     if (job.i < job.boxes.length) return false;
     carveDoorways(job);
+    markVoids(job);
     // downsample for the coarse tier, then swap the finished window in
     const CN = Math.ceil(job.n / COARSE);
     if (!coarse || coarse.length !== CN * CN) coarse = new Uint8Array(CN * CN);
@@ -255,6 +279,7 @@
     const stale = !blocked || half !== reach
       || Math.abs(x - cx0) > keep || Math.abs(z - cz0) > keep
       || (watch && (CBZ.colliders || []).length !== builtCols)
+      || (CBZ.navVoidsVersion || 0) !== builtVoids
       || now - builtT > REBUILD_BACKSTOP || now < builtT;
     if (stale && !job) startBuild(x, z, reach);
     if (job) pumpBuild();                 // a slice per frame; the old window still serves

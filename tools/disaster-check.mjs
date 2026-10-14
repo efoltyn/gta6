@@ -10,6 +10,7 @@
      node tools/disaster-check.mjs                      # index.html (baseline)
      node tools/disaster-check.mjs --url disaster.html  # the slice page
      node tools/disaster-check.mjs --quick              # skip the roster sweep
+     node tools/disaster-check.mjs --only volcano,quake # sweep just these defs
      node tools/disaster-check.mjs --json
 
    THREE THINGS IT ASSERTS, and they are different in kind:
@@ -52,6 +53,11 @@ const HOLD = FAST ? 240 : 5400;
    machine legitimately takes a while. */
 const PATIENCE = (QUICK || FAST) ? { engine: 60000, play: 100000 } : { engine: 150000, play: 300000 };
 const JSON_OUT = has("--json");
+/* --only tornado[,quake]: sweep just these disasters (a builder checking the
+   one def they changed on the real island, without the other ten minutes). */
+const ONLY = arg("--only", "") ? arg("--only", "").split(",") : null;
+// --mag 3: build the forced disaster at this size instead of the seeded roll
+const MAG = arg("--mag", "");
 const say = (m) => { if (!JSON_OUT) console.log(m); };
 
 /* THE CENSUS. Every row is a system this game is actually made of, named by
@@ -125,8 +131,7 @@ const CENSUS = [
 const ROSTER_ALL = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado",
   "hurricane", "blizzard", "meteor", "sinkhole", "volcano"];
 // --only flashflood,quake : run just these through the sweep (a builder's loop)
-const ONLY = arg("--only", "");
-const ROSTER = ONLY ? ROSTER_ALL.filter((id) => ONLY.split(",").includes(id)) : ROSTER_ALL;
+const ROSTER = ONLY ? ROSTER_ALL.filter((id) => ONLY.includes(id)) : ROSTER_ALL;
 
 const report = { url: URL_REL, ok: false, fails: [], measures: {}, errors: [], census: {} };
 const fail = (m) => { report.fails.push(m); };
@@ -272,10 +277,10 @@ try {
        reached — which is a fact about the harness, not about the game. A
        reset() before each force gives every def the same clean island, the
        same live bot field and a living player to threaten. */
-    for (const id of ROSTER) {
+    for (const id of (ONLY || ROSTER)) {
       const r = await rig.evl(`(async () => {
         CBZ.modes.survival.reset(CBZ.game);
-        if (!CBZ.disasters.force(${JSON.stringify(id)})) return { forced: false };
+        if (!CBZ.disasters.force(${JSON.stringify(id)}${MAG ? ", { mag: " + (+MAG) + " }" : ""})) return { forced: false };
         let active = 0, ticks = 0, warned = 0, ended = false;
         for (let i = 0; i < 5400 && !ended; i++) {
           CBZ.stepSim(1 / 60); ticks++;
@@ -286,10 +291,23 @@ try {
           if (i % 150 === 0) await new Promise(r => setTimeout(r, 0));
         }
         const p = CBZ.player;
+        // the wildfire reports what it did to the REAL island (fuel bed, houses, cars, cost)
+        const fire = ${JSON.stringify(id)} === 'wildfire' && CBZ.wildfireAudit ? CBZ.wildfireAudit() : undefined;
         // the routed flood reports what it did on the real island
         const ff = ${JSON.stringify(id)} === 'flashflood' && CBZ.flashflood ? CBZ.flashflood.stats() : null;
-        return { forced: true, active, warned, ticks, ended, flood: ff ? { grid: ff.grid, maxDepth: +(+ff.maxDepth).toFixed(2), frontSpeed: +(+ff.frontSpeed).toFixed(2),
-                   carsSwept: ff.carsSwept, carsFloated: ff.carsFloated, lids: ff.lidsPopped, bridges: ff.bridges, rooms: ff.roomsFlooded, frameMs: ff.frameMs, solveMs: ff.solveMsPerFrame, bodyMs: ff.bodyMsPerFrame, surfaceMs: ff.renderMsPerFrame, worstMs: ff.worstFrameMs, uploadKB: Math.round((ff.uploadBytes || 0) / 1024), silt: ff.siltArea, events: (CBZ.flashflood.events() || []).slice(0, 12) } : null,
+        // what the vortex DID to the island (systems/tornado.js counters)
+        const tw = (${JSON.stringify(id)} === "tornado" && CBZ.tornado && CBZ.tornado.audit) ? (function (a, pf) {
+          const F = (CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.fragile) || [];
+          const parts = F.map(function (b) { return CBZ.tornado.partsOf(b); });
+          return { ef: a.path ? a.path.ef : -1, buildings: F.length,
+            withRoofParts: parts.filter(function (p) { return p && p.roof > 0; }).length,
+            separable: parts.filter(function (p) { return p && p.separable; }).length,
+            roofsDamaged: a.roofsDamaged, roofsRemoved: a.roofsRemoved, wallsDown: a.wallsDown, buildingsFailed: a.buildingsFailed,
+            housesSwept: a.housesSwept, treesDown: a.treesDown, carsMoved: a.carsMoved, carsRolled: a.carsRolled, carsThrown: a.carsThrown,
+            debrisLofted: a.debrisLofted, scarSections: a.scarSections, hailStones: a.hailStones, perf: pf };
+        })(CBZ.tornado.audit(), CBZ.tornado.perf()) : undefined;
+        return { forced: true, active, warned, ticks, ended, tornado: tw, flood: ff ? { grid: ff.grid, maxDepth: +(+ff.maxDepth).toFixed(2), frontSpeed: +(+ff.frontSpeed).toFixed(2),
+                   carsSwept: ff.carsSwept, carsFloated: ff.carsFloated, lids: ff.lidsPopped, bridges: ff.bridges, rooms: ff.roomsFlooded, frameMs: ff.frameMs, solveMs: ff.solveMsPerFrame, bodyMs: ff.bodyMsPerFrame, surfaceMs: ff.renderMsPerFrame, worstMs: ff.worstFrameMs, uploadKB: Math.round((ff.uploadBytes || 0) / 1024), silt: ff.siltArea, events: (CBZ.flashflood.events() || []).slice(0, 12) } : null, fire,
                  x: p.pos.x, y: p.pos.y, z: p.pos.z,
                  live: CBZ.bots ? CBZ.bots.filter(b => !b.dead).length : 0,
                  killed: CBZ.bots ? CBZ.bots.filter(b => b.dead).length : 0 };
@@ -301,6 +319,8 @@ try {
       if (r.x != null && !(isFinite(r.x) && isFinite(r.y) && isFinite(r.z))) fail(id + ": player position went NaN");
       say(`  ${id.padEnd(11)} ${r.active ? String(r.active).padStart(4) + " active ticks · killed " + r.killed : "NEVER ACTIVE"}`);
       if (r.flood) say("              flood: " + JSON.stringify(r.flood));
+      if (r.fire) say("              fire: " + JSON.stringify(r.fire));
+      if (r.tornado) say("              " + JSON.stringify(r.tornado));
     }
     if (sweep.neverActive.length) fail("never reached active: " + sweep.neverActive.join(", "));
   } else {

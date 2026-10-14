@@ -1,7 +1,8 @@
 /* ============================================================
-   systems/quake.js — THE SUBDUCTION-ZONE EARTHQUAKE CORE (CBZ.quake).
+   systems/quake.js — THE EARTHQUAKE (CBZ.quake). One event, run the same
+   way on the disaster island, in the city and in the lab.
 
-   OWNER SCIENCE, and this file is the implementation of it verbatim:
+   OWNER SCIENCE, implemented, not paraphrased:
 
      "The shaking itself rarely kills directly. Primary deaths: CRUSHING and
       BLUNT FORCE TRAUMA from falling debris (glass, masonry, facades, heavy
@@ -12,63 +13,63 @@
       shelves. Outdoors: open ground far from structures, trees, streetlights,
       power lines that fall OUTWARD."
 
-   Every clause above is a mechanic here, and NONE of them is the shake:
+   WHAT AN EARTHQUAKE IS, HERE (each a section below):
 
-     shed()      buildings SHED. Glass panes and masonry spall off the facade
-                 EDGES and fall as real transient bodies under gravity. They
-                 strike actors ON THE WAY DOWN, not on landing. Density scales
-                 with the structural ledger stage the caller reports, so a
-                 building about to pancake sheds hardest — which makes the
-                 strip of ground beside a wounded tower the deadliest place on
-                 the map and the open square the safest. THAT ASYMMETRY IS THE
-                 WHOLE LESSON, and it is produced by geometry, not by a rule.
-     cover()     drop, cover, hold on. A registered heavy table/desk is real
-                 protection (x0.05); a roof over your head is partial (x0.55);
-                 the 1.5 m strip against an exterior wall or window is WORSE
-                 than the open street (x1.35), because that is where the
-                 facade lands.
-     gasFire()   ruptured gas mains light damaged buildings. In the city this
-                 is city/structural.js's BURNING state — its floor automaton,
-                 its wind-biased spread, its load-path burn-through — so no
-                 fire model is written here. Off a city lot (the survival
-                 island has no lots) a small local flame stands in and reports
-                 its structural damage back through the caller's own hook.
-     dropLine()  a pole comes down AWAY from the structure it stands beside,
-                 which is exactly why "open ground" is not the same as "open
-                 ground under the wires". The conductor lies live, arcing, and
-                 touching it electrocutes.
+     source + path   magnitude is the SOURCE; what reaches a street is the
+                     ground motion attenuated over the distance to the
+                     rupture and amplified by the soil under it (published
+                     relations: Wells-Coppersmith rupture size, Boore-
+                     Atkinson 2008 PGA, Rathje 2004 period, Worden 2012 MMI).
+                     The same M7 is a wrecking ball over the fault and a long
+                     sway 100 km off.
+     wave train      P (the vertical jolt), S (the damaging shaking, at the
+                     site's period, for as long as the rupture runs), surface
+                     waves (the slow roll of a big distant quake), coda,
+                     aftershocks (Gutenberg-Richter under Bath's cap, Omori
+                     front-loaded), each with its own distance.
+     buildings       by structural system (the facade grammar's `structure:`)
+                     and height (period): HAZUS-style fragility in spectral
+                     demand, one draw per building per quake. Masonry sheds
+                     its facade and drops its parapets and chimney stacks;
+                     glass rains off curtain walls; a soft storey racks flat
+                     and the floors above come down onto it; complete =
+                     the shared collapse engine. All of it ON THE BUILDING'S
+                     OWN GEOMETRY through one adapter (BD) to city/collapse.js
+                     and city/demolition.js.
+     ground          cracks open in the roads, mains break and flood the
+                     street, soft ground by the water liquefies (sand boils,
+                     settling, leaning buildings, sinking cars), collapses
+                     raise dust in the building's own colour.
+     cars            a parked car is a sprung mass with its handbrake on: it
+                     rocks, heaves, walks along its own axis, and is dented
+                     or crushed by what falls on it.
+     people          at the first jolt everyone decides once: under a table,
+                     out of the door, off the pavement, or crouch in the open.
+     what kills      every falling body in systems/debris.js, priced by its
+                     own kinetic energy, on the way down (debris.js moves
+                     things; it hurts no one: that is this file's job);
+                     then gas fires (city/structural.js BURNING where a real
+                     lot exists) and downed live conductors.
+     cover()         drop, cover, hold on: a table x0.05, a roof x0.55, the
+                     1.5 m strip against a facade x1.35 (worse than the open
+                     street, because that is where the facade lands).
 
-   REUSE, NOT REINVENTION — what this file deliberately does not own:
-     · the structural ledger  → CBZ.structure (city) / the caller's ledger
+   REUSE, NOT REINVENTION — what this file does not own:
+     · the structural ledger  → the caller's (hooks.damage / hooks.collapse),
+                                CBZ.structure in the city
+     · debris bodies          → CBZ.debris (fracture, rigid bodies, rubble)
+     · collapse               → CBZ.collapse / CBZ.cityDemolition via BD
      · fire spread            → CBZ.structure.ignite
      · deaths                 → CBZ.surv.hurt / CBZ.cityKillPed / cityHurtPlayer
-                                (the killfeed is the only popup; nothing here
-                                 toasts anything)
      · knockdown/ragdoll      → CBZ.body
-     · furniture              → the arena's own rooms (b.interior.covers) /
-                                CBZ.propSeats in the city
      · the shake              → CBZ.shake
-   What it DOES own is one thing nothing else in the game had: a piece of a
-   building in the air with mass, on its way to a person.
 
-   WHY ITS OWN DEBRIS TICKER, given CBZ.fx.dropDebris exists: fx.js's debris
-   updater is `if (CBZ.game.mode !== "survival") return`, and it only damages
-   on LANDING, through a radius. A quake needs debris in the CITY too, and a
-   masonry block kills at head height while it is still falling. Both are
-   structural differences, not preferences.
+   DETERMINISM: on the island every draw (the source, the aftershock list,
+   each building's fragility draw, cracks, who runs where) comes from the
+   disaster director's seeded stream (CBZ.survRnd), so two clients agree.
+   dressArena() (tables, poles) is position-hashed.
 
-   DUAL MODE, the shape systems/tornado.js established: survival actors go
-   through CBZ.surv.hurt (which resolves the kill-feed cause); city actors go
-   through the kill bus or a knockdown. NO PRIVATE HEALTH LEDGER EXISTS HERE —
-   a city ped is either killed by the piece that hit them or knocked down by
-   it, so this file adds nothing to the `.hp -=` ratchet.
-
-   DETERMINISM: this is a runtime event, not a generation path, so the debris
-   scatter uses Math.random. The one BUILD path here — dressArena(), which
-   gives the survival island the day-room tables and utility poles the lesson
-   needs — is position-hashed through CBZ.hash01 and never touches an rng
-   stream.
-
+   Lab: node tools/lab/run.mjs --kit quake --params 'M=7&dist=12'.
    Ratchet: CBZ.quakeAudit().
    Flags: QUAKE_DEBRIS · QUAKE_COVER · QUAKE_UTILITY · QUAKE_ARENA_KIT ·
           CITY_QUAKE (the whole city-side event, default OFF).
@@ -101,8 +102,14 @@
     fireKills: 0, lineKills: 0,
     gasFires: 0, gasFiresShared: 0, linesDown: 0, shocks: 0,
     coverAnchors: 0, coverSaves: 0, ducked: 0, kitTables: 0, kitPoles: 0,
-    knockdowns: 0, staggers: 0, aftershocks: 0, pgaPeak: 0,
+    knockdowns: 0, staggers: 0, aftershocks: 0, pgaPeak: 0, mag: 0,
+    panesBroken: 0, wallHits: 0, parapets: 0, chimneys: 0, softStoreys: 0, collapses: 0,
+    cracks: 0, mains: 0, boils: 0, liquefied: 0, settled: 0, dustClouds: 0,
+    carsHit: 0, carsCrushed: 0, carsRolled: 0, evacuated: 0, crowd: {},
+    tickN: 0, tickMs: 0, tickMsMax: 0, jobErrors: 0, jobWaits: 0,
   };
+  // the device budget (debris.js sizes its own pools the same way)
+  const PHONE = CBZ.deviceClass === "phone";
 
   /* THE DRAW, AND WHO OWNS IT. The header above says a runtime event does not
      need a seed, and for one player that was true. It stops being true the
@@ -304,7 +311,7 @@
     let best = 99;
     for (let i = 0; i < S.length; i++) {
       const b = S[i];
-      if (!b || b.fallen) continue;
+      if (!b || b.fallen || b.collapsed) continue;
       const bx = b.x != null ? b.x : (b.building ? b.building.ox : null);
       if (bx == null) continue;
       const bz = b.z != null ? b.z : b.building.oz;
@@ -426,63 +433,34 @@
       if (p.ra) p.ra.rotation.z = 0;
     }
   }
-
   /* ============================================================
-     SHEDDING — the thing that actually kills people.
+     WHAT FALLS, AND WHO IT HITS.
+
+     This file used to fly its own "pieces": BoxGeometry panes and hashed
+     lumps of a box, spawned on the footprint PERIMETER of a building it only
+     knew as a box, in a private integrator. Swapped boxes, the exact thing a
+     quake must not look like. Now nothing falls that was not part of the
+     world:
+
+       glass      the building's own panes, burst through the pane's own
+                  owner (city/buildings.js cityShatterRay, or the island's
+                  pane contract) into CBZ.debris radial shards
+       masonry    the building's own wall, opened through the building
+                  adapter below (city: CBZ.cityCarveWall, the carve every
+                  rocket uses; island: a slab of the face in its own wall
+                  material through CBZ.debris)
+       parapets,  the triangles of the building's OWN roof line (crown,
+       chimneys   parapet run, chimney stack) peeled out of its merged mesh
+                  and handed to CBZ.debris as the rigid bodies they become
+
+     and every one of them is a rigid body in systems/debris.js. What this
+     file adds is the one thing debris.js does not do: a falling body that
+     reaches a person or a car HITS them, priced by its own kinetic energy
+     (mass from its own volume, speed from its own fall), on the way down.
      ============================================================ */
-  const MAX_PIECES = 170;
-  const pieces = [];
-  const GEO_CACHE = new Map();
-  function pieceGeo(kind, s) {
-    // quantised so a whole quake's worth of debris shares a handful of buffers
-    const q = Math.max(1, Math.round(s * 6));
-    const k = kind + q;
-    let g = GEO_CACHE.get(k);
-    if (!g) {
-      const u = q / 6;
-      g = kind === "glass"
-        ? new THREE.BoxGeometry(u * 1.6, u * 2.1, 0.05)
-        : brokenChunk(u, u * (0.55 + (q % 3) * 0.22), u * 0.85, q);
-      g._shared = true;
-      GEO_CACHE.set(k, g);
-    }
-    return g;
-  }
-  /* A LUMP OF BROKEN WALL, not a box. Masonry used to shed as clean cuboids
-     in five greys: dice falling off a painted building. A torn-off piece of
-     facade is a slab with one or two faces still flat (the wall face, the
-     back of the render) and the rest ragged, so the chunk is a box cut into
-     a 2x2x2 lattice whose inner and edge vertices are pushed about by a hash
-     of the lattice point, then split to flat-shaded triangles so every
-     fracture facet catches the light on its own. Quantised and cached, so a
-     whole quake still shares a handful of buffers. */
-  function brokenChunk(w, h, d, salt) {
-    const b = new THREE.BoxGeometry(w, h, d, 2, 2, 2);
-    const pa = b.attributes.position;
-    const hs = function (x, y, z) {
-      const v = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + salt * 17.3) * 43758.5453;
-      return v - Math.floor(v) - 0.5;
-    };
-    for (let i = 0; i < pa.count; i++) {
-      const x = pa.getX(i), y = pa.getY(i), z = pa.getZ(i);
-      // the +z face stays the flat wall face; everything else is fracture
-      const face = z > d * 0.49 ? 0.25 : 1;
-      const k = 0.34 * face;
-      pa.setXYZ(i,
-        x + hs(x, y, z) * w * k,
-        y + hs(y, z, x) * h * k,
-        z + hs(z, x, y) * d * k * 0.6);
-    }
-    const g = b.toNonIndexed();
-    b.dispose();
-    g.computeVertexNormals();
-    return g;
-  }
-  const MASONRY = [0x8b9097, 0x70757e, 0x9aa0a8, 0xb0aa9c, 0x5c6168];
-  /* WHAT THE BUILDING IS MADE OF. A piece off a red-brick house is red
-     brick: two in three lumps wear the building's own wall material (the
-     biggest opaque coloured mesh in its group, cached on the group), the
-     third is the grey concrete core behind the facade. */
+  const MASONRY_GREY = 0x8b9097;
+  /* WHAT THE BUILDING IS MADE OF: the biggest opaque coloured mesh in its
+     group (cached on the group). A piece off a red-brick house is red brick. */
   function wallMatOfGroup(grp) {
     if (!grp) return null;
     const ud = grp.userData || (grp.userData = {});
@@ -490,8 +468,6 @@
     let best = null, bestN = -1;
     grp.traverse(function (o) {
       if (!o.isMesh || !o.material || Array.isArray(o.material) || o.material.transparent || !o.material.color) return;
-      // a vertex-coloured merge paints its colour per vertex; a chunk has none
-      // and would draw black in it
       if (o.material.vertexColors) return;
       if (o.material.emissive && o.material.emissive.getHex() !== 0 && o.material.emissiveIntensity > 0.2) return;
       const pa = o.geometry && o.geometry.attributes && o.geometry.attributes.position;
@@ -501,219 +477,301 @@
     ud._quakeWallMat = best;
     return best;
   }
-  function pieceMat(kind, i, B) {
-    if (kind === "glass") return CBZ.glass ? CBZ.glass({ opacity: 0.55 }) : new THREE.MeshLambertMaterial({ color: 0xcdeefb, transparent: true, opacity: 0.55 });
-    if (B && B.group && (i % 3) !== 0) {
-      const wm = wallMatOfGroup(B.group);
-      if (wm) return wm;
+  function wallMatOf(S) {
+    return wallMatOfGroup(S.group) || (CBZ.cmat ? CBZ.cmat(S.wallCol != null ? S.wallCol : MASONRY_GREY) : null);
+  }
+
+  /* THE STRIKE PASS. debris.js's live bodies carry mass, velocity and kind;
+     a body travelling down faster than a stumble that passes through a head
+     or a car roof is a hit. Each body strikes once per target class. Where
+     debris.js publishes no live list (a rebuild of that file), the bodies
+     this file itself threw are tracked by position instead. */
+  const thrown = [];               // fallback: {mesh, m, kind, lx, ly, lz}
+  function liveBodies() {
+    const D = CBZ.debris;
+    return D && D._internal && Array.isArray(D._internal.live) ? D._internal.live : null;
+  }
+  function trackThrown(out, mPer, kind) {
+    if (liveBodies() || !out || !out.bodies) return;
+    for (let i = 0; i < out.bodies.length && thrown.length < 160; i++) {
+      const m = out.bodies[i];
+      thrown.push({ mesh: m, m: mPer, kind: kind, lx: m.position.x, ly: m.position.y, lz: m.position.z, v: { x: 0, y: 0, z: 0 } });
     }
-    const c = MASONRY[i % MASONRY.length];
-    return CBZ.cmat ? CBZ.cmat(c) : new THREE.MeshLambertMaterial({ color: c });
   }
-
-  /* One piece off one building. `sev` 0..1 is the caller's structural stage:
-     it decides SIZE, MASS and whether what comes off is a window or a lump of
-     the wall — a lightly cracked block loses glass, a critical one loses its
-     facade. Spawns on the footprint PERIMETER, never in the middle of the
-     roof, because that is where a facade actually detaches from. */
-  function shedOne(B, sev, opts) {
-    if (pieces.length >= MAX_PIECES) return null;
-    opts = opts || {};
-    let glassy = opts.kind ? opts.kind === "glass" : rnd() > 0.25 + sev * 0.55;
-    /* WHERE IT COMES FROM. Mostly the facade EDGE, travelling outward — that
-       is what makes the strip of pavement beside a building the kill zone.
-       But a badly hurt building also fails INWARDS: ceiling slabs, light
-       fittings, the tops of shelves. Without that share, debris could never
-       reach anybody indoors, the table would never actually save a life, and
-       "drop, cover, hold on" would be advice about a hazard that does not
-       exist. So above the spalling stage a third of what lets go lets go over
-       the floorplate, straight down, with no outward travel. */
-    const interior = sev > 0.42 && rnd() < 0.34;
-    if (interior) glassy = false;        // a ceiling slab is not a window pane
-    const kind = glassy ? "glass" : "masonry";
-    const side = (rnd() * 4) | 0;
-    const t = rnd() - 0.5;
-    let px, pz, nx, nz;
-    if (interior) {
-      px = B.x + (rnd() - 0.5) * B.w * 0.8;
-      pz = B.z + (rnd() - 0.5) * B.d * 0.8;
-      nx = 0; nz = 0;
+  function strikePass(dt) {
+    const L = liveBodies();
+    if (L) {
+      for (let i = 0; i < L.length; i++) {
+        const b = L[i];
+        if (!b || b.asleep || !b.mesh || !b.v) continue;
+        strikeOne(b, b.mesh.position, b.v.x, b.v.y, b.v.z, b.mass || 1, b.kind);
+      }
+      return;
     }
-    else if (side === 0) { px = B.x + t * B.w; pz = B.z - B.d / 2; nx = 0; nz = -1; }
-    else if (side === 1) { px = B.x + t * B.w; pz = B.z + B.d / 2; nx = 0; nz = 1; }
-    else if (side === 2) { px = B.x - B.w / 2; pz = B.z + t * B.d; nx = -1; nz = 0; }
-    else { px = B.x + B.w / 2; pz = B.z + t * B.d; nx = 1; nz = 0; }
-    const fy = (opts.gy != null ? opts.gy : floorAt(B.x, B.z)) + B.h * (0.25 + rnd() * 0.72);
-    // it comes OFF the wall, so it starts just proud of it and travels outward
-    const out = 0.35 + rnd() * (glassy ? 1.1 : 2.0) * (0.4 + sev);
-    // SIZE IS MASS IS LETHALITY, and it is also whether you can SEE the thing
-    // that killed you. A facade panel is a metre-and-a-half slab of cladding,
-    // not a pebble: the first pass of this shed at 0.45-1.6 m produced debris
-    // that was invisible from across the street and read as grit.
-    const size = glassy ? (0.7 + rnd() * 0.9) : (0.95 + rnd() * (1.1 + sev * 1.7));
-    const geo = pieceGeo(kind, size);
-    const m = new THREE.Mesh(geo, pieceMat(kind, Math.abs((px * 7 + pz * 13) | 0), B));
-    m.position.set(px + nx * 0.3, fy, pz + nz * 0.3);
-    m.rotation.set(rnd() * 3, rnd() * 3, rnd() * 3);
-    m.castShadow = !glassy;
-    m.renderOrder = glassy ? 2 : 0;
-    const host = opts.parent || scene();
-    if (!host) return null;
-    host.add(m);
-    const rec = {
-      mesh: m, kind: kind,
-      x: m.position.x, y: fy, z: m.position.z,
-      vx: nx * out, vy: opts.vy != null ? opts.vy : -0.4 - rnd() * 1.6, vz: nz * out,
-      sx: (rnd() - 0.5) * 7, sz: (rnd() - 0.5) * 7,
-      r: (glassy ? 0.55 : 0.5 + size * 0.55),
-      // BLUNT FORCE, priced by mass: a pane cuts, a lump of wall crushes.
-      dmg: glassy ? 16 + sev * 12 : 42 + sev * 46,
-      lethal: !glassy,
-      cause: glassy ? "cut down by falling glass" : "crushed by falling masonry",
-      hit: false, t: 0, landed: 0,
-    };
-    pieces.push(rec);
-    A.debrisSpawned++;
-    return rec;
-  }
-
-  /* The CONTINUOUS form the caller ticks each frame. `rate` is pieces per
-     second at sev 0; the stage multiplier is where the "about to collapse
-     sheds hardest" rule lives, and it is a curve, not a threshold, so a
-     building visibly gets worse rather than switching states. */
-  function shedTick(t, dt, o) {
-    if (CBZ.CONFIG.QUAKE_DEBRIS === false) return 0;
-    const B = boxOf(t);
-    if (!B) return 0;
-    o = o || {};
-    const sev = Math.max(0, Math.min(1, o.sev != null ? o.sev : 0));
-    const face = 2 * (B.w + B.d);                        // facade metres
-    const rate = (o.rate != null ? o.rate : 0.11) * face * (0.25 + sev * sev * 2.6) * (o.gain != null ? o.gain : 1);
-    let n = 0;
-    t._shedAcc = (t._shedAcc || 0) + rate * dt;
-    while (t._shedAcc >= 1 && n < 4) {
-      t._shedAcc -= 1;
-      if (shedOne(B, sev, o)) n++;
+    for (let i = thrown.length - 1; i >= 0; i--) {
+      const t = thrown[i], p = t.mesh.position;
+      if (!t.mesh.parent) { thrown.splice(i, 1); continue; }
+      const id = dt > 0 ? 1 / dt : 60;
+      t.v.x = (p.x - t.lx) * id; t.v.y = (p.y - t.ly) * id; t.v.z = (p.z - t.lz) * id;
+      t.lx = p.x; t.ly = p.y; t.lz = p.z;
+      strikeOne(t, p, t.v.x, t.v.y, t.v.z, t.m, t.kind);
     }
-    if (n && rnd() < 0.14) sfxAt(sev > 0.5 ? "collapse" : "glass", B.x, B.z, { vol: 0.5 });
-    return n;
   }
-
-  /* The BURST form: a facade lets go all at once (a spall event, a pancake
-     front reaching a floor). */
-  function shed(t, o) {
-    if (CBZ.CONFIG.QUAKE_DEBRIS === false) return 0;
-    const B = boxOf(t);
-    if (!B) return 0;
-    o = o || {};
-    const sev = Math.max(0, Math.min(1, o.sev != null ? o.sev : 0.5));
-    const n = Math.max(1, o.count != null ? o.count : Math.round(4 + sev * 16));
-    let k = 0;
-    for (let i = 0; i < n; i++) if (shedOne(B, sev, o)) k++;
-    if (k) sfxAt(sev > 0.5 ? "collapse" : "glass", B.x, B.z, {});
-    return k;
-  }
-
-  // ---- the debris integrator (runs in survival AND city) ----------------
-  const QK_PAD = 0.18;                   // a slab's half-thickness against walls
-  const _qkHit = { t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, c: null };
-  // rubble colliders don't stop a falling slab (it lands ON the pile via the
-  // floor); a collider with no y band is full height, as CBZ.collide reads it
-  const QK_OPTS = { skip: (c) => !!c.debris };
-  function tickPieces(dt) {
-    // A falling slab of cladding is not a person: it falls at the REAL rate
-    // (CBZ.PHYS.G_REAL, the same 9.81 debris.js's rigid pieces use, so two
-    // chunks off one facade no longer drop at two different speeds). It used
-    // to borrow the characters' tuned 22.
-    const g = (CBZ.PHYS && CBZ.PHYS.G_REAL) || 9.81;
-    const LC = CBZ.looseContact;
-    for (let i = pieces.length - 1; i >= 0; i--) {
-      const p = pieces[i];
-      p.t += dt;
-      if (!p.landed) {
-        p.vy -= g * dt;
-        const ox = p.x, oy = p.y, oz = p.z;
-        p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-        /* THE WORLD IS SOLID TO IT. This integrator knew the floor and
-           nothing else: a slab shed off a facade flew straight through the
-           shop awning, the neighbour's wall and the parked bus shelter, and
-           a ceiling slab fell through every storey to the street. Now the
-           step is a swept segment against the colliders (debris.js's
-           CBZ.looseContact): a side face stops it and it drops down the wall,
-           a top face (an awning, a roof, a ledge) is where it lands. The box
-           it was shed FROM is skipped for free: it starts inside it. */
-        if (LC && (ox !== p.x || oy !== p.y || oz !== p.z)) {
-          if (LC.sweep(ox, oy, oz, p.x, p.y, p.z, QK_PAD, _qkHit, QK_OPTS)) {
-            p.x = _qkHit.x; p.y = _qkHit.y; p.z = _qkHit.z;
-            if (_qkHit.ny > 0.5) { p.y -= QK_PAD; p.restY = p.y; }       // landed on a top face
-            else {
-              const vn = p.vx * _qkHit.nx + p.vz * _qkHit.nz;
-              if (vn < 0) { p.vx -= 1.25 * vn * _qkHit.nx; p.vz -= 1.25 * vn * _qkHit.nz; }
-              p.vx *= 0.6; p.vz *= 0.6;
-              if (_qkHit.ny < -0.5 && p.vy > 0) p.vy = 0;                // under a soffit
-            }
-          }
-        }
-        p.mesh.position.set(p.x, p.y, p.z);
-        p.mesh.rotation.x += p.sx * dt;
-        p.mesh.rotation.z += p.sz * dt;
-        // THE STRIKE. A falling block hits you at head height on its way past,
-        // which is the whole difference between this and a landing radius.
-        if (!p.hit && p.vy < -2) {
-          const self = p;
-          eachActorNear(p.x, p.z, p.r + 0.55, function (a) {
-            if (self.hit) return;
-            const ay = (a.pos && a.pos.y) || 0;
-            if (p.y > ay + 2.2 || p.y < ay - 0.4) return;      // passed above / already below
-            self.hit = true;
-            A.debrisHits++;
-            const c = cover(a);
-            if (c.exposure < 0.6) A.coverSaves++;   // the hit that cover paid for
-            const dmg = self.dmg * c.exposure;
-            // Under a solid table a masonry block is survivable — which is the
-            // entire point of the advice, expressed as arithmetic.
-            wound(a, dmg, self.cause, {
-              x: self.x, z: self.z, fling: self.lethal ? 3 : 1, tag: "debris",
-              lethal: self.lethal && c.exposure > 0.6,
-            });
-            // a pane LACERATES and a lump of wall is BLUNT — the two wound
-            // vocabularies systems/wounds.js already draws, so a body that has
-            // been hit by falling glass looks different from one that was
-            // crushed, with no decal written here.
-            if (CBZ.bodyWound) { try { CBZ.bodyWound(a, { x: self.x, y: ay + 1.5, z: self.z }, { melee: self.kind === "glass" ? "blade" : "blunt", fromX: self.x, fromZ: self.z }); } catch (e) {} }
-          });
-        }
-        // the floor it can actually reach: roofs/platforms/storey floors via
-        // groundAt from where it WAS (a ceiling slab lands on this storey's
-        // floor, not the street five floors down), or the top it just hit
-        const fl = (p.restY != null ? p.restY : (LC ? LC.ground(p.x, p.z, oy + 0.3) : floorAt(p.x, p.z))) + 0.16;
-        if (p.y <= fl) {
-          p.y = fl; p.mesh.position.y = fl; p.landed = p.t;
-          p.mesh.rotation.x = (rnd() - 0.5) * 0.5;
-          p.mesh.rotation.z = (rnd() - 0.5) * 0.5;
-          if (p.kind === "glass") sfxAt("glass", p.x, p.z, { vol: 0.35 });
-        }
-      } else if (p.kind === "glass" && p.t - p.landed > 2.6) {
-        // panes shatter out; masonry is RUBBLE and rubble stays (the aftermath
-        // has to be readable long after the shaking stops)
-        drop(p); pieces.splice(i, 1);
-      } else if (pieces.length > MAX_PIECES * 0.72 && p.t - p.landed > 12) {
-        // RUBBLE STAYS — that is what makes the aftermath readable minutes
-        // later — but each landed chunk is a draw call, so once the pool is
-        // three-quarters full the oldest settled pieces are recycled. The
-        // ceiling on live draws is therefore ~120, not MAX_PIECES.
-        drop(p); pieces.splice(i, 1);
+  function strikeOne(rec, p, vx, vy, vz, mass, kind) {
+    if (vy > -3) return;                         // falling, not tumbling across the ground
+    const ke = 0.5 * mass * (vx * vx + vy * vy + vz * vz);
+    if (!rec._qkA && ke > 20) {
+      eachActorNear(p.x, p.z, 0.7, function (a) {
+        if (rec._qkA) return;
+        const ay = (a.pos && a.pos.y) || 0;
+        if (p.y > ay + 2.0 || p.y < ay - 0.2) return;   // passed above / already below
+        rec._qkA = 1;
+        hitActor(a, p, ke, kind);
+      });
+    }
+    if (!rec._qkC && mass > 20 && ev.cars.length) {
+      for (let i = 0; i < ev.cars.length; i++) {
+        const C = ev.cars[i];
+        if (carStrike(C, p, ke)) { rec._qkC = 1; break; }
       }
     }
   }
-  function drop(p) {
-    if (p.mesh && p.mesh.parent) p.mesh.parent.remove(p.mesh);
-    // geometry + material are pooled/shared — never disposed here
+  /* BLUNT FORCE, priced by energy: a brick off a third storey (~3 kg at
+     13 m/s, ~250 J) is a serious head wound; a lump of wall or a parapet
+     section (tens of kilos, ~1 kJ) kills. Glass cuts at any size. */
+  function hitActor(a, p, ke, kind) {
+    A.debrisHits++;
+    const c = cover(a);
+    if (c.exposure < 0.6) A.coverSaves++;
+    const glass = kind === "glass";
+    const dmg = Math.max(4, Math.min(140, glass ? 14 + ke / 12 : ke / 8)) * c.exposure;
+    wound(a, dmg, glass ? "cut down by falling glass" : "crushed by falling masonry", {
+      x: p.x, z: p.z, fling: glass ? 1 : 3, tag: "debris",
+      lethal: !glass && ke > 900 && c.exposure > 0.6,
+    });
+    // a pane LACERATES and a lump of wall is BLUNT: systems/wounds.js draws both
+    if (CBZ.bodyWound) { try { CBZ.bodyWound(a, { x: p.x, y: ((a.pos && a.pos.y) || 0) + 1.5, z: p.z }, { melee: glass ? "blade" : "blunt", fromX: p.x, fromZ: p.z }); } catch (e) {} }
   }
-  function clearPieces() {
-    for (let i = 0; i < pieces.length; i++) drop(pieces[i]);
-    pieces.length = 0;
+
+  /* ============================================================
+     THE BUILDING ADAPTER — the ONE door this file damages a building
+     through. city/collapse.js is being rebuilt with CBZ.collapse.damage(
+     building, point, radius, energy, dir) and CBZ.collapse.undermine(
+     building, region); when those exist they get every call, and the
+     fallbacks below are what the game has today:
+       hit        city: CBZ.cityCarveWall (a real hole, the wall's own
+                  material leaves through CBZ.debris); island (merged shells
+                  cannot be carved): a slab of the face in its own wall
+                  material through CBZ.debris.shatterBox
+       undermine  the building's own group drops / settles / tilts about its
+                  base, its colliders and floors go with it
+       collapse   the caller's ledger (hooks.collapse), else a city lot to
+                  city/demolition.js, else CBZ.collapse.play on its own group
+     ============================================================ */
+  const BD = {
+    hit: function (S, p, r, energy, n, fling) {
+      A.wallHits++;
+      const C = CBZ.collapse;
+      if (C && C.damage) { try { C.damage(S.src, p, r, energy, n); return 1; } catch (e) {} }
+      if (S.city && CBZ.cityCarveWall) {
+        let carved = null;
+        try { carved = CBZ.cityCarveWall(p.x - n.x * 0.1, p.y, p.z - n.z * 0.1, r, { search: 1.6 }); } catch (e) {}
+        // a wall failing OUT OF PLANE is more than its hole: the panel above
+        // and beside it comes away whole and leaves outward
+        if (carved && fling) shedFace(S, p, r * 0.8, energy, n, fling);
+        if (carved) return 1;
+      }
+      return shedFace(S, p, r, energy, n, fling);
+    },
+    undermine: function (S, region) {
+      const C = CBZ.collapse;
+      if (C && C.undermine) { try { C.undermine(S.src, region); return true; } catch (e) {} }
+      return sinkGroup(S, region);
+    },
+    collapse: function (S, n) {
+      if (S.collapsed) return;
+      S.collapsed = true;
+      A.collapses++;
+      if (S.lot && CBZ.cityDemolition && CBZ.cityDemolition.destroy) { try { CBZ.cityDemolition.destroy(S.lot, { cause: "quake" }); return; } catch (e) {} }
+      const yank = function () { pullSolids(S, true); if (S.group) S.group.visible = false; };
+      const job = CBZ.collapse && CBZ.collapse.play ? CBZ.collapse.play({
+        root: S.group && S.group.parent ? S.group.parent : scene(), ox: S.x, oz: S.z, gy: S.gy, group: S.group,
+        w: S.w, d: S.d, h: S.h, storeys: S.storeys, FH: S.FH, wall: S.wallCol != null ? S.wallCol : MASONRY_GREY,
+        style: S.style, key: "qk:" + Math.round(S.x) + "," + Math.round(S.z),
+      }, { wound: { nx: n.x, nz: n.z, floor: 0 }, preShudder: 0.3, onSwap: yank }) : null;
+      if (!job) yank();
+    },
+  };
+  function pullSolids(S, all, below) {
+    const cols = CBZ.colliders, plats = CBZ.platforms;
+    if (cols && S.colliders) for (const c of S.colliders) {
+      if (!all && !(c.y1 != null && c.y1 <= below)) continue;
+      const i = cols.indexOf(c); if (i >= 0) cols.splice(i, 1);
+    }
+    if (plats && S.platforms) for (const p of S.platforms) {
+      if (!all && !(p.top <= below)) continue;
+      const i = plats.indexOf(p); if (i >= 0) plats.splice(i, 1);
+    }
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
   }
+  /* The island fallback for a wound in a wall: the face lets go a slab of
+     itself. The box sits ON the wall plane (half proud), so debris.js
+     fractures it in the wall's own material and the pieces leave outward. */
+  function shedFace(S, p, r, energy, n, fling) {
+    const D = CBZ.debris, mat = wallMatOf(S);
+    if (!D || !D.shatterBox || !mat) return 0;
+    const along = Math.abs(n.x) > 0.5;           // the face runs along z
+    const hw = r, hh = r * 0.7, th = 0.22;
+    const box = along
+      ? { minX: p.x - th, maxX: p.x + th, minY: p.y - hh, maxY: p.y + hh, minZ: p.z - hw, maxZ: p.z + hw }
+      : { minX: p.x - hw, maxX: p.x + hw, minY: p.y - hh, maxY: p.y + hh, minZ: p.z - th, maxZ: p.z + th };
+    const out = D.shatterBox(box, mat, {
+      kind: S.debrisKind, at: { x: p.x, y: p.y, z: p.z }, dir: { x: n.x, y: -0.15, z: n.z },
+      power: fling ? 0.35 : 0.45 + Math.min(1.2, energy), maxPieces: PHONE ? 4 : 7, owner: "quake", dust: 0.7,
+      // a wall that fails out of plane rotates off its base and leaves
+      // OUTWARD: its top lands as far out as the wall was tall
+      velocity: fling ? { x: n.x * fling, y: 0.4, z: n.z * fling } : undefined,
+    });
+    const k = out ? out.pieces || 0 : 0;
+    A.debrisSpawned += k; S.shed += k;
+    trackThrown(out, 2400 * (2 * hw) * (2 * hh) * (2 * th) / Math.max(1, k), S.debrisKind);
+    return k;
+  }
+
+  /* THE ROOF LINE LETS GO. A parapet run, a chimney stack, a cornice crown:
+     whatever of the building's OWN geometry stands above its roof within
+     `rad` of (cx, cz), cut out of its merged mesh (those triangles collapse
+     to nothing in place) and handed to CBZ.debris as the rigid bodies they
+     become. A building with nothing up there loses nothing: no stand-in
+     chimney is ever invented. The triangle scan is done once per building
+     (the crown set), so a second peel costs nothing. */
+  const _v0 = new THREE.Vector3(), _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _bb = new THREE.Box3();
+  function crownOf(S) {
+    if (S.crown) return S.crown;
+    S.crown = [];
+    if (!S.group) return S.crown;
+    const yMin = S.gy + S.h - 0.06;
+    S.group.updateMatrixWorld(true);
+    S.group.traverse(function (o) {
+      if (!o.isMesh || o.isInstancedMesh || o.visible === false || !o.geometry || !o.material || Array.isArray(o.material)) return;
+      const g = o.geometry, P = g.attributes && g.attributes.position;
+      if (!P || g._shared || P.count > 240000 || o.material.transparent) return;
+      if (!g.boundingBox) g.computeBoundingBox();
+      _bb.copy(g.boundingBox).applyMatrix4(o.matrixWorld);
+      if (_bb.max.y < yMin) return;                      // all of it under the roof
+      const I = g.index ? g.index.array : null, n = I ? I.length / 3 : P.count / 3;
+      const mw = o.matrixWorld, tris = [];
+      for (let t = 0; t < n; t++) {
+        const a = I ? I[t * 3] : t * 3, b = I ? I[t * 3 + 1] : t * 3 + 1, c = I ? I[t * 3 + 2] : t * 3 + 2;
+        _v0.fromBufferAttribute(P, a).applyMatrix4(mw);
+        if (_v0.y < yMin) continue;
+        _v1.fromBufferAttribute(P, b).applyMatrix4(mw);
+        if (_v1.y < yMin) continue;
+        _v2.fromBufferAttribute(P, c).applyMatrix4(mw);
+        if (_v2.y < yMin) continue;
+        const x0 = Math.min(_v0.x, _v1.x, _v2.x), x1 = Math.max(_v0.x, _v1.x, _v2.x);
+        const z0 = Math.min(_v0.z, _v1.z, _v2.z), z1 = Math.max(_v0.z, _v1.z, _v2.z);
+        const y1 = Math.max(_v0.y, _v1.y, _v2.y), y0 = Math.min(_v0.y, _v1.y, _v2.y);
+        tris.push(t, (x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0), y1 - y0);
+      }
+      if (tris.length) S.crown.push({ mesh: o, tris: tris });
+    });
+    return S.crown;
+  }
+  function peelTop(S, cx, cz, rad, why) {
+    const D = CBZ.debris;
+    if (!D || !D.shatter) return 0;
+    const crown = crownOf(S);
+    let total = 0;
+    for (let k = 0; k < crown.length; k++) {
+      const cr = crown[k], o = cr.mesh, g = o.geometry, P = g.attributes.position;
+      const I = g.index ? g.index.array : null;
+      const soup = [];
+      const T = cr.tris;
+      for (let i = 0; i < T.length; i += 5) {
+        if (T[i] < 0) continue;                                  // already gone
+        const dx = T[i + 1] - cx, dz = T[i + 2] - cz;
+        if (dx * dx + dz * dz > rad * rad) continue;
+        // a roof PLANE is big and low-pitched; what topples is small (a stack,
+        // a coping, a crown piece) or a thin upstand band (a parapet run)
+        if (T[i + 3] > 2.4 && T[i + 4] > 1.7) continue;
+        if (T[i + 3] > 2.4 && T[i + 4] < 0.05) continue;         // a flat roof slab
+        const t = T[i];
+        const a = I ? I[t * 3] : t * 3, b = I ? I[t * 3 + 1] : t * 3 + 1, c = I ? I[t * 3 + 2] : t * 3 + 2;
+        for (const vi of [a, b, c]) {
+          _v0.fromBufferAttribute(P, vi).applyMatrix4(o.matrixWorld);
+          soup.push(_v0.x, _v0.y, _v0.z);
+        }
+        // the triangle is gone from the building: an indexed mesh shares
+        // corners with its neighbours, so the INDEX folds (a,a,a); a soup's
+        // corners are its own and fold in place
+        if (I) { I[t * 3 + 1] = a; I[t * 3 + 2] = a; }
+        else { const ax = P.getX(a), ay = P.getY(a), az = P.getZ(a); P.setXYZ(b, ax, ay, az); P.setXYZ(c, ax, ay, az); }
+        T[i] = -1;
+      }
+      if (!soup.length) continue;
+      if (I) g.index.needsUpdate = true; else P.needsUpdate = true;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(soup, 3));
+      geo.computeVertexNormals();
+      const out = D.shatter({ geometry: geo, material: o.material }, {
+        kind: S.debrisKind, at: { x: cx, y: S.gy + S.h, z: cz }, dir: { x: (cx - S.x) / (S.w || 1), y: -0.1, z: (cz - S.z) / (S.d || 1) },
+        power: 0.7, maxPieces: PHONE ? 5 : 9, owner: "quake", dust: 0.8,
+      });
+      geo.dispose();
+      const n = out ? out.pieces || 0 : 0;
+      total += n;
+      trackThrown(out, 60, S.debrisKind);
+    }
+    if (total) { A.debrisSpawned += total; S.shed += total; if (why === "parapet") S.parapetDown = true; else S.crownDown = true; }
+    return total;
+  }
+
+  /* A building that loses its footing: the soft storey that racks flat
+     under the floors above, or the liquefied ground that lets it settle and
+     lean. The building's own group moves about its own base (never swapped):
+     `drop` metres down, tilted `tilt` radians about a horizontal axis
+     (ax, az), eased in over `secs`. Colliders and floors go with it; a soft
+     storey's ground-floor walls are pulled (there is no ground floor left). */
+  const sinks = [];
+  function sinkGroup(S, region) {
+    if (!S.group || S.sunk) return false;
+    S.sunk = true;
+    const r = region || {};
+    sinks.push({ S: S, drop: r.drop || 0.3, tilt: r.tilt || 0, ax: r.ax || 1, az: r.az || 0, secs: r.secs || 0.6,
+      t: 0, done: 0, soft: !!r.soft });
+    if (r.soft) pullSolids(S, false, S.gy + S.FH * 0.95);
+    return true;
+  }
+  const _axis = new THREE.Vector3(), _piv = new THREE.Vector3();
+  function tickSinks(dt) {
+    for (let i = sinks.length - 1; i >= 0; i--) {
+      const k = sinks[i], S = k.S;
+      k.t += dt;
+      const u = Math.min(1, k.t / k.secs), e = k.soft ? u * u : u * (2 - u);   // a storey falls; mud yields
+      const want = e - k.done;
+      if (want <= 0) { if (u >= 1) sinks.splice(i, 1); continue; }
+      k.done = e;
+      const dy = -k.drop * want, th = k.tilt * want;
+      const g = S.group;
+      g.position.y += dy;
+      if (th) {
+        _piv.set(S.x, S.gy, S.z);
+        _axis.set(k.ax, 0, k.az).normalize();
+        g.position.sub(_piv).applyAxisAngle(_axis, th).add(_piv);
+        g.rotateOnWorldAxis(_axis, th);
+      }
+      if (S.colliders) for (const c of S.colliders) { if (c.y0 != null) c.y0 += dy; if (c.y1 != null) c.y1 += dy; }
+      if (S.platforms) for (const p of S.platforms) { if (p.top != null) p.top += dy; }
+      if (u >= 1) {
+        sinks.splice(i, 1);
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+      }
+    }
+  }
+  function clearPieces() { thrown.length = 0; sinks.length = 0; }
 
   /* ============================================================
      RUPTURED GAS — the secondary killer.
@@ -1247,181 +1305,144 @@
   }
 
   /* ============================================================
-     THE CITY EVENT (CITY_QUAKE, default OFF).
+     THE SOURCE AND THE PATH — magnitude is the earthquake, intensity is
+     what reaches the street.
 
-     Everything above is mode-agnostic, so the city's quake is a THIN driver
-     over it: shake, sweep CBZ.structure so real lots take real staged damage,
-     shed off whatever is standing near the player, then the gas and the
-     lines. It authors no damage model, no fire and no collapse — those are
-     structural.js's, which is exactly the point of keeping the core here
-     instead of inside the survival def.
+     The old model turned a magnitude straight into a ground acceleration at
+     the player ("M7 = 0.45 g"), the same everywhere, at any distance. That
+     is the felt-report table of a quake directly underneath you, every
+     time. Real ground motion is the SOURCE (moment magnitude, depth, where
+     the rupture is) attenuated along the PATH and amplified by the SITE:
+
+       rupture   Wells & Coppersmith (1994): length L = 10^(-2.44+0.59M) km,
+                 width W = 10^(-1.01+0.32M) km. A great quake is a fault
+                 hundreds of km long, so "distance" is to the rupture, not
+                 to the epicentre (Joyner-Boore), and the top of a wide
+                 rupture comes up towards the surface.
+       PGA       Boore & Atkinson (2008) median for firm rock (Vs30 760),
+                 near-source saturation included: an M6 at 10 km is ~0.14 g,
+                 an M7 over the fault ~0.45 g, an M8 at 80 km ~0.19 g.
+       site      soil amplifies weak motion and saturates under strong
+                 motion (nonlinear soil): soft fill by the water ~1.8x at
+                 0.1 g, ~1.1x at 0.4 g; volcanic rock 1.0x.
+       period    Rathje et al. (2004) mean period Tm: an M5 nearby buzzes at
+                 ~4 Hz, an M8 far off rolls at ~1.5 Hz, and soft soil
+                 lengthens it.
+       arrivals  P at 6.0 km/s, S at 3.5 km/s, surface waves at ~3.1 km/s:
+                 the S-minus-P gap is 0.119 s per km of hypocentral
+                 distance, the warning you actually get.
+       duration  strong shaking lasts about as long as the rupture takes to
+                 run (L at 2.8 km/s) plus scattering along the path.
+       MMI       Worden et al. (2012) from PGA.
+     Every one of those is a published relation; the numbers below are their
+     coefficients, not tuning.
      ============================================================ */
-  const city = { on: false, t: 0, dur: 0, mag: 0, x: 0, z: 0, lots: [], phase: "main", after: 0, nextAfter: 0 };
-
-  function cityStart(o) {
-    o = o || {};
-    if (!CBZ.CONFIG.CITY_QUAKE) return false;
-    if (!inCity()) return false;
-    const arena = CBZ.city && (CBZ.city.arena || CBZ.city);
-    if (!arena || !arena.lots) return false;
-    city.on = true; city.t = 0;
-    city.mag = o.mag != null ? o.mag : 0.75;
-    city.dur = o.secs != null ? o.secs : 22;
-    const P = CBZ.player && CBZ.player.pos;
-    city.x = o.x != null ? o.x : (P ? P.x : 0);
-    city.z = o.z != null ? o.z : (P ? P.z : 0);
-    city.phase = "main"; city.after = 0; city.nextAfter = 6;
-    // the shakeable set: lots within a working radius of the player, so a
-    // continental quake still costs one bounded loop per frame
-    city.lots = [];
-    const R = o.radius != null ? o.radius : 220;
-    for (let i = 0; i < arena.lots.length; i++) {
-      const L = arena.lots[i];
-      if (!L || !L.building || L.demolished) continue;
-      if (Math.hypot(L.building.ox - city.x, L.building.oz - city.z) > R) continue;
-      city.lots.push(L);
-    }
-    liveStructures = city.lots;
-    // the city's event bus hears it (the news channel reports it by name)
-    if (CBZ.cityEvent) { try { CBZ.cityEvent("quake", { x: city.x, z: city.z, mag: city.mag }, { silent: true, noWanted: true }); } catch (e) {} }
-    return true;
+  const VP = 6.0, VS = 3.5, VR = 3.1;
+  function rupture(M) {
+    return { L: Math.pow(10, -2.44 + 0.59 * M), W: Math.min(60, Math.pow(10, -1.01 + 0.32 * M)) };
   }
-  function cityStop() {
-    city.on = false; city.lots = []; if (liveStructures === city.lots) liveStructures = null;
+  // distance from a site to the rupture plane (km), with a fault centred on
+  // the epicentre and the site off its strike by a quarter of its length
+  function rupDistKm(M, epiKm, depthKm) {
+    const r = rupture(M);
+    const rjb = Math.max(0, epiKm - 0.25 * r.L);
+    const ztop = Math.max(0, depthKm - 0.5 * r.W);
+    return Math.sqrt(rjb * rjb + 1.35 * 1.35 + ztop * ztop);
   }
-  function citySeverity(L) {
-    if (!CBZ.structure || !CBZ.structure.state) return 0.2;
-    try {
-      const st = CBZ.structure.state(L);
-      return st ? Math.min(1, (st.stage || 0) / 5) : 0;
-    } catch (e) { return 0.2; }
+  // BA08 median PGA (g) on firm rock
+  function pgaRock(M, Rkm) {
+    const dm = M - 6.75;
+    const FM = M <= 6.75 ? -0.53804 + 0.28805 * dm - 0.10164 * dm * dm : -0.53804 + 0.04 * dm;
+    const FD = (-0.6605 + 0.1197 * (M - 4.5)) * Math.log(Math.max(1, Rkm)) - 0.01151 * (Rkm - 1);
+    return Math.exp(FM + FD);
   }
-  function cityTick(dt) {
-    if (!city.on) return;
-    city.t += dt;
-    const k = city.phase === "main" ? 1 : Math.max(0, 1 - city.after / 3.2);
-    if (CBZ.shake) CBZ.shake(0.12 + 0.45 * city.mag * k);
-    // load every standing lot, then shed off the ones that took it worst
-    for (let i = 0; i < city.lots.length; i++) {
-      const L = city.lots[i];
-      if (!L || L.demolished) continue;
-      if (CBZ.structure && CBZ.structure.hit && k > 0.05) {
-        const b = L.building;
-        try {
-          CBZ.structure.hit(b.ox, 1.5, b.oz, 5.5 * city.mag * k * dt, { kind: "quake", lot: L, sudden: true });
-        } catch (e) {}
-      }
-      const sev = citySeverity(L);
-      if (sev > 0.05) shedTick(L, dt, { sev: sev, gain: 0.35 * k });
-    }
-    if (city.phase === "main" && city.t > city.dur * 0.6) {
-      city.phase = "after"; city.after = 0;
-      cityAftermath();
-    } else if (city.phase === "after") {
-      city.after += dt;
-      if (city.after > city.nextAfter) { city.after = 0; city.nextAfter *= 1.6; A.shocks++; if (CBZ.shake) CBZ.shake(0.5 * city.mag); }
-    }
-    if (city.t > city.dur) cityStop();
+  const SOIL = {
+    rock: { amp: 1.0, nl: 0, T: 1.0 },
+    firm: { amp: 1.3, nl: 0.15, T: 1.12 },
+    soft: { amp: 1.8, nl: 0.33, T: 1.35 },
+  };
+  function siteAmp(soil, pgaR) {
+    const s = SOIL[soil] || SOIL.firm;
+    return Math.max(0.9, s.amp * (pgaR > 0.1 ? Math.pow(pgaR / 0.1, -s.nl) : 1));
   }
-  function cityAftermath() {
-    // 1-3 gas fires at the worst-hit lots, and two poles down.
-    const ranked = city.lots.slice().sort(function (a, b) { return citySeverity(b) - citySeverity(a); });
-    const n = 1 + ((rnd() * 3) | 0);
-    for (let i = 0; i < Math.min(n, ranked.length); i++) gasFire(ranked[i], {});
-    const census = CBZ.streetPoleCensus ? CBZ.streetPoleCensus() : null;
-    if (census && census.poles && census.poles.length) {
-      for (let i = 0; i < 2; i++) {
-        const P = census.poles[(rnd() * census.poles.length) | 0];
-        if (P) dropLine({ x: P.x, z: P.z });
-      }
-    }
+  function meanPeriod(M, Rkm, soil) {
+    const Tm = 0.411 + 0.0837 * (Math.min(M, 7.25) - 6) + 0.05 * Math.max(0, M - 7.25) + 0.00208 * Rkm;
+    return Math.max(0.12, Tm) * ((SOIL[soil] || SOIL.firm).T);
+  }
+  function mmiOf(pgaG) {
+    const l = Math.log10(Math.max(1e-4, pgaG * 980.665));
+    return Math.max(1, Math.min(10, l <= 1.57 ? 1.78 + 1.55 * l : -1.6 + 3.7 * l));
   }
 
-  /* ============================================================
-     GROUND MOTION — THE WAVE TRAIN (magnitude in, felt quake out).
-
-     The old quake fed CBZ.shake a linear ramp that then decayed — a
-     machine's envelope, and the same envelope every time. A real quake is
-     a WAVE TRAIN, and the ORDER OF ARRIVALS is the experience:
-
-       P     the compressional wave arrives first: a sharp vertical BANG,
-             a second or two of "was that a truck?" — small, fast, high
-             frequency.
-       S     the shear waves arrive sLag seconds later: the violent lateral
-             rolling that does all the damage. A rise, sustained strong
-             motion for mainDur, then
-       coda  an exponential tail as the scattered energy rings out,
-             punctured by AFTERSHOCKS — each a miniature train of its own,
-             decaying in size and count over the round (Båth's law: the
-             biggest aftershock runs ~1.2 magnitudes under the mainshock).
-
-     MAGNITUDE IS THE ONLY INPUT, in real Richter units, and everything is
-     derived from it the way the ground actually scales — PGA, duration
-     (the big one: it roughly doubles per magnitude unit), frequency
-     content (big quakes ROLL at ~1 Hz, small ones BUZZ at ~5), aftershock
-     count, and whether liquefaction / surface rupture happen at all:
-
-       M4.2  PGA 0.03 g · ~4 s of 5 Hz rattle    · damages nothing
-       M6.0  PGA 0.18 g · ~15 s                  · you stagger, facades crack
-       M7.0  PGA 0.45 g · ~28 s                  · knocked down at the peak
-       M8.3  PGA 0.92 g · ~60 s of 0.9 Hz rolling you cannot stand through
-                          · liquefaction, surface rupture, tsunamigenic
-
-     The synthesizer owns FOOTING too: the live ground acceleration
-     staggers every actor through CBZ.body.hit and knocks them down through
-     CBZ.body.knockdown — the WORLD's reaction to the ground, not a screen
-     effect. A body holding onto a table (_quakeDuck) keeps its feet;
-     that is what the "hold on" third of the advice buys.
-
-     Camera: camera.js's CBZ.shake is a white-noise latch with a fast
-     real-time decay, so frequency content is carried in the ENVELOPE fed
-     to it — a slow |sin| carrier at f0 makes an M8 visibly ROLL where an
-     M4 buzzes. No camera code changed.
-     ============================================================ */
-  function lerpTable(M, tab) {
-    // tab = [[M, v], ...] ascending
-    if (M <= tab[0][0]) return tab[0][1];
-    for (let i = 1; i < tab.length; i++) {
-      if (M <= tab[i][0]) {
-        const u = (M - tab[i - 1][0]) / (tab[i][0] - tab[i - 1][0]);
-        return tab[i - 1][1] + (tab[i][1] - tab[i - 1][1]) * u;
-      }
-    }
-    return tab[tab.length - 1][1];
+  /* WHERE IT BROKE: drawn per occurrence from the shared seeded stream. On a
+     subduction margin the great quakes are the offshore megathrust (tens to
+     a hundred km out, 15-35 km down); the rest are crustal faults inland,
+     shallower and closer. Bigger quakes are far more often the megathrust. */
+  function sourceRoll(M, draw) {
+    const r = draw || rnd;
+    const pOff = 0.3 + 0.5 * Math.max(0, Math.min(1, (M - 6) / 2));
+    const offshore = r() < pOff;
+    const epiKm = offshore ? 25 + r() * 85 : 3 * Math.pow(15, r());
+    const depthKm = offshore ? 15 + r() * 20 : 5 + r() * 10;
+    return { M: M, epiKm: +epiKm.toFixed(1), depthKm: +depthKm.toFixed(1), offshore: offshore, bearing: r() * 6.2832 };
   }
-  /* Everything a magnitude implies, in one record. Pure: same M, same
-     numbers, so the def, the synth and any tool all read one derivation. */
-  function magParams(M) {
-    M = Math.max(4, Math.min(8.6, M));
-    // PGA in g, off the felt-report anchors (M4 barely instrumental, M8 ~1 g
-    // near-field). This is the number footing and damage both key off.
-    const pgaG = lerpTable(M, [[4, 0.02], [5, 0.06], [6, 0.18], [7, 0.45], [8, 0.85], [8.6, 1.15]]);
+
+  /* Everything a quake implies, in one record. PURE: the same M and source
+     give the same numbers, so the def, the synth, the lab and any tool all
+     read one derivation. `src` defaults to a crustal quake 15 km off at 10 km
+     depth on firm ground, the reference the tools quote. */
+  function magParams(M, src) {
+    M = Math.max(4, Math.min(8.6, +M || 6));
+    src = src || {};
+    const epiKm = src.epiKm != null ? +src.epiKm : 15, depthKm = src.depthKm != null ? +src.depthKm : 10;
+    const soil = src.soil || "firm";
+    const rup = rupture(M);
+    const hypoKm = Math.sqrt(epiKm * epiKm + depthKm * depthKm);
+    const Rrup = rupDistKm(M, epiKm, depthKm);
+    const pgaR = pgaRock(M, Rrup);
+    const pgaG = Math.min(1.6, pgaR * siteAmp(soil, pgaR));
     const pga01 = Math.min(1, pgaG);
-    // camera-shake metres at the peak of the S phase (CBZ.shake units)
+    const Tm = meanPeriod(M, Rrup, soil);
+    const f0 = 1 / Tm;
+    // arrivals, measured from the P arrival at this site
+    const sLag = Math.max(0.35, hypoKm * (1 / VS - 1 / VP));
+    const rLag = sLag + Math.max(0.6, epiKm * (1 / VR - 1 / VS));
+    // strong motion ~ the rupture's own run time plus path scattering
+    const ruptureSecs = rup.L / 2.8;
+    const realDur = 0.6 * ruptureSecs + 0.05 * hypoKm + 0.6;
+    const mainDur = Math.max(0.8, Math.min(36, realDur));
+    const riseT = Math.min(4, 0.3 + mainDur * 0.15);
+    const codaTau = 1 + 0.3 * mainDur;
+    // surface waves: big, shallow and far enough for them to form
+    const surfK = depthKm > 45 ? 0 : Math.max(0, Math.min(1, (M - 5.8) / 2)) * Math.max(0, Math.min(1, (epiKm - 1.5 * depthKm) / 50)) * (soil === "soft" ? 1.3 : 1);
+    const surfT = 2 + 1.5 * Math.max(0, M - 6);
+    // P: the vertical jolt, strongest near the source, high frequency
+    const pK = Math.max(0.18, Math.min(0.55, 0.6 - hypoKm * 0.004));
+    const fP = Math.max(3, Math.min(10, 9 * Math.exp(-0.01 * hypoKm)));
+    // camera metres at the peak of S (CBZ.shake units), as before
     const ampPeak = 0.04 + Math.pow(pga01, 1.25) * 1.35;
-    // dominant frequency: source dimension grows with M, corner frequency
-    // falls — an M4 rattles the crockery at ~5.5 Hz, an M8.6 rolls at ~0.6
-    const f0 = 5.5 * Math.pow(0.62, M - 4);
-    // strong-motion duration ~doubles per magnitude unit. THE BIG ONE.
-    const mainDur = Math.min(70, 4 * Math.pow(1.9, M - 4));
-    const sLag = 1.2 + (M - 4) * 0.6;          // P→S gap: bigger rupture, farther fault
-    const pDur = 0.7 + (M - 4) * 0.22;
-    const riseT = Math.min(5, 1 + mainDur * 0.1);
-    const codaTau = 1.2 + (M - 4) * 1.9;
-    const nShocks = Math.max(0, Math.min(8, Math.round((M - 4.6) * 2.2)));
-    // damage scaling: below ~M5.2 a quake damages NOTHING — that is what
-    // makes a small one genuinely fun instead of a shorter disaster
-    const dmgK = M < 5.2 ? 0 : Math.min(1.6, (M - 5.2) / 2.0);
-    const collapseFrac = M < 5.6 ? 0 : Math.min(0.5, Math.pow((M - 5.6) / 3, 1.4) * 0.6);
-    const shockWindow = nShocks ? 4 + nShocks * 3 : 0;
-    const activeSecs = Math.round(Math.max(12, Math.min(110,
-      sLag + mainDur + Math.max(codaTau * 3, shockWindow) + 6)));
+    // AFTERSHOCKS (Reasenberg-Jones with an early-time c, Bath's law): the
+    // expected count of felt (M>=4) shocks in the minute after the main
+    // shaking, the largest ~1.2 under the mainshock
+    const shockRate = 0.11 * Math.pow(10, 0.91 * (M - 7));
+    const nShocks = Math.max(0, Math.min(8, Math.round(shockRate * 25)));
+    const shockWindow = nShocks ? 6 + nShocks * 3 : 0;
+    const activeSecs = Math.round(Math.max(12, Math.min(55, sLag + mainDur + Math.max(codaTau * 2.5, shockWindow) + 5)));
+    const mmi = mmiOf(pgaG);
+    // liquefaction needs soft saturated ground, enough acceleration and
+    // enough cycles (Idriss magnitude scaling): an M6 needs ~0.18 g, an M8
+    // liquefies at ~0.1 g
+    const liqDemand = pgaG * Math.pow(M / 7.5, 2.56);
     return {
-      M: M, pgaG: pgaG, pga01: pga01, ampPeak: ampPeak, f0: f0,
-      mainDur: mainDur, sLag: sLag, pDur: pDur, riseT: riseT,
-      codaTau: codaTau, nShocks: nShocks, dmgK: dmgK,
-      collapseFrac: collapseFrac, activeSecs: activeSecs,
-      liq: M >= 7.2, rupture: M >= 7.8, tsunamigenic: M >= 7.4,
+      M: M, src: { epiKm: epiKm, depthKm: depthKm, offshore: !!src.offshore, bearing: src.bearing || 0, soil: soil },
+      hypoKm: hypoKm, Rrup: Rrup, pgaRock: pgaR, pgaG: pgaG, pga01: pga01, mmi: mmi,
+      ampPeak: ampPeak, f0: f0, Tm: Tm, fP: fP, pK: pK, surfK: surfK, surfT: surfT,
+      mainDur: mainDur, realDur: realDur, durCapped: realDur > mainDur + 0.01,
+      sLag: sLag, rLag: rLag, riseT: riseT, codaTau: codaTau,
+      nShocks: nShocks, activeSecs: activeSecs, ruptureKm: rup.L,
+      liqDemand: liqDemand, liq: liqDemand >= 0.1,
+      rupture: M >= 6.8 && epiKm < rup.L * 0.5 && !src.offshore,
+      tsunamigenic: M >= 7.4 && !!src.offshore,
     };
   }
 
@@ -1429,97 +1450,171 @@
   // consumed by the next roll and gone)
   let forcedMag = null;
 
+  /* ============================================================
+     THE WAVE TRAIN — three arrivals, one ground.
+
+       P        a sharp VERTICAL jolt at the P arrival: high frequency,
+                a third to a half of the S amplitude near the source, then a
+                low rumble until the S waves arrive. "Was that a truck?"
+       S        the shear waves, sLag later: the violent horizontal shaking
+                that does the damage, at the site's own mean period, rising
+                over riseT, sustained for the rupture's duration, then a
+                scattered coda.
+       surface  for a big shallow quake far enough off, the Love/Rayleigh
+                train arrives last: small accelerations at a 3-6 s period
+                with large displacements. You see the ground ROLL, tall
+                buildings sway with it, and it is what makes a distant
+                great quake feel nothing like a near small one.
+       aftershocks  each a miniature train of its own, drawn Gutenberg-
+                Richter (b = 1) under Bath's cap, front-loaded (Omori), at
+                its own distance with its own site PGA.
+
+     The synthesizer publishes ENVELOPES (p, s, r: 0..1 of each phase's
+     peak) for damage and a ground ACCELERATION and DISPLACEMENT vector for
+     what moves (cars, footing, the camera).
+     ============================================================ */
   const motion = {
     on: false, t: 0, p: null, cx: 0, cz: 0, R: 120,
     shocks: [], shockFired: 0, phase: "quiet", amp: 0, pgaNow: 0,
+    env: { p: 0, s: 0, r: 0, m: 0, a: 0 }, acc: { x: 0, y: 0, z: 0 }, disp: { x: 0, y: 0, z: 0 },
+    ph: [0, 0, 0, 0, 0, 0, 0, 0], pol: 0,
   };
   function motionStart(p, o) {
     o = o || {};
     motion.on = true; motion.t = 0; motion.p = p;
     motion.cx = o.cx || 0; motion.cz = o.cz || 0; motion.R = o.R || 120;
     motion.phase = "quiet"; motion.amp = 0; motion.pgaNow = 0; motion.shockFired = 0;
+    for (let i = 0; i < 8; i++) motion.ph[i] = rnd() * 6.2832;
+    motion.pol = rnd() * 6.2832;
     // the aftershock schedule, drawn now from the shared seeded stream so
     // every client agrees when the ground moves again. Times are seconds
-    // into the tail (after mainshock end); sizes fall off Båth-style.
+    // into the tail (after the strong motion), front-loaded; sizes are
+    // Gutenberg-Richter between M4 and Bath's cap.
     motion.shocks = [];
-    let at = 1.5 + rnd() * 3;
+    const W = p.nShocks ? 6 + p.nShocks * 3 : 0;
+    const cap = p.M - 1.2;
     for (let i = 0; i < p.nShocks; i++) {
+      const Ma = i === 0 ? cap - 0.3 * rnd()
+        : Math.min(cap, 4 - Math.log10(1 - rnd() * (1 - Math.pow(10, -(cap - 4)))));
+      if (Ma < 4) continue;
+      const src = p.src || {};
+      const off = (rnd() - 0.5) * p.ruptureKm * 0.5;
+      const epi = Math.max(1, Math.hypot((src.epiKm || 15) + off * Math.cos(src.bearing || 0), off * Math.sin(src.bearing || 0)));
+      const sp = magParams(Ma, { epiKm: epi, depthKm: (src.depthKm || 10) * (0.6 + rnd() * 0.6), soil: src.soil });
       motion.shocks.push({
-        at: at,
-        k: 0.38 * Math.pow(0.78, i) * (0.8 + rnd() * 0.4),   // fraction of ampPeak
-        dur: 1.6 + p.mainDur * 0.04 + rnd() * 1.2,
-        fired: false,
+        at: 1.2 + W * Math.pow(rnd(), 1.8), M: +Ma.toFixed(1),
+        k: Math.min(1, sp.pgaG / Math.max(1e-3, p.pgaG)),
+        sLag: sp.sLag, dur: Math.max(1, sp.mainDur), f: sp.f0, fired: false,
       });
-      at += 2.2 + rnd() * 4 + i * 0.8;
     }
+    motion.shocks.sort(function (a, b) { return a.at - b.at; });
     A.shocks++;
   }
   function motionStop() {
     motion.on = false; motion.phase = "quiet"; motion.amp = 0; motion.pgaNow = 0; motion.p = null;
+    motion.env.p = motion.env.s = motion.env.r = motion.env.m = motion.env.a = 0;
+    motion.acc.x = motion.acc.y = motion.acc.z = 0; motion.disp.x = motion.disp.y = motion.disp.z = 0;
   }
+  const TAU = 6.2832;
   function motionTick(dt) {
-    if (!motion.on || !motion.p) return { amp: 0, pga01: 0, phase: "quiet", t: 0, shockFired: 0 };
-    const p = motion.p;
+    if (!motion.on || !motion.p) return { amp: 0, pga01: 0, phase: "quiet", t: 0, shockFired: 0, env: motion.env };
+    const p = motion.p, E = motion.env;
     motion.t += dt;
     const t = motion.t;
-    let env = 0, phase = "quiet", carF = p.f0;
-    // ---- P: the bang -----------------------------------------------------
-    const pT = 0.15;
-    if (t >= pT && t < pT + p.pDur) {
-      const u = (t - pT) / p.pDur;
-      // fast attack, exponential ring-down; a quarter of the S amplitude
-      env = p.ampPeak * 0.25 * Math.min(1, u * 12) * Math.exp(-u * 3.2);
-      carF = p.f0 * 4;                       // P is the high-frequency arrival
-      phase = "p";
-    } else if (t >= pT + p.pDur && t < p.sLag) {
-      env = p.ampPeak * 0.03;                // the uneasy quiet between arrivals
-      carF = p.f0 * 3;
+    let phase = "quiet";
+    // ---- P ---------------------------------------------------------------
+    let eP = 0;
+    if (t < p.sLag + 0.5) {
+      const u = t / 0.08;
+      eP = Math.min(1, u) * (0.22 + 0.78 * Math.exp(-t / (0.4 + 0.12 * (p.M - 4))));
       phase = "p";
     }
-    // ---- S: the damage ---------------------------------------------------
-    let shockFired = 0;
-    if (t >= p.sLag) {
-      const ts = t - p.sLag;
+    // ---- S ---------------------------------------------------------------
+    let eS = 0;
+    const ts = t - p.sLag;
+    if (ts >= 0) {
       if (ts < p.mainDur) {
         const rise = Math.min(1, ts / p.riseT);
-        // sustained strong motion breathes a little (two incommensurate sines)
-        const breathe = 0.86 + 0.09 * Math.sin(ts * 0.7) + 0.05 * Math.sin(ts * 1.9);
-        env = Math.max(env, p.ampPeak * rise * (2 - rise) * breathe);
+        const breathe = 0.88 + 0.08 * Math.sin(ts * 0.7 + motion.ph[3]) + 0.04 * Math.sin(ts * 1.9);
+        eS = rise * (2 - rise) * breathe;
         phase = "s";
       } else {
-        const tail = ts - p.mainDur;
-        env = Math.max(env, p.ampPeak * Math.exp(-tail / p.codaTau));
-        phase = tail < p.codaTau * 3 ? "coda" : "done";
-        for (let i = 0; i < motion.shocks.length; i++) {
-          const s = motion.shocks[i];
-          const d = tail - s.at;
-          if (d >= 0 && d < s.dur) {
-            if (!s.fired) { s.fired = true; motion.shockFired++; shockFired = s.k; A.aftershocks++; }
-            const a = p.ampPeak * s.k * Math.min(1, d * 6) * Math.exp(-d / (s.dur * 0.45));
-            if (a > env) { env = a; phase = "aftershock"; }
-          }
-        }
+        eS = Math.exp(-(ts - p.mainDur) / p.codaTau);
+        phase = ts - p.mainDur < p.codaTau * 2.5 ? "coda" : "done";
       }
     }
-    /* THE CARRIER. camera.js turns whatever we feed it into white noise, so
-       the frequency lives here: a |sin| at the quake's own dominant frequency
-       modulates the envelope. At 5 Hz that is a buzz; at 0.8 Hz the whole
-       view visibly rolls and slackens twice a second — the difference you
-       feel between a small quake and a great one. */
-    const carrier = 0.6 + 0.4 * Math.abs(Math.sin(6.2832 * carF * t));
-    motion.amp = env * carrier;
-    motion.pgaNow = p.ampPeak > 0 ? (env / p.ampPeak) * p.pga01 : 0;
+    // ---- surface ---------------------------------------------------------
+    let eR = 0;
+    const tr = t - p.rLag;
+    if (p.surfK > 0 && tr >= 0) {
+      const hold = p.mainDur * 0.7;
+      eR = tr < hold ? Math.min(1, tr / 2.5) : Math.exp(-(tr - hold) / (0.5 * p.mainDur + 2));
+      if (eR > 0.35 && phase === "coda") phase = "surface";
+    }
+    // ---- aftershocks -----------------------------------------------------
+    let shockFired = 0, eA = 0, fA = p.f0;
+    const tail = ts - p.mainDur;
+    if (tail >= 0) {
+      for (let i = 0; i < motion.shocks.length; i++) {
+        const s = motion.shocks[i];
+        const d = tail - s.at;
+        if (d < 0 || d > s.sLag + s.dur * 3) continue;
+        if (!s.fired) { s.fired = true; motion.shockFired++; shockFired = s.k; A.aftershocks++; }
+        const dS = d - s.sLag;
+        const a = dS < 0 ? s.k * 0.3 * Math.min(1, d * 10) : s.k * Math.min(1, dS * 4) * (dS < s.dur ? 1 : Math.exp(-(dS - s.dur) / (0.4 * s.dur + 0.5)));
+        if (a > eA) { eA = a; fA = s.f; }
+      }
+      if (eA > eS && eA > 0.05) phase = "aftershock";
+    }
+    // s = what is shaking now (main or aftershock); m = the mainshock's own
+    // S train and coda; a = the aftershock trains (damage reads them apart)
+    E.p = eP; E.s = Math.max(eS, eA); E.r = eR; E.m = eS; E.a = eA;
+    /* THE GROUND ITSELF (m/s^2 and m), at the reference site: the S train
+       on two components (a wandering ellipse), the surface roll on its own
+       period, the P jolt vertical. */
+    const g = 9.81, pga = p.pgaG;
+    const fS = eA > eS ? fA : p.f0;
+    // two horizontal components of similar size, each a pair of incommensurate
+    // sines about the site period: the ground traces a wandering ellipse, as
+    // a real two-component record does, never a fixed line
+    const swX = Math.cos(TAU * fS * t + motion.ph[0]) * 0.72 + Math.cos(TAU * fS * 1.37 * t + motion.ph[1]) * 0.28;
+    const swZ = (Math.cos(TAU * fS * 1.13 * t + motion.ph[5]) * 0.72 + Math.cos(TAU * fS * 0.81 * t + motion.ph[6]) * 0.28) * 0.9;
+    const ang = motion.pol;
+    const aSx = pga * g * E.s * swX, aSz = pga * g * E.s * swZ;
+    const wR = TAU / p.surfT, aRm = pga * g * p.surfK * 0.22 * eR;
+    const rw = Math.cos(wR * t + motion.ph[2]);
+    const aV = pga * g * (p.pK * eP * Math.sin(TAU * p.fP * t) + 0.5 * E.s * Math.sin(TAU * fS * 1.3 * t + motion.ph[4]));
+    motion.acc.x = aSx + aRm * rw * Math.cos(ang);
+    motion.acc.z = aSz + aRm * rw * Math.sin(ang);
+    motion.acc.y = aV;
+    const wS2 = (TAU * fS) * (TAU * fS), dR = aRm * rw / (wR * wR);
+    motion.disp.x = aSx / wS2 + dR * Math.cos(ang);
+    motion.disp.z = aSz / wS2 + dR * Math.sin(ang);
+    // vertical: the S/P part is small and fast; a Rayleigh wave lifts and
+    // drops the whole street on its long period (retrograde ellipse)
+    const rv = Math.sin(wR * t + motion.ph[2]);
+    motion.disp.y = (pga * g * 0.5 * E.s * Math.sin(TAU * fS * 1.3 * t + motion.ph[4])) / ((TAU * fS * 1.3) * (TAU * fS * 1.3)) + 0.7 * aRm * rv / (wR * wR);
+    motion.acc.y += -0.7 * aRm * rv;
+    // felt PGA (g, 0..1): the envelope peak of everything arriving now
+    motion.pgaNow = Math.min(1, pga * Math.max(E.s, p.pK * eP, p.surfK * 0.22 * eR));
+    /* THE CAMERA. camera.js's CBZ.shake is white noise with a fast decay,
+       so frequency lives in the ENVELOPE fed to it: a |sin| at the arriving
+       phase's own frequency (the P jolt buzzes, the S shakes, the surface
+       train rolls slow and wide). */
+    const felt = Math.max(E.s, p.pK * eP * 1.2, p.surfK * 0.6 * eR);
+    const carF = (p.pK * eP * 1.2 >= E.s && eP > 0.05) ? p.fP : (p.surfK * 0.6 * eR > E.s ? 1 / p.surfT : fS);
+    const carrier = 0.6 + 0.4 * Math.abs(Math.sin(TAU * carF * t));
+    motion.amp = p.ampPeak * felt * carrier;
     motion.phase = phase;
     if (motion.pgaNow > A.pgaPeak) A.pgaPeak = motion.pgaNow;
     footingTick(dt, motion.pgaNow);
-    return { amp: motion.amp, pga01: motion.pgaNow, phase: phase, t: t, shockFired: shockFired };
+    return { amp: motion.amp, pga01: motion.pgaNow, phase: phase, t: t, shockFired: shockFired, env: E };
   }
 
   /* FOOTING. The ground decides whether you keep yours. Live PGA (as a
      fraction of 1 g) staggers, then flattens: above ~0.12 g people lurch,
      above ~0.35 g they start going down, and near 1 g nobody stays up long
-     enough to run — which is the real reason you cannot flee an M8, taught
-     by the legs and not by a speed debuff. Holding onto a table exempts you. */
+     enough to run. Holding onto a table exempts you. */
   function footingTick(dt, pga) {
     if (pga < 0.12 || !CBZ.body) return;
     eachActorNear(motion.cx, motion.cz, motion.R * 2.5, function (a) {
@@ -1541,6 +1636,1147 @@
   }
 
   /* ============================================================
+     HOW A BUILDING ANSWERS THE GROUND — by what it is made of and how tall.
+
+     The old quake loaded every building on the island by the same amount
+     and then knocked down a random `collapseFrac` of them: a timber house
+     and a 30-storey steel tower were the same coin. Earthquake engineering
+     says three things decide it, and all three are read off the building:
+
+       structural system  the facade grammar's own `structure:` field
+                 (city/collapse.js profile): unreinforced masonry (brick,
+                 stone, adobe) is brittle and heavy; timber light frame is
+                 light and forgiving; reinforced concrete and steel frames
+                 are engineered.
+       period    T = Ct * H^x (ASCE 7 approximate period): a 3-storey walk-
+                 up is ~0.25 s, a 12-storey steel tower ~1.4 s. A building
+                 takes the ground's SPECTRAL acceleration at its own period,
+                 so a near small quake (short period) wrecks low masonry and
+                 barely moves towers, while a distant great quake's long
+                 period and surface waves find the tall ones.
+       weak storey  an open ground floor (shopfronts, a lobby, parking under
+                 flats) concentrates all the drift in one storey: it fails
+                 first and the floors above come down onto it.
+
+     Damage follows HAZUS-style fragility: four states (slight, moderate,
+     extensive, complete), lognormal in spectral demand with dispersion
+     beta, and ONE uniform draw per building per quake decides where on the
+     curve that building sits (so a stronger building on the same street
+     can still lose, as it does). Long strong shaking degrades brittle walls
+     cycle by cycle, and a damaged building is weaker for the aftershocks.
+
+     Medians are spectral acceleration (g) at the building's period for a
+     low-code town; tall buildings' capacities scale down with period the
+     way their design base shear does. `glass` is the share of a building's
+     panes lost by each state (glazing mostly survives: a curtain wall at
+     extensive damage has lost about a third; at complete the collapse
+     engine takes the rest with the building).
+     ============================================================ */
+  const TYPES = {
+    URM: { label: "unreinforced masonry", med: [0.30, 0.48, 0.80, 1.20], beta: 0.6, degrade: 0.25, ct: 0.0488, x: 0.75, glass: [0.02, 0.06, 0.18, 0] },
+    W:   { label: "timber frame",         med: [0.50, 0.90, 1.70, 2.60], beta: 0.65, degrade: 0.08, ct: 0.0488, x: 0.75, glass: [0.01, 0.04, 0.12, 0] },
+    C:   { label: "reinforced concrete",  med: [0.45, 0.75, 1.40, 2.30], beta: 0.65, degrade: 0.12, ct: 0.0466, x: 0.9, glass: [0.01, 0.05, 0.15, 0] },
+    S:   { label: "steel frame",          med: [0.50, 0.90, 1.90, 3.20], beta: 0.65, degrade: 0.06, ct: 0.0724, x: 0.8, glass: [0.02, 0.06, 0.18, 0] },
+    CW:  { label: "curtain-wall frame",   med: [0.50, 0.90, 1.90, 3.20], beta: 0.65, degrade: 0.06, ct: 0.0724, x: 0.8, glass: [0.04, 0.12, 0.30, 0] },
+  };
+  const TYPE_OF = { masonry: "URM", brick: "URM", stone: "URM", adobe: "URM", timber: "W", concrete: "C", steel: "S", glassbox: "CW" };
+  const DEBRIS_KIND = { masonry: "brick", brick: "brick", stone: "rock", adobe: "dirt", timber: "wood", concrete: "concrete", steel: "concrete", glassbox: "concrete" };
+  const DS_NAME = ["none", "slight", "moderate", "extensive", "complete"];
+  // standard normal CDF (Abramowitz & Stegun 7.1.26 erf)
+  function Phi(x) {
+    const z = Math.abs(x) / Math.SQRT2, t = 1 / (1 + 0.3275911 * z);
+    const e = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z);
+    return x >= 0 ? 0.5 * (1 + e) : 0.5 * (1 - e);
+  }
+  function fragP(D, med, beta) { return D <= 0 ? 0 : Phi(Math.log(D / med) / beta); }
+  // design-spectrum shape: Sa/PGA at period T for a ground of mean period Tm
+  function spectral(T, Tm) {
+    const Tc = Math.max(0.3, 1.6 * Tm);
+    if (T < 0.1) return 1 + 15 * T;
+    return T <= Tc ? 2.5 : 2.5 * Tc / T;
+  }
+  // a building's response to the surface train: a damped oscillator near
+  // its own period, capped (the train is a few cycles, not a steady state)
+  function resonance(T, Ts) {
+    const r = T / Ts, z = 0.05;
+    return Math.min(5, 1 / Math.sqrt((1 - r * r) * (1 - r * r) + (2 * z * r) * (2 * z * r)));
+  }
+  function materialOf(t, B) {
+    const C = CBZ.collapse;
+    const style = t.facadeStyle || (t.building && (t.building.dressStyle || t.building.style)) || t.style || null;
+    if (C && C.profile) {
+      try { return C.profile({ style: style, storeys: B.storeys, w: B.w, d: B.d, h: B.h, masonry: t.building && t.building.masonry }).material; } catch (e) {}
+    }
+    return B.storeys >= 10 ? "steel" : B.storeys >= 4 ? "concrete" : "brick";
+  }
+
+  /* ONE STRUCTURE RECORD per building per quake, from either shape (a city
+     lot / city building record, or the island's fragile record). */
+  function structOf(t, p) {
+    const B = boxOf(t);
+    if (!B) return null;
+    const b = t.building || t;
+    const storeys = Math.max(1, b.storeys || Math.round(B.h / 3.2));
+    const FH = b.FH || B.h / storeys;
+    const S = {
+      src: t, lot: ev.lots && t.building ? t : null,
+      x: B.x, z: B.z, w: B.w, d: B.d, h: B.h, storeys: storeys, FH: FH,
+      gy: t.gy != null ? t.gy : (b.gy != null ? b.gy : floorAt(B.x, B.z)),
+      group: B.group || b.group || null,
+      style: t.facadeStyle || b.dressStyle || null,
+      wallCol: t.color != null ? t.color : (b.wallColor != null ? b.wallColor : null),
+      colliders: t.colliders || b.colliders || null, platforms: t.platforms || b.platforms || null,
+      city: !!(t.building && CBZ.cityCarveWall),
+      // u: where on its fragility curves this building sits, the 3rd to the
+      // 97th percentile (no building is weaker than one in thirty of its kind)
+      ds: 0, peak: 0, cyc: 0, u: 0.03 + 0.94 * rnd(), shed: 0, panes: 0, parapetDown: false, crownDown: false,
+      soft: false, collapsed: false, sunk: false, liq: false, shedAcc: 0, holes: 0,
+    };
+    S.material = materialOf(t, S);
+    S.type = TYPE_OF[S.material] || "C";
+    S.debrisKind = DEBRIS_KIND[S.material] || "concrete";
+    const TY = TYPES[S.type];
+    S.T = TY.ct * Math.pow(Math.max(3, S.h), TY.x);
+    const hf = S.T > 0.35 ? Math.max(0.4, Math.min(1, Math.pow(0.35 / S.T, 0.4))) : 1;
+    S.med = TY.med.map(function (m) { return m * hf * (S.material === "adobe" ? 0.8 : 1); });
+    S.beta = TY.beta; S.degrade = TY.degrade;
+    /* THE WEAK STOREY. A storefront or lobby ground floor on a mid-rise
+       concrete or timber building (a third of the rest of them, which is
+       roughly what a pre-code town has). Its extensive and complete
+       capacities are the soft storey's, not the frame's. */
+    const h01 = CBZ.hash01 ? CBZ.hash01(S.x, S.z, 0x5f7) : 0.5;
+    S.soft = (S.type === "C" || S.type === "W") && storeys >= 2 && storeys <= 8 &&
+      !!(t.retail || b.retail || t.softStorey || (b.storefront) || h01 < 0.33);
+    if (S.soft) { S.med[2] *= 0.7; S.med[3] *= 0.55; }
+    /* ALREADY HURT: a building the caller's ledger has damaged (the tsunami
+       spalled it, an earlier quake cracked it) starts this one at that state
+       and with a weakened frame. */
+    const pre = +t._dmg || 0;
+    S.ds = pre >= 0.69 ? 3 : pre >= 0.34 ? 2 : pre >= 0.15 ? 1 : 0;
+    S.dsStart = S.ds;
+    if (S.ds) S.med = S.med.map(function (m) { return m * (1 - 0.08 * S.ds); });
+    S.parapet = S.type === "URM" ? (b.parapetH == null || b.parapetH > 0.2) : (b.parapetH > 0.4);
+    /* THE SITE. Its own distance to the rupture (game metres are metres:
+       across an island a kilometre wide that is a small change, and an
+       honest one), its own soil, and a lognormal intra-event scatter so two
+       identical buildings a street apart do not shake identically. */
+    const src = p.src || {};
+    const offKm = Math.hypot(S.x - ev.cx, S.z - ev.cz) / 1000;
+    const ux = Math.cos(src.bearing || 0), uz = Math.sin(src.bearing || 0);
+    const along = ((S.x - ev.cx) * ux + (S.z - ev.cz) * uz) / 1000;
+    const epi = Math.max(0.5, (src.epiKm || 15) - along + offKm * 0.1);
+    S.soil = soilAt(S.x, S.z);
+    const Rr = rupDistKm(p.M, epi, src.depthKm || 10);
+    const pr = pgaRock(p.M, Rr);
+    const scatter = Math.exp(0.3 * ((rnd() + rnd() + rnd()) - 1.5) * 1.15);
+    S.pga = Math.min(1.6, pr * siteAmp(S.soil, pr) * scatter);
+    S.Tm = meanPeriod(p.M, Rr, S.soil);
+    S.fS = 1 / S.Tm;
+    S.saS = S.pga * spectral(S.T, S.Tm);
+    S.saR = S.pga * p.surfK * 0.22 * resonance(S.T, p.surfT);
+    S.saP = S.pga * p.pK * 0.6;                  // vertical jolt: mostly felt, rarely structural
+    S.n = { x: 0, z: 1 };
+    // the street face (the door side) is where the facade drops, and where
+    // the people come out
+    const door = doorOf(t, S);
+    S.door = door;
+    S.n = { x: Math.sign(door.x - S.x) * (Math.abs(door.x - S.x) > Math.abs(door.z - S.z) ? 1 : 0), z: Math.sign(door.z - S.z) * (Math.abs(door.z - S.z) >= Math.abs(door.x - S.x) ? 1 : 0) };
+    return S;
+  }
+  function doorOf(t, S) {
+    const b = t.building || t;
+    // city shells publish their doorway (building-local, inward normal)
+    if (b.localDoor && b.localDoor.x != null) {
+      const ld = b.localDoor, nx = -(ld.nx || 0), nz = -(ld.nz || 0);
+      return { x: S.x + ld.x + nx * 1.2, z: S.z + ld.z + nz * 1.2 };
+    }
+    if (b.doorSide != null) {
+      const s = b.doorSide;
+      return s === 0 ? { x: S.x, z: S.z - S.d / 2 - 1.2 } : s === 1 ? { x: S.x, z: S.z + S.d / 2 + 1.2 } : s === 2 ? { x: S.x - S.w / 2 - 1.2, z: S.z } : { x: S.x + S.w / 2 + 1.2, z: S.z };
+    }
+    // the island's houses and towers all face -z (world/disaster_arena.js)
+    return { x: S.x, z: S.z - S.d / 2 - 1.1 };
+  }
+
+  // ---- what the building does at each state it reaches -----------------
+  /* THE WORK QUEUE. A street failing at once is dozens of fractures,
+     carves and peels; they run under a per-frame budget instead of landing
+     in one frame. NOTHING IN A JOB DRAWS FROM THE SHARED STREAM (how many
+     run per frame depends on the device), so every decision is taken when
+     the job is queued and the job only draws the picture. */
+  const jobs = [];
+  const jobCost = {};
+  // two queues: the STRUCTURE (wounds, peels, soft storeys, collapses, in
+  // the order they were decided) goes before the GLASS
+  const glassJobs = [];
+  function job(fn, tag) {
+    const q = tag === "pane" ? glassJobs : jobs;
+    if (q.length < 400) q.push({ fn: fn, tag: tag || "job" });
+  }
+  /* THE LIVE-BODY BUDGET. debris.js holds a device-capped number of bodies
+     in flight and makes room by FREEZING the oldest where they are, in the
+     air. A quake that out-throws the cap would leave slabs hanging over the
+     street, so a job that throws bodies waits while the sky is full (the
+     ones in flight land in a second or two) and only then goes. */
+  let liveCap = 0;
+  function skyFull() {
+    const D = CBZ.debris, L = liveBodies();
+    if (!D || !L) return false;
+    if (!liveCap) { try { liveCap = (D.stats().caps || {}).live || 140; } catch (e) { liveCap = 140; } }
+    return L.length > liveCap * 0.6;
+  }
+  const THROWS = { pane: 1, wall: 1, peel: 1, shed: 1, soft: 1, collapse: 1 };
+  let stall = 0;
+  function runJobs() {
+    const t0 = performance.now(), budget = PHONE ? 2.5 : 4;
+    let k = 0;
+    while ((jobs.length || glassJobs.length) && (k < 1 || performance.now() - t0 < budget) && k < (PHONE ? 2 : 4)) {
+      const q = jobs.length ? jobs : glassJobs;
+      const j0 = q[0];
+      // the queues keep their order (a facade's wounds come before its
+      // collapse), so a full sky holds them, a second at a time: after that
+      // one job goes every half second whatever the sky holds
+      if (THROWS[j0.tag] && skyFull()) {
+        if (++stall < 60) { A.jobWaits++; break; }
+        stall = 30;
+      } else stall = 0;
+      const j = q.shift(); k++;
+      const t1 = performance.now();
+      try { j.fn(); } catch (e) { A.jobErrors++; if (CBZ.quake && CBZ.quake._debug) console.warn("[quake job]", j.tag, e); }
+      const ms = performance.now() - t1;
+      const c = jobCost[j.tag] || (jobCost[j.tag] = { n: 0, ms: 0, max: 0 });
+      c.n++; c.ms += ms; if (ms > c.max) c.max = ms;
+    }
+  }
+  function faceNormals(S) {
+    return [{ x: 0, z: -1 }, { x: 0, z: 1 }, { x: -1, z: 0 }, { x: 1, z: 0 }];
+  }
+  function facePoint(S, n, u, y) {
+    // a point on face n, u in -0.5..0.5 along it, at height y
+    if (n.z) return { x: S.x + u * S.w * 0.9, y: y, z: S.z + n.z * (S.d / 2 + 0.02) };
+    return { x: S.x + n.x * (S.w / 2 + 0.02), y: y, z: S.z + u * S.d * 0.9 };
+  }
+  function upperY(S, frac) { return S.gy + S.h * (frac != null ? frac : 0.55 + rnd() * 0.4); }
+
+  function panesOf(S) {
+    if (S.paneList) return S.paneList;
+    let list = [];
+    if (S.src.glass && S.src.glass.length) list = S.src.glass.slice();
+    else if (CBZ.cityGlassRecs) {
+      const x0 = S.x - S.w / 2 - 1.2, x1 = S.x + S.w / 2 + 1.2, z0 = S.z - S.d / 2 - 1.2, z1 = S.z + S.d / 2 + 1.2;
+      const G = CBZ.cityGlassRecs;
+      for (let i = 0; i < G.length; i++) { const g = G[i]; if (g.x >= x0 && g.x <= x1 && g.z >= z0 && g.z <= z1) list.push(g); }
+    }
+    // the order they go in: weighted by height (drift whips the upper
+    // floors) on a uniform draw, so the top of a tower rains first
+    const key = new Map();
+    for (const g of list) key.set(g, rnd() * (0.45 + Math.max(0, Math.min(1, ((g.y || 0) - S.gy) / Math.max(1, S.h)))));
+    list.sort(function (a, b) { return key.get(b) - key.get(a); });
+    S.paneList = list; S.paneAt = 0;
+    return list;
+  }
+  function breakPane(S, gp) {
+    if (!gp || gp.shattered) return false;
+    if (S.city && CBZ.cityShatterRay && gp.hw != null) {
+      const horiz = gp.hd < gp.hw;
+      const nx = horiz ? 0 : (gp.x >= S.x ? 1 : -1), nz = horiz ? (gp.z >= S.z ? 1 : -1) : 0;
+      // struck from INSIDE: a racked frame throws its glazing out over the
+      // street, it does not punch it into the room
+      try { CBZ.cityShatterRay(gp.x - nx * 0.6, gp.y, gp.z - nz * 0.6, nx, 0, nz, 1.2, true, {}); } catch (e) {}
+      return !!gp.shattered;
+    }
+    if (CBZ.island && CBZ.island.breakPane) { try { CBZ.island.breakPane(gp); return true; } catch (e) {} }
+    // the island's pane contract (world/disaster_arena.js addGlass / the
+    // merged facade glass): a real mesh, or a hide() on the merged glass
+    // with its material, broken into its own radial shards
+    gp.shattered = true;
+    const D = CBZ.debris, at = { x: gp.x, y: gp.y, z: gp.z };
+    if (gp.mesh && !gp.hide) {
+      if (D) D.shatter(gp.mesh, { kind: "glass", at: at, power: 0.9, maxPieces: PHONE ? 4 : 7, owner: "fx" });
+      gp.mesh.visible = false;
+      return true;
+    }
+    if (gp.hide) gp.hide(); else if (gp.mesh) gp.mesh.visible = false;
+    if (D && gp.mat) {
+      const hs = gp.span || 0.6, hh = gp.hh || 0.7, th = 0.012;
+      const box = gp.horiz
+        ? { minX: gp.x - hs, maxX: gp.x + hs, minY: gp.y - hh, maxY: gp.y + hh, minZ: gp.z - th, maxZ: gp.z + th }
+        : { minX: gp.x - th, maxX: gp.x + th, minY: gp.y - hh, maxY: gp.y + hh, minZ: gp.z - hs, maxZ: gp.z + hs };
+      D.shatterBox(box, gp.mat, { kind: "glass", at: at, power: 0.9, maxPieces: PHONE ? 4 : 7, owner: "fx" });
+    } else if (D) D.chips(at.x, at.y, at.z, { kind: "glass", count: 6, power: 0.8 });
+    return true;
+  }
+  function glassTo(S, frac) {
+    const list = panesOf(S);
+    const want = Math.round(list.length * Math.min(1, frac));
+    while (S.paneAt < want) {
+      const gp = list[S.paneAt++];
+      // a building that has come down took its glass with it
+      job(function () { if (!S.collapsed && breakPane(S, gp)) { S.panes++; A.panesBroken++; } }, "pane");
+    }
+  }
+  function wallHits(S, n, count, r, energy, yLo, yHi, fling) {
+    for (let i = 0; i < count; i++) {
+      const p = facePoint(S, n, rnd() - 0.5, S.gy + S.h * (yLo + rnd() * (yHi - yLo)));
+      // the wall rotates off its base: its middle lands near, its top far
+      const fl = fling ? fling * (0.35 + 0.9 * rnd()) : 0;
+      job(function () { if (S.holes < 14 && !S.collapsed) { S.holes++; BD.hit(S, p, r, energy, n, fl); } }, "wall");
+    }
+  }
+  function dustBillow(S, power) {
+    const D = CBZ.debris;
+    const col = S.wallCol != null ? S.wallCol : 0xb6a892;
+    if (D && D.dust) for (let i = 0; i < 3; i++) {
+      const n = faceNormals(S)[i];
+      const p = facePoint(S, n, Math.random() - 0.5, S.gy + 1);
+      try { D.dust(p.x, p.y, p.z, { color: col, power: power, radius: Math.min(4, Math.max(S.w, S.d) * 0.3) }); } catch (e) {}
+    }
+    A.dustClouds++;
+    // the collapse cloud: a rolling, rising column the colour of the building
+    if (CBZ.fx && CBZ.fx.particleCloud && clouds.length < (PHONE ? 2 : 4)) {
+      const c = CBZ.fx.particleCloud({ mode: "rise", color: 0xa69a88, count: PHONE ? 60 : 120, radius: Math.max(S.w, S.d) * 0.8, top: Math.min(30, S.h * 0.7 + 6), size: 0.9, opacity: 0.42, vMin: 1, vMax: 3.2, drift: 2.5 });
+      if (c) { c.setActive(Math.min(1, power / 3)); clouds.push({ c: c, x: S.x, y: S.gy, z: S.z, t: 0, life: 14 }); }
+    }
+  }
+  const clouds = [];
+  function tickClouds(dt) {
+    for (let i = clouds.length - 1; i >= 0; i--) {
+      const k = clouds[i];
+      k.t += dt;
+      k.c.setActive(Math.max(0, 1 - k.t / k.life));
+      k.c.update(dt, k.x, k.y, k.z);
+      if (k.t > k.life) { k.c.dispose(); clouds.splice(i, 1); }
+    }
+  }
+
+  function enterState(S, k) {
+    const TY = TYPES[S.type];
+    const n = S.n;
+    if (ev.hooks.damage) { try { ev.hooks.damage(S.src, k, S); } catch (e) {} }
+    if (TY.glass[k - 1]) glassTo(S, TY.glass[k - 1]);
+    if (k === 1) {
+      // the roof line goes first on brittle buildings: parapets over the
+      // street, chimney stacks off houses
+      if (S.parapet && S.type === "URM") job(function () { if (peelTop(S, S.x + n.x * S.w * 0.45, S.z + n.z * S.d * 0.45, Math.max(S.w, S.d) * 0.4, "parapet")) A.parapets++; }, "peel");
+      if ((S.type === "URM" || S.type === "W") && S.storeys <= 4 && rnd() < 0.6) {
+        const cx = S.x + (rnd() - 0.5) * S.w * 0.6, cz = S.z + (rnd() - 0.5) * S.d * 0.6;
+        job(function () { if (peelTop(S, cx, cz, 1.6, "crown")) A.chimneys++; }, "peel");
+      }
+    } else if (k === 2) {
+      if (S.type === "URM") {
+        // the facade starts shedding while the ground keeps moving
+        S.shedRate = 0.45;
+        if (S.parapet) { const m = faceNormals(S)[(rnd() * 4) | 0]; job(function () { if (peelTop(S, S.x + m.x * S.w * 0.45, S.z + m.z * S.d * 0.45, Math.max(S.w, S.d) * 0.4, "parapet")) A.parapets++; }, "peel"); }
+      } else if (S.type === "C") { wallHits(S, n, 2, 0.8, 0.5, 0.15, 0.9); S.shedRate = 0.15; }
+      else if (S.type === "S" || S.type === "CW") { wallHits(S, n, 1, 0.9, 0.4, 0.5, 0.95); }
+      else if (S.type === "W") { lean(S, 0.012); }
+    } else if (k === 3) {
+      if (S.type === "URM") {
+        // OUT-OF-PLANE FAILURE: the top of one wall comes away whole
+        const m = rnd() < 0.6 ? n : faceNormals(S)[(rnd() * 4) | 0];
+        wallHits(S, m, PHONE ? 3 : 5, 1.4, 1.1, 0.68, 0.98, Math.sqrt(9.81 * S.h) * 0.3);
+        S.shedRate = 1.2;
+        lean(S, 0.018);
+        job(function () { dustBillow(S, 1.6); }, "dust");
+      } else if (S.soft) {
+        // THE SOFT STOREY GOES: the ground floor racks flat, the building
+        // above comes down a storey and leans over the street
+        const tilt = 0.05 + rnd() * 0.05;
+        job(function () {
+          A.softStoreys++;
+          crushFloor(S);
+          BD.undermine(S, { drop: S.FH * 0.88, tilt: tilt, ax: n.z, az: -n.x, secs: 0.55, soft: true });
+          dustBillow(S, 2.6);
+          if (CBZ.shake) CBZ.shake(0.25);
+          sfxAt("collapse", S.x, S.z, {});
+        }, "soft");
+      } else {
+        if (S.parapet) job(function () { if (peelTop(S, S.x + n.x * S.w * 0.45, S.z + n.z * S.d * 0.45, Math.max(S.w, S.d) * 0.3, "parapet")) A.parapets++; }, "peel");
+        wallHits(S, n, PHONE ? 2 : 3, 1.1, 0.8, 0.1, 0.9);
+        lean(S, S.type === "W" ? 0.035 : 0.014);
+        job(function () { dustBillow(S, 1.2); }, "dust");
+      }
+    } else if (k === 4) {
+      /* THE LEDGER DECIDES NOW (the caller's collapse draws from the shared
+         stream, so it must not wait on a frame budget); the picture of it
+         comes down through the queue. */
+      if (ev.hooks.collapse) {
+        S.collapsed = true; A.collapses++;
+        try { ev.hooks.collapse(S.src, n); } catch (e) {}
+        job(function () { dustBillow(S, 3); }, "dust");
+      } else job(function () { dustBillow(S, 3); BD.collapse(S, n); }, "collapse");
+    }
+  }
+  /* A permanent lean: the building's own group rotates about its base (the
+     frame has yielded). */
+  function lean(S, ang) {
+    if (!S.group || S.collapsed) return;
+    const n = S.n;
+    _piv.set(S.x, S.gy, S.z);
+    _axis.set(n.z, 0, -n.x);
+    const g = S.group;
+    g.position.sub(_piv).applyAxisAngle(_axis, ang).add(_piv);
+    g.rotateOnWorldAxis(_axis, ang);
+    S.leanRad = (S.leanRad || 0) + ang;
+  }
+  // the ground floor of a soft-storey building, crushed: its walls leave
+  // through the adapter as pieces of themselves, and whoever is in it is
+  // under the building
+  function crushFloor(S) {
+    // the open front (the shopfront, the lobby) and one flank burst out
+    const fs = [S.n, faceNormals(S)[(Math.random() * 4) | 0]];
+    for (let i = 0; i < fs.length; i++) {
+      const p = facePoint(S, fs[i], Math.random() - 0.5, S.gy + S.FH * 0.5);
+      if (S.city) BD.hit(S, p, 1.2, 1.2, fs[i]); else shedFace(S, p, 1.4, 1.4, fs[i]);
+    }
+    eachActorNear(S.x, S.z, Math.max(S.w, S.d) * 0.6, function (a) {
+      if (!a.pos) return;
+      if (Math.abs(a.pos.x - S.x) > S.w / 2 || Math.abs(a.pos.z - S.z) > S.d / 2) return;
+      if ((a.pos.y || 0) > S.gy + S.FH * 1.2) return;
+      const c = cover(a);
+      wound(a, 160 * (c.kind === "table" ? 0.4 : 1), "crushed when the ground floor gave way", { x: S.x, z: S.z, lethal: c.kind !== "table", tag: "debris" });
+    });
+  }
+
+  function respond(S, dt, E) {
+    if (S.collapsed) return;
+    // the mainshock (P, S, coda, surface train) ...
+    const sa = S.saS * E.m + S.saR * E.r + S.saP * E.p;
+    if (sa > S.peak) S.peak = sa;
+    // cycles of strong motion (above 40% of what this building has felt)
+    if (sa > 0.4 * S.peak && sa > 0.05) S.cyc += dt * (E.r > E.m ? 1 / ev.p.surfT : S.fS);
+    // ... and the aftershocks, kept apart
+    const saA = S.saS * (E.a || 0);
+    if (saA > (S.peakA || 0)) {
+      if (!S.peakA) S.dsMain = S.ds;
+      S.peakA = saA;
+    }
+    let ds = S.ds;
+    const D = S.peak * (1 + S.degrade * Math.log(1 + S.cyc / 8));
+    while (ds < 4 && fragP(D, S.med[ds], S.beta) > S.u) ds++;
+    /* AFTERSHOCKS find a weakened frame: their own (smaller) demand against
+       capacities cut 8% per state the mainshock left it in. */
+    if (S.peakA) {
+      const capK = 1 - 0.08 * (S.dsMain || 0);
+      while (ds < 4 && fragP(S.peakA * (1 + S.degrade), S.med[ds] * capK, S.beta) > S.u) ds++;
+    }
+    while (S.ds < ds) { S.ds++; enterState(S, S.ds); }
+    // the continuous shed: brittle facades let go of bricks while it shakes
+    if (S.shedRate && E.s > 0.25 && !S.collapsed) {
+      S.shedAcc += S.shedRate * E.s * dt;
+      if (S.shedAcc >= 1) {
+        S.shedAcc -= 1;
+        const m = rnd() < 0.55 ? S.n : faceNormals(S)[(rnd() * 4) | 0];
+        // bricks and spalled render off the SURFACE: the wall loses its skin,
+        // not a hole (holes are the extensive state's out-of-plane failure)
+        const p = facePoint(S, m, rnd() - 0.5, upperY(S)), r = S.type === "URM" ? 0.4 + rnd() * 0.35 : 0.3 + rnd() * 0.2;
+        if (S.shed < 160) job(function () { shedFace(S, p, r, 0.5, m); }, "shed");
+      }
+    }
+  }
+
+  /* ============================================================
+     THE GROUND — what the shaking does to the ground itself.
+
+       cracks     MMI VII-VIII opens cracks in roads, IX conspicuous ones.
+                  Fissures open in the asphalt across (mostly) and along the
+                  carriageway, widening while the strong motion lasts, wider
+                  still on soft ground; one merged mesh, one draw, its width
+                  written per vertex as it opens.
+       mains      where a crack opens wide across a road the pipe under it
+                  shears: a geyser out of the break and a spreading sheet
+                  of water on the asphalt.
+       liquefaction  soft saturated ground near the water, once enough
+                  cycles have run (magParams.liq): sand boils erupt in the
+                  open, buildings on it settle and lean on their own base,
+                  parked cars sink and tilt.
+     WHERE things are comes from the world, never from coordinates here:
+     the event's own `roads` / `onRoad` / `lowGround`, else CBZ.island's
+     roads and low ground (world/disaster_arena.js publishes them), else the
+     arena's own street test.
+     ============================================================ */
+  function groundAt(x, z) {
+    if (ev.groundAt) { try { const y = ev.groundAt(x, z); if (isFinite(y)) return y; } catch (e) {} }
+    return floorAt(x, z);
+  }
+  function lowGroundAt(x, z) {
+    if (ev.lowGround) { try { return !!ev.lowGround(x, z); } catch (e) { return false; } }
+    if (ev.soil === "soft") return true;          // the caller said: all of it
+    const I = CBZ.island, lg = I && (I.lowGround || I.lowground);
+    if (lg) {
+      if (typeof lg === "function") { try { return !!lg(x, z); } catch (e) { return false; } }
+      if (typeof lg.at === "function") { try { return !!lg.at(x, z); } catch (e) { return false; } }
+      const list = Array.isArray(lg) ? lg : (Array.isArray(lg.zones) ? lg.zones : null);
+      if (list) {
+        for (let i = 0; i < list.length; i++) {
+          const r = list[i];
+          if (r.r != null && Math.hypot(x - r.x, z - r.z) < r.r) return true;
+          if (r.x0 != null && x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1) return true;
+        }
+        return false;
+      }
+    }
+    // the island without a published map: land within ~2.2 m of sea level
+    if (inSurv()) { const y = groundAt(x, z); return y > -0.4 && y < 2.2; }
+    return false;
+  }
+  function soilAt(x, z) {
+    if (ev.soil) return ev.soil;
+    if (lowGroundAt(x, z)) return "soft";
+    return groundAt(x, z) > 18 ? "rock" : "firm";
+  }
+  function normRoad(r) {
+    if (!r) return null;
+    if (r.x0 != null) return { x0: Math.min(r.x0, r.x1), x1: Math.max(r.x0, r.x1), z0: Math.min(r.z0, r.z1), z1: Math.max(r.z0, r.z1) };
+    if (r.len != null && r.x != null) {
+      const hw = (r.w || 7) / 2, hl = r.len / 2;
+      return r.vertical ? { x0: r.x - hw, x1: r.x + hw, z0: r.z - hl, z1: r.z + hl } : { x0: r.x - hl, x1: r.x + hl, z0: r.z - hw, z1: r.z + hw };
+    }
+    if (r.a && r.b) {
+      const hw = (r.w || 7) / 2;
+      return { x0: Math.min(r.a.x, r.b.x) - hw, x1: Math.max(r.a.x, r.b.x) + hw, z0: Math.min(r.a.z, r.b.z) - hw, z1: Math.max(r.a.z, r.b.z) + hw };
+    }
+    return null;
+  }
+  function roadRects() {
+    if (ev.roadList) return ev.roadList;
+    let out = [];
+    const I = CBZ.island;
+    const src = ev.roads || (I && Array.isArray(I.roads) ? I.roads : null);
+    if (src) out = src.map(normRoad).filter(Boolean);
+    else if (ev.onRoad) {
+      // no list: walk the arena's own street test on a 6 m grid
+      const R = ev.R, STEP = 6;
+      for (let x = ev.cx - R; x <= ev.cx + R; x += STEP) {
+        for (let z = ev.cz - R; z <= ev.cz + R; z += STEP) {
+          let on = false;
+          try { on = ev.onRoad(x, z, 0.5, 0.5); } catch (e) {}
+          if (on) out.push({ x0: x - STEP / 2, x1: x + STEP / 2, z0: z - STEP / 2, z1: z + STEP / 2 });
+        }
+      }
+    }
+    // only the roads that are near this event's structures matter
+    ev.roadList = out.filter(function (r) { return Math.hypot((r.x0 + r.x1) / 2 - ev.cx, (r.z0 + r.z1) / 2 - ev.cz) < ev.R * 1.6; });
+    return ev.roadList;
+  }
+
+  const ground = { cracks: [], mesh: null, base: null, open: 0, planted: false, len: 0, wmax: 0,
+    mains: [], boils: null, boilList: [], liqDone: false };
+  const CRACK_DARK = [0.035, 0.032, 0.03], CRACK_LIP = [0.36, 0.345, 0.32];
+  function plantCracks() {
+    ground.planted = true;
+    const p = ev.p;
+    const soft = (ev.soil || p.src.soil) === "soft" || p.liq;
+    const thr = soft ? 0.15 : 0.25;
+    if (p.pgaG < thr) return;
+    const rects = roadRects();
+    if (!rects.length) return;
+    const n = Math.min(PHONE ? 6 : 10, Math.round(2 + 14 * (p.pgaG - thr)));
+    const pos = [], col = [], side = [], idx = [];
+    let vi = 0;
+    for (let c = 0; c < n; c++) {
+      const r = rects[(rnd() * rects.length) | 0];
+      const alongX = (r.x1 - r.x0) >= (r.z1 - r.z0);
+      let x = r.x0 + rnd() * (r.x1 - r.x0), z = r.z0 + rnd() * (r.z1 - r.z0);
+      // most cracks run ACROSS the carriageway (the slab breaks between its
+      // kerbs), some split along it
+      let hd = (alongX ? Math.PI / 2 : 0) + (rnd() < 0.3 ? Math.PI / 2 : 0) + (rnd() - 0.5) * 0.8;
+      if (rnd() < 0.5) hd += Math.PI;
+      const L = 4 + rnd() * 14 * Math.min(1.5, p.pgaG / 0.5);
+      const wMax = Math.min(0.35, 0.03 + 0.4 * (p.pgaG - thr) + (soft ? 0.08 : 0)) * (0.6 + 0.4 * rnd());
+      const pts = [];
+      const pad = 1.5;
+      for (let s = 0; s <= L; s += 0.7) {
+        pts.push(x, z);
+        hd += (rnd() - 0.5) * 0.7;
+        x += Math.sin(hd) * 0.7; z += Math.cos(hd) * 0.7;
+        if (x < r.x0 - pad || x > r.x1 + pad || z < r.z0 - pad || z > r.z1 + pad) break;
+      }
+      const m = pts.length / 2;
+      if (m < 3) continue;
+      ground.cracks.push({ x: pts[0], z: pts[1], mx: pts[(m >> 1) * 2], mz: pts[(m >> 1) * 2 + 1], w: wMax, len: (m - 1) * 0.7 });
+      ground.len += (m - 1) * 0.7;
+      if (wMax > ground.wmax) ground.wmax = wMax;
+      // a ribbon: lip | dark throat | dark throat | lip, tapered at both ends
+      for (let k = 0; k < m; k++) {
+        const px = pts[k * 2], pz = pts[k * 2 + 1];
+        const qx = pts[Math.min(m - 1, k + 1) * 2] - pts[Math.max(0, k - 1) * 2];
+        const qz = pts[Math.min(m - 1, k + 1) * 2 + 1] - pts[Math.max(0, k - 1) * 2 + 1];
+        const ql = Math.hypot(qx, qz) || 1;
+        const sx = -qz / ql, sz = qx / ql;
+        const taper = Math.pow(Math.sin(Math.PI * k / (m - 1)), 0.6) * (0.75 + 0.25 * Math.sin(k * 1.7 + c));
+        const y = groundAt(px, pz) + 0.018;
+        const offs = [-(1.9 * taper * wMax + 0.05), -0.5 * taper * wMax, 0.5 * taper * wMax, 1.9 * taper * wMax + 0.05];
+        for (let j = 0; j < 4; j++) {
+          pos.push(px, y, pz);
+          side.push(sx, sz, offs[j]);
+          const cc = (j === 0 || j === 3) ? CRACK_LIP : CRACK_DARK;
+          col.push(cc[0], cc[1], cc[2]);
+        }
+        if (k > 0) {
+          const a0 = vi + (k - 1) * 4, b0 = vi + k * 4;
+          for (let j = 0; j < 3; j++) idx.push(a0 + j, b0 + j, a0 + j + 1, a0 + j + 1, b0 + j, b0 + j + 1);
+        }
+      }
+      vi += m * 4;
+    }
+    if (!pos.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(new Float32Array(pos.length).map(function (_, i) { return i % 3 === 1 ? 1 : 0; }), 3));
+    g.setIndex(idx);
+    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+    m.name = "quake-cracks"; m.receiveShadow = true; m.frustumCulled = false; m.renderOrder = 1;
+    if (scene()) scene().add(m);
+    ground.mesh = m; ground.base = new Float32Array(pos); ground.side = new Float32Array(side);
+    A.cracks = ground.cracks.length;
+    // where a wide crack crosses the road, the main under it shears
+    const want = PHONE ? 2 : 3;
+    for (let i = 0; i < ground.cracks.length && ground.mains.length < want; i++) {
+      const c = ground.cracks[i];
+      if (c.w > 0.06 && rnd() < 0.45) ground.mains.push({ x: c.mx, z: c.mz, at: 0.45 + rnd() * 0.4, on: false, t: 0, cloud: null, pool: null });
+    }
+  }
+  function openCracks(open) {
+    if (!ground.mesh || open <= ground.open + 1e-3) return;
+    ground.open = Math.min(1, open);
+    const P = ground.mesh.geometry.attributes.position, B = ground.base, Sd = ground.side;
+    for (let i = 0, n = B.length / 3; i < n; i++) {
+      const o = Sd[i * 3 + 2] * ground.open;
+      P.array[i * 3] = B[i * 3] + Sd[i * 3] * o;
+      P.array[i * 3 + 2] = B[i * 3 + 2] + Sd[i * 3 + 1] * o;
+    }
+    P.needsUpdate = true;
+  }
+  function tickMains(dt) {
+    for (let i = 0; i < ground.mains.length; i++) {
+      const w = ground.mains[i];
+      if (!w.on) {
+        if (ground.open < w.at) continue;
+        w.on = true; A.mains++;
+        const y = groundAt(w.x, w.z);
+        w.y = y;
+        if (CBZ.fx && CBZ.fx.particleCloud) {
+          w.cloud = CBZ.fx.particleCloud({ mode: "rise", color: 0xd6e6ee, count: PHONE ? 40 : 80, radius: 0.45, top: 3 + rnd() * 4, bottom: 0, size: 0.2, opacity: 0.6, vMin: 5, vMax: 9, drift: 0.8 });
+          if (w.cloud) w.cloud.setActive(1);
+        }
+        const pool = new THREE.Mesh(new THREE.CircleGeometry(1, 22).rotateX(-Math.PI / 2),
+          new THREE.MeshLambertMaterial({ color: 0x2c343b, transparent: true, opacity: 0.62, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+        pool.position.set(w.x, y + 0.025, w.z); pool.scale.set(0.2, 1, 0.2); pool.renderOrder = 2;
+        if (scene()) scene().add(pool);
+        w.pool = pool;
+        sfxAt("splash", w.x, w.z, { vol: 0.5 });
+      }
+      w.t += dt;
+      if (w.cloud) w.cloud.update(dt, w.x, w.y, w.z);
+      const r = Math.min(6, 0.2 + w.t * 0.22);
+      if (w.pool) w.pool.scale.set(r, 1, r * 0.8);
+    }
+  }
+  // ---- liquefaction --------------------------------------------------
+  function liquefy() {
+    ground.liqDone = true;
+    // buildings on liquefiable ground settle and lean on their own base
+    for (let i = 0; i < ev.S.length; i++) {
+      const S = ev.S[i];
+      if (S.collapsed || S.soil !== "soft") continue;
+      S.liq = true;
+      const n = S.n;
+      const reg = { drop: 0.15 + rnd() * 0.45, tilt: 0.02 + rnd() * 0.05, ax: rnd() < 0.5 ? n.z : 1, az: rnd() < 0.5 ? -n.x : 0, secs: 4 + rnd() * 3 };
+      // settlement is damage: at least moderate, decided now
+      while (S.ds < 2) { S.ds++; enterState(S, S.ds); }
+      A.settled++;
+      job(function () { BD.undermine(S, reg); }, "settle");
+    }
+    // cars on it sink and tilt
+    for (let i = 0; i < ev.cars.length; i++) {
+      const C = ev.cars[i];
+      if (soilAt(C.x0, C.z0) === "soft") { C.sinkTo = 0.08 + rnd() * 0.18; C.tiltTo = (rnd() - 0.5) * 0.12; }
+    }
+    // sand boils in the open
+    const want = PHONE ? 10 : 22, pts = [];
+    for (let k = 0; k < 160 && pts.length < want; k++) {
+      const a = rnd() * 6.2832, d = rnd() * ev.R * 1.2;
+      const x = ev.cx + Math.cos(a) * d, z = ev.cz + Math.sin(a) * d;
+      if (!lowGroundAt(x, z) || insideStructure(x, z, 1.5)) continue;
+      pts.push({ x: x, z: z, y: groundAt(x, z), r: 0.4 + rnd() * 1.0, at: rnd() * 6, t: 0 });
+    }
+    if (A.settled || pts.length) A.liquefied = 1;
+    if (!pts.length) return;
+    const geo = new THREE.ConeGeometry(1, 0.22, 12, 2, false);
+    geo.translate(0, 0.11, 0);
+    const P = geo.attributes.position, cc = new Float32Array(P.count * 3);
+    for (let i = 0; i < P.count; i++) {
+      const wet = Math.max(0, Math.min(1, P.getY(i) / 0.22));       // the wet vent darkens to the top
+      cc[i * 3] = 0.56 - 0.26 * wet; cc[i * 3 + 1] = 0.5 - 0.24 * wet; cc[i * 3 + 2] = 0.4 - 0.2 * wet;
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(cc, 3));
+    const im = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }), pts.length);
+    im.name = "quake-sand-boils"; im.receiveShadow = true; im.frustumCulled = false;
+    const M = new THREE.Matrix4();
+    for (let i = 0; i < pts.length; i++) { M.makeScale(0.001, 0.001, 0.001); M.setPosition(pts[i].x, pts[i].y, pts[i].z); im.setMatrixAt(i, M); }
+    if (scene()) scene().add(im);
+    ground.boils = im; ground.boilList = pts;
+    A.boils = pts.length;
+  }
+  const _bm = new THREE.Matrix4();
+  function tickBoils(dt) {
+    const im = ground.boils;
+    if (!im) return;
+    let dirty = false;
+    for (let i = 0; i < ground.boilList.length; i++) {
+      const b = ground.boilList[i];
+      if (b.t >= 3) continue;
+      b.at -= dt;
+      if (b.at > 0) continue;
+      b.t += dt;
+      const s = b.r * Math.min(1, b.t / 3);
+      _bm.makeScale(s, 0.5 + 0.5 * Math.min(1, b.t / 3), s);
+      _bm.setPosition(b.x, b.y, b.z);
+      im.setMatrixAt(i, _bm); dirty = true;
+    }
+    if (dirty) im.instanceMatrix.needsUpdate = true;
+  }
+  function insideStructure(x, z, pad) {
+    for (let i = 0; i < ev.S.length; i++) {
+      const S = ev.S[i];
+      if (Math.abs(x - S.x) < S.w / 2 + pad && Math.abs(z - S.z) < S.d / 2 + pad) return S;
+    }
+    return null;
+  }
+  function clearGround() {
+    if (ground.mesh) { if (ground.mesh.parent) ground.mesh.parent.remove(ground.mesh); ground.mesh.geometry.dispose(); ground.mesh.material.dispose(); }
+    for (const w of ground.mains) {
+      if (w.cloud) w.cloud.dispose();
+      if (w.pool) { if (w.pool.parent) w.pool.parent.remove(w.pool); w.pool.geometry.dispose(); w.pool.material.dispose(); }
+    }
+    if (ground.boils) { if (ground.boils.parent) ground.boils.parent.remove(ground.boils); ground.boils.geometry.dispose(); ground.boils.material.dispose(); }
+    ground.cracks = []; ground.mesh = null; ground.base = null; ground.open = 0; ground.planted = false; ground.len = 0; ground.wmax = 0;
+    ground.mains = []; ground.boils = null; ground.boilList = []; ground.liqDone = false;
+    for (const k of clouds) k.c.dispose();
+    clouds.length = 0;
+  }
+
+  /* ============================================================
+     THE CARS — a parked car is a sprung mass on four tyres with its
+     handbrake on the rear axle.
+       along     it ROLLS: the tyres turn, only the rear brake resists
+                 (~0.33 g), so above that the ground moves out from under
+                 it and the car walks back and forth along its own axis
+       across    the tyres grip to ~0.8 g, so it rocks on its springs
+                 (~1.4 Hz) instead, and only slides beyond that
+       vertical  it heaves on its springs; when the ground drops away
+                 faster than gravity (vertical PGA over 1 g) it leaves it
+     A falling piece that reaches it dents or crushes it by its energy, and
+     its own glass goes. A car rolls over only if the ground throws it past
+     its tipping angle, which a quake rarely does: that is honest.
+     ============================================================ */
+  function carOf(c) {
+    if (!c || !c.group || c.dead || c.flung) return null;
+    const g = c.group;
+    let W = 1.9, L = 4.4;
+    if (c.dims) { W = c.dims.width || W; L = c.dims.length || L; }
+    else if (c.collider) {
+      const ex = c.collider.maxX - c.collider.minX, ez = c.collider.maxZ - c.collider.minZ;
+      W = Math.min(ex, ez) * 0.9; L = Math.max(ex, ez);
+    }
+    const x0 = c.pos ? c.pos.x : (c.x != null ? c.x : g.position.x);
+    const z0 = c.pos ? c.pos.z : (c.z != null ? c.z : g.position.z);
+    return {
+      src: c, g: g, city: !!c.pos, x0: x0, z0: z0, y0: g.position.y, yaw: c.pos ? (c.heading || 0) : g.rotation.y,
+      order: g.rotation.order, rx0: g.rotation.x, rz0: g.rotation.z,
+      W: W, L: L, H: 1.55, k: 1,
+      rf: 0, rs: 0, vf: 0, vs: 0, roll: 0, rollV: 0, pitch: 0, pitchV: 0, hv: 0, hvV: 0, air: 0, airV: 0,
+      sink: 0, sinkTo: 0, tilt: 0, tiltTo: 0, hit: 0, crushed: false, rolled: 0,
+      maxB: 0, maxRoll: 0, walked: 0, colX: 0, colZ: 0,
+    };
+  }
+  function carTick(C, dt) {
+    const g = C.g;
+    if (C.crushed) return;
+    const G = 9.81, k = C.k;
+    const ax = motion.acc.x * k, az = motion.acc.z * k, ay = motion.acc.y * k;
+    const fx = Math.sin(C.yaw), fz = Math.cos(C.yaw), rxv = Math.cos(C.yaw), rzv = -Math.sin(C.yaw);
+    const aF = ax * fx + az * fz, aR = ax * rxv + az * rzv;
+    // along: rolling against the rear brake
+    C.vf = slip(C.vf, aF, 0.33 * G, dt);
+    C.rf += C.vf * dt;
+    // across: tyre grip
+    C.vs = slip(C.vs, aR, 0.8 * G, dt);
+    C.rs += C.vs * dt;
+    // the body on its springs
+    const wR = 6.3 * 1.4, zR = 0.25;
+    C.rollV += (wR * wR * (-C.roll - 0.0061 * aR) - 2 * zR * wR * C.rollV) * dt;
+    C.roll += C.rollV * dt;
+    C.pitchV += (wR * wR * (-C.pitch + 0.004 * (C.vf === 0 ? aF : 0)) - 2 * zR * wR * C.pitchV) * dt;
+    C.pitch += C.pitchV * dt;
+    const wH = 6.3 * 1.3;
+    C.hvV += (wH * wH * (-C.hv) - 2 * 0.3 * wH * C.hvV - ay * 0.6) * dt;
+    C.hv += C.hvV * dt;
+    // airborne: the ground falls away faster than gravity
+    if (C.air > 0 || ay < -G) {
+      if (C.air <= 0 && ay < -G) { C.airV = 0; C.air = 1e-4; }
+      C.airV += (-G - ay) * dt;
+      C.air += C.airV * dt;
+      if (C.air <= 0) { C.air = 0; C.airV = 0; if (rnd() < 0.3) sfxAt("thud", C.x0, C.z0, { vol: 0.3 }); }
+    }
+    // liquefied ground takes it down by the wheels
+    if (C.sinkTo) { C.sink += (C.sinkTo - C.sink) * Math.min(1, dt * 0.4); C.tilt += (C.tiltTo - C.tilt) * Math.min(1, dt * 0.4); }
+    // the tipping angle: a car's track over its centre of gravity (~0.9 rad)
+    if (!C.rolled && Math.abs(C.roll) > 0.55) { C.rolled = Math.sign(C.roll); A.carsRolled++; }
+    if (C.rolled) { C.roll += (C.rolled * 1.57 - C.roll) * Math.min(1, dt * 3); C.rollV = 0; }
+    const dx = fx * C.rf + rxv * C.rs, dz = fz * C.rf + rzv * C.rs;
+    const px = C.x0 + dx + motion.disp.x * k, pz = C.z0 + dz + motion.disp.z * k;
+    const bounce = C.hv + C.air;
+    g.position.set(px, C.y0 + motion.disp.y * k + bounce - C.sink, pz);
+    g.rotation.order = "YXZ";
+    g.rotation.x = C.rx0 + C.pitch;
+    g.rotation.z = C.rz0 + C.roll + C.tilt;
+    if (C.city) { C.src.pos.x = C.x0 + dx; C.src.pos.z = C.z0 + dz; }
+    else if (C.src.collider) {
+      const c = C.src.collider, mx = dx - C.colX, mz = dz - C.colZ;
+      c.minX += mx; c.maxX += mx; c.minZ += mz; c.maxZ += mz;
+      C.colX = dx; C.colZ = dz;
+    }
+    const b = Math.abs(bounce + motion.disp.y * k);
+    if (b > C.maxB) C.maxB = b;
+    if (Math.abs(C.roll) > C.maxRoll) C.maxRoll = Math.abs(C.roll);
+    C.walked = Math.max(C.walked, Math.hypot(dx, dz));
+  }
+  // relative velocity of a body on a moving base held by friction `lim`
+  function slip(v, aBase, lim, dt) {
+    if (v === 0) {
+      if (Math.abs(aBase) <= lim) return 0;
+      return (-aBase + Math.sign(aBase) * lim) * dt;
+    }
+    const nv = v + (-aBase - Math.sign(v) * lim) * dt;
+    return (nv > 0) !== (v > 0) ? 0 : nv * 0.995;
+  }
+  function carStrike(C, p, ke) {
+    const g = C.g, gx = g.position.x, gz = g.position.z, gy = g.position.y;
+    if (p.y > gy + C.H + 0.3 || p.y < gy - 0.2) return false;
+    const dx = p.x - gx, dz = p.z - gz;
+    const lz = dx * Math.sin(C.yaw) + dz * Math.cos(C.yaw), lx = dx * Math.cos(C.yaw) - dz * Math.sin(C.yaw);
+    if (Math.abs(lx) > C.W / 2 + 0.15 || Math.abs(lz) > C.L / 2 + 0.15) return false;
+    if (!C.hit) A.carsHit++;
+    C.hit++;
+    sfxAt("thud", p.x, p.z, { vol: 0.5 });
+    if (ke > 6000 && !C.crushed) crushCar(C, lz);
+    return true;
+  }
+  function crushCar(C, lz) {
+    C.crushed = true; A.carsCrushed++;
+    const g = C.g;
+    // the roof goes down onto the sills, the struck end lower
+    g.scale.y = 0.66;
+    g.rotation.x += Math.sign(lz || 1) * 0.06;
+    const D = CBZ.debris;
+    if (D) {
+      let pane = null;
+      g.traverse(function (o) { if (!pane && o.isMesh && o.visible && o.material && !Array.isArray(o.material) && D.kindOf && D.kindOf(o.material, o) === "glass") pane = o; });
+      const at = { x: g.position.x, y: g.position.y + 1.1, z: g.position.z };
+      if (pane) D.shatter(pane, { kind: "glass", at: at, power: 1, maxPieces: PHONE ? 5 : 9, owner: "fx" });
+      else D.chips(at.x, at.y, at.z, { kind: "glass", count: 14, power: 1, spread: 1.2 });
+    }
+    if (C.src) C.src.quakeCrushed = true;
+    sfxAt("collapse", g.position.x, g.position.z, { vol: 0.6 });
+  }
+  function carsRestoreOrder() {
+    for (let i = 0; i < ev.cars.length; i++) { const C = ev.cars[i]; if (C.g && C.order) C.g.rotation.order = C.order; }
+  }
+
+  /* ============================================================
+     THE PEOPLE. At the first jolt everyone decides, once:
+       indoors   drop, cover and hold on under the nearest sturdy table if
+                 there is one within reach (the advice) — or, the thing
+                 most people actually do, RUN FOR THE DOOR and out into the
+                 street, which is how people end up under the facade
+       by a wall clear off the pavement into the open, away from the
+                 facade (the kill zone)
+       in the open stay put and crouch while it is strong
+     The ground still takes their feet (footingTick); the debris still
+     finds the ones who ran under it (the strike pass). Bodies are OWNED by
+     absolute writes for the duration (a brain steering them elsewhere at
+     order 23 would cancel a nudge) and handed back afterwards.
+     ============================================================ */
+  function plan(a) {
+    const x = a.pos.x, z = a.pos.z, y = a.pos.y || 0;
+    const S = insideStructure(x, z, -0.2);
+    if (S && y < S.gy + S.h) {
+      const anc = coverNear(x, z, y, 7);
+      if (anc && rnd() < 0.6) return { kind: "cover", anchor: anc };
+      return { kind: "evac", S: S, leg: 0, tx: S.door.x, tz: S.door.z };
+    }
+    const near = insideStructure(x, z, 7);
+    if (near) {
+      // away from the nearest face, out to ~13 m clear of it
+      let ox = x - near.x, oz = z - near.z;
+      if (Math.abs(ox) / (near.w / 2 + 0.1) > Math.abs(oz) / (near.d / 2 + 0.1)) { oz = 0; ox = Math.sign(ox) || 1; } else { ox = 0; oz = Math.sign(oz) || 1; }
+      const tx = ox ? near.x + ox * (near.w / 2 + 13) : x, tz = oz ? near.z + oz * (near.d / 2 + 13) : z;
+      return { kind: "clear", tx: tx, tz: tz };
+    }
+    return { kind: "open" };
+  }
+  function ownedMove(a, tx, tz, spd, dt) {
+    if (a._qkX == null) { a._qkX = a.pos.x; a._qkZ = a.pos.z; }
+    const dx = tx - a._qkX, dz = tz - a._qkZ, d = Math.hypot(dx, dz);
+    if (d < 0.5) return true;
+    const st = Math.min(d, spd * dt);
+    a._qkX += dx / d * st; a._qkZ += dz / d * st;
+    a.pos.x = a._qkX; a.pos.z = a._qkZ;
+    if (a.group) a.group.rotation.y = Math.atan2(dx, dz);
+    return false;
+  }
+  function brace(a, on) {
+    const ch = a.char;
+    if (!ch || !ch.parts) return;
+    const p = ch.parts;
+    if (on) {
+      if (p.ll) p.ll.rotation.x = -1.1;
+      if (p.rl) p.rl.rotation.x = -1.1;
+      if (p.torso) p.torso.rotation.x = 0.55;
+      if (p.la) p.la.rotation.x = -0.9;
+      if (p.ra) p.ra.rotation.x = -0.9;
+      if (a.group) a.group.position.y = floorAt(a.pos.x, a.pos.z) - 0.32;
+    } else if (p.torso) p.torso.rotation.x = 0;
+  }
+  function crowdTick(dt, E) {
+    const list = ev.actors ? (function () { try { return ev.actors(); } catch (e) { return null; } })() : null;
+    if (!list || !list.length) return;
+    const p = ev.p;
+    const strong = p.pgaG * Math.max(E.s, p.pK * E.p, p.surfK * 0.22 * E.r);
+    const late = motion.t > p.sLag + p.mainDur + 4;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a || a.dead || !a.pos || isPlayer(a)) continue;
+      let r = a._qkPlan;
+      if (r === undefined) {
+        if (strong < 0.02 || late) continue;
+        r = a._qkPlan = plan(a);
+        A.crowd[r.kind] = (A.crowd[r.kind] || 0) + 1;
+        ev.owned.push(a);
+      }
+      if (!r) continue;
+      if (CBZ.body && CBZ.body.busy && CBZ.body.busy(a)) { a._qkX = null; continue; }   // on the ground
+      const spd = 4.2 * (1 - Math.min(0.7, strong * 1.6));
+      if (r.kind === "cover") { duckUnder(a, r.anchor, dt, 10); continue; }
+      if (late) { if (r.kind !== "done") { standUp(a); r.kind = "done"; } continue; }
+      if (r.kind === "evac") {
+        if (ownedMove(a, r.tx, r.tz, spd, dt)) {
+          if (r.leg === 0) { r.leg = 1; r.tx = r.S.door.x + r.S.n.x * 12; r.tz = r.S.door.z + r.S.n.z * 12; A.evacuated++; }
+          else r.kind = "open";
+        }
+      } else if (r.kind === "clear") {
+        if (ownedMove(a, r.tx, r.tz, spd, dt)) r.kind = "open";
+      } else if (r.kind === "open") {
+        brace(a, strong > 0.12);
+      }
+    }
+  }
+  function crowdRelease() {
+    for (let i = 0; i < ev.owned.length; i++) {
+      const a = ev.owned[i];
+      if (!a) continue;
+      standUp(a);
+      a._qkPlan = undefined;
+    }
+    ev.owned.length = 0;
+  }
+
+  /* ============================================================
+     THE EVENT — one earthquake, run the same way everywhere.
+
+       CBZ.quake.eventStart(o) -> params      o: {
+           M | src {M, epiKm, depthKm, offshore, bearing}   the source
+           soil          force one site class (tools / the lab)
+           cx, cz, R     the area it is played over
+           structures    buildings: island fragile records, city lots
+                         ({building}), or {building, colliders, platforms}
+           lots          true when `structures` are real city lots
+           cars          island car records or city car records
+           actors()      the people to move (bots / peds)
+           roads, onRoad, lowGround, groundAt   where the world is
+           hooks {damage(src, ds, S), collapse(src, n)}  the caller's ledger
+       }
+       CBZ.quake.eventTick(dt) -> {amp, pga01, phase, shockFired, env}
+       CBZ.quake.eventEnd()      the motion stops; the ground keeps its
+                                 cracks and water until reset()
+       CBZ.quake.eventReport()   what it did, by building and by car
+
+     The disaster island's round (systems/disasters.js), the city event
+     below and the lab kit (src/lab/kits/quake.js) all drive exactly this.
+     ============================================================ */
+  const ev = {
+    on: false, p: null, t: 0, cx: 0, cz: 0, R: 120, soil: null,
+    S: [], cars: [], actors: null, owned: [], hooks: {}, lots: false,
+    roads: null, roadList: null, onRoad: null, lowGround: null, groundAt: null,
+  };
+  function eventStart(o) {
+    o = o || {};
+    if (ev.on) eventEnd();
+    clearGround(); clearPieces();
+    jobs.length = 0; glassJobs.length = 0;
+    ev.cx = o.cx != null ? o.cx : 0; ev.cz = o.cz != null ? o.cz : 0; ev.R = o.R || 120;
+    ev.soil = o.soil || null;
+    ev.roads = o.roads || null; ev.roadList = null; ev.onRoad = o.onRoad || null;
+    ev.lowGround = o.lowGround || null; ev.groundAt = o.groundAt || null;
+    ev.hooks = o.hooks || {}; ev.lots = !!o.lots;
+    // selfTick: this file's own frame runs the event (a caller with no loop
+    // of its own: the lab, a tool); otherwise the caller ticks it
+    ev.self = !!o.selfTick; ev.last = null; ev.secs = o.secs || 0;
+    ev.actors = typeof o.actors === "function" ? o.actors : (o.actors ? function () { return o.actors; } : null);
+    const src = Object.assign({}, o.src || {});
+    if (o.epiKm != null) src.epiKm = o.epiKm;
+    if (o.depthKm != null) src.depthKm = o.depthKm;
+    src.soil = ev.soil || src.soil || soilAt(ev.cx, ev.cz);
+    const M = o.M != null ? +o.M : (src.M != null ? src.M : 6.5);
+    const p = ev.p = o.params && o.params.M === M ? o.params : magParams(M, src);
+    begin(null);
+    A.mag = p.M;
+    ev.on = true; ev.t = 0;
+    motionStart(p, { cx: ev.cx, cz: ev.cz, R: ev.R });
+    ev.S = [];
+    const list = o.structures || [];
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
+      if (!t || t.fallen || (t.building && t.demolished)) continue;
+      const S = structOf(t, p);
+      if (S) ev.S.push(S);
+    }
+    // the facade-strip cover test reads the same set
+    liveStructures = ev.S;
+    ev.cars = [];
+    const cl = o.cars || [];
+    for (let i = 0; i < cl.length; i++) {
+      const C = carOf(cl[i]);
+      if (!C) continue;
+      const pr = p.pgaRock;
+      C.k = siteAmp(soilAt(C.x0, C.z0), pr) / siteAmp(p.src.soil, pr);
+      ev.cars.push(C);
+    }
+    ev.owned.length = 0;
+    return p;
+  }
+  function eventTick(dt) {
+    if (!ev.on) return { amp: 0, pga01: 0, phase: "quiet", shockFired: 0, env: motion.env };
+    ev.t += dt;
+    const m = motionTick(dt);
+    const E = m.env, p = ev.p;
+    for (let i = 0; i < ev.S.length; i++) respond(ev.S[i], dt, E);
+    // the ground
+    if (!ground.planted && E.s > 0.6) plantCracks();
+    if (ground.mesh) {
+      const want = Math.min(1, (ground.open || 0) + dt * 0.5 * Math.max(E.s, E.r * 0.5));
+      openCracks(want);
+    }
+    if (p.liq && !ground.liqDone && motion.t > p.sLag + Math.min(p.mainDur * 0.55, 8 / Math.max(0.5, p.f0))) liquefy();
+    for (let i = 0; i < ev.cars.length; i++) carTick(ev.cars[i], dt);
+    crowdTick(dt, E);
+    return m;
+  }
+  function eventEnd() {
+    if (!ev.on) return;
+    ev.on = false;
+    motionStop();
+    crowdRelease();
+    carsRestoreOrder();
+    liveStructures = null;
+  }
+  function eventReport() {
+    const p = ev.p;
+    if (!p) return null;
+    const r2 = function (v) { return Math.round(v * 100) / 100; };
+    return {
+      motion: {
+        M: p.M, epiKm: r2(p.src.epiKm), depthKm: r2(p.src.depthKm), hypoKm: r2(p.hypoKm), offshore: p.src.offshore, soil: p.src.soil,
+        pgaG: r2(p.pgaG), pgaPeak: r2(A.pgaPeak), mmi: Math.round(p.mmi * 10) / 10, f0: r2(p.f0), sMinusP: r2(p.sLag),
+        strongSecs: r2(p.mainDur), realStrongSecs: r2(p.realDur), surfK: r2(p.surfK), liqDemand: r2(p.liqDemand), liquefied: !!A.liquefied,
+        aftershocks: motion.shocks.map(function (s) { return s.M; }), aftershocksFired: A.aftershocks,
+      },
+      buildings: ev.S.map(function (S) {
+        return { style: S.style || null, type: S.type, material: S.material, storeys: S.storeys, T: r2(S.T), soil: S.soil,
+          pga: r2(S.pga), sa: r2(S.peak), ds: S.ds, dsName: DS_NAME[S.ds], soft: S.soft, u: r2(S.u),
+          panes: S.panes, shed: S.shed, holes: S.holes, parapet: S.parapetDown, crown: S.crownDown,
+          leanDeg: r2((S.leanRad || 0) * 57.3), settled: S.liq };
+      }),
+      cars: ev.cars.map(function (C) {
+        return { hit: C.hit, crushed: C.crushed, rolled: !!C.rolled, bounceCm: Math.round(C.maxB * 100), rollDeg: r2(C.maxRoll * 57.3), walkedM: r2(C.walked) };
+      }),
+      ground: { cracks: ground.cracks.length, crackM: Math.round(ground.len), widestCm: Math.round(ground.wmax * 100), boils: ground.boilList.length, mains: A.mains },
+      crowd: Object.assign({ evacuated: A.evacuated }, A.crowd),
+    };
+  }
+
+  /* ============================================================
+     THE CITY EVENT (CITY_QUAKE, default OFF).
+
+     The same event over the real lots near the player: the lots' own
+     ledger (city/structural.js) hears each damage state through the hook,
+     a complete state goes to city/demolition.js, and the aftermath lights
+     gas through CBZ.structure and drops real street conductors.
+     ============================================================ */
+  const city = { on: false, t: 0, dur: 0, after: false };
+  function cityStart(o) {
+    o = o || {};
+    if (!CBZ.CONFIG.CITY_QUAKE) return false;
+    if (!inCity()) return false;
+    const arena = CBZ.city && (CBZ.city.arena || CBZ.city);
+    if (!arena || !arena.lots) return false;
+    const P = CBZ.player && CBZ.player.pos;
+    const x = o.x != null ? o.x : (P ? P.x : 0), z = o.z != null ? o.z : (P ? P.z : 0);
+    const R = o.radius != null ? o.radius : 220;
+    const lots = [];
+    for (let i = 0; i < arena.lots.length; i++) {
+      const L = arena.lots[i];
+      if (!L || !L.building || L.demolished) continue;
+      if (Math.hypot(L.building.ox - x, L.building.oz - z) > R) continue;
+      lots.push(L);
+    }
+    const cars = (CBZ.cityCars || []).filter(function (c) { return c && c.pos && !c.driver && Math.hypot(c.pos.x - x, c.pos.z - z) < R * 0.6; }).slice(0, PHONE ? 16 : 40);
+    // the old event took a 0..1 `mag`; it maps onto the same magnitude scale
+    const M = o.M != null ? o.M : (o.mag != null ? 5.4 + 3 * o.mag : 6.9);
+    const src = o.src || sourceRoll(M);
+    const p = eventStart({
+      M: M, src: src, cx: x, cz: z, R: R, structures: lots, lots: true, cars: cars,
+      actors: function () { return CBZ.cityPeds; },
+      hooks: {
+        damage: function (L, ds) {
+          if (!CBZ.structure || !CBZ.structure.hit) return;
+          const b = L.building;
+          try { CBZ.structure.hit(b.ox, 1.5, b.oz, [0, 6, 14, 26, 0][ds] || 0, { kind: "quake", lot: L, sudden: true }); } catch (e) {}
+        },
+      },
+    });
+    city.on = true; city.t = 0; city.after = false;
+    city.dur = o.secs != null ? o.secs : p.activeSecs;
+    if (CBZ.cityEvent) { try { CBZ.cityEvent("quake", { x: x, z: z, mag: M }, { silent: true, noWanted: true }); } catch (e) {} }
+    return true;
+  }
+  function cityStop() { if (city.on) { city.on = false; eventEnd(); } }
+  function cityTick(dt) {
+    if (!city.on) return;
+    city.t += dt;
+    const m = eventTick(dt);
+    if (CBZ.shake && m.amp > 0.004) CBZ.shake(m.amp);
+    if (!city.after && ev.p && motion.t > ev.p.sLag + ev.p.mainDur) { city.after = true; cityAftermath(); }
+    if (city.t > city.dur) cityStop();
+  }
+  function cityAftermath() {
+    // gas at the worst-hit lots, and two conductors down
+    const ranked = ev.S.filter(function (S) { return S.ds >= 2 && !S.collapsed; }).sort(function (a, b) { return b.ds - a.ds; });
+    const n = Math.min(ranked.length, 1 + ((rnd() * 3) | 0));
+    for (let i = 0; i < n; i++) gasFire(ranked[i].src, {});
+    const census = CBZ.streetPoleCensus ? CBZ.streetPoleCensus() : null;
+    if (census && census.poles && census.poles.length && ev.p.mmi >= 7) {
+      for (let i = 0; i < 2; i++) {
+        const P = census.poles[(rnd() * census.poles.length) | 0];
+        if (P) dropLine({ x: P.x, z: P.z });
+      }
+    }
+  }
+
+  /* ============================================================
      LIFECYCLE
      ============================================================ */
   /* begin() is per-EVENT, and it zeroes the per-event counters on purpose:
@@ -1548,15 +2784,20 @@
      this page done since it loaded". World state (anchors, poles, tables)
      survives, because those belong to the world and not to the event. */
   function begin(structures) {
-    liveStructures = structures || null;
+    if (structures) liveStructures = structures;
     A.debrisSpawned = 0; A.debrisHits = 0; A.debrisKills = 0;
     A.fireKills = 0; A.lineKills = 0;
     A.gasFires = 0; A.gasFiresShared = 0; A.linesDown = 0;
     A.coverSaves = 0; A.ducked = 0;
     A.knockdowns = 0; A.staggers = 0; A.aftershocks = 0; A.pgaPeak = 0;
-    A.shocks++;
+    A.panesBroken = 0; A.wallHits = 0; A.parapets = 0; A.chimneys = 0; A.softStoreys = 0; A.collapses = 0;
+    A.cracks = 0; A.mains = 0; A.boils = 0; A.liquefied = 0; A.settled = 0; A.dustClouds = 0;
+    A.carsHit = 0; A.carsCrushed = 0; A.carsRolled = 0; A.evacuated = 0; A.crowd = {};
+    A.tickN = 0; A.tickMs = 0; A.tickMsMax = 0; A.jobErrors = 0; A.jobWaits = 0;
+    for (const k in jobCost) delete jobCost[k];
   }
   function end() {
+    eventEnd();
     liveStructures = null;
     motionStop();
     for (let i = localFires.length - 1; i >= 0; i--) { killFire(localFires[i]); }
@@ -1564,20 +2805,38 @@
     clearLines();
   }
   function reset() {
-    end(); clearPieces(); clearPoles(); coverReset();
-    dressedArena = null; cityStop();
+    end(); clearPieces(); clearGround(); clearPoles(); coverReset();
+    jobs.length = 0; glassJobs.length = 0;
+    dressedArena = null; city.on = false;
   }
 
   CBZ.onUpdate(27.6, function (dt) {
     if (!CBZ.game || CBZ.game.mode === "escape") return;
+    const busy = ev.on || jobs.length + glassJobs.length > 0, t0 = busy ? performance.now() : 0;
     // The arena kit is laid the first frame an island exists, not at quake
     // time — furniture that pops in when the sirens start is a tell.
     if (inSurv() && CBZ.surv && CBZ.surv.arena) dressArena(CBZ.surv.arena);
     else if (inCity()) deriveSeatCovers();
-    tickPieces(dt);
+    cityTick(dt);
+    if (ev.on && ev.self) {
+      ev.last = eventTick(dt);
+      if (CBZ.shake && ev.last.amp > 0.004) CBZ.shake(ev.last.amp);
+      if (ev.secs && ev.t > ev.secs) eventEnd();
+    }
+    // the building work the event queued (panes, wall wounds, peels) runs
+    // under a per-frame budget so a whole street failing at once is spread
+    // over frames instead of landing in one
+    if (jobs.length || glassJobs.length) runJobs();
+    tickSinks(dt);
+    if (ev.on || thrown.length) strikePass(dt);
+    tickMains(dt);
+    tickBoils(dt);
+    tickClouds(dt);
     tickFires(dt);
     tickLines(dt);
-    cityTick(dt);
+    // what the whole earthquake costs this frame (the motion, every
+    // building, the queue, the strike pass, the ground, cars and people)
+    if (busy) { const ms = performance.now() - t0; A.tickN++; A.tickMs += ms; if (ms > A.tickMsMax) A.tickMsMax = ms; }
   });
   // Late injection (a probe adding this file after boot) lands unsorted at the
   // end of an already-sorted list; core/loop.js only sorts once.
@@ -1593,28 +2852,50 @@
     const m = CBZ.game && CBZ.game.mode;
     if (m === wasMode) return;
     wasMode = m;
-    // EVERY mode change is a world change: debris, downed conductors, fires,
-    // poles and cover anchors all belong to the world that made them, and one
-    // left behind is a lump of masonry lying in the middle of the city.
     reset();
   });
 
+  /* The burst a caller can still ask for by hand (tools, a scripted beat):
+     `count` wounds in the facade of one structure at severity `sev`, through
+     the building adapter. */
+  function shed(t, o) {
+    if (CBZ.CONFIG.QUAKE_DEBRIS === false) return 0;
+    o = o || {};
+    const p = ev.p || magParams(6.5);
+
+    const S = (t && t._qkS) || structOf(t, p);
+    if (!S) return 0;
+    t._qkS = S;
+    const sev = Math.max(0, Math.min(1, o.sev != null ? o.sev : 0.5));
+    const n = Math.max(1, o.count != null ? o.count : Math.round(2 + sev * 6));
+    for (let i = 0; i < n; i++) {
+      const m = faceNormals(S)[(rnd() * 4) | 0];
+      if (rnd() < 0.35 && panesOf(S).length) glassTo(S, Math.min(1, (S.paneAt + 1) / Math.max(1, panesOf(S).length)));
+      else wallHits(S, m, 1, 0.6 + sev * 0.8, 0.4 + sev, 0.4, 0.95);
+    }
+    return n;
+  }
+
   CBZ.quake = {
-    // shedding
-    shed: shed, shedTick: shedTick, pieces: function () { return pieces.length; },
+    // the event (the one entry every caller drives)
+    eventStart: eventStart, eventTick: eventTick, eventEnd: eventEnd, eventReport: eventReport,
+    eventActive: function () { return ev.on; },
+    eventSample: function () { return ev.last; },
+    // seismology, pure
+    magParams: magParams, sourceRoll: sourceRoll, pgaRock: pgaRock, rupDistKm: rupDistKm, siteAmp: siteAmp, mmiOf: mmiOf,
+    fragility: function (type) { return TYPES[type] || null; }, TYPES: TYPES,
+    // the building adapter (one door to city/collapse.js / demolition)
+    damage: BD,
+    // a burst by hand
+    shed: shed, pieces: function () { const L = liveBodies(); return L ? L.length : thrown.length; },
     // drop, cover, hold on
     cover: cover, coverAdd: coverAdd, coverNear: coverNear, coverReset: coverReset,
     duckUnder: duckUnder, standUp: standUp, underRoof: underRoof,
     // secondary killers
     gasFire: gasFire, dropLine: dropLine, poleNear: poleNear, poleAdd: poleAdd,
     /* WHERE THE SECONDARY HAZARDS ACTUALLY ARE. The same shape
-       CBZ.disasters.hazards() publishes ({x, z, r}), so a minimap, an AI
-       avoidance pass or a storyboard camera can all read one answer and
-       nothing has to re-derive "is there a live wire here". */
-    /* Each hazard also publishes the OUTWARD bearing it faces — the wall face
-       a fire is on, the direction a pole fell. That is what a caller needs to
-       stand on the open side of it: an AI keeping clear, or a camera that must
-       not be inside the building the hazard is attached to. */
+       CBZ.disasters.hazards() publishes ({x, z, r}), each with the OUTWARD
+       bearing it faces, so a minimap, an AI or a camera reads one answer. */
     hazards: function () {
       const out = [];
       for (let i = 0; i < localFires.length; i++) {
@@ -1628,15 +2909,20 @@
           nx: L.fx, nz: L.fz, tipX: L.x + L.fx * L.len, tipZ: L.z + L.fz * L.len, baseX: L.x, baseZ: L.z,
         });
       }
+      for (let i = 0; i < ground.mains.length; i++) {
+        const w = ground.mains[i];
+        if (w.on) out.push({ kind: "water", x: w.x, z: w.z, r: Math.min(6, 0.2 + w.t * 0.22), nx: 0, nz: 1 });
+      }
       return out;
     },
-    // the wave train (magnitude → felt ground motion + footing)
-    magParams: magParams, motionStart: motionStart, motionTick: motionTick,
-    motionStop: motionStop,
+    // the wave train (exposed for tools; the event drives it)
+    motionStart: motionStart, motionTick: motionTick, motionStop: motionStop,
     motionState: function () {
       return { on: motion.on, t: motion.t, phase: motion.phase, amp: motion.amp,
         pga01: motion.pgaNow, M: motion.p ? motion.p.M : 0,
-        mainDur: motion.p ? motion.p.mainDur : 0, shocksFired: motion.shockFired };
+        mainDur: motion.p ? motion.p.mainDur : 0, shocksFired: motion.shockFired,
+        env: { p: motion.env.p, s: motion.env.s, r: motion.env.r },
+        acc: { x: motion.acc.x, y: motion.acc.y, z: motion.acc.z }, disp: { x: motion.disp.x, y: motion.disp.y, z: motion.disp.z } };
     },
     // one-shot magnitude override for tools/storyboards — consumed by the
     // def's next roll, never stored, not a flag
@@ -1650,37 +2936,30 @@
     audit: function () { return CBZ.quakeAudit(); },
   };
 
-  /* THE CITY'S ONE-LINE ENTRY POINT. `CBZ.cityQuake({mag, secs, x, z})` runs
-     the whole event over whatever lots are near you.
-
-     HONEST SEAM, stated rather than hidden: NOTHING IN THE WORLD CALLS THIS
-     YET, and CITY_QUAKE is false, so it is dark by construction rather than a
-     stat fiction — the flag does not claim a quake happens in the city, it
-     says the engine can run one when a producer asks. The producer is the
-     next owner decision (a scripted story beat, a cityevents.js roll, a
-     campaign contract), and it costs one line whenever that lands. */
+  /* THE CITY'S ONE-LINE ENTRY POINT. `CBZ.cityQuake({M | mag, secs, x, z})`.
+     Nothing in the world calls it yet and CITY_QUAKE is false: dark by
+     construction, one line for whichever producer lands first. */
   CBZ.cityQuake = function (o) { return cityStart(o || {}); };
 
   /* ============================================================
-     CBZ.quakeAudit() — THE RATCHET.
-
-     Measured from live state, not counted in the source. What each field
-     proves:
-       debrisSpawned  the buildings actually shed (a quake that only shakes
-                      reads 0 and cannot pass as this feature)
+     CBZ.quakeAudit() — THE RATCHET, measured from live state.
+       debrisSpawned / panesBroken  the buildings actually shed (a quake
+                      that only shakes reads 0 and cannot pass as this)
        debrisHits/Kills  the debris is what kills, not the shake
-       coverSaves     somebody's damage was actually divided by cover
-       ducked         bots really got under the tables
-       gasFires / gasFiresShared  fires lit, and how many went through
-                      city/structural.js's BURNING state rather than the local
-                      fallback — `gasFiresShared` may only ever go UP relative
-                      to `gasFires`, which is the anti-second-fire-model gate
-       linesDown      conductors on the deck
+       coverSaves / ducked  cover worked / people got under it
+       gasFires vs gasFiresShared  a second fire model would show here
+       softStoreys / parapets / chimneys / collapses  damage BY TYPE happened
+       cracks / mains / boils  the ground answered
+       carsHit / carsCrushed   the street's cars were in it
+       tickMsMean / tickMsMax  what the core costs per frame
      ============================================================ */
   CBZ.quakeAudit = function () {
+    const L = liveBodies();
     return {
       debrisSpawned: A.debrisSpawned,
-      debrisLive: pieces.length,
+      debrisLive: L ? L.length : thrown.length,
+      panesBroken: A.panesBroken,
+      wallHits: A.wallHits,
       debrisHits: A.debrisHits,
       debrisKills: A.debrisKills,
       fireKills: A.fireKills,
@@ -1695,10 +2974,8 @@
       localFires: localFires.length,
       linesDown: A.linesDown,
       shocks: A.shocks,
-      // the wave train, live: what magnitude this quake IS and what the
-      // ground is doing right now — a quake that never moves pgaPeak off 0
-      // was a camera effect and cannot pass as this feature
-      mag: motion.p ? +motion.p.M.toFixed(1) : 0,
+      mag: motion.p ? +motion.p.M.toFixed(1) : (A.mag ? +A.mag.toFixed(1) : 0),
+      mmi: ev.p ? +ev.p.mmi.toFixed(1) : 0,
       motionPhase: motion.phase,
       motionAmp: +motion.amp.toFixed(3),
       pgaNow: +motion.pgaNow.toFixed(3),
@@ -1706,10 +2983,16 @@
       knockdowns: A.knockdowns,
       staggers: A.staggers,
       aftershocksFired: A.aftershocks,
+      parapets: A.parapets, chimneys: A.chimneys, softStoreys: A.softStoreys, collapses: A.collapses,
+      byState: ev.S.reduce(function (o, S) { o[DS_NAME[S.ds]] = (o[DS_NAME[S.ds]] || 0) + 1; return o; }, {}),
+      cracks: A.cracks, mains: A.mains, boils: A.boils, liquefied: A.liquefied, settled: A.settled, dustClouds: A.dustClouds,
+      carsHit: A.carsHit, carsCrushed: A.carsCrushed, carsRolled: A.carsRolled,
+      evacuated: A.evacuated, crowd: A.crowd,
+      tickMsMean: A.tickN ? +(A.tickMs / A.tickN).toFixed(3) : 0, tickMsMax: +A.tickMsMax.toFixed(2),
+      jobErrors: A.jobErrors, jobsQueued: jobs.length + glassJobs.length, jobWaits: A.jobWaits,
+      jobCost: Object.keys(jobCost).reduce(function (o, k) { const c = jobCost[k]; o[k] = { n: c.n, meanMs: +(c.ms / c.n).toFixed(2), maxMs: +c.max.toFixed(1) }; return o; }, {}),
       cityQuake: !!CBZ.CONFIG.CITY_QUAKE,
       cityActive: city.on,
-      // a second fire model would show up here as gasFires > gasFiresShared
-      // WHILE in city mode — off a city lot the local flame is legitimate
       mode: CBZ.game ? CBZ.game.mode : null,
     };
   };
