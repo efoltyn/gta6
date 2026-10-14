@@ -639,7 +639,7 @@ document.body.appendChild(b);}}catch(e){}})();
      through a shut door opens it if cleared (the city door kit, the prison
      door registry), is refused if not, and it shuts behind them. Asked by
      CBZ.moves.step and by systems/navgrid.js. -->
-<script src="src/systems/bodydoors.js?v=presint1001b"></script>
+<script src="src/systems/bodydoors.js?v=sink1014"></script>
 <script src="src/entities/poses.js?v=placard1013"></script>
 <!-- A SOLDIER (entities/soldier.js): rifle carries, cover, reload, the throw,
      hit reactions, wounds, the dive and the crawl, on the shared body. -->
@@ -1076,7 +1076,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
-<script src="src/world/groundshaft.js?v=shaft1"></script>
+<script src="src/world/groundshaft.js?v=sink1014"></script>
+<!-- THE SINKHOLE EVENT (warning, cover collapse, calving, what goes in) reads
+     the shaft through CBZ.groundShaftKit, so it loads right after it. -->
+<script src="src/world/sinkhole.js?v=sink1014"></script>
 <!-- THE VOLCANO IS SHARED: world/volcanofx.js owns the opaque crusted lava,
      the pyroclastic density current, the lahar and the ash LOAD, all keyed on
      a position + a height field so a city-side eruption calls the same four
@@ -1124,7 +1127,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=noring1013"></script>
+<script src="src/systems/disasters.js?v=sink1014"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>
@@ -1989,7 +1992,7 @@ document.body.appendChild(b);}}catch(e){}})();
      to walk at curfew was a body pressed into geometry. This sits between the
      brain and the mover and answers HOW to get there — and it owns the one
      walkability grid + A* that navigation.js's escapeRoute now delegates to. -->
-<script src="src/systems/navgrid.js?v=bdoor1001"></script>
+<script src="src/systems/navgrid.js?v=sink1014"></script>
 <script src="src/systems/prisonnav.js?v=nav2-st1"></script>
 <!-- THE CITY'S SIDE OF THE SAME GRID. Measured on a calm street: 56% of every
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding

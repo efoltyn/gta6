@@ -1770,10 +1770,14 @@
        (the shaft itself now lives in world/groundshaft.js):
 
        FEWER, BIGGER, DEEPER. Six 4 m dimples scattered over the island read as
-       potholes. The reference is ONE shaft ~20 m across and twice that deep,
-       with everything around it untouched, and the untouched surroundings are
-       half of why it is frightening. So: one or two per event, r 7-11, depth
-       4.2x the radius, and never anywhere the ground is not flat.
+       potholes. The reference is ONE shaft ~20 m across and much deeper than
+       wide, with everything around it untouched, and the untouched
+       surroundings are half of why it is frightening. So: one or two per
+       event, r 7-11, about three radii deep, never anywhere the ground is not
+       flat — and (2026-10-14) at the site with the most standing on it: a
+       road, parked cars, a building at the lip. world/sinkhole.js is the
+       event itself: the warning signs, the cover collapse, the calving rim,
+       and the cars, posts, trees and buildings going in.
 
        THE WARNING HAPPENS WHERE THE HOLE WILL BE. The old warn scattered
        cracks at random points across the whole island — information that could
@@ -1787,12 +1791,14 @@
 
        AND THE HOLE STAYS. end() no longer fills it in.                       */
     sinkhole: {
-      name: "SINKHOLES", emoji: "", warnSecs: 6, activeSecs: 20, gap: 6, cause: "swallowed by a sinkhole", tint: 0x5a4a36,
+      // 8 s of warning: long enough to SEE it coming (cracks running out
+      // across the road, the cover sagging, the posts leaning) and run
+      name: "SINKHOLES", emoji: "", warnSecs: 8, activeSecs: 22, gap: 6, cause: "swallowed by a sinkhole", tint: 0x5a4a36,
       warn(ctx) {
         narrate("hint", "The ground is giving way!", 2.6); sound("rumble");
         ctx.st.holes = []; ctx.st.pending = []; ctx.st.seqs = [];
         ctx.st.cd = 0;
-        sinkSite(ctx, this.warnSecs || 6);        // the first one is telegraphed for the whole warning
+        sinkSite(ctx, this.warnSecs || 8);        // the first one is telegraphed for the whole warning
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
@@ -1809,8 +1815,8 @@
         // the island, each with its own full warn→drop→grow arc
         ctx.st.cd -= dt;
         if (ctx.st.cd <= 0 && (ctx.st.seqs || []).length < 1 + Math.round(ctx.intensity * 1.6)) {
-          ctx.st.cd = 9 + rnd() * 5;
-          sinkSite(ctx, 3.2);
+          ctx.st.cd = 10 + rnd() * 5;
+          sinkSite(ctx, 4.5);
         }
         sinkSync(ctx);
         tickHoles(dt, ctx);
@@ -4246,6 +4252,10 @@
     //   higher, wider heap. The last few storeys still come down on whoever
     //   is standing at the edge of the footprint.
     const layRubble = function () {
+      // a building that fell INTO a sinkhole leaves its rubble down the shaft
+      // (the collapse engine's fragments land on the hole's floor); a mound
+      // on the footprint would be rubble standing on air
+      if (opts.noRubble) return;
       if (ctx && surv()) {
         for (let i = 0; i < 6; i++) {
           surv().hurtRadius(b.x + (rnd() - 0.5) * b.w * 1.4, b.z + (rnd() - 0.5) * b.d * 1.4, 1.6, scale(30, ctx));
@@ -4279,9 +4289,13 @@
       // the island is hills, a beach and a volcano skirt, so debris thrown
       // clear of the footprint has to land on the ground that is actually
       // there rather than on the height the building's own base sat at
-      groundAt: floor,
+      groundAt: opts.groundAt || floor,
       key: "isl:" + Math.round(b.x) + "," + Math.round(b.z),
     }, {
+      // a caller that KNOWS the motion (a sinkhole undermining one side: a
+      // topple toward the hole) says so; everything else is chosen by what
+      // the building is made of
+      mode: opts.mode || undefined,
       wound: { nx: opts.dirx || (b._lean ? 1 : 0), nz: opts.dirz || 0, floor: opts.floor || 0 },
       // the island has been shaking for ten seconds by the time anything
       // comes down — it does not need the city's 1.15 s "something is about
@@ -4728,34 +4742,72 @@
     CBZ.survHoles.push(h);
     return h;
   }
-  /* THE COLLAPSE, STAGED. One call per sinkhole and the primitive drives its
-     own arc; all this passes is the seam only this file can supply — the
-     ENTRAINMENT of the arena's own cars, through the flingCar this file
-     already owns, aimed inward and down. */
+  /* THE COLLAPSE, STAGED. One call per sinkhole and world/sinkhole.js drives
+     the whole event (cracks and sag, the cover dropping, the edges calving,
+     the things on top going in). What this file supplies is what only it
+     owns: the island's CARS (their records, their colliders, the flung flag
+     the arena's reset puts back), its BUILDINGS (and the structural ledger a
+     falling one must go through) and whether the site is a road. The old seam
+     threw every car inside the radius straight down with flingCar; a car now
+     goes in when the ground under its wheels does, nose first. */
   function stageHole(ctx, x, z, r) {
     if (!CBZ.groundShaftCollapse) { return { x: x, z: z, r: r, legacy: openHole(ctx, x, z, r) }; }
+    const A = ctx.arena;
+    const road = !!(A.onRoad && A.onRoad(x, z));
+    // as deep as the island allows: a karst throat a good three radii down,
+    // kept above the depth debris and bodies are culled at
+    const gy = floor(x, z);
+    const depth = Math.max(r * 2.4, Math.min(r * 3.2, gy + 52));
     return CBZ.groundShaftCollapse(x, z, {
-      r: r, depth: r * 4.2, surface: "soil",
-      warnSecs: 3.4, growSecs: 4.2,
-      entrain(hx, hz, hr) {
-        const cars = ctx.arena.cars || [];
-        for (let i = 0; i < cars.length; i++) {
-          const c = cars[i];
+      r: r, depth: depth, surface: road ? "asphalt" : "soil", road: road,
+      warnSecs: 3.4, growSecs: 6,
+      cars: function () {
+        const out = [], C = A.cars || [];
+        for (let i = 0; i < C.length; i++) {
+          const c = C[i];
           if (!c || c.flung || !c.group) continue;
-          const dx = c.group.position.x - hx, dz = c.group.position.z - hz;
-          const d = Math.hypot(dx, dz);
-          if (d > hr * 1.15) continue;
-          const m = d || 1;
-          flingCar(c, -dx / m, -dz / m, 5 + rnd() * 4, -3);   // inward and DOWN
+          out.push({ obj: c.group, x: c.group.position.x, z: c.group.position.z, yaw: c.group.rotation.y, rec: c,
+            // off the street: its collider goes, and `flung` is the flag the
+            // arena's reset() parks it back by
+            take: function () {
+              c.flung = true;
+              const k = CBZ.colliders.indexOf(c.collider); if (k >= 0) CBZ.colliders.splice(k, 1);
+              if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+            } });
         }
+        return out;
+      },
+      buildings: function () {
+        const out = [], B = A.fragile || [];
+        for (let i = 0; i < B.length; i++) {
+          const b = B[i];
+          if (!b || b.fallen || !b.group) continue;
+          const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
+          out.push({ x: bx, z: bz, w: b.w || 8, d: b.d || b.w || 8, h: b.h || 8, gy: b.gy || 0, storeys: b.storeys,
+            group: b.group, colliders: b.colliders, platforms: b.platforms, color: b.color, facadeStyle: b.facadeStyle, rec: b,
+            // the ledger owns the fall: a topple TOWARD the hole, its rubble
+            // going down the shaft rather than heaped on the footprint
+            onFall: function (nx, nz, info) {
+              collapse(b, ctx, { dirx: nx, dirz: nz, preShudder: 0.05, mode: "topple", noRubble: true, groundAt: info && info.groundAt });
+              return { phase: 1, ledger: true };
+            } });
+        }
+        return out;
       },
     });
   }
   /* WHERE A SINKHOLE MAY OPEN. The law lives in world/groundshaft.js
      (slope over the whole footprint, sampled off this arena's own ground) —
-     this only says how far apart they are and how big this round's is. A site
-     that fails is NOT relocated to somewhere flatter-looking: no site, no hole.
-     That is what keeps shaftAudit().holesOnSlopes at zero by construction. */
+     this only says how far apart they are, how big this round's is, and
+     which of the legal sites is WORTH it.
+
+     A sinkhole in an empty field is a hole; the one that matters swallows a
+     street. So several legal sites are drawn and scored by what is standing
+     at them: road under it, parked cars in reach, a building at the lip
+     (allowed now — the event undermines it properly instead of leaving it
+     floating), trees. A site that fails the law is never relocated
+     somewhere flatter-looking: no site, no hole. That is what keeps
+     shaftAudit().holesOnSlopes at zero by construction. */
   function sinkSite(ctx, warnSecs) {
     if (!CBZ.groundShaftSite) {
       const p = ctx.arena.randomPoint(0, ctx.R * 0.8);
@@ -4764,13 +4816,10 @@
       return null;
     }
     const r = 7 + scale(3.4, ctx);
-    /* CLEAR OF THE OTHER HOLES IS LAW TOO, AND IT USED NOT TO BE. Two shafts
-       cut into each other are not two sinkholes: the lips carve through one
-       another, and the floor query — which answers from the FIRST live shaft
-       that contains the point — starts handing out the neighbour's stair, so
-       the middle of a 58 m hole reports as 1.6 m deep. Caught by
-       tools/sinkhole-check.mjs asserting that floorAt at a mouth's centre drops
-       most of the shaft's depth. */
+    /* CLEAR OF THE OTHER HOLES IS LAW TOO. Two shafts cut into each other
+       are not two sinkholes: the floor query answers from the FIRST live shaft
+       that contains the point, so the middle of a 58 m hole reported as 1.6 m
+       deep. Caught by tools/sinkhole-check.mjs. */
     function nearAnotherHole(x, z) {
       const S = CBZ.groundShafts || [];
       for (let i = 0; i < S.length; i++) if (Math.hypot(x - S[i].x, z - S[i].z) < S[i].r + r + 12) return true;
@@ -4778,37 +4827,31 @@
       for (let i = 0; i < P.length; i++) if (Math.hypot(x - P[i].x, z - P[i].z) < P[i].r + r + 12) return true;
       return false;
     }
-    /* THE BUILDINGS MUST BE STANDING AT THE LIP, NOT IN THE HOLE. That is
-       the whole read of the reference photograph — a tower whose footing
-       is inside the mouth is a floating tower, and this file's structural
-       ledger has no concept of "undermined". Close is the point; over is
-       the bug. */
-    function underABuilding(x, z) {
-      const B = ctx.arena.fragile || [];
+    function worth(x, z) {
+      const A = ctx.arena;
+      let s = 0;
+      if (A.onRoad && A.onRoad(x, z)) s += 3;
+      const C = A.cars || [];
+      for (let i = 0; i < C.length; i++) { const c = C[i]; if (c && !c.flung && Math.hypot(c.x - x, c.z - z) < r + 2.5) s += 2; }
+      const B = A.fragile || [];
       for (let i = 0; i < B.length; i++) {
-        const b = B[i];
+        const b = B[i]; if (!b || b.fallen) continue;
         const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
-        if (bx == null) continue;
-        if (Math.hypot(x - bx, z - bz) < r * 0.85 + (b.w || 8) * 0.5) return true;
+        const half = Math.max(b.w || 8, b.d || 8) * 0.5, d = Math.hypot(bx - x, bz - z);
+        if (d < r + half * 0.9) { s += 4; break; }
       }
-      return false;
+      const T = A.flammable || [];
+      for (let i = 0; i < T.length; i++) if (T[i] && Math.hypot(T[i].x - x, T[i].z - z) < r) s += 0.5;
+      return s;
     }
-    const spec = {
-      cx: ctx.cx, cz: ctx.cz, R: ctx.R, r: r, rng: rnd, minDist: 14, tries: 90,
-      avoid(x, z) { return nearAnotherHole(x, z) || underABuilding(x, z); },
-    };
-    /* THE SLOPE LAW IS LAW; KEEPING CLEAR OF A BUILDING IS TASTE. If the
-       island cannot offer flat ground away from every tower, take flat ground
-       — a disaster that silently does nothing because its preferences went
-       unmet is worse than a hole beside a wall. The slope refusal is never
-       relaxed, which is what keeps holesOnSlopes at zero.
-
-       The relaxed pass used to drop `avoid` ENTIRELY, which threw away the
-       hole-spacing rule along with the building rule. It now drops only the
-       taste half: no site beside a tower is better than a site inside an
-       existing shaft, and if neither can be had there is simply no hole. */
-    let site = CBZ.groundShaftSite(spec);
-    if (!site) { spec.avoid = nearAnotherHole; site = CBZ.groundShaftSite(spec); }
+    const spec = { cx: ctx.cx, cz: ctx.cz, R: ctx.R, r: r, rng: rnd, minDist: 14, tries: 90, undermine: true, avoid: nearAnotherHole };
+    let site = null, best = -1;
+    for (let k = 0; k < 8; k++) {
+      const s = CBZ.groundShaftSite(spec);
+      if (!s) continue;
+      const w = worth(s.x, s.z);
+      if (w > best) { best = w; site = s; }
+    }
     if (!site) return null;
     const seq = stageHole(ctx, site.x, site.z, r);
     if (seq && seq.warnSecs != null && warnSecs) seq.warnSecs = warnSecs;
