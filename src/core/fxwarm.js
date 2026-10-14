@@ -248,7 +248,9 @@
     lightSig = n.D + "|" + n.P + "|" + n.S + "|" + n.H + "|" + n.R + "|" + n.s + "|" + (r.shadowMap.enabled ? 1 : 0) + "|" + (sc.fog ? (sc.fog.isFogExp2 ? 2 : 1) : 0) +
       (opts && opts.target ? "|t" + (opts.target.texture ? opts.target.texture.encoding : 0) : "");
     const reps = [];
-    const casters = (opts && opts.depth && r.shadowMap && r.shadowMap.enabled) ? [] : null;
+    // no light casts (the phone tier turns the sun's shadow off): the shadow
+    // pass never runs, so its depth programs would be compiled for nothing
+    const casters = (opts && opts.depth && r.shadowMap && r.shadowMap.enabled && n.s > 0) ? [] : null;
     let bad = 0;
     function visit(o) {
       if (hidden.has(o)) return;
