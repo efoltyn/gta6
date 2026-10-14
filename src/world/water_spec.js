@@ -3022,7 +3022,7 @@
     const cut = kind === "city"
       ? "  if (uSeaHasLandMask > 0.5 && field.r > cbzShoreCutAt(vSeaWorld.xz)) discard;"
       : kind === "arena"
-        ? "  if (uSeaHasLandMask > 0.5 && field.r > uShoreCut) discard;"
+        ? "  if (uSeaHasLandMask > 0.5 && field.r > uShoreCut" + (opts.cutGuard ? " && " + opts.cutGuard : "") + ") discard;"
         : "  if (uClip.z > 0.0 && abs(vSeaWorld.x - uClip.x) < uClip.z && abs(vSeaWorld.z - uClip.y) < uClip.z) discard;";
     const fs = [
       CBZ.waterFragmentDecl(),
@@ -3033,6 +3033,7 @@
       "#include <fog_pars_fragment>",
       "void main() {",
       "  vec4 field = cbzWaterField(vSeaWorld.xz);",
+      opts.fragHead || "",
       cut,
       "  float inland = max(vSeaMisc.w, field.a);",
       "  float under = gl_FrontFacing ? 0.0 : 1.0;",
@@ -3176,8 +3177,50 @@
 
   CBZ.waterDisasterSurfaceY = function (x, z, meanY, amp, chop, t) {
     const base = CBZ.waterSeaY();
-    return meanY + (CBZ.waterWaveHeight(x, z, t, amp, chop) - base);
+    let wave = CBZ.waterWaveHeight(x, z, t, amp, chop) - base;
+    /* A FLOOD A METRE DEEP CARRIES NO METRE-HIGH SWELL. Inside the run-up
+       field the swell is scaled by the depth under it (full from 2.5 m), the
+       same factor the disaster sea's vertex stage applies. */
+    const F = CBZ.tsuRunup && CBZ.tsuRunup.current ? CBZ.tsuRunup.current() : null;
+    if (F) {
+      const r = F.sample(x, z, _runSY);
+      if (r.in > 0) { const k = Math.min(1, Math.max(0, r.depth / 2.5)); wave *= 1 - r.in + r.in * k; }
+    }
+    return meanY + wave;
   };
+  const _runSY = {};
+
+  /* THE RUN-UP FIELD, READ ON THE GPU. One RGBA8 texel per cell, nearest-
+     sampled and blended by hand (float textures cannot be linearly filtered
+     on every phone; four fetches always can): RG = the drawn surface (16
+     bit), B = sqrt(depth / 25), A = speed / 16. Returns (surface, depth,
+     speed, inside weight) and the surface slope through `grad`. The CPU
+     twin is world/tsunami_runup.js sample(). */
+  const RUN_ENC = CBZ.waterRunupEnc = { lo: -16, span: 64, depth: 25, speed: 16, dryLift: 0.6 };
+  const RUN_GLSL = [
+    "uniform sampler2D uRunTex;",
+    "uniform vec4 uRunB;",
+    "uniform float uRunOn;",
+    "vec4 cbzRunTexel(vec2 c) { return texture2D(uRunTex, (c + 0.5) / uRunB.w); }",
+    "vec4 cbzRun(vec2 xz, out float grad) {",
+    "  grad = 0.0;",
+    "  vec2 g = (xz - uRunB.xy) / uRunB.z * uRunB.w - 0.5;",
+    "  float e = min(min(g.x + 0.5, g.y + 0.5), min(uRunB.w - 0.5 - g.x, uRunB.w - 0.5 - g.y));",
+    "  float w = clamp(e / 1.5, 0.0, 1.0);",
+    "  if (w <= 0.0) return vec4(0.0);",
+    "  vec2 i0 = clamp(floor(g), vec2(0.0), vec2(uRunB.w - 2.0));",
+    "  vec2 f = clamp(g - i0, 0.0, 1.0);",
+    "  vec4 a = cbzRunTexel(i0), b = cbzRunTexel(i0 + vec2(1.0, 0.0));",
+    "  vec4 c = cbzRunTexel(i0 + vec2(0.0, 1.0)), d = cbzRunTexel(i0 + vec2(1.0, 1.0));",
+    "  vec4 ee = (floor(vec4(a.r, b.r, c.r, d.r) * 255.0 + 0.5) * 256.0 + floor(vec4(a.g, b.g, c.g, d.g) * 255.0 + 0.5)) * " + gnum(RUN_ENC.span / 65535) + " + " + gnum(RUN_ENC.lo) + ";",
+    "  vec4 dd = vec4(a.b, b.b, c.b, d.b); dd = dd * dd * " + gnum(RUN_ENC.depth) + ";",
+    "  vec4 sp = vec4(a.a, b.a, c.a, d.a) * " + gnum(RUN_ENC.speed) + ";",
+    "  vec4 wq = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);",
+    "  float cell = uRunB.z / uRunB.w;",
+    "  grad = length(vec2(mix(ee.y - ee.x, ee.w - ee.z, f.y), mix(ee.z - ee.x, ee.w - ee.y, f.x))) / cell;",
+    "  return vec4(dot(ee, wq), dot(dd, wq), dot(sp, wq), w);",
+    "}",
+  ].join("\n");
 
   CBZ.makeDisasterWaterMaterial = function (opts) {
     opts = opts || {};
@@ -3216,8 +3259,18 @@
     U.uDwDryDisc = { value: new THREE.Vector4(0, 0, 0, 0) };
     U.uDwSilt = { value: new THREE.Color(opts.siltColor == null ? 0x1f1810 : opts.siltColor) };
     U.uDwFoam = { value: new THREE.Color(opts.dirtyFoamColor == null ? 0x8e8271 : opts.dirtyFoamColor) };
+    /* THE RUN-UP FIELD (world/tsunami_runup.js): while one is attached, the
+       sheet over its domain IS the field's surface (one RGBA8 texel a cell,
+       see RUN_GLSL), its swell scaled by the depth under it, its dry cells
+       discarded, and its froth where the water is fast and steep. */
+    U.uRunTex = { value: null };
+    U.uRunB = { value: new THREE.Vector4(0, 0, 1, 2) };   // x0, z0, size (m), cells per side
+    U.uRunOn = { value: 0 };
+    U.uRunRest = { value: -0.8 };                        // the rest sea: bed above it is land
 
     const vDecl = [
+      RUN_GLSL,
+      "varying vec4 vRun;",
       "uniform vec4 uDwDryDisc;",
       "uniform vec2 uDwFrontC;",
       "uniform vec2 uDwFrontDir;",
@@ -3232,8 +3285,21 @@
       // sink comes back with it (swell crests never stripe the plain)
       "  float dwAk = uDwAhead > 0.001 ? smoothstep(-1.0, 7.0, dot(wWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS) : 0.0;",
       "  wWorld.y -= dwAk * (uDwAhead + 3.0 * dwDisc * step(uDwDryDisc.w, 0.01));",
+      // the run-up field owns its domain: its surface, plus the swell scaled
+      // by the depth under it (a flood a metre deep carries no metre swell)
+      "  float rG = 0.0;",
+      "  vec4 rS = uRunOn > 0.5 ? cbzRun(wXZ, rG) : vec4(0.0);",
+      "  if (rS.w > 0.0) {",
+      "    float rk = clamp(rS.y / 2.5, 0.0, 1.0);",
+      "    wWorld.y = mix(wWorld.y, rS.x + wHeight * rk, rS.w);",
+      "    wWorld.xz = mix(wWorld.xz, wXZ + wDisp.xz * rk, rS.w);",
+      "  }",
+      "  vRun = vec4(rS.y, rS.z, rG, rS.w);",
     ].join("\n");
     const fDecl = [
+      RUN_GLSL,
+      "varying vec4 vRun;",
+      "uniform float uRunRest;",
       "uniform float uDwSediment;",
       "uniform vec2 uDwFrontC;",
       "uniform vec2 uDwFrontDir;",
@@ -3267,7 +3333,11 @@
        network where the water has stood. Gated on uDwSediment, which is 0 for
        every clean sea, so they run not one instruction of it. */
     const fTail = [
-      "  if (uDwSediment > 0.002) {",
+      // run-up water on the land is flood water whatever the sea is doing:
+      // it stays mud through the backwash, after the event has cleared
+      "  float rLand = dwRun.w * smoothstep(uRunRest - 1.2, uRunRest + 0.3, dwRun.x - dwRun.y) * step(0.03, dwRun.y);",
+      "  float dwSed = max(uDwSediment, 0.92 * rLand);",
+      "  if (dwSed > 0.002) {",
       "    vec3 tN = normalize(vSeaNormal);",
       "    if (under > 0.5) tN = -tN;",
       "    vec3 tL = normalize(uSunDir);",
@@ -3282,15 +3352,25 @@
       "    float fdS = dot(vSeaWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS;",
       "    float behind = clamp(-fdS / max(1.0, uDwFrontRun), 0.0, 1.0);",
       "    float dwWet = 1.0 - smoothstep(-1.0, 7.0, fdS);",
-      "    float turb = uDwSediment * dwWet;",
+      // ON THE LAND the field says what is flood: water standing on ground
+      // above the rest sea, wherever it got to, whatever the front line says.
+      // Its froth is where it is fast AND steep (the bore's face, the race
+      // round a corner, the backwash pouring off a kerb), its slack is still.
+      "    float rFront = smoothstep(0.12, 0.7, dwRunG) * smoothstep(0.6, 3.2, dwRun.z);",
+      // the leading edge of water still on the move is a lip of froth
+      // (shallow AND fast: the tongue of a bore running up a street)
+      "    rFront = max(rFront, (1.0 - smoothstep(0.08, 0.7, dwRun.y)) * smoothstep(0.8, 2.6, dwRun.z));",
+      "    dwWet = max(dwWet, rLand);",
+      "    behind = mix(behind, 0.35 * (1.0 - rFront), rLand);",
+      "    float turb = dwSed * dwWet;",
       "    if (turb > 0.002) {",
-      "      float bd = max(0.0, -fdS);",
+      "      float bd = mix(max(0.0, -fdS), mix(60.0, 0.5, rFront), rLand);",
       "      vec2 fl = uDwFlow;",
       "      vec2 ax = vec2(-fl.y, fl.x);",
       "      vec2 adv = vSeaWorld.xz - fl * (uDwFlowSpd * uSeaTime);",
       "      float sAl = dot(adv, fl);",
       "      float sAc = dot(adv, ax);",
-      "      float stand = max(uDwStand, smoothstep(0.30, 1.0, behind));",
+      "      float stand = mix(max(uDwStand, smoothstep(0.30, 1.0, behind)), 1.0 - smoothstep(0.4, 3.0, dwRun.z), rLand);",
       "      float plume = clamp(dwFbm(vec2(sAl, sAc) * 0.0068) * 0.72 +",
       "                          dwNoise(vec2(sAl * 0.0021, sAc * 0.0029) + 11.0) * 0.46, 0.0, 1.0);",
       "      float sed = turb * mix(1.0, 0.92, behind);",
@@ -3300,7 +3380,7 @@
       "      vec3 turbCol = mix(mudBody, dwSkyC, clamp(mf * 0.80, 0.0, 0.62));",
       "      turbCol += uSunColor * pow(max(dot(tN, tH), 0.0), 110.0) * (0.45 + 2.4 * mf);",
       "      outColor = mix(outColor, turbCol, clamp(sed * 1.28, 0.0, 0.985));",
-      "      vec3 dfoam = mix(uFoamColor, uDwFoam, uDwSediment * 0.88);",
+      "      vec3 dfoam = mix(uFoamColor, uDwFoam, dwSed * 0.88);",
       "      float tongue = dwFbm(vec2(sAc * 0.052 + 4.0, uSeaTime * 0.28));",
       "      float boil = clamp(turb * exp(-bd / (2.0 + 5.4 * tongue)) * (0.50 + 0.80 * tongue), 0.0, 0.92);",
       "      float streak = smoothstep(0.60, 0.95, dwFbm(vec2(sAl * 0.023, sAc * 0.30)));",
@@ -3316,9 +3396,18 @@
       "    }",
       "  }",
     ].join("\n");
+    const fHead = [
+      "  vec4 dwRun = vec4(0.0); float dwRunG = 0.0;",
+      "  if (uRunOn > 0.5 && vRun.w > 0.01) {",
+      "    dwRun = cbzRun(vSeaWorld.xz, dwRunG);",
+      // a dry cell of the field is dry land: no sea is drawn on it
+      "    if (dwRun.w > 0.5 && dwRun.y < 0.03) discard;",
+      "  }",
+    ].join("\n");
     const mat = CBZ.waterSeaMaterial({
       kind: "arena", uniforms: U, name: opts.name || "CBZ Disaster Water",
       vertexDecl: vDecl, vertexTail: vTail, fragDecl: fDecl, fragTail: fTail,
+      fragHead: fHead, cutGuard: "dwRun.w < 0.5",
       horizonFuse: false, transparent: opts.transparent === true,
       depthWrite: opts.depthWrite == null ? (U.uSeaOpacity.value >= 0.999) : !!opts.depthWrite,
     });
@@ -3351,6 +3440,16 @@
     const fld = mat.userData && mat.userData.waterField;
     if (fld && !fld.done) fld.step(2.5);
     state = state || {};
+    if (u.uRunOn) {
+      const F = CBZ.tsuRunup && CBZ.tsuRunup.current ? CBZ.tsuRunup.current() : null;
+      const tx = F ? F.texture() : null;
+      if (tx) {
+        u.uRunTex.value = tx;
+        u.uRunB.value.set(F.x0, F.z0, F.size, F.n);
+        u.uRunRest.value = F.restY;
+        u.uRunOn.value = 1;
+      } else u.uRunOn.value = 0;
+    }
     if (Number.isFinite(state.amp)) u.uDisasterAmp.value = +state.amp;
     if (Number.isFinite(state.chop)) u.uDisasterChop.value = +state.chop;
     if (Number.isFinite(state.foam)) u.uDisasterFoam.value = +state.foam;
@@ -4320,12 +4419,36 @@
      published mean because the tsunami front has not reached it yet. Every
      survival water query subtracts this, so the swimmer, the drowning test,
      the debris and the bots all agree with the sheet that is drawn. */
-  CBZ.waterFrontDropAt = function (x, z) {
+  function frontFormulaDrop(x, z) {
     const e = waterEvent;
     if (!e || !(e.aheadDrop > 0.001)) return 0;
     const fd = (x - (+e.cx || 0)) * (+e.dx || 0) + (z - (+e.cz || 0)) * (+e.dz || 0) - (+e.frontS || 0);
     let k = (fd + 1) / 8; k = k < 0 ? 0 : k > 1 ? 1 : k;
     return e.aheadDrop * k * k * (3 - 2 * k);
+  }
+  /* THE STRAIGHT FRONT, alone: what the SEA does (the drawn-back water ahead
+     of the bore, the raised water behind it). The run-up field forces its
+     open-sea cells to exactly this, so the sheet is continuous across the
+     field's edge. */
+  CBZ.waterFrontFormulaDrop = frontFormulaDrop;
+  /* ...AND ON THE LAND, THE RUN-UP FIELD (world/tsunami_runup.js). While a
+     field is attached its surface IS the water inside its domain: the drop
+     is whatever puts the published mean onto the field's surface (a dry cell
+     sits 0.6 m under its own bed, so every depth query reads it as dry).
+     Its edge fades to the formula over a cell and a half. */
+  const _runS = {};
+  function runupField() { return CBZ.tsuRunup && CBZ.tsuRunup.current ? CBZ.tsuRunup.current() : null; }
+  function runupMean() {
+    return CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : seaY();
+  }
+  CBZ.waterFrontDropAt = function (x, z) {
+    const base = frontFormulaDrop(x, z);
+    const F = runupField();
+    if (!F) return base;
+    const r = F.sample(x, z, _runS);
+    if (!(r.in > 0)) return base;
+    const d = runupMean() - r.eta;
+    return r.in >= 1 ? d : base + (d - base) * r.in;
   };
   CBZ.waterEventSample = function (x, z, t, out) {
     out = out || {};
@@ -4342,7 +4465,7 @@
     out.active = true; out.owner = e.owner || ""; out.kind = e.kind || ""; out.phase = phase;
     const drop = CBZ.waterFrontDropAt(x, z);
     out.wet = wet; out.frontDistance = fd; out.mean = mean - drop;
-    out.height = CBZ.waterDisasterSurfaceY(x, z, mean, amp, chop, t) - drop;
+    out.height = CBZ.waterDisasterSurfaceY(x, z, mean - drop, amp, chop, t);
     let flow = wet && Number.isFinite(e.flow) ? e.flow : 0;
     /* THE RIVER BEHIND A BORE IS FASTEST RIGHT BEHIND IT. A tsunami front
        drags the water in its first few tens of metres at close to its own
@@ -4351,6 +4474,22 @@
        run up to 2.2x it: caught near the wall you are going where it goes. */
     if (phase === "sweep" && e.kind === "tsunami" && fd < 0) flow *= 1 + 1.2 * Math.max(0, 1 + fd / 45);
     out.currentX = dx * flow; out.currentZ = dz * flow;
+    /* ON THE LAND THE CURRENT IS THE FIELD'S: down the street it is running
+       down, round the building it is splitting on, back to sea on the
+       backwash — never one heading for the whole island. */
+    const F = runupField();
+    if (F) {
+      const r = F.sample(x, z, _runS);
+      if (r.in > 0) {
+        // on the forced open sea the current stays the director's
+        const k = r.in * (1 - r.forced);
+        out.wet = r.in >= 1 ? r.depth > 0.05 : (r.depth > 0.05 || out.wet);
+        out.currentX = out.currentX * (1 - k) + r.u * k;
+        out.currentZ = out.currentZ * (1 - k) + r.v * k;
+        out.runup = true; out.depth = r.depth; out.speed = r.speed;
+        flow = Math.hypot(out.currentX, out.currentZ) * (r.u * dx + r.v * dz < 0 ? -1 : 1);
+      }
+    }
     out.foam = phase === "sweep" ? Math.max(0, 1 - Math.abs(fd) / Math.max(1, +e.frontWidth || 18)) : 0;
     /* THE SEDIMENT LOAD AND THE UNDERTOW, on the same descriptor, because they
        are the same water. `sediment` is what makes the front gray-black and is
@@ -4358,7 +4497,7 @@
        it. `undertow` is the flow being NEGATIVE — the drain dragging seaward —
        which is the half of a tsunami that actually drowns people, and it is a
        sign, not a second field. */
-    out.sediment = wet && Number.isFinite(e.sediment) ? e.sediment : 0;
+    out.sediment = out.wet && Number.isFinite(e.sediment) ? e.sediment : 0;
     out.undertow = flow < 0 ? -flow : 0;
     return out;
   };

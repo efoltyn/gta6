@@ -24,7 +24,8 @@
      band   the exposed-seabed skin (wet sheen, ripples, weed, pools)   1
      reef   rock + coral outcrops on the band (instanced)               1
      fish   stranded fish, flopping in the vertex shader (instanced)    1
-     boats  four lofted dinghies lying on their bilges (merged)         1
+     boats  four lofted dinghies on their bilges (one each: the wave   4
+            lifts them, see buildBoats)
      mud    the silt drape over the island (64x64 DataTexture)          1
      stain  high-water marks on standing buildings (instanced)          1
    CPU: uniforms per frame; water queries / texture writes at 5 Hz, and
@@ -500,20 +501,54 @@
     plank(0.80, 0.80, 0.045, 0.10, D * 0.70);
     return start;
   }
+  /* THE BOATS ARE SEPARATE HULLS NOW (one mesh each, four draws), because
+     the wave PICKS THEM UP: lying on the mud through the drawdown, lifted
+     when the bore reaches them, carried inland on the flood and left in a
+     street when it goes (systems/disasters.js hands each one to the debris
+     field as a "boat"). When the island publishes a harbour (CBZ.island.
+     harbour), the first two lie off it: a harbour is where the boats are. */
+  // ONE HULL, its own mesh, built round its own origin (YXZ: yaw, then trim)
+  let hullMat = null;
+  function makeHull(o, mat) {
+    const P = [], C = [], I = [];
+    addDinghy(P, C, I, new THREE.Matrix4(), o);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(C, 3));
+    geo.setIndex(I);
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+    if (!mat) {
+      if (!hullMat) { hullMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide }); hullMat.name = "tsunami-stranded-boats"; }
+      mat = hullMat;
+    }
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = "tsunami-boat";
+    mesh.castShadow = false; mesh.receiveShadow = true;
+    mesh.rotation.order = "YXZ";
+    return mesh;
+  }
   function buildBoats() {
     const rnd = rngOf(4242 + events);
     const appr = Math.atan2(-tsu.dz, -tsu.dx);
     const oy = A.oceanY != null ? A.oceanY : -0.8;
-    const P = [], C = [], I = [];
     const paints = [
       [[0.34, 0.33, 0.30], [0.30, 0.05, 0.04]],   // white-ish, red bottom
       [[0.03, 0.09, 0.20], [0.06, 0.06, 0.07]],   // navy
       [[0.05, 0.16, 0.08], [0.25, 0.05, 0.04]],   // green
       [[0.30, 0.20, 0.04], [0.06, 0.08, 0.12]],   // yellow
     ];
-    const spots = [appr + 0.22, appr - 0.48, appr + 1.3, appr + Math.PI + 0.5];
-    const M = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
-    const one = new THREE.Vector3(1, 1, 1), pv = new THREE.Vector3();
+    const H = CBZ.island && CBZ.island.harbour;
+    const hx = H ? (Number.isFinite(H.x) ? H.x : H.center && H.center.x) : null;
+    const hz = H ? (Number.isFinite(H.z) ? H.z : H.center && H.center.z) : null;
+    const harbA = Number.isFinite(hx) && Number.isFinite(hz) ? Math.atan2(hz - A.center.z, hx - A.center.x) : null;
+    const spots = harbA != null ? [harbA - 0.05, harbA + 0.07, appr + 0.22, appr - 0.48] : [appr + 0.22, appr - 0.48, appr + 1.3, appr + Math.PI + 0.5];
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide });
+    mat.name = "tsunami-stranded-boats";
+    const v = new THREE.Vector3();
+    const group = new THREE.Group();
+    group.name = "tsunami-stranded-boats";
+    const hulls = [];
     for (let b = 0; b < spots.length; b++) {
       const Pt = bandPoint(spots[b], oy - 1.1 - rnd() * 2.8);
       const L = 3.0 + rnd() * 1.4, Bm = L * (0.38 + rnd() * 0.05), D = 0.5 + rnd() * 0.12;
@@ -524,34 +559,26 @@
         stripe: [pc[0][0] * 0.6, pc[0][1] * 0.6, pc[0][2] * 0.6],
         inner: [0.20, 0.19, 0.17], bilge: [0.07, 0.06, 0.045], wood: [0.17, 0.11, 0.06],
       };
+      const mesh = makeHull(o, mat);
+      const P = mesh.geometry.attributes.position.array;
       const roll = (rnd() < 0.5 ? -1 : 1) * (0.95 + rnd() * 0.35);   // on its bilge, gunwale to the mud
-      e.set((rnd() - 0.5) * 0.12, rnd() * 6.28, roll, "YXZ");
-      q.setFromEuler(e);
-      pv.set(Pt.x, Pt.y, Pt.z);
-      M.compose(pv, q, one);
-      const s0 = addDinghy(P, C, I, M, o);
+      mesh.rotation.set((rnd() - 0.5) * 0.12, rnd() * 6.28, roll);
+      mesh.position.set(Pt.x, Pt.y, Pt.z);
+      mesh.updateMatrix();
       // settle it: lowest point of the hull 12 cm into the mud
       let minC = Infinity;
-      for (let i = s0; i < P.length / 3; i++) {
-        const cl = P[i * 3 + 1] - gh(P[i * 3], P[i * 3 + 2]);
+      for (let i = 0; i < P.length / 3; i++) {
+        v.set(P[i * 3], P[i * 3 + 1], P[i * 3 + 2]).applyMatrix4(mesh.matrix);
+        const cl = v.y - gh(v.x, v.z);
         if (cl < minC) minC = cl;
       }
-      const drop = minC + 0.12;
-      for (let i = s0; i < P.length / 3; i++) P[i * 3 + 1] -= drop;
+      mesh.position.y -= minC + 0.12;
+      mesh.userData.home = { p: mesh.position.clone(), r: mesh.rotation.clone() };
+      group.add(mesh);
+      hulls.push(mesh);
     }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(C, 3));
-    geo.setIndex(I);
-    geo.computeVertexNormals();
-    geo.computeBoundingSphere();
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide });
-    mat.name = "tsunami-stranded-boats";
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.name = "tsunami-stranded-boats";
-    mesh.castShadow = false; mesh.receiveShadow = true;
-    A.root.add(mesh);
-    return mesh;
+    A.root.add(group);
+    return { mesh: group, hulls: hulls };
   }
 
   /* =============================================================================
@@ -856,8 +883,13 @@
       }
       const base = b.gy != null ? b.gy : gh(b.x, b.z);
       if (query) {
-        const d = depthAt(b.x, b.z);
-        const cur = d > 0 ? gh(b.x, b.z) + d : -99;
+        /* THE MARK IS THE WATER OUTSIDE THE WALL. With the run-up field on,
+           a building's own cells are its flooded interior (lower, later);
+           the line on the facade is the street's level against it. */
+        const RF = CBZ.tsuRunup && CBZ.tsuRunup.current ? CBZ.tsuRunup.current() : null;
+        const RB = RF ? RF.buildingOf(b) : null;
+        const d = RB ? (RB.rimNow > -90 ? RB.rimNow - base : -1) : depthAt(b.x, b.z);
+        const cur = d > 0 ? (RB ? RB.rimNow : gh(b.x, b.z) + d) : -99;
         T.cur[i] = cur;
         if (d > 0.04) T.wet[i] = 1;
         if (cur > T.lvl[i] && cur - base > 0.3) {
@@ -916,6 +948,13 @@
     tsu.active = false; flood.active = false;
     clearAftermath();
     if (!S) return;
+    // a new match: the hulls the last wave carried off go back on the shelf
+    const BG = S.boats;
+    if (BG && BG.hulls) for (const m of BG.hulls) {
+      const H = m.userData.home; if (!H) continue;
+      if (m.parent !== BG.mesh) BG.mesh.add(m);
+      m.position.copy(H.p); m.rotation.copy(H.r); m.visible = true;
+    }
     S.band.mesh.visible = false; S.band.U.uOn.value = 0;
     S.fish.mesh.visible = false; S.fish.show.fill(0);
     const fa = S.fish.attr.array; for (let i = 0; i < S.fish.N; i++) fa[i * 4 + 2] = 0;
@@ -1057,5 +1096,19 @@
       };
     },
     reset: clearAll,
+    // the four hulls on the bared shelf (Object3D each), for the wave to take
+    boats() { return S && S.boats && S.boats.hulls ? S.boats.hulls.slice() : []; },
+    /* one dinghy hull as its own mesh (L length, B beam, D depth, paint /
+       bottom rgb), for a scene that wants a real boat without this file's
+       island: the lab kit `tsunami` moors two in its harbour */
+    makeDinghy(o) {
+      o = o || {};
+      const L = o.L || 3.6, pc = o.paint || [0.34, 0.33, 0.30];
+      return makeHull({
+        L: L, B: o.B || L * 0.4, D: o.D || 0.55, paint: pc, bottom: o.bottom || [0.30, 0.05, 0.04],
+        stripe: [pc[0] * 0.6, pc[1] * 0.6, pc[2] * 0.6],
+        inner: [0.20, 0.19, 0.17], bilge: [0.07, 0.06, 0.045], wood: [0.17, 0.11, 0.06],
+      });
+    },
   };
 })();
