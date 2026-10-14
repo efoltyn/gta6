@@ -111,6 +111,7 @@
   // you can drive straight THROUGH the hole — while a few glass shards rain
   // down. One shared translucent material + shard geometry keep it cheap.
   const cityGlass = [];
+  CBZ.cityGlassRecs = cityGlass;   // read-only: probes (the lab's window-break kit) pick a pane by record
   // Ground-front glass is a measurable architectural promise, not a camera
   // impression. `role` is stamped only by storefront/showroom/garage frontage
   // recipes that intentionally meet the floor; upper windows and sill windows
@@ -375,59 +376,6 @@
   }
   let _lodPaneBatch = 0;
 
-  // ---- INTERIOR WINDOW DRESSING POOLS -------------------------------------
-  // The room-side "daylight" sky slab + mullion strips behind every window
-  // band used to be merged into the building-wide deco buckets — unhideable,
-  // so a hole carved through the wall left them FLOATING across the opening
-  // (USER-FILMED: shoot a window from inside → "gray instead of showing
-  // outside"). They now ride two InstancedMeshes exactly like the panes, so a
-  // carve can hide the exact slabs across its gap. Cost: 2 draw calls, ever.
-  const roomDeco = [];       // {x,y,z,hw,hh,hd,kind,hidden,pool,inst}
-  let pendingDeco = [];
-  function addRoomDeco(group, lx, ly, lz, bw, bh, bd, kind, ox, oz) {
-    const rec = { x: ox + lx, y: ly, z: oz + lz, hw: bw / 2, hh: bh / 2, hd: bd / 2,
-      kind, hidden: false, pool: null, inst: -1, _grp: group };
-    pendingDeco.push(rec); roomDeco.push(rec);
-    return rec;
-  }
-  function decoMatrix(r) {
-    _pPos.set(r.x, r.y, r.z); _pScl.set(r.hw * 2, r.hh * 2, r.hd * 2);
-    return _pM.compose(_pPos, _pQ, _pScl);
-  }
-  function decoShow(r, show) {
-    if (!r.pool) { r.hidden = !show; return; }
-    r.hidden = !show;
-    r.pool.setMatrixAt(r.inst, show ? decoMatrix(r) : _zeroM);
-    r.pool.instanceMatrix.needsUpdate = true;
-  }
-  function buildRoomDecoPools() {
-    if (!pendingDeco.length) return;
-    const batch = pendingDeco; pendingDeco = [];
-    let root = null;
-    for (const r of batch) { if (r._grp && r._grp.parent) { root = r._grp.parent; break; } }
-    if (!root) root = CBZ.scene;
-    // sectored like the pane pools (same 320u cells) so interior dressing
-    // frustum-culls per city cell instead of always-drawing city-wide.
-    const byKS = new Map();
-    for (const r of batch) {
-      const kind = (r.kind === "sky") ? "sky" : "mull";
-      const k = kind + "|" + sectorKey(r);
-      let a = byKS.get(k); if (!a) { a = []; byKS.set(k, a); } a.push(r);
-      r._grp = null;
-    }
-    byKS.forEach(function (recs, k) {
-      const col = k.charAt(0) === "s" ? 0xd6e6f2 : 0x262b31;
-      const m = CBZ.cmat ? CBZ.cmat(col) : new THREE.MeshLambertMaterial({ color: col });
-      const im = pooledIM(recs, m);
-      im.renderOrder = 0;             // opaque interior dressing — no glass ordering needed
-      for (let i = 0; i < recs.length; i++) {
-        const r = recs[i]; r.pool = im; r.inst = i;
-        im.setMatrixAt(i, r.hidden ? _zeroM : decoMatrix(r));
-      }
-      im.instanceMatrix.needsUpdate = true;
-      root.add(im); glassPools.push(im);   // rides the same lifecycle as the pane pools
-    });
-  }
   // ---- THE WINDOW AND DOOR MODULES, INSTANCED -------------------------------
   // Every frame member, mullion, glazing bar, sill, lintel, door stop, step
   // and stoop city/facade_openings.js builds is one instance of ONE unit box,
@@ -470,7 +418,7 @@
       const im = new THREE.InstancedMesh(geo, m, recs.length);
       for (let i = 0; i < recs.length; i++) {
         const r = recs[i]; r.pool = im; r.inst = i;
-        im.setMatrixAt(i, decoMatrix(r));
+        im.setMatrixAt(i, paneMatrix(r));
         im.setColorAt(i, _trimC.setHex(r.col));
       }
       im.instanceMatrix.needsUpdate = true;
@@ -781,6 +729,7 @@
       tint: (o.tint || 0) % GLASS_TINTS,
       kind: (allowMirror && o.kind === "reflective") ? "reflective" : "clear",   // pooled-pane glass kind (see-through vs mirror-ish)
       frontageRole: o.role || "",
+      win: o.win || null,   // the window this pane glazes (a facade window), or null
       x: ox + lx, y: ly, z: oz + lz, span: Math.max(pw, pd) * 0.5, hw: pw / 2, hh: ph / 2, hd: pd / 2,
       shattered: false, col: null };
     if (o.external) {
@@ -899,6 +848,121 @@
     CBZ.scene.add(q);
     crackQuads.push({ mesh: q, gp });
   }
+  // ---- THE HOLE A PANE LEAVES ----------------------------------------------
+  /* A broken window is an OPENING with the wreck of its glass in it, not a
+     missing texture. Two things stay behind when a pane bursts:
+
+     1. THE TEETH. Glass does not leave a frame clean: it breaks along the
+        stress lines and the edges stay in the putty. Each broken pane keeps a
+        few jagged triangles standing in from its sill and hanging from its
+        head, one or two off each jamb, tilted, in the pane's own plane. They
+        are instances of ONE unit triangle on one glass material: the whole
+        city's broken glass is one draw call. (The old teeth were tilted
+        boxes on the carve record, one mesh each, and only where the wall
+        carve succeeded.)
+
+     2. THE ROOM (city/interiorlight.js cityInteriorBreak): the painted room
+        that stood behind the glass comes out of the hole, and a dark room box
+        goes in behind it, so the hole reads as an unlit room, never as the
+        grey painting or the hollow shell's far wall.
+
+     Glass falling is burstPane's debris fracture (systems/debris.js), as it
+     always was. */
+  const TEETH_MAX = 4096;
+  let teethIM = null, teethNext = 0;
+  const _tX = new THREE.Vector3(), _tY = new THREE.Vector3(), _tZ = new THREE.Vector3(), _tT = new THREE.Vector3(), _tM = new THREE.Matrix4();
+  function teethPool(host) {
+    if (teethIM) {
+      if (!teethIM.parent && host && host.add) host.add(teethIM);
+      return teethIM;
+    }
+    // one unit tooth: base on the frame edge (y = 0), its point 1 m in, a
+    // ragged second facet so it is not a clean isoceles; two-sided
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute([
+      -0.5, 0, 0, 0.5, 0, 0, 0.12, 1, 0,
+      0.5, 0, 0, 0.38, 0.42, 0, 0.12, 1, 0,
+    ], 3));
+    g.computeVertexNormals();
+    const m = new THREE.MeshLambertMaterial({ color: 0xd2ecf4, emissive: 0x3f7f96, emissiveIntensity: 0.45,
+      transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false });
+    seatGlass(m);
+    teethIM = new THREE.InstancedMesh(g, m, TEETH_MAX);
+    teethIM.count = 0;
+    teethIM.castShadow = false; teethIM.receiveShadow = false; teethIM.renderOrder = 1;
+    teethIM.frustumCulled = false;              // instances anywhere in the city
+    teethIM.name = "cityGlassTeeth";
+    teethIM.userData.worldSpacePool = "cityGlassTeeth";
+    if (host && host.add) host.add(teethIM);
+    return teethIM;
+  }
+  function addTeeth(gp) {
+    const host = gp.pool ? (CBZ.poolIdentityHost(gp.pool) || gp.pool.parent) : (gp._grp ? CBZ.poolIdentityHost(gp._grp) : null) || CBZ.scene;
+    const im = teethPool(host);
+    if (!im) return;
+    const horiz = gp.hd < gp.hw;
+    const W = Math.max(gp.hw, gp.hd) * 2, H = gp.hh * 2;
+    const nx = horiz ? 0 : 1, nz = horiz ? 1 : 0;      // the pane's normal (either sign: the tooth is two-sided)
+    const ux = horiz ? 1 : 0, uz = horiz ? 0 : 1;      // along the pane
+    const cap = Math.min(0.42, 0.32 * Math.min(W, H));
+    const ids = gp.teethIds || (gp.teethIds = []);
+    // edge: [start u, start y, dir along the edge (u,y), inward (u,y), length, count]
+    const edges = [
+      [-W / 2, -H / 2, 1, 0, 0, 1, W, 2 + ((W > 0.9) ? 2 : 1)],   // the sill: teeth standing up
+      [-W / 2, H / 2, 1, 0, 0, -1, W, 1 + ((W > 0.9) ? 2 : 1)],   // the head: hanging down
+      [-W / 2, -H / 2, 0, 1, 1, 0, H, H > 1.1 ? 2 : 1],            // a jamb
+      [W / 2, -H / 2, 0, 1, -1, 0, H, H > 1.1 ? 2 : 1],            // the other
+    ];
+    for (const e of edges) {
+      const n = e[7];
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.2 + Math.random() * 0.6) / n * e[6];
+        const pu = e[0] + e[2] * t, py = e[1] + e[3] * t;
+        const h = cap * (0.3 + Math.random() * 0.7), b = Math.min(e[6] / n, 0.1 + Math.random() * 0.22);
+        const tilt = (Math.random() - 0.5) * 0.9;
+        const iu = e[4] * Math.cos(tilt) - e[5] * Math.sin(tilt), iy = e[4] * Math.sin(tilt) + e[5] * Math.cos(tilt);
+        // basis: Y = the tooth's point (inward, tilted), X = its base along the edge, Z = the pane normal
+        _tY.set(ux * iu, iy, uz * iu).multiplyScalar(h);
+        _tZ.set(nx, 0, nz);
+        _tX.crossVectors(_tY, _tZ).normalize().multiplyScalar(b);
+        _tM.makeBasis(_tX, _tY, _tZ);
+        _tT.set(gp.x + ux * pu, gp.y + py, gp.z + uz * pu);
+        _tM.setPosition(_tT);
+        let idx;
+        if (im.count < TEETH_MAX) idx = im.count++;
+        else { idx = teethNext; teethNext = (teethNext + 1) % TEETH_MAX; }
+        im.setMatrixAt(idx, _tM);
+        ids.push(idx);
+      }
+    }
+    gp.teeth = ids.length;
+    im.instanceMatrix.needsUpdate = true;
+  }
+  // a re-glazed (or streamed-out, or demolished) pane takes its teeth and its
+  // window's room with it
+  function dropHole(gp) {
+    if (gp.teethIds && teethIM) {
+      for (const i of gp.teethIds) teethIM.setMatrixAt(i, _zeroM);
+      teethIM.instanceMatrix.needsUpdate = true;
+    }
+    gp.teethIds = null; gp.teeth = 0;
+    if (gp.win && gp.win.room && CBZ.cityInteriorMend) CBZ.cityInteriorMend(gp.win);
+  }
+  CBZ.cityPaneHoleDrop = dropHole;
+  // the opening a pane's break leaves: teeth in the frame, a room behind it
+  function openHole(gp) {
+    if (gp.mesh) return;                     // the jewelry cases / bank counter: their owners' glass
+    try { addTeeth(gp); } catch (e) {}
+    const w = gp.win;
+    if (!w) return;
+    if (CBZ.cityInteriorBreak) { try { CBZ.cityInteriorBreak(w, gp.pool || gp._grp || CBZ.scene); } catch (e) {} }
+    // A GROUND-FLOOR WINDOW IS A WAY IN: the burglary hook below watches the
+    // player cross its plane (shops.js cityWindowEntry). One entry per window.
+    if (!w.entry && w.y0 < 1.6) {
+      w.entry = { rec: { gap: { horiz: w.horiz, u0: w.u0, u1: w.u1, fixed: w.fixed, v1: w.y1, outS: w.out } }, side: 0 };
+      winOpenings.push(w.entry);
+    }
+  }
   // hit (optional): {x, y, z, dx, dz, power} — where the pane was struck and
   // which way the blow travelled, so the shards radiate from the strike.
   function burstPane(gp, hit) {
@@ -909,6 +973,7 @@
     if (gp.col) CBZ.colliderRemove(gp.col);   // incremental: the glass debris below queries the grid
     // clear any lingering crack decal for this pane
     for (let i = crackQuads.length - 1; i >= 0; i--) if (crackQuads[i].gp === gp) { CBZ.scene.remove(crackQuads[i].mesh); crackQuads.splice(i, 1); }
+    openHole(gp);                       // teeth in the frame, the room behind it
     if (!CBZ.debris) return;
     // THE PANE ITSELF BREAKS: its own box and its own glass, cut into radial
     // shards around the strike (debris.js glass fracture), thrown the way the
@@ -948,34 +1013,9 @@
     CBZ.sfx("glass", dist == null ? { volume: volume } : { dist: dist, volume: volume });
   }
   // burst every intact pane within r of (x,z) — called on car crashes etc.
-  // SWISS CHEESE: a blast doesn't just clear glass — up to PER_BLAST_OPEN of the
-  // nearest WINDOW-SIZED panes carve into real see-through holes/rooms, so a
-  // rocket peppers a facade with openings (the wall `_breached` dedup keeps
-  // same-face panes from carving twice → bounded cost, no cache/cleanup).
-  const PER_BLAST_OPEN = 8;
-  // ---- DEFERRED WINDOW-OPENING CARVES (rocket-frame de-spike, part 2) -------
-  // tryWindowOpening runs the carveHole MONOLITH (collider scan + remnant
-  // geometry builds + a BufferGeometryUtils merge + full cityGlass/roomDeco
-  // sweeps) — and cityShatter used to fire up to PER_BLAST_OPEN(8) of them
-  // SYNCHRONOUSLY inside the rocket's impact frame, plus one more from
-  // cityShatterRay. fracture.js already deferred blastAt's single carve for
-  // exactly this cost (see its DEFERRED LOCAL CARVE header — the same monolith
-  // ballooned the impact frame ~200→350ms); the window-opening storm was the
-  // remaining synchronous copy of that work, ~8x over. Same fix: the panes still BURST on
-  // the impact frame (the visible feedback), only the cosmetic room-reveal
-  // carve drains at 1/frame afterwards — the boom/dust/shards mask the slip,
-  // and the openings appearing one-per-frame reads as progressive collapse.
-  // Every drained carve re-resolves from live state (carveHole returns null on
-  // a breached/missing wall), so stale entries self-cancel; the queue clears
-  // on mode exit and on cityGlassReset so a fresh arena never inherits one.
-  const winOpenQ = [];
-  const WINOPEN_BUDGET = 1;        // carves drained per city frame
-  const WINOPENQ_CAP = 24;         // a multi-blast salvo can't grow it unbounded
-  function queueWindowOpening(gp) {
-    if (!gp) return;
-    if (winOpenQ.length >= WINOPENQ_CAP || winOpenQ.indexOf(gp) !== -1) return;
-    winOpenQ.push(gp);
-  }
+  // (A blast used to also queue wall CARVES at the nearest windows, from the
+  // days when a pane hung on a solid wall: the walls are built round their
+  // openings now, so a burst pane already leaves a real hole. See openHole.)
   /* A WIDE SHATTER BREAKS OVER A FEW FRAMES. Every burst is a real fracture
      of the pane into shards (debris.js), and a big radius — a nuke's pressure
      receipts, a collapse's ground impact, a tornado — selects up to 51 panes,
@@ -999,14 +1039,10 @@
   CBZ.cityShatter = function (x, z, r, opts) {
     opts = opts || {};
     const r2 = r * r; let n = 0, near = null, nearD = 1e9;
-    const cand = [];   // window-sized in-radius panes eligible to carve an opening
     for (let i = 0; i < cityGlass.length; i++) {
       const gp = cityGlass[i]; if (gp.shattered || gp._burstQ) continue;
       const dx = gp.x - x, dz = gp.z - z, dd = dx * dx + dz * dz;
       if (dd <= r2) {
-        // gather BEFORE bursting (burstPane marks shattered): pooled (no mesh),
-        // above the sill, window-sized — so we open windows, not transoms
-        if (!gp.mesh && gp.y > 1.0 && Math.max(gp.hw, gp.hd) * 2 >= 0.7) cand.push({ gp, dd });
         { const d = Math.sqrt(dd) || 1, fall = Math.max(0.35, 1.6 - d / Math.max(1, r));
           const hit = { x: gp.x, y: gp.y, z: gp.z, dx: (gp.x - x) / d, dz: (gp.z - z) / d, power: Math.min(2.2, fall * (opts.power || 1.2)) };
           if (n < BURST_NOW) burstPane(gp, hit);
@@ -1014,15 +1050,6 @@
         if (dd < nearD) { nearD = dd; near = gp; } if (++n > 50) break;
       }
     }
-    // open the nearest few as real holes/rooms; tryWindowOpening reads the
-    // pane's stored x/y/z (it doesn't care that the pane is now "shattered"),
-    // and carveHole's wall `_breached` flag makes same-face panes a no-op carve.
-    // QUEUED, not inline (see winOpenQ above): eight carveHole monoliths in the
-    // impact frame were the filmed rocket stall — they drain 1/frame instead.
-    cand.sort(function (a, b) { return a.dd - b.dd; });
-    const lim = Math.min(PER_BLAST_OPEN, cand.length);
-    for (let i = 0; i < lim; i++) queueWindowOpening(cand[i].gp);
-    if (!lim && near) queueWindowOpening(near);   // fallback: nearest pane (sub-window slivers only)
     if (n > 0 && opts.directPlayer && near) playPlayerGlass(near);
     // a hard impact (big radius shatter = a car ploughing a storefront) also
     // knocks a couple of concrete chunks off and leaves no scorch — just rubble.
@@ -1105,10 +1132,8 @@
       CBZ.cityLastShatterDist = bestT;
       // a bullet (force) or a second hit — or a solid showroom pane — blows it
       // fully out; otherwise spider-crack it (and chip a shard off the point).
-      // The pane bursts NOW (the feedback); the room-reveal carve queues (1-
-      // frame slip, same winOpenQ de-spike the blast path uses).
       if (force || best.cracked || best.col) {
-        burstPane(best, { x: bestHX, y: bestHY, z: bestHZ, dx: dx, dz: dz, power: force ? 1.1 : 0.7 }); queueWindowOpening(best);
+        burstPane(best, { x: bestHX, y: bestHY, z: bestHZ, dx: dx, dz: dz, power: force ? 1.1 : 0.7 });
         if (opts.directPlayer) playPlayerGlass(best);
       }
       else {
@@ -1172,7 +1197,6 @@
   CBZ._paneShow = paneShow;
   CBZ.cityGlassReset = function () {
     shatteredPanes = 0; shatteredList.length = 0;
-    winOpenQ.length = 0;   // never carve a fresh arena from a stale pre-reset queue
     dropBursts();
     /* CBZ.CONFIG.DEMO_FAST_PURGE (declared in city/demolition.js, which loads
        after this file — so it is read here at CALL time, never at parse time,
@@ -1189,6 +1213,8 @@
     for (const gp of cityGlass) {
       if (gp.shattered) {
         gp.shattered = false;
+        if (gp.teethIds || (gp.win && gp.win.room)) dropHole(gp);
+        if (gp.win) gp.win.entry = null;
         if (gp.mesh) gp.mesh.visible = true;
         else paneShow(gp, true);       // pooled pane: restore (honours night state)
         if (gp.col) {
@@ -1199,8 +1225,11 @@
       gp.cracked = false;
     }
     crackedPanes.length = 0;   // a re-glazed city holds no half-broken panes
-    // interior band dressing hidden by wall carves comes back with the glass
-    for (let i = 0; i < roomDeco.length; i++) if (roomDeco[i].hidden) decoShow(roomDeco[i], true);
+    // every broken window's painted room comes back, every dark room goes,
+    // and the teeth pool starts empty
+    if (CBZ.cityInteriorMend) CBZ.cityInteriorMend();
+    if (teethIM) { teethIM.count = 0; teethNext = 0; teethIM.instanceMatrix.needsUpdate = true; }
+    winOpenings.length = 0;
     for (const cq of crackQuads) { CBZ.scene.remove(cq.mesh); if (cq.mesh.material) cq.mesh.material.dispose(); cq.mesh.geometry.dispose(); }
     crackQuads.length = 0;
     CBZ.cityDamageReset && CBZ.cityDamageReset();
@@ -1695,7 +1724,6 @@
       if (b.col && CBZ.colliders.indexOf(b.col) === -1) { CBZ.colliders.push(b.col); dirty = true; }
     }
     cityBreaches.length = 0;
-    winOpenings.length = 0;   // the recs above owned these openings; clear with them
     if (dirty && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     if (CBZ.cityFracture && CBZ.cityFracture._cleared) CBZ.cityFracture._cleared();   // wipe the hole ledger with the walls
   }
@@ -1710,8 +1738,8 @@
   // Dressing per hole: see WHAT IS BEHIND THE HOLE inside carveHole.
   // city/fracture.js drives this primitive and owns ledger/caps/persistence.
   let holeDebrisSeq = 0;
-  let _insetMat = null, _plyMat = null, _plyBatMat = null, _sootMat = null;
-  let _roomFloorMat = null, _rebarMat = null, _warmLightMat = null;
+  let _plyMat = null, _plyBatMat = null, _sootMat = null;
+  let _rebarMat = null;
   // Every surface behind a hole is LIT BY THE SCENE (Lambert). A window's
   // empty unit carries a low emissive fill — the building's own interior
   // light — so it reads as a room by day and a dim one at night; a blast
@@ -1721,10 +1749,7 @@
     if (fill > 0) m.emissive = new THREE.Color(color).multiplyScalar(fill);
     return m;
   }
-  function insetMat() { return _insetMat || (_insetMat = lit(0xbcb4a4, 0.28, THREE.BackSide)); }   // an empty unit's walls/ceiling
-  function roomFloorMat() { return _roomFloorMat || (_roomFloorMat = lit(0xbfc3ca, 0.22)); }
   function sootMat() { return _sootMat || (_sootMat = lit(0x2e2a26, 0, THREE.BackSide)); }        // a blast pocket: charred, unlit by itself
-  function warmLightMat() { return _warmLightMat || (_warmLightMat = new THREE.MeshBasicMaterial({ color: 0xffe9c2 })); }   // a real ceiling fixture
   function rebarMat() { return _rebarMat || (_rebarMat = lit(0x41434a, 0)); }
   function plyMat() { return _plyMat || (_plyMat = new THREE.MeshLambertMaterial({ color: 0x9a7b4f })); }
   function plyBatMat() { return _plyBatMat || (_plyBatMat = new THREE.MeshLambertMaterial({ color: 0x6f5636 })); }
@@ -1992,7 +2017,8 @@
     // that fact — the gap width, the outward side, and whether the hole gets
     // an interior dress at all.
     const freeStanding = !parent || parent === CBZ.scene ||
-      (Math.abs(parent.position.x) < 1e-6 && Math.abs(parent.position.z) < 1e-6);
+      (!(parent.userData && parent.userData.bld) &&          // a building group at (0,0) is still a building
+       Math.abs(parent.position.x) < 1e-6 && Math.abs(parent.position.z) < 1e-6);
     carveDbg.freeStanding = freeStanding;
     const horiz = (c.maxX - c.minX) >= (c.maxZ - c.minZ);   // wall runs along X if wider in X
     const minU = horiz ? c.minX : c.minZ, maxU = horiz ? c.maxX : c.maxZ;   // wall extent (world) along its axis
@@ -2370,20 +2396,6 @@
         mat: gm, glass: true,
       });
     }
-    // interior band dressing (sky slab + mullions) floating across the gap —
-    // hide every record overlapping the opening rect on this wall, or the
-    // hole reads as a gray panel from inside (USER-FILMED)
-    for (let i = 0; i < roomDeco.length; i++) {
-      const rd = roomDeco[i];
-      if (rd.hidden) continue;
-      const du = horiz ? rd.x : rd.z, df = horiz ? rd.z : rd.x, dhu = horiz ? rd.hw : rd.hd;
-      if (Math.abs(df - fixed) > thick / 2 + 0.5) continue;
-      if (du + dhu < u0 - 0.2 || du - dhu > u1 + 0.2) continue;
-      if (rd.y + rd.hh < v0 - 0.3 || rd.y - rd.hh > v1 + 0.3) continue;
-      decoShow(rd, false);
-      rec.hiddenDeco = rec.hiddenDeco || [];
-      rec.hiddenDeco.push(rd);
-    }
     // THE FAKE INTERIOR GOES WITH THE GLASS IT WAS BEHIND. city/interiorlight.js
     // parks one painted room-plane 0.18 m inside every opening; with the bay
     // blown out it stands in the hole as a flat tan billboard in front of the
@@ -2510,10 +2522,7 @@
            already behind it — no dress at all.
        (2) a free-standing slab or anything prop-sized: nothing is behind it —
            no dress (gta6-props-are-not-walls: the lamp-post "glowing room").
-       (3) opts.revealRoom (a shot-out upper window): the empty unit behind the
-           glass, lit by the SCENE with a low baked fill, plus its ceiling
-           fixture — never a self-lit box.
-       (4) a BLAST hole: a charred pocket. One soot-lined box you look into,
+       (3) a BLAST hole: a charred pocket. One soot-lined box you look into,
            Lambert-lit like the wall around it (dark at night, because it is),
            and the reinforcement the blast exposed hanging off the header. The
            old prefab — full-bright cream liner, glowing ceiling slab, box
@@ -2528,12 +2537,11 @@
       cityBreaches.push(rec);
       return rec;
     }
-    const revealRoom = !!opts.revealRoom;
     // a blast pocket is as deep as the wound is wide (a 0.7 m rocket hole does
-    // not open onto a 2.6 m stage set); a gutted bay or a window shows the room
+    // not open onto a 2.6 m stage set); a gutted bay shows the room
     const dep = opts.dep != null ? opts.dep
-      : (revealRoom || opts.storey ? 2.6 : Math.min(2.6, Math.max(0.9, gapU * 1.3)));
-    const floorY = (revealRoom || opts.storey) ? y0 : v0;
+      : (opts.storey ? 2.6 : Math.min(2.6, Math.max(0.9, gapU * 1.3)));
+    const floorY = opts.storey ? y0 : v0;
     const podV0 = Math.min(v0, floorY), podV1 = v1 + 0.2;
     const podCen = (podV0 + podV1) / 2, podH = podV1 - podV0;
     const inCtr = fixed - outS * (dep - thick) / 2;    // pocket centred inward from the outer plane
@@ -2545,16 +2553,9 @@
     };
     const im = addPart(new THREE.Mesh(
       new THREE.BoxGeometry(horiz ? gapU + 0.2 : dep, podH, horiz ? dep : gapU + 0.2),
-      revealRoom ? insetMat() : sootMat()));
+      sootMat()));
     im.position.set((horiz ? gapCen : inCtr) - px, podCen, (horiz ? inCtr : gapCen) - pz);
-    if (revealRoom) {
-      // the unit's floor and its ceiling fixture — the room reads as a room
-      const fl = addPart(new THREE.Mesh(new THREE.BoxGeometry(horiz ? gapU + 0.2 : dep - 0.1, 0.08, horiz ? dep - 0.1 : gapU + 0.2), roomFloorMat()));
-      fl.position.set((horiz ? gapCen : inCtr) - px, floorY + 0.05, (horiz ? inCtr : gapCen) - pz);
-      const lgW = horiz ? Math.min(1.8, (gapU + 0.2) * 0.6) : 0.5, lgD = horiz ? 0.5 : Math.min(1.8, (gapU + 0.2) * 0.6);
-      const lg = addPart(new THREE.Mesh(new THREE.BoxGeometry(lgW, 0.07, lgD), warmLightMat()));
-      lg.position.set((horiz ? gapCen : inCtr) - px, v1 - 0.2, (horiz ? inCtr : gapCen) - pz);
-    } else {
+    {
       // exposed reinforcement: bars torn out of the broken header, sized to the
       // wound (a small hole shows one or two, a gutted bay a row of them) —
       // merged into ONE mesh, so a hole costs two draws (pocket + steel)
@@ -2676,189 +2677,55 @@
     if (CBZ.losBlockers) { if (CBZ.losAdd) CBZ.losAdd(board); else CBZ.losBlockers.push(board); }
   };
 
-  // ---- SHOT-OUT WINDOWS YOU CAN CLIMB THROUGH -----------------------------
-  // WHY: shooting a storefront window used to reveal... MORE WALL (panes are
-  // decoration hanging proud of a solid per-storey wall box). Now a burst
-  // GROUND-FLOOR street pane opens the wall behind it with the SAME proven
-  // carve the RPG breach uses — sill remnant kept (a small hop over it reads
-  // as climbing in), header kept (it reads window, not missing wall), jagged
-  // glass teeth left in the frame. That makes every shop window a burglary
-  // route after hours and an escape hatch mid-chase — quiet entry vs the
-  // front door. Player-only shortcut: NPCs/cops never path through them.
-  // Pool-capped: past WIN_OPEN_CAP the OLDEST opening boards itself over
-  // (cityBoardHole planks = the city visibly healing its wounds).
-  // SWISS-CHEESE budget: city facades can be peppered (each hole ≈4 remnant
-  // colliders + a few shell meshes; 28 ≈ 112 colliders, fine w/ markCollidersDirty).
-  // Other modes keep the conservative 12. Read mode at use-time (module body may
-  // run before the mode is chosen) — tryWindowOpening only runs in city anyway.
-  function winOpenCap() { return (CBZ.game && CBZ.game.mode === "city") ? 28 : 12; }
-  const winOpenings = [];   // oldest-first [{rec, side}] — rec is the carve record
+  // ---- BROKEN WINDOWS YOU CAN CLIMB THROUGH ---------------------------------
+  // A ground-floor window whose glass is gone is a way in (openHole pushes it
+  // here): every shop window a burglary route after hours, an escape hatch
+  // mid-chase. The frame update below reports the player crossing its plane
+  // to shops.js (CBZ.cityWindowEntry), which owns the crime. Re-glaze clears it.
+  const winOpenings = [];   // [{rec: {gap}, side}]
   CBZ.cityWindowOpenings = winOpenings;   // read-only for shops/wanted wiring
-  function tryWindowOpening(gp) {
-    if (gp.mesh) return;                       // solid showroom / jewelry-case glass keep their own contracts
-    if (!CBZ.game || CBZ.game.mode !== "city") return;
-    if (gp.y < 1.0) return;                    // sub-sill slivers aren't windows
-    const paneW = Math.max(gp.hw, gp.hd) * 2;
-    if (paneW < 0.7) return;                   // transoms / slivers aren't a route
-    // GROUND FLOOR (sill is a hop, head clears the header): a person-passable
-    // route into the furnished room. UPPER STOREYS (user-filmed: "all the
-    // other windows have gray building behind them"): the same carve, hugging
-    // the pane's own band — not a route, a REVEAL: the wall section behind the
-    // glass actually opens and the deep-room dress (floor slab, furniture,
-    // back wall) shows a real room where the gray wall used to be.
-    const upper = gp.y > 3.0;
-    const sill = upper ? Math.max(0.3, gp.y - gp.hh - 0.05)
-                       : Math.max(0.55, Math.min(1.3, gp.y - gp.hh));
-    const top = upper ? gp.y + gp.hh + 0.05
-                      : Math.min(gp.y + gp.hh + 1.4, Math.max(gp.y + gp.hh, sill + 2.5));
-    const rec = carveHole(gp.x, gp.y, gp.z, 1.4, {
-      search: 0.9,                             // the host wall is 0.105 behind the pane — never borrow a neighbour
-      gapW: Math.max(1.3, Math.min(3.2, paneW + 0.2)),
-      v0: sill, v1: top,
-      // EVERY storey reveals a clean LIT ROOM. The raw hollow interior reads as
-      // dim GRAY (the inside faces of the walls ARE the gray exterior box, barely
-      // lit), so a true open:true hole just showed "gray building" (filmed).
-      // revealRoom lines the opening with the empty unit — light walls and a
-      // cool floor, lit by the scene plus the building's own low interior fill,
-      // and its ceiling fixture — so you SEE A ROOM through a shot-out window.
-      revealRoom: true, dep: 2.6,
-    });
-    if (!rec) return;                          // open air / wall already breached
-    rec.windowOpening = true;
-    const g = rec.gap;
-    // carveHole hid the ENTIRE storey wall box (wall.visible=false), so EVERY
-    // piece of dressing on it now floats with no wall behind it: BOTH bands'
-    // full-span interior SKY slabs + mullion strips, the room-side MIRROR panes,
-    // and the exterior panes on the OTHER (un-shot) band. The carve / revealRoom
-    // only touched the gap rect, so anything else on this wall box reads as a
-    // light-gray slab + floating glass from inside (USER-FILMED: a small real
-    // hole + a gray panel + a crack of sky from the band the carve didn't cover).
-    // Clear ALL panes + ALL interior deco across the wall box's FULL footprint
-    // and y-span — not just the gap. The remnant flanks the carve rebuilt stay
-    // solid concrete, so the wall is real where it's still wall; only the carved
-    // gap (the open route / revealRoom box) is the window.
-    const wMinU = g.minU != null ? g.minU : g.u0, wMaxU = g.maxU != null ? g.maxU : g.u1;
-    const wY0 = g.y0, wY1 = g.y1, offTol = g.thick / 2 + 0.62;   // 0.62 = pane/slab proud + slack
-    for (let i = 0; i < cityGlass.length; i++) {
-      const o = cityGlass[i];
-      if (o.shattered) continue;
-      const gu = g.horiz ? o.x : o.z, gf = g.horiz ? o.z : o.x, hu = g.horiz ? o.hw : o.hd;
-      if (Math.abs(gf - g.fixed) > offTol) continue;
-      if (gu + hu < wMinU - 0.2 || gu - hu > wMaxU + 0.2) continue;
-      if (o.y + o.hh < wY0 - 0.2 || o.y - o.hh > wY1 + 0.2) continue;
-      o.shattered = true; shatteredPanes++; shatteredList.push(o);
-      if (o.mesh) o.mesh.visible = false; else paneShow(o, false);
-      if (o.col) CBZ.colliderRemove(o.col);
-    }
-    // interior SKY slabs + mullion strips (instanced roomDeco) — these ARE the
-    // light-gray panel the user filmed. Hide every one on this wall box footprint
-    // (carveHole only hid those overlapping the gap rect, missing the off-band).
-    for (let i = 0; i < roomDeco.length; i++) {
-      const rd = roomDeco[i];
-      if (rd.hidden) continue;
-      const du = g.horiz ? rd.x : rd.z, df = g.horiz ? rd.z : rd.x, dhu = g.horiz ? rd.hw : rd.hd;
-      if (Math.abs(df - g.fixed) > offTol) continue;
-      if (du + dhu < wMinU - 0.2 || du - dhu > wMaxU + 0.2) continue;
-      if (rd.y + rd.hh < wY0 - 0.2 || rd.y - rd.hh > wY1 + 0.2) continue;
-      decoShow(rd, false);
-      (rec.hiddenDeco = rec.hiddenDeco || []).push(rd);
-    }
-    // jagged glass TEETH left standing in the frame (sill + header) sell the
-    // broken window. Unique tiny geometries so resetBreaches can dispose them
-    // with the rec's other extras; shared glass material.
-    const nT = 4 + ((Math.random() * 3) | 0);
-    for (let i = 0; i < nT; i++) {
-      const tw = 0.1 + Math.random() * 0.16, th = 0.22 + Math.random() * 0.3;
-      const tg = new THREE.BoxGeometry(tw, th, 0.04);
-      tg.rotateZ((Math.random() - 0.5) * 0.9);   // tilted shards, not a picket fence
-      const tm = new THREE.Mesh(tg, glassMat());
-      const fu = g.u0 + 0.15 + Math.random() * Math.max(0.1, (g.u1 - g.u0) - 0.3);
-      const fv = (i % 2 === 0) ? g.v0 + th * 0.3 : g.v1 - th * 0.3;
-      const fn = g.fixed + g.outS * 0.08;
-      if (g.horiz) tm.position.set(fu - g.px, fv, fn - g.pz);
-      else { tm.rotation.y = Math.PI / 2; tm.position.set(fn - g.px, fv, fu - g.pz); }
-      tm.castShadow = false; tm.receiveShadow = false; tm.renderOrder = 1;
-      if (g.parent) g.parent.add(tm); else CBZ.scene.add(tm);
-      rec.extras.push(tm);
-    }
-    winOpenings.push({ rec: rec, side: 0 });
-    // cap: the OLDEST opening gets plywooded over (collider + LOS come back)
-    if (winOpenings.length > winOpenCap()) {
-      const old = winOpenings.shift();
-      if (old.rec && !old.rec.boarded) CBZ.cityBoardHole(old.rec);
-    }
-  }
 
-  // Read-only regression probe for the filmed "glass planes across a missing
-  // wall" failure. It checks the actual pooled instance matrices as well as
-  // logical flags: an intact record with a zero matrix is still a lifecycle
-  // bug, and a shattered record whose matrix remains non-zero is still visible.
-  const _openingAuditM = new THREE.Matrix4();
-  function pooledRecordDrawn(r, pool, inst) {
-    if (!r) return false;
-    if (!pool && r.mesh) return r.mesh.visible !== false;
-    pool = pool || r.pool; inst = inst == null ? r.inst : inst;
-    if (!pool || inst == null || inst < 0) return false;
-    pool.getMatrixAt(inst, _openingAuditM);
-    const e = _openingAuditM.elements;
-    // A hidden instance uses makeScale(0,0,0): all three basis vectors vanish.
-    return Math.abs(e[0]) + Math.abs(e[1]) + Math.abs(e[2]) +
-      Math.abs(e[4]) + Math.abs(e[5]) + Math.abs(e[6]) +
-      Math.abs(e[8]) + Math.abs(e[9]) + Math.abs(e[10]) > 1e-7;
+  /* RATCHET — what a broken window left behind, over every broken facade pane:
+     panes still drawn (must be 0), panes with no teeth in their frame, windows
+     with no room behind them, painted-room panels still standing in a broken
+     window (the grey slab; must be 0). */
+  const _holeM = new THREE.Matrix4();
+  function paneDrawn(gp) {
+    if (gp.mesh) return gp.mesh.visible !== false;
+    if (!gp.pool || gp.inst < 0) return false;
+    gp.pool.getMatrixAt(gp.inst, _holeM);
+    const e = _holeM.elements;
+    return Math.abs(e[0]) + Math.abs(e[5]) + Math.abs(e[10]) > 1e-7;
   }
-  function openingOwnsRecord(r, g) {
-    if (!r || !g) return false;
-    const u = g.horiz ? r.x : r.z, f = g.horiz ? r.z : r.x;
-    const hu = g.horiz ? r.hw : r.hd;
-    const minU = g.minU != null ? g.minU : g.u0, maxU = g.maxU != null ? g.maxU : g.u1;
-    const offTol = g.thick / 2 + 0.62;
-    return Math.abs(f - g.fixed) <= offTol &&
-      u + hu >= minU - 0.2 && u - hu <= maxU + 0.2 &&
-      r.y + r.hh >= g.y0 - 0.2 && r.y - r.hh <= g.y1 + 0.2;
-  }
-  CBZ.cityWindowOpeningAudit = function () {
-    const out = { openings: winOpenings.length, hostWallsVisible: 0, intactPanes: 0, renderedPanes: 0, visibleDeco: 0, ok: true };
-    for (let wi = 0; wi < winOpenings.length; wi++) {
-      const rec = winOpenings[wi] && winOpenings[wi].rec, g = rec && rec.gap;
-      if (!rec || !g) continue;
-      if (rec.wall && rec.wall.visible !== false) out.hostWallsVisible++;
-      for (let i = 0; i < cityGlass.length; i++) {
-        const gp = cityGlass[i]; if (!openingOwnsRecord(gp, g)) continue;
-        if (!gp.shattered) out.intactPanes++;
-        if (pooledRecordDrawn(gp)) out.renderedPanes++;
-        if (gp.lit && gp.litPool && gp.litId >= 0) {
-          if (pooledRecordDrawn(gp, gp.litPool, gp.litId)) out.renderedPanes++;
-        }
-      }
-      for (let i = 0; i < roomDeco.length; i++) {
-        const rd = roomDeco[i]; if (!openingOwnsRecord(rd, g)) continue;
-        if (!rd.hidden || pooledRecordDrawn(rd)) out.visibleDeco++;
-      }
+  CBZ.cityBrokenWindowAudit = function () {
+    const out = { broken: 0, drawn: 0, noTeeth: 0, windows: 0, noRoom: 0, ok: true };
+    const wins = new Set();
+    for (const gp of shatteredList) {
+      if (!gp.shattered || !gp.win) continue;
+      out.broken++;
+      if (paneDrawn(gp)) out.drawn++;
+      if (!gp.teeth) out.noTeeth++;
+      wins.add(gp.win);
     }
-    out.ok = out.hostWallsVisible === 0 && out.intactPanes === 0 && out.renderedPanes === 0 && out.visibleDeco === 0;
+    wins.forEach(function (w) { out.windows++; if (!w.room) out.noRoom++; });
+    if (CBZ.cityInteriorRoomsAudit) out.rooms = CBZ.cityInteriorRoomsAudit();
+    out.ok = out.drawn === 0 && out.noRoom === 0;
     return out;
   };
-  // Dev/test-only mutator: open the nearest eligible real pooled window, then
-  // return the same audit a manual gunshot would. Gameplay never calls this.
+  // Dev/test-only: shoot out the nearest intact facade window to (x,z) and
+  // return the audit. Gameplay never calls this.
   CBZ.debugWindowOpeningProbe = function (x, z) {
-    const candidates = cityGlass.filter(function (gp) {
-      return gp && !gp.mesh && !gp.shattered && gp.pool && gp.y >= 1 && Math.max(gp.hw, gp.hd) * 2 >= 0.7;
-    });
-    if (Number.isFinite(x) && Number.isFinite(z)) {
-      candidates.sort(function (a, b) {
-        return ((a.x - x) * (a.x - x) + (a.z - z) * (a.z - z)) - ((b.x - x) * (b.x - x) + (b.z - z) * (b.z - z));
-      });
+    let best = null, bd = Infinity;
+    for (const gp of cityGlass) {
+      if (!gp || gp.shattered || !gp.win) continue;
+      const d = Number.isFinite(x) && Number.isFinite(z) ? (gp.x - x) * (gp.x - x) + (gp.z - z) * (gp.z - z) : 0;
+      if (d < bd) { bd = d; best = gp; }
     }
-    for (let i = 0; i < candidates.length; i++) {
-      const gp = candidates[i], before = winOpenings.length;
-      burstPane(gp); tryWindowOpening(gp);
-      if (winOpenings.length <= before) continue;
-      const audit = CBZ.cityWindowOpeningAudit();
-      audit.target = { x: gp.x, y: gp.y, z: gp.z };
-      return audit;
-    }
-    const audit = CBZ.cityWindowOpeningAudit();
-    audit.error = "no eligible unbreached pooled window";
+    if (!best) return Object.assign(CBZ.cityBrokenWindowAudit(), { ok: false, error: "no intact facade window" });
+    burstPane(best);
+    const audit = CBZ.cityBrokenWindowAudit();
+    audit.openings = audit.windows;
+    audit.target = { x: best.x, y: best.y, z: best.z };
     return audit;
   };
 
@@ -2935,24 +2802,15 @@
   CBZ.onUpdate(0.01, function () {
     if (CBZ.game.mode !== "city") {
       if (glassNightOn) CBZ.cityGlassNight(false);
-      if (winOpenQ.length) winOpenQ.length = 0;   // arena gone — drop queued window carves
       if (burstQ.length) dropBursts();
       return;
     }
     // fold any freshly-registered panes into instanced pools (first city frame
     // for the main build; later generations for the expansion island).
     if (pendingGlass.length) buildGlassPools();
-    if (pendingDeco.length) buildRoomDecoPools();
     if (pendingTrim.length) buildTrimPools();
     if (pendingMasonry.length) buildMasonryPools();
     if (CBZ.facadeNumbersFlush) CBZ.facadeNumbersFlush();
-    // drain deferred window-opening carves (see winOpenQ at cityShatter) —
-    // WINOPEN_BUDGET carveHole monoliths per frame, off the blast frame's
-    // critical path. Each re-resolves against live walls, so stale entries
-    // (breached wall, demolished building, new run) are cheap no-ops.
-    for (let wq = WINOPEN_BUDGET; wq > 0 && winOpenQ.length; wq--) {
-      try { tryWindowOpening(winOpenQ.shift()); } catch (e) {}
-    }
     if (burstQ.length) drainBursts();          // the wide shatters' remaining panes
     // the dusk/dawn LIT-PANE flip — the same hysteresis thresholds as
     // view.js's emissive night pass so the whole night look lands together.
@@ -4630,6 +4488,26 @@
     const framePick = function (st) { const a = FRAMES[st] || FRAMES.curtain; return a[Math.min(a.length - 1, (h01b(0xf4a3) * a.length) | 0)]; };
     const WPAL = { trim: TRIM, stone: MPAL ? MPAL.stone : shadeHex(TRIM, 1.18) };
     const trimLocal = [];                         // the module's boxes, building-local, fixed planes for the resolver
+    /* THE WINDOW A PANE BELONGS TO, in world terms: what a break needs to put
+       a room behind the hole (city/interiorlight.js cityInteriorBreak). Every
+       light of one window shares the record, so the window is broken once,
+       whichever of its panes goes first. */
+    const winRecs = new Map();
+    function winRecOf(o, x, y, z) {
+      const op = o && o.win, f = o && o.face;
+      if (!op || !f) return null;
+      let w = winRecs.get(op);
+      if (w) return w;
+      const k = op.k != null ? op.k : Math.max(0, Math.floor(y / FH));
+      w = { horiz: f.horiz, out: f.out, fixed: f.horiz ? oz + z : ox + x,
+        u0: (f.horiz ? ox : oz) + op.t0, u1: (f.horiz ? ox : oz) + op.t1, y0: op.y0, y1: op.y1,
+        fy0: k <= 0 ? 0.14 : k * FH, fy1: (k + 1) * FH - 0.22, room: null,
+        // a shop front / showroom has its real furnished room behind it (and
+        // no painted panel): the break must not wall it off with a dark box
+        furnished: !!op.front };
+      winRecs.set(op, w);
+      return w;
+    }
     const E = {
       dbox: dbox,
       trim: function (x, y, z, bw, bh, bd, col) {
@@ -4637,7 +4515,7 @@
         trimLocal.push([x - bw / 2, x + bw / 2, y - bh / 2, y + bh / 2, z - bd / 2, z + bd / 2]);
       },
       glass: function (x, y, z, bw, bh, bd, o) {
-        addCityGlass(bgroup, x, y, z, bw, bh, bd, ox, oz, { solid: true, tint: tintIdx, kind: "clear", role: (o && o.role) || "" }, windows);
+        addCityGlass(bgroup, x, y, z, bw, bh, bd, ox, oz, { solid: true, tint: tintIdx, kind: "clear", role: (o && o.role) || "", win: winRecOf(o, x, y, z) }, windows);
       },
       glow: function (x, y, z, ww, hh, nrm, o) {
         if (CBZ.cityInteriorGlow) CBZ.cityInteriorGlow(bgroup, ox + x, y, oz + z, ww, hh, nrm, o);
@@ -8011,17 +7889,28 @@
     }
   }
 
-  // a streamed job's panes / room deco / veneer become pools at the END of
+  // a streamed job's panes / veneer become pools at the END of
   // the job (core/citystream.js), so the pools are that job's own objects
   CBZ.cityFlushPools = function () {
     if (pendingGlass.length) buildGlassPools();
-    if (pendingDeco.length) buildRoomDecoPools();
     if (pendingTrim.length) buildTrimPools();
     if (pendingMasonry.length) buildMasonryPools();
     if (CBZ.facadeNumbersFlush) CBZ.facadeNumbersFlush();
   };
   // the module lists a streamed job writes to (freed with it)
-  if (CBZ.streamBus) { CBZ.streamBus(cityGlass, "cityGlass"); CBZ.streamBus(roomDeco, "roomDeco"); CBZ.streamBus(cityDoors, "cityDoors"); }
+  if (CBZ.streamBus) { CBZ.streamBus(cityGlass, "cityGlass"); CBZ.streamBus(cityDoors, "cityDoors"); }
+  // a freed job's broken panes take their teeth and their windows' rooms out
+  // of the shared pools (those outlive every job)
+  if (CBZ.streamBusHook) CBZ.streamBusHook({
+    mark: function () { return cityGlass.length; },
+    since: function (m) { return cityGlass.slice(m); },
+    drop: function (items) {
+      for (const gp of items) if (gp.teethIds || (gp.win && gp.win.room)) dropHole(gp);
+      if (!shatteredList.length) return;
+      const gone = new Set(items);
+      for (let i = shatteredList.length - 1; i >= 0; i--) if (gone.has(shatteredList[i])) { shatteredList.splice(i, 1); shatteredPanes = Math.max(0, shatteredPanes - 1); }
+    },
+  });
   CBZ.cityBuildings = function (city) {
     const root = city.root, rng = city.rng;
     const C = CBZ.CITY;

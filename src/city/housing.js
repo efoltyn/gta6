@@ -11,7 +11,7 @@
 
    The trick that keeps a thousand-person city cheap: cheap, shitty
    MICRO-flats. buildings.js already BUILT every storey (the apartment
-   dresser ran on each floor; the interiormap backdrop quads already
+   dresser ran on each floor; city/interiorlight.js's window panels
    sell "someone lives here" from the street). We add NO geometry — we
    only mint DATA records that MAP a tenant onto a floor that already
    exists, so a colossal city costs a flat array, not a mesh per soul.
@@ -493,9 +493,9 @@
 
   // ---- H6: NIGHT OCCUPANCY READ (data-first, light-optional) ---------------
   // The unit→floor mapping IS the "micro-apartment interior": the floor was
-  // already dressed by buildings.js (furnishApartmentFloor) and the interiormap
-  // backdrop quads already sell "someone lives here" from outside (BACKDROP_CAP
-  // 480 — we add ZERO quads). So no per-unit geometry is needed for the read.
+  // already dressed by buildings.js (furnishApartmentFloor) and
+  // city/interiorlight.js's window panels already sell "someone lives here"
+  // from outside. So no per-unit geometry is needed for the read.
   //
   // The OPTIONAL extra: at night, flip a unit's EXISTING ceiling-lamp emissive
   // (lit when the resident is home + sleeping, dark when out) by toggling a

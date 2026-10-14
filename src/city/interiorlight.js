@@ -45,6 +45,9 @@
                 pool:bool (default true; false = own material, rare) }
         Returns a small handle (or null if capped) — currently informational.
      CBZ.cityInteriorGlowReset()  — drop all layers (new run / island rebuild).
+     CBZ.cityInteriorBreak(win, parent) — a window's glass broke: its panel
+        comes out of the hole and a dark room box goes in behind it (see
+        "A BROKEN WINDOW" below). CBZ.cityInteriorMend([win]) undoes it.
 
    It COMPLEMENTS buildings.js's pane tint (cityGlassNight): theirs is the
    GLASS, ours is the ROOM seen through it. We read CBZ.nightAmount on the same
@@ -367,6 +370,7 @@
 
      Returns how many it cleared, so a caller/gate can assert it happened. */
   CBZ.cityInteriorGlowClearBox = function (minX, maxX, y0, y1, minZ, maxZ) {
+    if (roomIM && !built) roomsInBox(minX, maxX, y0, y1, minZ, maxZ, function (r, i) { r.dead = true; r.hidden = true; roomShow(r); rooms.splice(i, 1); });
     if (!built || !ensureThree()) return 0;
     if (!__clearM) { __clearM = new THREE.Matrix4(); __clearP = new THREE.Vector3(); }
     var cleared = 0;
@@ -377,6 +381,12 @@
       if (sv[12] < minX || sv[12] > maxX || sv[14] < minZ || sv[14] > maxZ || sv[13] < y0 || sv[13] > y1) continue;
       delete HIDDEN[id]; cleared++;
     }
+    for (var bid in BROKEN) {
+      var bv = BROKEN[bid];
+      if (bv[12] < minX || bv[12] > maxX || bv[14] < minZ || bv[14] > maxZ || bv[13] < y0 || bv[13] > y1) continue;
+      delete BROKEN[bid];
+    }
+    if (roomIM) roomsInBox(minX, maxX, y0, y1, minZ, maxZ, function (r, i) { r.dead = true; r.hidden = true; roomShow(r); rooms.splice(i, 1); });
     Object.keys(layers).forEach(function (k) {
       var im = layers[k], n = counts[k];
       for (var i = 0; i < n; i++) {
@@ -407,13 +417,24 @@
      that) when the fit-out frees the floor. Returns the count touched. */
   var HIDDEN = {};                      // "layer:index" -> saved matrix elements
   CBZ.cityInteriorGlowHideBox = function (minX, maxX, y0, y1, minZ, maxZ, hide) {
-    if (!built || !ensureThree()) return 0;
-    if (!__clearM) { __clearM = new THREE.Matrix4(); __clearP = new THREE.Vector3(); }
     var n2 = 0;
+    // the broken windows' rooms on this storey: the real one replaces them
+    if (hide) HIDE_REGIONS.push([minX, maxX, y0, y1, minZ, maxZ]);
+    else for (var hr = HIDE_REGIONS.length - 1; hr >= 0; hr--) {
+      var q = HIDE_REGIONS[hr];
+      if (q[0] === minX && q[1] === maxX && q[2] === y0 && q[3] === y1 && q[4] === minZ && q[5] === maxZ) { HIDE_REGIONS.splice(hr, 1); break; }
+    }
+    if (roomIM) n2 += roomsInBox(minX, maxX, y0, y1, minZ, maxZ, function (r) {
+      var h = hide ? true : inRegion(r);
+      if (h !== r.hidden) { r.hidden = h; roomShow(r); }
+    });
+    if (!built || !ensureThree()) return n2;
+    if (!__clearM) { __clearM = new THREE.Matrix4(); __clearP = new THREE.Vector3(); }
     Object.keys(layers).forEach(function (k) {
       var im = layers[k], n = counts[k], touched = false;
       for (var i = 0; i < n; i++) {
         var id = k + ":" + i, sv = HIDDEN[id];
+        if (BROKEN[id]) continue;
         if (hide) {
           if (sv) continue;
           im.getMatrixAt(i, __clearM);
@@ -437,6 +458,235 @@
     return n2;
   };
 
+  /* ---- A BROKEN WINDOW: THE PAINTING COMES OUT, A ROOM GOES IN ------------
+
+     OWNER: "Sometimes when I break a window, there's just this gray slab that
+     replaces the window. It's really dumb."
+
+     The slab was the panel above. It is a picture of a room for looking at
+     THROUGH GLASS: 96% opaque, unlit, mid-grey by day, 12 cm behind the pane.
+     Shoot the pane out and nothing hides what it is. Only a successful wall
+     carve (buildings.js's old tryWindowOpening) ever took it down, and that
+     carve failed on the second window of a wall, outside the city mode, past
+     its queue cap. MEASURED in the lab (kit window-break): the third window
+     shot on a brick storey, a grey #998975 sheet at 0.12 m in.
+
+     And taking the panel down is not enough on its own: a city shell is
+     hollow behind its windows (the fit-out builds a real storey only within
+     9 m), so the hole then showed the shell's far wall 5-26 m away, lit by
+     the sun as if it stood outdoors: another flat grey.
+
+     So a broken window gets a ROOM: one inward-facing box behind the opening,
+     3.2 m deep, a metre wider than the window on each side (an oblique look
+     meets its side wall, never the void), floor to ceiling of the storey,
+     coloured like a room with the lights off by day (floor brightest by the
+     window, the back corners darkest) and a strip fitting on the ceiling.
+     Unlit (MeshBasic), so the sun never flattens it; inward faces only, so
+     from outside its walls and from inside the building it is invisible.
+     Every room is one instance of one unit box: a city of broken windows is
+     one draw call. A window that breaks next to an open room widens it.
+
+     The fit-out hides rooms with the panels (HideBox) so the real storey is
+     what you see when you are close; a blast's ClearBox takes them with the
+     wall; CBZ.cityInteriorMend() (buildings.js's re-glaze) puts every panel
+     back and drops every room. */
+  var ROOM_MAX = 1024, ROOM_DEPTH = 3.2, ROOM_SIDE = 1.0;
+  var roomGeo = null, roomMat = null, roomIM = null;
+  var rooms = [];                 // live: {nx, nz, fixed, u0, u1, y0, y1, idx, hidden}
+  var roomNext = 0;               // ring cursor once the pool is full
+  var BROKEN = {};                // "layer:index" -> saved panel matrix (a broken window's painting)
+  var HIDE_REGIONS = [];          // the fit-out's live floors: new rooms inside one start hidden
+
+  function lin(hex) { var c = new THREE.Color(hex); if (c.convertSRGBToLinear) c.convertSRGBToLinear(); return c; }
+  function buildRoomGeo() {
+    // unit room: x -0.5..0.5 (across the window), y 0..1 (floor..ceiling),
+    // z -1..0 (deep..the glass plane). Faces point INTO the room.
+    var P = [], C = [];
+    function quad(a, b, c, d, ca, cb, cc, cd, want) {
+      // wind so the face's normal is `want`
+      var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+      var vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      var flip = nx * want[0] + ny * want[1] + nz * want[2] < 0;
+      var tri = flip ? [[a, ca], [c, cc], [b, cb], [a, ca], [d, cd], [c, cc]] : [[a, ca], [b, cb], [c, cc], [a, ca], [c, cc], [d, cd]];
+      for (var i = 0; i < 6; i++) { P.push(tri[i][0][0], tri[i][0][1], tri[i][0][2]); C.push(tri[i][1].r, tri[i][1].g, tri[i][1].b); }
+    }
+    var floorNear = lin(0x6a6156), floorFar = lin(0x37322d);
+    var backLow = lin(0x37312b), backHigh = lin(0x5a5148);
+    var sideNear = lin(0x544c43), sideFar = lin(0x2e2a26), sideTopNear = lin(0x463f38);
+    var ceilNear = lin(0x3e3832), ceilFar = lin(0x4a433b);
+    var strip = lin(0xfff4dc);
+    var L = -0.5, R = 0.5;
+    // floor (y=0, normal +y): light by the window, falling off to the back
+    quad([L, 0, 0], [R, 0, 0], [R, 0, -1], [L, 0, -1], floorNear, floorNear, floorFar, floorFar, [0, 1, 0]);
+    // ceiling (y=1, normal -y): lifted toward the back by the fitting's spill
+    quad([L, 1, 0], [R, 1, 0], [R, 1, -1], [L, 1, -1], ceilNear, ceilNear, ceilFar, ceilFar, [0, -1, 0]);
+    // back wall (z=-1, normal +z): the strip's wash on its upper half
+    quad([L, 0, -1], [R, 0, -1], [R, 1, -1], [L, 1, -1], backLow, backLow, backHigh, backHigh, [0, 0, 1]);
+    // side walls (normals inward)
+    quad([L, 0, 0], [L, 0, -1], [L, 1, -1], [L, 1, 0], sideNear, sideFar, sideFar, sideTopNear, [1, 0, 0]);
+    quad([R, 0, 0], [R, 0, -1], [R, 1, -1], [R, 1, 0], sideNear, sideFar, sideFar, sideTopNear, [-1, 0, 0]);
+    // the ceiling fitting: a strip across the room ~1.5 m in (where a look up
+    // from the street lands past the window head), a hair under the board
+    quad([-0.24, 0.993, -0.42], [0.24, 0.993, -0.42], [0.24, 0.993, -0.5], [-0.24, 0.993, -0.5], strip, strip, strip, strip, [0, -1, 0]);
+    var g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(C, 3));
+    return g;
+  }
+  function ensureRooms(parent) {
+    if (roomIM) {
+      if (!roomIM.parent && parent) { var h0 = identityHost(parent) || parent; if (h0 && h0.add) h0.add(roomIM); }
+      return true;
+    }
+    if (!ensureThree()) return false;
+    roomGeo = buildRoomGeo();
+    roomMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.FrontSide, fog: true });
+    roomIM = new THREE.InstancedMesh(roomGeo, roomMat, ROOM_MAX);
+    roomIM.count = 0;
+    roomIM.castShadow = false; roomIM.receiveShadow = false;
+    // world-coordinate instances spread over the whole city: one sphere can't
+    // bound them tightly, and a culled draw of a few hundred boxes saves nothing
+    roomIM.frustumCulled = false;
+    roomIM.name = "cityBrokenWindowRooms";
+    roomIM.userData.worldSpacePool = "cityBrokenWindowRooms";
+    var host = parent ? (identityHost(parent) || parent) : CBZ.scene;
+    if (host && host.add) host.add(roomIM);
+    return true;
+  }
+  var _rm = null, _rq = null, _rp = null, _rs = null, _rz = null, _rn = null;
+  function roomMatrix(r) {
+    if (!_rm) { _rm = new THREE.Matrix4(); _rq = new THREE.Quaternion(); _rp = new THREE.Vector3(); _rs = new THREE.Vector3(); _rz = new THREE.Vector3(0, 0, 1); _rn = new THREE.Vector3(); }
+    var uc = (r.u0 + r.u1) / 2, horiz = r.nz !== 0;
+    _rp.set(horiz ? uc : r.fixed, r.y0, horiz ? r.fixed : uc);
+    _rq.setFromUnitVectors(_rz, _rn.set(r.nx, 0, r.nz));
+    _rs.set(r.u1 - r.u0, Math.max(0.5, r.y1 - r.y0), ROOM_DEPTH);
+    return _rm.compose(_rp, _rq, _rs);
+  }
+  var _zero = null;
+  function roomShow(r) {
+    if (!_zero) _zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    roomIM.setMatrixAt(r.idx, (r.hidden || r.camIn || r.dead) ? _zero : roomMatrix(r));
+    roomIM.instanceMatrix.needsUpdate = true;
+  }
+  // a room is WHERE ITS WINDOW IS: the middle of its open side, on the glass plane
+  function roomFront(r) {
+    var uc = (r.u0 + r.u1) / 2, horiz = r.nz !== 0;
+    return { x: horiz ? uc : r.fixed, y: (r.y0 + r.y1) / 2, z: horiz ? r.fixed : uc };
+  }
+  function inRegion(r) {
+    var c = roomFront(r);
+    for (var i = 0; i < HIDE_REGIONS.length; i++) {
+      var b = HIDE_REGIONS[i];
+      if (c.x >= b[0] && c.x <= b[1] && c.y >= b[2] && c.y <= b[3] && c.z >= b[4] && c.z <= b[5]) return true;
+    }
+    return false;
+  }
+  // zero the painted panel(s) standing in this opening, saving them for the mend
+  function breakPanels(minX, maxX, y0, y1, minZ, maxZ) {
+    if (!built) return 0;
+    if (!__clearM) { __clearM = new THREE.Matrix4(); __clearP = new THREE.Vector3(); }
+    var n = 0;
+    Object.keys(layers).forEach(function (k) {
+      var im = layers[k], cnt = counts[k], touched = false;
+      for (var i = 0; i < cnt; i++) {
+        var id = k + ":" + i;
+        if (BROKEN[id]) continue;
+        var sv = HIDDEN[id];
+        var e;
+        if (sv) e = sv;                              // the fit-out hid it: the break owns it now
+        else { im.getMatrixAt(i, __clearM); e = __clearM.elements; if (e[0] === 0 && e[5] === 0) continue; }
+        if (e[12] < minX || e[12] > maxX || e[14] < minZ || e[14] > maxZ || e[13] < y0 || e[13] > y1) continue;
+        BROKEN[id] = e.slice();
+        if (sv) { delete HIDDEN[id]; continue; }
+        __clearM.makeScale(0, 0, 0);
+        im.setMatrixAt(i, __clearM);
+        touched = true; n++;
+      }
+      if (touched) im.instanceMatrix.needsUpdate = true;
+    });
+    return n;
+  }
+  /* PUBLIC: a window broke. w = { horiz, out (+1/-1 along the face normal),
+     fixed (the glass plane, world), u0, u1 (its span along the face, world),
+     y0, y1 (the opening), fy0, fy1 (its storey's floor and ceiling) },
+     parent = any node of the building (the pool hangs off its identity host).
+     Idempotent per window record. Returns the room record. */
+  CBZ.cityInteriorBreak = function (w, parent) {
+    if (!w || w.room) return w ? w.room : null;
+    if (!ensureThree()) return null;
+    var nx = w.horiz ? 0 : w.out, nz = w.horiz ? w.out : 0;
+    // the painting in this opening (its centre is the opening's centre, 0.2-0.3 m in)
+    var ux0 = w.u0 - 0.05, ux1 = w.u1 + 0.05, f0 = w.fixed - 0.7, f1 = w.fixed + 0.7;
+    w.panels = breakPanels(w.horiz ? ux0 : f0, w.horiz ? ux1 : f1, w.y0 - 0.1, w.y1 + 0.1, w.horiz ? f0 : ux0, w.horiz ? f1 : ux1);
+    if (w.furnished) return null;               // a real room is already behind this glass
+    if (!ensureRooms(parent)) return null;
+    var y0 = (w.fy0 != null ? w.fy0 : w.y0 - 0.9) + 0.015, y1 = w.fy1 != null ? w.fy1 : w.y1 + 0.4;   // floor a hair over the slab: never coplanar
+    var u0 = w.u0 - ROOM_SIDE, u1 = w.u1 + ROOM_SIDE;
+    // a room already open on this storey of this face, touching this window: widen it
+    for (var i = 0; i < rooms.length; i++) {
+      var r = rooms[i];
+      if (r.dead || r.nx !== nx || r.nz !== nz || Math.abs(r.fixed - w.fixed) > 0.35 || Math.abs(r.y0 - y0) > 0.3) continue;
+      if (u0 > r.u1 + 0.2 || u1 < r.u0 - 0.2) continue;
+      r.u0 = Math.min(r.u0, u0); r.u1 = Math.max(r.u1, u1);
+      r.wins++;
+      roomShow(r);
+      w.room = r;
+      return r;
+    }
+    var idx;
+    if (roomIM.count < ROOM_MAX) idx = roomIM.count++;
+    else {
+      // full: the oldest room goes (its window keeps its hole and its teeth)
+      idx = roomNext; roomNext = (roomNext + 1) % ROOM_MAX;
+      for (var j = 0; j < rooms.length; j++) if (rooms[j].idx === idx) { rooms[j].dead = true; rooms.splice(j, 1); break; }
+    }
+    var rec = { nx: nx, nz: nz, fixed: w.fixed, u0: u0, u1: u1, y0: y0, y1: y1, idx: idx, hidden: false, wins: 1 };
+    rec.hidden = inRegion(rec);
+    rooms.push(rec);
+    roomShow(rec);
+    w.room = rec;
+    return rec;
+  };
+  /* PUBLIC: re-glaze. Every broken window's panel comes back, every room goes.
+     With a window record: just that window (a rebuilt building's panes). */
+  CBZ.cityInteriorMend = function (w) {
+    if (w) {
+      var r = w.room;
+      w.room = null;
+      if (r && !r.dead && --r.wins <= 0) { r.dead = true; r.hidden = true; if (roomIM) roomShow(r); rooms.splice(rooms.indexOf(r), 1); }
+      return;
+    }
+    if (built) {
+      Object.keys(BROKEN).forEach(function (id) {
+        var p = id.split(":"), im = layers[p[0]];
+        if (!im) return;
+        __clearM = __clearM || new THREE.Matrix4();
+        im.setMatrixAt(+p[1], __clearM.fromArray(BROKEN[id]));
+        im.instanceMatrix.needsUpdate = true;
+      });
+    }
+    BROKEN = {};
+    for (var i = 0; i < rooms.length; i++) rooms[i].dead = true;
+    rooms.length = 0; roomNext = 0;
+    if (roomIM) { roomIM.count = 0; roomIM.instanceMatrix.needsUpdate = true; }
+  };
+  CBZ.cityInteriorRoomsAudit = function () {
+    var vis = 0;
+    for (var i = 0; i < rooms.length; i++) if (!rooms[i].hidden) vis++;
+    return { rooms: rooms.length, visible: vis, panelsBroken: Object.keys(BROKEN).length, capacity: ROOM_MAX };
+  };
+  // rooms whose centre lies in a world box: hide/show (fit-out) or drop (blast)
+  function roomsInBox(minX, maxX, y0, y1, minZ, maxZ, fn) {
+    var n = 0;
+    for (var i = rooms.length - 1; i >= 0; i--) {
+      var c = roomFront(rooms[i]);
+      if (c.x < minX || c.x > maxX || c.z < minZ || c.z > maxZ || c.y < y0 || c.y > y1) continue;
+      fn(rooms[i], i); n++;
+    }
+    return n;
+  }
+
   /* PUBLIC: wipe everything (new run / island regen). */
   CBZ.cityInteriorGlowReset = function () {
     if (!built) return;
@@ -448,6 +698,9 @@
     });
     total = 0;
     HIDDEN = {};
+    CBZ.cityInteriorMend();
+    BROKEN = {};
+    HIDE_REGIONS.length = 0;
     nightApplied = -1;
   };
 
@@ -495,8 +748,29 @@
 
   // throttled updater — a few Hz is plenty for a dusk ramp. 0.34 = order slot
   // near buildings.js's own night pass so they settle together.
+  /* A ROOM IS FOR LOOKING INTO, NOT FOR STANDING IN. Seen from the street a
+     room box is the dark storey behind a broken window. But a storey can be
+     real (a dressed floor, an apartment the shell furnished) and the player
+     can walk up to the hole from inside it, or climb in through it: then the
+     box's walls would close round him. So a room whose window the camera is
+     BEHIND (on the building's side of the glass, within its storey and its
+     reach) is not drawn. A handful of rooms, a few compares a frame. */
+  function roomsForCamera() {
+    if (!roomIM || !rooms.length) return;
+    var cam = CBZ.camera; if (!cam) return;
+    var p = cam.position, any = false;
+    for (var i = 0; i < rooms.length; i++) {
+      var r = rooms[i], horiz = r.nz !== 0;
+      var off = horiz ? (p.z - r.fixed) * r.nz : (p.x - r.fixed) * r.nx;     // + = the street side
+      var u = horiz ? p.x : p.z;
+      var inside = off < 0.05 && off > -(ROOM_DEPTH + 6) && u > r.u0 - 3 && u < r.u1 + 3 && p.y > r.y0 - 1 && p.y < r.y1 + 1;
+      if (inside !== !!r.camIn) { r.camIn = inside; roomShow(r); any = true; }
+    }
+    return any;
+  }
   CBZ.onUpdate(0.34, function () {
     if (!CBZ.game || CBZ.game.mode !== "city") return;
+    roomsForCamera();
     if (!built) return;
     var n = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
     // quantize so we only write the shared materials when the value moves —

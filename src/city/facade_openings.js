@@ -24,7 +24,7 @@
    it an EMITTER and it emits boxes, panes and lamps in building-local metres.
 
      E.dbox(x, y, z, w, h, d, col)       opaque trim (merged per colour)
-     E.glass(x, y, z, w, h, d, o)         one breakable pane (o: {tint, kind})
+     E.glass(x, y, z, w, h, d, o)         one breakable pane (o: {tint, kind, role, win: the opening, face})
      E.glow(x, y, z, w, h, nrm, o)        the lit room behind a window (optional)
      E.lamp(x, y, z, w, h, d, col)        a self-lit fitting (optional)
      E.number(x, y, z, nrm, text, h)      a house number (optional)
@@ -210,7 +210,9 @@
     for (const c of cols) for (const r of rows) {
       const tc = (c[0] + c[1]) / 2, yc = (r[0] + r[1]) / 2;
       const b = FO.at(f, tc, yc, -rev, c[1] - c[0], r[1] - r[0], PT);
-      E.glass(b[0], b[1], b[2], b[3], b[4], b[5], { tint: o.tint || 0, kind: o.kind || S.glass, role: o.role || "" });
+      // win: every light of one window names the same opening, so a host can
+      // treat the window (not the pane) as the hole when one of them breaks
+      E.glass(b[0], b[1], b[2], b[3], b[4], b[5], { tint: o.tint || 0, kind: o.kind || S.glass, role: o.role || "", win: op, face: f });
       n++;
     }
     // glazing bars in front of the glass (never in the frame's plane)
