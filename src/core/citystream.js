@@ -178,10 +178,12 @@
      (a pop, measured on the drive). So a job is wanted, and counted in view,
      by its rect grown by its SPILL: measured when it settles (its objects'
      bounds past the rect, +10 m), and used from its next run on. */
-  /* (a job never built is wanted by its rect alone: a blanket 60 m for every
-     unbuilt job built ~20% more in the air and cost 4% of the phone's drive
-     heap in the paired A/B; the measured spill pads the job's next run) */
-  const SPILL_UNKNOWN = 0;
+  /* A job never built: 60 m on the desktop (the stream-job group that popped
+     at 750 m on the drive spills 50 m+ past its rect, and the desktop has the
+     memory to build that early), its rect alone on a phone or tablet, where a
+     blanket 60 m cost 4% of the drive's memory peak in the paired A/B; the
+     measured spill pads every job's next run on every device. */
+  const SPILL_UNKNOWN = CBZ.isMobileDevice ? 0 : 60;
   function spillOf(j) { return j.spill != null ? j.spill : SPILL_UNKNOWN; }
   const _sb = window.THREE ? new window.THREE.Box3() : null, _gb = window.THREE ? new window.THREE.Box3() : null;
   function measureSpill(job) {
