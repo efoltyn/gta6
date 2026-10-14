@@ -23,6 +23,7 @@
      node tools/speed.mjs --ask prof 'CBZ.startRun()'        # ... under the CPU profiler: self + inclusive tops
      node tools/speed.mjs --ask drive [--mps 40 --secs 60 --route x,z;x,z]  # fast drive: peak memory per second + POP-INS in view
      node tools/speed.mjs --ask drive --allocs     # ... + who ALLOCATED during it (incl. collected garbage), by site
+     node tools/speed.mjs --ask horizon [--spot spawn]   # how far REAL content (near form) reaches vs the fog, far form + ground beside it
      node tools/speed.mjs --ask reload                       # rebuild from edited sources (measured load)
      node tools/speed.mjs --ask info | stop
      node tools/speed.mjs --serve                            # run the world in the foreground instead
@@ -689,6 +690,13 @@ S.hold_ = function(){ S.hold = true; S.rafLog = false; S.t = now(); };
    S.tqCollect() fills them in later). o.grab: keep the last frame's pixels. */
 S.step = function(n, o){
   o = o || {}; var C = window.CBZ, r = C && C.renderer, gl = S.gl(), out = [];
+  /* A POSED CAMERA IS THE CAMERA FOR THE WHOLE FRAME'S LAST WORD, not only
+     inside render(): the passes that decide what to draw from the camera
+     (core/viewscope.js at always 999.9) ran with the game's own camera and
+     hid things the posed one sees. Applied just before them. */
+  if (C && C.onAlways && !S.poseHook) { S.poseHook = 1; var ph = function(){ if (S.pose && C.camera) S.applyPose(C.camera); };
+    /* slotted into the sorted list (a run-time onAlways is appended after everything) */
+    if (C.frameListsAdd) C.frameListsAdd([], [{ order: 999.8, fn: ph, seq: 0 }]); else C.onAlways(999.8, ph); }
   if (r && r.info) r.info.autoReset = false;
   var useTq = !!(o.gpu && S.tqInit());
   for (var i = 0; i < n; i++) {
@@ -1758,6 +1766,11 @@ async function serveMain() {
        rule: nothing may assemble itself in view). Target 0. */
     if (op === "drive") {
       const route = q.route || null, mps = q.mps || 40, secs = q.secs || 60;
+      /* A DRIVE STARTS FROM A FIXED SPOT (--from, default spawn) with the
+         camera on the player: a drive asked after the aerial spot used to run
+         under its pinned 110 m camera, from the middle of a wood */
+      const from = spots[q.from || "spawn"] || spots.spawn;
+      if (from) { await P.ev(place(Object.assign({}, from, { cam: null }))); await P.ev(`(function(){ var S = window.__speed; S.pose = null; S.step(30, { path: S.pin(${JSON.stringify(Object.assign({}, from, { cam: null }))}) }); return 1; })()`, 300000); }
       // --allocs: V8's sampling heap profiler over the drive, INCLUDING what
       // the collector already took (the churn behind the sawtooth), by site
       if (q.allocs) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", { samplingInterval: 262144, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); }
@@ -1871,22 +1884,78 @@ async function serveMain() {
             if (dist < fog && sp.radius < fog && fr.intersectsSphere(sp)) { popN++; if (pops.length < 30) pops.push([label(o), Math.round(dist), Math.round(sp.radius)]); } } }
         }
         var samples = [], t0 = performance.now(), frames = SECS * 60, d = 0;
+        var cpuF = [], strF = [], perK = {}, STREAM_RE = /citystream|farcull|metro\.js|metro_fabric|instcull|treelod|slice\.js/;
+        function stat(a){ if (!a.length) return null; var b = a.slice().sort(function(x, y){ return x - y; }), s0 = 0; for (var i = 0; i < b.length; i++) s0 += b[i];
+          var r2 = function(x){ return Math.round(x * 100) / 100; };
+          return { mean: r2(s0 / b.length), p50: r2(b[b.length >> 1]), p95: r2(b[Math.min(b.length - 1, Math.floor(b.length * 0.95))]), p99: r2(b[Math.min(b.length - 1, Math.floor(b.length * 0.99))]), max: r2(b[b.length - 1]), over33: b.filter(function(x){ return x > 33; }).length }; }
         scan(true);
         var hp = 0, gp = 0, php = 0;
         for (var f = 0; f < frames; f++) {
           d += MPS / 60; var q = at(Math.min(d, tot));
-          S.step(1, { path: function(){ Pl.pos.x = q[0]; Pl.pos.z = q[1]; Pl.pos.y = gh(q[0], q[1]); if (Pl.vel) { Pl.vel.x = 0; Pl.vel.y = 0; Pl.vel.z = 0; } Pl.hp = Math.max(Pl.hp || 0, 100);
+          var rows = S.step(1, { perUpdater: true, path: function(){ Pl.pos.x = q[0]; Pl.pos.z = q[1]; Pl.pos.y = gh(q[0], q[1]); if (Pl.vel) { Pl.vel.x = 0; Pl.vel.y = 0; Pl.vel.z = 0; } Pl.hp = Math.max(Pl.hp || 0, 100);
             if (C.playerChar && C.playerChar.group) { C.playerChar.group.position.set(q[0], Pl.pos.y, q[1]); C.playerChar.group.rotation.y = q[2]; }
             if (C.cam) C.cam.yaw = q[2] + Math.PI; } });
+          /* THE FRAME AND THE STREAMER'S SHARE OF IT (CPU ms per stepped
+             frame; the first 30 frames are the drive's own warm-up) */
+          if (f >= 30 && rows && rows[0]) { var rw = rows[0]; cpuF.push(rw.cpu);
+            var sm = 0; for (var uk in rw.u || {}) if (STREAM_RE.test(uk)) { sm += rw.u[uk]; (perK[uk] || (perK[uk] = [])).push(rw.u[uk]); }
+            strF.push(sm); }
           if (f & 1) scan(false);
           if (YIELD) await new Promise(function (r) { setTimeout(r, 0); });
           if (f % 60 === 59) { var m = S.memRead(); hp = Math.max(hp, m.heap); gp = Math.max(gp, m.gpu); php = Math.max(php, m.phone);
             var st = C.streamStats || {}; samples.push([Math.round((f + 1) / 60), Math.round(m.heap), Math.round(m.gpu), Math.round(m.phone), st.built, st.parked, st.queued, C.slice ? Math.round(C.slice.keepR()) : null]); }
         }
         return { routeLegs: route.length - 1, routeKm: +(tot / 1000).toFixed(2), km: +(Math.min(d, tot) / 1000).toFixed(2), wallS: +((performance.now() - t0) / 1000).toFixed(1), peak: { heap: Math.round(hp), gpu: Math.round(gp), phone: Math.round(php) },
+          frameCpu: stat(cpuF), streamerCpu: stat(strF), streamerBy: Object.keys(perK).map(function(k){ return [k.split("src/").join(""), stat(perK[k])]; }).sort(function(a, b){ return b[1].p95 - a[1].p95; }).slice(0, 8),
+          streamStats: (function(){ var o = {}, st = C.streamStats || {}; for (var k in st) if (typeof st[k] === "number") o[k] = st[k]; return o; })(),
           pops: popN, popChecks: checks, lodHandoffs: handoffs, popSamples: pops, poolSwitches: poolSw, poolSamples: poolSamples, streamAdds: (C.streamStats && C.streamStats.adds || []).filter(function (a) { return a[1] < 420; }).slice(0, 20), cols: "s heap gpu phone built parked queued keepR", samples: samples };
       })(${JSON.stringify(route)}, ${+mps}, ${+secs})`, 1800000);
       if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 300000); await P.s("HeapProfiler.stopSampling", {}, 60000); res.allocs = heapSites(profile); } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
+      res.ms = Date.now() - t0; return res;
+    }
+    /* --ask horizon [--spot a,b]: HOW FAR REAL CONTENT EXISTS against the fog.
+       At each spot (after the streamer has settled there): every drawn mesh /
+       instance in the camera frustum, by its NEAREST point's distance from the
+       eye, split into near form (the real thing: shells, props, cars, trees as
+       themselves), far form (metro / built-world HLOD, tree impostors,
+       mountain LOD: userData.metroFar / farLod) and ground (terrain, world
+       surfaces). Reports each class's p50 / p90 / p99 / max distance and
+       count, the fog's far, core/sight.js's detail ring and reach, and the
+       keep circle. "Real content distance" = the near form's p99. */
+    if (op === "horizon") {
+      res.spots = {};
+      for (const name of spotList(q)) {
+        const sp = spots[name];
+        await P.ev(place(sp));
+        await P.ev(`(function(){ var S = window.__speed, C = window.CBZ; S.step(${q.warm != null ? q.warm : 30}, { path: S.pin(${JSON.stringify(sp)}) }); try { if (C.streamTick) C.streamTick(true); } catch (e) {} S.step(30, { path: S.pin(${JSON.stringify(sp)}) }); return 1; })()`, 300000);
+        res.spots[name] = await P.ev(`(function(){
+          var C = window.CBZ, T = window.THREE, cam = C.camera; cam.updateMatrixWorld(true);
+          var pm = new T.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse), fr = new T.Frustum().setFromProjectionMatrix(pm);
+          var sph = new T.Sphere(), v = new T.Vector3(), m4 = new T.Matrix4(), ex = cam.position.x, ez = cam.position.z;
+          var D = { near: [], far: [], ground: [], haze: [] }, past = {}, pastR = {}, pastReach = 0, fog0 = C.scene.fog ? C.scene.fog.far : 0, reach0 = C.sight ? C.sight().reach : 1e9;
+          function hazed(o){ var m = Array.isArray(o.material) ? o.material[0] : o.material; return !!(m && (m.isShaderMaterial || (m.userData && m.userData._cbzFogScaled))); }
+          function cls(o){ for (var p = o; p; p = p.parent) { var u = p.userData || {}; if (u.metroFar || u.farLod != null || u.treeImpostor) return "far"; if (u.terrain || u.worldSurface || u.terrainFar || u.horizon) return "ground"; } return "near"; }
+          function walk(o, k){ if (!o.visible || (o.layers && o.layers.mask === 0 && !o.isScene)) return; var u = o.userData || {};
+            if (k == null && (u.metroFar || u.farLod != null || u.treeImpostor)) k = "far"; else if (k == null && (u.terrain || u.worldSurface || u.terrainFar || u.horizon)) k = "ground";
+            if ((o.isMesh || o.isPoints) && o.geometry && !o.isSkinnedMesh) { var g = o.geometry, kk = k || (hazed(o) ? "haze" : "near");
+              if (o.isInstancedMesh) { var n = o.count | 0; if (n > 0) { if (!g.boundingSphere) g.computeBoundingSphere(); var r = g.boundingSphere ? g.boundingSphere.radius : 1, a = o.instanceMatrix.array, st = Math.max(1, Math.floor(n / 600));
+                for (var i = 0; i < n; i += st) { m4.fromArray(a, i * 16).premultiply(o.matrixWorld); v.setFromMatrixPosition(m4); sph.center.copy(v); sph.radius = r * Math.max(1, m4.getMaxScaleOnAxis()); if (!fr.intersectsSphere(sph)) continue; D[kk].push(Math.max(0, Math.hypot(v.x - ex, v.z - ez) - sph.radius)); } } }
+              else { if (!g.boundingSphere) try { g.computeBoundingSphere(); } catch (e) {} if (g.boundingSphere) { sph.copy(g.boundingSphere).applyMatrix4(o.matrixWorld); if (fr.intersectsSphere(sph)) { var dd = Math.max(0, Math.hypot(sph.center.x - ex, sph.center.z - ez) - sph.radius); D[kk].push(dd);
+                if (kk === "near" && dd > reach0) { pastReach++; var top2 = o; while (top2.parent && top2.parent !== C.scene && top2.parent !== (C.city && C.city.arena && C.city.arena.root)) top2 = top2.parent; var lb2 = (top2.name || top2.type) + "/" + (o.name || (o.material && o.material.name) || o.type); pastR[lb2] = (pastR[lb2] || 0) + 1; }
+                if (kk === "near" && dd > fog0) { var top = o; while (top.parent && top.parent !== C.scene && !(top.parent.userData && top.parent.userData._cityRoot) && top.parent !== (C.city && C.city.arena && C.city.arena.root)) top = top.parent; var lb = (top.name || top.type) + "/" + (o.name || (o.material && o.material.name) || o.type); past[lb] = (past[lb] || 0) + 1; } } } } }
+            for (var c = 0; c < o.children.length; c++) walk(o.children[c], k); }
+          walk(C.scene, null);
+          function q(a){ if (!a.length) return null; a.sort(function(x, y){ return x - y; }); var at = function(f){ return Math.round(a[Math.min(a.length - 1, Math.floor(a.length * f))]); }; return { n: a.length, p50: at(0.5), p90: at(0.9), p99: at(0.99), max: Math.round(a[a.length - 1]) }; }
+          var SG = C.sight ? C.sight() : {}, s = C.slice;
+          var nearPastFog = 0, fog = C.scene.fog ? C.scene.fog.far : 0; for (var j = 0; j < D.near.length; j++) if (D.near[j] > fog) nearPastFog++;
+          return { fogFar: Math.round(fog), detail: Math.round(SG.detail || 0), reach: Math.round(SG.reach || 0), camFar: Math.round(cam.far), keepR: s && s.keepR ? Math.round(s.keepR()) : null,
+            tier: C.getQualityLevel ? C.getQualityLevel() : null, near: q(D.near), haze: q(D.haze), far: q(D.far), ground: q(D.ground), nearPastFog: nearPastFog,
+            pastFogTop: Object.keys(past).map(function(k){ return [k, past[k]]; }).sort(function(a, b){ return b[1] - a[1]; }).slice(0, 10),
+            /* past REACH = drawn although every pixel of it is fog colour (pure waste) */
+            nearPastReach: pastReach, pastReachTop: Object.keys(pastR).map(function(k){ return [k, pastR[k]]; }).sort(function(a, b){ return b[1] - a[1]; }).slice(0, 10),
+            stream: C.streamStats ? { built: C.streamStats.built, parked: C.streamStats.parked, queued: C.streamStats.queued } : null };
+        })()`, 300000);
+      }
       res.ms = Date.now() - t0; return res;
     }
     // --ask prof '<expr>': the expression under V8's CPU profiler (1 ms), the
@@ -2024,13 +2093,13 @@ async function askMain() {
   if (ASK === "eval" && has("--gc")) q.gc = true;
   // --allocs --live: only what the expression allocated and is STILL alive after it (a leak finder)
   if (ASK === "eval" && has("--live")) { q.allocs = true; q.liveOnly = true; q.timeoutS = 300; }
-  if (ASK === "drive") { const r = opt("--route", "road"); q.route = r === "road" || r === "straight" ? r : r.split(";").map((p) => p.split(",").map(Number)); q.mps = +opt("--mps", 40); q.secs = +opt("--secs", 60); q.allocs = has("--allocs"); }
+  if (ASK === "drive") { const r = opt("--route", "road"); q.route = r === "road" || r === "straight" ? r : r.split(";").map((p) => p.split(",").map(Number)); q.mps = +opt("--mps", 40); q.secs = +opt("--secs", 60); q.allocs = has("--allocs"); q.from = opt("--from", "spawn"); }
   if (ASK === "prof") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }
   if (ASK === "eval") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }
   let r;
   try { r = await post(w.port, q, 30 * 60 * 1000); } catch (e) { console.error("[speed] query failed: " + e.message); process.exit(1); }
   const O = (s) => process.stdout.write(s + "\n");
-  if (has("--json-out") || ASK === "info" || ASK === "eval" || ASK === "prof" || ASK === "drive" || ASK === "stop") O(JSON.stringify(r, null, 1));
+  if (has("--json-out") || ASK === "info" || ASK === "eval" || ASK === "prof" || ASK === "drive" || ASK === "horizon" || ASK === "stop") O(JSON.stringify(r, null, 1));
   if (r.reloaded) O(`reloaded (${r.reloaded.why}): load ${r.reloaded.load} ms = build ${r.reloaded.build} + first frame ${r.reloaded.firstFrame} + settle ${r.reloaded.settle}; CPU main ${r.reloaded.cpuMain} ms, GPU process ${r.reloaded.gpuProc} ms`);
   if (ASK === "frames") for (const [n, o] of Object.entries(r.spots || {}))
     O(`${n.padEnd(9)} frame ${fmt(o.frame)} ms (p95 ${fmt(o.p95)})  cpu ${fmt(o.cpu)} [sim ${fmt(o.sim)} always ${fmt(o.always)} render ${fmt(o.render)}]  gpu ${fmt(o.gpu)} [main ${fmt(o.gpuMain)} shadow ${fmt(o.gpuShadow)} rt ${fmt(o.gpuRt)}]  CPU/frame main ${fmt(o.cpuThread)} gpuProc ${fmt(o.gpuProcCpu)}  calls ${o.calls} tris ${((o.tris || 0) / 1e6).toFixed(2)}M\n` +
