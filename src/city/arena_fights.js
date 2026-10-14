@@ -1270,7 +1270,7 @@ CBZ.addLandmass(function(city){
         // core/batch.js is allowed to fold all of them into the city merge
         // (a bench is ~5 boxes and 4 benches spared would be 20 draw calls).
         root.add(mm);
-        if(fo.solid)solid(fx-fw/2,fz-fd/2,fx+fw/2,fz+fd/2,fo.y0,fo.y1);
+        if(fo.solid){var sc=solid(fx-fw/2,fz-fd/2,fx+fw/2,fz+fd/2,fo.y0,fo.y1);if(sc&&fo.noStep)sc.noStep=true;}
         return mm;
       };
       // The north forecourt is the one part of the ring the car park does NOT

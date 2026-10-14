@@ -2333,6 +2333,7 @@
           if (o.y0 != null) cp.y0 = o.y0;
           if (o.y1 != null) cp.y1 = o.y1;
           if (o.noBreach) cp.noBreach = true;
+          if (o.noStep) cp.noStep = true;
           if (horiz) { cp.minX = u1; cp.maxX = oU1; } else { cp.minZ = u1; cp.maxZ = oU1; }
           CBZ.colliderAdd(cp); rec.remnCols.push(cp);
         }
@@ -3931,6 +3932,7 @@
         const c = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, ref: m,
           y0: o.y0 != null ? o.y0 : ly - bh / 2, y1: o.y1 != null ? o.y1 : ly + bh / 2 };
         if (o.noBreach) c.noBreach = true;
+        if (o.noStep) c.noStep = true;           // furniture: a blocker, never a stair
         CBZ.colliders.push(c); cols.push(c);
       }
       if (o.plat) { const p = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, top: ly + bh / 2 }; CBZ.platforms.push(p); plats.push(p); }

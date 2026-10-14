@@ -2600,6 +2600,7 @@
         if (o && o.solid) {
           const c = { minX: ox + x - w / 2, maxX: ox + x + w / 2, minZ: oz + z - d / 2, maxZ: oz + z + d / 2,
             ref: null, y0: gy + (o.y0 != null ? o.y0 : y - h / 2), y1: gy + (o.y1 != null ? o.y1 : y + h / 2) };
+          if (o.noStep) c.noStep = true;
           CBZ.colliders.push(c); cols.push(c);
         }
         return true;

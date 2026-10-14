@@ -59,14 +59,15 @@
 
    SOLID THAT FITS THE MESH. A piece's colliders are the SHAPE of the piece,
    not one box round it: a sofa is a seat, a back and two arms; a chair is
-   a seat and a back. Every collider stands on the floor (band [0, top]),
-   so the physics step-up (systems/physics.js stepTopAt: a banded box whose
-   top is within a step of your feet is ground) lets you WALK UP onto a seat
-   the way you walk up a kerb, and anything taller than a step is a wall.
-   A seat's collider top is its cushion less SEAT_GIVE (3 cm of padding
-   under a standing foot), which also brings a 0.45 chair under the 0.42 m
-   the resolver steps (physics.js STEP_SOLID). Tables, counters, stools and
-   beds stay above it: those are a jump or a vault, never a stroll.
+   a seat and a back. Every collider stands on the floor (band [0, top]) and
+   is stamped noStep: FURNITURE IS NOT A STAIR. Walking into a sofa stops you
+   at the seat (physics.js collide measures a noStep box from the real feet,
+   not the 0.42 m step line), and a top is ground only once your feet are on
+   it: you jumped or vaulted up. It used to be a kerb you strolled onto, and
+   that was the owner's "walk up to a couch and the game glitches up and
+   down". A seat's collider top is its cushion less SEAT_GIVE (3 cm of
+   padding under a standing foot). Every host `box` copies oo.noStep onto
+   the record it makes, the same as y0/y1/noBreach.
      opts.tone   palette variant: "warm" | "cool" | "exec" | "clinic" | "auto"
                  ("auto" = deterministic per-position pick via CBZ.hash01).
 
@@ -312,6 +313,7 @@
             // just the cushion (see SOLID THAT FITS THE MESH up top)
             oo.solid = true;
             oo.noBreach = true;            // furniture is never a wall to carve
+            oo.noStep = true;              // ...and never a stair (physics.js stepTopAt)
             oo.y0 = y + (o.band ? o.band[0] : up);
             oo.y1 = y + (o.band ? o.band[1] : up + (o.colH != null ? o.colH : h));
             if (!hostBox) nSolid++;
@@ -438,7 +440,7 @@
     // stops them reading as four unrelated sticks.
     if (D) p.put(0, 0.37, 0, 0.44, 0.05, 0.44, leg);
     // The pad carries the seat's collider, floor to cushion (less the give),
-    // and the back carries its own: walk into it and you step up onto it.
+    // and the back carries its own: walk into it and it stops you.
     const top = D
       ? p.put(0, 0.39, 0, 0.52, 0.06, 0.52, pad, { solid: true, band: seatBand(0.45) })   // cushion → 0.45
       : p.put(0, 0.37, 0, 0.50, 0.08, 0.50, pad, { solid: true, band: seatBand(0.45) });  // cushion → 0.45
@@ -578,7 +580,7 @@
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
       p.put(a * (L / 2 - 0.1), 0, b * 0.33, 0.05, 0.12, 0.05, P.darkwood);
     if (L > 1.9) for (let b = -1; b <= 1; b += 2) p.put(0, 0, b * 0.33, 0.05, 0.12, 0.05, P.darkwood);
-    p.put(0, 0.12, 0, L, 0.22, 0.85, cloth, { solid: true, band: seatBand(0.40) });   // body (the seat's solid: step up onto it)
+    p.put(0, 0.12, 0, L, 0.22, 0.85, cloth, { solid: true, band: seatBand(0.40) });   // body (the seat's solid)
     // THE SEAM IS THE WHOLE READ. A sofa is three cushions, and one 2.24-long
     // slab is a bench with upholstery on it. Draw the cushion ONCE PER SEAT
     // with a 3cm gap between, all at the identical 0.34→0.40 band, so the
@@ -845,7 +847,7 @@
     // The top oversails the legs by 9cm and carries a SHIN-HIGH collider only:
     // a coffee table between a sofa and a screen is an obstacle you step round,
     // never a wall, and never something the body can stand on.
-    const top = p.put(0, 0.35, 0, L, 0.05, D, wood, { solid: true, band: [0, 0.40] });   // top → 0.40 (low enough to step up onto)
+    const top = p.put(0, 0.35, 0, L, 0.05, D, wood, { solid: true, band: [0, 0.40] });   // top → 0.40
     if (DT) p.put(0, 0.30, 0, L - 0.10, 0.04, D - 0.12, P.darkwood);        // apron shadow under the lip (its top 1 cm below the legs', never in their plane)
     return p.done(L, D, 0.40, top);
   };

@@ -531,7 +531,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=ground1008c"></script>
-<script src="src/world/materials.js?v=seats1009b"></script>
+<script src="src/world/materials.js?v=nostep1013"></script>
 <script src="src/world/fuel_station.js?v=pf0930a"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
@@ -549,7 +549,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
-<script src="src/city/furniture.js?v=seats1009b"></script>
+<script src="src/city/furniture.js?v=nostep1013"></script>
 <!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
      the one TV set, shared by every screen in the game. Before world/lounge.js
      (the prison dayroom set) and every city/ room that hangs a TV. -->
@@ -815,7 +815,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/camera.js?v=planes1009b"></script>
-<script src="src/systems/physics.js?v=sink1011"></script>
+<script src="src/systems/physics.js?v=nostep1013"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -946,7 +946,7 @@ document.body.appendChild(b);}}catch(e){}})();
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/island_roads.js?v=roads1"></script>
-<script src="src/world/disaster_arena.js?v=water1011"></script>
+<script src="src/world/disaster_arena.js?v=nostep1013"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
@@ -1493,7 +1493,7 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=stairs1009b"></script>
+<script src="src/city/fitout.js?v=nostep1013"></script>
 <script src="src/city/fitout_plans.js?v=stairs1009b"></script>
 <script src="src/city/fitout_work.js?v=stairs1009b"></script>
 <script src="src/city/fitout_gang.js?v=stairs1009b"></script>

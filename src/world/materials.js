@@ -280,6 +280,7 @@
       if (opts.y0 != null) col.y0 = opts.y0;
       if (opts.y1 != null) col.y1 = opts.y1;
       if (opts.noBreach) col.noBreach = true;     // furniture (city/furniture.js) is never a wall to carve
+      if (opts.noStep) col.noStep = true;         // ...nor a stair (physics.js stepTopAt)
       CBZ.colliders.push(col);
       m.userData.collider = col;
     }

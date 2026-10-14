@@ -638,6 +638,7 @@
         const c = { minX: bx - w / 2, maxX: bx + w / 2, minZ: bz - d / 2, maxZ: bz + d / 2, ref: m, noCam: true };
         if (o.y0 != null) c.y0 = o.y0;
         if (o.y1 != null) c.y1 = o.y1;
+        if (o.noStep) c.noStep = true;
         CBZ.colliders.push(c);
       }
       return m;

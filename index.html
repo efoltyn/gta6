@@ -541,7 +541,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=ground1008c"></script>
-<script src="src/world/materials.js?v=seats1009b"></script>
+<script src="src/world/materials.js?v=nostep1013"></script>
 <script src="src/world/fuel_station.js?v=pf0930a"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
@@ -561,7 +561,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
-<script src="src/city/furniture.js?v=seats1009b"></script>
+<script src="src/city/furniture.js?v=nostep1013"></script>
 <!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
      the one TV set, shared by every screen in the game. Before world/lounge.js
      (the prison dayroom set) and every city/ room that hangs a TV. -->
@@ -890,7 +890,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=planes1009b"></script>
-<script src="src/systems/physics.js?v=sink1011"></script>
+<script src="src/systems/physics.js?v=nostep1013"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -1055,7 +1055,7 @@ document.body.appendChild(b);}}catch(e){}})();
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/island_roads.js?v=roads1"></script>
-<script src="src/world/disaster_arena.js?v=water1011"></script>
+<script src="src/world/disaster_arena.js?v=nostep1013"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
@@ -1172,7 +1172,7 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=flicker1009b"></script>
-<script src="src/city/buildings.js?v=farcopy1013"></script>
+<script src="src/city/buildings.js?v=nostep1013"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1230,7 +1230,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/exec_office.js?v=pf0930a"></script>
 <script src="src/city/escalators.js?v=air0929r"></script>
 <script src="src/city/roofloot.js?v=cd0929"></script>
-<script src="src/city/beach.js?v=ground1001"></script>
+<script src="src/city/beach.js?v=nostep1013"></script>
 <script src="src/city/expansion.js?v=ground1001"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
@@ -1415,7 +1415,7 @@ document.body.appendChild(b);}}catch(e){}})();
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
      so either order works — keep them adjacent, still landmass order 40. -->
 <script src="src/city/arena_venue.js?v=bigcrowd1009b"></script>
-<script src="src/city/arena_fights.js?v=gnp0930"></script>
+<script src="src/city/arena_fights.js?v=nostep1013"></script>
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
 <script src="src/city/street_hardware.js?v=farform1011m"></script>
@@ -1769,7 +1769,7 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=stairs1009b"></script>
+<script src="src/city/fitout.js?v=nostep1013"></script>
 <script src="src/city/fitout_plans.js?v=stairs1009b"></script>
 <script src="src/city/fitout_work.js?v=stairs1009b"></script>
 <script src="src/city/fitout_gang.js?v=stairs1009b"></script>
@@ -2414,7 +2414,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=boot1013"></script>
+<script src="src/city/presidency.js?v=nostep1013"></script>
 <script src="src/city/politics.js?v=btn1011"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
@@ -2523,7 +2523,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/games/military.js?v=base1012"></script>
 <script src="src/games/government.js?v=intent1008"></script>
 <script src="src/games/police.js?v=dogs1009b"></script>
-<script src="src/games/jail.js?v=nodash1"></script>
+<script src="src/games/jail.js?v=nostep1013"></script>
 <script src="src/systems/newlife.js?v=newlife1"></script>
 
 <!-- 5. quality + loop + boot -->

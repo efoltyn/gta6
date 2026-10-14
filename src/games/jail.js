@@ -789,8 +789,11 @@
     const o = {
       box: function (x, y, z, w, h, d, color, oo) {
         const m = ctx.box(gp, x, y, z, w, h, d, ctx.mat(color), 0);
-        if (oo && oo.solid) ctx.solid(x - w / 2, z - d / 2, x + w / 2, z + d / 2,
-          oo.y0 != null ? oo.y0 : y - h / 2, oo.y1 != null ? oo.y1 : y + h / 2);
+        if (oo && oo.solid) {
+          const c = ctx.solid(x - w / 2, z - d / 2, x + w / 2, z + d / 2,
+            oo.y0 != null ? oo.y0 : y - h / 2, oo.y1 != null ? oo.y1 : y + h / 2);
+          if (c && typeof c === "object" && oo.noStep) c.noStep = true;
+        }
         return m;
       },
       ox: V.origin.x, oz: V.origin.z, solid: true,

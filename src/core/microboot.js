@@ -1241,9 +1241,13 @@
   }
   // feetY/headY gate a banded record exactly as physics.js's collide() does:
   // skipped when the body is wholly under it or wholly over it. Omit both and
-  // every record is full height.
+  // every record is full height. An object (c.noStep: furniture, cars) is
+  // measured from the real feet — walkers pass feet raised by the 0.42 m step
+  // line, and furniture is a blocker, not a step (physics.js STEP_SOLID).
+  const STEP_SOLID = 0.42;
   function bandSkip(c, feetY, headY) {
-    return c.y0 != null && (headY <= c.y0 || feetY >= (c.y1 == null ? Infinity : c.y1));
+    return c.y0 != null && (headY <= c.y0 ||
+      (c.noStep ? feetY - STEP_SOLID : feetY) >= (c.y1 == null ? Infinity : c.y1));
   }
 
   // Penetration of a disc into one record. Returns the depth (0 = clear) and

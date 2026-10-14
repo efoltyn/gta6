@@ -704,11 +704,14 @@
     ROOM.board = canvasTexLive(2048, 512);           // 4:1, exactly the screen's aspect
     ROOM.pads = [];
     let tableRec = null;
-    // the kit's colliders ride its draw call ({solid, y0, y1}: a chair is a
-    // seat you can step onto and a back); addCol ledgers them on ROOM.cols so
+    // the kit's colliders ride its draw call ({solid, y0, y1, noStep}: a
+    // chair is a seat and a back, both blockers, neither a stair); addCol ledgers them on ROOM.cols so
     // they leave with the room
     const kitBox = function (x, y, z, w, h, d, color, o) {
-      if (o && o.solid) addCol(x, z, w, d, o.y0 != null ? o.y0 : y - h / 2, o.y1 != null ? o.y1 : y + h / 2);
+      if (o && o.solid) {
+        const c = addCol(x, z, w, d, o.y0 != null ? o.y0 : y - h / 2, o.y1 != null ? o.y1 : y + h / 2);
+        if (o.noStep) c.noStep = true;   // furniture: a blocker, never a stair
+      }
       return addBox(grp, x, y, z, w, h, d, color);
     };
     if (CBZ.furnish && CBZ.furnish.table) {

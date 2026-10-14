@@ -761,8 +761,10 @@
     }
     function solid(x0, x1, z0, z1, ya, yb) {
       if (inCore(Math.min(x0, x1), Math.max(x0, x1), Math.min(z0, z1), Math.max(z0, z1))) return;
-      cols.push({ minX: ox + Math.min(x0, x1), maxX: ox + Math.max(x0, x1), minZ: oz + Math.min(z0, z1),
-                  maxZ: oz + Math.max(z0, z1), y0: ya, y1: yb, ref: null, _fitout: site.key });
+      const c = { minX: ox + Math.min(x0, x1), maxX: ox + Math.max(x0, x1), minZ: oz + Math.min(z0, z1),
+                  maxZ: oz + Math.max(z0, z1), y0: ya, y1: yb, ref: null, _fitout: site.key };
+      cols.push(c);
+      return c;
     }
     // a subdivided floor/ceiling plane so baked light can pool on it. `holes`
     // are rects to leave open (stair wells, lift shafts): a floor takes this
@@ -1008,8 +1010,11 @@
       // The kit hands its own band (a seat is solid floor-to-cushion, its
       // back and arms higher); solid() ledgers it with the floor's colliders,
       // so it dies with the floor like every wall here.
-      if (o && o.solid) solid(lx - w / 2, lx + w / 2, lz - d / 2, lz + d / 2,
-        o.y0 != null ? o.y0 : ly - h / 2, o.y1 != null ? o.y1 : ly + h / 2);
+      if (o && o.solid) {
+        const c = solid(lx - w / 2, lx + w / 2, lz - d / 2, lz + d / 2,
+          o.y0 != null ? o.y0 : ly - h / 2, o.y1 != null ? o.y1 : ly + h / 2);
+        if (c && o.noStep) c.noStep = true;   // furniture: a blocker, never a stair
+      }
       return true;
     }
     function furn(name, x, z, yaw, o) {

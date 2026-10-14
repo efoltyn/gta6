@@ -22,6 +22,15 @@
                             // "airborne off each nosing → fall through" bug). A
                             // real ledge (drop > SNAP_DOWN) still falls normally.
   const BODY_H = 1.7;       // collision body height for height-gated walls
+  // THE STEP LINE. Walking bodies (player, peds) hand collide() their feet
+  // RAISED by this much, so a banded box whose top is under it is strode over
+  // rather than pushed back from (see REAL STEP-UP ONTO SOLID STEPS).
+  const STEP_SOLID = 0.42;
+  // An OBJECT (c.noStep: furniture, cars) is never strode onto. collide()
+  // takes the step line back off its feet for those, so a sofa seat is a
+  // blocker at shin height, and stepTopAt() only lets you stand on its top
+  // once your feet are already there (you jumped or vaulted up).
+  const ON_TOP_EPS = 0.05;
 
   // ---- static-world collision broad phase ---------------------------
   // Most colliders are inert walls and props. Index their expanded bounds
@@ -506,7 +515,9 @@
         for (let i = 0, N = nCol + carN; i < N; i++) {
           const c = i < nCol ? cols[i] : _carNear[i - nCol];
           if (c._city && !cityOn) continue;
-          if (c.y0 != null && (headY <= c.y0 || feetY >= c.y1)) continue; // body clears this box
+          // body clears this box. An object (noStep) is measured from the
+          // body's real feet: the step line does not stride over furniture.
+          if (c.y0 != null && (headY <= c.y0 || (c.noStep ? feetY - STEP_SOLID : feetY) >= c.y1)) continue;
           if (!(x >= c.minX - reach && x <= c.maxX + reach && z >= c.minZ - reach && z <= c.maxZ + reach)) continue;
           if (nn < NEAR_MAX) _near[nn++] = c; else over = true;
           if (!(x >= c.minX - radius && x <= c.maxX + radius && z >= c.minZ - radius && z <= c.maxZ + radius)) continue;
@@ -751,7 +762,7 @@
         if (c._qSeen === qid) continue;
         c._qSeen = qid;
         if (c._city && !cityOn) continue;
-        if (c.y0 != null && (headY <= c.y0 || feetY >= c.y1)) continue;
+        if (c.y0 != null && (headY <= c.y0 || (c.noStep ? feetY - STEP_SOLID : feetY) >= c.y1)) continue;
         if (!(c.maxX >= minX && c.minX <= maxX && c.maxZ >= minZ && c.minZ <= maxZ)) continue;
         if (sweepBox(ax, az, vx, vz, radius, c, best)) { best = SW.t; bnx = SW.nx; bnz = SW.nz; bc = c; }
       }
@@ -2350,18 +2361,32 @@
        · stepTopAt() makes that same box's top a surface you stand on, the
          moment your centre is over it.
      A box that is floating (its bottom above your ankles) is never a step,
-     and a full-height collider (no y0) never is either: it is a wall. */
-  const STEP_SOLID = 0.42;
+     and a full-height collider (no y0) never is either: it is a wall.
+
+     THE BOX YOU ARE STANDING ON IS GROUND (2026-10-13). This used to ask
+     only for tops ABOVE the feet (y1 > feetY + 0.02). The frame after you
+     stepped up, your feet were AT the top, so the box no longer counted, the
+     floor 0.4 m down was "ground" again, the snap pulled you down to it, and
+     the next frame stepped you back up: the owner's "walk up to a couch and
+     the game starts glitching up and down". A box under you is support at
+     any depth below the feet (walkGroundAt keeps the higher of it and the
+     platforms, so a lower box can never pull you down).
+
+     FURNITURE IS NOT A STAIR. A record marked noStep (every city/furniture.js
+     solid, cars) is a blocker at shin height: collide() measures it from the
+     real feet, and its top is ground only once the feet are already on it
+     (ON_TOP_EPS), i.e. you jumped or vaulted onto the sofa. Walking into it
+     just stops you. */
   function stepTopAt(x, z, feetY) {
     if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
     const b = colBuckets.get(colKey(Math.floor(x / COL_CELL), Math.floor(z / COL_CELL)));
     if (!b) return -Infinity;
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
-    const lo = feetY + 0.02, hi = feetY + STEP_UP, base = feetY + 0.1;
+    const hi = feetY + STEP_UP, onTop = feetY + ON_TOP_EPS, base = feetY + 0.1;
     let best = -Infinity;
     for (let i = 0; i < b.length; i++) {
       const c = b[i];
-      if (c.y0 == null || c.y1 <= lo || c.y1 > hi || c.y0 > base || c.noStep) continue;
+      if (c.y0 == null || c.y0 > base || c.y1 <= best || c.y1 > (c.noStep ? onTop : hi)) continue;
       if (c._city && !cityOn) continue;
       if (x < c.minX || x > c.maxX || z < c.minZ || z > c.maxZ) continue;
       if (c.yaw) {
@@ -2369,7 +2394,7 @@
         const lx = rx * co - rz * si, lz = rx * si + rz * co;
         if (lx < -c.hw || lx > c.hw || lz < -c.hd || lz > c.hd) continue;
       }
-      if (c.y1 > best) best = c.y1;
+      best = c.y1;
     }
     return best;
   }
