@@ -120,6 +120,10 @@
      CanvasTexture re-upload is real per-frame GPU cost, so a live board redraws
      on EVENTS (a vote flipped, a shift changed), never per frame. */
   function canvasTexLive(w, h) {
+    // the canvas is made when the board is first drawn on or drawn
+    // (core/texfree.js liveCanvas): a package's board nobody has painted yet
+    // holds no backing store
+    if (CBZ.liveCanvas) return CBZ.liveCanvas(w, h);
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     const tex = new THREE.CanvasTexture(canvas);

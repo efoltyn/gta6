@@ -489,6 +489,9 @@
   // here (same board contract: paint() is the one needsUpdate writer, and it
   // is called on EVENTS, never per frame).
   function canvasTexLive(w, h) {
+    // made when first painted or first drawn (core/texfree.js liveCanvas): the
+    // 2048x512 wall is 4 MB of blank canvas in a room nobody has entered
+    if (CBZ.liveCanvas) return CBZ.liveCanvas(w, h);
     const canvas = document.createElement("canvas");
     canvas.width = w; canvas.height = h;
     const tex = new THREE.CanvasTexture(canvas);
@@ -2035,7 +2038,15 @@
   }
 
   // ---- the board - painted on events, never per frame --------------------
+  // the wall paints itself when it is next drawn (core/texfree.js paintWith):
+  // a situation room nobody is in holds no 4 MB canvas
   function paintBoard() {
+    const b = ROOM.board;
+    if (!b) return;
+    if (b.paintWith) b.paintWith(paintBoardNow);
+    else paintBoardNow();
+  }
+  function paintBoardNow() {
     const b = ROOM.board;
     if (!b) return;
     const h = seat();

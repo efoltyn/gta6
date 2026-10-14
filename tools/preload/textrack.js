@@ -21,6 +21,32 @@
   var SRC = new WeakMap();           // canvas / typed array -> painter site
   var LIVE = new Map();              // WebGLTexture -> record
   var CVS = [];                      // WeakRefs of every canvas given a 2D context
+  var UP = new WeakSet();            // ArrayBuffers some bufferData call uploaded
+  /* CBZ_GEO(top): every geometry reachable from CBZ.scene (hidden included),
+     its CPU arrays split by: uploaded or not, the mesh drawing or not
+     (visible chain), and grouped by the nearest named ancestor. Shared
+     arrays are counted once. */
+  window.CBZ_GEO = function (top) {
+    var seen = new Set(), cat = {}, by = new Map();
+    function chainVis(o) { for (; o; o = o.parent) if (!o.visible) return false; return true; }
+    function nameOf(o) { var path = []; for (var p = o; p && path.length < 3; p = p.parent) if (p.name) path.push(p.name); return path.join("<") || o.type; }
+    CBZ.scene.traverse(function (o) {
+      var g = o.geometry; if (!g || !g.attributes) return;
+      var bytes = 0, upl = 0;
+      function one(a) { if (!a) return; var arr = a.isInterleavedBufferAttribute ? a.data.array : a.array; if (!arr || !arr.buffer || seen.has(arr.buffer)) return; seen.add(arr.buffer); bytes += arr.byteLength; if (UP.has(arr.buffer)) upl += arr.byteLength; }
+      for (var k in g.attributes) one(g.attributes[k]);
+      one(g.index);
+      if (o.isInstancedMesh) { one(o.instanceMatrix); one(o.instanceColor); }
+      if (!bytes) return;
+      var vis = chainVis(o), k2 = (vis ? "drawing" : "hidden") + (upl ? (upl < bytes ? " part-uploaded" : " uploaded") : " never-uploaded");
+      cat[k2] = (cat[k2] || 0) + bytes;
+      var n = k2 + " | " + nameOf(o), e = by.get(n); if (!e) by.set(n, e = [0, 0]); e[0] += bytes; e[1]++;
+    });
+    var rows = []; by.forEach(function (e, k) { rows.push([+(e[0] / 1048576).toFixed(2), e[1], k]); });
+    rows.sort(function (a, b) { return b[0] - a[0]; });
+    for (var c in cat) cat[c] = +(cat[c] / 1048576).toFixed(1);
+    return JSON.stringify({ categoriesMB: cat, top: rows.slice(0, top || 50) });
+  };
   [window.HTMLCanvasElement, window.OffscreenCanvas].forEach(function (K) {
     if (!K) return; var g = K.prototype.getContext;
     K.prototype.getContext = function (type) { if (!SRC.has(this)) { SRC.set(this, site()); if (type === "2d" && window.WeakRef) CVS.push(new WeakRef(this)); } return g.apply(this, arguments); };
@@ -67,6 +93,9 @@
       } catch (e) {}
       return r;
     };
+    // every array a buffer was filled from (CBZ_GEO: is a geometry's CPU copy also on the GPU?)
+    var bd = p.bufferData;
+    p.bufferData = function (t, d) { if (d && typeof d === "object" && d.buffer) UP.add(d.buffer); return bd.apply(this, arguments); };
     var gm = p.generateMipmap;
     p.generateMipmap = function (t) { var r = gm.apply(this, arguments); try { var rec = LIVE.get(bound(this, t)); if (rec) rec.mips = 1; } catch (e) {} return r; };
     var dt = p.deleteTexture;

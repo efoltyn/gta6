@@ -995,6 +995,8 @@
     if (!tex) { _atlasMat = sharedMat("interior-screen-v5", 0x04060a, { emissive: 0x0c1e2c, ei: 0.9 }); return _atlasMat; }
     if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;
     tex.anisotropy = 4;
+    // painted once (drawAtlas): the canvas goes back once it is on the GPU (core/texfree.js)
+    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);
     _atlasMat = new THREE.MeshLambertMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.92 });
     _atlasMat._shared = true;
     mats.set("interior-atlas", _atlasMat);

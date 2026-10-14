@@ -873,7 +873,7 @@
     const arena = CBZ.city && CBZ.city.arena;
     if (S.built) {
       if (S.arena === arena) return true;
-      S.built = false; S.group = null; S.winGroup = null; S.slots = []; S.near = false; S.lot = null; S.cs = null; S.tux = null;
+      S.built = false; S.dressed = false; S.group = null; S.winGroup = null; S.slots = []; S.near = false; S.lot = null; S.cs = null; S.tux = null;
       S.cols = [];                                        // the old arena's collider list went with it
     }
     if (!arena || !econ() || !CBZ.cityComposableSpec) return false;
@@ -915,9 +915,19 @@
       bounds: { minX: cx - w / 2 + WT, maxX: cx + w / 2 - WT, minZ: cz - d / 2 + WT, maxZ: cz + d / 2 - WT },
     };
     S.arena = arena;
-    buildDisplays();
+    // THE FLOOR IS DRESSED WHEN YOU COME DOWN THE STREET, not at the city
+    // boot: the racks, forms and window (6.4 MB of merged geometry, drawn only
+    // from the door) were built at the boot for a shop that is usually a
+    // district away, and held, hidden, never uploaded (dress() below)
+    S.cx = S.cs.cx; S.cz = S.cs.cz; S.dressed = false;
     S.built = true;
     return true;
+  }
+  const DRESS_R = 80;         // past the window's 26 m read, with room to build it unseen
+  function dress() {
+    if (!S.built || S.dressed) return;
+    S.dressed = true;
+    buildDisplays();
   }
 
   // ---- per-frame --------------------------------------------------------------
@@ -931,6 +941,7 @@
     wireFixtures();
     const P = CBZ.player;
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
+    if (!S.dressed && dx * dx + dz * dz < DRESS_R * DRESS_R) dress();
     // The racks may ONLY render when the player is actually INSIDE the store
     // shell (plus a small doorway lip). r128's raycaster can't cull a hung
     // garment behind opaque walls, so the merch was reading through the glass
@@ -974,6 +985,7 @@
   // headless/harness handle: buy/wear a named composable off the floor.
   CBZ.cityClothingBuy = function (labelOrName) {
     if (!ensure()) return false;
+    dress();
     let slot = S.slots.find((x) => x.kind === "item" && (x.name === labelOrName || x.label === labelOrName));
     if (slot) { buyOrWear(slot.name, slot.visualId, slot.label); return true; }
     if (S.tux && (S.tux.name === labelOrName || S.tux.label === labelOrName || labelOrName === "Tuxedo")) {
@@ -983,6 +995,7 @@
   };
   CBZ.cityClothingState = function () {
     if (!S.built) return null;
+    dress();
     return {
       lot: !!S.lot,
       items: S.slots.filter((s) => s.kind === "item").map((s) => ({
@@ -999,6 +1012,7 @@
   // one is the perf ceiling this file has to live under.
   CBZ.cityClothingDressAudit = function () {
     if (!S.built) return null;
+    dress();
     let meshes = 0, sprites = 0, winMeshes = 0;
     const count = function (o) { if (o.isMesh) meshes++; else if (o.isSprite) sprites++; };
     if (S.group) S.group.traverse(count);

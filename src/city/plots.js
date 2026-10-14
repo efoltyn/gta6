@@ -457,20 +457,27 @@
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(num, W / 2, H * 0.54);
   }
-  /* The canvas takes its size the first time somebody paints it (cm.ctx):
-     the pooled for-sale signs are built hidden at boot and painted only when
-     a lot is assigned, and each held a 512 x 352 canvas (0.7 MB) from the
-     start. A hidden sign never uploads, so a 1x1 canvas until then is free. */
+  /* A sign's picture is a PAINTER, not a canvas: cm.draw(fn) records what the
+     sign says and the canvas exists only while three uploads it, the first
+     frame the sign is drawn (core/texfree.js lazyCanvasTexture). The pooled
+     for-sale signs are painted when a lot is assigned, often far out of
+     sight, and each held its 512 x 352 canvas (0.7 MB) from then on: 5.5 MB
+     of canvases at the phone boot for signs nobody had looked at. A repaint
+     (a new price) re-uploads by running the newest painter. */
   function makeCanvasMat(w, h) {
-    const c = document.createElement("canvas"); c.width = 1; c.height = 1;
-    const t = new THREE.CanvasTexture(c);
+    let painter = null;
+    const paint = function (ctx) { if (painter) painter(ctx, w, h); };
+    let t;
+    if (CBZ.lazyCanvasTexture) t = CBZ.lazyCanvasTexture(w, h, paint);
+    else { const c = document.createElement("canvas"); c.width = w; c.height = h; t = new THREE.CanvasTexture(c); }
     t.anisotropy = 4;
     const m = new THREE.MeshLambertMaterial({ map: t });
-    const cm = { canvas: c, tex: t, mat: m };
-    Object.defineProperty(cm, "ctx", { enumerable: true, get: function () {
-      if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
-      return c.getContext("2d");
-    } });
+    const cm = { tex: t, mat: m };
+    cm.draw = function (fn) {
+      painter = fn;
+      if (!CBZ.lazyCanvasTexture) fn(t.image.getContext("2d"), w, h);
+      t.needsUpdate = true;
+    };
     return cm;
   }
   // a sign stands just inside the frontage, off to one side of the door so it
@@ -522,7 +529,7 @@
     const box = new THREE.Mesh(m.mboxG, m.box); box.position.set(0, 1.4, 0); box.castShadow = true; grp.add(box);
     const lid = new THREE.Mesh(m.mlidG, m.box); lid.rotation.x = Math.PI / 2; lid.rotation.z = Math.PI / 2; lid.position.set(0, 1.52, 0); grp.add(lid);
     const cm = makeCanvasMat(128, 52);
-    paintPlate(cm.ctx, 128, 52, num); cm.tex.needsUpdate = true;
+    cm.draw(function (ctx) { paintPlate(ctx, 128, 52, num); });
     const plate = new THREE.Mesh(m.plateG, [m.steel, m.steel, m.steel, m.steel, cm.mat, cm.mat]);
     plate.position.set(0, 1.0, 0.062); grp.add(plate);
     const plate2 = plate.clone(); plate2.position.z = -0.062; grp.add(plate2);
@@ -594,8 +601,8 @@
     const txt = tag + "|" + (p != null ? money(p) : "");
     if (txt === s.text) return;
     s.text = txt;
-    paintSale(s.cm.ctx, 512, 352, p != null ? money(p) : "", tag);
-    s.cm.tex.needsUpdate = true;
+    const price = p != null ? money(p) : "";
+    s.cm.draw(function (ctx) { paintSale(ctx, 512, 352, price, tag); });
   }
   function refreshMarkers() {
     const A = arena(); if (!A || !A.root) return;

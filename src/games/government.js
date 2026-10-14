@@ -364,7 +364,15 @@
     cc.lineTo(x, y + r); cc.quadraticCurveTo(x, y, x + r, y); cc.closePath();
   }
   function makeBoard() { return C.canvasTexLive(BOARD_CW, BOARD_CH); }
+  // the board paints itself when it is next drawn (core/texfree.js
+  // paintWith): a chamber nobody is in holds no canvas, however often the
+  // whip count moves
   function redrawBoard() {
+    if (!V || !V.board) return;
+    if (V.board.paintWith) V.board.paintWith(redrawBoardNow);
+    else redrawBoardNow();
+  }
+  function redrawBoardNow() {
     if (!V || !V.board) return;
     const cc = V.board.cc, W = V.board.w, H = V.board.h;
     cc.textBaseline = "alphabetic";

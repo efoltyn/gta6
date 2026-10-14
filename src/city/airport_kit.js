@@ -817,6 +817,8 @@
     const tex = new THREE.CanvasTexture(cvs);
     tex.anisotropy = 4;
     if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
+    // painted once: the canvas goes back once it is on the GPU (core/texfree.js)
+    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);
     const faceGeos = [], frame = [], legs = [];
     const HGT = 1.1;
     for (const f of faces) {

@@ -1607,14 +1607,14 @@
     const cv = sz && mkCanvas(sz[0], sz[1]);
     // no 2D canvas (a headless stub): no chart, and the skin stays plain
     if (!cv || !cv.getContext || !cv.getContext("2d")) { FAILED.add(id); return null; }
-    /* Painted now (this runs in idle time), but the canvas is not kept: it
-       goes back once the texture is uploaded or copied into a ped atlas page
-       (core/texfree.js lazyCanvasTexture), and a later read paints it again. */
+    /* Painted when first read (the upload, or the ped atlas page's copy) and
+       given back right after (core/texfree.js lazyCanvasTexture); a later
+       read paints it again. It used to be painted eagerly here and then held
+       until that read: a far body's chart waited for a draw that had not come
+       (19 charts, 6.4 MB of canvases at the phone boot's peak). */
     if (CBZ.lazyCanvasTexture && !(CBZ.tattoo && CBZ.tattoo._mkCanvas)) {
-      let ok = true;
       cv.width = 1; cv.height = 1;             // (only the capability probe)
-      t = CBZ.lazyCanvasTexture(sz[0], sz[1], function (ctx, c) { try { paint(kind, key, c); } catch (e) { ok = false; } }, { eager: true });
-      if (!ok) { FAILED.add(id); return null; }
+      t = CBZ.lazyCanvasTexture(sz[0], sz[1], function (ctx, c) { try { paint(kind, key, c); } catch (e) { FAILED.add(id); } });
     } else {
       try { paint(kind, key, cv); } catch (e) { FAILED.add(id); return null; }
       t = new THREE.CanvasTexture(cv);

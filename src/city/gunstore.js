@@ -781,6 +781,7 @@
   }
   // headless / harness handle: what the armoury row is actually WEARING.
   CBZ.cityGunstoreArmoury = function () {
+    if (ensure()) dress();
     const out = [];
     for (const s of S.slots) {
       if (!s.armor) continue;
@@ -979,7 +980,7 @@
     const arena = CBZ.city && CBZ.city.arena;
     if (S.built) {
       if (S.arena === arena) return true;
-      S.built = false; S.group = null; S.slots = []; S.near = false; S.lot = null; S.gs = null;
+      S.built = false; S.dressed = false; S.group = null; S.slots = []; S.near = false; S.lot = null; S.gs = null;
     }
     if (!arena || !econ() || !CBZ.buildActorWeapon) return false;
     if (S.noLotArena === arena) return false;          // this city has no gun wall — answered once
@@ -992,9 +993,20 @@
     }
     if (!lot) return false;
     S.lot = lot; S.gs = lot.building.gunstore; S.arena = arena;
-    buildDisplays();
+    // the wall is DRESSED when you come down the street (dress() below), not
+    // at the boot: its merged racks and cases were ~2 MB of geometry held
+    // hidden, never uploaded, for a shop that is usually a district away
+    S.cx = (S.gs.bounds.minX + S.gs.bounds.maxX) / 2;
+    S.cz = (S.gs.bounds.minZ + S.gs.bounds.maxZ) / 2;
+    S.dressed = false;
     S.built = true;
     return true;
+  }
+  const DRESS_R = 110;        // past the 55 m draw gate, with room to build it unseen
+  function dress() {
+    if (!S.built || S.dressed) return;
+    S.dressed = true;
+    buildDisplays();
   }
 
   // ---- per-frame --------------------------------------------------------------
@@ -1016,6 +1028,7 @@
     // distance VIS-GATE: the dozen display models draw only when you're near
     const P = CBZ.player;
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
+    if (!S.dressed && dx * dx + dz * dz < DRESS_R * DRESS_R) dress();
     const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
     if (S.group && S.group.visible !== near) S.group.visible = near;
     S.near = near;
@@ -1028,6 +1041,7 @@
   // headless/harness handle: buy a named display off the wall ("AK-47", "Ammo Box")
   CBZ.cityGunstoreBuy = function (name) {
     if (!ensure()) return false;
+    dress();
     const s = S.slots.find((x) => x.name === name);
     if (!s) return false;
     buySlot(s);

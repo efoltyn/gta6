@@ -18,10 +18,12 @@
     var u = m.usedJSHeapSize; P.samples++;
     if (u > cur.hi) cur.hi = u;
     if (u < cur.lo) cur.lo = u;
-    if (cur.k === "(frames)" && P.trail.length < 400) P.trail.push([Math.round(performance.now() - cur.t0), Math.round(u / 1048576)]);
+    if (cur.k === "(frames)" && P.trail.length < 400 && performance.now() - (P.trailAt || 0) >= 40) { P.trailAt = performance.now(); P.trail.push([Math.round(performance.now() - cur.t0), Math.round(u / 1048576)]); }
     if (u > P.max) {
       P.max = u; P.maxStep = cur.k; P.maxAt = performance.now();
-      if (withStack && cur.k === "(frames)" && P.stacks.length < 40) {
+      // one stack per 3 MB of new maximum, so the whole climb is named, not its first 40 samples
+      if (withStack && cur.k === "(frames)" && P.stacks.length < 120 && u > (P.lastStackAt || 0) + 3145728) {
+        P.lastStackAt = u;
         var st = (new Error().stack || "").split("\n").slice(3, 9).map(function (l) { var m2 = /\/(src\/[^?:)]+)(?:\?[^:)]*)?:(\d+)/.exec(l); return m2 ? m2[1].replace(/^src\//, "") + ":" + m2[2] : ""; }).filter(Boolean).join(" < ");
         P.stacks.push([Math.round(u / 1048576), Math.round(performance.now() - cur.t0), st]);
       }
@@ -55,6 +57,6 @@
     stepTo(cur.k);
     var top = P.steps.slice().sort(function (a, b) { return b[2] - a[2]; }).slice(0, 12);
     var m = performance.memory;
-    return JSON.stringify({ peakMB: +(P.max / 1048576).toFixed(0), inStep: P.maxStep, nowMB: m ? +(m.usedJSHeapSize / 1048576).toFixed(0) : null, samples: P.samples, topSteps: top, trail: P.trail.filter(function (x, i) { return i % 4 === 0; }), stacks: P.stacks });
+    return JSON.stringify({ peakMB: +(P.max / 1048576).toFixed(0), inStep: P.maxStep, nowMB: m ? +(m.usedJSHeapSize / 1048576).toFixed(0) : null, samples: P.samples, topSteps: top, trail: P.trail.filter(function (x, i) { return i % 3 === 0; }), stacks: P.stacks });
   };
 })();

@@ -609,7 +609,7 @@
     const arena = CBZ.city && CBZ.city.arena;
     if (S.built) {
       if (S.arena === arena) return true;
-      S.built = false; S.group = null; S.lot = null; S.b = null; S.near = false; S.sellDesk = null; S.loanDesk = null;
+      S.built = false; S.dressed = false; S.group = null; S.lot = null; S.b = null; S.near = false; S.sellDesk = null; S.loanDesk = null;
     }
     if (!arena || !econ()) return false;
     if (S.noLotArena === arena) return false;          // this city has no pawn lot — answered once
@@ -625,9 +625,19 @@
     }
     if (!lot) return false;
     S.lot = lot; S.b = lot.building; S.arena = arena;
-    buildDisplays();
+    // DRESSED WHEN YOU COME DOWN THE STREET (dress() below), not at the boot:
+    // the shelving and cases were ~1.3 MB of merged geometry held hidden and
+    // never uploaded for a shop that is usually a district away
+    S.cx = S.b.ox != null ? S.b.ox : lot.cx; S.cz = S.b.oz != null ? S.b.oz : lot.cz;
+    S.dressed = false;
     S.built = true;
     return true;
+  }
+  const DRESS_R = 110;        // past the 55 m draw gate, with room to build it unseen
+  function dress() {
+    if (!S.built || S.dressed) return;
+    S.dressed = true;
+    buildDisplays();
   }
 
   // ---- per-frame --------------------------------------------------------------
@@ -652,6 +662,7 @@
 
     const P = CBZ.player;
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
+    if (!S.dressed && dx * dx + dz * dz < DRESS_R * DRESS_R) dress();
     const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
     if (S.group && S.group.visible !== near) S.group.visible = near;
     S.near = near;

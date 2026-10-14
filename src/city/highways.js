@@ -1354,25 +1354,37 @@
   // ============================================================
   const ATLAS_W = 1024, ATLAS_H = 1024, SLOT_W = 512, SLOT_H = 204;
   let _slot = 0;
+  /* THE ATLAS IS ITS PANEL LIST. Signs are added a slot at a time as highway
+     jobs stream in; the atlas keeps each slot's spec and the canvas exists
+     only while three uploads it (core/texfree.js lazyCanvasTexture: painted
+     from the whole list at the upload, given back after). A new sign
+     re-uploads the list. It used to be a 1024x1024 canvas held for the
+     session (4 MB at the phone boot) and kept out of the sweep, because the
+     sweep shrinking it lost every sign painted before. */
   function atlas() {
     if (_atlas) return _atlas;
     let cv = null;
     try { cv = document.createElement("canvas"); } catch (e) { cv = null; }
-    if (!cv || !cv.getContext) return null;
-    cv.width = ATLAS_W; cv.height = ATLAS_H;
-    const g = cv.getContext("2d");
-    if (!g) return null;
-    g.fillStyle = "#1f6b3a"; g.fillRect(0, 0, ATLAS_W, ATLAS_H);
-    const tex = new THREE.CanvasTexture(cv);
+    if (!cv || !cv.getContext || !cv.getContext("2d")) return null;   // (only the capability probe)
+    cv.width = 1; cv.height = 1;
+    const specs = [];
+    const paintAll = function (g) {
+      g.fillStyle = "#1f6b3a"; g.fillRect(0, 0, ATLAS_W, ATLAS_H);
+      for (let i = 0; i < specs.length; i++) if (specs[i]) paintPanel(g, i, specs[i]);
+    };
+    let tex;
+    if (CBZ.lazyCanvasTexture) tex = CBZ.lazyCanvasTexture(ATLAS_W, ATLAS_H, paintAll);
+    else {
+      cv.width = ATLAS_W; cv.height = ATLAS_H;
+      tex = new THREE.CanvasTexture(cv);
+      if (CBZ.texKeep) CBZ.texKeep(tex);
+    }
     tex.encoding = THREE.sRGBEncoding;           // sRGB-authored colours (the pale-sign bug class)
     tex.anisotropy = 4;
-    /* NEVER SWEPT (core/texfree.js texKeep): signs are painted into free
-       slots as highway jobs stream in, one slot at a time. Once the sweep had
-       shrunk the canvas (30 s without a new sign), the next sign was drawn
-       onto a blank restored canvas and every earlier sign went with it. */
-    if (CBZ.texKeep) CBZ.texKeep(tex);
     const mat = new THREE.MeshLambertMaterial({ map: tex, emissive: 0x111111, emissiveMap: tex });
-    _atlas = { cv: cv, g: g, tex: tex, mat: mat };
+    _atlas = { tex: tex, mat: mat, specs: specs, eager: !CBZ.lazyCanvasTexture,
+      // the eager fallback paints into its own canvas at once
+      paint: function () { if (_atlas.eager) paintAll(tex.image.getContext("2d")); tex.needsUpdate = true; } };
     return _atlas;
   }
   function shield(g, x, y, s, num) {
@@ -1399,7 +1411,12 @@
     const A = atlas();
     if (!A || _slot >= 10) return null;
     const i = _slot++, sx = (i % 2) * SLOT_W, sy = Math.floor(i / 2) * SLOT_H;
-    const g = A.g;
+    A.specs[i] = spec;
+    A.paint();
+    return { u0: sx / ATLAS_W, u1: (sx + SLOT_W) / ATLAS_W, v0: 1 - (sy + SLOT_H) / ATLAS_H, v1: 1 - sy / ATLAS_H };
+  }
+  function paintPanel(g, i, spec) {
+    const sx = (i % 2) * SLOT_W, sy = Math.floor(i / 2) * SLOT_H;
     if (spec.chevron) {
       g.fillStyle = "#e8b81a"; g.fillRect(sx, sy, SLOT_W, SLOT_H);
       g.fillStyle = "#111";
@@ -1422,8 +1439,6 @@
         g.fillText("EXIT " + spec.exit, sx + 30, sy + 170);
       }
     }
-    A.tex.needsUpdate = true;
-    return { u0: sx / ATLAS_W, u1: (sx + SLOT_W) / ATLAS_W, v0: 1 - (sy + SLOT_H) / ATLAS_H, v1: 1 - sy / ATLAS_H };
   }
   function signQuad(uv, cx, cy, cz, fx, fz, w, h) {
     // face normal (fx,fz) toward the approaching driver; right vector r
@@ -1548,7 +1563,7 @@
       _lateDone = false;
       _bends.length = 0;
       _signAcc = null; _gantryAcc = null; _slot = 0;
-      if (_atlas) { _atlas.g.fillStyle = "#1f6b3a"; _atlas.g.fillRect(0, 0, ATLAS_W, ATLAS_H); _atlas.tex.needsUpdate = true; }
+      if (_atlas) { _atlas.specs.length = 0; _atlas.paint(); }
     }, -1000);
     // the late build: after the continent (97) has published the coast
     CBZ.addLandmass(function (city) {

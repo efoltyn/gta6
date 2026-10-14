@@ -159,6 +159,52 @@
     }
     return t;                                 // (CanvasTexture's constructor flagged it for upload)
   };
+  /* CBZ.liveCanvas(w, h): A LIVE BOARD (a tally, a roster, a video wall) whose
+     canvas does not exist until somebody draws on it or the board is first
+     drawn. The shape every board already used: { canvas, cc, tex, w, h,
+     paint() } — canvas and cc are made on first read; paint() is the one
+     needsUpdate writer. A board in a building nobody has walked into, never
+     painted, costs no backing store at all (the situation room's 2048x512
+     wall was 4 MB of blank canvas at the phone boot). A board drawn before it
+     was ever painted uploads the same blank picture it always did. */
+  /* rec.paintWith(fn): the board's painter instead of its pixels. fn draws
+     the WHOLE board from the game's state through rec.cc (and may call
+     rec.paint(), which is then a no-op). It runs when three uploads the board
+     (the first frame it is drawn after a change), and the canvas goes back
+     right after the upload; a later change records the painter again. A board
+     whose building nobody is in holds no canvas, however often its facts
+     change, and when it is drawn it shows the facts of that moment. */
+  CBZ.liveCanvas = function (w, h) {
+    let cv = null, cc = null, painter = null, inPaint = false, dirty = false, painted = false;
+    const make = function () { if (!cv) { cv = document.createElement("canvas"); cv.width = w; cv.height = h; painted = false; } return cv; };
+    const tex = new Orig(undefined);        // not Watched: a live board is never swept
+    Object.defineProperty(tex, "image", {
+      configurable: true, enumerable: true,
+      get: function () {
+        // (three reads .image several times per upload: paint once per change,
+        // or again if the canvas was given back)
+        if (painter && !inPaint && (dirty || !painted)) {
+          dirty = false;
+          make();
+          inPaint = true;
+          try { painter(); } catch (e) { console.error("[live canvas]", tex.name || "", e); }
+          inPaint = false; painted = true;
+          // after the upload the canvas goes; the painter stays for the next one
+          if (CFG.TEX_FREE !== false) tex._cbzDropAfter = true;
+        }
+        return make();
+      },
+      set: function (v) { if (v && typeof v.getContext === "function") { cv = v; cc = null; } },
+    });
+    tex.onUpdate = function () { if (tex._cbzDropAfter) { tex._cbzDropAfter = false; cv = null; cc = null; A.lazyReleased++; } };
+    tex._cbzLazyW = w; tex._cbzLazyH = h;
+    const rec = { tex: tex, w: w, h: h,
+      paint: function () { if (!inPaint) tex.needsUpdate = true; return rec; },
+      paintWith: function (fn) { painter = fn; dirty = true; tex.needsUpdate = true; return rec; } };
+    Object.defineProperty(rec, "canvas", { enumerable: true, get: make });
+    Object.defineProperty(rec, "cc", { enumerable: true, get: function () { return cc || (cc = make().getContext("2d")); } });
+    return rec;
+  };
   /* CBZ.lazyBaked(w, h, bake[, opts]): the same for a baker that makes its
      OWN canvas (or CanvasTexture) in one go. bake() runs at the first upload
      and its picture is copied into the lazy canvas (drawImage, scaled to w x h

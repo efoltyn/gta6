@@ -71,6 +71,13 @@
     }
     return JSON.stringify({ samples: want.size, nodes: nodes, found: found });
   };
+  // CBZ_AB_SITEOF(typedArray): the allocation site of a live array (when it is
+  // among its site's first 64 samples), or null
+  window.CBZ_AB_SITEOF = function (arr) {
+    var buf = arr && arr.buffer ? arr.buffer : arr, hit = null;
+    sites.forEach(function (e, k) { if (hit) return; for (var i = 0; i < e.s.length; i++) { var a = e.s[i].deref(); if (a && (a === arr || a === buf || a.buffer === buf)) { hit = k; return; } } });
+    return hit;
+  };
   window.CBZ_AB_SAMPLES = function (sub) { var out = []; sites.forEach(function (e, k) { if (k.indexOf(sub) >= 0) e.s.forEach(function (w) { var a = w.deref(); if (a) out.push(a); }); }); return out; };
   // CBZ_AB_CHURN(): bytes ALLOCATED per site since load (dead + live): where
   // the build's garbage comes from

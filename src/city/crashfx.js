@@ -255,6 +255,9 @@
   const THREE = window.THREE;
   const scene = CBZ.scene;
   const PURE = CBZ.blastFxPure;
+  // every decal sheet here is painted once from a seeded LCG: its canvas goes
+  // back the moment it is on the GPU (core/texfree.js), not held for the session
+  function freeAfterUpload(t) { return CBZ.freeCanvasAfterUpload ? CBZ.freeCanvasAfterUpload(t) : t; }
 
   // ---- deterministic seeded LCG (NEVER Math.random() — replay/MP sync) ------
   let _rs = 78451;
@@ -458,7 +461,7 @@
       ctx.beginPath(); ctx.arc(r + Math.cos(a) * rr, r + Math.sin(a) * rr, 2 + rng() * 5, 0, 6.2832);
       ctx.fillStyle = "rgba(0,0,0," + (0.2 + rng() * 0.5) + ")"; ctx.fill();
     }
-    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+    const t = new THREE.Texture(c); t.needsUpdate = true; return freeAfterUpload(t);
   }
   const scorchGeo = new THREE.PlaneGeometry(1, 1); scorchGeo._shared = true;
   function addScuff(x, z, radius, hold) {
@@ -505,7 +508,7 @@
       ctx.beginPath(); ctx.arc(r + Math.cos(a) * rr, r + Math.sin(a) * rr, 4 + rng() * 9, 0, 6.2832);
       ctx.fillStyle = "rgba(60,0,0,0.6)"; ctx.fill();
     }
-    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+    const t = new THREE.Texture(c); t.needsUpdate = true; return freeAfterUpload(t);
   }
   function addBloodPool(x, z, radius) {
     if (!splatTex) splatTex = makeSplatTexture();
@@ -564,7 +567,7 @@
     g.addColorStop(0.7, "rgba(255,255,255,0.12)");
     g.addColorStop(1.0, "rgba(255,255,255,0.0)");
     ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
-    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+    const t = new THREE.Texture(c); t.needsUpdate = true; return freeAfterUpload(t);
   }
   // Lumpy smoke texture: several overlapping soft blobs so rising smoke reads as
   // billowing cloud rather than a clean dot. Sampled with alpha blending.
@@ -578,7 +581,7 @@
       g.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, rr, 0, 6.2832); ctx.fill();
     }
-    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+    const t = new THREE.Texture(c); t.needsUpdate = true; return freeAfterUpload(t);
   }
   // The RPG's soft fire/smoke masks are the shared blast visual language.
   // Large composers can reuse the textures in bounded instanced fields rather
@@ -916,7 +919,7 @@
       d[o] = g; d[o + 1] = g; d[o + 2] = g; d[o + 3] = Math.round(Math.max(0, Math.min(1, a)) * 255);
     }
     ctx.putImageData(img, 0, 0);
-    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+    const t = new THREE.Texture(c); t.needsUpdate = true; return freeAfterUpload(t);
   }
   const fireTex = [], smokeB = [];
   function blastTexReady() {
@@ -982,7 +985,7 @@
       ctx.restore();
       ctx.globalCompositeOperation = "source-over";
     }
-    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+    const t = new THREE.Texture(c); t.needsUpdate = true; return freeAfterUpload(t);
   }
 
   /* WALL SOOT: two variants on one 256x512 canvas. Top half: a RING whose
@@ -1027,7 +1030,7 @@
       ctx.restore();
       ctx.globalCompositeOperation = "source-over";
     }
-    const t = new THREE.Texture(c); t.needsUpdate = true; return t;
+    const t = new THREE.Texture(c); t.needsUpdate = true; return freeAfterUpload(t);
   }
 
   // ---- the ONE pooled flash light --------------------------------------------

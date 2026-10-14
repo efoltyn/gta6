@@ -329,6 +329,8 @@
      exactly what the source would draw by itself. Paging can therefore never
      make a garment vanish that the unpaged renderer would have shown. */
   const PAGE_MAX = 2048, PAGES_PER_CLASS = 6;
+  // a page this tall or taller lives on the GPU only (no CPU copy); see growPage
+  const GPU_ROWS = 1024;
   const pageClasses = new Map();    // settings key -> class { w, h, g, sw, sh, PW, PH0, cols, pages }
   const slotOf = new Map();         // source texture uuid -> slot
   let pageSeq = 0, pageCopies = 0, pageFullUploads = 0, pageRefused = 0;
@@ -395,7 +397,7 @@
        the texture (copyTextureToTexture). 16 MB per full page, measured 18 MB
        live on the phone. A lost context reloads (CBZ.freedStaticArrays). */
     t.onUpdate = function () {
-      if (P.PH < PAGE_MAX || !P.data || CBZ.CONFIG && CBZ.CONFIG.TEX_FREE === false) return;
+      if (P.PH < GPU_ROWS || !P.data || CBZ.CONFIG && CBZ.CONFIG.TEX_FREE === false) return;
       P.data = null; t.image.data = null; P.gpuOnly = true;
       CBZ.freedStaticArrays = true;
     };
@@ -412,26 +414,64 @@
   /* Double a full page's height. Rows are stored bottom-up (GL order), so the
      old page is the TOP of the new one: every slot keeps its image position,
      only the normalised v of each slot moves, so every live instance on the
-     page gets its pinUv rewritten here (a rare event: a handful per session). */
+     page gets its pinUv rewritten here (a rare event: a handful per session).
+
+     ONE DOUBLING AT A TIME: 64 .. 512, 1024, 2048. A busy class (the 128x256
+     outfit atlases: ~40 at the city boot, 42 fit in 1024 rows) used to jump
+     from 512 straight to 2048 rows, a 21 MB texture (mips included) holding
+     39 slots of 98; at 1024 rows it is 10.7 MB. From GPU_ROWS up a page is
+     BORN ON THE GPU and has no CPU copy at all: the taller texture is
+     allocated empty (texImage2D with no pixels) and the old rows are copied
+     into its top, from the CPU rows while the page still has them, else read
+     back off the GPU (readOldRows: one readPixels of the old page, garbage
+     the moment it is copied, on a growth that happens a handful of times a
+     session). The doublings below GPU_ROWS are small (the page at 512 rows is
+     4 MB). */
+  function readOldRows(R, P) {
+    const gl = R.getContext && R.getContext();
+    const pr = R.properties.get(P.tex);
+    if (!gl || !pr || !pr.__webglTexture) return null;
+    const C = P.cls, prev = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const fb = gl.createFramebuffer();
+    let out = null;
+    try {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pr.__webglTexture, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
+        out = new Uint8Array(C.PW * P.PH * 4);
+        gl.readPixels(0, 0, C.PW, P.PH, gl.RGBA, gl.UNSIGNED_BYTE, out);
+      }
+    } finally {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, prev);
+      gl.deleteFramebuffer(fb);
+    }
+    return out;
+  }
+  /* The next height. Doubling up to GPU_ROWS; past it, on WebGL2 (which mips
+     any height), ONE SLOT ROW at a time: the 128x256 outfit class fits 42 in
+     1024 rows, and its 43rd outfit used to double the page to 2048 rows
+     (21 MB with mips, for 45 slots) where 1088 rows hold 56 (12 MB). Slot
+     rows stay where they were from the page's top and every row offset is a
+     multiple of the slot height, so mip levels 0..3 (the 8-texel gutter's
+     reach) sample exactly the texels they did on a power-of-two page. */
+  function nextRows(P) {
+    const C = P.cls, R = CBZ.renderer;
+    const npot = !!(R && R.capabilities && R.capabilities.isWebGL2);
+    if (!npot || P.PH * 2 <= GPU_ROWS) return Math.min(PAGE_MAX, P.PH * 2);
+    return Math.min(PAGE_MAX, (Math.floor(P.PH / C.sh) + 1) * C.sh);
+  }
   function growPage(P) {
     const C = P.cls;
     if (P.PH >= PAGE_MAX) return false;
-    // a page that has already grown to 512 rows is a busy class: it goes
-    // straight to its full height (every doubling on the way was a copy of
-    // the page left as garbage: 24 MB of it at boot, measured), and at full
-    // height it drops its CPU copy once uploaded (newPage's onUpdate)
-    const PH = P.PH >= 512 ? PAGE_MAX : P.PH * 2;
-    /* THE FULL PAGE IS BORN ON THE GPU. Its 16 MB CPU array lived just long
-       enough to be uploaded once and then went (newPage's onUpdate): 16 MB of
-       garbage on the phone's boot peak per full page, measured. Now the
-       full-height texture is allocated empty on the GPU (texImage2D with no
-       pixels), the old rows are copied into its top, and the page is
-       GPU-only from that moment: every later slot is written straight into
-       the texture (paintSlot's copyTextureToTexture), as before. */
+    const PH = nextRows(P);
+    if (C.cols * Math.floor(PH / C.sh) <= P.cap) return false;     // no new slot row in it
     const R = CBZ.renderer;
-    if (PH === PAGE_MAX && P.data && R && R.initTexture && R.copyTextureToTexture && R.properties && !(CBZ.CONFIG && CBZ.CONFIG.TEX_FREE === false)) {
-      const old = P.data, oldPH = P.PH;
+    if (PH >= GPU_ROWS && R && R.initTexture && R.copyTextureToTexture && R.properties && !(CBZ.CONFIG && CBZ.CONFIG.TEX_FREE === false)) {
+      const oldPH = P.PH;
+      let old = P.data;
       try {
+        if (!old && P.gpuOnly) old = readOldRows(R, P);
+        if (!old) throw new Error("no rows to carry");
         P.data = null;
         P.tex.image = { data: null, width: C.PW, height: PH };
         P.tex.needsUpdate = true;
@@ -447,10 +487,14 @@
         reUv(P);
         return true;
       } catch (e) {
-        // (no GPU page: the CPU path below, from the rows we still hold)
-        P.data = old; P.tex.image = pageImage(C, oldPH, old); P.tex.needsUpdate = true;
+        // (no GPU page: the CPU path below, from the rows we hold or read
+        // back; a GPU-only page whose rows could not be read stays as it is,
+        // and the class opens a new page instead)
+        if (!old) return false;
+        P.data = old; P.gpuOnly = false; P.tex.image = pageImage(C, oldPH, old); P.tex.needsUpdate = true;
       }
     }
+    if (!P.data) return false;
     const img = pageImage(C, PH);
     img.data.set(P.data, (PH - P.PH) * C.PW * 4);
     P.data = img.data; P.PH = PH;
@@ -1383,6 +1427,26 @@
      not body sizes); if it starts tracking the population, the unit-box
      remap has stopped matching and every part is falling into its own
      exact-geometry pool again. */
+  /* CBZ.pedPageGrowCheck(): grows the tallest page that can still grow (the
+     GPU-only readback path once it is past GPU_ROWS) and reads back one slot
+     of it before and after: the same bytes, at the slot's new rows, is a
+     carried page. A check hook, never called by the game. */
+  CBZ.pedPageGrowCheck = function () {
+    let P = null;
+    pageClasses.forEach(function (C) { if (C) for (const p of C.pages) if (p.PH < PAGE_MAX && p.slots.length && (!P || p.PH > P.PH)) P = p; });
+    const R = CBZ.renderer;
+    if (!P || !R) return { ok: false, why: "no page to grow" };
+    const before = P.data ? P.data.slice() : readOldRows(R, P), ph0 = P.PH, gpu0 = !!P.gpuOnly;
+    if (!before) return { ok: false, why: "page unreadable" };
+    if (!growPage(P)) return { ok: false, why: "growPage refused", rows: ph0 };
+    const after = P.data ? P.data : readOldRows(R, P);
+    if (!after) return { ok: false, why: "grown page unreadable" };
+    // the old rows are the TOP of the new page (GL order: the last rows)
+    const off = (P.PH - ph0) * P.cls.PW * 4;
+    let diff = 0;
+    for (let i = 0; i < before.length; i += 997) if (before[i] !== after[off + i]) diff++;
+    return { ok: diff === 0, rows: ph0 + "->" + P.PH, wasGpuOnly: gpu0, gpuOnly: !!P.gpuOnly, sampledDiffs: diff };
+  };
   CBZ.pedInstanceAudit = function () {
     let active = 0, capacity = 0, live = 0, boxPools = 0, unitPools = 0, blackPools = 0, pagedPools = 0;
     let pages = 0, pageSlots = 0, pageTexels = 0;

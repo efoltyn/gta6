@@ -95,6 +95,10 @@
       t.anisotropy = Math.min(4, r.capabilities.getMaxAnisotropy() || 1);
     }
     t.needsUpdate = true;
+    // painted once (seeded): the canvas goes back once the texture is on the
+    // GPU (core/texfree.js), not 30 s later; the leaf atlas and the bark were
+    // 3 MB of canvases on the phone boot's peak
+    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(t);
     return t;
   }
   function rgb(l, r, g, b) {
