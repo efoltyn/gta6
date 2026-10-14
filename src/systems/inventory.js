@@ -25,7 +25,7 @@
        the node check pins.
      · NO SCREEN. No [I], no bag button, no stash. Digits 1..9 pick the Nth
        usable cell (each usable cell wears its digit in tiny type in its
-       corner, only when there is a keyboard: html.kbd, systems/input.js);
+       corner, only when there is a keyboard: html.has-kbd, systems/input.js);
        the mouse wheel cycles guns (fpsmode.js); a tap picks a cell; a
        sideways swipe along the bar steps to the next/previous gun. Picking the thing already in your hands puts it away.
      · POCKETS STILL EXIST, THEY'RE JUST NOT UI. CBZ.game.inventory (prison)
@@ -271,7 +271,7 @@
       const n = e.count | 0;
       if (n > 1 && e.kind !== "detonator") { pips = "<i class='pips'>"; for (let k = 0; k < Math.min(n, 5); k++) pips += "<b></b>"; pips += "</i>"; }
       // the digit that picks it, stamped on every usable cell; css/inventory.css
-      // shows it only under html.kbd (systems/input.js), so a phone never sees it
+      // shows it only under html.has-kbd (systems/input.js), so a phone never sees it
       const dk = e.selectable && digit < 9 ? " data-k='" + (++digit) + "'" : "";
       html += "<div class='" + cls + "' data-i='" + i + "'" + dk + ">" + face + pips + "</div>";
     }

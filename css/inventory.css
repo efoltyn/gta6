@@ -3,7 +3,7 @@
    inventory of every game, prison and Gang City alike: one clean row of
    real object renders (guns, the bat, grenades, the flashlight, the phone,
    cards, door keys), no stash screen, no bag button. The only type is the
-   tiny slot digit, and only when there is a keyboard (html.kbd).
+   tiny slot digit, and only when there is a keyboard (html.has-kbd).
 
    MANY GUNS: the row never wraps and never scrolls off the glass. Cells
    shrink with the count (--hb-n, stamped by JS) down to a floor, the held
@@ -52,14 +52,14 @@
 #hotbar .hb .pips{ position:absolute; left:50%; bottom:3px; transform:translateX(-50%); display:flex; gap:2px; pointer-events:none; }
 #hotbar .hb .pips b{ width:4px; height:4px; border-radius:50%; background:rgba(236,240,246,.85); box-shadow:0 0 2px rgba(0,0,0,.8); }
 /* the digit that picks a cell, tiny in its top-left corner. Keyboard only:
-   html.kbd is the one truth (systems/input.js), so a phone never sees it. */
-html.kbd #hotbar .hb[data-k]::before{
+   html.has-kbd is the one truth (systems/input.js), so a phone never sees it. */
+html.has-kbd #hotbar .hb[data-k]::before{
   content:attr(data-k); position:absolute; left:4px; top:2px; pointer-events:none;
   font:600 9px/1 system-ui, -apple-system, "Helvetica Neue", sans-serif;
   font-variant-numeric:tabular-nums; letter-spacing:0;
   color:rgba(236,240,246,.6); text-shadow:0 1px 2px rgba(0,0,0,.9);
 }
-html.kbd #hotbar .hb.on[data-k]::before{ color:rgba(255,255,255,.92); }
+html.has-kbd #hotbar .hb.on[data-k]::before{ color:rgba(255,255,255,.92); }
 /* the phone: a message waiting is a red LED on the handset, a call shakes it */
 #hotbar .hb.phone.unread::after{ content:""; position:absolute; right:5px; top:5px; width:7px; height:7px; border-radius:50%;
   background:#ff6258; box-shadow:0 0 8px #ff6258; }
