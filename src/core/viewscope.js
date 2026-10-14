@@ -46,7 +46,24 @@
    arena child, instanced pools measured over their instances, world-spanning
    things marked dyn and never scoped.
 
-   Audit: CBZ.viewScopeAudit(). Revert: ?cfg_VIEW_SCOPE=0.
+   PAST THE FOG, THE SAME RULE (2026-10-14). A subtree whose nearest point
+   lies past core/sight.js's `reach` (the farthest range at which any pixel of
+   the frame is still short of full fog: the fog's end over the cosine of the
+   lens corner, plus the raised eye's haze margin) can only paint fog.color,
+   so it is hidden for the frame too, exactly like a group behind the camera.
+   That includes ACTORS: a parked airliner with its crew, a herd, a convoy
+   (userData.dynamic, never touched by core/farcull.js's distance hides) were
+   drawn mesh by mesh as pure fog colour (measured at the downtown spawn on
+   the desktop tier: 367 meshes and 117k triangles past the fog, most of them
+   moving things). Exact, so only subtrees whose every material takes the
+   scene fog and blends normally qualify (an emissive light, a fog-scaled
+   street or HLOD, an additive glow, a shader of its own are seen past the
+   fog and keep the subtree drawn), and only while the scene fog is the
+   linear THREE.Fog core/sight.js measures. A moving subtree's sphere rides
+   its root (offset + radius measured, re-measured every few seconds).
+
+   Audit: CBZ.viewScopeAudit(). Revert: ?cfg_VIEW_SCOPE=0 (the fog half
+   alone: ?cfg_VIEW_FOG_SCOPE=0).
 ============================================================ */
 (function () {
   "use strict";
@@ -150,11 +167,63 @@
     return b;
   };
 
+  // ---- past the fog: can this subtree only ever paint fog colour? ---------
+  // { ox, oy, oz: sphere centre relative to the root's position, r, safe, at }
+  const fogCache = new WeakMap();
+  const FOG_REMEASURE_MS = 4000;           // an actor's own parts move (a crew, a rotor)
+  const FOG_REMEASURE_STATIC_MS = 15000;   // a group a builder adds to later (a town's late parcels)
+  function isIdentity(m) { const e = m.elements; return e[0] === 1 && e[5] === 1 && e[10] === 1 && e[15] === 1 && !e[1] && !e[2] && !e[4] && !e[6] && !e[8] && !e[9] && !e[12] && !e[13] && !e[14]; }
+  function fogSafeMat(m) {
+    if (!m) return true;
+    if (m.fog === false || m.isShaderMaterial || m.isRawShaderMaterial) return false;
+    if (m.blending !== undefined && m.blending !== THREE.NormalBlending && m.blending !== THREE.NoBlending) return false;
+    const u = m.userData;
+    return !(u && u._cbzFogScaled);
+  }
+  function fogSphere(o, now) {
+    let f = fogCache.get(o);
+    const keepSafe = f ? f.safe : null;
+    f = { ox: 0, oy: 0, oz: 0, r: 0, safe: true, ok: false, dyn: !!(o.userData && o.userData.dynamic), at: now };
+    try {
+      let safe = keepSafe == null ? true : keepSafe;
+      if (keepSafe == null) {
+        o.traverse(function (x) {
+          if (!safe) return;
+          if (x.isLight || x.isSprite) { if (x.isSprite && !fogSafeMat(x.material)) safe = false; return; }
+          if (!(x.isMesh || x.isPoints || x.isLine)) return;
+          if (x.isInstancedMesh) { safe = false; return; }        // footprint is its instances, not its box
+          const mats = Array.isArray(x.material) ? x.material : [x.material];
+          for (let i = 0; i < mats.length; i++) if (!fogSafeMat(mats[i])) { safe = false; return; }
+        });
+      }
+      f.safe = safe;
+      if (safe) {
+        o.updateWorldMatrix(true, true);
+        _box.setFromObject(o);
+        if (isFinite(_box.min.x) && isFinite(_box.max.x)) {
+          _box.getCenter(_v);
+          // root-space (the city root is the identity: core/citystream.js
+          // checks the same thing): the sphere rides o.position, which the
+          // owner moves every frame (a hidden node's matrixWorld is not kept
+          // up to date, core/matrixskip.js). A mover turns, so its centre's
+          // offset is folded into the radius instead of being carried.
+          f.ox = _v.x - o.position.x; f.oy = _v.y - o.position.y; f.oz = _v.z - o.position.z;
+          f.r = Math.hypot(_box.max.x - _box.min.x, _box.max.y - _box.min.y, _box.max.z - _box.min.z) * 0.5 + PAD;
+          // a moving subtree's parts can swing out between measures
+          if (f.dyn) { f.r += Math.hypot(f.ox, f.oy, f.oz) + 20; f.ox = f.oy = f.oz = 0; }
+          f.ok = true;
+        }
+      }
+    } catch (e) { f.safe = false; }
+    fogCache.set(o, f);
+    return f;
+  }
+
   // ---- the pass -----------------------------------------------------------
   const hidden = [];
   const viewF = new THREE.Frustum(), sunF = new THREE.Frustum();
   const _m = new THREE.Matrix4(), _s = new THREE.Sphere();
-  const A = CBZ.viewScopeStats = { frames: 0, shadowFrames: 0, tested: 0, hidden: 0, measures: 0, lastHidden: 0 };
+  const A = CBZ.viewScopeStats = { frames: 0, shadowFrames: 0, tested: 0, hidden: 0, measures: 0, lastHidden: 0, fogHidden: 0, lastFogHidden: 0 };
   const MEASURES_PER_FRAME = 24;   // fresh Box3 subtree walks allowed per frame (the 30-50 ms hitch-stack farcull budgets against)
 
   function restore() {
@@ -193,13 +262,36 @@
       } catch (e) { return; }              // cannot be exact → hide nothing this frame
       A.shadowFrames++;
     }
+    // PAST THE FOG (see the header): the eye and the range past which every
+    // pixel is fog colour, when the scene fog is the linear one sight.js reads
+    const fog = CBZ.scene && CBZ.scene.fog;
+    const SG = (fog && fog.isFog && CBZ.CONFIG.VIEW_FOG_SCOPE !== false && CBZ.sight) ? CBZ.sight() : null;
+    root.updateWorldMatrix(false, false);
+    const rootId = isIdentity(root.matrixWorld);
+    const reach = rootId && SG && SG.reach > 0 ? SG.reach : Infinity;
+    const now = performance.now();
     const kids = root.children;
-    let n = 0, measures = MEASURES_PER_FRAME;
+    let n = 0, nf = 0, measures = MEASURES_PER_FRAME;
     for (let i = 0; i < kids.length; i++) {
       const o = kids[i];
       if (!o.visible) continue;                                   // farcull's (or anyone's) hide — theirs
-      if (!o.isGroup && !o.isInstancedMesh) continue;             // a lone mesh is one O(1) test already
+      if (!o.isGroup && !o.isMesh) continue;
       if (o.isGroup && !o.children.length) continue;
+      if (reach < Infinity && !o.isInstancedMesh) {
+        let f = fogCache.get(o);
+        if ((!f || (f.safe && now - f.at >= (f.dyn ? FOG_REMEASURE_MS : FOG_REMEASURE_STATIC_MS))) && measures > 0) { measures--; A.measures++; f = fogSphere(o, now); }
+        if (f && f.safe && f.ok) {
+          const cx = o.position.x + f.ox, cz = o.position.z + f.oz;
+          if (Math.hypot(cx - SG.x, cz - SG.z) - f.r > reach) {
+            _s.center.set(cx, o.position.y + f.oy, cz); _s.radius = f.r;
+            if (!(shadowFrame && sunF.intersectsSphere(_s))) {
+              o.visible = false; o._cbzScopeHidden = true; hidden.push(o); nf++;
+              continue;
+            }
+          }
+        }
+      }
+      if (!o.isGroup && !o.isInstancedMesh) continue;             // a lone mesh is one O(1) test already
       if (!cache.has(o)) { if (measures <= 0) continue; measures--; A.measures++; }
       const b = CBZ.subtreeSphere(o);
       if (b.dyn || b.loose) continue;
@@ -210,7 +302,7 @@
       if (shadowFrame && sunF.intersectsSphere(_s)) continue;
       o.visible = false; o._cbzScopeHidden = true; hidden.push(o); n++;
     }
-    A.frames++; A.hidden += n; A.lastHidden = n;
+    A.frames++; A.hidden += n; A.lastHidden = n; A.fogHidden += nf; A.lastFogHidden = nf;
   }
   // Last thing before the draw: after the camera (50), first person (52), the
   // sky rig (99) and the campaign's late syncs (999.x) have all had their say.
@@ -226,6 +318,7 @@
     return {
       on: CBZ.CONFIG.VIEW_SCOPE !== false, frames: A.frames, shadowFrames: A.shadowFrames,
       lastHidden: A.lastHidden, avgHidden: A.frames ? +(A.hidden / A.frames).toFixed(1) : 0,
+      lastFogHidden: A.lastFogHidden, avgFogHidden: A.frames ? +(A.fogHidden / A.frames).toFixed(1) : 0,
       tested: A.tested, measures: A.measures, arenaChildren: root ? root.children.length : 0,
     };
   };

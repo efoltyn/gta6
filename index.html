@@ -457,7 +457,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the far night lights (GTA "LOD lights"): one sprite per real lamp, lit window, car, beacon and airfield light; three draws, to the horizon -->
 <script src="src/core/lodlights.js?v=lodlight1012"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=farcopy1013"></script>
+<script src="src/core/citystream.js?v=stream1014b"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -1172,7 +1172,7 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=reach1013"></script>
-<script src="src/city/buildings.js?v=side1014"></script>
+<script src="src/city/buildings.js?v=stream1014b"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -2599,9 +2599,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/street_furniture.js?v=deslop1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>
 <script src="src/world/building_dress.js?v=roof1-st1"></script>
-<script src="src/core/farcull.js?v=farcopy1013"></script>
+<script src="src/core/farcull.js?v=stream1014b"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
-<script src="src/core/viewscope.js?v=w09290242x"></script>
+<script src="src/core/viewscope.js?v=stream1014b"></script>
 <script src="src/core/losgrid.js?v=nukecost1013"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
