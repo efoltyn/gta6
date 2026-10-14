@@ -133,6 +133,12 @@
     cv.width = w; cv.height = h;
     return cv;
   }
+  /* A scratch canvas is GIVEN BACK the moment it is used up (0 x 0 frees its
+     backing store now), not when the collector gets round to it: every chart
+     painted at the boot left its layer, halo, soft and resample canvases
+     (~8 MB for a crowd's worth) holding pixels until the next GC, right on
+     the phone's boot peak. */
+  function drop(c) { if (c && c.getContext) { try { c.width = 0; c.height = 0; } catch (e) {} } }
   let _filterOk = null;
   function filterOk(ctx) {
     if (_filterOk == null) {
@@ -155,6 +161,7 @@
     tc.drawImage(src, 0, 0, sw, sh);
     o.imageSmoothingEnabled = true;
     o.drawImage(t, 0, 0, w, h);
+    drop(t);
     return out;
   }
 
@@ -1479,6 +1486,7 @@
     c.globalAlpha = L.a[1]; c.drawImage(L.soft, -pad, 0);
     c.globalAlpha = L.a[2]; c.drawImage(L.crisp, -pad, 0);
     c.restore();
+    drop(L.halo); drop(L.soft); drop(layer);
     return canvas;
   }
 

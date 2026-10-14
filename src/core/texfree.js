@@ -103,6 +103,17 @@
   // count textures per canvas at upload time (clone() shares the canvas)
   const OT = THREE.Texture.prototype.clone;
   THREE.Texture.prototype.clone = function () {
+    // a lazy texture's clone is lazy too (Texture.copy reads .image, which
+    // would PAINT the source and hand both the same, never-released canvas)
+    if (this._cbzLazy && this._cbzLazyPaint && CBZ.lazyCanvasTexture) {
+      const L = this._cbzLazyPaint, t = CBZ.lazyCanvasTexture(L.w, L.h, L.paint, L.opts);
+      const src = this, keys = ["name", "mapping", "wrapS", "wrapT", "magFilter", "minFilter", "anisotropy", "format", "internalFormat", "type",
+        "rotation", "matrixAutoUpdate", "generateMipmaps", "premultiplyAlpha", "flipY", "unpackAlignment", "encoding"];
+      for (let i = 0; i < keys.length; i++) t[keys[i]] = src[keys[i]];
+      t.offset.copy(src.offset); t.repeat.copy(src.repeat); t.center.copy(src.center); t.matrix.copy(src.matrix);
+      t.needsUpdate = true;
+      return t;
+    }
     const t = OT.call(this);
     const c = this.image; if (c && typeof c.getContext === "function") c._cbzTexCount = (c._cbzTexCount || 1) + 1;
     return t;
@@ -136,7 +147,8 @@
       },
       set: function (v) { if (v && typeof v.getContext === "function") cv = v; },
     });
-    t._cbzLazy = true;
+    t._cbzLazy = true; t._cbzLazyW = w; t._cbzLazyH = h;   // (sizes for censuses: reading .image paints)
+    t._cbzLazyPaint = { w: w, h: h, paint: paint, opts: opts };   // (clone() makes another lazy one)
     // a reader that copied the pixels out (entities/pedinstance.js's atlas)
     // hands the canvas back; the next read paints it again
     t._cbzRelease = function () { if (cv) { cv = null; A.lazyReleased++; } };
@@ -146,6 +158,19 @@
       t.onUpdate = function () { cv = null; A.lazyReleased++; };
     }
     return t;                                 // (CanvasTexture's constructor flagged it for upload)
+  };
+  /* CBZ.lazyBaked(w, h, bake[, opts]): the same for a baker that makes its
+     OWN canvas (or CanvasTexture) in one go. bake() runs at the first upload
+     and its picture is copied into the lazy canvas (drawImage, scaled to w x h
+     if the baker picked another size), then the baker's canvas is dropped.
+     bake must be pure (seeded). */
+  CBZ.lazyBaked = function (w, h, bake, opts) {
+    return CBZ.lazyCanvasTexture(w, h, function (ctx) {
+      const r = bake();
+      const src = r && r.isTexture ? r.image : r;
+      if (src && src.width) ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, w, h);
+      if (r && r.isTexture) { if (src && src.getContext) { src.width = 1; src.height = 1; } r.dispose(); }
+    }, opts);
   };
   /* A canvas texture painted once, in place, at build time (a painter that
      draws in many calls): give its canvas back right after the upload

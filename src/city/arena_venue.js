@@ -128,6 +128,20 @@ function tintUnitBox() {
 
 function ctex(w, h, draw) {
   if (typeof document === "undefined") return null;
+  /* PAINTED WHEN FIRST DRAWN (core/texfree.js): the arena's hoardings, signs
+     and name boards sat in the boot as ~6 MB of canvases while the arena was
+     out of sight; the canvas is given back after each upload. _canvas / _ctx
+     (the live scoreboard repaints through them) hand out the canvas, painting
+     a fresh one first if it was given back: the board redraws it whole. */
+  var CB = window.CBZ;
+  if (CB && CB.lazyCanvasTexture) {
+    try {
+      var lt = CB.lazyCanvasTexture(w, h, function (c) { draw(c, w, h); }, { name: "arena-canvas" });
+      Object.defineProperty(lt, "_canvas", { configurable: true, get: function () { return lt.image; } });
+      Object.defineProperty(lt, "_ctx", { configurable: true, get: function () { return lt.image.getContext("2d"); } });
+      return lt;
+    } catch (e) { /* fall through: eager */ }
+  }
   try {
     var cv = document.createElement("canvas"); cv.width = w; cv.height = h;
     var c = cv.getContext("2d"); if (!c) return null;

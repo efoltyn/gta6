@@ -92,9 +92,16 @@
     mesh.position.set(x, y, z); parent.add(mesh); return mesh;
   }
   function canvasTex(w, h, draw, rx, ry) {
-    const c = document.createElement("canvas"); c.width = w; c.height = h;
-    draw(c.getContext("2d"), w, h);
-    const t = new THREE.CanvasTexture(c);
+    // painted the first frame it is drawn, the canvas given back after the
+    // upload (core/texfree.js): a package's signs sat in the boot as canvases
+    // whether or not its building was ever in sight
+    let t;
+    if (CBZ.lazyCanvasTexture) t = CBZ.lazyCanvasTexture(w, h, function (cc) { draw(cc, w, h); }, { name: "package-sign" });
+    else {
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      draw(c.getContext("2d"), w, h);
+      t = new THREE.CanvasTexture(c);
+    }
     if (rx || ry) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx || 1, ry || 1); }
     return t;
   }

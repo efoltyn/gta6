@@ -1366,6 +1366,11 @@
     const tex = new THREE.CanvasTexture(cv);
     tex.encoding = THREE.sRGBEncoding;           // sRGB-authored colours (the pale-sign bug class)
     tex.anisotropy = 4;
+    /* NEVER SWEPT (core/texfree.js texKeep): signs are painted into free
+       slots as highway jobs stream in, one slot at a time. Once the sweep had
+       shrunk the canvas (30 s without a new sign), the next sign was drawn
+       onto a blank restored canvas and every earlier sign went with it. */
+    if (CBZ.texKeep) CBZ.texKeep(tex);
     const mat = new THREE.MeshLambertMaterial({ map: tex, emissive: 0x111111, emissiveMap: tex });
     _atlas = { cv: cv, g: g, tex: tex, mat: mat };
     return _atlas;

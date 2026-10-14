@@ -457,12 +457,21 @@
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(num, W / 2, H * 0.54);
   }
+  /* The canvas takes its size the first time somebody paints it (cm.ctx):
+     the pooled for-sale signs are built hidden at boot and painted only when
+     a lot is assigned, and each held a 512 x 352 canvas (0.7 MB) from the
+     start. A hidden sign never uploads, so a 1x1 canvas until then is free. */
   function makeCanvasMat(w, h) {
-    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const c = document.createElement("canvas"); c.width = 1; c.height = 1;
     const t = new THREE.CanvasTexture(c);
     t.anisotropy = 4;
     const m = new THREE.MeshLambertMaterial({ map: t });
-    return { canvas: c, ctx: c.getContext("2d"), tex: t, mat: m };
+    const cm = { canvas: c, tex: t, mat: m };
+    Object.defineProperty(cm, "ctx", { enumerable: true, get: function () {
+      if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+      return c.getContext("2d");
+    } });
+    return cm;
   }
   // a sign stands just inside the frontage, off to one side of the door so it
   // never sits in the walkway, and its board faces the street

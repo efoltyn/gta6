@@ -1656,11 +1656,22 @@
     if (a.step === "opening" && (!a.job || a.job.phase === "ring" || a.job.phase === "call" || a.job.phase === "envelope")) return;
     a.paperDay = d; commit();
     const built = buildIssue();
-    let c = null; try { c = K.newspaper(built.issue); } catch (e) { c = null; }
-    if (!c) return;
-    RT.paperCanvas = c; RT.paperSide = built.side;
-    try { R.door.deliver("paper", { canvas: c, verb: "Pick up", onPick: function () { readPaper(c, built.side); } }); } catch (e) {}
+    /* PRINTED WHEN SEEN. The day's front page is a 1400 x 1900 canvas (10 MB);
+       it used to be painted here, at the boot, for a room the player may not
+       open for an hour. The door's lazy texture prints it the first frame it
+       is drawn and gives the canvas back after the upload; picking it up
+       prints it again (the same issue, the same picture). */
+    RT.paperCanvas = null; RT.paperIssue = built.issue; RT.paperSide = built.side;
+    const issue = built.issue;
+    try { R.door.deliver("paper", { paint: function (ctx, lc) { K.newspaper(issue, { canvas: lc }); }, verb: "Pick up", onPick: function (cc) { RT.paperCanvas = cc || null; readPaper(paperNow(), built.side); } }); } catch (e) {}
     if (built.story) showTV(built.story);
+  }
+  function paperNow() {
+    if (RT.paperCanvas) return RT.paperCanvas;
+    const K = paper();
+    if (!RT.paperIssue || !K || !K.newspaper) return null;
+    try { RT.paperCanvas = K.newspaper(RT.paperIssue); } catch (e) { RT.paperCanvas = null; }
+    return RT.paperCanvas;
   }
   function readPaper(c, side) {
     const H = hold();
@@ -2700,7 +2711,7 @@
     },
     _rt: RT,
     _test: {
-      answer: answerOpening, pickEnvelope: pickEnvelope, handBook: handBook, takeBook: takeBook, readPaper: function () { readPaper(RT.paperCanvas, RT.paperSide); },
+      answer: answerOpening, pickEnvelope: pickEnvelope, handBook: handBook, takeBook: takeBook, readPaper: function () { readPaper(paperNow(), RT.paperSide); },
       slowTick: slowTick, boardItems: boardItems, scheduleRows: scheduleRows, buildIssue: buildIssue, legAtHour: legAtHour,
     },
   };
