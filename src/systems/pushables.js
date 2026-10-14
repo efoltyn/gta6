@@ -63,6 +63,26 @@
    motion is a pure function of contact, so two clients on one seed that see
    the same shove get the same slide.
 
+   LOOSE PIECES (OWNER: "You run over chairs, chairs don't fall over, they
+   have no colliders"). piece(spec) is the same record with two additions,
+   so a chair is not a second physics system either:
+     - ONE DRAW CALL PER KIND PER ROOM. The piece's boxes are recorded once
+       into a cached geometry (spec.key + spec.build) and every copy is an
+       instance of one InstancedMesh parented to the host group. A pushed
+       chair rewrites one instance matrix; nothing is re-merged.
+     - IT FALLS OVER. A light piece (spec.tip) hit at a run or by a car tips
+       about the bottom edge it is driven toward, lies on its back with a low
+       collider where it lies, and its seat stops being a seat until a fresh
+       run stands it back up.
+   Cars push too: a car inside ACTIVE_R of you that overlaps a loose piece
+   flings it along its own travel (and tips it). The collider a piece mints
+   is tagged `pushProp`, which vehicles.js skips: a chair is never a wall to
+   a bumper. Records sit in a 16 m grid, so a quiet frame touches the 3x3
+   cells round you and nothing else, however many offices the city has.
+   Lifetime is the host's: the collider is filed on the host's own ledger
+   (spec.ledger) so the host's teardown takes it, and removeOwner(owner)
+   drops the records (fit-out floors call it when a floor is freed).
+
    Flag PUSH_PROPS_V1. Ratchet CBZ.pushPropAudit().escaped — props that ended
    up outside their own leash/room, i.e. furniture that got away — pinned at 0,
    and .standLost — a standable top that drifted off its own prop, i.e. thin
@@ -107,6 +127,15 @@
   const MAX_STEP = 0.22;      // m per frame: a shove can never tunnel a prop through a wall
   const BODY_LOW = 0.10, BODY_HIGH = 1.75;   // the band a standing body pushes with
   const SHOE = 0.10;          // m the standable top is inset from the collider face
+  // FALLING OVER. A body only knocks a chair flat when it arrives faster than
+  // a walk (a sprint drives ~3.4 m/s, a walk ~2.0), and only a piece light
+  // enough to be bowled (TIP_MASS). A car at any real speed does it.
+  const TIP_DRIVE = 2.8;      // m/s of drive INTO the piece that tips it
+  const TIP_MASS = 16;        // kg: heavier than this slides, it never tips
+  const TIP_DUR = 0.42;       // s from upright to lying (accelerating, a fall)
+  const CAR_MIN_V = 1.2;      // m/s: a car slower than this nudges, it does not fling
+  const CAR_HW = 1.0, CAR_HL = 2.3;   // a car's half width / half length (m)
+  const CELL = 16;            // m: grid cell (> ACTIVE_R so 3x3 cells cover it)
 
   const qnear = [];
   let dirty = false, platDirty = false, movingCount = 0, escaped = 0;
@@ -153,18 +182,30 @@
     const p0 = parts[0];
     const x = spec.x != null ? spec.x : p0.position.x;
     const z = spec.z != null ? spec.z : p0.position.z;
+    return enrol(spec, parts, x, z);
+  }
+  function enrol(spec, parts, x, z) {
+    const p0 = parts ? parts[0] : null;
     const hx = spec.hx != null ? spec.hx : 0.25, hz = spec.hz != null ? spec.hz : 0.25;
     const y0 = spec.y0 != null ? spec.y0 : 0, y1 = spec.y1 != null ? spec.y1 : 0.5;
 
     // the collider: adopt one the art already registered, else mint one here.
     // A minted box carries y0/y1 so it is an OBSTACLE at shin height and not a
     // full-height pillar — the same height-gating a mess stool already uses.
-    let col = spec.col || meshCollider(p0) || null;
-    for (let i = 1; !col && i < parts.length; i++) col = meshCollider(parts[i]);
+    let col = spec.col || (p0 ? meshCollider(p0) : null) || null;
+    for (let i = 1; !col && parts && i < parts.length; i++) col = meshCollider(parts[i]);
+    let ledgered = false;
     if (!col && spec.solid !== false) {
-      col = { minX: x - hx, maxX: x + hx, minZ: z - hz, maxZ: z + hz, y0: y0, y1: y1, ref: p0 };
+      col = { minX: x - hx, maxX: x + hx, minZ: z - hz, maxZ: z + hz, y0: y0, y1: y1, ref: p0 || spec.ref || null };
+      // a loose piece's collider is a body to push, never a wall: vehicles.js
+      // skips `pushProp` (the car pushes it here instead) and the breach /
+      // carve passes skip `noBreach`
+      if (!parts) { col.pushProp = true; col.noBreach = true; }
       (CBZ.colliders || (CBZ.colliders = [])).push(col);
-      p0.userData.collider = col;
+      if (p0) p0.userData.collider = col;
+      // the HOST's ledger: its teardown splices it out of CBZ.colliders with
+      // its own walls (fitout.js freeFloor, a building's `colliders`)
+      if (spec.ledger && spec.ledger.push) { spec.ledger.push(col); ledgered = true; }
       dirty = true;
     }
     // a collider drawn without a band would be a full-height wall the moment it
@@ -177,7 +218,7 @@
     // floor. `mover` is losgrid.js's own tag for a solid whose AABB is
     // re-derived per cast. This is the same declaration every sliding leaf in
     // the engine makes, for the same reason.
-    for (let i = 0; i < parts.length; i++) {
+    for (let i = 0; parts && i < parts.length; i++) {
       const m = parts[i];
       m.userData.dynamic = true;
       m.userData.mover = true;
@@ -217,11 +258,313 @@
       vx: 0, vz: 0, plat: plat,
       homeX: x, homeZ: z, leash: spec.leash != null ? spec.leash : 4.0,
       room: spec.room || null,
-      seatAt: spec.seat || null, seat: null, seatSolved: false,
+      seatAt: spec.seat || null, seat: spec.seatRec || null, seatSolved: !!spec.seatRec,
       moved: 0,                       // total metres this prop has been shoved
+      owner: spec.owner || null, ledgered: ledgered,
+      // FALLING OVER (pooled pieces): tipOK, and the state of a fall
+      tipOK: !!spec.tip && (spec.mass || 12) <= TIP_MASS, tipS: 0, tipT: 0, tipA: 0, tax: 0, taz: 0,
+      tdx: 0, tdz: 0, pdx: 0, pdz: 0, ext: 0,
+      h: spec.h != null ? spec.h : (y1 - y0), h0: y1 - y0, ext0x: hx, ext0z: hz,
+      // the upright centre (a fall moves the collider, not this)
+      ux: x, uz: z, fy: spec.y != null ? spec.y : y0, yaw: spec.yaw || 0,
+      pool: null, slot: -1, offX: spec.ox || 0, offZ: spec.oz || 0, offY: spec.oy || 0,
+      cell: null, _carT: 0, _near: 0,
     };
     props.push(rec);
+    gridAdd(rec);
     return rec;
+  }
+
+  /* ---- THE GRID ---------------------------------------------------------
+     16 m cells keyed by integer pair. A quiet frame reads the 3x3 cells round
+     the player and nothing else; a prop that slides into another cell is
+     re-filed by translate(). */
+  const GRID = new Map();
+  function cellOf(v) { return Math.floor(v / CELL); }
+  function cellKey(cx, cz) { return cx * 100003 + cz; }
+  function gridAdd(r) {
+    const k = cellKey(cellOf(r.x), cellOf(r.z));
+    let a = GRID.get(k);
+    if (!a) { a = []; GRID.set(k, a); }
+    a.push(r); r.cell = k;
+  }
+  function gridDel(r) {
+    const a = GRID.get(r.cell);
+    if (a) { const i = a.indexOf(r); if (i >= 0) { a[i] = a[a.length - 1]; a.pop(); } if (!a.length) GRID.delete(r.cell); }
+    r.cell = null;
+  }
+  function gridMove(r) {
+    const k = cellKey(cellOf(r.x), cellOf(r.z));
+    if (k !== r.cell) { gridDel(r); gridAdd(r); }
+  }
+
+  /* ---- POOLED PIECES ----------------------------------------------------
+     spec.key      geometry cache key (one geometry per kind + palette)
+     spec.build    function (box) called ONCE per key: box(x, y, z, w, h, d, hex)
+                   in the piece's own frame (floor at y=0, front +z, yaw 0,
+                   x,y,z the box CENTRE)
+     spec.parent   the host group the pool hangs in (host-local coords)
+     spec.ox/oz/oy the host group's world origin (colliders are world)
+     spec.lx/lz    the piece's centre in host-local coords; spec.y its floor
+     spec.yaw      facing (forward = sin yaw, cos yaw)
+     spec.material optional: a host's own surface (fitout's night self-light)
+     plus add()'s fields: mass, tip, seatRec, owner, ledger, leash, mode.
+     The footprint and the band come off the recorded geometry, by yaw. */
+  const GEO = new Map();
+  const POOLS = new Map();
+  let _poolMat = null;
+  function poolMaterial() {
+    if (_poolMat) return _poolMat;
+    _poolMat = CBZ.cmat ? CBZ.cmat(0xffffff, { vc: true }) : new window.THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+    return _poolMat;
+  }
+  // the six faces of a box: normal, then the two in-plane axes (u x v = n)
+  const FACE6 = [
+    [0, 1, 2, 1], [0, 2, 1, -1], [1, 2, 0, 1], [1, 0, 2, -1], [2, 0, 1, 1], [2, 1, 0, -1],
+  ];
+  function recordGeo(key, build) {
+    if (GEO.has(key)) return GEO.get(key);
+    const THREE = window.THREE;
+    const pos = [], nor = [], col = [], idx = [];
+    let x0 = 1e9, x1 = -1e9, y1 = 0, z0 = 1e9, z1 = -1e9;
+    const C = new THREE.Color();
+    const box = function (x, y, z, w, h, d, hex) {
+      if (!(w > 0 && h > 0 && d > 0)) return;
+      C.setHex(hex >>> 0);
+      const c = [x, y, z], half = [w / 2, h / 2, d / 2];
+      for (let f = 0; f < 6; f++) {
+        // [axis, u, v, sign]: the face at sign*half on `axis`; corners walk
+        // u then v so (u x v) points along +axis, flipped for the - face
+        const a = FACE6[f][0], sg = FACE6[f][3];
+        let u = FACE6[f][1], v = FACE6[f][2];
+        if (sg < 0) { const t = u; u = v; v = t; }
+        const b = pos.length / 3;
+        const Q = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+        for (let q = 0; q < 4; q++) {
+          const p = [c[0], c[1], c[2]];
+          p[a] += sg * half[a];
+          p[u] += Q[q][0] * half[u];
+          p[v] += Q[q][1] * half[v];
+          pos.push(p[0], p[1], p[2]);
+          nor.push(a === 0 ? sg : 0, a === 1 ? sg : 0, a === 2 ? sg : 0);
+          col.push(C.r, C.g, C.b);
+        }
+        idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      }
+      x0 = Math.min(x0, x - w / 2); x1 = Math.max(x1, x + w / 2);
+      z0 = Math.min(z0, z - d / 2); z1 = Math.max(z1, z + d / 2);
+      y1 = Math.max(y1, y + h / 2);
+    };
+    try { build(box); } catch (e) { if (window.console) console.warn("[pushables] piece " + key + " build failed", e); }
+    if (!pos.length) { GEO.set(key, null); return null; }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+    g.setIndex(idx);
+    g.computeBoundingSphere();
+    g._shared = true;                   // survives any host teardown traversal
+    const G = { geo: g, x0: x0, x1: x1, z0: z0, z1: z1, h: y1, boxes: pos.length / 24 };
+    GEO.set(key, G);
+    return G;
+  }
+  function poolGrow(P, cap) {
+    const THREE = window.THREE;
+    const m = new THREE.InstancedMesh(P.geo, P.mat, cap);
+    if (m.instanceMatrix.setUsage) m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    if (P.mesh) {
+      m.instanceMatrix.array.set(P.mesh.instanceMatrix.array.subarray(0, P.n * 16));
+      if (P.mesh.parent) P.mesh.parent.remove(P.mesh);
+      if (P.mesh.dispose) { try { P.mesh.dispose(); } catch (e) {} }
+    }
+    m.count = P.n;
+    // r128 culls an InstancedMesh by its GEOMETRY's sphere, so each pool owns
+    // a geometry of its own (the same attribute buffers, shared on the GPU)
+    // whose sphere is fitted round the pool's pieces (poolBounds): a room of
+    // chairs behind you, or across the city, costs no draw.
+    m.castShadow = false; m.receiveShadow = true;
+    m.userData.dynamic = true; m.userData.mover = true; m.userData.loosePool = true;
+    m.name = "loose:" + P.gkey;
+    P.parent.add(m);
+    P.mesh = m; P.cap = cap;
+    for (let i = 0; i < P.recs.length; i++) if (P.recs[i].col) P.recs[i].col.ref = m;
+  }
+  function poolGeo(G) {
+    const THREE = window.THREE, src = G.geo;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", src.attributes.position);
+    g.setAttribute("normal", src.attributes.normal);
+    g.setAttribute("color", src.attributes.color);
+    g.setIndex(src.index);
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
+    g._shared = true;
+    return g;
+  }
+  // the sphere round every piece in the pool (pool-local): centre of their
+  // footprint box, radius to its corner plus the piece's own reach
+  function poolBounds(P) {
+    P.bounds = false;
+    const S = P.geo.boundingSphere;
+    if (!P.n) { S.radius = 0; return; }
+    let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9, y0 = 1e9;
+    for (let i = 0; i < P.n; i++) {
+      const r = P.recs[i];
+      const lx = r.ux - r.offX, lz = r.uz - r.offZ;
+      if (lx < x0) x0 = lx; if (lx > x1) x1 = lx;
+      if (lz < z0) z0 = lz; if (lz > z1) z1 = lz;
+      if (r.fy - r.offY < y0) y0 = r.fy - r.offY;
+    }
+    S.center.set((x0 + x1) / 2, y0 + P.reach / 2, (z0 + z1) / 2);
+    S.radius = Math.hypot((x1 - x0) / 2, (z1 - z0) / 2) + P.reach + 0.5;
+  }
+  function poolFor(parent, gkey, G, mat) {
+    const k = parent.uuid + "|" + gkey + "|" + (mat ? mat.uuid : "");
+    let P = POOLS.get(k);
+    if (!P) {
+      P = { key: k, gkey: gkey, parent: parent, geo: poolGeo(G), mat: mat || poolMaterial(), mesh: null, cap: 0, n: 0, recs: [],
+        dirty: false, attached: true, gone: 0, bounds: true,
+        reach: Math.max(G.h, Math.abs(G.x0), Math.abs(G.x1), Math.abs(G.z0), Math.abs(G.z1)) * 1.5 };
+      POOLS.set(k, P);
+      poolGrow(P, 8);
+    } else if (P.n >= P.cap) poolGrow(P, P.cap * 2);
+    return P;
+  }
+  // scratch, made on first use (a page may load this file before THREE)
+  let _m4 = null, _mt, _q4, _q5, _p4, _s4, _ay, _ax4;
+  function scratch() {
+    if (_m4) return;
+    const T = window.THREE;
+    _m4 = new T.Matrix4(); _mt = new T.Matrix4(); _q4 = new T.Quaternion(); _q5 = new T.Quaternion();
+    _p4 = new T.Vector3(); _s4 = new T.Vector3(1, 1, 1); _ay = new T.Vector3(0, 1, 0); _ax4 = new T.Vector3();
+  }
+  function poolWrite(r) {
+    const P = r.pool;
+    if (!P || r.slot < 0) return;
+    scratch();
+    const lx = r.ux - r.offX, lz = r.uz - r.offZ, ly = r.fy - r.offY;
+    _q4.setFromAxisAngle(_ay, r.yaw);
+    _m4.compose(_p4.set(lx, ly, lz), _q4, _s4);
+    if (r.tipA) {
+      const px = lx + r.pdx, pz = lz + r.pdz;
+      _mt.makeTranslation(-px, -ly, -pz); _m4.premultiply(_mt);
+      _q5.setFromAxisAngle(_ax4.set(r.tax, 0, r.taz), r.tipA);
+      _mt.makeRotationFromQuaternion(_q5); _m4.premultiply(_mt);
+      _mt.makeTranslation(px, ly, pz); _m4.premultiply(_mt);
+    }
+    P.mesh.setMatrixAt(r.slot, _m4);
+    P.dirty = true; P.bounds = true;
+  }
+  function piece(spec) {
+    if (!CFG.PUSH_PROPS_V1 || !spec || !spec.parent || !spec.key || typeof spec.build !== "function" || !window.THREE) return null;
+    const G = recordGeo(spec.key, spec.build);
+    if (!G) return null;
+    const yaw = +spec.yaw || 0, sn = Math.sin(yaw), cs = Math.cos(yaw);
+    // the recorded footprint (piece frame) as a world AABB about the centre
+    const ax = Math.max(Math.abs(G.x0), Math.abs(G.x1)), az = Math.max(Math.abs(G.z0), Math.abs(G.z1));
+    const hx = Math.abs(cs) * ax + Math.abs(sn) * az, hz = Math.abs(sn) * ax + Math.abs(cs) * az;
+    const ox = spec.ox || 0, oz = spec.oz || 0, oy = spec.oy || 0;
+    const fy = spec.y || 0;                                   // host-local floor
+    const P = poolFor(spec.parent, spec.key, G, spec.material || null);
+    const s2 = Object.assign({}, spec, {
+      hx: hx, hz: hz, y0: fy + oy, y1: fy + oy + (spec.colH != null ? Math.min(G.h, spec.colH) : G.h),
+      h: G.h, y: fy + oy, yaw: yaw, ox: ox, oz: oz, oy: oy, ref: P.mesh, parts: null,
+    });
+    const rec = enrol(s2, null, ox + (spec.lx || 0), oz + (spec.lz || 0));
+    if (!rec) return null;
+    rec.pool = P; rec.slot = P.n++;
+    P.recs.push(rec);
+    P.mesh.count = P.n;
+    poolWrite(rec);
+    poolBounds(P);
+    return rec;
+  }
+  function poolRemove(r) {
+    const P = r.pool;
+    if (!P) return;
+    const last = P.recs[P.n - 1];
+    if (last && last !== r) {
+      scratch();
+      P.mesh.getMatrixAt(last.slot, _m4); P.mesh.setMatrixAt(r.slot, _m4);
+      P.recs[r.slot] = last; last.slot = r.slot;
+    }
+    P.recs.pop(); P.n--;
+    P.mesh.count = P.n; P.dirty = true;
+    poolBounds(P);
+    r.pool = null; r.slot = -1;
+    if (!P.n) { if (P.mesh && P.mesh.parent) P.mesh.parent.remove(P.mesh); POOLS.delete(P.key); }
+  }
+  // drop records (a host that ledgered the collider already took it out of
+  // CBZ.colliders with its own teardown; anything else is spliced out here)
+  function removeRecs(test) {
+    let w = 0, cut = null;
+    for (let i = 0; i < props.length; i++) {
+      const r = props[i];
+      if (!test(r)) { props[w++] = r; continue; }
+      gridDel(r); poolRemove(r); MOVING.delete(r);
+      if (r.plat && CBZ.platforms) { const j = CBZ.platforms.indexOf(r.plat); if (j >= 0) { CBZ.platforms.splice(j, 1); platDirty = true; } }
+      if (r.col && !r.ledgered) (cut || (cut = new Set())).add(r.col);
+    }
+    const n = props.length - w;
+    props.length = w;
+    if (cut && CBZ.colliders) {
+      const C = CBZ.colliders; let k = 0;
+      for (let i = 0; i < C.length; i++) if (!cut.has(C[i])) C[k++] = C[i];
+      C.length = k; dirty = true;
+    }
+    flushDirty();
+    return n;
+  }
+  function removeOwner(owner) { if (owner == null) return 0; return removeRecs(function (r) { return r.owner === owner; }); }
+  function remove(rec) { return removeRecs(function (r) { return r === rec; }); }
+  const MOVING = new Set();           // sliding or falling: driven even out of range
+
+  /* ---- FALLING OVER -------------------------------------------------------
+     About the bottom edge the piece is driven toward: the pivot is that edge
+     on the floor, the axis is horizontal and square to the drive, and the top
+     goes over toward (dx, dz). Lying, the collider is where the piece now is
+     (pivot .. pivot + h along the drive) and as tall as the piece was deep. */
+  function tip(r, dx, dz) {
+    if (!r.tipOK || r.tipS || !r.pool) return false;
+    const l = Math.hypot(dx, dz);
+    if (l < 1e-4) return false;
+    dx /= l; dz /= l;
+    r.tipS = 1; r.tipT = 0; r.tipA = 0;
+    r.tdx = dx; r.tdz = dz;
+    r.tax = dz; r.taz = -dx;                 // (dz,0,-dx) x up = (dx,0,dz): the top goes toward +dir
+    const ext = Math.abs(dx) * r.ext0x + Math.abs(dz) * r.ext0z;
+    r.pdx = dx * ext; r.pdz = dz * ext;
+    r.ext = ext;
+    const s = r.seat;
+    if (s) {
+      s.tipped = true;
+      if (s.occupant && CBZ.propStand) { try { CBZ.propStand(s.occupant, { instant: true }); } catch (e) {} }
+    }
+    MOVING.add(r);
+    return true;
+  }
+  function landTip(r) {
+    r.tipS = 2; r.tipA = Math.PI / 2;
+    const dx = r.tdx, dz = r.tdz, h = Math.max(0.3, r.h);
+    // the lying footprint: from the pivot edge out to where the top landed
+    const cx = r.ux + r.pdx + dx * h / 2, cz = r.uz + r.pdz + dz * h / 2;
+    const xMajor = Math.abs(dx) >= Math.abs(dz);
+    const nhx = xMajor ? h / 2 : r.ext0x, nhz = xMajor ? r.ext0z : h / 2;
+    r.x = cx; r.z = cz; r.hx = nhx; r.hz = nhz;
+    r.y1 = r.y0 + Math.max(0.5, Math.min(0.75, 2 * r.ext));
+    const c = r.col;
+    if (c) { c.minX = cx - nhx; c.maxX = cx + nhx; c.minZ = cz - nhz; c.maxZ = cz + nhz; c.y1 = r.y1; dirty = true; }
+    gridMove(r);
+    poolWrite(r);
+  }
+  function untip(r) {
+    if (!r.tipS) return;
+    r.tipS = 0; r.tipA = 0; r.tipT = 0;
+    r.x = r.ux; r.z = r.uz; r.hx = r.ext0x; r.hz = r.ext0z; r.y1 = r.y0 + r.h0;
+    const c = r.col;
+    if (c) { c.minX = r.x - r.hx; c.maxX = r.x + r.hx; c.minZ = r.z - r.hz; c.maxZ = r.z + r.hz; c.y1 = r.y1; dirty = true; }
+    if (r.seat) r.seat.tipped = false;
+    gridMove(r);
+    poolWrite(r);
   }
 
   /* ---- the pushers ------------------------------------------------------
@@ -301,10 +644,13 @@
   // commit a delta: meshes, collider, sit anchor, broadphase
   function translate(rec, dx, dz) {
     rec.x += dx; rec.z += dz;
-    for (let i = 0; i < rec.parts.length; i++) {
+    rec.ux += dx; rec.uz += dz;
+    for (let i = 0; rec.parts && i < rec.parts.length; i++) {
       const m = rec.parts[i];
       m.position.x += dx; m.position.z += dz;
     }
+    if (rec.pool) poolWrite(rec);
+    gridMove(rec);
     const c = rec.col;
     if (c) { c.minX += dx; c.maxX += dx; c.minZ += dz; c.maxZ += dz; dirty = true; }
     // THE GROUND GOES WITH IT TOO. Without this the stool you just pushed under
@@ -342,25 +688,44 @@
 
     const P = CBZ.player;
     if (!P || !P.pos) return;
-    const px = P.pos.x, pz = P.pos.z;
+    const px = P.pos.x, pz = P.pos.z, py = P.pos.y || 0;
+    if ((attachAcc += dt) > 1) { attachAcc = 0; checkPools(); }
+    // THE CANDIDATES: the 3x3 grid cells round the player, plus anything
+    // still sliding or falling. A quiet city costs nine Map lookups.
+    const cand = CAND; cand.length = 0;
+    const gcx = cellOf(px), gcz = cellOf(pz);
     let near = 0;
-    for (let i = 0; i < props.length; i++) {
-      const r = props[i];
-      if (!live(r)) { r._near = 0; continue; }
-      const dx = r.x - px, dz = r.z - pz;
-      if (dx * dx + dz * dz < ACTIVE_R2) { r._near = 1; near++; }
-      else r._near = 0;
+    for (let ix = -1; ix <= 1; ix++) for (let iz = -1; iz <= 1; iz++) {
+      const a = GRID.get(cellKey(gcx + ix, gcz + iz));
+      if (!a) continue;
+      for (let i = 0; i < a.length; i++) {
+        const r = a[i];
+        if (!live(r) || (r.pool && !r.pool.attached)) { r._near = 0; continue; }
+        const dx = r.x - px, dz = r.z - pz;
+        // this storey only: a tower holds forty floors of chairs in one column
+        r._near = dx * dx + dz * dz < ACTIVE_R2 && r.y0 < py + 4.5 && r.y1 > py - 4.5 ? 1 : 0;
+        if (r._near) { near++; cand.push(r); }
+      }
     }
-    if (!near && !movingCount) return;
+    MOVING.forEach(function (r) { if (!r._near) cand.push(r); });
+    if (!near && !MOVING.size) return;
 
     const list = collectPushers(px, pz);
+    const cars = near ? collectCars(px, pz) : CARS0;
     movingCount = 0;
     let pushing = null, pushNx = 0, pushNz = 0;
 
-    for (let i = 0; i < props.length; i++) {
-      const r = props[i];
-      const idle = r.vx === 0 && r.vz === 0;
-      if (!r._near && idle) continue;
+    for (let i = 0; i < cand.length; i++) {
+      const r = cand[i];
+      // ---- 0. a fall in progress: accelerate over, then lie there ----------
+      if (r.tipS === 1) {
+        r.tipT += dt;
+        const k = Math.min(1, r.tipT / TIP_DUR);
+        r.tipA = (Math.PI / 2) * k * k;
+        if (k >= 1) landTip(r); else poolWrite(r);
+      }
+      // ---- 0b. a car: flung along its travel, over if it can go over ------
+      if (r._near && cars.length && r.tipS !== 1) carHit(r, cars);
 
       // ---- 1. contact ---------------------------------------------------
       if (r._near) {
@@ -389,11 +754,14 @@
           if (want < MIN_V) continue;           // too heavy for a body on foot
           const wx = -nx * want, wz = -nz * want;
           if (wx * wx + wz * wz > r.vx * r.vx + r.vz * r.vz) { r.vx = wx; r.vz = wz; }
+          // arriving at a run bowls a light piece over, away from the body
+          if (into >= TIP_DRIVE && r.tipOK && !r.tipS) tip(r, -nx, -nz);
           if (q.a === P) { pushing = r; pushNx = nx; pushNz = nz; }
         }
       }
 
-      if (r.vx === 0 && r.vz === 0) continue;
+      if (r.vx === 0 && r.vz === 0) { if (r.tipS !== 1) MOVING.delete(r); continue; }
+      MOVING.add(r);
 
       // ---- 2. integrate, clamped so nothing tunnels ----------------------
       let sx = r.vx * dt, sz = r.vz * dt;
@@ -431,8 +799,80 @@
     }
 
     flushDirty();
+    POOLS.forEach(function (Pl) {
+      if (!Pl.dirty) return;
+      Pl.dirty = false; Pl.mesh.instanceMatrix.needsUpdate = true;
+      if (Pl.bounds) poolBounds(Pl);
+    });
     if (pushing) pushHands(P, pushing, pushNx, pushNz);
   });
+  const CAND = [], CARS = [], CARS0 = [];
+  let attachAcc = 0;
+
+  /* ---- CARS ---------------------------------------------------------------
+     The cars within reach of the player, as boxes: centre, forward f, right u,
+     signed speed. A loose piece inside one is flung along the car's travel
+     (plus a little off its centre line, the way a bumper glances a chair) and
+     tipped if it can go over; the car loses a breath of speed. */
+  function collectCars(px, pz) {
+    CARS.length = 0;
+    const L = CBZ.cityCars;
+    if (!L || !L.length) return CARS;
+    const R2 = (ACTIVE_R + 4) * (ACTIVE_R + 4);
+    for (let i = 0; i < L.length; i++) {
+      const c = L[i];
+      if (!c || c.dead || !c.pos || !isFinite(c.pos.x) || !isFinite(c.pos.z)) continue;
+      const v = +c.v || 0;
+      if (Math.abs(v) < CAR_MIN_V) continue;
+      const dx = c.pos.x - px, dz = c.pos.z - pz;
+      if (dx * dx + dz * dz > R2) continue;
+      CARS.push(c);
+    }
+    return CARS;
+  }
+  function carHit(r, cars) {
+    if (r._carT > CLOCK) return;
+    const rad = Math.max(r.hx, r.hz);
+    for (let j = 0; j < cars.length; j++) {
+      const c = cars[j];
+      if (r.y1 < (c.pos.y || 0) - 0.3 || r.y0 > (c.pos.y || 0) + 1.6) continue;     // another storey
+      const h = c.heading || 0, fx = Math.sin(h), fz = Math.cos(h), ux = Math.cos(h), uz = -Math.sin(h);
+      const dx = r.x - c.pos.x, dz = r.z - c.pos.z;
+      const along = dx * fx + dz * fz, lat = dx * ux + dz * uz;
+      if (Math.abs(along) > CAR_HL + rad || Math.abs(lat) > CAR_HW + rad) continue;
+      const v = +c.v || 0, sg = v < 0 ? -1 : 1, sp = Math.min(9, Math.abs(v) * 0.9);
+      let ddx = fx * sg + ux * Math.sign(lat || 1) * 0.45, ddz = fz * sg + uz * Math.sign(lat || 1) * 0.45;
+      const l = Math.hypot(ddx, ddz); ddx /= l; ddz /= l;
+      const k = Math.min(1, PUSH_REF / r.mass);
+      r.vx = ddx * sp * Math.max(0.35, k); r.vz = ddz * sp * Math.max(0.35, k);
+      if (r.tipOK && !r.tipS) tip(r, ddx, ddz);
+      c.v = v * 0.97;
+      r._carT = CLOCK + 0.35;
+      MOVING.add(r);
+      return;
+    }
+  }
+  let CLOCK = 0;
+  onUpdate(22.95, function (dt) { CLOCK += Math.min(0.2, Math.max(0, dt || 0)); });
+
+  /* ---- POOLS THAT LEFT THE SCENE ------------------------------------------
+     A host that parks its building takes the pool with it; its pieces go
+     dormant (no contact, no driving) until it comes back. A pool gone for two
+     minutes belonged to a host that freed without telling us: its records are
+     dropped (its colliders went with the host's ledger). Once a second. */
+  function attachedToScene(o) {
+    for (let i = 0; i < 64 && o; i++) { if (o.isScene) return true; o = o.parent; }
+    return false;
+  }
+  function checkPools() {
+    let drop = null;
+    POOLS.forEach(function (Pl) {
+      Pl.attached = attachedToScene(Pl.mesh);
+      if (Pl.attached) Pl.gone = 0;
+      else if ((Pl.gone += 1) > 120) (drop || (drop = new Set())).add(Pl);
+    });
+    if (drop) removeRecs(function (r) { return r.pool && drop.has(r.pool); });
+  }
 
   /* THE HANDS DO THE PUSHING. A body walking a crate across a room leans on
      it with both palms flat on the face it is driving (CBZ.verbs.touch, the
@@ -483,10 +923,12 @@
   });
 
   function resetProps() {
+    MOVING.clear();
     for (let i = 0; i < props.length; i++) {
       const r = props[i];
       r.vx = 0; r.vz = 0;
-      const dx = r.homeX - r.x, dz = r.homeZ - r.z;
+      if (r.tipS) untip(r);
+      const dx = r.homeX - r.ux, dz = r.homeZ - r.uz;
       if (dx || dz) translate(r, dx, dz);
       r.moved = 0;
     }
@@ -502,6 +944,7 @@
      welded into a static buffer — checked here rather than trusted. */
   function audit() {
     escaped = 0;
+    let pooled = 0, tipped = 0, tippable = 0;
     let unbatched = 0, movedNow = 0, totalMoved = 0, minted = 0, stands = 0, standLost = 0, active = 0;
     const byKind = {};
     for (let i = 0; i < props.length; i++) {
@@ -520,8 +963,11 @@
       if (d > r.leash + 0.05) escaped++;
       if (r.room && (r.x < r.room.x0 - 0.05 || r.x > r.room.x1 + 0.05
         || r.z < r.room.z0 - 0.05 || r.z > r.room.z1 + 0.05)) escaped++;
-      for (let k = 0; k < r.parts.length; k++)
+      for (let k = 0; r.parts && k < r.parts.length; k++)
         if (!(r.parts[k].userData && r.parts[k].userData.dynamic)) unbatched++;
+      if (r.pool) pooled++;
+      if (r.tipS) tipped++;
+      if (r.tipOK) tippable++;
       if (r.vx || r.vz) movedNow++;
       if (r.moved > 0.02) totalMoved++;
       if (r.col) minted++;
@@ -532,6 +978,7 @@
       withCollider: minted, seats: props.filter(function (r) { return !!r.seat; }).length,
       standable: stands, standLost: standLost,
       escaped: escaped, unbatched: unbatched,
+      pooled: pooled, pools: POOLS.size, tippable: tippable, tipped: tipped, moving: MOVING.size, cells: GRID.size,
       sliding: movedNow, shoved: totalMoved,
       refMass: PUSH_REF, damp: DAMP, minSpeed: MIN_V, activeR: ACTIVE_R,
     };
@@ -540,6 +987,10 @@
   /* ---- THE CONTRACT ------------------------------------------------------ */
   CBZ.pushables = {
     add: add,
+    piece: piece,
+    tip: tip,
+    remove: remove,
+    removeOwner: removeOwner,
     props: props,
     reset: resetProps,
     audit: audit,

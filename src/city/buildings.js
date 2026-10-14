@@ -5442,6 +5442,9 @@
     if (b.clearFloorPoint && !b.clearFloorPoint(x, z, pad == null ? 0.9 : pad)) return null;
     const oo = { box: b.lbox, ox: b.ox != null ? b.ox : 0, oz: b.oz != null ? b.oz : 0 };
     if (o) for (const kk in o) if (oo[kk] === undefined) oo[kk] = o[kk];
+    // chairs and stools are LOOSE in the shell (furniture.js makeLoose): a
+    // body you shove and knock over, on the building's own collider ledger
+    if (oo.loose === undefined && b.group && b.group.isObject3D && Array.isArray(b.colliders)) oo.loose = { parent: b.group, ledger: b.colliders, mode: "city" };
     // F.lamp has no yaw (a lamp has no front) — furniture.js's one signature
     // exception, mirrored here and in world/roombuild.js's executor.
     try { return (name === "lamp") ? F.lamp(x, k.Y, z, oo) : F[name](x, k.Y, z, yaw, oo); }
@@ -5777,6 +5780,9 @@
       if (!p || !F || typeof F[name] !== "function" || typeof b.lbox !== "function") return null;
       const oo = { box: b.lbox, ox: abx, oz: abz };
       if (o) for (const kk in o) if (oo[kk] === undefined) oo[kk] = o[kk];
+      // chairs and stools are LOOSE in the shell (furniture.js makeLoose): a
+      // body you shove and knock over, on the building's own collider ledger
+      if (oo.loose === undefined && b.group && b.group.isObject3D && Array.isArray(b.colliders)) oo.loose = { parent: b.group, ledger: b.colliders, mode: "city" };
       try { return (name === "lamp") ? F.lamp(p.x, GF, p.z, oo) : F[name](p.x, GF, p.z, yaw, oo); }
       catch (e) { return null; }
     }

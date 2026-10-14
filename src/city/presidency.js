@@ -513,6 +513,7 @@
     return c;
   }
   function teardownRoom() {
+    if (CBZ.pushables && CBZ.pushables.removeOwner) { try { CBZ.pushables.removeOwner("sitroom"); } catch (e) {} }
     if (ROOM.group && ROOM.group.parent) ROOM.group.parent.remove(ROOM.group);
     for (let i = 0; i < ROOM.cols.length; i++) {
       const k = CBZ.colliders ? CBZ.colliders.indexOf(ROOM.cols[i]) : -1;
@@ -722,10 +723,13 @@
       }
       return addBox(grp, x, y, z, w, h, d, color);
     };
+    // the room's chairs are LOOSE (furniture.js makeLoose): shoved, knocked
+    // over, their colliders on ROOM.cols so they leave with the room
+    const kitLoose = { parent: grp, ledger: ROOM.cols, owner: "sitroom", mode: "city" };
     if (CBZ.furnish && CBZ.furnish.table) {
       try {
         tableRec = CBZ.furnish.table(tcx, Y, tcz, alongX ? 0 : Math.PI / 2, {
-          box: kitBox, ox: 0, oz: 0, oy: 0, len: len, deep: 1.7, seats: 14, tone: "exec",
+          box: kitBox, ox: 0, oz: 0, oy: 0, len: len, deep: 1.7, seats: 14, tone: "exec", loose: kitLoose,
         });
       } catch (e) { tableRec = null; }
     }
@@ -821,7 +825,7 @@
       if (CBZ.furnish && CBZ.furnish.chair) {
         try {
           const cxp = alongX ? px : sideF + 1.35, czp = alongX ? sideF + 1.35 : pz;
-          const cr = CBZ.furnish.chair(cxp, Y, czp, alongX ? Math.PI : -Math.PI / 2, { box: kitBox, ox: 0, oz: 0, oy: 0, tone: "exec" });
+          const cr = CBZ.furnish.chair(cxp, Y, czp, alongX ? Math.PI : -Math.PI / 2, { box: kitBox, ox: 0, oz: 0, oy: 0, tone: "exec", loose: kitLoose });
           stationSeats += cr && cr.seats ? cr.seats.length : 0;
         } catch (e) {}
       }

@@ -851,8 +851,11 @@
   }
 
   // ---- LOOSE FURNITURE ---------------------------------------------------------
-  function foldChair(B, x, z, yaw, seat) {
-    const p = piece(B, x, z, yaw), m = COL.metal, s = 0x5d6166;
+  // A FOLDING CHAIR is the lightest thing in the room: loose (B.loose, an
+  // instance you shove and bowl over, its seat riding along), and only drawn
+  // static when the fit-out has no loose pieces.
+  function foldChairParts(p) {
+    const m = COL.metal, s = 0x5d6166;
     for (let a = -1; a <= 1; a += 2) {
       p(a * 0.19, 0, 0.17, 0.025, 0.42, 0.025, m);             // front legs
       p(a * 0.19, 0, -0.19, 0.025, 0.86, 0.025, m);            // rear legs, up into the back
@@ -862,7 +865,14 @@
     p(0, 0.18, -0.19, 0.36, 0.02, 0.02, m);
     p(0, 0.42, 0, 0.42, 0.03, 0.42, s);                        // seat -> 0.45
     p(0, 0.6, -0.195, 0.4, 0.22, 0.022, s);                    // back panel
-    if (seat) seatAt(B.ox + x, B.fy, B.oz + z, yaw, "chair", 0.45, B.lot);
+  }
+  function foldChair(B, x, z, yaw, seat) {
+    const rec = seat ? seatAt(B.ox + x, B.fy, B.oz + z, yaw, "chair", 0.45, B.lot) : null;
+    if (B.loose && B.loose("foldchair", x, z, yaw, function (box) {
+      foldChairParts(function (lat, up, fwd, across, h, deep, col) { box(lat, up + h / 2, fwd, across, h, deep, col); });
+    }, { mass: 4, seatRec: rec })) return;
+    foldChairParts(piece(B, x, z, yaw));
+    B.solid(x - 0.23, x + 0.23, z - 0.23, z + 0.23, B.fy, B.fy + 0.86);
   }
   function crateBox(B, x, y0, z, w, h, d, col, o) {
     B.box(x, y0 + h / 2, z, w, h, d, col, o);

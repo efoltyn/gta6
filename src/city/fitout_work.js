@@ -566,17 +566,16 @@
   function deskClutter(B, d, top, lampsLeft) {
     const x = d.x, z = d.z, eY = top - 0.76;
     // what the eager bench desk leaves to the walk-in: a mobile drawer
-    // pedestal under the right of the top, a fabric screen clamped to the
-    // back edge with an aluminium cap, and the task chair's arms
+    // pedestal under the right of the top and a fabric screen clamped to the
+    // back edge with an aluminium cap. (The task chair's arms used to be
+    // painted on here, at the spot the chair was built: the chair is the
+    // kit's now, arms and all, and LOOSE, so arms drawn here hung in the air
+    // the moment you shoved it.)
     box(B, x + 0.52, eY + 0.03, z + 0.06, 0.42, 0.58, 0.52, 0x4a5260);
     for (let i = 0; i < 3; i++) box(B, x + 0.52, eY + 0.1 + i * 0.19, z + 0.326, 0.38, 0.17, 0.012, 0x565e6c);
     for (let i = 0; i < 3; i++) box(B, x + 0.52, eY + 0.22 + i * 0.19, z + 0.337, 0.12, 0.015, 0.012, 0xb9bec4);
     box(B, x, top, z - 0.44, 1.6, 0.42, 0.03, hashPick(B, [0x5b6571, 0x6b6f63, 0x4f5b66], d.c | 0, 1, 0xd9));
     box(B, x, top + 0.42, z - 0.44, 1.61, 0.012, 0.036, 0xc5c9cc);
-    for (const a of [-1, 1]) {
-      box(B, x + a * 0.27, eY + 0.48, z + 0.9, 0.03, 0.17, 0.03, C.dark);
-      box(B, x + a * 0.27, eY + 0.65, z + 0.86, 0.05, 0.03, 0.26, C.dark);
-    }
     box(B, x, top, z + 0.12, 0.44, 0.022, 0.15, 0x2a2d31);                         // keyboard
     box(B, x, top + 0.022, z + 0.125, 0.41, 0.003, 0.12, 0x3c4046);                  // its keys
     box(B, x + 0.34, top, z + 0.14, 0.06, 0.03, 0.1, 0x2a2d31);                    // mouse
