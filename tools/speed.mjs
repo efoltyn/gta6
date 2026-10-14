@@ -2259,7 +2259,7 @@ try {
     res.ab = { against: AGAINST, kind: AGAINST_KIND, base: baseLabel, candidate: sides.cand.label, pairs, stop: stopWhy, minPairs: MIN_PAIRS, maxPairs: MAX_PAIRS, rows, look, lookSettings: settings, lookDir };
     // v1-shaped compare block, for scripts that read it
     res.compare = { against: AGAINST, rows: rows.filter((r) => /SLOWER|faster|MORE|fewer/.test(r.verdict)).map((r) => [r.k, r.base, r.cand, r.cand - r.base, r.eps, r.verdict === "MORE" ? "SLOWER" : r.verdict === "fewer" ? "faster" : r.verdict, r.unit]),
-      lookRegression: [...settings.bad, ...lookBad.map((l) => `${l.spot}: pixels changed ${fmt(100 * l.cand.changed, 2)}% vs ${fmt(100 * l.floor.changed, 2)}% on a re-run`)] };
+      lookRegression: [...settings.bad, ...lookBad.map((l) => l.cand ? `${l.spot}: pixels changed ${fmt(100 * l.cand.changed, 2)}% vs ${fmt(100 * l.floor.changed, 2)}% on a re-run` : `${l.spot}: ${l.why || "?"}`)] };
     if (slower.length || lookFail) exitCode = exitCode || 4;
   }
   const json = JSON.stringify(res, null, 1);

@@ -266,13 +266,14 @@
     // leaves pixels to it, so it must be there (never nearer than the tier's
     // radius, never farther than the fog)
     /* THE BAND GOES OUTWARD. A group must be drawn wherever it can be seen
-       (RV: the fog's end; RB: a covered shell's crossfade band). It used to
-       be HIDDEN at R and SHOWN again at R - hysBand, and at driving speed the
-       band is 60 m+: a shell came back 30 m INSIDE the fog (counted as a
-       handoff, seen as a building fading in out of the haze). Now it is
-       SHOWN at R + hysBand (the distance the viewer covers before this group
-       is looked at again, so it is there before it is needed) and hidden
-       only past R + 2 x hysBand. Showing early only ever draws fog colour. */
+       (RV: the fog's end + 30 m; RB: a covered shell's crossfade band). It
+       used to be HIDDEN at R and SHOWN again at R - hysBand, and at driving
+       speed the band is 60 m+: a shell came back 30 m INSIDE the fog (counted
+       as a handoff, seen as a building fading in out of the haze). Now it is
+       SHOWN at R (the viewer covers hysBand / 1.5 between two looks at it, so
+       it is at or past the fog's very end when it shows) and hidden only past
+       R + hysBand. (Shown at R + hysBand it drew 10% more calls on the paired
+       desktop drive, all of them fog colour.) */
     const RB = R0 ? Math.max(SG.detail + (CBZ.SIGHT_FADE_BAND || 30) / 2 + 10, R0) : 0;
     if (!R0) {                      // OFF (high tiers / flag) — restore and idle
       if (hidByUs.size) { hidByUs.forEach(function (o) { o.visible = true; }); hidByUs.clear(); }
@@ -320,14 +321,14 @@
     // far copy only to the swap band, RB.)
     const R = covers && o.userData && o.userData.bld && covers(o) ? Math.min(RV, RB) : RV;
     const H = hysBand();
-    if (d > R + 2 * H) {
+    if (d > R + H) {
       // no `!hidByUs.has(o)` guard: if another system handed visibility back
       // (a quality tier restoring the masonry veneer), the sweep must be able
       // to re-take it, or the object stays drawn forever while the set still
       // claims we own it. Re-adding to a Set is free.
       if (o.visible) { o.visible = false; hidByUs.add(o); }
-      if (d > R + 2 * H + EVICT && hidByUs.has(o) && !evicted.has(o) && !(o.userData && o.userData.streamJob)) evict(o);
-    } else if (d < R + H) {
+      if (d > R + H + EVICT && hidByUs.has(o) && !evicted.has(o) && !(o.userData && o.userData.streamJob)) evict(o);
+    } else if (d < R) {
       // userData.cullLocked = "another system wants this hidden at this
       // quality tier" (city/buildings.js's masonry veneer is dropped whole at
       // tier 0). Re-showing on approach would override that owner. Culling it
@@ -716,11 +717,14 @@
   /* EVERY DEVICE (2026-10-14). It was phones and tablets only, on the
      belief that a desktop pool past the fog was "a fair price for a
      horizon". Past `reach` there is no horizon to pay for: every pixel of a
-     pool there is fog.color (core/sight.js), on any device. The test is
-     exact as long as the pool's material takes the plain scene fog, so a
-     pool with a fog of its own (fog-scaled, a shader, unfogged) is left
-     drawn. */
+     pool there is fog.color (core/sight.js), on any device. On the desktop
+     it takes only pools whose material takes the plain scene fog, so its
+     picture is exactly the old one; phones and tablets keep the rule they
+     shipped with (every scenery pool: a tree's foot decal and mulch go with
+     the tree, which the fog has already taken, and the far street-light
+     pools with them). */
   function reachSafe(o) {
+    if (CBZ.isMobileDevice) return true;
     const m = Array.isArray(o.material) ? o.material[0] : o.material;
     if (!m) return true;
     return !(m.fog === false || m.isShaderMaterial || (m.userData && m.userData._cbzFogScaled));
