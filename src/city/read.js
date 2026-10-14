@@ -456,6 +456,13 @@
       me: { president: ["Mr. President.", "Love what you're doing.", "Hate what you're doing."] },
       base: ["That's the one from the news.", "Heard about you.", "We good. No problems here."],
     },
+    // somebody who works for the President, as he comes past
+    // (president_staff.js THE HOUSE KNOWS HIM; {title} {sir} {Sir} filled there)
+    serve: {
+      night: ["Evening, {title}.", "Good evening, {sir}."],
+      them: { security: ["{Sir}.", "{title}."] },
+      base: ["{title}.", "{Sir}.", "Good to see you, {sir}."],
+    },
     // you leaned on them and it worked
     cower: {
       base: ["Okay, okay.", "I don't want trouble.", "I'm going. I'm going.", "Please. I got kids."],

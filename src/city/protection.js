@@ -1677,6 +1677,53 @@
     for (const k in sec.doors) { const d = sec.doors[k]; if (hyp(d.x, d.z, x, z) < 4.0) return true; }
     return false;
   }
+  /* THE OFFICE DOOR, BOTH SIDES. The pair used to stand 0.4 m behind the
+     Oval Office's door line, in the outer office, either side of the jamb:
+     from the Resolute desk (where a President starts) the wall hid both of
+     them, and the man in the chair sat alone with "no security". Now one
+     stands INSIDE the office by its door, in sight of the desk, watching
+     the room, and one holds the outer office side.
+     Worked in the room's own approach frame (president_office.js reads the
+     same one): entry point, n into the room toward the desk, t across it,
+     depth = 2A and span = 2B of the oval. The inside post is beside the
+     staff's own door (landmarks.staffDoor) on the side AWAY from the room's
+     centre (the staff's aisle runs toward it), clamped inside the oval wall
+     with half a metre to spare; the arrival portal stands in for the staff
+     door in the plain-office fallback. Returns {x, z, y, face} or null. */
+  function officeDoorPost(room, inside) {
+    if (!room || !room.approach || !room.landmarks || !room.landmarks.arrivalPortal) return null;
+    const A2 = room.approach, ap = room.landmarks.arrivalPortal, y = room.floorY || 0;
+    if (!inside) {
+      const x = ap.x - A2.nx * 1.0 + A2.tx * 0.9, z = ap.z - A2.nz * 1.0 + A2.tz * 0.9;
+      return { x: x, z: z, y: y, face: Math.atan2(-A2.nx, -A2.nz) };
+    }
+    const base = room.landmarks.staffDoor || ap;
+    const halfD = Math.max(1.5, (A2.depth || 6) / 2), halfS = Math.max(1.5, (A2.span || 6) / 2);
+    const bx = base.x - A2.x, bz = base.z - A2.z;
+    let u = bx * A2.nx + bz * A2.nz;                  // metres in from the entry
+    const v0 = bx * A2.tx + bz * A2.tz;               // metres across from the centre line
+    u = Math.min(Math.max(u, 1.3), 2 * halfD - 1.3);
+    // how far across the oval reaches at that depth, less the wall's margin
+    const du = (u - halfD) / halfD;
+    const reach = halfS * Math.sqrt(Math.max(0, 1 - du * du)) - 0.55;
+    const s = v0 >= 0 ? 1 : -1;
+    let v = v0 + s * 0.9;
+    if (Math.abs(v) > reach) v = (Math.abs(v0) + 0.5 <= reach) ? s * reach : v0 - s * 0.9;   // no room by the wall: the room side
+    if (Math.abs(v) > reach) v = Math.max(-reach, Math.min(reach, v));
+    const x = A2.x + A2.nx * u + A2.tx * v, z = A2.z + A2.nz * u + A2.tz * v;
+    const cx = A2.x + A2.nx * halfD, cz = A2.z + A2.nz * halfD;
+    return { x: x, z: z, y: y, face: Math.atan2(cx - x, cz - z) };
+  }
+  // put one of the pair straight on his door post (the opening shift, or a
+  // body that has to come up from the ground floor while nobody is looking)
+  function standOfficePost(q, post, tag, snap) {
+    if (snap) teleport(q, post.x, post.z, post.y);
+    if (CBZ.cityFloorPed) { try { CBZ.cityFloorPed(q, post.y); } catch (e) {} }
+    release(q);
+    q._protIndoor = tag; q.staffPost = { x: post.x, z: post.z, face: post.face };
+    q.state = "idle"; q.speed = 0; q._boardRun = false;
+    if (snap && q.group) q.group.rotation.y = post.face;
+  }
   function wantCount(det) { return Math.max(0, (det.memberCount | 0) + (det.standing | 0)); }
   /* ------------------------------------------------------------
      THE SERVICE'S ROSTER. Owner (2026-10-09): "I keep killing all my
@@ -1799,6 +1846,28 @@
     }
     return null;
   }
+  function officeStillPlacing() {
+    const PO = CBZ.presidentOffice;
+    if (!PO || typeof PO.placing !== "function") return false;
+    try { return !!PO.placing(); } catch (e) { return false; }
+  }
+  // he took office at his desk: the two at the office door are ON the door
+  // when the run opens (the rest hold the building doors, from the muster)
+  function postOpeningShift(det, P) {
+    if (!indoorBuilding(P)) return;
+    const room = readOfficeRoom();
+    if (!room || Math.abs((P.pos.y || 0) - (room.floorY || 0)) > 1.5) return;
+    _officeRoom = room;
+    assignRoles(det);
+    let k = 0;
+    for (let i = 0; i < det.memberPedRefs.length && k < 2; i++) {
+      const q = det.memberPedRefs[i];
+      if (!q || q.dead || q._protRole === "shift-leader") continue;
+      const post = officeDoorPost(room, k === 0);
+      k++;
+      if (post) standOfficePost(q, post, "portal", true);
+    }
+  }
   const LEAVING = [];
   function serviceTick(det, A, P, isPres) {
     const svc = svcOf(det);
@@ -1815,10 +1884,20 @@
     if (CBZ.citySpawnDraining) return;
     const want = Math.min(cap, svc.books);
     const have = det.memberPedRefs.length;
-    // THE OPENING SHIFT: on duty when he takes office (and after a load)
+    // THE OPENING SHIFT: on duty when he takes office (and after a load).
+    // Not while president_office.js is still carrying him to the desk: the
+    // muster used to read wherever the origin first dropped him (the lawn,
+    // the front door) and post the detail there, then he was lifted into the
+    // Oval Office and the office pair had to be moved up after him.
     if (!svc.mustered) {
+      // (never more than 6 s: an office that never builds must not cost him his detail)
+      if (isPres && officeStillPlacing()) {
+        if (svc.waitFrom == null) svc.waitFrom = clock;
+        if (clock - svc.waitFrom < 6) return;
+      }
       svc.mustered = true;
       if (have < want) { const m = musterSpot(P, isPres); if (m.x != null) spawnMembers(det, A, m.x, m.z, rng, want - have); }
+      if (isPres) postOpeningShift(det, P);
       return;
     }
     // A SERVICE THAT NO LONGER BELIEVES IN HIM pulls men off the detail
@@ -1928,6 +2007,21 @@
     const room = bld ? officeRoom() : null;
     const hot = ps.posture !== "normal" && !!(ps.threat && !ps.threat.dead);
     const y = P.pos.y || 0;
+    // HE WALKS OUT: the shift leader on the door calls it in, once, and the
+    // detail closes round him (the formation below). Over his head, a radio
+    // call, never a banner.
+    if (isPres) {
+      const was = PSTATE.bld;
+      PSTATE.bld = bld;
+      if (was && !bld && !inCar && ps.posture === "normal" && clock - (PSTATE.movedSaid || -1e9) > 120) {
+        for (let i = 0; i < n; i++) {
+          const q = peds[i];
+          if (q && !q.dead && q._protRole === "shift-leader" && hyp(q.pos.x, q.pos.z, P.pos.x, P.pos.z) < 25) {
+            PSTATE.movedSaid = clock; say(q, "Eagle is moving."); break;
+          }
+        }
+      }
+    }
     _form.length = 0;
     let k = 0;                                   // non-leader index, by roster order (stable)
     for (let i = 0; i < n; i++) {
@@ -1945,22 +2039,16 @@
       if (inCar && !hot) { if (!q._protIndoor) { q.state = "idle"; q.speed = 0; q._boardRun = false; setTarget(q, q.pos.x, q.pos.z); } continue; }
       // ---- indoors in the Mansion or the West Wing, calm: posts -----------
       if (bld && !hot && ps.posture === "normal") {
-        if ((ki === 0 || ki === 1) && room && room.landmarks && room.landmarks.arrivalPortal && room.approach) {
-          // two stand either side of the office door upstairs
-          const ap = room.landmarks.arrivalPortal, A2 = room.approach;
-          const side = ki === 0 ? -1 : 1;
-          const x = ap.x + A2.tx * 0.9 * side - A2.nx * 0.4, z = ap.z + A2.tz * 0.9 * side - A2.nz * 0.4;
-          const face = Math.atan2(-A2.nx, -A2.nz);
+        const dpost = (ki === 0 || ki === 1) ? officeDoorPost(room, ki === 0) : null;
+        if (dpost) {
+          // the office door: one inside it in sight of the desk, one outside
+          const x = dpost.x, z = dpost.z, face = dpost.face;
           const dy = Math.abs((q.pos.y || 0) - room.floorY);
           const dd = hyp(q.pos.x, q.pos.z, x, z) + dy * 4;
           if (q._protIndoor === "portal" && dd < 1.2) { turnTo(q, face, dt); continue; }
           q._protIndoor = null; q.staffPost = null;
-          if (dd < 0.5 || relocateIfFar(q, x, z, room.floorY, 0.8, dt)) {
-            if (CBZ.cityFloorPed) { try { CBZ.cityFloorPed(q, room.floorY); } catch (e) {} }
-            release(q);
-            q._protIndoor = "portal"; q.staffPost = { x: x, z: z, face: face };
-            q.state = "idle"; q.speed = 0; q._boardRun = false;
-          } else if (dy < 1.0) goTo(q, x, z, false, dt, face, false);   // same floor: walk to the post
+          if (dd < 0.5 || relocateIfFar(q, x, z, room.floorY, 0.8, dt)) standOfficePost(q, dpost, "portal");
+          else if (dy < 1.0) goTo(q, x, z, false, dt, face, false);   // same floor: walk to the post
           else { release(q); q.state = "idle"; q.speed = 0; setTarget(q, q.pos.x, q.pos.z); }
           continue;
         }

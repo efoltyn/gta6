@@ -2401,6 +2401,10 @@
     cellCall: cellCall,
     callBack: callBack,
     deskPoint: deskPoint,
+    // still carrying him to the chair (the run's first seconds, before he has
+    // reached it): protection.js holds the detail's opening muster for this,
+    // so the agents are posted where he actually starts
+    placing: function () { return !!(SPAWN.pending && !SPAWN.sat && !(SPAWN.settle > 0)); },
     audit: audit,
     // harness hooks only
     _M: M, _room: ROOM, _answer: answer, _call: placeCall, _open: function () { openFolder(topFolder()); }, _sign: signFolder,

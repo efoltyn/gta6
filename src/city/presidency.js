@@ -395,6 +395,14 @@
       });
     }
     if (det && det.principal) det.principal.ref = sid;
+    // A NEW PRESIDENT GETS A FULL DETAIL. The Service's roster (protection.js
+    // svc: books, dispatch timer, the opening muster) rides the save, so a
+    // President sworn in "this morning" inherited the last presidency's
+    // losses: a run that ended two agents down opened with four, one that
+    // ended with the detail dead opened with NOBODY round him and a
+    // replacement car two to four minutes out. The swearing-in is the
+    // Service's first shift: books full, mustered at his side.
+    if (det) det._svc = null;
   }
   function presidencyBegin() {
     if (!on()) return null;

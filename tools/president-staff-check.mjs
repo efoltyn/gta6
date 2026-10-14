@@ -328,6 +328,32 @@ ok(PS.chiefStyle() === "open", "a good Chief keeps the door open: " + PS.chiefSt
 const off = readFileSync(path.join(ROOT, "src/city/president_office.js"), "utf8");
 ok(/function staffSays\(m\)/.test(off) && /PS\.chiefStyle/.test(off) && /presoffice-dial/.test(off), "president_office.js routes matters through the staff (empty chairs, the Chief's style) and the desk phone dials");
 
+// ---- 9b. THE HOUSE KNOWS HIM: his people acknowledge him as he passes ---------------------
+{
+  CBZ.presidency.serves = (p) => (p._house ? "staff" : p._post ? "security" : null);
+  CBZ.cityPedFaceTo = (p) => { p._faced = (p._faced || 0) + 1; };
+  const mk = (x, z, o) => Object.assign({ pos: { x, y: P.pos.y, z }, group: { rotation: {} }, name: "?", state: "idle" }, o);
+  const butler = mk(P.pos.x + 2, P.pos.z, { _house: true, name: "butler" });
+  const agent = mk(P.pos.x - 3.5, P.pos.z, { _post: true, controlled: true, name: "agent" });
+  const stranger = mk(P.pos.x + 1, P.pos.z + 1, { name: "stranger" });
+  const far = mk(P.pos.x + 30, P.pos.z, { _house: true, name: "gardener" });
+  CBZ.cityPeds = [butler, agent, stranger, far];
+  const before = said.length;
+  tick(1.5);
+  let mine = said.slice(before);
+  ok(mine.length === 1 && mine[0].by === "butler" && mine[0].line === "Mr. President.", "the nearest of his people speaks first, one line: " + JSON.stringify(mine));
+  ok(butler._faceT > 0, "and stops and turns to him");
+  tick(4);
+  mine = said.slice(before);
+  ok(mine.length === 2 && mine[1].by === "agent" && agent._faced === 1, "a few seconds later the next one (an agent turns his head): " + JSON.stringify(mine));
+  tick(20);
+  ok(said.length - before === 2, "nobody says it twice, the stranger and the far man say nothing: " + said.slice(before).map((s) => s.by).join(","));
+  P.driving = true; butler._presAckAt = -1e9; tick(5);
+  ok(said.length - before === 2, "nobody greets a man in a car");
+  P.driving = false;
+  CBZ.cityPeds = [];
+}
+
 // ---- 10. text law ------------------------------------------------------------------------
 const src = readFileSync(path.join(ROOT, "src/city/president_staff.js"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 const strings = (src.match(/"[^"\n]*"/g) || []).join("\n");
