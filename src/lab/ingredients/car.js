@@ -62,7 +62,9 @@ CBZ.lab.ingredient("car", {
     const L = function (v) { return Math.round(v * 1000) / 1000; };
 
     function step(dt) {
-      if (car.dead || !CD) return;
+      // a car the wind has taken (systems/tornado.js) is a body, not a
+      // vehicle: the controller yields, as vehicles.js's `ai` gate does
+      if (car.dead || !CD || car._twWreck) return;
       // pedals
       const v = car.v || 0;
       // brake: stand on it until stopped, then hold (cardyn reads a brake

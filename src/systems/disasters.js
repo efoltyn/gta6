@@ -333,6 +333,19 @@
     }
     return false;
   }
+  /* THE SUPERCELL LIGHT: k 0..1 from a normal sky to the sick green-grey of a
+     tornadic storm's core light (sun almost gone, a green cast in the fill,
+     the horizon pulled in). Shared by the tornado def's warn and active. */
+  function tornadoSky(ctx, k) {
+    const E = ctx.env;
+    if (!E || !(k > 0)) return;
+    E.sunInt = (E.sunInt != null ? E.sunInt : 1) * (1 - 0.7 * k);
+    E.hemiInt = (E.hemiInt != null ? E.hemiInt : 0.8) * (1 - 0.4 * k);
+    if (E.hemiColor != null) E.hemiColor = lerpHex(E.hemiColor, 0x8fa07a, 0.75 * k);
+    if (E.sunColor != null) E.sunColor = lerpHex(E.sunColor, 0xb9c79a, 0.6 * k);
+    if (E.fog != null) E.fog = lerpHex(E.fog, 0x56604a, 0.8 * k);
+    if (E.fogFar != null) E.fogFar = E.fogFar * (1 - 0.45 * k);
+  }
   function sheltered(a) {
     if (CBZ.CONFIG.SURV_PHYSICAL_SHELTER === false) return false;
     return underRoof(a.pos.x, a.pos.z, a.pos.y);
@@ -1449,33 +1462,27 @@
     },
 
     // ---- TORNADO: DELEGATED to systems/tornado.js (CBZ.tornado) ----------
-    //      This slot used to own a second, weaker vortex: six translucent
-    //      cylinders, a swirl particle cloud, a random-walk wander and a
-    //      suck-and-hurt loop that touched ACTORS ONLY — it could not move a
-    //      car, tip a prop or scratch a building, and none of that arithmetic
-    //      was shared with anything. CBZ.tornado is now the ONE vortex in the
-    //      game (Rankine field, EF scale, roof-first structural damage,
-    //      thrown vehicles priced through CBZ.detonate's `kinetic` row), so
-    //      this def authors only what is genuinely survival-specific: the
-    //      banner copy, the EF class the round's intensity earns, and the
-    //      island bounds it must bounce off. Everything else it gets free.
-    //      Deleting the duplicate is the point — see CBZ.tornadoAudit().
+    //      CBZ.tornado is the ONE vortex (the parent storm, the funnel, the EF
+    //      damage on real building parts, the thrown cars, the path, the hail).
+    //      This def authors only what is the ISLAND's: the sky, the siren, the
+    //      bridge to the island's buildings / cars / trees / ground, and the
+    //      phase timing. See CBZ.tornadoAudit().
     tornado: {
-      name: "TORNADO", emoji: "", warnSecs: 5, activeSecs: 18, gap: 6, cause: "torn apart by the tornado", tint: 0x6a6f7a,
-      // THE SKY GOES GREEN AND THE AIR STOPS. The pre-tornado sky is the most
-      // recognisable weather telegraph there is, and it costs one weatherDrive
-      // call: heavy low cloud, a hard yellow-green cast, and wind that dies
-      // away to nothing right before the funnel drops.
+      name: "TORNADO", emoji: "", warnSecs: 7, activeSecs: 22, gap: 6, cause: "torn apart by the tornado", tint: 0x5d6650,
+      /* THE SKY GOES GREEN-GREY AND THE AIR STOPS. A supercell's core light
+         through deep cloud and hail goes that sick green; the sun dies, the
+         wind rises and then falls away to nothing right before the drop, and
+         the civil-defence siren starts. */
       warn(ctx) {
         narrate("hint", "TORNADO touching down!", 2.6); sound("wind");
         const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
+        if (CBZ.tornado && CBZ.tornado.siren) CBZ.tornado.siren(true);
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
-        // wind RISES then falls away — the eerie calm before the drop
         const gust = Math.sin(Math.min(1, k * 1.35) * Math.PI);
-        weather({ rain: 0.25 + k * 0.35, wind: 2 + gust * 13, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.2 + k * 0.4, fogColor: 0x6f7a4e });
-        ctx.env.hemiColor = lerpHex(ctx.env.hemiColor, 0xc9d67a, 0.5 * k);
+        weather({ rain: 0.2 + k * 0.35, wind: 2 + gust * 13, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.2 + k * 0.35, fogColor: 0x56604a, lightning: 0.25 * k });
+        tornadoSky(ctx, k);
         rattleProps(ctx, 0.02 * gust);
         if (rnd() < dt * 1.5 * gust) sound("wind");
       },
@@ -1483,68 +1490,64 @@
       start(ctx) {
         const p = ctx.arena.randomPoint(0, ctx.R * 0.5);
         ctx.st.x = p.x; ctx.st.z = p.z;              // hazards() reads these
-        // A MAGNITUDE, ROLLED PER OCCURRENCE. The old line was a RAMP —
-        // round N's intensity WAS the EF class, so every run met the same
-        // tornado at the same round. Now intensity only biases the centre of
-        // a seeded roll: the same round can hand you a 25 m rope one run and
-        // a wedge that owns the island the next. EF5 stays scripted-only.
-        // capLife (not life): the vortex maps its own rolled lifetime into
-        // the phase window, so a small one ropes out mid-phase and the sky
-        // clears early, while a monster grinds to the horn.
-        const mag = Math.max(0.5, Math.min(4.5, 0.7 + ctx.intensity * 2.2 + (rnd() - 0.5) * 2.6));
+        // A MAGNITUDE, ROLLED PER OCCURRENCE: intensity biases a seeded roll,
+        // so the same round can hand you a rope one run and a wedge the next.
+        // EF5 stays scripted-only. capLife maps the vortex's own lifetime into
+        // the phase window (a small one ropes out early and the sky clears).
+        let mag = Math.max(0.5, Math.min(4.5, 0.7 + ctx.intensity * 2.2 + (rnd() - 0.5) * 2.6));
+        if (dir.forceMag != null) { mag = dir.forceMag; dir.forceMag = null; }
+        const A = ctx.arena;
         ctx.st.tw = CBZ.tornado ? CBZ.tornado.spawn({
           x: p.x, z: p.z, mag: mag,
           capLife: this.activeSecs + 1.5,
-          // no `by`: nobody is credited for the weather (see tornado.js's
-          // note — a non-null `by` makes structural.js blame the player)
+          // no `by`: nobody is credited for the weather
           bounds: { x: ctx.cx, z: ctx.cz, r: ctx.R - 6 },   // bounce off the island edge
-          /* THE ARENA BRIDGE (TORNADO_V2, declared in tornado.js). The vortex
-             file owns the wind field and the timing; what it cannot own is the
-             island's machinery, so this def LENDS it: bites land in THE
-             structural ledger above (glass → lean → collapse, shared with the
-             quake and the wave), thrown cars ride the one flingCar ticker the
-             flood uses, and shelter is surv's own physical underRoof test.
-             The vortex keeps no structural state; the island keeps one ledger. */
-          arena: (CBZ.CONFIG.TORNADO_V2 !== false) ? {
-            fragile: function () { return ctx.arena.fragile || []; },
-            cars: function () { return ctx.arena.cars || []; },
+          /* THE ISLAND BRIDGE: the vortex reads the island's own records and
+             writes its damage through the island's own machinery (the ONE
+             structural ledger above, the car's own glass, surv's shelter). */
+          arena: {
+            fragile: function () { return A.fragile || []; },
+            cars: function () { return A.cars || []; },
+            trees: function () { return A.flammable ? A.flammable.filter(function (f) { return f.trunk || f.foliage; }) : []; },
+            ground: function (x, z) { return A.groundHeightAt(x, z); },
             hitBuilding: function (b, amount, dirx, dirz) {
               return structureHit(b, amount, ctx, { kind: "tornado", dirx: dirx, dirz: dirz });
             },
-            flingCar: function (car, dx, dz, force, up) { flingCar(car, dx, dz, force, up); },
+            carGlass: function (car, dx, dz) { shatterCarGlass(car, dx, dz); },
             sheltered: function (a) { return sheltered(a); },
-          } : null,
+          },
         }) : null;
       },
       active(dt, ctx) {
-        // CBZ.tornado owns the field, the funnel, the deaths and the debris.
-        // All this def does is mirror the live position for the minimap and
-        // keep the parent storm blowing.
-        // V2 thins the active-phase fog: at 0.45 the whole column washed to
-        // the fog colour and the funnel read as weather haze, not a tornado.
+        // mirror the live position for the minimap; keep the parent storm
+        // blowing. Near the funnel the storm's own wind bends INTO it and the
+        // rain thins (the rain-free base under the updraft), then hammers
+        // again once it has passed.
         const a = CBZ.tornado && CBZ.tornado.active()[0];
-        if (a) { ctx.st.x = a.x; ctx.st.z = a.z; }
-        /* YOU DON'T SEE THE INFLOW, YOU FEEL IT. Near the funnel the storm's
-           own wind bends INTO it — everything loose, including the rain
-           streaks the weather system draws along windDir, visibly feeds the
-           vortex — and the rain THINS (the rain-free base under a supercell's
-           updraft), then hammers again once it has passed. That arriving
-           hush-then-roar is the body-level telegraph a siren can't fake. */
+        if (a) { ctx.st.x = a.x; ctx.st.z = a.z; ctx.st.r = a.r; }
         let wx = ctx.st.wx, wz = ctx.st.wz, wind = 12, rain = 0.55;
         const P = CBZ.player;
         if (a && P && P.pos) {
           const dx = a.x - P.pos.x, dz = a.z - P.pos.z, d = Math.hypot(dx, dz) || 1;
-          const k = Math.max(0, 1 - d / 320);            // inflow influence
+          const k = Math.max(0, 1 - d / 320);
           wx = wx * (1 - k) + (dx / d) * k;
           wz = wz * (1 - k) + (dz / d) * k;
           const wl = Math.hypot(wx, wz) || 1; wx /= wl; wz /= wl;
           wind = 12 + 16 * k;
-          rain = 0.55 - 0.38 * Math.max(0, 1 - d / (a.r * 1.6));
+          rain = 0.55 - 0.38 * Math.max(0, 1 - d / (a.r * 3));
         }
-        weather({ rain: rain, wind: wind, windDir: { x: wx, z: wz },
-          fog: CBZ.CONFIG.TORNADO_V2 !== false ? 0.28 : 0.45, fogColor: 0x6a6f7a });
+        // the light comes back as it ropes out: the clear slot behind the
+        // rear-flank downdraft arrives with the end of it
+        const clear = a ? a.rope : 1;
+        weather({ rain: rain * (1 - 0.5 * clear), wind: wind, windDir: { x: wx, z: wz }, fog: 0.26 - 0.1 * clear, fogColor: 0x56604a, lightning: 0.3 * (1 - clear) });
+        tornadoSky(ctx, 1 - 0.6 * clear);
       },
-      end(ctx) { weatherOff(); if (CBZ.tornado && ctx.st.tw) CBZ.tornado.stop(ctx.st.tw); ctx.st.tw = null; },
+      end(ctx) {
+        weatherOff();
+        if (CBZ.tornado && ctx.st.tw) CBZ.tornado.stop(ctx.st.tw);
+        if (CBZ.tornado && CBZ.tornado.siren) CBZ.tornado.siren(false);
+        ctx.st.tw = null;
+      },
       threat(x, z, ctx) { return CBZ.tornado ? CBZ.tornado.threat(x, z) : 0; },
       safeDir(x, z, ctx) { return CBZ.tornado ? CBZ.tornado.safeDir(x, z) : null; },
     },
@@ -4317,9 +4320,14 @@
       vx: dirx * force + (rnd() - 0.5) * 2, vy: up + rnd() * 3, vz: dirz * force + (rnd() - 0.5) * 2,
       sx: (rnd() - 0.5) * 6, sz: (rnd() - 0.5) * 6, settled: false,
     });
-    // the windows go as it is ripped off the street: THIS car's own glass
-    // shatters (a single-material glass mesh on its body), else a burst of
-    // glass grit where the windows were
+    shatterCarGlass(car, dirx, dirz);
+  }
+  // the windows go as it is ripped off the street: THIS car's own glass
+  // shatters (a single-material glass mesh on its body), else a burst of
+  // glass grit where the windows were. Shared by the wave's fling and the
+  // tornado (through its island bridge).
+  function shatterCarGlass(car, dirx, dirz) {
+    if (!car || car._pane || !car.group) return;
     if (CBZ.debris) {
       const gp = car.group.position;
       let pane = null;
@@ -5310,6 +5318,9 @@
       if (dir.cur && dir.cur.end && dir.state === "active") { try { dir.cur.end(makeCtx(0)); } catch (e) {} }
       // a fresh match starts on a flat sea, clear weather and no open holes
       surgeSet(0); weatherOff();
+      // the tornado's journal: every roof, wall, tree and car it moved goes
+      // back, its debris, hail and scar are cleared, the siren stops
+      if (CBZ.tornado && CBZ.tornado.restoreWorld) { try { CBZ.tornado.restoreWorld(); } catch (e) {} }
       if (CBZ.survHoles) CBZ.survHoles.length = 0;
       said.banners = said.hints = said.toasts = 0;
       // a fresh SEEDED arc for this run: world seed + run counter → the same
@@ -5539,7 +5550,7 @@
       const id = dir.curId, st = dir.st, out = [];
       const warn = dir.state === "warn";
       if (id === "tornado") {
-        if (!warn && st.x != null) out.push({ x: st.x, z: st.z, r: 18 });
+        if (!warn && st.x != null) out.push({ x: st.x, z: st.z, r: st.r ? Math.max(10, st.r * 1.4) : 18 });
       } else if (id === "volcano") {
         const h = A.hills[0]; out.push({ x: h.x, z: h.z, r: 15 });
         pushEruptHazards(st, out);
@@ -5604,9 +5615,12 @@
        ============================================================ */
     audit() { return CBZ.disasterAudit(); },
     // jump straight to a named disaster's warning (debug / verification aid)
-    force(id) {
+    // opts.mag (QA): the size the next occurrence is built at, instead of the
+    // seeded roll (the tornado reads it; tools/disaster-check.mjs --mag)
+    force(id, opts) {
       const i = order.indexOf(id);   // this run's shuffled arc
       if (i < 0) return false;
+      dir.forceMag = opts && opts.mag != null ? +opts.mag : null;
       /* A WARNING HAS MESHES TOO. Ending only an ACTIVE def left every warn-
          phase artefact of the interrupted one in the world — the volcano's
          crater glow disc, its telegraph lane — because warn() built them and

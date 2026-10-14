@@ -52,6 +52,11 @@ const HOLD = FAST ? 240 : 5400;
    machine legitimately takes a while. */
 const PATIENCE = (QUICK || FAST) ? { engine: 60000, play: 100000 } : { engine: 150000, play: 300000 };
 const JSON_OUT = has("--json");
+/* --only tornado[,quake]: sweep just these disasters (a builder checking the
+   one def they changed on the real island, without the other ten minutes). */
+const ONLY = arg("--only", "") ? arg("--only", "").split(",") : null;
+// --mag 3: build the forced disaster at this size instead of the seeded roll
+const MAG = arg("--mag", "");
 const say = (m) => { if (!JSON_OUT) console.log(m); };
 
 /* THE CENSUS. Every row is a system this game is actually made of, named by
@@ -269,10 +274,10 @@ try {
        reached — which is a fact about the harness, not about the game. A
        reset() before each force gives every def the same clean island, the
        same live bot field and a living player to threaten. */
-    for (const id of ROSTER) {
+    for (const id of (ONLY || ROSTER)) {
       const r = await rig.evl(`(async () => {
         CBZ.modes.survival.reset(CBZ.game);
-        if (!CBZ.disasters.force(${JSON.stringify(id)})) return { forced: false };
+        if (!CBZ.disasters.force(${JSON.stringify(id)}${MAG ? ", { mag: " + (+MAG) + " }" : ""})) return { forced: false };
         let active = 0, ticks = 0, warned = 0, ended = false;
         for (let i = 0; i < 5400 && !ended; i++) {
           CBZ.stepSim(1 / 60); ticks++;
@@ -283,7 +288,18 @@ try {
           if (i % 150 === 0) await new Promise(r => setTimeout(r, 0));
         }
         const p = CBZ.player;
-        return { forced: true, active, warned, ticks, ended,
+        // what the vortex DID to the island (systems/tornado.js counters)
+        const tw = (${JSON.stringify(id)} === "tornado" && CBZ.tornado && CBZ.tornado.audit) ? (function (a, pf) {
+          const F = (CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.fragile) || [];
+          const parts = F.map(function (b) { return CBZ.tornado.partsOf(b); });
+          return { ef: a.path ? a.path.ef : -1, buildings: F.length,
+            withRoofParts: parts.filter(function (p) { return p && p.roof > 0; }).length,
+            separable: parts.filter(function (p) { return p && p.separable; }).length,
+            roofsDamaged: a.roofsDamaged, roofsRemoved: a.roofsRemoved, wallsDown: a.wallsDown, buildingsFailed: a.buildingsFailed,
+            housesSwept: a.housesSwept, treesDown: a.treesDown, carsMoved: a.carsMoved, carsRolled: a.carsRolled, carsThrown: a.carsThrown,
+            debrisLofted: a.debrisLofted, scarSections: a.scarSections, hailStones: a.hailStones, perf: pf };
+        })(CBZ.tornado.audit(), CBZ.tornado.perf()) : undefined;
+        return { forced: true, active, warned, ticks, ended, tornado: tw,
                  x: p.pos.x, y: p.pos.y, z: p.pos.z,
                  live: CBZ.bots ? CBZ.bots.filter(b => !b.dead).length : 0,
                  killed: CBZ.bots ? CBZ.bots.filter(b => b.dead).length : 0 };
@@ -294,6 +310,7 @@ try {
       else if (!r.active) sweep.neverActive.push(id);
       if (r.x != null && !(isFinite(r.x) && isFinite(r.y) && isFinite(r.z))) fail(id + ": player position went NaN");
       say(`  ${id.padEnd(11)} ${r.active ? String(r.active).padStart(4) + " active ticks · killed " + r.killed : "NEVER ACTIVE"}`);
+      if (r.tornado) say("              " + JSON.stringify(r.tornado));
     }
     if (sweep.neverActive.length) fail("never reached active: " + sweep.neverActive.join(", "));
   } else {
