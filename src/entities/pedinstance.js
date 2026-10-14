@@ -392,7 +392,8 @@
 
   function pageImage(C, PH, data) { return { data: data || new Uint8Array(C.PW * PH * 4), width: C.PW, height: PH }; }
   function newPage(C) {
-    const s = C.proto, img = pageImage(C, C.PH0);
+    const gpu = gpuPagesOk();
+    const s = C.proto, img = gpu ? { data: null, width: C.PW, height: C.PH0 } : pageImage(C, C.PH0);
     const t = new THREE.DataTexture(img.data, img.width, img.height, THREE.RGBAFormat, THREE.UnsignedByteType);
     t.flipY = false; t.premultiplyAlpha = false; t.unpackAlignment = 4;
     t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
@@ -412,6 +413,22 @@
       P.data = null; t.image.data = null; P.gpuOnly = true;
       CBZ.freedStaticArrays = true;
     };
+    /* EVERY PAGE IS BORN ON THE GPU when there is a renderer to hold it: the
+       texture is allocated empty (texImage2D with no pixels), every slot is
+       written straight into it (paintSlot's copyTextureToTexture) and a
+       growth copies the old rows texture to texture (gpuGrow). No page keeps
+       a CPU copy (5.5 MB of them at the phone boot, plus the full-page
+       garbage every growth made). */
+    if (gpu) {
+      let born = false;
+      try {
+        CBZ.renderer.initTexture(t);
+        const pr = CBZ.renderer.properties.get(t);
+        born = !!(pr && pr.__webglInit);
+      } catch (e) { born = false; }
+      if (born) { P.gpuOnly = true; CBZ.freedStaticArrays = true; }
+      else { const im = pageImage(C, C.PH0); t.image = im; P.data = im.data; t.needsUpdate = true; }
+    }
     C.pages.push(P);
     return P;
   }
@@ -438,6 +455,67 @@
      the moment it is copied, on a growth that happens a handful of times a
      session). The doublings below GPU_ROWS are small (the page at 512 rows is
      4 MB). */
+  function gpuPagesOk() {
+    const R = CBZ.renderer;
+    return !!(R && R.initTexture && R.copyTextureToTexture && R.properties && R.state && R.getContext &&
+      !(CBZ.CONFIG && CBZ.CONFIG.TEX_FREE === false));
+  }
+  /* GROW A GPU-ONLY PAGE ON THE GPU: the old rows go texture -> scratch
+     texture -> the re-allocated page (copyTexSubImage2D through a scratch
+     framebuffer; the scratch is a three DataTexture with the page's own
+     format, so both copies are format-identical, sRGB or not). Bindings go
+     through three's state cache and the framebuffer binding is put back, so
+     the renderer never sees a binding it did not make. false = not done (the
+     caller reads the rows back instead). */
+  function gpuGrow(R, P, PH) {
+    const gl = R.getContext(), C = P.cls, oldPH = P.PH, st = R.state;
+    const pr = R.properties.get(P.tex);
+    if (!gl || !pr || !pr.__webglTexture || !gl.copyTexSubImage2D) return false;
+    const tmp = new THREE.DataTexture(null, C.PW, oldPH, THREE.RGBAFormat, THREE.UnsignedByteType);
+    tmp.flipY = false; tmp.generateMipmaps = false; tmp.minFilter = tmp.magFilter = THREE.NearestFilter;
+    tmp.encoding = P.tex.encoding;
+    const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const fb = gl.createFramebuffer();
+    let ok = false;
+    try {
+      R.initTexture(tmp);
+      const tp = R.properties.get(tmp);
+      if (!tp || !tp.__webglTexture) return false;
+      // 1. old rows -> scratch
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pr.__webglTexture, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) return false;
+      st.activeTexture(gl.TEXTURE0);
+      st.bindTexture(gl.TEXTURE_2D, tp.__webglTexture);
+      gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, C.PW, oldPH);
+      st.unbindTexture();
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+      // 2. the page, taller and empty
+      P.tex.image = { data: null, width: C.PW, height: PH };
+      P.tex.needsUpdate = true;
+      R.initTexture(P.tex);
+      const pp = R.properties.get(P.tex);
+      if (!pp || !pp.__webglInit) throw new Error("page not re-allocated");
+      // 3. scratch -> the top rows of the page, then its mips
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tp.__webglTexture, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) throw new Error("scratch not readable");
+      st.activeTexture(gl.TEXTURE0);
+      st.bindTexture(gl.TEXTURE_2D, pp.__webglTexture);
+      gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, PH - oldPH, 0, 0, C.PW, oldPH);
+      if (P.tex.generateMipmaps) gl.generateMipmap(gl.TEXTURE_2D);
+      st.unbindTexture();
+      ok = true;
+    } finally {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+      gl.deleteFramebuffer(fb);
+      tmp.dispose();
+    }
+    return ok;
+  }
   function readOldRows(R, P) {
     const gl = R.getContext && R.getContext();
     const pr = R.properties.get(P.tex);
@@ -477,9 +555,22 @@
     const PH = nextRows(P);
     if (C.cols * Math.floor(PH / C.sh) <= P.cap) return false;     // no new slot row in it
     const R = CBZ.renderer;
-    if (PH >= GPU_ROWS && R && R.initTexture && R.copyTextureToTexture && R.properties && !(CBZ.CONFIG && CBZ.CONFIG.TEX_FREE === false)) {
+    if ((PH >= GPU_ROWS || P.gpuOnly) && R && R.initTexture && R.copyTextureToTexture && R.properties && !(CBZ.CONFIG && CBZ.CONFIG.TEX_FREE === false)) {
       const oldPH = P.PH;
       let old = P.data;
+      if (!old && P.gpuOnly) {
+        let done = false;
+        try { done = gpuGrow(R, P, PH); } catch (e) { console.error("[pedinstance] page grow on the GPU", e); }
+        if (done) {
+          CBZ.freedStaticArrays = true;
+          P.PH = PH;
+          P.cap = C.cols * Math.floor(PH / C.sh);
+          pageFullUploads++;
+          for (let i = 0; i < P.slots.length; i++) P.slots[i].uv = slotUv(P.slots[i]);
+          reUv(P);
+          return true;
+        }
+      }
       try {
         if (!old && P.gpuOnly) old = readOldRows(R, P);
         if (!old) throw new Error("no rows to carry");
