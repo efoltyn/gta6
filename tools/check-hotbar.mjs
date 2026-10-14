@@ -98,7 +98,8 @@ const CBZ = {
   econ: { hasItem: () => false, takeItem: () => false },
   player: { hp: 100, hunger: 80 },
 };
-const win = { CBZ, addEventListener() {} };
+const winListeners = {};
+const win = { CBZ, addEventListener(t, f) { (winListeners[t] = winListeners[t] || []).push(f); } };
 win.window = win;
 win.document = { createElement: el, body };
 vm.createContext(win);
@@ -120,6 +121,16 @@ for (const n of [0, 1, 3, 9, 14]) {
   ok(lit === (n ? 1 : 0), `render n=${n}: ${lit} lit guns`);
   ok(cells === n + 3, `render n=${n}: ${cells} cells (want guns + flashlight + keycard + key)`);
   ok(bar.style["--hb-n"] === String(n + 3), `render n=${n}: --hb-n=${bar.style["--hb-n"]}`);
+  // the digit that picks a cell rides as data-k on usable cells only (CSS
+  // draws it under html.kbd); passive belt items carry none
+  const ks = [...html.matchAll(/<div class='hb ([^']*)' data-i='\d+'(?: data-k='(\d)')?>/g)];
+  ok(ks.length === cells, `render n=${n}: cell markup unparsed`);
+  let want = 0;
+  for (const m of ks) {
+    const usable = !/passive/.test(m[1]);
+    if (usable && want < 9) { want++; ok(m[2] === String(want), `render n=${n}: usable cell wants data-k=${want}, has ${m[2]}`); }
+    else ok(m[2] === undefined, `render n=${n}: data-k on a passive cell or past 9`);
+  }
   // no words on the bar: strip tags and attributes, nothing may remain
   ok(html.replace(/<[^>]*>/g, "").trim() === "", `render n=${n}: text on the bar`);
   ok(!/Ramen|Soap/.test(html), `render n=${n}: junk drawn`);
@@ -166,5 +177,60 @@ for (const n of [0, 1, 3, 9, 14]) {
   ok(bar.style.display === "none", "city: the bar must leave while you drive (keyboard)");
 }
 
-console.log(fails ? `hotbar check: ${fails} failure(s)` : "hotbar check: OK (model allow-list, 0..14 guns, renderer, audit, Gang City on the same bar)");
+// ---- 4. the keys: systems/input.js (digitKey, html.kbd) + the bar's handler ----
+{
+  const cls = new Set();
+  const il = {};
+  const iwin = {
+    CBZ: {}, listeners: il,
+    addEventListener(t, f) { (il[t] = il[t] || []).push(f); },
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+  };
+  iwin.window = iwin;
+  iwin.document = { documentElement: { classList: { toggle(c, on) { on ? cls.add(c) : cls.delete(c); } } } };
+  vm.createContext(iwin);
+  vm.runInContext(readFileSync(path.join(root, "src/systems/input.js"), "utf8"), iwin);
+  const I = iwin.CBZ;
+  const dk = (o) => I.digitKey(Object.assign({ key: "", code: "" }, o));
+  ok(dk({ code: "Digit1", key: "1" }) === 1, "digitKey: Digit1");
+  ok(dk({ code: "Digit1", key: "!", shiftKey: true }) === 1, "digitKey: Shift+1 on a Mac must still be 1");
+  ok(dk({ code: "Digit2", key: "é" }) === 2, "digitKey: AZERTY 2");
+  ok(dk({ code: "Numpad9", key: "9" }) === 9, "digitKey: numpad 9");
+  ok(dk({ code: "Digit0", key: "0" }) === 0 && dk({ code: "KeyE", key: "e" }) === 0, "digitKey: 0 / letters are not slots");
+  ok(dk({ code: "Digit1", key: "1", metaKey: true }) === 0, "digitKey: Cmd+1 belongs to the browser");
+  ok(!I.hasKeyboard() && !cls.has("kbd"), "kbd: a touch-only device starts without html.kbd");
+  const kd = (e) => iwin.listeners.keydown.forEach((f) => f(Object.assign({ key: "a", code: "KeyA", isTrusted: true, preventDefault() {} }, e)));
+  kd({ isTrusted: false });
+  ok(!cls.has("kbd"), "kbd: a synthetic key is not a keyboard");
+  kd({ target: { tagName: "INPUT" } });
+  ok(!cls.has("kbd"), "kbd: typing into a field (on-screen keyboard) is not a keyboard");
+  kd({ key: "Unidentified", keyCode: 229 });
+  ok(!cls.has("kbd"), "kbd: Android soft keys are not a keyboard");
+  kd({});
+  ok(I.hasKeyboard() && cls.has("kbd"), "kbd: the first real key reveals the digits");
+  const dwin = { CBZ: {}, addEventListener() {}, matchMedia: () => ({ matches: true, addEventListener() {} }) };
+  dwin.window = dwin;
+  dwin.document = { documentElement: { classList: { toggle(c, on) { if (on) dwin.on = c; } } } };
+  vm.createContext(dwin);
+  vm.runInContext(readFileSync(path.join(root, "src/systems/input.js"), "utf8"), dwin);
+  ok(dwin.CBZ.hasKeyboard() && dwin.on === "kbd", "kbd: a desktop (hover + fine pointer) shows the digits from boot");
+
+  // the bar's own handler, fed Shift+2 on a Mac: the 2nd usable cell
+  CBZ.digitKey = I.digitKey;
+  CBZ.game = { mode: "escape", state: "playing", inventory: {}, prisonHolstered: false };
+  CBZ.weaponInventory = ["sidearm", "ak47", "shotgun"];
+  CBZ.currentWeaponId = "sidearm";
+  let picked = null;
+  CBZ.fpsSelectWeaponId = (id) => { picked = id; return true; };
+  const fire = (e) => winListeners.keydown.forEach((f) => f(Object.assign({ repeat: false, target: null, preventDefault() {} }, e)));
+  fire({ code: "Digit2", key: "@", shiftKey: true });
+  ok(picked === "ak47", "keys: Shift+2 must pick the 2nd cell, picked " + picked);
+  picked = null;
+  fire({ code: "Digit3", key: "3", target: { tagName: "TEXTAREA" } });
+  ok(picked === null, "keys: a digit typed into a field must not pick a cell");
+  fire({ code: "Digit3", key: "3", metaKey: true });
+  ok(picked === null, "keys: Cmd+3 must not pick a cell");
+}
+
+console.log(fails ? `hotbar check: ${fails} failure(s)` : "hotbar check: OK (model allow-list, 0..14 guns, renderer, audit, Gang City on the same bar, slot digits + keyboard detection)");
 process.exit(fails ? 1 : 0);

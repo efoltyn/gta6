@@ -24,9 +24,10 @@
        may appear is decided by systems/hotbar_model.js, a pure allow-list
        the node check pins.
      · NO SCREEN. No [I], no bag button, no stash. Digits 1..9 pick the Nth
-       usable cell; the mouse wheel cycles guns (fpsmode.js); a tap picks a
-       cell; a sideways swipe along the bar steps to the next/previous gun.
-       Picking the thing already in your hands puts it away.
+       usable cell (each usable cell wears its digit in tiny type in its
+       corner, only when there is a keyboard: html.kbd, systems/input.js);
+       the mouse wheel cycles guns (fpsmode.js); a tap picks a cell; a
+       sideways swipe along the bar steps to the next/previous gun. Picking the thing already in your hands puts it away.
      · POCKETS STILL EXIST, THEY'RE JUST NOT UI. CBZ.game.inventory (prison)
        and CBZ.game.cityInv (city) stay the count truth that trade, frisks,
        bribes, doors and dealers read. Food and painkillers are taken
@@ -252,7 +253,7 @@
   let shown = [], sig = "", seen = Object.create(null), missingFace = false;
 
   function render(list) {
-    let html = "", firstPassive = true, missing = false;
+    let html = "", firstPassive = true, missing = false, digit = 0;
     for (let i = 0; i < list.length; i++) {
       const e = list[i];
       const face = CBZ.hotbarFace(e);
@@ -269,7 +270,10 @@
       let pips = "";
       const n = e.count | 0;
       if (n > 1 && e.kind !== "detonator") { pips = "<i class='pips'>"; for (let k = 0; k < Math.min(n, 5); k++) pips += "<b></b>"; pips += "</i>"; }
-      html += "<div class='" + cls + "' data-i='" + i + "'>" + face + pips + "</div>";
+      // the digit that picks it, stamped on every usable cell; css/inventory.css
+      // shows it only under html.kbd (systems/input.js), so a phone never sees it
+      const dk = e.selectable && digit < 9 ? " data-k='" + (++digit) + "'" : "";
+      html += "<div class='" + cls + "' data-i='" + i + "'" + dk + ">" + face + pips + "</div>";
     }
     seen = Object.create(null);
     for (let i = 0; i < list.length; i++) seen[list[i].kind + ":" + (list[i].id || list[i].name || "")] = 1;
@@ -401,10 +405,12 @@
   addEventListener("keydown", function (ev) {
     if (ev.repeat || !barMode() || !CBZ.game || CBZ.game.state !== "playing") return;
     const t = ev.target;
-    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
-    const n = "123456789".indexOf(ev.key);
-    if (n < 0 || blocked()) return;
-    const e = M.selectableAt(entries(), n);
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+    // the physical key (Digit1..9 / numpad), so Shift+1 on a Mac and any
+    // layout still mean slot 1 (systems/input.js)
+    const d = CBZ.digitKey ? CBZ.digitKey(ev) : 0;
+    if (!d || blocked()) return;
+    const e = M.selectableAt(entries(), d - 1);
     // the roll's digit, held, is the use input held (systems/helditems.js)
     if (e && e.kind === "bandage" && CBZ.heldItem && CBZ.heldItem.keyHold) { if (CBZ.heldItem.keyHold("bandage", ev.code || ev.key)) ev.preventDefault(); return; }
     if (e && pick(e)) { ev.preventDefault(); refresh(); }

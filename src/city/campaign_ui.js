@@ -1318,15 +1318,15 @@
       return;
     }
 
-    // A visible choice line owns 1-9. Character speech remains the only prose
-    // outside the phone, and these buttons are part of that conversation.
-    if (!state.open && state.dialogue && state.dialogue.choices.length && /^[1-9]$/.test(key)) {
-      const index = parseInt(key, 10) - 1;
-      if (index < state.dialogue.choices.length) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        choose(index);
-      }
+    // A visible choice line owns ALL of 1-9 while it is up: a digit past the
+    // last choice is eaten too, so it can never fall through to the hotbar
+    // (systems/inventory.js) and draw a gun mid-conversation. The physical
+    // key (CBZ.digitKey, systems/input.js), so Shift+1 on a Mac still picks 1.
+    const digit = CBZ.digitKey ? CBZ.digitKey(event) : 0;
+    if (!state.open && state.dialogue && state.dialogue.choices.length && digit) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (digit - 1 < state.dialogue.choices.length) choose(digit - 1);
       return;
     }
 
@@ -1347,7 +1347,7 @@
       // close() as the fallback when the map module isn't loaded.
       if (!(CBZ.fullMap && CBZ.fullMap.open && CBZ.fullMap.open())) close();
     }
-    else if (/^[1-3]$/.test(key)) selectApp(APPS[parseInt(key, 10) - 1]);
+    else if (digit >= 1 && digit <= 3) selectApp(APPS[digit - 1]);
   }
 
   function keyup(event) {

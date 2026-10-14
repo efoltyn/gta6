@@ -554,10 +554,11 @@
   CBZ.weaponInventory = CBZ.weaponInventory || [];
   CBZ.currentWeaponId = CBZ.currentWeaponId || null;
 
-  // Prison Escape owns ten physical number slots: 1 is permanently the
-  // player's empty hands, while 2..0 are a reorderable firearm loadout. Keep
-  // the mapping beside weaponInventory (the ownership truth) so the HUD, stash,
-  // keyboard and touch surfaces cannot each invent a different order.
+  // Prison Escape keeps a nine-slot firearm rail: the ORDER guns sit in on
+  // the one hotbar (systems/inventory.js gunOrder), so a gun never slides when
+  // another is picked up. The digit that picks a gun is NOT decided here: it is
+  // the bar's, 1..9 = the Nth usable cell, the same in every game. (This used
+  // to claim 1 = empty hands and 2..0 = guns; no key handler ever read that.)
   const PRISON_SLOT_KEYS = Object.freeze(["2", "3", "4", "5", "6", "7", "8", "9", "0"]);
   const prisonSlots = CBZ.prisonWeaponSlots = Array.isArray(CBZ.prisonWeaponSlots)
     ? CBZ.prisonWeaponSlots.slice(0, PRISON_SLOT_KEYS.length)
@@ -708,8 +709,6 @@
     const slots = reconcilePrisonSlots().slice();
     const assigned = slots.filter(Boolean);
     return {
-      fistsKey: "1",
-      gunKeys: PRISON_SLOT_KEYS.join(""),
       slots,
       assigned: assigned.length,
       unique: new Set(assigned).size,
