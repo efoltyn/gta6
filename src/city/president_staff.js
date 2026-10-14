@@ -796,6 +796,68 @@
     if (W.press) { unpost(W.press); W.press = null; }
   }
 
+  /* ---- THE HOUSE KNOWS HIM ------------------------------------------------------
+     Owner: "it's like you're not actually president though you start in the
+     pres chair." Everybody who works for him (presidency.js serves(): the
+     office, the household, the Mansion's posts, the agents on a door, the
+     motorcade's men) walked past him like a stranger on a pavement. Now the
+     one nearest him, when he comes within a few metres, stops, turns to him
+     and says one short thing over his head ("Mr. President." / "Sir."), the
+     line picked by read.js (the same man always says the same thing). One at
+     a time, a few seconds apart, each person once every few minutes; nobody
+     while the detail is on alert, nobody to a man in a car. A walker who
+     stops is the street's own turn-to-look (_faceT), so he stands aside for
+     the President rather than walking through him.
+     ------------------------------------------------------------------------------ */
+  const ACK_R = 5.5, ACK_GAP = 3.5, ACK_AGAIN = 150;
+  let ackAcc = 0, ackLast = -1e9;
+  function ackVars() {
+    const P = CBZ.player;
+    const f = ((P && P.gender) || g.playerGender) === "f";
+    return { title: f ? "Madam President" : "Mr. President", sir: f ? "ma'am" : "sir", Sir: f ? "Ma'am" : "Sir" };
+  }
+  function tickAck(dt) {
+    ackAcc += dt;
+    if (ackAcc < 0.25) return;
+    ackAcc = 0;
+    if (CLOCK - ackLast < ACK_GAP) return;
+    const P = CBZ.player, Zp = Pz();
+    if (!P || !P.pos || P.dead || P.driving || P._vehicle || P._aircraft || !Zp || typeof Zp.serves !== "function") return;
+    const Pr = CBZ.protection;
+    if (Pr && Pr.posture) { try { if (Pr.posture("president") !== "normal") return; } catch (e) {} }
+    const L = CBZ.cityPeds; if (!L) return;
+    const h = seat(), detailId = h ? "off_" + h.id : null;
+    const px = P.pos.x, pz = P.pos.z, py = P.pos.y || 0;
+    let best = null, bd = ACK_R;
+    for (let i = 0; i < L.length; i++) {
+      const p = L[i];
+      if (!p || p.dead || !p.pos || !p.group) continue;
+      const dx = p.pos.x - px, dz = p.pos.z - pz;
+      if (dx > bd || dx < -bd || dz > bd || dz < -bd) continue;
+      const d = Math.sqrt(dx * dx + dz * dz);
+      if (d >= bd || d < 0.6 || Math.abs((p.pos.y || 0) - py) > 1.6) continue;
+      if (p._presAckAt != null && CLOCK - p._presAckAt < ACK_AGAIN) continue;
+      if (p.rage || p.surrender || p.state === "fight" || p.state === "flee" || p.state === "surrender" || p._order || p.inCar) continue;
+      // the ones who already talk to him: the Chief and the press secretary
+      // in the office, and the agents walking at his shoulder
+      if (p === W.chief || p === W.press) continue;
+      if (detailId && p._protUnit === detailId && !p._protIndoor) continue;
+      if (p._protRole === "gate") continue;        // the gate says it at the arch (protection.js)
+      let who = null;
+      try { who = Zp.serves(p); } catch (e) { who = null; }
+      if (!who) continue;
+      best = p; bd = d;
+    }
+    if (!best) return;
+    ackLast = CLOCK;
+    best._presAckAt = CLOCK;
+    if (!best.controlled) best._faceT = Math.max(best._faceT || 0, 1.8);   // stops and turns to him
+    else if (CBZ.cityPedFaceTo) { try { CBZ.cityPedFaceTo(best, px, pz, 1.6); } catch (e) {} }
+    let said = false;
+    if (CBZ.citySayTopic) { try { said = CBZ.citySayTopic(best, "serve", { vars: ackVars(), secs: 2.0, color: "#e8e2cf" }); } catch (e) { said = false; } }
+    if (!said) say(best, ackVars().title + ".", 2.0);
+  }
+
   // ---- TICK -----------------------------------------------------------------------
   let acc = 0;
   function tick(dt) {
@@ -805,6 +867,7 @@
     hook();
     if (!seat()) { if (W.chief || W.press) releaseOffice(); return; }
     ensureStaffed();
+    tickAck(dt);
     for (let i = OUT.length - 1; i >= 0; i--) {
       const o = OUT[i]; o.t += dt;
       if (o.t >= 0 && !o.walking && o.door && o.ped && !o.ped.dead) { o.walking = true; walkTo(o.ped, o.door.x, o.door.z); }

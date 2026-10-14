@@ -1701,8 +1701,32 @@
     }
     if (r.group && r.group.parent) r.group.parent.remove(r.group);   // shared assets: detach, never dispose
   }
+  function heliPad() {
+    const site = mansion(), L = site && site.layout && site.layout.heli;
+    return L ? { x: L.x, z: L.z } : (site ? { x: site.cx + 74, z: site.cz + 62 } : null);
+  }
+  /* EXECUTIVE ONE LIVES ON ITS PAD. The city is built once per page and
+     reused by every run, and so was this record: fly it once and it stayed
+     wherever you set it down (playeraircraft.js parks a flown airframe where
+     it landed), for the rest of that run AND every later run of the session.
+     The pad sat empty and "no helicopter" was the President's whole morning.
+     Now: an airframe he is not in, standing off its pad, is flown home by its
+     crew while nobody is looking at either end, and a lost one (a wreck) is
+     replaced on the pad the same way. The first one of a page just stands
+     there. */
   function ensureHeli() {
-    if (heliAlive() && HELI.forArena === arena() && HELI.forSites === CBZ.govComplexes) return true;
+    const fresh = HELI.forArena === arena() && HELI.forSites === CBZ.govComplexes;
+    const pad = heliPad();
+    if (heliAlive() && fresh) {
+      const r = HELI.rec;
+      if (r.taken || !pad || !r.pos) return true;                     // in use, or nowhere to go
+      if (d2(r.pos.x, r.pos.z, pad.x, pad.z) < 14) return true;        // home
+      if (!unseen(r.pos.x, r.pos.z) || !unseen(pad.x, pad.z)) return true;
+      dropHeli();
+      return buildHeli();
+    }
+    // lost (shot down, crashed): the replacement is on the pad, put down unseen
+    if (HELI.rec && fresh && pad && !unseen(pad.x, pad.z)) return false;
     if (HELI.rec) dropHeli();
     return buildHeli();
   }

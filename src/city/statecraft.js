@@ -231,11 +231,18 @@
     if (CBZ.officials && CBZ.officials.titleFor) { try { const t = CBZ.officials.titleFor(rec); if (t) return t; } catch (e) {} }
     return "Official";
   }
+  /* THE HIGHEST SEAT HE HOLDS. allRecs() lists city -> state -> federal ->
+     country, and this used to hand back the FIRST seat with his name on it:
+     a President who also held a city or state seat (a seat kept from an
+     earlier life, a deputy chair, a won by-election) answered "city", so
+     presidency.js's seat() (country only) said nobody was in the chair. No
+     detail, no Executive One, no staff, no salute, while he sat at the
+     Resolute desk. The top of the ladder is the answer to "what does he hold". */
   function holds() {
     if (!CBZ.CONFIG.GOV_OFFICE) return null;
     const sid = playerSid();
     const recs = allRecs();
-    for (let i = 0; i < recs.length; i++) {
+    for (let i = recs.length - 1; i >= 0; i--) {
       const rec = recs[i];
       if (!rec || !rec.office || rec.office.holder !== sid) continue;
       const S = st();
