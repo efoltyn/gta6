@@ -323,6 +323,21 @@
     return queue(objs, opts);
   };
   CBZ.shaderQueueStats = function () { return lastReport; };
+  /* THE WHOLE ACTIVE WORLD, NOW. What the play-start prewarm above walks on
+     the first playing frame (hidden FX pools, the viewmodel, jewellery, the
+     ped instancing pools...) was compiled in that frame's render, a few
+     dozen programs the first draw then waited for. city/mode.js calls this
+     as the build starts (the pools all exist by then, so their programs link
+     on the GPU while the city is built) and again once the run is spawned
+     and the first streamed tick has run (peds, traffic, streamed jobs), so
+     the first frame finds them linked. Already-queued materials are skipped
+     (one walk of the scene graph). */
+  CBZ.shaderQueueWorld = function () {
+    if (!LAZY) return null;
+    if (CBZ.CONFIG && CBZ.CONFIG.RENDER_FRAMES === false) return null;
+    if (!CBZ.scene) return null;
+    return queue(CBZ.scene, { depth: true });
+  };
 
   /* THE CAR-ENTRY SET. Getting into a car compiled ~14 programs in its first
      frames (measured: the car bodies' own materials, drawn close for the
