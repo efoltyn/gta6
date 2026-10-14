@@ -216,11 +216,7 @@
       if (p && p.vacateCabinet) { try { body = p.vacateCabinet(role, { keep: !!opts.ped }); } catch (e) { body = null; } }
       if (role === "chief") { body = W.chief; W.chief = null; }
     }
-    if (body && typeof body === "object" && body.pos) {
-      body._iopts = null;
-      const delay = via === "face" ? 3.6 : 0;
-      OUT.push({ ped: body, t: -delay });
-    }
+    if (body && typeof body === "object" && body.pos) letGo(body, role, via, who);
 
     // THE PERSON STAYS IN THE WORLD
     const grudge = clamp(100 - loyalty + (trait === "able" ? 15 : 0) + (how === "fired" ? 10 : 0), 0, 100);
@@ -262,6 +258,39 @@
 
     emit("dismissal", { role: role, name: who.name, office: TITLE[role], how: how, loyalty: loyalty, sub: sub, breaking: role === "general", via: via });
     return out;
+  }
+  // HE WALKS OUT A PRIVATE MAN. CBZ.cityDismiss (city/brain_city.js) is the
+  // one let-go for every city body: his post ends (the title over his head is
+  // his name again), the office's pin and flags go, and the shared brain walks
+  // him out of the room (the Oval's staff door by the aisle, the Situation
+  // Room's door) instead of the old controlled walk with his rank still on.
+  // Through the door and out of sight, he is taken out of the scene.
+  function letGo(body, role, via, who) {
+    const Zp = Pz(), O = Ofc();
+    // out of the office by its door (president_office.js's route: round the
+    // sofas, through the leaf, on into the outer office), else the room's own
+    let to = null, path = null;
+    const route = O && O.walkOut && O.exitRoute && inOfficeRoom(body) ? O.exitRoute(body.pos) : null;
+    if (route && route.length) { to = route[route.length - 1]; path = route.slice(0, -1); }
+    if (!to && Zp && Zp.roomDoor) { try { to = Zp.roomDoor(); } catch (e) { to = null; } }
+    if (CBZ.cityDismiss) {
+      // face to face the two lines are sayLines' (dismissFace): he stands for them
+      CBZ.cityDismiss(body, { from: (CBZ.city && CBZ.city.playerActor) || CBZ.player, familiar: ["state", "detail"], to: to || null, path: path, line: null,
+        nod: via === "face" ? 3.4 : 0.4, name: who && who.name, job: null, arrive: 0.9 });
+      OUT.push({ ped: body, t: 0, to: to, max: to ? 30 : 20, walked: true });
+    } else {
+      // no street brain on this page: he says his line where he stands, then
+      // the leave layer walks him out
+      body._iopts = null; body._presStaff = null; body._presOfficer = null;
+      if (CBZ.brain && CBZ.brain.dismiss) CBZ.brain.dismiss(body, {});
+      OUT.push({ ped: body, t: via === "face" ? -3.6 : 0, to: null, max: 0, walked: false });
+    }
+  }
+  function inOfficeRoom(p) {
+    const r = office();
+    if (!r || !p || !p.pos || Math.abs((p.pos.y || 0) - r.floorY) > 2.2) return false;
+    const l = toLocal(r, p.pos.x, p.pos.z), A = r.approach;
+    return l.z > -0.5 && l.z < A.depth + 0.5 && Math.abs(l.x) < A.span / 2 + 0.5;
   }
   // face to face: two lines over heads, then he walks
   function dismissFace(role, ped) {
@@ -722,12 +751,14 @@
   const BACK = { chief: -1e9, press: -1e9 };      // CLOCK before which a role does not come back in
   const IN = [];                                  // { ped, route, i, stuck, lastD, face }
   function Ofc() { return CBZ.presidentOffice || null; }
-  function sendOut(p, tag) {
+  // drive false: somebody else (the shared brain's LEAVE) is walking him;
+  // the leave layer only takes him off the world when he is out of sight
+  function sendOut(p, tag, drive) {
     if (!p || p.dead) return;
     for (let i = IN.length - 1; i >= 0; i--) if (IN[i].ped === p) IN.splice(i, 1);
     const O = Ofc();
-    if (O && O.walkOut) { O.walkOut(p, tag); return; }
-    if (CBZ.leave) { CBZ.leave.go(p, { tag: tag, remove: unpost }); return; }
+    if (drive !== false && O && O.walkOut) { O.walkOut(p, tag); return; }
+    if (CBZ.leave) { CBZ.leave.go(p, { tag: tag, remove: unpost, drive: drive !== false }); return; }
     unpost(p);
   }
   function seenAt(r, at) { return !!(CBZ.leave && at && !CBZ.leave.unseen({ x: at.x, y: r.floorY, z: at.z })); }
@@ -796,6 +827,7 @@
     const p = post(r, e.at, JOB.chief, { pin: !e.route, face: e.route ? null : face, gender: c.gender });
     if (!p) return;
     p.name = c.name; p._presStaff = "chief";
+    if (CBZ.brain && CBZ.brain.employ) CBZ.brain.employ(p, { by: "president", title: "Chief of Staff", side: "state" });
     W.chief = p;
     if (e.route) comeIn(p, e.route, face);
     if (!CBZ.interactions || !CBZ.interactions.registerFor) return;
@@ -829,6 +861,7 @@
     const p = post(r, e.at, JOB.press, { pin: !e.route, face: e.route ? null : face, gender: pr.gender || "f" });
     if (!p) return;
     p.name = pr.name; p._presStaff = "press";
+    if (CBZ.brain && CBZ.brain.employ) CBZ.brain.employ(p, { by: "president", title: "Press Secretary", side: "state" });
     W.press = p;
     if (e.route) comeIn(p, e.route, face);
     // no "Brief" button on her: she comes to YOU when the press is waiting
@@ -937,8 +970,13 @@
     // the dismissed finish their line, then walk out (systems/leave.js)
     for (let i = OUT.length - 1; i >= 0; i--) {
       const o = OUT[i]; o.t += dt;
+      // the shared brain walks him (CBZ.cityDismiss) out through the door;
+      // past it (or if he never gets there) he is the leave layer's: off the
+      // world the moment nobody can see him, never before
       if (!o.ped || o.ped.dead) { OUT.splice(i, 1); continue; }
-      if (o.t >= 0) { sendOut(o.ped, "presstaff:dismissed"); OUT.splice(i, 1); }
+      if (o.t < 0) continue;
+      const done = o.to ? (o.t > 1 && Math.hypot(o.ped.pos.x - o.to.x, o.ped.pos.z - o.to.z) < 1.4) : o.t > 1.2;
+      if (done || o.t > o.max) { sendOut(o.ped, "presstaff:dismissed", !o.walked); OUT.splice(i, 1); }
     }
     tickIn(dt);
     // A DEAD STAFFER STAYS DEAD: her desk, his chair, is empty from now on

@@ -138,6 +138,7 @@
     ped.gang = pg.id; ped.faction = "player";
     ped.recruited = true; ped.kind = "crew"; ped.companion = (pg.order === "follow");
     ped.rank = rank || ped.rank || "soldier";
+    if (ped._hireAggr == null) ped._hireAggr = ped.aggr;   // restored by CBZ.cityDismiss
     ped.aggr = Math.max(ped.aggr || 0, 0.92);
     ped.armed = true; if (!ped.weapon || ped.weapon === "Bat") ped.weapon = "Pistol"; ped.ammo = 999;
     ped.maxHp = Math.max(ped.maxHp || 120, ped.rank === "lt" ? 200 : 160);

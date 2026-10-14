@@ -30,8 +30,9 @@
 
    Registers through CBZ.interactions only — interact.js untouched.
    police.js provides the desk: CBZ.cityPoliceStation() (the intake
-   point) + CBZ.cityStationIntake(ped) (walked through the door,
-   off-board) + cops skip restrained peds when picking targets.
+   point) + cops skip restrained peds when picking targets. The hand-over
+   itself is city/custody.js's intake: he is walked through the door, never
+   switched off at the desk.
 ============================================================ */
 (function () {
   "use strict";
@@ -224,19 +225,20 @@
   }
 
   /* ---- STUFFING SOMEBODY IN THE BACK ---------------------------------------
-     This used to be four lines and every one of them was the bug the owner
-     filmed: `group.visible = false` (the body stops existing), `pos.set(car.pos)`
-     (it teleports to the car's ORIGIN, which is the middle of the engine bay),
-     `inCar = true` (peds.js skips it entirely — "the seat IS the freeze"), and
-     a hard cap of ONE because there was exactly one hiding place.
+     A real back seat, reached on foot: city/boarding.js walks the cuffed body
+     to the door under its own legs and npclife puts it in the chair, visible
+     through the glass, holding its seat while the car moves. The cap is the
+     car's SEAT COUNT; `_captive` keeps meaning "the first captive in this car"
+     for the places that read it.
 
-     A real back seat has two, and city/boarding.js knows where both of them
-     are because `CBZ.carCabinInfo` publishes the bench. So the cap is lifted to
-     the SEAT COUNT rather than to a number, `_captive` keeps meaning "the first
-     captive in this car" for the five places that read it, and the body walks
-     to the door under its own legs and is put in the chair by npclife —
-     visible, shootable through the glass, holding its seat while the car moves.
-     The old snap survives underneath as the flag-off path, unchanged. */
+     NO SEAT, NO RIDE. This used to fall back to a hidden back seat:
+     `group.visible = false` and `pos.set(car.pos)`, the body gone from the
+     street the frame it was "put in". city/custody.js reached for it whenever
+     the door arc refused (a full car, a stuck walk), so an arrested man
+     blinked out beside the cruiser in front of the player: the owner's "they
+     just disappear after they get arrested". Deleted. A man who cannot be put
+     in a real seat stays a body, cuffed, on the pavement, and custody.js
+     walks him off instead. */
   function captives(car) { return (car && car._captives) || null; }
   function noteCaptive(car, ped) {
     const a = car._captives || (car._captives = []);
@@ -253,54 +255,38 @@
     return !!(CBZ.boarding && CBZ.boarding.board && CBZ.CONFIG &&
               CBZ.CONFIG.COMPANION_BOARDING_V1 !== false);
   }
-  // opts.legacy: the old hidden back seat (city/custody.js's last resort when
-  // the door arc cannot take him)
-  function seat(ped, car, opts) {
+  function seat(ped, car) {
     if (!ped || !car || car.dead) return false;
     const s = st(ped);
     if (s !== "escorted" && s !== "cuffed") return false;
-    if (ped.restraint) ped.restraint.officer = null;
-    if (boardingUp() && !(opts && opts.legacy)) {
-      // a real seat, reached on foot. `role: "captive"` is what sends him to
-      // the BACK — the seat picker puts a tied man behind the driver, which is
-      // both where he goes and why the one-body cap could be lifted at all.
-      if (CBZ.boarding.freeSeats && CBZ.boarding.freeSeats(car) <= 0) return false;
-      letGo(ped, "set");                             // the car takes him from here
-      ped.restraint.state = "boarding";
-      ped.restraint.vehicle = car;
-      const ok = CBZ.boarding.board(ped, car, { role: "captive", run: false });
-      if (ok) { noteCaptive(car, ped); I.refresh(); return true; }
-      ped.restraint.state = s;                       // refused — nothing moved
-      ped.restraint.vehicle = null;
-      return false;
-    }
-    if (car._captive) return false;                  // one body per back seat
-    letGo(ped, "set");
-    ped.restraint.state = "in_vehicle";
+    if (!boardingUp()) return false;
+    // `role: "captive"` is what sends him to the BACK: the seat picker puts a
+    // tied man behind the driver
+    if (CBZ.boarding.freeSeats && CBZ.boarding.freeSeats(car) <= 0) return false;
+    const officer = ped.restraint.officer;
+    letGo(ped, "set");                               // the car takes him from here
+    ped.restraint.state = "boarding";
     ped.restraint.vehicle = car;
-    noteCaptive(car, ped);
-    ped.inCar = true;                                // peds.js fully skips them (the seat IS the freeze)
-    ped.group.visible = false;
-    ped.pos.set(car.pos.x, 0, car.pos.z);
-    I.refresh();
-    return true;
+    ped.restraint.officer = null;
+    const ok = CBZ.boarding.board(ped, car, { role: "captive", run: false });
+    if (ok) { noteCaptive(car, ped); I.refresh(); return true; }
+    ped.restraint.state = "cuffed";                  // refused: still tied, standing there
+    ped.restraint.vehicle = null;
+    ped.restraint.officer = s === "escorted" ? officer : null;
+    if (s === "escorted") escort(ped, officer || undefined);
+    return false;
   }
   function unseatBody(ped, car) {
     dropCaptive(car, ped);
-    // a body city/boarding.js seated leaves through CBZ.cityUnseat, which is
-    // the ONE sanctioned exit; only the legacy hidden rig is un-hidden here.
-    if (ped._cbzSeat && CBZ.boarding && CBZ.boarding.alight) {
+    // a body city/boarding.js seated (or is walking to the door) leaves
+    // through its door arc: CBZ.cityUnseat is the ONE sanctioned exit
+    if ((ped._cbzSeat || ped._cbzArc) && CBZ.boarding && CBZ.boarding.alight) {
       CBZ.boarding.alight(ped);
       return;
     }
     ped.inCar = false;
-    ped.group.visible = true;
-    if (car) {
-      const h = car.heading || 0;
-      ped.pos.set(car.pos.x - Math.cos(h) * 1.8, 0, car.pos.z + Math.sin(h) * 1.8);
-    }
+    if (ped.group) ped.group.visible = true;
     ped.target.set(ped.pos.x, 0, ped.pos.z); ped.speed = 0;
-    if (CBZ.collide) CBZ.collide(ped.pos, 0.5, 0, 1.7);
   }
   function unseat(ped) {
     const s = st(ped);
@@ -393,21 +379,42 @@
   }
 
   // ---- TURN IN: the desk pays for paper, and only for paper ------------------
+  /* HE IS WALKED IN, NOT ERASED. A collar handed over here used to go through
+     police.js's CBZ.cityStationIntake on the spot: `group.visible = false`
+     and a teleport to (-9999, -9999), a cuffed man gone from under your hand
+     at the desk. Now the desk TAKES him (city/custody.js intake): still in
+     the cuffs, a desk officer's hand on his arm when one is near, walked
+     through the door, and he leaves play only where nobody can see him. */
   function turnIn(ped) {
     if (!ped || !ped.restraint || ped.dead) return false;
     const r = ped.restraint;
-    if (r.state === "in_vehicle" || r.state === "boarding") unseatBody(ped, r.vehicle);
     const wanted = isWanted(ped);
     const pay = wanted ? bountyFor(ped) : 0;
     const tag = ped.bountyTag || "";
+    const CU = CBZ.custody;
+    if (wanted && CU && CU.intake) {
+      // out of the back seat by its own door, then off your hands
+      if (r.state === "in_vehicle" || r.state === "boarding") unseat(ped);
+      if (r.state === "escorted") { letGo(ped, "set"); r.state = "cuffed"; r.officer = null; }
+      ped.bounty = 0; ped.bountyTag = null;
+      ped.npcHeat = 0; ped.npcWanted = 0; ped.rage = null; ped.rampage = null;
+      const S = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
+      if (!CU.intake(ped, S || { x: ped.pos.x, z: ped.pos.z }, { by: "player" })) return false;
+      CBZ.city && CBZ.city.addCash(pay);
+      CBZ.city && CBZ.city.addRespect(4);
+      if (CBZ.sfx) CBZ.sfx("coin");
+      CBZ.city && CBZ.city.big("COLLAR + $" + pay + (tag ? " — " + tag : ""));
+      if (CBZ.pushKill) CBZ.pushKill(nm(ped) + " was turned in", "#7ed957");
+      I.refresh();
+      return true;
+    }
+    if (r.state === "in_vehicle" || r.state === "boarding") unseatBody(ped, r.vehicle);
     ped.restraint = null;
     untrack(ped);
     letGo(ped, "set");
     tie(ped, false);
     if (wanted) {
-      // the desk takes custody: he is a detainee on the state's list from here
-      // (city/custody.js), walked through the door, off the board
-      if (CBZ.custody && CBZ.custody.book) { try { CBZ.custody.book(ped, { verb: "arrest", by: "player", status: "held", facility: CBZ.custody.facility("police") }); } catch (e) {} }
+      // no custody layer loaded: the old desk (police.js's intake)
       ped._custodyExit = true;
       ped.bounty = 0; ped.bountyTag = null;
       if (CBZ.cityStationIntake) CBZ.cityStationIntake(ped);
@@ -479,9 +486,14 @@
          tick must not drag him back to your shoulder every frame. A CLINCH is
          deliberately excluded: you cannot be holding somebody in a headlock and
          have him politely walking to a car at the same time, so a grapple wins
-         and the arc's own `arcInvalid` drops it. Feature-detected. */
+         and the arc's own `arcInvalid` drops it. Feature-detected.
+         THE ARC, NOT boardingHolds: boardingHolds is also true for a body
+         already SEATED (`_cbzSeat`), so asking it here kept a seated man
+         "boarding" forever. custody.js then gave up on the load after 14 s,
+         pulled him back out and stuffed him in the old hidden back seat: the
+         man vanished beside the cruiser in front of the player. */
       if (r.state === "boarding") {
-        if (CBZ.boardingHolds && CBZ.boardingHolds(ped)) continue;
+        if (ped._cbzArc || ped._boardOwn) continue;
         // the arc ended: seated → riding, refused → still tied, standing there
         r.state = ped._cbzSeat ? "in_vehicle" : "cuffed";
         if (r.state === "cuffed") { r.vehicle = null; ped.target.set(ped.pos.x, 0, ped.pos.z); }
@@ -533,10 +545,16 @@
              for the flag-off case. */
           ped.speed = 0;
         } else {
-          ped.pos.set(car.pos.x, 0, car.pos.z);   // riding along (LOS/map stay honest)
+          // "in a car" with no seat under him is a state nothing can draw:
+          // he is standing where he is, still tied
+          r.state = "cuffed"; r.vehicle = null; dropCaptive(car, ped);
+          ped.target.set(ped.pos.x, 0, ped.pos.z);
         }
         continue;
       }
+      // city/custody.js is walking him (through the precinct door, or off
+      // down the street with nobody to drive him): its legs, not this pin
+      if (ped._custody && ped._custody.walking) continue;
 
       // cuffed (standing or escorted): held still, hands pinned, mouth running
       ped.controlled = true; ped.rage = null;
@@ -730,6 +748,7 @@
     for (const p of restrained) {
       const s = st(p);
       if (s !== "cuffed" && s !== "escorted" && s !== "in_vehicle") continue;
+      if (p._custody && p._custody.state === "intake") continue;   // the desk already has him
       const d = Math.hypot(p.pos.x - px, p.pos.z - pz);
       if (d > 9) continue;
       if (d < bd) { bd = d; best = p; }

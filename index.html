@@ -706,7 +706,7 @@ document.body.appendChild(b);}}catch(e){}})();
      memory, witnesses, morale, the authority ladder). Pure logic with no
      parse-time dependencies, so it loads before its first consumers
      (entities/security.js, entities/guards.js). -->
-<script src="src/systems/brain.js?v=bal2m1012"></script>
+<script src="src/systems/brain.js?v=dismiss1014"></script>
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
@@ -1456,7 +1456,7 @@ document.body.appendChild(b);}}catch(e){}})();
      retaliate proportionally and rout on brain morale, gang standing is
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
-<script src="src/city/brain_city.js?v=standdown1009"></script>
+<script src="src/city/brain_city.js?v=dismiss1014"></script>
 <script src="src/entities/pedinstance.js?v=peak1014c"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
@@ -1642,7 +1642,7 @@ document.body.appendChild(b);}}catch(e){}})();
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
 <script src="src/city/jewelry.js?v=tap0929"></script>
-<script src="src/city/careers.js?v=nodash1"></script>
+<script src="src/city/careers.js?v=dismiss1014"></script>
 <script src="src/city/activities.js?v=nored0930"></script>
 <script src="src/city/heists.js?v=tap0929"></script>
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
@@ -1722,7 +1722,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/interact.js?v=pin1013"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=pres1012"></script>
+<script src="src/city/orders.js?v=dismiss1014"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -1732,8 +1732,8 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=vault1013"></script>
-<script src="src/city/restrain.js?v=btn1011"></script>
-<script src="src/city/custody.js?v=btn1011"></script>
+<script src="src/city/restrain.js?v=detain1014"></script>
+<script src="src/city/custody.js?v=detain1014"></script>
 <script src="src/city/combat.js?v=rounds1013m"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
@@ -1786,10 +1786,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/construction.js?v=news0930"></script>
 <script src="src/city/companies.js?v=fallstay1"></script>
 <script src="src/city/citystaff.js?v=staff1s"></script>
-<script src="src/city/playergang.js?v=cpd1"></script>
+<script src="src/city/playergang.js?v=dismiss1014"></script>
 <script src="src/city/promotion.js?v=rank1"></script>
 <script src="src/city/schedule.js?v=w09290219"></script>
-<script src="src/city/aigoals.js?v=w09290219"></script>
+<script src="src/city/aigoals.js?v=dismiss1014"></script>
 <script src="src/city/officejobs.js?v=living1"></script>
 <script src="src/city/cityevents.js?v=street1009"></script>
 <script src="src/city/story.js?v=night1"></script>
@@ -1835,7 +1835,7 @@ document.body.appendChild(b);}}catch(e){}})();
      registry filters every street verb through, the one-line title over a
      person (card + tap wheel), and the role verbs Threaten / Bribe / Take
      card. After interactions.js + interact.js; everything else lazily. -->
-<script src="src/city/roles.js?v=vault1013"></script>
+<script src="src/city/roles.js?v=dismiss1014"></script>
 <!-- A MAN WITH WORK PITCHES IT AS YOU COME UP (no Talk verb): his line over
      his head, Take is the verb, walking off is the no. After the registry;
      contracts.js + phone.js read lazily. -->
@@ -2413,7 +2413,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=peak1014c"></script>
+<script src="src/city/presidency.js?v=dismiss1014"></script>
 <script src="src/city/politics.js?v=btn1011"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
@@ -2431,7 +2431,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Staff fills a chair with two names (loyal or good); refusals feed
      loyalty, loyalty feeds the coup. After presidency.js,
      president_office.js, protection.js, motorcade.js. -->
-<script src="src/city/president_staff.js?v=presreal1013"></script>
+<script src="src/city/president_staff.js?v=dismiss1014"></script>
 <!-- THE COMMANDER IN CHIEF (city/warroom.js): war / peace / airstrike / nuke
      for a sitting President, ordered from the Situation Room's red phones and
      map (presidency.js) or the detail agent carrying the football. Rides
@@ -2485,7 +2485,7 @@ document.body.appendChild(b);}}catch(e){}})();
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
 <script src="src/city/plots.js?v=peak1014c"></script>
-<script src="src/city/compoundcrew.js?v=cd0929"></script>
+<script src="src/city/compoundcrew.js?v=dismiss1014"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker

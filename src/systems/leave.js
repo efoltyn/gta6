@@ -19,10 +19,10 @@
         body's own mover: CBZ.moves under city/peds.js or the plain actor's
         target), so doors open in front of him (systems/bodydoors.js) and
         shut behind him.
-     2. HE IS REMOVED ONLY WHEN NOBODY CAN SEE HIM: outside the camera's
-        frustum, or behind something solid (rays from the camera to his head,
-        chest and knees all stopped by CBZ.rayColliders), or past FAR metres
-        (the crowd stops drawing at 95). Never a pop in view. A man who has
+     2. HE IS REMOVED ONLY WHEN NOBODY CAN SEE HIM: off the (padded) screen,
+        or behind something solid (config.js CBZ.npcTransitionSafe with
+        occlusion: the engine's one appear/disappear contract), or past FAR
+        metres (the crowd stops drawing at 95). Never a pop in view. A man who has
         walked his whole route and is still in plain sight keeps walking the
         way he was going; if he cannot, he stands there, facing away, until
         the camera leaves him. He does not vanish.
@@ -38,11 +38,14 @@
                                     actor's target)
        opts.remove fn(body)         how he leaves the world (default:
                                     CBZ.cityUnpostNpc, else unparent his rig)
+       opts.drive  false            somebody else walks him (the shared brain's
+                                    LEAVE after CBZ.cityDismiss): only the
+                                    removal is ours
        opts.far    metres           the distance fallback (default 90)
        opts.onGone fn(body, info)   info = { walked, t, throughDoorAt, inView }
        opts.tag    string           who sent him (audit)
      CBZ.leave.unseen(pos [, opts]) -> bool   the visibility rule on its own
-     CBZ.leave.seen(pos)            -> { inFrustum, occluded, dist }
+     CBZ.leave.seen(pos)            -> { onScreen, occluded, dist }
      CBZ.leave.busy(body)           -> bool   is he on his way out
      CBZ.leave.audit()              -> walking now, removed, removedInView (0)
 
@@ -68,53 +71,31 @@
   function posOf(b) { return b ? (b.pos || (b.group && b.group.position) || null) : null; }
 
   // ---- CAN ANYBODY SEE HIM --------------------------------------------------
-  let _fr = null, _pm = null, _sp = null;
-  const _hit = { hit: false };
-  const RAY_OPTS = { any: true, noCam: true, minT: 0.05 };
-  function inFrustum(x, y, z) {
-    const cam = CBZ.camera, THREE = (typeof window !== "undefined" ? window : globalThis).THREE;
-    if (!cam || !THREE || !cam.projectionMatrix) return false;
-    if (!_fr) { _fr = new THREE.Frustum(); _pm = new THREE.Matrix4(); _sp = new THREE.Sphere(); }
-    cam.updateMatrixWorld();
-    _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-    _fr.setFromProjectionMatrix(_pm);
-    _sp.center.set(x, y + 0.9, z); _sp.radius = 0.95;          // a standing man, padded
-    return _fr.intersectsSphere(_sp);
-  }
-  // one ray from the camera to a point on him: stopped by something solid?
-  function rayStopped(cx, cy, cz, x, y, z) {
-    if (typeof CBZ.rayColliders !== "function") return false;  // cannot tell: assume he shows
-    const dx = x - cx, dy = y - cy, dz = z - cz, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (d < 0.6) return false;
-    // the last 0.45 m is his own (the door leaf he is pushing, the wall he passes)
-    try { return !!CBZ.rayColliders(cx, cy, cz, dx / d, dy / d, dz / d, d - 0.45, _hit, RAY_OPTS); } catch (e) { return false; }
-  }
-  function occluded(x, y, z) {
-    const cam = CBZ.camera;
-    if (!cam || !cam.position) return false;
-    const c = cam.position;
-    // head, chest, knees: any one of them showing is him showing
-    return rayStopped(c.x, c.y, c.z, x, y + 1.62, z) && rayStopped(c.x, c.y, c.z, x, y + 1.1, z) && rayStopped(c.x, c.y, c.z, x, y + 0.5, z);
-  }
-  function seen(pos) {
-    const cam = CBZ.camera;
-    if (!pos) return { inFrustum: false, occluded: true, dist: Infinity };
-    const y = pos.y || 0;
-    const c = cam && cam.position;
-    const dist = c ? Math.hypot(pos.x - c.x, y - c.y, pos.z - c.z) : Infinity;
-    const f = inFrustum(pos.x, y, pos.z);
-    return { inFrustum: f, occluded: f ? occluded(pos.x, y, pos.z) : false, dist: dist };
-  }
+  /* The engine already has ONE visibility contract for a body appearing or
+     going (config.js): CBZ.npcTransitionSafe, the padded screen (wider than
+     the frustum, so a man at the edge of the frame counts as seen) and, with
+     `occlusion`, CBZ.npcOccluded (head and hip sight lines from the camera
+     both cut by something solid that is not glass). This file asks THAT, with
+     no near radius (indoors a man two metres away behind a shut door is out
+     of sight) and `far` as the distance past which nothing of him is drawn. */
   function unseen(pos, opts) {
     if (!pos) return true;
-    const cam = CBZ.camera;
-    if (!cam || !cam.position) return true;                  // no eye in this world
-    const far = (opts && opts.far) || FAR;
-    const c = cam.position, y = pos.y || 0;
-    const dx = pos.x - c.x, dz = pos.z - c.z;
-    if (dx * dx + dz * dz > far * far) return true;
-    if (!inFrustum(pos.x, y, pos.z)) return true;
-    return occluded(pos.x, y, pos.z);
+    if (!CBZ.npcTransitionSafe) return !CBZ.camera;            // no contract on this page: only with no eye
+    const far = (opts && opts.far) || FAR, minD = (opts && opts.minDistance) || 0;
+    return CBZ.npcTransitionSafe(pos.x, pos.z, { minDistance: minD, maxDistance: far, y: pos.y != null ? pos.y + 1.05 : null, occlusion: true });
+  }
+  // the same question, in its parts (the lab's report, an audit)
+  function seen(pos) {
+    const cam = CBZ.camera, THREE = (typeof window !== "undefined" ? window : globalThis).THREE;
+    if (!pos || !cam || !THREE) return { onScreen: false, occluded: false, dist: Infinity };
+    const y = pos.y || 0;
+    const v = new THREE.Vector3(pos.x, y + 1.05, pos.z).project(cam);
+    const onScreen = v.z >= -1.05 && v.z <= 1.05 && Math.abs(v.x) <= 1.28 && Math.abs(v.y) <= 1.38;
+    const c = cam.position;
+    return {
+      onScreen: onScreen, occluded: !!(CBZ.npcOccluded && CBZ.npcOccluded(pos.x, y, pos.z, cam)),
+      dist: Math.round(Math.hypot(pos.x - c.x, y - c.y, pos.z - c.z) * 10) / 10,
+    };
   }
 
   // ---- HOW A BODY IS TOLD TO WALK -------------------------------------------
@@ -188,18 +169,18 @@
       }
       if (best) route = (best.route || []).concat([{ x: best.x, z: best.z, door: !!best.door }]);
     }
-    if (!route || !route.length) route = awayRoute(p);
+    const drive = opts.drive !== false;
+    if (!route || !route.length) route = drive ? awayRoute(p) : [];
     const r = {
       b: b, route: route, i: 0, t: 0, walked: 0, lx: p.x, lz: p.z,
       chk: 0, nudge: REISSUE, prog: 0, progX: p.x, progZ: p.z, ext: 0,
-      throughDoorAt: null, tag: opts.tag || null, far: opts.far || FAR,
+      throughDoorAt: null, tag: opts.tag || null, far: opts.far || FAR, drive: drive,
       walk: opts.walk || walkDefault, hold: opts.hold || holdDefault, remove: opts.remove || removeDefault,
       onGone: opts.onGone || null, minT: opts.minT != null ? opts.minT : 0.25,
     };
     b._leaving = r;
     LIVE.push(r);
-    const w = route[0];
-    try { r.walk(b, w.x, w.z); } catch (e) {}
+    if (drive) { const w = route[0]; try { r.walk(b, w.x, w.z); } catch (e) {} }
     return r;
   }
   function rec(b) { return b && b._leaving && LIVE.indexOf(b._leaving) >= 0 ? b._leaving : null; }
@@ -238,8 +219,9 @@
       r.walked += Math.hypot(p.x - r.lx, p.z - r.lz);
       r.lx = p.x; r.lz = p.z;
       // ---- the route ----
-      const w = r.route[r.i];
-      if (w) {
+      const w = r.drive ? r.route[r.i] : null;
+      if (!r.drive) { /* his own brain walks him; only the removal is ours */ }
+      else if (w) {
         const dw = Math.hypot(p.x - w.x, p.z - w.z);
         r.prog += dt;
         if (Math.hypot(p.x - r.progX, p.z - r.progZ) > 0.35) { r.prog = 0; r.progX = p.x; r.progZ = p.z; }

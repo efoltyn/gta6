@@ -1081,6 +1081,7 @@
     // bodyguard who travels with you and shoots to defend (costs a salary).
     ped.recruited = true; ped.kind = (g.career === "pimp" || g.career === "entrepreneur") ? "worker" : "crew";
     if (ped.kind === "crew") {
+      if (ped._hireAggr == null) ped._hireAggr = ped.aggr;   // his own temper back when he is let go (CBZ.cityDismiss)
       ped.companion = true; ped.aggr = 0.96; ped.maxHp = 160; ped.hp = 160;
       ped.armed = true; ped.weapon = ped.weapon && ped.weapon !== "Bat" ? ped.weapon : "Pistol"; ped.ammo = 999;
       ped.faction = "player"; ped.gang = null; ped.npcWanted = 0;
@@ -1338,7 +1339,15 @@
       if (crew.length) {
         const wage = crew.length * (E.crewSalary || 14);
         if ((g.cash || 0) >= wage) { g.cash -= wage; if (CBZ.cityHudDirty) CBZ.cityHudDirty(); }
-        else { const q = crew[0]; q.companion = false; q.recruited = false; q.faction = null; if (q.gang === "player") q.gang = null; g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1); CBZ.city.note("Couldn't make payroll · " + q.name + " walked off.", 2.6); }
+        else {
+          // unpaid, he quits: the one let-go (CBZ.cityDismiss) ends his post and
+          // walks him home; it used to be four field writes, which left his
+          // leash, his crew title and his held fight behind
+          const q = crew[0];
+          if (CBZ.cityDismiss) CBZ.cityDismiss(q, { line: "No pay, no work. I'm out." });
+          else { q.companion = false; q.recruited = false; q.faction = null; if (q.gang === "player") q.gang = null; g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1); }
+          CBZ.city.note("Couldn't make payroll · " + q.name + " walked off.", 2.6);
+        }
       }
       if (g.career === "security") {
         const stars = g.wanted | 0;
