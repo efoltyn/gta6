@@ -817,28 +817,42 @@
     return { frames: n, mean: n ? +(sum / n).toFixed(3) : 0, p95: at(0.95), p99: at(0.99), max: n ? +a[n - 1].toFixed(2) : 0, phases: CBZ.streamStats.ms };
   };
   // one share of work on j; true when j is in the scene (built / unparked)
+  // the heavy ones, for the tools (CBZ.streamStats.slow: the last 24 pieces
+  // of work over 20 ms in ONE frame: what, how, how long)
+  function slowNote(j, how, ms) {
+    if (!(ms > 20)) return;
+    const L = CBZ.streamStats.slow || (CBZ.streamStats.slow = []);
+    const e = [how, j.name || "?", Math.round(ms)];
+    L.push(e); if (L.length > 24) L.shift();
+    // ... and the worst 8 since boot
+    const W = CBZ.streamStats.worst || (CBZ.streamStats.worst = []);
+    if (W.length < 8 || ms > W[W.length - 1][2]) { W.push(e); W.sort(function (a, b) { return b[2] - a[2]; }); if (W.length > 8) W.length = 8; }
+  }
   function bringIn(j, urgent) {
     const t0 = performance.now();
-    if (j.state === "parked") { unpark(j); CBZ.streamStats.ms.unpark += performance.now() - t0; return true; }
+    if (j.state === "parked") { unpark(j); const ms = performance.now() - t0; CBZ.streamStats.ms.unpark += ms; slowNote(j, "unpark", ms); return true; }
     if (j.steps && !urgent) {
       // a job in steps: one step now, the rest on the next frames
       const done = stepJob(j);
-      CBZ.streamStats.ms.build += performance.now() - t0;
+      if (done) { settle(j); noteAdd(j, "build"); }
+      const ms = performance.now() - t0;
+      CBZ.streamStats.ms.build += ms; slowNote(j, done ? "step+settle" : "step", ms);
       if (!done) return false;
-      settle(j); noteAdd(j, "build");
       CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms));
       return true;
     }
     runCaptured(j); settle(j); noteAdd(j, urgent ? "build!" : "build");
-    CBZ.streamStats.ms.build += performance.now() - t0;
+    const ms = performance.now() - t0;
+    CBZ.streamStats.ms.build += ms; slowNote(j, urgent ? "build!" : "build", ms);
     CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms));
     if (urgent) CBZ.streamStats.urgent = (CBZ.streamStats.urgent || 0) + 1;
     return true;
   }
   function takeOut(j) {
     const t0 = performance.now();
-    if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST + (j.spill || 0))) { park(j); CBZ.streamStats.ms.park += performance.now() - t0; }
-    if (j.state === "parked" && j.fn && !j.noFree && !rectKeeps(j.rect, FREE_DIST)) { freeJob(j); CBZ.streamStats.ms.free += performance.now() - t0; }
+    if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST + (j.spill || 0))) { park(j); const ms = performance.now() - t0; CBZ.streamStats.ms.park += ms; slowNote(j, "park", ms); }
+    const t1 = performance.now();
+    if (j.state === "parked" && j.fn && !j.noFree && !rectKeeps(j.rect, FREE_DIST)) { freeJob(j); const ms = performance.now() - t1; CBZ.streamStats.ms.free += ms; slowNote(j, "free", ms); }
   }
   // THE PLAN (10 Hz): re-centre, what is wanted (nearest first, what lies
   // ahead counts as nearer), what is in view now (done now), what goes
@@ -903,7 +917,8 @@
     }
     plan.out = out; plan.oi = 0;
     if (force) { for (const j of out) takeOut(j); plan.out = []; }
-    CBZ.streamStats.ms.plan += performance.now() - t0;
+    const pms = performance.now() - t0;
+    CBZ.streamStats.ms.plan += pms; slowNote({ name: force ? "(forced plan)" : "(plan)" }, "plan", pms);
     let b = 0, p = 0, qd = 0;
     for (const j of jobs) { if (j.state === "built") b++; else if (j.state === "parked") p++; else qd++; }
     CBZ.streamStats.built = b; CBZ.streamStats.parked = p; CBZ.streamStats.queued = qd;

@@ -1907,7 +1907,7 @@ async function serveMain() {
         }
         return { routeLegs: route.length - 1, routeKm: +(tot / 1000).toFixed(2), km: +(Math.min(d, tot) / 1000).toFixed(2), wallS: +((performance.now() - t0) / 1000).toFixed(1), peak: { heap: Math.round(hp), gpu: Math.round(gp), phone: Math.round(php) },
           frameCpu: stat(cpuF), streamerCpu: stat(strF), streamerBy: Object.keys(perK).map(function(k){ return [k.split("src/").join(""), stat(perK[k])]; }).sort(function(a, b){ return b[1].p95 - a[1].p95; }).slice(0, 8),
-          streamStats: (function(){ var o = {}, st = C.streamStats || {}; for (var k in st) if (typeof st[k] === "number") o[k] = st[k]; return o; })(),
+          streamStats: (function(){ var o = {}, st = C.streamStats || {}; for (var k in st) if (typeof st[k] === "number") o[k] = st[k]; if (st.slow) o.slow = st.slow.slice(-24); if (st.worst) o.worst = st.worst.slice(); return o; })(),
           pops: popN, popChecks: checks, lodHandoffs: handoffs, popSamples: pops, poolSwitches: poolSw, poolSamples: poolSamples, streamAdds: (C.streamStats && C.streamStats.adds || []).filter(function (a) { return a[1] < 420; }).slice(0, 20), cols: "s heap gpu phone built parked queued keepR", samples: samples };
       })(${JSON.stringify(route)}, ${+mps}, ${+secs})`, 1800000);
       if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 300000); await P.s("HeapProfiler.stopSampling", {}, 60000); res.allocs = heapSites(profile); } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
