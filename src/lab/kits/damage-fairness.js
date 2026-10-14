@@ -60,10 +60,14 @@
     { id: "tornado EF2", at: "tornado.js hitPeople", far: 100, law: tornado(55, 40) },
     { id: "lightning bolt", at: "disasters.js conduct()", once: true, law: ground },
     { id: "meteor impact", at: "disasters.js meteor impact()", mistake: 0, once: true, law: function () { CBZ.surv.hurtRadius(0, 0, 6, 1e6, { cause: "flattened by a meteor", knockback: 14, fling: 7 }); } },
-    { id: "meteor airburst", at: "disasters.js meteor front()", once: true, far: 100, law: function (a, d, dt, old) {
+    // the front's k is meteor.js's real overpressure / 40 kPa (systems/meteor.js
+    // law.overpressure); here a 200 m ring stands in for it, k = 1 - d/200.
+    // The law below is the meteor owner's (disasters.js front(): nothing under
+    // ~5 kPa, a knock-down and glass cuts above), so `far` is the ring's edge.
+    { id: "meteor airburst", at: "disasters.js meteor front()", once: true, far: 180, law: function (a, d, dt, old) {
       const k = Math.max(0, 1 - d / 200);
       if (old) { if (k > 0.18) CBZ.surv.hurt(a, 6 + 30 * k, { fromX: 0, fromZ: 0, cause: "caught in the meteor airburst" }); }
-      else if (k > 0.5) CBZ.surv.hurt(a, (k - 0.5) * 76, { fromX: 0, fromZ: 0, cause: "caught in the meteor airburst" });
+      else if (k > 0.12) CBZ.surv.hurt(a, 6 + 10 * k + 40 * k * k, { fromX: 0, fromZ: 0, cause: "caught in the meteor airburst" });
     } },
     { id: "volcanic bomb", at: "fx.js dropDebris + disasters.js kinetic", once: true, law: function (a, d, dt, old) {
       CBZ.surv.hurtRadius(0, 0, 1.7, 999, { instakill: true, y: old ? undefined : 0.55 });
