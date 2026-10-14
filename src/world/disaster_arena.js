@@ -1,25 +1,39 @@
 /* ============================================================
-   world/disaster_arena.js — the SURVIVAL battle-royale map.
+   world/disaster_arena.js — the SURVIVAL island: builder.
 
    A disaster island built FAR from the prison (z≈600) so both worlds
    can coexist with zero refactor: an escape match never sees it, a
    survival match teleports here. Everything lives in one group
    (arena.root) so escape mode just hides it.
 
-   The island has a tall central MOUNTAIN (the tsunami refuge) plus a
-   few hills — modelled as cones AND as a CBZ.floorAt() height field so
-   the otherwise-flat (Y-agnostic) physics lets you actually walk up to
-   high ground. Around it: a bright low-poly town of ENTERABLE buildings
-   — every one has a front door, windows, a switchback stair that climbs
-   to each floor and the roof, walkable floor slabs, and a roof you can
-   stand on. They register their floors/stairs/roof as CBZ.platforms and
-   their walls as height-gated CBZ.colliders, so the new vertical physics
-   lets you go inside and up. None of them are safe: the earthquake
-   topples each one as a single piece (walls, floors AND roof) — there
-   is no safe building, only the right KIND of shelter for each hazard,
-   high ground, and luck. (No zones — the disasters are the pressure.)
+   THE ISLAND IS A PLACE (2026-10-14). It was a 120 m disc with the volcano
+   dead centre, a 5 x 5 street lattice painted over it and ~30 buildings
+   dropped at random angles, every front door on -z. It is now 240 m (twice
+   across, four times the land), laid out by world/island_plan.js as a small
+   volcanic harbour town: a coastal plain climbing from the beach, the
+   volcano to the north-west with its breach facing the town, a dry ghaut
+   from the breach to the beach crossed by bridges, reclaimed quays with a
+   breakwater, a lighthouse, marina jetties and moored boats, a downtown
+   grid behind the waterfront with a handful of towers and a helipad hotel,
+   residential streets west and north, villas on the estates, the Works on
+   the east, a ring road, farm fields, beaches. This file BUILDS what the
+   plan says; the plan is data (and tools/island-check.mjs audits it in
+   node: no lot overlaps, no footprint past its lot line, every car on a
+   road, in a bay or on a drive).
 
-   CBZ.buildDisasterArena() builds once and returns the arena descriptor.
+   The buildings are ENTERABLE — a front door on the street, windows, a
+   switchback stair to every floor and the roof (or a lift in a tower),
+   walkable slabs — registered as CBZ.platforms and height-gated
+   CBZ.colliders, so you go inside and up. None of them are safe: the quake
+   topples each as one piece; there is no safe building, only the right
+   KIND of shelter for each hazard, high ground, and luck.
+
+   COST, for a phone: a building's opaque shell draws as ONE mesh (bakeShell),
+   every tree and parked car as an instance (world/instance_proxy.js), the
+   streets in 7 draws, the dressing in 8, the harbour in 4.
+
+   CBZ.buildDisasterArena() builds once and returns the arena descriptor;
+   CBZ.island is the same island as data for the disasters (see publish()).
 ============================================================ */
 (function () {
   "use strict";
@@ -653,9 +667,29 @@
     const group = o.group, ox = o.ox, oz = o.oz, gy = o.gy;
     const dressed = !!(CBZ.dressFacade && o.style && !(CBZ.CONFIG && CBZ.CONFIG.SURV_FACADES === false));
 
+    /* THE LOT LINE. A grammar's entrance is real architecture and it is
+       deep (a terrace and a flight of steps 4 m off the wall, a stylobate
+       6 m, a tower's granite plaza 16 m: city/facade_kit.js facadeReach).
+       A building stands on its own lot (world/island_plan.js), so o.fence —
+       the lot in the building's own frame — clips every piece the grammar
+       lays: a box is cut at the lot line, a round piece past it is dropped.
+       Nothing the facade builds lands on the sidewalk or the neighbour. */
+    const F = o.fence || null;
+    function fenceClip(x0, x1, z0, z1) {
+      if (!F) return [x0, x1, z0, z1];
+      if (x0 < F.x0) x0 = F.x0; if (x1 > F.x1) x1 = F.x1;
+      if (z0 < F.z0) z0 = F.z0; if (z1 > F.z1) z1 = F.z1;
+      return (x1 - x0 < 0.005 || z1 - z0 < 0.005) ? null : [x0, x1, z0, z1];
+    }
+    function inFence(x0, x1, z0, z1) { return !F || (x0 >= F.x0 - 1e-3 && x1 <= F.x1 + 1e-3 && z0 >= F.z0 - 1e-3 && z1 <= F.z1 + 1e-3); }
     function dbox(lx, ly, lz, bw, bh, bd, col) {
       if (!(bw > 0) || !(bh > 0) || !(bd > 0)) return;
       if (!Number.isFinite(lx + ly + lz + bw + bh + bd)) return;
+      if (F) {
+        const c = fenceClip(lx - bw / 2, lx + bw / 2, lz - bd / 2, lz + bd / 2);
+        if (!c) return;
+        lx = (c[0] + c[1]) / 2; bw = c[1] - c[0]; lz = (c[2] + c[3]) / 2; bd = c[3] - c[2];
+      }
       const key = col >>> 0;
       if (!seenCol.has(key)) { seenCol.add(key); colOrder.push(key); }
       recs.push([lx, ly, lz, bw, bh, bd, key]);
@@ -694,21 +728,22 @@
       // already carry them — so lbox is deliberately the deco path too.
       lbox: function (lx, ly, lz, bw, bh, bd, col) { dbox(lx, ly, lz, bw, bh, bd, col); },
       plat: function (lx0, lx1, lz0, lz1, top, ramp) {
+        if (F) { const c = fenceClip(lx0, lx1, lz0, lz1); if (!c) return; lx0 = c[0]; lx1 = c[1]; lz0 = c[2]; lz1 = c[3]; }
         const p = { minX: ox + lx0, maxX: ox + lx1, minZ: oz + lz0, maxZ: oz + lz1, top: gy + top };
         if (ramp) {
           p.ramp = { z0: oz + ramp.z0, z1: oz + ramp.z1, y0: gy + ramp.y0, y1: gy + ramp.y1 };
         }
         CBZ.platforms.push(p); if (o.plats) o.plats.push(p);
       },
-      ball: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 10, 7), col, lx, ly, lz); },
+      ball: function (lx, ly, lz, r, col) { if (inFence(lx - r, lx + r, lz - r, lz + r)) addMesh(new THREE.SphereGeometry(r, 10, 7), col, lx, ly, lz); },
       column: function (lx, ly, lz, r, h, col, seg) {
-        addMesh(new THREE.CylinderGeometry(r, r, h, seg || 12), col, lx, ly + h / 2, lz);
+        if (inFence(lx - r, lx + r, lz - r, lz + r)) addMesh(new THREE.CylinderGeometry(r, r, h, seg || 12), col, lx, ly + h / 2, lz);
       },
-      cone: function (lx, ly, lz, r, h, col) { addMesh(new THREE.ConeGeometry(r, h, 14), col, lx, ly + h / 2, lz); },
+      cone: function (lx, ly, lz, r, h, col) { if (inFence(lx - r, lx + r, lz - r, lz + r)) addMesh(new THREE.ConeGeometry(r, h, 14), col, lx, ly + h / 2, lz); },
       dome: function (lx, ly, lz, r, col) {
-        addMesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), col, lx, ly, lz);
+        if (inFence(lx - r, lx + r, lz - r, lz + r)) addMesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), col, lx, ly, lz);
       },
-      lamp: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 8, 6), col, lx, ly, lz, true); },
+      lamp: function (lx, ly, lz, r, col) { if (inFence(lx - r, lx + r, lz - r, lz + r)) addMesh(new THREE.SphereGeometry(r, 8, 6), col, lx, ly, lz, true); },
       disc: function () {},                 // clock faces: civic only, not here
       plaque: function () {}, seal: function () {},
     };
@@ -724,6 +759,7 @@
         ctx.keepClear = lift.keepClear;
       } catch (e) { lift = null; }
     }
+    if (dressed && o.keepClear) ctx.keepClear = (ctx.keepClear || []).concat(o.keepClear);
     const def = dressed ? CBZ.dressFacade(ctx) : null;
     if (!def) lift = null;
 
@@ -856,6 +892,25 @@
     CBZ.scene.add(root);
     const mat = CBZ.mat;
 
+    /* ---- THE PLAN (world/island_plan.js) --------------------------------
+       The island is laid out as a town before a single mesh is made: the
+       plain, the ghaut, the harbour, the streets, every lot and what stands
+       on it, every parked car, every moored boat. This file builds what the
+       plan says. The facade registry is read first because the plan decides
+       which grammar each lot wears (by district and storey range). */
+    const facadeIds = CBZ.facadeList
+      ? CBZ.facadeList().map(function (f) { return f.id; }).sort() : [];
+    const facTall = {}, facLow = {};
+    for (const id of facadeIds) {
+      const def = CBZ.facadeDef && CBZ.facadeDef(id);
+      if (!def) continue;
+      if (def.minStoreys > 0) facTall[id] = def.minStoreys;
+      if (def.maxStoreys && def.maxStoreys !== Infinity) facLow[id] = def.maxStoreys;
+    }
+    const PLAN = CBZ.islandPlan
+      ? CBZ.islandPlan.make({ cx: cx, cz: cz, R: R, facades: facadeIds, tall: facTall, low: facLow })
+      : null;
+
     // pull addBox results into the arena group (keeps world transform; root @ origin)
     function box(x, y, z, w, h, d, color, opts) {
       const m = CBZ.addBox(x, y, z, w, h, d, color, opts);
@@ -959,12 +1014,16 @@
     grassMat.name = "survival-grass";
 
     // ---- hills / mountain (the high-ground height field) ----
-    const hills = [
-      { x: cx, z: cz, r: 36, peak: 30 },          // central refuge mountain (the volcano)
-      { x: cx - 52, z: cz - 30, r: 20, peak: 9 },
-      { x: cx + 48, z: cz + 40, r: 22, peak: 11 },
-      { x: cx + 40, z: cz - 48, r: 16, peak: 7 },
-    ];
+    // hills[0] is the volcano; the plan puts it north-west of the town with
+    // its breach facing the harbour (the old island stood it dead centre)
+    const hills = PLAN
+      ? PLAN.hills.map(function (h) { return { x: h.x, z: h.z, r: h.r, peak: h.peak }; })
+      : [
+        { x: cx, z: cz, r: 36, peak: 30 },
+        { x: cx - 52, z: cz - 30, r: 20, peak: 9 },
+        { x: cx + 48, z: cz + 40, r: 22, peak: 11 },
+        { x: cx + 40, z: cz - 48, r: 16, peak: 7 },
+      ];
     /* ---- THE VOLCANO IS THE MOUNTAIN, NOT A CONE WITH LAVA ON IT --------
        hills[0] is the island's refuge AND the thing that erupts. ONE function,
        volcanoHeightAt, is read by BOTH the mesh below and CBZ.floorAt (via
@@ -1005,12 +1064,16 @@
        own fixed centre, so the island stays byte-identical per seed. */
     const VOL = hills[0];
     VOL.volcano = true;
-    const VOL_RIM = 6.2;                    // crater rim radius (m)
-    const VOL_BOWL = 3.6;                   // crater floor, metres below the nominal rim
+    /* Every crater and gully number below was authored on the r 36 / 30 m
+       cone; the cone is r 82 / 62 m on the twice-size island, so they scale
+       with it (VK) and the mountain keeps its proportions. */
+    const VK = VOL.r / 36;
+    const VOL_RIM = 6.2 * VK;               // crater rim radius (m)
+    const VOL_BOWL = 3.6 * VK;              // crater floor, metres below the nominal rim
     const VOL_FLANK = VOL.r - VOL_RIM;      // horizontal run, rim -> base
-    const VOL_GULLY = 2.3;                  // barranco depth at its deepest (m)
+    const VOL_GULLY = 2.3 * VK;             // barranco depth at its deepest (m)
     const VOL_POW = 1.65;                   // profile concavity
-    const VOL_BREACH_D = 2.2;               // how far the breached sector drops
+    const VOL_BREACH_D = 2.2 * VK;          // how far the breached sector drops
     const _vh = CBZ.hash01 || function (a, b, s) { return ((s * 0.618034) % 1 + 1) % 1; };
     const VOL_P1 = _vh(VOL.x, VOL.z, 0x5601) * 6.2831853;
     const VOL_P2 = _vh(VOL.x, VOL.z, 0x5602) * 6.2831853;
@@ -1018,7 +1081,7 @@
     const VOL_P4 = _vh(VOL.x, VOL.z, 0x5608) * 6.2831853;
     // the breach faces the town side the island is usually seen from
     // (-x / +z, away from the sun), wobbled per seed so it is not ruled
-    const VOL_BREACH_A = 2.45 + (_vh(VOL.x, VOL.z, 0x5609) - 0.5) * 0.9;
+    const VOL_BREACH_A = (PLAN ? PLAN.volcano.breachA : 2.45) + (_vh(VOL.x, VOL.z, 0x5609) - 0.5) * 0.3;
     VOL.rim = VOL_RIM; VOL.bowl = VOL_BOWL; VOL.breach = VOL_BREACH_A;
     function angDiff(a, b) {
       let d = (a - b) % 6.2831853;
@@ -1028,8 +1091,8 @@
     // the rim's own skyline, in metres about VOL.peak (the notch included)
     function volcanoRimAt(ang) {
       const db = angDiff(ang, VOL_BREACH_A) / 0.34;
-      return 0.55 * Math.sin(2 * ang + VOL_P3) + 0.32 * Math.sin(3 * ang + VOL_P4)
-        + 0.16 * Math.sin(7 * ang + VOL_P1)
+      return (0.55 * Math.sin(2 * ang + VOL_P3) + 0.32 * Math.sin(3 * ang + VOL_P4)
+        + 0.16 * Math.sin(7 * ang + VOL_P1)) * VK
         - VOL_BREACH_D * Math.exp(-db * db);
     }
     // the gully ENVELOPE: nil at the rim and the base, deepest a third down
@@ -1040,7 +1103,7 @@
     }
     // the SIGNED corrugation, -1 (valley floor) .. ~+0.45 (ridge crown)
     function volcanoLobe(d, ang) {
-      const drift = 0.32 * Math.sin(d * 0.085);
+      const drift = 0.32 * Math.sin(d * 0.085 / VK);
       const c = 0.62 * Math.sin(12 * ang + VOL_P1 + drift)
               + 0.38 * Math.sin(7 * ang + VOL_P2 - drift * 1.7);
       return c < 0 ? -Math.pow(-c, 1.9) : 0.45 * Math.pow(c, 0.75);
@@ -1057,7 +1120,7 @@
       const t = (VOL.r - d) / VOL_FLANK;        // 1 at the rim, 0 at the base
       const env = volcanoGully(d);
       // fine rills on the steep upper cone only
-      const rill = 0.35 * Math.sin(31 * ang + VOL_P2 * 3 + d * 0.2) * env * t;
+      const rill = 0.35 * VK * Math.sin(31 * ang + VOL_P2 * 3 + d * 0.2 / VK) * env * t;
       const h = rimY * Math.pow(t, VOL_POW)
         + env * (VOL_GULLY * volcanoLobe(d, ang) + rill);
       return h > 0 ? h : 0;
@@ -1311,8 +1374,20 @@
           : hl.peak * (1 - d / hl.r);
         if (hh > h) h = hh;
       }
-      if (h > 0 || CBZ.CONFIG.SURV_SEABED === false) return h;
-      return seabedAt(x, z);
+      /* THE LAND: inside the grass edge, the plan's plain (climbing ~4 m
+         inland, the ghaut cut into it, every lot graded to its pad); past
+         it the beach, the shelf and the sea floor. Then whatever was MADE
+         over it: the quay, the cargo pier, the breakwater. */
+      const ddx = x - cx, ddz = z - cz;
+      const inside = ddx * ddx + ddz * ddz < R * R;
+      if (CBZ.CONFIG.SURV_SEABED === false) {
+        if (inside && PLAN) { const l = PLAN.landAt(x, z); if (l > h) h = l; }
+      } else {
+        const b = inside ? (PLAN ? PLAN.landAt(x, z) : 0) : seabedAt(x, z);
+        h = h > 0 ? Math.max(h, b) : b;
+      }
+      if (PLAN) { const m = PLAN.madeAt(x, z); if (m > h) h = m; }
+      return h;
     }
 
     if (CBZ.bootStep) CBZ.bootStep("island:ground");
@@ -1821,7 +1896,7 @@
          CircleGeometry/RingGeometry local→world after rotateX(-PI/2):
          (x, y, z) → (x, z, -y), so local z IS world height (mesh sits at y 0)
          and world radius is hypot(local x, local y). */
-      const shoreGeo = new THREE.RingGeometry(R - 3, SHORE_R - 1, 96, 20);
+      const shoreGeo = new THREE.RingGeometry(R - 3, SHORE_R - 1, Math.max(96, Math.round(R * 1.1)), 20);
       const sp = shoreGeo.attributes.position, sa = sp.array, vn = sp.count;
       const cols = new Float32Array(vn * 3);   // live colour (base × wetness)
       const base = new Float32Array(vn * 3);   // authored colour, never mutated
@@ -1895,21 +1970,59 @@
         wetLive: shoreRig ? 1 : 0,
       };
     })();
-    // THE GRASS PLAIN — same flat disc at y 0, now a fine polar grid so the
-    // vertex colour can carry the island's patchwork (grassColorAt above),
-    // wearing the normalised grass map at GRASS_TILE metres a repeat.
-    const islandGeo = new THREE.RingGeometry(0.4, R, 128, 40);
-    {
-      const p = islandGeo.attributes.position, n = p.count, col = new Float32Array(n * 3), c3 = [0, 0, 0];
-      for (let i = 0; i < n; i++) {
-        grassColorAt(cx + p.getX(i), cz - p.getY(i), c3);
-        col[i * 3] = c3[0]; col[i * 3 + 1] = c3[1]; col[i * 3 + 2] = c3[2];
+    /* THE LAND. It was a flat polar disc at y 0; the island now has a plain
+       that climbs ~4 m inland, a ghaut cut through it and every lot graded
+       to its pad, so the land is a 2.5 m grid draped on the SAME function
+       physics stands on (groundHeightAt's land term, the plan's landAt):
+       drawn and walked are one surface. Grid vertices outside the grass edge
+       are pulled onto it at height 0 (the beach ring tucks under there), so
+       the rim is a circle, not a staircase. Grass by grassColorAt; the
+       ghaut's bed and banks are bare scree and boulder gravel, graded in by
+       how deep the cut is. The hills and the volcano are their own meshes
+       standing on it. */
+    const islandGeo = (function () {
+      const STEP = 2.5, N = Math.ceil(2 * R / STEP);
+      const nv = (N + 1) * (N + 1);
+      const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), inR = new Uint8Array(nv);
+      const c3 = [0, 0, 0];
+      const BED = [0.085, 0.074, 0.060], STONE = [0.120, 0.112, 0.100];
+      for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+        const k = j * (N + 1) + i;
+        let x = cx - R + i * STEP, z = cz - R + j * STEP;
+        const dx = x - cx, dz = z - cz, d = Math.sqrt(dx * dx + dz * dz);
+        let y = 0;
+        if (d >= R) { x = cx + dx * R / d; z = cz + dz * R / d; }
+        else { inR[k] = 1; y = PLAN ? PLAN.landAt(x, z) : 0; }
+        pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z;
+        grassColorAt(x, z, c3);
+        if (PLAN && d < R) {
+          const cut = PLAN.plainBaseAt(x, z) - PLAN.plainAt(x, z);
+          if (cut > 0.05) {
+            const g = Math.max(0, Math.min(1, cut / 1.4));
+            const st = vnoise(x, z, 1.7, 0x6c01), base = st > 0.62 ? STONE : BED;
+            const m = 0.85 + 0.3 * vnoise(x, z, 0.9, 0x6c02);
+            for (let q = 0; q < 3; q++) c3[q] += (base[q] * m - c3[q]) * g;
+          }
+        }
+        col[k * 3] = c3[0]; col[k * 3 + 1] = c3[1]; col[k * 3 + 2] = c3[2];
       }
-      islandGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-      worldUV(islandGeo, GRASS_TILE, cx, cz, function (pp, i, w) { w.x = pp.getX(i); w.z = -pp.getY(i); });
-    }
+      const idx = [];
+      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+        const a = j * (N + 1) + i, b2 = a + 1, c = a + N + 1, e = c + 1;
+        if (!(inR[a] || inR[b2] || inR[c] || inR[e])) continue;
+        idx.push(a, c, b2, b2, c, e);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      g.computeBoundingSphere();
+      worldUV(g, GRASS_TILE, 0, 0, function (pp, i, w) { w.x = pp.getX(i); w.z = pp.getZ(i); });
+      return g;
+    })();
     const island = new THREE.Mesh(islandGeo, grassMat);
-    island.rotation.x = -Math.PI / 2; island.position.set(cx, 0, cz);
+    island.name = "survival-land";
     island.receiveShadow = true; root.add(island);
 
     if (CBZ.bootStep) CBZ.bootStep("island:mountains");
@@ -3195,7 +3308,179 @@
     }
     const PPH_ROOF = 0.7;
 
-    function makeBuilding(ox, oz, w, d, storeys, color, gy, style) {
+    /* ---- A BUILDING THAT FACES ITS STREET ---------------------------------
+       makeBuilding lays every record (colliders, walk platforms, stair ramps
+       and their AI links, glass panes, cover anchors) in world space as if
+       the door were on -z, which it always was. A lot on the far side of a
+       street needs its door on +z, -x or +x: the group turns (rotation.y =
+       yaw, a quarter turn at a time) and every record the build appended is
+       turned with it about the building's origin, so physics, AI and glass
+       agree with what is drawn. A quarter turn keeps every AABB an AABB. */
+    /* ---- ONE DRAW FOR A BUILDING'S SHELL -----------------------------------
+       A house came out of the builder as ~40 meshes: thirteen wall boxes
+       (each a collider's ref and a line-of-sight blocker), one merged mesh
+       per facade colour (a dozen and more), the roof bulkhead, the door
+       leaves. Every piece wears finishMat(colour, foot) — the same grime
+       shader, a different colour. So the colour moves into the vertices and
+       the whole opaque shell draws as ONE mesh in one white vertex-coloured
+       grime material per foot height: the same lit pixel (lambert = light x
+       colour x vertex colour either way), a twentieth of the draw calls.
+       The originals a collider or the line-of-sight list points at stay in
+       the group, hidden (r128's raycaster does not skip invisible meshes, and
+       collision reads the rects), so physics, AI sight and collider.ref keep
+       working; everything else is disposed. Glass (it shatters pane by
+       pane), the interior (its own textures), lamps and anything moving stay
+       their own meshes. The building group is untouched as a whole, so a
+       quake still topples it as one piece and city/collapse.js still reads
+       its solids (the baked shell carries its vertex colours into the
+       fall). */
+    const bakedMats = new Map();
+    function bakedMat(gy) {
+      const key = Math.round(gy * 5);
+      let m = bakedMats.get(key);
+      if (m) return m;
+      m = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+      m.onBeforeCompile = grimeCompile({ value: key / 5 });
+      m.customProgramCacheKey = grimeKey;
+      m.name = "island-shell";
+      m._shared = true;
+      bakedMats.set(key, m);
+      return m;
+    }
+    const _finSet = new Set();
+    const _bm = new THREE.Matrix4(), _bn = new THREE.Matrix3(), _bv = new THREE.Vector3();
+    let bakeStats = { buildings: 0, meshesIn: 0, meshesOut: 0, hidden: 0 };
+    function bakeShell(group, gy) {
+      _finSet.clear();
+      finMats.forEach(function (m) { _finSet.add(m); });
+      group.updateMatrixWorld(true);
+      const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+      const keep = new Set();
+      for (const c of CBZ.colliders) if (c.ref && c.ref.isMesh) keep.add(c.ref);
+      const losSet = new Set(CBZ.losBlockers || []);
+      const take = [];
+      let total = 0;
+      const rooms = group.userData.rooms || (group.userData.rooms = []);
+      group.traverse(function (o) {
+        if (!o.isMesh) return;
+        total++;
+        // the interior's own meshes (floors, plaster, furniture, fixtures):
+        // nobody sees them from 60 m, so the LOD tick sleeps them out there
+        if (o.name && o.name.indexOf("island-interior") === 0) rooms.push(o);
+        if (o.isInstancedMesh || !_finSet.has(o.material)) return;
+        for (let a = o; a && a !== group; a = a.parent) if (a.userData && a.userData.noBake) return;
+        const g = o.geometry;
+        if (!g || !g.attributes.position || !g.attributes.normal) return;
+        take.push(o);
+      });
+      if (take.length < 2) return;
+      let nv = 0, ni = 0;
+      for (const o of take) { const g = o.geometry; nv += g.attributes.position.count; ni += g.index ? g.index.count : g.attributes.position.count; }
+      const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
+      const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+      let v = 0, k = 0;
+      for (const o of take) {
+        const g = o.geometry, P = g.attributes.position, N = g.attributes.normal, c = o.material.color;
+        _bm.multiplyMatrices(inv, o.matrixWorld);
+        _bn.getNormalMatrix(_bm);
+        for (let i = 0; i < P.count; i++) {
+          _bv.set(P.getX(i), P.getY(i), P.getZ(i)).applyMatrix4(_bm);
+          pos[(v + i) * 3] = _bv.x; pos[(v + i) * 3 + 1] = _bv.y; pos[(v + i) * 3 + 2] = _bv.z;
+          _bv.set(N.getX(i), N.getY(i), N.getZ(i)).applyMatrix3(_bn).normalize();
+          nor[(v + i) * 3] = _bv.x; nor[(v + i) * 3 + 1] = _bv.y; nor[(v + i) * 3 + 2] = _bv.z;
+          col[(v + i) * 3] = c.r; col[(v + i) * 3 + 1] = c.g; col[(v + i) * 3 + 2] = c.b;
+        }
+        if (g.index) { const I = g.index.array; for (let i = 0; i < I.length; i++) idx[k++] = I[i] + v; }
+        else for (let i = 0; i < P.count; i++) idx[k++] = v + i;
+        v += P.count;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+      geo.computeBoundingSphere();
+      const mesh = new THREE.Mesh(geo, bakedMat(gy));
+      mesh.name = "island-shell";
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      group.add(mesh);
+      let hidden = 0;
+      const hid = group.userData.bakedHidden || (group.userData.bakedHidden = []);
+      for (const o of take) {
+        if (keep.has(o) || losSet.has(o)) { o.visible = false; hidden++; hid.push(o); continue; }
+        if (o.parent) o.parent.remove(o);
+        if (o.geometry && !o.geometry._shared) o.geometry.dispose();
+      }
+      bakeStats.buildings++; bakeStats.meshesIn += total; bakeStats.meshesOut += total - take.length + 1; bakeStats.hidden += hidden;
+    }
+
+    function recSnap() {
+      const L = CBZ.stairs && CBZ.stairs.links ? CBZ.stairs.links() : null;
+      return { c: CBZ.colliders.length, p: CBZ.platforms.length, l: L ? L.length : 0, g: allGlass.length };
+    }
+    function orientRecords(snap, ox, oz, yaw, extra) {
+      const co = Math.round(Math.cos(yaw)), si = Math.round(Math.sin(yaw));
+      if (co === 1 && si === 0) return;
+      // three.js rotation.y: local (dx, dz) -> (dx cos + dz sin, -dx sin + dz cos)
+      const T = function (X, Z, out) { const dx = X - ox, dz = Z - oz; out.x = ox + dx * co + dz * si; out.z = oz - dx * si + dz * co; return out; };
+      const D = function (ux, uz, out) { out.x = ux * co + uz * si; out.z = -ux * si + uz * co; return out; };
+      const a = { x: 0, z: 0 }, b = { x: 0, z: 0 };
+      const box = function (r) {
+        T(r.minX, r.minZ, a); T(r.maxX, r.maxZ, b);
+        r.minX = Math.min(a.x, b.x); r.maxX = Math.max(a.x, b.x); r.minZ = Math.min(a.z, b.z); r.maxZ = Math.max(a.z, b.z);
+      };
+      const done = new Set();
+      const C = CBZ.colliders;
+      for (let i = snap.c; i < C.length; i++) {
+        const c = C[i]; if (done.has(c)) continue; done.add(c);
+        box(c);
+        if (c.cx != null && c.yaw != null) { T(c.cx, c.cz, a); c.cx = a.x; c.cz = a.z; c.yaw += yaw; }
+      }
+      const P = CBZ.platforms;
+      for (let i = snap.p; i < P.length; i++) {
+        const p = P[i]; if (done.has(p)) continue; done.add(p);
+        const xc = (p.minX + p.maxX) / 2, zc = (p.minZ + p.maxZ) / 2;
+        box(p);
+        const r = p.ramp;
+        if (r && r.dir) {
+          T(r.ox, r.oz, a); r.ox = a.x; r.oz = a.z; D(r.dx, r.dz, a); r.dx = a.x; r.dz = a.z;
+        } else if (r) {
+          // an axis ramp: its two ends on the footprint's centre line
+          const p0 = r.axis === "x" ? T(r.x0, zc, { x: 0, z: 0 }) : T(xc, r.z0, { x: 0, z: 0 });
+          const p1 = r.axis === "x" ? T(r.x1, zc, { x: 0, z: 0 }) : T(xc, r.z1, { x: 0, z: 0 });
+          delete r.axis; delete r.x0; delete r.x1; delete r.z0; delete r.z1;
+          if (Math.abs(p1.x - p0.x) > Math.abs(p1.z - p0.z)) { r.axis = "x"; r.x0 = p0.x; r.x1 = p1.x; }
+          else { r.z0 = p0.z; r.z1 = p1.z; }
+        }
+        if (p.obb) { T(p.obb.cx, p.obb.cz, a); p.obb.cx = a.x; p.obb.cz = a.z; D(p.obb.ux, p.obb.uz, a); p.obb.ux = a.x; p.obb.uz = a.z; }
+      }
+      const L = CBZ.stairs && CBZ.stairs.links ? CBZ.stairs.links() : null;
+      if (L) for (let i = snap.l; i < L.length; i++) {
+        for (const pt of L[i].path) { if (done.has(pt)) continue; done.add(pt); T(pt.x, pt.z, a); pt.x = a.x; pt.z = a.z; }
+      }
+      const quarter = si !== 0;
+      for (let i = snap.g; i < allGlass.length; i++) {
+        const gp = allGlass[i]; if (done.has(gp)) continue; done.add(gp);
+        T(gp.x, gp.z, a); gp.x = a.x; gp.z = a.z;
+        if (quarter && gp.horiz != null) gp.horiz = !gp.horiz;
+      }
+      if (extra) for (const pt of extra) { if (done.has(pt)) continue; done.add(pt); T(pt.x, pt.z, a); pt.x = a.x; pt.z = a.z; }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    }
+
+    // a world rect (a lot) in a building's own frame (the inverse of its turn)
+    function localFence(r, ox, oz, yaw) {
+      if (!r) return null;
+      const co = Math.round(Math.cos(yaw || 0)), si = Math.round(Math.sin(yaw || 0));
+      const L = function (X, Z) { const wx = X - ox, wz = Z - oz; return [wx * co - wz * si, wx * si + wz * co]; };
+      const a = L(r.x0, r.z0), b = L(r.x1, r.z1);
+      return { x0: Math.min(a[0], b[0]), x1: Math.max(a[0], b[0]), z0: Math.min(a[1], b[1]), z1: Math.max(a[1], b[1]) };
+    }
+
+    function makeBuilding(ox, oz, w, d, storeys, color, gy, style, yaw, bo) {
+      yaw = yaw || 0; bo = bo || {};
+      const snap = recSnap();
       const bgroup = new THREE.Group();
       bgroup.position.set(ox, gy, oz);
       root.add(bgroup);
@@ -3374,6 +3659,9 @@
         fh: FH, wt: WT, rTop: rTop, pp: 0.7, doorSide: 0,   // the door is on -z
         color: color, style: style, plats: plats,
         shellMerge: shellMerge, glassList: glassList, doorHalf: DOORW / 2 + 0.35, walls: walls,
+        fence: localFence(bo.lot, ox, oz, yaw),
+        // a helipad roof: the grammar's crown is kept off the pad
+        keepClear: bo.helipad ? [{ x0: -w / 2 + WT + SW + 0.6, x1: w / 2 - WT - 0.4, z0: -d / 2 + WT + 0.4, z1: d / 2 - WT - 0.4, y0: storeys * FH - 0.3, y1: storeys * FH + 60 }] : null,
       });
       for (const gp of glassList) allGlass.push(gp);
 
@@ -3387,8 +3675,48 @@
       });
       flushLateShell(bgroup, shellMerge, gy);
 
+      /* THE ROOF, as data: the slab you can stand on (everything but the
+         stair strip, which carries the bulkhead), reached by the stair. A
+         helipad roof gets its marking: the yellow touchdown circle and the
+         white H, centred on the clear slab the facade was kept off. */
+      const rTopL = storeys * FH, padX = (ixMin + SW + ixMax) / 2;
+      const padR = Math.max(0, Math.min((ixMax - ixMin - SW) / 2, (izMax - izMin) / 2) - 0.6);
+      const roofPt = { x: ox + padX, y: gy + rTopL, z: oz };
+      if (bo.helipad && padR > 4) {
+        const ring = new THREE.RingGeometry(padR - 0.4, padR, 48, 1);
+        ring.rotateX(-Math.PI / 2); ring.translate(padX, rTopL + 0.025, 0);
+        const rm = new THREE.Mesh(ring, finishMat(0xd2a838, gy)); rm.receiveShadow = true; bgroup.add(rm);
+        const H = padR * 0.42, BW = Math.max(0.5, padR * 0.11);
+        // [centre x, size x, size z]: the two uprights, then the crossbar
+        for (const pc of [[padX - H * 0.55, BW, H * 2], [padX + H * 0.55, BW, H * 2], [padX, H * 1.1, BW]]) {
+          const g2 = new THREE.BoxGeometry(pc[1], 0.012, pc[2]);
+          g2.translate(pc[0], rTopL + 0.026, 0);
+          const hm = new THREE.Mesh(g2, finishMat(0xe8e5dc, gy)); hm.receiveShadow = true; bgroup.add(hm);
+        }
+      }
+
+      // turn it to face its street (records and all), then draw its static
+      // shell in one call (see bakeShell)
+      bgroup.rotation.y = yaw;
+      orientRecords(snap, ox, oz, yaw, covers.concat([roofPt]));
+      const quarter = Math.abs(Math.round(Math.sin(yaw))) === 1;
+      const roofHalf = function (lx0, lx1, lz0, lz1) {
+        const p0 = { x: 0, z: 0 }, p1 = { x: 0, z: 0 };
+        const co = Math.round(Math.cos(yaw)), si = Math.round(Math.sin(yaw));
+        p0.x = ox + lx0 * co + lz0 * si; p0.z = oz - lx0 * si + lz0 * co;
+        p1.x = ox + lx1 * co + lz1 * si; p1.z = oz - lx1 * si + lz1 * co;
+        return { x0: Math.min(p0.x, p1.x), x1: Math.max(p0.x, p1.x), z0: Math.min(p0.z, p1.z), z1: Math.max(p0.z, p1.z) };
+      };
+
       const b = {
-        group: bgroup, ox, oz, gy, x: ox, z: oz, w, d, h: storeys * FH, storeys,
+        group: bgroup, ox, oz, gy, x: ox, z: oz, w: quarter ? d : w, d: quarter ? w : d, h: storeys * FH, storeys,
+        // the building's own frame: lw x ld with the door on its local -z,
+        // turned rotY (a quarter turn at a time) to face its street
+        lw: w, ld: d, rotY: yaw,
+        roofY: gy + rTopL, roofHex: color, roofAccess: true,
+        roof: Object.assign(roofHalf(ixMin + SW + 0.1, ixMax, izMin, izMax), { y: gy + rTopL, access: "stairs" }),
+        helipadCandidate: !!(bo.helipad && padR > 4),
+        helipad: bo.helipad && padR > 4 ? { x: roofPt.x, y: roofPt.y, z: roofPt.z, r: padR } : null,
         facadeStyle: style || null,        // so a tool can photograph "the pagoda one"
         color: color,                      // the shell's real wall colour — city/collapse.js
                                            // builds its proxy out of it, so the frame where
@@ -3406,7 +3734,7 @@
         // tables and desks it put in (WORLD {x, y, z, r}), which
         // systems/quake.js registers for drop-cover-hold-on.
         interior: {
-          kind: "house",
+          kind: "house", yaw: yaw,
           x0: ixMin, x1: ixMax, z0: izMin, z1: izMax,
           keepOut: [
             { x0: ixMin, x1: ixMin + SW + 0.35, z0: izMin, z1: izMax, why: "stairs" },
@@ -3416,6 +3744,8 @@
           covers: covers,
         },
       };
+      b._wallMat = finishMat(color, gy);   // what its rubble is made of (disasters.js wallMatOf)
+      bakeShell(bgroup, gy);
       fragile.push(b);
       return b;
     }
@@ -3653,10 +3983,11 @@
       K.box("flat", 0, 0.1 + CH - 0.06, -cs + 0.015, 2 * cs, 0.12, 0.03, 0x9ea3a8);
       K.flush(g2, false);
       g2.name = "island-lift-car";
+      g2.userData.noBake = true;          // it rides the shaft: never baked into the shell
       return g2;
     }
 
-    function makeTower(ox, oz, w, d, h, color, style) {
+    function makeTower(ox, oz, w, d, h, color, style, lot) {
       const gy = groundHeightAt(ox, oz);
       const g = new THREE.Group();
       g.position.set(ox, gy, oz);
@@ -3755,6 +4086,7 @@
         color: color, style: style, plats: plats,
         shellMerge: shellMerge, glassList: glassT, doorHalf: DW / 2 + 0.35, tower: true,
         walls: walls, liftShaft: { x0: -s, x1: s, z0: -s, z1: s },
+        fence: localFence(lot, ox, oz, 0),
       });
       const lift = dressedT && dressedT.lift;
       for (const gp of glassT) allGlass.push(gp);
@@ -3842,6 +4174,11 @@
       // h stays the SHELL's height (the collapse proxy and the ash roofs are
       // built off h / storeys); the lift's top stop is published beside it
       const b = { group: g, ox, oz, gy, x: ox, z: oz, w, d, h: realH, liftTop: topY, storeys,
+        lw: w, ld: d, rotY: 0,
+        // the roof: the lift's top stop is the way up (its shaft opens in
+        // the middle of the slab, so this roof is no helipad)
+        roofY: gy + realH, roofHex: color, roofAccess: true, helipadCandidate: false,
+        roof: { x0: ox - iw, x1: ox + iw, z0: oz - id, z1: oz + id, y: gy + realH, access: "lift" },
         facadeStyle: style || null, color: color,   // see makeBuilding: the collapse proxy is built from it
         floorTop: gy + lobbyTop,                    // the lobby's walk surface (see THE LOBBY FLOOR)
         colliders: cols, platforms: plats, glass: glassT, fallen: false,
@@ -3929,98 +4266,62 @@
       for (let k = 0; k < storeys; k++) poseLandingDoors(e, k);
       elevators.push(e);
 
+      b._wallMat = finishMat(color, gy);
+      bakeShell(g, gy);
       return b;
     }
 
     if (CBZ.bootStep) CBZ.bootStep("island:streets");
-    // ---- STREETS: a real town's streets (world/island_roads.js) ----------
-    /* The roads used to be fixed-height ribbons of a generic tiling asphalt,
-       avenues and cross-streets overlapping at every crossing (split 5 mm
-       apart so iPad TBDR would not z-fight them), with a yellow dash every
-       6 m and nothing else. Now: layRoadLine only SCANS where a street can
-       run (flat ground, off the shore); after the scan the island road kit
-       turns the runs into pieces and junctions that never overlap (the
-       loop's finalize block), and finishRoads() lays everything once the
-       stations have reported their driveways: road-aligned asphalt, junction
-       squares, 0.15 m sidewalks with curbs, ramps and corner returns, paint,
-       signs and street lights, in 7 draw calls. Every surface follows the
-       terrain, so nothing floats at a hill skirt. surfaceHeightAt is the
-       walkable floor (terrain + sidewalks + station pads); the arena
-       descriptor hands THAT to physics as groundHeightAt. Build code keeps
-       calling the terrain-only groundHeightAt. */
-    const LAYERS = true;          // legacy name; roads no longer stack by height
-    const ROAD_Y_PAD = 0.05;      // legacy constants (no road code reads them)
-    const PAINT_Y = 0.057;
-    const roadSegs = [];          // one per road piece, junction squares excluded (the car scatter reads it)
+    // ---- STREETS: the plan's streets, laid by the island street kit ------
+    /* world/island_plan.js decides where every street runs (a downtown grid
+       behind the quay, residential grids west and north, the Works on the
+       east, the ring road, the farm road, the quay road) and turns the runs
+       into pieces and junctions (world/island_roads.js plan()); finishRoads()
+       lays them once the stations have reported their driveways: asphalt,
+       junction squares, 0.15 m sidewalks with curbs, ramps and corner
+       returns, paint, signs and street lights, in 7 draw calls. Every
+       surface follows the ground — and where a street crosses the ghaut the
+       ground it is given is the BRIDGE DECK (roadGround: the plain's own
+       height across the cut), so the road, its sidewalks and the walkable
+       floor span the ravine instead of diving into it. surfaceHeightAt is
+       the walkable floor (terrain + sidewalks + decks + station pads); the
+       arena descriptor hands THAT to physics as groundHeightAt. Build code
+       keeps calling the terrain-only groundHeightAt. */
+    const roadSegs = [];          // one per road piece, junction squares excluded
     const ROADW = 7;
-    /* THE STREET GRID, declared HERE rather than beside the code that draws
-       it, because the buildings have to be placed with it in mind and they go
-       down first. It used to be declared after the town loop, which is exactly
-       why nothing consulted it: the houses were scattered on flat ground and
-       the asphalt was then painted straight through them. */
-    const GRID = 40;                 // avenue / cross-street pitch
-    const KERB = ROADW / 2 + 1.4;    // corridor half-width plus a verge
     // Driveways and raised slabs other builders report before finishRoads():
     //   roadCuts  {x0,x1,z0,z1} world AABB over a sidewalk: the curb there
     //             becomes a ramped apron (road level up to the 0.15 m top)
     //   raisePads {x0,x1,z0,z1,top} absolute walkable top (station forecourt)
     const roadCuts = [], raisePads = [];
-
-    // The nearest grid line to a coordinate, and how far off it we are.
-    function nearestLine(v, origin) {
-      const k = Math.max(-2, Math.min(2, Math.round((v - origin) / GRID)));
-      return { line: origin + k * GRID, off: v - (origin + k * GRID) };
-    }
-    // Does this footprint sit in a road corridor? Avenues run along z at a
-    // fixed x, cross-streets along x at a fixed z, so each axis is tested
-    // against its own family of lines.
+    // Is this footprint (w x d, centred) in a street corridor (carriageway +
+    // sidewalks)? Kept for the later dressers (quake.js's utility poles).
     function onRoad(x, z, w, d) {
-      const a = nearestLine(x, cx), c = nearestLine(z, cz);
-      return Math.abs(a.off) < w / 2 + KERB || Math.abs(c.off) < d / 2 + KERB;
+      if (!PLAN) return false;
+      return !!PLAN.inStreet({ x0: x - w / 2, x1: x + w / 2, z0: z - d / 2, z1: z + d / 2 }, 0);
     }
-    /* Push a footprint OFF the nearer road and stand it on the kerb, facing
-       the street. A town whose buildings line its streets reads as a town;
-       the same buildings scattered between them read as a sample book, and
-       the ones that landed ON the asphalt read as a bug — which is what they
-       were. Returns null when the candidate cannot be seated without landing
-       in the other family of roads. */
-    function faceStreet(x, z, w, d) {
-      const a = nearestLine(x, cx), c = nearestLine(z, cz);
-      // snap on whichever axis the candidate is already closest to a line
-      const snapX = Math.abs(a.off) <= Math.abs(c.off);
-      const half = snapX ? w / 2 : d / 2;
-      const near = snapX ? a : c;
-      const side = near.off >= 0 ? 1 : -1;
-      const seat = near.line + side * (KERB + half + 0.6);
-      const nx = snapX ? seat : x, nz = snapX ? z : seat;
-      return onRoad(nx, nz, w, d) ? null : { x: nx, z: nz };
+    const roadPlan = PLAN ? PLAN.roads : null;
+    let roadNet = null;
+    if (roadPlan) for (const p of roadPlan.pieces) {
+      const mid = (p.a + p.b) / 2;
+      roadSegs.push({ x: p.vertical ? p.fixed : mid, z: p.vertical ? mid : p.fixed, len: p.b - p.a, vertical: p.vertical, piece: p });
     }
-    // where a street can run on each grid line: flat ground, clear of the
-    // shore. Runs are [a, b] metres along the line from cx / cz.
-    const roadRuns = { ave: [[], [], [], [], []], cross: [[], [], [], [], []] };
-    let roadPlan = null, roadNet = null;
-    function layRoadLine(fixed, vertical) {
-      const step = 4, segs = [];
-      let runStart = null;
-      for (let t = -R; t <= R + step; t += step) {
-        const x = vertical ? fixed : cx + t;
-        const z = vertical ? cz + t : fixed;
-        const ok = Math.hypot(x - cx, z - cz) < R - 5 && groundHeightAt(x, z) < 0.5;
-        if (ok && runStart === null) runStart = t;
-        if ((!ok || t > R) && runStart !== null) {
-          const runEnd = ok ? t : t - step;
-          if (runEnd - runStart >= step * 2) segs.push([runStart, runEnd]);
-          runStart = null;
-        }
+    // the ground the street kit lays on: the terrain, or a bridge deck
+    function roadGround(x, z) {
+      const g = groundHeightAt(x, z);
+      if (PLAN && PLAN.bridges.length) {
+        const br = PLAN.bridgeAt(x, z);
+        if (br && !br.failed) { const b = PLAN.plainBaseAt(x, z); return b > g ? b : g; }
       }
-      const m = Math.round((fixed - (vertical ? cx : cz)) / GRID) + 2;
-      if (m >= 0 && m <= 4) roadRuns[vertical ? "ave" : "cross"][m] = segs;
+      return g;
     }
-    // the walkable floor: terrain, plus the sidewalk top on a sidewalk, plus
-    // any raised pad; exactly groundHeightAt everywhere else
+    // the walkable floor: terrain, plus the sidewalk top on a sidewalk, the
+    // bridge decks, plus any raised pad; exactly groundHeightAt everywhere
+    // else. A bridge the flood took (br.failed) is the ravine floor again.
     function surfaceHeightAt(x, z) {
+      if (PLAN && PLAN.bridges.length) { const br = PLAN.bridgeAt(x, z); if (br && br.failed) return groundHeightAt(x, z); }
       if (roadNet) return roadNet.surfaceHeightAt(x, z);
-      let y = groundHeightAt(x, z);
+      let y = roadGround(x, z);
       for (let i = 0; i < raisePads.length; i++) {
         const p = raisePads[i];
         if (x >= p.x0 && x <= p.x1 && z >= p.z0 && z <= p.z1 && p.top > y) y = p.top;
@@ -4033,7 +4334,9 @@
       if (roadNet || !kit || !roadPlan) return;
       roadNet = kit.build({
         THREE: THREE, root: root, cx: cx, cz: cz, R: R, plan: roadPlan,
-        ground: groundHeightAt, cuts: roadCuts, pads: raisePads,
+        ground: roadGround, cuts: roadCuts, pads: raisePads,
+        // a bridge draws its own deck (so a span that fails takes it along)
+        skip: PLAN && PLAN.bridges.length ? function (x, z) { return !!PLAN.bridgeAt(x, z); } : null,
         quality: CBZ.qualityLevel, renderer: CBZ.renderer, colliders: CBZ.colliders,
         onUpdate: CBZ.onUpdate,
         modeOn: function () { return !!(CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)); },
@@ -4172,23 +4475,34 @@
       carGeos.set(key, g);
       return g;
     }
-    // facing: optional. -1 / 1 picks which way the car points along its axis
-    // (a parked car faces the way its lane runs); omitted, a position hash.
+    /* A CAR, standing on whatever is under it (asphalt, a car park's
+       surface, a driveway), nose along `yaw` (rotation.y: the body's front is
+       its local -z, so yaw 0 points -z, PI/2 points -x). The old signature
+       (x, z, vertical, color, facing +-1) still works for the dressing's
+       showroom forecourt. The record the director and the storms read is
+       unchanged: group / x / z / oy / rotY / collider / flung. */
     const CAR_LIFT = 0.045;       // the asphalt sits 4 cm proud of the plain
-    function makeCar(x, z, vertical, color, facing) {
-      const gy = groundHeightAt(x, z) + CAR_LIFT;
+    const carProxy = CBZ.instanceProxy ? CBZ.instanceProxy(root, { name: "island-cars",
+      modeOn: function () { return !!(CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)); } }) : null;
+    function makeCar(x, z, yaw, color, facing) {
+      if (typeof yaw === "boolean") {
+        // legacy: (vertical, facing) -> a heading
+        const flip = facing != null ? facing > 0 : h01g(x, z, 0xca8) < 0.5;
+        yaw = (yaw ? 0 : Math.PI / 2) + (flip ? Math.PI : 0);
+      }
+      const gy = surfaceHeightAt(x, z) + CAR_LIFT;
       const g = new THREE.Group();
-      g.position.set(x, gy, z); g.rotation.y = vertical ? 0 : Math.PI / 2; root.add(g);
+      g.position.set(x, gy, z); g.rotation.y = yaw; root.add(g);
       const shape = (h01g(x, z, 0xca7) * CAR_SHAPES.length) | 0;
       const body = new THREE.Mesh(carGeo(shape, color), carMat);
-      const flip = facing != null ? facing > 0 : h01g(x, z, 0xca8) < 0.5;
-      if (flip) body.rotation.y = Math.PI;
       body.castShadow = true; body.receiveShadow = true; g.add(body);
-      const hw = vertical ? 1.1 : 2.2, hd = vertical ? 2.2 : 1.1;
+      const along = Math.abs(Math.round(Math.sin(yaw))) === 1;    // nose along x
+      const hw = along ? 2.2 : 1.1, hd = along ? 1.1 : 2.2;
       const c = { minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, ref: body, noCam: true };
       CBZ.colliders.push(c);
-      const car = { group: g, x, z, oy: gy, rotY: g.rotation.y, collider: c, flung: false };
+      const car = { group: g, x, z, oy: gy, rotY: yaw, collider: c, flung: false };
       cars.push(car);
+      if (carProxy) carProxy.add(body, carMat, g);
       return g;
     }
 
@@ -4213,39 +4527,13 @@
         onPad: function (a, top) { raisePads.push({ x0: a.x0, x1: a.x1, z0: a.z0, z1: a.z1, top: top }); },
       });
     }
-    function placeStations(want) {
-      const SZ = CBZ.FUEL_STATION_SIZE || { frontage: 24, depth: 26 };
-      const halfF = SZ.frontage / 2, halfD = SZ.depth / 2, SET = ROADW / 2 + 2 + halfD;
-      const cands = [];
-      for (let k = -2; k <= 2; k++) for (let j = -3; j <= 2; j++) for (const s of [-1, 1]) {
-        cands.push({ vertical: true, line: cx + k * GRID, along: cz + (j + 0.5) * GRID, s: s });
-        cands.push({ vertical: false, line: cz + k * GRID, along: cx + (j + 0.5) * GRID, s: s });
-      }
-      cands.forEach(function (c) { c.h = h01g(c.line * 1.7 + c.s, c.along * 0.9 + (c.vertical ? 3 : 7), 0x6a5); });
-      cands.sort(function (a, b) { return a.h - b.h; });
+    // the plan picked the stations' lots (a block frontage each, front to the street)
+    function placeStations() {
       const sites = [];
-      for (const c of cands) {
-        if (sites.length >= want) break;
-        const x = c.vertical ? c.line + c.s * SET : c.along, z = c.vertical ? c.along : c.line + c.s * SET;
-        const w = c.vertical ? SZ.depth : SZ.frontage, d = c.vertical ? SZ.frontage : SZ.depth;
-        let ok = true, mx = -1e9, mn = 1e9;
-        for (let i = -2; i <= 2 && ok; i++) for (let jj = -2; jj <= 2; jj++) {
-          const px = x + i * w / 4, pz = z + jj * d / 4;
-          if (Math.hypot(px - cx, pz - cz) > R - 16) { ok = false; break; }
-          const h = groundHeightAt(px, pz); if (h > mx) mx = h; if (h < mn) mn = h;
-        }
-        if (!ok || mx - mn > 0.2 || mx > 0.9) continue;
-        // the street in front must really be laid along the whole frontage
-        for (let t = -halfF - 4; t <= halfF + 4; t += 4) {
-          const rx = c.vertical ? c.line : c.along + t, rz = c.vertical ? c.along + t : c.line;
-          if (Math.hypot(rx - cx, rz - cz) >= R - 5 || groundHeightAt(rx, rz) >= 0.5) { ok = false; break; }
-        }
-        if (!ok) continue;
-        if (sites.some(function (p) { return Math.hypot(p.x - x, p.z - z) < 70; })) continue;
-        if (placed.some(function (p) { return Math.abs(p.x - x) < (p.w + w) / 2 + 3 && Math.abs(p.z - z) < (p.d + d) / 2 + 3; })) continue;
-        const rotY = c.vertical ? c.s * Math.PI / 2 : (c.s > 0 ? 0 : Math.PI);
-        sites.push({ x: x, z: z, y: mx, rotY: rotY });
-        placed.push({ x: x, z: z, w: w, d: d });
+      if (PLAN) for (const l of PLAN.stations) {
+        const site = { x: l.x, z: l.z, y: l.gy, rotY: l.rotY, lot: l };
+        sites.push(site);
+        placed.push({ x: l.x, z: l.z, w: l.wx, d: l.wz, lot: l });
       }
       sites.forEach(makeGasStation);
       return sites;
@@ -4372,167 +4660,59 @@
       K.flush(grp, false);
     }
 
-    /* ---- WHICH FACADE GOES ON WHICH BUILDING -------------------------------
-       The registry is the source of truth, not a list copied into this file:
-       a grammar that declares minStoreys is a SKYLINE grammar and belongs on
-       the downtown towers, everything else is low-rise and belongs in the
-       town. Sorted by id so the island is the same on every boot, and the
-       town/tower counts grow to cover the registry, so adding a facade file
-       adds a building here rather than quietly going unseen.
-
-       Read from the registry REGARDLESS of SURV_FACADES: the flag turns the
-       ornament off, never the town plan. The island is meant to be learnable,
-       so flipping a cosmetic flag must not move a building or change a
-       tower's height — dressIslandFacade is the only thing the flag gates,
-       and it checks the flag itself.                                       */
-    const facadeIds = CBZ.facadeList
-      ? CBZ.facadeList().map(function (f) { return f.id; }).sort() : [];
-    const lowIds = facadeIds.filter(function (id) {
-      const def = CBZ.facadeDef && CBZ.facadeDef(id); return def && !def.minStoreys;
-    });
-    const towerIds = facadeIds.filter(function (id) {
-      const def = CBZ.facadeDef && CBZ.facadeDef(id); return def && def.minStoreys > 0;
-    });
-
-    // place the town in a loose ring, ONLY on flat ground (off the mountain
-    // and hill skirts so terrain never pokes through a floor), no overlaps
+    /* ---- THE TOWN: every lot the plan laid, built --------------------------
+       world/island_plan.js decided each lot's footprint, which way its door
+       faces (the street it fronts), its storeys (falling off from the harbour
+       core), its district and the facade grammar that fits it (towers
+       downtown, shops on the main streets, houses on the residential grids,
+       villas on the estates, sheds in the Works and on the quay). This loop
+       only builds them: makeBuilding turns to face the street, makeTower's
+       door is on -z and the plan only gives towers lots on the + side of a
+       cross street. Every lot was graded to a pad (the plan's landAt), so a
+       building's floor is the ground under it: nothing floats, nothing is
+       sunk. The facade flag (SURV_FACADES) dresses or undresses; it never
+       moves a building. */
     const placed = [];
-    const stationSites = placeStations(2);   // gas stations claim their block frontages first
-    let attempts = 0, want = Math.max(18, lowIds.length);
-    while (placed.length < want && attempts < 1400) {
-      attempts++;
-      const a = rng() * Math.PI * 2;
-      const dist = 44 + rng() * (R - 60);
-      const w = 6.5 + rng() * 4.5, d = 7 + rng() * 4.5;
-      // Seat it on the kerb of the nearest street FIRST, then judge the ground
-      // under where it will actually stand — testing the terrain at the
-      // candidate and moving it afterwards is how a building ends up half in
-      // a hillside.
-      const seat = faceStreet(cx + Math.cos(a) * dist, cz + Math.sin(a) * dist, w, d);
-      if (!seat) continue;
-      const x = seat.x, z = seat.z;
-      if (Math.hypot(x - cx, z - cz) > R - 34) continue;         // stay off the shore
-      const ter = footprintTerrain(x, z, w, d);
-      if (ter.max - ter.min > 0.45 || ter.max > 1.8) continue;   // must be flat-ish
-      let clash = false;
-      for (const p of placed) { if (Math.abs(p.x - x) < (p.w + w) / 2 + 4 && Math.abs(p.z - z) < (p.d + d) / 2 + 4) { clash = true; break; } }
-      if (clash) continue;
-      const storeys = 1 + ((rng() * 3) | 0);    // 1..3 (roof is the top level)
-      const color = PALETTE[(rng() * PALETTE.length) | 0];
-      const style = lowIds.length ? lowIds[placed.length % lowIds.length] : null;
-      makeBuilding(x, z, w, d, storeys, color, ter.max, style);   // sit on the high point
-      placed.push({ x, z, w, d });
-    }
-
-    // ---- city grid: streets, then a skyline of really tall towers ----
-    // (GRID / KERB / onRoad / faceStreet are declared up by ROADW — the town
-    // is placed against this grid long before the asphalt is drawn.)
-    for (let k = -2; k <= 2; k++) {
-      layRoadLine(cx + k * GRID, true);    // avenues (run along z)
-      layRoadLine(cz + k * GRID, false);   // cross-streets (run along x)
-    }
-    // the scanned runs become pieces + junctions (drawn by finishRoads)
-    if (CBZ.islandRoadKit) {
-      roadPlan = CBZ.islandRoadKit.plan({ cx: cx, cz: cz, GRID: GRID, runs: roadRuns });
-      for (const p of roadPlan.pieces) {
-        const mid = (p.a + p.b) / 2;
-        roadSegs.push({ x: p.vertical ? p.fixed : cx + mid, z: p.vertical ? cz + mid : p.fixed, len: p.b - p.a, vertical: p.vertical });
-      }
-    }
-
-    // a downtown cluster of tall towers, plus a few outliers, on flat ground
+    const stationSites = placeStations();   // the stations' forecourts report their driveways first
     const TOWER_PALETTE = [0x5b6b82, 0x6f7e96, 0x8a98ac, 0x49566b, 0x7a6f8c, 0x5e7d86];
-    let tAttempts = 0, tWant = Math.max(9, towerIds.length);
-    let towers = 0;
-    while (towers < tWant && tAttempts < 900) {
-      tAttempts++;
-      const a = rng() * Math.PI * 2;
-      const dist = 40 + rng() * (R - 56);
-      const w = 7 + rng() * 5, d = 7 + rng() * 5;
-      const seat = faceStreet(cx + Math.cos(a) * dist, cz + Math.sin(a) * dist, w, d);
-      if (!seat) continue;
-      const x = seat.x, z = seat.z;
-      if (Math.hypot(x - cx, z - cz) > R - 34) continue;
-      const ter = footprintTerrain(x, z, w, d);
-      if (ter.max - ter.min > 0.45 || ter.max > 1.6) continue;   // flat ground only
-      let clash = false;
-      for (const p of placed) { if (Math.abs(p.x - x) < (p.w + w) / 2 + 5 && Math.abs(p.z - z) < (p.d + d) / 2 + 5) { clash = true; break; } }
-      if (clash) continue;
-      /* HEIGHT FOLLOWS THE GRAMMAR. The island's own towers are ~18-38 m
-         (5-11 floors), but a bundled tube or a braced tube is a grammar for
-         forty storeys and declares minStoreys to say so — put one on a
-         six-storey block and you get a smear, not a tower. So a tower wearing
-         a skyline facade is built tall enough to carry it (its minStoreys
-         plus a few floors), capped at 22 so the island stays quick to load
-         and the lift ride stays short. Undressed, the original range. */
-      const tStyle = towerIds.length ? towerIds[towers % towerIds.length] : null;
-      const tDef = tStyle && CBZ.facadeDef ? CBZ.facadeDef(tStyle) : null;
-      const h = tDef
-        ? Math.min(22, tDef.minStoreys + 3) * FH
-        : 18 + rng() * 20;                // ~18–38m (5–11 floors via the lift)
-      makeTower(x, z, w, d, h, TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0], tStyle);
-      placed.push({ x, z, w, d });
-      towers++;
-    }
-
-    // ---- landmarks: a couple of gas stations + a car showroom, on flat
-    // ground clear of everything else (registered in `placed` so the street
-    // cars + trees don't spawn on top of them) ----
-    function placeFlat(halfW, halfD) {
-      for (let a = 0; a < 90; a++) {
-        const ang = rng() * Math.PI * 2, dist = 38 + rng() * (R - 56);
-        const seat = faceStreet(cx + Math.cos(ang) * dist, cz + Math.sin(ang) * dist,
-          halfW * 2, halfD * 2);
-        if (!seat) continue;                       // a filling station in the road
-        const x = seat.x, z = seat.z;
-        const ter = footprintTerrain(x, z, halfW * 2, halfD * 2);
-        if (ter.max - ter.min > 0.4 || ter.max > 1.3) continue;
-        let clash = false;
-        for (const p of placed) { if (Math.abs(p.x - x) < p.w / 2 + halfW + 5 && Math.abs(p.z - z) < p.d / 2 + halfD + 5) { clash = true; break; } }
-        if (clash) continue;
-        placed.push({ x, z, w: halfW * 2, d: halfD * 2 });
-        return { x, z };
+    const HOUSE_PALETTE = [0xd8cdb8, 0xc9bea9, 0xb3a48e, 0xe0d6c4, 0x9eb0a2, 0xc8b08c, 0xb7c0c6, 0xd2b49a, 0xa8b89a];
+    const VILLA_PALETTE = [0xe4dccb, 0xd8cdb8, 0xcbb89a, 0xe8e2d4, 0xd9c9a8];
+    const WORKS_PALETTE = [0x8e8a80, 0x7d7a72, 0x9a948a, 0x6f746f, 0x8a6e5a];
+    const KIND_PAL = { house: HOUSE_PALETTE, villa: VILLA_PALETTE, shop: PALETTE, civic: VILLA_PALETTE, hotel: PALETTE,
+      works: WORKS_PALETTE, shed: WORKS_PALETTE, market: PALETTE, office: PALETTE, tower: TOWER_PALETTE };
+    let dl1 = null, built = 0;
+    if (PLAN) for (const l of PLAN.lots) {
+      if (l.kind === "station") continue;                 // placeStations built it
+      if (l.driveway) roadCuts.push(l.driveway.cut);     // the sidewalk drops to a crossing there
+      const pal = KIND_PAL[l.kind] || PALETTE;
+      const color = pal[(h01g(l.x, l.z, 0x7a1) * pal.length) | 0];
+      let b = null;
+      if (l.kind === "showroom") {
+        makeShowroom(l.x, l.z);
+        dl1 = { x: l.x, z: l.z };
+      } else if (l.kind === "tower") {
+        b = makeTower(l.x, l.z, l.w, l.d, l.storeys * FH, color, l.style, l.lot);
+      } else {
+        b = makeBuilding(l.x, l.z, l.w, l.d, l.storeys, color, l.gy, l.style, l.yaw, { helipad: !!l.helipad, lot: l.lot });
       }
-      return null;
+      if (b) {
+        b.lot = l.lot; b.district = l.district; b.kind = l.kind; b.name = l.name || null; b.planId = l.id;
+        b.street = l.street ? l.street.name : null;
+        built++;
+      }
+      placed.push({ x: l.x, z: l.z, w: l.wx, d: l.wz, lot: l.lot, b: b });
+      if (CBZ.bootStep && built % 12 === 0) CBZ.bootStep("island:town");
     }
-    const dl1 = placeFlat(10, 8); if (dl1) makeShowroom(dl1.x, dl1.z);
     finishRoads();
 
-    /* Park cars along the streets. They used to stand in the MIDDLE of a
-       lane (1.7 m off the centre line), pointing either way at random, and
-       anywhere along the piece, so a car sat on the crosswalk or across a
-       filling station's driveway. Now: against the kerb (2.2 m off, the
-       gutter side), facing the way that lane runs (drive on the right), clear
-       of the junction's crosswalk and stop bar, off the station's frontage
-       and never on top of another parked car. The rng stream is consumed
-       EXACTLY as before (a skipped car still spends its colour draw where the
-       old code would have placed one), so the trees and everything after
-       are where they were. */
-    const parked = [];
-    const CAR_OFF = 2.2, END_CLEAR = 8.5;
-    roadSegs.forEach((seg) => {
-      const n = 1 + ((rng() * 2) | 0);
-      for (let i = 0; i < n; i++) {
-        const side = rng() < 0.5 ? -1 : 1;
-        const u = rng() - 0.5;
-        const off = side * CAR_OFF;
-        const along = u * Math.max(0, seg.len - 2 * END_CLEAR);
-        const x = seg.x + (seg.vertical ? off : along);
-        const z = seg.z + (seg.vertical ? along : off);
-        let onBldg = false;
-        for (const p of placed) { if (Math.abs(p.x - x) < p.w / 2 + 2 && Math.abs(p.z - z) < p.d / 2 + 2) { onBldg = true; break; } }
-        if (onBldg) continue;
-        const color = CAR_COLORS[(rng() * CAR_COLORS.length) | 0];
-        if (seg.len < 2 * END_CLEAR + 4.5) continue;                     // too short to park on
-        if (stationSites.some(function (st) { return Math.abs(st.x - x) < 16 && Math.abs(st.z - z) < 16; })) continue;
-        if (parked.some(function (q) { return Math.hypot(q.x - x, q.z - z) < 5.4; })) continue;
-        parked.push({ x: x, z: z });
-        // right-hand traffic: +x lane of an avenue runs toward -z (body as
-        // built), the -z lane of a cross-street runs toward -x (as built)
-        const asBuilt = seg.vertical ? side > 0 : side < 0;
-        makeCar(x, z, seg.vertical, color, asBuilt ? -1 : 1);
-      }
-    });
+    /* THE PARKED CARS, where the plan stood them: against the kerb on the
+       residential and industrial streets (facing the way their lane runs,
+       traffic keeps right), nose-in in the car-park bays, and on house
+       driveways nose to the street. None in a junction mouth, on a
+       crossing, a driveway apron or another car. */
+    if (PLAN) for (const c of PLAN.cars) {
+      makeCar(c.x, c.z, c.yaw, CAR_COLORS[(h01g(c.x, c.z, 0xca9) * CAR_COLORS.length) | 0]);
+    }
 
     if (CBZ.bootStep) CBZ.bootStep("island:trees");
     /* ---- THE ISLAND'S TREES: kit trees, not green cubes on sticks ----------
@@ -4667,30 +4847,32 @@
       root.add(foliage);
       return { trunk, foliage, trunkCol: trunkCollider(x, z, trunk, 0.22), leafHex, barkHex };
     }
-    for (let i = 0; i < 70; i++) {
-      const a = rng() * Math.PI * 2;
-      const dist = 16 + rng() * (R - 18);
-      const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
-      let onBuilding = false;
-      for (const p of placed) { if (Math.abs(p.x - x) < p.w / 2 + 2 && Math.abs(p.z - z) < p.d / 2 + 2) { onBuilding = true; break; } }
-      if (onBuilding) continue;
-      const gy = groundHeightAt(x, z);
-      const th = 2 + rng() * 1.5;
-      // the two draws the box crown's width/depth used, still drawn so the
-      // stream (and everything placed after the trees) is unchanged. Crown
-      // size is NOT a mesh scale any more: wildfire resets foliage.scale to
-      // 1 between matches, so size variety lives in the cached geometries.
-      rng(); rng();
-      // nothing grows on the live cone above its turf line (a tree halfway up
-      // bare scoria is the "tree looks dumb" photo); the draws above are
-      // already spent, so the stream for everything after is unchanged
+    /* WHERE THE TREES ARE is the plan's: a park of shade trees along both
+       banks of the ghaut, street trees on the residential verges and palms
+       down the downtown and quay streets, palms along the grass edge where
+       the beaches are, bush on the volcano's lower skirt and the hills' feet,
+       a few in the countryside, four palms in the square. Nothing on the
+       live cone above its turf line, nothing on a lot, a driveway, a car
+       park or a street. */
+    // every tree DRAWS as an instance (world/instance_proxy.js): ~330 trees
+    // were ~660 draw calls; the meshes stay the trees the fire, the wave and
+    // the storm act on, and drop out of the instance the moment they do
+    const treeProxy = CBZ.instanceProxy ? CBZ.instanceProxy(root, { name: "island-trees",
+      modeOn: function () { return !!(CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)); } }) : null;
+    function proxyTree(rec, palm) {
+      if (!treeProxy) return;
+      treeProxy.add(rec.trunk, woodBase);
+      treeProxy.add(rec.foliage, palm ? frondBase : leafBase);
+    }
+    if (PLAN) for (const t of PLAN.trees) {
+      const x = t.x, z = t.z;
       if (Math.hypot(x - VOL.x, z - VOL.z) < VOL.r * 0.82) continue;
-      // palms own the coast and a share of the town; broadleaf the rest
-      const palm = dist > R - 34 || h01t(x, z, 0x7e9) < 0.3;
-      const rec = palm
-        ? plantPalm(x, z, gy, th * 1.9 + 1.2)
-        : plantBroadleaf(x, z, gy, th);
-      flammable.push({ x, z, trunk: rec.trunk, foliage: rec.foliage, trunkCol: rec.trunkCol,
+      const gy = groundHeightAt(x, z);
+      const hv = h01t(x, z, 0x7ea);
+      const palm = t.kind === "palm";
+      const rec = palm ? plantPalm(x, z, gy, 6.5 + hv * 4.5) : plantBroadleaf(x, z, gy, 2.2 + hv * 1.6);
+      proxyTree(rec, palm);
+      flammable.push({ x, z, trunk: rec.trunk, foliage: rec.foliage, trunkCol: rec.trunkCol, palm: palm,
         leafHex: rec.leafHex, barkHex: rec.barkHex, burning: 0, burnt: false });
     }
     // ---- the archipelago's palms, on their OWN rng stream so the main
@@ -4710,11 +4892,13 @@
           const th = 3.2 + rng4() * 1.6;
           rng4(); rng4();                         // the old crown's two draws
           const rec = plantPalm(x, z, gy, th * 1.6 + 1);
-          flammable.push({ x, z, trunk: rec.trunk, foliage: rec.foliage, trunkCol: rec.trunkCol,
+          proxyTree(rec, true);
+          flammable.push({ x, z, trunk: rec.trunk, foliage: rec.foliage, trunkCol: rec.trunkCol, palm: true,
             leafHex: rec.leafHex, barkHex: rec.barkHex, burning: 0, burnt: false });
         }
       }
     })();
+    if (treeProxy) treeProxy.build();
 
     if (CBZ.bootStep) CBZ.bootStep("island:rocks");
     // ---- rocks / cover ----
@@ -4729,26 +4913,435 @@
        noise-displaced and facet-cut (the flat broken faces that make a rock
        read as rock), part-buried, sun-bleached on top, lichen on the up
        faces, soil-stained at the foot, in the rock surface map, with a
-       fallen piece or two beside the big one. A site within 5 m of a
-       building is dropped: a boulder in a front yard has no reason. */
+       fallen piece or two beside the big one. The SITES are where rock is
+       on a volcanic island: boulders the floods rolled down the ghaut's bed,
+       talus round the hills' feet and the volcano's skirt, and the rocky
+       headlands under the hills. Never in a street, on a lot or a forecourt,
+       never within 5 m of a building. */
     const rockSites = [];
-    for (let i = 0; i < 26; i++) {
-      const a = rng() * Math.PI * 2, dist = 12 + rng() * (R - 14);
-      const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
+    function rockSite(x, z, s, salt) {
+      if (onRoad(x, z, 3, 3)) return;
       const gy = groundHeightAt(x, z);
-      if (gy > 0.8) continue;                 // skip hillsides — no floating cubes on the mountain
-      if (onRoad(x, z, 3, 3) || surfaceHeightAt(x, z) > gy + 0.02) continue;   // not in a street corridor or on a forecourt
-      const s = 1 + rng() * 2.2;
-      const tilt = (rng() - 0.5) * 0.5, yaw = rng() * Math.PI; rng();
-      const kx = 0.8 + rng() * 0.4, ky = 0.55 + rng() * 0.35, kz = 0.8 + rng() * 0.4;
-      let byBuilding = false;
-      for (const p of placed) { if (Math.abs(p.x - x) < p.w / 2 + 5 && Math.abs(p.z - z) < p.d / 2 + 5) { byBuilding = true; break; } }
-      if (byBuilding) continue;
-      rockSites.push({ x: x, z: z, s: s, kx: kx, ky: ky, kz: kz, yaw: yaw, tilt: tilt });
+      if (surfaceHeightAt(x, z) > gy + 0.02) return;
+      if (PLAN && PLAN.padAt(x, z)) return;
+      for (const p of placed) { if (Math.abs(p.x - x) < p.w / 2 + 5 && Math.abs(p.z - z) < p.d / 2 + 5) return; }
+      for (const q of rockSites) { if (Math.hypot(q.x - x, q.z - z) < (q.s + s) * 1.1) return; }
+      const h = function (k) { return h01g(x, z, salt + k); };
+      rockSites.push({ x: x, z: z, s: s, kx: 0.8 + h(1) * 0.4, ky: 0.55 + h(2) * 0.35, kz: 0.8 + h(3) * 0.4,
+        yaw: h(4) * Math.PI, tilt: (h(5) - 0.5) * 0.5 });
+    }
+    if (PLAN) {
+      const G = PLAN.ghaut;
+      for (let i = 0; i + 1 < G.pts.length; i++) {
+        const a = G.pts[i], b = G.pts[i + 1], len = Math.hypot(b.x - a.x, b.z - a.z);
+        const nx = -(b.z - a.z) / len, nz = (b.x - a.x) / len;
+        for (let t = 5; t < len; t += 8) {
+          const hh = h01g(a.x + t, a.z, 0x9a1);
+          if (hh < 0.35) continue;
+          const off = (h01g(a.x, a.z + t, 0x9a2) - 0.5) * G.half * 1.4;
+          rockSite(a.x + (b.x - a.x) * t / len + nx * off, a.z + (b.z - a.z) * t / len + nz * off, 0.7 + hh * 1.3, 0x9b0);
+        }
+      }
+      for (const hl of hills) {
+        const n = hl.volcano ? 14 : 6;
+        for (let k = 0; k < n; k++) {
+          const a = h01g(hl.x, k, 0x9a3) * Math.PI * 2, rr = hl.r * (hl.volcano ? 0.88 + 0.16 * h01g(k, hl.z, 0x9a4) : 0.92 + 0.14 * h01g(k, hl.z, 0x9a4));
+          const x = hl.x + Math.cos(a) * rr, z = hl.z + Math.sin(a) * rr;
+          if (Math.hypot(x - cx, z - cz) > R - 3) continue;
+          rockSite(x, z, 1 + h01g(x, z, 0x9a5) * 1.8, 0x9c0);
+        }
+      }
     }
 
-    // the town between the buildings: yards, square, car lot, dock, farm, rocks (world/island_dressing.js; result also at CBZ.islandDressing.current)
-    const islandDress = CBZ.islandDressing ? CBZ.islandDressing.build({ root: root, cx: cx, cz: cz, R: R, GRID: GRID, ROADW: ROADW, groundHeightAt: groundHeightAt, surfaceHeightAt: surfaceHeightAt, onRoad: onRoad, placed: placed, fragile: fragile, roadSegs: roadSegs, h01: h01g, trees: flammable, rocks: rockSites, cars: cars, makeCar: makeCar, showroom: dl1 ? { x: dl1.x, z: dl1.z, w: 18, d: 13 } : null, stations: stationSites, oceanY: OCEAN_Y }) : null;
+    /* ---- THE HARBOUR AND THE BRIDGES ---------------------------------------
+       What the plan made over the water and across the ghaut, built:
+         QUAY        the reclaimed land's deck (it is ground: groundHeightAt
+                     answers it, so you walk it and the water stops at its
+                     face), a sheet-piled concrete face down into the basin
+                     with a granite coping, timber fenders, bollards every 12
+                     m and ladders every 30, and the same walls round its
+                     ends where it stands proud of the beach
+         CARGO PIER  a concrete pier on the quay's line, bollards down its face
+         BREAKWATER  a rubble mound: a concrete crest walk on a core, armoured
+                     with rough basalt blocks down both slopes, the lighthouse
+                     on its head (its lens lights with the dark, like every
+                     lamp on the island)
+         JETTIES     timber decks on piles for the marina, walk platforms
+         BRIDGES     a concrete deck slab under every street that crosses the
+                     ghaut (the street kit lays the road and walks ON it), its
+                     fascia, a parapet each side (solid) and abutments
+       One merged mesh per material (concrete, rock, timber, paint), plus the
+       lens. Every piece is placed off the plan's numbers: nothing here is a
+       coordinate. */
+    const harbourOut = { boats: [], lens: null, points: [], jetties: [], bridges: [] };
+    /* THE BRIDGES. Every street that crosses the ghaut does it on a beam
+       bridge at the plain's own level: a concrete deck slab 0.8 m deep with
+       its fascia, the carriageway and both sidewalks ON it (the street kit
+       leaves the span to the bridge: o.skip), a parapet each side (solid),
+       an abutment in each bank. Each bridge is ITS OWN group with its origin
+       at the deck's centre, so the flood can take one: its record carries
+       the group, its colliders and its deck platform (systems/flashflood.js
+       fails a bridge by pulling those and setting record.failed, and the
+       walkable floor drops to the ravine's there); arena.reset() puts it
+       back. */
+    function buildBridges() {
+      if (!PLAN || !PLAN.bridges.length) return;
+      const C = CBZ.islandRoadKit && CBZ.islandRoadKit.C ? CBZ.islandRoadKit.C : { HW: 3.5, WALK: 5.5, CURB: 0.15, LIFT: 0.04 };
+      const HW = C.HW, WALK = C.WALK, CURB = C.CURB, LIFT = C.LIFT;
+      const concM = skinMat("concrete"); concM.name = "island-bridge-concrete";
+      const asphM = skinMat("asphalt"); asphM.name = "island-bridge-asphalt";
+      const BGU = THREE.BufferGeometryUtils;
+      for (const br of PLAN.bridges) {
+        const along = function (t, off) { return br.vertical ? { x: br.at + off, z: t } : { x: t, z: br.at + off }; };
+        const mid = along((br.a + br.b) / 2, 0);
+        const deckMid = PLAN.plainBaseAt(mid.x, mid.z);
+        const grp = new THREE.Group();
+        grp.position.set(mid.x, deckMid, mid.z);
+        grp.name = "island-bridge";
+        root.add(grp);
+        const cParts = [], aParts = [];
+        const yaw = br.vertical ? 0 : Math.PI / 2;     // local +z runs along the road
+        const piece = function (list, t, off, y, w, h, d, rgb) {
+          const g = new THREE.BoxGeometry(w, h, d).toNonIndexed();
+          g.deleteAttribute("uv");
+          g.rotateY(yaw);
+          const q = along(t, off);
+          g.translate(q.x - mid.x, y - deckMid, q.z - mid.z);
+          const n = g.attributes.position.count, c = new Float32Array(n * 3);
+          for (let i = 0; i < n; i++) { c[i * 3] = rgb[0]; c[i * 3 + 1] = rgb[1]; c[i * 3 + 2] = rgb[2]; }
+          g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+          list.push(g);
+        };
+        const FACE = [0.20, 0.195, 0.185], COPE = [0.40, 0.39, 0.37], WALKC = [0.34, 0.33, 0.31], ASPH = [0.055, 0.055, 0.058];
+        let dMin = 1e9, dMax = -1e9;
+        for (let t = br.a; t < br.b - 1e-6; t += 2) {
+          const t1 = Math.min(br.b, t + 2), tm = (t + t1) / 2, len = t1 - t;
+          const c0 = along(tm, 0), deck = PLAN.plainBaseAt(c0.x, c0.z);
+          dMin = Math.min(dMin, deck); dMax = Math.max(dMax, deck);
+          piece(cParts, tm, 0, deck - 0.42, WALK * 2 + 0.4, 0.8, len, FACE);              // the slab
+          piece(aParts, tm, 0, deck + LIFT / 2, HW * 2, LIFT, len, ASPH);                   // the carriageway
+          for (const s2 of [-1, 1]) {
+            piece(cParts, tm, s2 * (HW + WALK) / 2, deck + CURB / 2, WALK - HW, CURB, len, WALKC);   // a sidewalk
+            piece(cParts, tm, s2 * (WALK + 0.05), deck + 0.55, 0.3, 0.9, len, COPE);        // the parapet
+          }
+        }
+        for (const te of [br.a, br.b]) {
+          const c0 = along(te, 0), deck = PLAN.plainBaseAt(c0.x, c0.z);
+          piece(cParts, te, 0, deck - 2.2, WALK * 2 + 0.8, 4.0, 1.2, FACE);               // an abutment
+        }
+        const mk = function (parts, m2, name) {
+          if (!parts.length || !BGU) return null;
+          const g = BGU.mergeBufferGeometries(parts, false);
+          parts.forEach(function (p) { p.dispose(); });
+          const P2 = g.attributes.position, uv = new Float32Array(P2.count * 2);
+          for (let i = 0; i < P2.count; i++) { uv[i * 2] = (P2.getX(i) + mid.x) / 2.4; uv[i * 2 + 1] = (P2.getZ(i) + mid.z + P2.getY(i)) / 2.4; }
+          g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+          g.computeBoundingSphere();
+          const m = new THREE.Mesh(g, m2); m.name = name; m.castShadow = true; m.receiveShadow = true;
+          grp.add(m);
+          return m;
+        };
+        mk(cParts, concM, "island-bridge-concrete");
+        mk(aParts, asphM, "island-bridge-deck");
+        const cols = [];
+        for (const s2 of [-1, 1]) {
+          const p0 = along(br.a, s2 * (WALK + 0.05)), p1 = along(br.b, s2 * (WALK + 0.05));
+          const c = { minX: Math.min(p0.x, p1.x) - 0.16, maxX: Math.max(p0.x, p1.x) + 0.16,
+            minZ: Math.min(p0.z, p1.z) - 0.16, maxZ: Math.max(p0.z, p1.z) + 0.16, y0: dMin + 0.05, y1: dMax + 1.0, ref: null };
+          CBZ.colliders.push(c); cols.push(c);
+        }
+        // the deck is walked through the street surface (roadGround); the
+        // platform is what a disaster pulls to say "this is no longer here"
+        // (it is never higher than the deck you stand on)
+        const plat = { minX: br.x0, maxX: br.x1, minZ: br.z0, maxZ: br.z1, top: dMin + LIFT };
+        CBZ.platforms.push(plat);
+        // the record: the flood's bridge contract (systems/flashflood.js
+        // normBridge) and the reset this file owes it
+        Object.assign(br, {
+          x: mid.x, z: mid.z, minX: br.x0, maxX: br.x1, minZ: br.z0, maxZ: br.z1,
+          len: br.b - br.a, width: WALK * 2, ax: br.vertical ? 0 : 1, az: br.vertical ? 1 : 0,
+          deckY: deckMid + LIFT, soffitY: deckMid - 0.82, group: grp, colliders: cols, platforms: [plat],
+          failed: false, home: null,
+        });
+        br._home = { x: grp.position.x, y: grp.position.y, z: grp.position.z };
+        harbourOut.bridges.push(br);
+      }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    }
+    function resetBridges() {
+      for (const br of harbourOut.bridges) {
+        const g = br.group, H = br._home;
+        if (g && H) { g.position.set(H.x, H.y, H.z); g.rotation.set(0, 0, 0); g.visible = true; }
+        for (const c of br.colliders) if (CBZ.colliders.indexOf(c) === -1) CBZ.colliders.push(c);
+        for (const p of br.platforms) if (CBZ.platforms.indexOf(p) === -1) CBZ.platforms.push(p);
+        br.failed = false; br.home = null; br.state = undefined; br.dmg = 0;
+      }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    }
+    const resetHooks = [];
+    (function harbourAndBridges() {
+      if (!PLAN) return;
+      const BGU = THREE.BufferGeometryUtils;
+      if (!BGU || !BGU.mergeBufferGeometries) return;
+      const M4 = new THREE.Matrix4(), Q4 = new THREE.Quaternion(), E4 = new THREE.Euler(), V4 = new THREE.Vector3(), S4 = new THREE.Vector3();
+      function Acc(tile) { return { parts: [], tile: tile }; }
+      function put(A, g, x, y, z, yaw, rgb, sx, sy, sz) {
+        g = g.index ? g.toNonIndexed() : g;
+        E4.set(0, yaw || 0, 0); Q4.setFromEuler(E4); V4.set(x, y, z); S4.set(sx || 1, sy || 1, sz || 1);
+        M4.compose(V4, Q4, S4);
+        g.applyMatrix4(M4);
+        const n = g.attributes.position.count, c = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) { c[i * 3] = rgb[0]; c[i * 3 + 1] = rgb[1]; c[i * 3 + 2] = rgb[2]; }
+        g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+        if (g.attributes.uv) g.deleteAttribute("uv");
+        A.parts.push(g);
+      }
+      function box(A, x, y, z, w, h, d, rgb, yaw) { put(A, new THREE.BoxGeometry(w, h, d), x, y, z, yaw, rgb); }
+      function cyl(A, x, y0, z, r0, r1, h, seg, rgb) { put(A, new THREE.CylinderGeometry(r1, r0, h, seg || 10), x, y0 + h / 2, z, 0, rgb); }
+      // world-planar UVs by each triangle's dominant axis, so a map reads at
+      // real scale on every face
+      function planarUV(g, tile) {
+        const p = g.attributes.position, n = p.count, uv = new Float32Array(n * 2);
+        const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+        for (let i = 0; i < n; i += 3) {
+          a.fromBufferAttribute(p, i); b.fromBufferAttribute(p, i + 1); c.fromBufferAttribute(p, i + 2);
+          e1.subVectors(b, a); e2.subVectors(c, a); e1.cross(e2);
+          const ax = Math.abs(e1.x), ay = Math.abs(e1.y), az = Math.abs(e1.z);
+          for (let k = 0; k < 3; k++) {
+            const q = k === 0 ? a : k === 1 ? b : c;
+            let u, v;
+            if (ay >= ax && ay >= az) { u = q.x; v = q.z; } else if (ax >= az) { u = q.z; v = q.y; } else { u = q.x; v = q.y; }
+            uv[(i + k) * 2] = u / tile; uv[(i + k) * 2 + 1] = v / tile;
+          }
+        }
+        g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+      }
+      function flush(A, m2, name, cast) {
+        if (!A.parts.length) return null;
+        const g = BGU.mergeBufferGeometries(A.parts, false);
+        A.parts.forEach(function (p) { p.dispose(); });
+        planarUV(g, A.tile);
+        g.computeBoundingSphere();
+        const mesh = new THREE.Mesh(g, m2);
+        mesh.name = name; mesh.castShadow = !!cast; mesh.receiveShadow = true;
+        mesh.matrixAutoUpdate = false; mesh.updateMatrix();
+        root.add(mesh);
+        return mesh;
+      }
+      const conc = Acc(2.4), rock = Acc(2.2), wood = Acc(1.6), paint = Acc(1.2);
+      const C_DECK = [0.30, 0.29, 0.27], C_FACE = [0.20, 0.195, 0.185], C_COPE = [0.40, 0.39, 0.37];
+      const C_FEND = [0.055, 0.042, 0.03], C_IRON = [0.03, 0.03, 0.034], C_RUST = [0.11, 0.055, 0.03];
+      const C_ROCK = [0.075, 0.07, 0.066], C_CORE = [0.10, 0.095, 0.088], C_TIMB = [0.17, 0.12, 0.08];
+      const H = PLAN.harbour, Q = H.quay, seaY = OCEAN_Y;
+      const FOOT = -7.5;                    // walls and piles run down past the visible water
+
+      // ---- THE QUAY: deck (2 m cells on its own height), face, ends ----
+      {
+        const nx = Math.ceil((Q.x1 - Q.x0) / 2), nz = Math.ceil((Q.z1 - Q.z0) / 2);
+        const pos = [], col = [], idx = [];
+        for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
+          const x = Q.x0 + (Q.x1 - Q.x0) * i / nx, z = Q.z0 + (Q.z1 - Q.z0) * j / nz;
+          pos.push(x, PLAN.quayTop(x, z) + 0.004, z);
+          const k = 0.92 + 0.12 * h01g(Math.round(x / 2), Math.round(z / 2), 0xa71);
+          col.push(C_DECK[0] * k, C_DECK[1] * k, C_DECK[2] * k);
+        }
+        for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+          const a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, e = c + 1;
+          idx.push(a, c, b, b, c, e);
+        }
+        let g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+        g.setIndex(idx);
+        g.computeVertexNormals();
+        g = g.toNonIndexed();
+        conc.parts.push(g);
+        // the face and the two ends: wall slabs 2 m long down to the foot
+        const top = function (x, z) { return PLAN.quayTop(x, z); };
+        for (let x = Q.x0; x < Q.x1 - 1e-6; x += 2) {
+          const x1 = Math.min(Q.x1, x + 2), mx = (x + x1) / 2, t = top(mx, Q.z1);
+          box(conc, mx, (t + FOOT) / 2, Q.z1 + 0.3, x1 - x, t - FOOT, 0.6, C_FACE);
+          box(conc, mx, t + 0.11, Q.z1 + 0.15, x1 - x, 0.22, 0.9, C_COPE);
+          harbourOut.points.push({ x: mx, z: Q.z1 });
+        }
+        for (const side of [-1, 1]) {
+          const xe = side < 0 ? Q.x0 : Q.x1;
+          for (let z = Q.z0; z < Q.z1 - 1e-6; z += 2) {
+            const z1 = Math.min(Q.z1, z + 2), mz = (z + z1) / 2;
+            const t = top(xe, mz), g0 = groundHeightAt(xe + side * 1.5, mz);
+            if (t - g0 < 0.12) continue;                 // flush with the land there
+            box(conc, xe + side * 0.3, (t + FOOT) / 2, mz, 0.6, t - FOOT, z1 - z, C_FACE);
+            box(conc, xe + side * 0.15, t + 0.11, mz, 0.9, 0.22, z1 - z, C_COPE);
+          }
+        }
+        // fenders, bollards, ladders along the face
+        for (let x = Q.x0 + 3; x < Q.x1 - 2; x += 6) {
+          const t = top(x, Q.z1);
+          box(wood, x, t - 0.9, Q.z1 + 0.68, 0.3, 1.8, 0.16, C_FEND);
+        }
+        for (let x = Q.x0 + 6; x < Q.x1 - 3; x += 12) {
+          const t = top(x, Q.z1 - 0.8);
+          cyl(paint, x, t, Q.z1 - 0.7, 0.2, 0.17, 0.55, 10, C_IRON);
+          cyl(paint, x, t + 0.55, Q.z1 - 0.7, 0.26, 0.26, 0.07, 10, C_IRON);
+          const c = { minX: x - 0.25, maxX: x + 0.25, minZ: Q.z1 - 0.95, maxZ: Q.z1 - 0.45, y0: t, y1: t + 0.62, ref: null, noCam: true };
+          CBZ.colliders.push(c);
+        }
+        for (let x = Q.x0 + 15; x < Q.x1 - 5; x += 30) {
+          const t = top(x, Q.z1);
+          for (const s2 of [-0.25, 0.25]) box(paint, x + s2, (t + seaY - 1.5) / 2, Q.z1 + 0.66, 0.05, t - seaY + 1.5, 0.05, C_RUST);
+          for (let y = seaY - 1.2; y < t; y += 0.3) box(paint, x, y, Q.z1 + 0.66, 0.5, 0.035, 0.035, C_RUST);
+        }
+      }
+
+      // ---- THE CARGO PIER and THE JETTIES ----
+      for (const p of H.piers) {
+        if (p.kind === "cargo") {
+          box(conc, (p.x0 + p.x1) / 2, (p.deck + FOOT) / 2, (p.z0 + p.z1) / 2 + 0.2, p.x1 - p.x0, p.deck - FOOT, p.z1 - p.z0 - 0.4, C_FACE);
+          box(conc, (p.x0 + p.x1) / 2, p.deck + 0.002, (p.z0 + p.z1) / 2, p.x1 - p.x0 - 0.2, 0.01, p.z1 - p.z0, C_DECK);
+          for (let z = p.z0 + 4; z < p.z1 - 1; z += 8) for (const xe of [p.x0 + 0.6, p.x1 - 0.6]) {
+            cyl(paint, xe, p.deck, z, 0.2, 0.17, 0.55, 10, C_IRON);
+            cyl(paint, xe, p.deck + 0.55, z, 0.26, 0.26, 0.07, 10, C_IRON);
+            CBZ.colliders.push({ minX: xe - 0.25, maxX: xe + 0.25, minZ: z - 0.25, maxZ: z + 0.25, y0: p.deck, y1: p.deck + 0.62, ref: null, noCam: true });
+          }
+          harbourOut.points.push({ x: (p.x0 + p.x1) / 2, z: p.z1 });
+        } else {
+          const D = p.deck, w = p.x1 - p.x0;
+          // planks across, two stringers, piles every 3 m
+          for (let z = p.z0 + 0.15; z < p.z1; z += 0.3) {
+            const k = 0.9 + 0.18 * h01g(p.x0, Math.round(z * 10), 0xa72);
+            box(wood, (p.x0 + p.x1) / 2, D - 0.03, z, w, 0.06, 0.27, [C_TIMB[0] * k, C_TIMB[1] * k, C_TIMB[2] * k]);
+          }
+          for (const xe of [p.x0 + 0.2, p.x1 - 0.2]) box(wood, xe, D - 0.2, (p.z0 + p.z1) / 2, 0.2, 0.28, p.z1 - p.z0, C_FEND);
+          for (let z = p.z0 + 1.5; z < p.z1; z += 3) for (const xe of [p.x0 + 0.15, p.x1 - 0.15]) {
+            cyl(wood, xe, FOOT, z, 0.16, 0.14, D + 0.45 - FOOT, 8, C_FEND);
+            CBZ.colliders.push({ minX: xe - 0.16, maxX: xe + 0.16, minZ: z - 0.16, maxZ: z + 0.16, y0: D, y1: D + 0.45, ref: null, noCam: true });
+          }
+          const plat = { minX: p.x0, maxX: p.x1, minZ: p.z0 - 0.3, maxZ: p.z1, top: D };
+          CBZ.platforms.push(plat);
+          harbourOut.jetties.push({ x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1, deck: D, plat: plat });
+          harbourOut.points.push({ x: (p.x0 + p.x1) / 2, z: p.z1 });
+        }
+      }
+
+      // ---- THE BREAKWATER: core, crest walk, armour, the lighthouse ----
+      {
+        const crest = H.crest, half = H.half, slope = H.slope;
+        const lowY = seaY - 4.5;
+        const run = half + (crest - lowY) * slope;
+        for (const sg of H.breakwater) {
+          const dx = sg.bx - sg.ax, dz = sg.bz - sg.az, L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L;
+          const nx = -uz, nz = ux, yaw = Math.atan2(ux, uz);
+          // the core as a trapezoid prism (a cross-section swept down the arm)
+          const sh = new THREE.Shape();
+          sh.moveTo(-run, lowY); sh.lineTo(-half, crest - 0.25); sh.lineTo(half, crest - 0.25); sh.lineTo(run, lowY); sh.closePath();
+          const core = new THREE.ExtrudeGeometry(sh, { depth: L + half * 2, bevelEnabled: false });
+          core.translate(0, 0, -half);
+          put(rock, core, sg.ax, 0, sg.az, yaw, C_CORE);
+          // the crest walk: a concrete cap
+          box(conc, (sg.ax + sg.bx) / 2, crest - 0.12, (sg.az + sg.bz) / 2, half * 2, 0.24, L + half * 2, C_COPE, yaw);
+          // armour: rough blocks down both slopes, staggered
+          for (let t = -half; t < L + half; t += 2.6) for (const s2 of [-1, 1]) for (let row = 0; row < 3; row++) {
+            const e = half + 0.8 + row * 2.4;
+            const y = crest - 0.2 - (e - half) / slope;
+            const jit = h01g(Math.round(sg.ax + t), row * 7 + s2, 0xa73);
+            const tt = t + (row & 1) * 1.3 + (jit - 0.5) * 0.8;
+            const x = sg.ax + ux * tt + nx * s2 * e, z = sg.az + uz * tt + nz * s2 * e;
+            const sz = 1.25 + jit * 0.7;
+            const g = new THREE.DodecahedronGeometry(1, 0);
+            put(rock, g, x, y, z, jit * 6.28, [C_ROCK[0] * (0.85 + jit * 0.3), C_ROCK[1] * (0.85 + jit * 0.3), C_ROCK[2] * (0.85 + jit * 0.3)], sz, sz * 0.62, sz * 0.9);
+          }
+          for (let t = 0; t <= L; t += 10) harbourOut.points.push({ x: sg.ax + ux * t, z: sg.az + uz * t });
+        }
+        // the lighthouse on the head
+        const lh = H.light, g0 = crest;
+        cyl(conc, lh.x, g0 - 0.1, lh.z, 2.2, 2.2, 0.9, 16, C_COPE);
+        cyl(paint, lh.x, g0 + 0.8, lh.z, 1.55, 1.25, 8.4, 16, [0.72, 0.71, 0.67]);
+        cyl(paint, lh.x, g0 + 4.0, lh.z, 1.42, 1.38, 1.4, 16, [0.42, 0.05, 0.04]);
+        cyl(paint, lh.x, g0 + 9.2, lh.z, 1.75, 1.75, 0.18, 16, C_IRON);         // gallery
+        for (let k = 0; k < 12; k++) {
+          const a = k / 12 * Math.PI * 2;
+          box(paint, lh.x + Math.cos(a) * 1.68, g0 + 9.85, lh.z + Math.sin(a) * 1.68, 0.05, 1.1, 0.05, C_IRON);
+        }
+        cyl(paint, lh.x, g0 + 10.4, lh.z, 1.72, 1.72, 0.06, 16, C_IRON);
+        cyl(paint, lh.x, g0 + 11.3, lh.z, 0.9, 0.05, 0.9, 12, [0.42, 0.05, 0.04]);  // the lantern's cap
+        CBZ.colliders.push({ minX: lh.x - 1.6, maxX: lh.x + 1.6, minZ: lh.z - 1.6, maxZ: lh.z + 1.6, y0: g0 - 0.1, y1: g0 + 11.5, ref: null });
+        const lensMat = new THREE.MeshBasicMaterial({ color: 0x333330 });
+        lensMat.name = "island-lighthouse-lens";
+        const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 1.1, 12), lensMat);
+        lens.position.set(lh.x, g0 + 9.85, lh.z); lens.name = "island-lighthouse-lens";
+        root.add(lens);
+        harbourOut.lens = lens;
+        let lastK = -1;
+        if (CBZ.onUpdate) CBZ.onUpdate(48.4, function () {
+          if (!CBZ.game || !CBZ.islandModeOn || !CBZ.islandModeOn(CBZ.game.mode)) return;
+          const n = CBZ.lightsOnAmount ? CBZ.lightsOnAmount() : (CBZ.nightAmount || 0);
+          // a flash every 6 s once it is dark enough to need one
+          const t = (CBZ.now || 0) / 1000;
+          const flash = n > 0.25 ? Math.max(0, 1 - Math.abs(((t % 6) / 6) - 0.5) * 12) : 0;
+          const k = Math.min(1, n * 0.6 + flash);
+          if (Math.abs(k - lastK) < 0.01) return;
+          lastK = k;
+          lensMat.color.setRGB(0.2 + 0.85 * k, 0.2 + 0.78 * k, 0.19 + 0.55 * k);
+        });
+        harbourOut.points.push({ x: lh.x, z: lh.z });
+      }
+
+      // ---- THE BRIDGES over the ghaut: each its own group (see below) ----
+      buildBridges();
+
+      const concMat = skinMat("concrete"); concMat.name = "island-harbour-concrete";
+      const rockMat = skinMat("rock"); rockMat.name = "island-harbour-rock";
+      const woodMat = skinMat("wood"); woodMat.name = "island-harbour-timber";
+      const paintMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }); paintMat.name = "island-harbour-paint";
+      flush(conc, concMat, "island-harbour-concrete", true);
+      flush(rock, rockMat, "island-breakwater", true);
+      flush(wood, woodMat, "island-harbour-timber", true);
+      flush(paint, paintMat, "island-harbour-ironwork", true);
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+
+      // ---- THE BOATS, moored at their berths (world/water_hulls.js hulls) ----
+      const MH = CBZ.marineHulls;
+      if (MH && MH.build) for (const bt of H.berths) {
+        let g = null;
+        try { g = MH.build(bt.key); } catch (e) { g = null; }
+        if (!g) continue;
+        const spec = MH.spec ? MH.spec(bt.key) : null;
+        const ride = spec && spec.rideAbove != null ? spec.rideAbove : 0.06;
+        g.position.set(bt.x, seaY + ride, bt.z);
+        g.rotation.set(0, bt.heading, 0);
+        g.name = "island-moored-" + bt.key;
+        root.add(g);
+        harbourOut.boats.push({ group: g, x: bt.x, z: bt.z, yaw: bt.heading, len: bt.loa, beam: bt.beam,
+          draft: spec && spec.draft != null ? spec.draft : 0.5, key: bt.key, ride: ride, moored: true });
+      }
+      // they ride the swell while they are moored and nobody else is moving
+      // them (a storm that weathervanes a hull turns it: from then on it is
+      // the storm's). Only near the camera; a boat 200 m off does not bob.
+      let _bobT = 0;
+      if (harbourOut.boats.length && CBZ.onUpdate) CBZ.onUpdate(47.96, function (dt) {
+        if (!CBZ.game || !CBZ.islandModeOn || !CBZ.islandModeOn(CBZ.game.mode)) return;
+        _bobT += dt || 0;
+        const cam = CBZ.camera;
+        for (const bt of harbourOut.boats) {
+          const g = bt.group;
+          if (!bt.moored || Math.abs(g.rotation.y - bt.yaw) > 1e-4 || Math.abs(g.position.x - bt.x) > 0.05 || Math.abs(g.position.z - bt.z) > 0.05) { bt.moored = false; continue; }
+          if (cam && Math.abs(cam.position.x - bt.x) + Math.abs(cam.position.z - bt.z) > 260) continue;
+          const sy = CBZ.survSeaHeightAt ? CBZ.survSeaHeightAt(bt.x, bt.z) : seaY;
+          g.position.y = sy + bt.ride;
+          g.rotation.z = Math.sin(_bobT * 1.3 + bt.x) * 0.035 / Math.max(1, bt.beam * 0.5);
+          g.rotation.x = Math.sin(_bobT * 0.9 + bt.z) * 0.02 / Math.max(1, (bt.len || 6) * 0.12);
+        }
+      });
+    })();
+
+    // the town between the buildings: yards, the square, the car parks, the
+    // hydrants, the farm, the rocks (world/island_dressing.js; result also at
+    // CBZ.islandDressing.current). It reads the plan for where each goes.
+    const islandDress = CBZ.islandDressing ? CBZ.islandDressing.build({ root: root, cx: cx, cz: cz, R: R, plan: PLAN, ROADW: ROADW, groundHeightAt: groundHeightAt, surfaceHeightAt: surfaceHeightAt, onRoad: onRoad, placed: placed, fragile: fragile, roadSegs: roadSegs, h01: h01g, trees: flammable, rocks: rockSites, cars: cars, makeCar: makeCar, showroom: dl1 ? { x: dl1.x, z: dl1.z, w: 18, d: 13 } : null, stations: stationSites, oceanY: OCEAN_Y }) : null;
+    if (carProxy) carProxy.build();
 
     arena = {
       root, center: { x: cx, z: cz }, radius: R,
@@ -4767,10 +5360,31 @@
       // (world/island_dressing.js: fences, benches, bales, the pier...), so a
       // later dresser (quake.js's utility poles) never stands in a road or a fence
       onRoad: onRoad, dressing: islandDress,
+      // the town's plan (world/island_plan.js) and what was built off it:
+      // the harbour's boats, its seawall points, the bridges
+      plan: PLAN, boats: harbourOut.boats, harbour: harbourOut,
+      /* A point to stand on: dry, open ground of the town or the plain,
+         `minD`..`maxD` m from the centre — never inside a building, on the
+         volcano's cone or a hill, in the ghaut or in the water. (The old
+         island had its volcano at the centre, so callers pass the cone's
+         radius as minD to mean "not on the mountain"; with the volcano off
+         to the side that is asked of the ground directly.) */
       randomPoint(minD, maxD) {
-        const a = rng() * Math.PI * 2;
-        const d = (minD || 0) + rng() * ((maxD || R * 0.82) - (minD || 0));
-        return { x: cx + Math.cos(a) * d, z: cz + Math.sin(a) * d };
+        const lo = minD || 0, hi = Math.min(maxD || R * 0.82, R - 8);
+        let a = 0, d = 0, x = cx, z = cz;
+        for (let k = 0; k < 40; k++) {
+          a = rng() * Math.PI * 2;
+          d = lo + rng() * Math.max(0, hi - lo);
+          x = cx + Math.cos(a) * d; z = cz + Math.sin(a) * d;
+          if (!PLAN) break;
+          if (PLAN.hillAt(x, z) > 0.2 || PLAN.ghautDist(x, z) < PLAN.ghaut.bank) continue;
+          let inB = false;
+          for (const b of fragile) { if (Math.abs(b.x - x) < b.w / 2 + 1 && Math.abs(b.z - z) < b.d / 2 + 1) { inB = true; break; } }
+          if (inB) continue;
+          if (CBZ.survWaterAt && CBZ.survWaterAt(x, z)) continue;
+          break;
+        }
+        return { x: x, z: z };
       },
       // nearest high ground above height `above` (for tsunami fleeing)
       highGround(above) {
@@ -4808,7 +5422,7 @@
           if (b.fallen) {
             b.group.visible = true;
             b.group.position.set(b.ox, b.gy, b.oz);
-            b.group.rotation.set(0, 0, 0);
+            b.group.rotation.set(0, b.rotY || 0, 0);     // a house faces its street
             for (const c of b.colliders) if (CBZ.colliders.indexOf(c) === -1) CBZ.colliders.push(c);
             for (const p of b.platforms) if (CBZ.platforms.indexOf(p) === -1) CBZ.platforms.push(p);
             b.fallen = false;
@@ -4832,6 +5446,10 @@
         }
         // re-glaze every shattered window for the new match
         for (const gp of allGlass) { if (gp.shattered) { gp.shattered = false; if (gp.show) gp.show(); else gp.mesh.visible = true; } }
+        // a bridge the flood took stands again; then whatever a disaster
+        // registered to put back (CBZ.island.onReset)
+        resetBridges();
+        for (const fn of resetHooks) { try { fn(arena); } catch (e) {} }
         for (let i = root.children.length - 1; i >= 0; i--) {
           const c = root.children[i];
           if (c.userData && c.userData.transient) {
@@ -4843,6 +5461,45 @@
         if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
       },
     };
+
+    /* A WALL TORN OFF A BAKED BUILDING is drawn again. The originals a bake
+       hid stay in their building's group as collider / sight records; a
+       disaster that takes one (the tsunami tears walls off into the flow:
+       Object3D re-parent, world pose kept) takes a mesh nobody can see. Four
+       times a second, any hidden original that has left its group shows
+       itself. A static island costs one flag check per building. */
+    /* THE ROOMS SLEEP FAR AWAY. A building's interior (floors, plaster,
+       furniture, fixtures: ~6 draws) is only ever seen through its own
+       windows from close by; past 60 m it stops drawing, and it is back the
+       moment the camera comes within 50 (the gap stops it flickering at the
+       line). Same 4 Hz pass. */
+    const ROOM_FAR = 60, ROOM_NEAR = 50;
+    let _tornT = 0;
+    if (CBZ.onUpdate) CBZ.onUpdate(47.97, function (dt) {
+      if (!arena || !CBZ.game || !CBZ.islandModeOn(CBZ.game.mode)) return;
+      _tornT += dt || 0;
+      if (_tornT < 0.25) return;
+      _tornT = 0;
+      const cam = CBZ.camera;
+      for (let i = 0; i < fragile.length; i++) {
+        const b = fragile[i];
+        const ud = b.group && b.group.userData;
+        if (!ud) continue;
+        if (b._tsuTorn || b.fallen || b._dmg > 0) {
+          const hid = ud.bakedHidden;
+          if (hid) for (const o of hid) if (o.parent !== b.group && o.visible === false) o.visible = true;
+        }
+        const rooms = ud.rooms;
+        if (!rooms || !rooms.length || !cam) continue;
+        const dx = cam.position.x - b.x, dz = cam.position.z - b.z, dy = cam.position.y - b.gy;
+        const d = Math.sqrt(dx * dx + dz * dz + dy * dy * 0.25) - Math.max(b.w, b.d) / 2;
+        const want = ud.roomsOn === false ? d < ROOM_NEAR : d < ROOM_FAR;
+        if (want !== (ud.roomsOn !== false)) {
+          ud.roomsOn = want;
+          for (const o of rooms) o.visible = want;
+        }
+      }
+    });
 
     /* ---- ELEVATOR DRIVE -------------------------------------------------
        A lift that serves EVERY floor, and the top of the crown, driven by the
@@ -5077,6 +5734,127 @@
     });
 
     root.visible = false; // hidden until survival mode activates
+    /* ---- CBZ.island — THE ISLAND, AS DATA FOR THE DISASTERS ----------------
+       Every disaster used to carry its own idea of where things were (the
+       volcano at the centre, the town in a ring, a 120 m disc). This is the
+       one answer, read off the plan and the build, so an effect adapts to
+       the island instead of typing in coordinates. Everything is world
+       metres; lists are the live records (the same objects arena.fragile,
+       arena.cars and arena.flammable hold), never copies.
+
+         bounds        {cx, cz, R, x0, x1, z0, z1, seaR}
+         coast         [{x, z}] the grass edge (a circle, 128 points), and
+                       coastAt(angle) -> radius; beachR / shelfR the bands
+         buildings     [{x, z, w, d (world-axis footprint), h, gy, roofY,
+                       roofHex, roofAccess, roof {x0..z1, y, access},
+                       helipadCandidate, helipad {x,y,z,r}, storeys, kind,
+                       district, name, street, style, rotY, lot, group,
+                       fallen, colliders, platforms, glass, interior}]
+         helipads      the buildings with a clear marked roof pad
+         roads         {pieces:[{vertical, fixed, a, b, x0..z1}], junctions,
+                       lanes(): [{x0,z0,x1,z1,dir}] traffic lanes (keep right),
+                       bridges, inStreet(rect)}
+         harbour       {quay, face, basin, breakwater, piers, jetties,
+                       lighthouse, points:[{x,z}], berths}
+         boats         [{group, x, z, yaw, len, beam, draft, key, moored}]
+         volcano       {x, z, r, peak, rim, bowl, breach (angle), crater y}
+         hills         arena.hills (volcano first)
+         riverbeds     [{kind:"ghaut", pts, half, bank, depth}] the dry ravine
+                       the floods and lahars run down
+         lowGround     riverbeds + the quay + the beach band, and
+                       lowAt(x, z) -> how far (m) the ground there stands
+                       over mean sea (what floods first)
+         districts     [{id, name, x0,x1,z0,z1, x, z, half}] (half: the
+                       square the storm's power grid wants)
+         trees / cars / signs / parking / plaza / fields / carSlots
+         groundAt(x, z) the walkable surface; terrainAt(x, z) the land only
+         randomPoint(minD, maxD) open dry ground
+       Kept working: arena.hills[0] is the volcano, arena.radius, center,
+       fragile, cars, flammable, randomPoint, onRoad, groundHeightAt. */
+    (function publish() {
+      const P = PLAN;
+      const coast = [];
+      for (let k = 0; k < 128; k++) { const a = k / 128 * Math.PI * 2; coast.push({ x: cx + Math.cos(a) * R, z: cz + Math.sin(a) * R }); }
+      const WALK = CBZ.islandRoadKit && CBZ.islandRoadKit.C ? CBZ.islandRoadKit.C.WALK : 5.5;
+      const pieces = roadPlan ? roadPlan.pieces.map(function (p) {
+        return { vertical: p.vertical, fixed: p.fixed, a: p.a, b: p.b,
+          x0: p.vertical ? p.fixed - WALK : p.a, x1: p.vertical ? p.fixed + WALK : p.b,
+          z0: p.vertical ? p.a : p.fixed - WALK, z1: p.vertical ? p.b : p.fixed + WALK };
+      }) : [];
+      let lanesCache = null;
+      function lanes() {
+        if (lanesCache) return lanesCache;
+        lanesCache = [];
+        // keep right: on an avenue the +x lane runs toward -z; on a cross
+        // street the -z lane runs toward -x (1.75 m off the centre line)
+        for (const p of pieces) {
+          if (p.vertical) {
+            lanesCache.push({ x0: p.fixed + 1.75, z0: p.b, x1: p.fixed + 1.75, z1: p.a, dir: [0, -1] });
+            lanesCache.push({ x0: p.fixed - 1.75, z0: p.a, x1: p.fixed - 1.75, z1: p.b, dir: [0, 1] });
+          } else {
+            lanesCache.push({ x0: p.b, z0: p.fixed - 1.75, x1: p.a, z1: p.fixed - 1.75, dir: [-1, 0] });
+            lanesCache.push({ x0: p.a, z0: p.fixed + 1.75, x1: p.b, z1: p.fixed + 1.75, dir: [1, 0] });
+          }
+        }
+        return lanesCache;
+      }
+      const ghaut = P ? { kind: "ghaut", name: "the Ghaut", pts: P.ghaut.pts.map(function (q) { return { x: q.x, z: q.z }; }),
+        half: P.ghaut.half, bank: P.ghaut.bank, depth: P.ghaut.depth, width: P.ghaut.half * 2 + (P.ghaut.bank - P.ghaut.half) } : null;
+      const districts = P ? P.districts.map(function (d) {
+        return { id: d.id, name: d.name, x0: d.x0, x1: d.x1, z0: Math.max(d.z0, cz - R), z1: Math.min(d.z1, cz + R + 80),
+          x: (Math.max(d.x0, cx - R) + Math.min(d.x1, cx + R)) / 2, z: (Math.max(d.z0, cz - R) + Math.min(d.z1, cz + R + 80)) / 2,
+          half: Math.max(Math.min(d.x1, cx + R) - Math.max(d.x0, cx - R), Math.min(d.z1, cz + R + 80) - Math.max(d.z0, cz - R)) / 2 };
+      }) : [];
+      const I = CBZ.island = {
+        arena: arena, plan: P,
+        bounds: { cx: cx, cz: cz, R: R, x0: cx - R, x1: cx + R, z0: cz - R, z1: P ? Math.max(cz + R, P.harbour.basin.z1) : cz + R, seaR: FAR_WL },
+        coast: coast, beachR: R + BEACH_W * 0.45, shelfR: SHORE_R,
+        coastAt: function () { return R; },
+        buildings: fragile,
+        helipads: fragile.filter(function (b) { return b.helipadCandidate; }),
+        roads: { pieces: pieces, junctions: roadPlan ? roadPlan.junctions.map(function (j) { return { x: j.x, z: j.z, n: j.n, N: j.N, S: j.S, E: j.E, W: j.W }; }) : [],
+          lanes: lanes, bridges: harbourOut.bridges, segs: roadSegs,
+          inStreet: function (r) { return P ? !!P.inStreet(r, 0) : false; }, onRoad: onRoad },
+        harbour: P ? { quay: P.harbour.quay, face: P.harbour.face, basin: P.harbour.basin, breakwater: P.harbour.breakwater,
+          piers: P.harbour.piers, jetties: harbourOut.jetties, lighthouse: P.harbour.light, berths: P.harbour.berths,
+          points: harbourOut.points } : null,
+        boats: harbourOut.boats,
+        volcano: { x: VOL.x, z: VOL.z, r: VOL.r, peak: VOL.peak, rim: VOL.rim, bowl: VOL.bowl, breach: VOL.breach,
+          craterY: VOL.peak - VOL.bowl },
+        hills: hills,
+        riverbeds: ghaut ? [ghaut] : [],
+        rivers: ghaut ? [ghaut] : [],
+        bridges: harbourOut.bridges,
+        manholes: roadNet && roadNet.manholes ? roadNet.manholes : [],
+        streetLights: roadNet && roadNet.lights ? roadNet.lights.map(function (l) { return { x: l.x, z: l.z }; }) : [],
+        // register a function to run when the island is reset between matches
+        onReset: function (fn) { if (typeof fn === "function" && resetHooks.indexOf(fn) < 0) resetHooks.push(fn); return fn; },
+        lowGround: P ? P.lowGround : [],
+        lowAt: function (x, z) { return groundHeightAt(x, z) - OCEAN_Y; },
+        districts: districts,
+        trees: flammable, cars: cars,
+        carSlots: P ? P.cars : [],
+        parking: P ? P.parking.map(function (q) { return { rect: q.rect, name: q.name, bays: q.bays, gy: q.gy }; }) : [],
+        plaza: P ? P.plaza : null, fields: P ? P.fields : [],
+        signs: (islandDress && islandDress.signs) || [],
+        // the lamp materials beyond the street kit's (the storm's power grid
+        // darkens them by district): the lighthouse lens, the square's lanterns
+        powerMaterials: function () {
+          const out = [];
+          if (harbourOut.lens) out.push(harbourOut.lens.material);
+          if (islandDress && islandDress.lensMaterial) out.push(islandDress.lensMaterial);
+          return out;
+        },
+        groundAt: surfaceHeightAt, terrainAt: groundHeightAt,
+        randomPoint: function (a, b) { return arena.randomPoint(a, b); },
+        stats: function () {
+          return { radius: R, buildings: fragile.length, cars: cars.length, trees: flammable.length, boats: harbourOut.boats.length,
+            bake: bakeStats, trees_draws: treeProxy ? treeProxy.stats() : null, cars_draws: carProxy ? carProxy.stats() : null };
+        },
+      };
+      arena.island = I;
+    })();
+
     return arena;
   };
 })();

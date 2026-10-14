@@ -305,7 +305,7 @@
   if (typeof CBZ.CROWD_FACE_DIST !== "number") CBZ.CROWD_FACE_DIST = undefined;
   CBZ.SIM_OVERVIEW_BUDGET = typeof CBZ.SIM_OVERVIEW_BUDGET === "number" ? CBZ.SIM_OVERVIEW_BUDGET : 12000;
   CBZ.SURV = {
-    arena: { cx: 0, cz: 600, radius: 120 }, // far from the prison; own ground+sun
+    arena: { cx: 0, cz: 600, radius: 240 }, // far from the prison; own ground+sun (twice the old 120 m island: world/island_plan.js)
     playerHpRegen: 0,        // no passive regen — disasters are deadly
     sprintMul: 3.2,
     staminaMax: 100,
