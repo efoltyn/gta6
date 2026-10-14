@@ -310,8 +310,9 @@
   // PMREM-prefilter the equirect ONCE into a roughness-aware env texture,
   // shared by every vehicle material.
   let envBuilding = false;
+  let envTex = null;
   function buildVehicleEnv() {
-    if (CBZ.ENV) return CBZ.ENV; // idempotent
+    if (envTex) return envTex; // idempotent
     if (envBuilding) return null;
     if (!THREE || !CBZ.renderer || typeof document === "undefined") return null; // defer — no live renderer yet
     if (!THREE.PMREMGenerator || !THREE.CanvasTexture) return null;
@@ -324,22 +325,21 @@
       const pmrem = new THREE.PMREMGenerator(CBZ.renderer);
       if (pmrem.compileEquirectangularShader) pmrem.compileEquirectangularShader();
       const rt = pmrem.fromEquirectangular(tex); // r128: returns a WebGLRenderTarget
-      CBZ.ENV = rt.texture;
+      envTex = rt.texture;
       tex.dispose();
       pmrem.dispose();
 
       // Bake into scene.environment too (only Standard/Physical mats react,
       // i.e. the vehicle mats — Lambert city is unaffected, by design).
-      if (CBZ.scene && CBZ.scene.environment == null) CBZ.scene.environment = CBZ.ENV;
+      if (CBZ.scene && CBZ.scene.environment == null) CBZ.scene.environment = envTex;
 
       backfillEnv();
     } catch (e) {
       // Never throw out of a foundation module. Leave ENV null; retried later.
-      CBZ.ENV = CBZ.ENV || null;
     } finally {
       envBuilding = false;
     }
-    return CBZ.ENV;
+    return envTex;
   }
 
   // ---- shared material cache (one instance per role; NEVER for 'paint') ----
@@ -1144,21 +1144,21 @@
   CBZ.taperBox = taperBox;
   // CBZ.carPlateMat(i) -> shared plate material i (0..7); no argument cycles.
   CBZ.carPlateMat = carPlateMat;
-  if (CBZ.ENV === undefined) CBZ.ENV = null;
-
-  // Try once at load (renderer usually already exists here).
-  buildVehicleEnv();
+  /* CBZ.ENV IS BUILT ON FIRST READ, NOT AT LOAD. The PMREM bake (a canvas,
+     two shader programs and ~20 render passes) used to run while this script
+     was evaluated: ~2 s of the page's script eval on a cold GPU process
+     (tools/speed.mjs, 2026-10), before the title card could come up, and
+     paid by every mode, carless ones included. Every consumer reads CBZ.ENV
+     (vehicleMat, the plate and glass materials, gfx.js's backfill, the
+     airport/marina/govcomplex Standard materials), so the first read bakes
+     it, synchronously, and gets the same texture the eager bake made: no
+     material is ever created without it that would have had it before. A
+     read with no renderer yet returns null and the next read retries, which
+     is what the old per-frame backstop did. */
+  Object.defineProperty(CBZ, "ENV", {
+    configurable: true, enumerable: true,
+    get: function () { return envTex || buildVehicleEnv(); },
+    set: function (v) { envTex = v || null; },
+  });
   ensureEnvTick();
-
-  // Per-frame backstop: if the renderer wasn't ready at load, build the env on
-  // the first frame it IS, then back-fill, then stop trying. Cheap no-op once
-  // built. Guarded so headless (no onAlways) still loads fine.
-  if (!CBZ.ENV && typeof CBZ.onAlways === "function") {
-    let tries = 0;
-    CBZ.onAlways(1, function () {
-      if (CBZ.ENV) return; // done
-      if (tries++ > 600) return; // give up after ~a few seconds; stay graceful
-      buildVehicleEnv();
-    });
-  }
 })();

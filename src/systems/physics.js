@@ -43,6 +43,10 @@
   const EMPTY_COLS = [];
   const colBuckets = new Map();
   let colCount = -1, colDirty = true;
+  // the collider object at index colCount - 1 when the grid last matched the
+  // array: a plain push leaves it where it was (see gridFresh)
+  let colTail = null;
+  function tailMark() { colTail = colCount > 0 ? CBZ.colliders[colCount - 1] : null; }
 
   function colKey(gx, gz) { return ((gx + COL_OFF) * COL_SPAN + (gz + COL_OFF)) | 0; }   // (int32: a small-integer Map key, never a boxed double)
 
@@ -64,6 +68,7 @@
     }
     colCount = cols.length;
     colDirty = false;
+    tailMark();
     CBZ.colliderBroadphaseStats = { colliders: colCount, buckets: colBuckets.size };
   }
 
@@ -114,7 +119,7 @@
   CBZ.colliderAdd = function (c) {
     const sync = gridInSync();
     CBZ.colliders.push(c);
-    if (sync) { gridInsert(c); colCount++; }
+    if (sync) { gridInsert(c); colCount++; tailMark(); }
     return c;
   };
   // splice one collider out of CBZ.colliders and unindex it. `at` is an
@@ -125,7 +130,7 @@
     if (i < 0) return false;
     const sync = gridInSync();
     cols.splice(i, 1);
-    if (sync) { if (gridRemove(c, cellRange(c))) colCount--; else colDirty = true; }
+    if (sync) { if (gridRemove(c, cellRange(c))) { colCount--; tailMark(); } else colDirty = true; }
     return true;
   };
   /* BULK, FOR THE STREAMER (core/citystream.js). A park took a job's walls
@@ -137,7 +142,7 @@
     if (!list || !list.length) return;
     const sync = gridInSync(), cols = CBZ.colliders;
     for (let i = 0; i < list.length; i++) { cols.push(list[i]); if (sync) gridInsert(list[i]); }
-    if (sync) colCount = cols.length;
+    if (sync) { colCount = cols.length; tailMark(); }
   };
   // `list` may be an array or a Set (a building teardown already holds one).
   CBZ.colliderRemoveMany = function (list) {
@@ -146,7 +151,7 @@
     let w = 0, n = 0;
     for (let i = 0; i < cols.length; i++) { const c = cols[i]; if (drop.has(c)) { n++; if (sync && !gridRemove(c, cellRange(c))) colDirty = true; } else cols[w++] = c; }
     cols.length = w;
-    if (sync && !colDirty) colCount = w;
+    if (sync && !colDirty) { colCount = w; tailMark(); }
     return n;
   };
   // colliders APPENDED since the grid last matched `n0` entries (a streamed
@@ -155,7 +160,7 @@
     const cols = CBZ.colliders;
     if (colCount !== n0 || cols.length < n0) return false;
     for (let i = n0; i < cols.length; i++) gridInsert(cols[i]);
-    colCount = cols.length; colDirty = false;
+    colCount = cols.length; colDirty = false; tailMark();
     return true;
   };
   CBZ.colliderGridInSync = gridInSync;
@@ -187,7 +192,24 @@
     }
   };
 
-  function gridFresh() { if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid(); }
+  /* APPENDED, NOT REBUILT. ~225 call sites push straight onto CBZ.colliders
+     (a parked hull, a streamed job's walls, a door). Each push used to cost
+     the NEXT query a full rebuild of the ~145k-box grid (~20 ms): the fort's
+     fleet parks one hull a frame on arrival, so whoever asked first that
+     frame (the wall-hands probe, systems/verbs_pickup.js) paid ~20 ms a frame
+     for it. A push leaves every indexed entry where it was, so the box at
+     colCount - 1 is still the one we last indexed; then the new tail is
+     filed exactly as a rebuild would file it (appended to its buckets, in
+     array order). A splice shifts that slot and falls back to the rebuild. */
+  function gridFresh() {
+    const cols = CBZ.colliders;
+    if (colDirty || colCount !== cols.length) {
+      if (!colDirty && colCount > 0 && cols.length > colCount && cols[colCount - 1] === colTail) {
+        for (let i = colCount; i < cols.length; i++) gridInsert(cols[i]);
+        colCount = cols.length; tailMark();
+      } else rebuildColliderGrid();
+    }
+  }
 
   // Dedup across grid cells by stamping the collider with the query id — a
   // property compare instead of a Set hash per candidate. Every multi-cell
@@ -231,7 +253,7 @@
   // same collider objects from CBZ.colliders, deduplicated across grid cells.
   // This runs for every steering ped and crowd agent every frame.
   CBZ.queryCollidersNear = function (x, z, radius, out) {
-    if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
+    gridFresh();
     out = out || [];
     out.length = 0;
     const qid = ++colQueryId;
@@ -269,7 +291,7 @@
      hit(c) → true if this collider blocks the segment. `pad` widens the cell
      band and the slab reject (a body radius). Same mode gate as collide(). */
   CBZ.segmentHitsCollider = function (ax, az, bx, bz, pad, hit) {
-    if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
+    gridFresh();
     pad = pad || 0;
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
     const minX = Math.min(ax, bx) - pad, maxX = Math.max(ax, bx) + pad;
@@ -2378,7 +2400,7 @@
      (ON_TOP_EPS), i.e. you jumped or vaulted onto the sofa. Walking into it
      just stops you. */
   function stepTopAt(x, z, feetY) {
-    if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
+    gridFresh();
     const b = colBuckets.get(colKey(Math.floor(x / COL_CELL), Math.floor(z / COL_CELL)));
     if (!b) return -Infinity;
     const cityOn = !CBZ.game || CBZ.game.mode === "city";

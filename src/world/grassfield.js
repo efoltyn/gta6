@@ -111,7 +111,10 @@
       resetOut(out);
       for (let i = 0; i < providers.length; i++) {
         let owned = false;
-        try { owned = providers[i].fn(x, z, out); } catch (e) { owned = false; }
+        // a provider that throws owns nothing, and says so ONCE: a throw per
+        // 25 cm sample is ~27 us of stack capture (the continent's freed
+        // colour array cost ~20 ms a frame downtown, silently)
+        try { owned = providers[i].fn(x, z, out); } catch (e) { owned = false; if (!providers[i].warned) { providers[i].warned = true; console.warn("[grass] cover provider " + providers[i].name + " threw:", e); } }
         if (owned) { out.src = providers[i].name; return true; }
       }
       return false;

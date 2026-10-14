@@ -2074,6 +2074,15 @@
         if (!(fx >= 0 && fz >= 0 && fx < SEG && fz < SEG)) return false;
         if (authoredAt(x, z)) return false;                          // someone else's floor
         out.g = 0;
+        /* The plate is a world surface, so core/citystream.js freeStaticArrays
+           drops its colour array once it is on the GPU. With no colour there
+           is no land use to read: no grass here. This used to throw on the
+           null array instead, and groundCover.at swallowed it: a thrown
+           TypeError (stack and all) per 25 cm sample, ~27 us each, 625 per
+           6 m chunk = the grass field's ~20 ms a frame downtown, for a chunk
+           that came out empty anyway. */
+        const C = cAttr.array;
+        if (!C) return true;
         // THE COAST MEMO, not the raw field: the grass asks this per blade
         // sample as the player drives into new ground, and the raw field walks
         // every river and lake (the drive's largest garbage source after three
@@ -2089,7 +2098,6 @@
         let a, b, c, wa, wb, wc;                                      // the plate's own triangle split
         if (tx + tz <= 1) { a = base; b = base + 1; c = base + ST; wa = 1 - tx - tz; wb = tx; wc = tz; }
         else { a = base + ST + 1; b = base + ST; c = base + 1; wa = tx + tz - 1; wb = 1 - tx; wc = 1 - tz; }
-        const C = cAttr.array;
         const r = C[a * 3] * wa + C[b * 3] * wb + C[c * 3] * wc;
         const g = C[a * 3 + 1] * wa + C[b * 3 + 1] * wb + C[c * 3 + 1] * wc;
         const bl = C[a * 3 + 2] * wa + C[b * 3 + 2] * wb + C[c * 3 + 2] * wc;
