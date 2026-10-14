@@ -830,7 +830,11 @@
   const RATE_SOON_MS = 160;         // ... while something will be in sight within a few seconds
   const FRAME_MIN_MS = 1;           // a frame's share is never less than this
   const FRAME_MAX_MS = 8;           // ... nor more (a 10 fps frame does not take 20 ms of builds)
-  const OUT_MS = 1.5;               // park + free per frame (never urgent: past keep + HYST)
+  // park + free per frame (never urgent: past keep + HYST). At 1.5 ms a frame
+  // a teleport's worth of parks (the phone A/B's spot changes) trickled out
+  // over seconds: the content stood, drawn and in memory, past the keep
+  // circle meanwhile (+30% calls from the aerial spot, +7% drive memory)
+  const OUT_MS = 4;
   let acc = 0;
   const plan = { want: [], wi: 0, out: [], oi: 0, soon: false };
   let stepping = null;              // the job in steps now in flight
