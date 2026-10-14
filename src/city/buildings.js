@@ -3806,7 +3806,21 @@
 
   // ---- the enterable building (one group; switchback stairs to the roof) ----
   // opts: { boarded:bool (board windows instead of glass), grime:bool }
+  /* A DOOR SIDE IS A FACE INDEX: 0 -z (north), 1 +z (south), 2 -x (west),
+     3 +x (east). Callers write it either way (the biome landmarks pass
+     "south" / "north"), and the shell indexes FACES[doorSide]: a word there
+     came back undefined and threw inside FO.door, aborting the landmass
+     builder that raised it (the forest cabin, the desert's station store,
+     diner and ore shed). Anything else falls to 3, as doorInfo always did. */
+  const SIDE_OF = { north: 0, south: 1, west: 2, east: 3 };
+  function sideIndex(s) {
+    if (s === 0 || s === 1 || s === 2 || s === 3) return s;
+    const k = SIDE_OF[String(s).toLowerCase()];
+    return k != null ? k : 3;
+  }
+  CBZ.citySideIndex = sideIndex;
   function makeBuilding(root, ox, oz, w, d, storeys, color, doorSide, opts) {
+    doorSide = sideIndex(doorSide);
     // PER-SHELL STOREY HEIGHT. Every ordinary lot keeps the 3.2 m metre
     // contract; a landmark that is MEANT to be taller per floor (a head of
     // state's residence, whose state rooms stand 4-5 m) passes `opts.fh`.
