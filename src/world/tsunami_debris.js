@@ -62,6 +62,14 @@
        forEachActor(fn)  fn(actor) — actor.pos{x,y,z}, actor.isPlayer, actor.dead
        strike(actor, info)  info {kind, speed, dirX, dirZ, force, damage, cause}
        againstWall(x,z)     optional; true if a body here has a wall behind it
+       flowAt(x,z,out)      optional: the LOCAL water {depth, u, v} (the run-up
+                            field). With it every piece is carried by the
+                            current where it actually is, floats only where
+                            the water is deeper than its draft, grounds where
+                            it is not, and refloats when the water comes back.
+       blockedAt(x,z)       optional: true inside a standing building. A piece
+                            the current drives into a wall stops against it
+                            and the next one stops against that: wrack piles.
      }
      ============================================================ */
   const DEB_RAND = () => Math.random();     // runtime FX only — never a build path
@@ -158,16 +166,38 @@
     rf.push(vcBox(3.5, 0.16, 0.035, 0, -0.03, -1.27, 0xd2cabb));              // fascia
     for (let i = -1; i <= 1; i++) rf.push(vcBox(0.05, 0.14, 2.3, i * 1.3, -0.09, 0.05, 0x8d7652));
     const roof = mergeKit(rf);
+    /* SHIPPING CONTAINER: a 20 ft ISO box (6.06 x 2.59 x 2.44 m) off the
+       quay — corrugated side sheets (alternating proud/recessed bays), the
+       corner posts and rails that carry it, and the door end's four locking
+       bars. Every harbour tsunami frame has them floating in the soup. */
+    const ct = [], L = 6.06, H = 2.59, Wd = 2.44;
+    ct.push(vcBox(L - 0.2, H - 0.24, Wd - 0.12, 0, 0, 0, 0xffffff));
+    for (let i = 0; i < 26; i++) {
+      const x = -L / 2 + 0.2 + (i + 0.5) * ((L - 0.4) / 26);
+      if (i % 2) continue;
+      ct.push(vcBox((L - 0.4) / 26 * 0.9, H - 0.36, 0.05, x, 0, (Wd - 0.12) / 2 + 0.02, 0xf2f2f2));
+      ct.push(vcBox((L - 0.4) / 26 * 0.9, H - 0.36, 0.05, x, 0, -(Wd - 0.12) / 2 - 0.02, 0xf2f2f2));
+    }
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) ct.push(vcBox(0.16, H, 0.16, sx * (L / 2 - 0.08), 0, sz * (Wd / 2 - 0.08), 0xd8d8d8));
+    for (const sy of [-1, 1]) for (const sz of [-1, 1]) ct.push(vcBox(L, 0.14, 0.12, 0, sy * (H / 2 - 0.07), sz * (Wd / 2 - 0.06), 0xd8d8d8));
+    for (let i = 0; i < 4; i++) ct.push(vcBox(0.05, H - 0.3, 0.05, L / 2 + 0.03, 0, -Wd / 2 + 0.35 + i * ((Wd - 0.7) / 3), 0x9a9a9a));
+    const container = mergeKit(ct);
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     mat.name = "tsunami churn debris";
-    churnKit = { board: board, pallet: pallet, roof: roof, mat: mat };
+    churnKit = { board: board, pallet: pallet, roof: roof, container: container, mat: mat };
     return churnKit;
   }
   const BOARD_TINTS = [0xc9a877, 0xb8966a, 0x8f8272, 0xd8d2c4, 0x7d9bb0, 0xa06b4a];
   const PALLET_TINTS = [0xffffff, 0xe6e0d6, 0xcfc4b0];
   const ROOF_TINTS = [0xffffff, 0xd9d2cc];
+  const CONTAINER_TINTS = [0x9b2f22, 0x2b4f7a, 0x2f6b43, 0x8a5a2b, 0xb9b3a6, 0x6e3324];
 
   CBZ.tsuChurnPose = churnPose;     // pure; exported for checks
+  /* THE DRAFTS, published: the water a thing needs under it to float. The
+     island director lifts a parked car into the field at exactly this depth
+     (and the lab kit `tsunami` does the same), so "when does a car float"
+     is one number. Must match CLASS below. */
+  CBZ.tsuDebrisDraft = { car: 0.55, log: 0.30, panel: 0.12, rubble: 0.90, boat: 0.35, container: 1.30 };
 
   CBZ.tsuDebrisField = function (cfg) {
     cfg = cfg || {};
@@ -183,12 +213,25 @@
        are BEHAVIOUR, never geometry: `log` is a real uprooted tree, `panel` a
        wall off a real building, `rubble` a chunk of one. What each looks like
        is whatever the world object the caller handed over looks like.        */
+    /* draft: metres of water it needs to float (a car lifts at ~0.6 m, an
+       empty steel box at ~1.3, a dinghy at a hand's depth over its keel).
+       relax: how fast it takes up the water's velocity (1/s; a log is
+       carried at once, two tonnes of car lag the current). size: its half
+       length, for piling against walls and against each other. upright:
+       hulls float the right way up and weathercock; everything else tumbles. */
+    const D = CBZ.tsuDebrisDraft;
     const CLASS = {
-      car:    { drift: 0.78, hitR: 2.5, dmg: 92, force: 17, sink: 0.55, spin: 1.5 },
-      log:    { drift: 0.94, hitR: 1.9, dmg: 44, force: 11, sink: 0.18, spin: 3.0 },
-      panel:  { drift: 1.00, hitR: 1.5, dmg: 26, force: 8,  sink: 0.10, spin: 3.6 },
-      rubble: { drift: 0.70, hitR: 1.1, dmg: 34, force: 9,  sink: 0.35, spin: 4.2 },
+      car:       { drift: 0.85, hitR: 2.5, dmg: 92,  force: 17, sink: 0.55, spin: 1.5, draft: D.car, relax: 1.5, size: 2.2 },
+      log:       { drift: 0.95, hitR: 1.9, dmg: 44,  force: 11, sink: 0.18, spin: 3.0, draft: D.log, relax: 2.6, size: 2.6 },
+      panel:     { drift: 1.00, hitR: 1.5, dmg: 26,  force: 8,  sink: 0.10, spin: 3.6, draft: D.panel, relax: 3.2, size: 1.4 },
+      rubble:    { drift: 0.70, hitR: 1.1, dmg: 34,  force: 9,  sink: 0.35, spin: 4.2, draft: D.rubble, relax: 1.0, size: 0.9 },
+      boat:      { drift: 0.95, hitR: 2.3, dmg: 60,  force: 14, sink: 0.12, spin: 0.7, draft: D.boat, relax: 1.9, size: 2.0, upright: true },
+      container: { drift: 0.80, hitR: 3.3, dmg: 120, force: 24, sink: 1.00, spin: 0.45, draft: D.container, relax: 0.8, size: 3.2 },
     };
+    const flowAt = typeof cfg.flowAt === "function" ? cfg.flowAt : null;
+    const blockedAt = typeof cfg.blockedAt === "function" ? cfg.blockedAt : null;
+    const _fl = {};
+    let carried = 0, piled = 0;
 
     function add(obj, x, z, kind, opts) {
       opts = opts || {};
@@ -201,6 +244,7 @@
         lat: (DEB_RAND() - 0.5) * 0.9,
         stranded: false, hitCd: 0, onStrand: opts.onStrand || null, dispose: !!opts.dispose,
         inst: opts.inst || null, churn: opts.churn || null,
+        vx: 0, vz: 0, x0: x, z0: z, travel: 0, floated: false, piled: false, carried: false, stackY: 0,
       };
       items.push(it); entrained++;
       return it;
@@ -246,6 +290,110 @@
       });
     }
 
+    /* ---- CARRIED BY THE WATER WHERE IT IS (cfg.flowAt) ------------------
+       The run-up field's local current, not one heading for the island:
+       a car in a street goes where that street's water goes, swings round
+       the corner with it, and comes back down it on the backwash. */
+    function stackAt(it) {
+      // a grounded piece lands ON whatever already grounded under it
+      let top = 0;
+      for (let k = 0; k < items.length; k++) {
+        const o = items[k];
+        if (o === it || !o.obj || !o.stranded || o.churn) continue;
+        const r = (o.cls.size + it.cls.size) * 0.45;
+        const dx = o.x - it.x, dz = o.z - it.z;
+        if (dx * dx + dz * dz > r * r) continue;
+        const t = o.stackY + (o.cls.sink * 2 + 0.35);
+        if (t > top) top = t;
+      }
+      return Math.min(3.2, top);
+    }
+    function flowStep(it, i, dt) {
+      const c = it.cls;
+      const w = flowAt(it.x, it.z, _fl);
+      const depth = w && Number.isFinite(w.depth) ? w.depth : 0;
+      if (it.hitCd > 0) it.hitCd -= dt;
+      const floats = depth >= c.draft;
+      if (floats) {
+        // it takes up the current at its own rate (inertia), and keeps a
+        // little of its own sideways drift so a raft of wreckage spreads
+        const k = Math.min(1, dt * c.relax);
+        it.vx += ((w.u || 0) * c.drift - it.vx) * k;
+        it.vz += ((w.v || 0) * c.drift - it.vz) * k;
+        if (!it.floated) { it.floated = true; it.stranded = false; }
+        it.stranded = false;
+      } else {
+        // GROUNDED: the bottom takes its speed off in a second; a strong
+        // enough current still shoves it along the street (a car dragged on
+        // its wheels), anything less and it stays where the water left it
+        const push = depth > c.draft * 0.5 ? depth * ((w.u || 0) * (w.u || 0) + (w.v || 0) * (w.v || 0)) : 0;
+        const k = Math.min(1, dt * 3.5);
+        if (push > 6 * c.draft) {
+          it.vx += ((w.u || 0) * 0.35 - it.vx) * k; it.vz += ((w.v || 0) * 0.35 - it.vz) * k;
+        } else { it.vx -= it.vx * k; it.vz -= it.vz * k; }
+      }
+      const sp = Math.hypot(it.vx, it.vz);
+      if (sp > 0.02) {
+        let nx = it.x + it.vx * dt, nz = it.z + it.vz * dt;
+        // THE PILE: a wall stops it, and a piece already stopped at the wall
+        // stops the next one (their footprints, not a grid)
+        if (blockedAt) {
+          const lead = c.size * 0.55 / sp;
+          const hx = blockedAt(it.x + it.vx * (dt + lead), it.z);
+          const hz = blockedAt(it.x, it.z + it.vz * (dt + lead));
+          if (hx) { nx = it.x; it.vx *= -0.08; }
+          if (hz) { nz = it.z; it.vz *= -0.08; }
+          if ((hx || hz) && !it.piled) { it.piled = true; piled++; }
+        }
+        const moved = Math.hypot(nx - it.x, nz - it.z);
+        it.x = nx; it.z = nz;
+        it.travel += moved;
+        if (!it.carried && floats && Math.hypot(it.x - it.x0, it.z - it.z0) > 3) { it.carried = true; carried++; }
+      }
+      const gnd = groundY(it.x, it.z);
+      if (!floats) {
+        if (!it.stranded) {
+          it.stranded = true;
+          it.stackY = stackAt(it);
+          // a hull comes to rest on its bilge, a car on whatever side it was
+          if (c.upright) it.roll = (it.ph > 3.14 ? 1 : -1) * (0.35 + 0.25 * (it.ph % 1));
+          if (it.onStrand) { try { it.onStrand(it); } catch (e) {} }
+        }
+        // never lifted yet (a boat still lying where the drawdown left it):
+        // exactly where it lies; otherwise it settles onto the ground or the pile
+        const ty = gnd + 0.22 + it.stackY, y = it.obj.position.y;
+        it.obj.position.set(it.x, !it.floated && it.y0 != null ? it.y0 : y > ty ? Math.max(ty, y - dt * 4) : ty, it.z);
+        it.obj.rotation.set(it.pitch, it.yaw, it.roll);
+        sync(it);
+        return;
+      }
+      it.stackY = 0;
+      const surf = seaY(it.x, it.z);
+      const bob = Math.sin((CBZ.now || 0) * 0.005 + it.ph) * (c.upright ? 0.12 : 0.22);
+      it.obj.position.set(it.x, Math.max(gnd + 0.1, surf - c.sink + bob), it.z);
+      if (c.upright) {
+        // a hull rights itself and weathercocks into the current
+        const k = Math.min(1, dt * 1.6);
+        it.pitch += (Math.sin((CBZ.now || 0) * 0.0021 + it.ph) * 0.06 - it.pitch) * k;
+        it.roll += (Math.sin((CBZ.now || 0) * 0.0017 + it.ph * 2) * 0.09 - it.roll) * k;
+        if (sp > 0.3) {
+          let dy = Math.atan2(it.vx, it.vz) - it.yaw;
+          dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+          it.yaw += dy * Math.min(1, dt * 0.9);
+        }
+      } else {
+        // TUMBLING, not floating: the rate follows the water's speed
+        const tumble = Math.min(2.4, sp * 0.34) * c.spin * dt;
+        it.yaw += it.sy * tumble;
+        it.pitch += it.sx * tumble * 0.55;
+        it.roll += it.sz * tumble * 0.7;
+      }
+      it.obj.rotation.set(it.pitch, it.yaw, it.roll);
+      sync(it);
+      if (checkPhase !== (i % 3) || it.hitCd > 0 || sp < 1.3) return;
+      ram(it, i, sp, it.vx / sp, it.vz / sp, 1);
+    }
+
     return {
       /* ENTRAIN A REAL WORLD OBJECT. The caller has already taken it out of
          whatever system owned it (pulled its collider, marked the record dead)
@@ -263,6 +411,7 @@
         if (obj.parent !== root) root.attach(obj);
         const it = add(obj, wp.x, wp.z, kind, opts);
         it.yaw = obj.rotation.y; it.pitch = obj.rotation.x; it.roll = obj.rotation.z;
+        it.y0 = obj.position.y;
         return it;
       },
 
@@ -299,7 +448,11 @@
             const posed = it.churn.posed;
             it.churn = null; churnLive--;
             if (!posed) { if (!it.inst) it.obj.visible = false; it.obj = null; continue; }
+            // from here it is ordinary wreckage, moving at the toe's speed
+            it.x0 = it.x; it.z0 = it.z; it.floated = true;
+            if (F) { const fv = Math.min(7, Math.abs(F.v || 0) * 0.5); it.vx = F.dx * fv; it.vz = F.dz * fv; }
           }
+          if (flowAt) { flowStep(it, i, dt); continue; }
           const surf = seaY(it.x, it.z), gnd = groundY(it.x, it.z);
           const depth = surf - gnd;
           if (it.hitCd > 0) it.hitCd -= dt;
@@ -384,10 +537,13 @@
         const nB = opts.nBoards != null ? opts.nBoards : 14;
         const nP = opts.nPallets != null ? opts.nPallets : 7;
         const nR = opts.nRoofs != null ? opts.nRoofs : 3;
+        const nK = opts.nContainers != null ? opts.nContainers : 3;
         const mB = batch(K.board, nB, BOARD_TINTS), mP = batch(K.pallet, nP, PALLET_TINTS), mR = batch(K.roof, nR, ROOF_TINTS);
+        const mK = batch(K.container, nK, CONTAINER_TINTS);
         for (let i = 0; i < nB; i++) place(new THREE.Object3D(), "panel", { mesh: mB, i: i });
         for (let i = 0; i < nP; i++) place(new THREE.Object3D(), "panel", { mesh: mP, i: i });
         for (let i = 0; i < nR; i++) place(new THREE.Object3D(), "panel", { mesh: mR, i: i });
+        for (let i = 0; i < nK; i++) place(new THREE.Object3D(), "container", { mesh: mK, i: i });
         const tpl = (opts.cars || []).filter(function (t) { return t && t.geometry && t.material; });
         const nC = tpl.length ? (opts.nCars != null ? opts.nCars : 6) : 0;
         for (let i = 0; i < nC; i++) {
@@ -419,7 +575,24 @@
         }
       },
       count() { return items.length; },
-      stats() { return { entrained: entrained, strikes: strikes, kills: kills, live: items.length, churn: churnLive, churnMeshes: churnMeshes.length }; },
+      stats() {
+        let maxTravel = 0, floating = 0, grounded = 0, cars = 0, boats = 0, moved = 0;
+        const byKind = {};
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i]; if (!it.obj || it.churn) continue;
+          const d = Math.hypot(it.x - it.x0, it.z - it.z0);
+          if (d > 1) moved++;
+          if (it.travel > maxTravel) maxTravel = it.travel;
+          if (it.stranded) grounded++; else floating++;
+          if (it.carried && it.kind === "car") cars++;
+          if (it.carried && it.kind === "boat") boats++;
+          byKind[it.kind] = (byKind[it.kind] || 0) + 1;
+        }
+        return { entrained: entrained, strikes: strikes, kills: kills, live: items.length, churn: churnLive, churnMeshes: churnMeshes.length,
+          moved: moved, carried: carried, carsCarried: cars, boatsCarried: boats, piled: piled, floating: floating, grounded: grounded,
+          maxTravelM: Math.round(maxTravel * 10) / 10, byKind: byKind };
+      },
+      items: function () { return items; },
       /* Drops the field's TRACKING, not the world. Everything entrained was a
          real object, and a real object stranded by the drain is aftermath —
          it stays exactly where the water left it, owned again by the scene it

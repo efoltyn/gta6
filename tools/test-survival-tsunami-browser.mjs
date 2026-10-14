@@ -186,7 +186,10 @@ try {
   if (!(warning.audit?.oceanGrid?.segments >= 64)) failures.push("arena ocean remained an unsegmented plane");
   if (middle.audit?.phase !== "sweep") failures.push(`middle phase was ${middle.audit?.phase}`);
   if (middle.audit?.eventOwner !== "survival-tsunami") failures.push("shared water event owner was missing");
-  if (middle.audit?.aheadWet !== false || middle.audit?.behindWet !== true) failures.push("directional wet field was not dry ahead / wet behind");
+  // 2026-10-14: on the land the water is the run-up field's (world/tsunami_runup.js),
+  // so "wet" follows the ground and the flow, not a ruled line 14 m either side of
+  // the front: assert the field is attached and has water on the land instead
+  if (middle.audit?.runupAttached !== true || !(middle.audit?.runup?.wetCellsNow > 0)) failures.push("the run-up field was not attached with water on the land mid-sweep");
   if (middle.audit?.floodMode !== "shared-disaster-fresnel") failures.push(`flood surface used ${middle.audit?.floodMode}`);
   if (middle.audit?.floodIsOcean !== true) failures.push("the flooding surface was not the arena ocean");
   if (!middle.audit?.waveAnimated) failures.push("curling front did not expose animated vertex state");
