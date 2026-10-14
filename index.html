@@ -443,7 +443,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=leave1014"></script>
+<script src="src/config.js?v=island240"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=peak1014c"></script>
@@ -1059,9 +1059,15 @@ document.body.appendChild(b);}}catch(e){}})();
      old fireball fallback was deleted 2026-09-28). Needs only config.js +
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
-<script src="src/world/island_roads.js?v=roads1"></script>
-<script src="src/world/disaster_arena.js?v=nostep1013"></script>
-<script src="src/world/island_dressing.js?v=dress1"></script>
+<!-- THE DISASTER ISLAND: the plan (world/island_plan.js: terrain, harbour,
+     streets, lots, cars, boats as data, node-checkable by tools/island-check.mjs),
+     the street kit it lays with, the instanced draw of the island's trees and
+     parked cars (world/instance_proxy.js), the builder, and the dressing. -->
+<script src="src/world/island_roads.js?v=roads2town"></script>
+<script src="src/world/island_plan.js?v=plan1"></script>
+<script src="src/world/instance_proxy.js?v=proxy1"></script>
+<script src="src/world/disaster_arena.js?v=island2x"></script>
+<script src="src/world/island_dressing.js?v=dress2town"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
 <script src="src/modes/survival.js?v=noring1013"></script>

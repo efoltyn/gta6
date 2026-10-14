@@ -33,7 +33,8 @@ try {
   const ok = await pg.evl("__lab.ready");
   if (!ok) { console.log(JSON.stringify(await pg.evl("__lab.boot"), null, 1)); process.exit(2); }
   await pg.evl(`__lab.runTo(${+arg("--at", 0)})`);
-  const body = arg("--js", "return __lab.state()");
+  // --js-file F: the body from a file (a long probe, or one a shell would mangle)
+  const body = arg("--js-file", null) ? readFileSync(arg("--js-file"), "utf8") : arg("--js", "return __lab.state()");
   const r = await pg.evl(`(function(){ const W = __lab.W; ${body} })()`);
   console.log(JSON.stringify(r, null, 1));
   if (pg.errors.length) console.log("page errors:", pg.errors.slice(0, 6));
