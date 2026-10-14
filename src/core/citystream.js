@@ -177,8 +177,11 @@
      at the edge of the keep circle with its near edge already inside the view
      (a pop, measured on the drive). So a job is wanted, and counted in view,
      by its rect grown by its SPILL: measured when it settles (its objects'
-     bounds past the rect, +10 m), SPILL_UNKNOWN until it has been built. */
-  const SPILL_UNKNOWN = 60;
+     bounds past the rect, +10 m), and used from its next run on. */
+  /* (a job never built is wanted by its rect alone: a blanket 60 m for every
+     unbuilt job built ~20% more in the air and cost 4% of the phone's drive
+     heap in the paired A/B; the measured spill pads the job's next run) */
+  const SPILL_UNKNOWN = 0;
   function spillOf(j) { return j.spill != null ? j.spill : SPILL_UNKNOWN; }
   const _sb = window.THREE ? new window.THREE.Box3() : null, _gb = window.THREE ? new window.THREE.Box3() : null;
   function measureSpill(job) {
@@ -295,20 +298,39 @@
     if (job.stepI == null) {
       if (job.data) { for (const d of job.data) dropItems(d.arr, d.items); job.data = null; }
       job.stepI = 0; job.state = "building"; job.ms = 0;
-      job._acc = { ms: 0, bus: [], data: [], hooks: [], objs: [], cols: [], plats: [] };
+      job._acc = { ms: 0, bus: [], data: [], hooks: [], objs: [], cols: [], plats: [], los: [] };
     }
     const A = job._acc;
     const first = job.stepI === 0, last = job.stepI === job.steps.length - 1;
     // the last step: the held parts rejoin the scene first, so the one pool
     // flush at its end (glass, deco, trim, masonry for every part: one set of
     // pools for the job, as a one-piece job gets) finds them under the root
-    if (last) for (const it of A.objs) if (it.parent && !it.o.parent) it.parent.add(it.o);
+    if (last) {
+      for (const it of A.objs) if (it.parent && !it.o.parent) it.parent.add(it.o);
+      if (A.los.length && CBZ.losBlockers) for (const m of A.los) CBZ.losBlockers.push(m);
+      A.los.length = 0;
+    }
+    const L = CBZ.losBlockers, l0 = L ? L.length : 0;
     const R = capture(job, job.steps[job.stepI++], { noPre: !first, noPost: !last });
     A.ms += R.ms; job.ms = A.ms;
     for (const k of ["bus", "data", "hooks", "objs", "cols", "plats"]) for (const it of R[k]) A[k].push(it);
     if (!last) {
       // held out of the scene until the job is whole
       for (const it of R.objs) if (it.o.parent === it.parent) it.parent.remove(it.o);
+      /* ... and out of the LOS list: a held part's world matrices were never
+         computed (it has not been under the scene for a render), so a ray
+         (a bullet, the camera boom, AI sight) tested it at identity, its
+         walls standing at their LOCAL coordinates round the world origin */
+      if (L && L.length > l0 && R.objs.length) {
+        const tops = new Set(); for (const it of R.objs) tops.add(it.o);
+        let w = l0;
+        for (let i = l0; i < L.length; i++) {
+          const m = L[i]; let p = m, mine = false;
+          while (p) { if (tops.has(p)) { mine = true; break; } p = p.parent; }
+          if (mine) A.los.push(m); else L[w++] = m;
+        }
+        L.length = w;
+      }
       return false;
     }
     job.stepI = null; job._acc = null;
@@ -549,7 +571,7 @@
   function childrenOf(job) { const out = []; for (const j of jobs) if (j.parent === job) out.push(j); return out; }
   function freeJob(job) {
     // a job in steps caught half-built: what it made so far is its to free
-    if (job.state === "building" && job._acc) { const A = job._acc; job.stepI = null; job._acc = null; adoptCapture(job, A); }
+    if (job.state === "building" && job._acc) { const A = job._acc; job.stepI = null; job._acc = null; A.los = null; adoptCapture(job, A); }
     // its children first (built ones are freed; queued ones simply leave: the
     // parent's next run queues them again)
     const kids = childrenOf(job);
