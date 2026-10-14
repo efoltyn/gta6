@@ -1480,7 +1480,7 @@
     // CITY DRIVING: a high GTA-style chase — well BEHIND and ABOVE the car,
     // looking down the road ahead — so you read the whole car, not the hood.
     // (Yaw is auto-steered behind the car by city/vehicles.js.)
-    if (CBZ.game.mode === "city" && player.driving && !player.dead) {
+    if ((CBZ.vehicleModeOn ? CBZ.vehicleModeOn() : CBZ.game.mode === "city") && player.driving && !player.dead) {
       introT = 0; prev.copy(player.pos);
       // THE DRIVER'S SEAT (CAR_FP_VIEW, city/view.js). A car's first-person
       // view is a POSITION INSIDE THIS BRANCH, not a competing writer: view.js

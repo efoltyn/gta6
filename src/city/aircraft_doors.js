@@ -43,7 +43,8 @@
   if (CBZ.CONFIG && CBZ.CONFIG.AIRCRAFT_DOOR_SKIP_WHEN_ABOARD == null) CBZ.CONFIG.AIRCRAFT_DOOR_SKIP_WHEN_ABOARD = true;
 
   function enabled() { return !CBZ.CONFIG || CBZ.CONFIG.AIRCRAFT_DOOR_ARC !== false; }
-  function inCity() { return CBZ.game && CBZ.game.mode === "city"; }
+  // any vehicle world (config.js CBZ.VEHICLE_MODES), not only Gang City
+  function inCity() { return !!(CBZ.game && (CBZ.vehicleModeOn ? CBZ.vehicleModeOn(CBZ.game.mode) : CBZ.game.mode === "city")); }
 
   let arc = null;          // the one live arc, or null
 
