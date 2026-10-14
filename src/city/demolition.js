@@ -245,7 +245,12 @@
     // worse bug than an under-detailed one.
     const detailed = ledger.size <= RUBBLE_DETAIL_CAP;
     rec.rubbleDetailed = detailed;
-    if (CBZ.debris) {
+    // a building that came down through city/collapse.js is ALREADY lying on
+    // its lot as its own chunks (kept under this same lot key): no stand-in
+    // mound on top of it. The mound is for a lot that never fell on screen
+    // (a save, a net replay, a collapse over the concurrency cap).
+    const fell = !!(CBZ.collapse && CBZ.collapse.leftRubble && CBZ.collapse.leftRubble(rec.k));
+    if (CBZ.debris && !fell) {
       try {
         CBZ.debris.pile({
           x: b.ox, z: b.oz, w: W, d: Dp, h: detailed ? peak : Math.min(1.4, peak * 0.45),
@@ -758,6 +763,9 @@
     b._tornDown = false;             // its colliders/platforms/LOS are re-seated below
     if (CBZ.stairs) CBZ.stairs.setOwnerActive(b, true);
     restoreAir(b);             // the rebuild calendar gives the pad/hangar back
+    // whatever of the cut building still stood goes, and the pooled trim and
+    // veneer the cut took over come back with the shell
+    if (CBZ.collapse && CBZ.collapse.forget) { try { CBZ.collapse.forget(b); } catch (e) {} }
     if (CBZ.batchShowGroup) CBZ.batchShowGroup(b.group);
     b.group.visible = true;
     /* RE-SEAT (DEMO_FAST_PURGE). The mirror of destroy()'s disease: this used

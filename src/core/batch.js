@@ -384,6 +384,11 @@
     }
     return n;
   };
+  /* The merged ranges a top group owns (read-only): city/collapse.js reads a
+     building's inert deco back out of the shared buffers when it cuts the
+     building into structural chunks (the deco no longer exists as meshes in
+     the group once it is merged here). */
+  CBZ.batchRangesOf = function (top) { return groupRanges.get(top) || null; };
   CBZ.batchShowGroup = function (top) {
     const arr = groupRanges.get(top);
     if (!arr) return 0;

@@ -84,6 +84,8 @@
    SHARED WITH EVERY LOOSE BODY (see below): CBZ.PHYS gravities and
    CBZ.looseContact (swept segment vs colliders, pushOut, ground).
      pile(o) / adopt(obj, o)      settled rubble mound / hand a whole part to the sim
+     bake(obj, o)                 settle a whole part where it lies, straight into the merged rubble
+     keep(obj, o)                 keep a big settled object AS rubble where it lies, with the caller's fitted colliders (o.cols)
                                   (o.whole "all": a multi-mesh part as ONE body)
      chunkGeo(i)                  shared irregular chunk geometry for authored scenery rubble
      stats()                      live/static/grit counts for audits
@@ -1887,10 +1889,12 @@
       if (!comps.length) return out;
       const coreSlot = mats.length;               // virtual slot: the inside
       const power = Math.max(0.2, Math.min(3, o.power == null ? 1 : o.power));
-      let budget = Math.min(o.maxPieces || PER_CALL_CAP, PER_CALL_CAP);
+      // (a settle never joins the live sim, so it neither spends the live cap
+      // nor is held to the per-call burst: every part it hands over is baked)
+      let budget = o.settle ? 256 : Math.min(o.maxPieces || PER_CALL_CAP, PER_CALL_CAP);
       // live cap: make room by freezing the oldest pieces (resting ones first)
       const room = LIVE_CAP - live.length;
-      if (room < budget) makeRoom(budget - room);
+      if (!o.settle && room < budget) makeRoom(budget - room);
       // volume per component decides who gets the budget
       for (const c of comps) {
         const b = soupBounds(c.t); c.b = b;
@@ -1970,7 +1974,7 @@
         if (!piece) continue;
         piece.mesh.castShadow = !PHONE && cell.V > 0.004;
         piece.mesh.receiveShadow = true;
-        if ((cell.stump && o.anchorStump !== false) || cell.keep) {
+        if ((cell.stump && o.anchorStump !== false) || cell.keep || o.settle) {
           // the base of a snapped pole stays planted: straight to rubble
           const body = addBody(piece, o, k, c.kind, cell.V);
           if (body) { live.splice(live.indexOf(body), 1); body.anchored = true; freeze(body); frozenPending.push(body); }
@@ -2212,7 +2216,65 @@
   }
   if (CBZ.onUpdate) CBZ.onUpdate(62, update);
 
+  /* ---- KEPT RUBBLE: a whole settled object that is already rubble ---------
+     A falling block of a building (city/collapse.js) comes to rest as a
+     merged mesh of thousands of triangles. Copying it into a cell bucket
+     (freeze) would re-merge the whole 16 m cell around it every time, and its
+     one bounding box would be the size of the block: a 17 m solid filling a
+     sinkhole and lifting whoever stood in it. So it is KEPT as it lies: the
+     object stays in the scene as static rubble, its solids are the colliders
+     the caller fitted to its real pieces (never one big box), and the
+     height-field learns their tops so the next piece piles on them. It lives
+     and dies with its owner exactly as frozen pieces do (clear, clearNear,
+     reset). */
+  const kept = [];
+  function keep(obj, o) {
+    o = o || {};
+    if (!obj) return null;
+    obj.updateMatrixWorld(true);
+    obj.traverse(function (m) {
+      m.matrixAutoUpdate = false; m.updateMatrix();
+      if (m.isMesh) { m.userData.debrisRubble = true; m.castShadow = !PHONE && !TABLET; m.receiveShadow = true; }
+    });
+    obj.updateMatrixWorld(true);
+    if (!obj.parent && CBZ.scene) CBZ.scene.add(obj);
+    const e = obj.matrixWorld.elements;
+    const rec = { obj: obj, owner: o.owner || null, x: e[12], z: e[14], cols: [], perm: !!o.permanent };
+    for (const c of o.cols || []) {
+      if (!c || !(c.maxX > c.minX) || !(c.maxZ > c.minZ)) continue;
+      c.debris = true; c.noBreach = true; c.debrisOwner = rec.owner;
+      try { if (CBZ.colliderAdd) CBZ.colliderAdd(c); else if (CBZ.colliders) CBZ.colliders.push(c); } catch (err) {}
+      rec.cols.push(c);
+      // the next piece lands on its top
+      if (c.y1 != null && isFinite(c.y1)) {
+        for (let gx = Math.floor(c.minX / HF); gx <= Math.floor(c.maxX / HF); gx++) {
+          for (let gz = Math.floor(c.minZ / HF); gz <= Math.floor(c.maxZ / HF); gz++) {
+            const k = gx * 73856093 ^ gz * 19349663, h = hf.get(k);
+            if (h == null || c.y1 > h) hf.set(k, c.y1);
+            if (rec.owner) ownKey(rec.owner, k);
+          }
+        }
+      }
+    }
+    kept.push(rec);
+    return rec;
+  }
+  function dropKept(test) {
+    let n = 0;
+    for (let i = kept.length - 1; i >= 0; i--) {
+      const r = kept[i];
+      if (!test(r)) continue;
+      kept.splice(i, 1);
+      if (r.obj.parent) r.obj.parent.remove(r.obj);
+      r.obj.traverse(function (m) { if (m.isMesh && m.geometry && !m.geometry._shared) m.geometry.dispose(); });
+      if (r.cols.length) removeCols(r.cols);
+      n++;
+    }
+    return n;
+  }
+
   function clear(owner) {
+    dropKept(function (r) { return owner == null || r.owner === owner; });
     for (let i = live.length - 1; i >= 0; i--) {
       const b = live[i];
       if (owner != null && b.owner !== owner) continue;
@@ -2262,7 +2324,7 @@
      grit, colliders and the height-field under them. A crew clearing a lot. */
   function clearNear(x, z, r) {
     const r2 = r * r, inR = (px, pz) => (px - x) * (px - x) + (pz - z) * (pz - z) <= r2;
-    let n = 0;
+    let n = dropKept(function (k) { return inR(k.x, k.z); });
     for (let i = live.length - 1; i >= 0; i--) {
       const b = live[i], p = b.mesh.position;
       if (!inR(p.x, p.z)) continue;
@@ -2343,6 +2405,12 @@
     // hand an existing part (a door, a bumper, a lamp head) to the rigid-body
     // sim whole: its own geometry becomes the body, the original is hidden
     adopt: (obj, o) => shatter(obj, Object.assign({ whole: "one", launch: false, grit: false, dust: false }, o || {})),
+    // SETTLE an existing part where it lies: its own geometry is baked
+    // straight into the merged static rubble (one draw per material per
+    // cell, a solid box, the height-field raised so the next piece piles on
+    // it), exactly as a live piece is when it comes to rest. city/collapse.js
+    // hands every structural chunk that has stopped moving here.
+    bake: (obj, o) => shatter(obj, Object.assign({ whole: "one", launch: false, grit: false, dust: false, settle: true }, o || {})),
     pile,
     /* A shared irregular broken-chunk geometry (~1 m across, convex, cut by
        the same clipper) for SCENERY rubble authored at build time — a
@@ -2364,12 +2432,13 @@
     impulse,
     update,
     KINDS,
+    keep,
     stats() {
       let tris = 0; for (const bk of buckets.values()) for (const q of bk.parts) tris += q.p.length / 9;
       let gritLive = 0; if (grit) for (const v of grit.variants) for (const s of v.slots) if (s) gritLive++;
       let dustLive = 0; if (dustSys) for (const m of dustSys.motes) if (m) dustLive++;
       let asleep = 0; for (const b of live) if (b.asleep) asleep++;
-      return { live: live.length, asleep, static: staticCount, buckets: buckets.size, staticTris: tris, grit: gritLive, dust: dustLive,
+      return { live: live.length, asleep, static: staticCount, kept: kept.length, buckets: buckets.size, staticTris: tris, grit: gritLive, dust: dustLive,
         caps: { live: LIVE_CAP, static: STATIC_CAP, grit: GRIT_CAP, perCall: PER_CALL_CAP }, device: DEVICE };
     },
     // test hooks (node checks drive the fracture without a scene)
