@@ -610,7 +610,10 @@ S.tqCollect = function(timeoutMs){ var T = S.tq; return new Promise(function(res
 /* PIXELS for the look guard: the finished frame as the game drew it (same
    task as the render, so the drawing buffer is still intact). */
 S.grab = function(gl){ var w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * h * 4);
-  try { gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); S.shot = { w: w, h: h, px: px }; } catch (_) { S.shot = null; } };
+  try { gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); S.shot = { w: w, h: h, px: px }; } catch (_) { S.shot = null; }
+  /* the camera the shot was taken with: a look difference that is the CAMERA
+     (a lens eased to another fov, a boom settled elsewhere) is not content */
+  try { var cm = window.CBZ.camera; if (S.shot && cm) S.shot.cam = { p: [cm.position.x, cm.position.y, cm.position.z], q: [cm.quaternion.x, cm.quaternion.y, cm.quaternion.z, cm.quaternion.w], fov: cm.fov }; } catch (_) {} };
 function b64(u){ var s = "", CH = 0x8000; for (var i = 0; i < u.length; i += CH) s += String.fromCharCode.apply(null, u.subarray(i, i + CH)); return btoa(s); }
 S.shotOut = function(){ var s = S.shot; if (!s) return null; S.shot = null;
   var w = s.w, h = s.h, px = s.px, k = (w * h > 2.6e6) ? 2 : 1, lw = Math.floor(w / k), lh = Math.floor(h / k), L = new Uint8Array(lw * lh);
@@ -621,7 +624,7 @@ S.shotOut = function(){ var s = S.shot; if (!s) return null; S.shot = null;
   var hw = w >> 1, hh = h >> 1, R = new Uint8Array(hw * hh * 3);
   for (var y2 = 0; y2 < hh; y2++) for (var x2 = 0; x2 < hw; x2++) { var a = ((h - 1 - 2 * y2) * w + 2 * x2) * 4, b = a - w * 4, d = (y2 * hw + x2) * 3;
     for (var c = 0; c < 3; c++) R[d + c] = (px[a + c] + px[a + 4 + c] + px[b + c] + px[b + 4 + c]) >> 2; }
-  return { w: lw, h: lh, luma: b64(L), hw: hw, hh: hh, rgb: b64(R) }; };
+  return { w: lw, h: lh, luma: b64(L), hw: hw, hh: hh, rgb: b64(R), cam: s.cam || null }; };
 /* Name every updater: trap CBZ.onUpdate/onAlways so each entry carries the file:line that registered it (config.js's own source tag only exists under ?profile=1). */
 function srcOf(){ var st = (new Error()).stack || ""; var L = st.split("\n");
   for (var i = 2; i < L.length; i++) { var m = L[i].match(/((?:src|games)\/[^:?)]+\.js)(?:\?[^:)\s]+)?:(\d+)/); if (m && !/src\/(config|core\/prio|core\/microboot|core\/studio)\.js/.test(m[1])) return m[1] + ":" + m[2]; }
@@ -1523,7 +1526,14 @@ function compare(cur, base) {
 }
 
 /* ---------------- the PIXEL look guard ---------------- */
-function decodeShot(s) { return s && { w: s.w, h: s.h, L: Buffer.from(s.luma, "base64"), hw: s.hw, hh: s.hh, rgb: Buffer.from(s.rgb, "base64") }; }
+function decodeShot(s) { return s && { w: s.w, h: s.h, L: Buffer.from(s.luma, "base64"), hw: s.hw, hh: s.hh, rgb: Buffer.from(s.rgb, "base64"), cam: s.cam || null }; }
+/* how far apart two shots' cameras were (metres, radians, degrees of fov) */
+function camDelta(a, b) {
+  if (!a || !b) return null;
+  const dp = Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2]);
+  const dot = Math.min(1, Math.abs(a.q[0] * b.q[0] + a.q[1] * b.q[1] + a.q[2] * b.q[2] + a.q[3] * b.q[3]));
+  return { pos: +dp.toFixed(4), rot: +(2 * Math.acos(dot)).toFixed(5), fov: +Math.abs(a.fov - b.fov).toFixed(3) };
+}
 /* SSIM per 8x8 block on luma (Wang et al. 2004 constants for 8-bit) */
 function blockSsim(a, b, w, h, bs = 8) {
   const bw = Math.floor(w / bs), bh = Math.floor(h / bs), out = new Float32Array(bw * bh), C1 = 6.5025, C2 = 58.5225, n = bs * bs;
@@ -1560,6 +1570,18 @@ function lookSpot(name, B, C, outDir) {
      the frame AND by half again, or the stable picture's mean SSIM down 0.01 */
   const over = r.cand.changed - r.floor.changed;
   r.verdict = (over > 0.005 && r.cand.changed > 1.5 * r.floor.changed) || r.cand.ssim < r.floor.ssim - 0.01 ? "LOOK REGRESSION" : "same look";
+  /* WAS IT THE CAMERA? The shot is taken where the game's own camera stands,
+     and a lens still easing its fov or a boom settling after the spot's
+     placement moves every edge in the frame: a uniform edge diff that reads
+     as a regression of everything. Said beside the verdict (never instead):
+     the base re-runs' camera spread vs the candidate's. */
+  const cb = B.slice(1).map((x) => camDelta(ref.cam, x.cam)).filter(Boolean), cc2 = C.map((x) => camDelta(ref.cam, x.cam)).filter(Boolean);
+  if (cb.length || cc2.length) {
+    const mx = (L, k) => L.length ? Math.max(...L.map((d) => d[k])) : null;
+    r.camera = { baseSpread: { pos: mx(cb, "pos"), rot: mx(cb, "rot"), fov: mx(cb, "fov") }, cand: { pos: mx(cc2, "pos"), rot: mx(cc2, "rot"), fov: mx(cc2, "fov") } };
+    const moved = (r.camera.cand.fov || 0) > 0.02 || (r.camera.cand.pos || 0) > 0.01 || (r.camera.cand.rot || 0) > 2e-4;
+    if (moved) r.cameraMoved = `camera differs from base run 1 (fov ${r.camera.cand.fov} deg, pos ${r.camera.cand.pos} m, rot ${r.camera.cand.rot} rad; base re-runs: fov ${r.camera.baseSpread.fov}, pos ${r.camera.baseSpread.pos}, rot ${r.camera.baseSpread.rot})`;
+  }
   if (outDir) { try { r.png = writeLookPng(path.join(outDir, `look-${name}.png`), ref, C[0], cs[0], mask); } catch (e) { r.pngError = String(e.message || e); } }
   return r;
 }
@@ -2216,7 +2238,7 @@ try {
       .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct)).slice(0, 30);
     if (other.length) { O(`  OTHER CHANGES (diagnostic, not a verdict):`); other.forEach((r) => O(line(r))); }
     O(`  LOOK (pixels, block SSIM at the game's HD settings; changed = share of the stable picture with SSIM < ${BAD_SSIM}):`);
-    for (const l of look) O(`    ${l.verdict.padEnd(15)} ${l.spot.padEnd(16)} ${l.cand ? `candidate changed ${fmt(100 * l.cand.changed, 2)}% vs a base re-run ${fmt(100 * l.floor.changed, 2)}%, SSIM ${fmt(l.cand.ssim, 4)} vs ${fmt(l.floor.ssim, 4)} (stable area ${fmt(100 * l.stableArea, 0)}%${l.floorBiased ? ", floor from 2 base shots: biased low" : ""})` : l.why || ""}${l.png ? "  " + l.png : ""}`);
+    for (const l of look) O(`    ${l.verdict.padEnd(15)} ${l.spot.padEnd(16)} ${l.cand ? `candidate changed ${fmt(100 * l.cand.changed, 2)}% vs a base re-run ${fmt(100 * l.floor.changed, 2)}%, SSIM ${fmt(l.cand.ssim, 4)} vs ${fmt(l.floor.ssim, 4)} (stable area ${fmt(100 * l.stableArea, 0)}%${l.floorBiased ? ", floor from 2 base shots: biased low" : ""})` : l.why || ""}${l.png ? "  " + l.png : ""}${l.cameraMoved ? "\n                    " + l.cameraMoved : ""}`);
     if (!look.length) O(`    (no pixel shots${LOOK_PIX ? "" : ": --no-look"})`);
     if (settings.bad.length) O("  LOOK REGRESSION (settings dropped): " + settings.bad.join(" · "));
     if (settings.notes.length) O("  look notes (counts, not failures): " + settings.notes.join(" · "));
