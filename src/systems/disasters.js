@@ -492,10 +492,12 @@
      shiver, keyed off each object's own position so the whole street does not
      twitch in unison. Purely visual and self-restoring: the offset is a sine
      about the object's base, so amp 0 puts everything exactly back. */
-  function rattleProps(ctx, amp) {
+  // noCars: the quake's own core moves the island's cars on the real ground
+  // motion (systems/quake.js), so its rattle leaves them alone
+  function rattleProps(ctx, amp, noCars) {
     if (amp <= 0.001) return;
     const A = ctx.arena, t = CBZ.now * 0.03;
-    const cars = A.cars;
+    const cars = noCars ? null : A.cars;
     if (cars) for (let i = 0; i < cars.length; i++) {
       const c = cars[i]; if (c.flung || !c.group) continue;
       const ph = c.x * 0.7 + c.z * 0.31;
@@ -3814,41 +3816,39 @@
      that ends and lets the shuffled arc pick whatever is next.
      ============================================================ */
   if (CBZ.CONFIG.QUAKE_CHAIN == null) CBZ.CONFIG.QUAKE_CHAIN = true;
-  // Legacy shape, used ONLY when systems/quake.js never loaded: the fixed
-  // 14 s mainshock + three canned aftershocks the quake always played.
-  const QK_MAIN = 14;              // seconds of mainshock inside activeSecs
-  const QK_SHOCKS = [3.4, 7.2, 11.0];   // aftershocks, seconds into the tail
   let qkChained = 0, qkGasFires = 0, qkLines = 0;
 
-  /* THE MAGNITUDE. Every quake used to be the same 26-second quake — the
-     owner's "cookie cutter size" complaint, purest case. Now each occurrence
-     ROLLS a Richter magnitude off the run's seeded stream; the round's
-     escalating ctx.intensity BIASES the roll (Gutenberg–Richter says small
-     quakes dominate, and the bend weakens as the round escalates) but never
-     replaces it — an early round can still draw the big one. Everything
-     scales off M through CBZ.quake.magParams (PGA, DURATION, frequency,
-     damage threshold, aftershock count, liquefaction/rupture): an M4 is a
-     few seconds of rattling crockery that damages nothing; an M8 is a
-     minute you cannot stand up in and the city changes shape. */
+  /* THE MAGNITUDE AND THE SOURCE. Each occurrence ROLLS a moment magnitude
+     off the run's seeded stream (the round's escalating ctx.intensity BIASES
+     the roll — Gutenberg-Richter says small quakes dominate, and the bend
+     weakens as the round escalates — but never replaces it: an early round
+     can still draw the big one), and then WHERE it broke: an offshore
+     megathrust tens of km out, or a shallow crustal fault close by
+     (systems/quake.js sourceRoll). The ground the island feels is that
+     source attenuated to the island (quake.js magParams): an M7.6 100 km
+     offshore is a long sway and a tsunami; an M6.4 under the town is a
+     wrecking ball. An M4 is a few seconds of rattling crockery.
+
+     HONESTY (the 2026-08-29 "M7.4 every time" finding): the old def handed
+     every quake collapseFrac 0.3, i.e. an M7.4 directly underneath, every
+     time. Nothing here picks how many buildings fall any more: each
+     building's own fragility against its own site's shaking decides. */
   let qkQ = null;                        // this occurrence's rolled quake
   let qkRollNo = -1;                     // which dir.occ the roll belongs to
   /* ONE ROLL PER OCCURRENCE, whoever asks first. beginWarn's makeCtx reads
      the activeSecs getter BEFORE warn() runs, so a naive "roll in warn()"
      would roll twice — and the second roll would have already spent the
      forceMag pin on the first. Keyed on dir.occ (bumped once per warning),
-     every reader of this occurrence sees the same magnitude. */
+     every reader of this occurrence sees the same quake. */
   function qkEnsureRoll(intensity) {
     if (qkRollNo !== dir.occ || !qkQ) { qkQ = qkRoll(intensity); qkRollNo = dir.occ; }
     return qkQ;
   }
   function qkRoll(intensity) {
     const Q = qk();
-    if (!Q || !Q.magParams) {
-      // no shared core: exactly the quake this file always played
-      return { M: 0, activeSecs: 26, legacy: true, pga01: 0.5, dmgK: 1,
-        collapseFrac: 0.3, mainDur: QK_MAIN, sLag: 0, nShocks: QK_SHOCKS.length,
-        liq: false, rupture: false, tsunamigenic: true };
-    }
+    // no shared core (a build that never loaded systems/quake.js): a plain
+    // twenty-second shake, nothing more
+    if (!Q || !Q.magParams) return { M: 0, activeSecs: 20, legacy: true, pga01: 0.4, mainDur: 14, sLag: 0, src: {} };
     const forced = Q.takeForcedMag ? Q.takeForcedMag() : null;
     let M;
     if (forced != null) M = forced;
@@ -3857,12 +3857,10 @@
       const skew = Math.max(0.5, 1.9 - 1.0 * Math.min(1.4, intensity || 0.2));
       M = 4.0 + 4.6 * Math.pow(u, skew);
     }
-    return Q.magParams(M);
+    const src = Q.sourceRoll ? Q.sourceRoll(M, rnd) : null;
+    return Q.magParams(M, src);
   }
 
-  // Does the shared core exist? Every call site below is `qk() ? … : <the old
-  // behaviour>`, so a build that never loaded systems/quake.js still plays the
-  // quake it always played — that is the degrade-safe rule, not a nicety.
   function qk() { return CBZ.quake || null; }
   // one field off the shared core's ratchet, degrade-safe (0 when absent)
   function qkNum(k) {
@@ -3870,56 +3868,38 @@
     try { const a = CBZ.quakeAudit(); return Number(a && a[k]) || 0; } catch (e) { return 0; }
   }
 
-  /* THE STRUCTURAL STAGE, as one 0..1 number the shedder can read. It is the
-     SAME `_dmg` the ledger above accumulates, so a building the tsunami
-     already spalled sheds harder in the next quake without either event
-     knowing about the other. */
-  function qkSeverity(b) { return Math.max(0, Math.min(1, (b._dmg || 0) / 1.05)); }
-
-  /* DROP, COVER, HOLD ON — made VISIBLE.
-     A third of the crowd are "indoors" people and go for the nearest heavy
-     table; the rest keep their own brain, which fleeVector already steers into
-     the open. Two populations doing two correct things is what turns a rule
-     into a thing you watch happen. */
-  function qkTakeCover(dt, ctx) {
-    const Q = qk(); if (!Q) return;
-    const bots = CBZ.bots; if (!bots) return;
-    for (let i = 0; i < bots.length; i++) {
-      const a = bots[i];
-      if (!a || a.dead || !a.pos) continue;
-      if (CBZ.body && CBZ.body.busy(a)) continue;
-      if (i % 3 !== 0) continue;                       // the open-ground two thirds
-      let anchor = a._quakeAnchor;
-      if (anchor === undefined || anchor === null) {
-        anchor = Q.coverNear(a.pos.x, a.pos.z, a.pos.y, 18);
-        a._quakeAnchor = anchor || false;              // false = "looked, found none"
-      }
-      if (!anchor) continue;
-      Q.duckUnder(a, anchor, dt, 10);
-    }
-  }
-  function qkStandAll() {
-    const Q = qk(); if (!Q) return;
-    const bots = CBZ.bots; if (!bots) return;
-    for (let i = 0; i < bots.length; i++) { Q.standUp(bots[i]); if (bots[i]) bots[i]._quakeAnchor = null; }
+  /* THE LEDGER HEARS THE CORE. systems/quake.js decides each building's
+     damage state from its own fragility; this file's ONE ledger (`_dmg`,
+     shared with the tsunami and the eruption) is brought up to match, so a
+     building the quake left extensive goes down to the wave on less. The
+     targets sit just under the ledger's own glass (0.35) and spall (0.70)
+     thresholds on purpose: the quake core has already drawn this building's
+     glass and wounds on its own geometry, and the ledger must not draw a
+     second, generic set. The collapse itself goes through structureHit (the
+     shared collapse engine), on the side the building failed towards. */
+  const QK_LEDGER = [0, 0.15, 0.34, 0.69, 1.0];
+  function qkLedger(b, ds, ctx) {
+    if (!b || b.fallen || ds >= 4) return;
+    const want = QK_LEDGER[ds] || 0, have = b._dmg || 0;
+    if (want > have) structureHit(b, want - have, ctx, { kind: "quake" });
   }
 
   /* THE AFTERMATH — the secondary killers, fired ONCE when the mainshock
-     stops. Both are delegated: the fire goes through CBZ.structure's BURNING
-     state where a real lot exists (so spread comes free and no second fire
-     model is written), and the pole comes down through the shared core. */
+     stops, at the buildings the quake actually hurt. The fire goes through
+     CBZ.structure's BURNING state where a real lot exists (else quake.js's
+     local flame on this file's ledger); the poles come down through the
+     shared core, falling AWAY from the buildings, across the open ground
+     the sensible half of the crowd just ran to. */
   function qkAftermath(ctx) {
     const Q = qk(); if (!Q) return;
     const hurt = ctx.arena.fragile
       .filter(function (b) { return !b.fallen && (b._dmg || 0) > 0.25; })
       .sort(function (a, b) { return (b._dmg || 0) - (a._dmg || 0); });
+    if (!hurt.length) return;               // nothing broke: no mains, no lines
     const n = 1 + ((rnd() * 3) | 0);
     for (let i = 0; i < Math.min(n, hurt.length); i++) {
       if (Q.gasFire(hurt[i], { gy: hurt[i].gy })) qkGasFires++;
     }
-    // TWO POLES, and they fall AWAY from the buildings — i.e. across exactly
-    // the open ground the sensible half of the crowd is standing on. That is
-    // the point: "get clear of the structures" is not the whole answer.
     for (let i = 0; i < 2; i++) {
       const px = ctx.cx + (rnd() - 0.5) * ctx.R * 1.6, pz = ctx.cz + (rnd() - 0.5) * ctx.R * 1.6;
       const P = Q.poleNear(px, pz, 400);
@@ -3930,22 +3910,15 @@
   function QUAKE_DEF() {
     return {
       name: "EARTHQUAKE", emoji: "", warnSecs: 5, gap: 7,
-      // DURATION IS THE MAGNITUDE'S. The director reads this at activation,
-      // after warn() has rolled the occurrence; the lazy roll covers any
-      // path that reads it first. Real quake duration scales hard with M —
-      // an M4 is over in seconds, an M8 owns the round for a minute-plus.
-      /* A ROUND, NOT A SEISMOGRAM: quake.js's physical duration (strong
-         motion + coda + an aftershock window) runs to 110 s for a big one,
-         and a match measured 70 s and 100 s of aftershock rattle in which
-         nothing happened. The mainshock and the first aftershocks are the
-         event; the round ends at 40 s. */
-      get activeSecs() { return Math.min(40, qkEnsureRoll(dir.intensity).activeSecs); },
+      /* DURATION IS THE QUAKE'S: the S-P gap (the distance), the strong
+         motion (the rupture's run time) and the aftershock window. A ROUND,
+         NOT A SEISMOGRAM: a great quake's physical record runs well past a
+         minute, and a match measured 70-100 s of aftershock rattle in which
+         nothing happened, so the round ends at 55 s. */
+      get activeSecs() { return Math.min(55, qkEnsureRoll(dir.intensity).activeSecs); },
       cause: "crushed under collapsing rubble", tint: 0x8a7f6c,
-      // THE FORESHOCK IS THE WARNING. A real quake announces itself by rattling
-      // everything loose in the room, so the telegraph is a rising tremor with
-      // the props visibly buzzing on it — no line of text can say "get out from
-      // under that" as fast as the building itself shivering. Its SIZE is the
-      // magnitude's too: an M4's foreshock is barely a shiver.
+      // THE FORESHOCK IS THE WARNING: a rising tremor with the props buzzing
+      // on it, sized by the quake that is coming (an M4's is barely a shiver)
       warn(ctx) {
         ctx.st.q = qkEnsureRoll(ctx.intensity);
         narrate("hint", "The ground is rumbling…", 2.2); sound("rumble"); ctx.st.pre = 0;
@@ -3957,154 +3930,81 @@
         rattleProps(ctx, (0.02 + 0.05 * k) * mk);
         ctx.st.pre = (ctx.st.pre || 0) - dt;
         if (ctx.st.pre <= 0) { ctx.st.pre = 1.4 - k; soundAt("rumble", ctx.cx, ctx.cz); }
-        // the sensible ones are already moving before the first pane falls
-        if (k > 0.45) qkTakeCover(dt, ctx);
       },
-      // during the sirens the danger is ALREADY the buildings — bots start
-      // clearing the streets before the first collapse
+      // during the sirens the danger is ALREADY the buildings
       warnThreat(x, z, ctx) { return DEFS.quake.threat(x, z, ctx); },
       start(ctx) {
         ctx.st.T = 0;
         const q = ctx.st.q || (ctx.st.q = qkEnsureRoll(ctx.intensity));
-        // per-EVENT counters: the audit answers "what did this quake do"
         qkChained = qkGasFires = qkLines = 0;
         ctx.st.dust = CBZ.fx.particleCloud({ mode: "rise", color: 0xb6a892, count: 160, radius: ctx.R, top: 8, size: 0.32, opacity: 0.34, vMin: 1, vMax: 3 });
         // an M4 shakes dust off nothing; an M8 hazes the whole island
         ctx.st.dust.setActive(0.1 + 0.7 * q.pga01);
-        // only SOME buildings come down — a quake doesn't flatten the whole
-        // city, and HOW MANY is the magnitude's call: none at all below
-        // ~M5.6, near half of them at M8+.
-        const standing = ctx.arena.fragile.filter((b) => !b.fallen).sort(() => rnd() - 0.5);
-        ctx.st.order = q.collapseFrac > 0
-          ? standing.slice(0, Math.max(1, Math.ceil(standing.length * q.collapseFrac)))
-          : [];
-        ctx.st.next = 1.2;
-        // and EVERY standing structure takes load — scaled by magnitude, and
-        // below the damage threshold (M<5.2) a quake loads NOTHING: it is a
-        // few seconds of rattling crockery, which is the whole point of small
-        if (q.dmgK > 0) {
-          for (let i = 0; i < ctx.arena.fragile.length; i++) structureHit(ctx.arena.fragile[i], (0.22 + 0.2 * ctx.intensity) * q.dmgK, ctx, { kind: "quake" });
-        }
-        // the shared core needs to know WHICH structures are shedding, so its
-        // facade-proximity test (the thing that makes standing next to a wall
-        // lethal and the open square safe) has something to measure against
-        if (qk()) {
-          qk().begin(ctx.arena.fragile);
+        const Q = qk();
+        if (Q && !q.legacy) {
+          /* THE WHOLE EARTHQUAKE is the shared core's event: the wave train,
+             every building's answer by type and height, the ground (cracks,
+             mains, liquefaction), the cars, the crowd, and what falls on whom.
+             This def keeps the round, the ledger, the chain and the aftermath. */
+          Q.eventStart({
+            M: q.M, params: q, src: q.src, cx: ctx.cx, cz: ctx.cz, R: ctx.R,
+            structures: ctx.arena.fragile, cars: ctx.arena.cars || [],
+            actors: function () { return CBZ.bots; },
+            onRoad: ctx.arena.onRoad || null, groundAt: floor,
+            hooks: {
+              damage: function (b, ds) { qkLedger(b, ds, ctx); },
+              collapse: function (b, n) { structureHit(b, 2, ctx, { kind: "quake", dirx: n.x, dirz: n.z }); },
+            },
+          });
           // fire eats the building's OWN ledger — this file's, not the core's
-          qk().hooks.structDamage = function (b, amt) { structureHit(b, amt, ctx, { kind: "fire" }); };
-          // the wave train: P-then-S arrivals, coda, aftershock schedule and
-          // footing all live in the core; this def just reads the envelope
-          if (qk().motionStart && !q.legacy) qk().motionStart(q, { cx: ctx.cx, cz: ctx.cz, R: ctx.R });
+          Q.hooks.structDamage = function (b, amt) { structureHit(b, amt, ctx, { kind: "fire" }); };
         }
 
         /* ---- THE SUBDUCTION BRANCH ---------------------------------------
-           One rupture, two consequences, and WHERE it broke decides which.
-           Offshore + big → the sea. Inland → the magma. Neither is guaranteed,
-           because a quake that always ends in a tsunami stops being a quake. */
+           One rupture, two consequences, and WHERE it broke decides which:
+           the source roll already said offshore or inland. Offshore + big
+           (tsunamigenic, ~M7.4+) → the sea. Inland and big → the magma.
+           Neither is guaranteed, because a quake that always ends in a
+           tsunami stops being a quake. */
         ctx.st.chain = null;
+        const src = q.src || {};
+        const off = src.offshore ? 1.3 : 0.55;
+        ctx.st.epX = ctx.cx + Math.cos(src.bearing || 0) * ctx.R * off;
+        ctx.st.epZ = ctx.cz + Math.sin(src.bearing || 0) * ctx.R * off;
         if (CBZ.CONFIG.QUAKE_CHAIN !== false) {
-          const ang = rnd() * 6.28, off = 0.3 + rnd() * 0.95;
-          ctx.st.epX = ctx.cx + Math.cos(ang) * ctx.R * off;
-          ctx.st.epZ = ctx.cz + Math.sin(ang) * ctx.R * off;
-          const offshore = off > 0.7;
-          // TSUNAMIGENESIS IS A MAGNITUDE FACT, not a round-escalation one:
-          // the sea does not care how late in the match it is. ~M7.4+ and
-          // offshore, or nothing. Inland, only a big rupture loads the arc's
-          // magma plumbing enough to matter.
-          if (offshore && ctx.st.q.tsunamigenic && rnd() < 0.85) ctx.st.chain = "tsunami";
-          else if (ctx.st.q.M >= 6.2 && rnd() < 0.4) ctx.st.chain = "eruption";
+          if (src.offshore && q.tsunamigenic && rnd() < 0.85) ctx.st.chain = "tsunami";
+          else if (!src.offshore && q.M >= 6.2 && rnd() < 0.4) ctx.st.chain = "eruption";
         } else if (rnd() < 0.4) ctx.st.chain = "eruption";
         ctx.st.eruptArmed = ctx.st.chain === "eruption";
         ctx.st.eruptAt = 4 + rnd() * 5;     // seconds into the quake it would hit
-        ctx.st.shockN = 0;
       },
       active(dt, ctx) {
         ctx.st.T = (ctx.st.T || 0) + dt;
         const T = ctx.st.T, q = ctx.st.q, Q = qk();
-        const mainEnd = (!q || q.legacy) ? QK_MAIN : q.sLag + q.mainDur;
+        const live = !!(Q && q && !q.legacy);
+        const mainEnd = live ? q.sLag + q.mainDur : 14;
         const tail = T - mainEnd;
-        /* THE WAVE TRAIN. The core synthesizes the real arrival sequence —
-           the P bang, the S rolling, the coda, the aftershock trains — plus
-           footing (stagger/knockdown off live PGA). This def reads the
-           envelope and drives everything visible with it, so the camera, the
-           props, the dust and the damage all move to ONE ground motion. */
-        let amp, pga, phase = tail < 0 ? "s" : "coda", shockHit = 0;
-        if (Q && Q.motionTick && q && !q.legacy) {
-          const m = Q.motionTick(dt);
+        let amp, pga, phase, shockHit = 0;
+        if (live) {
+          const m = Q.eventTick(dt);
           amp = m.amp; pga = m.pga01; phase = m.phase; shockHit = m.shockFired;
         } else {
-          // no shared core: the quake this file always played
-          if (tail < 0) amp = 0.16 + 0.5 * ctx.intensity * (0.55 + (T / QK_MAIN) * 0.45);
-          else {
-            amp = 0.02;
-            for (let i = 0; i < QK_SHOCKS.length; i++) {
-              const d = tail - QK_SHOCKS[i];
-              if (d >= 0 && d < 2.2) amp = Math.max(amp, (0.42 - i * 0.11) * (1 - d / 2.2) * (0.6 + ctx.intensity));
-            }
-          }
-          pga = amp;
+          amp = tail < 0 ? 0.3 : 0.02; pga = amp; phase = tail < 0 ? "s" : "coda";
         }
         if (CBZ.shake && amp > 0.004) CBZ.shake(amp);
         ctx.st.dust.setActive(Math.min(0.85, 0.08 + pga * 1.1)); ctx.st.dust.update(dt, camPos().x, 0, camPos().z);
         // the rumble ARRIVES BEFORE THE MOTION: constant during the P gap,
         // then proportional to the shaking
         if (phase === "p" ? rnd() < dt * 1.6 : rnd() < dt * (0.15 + pga * 1.4)) sound("rumble");
+        // the trees sway on the same ground (the cars are the core's now)
+        rattleProps(ctx, 0.015 + amp * 0.38, true);
 
-        /* ---- SHEDDING: what actually kills people ------------------------
-           Every standing structure sheds in proportion to how close it is to
-           coming down, so the debris field IS the damage readout — and the
-           strip of ground next to a wounded tower is where you die. */
-        const dmgK = q ? q.dmgK : 1;
-        if (Q && amp > 0.05 && dmgK > 0) {
-          const f = ctx.arena.fragile;
-          for (let i = 0; i < f.length; i++) {
-            const b = f[i];
-            if (b.fallen) continue;
-            Q.shedTick(b, dt, { sev: qkSeverity(b), gain: Math.min(1.8, (0.4 + pga * 2.6) * dmgK), gy: b.gy });
-          }
-        }
-        qkTakeCover(dt, ctx);
-
-        // spaced-out collapses, spread over however long THIS quake's
-        // mainshock actually is (only the magnitude-capped subset falls)
-        ctx.st.next -= dt;
-        if (ctx.st.next <= 0 && ctx.st.order.length && phase !== "p") {
-          ctx.st.next = tail < 0
-            ? Math.max(0.9, (mainEnd - T) / (ctx.st.order.length + 1))
-            : 2.6;
-          // through the ledger, never straight to collapse: a tower already
-          // spalled by an earlier disaster goes down on less than a fresh one
-          structureHit(ctx.st.order.pop(), 1.2, ctx, { kind: "quake" });
-        }
-        rattleProps(ctx, 0.015 + amp * 0.38);
-
-        /* LIQUEFACTION (M≥7.2): the low ground turns to soup once strong
-           shaking has run long enough to raise pore pressure — the buildings
-           standing nearest sea level settle, lean, and take damage no shaking
-           of the frame itself would explain. One trigger, mid-mainshock. */
-        if (q && q.liq && !ctx.st.liqDone && tail < 0 && T > q.sLag + q.mainDur * 0.45) {
-          ctx.st.liqDone = 1;
-          const f3 = ctx.arena.fragile;
-          for (let i = 0; i < f3.length; i++) {
-            const b = f3[i];
-            if (b.fallen || (b.gy || 0) > 2.2) continue;   // firm ground: above ~2 m over sea level the water table is too deep
-            structureHit(b, 0.5 + rnd() * 0.4, ctx, { kind: "liquefaction" });
-            if (!b.fallen && b.group) {
-              // the settle: a visible permanent lean, not a collapse
-              b.group.rotation.x += (rnd() - 0.5) * 0.07;
-              b.group.rotation.z += (rnd() - 0.5) * 0.07;
-              b.group.position.y -= 0.25 + rnd() * 0.35;
-              b._lean = 1;
-            }
-          }
-          sound("collapse");
-        }
-        /* SURFACE RUPTURE (M≥7.8): the fault reaches daylight — a chain of
-           torn ground along one bearing through the epicentre, reusing the
-           ground-shaft primitive the sinkhole roster already owns. */
+        /* SURFACE RUPTURE: a big shallow crustal quake under the island
+           breaks the ground along one bearing through the epicentre, reusing
+           the ground-shaft primitive the sinkhole roster already owns. */
         if (q && q.rupture && !ctx.st.ruptured && tail < 0 && T > q.sLag + q.mainDur * 0.3) {
           ctx.st.ruptured = 1;
-          const bx = ctx.st.epX != null ? ctx.st.epX - ctx.cx : 1, bz = ctx.st.epZ != null ? ctx.st.epZ - ctx.cz : 0;
+          const bx = ctx.st.epX - ctx.cx, bz = ctx.st.epZ - ctx.cz;
           const bl = Math.hypot(bx, bz) || 1;
           const ux = bx / bl, uz = bz / bl;
           for (let i = -1; i <= 1; i++) {
@@ -4123,35 +4023,8 @@
         tick0(ctx, dt);
 
         // ---- THE MAINSHOCK STOPS, AND THE SECOND WAVE OF DEATHS STARTS ----
-        // (an M4 broke no mains and severed no lines: no aftermath at all)
-        if (tail >= 0 && !ctx.st.aftermath) { ctx.st.aftermath = 1; if (dmgK > 0) qkAftermath(ctx); }
-        // AFTERSHOCKS re-shed the weakened, which is when the rest go down.
-        // With the core live, the synthesizer's own schedule fires them
-        // (count and size from the magnitude, Båth-style decay); shockHit is
-        // the shock's relative size the moment its train arrives.
-        if (shockHit > 0) {
-          sound("rumble");
-          const f2 = ctx.arena.fragile;
-          for (let i = 0; i < f2.length; i++) {
-            const b = f2[i];
-            if (b.fallen) continue;
-            structureHit(b, 0.45 * shockHit * dmgK * (0.6 + ctx.intensity), ctx, { kind: "aftershock" });
-            if (Q && dmgK > 0) Q.shed(b, { sev: qkSeverity(b), count: 1 + ((qkSeverity(b) * 6 * shockHit * 3) | 0), gy: b.gy });
-          }
-        } else if ((!q || q.legacy) && tail >= 0) {
-          while (ctx.st.shockN < QK_SHOCKS.length && tail >= QK_SHOCKS[ctx.st.shockN]) {
-            ctx.st.shockN++;
-            sound("rumble");
-            const decay = 1 - (ctx.st.shockN - 1) * 0.3;
-            const f2 = ctx.arena.fragile;
-            for (let i = 0; i < f2.length; i++) {
-              const b = f2[i];
-              if (b.fallen) continue;
-              structureHit(b, 0.14 * decay * (0.6 + ctx.intensity), ctx, { kind: "aftershock" });
-              if (Q) Q.shed(b, { sev: qkSeverity(b), count: 2 + ((qkSeverity(b) * 7) | 0), gy: b.gy });
-            }
-          }
-        }
+        if (tail >= 0 && !ctx.st.aftermath) { ctx.st.aftermath = 1; qkAftermath(ctx); }
+        if (shockHit > 0) sound("rumble");
 
         /* ---- THE HANDOFF -------------------------------------------------
            The drawdown starts while the ground is still moving: the sea pulls
@@ -4172,9 +4045,8 @@
       end(ctx) {
         if (ctx.st.dust) { ctx.st.dust.dispose(); ctx.st.dust = null; }
         endEruption(ctx);
-        qkStandAll();
-        if (qk()) { qk().hooks.structDamage = null; qk().end(); }   // .end() also stops the wave train
-        qkQ = null;                       // the next occurrence rolls its own magnitude
+        if (qk()) { qk().hooks.structDamage = null; qk().end(); }   // .end() also ends the event
+        qkQ = null;                       // the next occurrence rolls its own quake
         // an armed chain that never fired must not leave the sea sucked out
         if (ctx.st.chain === "tsunami" && !ctx.st.handed) surgeSet(0);
       },
