@@ -50,131 +50,173 @@
   var CELL = 8;                                  // spatial-hash cell, metres
   var P = (CBZ.placement = {});
 
-  // hash: "ix,iz" → array of reserved rects.
-  // numeric cell keys in a Map (a string key per cell was most of this
-  // module's heap: ~16 MB in the streamed city)
-  var hash = new Map();
-  // Canonical reservation list. The spatial hash stores the same rectangle in
-  // every touched cell, which is ideal for collision queries but unusable for
-  // diagnostics (a large runway can appear hundreds of times). Keep each
-  // reservation exactly once so the world-audit tool can inspect the real
-  // placement plan without reverse-engineering hash buckets.
-  var reservations = [];
-  // seedFromColliders() is called by several independently-authored biome
-  // builders.  Re-inserting the same collider every time made the hash grow
-  // with duplicate rectangles and, more importantly, meant generator order
-  // changed the amount of work a later placement had to do.  Track the actual
-  // collider objects so seeding is idempotent until an explicit reset.
+  /* ---- THE STORE IS TYPED ARRAYS ---------------------------------------
+     Measured 2026-10-14 (memscope, phone boot of the streamed city): this
+     module held 20 MB of V8 heap, the third largest owner in the city. It
+     kept 38.6k reservation OBJECTS (12 fields each; 34k of them are copies
+     of static colliders from seedFromColliders) and a Map from a cell key to
+     an array of them, 200k cell references, with cell keys past the small-
+     integer range (ix * 1048576 is a boxed double per key). Every question
+     it answers is a rectangle test, so the records are columns now:
+       R     Float64Array, 6 per id: minX maxX minZ maxZ minY maxY
+             (a missing Y bound is stored as -/+Infinity: overlaps() did
+             exactly that default, so the test is the same arithmetic)
+       FL    Uint8Array per id: stackable, has minY, has maxY, live
+       ZN    Uint16Array per id: zone, an index into a small string table
+       EXTRA Map id -> { ref, id, kind, source } only for the few that carry
+             any of those (worldLayout features, tools)
+     and the hash is a Map from a small-integer cell key to the head of a
+     linked list in two Int32Arrays (cell entry -> next entry, -> id).
+     A dropped id is reused (free list). reserve() returns the id; snapshot()
+     still hands tools the same plain rectangles. */
+  var R = new Float64Array(6 * 1024), FL = new Uint8Array(1024), ZN = new Uint16Array(1024), cap = 1024, top = 0, liveN = 0;
+  var freeIds = [];
+  var EXTRA = new Map();
+  var zones = [null], zoneIx = new Map();
+  var NX = new Int32Array(4096), NI = new Int32Array(4096), ncap = 4096, ntop = 0, nfree = -1;
+  var hash = new Map();                          // cell key -> first entry (index into NX/NI)
+  var gen = 0;                                   // bumped by reset (the stream hook's marks)
+  var order = [];                                // ids in reservation order (snapshot, stream marks)
   var seededColliders = new WeakSet();
-  function ck(ix, iz) { return ix * 1048576 + iz; }
+  // cell key: a small integer for any cell within 65 km of the origin (both
+  // halves 14 bits), a string beyond (never a boxed double)
+  function ck(ix, iz) {
+    return (ix >= -8192 && ix < 8192 && iz >= -8192 && iz < 8192) ? ((ix + 8192) << 14) | (iz + 8192) : ix + "," + iz;
+  }
   function ci(v) { return Math.floor(v / CELL); }
+  function zoneOf(z) {
+    if (z == null) return 0;
+    var k = zoneIx.get(z);
+    if (k === undefined) { k = zones.length; zones.push(z); zoneIx.set(z, k); }
+    return k;
+  }
+  function growIds() {
+    var c = cap * 2, r2 = new Float64Array(6 * c), f2 = new Uint8Array(c), z2 = new Uint16Array(c);
+    r2.set(R); f2.set(FL); z2.set(ZN);
+    R = r2; FL = f2; ZN = z2; cap = c;
+  }
+  function newEntry() {
+    if (nfree >= 0) { var e = nfree; nfree = NX[e]; return e; }
+    if (ntop >= ncap) {
+      var c = ncap * 2, a = new Int32Array(c), b = new Int32Array(c);
+      a.set(NX); b.set(NI); NX = a; NI = b; ncap = c;
+    }
+    return ntop++;
+  }
+  function link(id) {
+    var o = id * 6, x0 = ci(R[o]), x1 = ci(R[o + 1]), z0 = ci(R[o + 2]), z1 = ci(R[o + 3]);
+    for (var ix = x0; ix <= x1; ix++) for (var iz = z0; iz <= z1; iz++) {
+      var key = ck(ix, iz), h = hash.get(key), e = newEntry();
+      NI[e] = id; NX[e] = h === undefined ? -1 : h;
+      hash.set(key, e);
+    }
+  }
+  function unlink(id) {
+    var o = id * 6, x0 = ci(R[o]), x1 = ci(R[o + 1]), z0 = ci(R[o + 2]), z1 = ci(R[o + 3]);
+    for (var ix = x0; ix <= x1; ix++) for (var iz = z0; iz <= z1; iz++) {
+      var key = ck(ix, iz), e = hash.get(key), prev = -1;
+      while (e !== undefined && e >= 0) {
+        var nx = NX[e];
+        if (NI[e] === id) {
+          if (prev < 0) { if (nx < 0) hash.delete(key); else hash.set(key, nx); }
+          else NX[prev] = nx;
+          NX[e] = nfree; nfree = e;
+        } else prev = e;
+        e = nx;
+      }
+    }
+  }
+  function store(rect) {
+    var id = freeIds.length ? freeIds.pop() : top++;
+    if (id >= cap) growIds();
+    var o = id * 6;
+    R[o] = rect.minX; R[o + 1] = rect.maxX; R[o + 2] = rect.minZ; R[o + 3] = rect.maxZ;
+    R[o + 4] = rect.minY != null ? rect.minY : -Infinity;
+    R[o + 5] = rect.maxY != null ? rect.maxY : Infinity;
+    FL[id] = 8 | (rect.stackable ? 1 : 0) | (rect.minY != null ? 2 : 0) | (rect.maxY != null ? 4 : 0);
+    ZN[id] = zoneOf(rect.zone || null);
+    if (rect.ref || rect.id || rect.kind || rect.source)
+      EXTRA.set(id, { ref: rect.ref || null, id: rect.id || null, kind: rect.kind || null, source: rect.source || null });
+    order.push(id);
+    liveN++;
+    link(id);
+    return id;
+  }
+  // the plain rectangle tools and worldLayout read (a fresh object each time)
+  function rectOf(id) {
+    var o = id * 6, f = FL[id], x = EXTRA.get(id);
+    return {
+      minX: R[o], maxX: R[o + 1], minZ: R[o + 2], maxZ: R[o + 3],
+      minY: f & 2 ? R[o + 4] : undefined, maxY: f & 4 ? R[o + 5] : undefined,
+      stackable: !!(f & 1), zone: zones[ZN[id]],
+      ref: x ? x.ref : null, id: x ? x.id : null, kind: x ? x.kind : null, source: x ? x.source : null
+    };
+  }
+  P.rectOf = rectOf;
 
   P.cellSize = CELL;
 
-  // what a streamed job reserved leaves with it (core/citystream.js)
+  // what a streamed job reserved leaves with it (core/citystream.js): ids
   P.dropReservations = function (items) {
     if (!items || !items.length) return;
-    var drop = new Set(items);
-    reservations = reservations.filter(function (r) { return !drop.has(r); });
-    items.forEach(function (r) {
-      forCells(r, function (key) {
-        var b = hash.get(key); if (!b) return false;
-        var w = 0; for (var i = 0; i < b.length; i++) if (!drop.has(b[i])) b[w++] = b[i];
-        b.length = w; if (!w) hash.delete(key);
-        return false;
-      });
-    });
+    var any = false;
+    for (var i = 0; i < items.length; i++) {
+      var id = items[i];
+      if (typeof id !== "number" || !(FL[id] & 8)) continue;
+      unlink(id);
+      FL[id] = 0; EXTRA.delete(id); freeIds.push(id); liveN--; any = true;
+    }
+    if (any) { var w = 0; for (var j = 0; j < order.length; j++) if (FL[order[j]] & 8) order[w++] = order[j]; order.length = w; }
   };
   if (CBZ.streamBusHook) CBZ.streamBusHook({
-    mark: function () { return { arr: reservations, n: reservations.length }; },
-    since: function (m) { return m.arr === reservations ? reservations.slice(m.n) : []; },
+    mark: function () { return { gen: gen, n: order.length }; },
+    since: function (m) { return m.gen === gen ? order.slice(m.n) : []; },
     drop: function (items) { P.dropReservations(items); },
   });
 
   P.reset = function () {
     hash = new Map();
-    reservations = [];
+    top = 0; liveN = 0; freeIds = []; EXTRA = new Map(); order = []; gen++;
+    ntop = 0; nfree = -1;
     seededColliders = new WeakSet();
   };
 
-  // Iterate every cell an AABB overlaps, calling fn(key). Returns early if
-  // fn returns true (used for short-circuit overlap tests).
-  function forCells(rect, fn) {
-    var x0 = ci(rect.minX), x1 = ci(rect.maxX);
-    var z0 = ci(rect.minZ), z1 = ci(rect.maxZ);
-    for (var ix = x0; ix <= x1; ix++)
-      for (var iz = z0; iz <= z1; iz++)
-        if (fn(ck(ix, iz)) === true) return true;
-    return false;
-  }
-
-  function overlaps(a, b) {
-    if (!(a.minX < b.maxX && a.maxX > b.minX &&
-          a.minZ < b.maxZ && a.maxZ > b.minZ)) return false;
-    // F5: Y test. Missing minY/maxY default to -Infinity/+Infinity — a
-    // legacy full-height rect always overlaps another full-height rect
-    // vertically, so every pre-F5 caller (none of which set minY/maxY)
-    // sees IDENTICAL results to before this test existed. Defaults are
-    // computed inline (no mutation of the caller's rect objects).
-    var aMinY = a.minY != null ? a.minY : -Infinity;
-    var aMaxY = a.maxY != null ? a.maxY : Infinity;
-    var bMinY = b.minY != null ? b.minY : -Infinity;
-    var bMaxY = b.maxY != null ? b.maxY : Infinity;
-    return aMinY < bMaxY && aMaxY > bMinY;
-  }
-
   /* ---- isFree -------------------------------------------------- */
+  // two stackables may share space; with opts.zoneOnly only rects of the
+  // same zone conflict; the Y test treats a missing band as full height
+  // (F5: every pre-F5 XZ-only caller sees exactly what it always saw)
   P.isFree = function (rect, opts) {
-    opts = opts || {};
     var stackable = !!rect.stackable;
-    var zoneOnly = !!opts.zoneOnly;
-    var zone = rect.zone || null;
-    return !forCells(rect, function (key) {
-      var bucket = hash.get(key);
-      if (!bucket) return false;
-      for (var i = 0; i < bucket.length; i++) {
-        var r = bucket[i];
-        // two stackables may share space. This unconditional allow is
-        // still correct under F5's Y test, in every case:
-        //  - either side lacks a Y range → legacy full-height rects, works
-        //    exactly as it did before F5 (unchanged behaviour).
-        //  - both sides have a Y range and they're Y-DISJOINT → they were
-        //    never going to conflict anyway (overlaps()'s Y test below
-        //    would say so too), so skipping here changes nothing.
-        //  - both sides have a Y range and they OVERLAP in Y → this is the
-        //    case the stackable escape hatch exists for (e.g. two signs on
-        //    the same wall band) — keep allowing it.
-        // So `continue` unconditionally is the right call in all three
-        // sub-cases; nothing here needs to consult minY/maxY directly.
-        if (stackable && r.stackable) continue;
-        // zone-scoped test: ignore rects in other zones.
-        if (zoneOnly && zone != null && r.zone != null && r.zone !== zone) continue;
-        if (!overlaps(rect, r)) continue;
-        // de-dupe (same rect can appear in several cells) — irrelevant for
-        // a positive hit, so just report conflict.
-        return true;                             // CONFLICT
+    var zoneOnly = !!(opts && opts.zoneOnly);
+    var rz = rect.zone || null;
+    var zone = rz != null ? zoneIx.get(rz) : 0;
+    if (zone === undefined) zone = -1;           // a zone nobody reserved: no same-zone rect exists
+    var aMinX = rect.minX, aMaxX = rect.maxX, aMinZ = rect.minZ, aMaxZ = rect.maxZ;
+    var aMinY = rect.minY != null ? rect.minY : -Infinity, aMaxY = rect.maxY != null ? rect.maxY : Infinity;
+    var x0 = ci(aMinX), x1 = ci(aMaxX), z0 = ci(aMinZ), z1 = ci(aMaxZ);
+    for (var ix = x0; ix <= x1; ix++) for (var iz = z0; iz <= z1; iz++) {
+      var e = hash.get(ck(ix, iz));
+      while (e !== undefined && e >= 0) {
+        var id = NI[e]; e = NX[e];
+        var f = FL[id];
+        if (stackable && (f & 1)) continue;
+        if (zoneOnly && rz != null && ZN[id] !== 0 && ZN[id] !== zone) continue;
+        var o = id * 6;
+        if (aMinX < R[o + 1] && aMaxX > R[o] && aMinZ < R[o + 3] && aMaxZ > R[o + 2] &&
+            aMinY < R[o + 5] && aMaxY > R[o + 4]) return false;   // CONFLICT
       }
-      return false;
-    });
+    }
+    return true;
   };
 
   /* ---- reserve ------------------------------------------------- */
-  P.reserve = function (rect) {
-    var r = {
-      minX: rect.minX, maxX: rect.maxX, minZ: rect.minZ, maxZ: rect.maxZ,
-      minY: rect.minY, maxY: rect.maxY,              // F5: optional Y band, passed through as-is (undefined if absent — overlaps() defaults it)
-      stackable: !!rect.stackable, zone: rect.zone || null, ref: rect.ref || null,
-      id: rect.id || null, kind: rect.kind || null, source: rect.source || null
-    };
-    reservations.push(r);
-    forCells(r, function (key) { var b = hash.get(key); if (!b) hash.set(key, b = []); b.push(r); });
-    return r;
-  };
+  P.reserve = function (rect) { return store(rect); };
 
   // Read-only, serialisable placement snapshot for tools. References are
   // represented by a useful name only; callers cannot mutate the live hash.
   P.snapshot = function () {
-    return reservations.map(function (r) {
+    return order.map(function (id) {
+      var r = rectOf(id);
       return {
         minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ,
         minY: r.minY, maxY: r.maxY, stackable: r.stackable,
@@ -183,6 +225,7 @@
       };
     });
   };
+  P.stats = function () { return { live: liveN, ids: top, cap: cap, cellEntries: ntop, cells: hash.size, MB: +(((R.byteLength + FL.byteLength + ZN.byteLength + NX.byteLength + NI.byteLength) / 1048576)).toFixed(1) }; };
 
   /* ---- seedFromColliders --------------------------------------
      Reserve the current static colliders so a later-built town dodges the
@@ -517,9 +560,10 @@
     r.id = id;
     r.kind = (opts && opts.kind) || "feature";
     r.source = (opts && opts.source) || "worldLayout";
-    layoutIds[id] = P.reserve(r);
-    layoutEntries.push(layoutIds[id]);
-    return layoutIds[id];
+    r.rid = P.reserve(r);
+    layoutIds[id] = r;
+    layoutEntries.push(r);
+    return r;
   };
 
   L.snapshot = function () {
@@ -564,18 +608,17 @@
     var grp = new THREE.Group();
     var mat = new THREE.LineBasicMaterial({ color: 0xff3366 });
     var seen = {};
-    hash.forEach(function (bucket) {
-      bucket.forEach(function (r) {
+    order.forEach(function (rid) {
+      (function (r) {
         var id = r.minX + ':' + r.minZ + ':' + r.maxX + ':' + r.maxZ;
         if (seen[id]) return; seen[id] = 1;
-        var w = r.maxX - r.minX, d = r.maxZ - r.minZ;
         var geo = new THREE.BufferGeometry().setFromPoints([
           new THREE.Vector3(r.minX, 0.1, r.minZ), new THREE.Vector3(r.maxX, 0.1, r.minZ),
           new THREE.Vector3(r.maxX, 0.1, r.maxZ), new THREE.Vector3(r.minX, 0.1, r.maxZ),
           new THREE.Vector3(r.minX, 0.1, r.minZ)
         ]);
         grp.add(new THREE.Line(geo, mat));
-      });
+      })(rectOf(rid));
     });
     parent.add(grp);
     return grp;

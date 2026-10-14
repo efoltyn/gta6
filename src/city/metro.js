@@ -1012,7 +1012,7 @@
      packed into ONE mipmapped atlas the plate's ground skin samples
      (textures_surface.js cityMap). No geometry, no draw call.
      ------------------------------------------------------------------ */
-  let _maps = null, _mapI = 0, _mapsDone = false;
+  let _maps = null, _mapI = 0, _mapsDone = false, _atlas = null;
   const MAP_BUDGET_MS = 2;
   function farMapPump() {
     const FC = CBZ.farCityMap, MG = CBZ.metroGround;
@@ -1024,8 +1024,14 @@
       _maps = [];
       for (const M of CBZ.metroCities) {
         if (_maps.length >= FC.max) break;
-        try { const m = MG.farMap(M.plan); if (m) { m.id = M.id; _maps.push(m); } } catch (e) { console.error("[metro far map] " + M.id, e); }
+        try { const m = MG.farMap(M.plan, { defer: true }); if (m) { m.id = M.id; _maps.push(m); } } catch (e) { console.error("[metro far map] " + M.id, e); }
       }
+      // THE MAPS PAINT INTO THE ATLAS. Each city's map used to paint into its
+      // own array (7 of them, 11 MB at the phone boot) and be copied into the
+      // atlas at the end, both alive at once. Their sizes are known before a
+      // texel is painted, so the atlas is packed now and every map paints its
+      // own rect of it: the same texels, one array.
+      try { _atlas = packAtlas(_maps); } catch (e) { console.error("[metro far map atlas]", e); _maps = []; }
       return;
     }
     const end = performance.now() + MAP_BUDGET_MS;
@@ -1034,8 +1040,8 @@
     }
     if (_mapI < _maps.length) return;
     _mapsDone = true;
-    try { packFarMaps(_maps, FC.uniforms); } catch (e) { console.error("[metro far map atlas]", e); }
-    _maps = null;
+    try { if (_atlas) packFarMaps(_atlas, FC.uniforms); } catch (e) { console.error("[metro far map atlas]", e); }
+    _maps = null; _atlas = null;
   }
   // guillotine-pack the maps (power-of-two each, largest first) into the
   // smallest power-of-two atlas that holds them; every city gets its world
@@ -1056,15 +1062,17 @@
     }
     return true;
   }
-  function packFarMaps(maps, U) {
+  // the atlas for maps not painted yet: packed, allocated, every map bound to its rect
+  function packAtlas(maps) {
     const order = maps.slice().sort(function (a, b) { return b.w * b.h - a.w * a.h; });
     let AW = 256, AH = 256;
     while (!packInto(order, AW, AH)) { if (AW <= AH) AW *= 2; else AH *= 2; }
     const data = new Uint8Array(AW * AH * 4);
-    for (const m of order) {
-      for (let j = 0; j < m.h; j++) data.set(m.data.subarray(j * m.w * 4, (j + 1) * m.w * 4), ((m.ay + j) * AW + m.ax) * 4);
-      m.data = null;
-    }
+    for (const m of order) m.bind(data, AW, m.ax, m.ay);
+    return { order: order, AW: AW, AH: AH, data: data };
+  }
+  function packFarMaps(A, U) {
+    const order = A.order, AW = A.AW, AH = A.AH, data = A.data;
     const tex = new THREE.DataTexture(data, AW, AH, THREE.RGBAFormat, THREE.UnsignedByteType);
     tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter;

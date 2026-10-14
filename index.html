@@ -540,7 +540,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=mem1014"></script>
+<script src="src/world/textures_surface.js?v=peak1014"></script>
 <script src="src/world/materials.js?v=nostep1013"></script>
 <script src="src/world/fuel_station.js?v=mem1014"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
@@ -605,7 +605,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=sl0930a"></script>
+  <script src="src/systems/fphands.js?v=peak1014"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
   <script src="src/entities/tattoo.js?v=mem1014"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
@@ -1172,7 +1172,7 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=winhole1014"></script>
-<script src="src/city/buildings.js?v=winhole1014"></script>
+<script src="src/city/buildings.js?v=peak1014"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1250,7 +1250,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4d-3. SIMS-STYLE WORLD FOUNDATION: asset catalog + occupancy/anti-overlap
      placement + per-biome town generator (loaded before biome/island builders). -->
 <script src="src/city/assets.js?v=nodash1"></script>
-<script src="src/city/placement.js?v=sims2"></script>
+<script src="src/city/placement.js?v=peak1014"></script>
 <script src="src/city/official_assets.js?v=cars1"></script>
 <!-- 4d-3b. F4 — the player-building ENABLING ENGINE (additive, zero call
      sites change yet): a 16m chunk registry, then spawnPiece/despawnPiece/
@@ -1457,7 +1457,7 @@ document.body.appendChild(b);}}catch(e){}})();
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
 <script src="src/city/brain_city.js?v=standdown1009"></script>
-<script src="src/entities/pedinstance.js?v=pf0930c"></script>
+<script src="src/entities/pedinstance.js?v=peak1014"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1825,8 +1825,8 @@ document.body.appendChild(b);}}catch(e){}})();
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=speed1014"></script>
-<script src="src/city/metro_ground.js?v=mem1014"></script>
-<script src="src/city/metro.js?v=farcopy1013"></script>
+<script src="src/city/metro_ground.js?v=peak1014"></script>
+<script src="src/city/metro.js?v=peak1014"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
@@ -2401,7 +2401,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=boot1013"></script>
+<script src="src/city/govcomplex.js?v=peak1014"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2604,7 +2604,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/losgrid.js?v=nukecost1013"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=nukecost1013"></script>
+<script src="src/core/batch.js?v=peak1014"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder

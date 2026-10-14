@@ -3020,10 +3020,13 @@
     const w = Math.min(maxN, nextPow2(Math.ceil((x1 - x0) / cellWant)));
     const cell = Math.max(cellWant, (x1 - x0) / w, (z1 - z0) / maxN);
     const h = Math.min(maxN, nextPow2(Math.ceil((z1 - z0) / cell)));
-    const data = new Uint8Array(w * h * 4);
+    // opts.defer: the map paints straight into its rect of a shared atlas
+    // (out.bind, city/metro.js packFarMaps), never into an array of its own
+    let data = opts.defer ? null : new Uint8Array(w * h * 4), stride = w, offX = 0, offY = 0;
     const out = { w: w, h: h, x0: x0, z0: z0, cell: cell, data: data, ms: 0 };
+    out.bind = function (D, S, ax, ay) { data = D; stride = S; offX = ax; offY = ay; out.data = null; };
     function put(i, j, c, a, k) {
-      const o = (j * w + i) * 4;
+      const o = ((j + offY) * stride + i + offX) * 4;
       if (k < 1 && data[o + 3]) {             // edge coverage: blend over what is there
         const r0 = data[o] / 255, g0 = data[o + 1] / 255, b0 = data[o + 2] / 255;
         data[o] = Math.round(255 * Math.sqrt(r0 * r0 * (1 - k) + c[0] * k));

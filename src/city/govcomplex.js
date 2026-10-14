@@ -1849,7 +1849,8 @@
       // Executive Mansion shipped as a Tudor manor with a dome through its
       // roof and a pagoda for a West Wing. A caller may still pass its own
       // `dress` (the Freeport's shed does) and that wins.
-      const base = spec ? { facade: "civic", civic: spec, district: "core", dress: false } : { facade: "office", district: "core", dress: false };
+      // keepPlanes: houseDress resolves its dressing against the shell's planes
+      const base = spec ? { facade: "civic", civic: spec, district: "core", dress: false, keepPlanes: true } : { facade: "office", district: "core", dress: false, keepPlanes: true };
       b = CBZ.cityMakeBuilding(root, x, z, w, d, storeys, hex, side,
         bopts ? Object.assign(base, bopts) : base);
     } catch (e) { b = null; }

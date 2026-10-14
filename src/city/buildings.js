@@ -384,11 +384,15 @@
   // trim they cost a full box of vertices apiece (~0.8 KB); an instance is a
   // matrix and a colour (76 B), and a whole city of windows is a few dozen
   // draw calls. Records hold WORLD coords (the root is at identity).
-  const trimRecs = [];
+  // A record lives until its pool is built (buildTrimPools): the instance
+  // matrix and colour are the trim from then on. (A module-wide list of
+  // every record used to be kept for a count: 79k objects, ~10 MB of the
+  // phone boot's heap, read by nothing.)
+  let trimCount = 0;
   let pendingTrim = [];
   function addTrim(group, lx, ly, lz, bw, bh, bd, col, ox, oz) {
     const rec = { x: ox + lx, y: ly, z: oz + lz, hw: bw / 2, hh: bh / 2, hd: bd / 2, col: col >>> 0, pool: null, inst: -1, _grp: group };
-    pendingTrim.push(rec); trimRecs.push(rec);
+    pendingTrim.push(rec); trimCount++;
     return rec;
   }
   const _trimC = new THREE.Color();
@@ -430,7 +434,7 @@
       root.add(im); glassPools.push(im);
     });
   }
-  CBZ.cityTrimStats = function () { return { recs: trimRecs.length, pending: pendingTrim.length }; };
+  CBZ.cityTrimStats = function () { return { recs: trimCount, pending: pendingTrim.length }; };
 
   // ---- MASONRY VENEER POOLS (BLD_MASONRY_TEXTURE) -------------------------
   // THE BATCHING PROBLEM, stated plainly: core/batch.js refuses to merge ANY
@@ -4944,8 +4948,10 @@
       openings: openings, bays: bays, doorKind: doorKind, doorKit: doorFrontKit, houseNumber: doorKind === "derelict" ? null : houseNo,
       facadePattern: FO.pattern(w, d, FH, storeys, openings),
       // the shell's own surfaces (structure + the window and door modules),
-      // building-local [x0,x1,y0,y1,z0,z1]: planes a later dresser must not share
-      fixedPlanes: structBoxes.concat(veneerRecs, roundRecs, trimLocal, decoFixed),
+      // building-local [x0,x1,y0,y1,z0,z1]: planes a later dresser must not
+      // share. Only a caller that dresses the shell afterwards asks for them
+      // (opts.keepPlanes: govcomplex.js's houseDress); see the release below.
+      fixedPlanes: opts.keepPlanes ? structBoxes.concat(veneerRecs, roundRecs, trimLocal, decoFixed) : null,
       reach: opts.reach != null ? opts.reach : null, // parcel depth past the wall (the footway starts there)
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
     // A swinging entrance only speaks when this player caused its cycle or is
@@ -4990,6 +4996,14 @@
     // hand the next world the previous one's coordinates — which is the actual
     // ghost city this registry exists to prevent.
     if (root && root.userData) (root.userData.shells || (root.userData.shells = [])).push(built);
+    /* THE PLANE LISTS GO WITH THE BUILD. `built.lbox` keeps this whole
+       function's scope alive for the life of the shell, so every list in it
+       stayed: one small [x0,x1,y0,y1,z0,z1] array per structural box, trim
+       module, veneer tile and deco box, ~200k arrays citywide, the largest
+       live V8 sites of the phone boot (trim 11 MB, flushDeco 9 MB, a share of
+       lbox's 21 MB). Their one reader, flushDeco, ran above; fixedPlanes
+       holds its own copy when it was asked for. */
+    structBoxes.length = 0; veneerRecs.length = 0; roundRecs.length = 0; trimLocal.length = 0; decoFixed.length = 0;
     return built;
   }
   // The connected island district reuses the exact same enterable shell and

@@ -793,7 +793,12 @@
       N = N || 1024;
       const W = rect.maxX - rect.minX, D = rect.maxZ - rect.minZ;
       const cx = W / N, cz = D / N, REACH = 32;
-      const f = new Float32Array(N * N).fill(REACH);
+      // THE RASTER IS THE BYTES. The 8-bit encoding below is monotonic in the
+      // distance (clamp, then round), so the byte of the nearest road is the
+      // smallest byte over every road: each segment writes its byte straight
+      // in, identical texels, and no 2048^2 float raster (16 MB per build,
+      // built twice at a boot and kept alive by the sample closure's context)
+      const bytes = new Uint8Array(N * N).fill(255);
       function seg(ax, az, bx, bz, half) {
         const x0 = Math.max(0, Math.floor((Math.min(ax, bx) - half - REACH - rect.minX) / cx)), x1 = Math.min(N - 1, Math.ceil((Math.max(ax, bx) + half + REACH - rect.minX) / cx));
         const z0 = Math.max(0, Math.floor((Math.min(az, bz) - half - REACH - rect.minZ) / cz)), z1 = Math.min(N - 1, Math.ceil((Math.max(az, bz) + half + REACH - rect.minZ) / cz));
@@ -805,8 +810,11 @@
             let t = L2 > 0 ? ((px - ax) * dx + (pz - az) * dz) / L2 : 0;
             t = t < 0 ? 0 : t > 1 ? 1 : t;
             const d = Math.hypot(ax + dx * t - px, az + dz * t - pz) - half;
+            if (d >= 31.75) continue;
+            let v = Math.round(128 + (d < -32 ? -32 : d) * 4);
+            v = v < 0 ? 0 : v;
             const k = j * N + i;
-            if (d < f[k]) f[k] = d;
+            if (v < bytes[k]) bytes[k] = v;
           }
         }
       }
@@ -818,8 +826,6 @@
         n++;
       }
       for (const s of segs || []) { seg(s.x0, s.z0, s.x1, s.z1, s.half); n++; }
-      const bytes = new Uint8Array(N * N);
-      for (let k = 0; k < N * N; k++) { const v = Math.round(128 + Math.max(-32, Math.min(31.75, f[k])) * 4); bytes[k] = v < 0 ? 0 : v > 255 ? 255 : v; }
       const tex = new THREE.DataTexture(bytes, N, N, THREE.LuminanceFormat, THREE.UnsignedByteType);
       tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
       tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;

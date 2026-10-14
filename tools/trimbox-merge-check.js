@@ -15,7 +15,7 @@ const B = fs.readFileSync(ROOT + "/src/city/buildings.js", "utf8");
 const BA = fs.readFileSync(ROOT + "/src/core/batch.js", "utf8");
 const code = [
   grab(B, /  const _boxNrm = new Map\(\);/, "  // boxes: flat [lx, ly, lz"),
-  grab(B, /  function lazyAttr\(Ctor/, "  // ---- the enterable building"),
+  grab(B, /  function lazyAttr\(Ctor/, "  /* WHAT A SHELL IS BUILT OF"),
   grab(BA, /  const _nm3 = new THREE.Matrix3\(\);/, "  // ---- WHAT IS IN THE FAT BUCKETS"),
   "this.mergedBoxGeometry = mergedBoxGeometry; this.bakeMergeV2 = bakeMergeV2;",
 ].join("\n");

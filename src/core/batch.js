@@ -366,7 +366,12 @@
     let arr = groupRanges.get(top);
     if (!arr) { arr = []; groupRanges.set(top, arr); }
     arr.push(entry);
+    if (entry.mesh && entry.mesh._cbzRoom) entry.mesh._cbzRoom.ranges.push(entry);
   }
+  // a room recipe that is not built has no vertices to zero: the hide is a
+  // mark, applied when the room is built (buildRoom)
+  const ROOM_HIDDEN = { room: true };
+  function roomUnbuilt(e) { const R = e.mesh._cbzRoom; return !!(R && !R.built); }
   CBZ.batchHideGroup = function (top) {
     const arr = groupRanges.get(top);
     if (!arr) return 0;
@@ -374,6 +379,7 @@
     for (const e of arr) {
       if (e.whole) { if (e.mesh.visible) { e.mesh.visible = false; n++; } continue; }
       if (e._stash) continue;                       // already hidden
+      if (roomUnbuilt(e)) { e._stash = ROOM_HIDDEN; n++; continue; }
       if (rangeSet(e.mesh.geometry.attributes.position, e.start, e.count, true, e, e.mesh.geometry)) n++;
     }
     return n;
@@ -385,6 +391,7 @@
     for (const e of arr) {
       if (e.whole) { if (!e.mesh.visible) { e.mesh.visible = true; n++; } continue; }
       if (!e._stash) continue;
+      if (roomUnbuilt(e) || e._stash === ROOM_HIDDEN) { e._stash = null; e._stashQ = null; n++; continue; }
       if (rangeSet(e.mesh.geometry.attributes.position, e.start, e.count, false, e, e.mesh.geometry)) n++;
     }
     return n;
@@ -881,8 +888,12 @@
     buckets.forEach((b, bkey) => {
       const meshes = b.meshes;
       if (meshes.length < 2 && !b.interior) return;   // nothing to gain (a room merges even alone: it must join the near-only group)
-      let merged, counts;
-      if (v2) {
+      let merged, counts, recipe = null;
+      if (v2 && b.interior && ROOM_RECIPE()) {
+        recipe = roomRecipe(meshes);
+        merged = recipe.geo; counts = recipe.counts;
+        census(bkey, meshes, counts, recipe.nPos);
+      } else if (v2) {
         const r = bakeMergeV2(meshes);
         merged = r.geometry; counts = r.counts;
         census(bkey, meshes, counts, r.geometry.attributes.position.count);
@@ -908,7 +919,7 @@
       mesh.matrixAutoUpdate = false;              // static — skip per-frame matrix work
       // a merged-per-building shell (or per-tile bucket) needs a bounding
       // sphere or frustum culling can't reject it.
-      merged.computeBoundingSphere();
+      if (!recipe) merged.computeBoundingSphere();
       merged._evictable = true;                   // owned by this one mesh: core/farcull.js may drop its GPU copy when far
       if (b.interior) {
         // a room's merged furniture lives in the root's interiors group
@@ -917,8 +928,17 @@
         mesh._cbzInterior = glazing(ib, ib.ox != null ? ib.ox : b.interior.g.matrixWorld.elements[12], ib.oz != null ? ib.oz : b.interior.g.matrixWorld.elements[14]);
         mesh.visible = false;                     // shown by the updater when somebody is near
         interiorsGroup(target).add(mesh);
-        interiorMeshes.push(mesh);
-        merged.addEventListener("dispose", deadMarker(mesh));   // (made outside run(): a closure here would keep run's whole scope, every source mesh, alive)
+        if (recipe) {
+          // built the frame it enters the view (roomFrame), unbuilt when left
+          // behind or when anything disposes it; held weakly, so a freed stream
+          // job's rooms simply go with it
+          mesh._cbzRoom = recipe; mesh._cbzPacked = true;
+          merged.addEventListener("dispose", roomDisposed(mesh));
+          interiorMeshes.push(new WeakRef(mesh));
+        } else {
+          interiorMeshes.push(mesh);
+          merged.addEventListener("dispose", deadMarker(mesh));   // (made outside run(): a closure here would keep run's whole scope, every source mesh, alive)
+        }
       } else
       target.add(mesh);                           // baked to world space; target is identity
       if (b.hide) {
@@ -1021,6 +1041,7 @@
   // a room left behind gives its GPU buffers back (read back and packed first
   // when it kept no JS copy), and comes back through roomFrame like any packed one
   function evictRoom(m) {
+    if (m._cbzRoom) { if (m._cbzRoom.built) unbuildRoom(m); return; }
     const g = m.geometry, a = g && g.attributes.position;
     if (!a || !a._cbzUploaded) return;
     CBZ.batchQueueEvict(g, function () { return !m._want; }, function () {
@@ -1033,17 +1054,144 @@
     });
   }
   function packRoom(m) {
+    if (m._cbzRoom) { unbuildRoom(m); return; }
     const g = m.geometry, a = g && g.attributes.position;
     if (!a || a._cbzUploaded || !CBZ.geoCompactOwned) { m._cbzPacked = true; return; }
     CBZ.geoCompactOwned(g);
     m._cbzPacked = true;
   }
   function expandRoom(m) {
+    if (m._cbzRoom) { buildRoom(m); return; }
     const g = m.geometry;
     if (g && CBZ.geoExpandAll) CBZ.geoExpandAll(g);
     m._cbzPacked = false;
   }
   function deadMarker(mesh) { return function () { mesh._cbzDead = true; }; }
+
+  /* ---- A ROOM IS A RECIPE UNTIL SOMEBODY LOOKS IN ----------------------
+     Measured 2026-10-14 (phone boot, streamed downtown): the merged rooms
+     (furniture and fit-out seen through windows, ~105 buckets, 3.1 M
+     vertices) were 41 MB of geometry that was NEVER drawn at the boot: baked
+     to floats (42 MB of garbage on the boot peak), packed to 16 bits, and
+     held, while a room only draws within 130 m of its building (or through
+     its glass to the fog). 84 % of those vertices come from trim box lists
+     (city/buildings.js mergedBoxGeometry: 6 numbers a box, 24 vertices when
+     baked) and most of the rest from shared unit boxes. So a room is now
+     its recipe: per source mesh, in merge order, the box list or the shared
+     geometry it was made of, its world matrix and its tint (about a tenth of
+     the packed bytes). The room is baked by the very same bakeMergeV2 the
+     frame it enters the view (roomFrame), its CPU arrays drop once on the
+     GPU in the streamed city, and it goes back to its recipe when it is left
+     behind or disposed (a parked or freed stream job). The output is the
+     bake the room always had, at full float precision (the 16-bit packing
+     is gone with it). A hidden building's slice is a mark until the room is
+     built, then zeroed in the fresh bake. An evicted room used to be marked
+     dead by its own dispose (deadMarker) and never came back; a recipe room
+     is only dropped when its mesh is collected (a freed job).
+     ?cfg_BATCH_ROOM_RECIPE=0: the baked-and-packed rooms. */
+  function ROOM_RECIPE() { return !(CBZ.CONFIG && CBZ.CONFIG.BATCH_ROOM_RECIPE === false); }
+  const _rbox = new THREE.Box3(), _rv = new THREE.Vector3();
+  function roomRecipe(meshes) {
+    const n = meshes.length;
+    const src = new Array(n), counts = new Array(n), mats = new Float64Array(n * 16), tints = new Float64Array(n * 3);
+    let nPos = 0;
+    _rbox.makeEmpty();
+    for (let i = 0; i < n; i++) {
+      const m = meshes[i], g = m.geometry, pc = g.attributes.position.count;
+      const BS = g._cbzBoxSource && !g._cbzBoxSource.built() && !g.attributes.color ? g._cbzBoxSource : null;
+      // a box list keeps only itself (its closure holds the 6 numbers a box);
+      // anything else keeps its geometry (shared unit boxes, a stair core)
+      src[i] = BS ? { bs: BS, pc: pc, ic: BS.n * 36 } : g;
+      counts[i] = pc; nPos += pc;
+      const e = m.matrixWorld.elements;
+      for (let k = 0; k < 16; k++) mats[i * 16 + k] = e[k];
+      const t = m.material && m.material.color;
+      tints[i * 3] = t ? t.r : 1; tints[i * 3 + 1] = t ? t.g : 1; tints[i * 3 + 2] = t ? t.b : 1;
+      if (!g.boundingBox) g.computeBoundingBox();
+      const bb = g.boundingBox;
+      if (bb && !bb.isEmpty()) {
+        for (let c = 0; c < 8; c++) {
+          _rv.set(c & 1 ? bb.max.x : bb.min.x, c & 2 ? bb.max.y : bb.min.y, c & 4 ? bb.max.z : bb.min.z).applyMatrix4(m.matrixWorld);
+          _rbox.expandByPoint(_rv);
+        }
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.boundingBox = _rbox.clone();
+    geo.boundingSphere = geo.boundingBox.getBoundingSphere(new THREE.Sphere());
+    geo._cbzNoDraw = true;                         // never drawn unbuilt (vendor three projectObject)
+    return { geo: geo, src: src, counts: counts, mats: mats, tints: tints, nPos: nPos, ranges: [], built: false };
+  }
+  // the proxies bakeMergeV2 reads (geometry, matrixWorld, material.color):
+  // made for the one bake and dropped
+  function roomProxies(R) {
+    const out = new Array(R.src.length);
+    for (let i = 0; i < R.src.length; i++) {
+      const s = R.src[i];
+      const geometry = s.bs ? { attributes: { position: { count: s.pc } }, index: { count: s.ic }, _cbzBoxSource: s.bs } : s;
+      out[i] = { geometry: geometry, matrixWorld: new THREE.Matrix4().fromArray(R.mats, i * 16),
+        material: { color: { r: R.tints[i * 3], g: R.tints[i * 3 + 1], b: R.tints[i * 3 + 2] } } };
+    }
+    return out;
+  }
+  function dropUploaded() { this.array = null; CBZ.freedStaticArrays = true; }
+  function buildRoom(m) {
+    const R = m._cbzRoom, g = m.geometry;
+    if (R.built) { m._cbzPacked = false; return; }
+    const r = bakeMergeV2(roomProxies(R)).geometry;
+    const P = r.attributes.position.array;
+    // a building hidden while this room was a recipe: its slice is zeroed now
+    for (let i = 0; i < R.ranges.length; i++) {
+      const e = R.ranges[i]; if (!e._stash) continue;
+      const i0 = e.start * 3, n = e.count * 3;
+      e._stash = P.slice(i0, i0 + n); e._stashQ = null;
+      P.fill(0, i0, i0 + n);
+    }
+    // one CPU copy: in the streamed (phone) city the arrays go once uploaded
+    // (slice hides then write the GPU buffer, rangeSet), as for every merged mesh
+    const gpuOnly = CBZ.CONFIG && CBZ.CONFIG.CITY_STREAM === true && CBZ.batchGpuSliceable && CBZ.batchGpuSliceable();
+    for (const k in r.attributes) { const a = r.attributes[k]; if (gpuOnly) a.onUpload(dropUploaded); g.setAttribute(k, a); }
+    if (gpuOnly) r.index.onUpload(dropUploaded);
+    g.setIndex(r.index);
+    g._cbzNoDraw = false;
+    R.built = true;
+    m._cbzPacked = false;
+    CBZ.roomStats.built++;
+  }
+  // back to the recipe: the GPU copy and every array go (the dispose event
+  // lands in roomDisposed, which drops the attributes)
+  function unbuildRoom(m) {
+    if (!m._cbzRoom.built) { m._cbzPacked = true; m.visible = false; return; }
+    const g = m.geometry, atts = Object.assign({}, g.attributes), idx = g.index;
+    g.dispose();                                   // (every dispose listener has run when this returns)
+    dropRoomArrays(g, atts, idx);
+  }
+  // the attributes go AFTER three's own dispose listener has freed their GL
+  // buffers (it walks geometry.attributes; dropping them first would leak
+  // the buffers): only those exact attributes, never a rebuilt room's
+  function dropRoomArrays(g, atts, idx) {
+    for (const k in atts) if (g.attributes[k] === atts[k]) g.deleteAttribute(k);
+    if (g.index === idx) g.index = null;
+  }
+  function roomDisposed(m) {
+    return function () {
+      const R = m._cbzRoom, g = m.geometry;
+      if (!R || !R.built) return;
+      // a hidden slice is a mark again: the next bake zeroes it
+      for (let i = 0; i < R.ranges.length; i++) {
+        const e = R.ranges[i]; if (!e._stash) continue;
+        if (e._stash.glBuf) { try { CBZ.renderer.getContext().deleteBuffer(e._stash.glBuf); } catch (er) {} }
+        e._stash = ROOM_HIDDEN; e._stashQ = null;
+      }
+      g._cbzNoDraw = true;
+      R.built = false;
+      m._cbzPacked = true; m.visible = false;
+      CBZ.roomStats.unbuilt++;
+      const atts = Object.assign({}, g.attributes), idx = g.index;
+      queueMicrotask(function () { dropRoomArrays(g, atts, idx); });
+    };
+  }
+  CBZ.roomStats = { built: 0, unbuilt: 0 };
   function INTERIOR_SPLIT() { return !(CBZ.CONFIG && CBZ.CONFIG.BATCH_INTERIOR_SPLIT === false); }
   const INTERIOR_R = 130;
   const interiorMeshes = [];
@@ -1065,16 +1213,16 @@
     const sc = CBZ.scene, fogEnd = ((sc && sc.fog && sc.fog.far) || CBZ.cityFogFar || 760) + 30;
     let w = 0;
     for (let i = 0; i < interiorMeshes.length; i++) {
-      const m = interiorMeshes[i];
-      if (m._cbzDead) continue;                                    // its geometry was disposed (a freed stream job)
-      interiorMeshes[w++] = m;
+      const it = interiorMeshes[i], m = it.deref ? it.deref() : it;
+      if (!m || m._cbzDead) continue;                              // its geometry was disposed / its job freed and collected
+      interiorMeshes[w++] = it;
       const I = m._cbzInterior, d = Math.hypot(P.x - I.x, P.z - I.z) - I.r;
       const R = seesGlass(I, P.x, P.z) ? fogEnd : INTERIOR_R;
       if (m._want) { if (d > R + 25) { m._want = false; evictRoom(m); } }
       else if (d < R) m._want = true;
       // a room nobody has drawn yet keeps half-size positions (core/citystream.js)
       // until the frame it enters the view (roomFrame below)
-      if (!m._cbzPacked && !(m.geometry.attributes.position && m.geometry.attributes.position._cbzUploaded)) packRoom(m);
+      if (!m._cbzPacked && !(m.geometry.attributes.position && m.geometry.attributes.position._cbzUploaded) && !(m._cbzRoom && m._want)) packRoom(m);
       m.visible = !!m._want && !m._cbzPacked;      // (a boolean: three draws anything whose visible is not === false)
     }
     interiorMeshes.length = w;
@@ -1089,8 +1237,8 @@
     const cam = CBZ.camera; if (!cam) return;
     let prepared = false;
     for (let i = 0; i < interiorMeshes.length; i++) {
-      const m = interiorMeshes[i];
-      if (!m._want || !m._cbzPacked || m._cbzDead) continue;
+      const it = interiorMeshes[i], m = it.deref ? it.deref() : it;
+      if (!m || !m._want || !m._cbzPacked || m._cbzDead) continue;
       if (!prepared) { cam.updateMatrixWorld(); _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); _fr.setFromProjectionMatrix(_pm); prepared = true; }
       const bs = m.geometry.boundingSphere; if (!bs) { expandRoom(m); m.visible = true; continue; }
       _sp.center.copy(bs.center); _sp.radius = bs.radius * 1.3 + 8;
@@ -1098,7 +1246,7 @@
     }
   }
   if (CBZ.onUpdate) CBZ.onUpdate(99.9, roomFrame);
-  CBZ.batchInteriorAudit = function () { let on = 0; for (const m of interiorMeshes) if (m.visible) on++; return { meshes: interiorMeshes.length, shown: on, R: INTERIOR_R }; };
+  CBZ.batchInteriorAudit = function () { let on = 0, built = 0; for (const it of interiorMeshes) { const m = it.deref ? it.deref() : it; if (!m) continue; if (m.visible) on++; if (m._cbzRoom && m._cbzRoom.built) built++; } return { meshes: interiorMeshes.length, shown: on, built: built, R: INTERIOR_R }; };
 
   CBZ.batchStaticUnder = function (root) {
     if (!root || root.userData._batched) return null;
