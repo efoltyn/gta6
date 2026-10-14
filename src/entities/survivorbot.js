@@ -906,7 +906,10 @@
         }
         if (d < clear) clear = d;
       }
-      const score = Math.min(clear, 30) - r * 0.08 - Math.max(0, y - 6) * 0.5;
+      let score = Math.min(clear, 30) - r * 0.08 - Math.max(0, y - 6) * 0.5;
+      // the fire burns the GROUND now, not just the trees: a road, the beach
+      // or the black behind the front is where a body survives it
+      if (trees && CBZ.wildfire && CBZ.wildfire.refuge) score += (CBZ.wildfire.refuge(x, z) - 0.5) * 24;
       if (score > bs) { bs = score; best = { x: x, z: z }; }
     }
     return best;

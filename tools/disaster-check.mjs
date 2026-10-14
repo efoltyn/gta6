@@ -122,8 +122,10 @@ const CENSUS = [
   ["spectate", "CBZ.spectate || CBZ.clearSpectate"],
 ];
 
-const ROSTER = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado",
+const ROSTER_ALL = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado",
   "hurricane", "blizzard", "meteor", "sinkhole", "volcano"];
+// --only wildfire,quake: sweep just those (a builder's loop on one def)
+const ROSTER = arg("--only") ? arg("--only").split(",").filter((id) => ROSTER_ALL.includes(id)) : ROSTER_ALL;
 
 const report = { url: URL_REL, ok: false, fails: [], measures: {}, errors: [], census: {} };
 const fail = (m) => { report.fails.push(m); };
@@ -283,7 +285,9 @@ try {
           if (i % 150 === 0) await new Promise(r => setTimeout(r, 0));
         }
         const p = CBZ.player;
-        return { forced: true, active, warned, ticks, ended,
+        // the wildfire reports what it did to the REAL island (fuel bed, houses, cars, cost)
+        const fire = ${JSON.stringify(id)} === 'wildfire' && CBZ.wildfireAudit ? CBZ.wildfireAudit() : undefined;
+        return { forced: true, active, warned, ticks, ended, fire,
                  x: p.pos.x, y: p.pos.y, z: p.pos.z,
                  live: CBZ.bots ? CBZ.bots.filter(b => !b.dead).length : 0,
                  killed: CBZ.bots ? CBZ.bots.filter(b => b.dead).length : 0 };
@@ -294,6 +298,7 @@ try {
       else if (!r.active) sweep.neverActive.push(id);
       if (r.x != null && !(isFinite(r.x) && isFinite(r.y) && isFinite(r.z))) fail(id + ": player position went NaN");
       say(`  ${id.padEnd(11)} ${r.active ? String(r.active).padStart(4) + " active ticks · killed " + r.killed : "NEVER ACTIVE"}`);
+      if (r.fire) say("              fire: " + JSON.stringify(r.fire));
     }
     if (sweep.neverActive.length) fail("never reached active: " + sweep.neverActive.join(", "));
   } else {
