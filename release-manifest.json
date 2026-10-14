@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "5d18da66455742f76395e95ee2b2d0ab2c7ca34d",
-  "createdAt": "2026-10-14T02:42:38.589Z",
+  "sourceCommit": "77b2dd34cc4d2ee1af05fb45aa0fcb95bdd31670",
+  "createdAt": "2026-10-14T02:52:42.205Z",
   "fileCount": 1366,
-  "totalBytes": 50019754,
+  "totalBytes": 50026314,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -548,8 +548,8 @@
     },
     {
       "file": "src/city/buildings.js",
-      "bytes": 219378,
-      "sha256": "1760d86262f4848fcfd7fa9a1050ea294696aa6c4385ad0fb836c6cf17622835"
+      "bytes": 223148,
+      "sha256": "ff841031a6a076082d7a68c2702167bc4e3b1747ede1c21f574637cf75c4f42a"
     },
     {
       "file": "src/city/buildings_civic.js",
@@ -928,13 +928,13 @@
     },
     {
       "file": "src/city/facade_kit.js",
-      "bytes": 14000,
-      "sha256": "12af9b954eb122753dccdb78268361ed5154bd54eaf286e2d303fbbd5c685007"
+      "bytes": 14899,
+      "sha256": "87c59ad6c5fe4c62f477d645ed649799d3d7e2695f7f966110092140b5846b2a"
     },
     {
       "file": "src/city/facade_openings.js",
-      "bytes": 22641,
-      "sha256": "1a706377e8284a35edd78c0c62482a2744dc132528ad800e1f9c0bde363f5ea5"
+      "bytes": 23143,
+      "sha256": "31b0a704a99b2e1b3601db48c8bb0cbf7ced3dfd15c2c08a17a048e2ba8e8825"
     },
     {
       "file": "src/city/facades/adobe.js",
@@ -1418,13 +1418,13 @@
     },
     {
       "file": "src/city/metro_fabric.js",
-      "bytes": 101292,
-      "sha256": "817f7603b9472b0d63a4c834a21947fcd5566dc761702cebd33a8a8befb5c787"
+      "bytes": 101468,
+      "sha256": "05952fe4ff292b18f401139c7c27ee6fdbeca57f9f4bbefcc2276641d45f1191"
     },
     {
       "file": "src/city/metro_ground.js",
-      "bytes": 98619,
-      "sha256": "024d88c5190c9d50c77165c872b3f537534edbe66d4a12a19a8b4a9d912d88d4"
+      "bytes": 99076,
+      "sha256": "5355c44e6e5dd45e034b9f99095de904bf614da85de04cf0072ecbd387b71d52"
     },
     {
       "file": "src/city/metro_structs.js",
@@ -1433,8 +1433,8 @@
     },
     {
       "file": "src/city/metroplan.js",
-      "bytes": 84138,
-      "sha256": "4c36509e1c8f9882be82fea4d6ba222a518c645ccac2f8fc755eeba4dfd60827"
+      "bytes": 84674,
+      "sha256": "c8531980c3eb2313ca7908326fa23bff279a40feaf9d978d5a4dd43751912057"
     },
     {
       "file": "src/city/migration.js",
@@ -1903,8 +1903,8 @@
     },
     {
       "file": "src/city/towngen.js",
-      "bytes": 25793,
-      "sha256": "1bd27816acc4032b6b8897b8c5841b89bfe95f69b12040ebf564abdf070fdb83"
+      "bytes": 26048,
+      "sha256": "4aa97654b8626c607974fe110d753941de18c9a60a19f56d53239ce161380500"
     },
     {
       "file": "src/city/traffic.js",
@@ -6768,28 +6768,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 62971,
-      "sha256": "1cb5c496b8764e707cc8ebc04dd960d647a6e303158fcb5acde1f19af95908e0"
+      "bytes": 62964,
+      "sha256": "eecc64045a3fdc5c9191de73fb063c8e43dfed88afb637ecb19a84549e3a7152"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 63014,
-      "sha256": "4de3ffa12764785d8db6a0ce74d77fc75daf77cc55d674d0693fbf01c618c000"
+      "bytes": 63007,
+      "sha256": "970c2a044e5f93ca91ad2fbb86eb7f177676b55c4b06857da511c94c79ee347d"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 62983,
-      "sha256": "e88c008983b33a2fd775a32354f51960a9c72ddf21e466c97dfab7225ad3b544"
+      "bytes": 62976,
+      "sha256": "2aaa540378f0750245ea730aa9fa75acdb1e9d05a808bcba288c4590f436ed8a"
     },
     {
       "file": "gang-city.html",
-      "bytes": 62938,
-      "sha256": "35598be808ed429216449d8bca1483ce88f49c49086a085503b536435652d32b"
+      "bytes": 62931,
+      "sha256": "b1b196a9117a70cb7d7e77576423145a67f5e4b88e0c0357806fbcff7506d618"
     },
     {
       "file": "gun-game.html",
-      "bytes": 62960,
-      "sha256": "76a64cddcee5c47eb423c416e90a648f16cbe38a70c89ae0a716836cb1dae4b4"
+      "bytes": 62953,
+      "sha256": "0213cebf8125d164d32f0b469c96cb6b9209a103c7885f1278cd6516e5cf5eb7"
     },
     {
       "file": "games/battle.html",
