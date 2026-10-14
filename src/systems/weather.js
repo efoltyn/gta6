@@ -126,7 +126,7 @@
      so a disaster ending does not snap the sky. Nothing accumulates, so a
      driver that dies mid-event simply stops being re-asserted. */
   const RELEASE = 3.5;          // seconds to bleed a lapsed drive back to ambient
-  const drv = { rain: 0, snow: 0, wind: 0, wx: 1, wz: 0, fog: 0, fogColor: -1, lightning: 0, pool: 0, cover: -1 };
+  const drv = { rain: 0, snow: 0, ashfall: 0, wind: 0, wx: 1, wz: 0, fog: 0, fogColor: -1, lightning: 0, pool: 0, cover: -1 };
   let drvHold = 0;              // seconds of assertion left
   /* ASH KEEPS ITS OWN CLOCK. The deposit outlives the sky by design — the
      eruption's fog has to bleed back in three and a half seconds while the
@@ -137,11 +137,20 @@
   const ash = { x: 0, z: 0, wx: 1, wz: 0, amount: 0, reach: 60, lobe: 3, spread: 0.06 };
   let ashHold = 0;
   let snowMix = 0;              // 0 = rain look, 1 = snow look (eased)
+  /* ASH GRAINS IN THE AIR — the third look of the ONE particle cloud. Fine
+     tephra falls at 1-3 m/s (rain ~9, snow ~1.5) as small dark-grey grit, and
+     standing in it is what an ashfall LOOKS like from the inside: the grains
+     streaming past and the far side of the street gone grey. It is NOT rain:
+     `ashfall` never enters `intensity`, because intensity is the wetness
+     every road, tyre and puddle in the game reads, and ash does not make
+     asphalt wet. It only feeds the particle count and the ash look. */
+  let ashMix = 0;
 
   CBZ.weatherDrive = function (spec, holdSecs) {
     if (CFG.WEATHER_DRIVE === false || !spec) return false;
     if (Number.isFinite(spec.rain)) drv.rain = Math.max(0, Math.min(1, +spec.rain));
     if (Number.isFinite(spec.snow)) drv.snow = Math.max(0, Math.min(1, +spec.snow));
+    if (Number.isFinite(spec.ashfall)) drv.ashfall = Math.max(0, Math.min(1, +spec.ashfall));
     // `pool`: metres of STANDING WATER the driver is asserting on the ground.
     // The one-word adoption for a flood — a caller that already darkens the
     // sky through this function floods the streets by adding one field, and
@@ -183,7 +192,7 @@
     // An ash-ONLY spec leaves the atmospheric hold alone (see the note on
     // ashHold above). Anything else — including an empty spec, which is what
     // every pre-ash caller effectively was — keeps the old behaviour exactly.
-    const atmos = Number.isFinite(spec.rain) || Number.isFinite(spec.snow) ||
+    const atmos = Number.isFinite(spec.rain) || Number.isFinite(spec.snow) || Number.isFinite(spec.ashfall) ||
       Number.isFinite(spec.pool) || Number.isFinite(spec.cover) ||
       Number.isFinite(spec.wind) || spec.windDir != null ||
       Number.isFinite(spec.fog) || spec.fogColor != null || Number.isFinite(spec.lightning);
@@ -334,6 +343,9 @@
   // by storing a base — instead we darken whatever colour it currently is,
   // proportional to rain intensity, AFTER daynight has run (high order).
   const _fogTmp = new THREE.Color();
+  // dark grey tephra grit (the point material is not lit: this is its final
+  // colour before fog), authored so the grains read darker than the fog veil
+  const _ashGrain = new THREE.Color(0.30, 0.285, 0.27);
   const FOG_DARK = 0x2a3340; // cool storm-grey we lerp toward
 
   // ---- lightning (Technique 2: storm flashes) --------------------------
@@ -793,7 +805,7 @@
     // A FILM IS THE GROUND SEEN THROUGH DUST: desaturated toward its own
     // luminance and a touch dimmer. The grass is still grass at this stage;
     // it has just stopped being green.
-    "    vec3 cbzAdust = mix(gl_FragColor.rgb, vec3(cbzAlm) * vec3(0.88, 0.92, 0.98),\n" +
+    "    vec3 cbzAdust = mix(gl_FragColor.rgb, vec3(cbzAlm) * vec3(0.97, 0.955, 0.93),\n" +
     "                        clamp(cbzAg * 2.4, 0.0, 1.0));\n" +
     /* THE BLANKET IS AN ALBEDO SWAP, NOT A PAINT BUCKET. A fixed grey (the
        snow term's trick) works for a blizzard because a blizzard does not
@@ -803,12 +815,15 @@
        (pow 0.55) so a lawn, a beach and an asphalt road eighteen times
        darker all land within a factor of five of each other, which is what
        "uniformly grey" actually looks like, and lands at zero at midnight.
-       Blue-shifted on purpose: the eruption's sun is 0xd9714a and a neutral
-       grey under it comes out pink — volcanofx.js's own lesson. */
-    "    vec3 cbzAcol = pow(max(cbzAlm, 0.0), 0.55) * 0.30 * cbzAm * vec3(0.92, 0.99, 1.13);\n" +
+       NOT blue-shifted any more (owner, iPad/iPhone, 2026-10-14: "purple-ish
+       speckles in the ash"): this colour is written AFTER lighting, so no sun
+       ever multiplies it — the old (0.92, 0.99, 1.13) tint went to the screen
+       as a blue-violet cast, and P3 phone panels saturate it. Ash is grey
+       with a touch of warmth; the dust film above is the same. */
+    "    vec3 cbzAcol = pow(max(cbzAlm, 1e-4), 0.55) * 0.30 * cbzAm * vec3(1.04, 1.0, 0.95);\n" +
     // never a full 1.0: the last few percent of the underlying material is
     // what keeps a buried road distinguishable from a buried lawn
-    "    gl_FragColor.rgb = mix(cbzAdust, cbzAcol, min(0.94, cbzAg * cbzAg * (3.0 - 2.0 * cbzAg)));\n" +
+    "    gl_FragColor.rgb = max(mix(cbzAdust, cbzAcol, min(0.94, cbzAg * cbzAg * (3.0 - 2.0 * cbzAg))), vec3(0.0));\n" +
     "  }\n" +
     "}\n";
 
@@ -862,7 +877,11 @@
         // vertex program never includes <beginnormal_vertex>, so objectNormal
         // does not exist there — and city/biome_snow.js's whole massif is
         // Basic. The attribute is declared in every non-raw shader prefix.
-        "vCbzUp = clamp(normalize(mat3(modelMatrix) * normal).y, 0.0, 1.0);\n" +
+        "vec3 cbzN = mat3(modelMatrix) * normal;\n" +
+        // a zero-length normal (a collapsed quad, a degenerate batch vertex)
+        // must not normalize() into NaN: Apple GPUs carry the NaN through
+        // every mix() below into the pixel, where desktop ones flush it
+        "vCbzUp = clamp(cbzN.y / max(length(cbzN), 1e-5), 0.0, 1.0);\n" +
         "#include <fog_vertex>");
       sh.fragmentShader = "uniform float uCbzSnowK;\nuniform float uCbzWetK;\n" +
         "uniform vec4 uCbzPool;\nuniform vec4 uCbzFront;\nuniform vec4 uCbzSky;\nuniform vec4 uCbzFlood;\n" +
@@ -1218,7 +1237,8 @@
     } else {
       // released: bleed every driven field to zero so the sky eases back
       const k = Math.min(1, dt / RELEASE);
-      drv.rain -= drv.rain * k; drv.snow -= drv.snow * k;
+      drv.rain -= drv.rain * k; drv.snow -= drv.snow * k; drv.ashfall -= drv.ashfall * k;
+      if (drv.ashfall < 0.004) drv.ashfall = 0;
       drv.wind -= drv.wind * k; drv.fog -= drv.fog * k;
       drv.lightning -= drv.lightning * k;
       // the flood recedes with the storm that made it; the snow it laid down
@@ -1253,8 +1273,14 @@
     // One material, two ends of a lerp — never a second particle system.
     const snowT = drvI > 0 ? (drv.snow / Math.max(1e-4, drvI)) : 0;
     snowMix += (snowT - snowMix) * Math.min(1, dt * 2.2);
-    mat.size = 0.16 + snowMix * 0.16;
+    // the grains' share of the cloud: ash wins the look wherever it is the
+    // heavier of the two precipitations falling through this camera
+    const precipI = Math.max(intensity, drv.ashfall);
+    const ashT = precipI > 0.002 ? (drv.ashfall >= intensity ? 1 : drv.ashfall / Math.max(1e-4, precipI)) : 0;
+    ashMix += (ashT - ashMix) * Math.min(1, dt * 1.6);
+    mat.size = (0.16 + snowMix * 0.16) * (1 - 0.35 * ashMix);
     mat.color.setRGB(0.737 + snowMix * 0.263, 0.823 + snowMix * 0.177, 0.910 + snowMix * 0.090);
+    if (ashMix > 0.001) mat.color.lerp(_ashGrain, ashMix);
 
     // ---- indoor check (throttled ~5x/sec, never per-drop) ----
     indoorCD -= dt;
@@ -1265,18 +1291,18 @@
 
     // ---- how many drops are live this frame ----
     // (cap read at USE time — the quality slider retunes the rain live)
-    const live = Math.round(intensity * maxDrops());
+    const live = Math.round(precipI * maxDrops());
     // suppress the cloud entirely while under a roof — re-shows the instant the
     // next throttled test clears `indoors` after stepping back outside.
     rain.visible = live > 0 && !indoors;
-    mat.opacity = Math.min(0.55, 0.18 + intensity * 0.5);
+    mat.opacity = Math.min(0.55 + 0.25 * ashMix, 0.18 + precipI * (0.5 + 0.3 * ashMix));
 
     if (live > 0 && !indoors) {
       const cx = cam.position.x, cz = cam.position.z;
       const driftX = windX * wind;
       const driftZ = windZ * wind;
       // snow falls at about a fifth of rain's terminal speed and wanders
-      const fallK = 1 - snowMix * 0.78;
+      const fallK = (1 - snowMix * 0.78) * (1 - 0.86 * ashMix);
       // recycle ring includes the forward bias — a drop seeded at the led
       // centre's far edge must not be born already outside the ring.
       const r2 = (RADIUS + FWD_BIAS + 3) * (RADIUS + FWD_BIAS + 3);
@@ -1377,6 +1403,7 @@
     get windX() { return windX; },
     get windZ() { return windZ; },
     get snow() { return snowMix; },
+    get ashfall() { return drv.ashfall; },
     get driven() { return drvHold > 0; },
     // WHAT IS OVERHEAD. `overcast` is how much cloud deck the sky is carrying,
     // 0..1 (core/sky.js paints it); `flash` is the live additive intensity of

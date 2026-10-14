@@ -10,6 +10,7 @@
      node tools/disaster-check.mjs                      # index.html (baseline)
      node tools/disaster-check.mjs --url disaster.html  # the slice page
      node tools/disaster-check.mjs --quick              # skip the roster sweep
+     node tools/disaster-check.mjs --only volcano,quake # sweep just these defs
      node tools/disaster-check.mjs --json
 
    THREE THINGS IT ASSERTS, and they are different in kind:
@@ -122,8 +123,11 @@ const CENSUS = [
   ["spectate", "CBZ.spectate || CBZ.clearSpectate"],
 ];
 
-const ROSTER = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado",
+const ROSTER_ALL = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado",
   "hurricane", "blizzard", "meteor", "sinkhole", "volcano"];
+// --only volcano,quake: sweep just these (a builder iterating on one def)
+const ONLY = arg("--only", "");
+const ROSTER = ONLY ? ROSTER_ALL.filter((id) => ONLY.split(",").includes(id)) : ROSTER_ALL;
 
 const report = { url: URL_REL, ok: false, fails: [], measures: {}, errors: [], census: {} };
 const fail = (m) => { report.fails.push(m); };
