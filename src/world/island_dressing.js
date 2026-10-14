@@ -10,28 +10,32 @@
    This file lays everything a real small island town has between its
    buildings, each thing for a reason:
 
-     YARDS       every house gets a lot: side and back yards fenced (white
-                 picket, a low rendered block wall or a clipped hedge, one per
-                 house by position hash), the street edge left open where the
-                 house already meets the sidewalk, a GATE where the path goes
-                 through, a concrete path from the front door (always on -z)
-                 to the sidewalk, planted beds either side of the door, a
-                 mailbox where the path meets the street and a wheelie bin
-                 against the side wall. Neighbouring yards share one fence.
+     YARDS       every house stands on a LOT (world/island_plan.js): its
+                 side and back lines fenced (white picket, a low rendered
+                 block wall or a clipped hedge, one per house by position
+                 hash), a low run on the street line with a GATE where the
+                 path from the front door crosses it and a gap for the
+                 driveway, the concrete drive itself, planted beds either
+                 side of the door, a mailbox by the gate, a wheelie bin in
+                 the side yard away from the drive, a washing line out back.
+                 Laid in the house's own frame, so a house facing +x has its
+                 garden facing +x. Neighbouring yards share one fence.
      TOWERS      two concrete planters flanking the door where there is room.
-     HYDRANTS    one per street block, behind the kerb (a town has water mains
-                 because a town burns).
-     SQUARE      a paved town square on the best open ground in town: pavers,
-                 granite border, a round raised planter in the middle, benches
-                 facing it, litter bins, post-top lanterns, corner planters,
-                 bollards on the street side, tree pits round any tree that
-                 already grew there.
-     CAR LOT     the showroom's forecourt: an asphalt lot with painted bays,
-                 wheel stops and cars for sale in some of them.
-     DOCK        a timber pier on piles off the beach, straight out to swimming
-                 depth, with a ramp up, a T head, bollards and a ladder.
-     FARM        a fenced field or two on flat ground out past the town's
-                 last street: ploughed crop rows, a gable barn, round bales.
+     HYDRANTS    one per street piece, behind the kerb (a town has water
+                 mains because a town burns).
+     SQUARE      the plan's town square on Front Street: pavers, granite
+                 border, a round raised planter, benches facing it, litter
+                 bins, post-top lanterns, corner planters, bollards on the
+                 street sides, tree pits round the palms planted there.
+     CAR LOT     the showroom's forecourt: asphalt, painted bays, wheel
+                 stops and cars for sale in some of them.
+     CAR PARKS   the plan's public car parks: asphalt on the graded pad, a
+                 kerb, bay lines, wheel stops (the arena parks the cars).
+     FARM        the plan's fields out past the town: ploughed crop rows, a
+                 gable barn, round bales, post-and-rail fences.
+     SIGNS       the named places and some of the shops carry a free-standing
+                 sign on two posts in the front setback, each panel its own
+                 mesh so a storm can tear it off.
      ROCKS       the arena's boulder sites (disaster_arena.js "rocks / cover")
                  as real rock: displaced, facet-cut, part-buried, weathered,
                  wearing the rock surface map, in clusters.
@@ -48,10 +52,10 @@
 
    API
      CBZ.islandDressing.build(ctx) -> {
-       fences[], benches[], bins[], bales[], barns[], pier, plaza, lot, fields[],
-       rocks[], flammable[], meshes{}, draws, stats }
+       fences[], benches[], bins[], bales[], barns[], plaza, lot, carParks[], fields[],
+       rocks[], signs[], flammable[], meshes{}, lensMaterial, draws, stats }
      ctx (from world/disaster_arena.js, one hook line before `arena = {`):
-       root, cx, cz, R, GRID, ROADW, groundHeightAt (terrain), surfaceHeightAt
+       root, cx, cz, R, plan (world/island_plan.js), ROADW, groundHeightAt (terrain), surfaceHeightAt
        (walkable), onRoad, placed, fragile, roadSegs, h01, trees, rocks
        (sites), cars, makeCar, showroom, stations, oceanY
 ============================================================ */
@@ -246,7 +250,8 @@
     initTemps();
     const RC = roadC();
     const WALK = RC.WALK;
-    const cx = ctx.cx, cz = ctx.cz, R = ctx.R, GRID = ctx.GRID || 40;
+    const cx = ctx.cx, cz = ctx.cz, R = ctx.R;
+    const PL = ctx.plan || null;            // world/island_plan.js: lots, streets, places
     const gh = ctx.groundHeightAt, sh = ctx.surfaceHeightAt || gh;
     const h01 = ctx.h01 || function (x, z, s) { return ih(Math.round(x * 10), Math.round(z * 10), s); };
     const placed = ctx.placed || [], fragile = ctx.fragile || [];
@@ -258,8 +263,8 @@
       rock: new Acc("rock", 2.6), lens: new Acc("lens", 1),
     };
     const out = {
-      fences: [], benches: [], bins: [], bales: [], barns: [], pier: null, plaza: null, lot: null,
-      fields: [], rocks: [], hydrants: [], mailboxes: [], flammable: [], colliders: [], platforms: [],
+      fences: [], benches: [], bins: [], bales: [], barns: [], pier: null, plaza: null, lot: null, carParks: [],
+      fields: [], rocks: [], hydrants: [], mailboxes: [], flammable: [], colliders: [], platforms: [], signs: [],
       meshes: {}, draws: 0, stats: {},
     };
 
@@ -299,29 +304,14 @@
       return p;
     }
 
-    // ---- the grid ----------------------------------------------------------
-    function nearestLine(v, origin) {
-      const k = Math.max(-2, Math.min(2, Math.round((v - origin) / GRID)));
-      return { line: origin + k * GRID, off: v - (origin + k * GRID) };
-    }
-    // inside a street corridor out to the back of the sidewalk (+pad)
+    // ---- the streets ---------------------------------------------------------
+    // inside a street corridor (carriageway + sidewalks, + pad): the plan's
+    // own street rectangles, junction squares included
     function inStreet(x, z, pad) {
-      const a = nearestLine(x, cx), c = nearestLine(z, cz);
-      return Math.abs(a.off) < WALK + pad || Math.abs(c.off) < WALK + pad;
+      if (!PL) return false;
+      return !!PL.inStreet({ x0: x - pad, x1: x + pad, z0: z - pad, z1: z + pad }, 0);
     }
-    // inside a street that is actually LAID (a road piece or its junction),
-    // out to the back of the sidewalk. The grid corridors run on across the
-    // outskirts where no road was ever built: that ground is farmland.
-    const segs = ctx.roadSegs || [];
-    function nearLaidRoad(x, z, pad) {
-      for (let i = 0; i < segs.length; i++) {
-        const g = segs[i];
-        const perp = g.vertical ? Math.abs(x - g.x) : Math.abs(z - g.z);
-        const along = g.vertical ? Math.abs(z - g.z) : Math.abs(x - g.x);
-        if (perp < WALK + pad && along < g.len / 2 + 3.5 + WALK + pad) return true;
-      }
-      return false;
-    }
+    function nearLaidRoad(x, z, pad) { return inStreet(x, z, pad); }
     function isWalk(x, z) { return sh(x, z) - gh(x, z) > 0.06; }
     // ground this pass has already given to something (the car lot, the
     // square): the yards laid after them stop at their edge
@@ -723,51 +713,63 @@
     })();
 
     /* ==================================================================
+       1b. THE CAR PARKS the plan laid (downtown, the quay, the beach):
+       asphalt on the lot's graded pad, a concrete kerb round it, white bay
+       lines, a wheel stop in every bay. The plan parks the cars in them.
+       ================================================================== */
+    if (PL) PL.parking.forEach(function (P) {
+      const r = P.rect, top = 0.05;
+      const Y = function (px, pz) { return gh(px, pz) + top; };
+      const nX = Math.max(1, Math.round((r.x1 - r.x0) / 2)), nZ = Math.max(1, Math.round((r.z1 - r.z0) / 2));
+      for (let i = 0; i < nX; i++) for (let j = 0; j < nZ; j++) {
+        const x0 = r.x0 + (r.x1 - r.x0) * i / nX, x1 = r.x0 + (r.x1 - r.x0) * (i + 1) / nX;
+        const z0 = r.z0 + (r.z1 - r.z0) * j / nZ, z1 = r.z0 + (r.z1 - r.z0) * (j + 1) / nZ;
+        quad(A.asph, new V3(x0, Y(x0, z0), z0), new V3(x0, Y(x0, z1), z1), new V3(x1, Y(x1, z1), z1), new V3(x1, Y(x1, z0), z0), vary(COL.asphalt, h01(x0, z0, 0xc11), 0.08), { faceUp: true });
+      }
+      const k = 0.15;
+      for (const sg of [-1, 1]) {
+        beam(A.mason, r.x0 - k / 2, gh(r.x0, sg < 0 ? r.z0 : r.z1) + 0.04, sg < 0 ? r.z0 - k / 2 : r.z1 + k / 2, r.x1 + k / 2, gh(r.x1, sg < 0 ? r.z0 : r.z1) + 0.04, sg < 0 ? r.z0 - k / 2 : r.z1 + k / 2, 0.2, k, COL.concrete, {});
+        beam(A.mason, sg < 0 ? r.x0 - k / 2 : r.x1 + k / 2, gh(sg < 0 ? r.x0 : r.x1, r.z0) + 0.04, r.z0, sg < 0 ? r.x0 - k / 2 : r.x1 + k / 2, gh(sg < 0 ? r.x0 : r.x1, r.z1) + 0.04, r.z1, 0.2, k, COL.concrete, {});
+      }
+      // bay lines between bays (and at each row's ends), wheel stops at the head
+      for (const b of P.bays) {
+        const across = b.alongX;                 // the row runs along x: lines run along z
+        const nose = { x: -Math.sin(b.yaw), z: -Math.cos(b.yaw) };
+        for (const sd of [-1, 1]) {
+          const lx = across ? b.x + sd * 1.3 : b.x, lz = across ? b.z : b.z + sd * 1.3;
+          const hx = across ? 0.05 : 2.6, hz = across ? 2.6 : 0.05;
+          const y = Y(lx, lz) + 0.008;
+          quad(A.asph, new V3(lx - hx, y, lz - hz), new V3(lx - hx, y, lz + hz), new V3(lx + hx, y, lz + hz), new V3(lx + hx, y, lz - hz), COL.line, { faceUp: true });
+        }
+        const wx = b.x + nose.x * 2.25, wz = b.z + nose.z * 2.25;
+        box(A.mason, wx, Y(wx, wz) + 0.06, wz, across ? 1.6 : 0.14, 0.12, across ? 0.14 : 1.6, 0, COL.concrete, {});
+      }
+      out.carParks.push({ x: P.x, z: P.z, w: P.w, d: P.d, name: P.name, bays: P.bays.length });
+      claims.push({ x: P.x, z: P.z, w: P.w + 0.4, d: P.d + 0.4 });
+    });
+
+    /* ==================================================================
        2. THE TOWN SQUARE
        ================================================================== */
     (function square() {
-      let best = null;
-      for (const H of [10, 8.5, 7]) {
-        for (let x = cx - R; x <= cx + R; x += 2) for (let z = cz - R; z <= cz + R; z += 2) {
-          const d = dC(x, z);
-          if (d < 42 || d > R - 30) continue;
-          if (inStreet(x, z, H + 0.35)) continue;          // a street runs through it
-          if (inPlaced(x, z, H + 1.2)) continue;
-          let ok = true, trees0 = 0, lo = 1e9, hi = -1e9;
-          for (let i = -H; i <= H + 1e-6 && ok; i += 2) for (let j = -H; j <= H + 1e-6; j += 2) {
-            const px = x + i, pz = z + j;
-            if (inStreet(px, pz, 0.35) || isWalk(px, pz) || inPlaced(px, pz, 1.2)) { ok = false; break; }
-            if (rockNear(px, pz, 1.0)) { ok = false; break; }
-            const g = gh(px, pz); if (g < lo) lo = g; if (g > hi) hi = g;
-          }
-          if (!ok || hi - lo > 0.35 || hi > 1.2) continue;
-          if (blocked(x - H, x + H, z - H, z + H, lo, true)) continue;   // trees become the square's trees
-          for (const t of trees) if (Math.abs(t.x - x) < H && Math.abs(t.z - z) < H) trees0++;
-          // a square belongs on a street: how many of its edges touch a sidewalk
-          let front = 0;
-          for (const s of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (isWalk(x + s[0] * (H + 1.2), z + s[1] * (H + 1.2))) front++;
-          const centreTree = treeNear(x, z, 3.2) ? 1 : 0;
-          const score = front * 10 - d * 0.08 - trees0 * 0.5 - centreTree * 20 + H * 1.5;
-          if (!best || score > best.score) best = { x: x, z: z, H: H, score: score, gy: hi, front: front };
-        }
-        if (best) break;
-      }
-      if (!best) return;
-      const x = best.x, z = best.z, H = best.H, top = 0.07;
+      const PZ = PL && PL.plaza;
+      if (!PZ) return;
+      const best = { x: PZ.x, z: PZ.z, H: Math.min(PZ.w, PZ.d) / 2, HX: PZ.w / 2, HZ: PZ.d / 2, gy: PZ.gy != null ? PZ.gy : gh(PZ.x, PZ.z) };
+      const x = best.x, z = best.z, H = best.H, HX = best.HX, HZ = best.HZ, top = 0.07;
       // one flat paved level at the lot's high point, walkable; on the low
       // side its granite edge stands proud like a real square's kerb
       const YT = best.gy + top;
       const Y = function () { return YT; };
-      addPlat(x - H, x + H, z - H, z + H, YT);
+      addPlat(x - HX, x + HX, z - HZ, z + HZ, YT);
       // tree pits for trees that grew here
-      const pits = trees.filter(function (t) { return Math.abs(t.x - x) < H && Math.abs(t.z - z) < H; });
+      const pits = trees.filter(function (t) { return Math.abs(t.x - x) < HX && Math.abs(t.z - z) < HZ; });
       const inPit = function (px, pz) { for (const t of pits) if (Math.abs(t.x - px) < 0.9 && Math.abs(t.z - pz) < 0.9) return true; return false; };
       // pavers: 1.0 m running bond, hashed tones; a 0.6 m granite sett border
       const P = 1.0, B = 0.6;
-      for (let i = -H + B; i < H - B - 1e-6; i += P) for (let j = -H + B; j < H - B - 1e-6; j += P / 2) {
-        const shift = (Math.round((j + H) / (P / 2)) & 1) ? P / 2 : 0;
-        let a0 = i + shift, a1 = Math.min(H - B, a0 + P);
-        if (a0 >= H - B) continue;
+      for (let i = -HX + B; i < HX - B - 1e-6; i += P) for (let j = -HZ + B; j < HZ - B - 1e-6; j += P / 2) {
+        const shift = (Math.round((j + HZ) / (P / 2)) & 1) ? P / 2 : 0;
+        let a0 = i + shift, a1 = Math.min(HX - B, a0 + P);
+        if (a0 >= HX - B) continue;
         const px = x + (a0 + a1) / 2, pz = z + j + P / 4;
         if (inPit(px, pz)) continue;
         const cc = vary(COL.pavers, h01(px, pz, 0xa21), 0.1);
@@ -775,13 +777,14 @@
         box(A.mason, px, y - 0.3, pz, (a1 - a0) - 0.012, 0.6, P / 2 - 0.012, 0, cc, {});
         void a1;
       }
-      for (let k = -H; k < H - 1e-6; k += 0.3) for (const s of [-1, 1]) {
-        const c1 = vary(COL.granite, h01(x + k, z + s, 0xa22), 0.14), c2 = vary(COL.granite, h01(x + s, z + k, 0xa23), 0.14);
-        for (let r = 0; r < 2; r++) {
-          const o = H - 0.15 - r * 0.3;
-          box(A.mason, x + k + 0.15, YT - 0.3, z + s * o, 0.29, 0.6, 0.29, 0, c1, {});
-          if (Math.abs(k + 0.15) < H - 0.6) box(A.mason, x + s * o, YT - 0.3, z + k + 0.15, 0.29, 0.6, 0.29, 0, c2, {});
-        }
+      // the granite sett border: along x on the two long edges, along z on the ends
+      for (let k = -HX; k < HX - 1e-6; k += 0.3) for (const s of [-1, 1]) {
+        const c1 = vary(COL.granite, h01(x + k, z + s, 0xa22), 0.14);
+        for (let r = 0; r < 2; r++) box(A.mason, x + k + 0.15, YT - 0.3, z + s * (HZ - 0.15 - r * 0.3), 0.29, 0.6, 0.29, 0, c1, {});
+      }
+      for (let k = -HZ + 0.6; k < HZ - 0.6 - 1e-6; k += 0.3) for (const s of [-1, 1]) {
+        const c2 = vary(COL.granite, h01(x + s, z + k, 0xa23), 0.14);
+        for (let r = 0; r < 2; r++) box(A.mason, x + s * (HX - 0.15 - r * 0.3), YT - 0.3, z + k + 0.15, 0.29, 0.6, 0.29, 0, c2, {});
       }
       for (const t of pits) {
         const gy = gh(t.x, t.z), mt = YT - 0.04;
@@ -819,18 +822,19 @@
       // lanterns on the axes, planters in the corners
       for (let k = 0; k < 4; k++) {
         const a = k * Math.PI / 2;
-        const lx = x + Math.cos(a) * (H - 2.2), lz = z + Math.sin(a) * (H - 2.2);
+        const lx = x + Math.cos(a) * (HX - 2.2), lz = z + Math.sin(a) * (HZ - 2.2);
         if (!treeNear(lx, lz, 1.2)) lantern(lx, lz, Y(lx, lz));
       }
       for (const s of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-        const px = x + s[0] * (H - 1.9), pz = z + s[1] * (H - 1.9);
+        const px = x + s[0] * (HX - 1.9), pz = z + s[1] * (HZ - 1.9);
         if (!treeNear(px, pz, 1.3)) planterBox(px, pz, 1.3, 0.55, Y(px, pz));
       }
       // bollards along every edge that meets a sidewalk
       for (const s of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        if (!isWalk(x + s[0] * (H + 1.2), z + s[1] * (H + 1.2))) continue;
-        for (let k = -H + 1.2; k <= H - 1.2 + 1e-6; k += 1.8) {
-          const bx = s[0] ? x + s[0] * (H - 0.35) : x + k, bz = s[1] ? z + s[1] * (H - 0.35) : z + k;
+        if (!isWalk(x + s[0] * (HX + 1.2), z + s[1] * (HZ + 1.2))) continue;
+        const HK = s[0] ? HZ : HX;
+        for (let k = -HK + 1.2; k <= HK - 1.2 + 1e-6; k += 1.8) {
+          const bx = s[0] ? x + s[0] * (HX - 0.35) : x + k, bz = s[1] ? z + s[1] * (HZ - 0.35) : z + k;
           const gy = Y(bx, bz);
           cylY(A.paint, bx, gy - 0.05, bz, 0.1, 0.1, 0.95, 10, COL.steelDark, {});
           cylY(A.paint, bx, gy + 0.9, bz, 0.1, 0.03, 0.08, 10, COL.steelDark, {});
@@ -838,12 +842,22 @@
           addCol(bx - 0.11, bx + 0.11, bz - 0.11, bz + 0.11, gy, gy + 1, "bollard");
         }
       }
-      out.plaza = { x: x, z: z, half: H, y: best.gy + top, trees: pits.length };
-      claims.push({ x: x, z: z, w: 2 * H, d: 2 * H });
+      out.plaza = { x: x, z: z, half: H, w: 2 * HX, d: 2 * HZ, y: best.gy + top, trees: pits.length };
+      claims.push({ x: x, z: z, w: 2 * HX, d: 2 * HZ });
     })();
 
     /* ==================================================================
-       3. YARDS
+       3. YARDS. A house stands on a LOT (world/island_plan.js): the yard is
+       the lot. Its side and back lines are fenced (white picket, a low
+       rendered wall or a clipped hedge, one per house by position hash;
+       neighbours share one fence), the street line gets a low run with a
+       GATE where the path from the front door crosses it and a gap where
+       the driveway does. The path runs straight from the door to the
+       sidewalk; planted beds either side of the door; a mailbox by the
+       gate; a wheelie bin in the side yard away from the drive; a rotary
+       washing line in a back yard deep enough for one. Everything is laid
+       in the house's own frame (its door on its local -z) and turned to
+       face the street with it.
        ================================================================== */
     const houses = [], towers = [];
     for (let i = 0; i < fragile.length; i++) {
@@ -856,178 +870,111 @@
       for (let i = 0; i < placed.length; i++) { const p = placed[i]; if (Math.abs(p.x - b.x) < 0.01 && Math.abs(p.z - b.z) < 0.01) return p; }
       return null;
     }
-    // how far a face can push out before it meets the street, another lot,
-    // the beach or a slope. f: 0 -z, 1 +z, 2 -x, 3 +x (the arena's faces)
-    function faceRoom(b, f, want, skip) {
-      const hx = b.w / 2, hz = b.d / 2;
-      const nx = f === 2 ? -1 : f === 3 ? 1 : 0, nz = f === 0 ? -1 : f === 1 ? 1 : 0;
-      let e = 0;
-      for (let s = 0.3; s <= want + 1e-6; s += 0.3) {
-        let ok = true;
-        const span = nx ? hz : hx;
-        for (let k = -2; k <= 2 && ok; k++) {
-          const t = k / 2 * (span - 0.45);       // across the face only: past a corner is the NEXT face's business
-          const px = b.x + nx * (hx + s) + (nx ? 0 : t), pz = b.z + nz * (hz + s) + (nz ? 0 : t);
-          if (inStreet(px, pz, 0.25) || isWalk(px, pz)) ok = false;
-          else if (inPlaced(px, pz, 1.4, skip)) ok = false;
-          else if (dC(px, pz) > R - 12) ok = false;
-          else if (Math.abs(gh(px, pz) - b.gy) > 0.55) ok = false;
-        }
-        if (!ok) break;
-        e = s;
-      }
-      return e;
-    }
-    // is this face on a street: its line sits at the sidewalk's back edge
-    function streetFace(b, f) {
-      const hx = b.w / 2, hz = b.d / 2;
-      if (f >= 2) {
-        const a = nearestLine(b.x, cx);
-        if (f === 2 && a.off > 0) return a.off - hx < WALK + 0.9;
-        if (f === 3 && a.off < 0) return -a.off - hx < WALK + 0.9;
-        return false;
-      }
-      const c = nearestLine(b.z, cz);
-      if (f === 0 && c.off > 0) return c.off - hz < WALK + 0.9;
-      if (f === 1 && c.off < 0) return -c.off - hz < WALK + 0.9;
-      return false;
-    }
-    const WANT = [3.2, 4.0, 2.4, 2.4];
     let nYards = 0;
     houses.forEach(function (b) {
-      const pr = placedOf(b);
-      const hx = b.w / 2, hz = b.d / 2;
-      const st = [0, 1, 2, 3].map(function (f) { return streetFace(b, f); });
-      const e = [0, 1, 2, 3].map(function (f) { return st[f] ? 0 : faceRoom(b, f, WANT[f], pr); });
-      for (let f = 0; f < 4; f++) if (!st[f] && e[f] < 0.9) e[f] = 0;
-      if (ctx.debug) b._dbg = { st: st, e: e };
-      const X0 = b.x - hx - e[2], X1 = b.x + hx + e[3], Z0 = b.z - hz - e[0], Z1 = b.z + hz + e[1];
+      if (b.kind !== "house" && b.kind !== "villa") return;      // shops and civic buildings meet their street
+      const lot = PL && b.planId != null ? PL.lots[b.planId] : null;
+      if (!lot || !lot.lot) return;
+      const L = lot.lot;
+      const yaw = b.rotY || 0, co = Math.round(Math.cos(yaw)), si = Math.round(Math.sin(yaw));
+      const toW = function (lx, lz) { return [b.x + lx * co + lz * si, b.z - lx * si + lz * co]; };
+      const lw = b.lw || b.w, ld = b.ld || b.d;
+      const fdx = -si, fdz = -co;                               // the way the door faces
       const hs = h01(b.x, b.z, 0xd01);
       const style = hs < 0.45 ? "picket" : hs < 0.75 ? "wall" : "hedge";
       const tone = COL.render[(h01(b.x, b.z, 0xd02) * COL.render.length) | 0];
-      const owner = { b: b, placedRec: pr };
-      const doorX = b.x, doorZ = b.z - hz;
-
-      // ---- the path from the door to the street, and where it crosses the
-      // yard line (that is where the gate goes)
-      const pts = [];
-      let gate = null;       // {edge, at}
-      let mailAt = null;     // {x, z, yaw}
-      if (st[0] || e[0] < 0.9) {
-        // the door opens straight onto the sidewalk (or onto nothing): the
-        // mailbox goes on the wall beside it
-        if (st[0]) wallMailbox();
-      } else {
-        const zp = doorZ - Math.min(e[0] * 0.55, 1.6);
-        pts.push([doorX, doorZ - 0.05], [doorX, zp]);
-        if (st[2] || st[3]) {
-          const sx = st[2] ? -1 : 1;
-          const edgeX = sx < 0 ? b.x - hx : b.x + hx;         // the side face line = the sidewalk edge
-          pts.push([edgeX - sx * 0.05, zp]);
-          gate = { run: sx < 0 ? "Lx" : "Rx", at: zp };
-          // beside the gate, on whichever side of the path the yard has room
-          mailAt = { x: edgeX - sx * 0.55, z: zp - 0.9, yaw: sx < 0 ? -Math.PI / 2 : Math.PI / 2 };
-          if (mailAt.z < Z0 + 0.3) mailAt.z = zp + 0.9;
-        } else if (st[1]) {
-          const side = e[2] >= e[3] ? 2 : 3;
-          if (e[side] >= 1.2) {
-            const sx = side === 2 ? -1 : 1;
-            const xp = b.x + sx * (hx + e[side] * 0.5);
-            pts.push([xp, zp], [xp, b.z + hz]);
-            gate = { run: "back", at: xp };
-            mailAt = { x: xp + sx * Math.max(0, e[side] * 0.5 - 0.4), z: Z1 - 0.55, yaw: 0 };
-          }
-        } else {
-          pts.push([doorX, Z0 + 0.05]);
-          gate = { run: "front", at: doorX };
-          mailAt = { x: doorX + 1.0, z: Z0 + 0.35, yaw: Math.PI };
-        }
-        for (let i = 0; i + 1 < pts.length; i++) pathSeg(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], 1.0);
-        // planted beds along the front wall either side of the door
-        if (e[0] >= 1.6) {
-          for (const s of [-1, 1]) {
-            const x0 = doorX + s * 1.0, x1 = b.x + s * (hx - 0.35);
-            const w = Math.abs(x1 - x0);
-            if (w < 0.8) continue;
-            const mx = (x0 + x1) / 2, mz = doorZ - 0.5;
-            const gy = gh(mx, mz);
-            box(A.soil, mx, gy - 0.02, mz, w, 0.08, 0.85, 0, COL.mulch, {});
-            box(A.mason, mx, gy + 0.02, mz - 0.45, w + 0.1, 0.1, 0.06, 0, COL.granite, {});
-            shrubs(mx, mz, w * 0.5, 0.25, Math.max(1, Math.round(w / 0.9)), 0x3e1 + i4(b.x), undefined, true);
-          }
-        }
-      }
-      function i4(v) { return (Math.abs(v * 13) | 0) % 911; }
-      // a letterbox on the wall beside the door (no room for a post one)
-      function wallMailbox() {
-        const mx = doorX + 1.35, mz = doorZ - 0.06, gy = b.gy;
-        box(A.paint, mx, gy + 1.25, mz, 0.34, 0.26, 0.1, 0, COL.steelDark, {});
-        box(A.paint, mx, gy + 1.39, mz - 0.02, 0.36, 0.03, 0.14, 0, COL.steelDark, {});
-        out.mailboxes.push({ x: mx, z: mz });
-      }
-
-      // ---- the fence: every yard edge that is not the house's own wall
-      const skipIn = null;
-      const runsDef = [
-        // front (-z) edge
-        { id: "front", x0: X0, z0: Z0, x1: X1, z1: Z0, on: e[0] > 0 || st[0] },
-        { id: "back", x0: X0, z0: Z1, x1: X1, z1: Z1, on: e[1] > 0 || st[1] },
-        { id: "Lx", x0: X0, z0: Z0, x1: X0, z1: Z1, on: e[2] > 0 || st[2] },
-        { id: "Rx", x0: X1, z0: Z0, x1: X1, z1: Z1, on: e[3] > 0 || st[3] },
-      ];
-      const any = e[0] + e[1] + e[2] + e[3] > 0;
-      if (any) nYards++;
-      runsDef.forEach(function (r) {
-        if (!r.on || !any) return;
-        // pull a street edge 0.3 m in off the back of the sidewalk
-        let x0 = r.x0, z0 = r.z0, x1 = r.x1, z1 = r.z1;
-        if (r.id === "front" && st[0]) { z0 += 0.3; z1 += 0.3; }
-        if (r.id === "back" && st[1]) { z0 -= 0.3; z1 -= 0.3; }
-        if (r.id === "Lx" && st[2]) { x0 += 0.3; x1 += 0.3; }
-        if (r.id === "Rx" && st[3]) { x0 -= 0.3; x1 -= 0.3; }
-        const gates = [];
-        if (gate && gate.run === r.id) gates.push({ at: gate.at, w: 1.2 });
-        fenceRun(style, x0, z0, x1, z1, gates, tone, owner, skipIn);
-        if (gate && gate.run === r.id) {
-          const alongX = r.id === "front" || r.id === "back";
-          gatePosts(style, alongX ? gate.at : x0, alongX ? z0 : gate.at, alongX, 1.2, tone);
-        }
-      });
-
-      // ---- the mailbox where the path meets the street
-      const inYard = function (q) {
-        return q.x > X0 + 0.25 && q.x < X1 - 0.25 && q.z > Z0 + 0.25 && q.z < Z1 - 0.25 &&
-          !(Math.abs(q.x - b.x) < hx + 0.25 && Math.abs(q.z - b.z) < hz + 0.25) &&
-          Math.abs(q.x - doorX) + Math.abs(q.z - (doorZ - 0.6)) > 0.9;
+      const owner = { b: b, placedRec: placedOf(b) };
+      // the lot's four lines as world runs, and which is the street's
+      const edges = {
+        x0: { x0: L.x0, z0: L.z0, x1: L.x0, z1: L.z1, out: [-1, 0] }, x1: { x0: L.x1, z0: L.z0, x1: L.x1, z1: L.z1, out: [1, 0] },
+        z0: { x0: L.x0, z0: L.z0, x1: L.x1, z1: L.z0, out: [0, -1] }, z1: { x0: L.x0, z0: L.z1, x1: L.x1, z1: L.z1, out: [0, 1] },
       };
-      if (mailAt && inYard(mailAt) && !isWalk(mailAt.x, mailAt.z) && !inStreet(mailAt.x, mailAt.z, 0.1) && !treeNear(mailAt.x, mailAt.z, 0.6)) {
-        mailbox(mailAt.x, mailAt.z, mailAt.yaw);
-      } else if (!st[0] && e[0] > 0) wallMailbox();
-      // ---- the wheelie bin against a side wall, a pace behind the front
-      const binSide = e[2] >= 1.0 ? 2 : e[3] >= 1.0 ? 3 : -1;
-      if (binSide > 0) {
-        const sx = binSide === 2 ? -1 : 1;
-        const bx = b.x + sx * (hx + 0.62), bz = b.z - hz + 1.1 + h01(b.x, b.z, 0xd05) * 1.2;
-        if (!treeNear(bx, bz, 0.8) && !blocked(bx - 0.4, bx + 0.4, bz - 0.4, bz + 0.4, gh(bx, bz))) wheelieBin(bx, bz, sx < 0 ? Math.PI / 2 : -Math.PI / 2, 0xd06);
-      } else if (e[0] >= 1.4) {
-        const bx = doorX + (hx > 2.6 ? 2.1 : -2.1), bz = doorZ - 0.5;
-        if (!treeNear(bx, bz, 0.8) && !blocked(bx - 0.4, bx + 0.4, bz - 0.4, bz + 0.4, gh(bx, bz))) wheelieBin(bx, bz, Math.PI, 0xd07);
+      const frontKey = fdx < 0 ? "x0" : fdx > 0 ? "x1" : fdz < 0 ? "z0" : "z1";
+      const door = toW(0, -ld / 2 - 0.05);
+      const front = edges[frontKey];
+      const alongX = front.z0 === front.z1;
+      // where the path meets the street line, and where the drive does
+      const pathAt = alongX ? door[0] : door[1];
+      const pathEnd = alongX ? [door[0], front.z0] : [front.x0, door[1]];
+      const dr = lot.driveway ? lot.driveway.rect : null;
+      const gates = [{ at: pathAt, w: 1.2 }];
+      if (dr) gates.push(alongX ? { at: (dr.x0 + dr.x1) / 2, w: dr.x1 - dr.x0 + 0.4 } : { at: (dr.z0 + dr.z1) / 2, w: dr.z1 - dr.z0 + 0.4 });
+      // a line that already borders a street (a corner lot's side) is left
+      // open: the house meets that sidewalk like its front
+      const onStreet = function (e) {
+        const mx = (e.x0 + e.x1) / 2 + e.out[0] * 0.7, mz = (e.z0 + e.z1) / 2 + e.out[1] * 0.7;
+        return isWalk(mx, mz) || inStreet(mx, mz, 0.05);
+      };
+      let any = false;
+      for (const k of ["x0", "x1", "z0", "z1"]) {
+        const e = edges[k];
+        // pull the run 0.3 m inside the lot line on a street side
+        let x0 = e.x0, z0 = e.z0, x1 = e.x1, z1 = e.z1;
+        const st = k === frontKey || onStreet(e);
+        if (st) { x0 -= e.out[0] * 0.3; x1 -= e.out[0] * 0.3; z0 -= e.out[1] * 0.3; z1 -= e.out[1] * 0.3; }
+        if (k !== frontKey && st) continue;
+        const laid = fenceRun(k === frontKey && style === "hedge" ? "picket" : style, x0, z0, x1, z1, k === frontKey ? gates : [], tone, owner, null);
+        if (laid) any = true;
+        if (k === frontKey) gatePosts(style === "hedge" ? "picket" : style, alongX ? pathAt : x0, alongX ? z0 : pathAt, alongX, 1.2, tone);
       }
-      // ---- a rotary washing line in a back yard deep enough to hang one
-      if (e[1] >= 3.0 && h01(b.x, b.z, 0xd08) < 0.6) {
-        const wx = b.x + (h01(b.x, b.z, 0xd09) - 0.5) * (b.w - 2), wz = b.z + hz + e[1] * 0.55;
-        const gy = gh(wx, wz);
-        if (!treeNear(wx, wz, 1.6)) {
-          cylY(A.paint, wx, gy - 0.2, wz, 0.03, 0.025, 2.1, 6, COL.galv, {});
-          for (let k = 0; k < 4; k++) {
-            const a = k * Math.PI / 2 + 0.3;
-            rod(A.paint, wx, gy + 1.8, wz, wx + Math.cos(a) * 1.15, gy + 1.72, wz + Math.sin(a) * 1.15, 0.012, 4, COL.galv, {});
+      if (any) nYards++;
+      // the path, door to sidewalk
+      pathSeg(door[0], door[1], pathEnd[0] - fdx * 0.1, pathEnd[1] - fdz * 0.1, 1.0);
+      // the driveway: concrete from the sidewalk back to its end
+      if (dr) {
+        const longX = dr.x1 - dr.x0 >= dr.z1 - dr.z0;
+        const w = longX ? dr.z1 - dr.z0 : dr.x1 - dr.x0;
+        if (longX) pathSeg(dr.x0 + 0.05, (dr.z0 + dr.z1) / 2, dr.x1 - 0.05, (dr.z0 + dr.z1) / 2, w);
+        else pathSeg((dr.x0 + dr.x1) / 2, dr.z0 + 0.05, (dr.x0 + dr.x1) / 2, dr.z1 - 0.05, w);
+      }
+      // planted beds along the front wall either side of the door
+      const setback = Math.abs((alongX ? front.z0 : front.x0) - (alongX ? door[1] : door[0]));
+      if (setback >= 1.6) {
+        for (const sd of [-1, 1]) {
+          const lx0 = sd * 1.0, lx1 = sd * (lw / 2 - 0.35);
+          const w = Math.abs(lx1 - lx0);
+          if (w < 0.8) continue;
+          const m = toW((lx0 + lx1) / 2, -ld / 2 - 0.5);
+          if (dr && m[0] > dr.x0 - 0.5 && m[0] < dr.x1 + 0.5 && m[1] > dr.z0 - 0.5 && m[1] < dr.z1 + 0.5) continue;
+          const gy = gh(m[0], m[1]);
+          const ex = alongX ? w : 0.85, ez = alongX ? 0.85 : w;
+          box(A.soil, m[0], gy - 0.02, m[1], ex, 0.08, ez, 0, COL.mulch, {});
+          shrubs(m[0], m[1], ex * 0.5, ez * 0.5, Math.max(1, Math.round(w / 0.9)), 0x3e1 + ((Math.abs(b.x * 13) | 0) % 911), undefined, true);
+        }
+      }
+      // a mailbox on a post by the gate, facing the street
+      {
+        const off = 1.0;
+        const mx = alongX ? pathAt + off : front.x0 - fdx * 0.45, mz = alongX ? front.z0 - fdz * 0.45 : pathAt + off;
+        if (!treeNear(mx, mz, 0.6) && !isWalk(mx, mz) && !(dr && mx > dr.x0 - 0.3 && mx < dr.x1 + 0.3 && mz > dr.z0 - 0.3 && mz < dr.z1 + 0.3)) mailbox(mx, mz, yaw + Math.PI);
+      }
+      // the wheelie bin in the side yard away from the drive
+      {
+        const drSide = dr ? Math.sign(((dr.x0 + dr.x1) / 2 - b.x) * co - ((dr.z0 + dr.z1) / 2 - b.z) * si) : 0;
+        const sd = drSide >= 0 ? -1 : 1;
+        const p2 = toW(sd * (lw / 2 + 0.62), -ld / 2 + 1.1 + h01(b.x, b.z, 0xd05) * 1.2);
+        if (p2[0] > L.x0 + 0.4 && p2[0] < L.x1 - 0.4 && p2[1] > L.z0 + 0.4 && p2[1] < L.z1 - 0.4 &&
+            !treeNear(p2[0], p2[1], 0.8) && !blocked(p2[0] - 0.4, p2[0] + 0.4, p2[1] - 0.4, p2[1] + 0.4, gh(p2[0], p2[1])))
+          wheelieBin(p2[0], p2[1], yaw + (sd < 0 ? Math.PI / 2 : -Math.PI / 2), 0xd06);
+      }
+      // a rotary washing line in a back yard deep enough to hang one
+      {
+        const back = frontKey === "z0" ? L.z1 - (b.z + b.d / 2) : frontKey === "z1" ? (b.z - b.d / 2) - L.z0 : frontKey === "x0" ? L.x1 - (b.x + b.w / 2) : (b.x - b.w / 2) - L.x0;
+        if (back >= 3.0 && h01(b.x, b.z, 0xd08) < 0.6) {
+          const p3 = toW((h01(b.x, b.z, 0xd09) - 0.5) * (lw - 2), ld / 2 + back * 0.55);
+          const wx = p3[0], wz = p3[1], gy = gh(wx, wz);
+          if (!treeNear(wx, wz, 1.6)) {
+            cylY(A.paint, wx, gy - 0.2, wz, 0.03, 0.025, 2.1, 6, COL.galv, {});
+            for (let k = 0; k < 4; k++) {
+              const a = k * Math.PI / 2 + 0.3;
+              rod(A.paint, wx, gy + 1.8, wz, wx + Math.cos(a) * 1.15, gy + 1.72, wz + Math.sin(a) * 1.15, 0.012, 4, COL.galv, {});
+            }
+            for (const rr of [0.5, 0.85]) for (let k = 0; k < 4; k++) {
+              const a0 = k * Math.PI / 2 + 0.3, a1 = a0 + Math.PI / 2;
+              rod(A.paint, wx + Math.cos(a0) * rr, gy + 1.76, wz + Math.sin(a0) * rr, wx + Math.cos(a1) * rr, gy + 1.76, wz + Math.sin(a1) * rr, 0.006, 3, COL.paintWhite, {});
+            }
+            addCol(wx - 0.05, wx + 0.05, wz - 0.05, wz + 0.05, gy, gy + 2, "pole");
           }
-          for (const rr of [0.5, 0.85]) for (let k = 0; k < 4; k++) {
-            const a0 = k * Math.PI / 2 + 0.3, a1 = a0 + Math.PI / 2;
-            rod(A.paint, wx + Math.cos(a0) * rr, gy + 1.76, wz + Math.sin(a0) * rr, wx + Math.cos(a1) * rr, gy + 1.76, wz + Math.sin(a1) * rr, 0.006, 3, COL.paintWhite, {});
-          }
-          addCol(wx - 0.05, wx + 0.05, wz - 0.05, wz + 0.05, gy, gy + 2, "pole");
         }
       }
     });
@@ -1061,122 +1008,21 @@
     });
 
     /* ==================================================================
-       6. THE DOCK: a timber pier straight out off the beach, on an axis
-       (platforms are boxes) where the water gets deep soonest
+       6. THE WATERFRONT is the harbour (world/disaster_arena.js builds the
+       quay, the piers, the jetties and the breakwater off the plan); the
+       lone timber pier this section used to throw off the nearest beach is
+       gone with the beach it stood on.
        ================================================================== */
-    (function dock() {
-      const oy = ctx.oceanY != null ? ctx.oceanY : -0.8;
-      const DECK = oy + 1.75, HW = 1.6;
-      let best = null;
-      for (const dir of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (let off = -44; off <= 44; off += 4) {
-        const px = dir[0] ? 0 : off, pz = dir[1] ? 0 : off;
-        let t0 = null;
-        for (let t = 60; t < R + 40; t += 0.5) {
-          const x = cx + px + dir[0] * t, z = cz + pz + dir[1] * t;
-          if (gh(x, z) < -0.15 && dC(x, z) > R - 4) { t0 = t; break; }
-        }
-        if (t0 == null) continue;
-        let tDeep = null;
-        for (let t = t0; t < t0 + 60; t += 0.5) {
-          const x = cx + px + dir[0] * t, z = cz + pz + dir[1] * t;
-          if (gh(x, z) < oy - 2.2) { tDeep = t; break; }
-        }
-        if (tDeep == null) continue;
-        const len = tDeep - t0 + 6;
-        // clear of everything on the land end
-        const lx = cx + px + dir[0] * (t0 - 3), lz = cz + pz + dir[1] * (t0 - 3);
-        if (inPlaced(lx, lz, 3) || treeNear(lx, lz, 3) || rockNear(lx, lz, 2)) continue;
-        // no islet in the way
-        let clear = true;
-        for (let t = t0; t <= t0 + len + 8 && clear; t += 2) {
-          const x = cx + px + dir[0] * t, z = cz + pz + dir[1] * t;
-          for (const s of [-HW - 4, 0, HW + 4]) if (gh(x + dir[1] * s, z + dir[0] * s) > DECK - 0.8 && t > t0 + 6) clear = false;
-        }
-        if (!clear) continue;
-        const score = -len - Math.abs(off) * 0.05 + h01(off, dir[0] * 3 + dir[1], 0xd0c) * 2;
-        if (!best || score > best.score) best = { dir: dir, px: px, pz: pz, t0: t0, len: len, score: score };
-      }
-      if (!best) return;
-      const d = best.dir, ax = d[0] !== 0;        // pier along x?
-      const P = function (t, s) { return { x: cx + best.px + d[0] * t + (ax ? 0 : s), z: cz + best.pz + d[1] * t + (ax ? s : 0) }; };
-      const RAMP = 5.5;
-      const tA = best.t0 - RAMP, tB = best.t0, tE = best.t0 + best.len;
-      const gA = gh(P(tA, 0).x, P(tA, 0).z);
-      const wood = COL.timberGrey, dark = COL.timberDark;
-      // piles every 3 m down both sides, into the seabed
-      for (let t = tB; t <= tE + 1e-6; t += 3) for (const s of [-HW + 0.15, HW - 0.15]) {
-        const p = P(t, s), bed = gh(p.x, p.z);
-        rod(A.wood, p.x, bed - 0.6, p.z, p.x, DECK - 0.05, p.z, 0.15, 9, dark, { ao: oy + 0.2, aoK: 0.45, aoH: 1.6 });
-      }
-      // T head piles
-      const TH = 4.5, TW = 5.5;
-      for (let t = tE; t <= tE + TH + 1e-6; t += 2.25) for (const s of [-TW, -TW / 2, TW / 2, TW]) {
-        const p = P(t, s), bed = gh(p.x, p.z);
-        rod(A.wood, p.x, bed - 0.6, p.z, p.x, DECK - 0.05, p.z, 0.15, 9, dark, { ao: oy + 0.2, aoK: 0.45, aoH: 1.6 });
-      }
-      // stringers + planks. Planks run ACROSS the pier.
-      const deckRun = function (t0, t1, w) {
-        for (const s of [-w + 0.25, 0, w - 0.25]) {
-          const a = P(t0, s), b = P(t1, s);
-          beam(A.wood, a.x, DECK - 0.22, a.z, b.x, DECK - 0.22, b.z, 0.26, 0.1, dark, { hgrain: true });
-        }
-        const n = Math.floor((t1 - t0) / 0.2);
-        for (let i = 0; i < n; i++) {
-          const t = t0 + (i + 0.5) * (t1 - t0) / n;
-          const p = P(t, 0), c = vary(wood, h01(p.x, p.z, 0xd11), 0.14);
-          box(A.wood, p.x, DECK - 0.04, p.z, ax ? 0.18 : 2 * w, 0.07, ax ? 2 * w : 0.18, 0, c, { grain: ax ? "z" : "x", hgrain: true });
-        }
-      };
-      deckRun(tB, tE, HW);
-      deckRun(tE, tE + TH, TW + 0.3);
-      // the ramp: the same planks climbing from the sand to the deck
-      {
-        const n = Math.floor(RAMP / 0.2);
-        for (let i = 0; i < n; i++) {
-          const u = (i + 0.5) / n, t = tA + RAMP * u;
-          const p = P(t, 0), y = gA + 0.05 + (DECK - gA - 0.05) * u;
-          box(A.wood, p.x, y - 0.04, p.z, ax ? 0.18 : 2 * HW, 0.07, ax ? 2 * HW : 0.18, 0, vary(wood, h01(p.x, p.z, 0xd12), 0.14), { grain: ax ? "z" : "x", hgrain: true });
-        }
-        for (const s of [-HW + 0.25, HW - 0.25]) {
-          const a = P(tA, s), b = P(tB, s);
-          beam(A.wood, a.x, gA - 0.12, a.z, b.x, DECK - 0.2, b.z, 0.24, 0.1, dark, { hgrain: true });
-        }
-      }
-      // bollards and cleats on the T head, a ladder down at the end
-      for (const s of [-TW + 0.4, TW - 0.4]) for (const tt of [tE + 0.5, tE + TH - 0.4]) {
-        const p = P(tt, s);
-        cylY(A.paint, p.x, DECK, p.z, 0.16, 0.13, 0.42, 12, COL.steelDark, {});
-        cylY(A.paint, p.x, DECK + 0.42, p.z, 0.22, 0.22, 0.07, 12, COL.steelDark, {});
-        addCol(p.x - 0.2, p.x + 0.2, p.z - 0.2, p.z + 0.2, DECK, DECK + 0.5, "bollard");
-      }
-      {
-        const e = P(tE + TH + 0.08, 0.6), e2 = P(tE + TH + 0.08, -0.6);
-        for (const q of [e, e2]) rod(A.paint, q.x, oy - 1.6, q.z, q.x, DECK + 0.9, q.z, 0.025, 6, COL.galv, {});
-        for (let y = oy - 1.4; y < DECK; y += 0.3) rod(A.paint, e.x, y, e.z, e2.x, y, e2.z, 0.018, 5, COL.galv, {});
-      }
-      // walkable: ramp (axis ramp), deck, T head
-      const rect = function (t0, t1, w) {
-        const a = P(t0, -w), b = P(t1, w);
-        return { x0: Math.min(a.x, b.x), x1: Math.max(a.x, b.x), z0: Math.min(a.z, b.z), z1: Math.max(a.z, b.z) };
-      };
-      const rr = rect(tA, tB, HW), dr = rect(tB, tE, HW), tr = rect(tE, tE + TH, TW + 0.3);
-      const ra = P(tA, 0), rb = P(tB, 0);
-      addPlat(rr.x0, rr.x1, rr.z0, rr.z1, DECK, ax
-        ? { axis: "x", x0: ra.x, x1: rb.x, y0: gA + 0.05, y1: DECK }
-        : { z0: ra.z, z1: rb.z, y0: gA + 0.05, y1: DECK });
-      addPlat(dr.x0, dr.x1, dr.z0, dr.z1, DECK);
-      addPlat(tr.x0, tr.x1, tr.z0, tr.z1, DECK);
-      const tip = P(tE + TH, 0);
-      out.pier = { x0: ra.x, z0: ra.z, x1: tip.x, z1: tip.z, deck: DECK, width: HW * 2, head: TW * 2, flammable: true };
-      out.flammable.push(out.pier);
-    })();
 
     /* ==================================================================
        7. THE FARM, out past the last street
        ================================================================== */
     (function farm() {
       const fields = [];
-      const want = [[24, 16], [18, 13]];
+      // the plan's fields (out past the town, between the hills)
+      const planned = PL ? PL.fields.map(function (r) { return { x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2, w: r.x1 - r.x0, d: r.z1 - r.z0 }; }) : null;
+      const want = planned ? [] : [[24, 16], [18, 13]];
+      if (planned) for (const f of planned) fields.push(f);
       // one ground test per 2 m lattice point, shared by every candidate
       const memo = new Map();
       const farmGround = function (px, pz) {
@@ -1456,6 +1302,108 @@
     })();
 
     /* ==================================================================
+       9. SIGNS: the places that have a name say it. A free-standing sign on
+       two posts in the lot's front setback, facing the street: the fish
+       market, the harbour office, the hotel, the bank, the town hall, the
+       church, the school, the showroom, and the shops that have one (a
+       bakery, a chemist, a dive shop...). Real names on real lots, nothing
+       invented in the middle of nowhere. Every panel is its OWN mesh (one
+       shared atlas material), so a storm can lean it and tear it off
+       (systems/hurricane.js reads out.signs: {x, z, y, w, h, mesh, hex}).
+       ================================================================== */
+    (function signs() {
+      if (!PL || typeof document === "undefined") return;
+      const SHOPS = ["BAKERY", "CHEMIST", "HARDWARE", "CAFE", "GROCER", "BARBER", "BOOKS", "TAILOR", "DINER", "DELI",
+        "FLORIST", "OPTICIAN", "SURF SHOP", "DIVE SHOP", "BUTCHER", "ICE CREAM", "LAUNDRY", "NEWSAGENT"];
+      const BG = [[0x1f3d2b, 0xf1ead8], [0x1d2a44, 0xf1ead8], [0x5a1e1e, 0xf1e6cf], [0xe9e2cf, 0x1d2328], [0x17191c, 0xe9d9a0], [0x2f4f4f, 0xf4efe2]];
+      const list = [];
+      const used = new Set();
+      for (const l of PL.lots) {
+        let text = null;
+        if (l.name && l.kind !== "station") text = l.name.toUpperCase();
+        else if (l.kind === "shop" && h01(l.x, l.z, 0x5c1) < 0.55) {
+          let k = (h01(l.x, l.z, 0x5c2) * SHOPS.length) | 0;
+          for (let n = 0; n < SHOPS.length && used.has(SHOPS[k]); n++) k = (k + 1) % SHOPS.length;
+          if (used.has(SHOPS[k])) continue;
+          text = SHOPS[k]; used.add(text);
+        }
+        if (text) list.push({ l: l, text: text });
+        if (list.length >= 30) break;
+      }
+      if (!list.length) return;
+      const COLS = 4, ROWS = 16, SW = 256, SH2 = 64;
+      const cvs = document.createElement("canvas");
+      cvs.width = COLS * SW; cvs.height = ROWS * SH2;
+      const g2 = cvs.getContext("2d");
+      if (!g2) return;
+      list.forEach(function (it, i) {
+        const cxs = (i % COLS) * SW, cys = ((i / COLS) | 0) * SH2;
+        const pal = BG[(h01(it.l.x, it.l.z, 0x5c3) * BG.length) | 0];
+        it.hex = pal[0];
+        const hx = function (v) { return "#" + v.toString(16).padStart(6, "0"); };
+        g2.fillStyle = hx(pal[0]); g2.fillRect(cxs, cys, SW, SH2);
+        g2.strokeStyle = hx(pal[1]); g2.lineWidth = 3; g2.strokeRect(cxs + 5, cys + 5, SW - 10, SH2 - 10);
+        g2.fillStyle = hx(pal[1]);
+        let fs = 36;
+        g2.font = "bold " + fs + "px Helvetica, Arial, sans-serif";
+        while (g2.measureText(it.text).width > SW - 30 && fs > 14) { fs -= 2; g2.font = "bold " + fs + "px Helvetica, Arial, sans-serif"; }
+        g2.textAlign = "center"; g2.textBaseline = "middle";
+        g2.fillText(it.text, cxs + SW / 2, cys + SH2 / 2 + 1);
+        it.u0 = (cxs + 2) / cvs.width; it.u1 = (cxs + SW - 2) / cvs.width;
+        it.v1 = 1 - (cys + 2) / cvs.height; it.v0 = 1 - (cys + SH2 - 2) / cvs.height;
+        it.chars = it.text.length;
+      });
+      const tex = new THREE.CanvasTexture(cvs);
+      if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;
+      tex.anisotropy = 4;
+      const mat = new THREE.MeshLambertMaterial({ map: tex });
+      mat.name = "island-signs";
+      const RC2 = roadC();
+      list.forEach(function (it) {
+        const l = it.l, st = l.street;
+        if (!st) return;
+        const yaw = l.yaw || 0;
+        const fdx = -Math.round(Math.sin(yaw)), fdz = -Math.round(Math.cos(yaw));
+        // the street line of the lot, and how far back the building stands
+        const frontN = st.at + st.side * RC2.WALK;
+        const bFront = st.vertical ? (st.side > 0 ? l.bx0 : l.bx1) : (st.side > 0 ? l.bz0 : l.bz1);
+        const setback = Math.abs(bFront - frontN);
+        const n = frontN + st.side * Math.max(0.45, Math.min(setback * 0.5, 2.0));
+        // beside the building's front corner, away from a driveway
+        const a0 = st.vertical ? l.lot.z0 : l.lot.x0, a1 = st.vertical ? l.lot.z1 : l.lot.x1;
+        const w = Math.max(1.6, Math.min(4.2, 0.6 + it.chars * 0.27)), h = 0.72;
+        const dr = l.driveway ? l.driveway.rect : null;
+        const drA = dr ? (st.vertical ? (dr.z0 + dr.z1) / 2 : (dr.x0 + dr.x1) / 2) : null;
+        let along = (drA != null && drA < (a0 + a1) / 2) ? a1 - w / 2 - 0.6 : a0 + w / 2 + 0.6;
+        // a building right on the setback: put the sign square in front of
+        // its door instead of beside the corner
+        if (setback < 1.2) along = (a0 + a1) / 2 + (h01(l.x, l.z, 0x5c4) - 0.5) * 2;
+        const x = st.vertical ? n : along, z = st.vertical ? along : n;
+        if (treeNear(x, z, 1.0) || isWalk(x, z)) return;
+        const gy = gh(x, z);
+        const H = setback < 1.2 ? 2.55 : 1.55;      // over the walk in front of a shop door; at eye level in a yard
+        // two steel posts (merged), the panel (its own mesh)
+        const rx = Math.cos(yaw), rz = -Math.sin(yaw);
+        for (const sd of [-1, 1]) {
+          const px = x + rx * sd * (w / 2 - 0.12), pz = z + rz * sd * (w / 2 - 0.12);
+          cylY(A.paint, px, gy - 0.2, pz, 0.045, 0.04, H + h + 0.2, 8, COL.steelDark, { ao: gy });
+          addCol(px - 0.06, px + 0.06, pz - 0.06, pz + 0.06, gy, gy + H + h, "signpost");
+        }
+        const geo = new THREE.BoxGeometry(w, h, 0.06);
+        const uv = geo.attributes.uv;
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, it.u0 + uv.getX(i) * (it.u1 - it.u0), it.v0 + uv.getY(i) * (it.v1 - it.v0));
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, gy + H + h / 2, z);
+        mesh.rotation.y = yaw;
+        mesh.castShadow = true; mesh.receiveShadow = true;
+        mesh.name = "island-sign";
+        ctx.root.add(mesh);
+        out.signs.push({ x: x, z: z, y: gy + H + h / 2, w: w, h: h, mesh: mesh, hex: it.hex, text: it.text, yaw: yaw, facing: { x: fdx, z: fdz } });
+      });
+      out.draws += out.signs.length;
+    })();
+
+    /* ==================================================================
        MESHES: one per material
        ================================================================== */
     const mapMean = CBZ.surfaceMapMean || function () { return [1, 1, 1]; };
@@ -1527,6 +1475,7 @@
         lensMat.color.setRGB(0.32 + 0.8 * k, 0.31 + 0.6 * k, 0.28 + 0.3 * k);
       });
     }
+    out.lensMaterial = lensMat;
     out.stats.yards = nYards;
     out.stats.verts = Object.keys(A).reduce(function (s, k) { return s + A[k].count(); }, 0);
     api.current = out;

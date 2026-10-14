@@ -31,10 +31,11 @@
 
   const WAKE = 18;          // m of wake room past the building on every side
   const SEG = 28;           // plane subdivisions (the bank is displaced)
-  let mesh = null, mat = null, rectAttr = null, forArena = null, maxN = 0;
+  let mesh = null, mat = null, rectAttr = null, flowAttr = null, forArena = null, maxN = 0;
   let acc = 0, live = false;
   const _m = new THREE.Matrix4();
   const _zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  const _fs = {};
 
   function arenaNow() { return CBZ.surv && CBZ.surv.arena ? CBZ.surv.arena : null; }
 
@@ -47,6 +48,11 @@
     const inst = geo;
     rectAttr = new THREE.InstancedBufferAttribute(new Float32Array(maxN * 4), 4);
     inst.setAttribute("aRect", rectAttr);
+    // THE WATER'S OWN HEADING AT EACH BUILDING (the run-up field's current
+    // round it): the bank piles on the face the water is actually hitting,
+    // which down a side street is not the face toward the sea
+    flowAttr = new THREE.InstancedBufferAttribute(new Float32Array(maxN * 2), 2);
+    inst.setAttribute("aFlow", flowAttr);
 
     const U = CBZ.waterCommonUniforms();
     U.uAmp = { value: 1 }; U.uChop = { value: 1 };
@@ -66,6 +72,8 @@
       // the one wave function (and its live wind weights) the sea itself uses
       CBZ.waterWaveDecl ? CBZ.waterWaveDecl() : "",
       "attribute vec4 aRect;",          // half-w, half-d, depth k (0..1), seed
+      "attribute vec2 aFlow;",          // unit flow heading at this building
+      "varying vec2 vFlow;",
       "varying vec2 vL;",
       "varying vec4 vR;",
       "varying float vBank;",
@@ -78,8 +86,10 @@
       CBZ.waterWaveGLSL("wp.xz", "uSeaTime", "uAmp", "twH", "twDx", "twDz", "uChop"),
       "  vec2 q = abs(vL) - aRect.xy;",
       "  float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);",
-      "  float ha = abs(uFlow.x) * aRect.x + abs(uFlow.y) * aRect.y;",
-      "  float a = dot(vL, uFlow) / max(1.0, ha);",
+      "  vec2 fl = dot(aFlow, aFlow) > 0.25 ? aFlow : uFlow;",
+      "  vFlow = fl;",
+      "  float ha = abs(fl.x) * aRect.x + abs(fl.y) * aRect.y;",
+      "  float a = dot(vL, fl) / max(1.0, ha);",
       // the water piles against the upstream wall: up to ~1.4 m, falling
       // away over a few metres, scaled by how deep/fast the flood is there
       "  vBank = exp(-max(sd, 0.0) / 3.2) * smoothstep(0.35, -0.9, a) * aRect.z;",
@@ -102,6 +112,7 @@
       "varying vec2 vL;",
       "varying vec4 vR;",
       "varying float vBank;",
+      "varying vec2 vFlow;",
       "#include <fog_pars_fragment>",
       "float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }",
       "float vn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
@@ -110,7 +121,7 @@
       "  vec2 q = abs(vL) - vR.xy;",
       "  float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);",
       "  if (sd < -0.05) discard;",      // inside the building: its walls own that
-      "  vec2 fl = uFlow; vec2 cr = vec2(-fl.y, fl.x);",
+      "  vec2 fl = normalize(vFlow); vec2 cr = vec2(-fl.y, fl.x);",
       "  float a = dot(vL, fl), c = dot(vL, cr);",
       "  float ha = abs(fl.x) * vR.x + abs(fl.y) * vR.y;",   // half extent along the flow
       "  float hc = abs(fl.y) * vR.x + abs(fl.x) * vR.y;",   // and across it
@@ -201,14 +212,33 @@
     if (acc < 0.1 && live) return;
     acc = 0;
     const mean = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0;
-    const bs = arena.fragile, arr = rectAttr.array;
+    const bs = arena.fragile, arr = rectAttr.array, fa = flowAttr.array;
+    const RF = CBZ.tsuRunup && CBZ.tsuRunup.current ? CBZ.tsuRunup.current() : null;
     // how hard the water is hitting: the sweep's live bore, the standing
     // flood's slosh, the drain's undertow
     const force = Math.min(1, 0.35 + flow / 5);
     let any = false;
     for (let i = 0; i < maxN; i++) {
       const b = bs[i];
-      const lvl = b && !b.fallen ? mean - (CBZ.waterFrontDropAt ? CBZ.waterFrontDropAt(b.x, b.z) : 0) : -1e9;
+      // THE WATER AGAINST THE WALLS: with the run-up field on, the level and
+      // the push are the street's round this building (its own cells are its
+      // flooded interior), and the heading is the current there
+      const RB = RF && b ? RF.buildingOf(b) : null;
+      let lvl = b && !b.fallen ? mean - (CBZ.waterFrontDropAt ? CBZ.waterFrontDropAt(b.x, b.z) : 0) : -1e9;
+      let hk = force;
+      fa[i * 2] = 0; fa[i * 2 + 1] = 0;
+      if (RB && !b.fallen) {
+        lvl = RB.rimNow;
+        hk = Math.min(1, 0.3 + Math.sqrt(Math.max(0, RB.hv2Now || 0)) / 6);
+        let su = 0, sv = 0;
+        const ox = (b.w || 8) * 0.5 + 2.5, oz = (b.d || 8) * 0.5 + 2.5;
+        for (let q = 0; q < 4; q++) {
+          const r = RF.sample(b.x + (q === 0 ? ox : q === 1 ? -ox : 0), b.z + (q === 2 ? oz : q === 3 ? -oz : 0), _fs);
+          su += r.u || 0; sv += r.v || 0;
+        }
+        const sl = Math.hypot(su, sv);
+        if (sl > 0.2) { fa[i * 2] = su / sl; fa[i * 2 + 1] = sv / sl; }
+      }
       const depth = b ? lvl - (b.gy != null ? b.gy : 0) : -1;
       if (!b || b.fallen || depth < 0.25 || lvl > (b.gy || 0) + (b.h || 0) - 0.5) { mesh.setMatrixAt(i, _zero); arr[i * 4 + 2] = 0; continue; }
       const hw = (b.w || 8) * 0.5, hd = (b.d || 8) * 0.5;
@@ -217,12 +247,13 @@
       mesh.setMatrixAt(i, _m);
       arr[i * 4] = hw; arr[i * 4 + 1] = hd;
       // shallow water barely froths; a metre and more is a full bank
-      arr[i * 4 + 2] = Math.min(1, depth / 1.2) * force;
+      arr[i * 4 + 2] = Math.min(1, depth / 1.2) * hk;
       arr[i * 4 + 3] = (i * 0.618) % 1;
       any = true;
     }
     mesh.instanceMatrix.needsUpdate = true;
     rectAttr.needsUpdate = true;
+    flowAttr.needsUpdate = true;
     mesh.visible = any;
     live = true;
   }

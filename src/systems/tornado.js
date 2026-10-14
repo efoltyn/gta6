@@ -1,84 +1,87 @@
 /* ============================================================
-   systems/tornado.js — CBZ.tornado, THE CITY VORTEX.
+   systems/tornado.js — CBZ.tornado, THE ONE VORTEX.
 
-   OWNER ASK: "tornadoes that hit buildings."
+   Every tornado in the game is this file: the Natural Disaster island
+   (systems/disasters.js's `tornado` def only authors the sky, the siren and
+   the island bridge, then calls spawn/stop), the city's weather director at
+   the bottom, and the lab (src/lab/kits/tornado.js). CBZ.tornadoAudit() is
+   the ratchet that keeps it that way.
 
-   WHAT WAS THERE BEFORE: exactly one funnel, in systems/disasters.js, which
-   (a) only existed inside survival mode's separate arena, (b) was six
-   translucent cylinders and a swirl particle cloud, and (c) damaged ACTORS
-   ONLY — it could not touch a building, a car, a prop or the terrain. A
-   tornado that cannot wreck the city is a weather decal.
+   2026-10-14 REWRITE — "make it far more realistic". What a real tornado is,
+   and where each part lives below:
 
-   This file is the real one, and per THE BLOCK LAW the survival funnel MOVED
-   onto it in the same change (systems/disasters.js's `tornado` def is now ~15
-   lines that call CBZ.tornado.spawn/stop and read CBZ.tornado.threat). There
-   is no second implementation left. CBZ.tornadoAudit() is the ratchet.
+   THE PARENT STORM. A tornado hangs from a supercell, it does not stand in a
+   clear sky. buildStorm(): a broad storm base (a soft spiral-striated deck
+   that turns), a lowered rotating WALL CLOUD under it, a RAIN-WRAP curtain on
+   the rear flank (behind and to the right of the track, where the rear-flank
+   downdraft wraps the hook), and the forward-flank precipitation core ahead
+   and to the left, where the HAIL falls (hail below).
 
-   ------------------------------------------------------------------
-   THE MODEL — a RANKINE COMBINED VORTEX. Analytic, ~20 flops, no solver.
+   THE FUNNEL is ONE deformable tube (plus a translucent veil), re-shaped on
+   the CPU every frame along a curved SPINE from the ground to the cloud:
+     touchdown  the CONDENSATION FUNNEL descends out of the wall cloud as a
+                pointed tip while the DEBRIS CLOUD already whirls at the
+                ground (the circulation reaches the ground before the
+                condensation does: real, and the scariest frame of a video);
+     mature     rope (EF0-1) ... wedge (EF4-5) proportions; the base LAGS the
+                cloud (surface friction), so the column TILTS along the track;
+     rope-out   the last quarter: the column thins to a rope, the tilt grows,
+                it contorts, the wind weakens with it, and at the very end
+                the condensation lifts from the bottom up.
+   ~900 vertices total, two draws: cheaper than the old 10-ring stack.
 
-     tangential   vt(r) = vmax * r/R      inside the core radius R
-                  vt(r) = vmax * R/r      outside it (free-vortex tail)
-     radial       vr(r) = -0.5 * vt(r)    inflow, pointing at the axis
-     vertical      w(r) = wmax * exp(-((r - 0.6R)/0.7R)^2)
-                                          updraft, peaked in the core annulus
+   THE WIND FIELD (fieldInto) is a Rankine combined vortex with a height
+   profile: corner-flow INFLOW strongest in the lowest tens of metres, an
+   annular UPDRAFT, OUTFLOW at the top of the updraft (that is what throws
+   debris out), the storm's own forward motion added (so the right side of
+   the track is the strong side, the most-cited real asymmetry), an
+   intensity ENVELOPE (spin-up, mature, rope-out), and for EF3+ SUCTION
+   VORTICES: 3-5 small, violent sub-vortices orbiting inside the core that
+   leave CYCLOIDAL marks on the ground and the narrow worst swaths of damage.
 
-   The spiral is the whole point. Pure tangential wind makes debris circle
-   forever; tangential + inflow + updraft makes it corkscrew IN and UP, which
-   is what a tornado visibly does to a car. The funnel's own FORWARD velocity
-   is added to the field, so the right-hand side of a northbound tornado is
-   genuinely stronger than the left — the single most-cited real asymmetry.
+   DAMAGE IS THE EF SCALE, READ BACKWARDS. The EF scale rates a tornado from
+   what it did to "damage indicators"; here the local gust at a house decides
+   which DEGREE OF DAMAGE it reaches, using the EF scale's own one- and
+   two-family-residence (FR12) expected wind speeds:
+       35 m/s  roof covering lost (shingles fly)
+       43 m/s  roof decking uplifted (the windward roof part goes)
+       54 m/s  ROOF OFF (every roof part is lifted and thrown)
+       59 m/s  exterior walls collapse (the two wind-facing walls go over)
+       68 m/s  most walls down
+       89 m/s  SWEPT OFF THE FOUNDATION (everything above the slab lofted)
+   applied to the building's REAL PARTS: the roof meshes, the wall meshes,
+   the slab. A building that publishes `b.parts = {roof, walls, slab}` is
+   used as published; one that does not is read by geometry (deriveParts).
+   A building whose walls are one merged shell (the island's walk-ups and
+   towers) hands its structural failure to ONE ADAPTER, structDamage(),
+   which calls CBZ.collapse.damage when that exists and the current ledger
+   (the island bridge's hitBuilding / city/structural.js) otherwise. Trees
+   use the hardwood/softwood indicators (twigs, limbs, snapped, uprooted,
+   debarked). Cars use FORCES, not a table: drag, lift and the updraft
+   against weight and friction make a car slide at ~EF2, roll at ~EF3 and
+   fly at EF4-5, which is what the EF descriptions say.
 
-   THE EF SCALE drives everything else (NWS 3-second-gust bands):
-     EF0 29-38 m/s   shingles, gutters              -> SCARRED
-     EF1 38-49       roofs stripped, windows out    -> WOUNDED
-     EF2 50-60       roofs gone, weak walls fail    -> CRITICAL, cars lifted
-     EF3 61-74       whole storeys destroyed        -> shops COLLAPSE
-     EF4 74-89       structures levelled            -> blocks COLLAPSE
-     EF5 >89         swept clean off the foundation -> towers COLLAPSE
-   Core radius 26-140 m, forward speed 11-19 m/s, path length a kilometre-plus.
+   EVERYTHING THAT FLIES is one integrator (stepFlyer): drag toward the local
+   wind (exponential relaxation, stable at any dt), lift, gravity, ground
+   friction, bounce, tumble, rest. Roofs, walls, crowns, cars. Small junk is
+   one InstancedMesh per shape (shingles, boards, roof sheet, masonry, leaves
+   tinted) on the same physics: it ORBITS because the inflow holds it, CLIMBS
+   because the updraft lifts it, and is THROWN OUT at the top because the
+   field turns to outflow there. Nothing is scripted to orbit.
 
-   ROOF-FIRST IS THE SIGNATURE. A bomb wrecks a building from the outside in
-   at the height it went off. A tornado wrecks it from the TOP DOWN: it takes
-   the roof, then the top storey, then the next. So every structural hit this
-   file makes is SEATED AT THE HIGHEST FLOOR THAT IS STILL INTACT — read back
-   from city/structural.js's own per-floor integrity array through its public
-   state() seam, never from a private mirror. As the top floors fail the seat
-   walks down the building on its own. That is what makes a tornado read
-   differently from an airstrike even though both drive the same ledger.
+   THE PATH: one ground-scar ribbon laid along the track at the measured
+   width where the gust scours the ground (narrow, sharp, offset to the
+   strong side), plus the suction vortices' cycloidal marks.
 
-   ------------------------------------------------------------------
-   WHAT THIS FILE REUSES (i.e. what it deliberately did NOT write):
-     buildings      CBZ.structure.hit(...{kind:"tornado"})   — the ONE ledger
-     debris strikes CBZ.detonate(x,y,z,"kinetic",{mass,speed}) — the ONE bus,
-                    which prices E=1/2mv^2 itself (cube root for FX, 2/3 power
-                    for structural). A thrown car into a facade is ONE call.
-     deaths         CBZ.cityKillPed / CBZ.crowds.crush / cityHurtPlayer.
-                    The killfeed is the only sanctioned popup; we toast nothing.
-     panic/police   CBZ.cityPostEvent — buys crowd flee + police reaction free.
-     street props   CBZ.cityShootProp — the existing public "something passed
-                    through here" verb; bins, cones, meters and newsboxes tip
-                    over and propane tanks cook off with zero new code.
-     glass          CBZ.cityShatter (idempotent per pane, so overlap is free)
-     particles      cityDustKick / cityChunk / cityCrashSmoke — ALL pooled and
-                    capped already. THIS FILE ADDS NO NEW PARTICLE POOL.
-     vehicles       CBZ.cityDamageCar / cityCarIgnite, and the existing
-                    `c.ai` gate in city/vehicles.js's updater is how we take
-                    ownership of a lifted car without a second car controller.
-     budget         CBZ.qScale(lo, hi) — every count in this file.
+   STORM EXTRAS: hail falling in the forward flank around the camera
+   (instanced, bounces, lies, melts; sized by the storm), the civil-defence
+   tornado siren (T.siren), dust points in the debris cloud.
 
-   THE ONE GENUINELY NEW DRAW is the funnel: a stack of open, leaning,
-   counter-rotating cylinder shells on a scrolling procedural CanvasTexture,
-   a wider dust skirt at the base, and a handful of orbiting debris boxes.
-   One THREE.Group, disposed whole.
-
-   FLAGS: TORNADO_CITY (master) · TORNADO_STRUCTURAL (buildings) ·
-          TORNADO_LIFT (cars/debris carried and thrown) ·
-          TORNADO_V2 (2026-08-23: the survival arena is destructible through
-          the roster's lent bridge, the funnel is a dark condensation funnel
-          under a rotating wall cloud, the track leaves a persistent scarred
-          damage path, and an interior room genuinely shelters you — see the
-          flag's own comment below; ?cfg_TORNADO_V2=0 reverts all of it).
+   RESET: every change this file makes to the world off the city (a roof
+   lifted, a wall felled, a tree blown over, a car thrown, a collider pulled)
+   goes in a JOURNAL, and T.restoreWorld() puts it all back (the island's
+   run reset calls it). PHONE: every count rides CBZ.qScale; the whole thing
+   adds ~14 draws; the tick is measured (T.perf) and reported by the lab.
 ============================================================ */
 (function () {
   "use strict";
@@ -88,513 +91,386 @@
   if (CBZ.tornado) return;                       // idempotent family guard
 
   CBZ.CONFIG = CBZ.CONFIG || {};
-  // TORNADO_CITY — the owner's ask: "tornadoes that hit buildings". ON => a
-  // city-level vortex exists at all (CBZ.tornado.spawn does something).
-  // Flip false (or ?cfg_TORNADO_CITY=0) and spawn() returns null, the survival
-  // roster's funnel degrades to nothing, and the game plays exactly as it did
-  // before this file — a one-line revert of the entire feature.
+  // TORNADO_CITY: the master switch (spawn() returns null when false).
   if (CBZ.CONFIG.TORNADO_CITY == null) CBZ.CONFIG.TORNADO_CITY = true;
-  // TORNADO_STRUCTURAL — ON => the funnel grinds buildings through
-  // city/structural.js (roof-first) and can genuinely fell them.
-  // Flip false to keep the spectacle, the deaths and the thrown cars while
-  // leaving the skyline untouched (the pre-consolidation behaviour).
+  // TORNADO_STRUCTURAL: city lots are ground through city/structural.js.
   if (CBZ.CONFIG.TORNADO_STRUCTURAL == null) CBZ.CONFIG.TORNADO_STRUCTURAL = true;
-  // TORNADO_LIFT — ON => vehicles are picked up, orbited and thrown, and the
-  // landing is a `kinetic` detonation. Flip false and cars are only shoved
-  // along the ground (cheapest path; nothing is ever taken off its wheels).
+  // TORNADO_LIFT: cars can be moved by the wind at all.
   if (CBZ.CONFIG.TORNADO_LIFT == null) CBZ.CONFIG.TORNADO_LIFT = true;
-  // How many funnels may exist at once. The brief caps this at 1 (2 absolute
-  // max) because every world query below is per-vortex; two doubles them.
+  // How many funnels may exist at once (every world query is per vortex).
   if (CBZ.CONFIG.TORNADO_MAX == null) CBZ.CONFIG.TORNADO_MAX = 1;
-  /* TORNADO_V2 (2026-08-23) — the tornado becomes a thing that happens TO THE
-     WORLD in survival mode, not just to the people in it. Everything the flag
-     buys, and why each is what a real tornado does:
-       · the SURVIVAL ARENA is destructible: the roster's def lends this file a
-         bridge to its ONE structural ledger + its flingCar verb, so island
-         buildings grind glass → lean → collapse under the funnel and parked
-         cars are picked up and thrown once the local gust passes the EF2
-         "cars lifted" bar — the same physics the city side already had.
-       · a DAMAGE PATH: persistent torn-ground scars and kept debris deposited
-         along the track. A tornado leaves a line across the map, not a circle
-         of hurt that vanishes when it dies.
-       · a WALL CLOUD: the funnel hangs from a dark rotating cloud deck the
-         way a condensation funnel hangs from a mesocyclone, instead of
-         standing in a clear sky like a dust devil on stilts.
-       · SHELTER IS REAL: an interior room (surv's underRoof test) protects
-         you from the wind — until the building itself fails, at which point
-         the collapse crushes the footprint. And safeDir sends the crowd to
-         the nearest doorway OUT of the path, which is the actual safety
-         advice, instead of a blind sprint a 15 m/s storm outruns.
-     ?cfg_TORNADO_V2=0 is the one-line revert to the pre-wave behaviour. */
-  if (CBZ.CONFIG.TORNADO_V2 == null) CBZ.CONFIG.TORNADO_V2 = true;
-  function v2() { return CBZ.CONFIG.TORNADO_V2 !== false; }
 
   const T = (CBZ.tornado = {});
+  const q = function (lo, hi) { return CBZ.qScale ? CBZ.qScale(lo, hi) : (lo + hi) * 0.5; };
+  const qi = function (lo, hi) { return Math.max(1, Math.round(q(lo, hi))); };
 
   /* ============================================================
-     THE EF TABLE. vmax = 3-second gust in m/s at the core radius R (metres).
-     These are the NWS bands' midpoints, not invented numbers; everything else
-     in the file is derived from them so re-tuning a class is one row.
+     THE EF TABLE. vmax = peak 3-second gust at the core radius R (NWS band
+     midpoints). R is the RADIUS OF MAXIMUM WIND, not the damage width: a
+     real EF1 does its damage in a 30-60 m swath, an EF5 in a few hundred
+     metres. (It was 26-140 m, which made every class a district-wide disc.)
      ============================================================ */
   const EF = [
-    { vmax: 33,  R: 26,  fwd: 11.0, life: 40 },   // EF0
-    { vmax: 43,  R: 38,  fwd: 12.6, life: 52 },   // EF1
-    { vmax: 55,  R: 52,  fwd: 14.2, life: 64 },   // EF2
-    { vmax: 67,  R: 72,  fwd: 15.8, life: 78 },   // EF3
-    { vmax: 81,  R: 100, fwd: 17.4, life: 94 },   // EF4
-    { vmax: 100, R: 140, fwd: 19.0, life: 112 },  // EF5
+    { vmax: 33,  R: 12, fwd: 11.0, life: 40 },   // EF0
+    { vmax: 43,  R: 16, fwd: 12.6, life: 52 },   // EF1
+    { vmax: 55,  R: 22, fwd: 14.2, life: 64 },   // EF2
+    { vmax: 67,  R: 30, fwd: 15.8, life: 78 },   // EF3
+    { vmax: 81,  R: 40, fwd: 17.4, life: 94 },   // EF4
+    { vmax: 100, R: 55, fwd: 19.0, life: 112 },  // EF5
   ];
-  // Beyond OUTER_MUL * R the free-vortex tail is faded to nothing, so every
-  // world query in this file has a hard, small bound instead of the 1/r tail's
-  // infinite reach. 4.5 core radii is ~120 m for an EF1 and ~630 m for an EF5.
-  const OUTER_MUL = 4.5;
-  // The DAMAGE PATH is narrower than the wind field: real EF-rated damage
-  // tracks roughly the core, not the inflow. 1.25 R.
-  const DAMAGE_MUL = 1.25;
-  // Updraft as a fraction of peak tangential speed (observed 0.3-0.6).
-  const LIFT_MUL = 0.45;
-  // A car comes off the ground at ~EF2 gusts — the EF2 damage indicator is
-  // literally "cars lifted off ground". Below this nothing is ever airborne.
-  const LIFT_MIN_SPEED = 42;
+  const EF_EDGES = [38, 49.5, 60.5, 74, 89];      // 3-s gust band edges, m/s
+  // Beyond OUTER_MUL * R the free-vortex tail is tapered to nothing, so every
+  // query has a hard bound. With the square taper below, the EF0 gust (29 m/s)
+  // ends ~1.2-1.6 R from the axis: a NARROW, SHARP path.
+  const OUTER_MUL = 3.2;
+  const LIFT_MUL = 0.5;                           // updraft / vmax (observed 0.3-0.6)
+  const AIR_RHO = 1.225;
+  const G = 9.81;
+  const DPS0 = 0.85;                              // city ledger: damage/s at 33 m/s (v^3 law)
 
-  /* ------------------------------------------------------------------
-     THE EF -> DAMAGE CALIBRATION (the number that decides the whole feel).
-
-     THE DRIVER IS NOT WIND SPEED. What a facade actually feels is DYNAMIC
-     PRESSURE, q = 0.5 * rho * v^2 (rho = 1.225 kg/m^3 at sea level):
-
-       EF0  667 Pa    EF1 1132 Pa    EF2 1853 Pa
-       EF3 2750 Pa    EF4 4019 Pa    EF5 6125 Pa
-
-     and what a facade actually LOSES per second is the aerodynamic POWER
-     FLUX carried past it — work rate = force x velocity, i.e.
-
-       P = q * v = 0.5 * rho * v^3     watts per square metre
-
-     the same v^3 law wind engineering uses for everything from turbine yield
-     to debris-generation rate. Using q alone (v^2) makes EF5 only 9x EF0,
-     which cannot reproduce the published damage descriptors; using power flux
-     gives 27.8x, which does. So DPS = DPS0 * (v/33)^3, and `pressure` is
-     published on the field query below for anyone who wants the force rather
-     than the damage rate.
-
-     IT IS A SUSTAINED LOAD, NOT A STRIKE. Every hit below is a small
-     continuous DPS bite with NO `sudden` flag: the dynamic-amplification
-     bonus city/structural.js gives an impulsive strike is exactly wrong for a
-     tornado, which grinds a building down over seconds rather than flicking
-     it over. That difference is most of why this reads as weather.
-
-     city/structural.js sizes a building at `12 + storeys*7 + (w*d)/26`:
-       corner shop      ~23      4-storey block   ~55      11-storey  ~110
-
-     Effective full-strength dwell (path width 2*1.25R divided by forward
-     speed, halved for the 1-r/R falloff) is ~3.0 s at EF0 rising to ~9.2 s at
-     EF5 — the wider classes linger as well as hit harder, which is the second
-     half of why the ladder is so steep. At DPS0 = 0.85 that lands:
-
-       EF0 -> shop frac 0.11   SCARRED    shingles, gutters             ✓
-       EF1 -> shop frac 0.31   WOUNDED    roof stripped, windows out    ✓
-       EF2 -> shop frac 0.79   CRITICAL   roof gone, weak walls fail    ✓
-       EF3 -> shop COLLAPSES (1.76), 4-storey block CRITICAL (0.74)     ✓
-       EF4 -> shop + block COLLAPSE, 11-storey CRITICAL (0.82)          ✓
-       EF5 -> the 11-storey goes too (1.97): swept clean                ✓
-
-     which is the published EF damage description, level for level. DPS0 is
-     therefore the single tuning knob for "how many seconds is a building".
-  ------------------------------------------------------------------ */
-  const AIR_RHO = 1.225;                       // kg/m^3 — sea-level air
-  const DPS0 = 0.85;
+  /* DEGREES OF DAMAGE, m/s — the EF scale's FR12 (one- and two-family
+     residence) expected wind speeds, mph converted. These are the house's
+     numbers; a masonry walk-up is RES_MASONRY stronger, an engineered tower
+     RES_ENGINEERED (whose structure then fails through the ledger). */
+  const DOD = { cover: 35, deck: 43, roof: 54, walls: 59, most: 68, swept: 89 };
+  const RES_MASONRY = 1.15, RES_ENGINEERED = 1.45;
+  // trees (EF DI 27/28): small limbs, large limbs, snapped/uprooted, debarked
+  const TREE = { twigs: 27, limbs: 33, down: 41, debark: 64 };
 
   /* ============================================================
-     STATE. `live` is capped at CONFIG.TORNADO_MAX (1). Everything else is
-     per-vortex and bounded by the caps in the perf block further down.
+     STATE
      ============================================================ */
   const live = [];
   let idSeq = 0;
-  // V2 run counters — read back by CBZ.tornado.audit() (and the before/after
-  // preset). Counts of things that HAPPENED, never promises: a build with the
-  // flag off reports zeros because the code paths that increment them are the
-  // code paths the flag gates.
   const stats = {
-    buildingHits: 0,        // structural bites landed in the survival ledger
-    buildingCollapses: 0,   // arena buildings the funnel took all the way down
-    carsFlung: 0,           // parked cars picked up and thrown
-    scarMarks: 0,           // torn-ground marks laid along the track
-    debrisKept: 0,          // persistent debris deposited in the path
-    shelterSaves: 0,        // actors the interior-room rule spared from the core
-    pathMeters: 0,          // ground the funnel actually covered
+    roofsDamaged: 0,      // buildings that lost roof covering (DOD 2+)
+    roofsRemoved: 0,      // buildings whose roof structure was lifted off
+    roofParts: 0,         // roof meshes thrown
+    wallsDown: 0,         // wall panels felled
+    buildingsFailed: 0,   // whole-structure failures handed to the ledger/collapse
+    housesSwept: 0,       // swept off the foundation
+    treesDown: 0, treesStripped: 0,
+    carsMoved: 0, carsRolled: 0, carsThrown: 0,
+    debrisLofted: 0,      // small pieces ever put in the air
+    flyersLaunched: 0,    // big parts (roofs/walls/cars/crowns) put in flight
+    buildingHits: 0, buildingCollapses: 0,
+    scarSections: 0, suctionMarks: 0,
+    shelterSaves: 0, pathMeters: 0,
+    hailStones: 0,
+    maxDebrisHeight: 0, maxCarHeight: 0, maxThrow: 0,
   };
+  // the tick's cost, and the worst frame of each stage (what a phone pays)
+  const perf = { frames: 0, ms: 0, max: 0, last: 0, sec: {} };
+  let _pt0 = 0;
+  function lap(name) {
+    const n = performance.now(), d = n - _pt0;
+    _pt0 = n;
+    const S = perf.sec;
+    if (!(S[name] >= d)) S[name] = d;
+  }
   let rngStream = null;
   function rng() {
-    if (!rngStream) rngStream = CBZ.seedStream ? CBZ.seedStream("tornado") : function () { return 0.5; };
+    if (!rngStream) rngStream = CBZ.seedStream ? CBZ.seedStream("tornado") : Math.random;
     return rngStream();
   }
+  function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
 
   function arenaRoot() {
     const g = CBZ.game;
     if (g && g.mode === "city" && CBZ.city && CBZ.city.arena && CBZ.city.arena.root) return CBZ.city.arena.root;
     if (g && g.mode === "survival" && CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.root) return CBZ.surv.arena.root;
+    if (CBZ.LAB && CBZ.labWorld && CBZ.labWorld.W && CBZ.labWorld.W.root) return CBZ.labWorld.W.root;
     return CBZ.scene || null;
   }
   function inCity() { return CBZ.game && CBZ.game.mode === "city"; }
   function floorAt(x, z) { return CBZ.floorAt ? (+CBZ.floorAt(x, z) || 0) : 0; }
+  function camPos() { return CBZ.camera ? CBZ.camera.position : null; }
   function camDist(x, z) {
-    const c = CBZ.camera && CBZ.camera.position;
+    const c = camPos();
     return c ? Math.hypot(x - c.x, z - c.z) : 0;
   }
 
-  /* ============================================================
-     THE FUNNEL MESH — the one new draw.
-
-     A stack of OPEN cylinder shells (r128: CylinderGeometry(rTop, rBot, h,
-     radial, height, openEnded)) whose radius grows with height, each leaning
-     a little off the axis so the column visibly bends the way real funnels
-     do, all sharing two scrolling CanvasTexture materials (inner column and
-     outer veil) so the whole thing costs two draw states, not N.
-
-     Everything rides CBZ.qScale: at tier 0 it is 4 rings and 3 debris boxes,
-     at tier 4 it is 9 rings and 10. The texture is built ONCE for the module
-     and never disposed; the geometries and the two per-funnel materials are.
-     ============================================================ */
-  let funnelTex = null;
-  function funnelTexture() {
-    if (funnelTex) return funnelTex;
-    const c = document.createElement("canvas");
-    c.width = 64; c.height = 256;
-    const g = c.getContext("2d");
-    g.clearRect(0, 0, 64, 256);
-    // DETERMINISTIC streaks (materials.js's concreteTex pattern — a fixed
-    // arithmetic sequence, never Math.random, so texture generation is
-    // reproducible and two clients build byte-identical funnels).
-    for (let i = 0; i < 220; i++) {
-      const x = (i * 53) % 64;
-      const y = (i * 97) % 256;
-      const h = 12 + ((i * 29) % 46);
-      const a = 0.10 + ((i * 37) % 45) / 260;
-      g.fillStyle = "rgba(214,210,200," + a.toFixed(3) + ")";
-      g.fillRect(x, y, 1 + (i % 3), h);
-    }
-    // a few darker debris ropes so the column is not uniform grey
-    for (let i = 0; i < 40; i++) {
-      const x = (i * 41) % 64;
-      const y = (i * 61) % 256;
-      g.fillStyle = "rgba(58,54,48,0.30)";
-      g.fillRect(x, y, 2, 26 + ((i * 17) % 40));
-    }
-    const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    funnelTex = t;
-    return t;
+  /* THE WORLD THE VORTEX WORKS ON. Off the city it is a BRIDGE of closures:
+     the island's (lent by systems/disasters.js), the lab's, or CBZ.island's
+     own lists when it publishes them. Never hard-coded positions:
+       fragile()   building records {group, x|ox, z|oz, w, d, h, storeys, gy,
+                   colliders, platforms, fallen, parts?}
+       cars()      car records (island {group, x, z, collider, flung} or a
+                   city car {pos, group, mass, dims})
+       trees()     {x, z, trunk, foliage}
+       ground(x,z) the walkable surface height
+       hitBuilding(b, amount, dirx, dirz)  the structural ledger
+       carGlass(car, dirx, dirz)           the car's own windows break
+       sheltered(actor)                    an interior room test           */
+  function islandBridge() {
+    const I = CBZ.island;
+    if (!I || inCity()) return null;
+    const list = function (k1, k2) { return function () { const v = I[k1] || (k2 && I[k2]); return Array.isArray(v) ? v : (typeof v === "function" ? v() : []); }; };
+    return {
+      fragile: list("buildings", "fragile"), cars: list("cars"), trees: list("trees", "flammable"),
+      ground: typeof I.groundAt === "function" ? I.groundAt : (typeof I.groundHeightAt === "function" ? I.groundHeightAt : null),
+    };
+  }
+  let lastWorld = null;
+  function groundOf(W) {
+    if (W && typeof W.ground === "function") return function (x, z) { let g; try { g = +W.ground(x, z); } catch (e) {} return Number.isFinite(g) ? g : floorAt(x, z); };
+    if (!inCity() && CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.groundHeightAt) return function (x, z) { return CBZ.surv.arena.groundHeightAt(x, z); };
+    return floorAt;
   }
 
-  /* V2's DENSE texture. The original canvas is transparent with faint streaks
-     — right for the outer veil, hopeless for a condensation funnel, which is
-     a solid dark column (the streaks in real footage are variations IN the
-     cloud, not gaps THROUGH it). This one has a filled base with streak
-     variation on top, so the inner column, the dirt skirt and the wall cloud
-     read as material with volume. Same deterministic arithmetic sequences. */
-  let funnelTexV2 = null;
-  function funnelTextureV2() {
-    if (funnelTexV2) return funnelTexV2;
-    const c = document.createElement("canvas");
-    c.width = 64; c.height = 256;
-    const g = c.getContext("2d");
-    g.fillStyle = "rgba(226,223,218,0.88)";
-    g.fillRect(0, 0, 64, 256);
+  /* ============================================================
+     THE JOURNAL — everything this file changes in a non-city world, so
+     T.restoreWorld() can put it back exactly.
+     ============================================================ */
+  const journal = [];
+  const touched = new Set();          // records carrying our _tw state
+  function jObj(o) {
+    if (!o || o.userData._twJ || inCity()) return;
+    o.userData._twJ = true;
+    journal.push({ k: 0, o: o, parent: o.parent, p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone(), v: o.visible });
+  }
+  function dropCollider(c) {
+    const C = CBZ.colliders;
+    if (!c || !C) return;
+    const i = C.indexOf(c);
+    if (i < 0) return;
+    C.splice(i, 1);
+    if (!inCity()) journal.push({ k: 1, c: c });
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  function addCollider(c) {
+    if (!CBZ.colliders) return;
+    CBZ.colliders.push(c);
+    if (!inCity()) journal.push({ k: 2, c: c });
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  function dropPlatform(p) {
+    const P = CBZ.platforms;
+    if (!p || !P) return;
+    const i = P.indexOf(p);
+    if (i < 0) return;
+    P.splice(i, 1);
+    if (!inCity()) journal.push({ k: 3, p: p });
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+  }
+  // move a mesh out of its building into the arena root, keeping where it is
+  function liberate(o) {
+    jObj(o);
+    const root = arenaRoot();
+    if (root && o.parent !== root) {
+      if (o.parent) o.parent.updateMatrixWorld(true);
+      root.updateMatrixWorld(true);
+      root.attach(o);
+    }
+  }
+
+  /* ============================================================
+     TEXTURES — all built once per module, deterministic arithmetic, never
+     Math.random (two clients build byte-identical storms).
+     ============================================================ */
+  let texCache = null;
+  function textures() {
+    if (texCache) return texCache;
+    const canvas = function (w, h) { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
+    const wrap = function (c) { const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t; };
+    // the condensation funnel: a dense column with streak variation in it and
+    // RAGGED alpha punched through so no grazing edge is a ruler line
+    let c = canvas(64, 256), g = c.getContext("2d");
+    g.fillStyle = "rgba(226,223,218,0.9)"; g.fillRect(0, 0, 64, 256);
     for (let i = 0; i < 200; i++) {
-      const x = (i * 53) % 64;
-      const y = (i * 97) % 256;
-      const h = 14 + ((i * 29) % 52);
-      const lite = (i % 3) !== 0;
-      const a = 0.12 + ((i * 37) % 40) / 220;
-      g.fillStyle = lite ? "rgba(255,253,248," + a.toFixed(3) + ")" : "rgba(112,106,98," + (a * 0.9).toFixed(3) + ")";
+      const x = (i * 53) % 64, y = (i * 97) % 256, h = 14 + ((i * 29) % 52), a = 0.12 + ((i * 37) % 40) / 220;
+      g.fillStyle = (i % 3) ? "rgba(255,253,248," + a.toFixed(3) + ")" : "rgba(112,106,98," + (a * 0.9).toFixed(3) + ")";
       g.fillRect(x, y, 1 + (i % 3), h);
     }
-    // RAGGED ALPHA. A uniform-alpha canvas gives the cylinder a silhouette
-    // you can trace with a ruler — the single loudest "it's a prop" tell.
-    // Punching streaky holes through the fill means every grazing edge of the
-    // column breaks up into wisps instead of a hard line, for zero draw cost.
     g.globalCompositeOperation = "destination-out";
     for (let i = 0; i < 90; i++) {
-      const x = (i * 47) % 64;
-      const y = (i * 83) % 256;
       g.fillStyle = "rgba(0,0,0," + (0.22 + ((i * 31) % 45) / 110).toFixed(3) + ")";
-      g.fillRect(x, y, 1 + (i % 2), 10 + ((i * 23) % 34));
+      g.fillRect((i * 47) % 64, (i * 83) % 256, 1 + (i % 2), 10 + ((i * 23) % 34));
     }
     g.globalCompositeOperation = "source-over";
-    const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    funnelTexV2 = t;
-    return t;
-  }
-
-  /* The storm-base deck used to be two flat CircleGeometry discs — a giant
-     hard-rimmed ceiling that read as ARCHITECTURE (the owner's exact
-     complaint about eyes that look like buildings). One radial-gradient
-     canvas gives the deck a centre that is solidly dark and an edge that
-     dissolves to nothing, so the sky ends in cloud, not in a rim. Built once
-     for the module, never disposed. */
-  let cloudDeckTex = null;
-  function cloudDeckTexture() {
-    if (cloudDeckTex) return cloudDeckTex;
-    const c = document.createElement("canvas");
-    c.width = c.height = 128;
-    const g = c.getContext("2d");
-    const grad = g.createRadialGradient(64, 64, 6, 64, 64, 64);
-    grad.addColorStop(0, "rgba(240,240,244,0.97)");
-    grad.addColorStop(0.5, "rgba(238,238,242,0.86)");
-    grad.addColorStop(0.78, "rgba(236,236,242,0.40)");
-    grad.addColorStop(1, "rgba(236,236,242,0)");
-    g.fillStyle = grad;
-    g.fillRect(0, 0, 128, 128);
-    cloudDeckTex = new THREE.CanvasTexture(c);
-    return cloudDeckTex;
-  }
-
-  /* THE JUNK IN THE COLUMN is what a tornado actually carries: boards,
-     torn corrugated roof sheet and snapped branches, each its own real shape
-     and material. (It was one grey 1.15 x 0.5 x 0.8 box, cloned.) Module-
-     shared geometry + materials, never disposed. */
-  let junkKit = null;
-  function junk() {
-    if (junkKit) return junkKit;
-    // a board: 2.4 m x 20 cm x 45 mm, weathered pine
-    const plank = new THREE.BoxGeometry(2.4, 0.045, 0.2);
-    // corrugated roof sheet: a thin plane rippled across its width
-    const sheet = new THREE.PlaneGeometry(1.8, 0.9, 1, 14);
-    const sp = sheet.attributes.position;
-    for (let i = 0; i < sp.count; i++) sp.setZ(i, Math.sin(sp.getY(i) / 0.9 * 14 * Math.PI) * 0.025);
-    sheet.computeVertexNormals();
-    // a snapped branch: tapered, lying along x, with one side twig
-    const br = new THREE.CylinderGeometry(0.035, 0.085, 2.1, 6, 1);
-    br.rotateZ(Math.PI / 2);
-    const tw = new THREE.CylinderGeometry(0.015, 0.03, 0.8, 5, 1);
-    tw.rotateZ(Math.PI / 2 - 0.7); tw.translate(0.25, 0.25, 0);
-    const branch = mergeTwo(br, tw);
-    const M = function (c, o) { const m = new THREE.MeshLambertMaterial(Object.assign({ color: c }, o || {})); m._shared = true; return m; };
-    junkKit = [
-      { geo: plank, mat: M(0x8f6e4a) },
-      { geo: sheet, mat: M(0x98a1a6, { side: THREE.DoubleSide }) },
-      { geo: branch, mat: M(0x4d3a28) },
-    ];
-    return junkKit;
-  }
-  function mergeTwo(a, b) {
-    a = a.index ? a.toNonIndexed() : a; b = b.index ? b.toNonIndexed() : b;
-    const g = new THREE.BufferGeometry();
-    for (const k of ["position", "normal", "uv"]) {
-      const A = a.attributes[k], B = b.attributes[k];
-      const arr = new Float32Array(A.array.length + B.array.length);
-      arr.set(A.array, 0); arr.set(B.array, A.array.length);
-      g.setAttribute(k, new THREE.BufferAttribute(arr, A.itemSize));
+    const dense = c;
+    // the veil: faint streaks on transparency
+    c = canvas(64, 256); g = c.getContext("2d");
+    for (let i = 0; i < 220; i++) {
+      const a = 0.10 + ((i * 37) % 45) / 260;
+      g.fillStyle = "rgba(214,210,200," + a.toFixed(3) + ")";
+      g.fillRect((i * 53) % 64, (i * 97) % 256, 1 + (i % 3), 12 + ((i * 29) % 46));
     }
+    for (let i = 0; i < 40; i++) { g.fillStyle = "rgba(58,54,48,0.30)"; g.fillRect((i * 41) % 64, (i * 61) % 256, 2, 26 + ((i * 17) % 40)); }
+    const veil = c;
+    // the storm base: a soft disc with LOG-SPIRAL striations (the inflow bands
+    // a rotating mesocyclone base shows from underneath), dissolving at the rim
+    c = canvas(256, 256); g = c.getContext("2d");
+    const img = g.createImageData(256, 256), d = img.data;
+    for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+      const dx = (x - 127.5) / 127.5, dy = (y - 127.5) / 127.5, r = Math.hypot(dx, dy);
+      const i4 = (y * 256 + x) * 4;
+      if (r >= 1) { d[i4 + 3] = 0; continue; }
+      const th = Math.atan2(dy, dx);
+      const band = 0.5 + 0.5 * Math.sin(th * 3 + Math.log(r + 0.04) * 7.5);
+      const fall = r < 0.45 ? 1 : Math.max(0, 1 - (r - 0.45) / 0.55);
+      const v = 200 + 50 * band;
+      d[i4] = v; d[i4 + 1] = v; d[i4 + 2] = v + 4;
+      d[i4 + 3] = Math.round(255 * fall * fall * (0.72 + 0.28 * band));
+    }
+    g.putImageData(img, 0, 0);
+    const deck = new THREE.CanvasTexture(c);
+    // rain shafts: vertical streaks, densest at the cloud, thinning to the ground
+    c = canvas(64, 256); g = c.getContext("2d");
+    const gr = g.createLinearGradient(0, 0, 0, 256);
+    gr.addColorStop(0, "rgba(220,224,230,0.85)"); gr.addColorStop(0.6, "rgba(220,224,230,0.55)"); gr.addColorStop(1, "rgba(220,224,230,0.25)");
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 256);
+    g.globalCompositeOperation = "destination-out";
+    for (let i = 0; i < 160; i++) {
+      g.fillStyle = "rgba(0,0,0," + (0.25 + ((i * 29) % 50) / 100).toFixed(3) + ")";
+      g.fillRect((i * 37) % 64, (i * 71) % 256, 1, 18 + ((i * 13) % 60));
+    }
+    for (let i = 0; i < 6; i++) {                 // gaps between the shafts
+      g.fillStyle = "rgba(0,0,0,0.55)";
+      g.fillRect((i * 23 + 5) % 64, 0, 3 + (i % 3), 256);
+    }
+    g.globalCompositeOperation = "source-over";
+    const rain = c;
+    // the ground scar: torn earth with ragged edges across its width (u)
+    c = canvas(64, 64); g = c.getContext("2d");
+    for (let x = 0; x < 64; x++) {
+      const e = Math.min(x, 63 - x) / 32;           // 0 at the edges, 1 mid
+      for (let y = 0; y < 64; y++) {
+        const n = ((x * 73 + y * 151) % 97) / 97, n2 = ((x * 31 + y * 17) % 53) / 53;
+        const a = Math.max(0, Math.min(1, (e * 1.6 - 0.15 + (n - 0.5) * 0.6)));
+        const v = 70 + Math.round(40 * n2);
+        g.fillStyle = "rgba(" + v + "," + Math.round(v * 0.82) + "," + Math.round(v * 0.62) + "," + a.toFixed(3) + ")";
+        g.fillRect(x, y, 1, 1);
+      }
+    }
+    const scar = c;
+    // a soft round sprite for the dust in the debris cloud
+    c = canvas(64, 64); g = c.getContext("2d");
+    const rg = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+    rg.addColorStop(0, "rgba(255,255,255,0.9)"); rg.addColorStop(0.5, "rgba(255,255,255,0.45)"); rg.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = rg; g.fillRect(0, 0, 64, 64);
+    const dust = new THREE.CanvasTexture(c);
+    texCache = { dense: wrap(dense), veil: wrap(veil), deck: deck, rain: wrap(rain), scar: wrap(scar), dust: dust };
+    return texCache;
+  }
+  function cloneTex(t, rx, ry) {
+    const c = t.clone();
+    c.wrapS = c.wrapT = THREE.RepeatWrapping;
+    c.needsUpdate = true;
+    c.repeat.set(rx, ry);
+    return c;
+  }
+
+  /* ============================================================
+     THE STORM AND THE FUNNEL (one group per vortex)
+     ============================================================ */
+  function makeTube(nR, nS) {
+    const g = new THREE.BufferGeometry();
+    const n = (nR + 1) * (nS + 1);
+    const pos = new Float32Array(n * 3), uv = new Float32Array(n * 2);
+    for (let i = 0; i <= nR; i++) for (let j = 0; j <= nS; j++) {
+      const k = i * (nS + 1) + j;
+      uv[k * 2] = j / nS; uv[k * 2 + 1] = i / nR;
+    }
+    const idx = [];
+    for (let i = 0; i < nR; i++) for (let j = 0; j < nS; j++) {
+      const a = i * (nS + 1) + j, b = a + 1, c = a + nS + 1, d = c + 1;
+      idx.push(a, b, c, b, d, c);
+    }
+    g.setIndex(idx);
+    const pa = new THREE.BufferAttribute(pos, 3);
+    if (pa.setUsage) pa.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute("position", pa);
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
     return g;
+  }
+  function basicMat(o) {
+    return new THREE.MeshBasicMaterial(Object.assign({ transparent: true, side: THREE.DoubleSide, depthWrite: false }, o));
   }
 
   function buildFunnel(t) {
     const root = arenaRoot();
     if (!root) return;
+    const X = textures();
     const grp = new THREE.Group();
-    // MOVES EVERY FRAME: core/batch.js and core/farcull.js both refuse to
-    // touch anything under a userData.dynamic node. Without this the batcher
-    // would happily freeze the funnel into a static merged buffer.
-    grp.userData.dynamic = true;
+    grp.userData.dynamic = true;                    // batch.js / farcull.js keep off
     grp.name = "tornado-funnel";
+    const wg = t.wedge;
+    // cloud base height: a rope is tall and thin, a wedge broad and squat
+    const H = 150 + 70 * wg + t.R * 0.6;
+    const nR = qi(14, 26), nS = qi(12, 20);
+    /* THE LINEAR-HEX TRAP: core/renderer.js runs sRGB output with r128 colour
+       management off, so material hex is LINEAR and gamma-lifted on screen.
+       These are authored in linear: 0x15171c reaches the screen ≈ #52565e. */
+    const matIn = basicMat({ map: cloneTex(X.dense, 3, 1), color: 0x15171c, opacity: 0.84, fog: false });
+    const matOut = basicMat({ map: cloneTex(X.veil, 2, 1), color: 0x3b3d42, opacity: 0.34 });
+    const tubeIn = new THREE.Mesh(makeTube(nR, nS), matIn);
+    const tubeOut = new THREE.Mesh(makeTube(nR, nS), matOut);
+    tubeIn.name = "tw-funnel"; tubeOut.name = "tw-veil";
+    for (const m of [tubeIn, tubeOut]) { m.renderOrder = 3; m.castShadow = m.receiveShadow = false; grp.add(m); }
 
-    /* SHAPE IS MAGNITUDE. t.wedge (0 rope … 1 wedge, set from `mag` at
-       spawn) decides what KIND of thing hangs from the cloud:
-         rope   — a thin tall tube: base ~0.16R, ~4.6R high, concave trumpet
-                  taper, big sway. The EF1 that peels a roof and moves on.
-         wedge  — wider than it is tall: base ~0.9R, ~2R high, near-straight
-                  sides, half-buried in its own debris cloud. An EF4+ does
-                  not even look like a funnel — it looks like the storm came
-                  down to the ground.
-       Every proportion interpolates between the two. */
-    const wg = t.wedge || 0;
-    const nRing = Math.max(4, Math.round(CBZ.qScale ? CBZ.qScale(5, 10) : 8));
-    const H = Math.max(50, Math.min(300, t.R * (4.6 - 2.6 * wg)));
-    const rBase = t.R * (0.16 + 0.74 * wg), rTop = t.R * (1.05 + 0.55 * wg);
-    const taperPow = 0.60 + 0.35 * wg;
-    const tex = funnelTexture();
-    // Two materials: the dense inner column and a translucent outer veil that
-    // scrolls at a different rate. Parallax for the price of one extra state.
-    // Both take a CLONE of the module texture — the canvas image is shared
-    // (one upload) but offset/repeat are per-funnel, so animating one funnel's
-    // scroll can never drag the other's (the cap is 2) or leave the module
-    // texture permanently mutated after every funnel is gone.
-    const texIn = (v2() ? funnelTextureV2() : tex).clone(), texOut = tex.clone();
-    texIn.wrapS = texIn.wrapT = texOut.wrapS = texOut.wrapT = THREE.RepeatWrapping;
-    texIn.needsUpdate = texOut.needsUpdate = true;
-    texIn.repeat.set(3, 1);
-    texOut.repeat.set(2, 1);
-    // V2: the column is a CONDENSATION funnel — dark, dense, a silhouette
-    // against the storm light — not pale translucent smoke. The base opacity
-    // pair is stored on the mesh record so the fade envelope below scales the
-    // right numbers on either flag path.
-    const opIn = v2() ? 0.82 : 0.62, opOut = v2() ? 0.34 : 0.30;
-    // fog:false on the V2 column (like the wall cloud): the active-phase fog
-    // was washing the dark funnel to the fog colour, and a tornado is seen as
-    // a dark silhouette against the bright storm light, not as haze in haze.
-    /* THE LINEAR-HEX TRAP (core/renderer.js runs outputEncoding=sRGB with
-       r128 colour management OFF, so material hex is treated as LINEAR and
-       gamma-lifted ~2.2 on the way out): 0x41444c — "dark slate" on paper —
-       reached the screen as pale mid-grey, which is why the "dark
-       condensation funnel" photographed as a glass curtain. These constants
-       are authored IN LINEAR so the SCREEN gets the dark column: 0x15171c
-       renders ≈ #52565e. */
-    const matIn = new THREE.MeshBasicMaterial({
-      map: texIn, color: v2() ? 0x15171c : 0x6d6f74, transparent: true, opacity: opIn,
-      side: THREE.DoubleSide, depthWrite: false, fog: !v2(),
-    });
-    const matOut = new THREE.MeshBasicMaterial({
-      map: texOut, color: v2() ? 0x3b3d42 : 0x8e9096, transparent: true, opacity: opOut,
-      side: THREE.DoubleSide, depthWrite: false,
-    });
-
-    const rings = [];
-    const seg = Math.max(8, Math.round(CBZ.qScale ? CBZ.qScale(9, 16) : 14));
-    for (let i = 0; i < nRing; i++) {
-      const k0 = i / nRing, k1 = (i + 1) / nRing;
-      const h = H / nRing;
-      const r0 = rBase + (rTop - rBase) * Math.pow(k0, taperPow);
-      const r1 = rBase + (rTop - rBase) * Math.pow(k1, taperPow);
-      const geo = new THREE.CylinderGeometry(r1, r0, h, seg, 1, true);
-      const m = new THREE.Mesh(geo, matIn);
-      m.name = "tw-ring";                            // probed by the ba preset
-      const leanK = v2() ? 0.5 : 1;
-      // the BASE offsets only — animateFunnel writhes the rings around these
-      // every frame; a funnel whose lean never changes is a prop on a lathe.
-      const bx = Math.sin(i * 0.8) * t.R * 0.13 * leanK;
-      const bz = Math.cos(i * 0.62) * t.R * 0.11 * leanK;
-      m.position.set(bx, h * (i + 0.5), bz);
-      m.rotation.z = Math.sin(i * 0.8) * (v2() ? 0.04 : 0.07);
-      m.castShadow = false; m.receiveShadow = false;
-      m.renderOrder = 3;
-      grp.add(m);
-      rings.push({ mesh: m, spin: 1.0 + i * 0.16, bx: bx, bz: bz });
-    }
-    /* THE VEIL — one full-height translucent shell around the whole column.
-       The old build put the veil material on the TOP ring only, so the rest
-       of the tube met the sky as a naked hard edge. A single enclosing shell
-       (loose enough to contain the writhe) haloes the silhouette everywhere
-       for one mesh and zero extra material states. */
-    const veil = new THREE.Mesh(
-      new THREE.CylinderGeometry(rTop * 1.30, rBase * 1.45 + t.R * 0.10, H, seg, 1, true), matOut);
-    veil.position.y = H * 0.5;
-    veil.castShadow = veil.receiveShadow = false;
-    veil.renderOrder = 3;
-    grp.add(veil);
-    // the DEBRIS SKIRT at the base — the churning dirt collar that sells the
-    // ground contact harder than the funnel itself does. TWO counter-rotating
-    // shells (a low wide bowl and a taller inner churn) whose height grows
-    // with the wedge factor: a big tornado is buried to the knees in its own
-    // debris cloud. Both are pinned to the GROUND's schedule in animateFunnel
-    // — the skirt spins up as the tube arrives and dies as the wind does.
-    const skirtH = Math.max(6, t.R * (0.30 + 0.55 * (t.wedge || 0)));
-    const skirtGeo = new THREE.CylinderGeometry(t.R * 1.15, t.R * 1.45, skirtH, seg, 1, true);
-    // V2: the base skirt is DIRT-coloured. What churns at a funnel's foot is
-    // the ground it is eating, not more grey cloud — the brown debris skirt is
-    // the single most recognisable ground-contact tell in real footage.
-    let matSkirt = null;
-    if (v2()) {
-      const texSk = funnelTextureV2().clone();
-      texSk.wrapS = texSk.wrapT = THREE.RepeatWrapping;
-      texSk.needsUpdate = true; texSk.repeat.set(3, 1);
-      matSkirt = new THREE.MeshBasicMaterial({
-        map: texSk, color: 0x331d0c, transparent: true, opacity: 0.6,   // linear-authored dirt (≈ #7b5f40 on screen)
-        side: THREE.DoubleSide, depthWrite: false, fog: false,
-      });
-    }
-    const skirt = new THREE.Mesh(skirtGeo, matSkirt || matOut);
+    // THE DEBRIS CLOUD's shells: dirt, not more cloud
+    const seg = qi(10, 16);
+    const skirtH = Math.max(7, t.R * (0.7 + 0.9 * wg));
+    const matSkirt = basicMat({ map: cloneTex(X.dense, 3, 1), color: 0x331d0c, opacity: 0.6, fog: false });
+    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(t.R * 1.1, t.R * 1.45, skirtH, seg, 1, true), matSkirt);
     skirt.position.y = skirtH * 0.45;
-    skirt.castShadow = skirt.receiveShadow = false;
-    skirt.renderOrder = 3;
-    grp.add(skirt);
-    const skirt2 = new THREE.Mesh(
-      new THREE.CylinderGeometry(t.R * 0.72, t.R * 1.02, skirtH * 1.5, seg, 1, true), matSkirt || matOut);
+    const skirt2 = new THREE.Mesh(new THREE.CylinderGeometry(t.R * 0.7, t.R * 1.0, skirtH * 1.5, seg, 1, true), matSkirt);
     skirt2.position.y = skirtH * 0.7;
-    skirt2.castShadow = skirt2.receiveShadow = false;
-    skirt2.renderOrder = 3;
-    grp.add(skirt2);
+    for (const m of [skirt, skirt2]) { m.renderOrder = 3; m.castShadow = m.receiveShadow = false; grp.add(m); }
 
-    /* V2: THE WALL CLOUD. A real funnel is a condensation funnel descending
-       from a rotating wall cloud under a storm base; a column that just ends
-       in clear sky reads as a special effect. Three cheap pieces, all sharing
-       the module texture: two counter-scaled open shells flaring out from the
-       funnel top (the rotating wall cloud) and one wide dark disc above them
-       (the storm base the shot's sky is missing). All spin slowly with the
-       column and fade on the same envelope. */
-    let cloud = null, matCloud = null, matDeck = null, matDeck2 = null;
-    if (v2()) {
-      const texCl = funnelTextureV2().clone();
-      texCl.wrapS = texCl.wrapT = THREE.RepeatWrapping;
-      texCl.needsUpdate = true; texCl.repeat.set(4, 1);
-      // fog:false on the cloud pieces, deliberately: the warn/active weather
-      // runs heavy fog, and a fogged dark cloud renders as a white ceiling —
-      // the exact opposite of a storm base. Unfogged, it stays the dark
-      // silhouette a wall cloud actually is against the bright fog horizon.
-      matCloud = new THREE.MeshBasicMaterial({
-        map: texCl, color: 0x0e0f13, transparent: true, opacity: 0.9,   // linear-authored (≈ #40434c on screen)
-        side: THREE.DoubleSide, depthWrite: false, fog: false,
-      });
-      // the cloud is the STORM'S size, not the funnel's: a rope hangs from a
-      // broad storm base, so the cloud radii floor at 60 m — without this a
-      // small funnel wore a funnel-sized saucer, which read as a UFO
-      const rCl = Math.max(rTop, 60);
-      const wall1 = new THREE.Mesh(
-        new THREE.CylinderGeometry(rCl * 2.1, rCl * 1.05, H * 0.16, seg, 1, true), matCloud);
-      wall1.position.y = H * 0.97;
-      const wall2 = new THREE.Mesh(
-        new THREE.CylinderGeometry(rCl * 2.9, rCl * 2.0, H * 0.10, seg, 1, true), matCloud);
-      wall2.position.y = H * 1.05;
-      /* ONE soft-edged deck. The old pair of flat CircleGeometry discs cut a
-         hard circular rim against the sky — a ceiling with an edge is a
-         BUILDING, which is the owner's exact complaint. The radial-gradient
-         texture dissolves the deck to nothing at its rim (the dark comes from
-         the material colour; the texture carries shading + alpha), and the
-         radius is capped so a wedge's storm base doesn't pave the entire sky
-         of a frame it isn't even in. */
-      matDeck = new THREE.MeshBasicMaterial({
-        map: cloudDeckTexture(), color: 0x0b0c10, transparent: true, opacity: 0.95,   // linear-authored (≈ #383b44 on screen)
-        side: THREE.DoubleSide, depthWrite: false, fog: false,
-      });
-      const deck = new THREE.Mesh(new THREE.CircleGeometry(Math.min(rCl * 5.0, 520), seg), matDeck);
-      deck.rotation.x = Math.PI / 2;                 // faces DOWN at the player
-      deck.position.y = H * 1.12;
-      cloud = [wall1, wall2, deck];
-      for (const m of cloud) {
-        m.castShadow = m.receiveShadow = false;
-        m.renderOrder = 3;
-        grp.add(m);
-      }
+    // THE DUST in the debris cloud: one Points draw, CPU-orbited
+    const nDust = qi(70, 240);
+    const dpos = new Float32Array(nDust * 3);
+    const dust = [];
+    for (let i = 0; i < nDust; i++) {
+      dust.push({ a: i * 2.399, r: t.R * (0.4 + ((i * 37) % 100) / 90), y: ((i * 53) % 100) / 100 * skirtH * 1.6,
+        vy: 0.6 + ((i * 29) % 10) / 10, sv: -1 });
     }
-    grp.userData.opIn = opIn; grp.userData.opOut = opOut;
+    const dg = new THREE.BufferGeometry();
+    const da = new THREE.BufferAttribute(dpos, 3);
+    if (da.setUsage) da.setUsage(THREE.DynamicDrawUsage);
+    dg.setAttribute("position", da);
+    dg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, skirtH, 0), t.R * 2 + skirtH);
+    const matDust = new THREE.PointsMaterial({ map: X.dust, color: 0x3a2a1a, size: Math.max(4, t.R * 0.32), sizeAttenuation: true,
+      transparent: true, opacity: 0.5, depthWrite: false });
+    const dustPts = new THREE.Points(dg, matDust);
+    dustPts.renderOrder = 4;
+    grp.add(dustPts);
 
-    // orbiting debris — the "flung junk in the column" read, as real meshes
-    // rather than a particle system, so it costs a fixed handful of draws.
-    const nDeb = Math.max(2, Math.round(CBZ.qScale ? CBZ.qScale(3, 10) : 7));
-    const kit = junk();
-    const debris = [];
-    for (let i = 0; i < nDeb; i++) {
-      const J = kit[i % kit.length];
-      const m = new THREE.Mesh(J.geo, J.mat);
-      m.castShadow = false; m.receiveShadow = false;
-      grp.add(m);
-      debris.push({
-        mesh: m,
-        rad: t.R * (0.5 + (i % 4) * 0.22),
-        y: 4 + (i * H) / (nDeb + 1),
-        ang: (i * 2.399),                         // golden-angle spread
-        rate: 1.5 + (i % 3) * 0.5,
-        sc: 0.75 + (i % 5) * 0.15,
-      });
-    }
+    /* THE PARENT STORM rides a sub-group at the top of the spine (the cloud
+       end of the funnel), so the funnel's tilt reads as the base lagging the
+       storm, which is what it is. */
+    const cloud = new THREE.Group();
+    grp.add(cloud);
+    const rCl = Math.max(t.R * 2.2, 70);
+    const matWall = basicMat({ map: cloneTex(X.dense, 4, 1), color: 0x0e0f13, opacity: 0.92, fog: false });
+    const wall1 = new THREE.Mesh(new THREE.CylinderGeometry(rCl * 1.05, rCl * 0.8, H * 0.12, seg, 1, true), matWall);
+    wall1.position.y = -H * 0.05;                   // the LOWERED wall cloud
+    const wall2 = new THREE.Mesh(new THREE.CylinderGeometry(rCl * 2.4, rCl * 1.05, H * 0.08, seg, 1, true), matWall);
+    wall2.position.y = H * 0.03;
+    const matDeck = basicMat({ map: X.deck, color: 0x0b0d0c, opacity: 0.96, fog: false });
+    const deck = new THREE.Mesh(new THREE.CircleGeometry(Math.min(rCl * 6, 640), Math.max(16, seg + 6)), matDeck);
+    deck.rotation.x = Math.PI / 2;                   // faces down at the player
+    deck.position.y = H * 0.07;
+    // RAIN-WRAP on the rear flank and the precipitation core ahead-left. One
+    // material, two open arcs, each the height of the storm.
+    const matRain = basicMat({ map: cloneTex(X.rain, 5, 1), color: 0x2c3035, opacity: 0.0, fog: true });
+    const rainR = rCl * 1.25;
+    const rainWrap = new THREE.Mesh(new THREE.CylinderGeometry(rainR, rainR * 0.9, H * 1.05, seg + 4, 1, true, 0, Math.PI * 1.15), matRain);
+    rainWrap.position.y = -H * 0.5;
+    const ffdR = rCl * 1.4;
+    const ffd = new THREE.Mesh(new THREE.CylinderGeometry(ffdR, ffdR, H * 1.05, seg + 4, 1, true, 0, Math.PI * 2), matRain);
+    ffd.position.y = -H * 0.5;
+    for (const m of [wall1, wall2, deck, rainWrap, ffd]) { m.renderOrder = 3; m.castShadow = m.receiveShadow = false; cloud.add(m); }
 
-    grp.position.set(t.x, floorAt(t.x, t.z), t.z);
+    grp.position.set(t.x, t.gfn(t.x, t.z), t.z);
     root.add(grp);
-    t.mesh = { grp: grp, rings: rings, skirt: skirt, skirt2: skirt2, veil: veil, debris: debris,
-      matIn: matIn, matOut: matOut, H: H,
-      cloud: cloud, matCloud: matCloud, matDeck: matDeck, matDeck2: matDeck2, matSkirt: matSkirt };
+    // spine scratch: ring centres for the current frame
+    const cen = new Float32Array((nR + 1) * 3);
+    t.mesh = { grp, tubeIn, tubeOut, skirt, skirt2, dustPts, dust, cloud, wall1, wall2, deck, rainWrap, ffd,
+      matIn, matOut, matSkirt, matDust, matWall, matDeck, matRain, H, nR, nS, cen, skirtH, rCl, ffdR };
   }
 
   function disposeFunnel(t) {
@@ -602,483 +478,1327 @@
     if (!M) return;
     try {
       if (M.grp.parent) M.grp.parent.remove(M.grp);
-      // ONLY the geometries this funnel created; the junk in the column shares
-      // the module kit's geometry and _shared materials — never dispose those.
-      for (const r of M.rings) if (r.mesh.geometry) r.mesh.geometry.dispose();
-      if (M.skirt.geometry) M.skirt.geometry.dispose();
-      if (M.skirt2 && M.skirt2.geometry) M.skirt2.geometry.dispose();
-      if (M.veil && M.veil.geometry) M.veil.geometry.dispose();
-      if (M.cloud) for (const c of M.cloud) if (c.geometry) c.geometry.dispose();
-      if (M.matIn.map && M.matIn.map !== funnelTex) M.matIn.map.dispose();
-      if (M.matOut.map && M.matOut.map !== funnelTex) M.matOut.map.dispose();
-      if (M.matSkirt) { if (M.matSkirt.map && M.matSkirt.map !== funnelTex) M.matSkirt.map.dispose(); M.matSkirt.dispose(); }
-      if (M.matCloud) { if (M.matCloud.map && M.matCloud.map !== funnelTex && M.matCloud.map !== cloudDeckTex) M.matCloud.map.dispose(); M.matCloud.dispose(); }
-      if (M.matDeck) M.matDeck.dispose();
-      if (M.matDeck2) M.matDeck2.dispose();
-      M.matIn.dispose(); M.matOut.dispose();
+      M.grp.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
+      for (const m of [M.matIn, M.matOut, M.matSkirt, M.matWall, M.matRain]) { if (m.map) m.map.dispose(); m.dispose(); }
+      M.matDust.dispose(); M.matDeck.dispose();
     } catch (e) {}
     t.mesh = null;
+  }
+
+  /* The funnel's life, as three numbers read by the shape AND the field:
+       k     wind intensity envelope (spin-up, mature, rope-out decay)
+       s0    where the visible condensation ends (1 = only at the cloud, 0 = on
+             the ground): it DESCENDS at touchdown and LIFTS at the very end
+       rope  0..1 through the rope-out stage */
+  const TOUCH = 5.0;               // s for the condensation to reach the ground
+  function lifecycle(t) {
+    const a = t.age, L = t.life;
+    const f = L > 0 ? a / L : 0;
+    t.rope = Math.max(0, Math.min(1, (f - 0.72) / 0.28));
+    const spin = Math.min(1, a / (TOUCH * 0.6));    // the ground whirl comes first
+    const sm = spin * spin * (3 - 2 * spin);
+    t.k = sm * (1 - 0.55 * t.rope) * (f > 0.94 ? Math.max(0, 1 - (f - 0.94) / 0.06) : 1);
+    const desc = Math.min(1, a / TOUCH);
+    const lift = f > 0.9 ? Math.min(1, (f - 0.9) / 0.1) : 0;
+    t.s0 = Math.max(1 - desc * desc * (3 - 2 * desc), lift);
+  }
+
+  const _T = new THREE.Vector3(), _N = new THREE.Vector3(), _B = new THREE.Vector3(), _ref = new THREE.Vector3();
+  function shapeTube(M, t, tube, radMul, s0, rB, rT, pw) {
+    const nR = M.nR, nS = M.nS, cen = M.cen;
+    const pos = tube.geometry.attributes.position.array;
+    for (let i = 0; i <= nR; i++) {
+      const s = s0 + (1 - s0) * (i / nR);
+      let r = rB + (rT - rB) * Math.pow(s, pw);
+      // the descending condensation TIP is pointed, not a cut-off pipe
+      if (s0 > 0.02) { const k = (s - s0) / Math.max(0.05, (1 - s0) * 0.35); r *= k >= 1 ? 1 : Math.max(0.05, k * k * (3 - 2 * k)); }
+      r *= radMul * (1 + 0.09 * Math.sin(t.age * 1.35 + i * 0.62) + 0.05 * Math.sin(t.age * 3.1 + i * 1.17));
+      const cx = cen[i * 3], cy = cen[i * 3 + 1], cz = cen[i * 3 + 2];
+      const i0 = Math.max(0, i - 1), i1 = Math.min(nR, i + 1);
+      _T.set(cen[i1 * 3] - cen[i0 * 3], cen[i1 * 3 + 1] - cen[i0 * 3 + 1], cen[i1 * 3 + 2] - cen[i0 * 3 + 2]).normalize();
+      _ref.set(0, 0, 1);
+      if (Math.abs(_T.z) > 0.9) _ref.set(1, 0, 0);
+      _N.copy(_ref).addScaledVector(_T, -_T.dot(_ref)).normalize();
+      _B.crossVectors(_T, _N);
+      for (let j = 0; j <= nS; j++) {
+        const th = (j / nS) * Math.PI * 2, c = Math.cos(th) * r, sn = Math.sin(th) * r;
+        const k = (i * (nS + 1) + j) * 3;
+        pos[k] = cx + _N.x * c + _B.x * sn;
+        pos[k + 1] = cy + _N.y * c + _B.y * sn;
+        pos[k + 2] = cz + _N.z * c + _B.z * sn;
+      }
+    }
+    tube.geometry.attributes.position.needsUpdate = true;
+    const bs = tube.geometry.boundingSphere;
+    bs.center.set(cen[(nR >> 1) * 3], cen[(nR >> 1) * 3 + 1], cen[(nR >> 1) * 3 + 2]);
+    bs.radius = M.H * 0.75 + rT * 2;
   }
 
   function animateFunnel(t, dt) {
     const M = t.mesh;
     if (!M) return;
-    const gy = floorAt(t.x, t.z);
+    const gy = t.gfn(t.x, t.z);
     M.grp.position.set(t.x, gy, t.z);
-    // the whole column turns; each ring adds its own differential so the
-    // funnel visibly shears with height instead of spinning as one solid.
-    const base = (t.vmax / Math.max(1, t.R)) * 0.55;
-    t.spin = (t.spin || 0) + base * dt;
-    M.grp.rotation.y = t.spin;
+    const H = M.H, rope = t.rope, wg = t.wedge;
+    const f = Math.hypot(t.fvx, t.fvz) || 1, dx = t.fvx / f, dz = t.fvz / f;
+    /* THE SPINE. The cloud end LEADS along the track (the ground drags the
+       base back), more so as it ropes out, when the parent storm moves away
+       and the rope stretches into a long tilted, contorted tube. */
+    const tilt = H * (0.10 + 0.08 * (1 - wg) + 0.55 * rope);
+    const sway = t.R * (0.25 + 0.4 * (1 - wg)) * (1 + 3.5 * rope);
+    const cx = dx * tilt + Math.sin(t.age * 0.21 + t.id) * t.R * 0.6;
+    const cz = dz * tilt + Math.cos(t.age * 0.17 + t.id) * t.R * 0.6;
+    const mx = cx * 0.12, mz = cz * 0.12, my = H * 0.42;
+    const cen = M.cen, nR = M.nR;
+    const freq = 5 + 6 * rope;
+    for (let i = 0; i <= nR; i++) {
+      const s = i / nR, u = 1 - s;
+      const bx = 2 * s * u * mx + s * s * cx, by = 2 * s * u * my + s * s * H, bz = 2 * s * u * mz + s * s * cz;
+      const env = Math.sin(Math.PI * Math.min(1, s * 1.15));
+      cen[i * 3] = bx + Math.sin(t.age * 0.9 + s * freq + t.id) * sway * env;
+      cen[i * 3 + 1] = by;
+      cen[i * 3 + 2] = bz + Math.cos(t.age * 0.73 + s * freq * 0.8) * sway * env;
+    }
+    // ring centres follow s0 too: re-sample the spine at the visible span
+    const s0 = t.s0;
+    if (s0 > 0.001) {
+      for (let i = nR; i >= 0; i--) {
+        const s = s0 + (1 - s0) * (i / nR), fi = s * nR, a = Math.min(nR - 1, Math.floor(fi)), b = fi - a;
+        for (let c = 0; c < 3; c++) cen[i * 3 + c] = cen[a * 3 + c] * (1 - b) + cen[(a + 1) * 3 + c] * b;
+      }
+    }
+    // proportions: rope (thin trumpet) ... wedge (broad, near-straight sides)
+    const thin = 1 - 0.82 * rope;
+    const rB = t.R * (0.30 + 0.62 * wg) * thin, rT = Math.max(t.R * (1.0 + 0.5 * wg), 14) * (1 - 0.6 * rope);
+    const pw = 0.55 + 0.4 * wg;
+    shapeTube(M, t, M.tubeIn, 1, s0, rB, rT, pw);
+    shapeTube(M, t, M.tubeOut, 1.35, Math.max(0, s0 - 0.04), rB + t.R * 0.12, rT * 1.15, pw);
+    // the cloud rides the spine's top
+    M.cloud.position.set(cen[nR * 3], H, cen[nR * 3 + 2]);
+    const spin = (t.vmax / Math.max(1, t.R)) * 0.5;
+    t.spin = (t.spin || 0) + spin * dt;
+    M.wall1.rotation.y += spin * 0.18 * dt;
+    M.wall2.rotation.y += spin * 0.10 * dt;
+    M.deck.rotation.z += spin * 0.05 * dt;
+    // the rain-wrap arc sits behind and to the RIGHT of the track (the rear
+    // flank); the forward-flank core ahead and to the LEFT (where hail falls)
+    const rx = -dx - dz * 0.8, rz = -dz + dx * 0.8;
+    M.rainWrap.rotation.y = Math.atan2(rx, rz) - Math.PI * 0.575;
+    const fx = dx * 1.0 + dz * 1.0, fz = dz * 1.0 - dx * 1.0, fl = Math.hypot(fx, fz) || 1;
+    t.ffdX = t.x + cen[nR * 3] + fx / fl * M.rCl * 2.6;
+    t.ffdZ = t.z + cen[nR * 3 + 2] + fz / fl * M.rCl * 2.6;
+    M.ffd.position.set(fx / fl * M.rCl * 2.6, -H * 0.5, fz / fl * M.rCl * 2.6);
+    // texture motion: up the column and round it
+    const sc = 0.5 * dt * (t.vmax / 60);
+    M.matIn.map.offset.y -= sc; M.matIn.map.offset.x -= spin * 0.12 * dt;
+    M.matOut.map.offset.y -= sc * 0.6; M.matOut.map.offset.x -= spin * 0.07 * dt;
+    M.matSkirt.map.offset.y -= sc * 0.8; M.matSkirt.map.offset.x -= spin * 0.2 * dt;
+    M.matWall.map.offset.x += 0.02 * dt;
+    M.matRain.map.offset.y += dt * 1.6;
+    // the debris-cloud shells and the dust live on the WIND's schedule
+    const k = t.k;
+    M.skirt.rotation.y -= spin * 0.7 * dt;
+    M.skirt2.rotation.y += spin * 0.5 * dt;
+    const sk = Math.max(0.001, k * (1 - 0.7 * rope));
+    M.skirt.scale.set(sk * (1 + 0.14 * Math.sin(t.age * 1.9)), 0.3 + 0.7 * sk, sk);
+    M.skirt2.scale.set(sk * (1 + 0.18 * Math.sin(t.age * 2.6 + 1.4)), 0.3 + 0.7 * sk, sk);
+    stepDust(t, M, dt);
+    // fades: in over the first second, out over the last 1.6 s
+    const fade = Math.min(1, t.age / 1.0) * Math.min(1, Math.max(0, t.life - t.age) / 1.6);
+    M.matIn.opacity = 0.84 * fade;
+    M.matOut.opacity = 0.34 * fade;
+    M.matSkirt.opacity = 0.6 * fade * Math.min(1, k * 1.3);
+    M.matDust.opacity = 0.5 * fade * Math.min(1, k * 1.2);
+    M.matWall.opacity = 0.92 * fade;
+    M.matDeck.opacity = 0.96 * fade;
+    M.matRain.opacity = 0.42 * fade * Math.min(1, t.age / 3) * t.wrap;
+  }
 
-    /* THE COLUMN IS ALIVE. Three life envelopes multiply into every ring:
-         birth — the condensation funnel DESCENDS out of the wall cloud over
-                 the first ~2.5 s, top rings condensing first; the debris
-                 skirt only spins up once the tube is near the ground.
-         pulse — per-ring radial breathing on two incommensurate sines, so
-                 the width is never the same two seconds running.
-         rope  — the last ~30% of life: the tube thins toward a rope, the
-                 sway triples, and the skirt dies BEFORE the funnel does
-                 (a roping-out tube with a churning base would be claiming
-                 wind that is no longer there).
-       Plus WRITHE: per-ring lateral sway that grows with height, so the
-       column leans and snakes instead of standing like a lathe part. */
-    const nR = M.rings.length;
-    const lifeFrac = t.life > 0 ? t.age / t.life : 0;
-    const birthK = Math.min(1, t.age / 2.5);
-    const ropeK = Math.max(0, Math.min(1, (lifeFrac - 0.70) / 0.30));
-    const swayBase = t.R * (0.06 + 0.10 * (1 - (t.wedge || 0)));
-    for (let i = 0; i < nR; i++) {
-      const r = M.rings[i], m = r.mesh;
-      m.rotation.y += base * r.spin * dt;
-      const hc = (i + 0.5) / nR;                    // 0 = ground … 1 = cloud
-      // the descending condensation front: a ring exists once the front
-      // (walking down from the cloud) has passed its height
-      const cond = Math.max(0, Math.min(1, (birthK * 1.35 - (1 - hc)) * 3));
-      const pulse = 1 + 0.11 * Math.sin(t.age * 1.35 + i * 0.62) + 0.06 * Math.sin(t.age * 3.1 + i * 1.17);
-      m.scale.x = m.scale.z =
-        Math.max(0.02, (0.18 + 0.82 * cond) * pulse * (1 - 0.62 * ropeK * (1 - hc * 0.4)));
-      const sway = swayBase * (0.35 + hc * 1.35) * (1 + 2.6 * ropeK);
-      m.position.x = r.bx * (1 - ropeK * 0.5) + Math.sin(t.age * 0.9 + i * 0.83) * sway
-        + Math.sin(t.age * 0.37 + i * 0.5) * sway * 0.6;
-      m.position.z = r.bz * (1 - ropeK * 0.5) + Math.cos(t.age * 0.73 + i * 0.61) * sway
-        + Math.cos(t.age * 0.29) * sway * 0.5;
+  function stepDust(t, M, dt) {
+    const pos = M.dustPts.geometry.attributes.position.array;
+    const D = M.dust, top = M.skirtH * 1.7, k = t.k, R = t.R;
+    const sv = t.sv;
+    for (let i = 0; i < D.length; i++) {
+      const p = D[i];
+      // a fifth of the dust rides the suction vortices on a strong tornado
+      if (sv && i % 5 === 0) {
+        const v = sv[(i / 5 | 0) % sv.length];
+        p.a += 3.2 * dt; p.y += p.vy * 2.4 * k * dt;
+        if (p.y > top * 0.6) p.y = 0.3;
+        const rr = v.rs * (0.6 + (i % 7) * 0.2);
+        pos[i * 3] = v.x - t.x + Math.cos(p.a) * rr; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = v.z - t.z + Math.sin(p.a) * rr;
+        continue;
+      }
+      const r = Math.max(R * 0.25, p.r);
+      const vt = r <= R ? t.vmax * r / R : t.vmax * R / r;
+      p.a -= (vt * k / r) * 0.55 * dt;               // cyclonic (counter-clockwise from above)
+      p.r -= p.r * 0.12 * k * dt;
+      p.y += p.vy * (2 + 6 * k) * dt;
+      if (p.y > top || p.r < R * 0.3) { p.y = 0.3 + (i % 5) * 0.3; p.r = R * (0.75 + ((i * 13) % 10) / 12); }
+      pos[i * 3] = Math.cos(p.a) * p.r; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = Math.sin(p.a) * p.r;
     }
-    if (M.veil) {
-      M.veil.rotation.y -= base * 0.4 * dt;
-      M.veil.scale.x = M.veil.scale.z =
-        Math.max(0.02, (0.3 + 0.7 * birthK) * (1 - 0.45 * ropeK) * (1 + 0.09 * Math.sin(t.age * 1.1 + 0.7)));
-    }
-    // the skirt lives on the GROUND's schedule, not the tube's
-    const skirtK = Math.max(0, Math.min(1, (birthK - 0.55) * 2.2)) * (1 - 0.8 * ropeK);
-    M.skirt.rotation.y -= base * 0.7 * dt;
-    M.skirt.scale.x = M.skirt.scale.z = Math.max(0.001, skirtK * (1 + 0.16 * Math.sin(t.age * 1.9)));
-    if (M.skirt2) {
-      M.skirt2.rotation.y += base * 0.5 * dt;
-      M.skirt2.scale.x = M.skirt2.scale.z = Math.max(0.001, skirtK * (1 + 0.2 * Math.sin(t.age * 2.6 + 1.4)));
-    }
-    // scrolling texture = the sense of material rushing UP the column
-    const sc = 0.55 * dt * (t.vmax / 60);
-    if (M.matIn.map) M.matIn.map.offset.y -= sc;
-    if (M.matOut.map) M.matOut.map.offset.y -= sc * 0.62;
-    // orbiting debris corkscrews up, wraps at the top
-    for (let i = 0; i < M.debris.length; i++) {
-      const d = M.debris[i];
-      d.mesh.visible = t.age > 1.2;                 // nothing orbits a funnel
-                                                    // that hasn't touched down
-      d.ang += d.rate * dt * (t.vmax / 55);
-      d.y += (t.wmax * 0.22) * dt;
-      if (d.y > M.H) d.y = 3;
-      const m = d.mesh;
-      m.position.set(Math.cos(d.ang) * d.rad, d.y, Math.sin(d.ang) * d.rad);
-      m.rotation.y = -d.ang * 2.4;
-      m.rotation.x += dt * 4.5;
-      m.scale.setScalar(d.sc);
-    }
-    // V2: the wall cloud turns SLOWLY — a rotating storm base, not a spinning
-    // top — and the dirt skirt scrolls with the column.
-    if (M.cloud) {
-      M.cloud[0].rotation.y += base * 0.22 * dt;
-      M.cloud[1].rotation.y -= base * 0.13 * dt;
-      if (M.matSkirt && M.matSkirt.map) M.matSkirt.map.offset.y -= sc * 0.8;
-      if (M.matCloud && M.matCloud.map) M.matCloud.map.offset.x += 0.02 * dt;
-    }
-    // fade the whole thing in over the first second and out over the last
-    const k = Math.min(1, t.age / 1.0) * Math.min(1, Math.max(0, t.life - t.age) / 1.6);
-    M.matIn.opacity = (M.grp.userData.opIn || 0.62) * k;
-    M.matOut.opacity = (M.grp.userData.opOut || 0.30) * k;
-    if (M.matSkirt) M.matSkirt.opacity = 0.6 * k;
-    if (M.matCloud) M.matCloud.opacity = 0.9 * k;
-    if (M.matDeck) M.matDeck.opacity = 0.94 * k;
-    if (M.matDeck2) M.matDeck2.opacity = 0.5 * k;
+    M.dustPts.geometry.attributes.position.needsUpdate = true;
   }
 
   /* ============================================================
-     V2 — THE DAMAGE PATH. A tornado is track-shaped: what it leaves behind is
-     a LINE of torn ground and scattered wreckage you can walk after the event
-     and read its whole story from. Two parts, both persistent:
-
-       · SCARS — flat dark torn-earth marks laid under the core every few
-         metres of travel. A fixed module pool (SCAR_CAP meshes, one shared
-         geometry, three shared materials) recycled oldest-first, so a long
-         track fades at its tail instead of growing without bound. They
-         outlive the vortex (that is the point) and clear on run reset.
-       · DEPOSITED DEBRIS — CBZ.fx.dropDebris with keep:true, scattered
-         behind and beside the track. The funnel picks the world up and puts
-         it down somewhere else; kept rubble in a line IS that fact.
+     THE WIND FIELD — CBZ.tornado.at(x, z[, y]).
+     Returns {speed, gust, inflow, lift, vx, vz, r, ef, pressure}:
+       speed   the vortex's rotating speed at that point (m/s)
+       gust    the GROUND-RELATIVE horizontal wind incl. the storm's motion
+               and the suction vortices: what a house actually feels
+       vx, vz  that wind as a vector; lift the updraft (m/s, +y)
      ============================================================ */
-  const SCAR_CAP = 70;
-  const scars = [];
-  let scarGeo = null, scarMats = null, scarIdx = 0;
-  function layScar(x, z, r) {
-    const root = arenaRoot();
-    if (!root) return;
-    // never scar the SEA: a funnel skirting the shore was leaving brown discs
-    // hovering over the water (floorAt returns the seabed there)
-    const gy = floorAt(x, z);
-    if (gy < -0.05) return;
-    if (!scarGeo) scarGeo = new THREE.CircleGeometry(1, 12);
-    if (!scarMats) scarMats = [0x33291f, 0x3e3226, 0x2a221b].map(function (c) {
-      return new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.44, depthWrite: false, side: THREE.DoubleSide });
-    });
-    let s;
-    if (scars.length < SCAR_CAP) {
-      s = new THREE.Mesh(scarGeo, scarMats[scarIdx % scarMats.length]);
-      s.rotation.x = -Math.PI / 2;
-      s.renderOrder = 2;
-      s.castShadow = s.receiveShadow = false;
-      scars.push(s);
-    } else {
-      s = scars[scarIdx % SCAR_CAP];               // recycle the oldest mark
-    }
-    scarIdx++;
-    if (s.parent !== root) { if (s.parent) s.parent.remove(s); root.add(s); }
-    const h1 = CBZ.hash01 ? CBZ.hash01(x, z, 0x7051) : 0.5;
-    const h2 = CBZ.hash01 ? CBZ.hash01(z, x, 0x7052) : 0.5;
-    s.position.set(x, gy + 0.09, z);
-    s.scale.set(r * (0.55 + h1 * 0.45), r * (0.45 + h2 * 0.45), 1);   // never wider than r
-    s.rotation.z = h2 * 6.2832;
-    stats.scarMarks++;
-  }
-  function clearScars() {
-    for (const s of scars) if (s.parent) s.parent.remove(s);
-    scars.length = 0; scarIdx = 0;
-  }
-
-  // Laid per metre of TRACK, not per frame, so the trail density is the same
-  // at any frame rate and a stalled funnel does not paint a black puddle.
-  function pathTrail(t, dt) {
-    if (!v2()) return;
-    const f = Math.hypot(t.fvx, t.fvz);
-    stats.pathMeters += f * dt;
-    t._scarD = (t._scarD || 0) + f * dt;
-    const step = Math.max(4, t.R * 0.35);
-    if (t._scarD < step) return;
-    t._scarD = 0;
-    // clamp the mark so it cannot reach past the island's grass circle: a
-    // shore-hugging funnel was laying discs that hung out over the sea
-    let scarR = t.R * 0.55;
-    if (t.bounds) scarR = Math.min(scarR, Math.max(3, t.bounds.r + 2 - Math.hypot(t.x - t.bounds.x, t.z - t.bounds.z)));
-    layScar(t.x, t.z, scarR);
-    // deposit what it was carrying behind + beside the track (survival only:
-    // the city litters through its own structural/debris systems). The
-    // deposit is the SAME junk the column carries (boards, roof sheet,
-    // branches), each a whole real piece that lands, tumbles and lies there
-    // under CBZ.debris, not a scatter of coloured cubes.
-    if (!inCity() && CBZ.fx && CBZ.fx.dropDebris) {
-      const ux = f > 0.1 ? t.fvx / f : 1, uz = f > 0.1 ? t.fvz / f : 0;
-      const kit = junk();
-      const n = 2;
-      for (let i = 0; i < n; i++) {
-        const back = 2 + Math.random() * t.R * 1.2;
-        const side = (Math.random() - 0.5) * t.R * 2.0;
-        const k = (Math.random() * 3) | 0;
-        CBZ.fx.dropDebris({
-          x: t.x - ux * back - uz * side,
-          z: t.z - uz * back + ux * side,
-          fromY: 5 + Math.random() * 12, vy: -2 - Math.random() * 3,
-          size: k === 0 ? 2.4 : k === 1 ? 1.8 : 2.1,
-          dims: k === 0 ? { w: 2.4, h: 0.045, d: 0.2 } : k === 1 ? { w: 1.8, h: 0.02, d: 0.9 } : { w: 2.1, h: 0.12, d: 0.12 },
-          material: kit[k].mat, kind: k === 1 ? "metal" : "wood", whole: true,
-          keep: true,
-        });
-        stats.debrisKept++;
-      }
-    }
-  }
-
-  /* ============================================================
-     V2 — THE SURVIVAL ARENA IS DESTRUCTIBLE.
-
-     The city half of this file grinds buildings through city/structural.js
-     and lifts city cars; none of that could reach the island, so the roster's
-     tornado was a light show there. Rather than teach this file the arena's
-     internals, the roster's def LENDS them through spawn({arena}): a bridge of
-     five closures over systems/disasters.js's own machinery —
-
-       fragile()                 the arena's building records
-       cars()                    the parked-car records
-       hitBuilding(b,amt,dx,dz)  a bite into THE survival structural ledger
-                                 (glass → spall/lean → collapse; returns stage)
-       flingCar(car,dx,dz,f,up)  the one "car ripped off the street" verb
-       sheltered(a)              surv's physical underRoof test
-
-     so damage lands in the same ledger the quake and the tsunami write, the
-     thrown cars ride the same ballistic ticker the flood uses, and this file
-     still keeps no structural state of its own.
-
-     The arena buildings are monolithic shells (no per-floor array), so
-     roof-first seating does not apply; the ledger's own stages carry the
-     escalation read instead, and the roof VISIBLY sheds — debris thrown UP
-     off the top of a ground building, because a tornado lifts.
-     ============================================================ */
-  // a building's roof material: the highest wide flat mesh of its group,
-  // else its shell colour (cached on the record)
-  function roofMatOf(b) {
-    if (b._roofMat !== undefined) return b._roofMat;
-    let best = null, top = -Infinity;
-    const bb = new THREE.Box3();
-    if (b.group) {
-      b.group.updateWorldMatrix(true, true);
-      b.group.traverse(function (o) {
-        if (!o.isMesh || !o.geometry || !o.material || Array.isArray(o.material) || o.material.transparent || !o.material.color) return;
-        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-        bb.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
-        const w = bb.max.x - bb.min.x, d = bb.max.z - bb.min.z, h = bb.max.y - bb.min.y;
-        if (w < b.w * 0.4 || d < b.d * 0.4 || h > 2) return;
-        if (bb.max.y > top) { top = bb.max.y; best = o.material; }
-      });
-    }
-    b._roofMat = best || (CBZ.cmat ? CBZ.cmat(b.color != null ? b.color : 0x8b9097) : null);
-    return b._roofMat;
-  }
-  const ARENA_TICK = 0.25;
-  // maps the city-calibrated dps (v^3 power flux) onto the arena ledger's
-  // 0..1 scale. Tuned against the real dwell a moving funnel gives a
-  // footprint (~5-8 s, mean q ~0.6): an EF1 gets buildings in its path to
-  // the glass stage, an EF2 to the visible spall/lean, an EF3 collapses on a
-  // parked dwell (~3 s at full strength), an EF4 collapses what it crosses.
-  const ARENA_LEDGER_SCALE = 0.032;
-  function hitArena(t, dt) {
-    if (!v2() || inCity() || !t.arena) return;
-    t.tArena += dt;
-    if (t.tArena < ARENA_TICK) return;
-    const step = t.tArena; t.tArena = 0;
-    const A = t.arena;
-    // ---- buildings: a sustained grind, never a strike --------------------
-    const frag = A.fragile ? A.fragile() : null;
-    if (frag && A.hitBuilding) {
-      const reach = t.dmgR;
-      for (let i = 0; i < frag.length; i++) {
-        const b = frag[i];
-        if (!b || b.fallen) continue;
-        const dx = Math.max(0, Math.abs(b.x - t.x) - b.w * 0.5);
-        const dz = Math.max(0, Math.abs(b.z - t.z) - b.d * 0.5);
-        const d = Math.hypot(dx, dz);
-        if (d >= reach) continue;
-        const q = 1 - d / reach;
-        fieldInto(t, b.x, b.z, _scratch);
-        const nl = Math.hypot(_scratch.vx, _scratch.vz) || 1;
-        try {
-          A.hitBuilding(b, t.dps * ARENA_LEDGER_SCALE * q * step, _scratch.vx / nl, _scratch.vz / nl);
-        } catch (e) {}
-        stats.buildingHits++;
-        if (b.fallen && !b._twFell) { b._twFell = true; stats.buildingCollapses++; }
-        // the roof coming off, visibly: pieces leave the top of the building
-        // going UP, because the updraft is what a tornado is
-        // the pieces are slabs of THIS building's roof, in its own material
-        if (q > 0.4 && CBZ.fx && CBZ.fx.dropDebris && Math.random() < 0.75) {
-          const sz = 0.5 + Math.random() * 0.9;
-          CBZ.fx.dropDebris({
-            x: b.x + (Math.random() - 0.5) * b.w * 0.9,
-            z: b.z + (Math.random() - 0.5) * b.d * 0.9,
-            fromY: (b.gy || 0) + b.h + 1.2, vy: 2.5 + _scratch.lift * 0.25,
-            size: sz, dims: { w: sz * 1.4, h: 0.16, d: sz },
-            material: roofMatOf(b),
-            keep: Math.random() < 0.4,
-          });
-        }
-      }
-    }
-    // ---- parked cars: lifted at the EF2 gust bar, thrown along the wind ---
-    const cars = A.cars ? A.cars() : null;
-    if (cars && A.flingCar) {
-      const reach = t.R * 1.3;
-      for (let i = 0; i < cars.length; i++) {
-        const c = cars[i];
-        if (!c || c.flung) continue;
-        const dx = c.x - t.x, dz = c.z - t.z;
-        if (Math.abs(dx) > reach || Math.abs(dz) > reach) continue;
-        const d = Math.hypot(dx, dz);
-        if (d > reach) continue;
-        fieldInto(t, c.x, c.z, _scratch);
-        if (_scratch.speed < LIFT_MIN_SPEED) continue;    // EF2's "cars lifted"
-        const inv = 1 / Math.max(1, _scratch.speed);
-        const ox = d > 0.1 ? dx / d : 1, oz = d > 0.1 ? dz / d : 0;
-        // launched along the local wind with an outward kick — "the vortex
-        // spat it" — and hard UP, priced off the actual updraft
-        let lx = _scratch.vx * inv * 0.85 + ox * 0.5;
-        let lz = _scratch.vz * inv * 0.85 + oz * 0.5;
-        const ll = Math.hypot(lx, lz) || 1; lx /= ll; lz /= ll;
-        try {
-          A.flingCar(c, lx, lz, Math.min(22, _scratch.speed * 0.3), Math.min(14, 4 + _scratch.lift * 0.4));
-        } catch (e) {}
-        stats.carsFlung++;
-      }
-    }
-  }
-
-  /* ============================================================
-     THE WIND FIELD — CBZ.tornado.at(x, z).
-
-     Public because the tornado is an environment other systems should be able
-     to REACT to without knowing anything about this file: aircraft can be
-     thrown off course, boats can be swamped, a flag can stream, an AI can be
-     told which way to run. One query, no coupling.
-
-     Returns {speed, inflow, lift, vx, vz, r, ef} — speed/inflow/lift in m/s,
-     vx/vz the resolved horizontal wind vector INCLUDING the funnel's own
-     forward motion, r the distance to the nearest funnel axis.
-     ============================================================ */
-  const _fieldOut = { speed: 0, inflow: 0, lift: 0, vx: 0, vz: 0, r: Infinity, ef: -1, pressure: 0 };
-  // one reusable scratch record so the per-frame queries below never allocate
-  const _scratch = { speed: 0, inflow: 0, lift: 0, vx: 0, vz: 0, r: 0, ef: -1, pressure: 0 };
-  function fieldInto(t, x, z, out) {
+  const _fieldOut = { speed: 0, gust: 0, inflow: 0, lift: 0, vx: 0, vz: 0, r: Infinity, ef: -1, pressure: 0 };
+  const _s = { speed: 0, gust: 0, inflow: 0, lift: 0, vx: 0, vz: 0, r: 0, ef: -1, pressure: 0 };
+  const _s2 = { speed: 0, gust: 0, inflow: 0, lift: 0, vx: 0, vz: 0, r: 0, ef: -1, pressure: 0 };
+  function zero(out, r, ef) { out.speed = out.gust = out.inflow = out.lift = out.vx = out.vz = out.pressure = 0; out.r = r; out.ef = ef; return out; }
+  function fieldInto(t, x, z, out, y) {
+    y = y > 0 ? y : 0;
     const dx = x - t.x, dz = z - t.z;
-    let r = Math.hypot(dx, dz);
-    if (r > t.outer) { out.speed = out.inflow = out.lift = out.vx = out.vz = out.pressure = 0; out.r = r; out.ef = t.ef; return out; }
-    if (r < 0.35) r = 0.35;
-    // Rankine: solid-body rotation inside the core, free vortex outside.
-    let vt = r <= t.R ? t.vmax * (r / t.R) : t.vmax * (t.R / r);
-    // taper the free-vortex tail to zero at `outer` so every query is bounded
-    if (r > t.R) {
-      const tail = 1 - (r - t.R) / (t.outer - t.R);
-      vt *= Math.max(0, tail) * Math.max(0, tail);
+    const r = Math.hypot(dx, dz);
+    const k = t.k;
+    if (r > t.outer || k <= 0) return zero(out, r, t.ef);
+    const rr = r < 0.35 ? 0.35 : r;
+    const ux = dx / rr, uz = dz / rr;
+    let vt = rr <= t.R ? t.vrot * (rr / t.R) : t.vrot * (t.R / rr);
+    let tail = 1;
+    if (rr > t.R) { tail = 1 - (rr - t.R) / (t.outer - t.R); vt *= tail * tail; }
+    const hz = y / t.Hup;
+    vt *= k * (hz <= 1 ? 1 : Math.max(0.25, 1 - (hz - 1) * 1.5));
+    // corner flow: inflow strongest near the ground; OUTFLOW above the updraft
+    const inK = hz < 0.3 ? 1 : (hz < 1 ? 1 - (hz - 0.3) / 0.7 * 1.5 : -0.5);
+    const vin = 0.5 * vt * inK;
+    const u = (rr - 0.6 * t.R) / (0.7 * t.R);
+    // the corner region: the updraft is already strong a few metres up (what
+    // lifts a car); it is zero only at the ground itself
+    let w = t.wmax * k * Math.exp(-u * u) * Math.min(1, (y + 3) / 6) * (hz <= 1 ? 1 : Math.max(0, 1 - (hz - 1) * 2));
+    // CYCLONIC: counter-clockwise seen from above (+y), tangent = (uz, -ux)
+    let vx = uz * vt - ux * vin;
+    let vz = -ux * vt - uz * vin;
+    let spd = vt;
+    const sv = t.sv;
+    if (sv && y < t.Hup * 0.4) {
+      const kk = k * (1 - y / (t.Hup * 0.4));
+      for (let i = 0; i < sv.length; i++) {
+        const S = sv[i], sx = x - S.x, sz = z - S.z, d = Math.hypot(sx, sz);
+        if (d > S.rs * 4) continue;
+        const dd = d < 0.3 ? 0.3 : d;
+        let v = dd <= S.rs ? S.v * dd / S.rs : S.v * S.rs / dd;
+        if (dd > S.rs) { const tl = 1 - (dd - S.rs) / (3 * S.rs); v *= tl * tl; }
+        v *= kk;
+        vx += (sz / dd) * v; vz += (-sx / dd) * v;
+        spd += v; w += v * 0.5;
+      }
     }
-    const inflow = 0.5 * vt;                          // radial, toward the axis
-    // updraft peaks in the core annulus, not on the axis (real vortices have
-    // a downdraft core at EF3+; this gaussian is the cheap, honest shape).
-    const u = (r - 0.6 * t.R) / (0.7 * t.R);
-    const lift = t.wmax * Math.exp(-u * u);
-    const ux = dx / r, uz = dz / r;                   // radial unit, outward
-    const tx = -uz, tz = ux;                          // tangential unit, cyclonic
-    out.speed = vt;
-    out.inflow = inflow;
-    out.lift = lift;
-    // DYNAMIC PRESSURE in pascals — the force a facade, a windscreen, a sail
-    // or an aerofoil actually feels. Published so a neighbour can compute a
-    // real load without re-deriving it (and without importing our damage
-    // model, which is the power flux q*v, not q).
-    out.pressure = 0.5 * AIR_RHO * vt * vt;
-    out.vx = tx * vt - ux * inflow + t.fvx;
-    out.vz = tz * vt - uz * inflow + t.fvz;
-    out.r = r;
-    out.ef = t.ef;
+    // the storm's own motion, felt within the circulation
+    const tr = rr <= t.R ? 1 : tail;
+    vx += t.fvx * tr; vz += t.fvz * tr;
+    out.speed = spd; out.inflow = vin; out.lift = w;
+    out.vx = vx; out.vz = vz;
+    out.gust = Math.hypot(vx, vz);
+    out.pressure = 0.5 * AIR_RHO * out.gust * out.gust;
+    out.r = r; out.ef = t.ef;
     return out;
   }
-  T.at = function (x, z) {
-    _fieldOut.speed = _fieldOut.inflow = _fieldOut.lift = _fieldOut.vx = _fieldOut.vz = _fieldOut.pressure = 0;
-    _fieldOut.r = Infinity; _fieldOut.ef = -1;
-    if (!live.length) return _fieldOut;
-    // strongest wins (they are capped at 1-2, so this is at most two passes)
+  // the strongest live vortex's field at a point (they are capped at 1-2)
+  function fieldAt(x, z, out, y) {
+    if (!live.length) return zero(out, Infinity, -1);
+    if (live.length === 1) return fieldInto(live[0], x, z, out, y);
     let best = null, bs = -1;
     for (let i = 0; i < live.length; i++) {
-      fieldInto(live[i], x, z, _scratch);
-      if (_scratch.speed > bs) { bs = _scratch.speed; best = live[i]; }
+      fieldInto(live[i], x, z, _s2, y);
+      if (_s2.gust > bs) { bs = _s2.gust; best = live[i]; }
     }
-    if (!best) return _fieldOut;
-    return fieldInto(best, x, z, _fieldOut);
-  };
+    return fieldInto(best, x, z, out, y);
+  }
+  T.at = function (x, z, y) { return fieldAt(x, z, _fieldOut, y); };
 
-  // AI / HUD convenience, same shape systems/disasters.js's roster uses.
   T.threat = function (x, z) {
-    let t = 0;
+    let th = 0;
     for (let i = 0; i < live.length; i++) {
       const v = live[i];
       const d = Math.hypot(x - v.x, z - v.z);
-      const reach = v.R * 2.2;
-      if (d < reach) t = Math.max(t, 1 - d / reach);
+      const reach = v.R * 3.0;
+      if (d < reach) th = Math.max(th, (1 - d / reach) * Math.max(0.3, v.k));
     }
-    return t;
+    return th;
   };
   T.safeDir = function (x, z) {
     if (!live.length) return null;
-    /* V2 + a lent arena: the honest answer inside the funnel's reach is a
-       DOORWAY, not a heading. Every safety brief says the same thing — you do
-       not outrun a tornado on foot, you get inside something sturdy — so when
-       a standing, still-healthy building's door is nearby and that building is
-       not itself in the damage path, the crowd is pointed AT it. Outside that
-       case (no shelter in range, or already in the core where it is too late)
-       the perpendicular-to-track escape below still applies, which is the
-       right advice for the one situation running works: you are far away. */
-    if (v2()) {
-      for (let i = 0; i < live.length; i++) {
-        const t = live[i];
-        const A = t.arena;
-        if (!A || !A.fragile) continue;
-        const d0 = Math.hypot(x - t.x, z - t.z);
-        if (d0 > t.R * 3.2 || d0 < t.R * 0.9) continue;   // too far to care / too late
-        let best = null, bd = 1e9;
-        let frag = null;
-        try { frag = A.fragile(); } catch (e) {}
-        if (!frag) continue;
-        for (let j = 0; j < frag.length; j++) {
-          const b = frag[j];
-          if (!b || b.fallen || (b._dmg || 0) > 0.6) continue;   // failing shelter is a trap
-          // the island buildings all door on -z (disaster_arena.js's grammar)
-          const doorX = b.x, doorZ = b.z - b.d * 0.5 - 1.2;
-          const ad = Math.hypot(x - doorX, z - doorZ);
-          if (ad > 34 || ad < 1.0) continue;
-          if (Math.hypot(b.x - t.x, b.z - t.z) < t.dmgR + 4) continue;  // it IS the path
-          if (ad < bd) { bd = ad; best = { x: doorX - x, z: doorZ - z }; }
-        }
-        if (best) return best;
+    /* Inside the funnel's reach the honest answer is a DOORWAY: you do not
+       outrun a tornado on foot, you get inside something sturdy that is not
+       itself in the path. Far away, run at right angles to the track. */
+    for (let i = 0; i < live.length; i++) {
+      const t = live[i], W = t.world;
+      if (!W || !W.fragile) continue;
+      const d0 = Math.hypot(x - t.x, z - t.z);
+      if (d0 > t.R * 4 || d0 < t.R * 0.9) continue;
+      let frag = null;
+      try { frag = W.fragile(); } catch (e) {}
+      if (!frag) continue;
+      let best = null, bd = 1e9;
+      for (let j = 0; j < frag.length; j++) {
+        const b = frag[j];
+        if (!b || b.fallen || (b._dmg || 0) > 0.6 || (b._tw && b._tw.dod >= 3)) continue;
+        const bx = bxOf(b), bz = bzOf(b);
+        // the island's buildings door on -z (disaster_arena.js's grammar)
+        const doorX = bx, doorZ = bz - b.d * 0.5 - 1.2;
+        const ad = Math.hypot(x - doorX, z - doorZ);
+        if (ad > 34 || ad < 1.0) continue;
+        if (Math.hypot(bx - t.x, bz - t.z) < t.R * 2 + 4) continue;   // it IS the path
+        if (ad < bd) { bd = ad; best = { x: doorX - x, z: doorZ - z }; }
       }
+      if (best) return best;
     }
     let bx = 0, bz = 0;
     for (let i = 0; i < live.length; i++) {
       const v = live[i];
       const dx = x - v.x, dz = z - v.z, d = Math.hypot(dx, dz) || 1;
-      if (d > v.R * 3.2) continue;
-      // run PERPENDICULAR to the track, not straight away: you cannot outrun
-      // 17 m/s of forward motion in a straight line, and every safety brief
-      // says move at right angles to the path. That is a real tactic the AI
-      // and the player both get for free out of this one seam.
-      bx += (dx / d) * 0.45 - v.fvz / Math.max(1, Math.hypot(v.fvx, v.fvz));
-      bz += (dz / d) * 0.45 + v.fvx / Math.max(1, Math.hypot(v.fvx, v.fvz));
+      if (d > v.R * 4) continue;
+      const f = Math.max(1, Math.hypot(v.fvx, v.fvz));
+      bx += (dx / d) * 0.45 - v.fvz / f;
+      bz += (dz / d) * 0.45 + v.fvx / f;
     }
     return (bx || bz) ? { x: bx, z: bz } : null;
   };
+  function bxOf(b) { return b.x != null ? b.x : b.ox; }
+  function bzOf(b) { return b.z != null ? b.z : b.oz; }
 
   /* ============================================================
-     SPAWN / STOP.
-     DETERMINISM: the path is world/sim state that must agree across clients,
-     so the spawn point, the class and the heading come from
-     CBZ.seedStream("tornado") when the caller does not supply them, and the
-     per-step wobble is CBZ.hash01 on the CURRENT POSITION (order-independent:
-     the same funnel at the same metre wobbles the same way on every client,
-     no matter how many frames it took to get there). Never Math.random —
-     that is reserved for the cosmetic FX jitter further down.
+     SMALL DEBRIS — one InstancedMesh per shape, real physics (see header).
+     Module-level: wreckage outlives the vortex and lies where it fell.
+     ============================================================ */
+  // beta = 0.5 * rho * Cd * A / m (1/m): how hard the wind grips the piece
+  const DK = [
+    { name: "shingle", beta: 0.10, cap: [60, 220] },
+    { name: "board",   beta: 0.012, cap: [30, 120] },
+    { name: "sheet",   beta: 0.09, cap: [16, 70] },
+    { name: "chunk",   beta: 0.006, cap: [30, 120] },
+  ];
+  let deb = null;
+  function debrisPools() {
+    if (deb) return deb;
+    const root = arenaRoot();
+    if (!root) return null;
+    const geos = [];
+    geos.push(new THREE.BoxGeometry(0.42, 0.025, 0.32));
+    geos.push(new THREE.BoxGeometry(2.2, 0.05, 0.16));
+    const sheet = new THREE.PlaneGeometry(1.6, 0.8, 1, 10);
+    const sp = sheet.attributes.position;
+    for (let i = 0; i < sp.count; i++) sp.setZ(i, Math.sin(sp.getY(i) / 0.8 * 10 * Math.PI) * 0.025);
+    sheet.rotateX(-Math.PI / 2);
+    sheet.computeVertexNormals();
+    geos.push(sheet);
+    geos.push(new THREE.DodecahedronGeometry(0.22, 0));
+    deb = [];
+    for (let k = 0; k < DK.length; k++) {
+      const cap = qi(DK[k].cap[0], DK[k].cap[1]);
+      const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, side: k === 2 ? THREE.DoubleSide : THREE.FrontSide });
+      const mesh = new THREE.InstancedMesh(geos[k], mat, cap);
+      mesh.name = "tw-debris-" + DK[k].name;
+      mesh.frustumCulled = false;                    // instances span the whole path
+      mesh.castShadow = false; mesh.receiveShadow = false;
+      // r128 sizes instanceColor off `count` the FIRST time setColorAt runs:
+      // allocate it at full capacity now, then empty the draw
+      mesh.setColorAt(0, _col.setHex(0xffffff));
+      mesh.count = 0;
+      if (mesh.instanceMatrix.setUsage) mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.userData.dynamic = true;
+      root.add(mesh);
+      deb.push({ mesh, cap, beta: DK[k].beta,
+        p: new Float32Array(cap * 3), v: new Float32Array(cap * 3), q: new Float32Array(cap * 4),
+        ax: new Float32Array(cap * 3), w: new Float32Array(cap), sc: new Float32Array(cap), bm: new Float32Array(cap),
+        st: new Uint8Array(cap), age: new Float32Array(cap), gfn: null, ptr: 0, hi: 0, dirty: false });
+    }
+    return deb;
+  }
+  const _m4 = new THREE.Matrix4(), _p3 = new THREE.Vector3(), _q4 = new THREE.Quaternion(), _s3 = new THREE.Vector3(), _ax = new THREE.Vector3(), _dq = new THREE.Quaternion();
+  const _col = new THREE.Color(), _eu = new THREE.Euler();
+  // spawn one piece; colorHex is the colour of the part it came off
+  function spawnDebris(kind, x, y, z, vx, vy, vz, colorHex, scale, gfn, betaMul) {
+    const P = debrisPools();
+    if (!P) return -1;
+    const D = P[kind];
+    let i = -1;
+    for (let n = 0; n < D.cap; n++) {
+      const j = (D.ptr + n) % D.cap;
+      if (D.st[j] !== 1) { i = j; break; }
+    }
+    if (i < 0) i = D.ptr;                           // all airborne: recycle the oldest
+    D.ptr = (i + 1) % D.cap;
+    D.p[i * 3] = x; D.p[i * 3 + 1] = y; D.p[i * 3 + 2] = z;
+    D.v[i * 3] = vx; D.v[i * 3 + 1] = vy; D.v[i * 3 + 2] = vz;
+    _eu.set(Math.random() * 6.283, Math.random() * 6.283, 0);
+    _q4.setFromEuler(_eu);
+    D.q[i * 4] = _q4.x; D.q[i * 4 + 1] = _q4.y; D.q[i * 4 + 2] = _q4.z; D.q[i * 4 + 3] = _q4.w;
+    _ax.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+    D.ax[i * 3] = _ax.x; D.ax[i * 3 + 1] = _ax.y; D.ax[i * 3 + 2] = _ax.z;
+    D.w[i] = 2 + Math.random() * 6;
+    D.sc[i] = scale || 1;
+    D.bm[i] = betaMul || 1;
+    D.st[i] = 1; D.age[i] = 0;
+    D.gfn = gfn || D.gfn || floorAt;
+    if (i + 1 > D.hi) { D.hi = i + 1; D.mesh.count = D.hi; }
+    _col.setHex(colorHex == null ? 0x7a6a58 : colorHex);
+    D.mesh.setColorAt(i, _col);
+    if (D.mesh.instanceColor) D.mesh.instanceColor.needsUpdate = true;
+    stats.debrisLofted++;
+    return i;
+  }
+  function writeInstance(D, i) {
+    _p3.set(D.p[i * 3], D.p[i * 3 + 1], D.p[i * 3 + 2]);
+    _q4.set(D.q[i * 4], D.q[i * 4 + 1], D.q[i * 4 + 2], D.q[i * 4 + 3]);
+    _s3.setScalar(D.sc[i]);
+    _m4.compose(_p3, _q4, _s3);
+    D.mesh.setMatrixAt(i, _m4);
+    D.dirty = true;
+  }
+  let airborneNow = 0;
+  function stepDebris(dt) {
+    if (!deb) return;
+    airborneNow = 0;
+    for (let k = 0; k < deb.length; k++) {
+      const D = deb[k], gfn = D.gfn || floorAt;
+      for (let i = 0; i < D.hi; i++) {
+        if (D.st[i] !== 1) continue;
+        airborneNow++;
+        D.age[i] += dt;
+        const ix = i * 3;
+        let x = D.p[ix], y = D.p[ix + 1], z = D.p[ix + 2];
+        let vx = D.v[ix], vy = D.v[ix + 1], vz = D.v[ix + 2];
+        fieldAt(x, z, _s, y);
+        const rx = _s.vx - vx, ry = _s.lift - vy, rz = _s.vz - vz;
+        const rel = Math.sqrt(rx * rx + ry * ry + rz * rz);
+        const f = 1 - Math.exp(-D.beta * D.bm[i] * rel * dt);
+        vx += rx * f; vy += ry * f; vz += rz * f;
+        vy -= G * dt;
+        x += vx * dt; y += vy * dt; z += vz * dt;
+        const gy = gfn(x, z);
+        if (y > stats.maxDebrisHeight + gy) stats.maxDebrisHeight = y - gy;
+        if (y <= gy + 0.03) {
+          const sp = Math.hypot(vx, vz);
+          if (vy < -5 && sp > 2) { vy = -vy * 0.22; vx *= 0.55; vz *= 0.55; y = gy + 0.04; }
+          else {
+            // lie flat where it fell (a random yaw), and stay
+            y = gy + 0.03 * D.sc[i];
+            _q4.setFromAxisAngle(_ax.set(0, 1, 0), h01(x, z, 0x7d1) * 6.283);
+            D.q[i * 4] = _q4.x; D.q[i * 4 + 1] = _q4.y; D.q[i * 4 + 2] = _q4.z; D.q[i * 4 + 3] = _q4.w;
+            D.st[i] = 2; vx = vy = vz = 0;
+          }
+        } else {
+          // tumble: spin about its own axis, faster in a stronger wind
+          const wr = D.w[i] * (0.4 + Math.min(1.5, rel / 30));
+          _ax.set(D.ax[ix], D.ax[ix + 1], D.ax[ix + 2]);
+          _dq.setFromAxisAngle(_ax, wr * dt);
+          _q4.set(D.q[i * 4], D.q[i * 4 + 1], D.q[i * 4 + 2], D.q[i * 4 + 3]).multiply(_dq);
+          D.q[i * 4] = _q4.x; D.q[i * 4 + 1] = _q4.y; D.q[i * 4 + 2] = _q4.z; D.q[i * 4 + 3] = _q4.w;
+        }
+        D.p[ix] = x; D.p[ix + 1] = y; D.p[ix + 2] = z;
+        D.v[ix] = vx; D.v[ix + 1] = vy; D.v[ix + 2] = vz;
+        writeInstance(D, i);
+      }
+      if (D.dirty) { D.mesh.instanceMatrix.needsUpdate = true; D.dirty = false; }
+    }
+  }
+  function debrisCounts() {
+    let fly = 0, rest = 0;
+    if (deb) for (const D of deb) for (let i = 0; i < D.hi; i++) { if (D.st[i] === 1) fly++; else if (D.st[i] === 2) rest++; }
+    return { airborne: fly, onGround: rest, total: fly + rest };
+  }
+  function clearDebris() {
+    if (!deb) return;
+    for (const D of deb) { D.st.fill(0); D.hi = 0; D.ptr = 0; D.mesh.count = 0; }
+  }
+
+  /* ============================================================
+     BIG FLYERS — roofs, walls, crowns and cars, one integrator.
+     The body is its CENTRE + orientation; the object's origin is placed
+     from it each frame (cOff), so a merged mesh whose origin is the
+     building's corner still tumbles about its own middle.
+     ============================================================ */
+  const flyers = [];
+  const _box = new THREE.Box3(), _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _qa = new THREE.Quaternion(), _up = new THREE.Vector3(0, 1, 0);
+  // an object's own-frame bounds (scale included): centre + half extents
+  function localBox(o) {
+    const q0 = o.quaternion.clone(), p0 = o.position.clone(), par = o.parent;
+    o.quaternion.identity(); o.position.set(0, 0, 0);
+    if (par) par.remove(o);
+    o.updateMatrixWorld(true);
+    _box.setFromObject(o);
+    if (par) par.add(o);
+    o.quaternion.copy(q0); o.position.copy(p0);
+    o.updateMatrixWorld(true);
+    if (_box.isEmpty()) return { c: new THREE.Vector3(), h: new THREE.Vector3(0.5, 0.5, 0.5) };
+    const c = new THREE.Vector3(), s = new THREE.Vector3();
+    _box.getCenter(c); _box.getSize(s);
+    return { c: c, h: s.multiplyScalar(0.5) };
+  }
+  /* launch(obj, o): o = {kind, mass, area, top (planform m^2), cd, cl, gfn,
+     vx, vy, vz, spin, onImpact(f, speed), onRest(f), car}. The object must
+     already be in the arena root (liberate) or be a root-level group. */
+  function launch(obj, o) {
+    if (!obj || obj.userData._twFly) return null;
+    const lb = localBox(obj);
+    obj.updateMatrixWorld(true);
+    const c = lb.c.clone().applyQuaternion(obj.quaternion).add(obj.position);
+    const f = {
+      obj: obj, kind: o.kind || "part", cOff: lb.c, half: lb.h,
+      x: c.x, y: c.y, z: c.z,
+      vx: o.vx || 0, vy: o.vy || 0, vz: o.vz || 0,
+      q: obj.quaternion.clone(),
+      ax: new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.3, Math.random() - 0.5).normalize(), w: o.spin || 0,
+      mass: o.mass || 500, area: o.area || 4, top: o.top || o.area || 4, cd: o.cd || 1.1, cl: o.cl || 0.3,
+      gfn: o.gfn || floorAt, grounded: o.grounded !== false, rest: false, age: 0, restT: 0,
+      onImpact: o.onImpact || null, onRest: o.onRest || null, car: o.car || null,
+      x0: c.x, z0: c.z, gy0: (o.gfn || floorAt)(c.x, c.z), maxH: 0, tipped: false, aired: false, hits: 0,
+    };
+    obj.userData._twFly = f;
+    flyers.push(f);
+    stats.flyersLaunched++;
+    return f;
+  }
+  function placeFlyer(f) {
+    _v.copy(f.cOff).applyQuaternion(f.q);
+    f.obj.position.set(f.x - _v.x, f.y - _v.y, f.z - _v.z);
+    f.obj.quaternion.copy(f.q);
+    if (f.car && f.car.pos) { f.car.pos.x = f.obj.position.x; f.car.pos.z = f.obj.position.z; }
+  }
+  // the half-height of the body along world up, for its current orientation
+  function upHalf(f) {
+    _v.set(1, 0, 0).applyQuaternion(f.q); const a = Math.abs(_v.y) * f.half.x;
+    _v.set(0, 1, 0).applyQuaternion(f.q); const b = Math.abs(_v.y) * f.half.y;
+    _v.set(0, 0, 1).applyQuaternion(f.q); const c = Math.abs(_v.y) * f.half.z;
+    return a + b + c;
+  }
+  // come to rest on the face nearest down: wheels, a side, or its roof
+  function settle(f) {
+    let best = null, bd = -2;
+    const axes = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+    for (const a of axes) {
+      _v.set(a[0], a[1], a[2]).applyQuaternion(f.q);
+      if (_v.y > bd) { bd = _v.y; best = a; }
+    }
+    _v.set(best[0], best[1], best[2]).applyQuaternion(f.q);
+    _qa.setFromUnitVectors(_v, _up);
+    f.q.premultiply(_qa);
+    f.y = f.gfn(f.x, f.z) + upHalf(f);
+  }
+  const _hit = { t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, c: null };
+  const SWEEP_OPTS = { skip: function (c) { return !!c.debris || !!c._twOwn; } };
+  function stepFlyer(f, dt) {
+    f.age += dt;
+    fieldAt(f.x, f.z, _s, f.y);
+    const rx = _s.vx - f.vx, ry = _s.lift - f.vy, rz = _s.vz - f.vz;
+    const relH2 = rx * rx + rz * rz, rel = Math.sqrt(relH2 + ry * ry);
+    // drag toward the wind: tumbling bodies average their faces
+    const Aeff = f.grounded ? f.area : (f.area + f.top) * 0.5;
+    const beta = 0.5 * AIR_RHO * f.cd * Aeff / f.mass;
+    const k = 1 - Math.exp(-beta * rel * dt);
+    let ax = 0, ay = 0, az = 0;
+    f.vx += rx * k; f.vz += rz * k;
+    // the updraft on the planform + aerodynamic lift of the horizontal flow
+    const upA = 0.5 * AIR_RHO * (1.2 * f.top * Math.max(0, ry) * Math.abs(ry) + f.cl * f.top * relH2) / f.mass;
+    ay += upA - G;
+    const gy = f.gfn(f.x, f.z);
+    const hh = upHalf(f);
+    if (f.grounded) {
+      // on the ground: weight, minus lift, presses it into friction
+      const N = Math.max(0, G - upA);
+      if (upA > G * 1.02) { f.grounded = false; f.vy = Math.max(f.vy, 1.5); if (!f.aired) { f.aired = true; } }
+      else {
+        f.vy = 0; f.y = gy + hh;
+        const sp = Math.hypot(f.vx, f.vz);
+        const dec = 0.7 * N * dt;
+        if (sp <= dec) { f.vx = 0; f.vz = 0; } else { f.vx -= f.vx / sp * dec; f.vz -= f.vz / sp * dec; }
+        /* OVERTURNING: drag x CG height beats (weight - lift) x half track,
+           or the car is TRIPPED: sliding sideways faster than ~4 m/s, the
+           tyres dig into a kerb or soft ground and roll it (how most cars in
+           a tornado actually go over) */
+        if (f.kind === "car" && !f.tipped) {
+          const Fd = 0.5 * AIR_RHO * f.cd * f.area * relH2;
+          const tripped = sp > 3.5 && relH2 > 400;
+          if (tripped || Fd * 0.65 > Math.max(0, f.mass * G - upA * f.mass) * 0.8) {
+            f.tipped = true; f.grounded = false;
+            f.vy = 2 + Math.random() * 1.5;
+            _v2.set(rx, 0, rz).normalize();
+            f.ax.crossVectors(_up, _v2).normalize();
+            f.w = 2.5 + Math.random() * 2;
+            if (f.car && !f.car._twRolled) { f.car._twRolled = true; stats.carsRolled++; }
+            if (f.onImpact) f.onImpact(f, 0, "tip");
+          }
+        }
+      }
+    }
+    if (!f.grounded) {
+      f.vy += ay * dt;
+      // tumbling: the spin follows the relative wind
+      const wTarget = Math.min(7, 0.5 + rel * 0.09);
+      f.w += (wTarget - f.w) * Math.min(1, dt * 1.5);
+    } else if (f.kind !== "car") f.w *= Math.max(0, 1 - dt * 4);
+    else f.w *= Math.max(0, 1 - dt * 6);
+    const px = f.x, py = f.y, pz = f.z;
+    f.x += f.vx * dt; f.y += f.vy * dt; f.z += f.vz * dt;
+    if (f.w > 0.01) { _qa.setFromAxisAngle(f.ax, f.w * dt); f.q.premultiply(_qa); }
+    // the world's colliders, for the heavy bodies (a car into a wall is a hit)
+    const LC = CBZ.looseContact;
+    if (LC && LC.sweep && (f.kind === "car" || f.kind === "roof") && !f.grounded) {
+      const pad = Math.min(1.2, Math.max(0.4, Math.min(f.half.x, f.half.z)));
+      if (LC.sweep(px, py, pz, f.x, f.y, f.z, pad, _hit, SWEEP_OPTS)) {
+        f.x = _hit.x; f.y = _hit.y; f.z = _hit.z;
+        const vn = f.vx * _hit.nx + f.vy * _hit.ny + f.vz * _hit.nz;
+        const sp = Math.hypot(f.vx, f.vy, f.vz);
+        if (vn < 0) { f.vx -= 1.4 * vn * _hit.nx; f.vy -= 1.4 * vn * _hit.ny; f.vz -= 1.4 * vn * _hit.nz; }
+        f.vx *= 0.5; f.vz *= 0.5;
+        if (f.onImpact && sp > 8) f.onImpact(f, sp, "wall");
+        f.hits++;
+      }
+    }
+    const gy2 = f.gfn(f.x, f.z);
+    const hh2 = upHalf(f);
+    const hNow = f.y - hh2 - gy2;
+    if (hNow > f.maxH) {
+      f.maxH = hNow;
+      const c = f.car;
+      if (c) {
+        c._twMaxH = hNow;
+        if (hNow > stats.maxCarHeight) stats.maxCarHeight = hNow;
+        if (hNow > 1.5 && !c._twThrown) { c._twThrown = true; stats.carsThrown++; }
+      }
+    }
+    if (!f.grounded && f.y - hh2 <= gy2) {
+      const sp = Math.hypot(f.vx, f.vy, f.vz);
+      f.y = gy2 + hh2;
+      if (f.vy < -3.5) {
+        // a landing: bounce, lose most of it, keep tumbling a little
+        if (f.onImpact) f.onImpact(f, sp, "ground");
+        f.hits++;
+        f.vy = -f.vy * 0.28; f.vx *= 0.6; f.vz *= 0.6; f.w *= 0.6;
+      } else {
+        f.vy = 0; f.grounded = true;
+      }
+      f.tipped = false;                 // down again: the wind can roll it again
+    }
+    // rest: on the ground, slow, and the wind no longer moving it
+    const sp2 = Math.hypot(f.vx, f.vz);
+    if (f.grounded && sp2 < 0.25) { f.restT += dt; } else f.restT = 0;
+    if (f.restT > 0.4 || f.age > 40) {
+      settle(f);
+      f.rest = true; f.vx = f.vy = f.vz = 0; f.w = 0;
+      const thrown = Math.hypot(f.x - f.x0, f.z - f.z0);
+      if (thrown > stats.maxThrow) stats.maxThrow = thrown;
+      if (f.onRest) f.onRest(f);
+    }
+    placeFlyer(f);
+  }
+  function stepFlyers(dt) {
+    for (let i = flyers.length - 1; i >= 0; i--) {
+      const f = flyers[i];
+      if (!f.obj || f.dead) { flyers.splice(i, 1); continue; }
+      stepFlyer(f, dt);
+      if (f.rest) { f.obj.userData._twFly = null; flyers.splice(i, 1); }
+    }
+  }
+
+  /* ============================================================
+     THE STRUCTURAL ADAPTER — the ONE place whole-building failure leaves
+     this file. CBZ.collapse.damage(building, point, radius, energy, dir) is
+     the shared collapse system's entry when it exists; until then the
+     current ledger: the island bridge's hitBuilding (systems/disasters.js's
+     ledger -> city/collapse.js) or city/structural.js for a city lot.
+     `energy` is the wind's work on the face in joules: 0.5 rho v^3 x area x s.
+     ============================================================ */
+  function structDamage(t, b, x, y, z, radius, energy, dirx, dirz, ledgerAmount) {
+    const C = CBZ.collapse;
+    stats.buildingHits++;
+    if (C && typeof C.damage === "function") {
+      try { return C.damage(b, { x: x, y: y, z: z }, radius, energy, { x: dirx, y: 0, z: dirz }); } catch (e) {}
+    }
+    const W = t && t.world;
+    if (W && W.hitBuilding) {
+      let st = 0;
+      try { st = W.hitBuilding(b, ledgerAmount, dirx, dirz); } catch (e) {}
+      if (b.fallen && !b._twFell) { b._twFell = true; stats.buildingCollapses++; }
+      return st;
+    }
+    return 0;
+  }
+
+  /* ============================================================
+     BUILDING PARTS — published (b.parts) or read off the geometry.
+     ============================================================ */
+  function matHex(o) {
+    const m = Array.isArray(o.material) ? o.material[0] : o.material;
+    return m && m.color ? m.color.getHex() : 0x8b9097;
+  }
+  const _bb = new THREE.Box3();
+  function deriveParts(b) {
+    const out = { roof: [], walls: [], other: [], slab: null, roofHex: 0x5a4a40, wallHex: 0x9a8f80, top: 0, rb: null };
+    const gy = b.gy || 0;
+    const top = gy + (b.h || 3);
+    out.top = top;
+    const P = b.parts;
+    if (P) {
+      out.roof = (P.roof || []).slice(); out.walls = (P.walls || []).slice(); out.other = (P.other || []).slice(); out.slab = P.slab || null;
+    } else if (b.group) {
+      b.group.updateWorldMatrix(true, true);
+      b.group.traverse(function (o) {
+        if (!o.isMesh || !o.visible || !o.geometry) return;
+        const m = Array.isArray(o.material) ? o.material[0] : o.material;
+        if (m && m.transparent && m.opacity < 0.6) return;     // glass: the shatter path owns it
+        _bb.setFromObject(o);
+        if (_bb.isEmpty()) return;
+        const h = _bb.max.y - _bb.min.y, w = _bb.max.x - _bb.min.x, d = _bb.max.z - _bb.min.z;
+        if (_bb.min.y >= top - 1.2 && _bb.max.y <= top + 8) out.roof.push(o);
+        else if (h >= (b.h || 3) * 0.55 && Math.min(w, d) < 1.0 && Math.max(w, d) > 2) out.walls.push(o);
+        else if (_bb.max.y <= gy + 0.8 && w > b.w * 0.6 && d > b.d * 0.6 && !out.slab) out.slab = o;
+        else out.other.push(o);
+      });
+    }
+    if (out.roof.length) out.roofHex = matHex(out.roof[0]);
+    if (out.walls.length) out.wallHex = matHex(out.walls[0]);
+    else if (b.color != null) out.wallHex = b.color;
+    // the roof's world extent (where shingles come off)
+    if (out.roof.length) {
+      out.rb = new THREE.Box3();
+      for (const o of out.roof) { _bb.setFromObject(o); out.rb.union(_bb); }
+    }
+    return out;
+  }
+  function bState(b) {
+    if (b._tw) return b._tw;
+    const res = (b.storeys || 1) >= 4 || (b.h || 0) > 14 ? RES_ENGINEERED : ((b.storeys || 1) >= 2 ? RES_MASONRY : 1);
+    /* An engineered tower is NOT walked mesh by mesh: its furnished floors
+       are thousands of meshes (the walk measured 20+ ms in one frame on the
+       island) and what the wind does to it, past the roof plant, is a
+       structural load for the collapse system. Its roof sheds as debris in
+       its own colour; a published b.parts is still honoured. */
+    const parts = res === RES_ENGINEERED && !b.parts
+      ? { roof: [], walls: [], other: [], slab: null, roofHex: b.color != null ? b.color : 0x8b9097, wallHex: b.color != null ? b.color : 0x8b9097, top: (b.gy || 0) + (b.h || 30), rb: null }
+      : deriveParts(b);
+    const st = { dod: 0, lp: 0, peak: 0, parts: parts, shed: 0 };
+    st.res = res;
+    st.engineered = st.res === RES_ENGINEERED;
+    // SEPARABLE = real wall panels that actually enclose the plan; a trim
+    // strip or two does not make a merged shell into four walls
+    let run = 0;
+    for (const o of st.parts.walls) { _bb.setFromObject(o); run += Math.max(_bb.max.x - _bb.min.x, _bb.max.z - _bb.min.z); }
+    // A WOOD-FRAME HOME comes apart panel by panel; a masonry walk-up or an
+    // engineered tower fails as a STRUCTURE, which is the collapse system's
+    // business (structDamage), never a wall panel tipping over
+    st.separable = st.res === 1 && st.parts.walls.length >= 3 && run >= 1.4 * ((b.w || 8) + (b.d || 8));
+    b._tw = st;
+    touched.add(b);
+    return st;
+  }
+  function roofPoint(st, b, out) {
+    const rb = st.parts.rb;
+    if (rb) { out.set(rb.min.x + Math.random() * (rb.max.x - rb.min.x), rb.max.y - Math.random() * 0.6, rb.min.z + Math.random() * (rb.max.z - rb.min.z)); }
+    else out.set(bxOf(b) + (Math.random() - 0.5) * b.w, (b.gy || 0) + (b.h || 3) + 0.2, bzOf(b) + (Math.random() - 0.5) * b.d);
+    return out;
+  }
+  function areaOf(o) {
+    _bb.setFromObject(o);
+    const w = _bb.max.x - _bb.min.x, h = _bb.max.y - _bb.min.y, d = _bb.max.z - _bb.min.z;
+    return { w: w, h: h, d: d, plan: Math.max(0.5, w * d), face: Math.max(0.5, Math.max(w, d) * h) };
+  }
+  // throw a building part: it becomes a flyer with the wind already on it
+  function throwPart(t, o, kind, dirx, dirz, uplift) {
+    liberate(o);
+    const A = areaOf(o);
+    const plan = kind === "roof" ? A.plan : A.face;
+    const mass = kind === "roof" ? A.plan * 28 : A.face * 45;
+    const f = launch(o, { kind: kind, mass: mass, area: plan * 0.7, top: plan, cd: 1.2, cl: kind === "roof" ? 0.55 : 0.25,
+      gfn: t.gfn, grounded: false, vx: dirx * 6, vy: uplift || 4, vz: dirz * 6, spin: 1.5,
+      onImpact: function (ff, sp) { if (sp > 10 && ff.hits < 2) burst(ff.x, ff.y, ff.z, matHex(ff.obj), 3, 1, t.gfn, ff.vx, ff.vz); } });
+    if (f && kind === "roof") stats.roofParts++;
+    return f;
+  }
+  // a handful of debris pieces in a part's colour (kind 1 boards / 3 chunks / 0 shingles)
+  function burst(x, y, z, hex, n, kind, gfn, vx, vz) {
+    for (let i = 0; i < n; i++) {
+      spawnDebris(kind, x + (Math.random() - 0.5) * 2, y + Math.random(), z + (Math.random() - 0.5) * 2,
+        (vx || 0) * 0.5 + (Math.random() - 0.5) * 6, 2 + Math.random() * 4, (vz || 0) * 0.5 + (Math.random() - 0.5) * 6, hex, 0.7 + Math.random() * 0.6, gfn);
+    }
+  }
+  // fell a wall panel about its downwind base edge
+  const hinges = [];
+  function fellWall(t, b, o, wx, wz) {
+    liberate(o);
+    _bb.setFromObject(o);
+    const w = _bb.max.x - _bb.min.x, d = _bb.max.z - _bb.min.z;
+    let fx = 0, fz = 0, px, pz;
+    if (w < d) { fx = wx >= 0 ? 1 : -1; px = fx > 0 ? _bb.max.x : _bb.min.x; pz = (_bb.min.z + _bb.max.z) * 0.5; }
+    else { fz = wz >= 0 ? 1 : -1; pz = fz > 0 ? _bb.max.z : _bb.min.z; px = (_bb.min.x + _bb.max.x) * 0.5; }
+    const axis = new THREE.Vector3(fx, 0, fz).cross(_up).negate().normalize();   // up x fall
+    hinges.push({ o: o, base: new THREE.Vector3(px, _bb.min.y, pz), axis: axis, a: 0, w: 0.3,
+      max: Math.PI / 2 - 0.04, q0: o.quaternion.clone(), p0: o.position.clone(), b: b, t: t });
+    // the panel's colliders go with it (a fallen wall is not a wall)
+    if (b.colliders) for (const c of b.colliders.slice()) {
+      if (c.maxX >= _bb.min.x - 0.3 && c.minX <= _bb.max.x + 0.3 && c.maxZ >= _bb.min.z - 0.3 && c.minZ <= _bb.max.z + 0.3) dropCollider(c);
+    }
+    stats.wallsDown++;
+  }
+  function stepHinges(dt) {
+    for (let i = hinges.length - 1; i >= 0; i--) {
+      const H = hinges[i];
+      if (H.a >= H.max) { hinges.splice(i, 1); continue; }
+      H.w += (3.5 * Math.sin(H.a + 0.15) + 0.6) * dt;   // gravity's moment grows as it leans
+      H.a = Math.min(H.max, H.a + H.w * dt);
+      _qa.setFromAxisAngle(H.axis, H.a);
+      H.o.quaternion.copy(_qa).multiply(H.q0);
+      _v.copy(H.p0).sub(H.base).applyQuaternion(_qa).add(H.base);
+      H.o.position.copy(_v);
+      if (H.a >= H.max) {
+        burst(H.base.x, H.base.y + 0.3, H.base.z, matHex(H.o), 3, 3, H.t ? H.t.gfn : floorAt);
+        if (CBZ.shake && camDist(H.base.x, H.base.z) < 40) CBZ.shake(0.12);
+      }
+    }
+  }
+
+  /* ============================================================
+     WIND DAMAGE — buildings, trees, cars (off the city; the city's lots go
+     through city/structural.js further down).
+     ============================================================ */
+  const WD_TICK = 0.1;
+  let shedBudget = 0;
+  const _pt = new THREE.Vector3();
+  function windDamage(t, dt) {
+    const W = t.world;
+    if (!W) return;
+    t.tWd += dt;
+    if (t.tWd < WD_TICK) return;
+    const step = t.tWd; t.tWd = 0;
+    const lp = 1 - Math.exp(-step / 0.25);           // the "3-second gust", fast
+    // per-tick budgets: reading a building's parts walks its meshes once, and
+    // a street of roofs shedding at once is a storm of spawns; both are
+    // spread over ticks instead of landing in one frame
+    let newStates = 2;
+    shedBudget = qi(3, 10);
+    let list = null;
+    try { list = W.fragile ? W.fragile() : null; } catch (e) {}
+    if (list) for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      if (!b || b.fallen || b._twSwept) continue;
+      const bx = bxOf(b), bz = bzOf(b), hw = (b.w || 8) * 0.5, hd = (b.d || 8) * 0.5;
+      if (Math.abs(bx - t.x) > t.outer + hw || Math.abs(bz - t.z) > t.outer + hd) continue;
+      // the worst of the centre and the four corners
+      let g = 0, wx = 0, wz = 0, wl = 0;
+      for (let s = 0; s < 5; s++) {
+        const sx = s === 0 ? bx : bx + (s & 1 ? hw : -hw), sz = s === 0 ? bz : bz + (s & 2 ? hd : -hd);
+        fieldInto(t, sx, sz, _s, (b.gy || 0) + Math.min(8, (b.h || 3) * 0.6));
+        if (_s.gust > g) { g = _s.gust; wx = _s.vx; wz = _s.vz; wl = _s.lift; }
+      }
+      const st = b._tw || (g > DOD.cover * 0.85 && newStates-- > 0 ? bState(b) : null);
+      if (!st) continue;
+      st.lp += (g - st.lp) * lp;
+      if (st.lp > st.peak) st.peak = st.lp;
+      const v = st.peak / st.res;
+      const n = Math.hypot(wx, wz) || 1; wx /= n; wz /= n;
+      damageBuilding(t, b, st, v, st.lp / st.res, wx, wz, wl, step);
+    }
+    let trees = null;
+    try { trees = W.trees ? W.trees() : null; } catch (e) {}
+    if (trees) for (let i = 0; i < trees.length; i++) {
+      const tr = trees[i];
+      if (!tr || (tr._tw && tr._tw.done)) continue;
+      if (Math.abs(tr.x - t.x) > t.outer || Math.abs(tr.z - t.z) > t.outer) continue;
+      fieldInto(t, tr.x, tr.z, _s, 4);
+      if (_s.gust < TREE.twigs * 0.9 && !tr._tw) continue;
+      damageTree(t, tr, _s.gust, _s.vx, _s.vz, step);
+    }
+    if (CBZ.CONFIG.TORNADO_LIFT) {
+      let cars = null;
+      try { cars = W.cars ? W.cars() : null; } catch (e) {}
+      if (cars) for (let i = 0; i < cars.length; i++) {
+        const c = cars[i];
+        if (!c || (c.flung && !c._twOwned) || c._twLift || c.dead || c.player) continue;
+        const p = c.pos || (c.group && c.group.position);
+        if (!p || Math.abs(p.x - t.x) > t.outer || Math.abs(p.z - t.z) > t.outer) continue;
+        windCar(t, c, p, false);
+      }
+    }
+  }
+
+  function damageBuilding(t, b, st, v, vNow, wx, wz, wl, step) {
+    const P = st.parts, gfn = t.gfn;
+    const bx = bxOf(b), bz = bzOf(b);
+    // DOD 2: the covering goes — shingles off the roof, continuously, while
+    // the gust holds over the bar (scaled by how far over it is)
+    if (vNow >= DOD.cover && st.dod < 3) {
+      if (st.dod < 1) { st.dod = 1; stats.roofsDamaged++; }
+      const nShed = Math.min(shedBudget, Math.min(6, Math.max(1, Math.round((vNow - DOD.cover) / 5))));
+      shedBudget -= nShed;
+      for (let i = 0; i < nShed; i++) {
+        roofPoint(st, b, _pt);
+        spawnDebris(0, _pt.x, _pt.y + 0.1, _pt.z, wx * 8, 3 + Math.random() * 4 + wl * 0.2, wz * 8, P.roofHex, 0.8 + Math.random() * 0.4, gfn);
+        st.shed++;
+      }
+    }
+    // DOD 4: the decking lifts — the most windward roof part goes first
+    if (v >= DOD.deck && st.dod < 2) {
+      st.dod = 2;
+      if (P.roof.length >= 2) {
+        let bi = -1, bd = Infinity;
+        for (let i = 0; i < P.roof.length; i++) {
+          _bb.setFromObject(P.roof[i]);
+          const cx = (_bb.min.x + _bb.max.x) * 0.5 - bx, cz = (_bb.min.z + _bb.max.z) * 0.5 - bz;
+          const dd = cx * wx + cz * wz;
+          if (dd < bd) { bd = dd; bi = i; }
+        }
+        const o = P.roof.splice(bi, 1)[0];
+        throwPart(t, o, "roof", wx, wz, 6 + wl * 0.3);
+        st.dod2Threw = true;
+      } else {
+        for (let i = 0; i < 4; i++) { roofPoint(st, b, _pt); spawnDebris(2, _pt.x, _pt.y + 0.2, _pt.z, wx * 10, 6, wz * 10, P.roofHex, 1, gfn); }
+      }
+    }
+    // DOD 6: ROOF OFF
+    if (v >= DOD.roof && st.dod < 3) {
+      st.dod = 3;
+      // counted, and the deck you could stand on dropped, only where a real
+      // roof came off (an engineered roof slab stays; its plant sheds)
+      const hadRoof = P.roof.length > 0 || st.dod2Threw;
+      if (hadRoof) stats.roofsRemoved++;
+      for (const o of P.roof.splice(0)) throwPart(t, o, "roof", wx, wz, 8 + wl * 0.35);
+      if (hadRoof && !st.engineered && b.platforms) for (const p of b.platforms.slice()) if (p.top != null && p.top >= P.top - 0.6) dropPlatform(p);
+      for (let i = 0; i < 6; i++) { roofPoint(st, b, _pt); spawnDebris(1, _pt.x, _pt.y, _pt.z, wx * 12, 7, wz * 12, 0x8f6e4a, 1, gfn); }
+      if (CBZ.shatterGlass) { try { CBZ.shatterGlass(bx, bz, Math.max(b.w, b.d) * 0.7); } catch (e) {} }
+      if (T.onDamage) fireHook(T.onDamage, { id: t.id, x: bx, z: bz, stage: "roof", lot: null, amount: 0 });
+    }
+    // DOD 7: exterior walls collapse
+    if (v >= DOD.walls && st.dod < 4) {
+      st.dod = 4;
+      if (st.separable) {
+        // the two walls FACING the wind (windward caves in, leeward blows out)
+        P.walls.sort(function (a, c) { return wallFacing(c, wx, wz) - wallFacing(a, wx, wz); });
+        for (const o of P.walls.splice(0, 2)) fellWall(t, b, o, wx, wz);
+      } else {
+        // one merged shell: the structure goes through the ledger/collapse
+        const E = 0.5 * AIR_RHO * Math.pow(v, 3) * (b.w || 8) * (b.h || 3);
+        structDamage(t, b, bx, (b.gy || 0) + (b.h || 3) * 0.5, bz, Math.max(b.w || 8, b.d || 8), E, wx, wz, st.engineered ? 0.5 : 0.75);
+        stats.buildingsFailed++;
+      }
+    }
+    // DOD 9: most walls down
+    if (v >= DOD.most && st.dod < 5) {
+      st.dod = 5;
+      if (st.separable) {
+        for (const o of P.walls.splice(0)) fellWall(t, b, o, wx, wz);
+        for (const o of P.other) { jObj(o); o.visible = false; _bb.setFromObject(o); burst((_bb.min.x + _bb.max.x) / 2, (_bb.min.y + _bb.max.y) / 2, (_bb.min.z + _bb.max.z) / 2, matHex(o), 2, 1, gfn, wx * 10, wz * 10); }
+        // nothing left to stand in: the building's colliders go
+        if (b.colliders) for (const c of b.colliders.slice()) dropCollider(c);
+        if (b.platforms) for (const p of b.platforms.slice()) if (p.top != null && p.top > (b.gy || 0) + 0.6) dropPlatform(p);
+      } else {
+        const E = 0.5 * AIR_RHO * Math.pow(v, 3) * (b.w || 8) * (b.h || 3) * 2;
+        structDamage(t, b, bx, (b.gy || 0) + (b.h || 3) * 0.5, bz, Math.max(b.w || 8, b.d || 8), E, wx, wz, st.engineered ? 0.7 : 1.2);
+      }
+    }
+    // DOD 10: SWEPT CLEAN — everything above the slab lofted and carried off
+    if (v >= DOD.swept && st.dod < 6 && st.separable) {
+      st.dod = 6;
+      b._twSwept = true;
+      // the felled walls (falling or lying) go up with the wind
+      for (const H of hinges) if (H.b === b) { H.a = H.max; if (!H.o.userData._twFly) throwPart(t, H.o, "wall", wx, wz, 5); }
+      for (const o of st.felled || []) if (!o.userData._twFly) throwPart(t, o, "wall", wx, wz, 5);
+      b.fallen = true;
+      stats.housesSwept++;
+    }
+    // remember the felled walls so a later sweep can loft them
+    if (st.separable && hinges.length) {
+      st.felled = st.felled || [];
+      for (const H of hinges) if (H.b === b && st.felled.indexOf(H.o) < 0) st.felled.push(H.o);
+    }
+    // ENGINEERED: past its roof, the structure is ground by the ledger while
+    // the gust holds over the wall bar (a sustained load, never a strike)
+    if (st.engineered && vNow >= DOD.walls) {
+      const amt = 0.85 * Math.pow(vNow * st.res / 33, 3) * step * 0.016;
+      const E = 0.5 * AIR_RHO * Math.pow(vNow * st.res, 3) * (b.w || 10) * Math.min(30, b.h || 10) * step;
+      structDamage(t, b, bx, (b.gy || 0) + Math.min(b.h || 10, 30) * 0.8, bz, Math.max(b.w || 10, b.d || 10), E, wx, wz, amt);
+    }
+  }
+  function wallFacing(o, wx, wz) {
+    _bb.setFromObject(o);
+    const w = _bb.max.x - _bb.min.x, d = _bb.max.z - _bb.min.z;
+    return w < d ? Math.abs(wx) : Math.abs(wz);
+  }
+
+  // trees: twigs and leaves, limbs, then down (snapped or uprooted), debarked
+  function damageTree(t, tr, g, wx, wz, step) {
+    const s = tr._tw || (tr._tw = { stage: 0 });
+    touched.add(tr);
+    const n = Math.hypot(wx, wz) || 1; wx /= n; wz /= n;
+    const gfn = t.gfn, gy = gfn(tr.x, tr.z);
+    const leaf = tr.leafHex != null ? tr.leafHex : (tr.foliage ? matHex(tr.foliage) : 0x3f7a3f);
+    const top = tr.foliage ? (function () { _bb.setFromObject(tr.foliage); return _bb.max.y; })() : gy + 6;
+    if (g >= TREE.twigs && s.stage < 3) {
+      const nL = Math.min(shedBudget, Math.min(4, Math.max(1, Math.round((g - TREE.twigs) / 8))));
+      shedBudget -= nL;
+      for (let i = 0; i < nL; i++) spawnDebris(0, tr.x + (Math.random() - 0.5) * 3, top - Math.random() * 2.5, tr.z + (Math.random() - 0.5) * 3,
+        wx * 6, 2 + Math.random() * 3, wz * 6, leaf, 0.45 + Math.random() * 0.3, gfn, 2.5);
+      if (s.stage < 1) s.stage = 1;
+    }
+    if (g >= TREE.limbs && s.stage < 2) {
+      s.stage = 2;
+      for (let i = 0; i < 2; i++) spawnDebris(1, tr.x, top - 1.5, tr.z, wx * 8, 4, wz * 8, tr.barkHex != null ? tr.barkHex : 0x4d3a28, 0.6, gfn);
+    }
+    const palm = !!tr.palm;
+    if (g >= TREE.down * (palm ? 1.15 : 1) && s.stage < 3) {
+      s.stage = 3;
+      stats.treesDown++;
+      const uproot = h01(tr.x, tr.z, 0x7e3) < 0.45;
+      const base = new THREE.Vector3(tr.x, gy, tr.z);
+      const axis = new THREE.Vector3(wx, 0, wz).cross(_up).negate().normalize();
+      if (uproot) {
+        for (const o of [tr.trunk, tr.foliage]) if (o) { liberate(o); hinges.push({ o: o, base: base, axis: axis, a: 0, w: 0.4, max: Math.PI / 2 - 0.12, q0: o.quaternion.clone(), p0: o.position.clone(), b: null, t: t }); }
+        burst(tr.x, gy + 0.3, tr.z, 0x4a3828, 3, 3, gfn);                      // the root ball tears the ground
+      } else {
+        // SNAPPED: the crown is torn off and flies; the trunk is left leaning
+        if (tr.foliage) {
+          liberate(tr.foliage);
+          launch(tr.foliage, { kind: "crown", mass: 120, area: 10, top: 10, cd: 0.8, cl: 0.2, gfn: gfn, grounded: false,
+            vx: wx * 8, vy: 4, vz: wz * 8, spin: 1 });
+        }
+        if (tr.trunk) { liberate(tr.trunk); hinges.push({ o: tr.trunk, base: base, axis: axis, a: 0, w: 0.2, max: 0.35, q0: tr.trunk.quaternion.clone(), p0: tr.trunk.position.clone(), b: null, t: t }); }
+      }
+    }
+    if (g >= TREE.debark && s.stage < 4) {
+      s.stage = 4; s.done = true;
+      stats.treesStripped++;
+      if (tr.foliage && !tr.foliage.userData._twFly) { jObj(tr.foliage); tr.foliage.visible = false; }
+      for (let i = 0; i < 6; i++) spawnDebris(0, tr.x, top - 2, tr.z, wx * 10, 5, wz * 10, leaf, 0.5, gfn, 2.5);
+    }
+  }
+
+  /* CARS, BY FORCE. Side drag, lift over the body and the updraft under it,
+     against the car's weight and the tyres' friction: slides at ~EF2
+     (~50 m/s), rolls at ~EF3, flies at EF4-5. The flyer owns it after that. */
+  const CAR_SIDE = 4.2, CAR_TOP = 8.0, CAR_CD = 1.1, CAR_CL = 0.4;
+  // a car's mass in kg. city/vehicles.js's `mass` is a PROFILE MULTIPLIER
+  // (1.0 = a 1400 kg sedan, the bus/truck rows are bigger), not kilograms:
+  // read raw, a 1.05 "kg" sedan went into orbit at EF1.
+  function carKg(c) {
+    const m = +c.mass;
+    if (!(m > 0)) return 1400;
+    return m < 30 ? m * 1400 : m;
+  }
+  function windCar(t, c, p, city) {
+    const y = (p.y || 0) + 0.8;
+    fieldInto(t, p.x, p.z, _s, y);
+    const g = _s.gust;
+    if (g < 30) return;
+    const m = carKg(c);
+    const Fd = 0.5 * AIR_RHO * CAR_CD * CAR_SIDE * g * g;
+    const L = 0.5 * AIR_RHO * (CAR_CL * CAR_TOP * g * g + 1.2 * CAR_TOP * Math.max(0, _s.lift) * _s.lift);
+    const N = m * G - L;
+    if (Fd <= 0.7 * Math.max(0, N) && L < m * G) return;            // the tyres hold
+    seizeCar(t, c, city);
+  }
+  function seizeCar(t, c, city) {
+    const grp = c.group;
+    if (!grp) return;
+    c._twLift = true; c._twOwned = true; c._twWreck = true;
+    if (c._twCol) { dropCollider(c._twCol); c._twCol = null; }
+    if (c.pos || city) { c._twAi = c.ai; c.ai = false; c.road = null; c.v = 0; c.vx = 0; c.vz = 0; }
+    if (!inCity()) { jObj(grp); touched.add(c); }
+    if (c.collider) dropCollider(c.collider);
+    if (c.flung === false) c.flung = true;          // the island's own tickers skip it now
+    const root = arenaRoot();
+    if (root && grp.parent !== root) liberate(grp);
+    const f = launch(grp, { kind: "car", mass: carKg(c), area: CAR_SIDE, top: CAR_TOP, cd: CAR_CD, cl: CAR_CL, gfn: t.gfn,
+      grounded: true, car: c,
+      onImpact: function (ff, sp, why) { carImpact(t, c, ff, sp, why); },
+      onRest: function (ff) { carRest(t, c, ff); } });
+    if (f && !c._twMoved) { c._twMoved = true; stats.carsMoved++; }
+  }
+  function carImpact(t, c, f, sp, why) {
+    if (!c._twGlass && (why === "tip" || sp > 9)) {
+      c._twGlass = true;
+      const W = t.world;
+      const n = Math.hypot(f.vx, f.vz) || 1;
+      if (W && W.carGlass) { try { W.carGlass(c, f.vx / n, f.vz / n); } catch (e) {} }
+    }
+    if (why === "tip" || sp < 9) return;
+    if (inCity()) {
+      try {
+        if (CBZ.detonate) CBZ.detonate(f.x, f.y, f.z, "kinetic", { mass: f.mass, speed: sp, dirx: f.vx / (Math.hypot(f.vx, f.vz) || 1), dirz: f.vz / (Math.hypot(f.vx, f.vz) || 1), by: t.by, byPlayer: false });
+        if (c.npcDriver && !c.npcDriver.dead && CBZ.cityKillPed) CBZ.cityKillPed(c.npcDriver, { fromX: t.x, fromZ: t.z, force: 8, fling: 5, byPlayer: false }, "thrown by the tornado");
+        if (CBZ.cityDamageCar) CBZ.cityDamageCar(c, 300 + sp * 12, {});
+        if (sp > 26 && CBZ.cityCarIgnite) CBZ.cityCarIgnite(c, false);
+      } catch (e) {}
+    } else {
+      if (f.hits < 2) burst(f.x, f.y, f.z, 0x8a8f96, 2, 3, f.gfn, f.vx, f.vz);
+    }
+    if (CBZ.shake) { const d = camDist(f.x, f.z); if (d < 80) CBZ.shake(Math.min(1.2, sp * 0.03) * (1 - d / 80)); }
+    crushUnder(t, f, sp);
+  }
+  function carRest(t, c, f) {
+    c._twLift = false;
+    if (f.maxH > stats.maxCarHeight) stats.maxCarHeight = f.maxH;
+    if (!c._twThrown && (f.maxH > 1.5 || Math.hypot(f.x - f.x0, f.z - f.z0) > 12)) { c._twThrown = true; stats.carsThrown++; }
+    if (inCity()) {
+      c.ai = false; c.road = null; c.abandoned = true; c.wreckT = 0; c.v = 0; c.vx = 0; c.vz = 0;
+    } else {
+      // a wreck where it lies is solid again
+      const hx = Math.max(f.half.x, f.half.z) * 0.8, col = { minX: f.x - hx, maxX: f.x + hx, minZ: f.z - hx, maxZ: f.z + hx, _twOwn: true, noCam: true };
+      addCollider(col);
+      c._twCol = col;
+    }
+  }
+  // a thrown body landing on someone
+  function crushUnder(t, f, sp) {
+    if (sp < 10) return;
+    const P = CBZ.player, r = Math.max(f.half.x, f.half.z) + 0.5;
+    if (P && !P.dead && P.pos && Math.hypot(P.pos.x - f.x, P.pos.z - f.z) < r && Math.abs((P.pos.y || 0) + 0.9 - f.y) < 2.2) {
+      try {
+        if (inCity() && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.round(sp * 2), f.x, f.z, CAUSE, false, null, false);
+        else if (CBZ.surv && CBZ.surv.hurt && CBZ.surv.player) CBZ.surv.hurt(CBZ.surv.player, sp * 2, { fromX: f.x, fromZ: f.z });
+      } catch (e) {}
+    }
+  }
+
+  /* ============================================================
+     THE PATH — the ground scar ribbon + suction marks (module-level: the
+     track outlives the vortex).
+     ============================================================ */
+  const SCAR_MAX = 520;
+  let scar = null;
+  function scarMesh() {
+    if (scar) return scar;
+    const root = arenaRoot();
+    if (!root) return null;
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array(SCAR_MAX * 2 * 3), uv = new Float32Array(SCAR_MAX * 2 * 2), col = new Float32Array(SCAR_MAX * 2 * 3);
+    const pa = new THREE.BufferAttribute(pos, 3), ca = new THREE.BufferAttribute(col, 3);
+    if (pa.setUsage) { pa.setUsage(THREE.DynamicDrawUsage); ca.setUsage(THREE.DynamicDrawUsage); }
+    g.setAttribute("position", pa); g.setAttribute("uv", new THREE.BufferAttribute(uv, 2)); g.setAttribute("color", ca);
+    g.setIndex(new THREE.BufferAttribute(new Uint16Array(SCAR_MAX * 6), 1));
+    g.setDrawRange(0, 0);
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);
+    const mat = new THREE.MeshBasicMaterial({ map: cloneTex(textures().scar, 1, 1), vertexColors: true, transparent: true, opacity: 0.85,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(g, mat);
+    mesh.name = "tw-scar"; mesh.renderOrder = 2; mesh.frustumCulled = false;
+    mesh.userData.dynamic = true;
+    root.add(mesh);
+    // suction marks: one instanced draw
+    const markCap = qi(120, 300);
+    const mg = new THREE.CircleGeometry(1, 10); mg.rotateX(-Math.PI / 2);
+    const marks = new THREE.InstancedMesh(mg, new THREE.MeshBasicMaterial({ color: 0x1d160f, transparent: true, opacity: 0.55, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }), markCap);
+    marks.count = 0; marks.frustumCulled = false; marks.renderOrder = 2; marks.name = "tw-suction";
+    root.add(marks);
+    scar = { mesh, g, pos, uv, col, n: 0, head: 0, conn: new Uint8Array(SCAR_MAX), len: new Float32Array(SCAR_MAX), marks, markCap, markN: 0, markHi: 0 };
+    return scar;
+  }
+  // append a cross-section; `join` = connect to the previous one
+  function scarSection(t, x, z, nx, nz, wl, wr, strength, join) {
+    const S = scarMesh();
+    if (!S) return;
+    const i = S.head;
+    S.head = (S.head + 1) % SCAR_MAX;
+    if (S.n < SCAR_MAX) S.n++;
+    const prev = (i + SCAR_MAX - 1) % SCAR_MAX;
+    S.conn[i] = join ? 1 : 0;
+    S.len[i] = join ? S.len[prev] + Math.hypot(x - S._lx, z - S._lz) : 0;
+    S._lx = x; S._lz = z;
+    const jit = 0.85 + 0.3 * h01(x, z, 0x5c1);
+    const lx = x + nx * wl * jit, lz = z + nz * wl * jit, rx = x - nx * wr * jit, rz = z - nz * wr * jit;
+    S.pos[i * 6] = lx; S.pos[i * 6 + 1] = t.gfn(lx, lz) + 0.06; S.pos[i * 6 + 2] = lz;
+    S.pos[i * 6 + 3] = rx; S.pos[i * 6 + 4] = t.gfn(rx, rz) + 0.06; S.pos[i * 6 + 5] = rz;
+    S.uv[i * 4] = 0; S.uv[i * 4 + 1] = S.len[i] / 10; S.uv[i * 4 + 2] = 1; S.uv[i * 4 + 3] = S.len[i] / 10;
+    // a weak tornado's scar is a pale scuff; a violent one's is bare dark earth
+    const k = Math.max(0, Math.min(1, strength));
+    const cr = 0.55 - 0.35 * k, cg = 0.50 - 0.33 * k, cb = 0.40 - 0.28 * k;
+    for (let s = 0; s < 2; s++) { S.col[i * 6 + s * 3] = cr; S.col[i * 6 + s * 3 + 1] = cg; S.col[i * 6 + s * 3 + 2] = cb; }
+    // indices: every connected pair in ring order
+    const idx = S.g.index.array;
+    let m = 0;
+    const start = (S.head + SCAR_MAX - S.n) % SCAR_MAX;
+    for (let c = 1; c < S.n; c++) {
+      const b = (start + c) % SCAR_MAX, a = (b + SCAR_MAX - 1) % SCAR_MAX;
+      if (!S.conn[b]) continue;
+      idx[m++] = a * 2; idx[m++] = b * 2; idx[m++] = a * 2 + 1;
+      idx[m++] = a * 2 + 1; idx[m++] = b * 2; idx[m++] = b * 2 + 1;
+    }
+    S.g.index.needsUpdate = true;
+    S.g.attributes.position.needsUpdate = true; S.g.attributes.uv.needsUpdate = true; S.g.attributes.color.needsUpdate = true;
+    S.g.setDrawRange(0, m);
+    stats.scarSections++;
+  }
+  function suctionMark(t, x, z, dx, dz, rs) {
+    const S = scarMesh();
+    if (!S) return;
+    const i = S.markN % S.markCap;
+    S.markN++;
+    if (i + 1 > S.markHi) { S.markHi = i + 1; S.marks.count = S.markHi; }
+    _p3.set(x, t.gfn(x, z) + 0.08, z);
+    _q4.setFromAxisAngle(_up, Math.atan2(-dz, dx));
+    _s3.set(rs * 1.1, 1, rs * 0.35);
+    _m4.compose(_p3, _q4, _s3);
+    S.marks.setMatrixAt(i, _m4);
+    S.marks.instanceMatrix.needsUpdate = true;
+    stats.suctionMarks++;
+  }
+  function clearScar() {
+    if (!scar) return;
+    scar.n = 0; scar.head = 0; scar.g.setDrawRange(0, 0);
+    scar.markN = 0; scar.markHi = 0; scar.marks.count = 0;
+  }
+  // measure, across the track, how far the gust scours the ground (>= 50
+  // m/s) on each side, and lay the section there: narrow, offset to the
+  // strong side, exactly as wide as the wind made it
+  function pathTrail(t, dt) {
+    const f = Math.hypot(t.fvx, t.fvz);
+    stats.pathMeters += f * dt;
+    t._scarD = (t._scarD || 0) + f * dt;
+    if (t._scarD >= 2.5 && t.k > 0.15) {
+      t._scarD = 0;
+      const nx = -t.fvz / (f || 1), nz = t.fvx / (f || 1);   // left of the track
+      const reach = function (side) {
+        let w = 0;
+        for (let s = 1; s <= 14; s++) {
+          const d = s * t.outer / 14 * 0.6;
+          fieldInto(t, t.x + nx * d * side, t.z + nz * d * side, _s, 0.5);
+          if (_s.gust >= 50) w = d; else if (w > 0) break;
+        }
+        return w;
+      };
+      let wl = reach(1), wr = reach(-1);
+      const strength = Math.min(1, (t.vmax * t.k - 30) / 50);
+      if (wl + wr < 1) { wl = wr = Math.max(1.2, t.R * 0.25); }                  // a weak one scuffs
+      if (strength > -0.2) { scarSection(t, t.x, t.z, nx, nz, wl, wr, strength, !!t._scarJoin); t._scarJoin = true; }
+    }
+    // the suction vortices' cycloids
+    if (t.sv && t.k > 0.5) for (const S of t.sv) {
+      const d = Math.hypot(S.x - (S.lx != null ? S.lx : S.x), S.z - (S.lz != null ? S.lz : S.z));
+      S.acc = (S.acc || 0) + d;
+      if (S.lx == null || S.acc >= 2.2) {
+        if (S.lx != null) suctionMark(t, S.x, S.z, S.x - S.lx, S.z - S.lz, S.rs);
+        S.acc = 0; S.lx = S.x; S.lz = S.z;
+      }
+    }
+  }
+
+  /* ============================================================
+     HAIL — the forward flank, around the camera.
+     ============================================================ */
+  let hail = null;
+  function hailPool() {
+    if (hail) return hail;
+    const root = arenaRoot();
+    if (!root) return null;
+    const cap = qi(70, 240);
+    const mesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshLambertMaterial({ color: 0xe8eef2 }), cap);
+    mesh.count = 0; mesh.frustumCulled = false; mesh.name = "tw-hail";
+    if (mesh.instanceMatrix.setUsage) mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    root.add(mesh);
+    hail = { mesh, cap, p: new Float32Array(cap * 3), v: new Float32Array(cap * 3), r: new Float32Array(cap), st: new Uint8Array(cap), life: new Float32Array(cap), ptr: 0, hi: 0, acc: 0, sndT: 0, landed: 0 };
+    return hail;
+  }
+  function stepHail(dt) {
+    const t = live[0];
+    const c = camPos();
+    if (!hail && (!t || !c)) return;
+    const Hp = hailPool();
+    if (!Hp) return;
+    let rate = 0, size = 0.012;
+    if (t && c && t.ffdX != null && t.k > 0.2) {
+      const zoneR = (t.mesh ? t.mesh.ffdR : 80) * 1.6;
+      const d = Math.hypot(c.x - t.ffdX, c.z - t.ffdZ);
+      const inside = Math.max(0, Math.min(1, 1.25 - d / zoneR));
+      rate = inside * q(40, 130) * Math.min(1, t.age / 4);
+      size = 0.008 + 0.006 * t.ef;                    // radius: 1.6 cm (EF0) .. 4.6 cm (EF5)
+    }
+    Hp.acc += rate * dt;
+    while (Hp.acc >= 1 && c) {
+      Hp.acc -= 1;
+      const i = Hp.ptr; Hp.ptr = (Hp.ptr + 1) % Hp.cap;
+      const x = c.x + (Math.random() - 0.5) * 50, z = c.z + (Math.random() - 0.5) * 50;
+      const gy = t ? t.gfn(x, z) : floorAt(x, z);
+      Hp.p[i * 3] = x; Hp.p[i * 3 + 1] = Math.max(c.y, gy) + 18 + Math.random() * 14; Hp.p[i * 3 + 2] = z;
+      const sz = size * (0.6 + Math.random() * 0.8);
+      const vt = 9 * Math.sqrt(sz * 200);             // terminal fall speed ~ sqrt(diameter)
+      Hp.v[i * 3] = t ? (t.x - x) * 0.02 : 0; Hp.v[i * 3 + 1] = -vt; Hp.v[i * 3 + 2] = t ? (t.z - z) * 0.02 : 0;
+      Hp.r[i] = sz; Hp.st[i] = 1; Hp.life[i] = 0;
+      if (i + 1 > Hp.hi) { Hp.hi = i + 1; Hp.mesh.count = Hp.hi; }
+      stats.hailStones++;
+    }
+    let landed = 0, any = false;
+    for (let i = 0; i < Hp.hi; i++) {
+      const st = Hp.st[i];
+      if (!st) continue;
+      any = true;
+      const ix = i * 3;
+      if (st === 3) {                                  // lying, melting
+        Hp.life[i] += dt;
+        if (Hp.life[i] > 5) { Hp.st[i] = 0; _m4.makeScale(0, 0, 0); Hp.mesh.setMatrixAt(i, _m4); }
+        continue;
+      }
+      Hp.v[ix + 1] -= (st === 2 ? G : 0) * dt;
+      Hp.p[ix] += Hp.v[ix] * dt; Hp.p[ix + 1] += Hp.v[ix + 1] * dt; Hp.p[ix + 2] += Hp.v[ix + 2] * dt;
+      const gy = t ? t.gfn(Hp.p[ix], Hp.p[ix + 2]) : floorAt(Hp.p[ix], Hp.p[ix + 2]);
+      if (Hp.p[ix + 1] <= gy + Hp.r[i]) {
+        Hp.p[ix + 1] = gy + Hp.r[i];
+        if (st === 1) { Hp.st[i] = 2; Hp.v[ix + 1] = -Hp.v[ix + 1] * 0.3; Hp.v[ix] = (Math.random() - 0.5) * 2; Hp.v[ix + 2] = (Math.random() - 0.5) * 2; landed++; }
+        else { Hp.st[i] = 3; Hp.life[i] = 0; }
+      }
+      _p3.set(Hp.p[ix], Hp.p[ix + 1], Hp.p[ix + 2]);
+      _s3.setScalar(Hp.r[i]);
+      _m4.compose(_p3, _q4.identity(), _s3);
+      Hp.mesh.setMatrixAt(i, _m4);
+    }
+    if (any) Hp.mesh.instanceMatrix.needsUpdate = true;
+    else if (rate <= 0) { Hp.hi = 0; Hp.mesh.count = 0; }
+    // the rattle of it on the ground and the roofs
+    Hp.landed += landed;
+    Hp.sndT += dt;
+    if (Hp.sndT > 0.14) {
+      if (Hp.landed > 0 && CBZ.sfx) { try { CBZ.sfx("hail", { volume: Math.min(1, 0.2 + Hp.landed * 0.06) }); } catch (e) {} }
+      Hp.sndT = 0; Hp.landed = 0;
+    }
+  }
+  function clearHail() {
+    if (!hail) return;
+    hail.st.fill(0); hail.hi = 0; hail.mesh.count = 0; hail.acc = 0;
+  }
+
+  /* ============================================================
+     THE SIREN — the civil-defence tornado siren (assets/audio/oga/
+     storm-siren.m4a, a real one), started once, stopped when it is over.
+     ============================================================ */
+  let sirenSrc = null, sirenOn = false;
+  T.siren = function (on) {
+    if (on && !sirenOn) {
+      sirenOn = true;
+      try {
+        if (CBZ.sfx) {
+          const s = CBZ.sfx("storm_siren", { volume: 0.75, force: true, onSource: function (src) { if (sirenOn) sirenSrc = src; else { try { src.stop(); } catch (e) {} } } });
+          if (s) sirenSrc = s;
+        }
+      } catch (e) {}
+    } else if (!on && sirenOn) {
+      sirenOn = false;
+      try { if (sirenSrc) sirenSrc.stop(); } catch (e) {}
+      sirenSrc = null;
+    }
+    return sirenOn;
+  };
+
+  /* ============================================================
+     SPAWN / STOP
+     DETERMINISM: the spawn point, the class and the heading come from
+     CBZ.seedStream("tornado") when the caller does not supply them; the
+     per-step wobble is hashed off the current position. Math.random is only
+     cosmetic (which way a shingle tumbles).
      ============================================================ */
   T.spawn = function (opts) {
     opts = opts || {};
     if (!CBZ.CONFIG.TORNADO_CITY) return null;
     const cap = Math.max(1, Math.min(2, CBZ.CONFIG.TORNADO_MAX | 0));
     while (live.length >= cap) retire(live[0], true);
-
-    /* A MAGNITUDE, NOT A CLASS ROW. Every tornado used to be its EF row's
-       exact numbers — two EF2s were byte-identical clones, and the whole
-       population quantized to six molds. Now the vortex is built at a
-       CONTINUOUS point `mag` (0..5) on the EF table and its physical axes are
-       then jittered INDEPENDENTLY off the seeded stream (width and wind are
-       correlated in nature, never locked), so no two occurrences match. The
-       EF class is read BACK from the rolled gust (the NWS band edges): the
-       class is a rating of the tornado, not the mold it was cast from.
-         opts.mag   continuous 0..5 — the roster def and the weather director
-                    roll one, biased (not determined) by their intensity
-         opts.ef    legacy class request — honored as mag = ef ± 0.45, so an
-                    asked-for EF3 is always EF3-grade, never the same EF3
-         neither    a full seeded roll, weak common, monsters rare */
+    /* A MAGNITUDE, NOT A CLASS ROW: built at a continuous point `mag` (0..5)
+       on the EF table with independently jittered axes, the class read BACK
+       from the rolled gust. opts.ef = legacy class request (mag = ef ± 0.45). */
     let mag;
     if (opts.mag != null) mag = Math.max(0, Math.min(5, +opts.mag));
     else if (opts.ef != null) mag = Math.max(0, Math.min(5, (opts.ef | 0) + (rng() - 0.5) * 0.9));
@@ -1087,71 +1807,67 @@
     const rLo = EF[iLo], rHi = EF[iLo + 1];
     const lerpRow = function (k) { return rLo[k] + (rHi[k] - rLo[k]) * fRow; };
     const vmaxR = lerpRow("vmax") * (0.95 + rng() * 0.10);
-    const coreR = lerpRow("R")    * (0.75 + rng() * 0.55);
+    const coreR = lerpRow("R")    * (0.80 + rng() * 0.45);
     const fwdR  = lerpRow("fwd")  * (0.78 + rng() * 0.50);
     let   lifeR = lerpRow("life") * (0.70 + rng() * 0.75);
-    // capLife (the survival roster's phase clock) is a WINDOW, not a value:
-    // the rolled lifetime maps into it, so a small tornado still ropes out
-    // mid-phase and the sky clears early, while a monster uses every second.
     if (opts.capLife != null) lifeR = (+opts.capLife) * (0.55 + 0.45 * Math.min(1, lifeR / 94));
-    // the class, read back from the 3-second-gust band edges (m/s)
     let ef = 0;
-    while (ef < 5 && vmaxR >= [38, 49.5, 60.5, 74, 89][ef]) ef++;
+    while (ef < 5 && vmaxR >= EF_EDGES[ef]) ef++;
     let x = opts.x, z = opts.z;
     if (x == null || z == null) {
-      // no site given: pick one off the seeded stream, biased to the built-up
-      // part of the world (the lots) so a tornado is a CITY event, not a
-      // photogenic column out in the desert nobody ever sees.
       const A = CBZ.city && CBZ.city.arena;
-      if (A && A.lots && A.lots.length) {
-        const lot = A.lots[(rng() * A.lots.length) | 0];
-        x = lot.cx; z = lot.cz;
-      } else { x = (rng() - 0.5) * 400; z = (rng() - 0.5) * 400; }
+      if (A && A.lots && A.lots.length) { const lot = A.lots[(rng() * A.lots.length) | 0]; x = lot.cx; z = lot.cz; }
+      else { x = (rng() - 0.5) * 400; z = (rng() - 0.5) * 400; }
     }
     const heading = opts.heading != null ? opts.heading : rng() * 6.2832;
     const fwd = opts.speed != null ? +opts.speed : fwdR;
+    const world = opts.arena || islandBridge();
+    if (world) lastWorld = world;
     const t = {
       id: ++idSeq,
       x: +x, z: +z, ef: ef, mag: +mag.toFixed(2),
-      // rope (0) … wedge (1): the SHAPE of the funnel, derived from magnitude.
-      // buildFunnel and animateFunnel read it; nothing physical does.
       wedge: Math.max(0, Math.min(1, (mag - 1.2) / 2.8)),
       R: coreR, vmax: vmaxR, wmax: vmaxR * LIFT_MUL,
       outer: coreR * OUTER_MUL,
-      dmgR: coreR * DAMAGE_MUL,
+      Hup: 90 + 60 * Math.min(1, mag / 4),             // depth of the low-level updraft
       heading: heading, fwd: fwd,
       fvx: Math.cos(heading) * fwd, fvz: Math.sin(heading) * fwd,
       life: opts.life != null ? +opts.life : lifeR,
-      age: 0, spin: 0,
-      // WHO IS TO BLAME — and the answer is NOBODY, by default.
-      // city/structural.js reads `by` as the credited ATTACKER: a non-null
-      // rec.by makes its collapse kill everyone in the footprint with
-      // `byPlayer: true` and posts the event with `noWanted: false`, i.e. the
-      // player picks up a murder charge and a wanted level for every block the
-      // weather flattens. So a natural tornado passes `by: null` and only a
-      // caller that genuinely wants the credit (a weather-machine mission,
-      // a cheat, a scripted set piece) passes an actor through spawn({by}).
+      age: 0, spin: 0, k: 0, s0: 1, rope: 0,
+      wrap: 0.55 + 0.45 * rng(),                       // how rain-wrapped this storm is
+      // nobody is to blame for the weather (a non-null `by` makes the
+      // structural ledger credit the player with every collapse)
       by: opts.by || null,
-      bounds: opts.bounds || null,               // {x,z,r} — bounce off this circle
-      // V2: the survival roster's arena bridge (see hitArena above). null in
-      // the city, null with the flag off — either way every use is guarded.
-      arena: opts.arena || null,
-      x0: +x, z0: +z,                            // where the track began (audit/preset)
+      bounds: opts.bounds || null,
+      world: world, arena: world,                      // `arena`: the old name, kept for readers
+      gfn: groundOf(world),
+      x0: +x, z0: +z,
       dps: DPS0 * Math.pow(vmaxR / 33, 3),
-      // per-vortex timers (all throttles, never per-frame world queries)
-      tStruct: 0, tCars: 0, tPeople: 0, tFx: 0, tSfx: 0, tShake: 0, tGlass: 0, tProp: 0, tEvent: 0, tArena: 0,
-      // roof-seat cache: lot -> {y, t}. Bounded by the lot cap below and
-      // cleared on retire. NOT a damage ledger — it stores only where the
-      // NEXT hit should be seated, read back from CBZ.structure.state().
+      tStruct: 0, tCars: 0, tPeople: 0, tFx: 0, tSfx: 0, tShake: 0, tGlass: 0, tProp: 0, tEvent: 0, tWd: 0,
       roofs: new Map(),
-      lifted: [],                                 // vehicles under our control
       dead: false,
     };
+    // SUCTION VORTICES: EF3+ (3, 4 at EF4, 5 at EF5), orbiting inside the core
+    if (ef >= 3) {
+      const n = ef === 3 ? 3 : (ef === 4 ? 4 : 5);
+      t.sv = [];
+      for (let i = 0; i < n; i++) t.sv.push({ ang: i * 6.2832 / n, orb: coreR * 0.72, rs: Math.max(2.5, coreR * 0.12), v: vmaxR * 0.2, x: +x, z: +z });
+    }
+    /* THE RATING IS THE PEAK GUST. vmax is what the EF class means: the
+       strongest ground-relative 3-second gust anywhere in the path. That
+       peak is the rotation PLUS the storm's own motion (the right side) PLUS
+       a suction vortex passing over, so the rotation alone is built smaller
+       by those parts (forward speed surges to 1.35x; measured in the lab kit,
+       src/lab/kits/tornado.js, the transect's peak gust lands on vmax). */
+    t.vrot = Math.max(vmaxR * 0.55, vmaxR - 1.2 * fwd - (t.sv ? 0.7 * t.sv[0].v : 0));
     live.push(t);
     buildFunnel(t);
+    // the pools are built on the spawn frame (already the heavy one), not
+    // mid-storm the first time a shingle, a hailstone or a scar needs one
+    debrisPools(); scarMesh(); hailPool();
     try {
       if (CBZ.sfx) { CBZ.sfx("wind"); CBZ.sfx("rumble", { delay: 0.4 }); }
-      if (CBZ.shake) CBZ.shake(0.5);
+      if (inCity()) T.siren(true);
     } catch (e) {}
     fireHook(T.onSpawn, snapshot(t));
     return t;
@@ -1159,12 +1875,11 @@
 
   function snapshot(t) {
     return { id: t.id, x: +t.x.toFixed(2), z: +t.z.toFixed(2), ef: t.ef, mag: t.mag,
-      r: +t.R.toFixed(1), vmax: +t.vmax.toFixed(1), h: t.mesh ? t.mesh.H : +(t.R * 2.4).toFixed(0),
-      age: +t.age.toFixed(2) };
+      r: +t.R.toFixed(1), vmax: +t.vmax.toFixed(1), h: t.mesh ? +t.mesh.H.toFixed(0) : 0,
+      age: +t.age.toFixed(2), life: +t.life.toFixed(2), k: +t.k.toFixed(2), rope: +t.rope.toFixed(2) };
   }
   T.active = function () { return live.map(snapshot); };
   T.count = function () { return live.length; };
-
   T.stop = function (handle) {
     if (handle && handle.id != null) { retire(handle, false); return true; }
     if (!live.length) return false;
@@ -1177,45 +1892,25 @@
     const i = live.indexOf(t);
     if (i >= 0) live.splice(i, 1);
     t.dead = true;
-    // every car we still own is handed back / dropped, never left frozen
-    for (let k = t.lifted.length - 1; k >= 0; k--) releaseCar(t, t.lifted[k], hard);
-    t.lifted.length = 0;
     t.roofs.clear();
     disposeFunnel(t);
+    if (!live.length && inCity()) T.siren(false);
     if (!hard) { try { if (CBZ.sfx) CBZ.sfx("wind", { volume: 0.5 }); } catch (e) {} }
     fireHook(T.onEnd, snapshot(t));
   }
 
-  /* ============================================================
-     SEAMS — mirroring CBZ.structure.onCollapse's shape exactly, so a mission
-     ("survive the outbreak", "clear the path", "the storm chaser job") hangs
-     off this file without editing it.
-       T.onSpawn  fn({id,x,z,ef,r,vmax})
-       T.onPath   fn({id,x,z,ef,r,vmax,age})       every path step (~5 Hz)
-       T.onDamage fn({id,x,z,lot,amount,stage})    every structural bite
-       T.onEnd    fn({id,x,z,ef,r,vmax,age})
-     ============================================================ */
+  /* SEAMS: T.onSpawn / onPath / onDamage / onEnd  fn(snapshot | {id,x,z,stage,...}) */
   T.onSpawn = null; T.onPath = null; T.onDamage = null; T.onEnd = null;
-  // the last track's endpoints, kept after the vortex dies so the aftermath
-  // (the scarred line across the map) can still be found and photographed
   let lastPath = null;
   function fireHook(fn, arg) { if (typeof fn === "function") { try { fn(arg); } catch (e) {} } }
 
   /* ============================================================
-     MOVEMENT. Forward at `fwd` m/s along `heading`, with a deterministic
-     wobble hashed off the CURRENT POSITION. Bounces off an optional bounding
-     circle (survival's island) and is clamped into the city otherwise.
+     MOVEMENT: forward at `fwd`, a hashed wobble, a surging pace, bounced
+     off an optional bounding circle, clamped to the city otherwise.
      ============================================================ */
   function move(t, dt) {
-    // wobble: hash01 quantizes to decimetres, so this is stable per metre of
-    // track and identical on every client regardless of frame rate.
-    const w = CBZ.hash01 ? CBZ.hash01(t.x, t.z, 0x7043) : 0.5;
+    const w = h01(t.x, t.z, 0x7043);
     t.heading += (w - 0.5) * 0.55 * dt;
-    // FORWARD SPEED BREATHES. A real funnel surges and stalls (chaser rule:
-    // "if it looks parked, it is coming at you or slowing to kill you") —
-    // constant ground speed is one of the prop tells. ±35%, keyed to nominal
-    // distance travelled so the pace pattern is the track's own, not the
-    // frame rate's.
     t.trav = (t.trav || 0) + t.fwd * dt;
     const surge = 1 + 0.35 * Math.sin(t.trav * 0.045 + t.id * 2.1) * Math.sin(t.trav * 0.011 + 1.3);
     const fvNow = t.fwd * surge;
@@ -1228,10 +1923,9 @@
       if (d > t.bounds.r) {
         t.heading = Math.atan2(t.bounds.z - t.z, t.bounds.x - t.x) + (w - 0.5) * 0.8;
         t.fvx = Math.cos(t.heading) * fvNow; t.fvz = Math.sin(t.heading) * fvNow;
+        t._scarJoin = false;
       }
-    } else if (CBZ.city && CBZ.city.arena && CBZ.city.arena.clampToCity) {
-      // keep it over land: the same clamp traffic uses, so a funnel never
-      // wanders off into the ocean and grinds an empty water plane.
+    } else if (inCity() && CBZ.city && CBZ.city.arena && CBZ.city.arena.clampToCity) {
       const p = { x: t.x, z: t.z };
       try {
         CBZ.city.arena.clampToCity(p, t.R * 0.5);
@@ -1239,119 +1933,81 @@
           t.x = p.x; t.z = p.z;
           t.heading += Math.PI * 0.55;
           t.fvx = Math.cos(t.heading) * fvNow; t.fvz = Math.sin(t.heading) * fvNow;
+          t._scarJoin = false;
         }
       } catch (e) {}
+    }
+    // the suction vortices orbit the axis (cyclonic), faster as it tightens
+    if (t.sv) {
+      const rate = (t.vmax / t.R) * 0.45 * Math.max(0.3, t.k);
+      for (const S of t.sv) {
+        S.ang += rate * dt;
+        const orb = S.orb * (1 - 0.4 * t.rope);
+        S.x = t.x + Math.cos(-S.ang) * orb; S.z = t.z + Math.sin(-S.ang) * orb;
+      }
     }
   }
 
   /* ============================================================
-     BUILDINGS — roof-first, sustained, through THE ledger.
-
-     Not one big hit: a DPS bite every STRUCT_TICK while the funnel overlaps
-     the footprint, so the building visibly walks INTACT -> SCARRED -> WOUNDED
-     -> CRITICAL -> COLLAPSING under a funnel that parks on it, and merely gets
-     scuffed by one that clips it. That escalation IS the feature.
-
-     PERF: one bounded pass over lots every 0.2 s (city/structural.js's own
-     blast wave does the same pass at 20 Hz, so this is 4x cheaper than
-     precedent), and the number of lots actually hit per tick is capped by
-     qScale — over the cap we keep the NEAREST, because those are the ones the
-     player is looking at. Buildings already condemned are skipped outright so
-     the budget always goes to something still standing.
-
-     TALL BUILDINGS ARE FELLABLE NOW (structural.js reads
-     CBZ.CONFIG.DEMO_MAX_STOREYS, default 64, instead of the old hard 11-storey
-     immunity), so a sustained EF4/EF5 parked on a tower is a real event rather
-     than a light show. The cost of that is NOT ours to bound: every
-     condemnation lands in structural.js's own `condemned` queue, which drains
-     at qScale(1,3) teardowns per frame nearest-first. A funnel walking a
-     downtown block therefore produces a steady trickle of collapses, never one
-     catastrophic frame — which is exactly why the budget lives there, once,
-     for every condemnation source, and not here.
+     CITY LOTS — roof-first, sustained, through city/structural.js, sized by
+     the LOCAL gust (v^3 power flux) at the footprint.
      ============================================================ */
   const STRUCT_TICK = 0.2;
   const _lotHits = [];
-  function hitBuildings(t, dt) {
-    if (!CBZ.CONFIG.TORNADO_STRUCTURAL || !CBZ.structure || !CBZ.structure.hit) return;
+  function hitCityLots(t, dt) {
+    if (!inCity() || !CBZ.CONFIG.TORNADO_STRUCTURAL || !CBZ.structure || !CBZ.structure.hit) return;
     t.tStruct += dt;
     if (t.tStruct < STRUCT_TICK) return;
     const step = t.tStruct; t.tStruct = 0;
     const A = CBZ.city && CBZ.city.arena;
     if (!A || !A.lots) return;
-
-    const reach = t.dmgR;
     _lotHits.length = 0;
     for (let i = 0; i < A.lots.length; i++) {
       const lot = A.lots[i], b = lot.building;
       if (!b || lot.demolished) continue;
-      // cheap box distance from the axis to the footprint
       const dx = Math.max(0, Math.abs(b.ox - t.x) - b.w * 0.5);
       const dz = Math.max(0, Math.abs(b.oz - t.z) - b.d * 0.5);
       const d = Math.hypot(dx, dz);
-      if (d >= reach) continue;
+      if (d >= t.outer) continue;
       _lotHits.push(lot, d);
     }
     if (!_lotHits.length) return;
-
-    const cap = Math.max(3, Math.round(CBZ.qScale ? CBZ.qScale(6, 18) : 12)) * 2;
+    const cap = Math.max(3, Math.round(q(6, 18))) * 2;
     if (_lotHits.length > cap) {
-      // over budget: keep the nearest. A simple selection pass beats a sort
-      // here because the list is already short and this runs at 5 Hz.
       for (let a = 0; a < cap; a += 2) {
         let bi = a;
         for (let c = a + 2; c < _lotHits.length; c += 2) if (_lotHits[c + 1] < _lotHits[bi + 1]) bi = c;
-        if (bi !== a) {
-          const l0 = _lotHits[a], d0 = _lotHits[a + 1];
-          _lotHits[a] = _lotHits[bi]; _lotHits[a + 1] = _lotHits[bi + 1];
-          _lotHits[bi] = l0; _lotHits[bi + 1] = d0;
-        }
+        if (bi !== a) { const l0 = _lotHits[a], d0 = _lotHits[a + 1]; _lotHits[a] = _lotHits[bi]; _lotHits[a + 1] = _lotHits[bi + 1]; _lotHits[bi] = l0; _lotHits[bi + 1] = d0; }
       }
       _lotHits.length = cap;
     }
-
     for (let i = 0; i < _lotHits.length; i += 2) {
       const lot = _lotHits[i], d = _lotHits[i + 1], b = lot.building;
-      const q = Math.max(0, 1 - d / reach);
-      const amount = t.dps * q * step;
-      if (amount <= 0.001) continue;
-      // ---- ROOF-FIRST SEAT. The tornado is always working on the highest
-      //      floor that still has integrity, so it eats a building downward.
+      // the gust at the footprint's nearest point to the axis
+      const px = Math.max(b.ox - b.w * 0.5, Math.min(b.ox + b.w * 0.5, t.x));
+      const pz = Math.max(b.oz - b.d * 0.5, Math.min(b.oz + b.d * 0.5, t.z));
+      fieldInto(t, px, pz, _s, 6);
+      if (_s.gust < DOD.cover) continue;
+      const amount = DPS0 * Math.pow(_s.gust / 33, 3) * step * 0.5;
       const info = roofInfo(t, lot, b);
-      // Already condemned (city/structural.js's doomedIn >= 0): it is coming
-      // down on its own timer and hit() would early-out anyway. Skipping frees
-      // this tick's lot budget for something still standing, which is what
-      // keeps an EF5 over a dense district working on the whole block instead
-      // of re-hitting the same six ruins.
       if (info.doomed) continue;
-      const y = info.y;
-      fieldInto(t, b.ox, b.oz, _scratch);
-      let nx = _scratch.vx, nz = _scratch.vz;
+      let nx = _s.vx, nz = _s.vz;
       const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl;
       let stage = 0;
       try {
-        const rec = CBZ.structure.hit(b.ox, y, b.oz, amount, {
-          kind: "tornado", pen: 0, fire: 0,
-          dirx: nx, dirz: nz, by: t.by, lot: lot,
-        });
+        const rec = CBZ.structure.hit(b.ox, info.y, b.oz, amount, { kind: "tornado", pen: 0, fire: 0, dirx: nx, dirz: nz, by: t.by, lot: lot });
         stage = (rec && rec.stage) || 0;
       } catch (e) {}
+      stats.buildingHits++;
       if (T.onDamage) fireHook(T.onDamage, { id: t.id, x: b.ox, z: b.oz, lot: lot, amount: +amount.toFixed(3), stage: stage });
-      // the visible read of the roof coming off — only where it can be seen,
-      // only on the strong side of the path, on the already-pooled systems.
-      if (q > 0.45 && camDist(b.ox, b.oz) < (CBZ.cityCullRadius || 320)) {
-        try {
-          if (CBZ.cityChunk) CBZ.cityChunk(b.ox + (Math.random() - 0.5) * b.w * 0.7, y, b.oz + (Math.random() - 0.5) * b.d * 0.7,
-            { count: Math.round(CBZ.qScale ? CBZ.qScale(1, 4) : 3), force: 5 + 7 * q, dirx: nx, dirz: nz });
-        } catch (e) {}
+      // the roof coming off, visibly: its covering, lofted into the field
+      if (camDist(b.ox, b.oz) < (CBZ.cityCullRadius || 320)) {
+        const n = Math.min(4, Math.round((_s.gust - DOD.cover) / 10) + 1);
+        for (let k = 0; k < n; k++) spawnDebris(k & 1 ? 0 : 3, b.ox + (Math.random() - 0.5) * b.w * 0.8, info.y + 1, b.oz + (Math.random() - 0.5) * b.d * 0.8,
+          nx * 8, 5, nz * 8, b.color != null ? b.color : 0x7d7468, 1, floorAt);
       }
     }
   }
-
-  // WHERE THE NEXT BITE LANDS: the highest floor that still has integrity, in
-  // metres, plus whether the building is already condemned. BOTH are read back
-  // from city/structural.js's public state() — this file keeps NO damage
-  // number of its own (that is the whole point of one ledger), and the cache
-  // below stores only a Y and a boolean, refreshed twice a second.
   const _roofOut = { y: 1, doomed: false };
   function roofInfo(t, lot, b) {
     const FH = b.FH || 3.2;
@@ -1362,291 +2018,42 @@
     try {
       const st = CBZ.structure.state ? CBZ.structure.state(lot) : null;
       if (st) {
-        // `doomedIn` (seconds to collapse, -1 = standing) is structural.js's
-        // own countdown; `stage >= 5` is the pre-doomedIn fallback so this
-        // still behaves if that seam is not present.
         doomed = (st.doomedIn != null && st.doomedIn >= 0) || (st.stage || 0) >= 5;
         if (st.floors && st.floors.length) {
           let top = -1;
           for (let i = st.floors.length - 1; i >= 0; i--) if (st.floors[i] > 0.2) { top = i; break; }
-          // every floor gone: keep grinding the ground floor rather than
-          // seating the hit below the world (which resolves to floor 0 anyway).
           y = top < 0 ? Math.max(1, FH * 0.5) : Math.max(1, (top + 0.85) * FH);
         }
       }
     } catch (e) {}
     if (!rec) { rec = { y: y, doomed: doomed, t: 0 }; t.roofs.set(lot, rec); }
     rec.y = y; rec.doomed = doomed; rec.t = CBZ.now;
-    // BOUND the cache: it only ever holds lots the funnel is currently over,
-    // and the funnel moves, so trim it whenever it outgrows the lot cap.
     if (t.roofs.size > 64) t.roofs.clear();
     _roofOut.y = y; _roofOut.doomed = doomed;
     return _roofOut;
   }
-
-  /* ============================================================
-     VEHICLES — lifted, orbited, thrown, and priced as `kinetic` on landing.
-
-     OWNERSHIP: city/vehicles.js's updater skips any car with `ai` falsy, so
-     clearing `ai`/`road` is how we take a car off its own controller without
-     writing a second car physics loop. We hand it back (as a wreck) on impact.
-
-     PERF: one bounded scan every 0.3 s; concurrent lifted cars hard-capped by
-     qScale (2 at tier 0, 8 at tier 4). Over the cap we EJECT the farthest —
-     it becomes a thrown car, which is the cheap path and also the good-looking
-     one. Nothing ever queues.
-     ============================================================ */
-  const CAR_TICK = 0.3;
-  function liftedCap() { return Math.max(1, Math.round(CBZ.qScale ? CBZ.qScale(2, 8) : 5)); }
-
-  function scanCars(t, dt) {
+  // city traffic: the same force test, the same flyer
+  function scanCityCars(t, dt) {
     if (!CBZ.CONFIG.TORNADO_LIFT || !inCity() || !CBZ.cityCars) return;
     t.tCars += dt;
-    if (t.tCars < CAR_TICK) return;
+    if (t.tCars < 0.2) return;
     t.tCars = 0;
-    const cars = CBZ.cityCars, cap = liftedCap();
-    const reach = t.R * 1.3;
-    for (let i = 0; i < cars.length; i++) {
+    const cars = CBZ.cityCars;
+    let owned = 0;
+    for (const f of flyers) if (f.kind === "car") owned++;
+    const cap = qi(3, 10);
+    for (let i = 0; i < cars.length && owned < cap; i++) {
       const c = cars[i];
-      if (!c || c.dead || c._twLift) continue;
-      const dx = c.pos.x - t.x, dz = c.pos.z - t.z;
-      if (Math.abs(dx) > reach || Math.abs(dz) > reach) continue;
-      if (dx * dx + dz * dz > reach * reach) continue;
-      fieldInto(t, c.pos.x, c.pos.z, _scratch);
-      if (c.player) {
-        // NEVER seize the car the player is driving — city/vehicles.js owns
-        // that transform every frame and two writers would fight. Instead the
-        // wind SHOVES it: nudging pos before vehicles.js's order-37 tick means
-        // the controller integrates from the shoved position, so it reads as
-        // the storm pushing you across the road, which is the honest effect.
-        continue;
-      }
-      if (_scratch.speed < LIFT_MIN_SPEED) continue;
-      if (t.lifted.length >= cap) {
-        // degrade over the cap: throw the FARTHEST one out now.
-        let fi = 0, fd = -1;
-        for (let k = 0; k < t.lifted.length; k++) {
-          const L = t.lifted[k];
-          if (L.phase !== "orbit") continue;
-          if (L.rad > fd) { fd = L.rad; fi = k; }
-        }
-        if (fd < 0) break;                     // everything already in flight
-        eject(t, t.lifted[fi]);
-      }
-      if (t.lifted.length >= cap) break;
-      seizeCar(t, c);
-    }
-  }
-
-  function seizeCar(t, c) {
-    c._twLift = true;
-    c._twAi = c.ai; c._twRoad = c.road;
-    c.ai = false; c.road = null;
-    c.v = 0; c.vx = 0; c.vz = 0;
-    c._airborne = false; c._airY = 0; c._airVy = 0;
-    const dx = c.pos.x - t.x, dz = c.pos.z - t.z;
-    t.lifted.push({
-      car: c, phase: "orbit",
-      ang: Math.atan2(dz, dx), rad: Math.max(3, Math.hypot(dx, dz)),
-      y: c.group ? c.group.position.y : 0, vy: 2,
-      rx: 0, rz: 0, sx: (Math.random() - 0.5) * 5, sz: (Math.random() - 0.5) * 4,
-      age: 0, mass: c.mass || 1450,
-    });
-    try {
-      if (CBZ.cityDustKick) CBZ.cityDustKick(c.pos.x, 0.4, c.pos.z, 1.6);
-    } catch (e) {}
-  }
-
-  function eject(t, L) {
-    if (L.phase !== "orbit") return;
-    L.phase = "thrown";
-    fieldInto(t, L.car.pos.x, L.car.pos.z, _scratch);
-    // launched along the tangential+outward resultant at most of the local
-    // wind speed — that is what makes the throw read as "the vortex spat it".
-    const sp = Math.max(18, _scratch.speed * 0.8);
-    const tx = -Math.sin(L.ang), tz = Math.cos(L.ang);
-    const ox = Math.cos(L.ang), oz = Math.sin(L.ang);
-    L.vx = (tx * 0.8 + ox * 0.6) * sp;
-    L.vz = (tz * 0.8 + oz * 0.6) * sp;
-    L.vy = Math.max(4, _scratch.lift * 0.55);
-    try { if (CBZ.sfx && camDist(L.car.pos.x, L.car.pos.z) < 120) CBZ.sfx("whoosh"); } catch (e) {}
-  }
-
-  const TW_PAD = 0.9;                    // a car's half-width against walls
-  const _twHit = { t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, c: null };
-  // rubble colliders are knee-high piles the car tumbles over, not walls
-  const TW_OPTS = { skip: (c) => !!c.debris };
-  function spd0(L) { return Math.hypot(L.vx, L.vy, L.vz); }
-  function stepLifted(t, dt) {
-    for (let i = t.lifted.length - 1; i >= 0; i--) {
-      const L = t.lifted[i], c = L.car;
-      if (!c || !c.pos) { t.lifted.splice(i, 1); continue; }
-      // something else killed the car while we had it (a stray blast, a run
-      // reset, the vehicle pool recycling it) — hand it straight back rather
-      // than flying a corpse around.
-      if (c.dead) { releaseCar(t, L, true); t.lifted.splice(i, 1); continue; }
-      L.age += dt;
-
-      if (L.phase === "orbit") {
-        fieldInto(t, c.pos.x, c.pos.z, _scratch);
-        // the corkscrew: angular rate from tangential speed, radius eaten by
-        // the inflow, height driven by the updraft against gravity.
-        L.ang += (_scratch.speed / Math.max(2, L.rad)) * dt;
-        L.rad = Math.max(2.5, L.rad - _scratch.inflow * dt * 0.55);
-        L.vy += (_scratch.lift * 0.75 - L.vy) * Math.min(1, dt * 2.2);
-        L.y += L.vy * dt;
-        L.rx += L.sx * dt; L.rz += L.sz * dt;
-        const nx = t.x + Math.cos(L.ang) * L.rad, nz = t.z + Math.sin(L.ang) * L.rad;
-        c.pos.x = nx; c.pos.z = nz;
-        if (c.group) {
-          c.group.position.set(nx, L.y, nz);
-          c.group.rotation.set(L.rx, -L.ang, L.rz);
-          c.group.visible = true;
-        }
-        // spat out when it reaches the top, gets sucked to the axis, or has
-        // simply been up there long enough (bounded ride, never forever).
-        const H = t.mesh ? t.mesh.H : t.R * 2.4;
-        if (L.y > H * 0.8 || L.rad <= 3.0 || L.age > 6) eject(t, L);
-        continue;
-      }
-
-      // ---- THROWN: plain ballistics until it hits something ---------------
-      L.vy -= ((CBZ.PHYS && CBZ.PHYS.G_VEHICLE) || 19.2) * dt;
-      const px = c.pos.x, pz = c.pos.z, py = L.y;
-      c.pos.x += L.vx * dt; c.pos.z += L.vz * dt; L.y += L.vy * dt;
-      /* (0) THE WORLD'S COLLIDERS. The throw knew two things — a lot's
-         building footprint and the ground — so a car at 30 m/s went through
-         every wall, fence, bus shelter and parked-truck box that is not a
-         lot, and could never land on a roof. The step is now a swept box
-         (debris.js's CBZ.looseContact, grown by the car's half-width): a
-         side face at speed is the same kinetic impact a facade is, a slow
-         one is a bounce off it, and a top face is where it lands. */
-      const LC = CBZ.looseContact;
-      if (LC && LC.sweep(px, py, pz, c.pos.x, L.y, c.pos.z, TW_PAD, _twHit, TW_OPTS)) {
-        c.pos.x = _twHit.x; c.pos.z = _twHit.z; L.y = _twHit.y;
-        if (_twHit.ny > 0.5) {
-          // on a roof / a deck / a container: that is its ground now
-          L.y = _twHit.y - TW_PAD + 0.45; L.restY = _twHit.y - TW_PAD;
-          if (c.group) c.group.position.set(c.pos.x, L.y, c.pos.z);
-          impact(t, L, spd0(L), null, px, py, pz);
-          t.lifted.splice(i, 1);
-          continue;
-        }
-        const s0 = spd0(L);
-        if (s0 > 16) {
-          let lot = null;
-          try { if (CBZ.structure && CBZ.structure.lotAt) lot = CBZ.structure.lotAt(c.pos.x - _twHit.nx, c.pos.z - _twHit.nz, 1.2); } catch (e) {}
-          if (c.group) c.group.position.set(c.pos.x, L.y, c.pos.z);
-          impact(t, L, s0, lot && lot.building ? lot : null, px, py, pz);
-          t.lifted.splice(i, 1);
-          continue;
-        }
-        // a glancing / slow hit: off the wall, most of the energy gone
-        const vn = L.vx * _twHit.nx + L.vy * _twHit.ny + L.vz * _twHit.nz;
-        if (vn < 0) {
-          L.vx -= 1.3 * vn * _twHit.nx; L.vy -= 1.3 * vn * _twHit.ny; L.vz -= 1.3 * vn * _twHit.nz;
-        }
-        L.vx *= 0.55; L.vz *= 0.55;
-        L.sx *= -0.6; L.sz *= 0.6;
-      }
-      L.rx += L.sx * dt * 1.6; L.rz += L.sz * dt * 1.6;
-      if (c.group) {
-        c.group.position.set(c.pos.x, L.y, c.pos.z);
-        c.group.rotation.set(L.rx, Math.atan2(L.vz, L.vx), L.rz);
-      }
-      const spd = Math.hypot(L.vx, L.vy, L.vz);
-      // (a) into a FACADE — the money shot, and it is one bus call.
-      if (spd > 16 && CBZ.structure && CBZ.structure.lotAt) {
-        let lot = null;
-        try { lot = CBZ.structure.lotAt(c.pos.x, c.pos.z, 0.8); } catch (e) {}
-        if (lot && lot.building && L.y > 0.6 && L.y < (lot.building.h || 12)) {
-          impact(t, L, spd, lot, px, py, pz);
-          t.lifted.splice(i, 1);
-          continue;
-        }
-      }
-      // (b) into the GROUND — the surface it can reach from where it was
-      // (groundAt: a roof platform under it counts, the street under a roof
-      // does not)
-      const gy = LC ? LC.ground(c.pos.x, c.pos.z, py + 0.2) : floorAt(c.pos.x, c.pos.z);
-      if (L.y <= gy + 0.45) {
-        L.y = gy + 0.45; L.restY = gy;
-        impact(t, L, spd, null, px, py, pz);
-        t.lifted.splice(i, 1);
-        continue;
-      }
-    }
-  }
-
-  // The landing. ONE `kinetic` detonation — the bus prices mass x speed
-  // (E = 1/2 m v^2, cube root for FX, 2/3 power for the ledger) and resolves
-  // the struck lot itself, so a thrown car through a third-floor window is a
-  // single call and not a bespoke damage model.
-  //
-  // WE DELIBERATELY DO NOT PASS `frontal`. That option (metres of frontal
-  // width) buys a COLUMN-SEVER term, and a 1.5 t car at 40 m/s carries ~1.2 MJ
-  // — three orders below what it takes to cut a floorplate's load path. The
-  // model would correctly return ~0 anyway; omitting it says so honestly and
-  // saves the arithmetic. A tornado wrecks buildings by grinding them, not by
-  // sniping their columns with the contents of a car park.
-  function impact(t, L, spd, lot, px, py, pz) {
-    const c = L.car;
-    const dx = L.vx, dz = L.vz, dl = Math.hypot(dx, dz) || 1;
-    try {
-      if (CBZ.detonate) {
-        CBZ.detonate(c.pos.x, L.y, c.pos.z, "kinetic", {
-          mass: L.mass, speed: spd,
-          dirx: dx / dl, dirz: dz / dl,
-          by: t.by, byPlayer: false, lot: lot || null,
-        });
-      } else if (CBZ.cityDustKick) {
-        CBZ.cityDustKick(c.pos.x, L.y, c.pos.z, 2.0);
-      }
-    } catch (e) {}
-    // the car itself is now a wreck — the existing damage/fire path owns that.
-    try {
-      if (c.npcDriver && !c.npcDriver.dead && CBZ.cityKillPed) {
-        CBZ.cityKillPed(c.npcDriver, { fromX: t.x, fromZ: t.z, force: 8, fling: 5, byPlayer: false }, "thrown by the tornado");
-      }
-      if (CBZ.cityDamageCar) CBZ.cityDamageCar(c, 600, {});
-      if (spd > 26 && CBZ.cityCarIgnite) CBZ.cityCarIgnite(c, false);
-      if (CBZ.shake) { const d = camDist(c.pos.x, c.pos.z); if (d < 120) CBZ.shake(Math.min(1.5, spd * 0.03) * (1 - d / 120)); }
-    } catch (e) {}
-    releaseCar(t, L, false);
-  }
-
-  // Give the car back. It never returns to traffic (it is wreckage), but it
-  // stops being ours, sits on the ground, and every other system sees a
-  // perfectly ordinary abandoned car again.
-  function releaseCar(t, L, hard) {
-    const c = L && L.car;
-    if (!c) return;
-    c._twLift = false;
-    c.ai = false; c.road = null;
-    c.v = 0; c.vx = 0; c.vz = 0;
-    c._airborne = false; c._airY = 0; c._airVy = 0;
-    c.abandoned = true;
-    c.wreckT = 0;
-    // where it came down (a roof it landed on), else the ground under it
-    const gy = L.restY != null ? L.restY
-      : (CBZ.looseContact ? CBZ.looseContact.ground(c.pos.x, c.pos.z, (L.y != null ? L.y : 0) + 0.5) : floorAt(c.pos.x, c.pos.z));
-    if (c.group) {
-      c.group.position.set(c.pos.x, gy + 0.4, c.pos.z);
-      if (!hard) {
-        // come to rest crumpled on its side, like every other tossed wreck
-        c.group.rotation.set((Math.random() < 0.5 ? 1 : -1) * (0.5 + Math.random() * 0.8), c.heading || 0, (Math.random() - 0.5) * 1.2);
-      } else {
-        c.group.rotation.set(0, c.heading || 0, 0);
-      }
+      if (!c || c.dead || c._twLift || c.player || !c.pos) continue;
+      if (Math.abs(c.pos.x - t.x) > t.outer || Math.abs(c.pos.z - t.z) > t.outer) continue;
+      const before = flyers.length;
+      windCar(t, c, c.pos, true);
+      if (flyers.length > before) owned++;
     }
   }
 
   /* ============================================================
-     PEOPLE. Every death funnels through the SHARED kill bus — this file
-     never toasts anything (CLAUDE.md: the killfeed is the only popup).
-     PERF: the ped list is scanned at 5 Hz with an AABB reject before the
-     hypot, and the instanced crowd is handled by ONE circle-kill call rather
-     than a second per-agent loop.
+     PEOPLE. Every death goes through the shared kill bus.
      ============================================================ */
   const PEOPLE_TICK = 0.2;
   const CAUSE = "torn apart by the tornado";
@@ -1655,105 +2062,86 @@
     const tick = t.tPeople >= PEOPLE_TICK;
     const step = t.tPeople;
     if (tick) t.tPeople = 0;
-
-    // ---- SURVIVAL MODE: the roster's actors, through surv's own hurt path
-    //      (which already resolves the kill-feed cause). Nothing city-side
-    //      exists there, so we stop here.
     if (!inCity()) {
       if (CBZ.surv && CBZ.surv.forEachActor) {
-        const kill = t.R * 0.75;
+        const W = t.world;
         CBZ.surv.forEachActor(function (a) {
           if (!a || !a.pos) return;
           const d = Math.hypot(a.pos.x - t.x, a.pos.z - t.z);
           if (d > t.outer) { a._twSafe = false; return; }
-          fieldInto(t, a.pos.x, a.pos.z, _scratch);
-          /* V2: AN INTERIOR ROOM IS THE ANSWER. Real tornado safety advice is
-             not "run" — a funnel moves at 11-19 m/s and you do not — it is
-             "get inside a sturdy structure, away from windows". So a body
-             surv's physical underRoof test calls sheltered is spared the drag
-             and the core's instant kill: the walls take the wind. What it is
-             NOT spared is the building itself failing — the ledger's collapse
-             crushes the footprint — which is exactly the real bargain: shelter
-             beats an EF2, and nothing beats an EF5 parked on your roof. */
-          if (v2() && t.arena && t.arena.sheltered) {
+          fieldInto(t, a.pos.x, a.pos.z, _s, 1);
+          /* AN INTERIOR ROOM IS THE ANSWER: shelter spares the drag and the
+             core — until the building itself fails (its roof gone, its walls
+             down), which is the real bargain. */
+          if (W && W.sheltered) {
             let inside = false;
-            try { inside = !!t.arena.sheltered(a); } catch (e) {}
-            if (inside) {
-              if (d < kill && !a._twSafe) { a._twSafe = true; stats.shelterSaves++; }
-              // an EF3+ core still tears at a building's insides
-              if (_scratch.speed > 55) { try { CBZ.surv.hurt(a, _scratch.speed * 0.05 * dt); } catch (e) {} }
+            try { inside = !!W.sheltered(a); } catch (e) {}
+            // a room holds until the gust is past what takes its walls down
+            if (inside && _s.gust < DOD.most) {
+              if (_s.gust > 30 && !a._twSafe) { a._twSafe = true; stats.shelterSaves++; }
+              if (_s.gust > 55) { try { CBZ.surv.hurt(a, _s.gust * 0.04 * dt); } catch (e) {} }
               return;
             }
             a._twSafe = false;
           }
-          if (d < kill) { try { CBZ.surv.hurt(a, 1e6, { fromX: t.x, fromZ: t.z, fling: 8 }); } catch (e) {} return; }
-          // dragged toward the axis, and hurt in proportion to the wind
-          const drag = Math.min(9, _scratch.speed * 0.10);
+          if (_s.gust > 60 && d < t.R * 0.9) { try { CBZ.surv.hurt(a, 1e6, { fromX: t.x, fromZ: t.z, fling: 8 }); } catch (e) {} return; }   // only a >60 m/s (EF2+) core kills outright, and disasterhurt.js warns first
+          const drag = Math.min(9, _s.gust * 0.10);
           if (a.isPlayer) dragPlayer(t, dt, drag);
           else {
-            a.pos.x += (_scratch.vx / Math.max(1, _scratch.speed)) * drag * dt;
-            a.pos.z += (_scratch.vz / Math.max(1, _scratch.speed)) * drag * dt;
+            const inv = 1 / Math.max(1, _s.gust);
+            a.pos.x += _s.vx * inv * drag * dt;
+            a.pos.z += _s.vz * inv * drag * dt;
             if (CBZ.collide) { try { CBZ.collide(a.pos, 0.5); } catch (e) {} }
           }
-          if (_scratch.speed > 26) { try { CBZ.surv.hurt(a, _scratch.speed * 0.22 * dt); } catch (e) {} }
+          if (_s.gust > 30) { try { CBZ.surv.hurt(a, (_s.gust - 24) * 0.25 * dt); } catch (e) {} }
         });
       }
       return;
     }
-
-    // ---- CITY: crowd, peds, player -------------------------------------
     if (tick) {
       const kill = t.R * 0.7;
-      if (CBZ.crowds && CBZ.crowds.crush) { try { CBZ.crowds.crush(t.x, t.z, kill, { cause: "tornado" }); } catch (e) {} }
+      if (CBZ.crowds && CBZ.crowds.crush && t.k > 0.5) { try { CBZ.crowds.crush(t.x, t.z, kill, { cause: "tornado" }); } catch (e) {} }
       const peds = CBZ.cityPeds;
       if (peds && peds.length) {
-        const reach = t.outer;
         for (let i = 0; i < peds.length; i++) {
           const p = peds[i];
           if (!p || p.dead || !p.pos) continue;
           const dx = p.pos.x - t.x, dz = p.pos.z - t.z;
-          if (Math.abs(dx) > reach || Math.abs(dz) > reach) continue;
+          if (Math.abs(dx) > t.outer || Math.abs(dz) > t.outer) continue;
           const d = Math.hypot(dx, dz);
-          if (d > reach) continue;
-          if (d < kill) {
+          if (d > t.outer) continue;
+          fieldInto(t, p.pos.x, p.pos.z, _s, 1);
+          if (d < kill && _s.gust > 55) {
             try { CBZ.cityKillPed(p, { fromX: t.x, fromZ: t.z, force: 16, fling: 12, byPlayer: false }, CAUSE); } catch (e) {}
             continue;
           }
-          fieldInto(t, p.pos.x, p.pos.z, _scratch);
-          const drag = Math.min(10, _scratch.speed * 0.12);
-          const inv = 1 / Math.max(1, _scratch.speed);
-          p.pos.x += _scratch.vx * inv * drag * step;
-          p.pos.z += _scratch.vz * inv * drag * step;
+          const drag = Math.min(10, _s.gust * 0.12);
+          const inv = 1 / Math.max(1, _s.gust);
+          p.pos.x += _s.vx * inv * drag * step;
+          p.pos.z += _s.vz * inv * drag * step;
           if (CBZ.collideSlide) { try { CBZ.collideSlide(p.pos, 0.4, p.pos.y, p.pos.y + 1.7); } catch (e) {} }
         }
       }
     }
-    // the player is handled every frame (their motion must never be chunky)
     hitPlayer(t, dt);
   }
-
-  // Drag toward the axis, lift at the core, hurt throughout. The ballistic
-  // launch reuses systems/physics.js's `_phys.air` branch — the SAME state
-  // systems/predator.js's knockPlayer() sets, so there is one airborne-player
-  // model in the game and this file does not add a second.
+  // drag toward the axis, thrown at the core: systems/physics.js's `_phys.air`
   function hitPlayer(t, dt) {
     const P = CBZ.player;
     if (!P || P.dead || !P.pos) return;
     if (P.driving) { shovePlayerCar(t, dt); return; }
     const d = Math.hypot(P.pos.x - t.x, P.pos.z - t.z);
     if (d > t.outer) return;
-    fieldInto(t, P.pos.x, P.pos.z, _scratch);
+    fieldInto(t, P.pos.x, P.pos.z, _s, 1);
     const ph = P._phys;
-    if (ph && ph.air) return;                        // already in flight
-
-    if (d < t.R * 0.85 && _scratch.speed > 40) {
-      // INTO THE CORE. Thrown, hard, along the local wind + straight up.
-      const inv = 1 / Math.max(1, _scratch.speed);
+    if (ph && ph.air) return;
+    if (d < t.R * 0.85 && _s.gust > 45) {
+      const inv = 1 / Math.max(1, _s.gust);
       const p2 = P._phys = P._phys || {};
       p2.air = true; p2.down = 0; p2.kx = p2.kz = 0;
-      p2.vx = _scratch.vx * inv * Math.min(26, _scratch.speed * 0.45);
-      p2.vz = _scratch.vz * inv * Math.min(26, _scratch.speed * 0.45);
-      p2.vy = Math.min(20, 6 + _scratch.lift * 0.5);
+      p2.vx = _s.vx * inv * Math.min(26, _s.gust * 0.45);
+      p2.vz = _s.vz * inv * Math.min(26, _s.gust * 0.45);
+      p2.vy = Math.min(20, 6 + _s.lift * 0.5);
       p2.spin = (Math.random() < 0.5 ? -1 : 1) * 5.5;
       P.grounded = false;
       try {
@@ -1762,73 +2150,54 @@
       } catch (e) {}
       return;
     }
-    // OUTSIDE THE CORE: dragged. Scaled well down — the player must be able to
-    // fight it at the edge and lose at the middle, which is the whole tension.
-    dragPlayer(t, dt, Math.min(7, _scratch.speed * 0.075));
-    if (_scratch.speed > 30) {
+    dragPlayer(t, dt, Math.min(7, _s.gust * 0.075));
+    if (_s.gust > 32) {
       t.tHurt = (t.tHurt || 0) + dt;
       if (t.tHurt >= 0.5) {
         t.tHurt = 0;
-        try { if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.round(_scratch.speed * 0.12), t.x, t.z, "battered by the tornado", false, null, false); } catch (e) {}
+        try { if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.round(_s.gust * 0.12), t.x, t.z, "battered by the tornado", false, null, false); } catch (e) {}
       }
     }
   }
-
   function dragPlayer(t, dt, drag) {
     const P = CBZ.player;
     if (!P || !P.pos) return;
-    fieldInto(t, P.pos.x, P.pos.z, _scratch);
-    const inv = 1 / Math.max(1, _scratch.speed);
-    P.pos.x += _scratch.vx * inv * drag * dt;
-    P.pos.z += _scratch.vz * inv * drag * dt;
+    fieldInto(t, P.pos.x, P.pos.z, _s2, 1);
+    const inv = 1 / Math.max(1, _s2.gust);
+    P.pos.x += _s2.vx * inv * drag * dt;
+    P.pos.z += _s2.vz * inv * drag * dt;
     if (CBZ.collideSlide) { try { CBZ.collideSlide(P.pos, 0.45, P.pos.y, P.pos.y + 1.8); } catch (e) {} }
     else if (CBZ.collide) { try { CBZ.collide(P.pos, 0.45); } catch (e) {} }
   }
-
-  // The player's own car is never seized (see scanCars) — instead the wind
-  // pushes it. We run at 34.35, city/vehicles.js drives at 37, so nudging
-  // car.pos here means the controller integrates from the shoved position and
-  // the shove reads as steering resistance rather than a teleport.
   function shovePlayerCar(t, dt) {
     const car = CBZ.player && CBZ.player._vehicle;
     if (!car || !car.pos) return;
     const d = Math.hypot(car.pos.x - t.x, car.pos.z - t.z);
     if (d > t.outer) return;
-    fieldInto(t, car.pos.x, car.pos.z, _scratch);
-    const inv = 1 / Math.max(1, _scratch.speed);
-    // a tonne and a half resists: ~12% of the wind, which is a hard drift at
-    // EF2 and genuinely unsurvivable at EF5.
-    const push = Math.min(14, _scratch.speed * 0.12);
-    car.pos.x += _scratch.vx * inv * push * dt;
-    car.pos.z += _scratch.vz * inv * push * dt;
-    if (_scratch.speed > LIFT_MIN_SPEED) {
+    fieldInto(t, car.pos.x, car.pos.z, _s, 1);
+    const inv = 1 / Math.max(1, _s.gust);
+    const push = Math.min(14, _s.gust * 0.12);
+    car.pos.x += _s.vx * inv * push * dt;
+    car.pos.z += _s.vz * inv * push * dt;
+    if (_s.gust > 50) {
       try {
-        if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, _scratch.speed * 0.35 * dt, {});
-        if (CBZ.shake) CBZ.shake(Math.min(1.2, _scratch.speed * 0.012));
+        if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, _s.gust * 0.35 * dt, {});
+        if (CBZ.shake) CBZ.shake(Math.min(1.2, _s.gust * 0.012));
       } catch (e) {}
     }
   }
 
   /* ============================================================
-     WORLD FX + AMBIENCE. Every call here is into an EXISTING pooled system;
-     this file owns no particle pool. Everything is throttled on its own timer
-     and gated on camera distance, and every count rides CBZ.qScale.
+     AMBIENCE: shake, roar, ground debris pulled into the cloud; the city's
+     glass, street props and alarm.
      ============================================================ */
   function worldFx(t, dt) {
     const near = camDist(t.x, t.z);
-    const cull = CBZ.cityCullRadius || 320;
-
-    // --- camera shake, ~7 Hz, distance-attenuated -------------------------
     t.tShake += dt;
     if (t.tShake > 0.14) {
       t.tShake = 0;
-      if (near < 260 && CBZ.shake) {
-        const k = 1 - near / 260;
-        try { CBZ.shake((0.25 + t.ef * 0.16) * k * k); } catch (e) {}
-      }
+      if (near < 260 && CBZ.shake) { const k = 1 - near / 260; try { CBZ.shake((0.25 + t.ef * 0.16) * k * k * t.k); } catch (e) {} }
     }
-
-    // --- the roar. Two closed-set names only: wind + rumble. --------------
     t.tSfx += dt;
     if (t.tSfx > (near < 120 ? 0.8 : 2.2)) {
       t.tSfx = 0;
@@ -1839,114 +2208,49 @@
         }
       } catch (e) {}
     }
-
-    if (!inCity()) return;                            // the rest is city-only
-
-    // --- the debris skirt at the base ------------------------------------
+    // the ground itself feeds the debris cloud at EF2+: dirt and chips
     t.tFx += dt;
-    const every = CBZ.qScale ? CBZ.qScale(0.5, 0.16) : 0.25;
-    if (t.tFx > every && near < cull) {
+    if (t.tFx > q(0.35, 0.12) && t.k > 0.4 && t.ef >= 2) {
       t.tFx = 0;
-      const a = Math.random() * 6.2832, rr = t.R * (0.3 + Math.random() * 0.8);
-      const dx2 = t.x + Math.cos(a) * rr, dz2 = t.z + Math.sin(a) * rr;
-      try {
-        if (CBZ.cityDustKick) CBZ.cityDustKick(dx2, floorAt(dx2, dz2) + 0.4, dz2, 1.6 + t.ef * 0.2);
-        if (CBZ.cityChunk && Math.random() < 0.5) {
-          const ux = (dx2 - t.x) / (rr || 1), uz = (dz2 - t.z) / (rr || 1);
-          CBZ.cityChunk(dx2, 1.0, dz2, { count: Math.round(CBZ.qScale ? CBZ.qScale(1, 3) : 2), force: 9, dirx: -uz, dirz: ux });
-        }
-        if (CBZ.cityCrashSmoke && t.ef >= 3 && Math.random() < 0.25) CBZ.cityCrashSmoke(t.x, 6 + Math.random() * 10, t.z);
-      } catch (e) {}
+      const a = Math.random() * 6.2832, rr = t.R * (0.4 + Math.random() * 0.7);
+      const x = t.x + Math.cos(a) * rr, z = t.z + Math.sin(a) * rr;
+      spawnDebris(3, x, t.gfn(x, z) + 0.3, z, 0, 3, 0, 0x4a3a2a, 0.6 + Math.random() * 0.5, t.gfn);
     }
-
-    // --- glass. The pressure drop blows windows out ahead of the debris.
-    //     cityShatter skips already-shattered panes, so overlap is free.
+    if (!inCity()) return;
     t.tGlass += dt;
     if (t.tGlass > 0.55) {
       t.tGlass = 0;
-      try { if (CBZ.cityShatter) CBZ.cityShatter(t.x, t.z, t.R * (0.9 + t.ef * 0.06)); } catch (e) {}
+      try { if (CBZ.cityShatter) CBZ.cityShatter(t.x, t.z, t.R * 1.4); } catch (e) {}
     }
-
-    // --- street furniture. cityShootProp is the existing public "something
-    //     travelled through here" verb: bins, cones, meters and newsboxes tip
-    //     over and a propane cage cooks off, all with no new code and no new
-    //     registry. We cast a short chord across the funnel base each tick.
     t.tProp += dt;
     if (t.tProp > 0.35 && CBZ.cityShootProp) {
       t.tProp = 0;
       const a = Math.random() * 6.2832, L = t.R * 1.1;
       const gy = floorAt(t.x, t.z);
-      // ONE WRINKLE: city/props.js's propane branch reports a cooked-off tank
-      // as a WITNESSED CRIME (CBZ.cityCrime) and attributes the fireball to
-      // the player, because its only caller until now was a bullet. A storm
-      // is not something you did. props.js belongs to another domain, so
-      // rather than edit it we suspend the crime reporter for the duration of
-      // this one call and restore it in a `finally` — the alarm still sounds
-      // (police responding to an explosion is correct), only the blame is
-      // dropped. If props.js ever grows an un-attributed knock verb
-      // (cityKnockProp(x, z, dirx, dirz)), delete this and call that instead.
+      // props.js reports a cooked-off propane tank as the PLAYER's crime; a
+      // storm is not something you did, so the reporter is suspended for
+      // this one call (restored in `finally`)
       const crime = CBZ.cityCrime;
       try {
         CBZ.cityCrime = null;
-        CBZ.cityShootProp(
-          { x: t.x - Math.cos(a) * L, y: gy + 0.9, z: t.z - Math.sin(a) * L },
-          { x: t.x + Math.cos(a) * L, y: gy + 0.9, z: t.z + Math.sin(a) * L });
+        CBZ.cityShootProp({ x: t.x - Math.cos(a) * L, y: gy + 0.9, z: t.z - Math.sin(a) * L }, { x: t.x + Math.cos(a) * L, y: gy + 0.9, z: t.z + Math.sin(a) * L });
       } catch (e) {}
       finally { CBZ.cityCrime = crime; }
     }
-
-    // --- the city REACTS. One event post buys crowd flee, police attention
-    //     and the news/worldstate reaction that every other atrocity gets.
     t.tEvent += dt;
     if (t.tEvent > 1.0) {
       t.tEvent = 0;
-      try {
-        if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "explosion", pos: { x: t.x, z: t.z }, radius: t.outer, intensity: 1.4 + t.ef * 0.3 });
-      } catch (e) {}
+      try { if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "explosion", pos: { x: t.x, z: t.z }, radius: t.outer, intensity: 1.4 + t.ef * 0.3 }); } catch (e) {}
     }
   }
 
   /* ============================================================
-     TICK — order 34.35.
-
-     WHY 34.35: it must run BEFORE systems/impactbus.js (34.4) so a `kinetic`
-     detonation from a thrown car and a structural bite dealt this frame are
-     both processed by the bus (34.4) and the ledger (34.45) in the SAME frame
-     rather than one frame late, and it must run AFTER the ped brains (34) so
-     we drag people after they have chosen where to walk, not before. It is
-     also before city/vehicles.js (37), which is what makes the player-car
-     shove read as the controller fighting the wind. 34.35 was free.
-
-     Costs one length check when nothing is spinning.
-     ============================================================ */
-  /* ============================================================
-     THE WEATHER DIRECTOR — how a tornado actually reaches a player.
-
-     Without this the whole file is unreachable: `T.spawn` existed, and the
-     ONLY caller in the game was survival mode's disaster roster. A player in
-     city mode — which is the mode the owner asked for tornadoes hitting
-     buildings in — could never see one however long they played. A capability
-     nothing in the world triggers is a stat fiction, which CLAUDE.md bans by
-     name.
-
-     So a tornado forms the way a real one does: out of a severe storm.
-     `systems/weather.js` already runs an intensity state machine that builds
-     to `0.7 + rand*0.3` for a heavy storm and fades again over minutes — we
-     just read it. No second weather model, no timer of our own.
-
-     DETERMINISM. Which day a tornado forms, and how strong, is world state
-     that two clients on one seed must agree on, so the roll is a position-free
-     `CBZ.hash01` over the in-game DAY NUMBER — not `Math.random`, and not a
-     draw on a shared stream (order-fragile). One roll per day: the same day
-     always answers the same way, however many times we ask it.
-
-     Flip `?cfg_TORNADO_WEATHER=0` and storms stay storms.
+     THE WEATHER DIRECTOR — a city tornado forms out of a severe storm
+     (systems/weather.js's intensity), one hashed roll per in-game day.
      ============================================================ */
   if (CBZ.CONFIG.TORNADO_WEATHER == null) CBZ.CONFIG.TORNADO_WEATHER = true;
-  const STORM_MIN = 0.82;        // intensity a storm must reach to be tornadic
-  const DAY_CHANCE = 0.22;       // of the days that DO storm this hard
+  const STORM_MIN = 0.82, DAY_CHANCE = 0.22;
   let lastDay = -1;
-
   function director() {
     if (!CBZ.CONFIG.TORNADO_CITY || !CBZ.CONFIG.TORNADO_WEATHER) return;
     if (live.length) return;
@@ -1954,133 +2258,154 @@
     const w = CBZ.weather;
     if (!w || !(w.intensity >= STORM_MIN)) return;
     const day = CBZ.dayCount ? (CBZ.dayCount() | 0) : 0;
-    if (day === lastDay) return;              // one attempt per in-game day
+    if (day === lastDay) return;
     lastDay = day;
     if (!CBZ.hash01) return;
     if (CBZ.hash01(day, 0, 0x7075a) >= DAY_CHANCE) return;
-    // Strength: the storm BIASES the roll, the day's second hash DECIDES.
-    // A marginal supercell can still (rarely) drop a violent tornado and a
-    // full-blown one can still only manage a rope — a ramp gave every storm
-    // of a given strength the identical twister. EF5 stays out of reach:
-    // the weather never, unprompted, sweeps the map clean.
     const bias = (w.intensity - STORM_MIN) / (1 - STORM_MIN);
     const roll = CBZ.hash01(day, 1, 0x7075b);
     const mag = Math.max(0.6, Math.min(4.6, 0.8 + bias * 2.2 + (roll - 0.5) * 2.4));
-    try { T.spawn({ mag: mag, by: null, byPlayer: false }); } catch (e) {}
+    try { T.spawn({ mag: mag, by: null }); } catch (e) {}
   }
 
-  if (CBZ.onUpdate) CBZ.onUpdate(34.35, function (dt) {
+  /* ============================================================
+     TICK — order 34.35 (after the ped brains at 34, before the impact bus
+     at 34.4 and the ledger at 34.45, before vehicles.js at 37).
+     ============================================================ */
+  function tick(dt) {
     if (!CBZ.CONFIG.TORNADO_CITY) { if (live.length) T.clear(); return; }
     director();
-    if (!live.length) return;
-    const d = dt > 0.25 ? 0.25 : dt;                  // spike-cap: a stalled
-                                                      // frame must not teleport
-                                                      // the funnel across a block
+    if (!live.length && !flyers.length && !hinges.length && !airborneNow && !(hail && hail.hi)) return;
+    const t0 = performance.now();
+    const d = dt > 0.25 ? 0.25 : dt;
     for (let i = live.length - 1; i >= 0; i--) {
       const t = live[i];
       t.age += d;
       if (t.age >= t.life) { retire(t, false); continue; }
+      _pt0 = performance.now();
+      lifecycle(t);
       move(t, d);
-      animateFunnel(t, d);
-      worldFx(t, d);
-      pathTrail(t, d);                                  // V2: scars + deposited wreckage
-      hitArena(t, d);                                   // V2: survival buildings + cars
-      hitBuildings(t, d);
-      scanCars(t, d);
-      stepLifted(t, d);
-      hitPeople(t, d);
+      animateFunnel(t, d); lap("funnel");
+      worldFx(t, d); lap("fx");
+      pathTrail(t, d); lap("path");
+      windDamage(t, d); lap("damage");
+      hitCityLots(t, d);
+      scanCityCars(t, d); lap("city");
+      hitPeople(t, d); lap("people");
       lastPath = { x0: t.x0, z0: t.z0, x1: t.x, z1: t.z, ef: t.ef };
-      // the path seam, at the structural cadence rather than per frame
       if (T.onPath) {
         t.tPath = (t.tPath || 0) + d;
         if (t.tPath >= 0.2) { t.tPath = 0; fireHook(T.onPath, snapshot(t)); }
       }
     }
-  });
+    _pt0 = performance.now();
+    stepFlyers(d); lap("flyers");
+    stepHinges(d);
+    stepDebris(d); lap("debris");
+    stepHail(d); lap("hail");
+    const ms = performance.now() - t0;
+    perf.frames++; perf.ms += ms; perf.last = ms;
+    if (ms > perf.max) perf.max = ms;
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(34.35, tick);
 
-  // A fresh run must not inherit a funnel. cityGlassReset is the existing
-  // run-reset chokepoint city/demolition.js and city/structural.js both hang
-  // off; wrap it the same lazy, marker-copying way (CLAUDE.md's wrapper rule)
-  // so every reset fires and none clobbers the others.
+  /* ============================================================
+     RESET — T.restoreWorld() puts back everything the journal recorded,
+     clears the debris, the hail and the scar. The island's run reset calls
+     it; the city's reset chokepoint (cityGlassReset) clears the vortex.
+     ============================================================ */
+  T.restoreWorld = function () {
+    T.clear();
+    for (let i = flyers.length - 1; i >= 0; i--) { const f = flyers[i]; if (f.obj) f.obj.userData._twFly = null; }
+    flyers.length = 0;
+    hinges.length = 0;
+    for (let i = journal.length - 1; i >= 0; i--) {
+      const J = journal[i];
+      try {
+        if (J.k === 0) {
+          const o = J.o;
+          if (J.parent && o.parent !== J.parent) { if (o.parent) o.parent.remove(o); J.parent.add(o); }
+          o.position.copy(J.p); o.quaternion.copy(J.q); o.scale.copy(J.s); o.visible = J.v;
+          o.userData._twJ = false; o.userData._twFly = null;
+        } else if (J.k === 1) { if (CBZ.colliders && CBZ.colliders.indexOf(J.c) < 0) CBZ.colliders.push(J.c); }
+        else if (J.k === 2) { const k = CBZ.colliders ? CBZ.colliders.indexOf(J.c) : -1; if (k >= 0) CBZ.colliders.splice(k, 1); }
+        else if (J.k === 3) { if (CBZ.platforms && CBZ.platforms.indexOf(J.p) < 0) CBZ.platforms.push(J.p); }
+      } catch (e) {}
+    }
+    journal.length = 0;
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    touched.forEach(function (r) {
+      r._tw = null; r._twSwept = false; r._twFell = false; r._twLift = false; r._twGlass = false;
+      r._twOwned = false; r._twWreck = false; r._twCol = null; r._twMoved = false; r._twRolled = false; r._twThrown = false;
+      if (r.flung === true && r.group && r.collider) r.flung = false;
+    });
+    touched.clear();
+    clearDebris(); clearHail(); clearScar();
+    T.siren(false);
+    for (const k in stats) stats[k] = 0;
+    perf.frames = perf.ms = perf.max = perf.last = 0; perf.sec = {};
+    lastPath = null;
+  };
   if (CBZ.onUpdate) CBZ.onUpdate(0.03, function () {
     const orig = CBZ.cityGlassReset;
     if (typeof orig !== "function" || orig._tornadoResetWrapped) return;
-    const wrapped = function () { try { T.clear(); clearScars(); } catch (e) {} return orig.apply(this, arguments); };
+    const wrapped = function () { try { T.clear(); clearScar(); clearDebris(); clearHail(); } catch (e) {} return orig.apply(this, arguments); };
     for (const k in orig) if (k.endsWith("Wrapped")) wrapped[k] = orig[k];
     wrapped._tornadoResetWrapped = true;
     CBZ.cityGlassReset = wrapped;
   });
 
-  /* ============================================================
-     CBZ.tornadoAudit() — THE RATCHET (BLOCK LAW rule 5).
-
-     Counts VORTEX IMPLEMENTATIONS in the game that are not this one. Each is
-     a place where "what does a tornado do to the world" is answered
-     separately and can therefore disagree.
-
-       1. systems/disasters.js  survival funnel   -> MIGRATED in this change.
-          It now calls CBZ.tornado.spawn/stop and publishes the marker below;
-          if that marker ever disappears, this counts again.
-
-     Baseline 1, currently 0. Pin it in tools/math-gate.mjs's PASS block. It
-     may only ever DECREASE — copying CBZ.treeAudit()'s contract exactly.
-     ============================================================ */
+  /* CBZ.tornadoAudit() — THE RATCHET: vortex implementations that are not
+     this one. Baseline 1 (the old survival funnel), now 0; may only fall. */
   CBZ.tornadoAudit = function () {
     let n = 0;
     if (CBZ.disasters && !CBZ.disasters._tornadoDelegated) n++;
     return n;
   };
 
-  /* ============================================================
-     DEV/QA — read live state from a CDP probe with no rendering, the way
-     CLAUDE.md's closed loop wants it (math over live state, never frames).
-     ============================================================ */
-  /* V2 RUN AUDIT — what the tornado actually DID this page load, measured off
-     live counters at the moment of the call. The before/after preset's whole
-     measurements table reads from here; a build with TORNADO_V2 off reports
-     zeros because the incrementing code paths are the gated ones. */
+  /* What the tornado DID (counters of things that happened) + perf. */
   T.audit = function () {
     const a = live[0] || null;
-    return {
-      v2: v2(),
-      live: live.length,
-      ef: a ? a.ef : -1,
-      mag: a ? a.mag : null,
-      x: a ? +a.x.toFixed(1) : null,
-      z: a ? +a.z.toFixed(1) : null,
-      age: a ? +a.age.toFixed(2) : 0,
-      buildingHits: stats.buildingHits,
-      buildingCollapses: stats.buildingCollapses,
-      carsFlung: stats.carsFlung,
-      scarMarks: stats.scarMarks,
-      debrisKept: stats.debrisKept,
-      shelterSaves: stats.shelterSaves,
-      pathMeters: Math.round(stats.pathMeters),
+    const dc = debrisCounts();
+    return Object.assign({
+      live: live.length, ef: a ? a.ef : -1, mag: a ? a.mag : null,
+      x: a ? +a.x.toFixed(1) : null, z: a ? +a.z.toFixed(1) : null, age: a ? +a.age.toFixed(2) : 0,
+      debrisAirborne: dc.airborne, debrisOnGround: dc.onGround, debrisNow: dc.total,
+      flyersNow: flyers.length,
+      carsFlung: stats.carsThrown, scarMarks: stats.scarSections, debrisKept: dc.onGround,
       path: lastPath ? { x0: +lastPath.x0.toFixed(1), z0: +lastPath.z0.toFixed(1), x1: +lastPath.x1.toFixed(1), z1: +lastPath.z1.toFixed(1), ef: lastPath.ef } : null,
-    };
+    }, stats, { pathMeters: Math.round(stats.pathMeters), maxDebrisHeight: +stats.maxDebrisHeight.toFixed(1), maxCarHeight: +stats.maxCarHeight.toFixed(1), maxThrow: +stats.maxThrow.toFixed(1) });
   };
-
+  T.perf = function () {
+    const worst = {};
+    for (const k in perf.sec) worst[k] = +perf.sec[k].toFixed(2);
+    return { frames: perf.frames, avgMs: perf.frames ? +(perf.ms / perf.frames).toFixed(3) : 0, maxMs: +perf.max.toFixed(3), lastMs: +perf.last.toFixed(3), worstByStage: worst };
+  };
   T.debug = function () {
     return {
-      live: live.length,
-      cap: Math.max(1, Math.min(2, CBZ.CONFIG.TORNADO_MAX | 0)),
-      liftedCap: liftedCap(),
+      live: live.length, cap: Math.max(1, Math.min(2, CBZ.CONFIG.TORNADO_MAX | 0)),
       vortices: live.map(function (t) {
-        return {
-          id: t.id, ef: t.ef, mag: t.mag, wedge: +(t.wedge || 0).toFixed(2),
-          x: +t.x.toFixed(1), z: +t.z.toFixed(1),
-          R: +t.R.toFixed(1), vmax: +t.vmax.toFixed(1), dps: +t.dps.toFixed(2),
-          age: +t.age.toFixed(1), life: t.life,
-          lifted: t.lifted.length, roofs: t.roofs.size,
-        };
+        return { id: t.id, ef: t.ef, mag: t.mag, wedge: +t.wedge.toFixed(2), x: +t.x.toFixed(1), z: +t.z.toFixed(1),
+          R: +t.R.toFixed(1), vmax: +t.vmax.toFixed(1), k: +t.k.toFixed(2), s0: +t.s0.toFixed(2), rope: +t.rope.toFixed(2),
+          age: +t.age.toFixed(1), life: +t.life.toFixed(1), suction: t.sv ? t.sv.length : 0 };
       }),
-      audit: CBZ.tornadoAudit(),
-      flags: {
-        city: !!CBZ.CONFIG.TORNADO_CITY,
-        structural: !!CBZ.CONFIG.TORNADO_STRUCTURAL,
-        lift: !!CBZ.CONFIG.TORNADO_LIFT,
-        v2: v2(),
-      },
+      flyers: flyers.length, hinges: hinges.length, journal: journal.length,
+      audit: CBZ.tornadoAudit(), perf: T.perf(),
+      flags: { city: !!CBZ.CONFIG.TORNADO_CITY, structural: !!CBZ.CONFIG.TORNADO_STRUCTURAL, lift: !!CBZ.CONFIG.TORNADO_LIFT },
     };
   };
+  /* How this file reads a building's parts (for the island's author and the
+     checks): roof meshes, separate wall panels, the rest, the slab, whether
+     its walls fall panel by panel or the structure goes to the ledger. */
+  T.partsOf = function (b) {
+    if (!b) return null;
+    const had = b._tw, st = bState(b);
+    const r = { roof: st.parts.roof.length, walls: st.parts.walls.length, other: st.parts.other.length, slab: !!st.parts.slab,
+      separable: st.separable, resistance: st.res, published: !!b.parts };
+    if (!had) { b._tw = null; touched.delete(b); }
+    return r;
+  };
+  // the EF/damage tables, for tools and the HUD
+  T.EF = EF; T.DOD = DOD; T.TREE = TREE;
 })();

@@ -1345,6 +1345,17 @@
        effect, not a world event; slowing the world must not lengthen it. */
     const sdt = Math.max(0.0005, Math.min(0.1, CBZ.wallDt != null ? CBZ.wallDt : fdt));
     _camFrame++;                 // senseRoom answers once per frame (see it)
+    // THE DEAD PLAYER'S CAMERA on the disaster island (systems/spectator.js):
+    // death orbit, pull-back, then free flight. It writes the lens after this
+    // at onAlways(50.5); here we only keep this rig's state quiet so the
+    // hand-back on the next round is not a jump, and let the shake decay
+    // (spectator.js reads it through CBZ.camShakeLevel).
+    if (CBZ.spectator && CBZ.spectator.owns()) {
+      introT = 0; prev.copy(player.pos);
+      shakeAmt *= Math.pow(0.0006, sdt); if (shakeAmt < 0.01) shakeAmt = 0;
+      camV.x.v = camV.y.v = camV.z.v = 0; lookV.x.v = lookV.y.v = lookV.z.v = 0;
+      return;
+    }
     // ---- CAMERA POLISH per-frame state (cheap, runs in every branch) ----
     if (flT > 0 && !flHold) flT = Math.max(0, flT - fdt);          // free-look decay after the glance
     lookBackK += ((lookBackHeld ? 1 : 0) - lookBackK) * (1 - Math.exp(-11 * fdt));
@@ -1480,7 +1491,7 @@
     // CITY DRIVING: a high GTA-style chase — well BEHIND and ABOVE the car,
     // looking down the road ahead — so you read the whole car, not the hood.
     // (Yaw is auto-steered behind the car by city/vehicles.js.)
-    if (CBZ.game.mode === "city" && player.driving && !player.dead) {
+    if ((CBZ.vehicleModeOn ? CBZ.vehicleModeOn() : CBZ.game.mode === "city") && player.driving && !player.dead) {
       introT = 0; prev.copy(player.pos);
       // THE DRIVER'S SEAT (CAR_FP_VIEW, city/view.js). A car's first-person
       // view is a POSITION INSIDE THIS BRANCH, not a competing writer: view.js
@@ -1676,7 +1687,8 @@
       }
     }
 
-    // SPECTATE death-cam. Two beats, same grammar as the city's WASTED replay
+    // SHARK SIM's death-cam (the disaster game's dead player is flown by
+    // systems/spectator.js, which returned above). Two beats, same grammar as the city's WASTED replay
     // (owner: the city "goes to third person and shows me my death" — the
     // disaster island now does too). BEAT ONE (surv.deathCam, armed by
     // modes/survival.js on death): the camera leaves the shoulder rig and does

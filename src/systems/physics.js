@@ -441,11 +441,14 @@
   function rebuildCarGrid() {
     carStale = false;
     carBuckets.clear();
-    const cars = (!CBZ.game || CBZ.game.mode === "city") ? CBZ.cityCars : null;
+    // every vehicle world (config.js CBZ.VEHICLE_MODES), each seeing only its own records
+    const cars = (!CBZ.game || (CBZ.vehicleModeOn ? CBZ.vehicleModeOn() : CBZ.game.mode === "city")) ? CBZ.cityCars : null;
     if (!cars) return;
+    const vw = CBZ.vehicleInWorld, wm = CBZ.game && CBZ.game.mode;
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i];
       if (!car || !car.pos || !carDimsOf(car)) continue;
+      if (vw && wm && !vw(car, wm)) continue;
       const g = car.group;
       if (g && (!g.parent || g.visible === false)) continue;     // despawned / parked out of the scene
       if (car._roadBody == null) car._roadBody = isTraversalRoadCar(car);
@@ -522,7 +525,7 @@
     let gx = pos.x, gz = pos.z;            // where `cols` was gathered
     let cols = gatherColliders(gx, gz, reach);
     // the cars round an UPRIGHT body (see CARS ARE SOLID TO PEOPLE above)
-    const carsOn = cityOn && radius <= CAR_BODY_R && !(headY - feetY < 1.0) && !!CBZ.cityCars;
+    const carsOn = (cityOn || !!(CBZ.vehicleModeOn && CBZ.vehicleModeOn())) && radius <= CAR_BODY_R && !(headY - feetY < 1.0) && !!CBZ.cityCars;
     let carN = carsOn ? carsNear(pos, gx, gz, reach) : 0;
     let nearN = -1;                         // -1: scan the whole gathered list
     let moved = false;

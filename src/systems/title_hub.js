@@ -121,7 +121,10 @@
     // pause skips these for the same reason
     if (g.busted || (CBZ.cityCam && CBZ.cityCam.death)) return false;
     if (g.mode === "city" && CBZ.player && CBZ.player.dead) return false;
-    if (CBZ.surv && CBZ.surv.spectating) return false;
+    // Shark Sim's death replay owns the screen; the disaster game's ghost
+    // camera (systems/spectator.js) can be watched for as long as you like,
+    // so it has to be pausable: that card is the way to the main menu
+    if (CBZ.surv && CBZ.surv.spectating && g.mode !== "survival") return false;
     CBZ.setState("paused");
     return true;
   }

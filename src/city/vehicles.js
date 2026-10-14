@@ -2361,13 +2361,23 @@
     if (c._deferred) (c._afterBuild || (c._afterBuild = [])).push(fn);
     else fn(c);
   };
+  /* THE ROOT A VEHICLE IS BUILT UNDER: the live vehicle world's. Gang City
+     builds under its arena root; the disaster island (CBZ.VEHICLE_MODES,
+     config.js) under the island's, so a car parked there is hidden and torn
+     down with the island, never with a city that may not exist. */
+  function vehicleRoot() {
+    const A = (g.mode !== "city" && CBZ.surv && CBZ.surv.arena && CBZ.islandModeOn && CBZ.islandModeOn(g.mode))
+      ? CBZ.surv.arena : (CBZ.city && CBZ.city.arena);
+    return (A && A.root) || null;
+  }
+  CBZ.vehicleRoot = vehicleRoot;
   function makeCar(x, z, heading, vertical, model, aggr) {
     const S = CBZ.slice;
     if (S && S.stream && CBZ.sliceKeeps && CBZ.sliceAt && !CBZ.sliceKeeps(x, z, 12)) {
       const grp = new THREE.Group();
       grp.position.set(x, 0, z); grp.rotation.y = heading;
       grp.visible = false;
-      CBZ.city.arena.root.add(grp);
+      vehicleRoot().add(grp);
       const prof0 = vehicleProfile(model, null);
       const c = {
         group: grp, pos: grp.position, heading, vertical, model: model || null,
@@ -2387,7 +2397,7 @@
     }
     const grp = buildCar(model);
     grp.position.set(x, 0, z); grp.rotation.y = heading;
-    CBZ.city.arena.root.add(grp);
+    vehicleRoot().add(grp);
     const prof = vehicleProfile(model, grp.userData && grp.userData.bodyKind);
     const c = {
       group: grp, pos: grp.position, heading, vertical, model: model || null,
@@ -2405,6 +2415,7 @@
     if (model && model.rarity >= 0.975 && rng() < 0.10) c.mods = { booster: true, factoryBooster: true };
     tagTailMeshes(c);                     // one traverse per car, at build time
     addOccupants(c);                      // visible driver (+ sometimes a passenger) through the real glass
+    if (g.mode !== "city" && CBZ.vehicleModeOn && CBZ.vehicleModeOn()) c._world = g.mode;
     CBZ.cityCars.push(c);
     return c;
   }
@@ -3103,7 +3114,7 @@
   // Stale fixtures from a previous arena build are purged on the next spawn.
   if (CBZ.CONFIG && CBZ.CONFIG.CARS_ALL_DRIVABLE == null) CBZ.CONFIG.CARS_ALL_DRIVABLE = true;
   CBZ.cityAddParkedCar = function (x, z, heading, opts) {
-    if (!CBZ.city || !CBZ.city.arena) return null;
+    if (!vehicleRoot()) return null;
     if (CBZ.CONFIG && CBZ.CONFIG.CARS_ALL_DRIVABLE === false) return null;
     opts = opts || {};
     // A parked car IN THE SEA is never anything but a bug, whoever placed it.
@@ -3117,7 +3128,7 @@
     if (!opts.force && CBZ.cityWaterAt) {
       try { if (CBZ.cityWaterAt(x, z)) return null; } catch (e) {}
     }
-    const root = CBZ.city.arena.root;
+    const root = vehicleRoot();
     // purge fixtures whose group belongs to a torn-down arena root
     for (let i = CBZ.cityCars.length - 1; i >= 0; i--) {
       const old = CBZ.cityCars[i];
@@ -4365,9 +4376,9 @@
         }
       }
       // tick damage to whoever's inside while it burns
-      if (car.player && CBZ.cityHurtPlayer) {
+      if (car.player && canHurtDriver()) {
         car._burnTickCD = (car._burnTickCD || 0) - dt;
-        if (car._burnTickCD <= 0) { car._burnTickCD = 0.5; CBZ.cityHurtPlayer(6, car.pos.x, car.pos.z, "burned in the car", false, null, true); if (CBZ.player.dead) return; }
+        if (car._burnTickCD <= 0) { car._burnTickCD = 0.5; hurtDriver(6, car.pos.x, car.pos.z, "burned in the car", false, null, true); if (CBZ.player.dead) return; }
       }
       // cook-off: weapon fires blow when the burn finishes the engine or the
       // fuse runs out; a crash fire only when its (long) fuse expires — and a
@@ -4567,6 +4578,18 @@
     car.wreckT = Math.max(car.wreckT || 0, 1.0);
   }
 
+  /* THE DRIVER IS HURT BY THE MODE HE IS IN. Gang City's injury (death.js:
+     WASTED, the hospital) is the city's; on the disaster island a crash is
+     the island's damage path (systems/modecaps.js hurtWorldPlayer -> surv.hurt
+     -> CBZ.disasterHurt), so a wreck there eliminates you like anything else
+     on the island instead of running a city death in a world with no city. */
+  function canHurtDriver() { return g.mode === "city" ? !!CBZ.cityHurtPlayer : !!CBZ.hurtWorldPlayer; }
+  function hurtDriver(dmg, x, z, cause, a4, a5, a6) {
+    if (g.mode !== "city" && CBZ.hurtWorldPlayer) return CBZ.hurtWorldPlayer(dmg, x, z, cause);
+    if (CBZ.cityHurtPlayer) return CBZ.cityHurtPlayer(dmg, x, z, cause, a4, a5, a6);
+    return false;
+  }
+
   // ---- enter / exit ----
   CBZ.cityEnterVehicle = function (car, opts) {
     wakeCar(car);
@@ -4635,7 +4658,7 @@
     const seatHint = (CBZ.citySeatShift && !CBZ.touchMode &&
       (!CBZ.CONFIG || CBZ.CONFIG.PASSENGER_SEAT_V1 !== false)) ? "  [G] passenger" : "";
     // a race car needs no card: the start lights are the message
-    if (!car._raceCar) CBZ.city && CBZ.city.note(helmHint
+    if (!car._raceCar && g.mode === "city") CBZ.city && CBZ.city.note(helmHint
       ? "At the helm" + worth + "   [SPACE] get up  [V] wheel view"
       : "Driving" + worth + "   [F] out  [C] car style" + seatHint, 1.8);
     return true;
@@ -5560,7 +5583,7 @@
 
   // ---- player driving (order 11) ----
   CBZ.onUpdate(11, function (dt) {
-    if (g.mode !== "city") return;
+    if (!CBZ.vehicleModeOn(g.mode)) return;
     const P = CBZ.player;
     if (!P.driving || !P._vehicle || P.dead) return;
     const car = P._vehicle;
@@ -5904,10 +5927,10 @@
           }
           if (catastrophic && CBZ.cityBreach) CBZ.cityBreach(ix, iz, 1.6);
           // hard crashes hurt; only a flat-out square slam can kill
-          if (hard && CBZ.cityHurtPlayer) {
+          if (hard && canHurtDriver()) {
             const dmg = catastrophic ? 90 + (vIn - CRASH.wallCatastrophic) * 12
                                      : 16 + (vIn - CRASH.wallHard) * 8;
-            CBZ.cityHurtPlayer(Math.round(dmg), car.pos.x, car.pos.z, "crashed the car", false, null, !catastrophic);
+            hurtDriver(Math.round(dmg), car.pos.x, car.pos.z, "crashed the car", false, null, !catastrophic);
             if (P.dead) return;                  // death.js ejects + ragdolls the driver
           }
         }
@@ -6192,13 +6215,13 @@
     if ((a.player || b.player)) { if (a.player) a._burnByPlayer = true; if (b.player) b._burnByPlayer = true; }
     // Occupant injury follows delta-v, the quantity people actually feel in a
     // collision. Normal bumps do nothing; a hard side/T-bone hit hurts badly.
-    if (hard && CBZ.cityHurtPlayer) {
+    if (hard && canHurtDriver()) {
       const playerCar = a.player ? a : (b.player ? b : null);
       const deltaV = a.player ? imp.deltaA : imp.deltaB;
       if (playerCar && deltaV > 4.5) {
         const protection = Math.max(0.68, 1 - (playerCar.armor || 0) * 0.75);
         const dmg = Math.min(catastrophic ? 165 : 88, Math.round((deltaV - 4.5) * (catastrophic ? 7.2 : 4.5) * protection));
-        if (dmg > 0) CBZ.cityHurtPlayer(dmg, playerCar.pos.x, playerCar.pos.z, "car crash", false, null, !catastrophic);
+        if (dmg > 0) hurtDriver(dmg, playerCar.pos.x, playerCar.pos.z, "car crash", false, null, !catastrophic);
       }
     }
     // A small contact-position kick prevents the meshes from immediately
@@ -6246,7 +6269,7 @@
   // partner: there is nothing left of it to wreck, and running carCrash on a
   // dead record would re-enter the damage ladder it has already finished.
   // (race cars touch each other through the racing model's own contact, city/speedway_race.js)
-  function solidCar(c) { return c && (!c.dead || c._husk) && !c._raceCar; }
+  function solidCar(c) { return c && (!c.dead || c._husk) && !c._raceCar && CBZ.vehicleInWorld(c, g.mode); }
   function resolveCars(dt) {
     const cars = CBZ.cityCars, n = cars.length;
     carGrid.clear();
@@ -6336,7 +6359,7 @@
     }
   }
   // run after the player (order 11) and the AI traffic (order 37) have moved
-  CBZ.onUpdate(37.6, function (dt) { if (g.mode === "city") resolveCars(dt); });
+  CBZ.onUpdate(37.6, function (dt) { if (CBZ.vehicleModeOn(g.mode)) resolveCars(dt); });
 
   /* A CAR AT WALKING PACE IS STILL 1.4 TONNES (systems/humancontact.js,
      CBZ.bodyImpact.car: the same impulse law every body-to-body contact
@@ -6654,7 +6677,7 @@
   }
 
   function chopCheck(car, vmag, dt) {
-    const lot = CBZ.city.arena.chopShop; if (!lot || !lot.building.chopZone) return;
+    const lot = CBZ.city && CBZ.city.arena && CBZ.city.arena.chopShop; if (!lot || !lot.building.chopZone) return;
     const cz = lot.building.chopZone;
     const inZone = Math.hypot(car.pos.x - cz.x, car.pos.z - cz.z) < cz.r;
     if (inZone && vmag < 1.5 && (car.stolen || car.owned)) {

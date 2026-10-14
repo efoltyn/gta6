@@ -5,8 +5,9 @@
    height, avenues and cross-streets stacked through each other at every
    crossing, with a yellow dash every 6 m and nothing else: no kerb, no
    sidewalk, no junction, no signs, and black at night. This file is the
-   whole street kit that replaced them. world/disaster_arena.js scans the
-   grid lines (layRoadLine) and calls two things here:
+   whole street kit that replaced them. world/island_plan.js lays the
+   streets (where each line runs) and world/disaster_arena.js calls two
+   things here:
 
      plan(o)   pure topology: the scanned runs become PIECES (road between two
                junction mouths, or a junction and a dead end) and JUNCTIONS
@@ -85,10 +86,16 @@
   const clamp01 = function (v) { return v < 0 ? 0 : v > 1 ? 1 : v; };
 
   /* ======================================================================
-     PLAN — runs → pieces + junctions (pure; node-testable)
-     o = { cx, cz, GRID, runs: { ave: [runs x5], cross: [runs x5] } }
-     A run is [a, b] in metres along its line, relative to cx (cross-streets)
-     or cz (avenues). Line index m = 0..4 sits at (m - 2) * GRID.
+     PLAN — street lines → pieces + junctions (pure; node-testable)
+     o = { lines: { ave: [{ at, runs }], cross: [{ at, runs }] } }
+       ave    avenues: run along z at x = at
+       cross  cross-streets: run along x at z = at
+       runs   [[a, b], ...] in WORLD metres along the line (z for an avenue,
+              x for a cross-street)
+     Lines go anywhere (no fixed pitch): the island plan (world/island_plan.js)
+     lays a town, not a lattice. A run that ends at another line within the
+     approach zone meets it as a T or a bend; one that reaches past it as a
+     4-way. Every piece stops exactly at its junction squares.
      ====================================================================== */
   function subtract(runs, lo, hi) {
     const out = [];
@@ -110,19 +117,21 @@
     return -1;
   }
   function plan(o) {
-    const GR = o.GRID, cx = o.cx, cz = o.cz;
+    const src = o.lines || { ave: [], cross: [] };
+    const pos = { ave: src.ave.map(function (l) { return l.at; }), cross: src.cross.map(function (l) { return l.at; }) };
     const lines = {
-      ave: [0, 1, 2, 3, 4].map(function (m) { return ((o.runs.ave && o.runs.ave[m]) || []).map(function (r) { return [r[0], r[1]]; }); }),
-      cross: [0, 1, 2, 3, 4].map(function (m) { return ((o.runs.cross && o.runs.cross[m]) || []).map(function (r) { return [r[0], r[1]]; }); }),
+      ave: src.ave.map(function (l) { return (l.runs || []).map(function (r) { return [Math.min(r[0], r[1]), Math.max(r[0], r[1])]; }); }),
+      cross: src.cross.map(function (l) { return (l.runs || []).map(function (r) { return [Math.min(r[0], r[1]), Math.max(r[0], r[1])]; }); }),
     };
+    const NA = lines.ave.length, NC = lines.cross.length;
     let junctions = [];
     const jKey = {};
-    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
-      const Lz = (j - 2) * GR, Lx = (i - 2) * GR;
+    for (let i = 0; i < NA; i++) for (let j = 0; j < NC; j++) {
+      const Lz = pos.cross[j], Lx = pos.ave[i];
       const N = legRun(lines.ave[i], Lz, 1) >= 0, S = legRun(lines.ave[i], Lz, -1) >= 0;
       const E = legRun(lines.cross[j], Lx, 1) >= 0, W = legRun(lines.cross[j], Lx, -1) >= 0;
       if ((N || S) && (E || W)) {
-        const jn = { i: i, j: j, x: cx + Lx, z: cz + Lz, N: N, S: S, E: E, W: W, n: 0 };
+        const jn = { i: i, j: j, x: Lx, z: Lz, N: N, S: S, E: E, W: W, n: 0 };
         junctions.push(jn); jKey[i + "," + j] = jn;
       }
     }
@@ -134,8 +143,8 @@
       lines[fam][m] = runs;
     }
     for (const jn of junctions) {
-      cutAt("ave", jn.i, (jn.j - 2) * GR, jn.N, jn.S);
-      cutAt("cross", jn.j, (jn.i - 2) * GR, jn.E, jn.W);
+      cutAt("ave", jn.i, pos.cross[jn.j], jn.N, jn.S);
+      cutAt("cross", jn.j, pos.ave[jn.i], jn.E, jn.W);
     }
     // near-misses: a run that ENDS inside another road's corridor where no
     // junction was formed backs off to the approach point, so no road ever
@@ -143,11 +152,11 @@
     for (let pass = 0; pass < 2; pass++) {
       for (const fam of ["ave", "cross"]) {
         const other = fam === "ave" ? "cross" : "ave";
-        for (let m = 0; m < 5; m++) {
-          const mine = (m - 2) * GR;
-          for (let n = 0; n < 5; n++) {
+        for (let m = 0; m < lines[fam].length; m++) {
+          const mine = pos[fam][m];
+          for (let n = 0; n < lines[other].length; n++) {
             if (jKey[fam === "ave" ? m + "," + n : n + "," + m]) continue;
-            const Lp = (n - 2) * GR;
+            const Lp = pos[other][n];
             const hits = lines[other][n].some(function (r) { return r[0] < mine + WALK + 0.5 && r[1] > mine - WALK - 0.5; });
             if (!hits) continue;
             const out = [];
@@ -164,7 +173,7 @@
         }
       }
     }
-    for (const fam of ["ave", "cross"]) for (let m = 0; m < 5; m++) {
+    for (const fam of ["ave", "cross"]) for (let m = 0; m < lines[fam].length; m++) {
       lines[fam][m] = lines[fam][m].filter(function (r) { return r[1] - r[0] >= 5.9; });
     }
     // legs, re-read from what survived
@@ -172,7 +181,7 @@
     const starts = function (runs, t) { return runs.some(function (r) { return Math.abs(r[0] - t) < EPS; }); };
     const ends = function (runs, t) { return runs.some(function (r) { return Math.abs(r[1] - t) < EPS; }); };
     junctions = junctions.filter(function (jn) {
-      const Lz = (jn.j - 2) * GR, Lx = (jn.i - 2) * GR;
+      const Lz = pos.cross[jn.j], Lx = pos.ave[jn.i];
       jn.N = starts(lines.ave[jn.i], Lz + HW); jn.S = ends(lines.ave[jn.i], Lz - HW);
       jn.E = starts(lines.cross[jn.j], Lx + HW); jn.W = ends(lines.cross[jn.j], Lx - HW);
       jn.n = (jn.N ? 1 : 0) + (jn.S ? 1 : 0) + (jn.E ? 1 : 0) + (jn.W ? 1 : 0);
@@ -181,18 +190,19 @@
       return ok;
     });
     const pieces = [];
-    for (const fam of ["ave", "cross"]) for (let m = 0; m < 5; m++) {
+    for (const fam of ["ave", "cross"]) for (let m = 0; m < lines[fam].length; m++) {
       const vertical = fam === "ave";
-      const fixed = (vertical ? cx : cz) + (m - 2) * GR;
+      const fixed = pos[fam][m];
+      const others = vertical ? pos.cross : pos.ave;
       for (const r of lines[fam][m]) {
         const p = {
           vertical: vertical, m: m, fixed: fixed, a: r[0], b: r[1],
-          ox: vertical ? fixed : cx, oz: vertical ? cz : fixed,
+          ox: vertical ? fixed : 0, oz: vertical ? 0 : fixed,
           Ax: vertical ? 0 : 1, Az: vertical ? 1 : 0, Cx: vertical ? 1 : 0, Cz: vertical ? 0 : 1,
           jA: null, jB: null,
         };
-        for (let n = 0; n < 5; n++) {
-          const L = (n - 2) * GR;
+        for (let n = 0; n < others.length; n++) {
+          const L = others[n];
           const jn = jKey[vertical ? m + "," + n : n + "," + m];
           if (!jn) continue;
           if (Math.abs(p.a - (L + HW)) < EPS) p.jA = jn;
@@ -758,6 +768,11 @@
      ====================================================================== */
   function build(o) {
     const THREE = o.THREE, P = o.plan, ground = o.ground;
+    // o.skip(x, z): true where something else draws the street (a bridge
+    // deck carries its own asphalt and walks, so a failed span takes them
+    // with it); the walk/road FIELD is unchanged there, only the drawing
+    const skip = typeof o.skip === "function" ? o.skip : null;
+    const manholes = [];
     const lo = o.quality != null && o.quality <= 1;
     const pads = o.pads || [];
     const Z = makeZones(P, o);
@@ -800,6 +815,7 @@
       const n = Math.max(1, Math.ceil((tb - ta) / 2));
       for (let k = 0; k < n; k++) {
         const t0 = ta + (tb - ta) * k / n, t1 = ta + (tb - ta) * (k + 1) / n;
+        if (skip && skip(px(p, (t0 + t1) / 2, 0), pz(p, (t0 + t1) / 2, 0))) continue;
         for (let c = 0; c < OFFS.length - 1; c++) {
           roadA.quad(vRoad(p, t0, OFFS[c], vOff), vRoad(p, t0, OFFS[c + 1], vOff), vRoad(p, t1, OFFS[c + 1], vOff), vRoad(p, t1, OFFS[c], vOff), 0, 1, 0);
         }
@@ -934,6 +950,7 @@
       const salt = 0x6b2 + (zn.kind === "side" ? 1 : 2);
       for (let ci = 0; ci < cuts.length; ci++) {
         const a = cuts[ci][0], b = cuts[ci][1];
+        if (skip) { const sm = W2((a + b) / 2, (C0 + C1) / 2); if (skip(sm[0], sm[1])) continue; }
         const ap = isApron(a, b);
         let cols = [C0, C1];
         if (ap) { const e = zn.edge, r = zn.edge + zn.edgeDir * RAMP; cols = [C0, C1, r].sort(function (p, q) { return p - q; }); void e; }
@@ -1033,6 +1050,7 @@
         cellUV(cell, DN, (u - 0.5) * 0.94, (v - 0.5) * 0.94, 1, 1, uvT);
         return V(x, surfY(x, z) + (lift || 0.006), z, uvT[0], uvT[1], col[0], col[1], col[2]);
       };
+      if (skip && skip(px(p, (t0 + t1) / 2, (o0 + o1) / 2), pz(p, (t0 + t1) / 2, (o0 + o1) / 2))) return;
       decA.quad(mk(t0, o0, 0, 0), mk(t0, o1, 1, 0), mk(t1, o1, 1, 1), mk(t1, o0, 0, 1), 0, 1, 0);
     }
     function line(p, t0, t1, off, w, col) {        // split into <= 3 m quads
@@ -1040,6 +1058,7 @@
       for (let k = 0; k < n; k++) decalQuad(p, t0 + (t1 - t0) * k / n, t0 + (t1 - t0) * (k + 1) / n, off - w / 2, off + w / 2, 0, col);
     }
     function spot(x, z, size, ang, cell, col, sx, sz) {   // rotated world-space square
+      if (skip && skip(x, z)) return;
       const ca = Math.cos(ang), sa = Math.sin(ang), hx = (sx || size) / 2, hz = (sz || size) / 2;
       const c = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(function (q) {
         const lx = q[0] * hx, lz = q[1] * hz, wx = x + lx * ca - lz * sa, wz = z + lx * sa + lz * ca;
@@ -1153,6 +1172,7 @@
         const h = wh(p.fixed, p.a, 0x3b1);
         const t = p.a + 7 + (len - 14) * h, off = (wh(p.fixed, p.a, 0x3b2) < 0.5 ? -1 : 1) * 1.75;
         spot(px(p, t, off), pz(p, t, off), 0.76, h * 6.28, 1, [0.95, 0.95, 0.95]);
+        if (!(skip && skip(px(p, t, off), pz(p, t, off)))) manholes.push({ x: px(p, t, off), z: pz(p, t, off), r: 0.38 });
         const nOil = Math.floor(len / 11);
         for (let k = 0; k < nOil; k++) {
           const tt = p.a + 6 + (len - 12) * wh(p.fixed + k, p.a, 0x3b3);
@@ -1180,6 +1200,7 @@
             side = -side; x = px(p, t, side * 4.25); z = pz(p, t, side * 4.25);
             if (inCut(x, z, 1.5) || furn.some(function (f) { return Math.hypot(f.x - x, f.z - z) < 2.5; })) continue;
           }
+          if (skip && skip(x, z)) continue;
           lights.push({ p: p, t: t, side: side, x: x, z: z });
         }
       }
@@ -1385,7 +1406,7 @@
       verts: { road: roadA.count(), junc: juncA.count(), walk: walkA.count(), paint: decA.count(), furniture: furA.count(), pools: poolA.count() },
       draws: Object.keys(meshes).length,
     };
-    return { surfaceHeightAt: surfaceHeightAt, walkAt: Z.walkAt, meshes: meshes, stats: stats, night: night };
+    return { surfaceHeightAt: surfaceHeightAt, walkAt: Z.walkAt, meshes: meshes, stats: stats, night: night, manholes: manholes, lights: lights };
   }
 
   CBZ.islandRoadKit = {

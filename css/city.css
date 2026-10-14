@@ -31,9 +31,7 @@ body.mode-city #minimap,
 body.mode-city #simHud,
 body.mode-city #weaponStrip,
 body.mode-city #survTop,
-body.mode-city #survStatus,
-body.mode-city #survBars,
-body.mode-city #disasterBanner { display: none !important; }
+body.mode-city #survBars { display: none !important; }
 /* NOT #hotbar: the prison's bar is the city's inventory too (2026-09-30,
    systems/inventory.js decides when it shows). */
 

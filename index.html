@@ -14,13 +14,14 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=desk1009c">
+<link rel="stylesheet" href="css/hud.css?v=spec1014">
+<link rel="stylesheet" href="css/survival_hud.css?v=spec1014">
 <link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=deck1011">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
-<link rel="stylesheet" href="css/city.css?v=pin1013">
+<link rel="stylesheet" href="css/city.css?v=spec1014">
 <link rel="stylesheet" href="css/campaign.css?v=neck1001b">
 <link rel="stylesheet" href="css/interact_touch.css?v=jailside1001">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
@@ -85,14 +86,12 @@ document.body.appendChild(b);}}catch(e){}})();
   <canvas id="minimap" class="panel" width="112" height="168"></canvas>
   <div id="simHud" class="panel"></div>
 
-  <!-- SURVIVAL mode HUD (shown only in disaster mode). #survTop moved up into
-       #topright beside the clock — see the comment there. -->
-  <div id="survStatus" class="panel"><span id="survStatusText"></span></div>
+  <!-- SURVIVAL mode bars (systems/survivalhud.js builds the rest of the
+       disaster HUD itself; css/survival_hud.css styles it). -->
   <div id="survBars">
     <div class="sbar"><span class="slab">HEALTH</span><div class="sbarbg"><div id="hpBar"></div></div></div>
     <div class="sbar"><span class="slab">STAMINA</span><div class="sbarbg"><div id="stamBar"></div></div></div>
   </div>
-  <div id="disasterBanner"></div>
 
   <div id="toast"></div>
   <div id="hitfx"></div>
@@ -443,7 +442,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=leave1014"></script>
+<script src="src/config.js?v=island240b"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=peak1014c"></script>
@@ -639,7 +638,7 @@ document.body.appendChild(b);}}catch(e){}})();
      through a shut door opens it if cleared (the city door kit, the prison
      door registry), is refused if not, and it shuts behind them. Asked by
      CBZ.moves.step and by systems/navgrid.js. -->
-<script src="src/systems/bodydoors.js?v=presint1001b"></script>
+<script src="src/systems/bodydoors.js?v=sink1014"></script>
 <script src="src/entities/poses.js?v=placard1013"></script>
 <!-- A SOLDIER (entities/soldier.js): rifle carries, cover, reload, the throw,
      hit reactions, wounds, the dive and the crawl, on the shared body. -->
@@ -715,7 +714,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=rounds1013m"></script>
+<script src="src/systems/audio.js?v=twister1014"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 <script src="src/systems/economy.js?v=jailv1001"></script>
 
@@ -894,8 +893,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=planes1009b"></script>
-<script src="src/systems/physics.js?v=rail1014"></script>
+<script src="src/systems/camera.js?v=island1014"></script>
+<script src="src/systems/physics.js?v=island1014"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -961,7 +960,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reactions.js?v=pf0930c"></script>
 <script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
-<script src="src/systems/weather.js?v=ffroute1014"></script>
+<script src="src/systems/weather.js?v=ashgrain1014"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/dashboard.js?v=cars1"></script>
 <script src="src/systems/combat.js?v=melee1011"></script>
@@ -1049,8 +1048,8 @@ document.body.appendChild(b);}}catch(e){}})();
      Additive: registers its own updaters (gated by game.mode) and builds
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
-<script src="src/systems/fx.js?v=sharkmode1"></script>
-<script src="src/systems/debris.js?v=collapse1014"></script>
+<script src="src/systems/fx.js?v=island1014"></script>
+<script src="src/systems/debris.js?v=collapse1014b"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -1059,24 +1058,37 @@ document.body.appendChild(b);}}catch(e){}})();
      old fireball fallback was deleted 2026-09-28). Needs only config.js +
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
-<script src="src/world/island_roads.js?v=roads1"></script>
-<script src="src/world/disaster_arena.js?v=nostep1013"></script>
-<script src="src/world/island_dressing.js?v=dress1"></script>
+<!-- THE DISASTER ISLAND: the plan (world/island_plan.js: terrain, harbour,
+     streets, lots, cars, boats as data, node-checkable by tools/island-check.mjs),
+     the street kit it lays with, the instanced draw of the island's trees and
+     parked cars (world/instance_proxy.js), the builder, and the dressing. -->
+<script src="src/world/island_roads.js?v=roads2town"></script>
+<script src="src/world/island_plan.js?v=plan1"></script>
+<script src="src/world/instance_proxy.js?v=proxy1"></script>
+<script src="src/world/disaster_arena.js?v=island2x"></script>
+<script src="src/world/island_dressing.js?v=dress2town"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
-<script src="src/modes/survival.js?v=noring1013"></script>
+<script src="src/modes/survival.js?v=island1014"></script>
+<!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
+     instant death, i-frames, no chip, physical shelter, regen. survival.js's
+     surv.hurt hands the player to it. -->
+<script src="src/systems/disasterhurt.js?v=fair1014"></script>
 <script src="src/modes/shark_sim.js?v=nored0930"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
 <script src="src/modes/shark_title.js?v=uicut1"></script>
-<script src="src/systems/title_hub.js?v=end1"></script>
+<script src="src/systems/title_hub.js?v=spec1014"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
 <script src="src/modes/gungame.js?v=bootflash1"></script>
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
-<script src="src/world/groundshaft.js?v=shaft1"></script>
+<script src="src/world/groundshaft.js?v=sink1014"></script>
+<!-- THE SINKHOLE EVENT (warning, cover collapse, calving, what goes in) reads
+     the shaft through CBZ.groundShaftKit, so it loads right after it. -->
+<script src="src/world/sinkhole.js?v=sink1014"></script>
 <!-- THE VOLCANO IS SHARED: world/volcanofx.js owns the opaque crusted lava,
      the pyroclastic density current, the lahar and the ash LOAD, all keyed on
      a position + a height field so a city-side eruption calls the same four
@@ -1084,10 +1096,12 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. REQUIRED: the
      old additive-stream fallback in disasters.js was deleted 2026-09-28. -->
 <script src="src/world/volcanofx.js?v=plume2"></script>
-<!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
+<!-- THE QUAKE IS SHARED: systems/quake.js is the whole earthquake event (source
+     and path, P/S/surface wave train, buildings by type and height, cracks,
+     mains, liquefaction, cars, the crowd, what falls on whom), drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
-<script src="src/systems/quake.js?v=news0930"></script>
+<script src="src/systems/quake.js?v=seis1014"></script>
 <!-- ==== PER-DISASTER MODULE SEAM ==========================================
      One line per disaster in the survival roster, each owned by exactly that
      disaster and nobody else. A disaster whose behaviour outgrows its entry in
@@ -1111,10 +1125,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/flashflood.js?v=ffroute1014"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
-<script src="src/systems/hurricane.js?v=collapse1014"></script>
-<!-- seam:wildfire — systems/wildfire.js owns the wind/slope-driven front, the
-     killing smoke plume, the ember spotting and the persistent burn scar. -->
-<script src="src/systems/wildfire.js?v=fire1"></script>
+<script src="src/systems/hurricane.js?v=collapse1014b"></script>
+<!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
+     and its wind/slope spread, crown fire, spotting, ember attack on houses,
+     burning cars, the killing plume, ash and the persistent burn scar. -->
+<script src="src/systems/wildfire.js?v=fuel1014"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
@@ -1125,16 +1140,19 @@ document.body.appendChild(b);}}catch(e){}})();
      pressure front (one overpressure law: glass, trees, cars, buildings) and
      its late bang, craters with rim + ejecta blanket, curtain, plume, fires.
      REQUIRED by systems/disasters.js (no legacy shower any more). -->
-<script src="src/systems/meteor.js?v=collapse1014"></script>
+<script src="src/systems/meteor.js?v=collapse1014b"></script>
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=collapse1014"></script>
+<script src="src/systems/disasters.js?v=collapse1014b"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>
 <script src="src/systems/survival_interact.js?v=jailv1001"></script>
-<script src="src/systems/survivalhud.js?v=deathcam1009"></script>
+<script src="src/systems/survivalhud.js?v=spec1014"></script>
+<!-- THE DEAD PLAYER'S CAMERA on the disaster island: death orbit, pull-back,
+     then free flight (WASD / touch) while the round keeps running. -->
+<script src="src/systems/spectator.js?v=spec1014"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
      have to be true before a transport is worth writing: every actor carries a
      stable id, the whole match serialises to one ArrayBuffer and back
@@ -1156,11 +1174,12 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=water1011"></script>
-<!-- the tsunami kit shared by the island and the city: the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
-<script src="src/world/tsunami_debris.js?v=tsureal1"></script>
-<script src="src/world/tsunami_flow.js?v=water1011"></script>
-<script src="src/world/tsunami_scene.js?v=tsureal1"></script>
+<script src="src/world/water_spec.js?v=runup1014"></script>
+<!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
+<script src="src/world/tsunami_runup.js?v=runup1014"></script>
+<script src="src/world/tsunami_debris.js?v=runup1014"></script>
+<script src="src/world/tsunami_flow.js?v=runup1014"></script>
+<script src="src/world/tsunami_scene.js?v=runup1014"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
 <script src="src/city/world.js?v=lodlight1012"></script>
@@ -1234,7 +1253,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/interiorlight.js?v=winhole1014"></script>
 <script src="src/city/citynav.js?v=curb1013"></script>
 <script src="src/city/fracture.js?v=nukecost1013"></script>
-<script src="src/city/demolition.js?v=collapse1014"></script>
+<script src="src/city/demolition.js?v=collapse1014b"></script>
 <script src="src/city/elevators.js?v=stairs1009b"></script>
 <script src="src/city/exec_office.js?v=pf0930a"></script>
 <script src="src/city/escalators.js?v=air0929r"></script>
@@ -1524,10 +1543,10 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=pf0930e"></script>
-<script src="src/city/vehicles.js?v=loose1013"></script>
+<script src="src/city/vehicles.js?v=island1014"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
-<script src="src/city/playeraircraft.js?v=rounds1013"></script>
+<script src="src/city/playeraircraft.js?v=island1014"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1553,13 +1572,18 @@ document.body.appendChild(b);}}catch(e){}})();
      is priced through CBZ.detonate so it damages buildings like any other
      impact of that mass and speed. After playeraircraft.js (uses the exported
      setCraftRotation) and after cockpit_view.js. Revert: ?cfg_BAILOUT=0. -->
-<script src="src/city/bailout.js?v=planes1009b"></script>
+<script src="src/city/bailout.js?v=island1014"></script>
 <!-- elevator-grammar boarding doors for every flyable aircraft: the door
      visibly opens, you walk in through the opening, it closes, THEN flight
      control hands over (and the reverse on exit). Wired behind the existing
      board/enter APIs — militaryvehicles.js + playeraircraft.js call into it,
      island_airport.js panel/airstair easing honours its open flag. -->
-<script src="src/city/aircraft_doors.js?v=af0929"></script>
+<script src="src/city/aircraft_doors.js?v=island1014"></script>
+<!-- THE DISASTER ISLAND'S REAL MACHINES: a share of the parked cars become real
+     cars (vehicles.js), a rooftop helipad with a flyable helicopter
+     (playeraircraft.js CBZ.airParkFlyable), the island's weather fed into both.
+     After vehicles.js, playeraircraft.js, bailout.js and aircraft_doors.js. -->
+<script src="src/world/island_vehicles.js?v=island1014"></script>
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the
@@ -1628,7 +1652,7 @@ document.body.appendChild(b);}}catch(e){}})();
      skin on buildings that are still standing. Reverts: ?cfg_COLLAPSE_V2=0
      (callers fall back to their snap) · ?cfg_COLLAPSE_FRAGMENTS=0 (chunks
      turn to dust instead of pieces) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
-<script src="src/city/collapse.js?v=collapse1014"></script>
+<script src="src/city/collapse.js?v=collapse1014b"></script>
 <script src="src/systems/strike.js?v=strike1013m"></script>
 <script src="src/city/structural.js?v=nukecost1013"></script>
 <script src="src/city/nukefx.js?v=nukecost1013"></script>
@@ -1637,7 +1661,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=street1009"></script>
+<script src="src/systems/tornado.js?v=island1014"></script>
 <script src="src/city/aircraftimpact.js?v=street1009"></script>
 <script src="src/city/shops.js?v=vault1013"></script>
 <script src="src/city/gunstore.js?v=peak1014c"></script>
@@ -1994,7 +2018,7 @@ document.body.appendChild(b);}}catch(e){}})();
      to walk at curfew was a body pressed into geometry. This sits between the
      brain and the mover and answers HOW to get there — and it owns the one
      walkability grid + A* that navigation.js's escapeRoute now delegates to. -->
-<script src="src/systems/navgrid.js?v=bdoor1001"></script>
+<script src="src/systems/navgrid.js?v=sink1014"></script>
 <script src="src/systems/prisonnav.js?v=nav2-st1"></script>
 <!-- THE CITY'S SIDE OF THE SAME GRID. Measured on a calm street: 56% of every
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
@@ -2615,7 +2639,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/losgrid.js?v=nukecost1013"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=collapse1014"></script>
+<script src="src/core/batch.js?v=collapse1014b"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder

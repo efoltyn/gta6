@@ -146,6 +146,23 @@
      survival's alone and keeps asking g.mode === "survival". */
   CBZ.ISLAND_MODES = { survival: 1, sharksim: 1 };
   CBZ.islandModeOn = function (m) { return !!CBZ.ISLAND_MODES[m || (CBZ.game && CBZ.game.mode)]; };
+  /* WHERE YOU CAN DRIVE AND FLY. The vehicle stack (city/vehicles.js's
+     driven-car loop, city/playeraircraft.js's flight loop, the chase camera,
+     the cars-are-solid resolver) was written for Gang City and gated on
+     mode === "city". The disaster island drives and flies the SAME machines
+     (world/island_vehicles.js), so the gate is this one table, not a second
+     vehicle system. Shark Sim is not in it: you are the shark there.
+
+     A vehicle RECORD belongs to one world: these worlds share coordinates
+     (city, prison and island are stacked on the same plane), so a Gang City
+     car left in CBZ.cityCars from an earlier session must never be solid on
+     the island. Untagged records are Gang City's; a record built while
+     another vehicle world was live carries `_world` = that mode. */
+  CBZ.VEHICLE_MODES = { city: 1, survival: 1 };
+  CBZ.vehicleModeOn = function (m) { return !!CBZ.VEHICLE_MODES[m || (CBZ.game && CBZ.game.mode)]; };
+  CBZ.vehicleInWorld = function (v, m) {
+    return ((v && v._world) || "city") === (m || (CBZ.game && CBZ.game.mode) || "city");
+  };
 
   // ---- colour palette (Roblox-bright, beveled feel) ----
   CBZ.COL = {
@@ -305,7 +322,7 @@
   if (typeof CBZ.CROWD_FACE_DIST !== "number") CBZ.CROWD_FACE_DIST = undefined;
   CBZ.SIM_OVERVIEW_BUDGET = typeof CBZ.SIM_OVERVIEW_BUDGET === "number" ? CBZ.SIM_OVERVIEW_BUDGET : 12000;
   CBZ.SURV = {
-    arena: { cx: 0, cz: 600, radius: 120 }, // far from the prison; own ground+sun
+    arena: { cx: 0, cz: 600, radius: 240 }, // far from the prison; own ground+sun (twice the old 120 m island: world/island_plan.js)
     playerHpRegen: 0,        // no passive regen — disasters are deadly
     sprintMul: 3.2,
     staminaMax: 100,

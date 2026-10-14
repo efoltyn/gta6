@@ -576,8 +576,7 @@ async function stageFire(input) {
   q("name").textContent = subject.label;
   q("name").style.cssText = "position:absolute;top:212px;left:26px;font-size:22px;font-weight:800;letter-spacing:-.02em;max-width:360px";
   q("focus").textContent =
-    `${CBZ.disasters.current() || "—"} · ${CBZ.disasters.state()} · ${note}` +
-    (wa.v2 === false ? " · LEGACY FIRE" : "");
+    `${CBZ.disasters.current() || "—"} · ${CBZ.disasters.state()} · ${note}`;
   q("focus").style.cssText = "position:absolute;top:250px;left:27px;color:#c0cfda;font-size:12px;font-weight:550;max-width:380px";
   q("perf").textContent =
     `burning ${burning.length} · burnt ${burnt.length} · run ${Math.round(fireRunM)} m\n` +
@@ -589,7 +588,6 @@ async function stageFire(input) {
   q("source").style.cssText = "position:absolute;bottom:10px;left:27px;color:#9cb0bf;font:10px ui-monospace,SFMono-Regular,Menlo,monospace";
 
   const metrics = {
-    renderV3: wa.renderV3 ? 1 : 0,
     treesBurnt: burnt.length,
     fireRunM: Math.round(fireRunM),
     spotFires: Number(wa.spotFires || 0),
@@ -610,11 +608,11 @@ async function stageFire(input) {
     scarM2: Number(wa.scarM2 || 0),
     smokeAheadM: Number(wa.plumeLenM || 0),
     smokePuffsLive: Number(wa.smokePuffsLive || 0),
-    smokeBufferLive: Number(wa.smokeBufferLive || 0),
-    smokeAlphaMax: Number(wa.smokeAlphaMax || 0),
-    smokeSizeMax: Number(wa.smokeSizeMax || 0),
-    flameSpritesLive: Number(wa.flameSpritesLive || 0),
-    pointSizeMaxPx: Number(wa.pointSizeMaxPx || 0),
+    flameSpritesLive: Number(wa.flameSprites || 0),
+    burntHa: Number(wa.burntHa || 0),
+    buildingsIgnited: Number(wa.buildingsIgnited || 0),
+    buildingsCollapsed: Number(wa.buildingsCollapsed || 0),
+    carsExploded: Number(wa.carsExploded || 0),
     tickAvgMs: ticks ? Number((totalMs / ticks).toFixed(2)) : 0,
     tickMaxMs: Number(maxMs.toFixed(1)),
     ticksOver33: over33,
@@ -646,6 +644,9 @@ export default {
     deaths: { label: "Deaths (all causes)", better: "higher" },
     escapeAngleDeg: { label: "Escape angle vs wind", unit: "°", better: "higher" },
     scarM2: { label: "Ground left black", unit: "m²", better: "higher" },
+    buildingsIgnited: { label: "Houses caught (embers/heat)", better: "higher" },
+    buildingsCollapsed: { label: "Houses burned down", better: "higher" },
+    carsExploded: { label: "Cars cooked off", better: "higher" },
     smokeAheadM: { label: "Plume reach ahead", unit: "m", better: "higher" },
     windBiasPct: { label: "Run downwind-bias", unit: "%", better: "higher" },
     elongation: { label: "Burn elongation (down/cross)", better: "higher" },

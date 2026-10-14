@@ -2539,16 +2539,33 @@
     if (R.r != null) { const dx = x - R.x, dz = z - R.z; return dx * dx + dz * dz <= R.r * R.r; }
     return x >= R.minX && x <= R.maxX && z >= R.minZ && z <= R.maxZ;
   }
+  /* The region callers hand in:
+       {x, z, r} or {minX, maxX, minZ, maxZ}  the ground gone from there;
+         depth (or bottom, the hole's floor) on the region or in opts: what
+         the falling pieces land on there (world/sinkhole.js passes its shaft)
+       {ax, az, ...} with no place: the soil gives under one SIDE (a quake's
+         settlement, systems/quake.js): rotation axis (ax, az), so the side
+         that goes is the one the building would tilt toward */
   function applyUndermine(S, R, o) {
     swap(S);
     let n = 0;
+    const placed = R.r != null || R.minX != null;
+    let lnx = 0, lnz = 0, ext = 1;
+    if (!placed) {
+      const tx = -(R.az || 0), tz = R.ax || 0, l = Math.hypot(tx, tz) || 1;
+      lnx = (tx / l) * S.cos - (tz / l) * S.sin; lnz = (tx / l) * S.sin + (tz / l) * S.cos;
+      ext = Math.abs(lnx) * S.hw + Math.abs(lnz) * S.hd;
+    }
     for (const c of S.levels[0]) {
       if (!c.standing || c.undermined) continue;
-      const w = new THREE.Vector3(c.cx, 0, c.cz).applyMatrix4(S.L);
-      if (!inRegion(R, w.x, w.z)) continue;
+      if (placed) {
+        const w = new THREE.Vector3(c.cx, 0, c.cz).applyMatrix4(S.L);
+        if (!inRegion(R, w.x, w.z)) continue;
+      } else if (c.cx * lnx + c.cz * lnz < 0.1 * ext) continue;
       c.undermined = true; n++;
     }
-    if (o && o.depth > 0) holes.push(Object.assign({ y: S.gy, depth: +o.depth }, R));
+    const depth = (o && o.depth > 0) ? +o.depth : R.depth > 0 ? +R.depth : (R.bottom != null && isFinite(R.bottom)) ? S.gy - R.bottom : 0;
+    if (placed && depth > 0) holes.push({ x: R.x, z: R.z, r: R.r, minX: R.minX, maxX: R.maxX, minZ: R.minZ, maxZ: R.maxZ, y: S.gy, depth: depth });
     S.active = Math.max(S.active, 5);
     return { key: S.key, undermined: n };
   }

@@ -354,6 +354,15 @@
     // the number here is the level of a siren in your face, which is not the
     // situation it is ever played in.
     siren: layers([part([W + "disaster_siren.m4a"], 0.34, 1.42, 1.62)], 1.9),
+    // THE TORNADO SIREN (systems/tornado.js T.siren): the same civil-defence
+    // wail at its own pitch, which is what it is. Same file as `siren`, so the
+    // decoded buffer is shared (no second 29 MB of PCM on a phone). Played
+    // once per warning and stopped through opts.onSource when it is over.
+    storm_siren: layers([part([W + "disaster_siren.m4a"], 0.3, 0.99, 1.01)], 20),
+    // HAIL on roofs, cars and pavement: light metal and glass ticks pitched
+    // up into stones. One voice per 0.09 s; tornado.js scales the volume by
+    // how many landed near the listener that beat.
+    hail: layers([part([K + "impactMetal_light_000.m4a", K + "impactMetal_light_001.m4a", K + "impactGlass_medium_000.m4a", K + "impactGlass_medium_001.m4a"], 0.05, 1.7, 2.5)], 0.09),
     // EXCEPTION: unmeasurable headless — lockdown_brief.m4a is the one bank
     // file with no .ogg/.wav twin, so tools/sound-loudness.mjs cannot decode it
     // without an AAC codec. Set from the scheme assuming the near-full-scale
@@ -1157,10 +1166,14 @@
   function playPart(p, opts, file, onStart) {
     const buffer = buffers.get(file);
     if (!buffer) {
-      load(file).then(function (ready) { if (ready && ctx) playLoaded(file, ready, p, opts, onStart); });
+      // opts.onSource: a caller that must STOP a long cue (the tornado siren)
+      // gets the source even when it starts late, after the decode
+      load(file).then(function (ready) { if (ready && ctx) { const src = playLoaded(file, ready, p, opts, onStart); if (opts.onSource) opts.onSource(src); } });
       return null;
     }
-    return playLoaded(file, buffer, p, opts, onStart);
+    const src = playLoaded(file, buffer, p, opts, onStart);
+    if (opts.onSource) opts.onSource(src);
+    return src;
   }
 
   const FAR_DIST = 60; // beyond this, gunfire goes through the muffle+echo bus
