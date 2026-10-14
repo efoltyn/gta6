@@ -28,8 +28,9 @@ function pickGun(choice, i) {
    team colour over torso, collar and cap (0xff5a3d / 0x3fa8ff) — traffic-cone
    orange and swimming-pool blue on olive trousers, which is what made the
    whole page read as a toy. A side is a uniform: fatigues that belong on the
-   ground, a helmet cover in the team colour so a crane shot still sorts the
-   two lines, and a little fade from man to man so a rank is not one clone.
+   ground, ID tape in the side's mark on both upper arms (combatkit.js) so a
+   close look still sorts the two lines, and a little fade from man to man so
+   a rank is not one clone. Nothing team-coloured on the helmet.
    Soldiers/SWAT/guards wear the full kit; untrained men and street thugs keep
    their own trousers and wear the colour as a shirt, which is what a militia
    looks like. */

@@ -23,7 +23,9 @@
        over the shoulder), a drag handle.
      • HELMET: entities/headwear.js's real lids, by nation: ACH/ECH (MICH cut,
        ARC rails, NVG shroud, harness chinstrap) or the Russian 6B47 (fuller
-       cut, cover band, NVG bracket, counterweight pouch), PASGT for an older
+       cut, cover band in the cover's own darker cloth, NVG bracket,
+       counterweight pouch; never the side's colour: a bright ring round a
+       helmet is no army's practice and the ID tape already says whose he is), PASGT for an older
        army. EYE PRO: entities/eyewear.js's wraparound "eyepro". GLOVES on the
        real hands. KNEE PADS on the shins (they ride the knee pivot, so no pose
        separates them). COMBAT BOOTS (entities/footwear.js "combat").
@@ -36,9 +38,11 @@
        real armies do when two sides wear the same thing), and a medic's
        armband with the cross.
      • SLING: the body run of a two-point sling (over the support shoulder,
-       across the back, to the strong side) is part of the carrier; the two
-       free runs to the rifle's swivels are re-laid each frame for men near
-       the camera (combatKit.sling).
+       across the back, to the strong side) is part of the carrier. There are
+       NO free runs to the rifle: they were two rigid straight bars re-laid
+       each frame from the chest to the gun's swivels, and in every firing
+       pose they read as a stick poking out of the arm (owner, 2026-10-13).
+       A real sling hangs slack; a straight box never looks like one.
 
    FIT. Everything is built in the body's own frame from its measured shape
    (torsoShape, bodySection, torsoFrontZ/BackZ, the limb lofts) and hung on
@@ -62,7 +66,6 @@
                        CBZ.armour state for the wearer.
      strip(ch)         take the hard kit off (the uniform stays)
      lod(ch, lod)      rig LOD (character.js setLimbLod calls it)
-     sling(ch, prop, near)   re-lay the sling's free runs to a held rifle
      roleFor(o)        { wid, slot, i, tier } -> a LOADOUT id
      nation(id)        the NATIONS row (unknown ids -> a sensible default)
      camoMaterial(pattern)   the shared triplanar uniform material
@@ -680,12 +683,7 @@
       }
     }
     const g = B.geometry();
-    // the sling's two body anchors: the front of the support-side strap, and
-    // the band under the strong arm
-    const sa = add(paths[1].pts[1], paths[1].nrm[1], sth + 0.004 * m);
-    const sb = CBZ.bodySection.at(outerRing, -95 * Math.PI / 180);
-    g.userData.combatKit = { loadout: loadout, yB: yB, yT: yT, cy0: cy0, cy1: cy1, hw: hw,
-      slingA: sa, slingB: [sb[0], cy1 - 0.01 * m, sb[1]] };
+    g.userData.combatKit = { loadout: loadout, yB: yB, yT: yT, cy0: cy0, cy1: cy1, hw: hw };
     return (GEO[key] = g);
   }
 
@@ -849,7 +847,6 @@
     if (K.armBase != null) { ch.armOutZ = K.armBase; ch.armWear = 0; }
     if (K.hands) gloves(ch, null);
     ch._combatKit = null;
-    ch._kitSling = null;
   }
   function wear(ch, spec) {
     if (!ch || !ch.body || !ch.torsoShape) return null;
@@ -939,7 +936,7 @@
       try {
         if (L.helmet && N.helmet) {
           const kind = N.helmetVariant ? N.helmet + ":" + N.helmetVariant : N.helmet;
-          HW.wear(ch, kind, { owner: "armor", color: lin(N.helmetHex), accent: N.helmet === "b6b47" ? lin(spec.mark != null && !L.police ? spec.mark : tone(N.helmetHex, -0.3)) : undefined });
+          HW.wear(ch, kind, { owner: "armor", color: lin(N.helmetHex), accent: N.helmet === "b6b47" ? lin(tone(N.helmetHex, -0.3)) : undefined });
         } else if (spec.loadout === "militia") {
           const h = MILITIA_HATS[seed % MILITIA_HATS.length];
           HW.wear(ch, null, { owner: "outfit" });            // no issue cap on a militiaman
@@ -965,7 +962,6 @@
       K.armour = CBZ.armour.issue(a);
     }
     K.weight = L.weight || (L.carrier === "plates" ? 0.94 : 1);
-    if (L.sling) ch._kitSling = { ready: false };
     return K;
   }
   function lod(ch, l) {
@@ -978,78 +974,6 @@
     if (g) K.carrier.geometry = g;
     for (const o of K.meshes) if (o !== K.carrier) o.visible = l < 2;
     if (K.eyewear) K.eyewear.visible = l < 2;
-    if (K.slingMesh) K.slingMesh.visible = false;
-  }
-
-  /* ---- THE SLING'S FREE RUNS ----------------------------------------------
-     From the carrier's two anchors (the front of his support shoulder; his
-     strong side under the arm) to the rifle's front and rear swivels, two
-     flat straps re-laid in the BODY's frame. Only for men near the lens: a
-     sling is a 3 cm strap and past ~40 m it is under a pixel. */
-  const _m4 = new THREE.Matrix4(), _v = new THREE.Vector3(), _bb = new THREE.Box3();
-  function slingMesh(K) {
-    if (K.slingMesh) return K.slingMesh;
-    const g = new THREE.BufferGeometry();
-    const P = new Float32Array(16 * 3), Nn = new Float32Array(16 * 3), C = new Float32Array(16 * 3);
-    const hex = lin(tone(K.kitHex, -0.35)), r = ((hex >> 16) & 255) / 255, gg = ((hex >> 8) & 255) / 255, b = (hex & 255) / 255;
-    for (let i = 0; i < 16; i++) { C[i * 3] = r; C[i * 3 + 1] = gg; C[i * 3 + 2] = b; Nn[i * 3 + 2] = 1; }
-    g.setAttribute("position", new THREE.BufferAttribute(P, 3));
-    g.setAttribute("normal", new THREE.BufferAttribute(Nn, 3));
-    g.setAttribute("color", new THREE.BufferAttribute(C, 3));
-    const I = [];
-    for (let s = 0; s < 2; s++) { const o = s * 8; I.push(o, o + 1, o + 2, o, o + 2, o + 3, o + 4, o + 6, o + 5, o + 4, o + 7, o + 6, o, o + 4, o + 5, o, o + 5, o + 1, o + 3, o + 2, o + 6, o + 3, o + 6, o + 7); }
-    g.setIndex(I);
-    const mat = new THREE.MeshPhongMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide, shininess: 6 });
-    mat._shared = true;
-    const mesh = new THREE.Mesh(g, mat);
-    mesh.frustumCulled = false; mesh.castShadow = false; mesh.name = "sling-run";
-    K.slingMesh = mesh;
-    K.meshes.push(mesh);
-    return mesh;
-  }
-  function sling(ch, prop, near) {
-    const K = ch && ch._combatKit;
-    if (!K || !K.carrier || !ch._kitSling) return;
-    if (!near || !prop || !prop.visible || K.lod >= 2) { if (K.slingMesh) K.slingMesh.visible = false; return; }
-    const gk = K.carrier.geometry.userData.combatKit;
-    if (!gk) return;
-    const mesh = slingMesh(K);
-    if (mesh.parent !== ch.body) ch.body.add(mesh);
-    mesh.visible = true;
-    // the swivels, once per prop: front a third down the handguard, rear at the stock
-    let sw = prop.userData._slingPts;
-    if (!sw) {
-      prop.updateMatrixWorld(true);
-      _m4.copy(prop.matrixWorld).invert();
-      _bb.makeEmpty();
-      prop.traverse(function (o) {
-        if (!o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
-        o.geometry.computeBoundingBox();
-        const bb = o.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(_m4, o.matrixWorld));
-        _bb.union(bb);
-      });
-      if (_bb.isEmpty()) return;
-      const len = _bb.max.z - _bb.min.z;
-      sw = prop.userData._slingPts = [new THREE.Vector3(0, _bb.min.y + (_bb.max.y - _bb.min.y) * 0.3, _bb.min.z + len * 0.32),
-        new THREE.Vector3(0, _bb.min.y + (_bb.max.y - _bb.min.y) * 0.25, _bb.max.z - len * 0.06)];
-    }
-    ch.body.updateMatrixWorld(true);
-    prop.updateMatrixWorld(true);
-    _m4.copy(ch.body.matrixWorld).invert();
-    const m = 1 / scaleOf(ch);
-    const anchors = [gk.slingA, gk.slingB];
-    const P = mesh.geometry.attributes.position.array, w = 0.016 * m, th = 0.002 * m;
-    for (let s = 0; s < 2; s++) {
-      _v.copy(sw[s]).applyMatrix4(prop.matrixWorld).applyMatrix4(_m4);
-      const a = anchors[s], b = [_v.x, _v.y, _v.z];
-      const d = norm(sub(b, a)), side = norm(cross(d, [0, 0, 1]));
-      const up = norm(cross(side, d));
-      const corners = [add(add(a, side, -w), up, -th), add(add(a, side, w), up, -th), add(add(a, side, w), up, th), add(add(a, side, -w), up, th)];
-      const cb = corners.map((c) => add(c, sub(b, a), 1));
-      const all = corners.concat(cb);
-      for (let k = 0; k < 8; k++) { P[(s * 8 + k) * 3] = all[k][0]; P[(s * 8 + k) * 3 + 1] = all[k][1]; P[(s * 8 + k) * 3 + 2] = all[k][2]; }
-    }
-    mesh.geometry.attributes.position.needsUpdate = true;
   }
 
   // the colours a far (crowdgpu) soldier wears, so a promoted man keeps them
@@ -1064,7 +988,7 @@
     version: 1,
     LOADOUTS: LOADOUTS, NATIONS: NATIONS, SWAT: SWAT,
     nation: nation, roleFor: roleFor,
-    wear: wear, strip: strip, lod: lod, sling: sling,
+    wear: wear, strip: strip, lod: lod,
     geometry: geometry, kneeGeometry: kneeGeometry, bandGeometry: bandGeometry,
     material: material, camoMaterial: camoMaterial, crowdLook: crowdLook, lin: lin,
   };

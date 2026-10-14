@@ -22,8 +22,8 @@ const TEAMS = {
   blue: { id: "blue", name: "", color: 0x3fa8ff },
 };
 const SLOT_COLOR = { red: 0xff5a3d, blue: 0x3fa8ff };
-/* A NATION'S MARK: the bright band on the helmet cover, the collar, the HUD
-   bar. One per nation city/flags.js authors (a front spec brings its own). */
+/* A NATION'S MARK: the ID tape on the arms, the collar, the HUD bar (never
+   the helmet). One per nation city/flags.js authors (a front spec brings its own). */
 const NATION_MARK = { republic: 0x3f6fd0, kesh: 0xd23a3a, veridia: 0x2f9a55, solara: 0xe8721c, mbeya: 0xd39a1c };
 const SIDES = { red: null, blue: null };
 /* Recomputed whenever what is on a side can have changed (the war room's
