@@ -820,8 +820,12 @@
      frame starts a second job only while it is under its share. */
   const HYST = 250;                 // park only this far past the keep circle
   const FREE_DIST = 700;            // ... and free it outright this far past it
+  // (the old tick's own throughput, 6 / 16 ms ten times a second: content
+  // arrives when it always did, only no longer in one frame of six. 200 ms/s
+  // built ~25% more per second and drew ~29% more calls from the phone's
+  // aerial spot in the paired A/B, at +4% of the drive's memory peak)
   const RATE_MS = 60;               // build / unpark work per second of play
-  const RATE_SOON_MS = 200;         // ... while something will be in sight within a few seconds
+  const RATE_SOON_MS = 160;         // ... while something will be in sight within a few seconds
   const FRAME_MIN_MS = 1;           // a frame's share is never less than this
   const FRAME_MAX_MS = 8;           // ... nor more (a 10 fps frame does not take 20 ms of builds)
   const OUT_MS = 1.5;               // park + free per frame (never urgent: past keep + HYST)
