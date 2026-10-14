@@ -341,13 +341,24 @@
     "roughnessMap", "metalnessMap", "lightMap", "aoMap", "gradientMap", "clearcoatMap", "clearcoatNormalMap",
     "clearcoatRoughnessMap", "transmissionMap", "sheenColorMap"];
   const PAGED_TYPES = { MeshLambertMaterial: 1, MeshPhongMaterial: 1, MeshStandardMaterial: 1, MeshPhysicalMaterial: 1, MeshBasicMaterial: 1, MeshToonMaterial: 1 };
+  /* A source's size WITHOUT reading .image: a lazy canvas texture
+     (core/texfree.js) paints itself when .image is read, so a size question
+     must not repaint it (its canvas would then live on with nobody to give it
+     back); it knows its size, and it is always a canvas. */
+  const _dims = { w: 0, h: 0, canvas: false };
+  function srcDims(t) {
+    if (t._cbzLazy && t._cbzLazyW > 0) { _dims.w = t._cbzLazyW; _dims.h = t._cbzLazyH; _dims.canvas = true; return _dims; }
+    const im = t.image;
+    _dims.w = im ? im.width : 0; _dims.h = im ? im.height : 0; _dims.canvas = !!(im && typeof im.getContext === "function");
+    return _dims;
+  }
   function pageable(m) {
     const t = m.map;
     if (!t || !t.isTexture || t.isDataTexture || t.isCompressedTexture || t.isVideoTexture || t.isCubeTexture) return false;
     if (!PAGED_TYPES[m.type]) return false;
     for (let i = 0; i < VUV_MAPS.length; i++) if (m[VUV_MAPS[i]]) return false;
-    const im = t.image;
-    if (!im || typeof im.getContext !== "function" || !(im.width > 0) || !(im.height > 0) || im.width > 512 || im.height > 512) return false;
+    const im = srcDims(t);
+    if (!im.canvas || !(im.w > 0) || !(im.h > 0) || im.w > 512 || im.h > 512) return false;
     if (t.wrapS !== THREE.ClampToEdgeWrapping || t.wrapT !== THREE.ClampToEdgeWrapping || t.flipY !== true) return false;
     if (t.offset.x !== 0 || t.offset.y !== 0 || t.repeat.x !== 1 || t.repeat.y !== 1 || t.rotation !== 0 || t.matrixAutoUpdate === false) return false;
     // the array holds straight 8-bit RGBA, which is what a canvas uploads as
@@ -356,7 +367,7 @@
     return true;
   }
   function pageClass(t) {
-    const im = t.image, w = im.width, h = im.height;
+    const im = srcDims(t), w = im.w, h = im.h;
     const mips = t.generateMipmaps !== false && t.minFilter !== THREE.NearestFilter && t.minFilter !== THREE.LinearFilter;
     const key = w + "x" + h + "|" + t.minFilter + "|" + t.magFilter + "|" + (mips ? 1 : 0) + "|" + t.anisotropy + "|" + t.encoding;
     let C = pageClasses.get(key);
@@ -619,8 +630,8 @@
   function slotFor(t) {
     let s = slotOf.get(t.uuid);
     if (s && s.tex === t) {
-      const im = t.image, C = s.page.cls;
-      if (!im || im.width !== C.w || im.height !== C.h) freeSlotOf(t);   // resized: re-slot below
+      const im = srcDims(t), C = s.page.cls;
+      if (im.w !== C.w || im.h !== C.h) freeSlotOf(t);   // resized: re-slot below
       else { if (s.ver !== t.version) paintSlot(s); return s; }
     }
     const C = pageClass(t);

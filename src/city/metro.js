@@ -1067,8 +1067,21 @@
     const order = maps.slice().sort(function (a, b) { return b.w * b.h - a.w * a.h; });
     let AW = 256, AH = 256;
     while (!packInto(order, AW, AH)) { if (AW <= AH) AW *= 2; else AH *= 2; }
+    /* WebGL2 mips any height: the atlas is cut down to the 256-row band its
+       maps reach (the city's seven: 2.9 M texels went in a 2048x2048 square,
+       16 MB here and 21 MB on the GPU; 2048x1536 holds them). Every map is a
+       power of two at an offset that is a multiple of its own size, so each
+       samples the texels it did at every mip level. WebGL1: the square. */
+    const R = CBZ.renderer;
+    if (R && R.capabilities && R.capabilities.isWebGL2) {
+      let h = AH;
+      while (h - 256 >= 256 && packInto(order, AW, h - 256)) h -= 256;
+      AH = h;
+      packInto(order, AW, AH);        // (a failed trial left some rects moved: lay them out again)
+    }
     const data = new Uint8Array(AW * AH * 4);
     for (const m of order) m.bind(data, AW, m.ax, m.ay);
+    _audit.farMapRects = order.map(function (m) { return m.w + "x" + m.h; }).join(" ") + " in " + AW + "x" + AH;
     return { order: order, AW: AW, AH: AH, data: data };
   }
   function packFarMaps(A, U) {
@@ -1538,7 +1551,7 @@
       buildMs: _audit.buildMs, tileBuilds: _audit.tileBuilds, tileDrops: _audit.tileDrops,
       tileMsMax: Math.round(_audit.tileMsMax * 10) / 10, tileMsMean: _audit.tileBuilds ? Math.round(_audit.tileMsSum / _audit.tileBuilds * 10) / 10 : 0,
       sliceMsMax: Math.round(_audit.sliceMsMax * 10) / 10, farBuilds: _audit.farBuilds, farMB: +(_audit.farBytes / 1048576).toFixed(1),
-      farMap: _mapsDone ? { MB: _audit.farMapMB || 0, ms: _audit.farMapMs || 0 } : null,
+      farMap: _mapsDone ? { MB: _audit.farMapMB || 0, ms: _audit.farMapMs || 0, rects: _audit.farMapRects || "" } : (_audit.farMapRects ? { painting: _mapI, rects: _audit.farMapRects } : null),
       viewFar: CBZ.metroViewFar || 0, viewR: Math.round(_viewR), showR: Math.round(_showR),
       built: builtAudit(),
       // the facade cells: built / drawn now, their triangles, and the work so far

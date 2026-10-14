@@ -2997,6 +2997,7 @@
     const map = mat.map;
     if (!map) return true;
     if (map._cbzDead) return false;
+    if (map._cbzLazy && map._cbzLazyW > 0) return true;   // paints itself when read (core/texfree.js)
     const img = map.image;
     return !!(img && img.width > 0 && img.height > 0);
   }
@@ -3085,34 +3086,18 @@
   }
 
   let _deadCanvases = 0;
-  function buildSet(key, rec) {
-    const cv = document.createElement("canvas");
-    cv.width = W; cv.height = H;
-    // willReadFrequently: modalHex reads pixels back off this atlas after
-    // painting (cityPaintedBodyHex / yoke sampling). On an accelerated canvas
-    // every getImageData is a full GPU pipeline flush — measured 60+ms/tick
-    // during crowd-promotion prewarm when many outfit keys build in a burst.
-    // The CPU-side canvas paints marginally slower and reads for free; the
-    // texture upload path (texImage2D from canvas) is unchanged.
-    const ctx = cv.getContext("2d", { willReadFrequently: true });
-    if (!ctx) { _deadCanvases++; return null; }
-    const P = { T: rowPainter(ctx, "torso"), J: rowPainter(ctx, "jacket"), A: rowPainter(ctx, "arm"), L: rowPainter(ctx, "leg"), ctx: ctx };
-    const c = (rec && rec.colors) || {};
-    const kind = key.split("|")[0];
-    // pre-fill the WHOLE atlas opaque (base cloth color) so rows a painter
-    // skips can never mip-blend transparency into a used row at distance
-    // (alphaTest would eat the edge texels). Painters overdraw their rows;
-    // the jacket's gap/cap clears cut through this layer too.
+  // pre-fill the WHOLE atlas opaque (base cloth color) so rows a painter
+  // skips can never mip-blend transparency into a used row at distance
+  // (alphaTest would eat the edge texels). Painters overdraw their rows;
+  // the jacket's gap/cap clears cut through this layer too.
+  function clothFill(ctx, key, c) {
     ctx.fillStyle = hx(c.torso != null ? c.torso : (key.split("|")[1] | 0) || 0x444444);
     ctx.fillRect(0, 0, W, H);
-    // A DEAD CANVAS IS A BODY WITH NO CLOTHES. iOS WebKit caps the memory all
-    // canvases may hold; a canvas made past the cap still hands out a context,
-    // but it draws nothing and reads back transparent. Uploaded, that atlas is
-    // alpha 0 everywhere and this material's alphaTest discards the whole
-    // torso, arms and legs (owner, iPad: "the outfit is nil"). The opaque fill
-    // just above cannot read back fully transparent; if it does, refuse: null is this
-    // cache's "no painted look", so the body is flat-painted in rec.colors.
-    try { if (ctx.getImageData(W >> 1, H >> 1, 1, 1).data[3] === 0) { _deadCanvases++; return null; } } catch (e) {}
+  }
+  // the garment painters for this key over a filled atlas; null = no painter
+  function clothPaint(ctx, key, c) {
+    const P = { T: rowPainter(ctx, "torso"), J: rowPainter(ctx, "jacket"), A: rowPainter(ctx, "arm"), L: rowPainter(ctx, "leg"), ctx: ctx };
+    const kind = key.split("|")[0];
     let parts = null;
     if (kind === "suit") {
       const st = SUIT_STYLES[(key.split("|")[1] | 0)] || SUIT_STYLES[0];
@@ -3126,9 +3111,48 @@
     // colors stay exactly where every other painter reads them: rec.colors.
     else if (SKIN_KEYED[kind]) { const seg = key.split("|"); parts = PAINT[kind](P, Object.assign({}, c, { skin: seg[2] | 0 })); }
     else if (PAINT[kind]) parts = PAINT[kind](P, c);
+    if (parts && parts.jacket) coverUnderShell(ctx);
+    return parts;
+  }
+  function buildSet(key, rec) {
+    const cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    // willReadFrequently: modalHex reads pixels back off this atlas after
+    // painting (cityPaintedBodyHex / yoke sampling). On an accelerated canvas
+    // every getImageData is a full GPU pipeline flush — measured 60+ms/tick
+    // during crowd-promotion prewarm when many outfit keys build in a burst.
+    // The CPU-side canvas paints marginally slower and reads for free; the
+    // texture upload path (texImage2D from canvas) is unchanged.
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    if (!ctx) { _deadCanvases++; return null; }
+    // the colours as they are now: a repaint (below) must paint this key's
+    // picture even if the record is edited later
+    const c = Object.assign({}, (rec && rec.colors) || {});
+    const kind = key.split("|")[0];
+    clothFill(ctx, key, c);
+    // A DEAD CANVAS IS A BODY WITH NO CLOTHES. iOS WebKit caps the memory all
+    // canvases may hold; a canvas made past the cap still hands out a context,
+    // but it draws nothing and reads back transparent. Uploaded, that atlas is
+    // alpha 0 everywhere and this material's alphaTest discards the whole
+    // torso, arms and legs (owner, iPad: "the outfit is nil"). The opaque fill
+    // just above cannot read back fully transparent; if it does, refuse: null is this
+    // cache's "no painted look", so the body is flat-painted in rec.colors.
+    try { if (ctx.getImageData(W >> 1, H >> 1, 1, 1).data[3] === 0) { _deadCanvases++; return null; } } catch (e) {}
+    const parts = clothPaint(ctx, key, c);
     if (!parts) return null;
-    if (parts.jacket) coverUnderShell(ctx);
-    const tex = new THREE.CanvasTexture(cv);
+    /* ONE CANVAS, ONLY WHILE IT IS READ. The atlas is painted here (its body
+       and neck colours are read back below), then handed to three as a lazy
+       canvas texture (core/texfree.js): the canvas goes back after its upload
+       or once the ped page has copied it, and any later read paints the same
+       picture again from the key (clothFill + clothPaint are pure: no rng).
+       Every outfit key used to hold its 128x256 canvas for the session: 67 of
+       them, 8.4 MB of canvases at the phone boot, all but one of them already
+       copied into the ped page. */
+    let tex;
+    if (CBZ.lazyCanvasTexture) {
+      tex = CBZ.lazyCanvasTexture(W, H, function (c2) { clothFill(c2, key, c); clothPaint(c2, key, c); });
+      tex.image = cv;                               // the canvas just painted serves the first read
+    } else tex = new THREE.CanvasTexture(cv);
     tex.magFilter = THREE.LinearFilter;
     // THIS CACHE IS PERMANENT — but nothing else in the engine knows that. Two
     // teardown sweeps walk a whole rig and dispose every material/geometry they
@@ -3199,8 +3223,11 @@
   function setAlive(s) {
     if (!s) return true;                            // null = a deliberate "no painted look"
     if (!s.tex || s.tex._cbzDead) return false;
-    const img = s.tex.image;
-    if (!img || !(img.width > 0) || !(img.height > 0)) return false;
+    // (a lazy atlas paints itself when read: its size is the question, not a read)
+    if (!(s.tex._cbzLazy && s.tex._cbzLazyW > 0)) {
+      const img = s.tex.image;
+      if (!img || !(img.width > 0) || !(img.height > 0)) return false;
+    }
     return !!(s.mat && s.mat.map === s.tex && s.mat.visible !== false);
   }
   let _setsRebuilt = 0;

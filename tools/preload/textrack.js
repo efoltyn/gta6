@@ -22,6 +22,36 @@
   var LIVE = new Map();              // WebGLTexture -> record
   var CVS = [];                      // WeakRefs of every canvas given a 2D context
   var UP = new WeakSet();            // ArrayBuffers some bufferData call uploaded
+  var BUFS = new Map();              // WebGLBuffer -> { n bytes, src WeakRef(array), t }
+  /* CBZ_BUF(top): live GL buffers by whether the array they were filled from
+     still belongs to a geometry in CBZ.scene (drawn, hidden) or not (a
+     detached mesh whose buffers were never deleted, or a CPU copy dropped
+     after upload: "source gone"); the off-scene ones by allocation site when
+     abtrack.js is loaded too. */
+  window.CBZ_BUF = function (top) {
+    var where = new Map();
+    function chainVis(o) { for (; o; o = o.parent) if (!o.visible) return false; return true; }
+    CBZ.scene.traverse(function (o) {
+      var g = o.geometry; if (!g || !g.attributes) return;
+      var v = chainVis(o) ? "in scene, drawing" : "in scene, hidden";
+      for (var k in g.attributes) { var a = g.attributes[k], arr = a.isInterleavedBufferAttribute ? a.data.array : a.array; if (arr) where.set(arr, v); }
+      if (g.index && g.index.array) where.set(g.index.array, v);
+      if (o.isInstancedMesh) { where.set(o.instanceMatrix.array, v); if (o.instanceColor) where.set(o.instanceColor.array, v); }
+    });
+    var cat = {}, sites = new Map(), tot = 0;
+    BUFS.forEach(function (r) {
+      var s = r.src ? r.src.deref() : null, k = s ? (where.get(s) || "off scene") : "source gone";
+      cat[k] = (cat[k] || 0) + r.n; tot += r.n;
+      if (k === "off scene" || k === "source gone") {
+        var site = s && window.CBZ_AB_SITEOF ? (CBZ_AB_SITEOF(s) || "?") : "?";
+        var e = sites.get(k + " | " + site) || [0, 0]; e[0] += r.n; e[1]++; sites.set(k + " | " + site, e);
+      }
+    });
+    for (var c in cat) cat[c] = +(cat[c] / 1048576).toFixed(1);
+    var rows = []; sites.forEach(function (e, k) { rows.push([+(e[0] / 1048576).toFixed(2), e[1], k]); });
+    rows.sort(function (a, b) { return b[0] - a[0]; });
+    return JSON.stringify({ liveMB: +(tot / 1048576).toFixed(1), n: BUFS.size, categoriesMB: cat, offScene: rows.slice(0, top || 30) });
+  };
   /* CBZ_GEO(top): every geometry reachable from CBZ.scene (hidden included),
      its CPU arrays split by: uploaded or not, the mesh drawing or not
      (visible chain), and grouped by the nearest named ancestor. Shared
@@ -95,7 +125,16 @@
     };
     // every array a buffer was filled from (CBZ_GEO: is a geometry's CPU copy also on the GPU?)
     var bd = p.bufferData;
-    p.bufferData = function (t, d) { if (d && typeof d === "object" && d.buffer) UP.add(d.buffer); return bd.apply(this, arguments); };
+    p.bufferData = function (t, d) {
+      if (d && typeof d === "object" && d.buffer) UP.add(d.buffer);
+      try {
+        var b = this.getParameter(t === 34963 ? 34965 : 34964);
+        if (b) BUFS.set(b, { n: typeof d === "number" ? d : (d && d.byteLength) || 0, src: d && d.buffer && window.WeakRef ? new WeakRef(d) : null });
+      } catch (e) {}
+      return bd.apply(this, arguments);
+    };
+    var db = p.deleteBuffer;
+    p.deleteBuffer = function (b) { BUFS.delete(b); return db.apply(this, arguments); };
     var gm = p.generateMipmap;
     p.generateMipmap = function (t) { var r = gm.apply(this, arguments); try { var rec = LIVE.get(bound(this, t)); if (rec) rec.mips = 1; } catch (e) {} return r; };
     var dt = p.deleteTexture;

@@ -71,6 +71,23 @@
     }
     return JSON.stringify({ samples: want.size, nodes: nodes, found: found });
   };
+  // CBZ_AB_NONGEO(top): live bytes per site that are NOT a geometry's arrays
+  // in CBZ.scene (estimated from each site's samples): the data side of the
+  // ArrayBuffers (fields, grids, caches, detached geometry)
+  window.CBZ_AB_NONGEO = function (top) {
+    var inScene = new Set();
+    try { CBZ.scene.traverse(function (o) { var g = o.geometry; if (!g || !g.attributes) return; for (var k in g.attributes) { var a = g.attributes[k], arr = a.isInterleavedBufferAttribute ? a.data.array : a.array; if (arr) inScene.add(arr.buffer); } if (g.index && g.index.array) inScene.add(g.index.array.buffer); if (o.isInstancedMesh) inScene.add(o.instanceMatrix.array.buffer); }); } catch (e) {}
+    var rows = [], tot = 0;
+    sites.forEach(function (e, k) {
+      if (e.b <= 0) return;
+      var n = 0, inS = 0; for (var i = 0; i < e.s.length; i++) { var a = e.s[i].deref(); if (!a) continue; n++; if (inScene.has(a.buffer || a)) inS++; }
+      var frac = n ? 1 - inS / n : 1, b = e.b * frac;
+      if (b < 262144) return; tot += b;
+      rows.push([+(b / 1048576).toFixed(1), e.n, k]);
+    });
+    rows.sort(function (a, b) { return b[0] - a[0]; });
+    return JSON.stringify({ nonGeoMB: +(tot / 1048576).toFixed(0), top: rows.slice(0, top || 40) });
+  };
   // CBZ_AB_SITEOF(typedArray): the allocation site of a live array (when it is
   // among its site's first 64 samples), or null
   window.CBZ_AB_SITEOF = function (arr) {
