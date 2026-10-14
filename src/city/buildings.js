@@ -8915,11 +8915,13 @@
       placed.push(lot);
     }
 
-    // the streamed apartment cells (see homeCell): one job each
+    // the streamed apartment cells (see homeCell): one job each, IN STEPS
+    // (core/citystream.js): one block a step, so a 200 ms cell is spread over
+    // the frames while it is still past the fog, and joins the scene whole
     homeCells.forEach(function (c, k) {
-      CBZ.sliceAt({ minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ }, function () {
-        for (const fn of c.fns) { try { fn(); } catch (e) { console.error("[home cell " + k + "]", e); } }
-      }, { name: "homes " + k });
+      CBZ.sliceAt({ minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ }, c.fns.map(function (fn) {
+        return function () { try { fn(); } catch (e) { console.error("[home cell " + k + "]", e); } };
+      }), { name: "homes " + k });
     });
 
     // OWNERSHIP POST-PASS: give EVERY building an owner (shop→business,
