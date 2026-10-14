@@ -122,8 +122,11 @@ const CENSUS = [
   ["spectate", "CBZ.spectate || CBZ.clearSpectate"],
 ];
 
-const ROSTER = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado",
+const ROSTER_ALL = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado",
   "hurricane", "blizzard", "meteor", "sinkhole", "volcano"];
+// --only flashflood,quake : run just these through the sweep (a builder's loop)
+const ONLY = arg("--only", "");
+const ROSTER = ONLY ? ROSTER_ALL.filter((id) => ONLY.split(",").includes(id)) : ROSTER_ALL;
 
 const report = { url: URL_REL, ok: false, fails: [], measures: {}, errors: [], census: {} };
 const fail = (m) => { report.fails.push(m); };
@@ -283,7 +286,10 @@ try {
           if (i % 150 === 0) await new Promise(r => setTimeout(r, 0));
         }
         const p = CBZ.player;
-        return { forced: true, active, warned, ticks, ended,
+        // the routed flood reports what it did on the real island
+        const ff = ${JSON.stringify(id)} === 'flashflood' && CBZ.flashflood ? CBZ.flashflood.stats() : null;
+        return { forced: true, active, warned, ticks, ended, flood: ff ? { grid: ff.grid, maxDepth: +(+ff.maxDepth).toFixed(2), frontSpeed: +(+ff.frontSpeed).toFixed(2),
+                   carsSwept: ff.carsSwept, carsFloated: ff.carsFloated, lids: ff.lidsPopped, bridges: ff.bridges, rooms: ff.roomsFlooded, frameMs: ff.frameMs, solveMs: ff.solveMsPerFrame, bodyMs: ff.bodyMsPerFrame, surfaceMs: ff.renderMsPerFrame, worstMs: ff.worstFrameMs, uploadKB: Math.round((ff.uploadBytes || 0) / 1024), silt: ff.siltArea, events: (CBZ.flashflood.events() || []).slice(0, 12) } : null,
                  x: p.pos.x, y: p.pos.y, z: p.pos.z,
                  live: CBZ.bots ? CBZ.bots.filter(b => !b.dead).length : 0,
                  killed: CBZ.bots ? CBZ.bots.filter(b => b.dead).length : 0 };
@@ -294,6 +300,7 @@ try {
       else if (!r.active) sweep.neverActive.push(id);
       if (r.x != null && !(isFinite(r.x) && isFinite(r.y) && isFinite(r.z))) fail(id + ": player position went NaN");
       say(`  ${id.padEnd(11)} ${r.active ? String(r.active).padStart(4) + " active ticks · killed " + r.killed : "NEVER ACTIVE"}`);
+      if (r.flood) say("              flood: " + JSON.stringify(r.flood));
     }
     if (sweep.neverActive.length) fail("never reached active: " + sweep.neverActive.join(", "));
   } else {

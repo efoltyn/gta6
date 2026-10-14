@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 448
+     Natural Disaster Survival, standing alone: index.html minus the 446
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -457,6 +457,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/lodlights.js?v=lodlight1012"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
 <script src="src/core/citystream.js?v=merge1014c"></script>
+<script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -866,7 +867,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisonwarden.js?v=jailv1001"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=jailv1001"></script>
-<script src="src/systems/weather.js?v=w1014hur"></script>
+<script src="src/systems/weather.js?v=ffroute1014"></script>
 <script src="src/systems/compass.js"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
 <script src="src/systems/prisontrade.js?v=jailside1001"></script>
@@ -991,10 +992,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:earthquake     — systems/quake.js, tagged above (predates this block) -->
 <!-- seam:lightning      — systems/lightningfx.js, tagged above -->
 <!-- seam:tsunami        — city/tsunami.js, tagged with the city systems -->
-<!-- seam:flashflood — systems/flashflood.js owns the churn spray, the entrained
-     debris and the roar. Two draw calls and no water planes: the flood itself
-     is still a term in the ONE shared depth field, never a mesh. -->
-<script src="src/systems/flashflood.js?v=flood1"></script>
+<!-- seam:flashflood — systems/flashflood.js IS the flash flood: a shallow-water
+     solve routed down the island's own drainage, installed as the ONE ground-
+     water field (city/waterfield.js), drawn with the one water material; cars,
+     debris jams, bridge failure, manholes and the silt it leaves. Loads before
+     world/water_spec.js; it reaches the material at runtime. -->
+
+<script src="src/systems/flashflood.js?v=ffroute1014"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
 <script src="src/systems/hurricane.js?v=hur1014"></script>
@@ -1015,7 +1019,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=meteor1014"></script>
+<script src="src/systems/disasters.js?v=ffroute1014"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>
@@ -1117,6 +1121,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
+<script src="src/city/waterfield.js?v=ffroute1014"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
@@ -1504,7 +1509,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/fitout_plans.js?v=loose1013"></script>
 <script src="src/city/fitout_work.js?v=loose1013"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
-<script src="src/city/swim.js?v=sharkmode1"></script>
+<script src="src/city/swim.js?v=ffroute1014"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage

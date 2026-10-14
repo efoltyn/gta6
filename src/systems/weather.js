@@ -663,10 +663,8 @@
   // A new world (or a mode change) must not inherit the last one's puddles.
   CBZ.weatherGroundReset = function () {
     pool = poolAmb = 0; cover = 0; wetLook = 0;
-    floodHold = 0; uFlood.value.set(0, 0, 0, 0);
     ashHold = 0; ash.amount = 0; uAshK.value.set(0, 60, 3, 0.06);
     if (CBZ.groundWaterSet) CBZ.groundWaterSet(0);
-    if (CBZ.groundWaterFrontSet) CBZ.groundWaterFrontSet(null);
   };
 
   /* ---- THE SURFACE COAT ---------------------------------------------------
@@ -689,21 +687,7 @@
      and NOTHING at all while every scalar is zero (the branches early-out). */
   const uSnow = { value: 0 }, uWet = { value: 0 };
   const uPool = { value: new THREE.Vector4(0, 0, 0, 0) };   // y, camX, camZ, radius
-  const uFront = { value: new THREE.Vector4(1, 0, 0, 0) };  // dx, dz, planeD, on
   const uSky = { value: new THREE.Vector4(0.55, 0.63, 0.72, 0) };  // sky rgb + clock
-  /* THE FLASH-FLOOD LOOK (2026-08-23, systems/flashflood.js's seam). Real
-     floodwater is not the clear blue sheet the coat paints for rain: it is
-     OPAQUE MUD, it stands taller at the crest of a moving front, and it
-     visibly streams. One extra uniform carries all of it —
-       x  mud       0..1 blend from clear water to opaque brown
-       y  crestLift metres the waterline climbs in the band behind the front
-       z  band      metres of churned crest band behind the front line
-       w  flow      m/s of visible downstream streaming
-     — and every shader term it feeds is gated on it being nonzero, so a build
-     that never calls CBZ.weatherFloodLook renders pixel-identical to before.
-     HOLD-DECAYED like weatherDrive: the caller asserts it every frame, and a
-     def that dies mid-event cannot leave the world muddy. */
-  const uFlood = { value: new THREE.Vector4(0, 0, 0, 0) };
   /* ---- ASHFALL ON THE GROUND (2026-09-01) --------------------------------
      OWNER'S COMPLAINT, photographed: the volcano's deposit was a LEOPARD
      PRINT — hundreds of near-identical grey amoebas at partial coverage
@@ -727,24 +711,14 @@
      asserting the veil for minutes after the sky has finished releasing. */
   const uAshP = { value: new THREE.Vector4(0, 0, 1, 0) };
   const uAshK = { value: new THREE.Vector4(0, 60, 3, 0.06) };
-  const floodTgt = { mud: 0, crest: 0, band: 0, flow: 0 };
-  let floodHold = 0;
-  CBZ.weatherFloodLook = function (o) {
-    if (!o) { floodHold = 0; return; }
-    floodTgt.mud = Math.max(0, Math.min(1, +o.mud || 0));
-    floodTgt.crest = Math.max(0, +o.crest || 0);
-    floodTgt.band = Math.max(0, +o.band || 0);
-    floodTgt.flow = Math.max(0, +o.flow || 0);
-    floodHold = 1.2;
-  };
-  /* WHY THE WATER IS NOT JUST A DARK PATCH. Three terms, all free:
+  /* WHY THE WATER IS NOT JUST A DARK PATCH. Two terms, both free:
      · a FRESNEL sky reflection — water read at a grazing angle is mostly sky,
        which is the single strongest cue that a surface is wet rather than
        painted, and the sky colour is handed in live so it works at night too;
-     · a RIPPLE that modulates that reflection, so the sheet moves;
-     · FOAM in the first metres behind a flash-flood front, because the leading
-       edge of a run-up is whiter than the water behind it (the same asymmetry
-       world/water_spec.js's swash is built on). */
+     · a RIPPLE that modulates that reflection, so the sheet moves.
+     This is STANDING rain. A flash flood is moving water with its own solved
+     surface (systems/flashflood.js draws it from the routed field), so the
+     old front-plane crest/foam/mud terms that lived here are gone. */
   const COAT_FS =
     "float cbzUp = vCbzUp * vCbzUp;\n" +
     "if (uCbzWetK > 0.001) gl_FragColor.rgb *= 1.0 - 0.40 * uCbzWetK * cbzUp;\n" +
@@ -755,58 +729,17 @@
     // ground and draws a curved false shoreline across the middle distance.
     "  float cbzFade = 1.0 - smoothstep(uCbzPool.w * 0.72, uCbzPool.w, length(vCbzWP.xz - uCbzPool.yz));\n" +
     "  float cbzD = uCbzPool.x - vCbzWP.y;\n" +
-    "  float cbzFd = 1e9;\n" +
-    "  if (uCbzFront.w > 0.5) {\n" +
-    "    cbzFd = uCbzFront.z - dot(vCbzWP.xz, uCbzFront.xy);\n" +
-    // THE CREST: a flash-flood front stands HIGHER than the water behind it,
-    // so in the band behind the line the waterline is lifted — the wet edge
-    // visibly bulges up slopes and kerbs at the wall and settles after it.
-    // Zero-gated: crestLift is 0 unless flashflood.js is driving the event.
-    "    if (uCbzFlood.y > 0.0 && cbzFd > 0.0 && cbzFd < uCbzFlood.z)\n" +
-    "      cbzD += uCbzFlood.y * sin(min(1.0, cbzFd / uCbzFlood.z) * 3.14159);\n" +
-    "    if (cbzFd < 0.0) cbzD = -1.0;\n" +
-    "  }\n" +
     "  if (cbzD > 0.0) {\n" +
     "    float cbzW = smoothstep(0.0, 0.05, cbzD) * cbzUp * cbzFade;\n" +
     "    vec3 cbzV = normalize(cameraPosition - vCbzWP);\n" +
     "    float cbzFres = pow(1.0 - clamp(cbzV.y, 0.0, 1.0), 3.0);\n" +
-    // MOVING WATER MOVES. With a live flow the ripple is a set of streaks
-    // perpendicular to the travel direction, advected downstream at the
-    // front's own speed — two frames a tenth of a second apart differ, which
-    // is exactly the cue a still sheet of sine product cannot give.
-    "    float cbzRip;\n" +
-    "    if (uCbzFlood.w > 0.001) {\n" +
-    "      cbzRip = 0.5 + 0.5 * sin(dot(vCbzWP.xz, uCbzFront.xy) * 2.4 - uCbzSky.w * (2.2 + uCbzFlood.w * 1.6)\n" +
-    "        + sin(vCbzWP.x * 0.9 + vCbzWP.z * 1.2) * 1.3);\n" +
-    "    } else {\n" +
-    "      cbzRip = 0.5 + 0.5 * sin(vCbzWP.x * 2.3 + uCbzSky.w * 2.6) * sin(vCbzWP.z * 1.7 - uCbzSky.w * 2.1);\n" +
-    "    }\n" +
+    "    float cbzRip = 0.5 + 0.5 * sin(vCbzWP.x * 2.3 + uCbzSky.w * 2.6) * sin(vCbzWP.z * 1.7 - uCbzSky.w * 2.1);\n" +
     "    vec3 cbzDeep = mix(gl_FragColor.rgb * 0.18, vec3(0.026, 0.048, 0.058), min(1.0, cbzD * 1.4));\n" +
     // the sky term is CAPPED well under 1: water read at a grazing angle really
     // is mostly sky, but letting it get there makes a flooded street read as a
     // pale sheet against pale asphalt — the flood has to stay unmistakably
     // DARKER than the road it covered.
     "    vec3 cbzWater = mix(cbzDeep, uCbzSky.rgb, clamp(cbzFres * (0.26 + 0.34 * cbzRip), 0.0, 0.58));\n" +
-    // MUD. You cannot see the ground under real floodwater: it is a suspended
-    // sediment load, matte and brown, and it goes opaque FAST with depth. The
-    // sky reflection is mostly killed with it — mud does not mirror.
-    "    if (uCbzFlood.x > 0.001) {\n" +
-    "      vec3 cbzMud = vec3(0.215, 0.158, 0.105) * (0.85 + 0.28 * cbzRip);\n" +
-    "      cbzWater = mix(cbzWater, cbzMud, uCbzFlood.x * min(1.0, 0.35 + cbzD * 1.1));\n" +
-    "    }\n" +
-    // the foam band scales with the crest band instead of a fixed 3.5 m, and
-    // in a muddy event it is CHURNED — broken up by the moving ripple into
-    // streaks of white matter on brown, never a clean white blanket (the
-    // first pass painted half the flood pale). Flag off: identical output.
-    "    float cbzFoamW = max(3.5, uCbzFlood.z * 0.25);\n" +
-    "    if (cbzFd < cbzFoamW) {\n" +
-    "      float cbzFoamK = (1.0 - cbzFd / cbzFoamW) * 0.85;\n" +
-    "      if (uCbzFlood.x > 0.001) cbzFoamK *= 0.30 + 0.55 * cbzRip;\n" +
-    // dirty foam: the boil at a muddy crest is white MATTER on brown water,
-    // not clean surf — pure white read as fog/snow in the storyboard
-    "      vec3 cbzFoamC = mix(vec3(0.88, 0.92, 0.95), vec3(0.80, 0.76, 0.66), uCbzFlood.x * 0.55);\n" +
-    "      cbzWater = mix(cbzWater, cbzFoamC, cbzFoamK);\n" +
-    "    }\n" +
     "    gl_FragColor.rgb = mix(gl_FragColor.rgb, cbzWater, cbzW);\n" +
     "  }\n" +
     "}\n" +
@@ -893,9 +826,7 @@
       sh.uniforms.uCbzSnowK = uSnow;
       sh.uniforms.uCbzWetK = uWet;
       sh.uniforms.uCbzPool = uPool;
-      sh.uniforms.uCbzFront = uFront;
       sh.uniforms.uCbzSky = uSky;
-      sh.uniforms.uCbzFlood = uFlood;
       sh.uniforms.uCbzAshP = uAshP;
       sh.uniforms.uCbzAshK = uAshK;
       sh.vertexShader = "varying vec3 vCbzWP;\nvarying float vCbzUp;\n" + vs.replace(
@@ -908,7 +839,7 @@
         "vCbzUp = clamp(normalize(mat3(modelMatrix) * normal).y, 0.0, 1.0);\n" +
         "#include <fog_vertex>");
       sh.fragmentShader = "uniform float uCbzSnowK;\nuniform float uCbzWetK;\n" +
-        "uniform vec4 uCbzPool;\nuniform vec4 uCbzFront;\nuniform vec4 uCbzSky;\nuniform vec4 uCbzFlood;\n" +
+        "uniform vec4 uCbzPool;\nuniform vec4 uCbzSky;\n" +
         "uniform vec4 uCbzAshP;\nuniform vec4 uCbzAshK;\n" +
         "varying vec3 vCbzWP;\nvarying float vCbzUp;\n" + fs.replace(anchor, COAT_FS + anchor);
     };
@@ -967,16 +898,6 @@
 
   function coatTick(dt) {
     if (CFG.WEATHER_SURFACE_COAT === false) return;
-    // the flood look eases toward its asserted target while held, and bleeds
-    // back to clear water when the assertions stop (event ended or def died)
-    floodHold -= dt || 0;
-    const fv = uFlood.value, fk = Math.min(1, (dt || 0) * 2.5);
-    const wantMud = floodHold > 0 ? floodTgt.mud : 0;
-    fv.x += (wantMud - fv.x) * fk;
-    fv.y += ((floodHold > 0 ? floodTgt.crest : 0) - fv.y) * fk;
-    fv.z += ((floodHold > 0 ? floodTgt.band : 0) - fv.z) * fk;
-    fv.w += ((floodHold > 0 ? floodTgt.flow : 0) - fv.w) * fk;
-    if (fv.x < 0.004 && floodHold <= 0) fv.set(0, 0, 0, 0);
     // ...ash included: a volcano is the one event that puts something on the
     // ground without a drop of rain, and without this line the coat was never
     // scanned at all in an eruption-only session.
@@ -1001,9 +922,6 @@
       if (Number.isFinite(y)) uPool.value.set(y, cp.x, cp.z, 380);
       else uPool.value.set(0, 0, 0, 0);
     } else uPool.value.set(0, 0, 0, 0);
-    const F = CBZ.groundWaterFront ? CBZ.groundWaterFront() : null;
-    if (F) uFront.value.set(F.dx, F.dz, F.x * F.dx + F.z * F.dz + F.s, 1);
-    else uFront.value.set(1, 0, 0, 0);
     // the sky the water reflects is whatever the sky IS this minute — the fog
     // colour daynight.js writes every frame, so the flood goes dark at night
     // instead of glowing like a lit pool.
