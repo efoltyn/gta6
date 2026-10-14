@@ -1886,15 +1886,18 @@
     // pad win while guaranteeing continuous earth at the seam.
     const CARVE_SEAM_INSET = Math.min(32, Math.hypot(W / SEG, D / SEG) + 2);
     if (!FIN && geo.index) {
-      const src = geo.index.array, kept = [];
+      // (kept in a typed array: a plain array of ~1.2 M indices was several
+      // MB of boxed garbage on the boot peak; the same Uint32 index results)
+      const src = geo.index.array, kept = new Uint32Array(src.length);
+      let nk = 0;
       for (let i = 0; i < src.length; i += 3) {
         const ia = src[i], ib = src[i + 1], ic = src[i + 2];
         const tx = (pos.getX(ia) + pos.getX(ib) + pos.getX(ic)) / 3 + cx0;
         const tz = (pos.getZ(ia) + pos.getZ(ib) + pos.getZ(ic)) / 3 + cz0;
         if (insideAuthoredSurface(tx, tz, -CARVE_SEAM_INSET)) { carvedTriangles++; continue; }
-        kept.push(ia, ib, ic);
+        kept[nk++] = ia; kept[nk++] = ib; kept[nk++] = ic;
       }
-      geo.setIndex(kept);
+      geo.setIndex(pos.count > 65535 ? new THREE.BufferAttribute(kept.slice(0, nk), 1) : new THREE.BufferAttribute(Uint16Array.from(kept.subarray(0, nk)), 1));
     }
     if (!FIN && (COAST || CFG.CONTINENT_RELIEF_V1 !== false)) geo.computeVertexNormals(); // coast + country slopes want real shading
     if (!FIN && PLATE_SIG && CBZ.bakePut && geo.index) {
