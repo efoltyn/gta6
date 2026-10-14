@@ -5805,9 +5805,12 @@
           x: (Math.max(d.x0, cx - R) + Math.min(d.x1, cx + R)) / 2, z: (Math.max(d.z0, cz - R) + Math.min(d.z1, cz + R + 80)) / 2,
           half: Math.max(Math.min(d.x1, cx + R) - Math.max(d.x0, cx - R), Math.min(d.z1, cz + R + 80) - Math.max(d.z0, cz - R)) / 2 };
       }) : [];
+      const bz1 = P ? Math.max(cz + R, P.harbour.basin.z1) : cz + R;
       const I = CBZ.island = {
         arena: arena, plan: P,
-        bounds: { cx: cx, cz: cz, R: R, x0: cx - R, x1: cx + R, z0: cz - R, z1: P ? Math.max(cz + R, P.harbour.basin.z1) : cz + R, seaR: FAR_WL },
+        cx: cx, cz: cz, center: { x: cx, z: cz }, R: R, radius: R, seaY: OCEAN_Y,
+        bounds: { cx: cx, cz: cz, R: R, x0: cx - R, x1: cx + R, z0: cz - R, z1: bz1,
+          minX: cx - R - 12, maxX: cx + R + 12, minZ: cz - R - 12, maxZ: bz1 + 12, seaR: FAR_WL },
         coast: coast, beachR: R + BEACH_W * 0.45, shelfR: SHORE_R,
         coastAt: function () { return R; },
         buildings: fragile,
@@ -5815,9 +5818,12 @@
         roads: { pieces: pieces, junctions: roadPlan ? roadPlan.junctions.map(function (j) { return { x: j.x, z: j.z, n: j.n, N: j.N, S: j.S, E: j.E, W: j.W }; }) : [],
           lanes: lanes, bridges: harbourOut.bridges, segs: roadSegs,
           inStreet: function (r) { return P ? !!P.inStreet(r, 0) : false; }, onRoad: onRoad },
-        harbour: P ? { quay: P.harbour.quay, face: P.harbour.face, basin: P.harbour.basin, breakwater: P.harbour.breakwater,
-          piers: P.harbour.piers, jetties: harbourOut.jetties, lighthouse: P.harbour.light, berths: P.harbour.berths,
-          points: harbourOut.points } : null,
+        // the harbour is a LIST of seawall / pier points (what the storm's surf
+        // hits hardest: systems/hurricane.js harbour()) carrying the rest of
+        // the harbour as named fields
+        harbour: P ? Object.assign(harbourOut.points.slice(), { quay: P.harbour.quay, face: P.harbour.face, basin: P.harbour.basin,
+          breakwater: P.harbour.breakwater, piers: P.harbour.piers, jetties: harbourOut.jetties, lighthouse: P.harbour.light,
+          berths: P.harbour.berths, points: harbourOut.points }) : [],
         boats: harbourOut.boats,
         volcano: { x: VOL.x, z: VOL.z, r: VOL.r, peak: VOL.peak, rim: VOL.rim, bowl: VOL.bowl, breach: VOL.breach,
           craterY: VOL.peak - VOL.bowl },
@@ -5845,7 +5851,8 @@
           if (islandDress && islandDress.lensMaterial) out.push(islandDress.lensMaterial);
           return out;
         },
-        groundAt: surfaceHeightAt, terrainAt: groundHeightAt,
+        groundAt: surfaceHeightAt, groundHeightAt: surfaceHeightAt, terrainAt: groundHeightAt,
+        glass: allGlass,
         randomPoint: function (a, b) { return arena.randomPoint(a, b); },
         stats: function () {
           return { radius: R, buildings: fragile.length, cars: cars.length, trees: flammable.length, boats: harbourOut.boats.length,

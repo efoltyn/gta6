@@ -76,12 +76,16 @@ CBZ.lab.kit("island", {
     const pc = P ? CBZ.islandPlan.check(P) : null;
     // draws and triangles, as the renderer would see them
     let draws = 0, tris = 0;
-    A.root.traverseVisible(function (o) {
-      if (!o.isMesh || o.layers.mask !== 1) return;
-      if (o.material && o.material.visible === false) return;
-      draws++;
-      const g = o.geometry;
-      tris += (g.index ? g.index.count : g.attributes.position.count) / 3 * (o.isInstancedMesh ? o.count : 1);
+    // (the arena root itself is hidden outside an island mode: count what it
+    // draws when it is shown)
+    A.root.children.forEach(function (c) {
+      c.traverseVisible(function (o) {
+        if (!o.isMesh || o.layers.mask !== 1) return;
+        if (o.material && o.material.visible === false) return;
+        draws++;
+        const g = o.geometry;
+        tris += (g.index ? g.index.count : g.attributes.position.count) / 3 * (o.isInstancedMesh ? o.count : 1);
+      });
     });
     const st = I && I.stats ? I.stats() : {};
     r.built = {
