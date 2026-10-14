@@ -213,6 +213,81 @@ design: it uploads as the player turns); hidden-but-resident GPU buffers far
 content (farcull's side); the GPU's textures (130 MB: the Halloran airfield
 surface 4096x1024 is 21 MB, the full ped atlas page 21 MB).
 
+## Phone boot peak, wave 3 (2026-10-14): what holds pixels, and what is built for nobody
+
+One paired run, `--device phone --load --against b70a6db0 --pairs 3` (MB, per-run
+values in brackets):
+
+| MB | base b70a6db0 | after |
+|---|---|---|
+| true phone peak (heap + GPU + canvases) | 1214 [1211, 1214, 1219] | 1126 [1126, 1126, 1128] |
+| live after a GC (phone live) | 1014 | 941 |
+| JS heap peak | 841 | 806 |
+| GPU | 292 (textures 127.5) | 287 (textures 122) |
+| 2D canvases | 81 | 33 (peak 42) |
+
+Single runs, same box: heap after a GC V8 262 + ArrayBuffers 393 before, 257 + 368
+after. A second paired run with play (`--against b70a6db0 --pairs 3`, load + spots):
+phone peak 1230 -> 1123, the 40 m/s drive's peak 1321 -> 1219, spawn 1067 -> 1001,
+downtown 1109 -> 1016; frames within noise (spawn frame "same"); look: same at the
+spawn (1.08 % changed vs 1.39 % between two base runs), downtown and aerial.
+
+New eyes (tools/preload/textrack.js, loaded beside abtrack with
+`--preload tools/preload/abtrack.js,tools/preload/textrack.js`): `CBZ_TEX()` every
+live GL texture with its painter site and whether anything in the scene still uses
+it; `CBZ_CANVAS()` the live 2D canvases by painter and whether they were uploaded;
+`CBZ_GEO()` the scene's CPU geometry by drawing / hidden and uploaded / never
+uploaded; `CBZ_BUF()` GL buffers by owner. abtrack.js: `CBZ_AB_POST()` (allocated
+after the reveal, where the peak lives), `CBZ_AB_NONGEO()`, `CBZ_AB_SITEOF(array)`.
+heappeak.js names the whole climb (a stack per 3 MB of new maximum).
+
+What changed:
+- **Canvases hold pixels only while three reads them** (core/texfree.js).
+  `CBZ.liveCanvas` (packages' canvasTexLive, the situation room's 2048x512 wall):
+  no canvas until drawn on or drawn; `paintWith(fn)` boards (the council tally, the
+  situation room) paint at the upload and give the canvas back. Lazy painters for
+  the plot signs and the highway sign atlas (a recorded spec list, 4 MB that was
+  kept out of the sweep); tattoo charts painted when first read; the outfit atlases
+  (67 x 128x256, 8.4 MB) painted at build for their colour read-back, then given
+  back and repainted at the upload or the ped page's copy (`clothFill` +
+  `clothPaint`, pure). Canvases given back are shrunk at once (`giveBack`), not
+  left to the collector. Once-painted vegetation, crash decals, the airport's sign
+  atlas and the cabin screen atlas give their canvas back at the upload instead of
+  30 s later. The full map's canvas exists only while the map is open.
+- **Built for nobody**: the clothing store, gun store and pawn shop floors are
+  dressed when the player comes within 80-110 m (9.6 MB of hidden, never uploaded
+  merged geometry at the boot); the prison's inmate crowd (48 full rigs, 2.7k
+  objects, under the hidden prison root) is a `definePrison` builder now; the FP
+  arsenal is prebuilt in idle time only for the guns the player has (it was every
+  slot: two models and two grasp hands each, ~10 MB right after the boot).
+- **The ped atlas** (entities/pedinstance.js): pages are born on the GPU with no CPU
+  copy, grow one slot row at a time past 1024 rows on WebGL2 (the outfit class
+  jumped from 512 rows to a 2048-row page, 21 MB with mips, for ~40 outfits; 1024
+  rows hold 42, 1088 hold 56) and grow texture to texture through a scratch texture
+  of the page's own format (no readback garbage). `CBZ.pedPageGrowCheck()`.
+- metro.js: the far-map atlas is cut to the 256-row band its maps reach on WebGL2
+  (2048x1536, was 2048x2048: 4 MB of CPU while it paints, 5 MB of GPU after).
+
+Looked at and left, with the numbers:
+- **Hidden wall originals** (lbox, 22 MB V8): 24.3k hidden meshes at 925 B each
+  (measured: 20k Meshes in the live page). 11.4k are LOS blockers, 6.6k only
+  collider refs, 1.9k neither. glass already does the cheap version (`GlassRef`, a
+  plain tag for c.ref). Doing it for walls means a lean object that still raycasts,
+  carries `isMesh`, keeps its wallSlices key and its place in losBlockers /
+  b.losMeshes / colliders, and that 48 files reading losBlockers keep working with:
+  the next wave, as its own change (est. 11-18 MB).
+- **Rigs**: 340 at the boot, 22 visible, 205 farther than 150 m, 117 farther than
+  400 m (past the 380 m phone fog: airport travellers, venue staff, pit crews, ski
+  staff). A rig is ~55 kB of V8 (19k nodes in all). Building a rig only near needs
+  peds.js to hold a recipe for every dress pass any system applies after the spawn;
+  not done here.
+- The Halloran surface (21 MB) is drawn from the downtown play spots (in the
+  frustum, its near edge ~180 m out, inside the fog), so its level 0 is sampled. The PMREMs (official HDR
+  and the car paint env) are different pictures. MSAA stays (wave 1).
+- The peak is still ~180 MB of not-yet-collected garbage over the live set; the
+  climb after the reveal is room bakes, the metro far map, traffic car models,
+  the ped navgrid and cabins (CBZ_AB_POST).
+
 ## What is built (branch city-slice)
 
 - **Tool slices** (`src/core/slice.js`): `?mode=city&slice=<name>|x,z,r`. Everything visible
