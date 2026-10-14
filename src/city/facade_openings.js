@@ -740,7 +740,7 @@
       const w = W[k];
       const i0 = Math.floor(w[0] / GC), i1 = Math.floor(w[1] / GC), k0 = Math.floor(w[4] / GC), k1 = Math.floor(w[5] / GC);
       if ((i1 - i0 + 1) * (k1 - k0 + 1) > 200) continue;
-      for (let i = i0; i <= i1; i++) for (let j = k0; j <= k1; j++) { const key = i * 73856093 ^ j * 19349663; let L = wg.get(key); if (!L) { L = []; wg.set(key, L); } L.push(w); }
+      for (let i = i0; i <= i1; i++) for (let j = k0; j <= k1; j++) { const key = i * 73856093 ^ j * 19349663; let L = wg.get(key); if (!L) { L = []; wg.set(key, L); } L.push(k); }
     }
     /* IS THE FACE (a, s) OF BOX i HIDDEN over the rect [u0,u1] x [v0,v1]?
        Hidden only where the WHOLE overlap is backed by solid (a face half over
@@ -757,8 +757,6 @@
        the Set + rect-building version was 6.3 s of a 25 s city build.) */
     const wStamp = new Int32Array(W.length);
     let wStampN = 0;
-    const wIdx = new Map();
-    for (let k = 0; k < W.length; k++) wIdx.set(W[k], k);
     const hA0 = [], hA1 = [], hY0 = [], hY1 = [], gX = [], gY = [];
     const uniq4 = function (arr) {
       arr.sort(function (p, q) { return p - q; });
@@ -777,8 +775,9 @@
       for (let gi = Math.floor(xs0 / GC); gi <= Math.floor(xs1 / GC); gi++) for (let gk = Math.floor(zs0 / GC); gk <= Math.floor(zs1 / GC); gk++) {
         const L = wg.get(gi * 73856093 ^ gk * 19349663); if (!L) continue;
         for (let q = 0; q < L.length; q++) {
-          const w = L[q], k = wIdx.get(w);
+          const k = L[q];
           if (wStamp[k] === wStampN) continue; wStamp[k] = wStampN;
+          const w = W[k];
           if (!(off > w[a * 2] && off < w[a * 2 + 1])) continue;
           if (w[u * 2 + 1] <= u0 || w[u * 2] >= u1 || w[v * 2 + 1] <= v0 || w[v * 2] >= v1) continue;
           nh++;
@@ -812,6 +811,7 @@
     }
     let moved = 0;
     const CELL = 0.02;
+    const pos = new Int32Array(n);                 // a face's place in its cluster's plane order
     // rounds over all three axes: settling a face on one axis can make a box
     // reach into a wall, putting a SIDE face in a jamb's plane
     for (let round = 0; round < 3; round++) {
@@ -885,13 +885,12 @@
                skipped. `i` is still the face earlier in the plane order, as
                in the all-pairs loop this replaced (2 s + 6 s of a 25 s build
                on downtown's long ornament runs): the same set of faces. */
-            const pos = new Map();
-            for (let x = 0; x < L.length; x++) pos.set(L[x], x);
+            for (let x = 0; x < L.length; x++) pos[L[x]] = x;
             const byU = L.slice().sort(function (p, q) { return B[p * 6 + u * 2] - B[q * 6 + u * 2]; });
             for (let xp = 0; xp < byU.length; xp++) for (let yp = xp + 1; yp < byU.length; yp++) {
               const pp = byU[xp], qq = byU[yp];
               if (B[qq * 6 + u * 2] >= B[pp * 6 + u * 2 + 1]) break;   // no u overlap from here on
-              const i = pos.get(pp) < pos.get(qq) ? pp : qq, j = i === pp ? qq : pp;
+              const i = pos[pp] < pos[qq] ? pp : qq, j = i === pp ? qq : pp;
               if (recs[i][6] === recs[j][6]) continue;
               if (hit.has(i) && hit.has(j)) continue;
               if (Math.abs(B[i * 6 + a * 2 + s] - B[j * 6 + a * 2 + s]) > tol) continue;
