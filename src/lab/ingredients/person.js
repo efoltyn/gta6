@@ -260,7 +260,7 @@
     const M = CBZ.moves, B = CBZ.brain;
     for (let i = 0; i < people.length; i++) {
       const a = people[i];
-      if (a.dead) continue;
+      if (a.dead || !a.group.parent) continue;        // taken off the world (CBZ.leave): nobody to move
       const ch = a.char, g = a.group, p = g.position;
       // THINK: perceive, decide, act
       if (B && a._brainOn) {

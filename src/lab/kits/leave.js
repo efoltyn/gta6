@@ -91,7 +91,7 @@ CBZ.lab.kit("leave", {
     W.add("player", { name: "player", at: [EYE.x, EYE.z], yaw: 0 });
     W.add("person", { name: "aide", at: [-1.6, 0.6], yaw: 150, role: "exec", brain: false });
     W.watch("door", "door", function () { return door.open ? "open" : "shut"; });
-    W.marks = { look: +P.look !== 0 };
+    W.marks = { look: true };
     // THE PLAYER'S EYES: the camera stands where he stands and looks into the
     // room, before the leave layer asks who can see whom (update order 36.6)
     (CBZ.onUpdate || function () {})(36.5, function () {
@@ -110,7 +110,7 @@ CBZ.lab.kit("leave", {
     const a = aide.actor;
     const route = String(P.route || "door");
     return [
-      [0.3, function () { W.event("aide", "says \"Three folders on your desk, sir.\""); aide.say && aide.say("Three folders on your desk, sir."); }, "aide: his line"],
+      [0.3, function () { aide.say("Three folders on your desk, sir."); }, "aide: his line"],
       [2.6, function () {
         W.marks.leftAt = W.t();
         const opts = {
@@ -129,7 +129,7 @@ CBZ.lab.kit("leave", {
         }
         CBZ.leave.go(a, opts);
       }, "aide: done talking, CBZ.leave.go"],
-      [3.0, function () { if (!W.marks.look) W.event("player", "turns his back"); }, ""],
+      [3.0, function () { if (+P.look === 0) { W.marks.look = false; W.event("player", "turns his back"); } }, ""],
     ];
   },
   probe: function (W, P) {
@@ -139,7 +139,10 @@ CBZ.lab.kit("leave", {
     const left = W.marks.leftAt || 0;
     const door = g && g.throughDoorAt != null ? +(left + g.throughDoorAt).toFixed(2) : null;
     const inView = W.marks.goneSeen ? W.marks.goneSeen.inView : null;
-    const ok = !!g && inView === false && (String(P.route || "door") !== "door" || door != null) && g.walked > 2;
+    // watched, he must have walked out; with the player's back turned he may
+    // go the moment nobody sees him
+    const watched = +P.look !== 0;
+    const ok = !!g && inView === false && (!watched || ((String(P.route || "door") !== "door" || door != null) && g.walked > 2));
     const f = function (v) { return v == null ? "never" : (+v).toFixed(1) + " s"; };
     return {
       ok: ok,

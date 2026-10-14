@@ -89,8 +89,10 @@
     const cam = CBZ.camera, THREE = (typeof window !== "undefined" ? window : globalThis).THREE;
     if (!pos || !cam || !THREE) return { onScreen: false, occluded: false, dist: Infinity };
     const y = pos.y || 0;
-    const v = new THREE.Vector3(pos.x, y + 1.05, pos.z).project(cam);
-    const onScreen = v.z >= -1.05 && v.z <= 1.05 && Math.abs(v.x) <= 1.28 && Math.abs(v.y) <= 1.38;
+    const v = new THREE.Vector3(pos.x, y + 1.05, pos.z).applyMatrix4(cam.matrixWorldInverse);
+    const inFront = v.z < -(cam.near || 0.05);
+    if (inFront) v.applyMatrix4(cam.projectionMatrix);
+    const onScreen = inFront && v.z <= 1.0 && Math.abs(v.x) <= 1.28 && Math.abs(v.y) <= 1.38;
     const c = cam.position;
     return {
       onScreen: onScreen, occluded: !!(CBZ.npcOccluded && CBZ.npcOccluded(pos.x, y, pos.z, cam)),

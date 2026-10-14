@@ -1244,8 +1244,17 @@
           : (CBZ.cityGroundHeightAt ? +CBZ.cityGroundHeightAt(x, z) : NaN);
         y = (Number.isFinite(floor) ? floor : (Number.isFinite(P.pos.y) ? P.pos.y : 0)) + 1.05;
       }
-      _npcTransitionProbe.set(x, y, z).project(camera);
-      const onPaddedScreen = _npcTransitionProbe.z >= -1.05 && _npcTransitionProbe.z <= 1.05 &&
+      // BEHIND THE CAMERA IS NOT ON SCREEN. project() divides by w, which is
+      // negative behind the eye: a point there comes out mirrored, with an NDC
+      // depth just over 1 (1 + 2n/depth: 1.03 three metres behind), inside the
+      // old 1.05 depth pad. Every body more than ~2 m behind the camera inside
+      // the mirrored cone read as "in view" (measured in the lab's leave kit:
+      // a man 3.8 m behind the player's back could not be let go). The view-
+      // space depth decides front or back; the pad stays on the sides.
+      _npcTransitionProbe.set(x, y, z).applyMatrix4(camera.matrixWorldInverse);
+      const inFront = _npcTransitionProbe.z < -(camera.near || 0.05);
+      if (inFront) _npcTransitionProbe.applyMatrix4(camera.projectionMatrix);
+      const onPaddedScreen = inFront && _npcTransitionProbe.z <= 1.0 &&
         Math.abs(_npcTransitionProbe.x) <= 1.28 && Math.abs(_npcTransitionProbe.y) <= 1.38;
       // ON SCREEN BUT BEHIND A WALL is not seen: a body in the next room, or
       // on the far side of a shut door, may appear (opts.occlusion)
