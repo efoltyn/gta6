@@ -961,7 +961,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reactions.js?v=pf0930c"></script>
 <script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
-<script src="src/systems/weather.js?v=w09290204"></script>
+<script src="src/systems/weather.js?v=ffroute1014"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/dashboard.js?v=cars1"></script>
 <script src="src/systems/combat.js?v=melee1011"></script>
@@ -1102,10 +1102,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:earthquake     — systems/quake.js, tagged above (predates this block) -->
 <!-- seam:lightning      — systems/lightningfx.js, tagged above -->
 <!-- seam:tsunami        — city/tsunami.js, tagged with the city systems -->
-<!-- seam:flashflood — systems/flashflood.js owns the churn spray, the entrained
-     debris and the roar. Two draw calls and no water planes: the flood itself
-     is still a term in the ONE shared depth field, never a mesh. -->
-<script src="src/systems/flashflood.js?v=flood1"></script>
+<!-- seam:flashflood — systems/flashflood.js IS the flash flood: a shallow-water
+     solve routed down the island's own drainage, installed as the ONE ground-
+     water field (city/waterfield.js), drawn with the one water material; cars,
+     debris jams, bridge failure, manholes and the silt it leaves. Loads before
+     world/water_spec.js; it reaches the material at runtime. -->
+
+<script src="src/systems/flashflood.js?v=ffroute1014"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
 <script src="src/systems/hurricane.js?v=hur1"></script>
@@ -1124,7 +1127,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=noring1013"></script>
+<script src="src/systems/disasters.js?v=ffroute1014"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>
@@ -1242,7 +1245,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<script src="src/city/waterfield.js?v=pf0930g"></script>
+<script src="src/city/waterfield.js?v=ffroute1014"></script>
 <script src="src/city/highways.js?v=peak1014c"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
@@ -1778,7 +1781,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/fitout_work.js?v=loose1013"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
 <script src="src/city/family.js?v=ekey2"></script>
-<script src="src/city/swim.js?v=sharkmode1"></script>
+<script src="src/city/swim.js?v=ffroute1014"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage
