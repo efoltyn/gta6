@@ -3649,6 +3649,8 @@
       links: [f1 && f1.link ? f1.link.id : null, f2 && f2.link ? f2.link.id : null],
     };
   }
+  // the lab's stair-drop kit builds the mansion's grand stair on a bare shell
+  CBZ.cityGrandStair = grandStair;
 
   /* THE MANSION'S PUBLISHED FRAME. Four files hang things on this front and
      ground — the balcony (president_public.js), the regime's banners

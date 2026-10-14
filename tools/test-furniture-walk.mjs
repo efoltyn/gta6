@@ -126,5 +126,17 @@ world([], [
 r = run("stair", { x: 0, y: 0, z: -1 }, [0, 3], 240);
 check(Math.abs(r.mn - 3) < 1e-6, "stair: climbed to the landing");
 
+// 7. a body falling past a GUARD RAIL (the grand stair's balustrade collider:
+//    18 cm, 1.0 m tall) with its centre over it: falls to the floor, never
+//    stands in the air on the rail's top (the owner's "standing on air")
+world([{ minX: -0.12, maxX: 0.06, minZ: -3, maxZ: 3, y0: 0.1, y1: 1.05 }]);
+r = run("railDrop", { x: 0, y: 3, z: 0 }, [0, 0], 120, { vy: -0.1 });
+check(Math.abs(r.mx) < 1e-6, "railDrop: fell to the floor past the rail top");
+
+// 8. ...while a crate as tall as that rail is still a floor you land on
+world([{ minX: -0.6, maxX: 0.6, minZ: -0.6, maxZ: 0.6, y0: 0, y1: 1.05 }]);
+r = run("crateLand", { x: 0, y: 3, z: 0 }, [0, 0], 120, { vy: -0.1 });
+check(Math.abs(r.mn - 1.05) < 1e-6 && Math.abs(r.mx - 1.05) < 1e-6, "crateLand: stands on the crate");
+
 console.log(fails ? `${fails} FAIL` : "ALL OK");
 process.exit(fails ? 1 : 0);

@@ -31,6 +31,10 @@
   // blocker at shin height, and stepTopAt() only lets you stand on its top
   // once your feet are already there (you jumped or vaulted up).
   const ON_TOP_EPS = 0.05;
+  // A box narrower than this (a handrail, a balustrade, a parapet coping, a
+  // fence, a sofa back) is never a FLOOR: a foot cannot be planted on it, so
+  // stepTopAt does not stand a body on its top. It stays a blocker.
+  const STAND_MIN = 0.25;
 
   // ---- static-world collision broad phase ---------------------------
   // Most colliders are inert walls and props. Index their expanded bounds
@@ -2398,7 +2402,21 @@
      solid, cars) is a blocker at shin height: collide() measures it from the
      real feet, and its top is ground only once the feet are already on it
      (ON_TOP_EPS), i.e. you jumped or vaulted onto the sofa. Walking into it
-     just stops you. */
+     just stops you.
+
+     A RAIL IS NOT A FLOOR (2026-10-14). "Any depth below the feet" made the
+     top of EVERY banded box a floor the moment a falling body's centre
+     crossed its footprint. The owner, in President mode: "if I jump over the
+     railing near the stairs, I'm standing on air instead of dropping down a
+     floor". He came down beside the grand stair's balustrade: its collider
+     (18 cm, 6 cm proud of the drawn rail so nobody steps off the open side)
+     caught the body's centre, its top 1.0 m over the treads became ground,
+     and he stood there in the air for good (before 10-13 the same top caught
+     the fall for one frame and then let go, a stutter rather than a hang).
+     Guard rails, balusters, parapet copings and sofa backs are all
+     blockers that are too narrow to stand on; their tops are no longer a
+     floor (STAND_MIN). A step, a kerb, a tread mass, a seat or a crate is
+     wider than that and is still stood on. lab kit stair-drop reproduces it. */
   function stepTopAt(x, z, feetY) {
     gridFresh();
     const b = colBuckets.get(colKey(Math.floor(x / COL_CELL), Math.floor(z / COL_CELL)));
@@ -2411,6 +2429,8 @@
       if (c.y0 == null || c.y0 > base || c.y1 <= best || c.y1 > (c.noStep ? onTop : hi)) continue;
       if (c._city && !cityOn) continue;
       if (x < c.minX || x > c.maxX || z < c.minZ || z > c.maxZ) continue;
+      if (c.yaw ? (c.hw < STAND_MIN / 2 || c.hd < STAND_MIN / 2)
+        : (c.maxX - c.minX < STAND_MIN || c.maxZ - c.minZ < STAND_MIN)) continue;   // a rail: blocker, never floor
       if (c.yaw) {
         const co = Math.cos(c.yaw), si = Math.sin(c.yaw), rx = x - c.cx, rz = z - c.cz;
         const lx = rx * co - rz * si, lz = rx * si + rz * co;
