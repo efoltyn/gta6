@@ -380,6 +380,12 @@
   const _curSample = {};
   function applyCurrent(P, step) {
     if (survOn()) {
+      // a ROUTED flood (systems/flashflood.js) speaks for its own water: the
+      // current is the solved one at this point, down whichever channel
+      if (CBZ.groundWaterField && CBZ.groundWaterField() && CBZ.groundWaterFlowAt) {
+        const f = CBZ.groundWaterFlowAt(P.pos.x, P.pos.z, swimCurrent);
+        if (f.speed > 0.02) { P.pos.x += f.x * step * 0.34; P.pos.z += f.z * step * 0.34; return; }
+      }
       if (!CBZ.waterEventSample) return;
       const s = CBZ.waterEventSample(P.pos.x, P.pos.z, null, _curSample);
       if (!s.active || !s.wet) return;

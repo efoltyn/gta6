@@ -3874,7 +3874,6 @@
   "src/world/terrain.js",
   "src/world/terrain_overhaul.js",
   "src/world/mountain_detail.js",
-  "src/core/seed.js",
   "src/systems/breach.js",
   "src/systems/airports.js",
   "src/world/forestlook.js",
@@ -3998,7 +3997,6 @@
   "src/city/roofloot.js",
   "src/city/beach.js",
   "src/city/expansion.js",
-  "src/city/waterfield.js",
   "src/world/waterfx.js",
   "src/city/highways.js",
   "src/city/highwaynet.js",
@@ -4446,6 +4444,7 @@
   "src/entities/verbposes.js",
   "src/entities/meleeposes.js",
   "src/systems/verbs_strike.js",
-  "src/systems/verbs_pickup.js"
+  "src/systems/verbs_pickup.js",
+  "src/city/waterfield.js"
  ]
 }
