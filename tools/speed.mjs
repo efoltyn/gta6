@@ -1548,11 +1548,44 @@ function scoreOn(mask, ss) { let n = 0, sum = 0, bad = 0; for (let i = 0; i < ma
    particles fall out). Base runs 3+ say how much of the stable picture a
    plain re-run changes (the floor, measured on blocks it did not choose).
    A candidate that changes clearly more than that is a LOOK REGRESSION. */
+/* HARNESS TRAP (2026-10-14): core/quality.js's DYNAMIC RESOLUTION governor
+   scales the pixel ratio by frame time (phone: 0.8..1), so on a loaded box
+   two runs of the SAME code can freeze their look shots at different
+   drawing buffers (624x1350 vs 702x1519 at the spawn, measured). That used
+   to read as "LOOK REGRESSION: drawing buffer" with no pixels compared (and
+   then crashed the report). The tier's own settings are still checked by the
+   settings half; here every shot is area-averaged to the smallest buffer of
+   the spot and compared there, so a real picture change still shows. */
+function fitShot(s, W, H) {
+  if (s.w === W && s.h === H) return s;
+  const L = new Uint8Array(W * H), sx = s.w / W, sy = s.h / H;
+  for (let y = 0; y < H; y++) {
+    const y0 = y * sy, y1 = y0 + sy;
+    for (let x = 0; x < W; x++) {
+      const x0 = x * sx, x1 = x0 + sx;
+      let sum = 0, wsum = 0;
+      for (let yy = Math.floor(y0); yy < Math.min(s.h, Math.ceil(y1)); yy++) {
+        const wy = Math.min(y1, yy + 1) - Math.max(y0, yy);
+        for (let xx = Math.floor(x0); xx < Math.min(s.w, Math.ceil(x1)); xx++) {
+          const w = wy * (Math.min(x1, xx + 1) - Math.max(x0, xx));
+          sum += s.L[yy * s.w + xx] * w; wsum += w;
+        }
+      }
+      L[y * W + x] = Math.round(sum / (wsum || 1));
+    }
+  }
+  return Object.assign({}, s, { w: W, h: H, L: L });
+}
 function lookSpot(name, B, C, outDir) {
   const r = { spot: name, baseShots: B.length, candShots: C.length };
   if (B.length < 2 || !C.length) { r.verdict = "n/a"; r.why = "needs 2+ base and 1+ candidate shots"; return r; }
+  const all = B.concat(C);
+  if (all.some((c) => c.w !== B[0].w || c.h !== B[0].h)) {
+    const W = Math.min(...all.map((c) => c.w)), H = Math.min(...all.map((c) => c.h));
+    r.resampled = `drawing buffers ${B.map((c) => c.w + "x" + c.h).join(",")} | ${C.map((c) => c.w + "x" + c.h).join(",")} (dynamic resolution): compared at ${W}x${H}`;
+    B = B.map((c) => fitShot(c, W, H)); C = C.map((c) => fitShot(c, W, H));
+  }
   const ref = B[0];
-  if (C.some((c) => c.w !== ref.w || c.h !== ref.h)) { r.verdict = "LOOK REGRESSION"; r.why = `drawing buffer ${ref.w}x${ref.h} → ${C[0].w}x${C[0].h}`; return r; }
   const st = blockSsim(ref.L, B[1].L, ref.w, ref.h);
   const mask = new Uint8Array(st.s.length); let nm = 0; for (let i = 0; i < mask.length; i++) if (st.s[i] >= STABLE_SSIM) { mask[i] = 1; nm++; }
   r.stableArea = +(nm / mask.length).toFixed(3);
@@ -1566,7 +1599,7 @@ function lookSpot(name, B, C, outDir) {
      the frame AND by half again, or the stable picture's mean SSIM down 0.01 */
   const over = r.cand.changed - r.floor.changed;
   r.verdict = (over > 0.005 && r.cand.changed > 1.5 * r.floor.changed) || r.cand.ssim < r.floor.ssim - 0.01 ? "LOOK REGRESSION" : "same look";
-  if (outDir) { try { r.png = writeLookPng(path.join(outDir, `look-${name}.png`), ref, C[0], cs[0], mask); } catch (e) { r.pngError = String(e.message || e); } }
+  if (outDir && ref.hw === C[0].hw && ref.hh === C[0].hh && !r.resampled) { try { r.png = writeLookPng(path.join(outDir, `look-${name}.png`), ref, C[0], cs[0], mask); } catch (e) { r.pngError = String(e.message || e); } }
   return r;
 }
 /* top: before | after. bottom: the SSIM heat map over "before" (red =
@@ -2161,7 +2194,7 @@ try {
       .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct)).slice(0, 30);
     if (other.length) { O(`  OTHER CHANGES (diagnostic, not a verdict):`); other.forEach((r) => O(line(r))); }
     O(`  LOOK (pixels, block SSIM at the game's HD settings; changed = share of the stable picture with SSIM < ${BAD_SSIM}):`);
-    for (const l of look) O(`    ${l.verdict.padEnd(15)} ${l.spot.padEnd(16)} ${l.cand ? `candidate changed ${fmt(100 * l.cand.changed, 2)}% vs a base re-run ${fmt(100 * l.floor.changed, 2)}%, SSIM ${fmt(l.cand.ssim, 4)} vs ${fmt(l.floor.ssim, 4)} (stable area ${fmt(100 * l.stableArea, 0)}%${l.floorBiased ? ", floor from 2 base shots: biased low" : ""})` : l.why || ""}${l.png ? "  " + l.png : ""}`);
+    for (const l of look) O(`    ${l.verdict.padEnd(15)} ${l.spot.padEnd(16)} ${l.cand ? `candidate changed ${fmt(100 * l.cand.changed, 2)}% vs a base re-run ${fmt(100 * l.floor.changed, 2)}%, SSIM ${fmt(l.cand.ssim, 4)} vs ${fmt(l.floor.ssim, 4)} (stable area ${fmt(100 * l.stableArea, 0)}%${l.floorBiased ? ", floor from 2 base shots: biased low" : ""})${l.resampled ? "; " + l.resampled : ""}` : l.why || ""}${l.png ? "  " + l.png : ""}`);
     if (!look.length) O(`    (no pixel shots${LOOK_PIX ? "" : ": --no-look"})`);
     if (settings.bad.length) O("  LOOK REGRESSION (settings dropped): " + settings.bad.join(" · "));
     if (settings.notes.length) O("  look notes (counts, not failures): " + settings.notes.join(" · "));
@@ -2173,7 +2206,7 @@ try {
     res.ab = { against: AGAINST, kind: AGAINST_KIND, base: baseLabel, candidate: sides.cand.label, pairs, stop: stopWhy, minPairs: MIN_PAIRS, maxPairs: MAX_PAIRS, rows, look, lookSettings: settings, lookDir };
     // v1-shaped compare block, for scripts that read it
     res.compare = { against: AGAINST, rows: rows.filter((r) => /SLOWER|faster|MORE|fewer/.test(r.verdict)).map((r) => [r.k, r.base, r.cand, r.cand - r.base, r.eps, r.verdict === "MORE" ? "SLOWER" : r.verdict === "fewer" ? "faster" : r.verdict, r.unit]),
-      lookRegression: [...settings.bad, ...lookBad.map((l) => `${l.spot}: pixels changed ${fmt(100 * l.cand.changed, 2)}% vs ${fmt(100 * l.floor.changed, 2)}% on a re-run`)] };
+      lookRegression: [...settings.bad, ...lookBad.map((l) => l.cand ? `${l.spot}: pixels changed ${fmt(100 * l.cand.changed, 2)}% vs ${fmt(100 * l.floor.changed, 2)}% on a re-run` : `${l.spot}: ${l.why || "?"}`)] };
     if (slower.length || lookFail) exitCode = exitCode || 4;
   }
   const json = JSON.stringify(res, null, 1);
