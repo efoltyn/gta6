@@ -1,0 +1,33 @@
+<!doctype html>
+<!-- THE LAB: a tiny real world made of chosen ingredients, running the real
+     game systems. lab.html?kit=person-chair&seed=1[&live=1][&cam=side]
+     Kits: src/lab/kits/*.js. How it loads only what a kit needs, and the
+     one-line commands: tools/lab/README.md. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lab</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #23272d; overflow: hidden; }
+  #labHud { position: fixed; left: 10px; top: 8px; z-index: 5; color: #e3e8ee; font: 12px/1.4 ui-monospace, Menlo, monospace;
+            background: rgba(20, 23, 27, 0.6); padding: 3px 8px; border-radius: 4px; pointer-events: none; }
+  /* systems/speech.js draws over-head lines into #speech (css/hud.css's rule) */
+  #speech { position: fixed; inset: 0; pointer-events: none; z-index: 4; }
+  #speech .say { position: absolute; transform: translate(-50%, -100%); color: #fff; font: 600 13px/1.2 system-ui, sans-serif;
+                 text-shadow: 0 1px 2px #000, 0 0 6px rgba(0,0,0,.7); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="speech"></div>
+<div id="labHud">lab: booting</div>
+<script src="src/vendor/three.r128.min.js"></script>
+<script src="src/config.js"></script>
+<script src="src/core/seed.js"></script>
+<script src="src/core/microboot.js"></script>
+<script src="src/lab/closure.js"></script>
+<script src="src/lab/registry.js"></script>
+<script src="src/lab/labworld.js"></script>
+</body>
+</html>

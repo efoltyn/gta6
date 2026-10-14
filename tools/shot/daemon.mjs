@@ -135,16 +135,20 @@ function hotSafe(commit, f) {
 
 // ------------------------------------------------------------------- the pool
 const knownLoaded = new Map();      // world key -> files an npcwar page loads (learned on first boot)
-async function loadGate(what) {
-  const lim = CORES * CFG.maxLoadPerCore, t0 = Date.now();
+async function loadGate(what, perCore) {
+  const lim = CORES * (perCore || CFG.maxLoadPerCore), t0 = Date.now();
   while (load1() > lim && Date.now() - t0 < 5 * 60e3) { log(`load ${load1().toFixed(1)} > ${lim}: holding ${what}`); await sleep(5000); }
   return Date.now() - t0;
 }
-async function addChrome() {
+/* lightOnly: the backlog is all lab requests (a kit boots in ~0.1-0.5 s of
+   CPU): the first Chrome for them waits only above SHOT_LAB_LOAD_PER_CORE
+   (8) x cores, so a lab glance is not held for minutes behind a gate sized
+   for the city */
+async function addChrome(lightOnly) {
   const c = { n: chromes.length, B: null, pages: [], busy: false, sheet: null, launching: true };
   chromes.push(c);
   try {
-    await loadGate("a Chrome launch");
+    await loadGate("a Chrome launch", lightOnly ? CFG.labLoadPerCore : 0);
     c.B = await launchChrome();
     c.launching = false;
     log(`chrome #${c.n} up in ${c.B.startMs} ms (pid ${c.B.pid}, :${c.B.dbg})`);
@@ -245,7 +249,10 @@ async function acquire(c, world, query, commit, T) {
     const idle = c.pages.slice().sort((a, b) => a.lastUsed - b.lastUsed)[0];
     await closePage(c, idle);
   }
-  T.loadWaitMs = (T.loadWaitMs || 0) + await loadGate("a world boot");
+  // a lab boot is ~0.1-0.5 s of CPU (a kit's few dozen scripts, no world):
+  // holding it for minutes behind a load gate built for the city costs more
+  // than it saves, so only the heavy worlds wait
+  if (world !== "lab") T.loadWaitMs = (T.loadWaitMs || 0) + await loadGate("a world boot");
   const t0 = Date.now();
   const srv = await serveCommit(REPO, base);
   const pg = await c.B.newPage();
@@ -254,7 +261,7 @@ async function acquire(c, world, query, commit, T) {
   try {
     const W = WORLDS[world];
     const seed = new URLSearchParams(query).get("seed") || W.seed;
-    const b = await bootWorld(pg, srv.origin, `${world}|${seed}|${query}`, world === "npcwar" ? CFG.bootMs : 10 * 60e3);
+    const b = await bootWorld(pg, srv.origin, `${world}|${seed}|${query}`, W.bootMs || (world === "npcwar" ? CFG.bootMs : 10 * 60e3));
     p.loaded = new Set(b.loaded);
     knownLoaded.set(wk, p.loaded);
     const ok = await pg.evl(pageLib(libOf(world)), 20e3);
@@ -288,10 +295,12 @@ function expandTimes(times, period) {
 }
 /* which in-page half drives a world: NPC War has its own; every CBZ world
    (city, president, escape, survival and their aliases) shares page/world.js */
-const libOf = (world) => (world === "npcwar" ? "npcwar" : "world");
+const libOf = (world) => (world === "npcwar" ? "npcwar" : world === "lab" ? "lab" : "world");
+// the light worlds: seconds, not minutes (NPC War, the lab)
+const lightWorld = (world) => world === "npcwar" || world === "lab";
 async function worldSide(c, req, side, T, warns) {
   // a CBZ world's main thread is busy streaming even while frozen: give its calls room
-  const ms = req.world === "npcwar" ? CFG.evalMs : CFG.evalMs * 4;
+  const ms = lightWorld(req.world) ? CFG.evalMs : CFG.evalMs * 4;
   if (!WORLDS[req.world]) throw new Error(`unknown world "${req.world}" (know: ${Object.keys(WORLDS).join(", ")})`);
   let { p, how } = await acquire(c, req.world, req.query, side.commit, T);
   side.how = how; c.cur = p;
@@ -317,6 +326,8 @@ async function worldSide(c, req, side, T, warns) {
         }
       }
     }
+    // the lab answers with numbers too: the kit's probe at the end of the run
+    if (req.world === "lab") side.probe = await p.pg.evl("__shot.probe()", ms).catch((e) => ({ ok: false, summary: "probe failed: " + e.message }));
     await p.pg.evl("__shot.clear()", ms).catch(() => {});
     if (req.js) p.dirty = true;          // arbitrary JS: nobody else gets this page
   } finally {
@@ -380,8 +391,9 @@ async function runJob(c, req) {
   Object.assign(res, {
     status: sides.every((s) => s.frames.some((f) => f.file)) ? "done" : "error",
     finished: now(), sheet, frames: files, out, warn: [...warns].slice(0, 12), timings: T,
-    sides: sides.map((s) => ({ label: s.label, branch: s.branch, commit: s.commit, how: s.how, frames: s.frames.length })),
+    sides: sides.map((s) => ({ label: s.label, branch: s.branch, commit: s.commit, how: s.how, frames: s.frames.length, probe: s.probe || undefined })),
   });
+  if (req.world === "lab") res.probe = sides[sides.length - 1].probe || null;
   if (res.status === "error") res.error = "no frames rendered: " + [...warns].slice(0, 3).join(" | ");
   writeJson(resultPath(req.id), res);
   log(`  ${req.id} ${res.status} in ${(T.workMs / 1000).toFixed(1)} s (queued ${(T.queuedMs / 1000).toFixed(1)} s) ${sides.map((s) => s.how).join("/")} -> ${sheet}`);
@@ -420,7 +432,7 @@ async function work(c, q) {
   writeStatus();
   let timer;
   // a CBZ world's cold boot alone can take minutes on a loaded Mac: its budget includes one
-  const jobMs = q.world === "npcwar" ? CFG.jobMs : CFG.jobMs + 10 * 60e3;
+  const jobMs = lightWorld(q.world) ? CFG.jobMs : CFG.jobMs + 10 * 60e3;
   try {
     await Promise.race([runJob(c, q), new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`request timed out after ${jobMs / 1000} s`)), jobMs); })]);
   } catch (e) {
@@ -476,7 +488,7 @@ for (;;) {
     // grow the pool while there is a backlog nobody is serving
     const idle = chromes.filter((c) => !c.busy && !c.launching).length;
     if (Q.length > idle && chromes.length < CFG.chromes && !chromes.some((c) => c.launching) &&
-        (chromes.length === 0 || load1() < CORES * CFG.growLoadPerCore)) addChrome();
+        (chromes.length === 0 || load1() < CORES * CFG.growLoadPerCore)) addChrome(Q.every((q) => q.world === "lab"));
   } catch (e) { log("tick error " + (e && e.stack || e)); }
   if (++tick % 20 === 0) writeStatus();
   if (!running.size && Date.now() - lastWork > CFG.idleMin * 60e3) {

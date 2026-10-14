@@ -32,6 +32,7 @@ export const CFG = {
   idleMin: num("SHOT_IDLE_MIN", 20),
   maxLoadPerCore: num("SHOT_MAX_LOAD_PER_CORE", 4),                 // hold cold boots above this
   growLoadPerCore: num("SHOT_GROW_LOAD_PER_CORE", 3),               // add a Chrome only below this
+  labLoadPerCore: num("SHOT_LAB_LOAD_PER_CORE", 8),                 // a lab-only backlog launches its Chrome below this
 };
 
 /* ---- presets: what a builder asks for in one word ------------------------
@@ -53,8 +54,24 @@ export const PRESETS = {
     orbit:  { setup: {}, cams: ["chase", "orbit:90:20", "orbit:180:20", "orbit:270:20", "top", "fp"], times: ["0"] },
     timeline: { setup: {}, cams: ["chase"], times: ["0", "2", "5", "10"] },
   },
+  /* THE LAB (lab.html, tools/lab/README.md): --setup 'kit=person-chair&...'.
+     `cycle:N` is N frames evenly over the KIT'S RUN (its duration), the
+     lab's own reading of "one cycle". The result also carries the kit's
+     probe (numbers, the event timeline), printed by get.mjs. */
+  lab: {
+    lab:      { setup: {}, cams: ["3q"], times: ["cycle:8"] },          // a sheet of frames across the sim
+    glance:   { setup: {}, cams: ["3q"], times: ["0"] },
+    timeline: { setup: {}, cams: ["3q", "side"], times: ["cycle:6"] },
+    orbit:    { setup: {}, cams: ["3q", "side", "front", "back", "top"], times: ["0"] },
+  },
 };
 for (const w of ["president", "escape", "prison", "survival", "disaster"]) PRESETS[w] = PRESETS.city;
+/* the world a bare --preset means: `--preset lab` is the lab's, not NPC War's */
+export function worldForPreset(name) {
+  if (!name || (PRESETS.npcwar && PRESETS.npcwar[name])) return "npcwar";
+  for (const w of Object.keys(PRESETS)) if (PRESETS[w][name]) return w;
+  return "npcwar";
+}
 
 /* --setup is URL params ("species=lion&pose=walk") or a JS snippet. A string
    that is not a clean k=v&k=v list is JS. */
@@ -78,6 +95,8 @@ export function parseSetup(s) {
 export const NPCWAR_STAGE_KEYS = new Set(["species", "unit", "n", "vs", "vn", "pose", "style", "speed", "heading", "stage", "grid", "ruler", "rw", "bw", "rt", "bt", "cam"]);
 // the CBZ worlds (page/world.js): look point, bearing, orbit radius; the rest is page URL (cfg_X=1, seed=N)
 export const WORLD_STAGE_KEYS = new Set(["at", "heading", "dist", "pose"]);
+// the lab: everything is a page param (kit=, the kit's own params, seed=)
+export const LAB_STAGE_KEYS = new Set(["pose"]);
 export const NPCWAR_BASE_QUERY = "auto=1&map=arena&red=1&blue=1&killcam=0";
 /* NPC War's own URL names (docs/npcwar/ARCHITECTURE.md §6) work in --setup
    too, so a matchup link and a shot are written the same way:

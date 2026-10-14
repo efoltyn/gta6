@@ -24,7 +24,8 @@ export async function runStandalone(probeFile, args = []) {
   try {
     const probe = await loadProbe(file);
     const world = arg("--world") || probe.meta.world || "city";
-    const key = worldKey(world, arg("--seed") || probe.meta.seed, arg("--query") || "");
+    const mq = typeof probe.meta.query === "function" ? probe.meta.query(args) : (probe.meta.query || "");
+    const key = worldKey(world, arg("--seed") || probe.meta.seed, [arg("--query"), mq].filter(Boolean).join("&"));
     srv = await serve(TOOL_ROOT);
     browser = await launchChrome();
     const pg = await browser.newPage();
