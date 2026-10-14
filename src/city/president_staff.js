@@ -216,11 +216,7 @@
       if (p && p.vacateCabinet) { try { body = p.vacateCabinet(role, { keep: !!opts.ped }); } catch (e) { body = null; } }
       if (role === "chief") { body = W.chief; W.chief = null; }
     }
-    if (body && typeof body === "object" && body.pos) {
-      body._iopts = null;
-      const delay = via === "face" ? 3.6 : 0;
-      OUT.push({ ped: body, t: -delay, door: role === "chief" || role === "press" ? doorSpot() : null, max: role === "chief" || role === "press" ? 14 : 1.5 });
-    }
+    if (body && typeof body === "object" && body.pos) letGo(body, role, via, who);
 
     // THE PERSON STAYS IN THE WORLD
     const grudge = clamp(100 - loyalty + (trait === "able" ? 15 : 0) + (how === "fired" ? 10 : 0), 0, 100);
@@ -262,6 +258,31 @@
 
     emit("dismissal", { role: role, name: who.name, office: TITLE[role], how: how, loyalty: loyalty, sub: sub, breaking: role === "general", via: via });
     return out;
+  }
+  // HE WALKS OUT A PRIVATE MAN. CBZ.cityDismiss (city/brain_city.js) is the
+  // one let-go for every city body: his post ends (the title over his head is
+  // his name again), the office's pin and flags go, and the shared brain walks
+  // him out of the room (the Oval's staff door by the aisle, the Situation
+  // Room's door) instead of the old controlled walk with his rank still on.
+  // Through the door and out of sight, he is taken out of the scene.
+  function letGo(body, role, via, who) {
+    const office = role === "chief" || role === "press";
+    const Zp = Pz();
+    let door = office ? doorSpot() : null;
+    if (!door && Zp && Zp.roomDoor) { try { door = Zp.roomDoor(); } catch (e) { door = null; } }
+    const path = office && door ? aisleTo(body, door.x, door.z) : null;
+    if (CBZ.cityDismiss) {
+      // face to face the two lines are sayLines' (dismissFace): he stands for them
+      CBZ.cityDismiss(body, { from: (CBZ.city && CBZ.city.playerActor) || CBZ.player, familiar: ["state", "detail"], to: door || null, path: path, line: null,
+        nod: via === "face" ? 3.4 : 0.4, name: who && who.name, job: null, arrive: 0.9 });
+      OUT.push({ ped: body, t: 0, door: door, max: door ? 30 : 20 });
+    } else {
+      // no street brain on this page: he says his line where he stands and is
+      // taken out of the scene
+      body._iopts = null; body._presStaff = null; body._presOfficer = null;
+      if (CBZ.brain && CBZ.brain.dismiss) CBZ.brain.dismiss(body, {});
+      OUT.push({ ped: body, t: 0, door: null, max: via === "face" ? 5 : 1.5 });
+    }
   }
   // face to face: two lines over heads, then he walks
   function dismissFace(role, ped) {
@@ -725,13 +746,7 @@
     for (let i = 0; i < fwd.length; i++) if (d(fwd[i], { x: x, z: z }) < d(p.pos, { x: x, z: z }) + 0.5) out.push({ x: fwd[i].x, z: fwd[i].z });
     return out;
   }
-  function walkTo(p, x, z) {
-    if (!p || p.dead) return;
-    p.controlled = true; p.staffPost = null;
-    p.path = aisleTo(p, x, z).concat([{ x: x, z: z }]); p.finalGoal = { x: x, z: z };
-    if (p.target && p.target.set) p.target.set(x, 0, z);
-    p.state = "walk"; p.pause = 0;
-  }
+
   function near(p, at, r) { return p && at && Math.hypot(p.pos.x - at.x, p.pos.z - at.z) < r; }
 
   // THE CHIEF: E is the day in one sentence; with names in hand, E is the
@@ -743,6 +758,7 @@
     const p = post(r, sp.chief, JOB.chief, { pin: true, face: sp.faceIn(sp.chief), gender: c.gender });
     if (!p) return;
     p.name = c.name; p._presStaff = "chief";
+    if (CBZ.brain && CBZ.brain.employ) CBZ.brain.employ(p, { by: "president", title: "Chief of Staff", side: "state" });
     W.chief = p;
     if (!CBZ.interactions || !CBZ.interactions.registerFor) return;
     const nm = function () { const n = S().nominee; return n && speakerFor(n.role) && speakerFor(n.role).body === p ? n : null; };
@@ -772,6 +788,7 @@
     const p = post(r, sp, JOB.press, { pin: true, face: spots(r).faceIn(sp), gender: pr.gender || "f" });
     if (!p) return;
     p.name = pr.name; p._presStaff = "press";
+    if (CBZ.brain && CBZ.brain.employ) CBZ.brain.employ(p, { by: "president", title: "Press Secretary", side: "state" });
     W.press = p;
     // no "Brief" button on her: she comes to YOU when the press is waiting
     // (pressAsk), and your answer rides on her
@@ -870,8 +887,9 @@
     tickAck(dt);
     for (let i = OUT.length - 1; i >= 0; i--) {
       const o = OUT[i]; o.t += dt;
-      if (o.t >= 0 && !o.walking && o.door && o.ped && !o.ped.dead) { o.walking = true; walkTo(o.ped, o.door.x, o.door.z); }
-      if (!o.ped || o.ped.dead || (o.t > 0.5 && o.door && near(o.ped, o.door, 0.9)) || o.t > o.max) { if (o.ped && !o.ped.dead) unpost(o.ped); OUT.splice(i, 1); }
+      // the shared brain walks him (CBZ.cityDismiss); this only takes him out
+      // of the scene at the door (or if he never gets there)
+      if (!o.ped || o.ped.dead || (o.t > 1 && o.door && near(o.ped, o.door, 1.2)) || o.t > o.max) { if (o.ped && !o.ped.dead) unpost(o.ped); OUT.splice(i, 1); }
     }
     // A DEAD STAFFER STAYS DEAD: her desk, his chair, is empty from now on
     if (W.press && W.press.dead) { W.press = null; S().press = null; }

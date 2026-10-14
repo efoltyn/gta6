@@ -61,7 +61,7 @@
 
      threat.assess(actor, threat)  threat.respond(actor, threat)
        responses: fight | flee | freeze | cover | surrender | comply | ignore | + hold
-       threat: { source, x, z, armed, aimingAtMe, distance, kind, + authority, + sheltered,
+       threat: { source, x, z, armed, aimingAtMe, distance, kind, + authority, + sheltered, + hostile,
                  + weapon ("gun"|"melee"|"none"|"hazard"), + reloading, + facingAway | + yaw,
                  + cornered, + hide (a door to get behind exists), + coverNear, + inCover, + rushRange }
        WEAPON-AWARE: against a gun only a gun fights (cover first, then from
@@ -97,6 +97,26 @@
        + opts.rechallenge (true | window s: patience / n for the same man again)
        + opts.tackleRange (m, default 3.2)  + opts.tackles (attempts per case, default 2)
        + opts.silent (the game speaks the lines)  + opts.complyHold (s, default 0.6)
+
+     + brain.dismiss(actor, { from, fromFaction, familiar[], to:{x,z}, line, nod, faction, archetype, arrive, max }) -> leave record
+       LET GO OF A MAN WHO WORKED FOR SOMEBODY (a crewman, a staffer, a guard):
+       every job-held thing in his head goes (the principal he covered, an
+       arrest case, a held fight/flight, a grudge or a witness record about the
+       man he worked for, his morale group, the crew faction) and he LEAVES:
+       intent "leave", phase "nod" (stands, faces `from`, says `line` once)
+       then phase "walk" to `to` at a walk, posture "stand" throughout. His ex-
+       boss and the ex-boss's people are FAMILIAR while he leaves: their guns
+       are not a threat to him unless one is turned on HIM (threat.hostile:
+       the game says the shooter is targeting him, not merely facing his way)
+       or fired. A real threat from anyone else ends the leave and is
+       answered as usual.
+     + brain.employ(actor, { by, title, side }) -> job   + brain.job(actor) -> job | null
+       WHO HE WORKS FOR AND AS WHAT: the ONE record of a person's post. A
+       head tag, a card title, "is he yours" read it live; dismiss() ends it.
+       (by: the employer actor or a name; title: "General", "Chief of Staff";
+       side: the faction he takes, e.g. "player")
+     + brain.leaving(actor) -> the leave record or null
+     + brain.familiar(actor, src) -> true for the man (or his side) he just left
 
      act.moveTo(a, x, z, opts)  act.stop(a)  act.face(a, x, z)  act.posture(a, p)
      act.say(a, line, opts)  act.verb(name, a, b, opts)  act.use(game, executor)
@@ -377,7 +397,7 @@
       rattle: 0, rattleAt: null, routed: false, rallyT: 0, nerveJ: (((id * 37) % 11) - 5) * 0.012, nerveAbs: null,
       movedAt: -1e9, movedFrame: -1,
       case: null,
-      protect: null, safe: null,
+      protect: null, safe: null, job: null, leave: null,
       lastSay: "", lastSayT: -1e9,
       threatR: { source: null, x: 0, z: 0, armed: false, aimingAtMe: false, distance: 0, kind: null },
       assessR: { level: 0, kind: null },
@@ -1595,6 +1615,11 @@
     if (actor.cuffed || actor.tied) return "comply";
     if (actor.ko > 0 || actor.asleep) return "ignore";
     if (!th) return "ignore";
+    // A MAN WALKING OFF A JOB knows the people he worked with: their guns are
+    // what they were an hour ago, not a threat (unless one is on him)
+    if (b.leave && familiar(actor, th.source) && !th.hostile && th.kind !== "gunshot" && th.kind !== "explosion") {
+      b.threatHow = "ignore"; return (b.response = "ignore");
+    }
     const lvl = assess(actor, th).level;
     if (lvl < 0.12) { b.threatHow = "ignore"; return (b.response = "ignore"); }
     const p = b.personality, bias = b.arch.threat || {};
@@ -2064,6 +2089,8 @@
     if (pending.length && lastPumpT !== now()) pumpReports();
     if (blind(actor)) return setIntent(I, "none", ax(actor), az(actor), 0, actor.cuffed ? "kneel" : "stand", null);
     const px = ax(actor), pz = az(actor);
+    // --- let go of a job: the nod, then the walk (brain.dismiss)
+    if (b.leave && leaveStep(actor, b, b.leave, ctx, I, px, pz)) return I;
     // --- authority case
     if (b.case && b.case.active) {
       const r = step(actor, dt, ctx && ctx.suspect);
@@ -2182,6 +2209,86 @@
     return setIntent(I, "idle", px, pz, 0, "stand", null);
   }
 
+  /* ================================================================ DISMISS
+     A man who worked for somebody is let go. Owner (Gang City): "when you
+     dismiss someone ... they walk and turn in a circle and start crouching."
+     That was a half-reset: the job's state outlived the job. Whoever let him
+     go called a few field writes of his own, so a guard kept the principal he
+     covered (cover = run to the principal's side, a circle round the man who
+     just fired him), a held fight/flight kept its dwell, and the crew's guns
+     he had stood beside for an hour turned into an armed threat the moment
+     he was a civilian (cower = the crouch). ONE reset, here, for every game. */
+  function dismiss(actor, o) {
+    if (!actor) return null;
+    o = o || {};
+    const b = of(actor);
+    const from = o.from || (b.job && typeof b.job.by === "object" ? b.job.by : null);
+    const fromFaction = o.fromFaction || (b.job && b.job.side) || b.faction || null;
+    b.job = null;
+    // the job's state, all of it
+    b.protect = null; b.safe = null;
+    if (b.case) { b.case.active = false; b.case.outcome = "cancelled"; b.case.phase = "done"; b.case = null; }
+    b.tResp = null; b.tRespT = -1e9; b.tSrc = null; b.threatHow = null;
+    b.engSrc = null; b.engT = -1e9; b.engLast = -1e9;
+    b.retaliation = null; b.routed = false; b.rallyT = 0; b.rattle = 0;
+    b.response = "ignore"; b.responseT = now();
+    if (b.witness && from && b.witness.perp === from) b.witness = null;
+    if (from) { const id = idOf(from), i = b.gIds.indexOf(id); if (i >= 0) { b.gIds.splice(i, 1); b.gVals.splice(i, 1); } }
+    // out of the crew: its faction, its morale group, its clique
+    if (b._gid != null) moraleLeave(b);
+    b.clique = null; b.group = null; b.leader = false;
+    b.faction = o.faction || "civilians";
+    if (o.archetype && ARCH[o.archetype]) { b.arch = ARCH[o.archetype]; b.archId = o.archetype; }
+    b.posture = "stand";
+    const px = ax(actor), pz = az(actor);
+    const to = o.to && isFinite(o.to.x) && isFinite(o.to.z) ? { x: +o.to.x, z: +o.to.z } : null;
+    b.leave = {
+      from: from, sides: [].concat(fromFaction || [], o.familiar || []).filter(function (f) { return f && f !== "civilians"; }),
+      to: to || { x: px, z: pz }, line: o.line || null, said: false,
+      t0: now(), nod: o.nod != null ? Math.max(0, +o.nod) : 1.1,
+      arrive: o.arrive != null ? +o.arrive : 1.5, max: o.max != null ? +o.max : 90,
+      phase: "nod",
+    };
+    hashDirty = true;
+    return b.leave;
+  }
+  function employ(actor, o) {
+    if (!actor) return null;
+    o = o || {};
+    const b = of(actor);
+    b.job = { by: o.by || null, title: o.title ? String(o.title) : "", side: o.side || null, since: now() };
+    if (o.side) b.faction = o.side;
+    b.leave = null;
+    return b.job;
+  }
+  function familiar(actor, src) {
+    const b = actor && actor._brain, L = b && b.leave;
+    if (!L || !src) return false;
+    if (src === L.from) return true;
+    const sb = src._brain;
+    return !!(sb && L.sides.indexOf(sb.faction) >= 0);
+  }
+  function leaveStep(actor, b, L, ctx, I, px, pz) {
+    const t = now();
+    // a real threat (not his old side, or a gun on him) ends the walk-off
+    const th = (ctx && ctx.threat) || heardThreat(b, b.threatR);
+    if (th && (!familiar(actor, th.source) || th.hostile || th.kind === "gunshot" || th.kind === "explosion")) { b.leave = null; return false; }
+    if (t - L.t0 > L.max) { b.leave = null; return false; }
+    if (t - L.t0 < L.nod) {
+      L.phase = "nod";
+      setIntent(I, "leave", px, pz, 0, "stand", L.from && !isDead(L.from) ? L.from : null, L.said ? null : L.line);
+      L.said = true;
+      I.phase = "nod";
+      return true;
+    }
+    if (Math.hypot(L.to.x - px, L.to.z - pz) <= L.arrive) { b.leave = null; L.phase = "done"; return false; }
+    L.phase = "walk";
+    setIntent(I, "leave", L.to.x, L.to.z, SPEEDS.walk, "stand", null, L.said ? null : L.line);
+    L.said = true;
+    I.phase = "walk";
+    return true;
+  }
+
   /* ================================================================ LIFECYCLE */
   function clock(t) {
     if (typeof t === "number") { T = t; clockSet = true; clockWall = wallNow(); }
@@ -2215,6 +2322,9 @@
     personalityFromBehavior: personalityFromBehavior,
     perception: perception, memory: memory, rep: rep, needs: needs, social: social,
     threat: threat, morale: morale, authority: authority, act: act,
+    dismiss: dismiss, familiar: familiar, employ: employ,
+    job: function (a) { const b = a && a._brain; return (b && b.job) || null; },
+    leaving: function (a) { const b = a && a._brain; return (b && b.leave) || null; },
     ARCH: ARCH,
   };
   CBZ.brain = brain;

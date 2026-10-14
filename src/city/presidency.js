@@ -1650,7 +1650,10 @@
       });
     } catch (e) { p = null; }
     if (!p) return null;
-    p.name = c.display; p.nameKnown = true; p.organization = "state"; p._presOfficer = role; p._stateStaff = true;
+    // his NAME is his name; his rank over his head is his post (CBZ.brain.job,
+    // city/roles.js titleOf), which ends the moment he is dismissed
+    p.name = c.name; p.nameKnown = true; p.organization = "state"; p._presOfficer = role; p._stateStaff = true;
+    if (CBZ.brain && CBZ.brain.employ) CBZ.brain.employ(p, { by: "president", title: R.prefix || R.title, side: "state" });
     p._iOnly = true;          // his job's verbs (Talk, Dismiss, the General's buys), never the street's
     OFF.peds[role] = p;
     if (CBZ.interactions && CBZ.interactions.registerFor) {
@@ -3446,6 +3449,7 @@
     lockdown: lockdownRead,
     cabinet: cabinet,
     vacateCabinet: vacateCabinet, fillCabinet: fillCabinet,
+    roomDoor: function () { return ROOM.doorPt ? { x: ROOM.doorPt.x, z: ROOM.doorPt.z } : null; },
     // the live, saved record of one post (loyalty / trait / refused live here;
     // city/president_staff.js reads and writes them)
     cabinetRecord: function (role) { cabinet(); const S = st(); return (S.cabinet && S.cabinet[role]) || null; },

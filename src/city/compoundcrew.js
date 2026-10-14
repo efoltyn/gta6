@@ -587,11 +587,17 @@
       releaseBody(ped);
       rt.bodies.delete(entry.id);
       ped._compoundCrew = null; ped._ccId = null; ped._ccRole = null;
-      ped.recruited = false; ped.faction = null; ped.gang = null; ped.kind = "civilian";
       const c = center(plot), f = front(plot);
-      if (ped.target && ped.target.set) ped.target.set(c.x + f.nx * 90, 0, c.z + f.nz * 90);
-      ped.state = "walk"; ped.pause = 0; ped.path = null;
-      say(ped, BARK_QUIT);
+      if (CBZ.cityDismiss) {
+        // the one let-go (city/brain_city.js): his post, his side and his
+        // leash end together, and the street's walk takes him out the front
+        CBZ.cityDismiss(ped, { line: BARK_QUIT[(Math.random() * BARK_QUIT.length) | 0], to: { x: c.x + f.nx * 90, z: c.z + f.nz * 90 } });
+      } else {
+        ped.recruited = false; ped.faction = null; ped.gang = null; ped.kind = "civilian";
+        if (ped.target && ped.target.set) ped.target.set(c.x + f.nx * 90, 0, c.z + f.nz * 90);
+        ped.state = "walk"; ped.pause = 0; ped.path = null;
+        say(ped, BARK_QUIT);
+      }
     }
     markDirty();
   }
