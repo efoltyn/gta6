@@ -74,3 +74,42 @@ if (lotsBuilt <= inline) { nfail++; console.log("FAIL: far parcels never built o
 if (left.lotJobs !== 0) { nfail++; console.log("FAIL: freed town left child jobs"); }
 console.log(nfail ? "NESTED FAIL" : "NESTED OK");
 if (nfail) process.exit(1);
+
+// ---- a job in STEPS (an array of independent parts): the frames build it a
+// part at a time, its parts stay out of the scene until the last one, then it
+// joins as one unit; a forced tick (a teleport) builds it whole at once
+const stepRuns = [0, 0, 0, 0, 0];
+const parts = stepRuns.map(function (_, i) { return function () {
+  stepRuns[i]++;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial()); m.position.set(40000 + i * 5, 0, 0); m.name = "part" + i; root.add(m);
+  CBZ.colliders.push({ minX: 40000 + i * 5 - 1, maxX: 40000 + i * 5 + 1, minZ: -1, maxZ: 1, ref: m });
+  CBZ.losBlockers.push(m);          // a sight blocker: never raycast while its part is held out
+  // a slow part: well over a frame's share
+  const t = performance.now(); while (performance.now() - t < 6) {}
+}; });
+CBZ.sliceAt({ minX: 39990, maxX: 40030, minZ: -10, maxZ: 10 }, parts, { name: "cell" });
+const cellJob = () => CBZ.streamJobs.find(j => j.name === "cell");
+const frame = (dt) => { for (const u of CBZ.updaters) u.fn(dt); };
+const partsIn = () => root.children.filter(o => /^part/.test(o.name)).length;
+// approach from far enough that it is not in view (the frames build it)
+CBZ.player.pos.set(39990 - CBZ.slice.view() - 75, 0, 0); CBZ.streamTick(false);   // (past the view by more than an unbuilt job's 60 m desktop spill pad)
+let sawHalf = false, frames = 0, losHeld = true;
+const losParts = () => CBZ.losBlockers.filter(m => /^part/.test(m.name)).length;
+while (cellJob().state !== "built" && frames < 200) { frame(1 / 60); frames++; if (cellJob().state === "building" && (partsIn() > 0 || losParts() > 0)) sawHalf = true; }
+if (losParts() !== 5) losHeld = false;
+const stepped = { state: cellJob().state, frames, runs: stepRuns.join(""), inScene: partsIn(), sawHalf };
+console.log("stepped cell", JSON.stringify(stepped));
+let sfail = 0;
+if (stepped.state !== "built" || stepped.runs !== "11111" || stepped.inScene !== 5) { sfail++; console.log("FAIL: the stepped job did not build each part once and join whole"); }
+if (stepped.frames < 2) { sfail++; console.log("FAIL: the stepped job was built in one frame"); }
+if (sawHalf) { sfail++; console.log("FAIL: a half-built stepped job showed parts in the scene (or its sight blockers in the LOS list)"); }
+if (!losHeld) { sfail++; console.log("FAIL: the stepped job's sight blockers did not come back with it"); }
+CBZ.player.pos.set(0, 0, 0); CBZ.streamTick(true);
+const away = { state: cellJob().state, inScene: partsIn(), cols: CBZ.colliders.filter(c => c.minX > 39000).length };
+console.log("stepped cell away", JSON.stringify(away));
+if (away.inScene || away.cols || away.state !== "queued") { sfail++; console.log("FAIL: the stepped job was not freed"); }
+CBZ.player.pos.set(40000, 0, 0); CBZ.streamTick(true);
+console.log("teleport into it", JSON.stringify({ state: cellJob().state, runs: stepRuns.join(""), inScene: partsIn() }));
+if (cellJob().state !== "built" || stepRuns.join("") !== "22222" || partsIn() !== 5) { sfail++; console.log("FAIL: a forced tick did not build the stepped job whole"); }
+console.log(sfail ? "STEPS FAIL" : "STEPS OK");
+if (sfail) process.exit(1);

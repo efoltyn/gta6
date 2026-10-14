@@ -3430,13 +3430,22 @@
      radar, ILS, approach lights and apron masts to the streamer as one
      job: built with the world when nothing streams, built before it can be
      seen and parked when the player leaves when it does. */
-  function buildDressing(ap, spec, city) {
+  /* IN STEPS (core/citystream.js CBZ.sliceAt with an array): the field
+     group, then one hangar a step (a hangar is ~30 ms of merges), then the
+     small buildings, then the ILS and the approach lights: a 100 ms job on
+     the drive became a handful of frame-sized ones. buildDressing runs them
+     all at once (the whole-world build). */
+  function dressingSteps(ap, spec, city) {
     const d = spec.dressing, root = city.root;
-    const D = new THREE.Group();
-    D.position.set(ap.x, 0, ap.z);
-    D.rotation.y = ap.yaw;
-    D.name = "airfield-dressing:" + ap.id;
-    root.add(D);
+    let D = null;
+    const steps = [];
+    steps.push(function () {
+      D = new THREE.Group();
+      D.position.set(ap.x, 0, ap.z);
+      D.rotation.y = ap.yaw;
+      D.name = "airfield-dressing:" + ap.id;
+      root.add(D);
+    });
     const L = ap.layout, H0 = L.H, RW = L.RW;
     const solid = ap.solidLocal, plat = ap.platLocal;
     function put3(res, x, z, yawL) {
@@ -3451,11 +3460,12 @@
       return res;
     }
     // hangars: lamp discs hung under the rafters glow at night
-    for (const h of d.hangars || []) {
+    for (const h of d.hangars || []) steps.push(function () {
       const res = P.hangar(h);
       if (res.lamps && res.lamps.length) addMerged(res.group, res.lamps, lamp(0xfff2dc, 0.4, 1.3, D), {});
       put3(res, h.lx, h.lz, h.yaw);
-    }
+    });
+    steps.push(function () {
     for (const s of d.sheds || []) put3(P.shed(s), s.lx, s.lz, s.yaw);
     if (d.fuel) put3(P.fuelFarm(d.fuel), d.fuel.lx, d.fuel.lz, d.fuel.yaw);
     if (d.fire) {
@@ -3474,6 +3484,8 @@
     if (d.ulds && d.ulds.length) P.ulds(D, d.ulds);
     for (const w of d.windsocks || []) P.windsock(D, w[0], w[1], w[2] || 0, D);
     if (d.masts && d.masts.length) P.apronMasts(D, d.masts, D);
+    });
+    steps.push(function () {
     // ---- ILS: localizer beyond the stop end, glideslope beside the touchdown
     if (d.ils) {
       const e = ap.ends[d.ils.end || 0];               // the landing threshold
@@ -3539,7 +3551,14 @@
       ap.approach.push({ end: e.name, stations: stations.length });
     }
     D.traverse(function (o) { if (o.isMesh) o.userData.airfieldDressing = true; });
-    return D;
+    });
+    steps.group = function () { return D; };
+    return steps;
+  }
+  function buildDressing(ap, spec, city) {
+    const steps = dressingSteps(ap, spec, city);
+    for (const f of steps) f();
+    return steps.group();
   }
 
   if (CBZ.addLandmass) {
@@ -3550,9 +3569,10 @@
         const B = p.ap.bounds;
         const pad = 800;
         const rect = { minX: B.minX - pad, maxX: B.maxX + pad, minZ: B.minZ - pad, maxZ: B.maxZ + pad };
-        const run = function () { buildDressing(p.ap, p.spec, city); };
-        if (CBZ.sliceAt) CBZ.sliceAt(rect, run, { name: "airfield-dressing:" + p.ap.id, pure: true });
-        else run();
+        // (a re-run of the freed job starts again at the first step, which
+        // makes a new field group: the steps share nothing else)
+        if (CBZ.sliceAt) CBZ.sliceAt(rect, dressingSteps(p.ap, p.spec, city), { name: "airfield-dressing:" + p.ap.id, pure: true });
+        else buildDressing(p.ap, p.spec, city);
       }
     }, 96);
   }

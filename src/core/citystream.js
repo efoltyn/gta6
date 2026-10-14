@@ -170,6 +170,41 @@
   CBZ.streamJobs = jobs;
 
   function rectKeeps(r, pad) { return CBZ.sliceKeepsRect(r.minX, r.maxX, r.minZ, r.maxZ, pad || 0); }
+  /* WHAT A JOB DRAWS IS NOT ITS RECT. A builder's rect is where it was asked
+     to build; what it builds can stand past it (a lot's forecourt, a town's
+     edge parcels, a pruned cell's long buildings): measured, up to 60 m and
+     more. Wanted and judged "in view" by its rect alone, such a job was built
+     at the edge of the keep circle with its near edge already inside the view
+     (a pop, measured on the drive). So a job is wanted, and counted in view,
+     by its rect grown by its SPILL: measured when it settles (its objects'
+     bounds past the rect, +10 m), and used from its next run on. */
+  /* A job never built: 60 m on the desktop (the stream-job group that popped
+     at 750 m on the drive spills 50 m+ past its rect, and the desktop has the
+     memory to build that early), its rect alone on a phone or tablet, where a
+     blanket 60 m cost 4% of the drive's memory peak in the paired A/B; the
+     measured spill pads every job's next run on every device. */
+  const SPILL_UNKNOWN = CBZ.isMobileDevice ? 0 : 60;
+  function spillOf(j) { return j.spill != null ? j.spill : SPILL_UNKNOWN; }
+  const _sb = window.THREE ? new window.THREE.Box3() : null, _gb = window.THREE ? new window.THREE.Box3() : null;
+  function measureSpill(job) {
+    if (!_sb || !job.rect || !job.objs || !job.objs.length) return;
+    _sb.makeEmpty();
+    for (const it of job.objs) {
+      const o = it.o; if (!o) continue;
+      o.updateWorldMatrix(true, true);
+      o.traverse(function (c) {
+        if (!c.isMesh || c.isInstancedMesh) return;            // a pool's box is its prototype's, not its spread
+        const g = c.geometry; if (!g) return;
+        if (!g.boundingBox) { const p = g.attributes && g.attributes.position; if (!p || !p.array) return; try { g.computeBoundingBox(); } catch (e) { return; } }
+        if (!g.boundingBox || g.boundingBox.isEmpty()) return;
+        _gb.copy(g.boundingBox).applyMatrix4(c.matrixWorld); _sb.union(_gb);
+      });
+    }
+    if (_sb.isEmpty()) { job.spill = 0; return; }
+    const r = job.rect;
+    const sp = Math.max(0, r.minX - _sb.min.x, _sb.max.x - r.maxX, r.minZ - _sb.min.z, _sb.max.z - r.maxZ);
+    job.spill = Math.min(400, Math.round(sp)) + (sp > 0 ? 10 : 0);
+  }
 
   function cityRoot() { const A = CBZ.city && CBZ.city.arena; return (A && A.root) || (CBZ._cityRootBuilding || null); }
 
@@ -207,14 +242,15 @@
     arr.length = w;
   }
 
-  // run fn, capturing what it adds at the top of the city root and the scene,
-  // every collider/platform it pushes and every list it grows
-  function runCaptured(job) {
+  // run body under capture: what it adds at the top of the city root and the
+  // scene, every collider/platform it pushes and every list it grows
+  function capture(job, body, opt) {
+    // a job in steps is finished before anything else captures: its panes
+    // wait unflushed between steps, and another job's flush would take them
+    if (stepping && stepping !== job && stepping.state === "building") { const st = stepping; while (!stepJob(st)) {} settle(st); stepping = null; }
     const root = cityRoot(), scene = CBZ.scene;
-    // a re-run: its last run's world data comes out first (it registers it again)
-    if (job.data) { for (const d of job.data) dropItems(d.arr, d.items); job.data = null; }
     // what is already pending pools up now, so the job's pools hold only its own panes
-    if (CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
+    if (!(opt && opt.noPre) && CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
     const r0 = root ? root.children.length : 0, s0 = scene ? scene.children.length : 0;
     const c0 = (CBZ.colliders || []).length, p0 = (CBZ.platforms || []).length;
     // the broadphase grid was current before the job: index only what it appends
@@ -223,27 +259,85 @@
     const marks = busHooks.map(function (h) { try { return h.mark(); } catch (e) { return null; } });
     const t0 = performance.now();
     const outer = capturing; capturing = job;
-    try { job.fn(); } catch (e) { console.error("[stream job " + (job.name || "?") + "]", e); }
+    try { body(); } catch (e) { console.error("[stream job " + (job.name || "?") + "]", e); }
     capturing = outer;
     // late pools (glass, room deco, masonry) of what it built: now, so they are this job's
-    if (CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
-    job.ms = performance.now() - t0;
-    job.bus = []; job.data = [];
-    job.hooks = [];
-    busHooks.forEach(function (h, i) { if (marks[i] == null) return; try { const items = h.since(marks[i]); if (items && items.length) job.hooks.push({ h: h, items: items }); } catch (e) {} });
+    if (!(opt && opt.noPost) && CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
+    const R = { ms: performance.now() - t0, bus: [], data: [], hooks: [], objs: [], cols: null, plats: null };
+    busHooks.forEach(function (h, i) { if (marks[i] == null) return; try { const items = h.since(marks[i]); if (items && items.length) R.hooks.push({ h: h, items: items }); } catch (e) {} });
     for (const b of buses) {
       if (b.arr.length <= b.n) continue;
       const items = b.arr.slice(b.n);
-      (DATA_BUSES[b.name] || DATA_BUSES[b.name.replace(/^arena\./, "")] ? job.data : job.bus).push({ arr: b.arr, items: items });
+      (DATA_BUSES[b.name] || DATA_BUSES[b.name.replace(/^arena\./, "")] ? R.data : R.bus).push({ arr: b.arr, items: items });
     }
-
-    job.objs = [];
-    if (root) for (let i = r0; i < root.children.length; i++) job.objs.push({ o: root.children[i], parent: root });
-    if (scene) for (let i = s0; i < scene.children.length; i++) { const o = scene.children[i]; if (o !== root) job.objs.push({ o: o, parent: scene }); }
-    job.cols = (CBZ.colliders || []).slice(c0);
-    job.plats = (CBZ.platforms || []).slice(p0);
-    if (gridWas && job.cols.length && CBZ.colliderIndexAppended && (c0 === 0 || CBZ.colliders[c0 - 1] === lastCol)) CBZ.colliderIndexAppended(c0);
+    if (root) for (let i = r0; i < root.children.length; i++) R.objs.push({ o: root.children[i], parent: root });
+    if (scene) for (let i = s0; i < scene.children.length; i++) { const o = scene.children[i]; if (o !== root) R.objs.push({ o: o, parent: scene }); }
+    R.cols = (CBZ.colliders || []).slice(c0);
+    R.plats = (CBZ.platforms || []).slice(p0);
+    if (gridWas && R.cols.length && CBZ.colliderIndexAppended && (c0 === 0 || CBZ.colliders[c0 - 1] === lastCol)) CBZ.colliderIndexAppended(c0);
+    return R;
+  }
+  function adoptCapture(job, R) {
+    job.ms = R.ms; job.bus = R.bus; job.data = R.data; job.hooks = R.hooks;
+    job.objs = R.objs; job.cols = R.cols; job.plats = R.plats;
     job.state = "built";
+  }
+  function runCaptured(job) {
+    // a re-run: its last run's world data comes out first (it registers it again)
+    if (job.data) { for (const d of job.data) dropItems(d.arr, d.items); job.data = null; }
+    if (job.steps && job.stepI != null) { while (!stepJob(job)) {} return; }   // one in flight: finish it
+    adoptCapture(job, capture(job, job.fn));
+  }
+  /* A JOB IN STEPS (CBZ.sliceAt with an array of fns: a cell of apartment
+     blocks, one block a step). A builder is not resumable, but a list of
+     independent parts is: each frame runs as many of them as its share
+     allows, each under its own capture, and what a step made is held OUT
+     of the scene (it is past the fog anyway) until the last step, when the
+     job joins the scene and settles (batch, freeze) as one unit, exactly as
+     a one-piece job does. The 200 ms cell became twenty 10 ms steps.
+     Returns true when the job is built. */
+  function stepJob(job) {
+    if (job.stepI == null) {
+      if (job.data) { for (const d of job.data) dropItems(d.arr, d.items); job.data = null; }
+      job.stepI = 0; job.state = "building"; job.ms = 0;
+      job._acc = { ms: 0, bus: [], data: [], hooks: [], objs: [], cols: [], plats: [], los: [] };
+    }
+    const A = job._acc;
+    const first = job.stepI === 0, last = job.stepI === job.steps.length - 1;
+    // the last step: the held parts rejoin the scene first, so the one pool
+    // flush at its end (glass, deco, trim, masonry for every part: one set of
+    // pools for the job, as a one-piece job gets) finds them under the root
+    if (last) {
+      for (const it of A.objs) if (it.parent && !it.o.parent) it.parent.add(it.o);
+      if (A.los.length && CBZ.losBlockers) for (const m of A.los) CBZ.losBlockers.push(m);
+      A.los.length = 0;
+    }
+    const L = CBZ.losBlockers, l0 = L ? L.length : 0;
+    const R = capture(job, job.steps[job.stepI++], { noPre: !first, noPost: !last });
+    A.ms += R.ms; job.ms = A.ms;
+    for (const k of ["bus", "data", "hooks", "objs", "cols", "plats"]) for (const it of R[k]) A[k].push(it);
+    if (!last) {
+      // held out of the scene until the job is whole
+      for (const it of R.objs) if (it.o.parent === it.parent) it.parent.remove(it.o);
+      /* ... and out of the LOS list: a held part's world matrices were never
+         computed (it has not been under the scene for a render), so a ray
+         (a bullet, the camera boom, AI sight) tested it at identity, its
+         walls standing at their LOCAL coordinates round the world origin */
+      if (L && L.length > l0 && R.objs.length) {
+        const tops = new Set(); for (const it of R.objs) tops.add(it.o);
+        let w = l0;
+        for (let i = l0; i < L.length; i++) {
+          const m = L[i]; let p = m, mine = false;
+          while (p) { if (tops.has(p)) { mine = true; break; } p = p.parent; }
+          if (mine) A.los.push(m); else L[w++] = m;
+        }
+        L.length = w;
+      }
+      return false;
+    }
+    job.stepI = null; job._acc = null;
+    adoptCapture(job, A);
+    return true;
   }
 
   /* NESTED JOBS. A job's builder may itself defer parts (a town defers each
@@ -252,11 +346,18 @@
      CHILD: it builds when seen, and goes when its parent is parked or freed. */
   let capturing = null;
   CBZ.sliceAt = function (rect, fn, opts) {
+    // fn: one function, or an ARRAY of independent parts (a job in steps)
+    let steps = null;
+    if (Array.isArray(fn)) {
+      steps = fn.filter(function (f) { return typeof f === "function"; });
+      if (!steps.length) return null;
+      fn = function () { for (const f of steps) { try { f(); } catch (e) { console.error("[stream step]", e); } } };
+    }
     if (typeof fn !== "function") return null;
     const s = CBZ.slice;
     if (!s) { fn(); return null; }
     if (s.stream && capturing && rectKeeps(rect)) { fn(); return null; }
-    const job = { rect: rect, fn: fn, name: (opts && opts.name) || "", pure: !!(opts && opts.pure), state: "queued", parent: s.stream ? capturing : null };
+    const job = { rect: rect, fn: fn, steps: steps && steps.length > 1 ? steps : null, name: (opts && opts.name) || "", pure: !!(opts && opts.pure), state: "queued", parent: s.stream ? capturing : null };
     if (rectKeeps(rect)) {
       if (s.stream) { jobs.push(job); runCaptured(job); } else fn();
       return job;
@@ -287,8 +388,16 @@
           let w = 0; for (let i = 0; i < arr.length; i++) if (!drop.has(arr[i])) arr[w++] = arr[i];
           arr.length = w;
         }
+        /* THE FOG SWEEP COVERS WHAT THIS BUILDER ADDED, not the whole city
+           root: a full traverse of the root (every building, prop and pool
+           of the world) ran inside every streamed landmass job, and was most
+           of the 500 ms the smallest of them (metro_structs: one mesh) took
+           on a drive. A builder that hangs a world surface inside a group
+           that already existed wraps its own material (metro_structs,
+           metro_ground, streetkit all call terrainFogScale themselves). */
+        const n0 = city.root.children.length;
         fn(city);
-        if (CBZ.cityWorldFogSweep) CBZ.cityWorldFogSweep(city.root);
+        if (CBZ.cityWorldFogSweep) for (let i = n0; i < city.root.children.length; i++) CBZ.cityWorldFogSweep(city.root.children[i]);
       },
     });
   };
@@ -390,7 +499,13 @@
   CBZ.geoCompactOwned = function (g) { return (g && reuploadable(g)) ? compactGeo(g, true) : 0; };
   /* The geometries still drawn by the scene: a builder that shares one
      geometry between a parked and a live mesh without flagging it _shared
-     must never lose its arrays. Rebuilt at most every 4 s (a scene walk). */
+     must never lose its arrays. It was a whole-scene traverse (72k objects,
+     8 ms on the desktop, ~25 on a phone) inside the frame that parked, at
+     most every 4 s. Now the walk is SPREAD: a parked job's packing waits in
+     a queue, the scene is walked WALK_N objects a frame, and a job is packed
+     once a walk that began after it was parked has finished (the same
+     freshness the old 4 s rebuild gave, without the frame). Boot-time
+     packing (streamCompactParked, inside the load) still walks at once. */
   let inUse = null, inUseAt = -1e9;
   function refreshInUse() {
     const now = performance.now();
@@ -398,9 +513,38 @@
     inUseAt = now; inUse = new WeakSet();
     if (CBZ.scene) CBZ.scene.traverse(function (c) { if (c.geometry) inUse.add(c.geometry); });
   }
+  const WALK_N = 4000;
+  let walk = null;                  // { set, stack, t0 }
+  const packQ = [];                 // { job, t } parked, waiting to be packed
+  function walkStep() {
+    if (!walk) { if (!CBZ.scene) return; walk = { set: new WeakSet(), stack: [CBZ.scene], t0: performance.now() }; }
+    const st = walk.stack, set = walk.set;
+    let n = 0;
+    while (st.length && n < WALK_N) {
+      const o = st.pop(); n++;
+      if (o.geometry) set.add(o.geometry);
+      const ch = o.children; for (let i = 0; i < ch.length; i++) st.push(ch[i]);
+    }
+    if (!st.length) { inUse = set; inUseAt = walk.t0; walk = null; }
+  }
+  // (every frame, from workFrame): walk on while something waits; pack one
+  // job whose wait is over
+  function packStep() {
+    if (!packQ.length) return;
+    const it = packQ[0];
+    if (!(inUseAt > it.t)) { walkStep(); return; }
+    packQ.shift();
+    const job = it.job;
+    if (job.state !== "parked" || !job.objs) return;     // came back, or freed meanwhile
+    for (const o of job.objs) compactTreeNow(o.o);
+  }
   function compactTree(o) {
     if (CFG.STREAM_COMPACT === false) return;
     refreshInUse();
+    compactTreeNow(o);
+  }
+  function compactTreeNow(o) {
+    if (CFG.STREAM_COMPACT === false || !inUse) return;
     let saved = 0;
     o.traverse(function (c) {
       if (!c.isMesh || c.isInstancedMesh || c.isSkinnedMesh || !c.geometry || !c.geometry.attributes) return;
@@ -416,7 +560,7 @@
     for (const k of childrenOf(job)) if (k.state === "built" && k.objs) park(k);
     takeLos(job);
     for (const it of job.objs) { if (it.o.parent) it.o.parent.remove(it.o); releaseGPU(it.o); }
-    if (!job.pure) for (const it of job.objs) compactTree(it.o);
+    if (!job.pure && CFG.STREAM_COMPACT !== false) packQ.push({ job: job, t: performance.now() });
     const inSync = CBZ.colliderRemoveMany && CBZ.colliderGridInSync && CBZ.colliderGridInSync();
     if (inSync) CBZ.colliderRemoveMany(job.cols); else removeFrom(CBZ.colliders, job.cols);
     removeFrom(CBZ.platforms, job.plats);
@@ -428,6 +572,8 @@
      Materials are left alone (they are cached and shared across builds). */
   function childrenOf(job) { const out = []; for (const j of jobs) if (j.parent === job) out.push(j); return out; }
   function freeJob(job) {
+    // a job in steps caught half-built: what it made so far is its to free
+    if (job.state === "building" && job._acc) { const A = job._acc; job.stepI = null; job._acc = null; A.los = null; adoptCapture(job, A); }
     // its children first (built ones are freed; queued ones simply leave: the
     // parent's next run queues them again)
     const kids = childrenOf(job);
@@ -488,7 +634,7 @@
   }
   function unpark(job) {
     noteAdd(job, "unpark");
-    for (const it of job.objs) { expandTree(it.o); if (it.parent) it.parent.add(it.o); }
+    for (const it of job.objs) { expandTree(it.o); if (it.parent) it.parent.add(it.o); if (CBZ.farcullAdopt) CBZ.farcullAdopt(it.o); }
     const inSync = CBZ.colliderAddMany && CBZ.colliderGridInSync && CBZ.colliderGridInSync();
     // a collider its owner had TAKEN OUT while the job was built (`_out`: an
     // open door, interior_programs.js) stays out: re-attaching all of them
@@ -512,7 +658,7 @@
       const mine = job.objs.filter(function (it) { return it.parent === root && it.o.parent === root; });
       if (mine.length) {
         const G = new window.THREE.Group();
-        G.name = "stream-job";
+        G.name = "stream-job"; G.userData.streamJob = true;
         root.add(G);
         for (const it of mine) { root.remove(it.o); G.add(it.o); }
         try { CBZ.batchStaticUnder(G); } catch (e) { console.error("[stream batch " + (job.name || "?") + "]", e); }
@@ -521,10 +667,12 @@
         job.objs.push({ o: G, parent: root });
       }
     }
+    if (job.spill == null) { try { measureSpill(job); } catch (e) {} }
     for (const it of job.objs || []) {
       try { CBZ.freeStaticArrays(it.o); } catch (e) {}
       try { if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(it.o); } catch (e) {}
       try { if (CBZ.shaderQueue) CBZ.shaderQueue(it.o, { full: true }); } catch (e) {}
+      try { if (CBZ.farcullAdopt) CBZ.farcullAdopt(it.o); } catch (e) {}
     }
   }
 
@@ -631,7 +779,7 @@
       const mine = job.objs.filter(function (it) { return it.parent === root && it.o && !it.o.parent; });
       if (mine.length < 2) { for (const it of job.objs) if (it.o) compactTree(it.o); return; }
       const G = new window.THREE.Group();
-      G.name = "stream-job";
+      G.name = "stream-job"; G.userData.streamJob = true;
       for (const it of mine) G.add(it.o);
       const los = L && job.los && job.los.length ? job.los : null;
       const base = L ? L.length : 0;
@@ -663,16 +811,91 @@
     releaseGPU(o);
   };
 
-  /* ---- the streamer --------------------------------------------------------- */
+  /* ---- the streamer ---------------------------------------------------------
+     PLANNED AT 10 Hz, WORKED EVERY FRAME. The tick used to do everything at
+     once every sixth frame: re-attach EVERY parked job that came into range,
+     build up to 16 ms, park and free everything that left: one heavy frame
+     in six (the drive's p95), however little was asked of the frames between.
+     Now the 10 Hz plan only decides (re-centre, what is wanted, nearest
+     first, what is to be parked or freed), and every frame does a share of
+     it under a budget of milliseconds PER SECOND, spread by the frame's dt:
+     the same work per second, never the whole second's work in one frame.
+     What the camera could already see (inside the view distance) is still
+     done at once, whatever the budget: nothing may assemble itself in view.
+     A job always finishes once started (builders are not resumable), so a
+     frame starts a second job only while it is under its share. */
   const HYST = 250;                 // park only this far past the keep circle
   const FREE_DIST = 700;            // ... and free it outright this far past it
-  const STEP_MS = 6;                // per-tick build budget (a job always gets to finish)
-  const STEP_SOON_MS = 16;          // ... while something will be in sight within a few ticks
+  // (the old tick's own throughput, 6 / 16 ms ten times a second: content
+  // arrives when it always did, only no longer in one frame of six. 200 ms/s
+  // built ~25% more per second and drew ~29% more calls from the phone's
+  // aerial spot in the paired A/B, at +4% of the drive's memory peak)
+  const RATE_MS = 60;               // build / unpark work per second of play
+  const RATE_SOON_MS = 160;         // ... while something will be in sight within a few seconds
+  const FRAME_MIN_MS = 1;           // a frame's share is never less than this
+  const FRAME_MAX_MS = 8;           // ... nor more (a 10 fps frame does not take 20 ms of builds)
+  // park + free per frame (never urgent: past keep + HYST). At 1.5 ms a frame
+  // a teleport's worth of parks (the phone A/B's spot changes) trickled out
+  // over seconds: the content stood, drawn and in memory, past the keep
+  // circle meanwhile (+30% calls from the aerial spot, +7% drive memory)
+  const OUT_MS = 4;
   let acc = 0;
-  CBZ.streamStats = { built: 0, parked: 0, queued: 0, recentres: 0, lastJobMs: 0, maxJobMs: 0 };
-  CBZ.streamTick = function (force) {
+  const plan = { want: [], wi: 0, out: [], oi: 0, soon: false };
+  let stepping = null;              // the job in steps now in flight
+  CBZ.streamStats = { built: 0, parked: 0, queued: 0, recentres: 0, lastJobMs: 0, maxJobMs: 0,
+    ms: { plan: 0, unpark: 0, build: 0, park: 0, free: 0 }, frameMaxMs: 0 };
+  // the streamer's own cost per frame (ms), last 600 frames: CBZ.streamPerf()
+  const RING = new Float32Array(600); let ringN = 0;
+  CBZ.streamPerf = function () {
+    const n = Math.min(ringN, RING.length), a = Array.prototype.slice.call(RING, 0, n).sort(function (x, y) { return x - y; });
+    let sum = 0; for (let i = 0; i < n; i++) sum += a[i];
+    const at = function (f) { return n ? +a[Math.min(n - 1, Math.floor(n * f))].toFixed(2) : 0; };
+    return { frames: n, mean: n ? +(sum / n).toFixed(3) : 0, p95: at(0.95), p99: at(0.99), max: n ? +a[n - 1].toFixed(2) : 0, phases: CBZ.streamStats.ms };
+  };
+  // one share of work on j; true when j is in the scene (built / unparked)
+  // the heavy ones, for the tools (CBZ.streamStats.slow: the last 24 pieces
+  // of work over 20 ms in ONE frame: what, how, how long)
+  function slowNote(j, how, ms) {
+    if (!(ms > 20)) return;
+    const L = CBZ.streamStats.slow || (CBZ.streamStats.slow = []);
+    const e = [how, j.name || "?", Math.round(ms)];
+    L.push(e); if (L.length > 24) L.shift();
+    // ... and the worst 8 since boot
+    const W = CBZ.streamStats.worst || (CBZ.streamStats.worst = []);
+    if (W.length < 8 || ms > W[W.length - 1][2]) { W.push(e); W.sort(function (a, b) { return b[2] - a[2]; }); if (W.length > 8) W.length = 8; }
+  }
+  function bringIn(j, urgent) {
+    const t0 = performance.now();
+    if (j.state === "parked") { unpark(j); const ms = performance.now() - t0; CBZ.streamStats.ms.unpark += ms; slowNote(j, "unpark", ms); return true; }
+    if (j.steps && !urgent) {
+      // a job in steps: one step now, the rest on the next frames
+      const done = stepJob(j);
+      if (done) { settle(j); noteAdd(j, "build"); }
+      const ms = performance.now() - t0;
+      CBZ.streamStats.ms.build += ms; slowNote(j, done ? "step+settle" : "step", ms);
+      if (!done) return false;
+      CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms));
+      return true;
+    }
+    runCaptured(j); settle(j); noteAdd(j, urgent ? "build!" : "build");
+    const ms = performance.now() - t0;
+    CBZ.streamStats.ms.build += ms; slowNote(j, urgent ? "build!" : "build", ms);
+    CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms));
+    if (urgent) CBZ.streamStats.urgent = (CBZ.streamStats.urgent || 0) + 1;
+    return true;
+  }
+  function takeOut(j) {
+    const t0 = performance.now();
+    if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST + (j.spill || 0))) { park(j); const ms = performance.now() - t0; CBZ.streamStats.ms.park += ms; slowNote(j, "park", ms); }
+    const t1 = performance.now();
+    if (j.state === "parked" && j.fn && !j.noFree && !rectKeeps(j.rect, FREE_DIST)) { freeJob(j); const ms = performance.now() - t1; CBZ.streamStats.ms.free += ms; slowNote(j, "free", ms); }
+  }
+  // THE PLAN (10 Hz): re-centre, what is wanted (nearest first, what lies
+  // ahead counts as nearer), what is in view now (done now), what goes
+  function planTick(force) {
     const s = CBZ.slice; if (!s || !s.stream) return;
     const P = CBZ.player; if (!P || !P.pos) return;
+    const t0 = performance.now();
     const dx = P.pos.x - s.x, dz = P.pos.z - s.z;
     // WHERE THE PLAYER IS GOING (core/sight.js sightAhead: the body's speed
     // and heading on GAME time, a car, a horse, a plane alike): the keep
@@ -688,53 +911,86 @@
       s.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(s.x, s.z, s.view()) : s.r;
       CBZ.streamStats.recentres++;
     }
-    const t0 = performance.now();
-    // nearest first
-    const order = jobs.filter(function (j) { return j.state !== "built" && rectKeeps(j.rect); });
+    const want = [];
+    for (let i = 0; i < jobs.length; i++) { const j = jobs[i]; if (j.state !== "built" && rectKeeps(j.rect, spillOf(j))) want.push(j); }
     // nearest first, but what lies AHEAD of a moving player counts as nearer
     // (at 30 m/s the road ahead reaches view distance in seconds; the ground
     // beside and behind can wait): distance minus half its forward reach
     const hx = V > 3 && AH ? AH.hx : 0, hz = V > 3 && AH ? AH.hz : 0;
-    const keyOf = function (r) {
-      const d = Math.sqrt(distTo(r, P.pos.x, P.pos.z));
-      if (!hx && !hz) return d;
+    for (const j of want) {
+      const r = j.rect, d = Math.sqrt(distTo(r, P.pos.x, P.pos.z));
+      if (!hx && !hz) { j._key = d; continue; }
       const cx = (r.minX + r.maxX) / 2 - P.pos.x, cz = (r.minZ + r.maxZ) / 2 - P.pos.z;
-      return d - 0.5 * Math.max(0, cx * hx + cz * hz) * (d > 0 ? Math.min(1, 400 / (d + 1)) : 1);
-    };
-    for (const j of order) j._key = keyOf(j.rect);
-    order.sort(function (a, b) { return a._key - b._key; });
+      j._key = d - 0.5 * Math.max(0, cx * hx + cz * hz) * (d > 0 ? Math.min(1, 400 / (d + 1)) : 1);
+    }
+    want.sort(function (a, b) { return a._key - b._key; });
     // A job the player could already SEE (its rect inside the view distance
-    // of where the player stands) is built now, whatever the budget: nothing
-    // may assemble itself in view. The rest spend STEP_MS a tick, nearest first.
-    // Re-attaching parked content is cheap: all of it, now. Building has a
-    // budget that GROWS with need: a job that will be in sight within the
-    // next few ticks (inside view + the speed lead) raises it to STEP_SOON_MS,
-    // so the queue drains BEFORE anything reaches view distance (a build that
-    // only happens inside view is a pop: counted in streamStats.urgent).
-    // (in sight = from the EYE, core/sight.js; the body is where colliders matter)
+    // of the eye or the body) is done NOW: a build there is a pop (counted in
+    // streamStats.urgent). The rest go to the frames, at RATE_MS a second, or
+    // RATE_SOON_MS while one of them will be in sight within the next few
+    // seconds (inside view + the speed lead), so the queue drains BEFORE
+    // anything reaches the view distance.
     const EYE = CBZ.sight();
     const VIEW = s.view(), V2 = VIEW * VIEW, SOON = VIEW + lead + 60, SOON2 = SOON * SOON;
-    let budget = STEP_MS;
-    for (const j of order) {
-      if (j.state === "parked") { unpark(j); continue; }
-      if (distTo(j.rect, EYE.x, EYE.z) < SOON2 || distTo(j.rect, P.pos.x, P.pos.z) < SOON2 ||
-          (lead > 20 && distTo(j.rect, AH.x, AH.z) < V2)) budget = STEP_SOON_MS;
+    let soon = false;
+    const rest = [];
+    for (const j of want) {
+      if (j.state === "built") continue;           // a parent's run built it inline
+      if (force) { while (!bringIn(j, false)) {} continue; }
+      const sp = spillOf(j), Vs = (VIEW + sp) * (VIEW + sp), Ss = (SOON + sp) * (SOON + sp);
+      if (distTo(j.rect, EYE.x, EYE.z) < Vs || distTo(j.rect, P.pos.x, P.pos.z) < Vs) { bringIn(j, true); continue; }
+      if (!soon && (distTo(j.rect, EYE.x, EYE.z) < Ss || distTo(j.rect, P.pos.x, P.pos.z) < Ss ||
+          (lead > 20 && distTo(j.rect, AH.x, AH.z) < Vs))) soon = true;
+      rest.push(j);
     }
-    for (const j of order) {
-      if (j.state !== "queued") continue;
-      const urgent = distTo(j.rect, EYE.x, EYE.z) < V2 || distTo(j.rect, P.pos.x, P.pos.z) < V2;
-      if (!force && !urgent && performance.now() - t0 > budget) break;
-      runCaptured(j); settle(j); noteAdd(j, urgent ? "build!" : "build");
-      CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms));
-      if (urgent) CBZ.streamStats.urgent = (CBZ.streamStats.urgent || 0) + 1;
+    plan.want = rest; plan.wi = 0; plan.soon = soon;
+    const out = [];
+    for (const j of jobs) {
+      if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST + (j.spill || 0))) out.push(j);
+      // a parked job this far out is freed outright (it re-runs if the player
+      // comes back); pruned boot content has no fn and stays parked
+      else if (j.state === "parked" && j.fn && !j.noFree && !rectKeeps(j.rect, FREE_DIST)) out.push(j);
     }
-    for (const j of jobs) if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST)) park(j);
-    // a parked job this far out is freed outright (it re-runs if the player
-    // comes back); pruned boot content has no fn and stays parked
-    for (const j of jobs) if (j.state === "parked" && j.fn && !j.noFree && !rectKeeps(j.rect, FREE_DIST)) freeJob(j);
+    plan.out = out; plan.oi = 0;
+    if (force) { for (const j of out) takeOut(j); plan.out = []; }
+    const pms = performance.now() - t0;
+    CBZ.streamStats.ms.plan += pms; slowNote({ name: force ? "(forced plan)" : "(plan)" }, "plan", pms);
     let b = 0, p = 0, qd = 0;
     for (const j of jobs) { if (j.state === "built") b++; else if (j.state === "parked") p++; else qd++; }
     CBZ.streamStats.built = b; CBZ.streamStats.parked = p; CBZ.streamStats.queued = qd;
+  }
+  // THE WORK (every frame): a share of the plan, by the frame's dt
+  function workFrame(dt) {
+    const s = CBZ.slice; if (!s || !s.stream) return;
+    const t0 = performance.now();
+    const share = Math.max(FRAME_MIN_MS, Math.min(FRAME_MAX_MS, (plan.soon ? RATE_SOON_MS : RATE_MS) * Math.max(0.001, dt || 1 / 60)));
+    let did = false;
+    // a job in steps keeps going until it is whole (its parts are held out
+    // of the scene meanwhile), wherever the player went
+    while (stepping && performance.now() - t0 < share) {
+      if (stepping.state !== "building" || bringIn(stepping, false)) stepping = null;
+      did = true;
+    }
+    while (!stepping && plan.wi < plan.want.length) {
+      if (did && performance.now() - t0 >= share) break;
+      const j = plan.want[plan.wi++];
+      if (j.state === "built" || !rectKeeps(j.rect, spillOf(j))) continue;   // done meanwhile, or left range since the plan
+      if (j.parent && jobs.indexOf(j) < 0) continue;                 // a freed parent's child
+      if (!bringIn(j, false)) stepping = j;
+      did = true;
+      while (stepping && performance.now() - t0 < share) { if (bringIn(stepping, false)) stepping = null; }
+    }
+    const t1 = performance.now();
+    while (plan.oi < plan.out.length && performance.now() - t1 < OUT_MS) takeOut(plan.out[plan.oi++]);
+    packStep();
+    const ms = performance.now() - t0;
+    RING[ringN++ % RING.length] = ms;
+    if (ms > CBZ.streamStats.frameMaxMs) CBZ.streamStats.frameMaxMs = +ms.toFixed(1);
+  }
+  // force = everything now (a boot, a teleport, tools); otherwise only the
+  // plan (the frames do the work)
+  CBZ.streamTick = function (force) {
+    planTick(!!force);
   };
   function distTo(r, x, z) {
     const cx = Math.max(r.minX, Math.min(x, r.maxX)), cz = Math.max(r.minZ, Math.min(z, r.maxZ));
@@ -753,9 +1009,8 @@
     CBZ.onUpdate(0.05, function (dt) {
       if (!CBZ.slice || !CBZ.slice.stream || !CBZ.game || CBZ.game.mode !== "city") return;
       acc += dt || 0;
-      if (acc < 0.1) return;           // 10 Hz: a fast car covers 4 m a tick
-      acc = 0;
-      CBZ.streamTick(false);
+      if (acc >= 0.1) { acc = 0; planTick(false); }     // 10 Hz: a fast car covers 4 m a plan
+      workFrame(dt);
     });
   }
 })();

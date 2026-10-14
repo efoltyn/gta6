@@ -23,6 +23,7 @@
      node tools/speed.mjs --ask prof 'CBZ.startRun()'        # ... under the CPU profiler: self + inclusive tops
      node tools/speed.mjs --ask drive [--mps 40 --secs 60 --route x,z;x,z]  # fast drive: peak memory per second + POP-INS in view
      node tools/speed.mjs --ask drive --allocs     # ... + who ALLOCATED during it (incl. collected garbage), by site
+     node tools/speed.mjs --ask horizon [--spot spawn]   # how far REAL content (near form) reaches vs the fog, far form + ground beside it
      node tools/speed.mjs --ask reload                       # rebuild from edited sources (measured load)
      node tools/speed.mjs --ask info | stop
      node tools/speed.mjs --serve                            # run the world in the foreground instead
@@ -617,7 +618,10 @@ S.tqCollect = function(timeoutMs){ var T = S.tq; return new Promise(function(res
 /* PIXELS for the look guard: the finished frame as the game drew it (same
    task as the render, so the drawing buffer is still intact). */
 S.grab = function(gl){ var w = gl.drawingBufferWidth, h = gl.drawingBufferHeight, px = new Uint8Array(w * h * 4);
-  try { gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); S.shot = { w: w, h: h, px: px }; } catch (_) { S.shot = null; } };
+  try { gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px); S.shot = { w: w, h: h, px: px }; } catch (_) { S.shot = null; }
+  /* the camera the shot was taken with: a look difference that is the CAMERA
+     (a lens eased to another fov, a boom settled elsewhere) is not content */
+  try { var cm = window.CBZ.camera; if (S.shot && cm) S.shot.cam = { p: [cm.position.x, cm.position.y, cm.position.z], q: [cm.quaternion.x, cm.quaternion.y, cm.quaternion.z, cm.quaternion.w], fov: cm.fov }; } catch (_) {} };
 function b64(u){ var s = "", CH = 0x8000; for (var i = 0; i < u.length; i += CH) s += String.fromCharCode.apply(null, u.subarray(i, i + CH)); return btoa(s); }
 S.shotOut = function(){ var s = S.shot; if (!s) return null; S.shot = null;
   var w = s.w, h = s.h, px = s.px, k = (w * h > 2.6e6) ? 2 : 1, lw = Math.floor(w / k), lh = Math.floor(h / k), L = new Uint8Array(lw * lh);
@@ -628,7 +632,7 @@ S.shotOut = function(){ var s = S.shot; if (!s) return null; S.shot = null;
   var hw = w >> 1, hh = h >> 1, R = new Uint8Array(hw * hh * 3);
   for (var y2 = 0; y2 < hh; y2++) for (var x2 = 0; x2 < hw; x2++) { var a = ((h - 1 - 2 * y2) * w + 2 * x2) * 4, b = a - w * 4, d = (y2 * hw + x2) * 3;
     for (var c = 0; c < 3; c++) R[d + c] = (px[a + c] + px[a + 4 + c] + px[b + c] + px[b + 4 + c]) >> 2; }
-  return { w: lw, h: lh, luma: b64(L), hw: hw, hh: hh, rgb: b64(R) }; };
+  return { w: lw, h: lh, luma: b64(L), hw: hw, hh: hh, rgb: b64(R), cam: s.cam || null }; };
 /* Name every updater: trap CBZ.onUpdate/onAlways so each entry carries the file:line that registered it (config.js's own source tag only exists under ?profile=1). */
 function srcOf(){ var st = (new Error()).stack || ""; var L = st.split("\n");
   for (var i = 2; i < L.length; i++) { var m = L[i].match(/((?:src|games)\/[^:?)]+\.js)(?:\?[^:)\s]+)?:(\d+)/); if (m && !/src\/(config|core\/prio|core\/microboot|core\/studio)\.js/.test(m[1])) return m[1] + ":" + m[2]; }
@@ -697,10 +701,25 @@ S.hold_ = function(){ S.hold = true; S.rafLog = false; S.t = now(); };
    S.tqCollect() fills them in later). o.grab: keep the last frame's pixels. */
 S.step = function(n, o){
   o = o || {}; var C = window.CBZ, r = C && C.renderer, gl = S.gl(), out = [];
+  /* A POSED CAMERA IS THE CAMERA FOR THE WHOLE FRAME'S LAST WORD, not only
+     inside render(): the passes that decide what to draw from the camera
+     (core/viewscope.js at always 999.9) ran with the game's own camera and
+     hid things the posed one sees. Applied just before them. */
+  /* THE LOOK SHOT'S LENS IS PINNED. The game eases its fov (a speed kick, a
+     chase lens, a settle after the spot's placement), and two runs of the SAME
+     build reached the shot 0.2 deg apart, which moves every edge in the frame
+     (measured: base re-runs 0.214 deg, candidate 0.244 deg). The frame a look
+     guard grabs is drawn at a fixed fov (S.shotFov, 60: the game's base lens)
+     on both sides of an A/B, so its pixels compare content, not lens timing. */
+  if (C && C.onAlways && !S.poseHook) { S.poseHook = 1; var ph = function(){ if (S.pose && C.camera) S.applyPose(C.camera);
+      if (S.fixFov && C.camera && C.camera.fov !== S.fixFov) { C.camera.fov = S.fixFov; C.camera.updateProjectionMatrix(); } };
+    /* slotted into the sorted list (a run-time onAlways is appended after everything) */
+    if (C.frameListsAdd) C.frameListsAdd([], [{ order: 999.8, fn: ph, seq: 0 }]); else C.onAlways(999.8, ph); }
   if (r && r.info) r.info.autoReset = false;
   var useTq = !!(o.gpu && S.tqInit());
   for (var i = 0; i < n; i++) {
     if (o.path) o.path(i, n);
+    S.fixFov = (o.grab && i === n - 1 && S.shotFov !== 0) ? (S.shotFov || 60) : 0;
     if (!o.frozen) S.t += 1000 / 60;   /* frozen: dt = 0, the world stands still (the look guard's A/B shots) */
     if (useTq) { S.tq.frame++; S.tq.on = true; S.tqPush("frame"); }
     if (!S.q.length && !S.kicked && C && C.startLoop) { S.kicked = 1; C.startLoop(); }   // loop not pending: restart it into the hold queue
@@ -718,6 +737,7 @@ S.step = function(n, o){
        the frame (gl.finish() is a no-op wait in Chrome: measured 0.0 ms). */
     if (gl && o.finish) { var f0 = now(); try { gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, S.px || (S.px = new Uint8Array(4))); } catch (_) {} fin = now() - f0; }
     if (gl && o.grab && i === n - 1) S.grab(gl);
+    S.fixFov = 0;
     var sim = 0, alw = 0, row = { cpu: cpu, fin: fin, render: S.render, rOther: S.renderOther, compile: S.compileMs, draws: S.draws, glTris: Math.round(S.tris) };
     if (useTq) row.tf = S.tq.frame;
     if (o.perUpdater) row.u = {};
@@ -1530,7 +1550,14 @@ function compare(cur, base) {
 }
 
 /* ---------------- the PIXEL look guard ---------------- */
-function decodeShot(s) { return s && { w: s.w, h: s.h, L: Buffer.from(s.luma, "base64"), hw: s.hw, hh: s.hh, rgb: Buffer.from(s.rgb, "base64") }; }
+function decodeShot(s) { return s && { w: s.w, h: s.h, L: Buffer.from(s.luma, "base64"), hw: s.hw, hh: s.hh, rgb: Buffer.from(s.rgb, "base64"), cam: s.cam || null }; }
+/* how far apart two shots' cameras were (metres, radians, degrees of fov) */
+function camDelta(a, b) {
+  if (!a || !b) return null;
+  const dp = Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1], a.p[2] - b.p[2]);
+  const dot = Math.min(1, Math.abs(a.q[0] * b.q[0] + a.q[1] * b.q[1] + a.q[2] * b.q[2] + a.q[3] * b.q[3]));
+  return { pos: +dp.toFixed(4), rot: +(2 * Math.acos(dot)).toFixed(5), fov: +Math.abs(a.fov - b.fov).toFixed(3) };
+}
 /* SSIM per 8x8 block on luma (Wang et al. 2004 constants for 8-bit) */
 function blockSsim(a, b, w, h, bs = 8) {
   const bw = Math.floor(w / bs), bh = Math.floor(h / bs), out = new Float32Array(bw * bh), C1 = 6.5025, C2 = 58.5225, n = bs * bs;
@@ -1600,6 +1627,18 @@ function lookSpot(name, B, C, outDir) {
      the frame AND by half again, or the stable picture's mean SSIM down 0.01 */
   const over = r.cand.changed - r.floor.changed;
   r.verdict = (over > 0.005 && r.cand.changed > 1.5 * r.floor.changed) || r.cand.ssim < r.floor.ssim - 0.01 ? "LOOK REGRESSION" : "same look";
+  /* WAS IT THE CAMERA? The shot is taken where the game's own camera stands,
+     and a lens still easing its fov or a boom settling after the spot's
+     placement moves every edge in the frame: a uniform edge diff that reads
+     as a regression of everything. Said beside the verdict (never instead):
+     the base re-runs' camera spread vs the candidate's. */
+  const cb = B.slice(1).map((x) => camDelta(ref.cam, x.cam)).filter(Boolean), cc2 = C.map((x) => camDelta(ref.cam, x.cam)).filter(Boolean);
+  if (cb.length || cc2.length) {
+    const mx = (L, k) => L.length ? Math.max(...L.map((d) => d[k])) : null;
+    r.camera = { baseSpread: { pos: mx(cb, "pos"), rot: mx(cb, "rot"), fov: mx(cb, "fov") }, cand: { pos: mx(cc2, "pos"), rot: mx(cc2, "rot"), fov: mx(cc2, "fov") } };
+    const moved = (r.camera.cand.fov || 0) > 0.02 || (r.camera.cand.pos || 0) > 0.01 || (r.camera.cand.rot || 0) > 2e-4;
+    if (moved) r.cameraMoved = `camera differs from base run 1 (fov ${r.camera.cand.fov} deg, pos ${r.camera.cand.pos} m, rot ${r.camera.cand.rot} rad; base re-runs: fov ${r.camera.baseSpread.fov}, pos ${r.camera.baseSpread.pos}, rot ${r.camera.baseSpread.rot})`;
+  }
   if (outDir && ref.hw === C[0].hw && ref.hh === C[0].hh && !r.resampled) { try { r.png = writeLookPng(path.join(outDir, `look-${name}.png`), ref, C[0], cs[0], mask); } catch (e) { r.pngError = String(e.message || e); } }
   return r;
 }
@@ -1806,6 +1845,11 @@ async function serveMain() {
        rule: nothing may assemble itself in view). Target 0. */
     if (op === "drive") {
       const route = q.route || null, mps = q.mps || 40, secs = q.secs || 60;
+      /* A DRIVE STARTS FROM A FIXED SPOT (--from, default spawn) with the
+         camera on the player: a drive asked after the aerial spot used to run
+         under its pinned 110 m camera, from the middle of a wood */
+      const from = spots[q.from || "spawn"] || spots.spawn;
+      if (from) { await P.ev(place(Object.assign({}, from, { cam: null }))); await P.ev(`(function(){ var S = window.__speed; S.pose = null; S.step(30, { path: S.pin(${JSON.stringify(Object.assign({}, from, { cam: null }))}) }); return 1; })()`, 300000); }
       // --allocs: V8's sampling heap profiler over the drive, INCLUDING what
       // the collector already took (the churn behind the sawtooth), by site
       if (q.allocs) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", { samplingInterval: 262144, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); }
@@ -1919,22 +1963,78 @@ async function serveMain() {
             if (dist < fog && sp.radius < fog && fr.intersectsSphere(sp)) { popN++; if (pops.length < 30) pops.push([label(o), Math.round(dist), Math.round(sp.radius)]); } } }
         }
         var samples = [], t0 = performance.now(), frames = SECS * 60, d = 0;
+        var cpuF = [], strF = [], perK = {}, STREAM_RE = /citystream|farcull|metro\.js|metro_fabric|instcull|treelod|slice\.js/;
+        function stat(a){ if (!a.length) return null; var b = a.slice().sort(function(x, y){ return x - y; }), s0 = 0; for (var i = 0; i < b.length; i++) s0 += b[i];
+          var r2 = function(x){ return Math.round(x * 100) / 100; };
+          return { mean: r2(s0 / b.length), p50: r2(b[b.length >> 1]), p95: r2(b[Math.min(b.length - 1, Math.floor(b.length * 0.95))]), p99: r2(b[Math.min(b.length - 1, Math.floor(b.length * 0.99))]), max: r2(b[b.length - 1]), over33: b.filter(function(x){ return x > 33; }).length }; }
         scan(true);
         var hp = 0, gp = 0, php = 0;
         for (var f = 0; f < frames; f++) {
           d += MPS / 60; var q = at(Math.min(d, tot));
-          S.step(1, { path: function(){ Pl.pos.x = q[0]; Pl.pos.z = q[1]; Pl.pos.y = gh(q[0], q[1]); if (Pl.vel) { Pl.vel.x = 0; Pl.vel.y = 0; Pl.vel.z = 0; } Pl.hp = Math.max(Pl.hp || 0, 100);
+          var rows = S.step(1, { perUpdater: true, path: function(){ Pl.pos.x = q[0]; Pl.pos.z = q[1]; Pl.pos.y = gh(q[0], q[1]); if (Pl.vel) { Pl.vel.x = 0; Pl.vel.y = 0; Pl.vel.z = 0; } Pl.hp = Math.max(Pl.hp || 0, 100);
             if (C.playerChar && C.playerChar.group) { C.playerChar.group.position.set(q[0], Pl.pos.y, q[1]); C.playerChar.group.rotation.y = q[2]; }
             if (C.cam) C.cam.yaw = q[2] + Math.PI; } });
+          /* THE FRAME AND THE STREAMER'S SHARE OF IT (CPU ms per stepped
+             frame; the first 30 frames are the drive's own warm-up) */
+          if (f >= 30 && rows && rows[0]) { var rw = rows[0]; cpuF.push(rw.cpu);
+            var sm = 0; for (var uk in rw.u || {}) if (STREAM_RE.test(uk)) { sm += rw.u[uk]; (perK[uk] || (perK[uk] = [])).push(rw.u[uk]); }
+            strF.push(sm); }
           if (f & 1) scan(false);
           if (YIELD) await new Promise(function (r) { setTimeout(r, 0); });
           if (f % 60 === 59) { var m = S.memRead(); hp = Math.max(hp, m.heap); gp = Math.max(gp, m.gpu); php = Math.max(php, m.phone);
             var st = C.streamStats || {}; samples.push([Math.round((f + 1) / 60), Math.round(m.heap), Math.round(m.gpu), Math.round(m.phone), st.built, st.parked, st.queued, C.slice ? Math.round(C.slice.keepR()) : null]); }
         }
         return { routeLegs: route.length - 1, routeKm: +(tot / 1000).toFixed(2), km: +(Math.min(d, tot) / 1000).toFixed(2), wallS: +((performance.now() - t0) / 1000).toFixed(1), peak: { heap: Math.round(hp), gpu: Math.round(gp), phone: Math.round(php) },
+          frameCpu: stat(cpuF), streamerCpu: stat(strF), streamerBy: Object.keys(perK).map(function(k){ return [k.split("src/").join(""), stat(perK[k])]; }).sort(function(a, b){ return b[1].p95 - a[1].p95; }).slice(0, 8),
+          streamStats: (function(){ var o = {}, st = C.streamStats || {}; for (var k in st) if (typeof st[k] === "number") o[k] = st[k]; if (st.slow) o.slow = st.slow.slice(-24); if (st.worst) o.worst = st.worst.slice(); return o; })(),
           pops: popN, popChecks: checks, lodHandoffs: handoffs, popSamples: pops, poolSwitches: poolSw, poolSamples: poolSamples, streamAdds: (C.streamStats && C.streamStats.adds || []).filter(function (a) { return a[1] < 420; }).slice(0, 20), cols: "s heap gpu phone built parked queued keepR", samples: samples };
       })(${JSON.stringify(route)}, ${+mps}, ${+secs})`, 1800000);
       if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 300000); await P.s("HeapProfiler.stopSampling", {}, 60000); res.allocs = heapSites(profile); } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
+      res.ms = Date.now() - t0; return res;
+    }
+    /* --ask horizon [--spot a,b]: HOW FAR REAL CONTENT EXISTS against the fog.
+       At each spot (after the streamer has settled there): every drawn mesh /
+       instance in the camera frustum, by its NEAREST point's distance from the
+       eye, split into near form (the real thing: shells, props, cars, trees as
+       themselves), far form (metro / built-world HLOD, tree impostors,
+       mountain LOD: userData.metroFar / farLod) and ground (terrain, world
+       surfaces). Reports each class's p50 / p90 / p99 / max distance and
+       count, the fog's far, core/sight.js's detail ring and reach, and the
+       keep circle. "Real content distance" = the near form's p99. */
+    if (op === "horizon") {
+      res.spots = {};
+      for (const name of spotList(q)) {
+        const sp = spots[name];
+        await P.ev(place(sp));
+        await P.ev(`(function(){ var S = window.__speed, C = window.CBZ; S.step(${q.warm != null ? q.warm : 30}, { path: S.pin(${JSON.stringify(sp)}) }); try { if (C.streamTick) C.streamTick(true); } catch (e) {} S.step(30, { path: S.pin(${JSON.stringify(sp)}) }); return 1; })()`, 300000);
+        res.spots[name] = await P.ev(`(function(){
+          var C = window.CBZ, T = window.THREE, cam = C.camera; cam.updateMatrixWorld(true);
+          var pm = new T.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse), fr = new T.Frustum().setFromProjectionMatrix(pm);
+          var sph = new T.Sphere(), v = new T.Vector3(), m4 = new T.Matrix4(), ex = cam.position.x, ez = cam.position.z;
+          var D = { near: [], far: [], ground: [], haze: [] }, past = {}, pastR = {}, pastReach = 0, fog0 = C.scene.fog ? C.scene.fog.far : 0, reach0 = C.sight ? C.sight().reach : 1e9;
+          function hazed(o){ var m = Array.isArray(o.material) ? o.material[0] : o.material; return !!(m && (m.isShaderMaterial || (m.userData && m.userData._cbzFogScaled))); }
+          function cls(o){ for (var p = o; p; p = p.parent) { var u = p.userData || {}; if (u.metroFar || u.farLod != null || u.treeImpostor) return "far"; if (u.terrain || u.worldSurface || u.terrainFar || u.horizon) return "ground"; } return "near"; }
+          function walk(o, k){ if (!o.visible || (o.layers && o.layers.mask === 0 && !o.isScene)) return; var u = o.userData || {};
+            if (k == null && (u.metroFar || u.farLod != null || u.treeImpostor)) k = "far"; else if (k == null && (u.terrain || u.worldSurface || u.terrainFar || u.horizon)) k = "ground";
+            if ((o.isMesh || o.isPoints) && o.geometry && !o.isSkinnedMesh) { var g = o.geometry, kk = k || (hazed(o) ? "haze" : "near");
+              if (o.isInstancedMesh) { var n = o.count | 0; if (n > 0) { if (!g.boundingSphere) g.computeBoundingSphere(); var r = g.boundingSphere ? g.boundingSphere.radius : 1, a = o.instanceMatrix.array, st = Math.max(1, Math.floor(n / 600));
+                for (var i = 0; i < n; i += st) { m4.fromArray(a, i * 16).premultiply(o.matrixWorld); v.setFromMatrixPosition(m4); sph.center.copy(v); sph.radius = r * Math.max(1, m4.getMaxScaleOnAxis()); if (!fr.intersectsSphere(sph)) continue; D[kk].push(Math.max(0, Math.hypot(v.x - ex, v.z - ez) - sph.radius)); } } }
+              else { if (!g.boundingSphere) try { g.computeBoundingSphere(); } catch (e) {} if (g.boundingSphere) { sph.copy(g.boundingSphere).applyMatrix4(o.matrixWorld); if (fr.intersectsSphere(sph)) { var dd = Math.max(0, Math.hypot(sph.center.x - ex, sph.center.z - ez) - sph.radius); D[kk].push(dd);
+                if (kk === "near" && dd > reach0) { pastReach++; var top2 = o; while (top2.parent && top2.parent !== C.scene && top2.parent !== (C.city && C.city.arena && C.city.arena.root)) top2 = top2.parent; var lb2 = (top2.name || top2.type) + "/" + (o.name || (o.material && o.material.name) || o.type); pastR[lb2] = (pastR[lb2] || 0) + 1; }
+                if (kk === "near" && dd > fog0) { var top = o; while (top.parent && top.parent !== C.scene && !(top.parent.userData && top.parent.userData._cityRoot) && top.parent !== (C.city && C.city.arena && C.city.arena.root)) top = top.parent; var lb = (top.name || top.type) + "/" + (o.name || (o.material && o.material.name) || o.type); past[lb] = (past[lb] || 0) + 1; } } } } }
+            for (var c = 0; c < o.children.length; c++) walk(o.children[c], k); }
+          walk(C.scene, null);
+          function q(a){ if (!a.length) return null; a.sort(function(x, y){ return x - y; }); var at = function(f){ return Math.round(a[Math.min(a.length - 1, Math.floor(a.length * f))]); }; return { n: a.length, p50: at(0.5), p90: at(0.9), p99: at(0.99), max: Math.round(a[a.length - 1]) }; }
+          var SG = C.sight ? C.sight() : {}, s = C.slice;
+          var nearPastFog = 0, fog = C.scene.fog ? C.scene.fog.far : 0; for (var j = 0; j < D.near.length; j++) if (D.near[j] > fog) nearPastFog++;
+          return { fogFar: Math.round(fog), detail: Math.round(SG.detail || 0), reach: Math.round(SG.reach || 0), camFar: Math.round(cam.far), keepR: s && s.keepR ? Math.round(s.keepR()) : null,
+            tier: C.getQualityLevel ? C.getQualityLevel() : null, near: q(D.near), haze: q(D.haze), far: q(D.far), ground: q(D.ground), nearPastFog: nearPastFog,
+            pastFogTop: Object.keys(past).map(function(k){ return [k, past[k]]; }).sort(function(a, b){ return b[1] - a[1]; }).slice(0, 10),
+            /* past REACH = drawn although every pixel of it is fog colour (pure waste) */
+            nearPastReach: pastReach, pastReachTop: Object.keys(pastR).map(function(k){ return [k, pastR[k]]; }).sort(function(a, b){ return b[1] - a[1]; }).slice(0, 10),
+            stream: C.streamStats ? { built: C.streamStats.built, parked: C.streamStats.parked, queued: C.streamStats.queued } : null };
+        })()`, 300000);
+      }
       res.ms = Date.now() - t0; return res;
     }
     // --ask prof '<expr>': the expression under V8's CPU profiler (1 ms), the
@@ -2070,15 +2170,17 @@ async function askMain() {
   if (tg || tgf) q.toggle = tgf ? fs.readFileSync(tgf, "utf8") : tg;
   if (ASK === "eval" && has("--allocs")) q.allocs = true;
   if (ASK === "eval" && has("--gc")) q.gc = true;
+  // --timeout-s N: a long in-page check (default 60 s)
+  if (has("--timeout-s")) q.timeoutS = +opt("--timeout-s");
   // --allocs --live: only what the expression allocated and is STILL alive after it (a leak finder)
   if (ASK === "eval" && has("--live")) { q.allocs = true; q.liveOnly = true; q.timeoutS = 300; }
-  if (ASK === "drive") { const r = opt("--route", "road"); q.route = r === "road" || r === "straight" ? r : r.split(";").map((p) => p.split(",").map(Number)); q.mps = +opt("--mps", 40); q.secs = +opt("--secs", 60); q.allocs = has("--allocs"); }
+  if (ASK === "drive") { const r = opt("--route", "road"); q.route = r === "road" || r === "straight" ? r : r.split(";").map((p) => p.split(",").map(Number)); q.mps = +opt("--mps", 40); q.secs = +opt("--secs", 60); q.allocs = has("--allocs"); q.from = opt("--from", "spawn"); }
   if (ASK === "prof") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }
   if (ASK === "eval") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }
   let r;
   try { r = await post(w.port, q, 30 * 60 * 1000); } catch (e) { console.error("[speed] query failed: " + e.message); process.exit(1); }
   const O = (s) => process.stdout.write(s + "\n");
-  if (has("--json-out") || ASK === "info" || ASK === "eval" || ASK === "prof" || ASK === "drive" || ASK === "stop") O(JSON.stringify(r, null, 1));
+  if (has("--json-out") || ASK === "info" || ASK === "eval" || ASK === "prof" || ASK === "drive" || ASK === "horizon" || ASK === "stop") O(JSON.stringify(r, null, 1));
   if (r.reloaded) O(`reloaded (${r.reloaded.why}): load ${r.reloaded.load} ms = build ${r.reloaded.build} + first frame ${r.reloaded.firstFrame} + settle ${r.reloaded.settle}; CPU main ${r.reloaded.cpuMain} ms, GPU process ${r.reloaded.gpuProc} ms`);
   if (ASK === "frames") for (const [n, o] of Object.entries(r.spots || {}))
     O(`${n.padEnd(9)} frame ${fmt(o.frame)} ms (p95 ${fmt(o.p95)})  cpu ${fmt(o.cpu)} [sim ${fmt(o.sim)} always ${fmt(o.always)} render ${fmt(o.render)}]  gpu ${fmt(o.gpu)} [main ${fmt(o.gpuMain)} shadow ${fmt(o.gpuShadow)} rt ${fmt(o.gpuRt)}]  CPU/frame main ${fmt(o.cpuThread)} gpuProc ${fmt(o.gpuProcCpu)}  calls ${o.calls} tris ${((o.tris || 0) / 1e6).toFixed(2)}M\n` +
@@ -2195,7 +2297,7 @@ try {
       .sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct)).slice(0, 30);
     if (other.length) { O(`  OTHER CHANGES (diagnostic, not a verdict):`); other.forEach((r) => O(line(r))); }
     O(`  LOOK (pixels, block SSIM at the game's HD settings; changed = share of the stable picture with SSIM < ${BAD_SSIM}):`);
-    for (const l of look) O(`    ${l.verdict.padEnd(15)} ${l.spot.padEnd(16)} ${l.cand ? `candidate changed ${fmt(100 * l.cand.changed, 2)}% vs a base re-run ${fmt(100 * l.floor.changed, 2)}%, SSIM ${fmt(l.cand.ssim, 4)} vs ${fmt(l.floor.ssim, 4)} (stable area ${fmt(100 * l.stableArea, 0)}%${l.floorBiased ? ", floor from 2 base shots: biased low" : ""})${l.resampled ? "; " + l.resampled : ""}` : l.why || ""}${l.png ? "  " + l.png : ""}`);
+    for (const l of look) O(`    ${l.verdict.padEnd(15)} ${l.spot.padEnd(16)} ${l.cand ? `candidate changed ${fmt(100 * l.cand.changed, 2)}% vs a base re-run ${fmt(100 * l.floor.changed, 2)}%, SSIM ${fmt(l.cand.ssim, 4)} vs ${fmt(l.floor.ssim, 4)} (stable area ${fmt(100 * l.stableArea, 0)}%${l.floorBiased ? ", floor from 2 base shots: biased low" : ""})${l.resampled ? "; " + l.resampled : ""}` : l.why || ""}${l.png ? "  " + l.png : ""}${l.cameraMoved ? "\n                    " + l.cameraMoved : ""}`);
     if (!look.length) O(`    (no pixel shots${LOOK_PIX ? "" : ": --no-look"})`);
     if (settings.bad.length) O("  LOOK REGRESSION (settings dropped): " + settings.bad.join(" · "));
     if (settings.notes.length) O("  look notes (counts, not failures): " + settings.notes.join(" · "));

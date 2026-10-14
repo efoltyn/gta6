@@ -4,6 +4,71 @@ Owner, 2026-09-29: "The point is that jail opens on my phone and runs on my phon
 and Gang City doesn't." And: "the jail game is more real than any other game by 1000x",
 "it should be in sizes that are the same as fast as the jail game."
 
+## The runtime streamer (2026-10-14)
+
+Measured with tools/speed.mjs on the owner's M1 Pro under a shared box (load 30-90): paired
+A/B against 0da9d239 (3 interleaved pairs per device), plus one warm-world drive per side
+(`--ask drive`, 60 s at 40 m/s from the downtown spawn, `--route "-15,-725;-2110,-260;-1520,-1180"`)
+and `--ask horizon` (new: how far real content reaches against the fog, what is drawn past reach).
+
+| | desktop before | desktop after | phone before | phone after |
+|---|---|---|---|---|
+| load, nav to playable (paired) | 27.2 s | 19.9 s (-28%) | 26.3 s | 18.3 s (-30%) |
+| worst streamer frame on the drive | 545 ms | 246 ms | 535 ms | 215 ms |
+| worst single piece of streamer work | 517 ms (metro_structs) | ~230 ms (one Neon Reef town lot) | 505 ms | ~210 ms |
+| streamer ms/frame on the drive, mean / p99 | 2.28 / 27.1 | 2.26 / 24.3 | 2.22 / 16.3 | 1.96 / 14.6 |
+| pop-ins on the drive (streamed / other) | 1 / 3 | 0 / 3 | 0 / 1 | 0 / 1 |
+| LOD handoffs inside the fog on the drive | 73 | 79 | 176 | 27 |
+| meshes drawn past the fog's reach (spawn / downtown / aerial) | 283 / 232 / 26 | 104 / 123 / 0 | 286 / 55 / 0 | 141 / 55 / 0 |
+| tris at spawn / downtown (paired) | | -11% / -15% | | |
+| memory (paired: boot heap, GPU, phone live) | | same | | same |
+
+What changed:
+- **Planned at 10 Hz, worked every frame** (core/citystream.js). The tick did all of it in one
+  frame of six (every unpark, 6-16 ms of builds, every park and free). The plan only decides
+  now; each frame does a share at the old throughput (60 / 160 ms a second). In view is still
+  done at once.
+- **A streamed landmass job swept the whole city root** for fog-scaled surfaces (72k
+  objects): metro_structs, one mesh, was 505-530 ms on every drive. Now the sweep covers what
+  the job added (2-10 ms).
+- **Jobs in steps**: `CBZ.sliceAt(rect, [fn, fn, ...])` builds one part per share, holds the
+  parts (and their LOS blockers: unrendered, their matrices were identity, so rays hit their
+  walls round the world origin) out of the scene until the last, then settles them as one.
+  Apartment cells (200 ms) and airfield dressing (100 ms) use it.
+- **facade_openings**: this wave and fast-streamed-boot (main) both rewrote the coplanar
+  resolver the same way; the merge keeps main's file (its scan and hidden-face test are the
+  fastest). `tools/facade-equiv.mjs` + `tools/preload/focapture.js` replay every real call
+  of a boot and a streamed tour (207 resolve calls, 221,605 boxes; 141 scans) through the
+  pre-2026-10-14 code and each rewrite: 0 differences; resolve 14.2 s -> 3.1 s, scan
+  6.5 s -> 0.4 s. That is the -28% load above.
+- **farcull**: a freshly built or re-attached stream group is judged before its first frame
+  (content built ahead past the fog was uploaded, hidden, read back and re-uploaded); groups
+  show at R and hide past R + band (they came back 30 m inside the fog at speed); the
+  fog-reach pool cull runs on the desktop too (plain-fog pools only; phones keep their rule).
+- **viewscope**: a subtree past `reach` is hidden for the frame, movers included (parked
+  airliners with crews, herds were drawn as fog colour). Exact: pixel-identical in-page A/B.
+- **fitout** floors index their colliders in place (4 of 5 full broadphase rebuilds on a
+  phone drive).
+- A job is wanted by its rect grown by its measured spill (60 m on the desktop until it has
+  been built once: the stream group that popped at 750 m).
+
+The horizon, plainly: on the ground the real (near-form) content already reaches the fog's end
+(`detail` = fog + 36 m, the keep circle 30 m past it), and nothing near-form can be seen past
+the fog. What this wave bought is the far tier's cost (nothing past `reach` is drawn, tris
+-11/-15%) and frames without the streamer's 0.5 s stalls; the distance itself is the quality
+tier's fog (desktop 760 m at tier 2, phone 380 m), which the governor raises when frames allow.
+The paired frame medians stayed within the box's noise (load 30-90). Not settled: on every
+phone A/B the full run drew ~30% more calls from the aerial spot (GPU +25%), and the shot shows
+downtown towers on the horizon that the base run lacks; a warm world placed at that spot draws
+the same (5,361 vs 5,384 calls), so it depends on what the run did before the shot, not on the
+spot. The phone A/B's drive memory read +7% (an unsure interval, -0.4..+8.7% runs); the boot
+and steady memory read "same".
+
+Still open: a town lot is one building job of 150-230 ms (makeBuilding: flushDeco and the
+facade grammar; needs the builder split into steps); 3 non-stream pops at the drive start
+(`Group#6`, radius 1 m, 18-72 m); the drive's heap sawtooth is three.js render allocations,
+metro facade kit cells and wildlife, not the streamer.
+
 ## Phone fit (branch phone-fit, 2026-09-29)
 
 Measured on the phone profile (tools/speed.mjs --device phone, 390x844@3, iOS UA), streamed

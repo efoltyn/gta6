@@ -1216,8 +1216,12 @@
       g.updateMatrixWorld(true);
       if (parent) parent.add(g);
       if (cols.length && CBZ.colliders) {
-        for (let i = 0; i < cols.length; i++) { cols[i].ref = g; CBZ.colliders.push(cols[i]); }
-        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        for (let i = 0; i < cols.length; i++) cols[i].ref = g;
+        // indexed in place (systems/physics.js): a dirty mark rebuilt the
+        // whole broadphase grid (37k-140k boxes) on the next query, every
+        // time a floor was fitted out as the player walked past
+        if (CBZ.colliderAddMany) CBZ.colliderAddMany(cols);
+        else { for (let i = 0; i < cols.length; i++) CBZ.colliders.push(cols[i]); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
       }
       // the loose pieces' colliders went live when they were placed: the
       // floor's ledger carries them so freeFloor takes them too
@@ -1425,11 +1429,14 @@
     if (L.owner && CBZ.pushables && CBZ.pushables.removeOwner) { try { CBZ.pushables.removeOwner(L.owner); } catch (e) {} }
     if (L.cols.length && CBZ.colliders) {
       const set = new Set(L.cols);
-      const C = CBZ.colliders;
-      let w = 0;
-      for (let i = 0; i < C.length; i++) if (!set.has(C[i])) C[w++] = C[i];
-      C.length = w;
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(set);       // unindexed in place, no full rebuild
+      else {
+        const C = CBZ.colliders;
+        let w = 0;
+        for (let i = 0; i < C.length; i++) if (!set.has(C[i])) C[w++] = C[i];
+        C.length = w;
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      }
     }
     STATS.freed++;
   }
