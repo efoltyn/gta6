@@ -456,6 +456,10 @@
             // again, and disposing one made every later render throw (the
             // world stopped drawing after a drive: orchestrator, 8540e9bc)
             if (!t || !t.isCanvasTexture || texDone.has(t) || t._cbzFreed) continue;
+            // a self-painting canvas (core/texfree.js lazyCanvasTexture) repaints
+            // on its next upload: reading .image here would PAINT it, just to
+            // throw the GPU copy away, and keep that canvas while parked
+            if (t._cbzLazy) { texDone.add(t); t.dispose(); if (t._cbzRelease) t._cbzRelease(); continue; }
             const im = t.image;
             if (!im || typeof im.getContext !== "function" || !(im.width > 1)) continue;
             texDone.add(t);

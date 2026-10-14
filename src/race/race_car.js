@@ -993,11 +993,22 @@
     group.add(near, farG);
 
     // livery texture + body material
-    const tsz = lo ? 512 : 1024, cv = makeCanvas(tsz, tsz);
+    /* The livery is painted the first frame the car is DRAWN and its canvas
+       given back after the upload (core/texfree.js lazyCanvasTexture): the
+       speedway's field sat at the city boot as 1 MB canvases per car whether
+       or not anybody looked at the track. drawLivery is pure (the same
+       picture every call). Outside the game (no CBZ) it paints now. */
+    const tsz = lo ? 512 : 1024, CB = typeof window !== "undefined" ? window.CBZ : null;
     let tex = null;
-    if (cv) {
-      drawLivery(cv.ctx, L, tsz);
-      tex = new THREE.CanvasTexture(cv.c); tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
+    if (CB && CB.lazyCanvasTexture && typeof document !== "undefined") {
+      tex = CB.lazyCanvasTexture(tsz, tsz, function (ctx) { drawLivery(ctx, L, tsz); }, { name: "race-livery" });
+      tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
+    } else {
+      const cv = makeCanvas(tsz, tsz);
+      if (cv) {
+        drawLivery(cv.ctx, L, tsz);
+        tex = new THREE.CanvasTexture(cv.c); tex.encoding = THREE.sRGBEncoding; tex.anisotropy = 4;
+      }
     }
     const bodyMat = new THREE.MeshStandardMaterial({ map: tex, color: tex ? 0xffffff : col(THREE, hexToInt(L.base)),
       roughness: player ? 0.26 : 0.32, metalness: 0.12, side: THREE.DoubleSide });

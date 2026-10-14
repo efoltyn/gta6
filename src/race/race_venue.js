@@ -32,7 +32,7 @@
   const TR = (typeof module !== "undefined" && module.exports && typeof require === "function")
     ? require("./race_track.js") : root.CBZ.race.track;
   const K = TR.kit;
-  const { rng, canvas, tex, rgb, Mesher, Buckets, chunk, STAND, standSection, SUITES, inSuites, tunnelSpec, towerSpots, lightField, arcAt, signAtlas } = K;
+  const { rng, canvas, tex, ltex, rgb, Mesher, Buckets, chunk, STAND, standSection, SUITES, inSuites, tunnelSpec, towerSpots, lightField, arcAt, signAtlas } = K;
 
   const CANOPY = { back: 8.0, front: 6.2, reach: 9.0 };           // heights above the concourse; reach inward of uTop
   const SUITE_H = 0.9 + 3.2 + 0.6 + 3.2 + 0.8;                     // fascia, glass, slab, glass, roof fascia
@@ -72,8 +72,9 @@
     const t = tex(THREE, cv, false); t.repeat.set(0.25, 1); return t;
   }
   function skylineTex(THREE) {
-    const W = 1024, H = 256, cv = canvas(W, H); if (!cv) return null;
-    const g = cv.getContext("2d"), R = rng(909);
+    const W = 1024, H = 256;
+    const t = ltex(THREE, W, H, function (g) {
+    const R = rng(909);
     g.clearRect(0, 0, W, H);
     // far hills
     g.fillStyle = "#0f1420"; g.beginPath(); g.moveTo(0, H);
@@ -92,7 +93,9 @@
     // the glow of the stadium lights on the haze
     const gr = g.createLinearGradient(0, H * 0.3, 0, H);
     gr.addColorStop(0, "rgba(40,50,70,0)"); gr.addColorStop(1, "rgba(40,50,70,0.35)"); g.fillStyle = gr; g.fillRect(0, H * 0.3, W, H * 0.7);
-    const t = tex(THREE, cv, true); t.wrapT = THREE.ClampToEdgeWrapping; t.repeat.set(4, 1); return t;
+    }, true, "race-skyline");
+    if (!t) return null;
+    t.wrapT = THREE.ClampToEdgeWrapping; t.repeat.set(4, 1); return t;
   }
   function screenCanvas(w, h) { const cv = canvas(w, h); return cv; }
 
@@ -120,14 +123,10 @@
     // ---- materials ------------------------------------------------------------------
     const signs = signAtlas(THREE);
     const T = { noise: null, halo: haloTex(THREE), flag: flagTex(THREE), sky: skylineTex(THREE) };
-    {
-      const cv = canvas(256, 256);
-      if (cv) {
-        const g = cv.getContext("2d"), R = rng(31); g.fillStyle = "#e6e6e6"; g.fillRect(0, 0, 256, 256);
-        for (let i = 0; i < 8000; i++) { const v = 185 + R() * 70 | 0; g.fillStyle = "rgba(" + v + "," + v + "," + v + ",0.55)"; g.fillRect(R() * 256, R() * 256, 1 + R() * 2.5, 1 + R() * 2.5); }
-        T.noise = tex(THREE, cv, true);
-      }
-    }
+    T.noise = ltex(THREE, 256, 256, function (g) {
+      const R = rng(31); g.fillStyle = "#e6e6e6"; g.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 8000; i++) { const v = 185 + R() * 70 | 0; g.fillStyle = "rgba(" + v + "," + v + "," + v + ",0.55)"; g.fillRect(R() * 256, R() * 256, 1 + R() * 2.5, 1 + R() * 2.5); }
+    }, true, "race-venue-noise");
     const pylonCv = screenCanvas(128, 1024), jumboCv = screenCanvas(512, 288);
     T.pylon = tex(THREE, pylonCv, false); T.jumbo = tex(THREE, jumboCv, false);
     const M = {

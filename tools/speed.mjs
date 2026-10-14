@@ -106,9 +106,10 @@
        copyTexImage2D, generateMipmap, renderbufferStorage[Multisample],
        and the deletes; bytes per GL object in a WeakMap) plus the drawing
        buffer (w*h*(4+4)*MSAA samples + resolve): live, peak, split into
-       textures / buffers / renderbuffers. PHONE TOTAL = heap + GPU, its
-       peak and steady value, printed OK / OVER against --mem-budget (600).
-       2D canvases (w*h*4 of live ones) beside it: iOS caps those too.
+       textures / buffers / renderbuffers. 2D canvases: w*h*4 of the live
+       ones. PHONE TOTAL = heap + GPU + 2D canvases (one process on an
+       iPhone, killed on the sum), its peak and steady value, printed
+       OK / OVER against --mem-budget (600).
      SHADERS, COLD OR WARM. macOS keeps compiled Metal shaders in a SYSTEM
        cache that survives a fresh Chrome profile (40 programs: 4.4 s cold,
        0.37 s warm), so v1's compile numbers were bimodal: warm usually, cold
@@ -508,7 +509,13 @@ var ANGLE = window.ANGLEInstancedArrays; if (ANGLE) { hook(ANGLE.prototype, "dra
    (live with --enable-precise-memory-info), sampled at every script load,
    bootStep, landmass builder, stepped frame, GL allocation (throttled) and a
    100 ms timer; the combined "phone" peak is taken at the same instants. */
-var M = S.mem = { buf: 0, tex: 0, rb: 0, db: 0, peak: { buf: 0, tex: 0, rb: 0, gpu: 0, heap: 0, heapTotal: 0, phone: 0, cv2d: 0 },
+/* HARNESS TRAP (2026-10-14): the phone total used to be heap + GPU only, and
+   the live 2D canvases (155 MB at the city boot) were printed BESIDE it. On an
+   iPhone a canvas backing store is the same process's memory as the heap and
+   the GL buffers, so WebKit kills the tab on the SUM: a run could read 1286 MB
+   "near the limit" while the phone saw 1440. Canvases are in the total now
+   (M.cv, refreshed every sample, at most every 100 ms: the walk is not free). */
+var M = S.mem = { buf: 0, tex: 0, rb: 0, db: 0, cv: 0, cvAt: -1e9, peak: { buf: 0, tex: 0, rb: 0, gpu: 0, heap: 0, heapTotal: 0, phone: 0, cv2d: 0 },
   win: null, nBuf: 0, nTex: 0, nRb: 0, subBytes: 0, samples: 0, lastHeapAt: 0, heap: 0, heapTotal: 0 };
 var OBJ = new WeakMap(), cv2d = [];
 var BIND = { 34962: 34964, 34963: 34965, 35345: 35368, 36662: 36662, 36663: 36663, 35051: 35053, 35052: 35055, 35982: 35983 };
@@ -528,11 +535,12 @@ function dbBytes(){ var sum = 0; for (var i = 0; i < S.gls.length; i++) { var g 
     var w = g.drawingBufferWidth, h = g.drawingBufferHeight, per = 4 + (a.depth || a.stencil ? 4 : 0), smp = a.antialias ? 4 : 1;
     sum += w * h * per * smp + (a.antialias ? w * h * 4 : 0); } catch (_) {} } return sum; }
 function cv2dBytes(){ var sum = 0, keep = []; for (var i = 0; i < cv2d.length; i++) { var c = cv2d[i].deref ? cv2d[i].deref() : cv2d[i]; if (!c) continue; keep.push(cv2d[i]); sum += (c.width || 0) * (c.height || 0) * 4; } cv2d = keep; return sum; }
-function bump(){ var P = M.peak, gpu = M.buf + M.tex + M.rb + M.db, ph = gpu + M.heap;
+function bump(){ var P = M.peak, gpu = M.buf + M.tex + M.rb + M.db, ph = gpu + M.heap + M.cv; if (M.cv > P.cv2d) P.cv2d = M.cv;
   if (M.buf > P.buf) P.buf = M.buf; if (M.tex > P.tex) P.tex = M.tex; if (M.rb > P.rb) P.rb = M.rb; if (gpu > P.gpu) P.gpu = gpu; if (M.heap > P.heap) P.heap = M.heap;
   if (M.heapTotal > P.heapTotal) P.heapTotal = M.heapTotal; if (ph > P.phone) P.phone = ph;
   var W = M.win; if (W) { if (gpu > W.gpu) W.gpu = gpu; if (M.heap > W.heap) W.heap = M.heap; if (ph > W.phone) W.phone = ph; } }
-S.memSample = function(force){ heapNow(force !== false); M.db = dbBytes(); bump(); };
+S.cv2dNow = function(){ return cv2dBytes(); };
+S.memSample = function(force){ heapNow(force !== false); M.db = dbBytes(); var t = now(); if (t - M.cvAt >= 100) { M.cvAt = t; M.cv = cv2dBytes(); } bump(); };
 function setObj(o, kind, key, bytes){ if (!o) return; var r = OBJ.get(o); if (!r) { r = { kind: kind, total: 0, parts: {} }; OBJ.set(o, r); if (kind === "buf") M.nBuf++; else if (kind === "tex") M.nTex++; else M.nRb++; }
   var old = r.parts[key] || 0; r.parts[key] = bytes; r.total += bytes - old; M[kind] += bytes - old; heapNow(false); bump(); }
 function freeObj(o){ var r = o && OBJ.get(o); if (!r) return; M[r.kind] -= r.total; if (r.kind === "buf") M.nBuf--; else if (r.kind === "tex") M.nTex--; else M.nRb--; OBJ.delete(o); }
@@ -565,10 +573,10 @@ function wrapGL(p, name, fn){ var f = p[name]; if (!f) return; p[name] = functio
 /* 2D canvases: iOS caps total canvas memory too (a past bug). Live = still referenced. */
 [window.HTMLCanvasElement, window.OffscreenCanvas].forEach(function(K){ if (!K) return; var g2 = K.prototype.getContext;
   K.prototype.getContext = function(type){ var c = g2.apply(this, arguments); if (c && type === "2d" && !this.__cbz2d) { this.__cbz2d = 1; cv2d.push(window.WeakRef ? new WeakRef(this) : this); } return c; }; });
-S.memWin = function(){ S.memSample(); M.win = { gpu: M.buf + M.tex + M.rb + M.db, heap: M.heap, phone: M.buf + M.tex + M.rb + M.db + M.heap }; };
-S.memRead = function(){ S.memSample(); var c2 = cv2dBytes(); if (c2 > M.peak.cv2d) M.peak.cv2d = c2; var MB = function(x){ return +(x / 1048576).toFixed(1); }, P = M.peak, W = M.win;
+S.memWin = function(){ S.memSample(); M.win = { gpu: M.buf + M.tex + M.rb + M.db, heap: M.heap, phone: M.buf + M.tex + M.rb + M.db + M.heap + M.cv }; };
+S.memRead = function(){ M.cvAt = -1e9; S.memSample(); var c2 = M.cv; var MB = function(x){ return +(x / 1048576).toFixed(1); }, P = M.peak, W = M.win;
   return { heap: MB(M.heap), heapTotal: MB(M.heapTotal), gpu: MB(M.buf + M.tex + M.rb + M.db), buf: MB(M.buf), tex: MB(M.tex), rb: MB(M.rb), db: MB(M.db),
-    phone: MB(M.buf + M.tex + M.rb + M.db + M.heap), cv2d: MB(c2), nBuf: M.nBuf, nTex: M.nTex, nRb: M.nRb, subMB: MB(M.subBytes), samples: M.samples, precise: !!(performance.memory && performance.memory.usedJSHeapSize % 4096),
+    phone: MB(M.buf + M.tex + M.rb + M.db + M.heap + c2), cv2d: MB(c2), nBuf: M.nBuf, nTex: M.nTex, nRb: M.nRb, subMB: MB(M.subBytes), samples: M.samples, precise: !!(performance.memory && performance.memory.usedJSHeapSize % 4096),
     peak: { heap: MB(P.heap), heapTotal: MB(P.heapTotal), gpu: MB(P.gpu), buf: MB(P.buf), tex: MB(P.tex), rb: MB(P.rb), phone: MB(P.phone), cv2d: MB(P.cv2d) },
     win: W ? { heap: MB(W.heap), gpu: MB(W.gpu), phone: MB(W.phone) } : null }; };
 setInterval(function(){ S.memSample(); }, 100);
@@ -748,7 +756,12 @@ S.census = function(){
     var mats = Array.isArray(o.material) ? o.material : [o.material];
     for (var i = 0; i < mats.length; i++) { var m = mats[i]; if (!m) continue;
       ["map","normalMap","roughnessMap","emissiveMap","alphaMap","aoMap","bumpMap"].forEach(function(k){ var tx = m[k]; if (!tx || texSeen.has(tx)) return; texSeen.add(tx);
-        var im = tx.image; var w = im && (im.width || (im.data && im.width)) || 0, h = im && im.height || 0; texPx += w * h; texMax = Math.max(texMax, w, h); }); }
+        /* HARNESS TRAP (2026-10-14): reading .image of a lazy canvas texture
+           (core/texfree.js lazyCanvasTexture) PAINTS it, so this census used
+           to create every not-yet-drawn sign's canvas it counted; the size
+           comes from the texture's own record instead */
+        var w, h; if (tx._cbzLazy) { w = tx._cbzLazyW || 0; h = tx._cbzLazyH || 0; } else { var im = tx.image; w = im && (im.width || (im.data && im.width)) || 0; h = im && im.height || 0; }
+        texPx += w * h; texMax = Math.max(texMax, w, h); }); }
     if (isVeg(o)) { var v = out.veg; if (o.isInstancedMesh) { v.instancedMeshes++; v.instances += inst; if (vis) v.visibleInstances += inst; } else v.meshes++;
       v.tris += t; if (vis) v.visibleTris += t; if (o.castShadow) v.castShadow++;
       var nm = (o.name || (o.material && o.material.name) || "?").replace(/[0-9]+/g, "#").slice(0, 40); v.names[nm] = (v.names[nm] || 0) + inst; }
@@ -945,8 +958,9 @@ async function memSnap(P) {
   // figure above still counts garbage the build left for the collector; a
   // phone's GC reclaims that under pressure, so live is the resident floor).
   try { await P.s("HeapProfiler.collectGarbage", {}, 30000); const r = await P.ev("(function(){ var m = performance.memory; return m ? m.usedJSHeapSize : 0; })()", 10000);
+    let cvLive = null; try { cvLive = await P.ev("(function(){ var S = window.__speed; return S && S.cv2dNow ? S.cv2dNow() : null; })()", 10000); } catch (_) {}
     const h = await P.s("Runtime.getHeapUsage", {}, 10000);
-    if (o) { o.liveHeap = +(r / 1048576).toFixed(1); o.liveV8 = +(h.usedSize / 1048576).toFixed(1); if (h.backingStorageSize != null) o.liveArrayBuffers = +(h.backingStorageSize / 1048576).toFixed(1); o.livePhone = +(o.liveHeap + (o.gpu || 0)).toFixed(1); } } catch (_) {}
+    if (o) { o.liveHeap = +(r / 1048576).toFixed(1); o.liveV8 = +(h.usedSize / 1048576).toFixed(1); if (h.backingStorageSize != null) o.liveArrayBuffers = +(h.backingStorageSize / 1048576).toFixed(1); o.liveCv2d = cvLive != null ? +(cvLive / 1048576).toFixed(1) : (o.cv2d || 0); o.livePhone = +(o.liveHeap + (o.gpu || 0) + o.liveCv2d).toFixed(1); } } catch (_) {}
   try { const { metrics } = await P.s("Performance.getMetrics", {}, 10000); if (o) o.cdpMetrics = Object.fromEntries(metrics.filter((x) => /Heap|Nodes|Documents|Frames/.test(x.name)).map((x) => [x.name, x.value])); } catch (_) {}
   return o;
 }
@@ -1038,7 +1052,7 @@ async function measureLoad(B, P, url, out, prof) {
      sampled in-page through all of it), and the steady value after settle */
   const ms = await memSnap(P);
   if (HEAP_SITES) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 300000); await P.s("HeapProfiler.stopSampling", {}, 120000); out.heapSites = heapSites(profile); } catch (e) { out.heapSites = { err: String(e).slice(0, 200) }; } }
-  if (ms) out.mem = { boot: ms.peak, steady: { heap: ms.heap, heapTotal: ms.heapTotal, gpu: ms.gpu, buf: ms.buf, tex: ms.tex, rb: ms.rb, db: ms.db, phone: ms.phone, cv2d: ms.cv2d, cdpHeap: ms.cdpHeap, cdpHeapTotal: ms.cdpHeapTotal, arrayBuffers: ms.arrayBuffers, liveHeap: ms.liveHeap, liveV8: ms.liveV8, liveArrayBuffers: ms.liveArrayBuffers, livePhone: ms.livePhone, cdpRaw: ms.cdpRaw, cdpMetrics: ms.cdpMetrics },
+  if (ms) out.mem = { boot: ms.peak, steady: { heap: ms.heap, heapTotal: ms.heapTotal, gpu: ms.gpu, buf: ms.buf, tex: ms.tex, rb: ms.rb, db: ms.db, phone: ms.phone, cv2d: ms.cv2d, cdpHeap: ms.cdpHeap, cdpHeapTotal: ms.cdpHeapTotal, arrayBuffers: ms.arrayBuffers, liveHeap: ms.liveHeap, liveCv2d: ms.liveCv2d, liveV8: ms.liveV8, liveArrayBuffers: ms.liveArrayBuffers, livePhone: ms.livePhone, cdpRaw: ms.cdpRaw, cdpMetrics: ms.cdpMetrics },
     objects: { buffers: ms.nBuf, textures: ms.nTex, renderbuffers: ms.nRb }, subDataMB: ms.subMB, samples: ms.samples, precise: ms.precise, budgetMB: MEM_BUDGET_MB,
     atTitle: memTitle && { heap: memTitle.heap, gpu: memTitle.gpu, phone: memTitle.phone, peakPhone: memTitle.peak.phone },
     afterBuild: memBuild && { heap: memBuild.heap, gpu: memBuild.gpu, phone: memBuild.phone, peakPhone: memBuild.peak.phone } };
@@ -1604,8 +1618,8 @@ function table(res) {
       p(`  MEMORY (MB)  JS heap peak ${fmt(b.heap, 0)} / steady ${fmt(st.heap, 0)}${st.cdpHeap != null ? ` (= V8 heap ${fmt(st.cdpHeap, 0)} + ArrayBuffers ${fmt(st.arrayBuffers, 0)})` : ""}   GPU peak ${fmt(b.gpu, 0)} / steady ${fmt(st.gpu, 0)} [textures ${fmt(st.tex, 0)} buffers ${fmt(st.buf, 0)} renderbuffers ${fmt(st.rb, 0)} drawing buffer ${fmt(st.db, 0)}]   2D canvases ${fmt(st.cv2d, 0)}`);
       if (r.heapSites && r.heapSites.files) { p(`  ${HEAP_GARBAGE ? "ALLOCATED (incl. garbage)" : "LIVE"} V8 BY FILE (sampled, ${r.heapSites.totalMB} MB): ` + r.heapSites.files.slice(0, 25).map(([f, mb]) => `${f} ${mb}`).join(" · "));
         p(`  ${HEAP_GARBAGE ? "ALLOCATED" : "LIVE"} V8 BY SITE: ` + r.heapSites.sites.slice(0, 30).map(([f, mb]) => `${f} ${mb}`).join(" · ")); }
-      if (st.liveHeap != null) p(`  LIVE after a forced GC: JS heap ${fmt(st.liveHeap, 0)} (V8 ${fmt(st.liveV8, 0)} + ArrayBuffers ${fmt(st.liveArrayBuffers, 0)})   phone live ${fmt(st.livePhone, 0)} MB ${memVerdict(st.livePhone)}`);
-      p(`  PHONE TOTAL (heap + GPU)  peak ${fmt(b.phone, 0)} MB ${memVerdict(b.phone)}   steady ${fmt(st.phone, 0)} MB ${memVerdict(st.phone)}   (budget ${r.mem.budgetMB || MEM_BUDGET_MB} MB; iOS kills a tab near 1-1.5 GB)${r.mem.precise === false ? "  [heap NOT precise]" : ""}`); }
+      if (st.liveHeap != null) p(`  LIVE after a forced GC: JS heap ${fmt(st.liveHeap, 0)} (V8 ${fmt(st.liveV8, 0)} + ArrayBuffers ${fmt(st.liveArrayBuffers, 0)}) + canvases ${fmt(st.liveCv2d, 0)}   phone live ${fmt(st.livePhone, 0)} MB ${memVerdict(st.livePhone)}`);
+      p(`  PHONE TOTAL (heap + GPU + 2D canvases)  peak ${fmt(b.phone, 0)} MB [canvases peak ${fmt(b.cv2d, 0)}] ${memVerdict(b.phone)}   steady ${fmt(st.phone, 0)} MB ${memVerdict(st.phone)}   (budget ${r.mem.budgetMB || MEM_BUDGET_MB} MB; iOS kills a tab near 1-1.5 GB)${r.mem.precise === false ? "  [heap NOT precise]" : ""}`); }
     if (g("load.cpu.main")) p(`  CPU time (Chrome): main thread ${fmt(g("load.cpu.main").v, 0)} ms (build ${fmt(g("load.cpu.mainBuild") && g("load.cpu.mainBuild").v, 0)}, first frames ${fmt(g("load.cpu.mainFirstFrames") && g("load.cpu.mainFirstFrames").v, 0)}, V8 compile ${fmt(g("load.cpu.v8Compile") && g("load.cpu.v8Compile").v, 0)})  GPU process ${fmt(g("load.cpu.gpuProc") && g("load.cpu.gpuProc").v, 0)} ms (first frames ${fmt(g("load.cpu.gpuProcFirstFrames") && g("load.cpu.gpuProcFirstFrames").v, 0)})`);
     if (g("load.return.total")) p(`  RETURN VISIT ${fmt(g("load.return.total").v, 0)} ms = title ${fmt(g("load.return.title") && g("load.return.title").v, 0)} (script eval ${fmt(g("load.return.scriptEval") && g("load.return.scriptEval").v, 0)}) + build ${fmt(g("load.return.build") && g("load.return.build").v, 0)} + first frame ${fmt(g("load.return.firstFrame") && g("load.return.firstFrame").v, 0)} (compile ${fmt(g("load.return.firstFrameCompile") && g("load.return.firstFrameCompile").v, 0)}) + settle ${fmt(g("load.return.warmFrames") && g("load.return.warmFrames").v, 0)}; GPU process ${fmt(g("load.return.cpu.gpuProc") && g("load.return.cpu.gpuProc").v, 0)} ms`);
     if (r.firstFrames && r.firstFrames.length && r.firstFrames[0].top != null) p("  settle frames: " + r.firstFrames.slice(0, 12).map((f) => `${fmt(f.cpu + f.fin, 0)}${f.newPrograms ? "/" + f.newPrograms + "p" : ""}`).join(" ") + `  (${r.settleFrames} to steady; worst: ${r.firstFrames.slice().sort((a, b) => b.cpu - a.cpu)[0].top})`);

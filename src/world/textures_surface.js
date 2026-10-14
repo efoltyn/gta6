@@ -832,11 +832,15 @@
       if (old && old !== tex && old.image && old.image.width > 1) old.dispose();
       CBZ.groundRoadField.stats = { N: N, texel: +(W / N).toFixed(1), roads: n, ms: Date.now() - t0, builds: ((CBZ.groundRoadField.stats && CBZ.groundRoadField.stats.builds) || 0) + 1 };
       // (node checks read the field back through this)
-      // (bilinear, like the GPU's read)
+      // (bilinear, like the GPU's read, from the SAME 8-bit texels the GPU
+      // reads. It used to close over the float raster `f`: a 2048² Float32Array,
+      // 16 MB held for the page's life by a function only a node check calls.
+      // The bytes go after the upload, and then there is nothing to sample.)
       CBZ.groundRoadField.sample = function (x, z) {
+        const B = tex.image && tex.image.data; if (!B) return NaN;
         const u = Math.max(0, Math.min(N - 1.001, (x - rect.minX) / W * N - 0.5)), v = Math.max(0, Math.min(N - 1.001, (z - rect.minZ) / D * N - 0.5));
         const i = Math.floor(u), j = Math.floor(v), a = u - i, b = v - j;
-        const q = function (ii, jj) { return Math.max(-32, Math.min(31.75, f[jj * N + ii])); };
+        const q = function (ii, jj) { return (B[jj * N + ii] - 128) / 4; };
         return (q(i, j) * (1 - a) + q(i + 1, j) * a) * (1 - b) + (q(i, j + 1) * (1 - a) + q(i + 1, j + 1) * a) * b;
       };
       return CBZ.groundRoadField.stats;

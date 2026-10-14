@@ -47,6 +47,27 @@
     t.anisotropy = 4;
     return t;
   }
+  /* A PAINTED TEXTURE, PAINTED WHEN FIRST DRAWN. In the game (core/texfree.js
+     CBZ.lazyCanvasTexture) the canvas does not exist until the texture is
+     first uploaded, and is given back after: the speedway's surfaces, signs
+     and skyline sat in the city's boot as ~25 MB of canvases whether or not
+     anybody looked at the track. paint(g, cv) must be pure (seeded: the same
+     picture every call). Without the game (a tool, the race page before
+     texfree) it paints at once into an ordinary canvas. */
+  function ltex(THREE, w, h, paint, wrap, name) {
+    const CB = typeof window !== "undefined" ? window.CBZ : null;
+    let t = null;
+    if (CB && CB.lazyCanvasTexture && typeof document !== "undefined") {
+      t = CB.lazyCanvasTexture(w, h, function (g, cv) { paint(g, cv); }, { name: name || "race-tex" });
+      t.encoding = THREE.sRGBEncoding;
+      if (wrap) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 4;
+      return t;
+    }
+    const cv = canvas(w, h); if (!cv) return null;
+    paint(cv.getContext("2d"), cv);
+    return tex(THREE, cv, wrap);
+  }
   function rgb(hex) { return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255]; }
   function css(c) { return "rgb(" + (c[0] * 255 | 0) + "," + (c[1] * 255 | 0) + "," + (c[2] * 255 | 0) + ")"; }
 
@@ -279,15 +300,16 @@
   /* arc length along the offset line u (for texture U that doesn't stretch) */
   function arcAt(core, s, u, f) { return s + u * (core.frame(s, f).heading - core.T.H[0]); }
 
-  const kit = { rng, canvas, tex, rgb, css, Mesher, Buckets, chunk, STAND, standSection, SUITES, inSuites, tunnelSpec, towerSpots, lightField, arcAt };
+  const kit = { rng, canvas, tex, ltex, rgb, css, Mesher, Buckets, chunk, STAND, standSection, SUITES, inSuites, tunnelSpec, towerSpots, lightField, arcAt };
 
   // =====================================================================
   // TEXTURES
   // =====================================================================
   const REP = 16;                      // metres of surface per texture repeat along s
   function surfaceTex(THREE, core, concrete, seed) {
-    const W = 1024, H = 512, cv = canvas(W, H); if (!cv) return null;
-    const D = core.DIMS, g = cv.getContext("2d"), R = rng(seed);
+    const W = 1024, H = 512;
+    return ltex(THREE, W, H, function (g) {
+    const D = core.DIMS, R = rng(seed);
     const span = D.WALL_U - D.INNER;                 // 19 m across
     const py = (u) => H - (u - D.INNER) / span * H;  // canvas y of a u (flipY: v=0 is the bottom)
     const pxm = W / REP;
@@ -336,26 +358,28 @@
     // lines: white at the top edge of the surface, yellow at the apron
     g.fillStyle = "#e9e7df"; g.fillRect(0, py(D.HALF_W), W, 0.16 / span * H);
     g.fillStyle = "#e4b41c"; g.fillRect(0, py(D.INNER + 0.3), W, 0.18 / span * H);
-    return tex(THREE, cv, true);
+    }, true, concrete ? "race-concrete" : "race-asphalt");
   }
   function grassTex(THREE, seed) {
-    const S = 512, cv = canvas(S, S); if (!cv) return null;
-    const g = cv.getContext("2d"), R = rng(seed);
+    const S = 512;
+    return ltex(THREE, S, S, function (g) {
+    const R = rng(seed);
     g.fillStyle = "#2f5a26"; g.fillRect(0, 0, S, S);
     g.fillStyle = "#3b6e2d"; g.fillRect(0, 0, S, S / 2);   // two mown stripes per repeat
     for (let i = 0; i < 30000; i++) {
       const v = R(); g.fillStyle = v < 0.5 ? "rgba(20,48,16,0.35)" : "rgba(90,130,60,0.25)";
       g.fillRect(R() * S, R() * S, 1 + R() * 2, 2 + R() * 3);
     }
-    return tex(THREE, cv, true);
+    }, true, "race-grass");
   }
   function noiseTex(THREE, seed) {
-    const S = 256, cv = canvas(S, S); if (!cv) return null;
-    const g = cv.getContext("2d"), R = rng(seed);
+    const S = 256;
+    return ltex(THREE, S, S, function (g) {
+    const R = rng(seed);
     g.fillStyle = "#e8e8e8"; g.fillRect(0, 0, S, S);
     for (let i = 0; i < 9000; i++) { const v = 190 + R() * 65 | 0; g.fillStyle = "rgba(" + v + "," + v + "," + v + ",0.6)"; const s = 1 + R() * 3; g.fillRect(R() * S, R() * S, s, s); }
     for (let i = 0; i < 18; i++) { g.fillStyle = "rgba(120,120,120,0.08)"; g.beginPath(); g.arc(R() * S, R() * S, 10 + R() * 40, 0, 7); g.fill(); }
-    return tex(THREE, cv, true);
+    }, true, "race-noise");
   }
   function linkTex(THREE) {
     const S = 64, cv = canvas(S, S); if (!cv) return null;
@@ -805,8 +829,14 @@
     ["TRAXIS", "#f36f21", "#141414", 3], ["NORVANE", "#ffffff", "#0a5c36", 0], ["SUNHOLT", "#ffd200", "#b31b1b", 2],
     ["QUILLON", "#2a2a2e", "#35c4f0", 1], ["OSSEN OIL", "#006a4e", "#ffffff", 3],
   ];
+  /* ONE atlas for the track and the venue (both asked for their own: two
+     identical 4 MB canvases), painted when first drawn. Its scuffs were
+     Math.random(): seeded now, so a repaint is the same picture. The shared
+     texture is never disposed by one user (the other still draws it). */
+  let _signs = null;
   function signAtlas(THREE) {
-    const A = 1024, cv = canvas(A, A);
+    if (_signs && _signs.THREE === THREE) return _signs;
+    const A = 1024;
     const rect = (x, y, w, h) => [x, y, w, h];
     const out = {
       safer: rect(0, 0, 512, 128), black: rect(520, 8, 48, 48), white: rect(584, 8, 48, 48), yellow: rect(648, 8, 48, 48), glass: rect(712, 8, 48, 48),
@@ -824,14 +854,15 @@
     /* uv for a quad listed bottom-left, bottom-right, top-right, top-left */
     out.uvBL = function (r, fu0, fu1) { const t = out.uv(r, fu0 == null ? 0 : fu0, 0, fu1 == null ? 1 : fu1, 1); return [t[6], t[7], t[4], t[5], t[2], t[3], t[0], t[1]]; };
     out.tex = null;
-    if (!cv) return out;
-    const g = cv.getContext("2d");
+    out.THREE = THREE;
+    const paint = function (g) {
+    const SR = rng(4242);
     g.fillStyle = "#808080"; g.fillRect(0, 0, A, A);
     // SAFER face: white-painted steel tubes with dark gaps between them
     { const [x, y, w, h] = out.safer; g.fillStyle = "#ecebe6"; g.fillRect(x, y, w, h);
       g.fillStyle = "#3a3c40"; for (const f of [0.26, 0.51, 0.76]) g.fillRect(x, y + h * f, w, 4);
       g.fillStyle = "rgba(0,0,0,0.12)"; g.fillRect(x, y + h - 10, w, 10);
-      g.fillStyle = "rgba(20,20,20,0.35)"; for (let i = 0; i < 60; i++) g.fillRect(x + Math.random() * w, y + h * (0.55 + Math.random() * 0.4), 6 + Math.random() * 30, 2); }
+      g.fillStyle = "rgba(20,20,20,0.35)"; for (let i = 0; i < 60; i++) g.fillRect(x + SR() * w, y + h * (0.55 + SR() * 0.4), 6 + SR() * 30, 2); }
     const chip = (r, c) => { g.fillStyle = c; g.fillRect(r[0], r[1], r[2], r[3]); };
     chip(out.black, "#0b0b0c"); chip(out.white, "#f2f2ee"); chip(out.yellow, "#e8b81e"); chip(out.glass, "#1d2a3a");
     // the flag
@@ -866,7 +897,10 @@
       g.fillStyle = a[1]; g.fillRect(x, y, w / 2, h); g.fillStyle = b[1]; g.fillRect(x + w / 2, y, w / 2, h);
       word(a[0], x + 20, y, w / 2 - 40, h, a[2], 48); word(b[0], x + w / 2 + 20, y, w / 2 - 40, h, b[2], 48);
     }
-    out.tex = tex(THREE, cv, false);
+    };
+    out.tex = ltex(THREE, A, A, paint, false, "race-signs");
+    if (out.tex) { out.tex._shared = true; const d0 = out.tex.dispose; out.tex.dispose = function () { if (_signs !== out) d0.call(this); }; }
+    _signs = out;
     return out;
   }
   kit.signAtlas = signAtlas;
