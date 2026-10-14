@@ -624,7 +624,6 @@
       // building shell?  (kind:'building' or no explicit asset key)
       const isBuilding = !pick.asset || pick.building || pick.kind === "building";
       if (isBuilding && mk) {
-        const w = Math.max(8, lt.w - 1.5), d = Math.max(8, lt.d - 1.5);
         // Decide the program before construction. Integrated skyline lots are
         // still the same shop/home records; only their final shell height differs.
         const isShop = (pick.lotKind || (lt.zone === "residential" ? "home" : "shop")) === "shop";
@@ -634,7 +633,20 @@
         // clean glass shell; buildings.js deliberately normalizes the removed
         // residential/fortified punched-window archetypes to office glass.
         const sideArg = V2 && SIDE_IDX[lt.doorSide] != null ? SIDE_IDX[lt.doorSide] : lt.doorSide;
-        const shellOpts = pick.opts || (V2 && !isShop ? { stairs: true } : { retail: true });
+        const baseOpts = pick.opts || (V2 && !isShop ? { stairs: true } : { retail: true });
+        /* THE SHELL FITS ITS FACADE ON ITS OWN LOT. A town lot is its parcel
+           (the footway runs round the block outside it, the next lot abuts
+           it), and the shell used to be the lot less 0.75 m a side whatever
+           it wore: the facade kit's porches, terraces and flights (up to
+           4-6 m deep) then ran out over the footway and into the street.
+           buildings.js fitShell sizes the shell from the grammar's own depth
+           (never under 8 m), and the parcel line is handed to makeBuilding as
+           opts.reach, the fence that keeps any remainder on the lot. */
+        const fit = CBZ.cityFitShell ? CBZ.cityFitShell(lt.cx, lt.cz, lt.w, lt.d, 0.75, storeys,
+          typeof sideArg === "number" ? sideArg : null, baseOpts) : null;
+        const w = Math.max(8, fit ? fit.w : lt.w - 1.5), d = Math.max(8, fit ? fit.d : lt.d - 1.5);
+        const lotReach = Math.min(lt.w - w, lt.d - d) / 2;
+        const shellOpts = lotReach > 0.05 ? Object.assign({}, baseOpts, { reach: lotReach }) : baseOpts;
         const doorPt = { x: lt.door.x + lt.door.nx * 1.6, z: lt.door.z + lt.door.nz * 1.6, nx: lt.door.nx, nz: lt.door.nz };
         if (PLAN) {
           // the shell this lot will raise, as cityMakeBuilding will raise it

@@ -606,6 +606,56 @@
     try { r.def.build(dry, F, r.spec); } catch (e) { /* the real pass reports it */ }
     return pieces;
   };
+  /* HOW FAR DOES THIS FACADE STAND PROUD OF ITS WALLS? Asked BEFORE the
+     shell is sized, because the answer decides how far back from the street
+     the wall has to stand.
+
+     OWNER: "facades, many spill onto streets." Measured (a plain-node run of
+     every grammar, tools/facade-reach-check.mjs): a grammar's entrance is
+     real architecture and it is DEEP — stone's terrace and three-step flight
+     stand 4.1 m off the wall, Queen Anne's wrap-round porch 4.4 m, Greek
+     Revival's stylobate 5.8 m, the International Style's granite plaza 16 m.
+     Every host sized its shell from the PARCEL alone (lot minus a setback
+     constant) and only then let the grammar dress it, so the grammar's depth
+     had nowhere to go: the downtown cut its stairs off at the footway, the
+     towns let them run straight out over the footway and into the road.
+     The fix is the order of operations: ask the grammar first, then stand
+     the wall back far enough that its facade fits on its own land.
+
+     Dry-runs dressFacade itself (door reveal, keep-clear carve and all)
+     against recording emitters — a grammar is pure: ctx in, emitter calls
+     out, no rng, no scene graph — and returns [-z, +z, -x, +x]: how far past
+     each wall plane anything it would emit reaches, at any height. */
+  CBZ.facadeReach = function (ctx) {
+    const out = [0, 0, 0, 0];
+    const hw = ctx.w / 2, hd = ctx.d / 2;
+    const rec = function (x0, x1, z0, z1) {
+      if (z0 < -hd && -hd - z0 > out[0]) out[0] = -hd - z0;
+      if (z1 > hd && z1 - hd > out[1]) out[1] = z1 - hd;
+      if (x0 < -hw && -hw - x0 > out[2]) out[2] = -hw - x0;
+      if (x1 > hw && x1 - hw > out[3]) out[3] = x1 - hw;
+    };
+    const bx = function (x, y, z, w, h, d) {
+      if (!(w > 0) || !(h > 0) || !(d > 0) || !Number.isFinite(x + y + z + w + h + d)) return;
+      rec(x - w / 2, x + w / 2, z - d / 2, z + d / 2);
+    };
+    const rnd = function (x, y, z, r) { if (r > 0) rec(x - r, x + r, z - r, z + r); };
+    const onFace = function (proud) {
+      return function (f) { if (f) out[f.s] = Math.max(out[f.s], proud); };
+    };
+    const nop = function () { return null; };
+    const dry = Object.assign({}, ctx, {
+      doorTint: null, crown: null, __kitDoor: false, __glass: null, publishOrder: nop,
+      dbox: bx, lbox: bx, solid: nop, flag: nop, disc: nop, lamp: rnd, ball: rnd, dome: rnd,
+      column: rnd, cone: rnd,
+      plat: function (x0, x1, z0, z1) { rec(x0, x1, z0, z1); },
+      plaque: onFace(0.38), seal: onFace(0.62),
+    });
+    if (Array.isArray(ctx.keepClear)) dry.keepClear = ctx.keepClear.slice();
+    try { CBZ.dressFacade(dry); } catch (e) { /* the real pass reports it */ }
+    return out;
+  };
+
   CBZ.facadeLiftTop = function (ctx, shaft, o) {
     o = o || {};
     const rTop = ctx.rTop, ring = o.ring != null ? o.ring : 1.1, thin = o.thin != null ? o.thin : 0.6;

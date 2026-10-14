@@ -283,7 +283,28 @@
        o: { number, frameCol, stoneCol, lampCol, transom: bool, stoop: bool,
             light: bool, canopy: bool, own: bool (a grammar drew its own
             doorcase: frame + number only) }                                  */
-  FO.DOOR = { W: 1.6, H: 2.25, LEAF_RECESS: 0.12 };
+  FO.DOOR = { W: 1.6, H: 2.25, LEAF_RECESS: 0.12,
+    // how far the entrance stands out over the walk (m past the wall face):
+    // a townhouse stoop's landing + tread (+ its newel caps), a lobby's broad
+    // step, a house's single step, the canopy over a lobby / office / shop
+    STOOP_LAND: 1.05, STOOP_TREAD: 0.34, STEP_LOBBY: 1.2, STEP: 0.42, CANOPY: 1.5, CANOPY_SHOP: 0.9 };
+  /* HOW FAR FO.door's entrance stands out past the wall, for `kind` and the
+     same `o` FO.door gets: what a host sizing its shell to its parcel adds to
+     the facade's own depth (buildings.js fitShell), from the numbers FO.door
+     builds with, so the two cannot drift. */
+  FO.doorReach = function (kind, o) {
+    o = o || {};
+    if (o.own) return 0;
+    const D = FO.DOOR;
+    let r = 0;
+    if (o.step !== false) {
+      if (kind === "townhouse") r = D.STOOP_LAND + D.STOOP_TREAD + 0.03;
+      else r = (kind === "lobby" || kind === "office") ? D.STEP_LOBBY : D.STEP;
+    }
+    if (kind === "lobby" || kind === "office" || o.canopy) r = Math.max(r, kind === "shop" ? D.CANOPY_SHOP : D.CANOPY);
+    else if (o.light !== false) r = Math.max(r, 0.17);   // the wall lantern
+    return r;
+  };
   FO.door = function (E, f, dr, kind, o) {
     o = o || {};
     const W = dr.w || FO.DOOR.W;
@@ -323,7 +344,7 @@
       if (kind === "townhouse") {
         // a stoop: a landing at the door, a tread down to the walk, cheek walls
         // with newel caps either side
-        const SW = W + 0.9, land = 1.05, tread = 0.34;
+        const SW = W + 0.9, land = FO.DOOR.STOOP_LAND, tread = FO.DOOR.STOOP_TREAD;
         const topY = yb - 0.012;
         emitBox(E, f, t - SW / 2, t + SW / 2, -0.3, topY, 0, land, STONE);
         emitBox(E, f, t - SW / 2, t + SW / 2, -0.3, topY * 0.5, land, land + tread, STONE);
@@ -336,14 +357,14 @@
         out.push("stoop");
       } else {
         const SW = (kind === "lobby" || kind === "office") ? W + 1.6 : W + 0.5;
-        const SD = (kind === "lobby" || kind === "office") ? 1.2 : 0.42;
+        const SD = (kind === "lobby" || kind === "office") ? FO.DOOR.STEP_LOBBY : FO.DOOR.STEP;
         emitBox(E, f, t - SW / 2, t + SW / 2, -0.3, yb - 0.012, 0, SD, STONE);
         out.push("step");
       }
     }
     // ---- a canopy over a lobby / office / shop door, lit from its soffit -------
     if (kind === "lobby" || kind === "office" || o.canopy) {
-      const CW = W + 1.4, CD = kind === "shop" ? 0.9 : 1.5;
+      const CW = W + 1.4, CD = kind === "shop" ? FO.DOOR.CANOPY_SHOP : FO.DOOR.CANOPY;
       const cy = Math.max(top + 0.12, yb + 2.45);
       emitBox(E, f, t - CW / 2, t + CW / 2, cy, cy + 0.16, 0, CD, o.canopyCol != null ? o.canopyCol : 0x33373c);
       out.push("canopy");

@@ -80,6 +80,21 @@
     return ab + (cd - ab) * fz;
   }
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+  /* THE FRONT STRIP. OWNER: "facades, many spill onto streets."
+     A street wall built ON the footway's back edge (the tower podiums, the
+     midtown slabs, the walk-up perimeter blocks: every parcel was cut to
+     block - sw and the wall stood on its edge) leaves its facade nowhere to
+     go but the footway: city/metro_fabric.js dresses every metro building
+     with the facade kit's real relief, piers, sills, cornices, door cases
+     and plinths, up to KIT_REACH past the wall, and all of it stood on the
+     pavement (tools/facade-reach-check.mjs: 2,577 buildings, up to 1.2 m).
+     So a building owns the strip in front of its wall: every street wall
+     stands FRONTAGE behind the footway, and metro_fabric's KIT_REACH IS this
+     number (it reads it from here), so the deepest relief the fabric keeps
+     ends exactly on the building's own land. A terrace already stands
+     behind a 1.5 m front step and a house behind its yard. */
+  const FRONTAGE = 1.2;
   function lerp(a, b, t) { return a + (b - a) * t; }
   function r2(v) { return Math.round(v * 100) / 100; }
 
@@ -1039,6 +1054,10 @@
     function fillBlock(blk, c) {
       const u = blk.use;
       const x0 = blk.x0 + blk.sw, x1 = blk.x1 - blk.sw, z0 = blk.z0 + blk.sw, z1 = blk.z1 - blk.sw;
+      // the street walls of towers and slabs stand FRONTAGE behind the
+      // footway: every parcel is still cut (and hashed) from the block as it
+      // always was, then the edges it shares with the street are drawn back
+      const front = frontOf(x0, z0, x1, z1);
       const W = x1 - x0, D = z1 - z0;
       if (W < 12 || D < 12) return;
       const L = blk.L, mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
@@ -1052,7 +1071,7 @@
         parcels.forEach(function (p, k) {
           const px = (p.x0 + p.x1) / 2, pz = (p.z0 + p.z1) / 2;
           const st = storeysFor("cbd", landValue(px, pz), px, pz);
-          tower(p, st, c, blk, k);
+          tower(p, st, c, blk, k, front(p));
         });
         return;
       }
@@ -1062,8 +1081,8 @@
         splitRect(x0, z0, x1, z1, split, hh > 0.3).forEach(function (p, k) {
           const px = (p.x0 + p.x1) / 2, pz = (p.z0 + p.z1) / 2;
           const st = storeysFor("midtown", landValue(px, pz), px, pz);
-          if (st >= 14) tower(p, st, c, blk, k);
-          else slab(p, st, c, "office", 3.9, true);
+          if (st >= 14) tower(p, st, c, blk, k, front(p));
+          else slab(p, st, c, "office", 3.9, true, front(p));
         });
         return;
       }
@@ -1079,14 +1098,28 @@
       return [{ x0: x0, z0: z0, x1: mx - g, z1: mz - g }, { x0: mx + g, z0: z0, x1: x1, z1: mz - g },
               { x0: x0, z0: mz + g, x1: mx - g, z1: z1 }, { x0: mx + g, z0: mz + g, x1: x1, z1: z1 }];
     }
-    function tower(p, st, c, blk, k) {
-      const W = p.x1 - p.x0, D = p.z1 - p.z0;
-      const x = (p.x0 + p.x1) / 2, z = (p.z0 + p.z1) / 2;
+    // the parcel `p` with every edge it shares with the street rectangle
+    // (x0..x1, z0..z1: a block inside its footway) drawn back FRONTAGE
+    function frontOf(x0, z0, x1, z1) {
+      const e = 0.01;
+      return function (p) {
+        return { x0: p.x0 <= x0 + e ? p.x0 + FRONTAGE : p.x0, x1: p.x1 >= x1 - e ? p.x1 - FRONTAGE : p.x1,
+                 z0: p.z0 <= z0 + e ? p.z0 + FRONTAGE : p.z0, z1: p.z1 >= z1 - e ? p.z1 - FRONTAGE : p.z1 };
+      };
+    }
+    // `p` the parcel as cut (every hash reads it, so the plan's draws are the
+    // ones it always made), `g` the footprint built on it (p behind its
+    // front strip; p itself when omitted)
+    function tower(p, st, c, blk, k, g) {
+      g = g || p;
+      const W = g.x1 - g.x0, D = g.z1 - g.z0;
+      const x = (p.x0 + p.x1) / 2, z = (p.z0 + p.z1) / 2;           // the hashes' anchor
+      const gx = (g.x0 + g.x1) / 2, gz = (g.z0 + g.z1) / 2;         // where it stands
       const fh = 3.9;
       const pod = Math.min(st, 3 + ((h01(seed, x, z, 311) * 3) | 0));
       const tiers = [];
       // podium fills the parcel (street wall), the shaft sets back from it
-      tiers.push({ w: W, d: D, y0: 0, y1: pod * fh, x: x, z: z, part: "podium" });
+      tiers.push({ w: W, d: D, y0: 0, y1: pod * fh, x: gx, z: gz, part: "podium" });
       const sw = W * lerp(0.62, 0.8, h01(seed, x, z, 312)), sd = D * lerp(0.62, 0.8, h01(seed, x, z, 313));
       const shaftTop = st * fh;
       const setbacks = st > 40 ? 2 : st > 24 ? 1 : 0;
@@ -1094,23 +1127,25 @@
       for (let s = 0; s <= setbacks; s++) {
         const frac = setbacks === 0 ? 1 : (s < setbacks ? 0.5 + 0.12 * s : 1);
         const top = s < setbacks ? lerp(y, shaftTop, frac) : shaftTop;
-        tiers.push({ w: w, d: d, y0: y, y1: top, x: x, z: z, part: "shaft" });
+        tiers.push({ w: w, d: d, y0: y, y1: top, x: gx, z: gz, part: "shaft" });
         y = top; w *= 0.8; d *= 0.8;
       }
       const crown = st >= 50 ? "spire" : st >= 30 ? (h01(seed, x, z, 314) < 0.5 ? "crown" : "flat") : "flat";
       const lk = look(c);
       const older = lk.grammar === "artdeco" || h01(seed, x, z, 315) < 0.2;
-      addBldg({ x: x, z: z, w: W, d: D, rot: 0, h: shaftTop, st: st, fh: fh, type: "tower", style: older ? "deco" : "glass",
+      addBldg({ x: gx, z: gz, w: W, d: D, rot: 0, h: shaftTop, st: st, fh: fh, type: "tower", style: older ? "deco" : "glass",
         wall: older ? wallOf(c, 316, x, z) : lk.walls[(h01(seed, x, z, 317) * lk.walls.length) | 0], glass: lk.glass,
         roof: crown, tiers: tiers, shop: true, dist: c.dist });
-      occupy(x, z, Math.hypot(W, D) / 2);
+      occupy(gx, gz, Math.hypot(W, D) / 2);
     }
-    function slab(p, st, c, type, fh, shop) {
-      const W = p.x1 - p.x0, D = p.z1 - p.z0, x = (p.x0 + p.x1) / 2, z = (p.z0 + p.z1) / 2;
+    function slab(p, st, c, type, fh, shop, g) {
+      g = g || p;
+      const W = g.x1 - g.x0, D = g.z1 - g.z0, x = (p.x0 + p.x1) / 2, z = (p.z0 + p.z1) / 2;
+      const gx = (g.x0 + g.x1) / 2, gz = (g.z0 + g.z1) / 2;
       const lk = look(c);
-      addBldg({ x: x, z: z, w: W, d: D, rot: 0, h: st * fh, st: st, fh: fh, type: type, style: styleOf(lk),
+      addBldg({ x: gx, z: gz, w: W, d: D, rot: 0, h: st * fh, st: st, fh: fh, type: type, style: styleOf(lk),
         wall: wallOf(c, 321, x, z), glass: lk.glass, roof: "flat", shop: !!shop, dist: c.dist });
-      occupy(x, z, Math.hypot(W, D) / 2);
+      occupy(gx, gz, Math.hypot(W, D) / 2);
     }
     function styleOf(lk) {
       const g = lk.grammar;
@@ -1128,7 +1163,8 @@
       // floors. Each face is cut into 2-4 buildings with their own heights.
       const depth = 15;
       const W = x1 - x0, D = z1 - z0;
-      if (W < 40 || D < 40) { slab({ x0: x0, z0: z0, x1: x1, z1: z1 }, storeysFor("inner", blk.L, x0, z0), c, type, 3.2, true); return; }
+      const front = frontOf(x0, z0, x1, z1);   // every street wall behind its front strip
+      if (W < 40 || D < 40) { const p0 = { x0: x0, z0: z0, x1: x1, z1: z1 }; slab(p0, storeysFor("inner", blk.L, x0, z0), c, type, 3.2, true, front(p0)); return; }
       const faces = [
         { x0: x0, x1: x1, z0: z0, z1: z0 + depth, run: "x" },              // south face (full width incl. corners)
         { x0: x0, x1: x1, z0: z1 - depth, z1: z1, run: "x" },              // north face
@@ -1145,7 +1181,7 @@
                                   : { x0: f.x0, x1: f.x1, z0: f.z0 + k * step, z1: f.z0 + (k + 1) * step - g };
           const px = (p.x0 + p.x1) / 2, pz = (p.z0 + p.z1) / 2;
           const st = storeysFor("inner", blk.L, px, pz);
-          slab(p, st, c, type, 3.2, h01(seed, px, pz, 332) < 0.45);
+          slab(p, st, c, type, 3.2, h01(seed, px, pz, 332) < 0.45, front(p));
         }
       }
       // the courtyard gets trees
@@ -1157,7 +1193,8 @@
       const W = x1 - x0, D = z1 - z0;
       const alongX = W >= D;
       const len = alongX ? W : D, depth = Math.min(13, (alongX ? D : W) / 2 - 6);
-      if (depth < 8) { slab({ x0: x0, z0: z0, x1: x1, z1: z1 }, 3, c, "apt", 3.1, true); return; }
+      // too shallow for terraces: one walk-up, behind its front strip
+      if (depth < 8) { const p0 = { x0: x0, z0: z0, x1: x1, z1: z1 }; slab(p0, 3, c, "apt", 3.1, true, frontOf(x0, z0, x1, z1)(p0)); return; }
       const lk = look(c);
       for (let side = 0; side < 2; side++) {
         let a = 0;
@@ -1772,7 +1809,8 @@
         while (t < L - 10) {
           const uw = lerp(8, 14, h01(seed, a.x + t, a.z + side, 811));
           const dd = lerp(15, 20, h01(seed, a.z + t, a.x - side, 812));
-          const tm = t + uw / 2, off = s.w / 2 + 4.2 + dd / 2;
+          // the avenue's kerb, its 3.3 m footway, then the shop's own strip
+          const tm = t + uw / 2, off = s.w / 2 + 3.3 + FRONTAGE + 0.05 + dd / 2;
           const x = a.x + tx * tm + nx * off, z = a.z + tz * tm + nz * off;
           t += uw + 0.4;
           const b0 = { x: x, z: z, w: uw, d: dd, rot: rot };
@@ -1868,9 +1906,10 @@
       const hh = h01(seed, x0, z0, 841);
       const flip = hh < 0.5;                           // which long street the factory fronts
       // (along a0..a1, across b0..b1) -> a building rect; across measured from the front
+      const front = frontOf(x0, z0, x1, z1);   // the works' street walls behind their front strip
       const put = function (a0, a1, b0, b1, extra) {
         const bf0 = flip ? B0 + LB - b1 : B0 + b0, bf1 = flip ? B0 + LB - b0 : B0 + b1;
-        const r = alongX ? { x0: A0 + a0, x1: A0 + a1, z0: bf0, z1: bf1 } : { x0: bf0, x1: bf1, z0: A0 + a0, z1: A0 + a1 };
+        const r = front(alongX ? { x0: A0 + a0, x1: A0 + a1, z0: bf0, z1: bf1 } : { x0: bf0, x1: bf1, z0: A0 + a0, z1: A0 + a1 });
         const b = Object.assign({ x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2, w: r.x1 - r.x0, d: r.z1 - r.z0, rot: 0, dist: c.dist }, extra);
         if (blocked(r.x0, r.z0, r.x1, r.z1, 0)) return null;
         addBldg(b); occupy(b.x, b.z, Math.hypot(b.w, b.d) / 2);
@@ -2605,7 +2644,7 @@
     return out;
   }
 
-  const API = { plan: plan, stats: stats, audit: audit, translatePlan: translatePlan, ceremonialSquare: ceremonialSquare, TIERS: TIERS, LOOKS: LOOKS, h01: h01, vnoise: vnoise, segDist: segDist };
+  const API = { plan: plan, stats: stats, audit: audit, translatePlan: translatePlan, ceremonialSquare: ceremonialSquare, TIERS: TIERS, LOOKS: LOOKS, h01: h01, vnoise: vnoise, segDist: segDist, FRONTAGE: FRONTAGE };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (G && G.CBZ) {
     G.CBZ.metroPlan = plan; G.CBZ.metroPlanStats = stats; G.CBZ.metroPlanAudit = audit; G.CBZ.metroPlanLib = API;
