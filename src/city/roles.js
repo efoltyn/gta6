@@ -186,9 +186,14 @@
   const GUARD = { "vault guard": "Vault guard", "sheriff's deputy": "Deputy", "soldier": "Soldier", "ranger": "Ranger", "park ranger": "Ranger" };
   function titleOf(p) {
     if (!p) return "";
-    if (p._presStaff === "chief") return "Chief of Staff " + surname(p.name);
-    if (p._presStaff === "press") return "Press Secretary " + surname(p.name);
-    if (p._presOfficer || p._presStaff || p._congress || p._presOffice) return String(p.name || "");
+    // HIS POST, from the one record of it (CBZ.brain.employ / job): "General
+    // Brandt", "Chief of Staff Hale". Read live, so the moment he is let go
+    // (CBZ.cityDismiss -> brain.dismiss) the tag is his own name again. The
+    // title used to be baked into p.name ("General Brandt") and read off
+    // flags nobody cleared: a dismissed General wore his rank out the door.
+    const J = CBZ.brain && CBZ.brain.job ? CBZ.brain.job(p) : null;
+    if (J && J.title) return J.title + (p.name ? " " + surname(p.name) : "");
+    if (p._congress || p._presOffice) return String(p.name || "");
     if (p.kind === "cop") return copTitle(p);
     if (p.vendor) return KEEPER[(p.vendor && p.vendor.kind) || ""] || "Store owner";
     const seat = seatOf(p);

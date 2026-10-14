@@ -666,6 +666,9 @@
     const b = BR();
     if (!b || !b.threat || !b.threat.respond) return null;
     _th.source = src || null; _th.x = x; _th.z = z; _th.armed = !!armed; _th.aimingAtMe = !!aiming;
+    // the city's "aiming" is a gun's cone actually swung onto him (the player's
+    // camera, a raging ped): pointed at HIM, so even his ex-boss means it
+    _th.hostile = !!aiming || !!(src && src.rage === p);
     _th.distance = Math.hypot(p.pos.x - x, p.pos.z - z); _th.kind = kind || (armed ? "armed" : "unarmed");
     fillShooter(_th, src);
     // a threat flagged armed with no source to read is a gun (a shot, a muzzle)
@@ -763,6 +766,7 @@
     const b = BR();
     if (!b || p.dead) return false;
     if (!adopt(p)) return false;
+    if (p._brain && p._brain.leave && leaving(p, b, dt)) return true;
     const t = now();
     const cuffs = playerCuffed();
     if (cuffs) {
@@ -878,6 +882,163 @@
     // 5) nothing else on: a cuffed man going by is worth a look
     if (cuffs && cuffedStare(p, t)) return true;
     return false;
+  }
+
+  // ============================================================
+  //  DISMISS — letting go of a man who worked for you. ONE path for every
+  //  way a city body stops working for somebody: your crewman let go (the
+  //  wheel's Dismiss, city/orders.js), a crewman who walks off unpaid
+  //  (careers.js), a compound hand who quits (compoundcrew.js), the
+  //  President's General / Director / Commissioner / Chief / press secretary
+  //  (president_staff.js). It used to be a few field writes at each site:
+  //  the title over his head was baked into his name ("General Brandt") and
+  //  his job flags stayed set, so the tag kept his old post; the brain kept
+  //  the job's held fight/flight and his crew side was wiped, so the guns of
+  //  the people he had stood beside for an hour became a threat (he crouched
+  //  into cover and drew on them); a stale guard leash / follow slot / pin
+  //  pulled him round in a circle. Now: every job field is cleared here, the
+  //  brain's dismiss (systems/brain.js) ends his post and walks him off, and
+  //  the walk is the street's own routine walk (path + pedNav) to his home.
+  //    opts: from (who let him go; default the player), familiar (more brain
+  //          factions whose guns he knows, e.g. the President's "detail"),
+  //          line (his one line;
+  //          null when the caller speaks it), to {x,z} (default his home),
+  //          path [{x,z}] (an exit route before `to`, e.g. the office aisle),
+  //          nod (s he stands and faces you first), name (his plain name),
+  //          job (his trade now; default none: the caster deals him one)
+  // ============================================================
+  function homeOf(p, from) {
+    const h = p._home || p._digs;
+    if (h) {
+      const d = h.building && h.building.door;
+      if (d && isFinite(d.x)) return { x: d.x, z: d.z };
+      if (isFinite(h.cx)) return { x: h.cx, z: h.cz };
+    }
+    const A = CBZ.city && CBZ.city.arena;
+    const fp = posOf(from) || p.pos;
+    if (A && typeof A.randomSidewalkPoint === "function") {
+      // a street a block or two off, AWAY from the man he just left
+      let best = null, bs = -1e9;
+      for (let i = 0; i < 6; i++) {
+        let q = null; try { q = A.randomSidewalkPoint(); } catch (e) { q = null; }
+        if (!q) continue;
+        const d = Math.hypot(q.x - p.pos.x, q.z - p.pos.z);
+        if (d < 25) continue;
+        const sc = -Math.abs(d - 60) + Math.hypot(q.x - fp.x, q.z - fp.z) * 0.5;
+        if (sc > bs) { bs = sc; best = { x: q.x, z: q.z }; }
+      }
+      if (best) return best;
+    }
+    let dx = p.pos.x - fp.x, dz = p.pos.z - fp.z;
+    const L = Math.hypot(dx, dz) || 1;
+    if (L < 0.01) { dx = 0; dz = 1; }
+    return { x: p.pos.x + dx / L * 40, z: p.pos.z + dz / L * 40 };
+  }
+  function dismiss(p, o) {
+    const b = BR();
+    if (!p || p.dead) return false;
+    o = o || {};
+    const from = o.from || PA() || CBZ.player || null;
+    const job = b && b.job ? b.job(p) : null;
+    const side = (job && job.side) || (isCrew(p) ? "player" : (p._brain && p._brain.faction) || null);
+    // ---- his orders, the follower engine, the detail's formation
+    const O = CBZ.cityOrders2;
+    if (p._order && O && O.clear) { try { O.clear(p); } catch (e) {} }
+    p._order = null; p._orderWas = null;
+    if ((p._cbzSeat || p.inCar) && CBZ.followerOrder) { try { CBZ.followerOrder(p, "alight"); } catch (e) {} }
+    p._cbzJob = null; p._sicOn = null; p._boardRun = false; p._cbzWait = null; p._cbzBag = null;
+    if (CBZ.protection && CBZ.protection.release) { try { CBZ.protection.release(p); } catch (e) {} }
+    p.moveOrder = null;
+    // ---- out of your gang / crew
+    const pg = g.playerGang;
+    let inGang = false;
+    if (pg && pg.members) { const i = pg.members.indexOf(p); if (i >= 0) { inGang = true; pg.members.splice(i, 1); } }
+    if (p.recruited && p.kind === "crew" && !inGang) g.cityCrew = Math.max(0, (g.cityCrew || 0) - 1);
+    if (pg && p.gang === pg.id) p.gang = null;
+    if (p.gang === "player") p.gang = null;
+    if (p.faction === "player") p.faction = null;
+    p.companion = false; p.recruited = false; p.rank = p.gang ? p.rank : null;
+    if (p.kind === "crew" || p.kind === "worker") p.kind = "civilian";
+    p.tagColor = null; p.npcWanted = 0;
+    if (p._hireAggr != null) { p.aggr = p._hireAggr; p._hireAggr = null; }
+    // ---- his post: leash, pin, the office's hold on him, the per-person verbs
+    p.guard = null; p.homeGuard = null; p.raidT = 0; p.raidLot = null; p.raidGang = null;
+    p.staffPost = null; p.controlled = false;
+    p._iOnly = false; p._stateStaff = false; p._presStaff = null; p._presOfficer = null;
+    if (p.organization === "state") p.organization = null;
+    p._iopts = null;
+    if (o.name) p.name = o.name;
+    if (o.job !== undefined) p.job = o.job;
+    if (inGang) {
+      if (CBZ.cityPlayerGangSync) { try { CBZ.cityPlayerGangSync(); } catch (e) {} }
+      if (CBZ.cityPlayerGangApply) { try { CBZ.cityPlayerGangApply(); } catch (e) {} }   // recounts g.cityCrew off the members left
+    }
+    if (CBZ.interactions && CBZ.interactions.refresh) { try { CBZ.interactions.refresh(); } catch (e) {} }
+    // ---- on his feet, hands down, no held street reaction
+    const M = CBZ.moves;
+    if (M && M.posture) {
+      let ps = "stand"; try { ps = M.posture(p); } catch (e) { ps = "stand"; }
+      if (ps === "crouch" && M.crouch) M.crouch(p, false);
+      else if (ps !== "stand" && ps !== "transition" && M.stand) { try { M.stand(p); } catch (e) {} }
+    }
+    if (p.char) { p.char.sitting = false; p.char.handsUp = false; p.char.surrender = false; p.char.typing = false; }
+    if (p._deskAnchor && CBZ.cityReleaseDesk) { try { CBZ.cityReleaseDesk(p); } catch (e) {} }
+    p.poseCower = 0; p.poseHandsUp = false; p.poseAimBack = false; p._twPose = false;
+    p.surrender = false; p.surrenderT = 0;
+    p.rage = null; p.mem = null; p.alarmed = 0; p.fear = 0; p.hunt = 0;
+    p._cbResp = null; p._cbAfter = null; p._cbUntil = 0; p._reactHold = 0;
+    p._cbThreatSrc = null; p._cbBang = null; p._cbConfrontT = -1e9;
+    p._faceT = 0; p._faceAt = null; p.chatT = 0; p.approach = null;
+    p.path = null; p.finalGoal = null; p.pause = 0; p.state = "idle";
+    if (p._iqPos) { p._iqPos = null; p._iqPlant = false; }
+    if (p.target && p.target.set && p.pos) p.target.set(p.pos.x, 0, p.pos.z);
+    // ---- the brain: a street body again (pedestrian, civilians), let go
+    release(p);
+    if (!adopt(p) || !b || !b.dismiss) {
+      // no brain: the plain routine walk home
+      const to0 = o.to || homeOf(p, from);
+      p.path = (o.path || []).concat([to0]); p.finalGoal = { x: to0.x, z: to0.z };
+      if (p.target && p.target.set) p.target.set(p.path[0].x, 0, p.path[0].z);
+      p.state = "walk";
+      if (o.line) say(p, o.line, 2.4);
+      return true;
+    }
+    const to = o.to || homeOf(p, from);
+    b.dismiss(p, { from: from, fromFaction: side, familiar: o.familiar || null, to: to, line: o.line || null, nod: o.nod != null ? o.nod : 1.1, arrive: o.arrive });
+    p._leavePath = o.path && o.path.length ? o.path.slice() : null;
+    p._leaveRouted = false;
+    return true;
+  }
+  // the brain's LEAVE intent on a city body: the nod is a stop and a held face
+  // at the man he worked for; the walk is the street's routine walk (path +
+  // finalGoal, which city/pednav.js routes round the block), set once
+  const _lctx = { threat: null };
+  function leaving(p, b, dt) {
+    // a hit, a gun turned on him, a cuff: the street's answers outrank the walk
+    if ((p.rage && !p.rage.dead) || p.surrender || (p.surrenderT || 0) > 0 || p.restraint || p.alarmed > 0 ||
+        (CBZ.cityPanicAt && CBZ.cityPanicAt(p.pos.x, p.pos.z) > 0.9)) { p._brain.leave = null; return false; }
+    const I = b.tick(p, dt || 0, _lctx);
+    if (!I || I.kind !== "leave") { p._leavePath = null; return false; }
+    if (I.say) say(p, I.say, 2.4);
+    if (I.phase === "nod") {
+      dropOrder(p);
+      p.speed = 0; p.path = null; p.finalGoal = null; p.state = "idle"; p.pause = Math.max(p.pause || 0, 0.2);
+      if (p.target && p.target.set) p.target.set(p.pos.x, 0, p.pos.z);
+      const tp = I.target && posOf(I.target);
+      if (tp) EXEC.face(p, tp.x, tp.z);
+      return true;
+    }
+    if (!p._leaveRouted || !p.finalGoal) {
+      p._leaveRouted = true;
+      dropOrder(p);
+      const goal = { x: I.x, z: I.z };
+      p.path = (p._leavePath || []).concat([goal]); p._leavePath = null;
+      p.finalGoal = goal;
+      if (p.target && p.target.set) p.target.set(p.path[0].x, 0, p.path[0].z);
+      p._goalKind = "home"; p._homeAt = { x: goal.x, z: goal.z };
+    }
+    if (p.state !== "walk") p.state = "walk";
+    return true;
   }
 
   // ============================================================
@@ -1159,11 +1320,13 @@
     adopt: adopt, release: release, reset: reset, update: update,
     exec: EXEC, crime: crime, hearBang: hearBang, think: think, threat: threat, perform: perform, respond: respond,
     retaliate: retaliate, harmOf: harmOf, holster: holster, unholster: unholster, gunGate: gunGate,
+    dismiss: dismiss, homeOf: homeOf,
     grudge: grudge, feud: feud,
     memberDown: memberDown, broken: broken, moraleOf: moraleOf,
     standing: repStanding, addStanding: repAddStanding, syncFactions: syncFactions,
     cancelWitness: cancelWitness, beginReport: beginReport, keepCall: keepCall, accuse: accuse,
     _t: { reactDelay: reactDelay, hash01: hash01, groupOf: groupOf, sideOf: sideOf, archOf: archOf },
   };
+  CBZ.cityDismiss = dismiss;
   if (typeof module !== "undefined" && module.exports) module.exports = CBZ.cityBrain;
 })();

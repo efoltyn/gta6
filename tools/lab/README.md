@@ -31,6 +31,7 @@ By hand in a browser: `lab.html?kit=person-chair&live=1&cam=3q` (any static serv
 | `car-chair` | a real car (cityMakeCar + cardyn.js) drives into a loose chair | `speed`, `offset`, `chair`, `model`, `brakeAt` |
 | `building` | one facade style on a lot with real footway, kerb and road (streetKit); the probe measures any spill past the lot line | `style`, `lot=WxD`, `storeys`, `door`, `setback`, `retail`, `fit=0` (the pre-43abc8af sizing) |
 | `window-break` | a real building (city mode); N of its windows shot (`cityShatterRay`, a round) or punched (two swings); the probe looks through each hole from the street: what stands in it (object, material, colour, depth behind the glass), SLAB (a flat thing < 0.6 m in: the owner's grey slab), room seen, teeth left in the frame, glass pieces | `style`, `floor` (storey), `how` shoot/punch, `n`, `side`, `retail`, `storeys`, `x`/`z` (lot centre, default 40,60) |
+| `dismiss` | a crewman follows the player beside a partner with his pistol out; at `at` s he is let go through `CBZ.brain.dismiss` (or `mode=legacy`, the old hand-written field clears); the probe reports, over 10 s, the name over his head, seconds crouched / cowering / aiming, heading turned (deg, deg/m) and metres to home | `mode` brain/legacy, `at`, `home` "x,z", `line` |
 | `chair-tip` | one loose chair knocked over through pushables' own tip: the smallest smoke test | |
 | `empty` | the bare lab world | |
 
@@ -55,7 +56,7 @@ CBZ.lab.kit("chair-push", {
 
 Ingredients (`src/lab/ingredients/*.js`) declare the game files/symbols they need and a `make(W, opts)`
 returning a handle with `state()` and `watch` (sampled values; every change becomes an event with its time).
-Handles: person `walkTo sit stand draw holster aimAt lower say pose response`; chair `pos moved tipped`;
+Handles: person `walkTo sit stand draw holster aimAt lower say pose response employ follow dismiss dismissLegacy label`; chair `pos moved tipped`;
 player `walkTo(x,z,{sprint}) stop hold`; gun `draw holster aimAt lower muzzle`; car `drive brake coast`;
 street / building (see their headers). `W.add / W.get / W.at(t, fn) / W.every(fn) / W.event / W.watch`.
 

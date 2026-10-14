@@ -1727,6 +1727,7 @@
   // a ped the brain is mid-action on, or that isn't ours to drive — never stomp
   function busy(ped) {
     if (ped.rage) return true;                       // already engaged
+    if (ped._brain && ped._brain.leave) return true; // walking off a job he was let go from (CBZ.cityDismiss)
     if (ped.approach) return true;                   // walking up to the player (brain owns it)
     const s = ped.state;
     if (s === "fight" || s === "flee" || s === "confront" ||

@@ -654,6 +654,24 @@
         if (CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(a)) { a.companion = true; a.guard = null; a.rage = null; }
         say(a, "With you.");
       } });
+    // DISMISS: let one of your own people go (a crewman you recruited, a
+    // soldier of your gang). There was no way to undo a Recruit but to get him
+    // killed or miss his pay. CBZ.cityDismiss (city/brain_city.js) is the one
+    // let-go: his post and side end, he nods, says one line and walks home.
+    // Not the President's guns (the Service owns them) and not a dog.
+    const LET_GO = ["Alright. I'm gone.", "Your call.", "See you around.", "Fair enough."];
+    I.register("ped", { id: "order-dismiss", wheel: true, prio: 5, campaignSafe: true, anyone: true,
+      canShow: function (p) {
+        if (!p || p.dead || p.kind === "dog" || p._compoundCrew || !on(p) || !CBZ.cityDismiss) return false;
+        const Pz = CBZ.presidency;
+        if (Pz && typeof Pz.serves === "function" && Pz.serves(p) === "security") return false;
+        return !!(p.recruited || p.companion || (CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p)));
+      },
+      label: "Dismiss",
+      onSelect: function (a) {
+        const h = ((a.name || "x").charCodeAt(0) + (a.name || "").length) % LET_GO.length;
+        CBZ.cityDismiss(a, { line: LET_GO[h] });
+      } });
     // CLEAR ROOM: the President's agents walk everyone who is not staff out
     // of the room you are in (10 m, your storey)
     I.register("ped", { id: "pv-clear-room", prio: 26, campaignSafe: true, anyone: true,
