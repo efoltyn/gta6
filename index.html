@@ -961,7 +961,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reactions.js?v=pf0930c"></script>
 <script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
-<script src="src/systems/weather.js?v=ffroute1014"></script>
+<script src="src/systems/weather.js?v=ashgrain1014"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/dashboard.js?v=cars1"></script>
 <script src="src/systems/combat.js?v=melee1011"></script>
@@ -1083,7 +1083,12 @@ document.body.appendChild(b);}}catch(e){}})();
      builders. Must precede systems/disasters.js so the roster finds
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. REQUIRED: the
      old additive-stream fallback in disasters.js was deleted 2026-09-28. -->
-<script src="src/world/volcanofx.js?v=plume2"></script>
+<script src="src/world/volcanofx.js?v=erupt1014"></script>
+<!-- THE ERUPTION'S SEQUENCE: world/eruption.js (CBZ.eruption) runs unrest,
+     phreatic blast, Plinian column + umbrella, bombs, lightning, lava,
+     collapse and lahar on volcanofx's builders, mode-agnostic (the lab's
+     eruption kit drives the same file). Must precede systems/disasters.js. -->
+<script src="src/world/eruption.js?v=erupt1014"></script>
 <!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
@@ -1130,7 +1135,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=fuel1014"></script>
+<script src="src/systems/disasters.js?v=erupt1014"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>

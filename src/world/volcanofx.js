@@ -159,7 +159,7 @@
   const V = {};
   // live census for CBZ.volcanoAudit() — measured, never counted in source
   const census = { lava: 0, pyro: 0, lahar: 0, ash: 0, lights: 0, tris: 0, branches: 0, vent: 0, fountain: 0 };
-  const LIVE = { lava: [], pyro: [], lahar: [], ash: [], vent: [], column: [], fountain: [] };
+  const LIVE = { lava: [], pyro: [], lahar: [], ash: [], vent: [], column: [], fountain: [], umbrella: [], bombs: [] };
 
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt | 0) : 0.5; }
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
@@ -257,7 +257,9 @@
     const turn = o.channel ? 0.8 : (o.turn != null ? +o.turn : 0.45);
     const wander = o.wander != null ? +o.wander : 0.16;
     const salt = o.salt | 0;
-    const probe = step * 1.15;
+    // how far ahead the fan looks: a step ahead by default; a viscous flow
+    // that must find the valley floor looks further (o.probe)
+    const probe = Math.max(step * 1.15, o.probe > 0 ? +o.probe : 0);
     let x = +o.x || 0, z = +o.z || 0;
     let b = o.bearing;
     if (b == null) {
@@ -526,9 +528,13 @@
      would be a lattice, which is the one thing the bible forbids.
      ===================================================================== */
   const LACE_W = 20, LACE_L = 24;       // metres the texture spans
-  let _laceTex = null;
-  function laceTex() {
-    if (_laceTex) return _laceTex;
+  let _laceTex = null, _lace = null;
+  /* BUILT IN SLICES. The pixel loop is ~30 ms on a desktop and three or four
+     times that on a phone, and it used to run inside the frame the first lava
+     crossed the rim — the eruption's own worst hitch. laceBegin/laceRows let
+     V.prewarm() paint it a few rows per frame during the warning, while the
+     mountain is only steaming; laceTex() finishes whatever is left. */
+  function laceBegin() {
     /* 512, not 256: at 256 the texture carries 10.7 px per metre, and a
        player being chased by this thing gets a lot closer than the 20-60 m
        the storyboard frames it at — the crack edges went soft under
@@ -536,11 +542,14 @@
        whole thing is built ONCE, lazily, on the first eruption (~30 ms with
        the ramp precomputed below; per-pixel Color.lerp made it three times
        that). */
-    const S = 512, cv = document.createElement("canvas");
-    cv.width = cv.height = S;
-    const g = cv.getContext("2d");
-    const img = g.createImageData(S, S);
-    const D = img.data;
+    /* A TYPED ARRAY, NOT A CANVAS. The texel loop already writes raw RGBA,
+       so the 2D canvas was only ever a carrier — and it cost twice: a 1 MB
+       backing store against iOS Safari's total canvas-memory cap (the cap
+       that left late textures uploading blank on iPhone), and a putImageData
+       that the lab timed at 16 ms to 3.3 s depending on what else the GPU
+       was doing. A DataTexture uploads the same bytes straight from JS. */
+    const S = 512;
+    const D = new Uint8Array(S * S * 4);
     // the ramp the texel walks, as ratios against MELT_C (the vertex colour's
     // top stop) — so texel x vColour reproduces the ramp exactly at the vent
     const top = new THREE.Color(MELT_C);
@@ -562,7 +571,12 @@
       LUT[q * 3 + 1] = Math.round(255 * clamp(_c3.g / top.g, 0, 1));
       LUT[q * 3 + 2] = Math.round(255 * clamp(_c3.b / top.b, 0, 1));
     }
-    for (let py = 0; py < S; py++) {
+    _lace = { S: S, D: D, LUT: LUT, KY: KY, KX: KX, row: 0 };
+  }
+  function laceRows(n) {
+    const L = _lace, S = L.S, D = L.D, LUT = L.LUT, KY = L.KY, KX = L.KX;
+    const end = Math.min(S, L.row + n);
+    for (let py = L.row; py < end; py++) {
       const sm = (py / S) * LACE_L;              // metres along
       for (let pxi = 0; pxi < S; pxi++) {
         const vm = (pxi / S - 0.5) * LACE_W;     // metres across
@@ -610,8 +624,16 @@
         D[o] = LUT[q3]; D[o + 1] = LUT[q3 + 1]; D[o + 2] = LUT[q3 + 2]; D[o + 3] = 255;
       }
     }
-    g.putImageData(img, 0, 0);
-    const tx = new THREE.CanvasTexture(cv);
+    L.row = end;
+    return end >= S;
+  }
+  function laceTex() {
+    if (_laceTex) return _laceTex;
+    if (!_lace) laceBegin();
+    laceRows(_lace.S);
+    const tx = new THREE.DataTexture(_lace.D, _lace.S, _lace.S, THREE.RGBAFormat);
+    tx.needsUpdate = true;
+    _lace = null;
     // LINEAR encoding on purpose: this is a MULTIPLIER, not a colour, and
     // r128's mapTexelToLinear would gamma-decode it if we said sRGB.
     tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
@@ -619,14 +641,23 @@
     tx.magFilter = THREE.LinearFilter;
     tx.generateMipmaps = true;
     // the flow is nearly always seen at a grazing angle down a cone, which is
-    // exactly the case trilinear filtering blurs into mush
-    const rn = CBZ.renderer;
-    if (rn && rn.capabilities && rn.capabilities.getMaxAnisotropy) {
-      tx.anisotropy = Math.min(4, rn.capabilities.getMaxAnisotropy());
-    }
+    // exactly the case trilinear filtering blurs into mush. r128 clamps this
+    // to the device's maximum at upload, so nothing here asks the GPU (the
+    // query was a pipeline sync inside the frame the lace finished)
+    tx.anisotropy = 4;
     _laceTex = tx;
     return _laceTex;
   }
+  /* V.prewarm(ms): spend up to `ms` this frame building what the first lava
+     will need. Returns true when there is nothing left to build. */
+  V.prewarm = function (ms) {
+    if (_laceTex) return true;
+    if (!_lace) laceBegin();
+    const t0 = performance.now(), budget = ms > 0 ? +ms : 3;
+    while (_lace.row < _lace.S && performance.now() - t0 < budget) laceRows(16);
+    if (_lace.row >= _lace.S) laceTex();
+    return !!_laceTex;
+  };
 
   V.lavaFlow = function (o) {
     o = o || {};
@@ -661,9 +692,11 @@
     let bearing0 = o.bearing;
     if (bearing0 != null) {
       let bestH = 1e9, best = bearing0;
-      for (let k = -5; k <= 5; k++) {
+      // +-0.8 rad, 10 m out: wide enough to always reach the head of a
+      // barranco (the island's run every ~60 degrees), never a full turn
+      for (let k = -8; k <= 8; k++) {
         const a = bearing0 + k * 0.1;
-        const hh = groundAt(o.x + Math.cos(a) * 7, o.z + Math.sin(a) * 7) + Math.abs(k) * 0.02;
+        const hh = groundAt(o.x + Math.cos(a) * 10, o.z + Math.sin(a) * 10) + Math.abs(k) * 0.02;
         if (hh < bestH) { bestH = hh; best = a; }
       }
       bearing0 = best;
@@ -671,7 +704,12 @@
     const path = smoothPath(fallLine({
       x: o.x, z: o.z, groundAt: groundAt, bearing: bearing0,
       step: seg, count: Math.ceil(len / seg) + 1, salt: salt,
-      turn: 0.42, wander: 0.05,
+      /* LAVA FINDS THE VALLEY FLOOR. Looking one station ahead the fan only
+         ever saw the radial slope of the cone and the flow came straight
+         down whatever ridge it was born on; looking ~6 m ahead it feels the
+         barranco walls on either side and settles into the floor, which is
+         where every real flow on a stratovolcano ends up. */
+      turn: 0.5, wander: 0.04, probe: 6,
     }), 2, groundAt);
     const N = path.pts.length;
 
@@ -916,6 +954,19 @@
        lace instead of just dimming it. */
     let quenchT = -1, phT = 0, settled = false;
     const QUENCH_SECS = 8;
+    /* LAVA IS VISCOUS, SO ITS FRONT SPEED IS THE SLOPE'S. A Bingham fluid
+       moves at a rate set by gravity resolved along the bed against a yield
+       strength and a viscosity that both climb as the flow loses heat: it
+       pours down the steep upper cone, slows to a crawl on the apron and
+       stalls on the flat, while the front thickens. So the nose advances at
+       `speed` scaled by the local grade under it (0.5x on the flat to 1.6x
+       on the steep cone) and by how far it has run (cooling stiffens it).
+       `bornT` records when the front actually reached each station, so the
+       crust's age — and its colour — follow the real arrival, not a
+       constant-speed guess. */
+    const bornT = new Float32Array(N).fill(-1);
+    bornT[0] = 0; if (N > 1) bornT[1] = 0;
+    let frontV = speed;
     const _v = new THREE.Vector3();
     /* THE SURFACE RUNS FASTER THAN THE FRONT. The nose is braked by the crust
        it is pushing; the melt behind it is not. ~2.4x is the ratio that reads
@@ -1041,7 +1092,7 @@
        glow instead of flat black — which is what the seams of a real flow
        margin do for days. */
     function stationThick(i) {
-      const bornAt = i * seg / Math.max(0.001, speed);
+      const bornAt = bornT[i] >= 0 ? bornT[i] : age;
       const localAge = clamp(age - bornAt, 0, 120);
       // the quench overrides the slow clock: with the supply cut, the whole
       // run chills together over QUENCH_SECS instead of station by station
@@ -1118,6 +1169,8 @@
     const handle = {
       kind: "lava", group: crust, path: path, mesh: crust, channel: chan,
       get length() { return adv; },
+      get frontSpeed() { return frontV; },
+      get fullLength() { return len; },
       get tip() {
         pathAt(path, adv, _v);
         return { x: _v.x, y: _v.y, z: _v.z };
@@ -1139,7 +1192,14 @@
         // a chilling surface stops travelling: the phase winds down with the
         // heat instead of the lace sliding under a dead crust forever
         phT += dt * (1 - qk);
-        if (quenchT < 0) adv = Math.min(len, adv + speed * dt);
+        if (quenchT < 0) {
+          const fi = clamp(Math.floor(adv / seg), 0, N - 2);
+          const grade = (path.pts[fi].y - path.pts[fi + 1].y) / seg;
+          frontV = speed * clamp(0.55 + 1.5 * grade, 0.5, 1.6) * (1 - 0.4 * adv / len);
+          adv = Math.min(len, adv + frontV * dt);
+          const fs = Math.min(N - 1, Math.floor(adv / seg) + 1);
+          for (let k = 0; k <= fs; k++) if (bornT[k] < 0) bornT[k] = age;
+        } else frontV = 0;
         // the front forks where a fork was armed — see BRANCHING above
         // (a quenched flow is no longer fed, so it arms nothing new)
         if (quenchT >= 0) branchPts.length = 0;
@@ -1247,15 +1307,20 @@
       // the same wProf the geometry used, so what kills you is what glows.
       // A branch is part of the flow, so its ribbon kills through this same
       // call and no caller has to know the tree exists.
-      hitTest(x, z) {
+      /* `pad` (m) widens the test past the drawn margin: the radiant heat
+         of a live flow chars and ignites what stands a metre or two off its
+         edge, so the eruption asks with a pad for fire and without one for
+         what the rock actually covers. */
+      hitTest(x, z, pad) {
         // cold rock is terrain, not a hazard — what kills you is what glows
         if (quenchT >= 0) return false;
+        const pd = pad > 0 ? +pad : 0;
         const c = pathCoord(path, x, z, adv);
-        if (c.s >= 0 && c.s <= adv) {
+        if (c.s >= -pd && c.s <= adv + pd) {
           const i = clamp(Math.round(c.s / seg), 0, N - 1);
-          if (c.perp < halfW * wProf[i] * 0.95) return true;
+          if (c.perp < halfW * wProf[i] * 0.95 + pd) return true;
         }
-        for (let b = 0; b < children.length; b++) if (children[b].hitTest(x, z)) return true;
+        for (let b = 0; b < children.length; b++) if (children[b].hitTest(x, z, pd)) return true;
         return false;
       },
       // 0..1 "how much of its run has it made" — for threat maps
@@ -1460,8 +1525,11 @@
     // the underside: strongest at the quad's foot, gone by two thirds up
     "  float u = vUnder * (1.0 - smoothstep(0.0, 0.68, vUv.y));",
     "  col = mix(col, uUnderCol * (0.55 + 0.45 * t.r), clamp(u, 0.0, 1.0));",
-    "  gl_FragColor = vec4(col, t.a * vCol.a);",
-    "  if (gl_FragColor.a < 0.004) discard;",
+    // max(): a NaN or negative channel must never reach the blend (Apple GPUs
+    // pass NaN through where desktop drivers flush it), and !(a > x) also
+    // discards a NaN alpha
+    "  gl_FragColor = vec4(max(col, vec3(0.0)), t.a * vCol.a);",
+    "  if (!(gl_FragColor.a > 0.004)) discard;",
     "  #include <tonemapping_fragment>",
     "  #include <encodings_fragment>",
     "  #include <fog_fragment>",
@@ -1577,14 +1645,21 @@
     for (let i = 0; i < N; i++) {
       P.push({ v: vents[i % vents.length], life: (i / N) * LIFE, jx: 0, jz: 0, sz: 0.8 + 0.4 * rnd(), rot: (rnd() - 0.5) * 0.5, tile: i % 3, big: (i % vents.length) === 0 ? 1 : 0.7 });
     }
+    /* STRENGTH: 1 is the mountain at rest. The UNREST before an eruption is
+       the same vents working harder — magma rising under the edifice boils
+       the groundwater off faster, so the plumes thicken, climb higher and
+       lean less (more heat, more buoyancy). 4 is a summit steaming like a
+       kettle in the last seconds before the phreatic blast. */
+    let strength = o.strength > 0 ? +o.strength : 1;
     let fade = 1, dead = false;
     const handle = {
       kind: "fumarole", mesh: B.mesh,
+      setStrength(k) { strength = clamp(+k || 1, 0.2, 5); return handle; },
       update(dt) {
         if (dead || !(dt > 0)) return handle;
         if (dt > 0.2) dt = 0.2;
         // the eruption column owns the summit while it stands
-        const want = LIVE.column.length ? 0 : 1;
+        const want = (LIVE.column.length && o.yieldToColumn !== false) ? 0 : 1;
         fade += (want - fade) * Math.min(1, dt * 0.8);
         let wx = 0.8, wz = 0.35;
         try {
@@ -1603,10 +1678,11 @@
           }
           const u = p.life / LIFE;
           // rises fast off the vent, then the breeze takes it over
-          const rise = 11 * p.big * (1 - Math.pow(1 - u, 1.8));
-          const lean = 9 * u * u * p.big;
-          const s = (1.1 + 5.5 * u) * p.sz * p.big;
-          const a = fade * 0.26 * Math.min(1, u / 0.12) * Math.pow(1 - u, 1.5);
+          const S1 = strength - 1;
+          const rise = 11 * p.big * (1 - Math.pow(1 - u, 1.8)) * (1 + 0.9 * S1);
+          const lean = 9 * u * u * p.big * (1 + 0.3 * S1);
+          const s = (1.1 + 5.5 * u) * p.sz * p.big * (1 + 0.45 * S1);
+          const a = fade * Math.min(0.62, 0.26 * (1 + 0.4 * S1)) * Math.min(1, u / 0.12) * Math.pow(1 - u, 1.5);
           B.set(i, p.v.x + p.jx + wx * lean, p.v.y + 0.6 + rise, p.v.z + p.jz + wz * lean,
             s * 1.15, s, p.rot + u * 0.3, p.tile, col.r, col.g, col.b, a, 0);
         }
@@ -1688,8 +1764,39 @@
     }
     const col = new THREE.Color();
     let t = 0, dead = false;
+    /* COLLAPSE. A Plinian column stands only while the jet keeps it
+       buoyant: when the mass flux outruns the air it can entrain, the dense
+       core stops rising and FALLS BACK on the vent — the column visibly
+       drops to a squat fountain while its foot billows outward over the rim,
+       and that outward billow is the birth of the density current. hk is the
+       standing fraction of the column: it sags to ~0.38 over 1.2 s, holds
+       while the collapse feeds the current, and rebuilds over six seconds as
+       the jet re-establishes. */
+    let slumpT = -1, hk = 1;
+    function ease(u) { u = clamp(u, 0, 1); return u * u * (3 - 2 * u); }
+    /* WANING: the vent stops feeding the column. Nothing pops — every puff
+       already aloft finishes its own life, recycled puffs are simply not
+       reborn, and when the last one has dispersed the handle reports done. */
+    let waning = false, done = false;
+    /* LIGHTNING INSIDE THE PLUME lights the ash around the channel from
+       within: a cold blue-white bloom on the puffs nearest the bolt, gone in
+       a tenth of a second. Baked into the per-puff colour, so no light. */
+    const C_FLASH = new THREE.Color(screenHex(214, 220, 255));
+    let flashK = 0, fx0 = 0, fy0 = 0, fz0 = 0, fr = 20;
     const handle = {
       kind: "column", group: B.mesh, puffCount: N,
+      get topY() { return baseY + height * hk; },
+      get standing() { return hk; },
+      get collapsing() { return slumpT >= 0; },
+      get done() { return done; },
+      height: height, baseY: baseY, x: x, z: z, r: r0,
+      collapse() { if (slumpT < 0 || slumpT > 3.2) slumpT = 0; return handle; },
+      wane() { waning = true; return handle; },
+      flash(px, py, pz, k, rad) {
+        flashK = Math.max(flashK, k == null ? 1 : +k);
+        fx0 = px; fy0 = py; fz0 = pz; fr = rad > 0 ? +rad : 20;
+        return handle;
+      },
       /* opts.night (0 day .. 1 night) is the caller's day clock — tickEruption
          already computes it and it is the difference between a black
          silhouette and a grey smudge. Absent, the sky's own sun height
@@ -1697,17 +1804,29 @@
       update(dt, wx, wz, opts) {
         if (dead) return handle;
         t += dt;
+        if (slumpT >= 0) {
+          slumpT += dt;
+          if (slumpT < 1.2) hk = 1 - 0.62 * ease(slumpT / 1.2);
+          else if (slumpT < 3.2) hk = 0.38;
+          else if (slumpT < 9.2) hk = 0.38 + 0.62 * ease((slumpT - 3.2) / 6);
+          else { hk = 1; slumpT = -1; }
+        }
+        flashK *= Math.exp(-dt * 16);
+        if (flashK < 0.01) flashK = 0;
         const bx = wx || 0, bz = wz || 0;
         const night = (opts && opts.night != null) ? clamp(+opts.night, 0, 1)
           : clamp(1 - (0.5 + 2.2 * (CBZ.sunHeight != null ? CBZ.sunHeight : 0.5)), 0, 1);
         const day = 1 - night;
         const sd = sunBearing();
+        const H = height * hk, foot = 1 - hk;
+        let alive = 0;
         for (let i = 0; i < puffs.length; i++) {
           const P = puffs[i];
           P.life += dt;
-          if (P.life < 0) { B.hide(i); continue; }
+          if (P.life < 0) { if (waning) P.life = -1e9; B.hide(i); continue; }
           let u = P.life / RISE;
           if (u >= END) {
+            if (waning) { P.life = -1e9; B.hide(i); continue; }
             P.life = 0; u = 0;
             P.ang = rnd() * 6.2832;
             P.ph = rnd() * 6.2832;
@@ -1724,14 +1843,16 @@
              ~0.2 m of radius per metre climbed, then a broad turbulent cap
              that spreads sideways at neutral buoyancy — an anvil, not a ball. */
           const jet = hh < 0.1 ? 0.75 + 2.5 * hh : 1;
-          const axisR = (r0 * jet + 0.2 * hh * height) * (1 + 1.05 * head);
-          const lean = height * 0.27 * hh * hh * P.wind;
+          alive++;
+          // a collapsing column's foot billows OUT over the rim
+          const axisR = (r0 * jet + 0.2 * hh * H) * (1 + 1.05 * head) * (1 + 1.4 * foot * (1 - hh));
+          const lean = H * 0.27 * hh * hh * P.wind;
           // A slow helical roll belongs to convection; nothing is added to
           // world position as a sinusoid, so no puff bounces on a fixed seat.
           const drift = P.ang + hh * 0.72 + t * (0.018 + P.spin * 0.08);
           const radial = axisR * P.rr * (1 + head * (P.role === 2 ? 0.34 : 0.12));
-          const capLift = head * height * (0.02 + 0.04 * Math.sin(P.ph));
-          const py = baseY + hh * height + capLift;
+          const capLift = head * H * (0.02 + 0.04 * Math.sin(P.ph));
+          const py = baseY + hh * H + capLift;
           // sized off the LOCAL radius: overlap depth is scale-free, so the
           // burp and the big one are both masses rather than strings; puffs
           // keep swelling as they age (the billow)
@@ -1761,12 +1882,19 @@
             const gk = 1 - dy / VENT_REACH;
             under = gk * gk * (0.28 + 0.62 * night);
           }
+          const px = x + Math.cos(drift) * radial + bx * lean, pz = z + Math.sin(drift) * radial + bz * lean;
+          if (flashK > 0) {
+            const ddx = px - fx0, ddy = py - fy0, ddz = pz - fz0;
+            const pr = Math.exp(-(ddx * ddx + ddy * ddy + ddz * ddz) / (fr * fr));
+            if (pr > 0.02) col.lerp(C_FLASH, Math.min(0.85, flashK * pr));
+          }
           B.set(i,
-            x + Math.cos(drift) * radial + bx * lean, py, z + Math.sin(drift) * radial + bz * lean,
+            px, py, pz,
             sc * P.aspect, sc * (1.12 - (P.aspect - 0.74) * 0.3), P.rot, P.tile,
             col.r, col.g, col.b, Math.min(0.85, op), under);
         }
         B.commit();
+        if (waning && alive === 0) done = true;
         return handle;
       },
       dispose() {
@@ -1777,6 +1905,623 @@
       },
     };
     LIVE.column.push(handle);
+    return handle;
+  };
+
+  /* ============================================================
+     THE UMBRELLA CLOUD — where a Plinian column stops climbing.
+
+     A Plinian column is a buoyant plume: it climbs until its mixture of
+     hot gas, ash and entrained air is no denser than the air around it,
+     overshoots a little, and then SPREADS SIDEWAYS as a gravity current at
+     that neutral-buoyancy height. That flat, dark, ever-widening deck is
+     the umbrella, and it is the eruption's real footprint: the ash that
+     buries the downwind town falls OUT OF IT, not out of the column, which
+     is why the fall marches across the island as the deck spreads instead
+     of appearing everywhere at once.
+
+     The physics in the shape:
+       SPREAD   a radial gravity current: r ~ t^(3/4) (Sparks et al.), from
+                the column head's own width out to rMax, so it opens fast
+                and then creeps.
+       WIND     an umbrella cannot spread upwind faster than the wind
+                pushes it back, so the deck is an off-centre lens stretched
+                downwind — a fan, not a disc.
+       LENS     thickest over the vent (the overshoot dome), thin at the
+                rim; the belly is in its own shadow and the top is lit.
+       CURTAINS once the deck is a few seconds old, ash falls out of its
+                downwind half in long soft grey streaks — the fall streaks
+                every photograph of an ashfall shows hanging under the cloud.
+
+     One instanced draw (puffBatch). Puffs keep a near-upright rotation (the
+     lit puff mask, see puffTex). coverAt(x, z) is the analytic footprint the
+     caller reads to darken the sky and cut visibility under the deck, so the
+     darkness and the picture can never disagree about where the cloud is.
+     ============================================================ */
+  V.umbrella = function (o) {
+    o = o || {};
+    const parent = o.parent || CBZ.scene;
+    const x0 = +o.x || 0, z0 = +o.z || 0;
+    const y0 = o.y != null ? +o.y : 120;
+    const thick = o.thick > 0 ? +o.thick : 30;
+    const r0 = o.r0 > 0 ? +o.r0 : 30;
+    const rMax = Math.max(r0 + 1, o.rMax > 0 ? +o.rMax : 150);
+    const stretchMax = o.stretch > 0 ? +o.stretch : 80;
+    const T = o.spreadSecs > 0 ? +o.spreadSecs : 22;
+    const groundY = o.groundY != null ? +o.groundY : 0;
+    const useFog = !o.fogless;
+    const CH_BELLY = screenHex(28, 25, 23);
+    const CH_MID = screenHex(50, 46, 43);
+    const CH_TOP = screenHex(86, 81, 76);
+    const CH_FALL = screenHex(58, 55, 52);
+    const C_NIGHT = new THREE.Color(screenHex(10, 10, 13));
+    const C_SUN = new THREE.Color(screenHex(170, 160, 146));
+    const C_FLASH = new THREE.Color(screenHex(214, 220, 255));
+    const C_FALL = new THREE.Color(CH_FALL);
+    const N = qi(72, 150);
+    const B = puffBatch(N, { map: puffAtlas(), tiles: 3, fog: useFog, parent: parent, renderOrder: 7 });
+    let seed = ((o.salt | 0) ^ 0x7f4a7c15) >>> 0;
+    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const P = [];
+    for (let i = 0; i < N; i++) {
+      const curtain = i % 7 === 6;
+      P.push({
+        curtain: curtain,
+        ang: rnd() * 6.2832,
+        // curtains hang under the DOWNWIND half: an angle off the wind bearing
+        da: (rnd() - 0.5) * 1.9,
+        rr: curtain ? 0.3 + 0.65 * rnd() : Math.min(1.12, Math.sqrt(rnd()) * 1.1),
+        hf: rnd() * 2 - 1,
+        sz: 0.75 + 0.5 * rnd(),
+        aspect: 0.8 + 0.5 * rnd(),
+        rot: (rnd() - 0.5) * 0.4,
+        ph: rnd() * 6.2832,
+        tile: i % 3,
+      });
+    }
+    const col = new THREE.Color();
+    let age = 0, feed = 1, fade = 1, cx = x0, cz = z0, R = r0, S = 0, dead = false, done = false;
+    let ux = 1, uz = 0, flashK = 0, fx0 = 0, fy0 = 0, fz0 = 0, fr = 30;
+    const handle = {
+      kind: "umbrella", group: B.mesh, puffCount: N, y: y0, thick: thick,
+      get radius() { return R; },
+      get stretch() { return S; },
+      get downwindReach() { return R + S; },
+      get centre() { return { x: cx, z: cz }; },
+      get age() { return age; },
+      get done() { return done; },
+      get fade() { return fade; },
+      // the column stopped feeding it: the deck drifts off downwind and thins
+      starve() { feed = 0; return handle; },
+      flash(px, py, pz, k, rad) {
+        flashK = Math.max(flashK, k == null ? 1 : +k);
+        fx0 = px; fy0 = py; fz0 = pz; fr = rad > 0 ? +rad : 30;
+        return handle;
+      },
+      /* 0..1: how much deck is overhead at (x, z). The off-centre lens the
+         puffs are laid out on, solved analytically: upwind it reaches R,
+         downwind R + stretch, across a little more than R. */
+      coverAt(x, z) {
+        if (dead || fade <= 0) return 0;
+        const dx = x - cx, dz = z - cz;
+        const a = dx * ux + dz * uz, c = -dx * uz + dz * ux;
+        const ex = a > 0 ? R + S : R * 0.9, ey = R + 0.22 * S;
+        const q = (a * a) / (ex * ex) + (c * c) / (ey * ey);
+        return fade * clamp((1.12 - q) / 0.42, 0, 1) * clamp(age / 3, 0, 1);
+      },
+      update(dt, wx, wz, opts) {
+        if (dead || done) return handle;
+        if (!(dt > 0)) return handle;
+        if (dt > 0.2) dt = 0.2;
+        age += dt;
+        const wl = Math.hypot(wx || 0, wz || 0);
+        if (wl > 1e-3) {
+          ux += ((wx / wl) - ux) * Math.min(1, dt * 0.5);
+          uz += ((wz / wl) - uz) * Math.min(1, dt * 0.5);
+          const ul = Math.hypot(ux, uz) || 1; ux /= ul; uz /= ul;
+        }
+        if (feed > 0) {
+          const k = Math.min(1, age / T);
+          R = r0 + (rMax - r0) * Math.pow(k, 0.75);
+          S = stretchMax * k;
+        } else {
+          // starved: the whole deck rides the wind off the island and thins
+          const ws = opts && opts.windSpeed > 0 ? +opts.windSpeed : 6;
+          cx += ux * ws * dt; cz += uz * ws * dt;
+          S += ws * 0.4 * dt;
+          fade -= dt / 26;
+          if (fade <= 0) { fade = 0; done = true; B.commit(); handle.group.visible = false; return handle; }
+        }
+        flashK *= Math.exp(-dt * 14);
+        if (flashK < 0.01) flashK = 0;
+        const night = (opts && opts.night != null) ? clamp(+opts.night, 0, 1)
+          : clamp(1 - (0.5 + 2.2 * (CBZ.sunHeight != null ? CBZ.sunHeight : 0.5)), 0, 1);
+        const day = 1 - night;
+        const sd = sunBearing();
+        const windA = Math.atan2(uz, ux);
+        const grow = clamp(age / 2.5, 0, 1);
+        const fallK = clamp((age - 5) / 6, 0, 1) * fade;
+        const base = y0 - thick * 0.5;
+        for (let i = 0; i < N; i++) {
+          const p = P[i];
+          const ang = p.curtain ? windA + p.da : p.ang;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const d = ca * ux + sa * uz;
+          const push = S * p.rr * Math.pow(clamp((d + 0.35) / 1.35, 0, 1), 1.6);
+          const px = cx + ca * R * p.rr + ux * push;
+          const pz = cz + sa * R * p.rr + uz * push;
+          if (p.curtain) {
+            if (fallK <= 0.01 || base - groundY < 8) { B.hide(i); continue; }
+            const hgt = base - groundY;
+            const w = (0.12 * R + 9) * p.sz;
+            col.copy(C_FALL);
+            if (night > 0) col.lerp(C_NIGHT, night * 0.85);
+            B.set(i, px + ux * hgt * 0.12, groundY + hgt * 0.5, pz + uz * hgt * 0.12,
+              w, hgt * 1.05, p.rot * 0.3, p.tile, col.r, col.g, col.b, 0.15 * fallK * (1.2 - p.rr * 0.5), 0);
+            continue;
+          }
+          const lens = 1 - 0.55 * p.rr * p.rr;
+          const dome = thick * 0.4 * Math.pow(Math.max(0, 1 - p.rr), 2);
+          const py = y0 + p.hf * thick * 0.5 * lens + dome + Math.sin(age * 0.25 + p.ph) * thick * 0.05;
+          const sc = (0.2 * R + 0.55 * thick + 6) * p.sz * (0.8 + 0.4 * (1 - Math.min(1, p.rr)));
+          // belly in its own shadow, top in the light
+          ramp3((p.hf + 1) * 0.5, CH_BELLY, CH_MID, CH_TOP, col);
+          if (night > 0) col.lerp(C_NIGHT, night * 0.9);
+          if (day > 0.02 && p.hf > 0) {
+            const sunSide = (ca * sd.x + sa * sd.z) * Math.min(1, p.rr);
+            if (sunSide > 0) col.lerp(C_SUN, sunSide * day * 0.35 * p.hf);
+          }
+          if (flashK > 0) {
+            const ddx = px - fx0, ddy = py - fy0, ddz = pz - fz0;
+            const pr = Math.exp(-(ddx * ddx + ddy * ddy + ddz * ddz) / (fr * fr));
+            if (pr > 0.02) col.lerp(C_FLASH, Math.min(0.8, flashK * pr));
+          }
+          const edge = clamp((1.14 - p.rr) / 0.3, 0, 1);
+          B.set(i, px, py, pz, sc * p.aspect, sc * 0.62, p.rot, p.tile,
+            col.r, col.g, col.b, 0.62 * edge * fade * grow, 0);
+        }
+        B.commit();
+        return handle;
+      },
+      dispose() {
+        if (dead) return;
+        dead = true;
+        B.dispose();
+        const k = LIVE.umbrella.indexOf(handle); if (k >= 0) LIVE.umbrella.splice(k, 1);
+      },
+    };
+    LIVE.umbrella.push(handle);
+    return handle;
+  };
+
+  /* ============================================================
+     THE PHREATIC BLAST — the mountain clearing its throat.
+
+     Before fresh magma reaches the surface it flashes the groundwater
+     above it to steam, and the summit fails in one violent, cold, DIRTY
+     explosion: no incandescence, just shattered old rock and boiling water
+     thrown out of the crater. The classic photographs (Ontake 2014, Whakaari
+     2019, Taal 2020) all show the same two shapes:
+
+       THE COCK'S TAIL  a crown of black-grey jets fanned out of the crater at
+                        30-80 degrees, each one dragging a train of debris,
+                        decelerating hard in the air and then hanging there
+                        while it condenses whiter at the edges;
+       THE BASE SURGE   a low ring of steam and grit that leaves the crater
+                        rim sideways and rolls DOWN the cone faster than a
+                        car, hugging the ground, thinning as it goes.
+
+     Both are particles with their own little physics (quadratic-ish drag
+     on the jets, buoyancy on the steam, a decelerating radial run on the
+     surge), all in ONE instanced draw. surgeAt(x, z) is the scalding steam
+     band for the caller's damage pass — what is drawn is what burns.
+     ============================================================ */
+  V.phreatic = function (o) {
+    o = o || {};
+    const parent = o.parent || CBZ.scene;
+    const groundAt = o.groundAt || flatGround;
+    const x = +o.x || 0, z = +o.z || 0;
+    const y = o.y != null ? +o.y : groundAt(x, z);
+    const mag = clamp(o.mag != null ? +o.mag : 0.5, 0, 1);
+    const rim = o.r > 0 ? +o.r : 6;
+    const coneR = o.coneR > 0 ? +o.coneR : 36;
+    const N = qi(84, 156);
+    const B = puffBatch(N, { map: puffAtlas(), tiles: 3, fog: true, parent: parent, renderOrder: 7 });
+    let seed = ((o.salt | 0) ^ 0x2545f491) >>> 0;
+    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    const C_DIRT = new THREE.Color(screenHex(40, 37, 34));
+    const C_STEAM = new THREE.Color(screenHex(206, 203, 196));
+    const C_SURGE = new THREE.Color(screenHex(170, 165, 156));
+    const C_NIGHT = new THREE.Color(screenHex(26, 26, 30));
+    const K = 5 + Math.round(4 * mag);
+    const jets = [];
+    for (let j = 0; j < K; j++) {
+      const az = (j / K) * 6.2832 + (rnd() - 0.5) * 0.7;
+      // one near-vertical jet in the middle, the rest fanned out
+      const el = j === 0 ? 1.35 + rnd() * 0.15 : 0.52 + rnd() * 0.75;
+      jets.push({ az: az, el: el, v: (24 + 30 * mag) * (0.75 + 0.5 * rnd()) });
+    }
+    const SURGE_V = 16 + 14 * mag;
+    const parts = [];
+    for (let i = 0; i < N; i++) {
+      const surge = i % 5 >= 3;     // 40%: the base surge ring
+      const p = { surge: surge, born: false, tb: 0, x: x, y: y, z: z, vx: 0, vy: 0, vz: 0, r: rim, vr: 0, a: 0,
+        s0: 0, steam: rnd(), tile: i % 3, rot: (rnd() - 0.5) * 0.4, life: 0, maxL: 0 };
+      if (surge) {
+        p.tb = 0.25 + rnd() * 0.8;
+        p.a = rnd() * 6.2832;
+        p.vr = SURGE_V * (0.6 + 0.5 * rnd());
+        p.s0 = 2.5 + 2 * rnd();
+        p.maxL = 9 + 4 * rnd();
+      } else {
+        const J = jets[i % K];
+        p.tb = Math.pow(rnd(), 1.6) * 1.1;
+        const az = J.az + (rnd() - 0.5) * 0.3, el = J.el + (rnd() - 0.5) * 0.18;
+        // the head of each jet leaves fastest; the train behind it slower
+        const sp = J.v * (0.35 + 0.65 * rnd());
+        p.vx = Math.cos(az) * Math.cos(el) * sp;
+        p.vz = Math.sin(az) * Math.cos(el) * sp;
+        p.vy = Math.sin(el) * sp;
+        p.s0 = 1.6 + 2.2 * rnd();
+        p.maxL = 10 + 6 * rnd();
+      }
+      parts.push(p);
+    }
+    const col = new THREE.Color();
+    let t = 0, dead = false, done = false, surgeR = rim;
+    const handle = {
+      kind: "phreatic", group: B.mesh, puffCount: N,
+      get age() { return t; },
+      get done() { return done; },
+      get surgeRadius() { return surgeR; },
+      /* 0..1: inside the rolling steam band right now. The band is the
+         surge's own front +- a few metres, live only while it is still
+         dense (first ~5 s); the drawn ring is the hitbox. */
+      surgeAt(px, pz) {
+        if (dead || t > 5.5) return 0;
+        const d = Math.hypot(px - x, pz - z);
+        const band = 4 + surgeR * 0.12;
+        if (Math.abs(d - surgeR) > band) return 0;
+        return clamp(1 - t / 5.5, 0, 1) * (1 - Math.abs(d - surgeR) / band);
+      },
+      update(dt, opts) {
+        if (dead || done) return handle;
+        if (!(dt > 0)) return handle;
+        if (dt > 0.2) dt = 0.2;
+        t += dt;
+        const night = (opts && opts.night != null) ? clamp(+opts.night, 0, 1) : 0;
+        const ww = opts && opts.windX != null ? opts : null;
+        let live = 0, far = rim;
+        for (let i = 0; i < N; i++) {
+          const p = parts[i];
+          if (t < p.tb) { B.hide(i); continue; }
+          p.life += dt;
+          if (p.life > p.maxL) { B.hide(i); continue; }
+          live++;
+          const L = p.life;
+          if (p.surge) {
+            // a density current that runs out of momentum on the apron
+            p.vr *= Math.exp(-0.42 * dt);
+            p.r = Math.min(coneR * 1.35, p.r + p.vr * dt);
+            if (p.r > far && L < 5) far = p.r;
+            const px = x + Math.cos(p.a) * p.r, pz = z + Math.sin(p.a) * p.r;
+            const s = p.s0 + 2.2 * L * (0.7 + 0.6 * mag);
+            const gy = groundAt(px, pz);
+            col.copy(C_SURGE);
+            if (night > 0) col.lerp(C_NIGHT, night * 0.8);
+            const a = 0.72 * clamp(L / 0.25, 0, 1) * clamp((p.maxL - L) / 5, 0, 1);
+            B.set(i, px, gy + s * 0.32 + L * 0.5, pz, s * 1.3, s * 0.7, p.rot, p.tile, col.r, col.g, col.b, a, 0);
+            continue;
+          }
+          // jets: hard drag (the debris train decelerates in a second or two),
+          // then the cloud hangs and the steam fraction climbs on buoyancy
+          const drag = Math.exp(-1.25 * dt);
+          p.vx *= drag; p.vz *= drag; p.vy *= drag;
+          p.vy += (p.steam > 0.45 ? 2.4 : -3.2) * dt;
+          if (ww) { p.vx += (ww.windX || 0) * 1.2 * dt; p.vz += (ww.windZ || 0) * 1.2 * dt; }
+          p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+          const gy = groundAt(p.x, p.z);
+          if (p.y < gy + 1) { p.y = gy + 1; p.vy = Math.abs(p.vy) * 0.2; }
+          const s = p.s0 + 3.4 * L * (0.6 + 0.6 * mag);
+          // dark dirty jet, condensing whiter at the edges as it ages
+          col.copy(C_DIRT).lerp(C_STEAM, clamp(L / 5, 0, 1) * (0.25 + 0.75 * p.steam));
+          if (night > 0) col.lerp(C_NIGHT, night * 0.8);
+          const a = 0.8 * clamp(L / 0.12, 0, 1) * clamp((p.maxL - L) / 6, 0, 1);
+          B.set(i, p.x, p.y, p.z, s, s * 0.95, p.rot, p.tile, col.r, col.g, col.b, a, 0);
+        }
+        surgeR = far;
+        B.commit();
+        if (t > 1.5 && live === 0) done = true;
+        return handle;
+      },
+      dispose() {
+        if (dead) return;
+        dead = true;
+        B.dispose();
+      },
+    };
+    return handle;
+  };
+
+  /* ============================================================
+     BALLISTIC BOMBS — rocks on real parabolas, with real impacts.
+
+     A volcanic bomb is a lump of rock thrown out of the vent at 50-200 m/s
+     that flies a drag-light parabola, and the reason it kills is mass and
+     speed, nothing else. So each one here is a body: launched from the
+     crater on an elevation and a muzzle speed SOLVED for where ballistics
+     puts it, integrated under the game's gravity every frame, and stopped by
+     whatever it actually meets first — the cone's own flank on a low shot, a
+     roof, a car, the ground. Nothing is placed: if the arc clips the
+     mountain on the way down, that is where it lands.
+
+       JUVENILE  fresh magma: incandescent in flight (white-orange cooling to
+                 dull red on the way down, unlit = self-luminous), trailing a
+                 dark degassing streak, and still glowing in its crater for
+                 twenty seconds after it lands.
+       LITHIC    the phreatic blast's cold shattered old rock: grey, lit,
+                 trailing pale dust.
+
+     AN IMPACT LEAVES A CRATER: a pit with a lighter ejecta rim, draped on
+     the ground's own slope, plus a burst of dust. The bomb itself stays,
+     half-buried, cooling. The caller hears every landing through onLand
+     with the mass, the speed and what was hit, and prices it.
+
+     Draws: hot rocks 1, cold rocks 1, trails+dust 1, craters 1 — however
+     many bombs are in the air.
+     ============================================================ */
+  let _bombGeo = null, _craterGeo = null;
+  function bombGeo() {
+    if (_bombGeo) return _bombGeo;
+    const g = new THREE.IcosahedronGeometry(1, 1);
+    const p = g.attributes.position;
+    // jitter by POSITION, not index: the polyhedron is non-indexed, so the
+    // same corner appears in up to six triangles and must move as one
+    for (let i = 0; i < p.count; i++) {
+      const vx = p.getX(i), vy = p.getY(i), vz = p.getZ(i);
+      const k = 0.78 + 0.4 * h01(Math.round(vx * 97 + vz * 13), Math.round(vy * 89 - vz * 31), 4441);
+      p.setXYZ(i, vx * k * 1.08, vy * k * 0.84, vz * k);
+    }
+    g.computeVertexNormals();
+    _bombGeo = g;
+    return g;
+  }
+  function craterGeo() {
+    if (_craterGeo) return _craterGeo;
+    // a fan: centre, pit ring, ejecta crest, ragged outer edge — opaque
+    // vertex colours, its outline lobed so no crater is a coin
+    const SEG = 20;
+    const pos = [0, -0.06, 0], colA = [];
+    const pit = new THREE.Color(0.016, 0.013, 0.011), lip = new THREE.Color(0.075, 0.066, 0.058), out = new THREE.Color(0.05, 0.045, 0.04);
+    colA.push(pit.r, pit.g, pit.b);
+    const rings = [[0.42, -0.03, pit], [0.72, 0.05, lip], [1.0, 0.0, out]];
+    for (let r = 0; r < rings.length; r++) {
+      for (let k = 0; k < SEG; k++) {
+        const a = (k / SEG) * 6.2832;
+        const lob = r === 2 ? 0.78 + 0.44 * h01(k, 7, 5531) : (r === 1 ? 0.92 + 0.16 * h01(k, 3, 5537) : 1);
+        const R = rings[r][0] * lob;
+        pos.push(Math.cos(a) * R, rings[r][1], Math.sin(a) * R);
+        const c = rings[r][2];
+        colA.push(c.r, c.g, c.b);
+      }
+    }
+    const idx = [];
+    for (let k = 0; k < SEG; k++) idx.push(0, 1 + (k + 1) % SEG, 1 + k);
+    for (let r = 0; r < 2; r++) {
+      const a0 = 1 + r * SEG, b0 = 1 + (r + 1) * SEG;
+      for (let k = 0; k < SEG; k++) {
+        const k1 = (k + 1) % SEG;
+        idx.push(a0 + k, a0 + k1, b0 + k1, a0 + k, b0 + k1, b0 + k);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(colA, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    _craterGeo = g;
+    return g;
+  }
+  V.bombs = function (o) {
+    o = o || {};
+    const parent = o.parent || CBZ.scene;
+    const groundAt = o.groundAt || flatGround;
+    const G = o.gravity > 0 ? +o.gravity : ((CBZ.TUNE && CBZ.TUNE.gravity > 0) ? CBZ.TUNE.gravity : 20);
+    const MAX = Math.max(8, o.max | 0 || 48);           // bodies alive (flying + resting)
+    const NC = Math.max(4, o.craters | 0 || qi(24, 64));
+    const rnd = typeof o.rnd === "function" ? o.rnd : Math.random;
+    const geo = bombGeo();
+    const hotMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const coldMat = new THREE.MeshPhongMaterial({ color: 0xffffff, flatShading: true, shininess: 0, specular: 0x000000 });
+    const hot = new THREE.InstancedMesh(geo, hotMat, MAX);
+    const cold = new THREE.InstancedMesh(geo, coldMat, MAX);
+    const _c = new THREE.Color(1, 1, 1);
+    for (let i = 0; i < MAX; i++) { hot.setColorAt(i, _c); cold.setColorAt(i, _c); }
+    hot.count = 0; cold.count = 0;
+    hot.frustumCulled = cold.frustumCulled = false;
+    cold.castShadow = true;
+    hot.renderOrder = 3;
+    parent.add(hot); parent.add(cold);
+    const crMat = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const craters = new THREE.InstancedMesh(craterGeo(), crMat, NC);
+    craters.count = 0; craters.frustumCulled = false; craters.receiveShadow = true;
+    parent.add(craters);
+    let crN = 0, crNext = 0;
+    const TRAIL = qi(90, 190);
+    const TB = puffBatch(TRAIL, { map: puffAtlas(), tiles: 3, fog: true, parent: parent, renderOrder: 7 });
+    const trail = [];
+    for (let i = 0; i < TRAIL; i++) trail.push({ live: false, x: 0, y: 0, z: 0, vy: 0, age: 0, life: 1, s0: 1, s1: 2, r: 0, g: 0, b: 0, a: 0.4, tile: i % 3 });
+    let trailNext = 0;
+    function puff(x, y, z, life, s0, s1, c, a, vy) {
+      const p = trail[trailNext]; trailNext = (trailNext + 1) % TRAIL;
+      p.live = true; p.x = x; p.y = y; p.z = z; p.age = 0; p.life = life; p.s0 = s0; p.s1 = s1;
+      p.r = c.r; p.g = c.g; p.b = c.b; p.a = a; p.vy = vy || 0;
+    }
+    const C_HOT = new THREE.Color(screenHex(255, 236, 190));
+    const C_MID = new THREE.Color(screenHex(255, 122, 30));
+    const C_OLD = new THREE.Color(screenHex(120, 22, 6));
+    const C_ROCK = new THREE.Color(0.055, 0.047, 0.042);   // lit basalt (Phong multiplies)
+    const C_LITHIC = new THREE.Color(0.16, 0.15, 0.14);    // old grey andesite
+    const C_SMOKE = new THREE.Color(screenHex(54, 50, 47));
+    const C_DUST = new THREE.Color(screenHex(118, 108, 96));
+    const C_PALE = new THREE.Color(screenHex(160, 156, 148));
+    const bodies = [];
+    const stats = { thrown: 0, landed: 0, craters: 0, roof: 0, car: 0, ground: 0, maxSpeed: 0, maxRange: 0 };
+    const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
+    const _up = new THREE.Vector3(0, 1, 0), _n = new THREE.Vector3(), _e = new THREE.Euler();
+    function addCrater(x, z, r) {
+      const e = 0.6;
+      const hx1 = groundAt(x + e, z), hx0 = groundAt(x - e, z), hz1 = groundAt(x, z + e), hz0 = groundAt(x, z - e);
+      _n.set(hx0 - hx1, 2 * e, hz0 - hz1).normalize();
+      _q.setFromUnitVectors(_up, _n);
+      _p.set(x, groundAt(x, z) + 0.04, z);
+      _s.set(r, r, r);
+      _m.compose(_p, _q, _s);
+      craters.setMatrixAt(crNext, _m);
+      crNext = (crNext + 1) % NC;
+      crN = Math.min(NC, crN + 1);
+      craters.count = crN;
+      craters.instanceMatrix.needsUpdate = true;
+      stats.craters++;
+    }
+    const handle = {
+      kind: "bombs", stats: stats,
+      get inFlight() { let n = 0; for (let i = 0; i < bodies.length; i++) if (!bodies[i].landed) n++; return n; },
+      /* the predicted landing of every rock in the air — the bot flee field
+         and any HUD read this, so a bomb is avoidable by watching it */
+      forEachFlying(fn) {
+        for (let i = 0; i < bodies.length; i++) { const b = bodies[i]; if (!b.landed) fn(b.tx, b.tz, b.size, b.eta); }
+      },
+      /* throw one. {x,y,z} the muzzle, {tx,tz} the aim, `elev` the launch
+         angle off horizontal (rad), `size` the radius (m), `hot` juvenile or
+         lithic. The muzzle speed is SOLVED for the aim under G; the rock then
+         flies free and lands wherever it really meets the world. */
+      throwTo(b) {
+        if (bodies.length >= MAX) {
+          // recycle the oldest RESTING rock; never one still in the air
+          let k = -1;
+          for (let i = 0; i < bodies.length; i++) if (bodies[i].landed) { k = i; break; }
+          if (k < 0) return null;
+          bodies.splice(k, 1);
+        }
+        const x0 = +b.x, y0 = +b.y, z0 = +b.z;
+        const dx = b.tx - x0, dz = b.tz - z0, D = Math.hypot(dx, dz) || 0.01;
+        const ty = groundAt(b.tx, b.tz);
+        let el = b.elev != null ? +b.elev : 0.95;
+        let den = 2 * Math.cos(el) * Math.cos(el) * (D * Math.tan(el) - (ty - y0));
+        while (den <= 0.01 && el < 1.45) { el += 0.08; den = 2 * Math.cos(el) * Math.cos(el) * (D * Math.tan(el) - (ty - y0)); }
+        const v = Math.sqrt(Math.max(1, G * D * D / Math.max(0.01, den)));
+        const vh = v * Math.cos(el);
+        const size = b.size > 0 ? +b.size : 0.6;
+        const body = {
+          x: x0, y: y0, z: z0, vx: dx / D * vh, vy: v * Math.sin(el), vz: dz / D * vh,
+          tx: b.tx, tz: b.tz, eta: D / Math.max(0.1, vh),
+          size: size, hot: b.hot !== false, temp: b.hot !== false ? 1 : 0,
+          mass: 2600 * 4.19 * size * size * size,
+          rx: rnd() * 6, ry: rnd() * 6, rz: rnd() * 6,
+          sx: (rnd() - 0.5) * 7, sy: (rnd() - 0.5) * 7, sz: (rnd() - 0.5) * 7,
+          trailT: 0, landed: false, rest: 0, v0: v,
+        };
+        bodies.push(body);
+        stats.thrown++;
+        stats.maxSpeed = Math.max(stats.maxSpeed, v);
+        return body;
+      },
+      update(dt) {
+        if (!(dt > 0)) return handle;
+        if (dt > 0.1) dt = 0.1;
+        let nh = 0, nc = 0;
+        for (let i = bodies.length - 1; i >= 0; i--) {
+          const b = bodies[i];
+          if (!b.landed) {
+            b.vy -= G * dt;
+            b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+            b.eta -= dt;
+            b.rx += b.sx * dt; b.ry += b.sy * dt; b.rz += b.sz * dt;
+            // a big bomb's skin chills in flight but its core does not
+            if (b.hot) b.temp = Math.max(0.35, b.temp - dt * 0.09 / Math.max(0.4, b.size));
+            b.trailT -= dt;
+            if (b.trailT <= 0) {
+              b.trailT = 0.05;
+              puff(b.x, b.y, b.z, 1.6 + rnd() * 0.8, b.size * 1.1, b.size * 4.5, b.hot ? C_SMOKE : C_PALE, b.hot ? 0.42 : 0.3, 0.6);
+            }
+            let hit = null, gy = 0;
+            if (b.vy < 0 && o.solids) { try { hit = o.solids(b.x, b.y - b.size * 0.5, b.z); } catch (e) { hit = null; } }
+            if (hit) gy = hit.y;
+            else gy = groundAt(b.x, b.z);
+            if (b.y - b.size * 0.4 <= gy) {
+              b.landed = true;
+              const speed = Math.hypot(b.vx, b.vy, b.vz);
+              b.y = gy + b.size * (hit ? 0.5 : 0.25);
+              stats.landed++;
+              const range = Math.hypot(b.x - (o.ventX || 0), b.z - (o.ventZ || 0));
+              stats.maxRange = Math.max(stats.maxRange, range);
+              if (hit) { if (hit.kind === "roof") stats.roof++; else if (hit.kind === "car") stats.car++; }
+              else {
+                stats.ground++;
+                // a crater only where a rock hit DIRT hard enough to dig one
+                if (speed > 10) addCrater(b.x, b.z, Math.min(4.5, b.size * (1.5 + speed / 30)));
+              }
+              for (let k = 0; k < 7; k++) {
+                const a = rnd() * 6.2832, rr = b.size * (0.6 + rnd() * 1.8);
+                puff(b.x + Math.cos(a) * rr, gy + b.size * 0.5, b.z + Math.sin(a) * rr, 2.4 + rnd() * 1.6,
+                  b.size * 1.6, b.size * (4 + speed / 12), C_DUST, 0.55, 1.2 + rnd());
+              }
+              if (o.onLand) {
+                try {
+                  o.onLand({ x: b.x, y: gy, z: b.z, speed: speed, mass: b.mass, size: b.size, hot: b.hot, hit: hit, range: range });
+                } catch (e) { /* a caller's bug must not stop the rocks */ }
+              }
+            }
+          } else {
+            b.rest += dt;
+            if (b.hot) b.temp = Math.max(0, b.temp - dt / (14 + 18 * b.size));
+          }
+          // draw: glowing while it is hotter than dull red, rock after
+          _e.set(b.rx, b.ry, b.rz); _q.setFromEuler(_e);
+          _p.set(b.x, b.y, b.z); _s.setScalar(b.size);
+          _m.compose(_p, _q, _s);
+          if (b.hot && b.temp > 0.12) {
+            const k = 1 - b.temp;
+            if (k < 0.45) _c.copy(C_HOT).lerp(C_MID, k / 0.45);
+            else _c.copy(C_MID).lerp(C_OLD, (k - 0.45) / 0.55);
+            hot.setMatrixAt(nh, _m); hot.setColorAt(nh, _c); nh++;
+          } else {
+            _c.copy(b.hot ? C_ROCK : C_LITHIC);
+            cold.setMatrixAt(nc, _m); cold.setColorAt(nc, _c); nc++;
+          }
+        }
+        hot.count = nh; cold.count = nc;
+        hot.instanceMatrix.needsUpdate = cold.instanceMatrix.needsUpdate = true;
+        if (hot.instanceColor) hot.instanceColor.needsUpdate = true;
+        if (cold.instanceColor) cold.instanceColor.needsUpdate = true;
+        hot.visible = nh > 0; cold.visible = nc > 0;
+        // the smoke and dust: rise a little, grow, thin
+        let any = false;
+        for (let i = 0; i < TRAIL; i++) {
+          const p = trail[i];
+          if (!p.live) { TB.hide(i); continue; }
+          p.age += dt;
+          if (p.age >= p.life) { p.live = false; TB.hide(i); continue; }
+          any = true;
+          const u = p.age / p.life;
+          p.y += p.vy * dt;
+          const s = p.s0 + (p.s1 - p.s0) * Math.sqrt(u);
+          TB.set(i, p.x, p.y, p.z, s, s, 0, p.tile, p.r, p.g, p.b, p.a * (1 - u) * clamp(p.age / 0.08, 0, 1), 0);
+        }
+        TB.commit();
+        TB.mesh.visible = any;
+        return handle;
+      },
+      dispose() {
+        parent.remove(hot); parent.remove(cold); parent.remove(craters);
+        hotMat.dispose(); coldMat.dispose(); crMat.dispose();
+        hot.dispose && hot.dispose(); cold.dispose && cold.dispose(); craters.dispose && craters.dispose();
+        TB.dispose();
+        const k = LIVE.bombs.indexOf(handle); if (k >= 0) LIVE.bombs.splice(k, 1);
+      },
+    };
+    LIVE.bombs.push(handle);
     return handle;
   };
 
@@ -2166,28 +2911,6 @@
     _puffTex[k] = new THREE.CanvasTexture(cv);
     return _puffTex[k];
   }
-  let _pyroMats = null;
-  function pyroMats() {
-    if (_pyroMats) return _pyroMats;
-    _pyroMats = [];
-    for (let i = 0; i < PYRO_BODY; i++) {
-      _pyroMats.push(new THREE.SpriteMaterial({
-        map: puffTex(i % 3), color: pyroAsh()[i],
-        transparent: true, opacity: 1, depthWrite: false, fog: true,
-        blending: THREE.NormalBlending, rotation: 0,
-      }));
-    }
-    // the fringe is a GLOW under the front, not a fire in it — additive and
-    // dim, or it turns the base of an ash cloud into a burning haystack
-    for (let i = 0; i < 2; i++) {
-      _pyroMats.push(new THREE.SpriteMaterial({
-        map: puffTex(i), color: i ? 0x9e3806 : 0x6d1f02,
-        transparent: true, opacity: 0.5, depthWrite: false, fog: true,
-        blending: THREE.AdditiveBlending, rotation: i * 2.1,
-      }));
-    }
-    return _pyroMats;
-  }
 
   V.pyroclastic = function (o) {
     o = o || {};
@@ -2200,12 +2923,18 @@
     const len = o.len > 0 ? +o.len : 150;
     const tail = o.tail > 0 ? +o.tail : 62;
     const salt = o.salt != null ? (o.salt | 0) : 8123;
-    const path = fallLine({
+    /* THE TELEGRAPHED LANE IS THE FLOW'S LANE. A caller that announced a
+       corridor (rockfall down it, the crowd cleared out of it) hands that
+       exact polyline in as `path`, so the current cannot take a slightly
+       different line off a different salt than the one everyone was shown. */
+    const path = (o.path && o.path.pts && o.path.pts.length > 1) ? o.path : fallLine({
       x: o.x, z: o.z, groundAt: groundAt, bearing: o.bearing,
-      step: 6, count: Math.ceil(len / 6) + 1, salt: salt, turn: 0.4, wander: 0.1,
+      step: 6, count: Math.ceil(len / 6) + 1, salt: salt, turn: o.channel ? 0.8 : 0.4, wander: 0.1,
     });
 
-    const mats = pyroMats();
+    const ash = pyroAsh();
+    const FRINGE = [new THREE.Color(0x6d1f02), new THREE.Color(0x9e3806)];
+    const _bc = new THREE.Color();
     /* DENSITY IS THE POINT, and it is a balance the first sprite pass got
        wrong in the other direction. Too big and hard-edged reads as boulders;
        too small and too few reads as steam, which is what a first cut at
@@ -2215,11 +2944,15 @@
        icosahedron filled a full diameter of TWICE its scale, which is most of
        why the naive size match came out small), and the count up by half
        again so the mass is five deep everywhere instead of one. */
+    /* ONE DRAW FOR THE CLOUD, ONE FOR ITS GLOW. Each puff was a THREE.Sprite
+       — 58-136 draw calls for a single current, more than the whole town on
+       a phone, every frame it ran. The same billboards now ride puffBatch
+       (the column's instanced quad): same texture tiles, same baked tier
+       colours, same rocking, same back-to-front order, two calls. The
+       incandescent basal fringe keeps its own ADDITIVE batch. */
     const N = qi(58, 136);
-    const grp = new THREE.Group();
-    grp.frustumCulled = false;
-    parent.add(grp);
     const blobs = [];
+    let nFringe = 0;
     for (let i = 0; i < N; i++) {
       // the HEAD carries most of the mass: bias lags toward zero
       const lag = Math.pow(Math.random(), 1.7) * tail;
@@ -2229,22 +2962,24 @@
       // the whole point: the tier is the lighting.
       const hf = basal ? 0.04 + Math.random() * 0.11 : Math.random();
       const tier = Math.min(2, Math.floor(Math.pow(hf, 0.85) * 3));
-      const m = new THREE.Sprite(basal ? mats[PYRO_BODY + (i % 2)] : mats[tier * 2 + (i & 1)]);
-      m.renderOrder = 7;
-      grp.add(m);
+      // the material index the sprite build used: it sets the colour, the
+      // texture tile and the rocking rate, exactly as the shared mats did
+      const mi = basal ? PYRO_BODY + (i % 2) : tier * 2 + (i & 1);
       blobs.push({
-        m: m, lag: lag, basal: basal, hf: hf,
+        mi: mi, slot: basal ? nFringe++ : -1, lag: lag, basal: basal, hf: hf,
         lat: (Math.random() * 2 - 1) * 1.1,
         ph: Math.random() * 6.28,
         sz: (basal ? 0.17 : 0.15) + Math.pow(Math.random(), 1.4) * (basal ? 0.17 : 0.42),
       });
     }
 
+    const body = puffBatch(N, { map: puffAtlas(), tiles: 3, fog: true, parent: parent, renderOrder: 7 });
+    const glow = puffBatch(Math.max(1, nFringe), { map: puffAtlas(), tiles: 3, additive: true, fog: true, parent: parent, renderOrder: 8 });
     let front = 0, t = 0, dead = false;
     const _v = new THREE.Vector3();
 
     const handle = {
-      kind: "pyro", group: grp, path: path,
+      kind: "pyro", group: body.mesh, path: path, blobCount: N,
       get frontS() { return front; },
       get done() { return front > path.total + tail * 0.4; },
       frontPos() { pathAt(path, Math.min(front, path.total), _v); return { x: _v.x, y: _v.y, z: _v.z }; },
@@ -2261,12 +2996,10 @@
         /* ROCKING, NOT SPINNING: the mask is lit from above now, so a full
            turn would put the light underneath. Eight materials rocking a
            few tenths of a radian at eight rates keeps the churn. */
-        for (let i = 0; i < mats.length; i++) mats[i].rotation = 0.32 * Math.sin(t * (0.35 + i * 0.09) + i * 1.7);
         for (let i = 0; i < blobs.length; i++) {
           const B = blobs[i];
           const s = front - B.lag;
-          if (s < -4 || s > path.total + 8) { B.m.visible = false; continue; }
-          B.m.visible = true;
+          if (s < -4 || s > path.total + 8) { if (B.basal) glow.hide(B.slot); else body.hide(i); continue; }
           pathAt(path, clamp(s, 0, path.total), _v);
           // heading normal so the lateral spread follows the channel
           const fi = clamp(Math.floor(s / path.seg), 0, path.pts.length - 2);
@@ -2281,13 +3014,19 @@
           // an expanding gas GROWS as it ages — the single cue that most
           // separates a puff of smoke from an object being carried along
           const sc = width * B.sz * (0.62 + 0.7 * ageK) * (0.92 + 0.13 * Math.sin(t * 1.6 + B.ph));
-          B.m.position.set(
-            _v.x + nx * B.lat * spread + Math.sin(t * 1.1 + B.ph) * 2.4,
-            gy + height * B.hf * (0.22 + 0.95 * ageK) * churn + sc * 0.42,
-            _v.z + nz * B.lat * spread + Math.cos(t * 1.3 + B.ph) * 2.4
-          );
-          B.m.scale.set(sc, sc * (B.basal ? 0.72 : 0.92), 1);
+          const px = _v.x + nx * B.lat * spread + Math.sin(t * 1.1 + B.ph) * 2.4;
+          const py = gy + height * B.hf * (0.22 + 0.95 * ageK) * churn + sc * 0.42;
+          const pz = _v.z + nz * B.lat * spread + Math.cos(t * 1.3 + B.ph) * 2.4;
+          const rot = 0.32 * Math.sin(t * (0.35 + B.mi * 0.09) + B.mi * 1.7);
+          if (B.basal) {
+            const c = FRINGE[B.mi - PYRO_BODY];
+            glow.set(B.slot, px, py, pz, sc, sc * 0.72, rot, B.mi - PYRO_BODY, c.r, c.g, c.b, 0.5, 0);
+          } else {
+            _bc.setHex(ash[B.mi]);
+            body.set(i, px, py, pz, sc, sc * 0.92, rot, B.mi % 3, _bc.r, _bc.g, _bc.b, 1, 0);
+          }
         }
+        body.commit(); glow.commit();
         return handle;
       },
       /* WHAT PART OF THE FLOW IS THIS, and the answer has to be measured
@@ -2327,10 +3066,8 @@
       dispose() {
         if (dead) return;
         dead = true;
-        // the puff materials and their textures are module-shared and outlive
-        // every individual flow — remove the sprites, never dispose the mats
-        for (let i = 0; i < blobs.length; i++) grp.remove(blobs[i].m);
-        parent.remove(grp);
+        // the atlas is module-shared and outlives every flow; the batches are this flow's own
+        body.dispose(); glow.dispose();
         const k = LIVE.pyro.indexOf(handle); if (k >= 0) LIVE.pyro.splice(k, 1);
       },
     };
@@ -2701,7 +3438,7 @@
          fought with PIGMENT instead (the colours below are blue-shifted so an
          orange sun lands them neutral), and the emissive is back to being
          what it was for: keeping deep shadow off pure black. */
-      emissive: 0x090b0e, emissiveIntensity: 1,
+      emissive: 0x0a0a09, emissiveIntensity: 1,
       polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
     });
     const mesh = new THREE.Mesh(geo, mat);
@@ -2860,26 +3597,33 @@
          step below where they should read, the same trick the melt ramp
          learned, so the screen lands on dark rock and the cone the flows
          thread down is finally the photograph's. */
-      // blue-shifted on purpose: these are multiplied by a warm sun, and an
-      // albedo picked to look grey in a swatch comes out pink on the ground
+      /* NEUTRAL, NOT BLUE-SHIFTED — the owner's iPad/iPhone report (2026-10-14,
+         "purple-ish speckles in the volcano ash"). These stops used to be
+         blue-shifted (B > G > R) to cancel the eruption's orange sun. But the
+         DRIFTS OUTLIVE THAT SUN: they are a scar that lies for minutes after
+         the eruption hands the sky back to white daylight, and a blue-grey
+         patch under white light, on green grass, read through a P3 phone
+         panel's extra saturation, is a field of lavender flecks. The sun
+         under the ash is now DIMMED by the deck (world/eruption.js envAt)
+         rather than painted orange over a bright grass, so the pigment can
+         simply be what volcanic ash is: grey, a touch warm (R >= G >= B). */
       if (C.roof) {
         // ROOFS KEEP THE OLD RAMP. A roof quad is the load gauge — it has to
         // read as "something is piling up here" from the first centimetre,
         // dark against a pale roof, and it is not standing on a veil.
-        _c3.setHex(0x191b1d).lerp(_c1.setHex(0x33363a), Math.min(1, cov * 1.15));
-        _c3.lerp(_c1.setHex(0x212325), deep * 0.7);
+        _c3.setHex(0x1c1b19).lerp(_c1.setHex(0x34322f), Math.min(1, cov * 1.15));
+        _c3.lerp(_c1.setHex(0x232220), deep * 0.7);
       } else {
         /* A DRIFT STARTS AS THE VEIL AND ENDS PALER THAN IT. The bottom stop
            is the ash term's own colour in systems/weather.js, so a patch
            coming into existence at cov 0 is invisible against the ground it
            is standing on — no popping outline, no fleck — and it walks up to
            a pale deposit as it deepens, which is the only thing that makes a
-           drift read as raised rather than as a stain. Blue-shifted for the
-           same reason every other stop in this file is: the eruption's sun
-           is 0xd9714a and a neutral grey under it comes out pink. */
-        _c3.setHex(0x33363a).lerp(_c1.setHex(0x585d66), cov);
+           drift read as raised rather than as a stain. Neutral warm grey,
+           like the veil (see the note above the roof ramp). */
+        _c3.setHex(0x363431).lerp(_c1.setHex(0x5c5953), cov);
         // ...and back down a stop when it goes deep and damp
-        _c3.lerp(_c1.setHex(0x3d4149), deep * 0.5);
+        _c3.lerp(_c1.setHex(0x423f3b), deep * 0.5);
       }
       for (let k = 0; k < 4; k++) {
         col[v + k * 3] = _c3.r * grain;
@@ -3068,10 +3812,7 @@
       }
     }
     let pyroBlobs = 0;
-    for (let i = 0; i < LIVE.pyro.length; i++) {
-      const g = LIVE.pyro[i].group;
-      if (g) pyroBlobs += g.children.length;
-    }
+    for (let i = 0; i < LIVE.pyro.length; i++) pyroBlobs += LIVE.pyro[i].blobCount || 0;
     let columnPuffs = 0;
     for (let i = 0; i < LIVE.column.length; i++) {
       const c = LIVE.column[i];
@@ -3114,6 +3855,12 @@
       fountainClots: fountainClots,
       builtFountain: census.fountain,
       pyroLive: LIVE.pyro.length, pyroBlobs: pyroBlobs,
+      // the Plinian deck and the ballistic field
+      umbrellas: LIVE.umbrella.length,
+      umbrellaRadius: LIVE.umbrella.length ? Math.round(LIVE.umbrella[0].radius) : 0,
+      bombsFlying: LIVE.bombs.reduce(function (n, b) { return n + b.inFlight; }, 0),
+      bombsLanded: LIVE.bombs.reduce(function (n, b) { return n + b.stats.landed; }, 0),
+      bombCraters: LIVE.bombs.reduce(function (n, b) { return n + b.stats.craters; }, 0),
       laharLive: LIVE.lahar.length,
       ashFields: LIVE.ash.length, ashCells: ashCells,
       ashPeakDepth: +ashPeak.toFixed(3),

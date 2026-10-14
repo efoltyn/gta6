@@ -10,6 +10,7 @@
      node tools/disaster-check.mjs                      # index.html (baseline)
      node tools/disaster-check.mjs --url disaster.html  # the slice page
      node tools/disaster-check.mjs --quick              # skip the roster sweep
+     node tools/disaster-check.mjs --only volcano,quake # sweep just these defs
      node tools/disaster-check.mjs --json
 
    THREE THINGS IT ASSERTS, and they are different in kind:

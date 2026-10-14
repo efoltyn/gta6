@@ -78,7 +78,11 @@
    eruption calls the same code. Its flags (VOLCANO_PYRO · VOLCANO_LAHAR ·
    VOLCANO_ASH_LOAD) are declared THERE, in the owning file. volcanofx.js is
    loaded on every page that loads this file; the old additive stream boxes
-   were deleted 2026-09-28.
+   were deleted 2026-09-28. Since 2026-10-14 the eruption's SEQUENCE (unrest,
+   phreatic blast, Plinian column + umbrella, bombs, plume lightning, lava,
+   collapse, lahar, waning) and its effects on houses, trees and cars live in
+   world/eruption.js (CBZ.eruption); this file supplies the island and prices
+   the consequences through its own ledgers and roster.
 
    NUKE_FINALE_REAL (declared here, default on) is the finale's LENS: the
    real cloud was always being drawn, it was being clipped at a 1 km far
@@ -1424,32 +1428,24 @@
         const M = rollMag(ctx);
         narrate("hint", "THE VOLCANO IS WAKING, get off the mountain!", 3);
         sound("rumble"); if (CBZ.shake) CBZ.shake(0.3 + 0.4 * M);
-        const h = ctx.arena.hills[0];
-        /* 0.3, NOT h.peak + 0.3: disc() already stands its mesh on floor(x, z),
-           and the floor under the vent IS the peak. Passing the peak again
-           parked the crater glow 26 m above the summit — a tan coin hanging in
-           the sky over every warning (and, leaked through force(), over every
-           storyboard eruption since the disc was written). */
-        ctx.st.preGlow = disc(h.x, h.z, 0xff5210, 0.0, 0.3);
-        ctx.st.preGlow.material.blending = THREE.AdditiveBlending;
-        ctx.st.preGlow.scale.set(4, 4, 1);
+        /* NO GLOWING COIN ON THE SUMMIT. Before an eruption there is no magma
+           at the surface to glow: what a waking volcano shows is STEAM — the
+           groundwater over the rising magma boiling off through the summit
+           vents, harder and harder — and a ground that hums. Both are the
+           eruption's own UNREST (world/eruption.js), driven from warnTick. */
         const wa = rnd() * 6.28; ctx.st.wx = Math.cos(wa); ctx.st.wz = Math.sin(wa);
         // the failing flank, chosen ONCE so the telegraph and the flow can
         // never point at two different sides of the same mountain
         ctx.st.pyroBear = rnd() * 6.28;
-        ctx.st.pyroLane = (vfx() && vfx().fallLine) ? vfx().fallLine({
-          x: h.x + Math.cos(ctx.st.pyroBear) * 3, z: h.z + Math.sin(ctx.st.pyroBear) * 3,
-          groundAt: gAt(ctx), bearing: ctx.st.pyroBear,
-          step: 6, count: Math.ceil((h.r + ctx.R * 0.95) / 6) + 1, turn: 0.4, wander: 0.1,
-        }) : null;
+        erCreate(ctx);            // sets ctx.st.pyroLane: the valley the collapse will take
         ctx.st.rockCd = 0.7;
       },
       warnTick(dt, ctx) {
         const k = 1 - dir.t / (this.warnSecs || 1);
-        const h = ctx.arena.hills[0];
-        if (CBZ.shake) CBZ.shake(0.04 + 0.22 * k * k);
+        const h = erSite(ctx);
+        // harmonic tremor + the summit steaming harder (world/eruption.js)
+        if (ctx.st.er) ctx.st.er.unrest(dt, k);
         rattleProps(ctx, 0.015 + 0.05 * k);
-        if (ctx.st.preGlow) ctx.st.preGlow.material.opacity = k * (0.55 + 0.3 * Math.sin(CBZ.now * 0.012));
         weather({ rain: 0, wind: 3 + k * 5, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.2, fogColor: 0x2e211c });
         ctx.st.rumbleCd = (ctx.st.rumbleCd || 0) - dt;
         if (ctx.st.rumbleCd <= 0) { ctx.st.rumbleCd = 1.8 - k; soundAt("rumble", h.x, h.z); }
@@ -1474,7 +1470,7 @@
          rumbling — and, first, OUT OF THE LANE. That stampede IS the warning
          for anyone who missed the rockfall. */
       warnThreat(x, z, ctx) {
-        const h = ctx.arena.hills[0], d = Math.hypot(x - h.x, z - h.z);
+        const h = erSite(ctx), d = Math.hypot(x - h.x, z - h.z);
         let t = d < h.r + 12 ? 0.9 * (1 - d / (h.r + 12)) : 0.05;
         const lane = ctx.st.pyroLane;
         if (lane && vfx()) {
@@ -1498,19 +1494,11 @@
         }
         return DEFS.volcano.safeDir(x, z, ctx);
       },
-      start(ctx) {
-        if (ctx.st.preGlow) { rmMesh(ctx.st.preGlow); ctx.st.preGlow = null; }
-        if (ctx.st.preAsh) { ctx.st.preAsh.dispose(); ctx.st.preAsh = null; }
-        startEruption(ctx);
-      },
+      start(ctx) { startEruption(ctx); },
       active(dt, ctx) { tickEruption(dt, ctx); tick0(ctx, dt); },
-      end(ctx) {
-        if (ctx.st.preGlow) { rmMesh(ctx.st.preGlow); ctx.st.preGlow = null; }
-        if (ctx.st.preAsh) { ctx.st.preAsh.dispose(); ctx.st.preAsh = null; }
-        weatherOff(); endEruption(ctx);
-      },
+      end(ctx) { weatherOff(); endEruption(ctx); },
       threat(x, z, ctx) { return eruptThreat(x, z, ctx); },
-      safeDir(x, z, ctx) { const h = ctx.arena.hills[0]; const dx = x - h.x, dz = z - h.z, d = Math.hypot(dx, dz) || 1; return { x: dx / d, z: dz / d }; },
+      safeDir(x, z, ctx) { const h = erSite(ctx); const dx = x - h.x, dz = z - h.z, d = Math.hypot(dx, dz) || 1; return { x: dx / d, z: dz / d }; },
     },
 
     /* ---- BLIZZARD: whiteout, freeze if you stop — AND THE SNOW LIES ---------
@@ -2767,55 +2755,12 @@
   // through city/nukefx.js's real whiteout sheet instead of a second one.
   if (CBZ.CONFIG.NUKE_FINALE_REAL == null) CBZ.CONFIG.NUKE_FINALE_REAL = true;
 
-  /* THE ASH LADDER, in metres of deposited ash, and the three numbers are
-     deliberately close together: the whole point of ashfall is that the SAME
-     accumulation that starts hurting the people outside is on its way to
-     killing the people who correctly went inside. VISUAL_FULL is only when
-     the blanket stops thickening on screen; the depth keeps climbing. */
-  const ASH_DOT_DEPTH = 0.006;   // shreds unsheltered lungs
-  const ASH_VISUAL_FULL = 0.16;  // continuous grey blanket on screen
-  const ASH_ROOF_FAIL = 0.055;   // the roof starts failing under the load
-  /* ONE WEDGE, READ THREE TIMES. The deposit ledger (world/volcanofx.js),
-     the ground veil (systems/weather.js's surface coat) and the aftermath
-     erosion all have to agree about WHERE the ash is, and the only way two
-     of them can disagree is if two of them own a copy of the numbers. So the
-     shape is built once, into a reused object (this runs every frame — a
-     fresh literal per frame is 60 allocations a second for nothing), and
-     everyone downstream reads the same fields. */
-  const _ashW = {
-    srcX: 0, srcZ: 0, windX: 1, windZ: 0,
-    reach: 60, spread: 0.05, lobe: 3.2, rate: 0, amount: 0,
-  };
-  function ashWedge(ctx, M) {
-    const V3 = CBZ.CONFIG.VOLCANO_V3 !== false;
-    const h = ctx.arena.hills[0];
-    _ashW.srcX = h.x; _ashW.srcZ = h.z;
-    _ashW.windX = ctx.st.erWindX != null ? ctx.st.erWindX : 1;
-    _ashW.windZ = ctx.st.erWindZ != null ? ctx.st.erWindZ : 0;
-    /* magnitude owns the fall: a burp lays a dusting you watch settle,
-       the big one buries the downwind town and takes its roofs */
-    _ashW.rate = 0.003 + 0.043 * M;
-    _ashW.reach = ctx.R * (0.3 + 0.45 * M);
-    /* V3: A WEDGE, NOT A BLANKET. spread 0.16 put a sixth of the axis rate
-       on every cell — the whole island greyed at once, which is precisely
-       the "covers everything in a dumb way" that got the entire ash ledger
-       switched off on 2026-08-16. At 0.05/lobe 3.2 the fall is a sector:
-       the downwind town greys, chokes and loses roofs while the upwind beach
-       stays green — a hazard with an outside, which is what makes it a
-       hazard at all. A big eruption's wedge is wider and softer-edged; a
-       burp's is a tight sector on the cone's own shoulder. */
-    _ashW.spread = V3 ? 0.03 + 0.04 * M : 0.16;
-    _ashW.lobe = V3 ? 3.6 - 1.4 * M : 2.2;
-    /* THE VEIL'S AMOUNT IS THE LEDGER'S OWN PEAK, in units of the blanket
-       depth — so the grey on the ground and the number that chokes people
-       and fails roofs can never drift apart. Deliberately NOT clamped to 1
-       here: >1 is the headroom that says how much GROUND is fully
-       blanketed, and that area shrinking as the deposit erodes is what
-       makes the aftermath thin instead of switching off. */
-    const AL = ctx.st.erAshLoad;
-    _ashW.amount = AL ? Math.min(6, AL.peakDepth / ASH_VISUAL_FULL) : 0;
-    return _ashW;
-  }
+  /* THE ASH LADDER lives with the eruption (world/eruption.js, CBZ.eruption.ASH):
+     the deposit that starts hurting the people outside is the same one on its
+     way to killing the people who correctly went inside. Read, never copied. */
+  const ER_ASH = (CBZ.eruption && CBZ.eruption.ASH) || { DOT: 0.006, FULL: 0.16, ROOF_FAIL: 0.055 };
+  const ASH_DOT_DEPTH = ER_ASH.DOT;
+  const ASH_VISUAL_FULL = ER_ASH.FULL;
   let pyroRuns = 0, laharRuns = 0, ashRoofCollapses = 0, whiteouts = 0;
   /* THE BODY COUNT, because the owner's "kills way too many people" deserves
      a number that a later edit cannot quietly undo. `volcanoDeaths` is the
@@ -2906,7 +2851,6 @@
   // and must not apply the night itself a second time.
   function dayK() { return 1; }
   function gAt(ctx) { return ctx.arena.groundHeightAt; }
-  function vent(h, ang, r) { return { x: h.x + Math.cos(ang) * r, z: h.z + Math.sin(ang) * r }; }
 
   /* ---- THE INCINERATION WHITEOUT -----------------------------------------
      One grammar for every death where the answer to "what did you see" is
@@ -2928,409 +2872,236 @@
     return false;
   }
 
-  function startEruption(ctx) {
-    if (ctx.st.erupting) return; ctx.st.erupting = true;
+  /* ============================================================
+     THE ERUPTION ITSELF IS world/eruption.js's (CBZ.eruption): the sequence
+     (unrest -> phreatic blast -> Plinian column + umbrella -> bombs, plume
+     lightning, lava -> collapse into a density current, lahar -> waning) and
+     what it does to the houses, trees and cars around the mountain. This file
+     hands it the ISLAND — the volcano's site (CBZ.island.volcano, else the
+     arena's volcano hill), the height field, the buildings / trees / cars —
+     and the hooks that price every consequence through this mode's ONE
+     ledgers: structureHit for roofs, lava and bombs, quake.js's fire for
+     burning houses and cars, the tree fire, the blast bus, the roster.
+     ============================================================ */
+  function erSite(ctx) {
+    if (ctx.st.erS) return ctx.st.erS;
+    const S = CBZ.eruption ? CBZ.eruption.site(ctx.arena) : null;
     const h = ctx.arena.hills[0];
-    const V = vfx();
-    const V3 = CBZ.CONFIG.VOLCANO_V3 !== false;
-    // the per-occurrence size — already rolled in warn(); the earthquake's
-    // surprise eruption has no warn phase, so it rolls here instead
+    ctx.st.erS = S || { x: h.x, z: h.z, peak: h.peak, r: h.r, rim: h.rim || 6.2 };
+    return ctx.st.erS;
+  }
+  function erHooks(ctx) {
+    const fireDamage = function (b, amt) { if (b && !b.volcCar) structureHit(b, amt, ctx, { kind: "fire" }); };
+    return {
+      shake(k) { if (CBZ.shake) CBZ.shake(k); },
+      sound(name, x, z) { if (x != null) soundAt(name, x, z); else sound(name); },
+      night() { return 1 - dayK(); },
+      wind() { return windVec(); },
+      igniteTree(t) { ignite(t); },
+      treeFlicker(t) { flickerTreeFire(t); },
+      treeBurnOut(t) { burnOut(t); },
+      // a house the lava reached (or a hot bomb lodged in) burns through
+      // quake.js's fire — the island's one building fire — and that fire eats
+      // the building's own ledger through the hook installed here
+      burnBuilding(b) {
+        const Q = qk();
+        if (!Q || !Q.gasFire || b.fallen) return false;
+        if (!Q.hooks.structDamage) Q.hooks.structDamage = fireDamage;
+        return !!Q.gasFire(b, { gy: b.gy, life: 70 });
+      },
+      damageBuilding(b, amount, kind) {
+        const was = surv()._cause;
+        // the killfeed names what actually came through the ceiling
+        surv()._cause = kind === "ashload" ? "crushed by an ash-laden roof"
+          : (kind === "lava" ? "buried when the lava took the house" : "crushed by a volcanic bomb through the roof");
+        const stage = structureHit(b, amount, ctx, { kind: kind });
+        surv()._cause = was;
+        if (kind === "ashload" && b.fallen) ashRoofCollapses++;
+        return stage;
+      },
+      // a car in the lava: the fuel goes up, drawn by the same fire
+      carFire(c) {
+        const Q = qk();
+        if (!Q || !Q.gasFire) return;
+        const rec = c._erFireRec || (c._erFireRec = { x: c.x, z: c.z, w: 2, d: 4.4, h: 1.6, group: c.group, volcCar: true });
+        Q.gasFire(rec, { gy: c.oy != null ? c.oy : floor(c.x, c.z), life: 45 });
+      },
+      /* A BOMB IS A ROCK ARRIVING AT SPEED, priced by its own mass and impact
+         speed. The real juvenile bombs go through the blast bus (the `kinetic`
+         row, a volcano picture); the small clots and the cold lithics only
+         bruise, so they price straight onto the roster. A direct hit by a
+         big one kills; near it maims; the crater and the dust are drawn by
+         the bomb field itself. */
+      bombLand(info) {
+        const massK = Math.min(1.2, Math.max(0.1, info.mass / 2500));
+        const roof = info.hit && info.hit.kind === "roof";
+        const cause = info.hot ? "caught by a volcanic bomb" : "struck by a block from the blast";
+        if (info.hot && info.size >= 0.4) {
+          survBlast("kinetic", info.x, info.z, {
+            r: 3 + 5 * Math.min(1, info.size), dmg: scale(34, ctx) * massK, cause: cause, ctx: ctx,
+            mass: info.mass, speed: info.speed, struct: roof ? 0 : 0.3 * massK, structR: 6 + 6 * massK,
+            fx: { kind: "volcano" }, color: 0xff7a30, sfx: "punch", flash: 0.12 * massK,
+            knockback: 12 * massK, fling: 6 * massK, y: info.y + 0.5,
+          });
+        } else {
+          surv().hurtRadius(info.x, info.z, 1.2 + 2.2 * info.size, scale(30, ctx) * massK, { cause: cause, knockback: 6, fling: 2 });
+          soundAt("punch", info.x, info.z);
+        }
+      },
+      // a bolt out of the ash cloud to the flank: the storm's own strike
+      groundStrike(x, z) {
+        survBlast("lightning", x, z, {
+          r: 0, ctx: ctx, up: 0.6, struct: 0.06, structR: 4.5, fx: { groundScale: 1 },
+          draw: function (bx, by, bz) { if (CBZ.lightningStrike) CBZ.lightningStrike(bx, bz, { y: by, groundScale: 1 }); },
+        });
+        surv().forEachActor(function (a) {
+          if (Math.hypot(a.pos.x - x, a.pos.z - z) < 2.6) surv().hurt(a, 1e6, { cause: "struck by lightning in the ash cloud", fromX: x, fromZ: z });
+        });
+      },
+    };
+  }
+  // the eruption's handle, built at the WARNING (so the unrest and the lane
+  // belong to the same object as the blast) or, for the earthquake's surprise
+  // eruption, at the blast itself
+  function erCreate(ctx) {
+    if (ctx.st.er) return ctx.st.er;
+    if (!CBZ.eruption) return null;
+    const S = erSite(ctx);
     const M = rollMag(ctx);
+    if (ctx.st.pyroBear == null) ctx.st.pyroBear = rnd() * 6.28;
+    const A = ctx.arena;
+    ctx.st.er = CBZ.eruption.create({
+      site: S, groundAt: gAt(ctx), parent: root(), mag: M, rnd: rnd,
+      region: { cx: ctx.cx, cz: ctx.cz, R: ctx.R },
+      collapseBearing: ctx.st.pyroBear,
+      world: { buildings: A.fragile || [], trees: A.flammable || [], cars: A.cars || [] },
+      hooks: erHooks(ctx),
+    });
+    if (ctx.st.er) ctx.st.pyroLane = ctx.st.er.lane;
+    return ctx.st.er;
+  }
+
+  function startEruption(ctx) {
+    if (ctx.st.erupting) return;
+    const E = erCreate(ctx);
+    if (!E) return;
+    ctx.st.erupting = true;
     try { volAliveAtStart = surv().aliveCount(); } catch (e) { volAliveAtStart = -1; }
     narrate("banner", "VOLCANIC ERUPTION");
     narrate("hint", "THE MOUNTAIN ERUPTS, stay off the lava!", 3);
-    if (CBZ.shake) CBZ.shake(0.9); sound("explosion"); sound("rumble");
-    /* THE FOUNTAIN IS BALLISTIC. What stood here was a Points cloud rising
-       at a constant speed — orange confetti, and the only thing filling the
-       twenty metres between the crater and the column. world/volcanofx.js's
-       V.fountain throws incandescent clots on real parabolas out of the vent
-       mouth and lets them fall back onto the cone. */
-    ctx.st.erFountain = V.fountain({
-      x: h.x, z: h.z, y: h.peak + 1,
-      r: 1.6 + 2.4 * M, mag: M,
-      groundAt: gAt(ctx), parent: root(),
-    });
-    ctx.st.erFountain.setActive(0.6 + 0.4 * M);
-    /* the towering dark convective column, standing ON the crater — one
-       path now, the sprite plume in world/volcanofx.js. V3 only decides
-       whether it is exempt from the eruption's own fog wall. */
-    {
-      ctx.st.erColumn = V.ashColumn({
-        // one metre over the lip: the plume's foot has to be INSIDE the
-        // vent apron's glow, or the column reads as floating
-        x: h.x, z: h.z, y: h.peak + 1,
-        /* MAGNITUDE OWNS THE SILHOUETTE: ~56 m for the burp, ~194 m for the
-           big one. The references are broad convecting plumes whose visible
-           column is roughly three to five cone-heights, and the radius is
-           the VENT's — volcanofx widens it by entrainment as it climbs. */
-        height: 46 + 148 * M,
-        r: 6.5 + 10.5 * M,
-        fogless: V3,
-        parent: root(),
-      });
-    }
-    /* THE COLUMN STANDS ON LIGHT — but that light is now baked into the
-       column's own puffs (volcanofx bakes a vent underlight into every puff
-       within ~28 m of the crater, scaled by night), not painted by a second
-       rising Points cloud underneath it. The extra cloud was the floating-dot
-       silhouette this pass exists to remove. */
-    /* NO ash raining over the island any more — OWNER, 2026-08-16: "the ash
-       everywhere is just so dumb, idc if it's realistic". The 300 grey motes
-       that fell here went the same way as the ground blanket. */
-    ctx.st.erAsh = null;
-    /* The crater itself: the OPAQUE draped spatter apron (world/volcanofx.js
-       ventGlow — the reference photo's white-hot summit). */
-    ctx.st.erVent = V.ventGlow({
-      x: h.x, z: h.z, r: 3.8 + 4.6 * M,
-      groundAt: gAt(ctx), parent: root(), salt: 4747,
-    });
-
-    // THE WIND IS THE WEATHER'S WIND — the warn phase already set a bearing
-    // and drove it into systems/weather.js, so the ash falls the same way the
-    // rain would and there is no fourth wind field in this file.
-    const w0 = windVec();
-    const wa = (w0 && w0.speed > 0.5) ? Math.atan2(w0.z, w0.x)
-      : (ctx.st.wx != null ? Math.atan2(ctx.st.wz, ctx.st.wx) : rnd() * 6.28);
-    ctx.st.erWindX = Math.cos(wa); ctx.st.erWindZ = Math.sin(wa);
-    /* The collapse bearing: the side of the cone that fails. Chosen in warn()
-       so the telegraph and the flow cannot disagree about which way it goes —
-       but the EARTHQUAKE's surprise eruption has no warn phase of its own, so
-       the lane is built here too when it is missing. Without this the quake
-       path had a flow and no lane, which meant no minimap front and no
-       flee-the-corridor field: the same hazard, silently unreadable. */
-    if (ctx.st.pyroBear == null) ctx.st.pyroBear = rnd() * 6.28;
-    if (!ctx.st.pyroLane && V && V.fallLine) {
-      ctx.st.pyroLane = V.fallLine({
-        x: h.x + Math.cos(ctx.st.pyroBear) * 3, z: h.z + Math.sin(ctx.st.pyroBear) * 3,
-        groundAt: gAt(ctx), bearing: ctx.st.pyroBear,
-        step: 6, count: Math.ceil((h.r + ctx.R * 0.95) / 6) + 1, turn: 0.4, wander: 0.1,
-      });
-    }
-
-    ctx.st.erLava = null;
-    {
-      /* ---- LAVA: braided, branching flow fields down the fall line ----
-
-         OWNER, 2026-08-15, sending the two reference photographs that are
-         now this eruption's bible: "magma should be way better... organic
-         ... don't make it look geometric". The last wave answered an
-         earlier photo with NINE separate uniform threads, and the shots
-         proved the problem with that: nine parallel worms of even width and
-         even glow are still geometry, just thinner geometry.
-
-         The close-up bible photo is ONE THING that branches: a stem that
-         forks into lobes, a dark crusted surface laced with connected
-         bright filaments, margins that neck and belly. So the count goes
-         DOWN and the structure goes UP: five broad flows, each carrying
-         the lace field (the braid now lives in the surface, where the
-         photograph has it, instead of in the flow count), each forking
-         into narrower children as its front advances. The mountain ends up
-         wearing a fan of fifteen-odd noses grown from five stems — organic
-         because it is grown, not drawn. */
-      /* THE FAN IS THE SIZE OF THE ERUPTION: two tongues for a burp, the
-         full six-stem fan for the big one. */
-      const n = 2 + Math.round(4 * M);
-      ctx.st.erLava = [];
-      for (let i = 0; i < n; i++) {
-        // never straight down the pyroclastic lane — the two hazards want
-        // separate faces of the cone so the mountain reads as having sides
-        const a = ctx.st.pyroBear + 1.0 + (i / n) * 5.2 + (CBZ.hash01 ? CBZ.hash01(h.x + i, h.z, 91) : 0.5) * 0.34;
-        /* 6.4 m: the summit is a CRATER now (world/disaster_arena.js's
-           stratovolcano — bowl radius 6.2 m). A flow born 2.2 m from the
-           centre started on the bowl floor and had to climb out; it is born
-           on the rim and spills down the flank, which is what a flow does. */
-        const p = vent(h, a, 6.4);
-        ctx.st.erLava.push(V.lavaFlow({
-          x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
-          len: h.r * (1.05 + 0.6 * M) + 24 * M,
-          /* A SLOW FLOOD, NOT RIVERS — OWNER, 2026-08-16: "magma coming down
-             not in rivers but like a slow flood". At 4.5-5.6 m wide the five
-             stems read as separate ribbons with grass between them; at
-             ~10-13 m they overlap into one apron at the rim and come down
-             the cone as broad lobes that happen to divide. Same station
-             count (spacing is set by the lid field, not the width), same
-             nine-column grid, so the flood costs what the rivers cost. */
-          width: 6 + 8 * M,
-          /* YOU WALK AWAY FROM LAVA — that is this file's own doctrine two
-             hundred lines up, and at 4.2-6.8 m/s the flows were outrunning a
-             SPRINT. Slower still now (1.2-1.9): a flood CREEPS — the wide
-             front nosing down the cone is the read, not the sprint. */
-          speed: 0.9 + 1.1 * M,
-          salt: 4700 + i * 137,
-          branches: M > 0.3 ? 2 : 1,
-          // BUDGET: three real lights for five stems (the vent apron carries
-          // its own), haze on the same three — a full set on every stem plus
-          // every child is a fog bank, which is what buried an earlier look
-          light: i % 2 === 0,
-          haze: i % 2 === 0,
-        }));
-      }
-      /* ---- ASHFALL AS A LOAD: one field, plus every standing roof ---- */
-      if (CBZ.CONFIG.VOLCANO_ASH_LOAD !== false) {
-        const F = ctx.arena.fragile || [];
-        const AL = V.ashLoad({
-          cx: ctx.cx, cz: ctx.cz, r: ctx.R, groundAt: gAt(ctx),
-          parent: root(), roofs: F.length + 8, salt: 6151, full: ASH_VISUAL_FULL,
-        });
-        ctx.st.erAshLoad = AL;
-        ctx.st.erRoofs = [];
-        for (let i = 0; i < F.length; i++) {
-          const b = F[i]; if (b.fallen) continue;
-          ctx.st.erRoofs.push({ b: b, id: AL.addRoof({ x: b.x, z: b.z, y: b.h + 0.05, w: b.w, d: b.d, ref: b }) });
-        }
-        ctx.st.erRoofT = 0;
-      }
-      /* ---- the two travelling hazards are SCHEDULED, not immediate: a
-              cone has to build a column before it can collapse one ---- */
-      /* A BURP DOES NOT COLLAPSE A COLUMN, and it melts no meltwater: the
-         two travelling hazards only exist above their magnitudes. Small
-         eruptions are the ones you can stand and watch — that is what makes
-         the big ones land. */
-      ctx.st.pyro = null;
-      ctx.st.pyroOn = M > 0.28;
-      ctx.st.pyroCd = 7.5 - 4.5 * M;
-      ctx.st.lahar = null;
-      ctx.st.laharOn = M > 0.3;
-      ctx.st.laharCd = 11 - 5 * M;
-    }
-    ctx.st.erBombCd = 2.4 - 1.6 * M;
+    E.erupt();
+    ctx.st.erWindX = E.windX; ctx.st.erWindZ = E.windZ;
   }
 
   function tickEruption(dt, ctx) {
     if (!ctx.st.erupting) return;
-    const h = ctx.arena.hills[0];
-    const V = vfx();
-    const M = ctx.st.erMag != null ? ctx.st.erMag : 0.42;
-    /* AN ERUPTION DARKENS THE AIR; IT DOES NOT DELETE THE ISLAND. The old
-       22/160 m fog put the far side of a 240 m island inside the wall, so the
-       mountain you are supposed to be reading was the murkiest thing on
-       screen. Widened again (55/380) with the ash's removal — OWNER,
-       2026-08-16: the grey-out was half of "the ash covers everything in a
-       dumb way", and with no blanket to excuse it the air only needs enough
-       murk to sell the event.
-
-       AND IT MUST NOT TURN NIGHT INTO NOON. survEnv is a flat override, so
-       writing sunInt 0.5 unconditionally made a midnight eruption brighter
-       than the midnight around it — which is also precisely the condition
-       under which the lava's own light is supposed to be the thing you see.
-       dayK() is the sun's own elevation off core/daynight.js. */
+    const E = ctx.st.er;
+    if (!E) return;
+    const S = E.site, M = E.mag;
     const dk = dayK();
-    /* V3: ASH BLOTS THE SUN. The one thing every eyewitness account of a real
-       ashfall agrees on is darkness at noon — and the fixed 0.5 sun above
-       could never say it. ashK follows the DEPOSIT (the field's own peak
-       depth), so the sky darkens exactly as fast as the ground greys and a
-       revert of the ash flag reverts the darkness with it. The fog wall
-       tightens with it — 380 → ~290 at full load, still twice the 2026-08-16
-       "island-wide grey-out" distance, and now it has a visible cause. */
-    const ashK = (CBZ.CONFIG.VOLCANO_V3 !== false && ctx.st.erAshLoad)
-      ? Math.min(1, ctx.st.erAshLoad.peakDepth / 0.3) : 0;
-    ctx.env.fog = lerpHex(0x120b08, lerpHex(0x2e211c, 0x181310, ashK), dk);
-    ctx.env.fogNear = 55; ctx.env.fogFar = 380 - 90 * ashK;
-    /* AND IT MUST NOT PAINT THE ISLAND PEACH. 0xff6a3a is a fully saturated
-       orange; run through every diffuse surface on the map it turned grey ash,
-       grey concrete and green grass into one warm pastel, which is the
-       opposite of the reference photograph the owner sent — that mountain is
-       DARK. An ash-shrouded eruption sky is a dirty brown, not a sodium lamp,
-       so the sun keeps its warmth and loses most of its saturation. */
-    ctx.env.sunInt = 0.5 * dk * (1 - 0.78 * ashK); ctx.env.sunColor = 0xd9714a;
-    ctx.env.hemiInt = (0.14 + 0.42 * dk) * (1 - 0.55 * ashK); ctx.env.hemiColor = 0x9c7461;
-    ctx.st.erFountain.update(dt, h.x, h.peak, h.z);
-    // the sprite pillar leans with the same wind the ash falls on
-    // ...and it is told the hour, because a night column is a SILHOUETTE
-    // with a burning foot, not the pale smudge it used to photograph as
-    if (ctx.st.erColumn) ctx.st.erColumn.update(dt, ctx.st.erWindX || 0, ctx.st.erWindZ || 0, { night: 1 - dk });
-    if (ctx.st.erVent) ctx.st.erVent.update(dt);
-    // the eruption is still weather — a dimmed sun and a downwind haze — but
-    // a light one now the ash is gone: 0.55 fog was the island-wide grey-out
-    // the ash thickens the air it is falling through (V3: ashK rides the
-    // deposit; pre-V3 ashK is 0 and this is the old constant 0.3)
-    /* THE DEPOSIT IS WEATHER ON THE GROUND, not five thousand quads. The
-       downwind sector greys through systems/weather.js's shared surface coat
-       — the same seam the blizzard whitens through — so the ground goes
-       uniformly grey the way a real ashfall does, and world/volcanofx.js's
-       quad field is left doing the one thing quads are good for: DRIFTS. */
-    const AW = ashWedge(ctx, M);
-    weather({ rain: 0, wind: 5 + 4 * M, windDir: { x: ctx.st.erWindX || 1, z: ctx.st.erWindZ || 0 }, fog: 0.14 + 0.24 * M + 0.2 * ashK, fogColor: 0x2e211c, ash: AW });
+    const cp = camPos();
+    /* THE AIR WHERE YOU STAND. The eruption answers three things about the
+       camera's position: how much umbrella is overhead, how hard ash is
+       falling through the air there, and how much has landed island-wide.
+
+         DARKNESS AT NOON  every eyewitness account of an ashfall agrees on
+                           it. Under the deck the sun goes (86%), and the
+                           deposit browns the rest of the sky as it builds.
+                           Out from under it, it is a dim brown afternoon.
+         VISIBILITY        is where you stand: 380 m in the clear, the far
+                           side of the street in the heaviest fall — a
+                           hazard with an outside, because walking out of
+                           the fall walks you back into the light.
+         MIDNIGHT STAYS MIDNIGHT: dayK is the sun's own elevation, so a night
+                           eruption is lit by its lava, not by a grade. */
+    const env = E.envAt(cp.x, cp.z);
+    const ashK = env.ashK, dark = env.dark;
+    ctx.env.fog = lerpHex(0x120b08, lerpHex(0x2e211c, 0x181310, Math.max(ashK, env.cover)), dk);
+    ctx.env.fogFar = Math.max(70, 380 - 90 * ashK - 300 * env.fall);
+    ctx.env.fogNear = Math.min(55, ctx.env.fogFar * 0.3);
+    /* the sun keeps its warmth and loses its strength: an ash sky is a dirty
+       brown, never the saturated orange that painted the island peach */
+    ctx.env.sunInt = 0.5 * dk * (1 - dark); ctx.env.sunColor = 0xd9714a;
+    ctx.env.hemiInt = (0.14 + 0.42 * dk) * (1 - 0.6 * dark); ctx.env.hemiColor = 0x9c7461;
+    /* THE DEPOSIT IS WEATHER ON THE GROUND (systems/weather.js's surface
+       coat greys the downwind sector off the same wedge the ledger fills),
+       and the GRAINS IN THE AIR are weather too — the same particle cloud the
+       rain uses, in its ash look, as dense as the fall at the camera. */
+    weather({
+      rain: 0, wind: 5 + 4 * M, windDir: { x: E.windX, z: E.windZ },
+      fog: 0.14 + 0.24 * M + 0.2 * ashK + 0.3 * env.fall, fogColor: 0x2e211c,
+      ash: E.wedge(), ashfall: env.fall,
+    });
     if (rnd() < dt * (0.8 + 1.6 * M)) sound("rumble");
-    /* THE GROUND NEVER STOPS TALKING. A continuous tremor, scaled by the
-       size of the event and slowly breathing — the body's channel, not the
-       eyes'. A burp murmurs underfoot; the big one you feel in the frame
-       the whole time. Same per-frame CBZ.shake grammar as warnTick. */
+    /* THE GROUND NEVER STOPS TALKING: a continuous tremor scaled by the size
+       of the event, breathing slowly — the body's channel, not the eyes'. */
     if (CBZ.shake) CBZ.shake((0.012 + 0.1 * M) * (0.7 + 0.3 * Math.sin(CBZ.now * 0.0019)));
 
-    // ---------------- LAVA ----------------
-    if (ctx.st.erLava) {
-      for (let i = 0; i < ctx.st.erLava.length; i++) ctx.st.erLava[i].update(dt);
-    }
+    E.update(dt, ctx.prog);
 
-    /* ---------------- INCANDESCENT ROCKFALL ----------------
-       The wide reference photograph's flanks are STREAKED with fine fire:
-       spatter thrown from the vent, bouncing and rolling down the cone,
-       each block a glowing tracer. fx.dropDebris already throws on a real
-       ballistic arc; `glow` makes the rock unlit ember-orange (incandescent
-       by the same doctrine as the melt), and a short linger leaves the
-       flank dotted with cooling embers that vanish on their own. Visual
-       only — dmg 0 — the bombs below are the ones that hurt, and they
-       telegraph. */
-    {
+    /* INCANDESCENT ROCKFALL. The flanks are streaked with fine fire: spatter
+       off the vent bouncing and rolling down the cone, each block a glowing
+       tracer that cools to an ember and goes. Visual only — the bombs are
+       the ones that hurt. */
+    if (E.phase === "plinian") {
       ctx.st.erEmberCd = (ctx.st.erEmberCd || 0) - dt;
       if (ctx.st.erEmberCd <= 0) {
         ctx.st.erEmberCd = 0.4;
         const ea = rnd() * 6.28;
-        const er = h.r * (0.35 + rnd() * 0.6);
+        const er = S.r * (0.35 + rnd() * 0.6);
         CBZ.fx.dropDebris({
-          x: h.x + Math.cos(ea) * er, z: h.z + Math.sin(ea) * er,
-          fromX: h.x + Math.cos(ea) * 1.5, fromZ: h.z + Math.sin(ea) * 1.5,
-          fromY: h.peak + 2,
+          x: S.x + Math.cos(ea) * er, z: S.z + Math.sin(ea) * er,
+          fromX: S.x + Math.cos(ea) * 1.5, fromZ: S.z + Math.sin(ea) * 1.5,
+          fromY: S.peak + 2,
           size: 0.22 + rnd() * 0.3, shape: "rock", color: 0xff7e22, glow: true,
           dmg: 0, linger: 2 + rnd() * 2.5,
         });
       }
     }
-
-    /* ---------------- PYROCLASTIC DENSITY CURRENT ----------------
-       The column over-builds, loses buoyancy and DROPS — that is the
-       physical event, and it is why this arrives as a bang from the summit
-       rather than fading in. One at a time; the next one is armed while the
-       first is still running out. */
-    if (V && CBZ.CONFIG.VOLCANO_PYRO !== false && ctx.st.pyroOn !== false) {
-      ctx.st.pyroCd -= dt;
-      if (!ctx.st.pyro && ctx.st.pyroCd <= 0) {
-        /* THE WARNED CORRIDOR HAS TO BE THE CORRIDOR. warn() telegraphs ONE
-           lane — it is the whole reason the hazard is survivable — and the
-           second and third collapses then fanned +-0.55 rad off it, which at
-           this island's scale walks the flow sixty metres sideways and lands
-           it on people who had correctly cleared the lane they were shown.
-           +-0.18 keeps every run inside the corridor that was announced. */
-        const a = ctx.st.pyroBear + (pyroRuns % 2 ? 0.18 : -0.12) * (pyroRuns > 0 ? 1 : 0);
-        const p = vent(h, a, 3.0);
-        ctx.st.pyro = V.pyroclastic({
-          x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
-          speed: 28 + 26 * M,                      // up to ~6x a sprinting bot
-          len: h.r + ctx.R * (0.55 + 0.4 * M),
-          width: 14 + 24 * M,
-          height: 11 + 17 * M,
-          tail: 58, salt: 8100 + pyroRuns * 311,
-        });
-        pyroRuns++;
-        // a cone has to rebuild a column before it can drop another one; at
-        // 7.5 s it was collapsing three or four times inside one 20 s window
-        ctx.st.pyroCd = 14 - 6 * M - 2 * ctx.prog;
-        if (CBZ.shake) CBZ.shake(1.15);
-        soundAt("explosion", p.x, p.z); sound("rumble");
-      }
-      if (ctx.st.pyro) {
-        ctx.st.pyro.update(dt);
-        // the ground under the front is scoured and buried in one pass
-        const fp = ctx.st.pyro.frontPos();
-        if (CBZ.shake) {
-          const dpx = Math.hypot(camPos().x - fp.x, camPos().z - fp.z);
-          if (dpx < 70) CBZ.shake(0.5 * (1 - dpx / 70));
-        }
-        if (ctx.st.pyro.done) { ctx.st.pyro.dispose(); ctx.st.pyro = null; }
-      }
-    }
-
-    /* ---------------- LAHAR ----------------
-       Meltwater takes time to arrive, and it goes down the VALLEY, not the
-       face — `channel:true` on the fall-line walk is the whole difference. */
-    if (V && CBZ.CONFIG.VOLCANO_LAHAR !== false && ctx.st.laharOn !== false) {
-      ctx.st.laharCd -= dt;
-      if (!ctx.st.lahar && ctx.st.laharCd <= 0) {
-        const a = ctx.st.pyroBear + Math.PI * 0.62;
-        const p = vent(h, a, h.r * 0.45);
-        ctx.st.lahar = V.lahar({
-          x: p.x, z: p.z, groundAt: gAt(ctx), parent: root(), bearing: a,
-          len: ctx.R * (0.5 + 0.4 * M), width: 7 + 9 * M,
-          speed: 7 + 8 * M, salt: 2600 + laharRuns * 197,
-        });
-        laharRuns++;
-        soundAt("water", p.x, p.z);
-        if (CBZ.shake) CBZ.shake(0.45);
-      }
-      if (ctx.st.lahar) ctx.st.lahar.update(dt);
-    }
-
-    /* ---------------- ASH AS A LOAD ---------------- */
-    const AL = ctx.st.erAshLoad;
-    if (AL) {
-      /* Metres of ash per second on the plume axis. Calibrated against the
-         ladder above so ONE 20 s eruption walks the whole arc: the ground
-         downwind is dusted within a second or two (the choke starts), the
-         blanket is continuous downwind near the end, and the downwind roofs
-         cross ASH_ROOF_FAIL at about two thirds — so "indoors saves you from
-         the ash until the roof goes" is something that HAPPENS inside one
-         event instead of a rule on paper. Upwind stays green, which is what
-         makes the wedge readable at all. The shape itself is ashWedge()'s —
-         the SAME object the ground veil above was just driven with. */
-      AL.update(dt, ashWedge(ctx, M));
-      // ROOFS FAIL UNDER THE LOAD, through the ONE ledger. Wet ash is ~1000
-      // kg/m3: a quarter-metre on a flat roof is a quarter of a tonne per
-      // square metre, and light-frame roofs go at about that. Checked at 2 Hz
-      // — the ledger accumulates, so the cadence only sets how fast, not if.
-      ctx.st.erRoofT = (ctx.st.erRoofT || 0) - dt;
-      if (ctx.st.erRoofT <= 0 && ctx.st.erRoofs) {
-        ctx.st.erRoofT = 0.5;
-        const wasCause = surv()._cause;
-        for (let i = 0; i < ctx.st.erRoofs.length; i++) {
-          const R = ctx.st.erRoofs[i];
-          if (!R.b || R.b.fallen) continue;
-          const dep = AL.roofDepth(R.id);
-          if (dep < ASH_ROOF_FAIL) continue;
-          // the killfeed has to name the ROOF, not the volcano — collapse()
-          // crushes the footprint with the director's default cause
-          surv()._cause = "crushed by an ash-laden roof";
-          const stage = structureHit(R.b, 0.75 * (dep / ASH_ROOF_FAIL), ctx, { kind: "ashload" });
-          if (R.b.fallen) { ashRoofCollapses++; AL.clearCell(R.id); }
-          else if (stage >= 2) AL.clearCell(R.id);   // it shed its load as it spalled
-        }
-        surv()._cause = wasCause;
-      }
+    if (E.pyro && CBZ.shake) {
+      const fp = E.pyro.frontPos();
+      const dpx = Math.hypot(cp.x - fp.x, cp.z - fp.z);
+      if (dpx < 70) CBZ.shake(0.5 * (1 - dpx / 70));
     }
 
     /* ---------------- THE ACTOR PASS ----------------
        Ordered by how fast the thing kills you, which is also the order in
-       which the world gives you a chance: the flow first (none), then the
-       crater and the lava (see it, don't stand in it), then the lahar
-       (survivable if you get out of the channel), then the ash (survivable
-       indefinitely if you are indoors). */
-    const P = ctx.st.pyro, LH = ctx.st.lahar, LV = ctx.st.erLava;
+       which the world gives you a chance: the density current first (none),
+       the base surge, the crater and the lava (see it, don't stand in it),
+       the lahar (get out of the channel), then the ash (survivable
+       indefinitely indoors — until the roof goes, through the ledger). */
+    const P = E.pyro, LH = E.lahar, LV = E.lava, AL = E.field, PH = E.phreatic;
     surv().forEachActor(function (a) {
       const ax = a.pos.x, az = a.pos.z;
-      // 1) PYROCLASTIC FLOW — zero survival in the path, no exceptions.
-      //    A roof is not shelter from 600 C at 130 m/s and pretending it is
-      //    would be the worst lie in the file.
+      // 1) PYROCLASTIC FLOW. The HEAD is absolute: there is no surviving a
+      //    wall of 600 C rock at 130 m/s, and a roof is no shelter. The
+      //    trailing cloud is hot gas: lethal quickly, but the kind of lethal
+      //    you can be dragged out of, so it prices as damage over time.
       if (P) {
         const zone = P.contains(ax, az);
         if (zone) {
           if (a.isPlayer) incinerate(1, zone === 1 ? 1.9 : 2.6);
           const fp = P.frontPos();
-          /* THE HEAD IS ABSOLUTE. THE TAIL IS NOT.
-             Both zones used to be 1e6, which made the whole ~50 m lane behind
-             the front an instant kill and turned one pass of one flow into
-             most of a lobby. The head keeps its 1e6 and should: there is no
-             surviving a wall of 600 C rock at 130 m/s, and pretending a roof
-             helps would be the worst lie in the file. The trailing cloud is
-             hot gas — lethal, quickly, but it is the kind of lethal you can
-             be dragged out of, so it prices as damage over time. Clipped by
-             the edge as it sweeps past, you live and you are wrecked; stood
-             in it, you die in about a second and a half. */
           if (zone === 1) {
-            surv().hurt(a, 1e6, {
-              cause: "incinerated by the pyroclastic flow",
-              fromX: fp.x, fromZ: fp.z, fling: 9,
-            });
+            surv().hurt(a, 1e6, { cause: "incinerated by the pyroclastic flow", fromX: fp.x, fromZ: fp.z, fling: 9 });
             return;
           }
-          surv().hurt(a, scale(30, ctx) * dt, {
-            cause: "asphyxiated in the ash cloud", fromX: fp.x, fromZ: fp.z,
-          });
+          surv().hurt(a, scale(30, ctx) * dt, { cause: "asphyxiated in the ash cloud", fromX: fp.x, fromZ: fp.z });
           if (a.dead) return;
         }
       }
-      // 2) the vent itself
-      if (Math.hypot(ax - h.x, az - h.z) < 3.4) { surv().hurt(a, 1e6, { cause: "swallowed by the crater", fromX: h.x, fromZ: h.z }); return; }
-      // 3) LAVA — what kills you is exactly what glows
+      // 2) THE BASE SURGE off the phreatic blast: scalding steam and grit
+      //    rolling down the cone. A wall stops it; out in the open it burns.
+      if (PH && !sheltered(a)) {
+        const k = PH.surgeAt(ax, az);
+        if (k > 0) {
+          surv().hurt(a, scale(26, ctx) * k * dt, { cause: "scalded by the blast's steam surge", fromX: S.x, fromZ: S.z });
+          if (a.dead) return;
+        }
+      }
+      // 3) the vent itself
+      if (Math.hypot(ax - S.x, az - S.z) < S.rim * 0.55) { surv().hurt(a, 1e6, { cause: "swallowed by the crater", fromX: S.x, fromZ: S.z }); return; }
+      // 4) LAVA — what kills you is exactly what glows
       if (LV) {
         for (let i = 0; i < LV.length; i++) if (LV[i].hitTest(ax, az)) {
           const t = LV[i].tip;
@@ -3338,7 +3109,7 @@
           return;
         }
       }
-      // 4) LAHAR — it CARRIES you, and then it sets around you
+      // 5) LAHAR — it CARRIES you, and then it sets around you
       if (LH) {
         const m = LH.hitTest(ax, az);
         if (m) {
@@ -3349,152 +3120,46 @@
           return;
         }
       }
-      /* 5) ASHFALL — glass in the lungs, and a roof is a real answer to it.
-         THE ASH FIELD IS THE ONLY AUTHORITY ON WHERE THERE IS ASH. V3
-         (2026-08-23) turned the field back on as a downwind WEDGE — the
-         2026-08-16 default-off was aimed at the island-wide blanket, and
-         world/volcanofx.js's flag note carries that investigation. The rule
-         survives unchanged either way: the choke reads depthAt() off the
-         drawn field, so no picture, no damage — the geometric stand-in
-         wedge that once choked people over clean ground stays deleted. */
-      if (!sheltered(a)) {
-        let choke = 0;
-        /* AND IT IS A GRADIENT, NOT A SWITCH. The measurement that found this:
-           with the bombs throttled and the flow's tail made survivable, ONE
-           beat of the storyboard still killed 68 of the 100 in eleven seconds
-           — and it was this line. A binary test at 6 mm meant a DUSTING did
-           the same 11 damage a second as half a metre of the stuff, so within
-           a few seconds of the plume establishing, every unsheltered actor on
-           the downwind half of the island was on the same clock and the island
-           emptied. That is the owner's "kills way too many people" with no
-           hazard on screen doing it.
-
-           A gradient makes the ash a place you leave rather than a timer you
-           are on: nothing at the edge of the fall, and even standing in the
-           worst of it you have the better part of the eruption to move. The
-           roofs are still what actually kills indoors, through the ledger. */
-        if (AL) {
-          /* THE RAMP HAS TO OUTRUN THE FALL. This plume lays down ~0.2 m on
-             its axis inside eight seconds — the rate is calibrated so roofs
-             actually reach ASH_ROOF_FAIL inside one event, and that feature is
-             worth keeping — so a gradient that saturated at 10 cm was back to
-             being a switch by the time anyone could walk out of it. At 35 cm
-             the worst ground on the island still leaves you most of the
-             eruption, and everywhere else is a real gradient you can read off
-             the colour of the ground you are standing on. */
-          const d = AL.depthAt(ax, az);
-          choke = Math.max(0, Math.min(1, (d - ASH_DOT_DEPTH) / 0.35));
-        }
+      /* 6) ASHFALL — glass in the lungs, and a roof is a real answer to it.
+         The ledger is the only authority on where ash is (no picture, no
+         damage), and it is a GRADIENT, not a switch: nothing at the edge of
+         the fall, and even in the worst of it you have most of the eruption
+         to walk out. */
+      if (AL && !sheltered(a)) {
+        const d = AL.depthAt(ax, az);
+        const choke = Math.max(0, Math.min(1, (d - ASH_DOT_DEPTH) / 0.35));
         if (choke > 0) surv().hurt(a, scale(3.4, ctx) * choke * dt, { cause: "choked by volcanic ash" });
       }
     });
-
-    /* ---------------- LAVA BOMBS ----------------
-       OWNER, 2026-08-13: the volcano "kills way too many people and randomly
-       not even with physics". This block was the single worst offender and it
-       was wrong in all three of those ways at once.
-
-       ONE BOMB EVERY 0.6-1.0 s, for the whole twenty-second window, is
-       twenty-odd bombs. Each was placed at arena.randomPoint(8, R) — a
-       UNIFORM draw over the entire island, so a bomb was as likely to land on
-       the far beach as on the mountain's own flank. Each then materialised at
-       y = 34 directly above that point and fell straight down: there was no
-       trajectory to read, no direction to run from, and nothing on screen
-       connecting the rock to the volcano that supposedly threw it. And each
-       killed twice over — `dmg: 999` is instakill on contact, and the landing
-       called survBlast with r: 7 and no dmg, which hurtRadius resolves to 1e6
-       with NO falloff. A guaranteed seven-metre circle of death, twenty times,
-       everywhere.
-
-       So: it is thrown, from the crater, on a real arc that you can watch
-       (fx.dropDebris solves vx/vy/vz for the range against the shared
-       gravity); it lands where ballistics puts it, which is CLUSTERED ON THE
-       MOUNTAIN and thinning with distance, not spread evenly over the sea's
-       edge; there are a third as many; the telegraph outlives the flight; and
-       only a direct hit is fatal — the blast around it is now a real number
-       that falls off, so being near one is an injury and standing under one
-       is a death. */
-    ctx.st.erBombCd -= dt;
-    if (ctx.st.erBombCd <= 0) {
-      // a burp lobs the odd block; the big one keeps the sky busy
-      ctx.st.erBombCd = Math.max(0.9, 4.8 - 3.0 * M - 0.8 * ctx.prog);
-      /* BALLISTICS DECIDES WHERE IT LANDS. Bearing is uniform, range is not:
-         `pow(rnd, 1.7)` piles the throws up on the cone's own flanks and lets
-         only the rare one carry to the town. That distribution IS the
-         physics — a vent throws most of its mass short. */
-      const ba = rnd() * 6.28;
-      const rng2 = h.r * 0.5 + Math.pow(rnd(), 1.7) * (ctx.R * (0.42 + 0.4 * M));
-      const bx = h.x + Math.cos(ba) * rng2, bz = h.z + Math.sin(ba) * rng2;
-      const mk = CBZ.fx.groundMarker(bx, bz, 5.5, 0xff7a30); mk.set(1);
-      const vp = vent(h, ba, 2.2);
-      const flight = Math.max(0.9, 0.75 + rng2 / 26);
-      bombsThrown++;
-      CBZ.fx.dropDebris({
-        x: bx, z: bz, fromX: vp.x, fromZ: vp.z, fromY: h.peak + 3.5,
-        size: 1.1 + 1.1 * M, color: 0x2e2622, shape: "rock", dmg: 999, keep: true,
-        onLand: function (x, z) {
-          mk.dispose();
-          /* A LAVA BOMB IS A ROCK ARRIVING AT SPEED — the bus's `kinetic` row,
-             priced by mass and impact velocity, which is why a late-round bomb
-             hits harder without a second number typed here. What changed is
-             the ROSTER damage: an explicit dmg means hurtRadius stops
-             resolving to 1e6, so the splash maims and the rock kills. */
-          survBlast("kinetic", x, z, {
-            r: 8, dmg: scale(34, ctx), cause: "caught by a volcanic bomb", ctx: ctx,
-            mass: 900, speed: 55, struct: 0.4, structR: 12, fx: { kind: "volcano" },
-            color: 0xff7a30, sfx: "punch", flash: 0.25, knockback: 12, fling: 6,
-          });
-        },
-      });
-      // the marker outlives the flight even if the rock never lands cleanly
-      setTimeout0(ctx, flight + 1.2, function () { mk.dispose(); });
-    }
   }
 
   function endEruption(ctx) {
-    if (!ctx.st.erupting) return;
+    if (!ctx.st.erupting) {
+      // a warning that never reached the blast still owns its steam
+      if (ctx.st.er) { const s0 = ctx.st.er.end(); for (let i = 0; i < s0.length; i++) volScars.push(s0[i]); ctx.st.er = null; }
+      return;
+    }
     if (volAliveAtStart >= 0) {
       try { volcanoDeaths += Math.max(0, volAliveAtStart - surv().aliveCount()); } catch (e) {}
       volAliveAtStart = -1;
     }
-    if (ctx.st.erFountain) ctx.st.erFountain.dispose();
-    if (ctx.st.erColumn) { ctx.st.erColumn.dispose(); ctx.st.erColumn = null; }
-    if (ctx.st.erVent) { ctx.st.erVent.dispose(); ctx.st.erVent = null; }
-    /* THE LAVA DOES NOT VANISH — IT DIES WHERE IT STANDS. The old line here
-       disposed every flow the frame the eruption ended: a glowing river
-       popped off the hillside mid-frame. quench() is the physics (the
-       supply stops, THEN it chills black over ~8 s, ember seams last) and
-       the five stems ride ONE composite scar so the eviction cap below
-       counts eruptions, not stems. Cold rock kills nothing: hitTest goes
-       false on quench, and this list is nulled out of the actor pass. */
-    if (ctx.st.erLava) {
-      const flows = ctx.st.erLava;
-      if (flows.length && flows.every((f) => typeof f.quench === "function")) {
-        flows.forEach((f) => f.quench());
-        volScars.push({
-          update(dt) { for (let i = 0; i < flows.length; i++) flows[i].update(dt); },
-          dispose() { for (let i = 0; i < flows.length; i++) { try { flows[i].dispose(); } catch (e) {} } },
-        });
-      } else {
-        flows.forEach((f) => f.dispose());
-      }
-      ctx.st.erLava = null;
+    const E = ctx.st.er;
+    if (E) {
+      pyroRuns += E.stats.pdcRuns; laharRuns += E.stats.laharRuns;
+      bombsThrown += E.bombStats ? E.bombStats.thrown : 0;
+      /* NOTHING POPS. The lava quenches black where it stands, the set lahar
+         and the ash stay and erode, the bombs cool in their craters, and the
+         sky — the column dispersing, the umbrella drifting off downwind —
+         reports done when there is nothing left of it. */
+      const scars = E.end();
+      for (let i = 0; i < scars.length; i++) volScars.push(scars[i]);
+      ctx.st.lastEr = E;
+      ctx.st.er = null;
     }
-    if (ctx.st.pyro) { ctx.st.pyro.dispose(); ctx.st.pyro = null; }
-    /* THE SCARS OUTLIVE THE EVENT, and that is the point: a lahar SETS, and
-       ash does not wash off between disasters. Both stay in the world for the
-       rest of the match and are cleared when the mode is torn down. */
-    if (ctx.st.lahar) { volScars.push(ctx.st.lahar.harden()); ctx.st.lahar = null; }
-    if (ctx.st.erAshLoad) { volScars.push(ctx.st.erAshLoad); ctx.st.erAshLoad = null; }
-    /* A SCAR IS A MEMORY, NOT A LEAK. Two eruptions can legitimately happen
-       in one match (the volcano, plus the earthquake's surprise one), and a
-       third would only be stacking a second full ash field on top of an
-       identical one. With the ash ledger back on (V3) one eruption leaves
-       THREE scars — lava composite, set lahar, ash field — so the old cap
-       of four evicted the first eruption's lava the moment the second one
-       ended. Six holds exactly the two legitimate eruptions' full memory. */
-    while (volScars.length > 6) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
-    ctx.st.erRoofs = null;
+    /* A SCAR IS A MEMORY, NOT A LEAK: two eruptions can happen in one match
+       (the volcano and the earthquake's surprise one) and each leaves five
+       (lava, lahar, ash, bombs, sky — the sky retires itself). Ten holds both. */
+    while (volScars.length > 10) { const old = volScars.shift(); try { old.dispose(); } catch (e) {} }
     ctx.st.erWindX = ctx.st.erWindZ = null;
     ctx.st.erupting = false;
   }
@@ -3547,6 +3212,8 @@
                 CBZ.weatherDrive({ ash: _ashScar }, 0.6);
               }
             } else sc.update(dt, null);
+            // the sky retires itself once the column and the deck are gone
+            if (sc && sc.done) { sc.dispose(); volScars.splice(i, 1); i--; }
           } catch (e) {}
         }
       }
@@ -3572,53 +3239,24 @@
   });
 
   /* THE MAP MARKS THE LANE, because the lane is the only survival
-     information this disaster has. A travelling front for the density
-     current (the map already draws {line:true} for the tsunami's wall) and a
-     ring on the mud head. During the WARNING the lane is still marked — that
-     is the entire point of telegraphing an unsurvivable hazard. */
+     information a density current gives you: a travelling front down the
+     warned valley (the map draws {line:true} as it does the tsunami's wall)
+     and a ring on the lahar's head. During the WARNING the lane is marked
+     too — that is the point of telegraphing an unsurvivable hazard. */
   function pushEruptHazards(st, out) {
-    const V = vfx();
+    if (st.er) { st.er.hazards(out); return; }
     const lane = st.pyroLane;
-    if (V && lane) {
-      const s = st.pyro ? Math.min(st.pyro.frontS, lane.total) : 0;
-      const P = new THREE.Vector3();
-      V.pathAt(lane, s, P);
-      const i = Math.max(0, Math.min(lane.pts.length - 2, Math.floor(s / lane.seg)));
-      const a = lane.pts[i], b = lane.pts[i + 1];
-      const dx = b.x - a.x, dz = b.z - a.z, dl = Math.hypot(dx, dz) || 1;
-      out.push({ line: true, x: P.x, z: P.z, dx: dx / dl, dz: dz / dl });
-    }
-    if (st.lahar) {
-      const V2 = new THREE.Vector3();
-      if (V) { V.pathAt(st.lahar.path, st.lahar.length, V2); out.push({ x: V2.x, z: V2.z, r: 9, fill: false }); }
+    if (lane && lane.pts && lane.pts.length > 1) {
+      const a = lane.pts[0], b = lane.pts[1], dx = b.x - a.x, dz = b.z - a.z, dl = Math.hypot(dx, dz) || 1;
+      out.push({ line: true, x: a.x, z: a.z, dx: dx / dl, dz: dz / dl });
     }
   }
 
-  // threat from an active eruption (shared by quake + volcano threat())
+  // threat from an active eruption (shared by quake + volcano threat()):
+  // world/eruption.js answers it off its own live hazards
   function eruptThreat(x, z, ctx) {
-    if (!ctx.st.erupting) return 0;
-    const h = ctx.arena.hills[0];
-    let t = 0.12;   // ambient: bombs can fall anywhere
-    if (Math.hypot(x - h.x, z - h.z) < 6) t = Math.max(t, 0.9);
-    // THE FLOW OUTRANKS EVERYTHING. Nothing else on this mountain is worth
-    // fleeing while a density current is coming down your lane.
-    if (ctx.st.pyro) t = Math.max(t, ctx.st.pyro.threatAt(x, z));
-    if (ctx.st.erLava) {
-      for (let i = 0; i < ctx.st.erLava.length; i++) if (ctx.st.erLava[i].hitTest(x, z)) { t = Math.max(t, 0.97); break; }
-    }
-    if (ctx.st.lahar && ctx.st.lahar.hitTest(x, z)) t = Math.max(t, 0.8);
-    /* THE ASH IS BACK, SO THE FLEEING READS AGAIN. The 2026-08-16 build cut
-       this term because bots emptying a visibly clean half of the island
-       looked like broken pathing — correct, WITH the field deleted. V3's
-       field is a visible grey wedge, so the term returns as a gradient read
-       off the same depthAt() the choke uses: bots drift out of exactly the
-       ground the player can see greying over. Capped at 0.5 — leaving the
-       wedge must never outrank fleeing the flow, the melt or the mud. */
-    if (CBZ.CONFIG.VOLCANO_V3 !== false && ctx.st.erAshLoad) {
-      const ad = ctx.st.erAshLoad.depthAt(x, z);
-      if (ad > ASH_DOT_DEPTH) t = Math.max(t, Math.min(0.5, (ad - ASH_DOT_DEPTH) / 0.35));
-    }
-    return t;
+    if (!ctx.st.erupting || !ctx.st.er) return 0;
+    return ctx.st.er.threat(x, z);
   }
 
   /* ============================================================
@@ -5172,7 +4810,10 @@
       else tLeft = -Math.max(0, dir.t);        // active: negative = seconds of it left
       let from = null;
       const A = CBZ.surv && CBZ.surv.arena;
-      if ((id === "volcano" || id === "nuke") && A && A.hills && A.hills[0]) from = { x: A.hills[0].x, z: A.hills[0].z };
+      if ((id === "volcano" || id === "nuke") && A && A.hills && A.hills[0]) {
+        const vs = (dir.st && dir.st.erS) || A.hills[0];
+        from = { x: vs.x, z: vs.z };
+      }
       if (id === "nuke" && dir.st && dir.st.gx != null) from = { x: dir.st.gx, z: dir.st.gz };
       if (id === "tornado" && dir.curId === "tornado" && dir.st && dir.st.x != null) from = { x: dir.st.x, z: dir.st.z };
       return { id, name: def.name, phase, kind: a.kind, tip: a.tip, from, tLeft,
@@ -5378,10 +5019,10 @@
       if (id === "tornado") {
         if (!warn && st.x != null) out.push({ x: st.x, z: st.z, r: 18 });
       } else if (id === "volcano") {
-        const h = A.hills[0]; out.push({ x: h.x, z: h.z, r: 15 });
+        const h = st.erS || A.hills[0]; out.push({ x: h.x, z: h.z, r: 15 });
         pushEruptHazards(st, out);
       } else if (id === "quake") {
-        if (st.erupting) { const h = A.hills[0]; out.push({ x: h.x, z: h.z, r: 15 }); pushEruptHazards(st, out); }
+        if (st.erupting) { const h = st.erS || A.hills[0]; out.push({ x: h.x, z: h.z, r: 15 }); pushEruptHazards(st, out); }
       } else if (id === "storm") {
         (st.pending || []).forEach((p) => out.push({ x: p.x, z: p.z, r: 5 }));
       } else if (id === "meteor") {
@@ -5606,9 +5247,9 @@
       lavaOpaque: volA ? !!volA.lavaOpaque : true,
       lavaTransparent: volA ? volA.lavaTransparent : 0,
       lavaFlows: volA ? volA.lavaFlows : 0,
-      pyroRuns: pyroRuns,
+      pyroRuns: pyroRuns + (st.er ? st.er.stats.pdcRuns : 0),
       pyroLive: volA ? volA.pyroLive : 0,
-      laharRuns: laharRuns,
+      laharRuns: laharRuns + (st.er ? st.er.stats.laharRuns : 0),
       /* THE OWNER'S SECOND COMPLAINT AS TWO NUMBERS. `volcanoDeaths` is the
          drop in the live roster across every eruption this run finished, and
          it is the one to watch: an eruption that empties a 100-player island
@@ -5616,18 +5257,23 @@
          mountain actually threw — the thing that used to run at one a second
          from a uniform draw over the whole map. */
       volcanoDeaths: volcanoDeaths,
-      volcanoBombs: bombsThrown,
+      volcanoBombs: bombsThrown + (st.er && st.er.bombStats ? st.er.bombStats.thrown : 0),
+      /* the sequence, as the eruption itself counted it (live, else the last one) */
+      eruption: (function () {
+        const E = st.er || st.lastEr;
+        if (!E) return null;
+        const s2 = E.stats;
+        return { phase: E.phase, mag: s2.mag, lithics: s2.lithics, bombs: s2.bombs, lightning: s2.lightningIC + s2.lightningCG,
+          collapses: s2.columnCollapses, umbrellaR: s2.umbrellaR, surgeR: s2.surgeR, treesLit: s2.treesLit,
+          housesLit: s2.buildingsLit, housesInLava: s2.buildingsInLava, carsEngulfed: s2.carsEngulfed, roofsFailed: s2.roofsFailed,
+          site: E.site.src };
+      })(),
       ashRoofCollapses: ashRoofCollapses,
       // the two numbers that say WHY a roof did or did not go: how many roofs
       // are actually carrying a load, and the heaviest load any of them has
-      ashRoofs: (st.erRoofs && st.erRoofs.length) || 0,
-      ashRoofMax: (function () {
-        const R = st.erRoofs, A = st.erAshLoad;
-        if (!R || !A) return 0;
-        let m = 0;
-        for (let i = 0; i < R.length; i++) m = Math.max(m, A.roofDepth(R[i].id));
-        return +m.toFixed(3);
-      })(),
+      ashRoofs: st.er ? st.er.roofs.length : 0,
+      ashRoofMax: st.er ? +st.er.roofAshMax().toFixed(3) : 0,
+      ashCarMax: st.er ? +st.er.carAshMax().toFixed(3) : 0,
       ashPeakDepth: volA ? volA.ashPeakDepth : 0,
       volcanoLights: volA ? volA.lights : 0,
       nukeUsedNukefx: nukeFxRuns > 0,
