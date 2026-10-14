@@ -286,10 +286,12 @@ try {
           if (i % 150 === 0) await new Promise(r => setTimeout(r, 0));
         }
         const p = CBZ.player;
+        // the wildfire reports what it did to the REAL island (fuel bed, houses, cars, cost)
+        const fire = ${JSON.stringify(id)} === 'wildfire' && CBZ.wildfireAudit ? CBZ.wildfireAudit() : undefined;
         // the routed flood reports what it did on the real island
         const ff = ${JSON.stringify(id)} === 'flashflood' && CBZ.flashflood ? CBZ.flashflood.stats() : null;
         return { forced: true, active, warned, ticks, ended, flood: ff ? { grid: ff.grid, maxDepth: +(+ff.maxDepth).toFixed(2), frontSpeed: +(+ff.frontSpeed).toFixed(2),
-                   carsSwept: ff.carsSwept, carsFloated: ff.carsFloated, lids: ff.lidsPopped, bridges: ff.bridges, rooms: ff.roomsFlooded, frameMs: ff.frameMs, solveMs: ff.solveMsPerFrame, bodyMs: ff.bodyMsPerFrame, surfaceMs: ff.renderMsPerFrame, worstMs: ff.worstFrameMs, uploadKB: Math.round((ff.uploadBytes || 0) / 1024), silt: ff.siltArea, events: (CBZ.flashflood.events() || []).slice(0, 12) } : null,
+                   carsSwept: ff.carsSwept, carsFloated: ff.carsFloated, lids: ff.lidsPopped, bridges: ff.bridges, rooms: ff.roomsFlooded, frameMs: ff.frameMs, solveMs: ff.solveMsPerFrame, bodyMs: ff.bodyMsPerFrame, surfaceMs: ff.renderMsPerFrame, worstMs: ff.worstFrameMs, uploadKB: Math.round((ff.uploadBytes || 0) / 1024), silt: ff.siltArea, events: (CBZ.flashflood.events() || []).slice(0, 12) } : null, fire,
                  x: p.pos.x, y: p.pos.y, z: p.pos.z,
                  live: CBZ.bots ? CBZ.bots.filter(b => !b.dead).length : 0,
                  killed: CBZ.bots ? CBZ.bots.filter(b => b.dead).length : 0 };
@@ -301,6 +303,7 @@ try {
       if (r.x != null && !(isFinite(r.x) && isFinite(r.y) && isFinite(r.z))) fail(id + ": player position went NaN");
       say(`  ${id.padEnd(11)} ${r.active ? String(r.active).padStart(4) + " active ticks · killed " + r.killed : "NEVER ACTIVE"}`);
       if (r.flood) say("              flood: " + JSON.stringify(r.flood));
+      if (r.fire) say("              fire: " + JSON.stringify(r.fire));
     }
     if (sweep.neverActive.length) fail("never reached active: " + sweep.neverActive.join(", "));
   } else {

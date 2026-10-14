@@ -1063,7 +1063,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/disaster_arena.js?v=nostep1013"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
-<script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
+<script src="src/entities/survivorbot.js?v=fuel1014"></script>
 <script src="src/modes/survival.js?v=noring1013"></script>
 <script src="src/modes/shark_sim.js?v=nored0930"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
@@ -1111,10 +1111,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/flashflood.js?v=ffroute1014"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
-<script src="src/systems/hurricane.js?v=hur1014"></script>
-<!-- seam:wildfire — systems/wildfire.js owns the wind/slope-driven front, the
-     killing smoke plume, the ember spotting and the persistent burn scar. -->
-<script src="src/systems/wildfire.js?v=fire1"></script>
+<script src="src/systems/hurricane.js?v=hur1"></script>
+<!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
+     and its wind/slope spread, crown fire, spotting, ember attack on houses,
+     burning cars, the killing plume, ash and the persistent burn scar. -->
+<script src="src/systems/wildfire.js?v=fuel1014"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
@@ -1129,7 +1130,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=ffroute1014"></script>
+<script src="src/systems/disasters.js?v=fuel1014"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>

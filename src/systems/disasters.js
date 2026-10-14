@@ -1216,168 +1216,81 @@
       },
     },
 
-    // ---- WILDFIRE: DELEGATED to systems/wildfire.js (CBZ.wildfire) --------
-    //      The fire itself — the wind/slope spread wave, ember spotting ahead
-    //      of the front, the choking plume that kills more than the flame
-    //      does, the persistent burn scar, and the crosswind escape advice —
-    //      lives in that file behind WILDFIRE_V2 (declared there, default
-    //      on). This def keeps what is genuinely director-specific: pacing,
-    //      env tint, the weatherDrive call (the fire's bearing IS the
-    //      weather's bearing), and the complete legacy fire as the
-    //      WILDFIRE_V2=false / missing-module revert path. The legacy path's
-    //      camera-centred ember/smoke clouds, 13 m coin-flip spread and
-    //      flame-only casualties are exactly what the module exists to
-    //      replace — see its header for the argument.
+    // ---- WILDFIRE: systems/wildfire.js (CBZ.wildfire) owns the fire ------
+    //      The fuel bed (grass, brush, litter) and its wind/slope spread, the
+    //      crowns, spotting, ember attack on the houses, burning cars, the
+    //      plume that kills more than the flame does, the burn scar and the
+    //      crosswind escape all live there. This def keeps what is the
+    //      director's: pacing, the sky, the weatherDrive call (the fire's
+    //      bearing IS the weather's), and the BRIDGE that lends the fire the
+    //      island's machinery: THE structural ledger (a burned-out house pays
+    //      in here, so it collapses on the same engine as a quake's), the
+    //      survival blast (a car's tank) and the physical shelter test.
     wildfire: {
       name: "WILDFIRE", emoji: "", warnSecs: 5, gap: 6, cause: "burned alive in the wildfire", tint: 0x4a2814,
       // the DURATION is the magnitude's: a brush fire is done in ~12 s, a
-      // wind-driven ridge run takes ~28. The director reads this at
-      // active-start, after beginWarn has rolled the occurrence's size.
+      // wind-driven run takes ~28 (read at active-start, after the roll)
       get activeSecs() {
-        const m = (CBZ.wildfire && CBZ.CONFIG.WILDFIRE_V2 !== false) ? CBZ.wildfire.magnitude() : null;
+        const m = CBZ.wildfire ? CBZ.wildfire.magnitude() : null;
         return m == null ? 18 : Math.round(12 + 16 * m);
       },
-      v2() { return !!(CBZ.wildfire && CBZ.CONFIG.WILDFIRE_V2 !== false); },
-      // ONE TREE LIGHTS AND ITS SMOKE STANDS UP. That is how you actually learn
-      // a wildfire is coming, and it also gives the fire a real ORIGIN you can
-      // put your back to instead of a hazard that materialises everywhere.
+      // ONE TREE LIGHTS AND ITS SMOKE STANDS UP: how you actually learn a
+      // wildfire is coming, and the fire's real ORIGIN
       warn(ctx) {
         narrate("hint", "Wildfire spreading, don't get cornered!", 2.6); sound("fire");
-        if (this.v2()) {
-          CBZ.wildfire.beginWarn(ctx);
-          const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
-          return;
-        }
-        const tr = ctx.arena.flammable;
-        const seedTree = tr[(rnd() * tr.length) | 0];
-        if (seedTree && !seedTree.burnt) { ignite(seedTree); ctx.st.seed = seedTree; }
-        // the wind decides which way it runs — and it is the WEATHER's wind
-        const a = rnd() * 6.28; ctx.st.wx = Math.cos(a); ctx.st.wz = Math.sin(a);
+        if (!CBZ.wildfire) return;
+        CBZ.wildfire.beginWarn(ctx, {
+          hitBuilding: function (b, amount, o) { return structureHit(b, amount, ctx, Object.assign({ kind: "fire" }, o || {})); },
+          blast: function (kind, x, z, o) { survBlast(kind, x, z, Object.assign({ ctx: ctx }, o || {})); },
+          sheltered: function (a) { return sheltered(a); },
+        });
+        const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
       },
       warnTick(dt, ctx) {
+        if (!CBZ.wildfire) return;
         const k = 1 - dir.t / (this.warnSecs || 1);
-        if (this.v2()) {
-          const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
-          const mg = CBZ.wildfire.magnitude();
-          // the telegraph is sized to the fire it telegraphs: a brush fire
-          // barely tints the light; before a crown fire the wind is already
-          // up and the sun is going orange while ONE tree burns
-          weather({ rain: 0, wind: 3 + k * Math.max(1, w.speed - 3), windDir: { x: w.x, z: w.z }, fog: k * (0.12 + 0.3 * mg), fogColor: 0x6a4a30 });
-          CBZ.wildfire.tick(dt, ctx, true); // the seed torches; its smoke column stands up
-          ctx.env.sunColor = lerpHex(ctx.env.sunColor, 0xff9a50, (0.15 + 0.45 * mg) * k);
-          if (rnd() < dt * 1.2) sound("fire");
-          return;
-        }
-        weather({ rain: 0, wind: 3 + k * 7, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: k * 0.3, fogColor: 0x6a4a30 });
-        if (ctx.st.seed) { ctx.st.seed.burning = Math.max(ctx.st.seed.burning, 1); flickerTreeFire(ctx.st.seed); }
-        ctx.env.sunColor = lerpHex(ctx.env.sunColor, 0xff9a50, 0.4 * k);
+        const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
+        const mg = CBZ.wildfire.magnitude();
+        // the telegraph is sized to the fire it telegraphs
+        weather({ rain: 0, wind: 3 + k * Math.max(1, w.speed - 3), windDir: { x: w.x, z: w.z }, fog: k * (0.12 + 0.3 * mg), fogColor: 0x6a4a30 });
+        CBZ.wildfire.tick(dt, ctx, true);
+        ctx.env.sunColor = lerpHex(ctx.env.sunColor, 0xff9a50, (0.15 + 0.45 * mg) * k);
         if (rnd() < dt * 1.2) sound("fire");
       },
-      warnThreat(x, z, ctx) {
-        if (this.v2()) return CBZ.wildfire.threat(x, z);
-        const s = ctx.st.seed; if (!s) return 0;
-        const d = Math.hypot(x - s.x, z - s.z);
-        return d < 16 ? 0.7 * (1 - d / 16) : 0;
-      },
-      warnSafeDir(x, z, ctx) {
-        if (this.v2()) return CBZ.wildfire.safeDir(x, z);
-        const s = ctx.st.seed; if (!s) return null;
-        const dx = x - s.x, dz = z - s.z, d = Math.hypot(dx, dz) || 1;
-        return { x: dx / d, z: dz / d };
-      },
-      start(ctx) {
-        if (this.v2()) { CBZ.wildfire.begin(ctx); return; }
-        ctx.st.embers = CBZ.fx.particleCloud({ mode: "rise", color: 0xff7a1a, count: 320, radius: 28, top: 16, size: 0.26, opacity: 0.7, vMin: 5, vMax: 12, drift: 6 });
-        ctx.st.embers.setActive(0.9);
-        // a heavy rolling smoke pall above the flames
-        ctx.st.smoke = CBZ.fx.particleCloud({ mode: "rise", color: 0x2b2521, count: 240, radius: 34, top: 40, size: 0.95, opacity: 0.26, vMin: 3, vMax: 7, drift: 10 });
-        ctx.st.smoke.setActive(0.7);
-        const tr = ctx.arena.flammable; ctx.st.spreadCd = 0;
-        // the fire GROWS out of the tree that was already burning through the
-        // warning — it does not teleport four new fires across the island
-        const s = ctx.st.seed;
-        for (let i = 0; i < tr.length; i++) {
-          const t = tr[i]; if (t.burning || t.burnt || !s) continue;
-          if (Math.hypot(t.x - s.x, t.z - s.z) < 22 && rnd() < 0.5) ignite(t);
-        }
-        if (!tr.some((t) => t.burning)) { const t = tr[(rnd() * tr.length) | 0]; if (t && !t.burnt) ignite(t); }
-      },
+      warnThreat(x, z) { return CBZ.wildfire ? CBZ.wildfire.threat(x, z) : 0; },
+      warnSafeDir(x, z) { return CBZ.wildfire ? CBZ.wildfire.safeDir(x, z) : null; },
+      start(ctx) { if (CBZ.wildfire) CBZ.wildfire.begin(ctx); },
       active(dt, ctx) {
-        if (this.v2()) {
-          const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
-          const mg = CBZ.wildfire.magnitude();
-          // THE SKY IS SIZED TO THE FIRE. A brush fire is a smudge on an
-          // otherwise ordinary afternoon; a crown fire's pall dims the sun
-          // orange and closes the horizon in — the colour grade is a
-          // consequence of magnitude, not a costume every occurrence wears.
-          ctx.env.fog = 0x4a2814;
-          ctx.env.fogNear = 30 - 14 * mg; ctx.env.fogFar = 320 - 175 * mg;
-          ctx.env.sunInt = 0.86 - 0.36 * mg; ctx.env.sunColor = lerpHex(0xffc27a, 0xff7320, mg);
-          ctx.env.hemiColor = 0xff8a3a; ctx.env.hemiInt = 0.74 - 0.12 * mg;
-          // fire runs DOWNWIND — the same wind everything else in the game
-          // reads, at the speed THIS occurrence rolled
-          weather({ rain: 0, wind: w.speed, windDir: { x: w.x, z: w.z }, fog: 0.18 + 0.3 * mg, fogColor: 0x4a2814 });
-          CBZ.wildfire.tick(dt, ctx);
-          // the sky YOU are under: standing in the plume closes the world in —
-          // the smoke is a place, not a colour grade
-          const p = CBZ.player && CBZ.player.group ? CBZ.player.group.position : camPos();
-          const s = Math.min(1, CBZ.wildfire.smokeAt(p.x, p.z));
-          if (s > 0.15) {
-            ctx.env.fogNear = Math.min(ctx.env.fogNear, 16 - 11 * s);
-            ctx.env.fogFar = Math.min(ctx.env.fogFar, 145 - 100 * s);
-            ctx.env.sunInt = Math.min(ctx.env.sunInt, 0.5 - 0.25 * s);
-          }
-          if (rnd() < dt * 3) sound("fire");
-          return;
-        }
-        // legacy revert path keeps its fixed pall exactly as it was
-        ctx.env.fog = 0x4a2814; ctx.env.fogNear = 16; ctx.env.fogFar = 145; ctx.env.sunInt = 0.5; ctx.env.sunColor = 0xff7320; ctx.env.hemiColor = 0xff8a3a; ctx.env.hemiInt = 0.62;
-        // fire runs DOWNWIND — the same wind everything else in the game reads
-        weather({ rain: 0, wind: 9 + 4 * ctx.intensity, windDir: { x: ctx.st.wx, z: ctx.st.wz }, fog: 0.45, fogColor: 0x4a2814 });
-        ctx.st.embers.update(dt, camPos().x, 2, camPos().z);
-        if (ctx.st.smoke) ctx.st.smoke.update(dt, camPos().x, 8, camPos().z);
-        const tr = ctx.arena.flammable;
-        // burn anyone near a burning tree
-        for (let i = 0; i < tr.length; i++) {
-          const t = tr[i]; if (!t.burning) continue;
-          t.burning -= dt;
-          flickerTreeFire(t);
-          surv().hurtRadius(t.x, t.z, 3.4, scale(20, ctx) * dt);
-          if (t.burning <= 0 && !t.burnt) burnOut(t);
-        }
-        // spread to neighbours
-        ctx.st.spreadCd -= dt;
-        if (ctx.st.spreadCd <= 0) {
-          ctx.st.spreadCd = 0.5;
-          const wx = ctx.st.wx || 0, wz = ctx.st.wz || 0;
-          for (let i = 0; i < tr.length; i++) {
-            const t = tr[i]; if (!t.burning) continue;
-            for (let j = 0; j < tr.length; j++) {
-              const o = tr[j]; if (o.burning || o.burnt) continue;
-              const dx = o.x - t.x, dz = o.z - t.z, d = Math.hypot(dx, dz);
-              if (d > 13 || d < 0.01) continue;
-              // downwind neighbours catch far more readily than upwind ones,
-              // which is what gives the burn a visible DIRECTION to outrun
-              const down = (dx * wx + dz * wz) / d;
-              if (rnd() < 0.18 + 0.5 * Math.max(0, down)) ignite(o);
-            }
-          }
+        if (!CBZ.wildfire) return;
+        const w = CBZ.wildfire.wind(); ctx.st.wx = w.x; ctx.st.wz = w.z;
+        const mg = CBZ.wildfire.magnitude(), sz = CBZ.wildfire.size();
+        // THE SKY IS SIZED TO THE FIRE: a brush fire is a smudge on an
+        // ordinary afternoon; a big run's pall turns the sun orange-red and
+        // closes the horizon in, deepening as the fire grows
+        const big = Math.min(1, mg * 0.7 + sz * 0.6);
+        ctx.env.fog = 0x4a2814;
+        ctx.env.fogNear = 30 - 14 * big; ctx.env.fogFar = 320 - 175 * big;
+        ctx.env.sunInt = 0.86 - 0.36 * big; ctx.env.sunColor = lerpHex(0xffc27a, 0xff6018, big);
+        ctx.env.hemiColor = 0xff8a3a; ctx.env.hemiInt = 0.74 - 0.12 * big;
+        weather({ rain: 0, wind: w.speed, windDir: { x: w.x, z: w.z }, fog: 0.18 + 0.3 * big, fogColor: 0x4a2814 });
+        CBZ.wildfire.tick(dt, ctx);
+        // the sky YOU are under: standing in the plume closes the world in
+        const p = CBZ.player && CBZ.player.group ? CBZ.player.group.position : camPos();
+        const s = Math.min(1, CBZ.wildfire.smokeAt(p.x, p.z));
+        if (s > 0.15) {
+          ctx.env.fogNear = Math.min(ctx.env.fogNear, 16 - 11 * s);
+          ctx.env.fogFar = Math.min(ctx.env.fogFar, 145 - 100 * s);
+          ctx.env.sunInt = Math.min(ctx.env.sunInt, 0.5 - 0.25 * s);
+          ctx.env.sunColor = lerpHex(ctx.env.sunColor, 0xd8400c, s * 0.6);
         }
         if (rnd() < dt * 3) sound("fire");
       },
-      end(ctx) {
+      end() {
         weatherOff();
-        if (this.v2()) { CBZ.wildfire.stop(); return; }   // the burnt trees and the scar STAY
-        if (ctx.st.embers) ctx.st.embers.dispose(); if (ctx.st.smoke) ctx.st.smoke.dispose(); ctx.arena.flammable.forEach((t) => { if (t.fire) removeTreeFire(t); });
+        if (CBZ.wildfire) CBZ.wildfire.stop();   // the black, the snags, the wrecks STAY
       },
-      threat(x, z, ctx) {
-        if (this.v2()) return CBZ.wildfire.threat(x, z);
-        let t = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const d = Math.hypot(x - tr[i].x, z - tr[i].z); if (d < 7) t = Math.max(t, 1 - d / 7); } return t;
-      },
-      safeDir(x, z, ctx) {
-        if (this.v2()) return CBZ.wildfire.safeDir(x, z);
-        let bx = 0, bz = 0; const tr = ctx.arena.flammable; for (let i = 0; i < tr.length; i++) if (tr[i].burning) { const dx = x - tr[i].x, dz = z - tr[i].z, d = Math.hypot(dx, dz); if (d < 9 && d > 0.1) { bx += dx / d / d; bz += dz / d / d; } } return (bx || bz) ? { x: bx, z: bz } : null;
-      },
+      threat(x, z) { return CBZ.wildfire ? CBZ.wildfire.threat(x, z) : 0; },
+      safeDir(x, z) { return CBZ.wildfire ? CBZ.wildfire.safeDir(x, z) : null; },
     },
 
     // ---- TORNADO: DELEGATED to systems/tornado.js (CBZ.tornado) ----------
@@ -4264,57 +4177,6 @@
     }
   }
 
-  // ---- WILDFIRE: real flames + glow + smoke + scorch on each burning tree ----
-  function addTreeFire(t) {
-    if (t.fire) return;
-    const g = new THREE.Group();
-    const flame = (c, s, y) => {
-      const m = new THREE.Mesh(new THREE.ConeGeometry(s, s * 2.4, 6),
-        new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending }));
-      m.position.y = y; m.renderOrder = 8; g.add(m); return m;
-    };
-    t.fireMeshes = [flame(0xff3a0e, 2.2, 0.5), flame(0xff7a1e, 1.5, 1.7), flame(0xffd24a, 0.85, 2.8)];
-    g.position.set(t.x, floor(t.x, t.z) + 2.6, t.z);
-    root().add(g); t.fire = g;
-    t.scorch = disc(t.x, t.z, 0x140d08, 0.0, 0.04);
-    t.scorch.scale.set(3.4, 3.4, 1);
-    // additive orange glow pooling on the ground around the base
-    t.glow = disc(t.x, t.z, 0xff5a14, 0.0, 0.05);
-    t.glow.material.blending = THREE.AdditiveBlending;
-    t.glow.scale.set(6, 6, 1);
-    if (t.foliage && t.foliage.material) { t.foliage.material.color.setHex(0xff5a1a); if (t.foliage.material.emissive) { t.foliage.material.emissive.setHex(0xff4a10); t.foliage.material.emissiveIntensity = 0.9; } }
-  }
-  function flickerTreeFire(t) {
-    if (!t.fire) return;
-    const f = 0.75 + 0.35 * Math.sin(CBZ.now * 0.02 + t.x);
-    for (let k = 0; k < t.fireMeshes.length; k++) {
-      const m = t.fireMeshes[k];
-      m.scale.set(1 + 0.12 * Math.sin(CBZ.now * 0.03 + k), f * (1 + 0.12 * Math.sin(CBZ.now * 0.035 + k * 2)), 1);
-      m.material.opacity = 0.55 + 0.32 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.025 + k + t.z));
-    }
-    if (t.scorch) t.scorch.material.opacity = Math.min(0.55, t.scorch.material.opacity + 0.4 * 0.016);
-    if (t.glow) t.glow.material.opacity = 0.4 + 0.28 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.022 + t.x));
-  }
-  function removeTreeFire(t) {
-    if (t.fire) { t.fire.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); }); root().remove(t.fire); t.fire = null; t.fireMeshes = null; }
-    if (t.scorch) { rmMesh(t.scorch); t.scorch = null; }
-    if (t.glow) { rmMesh(t.glow); t.glow = null; }
-  }
-  function ignite(t) {
-    if (t.burnt || t.burning) return;
-    t.burning = 2.5 + rnd() * 2;
-    addTreeFire(t);
-  }
-  function burnOut(t) {
-    t.burning = 0; t.burnt = true;
-    removeTreeFire(t);
-    if (t.foliage && t.foliage.material) { t.foliage.material.color.setHex(0x1a1410); if (t.foliage.material.emissive) t.foliage.material.emissive.setHex(0x000000); }
-    if (t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x140d08);
-    // the crown burns out: charred twig and bark flecks rain off it in a
-    // puff of ash (the tree's own char, not a black cube)
-    if (CBZ.debris) CBZ.debris.chips(t.x, floor(t.x, t.z) + 3, t.z, { kind: "wood", color: 0x1a1410, count: 14, power: 0.6, spread: 2, size: 0.06, dustColor: 0x5a5550 });
-  }
-
   /* ============================================================
      WHAT A BOLT HITS, AND WHO THAT KILLS (2026-08-13)
 
@@ -5104,7 +4966,7 @@
     meteor:     { kind: "indoors",     tip: "Get under a solid roof." },
     volcano:    { kind: "indoors_far", tip: "Get away from the mountain and get inside." },
     quake:      { kind: "open",        tip: "Get out of the buildings. Open ground." },
-    wildfire:   { kind: "clear",       tip: "Get away from the trees." },
+    wildfire:   { kind: "clear",       tip: "Get to a road, the beach or burnt ground." },
     tornado:    { kind: "away",        tip: "Watch the funnel. Run across its path, not ahead of it." },
     sinkhole:   { kind: "away",        tip: "Watch the ground. When it cracks, run." },
     nuke:       { kind: "indoors_far", tip: "Get inside, as far from the blast as you can." },
@@ -5344,6 +5206,9 @@
           const ex = Math.max(0, Math.abs(x - b.ox) - b.w / 2), ez = Math.max(0, Math.abs(z - b.oz) - b.d / 2);
           if (Math.hypot(ex, ez) < Math.max(6, Math.min(24, (b.h || 10) * 0.6))) safe = false;
         }
+      } else if (adv.kind === "clear" && CBZ.wildfire && CBZ.wildfire.refuge) {
+        // bare or already-burnt ground, clear air, nothing alight beside you
+        safe = CBZ.wildfire.refuge(x, z) >= 0.5;
       } else if (adv.kind === "clear") {
         safe = true;
         const T = A.flammable || [];
@@ -5525,8 +5390,7 @@
         (st.holes || []).forEach((h2) => out.push({ x: h2.x, z: h2.z, r: h2.r || 4 }));
         (st.pending || []).forEach((p) => out.push({ x: p.x, z: p.z, r: p.r || 4 }));
       } else if (id === "wildfire") {
-        const tr = A.flammable || [];
-        for (let i = 0, n = 0; i < tr.length && n < 24; i++) if (tr[i].burning) { out.push({ x: tr[i].x, z: tr[i].z, r: 4 }); n++; }
+        if (CBZ.wildfire) CBZ.wildfire.hazards(24).forEach((h2) => out.push(h2));
       } else if (id === "nuke") {
         if (st.gx != null) out.push(!st.r ? { x: st.gx, z: st.gz, r: 9 } : { x: st.gx, z: st.gz, r: st.r, fill: false });
       } else if (id === "flashflood") {
