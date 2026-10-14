@@ -140,6 +140,9 @@
   function emit(evt, d) { const p = CBZ.presidency; if (p && p.emit) { try { p.emit(evt, d); } catch (e) {} } }
   function say(ped, text, color, secs) { if (ped && !ped.dead && text && CBZ.citySay) { try { CBZ.citySay(ped, text, color || "#f0e6d0", secs || 2.4); } catch (e) {} } }
   function PP() { return CBZ.presidentPublic && CBZ.presidentPublic.props ? CBZ.presidentPublic.props : null; }
+  // the placard's measures (president_public.js giveSign owns them)
+  const PLACARD_DEF = { stickBot: -0.30, stickLen: 1.25, stickW: 0.03, boardW: 0.72, boardH: 0.50, boardT: 0.012, boardY: 0.72, boardZ: 0.026, gripY: 1.29, gripZ: 0.35 };
+  function placard() { const p = PP(); return (p && p.placard) || PLACARD_DEF; }
   function arenaRoot() { const A = CBZ.city && CBZ.city.arena; return (A && A.root) || CBZ.scene || null; }
   function inCity() { return !g.mode || g.mode === "city"; }
   // SECURED GROUND IS A WALL (city/perimeter.js): a crowd stands on the public
@@ -294,10 +297,18 @@
     "RESIGN": "Resign! Resign!", "NO DICTATOR": "No dictator!", "RESPECT THE VOTE": "Respect the vote!", "COUNT EVERY VOTE": "Count every vote!",
     "WE THE PEOPLE": "We the people!", "NO KINGS": "No kings! No kings!", "FOUR MORE YEARS": "Four more years!", "ENOUGH": "Enough! Enough!",
     "WHOSE HOUSE": "Whose house? Our house!", "TAKE IT BACK": "Take it back!", "HEAR US": "Hear us!",
+    "LAW AND ORDER": "Law and order!", "NOT MY PRESIDENT": "Not my president!",
   };
+  // a board said out loud: sentence case, a name kept a name ("VOSS OUT" -> "Voss out!")
   function chantFor(slogan) {
     const s = String(slogan || "").toUpperCase();
-    return CHANT_OF[s] || (s ? s.charAt(0) + s.slice(1).toLowerCase() + "!" : "");
+    if (CHANT_OF[s]) return CHANT_OF[s];
+    if (!s) return "";
+    let sn = "";
+    try { const c = CBZ.presidency && CBZ.presidency.current ? CBZ.presidency.current() : null; const p = String((c && c.name) || "").trim().split(/\s+/); sn = (p[p.length - 1] || "").toUpperCase(); } catch (e) { sn = ""; }
+    return s.split(" ").map(function (w, i) {
+      return i === 0 || (sn && w === sn) || w === "I" ? w.charAt(0) + w.slice(1).toLowerCase() : w.toLowerCase();
+    }).join(" ") + "!";
   }
 
   /* form(spec) -> id
@@ -1301,11 +1312,35 @@
   }
   // a held thing leaves the hands the moment a rig goes down (a cop killed
   // through the cop funnel, a man knocked flat, cuffed)
+  // A held sign leaves the hands of anybody who RUNS, too (shot at, a
+  // charge, the crowd breaking): a person bolting does not carry a placard
+  // over their head. Behind them, where they let go.
+  function runner(p) {
+    if (p.state === "flee") return true;
+    const i = p._mobAgent;
+    return i != null && i >= 0 && i < CAP && rigPed(i) === p && aact[i] === ACT.flee;
+  }
+  function dropRunner(p) {
+    const h = p.group ? p.group.rotation.y : 0, x = p.pos ? p.pos.x : 0, z = p.pos ? p.pos.z : 0;
+    return dropHeldProp(p, { fromX: x + Math.sin(h), fromZ: z + Math.cos(h) });
+  }
+  // every person given a sign or a flag anywhere (president_public.js giveSign
+  // registers them): the rally crowds that are not mob rigs fall and run too
+  const HELD = new Set();
+  CBZ.heldPropWatch = function (ped) { if (ped && ped.group) HELD.add(ped); };
   function tickRigProps() {
     for (let k = 0; k < RIGS.length; k++) {
       const R = RIGS[k]; if (!R || !R.ped) continue;
       const p = R.ped;
       if ((p._pubProp || p._mobShield) && (p.dead || lying(p))) dropHeldProp(p, null);
+      else if (p._pubProp && runner(p)) dropRunner(p);
+    }
+    if (!HELD.size) return;
+    for (const p of HELD) {
+      // gone with its prop (despawned out of view) or empty-handed: forget him
+      if (!p._pubProp || !p.group || !p.group.parent) { HELD.delete(p); continue; }
+      if (p.dead || lying(p)) { dropHeldProp(p, null); HELD.delete(p); }
+      else if (runner(p)) { dropRunner(p); HELD.delete(p); }
     }
   }
 
@@ -1342,9 +1377,12 @@
       let out = null;
       // tipping over away from the push: spin about the horizontal axis across it
       const sp = Math.hypot(vx, vz) || 1;
+      // (solid: a board that comes to rest propped up against something
+      // tall enough to matter registers its box; one lying flat is in the
+      // rubble height-field, which is what the next falling thing lands on)
       try {
-        out = CBZ.debris.adopt(pr, { whole: "all", kind: "wood", snap: false, owner: "crowd-prop",
-          velocity: { x: vx, y: 0.4, z: vz }, angular: { x: vz / sp * 2.2, y: 0, z: -vx / sp * 2.2 } });
+        out = CBZ.debris.adopt(pr, { whole: "all", kind: "wood", snap: false, owner: "crowd-prop", solid: true,
+          velocity: { x: vx, y: 0.4, z: vz }, angular: { x: vz / sp * 2.2, y: (Math.random() - 0.5) * 1.5, z: -vx / sp * 2.2 } });
       } catch (e) { out = null; }
       if (out && out.pieces > 0) {
         parent.remove(pr);
@@ -1360,8 +1398,10 @@
     parent.remove(pr);
     root.add(pr);
     pr.visible = true;
-    pr.position.set(_wp.x + vx * 0.3, floorAt(_wp.x, _wp.z) + 0.03, _wp.z + vz * 0.3);
+    // face up, the board resting on its own stick (origin = the stick's axis)
+    pr.position.set(_wp.x + vx * 0.3, floorAt(_wp.x, _wp.z) + 0.016, _wp.z + vz * 0.3);
     pr.rotation.set(-Math.PI / 2, yaw, 0, "YXZ");
+    pr.userData._laidT = CLOCK;
     LAID.push(pr);
     if (LAID.length > 64) { const o = LAID.shift(); if (o.parent) o.parent.remove(o); }
     DROPS.laid++;
@@ -1422,6 +1462,26 @@
     if (FALLEN.length > FALLEN_CAP) FALLEN.shift();
     DROPS.flat++;
     return true;
+  }
+  // THE STREET GETS SWEPT. Real dropped boards (debris rubble, owner
+  // "crowd-prop") are capped per device, and the ones past their time go
+  // once the lens is away from them; the laid-flat fallbacks the same. One
+  // look every two seconds, nothing per frame.
+  const DROP_KEEP = ({ desktop: 80, tablet: 40, phone: 16 })[DEVICE] || 80;
+  const DROP_TTL = 300;                                   // seconds a board lies there
+  let trimT = 0;
+  function trimDrops(dt) {
+    trimT += dt;
+    if (trimT < 2) return;
+    trimT = 0;
+    if (DROPS.phys && CBZ.debris && CBZ.debris.trim) { try { CBZ.debris.trim("crowd-prop", DROP_KEEP, DROP_TTL); } catch (e) {} }
+    const cam = CBZ.camera && CBZ.camera.position;
+    for (let k = LAID.length - 1; k >= 0; k--) {
+      const o = LAID[k];
+      const old = CLOCK - (o.userData._laidT || 0) > DROP_TTL;
+      const away = !cam || Math.hypot(o.position.x - cam.x, o.position.z - cam.z) > 40;
+      if (!o.parent || (old && away)) { if (o.parent) o.parent.remove(o); LAID.splice(k, 1); }
+    }
   }
 
   // ---------------------------------------------------------------- chants, voices
@@ -1675,12 +1735,14 @@
       if (r === ROLE.officer && n.shield < P.shield.instanceMatrix.count) {
         putBox(P.shield, n.shield, x, y, z, -0.1, 1.05, 0.42, 0, 0, 0.6, 1.0, 0.04); n.shield++;
       } else if (r === ROLE.sign) {
-        // where president_public's placard sits in the same pose: the board
-        // over the head, both hands up the stick
+        // the same placard a full rig holds (president_public.js giveSign),
+        // where poses.js pubPlacard puts it: the stick upright in both fists
+        // in front of the chest, the board over the head
+        const L = placard();
         const sm = signMesh(m.slogans[asign[i] % m.slogans.length], m.support);
-        const pump = Math.sin(t * 1.4 + i) * 0.04;
-        if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, x, y, z, 0, 2.4, 0.2, pump * 0.25, 0, 0.82, 0.52, 0.02); sm.count++; }
-        if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, x, y, z, 0, 1.68, 0.2, 0, 0, 0.034, 1.0, 0.034); n.stick++; }
+        const gy = L.gripY + Math.sin(t * 1.4 + i) * 0.017, gz = L.gripZ;
+        if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, x, y, z, 0, gy + L.boardY, gz + L.boardZ, 0, 0, L.boardW, L.boardH, L.boardT); sm.count++; }
+        if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, x, y, z, 0, gy + L.stickBot + L.stickLen / 2, gz, 0, 0, L.stickW, L.stickLen, L.stickW * 0.6); n.stick++; }
       } else if (r === ROLE.flag) {
         const fm = flagMesh(m.flag);
         if (fm.count < fm.instanceMatrix.count) {
@@ -1703,11 +1765,15 @@
       if (dx * dx + dz * dz > PROP2) continue;
       base(f.h, -Math.PI / 2);
       if (f.k === "shield") { if (n.shield < P.shield.instanceMatrix.count) { putBox(P.shield, n.shield, f.x, f.y, f.z, 0.3, 0.5, 0.03, 0, 0, 0.6, 1.0, 0.04); n.shield++; } continue; }
-      if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, f.x, f.y, f.z, 0.45, 0.35, 0.02, 0, 0, 0.034, 1.0, 0.034); n.stick++; }
       if (f.k === "sign") {
+        // face up, the board resting on its own stick (the laid rig prop's frame)
+        const L = placard(), y0 = f.y + 0.016;
+        if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, f.x, y0, f.z, 0, L.stickBot + L.stickLen / 2, 0, 0, 0, L.stickW, L.stickLen, L.stickW * 0.6); n.stick++; }
         const sm = signMesh(f.text, f.support);
-        if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, f.x, f.y, f.z, 0.45, 1.11, 0.03, 0, 0, 0.82, 0.52, 0.02); sm.count++; }
+        if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, f.x, y0, f.z, 0, L.boardY, L.boardZ, 0, 0, L.boardW, L.boardH, L.boardT); sm.count++; }
+        continue;
       }
+      if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, f.x, f.y, f.z, 0.45, 0.35, 0.02, 0, 0, 0.034, 1.0, 0.034); n.stick++; }
     }
     P.shield.count = n.shield; P.stick.count = n.stick;
     for (const k in P) { const M = P[k]; M.instanceMatrix.needsUpdate = M.count > 0; }
@@ -1736,6 +1802,9 @@
     CLOCK += dt;
     let any = false;
     for (let i = 0; i < MOBS.length; i++) if (MOBS[i]) { any = true; break; }
+    // the dropped boards are capped and cleared over time, mob or no mob
+    trimDrops(dt);
+    if (!any && HELD.size) tickRigProps();
     if (!any && !SHOTS.length && !GAS.length && !FALLEN.length) {
       if (R_.root && STATS.drawn >= 0) { blank(); STATS.drawn = -1; }
       return;

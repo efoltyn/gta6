@@ -78,6 +78,7 @@
      tag(object, kind)            declare an object's material kind
      clear(owner?)                remove live + frozen debris (all, or one owner)
      clearNear(x, z, r)           haul off every piece within r (a crew clearing a lot)
+     trim(owner, keep, maxAge)    keep one owner's newest `keep` settled pieces, age out the rest off-lens
      impulse(x, y, z, R, power)   radial shove (m/s at the centre) through the LIVE
                                   pieces, waking sleepers; baked rubble is static
    SHARED WITH EVERY LOOSE BODY (see below): CBZ.PHYS gravities and
@@ -2298,6 +2299,35 @@
     dropCols(gone);
     return n;
   }
+  /* One owner's settled pieces, kept to the newest `keep`, and any older than
+     maxAge seconds dropped once the lens is 30 m off them (a street swept of
+     the protest's boards, piece by piece, not all at once like clear(owner)).
+     Returns how many went. */
+  function trim(owner, keep, maxAge) {
+    if (owner == null) return 0;
+    const seen = new Map();
+    for (const bk of buckets.values()) {
+      if (bk.owner !== owner) continue;
+      for (const q of bk.parts) if (!q.perm && !seen.has(q.id)) seen.set(q.id, q);
+    }
+    if (!seen.size) return 0;
+    const list = Array.from(seen.values()).sort((a, b) => b.t - a.t);
+    const drop = new Set();
+    for (let i = 0; i < list.length; i++) {
+      const q = list[i];
+      if (i >= keep || (maxAge > 0 && nowT - q.t > maxAge && camD2(q.x, q.z) > 900)) drop.add(q.id);
+    }
+    if (!drop.size) return 0;
+    for (const bk of buckets.values()) {
+      if (bk.owner !== owner) continue;
+      const before = bk.parts.length;
+      bk.parts = bk.parts.filter((q) => !drop.has(q.id));
+      if (bk.parts.length !== before && !bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
+    }
+    staticCount = Math.max(0, staticCount - drop.size);
+    dropCols(drop, true);
+    return drop.size;
+  }
   // a fresh scene (mode switch) drops the old pools: they belong to its scene
   function hardReset() {
     clear();
@@ -2330,7 +2360,7 @@
     dust: (x, y, z, o) => dust(x, y, z, o),
     kindOf,
     tag(obj, kind) { if (obj) { if (obj.userData) obj.userData.debrisKind = kind; else if (obj.material) obj.material.userData.debrisKind = kind; } return obj; },
-    clear, clearNear, reset: hardReset,
+    clear, clearNear, trim, reset: hardReset,
     impulse,
     update,
     KINDS,
