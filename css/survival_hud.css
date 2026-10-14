@@ -1,0 +1,160 @@
+/* ============================================================
+   css/survival_hud.css — the disaster island's HUD (systems/survivalhud.js)
+   and the spectator camera's touch pad (systems/spectator.js).
+
+   One quiet look: dark glass, white type in the system face (SF on an
+   iPhone), tabular figures for anything that counts, one accent per state
+   (amber = coming, red = here / wrong place, green = right place). Every
+   piece is scoped to the disaster game; Shark Sim shares body.mode-survival
+   and keeps its own HUD.
+============================================================ */
+:root {
+  --dz-glass: rgba(12, 16, 24, .58);
+  --dz-line: rgba(255, 255, 255, .10);
+  --dz-ink: #f3f5f8;
+  --dz-dim: rgba(243, 245, 248, .62);
+  --dz-amber: #ffb340;
+  --dz-red: #ff5a4a;
+  --dz-green: #3ddc84;
+  --dz-font: system-ui, -apple-system, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+
+/* the old pieces this HUD replaces, in the disaster game only */
+body.mode-survival:not(.mode-sharksim) #topright #timer,
+body.mode-survival:not(.mode-sharksim) #topright #survTop,
+body.mode-survival:not(.mode-sharksim) #cityKillFeed,
+body.mode-survival:not(.mode-sharksim) #minimap,
+body.mode-survival:not(.mode-sharksim) #interactNote { display: none !important; }
+
+#dzCard, #dzStats, #dzGhost, #dzHint {
+  position: fixed; z-index: 20; pointer-events: none;
+  font-family: var(--dz-font); color: var(--dz-ink);
+  -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums;
+  opacity: 0; transition: opacity .45s ease, transform .45s ease;
+}
+body:not(.mode-survival) #dzCard, body:not(.mode-survival) #dzStats,
+body:not(.mode-survival) #dzGhost, body:not(.mode-survival) #dzHint,
+body.mode-sharksim #dzCard, body.mode-sharksim #dzStats,
+body.mode-sharksim #dzGhost, body.mode-sharksim #dzHint { display: none; }
+
+/* ---- THE CARD: what is coming / what is here, and how big ---- */
+#dzCard {
+  top: max(12px, env(safe-area-inset-top)); left: 50%;
+  transform: translate(-50%, -6px);
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 16px 6px 6px; border-radius: 999px;
+  background: var(--dz-glass); box-shadow: 0 0 0 1px var(--dz-line), 0 8px 24px rgba(0, 0, 0, .28);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+#dzCard.on { opacity: 1; transform: translate(-50%, 0); }
+#dzCard .dz-ring { width: 40px; height: 40px; flex: 0 0 auto; }
+#dzCard svg { width: 100%; height: 100%; overflow: visible; display: block; }
+#dzCard .trk { fill: rgba(255, 255, 255, .06); stroke: rgba(255, 255, 255, .14); stroke-width: 2.4; }
+#dzCard .fuse { fill: none; stroke: var(--dz-amber); stroke-width: 2.4; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 20px 20px; transition: stroke .3s; }
+#dzCard .gl { fill: none; stroke: var(--dz-ink); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; transition: stroke .25s; }
+#dzCard.live .trk { stroke: rgba(255, 90, 74, .55); }
+#dzCard.safe .gl { stroke: var(--dz-green); }
+#dzCard.safe .trk { stroke: rgba(61, 220, 132, .6); }
+#dzCard.bad .gl { stroke: var(--dz-red); }
+#dzCard.soon.bad .dz-ring { animation: dzPulse 1s ease-in-out infinite; border-radius: 50%; }
+@keyframes dzPulse { 50% { box-shadow: 0 0 0 4px rgba(255, 90, 74, .35); } }
+#dzCard .dz-txt { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+#dzCard .dz-name { font-size: 15px; font-weight: 650; letter-spacing: .1px; white-space: nowrap; }
+#dzCard .dz-sub { display: flex; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--dz-dim); white-space: nowrap; }
+#dzCard .dz-sub:empty, #dzCard .dz-sub span:empty { display: none; }
+#dzCard .dz-scale { color: var(--dz-ink); }
+#dzCard .dz-when { color: var(--dz-amber); }
+#dzCard.live .dz-name { font-size: 16px; }
+
+/* ---- THE CLOCK: lasted, round, alive ---- */
+#dzStats {
+  top: max(12px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right));
+  text-align: right; text-shadow: 0 1px 6px rgba(0, 0, 0, .45);
+}
+#dzStats.on { opacity: 1; }
+#dzStats .dz-time { font-size: 22px; font-weight: 650; letter-spacing: .3px; line-height: 1; }
+#dzStats .dz-meta { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 5px; font-size: 12.5px; font-weight: 600; color: var(--dz-dim); }
+#dzStats .dz-alive { display: inline-flex; align-items: center; gap: 4px; }
+#dzStats .dz-alive svg { width: 14px; height: 14px; fill: currentColor; }
+#dzStats .dz-alive b { font-weight: 650; color: var(--dz-ink); }
+#dzStats .dz-round:empty { display: none; }
+
+/* ---- HEALTH: one slim bar, bottom centre ---- */
+body.mode-survival:not(.mode-sharksim) #survBars {
+  width: min(200px, 46vw); bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+}
+body.mode-survival:not(.mode-sharksim) #survBars .slab { display: none; }
+body.mode-survival:not(.mode-sharksim) #survBars .sbar { margin-top: 5px; opacity: 0; transition: opacity .5s ease; }
+body.mode-survival:not(.mode-sharksim) #survBars .sbarbg {
+  height: 5px; border-radius: 3px; background: rgba(10, 14, 22, .5); box-shadow: 0 0 0 1px rgba(255, 255, 255, .08);
+}
+body.mode-survival:not(.mode-sharksim) #survBars #hpBar,
+body.mode-survival:not(.mode-sharksim) #survBars #stamBar { border-radius: 3px; }
+body.mode-survival:not(.mode-sharksim) #survBars.sv-hp .sv-hprow,
+body.mode-survival:not(.mode-sharksim) #survBars.sv-st .sv-strow { opacity: 1; }
+body.mode-survival:not(.mode-sharksim) #survBars.sv-low .sv-hprow .sbarbg { animation: dzLow 1.1s ease-in-out infinite; }
+@keyframes dzLow { 50% { box-shadow: 0 0 0 1px rgba(255, 90, 74, .7), 0 0 10px rgba(255, 90, 74, .45); } }
+/* on a phone the move stick and the buttons own the bottom corners; the bar
+   sits between them */
+body.touch.mode-survival:not(.mode-sharksim) #survBars { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); width: min(160px, 36vw); }
+
+/* ---- THE GHOST: how it ended, your place, play again ---- */
+#dzGhost {
+  left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  transform: translate(-50%, 8px);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 12px 18px 14px; border-radius: 18px; min-width: 210px; max-width: calc(100vw - 32px);
+  background: var(--dz-glass); box-shadow: 0 0 0 1px var(--dz-line), 0 10px 30px rgba(0, 0, 0, .32);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+}
+#dzGhost.on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+#dzGhost .g-title { font-size: 12px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: var(--dz-red); }
+#dzGhost .g-line { font-size: 15px; font-weight: 600; text-align: center; }
+#dzGhost .g-place { font-size: 12.5px; font-weight: 600; color: var(--dz-dim); }
+#dzGhost button {
+  margin-top: 9px; font: 650 15px/1 var(--dz-font); color: #0c1018; background: var(--dz-ink);
+  border: 0; border-radius: 999px; padding: 11px 22px; cursor: pointer; pointer-events: auto;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+#dzGhost button:hover { background: #fff; }
+#dzGhost button:active { transform: scale(.97); }
+
+/* ---- the first-time spectator hint ---- */
+#dzHint {
+  left: 50%; top: calc(max(12px, env(safe-area-inset-top)) + 62px); transform: translateX(-50%);
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; max-width: calc(100vw - 32px);
+  padding: 8px 14px; border-radius: 12px; background: var(--dz-glass);
+  font-size: 13px; font-weight: 600; color: var(--dz-dim);
+}
+#dzHint.on { opacity: 1; }
+#dzHint span { white-space: nowrap; }
+#dzHint kbd {
+  display: inline-block; min-width: 1.6em; padding: 2px 5px; margin-right: 3px; border-radius: 5px;
+  font: 650 11.5px/1.2 var(--dz-font); color: var(--dz-ink); text-align: center;
+  background: rgba(255, 255, 255, .12); box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .12);
+}
+
+/* ---- the spectator's touch pad (systems/spectator.js) ---- */
+#specPad { position: fixed; inset: 0; z-index: 15; display: none; touch-action: none; -webkit-user-select: none; user-select: none; }
+body.touch #specPad.on { display: block; }
+#specPad button {
+  position: absolute; right: max(16px, env(safe-area-inset-right)); width: 48px; height: 48px; border-radius: 50%;
+  border: 0; padding: 0; background: var(--dz-glass); box-shadow: 0 0 0 1px var(--dz-line);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); touch-action: none; -webkit-tap-highlight-color: transparent;
+}
+#specPad #specUp { top: calc(50% - 56px); }
+#specPad #specDown { top: calc(50% + 8px); }
+#specPad button svg { width: 24px; height: 24px; fill: none; stroke: var(--dz-ink); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+#specPad button.on { background: rgba(255, 255, 255, .22); }
+/* while you watch, the play controls are not yours */
+body.spectating #touch, body.spectating #crosshair { display: none !important; }
+
+@media (max-width: 520px) {
+  #dzCard { padding: 5px 13px 5px 5px; gap: 8px; }
+  #dzCard .dz-ring { width: 34px; height: 34px; }
+  #dzCard .dz-name { font-size: 14px; }
+  #dzStats .dz-time { font-size: 19px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #dzCard.soon.bad .dz-ring, body.mode-survival #survBars.sv-low .sv-hprow .sbarbg { animation: none; }
+}

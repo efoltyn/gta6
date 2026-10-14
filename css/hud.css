@@ -594,19 +594,15 @@ body.campaign-dialogue-active #hint.hint-sub{ --hint-rank:calc(var(--subtitle-sl
    SURVIVAL (natural-disaster) mode HUD — shown only when the body
    carries .mode-survival; the prison-specific panels are hidden.
 ============================================================ */
-/* SHOW DON'T TELL (2026-08-02): #survStatus and #disasterBanner are DEAD.
-   Nothing writes to them any more (systems/survivalhud.js dropped both
-   channels) and they are force-hidden in EVERY mode, survival included, so a
-   stale string can never surface. The elements themselves live in index.html
-   and are left there deliberately — this file cannot edit it, and an empty
-   div costs nothing. Their styling is deleted below. */
+/* The disaster game's own HUD (card, clock, ghost panel) is
+   css/survival_hud.css. #survStatus and #disasterBanner are deleted from
+   index.html (2026-10-14): nothing had written to them since 2026-08-02. */
 /* #survTop now LIVES INSIDE #topright, so the id-only hide below would lose to
    `#topright .pill{display:flex}` at the head of this sheet. Two ids beat one
    id + one class, which is what keeps the counter out of every non-survival
    mode. */
 #topright #survTop { display:none; }
 #survBars { display:none; }
-#survStatus, #disasterBanner { display:none !important; }
 #survFlash{ position:fixed; inset:0; pointer-events:none; background:#fff; opacity:0; z-index:25; transition:opacity .05s linear; }
 
 body.mode-survival #cigs,

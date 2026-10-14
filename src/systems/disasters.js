@@ -160,6 +160,13 @@
      same order, one place to reason about. */
   CBZ.survRnd = rnd;
   function camPos() { return CBZ.camera.position; }
+  /* WHERE THE VIEWER IS. Alive, that is your body; dead, it is the spectator
+     camera (systems/spectator.js) flying over the island. Anything that is a
+     matter of what YOU see, hear or feel (the plume closing in, the roar of
+     the front, the wind bending into the funnel, which survivor's voice you
+     hear) follows the viewer, so a ghost watching the tsunami from a hill
+     gets the hill's experience and not the corpse's on the beach. */
+  function eyePos() { const P = CBZ.player; return P && P.pos && !P.dead ? P.pos : CBZ.camera.position; }
   function root() { return CBZ.surv.arena.root; }
   function floor(x, z) { return CBZ.surv.arena.groundHeightAt(x, z); }
   function scale(base, ctx) { return base * (0.85 + ctx.intensity); }
@@ -1063,10 +1070,13 @@
         const H = CBZ.hurricane;
         H.tick(dt, camPos().x, camPos().z);
         weather(H.localWeather(camPos().x, camPos().z));
-        const w = H.windAt(CBZ.player.pos.x, CBZ.player.pos.z);
-        const p = CBZ.player._phys || (CBZ.player._phys = { kx: 0, kz: 0 });
-        p.kx = (p.kx || 0) + w.x * w.speed * 0.09 * k * dt;
-        p.kz = (p.kz || 0) + w.z * w.speed * 0.09 * k * dt;
+        // the outer bands lean on a LIVE body; a corpse is not shoved about
+        const w = H.windAt(eyePos().x, eyePos().z);
+        if (!CBZ.player.dead) {
+          const p = CBZ.player._phys || (CBZ.player._phys = { kx: 0, kz: 0 });
+          p.kx = (p.kx || 0) + w.x * w.speed * 0.09 * k * dt;
+          p.kz = (p.kz || 0) + w.z * w.speed * 0.09 * k * dt;
+        }
         if (CBZ.shake) CBZ.shake(Math.min(0.12, 0.02 + w.speed * 0.004));
         if (rnd() < dt * 2 * k) sound("wind");
       },
@@ -1298,7 +1308,7 @@
         weather({ rain: 0, wind: w.speed, windDir: { x: w.x, z: w.z }, fog: 0.18 + 0.3 * big, fogColor: 0x4a2814 });
         CBZ.wildfire.tick(dt, ctx);
         // the sky YOU are under: standing in the plume closes the world in
-        const p = CBZ.player && CBZ.player.group ? CBZ.player.group.position : camPos();
+        const p = eyePos();
         const s = Math.min(1, CBZ.wildfire.smokeAt(p.x, p.z));
         if (s > 0.15) {
           ctx.env.fogNear = Math.min(ctx.env.fogNear, 16 - 11 * s);
@@ -1381,10 +1391,10 @@
         const a = CBZ.tornado && CBZ.tornado.active()[0];
         if (a) { ctx.st.x = a.x; ctx.st.z = a.z; ctx.st.r = a.r; }
         let wx = ctx.st.wx, wz = ctx.st.wz, wind = 12, rain = 0.55;
-        const P = CBZ.player;
-        if (a && P && P.pos) {
-          const dx = a.x - P.pos.x, dz = a.z - P.pos.z, d = Math.hypot(dx, dz) || 1;
-          const k = Math.max(0, 1 - d / 320);
+        const E = eyePos();
+        if (a && E) {
+          const dx = a.x - E.x, dz = a.z - E.z, d = Math.hypot(dx, dz) || 1;
+          const k = Math.max(0, 1 - d / 320);            // inflow influence
           wx = wx * (1 - k) + (dx / d) * k;
           wz = wz * (1 - k) + (dz / d) * k;
           const wl = Math.hypot(wx, wz) || 1; wx /= wl; wz /= wl;
@@ -2857,11 +2867,11 @@
            front is to YOU (ahead of it or already behind it), from 150 m
            out, and with how big this one is; a tower roof 30 m up feels
            the building shudder but not the water's fist. */
-        const pS = tsuS(ctx, CBZ.player.pos.x, CBZ.player.pos.z);
+        const E = eyePos(), pS = tsuS(ctx, E.x, E.z);
         const pd = Math.abs(pS - st.frontS);
         const near = Math.max(0, 1 - pd / 150);
         if (near > 0) {
-          const hk = Math.max(0.35, 1 - Math.max(0, CBZ.player.pos.y - st.level) / 30);
+          const hk = Math.max(0.35, 1 - Math.max(0, E.y - st.level) / 30);
           const mk = 0.6 + 0.4 * Math.min(1.3, st.mag != null ? st.mag : 1);
           if (CBZ.shake) CBZ.shake((0.08 + 0.62 * near * near * near) * hk * mk);
           st.roarCd = (st.roarCd || 0) - dt;
@@ -4978,8 +4988,8 @@
   }
   function survivorSays(pool, delay) {
     setTimeout(function () {
-      const SP = CBZ.speech, P = CBZ.player, B = CBZ.bots;
-      if (!SP || !SP.say || !P || !P.pos || !B || !CBZ.game || CBZ.game.mode !== "survival") return;
+      const SP = CBZ.speech, P = { pos: eyePos() }, B = CBZ.bots;
+      if (!SP || !SP.say || !P.pos || !B || !CBZ.game || CBZ.game.mode !== "survival") return;
       let who = null, bd = 26 * 26;
       for (let i = 0; i < B.length; i++) {
         const b = B[i]; if (!b || b.dead || !b.pos) continue;
@@ -5149,6 +5159,39 @@
         if (adv.from && Math.hypot(x - adv.from.x, z - adv.from.z) < 30) safe = false;
       }
       return { safe, kind: adv.kind };
+    },
+    /* THE SIZE OF THIS ONE, in the unit the real world measures it in, for
+       the HUD. Read off the def's own roll, so it is the number the event is
+       actually being simulated at, never a label picked to sound scary.
+       null until the roll exists (most defs roll in warn(), the tornado at
+       touchdown), and null for the disasters with no public scale. */
+    scale() {
+      const id = dir.curId;
+      if (!id) return null;
+      const st = dir.st || {}, def = DEFS[id];
+      if (id === "quake") return (qkQ && qkRollNo === dir.occ && !qkQ.legacy && qkQ.M) ? "M" + qkQ.M.toFixed(1) : null;
+      if (id === "hurricane") return def._catF ? "Cat " + Math.max(1, Math.min(5, Math.floor(def._catF))) : null;
+      if (id === "tornado") return st.tw && st.tw.ef != null ? "EF" + Math.max(0, Math.min(5, st.tw.ef | 0)) : null;
+      if (id === "volcano") return st.erMag != null ? "VEI " + Math.max(1, Math.min(6, Math.round(1 + 5 * st.erMag))) : null;
+      if (id === "flood") {
+        const H = st.H != null ? st.H : (st.mag != null ? Math.max(10, Math.min(44, 34 * st.mag)) : null);
+        return H != null ? Math.round(H) + " m wave" : null;
+      }
+      // the standing water in the channel at the height of it (st.peak is the sea's rise)
+      if (id === "flashflood") return st.pool != null ? st.pool.toFixed(1) + " m deep" : null;
+      if (id === "wildfire") {
+        const m = CBZ.wildfire && CBZ.wildfire.magnitude ? CBZ.wildfire.magnitude() : null;
+        if (m == null || dir.state === "warn") return null;
+        // the US fire danger adjective scale
+        return m < 0.2 ? "Low danger" : m < 0.4 ? "Moderate danger" : m < 0.6 ? "High danger" : m < 0.8 ? "Very high danger" : "Extreme danger";
+      }
+      if (id === "sinkhole") {
+        let r = 0;
+        (st.holes || []).forEach((h) => { r = Math.max(r, h.r || 0); });
+        (st.pending || []).forEach((h) => { r = Math.max(r, h.r || 0); });
+        return r > 0 ? Math.round(r * 2) + " m wide" : null;
+      }
+      return null;
     },
     // the round just finished (name, number, what it cost), for the HUD
     lastResult() { return dir.last; },
