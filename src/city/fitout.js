@@ -502,6 +502,17 @@
       .replace("#include <color_fragment>", "#include <color_fragment>\n\tdiffuseColor.rgb *= fitMottle(vFitW);")
       .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * uFitLit;");
   }
+  // the LOOSE pieces' material (chairs and stools in their instance pools):
+  // white vertex colour like every fit-out bucket, the same surface program
+  let LOOSE_MAT = null;
+  function looseMat() {
+    if (LOOSE_MAT) return LOOSE_MAT;
+    LOOSE_MAT = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+    LOOSE_MAT.onBeforeCompile = fitShader;
+    LOOSE_MAT.name = "fitout:loose";
+    LOOSE_MAT._shared = true;
+    return LOOSE_MAT;
+  }
   // the decals' canvases (B.decal): registered once by whoever paints them
   const DECALS = Object.create(null);
   CBZ.fitoutDecalTex = function (id, tex) { if (id && tex) DECALS[id] = tex; return DECALS[id] || null; };
@@ -548,7 +559,10 @@
   CBZ.fitoutShade = function (m) { if (m) m.onBeforeCompile = fitShader; return m; };
   CBZ.fitoutWarmObjects = function () {
     const g = new THREE.BoxGeometry(0.01, 0.01, 0.01);
-    return ["flat", "glow", "glass", "plaster"].map(function (k) { try { return new THREE.Mesh(g, texMat(k)); } catch (e) { return null; } }).filter(Boolean);
+    const out = ["flat", "glow", "glass", "plaster"].map(function (k) { try { return new THREE.Mesh(g, texMat(k)); } catch (e) { return null; } }).filter(Boolean);
+    // the loose pieces (chairs, stools): the same surface, instanced
+    try { const im = new THREE.InstancedMesh(g, looseMat(), 1); im.setMatrixAt(0, new THREE.Matrix4()); out.push(im); } catch (e) {}
+    return out;
   };
   // THE SAME SURFACES ELSEWHERE. The disaster island's walk-in houses and
   // towers (world/disaster_arena.js) finish their floors, walls and ceilings
@@ -583,6 +597,14 @@
     const people = [];     // bodies this floor puts in its furniture (see B.person)
     const screens = [];    // live TV screens (B.tv): NEWS ONE planes added at finish
     const ox = b.ox || 0, oz = b.oz || 0;
+    // THE FLOOR'S GROUP exists from the first box, not from finish(): a LOOSE
+    // piece (a chair, a stool: systems/pushables.js piece) hangs its instance
+    // pool in it while the plan is still running. Its colliders are already
+    // live (pushables files them itself), so they ride their own ledger and
+    // freeFloor takes them with the rest.
+    const FG = new THREE.Group();
+    const looseCols = [];
+    const OWNER = "fitout:" + site.key + ":" + floor.k;
     const FH = b.FH || 3.2;
     const y0 = floor.y;                               // slab top
     const nextTop = floorTopOf(b, floor.k + 1);
@@ -1012,10 +1034,32 @@
         o.y0 != null ? o.y0 : ly - h / 2, o.y1 != null ? o.y1 : ly + h / 2);
       return true;
     }
+    // the loose pieces' surface: the fit-out's own (mottle + the night
+    // self-light), on the shared white vertex-colour body the pool draws with
+    function looseHost() {
+      return { parent: FG, ledger: looseCols, owner: OWNER, material: looseMat(), mode: "city" };
+    }
+    // A LOOSE PIECE drawn by the caller: build(box) records its boxes ONCE per
+    // key in the piece's own frame (floor y=0, front +z, box(x, y, z, w, h, d,
+    // hex) by CENTRE). Returns the pushables record, or null (the caller then
+    // draws it static, as before).
+    function loose(key, x, z, yaw, build, o) {
+      o = o || {};
+      const PB = CBZ.pushables;
+      if (!PB || !PB.piece) return null;
+      return PB.piece({
+        key: "fit:" + key, build: build, parent: FG, material: looseMat(),
+        ox: ox, oz: oz, oy: 0, lx: x, lz: z, y: o.y != null ? o.y : fy, yaw: yaw || 0,
+        mass: o.mass || 6, tip: o.tip !== false, seatRec: o.seatRec || null,
+        owner: OWNER, ledger: looseCols, mode: "city", kind: key,
+      });
+    }
     function furn(name, x, z, yaw, o) {
       const F = CBZ.furnish;
       if (!F || typeof F[name] !== "function") return null;
       const oo = { box: kitBox, ox: ox, oz: oz, lot: site.lot || null };
+      // chairs and stools (and a desk's own chair, a table's ring) are loose
+      if (!(o && o.loose === false)) oo.loose = looseHost();
       if (o) for (const k in o) if (oo[k] === undefined) oo[k] = o[k];
       let r = null;
       const yy = o && o.atY != null ? o.atY : fy;           // a piece on a sill or a worktop
@@ -1027,7 +1071,7 @@
     const B = {
       site: site, b: b, floor: floor, lot: site.lot, k: floor.k, y0: y0, fy: fy, ceil: ceil, FH: FH,
       ox: ox, oz: oz, rect: floor.rect, info: floor.info || {},
-      box: box, plane: plane, wall: wall, skin: skin, light: light, lamp: lamp, furn: furn, solid: solid,
+      box: box, plane: plane, wall: wall, skin: skin, light: light, lamp: lamp, furn: furn, solid: solid, loose: loose,
       fixture: function (x, z, o) { o = o || {}; fixture(x, z, o.kind || "panel", o, o.color == null ? 0xfff1d6 : o.color); },
       pieces: pieces,
       // SOMEBODY IN THE ROOM. spec {x, z (local), face, job, seat|bed (a propuse
@@ -1126,7 +1170,7 @@
 
     // ---- FINISH: arrays -> meshes, light baked into the vertex colours ----
     B.finish = function (parent) {
-      const g = new THREE.Group();
+      const g = FG;
       g.name = "fitout:" + site.key + ":" + floor.k;
       g.userData.dynamic = true;                        // never folded by core/batch.js
       g.userData.fitout = true;
@@ -1170,7 +1214,10 @@
         for (let i = 0; i < cols.length; i++) { cols[i].ref = g; CBZ.colliders.push(cols[i]); }
         if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
       }
-      const out = { group: g, meshes: meshes, cols: cols, lights: lights.length, pieces: pieces.length, live: true, people: people.length };
+      // the loose pieces' colliders went live when they were placed: the
+      // floor's ledger carries them so freeFloor takes them too
+      const out = { group: g, meshes: meshes, cols: looseCols.length ? cols.concat(looseCols) : cols, owner: OWNER,
+        lights: lights.length, pieces: pieces.length, live: true, people: people.length };
       postPeople(site, floor.k, people, out);
       return out;
     };
@@ -1370,6 +1417,7 @@
     if (L.posted) PEOPLE.live = Math.max(0, PEOPLE.live - L.posted);
     if (L.group && L.group.parent) L.group.parent.remove(L.group);
     for (let i = 0; i < L.meshes.length; i++) { try { L.meshes[i].geometry.dispose(); } catch (e) {} }
+    if (L.owner && CBZ.pushables && CBZ.pushables.removeOwner) { try { CBZ.pushables.removeOwner(L.owner); } catch (e) {} }
     if (L.cols.length && CBZ.colliders) {
       const set = new Set(L.cols);
       const C = CBZ.colliders;

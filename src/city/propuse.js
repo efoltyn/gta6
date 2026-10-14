@@ -488,6 +488,7 @@
   }
   function usable(rec, py) {
     if (!isFree(rec)) return false;
+    if (rec.tipped) return false;       // a chair lying on its back (systems/pushables.js) is not a seat
     if (py != null && Math.abs(rec.y - py) > 2.0) return false;   // wrong floor
     const l = lotOf(rec);
     if (l && l.demolished) return false;
@@ -556,7 +557,7 @@
   //   CBZ.propGoSit(ped, CBZ.propNearestSeat(x, z, 20, floorY));
   CBZ.propGoSit = function (ped, seat) {
     if (!on() || !ped || !seat || ped === CBZ.player) return false;
-    if (!isFree(seat) || ped.dead || ped.driving || (ped.ko | 0) > 0) return false;
+    if (!isFree(seat) || seat.tipped || ped.dead || ped.driving || (ped.ko | 0) > 0) return false;
     CBZ.propSeatRelease(ped);
     seat.occupant = ped;                     // reserve for the walk (TTL-expiring)
     markClaimed(seat);

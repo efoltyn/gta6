@@ -420,15 +420,29 @@
     }
     B.light(F.P((d0 + d1) / 2, tC - s * 0.7).x, F.P((d0 + d1) / 2, tC - s * 0.7).z, { kind: "dome", r: 4.2, i: 0.55 });
   }
-  // a wooden high chair: splayed legs, a seat at 0.55, a back, a tray
-  function highChair(B, F, d, t) {
-    const y = B.fy, c = 0xe8d8b8;
+  // a wooden high chair: splayed legs, a seat at 0.55, a back, a tray. LOOSE
+  // (B.loose: a 5 kg chair you knock flat), drawn in its own frame: x across
+  // (the frame's t), z toward the tray (+d), y from the floor (box centres)
+  function highChairParts(box) {
+    const c = 0xe8d8b8;
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
-      fbox(B, F, d + a * 0.2, y + 0.28, t + b * 0.2, 0.035, 0.56, 0.035, c);
-    for (let a = -1; a <= 1; a += 2) fbox(B, F, d + a * 0.2, y + 0.12, t, 0.03, 0.03, 0.4, c);   // foot bars
-    fbox(B, F, d, y + 0.57, t, 0.36, 0.03, 0.34, c);                                 // seat
-    fbox(B, F, d - 0.17, y + 0.8, t, 0.03, 0.44, 0.32, c);                           // back
-    fbox(B, F, d + 0.2, y + 0.76, t, 0.2, 0.025, 0.42, 0xf4f2ec);                    // tray
+      box(b * 0.2, 0.28, a * 0.2, 0.035, 0.56, 0.035, c);
+    for (let a = -1; a <= 1; a += 2) box(0, 0.12, a * 0.2, 0.4, 0.03, 0.03, c);     // foot bars
+    box(0, 0.57, 0, 0.34, 0.03, 0.36, c);                                           // seat
+    box(0, 0.8, -0.17, 0.32, 0.44, 0.03, c);                                        // back
+    box(0, 0.76, 0.2, 0.42, 0.025, 0.2, 0xf4f2ec);                                  // tray
+  }
+  function highChair(B, F, d, t) {
+    const p = F.P(d, t), yaw = F.yaw(1, 0);
+    if (B.loose && B.loose("highchair", p.x, p.z, yaw, highChairParts, { mass: 5 })) return;
+    // no loose pieces: static, and SOLID (it used to be neither)
+    const sn = Math.sin(yaw), cs = Math.cos(yaw);
+    highChairParts(function (x, y, z, w, h, dd, col) {
+      const wx = p.x + x * cs + z * sn, wz = p.z - x * sn + z * cs;
+      const sw = Math.abs(cs) > 0.5;
+      B.box(wx, B.fy + y, wz, sw ? w : dd, h, sw ? dd : w, col);
+    });
+    B.solid(p.x - 0.25, p.x + 0.25, p.z - 0.25, p.z + 0.25, B.fy, B.fy + 1.02);
   }
 
   /* ========================================================================

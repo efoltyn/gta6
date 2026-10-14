@@ -43,6 +43,16 @@
    merges them into one mesh for authored rooms (the Oval, the prison
    dayroom). Both put the same shared screen on the front.
 
+   READABLE FROM THE DOORWAY (OWNER: "in the media room the media is just
+   random slop characters"). The picture is one 512x288 canvas stretched over
+   sets 0.6 to 2 m wide and repainted at most twice a second, so 11-15 px type
+   arrived as a few texels a letter, and the ticker's crawl, stepped 15 px a
+   repaint, smeared into glyph noise. So: the words on screen are FEW and BIG
+   (a 26 px headline, an 18 px tag, a 16 px next-story line), nothing moves
+   sideways (the bottom line is one whole story, changed with the rotation,
+   never a crawl), the turf map has no 8 px labels, and the topic card is the
+   country's flag and a place, not a paragraph.
+
    PUBLIC: CBZ.news = { push, event, massHeadline, stories, current, texture,
      material, screen, watch, tvParts, tvSet, paintNow, audit }.
    MASS CASUALTIES (entities/crowdstore.js) arrive through the death ledger as
@@ -64,7 +74,7 @@
   const BREAK_HOLD = 22;      // s a breaking story owns the screen
   const RECENT = 600;         // s a story stays in the rotation
   const POLL = 2;             // s between state polls
-  const TICKER_PX = 30;       // ticker crawl, px per second
+  const NEXT_HOLD = 6;        // s each story holds the bottom line (no crawl)
 
   let CLOCK = 0;
 
@@ -188,6 +198,7 @@
     const s = {
       h: h, sub: short(opts.sub || "", 80), cat: clean(opts.cat || "").toUpperCase().slice(0, 12),
       kind: opts.kind === "breaking" ? "breaking" : "story", look: opts.look || null, t: CLOCK, day: day(), tag: opts.tag || null,
+      place: opts.place ? short(opts.place, 18) : null,          // the topic card names it (else the country)
     };
     // the same running story with a new number: the old word on it goes
     if (s.tag) for (let i = N.stories.length - 1; i >= 0; i--) if (N.stories[i].tag === s.tag) N.stories.splice(i, 1);
@@ -834,21 +845,24 @@
     N.paintAt = -1e9;                 // the cut is immediate on every set in the room
     return true;
   }
+  // the channel bug, LIVE and the clock: the same furniture on every picture
+  function channelBug(c, t, shade) {
+    c.textBaseline = "middle"; c.textAlign = "left";
+    c.fillStyle = "#c0392b"; c.fillRect(12, 10, 112, 30);
+    c.fillStyle = "#fff"; c.font = "bold 19px Arial, sans-serif"; c.fillText("NEWS ONE", 19, 26);
+    c.fillStyle = "rgba(0,0,0," + shade + ")"; c.fillRect(126, 10, 64, 30);
+    c.fillStyle = (Math.floor(t * 2) % 2) ? "#ff4d3d" : "#b8332a"; c.beginPath(); c.arc(139, 25, 5, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#fff"; c.font = "bold 16px Arial, sans-serif"; c.fillText("LIVE", 148, 26);
+    const hr = hour(), hh = Math.floor(hr), mm = Math.floor((hr - hh) * 60);
+    c.fillStyle = "rgba(0,0,0," + shade + ")"; c.fillRect(W - 82, 10, 70, 30);
+    c.fillStyle = "#fff"; c.font = "bold 19px Arial, sans-serif"; c.textAlign = "center";
+    c.fillText((hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm, W - 47, 26);
+    c.textAlign = "left";
+  }
   function paintLive(c, t) {
     const L = LIVE.spec;
     if (L.kind === "results") paintResults(c, t, L); else paintAddress(c, t, L);
-    // channel bug + LIVE + clock (the same furniture as the studio)
-    c.textBaseline = "middle"; c.textAlign = "left";
-    c.fillStyle = "#c0392b"; c.fillRect(12, 10, 86, 24);
-    c.fillStyle = "#fff"; c.font = "bold 15px Arial, sans-serif"; c.fillText("NEWS ONE", 18, 23);
-    c.fillStyle = "rgba(0,0,0,.6)"; c.fillRect(100, 10, 40, 24);
-    c.fillStyle = (Math.floor(t * 2) % 2) ? "#ff4d3d" : "#b8332a"; c.beginPath(); c.arc(110, 22, 4, 0, Math.PI * 2); c.fill();
-    c.fillStyle = "#fff"; c.font = "bold 12px Arial, sans-serif"; c.fillText("LIVE", 117, 23);
-    const hr = hour(), hh = Math.floor(hr), mm = Math.floor((hr - hh) * 60);
-    c.fillStyle = "rgba(0,0,0,.6)"; c.fillRect(W - 70, 10, 58, 24);
-    c.fillStyle = "#fff"; c.font = "bold 15px Arial, sans-serif"; c.textAlign = "center";
-    c.fillText((hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm, W - 41, 23);
-    c.textAlign = "left";
+    channelBug(c, t, ".6");
     c.fillStyle = "rgba(0,0,0,.07)";
     for (let y = 0; y < H; y += 3) c.fillRect(0, y, W, 1);
   }
@@ -929,28 +943,18 @@
     }
     // the lower third: ADDRESS TO THE NATION, who, and what he just said
     c.textBaseline = "middle"; c.textAlign = "left";
-    c.fillStyle = "#a8232c"; c.fillRect(0, 200, 236, 26);
-    c.fillStyle = "#fff"; c.font = "bold 14px Arial, sans-serif";
-    c.fillText(clean(L.title || "ADDRESS TO THE NATION").toUpperCase().slice(0, 28), 10, 214);
+    c.fillStyle = "#a8232c"; c.fillRect(0, 196, 250, 28);
+    c.fillStyle = "#fff";
+    fitText(c, clean(L.title || "ADDRESS TO THE NATION").toUpperCase(), 10, 211, 232, 17, false, 13);
     if (L.who) {
-      c.fillStyle = "rgba(10,20,40,.88)"; c.fillRect(236, 200, W - 236, 26);
-      c.fillStyle = "#dfe7f2"; fitText(c, clean(L.who), 244, 214, W - 252, 13, true);
+      c.fillStyle = "rgba(10,20,40,.88)"; c.fillRect(250, 196, W - 250, 28);
+      c.fillStyle = "#dfe7f2"; fitText(c, short(L.who, 30), 258, 211, W - 266, 16, false, 12);
     }
-    c.fillStyle = "rgba(245,245,245,.97)"; c.fillRect(0, 226, W, 32);
+    c.fillStyle = "rgba(245,245,245,.97)"; c.fillRect(0, 224, W, 34);
     c.fillStyle = "#101010";
-    const q = L.line ? "“" + clean(L.line) + "”" : "The President is speaking from " + (desk ? "the Oval Office" : "the press room");
-    fitText(c, q, 12, 243, W - 24, 18);
-    // the ticker carries the real headlines underneath
-    c.fillStyle = "#0a0f19"; c.fillRect(0, 258, W, 30);
-    c.fillStyle = "#a8232c"; c.fillRect(0, 258, 58, 30);
-    c.fillStyle = "#fff"; c.font = "bold 12px Arial, sans-serif"; c.fillText("LIVE", 16, 274);
-    const txt = tickerItems().join("     ");
-    c.save(); c.beginPath(); c.rect(60, 258, W - 60, 30); c.clip();
-    c.fillStyle = "#e9eef5"; c.font = "14px Arial, sans-serif";
-    const tw = Math.max(200, c.measureText(txt + "     ").width);
-    const off = (t * TICKER_PX) % tw;
-    c.fillText(txt, 66 - off, 274); c.fillText(txt, 66 - off + tw, 274);
-    c.restore();
+    const q = L.line ? "“" + short(L.line, 54) + "”" : "The President is speaking from " + (desk ? "the Oval Office" : "the press room");
+    fitText(c, q, 12, 242, W - 24, 22, false, 16);
+    bottomLine(c, "NEWS", "#a8232c", "#fff");
   }
   function paintResults(c, t, L) {
     const bg = c.createLinearGradient(0, 0, 0, H);
@@ -967,8 +971,8 @@
       c.textAlign = "left";
       c.fillStyle = col; c.fillRect(16, y, 8, 34);
       c.fillStyle = "#fff"; fitText(c, clean(cand.name || "").toUpperCase(), 32, y + 10, 180, 15);
-      c.fillStyle = "#c9d4e6"; c.font = "12px Arial, sans-serif";
-      c.fillText((cand.won | 0) + " won", 32, y + 27);
+      c.fillStyle = "#c9d4e6"; c.font = "bold 14px Arial, sans-serif";
+      c.fillText((cand.won | 0) + " won", 32, y + 28);
       c.fillStyle = "rgba(255,255,255,.08)"; c.fillRect(220, y + 4, 200, 26);
       c.fillStyle = col; c.fillRect(220, y + 4, Math.max(0, Math.min(200, 2 * (+cand.pct || 0))), 26);
       c.fillStyle = "#fff"; c.font = "bold 18px Arial, sans-serif"; c.textAlign = "right";
@@ -984,27 +988,18 @@
       const lead = !d.called ? null : (d.a >= d.b ? CA : CB);
       c.fillStyle = lead || "rgba(255,255,255,.10)"; c.fillRect(x, y, cw, ch);
       c.fillStyle = lead ? "#fff" : "#9aa6bd"; c.textAlign = "left";
-      fitText(c, clean(d.name || ""), x + 5, y + ch / 2 + 1, cw - 10, 12, !lead);
+      fitText(c, clean(d.name || ""), x + 5, y + ch / 2 + 1, cw - 10, 15, false, 12);
     }
     // the lower third: the latest call, then the decision
     c.fillStyle = L.call ? "#e0301e" : "#1d4f9c"; c.fillRect(0, 200, 150, 26);
     c.fillStyle = "#fff"; c.font = "bold 14px Arial, sans-serif"; c.textAlign = "left";
     c.fillText(L.call ? "PROJECTION" : "REPORTING", 10, 214);
     c.fillStyle = "rgba(10,20,40,.88)"; c.fillRect(150, 200, W - 150, 26);
-    c.fillStyle = "#dfe7f2"; fitText(c, clean(L.reporting || ""), 158, 214, W - 166, 13, true);
+    c.fillStyle = "#dfe7f2"; fitText(c, short(L.reporting || "", 40), 158, 214, W - 166, 16, false, 13);
     c.fillStyle = "rgba(245,245,245,.97)"; c.fillRect(0, 226, W, 32);
     c.fillStyle = "#101010";
     fitText(c, clean(L.call || L.line || "Votes are being counted").toUpperCase(), 12, 243, W - 24, 19);
-    c.fillStyle = "#0a0f19"; c.fillRect(0, 258, W, 30);
-    c.fillStyle = "#f4c542"; c.fillRect(0, 258, 58, 30);
-    c.fillStyle = "#0a0f19"; c.font = "bold 12px Arial, sans-serif"; c.fillText("VOTE", 12, 274);
-    const txt = tickerItems().join("     ");
-    c.save(); c.beginPath(); c.rect(60, 258, W - 60, 30); c.clip();
-    c.fillStyle = "#e9eef5"; c.font = "14px Arial, sans-serif";
-    const tw = Math.max(200, c.measureText(txt + "     ").width);
-    const off = (t * TICKER_PX) % tw;
-    c.fillText(txt, 66 - off, 274); c.fillText(txt, 66 - off + tw, 274);
-    c.restore();
+    bottomLine(c, "VOTE", "#f4c542", "#0a0f19");
   }
 
   // where the sets are, for the people watching them (city/address.js): world
@@ -1051,48 +1046,22 @@
     // over the shoulder: the footage, the poll, or the map
     drawFootage(c, s, look, t);
     // channel bug + LIVE + clock
-    c.textBaseline = "middle"; c.textAlign = "left";
-    c.fillStyle = "#c0392b"; c.fillRect(12, 10, 86, 24);
-    c.fillStyle = "#fff"; c.font = "bold 15px Arial, sans-serif";
-    c.fillText("NEWS ONE", 18, 23);
-    c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect(100, 10, 40, 24);
-    c.fillStyle = (Math.floor(t * 2) % 2) ? "#ff4d3d" : "#b8332a"; c.beginPath(); c.arc(110, 22, 4, 0, Math.PI * 2); c.fill();
-    c.fillStyle = "#fff"; c.font = "bold 12px Arial, sans-serif"; c.fillText("LIVE", 117, 23);
-    const hr = hour(), hh = Math.floor(hr), mm = Math.floor((hr - hh) * 60);
-    c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect(W - 70, 10, 58, 24);
-    c.fillStyle = "#fff"; c.font = "bold 15px Arial, sans-serif"; c.textAlign = "center";
-    c.fillText((hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm, W - 41, 23);
-    // the lower third
+    channelBug(c, t, ".55");
+    // the lower third: a tag and the headline, big, one line each
     const brk = s.kind === "breaking" && t < N.breakingUntil;
     c.textAlign = "left";
-    if (brk) {
-      c.fillStyle = (Math.floor(t * 2) % 2) ? "#e0301e" : "#c0271a";
-      c.fillRect(0, 200, 112, 26);
-      c.fillStyle = "#fff"; c.font = "bold 15px Arial, sans-serif"; c.fillText("BREAKING", 12, 214);
-    } else if (s.cat) {
-      c.fillStyle = "#1d4f9c"; c.fillRect(0, 200, 112, 26);
-      c.fillStyle = "#fff"; c.font = "bold 13px Arial, sans-serif"; c.fillText(s.cat.slice(0, 12), 12, 214);
+    const tag = brk ? "BREAKING" : (s.cat ? String(s.cat).slice(0, 12) : null);
+    if (tag) {
+      c.font = "bold 18px Arial, sans-serif";
+      const tw = c.measureText(tag).width + 24;
+      c.fillStyle = brk ? ((Math.floor(t * 2) % 2) ? "#e0301e" : "#c0271a") : "#1d4f9c";
+      c.fillRect(0, 196, tw, 28);
+      c.fillStyle = "#fff"; c.fillText(tag, 12, 211);
     }
-    c.fillStyle = "rgba(245,245,245,.96)"; c.fillRect(0, 226, W, 32);
+    c.fillStyle = "rgba(245,245,245,.97)"; c.fillRect(0, 224, W, 34);
     c.fillStyle = "#101010";
-    fitText(c, s.h.toUpperCase(), 12, 243, W - 24, 19);
-    if (s.sub) {
-      c.fillStyle = "rgba(10,20,40,.82)"; c.fillRect(112, 200, W - 112, 26);
-      c.fillStyle = "#dfe7f2"; c.font = "13px Arial, sans-serif";
-      fitText(c, s.sub, 120, 214, W - 128, 13, true);
-    }
-    // the ticker
-    c.fillStyle = "#0a0f19"; c.fillRect(0, 258, W, 30);
-    c.fillStyle = "#f4c542"; c.fillRect(0, 258, 58, 30);
-    c.fillStyle = "#0a0f19"; c.font = "bold 12px Arial, sans-serif"; c.fillText("LATEST", 8, 274);
-    const txt = tickerItems().join("     ");
-    c.save(); c.beginPath(); c.rect(60, 258, W - 60, 30); c.clip();
-    c.fillStyle = "#e9eef5"; c.font = "14px Arial, sans-serif";
-    const tw = Math.max(200, c.measureText(txt + "     ").width);
-    const off = (t * TICKER_PX) % tw;
-    c.fillText(txt, 66 - off, 274);
-    c.fillText(txt, 66 - off + tw, 274);
-    c.restore();
+    fitText(c, short(s.h, 60).toUpperCase(), 12, 242, W - 24, 26, false, 18);
+    bottomLine(c, "NEXT", "#f4c542", "#0a0f19");
     // the glass: faint scanlines
     c.fillStyle = "rgba(0,0,0,.07)";
     for (let y = 0; y < H; y += 3) c.fillRect(0, y, W, 1);
@@ -1109,27 +1078,41 @@
     if (/TRAFFIC/.test(cat)) return "traffic";
     return "politics";
   }
-  function fitText(c, s, x, y, maxW, size, light) {
+  function fitText(c, s, x, y, maxW, size, light, floor) {
     let sz = size;
+    const lo = floor || 11;
     const f = function () { c.font = (light ? "" : "bold ") + sz + "px Arial, sans-serif"; };
     f();
-    while (c.measureText(s).width > maxW && sz > 11) { sz--; f(); }
-    if (c.measureText(s).width > maxW) { while (s.length > 4 && c.measureText(s + "...").width > maxW) s = s.slice(0, -1); s += "..."; }
+    while (c.measureText(s).width > maxW && sz > lo) { sz--; f(); }
+    // still too long: drop whole words off the end (a headline cut at a word
+    // reads as a headline; one cut mid-word with dots reads as a glitch)
+    if (c.measureText(s).width > maxW) {
+      const w = String(s).split(" ");
+      while (w.length > 2 && c.measureText(w.join(" ")).width > maxW) w.pop();
+      while (w.length > 2 && /^(in|at|on|of|the|a|an|to|for|and|as|by|with|from)$/i.test(w[w.length - 1])) w.pop();
+      s = w.join(" ").replace(/[,:;]$/, "");
+      while (s.length > 4 && c.measureText(s).width > maxW) s = s.slice(0, -1);
+    }
     c.fillText(s, x, y);
   }
-  function wrap(c, s, x, y, maxW, lh, maxLines) {
-    const words = String(s).split(/\s+/);
-    let line = "", n = 0;
-    for (let i = 0; i < words.length; i++) {
-      const test = line ? line + " " + words[i] : words[i];
-      if (c.measureText(test).width > maxW && line) {
-        c.fillText(line, x, y); y += lh; n++;
-        if (n >= maxLines) return y;
-        line = words[i];
-      } else line = test;
+  // THE BOTTOM LINE: one whole story, held, then the next. Replaces the crawl
+  // (a 30 px/s scroll repainted at 2 Hz is a 15 px jump: unreadable).
+  function bottomLine(c, label, labelBg, labelFg) {
+    c.fillStyle = "#0a0f19"; c.fillRect(0, 258, W, 30);
+    c.font = "bold 15px Arial, sans-serif"; c.textAlign = "left"; c.textBaseline = "middle";
+    const lw = Math.max(64, c.measureText(label).width + 18);
+    c.fillStyle = labelBg; c.fillRect(0, 258, lw, 30);
+    c.fillStyle = labelFg; c.fillText(label, 9, 274);
+    const items = tickerItems();
+    const cur = N.cur ? N.cur.h : null;
+    let pick = null;
+    for (let k = 0; k < items.length && !pick; k++) {
+      const it = items[(Math.floor(CLOCK / NEXT_HOLD) + k) % items.length];
+      if (it && it !== cur) pick = it;
     }
-    if (line) { c.fillText(line, x, y); y += lh; }
-    return y;
+    if (!pick) return;                  // nothing else to say: an empty bar, not the headline twice
+    c.fillStyle = "#e9eef5";
+    fitText(c, short(pick, 70), lw + 10, 274, W - lw - 20, 17, false, 15);
   }
   function tickerItems() {
     const out = [];
@@ -1263,23 +1246,25 @@
       drawPoll(c);
       label = "NEW POLL";
     } else {
-      // politics / anything else: the topic card
-      c.fillStyle = "rgba(8,18,36,.92)"; c.fillRect(FX, FY, FW, FH);
-      c.fillStyle = "#1d4f9c"; c.fillRect(FX, FY, FW, 6);
-      c.fillStyle = "#9fc4ff"; c.font = "bold 13px Arial, sans-serif"; c.textAlign = "left"; c.textBaseline = "alphabetic";
-      c.fillText(s.cat || "TODAY", FX + 12, FY + 26);
-      c.fillStyle = "#fff"; c.font = "bold 16px Arial, sans-serif";
-      const yy = wrap(c, s.h, FX + 12, FY + 50, FW - 24, 19, 3);
-      if (s.sub) { c.fillStyle = "#cfd8e6"; c.font = "13px Arial, sans-serif"; wrap(c, s.sub, FX + 12, yy + 4, FW - 24, 16, 2); }
-      label = null;
+      // politics / anything else: the country's flag over the capital's
+      // skyline, and where the story is. The headline is already in the lower
+      // third; saying it again here in 13 px type was the glyph soup.
+      sky("#2a3f66", "#7f9cc4");
+      skyline("#1a2638", 118);
+      c.fillStyle = "#b8963e"; c.fillRect(FX + 40, FY + 22, 3, 96);
+      drawFlagAt(c, null, FX + 43, FY + 24, 96, 62);
+      c.fillStyle = "rgba(0,0,0,.10)";
+      for (let i = 1; i < 4; i++) c.fillRect(FX + 43 + 96 * i / 4, FY + 24, 6, 62);
+      const where = (s.place || (nation().name) || homeCity().name || "").toUpperCase();
+      label = where ? short(where, 18) : null;
     }
     c.restore();
     c.strokeStyle = "rgba(160,200,255,.35)"; c.lineWidth = 2; c.strokeRect(FX, FY, FW, FH);
     if (label) {
-      c.font = "bold 11px Arial, sans-serif"; c.textAlign = "left"; c.textBaseline = "middle";
-      const lw = c.measureText(label).width + 12;
-      c.fillStyle = "rgba(0,0,0,.6)"; c.fillRect(FX + 6, FY + 6, lw, 16);
-      c.fillStyle = "#fff"; c.fillText(label, FX + 12, FY + 14);
+      c.font = "bold 15px Arial, sans-serif"; c.textAlign = "left"; c.textBaseline = "middle";
+      const lw = c.measureText(label).width + 14;
+      c.fillStyle = "rgba(0,0,0,.6)"; c.fillRect(FX + 6, FY + 6, lw, 22);
+      c.fillStyle = "#fff"; c.fillText(label, FX + 13, FY + 17);
     }
   }
   function gangColor(id) {
@@ -1309,8 +1294,7 @@
       const py = FY + 28 + (z.cz - z0) * k + ((FH - 44) - (z1 - z0) * k) / 2;
       c.fillStyle = z.owner ? gangColor(z.owner) : "#3a4454";
       c.beginPath(); c.arc(px, py, 13, 0, Math.PI * 2); c.fill();
-      c.fillStyle = "#fff"; c.font = "bold 8px Arial, sans-serif";
-      c.fillText(String(z.name || "").slice(0, 9).toUpperCase(), px, py + 20 > FY + FH - 4 ? py - 18 : py + 20);
+      c.strokeStyle = "rgba(255,255,255,.55)"; c.lineWidth = 2; c.stroke();
     }
   }
   const MKT = { pts: [], at: -1e9 };

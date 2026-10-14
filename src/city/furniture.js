@@ -326,6 +326,9 @@
       // agree or the audit counts a mismatch.
       seat: function (lat, fwd, face, kind, cushion, drawnTop) {
         const sx = ox + p.wx(lat, fwd), sz = oz + p.wz(lat, fwd), sy = y + oy;
+        // the geometry-recording pass of a LOOSE piece (makeLoose below) is
+        // drawn at the origin: it registers nothing and ledgers nothing
+        if (opts.noAnchor) return { x: sx, y: sy, z: sz, face: face, yaw: face, kind: kind, cushion: cushion, rec: null };
         if (drawnTop == null || Math.abs((drawnTop - y) - cushion) > EPS_CUSHION) led.mismatched++;
         const geom = { cushion: cushion, floorBelow: 0 };
         /* ...and when propuse has not parsed yet, THE QUEUE — the same shim
@@ -351,6 +354,7 @@
       // mattress box's real top, which must equal the declared mattress top.
       bed: function (len, topY, kind, drawnTop) {
         const bx = ox + x, bz = oz + z, by = y + oy;
+        if (opts.noAnchor) return null;
         if (drawnTop == null || Math.abs(drawnTop - topY) > EPS_CUSHION) led.mismatched++;
         // ...and when propuse has not parsed yet, the QUEUE. Every world/*
         // furnisher outside the city runs before city/propuse.js (index.html
@@ -371,6 +375,7 @@
       // finish: flush colliders, ledger the piece, hand back the contract.
       done: function (w, d, h, top) {
         if (nSolid && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        if (opts.noAnchor) return { w: w, d: d, h: h, top: top, seats: p.seats, beds: p.beds, parts: p.parts };
         led.pieces++;
         led.kinds[name] = (led.kinds[name] | 0) + 1;
         // `beds` is handed back for the same reason `seats` is: a caller that
@@ -394,7 +399,7 @@
     // whose `seats` includes the chair's anchor and whose `parts` did not
     // include the chair would be holding a contract that contradicts itself.
     return { box: opts.box, ox: opts.ox, oz: opts.oz, oy: opts.oy, lot: opts.lot, tone: opts.tone, solid: opts.solid,
-      _parts: parent ? parent.parts : null };
+      loose: opts.loose, _parts: parent ? parent.parts : null };
   }
 
   const F = {};
@@ -1095,6 +1100,67 @@
     }
     return p.done(L, D + 1.6, 1.30, top);
   };
+
+  /* ======================================================================
+     LOOSE PIECES. OWNER: "You run over chairs, chairs don't fall over, they
+     have no colliders. So many things without colliders, it's so dumb."
+
+     A chair, a task chair and a stool are things you KNOCK, not walls and not
+     pictures. When the host hands `opts.loose = { parent, ledger, owner,
+     material, mode }` (parent: the host group the host's own boxes live in,
+     ledger: the host's collider list its teardown clears), the piece is not
+     drawn into the host's static boxes at all:
+       - its boxes are recorded ONCE per kind + palette into a cached geometry
+         (the exact boxes the static path would draw, same colours, same
+         detail switch), and every copy is an instance in ONE InstancedMesh
+         per host + kind (systems/pushables.js piece): one draw call for a
+         room of chairs, culled by its own sphere;
+       - its seat is registered where it stands, as before, and rides with it;
+       - it gets one collider over its whole footprint, floor to the top of
+         its back (a body to shove, never a step to climb), on the host's
+         ledger;
+       - it slides when walked into, goes over when run into or hit by a car,
+         and a tipped chair is not a seat (city/propuse.js) until a fresh run.
+     Without a host group (or without systems/pushables.js) the piece draws
+     exactly as before: static and solid.
+     ====================================================================== */
+  const LOOSE = { chair: 7, taskChair: 12, stool: 6 };
+  const NOBOX = function () { return null; };
+  CBZ.FURNISH_LOOSE_KINDS = Object.keys(LOOSE);
+  function toneKey(t) {
+    if (t == null) return "";
+    if (typeof t === "object") { let k = ""; for (const q in t) k += q + ":" + t[q] + ","; return k; }
+    return String(t);
+  }
+  function makeLoose(name, fn) {
+    return function (x, y, z, yaw, opts) {
+      const L = opts && opts.loose;
+      const PB = CBZ.pushables;
+      if (!L || !L.parent || opts.noAnchor || !PB || !PB.piece || CBZ.CONFIG.FURNISH_LOOSE === false) return fn(x, y, z, yaw, opts);
+      const key = "furnish:" + name + "|" + toneKey(opts.tone) + "|" + (opts.frameCol != null ? opts.frameCol : "") + "|" + (det() ? 1 : 0);
+      // the anchors and the contract at the real spot, drawing nothing
+      const rec = fn(x, y, z, yaw, Object.assign({}, opts, { box: NOBOX, solid: false, loose: null, _parts: null }));
+      const seat = rec && rec.seats && rec.seats[0];
+      const pr = PB.piece({
+        key: key,
+        build: function (box) {
+          fn(0, 0, 0, 0, { box: function (bx, by, bz, w, h, d, col) { box(bx, by, bz, w, h, d, col); return null; },
+            solid: false, tone: opts.tone, frameCol: opts.frameCol, noAnchor: true });
+        },
+        parent: L.parent, material: L.material || null,
+        ox: opts.ox || 0, oz: opts.oz || 0, oy: opts.oy || 0,
+        lx: x, lz: z, y: y, yaw: +yaw || 0,
+        mass: LOOSE[name], tip: true, kind: name,
+        seatRec: seat && seat.rec ? seat.rec : null,
+        owner: L.owner || null, ledger: L.ledger || null, mode: L.mode || "city",
+      });
+      if (!pr) return fn(x, y, z, yaw, Object.assign({}, opts, { loose: null }));
+      led.loose = (led.loose | 0) + 1;
+      rec.loose = pr;
+      return rec;
+    };
+  }
+  for (const k in LOOSE) F[k] = makeLoose(k, F[k]);
 
   CBZ.furnish = F;
 })();

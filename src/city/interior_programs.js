@@ -474,14 +474,37 @@
   // is exactly `cush` (the anchor's cushionH), a back on its stem behind the
   // sitter. (fx,fz) is the axis-aligned way the sitter looks. The old program
   // chairs were a pad and a back floating in the air with nothing under them.
-  function taskChair(h, x, y, z, fx, fz, cush) {
+  //
+  // NOW: the kit's task chair (city/furniture.js F.taskChair: spokes,
+  // casters, gas lift, pad, back, arms), LOOSE in the building (looseOf): a
+  // chair you shove across the floor and bowl over at a run, its seat riding
+  // with it. This used to be six collider-free boxes of its own, a second
+  // task chair beside the kit's, and you ran straight through every one in
+  // every office in the city. Cushion 0.45, the kit's (the anchors say so).
+  const TASK_TONE = { cloth: P.chair };
+  function taskChair(h, x, y, z, fx, fz) {
+    const F = CBZ.furnish;
+    const yaw = Math.atan2(fx, fz);
+    if (F && F.taskChair) {
+      try { return F.taskChair(x, y, z, yaw, { box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, tone: TASK_TONE, loose: looseOf(h) }); }
+      catch (e) {}
+    }
+    // no kit: a static, SOLID pad and back
     const L = h.b.lbox, o = { cast: false }, ax = Math.abs(fx) > 0.5;
     L(x, y + 0.035, z, 0.6, 0.03, 0.07, P.bezel, o);
     L(x, y + 0.035, z, 0.07, 0.03, 0.6, P.bezel, o);
-    L(x, y + (cush - 0.07) / 2 + 0.025, z, 0.06, cush - 0.095, 0.06, P.bezel, o);
-    L(x, y + cush - 0.035, z, 0.5, 0.07, 0.5, P.chair, o);
-    L(x - fx * 0.25, y + cush + 0.05, z - fz * 0.25, ax ? 0.03 : 0.06, 0.16, ax ? 0.06 : 0.03, P.bezel, o);
-    L(x - fx * 0.27, y + cush + 0.34, z - fz * 0.27, ax ? 0.07 : 0.46, 0.46, ax ? 0.46 : 0.07, P.chair, o);
+    L(x, y + 0.205, z, 0.06, 0.355, 0.06, P.bezel, o);
+    L(x, y + 0.415, z, 0.5, 0.07, 0.5, P.chair, { cast: false, solid: true, y0: y, y1: y + 0.42 });
+    L(x - fx * 0.27, y + 0.79, z - fz * 0.27, ax ? 0.07 : 0.46, 0.46, ax ? 0.46 : 0.07, P.chair, { cast: false, solid: true, y0: y, y1: y + 1.02 });
+    return null;
+  }
+  // the host's group and collider ledger, for a LOOSE piece (furniture.js
+  // makeLoose): a buildings.js shell has both; anything else gets the static,
+  // solid piece it always got
+  function looseOf(h) {
+    const b = h && h.b;
+    if (!b || !b.group || !b.group.isObject3D || !Array.isArray(b.colliders)) return null;
+    return { parent: b.group, ledger: b.colliders, mode: "city" };
   }
   // rect containment — programs that place relative to a DOOR (lobby) can
   // aim outside a small plate; hosts without clearFloorPoint get no bounds
@@ -1429,7 +1452,7 @@
       if (!CBZ.furnish || !CBZ.furnish.chair) return false;
       if (!inRect(r, x, z, 0.6) || !h.clear(x, z, 0.6)) return false;
       if (CBZ.hash01 && CBZ.hash01(h.ox + k, h.oz, 0x0E13) >= 0.34) return false;
-      try { CBZ.furnish.chair(x, y, z, yaw, { box: h.b.lbox, ox: h.ox, oz: h.oz }); } catch (e) { return false; }
+      try { CBZ.furnish.chair(x, y, z, yaw, { box: h.b.lbox, ox: h.ox, oz: h.oz, loose: looseOf(h) }); } catch (e) { return false; }
       return true;
     }
     // a deterministic offset inside the room, so two floors of the same shell
@@ -1549,10 +1572,10 @@
       L(dx, y + 1.05, pz, 0.62, 0.38, 0.025, P.bezel, lo);                         // panel 0.86..1.24
       const screenZ = pz + 0.0125 + 0.003 + 0.002;
       L(dx, y + 1.06, screenZ, 0.59, 0.33, 0.004, P.screen, lo);                   // glass
-      taskChair(h, dx, y, seatZ, 0, -1, 0.48);
+      taskChair(h, dx, y, seatZ, 0, -1);
       anchors.push({
         x: h.ox + dx, y: y, z: h.oz + seatZ, face: Math.PI, lx: dx, lz: seatZ,
-        cushionH: 0.48, floorBelow: 0,
+        cushionH: 0.45, floorBelow: 0,
       });
       // INTERIOR_LOOT_V1: the desk BODY (not the chair) is the container. Hash-
       // thinned inside lootReg — most of a desk farm is just desks.
@@ -1621,16 +1644,15 @@
       const qx = alongX ? mx2 + off : mx2 + lat;
       const qz = alongX ? mz2 + lat : mz2 + off;
       if (!h.clear(qx, qz, 0.5)) continue;
-      taskChair(h, qx, y, qz, alongX ? -s : 0, alongX ? 0 : -s, 0.48);
-      seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair", 0.48);
+      // the kit chair registers its own seat (and carries it when shoved)
+      if (!taskChair(h, qx, y, qz, alongX ? -s : 0, alongX ? 0 : -s)) seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair", 0.45);
     }
     for (let e = -1; e <= 1; e += 2) {
       const lat = e * (TL / 2 + 0.75);
       const qx = alongX ? mx2 : mx2 + lat;
       const qz = alongX ? mz2 + lat : mz2;
       if (!h.clear(qx, qz, 0.5)) continue;
-      taskChair(h, qx, y, qz, alongX ? 0 : -e, alongX ? -e : 0, 0.48);
-      seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair", 0.48);
+      if (!taskChair(h, qx, y, qz, alongX ? 0 : -e, alongX ? -e : 0)) seatReg(h, qx, y, qz, Math.atan2(mx2 - qx, mz2 - qz), "chair", 0.45);
     }
     // one wall screen on the FAR wall (glow proud of the bezel, toward the
     // room) + one light line over the table
@@ -1724,11 +1746,11 @@
       lootReg(h.ox + pd.x, y, h.oz + pd.z, "reception");
       // the receptionist chair behind the desk, facing the door
       const pc = at(dIn + 0.95, 0);
-      taskChair(h, pc.x, y, pc.z, -nx, -nz, 0.49);
+      taskChair(h, pc.x, y, pc.z, -nx, -nz);
       const yaw = Math.atan2(-nx, -nz);               // look back out the door
       anchors.push({
         x: h.ox + pc.x, y: y, z: h.oz + pc.z, face: yaw, lx: pc.x, lz: pc.z,
-        cushionH: 0.49, floorBelow: 0,
+        cushionH: 0.45, floorBelow: 0,
       });
       // a FEATURE WALL behind reception, and the lit band mounted ON it (the
       // band used to float on its own 1.7 m behind the desk). The fit-out
@@ -3092,7 +3114,7 @@
       if (!oo || !oo.solid) return null;
       return ghostOf(h.b, function () { return h.b.lbox(lx, ly, lz, w, hh, d, col, oo); });
     } : h.b.lbox;
-    const o = Object.assign({ solid: true }, opts || {}, {
+    const o = Object.assign({ solid: true, loose: looseOf(h) }, opts || {}, {
       box: box, ox: h.ox, oz: h.oz, oy: 0, lot: null,
     });
     const y = (opts && opts.atY != null) ? opts.atY : r.y;
@@ -4892,7 +4914,7 @@
     finSolid(F, "veneer", d, l, 0.56, 0.60, 0.5, 0.5, SP.walnut, 0x7a5034);
     if (!lit) { F.box(d, l, 0.60, 0.64, 0.22, 0.16, 0x6e2b27); return; }
     const p = F.P(d, l);
-    presidentialPiece("lamp", F.r, F.h, p.x, p.z, 0, { atY: F.Y + 0.60, h: 0.62, ei: 0.5, solid: false });
+    presidentialPiece("lamp", F.r, F.h, p.x, p.z, 0, { atY: F.Y + 0.60, h: 0.62, ei: 0.5 });
     F.lights++;
     F.fitLights.push({ x: p.x, z: p.z, r: 3.0, i: 0.45, rect: room && room.rectL ? room.rectL : null });
   }
@@ -5735,7 +5757,7 @@
     for (let i = 0; i < nRows; i++) for (let j = 0; j < 7; j++) {
       const l = -HW + 0.75 + j * 0.8;
       if (l > -LC - 2.4) break;
-      const rec = statePiece(F, "chair", row0 + i * 1.05, l, F.face(1, 0), { tone: "cool", solid: false });
+      const rec = statePiece(F, "chair", row0 + i * 1.05, l, F.face(1, 0), { tone: "cool" });
       seats += presidentialUse(rec);
     }
     usable += seats;
@@ -6399,8 +6421,8 @@
       }
       const c1 = A.at(dd + 1.35, dl - 0.8), c2 = A.at(dd + 1.35, dl + 0.8);
       for (const c of [c1, c2]) if (inRect(r, c.x, c.z, 0.5)) {
-        taskChair(h, c.x, r.y, c.z, -A.nx, -A.nz, 0.49);
-        anchors.push({ x: h.ox + c.x, y: r.y, z: h.oz + c.z, face: A.faceIn, lx: c.x, lz: c.z, cushionH: 0.49, floorBelow: 0 });
+        taskChair(h, c.x, r.y, c.z, -A.nx, -A.nz);
+        anchors.push({ x: h.ox + c.x, y: r.y, z: h.oz + c.z, face: A.faceIn, lx: c.x, lz: c.z, cushionH: 0.45, floorBelow: 0 });
       }
     }
     // ---- THE TURNSTILE LINE: wall to wall, lanes in the middle ------------------
@@ -6520,8 +6542,8 @@
         B(A.at(d - 0.18, sl), 0.75, 0.46, 0.02, 0.16, P.bezel);                     // keyboard
         const c = A.at(d - 0.9, sl);
         if (!inRect(r, c.x, c.z, 0.4)) continue;
-        taskChair(h, c.x, r.y, c.z, A.nx, A.nz, 0.49);                              // facing the wall
-        anchors.push({ x: h.ox + c.x, y: r.y, z: h.oz + c.z, face: A.faceOut, lx: c.x, lz: c.z, cushionH: 0.49, floorBelow: 0 });
+        taskChair(h, c.x, r.y, c.z, A.nx, A.nz);                                     // facing the wall
+        anchors.push({ x: h.ox + c.x, y: r.y, z: h.oz + c.z, face: A.faceOut, lx: c.x, lz: c.z, cushionH: 0.45, floorBelow: 0 });
       }
     }
     // ---- THE WATCH OFFICER at the back, looking over the rows ------------------
@@ -6575,20 +6597,20 @@
       for (let i = 0; i < n; i++) {
         const cd = t0 + tl * (i + 0.5) / n;
         for (const s of [-1, 1]) {
-          const ch = F.piece("chair", cd, s * (tw / 2 + 0.42), Math.atan2(-s * A.tx, -s * A.tz), { tone: "exec", solid: false });
+          const ch = F.piece("chair", cd, s * (tw / 2 + 0.42), Math.atan2(-s * A.tx, -s * A.tz), { tone: "exec" });
           if (ch && ch.seats) F.seatAnchor(anchors, ch.seats[0]);
           B(A.at(cd, s * (tw / 2 - 0.22)), 0.75, 0.22, 0.01, 0.30, P.worktop);        // a pad at each place
         }
       }
       // the chair at the foot, looking up the table at the screen
-      const fc = F.piece("chair", t0 - 0.45, 0, A.faceOut, { tone: "exec", solid: false });
+      const fc = F.piece("chair", t0 - 0.45, 0, A.faceOut, { tone: "exec" });
       if (fc && fc.seats) F.seatAnchor(anchors, fc.seats[0]);
     }
     // ---- the back-benchers along both side walls --------------------------------
     for (const s of [-1, 1]) {
       const bl = s * (wh - 0.55);
       for (let d = D0 + 2.2; d < sd - 2.2; d += 0.95) {
-        const ch = F.piece("chair", d, bl, Math.atan2(-s * A.tx, -s * A.tz), { tone: "cool", solid: false });
+        const ch = F.piece("chair", d, bl, Math.atan2(-s * A.tx, -s * A.tz), { tone: "cool" });
         if (ch && ch.seats) F.seatAnchor(anchors, ch.seats[0]);
       }
     }
@@ -6885,7 +6907,7 @@
   function cvPiece(name, h, y, x, z, yaw, opts) {
     const F = CBZ.furnish, fn = F && F[name];
     if (typeof fn !== "function") return null;
-    const o = Object.assign({}, opts || {}, { box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, lot: null });
+    const o = Object.assign({ loose: looseOf(h) }, opts || {}, { box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, lot: null });
     try { return name === "lamp" ? fn(x, y, z, o) : fn(x, y, z, yaw || 0, o); } catch (e) { return null; }
   }
   const CV_LEATHER = { cloth: CV.leather, wood: CV.walnut, frame: 0x2a2f37, linen: CV.cream };

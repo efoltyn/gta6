@@ -5468,6 +5468,7 @@
     for (let i = 0; i < _vcQuery.length; i++) {
       const c = _vcQuery[i];
       if (c.minX == null) continue;
+      if (c.pushProp) continue;      // a loose chair or stool: systems/pushables.js flings it, it never walls a car
       if (c._rb === car || (self && c.ref === self) || c.ref === car) continue;   // its own parked wall
       if (!VC.inBand(c, span.feet, span.head)) continue;                        // bridge deck / gantry overhead
       _vcCand[n++] = c;

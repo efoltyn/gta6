@@ -50,6 +50,7 @@
      node tools/solid-census.mjs --sweep                   # all of gang city
      node tools/solid-census.mjs --group speedway --json out.json
      node tools/solid-census.mjs --group speedway --max-ghost 40   # a ratchet
+     node tools/solid-census.mjs --furniture [--rev HEAD]  # furniture by kind, from source
 
    --group takes a REGEX matched against scene object names and censuses that
    subtree's world footprint; a miss prints the names that do exist, so a typo
@@ -82,6 +83,20 @@ const num = (f, d) => { const v = arg(f, null); return v == null ? d : +v; };
 const TOP = num("--top", 12);
 const OWNER = arg("--owner", null);
 const QUIET = has("--quiet");
+
+// ------------------------------------------------------- --furniture (no probe)
+// The live ledgers above cannot see furniture: a chair is under the 1 m / 2 m
+// barrier threshold by construction. This reads the SOURCE instead: every
+// furniture call site by kind, LOOSE / STATIC / BARE (tools/lib/
+// furniture-census.mjs). --rev HEAD reads the committed tree (the before).
+//   node tools/solid-census.mjs --furniture [--rev HEAD] [--max-bare 0]
+if (has("--furniture")) {
+  const { furnitureCensus, printFurnitureCensus } = await import("./lib/furniture-census.mjs");
+  const R = await furnitureCensus(ROOT, { rev: arg("--rev", null) });
+  if (arg("--json", null)) await writeFile(arg("--json", null), JSON.stringify(R, null, 2));
+  printFurnitureCensus(R);
+  process.exit(has("--max-bare") && R.total.bare > num("--max-bare", 0) ? 1 : 0);
+}
 
 // ------------------------------------------------------------------- probing
 const DUMP_SRC = await readFile(path.join(ROOT, "tools/lib/solid-dump.js"), "utf8");

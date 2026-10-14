@@ -561,11 +561,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
-<script src="src/city/furniture.js?v=seats1009b"></script>
+<script src="src/city/furniture.js?v=loose1013"></script>
 <!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
      the one TV set, shared by every screen in the game. Before world/lounge.js
      (the prison dayroom set) and every city/ room that hangs a TV. -->
-<script src="src/city/newsroom.js?v=bigcrowd1009b"></script>
+<script src="src/city/newsroom.js?v=loose1013"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -579,7 +579,7 @@ document.body.appendChild(b);}}catch(e){}})();
      after core/batch.js has run would already be welded into a static buffer.
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
-<script src="src/systems/pushables.js?v=mce86a5"></script>
+<script src="src/systems/pushables.js?v=loose1013"></script>
 <script src="src/world/carfx.js?v=cars2"></script>
 <script src="src/world/ground.js?v=dsl3"></script>
 <script src="src/world/cellblock.js?v=fac1009"></script>
@@ -1156,7 +1156,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/world.js?v=lodlight1012"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
 <script src="src/city/flags.js?v=btn1011m"></script>
-<script src="src/city/interior_programs.js?v=solid1011b"></script>
+<script src="src/city/interior_programs.js?v=loose1013"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1172,7 +1172,7 @@ document.body.appendChild(b);}}catch(e){}})();
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
 <script src="src/city/facade_openings.js?v=flicker1009b"></script>
-<script src="src/city/buildings.js?v=farcopy1013"></script>
+<script src="src/city/buildings.js?v=loose1013"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1422,7 +1422,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/props.js?v=lodlight1012"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
-<script src="src/city/propuse.js?v=w09290219"></script>
+<script src="src/city/propuse.js?v=loose1013"></script>
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
@@ -1515,7 +1515,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=pf0930e"></script>
-<script src="src/city/vehicles.js?v=sight1011m"></script>
+<script src="src/city/vehicles.js?v=loose1013"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
 <script src="src/city/playeraircraft.js?v=rounds1013"></script>
@@ -1769,10 +1769,10 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=stairs1009b"></script>
-<script src="src/city/fitout_plans.js?v=stairs1009b"></script>
-<script src="src/city/fitout_work.js?v=stairs1009b"></script>
-<script src="src/city/fitout_gang.js?v=stairs1009b"></script>
+<script src="src/city/fitout.js?v=loose1013"></script>
+<script src="src/city/fitout_plans.js?v=loose1013"></script>
+<script src="src/city/fitout_work.js?v=loose1013"></script>
+<script src="src/city/fitout_gang.js?v=loose1013"></script>
 <script src="src/city/family.js?v=ekey2"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
@@ -2414,7 +2414,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=boot1013"></script>
+<script src="src/city/presidency.js?v=loose1013"></script>
 <script src="src/city/politics.js?v=btn1011"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
