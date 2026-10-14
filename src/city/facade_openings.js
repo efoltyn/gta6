@@ -47,6 +47,11 @@
   const CBZ = window.CBZ;
   if (!CBZ) return;
   const FO = {};
+  // faceHidden's per-call dedupe stamp: module-wide and only ever growing, so a
+  // fixed box shared between two resolveCoplanar calls never reads a stale mark
+  let fhStamp = 0;
+  // resolveCoplanar's "position in the cluster" scratch (grown, never per call)
+  let LIbuf = new Int32Array(256);
 
   // ---- faces ---------------------------------------------------------------
   FO.face = function (w, d, s) {
@@ -736,7 +741,8 @@
       // minus every fixed box the air in front of it lies inside, exactly
       pt[a] = off; pt[u] = (u0 + u1) / 2; pt[v] = (v0 + v1) / 2;
       const hs = [];
-      const seen = new Set();
+      // (a stamp per call, not a Set per call: this runs per overlapping pair)
+      const stamp = ++fhStamp;
       const ci0 = Math.floor(Math.min(a === 0 ? off : (u === 0 ? u0 : v0), a === 0 ? off : (u === 0 ? u1 : v1)) / GC);
       void ci0;
       // the candidate fixed boxes: every grid cell the rect spans
@@ -745,10 +751,15 @@
       for (let gi = Math.floor(xs0 / GC); gi <= Math.floor(xs1 / GC); gi++) for (let gk = Math.floor(zs0 / GC); gk <= Math.floor(zs1 / GC); gk++) {
         const L = wg.get(gi * 73856093 ^ gk * 19349663); if (!L) continue;
         for (const w of L) {
-          if (seen.has(w)) continue; seen.add(w);
+          if (w._fhStamp === stamp) continue; w._fhStamp = stamp;
           if (!(off > w[a * 2] && off < w[a * 2 + 1])) continue;
           if (w[u * 2 + 1] <= u0 || w[u * 2] >= u1 || w[v * 2 + 1] <= v0 || w[v * 2] >= v1) continue;
-          hs.push({ a0: w[u * 2], a1: w[u * 2 + 1], y0: w[v * 2], y1: w[v * 2 + 1] });
+          const ha0 = w[u * 2], ha1 = w[u * 2 + 1], hy0 = w[v * 2], hy1 = w[v * 2 + 1];
+          // ONE fixed box over the whole rect answers it (what solidRects would
+          // return for it: nothing left; the same 1 cm entry test it applies)
+          if (ha0 <= u0 && ha1 >= u1 && hy0 <= v0 && hy1 >= v1 &&
+              ha1 > u0 + 0.01 && ha0 < u1 - 0.01 && hy1 > v0 + 0.01 && hy0 < v1 - 0.01) return true;
+          hs.push({ a0: ha0, a1: ha1, y0: hy0, y1: hy1 });
         }
       }
       if (!hs.length) return false;
@@ -814,6 +825,7 @@
         };
         const order = [];
         for (let i = 0; i < n; i++) order.push(i);
+        const LI = LIbuf.length >= n ? LIbuf : (LIbuf = new Int32Array(Math.max(n, LIbuf.length * 2)));
         order.sort(function (p, q) { return B[p * 6 + a * 2 + s] - B[q * 6 + a * 2 + s]; });
         const dir = s === 1 ? -1 : 1;              // "back" = into the box
         let c0 = 0;
@@ -823,8 +835,22 @@
           if (c1 - c0 >= 2) {
             const L = order.slice(c0, c1);
             const hit = new Set();
-            for (let x = 0; x < L.length; x++) for (let y = x + 1; y < L.length; y++) {
-              const i = L[x], j = L[y];
+            /* SWEEP, NOT EVERY PAIR. A pair can only clash if the two faces
+               overlap by 2 mm along u, so the cluster is walked in u order and
+               each face meets only the faces that start before it ends (the
+               rest fail overlapsUV below anyway). A pair is still judged with
+               the face laid EARLIER in the cluster as `i` (faceHidden asks
+               about i's face), and `hit` is a set, so the outcome is the
+               all-pairs one exactly; a pair whose two faces are both marked
+               already adds nothing and is skipped (faceHidden was 1.6 s of a
+               3 s town rebuild). */
+            for (let x = 0; x < L.length; x++) LI[L[x]] = x;
+            const S = L.slice().sort(function (p, q) { return B[p * 6 + u * 2] - B[q * 6 + u * 2]; });
+            for (let x = 0; x < S.length; x++) for (let y = x + 1; y < S.length; y++) {
+              const p = S[x], q = S[y];
+              if (B[p * 6 + u * 2 + 1] - B[q * 6 + u * 2] < 0.002) break;   // q and every later one start past p's end
+              const i = LI[p] < LI[q] ? p : q, j = i === p ? q : p;
+              if (hit.has(i) && hit.has(j)) continue;
               if (recs[i][6] === recs[j][6]) continue;
               if (Math.abs(B[i * 6 + a * 2 + s] - B[j * 6 + a * 2 + s]) > tol) continue;
               if (!overlapsUV(i, j)) continue;
