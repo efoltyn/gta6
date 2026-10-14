@@ -235,9 +235,15 @@ body.mode-city{
   --verb-font: 600 15px/1.15 Fredoka, "Arial Rounded MT Bold", system-ui, sans-serif;
 }
 
-/* ---- the desktop card: small, quiet, verb-first ---- */
+/* ---- the desktop card: small, quiet, verb-first, ON THE THING ----
+   No corner: city/interactions.js placeCard() projects the target through
+   the camera every frame and writes the card's translate3d (beside a
+   person's shoulder, just above a thing). Only opacity animates, so the card
+   never swims behind the object it names. */
 body.mode-city:not(.touch) #interact{
-  width:auto; min-width:150px; max-width:240px;
+  position:fixed; left:0; top:0; right:auto; bottom:auto;
+  transform-origin:0 0; transition:opacity .12s ease;
+  width:auto; min-width:0; max-width:240px;
   padding:9px 12px 8px;
   border:1px solid rgba(255,255,255,.14); border-radius:12px;
   background:var(--verb-bg);
