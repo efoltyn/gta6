@@ -5509,6 +5509,10 @@
     return _vcImp;
   }
   CBZ.cityCollideVehicle = collideVehicle;
+  // the chassis feel record the driven-car loop hands city/cardyn.js
+  // (CBZ.carDyn.params(D, kind)): published read-only so a controller that is
+  // not the player's (the lab's car ingredient) steps the SAME car physics
+  CBZ.cityCarDynamics = carDynamics;
   // PUBLIC so an ALTERNATIVE vehicle controller (world/water_helm.js takes the
   // whole frame for a marine hull) can still run the two per-frame duties the
   // player drive loop below owns and which are NOT specific to road physics:

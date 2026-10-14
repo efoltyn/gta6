@@ -15,6 +15,10 @@
      --before REF       before/after against REF instead of origin/main
      --no-merge         shoot the commit as is, not merged onto origin/main
 
+   THE LAB (a kit = a tiny real world: tools/lab/README.md)
+     --preset lab --setup 'kit=person-chair'   8 frames across the kit's run + its probe numbers
+     --preset glance|timeline|orbit             (world lab is implied by the preset)
+
    WHAT TO SHOOT (NPC War)
      --preset P         glance | turntable | gait | walk | trot | run | attack | death | matchup
      --setup S          URL params: species=lion  n=3  vs=men  vn=20  pose=walk,trot
@@ -37,8 +41,8 @@ import { spawn, execFileSync } from "node:child_process";
 import { copyFileSync, openSync, existsSync, rmSync, mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { SD, LOG, OUT_ROOT, PRESETS, NPCWAR_STAGE_KEYS, WORLD_STAGE_KEYS, NPCWAR_BASE_QUERY, npcwarAliases, CFG, parseSetup, newId, daemonInfo, writeJson, readJson, resultPath, now, sleep } from "./lib.mjs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { SD, LOG, OUT_ROOT, PRESETS, NPCWAR_STAGE_KEYS, WORLD_STAGE_KEYS, LAB_STAGE_KEYS, worldForPreset, NPCWAR_BASE_QUERY, npcwarAliases, CFG, parseSetup, newId, daemonInfo, writeJson, readJson, resultPath, now, sleep } from "./lib.mjs";
 import { merge2 } from "../testbus/tree.mjs";
 import { mainRepo } from "../testbus/lib.mjs";
 
@@ -73,6 +77,16 @@ function snapshot() {
     return { commit, wip: true };
   } finally { try { rmSync(path.dirname(tmp), { recursive: true, force: true }); } catch (_) {} }
 }
+/* THE LAB READS src/lab/deps.json (the traced script graph). A builder's edit
+   can change what a file defines or reads, so the manifest of the tree being
+   shot is refreshed first (incremental: ~20 ms when nothing changed). */
+if (val("--world") === "lab" || (!val("--world") && worldForPreset(val("--preset", null)) === "lab")) {
+  try {
+    const top = g(["rev-parse", "--show-toplevel"]);
+    const dm = path.join(top, "tools/lab/deps.mjs");
+    if (existsSync(dm)) (await import(pathToFileURL(dm).href)).buildManifest();
+  } catch (e) { console.error("shot: lab manifest refresh failed: " + e.message); }
+}
 let branch = val("--branch"), after;
 try {
   if (branch) after = { commit: g(["rev-parse", branch + "^{commit}"]), wip: false };
@@ -100,8 +114,8 @@ if (beforeRef) {
 sides.push({ label: beforeRef ? "after" : "shot", branch: branch + (after.wip ? "+wip" : ""), commit: after.commit });
 
 // ---------------------------------------------------------------- the shot
-const world = val("--world", "npcwar");
 const presetName = val("--preset", null);
+const world = val("--world", worldForPreset(presetName));
 const P = presetName ? (PRESETS[world] || {})[presetName] : null;
 if (presetName && !P) die(`no preset "${presetName}" for ${world} (know: ${Object.keys(PRESETS[world] || {}).join(", ")})`);
 const S = parseSetup(val("--setup", ""));
@@ -109,7 +123,7 @@ const params0 = { ...(P ? P.setup : {}), ...S.params };
 const params = world === "npcwar" ? npcwarAliases(params0) : params0;
 const js = [S.js, val("--js", "")].filter(Boolean).join(";\n");
 const stage = {}, page = new URLSearchParams(world === "npcwar" ? NPCWAR_BASE_QUERY : "");
-const STAGE_KEYS = world === "npcwar" ? NPCWAR_STAGE_KEYS : WORLD_STAGE_KEYS;
+const STAGE_KEYS = world === "npcwar" ? NPCWAR_STAGE_KEYS : world === "lab" ? LAB_STAGE_KEYS : WORLD_STAGE_KEYS;
 for (const [k, v] of Object.entries(params)) {
   if (STAGE_KEYS.has(k)) stage[k] = v;
   else page.set(k, v);         // a page param: map=water, cfg_FLAG=1, seed=7 ...
