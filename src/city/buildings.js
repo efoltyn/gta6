@@ -3637,6 +3637,172 @@
   }
   CBZ.cityShellColorway = shellColorway;
 
+  /* THE GRAMMAR A SHELL WEARS, from its position, storeys and opts alone. An
+     explicit spec (or `false`) from the call site wins; otherwise facade_kit's
+     coherent neighbourhood pick. makeBuilding dresses with it and fitShell
+     (below) sizes the shell for it, so the two can never disagree. */
+  function shellDress(ox, oz, storeys, opts) {
+    opts = opts || {};
+    if (opts.dress === false) return false;
+    if (opts.dress) return opts.dress;
+    return CBZ.facadeAutoDress ? CBZ.facadeAutoDress(ox, oz, storeys,
+      opts.showroom || opts.garageGround ? "showroom" : opts.retail ? "shop" : null) : null;
+  }
+  /* The volumes a grammar must leave open on this shell (building-local
+     {x0,x1,y0,y1,z0,z1}): the caller's own (the mega-tower's executive
+     storey) plus THE STOREFRONT BAY. A shop's ground storey on its door face
+     belongs to the shop: the shell's clear glazing, its door, and the fascia +
+     awning signAwning hangs on the header band. No grammar ornament may clad
+     over it — every box a facade lays there is re-emitted around this volume
+     (corner piers survive, 0.7 m each end). */
+  function shellKeepClear(w, d, doorSide, FH, opts) {
+    const kc = Array.isArray(opts.keepClear) ? opts.keepClear.slice() : [];
+    if (opts.storefront === true || (opts.storefront !== false && (opts.retail || opts.showroom))) {
+      const hz = doorSide === 0 || doorSide === 1;
+      const span = hz ? w : d, half = (hz ? d : w) / 2;
+      const sgn = (doorSide === 0 || doorSide === 2) ? -1 : 1;
+      const n0 = sgn > 0 ? half - 0.05 : -half - 40, n1 = sgn > 0 ? half + 40 : -half + 0.05;
+      const t0 = -span / 2 + 0.7, t1 = span / 2 - 0.7;
+      kc.push(hz ? { x0: t0, x1: t1, y0: -1, y1: FH - 0.02, z0: n0, z1: n1 }
+                 : { x0: n0, x1: n1, y0: -1, y1: FH - 0.02, z0: t0, z1: t1 });
+    }
+    return kc.length ? kc : null;
+  }
+
+  /* SIZE THE SHELL FOR ITS FACADE. OWNER: "facades, many spill onto streets."
+
+     Every lot used to be built as (parcel - a setback constant) and dressed
+     afterwards, so a grammar whose entrance is deep — stone's terrace and
+     flight (4.1 m), a Queen Anne porch (4.4 m), Greek Revival's stylobate
+     (5.8 m) — either had its stairs sawn off at the parcel line (the
+     downtown's fence) or ran them out over the footway and into the road
+     (the towns, which had no fence at all). The facade's depth is a fact
+     about the grammar, knowable before a single box is laid
+     (CBZ.facadeReach dry-runs it), so the shell is sized from it:
+
+       setback = max(the street's own setback, how far the facade stands
+                     proud of the wall at this size)
+
+     iterated, because a grammar re-proportions to its host (stone's terrace
+     is 12% of the depth). The shell never shrinks under MIN_FRAC of its
+     parcel (or 8 m): a lot too small for its grammar keeps a sane building
+     and the parcel fence (makeBuilding opts.reach) trims the rest. Pass the
+     result's `setback` as opts.reach so that fence is the parcel line.
+
+     (cx, cz) parcel centre; (lotW, lotD) the parcel; minSetback the street's
+     own build line; storeys + opts exactly as makeBuilding will get them.
+     Returns { w, d, setback, need }. Pure: no rng, no scene graph. */
+  // WHAT KIND OF STREET DOOR a shell gets (facade_openings FO.door kinds)
+  const TOWNHOUSE_STYLES = { brickhouse: 1, queenanne: 1, victorian: 1 };
+  const HOUSE_STYLES = { manor: 1, ranch: 1, techhouse: 1, plantation: 1, greekrev: 1, spanish: 1, romanvilla: 1, machiya: 1, desertmod: 1, adobe: 1 };
+  function shellDoorKind(opts, dressDef, storeys, FACADE) {
+    if (opts.garageGround) return "deck";          // the drive-in bays on every face are its entrances
+    if (opts.boarded) return "derelict";
+    if (opts.showroom || opts.retail) return "shop";
+    if (opts.district === "industrial" || opts.industrial) return "service";
+    if (dressDef && TOWNHOUSE_STYLES[dressDef.id] && storeys <= 4) return "townhouse";
+    if (dressDef && HOUSE_STYLES[dressDef.id]) return "house";
+    if (opts.office || FACADE === "office" && storeys >= 6 && !dressDef) return "office";
+    if (storeys >= 3) return "lobby";
+    return "house";
+  }
+  const FIT_MIN_FRAC = 0.55;
+  const REACH_CACHE = new Map();
+  function fitShell(cx, cz, lotW, lotD, minSetback, storeys, doorSide, opts) {
+    opts = opts || {};
+    let s = Math.max(0, minSetback || 0);
+    const res = { w: lotW - 2 * s, d: lotD - 2 * s, setback: s, need: 0 };
+    const dress = shellDress(cx, cz, storeys, opts);
+    const dressDef = dress && dress.style && CBZ.facadeDef ? CBZ.facadeDef(dress.style) : null;
+    const FH = (opts.fh > 2.4 && opts.fh < 8) ? +opts.fh : FH_STD;
+    const sMax = Math.max(s, Math.min((lotW - Math.max(8, lotW * FIT_MIN_FRAC)) / 2, (lotD - Math.max(8, lotD * FIT_MIN_FRAC)) / 2));
+    const sides = doorSide == null ? [0, 1, 2, 3] : [doorSide];
+    const hash = function (salt) { return CBZ.hash01 ? CBZ.hash01(cx, cz, salt) : 0.42; };
+    // the street door's own step / stoop / canopy (facade_openings FO.door)
+    const FO = CBZ.facadeOpenings;
+    const kind = shellDoorKind(opts, dressDef, storeys, shellColorway(cx, cz, 0x888888, opts).facade);
+    const doorReach = FO && FO.doorReach && kind !== "deck"
+      ? FO.doorReach(kind === "derelict" ? "house" : kind, { own: !!(dressDef && dressDef.ownDoor), light: kind !== "derelict" && kind !== "shop" }) : 0;
+    // the facade's own depth at this size, per parcel (a grammar's details
+    // are position-hashed: a brickhouse stoop varies 0.3 m lot to lot), per
+    // style / storeys / program / door axis / 0.5 m of plan. ~0.4 ms a run.
+    const kitReach = function (w, d, side) {
+      if (!dressDef || typeof CBZ.facadeReach !== "function") return 0;
+      const key = Math.round(cx) + "," + Math.round(cz) + "|" + dress.style + "|" + storeys + "|" + FH + "|" + (opts.garageGround ? "g" : opts.showroom ? "v" : "") +
+        (shellKeepClear(1, 1, 0, FH, opts) ? "s" : "") + "|" + (side & 2) + "|" + Math.round(w * 2) + "x" + Math.round(d * 2);
+      let r = REACH_CACHE.get(key);
+      if (!r) {
+        r = CBZ.facadeReach({
+          ox: cx, oz: cz, w: w, d: d, storeys: storeys, FH: FH, WT: WT, rTop: storeys * FH, pp: 0.8, doorSide: side,
+          slabCx: 0, slabCz: 0, slabW: w - 2 * WT, slabD: d - 2 * WT,
+          garageGround: !!opts.garageGround, showroom: !!opts.showroom, civic: opts.civic || null, dress: dress,
+          keepClear: shellKeepClear(w, d, side, FH, opts), doorW: DOORW, doorH: DOORH + 0.5,
+          pal: { wall: 0x888888, stone: 0xbbbbbb, dirt: 0x2a2420, kind: "brick", id: null },
+          color: 0x888888, TRIM: 0x666666, BASE: 0x4b4b4b, PIL: 0x777777, MULL: 0x262b31, hash: hash,
+        });
+        REACH_CACHE.set(key, r);
+      }
+      return Math.max(r[0], r[1], r[2], r[3]);
+    };
+    for (let it = 0; it < 4; it++) {
+      const w = lotW - 2 * s, d = lotD - 2 * s;
+      let need = doorReach;
+      for (const side of sides) need = Math.max(need, kitReach(w, d, side));
+      res.need = need;
+      // 5 cm of air between the outermost piece and the footway's back edge
+      const want = Math.min(sMax, need + 0.05);
+      if (want <= s + 0.01) break;
+      s = want;
+    }
+    res.setback = s; res.w = lotW - 2 * s; res.d = lotD - 2 * s;
+    return res;
+  }
+  CBZ.cityFitShell = fitShell;
+
+  /* THE STREET IDENTITY TABLE (cityBuildings reads it per lot; see the
+     comment there). setback = the street's minimum build line. */
+  const STREET_STYLE = {
+    Midtown:    { grammar: "artdeco",                 shop: "artdeco", storeys: [12, 16], shopSt: 4, mixSt: 7, setback: 1.5, walls: [0xcfc2a4, 0xbdb096] },
+    Eastgate:   { grammar: "brick",                   shop: "brick",   storeys: [10, 8], shopSt: 3, mixSt: 6, setback: 1.5, walls: [0x8a3b26, 0x7d3624] },
+    Westend:    { grammar: "stone",                   shop: "stone",   storeys: [8, 10], shopSt: 3, mixSt: 6, setback: 1.5, walls: [0xcab99a, 0xb9a887] },
+    Harborside: { grammar: "brick",                   shop: "brick",   storeys: [7, 6],  shopSt: 3, mixSt: 5, setback: 1.5, walls: [0x6e4634, 0x62402f] },
+    Northpoint: { grammar: "brickhouse",              shop: "brick",   storeys: [3, 3],  shopSt: 2, setback: 3.5, walls: [0x98482e, 0x8c432c] },
+    Crownhill:  { grammar: ["queenanne", "victorian"], shop: "stone",  storeys: [3, 3],  shopSt: 2, setback: 3.5, walls: [0x6f8ea4, 0xb09a78] },
+    Southside:  { grammar: "brutalist",               shop: "brick",   storeys: [7, 8],  shopSt: 2, setback: 3.0, walls: [0x8c8983, 0x807d77] },
+    Ironworks:  { grammar: "brick",                   shop: "brick",   storeys: [3, 3],  shopSt: 2, setback: 2.0, walls: [0x5c3a2c, 0x543428] },
+    Dockyard:   { grammar: "brutalist",               shop: "brick",   storeys: [3, 4],  shopSt: 2, setback: 2.0, walls: [0x77746c, 0x6b6861] },
+  };
+  CBZ.CITY_STREET_STYLE = STREET_STYLE;
+  /* ONE BUILD LINE PER STREET, deep enough for everything the street
+     builds: its homes and towers in either grammar at either height, its
+     storefronts (whose door-face ground storey the shop keeps clear) from
+     shopSt to mixSt (a lot that wears something else, the bank's ashlar
+     front, stands back further on its own: cityBuildings standBack). Each case is sized by
+     fitShell (the facade's own depth, dry-run); the street takes the
+     deepest, so every building on it still stands on one line. Cached per
+     street + parcel size: no rng, no geometry. */
+  const _streetSB = new Map();
+  function streetSetbackFor(SS, cx, cz, lotW, lotD) {
+    const key = SS.grammar + "|" + SS.shop + "|" + SS.setback + "|" + lotW + "x" + lotD;
+    let sb = _streetSB.get(key);
+    if (sb != null) return sb;
+    sb = SS.setback;
+    const fit = function (style, st, shop) {
+      const def = CBZ.facadeDef ? CBZ.facadeDef(style) : null;
+      if (!def || st < (def.minStoreys || 0) || st > (def.maxStoreys || Infinity)) return;
+      const r = fitShell(cx, cz, lotW, lotD, SS.setback, st, null,
+        shop ? { retail: true, storefront: true, dress: { style: style } } : { dress: { style: style } });
+      if (r.setback > sb) sb = r.setback;
+    };
+    const grammars = Array.isArray(SS.grammar) ? SS.grammar : [SS.grammar];
+    const heights = Array.isArray(SS.storeys) ? SS.storeys : [SS.storeys];
+    for (const g of grammars) for (const st of heights) fit(g, st, false);
+    for (const st of [SS.shopSt, SS.mixSt || SS.shopSt]) fit(SS.shop, st, true);
+    _streetSB.set(key, sb);
+    return sb;
+  }
+  CBZ.cityStreetSetback = streetSetbackFor;
+
   // ---- the enterable building (one group; switchback stairs to the roof) ----
   // opts: { boarded:bool (board windows instead of glass), grime:bool }
   function makeBuilding(root, ox, oz, w, d, storeys, color, doorSide, opts) {
@@ -3713,9 +3879,7 @@
     // neighbourhood pick. Recorded on the built record as `dress`, so
     // structural.js / collapse.js ask facadePick the same question and get
     // the same answer.
-    const DRESS = opts.dress === false ? false
-      : (opts.dress || (CBZ.facadeAutoDress ? CBZ.facadeAutoDress(ox, oz, storeys,
-          opts.showroom || opts.garageGround ? "showroom" : opts.retail ? "shop" : null) : null));
+    const DRESS = shellDress(ox, oz, storeys, opts);
     const facadeTakesRoof = !!(CBZ.facadeCrownsRoof && CBZ.facadeCrownsRoof(DRESS,
       function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; }, storeys));
     const MPAL = CW.mpal;
@@ -3984,18 +4148,7 @@
 
     // ---- WHAT KIND OF STREET DOOR -------------------------------------------
     const dressDef = DRESS && DRESS.style && CBZ.facadeDef ? CBZ.facadeDef(DRESS.style) : null;
-    const TOWNHOUSE_STYLES = { brickhouse: 1, queenanne: 1, victorian: 1 };
-    const HOUSE_STYLES = { manor: 1, ranch: 1, techhouse: 1, plantation: 1, greekrev: 1, spanish: 1, romanvilla: 1, machiya: 1, desertmod: 1, adobe: 1 };
-    let doorKind;
-    if (opts.garageGround) doorKind = "deck";      // the drive-in bays on every face are its entrances
-    else if (opts.boarded) doorKind = "derelict";
-    else if (opts.showroom || opts.retail) doorKind = "shop";
-    else if (opts.district === "industrial" || opts.industrial) doorKind = "service";
-    else if (dressDef && TOWNHOUSE_STYLES[dressDef.id] && storeys <= 4) doorKind = "townhouse";
-    else if (dressDef && HOUSE_STYLES[dressDef.id]) doorKind = "house";
-    else if (opts.office || FACADE === "office" && storeys >= 6 && !dressDef) doorKind = "office";
-    else if (storeys >= 3) doorKind = "lobby";
-    else doorKind = "house";
+    const doorKind = shellDoorKind(opts, dressDef, storeys, FACADE);
     // the hole: a transom light over the leaf where the storey has the height
     const DOOR_SILL = 0.13;                       // threshold top (the slab's top is 0.14)
     const transomDoor = (doorKind === "townhouse" || doorKind === "lobby" || doorKind === "office") && FH >= 3.0;
@@ -4052,25 +4205,9 @@
         dress: DRESS || (DRESS === false ? false : null),   // false = explicit opt-out
         // volumes (building-local {x0,x1,y0,y1,z0,z1}) the facade kit must leave
         // open: dressFacade re-emits any grammar box through one as the pieces
-        // around it. The mega-tower hands in its executive storey here.
-        keepClear: (function () {
-          const kc = Array.isArray(opts.keepClear) ? opts.keepClear.slice() : [];
-          // THE STOREFRONT BAY. A shop's ground storey on its door face
-          // belongs to the shop: the shell's clear glazing, its door, and the
-          // fascia + awning signAwning hangs on the header band. No grammar
-          // ornament may clad over it — every box a facade lays there is
-          // re-emitted around this volume (corner piers survive, 0.7 m each end).
-          if (opts.storefront === true || (opts.storefront !== false && (opts.retail || opts.showroom))) {
-            const hz = doorSide === 0 || doorSide === 1;
-            const span = hz ? w : d, half = (hz ? d : w) / 2;
-            const sgn = (doorSide === 0 || doorSide === 2) ? -1 : 1;
-            const n0 = sgn > 0 ? half - 0.05 : -half - 40, n1 = sgn > 0 ? half + 40 : -half + 0.05;
-            const t0 = -span / 2 + 0.7, t1 = span / 2 - 0.7;
-            kc.push(hz ? { x0: t0, x1: t1, y0: -1, y1: FH - 0.02, z0: n0, z1: n1 }
-                       : { x0: n0, x1: n1, y0: -1, y1: FH - 0.02, z0: t0, z1: t1 });
-          }
-          return kc.length ? kc : null;
-        })(),
+        // around it. The mega-tower hands in its executive storey here; a
+        // shop's storefront bay is one too (shellKeepClear).
+        keepClear: shellKeepClear(w, d, doorSide, FH, opts),
         pal: MPAL || { wall: color, stone: TRIM, dirt: 0x2a2420, kind: "brick", id: null },
         color, TRIM, BASE, PIL, MULL,
         hash: bhash,
@@ -7691,8 +7828,8 @@
       { x0: -w / 2 - 0.35, x1: w / 2 + 0.35, z0: -d / 2 - 0.35, z1: d / 2 + 0.35, y0: execY + 0.5, y1: execY + FH - 0.4 },
     ] : [bodyClear];
     const b = makeBuilding(root, lot.cx, lot.cz, w, d, STOREYS, color, side,
-      EXECF ? { garageGround: true, district: "core", glassKind: "clear", keepClear: execClear }
-            : { garageGround: true, district: "core", keepClear: execClear });
+      EXECF ? { garageGround: true, district: "core", glassKind: "clear", keepClear: execClear, reach: (lot.w - w) / 2 }
+            : { garageGround: true, district: "core", keepClear: execClear, reach: (lot.w - w) / 2 });
     const topY = (STOREYS - 1) * FH;                      // the top interior floor (penthouse)
     // PENTHOUSE — the apex home dressed across the whole top floor.
     furnishPenthouse(b, topY);
@@ -7936,24 +8073,16 @@
                   they stood 4-5 and the Gang City West borough across the
                   harbour out-topped them with 10-27 storey towers.
                   city/zoning.js CORE_ST.downtown (10) is this street wall.
-         setback  metres from the wall to the footway's back edge. Everything
-                  a building dresses itself with stays inside it (makeBuilding
-                  opts.reach); residential gets a front yard for its porches.
+         setback  the street's MINIMUM metres from the wall to the footway's
+                  back edge; the line is pushed back as far as the street's
+                  grammars stand proud of their walls (streetSetbackFor), so
+                  every porch, terrace and flight is built whole on the parcel.
+                  makeBuilding opts.reach stays the parcel fence.
          walls    [A, B] wall tones (the grammar derives its trim from these)
 
        rng() draws are kept where the old code drew them (the value is simply
        no longer used), so the rest of the deterministic build is unchanged. */
-    const STREET_STYLE = {
-      Midtown:    { grammar: "artdeco",                 shop: "artdeco", storeys: [12, 16], shopSt: 4, mixSt: 7, setback: 1.5, walls: [0xcfc2a4, 0xbdb096] },
-      Eastgate:   { grammar: "brick",                   shop: "brick",   storeys: [10, 8], shopSt: 3, mixSt: 6, setback: 1.5, walls: [0x8a3b26, 0x7d3624] },
-      Westend:    { grammar: "stone",                   shop: "stone",   storeys: [8, 10], shopSt: 3, mixSt: 6, setback: 1.5, walls: [0xcab99a, 0xb9a887] },
-      Harborside: { grammar: "brick",                   shop: "brick",   storeys: [7, 6],  shopSt: 3, mixSt: 5, setback: 1.5, walls: [0x6e4634, 0x62402f] },
-      Northpoint: { grammar: "brickhouse",              shop: "brick",   storeys: [3, 3],  shopSt: 2, setback: 3.5, walls: [0x98482e, 0x8c432c] },
-      Crownhill:  { grammar: ["queenanne", "victorian"], shop: "stone",  storeys: [3, 3],  shopSt: 2, setback: 3.5, walls: [0x6f8ea4, 0xb09a78] },
-      Southside:  { grammar: "brutalist",               shop: "brick",   storeys: [7, 8],  shopSt: 2, setback: 3.0, walls: [0x8c8983, 0x807d77] },
-      Ironworks:  { grammar: "brick",                   shop: "brick",   storeys: [3, 3],  shopSt: 2, setback: 2.0, walls: [0x5c3a2c, 0x543428] },
-      Dockyard:   { grammar: "brutalist",               shop: "brick",   storeys: [3, 4],  shopSt: 2, setback: 2.0, walls: [0x77746c, 0x6b6861] },
-    };
+    // the table: STREET_STYLE (module scope, above makeBuilding)
     const KIND_STYLE = { core: "Midtown", commercial: "Eastgate", residential: "Northpoint", projects: "Southside", industrial: "Ironworks" };
     function streetStyle(lot) {
       const D = (city.districts && city.districts[lot.district]) || null;
@@ -7968,6 +8097,8 @@
       return { style: id };
     }
     function streetWall(lot) { return pick2(streetStyle(lot).walls, lot); }
+    // the street's build line, deep enough for its facades (streetSetbackFor)
+    function streetSetback(lot) { return streetSetbackFor(streetStyle(lot), lot.cx, lot.cz, lot.w, lot.d); }
     function districtStoreys(lot) {
       rng();   // the old per-lot height roll, drawn and discarded (RNG order preserved)
       return pick2(streetStyle(lot).storeys, lot);
@@ -8240,13 +8371,27 @@
       // A civic anchor's portico + steps are 2.5 m deep, so it stands back
       // far enough to keep them on its own parcel. The flagship tower keeps
       // its build-to-line 1 m (its podium deck is drive-in on every side).
+      // AND THE STREET'S LINE IS DEEP ENOUGH FOR ITS FACADES (streetSetback):
+      // the table's setback is a minimum; a street whose grammar builds a
+      // terrace and a flight of steps stands back far enough to keep them on
+      // its own parcel instead of having them sawn off at the footway.
       const SS = streetStyle(lot);
-      const setback = isLux ? 1 : (isCivic || civicShop) ? Math.max(SS.setback, 3.2) : SS.setback;
-      const w = lot.w - 2 * setback, d = lot.d - 2 * setback;
+      let setback = isLux ? 1 : (isCivic || civicShop) ? Math.max(streetSetback(lot), 3.2) : streetSetback(lot);
+      let w = lot.w - 2 * setback, d = lot.d - 2 * setback;
       const toCx = city.center.x - lot.cx, toCz = city.center.z - lot.cz;
       const side = Math.abs(toCx) > Math.abs(toCz) ? (toCx > 0 ? 3 : 2) : (toCz > 0 ? 1 : 0);
-      const door = doorInfo(lot.cx, lot.cz, w, d, side);
-      const doorPt = { x: door.x + door.nx * 1.6, z: door.z + door.nz * 1.6, nx: door.nx, nz: door.nz };
+      let door = doorInfo(lot.cx, lot.cz, w, d, side);
+      let doorPt = { x: door.x + door.nx * 1.6, z: door.z + door.nz * 1.6, nx: door.nx, nz: door.nz };
+      // a lot that wears something deeper than its street's own grammar (the
+      // bank's ashlar front and its flight of steps) stands back further than
+      // the street line, on its own parcel, instead of being sawn off at it
+      const standBack = function (storeys, opts) {
+        const f = fitShell(lot.cx, lot.cz, lot.w, lot.d, setback, storeys, side, opts);
+        if (!(f.setback > setback + 0.01)) return;
+        setback = f.setback; w = f.w; d = f.d;
+        door = doorInfo(lot.cx, lot.cz, w, d, side);
+        doorPt = { x: door.x + door.nx * 1.6, z: door.z + door.nz * 1.6, nx: door.nx, nz: door.nz };
+      };
 
       // ---- GANG-RUN HIDEOUT ----
       // PROCGEN #3 — land value nudges the odds on top of the CH-PLAN
@@ -8269,8 +8414,10 @@
         const storeys = Math.max(1, Math.min(4, districtStoreys(lot)));
         rng(); rng();   // the old palette + facade-variant draws (RNG order preserved)
         const color = streetWall(lot);
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side,
-          { facade: "office", district: districtKind(lot), dress: streetDress(lot, storeys, false) || false, reach: setback });
+        const hideOpts = { facade: "office", district: districtKind(lot), dress: streetDress(lot, storeys, false) || false };
+        standBack(storeys, hideOpts);
+        hideOpts.reach = setback;
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, hideOpts);
         lot.kind = "abandoned";
         lot.building = { ...b, name: "Gang Hideout", sign: color, side, door: doorPt, abandoned: true, gang: null };
         makeStash(b, lot);
@@ -8347,12 +8494,15 @@
           : (shop.kind === "bank" || shop.kind === "security") ? ({ style: "stone" })
           : (driveIn && shopStoreys < 2) ? false
           : (streetDress(lot, shopStoreys, true) || false);
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, {
+        const shopOpts = {
           showroom: driveIn,
           retail: !!shop.retail, facade: specialFacade, district: dk,
-          civic: civicSpec, dress: shopDress, reach: setback,
+          civic: civicSpec, dress: shopDress,
           storefront: !porticoLive,
-        });
+        };
+        standBack(shopStoreys, shopOpts);
+        shopOpts.reach = setback;
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, shopOpts);
         if (!porticoLive) signAwning(b, side, w, d, shop.sign, shop.name, shop.kind);
         // Counter toward the back, vendor behind it. The back wall is also
         // where the shell reserved its stair core (a back corner), so the
@@ -8554,6 +8704,9 @@
         // penthouse door, and a rooftop HELIPAD. It tags lot.building.home (the
         // penthouse tier), lot.building.helipad and lot.building.hangar, and is
         // exposed via CBZ.cityMegaTower().
+        // its podium is drive-in on every side (no steps), but the grammar's
+        // piers, cornices and fire escapes still stand proud of the wall
+        standBack(52, { garageGround: true, district: "core" });
         const mega = makeMegaTower(root, lot, w, d, side, door, doorPt, FLAGSHIP);
         luxury = lot; luxBuilding = mega.b;
         homeLots.push(lot);
@@ -8577,7 +8730,10 @@
           // a glass OFFICE shell — clear curtain wall so the seated workers READ
           // through it from the street (the living-floor "why"). Same enterable/
           // climbable rig; upper floors get desks instead of flats.
-          const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { office: true, glassKind: "clear", district: dk, dress: streetDress(lot, storeys, false) || false, reach: setback });
+          const offOpts = { office: true, glassKind: "clear", district: dk, dress: streetDress(lot, storeys, false) || false };
+          standBack(storeys, offOpts);
+          offOpts.reach = setback;
+          const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, offOpts);
           // dress EVERY storey above the lobby with a working office floor and
           // collect the seat anchors building-wide, then register them ONCE so
           // city/officejobs.js can seat a payroll of workers (witnesses + cash).
@@ -8662,6 +8818,7 @@
            sight (core/citystream.js). The shell never drew from the city rng,
            so every later lot gets exactly the draws it always did. Listed
            homes (the property ladder) are always built. */
+        standBack(storeys, { district: dk, facade: "office", dress: streetDress(lot, storeys, false) || false });
         const HS = CBZ.slice;
         if (!listed && HS && HS.stream && CBZ.sliceAt) {
           lot.kind = "tower";

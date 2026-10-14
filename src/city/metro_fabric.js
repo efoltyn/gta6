@@ -2150,7 +2150,9 @@
   //      the camera leaves. CPU arrays freed once on the GPU.
   // ---------------------------------------------------------------------
   const KIT_CELL = 100;           // metres: one mesh
-  const KIT_REACH = 1.2;          // nothing past a wall further than this
+  // nothing past a wall further than this: the strip every street wall owns
+  // in front of it (metroplan.js FRONTAGE), so the relief ends on its own land
+  const KIT_REACH = (CBZ.metroPlanLib && CBZ.metroPlanLib.FRONTAGE) || 1.2;
   const KIT_TOPLIP = 0.6;         // a cornice may lip this far over the parapet top
   const KMAP = [1, 3, 0, 2];      // fabric face FK[k] -> kit side (0 -z, 1 +z, 2 -x, 3 +x)
   /* LEVELS OF DETAIL. A cell is built for the nearest distance the camera
@@ -2381,6 +2383,11 @@
       if (p1 > pm) { s = 1; pm = p1; } if (p2 > pm) { s = 2; pm = p2; } if (p3 > pm) { s = 3; pm = p3; }
       if (pm <= 0.01 || !(allow & (1 << s))) { KSTAT.face++; continue; }
       if (Math.abs(r.x) + r.r > hw + KIT_REACH || Math.abs(r.z) + r.r > hd + KIT_REACH) { KSTAT.face++; continue; }
+      // a round piece cannot be clipped like a box: one that would poke
+      // through a face the kit may not dress (a party wall, the side of an
+      // end-of-terrace on its cross street's footway) is left out
+      if ((!(allow & 1) && r.z - r.r < -hd - e) || (!(allow & 2) && r.z + r.r > hd + e) ||
+          (!(allow & 4) && r.x - r.r < -hw - e) || (!(allow & 8) && r.x + r.r > hw + e)) { KSTAT.face++; continue; }
       if (r.r * 2 < KIT_PX * d0) { KSTAT.lod++; continue; }
       rs.push(r);
     }

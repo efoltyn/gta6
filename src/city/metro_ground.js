@@ -1898,6 +1898,22 @@
           FO.q(ids[0], ids[1], ids[2], ids[3]);
         }
       }
+      if (b.use === "inner") {
+        // the walk-ups' front strip (metroplan.js FRONTAGE: the wall stands
+        // that far behind the footway, the facade's relief stands on it):
+        // paved like an areaway, all four street faces, not a lawn verge
+        const FR = (CBZ && CBZ.metroPlanLib && CBZ.metroPlanLib.FRONTAGE) || 1.2;
+        const i0 = b.sw, i1 = b.sw + FR;
+        FO.N(0, 1, 0).T(0.9);
+        const strips = [
+          [b.x0 + i0, b.x1 - i0, b.z0 + i0, b.z0 + i1], [b.x0 + i0, b.x1 - i0, b.z1 - i1, b.z1 - i0],
+          [b.x0 + i0, b.x0 + i1, b.z0 + i1, b.z1 - i1], [b.x1 - i1, b.x1 - i0, b.z0 + i1, b.z1 - i1],
+        ];
+        for (const r of strips) {
+          const ids = [[r[0], r[2]], [r[1], r[2]], [r[1], r[3]], [r[0], r[3]]].map(function (p) { return FO.v(p[0], Y.lot + 0.012, p[1], p[0] / 6, p[1] / 1.5); });
+          FO.q(ids[0], ids[1], ids[2], ids[3]);
+        }
+      }
     }
 
     // ---------- PAD: ring (gapped at mouths and exclusions) + lawn ----------
