@@ -446,7 +446,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=boot1014"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
-<script src="src/core/texfree.js?v=mem1014"></script>
+<script src="src/core/texfree.js?v=peak1014c"></script>
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=memfit1008"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
@@ -487,7 +487,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=treelod1012"></script>
+<script src="src/world/vegetation.js?v=peak1014c"></script>
 <!-- one tree at every distance: near -> mid copy -> octahedral impostor, dithered crossfades (CBZ.treeLod) -->
 <script src="src/world/treelod.js?v=farcopy1013"></script>
 <!-- where a tree meets the ground: instanced contact shade + mulch rings every
@@ -607,7 +607,7 @@ document.body.appendChild(b);}}catch(e){}})();
        every body's hand (character.js builds it) — so it loads before bodies -->
   <script src="src/systems/fphands.js?v=peak1014"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
-  <script src="src/entities/tattoo.js?v=mem1014"></script>
+  <script src="src/entities/tattoo.js?v=peak1014c"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
   <script src="src/entities/character.js?v=armhole1011"></script>
@@ -916,7 +916,7 @@ document.body.appendChild(b);}}catch(e){}})();
      restores the legacy feet-pivot flop. -->
 <script src="src/systems/prisoncorpse.js?v=fallreal1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
-<script src="src/entities/crowd.js?v=realcrowd1"></script>
+<script src="src/entities/crowd.js?v=peak1014c"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
 <script src="src/systems/detection.js?v=jailv1001"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
@@ -1036,7 +1036,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ekey2"></script>
-<script src="src/systems/fpsmode.js?v=boot1014"></script>
+<script src="src/systems/fpsmode.js?v=peak1014c"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=jailv1001"></script>
 
@@ -1238,7 +1238,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
 <script src="src/city/waterfield.js?v=pf0930g"></script>
-<script src="src/city/highways.js?v=mem1014"></script>
+<script src="src/city/highways.js?v=peak1014c"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
@@ -1341,7 +1341,7 @@ document.body.appendChild(b);}}catch(e){}})();
      dressing through the city streamer. island_airport.js (Halloran) and
      airport_capeharbor.js are specs; both builders run at worldgen, after
      this file has parsed. -->
-<script src="src/city/airport_kit.js?v=merge1014c"></script>
+<script src="src/city/airport_kit.js?v=peak1014c"></script>
 <script src="src/city/airport_capeharbor.js?v=air0929r"></script>
 <!-- THE AIRFRAME KIT (loft / wing / merge) the NPC War airframes build on, and milAirDrive / milAirAim / milAirPoint, the calls the city makes on a flying unit. The machines themselves are the unit files Fort Brandt parks (island_military.js). -->
 <script src="src/city/mil_air.js?v=army1013m"></script>
@@ -1429,7 +1429,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=boot1014"></script>
 <script src="src/city/economy.js?v=vit3"></script>
-<script src="src/city/clothes.js?v=armhole1011"></script>
+<script src="src/city/clothes.js?v=peak1014c"></script>
 <script src="src/city/outfits.js?v=armourm1011"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <script src="src/city/hunger.js?v=stam1009"></script>
@@ -1457,7 +1457,7 @@ document.body.appendChild(b);}}catch(e){}})();
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
 <script src="src/city/brain_city.js?v=standdown1009"></script>
-<script src="src/entities/pedinstance.js?v=peak1014"></script>
+<script src="src/entities/pedinstance.js?v=peak1014c"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1504,8 +1504,8 @@ document.body.appendChild(b);}}catch(e){}})();
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=w09290242x"></script>
-<script src="src/city/playercars.js?v=sl0930b"></script>
-<script src="src/city/crashfx.js?v=rpgblast1013"></script>
+<script src="src/city/playercars.js?v=peak1014c"></script>
+<script src="src/city/crashfx.js?v=peak1014c"></script>
 <script src="src/city/crashdeform.js?v=carblood930"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
@@ -1630,7 +1630,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/tornado.js?v=street1009"></script>
 <script src="src/city/aircraftimpact.js?v=street1009"></script>
 <script src="src/city/shops.js?v=vault1013"></script>
-<script src="src/city/gunstore.js?v=tap0929"></script>
+<script src="src/city/gunstore.js?v=peak1014c"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <script src="src/city/gunmods.js?v=me6f1ee"></script>
@@ -1754,8 +1754,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/zillow.js?v=fac1009"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <script src="src/city/bank.js?v=verbs2b"></script>
-<script src="src/city/pawnshop.js?v=tap0929"></script>
-<script src="src/city/clothingstore.js?v=tap0929"></script>
+<script src="src/city/pawnshop.js?v=peak1014c"></script>
+<script src="src/city/clothingstore.js?v=peak1014c"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
      near you, plus its real catalog stock as the real item models, buyable
@@ -1826,7 +1826,7 @@ document.body.appendChild(b);}}catch(e){}})();
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=speed1014"></script>
 <script src="src/city/metro_ground.js?v=peak1014"></script>
-<script src="src/city/metro.js?v=peak1014"></script>
+<script src="src/city/metro.js?v=peak1014c"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
@@ -1991,7 +1991,7 @@ document.body.appendChild(b);}}catch(e){}})();
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
 <script src="src/city/pednav.js?v=nav2"></script>
-<script src="src/systems/fullmap.js?v=maplabels1009"></script>
+<script src="src/systems/fullmap.js?v=peak1014c"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -2413,7 +2413,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=loose1013"></script>
+<script src="src/city/presidency.js?v=peak1014c"></script>
 <script src="src/city/politics.js?v=btn1011"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
@@ -2484,7 +2484,7 @@ document.body.appendChild(b);}}catch(e){}})();
      property panel at your address post, the contractor's demolition, locked
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
-<script src="src/city/plots.js?v=mem1014"></script>
+<script src="src/city/plots.js?v=peak1014c"></script>
 <script src="src/city/compoundcrew.js?v=cd0929"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
@@ -2504,7 +2504,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=mem1014"></script>
+<script src="src/core/packages.js?v=peak1014c"></script>
 <script src="src/games/casino.js?v=onebet1"></script>
 <script src="src/games/ocean.js?v=nodash1"></script>
 <!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
@@ -2520,7 +2520,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/games/boxing.js?v=onebet1"></script>
 <script src="src/games/airport.js?v=air0929r"></script>
 <script src="src/games/military.js?v=base1012"></script>
-<script src="src/games/government.js?v=intent1008"></script>
+<script src="src/games/government.js?v=peak1014c"></script>
 <script src="src/games/police.js?v=dogs1009b"></script>
 <script src="src/games/jail.js?v=nostep1013"></script>
 <script src="src/systems/newlife.js?v=newlife1"></script>

@@ -445,7 +445,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=boot1014"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
-<script src="src/core/texfree.js?v=mem1014"></script>
+<script src="src/core/texfree.js?v=peak1014c"></script>
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=memfit1008"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
@@ -483,7 +483,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=treelod1012"></script>
+<script src="src/world/vegetation.js?v=peak1014c"></script>
 <!-- one tree at every distance: near -> mid copy -> octahedral impostor, dithered crossfades (CBZ.treeLod) -->
 <script src="src/world/treelod.js?v=farcopy1013"></script>
 <!-- where a tree meets the ground: instanced contact shade + mulch rings every
@@ -586,7 +586,7 @@ document.body.appendChild(b);}}catch(e){}})();
        every body's hand (character.js builds it) — so it loads before bodies -->
   <script src="src/systems/fphands.js?v=peak1014"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
-  <script src="src/entities/tattoo.js?v=mem1014"></script>
+  <script src="src/entities/tattoo.js?v=peak1014c"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
   <script src="src/entities/character.js?v=armhole1011"></script>
@@ -1527,7 +1527,7 @@ document.body.appendChild(b);}}catch(e){}})();
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=speed1014"></script>
 <script src="src/city/metro_ground.js?v=peak1014"></script>
-<script src="src/city/metro.js?v=peak1014"></script>
+<script src="src/city/metro.js?v=peak1014c"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- WHO A PERSON IS AND WHAT YOU CAN DO TO HIM: the role -> verbs table the
      registry filters every street verb through, the one-line title over a
@@ -1651,7 +1651,7 @@ document.body.appendChild(b);}}catch(e){}})();
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=maplabels1009"></script>
+<script src="src/systems/fullmap.js?v=peak1014c"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -2074,7 +2074,7 @@ document.body.appendChild(b);}}catch(e){}})();
      property panel at your address post, the contractor's demolition, locked
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
-<script src="src/city/plots.js?v=mem1014"></script>
+<script src="src/city/plots.js?v=peak1014c"></script>
 <script src="src/city/compoundcrew.js?v=cd0929"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
@@ -2093,7 +2093,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=mem1014"></script>
+<script src="src/core/packages.js?v=peak1014c"></script>
 <!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
      was a dumb idea, but it's really what this whole game's point is: get
      enough people recruited, or get enough money, or enough guns, or somehow
