@@ -265,7 +265,15 @@
     // the hysteresis) before the band begins: inside the band its copy
     // leaves pixels to it, so it must be there (never nearer than the tier's
     // radius, never farther than the fog)
-    const RB = R0 ? Math.max(SG.detail + (CBZ.SIGHT_FADE_BAND || 30) / 2 + hysBand() + 10, R0) : 0;
+    /* THE BAND GOES OUTWARD. A group must be drawn wherever it can be seen
+       (RV: the fog's end; RB: a covered shell's crossfade band). It used to
+       be HIDDEN at R and SHOWN again at R - hysBand, and at driving speed the
+       band is 60 m+: a shell came back 30 m INSIDE the fog (counted as a
+       handoff, seen as a building fading in out of the haze). Now it is
+       SHOWN at R + hysBand (the distance the viewer covers before this group
+       is looked at again, so it is there before it is needed) and hidden
+       only past R + 2 x hysBand. Showing early only ever draws fog colour. */
+    const RB = R0 ? Math.max(SG.detail + (CBZ.SIGHT_FADE_BAND || 30) / 2 + 10, R0) : 0;
     if (!R0) {                      // OFF (high tiers / flag) — restore and idle
       if (hidByUs.size) { hidByUs.forEach(function (o) { o.visible = true; }); hidByUs.clear(); }
       return;
@@ -302,32 +310,59 @@
         if (hidByUs.has(o)) { o.visible = true; hidByUs.delete(o); }
         continue;
       }
-      const dx = b.x - P.x, dz = b.z - P.z;
-      const d = Math.sqrt(dx * dx + dz * dz) - b.r;   // nearest possible point
-      // (RV: see above. Everything is held to the fog's end; a shell with a
-      // far copy only to the swap band, RB.)
-      const R = covers && o.userData && o.userData.bld && covers(o) ? Math.min(RV, RB) : RV;
-      if (d > R) {
-        // no `!hidByUs.has(o)` guard: if another system handed visibility back
-        // (a quality tier restoring the masonry veneer), the sweep must be able
-        // to re-take it, or the object stays drawn forever while the set still
-        // claims we own it. Re-adding to a Set is free.
-        if (o.visible) { o.visible = false; hidByUs.add(o); }
-        if (d > R + EVICT && hidByUs.has(o) && !evicted.has(o)) evict(o);
-      } else if (d < R - hysBand()) {
-        // userData.cullLocked = "another system wants this hidden at this
-        // quality tier" (city/buildings.js's masonry veneer is dropped whole at
-        // tier 0). Re-showing on approach would override that owner. Culling it
-        // is still fine — hidden is hidden.
-        if (evicted.has(o) && CBZ.geoExpandAll) {
-          // a packed eviction comes back to full size before it can draw
-          o.traverse(function (c) { const g = c.geometry; if (g && g._cbzNoDraw) CBZ.geoExpandAll(g); });
-        }
-        if (hidByUs.has(o) && !(o.userData && o.userData.cullLocked)) { o.visible = true; hidByUs.delete(o); shownAt.set(o, performance.now()); }
-        evicted.delete(o);
-      }
+      judge(o, b, P, covers, RV, RB);
     }
   });
+  function judge(o, b, P, covers, RV, RB) {
+    const dx = b.x - P.x, dz = b.z - P.z;
+    const d = Math.sqrt(dx * dx + dz * dz) - b.r;   // nearest possible point
+    // (RV: see above. Everything is held to the fog's end; a shell with a
+    // far copy only to the swap band, RB.)
+    const R = covers && o.userData && o.userData.bld && covers(o) ? Math.min(RV, RB) : RV;
+    const H = hysBand();
+    if (d > R + 2 * H) {
+      // no `!hidByUs.has(o)` guard: if another system handed visibility back
+      // (a quality tier restoring the masonry veneer), the sweep must be able
+      // to re-take it, or the object stays drawn forever while the set still
+      // claims we own it. Re-adding to a Set is free.
+      if (o.visible) { o.visible = false; hidByUs.add(o); }
+      if (d > R + 2 * H + EVICT && hidByUs.has(o) && !evicted.has(o) && !(o.userData && o.userData.streamJob)) evict(o);
+    } else if (d < R + H) {
+      // userData.cullLocked = "another system wants this hidden at this
+      // quality tier" (city/buildings.js's masonry veneer is dropped whole at
+      // tier 0). Re-showing on approach would override that owner. Culling it
+      // is still fine — hidden is hidden.
+      if (evicted.has(o) && CBZ.geoExpandAll) {
+        // a packed eviction comes back to full size before it can draw
+        o.traverse(function (c) { const g = c.geometry; if (g && g._cbzNoDraw) CBZ.geoExpandAll(g); });
+      }
+      if (hidByUs.has(o) && !(o.userData && o.userData.cullLocked)) { o.visible = true; hidByUs.delete(o); shownAt.set(o, performance.now()); }
+      evicted.delete(o);
+    }
+  }
+  /* ADOPT: judge a group the moment it joins the root (a streamed job just
+     built or re-attached, core/citystream.js), before any frame draws it.
+     The streamer builds 6 s ahead of a car, far past the fog: unjudged, such
+     a group was drawn (and its buffers uploaded) on its first frame as pure
+     fog colour, hidden by the next sweep, and its GPU-only buffers were then
+     READ BACK for eviction, to be uploaded again on approach. Judged at
+     once, it is never drawn or uploaded until it comes within the fog.
+     (Stream-job groups are never evicted: the streamer parks and frees them
+     itself, past the keep circle.) */
+  CBZ.farcullAdopt = function (o) {
+    const g = CBZ.game, root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+    if (!o || !root || o.parent !== root || !g || g.mode !== "city") return;
+    if (!(CBZ.CONFIG && CBZ.CONFIG.CITY_FAR_CULL !== false) || !(CBZ.cityCullRadius > 0)) return;
+    if (!o.isMesh && !o.isGroup) return;
+    const SG = CBZ.sight();
+    const R0 = CBZ.cityCullRadius;
+    const RV = Math.max(SG.far + 30, R0);
+    const RB = Math.max(SG.detail + (CBZ.SIGHT_FADE_BAND || 30) / 2 + 10, R0);
+    o.updateWorldMatrix(true, true);
+    const b = boundsFor(o);
+    if (b.dynamic) return;
+    judge(o, b, { x: SG.x, z: SG.z }, CBZ.metroBuiltCovers || null, RV, RB);
+  };
 
   /* ==================================================================
      SCENERY POOLS ARE DEALT INTO CELLS (2026-09-28, the "too many trees"
@@ -678,7 +713,19 @@
      removed from rendering via layers (never .visible, which the owners and
      the tier gates own), and put back before it comes within reach. Mountains
      are plain meshes and are left to their own tier gates. */
-  if (CBZ.isMobileDevice) {
+  /* EVERY DEVICE (2026-10-14). It was phones and tablets only, on the
+     belief that a desktop pool past the fog was "a fair price for a
+     horizon". Past `reach` there is no horizon to pay for: every pixel of a
+     pool there is fog.color (core/sight.js), on any device. The test is
+     exact as long as the pool's material takes the plain scene fog, so a
+     pool with a fog of its own (fog-scaled, a shader, unfogged) is left
+     drawn. */
+  function reachSafe(o) {
+    const m = Array.isArray(o.material) ? o.material[0] : o.material;
+    if (!m) return true;
+    return !(m.fog === false || m.isShaderMaterial || (m.userData && m.userData._cbzFogScaled));
+  }
+  {
     const reachHidden = new Set();
     let reachT = 0;
     const reachStat = { cands: 0, reach: 0, camY: 0 };
@@ -747,9 +794,10 @@
       const reach = CBZ.sight().reach;
       const kids = root.children;
       let cands = 0;
+      const cx = cam.position.x, cy = cam.position.y, cz = cam.position.z;
       const hold = function (o, b) {
         cands++;
-        const d = Math.hypot(b.x - cam.position.x, b.y - cam.position.y, b.z - cam.position.z) - b.r;
+        const d = Math.hypot(b.x - cx, b.y - cy, b.z - cz) - b.r;
         if (d > reach) {
           if (o.layers.mask !== 0) { o.layers.mask = 0; reachHidden.add(o); }
         } else if (reachHidden.has(o)) {
@@ -761,11 +809,15 @@
         const ud = o.userData || {};
         // A pool dealt into frustum cells (above) is held back cell by cell:
         // its own layer mask is the split's, never this pass's.
+        if (!reachSafe(o)) continue;
         if (ud.cellSplit && ud.cells) {
           if (reachHidden.has(o)) reachHidden.delete(o);
           for (let k = 0; k < ud.cells.length; k++) {
             const c = ud.cells[k], s = c.userData.sphere;
-            hold(c, { x: s.center.x + o.position.x, y: s.center.y + o.position.y, z: s.center.z + o.position.z, r: s.radius });
+            // (the cell's sphere in world space, kept with it: no object per cell per pass)
+            const w = c.userData._reachS || (c.userData._reachS = { x: 0, y: 0, z: 0, r: 0 });
+            w.x = s.center.x + o.position.x; w.y = s.center.y + o.position.y; w.z = s.center.z + o.position.z; w.r = s.radius;
+            hold(c, w);
           }
           continue;
         }
