@@ -100,7 +100,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       const frames = arg("--frames") ? arg("--frames").split(",") : [];
       const r = await runKit(B, srv.origin, kit, {
         params: arg("--params", ""), seconds: arg("--seconds"), bootOnly: flag("--boot-only"),
-        frames, cams: (arg("--cam", "3q")).split(","), W: 640, H: 400,
+        // cams split on a comma that starts a NEW cam name: an at:x,y,z:lx,ly,lz
+        // cam carries commas of its own (they are followed by digits)
+        frames, cams: (arg("--cam", "3q")).split(/,(?=[a-z])/i), W: 640, H: 400,
       });
       results.push(r);
       if (r.frames && r.frames.length) {

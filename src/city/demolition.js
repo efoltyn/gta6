@@ -659,7 +659,9 @@
       // to remove nothing is skipped.
       if (!b._tornDown) {
       for (const gp of b.windows || []) {
-        if (gp.shattered) continue;
+        // a pane broken before the building came down: its teeth and its
+        // window's room were standing in the facade that is now gone
+        if (gp.shattered) { if (CBZ.cityPaneHoleDrop) CBZ.cityPaneHoleDrop(gp); continue; }
         gp.shattered = true;
         if (gp.mesh) gp.mesh.visible = false;
         else if (CBZ._paneShow) CBZ._paneShow(gp, false);
@@ -687,7 +689,7 @@
       // ---- LEGACY PATH (flag off, or structural.js not loaded) — verbatim ----
       // 2) glass out of the instanced pools (+ solid panes' meshes/colliders)
       for (const gp of b.windows || []) {
-        if (gp.shattered) continue;
+        if (gp.shattered) { if (CBZ.cityPaneHoleDrop) CBZ.cityPaneHoleDrop(gp); continue; }
         gp.shattered = true;
         if (gp.mesh) gp.mesh.visible = false;
         else if (CBZ._paneShow) CBZ._paneShow(gp, false);
@@ -774,6 +776,7 @@
       for (const gp of b.windows || []) {
         if (!gp.shattered) continue;
         gp.shattered = false; gp.cracked = false;
+        if (CBZ.cityPaneHoleDrop) CBZ.cityPaneHoleDrop(gp);
         if (gp.mesh) gp.mesh.visible = true;
         else if (CBZ._paneShow) CBZ._paneShow(gp, true);
         if (gp.col) seat(CBZ.colliders, sets && sets.cols, gp.col);

@@ -11,7 +11,7 @@ The page loads only the scripts the kit needs, not index.html's 729.
 ```sh
 node tools/lab/run.mjs --kit person-chair                  # boot + run + the kit's verdict (numbers, no pictures)
 node tools/lab/run.mjs --kit standoff --params 'role=cop&dist=4' -v      # + the event timeline
-node tools/lab/run.mjs --kit car-chair --frames 0,1,2 --cam 3q,side      # + frames on disk
+node tools/lab/run.mjs --kit car-chair --frames 0,1,2 --cam 3q,side      # + frames on disk (an at:x,y,z:lx,ly,lz cam keeps its commas)
 node tools/lab/run.mjs --all --keep                         # every kit; --keep reuses one Chrome (~0.1-0.7 s a kit)
 node tools/shot/req.mjs --preset lab --setup 'kit=person-chair' --wait   # a contact sheet across the run + the probe, via the shot pool
 node tools/testbus/submit.mjs --probe "tools/probes/lab.mjs --kit standoff --params role=gang"   # numbers on the bus
@@ -30,6 +30,7 @@ By hand in a browser: `lab.html?kit=person-chair&live=1&cam=3q` (any static serv
 | `standoff` | a gunman (NPC or the player) draws and levels a pistol at a person; the target's brain perceives it and picks hands up / kneel / cower / flee / cover / draw back | `role` civilian/gang/cop/guard/inmate, `gunman` npc/player, `dist`, `nerve`, `targetGun`, `lower` |
 | `car-chair` | a real car (cityMakeCar + cardyn.js) drives into a loose chair | `speed`, `offset`, `chair`, `model`, `brakeAt` |
 | `building` | one facade style on a lot with real footway, kerb and road (streetKit); the probe measures any spill past the lot line | `style`, `lot=WxD`, `storeys`, `door`, `setback`, `retail`, `fit=0` (the pre-43abc8af sizing) |
+| `window-break` | a real building (city mode); N of its windows shot (`cityShatterRay`, a round) or punched (two swings); the probe looks through each hole from the street: what stands in it (object, material, colour, depth behind the glass), SLAB (a flat thing < 0.6 m in: the owner's grey slab), room seen, teeth left in the frame, glass pieces | `style`, `floor` (storey), `how` shoot/punch, `n`, `side`, `retail`, `storeys`, `x`/`z` (lot centre, default 40,60) |
 | `chair-tip` | one loose chair knocked over through pushables' own tip: the smallest smoke test | |
 | `empty` | the bare lab world | |
 
