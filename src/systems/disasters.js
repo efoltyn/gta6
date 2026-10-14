@@ -329,12 +329,6 @@
     }
   }
 
-  function disc(x, z, color, opacity, y) {
-    const m = new THREE.Mesh(new THREE.CircleGeometry(1, 28),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
-    m.rotation.x = -Math.PI / 2; m.position.set(x, floor(x, z) + (y || 0.07), z);
-    m.renderOrder = 4; root().add(m); return m;
-  }
   function rmMesh(m) { if (!m) return; if (m.parent) m.parent.remove(m); if (m.geometry) m.geometry.dispose(); if (m.material && m.material.dispose) m.material.dispose(); }
 
   // ---- PHYSICAL SHELTER: a roof over your head is a real place, not a circle
@@ -3210,8 +3204,10 @@
      hands it the ISLAND — the volcano's site (CBZ.island.volcano, else the
      arena's volcano hill), the height field, the buildings / trees / cars —
      and the hooks that price every consequence through this mode's ONE
-     ledgers: structureHit for roofs, lava and bombs, quake.js's fire for
-     burning houses and cars, the tree fire, the blast bus, the roster.
+     ledgers: structureHit for roofs, lava and bombs, THE fire (wildfire.js
+     as a service: the lava margin, hot bombs and the density current light
+     the fuel bed, the crowns, the houses and the cars, and it spreads from
+     there), the blast bus, the roster.
      ============================================================ */
   function erSite(ctx) {
     if (ctx.st.erS) return ctx.st.erS;
@@ -3221,24 +3217,30 @@
     return ctx.st.erS;
   }
   function erHooks(ctx) {
-    const fireDamage = function (b, amt) { if (b && !b.volcCar) structureHit(b, amt, ctx, { kind: "fire" }); };
+    const WF = CBZ.wildfire;
+    /* THE ERUPTION'S FIRES ARE THE ISLAND'S ONE FIRE (systems/wildfire.js as
+       a service): lent the same bridge the wildfire event gets (THE
+       structural ledger, the blast bus for a car's tank, the shelter test),
+       plus the eruption's wind and a magnitude tied to the eruption's. */
+    if (WF && WF.attach) {
+      WF.attach(ctx.arena, {
+        hitBuilding: function (b, amount, o) { return structureHit(b, amount, ctx, Object.assign({ kind: "fire" }, o || {})); },
+        blast: function (kind, x, z, o) { survBlast(kind, x, z, Object.assign({ ctx: ctx }, o || {})); },
+        sheltered: function (a) { return sheltered(a); },
+        wind: function () { return windVec(); },
+        mag: 0.3 + 0.3 * Math.min(1, rollMag(ctx)),
+      });
+    }
     return {
       shake(k) { if (CBZ.shake) CBZ.shake(k); },
       sound(name, x, z) { if (x != null) soundAt(name, x, z); else sound(name); },
       night() { return 1 - dayK(); },
       wind() { return windVec(); },
-      igniteTree(t) { ignite(t); },
-      treeFlicker(t) { flickerTreeFire(t); },
-      treeBurnOut(t) { burnOut(t); },
-      // a house the lava reached (or a hot bomb lodged in) burns through
-      // quake.js's fire — the island's one building fire — and that fire eats
-      // the building's own ledger through the hook installed here
-      burnBuilding(b) {
-        const Q = qk();
-        if (!Q || !Q.gasFire || b.fallen) return false;
-        if (!Q.hooks.structDamage) Q.hooks.structDamage = fireDamage;
-        return !!Q.gasFire(b, { gy: b.gy, life: 70 });
-      },
+      igniteTree(t, why) { return !!(WF && WF.igniteTree(t, why || "eruption")); },
+      igniteGround(x, z, r, why) { return !!(WF && WF.igniteAt(x, z, why || "eruption", r)); },
+      // a house the lava reached, a hot bomb lodged in, a density current
+      // rolled over: it burns floor by floor and pays the ledger as it goes
+      burnBuilding(b, how) { return !!(WF && WF.igniteBuilding(b, how || "lava")); },
       damageBuilding(b, amount, kind) {
         const was = surv()._cause;
         // the killfeed names what actually came through the ceiling
@@ -3249,13 +3251,8 @@
         if (kind === "ashload" && b.fallen) ashRoofCollapses++;
         return stage;
       },
-      // a car in the lava: the fuel goes up, drawn by the same fire
-      carFire(c) {
-        const Q = qk();
-        if (!Q || !Q.gasFire) return;
-        const rec = c._erFireRec || (c._erFireRec = { x: c.x, z: c.z, w: 2, d: 4.4, h: 1.6, group: c.group, volcCar: true });
-        Q.gasFire(rec, { gy: c.oy != null ? c.oy : floor(c.x, c.z), life: 45 });
-      },
+      // a car in the lava or under a hot bomb: the engine bay, then the tank
+      carFire(c, why) { if (WF) WF.igniteCar(c, why || "lava"); },
       /* A BOMB IS A ROCK ARRIVING AT SPEED, priced by its own mass and impact
          speed. The real juvenile bombs go through the blast bus (the `kinetic`
          row, a volcano picture); the small clots and the cold lithics only
@@ -4026,57 +4023,6 @@
       if (pane) { car._pane = pane; CBZ.debris.shatter(pane, { kind: "glass", at, dir: { x: dirx, y: 0.4, z: dirz }, power: 1.2, maxPieces: 12, owner: "fx" }); }
       else CBZ.debris.chips(at.x, at.y, at.z, { kind: "glass", count: 18, power: 1.2, dir: { x: dirx, y: 0.5, z: dirz }, spread: 1.4 });
     }
-  }
-
-  // ---- A TREE ON FIRE outside the wildfire sim (volcano bombs and lava light these; wildfire.js owns its own fuel bed) ----
-  function addTreeFire(t) {
-    if (t.fire) return;
-    const g = new THREE.Group();
-    const flame = (c, s, y) => {
-      const m = new THREE.Mesh(new THREE.ConeGeometry(s, s * 2.4, 6),
-        new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending }));
-      m.position.y = y; m.renderOrder = 8; g.add(m); return m;
-    };
-    t.fireMeshes = [flame(0xff3a0e, 2.2, 0.5), flame(0xff7a1e, 1.5, 1.7), flame(0xffd24a, 0.85, 2.8)];
-    g.position.set(t.x, floor(t.x, t.z) + 2.6, t.z);
-    root().add(g); t.fire = g;
-    t.scorch = disc(t.x, t.z, 0x140d08, 0.0, 0.04);
-    t.scorch.scale.set(3.4, 3.4, 1);
-    // additive orange glow pooling on the ground around the base
-    t.glow = disc(t.x, t.z, 0xff5a14, 0.0, 0.05);
-    t.glow.material.blending = THREE.AdditiveBlending;
-    t.glow.scale.set(6, 6, 1);
-    if (t.foliage && t.foliage.material) { t.foliage.material.color.setHex(0xff5a1a); if (t.foliage.material.emissive) { t.foliage.material.emissive.setHex(0xff4a10); t.foliage.material.emissiveIntensity = 0.9; } }
-  }
-  function flickerTreeFire(t) {
-    if (!t.fire) return;
-    const f = 0.75 + 0.35 * Math.sin(CBZ.now * 0.02 + t.x);
-    for (let k = 0; k < t.fireMeshes.length; k++) {
-      const m = t.fireMeshes[k];
-      m.scale.set(1 + 0.12 * Math.sin(CBZ.now * 0.03 + k), f * (1 + 0.12 * Math.sin(CBZ.now * 0.035 + k * 2)), 1);
-      m.material.opacity = 0.55 + 0.32 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.025 + k + t.z));
-    }
-    if (t.scorch) t.scorch.material.opacity = Math.min(0.55, t.scorch.material.opacity + 0.4 * 0.016);
-    if (t.glow) t.glow.material.opacity = 0.4 + 0.28 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.022 + t.x));
-  }
-  function removeTreeFire(t) {
-    if (t.fire) { t.fire.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); }); root().remove(t.fire); t.fire = null; t.fireMeshes = null; }
-    if (t.scorch) { rmMesh(t.scorch); t.scorch = null; }
-    if (t.glow) { rmMesh(t.glow); t.glow = null; }
-  }
-  function ignite(t) {
-    if (t.burnt || t.burning) return;
-    t.burning = 2.5 + rnd() * 2;
-    addTreeFire(t);
-  }
-  function burnOut(t) {
-    t.burning = 0; t.burnt = true;
-    removeTreeFire(t);
-    if (t.foliage && t.foliage.material) { t.foliage.material.color.setHex(0x1a1410); if (t.foliage.material.emissive) t.foliage.material.emissive.setHex(0x000000); }
-    if (t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x140d08);
-    // the crown burns out: charred twig and bark flecks rain off it in a
-    // puff of ash (the tree's own char, not a black cube)
-    if (CBZ.debris) CBZ.debris.chips(t.x, floor(t.x, t.z) + 3, t.z, { kind: "wood", color: 0x1a1410, count: 14, power: 0.6, spread: 2, size: 0.06, dustColor: 0x5a5550 });
   }
 
   /* ============================================================

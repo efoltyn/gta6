@@ -982,7 +982,13 @@ document.body.appendChild(b);}}catch(e){}})();
      builders. Must precede systems/disasters.js so the roster finds
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. REQUIRED: the
      old additive-stream fallback in disasters.js was deleted 2026-09-28. -->
-<script src="src/world/volcanofx.js?v=plume2"></script>
+<script src="src/world/volcanofx.js?v=fire1014"></script>
+<!-- THE ERUPTION'S SEQUENCE: world/eruption.js (CBZ.eruption) runs unrest,
+     phreatic blast, Plinian column + umbrella, bombs, lightning, lava,
+     collapse and lahar on volcanofx's builders, mode-agnostic (the lab's
+     eruption kit drives the same file). Its fires are systems/wildfire.js's.
+     Must precede systems/disasters.js. -->
+<script src="src/world/eruption.js?v=fire1014"></script>
 <!-- THE QUAKE IS SHARED: systems/quake.js is the whole earthquake event (source
      and path, P/S/surface wave train, buildings by type and height, cracks,
      mains, liquefaction, cars, the crowd, what falls on whom), drop-cover,
@@ -1016,7 +1022,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
-<script src="src/systems/wildfire.js?v=fuel1014"></script>
+<script src="src/systems/wildfire.js?v=fire1014"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
@@ -1031,7 +1037,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=island1014"></script>
+<script src="src/systems/disasters.js?v=fire1014"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>

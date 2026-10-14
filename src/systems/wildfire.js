@@ -80,6 +80,16 @@
    burnt-out cars and houses stay. "The black" is also the one safe place
    once the front has passed: refuge() and threat() know it.
 
+   THE FIRE AS A SERVICE. Other disasters start fires on this same bed:
+   the eruption's lava margin, its hot bombs and its density currents call
+   CBZ.wildfire.igniteAt(x, z, why, r) / igniteTree(t) / igniteBuilding(b)
+   / igniteCar(c) (the host lends its world and ledger once with attach()).
+   No wildfire event has to be running: the grid and the FX come up lazily
+   (an ignition before the bed is rasterised waits in a queue while the
+   bed finishes a slice a frame), and only what is burning is ticked. The
+   sky, the fog and the weather stay the running event's; the service never
+   touches them. The arena's reset (wrapReset) and hardStop() clear it.
+
    WHAT THIS FILE DOES NOT DO: fire crews and water-dropping helicopters.
    The island has no firefighting units to call; when it gets them, they
    read CBZ.wildfire.grid()/hazards() and put cells out with douse().
@@ -153,11 +163,15 @@
     burningList: [], sources: [],
     spots: [], smoulders: [],
     smokeLinger: 0, after: false,
+    // THE SERVICE (fires another disaster starts; see "THE FIRE AS A SERVICE")
+    svc: false, svcArena: null, svcBridge: null, svcQ: [], frame: 0,
   };
   let stats = null;
   function zeroStats() {
     stats = {
       ignitions: 0, treesTorched: 0, treesScorched: 0,
+      // fires lit FROM OUTSIDE (CBZ.wildfire.igniteAt / igniteTree / ...), by cause
+      lit: {},
       cellsIgnited: 0, burntM2: 0,
       spotLaunched: 0, spotFires: 0, spotMaxM: 0, spotFizzled: 0,
       bldIgnited: 0, bldByVent: 0, bldByWindow: 0, bldByHeat: 0, bldFloorsBurnt: 0, bldCollapsed: 0, bldGutted: 0,
@@ -1141,15 +1155,22 @@
     const ex = Math.max(0, Math.abs(x - b.x) - b.w / 2), ez = Math.max(0, Math.abs(z - b.z) - b.d / 2);
     return Math.hypot(ex, ez);
   }
+  // nothing alight anywhere = nothing to be exposed to (sources is last
+  // frame's list: it holds every burning house and car)
+  function anyHeat() { return G.flamingN > 0 || F.burningList.length > 0 || F.sources.length > 0; }
   function buildingsTick(dt, live) {
     const A = world(); const L = (A && A.fragile) || [];
-    const tr = (A && A.flammable) || [];
+    const hot = live && anyHeat();
+    // the service (another disaster's fires) prices exposure on a quarter of
+    // the houses a frame, each with 4x the dt: the same heat, a quarter the reads
+    const stride = F.svc ? 4 : 1;
     for (let k = 0; k < L.length; k++) {
       const b = L[k];
       const r = b._wf;
-      if (!r && (!live || b.fallen)) continue;
+      if (!r && (!hot || b.fallen)) continue;
       // ---- exposure: contact/radiant from what burns around it ----------
-      if (live && !b.fallen && !(r && r.done)) {
+      if (hot && !b.fallen && !(r && r.done) && (stride === 1 || (k + F.frame) % stride === 0)) {
+        const dtE = dt * stride;
         let q = 0;
         if (G.ready) {
           // the bed along its walls
@@ -1180,7 +1201,7 @@
         }
         if (q > 0) {
           const rr = bRec(b);
-          rr.heat += dt * q * rr.vuln;
+          rr.heat += dtE * q * rr.vuln;
           if (rr.heat >= 1 && !rr.fl[0].s) igniteFloor(b, 0, "heat");
         }
         // EMBER ATTACK: the shower in the plume finds a vent or a window
@@ -1188,8 +1209,8 @@
         if (ef > 0.05) {
           const rr = bRec(b);
           const lam = 0.10 * ef * rr.vuln * (0.4 + F.mag);
-          if (rnd() < 1 - Math.exp(-lam * dt)) emberIntoBuilding(b, rnd() < 0.6 ? "vent" : "window");
-          if (jit() < ef * dt * 6) spawnEmber(b.x + (jit() - 0.5) * b.w, rr.gy + rr.FH * rr.storeys + 1.5, b.z + (jit() - 0.5) * b.d,
+          if (rnd() < 1 - Math.exp(-lam * dtE)) emberIntoBuilding(b, rnd() < 0.6 ? "vent" : "window");
+          if (jit() < ef * dtE * 6) spawnEmber(b.x + (jit() - 0.5) * b.w, rr.gy + rr.FH * rr.storeys + 1.5, b.z + (jit() - 0.5) * b.d,
             F.wx * 1.5 + (jit() - 0.5), -0.6, F.wz * 1.5 + (jit() - 0.5), 1.2);
         }
       }
@@ -1258,6 +1279,9 @@
       else o.material = S.carMat;
     });
   }
+  function carRec(c, p) {
+    return c._wf || (c._wf = { s: 0, heat: 0, t: 0, boomAt: 6 + 4 * h01(Math.round(p.x), Math.round(p.z), 0x61), boomed: false, charred: false });
+  }
   function restoreCar(c) {
     const r = c._wf;
     if (r && r.orig) r.orig.forEach((e) => { e[0].material = e[1]; e[0].visible = e[2]; });
@@ -1265,12 +1289,16 @@
   }
   function carsTick(dt, live) {
     const A = world(); const L = (A && A.cars) || [];
+    const hot = live && anyHeat();
+    const stride = F.svc ? 4 : 1;
     for (let k = 0; k < L.length; k++) {
       const c = L[k];
       if (c.flung || c.dead && !c._wf) continue;
-      const p = carPos(c);
       let r = c._wf;
-      if (live && (!r || r.s === 0)) {
+      if (!r && !hot) continue;
+      const p = carPos(c);
+      if (hot && (!r || r.s === 0) && (stride === 1 || (k + F.frame) % stride === 0)) {
+        const dtE = dt * stride;
         let q = 0;
         const ci = cellOf(p.x, p.z);
         if (ci >= 0) {
@@ -1298,8 +1326,8 @@
           if (d < 5) q += 0.3 * (1 - d / 5);
         }
         if (q > 0) {
-          r = c._wf || (c._wf = { s: 0, heat: 0, t: 0, boomAt: 6 + 4 * h01(Math.round(p.x), Math.round(p.z), 0x61), boomed: false, charred: false });
-          r.heat += dt * q;
+          r = carRec(c, p);
+          r.heat += dtE * q;
           if (r.heat >= 1) { r.s = 1; r.t = 0; stats.carsBurnt++; }
         }
       }
@@ -1519,7 +1547,7 @@
   function beginWarn(ctx, bridge) {
     const A = ctx.arena;
     F.arena = A; F.bridge = bridge || null;
-    F.live = true; F.after = false; F.t = 0; F.intensity = ctx.intensity || 0;
+    F.live = true; F.after = false; F.svc = false; F.svcQ.length = 0; F.t = 0; F.intensity = ctx.intensity || 0;
     F.spreadCd = 0; F.spotCd = 2.4; F.smokeLinger = 0;
     F.spots.length = 0; F.smoulders.length = 0; F.burningList.length = 0; F.sources.length = 0;
     zeroStats();
@@ -1665,8 +1693,8 @@
     if (!F.sources.length) return;
     surv().forEachActor(function (a) {
       const h = heatAt(a.pos.x, a.pos.z);
-      if (h.contact > 0) hurtOne(a, (12 + 24 * F.mag) * Math.min(2, h.contact) * dt, "burned alive in the wildfire", true);
-      else if (h.heat > 0.1) hurtOne(a, (4.5 + 8 * F.mag) * Math.min(1.8, h.heat) * dt, "cooked by the wildfire's heat", true);
+      if (h.contact > 0) hurtOne(a, (12 + 24 * F.mag) * Math.min(2, h.contact) * dt, F.svc ? "burned alive in the brush fire" : "burned alive in the wildfire", true);
+      else if (h.heat > 0.1) hurtOne(a, (4.5 + 8 * F.mag) * Math.min(1.8, h.heat) * dt, F.svc ? "cooked by the brush fire's heat" : "cooked by the wildfire's heat", true);
     });
   }
   function chokeTick(dt) {
@@ -1677,7 +1705,7 @@
       if (s < 0.25) return;
       // a roof helps for a while; the open plume does not
       const shel = sheltered(a) ? 0.35 : 1;
-      hurtOne(a, 9 * Math.min(2, s) * shel * inten * dt, "suffocated in the wildfire smoke", false);
+      hurtOne(a, 9 * Math.min(2, s) * shel * inten * dt, F.svc ? "suffocated in the brush fire smoke" : "suffocated in the wildfire smoke", false);
     });
   }
   function sheltered(a) {
@@ -1828,9 +1856,11 @@
   function fxTick(dt) {
     if (!fxAlive()) return;
     const t0 = performance.now();
-    F.t += dt;
+    F.t += dt; F.frame++;
+    // another disaster's fires: the live sim, on only what burns
+    if (!F.live && F.svc) svcTick(dt);
     // after the timer: houses and cars burn on, the bed dies down, no spread
-    if (!F.live && F.arena && (F.after || G.act.length)) {
+    else if (!F.live && F.arena && (F.after || G.act.length)) {
       F.after = false;
       simTick(dt, false, false);
       const A = F.arena;
@@ -1927,7 +1957,7 @@
     if (!F.live && F.smokeLinger > 0) F.smokeLinger -= dt;
     // THE SCAR AGES: wet-black char greys toward ash over the minutes after
     // the fire; a new fire re-blackens it
-    if (!F.live && !F.after && G.mat && F.scarAge < 160) {
+    if (!F.live && !F.after && !F.svc && G.mat && F.scarAge < 160) {
       F.scarAge += dt;
       G.mat.uniforms.uAge.value = Math.min(1, F.scarAge / 150);
     }
@@ -1972,7 +2002,7 @@
 
   CBZ.onUpdate(27.7, function (dt) {
     const inSurv = !!(CBZ.game && CBZ.game.mode === "survival");
-    if (!inSurv && !(F.arena && F.arena.lab)) { if (FX) { disposeFX(); F.live = false; } return; }
+    if (!inSurv && !(F.arena && F.arena.lab)) { if (FX) { disposeFX(); F.live = false; F.svc = false; F.svcQ.length = 0; } return; }
     if (FX && !fxAlive()) disposeFX();       // the arena rebuilt under us
     if (inSurv) {
       // pay for the pools and the fuel bed while the island idles, not when
@@ -1980,7 +2010,7 @@
       const A = CBZ.surv && CBZ.surv.arena;
       if (A && A.root) {
         if (!FX) { buildFX(A.root); wrapReset(A); }
-        if (!F.live && (G.arena !== A || !G.ready)) gridEnsure(A, 6);
+        if (!F.live && !F.svc && (G.arena !== A || !G.ready)) gridEnsure(A, 6);
       }
     }
     if (!FX) return;
@@ -1988,6 +2018,133 @@
   });
   if (CBZ.bootComplete && CBZ.updaters && CBZ.updaters.sort) {
     CBZ.updaters.sort(function (a, b) { return a.order - b.order; });
+  }
+
+  /* ---- THE FIRE AS A SERVICE ------------------------------------------------
+     Another disaster lights this bed: the eruption's lava margin, its hot
+     bombs, its density currents. serve() brings the run up for that WITHOUT
+     a wildfire event: the arena, the bridge the host attached, the pools,
+     the reset hook, the grid (if the idle prebuild has not finished, the
+     ignitions wait in svcQ while it finishes 12 rows a frame). Its frame is
+     svcTick, from fxTick: the same live sim the event runs (spread, crowns,
+     spotting, houses, cars, heat and smoke on the roster), on only what
+     burns, and it never touches the sky, fog or weather (those are the
+     running event's). It ends itself when nothing is left alight. */
+  const SVC_MAG = 0.45;   // a fire lit in dry island brush, not a wind-driven run
+  function svcWorld() {
+    return F.svcArena || (CBZ.surv && CBZ.surv.arena) || F.arena;
+  }
+  function serve() {
+    const A = svcWorld();
+    if (!A || !A.groundHeightAt || !A.center) return null;
+    if (F.live) return F.arena === A ? A : null;      // the event's run takes it as it is
+    if (!F.svc) {
+      const idle = F.arena !== A || (!F.after && !G.act.length && !G.pend.length);
+      if (idle) {
+        zeroStats();
+        F.spots.length = 0; F.smoulders.length = 0; F.sources.length = 0; F.burningList.length = 0;
+        F.seed = null; F.spreadCd = 0; F.spotCd = 2.4; F.veer = 0; F.scarAge = 0; F.smokeLinger = 0;
+        if (G.mat) G.mat.uniforms.uAge.value = 0;      // a new fire re-blackens the old ash
+      }
+      const br = F.svcBridge;
+      F.arena = A; F.bridge = br || null; F.after = false; F.svc = true;
+      F.mag = F._forceMag != null ? F._forceMag : (br && br.mag != null ? Math.max(0, Math.min(1, +br.mag)) : SVC_MAG);
+      F.reach = 7 + 11 * F.mag;
+      svcWind();
+    }
+    if (FX && !fxAlive()) disposeFX();
+    if (!FX && A.root) buildFX(A.root);
+    wrapReset(A);
+    if (G.arena !== A) gridStart(A);
+    return A;
+  }
+  function svcWind() {
+    const br = F.bridge;
+    const w = br && br.wind ? br.wind() : (CBZ.weatherWind ? CBZ.weatherWind() : null);
+    if (!w) return;
+    const m = Math.hypot(w.x || 0, w.z || 0);
+    if (m > 1e-3) { F.wx = w.x / m; F.wz = w.z / m; }
+    F.wspd = Math.max(2, Math.min(19, w.speed != null ? +w.speed : m));
+  }
+  function svcIgnite(x, z, r, why) {
+    if (r > G.cs * 0.6) {
+      // the disc's centre takes now, the rest within a second or so
+      const c = cellOf(x, z);
+      const lit = igniteCell(c, why);
+      const before = G.pend.length;
+      igniteDisc(x, z, r, 6);
+      return lit || G.pend.length > before;
+    }
+    return igniteCell(cellOf(x, z), why);
+  }
+  function svcBurning() {
+    if (G.act.length || G.pend.length || F.burningList.length || F.spots.length || F.smoulders.length || F.svcQ.length) return true;
+    const A = F.arena;
+    const L = (A && A.fragile) || [];
+    for (let k = 0; k < L.length; k++) {
+      const r = L[k]._wf; if (!r) continue;
+      if (r.rubble > 0) return true;
+      if (!L[k].fallen) for (let f = 0; f < r.storeys; f++) if (r.fl[f].s === 1) return true;
+    }
+    const C = (A && A.cars) || [];
+    for (let k = 0; k < C.length; k++) { const r = C[k]._wf; if (r && (r.s === 1 || r.I > 0)) return true; }
+    return false;
+  }
+  function svcTick(dt) {
+    const t0 = performance.now();
+    const A = F.arena;
+    if (!A) { F.svc = false; return; }
+    if (!G.ready) {
+      gridEnsure(A, 12);
+      if (G.ready) { for (let i = 0; i < F.svcQ.length; i++) { const q = F.svcQ[i]; svcIgnite(q.x, q.z, q.r, q.why); } F.svcQ.length = 0; }
+    }
+    svcWind();
+    simTick(dt, false, true);
+    if (!svcBurning()) { F.svc = false; F.smokeLinger = 8; }
+    const ms = performance.now() - t0;
+    stats.simMs += ms; stats.simFrames++; if (ms > stats.simMsMax) stats.simMsMax = ms;
+  }
+  function litBy(why) { why = why || "other"; stats.lit[why] = (stats.lit[why] || 0) + 1; }
+  // the host lends its world and its machinery once (the event's bridge
+  // shape: hitBuilding, blast, sheltered; plus wind() and mag)
+  function attach(arena, bridge) {
+    F.svcArena = arena || null; F.svcBridge = bridge || null;
+    if (F.svc && !F.live) { if (arena) F.arena = arena; F.bridge = F.svcBridge; }
+  }
+  // fire on the bed at (x, z): one cell, or a disc of radius r (m)
+  function igniteAtPublic(x, z, why, r) {
+    if (!serve()) return false;
+    r = r > 0 ? +r : 0;
+    if (!G.ready) { F.svcQ.push({ x, z, r, why }); litBy(why); return true; }
+    const ok = svcIgnite(x, z, r, why);
+    if (ok) litBy(why);
+    return ok;
+  }
+  function igniteTreePublic(t, why) {
+    if (!t || t.burnt || t.burning || !serve()) return false;
+    igniteTree(t, why || "other");
+    litBy(why);
+    return true;
+  }
+  // a house set alight from outside: a hot bomb in the rafters / an ember in
+  // the attic lights the top floor, lava or a density current the ground floor
+  function igniteBuildingPublic(b, how) {
+    if (!b || b.fallen || !serve()) return false;
+    const r = bRec(b);
+    if (r.igAt >= 0 || r.done) return false;
+    if (how === "bomb" || how === "vent") igniteFloor(b, r.storeys - 1, "vent");
+    else igniteFloor(b, 0, "heat");
+    litBy(how);
+    return r.igAt >= 0;
+  }
+  // a car set alight from outside (a hot bomb, lava under it): fully involved now
+  function igniteCarPublic(c, why) {
+    if (!c || c.flung || !serve()) return false;
+    const r = carRec(c, carPos(c));
+    if (r.s !== 0) return false;
+    r.s = 1; r.t = 0; r.heat = 1; stats.carsBurnt++;
+    litBy(why || "car");
+    return true;
   }
 
   /* ---- end of the event --------------------------------------------------
@@ -2002,11 +2159,12 @@
     F.burningList.length = 0;
     F.spots.length = 0; F.smoulders.length = 0;
     if (G.ready) cellsStarve();
-    F.after = true;
+    F.after = true; F.svc = false; F.svcQ.length = 0;
   }
   function hardStop() {
     F.live = false; F.after = false; F.burningList.length = 0; F.sources.length = 0;
     F.spots.length = 0; F.smoulders.length = 0; F.seed = null;
+    F.svc = false; F.svcQ.length = 0;
   }
 
   /* ---- bot / threat surface --------------------------------------------- */
@@ -2163,6 +2321,7 @@
       treesTorched: stats.treesTorched, treesScorched: stats.treesScorched, ignitions: stats.ignitions,
       gridN: G.n, cellM: +G.cs.toFixed(2), cellsFlaming: G.flamingN, cellsIgnited: stats.cellsIgnited,
       burntHa: +(stats.burntM2 / 10000).toFixed(3), scarM2: Math.round(stats.burntM2),
+      ignitedM2: Math.round(stats.cellsIgnited * G.cs * G.cs), serving: F.svc, litBy: Object.assign({}, stats.lit),
       spotLaunched: stats.spotLaunched, spotFires: stats.spotFires, spotMaxM: stats.spotMaxM, spotFizzled: stats.spotFizzled,
       buildingsTotal: L.length, buildingsIgnited: stats.bldIgnited, ignitedByVent: stats.bldByVent,
       ignitedByWindow: stats.bldByWindow, ignitedByHeat: stats.bldByHeat,
@@ -2189,6 +2348,10 @@
 
   CBZ.wildfire = {
     beginWarn, begin, tick, stop,
+    // the fire as a service (see "THE FIRE AS A SERVICE")
+    attach, igniteAt: igniteAtPublic, igniteTree: igniteTreePublic,
+    igniteBuilding: igniteBuildingPublic, igniteCar: igniteCarPublic,
+    serving() { return F.svc; },
     threat, safeDir, smokeAt, emberAt, refuge, hazards, size, douse,
     wind() { return { x: F.wx, z: F.wz, speed: F.wspd }; },
     magnitude() { return F.mag; },
