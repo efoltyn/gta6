@@ -53,9 +53,12 @@ The horizon, plainly: on the ground the real (near-form) content already reaches
 the fog. What this wave bought is the far tier's cost (nothing past `reach` is drawn, tris
 -11/-15%) and frames without the streamer's 0.5 s stalls; the distance itself is the quality
 tier's fog (desktop 760 m at tier 2, phone 380 m), which the governor raises when frames allow.
-The paired frame medians stayed within the box's noise (load 30-90). On the phone A/B the full
-run drew ~30% more calls from the aerial spot: a timing effect of the faster boot (more of the
-far city complete at the shot); a warm world at that spot draws 5,361 vs 5,384 calls.
+The paired frame medians stayed within the box's noise (load 30-90). Not settled: on every
+phone A/B the full run drew ~30% more calls from the aerial spot (GPU +25%), and the shot shows
+downtown towers on the horizon that the base run lacks; a warm world placed at that spot draws
+the same (5,361 vs 5,384 calls), so it depends on what the run did before the shot, not on the
+spot. The phone A/B's drive memory read +7% (an unsure interval, -0.4..+8.7% runs); the boot
+and steady memory read "same".
 
 Still open: a town lot is one building job of 150-230 ms (makeBuilding: flushDeco and the
 facade grammar; needs the builder split into steps); 3 non-stream pops at the drive start
