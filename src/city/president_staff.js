@@ -95,7 +95,7 @@
   function Pol() { return CBZ.politics || null; }
 
   let CLOCK = 0;
-  const OUT = [];               // people walking out: { ped, t, door, max }
+  const OUT = [];               // the dismissed, finishing their line: { ped, t } (t < 0: still talking)
   const W = { chief: null, press: null, ringAt: -1e9, greeted: null };
 
   // ---- seams --------------------------------------------------------------
@@ -219,7 +219,7 @@
     if (body && typeof body === "object" && body.pos) {
       body._iopts = null;
       const delay = via === "face" ? 3.6 : 0;
-      OUT.push({ ped: body, t: -delay, door: role === "chief" || role === "press" ? doorSpot() : null, max: role === "chief" || role === "press" ? 14 : 1.5 });
+      OUT.push({ ped: body, t: -delay });
     }
 
     // THE PERSON STAYS IN THE WORLD
@@ -679,7 +679,6 @@
     const lp = L.arrivalPortal ? toLocal(r, L.arrivalPortal.x, L.arrivalPortal.z) : { x: 0, z: 6 };
     const side = half - 1.1, desk = L.presidentialDesk;
     return {
-      door: L.staffDoor ? { x: L.staffDoor.x, z: L.staffDoor.z } : toWorld(r, 0, 1.0),
       chief: L.chiefSpot ? { x: L.chiefSpot.x, z: L.chiefSpot.z } : toWorld(r, side, lp.z + 0.9),
       press: L.pressSpot ? { x: L.pressSpot.x, z: L.pressSpot.z } : toWorld(r, Math.min(3.4, half - 1.4), Math.max(1.4, lp.z - 2.0)),
       faceIn: function (p) {
@@ -688,7 +687,6 @@
       },
     };
   }
-  function doorSpot() { const r = office(); return r ? spots(r).door : null; }
   function nearOffice(r) {
     const P = CBZ.player;
     if (!r || !P || !P.pos || P.dead || Math.abs((P.pos.y || 0) - r.floorY) > 3) return false;
@@ -714,41 +712,97 @@
     if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); return; } catch (e) {} }
     try { if (p.group && p.group.parent) p.group.parent.remove(p.group); const a = CBZ.cityPeds; if (a) { const i = a.indexOf(p); if (i >= 0) a.splice(i, 1); } } catch (e) {}
   }
-  // the lane round the sofas from the staff door (interior_programs.js publishes it)
-  function aisleTo(p, x, z) {
-    const r = office(), L = r && r.landmarks;
-    if (!L || !L.staffAisle0 || !L.staffAisle1) return [];
-    const A = [L.staffAisle0, L.staffAisle1];
-    const d = function (q, s) { return Math.hypot(q.x - s.x, q.z - s.z); };
-    const fwd = d(p.pos, A[0]) <= d(p.pos, A[A.length - 1]) ? A : A.slice().reverse();
-    const out = [];
-    for (let i = 0; i < fwd.length; i++) if (d(fwd[i], { x: x, z: z }) < d(p.pos, { x: x, z: z }) + 0.5) out.push({ x: fwd[i].x, z: fwd[i].z });
-    return out;
-  }
-  function walkTo(p, x, z) {
+  /* IN AND OUT BY THE DOOR. Nobody on the staff appears at his spot or
+     vanishes from it while the President can see it (OWNER 2026-10-14:
+     "people disappear ... they need to walk out of the room"). The office
+     owns the door and the walk through it (president_office.js doorway /
+     entryRoute / walkOut); systems/leave.js takes a body out of the world
+     only when nobody can see it. A staffer posted while his spot is in view
+     is posted in the outer office instead and walks in. */
+  const BACK = { chief: -1e9, press: -1e9 };      // CLOCK before which a role does not come back in
+  const IN = [];                                  // { ped, route, i, stuck, lastD, face }
+  function Ofc() { return CBZ.presidentOffice || null; }
+  function sendOut(p, tag) {
     if (!p || p.dead) return;
+    for (let i = IN.length - 1; i >= 0; i--) if (IN[i].ped === p) IN.splice(i, 1);
+    const O = Ofc();
+    if (O && O.walkOut) { O.walkOut(p, tag); return; }
+    if (CBZ.leave) { CBZ.leave.go(p, { tag: tag, remove: unpost }); return; }
+    unpost(p);
+  }
+  function seenAt(r, at) { return !!(CBZ.leave && at && !CBZ.leave.unseen({ x: at.x, y: r.floorY, z: at.z })); }
+  // where a staffer is posted: at his spot when nobody is looking at it,
+  // else in the outer office with the walk in; null = not now
+  function entryFor(r, spot) {
+    if (!seenAt(r, spot)) return { at: spot, route: null };
+    const O = Ofc(), D = O && O.doorway ? O.doorway() : null;
+    if (!D || seenAt(r, D.out2)) return null;
+    return { at: D.out2, route: O.entryRoute(spot) };
+  }
+  function walkLeg(p, x, z) {
     p.controlled = true; p.staffPost = null;
-    p.path = aisleTo(p, x, z).concat([{ x: x, z: z }]); p.finalGoal = { x: x, z: z };
+    p.path = [{ x: x, z: z }]; p.finalGoal = { x: x, z: z };
     if (p.target && p.target.set) p.target.set(x, 0, z);
     p.state = "walk"; p.pause = 0;
   }
-  function near(p, at, r) { return p && at && Math.hypot(p.pos.x - at.x, p.pos.z - at.z) < r; }
+  function comeIn(p, route, face) {
+    IN.push({ ped: p, route: route, i: 0, stuck: 0, lastD: Infinity, face: face });
+    walkLeg(p, route[0].x, route[0].z);
+  }
+  function tickIn(dt) {
+    for (let k = IN.length - 1; k >= 0; k--) {
+      const o = IN[k], p = o.ped;
+      if (!p || p.dead || !p.group || !p.group.parent || (p !== W.chief && p !== W.press)) { IN.splice(k, 1); continue; }
+      const w = o.route[o.i];
+      const d = w ? Math.hypot(p.pos.x - w.x, p.pos.z - w.z) : 0;
+      o.stuck += dt;
+      if (o.lastD - d > 0.5) { o.lastD = d; o.stuck = 0; }
+      if (!w || d < 0.7 || o.stuck > 5) {
+        o.i++; o.stuck = 0; o.lastD = Infinity;
+        const n = o.route[o.i];
+        if (n) { walkLeg(p, n.x, n.z); continue; }
+        // at his post: pinned there, as if he had been posted on it
+        p.controlled = false; p.path = null; p.finalGoal = null; p.state = "idle"; p.speed = 0;
+        p.staffPost = { x: p.pos.x, z: p.pos.z, face: o.face };
+        if (p.target && p.target.set) p.target.set(p.pos.x, 0, p.pos.z);
+        if (p.group) p.group.rotation.y = o.face;
+        IN.splice(k, 1);
+      } else if (p.state !== "walk") walkLeg(p, w.x, w.z);
+    }
+  }
+  // THE CHIEF'S OWN VISIT (president_office.js sendAide): the Chief standing
+  // in the room is the one who walks over with the day. His body is handed to
+  // the office, which walks him out when he is done (wentOut).
+  function lend(role) {
+    const k = role === "chief" ? "chief" : role === "press" ? "press" : null;
+    const p = k && W[k];
+    if (!p || p.dead || !p.group || !p.group.parent) return null;
+    for (let i = IN.length - 1; i >= 0; i--) if (IN[i].ped === p) IN.splice(i, 1);
+    W[k] = null;
+    BACK[k] = CLOCK + 600;          // the office's until he walks out
+    return p;
+  }
+  function wentOut(role) { if (BACK[role] != null) BACK[role] = CLOCK + 45; }
 
   // THE CHIEF: E is the day in one sentence; with names in hand, E is the
   // first name and the wheel the second; the wheel always has Dismiss.
   function postChief(r) {
     const c = person("chief");
     if (!c) return;
-    const sp = spots(r);
-    const p = post(r, sp.chief, JOB.chief, { pin: true, face: sp.faceIn(sp.chief), gender: c.gender });
+    if (CLOCK < BACK.chief) return;
+    const sp = spots(r), face = sp.faceIn(sp.chief);
+    const e = entryFor(r, sp.chief);
+    if (!e) return;
+    const p = post(r, e.at, JOB.chief, { pin: !e.route, face: e.route ? null : face, gender: c.gender });
     if (!p) return;
     p.name = c.name; p._presStaff = "chief";
     W.chief = p;
+    if (e.route) comeIn(p, e.route, face);
     if (!CBZ.interactions || !CBZ.interactions.registerFor) return;
     const nm = function () { const n = S().nominee; return n && speakerFor(n.role) && speakerFor(n.role).body === p ? n : null; };
     // what he has for you, said as you come up (no Talk verb)
     CBZ.interactions.registerFor(p, { id: "pres-chief-talk", speak: true, prio: 30, campaignSafe: true, forceYes: true,
-      label: "Listen", canShow: function () { return !!seat() && !nm(); },
+      label: "Listen", canShow: function () { return W.chief === p && !!seat() && !nm(); },
       onSelect: function () {
         const O = CBZ.presidentOffice;
         let line = chiefWarning() || "Nothing that can't wait, sir.";
@@ -768,11 +822,15 @@
   function postPress(r) {
     const pr = S().press;
     if (!pr) return;
-    const sp = spots(r).press;
-    const p = post(r, sp, JOB.press, { pin: true, face: spots(r).faceIn(sp), gender: pr.gender || "f" });
+    if (CLOCK < BACK.press) return;
+    const sp = spots(r).press, face = spots(r).faceIn(sp);
+    const e = entryFor(r, sp);
+    if (!e) return;
+    const p = post(r, e.at, JOB.press, { pin: !e.route, face: e.route ? null : face, gender: pr.gender || "f" });
     if (!p) return;
     p.name = pr.name; p._presStaff = "press";
     W.press = p;
+    if (e.route) comeIn(p, e.route, face);
     // no "Brief" button on her: she comes to YOU when the press is waiting
     // (pressAsk), and your answer rides on her
     wire(p, "press");
@@ -791,9 +849,17 @@
   // his body is the agent at the state car's door (city/motorcade.js reads
   // driverRecord()), the one man who asks where to and drives you there.
 
+  // the President has gone (out of the office, out of office): the staff
+  // go too, each one the moment nobody can see him; until then he stays put
   function releaseOffice() {
-    if (W.chief) { unpost(W.chief); W.chief = null; }
-    if (W.press) { unpost(W.press); W.press = null; }
+    for (const k of ["chief", "press"]) {
+      const p = W[k];
+      if (!p) continue;
+      if (p.dead || !p.pos || !CBZ.leave || CBZ.leave.unseen(p.pos)) {
+        for (let i = IN.length - 1; i >= 0; i--) if (IN[i].ped === p) IN.splice(i, 1);
+        unpost(p); W[k] = null;
+      }
+    }
   }
 
   /* ---- THE HOUSE KNOWS HIM ------------------------------------------------------
@@ -868,11 +934,13 @@
     if (!seat()) { if (W.chief || W.press) releaseOffice(); return; }
     ensureStaffed();
     tickAck(dt);
+    // the dismissed finish their line, then walk out (systems/leave.js)
     for (let i = OUT.length - 1; i >= 0; i--) {
       const o = OUT[i]; o.t += dt;
-      if (o.t >= 0 && !o.walking && o.door && o.ped && !o.ped.dead) { o.walking = true; walkTo(o.ped, o.door.x, o.door.z); }
-      if (!o.ped || o.ped.dead || (o.t > 0.5 && o.door && near(o.ped, o.door, 0.9)) || o.t > o.max) { if (o.ped && !o.ped.dead) unpost(o.ped); OUT.splice(i, 1); }
+      if (!o.ped || o.ped.dead) { OUT.splice(i, 1); continue; }
+      if (o.t >= 0) { sendOut(o.ped, "presstaff:dismissed"); OUT.splice(i, 1); }
     }
+    tickIn(dt);
     // A DEAD STAFFER STAYS DEAD: her desk, his chair, is empty from now on
     if (W.press && W.press.dead) { W.press = null; S().press = null; }
     if (W.chief && W.chief.dead) { W.chief = null; const c = rec("chief"); if (c) c.dead = true; }
@@ -895,7 +963,13 @@
     // in the office, a Chief with names says them to your face; without him the phone rings
     if (nm && !(speakerFor(nm.role) && speakerFor(nm.role).body)) ringNames();
     // the one who walks in IS the Chief (or the press secretary): never two of her
-    if (aideVisiting()) { if (W.chief) { unpost(W.chief); W.chief = null; } if (aideRole() === "press" && W.press) { unpost(W.press); W.press = null; } }
+    // (the office borrows the Chief for his own visit, lend(); a second Chief
+    // is only here if that failed: he walks out, he does not blink out)
+    if (aideVisiting()) {
+      const ar = aideRole();
+      if (ar === "chief" && W.chief) { sendOut(W.chief, "presstaff:chief"); W.chief = null; wentOut("chief"); }
+      if (ar === "press" && W.press) { sendOut(W.press, "presstaff:press"); W.press = null; wentOut("press"); }
+    }
     else if ((!W.chief || W.chief.dead) && !vacant("chief")) { W.chief = null; postChief(r); }
     if (!W.press && !vacant("press") && aideRole() !== "press") postPress(r);
   }
@@ -907,6 +981,8 @@
     driverRecord: function () { const s = S(); return s.driver ? { name: s.driver.name, sid: s.driver.sid } : null; },
     person: person,
     has: function (role) { return !vacant(role); },
+    // president_office.js: the Chief in the room walks over for his own visit, and out
+    lend: lend, wentOut: wentOut,
     dismiss: dismiss,
     dismissFace: dismissFace,
     nominee: function () { const n = S().nominee; return n ? { role: n.role, line: nomineeLine(n), names: n.names.map(function (c) { return { name: c.name, trait: c.trait, ideology: c.ideology || null }; }) } : null; },

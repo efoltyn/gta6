@@ -1404,7 +1404,85 @@
   // ============================================================
   //  §7  PEOPLE WHO WALK IN, and the secretary at the door.
   // ============================================================
-  const AIDE = { ped: null, m: null, phase: null, t: 0, stuck: 0, lastD: Infinity, talking: false, spawnW: null, standW: null };
+  /* THE DOOR, AND THE WAY THROUGH IT. People come in at the office's staff
+     door and go out the same way, through the leaf (systems/bodydoors.js
+     opens it in front of them and shuts it behind them) into the outer
+     office. Nobody appears or disappears inside the room any more:
+       OWNER (2026-10-14): "There's a guy who starts on my left, says 'three
+       folders on your desk, sir', and then he disappears ... They need to
+       walk out of the room."
+     That was two pops. The Chief standing at his spot was taken out of the
+     world the instant the Chief's own visit began (president_staff.js), and
+     the visitor who walked in was conjured 2.5 m inside the door and
+     unposted when he got back there (or after 25 s, or 7 s stuck, wherever
+     he stood). Now a visitor is posted in the OUTER office and walks in;
+     the Chief, when the visit is his, is the Chief who is already in the
+     room (president_staff.js lend()); and everybody leaves through
+     CBZ.leave (systems/leave.js): the route below, then removed only when
+     nobody can see him. */
+  function doorway() {
+    const rec = ROOM.rec, L = ROOM.L;
+    if (!rec || !L) return null;
+    const lm = rec.landmarks;
+    const inside = toWorld(rec, L.aideSpawn.x, L.aideSpawn.z);
+    const door = lm.arrivalPortal ? { x: lm.arrivalPortal.x, z: lm.arrivalPortal.z } : toWorld(rec, 0, -0.4);
+    // out = through the leaf, away from the room
+    let ox = door.x - inside.x, oz = door.z - inside.z;
+    const l = Math.hypot(ox, oz);
+    if (l < 0.3) { ox = -rec.approach.nx; oz = -rec.approach.nz; } else { ox /= l; oz /= l; }
+    return {
+      inside: inside, door: door, ox: ox, oz: oz,
+      out1: { x: door.x + ox * 1.6, z: door.z + oz * 1.6 },
+      out2: { x: door.x + ox * 3.6, z: door.z + oz * 3.6 },
+    };
+  }
+  // the lane round the sofas (interior_programs.js publishes it): the aisle
+  // points that lie between `from` and `to`, nearest first
+  function aisle(from, to) {
+    const rec = ROOM.rec || office(), lm = rec && rec.landmarks;
+    if (!lm || !lm.staffAisle0 || !lm.staffAisle1 || !from || !to) return [];
+    const A = [lm.staffAisle0, lm.staffAisle1];
+    const d = function (q, s) { return Math.hypot(q.x - s.x, q.z - s.z); };
+    const fwd = d(from, A[0]) <= d(from, A[1]) ? A : A.slice().reverse();
+    const out = [];
+    for (let i = 0; i < fwd.length; i++) if (d(fwd[i], to) < d(from, to) + 0.5) out.push({ x: fwd[i].x, z: fwd[i].z });
+    return out;
+  }
+  // in: from the outer office, through the door, round the sofas, to `to`
+  function entryRoute(to) {
+    const D = doorway();
+    if (!D) return [{ x: to.x, z: to.z }];
+    return [{ x: D.out1.x, z: D.out1.z }, { x: D.door.x, z: D.door.z, door: true }, { x: D.inside.x, z: D.inside.z }]
+      .concat(aisle(D.inside, to)).concat([{ x: to.x, z: to.z }]);
+  }
+  // out: from where he stands, round the sofas, through the door, on into the outer office
+  function exitRoute(from) {
+    const D = doorway();
+    if (!D) return null;
+    return aisle(from, D.inside).concat([{ x: D.inside.x, z: D.inside.z }, { x: D.door.x, z: D.door.z, door: true },
+      { x: D.out1.x, z: D.out1.z }, { x: D.out2.x, z: D.out2.z }]);
+  }
+  // he walks out; he leaves the world when nobody can see him (systems/leave.js)
+  function walkOut(ped, tag) {
+    if (!ped || ped.dead) return false;
+    ped._iOnly = true;
+    if (CBZ.leave && CBZ.leave.go) {
+      // in this room: out by its door; anywhere else: the leave layer's own way
+      const rec = ROOM.rec, A = rec && rec.approach;
+      let here = false;
+      if (A && ped.pos && Math.abs((ped.pos.y || 0) - rec.floorY) < 2.2) {
+        const l = toLocal(rec, ped.pos.x, ped.pos.z);
+        here = l.z > -0.5 && l.z < A.depth + 0.5 && Math.abs(l.x) < A.span / 2 + 0.5;
+      }
+      const route = here ? exitRoute(ped.pos) : null;
+      if (CBZ.leave.go(ped, { route: route, tag: tag || "presoffice", remove: unpost })) return true;
+    }
+    // no leave layer in this build: only out of sight, never in it
+    if (!CBZ.leave) unpost(ped);
+    return false;
+  }
+
+  const AIDE = { ped: null, m: null, phase: null, t: 0, stuck: 0, lastD: Infinity, talking: false, route: null, wp: 0, standW: null, lent: null, out: null };
   const AIDE_JOB = {
     chief: { job: "chief of staff", archetype: "professional" },
     aide: { job: "military aide", archetype: "military" },
@@ -1432,48 +1510,70 @@
     if (p.target && p.target.set) p.target.set(p.pos.x, 0, p.pos.z);
     if (face != null && p.group) p.group.rotation.y = face;
   }
-  function place(p, x, z) {
-    if (!p || !p.pos) return;
-    p.pos.x = x; p.pos.z = z;
-    if (p.group) { p.group.position.x = x; p.group.position.z = z; }
-    if (p.target && p.target.set) p.target.set(x, 0, z);
-  }
   function sendAide(m) {
     const rec = ROOM.rec, L = ROOM.L;
     if (!rec || !L || !CBZ.cityPostNpc) return false;
-    const sp = toWorld(rec, L.aideSpawn.x, L.aideSpawn.z);
     const st = toWorld(rec, L.aideStand.x, L.aideStand.z);
     const J = AIDE_JOB[m.who.role] || AIDE_JOB.chief;
-    let ped = null;
-    try {
-      ped = CBZ.cityPostNpc(sp.x, sp.z, {
-        job: J.job, archetype: J.archetype, armed: false, aggr: 0.02, wealth: 0.75,
-        floorY: rec.floorY, face: Math.atan2(st.x - sp.x, st.z - sp.z), src: "presoffice:aide",
-      });
-    } catch (e) { ped = null; }
-    if (!ped) return false;
-    ped.name = m.who.name; ped.nameKnown = true; ped.organization = "state";
+    // THE CHIEF WHO IS ALREADY HERE brings his own news: he walks over from
+    // where he stands (president_staff.js hands his body over), instead of a
+    // second Chief walking in while the first one blinks out
+    let ped = null, lent = null;
+    const PS = CBZ.presidentStaff;
+    if (PS && PS.lend) { try { ped = PS.lend(m.who.role); } catch (e) { ped = null; } }
+    if (ped && !ped.dead) lent = m.who.role;
+    else {
+      ped = null;
+      const D = doorway();
+      // a visitor is posted in the outer office, behind the shut door, never in the room
+      const sp = D ? D.out2 : toWorld(rec, L.aideSpawn.x, L.aideSpawn.z);
+      if (D && CBZ.leave && !CBZ.leave.unseen({ x: sp.x, y: rec.floorY, z: sp.z })) return false;   // somebody is looking there: a little later
+      try {
+        ped = CBZ.cityPostNpc(sp.x, sp.z, {
+          job: J.job, archetype: J.archetype, armed: false, aggr: 0.02, wealth: 0.75,
+          floorY: rec.floorY, face: D ? Math.atan2(-D.ox, -D.oz) : 0, src: "presoffice:aide",
+        });
+      } catch (e) { ped = null; }
+      if (!ped) return false;
+      ped.name = m.who.name; ped.nameKnown = true; ped.organization = "state";
+    }
     ped._presOffice = true; ped._iOnly = true; ped._stateStaff = true;
     // he came to see you: look at him (or tap him) and he says it now,
     // without waiting for him to reach the desk. No Talk verb: it is his line.
-    if (CBZ.interactions && CBZ.interactions.registerFor) {
+    if (CBZ.interactions && CBZ.interactions.registerFor && !ped._pvAideHear) {
+      ped._pvAideHear = true;
       CBZ.interactions.registerFor(ped, { id: "pv-aide-hear", speak: true, speakCD: 4, prio: 30, campaignSafe: true, forceYes: true,
         label: "Listen",
         canShow: function () { return AIDE.ped === ped && !ped.dead && (AIDE.phase === "wait" || AIDE.phase === "enter") && !M.onCall && !READ.f; },
         onSelect: function () { aideTalk(); } });
     }
     AIDE.ped = ped; AIDE.m = m; AIDE.phase = "enter"; AIDE.t = 0; AIDE.stuck = 0; AIDE.lastD = Infinity;
-    AIDE.spawnW = sp; AIDE.standW = st; AIDE.talking = false;
-    walkTo(ped, st.x, st.z);
+    AIDE.standW = st; AIDE.talking = false; AIDE.lent = lent;
+    AIDE.route = lent ? aisle(ped.pos, st).concat([{ x: st.x, z: st.z }]) : entryRoute(st);
+    AIDE.wp = 0;
+    const w0 = AIDE.route[0];
+    walkTo(ped, w0.x, w0.z);
     return true;
   }
+  // his part is over: out the door (systems/leave.js removes him when unseen)
+  function aideOut() {
+    const p = AIDE.ped;
+    AIDE.ped = null; AIDE.m = null; AIDE.phase = null; AIDE.talking = false; AIDE.route = null;
+    if (!p || p.dead) return;
+    AIDE.out = p;
+    walkOut(p, AIDE.lent ? "presoffice:" + AIDE.lent : "presoffice:aide");
+    if (AIDE.lent && CBZ.presidentStaff && CBZ.presidentStaff.wentOut) { try { CBZ.presidentStaff.wentOut(AIDE.lent); } catch (e) {} }
+    AIDE.lent = null;
+  }
   function releaseAide(now) {
+    // the world is going (teardown): nobody is left to see him go
     if (AIDE.ped) unpost(AIDE.ped);
-    if (AIDE.m && AIDE.phase !== "leave" && now) {
+    if (AIDE.out && !AIDE.out.dead) { if (CBZ.leave) CBZ.leave.cancel(AIDE.out); unpost(AIDE.out); }
+    if (AIDE.m && now) {
       // a person who never got to say it goes back in the queue
       M.aideQ.unshift(AIDE.m);
     }
-    AIDE.ped = null; AIDE.m = null; AIDE.phase = null; AIDE.talking = false;
+    AIDE.ped = null; AIDE.m = null; AIDE.phase = null; AIDE.talking = false; AIDE.out = null; AIDE.lent = null; AIDE.route = null;
   }
   function tickAide(dt) {
     for (let i = M.aideQ.length - 1; i >= 0; i--) {
@@ -1481,8 +1581,10 @@
       if (CLOCK - m.born > m.expires) { M.aideQ.splice(i, 1); ignore(m, "aide"); }
     }
     const rec = ROOM.rec;
+    // the last one is still on his way out: the next waits for the doorway
+    if (AIDE.out && (AIDE.out.dead || !(CBZ.leave && CBZ.leave.busy(AIDE.out)))) AIDE.out = null;
     if (!AIDE.ped) {
-      if (M.aideQ.length && rec && inOffice(rec) && !READ.f && !M.onCall) {
+      if (!AIDE.out && M.aideQ.length && rec && inOffice(rec) && !READ.f && !M.onCall) {
         // urgent first
         M.aideQ.sort(function (a, b) { return (b.urgent ? 1 : 0) - (a.urgent ? 1 : 0); });
         const m = M.aideQ.shift();
@@ -1491,16 +1593,23 @@
       return;
     }
     const p = AIDE.ped;
-    if (p.dead) { const m = AIDE.m; AIDE.ped = null; AIDE.m = null; AIDE.phase = null; if (m) ignore(m, "aide"); return; }
+    if (p.dead) { const m = AIDE.m; AIDE.ped = null; AIDE.m = null; AIDE.phase = null; AIDE.lent = null; if (m) ignore(m, "aide"); return; }
     AIDE.t += dt;
     const Pp = player();
     if (AIDE.phase === "enter") {
-      const d = Math.hypot(p.pos.x - AIDE.standW.x, p.pos.z - AIDE.standW.z);
-      if (d < 0.7) { AIDE.phase = "wait"; AIDE.t = 0; holdAt(p, faceTo(p, Pp)); return; }
+      const w = AIDE.route && AIDE.route[AIDE.wp];
+      if (!w) { AIDE.phase = "wait"; AIDE.t = 0; holdAt(p, faceTo(p, Pp)); return; }
+      const d = Math.hypot(p.pos.x - w.x, p.pos.z - w.z);
+      const last = AIDE.wp >= AIDE.route.length - 1;
       AIDE.stuck += dt;
-      if (AIDE.lastD - d > 0.8) { AIDE.lastD = d; AIDE.stuck = 0; }
-      if (AIDE.stuck > 7) { place(p, AIDE.standW.x, AIDE.standW.z); AIDE.stuck = 0; }
-      if (p.state !== "walk") walkTo(p, AIDE.standW.x, AIDE.standW.z);
+      if (AIDE.lastD - d > 0.5) { AIDE.lastD = d; AIDE.stuck = 0; }
+      // a waypoint he cannot reach is skipped; nobody is carried there
+      if (d < (last ? 0.7 : 0.8) || AIDE.stuck > 5) {
+        AIDE.wp++; AIDE.stuck = 0; AIDE.lastD = Infinity;
+        const n = AIDE.route[AIDE.wp];
+        if (!n) { AIDE.phase = "wait"; AIDE.t = 0; holdAt(p, faceTo(p, Pp)); return; }
+        walkTo(p, n.x, n.z);
+      } else if (p.state !== "walk") walkTo(p, w.x, w.z);
     } else if (AIDE.phase === "wait") {
       if (Pp && Pp.pos && p.group) p.group.rotation.y = faceTo(p, Pp);
       const near = Pp && Pp.pos && Math.abs(Pp.pos.y - rec.floorY) < 2.2 &&
@@ -1513,28 +1622,22 @@
         const m = AIDE.m;
         AIDE.m = null;
         ignore(m, "aide");
-        AIDE.phase = "leave"; AIDE.t = 0;
-        walkTo(p, AIDE.spawnW.x, AIDE.spawnW.z);
+        aideOut();
       }
-    } else if (AIDE.phase === "leave") {
-      const d = Math.hypot(p.pos.x - AIDE.spawnW.x, p.pos.z - AIDE.spawnW.z);
-      AIDE.stuck += dt;
-      if (AIDE.lastD - d > 0.8) { AIDE.lastD = d; AIDE.stuck = 0; }
-      if (d < 1.0 || AIDE.t > 25 || AIDE.stuck > 7) { AIDE.m = null; unpost(p); AIDE.ped = null; AIDE.phase = null; }
-      else if (p.state !== "walk") walkTo(p, AIDE.spawnW.x, AIDE.spawnW.z);
     }
   }
-  // he says what he came to say; your answer rides on him (campaign_ui.js)
+  // he says what he came to say; your answer rides on him (campaign_ui.js);
+  // then he finishes his line, turns and walks out the door
   function aideTalk() {
     if (!AIDE.ped || !AIDE.m || (AIDE.phase !== "wait" && AIDE.phase !== "enter")) return false;
     AIDE.phase = "talk"; AIDE.talking = true;
     holdAt(AIDE.ped, faceTo(AIDE.ped, player()));
+    const ped = AIDE.ped;
     converse(AIDE.m, "aide", function () {
       AIDE.talking = false;
       M.later.push({ at: CLOCK + 2.6, fn: function () {
-        if (!AIDE.ped || AIDE.phase !== "talk") return;
-        AIDE.phase = "leave"; AIDE.t = 0; AIDE.stuck = 0; AIDE.lastD = Infinity;
-        walkTo(AIDE.ped, AIDE.spawnW.x, AIDE.spawnW.z);
+        if (AIDE.ped !== ped || AIDE.phase !== "talk") return;
+        aideOut();
       } });
     });
     return true;
@@ -2308,7 +2411,7 @@
       if (wasCity) {
         // the world is gone: our peds and meshes with it
         wasCity = false;
-        AIDE.ped = null; AIDE.m = null; AIDE.phase = null; SEC.ped = null; SEC.dead = false;
+        AIDE.ped = null; AIDE.m = null; AIDE.phase = null; AIDE.out = null; AIDE.lent = null; SEC.ped = null; SEC.dead = false;
         M.ringing = null; M.onCall = null; READ.f = null;
         ROOM.root = null; ROOM.rec = null; ROOM.builtFor = null;
       }
@@ -2401,6 +2504,9 @@
     cellCall: cellCall,
     callBack: callBack,
     deskPoint: deskPoint,
+    // the office's door and the walk through it (president_staff.js sends
+    // its people in and out by these; systems/leave.js removes them unseen)
+    doorway: doorway, entryRoute: entryRoute, exitRoute: exitRoute, aisle: aisle, walkOut: walkOut,
     // still carrying him to the chair (the run's first seconds, before he has
     // reached it): protection.js holds the detail's opening muster for this,
     // so the agents are posted where he actually starts
