@@ -420,7 +420,38 @@
     // straight to its full height (every doubling on the way was a copy of
     // the page left as garbage: 24 MB of it at boot, measured), and at full
     // height it drops its CPU copy once uploaded (newPage's onUpdate)
-    const PH = P.PH >= 512 ? PAGE_MAX : P.PH * 2, img = pageImage(C, PH);
+    const PH = P.PH >= 512 ? PAGE_MAX : P.PH * 2;
+    /* THE FULL PAGE IS BORN ON THE GPU. Its 16 MB CPU array lived just long
+       enough to be uploaded once and then went (newPage's onUpdate): 16 MB of
+       garbage on the phone's boot peak per full page, measured. Now the
+       full-height texture is allocated empty on the GPU (texImage2D with no
+       pixels), the old rows are copied into its top, and the page is
+       GPU-only from that moment: every later slot is written straight into
+       the texture (paintSlot's copyTextureToTexture), as before. */
+    const R = CBZ.renderer;
+    if (PH === PAGE_MAX && P.data && R && R.initTexture && R.copyTextureToTexture && R.properties && !(CBZ.CONFIG && CBZ.CONFIG.TEX_FREE === false)) {
+      const old = P.data, oldPH = P.PH;
+      try {
+        P.data = null;
+        P.tex.image = { data: null, width: C.PW, height: PH };
+        P.tex.needsUpdate = true;
+        R.initTexture(P.tex);
+        const pr = R.properties.get(P.tex);
+        if (!pr || !pr.__webglInit) throw new Error("page not on the GPU");
+        R.copyTextureToTexture(new THREE.Vector2(0, PH - oldPH), { isDataTexture: true, image: { data: old, width: C.PW, height: oldPH } }, P.tex);
+        P.gpuOnly = true; CBZ.freedStaticArrays = true;
+        P.PH = PH;
+        P.cap = C.cols * Math.floor(PH / C.sh);
+        pageFullUploads++;
+        for (let i = 0; i < P.slots.length; i++) P.slots[i].uv = slotUv(P.slots[i]);
+        reUv(P);
+        return true;
+      } catch (e) {
+        // (no GPU page: the CPU path below, from the rows we still hold)
+        P.data = old; P.tex.image = pageImage(C, oldPH, old); P.tex.needsUpdate = true;
+      }
+    }
+    const img = pageImage(C, PH);
     img.data.set(P.data, (PH - P.PH) * C.PW * 4);
     P.data = img.data; P.PH = PH;
     P.cap = C.cols * Math.floor(PH / C.sh);
@@ -428,6 +459,11 @@
     P.tex.needsUpdate = true;
     pageFullUploads++;
     for (let i = 0; i < P.slots.length; i++) P.slots[i].uv = slotUv(P.slots[i]);
+    reUv(P);
+    return true;
+  }
+  // every live instance on a grown page gets its pinUv rewritten
+  function reUv(P) {
     pools.forEach(function (p) {
       if (p.page !== P || !p.uv) return;
       for (let i = 0; i < p.recs.length; i++) {
@@ -436,7 +472,6 @@
       }
       p.uDirty = true;
     });
-    return true;
   }
 
   /* The source's own pixels, straight RGBA rows top-down, or null when they

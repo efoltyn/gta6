@@ -24,7 +24,7 @@
    it an EMITTER and it emits boxes, panes and lamps in building-local metres.
 
      E.dbox(x, y, z, w, h, d, col)       opaque trim (merged per colour)
-     E.glass(x, y, z, w, h, d, o)         one breakable pane (o: {tint, kind})
+     E.glass(x, y, z, w, h, d, o)         one breakable pane (o: {tint, kind, role, win: the opening, face})
      E.glow(x, y, z, w, h, nrm, o)        the lit room behind a window (optional)
      E.lamp(x, y, z, w, h, d, col)        a self-lit fitting (optional)
      E.number(x, y, z, nrm, text, h)      a house number (optional)
@@ -47,11 +47,6 @@
   const CBZ = window.CBZ;
   if (!CBZ) return;
   const FO = {};
-  // faceHidden's per-call dedupe stamp: module-wide and only ever growing, so a
-  // fixed box shared between two resolveCoplanar calls never reads a stale mark
-  let fhStamp = 0;
-  // resolveCoplanar's "position in the cluster" scratch (grown, never per call)
-  let LIbuf = new Int32Array(256);
 
   // ---- faces ---------------------------------------------------------------
   FO.face = function (w, d, s) {
@@ -215,7 +210,9 @@
     for (const c of cols) for (const r of rows) {
       const tc = (c[0] + c[1]) / 2, yc = (r[0] + r[1]) / 2;
       const b = FO.at(f, tc, yc, -rev, c[1] - c[0], r[1] - r[0], PT);
-      E.glass(b[0], b[1], b[2], b[3], b[4], b[5], { tint: o.tint || 0, kind: o.kind || S.glass, role: o.role || "" });
+      // win: every light of one window names the same opening, so a host can
+      // treat the window (not the pane) as the hole when one of them breaks
+      E.glass(b[0], b[1], b[2], b[3], b[4], b[5], { tint: o.tint || 0, kind: o.kind || S.glass, role: o.role || "", win: op, face: f });
       n++;
     }
     // glazing bars in front of the glass (never in the frame's plane)
@@ -546,7 +543,26 @@
         for (let i = 0; i < L.length; i++) { const q = L[i]; if (t > q[0] && t < q[1] && y > q[2] && y < q[3]) return true; }
         return false;
       };
-      const cov = function (t, y) { return hit(list, t, y); };
+      /* THE SWEEPS ASK ONE ROW (or one column) AT A TIME. A run sweep holds y
+         fixed and walks t in 6 cm steps; the grow loops hold t and walk y. So
+         each takes only the boxes that cross its row (column) once, and the
+         step test is one interval check against those few, not the whole
+         face's list (measured: this scan was 3.9 s of a 25 s city build).
+         Same comparisons, same answers. */
+      const rowOf = function (y) {
+        const r = [];
+        for (let i = 0; i < list.length; i++) { const q = list[i]; if (y > q[2] && y < q[3]) r.push(q[0], q[1]); }
+        return r;
+      };
+      const colOf = function (t) {
+        const c = [];
+        for (let i = 0; i < list.length; i++) { const q = list[i]; if (t > q[0] && t < q[1]) c.push(q[2], q[3]); }
+        return c;
+      };
+      const inSpans = function (S, x) {
+        for (let i = 0; i < S.length; i += 2) if (x > S[i] && x < S[i + 1]) return true;
+        return false;
+      };
       const half = f.span / 2 - 0.45;
       for (let k = 0; k < o.storeys; k++) {
         if (o.skip && o.skip(f, k)) continue;
@@ -560,9 +576,10 @@
         const runsAt = function (yS) {
           const res = [];
           let start = null;
+          const row = rowOf(yS);
           for (let t = -half; t <= half + 1e-6; t += STEP) {
             const doorBlock = doorBand && Math.abs(t) < o.doorHalf;
-            const open = !doorBlock && !cov(t, yS);
+            const open = !doorBlock && !inSpans(row, t);
             if (open && start == null) start = t;
             if ((!open || t + STEP > half + 1e-6) && start != null) {
               const end = open ? t : t - STEP;
@@ -577,13 +594,14 @@
         for (const run of runs) {
           const tm = (run[0] + run[1]) / 2, yS = run[2];
           let v0 = yS, v1 = yS;
-          while (v0 - VSTEP >= b0 && !cov(tm, v0 - VSTEP)) v0 -= VSTEP;
-          while (v1 + VSTEP <= b1 && !cov(tm, v1 + VSTEP)) v1 += VSTEP;
+          const col = colOf(tm);
+          while (v0 - VSTEP >= b0 && !inSpans(col, v0 - VSTEP)) v0 -= VSTEP;
+          while (v1 + VSTEP <= b1 && !inSpans(col, v1 + VSTEP)) v1 += VSTEP;
           if (v1 - v0 < 0.5) continue;
           const u0 = run[0] - STEP / 2, u1 = run[1] + STEP / 2;
           if (overlapsMade(u0, u1, v0, v1)) continue;
           made.push([u0, u1, v0, v1]);
-          out.push({ s: f.s, k: k, t0: u0, t1: u1, y0: v0, y1: v1, forced: false, bare: !cov(tm, v0 - 0.12), shop: shop });
+          out.push({ s: f.s, k: k, t0: u0, t1: u1, y0: v0, y1: v1, forced: false, bare: !inSpans(col, v0 - 0.12), shop: shop });
         }
         // a storey the grammar clad solid still gets windows, on a rhythm
         const span = 2 * half;
@@ -724,51 +742,78 @@
       const w = W[k];
       const i0 = Math.floor(w[0] / GC), i1 = Math.floor(w[1] / GC), k0 = Math.floor(w[4] / GC), k1 = Math.floor(w[5] / GC);
       if ((i1 - i0 + 1) * (k1 - k0 + 1) > 200) continue;
-      for (let i = i0; i <= i1; i++) for (let j = k0; j <= k1; j++) { const key = i * 73856093 ^ j * 19349663; let L = wg.get(key); if (!L) { L = []; wg.set(key, L); } L.push(w); }
+      for (let i = i0; i <= i1; i++) for (let j = k0; j <= k1; j++) { const key = i * 73856093 ^ j * 19349663; let L = wg.get(key); if (!L) { L = []; wg.set(key, L); } L.push(k); }
     }
-    function inFixed(x, y, z) {
-      const L = wg.get(Math.floor(x / GC) * 73856093 ^ Math.floor(z / GC) * 19349663);
-      if (!L) return false;
-      for (const w of L) if (x > w[0] && x < w[1] && y > w[2] && y < w[3] && z > w[4] && z < w[5]) return true;
-      return false;
-    }
-    // the point 3 mm in front of face (a, s) of box i, at the centre of [u, v] range
-    const pt = [0, 0, 0];
+    /* IS THE FACE (a, s) OF BOX i HIDDEN over the rect [u0,u1] x [v0,v1]?
+       Hidden only where the WHOLE overlap is backed by solid (a face half over
+       a window opening is seen through the glass from the room): the air 3 mm
+       in front of it lies inside fixed boxes everywhere.
+
+       This is FO.solidRects(rect minus the fixed boxes) asked only "is
+       anything left?", answered without building the rects: the same grid
+       over the hole edges (same uniq at 4 mm), the first solid cell answers
+       no. Every merged rect is at least one cell (> 4 mm) on each side, so
+       "a left rect wider and taller than 2 mm" is exactly "a solid cell";
+       with no hole at all inside the 1 cm margins the whole rect is left.
+       Candidates are visited once per call by a stamp, not a Set. (Measured:
+       the Set + rect-building version was 6.3 s of a 25 s city build.) */
+    const wStamp = new Int32Array(W.length);
+    let wStampN = 0;
+    const hA0 = [], hA1 = [], hY0 = [], hY1 = [], gX = [], gY = [];
+    const uniq4 = function (arr) {
+      arr.sort(function (p, q) { return p - q; });
+      let n2 = 0;
+      for (let i = 0; i < arr.length; i++) { const x = arr[i]; if (!n2 || x - arr[n2 - 1] > 0.004) arr[n2++] = x; }
+      arr.length = n2;
+      return arr;
+    };
     function faceHidden(i, a, s, u, v, u0, u1, v0, v1) {
       const off = B[i * 6 + a * 2 + s] + (s ? 0.003 : -0.003);
-      // hidden only where the WHOLE overlap is backed by solid (a face half over
-      // a window opening is seen through the glass from the room): the rect
-      // minus every fixed box the air in front of it lies inside, exactly
-      pt[a] = off; pt[u] = (u0 + u1) / 2; pt[v] = (v0 + v1) / 2;
-      const hs = [];
-      // (a stamp per call, not a Set per call: this runs per overlapping pair)
-      const stamp = ++fhStamp;
-      const ci0 = Math.floor(Math.min(a === 0 ? off : (u === 0 ? u0 : v0), a === 0 ? off : (u === 0 ? u1 : v1)) / GC);
-      void ci0;
       // the candidate fixed boxes: every grid cell the rect spans
       const xs0 = a === 0 ? off : (u === 0 ? u0 : v0), xs1 = a === 0 ? off : (u === 0 ? u1 : v1);
       const zs0 = a === 2 ? off : (u === 2 ? u0 : v0), zs1 = a === 2 ? off : (u === 2 ? u1 : v1);
+      wStampN++;
+      let nh = 0, nm = 0;
       for (let gi = Math.floor(xs0 / GC); gi <= Math.floor(xs1 / GC); gi++) for (let gk = Math.floor(zs0 / GC); gk <= Math.floor(zs1 / GC); gk++) {
         const L = wg.get(gi * 73856093 ^ gk * 19349663); if (!L) continue;
-        for (const w of L) {
-          if (w._fhStamp === stamp) continue; w._fhStamp = stamp;
+        for (let q = 0; q < L.length; q++) {
+          const k = L[q];
+          if (wStamp[k] === wStampN) continue; wStamp[k] = wStampN;
+          const w = W[k];
           if (!(off > w[a * 2] && off < w[a * 2 + 1])) continue;
           if (w[u * 2 + 1] <= u0 || w[u * 2] >= u1 || w[v * 2 + 1] <= v0 || w[v * 2] >= v1) continue;
+          nh++;
           const ha0 = w[u * 2], ha1 = w[u * 2 + 1], hy0 = w[v * 2], hy1 = w[v * 2 + 1];
-          // ONE fixed box over the whole rect answers it (what solidRects would
-          // return for it: nothing left; the same 1 cm entry test it applies)
-          if (ha0 <= u0 && ha1 >= u1 && hy0 <= v0 && hy1 >= v1 &&
-              ha1 > u0 + 0.01 && ha0 < u1 - 0.01 && hy1 > v0 + 0.01 && hy0 < v1 - 0.01) return true;
-          hs.push({ a0: ha0, a1: ha1, y0: hy0, y1: hy1 });
+          // solidRects' own filter: a hole that reaches 1 cm into the rect
+          if (!(ha1 > u0 + 0.01 && ha0 < u1 - 0.01 && hy1 > v0 + 0.01 && hy0 < v1 - 0.01)) continue;
+          // one hole over the whole rect: nothing is left
+          if (ha0 <= u0 && ha1 >= u1 && hy0 <= v0 && hy1 >= v1) return true;
+          hA0[nm] = ha0; hA1[nm] = ha1; hY0[nm] = hy0; hY1[nm] = hy1; nm++;
         }
       }
-      if (!hs.length) return false;
-      const left = FO.solidRects(u0, u1, v0, v1, hs);
-      for (const r of left) if ((r[1] - r[0]) > 0.002 && (r[3] - r[2]) > 0.002) return false;
+      if (!nh) return false;
+      if (!nm) return !((u1 - u0) > 0.002 && (v1 - v0) > 0.002);
+      gX.length = 0; gY.length = 0;
+      gX.push(u0, u1); gY.push(v0, v1);
+      for (let h = 0; h < nm; h++) {
+        gX.push(Math.max(u0, Math.min(u1, hA0[h])), Math.max(u0, Math.min(u1, hA1[h])));
+        gY.push(Math.max(v0, Math.min(v1, hY0[h])), Math.max(v0, Math.min(v1, hY1[h])));
+      }
+      uniq4(gX); uniq4(gY);
+      for (let jy = 0; jy < gY.length - 1; jy++) {
+        const cy = (gY[jy] + gY[jy + 1]) / 2;
+        for (let ix = 0; ix < gX.length - 1; ix++) {
+          const cx = (gX[ix] + gX[ix + 1]) / 2;
+          let open = false;
+          for (let h = 0; h < nm; h++) if (cx > hA0[h] && cx < hA1[h] && cy > hY0[h] && cy < hY1[h]) { open = true; break; }
+          if (!open) return false;                 // a solid cell: something is left
+        }
+      }
       return true;
     }
     let moved = 0;
     const CELL = 0.02;
+    const pos = new Int32Array(n);                 // a face's place in its cluster's plane order
     // rounds over all three axes: settling a face on one axis can make a box
     // reach into a wall, putting a SIDE face in a jamb's plane
     for (let round = 0; round < 3; round++) {
@@ -825,7 +870,6 @@
         };
         const order = [];
         for (let i = 0; i < n; i++) order.push(i);
-        const LI = LIbuf.length >= n ? LIbuf : (LIbuf = new Int32Array(Math.max(n, LIbuf.length * 2)));
         order.sort(function (p, q) { return B[p * 6 + a * 2 + s] - B[q * 6 + a * 2 + s]; });
         const dir = s === 1 ? -1 : 1;              // "back" = into the box
         let c0 = 0;
@@ -835,23 +879,22 @@
           if (c1 - c0 >= 2) {
             const L = order.slice(c0, c1);
             const hit = new Set();
-            /* SWEEP, NOT EVERY PAIR. A pair can only clash if the two faces
-               overlap by 2 mm along u, so the cluster is walked in u order and
-               each face meets only the faces that start before it ends (the
-               rest fail overlapsUV below anyway). A pair is still judged with
-               the face laid EARLIER in the cluster as `i` (faceHidden asks
-               about i's face), and `hit` is a set, so the outcome is the
-               all-pairs one exactly; a pair whose two faces are both marked
-               already adds nothing and is skipped (faceHidden was 1.6 s of a
-               3 s town rebuild). */
-            for (let x = 0; x < L.length; x++) LI[L[x]] = x;
-            const S = L.slice().sort(function (p, q) { return B[p * 6 + u * 2] - B[q * 6 + u * 2]; });
-            for (let x = 0; x < S.length; x++) for (let y = x + 1; y < S.length; y++) {
-              const p = S[x], q = S[y];
-              if (B[p * 6 + u * 2 + 1] - B[q * 6 + u * 2] < 0.002) break;   // q and every later one start past p's end
-              const i = LI[p] < LI[q] ? p : q, j = i === p ? q : p;
-              if (hit.has(i) && hit.has(j)) continue;
+            /* THE PAIRS, SWEPT. Only faces that overlap along u can clash, so
+               the cluster is walked in u order and each face meets only the
+               ones whose u range starts before its own ends (the exact
+               overlap test still decides). A pair whose two faces are both
+               already marked adds nothing, so its hidden-face test is
+               skipped. `i` is still the face earlier in the plane order, as
+               in the all-pairs loop this replaced (2 s + 6 s of a 25 s build
+               on downtown's long ornament runs): the same set of faces. */
+            for (let x = 0; x < L.length; x++) pos[L[x]] = x;
+            const byU = L.slice().sort(function (p, q) { return B[p * 6 + u * 2] - B[q * 6 + u * 2]; });
+            for (let xp = 0; xp < byU.length; xp++) for (let yp = xp + 1; yp < byU.length; yp++) {
+              const pp = byU[xp], qq = byU[yp];
+              if (B[qq * 6 + u * 2] >= B[pp * 6 + u * 2 + 1]) break;   // no u overlap from here on
+              const i = pos[pp] < pos[qq] ? pp : qq, j = i === pp ? qq : pp;
               if (recs[i][6] === recs[j][6]) continue;
+              if (hit.has(i) && hit.has(j)) continue;
               if (Math.abs(B[i * 6 + a * 2 + s] - B[j * 6 + a * 2 + s]) > tol) continue;
               if (!overlapsUV(i, j)) continue;
               if (W.length) {

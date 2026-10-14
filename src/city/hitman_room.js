@@ -19,7 +19,7 @@
                                board:{x,z}, center:{x,z}, inside(x,z)}
      board.set(items) / items() / reset() / defaults() / refresh()
      phone.ring({from, onAnswer}) / stop() / ringing()
-     door.deliver(kind, {canvas, verb, onPick}) / clear(kind) / waiting(kind)
+     door.deliver(kind, {canvas | paint(ctx, canvas), verb, onPick}) / clear(kind) / waiting(kind)
      tv.show(canvas) / tv.idle()
      gunCase.open() / close() / isOpen()
      closet.open()
@@ -1403,7 +1403,7 @@
   }
 
   /* ---------------- deliveries under the door ------------------------------ */
-  function deliverMesh(kind, canvas) {
+  function deliverMesh(kind, canvas, paint) {
     const K = paperKit();
     let c = canvas;
     /* THE MORNING PAPER IS PRINTED WHEN SOMEBODY LOOKS AT IT: a 1400 x 1900
@@ -1413,7 +1413,8 @@
        pick-up) paints it again. */
     if (!c && kind === "paper" && K && K.newspaper && CBZ.lazyCanvasTexture) {
       const issue = { masthead: "The Morning Ledger", headline: paperHeadline() };
-      const ltex = CBZ.lazyCanvasTexture(1400, 1900, function (ctx, lc) { K.newspaper(issue, { canvas: lc }); }, { name: "hm-paper" });
+      // (a caller's own issue comes as a painter: city/agency.js's daily paper)
+      const ltex = CBZ.lazyCanvasTexture(1400, 1900, paint || function (ctx, lc) { K.newspaper(issue, { canvas: lc }); }, { name: "hm-paper" });
       if (THREE.sRGBEncoding != null) ltex.encoding = THREE.sRGBEncoding;
       ltex.anisotropy = aniso();
       ltex.minFilter = THREE.LinearMipmapLinearFilter || ltex.minFilter;
@@ -1916,7 +1917,7 @@
     kind = kind === "paper" ? "paper" : "envelope";
     opts = opts || {};
     clearDelivery(kind);
-    const m = deliverMesh(kind, opts.canvas || null);
+    const m = deliverMesh(kind, opts.canvas || null, typeof opts.paint === "function" ? opts.paint : null);
     const r = rng(((now() * 1000) | 0) + (kind === "paper" ? 7 : 3));
     const d = {
       kind: kind, g: m.g, canvas: null, verb: opts.verb || "Pick up", onPick: opts.onPick || null,

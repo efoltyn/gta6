@@ -447,36 +447,64 @@
     _scopeHidden.length = 0;
   }
 
+  /* THREE TIERS OF SKIP. The arena's top-level children were the only thing
+     scoped, and after that pass a feed still walked ~12k nodes: ~8k of them
+     inside the WORLD-SPANNING arena groups (the highway network, the
+     airfields' dressing, wide district groups: r > 400 m, which a single
+     sphere cannot drop) and the rest under the scene's own top level (the
+     streamed and dressing roots that are not under the arena). So:
+       1) arena children, as before (the 256 px monitor accepts `loose`);
+       2) ONE LEVEL INSIDE a world-spanning, static, unlit arena group: its
+          children are tested by their own spheres;
+       3) the SCENE's top-level children (not the arena, not lights, not
+          the CCTV's own roots).
+     Tiers 2 and 3 are strict: a subtree holding a light, an instanced pool or
+     a frustumCulled=false mesh (`loose`: its sphere is not its footprint) or
+     anything marked dynamic is never hidden, so they drop exactly what r128
+     would have frustum-rejected mesh by mesh, and the feed is unchanged. */
+  let _scopeBudget = 0, _scopeSeen = 0;
+  // 0 = tested (hidden or kept), 1 = skipped, 2 = world-spanning static group
+  function scopeOne(o, strict) {
+    if (!o || !o.visible) return 1;
+    if (!o.isMesh && !o.isGroup) return 1;
+    if (o === camRoot || o === feedRoot) return 1;   // renderFeed owns those two
+    if (!CBZ.subtreeSphereMeasured(o)) {
+      // a first measurement is a subtree walk; unmeasured stays VISIBLE
+      if (_scopeBudget <= 0) return 1;
+      _scopeBudget--; auMeasured++;
+    }
+    const b = CBZ.subtreeSphere(o);
+    if (b.lit) return 1;
+    if (b.dyn) return (b.r > 400 && o.isGroup && o.children.length && !(o.userData && o.userData.dynamic) &&
+      o.position.x === b.px && o.position.z === b.pz) ? 2 : 1;
+    if (strict && b.loose) return 1;
+    if (o.position.x !== b.px || o.position.z !== b.pz) { b.dyn = true; return 1; }   // it moved: an actor
+    _scopeSeen++;
+    _scopeSph.center.set(b.x, b.y, b.z);
+    _scopeSph.radius = b.r + SCOPE_PAD;
+    if (_scopeFrustum.intersectsSphere(_scopeSph)) return 0;
+    o.visible = false;
+    _scopeHidden.push(o);                   // recorded AS it is hidden
+    return 0;
+  }
+
   function scopeApply(root) {
     scopeRestore();
     feedCam.updateMatrixWorld(true);
     _scopeM.multiplyMatrices(feedCam.projectionMatrix, feedCam.matrixWorldInverse);
     _scopeFrustum.setFromProjectionMatrix(_scopeM);
+    _scopeBudget = SCOPE_MEASURES; _scopeSeen = 0;
+    // only ever hide something CURRENTLY visible (farcull, demolition and the
+    // quality tiers own what is hidden), meshes and groups only (never a light)
     const kids = root.children;
-    let budget = SCOPE_MEASURES, seen = 0;
     for (let i = 0; i < kids.length; i++) {
-      const o = kids[i];
-      // only ever hide something CURRENTLY visible (farcull, demolition and the
-      // quality tiers own what is hidden), meshes and groups only (never a light)
-      if (!o || !o.visible) continue;
-      if (!o.isMesh && !o.isGroup) continue;
-      if (o === camRoot || o === feedRoot) continue;   // renderFeed owns those two
-      if (!CBZ.subtreeSphereMeasured(o)) {
-        // a first measurement is a subtree walk; unmeasured stays VISIBLE
-        if (budget <= 0) continue;
-        budget--; auMeasured++;
-      }
-      const b = CBZ.subtreeSphere(o);
-      if (b.dyn || b.lit) continue;
-      if (o.position.x !== b.px || o.position.z !== b.pz) { b.dyn = true; continue; }   // it moved: an actor
-      seen++;
-      _scopeSph.center.set(b.x, b.y, b.z);
-      _scopeSph.radius = b.r + SCOPE_PAD;
-      if (_scopeFrustum.intersectsSphere(_scopeSph)) continue;
-      o.visible = false;
-      _scopeHidden.push(o);                   // recorded AS it is hidden
+      if (scopeOne(kids[i], false) !== 2) continue;
+      const inner = kids[i].children;
+      for (let j = 0; j < inner.length; j++) scopeOne(inner[j], true);
     }
-    auCandidates = seen;
+    const top = CBZ.scene ? CBZ.scene.children : [];
+    for (let i = 0; i < top.length; i++) if (top[i] !== root) scopeOne(top[i], true);
+    auCandidates = _scopeSeen;
     return _scopeHidden.length;
   }
 
@@ -602,6 +630,14 @@
                         the measured static ones it considered (`0 of 0` =
                         the scope is still warming, not "found nothing")
        far            — the depth in force */
+  // probes: one feed render from camera `i` (default: the current one), timed
+  CBZ.cctvFeedBench = function (i) {
+    if (!ensureInit() || !CBZ.cctvCameras.length) return null;
+    if (i != null) camIdx = i;
+    const t0 = perfNow();
+    renderFeed();
+    return { ms: perfNow() - t0, hidden: auHidden, candidates: auCandidates };
+  };
   CBZ.cctvFeedAudit = function () {
     return {
       renders: auRenders,

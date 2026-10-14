@@ -312,9 +312,21 @@
   function mats() {
     if (M) return M;
     let atlas = null, slab = null, pool = null;
-    try { atlas = bakeAtlas(); slab = bakeSlab(); pool = bakePool(); } catch (e) { /* no canvas */ }
-    // baked once, never repainted: the canvases go once uploaded (core/texfree.js)
-    if (CBZ.freeCanvasAfterUpload) { CBZ.freeCanvasAfterUpload(atlas); CBZ.freeCanvasAfterUpload(slab); }
+    /* baked when first DRAWN (core/texfree.js lazyBaked): the 1024 atlas and
+       the slab sat in the boot as 5 MB of canvas while no forecourt was in
+       sight; both bakers are seeded (lcg), so a re-bake is the same picture */
+    try {
+      if (CBZ.lazyBaked) {
+        const NS = (CBZ.qualityLevel != null && CBZ.qualityLevel <= 1) ? 512 : 1024;
+        atlas = CBZ.lazyBaked(AT, AT, bakeAtlas, { name: "fuel-atlas" }); atlas.encoding = THREE.sRGBEncoding; atlas.anisotropy = 8;
+        slab = CBZ.lazyBaked(NS, NS, bakeSlab, { name: "fuel-slab" });
+        slab.encoding = THREE.sRGBEncoding; slab.wrapS = slab.wrapT = THREE.RepeatWrapping; slab.anisotropy = 8;
+      } else {
+        atlas = bakeAtlas(); slab = bakeSlab();
+        if (CBZ.freeCanvasAfterUpload) { CBZ.freeCanvasAfterUpload(atlas); CBZ.freeCanvasAfterUpload(slab); }
+      }
+      pool = bakePool();
+    } catch (e) { /* no canvas */ }
     const sh = function (m, name) { m._shared = true; m.name = name; return m; };
     M = {
       solid: sh(new THREE.MeshLambertMaterial({ vertexColors: true }), "fuel-solid"),

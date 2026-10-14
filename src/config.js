@@ -1808,6 +1808,33 @@
   CBZ.frameSeqMark = function () { return frameSeq + 0.5; };
   CBZ.onUpdate = function (order, fn) { CBZ.updaters.push({ order, fn, source: frameSource(), seq: nextFrameSeq() }); };
   CBZ.onAlways = function (order, fn) { CBZ.always.push({ order, fn, source: frameSource(), seq: nextFrameSeq() }); };
+  /* AFTER THE BOOT, IN IDLE TIME. Work a run needs soon but not before its
+     first frame (compacting parked far cells, building the guns nobody holds
+     yet) waits until the game has been PLAYING for ~2 s (the first frames
+     and their shader links are done), then runs in an idle slice. Tasks run
+     in the order given, one per idle slice. */
+  const afterBootQ = [];
+  let afterBootArmed = false;
+  CBZ.afterBoot = function (fn) {
+    afterBootQ.push(fn);
+    if (afterBootArmed) return;
+    afterBootArmed = true;
+    let playing = 0;
+    const idle = typeof requestIdleCallback === "function"
+      ? function (f) { requestIdleCallback(f, { timeout: 2000 }); } : function (f) { setTimeout(f, 0); };
+    const step = function () {
+      if (!afterBootQ.length) { afterBootArmed = false; return; }
+      const g = CBZ.game;
+      playing = g && g.state === "playing" ? playing + 1 : 0;
+      if (playing < 8) { setTimeout(step, 250); return; }
+      idle(function () {
+        const f = afterBootQ.shift();
+        try { f(); } catch (e) { console.error("[afterBoot]", e); }
+        setTimeout(step, 30);
+      });
+    };
+    setTimeout(step, 250);
+  };
 
   // ---- THE ONE QUALITY KNOB (owner rule: NO hardcoded content budgets). ----
   // Every content system (decal pools, gore counts, rain density, LOD draw

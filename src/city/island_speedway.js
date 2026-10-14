@@ -336,10 +336,12 @@
 
     // ---- the ground: country grass, a paved ring round the stadium, the
     //      entrance plaza and the approach apron; one canvas, one mesh ----
-    const cv = document.createElement("canvas");
-    cv.width = cv.height = 1024;
-    const c2 = cv.getContext("2d");
     const SPAN = Math.max(SITE_HX, SITE_HZ + Math.abs(SITE_DZ)) + 4;
+    const E = entrance();
+    /* painted the first frame the ground is drawn, its canvas given back after
+       the upload (core/texfree.js): it sat in the boot as a 4 MB canvas while
+       the speedway was out of sight. The painter reads only fixed data. */
+    const paintGround = function (c2) {
     const px = (x) => (x - (CX - SPAN)) / (2 * SPAN) * 1024;
     const pz = (z) => (z - (CZ - SPAN)) / (2 * SPAN) * 1024;
     c2.fillStyle = "#5f7a4a"; c2.fillRect(0, 0, 1024, 1024);
@@ -357,17 +359,22 @@
     }
     ring(16); c2.fillStyle = "#44474c"; c2.fill();                 // the concourse apron round the bowl
     ring(15); c2.strokeStyle = "rgba(230,232,236,.35)"; c2.lineWidth = 2; c2.stroke();
-    const E = entrance();
     // the plaza: from the approach road up to the main gate
     c2.fillStyle = "#55585d";
     const pzx0 = Math.min(E.doorX - 38, CX - 80), pzx1 = E.doorX + 38;
     c2.fillRect(px(pzx0), pz(ACCESS_Z - 14), px(pzx1) - px(pzx0), pz(E.doorZ + 2) - pz(ACCESS_Z - 14));
     c2.strokeStyle = "rgba(255,255,255,.08)"; c2.lineWidth = 1;
     for (let x = pzx0; x < pzx1; x += 6) { c2.beginPath(); c2.moveTo(px(x), pz(ACCESS_Z - 14)); c2.lineTo(px(x), pz(E.doorZ)); c2.stroke(); }
-    const tex = new THREE.CanvasTexture(cv);
+    };
+    let tex;
+    if (CBZ.lazyCanvasTexture) tex = CBZ.lazyCanvasTexture(1024, 1024, paintGround, { name: "speedway-ground" });
+    else {
+      const cv = document.createElement("canvas"); cv.width = cv.height = 1024;
+      paintGround(cv.getContext("2d"));
+      tex = new THREE.CanvasTexture(cv);
+    }
     tex.encoding = THREE.sRGBEncoding;
     tex.anisotropy = 4;
-    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);   // painted once: the canvas goes once uploaded
     const shape = new THREE.Shape();
     for (let i = 0; i <= 192; i++) {
       const p = siteEdge(i / 192 * Math.PI * 2, 0);

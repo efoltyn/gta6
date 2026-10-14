@@ -298,9 +298,18 @@
     const sig = CBZ.bakeSig ? CBZ.bakeSig("detail:" + N) : null;
     const hit = sig && CBZ.bakeGet ? CBZ.bakeGet("city-ground-detail", sig) : null;
     if (hit && hit.T1 && hit.T1.length === N * N * 4) { stats.bakeMs = Date.now() - t0; return { N, T1: hit.T1, T2: hit.T2, T3: hit.T3 }; }
-    const g = grassField(N), e = earthField(N), a = asphaltField(N), c = concreteField(N), p = paverField(N);
-    const dry = field(N, 5, 3, 601), weed = field(N, 24, 2, 603);
-    const out = { N, T1: pack(N, g[0], g[1], e[0], e[1]), T2: pack(N, a[0], a[1], dry, weed), T3: pack(N, c[0], c[1], p[0], p[1]) };
+    // each packed map is made from its own fields, which go before the next
+    // map's are made (every field is a pure function of N and its salt, so
+    // the order changes nothing but how many float fields live at once: 4,
+    // not 12)
+    let A = grassField(N), B = earthField(N);
+    const T1 = pack(N, A[0], A[1], B[0], B[1]);
+    A = asphaltField(N); B = [field(N, 5, 3, 601), field(N, 24, 2, 603)];
+    const T2 = pack(N, A[0], A[1], B[0], B[1]);
+    A = concreteField(N); B = paverField(N);
+    const T3 = pack(N, A[0], A[1], B[0], B[1]);
+    A = B = null;
+    const out = { N, T1: T1, T2: T2, T3: T3 };
     if (sig && CBZ.bakePut) CBZ.bakePut("city-ground-detail", sig, { T1: out.T1, T2: out.T2, T3: out.T3 });
     stats.bakeMs = Date.now() - t0;
     return out;

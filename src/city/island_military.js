@@ -687,7 +687,7 @@
     FLEET.promise = loadUnits(fleetIds()).then(function (got) {
       if (gen !== FLEET.gen) return;
       FLEET.queue = FLEET.stands.filter(function (q) { return got.indexOf(q.id) >= 0; });
-      FLEET.state = "building";
+      FLEET.state = "building"; FLEET.buildT = 0;
     }).catch(function (e) {
       console.warn("[fort] the motor pool did not load:", e);
       if (gen === FLEET.gen) FLEET.state = "idle";
@@ -715,6 +715,35 @@
       if (far && g.visible) { g.visible = false; g.userData.fleetAsleep = true; }
       else if (!far && g.userData.fleetAsleep) { g.visible = true; g.userData.fleetAsleep = false; }
     }
+  }
+  /* PARKING THE FLEET IS NOT FRAME WORK. Each hull's first build of its type
+     lofts the template and paints its camo/markings canvas on the CPU (a
+     Bradley's 512^2 fbm camo alone is ~70 ms; the 37 stands came to ~0.5 s
+     cold), and the fleet starts at 900 m, out of sight. Parked one a frame,
+     that was a 13 ms mean / 95 ms worst frame for the 40 frames after you
+     came within 900 m. Now the hulls park in the page's idle time between
+     frames (several per idle slice while it lasts, at least one per slice,
+     never starved: a 250 ms timeout), so a frame never carries a build. */
+  const IDLE = typeof window !== "undefined" && typeof window.requestIdleCallback === "function" ? window.requestIdleCallback.bind(window) : null;
+  function fleetPark() {
+    const q = FLEET.queue.shift();
+    if (q) {
+      try {
+        const made = unitBuild(q.id, { seed: q.n });
+        if (made) placeUnit(FLEET.root, made, q.s, q.x, q.z);
+      } catch (e) { console.warn("[fort] could not park " + q.id, e); }
+      q.done = true;
+    }
+    if (!FLEET.queue.length) {
+      FLEET.state = "ready";
+      if (CBZ._militaryBase) CBZ._militaryBase.boardable = placed.length;
+    }
+  }
+  function fleetIdle(deadline, gen) {
+    FLEET.idleAsked = false;
+    if (gen !== FLEET.gen || FLEET.state !== "building") return;
+    do fleetPark();
+    while (FLEET.state === "building" && deadline && !deadline.didTimeout && deadline.timeRemaining() > 6);
   }
   CBZ.fortBrandtFleet = {
     ensure: fleetEnsure,
@@ -747,19 +776,12 @@
       }
       if (FLEET.state === "ready") { fleetSleep(dt); return; }
       if (FLEET.state !== "building") return;
-      // one hull a frame: an Abrams' first build lofts its geometry
-      const q = FLEET.queue.shift();
-      if (q) {
-        try {
-          const made = unitBuild(q.id, { seed: q.n });
-          if (made) placeUnit(FLEET.root, made, q.s, q.x, q.z);
-        } catch (e) { console.warn("[fort] could not park " + q.id, e); }
-        q.done = true;
-      }
-      if (!FLEET.queue.length) {
-        FLEET.state = "ready";
-        if (CBZ._militaryBase) CBZ._militaryBase.boardable = placed.length;
-      }
+      // between frames when the page can (see fleetIdle). A page without
+      // idle callbacks, or a page too busy to have finished in 1.5 s (a jet
+      // covers the 900 m in ~4 s), parks one hull a frame, as it always did.
+      FLEET.buildT = (FLEET.buildT || 0) + dt;
+      if (IDLE && FLEET.buildT < 1.5) { if (!FLEET.idleAsked) { FLEET.idleAsked = true; const gen = FLEET.gen; IDLE(function (d) { fleetIdle(d, gen); }, { timeout: 250 }); } return; }
+      fleetPark();
     });
   }
 
@@ -841,7 +863,7 @@
     // ---- THE MACHINES: which unit stands on which stand. Nothing is built
     // here: the fleet loads and parks when the player comes near (FLEET).
     FLEET.gen++; FLEET.root = root; FLEET.queue = []; FLEET.promise = null;
-    FLEET.state = "idle"; FLEET.checkT = 0; FLEET.stands = [];
+    FLEET.state = "idle"; FLEET.checkT = 0; FLEET.stands = []; FLEET.idleAsked = false; FLEET.buildT = 0;
     const perKind = {};
     (PLAN ? PLAN.stands : []).forEach(function (s) {
       if (s.kind === "b2") return;                       // city/strategic.js parks the B-2 on this stand (zoning fixture)

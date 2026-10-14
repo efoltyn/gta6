@@ -474,8 +474,13 @@
     THREE.ShaderChunk.fog_fragment = body.join("\n");
   })();
 
+  // SAFE BOOT (systems/glcontext.js): this tab already lost its GPU context
+  // once; come back without MSAA so the same boot does not hit the same wall
+  let SAFE_BOOT = false;
+  try { SAFE_BOOT = sessionStorage.getItem("cbz.safeboot") === "1"; } catch (e) {}
+  CBZ.safeBoot = SAFE_BOOT;
   const renderer = new THREE.WebGLRenderer({
-    antialias: true,                 // MSAA — crisp edges on the blocky geometry
+    antialias: !SAFE_BOOT,           // MSAA — crisp edges on the blocky geometry
     powerPreference: "high-performance",
     stencil: false,                  // we never use the stencil buffer
   });

@@ -236,7 +236,13 @@
     // blockers, ~100 MB of heap) and still blocked sight where nothing stands.
     // Streamed, each goes with its parked job and returns when it does.
     stats.los = CBZ.sliceDropDetachedLos(root, prunedTops);
-    if (s.stream && CBZ.streamCompactParked) { try { stats.compacted = CBZ.streamCompactParked(root); } catch (e) { console.error("[compact parked]", e); } }
+    // merging + packing the parked far cells is memory, not the first frame:
+    // it runs once the run is playing (config.js CBZ.afterBoot); a cell the
+    // player reaches first simply comes back unpacked
+    if (s.stream && CBZ.streamCompactParked) {
+      const compact = function () { try { stats.compacted = CBZ.streamCompactParked(root); } catch (e) { console.error("[compact parked]", e); } };
+      if (CBZ.afterBoot) CBZ.afterBoot(compact); else compact();
+    }
 
     const keepRect = function (c) {
       if (!c || c.minX == null) return true;

@@ -280,6 +280,9 @@
 
   function build() {
     if (city.built) return;
+    // every program the live scene already needs starts linking on the GPU
+    // now, behind the build (core/fxwarm.js)
+    if (CBZ.shaderQueueWorld) { try { CBZ.shaderQueueWorld(); } catch (e) { console.error("[shader queue]", e); } }
     const colStart = CBZ.colliders ? CBZ.colliders.length : 0;
     const platStart = CBZ.platforms ? CBZ.platforms.length : 0;
     city.arena = CBZ.buildCity();
@@ -888,6 +891,9 @@
       if (CBZ.slice && CBZ.slice.stream && CBZ.streamTick) {
         try { CBZ.streamTick(true); } catch (e) { console.error("[stream first tick]", e); }
       }
+      // the spawned run (peds, traffic, the first streamed tick): its new
+      // programs link now, not inside the first frame (core/fxwarm.js)
+      if (CBZ.shaderQueueWorld) { try { CBZ.shaderQueueWorld(); } catch (e) { console.error("[shader queue]", e); } }
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
     winStats(game) {

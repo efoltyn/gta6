@@ -26,8 +26,10 @@
       var ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
       ms.forEach(function (m) {
         if (!m) return;
-        for (var k in m) { var t = m[k]; if (t && t.isTexture && t.image) inScene.set(t.image, t); }
-        if (m.uniforms) for (var u in m.uniforms) { var v = m.uniforms[u] && m.uniforms[u].value; if (v && v.isTexture && v.image) inScene.set(v.image, v); }
+        // (a lazy texture's .image PAINTS it: core/texfree.js lazyCanvasTexture.
+        // Reading it here made the census create the canvases it counted.)
+        for (var k in m) { var t = m[k]; if (t && t.isTexture && !t._cbzLazy && t.image) inScene.set(t.image, t); }
+        if (m.uniforms) for (var u in m.uniforms) { var v = m.uniforms[u] && m.uniforms[u].value; if (v && v.isTexture && !v._cbzLazy && v.image) inScene.set(v.image, v); }
       });
     });
     var by = {}, tot = { scene: 0, up: 0, dom: 0, other: 0 };

@@ -185,7 +185,22 @@
     if (reloading) return; reloading = true;
     say("Reloading where you were…");
     try { if (CBZ.game && CBZ.game.mode === "city" && CBZ.cityWorldCommit) CBZ.cityWorldCommit(); } catch (e) {}
-    try { sessionStorage.setItem("cbz.resume", (CBZ.game && CBZ.game.mode) || ""); } catch (e) {}
+    /* NO RELOAD LOOP. Owner 2026-10-14, iPhone: "once it gets to 100 the page
+       just reloads, every time". iOS dropped the context at the first frame
+       (memory), this reloaded and auto-pressed Play, the same boot hit the
+       same wall, forever. A reload because the GPU gave up comes back in SAFE
+       BOOT for this tab (no MSAA, pixel ratio 1: core/renderer.js, quality.js),
+       and a third loss inside two minutes stops auto-resuming: the title
+       waits for the player instead of looping. */
+    let n = 1;
+    try {
+      const prev = +sessionStorage.getItem("cbz.reloadAt") || 0;
+      n = Date.now() - prev < 120000 ? (+sessionStorage.getItem("cbz.reloadN") || 0) + 1 : 1;
+      sessionStorage.setItem("cbz.reloadAt", String(Date.now()));
+      sessionStorage.setItem("cbz.reloadN", String(n));
+      sessionStorage.setItem("cbz.safeboot", "1");
+    } catch (e) {}
+    if (n < 3) { try { sessionStorage.setItem("cbz.resume", (CBZ.game && CBZ.game.mode) || ""); } catch (e) {} }
     setTimeout(function () { try { location.reload(); } catch (e) {} }, 400);
   }
 

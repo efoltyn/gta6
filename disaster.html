@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 449
+     Natural Disaster Survival, standing alone: index.html minus the 448
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -442,21 +442,21 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=gait1011"></script>
+<script src="src/config.js?v=boot1014"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
-<script src="src/core/texfree.js?v=boot1013"></script>
+<script src="src/core/texfree.js?v=mem1014"></script>
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=memfit1008"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=streamall1014"></script>
+<script src="src/core/slice.js?v=boot1014"></script>
 <!-- WHAT THE CAMERA CAN SEE: the one fog/horizon + full-detail rule every spawner,
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
 <script src="src/core/sight.js?v=farcopy1013"></script>
 <!-- the far night lights (GTA "LOD lights"): one sprite per real lamp, lit window, car, beacon and airfield light; three draws, to the horizon -->
 <script src="src/core/lodlights.js?v=lodlight1012"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=stream1014b"></script>
+<script src="src/core/citystream.js?v=merge1014c"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -506,7 +506,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
 <script src="src/core/prisonlazy.js?v=phonefit1"></script>
-<script src="src/core/renderer.js?v=w09290242x"></script>
+<script src="src/core/renderer.js?v=safeboot1014"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
@@ -530,9 +530,9 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=ground1008c"></script>
+<script src="src/world/textures_surface.js?v=peak1014"></script>
 <script src="src/world/materials.js?v=nostep1013"></script>
-<script src="src/world/fuel_station.js?v=pf0930a"></script>
+<script src="src/world/fuel_station.js?v=mem1014"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
@@ -584,9 +584,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=sl0930a"></script>
+  <script src="src/systems/fphands.js?v=peak1014"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
-  <script src="src/entities/tattoo.js?v=pf0930c"></script>
+  <script src="src/entities/tattoo.js?v=mem1014"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
   <script src="src/entities/character.js?v=armhole1011"></script>
@@ -815,7 +815,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js?v=slotkey1013"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/camera.js?v=planes1009b"></script>
-<script src="src/systems/physics.js?v=nostep1013"></script>
+<script src="src/systems/physics.js?v=speed1014"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -910,7 +910,7 @@ document.body.appendChild(b);}}catch(e){}})();
      for the context back if it has not returned. AFTER state.js (it pauses
      through CBZ.setState, so there is exactly one kind of paused).
      ?cfg_GL_CONTEXT_GUARD=0 reverts. -->
-<script src="src/systems/glcontext.js?v=glguard1"></script>
+<script src="src/systems/glcontext.js?v=safeboot1014"></script>
 <!-- THE SIM ADVANCES IN WHOLE TICKS (survival only, by default). core/loop.js
      measures TIME, which is right for one player and is the reason two machines
      can never run the same match — a phone at 47 fps and a laptop at 60 take
@@ -1056,7 +1056,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the-hole rects, the facade scan + cut, the no-shared-plane pass and the
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
-<script src="src/city/facade_openings.js?v=stream1014b"></script>
+<script src="src/city/facade_openings.js?v=winhole1014"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1493,7 +1493,7 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=stream1014b"></script>
+<script src="src/city/fitout.js?v=merge1014c"></script>
 <script src="src/city/fitout_plans.js?v=loose1013"></script>
 <script src="src/city/fitout_work.js?v=loose1013"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
@@ -1525,9 +1525,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
-<script src="src/world/grassfield.js?v=grass0929c"></script>
-<script src="src/city/metro_ground.js?v=reach1013"></script>
-<script src="src/city/metro.js?v=farcopy1013"></script>
+<script src="src/world/grassfield.js?v=speed1014"></script>
+<script src="src/city/metro_ground.js?v=peak1014"></script>
+<script src="src/city/metro.js?v=peak1014"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- WHO A PERSON IS AND WHAT YOU CAN DO TO HIM: the role -> verbs table the
      registry filters every street verb through, the one-line title over a
@@ -1564,7 +1564,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=memfit1008"></script>
+<script src="src/city/cityground.js?v=peak1014"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -1629,10 +1629,10 @@ document.body.appendChild(b);}}catch(e){}})();
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
 <script src="src/city/hitman_hands.js?v=tap0929"></script>
-<script src="src/city/hitman_room.js?v=news0930"></script>
+<script src="src/city/hitman_room.js?v=mem1014"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=w09290219"></script>
-<script src="src/city/agency.js?v=street1009"></script>
+<script src="src/city/agency.js?v=mem1014"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
@@ -2074,7 +2074,7 @@ document.body.appendChild(b);}}catch(e){}})();
      property panel at your address post, the contractor's demolition, locked
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
-<script src="src/city/plots.js?v=cd0929"></script>
+<script src="src/city/plots.js?v=mem1014"></script>
 <script src="src/city/compoundcrew.js?v=cd0929"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
@@ -2093,7 +2093,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=w09290242x"></script>
+<script src="src/core/packages.js?v=mem1014"></script>
 <!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
      was a dumb idea, but it's really what this whole game's point is: get
      enough people recruited, or get enough money, or enough guns, or somehow
@@ -2106,7 +2106,7 @@ document.body.appendChild(b);}}catch(e){}})();
      scoreboard existed only to host those two rules and are gone with it. -->
 
 <!-- 5. quality + loop + boot -->
-<script src="src/core/quality.js?v=sharp1014b"></script>
+<script src="src/core/quality.js?v=safeboot1014"></script>
 
 <!-- REAL BOATS. Four hulls with real numbers replace one mesh wearing three
      name aliases: a 4.5m RIB, the 6.2m runabout (mesh untouched — zero art
@@ -2165,12 +2165,12 @@ document.body.appendChild(b);}}catch(e){}})();
        - detail_kit.js FIRST; the other four only register passes into it.
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
-<script src="src/core/farcull.js?v=stream1014b"></script>
+<script src="src/core/farcull.js?v=merge1014c"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
-<script src="src/core/viewscope.js?v=stream1014b"></script>
+<script src="src/core/viewscope.js?v=merge1014c"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=nukecost1013"></script>
+<script src="src/core/batch.js?v=peak1014"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder

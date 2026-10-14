@@ -42,6 +42,11 @@ for (const id of ids) {
   if (r.status === "error") { console.log(`${id}  ERROR  ${r.error}`); code = Math.max(code, 1); }
   else console.log(`${id}  DONE  ${r.frames.length} frame(s) in ${((T.totalMs || 0) / 1000).toFixed(1)} s (${(r.sides || []).map((s) => s.how).join("/")})`);
   if (r.sheet) console.log(`  sheet  ${r.sheet}`);
+  // the lab's numbers: the kit's verdict and its event timeline
+  if (r.probe) {
+    console.log(`  probe  ${r.probe.ok ? "OK" : "NOT OK"}: ${r.probe.summary}`);
+    if (has("-v")) for (const e of r.probe.events || []) console.log(`         ${String((+e.t).toFixed(2)).padStart(6)} s  ${e.who}: ${e.what}`);
+  }
   for (const w of r.warn || []) console.log(`  warn   ${w}`);
   if (has("-v")) {
     for (const f of r.frames || []) console.log(`  frame  ${f}`);

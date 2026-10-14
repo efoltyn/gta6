@@ -518,8 +518,23 @@
     return geo;
   }
   const GEO = {};
+  /* A grasp's pose carries its own solved joints and used to be keyed by a
+     RANDOM name ("g:" + Math.random()), so every grasp built and cached its own
+     ~90 KB hand forever: 126 identical steering-wheel hands (one pair per car
+     cabin) held 11 MB at the phone boot and kept growing. A pose with joints
+     is keyed by its content instead (joints to 10 microns + cup), so the same
+     grasp shares one geometry and two different grasps never collide. */
+  function jointsKey(pose) {
+    let h = 2166136261 >>> 0;
+    const J = pose.joints, mix = function (v) { h = Math.imul(h ^ (Math.round(v * 1e5) | 0), 16777619) >>> 0; };
+    const chains = J.fingers.concat([J.thumb]);
+    for (let c = 0; c < chains.length; c++) { const ch = chains[c]; mix(ch.length); for (let i = 0; i < ch.length; i++) { const p = ch[i]; mix(p[0]); mix(p[1]); mix(p[2]); } }
+    mix(pose.cup || 0);
+    return "j" + h.toString(36) + ":" + chains.length;
+  }
   function poseKey(pose) {
     if (typeof pose === "string") return pose;
+    if (pose.joints) return pose._key || (pose._key = jointsKey(pose));
     return "w" + Math.round((pose.wrap || 0) * 1000) + ":" + (pose.name || "custom");
   }
   function handGeometry(side, pose) {

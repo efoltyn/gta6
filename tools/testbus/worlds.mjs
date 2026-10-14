@@ -75,6 +75,19 @@ export const WORLDS = {
     engine: "!!window.__battle", enter: "0", noFreeze: true, freeze: "__battle.freeze()",
     ready: "!!(window.__battle && __battle.audit().started)",
   },
+  /* THE LAB (lab.html, tools/lab/README.md): a tiny real world made of a
+     kit's ingredients, booted in well under a second. The page's own clock is
+     already frozen (rAF never drives its sim), so no freeze; `install` points
+     __tb.step at __lab.step so a probe's t.step(n) also fires the kit's script
+     and its watches. ready = booted OR failed (a failed boot answers at once
+     with its error instead of waiting out the timeout). Query: kit=<name> +
+     the kit's params. */
+  lab: {
+    page: "lab.html", seed: 1, query: "kit=empty",
+    engine: "!!window.__lab", enter: "0", noFreeze: true, bootMs: 60e3, poll: 40,
+    ready: "!!(window.__lab && __lab.boot)",
+    install: "(function(){ __tb.step = function (n) { if (!__lab.ready) throw new Error('lab: ' + __lab.error); __lab.step(n | 0); return true; }; return true; })()",
+  },
 };
 WORLDS.disaster = WORLDS.survival;
 WORLDS.prison = WORLDS.escape;
@@ -103,12 +116,12 @@ export async function bootWorld(pg, origin, key, timeoutMs = 15 * 60e3) {
   const until = t0 + timeoutMs;
   const engine = W.engine || "window.CBZ && CBZ.game && CBZ.stepSim";
   const q = (e) => pg.evl(`(function(){try{return !!(${e})}catch(e){return false}})()`, 60000).catch(() => false);
-  while (Date.now() < until && !(await q(engine))) await sleep(300);
+  while (Date.now() < until && !(await q(engine))) await sleep(W.poll || 300);
   let ok = false;
   while (Date.now() < until && !ok) {
     try { await pg.evl(`(function(){try{${W.enter}}catch(e){}return 1})()`, 60000); } catch (_) {}
     ok = await q(W.ready);
-    if (!ok) await sleep(500);
+    if (!ok) await sleep(W.poll || 500);
   }
   if (!ok) throw new Error(`world ${key} never became ready in ${Math.round(timeoutMs / 1000)} s; page errors: ${pg.errors.slice(0, 3).join(" | ")}`);
   const builtMs = Date.now() - t0;
@@ -116,6 +129,7 @@ export async function bootWorld(pg, origin, key, timeoutMs = 15 * 60e3) {
   if (!W.noFreeze) await pg.evl("window.__tbFreeze && __tbFreeze()");
   if (W.freeze) await pg.evl(`(function(){try{${W.freeze}}catch(e){}return 1})()`, 30000);
   await pg.evl(TB_INSTALL);
+  if (W.install) await pg.evl(W.install, 30000);
   const files = await pg.evl("performance.getEntriesByType('resource').map(function(e){try{return new URL(e.name).pathname.replace(/^\\//,'')}catch(_){return ''}}).filter(Boolean)");
   return { bootMs: builtMs, url: u.href, loaded: [...new Set([W.page, ...(files || [])])] };
 }

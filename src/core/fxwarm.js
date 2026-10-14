@@ -248,7 +248,9 @@
     lightSig = n.D + "|" + n.P + "|" + n.S + "|" + n.H + "|" + n.R + "|" + n.s + "|" + (r.shadowMap.enabled ? 1 : 0) + "|" + (sc.fog ? (sc.fog.isFogExp2 ? 2 : 1) : 0) +
       (opts && opts.target ? "|t" + (opts.target.texture ? opts.target.texture.encoding : 0) : "");
     const reps = [];
-    const casters = (opts && opts.depth && r.shadowMap && r.shadowMap.enabled) ? [] : null;
+    // no light casts (the phone tier turns the sun's shadow off): the shadow
+    // pass never runs, so its depth programs would be compiled for nothing
+    const casters = (opts && opts.depth && r.shadowMap && r.shadowMap.enabled && n.s > 0) ? [] : null;
     let bad = 0;
     function visit(o) {
       if (hidden.has(o)) return;
@@ -323,6 +325,21 @@
     return queue(objs, opts);
   };
   CBZ.shaderQueueStats = function () { return lastReport; };
+  /* THE WHOLE ACTIVE WORLD, NOW. What the play-start prewarm above walks on
+     the first playing frame (hidden FX pools, the viewmodel, jewellery, the
+     ped instancing pools...) was compiled in that frame's render, a few
+     dozen programs the first draw then waited for. city/mode.js calls this
+     as the build starts (the pools all exist by then, so their programs link
+     on the GPU while the city is built) and again once the run is spawned
+     and the first streamed tick has run (peds, traffic, streamed jobs), so
+     the first frame finds them linked. Already-queued materials are skipped
+     (one walk of the scene graph). */
+  CBZ.shaderQueueWorld = function () {
+    if (!LAZY) return null;
+    if (CBZ.CONFIG && CBZ.CONFIG.RENDER_FRAMES === false) return null;
+    if (!CBZ.scene) return null;
+    return queue(CBZ.scene, { depth: true });
+  };
 
   /* THE CAR-ENTRY SET. Getting into a car compiled ~14 programs in its first
      frames (measured: the car bodies' own materials, drawn close for the

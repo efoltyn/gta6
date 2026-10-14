@@ -240,7 +240,10 @@ async function runBatch(lane, reqs) {
         const probe = await loadProbe(pr.file).catch((e) => ({ err: e }));
         if (probe.err) { setCheck(r, pr.name, { status: "error", summary: "probe did not load: " + probe.err.message }); continue; }
         const world = probe.meta.world || pr.world || q.world;
-        const wk = worldKey(world, probe.meta.seed != null ? probe.meta.seed : q.seed, q.query);
+        // a probe may add page params of its own (meta.query: a string, or a
+        // function of its args: tools/probes/lab.mjs turns "--kit X" into ?kit=X)
+        const mq = typeof probe.meta.query === "function" ? probe.meta.query(pr.args || []) : (probe.meta.query || "");
+        const wk = worldKey(world, probe.meta.seed != null ? probe.meta.seed : q.seed, [q.query, mq].filter(Boolean).join("&"));
         const hash = createHash("sha1").update(readFileSync(pr.file)).digest("hex").slice(0, 10);
         const k = `probe:${wk}:${hash}:${(pr.args || []).join(" ")}`;
         if (!probeU.has(k)) probeU.set(k, { key: k, kind: "probe", wk, probe, file: pr.file, args: pr.args || [], name: pr.name, owners: [] });

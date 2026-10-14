@@ -1886,15 +1886,18 @@
     // pad win while guaranteeing continuous earth at the seam.
     const CARVE_SEAM_INSET = Math.min(32, Math.hypot(W / SEG, D / SEG) + 2);
     if (!FIN && geo.index) {
-      const src = geo.index.array, kept = [];
+      // (kept in a typed array: a plain array of ~1.2 M indices was several
+      // MB of boxed garbage on the boot peak; the same Uint32 index results)
+      const src = geo.index.array, kept = new Uint32Array(src.length);
+      let nk = 0;
       for (let i = 0; i < src.length; i += 3) {
         const ia = src[i], ib = src[i + 1], ic = src[i + 2];
         const tx = (pos.getX(ia) + pos.getX(ib) + pos.getX(ic)) / 3 + cx0;
         const tz = (pos.getZ(ia) + pos.getZ(ib) + pos.getZ(ic)) / 3 + cz0;
         if (insideAuthoredSurface(tx, tz, -CARVE_SEAM_INSET)) { carvedTriangles++; continue; }
-        kept.push(ia, ib, ic);
+        kept[nk++] = ia; kept[nk++] = ib; kept[nk++] = ic;
       }
-      geo.setIndex(kept);
+      geo.setIndex(pos.count > 65535 ? new THREE.BufferAttribute(kept.slice(0, nk), 1) : new THREE.BufferAttribute(Uint16Array.from(kept.subarray(0, nk)), 1));
     }
     if (!FIN && (COAST || CFG.CONTINENT_RELIEF_V1 !== false)) geo.computeVertexNormals(); // coast + country slopes want real shading
     if (!FIN && PLATE_SIG && CBZ.bakePut && geo.index) {
@@ -2074,6 +2077,15 @@
         if (!(fx >= 0 && fz >= 0 && fx < SEG && fz < SEG)) return false;
         if (authoredAt(x, z)) return false;                          // someone else's floor
         out.g = 0;
+        /* The plate is a world surface, so core/citystream.js freeStaticArrays
+           drops its colour array once it is on the GPU. With no colour there
+           is no land use to read: no grass here. This used to throw on the
+           null array instead, and groundCover.at swallowed it: a thrown
+           TypeError (stack and all) per 25 cm sample, ~27 us each, 625 per
+           6 m chunk = the grass field's ~20 ms a frame downtown, for a chunk
+           that came out empty anyway. */
+        const C = cAttr.array;
+        if (!C) return true;
         // THE COAST MEMO, not the raw field: the grass asks this per blade
         // sample as the player drives into new ground, and the raw field walks
         // every river and lake (the drive's largest garbage source after three
@@ -2089,7 +2101,6 @@
         let a, b, c, wa, wb, wc;                                      // the plate's own triangle split
         if (tx + tz <= 1) { a = base; b = base + 1; c = base + ST; wa = 1 - tx - tz; wb = tx; wc = tz; }
         else { a = base + ST + 1; b = base + ST; c = base + 1; wa = tx + tz - 1; wb = 1 - tx; wc = 1 - tz; }
-        const C = cAttr.array;
         const r = C[a * 3] * wa + C[b * 3] * wb + C[c * 3] * wc;
         const g = C[a * 3 + 1] * wa + C[b * 3 + 1] * wb + C[c * 3 + 1] * wc;
         const bl = C[a * 3 + 2] * wa + C[b * 3 + 2] * wb + C[c * 3 + 2] * wc;

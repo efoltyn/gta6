@@ -35,8 +35,12 @@ What changed:
   parts (and their LOS blockers: unrendered, their matrices were identity, so rays hit their
   walls round the world origin) out of the scene until the last, then settles them as one.
   Apartment cells (200 ms) and airfield dressing (100 ms) use it.
-- **facade_openings.resolveCoplanar 2.8x faster, same output** (checked against the old one on
-  36k boxes of 30 live buildings): every building build, boot and stream (the -28% load).
+- **facade_openings**: this wave and fast-streamed-boot (main) both rewrote the coplanar
+  resolver the same way; the merge keeps main's file (its scan and hidden-face test are the
+  fastest). `tools/facade-equiv.mjs` + `tools/preload/focapture.js` replay every real call
+  of a boot and a streamed tour (207 resolve calls, 221,605 boxes; 141 scans) through the
+  pre-2026-10-14 code and each rewrite: 0 differences; resolve 14.2 s -> 3.1 s, scan
+  6.5 s -> 0.4 s. That is the -28% load above.
 - **farcull**: a freshly built or re-attached stream group is judged before its first frame
   (content built ahead past the fog was uploaded, hidden, read back and re-uploaded); groups
   show at R and hide past R + band (they came back 30 m inside the fog at speed); the
@@ -116,6 +120,98 @@ What changed, biggest first:
 Still open: streaming is still behind `?stream=1`; the city core's shops, offices and
 hideouts are built at boot; a building's LOD box stands in from 230 m on the phone (a swap
 inside the fog); the drive's heap sawtooth (build garbage) sets the peak.
+
+## Phone boot peak (2026-10-14, the "reloads at 100%" bug)
+
+speed.mjs's PHONE TOTAL now adds the live 2D canvases (an iPhone kills the tab on the
+sum of heap, GPU and canvases). One paired run, `--device phone --load --against 73c5e027`:
+
+| MB | main | after |
+|---|---|---|
+| true phone peak (heap + GPU + canvases) | 1440 | 1366 |
+| live after a GC | 1176 | 1092 |
+| 2D canvases | 150 | 83 (68 live) |
+| JS heap peak (V8 + ArrayBuffers) | 995 | 980 |
+| GPU (drawing buffer 47 of it) | 298 | 305 |
+
+What went: canvases painted at the boot for things nobody had looked at yet (the
+speedway's surfaces, signs, skyline and car liveries, the agency's 10 MB newspaper,
+the speedway ground, the fuel atlas, arena boards, package signs, plot signs) are
+painted when first drawn; tattoo scratch canvases are freed when composited; the
+road field's 16 MB float raster; metro_ground's 22 MB per-32-m floor index (two
+levels now). MSAA was measured at the phone's 780x1688 buffer: off would save 37 MB
+but changes 0.5-1.9 % of pixels by more than 8 levels (edges), so it stays.
+
+Still over the ~800 MB target. What is left, largest first: ~160 MB of dead
+ArrayBuffers the collector has not taken at the peak (batch merge positions freed
+after upload, ped atlas readbacks, stream compaction); V8 300 MB live (structural
+`lbox` meshes kept for LOS 22 MB, characters 22 MB, placement 16 MB); scene geometry
+CPU arrays ~215 MB, mostly never uploaded (hidden originals for raycasts, packed
+interiors, unmerged meshes out of view), only ~16 MB of it normal/colour/uv
+duplicates of uploaded buffers.
+
+## Phone boot peak, wave 2 (2026-10-14): what gets built or kept
+
+One paired run, `--device phone --against 987f32e5 --pairs 2` (MB, per-run values
+in brackets):
+
+| MB | base 987f32e5 | after |
+|---|---|---|
+| true phone peak (heap + GPU + canvases) | 1357 [1344, 1357] | 1222 [1221, 1222] |
+| JS heap peak | 977 | 846 |
+| live after a GC (phone live) | 1086 | 1019 |
+| 2D canvases | 88 | 83 |
+| GPU | 299 | 297 |
+| at the spawn, playing | 1114 | 1043 |
+
+Split (single runs, same box): heap at the end of the load V8 368 + ArrayBuffers 575
+before, V8 352 + 480 after; after a GC V8 301 + 414 before, 262 + 393 after.
+ArrayBuffers ALLOCATED during the boot (abtrack): 662 MB before, ~520 after.
+
+What changed, by the three questions:
+- **Built but never drawn: rooms are recipes** (core/batch.js). The merged rooms
+  (furniture behind windows: 105 buckets, 3.1 M vertices) were 41 MB of geometry
+  never drawn at the boot, plus 42 MB of float garbage from baking them before
+  packing. 84 % of their vertices are trim box lists (6 numbers a box), most of the
+  rest shared unit boxes, so a room keeps per source its box list or shared
+  geometry, its world matrix and tint (~9 MB for all), and is baked by the same
+  bakeMergeV2 the frame it enters the view; unbuilt when left behind or disposed.
+  Bit-identical to the direct bake (tools/room-recipe-check.js). An evicted room
+  used to be marked dead by its own dispose and never came back; fixed with it.
+- **Mesh-heavy to typed data**: city/placement.js is Float64 columns + an Int32
+  linked cell list (was 38.6k reservation objects, 34k of them copies of colliders,
+  and 200k cell refs under boxed-double cell keys: 20 MB of V8 to ~6;
+  tools/placement-check.js checks it against brute force). city/buildings.js:
+  `built.lbox` keeps makeBuilding's whole scope alive, so every per-box plane list
+  in it (structural boxes, trim modules, veneer, deco: ~200k small arrays) lived
+  for the shell's life; they are released after the build and `fixedPlanes` is
+  kept only when asked (govcomplex's houseDress). The 79k trim records were held
+  in a list read only for a count.
+- **Garbage that stacked on the peak**: the road field rasterises straight into
+  its bytes (16 MB float raster per build, kept alive by a closure context); a full
+  ped atlas page is allocated on the GPU and the old rows copied in (16 MB CPU page
+  per full page); a grasp's hand is keyed by its joints, not a random name (126
+  identical steering-wheel hands, 11 MB); the metro far maps paint straight into
+  their atlas (7 maps, 11 MB, plus the copy); the continent plate's carve keeps a
+  typed index; the ground detail maps are packed one at a time.
+- tools/speed.mjs: look shots frozen at different dynamic-resolution buffers are
+  compared at the smaller one (was a false "LOOK REGRESSION: drawing buffer" and a
+  crash in the report).
+
+Look: downtown and aerial same look. The spawn (inside the exec office) was flagged:
+1.4 % of its stable blocks changed against a floor of 0 % that the tool itself
+calls biased low (2 base shots), at a spot where the two base runs already
+disagreed on 30 % of the frame; the heat map is a uniform edge shift plus the
+player's idle pose (sim timing), with the same furniture and walls.
+
+What is left (V8 262 + ArrayBuffers 393 live, GPU 297, canvases 66-83), largest
+first: the hidden wall originals kept as Meshes for LOS and collider refs (lbox,
+23 MB V8 sampled; 24k hidden meshes, 37.5k collider objects with boxed doubles);
+395 full character rigs at boot, 358 of them hidden behind ped instancing (~20 MB);
+geometry built inside the keep circle but not yet in the frustum (~58 MB CPU, by
+design: it uploads as the player turns); hidden-but-resident GPU buffers far
+content (farcull's side); the GPU's textures (130 MB: the Halloran airfield
+surface 4096x1024 is 21 MB, the full ped atlas page 21 MB).
 
 ## What is built (branch city-slice)
 

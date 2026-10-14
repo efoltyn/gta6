@@ -86,7 +86,7 @@
                                    // pr 0.9 -> half saved nothing, -> 3x cost ~25%; 2x is sharp at arm's length)
     : [2, 2, 2, 2, 2];             // tablet: the panel's own pixels (owner 2026-10-14: "blurry as shit
                                    // for a tiny saving"); speed comes from logic, never from blur
-  if (MOBILE) for (let i = 0; i < QUALITY.length; i++) QUALITY[i].pr = Math.min(devicePixelRatio || 1, MOBILE_PR[i]);
+  if (MOBILE) for (let i = 0; i < QUALITY.length; i++) QUALITY[i].pr = Math.min(devicePixelRatio || 1, CBZ.safeBoot ? 1 : MOBILE_PR[i]);
   // A desktop whose GPU is an integrated/mobile part (Intel iGPU, Mali, Adreno)
   // starts where an iPad does and lets the auto governor climb. SwiftShader is
   // NOT on this list: every headless tool renders through it and must keep

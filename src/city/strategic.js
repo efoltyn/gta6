@@ -615,6 +615,8 @@
     if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
     tex.anisotropy = 4;
     tex.needsUpdate = true;
+    // painted once per page: the 4 MB canvas goes once the skin is on the GPU
+    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);
     _b2Tex = tex;
     return tex;
   }
