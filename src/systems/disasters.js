@@ -3837,6 +3837,57 @@
     }
   }
 
+  // ---- A TREE ON FIRE outside the wildfire sim (volcano bombs and lava light these; wildfire.js owns its own fuel bed) ----
+  function addTreeFire(t) {
+    if (t.fire) return;
+    const g = new THREE.Group();
+    const flame = (c, s, y) => {
+      const m = new THREE.Mesh(new THREE.ConeGeometry(s, s * 2.4, 6),
+        new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending }));
+      m.position.y = y; m.renderOrder = 8; g.add(m); return m;
+    };
+    t.fireMeshes = [flame(0xff3a0e, 2.2, 0.5), flame(0xff7a1e, 1.5, 1.7), flame(0xffd24a, 0.85, 2.8)];
+    g.position.set(t.x, floor(t.x, t.z) + 2.6, t.z);
+    root().add(g); t.fire = g;
+    t.scorch = disc(t.x, t.z, 0x140d08, 0.0, 0.04);
+    t.scorch.scale.set(3.4, 3.4, 1);
+    // additive orange glow pooling on the ground around the base
+    t.glow = disc(t.x, t.z, 0xff5a14, 0.0, 0.05);
+    t.glow.material.blending = THREE.AdditiveBlending;
+    t.glow.scale.set(6, 6, 1);
+    if (t.foliage && t.foliage.material) { t.foliage.material.color.setHex(0xff5a1a); if (t.foliage.material.emissive) { t.foliage.material.emissive.setHex(0xff4a10); t.foliage.material.emissiveIntensity = 0.9; } }
+  }
+  function flickerTreeFire(t) {
+    if (!t.fire) return;
+    const f = 0.75 + 0.35 * Math.sin(CBZ.now * 0.02 + t.x);
+    for (let k = 0; k < t.fireMeshes.length; k++) {
+      const m = t.fireMeshes[k];
+      m.scale.set(1 + 0.12 * Math.sin(CBZ.now * 0.03 + k), f * (1 + 0.12 * Math.sin(CBZ.now * 0.035 + k * 2)), 1);
+      m.material.opacity = 0.55 + 0.32 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.025 + k + t.z));
+    }
+    if (t.scorch) t.scorch.material.opacity = Math.min(0.55, t.scorch.material.opacity + 0.4 * 0.016);
+    if (t.glow) t.glow.material.opacity = 0.4 + 0.28 * (0.5 + 0.5 * Math.sin(CBZ.now * 0.022 + t.x));
+  }
+  function removeTreeFire(t) {
+    if (t.fire) { t.fire.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); }); root().remove(t.fire); t.fire = null; t.fireMeshes = null; }
+    if (t.scorch) { rmMesh(t.scorch); t.scorch = null; }
+    if (t.glow) { rmMesh(t.glow); t.glow = null; }
+  }
+  function ignite(t) {
+    if (t.burnt || t.burning) return;
+    t.burning = 2.5 + rnd() * 2;
+    addTreeFire(t);
+  }
+  function burnOut(t) {
+    t.burning = 0; t.burnt = true;
+    removeTreeFire(t);
+    if (t.foliage && t.foliage.material) { t.foliage.material.color.setHex(0x1a1410); if (t.foliage.material.emissive) t.foliage.material.emissive.setHex(0x000000); }
+    if (t.trunk && t.trunk.material) t.trunk.material.color.setHex(0x140d08);
+    // the crown burns out: charred twig and bark flecks rain off it in a
+    // puff of ash (the tree's own char, not a black cube)
+    if (CBZ.debris) CBZ.debris.chips(t.x, floor(t.x, t.z) + 3, t.z, { kind: "wood", color: 0x1a1410, count: 14, power: 0.6, spread: 2, size: 0.06, dustColor: 0x5a5550 });
+  }
+
   /* ============================================================
      WHAT A BOLT HITS, AND WHO THAT KILLS (2026-08-13)
 
