@@ -383,9 +383,11 @@
   CBZ.camera.add(vm);
 
   const gun = new THREE.Group();
-  const weaponModels = [];
+  // index === weapon slot; a slot's two models exist once it is drawn (or the
+  // idle builder below got to it): a hole until then (forEach skips holes)
+  const weaponModels = new Array(WEAPONS.length);
   const carriedGun = new THREE.Group();
-  const carriedModels = [];
+  const carriedModels = new Array(WEAPONS.length);
   const mat = {
     dark: new THREE.MeshLambertMaterial({ color: 0x161a20 }),
     black: new THREE.MeshLambertMaterial({ color: 0x080a0c }),
@@ -634,10 +636,20 @@
     return h;
   }
 
-  WEAPONS.forEach((w, i) => {
+  /* EVERY GUN IS BUILT WHEN IT IS FIRST NEEDED, NOT AT PARSE. All fourteen
+     slots used to be built twice (viewmodel + carried) while index.html
+     parsed: ~0.8 s of script evaluation before the title, on every page,
+     for guns most runs never draw. A slot is built the moment it becomes
+     the current weapon (fps.weapon's setter below), and the rest are built
+     one per idle slice once a run is playing (with their shaders queued), so
+     the first draw of any gun is still free. Same models, same order of
+     construction per gun. */
+  function ensureWeaponModel(i) {
+    if (!(i >= 0 && i < WEAPONS.length) || weaponModels[i]) return weaponModels[i] || null;
+    const w = WEAPONS[i];
     const viewModel = buildWeaponModel(w);
     if (!viewModel.userData.muzzle) viewModel.userData.muzzle = new THREE.Vector3(0, 0.05, -0.58);  // every gun MUST have a barrel tip (else tracers fall back to the head)
-    viewModel.visible = i === 0;
+    viewModel.visible = i === curSlot;
     viewModel.scale.setScalar(1.28);
     fitOffHand(viewModel, w);
     viewModel.traverse((obj) => {
@@ -659,20 +671,42 @@
         obj.material.transparent = true;
       }
     });
-    weaponModels.push(viewModel);
+    weaponModels[i] = viewModel;
     gun.add(viewModel);
 
     const carried = buildWeaponModel(w);
     if (!carried.userData.muzzle) carried.userData.muzzle = new THREE.Vector3(0, 0.05, -0.58);
-    carried.visible = i === 0;
+    carried.visible = i === curSlot;
     // REAL-DIMENSION SIZING (weapons/weapon-scale.js): same law as every
     // other world display of a gun — real researched length × class READ.
     // The legacy 1.45 (screenshot-tuned so the gun didn't vanish into the
     // blocky hand) stays as the module-absent fallback.
     carried.scale.setScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(w.id)) || 1.45);
-    carriedModels.push(carried);
+    carriedModels[i] = carried;
     carriedGun.add(carried);
+    // city gun mods (city/gunmods.js) dress what exists when the city starts;
+    // a gun built after that is dressed as it is born
+    if (CBZ.game && CBZ.game.mode === "city" && CBZ.gunModsDress) { try { CBZ.gunModsDress(i); } catch (e) { console.error("[gunmods dress]", e); } }
+    return viewModel;
+  }
+  let curSlot = fps.weapon | 0;
+  Object.defineProperty(fps, "weapon", {
+    enumerable: true, configurable: true,
+    get: function () { return curSlot; },
+    set: function (v) { curSlot = v; if (!weaponModels[v]) ensureWeaponModel(v); },
   });
+  ensureWeaponModel(0);                      // the default slot (and holsterprops' carried-gun parent)
+  ensureWeaponModel(curSlot);
+  // THE REST, IN IDLE TIME (config.js CBZ.afterBoot): one slot per idle
+  // slice once a run is playing, each slot's programs queued (core/fxwarm.js)
+  for (let i = 0; i < WEAPONS.length; i++) {
+    if (!CBZ.afterBoot) break;
+    CBZ.afterBoot(function () {
+      if (weaponModels[i]) return;
+      ensureWeaponModel(i);
+      if (CBZ.shaderQueue) { CBZ.shaderQueue(gun); CBZ.shaderQueue(carriedGun); }
+    });
+  }
   carriedGun.position.set(0.02, 0.02, 0.03);
   // Local orientation so the barrel lies along the socket -Y (down the forearm):
   // rotation.x ≈ -π/2 (no Math.PI on Y). Paired with animChar's -1.571 arm
