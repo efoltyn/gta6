@@ -1709,8 +1709,15 @@
       // Killed crew stay dead and stay where they fell (morgue.js owns bodies).
       // Live crew are given back the way citystaff gives a worker back.
       if (m.dead) continue;
-      try { if (m._npcAttached && CBZ.cityUnseat) CBZ.cityUnseat(m, { state: "walk" }); } catch (e) {}
-      if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(m); } catch (e) {} }
+      // ...but never in front of the player: a crewman sits on in his boat
+      // until nobody can see him (systems/leave.js), then he is given back.
+      // (He used to be unseated and deleted at sea in plain view.)
+      const giveBack = function (q) {
+        try { if (q._npcAttached && CBZ.cityUnseat) CBZ.cityUnseat(q, { state: "walk" }); } catch (e) {}
+        if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(q); } catch (e) {} }
+      };
+      if (why !== "reset" && CBZ.leave && CBZ.leave.go) { CBZ.leave.go(m, { drive: false, tag: "piracy:" + why, remove: giveBack }); }
+      else giveBack(m);
     }
     cr.members.length = 0;
     // A SKIFF LEFT ON THE WATER IS A BOAT YOU CAN STEAL — so it stays, and it

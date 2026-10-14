@@ -1021,10 +1021,17 @@
     R.checkBreach = 0.4;
   }
 
+  // a body whose part here is over WALKS OFF and leaves the world only where
+  // nobody can see him (systems/leave.js); they used to vanish on the spot
+  function walkOff(p, tag) {
+    if (!p || p.dead) return;
+    if (CBZ.leave && p.pos && p.group && p.group.parent && CBZ.leave.go(p, { tag: tag, remove: CBZ.cityUnpostNpc })) return;
+    if (CBZ.cityUnpostNpc) CBZ.cityUnpostNpc(p);
+  }
   function endRaid(plot, rt, why) {
     const R = rt.raid; if (!R) return;
     if (R.charge && R.charge.mesh && R.charge.mesh.parent) R.charge.mesh.parent.remove(R.charge.mesh);
-    for (const r of R.raiders) { if (r && !r.dead && CBZ.cityUnpostNpc) CBZ.cityUnpostNpc(r); }
+    for (const r of R.raiders) walkOff(r, "raid:over");
     let text;
     const who = R.gang.name || "They";
     if (R.escaped > 0) text = who + " got away with " + fmt(R.escaped) + " from the stash.";
@@ -1319,7 +1326,7 @@
       // forget plots you no longer own
       for (const [id, rt] of RT) if (plots.indexOf(rt.plot) < 0) {
         if (rt.raid) endRaid(rt.plot, rt, "done");
-        for (const ped of rt.bodies.values()) { releaseBody(ped); if (CBZ.cityUnpostNpc) CBZ.cityUnpostNpc(ped); }
+        for (const ped of rt.bodies.values()) { releaseBody(ped); walkOff(ped, "crew:not-yours"); }
         RT.delete(id);
       }
       for (const plot of plots) {

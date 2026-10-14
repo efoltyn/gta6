@@ -1470,7 +1470,18 @@
     for (const sid in BODIES.peds) {
       const p = BODIES.peds[sid], m = s ? member(sid) : null;
       if (p && p.dead) { delete BODIES.peds[sid]; continue; }        // the kill wrap reports it
-      if (!near || !m || m.status !== "sitting") { if (p && CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); } catch (e) {} } delete BODIES.peds[sid]; }
+      if (!near || !m || m.status !== "sitting") {
+        // a senator whose seat ended (lost it, resigned, purged) walks off;
+        // the President walking away leaves him where he stands until nobody
+        // sees him. Off the world only unseen (systems/leave.js).
+        if (p && CBZ.leave && p.pos) {
+          if (near) { CBZ.leave.go(p, { tag: "politics:senator", remove: function (b) { if (CBZ.cityUnpostNpc) CBZ.cityUnpostNpc(b); } }); delete BODIES.peds[sid]; }
+          else if (CBZ.leave.unseen(p.pos)) { if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); } catch (e) {} } delete BODIES.peds[sid]; }
+          continue;
+        }
+        if (p && CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); } catch (e) {} }
+        delete BODIES.peds[sid];
+      }
     }
     if (!near || !CBZ.cityPostNpc) return;
     const sp = c.seatPoint, gt = c.gate;

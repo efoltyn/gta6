@@ -473,9 +473,28 @@
   let pendingTP = false;    // one-shot: disarm fpsmode's FP-after-intro on the first frame of the run
   let introOptsCache = null;
 
-  function clearScene() {
-    if (scene && scene.cleanup) { try { scene.cleanup(); } catch (e) {} }
+  // A SCENE'S PEOPLE LEAVE ONLY UNSEEN. The doorman back at the bar door, the
+  // raid cops in the penthouse: when their beat ends they stay where they are
+  // until the player cannot see them (systems/leave.js's rule), then go.
+  // `hard`: the world is being reset or left, nobody is there to see.
+  const RETIRING = [];
+  let HARD = false;
+  function clearScene(hard) {
+    HARD = !!hard;
+    try { if (scene && scene.cleanup) { try { scene.cleanup(); } catch (e) {} } } finally { HARD = false; }
     scene = null;
+    if (hard) { for (let i = 0; i < RETIRING.length; i++) despawnActor(RETIRING[i]); RETIRING.length = 0; }
+  }
+  function retireActor(a) {
+    if (!a || !a.group) return;
+    if (HARD || !CBZ.leave || !CBZ.leave.unseen || !a.group.parent) { despawnActor(a); return; }
+    if (RETIRING.indexOf(a) < 0) RETIRING.push(a);
+  }
+  function tickRetiring() {
+    for (let i = RETIRING.length - 1; i >= 0; i--) {
+      const a = RETIRING[i];
+      if (!a || !a.group || !a.group.parent || CBZ.leave.unseen(a.group.position)) { despawnActor(a); RETIRING.splice(i, 1); }
+    }
   }
 
   function arena() { return CBZ.city && CBZ.city.arena; }
@@ -1073,7 +1092,7 @@
       wall0: (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now(),
       cleanup: function () {
         // the laptop stays on the desk, still showing whatever it showed last
-        for (const c of this.cops) despawnActor(c);
+        for (const c of this.cops) retireActor(c);
         this.cops.length = 0;
       },
     };
@@ -1251,7 +1270,7 @@
           const peds = CBZ.cityPeds;
           const idx = peds ? peds.indexOf(this.bouncer) : -1;
           if (idx >= 0) peds.splice(idx, 1);
-          despawnActor(this.bouncer);
+          retireActor(this.bouncer);
         }
       },
     };
@@ -2179,7 +2198,7 @@
   let lastBranch = "";
   function applyOriginCore(game) {
     introActiveFlag = false; introOptsCache = null;
-    clearScene();
+    clearScene(true);
     try {
       if (!CBZ.cityWorldEnsure) return { introActive: false };
       let w = CBZ.cityWorldEnsure();
@@ -2297,7 +2316,7 @@
   // origin staging after its grants/ledger stamps have landed. Keep that
   // cancellation explicit instead of having mode.js reach into private state.
   CBZ.cityOriginCancelIntro = function () {
-    clearScene(); introActiveFlag = false; introOptsCache = null;
+    clearScene(true); introActiveFlag = false; introOptsCache = null;
   };
 
   // ========================================================================
@@ -2466,8 +2485,9 @@
       if (pendingTP) { pendingTP = false; if (CBZ.disarmFPSAfterIntro) { try { CBZ.disarmFPSAfterIntro(); } catch (e) {} } }
       tickHeat(dt); tickAirborne(dt);
     }
+    if (RETIRING.length) { if (g.mode !== "city") clearScene(true); else tickRetiring(); }
     if (!scene) return;
-    if (g.mode !== "city") { clearScene(); return; }
+    if (g.mode !== "city") { clearScene(true); return; }
     if (g.state !== "playing") return;
     if (scene.kind === "exec") tickExec(dt);
     else if (scene.kind === "barfly") tickBarfly(dt);

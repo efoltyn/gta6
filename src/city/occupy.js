@@ -1370,7 +1370,20 @@
   CBZ.cityUnoccupyBuilding = function (lot) {
     const rec = lot && lot._occupancy;
     if (!rec) return false;
-    for (let i = 0; i < rec.peds.length; i++) CBZ.cityUnpostNpc(rec.peds[i]);
+    // THE OLD CREW WALKS OUT (a gang taking the building off another): out of
+    // their seats, out the front door, off the world when nobody can see
+    // them (systems/leave.js). They used to vanish mid-room on the takeover.
+    // A body no longer in the world (a landmass rebuild) is simply dropped.
+    const door = lot.building && lot.building.door;
+    for (let i = 0; i < rec.peds.length; i++) {
+      const p = rec.peds[i];
+      if (CBZ.leave && p && !p.dead && p.pos && p.group && p.group.parent) {
+        try { if (p._npcAttached && CBZ.cityUnseat) CBZ.cityUnseat(p, { state: "walk" }); } catch (e) {}
+        const ground = Math.abs(p.pos.y || 0) < 1.2;
+        if (CBZ.leave.go(p, { tag: "occupy:out", exits: ground && door && door.x != null ? [{ x: door.x, z: door.z, door: true }] : null, remove: CBZ.cityUnpostNpc })) continue;
+      }
+      CBZ.cityUnpostNpc(p);
+    }
     rec.peds.length = 0;
     const i = REG.indexOf(rec);
     if (i >= 0) REG.splice(i, 1);

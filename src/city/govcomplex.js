@@ -6963,7 +6963,14 @@
           if (hh && hh.sid === ((CBZ.officials && CBZ.officials.PLAYER_SID) || "player")) {
             if (s.actor && !s.actor.dead) {
               if (CBZ.powerDissolve) { try { CBZ.powerDissolve(s.actor); } catch (e) {} }
-              if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(s.actor); } catch (e) {} }
+              // he WALKS home (systems/leave.js: off the world unseen), he
+              // does not blink out on the perron in front of the new holder
+              const a = s.actor;
+              if (CBZ.leave && a.pos) {
+                if (a._npcAttached && CBZ.npcLife && CBZ.npcLife.detach) { try { CBZ.npcLife.detach(a, { parent: (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene }); } catch (e) {} }
+                if (CBZ.moves && CBZ.moves.stand && CBZ.moves.posture && CBZ.moves.posture(a) === "sit") { try { CBZ.moves.stand(a); } catch (e) {} }
+                CBZ.leave.go(a, { tag: "govcomplex:holder", remove: function (b) { if (CBZ.cityUnpostNpc) CBZ.cityUnpostNpc(b); } });
+              } else if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(a); } catch (e) {} }
             }
             s.actor = null; s.power = null; s.seated = false;
             continue;

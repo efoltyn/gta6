@@ -437,9 +437,10 @@
     }
   }
 
-  function dissolve(rec) {
+  // hard: the world is going (powerReset); otherwise the ring walks off
+  function dissolve(rec, hard) {
     if (!rec) return;
-    releaseGuards(rec, true);
+    releaseGuards(rec, !!hard);
     rec.live = false;
     if (rec.actor && rec.actor._power === rec) rec.actor._power = null;
     const i = REG.indexOf(rec);
@@ -575,6 +576,10 @@
     if (q._powerCop) {
       q.sees = false; q.curTarget = null; q._powerCop = false;
       if (q.dead) return;                           // a corpse belongs to the world
+      // OFF THE RING, NOT OFF THE SCREEN: police.js's own stand-down walks him
+      // back toward the precinct and lets him go only under CBZ.bodyMayLeave.
+      // _returned: he never was the force pool's, so he banks nothing.
+      if (!hard) { q._returned = true; q.giveUp = true; return; }
       // …and he LEAVES. citySpawnCop pushes straight into CBZ.cityCops without
       // consulting police.js's force pool (police.js:740), so handing a
       // released detail officer back to patrol would grow the citywide force
@@ -589,6 +594,12 @@
     }
     q._vipGuard = false;
     if (q.dead) return;                             // a corpse belongs to the world
+    // he walks off; systems/leave.js removes him where nobody can see it
+    if (!hard && CBZ.leave && q.pos) {
+      q.moveOrder = null;
+      CBZ.leave.go(q, { tag: "power:guard", remove: function (b) { if (CBZ.cityUnpostNpc) CBZ.cityUnpostNpc(b); } });
+      return;
+    }
     if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(q); return; } catch (e) {} }
     try {
       if (q.group && q.group.parent) q.group.parent.remove(q.group);
@@ -1480,7 +1491,7 @@
   // registry is not rebuilt with the arena, and re-registering the same ids
   // on every city rebuild would stack duplicate options forever.
   CBZ.powerReset = function () {
-    for (let i = REG.length - 1; i >= 0; i--) dissolve(REG[i]);
+    for (let i = REG.length - 1; i >= 0; i--) dissolve(REG[i], true);
     REG.length = 0; guardBudget = 0; adoptT = 0;
   };
 

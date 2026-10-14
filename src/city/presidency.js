@@ -1617,15 +1617,27 @@
     for (let i = 0; i < st_.length; i++) if (st_[i].role === role) return st_[i];
     return null;
   }
-  function releaseOfficer(role) {
-    const p = OFF.peds[role];
-    OFF.peds[role] = null;
-    if (!p || p.dead) return;
+  function unpostOfficer(p) {
+    if (!p) return;
     if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); return; } catch (e) {} }
     try {
       if (p.group && p.group.parent) p.group.parent.remove(p.group);
       const arr = CBZ.cityPeds; if (arr) { const i = arr.indexOf(p); if (i >= 0) arr.splice(i, 1); }
     } catch (e) {}
+  }
+  /* NOBODY BLINKS OUT OF THE CABINET ROOM (systems/leave.js). `far`: the
+     President walked away; the officer stays at his place until nobody can
+     see it, then he is gone. Otherwise his post ended (dismissed, replaced):
+     he walks out, and the leave layer takes him off the world unseen. */
+  function releaseOfficer(role, far) {
+    const p = OFF.peds[role];
+    if (!p || p.dead) { OFF.peds[role] = null; return; }
+    if (far && CBZ.leave && !CBZ.leave.unseen(p.pos)) return;
+    OFF.peds[role] = null;
+    if (far || !CBZ.leave) { unpostOfficer(p); return; }
+    p._presOfficer = null;
+    if (p._brain) p._brain.job = null;
+    CBZ.leave.go(p, { tag: "presidency:officer", remove: unpostOfficer });
   }
   function postOfficer(role) {
     const at = officerAt(role);
@@ -1664,7 +1676,7 @@
         CBZ.interactions.registerFor(p, {
           id: "pres-officer-" + role, speak: true, speakCD: 25, prio: 40, campaignSafe: true, forceYes: true,
           label: "Listen",
-          canShow: function () { return on() && !!seat() && !CONV && !p.dead; },
+          canShow: function () { return on() && !!seat() && !CONV && !p.dead && OFF.peds[role] === p; },
           onSelect: function () { talkTo(role); },
         });
         // the wheel's Dismiss (city/president_staff.js: two lines, he walks)
@@ -1781,7 +1793,7 @@
         continue;
       }
       if (near && !p) postOfficer(role);
-      else if (!near && p) releaseOfficer(role);
+      else if (!near && p) releaseOfficer(role, true);
     }
     speakUp();
   }

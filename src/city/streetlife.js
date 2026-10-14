@@ -751,6 +751,15 @@
     return Math.hypot(x - P.x, z - P.z) > 60;
   }
 
+  // may a body that walked to a door, or lost its group, leave the world HERE
+  // AND NOW? Only where nobody sees it (systems/leave.js: off the padded
+  // screen, behind a wall, or past the draw range). There is no 30 m rule:
+  // a man who went in at a door behind your back is simply gone.
+  function outOfSight(r) {
+    if (CBZ.leave && CBZ.leave.unseen) { try { return !!CBZ.leave.unseen({ x: S.x[r], y: S.y ? S.y[r] : undefined, z: S.z[r] }); } catch (e) { return false; } }
+    return hidden(S.x[r], S.z[r]);
+  }
+
   // what kind of group, at this pavement at this hour
   function rollGroup(mix, h) {
     const u = rnd();
@@ -1443,7 +1452,11 @@
         if (gT[g] > 9 + (gSer[g] % 7)) {
           gT[g] = 0;
           const front = ms[0];
-          if (front >= 0 && ms.length > 1 && mRig[front] < 0) { removeRow(front); if (!gUsed[g]) return; standLayout(g, site.spots[gSpot[g]]); return; }
+          // ...but only when nobody is watching the door: in view he waits his turn
+          if (front >= 0 && ms.length > 1 && mRig[front] < 0) {
+            if (!outOfSight(front)) gT[g] = 6 + (gSer[g] % 7);
+            else { removeRow(front); if (!gUsed[g]) return; standLayout(g, site.spots[gSpot[g]]); return; }
+          }
         }
       }
       if (mode === MODE.STAND && gKind[g] === KIND.CHAT) {
@@ -1470,8 +1483,10 @@
       const px = (sp.x - fx) / L, pz = (sp.z - fz) / L;
       if (mode === MODE.DOOR_IN) {
         gX[g] = fx + (sp.x - fx) * t; gZ[g] = fz + (sp.z - fz) * t; gTX[g] = px; gTZ[g] = pz;
-        // each one goes in at the door
-        for (const r of ms) if (Math.hypot(S.x[r] - sp.x, S.z[r] - sp.z) < 0.4) removeRow(r);
+        // each one goes in at the door: off the world when nobody sees the
+        // doorway, else he stands at it (finishing his cigarette) until then
+        // (a smoking break is one to three people at one door: a cheap check)
+        for (const r of ms) if (Math.hypot(S.x[r] - sp.x, S.z[r] - sp.z) < 0.4 && outOfSight(r)) removeRow(r);
         if (!gUsed[g]) return;
       } else {
         gX[g] = sp.x + (fx - sp.x) * t; gZ[g] = sp.z + (fz - sp.z) * t; gTX[g] = -px; gTZ[g] = -pz;
@@ -2065,7 +2080,7 @@
       for (let k = L.length - 1; k >= 0; k--) {
         const r = L[k];
         if (S.life[r] === ST.HURT && mG[r] < 0 && mRig[r] < 0 && Math.hypot(S.x[r] - P.x, S.z[r] - P.z) > 70 && hidden(S.x[r], S.z[r])) GS.remove(r);
-        else if (S.life[r] === ST.ALIVE && mG[r] < 0 && mRig[r] < 0 && !S.hide[r]) GS.remove(r);      // an orphan
+        else if (S.life[r] === ST.ALIVE && mG[r] < 0 && mRig[r] < 0 && !S.hide[r] && outOfSight(r)) GS.remove(r);      // an orphan, out of sight
       }
     }
     if (t0) STATS.ms = STATS.ms * 0.95 + ((performance.now() - t0)) * 0.05;

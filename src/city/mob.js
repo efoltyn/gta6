@@ -415,7 +415,7 @@
       for (let j = 0; j < o.agents.length; j++) if (aside[o.agents[j]] === 0) crowd++;
       for (let j = o.agents.length - 1; j >= 0 && room() < want && crowd > MIN_KEEP; j--) {
         const i = o.agents[j];
-        if (aside[i] !== 0 || arig[i] >= 0) continue;
+        if (aside[i] !== 0 || arig[i] >= 0 || !unseenRow(i)) continue;   // a row on screen is not reclaimed
         release(i); crowd--;
       }
       o.agents = o.agents.filter(function (j) { return amob[j] === o.slot; });
@@ -701,7 +701,9 @@
       headAdvance(m, dt);
       tickLines(m, dt);
       if (m.stage === "breach" && m.route && m.ri >= m.route.length && m.insideAt) setStage(m, "inside");
-      if (m.stage === "disperse" && m.stageT > (m.flee ? 30 : 45)) { endMob(m); continue; }
+      // the crowd goes home: each one leaves the world only where nobody sees
+      // him (systems/leave.js); the mob ends when the last is gone
+      if (m.stage === "disperse" && m.stageT > (m.flee ? 30 : 45) && thinUnseen(m, 400)) { endMob(m); continue; }
       stepAgents(m, dt);
     }
     // lines whose mob is gone go with it
@@ -1552,6 +1554,34 @@
       }
     }
     return true;
+  }
+  /* NOBODY IN A DISPERSING CROWD BLINKS OUT. The disperse timer used to end
+     the mob on the spot: every living marcher's row (and rig) gone in one
+     frame, in front of the player. Now each one is let go when unseen
+     (systems/leave.js's rule: off the padded screen, behind a wall, or far);
+     the rest keep walking away until they are. `budget` rows a call. true =
+     nobody alive is left. */
+  let _thinAt = 0;
+  const _thinP = { x: 0, y: 0, z: 0 };
+  function unseenRow(i) {
+    if (!CBZ.leave || !CBZ.leave.unseen) return true;
+    _thinP.x = ax[i]; _thinP.y = ay[i] || floorAt(ax[i], az[i]); _thinP.z = az[i];
+    return CBZ.leave.unseen(_thinP);
+  }
+  function thinUnseen(m, budget) {
+    const A = m.agents;
+    if (!A.length) return true;
+    let n = 0;
+    const start = _thinAt % A.length;
+    for (let c = 0; c < A.length && n < budget; c++, n++) {
+      const k = (start + c) % A.length, i = A[k];
+      if (amob[i] !== m.slot) continue;
+      if (ST.life(i) !== ST.ALIVE) continue;
+      if (unseenRow(i)) release(i);
+    }
+    _thinAt += budget;
+    m.agents = A.filter(function (j) { return amob[j] === m.slot && ST.life(j) === ST.ALIVE; });
+    return m.agents.length === 0;
   }
   function endMob(m) {
     for (let k = m.agents.length - 1; k >= 0; k--) if (amob[m.agents[k]] === m.slot) release(m.agents[k]);

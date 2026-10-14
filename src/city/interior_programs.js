@@ -8772,8 +8772,13 @@
         return true;
       })();
       if (!far && R.t < R.life + 75) continue;
-      if (CBZ.cityUnpostNpc) for (let q = 0; q < R.peds.length; q++) {
-        try { CBZ.cityUnpostNpc(R.peds[q]); } catch (e) {}
+      // reaped only out of sight (systems/leave.js): the crowd brain keeps
+      // walking them, the leave layer takes each off the world unseen. The
+      // 70 m test above has no eyes and the 75 s backstop has none either.
+      for (let q = 0; q < R.peds.length; q++) {
+        const p = R.peds[q];
+        if (CBZ.leave) CBZ.leave.go(p, { drive: false, tag: "robbery" });
+        else if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); } catch (e) {} }
       }
       ROBS.splice(i, 1);
     }

@@ -354,8 +354,16 @@
       if (Math.abs(dx) > R || Math.abs(dz) > R) continue;
       if (p.staffPost || p._npcAttached || (p.pos.y || 0) > 1.5) {
         // posted staff and people up on the floors leave by the back stairs
-        // before the crew arrives: they are simply not there any more.
-        if (CBZ.cityUnpostNpc && !CBZ.cityPlotFriendly(p)) { try { CBZ.cityUnpostNpc(p); } catch (e) {} continue; }
+        // before the crew arrives: they walk out and are taken off the world
+        // when nobody can see them (systems/leave.js; behind the building's
+        // walls that is at once). They used to be "simply not there any more".
+        if (CBZ.cityUnpostNpc && !CBZ.cityPlotFriendly(p)) {
+          try { if (p._npcAttached && CBZ.cityUnseat) CBZ.cityUnseat(p, { state: "walk" }); } catch (e) {}
+          const door = b.door || null;
+          if (CBZ.leave && CBZ.leave.go(p, { tag: "demolition", exits: (p.pos.y || 0) < 1.5 && door && door.x != null ? [{ x: door.x, z: door.z, door: true }] : null, remove: CBZ.cityUnpostNpc })) continue;
+          try { CBZ.cityUnpostNpc(p); } catch (e) {}
+          continue;
+        }
       }
       const l = Math.hypot(dx, dz) || 1;
       if (p.target && p.target.set) p.target.set(b.ox + dx / l * (R + 26), 0, b.oz + dz / l * (R + 26));

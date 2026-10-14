@@ -2953,7 +2953,13 @@
     // OFF THE EDGE OF THE WORLD. A routed man who reaches his own baseline has
     // left the battle: he lives, he is not a prisoner, and he is not a body
     // the sim has to keep stepping. This is what ENDS a broken army.
-    if (m.routed && Math.abs(m.pos.x - MAP.cx) > FIELD_R * 0.95) {
+    // HE LEAVES OUT OF SIGHT: a runner the lens can still see at the edge
+    // runs on (the sand goes on to FIELD_R + 45) and is let go once he is off
+    // the screen, past 1.2 FIELD_R, or after half a minute at the edge;
+    // before this he blinked out mid-stride at 0.95 FIELD_R in plain view.
+    const offX = Math.abs(m.pos.x - MAP.cx);
+    if (m.routed && offX > FIELD_R * 0.95) m.edgeT = (m.edgeT || 0) + sdt;
+    if (m.routed && offX > FIELD_R * 0.95 && (offX > FIELD_R * 1.2 || m.edgeT > 30 || !runnerInSight(m))) {
       m.fled = true;
       if (m.s) report.fledOf[m.team].push(m.s);
       if (m.group) m.group.visible = false;
@@ -3217,6 +3223,19 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
   function DTH() { return W.deaths || null; }
 
   /* ============================================================ CAMERA */
+  // a man on the screen: the lens's frustum, inside the 260 m a man is still a man
+  let _rFr = null, _rPm = null, _rSp = null;
+  function runnerInSight(m) {
+    const cam = CBZ.camera;
+    if (!cam || !cam.projectionMatrix || !m.pos) return false;
+    if (camDist2(m.pos) > 260 * 260) return false;
+    if (!_rFr) { _rFr = new THREE.Frustum(); _rPm = new THREE.Matrix4(); _rSp = new THREE.Sphere(); }
+    cam.updateMatrixWorld();
+    _rPm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    _rFr.setFromProjectionMatrix(_rPm);
+    _rSp.center.set(m.pos.x, (m.pos.y || 0) + 0.9, m.pos.z); _rSp.radius = 1.2;
+    return _rFr.intersectsSphere(_rSp);
+  }
   function camDist2(p) {
     const c = CBZ.camera.position;
     return (p.x - c.x) * (p.x - c.x) + (p.y - c.y) * (p.y - c.y) + (p.z - c.z) * (p.z - c.z);

@@ -434,9 +434,28 @@
       if (CBZ.cityPeds) { const i = CBZ.cityPeds.indexOf(p); if (i >= 0) CBZ.cityPeds.splice(i, 1); }
     } catch (e) {}
   }
-  function despawnMembers(detail) {
+  /* NOBODY ON A DETAIL BLINKS OUT (owner 2026-10-14: "I don't like how
+     people disappear. They need to walk out"). A man whose part on a detail
+     is over (he quit, was pulled, the detail stood down or is re-kitted) is
+     let go through the shared brain (CBZ.cityDismiss: post, pin, orders,
+     title off; a street body again) and walks; systems/leave.js takes him off
+     the world only when nobody can see him. Without those layers: removed. */
+  function leavePed(p, tag) {
+    if (!p || p.dead || !p.pos || !CBZ.leave) { removePed(p); return; }
+    release(p);
+    p._protUnit = null; p._protInbound = null; p._protIndoor = null; p._protRole = null;
+    let walked = false;
+    if (CBZ.cityDismiss && CBZ.cityPeds && CBZ.cityPeds.indexOf(p) >= 0) {
+      try { walked = !!CBZ.cityDismiss(p, { familiar: ["state", "detail"], line: null, nod: 0.4, job: null }); } catch (e) { walked = false; }
+    }
+    CBZ.leave.go(p, { tag: tag || "protection", remove: removePed, drive: !walked });
+  }
+  // now: the world is going (teardown); else every member walks out
+  function despawnMembers(detail, now) {
     if (!detail) return;
-    for (let i = 0; i < detail.memberPedRefs.length; i++) removePed(detail.memberPedRefs[i]);
+    for (let i = 0; i < detail.memberPedRefs.length; i++) {
+      if (now) removePed(detail.memberPedRefs[i]); else leavePed(detail.memberPedRefs[i], "protection:detail");
+    }
     detail.memberPedRefs.length = 0;
   }
   // one member peels off permanently (quit/killed/reassigned) — shrinks the
@@ -444,7 +463,7 @@
   function dropMember(detail, ped) {
     const i = detail.memberPedRefs.indexOf(ped);
     if (i >= 0) detail.memberPedRefs.splice(i, 1);
-    removePed(ped);
+    leavePed(ped, "protection:quit");
     detail.memberCount = Math.max(0, detail.memberCount - 1);
   }
 
@@ -1046,12 +1065,13 @@
     for (let i = 0; i < MS.units.length; i++) dropUnit(MS.units[i]);
     MS.live = false;
   }
+  // a post stood down (off duty, the player far, a rebind): he walks off it
   function dropUnit(u) {
     const p = u.ped; u.ped = null; u.target = null;
     if (!p) return;
     if (p._post && CBZ.cityPostRelease) { try { CBZ.cityPostRelease(p, "released"); } catch (e) {} }
     if (p.dead) return;
-    removePed(p);
+    leavePed(p, "protection:post");
   }
   function spawnUnit(u, A) {
     if (!CBZ.cityPostNpc || !A || !A.root) return null;
@@ -1868,7 +1888,6 @@
       if (post) standOfficePost(q, post, "portal", true);
     }
   }
-  const LEAVING = [];
   function serviceTick(det, A, P, isPres) {
     const svc = svcOf(det);
     const cap = wantCount(det);                      // what the Service will stand round him now
@@ -1907,9 +1926,8 @@
         if (!q || q._order || q._protRole === "shift-leader") continue;
         det.memberPedRefs.splice(i, 1);
         if (q.dead) continue;
-        q._protUnit = null; q._protInbound = null; q._protLeave = clock;
         unpostIndoor(q); release(q); disengage(q);
-        LEAVING.push(q);
+        leavePed(q, "protection:pulled");
       }
       svc.books = Math.min(svc.books, cap);
       return;
@@ -1940,23 +1958,6 @@
     }
     // whoever is still owed comes in a later car
     svc.dueAt = det.memberPedRefs.length < want ? clock + 60 + rng() * 60 : null;
-  }
-  // a man the Service pulled walks away and is gone once out of sight
-  function tickLeaving(dt) {
-    const P = CBZ.player;
-    for (let i = LEAVING.length - 1; i >= 0; i--) {
-      const q = LEAVING[i];
-      if (!q || q.dead || !q.pos || (CBZ.cityPeds && CBZ.cityPeds.indexOf(q) < 0)) { LEAVING.splice(i, 1); continue; }
-      const d = P && P.pos ? hyp(q.pos.x, q.pos.z, P.pos.x, P.pos.z) : 999;
-      if ((d > 60 && safeSpot(q.pos.x, q.pos.z, q.pos.y)) || clock - q._protLeave > 180) { LEAVING.splice(i, 1); removePed(q); continue; }
-      if (P && P.pos) {
-        if (!q._protAway) {
-          const ax = q.pos.x - P.pos.x, az = q.pos.z - P.pos.z, n = Math.hypot(ax, az) || 1;
-          q._protAway = { x: q.pos.x + ax / n * 140, z: q.pos.z + az / n * 140 };
-        }
-        goTo(q, q._protAway.x, q._protAway.z, false, dt, null, false);
-      }
-    }
   }
   // a dispatched man on his way in: routed to the President at a run; he
   // joins the formation inside 8 m. Stuck (no progress for 20 s) while out
@@ -2148,7 +2149,7 @@
     const S = state();
     for (const id in S.details) {
       const d = S.details[id];
-      if (d !== pdet && d.standing) { d.standing = 0; while (d.memberPedRefs.length > wantCount(d)) { removePed(d.memberPedRefs.pop()); } }
+      if (d !== pdet && d.standing) { d.standing = 0; while (d.memberPedRefs.length > wantCount(d)) { leavePed(d.memberPedRefs.pop(), "protection:stooddown"); } }
     }
 
     // ---- spawns (2 Hz) ----
@@ -2226,7 +2227,6 @@
     }
     if (npcBody) driveRing(npcBody, PRES, dt);
     driveNpcEvac(dt, PRES);
-    if (LEAVING.length) tickLeaving(dt);
   });
 
   // ------------------------------------------------------------

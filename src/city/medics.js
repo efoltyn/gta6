@@ -152,6 +152,9 @@
     if (m.group && m.group.parent) m.group.parent.remove(m.group);
   }
   function clearAll() { for (let i = 0; i < medics.length; i++) despawn(medics[i]); medics.length = 0; }
+  // NOBODY VANISHES IN VIEW (systems/leave.js's rule): a medic who is done
+  // leaves the world only where the player cannot see him
+  function unseen(m) { return !CBZ.leave || !CBZ.leave.unseen || CBZ.leave.unseen(m.pos); }
 
   // the walk itself is CBZ.moves: a velocity, a braking arrival at the
   // stretcher, a bounded turn; the rig is fed what the body really did
@@ -300,7 +303,9 @@
       if (m.dead) {
         if (!m._deadHandled) { m._deadHandled = true; dropBody(m); }
         m.deadT += dt;
-        if (m.deadT > 8) { despawn(m); medics.splice(i, 1); }
+        // A DEAD MEDIC IS A CORPSE: he stays under the corpse law (city/morgue.js),
+        // not an 8 s timer that deleted him where he fell
+        if (m.deadT > 8 && (CBZ.corpseMayReap ? CBZ.corpseMayReap(m) : unseen(m))) { despawn(m); medics.splice(i, 1); }
         continue;
       }
       if (m.ko > 0) { m.ko -= dt; continue; }                                  // tased — out cold, body system sprawls him
@@ -426,14 +431,23 @@
         m.t += dt;
         const r = vanRear(m.unit);
         const d = walkTo(m, r.x, r.z, dt);
-        if (d < 1.5 || m.t > 16) { despawn(m); medics.splice(i, 1); }
+        // at the tailgate he climbs in; a man who never got there goes only unseen
+        if (d < 1.5 || (m.t > 16 && unseen(m))) { despawn(m); medics.splice(i, 1); }
         continue;
       }
 
       // leave: walk back out, then despawn (legacy exit)
       m.t += dt;
       const d = walkTo(m, m.homeX, m.homeZ, dt);
-      if (d < 0.7 || m.t > 9) { despawn(m); medics.splice(i, 1); }
+      if ((d < 0.7 || m.t > 9) && unseen(m)) { despawn(m); medics.splice(i, 1); }
+      else if (d < 0.7) {
+        // there and still in sight: on, the same way, until he is not
+        const hx = m.homeX - (m._lvX != null ? m._lvX : m.pos.x), hz = m.homeZ - (m._lvZ != null ? m._lvZ : m.pos.z), L = Math.hypot(hx, hz) || 1;
+        m._lvX = m.homeX; m._lvZ = m.homeZ;
+        const nx = L > 0.5 ? hx / L : Math.sin(m.group.rotation.y), nz = L > 0.5 ? hz / L : Math.cos(m.group.rotation.y);
+        const sp = clearSpot(m.homeX + nx * 6, m.homeZ + nz * 6);
+        m.homeX = sp.x; m.homeZ = sp.z;
+      }
     }
   });
 })();

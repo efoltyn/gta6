@@ -274,9 +274,17 @@
     if (gd.wedge) disposeMesh(gd.wedge);
     if (CBZ.guards) { const i = CBZ.guards.indexOf(gd); if (i >= 0) CBZ.guards.splice(i, 1); }
   }
-  function reconcilePosts(want) {
+  // `live`: a mid-run change (the latch, the console): a post that is no
+  // longer wanted keeps walking his loop and leaves the world only when
+  // nobody can see him (systems/leave.js). From reset() (a new run, a
+  // transfer: the player is being carried to his cell) it is at once.
+  function reconcilePosts(want, live) {
     if (typeof CBZ.spawnGuard !== "function") return;
-    while (mine.length > want) removePost(mine.pop());
+    while (mine.length > want) {
+      const gd = mine.pop();
+      if (live && CBZ.leave && gd && !gd.dead && gd.group) CBZ.leave.go(gd, { drive: false, tag: "prison:tierpost", remove: removePost });
+      else removePost(gd);
+    }
     while (mine.length < want && mine.length < POSTS.length) {
       const p = POSTS[mine.length];
       let gd = null;
@@ -552,10 +560,10 @@
         resetGame, after every counter it wipes and after resetCameras.
      ========================================================== */
   let applied = -1, appliedAt = 0;
-  function applyRegime() {
+  function applyRegime(live) {
     if (!on()) return false;
     const t = tier();
-    reconcilePosts(t.posts);
+    reconcilePosts(t.posts, live === true);
     applyGuards(t);
     applyCameras(t);
     applySchedule(t);
@@ -761,7 +769,7 @@
      ========================================================== */
   CBZ.onUpdate(19.4, function () {
     if (!on()) return;
-    if (applied !== level()) applyRegime();
+    if (applied !== level()) applyRegime(true);
   });
 
   /* ==========================================================
@@ -780,7 +788,7 @@
     top: function () { return level() >= TOP; },
     set: function (n) {                            // probes and the console
       g.securityTier = Math.max(0, Math.min(TOP, n | 0));
-      applyRegime();
+      applyRegime(true);
       return level();
     },
     transfer: transfer,

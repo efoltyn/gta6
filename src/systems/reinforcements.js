@@ -113,12 +113,29 @@
     }
   }
 
-  // recall EVERY reinforcement we still hold
-  function recallAll() {
-    for (let i = mine.length - 1; i >= 0; i--) removeReinf(mine[i]);
+  // recall EVERY reinforcement we still hold. `walk`: the stand-down in play.
+  // Each man walks back to the tower corner he came in by (his own patrol
+  // mover, one waypoint) and leaves the world only when nobody can see him
+  // (systems/leave.js); before this the whole squad blinked out in the yard.
+  // A new run / the win screen / the title is a teardown: at once.
+  function recallAll(walk) {
+    for (let i = mine.length - 1; i >= 0; i--) {
+      const gd = mine[i];
+      if (walk && CBZ.leave && gd && !gd.dead && gd.group && gd.start) {
+        gd.hunt = 0; gd.alert = 0; gd._chase = null; gd.sus = 0;
+        gd.waypoints = [gd.start.clone ? gd.start.clone() : gd.start]; gd.wi = 0;
+        LEAVING.push(gd);
+        CBZ.leave.go(gd, { drive: false, tag: "prison:reinforcement", remove: function (b) { removeReinf(b); const k = LEAVING.indexOf(b); if (k >= 0) LEAVING.splice(k, 1); } });
+      } else removeReinf(gd);
+    }
     mine.length = 0;
+    if (!walk) {
+      for (let i = LEAVING.length - 1; i >= 0; i--) { const gd = LEAVING[i]; if (CBZ.leave) CBZ.leave.cancel(gd); if (!gd.dead) removeReinf(gd); }
+      LEAVING.length = 0;
+    }
     callT = 0; standT = 0; spawnCd = 0; reprimeCd = 0; announced = false;
   }
+  const LEAVING = [];        // stood down, walking back to their tower, not yet out of sight
 
   // ---- spawn one reinforcement from a tower corner ---------------------
   function spawnOne() {
@@ -240,7 +257,7 @@
       if (heat <= HEAT_STAND) {
         standT += dt;
         if (standT >= STAND_HOLD) {
-          recallAll();
+          recallAll(true);
           // NO HINT either — the squad walking off IS the stand-down.
         }
       } else {

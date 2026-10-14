@@ -676,7 +676,12 @@
         const shaken = (ped.alarmed || 0) > 2.5 || (ped.fear || 0) > 3 || ped.state === "flee" || ped.state === "fight";
         if (hurt || shaken) fanRouse(rec, pa);
       }
-      if (rec.loose ? d > 70 : d > FAN_KEEP) { fanRelease(rec, !rec.loose); FANS.list.splice(k, 1); }
+      // a seated fan goes back to his crowd row (a swap, nothing vanishes); a
+      // LOOSE one (roused, out of his seat) has no row to go back to: he is
+      // let go only where nobody can see him (systems/leave.js). "Far" here
+      // is also "you got into a car" (px = 1e9), which says nothing of eyes.
+      const go = rec.loose ? (d > 70 && (!CBZ.leave || CBZ.leave.unseen(ped.pos))) : d > FAN_KEEP;
+      if (go) { fanRelease(rec, !rec.loose); FANS.list.splice(k, 1); }
     }
     if (!here || CBZ.citySpawnDraining) return;
     // the nearest seats within reach, two new rigs a tick

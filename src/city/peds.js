@@ -2529,7 +2529,9 @@
         // a vendor you shot and put on the floor (alive, bleeding) is still
         // there when the shop shuts: he gets up or he dies, he never vanishes
         if (CBZ.vitals && CBZ.vitals.state && CBZ.vitals.state(v) !== "ok") continue;
-        if (!want && (d2 > VEND_OUT2 || vendorPlaceSafe(vs.x, vs.z))) { removeVendor(v); b.vendor = null; }
+        // (systems/leave.js's rule: 80 m was inside the 95 m rig band)
+        const gone = CBZ.leave ? CBZ.leave.unseen(v.pos || vs) : (d2 > VEND_OUT2 || vendorPlaceSafe(vs.x, vs.z));
+        if (!want && gone) { removeVendor(v); b.vendor = null; }
         continue;
       }
       if (want && posted < VEND_POST_BUDGET && vendorPlaceSafe(vs.x, vs.z)) {
@@ -6349,7 +6351,10 @@
         if (ped.path.length) ped.target.set(ped.path[0].x, 0, ped.path[0].z);
         else {
           ped.path = null;
-          if (ped.finalGoal && ped.finalGoal.enter && rng() < 0.5) { ped.enterT = 3 + rng() * 5; }
+          // "goes in" (hidden a few seconds, then back out) ONLY where nobody
+          // sees the doorway: in view he just stands at it and walks on.
+          // It used to blink him out on the step and back in where he stood.
+          if (ped.finalGoal && ped.finalGoal.enter && rng() < 0.5 && (!CBZ.leave || CBZ.leave.unseen(ped.pos))) { ped.enterT = 3 + rng() * 5; }
           ped.pause = Math.max(ped.pause, 0.4 + rng() * 1.5);
         }
       }
@@ -6552,7 +6557,15 @@
     if (!order && m.arrived && !ped.path && (st === "wander" || st === "walk")) ped.pause = Math.max(ped.pause, 0.4);
 
     // "entered" a building: hide briefly then re-emerge (cheap life)
-    if (ped.enterT > 0) { ped.enterT -= dt; ped.group.visible = false; ped.speed = 0; if (ped.enterT <= 0) ped.group.visible = !ped._spawnHidden; return; }
+    // (he comes back out only where nobody is looking at the door, too)
+    if (ped.enterT > 0) {
+      ped.enterT -= dt; ped.group.visible = false; ped.speed = 0;
+      if (ped.enterT <= 0) {
+        if (CBZ.leave && !CBZ.leave.unseen(ped.pos)) ped.enterT = 0.5;
+        else ped.group.visible = !ped._spawnHidden;
+      }
+      return;
+    }
 
     // ANTI-TUNNEL DEPENETRATION: CBZ.collide is a SINGLE-PASS circle-vs-box push
     // (shared with the player — do not edit it). One pass at a corner can shove the

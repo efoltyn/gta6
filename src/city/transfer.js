@@ -317,8 +317,16 @@
       CONG.peds.push(p);
     }
   }
-  function dropCongress() {
-    for (let i = 0; i < CONG.peds.length; i++) { const p = CONG.peds[i]; if (p && !p.dead && CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); } catch (e) {} } }
+  // the session is over: the members WALK OUT of the chamber (systems/leave.js
+  // takes each off the world where nobody can see him). `now`: a reset.
+  function unpostMember(p) { if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); } catch (e) {} } }
+  function dropCongress(now) {
+    for (let i = 0; i < CONG.peds.length; i++) {
+      const p = CONG.peds[i];
+      if (!p || p.dead) continue;
+      if (!now && CBZ.leave && p.pos) CBZ.leave.go(p, { tag: "transfer:congress", remove: unpostMember });
+      else unpostMember(p);
+    }
     CONG.peds.length = 0; CONG.posted = false;
   }
   // the breach reaches the chamber: run for the far doors, or get down
@@ -584,7 +592,7 @@
       return null;
     },
     audit: function () { return Object.assign({ log: st().log.slice(-12) }, CBZ.transfer.state()); },
-    reset: function () { g.transferState = fresh(); NIGHT.on = false; dropCongress(); },
+    reset: function () { g.transferState = fresh(); NIGHT.on = false; dropCongress(true); },
     _t: function (secs) { const n = Math.ceil((secs || 0) / 0.25); for (let i = 0; i < n; i++) tick(0.25); },
     _openSession: openSession,
     _tick: tick,

@@ -181,6 +181,14 @@
     a.aiState = "wander"; a.foe = null;
     a._chain.visible = false; a.group.position.y = FAR_AWAY; a.group.visible = true;
   }
+  // a dead agent's face rig is his body: held while it could be seen (5 s
+  // minimum for the fall), released to the pool only under the corpse law
+  function corpseHeld(e) {
+    if (e.id < 0 || !S.dead[e.id]) return false;
+    const a = e.actor;
+    if ((a._corpseT || 0) > 0) return true;
+    return !!(CBZ.corpseLaw && !CBZ.corpseLaw.hidden(a.group.position));
+  }
   function freeAllRigs() { for (let i = 0; i < facePool.length; i++) if (facePool[i].id >= 0) freeRig(facePool[i]); }
 
   const faceTmpId = new Int32Array(Math.max(1, FACE_POOL)), faceTmpD2 = new Float64Array(Math.max(1, FACE_POOL));
@@ -204,7 +212,11 @@
       if (d2 <= FD2) faceConsider(id, d2, FR);
     }
     // 2) release rigs whose agent dropped out of range
-    for (let i = 0; i < facePool.length; i++) { const e = facePool[i]; if (e.id >= 0 && !faceWanted(e.id)) freeRig(e); }
+    //    A CORPSE IS NOT "OUT OF RANGE": a dead agent is never wanted (step 1
+    //    skips S.dead), so his rig was freed the frame after he fell, body and
+    //    all, in front of the player. It stays until the corpse law says
+    //    nobody can see it (systems/bodyfall.js corpseLaw.hidden).
+    for (let i = 0; i < facePool.length; i++) { const e = facePool[i]; if (e.id >= 0 && !faceWanted(e.id) && !corpseHeld(e)) freeRig(e); }
     // 3) hand free rigs to newly-near agents. GENDER-MATCHED PICK (W3): a
     //    pooled rig's build is baked into its geometry at load (makeFaceEntry
     //    rolled a fixed ~48/52 split), so it can't be reshaped per-agent —
@@ -234,7 +246,7 @@
           S.cigs[id] = 0; S.item[id] = 0; S.dead[id] = 1; a._chain.visible = false; a._corpseT = 5;
         }
         a._corpseT -= dt; if (CBZ.animChar) CBZ.animChar(rig, 0, dt);
-        if (a._corpseT <= 0) { rig.group.visible = false; freeRig(e); }
+        if (!corpseHeld(e)) freeRig(e);
         continue;
       }
       if (a.ko > 0) {

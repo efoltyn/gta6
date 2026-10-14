@@ -313,6 +313,19 @@
     let kept = false;
     if (p.release) { try { kept = p.release(ped, reason) === true; } catch (e) { kept = false; } }
     if (wasAdopted || kept) return;    // never destroy a body we do not own
+    // A LIVING WORKER WHOSE JOB ENDED WALKS OFF (the shift is over, the turf
+    // was lost, the venue was re-declared under him). He gets up, walks out
+    // and systems/leave.js takes him off the world when nobody can see him;
+    // he used to blink out at his counter on the hour.
+    if (WALK_OUT[reason] && CBZ.leave && ped.pos && !ped.dead && ped.group && ped.group.parent) {
+      try { if (ped._propSeat || ped._propBed) { if (CBZ.propStand) CBZ.propStand(ped); } } catch (e) {}
+      try { if (ped._npcAttached && CBZ.cityUnseat) CBZ.cityUnseat(ped, { state: "walk" }); } catch (e) {}
+      if (CBZ.leave.go(ped, { tag: "venue:" + (p.venue || "?") + ":" + reason, remove: unpostBody })) return;
+    }
+    unpostBody(ped);
+  }
+  const WALK_OUT = { gone: 1, rebuild: 1 };
+  function unpostBody(ped) {
     try { if (ped._propSeat || ped._propBed) { if (CBZ.propStand) CBZ.propStand(ped, { instant: true }); } } catch (e) {}
     try { if (ped._npcAttached && CBZ.cityUnseat) CBZ.cityUnseat(ped, { state: "walk" }); } catch (e) {}
     if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(ped); } catch (e) {} }
@@ -478,7 +491,9 @@
         if (roster && roster.indexOf(ped) < 0) { dropPost(p, "swept"); continue; }
         if (ped.player || ped.driving) continue;   // somebody else owns this body now
         const dx = ped.pos ? ped.pos.x - P.x : p.x - P.x, dz = ped.pos ? ped.pos.z - P.z : p.z - P.z;
-        if (dx * dx + dz * dz > p.far * p.far) dropPost(p, "far");
+        // past his post's range, and out of sight (fitout's 48 m is indoors,
+        // in plain view down a corridor): never taken away while seen
+        if (dx * dx + dz * dz > p.far * p.far && (!CBZ.leave || !ped.pos || CBZ.leave.unseen(ped.pos))) dropPost(p, "far");
         continue;
       }
       if (p.lost) continue;

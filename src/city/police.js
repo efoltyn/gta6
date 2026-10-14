@@ -1163,6 +1163,9 @@
     let pick = null, bd = Infinity;
     for (const c of CBZ.cityCops) {
       if (!c || c.dead || c.swat || c._post || c._airPilot || c.gunstop || (CBZ.body && CBZ.body.busy && CBZ.body.busy(c))) continue;
+      // he is lifted off the street to the pad: only a man nobody is watching
+      // (systems/leave.js's rule), never one blinking out on your screen
+      if (CBZ.leave && CBZ.leave.unseen && !CBZ.leave.unseen(c.pos)) continue;
       const d = Math.hypot(c.pos.x - chopper.homeX, c.pos.z - chopper.homeZ);
       if (d < bd) { bd = d; pick = c; }
     }
@@ -2852,12 +2855,24 @@
       c.group.position.set(c.pos.x, 0, c.pos.z);
       c.group.rotation.y = c.heading;
       // keep rolling until clear of the PLAYER's eyes — never despawn on camera
-      if (RB.leaveT > 0 || Math.hypot(c.pos.x - CBZ.player.pos.x, c.pos.z - CBZ.player.pos.z) < 80) rolling = true;
+      // (after 8 s a car out of sight may go; one still in view rolls on)
+      if (RB.leaveT > 0 || (Math.hypot(c.pos.x - CBZ.player.pos.x, c.pos.z - CBZ.player.pos.z) < 80 &&
+          (RB.leaveT > -8 || (CBZ.leave && !CBZ.leave.unseen(c.pos))))) rolling = true;
     }
-    if (!rolling || RB.leaveT <= -8) rbPark();
+    if (!rolling) rbPark();
+  }
+  // A STRAGGLER WALKS OFF DUTY. He used to "mount up instantly": deleted
+  // where he stood, in view, when the wall's cars had gone. Now he is an
+  // ordinary stood-down officer (the giveUp leave: to the precinct, off the
+  // world only under CBZ.bodyMayLeave).
+  function rbStraggler(c) {
+    if (!c) return;
+    if (c.dead || !CBZ.leave || CBZ.leave.unseen(c.pos)) { if (c._post) rbDetachCop(c); return; }
+    c._post = null; c.sees = false; c.curTarget = null;
+    c.giveUp = true; c._returned = true;             // a roadblock's man: nothing banks back to the pool twice
   }
   function rbPark() {
-    for (const c of RB.cops.splice(0)) if (c && c._post) rbDetachCop(c);   // stragglers mount up instantly
+    for (const c of RB.cops.splice(0)) if (c && c._post) rbStraggler(c);
     for (const c of RB.cars.splice(0)) rbParkCar(c);
     RB.state = 0;
     RB.cd = 38 + rng() * 30;    // next wall lands ~45-80s after this one went up
@@ -3134,7 +3149,10 @@
           const m = post.mount;
           const mx = m && m.pos ? m.pos.x : RB.x, mz = m && m.pos ? m.pos.z : RB.z;
           const mdx = mx - c.pos.x, mdz = mz - c.pos.z;
-          if (post.mountT > 2.2 || Math.hypot(mdx, mdz) < 2.0) { rbDetachCop(c); continue; }
+          // at the cruiser's door he gets in; one who never reached it goes
+          // only where nobody sees him, else he walks off duty on his feet
+          if (Math.hypot(mdx, mdz) < 2.0 || (post.mountT > 2.2 && (!CBZ.leave || CBZ.leave.unseen(c.pos)))) { rbDetachCop(c); continue; }
+          if (post.mountT > 8) { rbStraggler(c); continue; }
           stepTo(c, mdx, mdz, c.baseSpeed * 1.15, dt, nearB);
           continue;
         }

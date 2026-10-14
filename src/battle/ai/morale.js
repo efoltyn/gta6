@@ -81,6 +81,23 @@ CBZ.npcwar.onBoot(function () {
 });
 const fledMen = [];
 let moraleT = -1;
+/* can the battle camera see this runner? (this page has no player body and
+   no systems/leave.js, whose contract measures from a player: it is the
+   camera's own frustum and distance). Past FLED_SIGHT_R he is a few pixels. */
+const FLED_SIGHT_R = 260, FLED_IN_SIGHT_MAX = 40;
+let _fledFr = null, _fledPm = null, _fledSp = null;
+function runnerInSight(m) {
+  const cam = CBZ.camera;
+  if (!cam || !cam.projectionMatrix || !m.pos || typeof THREE === "undefined") return false;
+  const c = cam.position, dx = m.pos.x - c.x, dz = m.pos.z - c.z;
+  if (dx * dx + dz * dz > FLED_SIGHT_R * FLED_SIGHT_R) return false;
+  if (!_fledFr) { _fledFr = new THREE.Frustum(); _fledPm = new THREE.Matrix4(); _fledSp = new THREE.Sphere(); }
+  cam.updateMatrixWorld();
+  _fledPm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+  _fledFr.setFromProjectionMatrix(_fledPm);
+  _fledSp.center.set(m.pos.x, (m.pos.y || 0) + 0.9, m.pos.z); _fledSp.radius = 1.2;
+  return _fledFr.intersectsSphere(_fledSp);
+}
 function emitWar(kind, data) {
   try { if (typeof warEvent === "function") warEvent(kind, data); } catch (e) {}
 }
@@ -116,10 +133,15 @@ function updateMorale() {
     if (!m._mc) { m._mc = 1; m._mw = manWeight(m); A.p0 += m._mw; A.men0++; }
     if (m.dead) continue;
     if (m.fled) {
+      // HE RUNS OUT OF SIGHT FIRST. Counted fled at once (the war's sums),
+      // but a runner the camera can still see keeps running (routCheck goes
+      // on steering him away) and leaves the field only once he is off the
+      // screen or far; before this he blinked out mid-stride in view.
+      if (!m._fledCounted) { m._fledCounted = true; A.fled++; m._fledAt = performance.now() / 1000; }
+      if (m.group && !m.surrendered && runnerInSight(m) && performance.now() / 1000 - m._fledAt < FLED_IN_SIGHT_MAX) continue;
       // OFF THE FIELD: out of every loop that walks `men`, so the grid, the
       // camera and the HUD forget him without each learning a new flag
       men.splice(i, 1);
-      A.fled++;
       fledMen.push(m);
       if (m.group && !m.surrendered) m.group.visible = false;   // a prisoner stays where he knelt
       if (m.ordTgt) {
@@ -262,10 +284,9 @@ function routCheck(m, dt) {
     }
     // FLED: far enough that this war is no longer his (or he has outrun
     // it for most of a minute)
-    if (fd > FLEE_GAPS * (HOST.gap || 150) || m.routT > 45) {
-      m.fled = true;
-      return true;
-    }
+    // (he keeps running below: updateMorale lets him off the field once the
+    // camera cannot see him)
+    if (fd > FLEE_GAPS * (HOST.gap || 150) || m.routT > 45) m.fled = true;
   }
   // THE RUN: away from their fighting centre, leaning toward his own start
   // edge, with a man-stable lateral so a broken line fans out instead of

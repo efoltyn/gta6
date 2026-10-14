@@ -168,8 +168,12 @@
   }
   function mansion() { return govSite("execmansion"); }
   function camPos() { return (CBZ.camera && CBZ.camera.position) || (CBZ.player && CBZ.player.pos) || null; }
-  // somewhere a body or a car can appear/vanish without the player watching
+  // somewhere a body or a car can appear/vanish without the player watching:
+  // the engine's one rule (systems/leave.js over config.js npcTransitionSafe
+  // with occlusion), never closer than 30 m, nothing drawn past 95 m. The
+  // yaw cone below is the fallback on a page without it.
   function unseen(x, z) {
+    if (CBZ.leave && CBZ.leave.unseen) { try { return !!CBZ.leave.unseen({ x: x, z: z }, { minDistance: 30, far: 95 }); } catch (e) {} }
     const c = camPos(); if (!c) return true;
     const dx = x - c.x, dz = z - c.z, d = Math.hypot(dx, dz);
     if (d > 95) return true;
@@ -1365,9 +1369,25 @@
       } else if (p.state === "live") {
         if (MC.s + minOff() > p.s + 50 || R.done) { p.state = "passed"; p.t = 0; }
       } else if (p.state === "passed") {
-        if (unseen(p.cx, p.cz) || p.t > 25) dropPost(p);
+        if (unseen(p.cx, p.cz)) dropPost(p);
+        else if (p.t > 25) standDownPost(p);
       }
     }
+  }
+  // a post whose column has passed but is still in view: the officers walk
+  // off (systems/leave.js removes them unseen), the cruiser waits as a stray
+  // (removed unseen, tickDismiss)
+  function standDownPost(p) {
+    if (!CBZ.leave) { dropPost(p); return; }
+    for (let k = 0; k < p.peds.length; k++) {
+      const q = p.peds[k];
+      if (!q || q.dead) continue;
+      q._motorcade = false;
+      CBZ.leave.go(q, { tag: "motorcade:post", remove: unpost });
+    }
+    p.peds = [];
+    if (p.car && !p.car.player && carLive(p.car)) MC.strays.push(p.car);
+    p.car = null; p.state = "done";
   }
   function dropPost(p) {
     for (let k = 0; k < p.peds.length; k++) unpost(p.peds[k]);
@@ -1805,6 +1825,12 @@
       if (!p || p.dead) { MC.dismiss.splice(i, 1); continue; }
       const at = p.pos || (q.car && q.car.pos);
       if (!at || unseen(at.x, at.z)) { unpost(p); MC.dismiss.splice(i, 1); }
+      else if (!p.inCar && CBZ.leave) {
+        // OFF DUTY ON FOOT: he walks off, he does not stand there until you look away
+        MC.dismiss.splice(i, 1);
+        p._motorcade = false;
+        CBZ.leave.go(p, { tag: "motorcade:offduty", remove: unpost });
+      }
     }
     for (let i = MC.strays.length - 1; i >= 0; i--) {
       const c = MC.strays[i];
@@ -1815,7 +1841,8 @@
       const p = LOOSE_POSTS[i];
       p.t += 0.25;
       if (p.state === "done") { LOOSE_POSTS.splice(i, 1); continue; }
-      if (unseen(p.cx, p.cz) || p.t > 25) { dropPost(p); LOOSE_POSTS.splice(i, 1); }
+      if (unseen(p.cx, p.cz)) { dropPost(p); LOOSE_POSTS.splice(i, 1); }
+      else if (p.t > 25) { standDownPost(p); LOOSE_POSTS.splice(i, 1); }
     }
   }
 

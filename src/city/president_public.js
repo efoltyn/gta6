@@ -1133,7 +1133,7 @@
   function crowdGather(stage, force) {
     if (!stage) return;
     if (CROWD.stage !== stage) {
-      crowdRelease(false);
+      crowdRelease(CROWD.stage != null);       // the last crowd walks off (systems/leave.js removes it unseen)
       CROWD.stage = stage;
       if (stage.pen) penUse("speech", true);
       const n = crowdSize();
@@ -1219,7 +1219,9 @@
       const p = d.ped;
       if (!p || p.dead) { list.splice(i, 1); continue; }
       const far = distXZ(P, p.pos.x, p.pos.z) > 40;
-      if ((d.t > 12 && far) || d.t > 40) { unpost(p); list.splice(i, 1); }
+      // gone a way off, or long enough: out of the world, but only where
+      // nobody can see him (systems/leave.js); until then he keeps walking
+      if (((d.t > 12 && far) || d.t > 40) && (!CBZ.leave || CBZ.leave.unseen(p.pos))) { unpost(p); list.splice(i, 1); }
     }
   }
   function members(role) {
@@ -2146,12 +2148,17 @@
       PROT.police.length = 0;
     }
   }
-  function releaseProtestBodies() {
+  // now: the world is going (resetAll); else the President went far: they
+  // walk off and leave the world unseen (systems/leave.js)
+  function releaseProtestBodies(now) {
     if (PROT.mob && CBZ.mob) { CBZ.mob.disperse(PROT.mob, false); PROT.mob = null; PROT.mobLine = null; }
-    for (let i = 0; i < PROT.members.length; i++) unpost(PROT.members[i].ped);
+    for (let i = 0; i < PROT.members.length; i++) {
+      const ped = PROT.members[i].ped;
+      if (now || !CBZ.leave) unpost(ped); else walkOff(ped);
+    }
     PROT.members.length = 0;
     if (PROT.slots) for (let i = 0; i < PROT.slots.length; i++) PROT.slots[i].ped = null;
-    for (let i = 0; i < PROT.police.length; i++) dropBody(PROT.police[i]);
+    for (let i = 0; i < PROT.police.length; i++) dropBody(PROT.police[i], now);
     PROT.police.length = 0;
   }
   function endProtest(phase) {
@@ -2269,16 +2276,26 @@
     if (p) { p.organization = "military"; p._presPublic = true; p._iOnly = true; }
     return p;
   }
-  function dropBody(b) {
+  /* A BODY STANDS DOWN, it does not blink out. A cop is stood down into
+     police.js's own walk off duty (giveUp: back to the precinct, off the
+     world under CBZ.bodyMayLeave); anybody else walks off through
+     systems/leave.js. `now` only when the world itself is going. */
+  function dropBody(b, now) {
     if (!b || b.dead) return;
     if (b._isCop) {
       if (CBZ.cityPostRelease) { try { CBZ.cityPostRelease(b, "stand-down"); } catch (e) {} }
       b._post = null;
+      if (!now) { b.giveUp = true; b._presPublic = false; return; }
       if (b.group && b.group.parent) b.group.parent.remove(b.group);
       const L = CBZ.cityCops; if (L) { const i = L.indexOf(b); if (i >= 0) L.splice(i, 1); }
       return;
     }
-    unpost(b);
+    if (now || !CBZ.leave) unpost(b); else walkOff(b);
+  }
+  function walkOff(b) {
+    if (!b || b.dead) return;
+    b._pubWalk = null; lowerProp(b); setPose(b, null);
+    CBZ.leave.go(b, { tag: "prespublic", remove: unpost });
   }
   function makeCruiser(x, z, heading) {
     if (!CBZ.cityMakeCar || !CBZ.cityCruiserModel) return null;
@@ -2337,9 +2354,9 @@
     if (c2) it.bodies.push(c2);
     return it;
   }
-  function dropItem(it) {
+  function dropItem(it, now) {
     if (it.group && it.group.parent) it.group.parent.remove(it.group);
-    for (let i = 0; i < it.bodies.length; i++) dropBody(it.bodies[i]);
+    for (let i = 0; i < it.bodies.length; i++) dropBody(it.bodies[i], now);
     for (let i = 0; i < (it.cars || []).length; i++) dropCar(it.cars[i]);
     for (let i = 0; i < (it.cols || []).length; i++) uncol(it.cols[i]);
     if (it.cols && it.cols.length) dirtyCols();
@@ -2528,12 +2545,12 @@
     PANIC.length = 0;
     for (let i = 0; i < CROWD.drifting.length; i++) unpost(CROWD.drifting[i].ped);
     CROWD.drifting.length = 0;
-    releaseProtestBodies();
+    releaseProtestBodies(true);
     for (let i = 0; i < PROT.drifting.length; i++) unpost(PROT.drifting[i].ped);
     PROT.drifting.length = 0;
     PROT.active = false; PROT.pen = null; PROT.breached = false;
     penReset();
-    for (let i = 0; i < CONS.items.length; i++) dropItem(CONS.items[i]);
+    for (let i = 0; i < CONS.items.length; i++) dropItem(CONS.items[i], true);
     CONS.items.length = 0;
     dropRally();
     APP.state = {}; APP.extra = []; APP.live = null;

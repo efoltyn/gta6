@@ -198,18 +198,26 @@
   // We reuse the city's own cop rig (already armed, shootable, hostile + LOS-
   // gated) as private security — spawned at the vault when you go loud, torn
   // down when the score ends so they never leak into the ambient police count.
-  function cleanupGuards() {
+  // THE SCORE IS OVER: the living guards stand down and walk off (police.js's
+  // own giveUp leave: to the precinct, off the world only under
+  // CBZ.bodyMayLeave, never on screen). They used to be flagged dead and
+  // deleted where they stood, in front of you. `hard` (a new run: the world
+  // is being reset) still removes at once.
+  function cleanupGuards(hard) {
     const h = g.cityHeist; if (!h || !h.guards || !h.guards.length) return;
     const cops = CBZ.cityCops;
     for (let i = 0; i < h.guards.length; i++) {
       const gd = h.guards[i];
-      if (!gd) continue;
-      // mark dead + remove from the world if still standing (clean exit)
-      if (!gd.dead) {
-        gd.dead = true;
-        if (gd.group && gd.group.parent) try { gd.group.parent.remove(gd.group); } catch (e) {}
-        if (cops) { const ix = cops.indexOf(gd); if (ix >= 0) cops.splice(ix, 1); }
+      if (!gd || gd.dead) continue;
+      gd._bankGuard = false;
+      if (!hard) {
+        gd.giveUp = true; gd.npcTarget = null; gd.chaseCar = null; gd.searchT = 0;
+        gd._returned = true;              // a bank's guard, not the force's: banks nothing back to the pool
+        continue;
       }
+      gd.dead = true;
+      if (gd.group && gd.group.parent) try { gd.group.parent.remove(gd.group); } catch (e) {}
+      if (cops) { const ix = cops.indexOf(gd); if (ix >= 0) cops.splice(ix, 1); }
     }
     h.guards.length = 0;
   }
@@ -219,7 +227,7 @@
     // botched — nobody should get a FAILED card for a life they didn't live.
     scoreEnd("retire", "new run");
     cleanupTruck();
-    cleanupGuards();
+    cleanupGuards(true);
     const h = ensure();
     h.phase = "idle"; h.tierId = null; h.target = null;
     h.bag = 0; h.bagMax = 0; h.grabbed = 0; h.t = 0; h.heat = 0;

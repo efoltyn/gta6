@@ -427,13 +427,28 @@
     if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(p); } catch (e) {} }
     return p;
   }
+  // HIS PART IS OVER: he walks out and leaves the world only where nobody
+  // sees him (systems/leave.js). The meeting's 9 s timer, a finished op, the
+  // finale's crowd and detail all used to delete people on the spot, in
+  // front of the player. Only a world reset (resetRuntime) removes at once.
+  let HARD = false;
+  function removeNow(p) {
+    if (!p || p.dead) return;
+    if (p.group && p.group.parent) p.group.parent.remove(p.group);
+    const L = CBZ.cityPeds || [];
+    const i = L.indexOf(p); if (i >= 0) L.splice(i, 1);
+    if (CBZ.cityFloorPed && p._occupyY) { try { CBZ.cityFloorPed(p, 0); } catch (e) {} }
+  }
   function despawn(p) {
     if (!p) return;
     if (!p.dead) {
-      if (p.group && p.group.parent) p.group.parent.remove(p.group);
-      const L = CBZ.cityPeds || [];
-      const i = L.indexOf(p); if (i >= 0) L.splice(i, 1);
-      if (CBZ.cityFloorPed && p._occupyY) { try { CBZ.cityFloorPed(p, 0); } catch (e) {} }
+      if (!HARD && CBZ.leave && p.group && p.group.parent) {
+        p.rage = null;
+        CBZ.leave.go(p, { tag: "agency", remove: removeNow });
+      } else {
+        if (CBZ.leave) CBZ.leave.cancel(p);
+        removeNow(p);
+      }
     }
     p._agency = false; p._campaignTarget = false;
   }
@@ -2637,9 +2652,12 @@
      §18  THE HOOKS other files call
      ================================================================ */
   function resetRuntime() {
-    if (RT.op) { teardownOp(RT.op); RT.op = null; }
-    if (RT.fin) { teardownFinale(RT.fin); RT.fin = null; }
-    teardownMeet(false);
+    HARD = true;                          // the world is being reset: nobody is left to see them go
+    try {
+      if (RT.op) { teardownOp(RT.op); RT.op = null; }
+      if (RT.fin) { teardownFinale(RT.fin); RT.fin = null; }
+      teardownMeet(false);
+    } finally { HARD = false; }
     RT.street = null; RT.ringing = false; RT.inCall = false; RT.envFor = null; RT.openT = 0; RT.turnT = null;
     unpin();
     boardDirty();

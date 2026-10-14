@@ -663,8 +663,15 @@
       if (CBZ.cityPeds) { const i = CBZ.cityPeds.indexOf(p); if (i >= 0) CBZ.cityPeds.splice(i, 1); }
     } catch (e) {}
   }
+  // the officeholder's window ends (the hour, a succession, you walked off,
+  // his principal is down): he and his detail WALK OUT, and systems/leave.js
+  // takes them off the world when nobody can see them. No blink.
   function despawnPresence(pr) {
-    removePed(pr.principal);
+    const p = pr.principal;
+    if (p && !p.dead && p.pos && CBZ.leave) {
+      if (CBZ.protection && CBZ.protection.release) CBZ.protection.release(p);
+      CBZ.leave.go(p, { tag: "officials:principal", remove: removePed });
+    } else removePed(p);
     const det = CBZ.protection && CBZ.protection.get ? CBZ.protection.get("off_" + pr.recId) : null;
     if (det && CBZ.protection.despawnMembers) CBZ.protection.despawnMembers(det);
     pr.state = "none"; pr.principal = null; pr.mode = null; pr.mournT = 0;
