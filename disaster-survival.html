@@ -10,13 +10,14 @@
 
 
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=desk1009c">
+<link rel="stylesheet" href="css/hud.css?v=spec1014">
+<link rel="stylesheet" href="css/survival_hud.css?v=spec1014">
 <link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=deck1011">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
-<link rel="stylesheet" href="css/city.css?v=pin1013">
+<link rel="stylesheet" href="css/city.css?v=spec1014">
 <link rel="stylesheet" href="css/campaign.css?v=neck1001b">
 <link rel="stylesheet" href="css/interact_touch.css?v=jailside1001">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
@@ -81,12 +82,10 @@ document.body.appendChild(b);}}catch(e){}})();
   <div id="simHud" class="panel"></div>
 
   
-  <div id="survStatus" class="panel"><span id="survStatusText"></span></div>
   <div id="survBars">
     <div class="sbar"><span class="slab">HEALTH</span><div class="sbarbg"><div id="hpBar"></div></div></div>
     <div class="sbar"><span class="slab">STAMINA</span><div class="sbarbg"><div id="stamBar"></div></div></div>
   </div>
-  <div id="disasterBanner"></div>
 
   <div id="toast"></div>
   <div id="hitfx"></div>
@@ -372,7 +371,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 
 
-<script src="src/config.js?v=leave1014"></script>
+<script src="src/config.js?v=island1014"></script>
 
 <script src="src/core/texfree.js?v=peak1014c"></script>
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
@@ -489,7 +488,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/entities/gait.js?v=hmove1011"></script>
 
-<script src="src/systems/bodydoors.js?v=presint1001b"></script>
+<script src="src/systems/bodydoors.js?v=sink1014"></script>
 <script src="src/entities/poses.js?v=placard1013"></script>
 
 
@@ -529,7 +528,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/security.js"></script>
 
 
-<script src="src/systems/audio.js?v=rounds1013m"></script>
+<script src="src/systems/audio.js?v=twister1014"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 <script src="src/systems/economy.js?v=jailv1001"></script>
 
@@ -621,8 +620,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=planes1009b"></script>
-<script src="src/systems/physics.js?v=rail1014"></script>
+<script src="src/systems/camera.js?v=island1014"></script>
+<script src="src/systems/physics.js?v=island1014"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -660,7 +659,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reactions.js?v=pf0930c"></script>
 <script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
-<script src="src/systems/weather.js?v=ffroute1014"></script>
+<script src="src/systems/weather.js?v=ashgrain1014"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/dashboard.js?v=cars1"></script>
 <script src="src/systems/combat.js?v=melee1011"></script>
@@ -707,7 +706,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/intimidate.js?v=jailv1001"></script>
 
 
-<script src="src/systems/fx.js?v=sharkmode1"></script>
+<script src="src/systems/fx.js?v=island1014"></script>
 <script src="src/systems/debris.js?v=placard1013"></script>
 
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
@@ -716,19 +715,23 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
-<script src="src/modes/survival.js?v=noring1013"></script>
+<script src="src/modes/survival.js?v=island1014"></script>
+
+<script src="src/systems/disasterhurt.js?v=fair1014"></script>
 <script src="src/modes/shark_sim.js?v=nored0930"></script>
 
 <script src="src/modes/shark_title.js?v=uicut1"></script>
-<script src="src/systems/title_hub.js?v=end1"></script>
+<script src="src/systems/title_hub.js?v=spec1014"></script>
 
 <script src="src/modes/gungame.js?v=bootflash1"></script>
 
-<script src="src/world/groundshaft.js?v=shaft1"></script>
+<script src="src/world/groundshaft.js?v=sink1014"></script>
+
+<script src="src/world/sinkhole.js?v=sink1014"></script>
 
 <script src="src/world/volcanofx.js?v=plume2"></script>
 
-<script src="src/systems/quake.js?v=news0930"></script>
+<script src="src/systems/quake.js?v=seis1014"></script>
 
 
 
@@ -737,9 +740,9 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/systems/flashflood.js?v=ffroute1014"></script>
 
-<script src="src/systems/hurricane.js?v=hur1014"></script>
+<script src="src/systems/hurricane.js?v=hur1"></script>
 
-<script src="src/systems/wildfire.js?v=fire1"></script>
+<script src="src/systems/wildfire.js?v=fuel1014"></script>
 
 
 
@@ -749,11 +752,13 @@ document.body.appendChild(b);}}catch(e){}})();
 
 
 
-<script src="src/systems/disasters.js?v=ffroute1014"></script>
+<script src="src/systems/disasters.js?v=island1014"></script>
 
 <script src="src/systems/handverbs.js?v=jailv1001"></script>
 <script src="src/systems/survival_interact.js?v=jailv1001"></script>
-<script src="src/systems/survivalhud.js?v=deathcam1009"></script>
+<script src="src/systems/survivalhud.js?v=spec1014"></script>
+
+<script src="src/systems/spectator.js?v=spec1014"></script>
 
 <script src="src/net/survnet.js?v=survnet1"></script>
 
@@ -761,11 +766,12 @@ document.body.appendChild(b);}}catch(e){}})();
 
 
 
-<script src="src/world/water_spec.js?v=water1011"></script>
+<script src="src/world/water_spec.js?v=runup1014"></script>
 
-<script src="src/world/tsunami_debris.js?v=tsureal1"></script>
-<script src="src/world/tsunami_flow.js?v=water1011"></script>
-<script src="src/world/tsunami_scene.js?v=tsureal1"></script>
+<script src="src/world/tsunami_runup.js?v=runup1014"></script>
+<script src="src/world/tsunami_debris.js?v=runup1014"></script>
+<script src="src/world/tsunami_flow.js?v=runup1014"></script>
+<script src="src/world/tsunami_scene.js?v=runup1014"></script>
 
 <script src="src/city/streetkit.js?v=metro0929"></script>
 <script src="src/city/world.js?v=lodlight1012"></script>
@@ -992,19 +998,21 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/cardyn.js?v=cars2aids"></script>
 
 <script src="src/city/carlod.js?v=pf0930e"></script>
-<script src="src/city/vehicles.js?v=loose1013"></script>
+<script src="src/city/vehicles.js?v=island1014"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
-<script src="src/city/playeraircraft.js?v=rounds1013"></script>
+<script src="src/city/playeraircraft.js?v=island1014"></script>
 
 <script src="src/city/cockpit_panel.js?v=cockpit1"></script>
 <script src="src/city/cockpit_shapes.js?v=cockpit1x0"></script>
 <script src="src/city/cockpit.js?v=af0929"></script>
 <script src="src/city/cockpit_view.js?v=nocine1011"></script>
 
-<script src="src/city/bailout.js?v=planes1009b"></script>
+<script src="src/city/bailout.js?v=island1014"></script>
 
-<script src="src/city/aircraft_doors.js?v=af0929"></script>
+<script src="src/city/aircraft_doors.js?v=island1014"></script>
+
+<script src="src/world/island_vehicles.js?v=island1014"></script>
 
 <script src="src/city/vehicle_hold.js?v=cd0929"></script>
 
@@ -1023,7 +1031,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/structural.js?v=nukecost1013"></script>
 <script src="src/city/nukefx.js?v=nukecost1013"></script>
 
-<script src="src/systems/tornado.js?v=street1009"></script>
+<script src="src/systems/tornado.js?v=island1014"></script>
 <script src="src/city/aircraftimpact.js?v=street1009"></script>
 <script src="src/city/shops.js?v=vault1013"></script>
 <script src="src/city/gunstore.js?v=peak1014c"></script>
@@ -1200,7 +1208,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/convoy.js?v=curb1013"></script>
 <script src="src/systems/navigation.js?v=convoy1011"></script>
 
-<script src="src/systems/navgrid.js?v=bdoor1001"></script>
+<script src="src/systems/navgrid.js?v=sink1014"></script>
 <script src="src/systems/prisonnav.js?v=nav2-st1"></script>
 
 <script src="src/city/pednav.js?v=nav2"></script>
