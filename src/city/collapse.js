@@ -704,9 +704,21 @@
   /* THE CUTTER. One triangle in (33 floats, building-local), clipped at every
      line it crosses, each piece filed into the chunk its centroid is in. */
   const EPS = 1e-4;
-  function splitOf(S, a, b) {        // the first line strictly inside [a, b] on this axis (lines sorted)
-    for (let i = 1; i < a.length - 1; i++) { const v = a[i]; if (v > b[0] + EPS && v < b[1] - EPS) return v; }
-    return null;
+  /* The line strictly inside [b0, b1] NEAREST ITS MIDDLE (lines sorted).
+     Halving, not peeling: a facade member emitted once full-height (a
+     curtain wall's mullion runs 70 m in two triangles) is cut into its
+     storeys in log2(storeys) levels of recursion, never left whole because
+     the recursion ran out peeling one storey at a time. */
+  function splitOf(S, a, b) {
+    const mid = (b[0] + b[1]) / 2;
+    let best = null, bd = Infinity;
+    for (let i = 1; i < a.length - 1; i++) {
+      const v = a[i];
+      if (v <= b[0] + EPS || v >= b[1] - EPS) continue;
+      const d = Math.abs(v - mid);
+      if (d < bd) { bd = d; best = v; }
+    }
+    return best;
   }
   function findSplit(S, P) {
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
@@ -718,9 +730,14 @@
     if (x1 - x0 > 0.02) { const x = splitOf(S, S.xs, [x0, x1]); if (x != null) return [0, x]; }
     if (z1 - z0 > 0.02) { const z = splitOf(S, S.zs, [z0, z1]); if (z != null) return [2, z]; }
     if (y1 - y0 > 0.02) {
-      const k = Math.floor((y0 + SL) / S.FH) + 1;
-      const Y = k * S.FH - SL;
-      if (k >= 1 && k <= S.ns && Y > y0 + EPS && Y < y1 - EPS) return [1, Y];
+      const k0 = Math.max(1, Math.floor((y0 + SL) / S.FH) + 1);
+      const k1 = Math.min(S.ns, Math.ceil((y1 + SL) / S.FH) - 1);
+      if (k0 <= k1) {
+        const k = Math.round((k0 + k1) / 2), Y = k * S.FH - SL;
+        if (Y > y0 + EPS && Y < y1 - EPS) return [1, Y];
+        const Y0 = k0 * S.FH - SL;
+        if (Y0 > y0 + EPS && Y0 < y1 - EPS) return [1, Y0];
+      }
     }
     return null;
   }
@@ -730,7 +747,7 @@
     return o;
   }
   function clipEmit(S, P, mat, glass, depth) {
-    const sp = depth < 12 ? findSplit(S, P) : null;
+    const sp = depth < 48 ? findSplit(S, P) : null;
     if (!sp) { emitPoly(S, P, mat, glass); return; }
     const ax = sp[0], val = sp[1], lo = [], hi = [];
     for (let i = 0; i < P.length; i++) {
@@ -914,9 +931,22 @@
         }
       }
     }
+    /* EMPTY CELLS ARE NOT STRUCTURE. A cell the building put nothing in (a
+       stair well, an atrium, the air over a setback) carries nothing: it must
+       never hold up a slab, or a falling block, or be what a floor hangs off.
+       The one exception is the ground storey of a frame, which stands on its
+       columns whether the cut found anything drawn there or not. */
+    for (const c of S.chunks) {
+      if (c.tris || (frame && c.kind === 1 && c.s === 0)) continue;
+      c.standing = false; c.void = true; c.hidden = true;
+    }
     // THE DESIGN: intact loads, then capacity = safety factor x load. The
     // factor drops on a storey that is mostly glass: the soft storey.
     loads(S, true);
+    // anything the building drew that the design could not find a way to
+    // hold (a sign on a stalk, a lantern off a bracket) stays where it was
+    // built for as long as something beside or under it stands
+    for (const c of S.chunks) if (c.standing && !c.held) c.anchor = true;
     const sol = [];
     for (let s = 0; s < ns; s++) {
       let a = 0, n = 0;
@@ -933,9 +963,10 @@
     for (const c of S.chunks) {
       c.cap0 = Math.max(S.sf[c.s] * c.load, c.mass * 2 + 0.3);
       c.tough = m.tough * Math.pow(Math.max(0.2, c.mass), 0.8);
-      S.totalMass += c.mass;
+      if (c.standing) S.totalMass += c.mass;
     }
-    S.standingMass = S.totalMass; S.standingCount = S.chunks.length;
+    S.standingMass = S.totalMass;
+    S.standingCount = S.chunks.filter(function (c) { return c.standing; }).length;
     S.standingReal = S.chunks.filter(function (c) { return c.tris > 0; }).length;
     S.stats.chunks = S.chunks.filter(function (c) { return c.tris > 0; }).length;
     // the cut faces
@@ -1194,12 +1225,18 @@
      its pieces) has been made (see the work queue, section 5). */
   function leave(S, c, keepDrawn) {
     if (!c.standing) return;
+    markGone(S, c);
+    if (!keepDrawn) hideChunk(S, c);
+    surgery(S, c);
+  }
+  function markGone(S, c) {
     c.standing = false;
     S.standingCount--; S.standingMass -= c.mass;
     if (c.tris) S.standingReal--;
     S.levelLost[c.s] = 1;
     S.active = Math.max(S.active, 3);
-    if (!keepDrawn) hideChunk(S, c);
+  }
+  function surgery(S, c) {
     const torn = !!(S.b && S.b._tornDown);
     for (const oc of c.origCols || []) {
       if (oc._cbzGone) continue;
@@ -1312,7 +1349,10 @@
       for (const c of lv) {
         if (!c.standing) continue;
         if (s === 0) c.direct = !c.undermined;
-        else for (const b of c.below) if (b.standing && b.held) { c.direct = true; break; }
+        else if (c.anchor) {
+          for (const b of c.below) if (b.standing) { c.direct = true; break; }
+          if (!c.direct) for (const b of c.lat) if (b.standing) { c.direct = true; break; }
+        } else for (const b of c.below) if (b.standing && b.held) { c.direct = true; break; }
         c.held = c.direct;
         if (c.direct) ord.push(c);
       }
@@ -1387,6 +1427,11 @@
     const D = [];
     for (const c of S.chunks) {
       if (!c.standing) continue;
+      if (c.s > 0 && c.tris && S.levelLost[c.s]) {
+        let braced = false;
+        for (const nb of c.lat) if (nb.standing && nb.s === c.s) { braced = true; break; }
+        if (!braced) c.tear = true;
+      }
       if (!c.held || c.tear || (tip >= 0 && c.s >= tip)) D.push(c);
     }
     if (tip >= 0) S.stats.tipped++;
@@ -1462,8 +1507,9 @@
       comps.push(comp);
     }
     comps.sort(function (a, b) { return b.length - a.length; });
+    for (const c of list) if (c.standing) markGone(S, c);
+    for (const c of list) surgery(S, c);
     for (const comp of comps) {
-      for (const c of comp) leave(S, c, true);
       S.stats.detached += comp.length;
       // a lone empty cell (air, a room with nothing in it) has nothing to show
       const real = comp.filter(function (c) { return c.tris > 0; });
@@ -1490,14 +1536,24 @@
     if (c.tris) queueShatter(S, c, dir, power, true); else hideChunk(S, c);
   }
   function queueShatter(S, c, dir, power, first) {
-    const job = function () {
+    // cheap: the backlog is long (a whole storey crushed at once): the chunk
+    // goes the way a crushed storey mostly does, as dust and grit
+    const job = function (cheap) {
       if (S.disposed || c.hidden) return;
       hideChunk(S, c);
+      if (cheap) { pulverise(S, c); return; }
       shatterStanding(S, c, dir, power);
     };
     // a blast's own chunks go at the head of the queue: they are what the
     // player is looking at the moment the charge goes off
     if (first) work.unshift(job); else work.push(job);
+  }
+  function pulverise(S, c) {
+    const w = new THREE.Vector3(c.cx, c.cy, c.cz).applyMatrix4(S.L);
+    try {
+      if (CBZ.debris && CBZ.debris.chips) CBZ.debris.chips(w.x, w.y, w.z, { color: S.D.wall, count: 8, power: 1, dust: true });
+      else dustAt(S, c, 0.8);
+    } catch (e) {}
   }
   // the chunk's own geometry handed to CBZ.debris as pieces of itself
   function shatterStanding(S, c, dir, power) {
@@ -1569,15 +1625,35 @@
      never waits: a body falls from the frame it detached; its picture is
      taken over from the standing building part by part, and a chunk keeps
      being drawn where it stood until its pieces exist. */
-  const work = [];
+  /* Two queues. FIRST: what is on screen in the wrong place until it runs (a
+     falling block's parts still drawn where they stood, a broken body frozen
+     in the air, a shed storey). It always goes before the pieces. THEN: the
+     pieces. A backlog of pieces longer than the device can cut (a whole
+     tower's storeys crushed in one tick) is worked off the front as dust and
+     grit, so no chunk waits seconds to break. */
+  const workHi = [], work = [], workIdle = [];   // (idle: tidying, when nothing else waits)
   const WORK_MS = PHONE ? 3 : TABLET ? 4 : 6;
+  const BACKLOG = PHONE ? 16 : TABLET ? 28 : 48;
   function runWork(budget) {
     const t0 = performance.now();
     let n = 0;
-    while (work.length && (n === 0 || performance.now() - t0 < budget)) {
-      const f = work.shift();
+    while (workHi.length && (n === 0 || performance.now() - t0 < budget)) {
+      const f = workHi.shift();
       try { f(); } catch (e) { console.warn("[collapse] work", e); }
       n++;
+    }
+    while (work.length && (n === 0 || performance.now() - t0 < budget)) {
+      const f = work.shift();
+      try { f(false); } catch (e) { console.warn("[collapse] work", e); }
+      n++;
+    }
+    while (work.length > BACKLOG) {
+      const f = work.shift();
+      try { f(true); } catch (e) {}
+    }
+    while (!work.length && !workHi.length && workIdle.length && performance.now() - t0 < budget) {
+      const f = workIdle.shift();
+      try { f(); } catch (e) {}
     }
   }
   // a part's picture: its chunks' own geometry about its body's centre
@@ -1655,7 +1731,7 @@
         for (const ms of p.meshes) { if (off) ms.position.add(off); g.add(ms); }
       } else {
         if (ghost) { p.ghost = ghost; ghost.n++; }
-        if (!was) work.push(buildPart.bind(null, p));
+        if (!was) workHi.push(buildPart.bind(null, p));
       }
     }
     // the first part (the one at the bottom, the one that lands) is made now
@@ -1684,7 +1760,7 @@
   }
 
   // ---- what holds a point up (world) -----------------------------------------
-  const _sup = { h: 0, src: 0, ch: null, lat: false, nx: 0, nz: 0, depth: 0 };
+  const _sup = { h: 0, src: 0, ch: null, lat: false, lch: null, nx: 0, nz: 0, depth: 0 };
   function groundAt(B, x, z) {
     let y = B.floorY;
     for (const H of holes) {
@@ -1727,6 +1803,18 @@
       const r = columnTop(T, lx, lz, y - T.gy + TOL);
       if (r && r.top + T.gy > _sup.h) { _sup.h = r.top + T.gy; _sup.src = 1; _sup.ch = r.c; }
     }
+    const near = B.near;
+    if (near) for (let i = 0; i < near.length; i++) {
+      const O = near[i];
+      if (O.dead || O.upY < 0.55) continue;
+      const dx = x - O.pos.x, dy = y - O.pos.y, dz = z - O.pos.z;
+      const R = O.R;
+      // into the other body's frame (R is row-major, its transpose is the inverse)
+      const lx = R[0] * dx + R[3] * dy + R[6] * dz, ly = R[1] * dx + R[4] * dy + R[7] * dz, lz = R[2] * dx + R[5] * dy + R[8] * dz;
+      if (lx < O.lo.x || lx > O.hi.x || lz < O.lo.z || lz > O.hi.z || ly < O.lo.y || ly > O.hi.y + TOL) continue;
+      const top = y + (O.hi.y - ly) / O.upY;
+      if (top <= y + TOL && top > _sup.h) { _sup.h = top; _sup.src = 4; _sup.ch = null; _sup.on = O; }
+    }
     const cols = B.cols;
     if (cols) for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
@@ -1737,7 +1825,7 @@
         // inside a solid from the side: out through the nearest face
         const a = x - c.minX, b = c.maxX - x, e = z - c.minZ, f = c.maxZ - z;
         const mn = Math.min(a, b, e, f);
-        _sup.lat = true; _sup.depth = mn; _sup.ch = c;
+        _sup.lat = true; _sup.depth = mn; _sup.lch = c;
         _sup.nx = mn === a ? -1 : mn === b ? 1 : 0; _sup.nz = mn === e ? -1 : mn === f ? 1 : 0;
       }
     }
@@ -1795,7 +1883,7 @@
     let nC = 0, maxD = 0, latX = 0, latZ = 0, latD = 0, hardest = 0, ownHard = 0;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, minZ = Infinity, maxZ = -Infinity;
     const crushSet = [];
-    B.ownC.length = 0;
+    B.ownC.length = 0; B.onBody = false;
     for (let i = 0; i < pts.length; i += 3) {
       const lx = pts[i], ly = pts[i + 1], lz = pts[i + 2];
       const rx = R[0] * lx + R[1] * ly + R[2] * lz, ry = R[3] * lx + R[4] * ly + R[5] * lz, rz = R[6] * lx + R[7] * ly + R[8] * lz;
@@ -1806,13 +1894,14 @@
         if (sp.depth > latD) { latD = sp.depth; latX = sp.nx; latZ = sp.nz; }
         const vx = v.x + (w.y * rz - w.z * ry), vz = v.z + (w.x * ry - w.y * rx);
         const vn = vx * sp.nx + vz * sp.nz;
-        if (vn < 0 && nC < 16) { CP[nC * 4] = rx; CP[nC * 4 + 1] = ry; CP[nC * 4 + 2] = rz; CP[nC * 4 + 3] = 0; CS[nC] = 2; CC[nC] = sp.nx * 10 + sp.nz; nC++; if (-vn > hardest) hardest = -vn; neighbourHit(B, sp.ch, wx, wy, wz, -vn); }
+        if (vn < 0 && nC < 16) { CP[nC * 4] = rx; CP[nC * 4 + 1] = ry; CP[nC * 4 + 2] = rz; CP[nC * 4 + 3] = 0; CS[nC] = 2; CC[nC] = sp.nx * 10 + sp.nz; nC++; if (-vn > hardest) hardest = -vn; neighbourHit(B, sp.lch, wx, wy, wz, -vn); }
       }
       const d = sp.h - wy;
       if (d > -0.02 && nC < 16) {
         const vy = v.y + (w.z * rx - w.x * rz);
         CP[nC * 4] = rx; CP[nC * 4 + 1] = ry; CP[nC * 4 + 2] = rz; CP[nC * 4 + 3] = d;
         CS[nC] = sp.src === 1 ? 1 : 0; CC[nC] = sp.ch;
+        if (sp.src === 4) B.onBody = true;
         if (sp.src === 1 && sp.ch) {
           if (-vy > 1.6) crushSet.push(sp.ch);
           if (B.ownC.indexOf(sp.ch) < 0) B.ownC.push(sp.ch);
@@ -1825,13 +1914,28 @@
     B.aabb = [minX, maxX, minY, minZ, maxZ];
     // THE PANCAKE: landing on a standing storey at speed crushes it, and the
     // mass keeps what the crush did not take
-    let skipOwn = false;
+    let skipOwn = false, skipAll = false;
     if (crushSet.length && nowT - B.lastCrush > 0.04) {
       B.lastCrush = nowT;
       skipOwn = crushStorey(B, crushSet, ownHard);
     }
+    /* THE PANCAKE ON THE GROUND. An upright block of several storeys that
+       lands hard on the ground (or on rubble, or on another block) does not
+       bounce and stand there: its bottom storeys are what takes the blow.
+       They are consumed (shed as pieces of themselves) and the block keeps
+       the speed the crush did not absorb, so it goes on crushing down to the
+       ground storey by storey. */
+    if (!skipOwn && hardest > B.S.m.breakV && B.parts.length > 1 && B.tilt < 0.45 && nowT - B.lastShed > 0.06 && !B.shed) {
+      const p0 = B.parts[0];
+      let need = 0;
+      for (const c of p0.chunks) need += c.tough;
+      const absorbed = need * 1000;
+      B.v.y = -Math.sqrt(Math.max(0, B.v.y * B.v.y - 2 * absorbed / Math.max(1e-3, B.mass)));
+      B.shed = true; B.pancaking = true; skipAll = true;
+      hardest = 0;
+    }
     B.contact = nC > 0;
-    if (nC) {
+    if (nC && !skipAll) {
       for (let it = 0; it < 5; it++) {
         for (let k = 0; k < nC; k++) {
           if (skipOwn && CS[k] === 1) continue;
@@ -1991,7 +2095,11 @@
     if (B.g.parent) B.g.parent.remove(B.g);
     if (!keepMeshes) B.g.traverse(function (o) { if (o.isMesh && o.geometry) o.geometry.dispose(); });
     B.dead = true;
-    for (const p of B.parts) if (!p.meshes && p.body === B) { for (const c of p.chunks) hideChunk(B.S, c); p.meshes = []; }
+    for (const p of B.parts) if (!p.meshes && p.body === B) {
+      for (const c of p.chunks) hideChunk(B.S, c);
+      p.meshes = [];
+      if (p.ghost && --p.ghost.n <= 0) dropGhost(p.ghost);
+    }
   }
   function buildAll(B) { for (const p of B.parts) if (!p.meshes) buildPart(p); }
   // settle: the body becomes static rubble where it lies
@@ -2014,7 +2122,7 @@
     const D = CBZ.debris;
     if (D && D.keep) {
       try { D.keep(B.g, { owner: S.key, cols: bodyCols(B) }); } catch (e) { console.warn("[collapse] keep", e); }
-      if (B.g.children.length > 3) work.push(function () { mergeKept(B.g); });
+      if (B.g.children.length > 3) workIdle.push(function () { mergeKept(B.g); });
     } else if (B.g.parent) { B.g.parent.remove(B.g); B.g.traverse(function (o) { if (o.isMesh && o.geometry) o.geometry.dispose(); }); }
   }
   /* The solids a settled body leaves: one box per chunk (one per level group
@@ -2051,9 +2159,13 @@
         _cw.set((x0 + x1) / 2, 0, (z0 + z1) / 2).applyMatrix4(M);
         out.push(CBZ.orientedCollider(_cw.x, _cw.z, (x1 - x0) / 2, (z1 - z0) / 2, yaw, lo, hi));
       } else {
-        // a tilted piece's bounds overstate it sideways: keep the core of them
-        const sx = (b - a) * 0.12, sz = (c1 - c0) * 0.12;
-        out.push({ minX: a + sx, maxX: b - sx, minZ: c0 + sz, maxZ: c1 - sz, y0: lo, y1: lo + (hi - lo) * 0.85 });
+        // a tilted piece's bounds overstate it in every direction (a slab lying
+        // at 40 degrees has an AABB as tall as it is wide): the solid is the
+        // core of them, up to the piece's own middle, so nothing lands on air
+        // above it and nobody under its low edge is lifted
+        const sx = (b - a) * 0.2, sz = (c1 - c0) * 0.2;
+        _cw.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2).applyMatrix4(M);
+        out.push({ minX: a + sx, maxX: b - sx, minZ: c0 + sz, maxZ: c1 - sz, y0: Math.max(lo, _cw.y - 0.6), y1: Math.max(lo + 0.25, _cw.y) });
       }
     }
     return out;
@@ -2127,8 +2239,7 @@
     const S = B.S;
     const room = Math.max(0, BODY_CAP - bodies.length + 1);
     if (B.parts.length > 1) {
-      const nSeg = Math.min(room, Math.min(6, Math.ceil(B.parts.length / 2)));
-      if (nSeg < 2) { bake(B); return; }
+      const nSeg = Math.max(2, Math.min(6, Math.ceil(B.parts.length / 2)));
       const per = Math.ceil(B.parts.length / nSeg);
       // the segments TAKE the parts (meshes and all): nothing is copied
       const i0 = bodies.indexOf(B);
@@ -2148,8 +2259,7 @@
     const real = B.chunks.filter(function (c) { return c.tris > 0; });
     if (real.length > 1) {
       // into groups of neighbouring chunks, as many as the budget allows
-      const n = Math.max(1, Math.min(real.length, room, PHONE ? 6 : 12));
-      if (n < 2) { bake(B); return; }
+      const n = Math.max(2, Math.min(real.length, Math.max(2, room), PHONE ? 6 : 12));
       real.sort(function (a, b) { return (a.kind - b.kind) || (a.f - b.f) || (a.j - b.j) || (a.ix - b.ix) || (a.iz - b.iz); });
       const per = Math.ceil(real.length / n);
       buildAll(B);
@@ -2177,7 +2287,7 @@
     B.dead = true;
     B.g.position.copy(B.pos); B.g.quaternion.copy(B.q);
     const vel = B.v.clone().multiplyScalar(0.4);
-    work.push(function () {
+    workHi.push(function () {
       // the meshes keep their offsets inside the body group: shatter the group
       if (B.g.parent) B.g.parent.remove(B.g);
       B.g.updateMatrix();
@@ -2200,7 +2310,7 @@
     hold.updateMatrix();
     const at = new THREE.Vector3(0, B.lo.y, 0).applyQuaternion(B.q).add(B.pos);
     const vel = B.v.clone().multiplyScalar(0.3), pm = p.mass;
-    work.push(function () {
+    workHi.push(function () {
       if (hold.parent) hold.parent.remove(hold);
       shatterMeshes(S, hold.children.slice(), hold.matrix, at, null, 0.5, vel, pm, hold);
     });
@@ -2227,14 +2337,44 @@
     pall(S, at.x, at.y, at.z, 1.2, Math.max(B.hi.x - B.lo.x, B.hi.z - B.lo.z) * 0.4);
   }
 
+  function frameOf(B) {
+    const q = B.q, R = B.R || (B.R = new Float64Array(9));
+    const qx = q.x, qy = q.y, qz = q.z, qw = q.w;
+    R[0] = 1 - 2 * (qy * qy + qz * qz); R[1] = 2 * (qx * qy - qz * qw); R[2] = 2 * (qx * qz + qy * qw);
+    R[3] = 2 * (qx * qy + qz * qw); R[4] = 1 - 2 * (qx * qx + qz * qz); R[5] = 2 * (qy * qz - qx * qw);
+    R[6] = 2 * (qx * qz - qy * qw); R[7] = 2 * (qy * qz + qx * qw); R[8] = 1 - 2 * (qx * qx + qy * qy);
+    B.upY = R[4];
+  }
+  /* THE SOFT CAP: more structural bodies awake than the device carries and
+     the calmest ones that are already lying on something settle where they
+     are (never one that is still falling). */
+  function relieve() {
+    let over = bodies.length - BODY_CAP;
+    if (over <= 0) return;
+    const cand = bodies.filter(function (b) { return b.contact && b.t > 0.4 && b.parts.length < 2 && !b.onBody; })
+      .sort(function (a, b) { return (a.v.lengthSq() + a.w.lengthSq()) - (b.v.lengthSq() + b.w.lengthSq()); });
+    for (let i = 0; i < cand.length && over > 0; i++, over--) bake(cand[i]);
+  }
   function stepBodies(dt) {
     if (!bodies.length) return;
+    relieve();
     const sub = Math.max(1, Math.min(4, Math.ceil(dt / (1 / 90))));
     const h = dt / sub;
+    for (const B of bodies) frameOf(B);
+    for (const B of bodies) {
+      let L = null;
+      for (const O of bodies) {
+        if (O === B || O.S !== B.S && Math.abs(O.pos.x - B.pos.x) > 200) continue;
+        const r = O.radius + B.radius + 0.5;
+        if (Math.abs(O.pos.x - B.pos.x) > r || Math.abs(O.pos.z - B.pos.z) > r || O.pos.y > B.pos.y + 0.5) continue;
+        (L || (L = [])).push(O);
+      }
+      B.near = L;
+    }
     for (let i = bodies.length - 1; i >= 0; i--) {
       const B = bodies[i];
       if (!B || B.dead) continue;
-      B.hard = 0;
+      B.hard = 0; B.pancaking = false;
       for (let k = 0; k < sub && !B.dead; k++) {
         stepBody(B, h);
         if (B.shed) shedBottom(B);
@@ -2245,21 +2385,34 @@
       // carries it (and fails under it) like any other load
       if (B.ownC.length) {
         const share = B.mass / B.ownC.length;
-        for (const c of B.ownC) { c.ext = share; c.extT = nowT; c.S.active = Math.max(c.S.active, 1); }
+        for (const c of B.ownC) { if (!c.S) continue; c.ext = share; c.extT = nowT; c.S.active = Math.max(c.S.active, 1); }
       }
       crushCars(B);
       const S = B.S, m = S.m;
       // a hard landing on anything that is not its own stump breaks it
       const multi = B.parts.length > 1 || B.chunks.length > 1;
       const brk = multi ? m.breakV : m.shatterV;
-      if (B.hard > brk && B.t > 0.05) {
+      if (B.hard > brk && B.t > 0.05 && !B.pancaking) {
         if (B.mass > 3) crushPeople(B, B.pos.x, B.pos.z, Math.max(2, B.radius * 0.7));
         if (B.parts.length > 1 && B.mass > 40) pall(S, B.pos.x, B.pos.y + B.lo.y, B.pos.z, Math.min(2.5, 0.8 + B.hard * 0.1), B.radius * 0.6);
         if (multi || B.hard > m.shatterV) { split(B); continue; }
       }
       // a toppling mass that has gone over and is touching down comes apart as it lands
       if (B.parts.length > 1 && B.contact && B.tilt > 0.62) { split(B); continue; }
-      if (B.calm > 0.5 || B.t > 30) { bake(B); continue; }
+      /* A BLOCK OF STOREYS NEVER COMES TO REST ON ITS RUBBLE. Upright and
+         stopped on anything but its own standing stump (whose load path
+         carries it, or crushes under it), a block of several storeys is a
+         wrecked frame standing on a heap: its bottom storey gives every
+         few tenths of a second and it settles storey by storey to the
+         ground, the last of it lying in its own pile. */
+      if (B.parts.length > 1 && B.contact && !B.ownC.length && B.tilt < 0.62 && B.v.lengthSq() < 4 && nowT - B.lastShed > 0.3) { shedBottom(B); if (B.dead) continue; }
+      // settle: still on something for half a second, or barely moving long
+      // after the fall. Never while lying on another body that is still
+      // moving (it would be left hanging in the air when that one goes), and
+      // a block of storeys never settles whole: past its time it breaks up.
+      const one = B.parts.length < 2;
+      if (B.t > 18 && !one) { split(B); continue; }
+      if (one && (!B.onBody || B.t > 24) && (B.calm > 0.5 || (B.contact && B.t > 8 && B.v.lengthSq() < 1 && B.w.lengthSq() < 0.5) || B.t > 18)) { bake(B); continue; }
       if (B.pos.y < -120) removeBody(B, false);
     }
   }
@@ -2703,7 +2856,7 @@
      ============================================================ */
   function update(dt) {
     if (!(dt > 0)) return;
-    if (!structs.length && !bodies.length && !jobs.length && !work.length) return;
+    if (!structs.length && !bodies.length && !jobs.length && !work.length && !workHi.length && !workIdle.length) return;
     const t0 = performance.now();
     dt = Math.min(dt, 0.1);
     nowT += dt;
@@ -2928,7 +3081,7 @@
     for (const B of bodies.slice()) removeBody(B, false);
     for (const S of structs.slice()) dispose(S, true);
     jobs.length = 0;
-    work.length = 0;
+    work.length = 0; workHi.length = 0; workIdle.length = 0;
     holes.length = 0;
     crushedCars.length = 0;
     rubbleKeys.clear();

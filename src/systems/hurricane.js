@@ -388,7 +388,7 @@
     if (C && typeof C.damage === "function") {
       try {
         C.damage(b, { x: b.x - dirx * b.w * 0.5, y: roofY, z: b.z - dirz * b.d * 0.5 },
-          Math.max(b.w, b.d) * 0.6, amount, { x: dirx, y: 0, z: dirz });
+          Math.max(b.w, b.d) * 0.6, amount, { x: dirx, y: 0, z: dirz }, { frac: true });
       } catch (e) {}
       return;
     }

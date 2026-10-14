@@ -4177,13 +4177,15 @@
     //   CBZ.debris.pile and frozen solid (you climb it). Taller towers leave a
     //   higher, wider heap. The last few storeys still come down on whoever
     //   is standing at the edge of the footprint.
-    const layRubble = function () {
+    const layRubble = function (job) {
       if (ctx && surv()) {
         for (let i = 0; i < 6; i++) {
           surv().hurtRadius(b.x + (rnd() - 0.5) * b.w * 1.4, b.z + (rnd() - 0.5) * b.d * 1.4, 1.6, scale(30, ctx));
         }
       }
-      if (!CBZ.debris) return;
+      // came down through collapse.js's structural model: the building's own
+      // chunks already lie where they fell, kept as solid rubble; no mound
+      if (!CBZ.debris || (job && job.S)) return;
       const tall = b.h > 24;
       CBZ.debris.pile({
         x: b.x, z: b.z, y: b.gy || undefined,

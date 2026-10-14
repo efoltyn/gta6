@@ -214,7 +214,8 @@
     stats.bldgHits++;
     try {
       if (CBZ.collapse && typeof CBZ.collapse.damage === "function") {
-        CBZ.collapse.damage(b, at, radius, energy, dir); return "collapse";
+        // `energy` is the ledger's fraction (1 = down): collapse.js reads it so
+        CBZ.collapse.damage(b, at, radius, energy, dir, { frac: true }); return "collapse";
       }
     } catch (e) {}
     const o = ev && ev.opts;
