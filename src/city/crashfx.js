@@ -260,7 +260,7 @@
   let _rs = 78451;
   function rng() { _rs = (_rs * 1103515245 + 12345) & 0x7fffffff; return _rs / 0x7fffffff; }
 
-  const bursts = [], rings = [], scorches = [];
+  const bursts = [], scorches = [];
   // B5: scratch reused by applyBlastDamage's piece-damage pass below (no
   // per-blast allocation) — a Set to dedupe pieceIds across the multiple
   // AABB colliders one piece can register (doorframe = 3), an Array for
@@ -414,32 +414,6 @@
     const b = { mesh, geo, mat, pos, vel, t: 0, life, dust: !!dust, op0, n: count * 3, slot };
     if (slot) slot.live = b;
     bursts.push(b);
-  }
-
-  // owner: "the fake ring that comes around at first is stupid and should be
-  // gone" — explosions draw no ground ring at all (the dust skirt in
-  // blastVisual is the shockwave). Only the car-crash glass ring uses this.
-  function ring(x, z, radius, color, opt) {
-    opt = opt || {};
-    const inner = opt.inner == null ? 0.7 : opt.inner;
-    const geo = new THREE.RingGeometry(inner, 1.3, 36);
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: opt.opacity == null ? 0.72 : opt.opacity,
-      depthWrite: false, side: THREE.DoubleSide,
-      blending: opt.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(x, opt.y == null ? 0.08 : opt.y, z);
-    mesh.renderOrder = 7;
-    scene.add(mesh);
-    rings.push({
-      mesh, geo, mat, radius, r: opt.r0 == null ? 1 : opt.r0, t: 0,
-      life: opt.life == null ? 0.5 : opt.life,
-      spd: opt.spd == null ? 2.2 : opt.spd,
-      op0: opt.opacity == null ? 0.72 : opt.opacity,
-      flat: !!opt.flat, // shockwave hugs the ground and thins as it grows
-    });
   }
 
   // adopt an already-built mesh (a hood torn off a crashed car) into the shared
@@ -830,7 +804,6 @@
     // shattered GLASS — pale blue-white shimmering shards (additive twinkle)
     if (hard) pointBurst(x, z, Math.max(1, Math.round((catastrophic ? 30 : 16) * fxq)), 0xcfe6ff, 0.09, 3 + speed * 0.16, catastrophic ? 0.8 : 0.6, false);
     if (hard) {
-      ring(x, z, catastrophic ? 7 : 4.5, catastrophic ? 0xffd08a : 0xffa14f, { opacity: catastrophic ? 0.7 : 0.55, spd: catastrophic ? 3 : 2.4, life: catastrophic ? 0.7 : 0.55 });
       // debris pool keeps its full cap; only the per-event spawn rides the tier
       if (CBZ.debris) {
         const cy = floorAt(x, z) + 0.7;
@@ -2505,14 +2478,6 @@
         }
         bursts.splice(i, 1);
       }
-    }
-    for (let i = rings.length - 1; i >= 0; i--) {
-      const r = rings[i]; r.t += dt;
-      // expand fast then ease out (shockwaves decelerate as energy dissipates)
-      r.r += r.radius * (r.spd || 2.2) * dt * (1 - 0.5 * (r.t / r.life));
-      r.mesh.scale.set(r.r, r.r, 1);
-      r.mat.opacity = Math.max(0, (r.op0 || 0.72) * (1 - r.t / r.life));
-      if (r.t >= r.life) { scene.remove(r.mesh); r.geo.dispose(); r.mat.dispose(); rings.splice(i, 1); }
     }
     for (let i = scorches.length - 1; i >= 0; i--) {
       const s = scorches[i]; s.t += dt;

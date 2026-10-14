@@ -2152,7 +2152,6 @@
         });
         surv().hurt(a, scale(info.damage * 0.45, ctx), { cause: info.cause, dir: { x: info.dirX, z: info.dirZ } });
         if (a.isPlayer && CBZ.shake) CBZ.shake(0.75);
-        CBZ.fx.blast(a.pos.x, a.pos.z, { maxR: 2.6, color: 0xcfe6ee, life: 0.32 });
         soundAt("collapse", a.pos.x, a.pos.z);
       },
     });
@@ -2260,7 +2259,6 @@
         CBZ.body.hit(a, { dir: { x: st.dx, z: st.dz }, force: 15 + 6 * ctx.intensity, fling: 6.5 + rnd() * 3.5 });
       }
       surv().hurt(a, scale(30, ctx), { cause: "swept away by the tsunami", dir: { x: st.dx, z: st.dz } });
-      CBZ.fx.blast(a.pos.x, a.pos.z, { maxR: 4.5, color: 0xd9f2ff, life: 0.5 });
       sound("water");
     });
   }
