@@ -162,11 +162,26 @@
       if (sees) a._spottedGun = true;
       if (dist < bd) { bd = dist; best = g; _th.aimingAtMe = onMe; _th.hostile = gunOn(g) === a; }
     }
-    if (!best) return null;
+    if (!best) return hazardOn(a);
     const bp = posOf(best);
     _th.source = best; _th.x = bp.x; _th.z = bp.z; _th.distance = bd;
     _th.yaw = best.group ? best.group.rotation.y : null;
     return _th;
+  }
+
+  /* THE GROUND GOING (world/sinkhole.js CBZ.groundShaftHazard): cracks
+     running under him, the road sagging, a hole opening — the brain's own
+     "hazard" kind, the one a survivor runs from a funnel or a lava front on.
+     No gun outranks it here only because a man staring down a pistol has
+     not noticed the road yet. */
+  const _hz = { kind: "hazard", x: 0, z: 0, distance: 0, armed: false, aimingAtMe: false, source: null };
+  function hazardOn(a) {
+    if (!CBZ.groundShaftHazard) return null;
+    const p = a.group.position;
+    const h = CBZ.groundShaftHazard(p.x, p.z);
+    if (!h || h.level < 0.15) return null;
+    _hz.x = h.x; _hz.z = h.z; _hz.distance = h.distance;
+    return _hz;
   }
 
   function sameJob(a, g) {
@@ -308,7 +323,16 @@
       M.step(m, p, g.rotation.y, a.target.x, a.target.z, _mo, dt);
       if (!(a.armed && a._aimAt)) g.rotation.y = m.yaw;   // a shooter's yaw is actorAimAt's
       if (CBZ.collide) CBZ.collide(p, 0.32, p.y + 0.42, p.y + 1.7);
-      p.y = CBZ.groundAt ? CBZ.groundAt(p.x, p.z, p.y) : 0;
+      /* HE FALLS. The floor under him can drop away (a sinkhole, a stair
+         well): snapping y to it teleported a man forty metres down in one
+         frame. Gravity at the game's actor rate until he meets it. */
+      const gnd = CBZ.groundAt ? CBZ.groundAt(p.x, p.z, p.y) : 0;
+      if (gnd < p.y - 0.06) {
+        a._vy = (a._vy || 0) - ((CBZ.PHYS && CBZ.PHYS.G_ACTOR) || 22) * dt;
+        p.y = Math.max(gnd, p.y + a._vy * dt);
+        a.airborne = p.y > gnd;
+        if (!a.airborne) { a._landV = -a._vy; a._vy = 0; }
+      } else { p.y = gnd; a._vy = 0; a.airborne = false; }
       a.speedNow = m.gs;
       if (CBZ.animChar) CBZ.animChar(ch, m.gs, dt);
     }

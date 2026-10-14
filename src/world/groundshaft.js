@@ -244,6 +244,13 @@
         const h = live[i];
         maskReq.push({ x: h.x, z: h.z, r: h.r * 1.06, y: h.gy, src: h });
       }
+      /* a running sinkhole EVENT may stand its own crust in for the ground
+         before any shaft exists (world/sinkhole.js: the sagging cover is real
+         slabs, and the ground under them has to stop drawing) */
+      for (let i = 0; i < seqs.length; i++) {
+        const m = seqs[i].mask;
+        if (m && m.r > 0 && !seqs[i].done) maskReq.push({ x: m.x, z: m.z, r: m.r, y: m.y, src: seqs[i] });
+      }
       return maskReq;
     });
   }
@@ -278,7 +285,12 @@
 
   // Is this a legal place to open one? Slope is the law; water and the city's
   // own registries are the manners.
-  CBZ.groundShaftCanOpen = function (x, z, r) {
+  /* `o.undermine`: the caller WANTS a building at its lip and will take it
+     down properly (world/sinkhole.js tilts it and hands it to the collapse
+     engine) — so a footprint the hole only bites into is allowed, and only a
+     building whose middle would stand over the mouth is still refused. */
+  CBZ.groundShaftCanOpen = function (x, z, r, o) {
+    const undermine = !!(o && o.undermine);
     const slope = CBZ.groundShaftSlope(x, z, r);
     if (slope > CBZ.CONFIG.SHAFT_SLOPE_MAX) return { ok: false, why: "slope", slope: slope };
     // a non-finite probe point is a caller bug, not a lake: cityWaterAt(undefined,
@@ -304,7 +316,8 @@
         // the record carries w AND d; a circle on the larger one is the
         // conservative read, and conservative is the right side to be wrong on
         const half = Math.max(b.w || 8, b.d || b.w || 8) * 0.5;
-        if (Math.hypot(x - bx, z - bz) < r * 0.85 + half) return { ok: false, why: "building", slope: slope };
+        const dB = Math.hypot(x - bx, z - bz);
+        if (undermine ? dB < r + half * 0.35 : dB < r * 0.85 + half) return { ok: false, why: "building", slope: slope };
       }
     }
     if (!survMode() && CBZ.city && CBZ.city.arena) {
@@ -380,7 +393,7 @@
       const a = rng() * TAU, d = (o.minDist || 0) + rng() * (R * 0.8 - (o.minDist || 0));
       const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
       if (o.avoid && o.avoid(x, z)) continue;
-      const can = CBZ.groundShaftCanOpen(x, z, r);
+      const can = CBZ.groundShaftCanOpen(x, z, r, o);
       if (can.ok) return { x: x, z: z, slope: can.slope, junction: false };
       stats.siteRejects++;
     }
@@ -540,69 +553,135 @@
      vertexColors ground needs its face tint applied). One implementation. */
   CBZ.groundColorAt = groundColorAt;
 
-  // The strata ladder: topsoil → clay → silt → weathered rock → bedrock, with
-  // the band edges jittered per shaft so no two read as the same wallpaper.
-  /* The ladder ALTERNATES IN VALUE, not just in hue: a band only reads as a
-     band against a neighbour of different brightness, and at 40 m the hue is
-     gone long before the value is. */
-  const STRATA = [
-    [0.00, 0x3a2a19], [0.06, 0xa8834e], [0.19, 0x4e4436],
-    [0.31, 0xb0a077], [0.45, 0x5a5142], [0.60, 0x8b7f63],
-    [0.72, 0x39332c], [0.86, 0x211e1b],
-  ];
+  /* ============================================================
+     THE SECTION IS REAL GEOLOGY, IN METRES — NOT A WALLPAPER IN FRACTIONS.
+
+     A cover-collapse sinkhole is a hole through a COVER (the road and the
+     earth it was built on) into a CAVITY in soluble rock. Its wall is a
+     section through exactly that, top to bottom, and every layer has a real
+     thickness that does not scale with the hole:
+
+       asphalt        0.12 m   the wearing course, black, sheared clean
+       base course    0.38 m   crushed stone under it, pale grey
+       (or topsoil    0.35 m   off-road: the dark organic layer)
+       soil           ~2 m     brown, loose, ERODED BACK — the water main
+                               that broke here washed it out from behind
+       clay           to ~30%  red-brown, plastic, holds a vertical face
+       limestone      the rest pale bedded rock, standing PROUD of the cover
+                               in ledges along its bedding planes
+
+     The old ladder was eight colours placed at FRACTIONS of the depth, so a
+     40 m hole had a 2.4 m band of "topsoil" and the road had no section at
+     all. The value still alternates down the wall (a band only reads against
+     a neighbour of different brightness), and everything still goes dark
+     with depth through the ONE sky-occlusion ladder, skyOcc().
+
+     Each layer also has its own RADIUS: the loose soil recesses, the clay
+     stands, the limestone juts. Two rows share every layer boundary at the
+     same height with different radii and colours, so each boundary is a real
+     horizontal step in the wall, not a gradient — the crumbling, stepped
+     face of every photographed collapse.
+     ============================================================ */
+  function layersOf(h) {
+    if (h._layers) return h._layers;
+    const L = [];
+    const D = h.depth;
+    if (h.road) {
+      L.push({ name: "asphalt", top: 0, bot: 0.12, c: 0x2b2a28, rf: 1.0, n: 0.008 });
+      L.push({ name: "base course", top: 0.12, bot: 0.5, c: 0x8e8b83, rf: 1.006, n: 0.012 });
+    } else {
+      L.push({ name: "topsoil", top: 0, bot: 0.35, c: 0x3b2a1a, rf: 1.0, n: 0.012 });
+    }
+    const s0 = L[L.length - 1].bot;
+    const soilBot = Math.min(D * 0.25, s0 + 2.1 + hs(h, 3, 3) * 0.8);
+    L.push({ name: "soil", top: s0, bot: soilBot, c: 0x6a4d31, rf: 1.045, n: 0.05 });
+    const clayBot = Math.min(D * 0.6, Math.max(soilBot + 2.5, D * (0.26 + hs(h, 4, 4) * 0.08)));
+    L.push({ name: "clay", top: soilBot, bot: clayBot, c: 0x8f5434, rf: 1.02, n: 0.03 });
+    // limestone, bedded: alternating pale and grey beds 1.6-3.2 m thick
+    let y = clayBot, k = 0;
+    while (y < D - 0.01) {
+      const th = 1.6 + hs(h, 9 + k, 2) * 1.6;
+      const bot = Math.min(D, y + th);
+      L.push({ name: "limestone", top: y, bot: bot, c: k % 2 ? 0x8a826c : 0xb8ae94, rf: 0.965 + hs(h, 11 + k, 5) * 0.03, n: 0.022 });
+      y = bot; k++;
+    }
+    h._layers = L;
+    return L;
+  }
+  /* PUBLISHED: the sinkhole event's crust slabs cut through the same section,
+     so they read it here rather than keeping a copy. */
+  CBZ.groundShaftLayers = function (h) { return layersOf(h); };
+  function layerAt(h, dm) {
+    const L = layersOf(h);
+    for (let i = 0; i < L.length; i++) if (dm < L[i].bot) return L[i];
+    return L[L.length - 1];
+  }
   /* Angular noise must WRAP. Hashing the raw bearing leaves a visible seam
      down the wall at 0 rad (the last column and the first are neighbours in
      space but strangers to the hash), so every angular input below is the
      bearing's cos/sin — a closed curve, and the seam cannot exist. */
-  function strataColor(h, t, ang, out) {
-    const j = (hs(h, Math.cos(ang) * 3.1 + t * 40, Math.sin(ang) * 3.1) - 0.5) * 0.055;
-    const tt = Math.max(0, Math.min(1, t + j));
-    let c = STRATA[0][1];
-    for (let i = 0; i < STRATA.length; i++) if (tt >= STRATA[i][0]) c = STRATA[i][1];
-    // DARK WITH DEPTH: no light reaches down a 30 m shaft. The floor of the
-    // reference photograph is black, and that is not a shadow — it is the
-    // absence of a bounce. Multiplicative, so the strata still read near the
-    // top: at the rim the ladder is 0.38, which is dark enough to read as a
-    // void against sunlit ground and bright enough that the bands are still
-    // legible when you are standing at the edge looking down.
-    const dark = skyOcc(h, h.depth * t);
-    const mot = 0.9 + hs(h, Math.cos(ang) * 9.7, Math.sin(ang) * 9.7 + t * 71) * 0.2;
+  function layerColor(h, dm, ang, hex, out) {
+    // DARK WITH DEPTH: no light reaches down a deep shaft. Multiplicative, so
+    // the beds still read near the top, where you are standing looking down.
+    const dark = skyOcc(h, dm);
+    const mot = 0.86 + hs(h, Math.cos(ang) * 9.7, Math.sin(ang) * 9.7 + dm * 1.7) * 0.28;
     const k = dark * mot;
-    out[0] = (((c >> 16) & 255) / 255) * k;
-    out[1] = (((c >> 8) & 255) / 255) * k;
-    out[2] = ((c & 255) / 255) * k;
+    out[0] = (((hex >> 16) & 255) / 255) * k;
+    out[1] = (((hex >> 8) & 255) / 255) * k;
+    out[2] = ((hex & 255) / 255) * k;
+  }
+  // the fraction-of-depth entry the dish floor uses
+  function strataColor(h, t, ang, out) {
+    const dm = h.depth * t;
+    layerColor(h, dm, ang, layerAt(h, dm).c, out);
   }
 
-  // radius profile: sheer, with a slight inward taper and a hint of an
-  // undercut just below the lip (the overhang the surface layer makes when it
-  // is left cantilevered over the void).
-  function wallRadius(h, t, ang) {
-    const undercut = 1 + 0.055 * Math.exp(-Math.pow(t / 0.10, 2));   // widest just under the rim
-    const taper = 1 - 0.10 * t * t;
-    const noise = 1 + (hs(h, Math.cos(ang) * 2.3 + t * 17, Math.sin(ang) * 2.3) - 0.5) * 0.05;   // sheer: ±2.5%
-    return h.r * undercut * taper * noise;
+  // radius profile: sheer, slightly tapering, every layer at its own radius
+  // (see layersOf), crumbling — the noise is per layer and per row so the
+  // face is broken, not machined.
+  function wallRadius(h, dm, ang, L, row) {
+    const t = dm / h.depth;
+    const taper = 1 - 0.08 * t * t;
+    const n = L ? L.n : 0.03;
+    const noise = 1 + (hs(h, Math.cos(ang) * 2.3 + row * 0.71, Math.sin(ang) * 2.3 + dm * 0.37) - 0.5) * 2 * n;
+    const lump = 1 + (hs(h, Math.cos(ang) * 0.9, Math.sin(ang) * 0.9 + (L ? L.top : 0)) - 0.5) * n * 0.8;
+    return h.r * (L ? L.rf : 1) * taper * noise * lump;
   }
 
   function buildWall(h) {
-    const seg = 46, rings = 20;
-    const pos = new Float32Array((seg + 1) * (rings + 1) * 3);
-    const col = new Float32Array((seg + 1) * (rings + 1) * 3);
+    const seg = 48;
+    const L = layersOf(h);
+    // rows: the top and bottom of every layer (two rows at each boundary,
+    // one per layer, so the step is a real face), plus filler rows every
+    // 2.4 m or less inside a thick layer
+    const rows = [];
+    for (let i = 0; i < L.length; i++) {
+      const ly = L[i];
+      const th = ly.bot - ly.top;
+      const n = Math.max(1, Math.ceil(th / 2.4));
+      for (let k = 0; k <= n; k++) rows.push({ dm: ly.top + th * (k / n), L: ly, edge: k === 0 || k === n });
+    }
+    const nr = rows.length;
+    const pos = new Float32Array((seg + 1) * nr * 3);
+    const col = new Float32Array((seg + 1) * nr * 3);
     const idx = [];
     const c = [0, 0, 0];
     let p = 0;
-    for (let j = 0; j <= rings; j++) {
-      const t = j / rings;
-      const y = h.gy - h.depth * t;
+    for (let j = 0; j < nr; j++) {
+      const R = rows[j];
+      const y = h.gy - R.dm;
       for (let i = 0; i <= seg; i++) {
         const a = (i / seg) * TAU;
-        const rad = wallRadius(h, t, a);
+        // a boundary row keeps one jitter for both its rows, so the step
+        // between two layers is a clean ledge and the faces stay closed
+        const rad = wallRadius(h, R.dm, a, R.L, R.edge ? 0 : j);
         pos[p] = Math.cos(a) * rad; pos[p + 1] = y; pos[p + 2] = Math.sin(a) * rad;
-        strataColor(h, t, a, c);
+        layerColor(h, R.dm, a, R.L.c, c);
         col[p] = c[0]; col[p + 1] = c[1]; col[p + 2] = c[2];
         p += 3;
       }
     }
-    for (let j = 0; j < rings; j++) {
+    for (let j = 0; j < nr - 1; j++) {
       for (let i = 0; i < seg; i++) {
         const a = j * (seg + 1) + i, b = a + 1, d = a + (seg + 1), e = d + 1;
         idx.push(a, d, b, b, d, e);
@@ -615,6 +694,94 @@
     geo.computeVertexNormals();
     return new THREE.Mesh(geo, wallMat);
   }
+
+  /* THE FLOOR OF THE SHAFT IS A SURFACE. There used to be a black disc down
+     there — a decal standing in for "you cannot see the bottom". The bottom is
+     the rubble the cover fell in as: a low mound highest in the middle (the
+     same `coneH` curve shaftFloor() answers with, so what you see is what you
+     land on), coloured by the same darkness ladder as the wall it meets. At
+     three radii down that ladder is near black anyway; it is black because no
+     light gets there, not because a disc was painted. */
+  function buildTalusFloor(h) {
+    if (h.bowl || h.through) return null;
+    const seg = 32, rings = 6;
+    const R = h.r * 1.02;
+    const pos = new Float32Array((seg + 1) * (rings + 1) * 3);
+    const col = new Float32Array((seg + 1) * (rings + 1) * 3);
+    const idx = [];
+    const c = [0, 0, 0];
+    let p = 0;
+    for (let j = 0; j <= rings; j++) {
+      const rr = (j / rings) * R;
+      const cone = rr < h.coneR ? h.coneH * (1 - rr / h.coneR) : 0;
+      for (let i = 0; i <= seg; i++) {
+        const a = (i / seg) * TAU;
+        const wob = 1 + (hs(h, Math.cos(a) * 3.1 + j, Math.sin(a) * 3.1) - 0.5) * 0.08;
+        const y = h.bottom + cone + (hs(h, Math.cos(a) * 5 + j * 1.3, Math.sin(a) * 5) - 0.5) * 0.35 - 0.05;
+        pos[p] = h.x + Math.cos(a) * rr * wob; pos[p + 1] = y; pos[p + 2] = h.z + Math.sin(a) * rr * wob;
+        layerColor(h, h.gy - y, a, j % 2 ? 0x6a5a48 : 0x56483a, c);
+        col[p] = c[0]; col[p + 1] = c[1]; col[p + 2] = c[2];
+        p += 3;
+      }
+    }
+    for (let j = 0; j < rings; j++) {
+      for (let i = 0; i < seg; i++) {
+        const a = j * (seg + 1) + i, b = a + 1, d = a + (seg + 1), e = d + 1;
+        idx.push(a, b, d, b, e, d);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    return new THREE.Mesh(geo, wallMat);
+  }
+
+  /* WATER AT THE BOTTOM. Groundwater seeps in through the limestone and a
+     broken main pours in from above, so a fresh sinkhole has a pool in it
+     that rises. It is a surface at a LEVEL (metres above the bottom) carried
+     across re-cuts, darkened by the same ladder as the wall beside it, and
+     moved by CBZ.groundShaftWater(h, level) — the sinkhole event drives it. */
+  let waterMat = null;
+  function buildWater(h) {
+    if (h.bowl || h.through || !(h.waterLevel > 0)) return null;
+    if (!waterMat) {
+      waterMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.86, depthWrite: false });
+      if (CBZ.groundMaskExempt) CBZ.groundMaskExempt(waterMat);
+    }
+    const g = new THREE.CircleGeometry(1, 40);
+    g.rotateX(-Math.PI / 2);
+    const m = new THREE.Mesh(g, waterMat.clone());
+    m.userData.groundShaftWater = true;
+    m.renderOrder = 2;
+    setWater(h, m, h.waterLevel);
+    return m;
+  }
+  function setWater(h, m, level) {
+    h.waterLevel = Math.max(0, Math.min(h.depth * 0.8, level));
+    const y = h.bottom + h.waterLevel;
+    const dm = h.gy - y;
+    // the pool fills the shaft at the height it stands: the wall's radius there
+    const rad = wallRadius(h, dm, 0, layerAt(h, dm), 0) * 0.995;
+    m.position.set(h.x, y, h.z);
+    m.scale.set(rad, 1, rad);
+    m.visible = h.waterLevel > 0.05;
+    // muddy water, lit only as much as the sky reaches it
+    const k = Math.max(0.05, skyOcc(h, dm) * 1.6);
+    m.material.color.setRGB(0.36 * k, 0.33 * k, 0.24 * k);
+  }
+  CBZ.groundShaftWater = function (h, level) {
+    if (!h || !h.grp) return 0;
+    if (!h.water) {
+      h.waterLevel = level;
+      h.water = buildWater(h);
+      if (h.water) h.grp.add(h.water);
+      return h.waterLevel || 0;
+    }
+    setWater(h, h.water, level);
+    return h.waterLevel;
+  };
 
   /* THE DISH FLOOR — a crater's bottom is a SURFACE, not an absence.
 
@@ -691,12 +858,16 @@
     // is the SAME sky-occlusion ladder the wall below it uses, keyed on how far
     // under the overhang each row sits, so the crust and the wall it hangs over
     // can never disagree about how much light gets in there.
-    const cutRows = [
-      { rf: 1.0, dy: 0.0, c: h.surfaceColor },
-      { rf: 1.0, dy: -0.32, c: h.surfaceColor },
-      { rf: 0.985, dy: -1.05, c: 0x4a3826 },
-      { rf: 0.97, dy: -2.1, c: 0x6a5233 },
-    ];
+    // ...and its ROWS are the section's own layers (asphalt, base course,
+    // soil) down to 2.1 m, two rows per layer, so the crust you see sheared
+    // at the lip is the same crust the wall below continues.
+    const cutRows = [];
+    const LY = layersOf(h);
+    for (let i = 0; i < LY.length && LY[i].top < 2.1; i++) {
+      const ly = LY[i], bot = Math.min(2.1, ly.bot);
+      const rf = 1 - Math.min(0.03, ly.top * 0.014);
+      cutRows.push({ rf: rf, dy: -ly.top, c: ly.c }, { rf: rf, dy: -bot, c: ly.c });
+    }
     const nR = 2 + cutRows.length;
     const pos = new Float32Array((seg + 1) * nR * 3);
     const col = new Float32Array((seg + 1) * nR * 3);
@@ -837,6 +1008,16 @@
     return B.mesh(rockMat);
   }
 
+  /* THE STAIR IS A SLUMP, NOT A SPIRAL. It used to run the whole way round
+     the shaft, a 2 m ledge under every metre of the rim, so anybody standing
+     at the edge when it went landed on a step a few metres down: the hole
+     you fell into had a floor under its lip all the way round. A fresh
+     collapse has sheer walls; what it does leave is ONE side where the wall
+     slumped into a stepped scree you can climb. So the ledges cover a
+     150-degree arc from a0 and the rest of the rim is a straight drop. */
+  const STAIR_ARC = Math.PI * 150 / 180;
+  function stairA0(seed) { return (seed % 1) * TAU; }
+  CBZ.groundShaftStairArc = function (seed) { return { a0: stairA0(seed), span: STAIR_ARC }; };
   /* THE STAIR. Declared once as (a0, n, rIn, rOut); drawn from that and
      ANSWERED from that (see shaftFloor). Steps are one jump apart, so the
      bottom of a sinkhole is survivable if you can find the ledge — which, in
@@ -844,7 +1025,7 @@
   function buildStair(h) {
     if (!h.stepN) return null;
     const B = BoxBuf();
-    const dA = TAU / h.stepN;
+    const dA = h.stepArc / h.stepN;
     const rOut = h.r * 1.01;                    // out to the wall it sheared off
     const rm = (h.stepIn + rOut) * 0.5;
     const wide = rOut - h.stepIn;
@@ -913,8 +1094,17 @@
       dish: (opts.bowl && !opts.through) ? { r: Math.max(0.5, r * 0.98), h: depth * 0.95 } : null,
       coneR: opts.bowl ? r * 0.3 : r * 0.66,
       coneH: opts.bowl ? Math.min(0.5, depth * 0.12) : Math.min(4.2, depth * 0.11),
-      stepN: 0, stepA0: 0, stepIn: r * 0.78,
+      stepN: 0, stepA0: 0, stepArc: STAIR_ARC, stepIn: r * 0.78,
       born: CBZ.now || 0,
+      /* the section's top layers: a road is asphalt over base course, open
+         ground is topsoil (layersOf) */
+      road: opts.road != null ? !!opts.road : opts.surface === "asphalt",
+      // metres of standing water above the bottom, carried across re-cuts
+      waterLevel: opts.water > 0 ? +opts.water : 0,
+      /* the sinkhole EVENT (world/sinkhole.js) takes everything standing in
+         the mouth as a falling body before each re-cut; clearInside() hiding
+         them first would delete the cars it is about to tip in */
+      keepInside: !!opts.keepInside,
     };
     /* Sampled BEFORE the group joins the scene, so the raycast cannot find an
        earlier row of our own collar and copy a copy. `opts.top` lets a caller
@@ -930,7 +1120,8 @@
     h.topSampled = opts.topSampled != null ? !!opts.topSampled : (top != null && opts.top == null);
     if (CBZ.CONFIG.SHAFT_ESCAPE !== false && !h.bowl) {
       h.stepN = Math.max(6, Math.min(34, Math.round(depth / 1.3)));
-      h.stepA0 = (h.seed % 1) * TAU;
+      h.stepA0 = stairA0(h.seed);
+      h.stepArc = STAIR_ARC;
       h.stepIn = h.mouth * 0.78;
     }
     const wall = buildWall(h);
@@ -938,20 +1129,19 @@
     const rubble = h.through ? null : buildFloorFurniture(h);
     const dish = buildDish(h);
     const stair = buildStair(h);
-    /* THE BLACK — a disc at the very bottom under the rubble, so a shaft you
-       cannot see the bottom of reads as bottomless rather than as a gap. A
-       CRATER is the opposite: you can see its floor, and painting a void under
-       it made a 5 m dish read as a hole to nowhere. Bowls get earth instead. */
-    const dark = (h.bowl || h.through) ? null : new THREE.Mesh(new THREE.CircleGeometry(r * 0.95, 24),
-      new THREE.MeshBasicMaterial({ color: 0x05040a }));
-    if (dark) { dark.rotation.x = -Math.PI / 2; dark.position.set(x, h.bottom - 0.2, z); }
+    /* No black disc: the floor is the talus the cover fell in as, dark
+       because no light reaches it (buildTalusFloor), and water stands on it. */
+    const floorM = buildTalusFloor(h);
+    const water = buildWater(h);
+    if (water) h.water = water;
     wall.position.set(x, 0, z);
     lip.position.set(x, 0, z);
     // the collar is ground, so it takes ground's shadows too: an unshadowed
     // annulus inside a shadowed field is the ring again, drawn in light
     lip.receiveShadow = true;
     h.grp.add(wall, lip);
-    if (dark) h.grp.add(dark);
+    if (floorM) h.grp.add(floorM);
+    if (water) h.grp.add(water);
     if (dish) h.grp.add(dish);
     if (rubble) h.grp.add(rubble);
     if (stair) h.grp.add(stair);
@@ -961,7 +1151,7 @@
     live.push(h);
     if (pub.indexOf(h) < 0) pub.push(h);
     stats.cut++;
-    clearInside(h);
+    if (!h.keepInside) clearInside(h);
     syncMask();
     attachCarving(h);
     return h;
@@ -1034,8 +1224,11 @@
     if (h.stepN && d >= h.stepIn) {
       let f = (Math.atan2(dz, dx) - h.stepA0) / TAU;
       f -= Math.floor(f);
-      const i = Math.min(h.stepN - 1, Math.floor(f * h.stepN));
-      return h.bottom + (i + 1) * (h.depth / h.stepN);
+      const g = f * TAU / h.stepArc;            // 0..1 along the slump, >1 = sheer wall
+      if (g < 1) {
+        const i = Math.min(h.stepN - 1, Math.floor(g * h.stepN));
+        return h.bottom + (i + 1) * (h.depth / h.stepN);
+      }
     }
     const cone = d < h.coneR ? h.coneH * (1 - d / h.coneR) : 0;
     if (h.dish) {
@@ -1178,220 +1371,33 @@
   }
 
   /* ============================================================
-     THE COLLAPSE IS A SEQUENCE, NOT A POP
-     warn → first drop → growth → aftermath. Self-driving: a caller makes
-     ONE call and never has to tick it (the one-line adoption rule).
+     THE COLLAPSE EVENT LIVES IN world/sinkhole.js NOW.
+
+     This file is the PRIMITIVE: cut a shaft, answer its floor, mask the
+     ground, hurt what falls in. The sinkhole EVENT — the cracks and the sag,
+     the cover giving way, the edges calving, the cars and poles and the
+     building going in, the broken main and the rising water — is a much
+     bigger thing than a hole and it was crammed in here as a 250-line
+     sequence that could only throw cars and shake the camera. It moved to its
+     own file and reads the shaft's internals through this one record instead
+     of re-deriving any of them. `seqs` stays HERE because the mask, the clear
+     and the audit all have to see running events.
      ============================================================ */
   const FALL_SAFE = 11.0;   // m/s — mirrors systems/physics.js's city fall law
   const FALL_K = 0.95;      // (a full jump lands ~8.2 m/s and must stay free)
-
-  CBZ.groundShaftCollapse = function (x, z, o) {
-    if (!on()) return null;
-    o = o || {};
-    mats();
-    const r = Math.max(3, o.r || 9);
-    const seq = {
-      x: x, z: z, r: r, rNow: r * 0.5, phase: "warn",
-      t: 0, warnSecs: o.warnSecs != null ? o.warnSecs : 3.2,
-      dropSecs: o.dropSecs != null ? o.dropSecs : 1.1,
-      growSecs: o.growSecs != null ? o.growSecs : 4.0,
-      // THE DEPTH IS SOLVED OFF THE FINAL RADIUS, ONCE. The first drop is a
-      // narrow plug of the FULL depth (that is what a sinkhole does — it does
-      // not deepen, it widens), so deriving depth from the plug's radius would
-      // give a shallow crater that never recovers.
-      depth: o.depth || Math.max(r * 2.4, r * 4.2),
-      opts: o, shaft: null, cracks: [], dust: null,
-      gy: rawFloor(x, z), done: false,
-    };
-    // ---- the warning is CRACKS AT THE REAL SITE ----
-    const nC = 12;
-    for (let i = 0; i < nC; i++) {
-      const a = (i / nC) * TAU + rnd() * 0.2;
-      const len = r * (0.5 + rnd() * 0.75);
-      const g = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.12 + rnd() * 0.4),
-        new THREE.MeshBasicMaterial({ color: 0x14100b, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
-      g.rotation.x = -Math.PI / 2;
-      g.rotation.z = -a;
-      const d = r * (0.55 + rnd() * 0.45);
-      g.position.set(x + Math.cos(a) * d, seq.gy + 0.05, z + Math.sin(a) * d);
-      g.renderOrder = 4;
-      root().add(g);
-      seq.cracks.push(g);
-      // a slab tilting inward beside each crack — the ground is already going
-      if (i % 3 === 0) {
-        const B = BoxBuf();
-        B.add(0, 0, 0, r * 0.34, 0.34, r * 0.3, 0, o.surface === "asphalt" ? 0x2f2e2c : (survMode() ? 0x4c5a34 : 0x2f2e2c), 0.75);
-        const m = B.mesh(rockMat);
-        m.position.set(x + Math.cos(a) * r * 0.72, seq.gy + 0.1, z + Math.sin(a) * r * 0.72);
-        m.userData.tilt = a;
-        root().add(m);
-        seq.cracks.push(m);
-      }
-    }
-    if (CBZ.fx && CBZ.fx.particleCloud) {
-      seq.dust = CBZ.fx.particleCloud({ count: 210, radius: r * 1.25, top: 26, mode: "rise", vMin: 5, vMax: 16, color: 0xa9967c, size: 0.5, opacity: 0.5 });
-      seq.dust.setActive(0.12);
-    }
-    sfx("rumble", x, z);
-    seq.tick = function (dt) { tickSeq(seq, dt); };
-    seq.dispose = function () {
-      for (let i = 0; i < seq.cracks.length; i++) { const m = seq.cracks[i]; if (m.geometry) m.geometry.dispose(); if (m.material && m.material.dispose && !m.material.vertexColors) m.material.dispose(); if (m.parent) m.parent.remove(m); }
-      seq.cracks.length = 0;
-      if (seq.dust) { seq.dust.dispose(); seq.dust = null; }
-      const i = seqs.indexOf(seq); if (i >= 0) seqs.splice(i, 1);
-      seq.done = true;
-    };
-    seqs.push(seq);
-    return seq;
-  };
-
-  function tickSeq(seq, dt) {
-    seq.t += dt;
-    const o = seq.opts;
-    if (seq.dust) seq.dust.update(dt, seq.x, seq.gy - 1, seq.z);
-    if (seq.phase === "warn") {
-      const k = Math.min(1, seq.t / seq.warnSecs);
-      for (let i = 0; i < seq.cracks.length; i++) {
-        const m = seq.cracks[i];
-        if (m.material && m.material.transparent) m.material.opacity = Math.min(0.85, k * 0.95);
-        else if (m.userData.tilt != null) {
-          // the slab tips INWARD and sinks — the ground giving before it goes
-          m.rotation.x = -k * 0.42 * Math.cos(m.userData.tilt);
-          m.rotation.z = -k * 0.42 * Math.sin(m.userData.tilt);
-          m.position.y = seq.gy + 0.1 - k * 0.55;
-        }
-      }
-      if (seq.dust) seq.dust.setActive(0.1 + k * 0.22);
-      if (CBZ.shake && nearCam(seq.x, seq.z, 70)) CBZ.shake(0.02 + 0.07 * k);
-      if (seq.t >= seq.warnSecs) firstDrop(seq);
-      return;
-    }
-    if (seq.phase === "drop") {
-      if (seq.dust) seq.dust.setActive(1);
-      if (seq.t >= seq.dropSecs) { seq.phase = "grow"; seq.t = 0; }
-      return;
-    }
-    if (seq.phase === "grow") {
-      const k = Math.min(1, seq.t / seq.growSecs);
-      if (seq.dust) seq.dust.setActive(0.85 - k * 0.45);
-      const want = seq.r * (0.5 + 0.5 * k);
-      if (want > seq.rNow + Math.max(0.35, seq.r * 0.06)) growTo(seq, want);
-      if (k >= 1) {
-        growTo(seq, seq.r);
-        seq.phase = "open"; seq.t = 0;
-        if (o.onOpen) try { o.onOpen(seq.shaft); } catch (e) {}
-      }
-      return;
-    }
-    // ---- aftermath: the standing shaft. The dust settles, the sequence
-    //      retires, and the HOLE STAYS. Permanent damage is the point.
-    if (seq.dust) {
-      const f = Math.max(0, 0.4 - seq.t * 0.12);
-      seq.dust.setActive(f);
-      if (f <= 0.001) { seq.dust.dispose(); seq.dust = null; }
-    }
-    if (seq.t > 3.2) {
-      for (let i = 0; i < seq.cracks.length; i++) { const m = seq.cracks[i]; if (m.geometry) m.geometry.dispose(); if (m.parent) m.parent.remove(m); }
-      seq.cracks.length = 0;
-      if (!seq.dust) { const i = seqs.indexOf(seq); if (i >= 0) seqs.splice(i, 1); seq.done = true; }
-    }
-  }
-
-  function firstDrop(seq) {
-    const o = seq.opts;
-    seq.phase = "drop"; seq.t = 0;
-    // the CORE goes first, at full depth: a sinkhole does not widen from a
-    // scratch, it drops a plug and then eats its own edges
-    seq.shaft = CBZ.groundShaft(seq.x, seq.z, {
-      r: seq.rNow, depth: seq.depth, gy: seq.gy, seed: o.seed, surface: o.surface,
-    });
-    if (CBZ.shake && nearCam(seq.x, seq.z, 90)) CBZ.shake(0.55);
-    sfx("collapse", seq.x, seq.z);
-    rimShear(seq, 7);
-    entrain(seq, seq.rNow);
-  }
-
-  function growTo(seq, want) {
-    const o = seq.opts;
-    const h = seq.shaft;
-    seq.rNow = want;
-    if (h) {
-      // re-cut the shaft at the new radius. Six or seven rebuilds over four
-      // seconds is cheaper than a vertex morph and lets the strata, the torn
-      // lip and the stair all stay ONE solve.
-      // the collar's colour is carried, not re-sampled: by the second re-cut
-      // the props over the mouth are hidden and the ground under it is masked,
-      // so a fresh sample could answer differently and the rim would change
-      // colour mid-collapse
-      const keep = { x: h.x, z: h.z, gy: h.gy, depth: h.depth, seed: h.seed, born: h.born, surface: o.surface, top: h.topColor, topSampled: h.topSampled };
-      disposeShaft(h);
-      seq.shaft = CBZ.groundShaft(keep.x, keep.z, { r: want, depth: keep.depth, gy: keep.gy, seed: keep.seed, surface: keep.surface, top: keep.top, topSampled: keep.topSampled });
-      if (seq.shaft) seq.shaft.born = keep.born;   // the burial clock is the HOLE's age, not this rebuild's
-    }
-    rimShear(seq, 3);
-    entrain(seq, want);
-    if (CBZ.shake && nearCam(seq.x, seq.z, 70)) CBZ.shake(0.18);
-  }
-
-  // rim chunks shear off the edge and fall in — these are what crush you
-  function rimShear(seq, n) {
-    const h = seq.shaft; if (!h) return;
-    for (let i = 0; i < n; i++) {
-      const a = rnd() * TAU;
-      // INSIDE the mouth, thrown further in — a slab that shears off the rim
-      // topples into the void, it does not perch on the edge (and a chunk that
-      // lands on the top ledge is a box floating in the picture)
-      const d = h.r * (0.15 + rnd() * 0.5);
-      const s = 0.7 + rnd() * 1.5;
-      dropChunk({
-        x: seq.x + Math.cos(a) * d, z: seq.z + Math.sin(a) * d, y: seq.gy + 0.6,
-        vy: 0.6 + rnd() * 1.4, vx: -Math.cos(a) * (0.8 + rnd() * 1.8), vz: -Math.sin(a) * (0.8 + rnd() * 1.8),
-        size: s, color: i % 3 === 0 ? h.surfaceColor : 0x584d40,
-        dmg: 55 + s * 22,
-      });
-    }
-  }
-
-  /* ENTRAINMENT — the expanding radius takes what is standing on it. Actors go
-     through CBZ.body (the airborne integrator that already exists), which is
-     also what stops the bots TELEPORTING to the bottom: survivorbot.js pins
-     pos.y to the floor every frame, but it skips a body CBZ.body.busy() owns,
-     and a flung body is busy until it lands. They FALL. */
-  function entrain(seq, r) {
-    eachActor(function (a) {
-      if (!a || !a.pos) return;
-      const dx = a.pos.x - seq.x, dz = a.pos.z - seq.z;
-      const d = Math.hypot(dx, dz);
-      if (d > r * 1.06) return;
-      if (a.pos.y > seq.gy + 3) return;
-      if (CBZ.body && !(CBZ.body.busy && CBZ.body.busy(a))) {
-        const m = d || 1;
-        CBZ.body.hit(a, { dir: { x: -dx / m, z: -dz / m }, force: 3 + rnd() * 3, fling: 0.9 + rnd() * 0.8 });
-      }
-      if (a.isPlayer && CBZ.doSlowmo && !seq._beat) { seq._beat = 1; CBZ.doSlowmo(0.45); }
-    });
-    // kerbs, props and parked cars: the host knows how to throw its own
-    // vehicles (survival has flingCar, the city has its wreck path), so the
-    // caller supplies that as a seam rather than this file learning both.
-    if (seq.opts.entrain) { try { seq.opts.entrain(seq.x, seq.z, r); } catch (e) {} }
-    // city parked cars are seated off CBZ.floorAt but cache their last seat —
-    // invalidate the cache so the ground disappearing under them is noticed.
-    if (!survMode() && CBZ.cityCars) {
-      const cars = CBZ.cityCars;
-      for (let i = 0; i < cars.length; i++) {
-        const c = cars[i];
-        if (!c || !c.pos) continue;
-        if (Math.hypot(c.pos.x - seq.x, c.pos.z - seq.z) > r + 4) continue;
-        c._parkX = null; c._parkZ = null;
-      }
-    }
-  }
-
   function nearCam(x, z, r) {
     if (!CBZ.camera) return false;
     const dx = CBZ.camera.position.x - x, dz = CBZ.camera.position.z - z;
     return dx * dx + dz * dz < r * r;
   }
+  CBZ.groundShaftKit = {
+    seqs: seqs, live: live, stats: stats,
+    root: root, rawFloor: rawFloor, eachActor: eachActor, hurt: hurt, sfx: sfx,
+    survMode: survMode, nearCam: nearCam, skyOcc: skyOcc, layersOf: layersOf,
+    mats: function () { mats(); return { wall: wallMat, rock: rockMat, lip: lipMat }; },
+    BoxBuf: BoxBuf, dropChunk: dropChunk, disposeShaft: disposeShaft, shaftFloor: shaftFloor,
+    syncMask: syncMask,
+  };
 
   /* ============================================================
      WHAT HAPPENS TO A BODY IN THE HOLE
@@ -1715,23 +1721,4 @@
     };
   };
 
-  /* ============================================================
-     THE CITY EVENT. Default OFF: a sinkhole that can open under you at
-     random is not a feature, it is weather. This is the door the city
-     runs an EVENT through — one call, and the placement law picks the
-     intersection.
-     ============================================================ */
-  CBZ.cityOpenSinkhole = function (o) {
-    o = o || {};
-    if (!on() || CBZ.CONFIG.CITY_SINKHOLES === false) return null;
-    const r = o.r || (9 + rnd() * 4);
-    const site = o.x != null ? { x: o.x, z: o.z } : CBZ.groundShaftSite({ r: r, minDist: o.minDist || 45, maxDist: o.maxDist || 300 });
-    if (!site) return null;
-    return CBZ.groundShaftCollapse(site.x, site.z, {
-      r: r, depth: o.depth || r * 4.0, surface: "asphalt",
-      warnSecs: o.warnSecs != null ? o.warnSecs : 3.4,
-      growSecs: o.growSecs != null ? o.growSecs : 4.5,
-      seed: o.seed,
-    });
-  };
 })();

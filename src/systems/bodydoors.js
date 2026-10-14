@@ -70,6 +70,9 @@
   function may(actor, col) {
     const e = col && col._bd;
     if (!e) return false;
+    // a door racked in its frame (a building settling over a sinkhole,
+    // world/sinkhole.js) opens for nobody
+    if (col.jammed) return false;
     try { return !!e.p.may(e.rec, actor); } catch (err) { return false; }
   }
   // can THIS person get through this door collider right now (open, or his to open)?
