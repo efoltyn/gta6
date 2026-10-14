@@ -873,6 +873,10 @@
     // verb — you're already committed. (CBZ.propArcActive, degrade-safe.)
     find: function (px, pz, ctx) {
       if (CBZ.propArcActive && CBZ.propArcActive(CBZ.player)) return null;
+      // SITTING, the next chair is not a verb: you stand first (F). The guest
+      // chairs across the President's desk used to out-shout the phone and
+      // the folders in front of him from his own chair.
+      if (CBZ.player && (CBZ.player._propSeat || CBZ.player._propBed)) return null;
       return CBZ.propNearestSeat ? CBZ.propNearestSeat(px, pz, REACH, ctx.pos.y) : null;
     },
     options: [{ id: "seat-sit", slot: "e", label: "Sit down", onSelect: function (seat) { CBZ.propSit(CBZ.player, seat); } }],

@@ -407,6 +407,11 @@
   // one-row funnel threw ~40 registered person verbs away a line before the
   // screen, which is how "talk, then hire" became the only flow there was.
   function isRide(o) { return !!(o && o.ride); }
+  function onDuty() {
+    const Pz = CBZ.presidency;
+    if (!Pz || typeof Pz.seat !== "function") return false;
+    try { return !!Pz.seat(); } catch (e) { return false; }
+  }
   function choiceScore(o, i, gp) {
     let s = (o.prio || 0) * 10 - i * 0.001;
     if (o.slot === "e") s += 18;                 // authored primary remains primary
@@ -466,8 +471,15 @@
     for (let i = 0; i < all.length; i++) { if (all[i].speak) { if (!speak) speak = all[i]; } else pass.push(all[i]); }
     if (!pass.length && !speak) return null;
     let tap = null, hold = null, ride = null;
+    // THE PRESIDENT DOES NOT MUG ON E. On duty, a street crime registered on
+    // the person layers (Mug, Punch, Pickpocket...) is never a key: E on a
+    // stranger in the West Wing printed "[E] Mug" because it was the only
+    // street verb left standing. They stay on his wheel (Q / a tap), with
+    // everything else he can do; his orders (`anyone`) keep their keys.
+    const duty = onDuty();
     for (const o of pass) {
       if (o.wheel) continue;                // a `wheel` verb is never a key
+      if (duty && o.bad && o.layer && !o.anyone) continue;
       if (isRide(o)) { if (!ride) ride = o; }
       else if (o.hold) { if (!hold) hold = o; }
       else if (!tap) tap = o;
@@ -597,7 +609,7 @@
   // the card goes away but the TARGET stays live: E / F / Q still reach it
   function quietPanel(tag) { dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); } shownRows = []; fingerprint = "quiet:" + tag; }
   function showPanel() { dom(); if (panel) { panel.style.display = "block"; panel.classList.add("show"); } }
-  function releasePanel() { dom(); if (panel) { panel.style.display = ""; panel.classList.remove("show"); } current = null; currentRows = []; shownRows = []; fingerprint = ""; currentScore = -1; }
+  function releasePanel() { dom(); if (panel) { panel.style.display = ""; panel.classList.remove("show"); unplaceCard(); } current = null; currentRows = []; shownRows = []; fingerprint = ""; currentScore = -1; }
 
   // ONE dispatch for every input: the E / F keys (a row), the Q wheel and a
   // touch tap (an option on a candidate).
@@ -651,24 +663,59 @@
     if (d < 0.3) return 1;
     return Math.max(0, (dx / d) * fx + (dz / d) * fz);
   }
-  function scoreOf(c, fx, fz, px, pz) {
+  /* NOT LOOKED AT = NOT THE TARGET (keyboard). OWNER, president mode on a
+     MacBook: "mug is the only option". A person two metres BEHIND you scored
+     on proximity alone (facing clamps at 0, it never goes negative), and the
+     pick takes the first candidate that has any verb at all, so the thing
+     you were looking at lost E to a stranger at your back whose one street
+     verb was Mug. Now a candidate more than ~75 degrees off your view line
+     is not a candidate unless you are touching it (a person) or standing at
+     it (a zone). The zone's half-a-look floor (INTERACT_REACH_V2) is earned
+     the same way: by STANDING AT it, not by being anywhere inside its
+     radius, which is how a guest chair across the desk outscored the phone
+     you were looking at. Touch never runs this: a finger picks by touching. */
+  const LOOK_MIN = 0.25;      // cos(~75 deg): outside this you are not looking at it
+  const BODY_NEAR = 1.0;      // m: a person this close is yours whichever way you face
+  const ZONE_STAND = 1.6;     // m: standing AT a zone counts as half a look
+  function scoreOf(c, fx, fz, px, pz, touch) {
     let s = (c.base || 0) * 0.05 + (REACH - Math.min(REACH, c.d)) * 0.5;
+    c.unseen = false;
     const t = c.t;
     const tx = t && t.pos ? t.pos.x : (t && t.x != null ? t.x : null);
     const tz = t && t.pos ? t.pos.z : (t && t.z != null ? t.z : null);
     if (tx != null) {
       let face = faceOf(tx, tz, fx, fz, px, pz);
+      if (!touch && !c.gunpoint && face < LOOK_MIN && c.d > (c.zone ? ZONE_STAND : BODY_NEAR)) c.unseen = true;
       // A DOOR YOU ARE SQUARELY FACING IS WHAT E MEANS. The Oval Office's
       // job applicants waited by its door, and E on the door hired the man
       // beside it instead of opening it (tools/president-walkout.mjs, desktop:
       // card "Hire" at the door, the President shut in). A zone that says
       // faceWins beats a person when you look straight at it.
       if (c.zone && c.zone.faceWins && face > 0.8) s += 14;
-      if (c.zone && ZONE_CONE_FLOOR > 0) face = ZONE_CONE_FLOOR + (1 - ZONE_CONE_FLOOR) * face;
+      if (c.zone && ZONE_CONE_FLOOR > 0 && c.d <= ZONE_STAND) face = ZONE_CONE_FLOOR + (1 - ZONE_CONE_FLOOR) * face;
       s += face * 10;
     }
     if (c.gunpoint) s += 100;   // a drawn gun on someone overrides everything
     return s;
+  }
+  // THE PICK as one pure step (the detection pass below and
+  // tools/interact-pick-check.mjs both run it): score, sort, keep the current
+  // target unless a rival clearly beats it, skip what you are not looking at;
+  // the first candidate with something to do wins. resolve(c) -> rows | null.
+  function pickFrom(list, cur, fx, fz, px, pz, touch, resolve) {
+    for (const c of list) c.score = scoreOf(c, fx, fz, px, pz, touch);
+    list.sort((a, b) => b.score - a.score);
+    const held = cur && !cur.unseen ? cur : null;
+    for (const c of list) {
+      if (c.kind === "vehicle:inside" || c.unseen) continue;
+      if (held && c !== held && c.score < held.score + HYSTERESIS) {
+        const r = resolve(held);
+        if (r) return { pick: held, rows: r };
+      }
+      const r = resolve(c);
+      if (r) return { pick: c, rows: r };
+    }
+    return null;
   }
   function sameTarget(a, b) { return a && b && a.t === b.t && !!a.gunpoint === !!b.gunpoint; }
 
@@ -697,26 +744,16 @@
 
     if (!cands.length) { approachT = null; if (current) hidePanel(); return; }
 
-    // score + sort; HYSTERESIS keeps the current target unless clearly beaten
-    for (const c of cands) c.score = scoreOf(c, fx, fz, px, pz);
-    cands.sort((a, b) => b.score - a.score);
-    let pick = null, rows = null;
     // YOUR OWN CAR is never the E target (you cannot look at it from the seat,
     // and it would shadow the pump you pulled up to). Its verbs - let them out,
     // drop anchor, hand over the helm - are the Q wheel's: wheel() falls back
     // to it while you drive.
     for (const c of cands) if (c.kind === "vehicle:inside") { insideCand = c; break; }
     const cur = current && cands.find((c) => sameTarget(c, current));
-    for (const c of cands) {
-      if (c.kind === "vehicle:inside") continue;
-      if (cur && c !== cur && c.score < cur.score + HYSTERESIS) {
-        const r = resolveRows(cur, ctx);
-        if (r) { pick = cur; rows = r; break; }
-      }
-      const r = resolveRows(c, ctx);
-      if (r) { pick = c; rows = r; break; }
-    }
-    if (!pick) { approachT = null; if (current) hidePanel(); return; }
+    const got = pickFrom(cands, cur, fx, fz, px, pz, !!CBZ.touchMode, (c) => resolveRows(c, ctx));
+    if (!got) { approachT = null; if (current) hidePanel(); return; }
+    const pick = got.pick;
+    let rows = got.rows;
 
     // he says his piece as you come up (before the providers: a line that
     // opens a conversation turns this very card into its replies)
@@ -756,16 +793,17 @@
     // WHAT THE CARD SHOWS. The target is live either way (E / F / Q reach it);
     // the card is only drawn when it says something the world does not:
     //   • a ride's F is pinned on its door (city/boarding.js) - no card row
-    //   • a lone "Sit down" is the chair itself - no card
     //   • a pinned verb that owns E right now (a lift button, a ladder) is the
     //     one E on screen, so the card steps back (cityUseOwner below)
     //   • TOUCH: the world is the button. Tapping the thing opens its wheel
     //     (systems/touch.js -> city/verbwheel.js), so no floating pills.
+    // A chair DOES get its [E] Sit on a keyboard: the card is pinned on the
+    // chair now (placeCard below), and nothing else ever said the chair was a
+    // verb, so the President's chair, the desk and the phone read as scenery.
     // a hold row's chip reads "HOLD E", so the card never shows two bare E's
     const shown = (SILENT_RIDE[pick.kind] ? rows.filter((r) => r.key !== "f") : rows)
       .map((r) => (r.hold ? Object.assign({}, r, { key: "hold " + r.key }) : r));
-    const loneSeat = pick.kind === "seat" && rows._pass && rows._pass.length === 1;
-    if (!shown.length || loneSeat || CBZ.touchMode || (CBZ.verbWheel && CBZ.verbWheel.isOpen()) || useOwner("e") === "pill") {
+    if (!shown.length || CBZ.touchMode || (CBZ.verbWheel && CBZ.verbWheel.isOpen()) || useOwner("e") === "pill") {
       quietPanel(pick.kind);
       return;
     }
@@ -812,8 +850,73 @@
       // At most E, hold E and F. Everything else is the Q wheel's.
       if (optsEl) optsEl.innerHTML = rowsHTML(shown);
       showPanel();
+      cardW = 0;                  // new words, new size: placeCard re-measures
+      placeCard();                // on the thing from its first frame, never the corner
     }
   }
+
+  /* ---- THE CARD IS ON THE THING (keyboard) --------------------------------
+     OWNER, on a MacBook: "interaction options show in the bottom right
+     corner". css/hud.css parked #interact at right:24px bottom:120px (the
+     jail's old Red Dead card) and city mode inherited it, so every verb in the
+     city sat in a corner, pinned to nothing. Now the card is projected onto
+     its target through the LIVE camera every frame, the same way
+     systems/interactions.js pins a lift's Call or a cell door's verb: beside
+     a person's shoulder (his head is where his words go), just above a thing.
+     OFF THE FRAME = NO CARD. There is no corner to fall back to: a target
+     behind the camera or off the screen hides the card (E still reaches it).
+     Touch never draws this card (the world is the button there). */
+  const CARD_GAP = 10, CARD_EDGE = 8, CARD_SLIVER = 1.1;
+  let cardW = 0, cardH = 0, cardX = NaN, cardY = NaN, cardHidden = false;
+  const _cv = window.THREE ? new THREE.Vector3() : null;
+  function cardAnchor(c) {
+    const a = anchorOf(c);
+    if (!a) return null;
+    const person = !a.small && c.layers && c.layers.indexOf("ped") >= 0;
+    if (!person) return { x: a.x, y: a.y + (a.small ? a.small : 0.15), z: a.z, beside: false };
+    // a person: his shoulder on the camera's right, so the card reads beside him
+    const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
+    return { x: a.x + Math.cos(yaw) * 0.42, y: a.y + 0.25, z: a.z - Math.sin(yaw) * 0.42, beside: true };
+  }
+  function cardVisible(v) {
+    if (cardHidden === !v) return;
+    cardHidden = !v;
+    panel.style.visibility = v ? "" : "hidden";
+  }
+  function placeCard() {
+    if (CBZ.touchMode && cardX === cardX) unplaceCard();   // went touch: mobile.css docks it
+    if (!panel || !current || !shownRows.length || CBZ.touchMode || g.mode !== "city") return;
+    if (!panel.classList.contains("show")) return;
+    const cam = CBZ.camera;
+    const a = cam && _cv ? cardAnchor(current) : null;
+    if (!a) { cardVisible(false); return; }
+    cam.updateMatrixWorld();
+    _cv.set(a.x, a.y, a.z).project(cam);
+    if (!(_cv.z <= 1) || Math.abs(_cv.x) > CARD_SLIVER || Math.abs(_cv.y) > CARD_SLIVER) { cardVisible(false); return; }
+    const w = window.innerWidth || 800, h = window.innerHeight || 600;
+    if (!cardW) { cardW = panel.offsetWidth || 180; cardH = panel.offsetHeight || 60; }
+    const sx = (_cv.x * 0.5 + 0.5) * w, sy = (-_cv.y * 0.5 + 0.5) * h;
+    let x, y;
+    if (a.beside) {
+      x = sx + CARD_GAP; y = sy - cardH / 2;
+      if (x + cardW > w - CARD_EDGE) x = sx - CARD_GAP - cardW;   // no room on his right: the near side
+    } else {
+      x = sx - cardW / 2; y = sy - CARD_GAP - cardH;
+    }
+    x = Math.round(Math.max(CARD_EDGE, Math.min(w - CARD_EDGE - cardW, x)));
+    y = Math.round(Math.max(CARD_EDGE, Math.min(h - CARD_EDGE - cardH, y)));
+    cardVisible(true);
+    if (x !== cardX || y !== cardY) {
+      cardX = x; cardY = y;
+      panel.style.transform = "translate3d(" + x + "px," + y + "px,0)";
+    }
+  }
+  function unplaceCard() {
+    if (!panel) return;
+    panel.style.transform = ""; panel.style.visibility = "";
+    cardX = cardY = NaN; cardHidden = false; cardW = cardH = 0;
+  }
+  CBZ.onAlways(96.2, placeCard);
 
   /* ---- WHO OWNS E RIGHT NOW: the card, or a verb pinned on a thing --------
      Two surfaces can offer E at once: this card's target (a person, a counter)
@@ -1095,6 +1198,7 @@
     // a tap on a person: he says his piece first (once per approach)
     approach: function (cand) { if (!cand) return false; const r = resolveRows(cand, buildCtx()); return r ? approach(cand, r) : false; }, tapPick: tapPick, liveLike: liveLike, candidateFor: candidateFor, anchorOf: anchorOf,
     registerFixtures: registerFixtures, aimed: aimed,
+    pickFrom: pickFrom,   // the pure targeting step (tools/interact-pick-check.mjs)
     useOwner: useOwner,
     rowsFor: function () { return currentRows.map((r) => ({ key: r.key, hold: !!r.hold, id: r.opt && r.opt.id, label: r.label })); },
     refresh: function () { dirty = true; },
