@@ -368,13 +368,13 @@
      document.write from a parser-inserted script inserts a parser-blocking
      tag right here, before worldmap.js reads it. */
   // a streamed city boot (core/citystream.js, ?stream=1) needs it too
-  /* STREAMING IS THE PHONE'S CITY. On a phone or tablet (config.js
-     deviceClass) Gang City streams by default: the whole continent at once
-     is ~2.8 GB on the phone profile, the streamed city under half of it.
-     ?stream=0 turns it off there, ?stream=1 turns it on anywhere. */
+  /* STREAMING IS THE CITY, on every device (owner 2026-10-14: "it loads fast
+     on my phone and takes forever on my Mac, the sharding should be on Mac
+     too"). The whole continent at once is ~2.8 GB and a 74 s boot; the
+     streamed city builds what is near the player and the rest as he comes.
+     ?stream=0 boots the whole continent (tools that measure the full world). */
   const sp = q ? q.get("stream") : null;
-  const mobile = CBZ.deviceClass === "phone" || CBZ.deviceClass === "tablet";
-  CBZ.STREAM_WANTED = sp === "1" || sp === "true" || (mobile && sp !== "0" && sp !== "false");
+  CBZ.STREAM_WANTED = !(sp === "0" || sp === "false");
   const wantManifest = S || CBZ.STREAM_WANTED;
   if (wantManifest && typeof document !== "undefined" && document.readyState === "loading") {
     try {

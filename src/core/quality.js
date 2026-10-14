@@ -83,7 +83,8 @@
   const MOBILE = DEVICE !== "desktop";
   const MOBILE_PR = DEVICE === "phone"
     ? [0.9, 1.0, 1.15, 1.3, 1.5]   // phone CSS viewports are tiny (390x844): 1.0 alone reads soft
-    : [0.75, 0.9, 1.0, 1.15, 1.3]; // tablet
+    : [2, 2, 2, 2, 2];             // tablet: the panel's own pixels (owner 2026-10-14: "blurry as shit
+                                   // for a tiny saving"); speed comes from logic, never from blur
   if (MOBILE) for (let i = 0; i < QUALITY.length; i++) QUALITY[i].pr = Math.min(devicePixelRatio || 1, MOBILE_PR[i]);
   // A desktop whose GPU is an integrated/mobile part (Intel iGPU, Mali, Adreno)
   // starts where an iPad does and lets the auto governor climb. SwiftShader is
@@ -322,7 +323,8 @@
   // tier. Only ever <= 1: it sheds pixels under load and returns them when
   // there is headroom; it never supersamples past the tier.
   let dynRes = 1;
-  const DYN_MIN = MOBILE ? 0.6 : 0.7;
+  // floor only takes the edge off a spike; the owner's rule: no blur to save frames
+  const DYN_MIN = DEVICE === "phone" ? 0.8 : 0.9;
   function setRenderScale() {
     const q = QUALITY[qLevel];
     const pr = Math.max(0.45, Math.round(q.pr * dynRes * 100) / 100);
