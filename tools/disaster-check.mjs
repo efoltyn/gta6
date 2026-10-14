@@ -131,8 +131,7 @@ const CENSUS = [
 const ROSTER_ALL = ["quake", "storm", "flashflood", "flood", "wildfire", "tornado",
   "hurricane", "blizzard", "meteor", "sinkhole", "volcano"];
 // --only flashflood,quake : run just these through the sweep (a builder's loop)
-const ONLY = arg("--only", "");
-const ROSTER = ONLY ? ROSTER_ALL.filter((id) => ONLY.split(",").includes(id)) : ROSTER_ALL;
+const ROSTER = ONLY ? ROSTER_ALL.filter((id) => ONLY.includes(id)) : ROSTER_ALL;
 
 const report = { url: URL_REL, ok: false, fails: [], measures: {}, errors: [], census: {} };
 const fail = (m) => { report.fails.push(m); };
