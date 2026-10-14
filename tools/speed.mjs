@@ -697,13 +697,21 @@ S.step = function(n, o){
      inside render(): the passes that decide what to draw from the camera
      (core/viewscope.js at always 999.9) ran with the game's own camera and
      hid things the posed one sees. Applied just before them. */
-  if (C && C.onAlways && !S.poseHook) { S.poseHook = 1; var ph = function(){ if (S.pose && C.camera) S.applyPose(C.camera); };
+  /* THE LOOK SHOT'S LENS IS PINNED. The game eases its fov (a speed kick, a
+     chase lens, a settle after the spot's placement), and two runs of the SAME
+     build reached the shot 0.2 deg apart, which moves every edge in the frame
+     (measured: base re-runs 0.214 deg, candidate 0.244 deg). The frame a look
+     guard grabs is drawn at a fixed fov (S.shotFov, 60: the game's base lens)
+     on both sides of an A/B, so its pixels compare content, not lens timing. */
+  if (C && C.onAlways && !S.poseHook) { S.poseHook = 1; var ph = function(){ if (S.pose && C.camera) S.applyPose(C.camera);
+      if (S.fixFov && C.camera && C.camera.fov !== S.fixFov) { C.camera.fov = S.fixFov; C.camera.updateProjectionMatrix(); } };
     /* slotted into the sorted list (a run-time onAlways is appended after everything) */
     if (C.frameListsAdd) C.frameListsAdd([], [{ order: 999.8, fn: ph, seq: 0 }]); else C.onAlways(999.8, ph); }
   if (r && r.info) r.info.autoReset = false;
   var useTq = !!(o.gpu && S.tqInit());
   for (var i = 0; i < n; i++) {
     if (o.path) o.path(i, n);
+    S.fixFov = (o.grab && i === n - 1 && S.shotFov !== 0) ? (S.shotFov || 60) : 0;
     if (!o.frozen) S.t += 1000 / 60;   /* frozen: dt = 0, the world stands still (the look guard's A/B shots) */
     if (useTq) { S.tq.frame++; S.tq.on = true; S.tqPush("frame"); }
     if (!S.q.length && !S.kicked && C && C.startLoop) { S.kicked = 1; C.startLoop(); }   // loop not pending: restart it into the hold queue
@@ -721,6 +729,7 @@ S.step = function(n, o){
        the frame (gl.finish() is a no-op wait in Chrome: measured 0.0 ms). */
     if (gl && o.finish) { var f0 = now(); try { gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, S.px || (S.px = new Uint8Array(4))); } catch (_) {} fin = now() - f0; }
     if (gl && o.grab && i === n - 1) S.grab(gl);
+    S.fixFov = 0;
     var sim = 0, alw = 0, row = { cpu: cpu, fin: fin, render: S.render, rOther: S.renderOther, compile: S.compileMs, draws: S.draws, glTris: Math.round(S.tris) };
     if (useTq) row.tf = S.tq.frame;
     if (o.perUpdater) row.u = {};
