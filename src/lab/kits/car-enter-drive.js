@@ -10,42 +10,52 @@
    exit (systems/seat_exit.js CBZ.seatExit, what [E] / #tExit calls).
 
    The driver is a little autopilot holding the real keys: W/S as a cruise
-   control on `speed`, A/D to hold the kerb lane it started in. The car is
-   picked as the one with the longest clear run ahead of it (sampled against
-   the colliders and the other cars), so the kit tests driving, not a wall.
+   control on `speed`, A/D to pull out and hold the street's centre line
+   (the island parks against the kerb, 2.2 m off it, on the car's right, so
+   the line is 2.2 m to its left: clear of every parked car), and where the
+   street ahead is blocked (a junction's post, the sea) it turns onto the
+   clearest cross street, slowing for the corner. The car is the one with the
+   longest clear street ahead of it.
 
    lab.html?kit=car-enter-drive&dist=100&speed=14
-   probe(): verb armed at the door, in the seat, metres driven, top speed,
+   probe(): verb armed at the door, in the seat, metres driven, turns, top speed,
    seconds to the distance, wall contacts, out of the seat beside the door on
    the ground, the player's hp. ok = all of it. */
 (function () {
 "use strict";
 
-function clearRun(A, car, max) {
-  const h = car.heading || 0, fx = Math.sin(h), fz = Math.cos(h), sx = Math.cos(h), sz = -Math.sin(h);
+const CENTRE = 2.2;   // world/disaster_arena.js CAR_OFF: kerb to centre line, toward the car's left (+X)
+// metres of clear street from (x,z) along heading h: the sea, a bank, any
+// collider at bumper-to-roof height, any other car, sampled every metre over a
+// 2.4 m corridor at 0.3 m (a lamp post is 0.3 m)
+function clearAhead(A, self, x0, z0, y0, h, max) {
+  const fx = Math.sin(h), fz = Math.cos(h), sx = Math.cos(h), sz = -Math.sin(h);
   const cols = CBZ.colliders || [], cars = CBZ.cityCars || [];
-  const L = ((car.dims && car.dims.length) || 4.5) / 2;
-  for (let d = L + 0.5; d < max; d += 1) {
-    for (let k = -1; k <= 1; k++) {
-      const x = car.pos.x + fx * d + sx * k * 1.1, z = car.pos.z + fz * d + sz * k * 1.1;
+  const sea = (A.oceanY != null ? A.oceanY : -0.5) + 0.1;
+  for (let d = 0.5; d < max; d += 1) {
+    for (let k = -4; k <= 4; k++) {
+      const x = x0 + fx * d + sx * k * 0.3, z = z0 + fz * d + sz * k * 0.3;
       const gy = A.groundHeightAt(x, z);
-      if (!(gy > 0.05)) return d;                                    // the sea
-      if (Math.abs(gy - car.pos.y) > 1.2) return d;                  // a bank or a step
-      const y = gy + 0.8;
+      if (!(gy > sea) || Math.abs(gy - y0) > 1.2) return d;
       for (let i = 0; i < cols.length; i++) {
         const c = cols[i];
         if (!c || x < c.minX || x > c.maxX || z < c.minZ || z > c.maxZ) continue;
-        if (c.y0 != null && (y < c.y0 || y > c.y1)) continue;
+        if (c.y0 != null && (gy + 0.5 > c.y1 || gy + 1.4 < c.y0)) continue;
         return d;
       }
       for (let i = 0; i < cars.length; i++) {
         const o = cars[i];
-        if (o === car || o.dead || (o._world && o._world !== "survival")) continue;
+        if (o === self || o.dead || (o._world && o._world !== "survival")) continue;
         if (Math.hypot(o.pos.x - x, o.pos.z - z) < 2.4) return d;
       }
     }
   }
   return max;
+}
+// the street's centre line beside a parked car (2.2 m to its left)
+function centreOf(c) {
+  const h = c.heading || 0;
+  return { x: c.pos.x + Math.cos(h) * CENTRE, z: c.pos.z - Math.sin(h) * CENTRE };
 }
 
 CBZ.lab.kit("car-enter-drive", {
@@ -71,7 +81,7 @@ CBZ.lab.kit("car-enter-drive", {
         const cars = V ? V.cars() : [];
         if (!cars.length) { if (M.phaseT > 2) { M.stalled = "no real cars on the island"; go("done"); } return; }
         let best = null;
-        for (const c of cars) { const r = clearRun(A, c, DIST + 40); if (!best || r > best.r) best = { c: c, r: r }; }
+        for (const c of cars) { const o = centreOf(c); const r = clearAhead(A, c, o.x, o.z, c.pos.y, c.heading, 80); if (!best || r > best.r) best = { c: c, r: r }; }
         M.car = best.c; M.run = Math.round(best.r);
         // stand at the driver's door (the car's local +X flank)
         const c = M.car, h = c.heading;
@@ -79,7 +89,9 @@ CBZ.lab.kit("car-enter-drive", {
         Pl.pos.set(c.pos.x + Math.cos(h) * (half + 0.7), c.pos.y, c.pos.z - Math.sin(h) * (half + 0.7));
         Pl.vy = 0; Pl.grounded = true;
         M.hp0 = Pl.hp;
-        M.line = { x: c.pos.x, z: c.pos.z, fx: Math.sin(h), fz: Math.cos(h) };
+        const o = centreOf(c);
+        M.line = { x: o.x, z: o.z, h: h, fx: Math.sin(h), fz: Math.cos(h) };
+        M.turns = 0;
         go("door");
         return;
       }
@@ -104,15 +116,36 @@ CBZ.lab.kit("car-enter-drive", {
         const v = Math.hypot(car.vx || 0, car.vz || 0);
         if (v > M.maxV) M.maxV = v;
         if (car._wallCD > 0.29) M.walls++;
-        // the lane: hold the line the car started on
+        // THE ROUTE: hold the street's centre line; where the street ahead is
+        // blocked (a junction's signal post, the sea, a parked car), turn onto
+        // whichever cross street (or back the way it came) is clearest
         const L = M.line;
-        const lat = (car.pos.x - L.x) * L.fz - (car.pos.z - L.z) * L.fx;
-        M.laneErrMax = Math.max(M.laneErrMax, Math.abs(lat));
-        const hErr = Math.atan2(Math.sin(car.heading - Math.atan2(L.fx, L.fz)), Math.cos(car.heading - Math.atan2(L.fx, L.fz)));
-        const steer = -(lat * 0.35 + hErr * 2.2);             // + = steer left (A)
+        if (M.phase === "drive" && M.odo > 3) {
+          const look = 8 + v * 0.9;
+          const ahead = clearAhead(A, car, car.pos.x, car.pos.z, car.pos.y, L.h, look + 1);
+          if (ahead < look) {
+            let pick = null;
+            for (const dh of [Math.PI / 2, -Math.PI / 2, Math.PI]) {
+              const r = clearAhead(A, car, car.pos.x, car.pos.z, car.pos.y, L.h + dh, 40);
+              if (!pick || r > pick.r) pick = { dh: dh, r: r };
+            }
+            if (pick && pick.r > 12) {
+              const nh = L.h + pick.dh;
+              M.line = { x: car.pos.x, z: car.pos.z, h: nh, fx: Math.sin(nh), fz: Math.cos(nh) };
+              M.turns++; W.event("kit", "turn " + Math.round(pick.dh * 180 / Math.PI) + " deg (" + Math.round(pick.r) + " m clear)");
+            }
+          }
+        }
+        const N = M.line;
+        const lat = (car.pos.x - N.x) * N.fz - (car.pos.z - N.z) * N.fx;
+        const hErr = Math.atan2(Math.sin(car.heading - N.h), Math.cos(car.heading - N.h));
+        if (M.odo > 15 && Math.abs(hErr) < 0.15) M.laneErrMax = Math.max(M.laneErrMax, Math.abs(lat));
+        const steer = -(lat * 0.35 + hErr * 2.2);              // + = steer left (A)
         keys.a = steer > 0.08; keys.d = steer < -0.08;
+        // slow for the corner, back up to cruise once lined up
+        const want = Math.abs(hErr) > 0.35 ? 5 : SPEED;
         if (M.phase === "drive") {
-          keys.w = v < SPEED - 0.8; keys.s = false;
+          keys.w = v < want - 0.8; keys.s = v > want + 2.5;
           if (M.odo >= DIST) { M.reachedAt = +W.t().toFixed(2); go("brake"); }
           else if (M.phaseT > 30) { M.stalled = "never made the distance"; go("brake"); }
         } else {
@@ -142,7 +175,7 @@ CBZ.lab.kit("car-enter-drive", {
       car: car ? (car.model && car.model.name) : null, clearRunAhead: M.run,
       verbArmedAtDoor: M.armed, entered: M.entered, enteredAt: M.enteredAt,
       metresDriven: +M.odo.toFixed(1), topSpeed: +M.maxV.toFixed(1), reachedAt: M.reachedAt,
-      stoppedAt: M.stoppedAt, laneErrMax: +M.laneErrMax.toFixed(2), wallHits: M.walls,
+      stoppedAt: M.stoppedAt, turns: M.turns, wallHits: M.walls,
       exited: M.exited && !Pl.driving, exitGap: M.exitGap, feetOverGround: M.exitDy,
       hp: Pl.hp, hp0: M.hp0, phase: M.phase, stalled: M.stalled,
     };

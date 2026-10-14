@@ -19,13 +19,21 @@
 
    handle: arena, machines() (CBZ.islandVehicles), state() */
 CBZ.lab.ingredient("island", {
-  files: ["src/world/island_roads.js", "src/world/disaster_arena.js", "src/world/island_dressing.js",
-    "src/modes/survival.js", "src/systems/stairs.js", "src/systems/liftcore.js",
+  // BufferGeometryUtils is THREE's, not a CBZ symbol: the tracer cannot see it
+  files: ["src/vendor/BufferGeometryUtils.js", "src/world/island_roads.js", "src/world/disaster_arena.js", "src/world/island_dressing.js",
+    "src/systems/interactions.js", "src/modes/survival.js", "src/systems/stairs.js", "src/systems/liftcore.js",
     "src/city/airframe_kit.js", "src/city/airframes.js", "src/city/aircraftphysics.js",
     "src/world/carfx.js", "src/city/economy.js", "src/city/carbody.js", "src/city/carwheels.js", "src/city/carparts.js",
     "src/city/carseats.js", "src/city/playercars.js", "src/city/cardyn.js", "src/city/vehicles.js",
     "src/city/playeraircraft.js", "src/city/aircraft_doors.js", "src/systems/seat_exit.js",
-    "src/world/island_vehicles.js"],
+    "src/world/island_vehicles.js", "src/city/facades/*.js"],
+  /* what the island builder reaches through aliases (const VKIT =
+     CBZ.vegetationKit ...), which the tracer does not follow: the island has
+     to be the island, palms, facades and all, or the tower it crowns is not
+     the tower the game crowns */
+  symbols: ["vegetationKit", "treeTrunkGeo", "facadeList", "facadeDef", "dressFacade", "facadeOpenings",
+    "surfaceMaps", "groundSkin", "furnish", "propRegisterSeat", "debris", "waterSurge", "waterClock",
+    "FUEL", "FITOUT", "SURV", "addBox", "liftCore", "islandRoadKit", "islandDressing", "movingPlatform"],
   make: function (W, o) {
     const S = CBZ.surv;
     if (!S || !CBZ.modes || !CBZ.modes.survival) throw new Error("modes/survival.js did not load (no CBZ.surv)");
@@ -37,6 +45,11 @@ CBZ.lab.ingredient("island", {
     A.root.visible = true;
     // a match: island_vehicles.js sets its machines up on the next frame
     S.stats = { total: 1, placement: 0, disastersSurvived: 0 };
+    // NO ROUND TO WIN. survival.js decides the round the frame nobody else is
+    // alive ("last one standing" -> CBZ.winGame -> state "won", and every
+    // verb stands down). A lab island has no crowd, so its round never ends:
+    // the win card is not what an island kit measures.
+    CBZ.winGame = function () { return false; };
     W.islandBuildMs = Math.round(performance.now() - t0);
     const h = {
       arena: A, obj: A.root, noFrame: true,

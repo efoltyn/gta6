@@ -751,7 +751,7 @@
   function armVerbs() {
     S.armCar = null; S.armHeli = null;
     const Pl = P();
-    if (!Pl || !Pl.pos || Pl.dead || Pl.driving || Pl._aircraft || Pl._doorArc || Pl._swim || !CBZ.prisonPrompt) return;
+    if (!Pl || !Pl.pos || Pl.dead || Pl.driving || Pl._aircraft || Pl._doorArc || Pl._swim) return;
     if (g.state !== "playing") return;
     const px = Pl.pos.x, py = Pl.pos.y, pz = Pl.pos.z;
     let best = null, bd = CAR_REACH;
@@ -765,7 +765,8 @@
     if (best) {
       S.armCar = best;
       const c = best.car;
-      CBZ.prisonPrompt("island-car-drive", "@islandCarDrive", "Drive",
+      // the verb is armed by reach alone; the pill is how it is shown (and tapped)
+      if (CBZ.prisonPrompt) CBZ.prisonPrompt("island-car-drive", "@islandCarDrive", "Drive",
         { at: { x: c.pos.x, y: c.pos.y + 1.7, z: c.pos.z }, key: "e", bind: true, d2: bd * bd });
     }
     const h = S.heli;
@@ -774,7 +775,7 @@
       const d = Math.hypot(h.pos.x - px, h.pos.z - pz);
       if (d < HELI_REACH && Math.abs(dy) < 1.4) {
         S.armHeli = h;
-        CBZ.prisonPrompt("island-heli-board", "@islandHeliBoard", "Board",
+        if (CBZ.prisonPrompt) CBZ.prisonPrompt("island-heli-board", "@islandHeliBoard", "Board",
           { at: { x: h.pos.x, y: h.pos.y + 1.2, z: h.pos.z }, key: "e", bind: true, d2: Math.max(0.01, (d - 2) * (d - 2)) });
       }
     }
