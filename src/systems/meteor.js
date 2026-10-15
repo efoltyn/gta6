@@ -1179,7 +1179,7 @@
 
     // the afterglow ends when nothing is left moving or burning, or after
     // two minutes either way
-    if (ev.over && ((!ev.fronts.length && !ev.bolides.length && !ev.movers.length && !ev.fallers.length && !ev.smoke.length && !ev.curtains.length && !ev.sounds.length) || ev.overT > 120)) hardStop(true);
+    if (ev.over && ((!ev.fronts.length && !ev.bolides.length && !ev.movers.length && !ev.fallers.length && !ev.smoke.length && !ev.curtains.length && !ev.sounds.length) || ev.overT > (ev.settleBy || 120))) hardStop(true);
   }
 
   // one glowing segment of ionized train
@@ -1319,6 +1319,24 @@
     ev.over = true;
     ev.shower = null;
   }
+  /* settle(secs): THE SHOWER IS OVER AND THE SKY HAS TO SAY SO. stop() alone
+     let the afterglow run to two minutes, because a big body's dust train is
+     born with a 55-75 s life: the meteor "lasted way too long" and its haze
+     drifted over whatever came next. The director's calm calls this: no new
+     bodies, every puff fades out inside `secs`, and whatever is still in the
+     air at the deadline is cleared. What it did to the ground (craters,
+     blankets, felled trees, moved cars) stays until restore(). */
+  function settle(secs) {
+    if (!ev) return;
+    secs = Math.max(0.5, +secs || 8);
+    stop();
+    const by = ev.overT + secs;
+    ev.settleBy = Math.min(ev.settleBy || 120, by);
+    // staggered (golden-ratio spread, not the event's rng) so the haze thins
+    // instead of vanishing on one frame
+    for (let i = 0; i < ev.smoke.length; i++) { const p = ev.smoke[i]; p.life = Math.min(p.life, p.t + secs * (0.45 + 0.55 * ((i * 0.618034) % 1))); }
+    for (const s of ev.trains) s.life = Math.min(s.life, s.t + secs * 0.5);
+  }
   function hardStop() {
     if (!ev) return;
     const pl = P;
@@ -1364,8 +1382,10 @@
   if (CBZ.onUpdate) CBZ.onUpdate(27.5, function (dt) { if (ev && ev.over) tick(dt); });
 
   CBZ.meteor = {
-    begin, strike, shower, tick, stop, hardStop, restore, lightBoost,
+    begin, strike, shower, tick, stop, settle, hardStop, restore, lightBoost,
     live: function () { return !!ev && !ev.over; },
+    // anything of the event still in the sky (the afterglow included)
+    busy: function () { return !!ev; },
     // the physics, exported for the lab and the ratchet
     law: { overpressure, windBehind, dynamicP, craterOf, impactW, reachOf, SOUND_SPEED, CLASSES },
   };

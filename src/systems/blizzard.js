@@ -79,6 +79,9 @@
   const DRIFT_MAX_H = 1.7;       // tallest drift crest, metres
   const MOUND_MAX_H = 0.48;      // a buried body's mound
   const MELT_SECS = 240;         // drifts/mounds melt-out after the storm
+  // the director's calm (CBZ.blizzard.settle) shortens it: the next disaster
+  // starts on a green island, not under the last one's drifts
+  let meltSecs = MELT_SECS;
 
   /* ---- storm state ---- */
   const S = {
@@ -306,7 +309,7 @@
     const m = Math.hypot(wx, wz) || 1;
     S.wx = wx / m; S.wz = wz / m;
     S.intensity = ctx ? ctx.intensity : 0.2;
-    S.t = 0; S.live = false;
+    S.t = 0; S.live = false; meltSecs = MELT_SECS;
     A.frozen = 0; A.hypoDamage = 0; A.buried = 0;
     buildDrifts();
   }
@@ -391,10 +394,10 @@
     }
     if (!on()) return;
     if (!S.live && driftK > 0) {
-      driftK = Math.max(0, driftK - dt / MELT_SECS);
+      driftK = Math.max(0, driftK - dt / meltSecs);
       scaleDrifts();
       for (let i = 0; i < mounds.length; i++) {
-        mounds[i].h = Math.max(0, mounds[i].h - dt * (MOUND_MAX_H / MELT_SECS));
+        mounds[i].h = Math.max(0, mounds[i].h - dt * (MOUND_MAX_H / meltSecs));
         mounds[i].mesh.scale.y = Math.max(0.001, mounds[i].h);
       }
       if (driftK <= 0.001) clearDrifts();
@@ -426,8 +429,14 @@
     };
   };
 
+  // melt everything the storm left within `secs` (the calm between disasters)
+  function settle(secs) {
+    S.live = false;
+    meltSecs = Math.max(0.5, Math.min(MELT_SECS, +secs || 8));
+  }
   CBZ.blizzard = {
-    begin, storm, end, threat, safeDir,
+    begin, storm, end, threat, safeDir, settle,
+    busy: () => driftK > 0.02 || mounds.some((m) => m.h > 0.02),
     windbreakAt, exposureAt, roofedAt,
     drifts: () => drifts, mounds: () => mounds,
     state: () => S,
