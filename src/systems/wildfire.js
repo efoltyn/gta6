@@ -1548,7 +1548,7 @@
   function beginWarn(ctx, bridge) {
     const A = ctx.arena;
     F.arena = A; F.bridge = bridge || null;
-    F.live = true; F.after = false; F.svc = false; F.svcQ.length = 0; F.t = 0; F.intensity = ctx.intensity || 0; F.quench = false;
+    F.live = true; F.after = false; F.svc = false; F.svcQ.length = 0; F.t = 0; F.intensity = ctx.intensity || 0; F.quench = false; F.calmLock = false;
     F.spreadCd = 0; F.spotCd = 2.4; F.smokeLinger = 0;
     F.spots.length = 0; F.smoulders.length = 0; F.burningList.length = 0; F.sources.length = 0;
     zeroStats();
@@ -2036,6 +2036,9 @@
     return F.svcArena || (CBZ.surv && CBZ.surv.arena) || F.arena;
   }
   function serve() {
+    // the calm between disasters: nothing outside an event lights the island
+    // (an eruption's cooling bombs and lava kept relighting the bed after it)
+    if (F.calmLock) return null;
     const A = svcWorld();
     if (!A || !A.groundHeightAt || !A.center) return null;
     if (F.live) return F.arena === A ? A : null;      // the event's run takes it as it is
@@ -2173,7 +2176,7 @@
   function settle(secs) {
     secs = Math.max(0.5, +secs || 8);
     if (F.live || F.svc) stop();
-    F.quench = true;
+    F.quench = true; F.calmLock = true;
     F.svcQ.length = 0;
     F.smokeLinger = Math.min(F.smokeLinger, secs * 0.5);
     const A = F.arena;
@@ -2203,7 +2206,7 @@
     return false;
   }
   function hardStop() {
-    F.quench = false;
+    F.quench = false; F.calmLock = false;
     F.live = false; F.after = false; F.burningList.length = 0; F.sources.length = 0;
     F.spots.length = 0; F.smoulders.length = 0; F.seed = null;
     F.svc = false; F.svcQ.length = 0;
@@ -2390,6 +2393,8 @@
 
   CBZ.wildfire = {
     beginWarn, begin, tick, stop, settle, busy,
+    // the next disaster's warning: fire may be lit again
+    unlock() { F.calmLock = false; },
     // the fire as a service (see "THE FIRE AS A SERVICE")
     attach, igniteAt: igniteAtPublic, igniteTree: igniteTreePublic,
     igniteBuilding: igniteBuildingPublic, igniteCar: igniteCarPublic,

@@ -5159,6 +5159,7 @@
     }
     dir.nextId = null;
     dir.calm = false;
+    if (CBZ.wildfire && CBZ.wildfire.unlock) CBZ.wildfire.unlock();
     dir.cur = DEFS[id]; dir.curId = id; dir.st = Object.assign({}, chain && chain.st); dir.state = "warn"; dir.t = dir.cur.warnSecs;
     dir.overT = 0; dir.overName = null;   // a new warning supersedes the all-clear
     curCtx = makeCtx(0);
