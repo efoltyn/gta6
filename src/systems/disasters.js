@@ -2325,7 +2325,8 @@
     for (let i = 0; i < picks.length; i++) {
       const p = picks[i].geometry.parameters;
       const thin = Math.min(p.width, p.height, p.depth) <= 0.45;
-      field.takeWorld(picks[i], thin ? "panel" : "rubble");
+      // a body in the shared debris sim, carried by the water as a force
+      (field.takePiece || field.takeWorld)(picks[i], thin ? "panel" : "rubble");
     }
   }
 

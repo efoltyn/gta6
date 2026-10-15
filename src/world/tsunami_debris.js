@@ -199,6 +199,28 @@
      is one number. Must match CLASS below. */
   CBZ.tsuDebrisDraft = { car: 0.55, log: 0.30, panel: 0.12, rubble: 0.90, boat: 0.35, container: 1.30 };
 
+  /* THE LIVE FIELDS (2026-10-15). The island keeps ONE event's wreckage
+     alive at a time (disasters.js disposes the last field when the next
+     tsunami starts), and the match reset must be able to take all of it back
+     without knowing where disasters.js keeps it: every field registers here,
+     CBZ.tsuDebrisReset() disposes them all (taken world objects back where
+     they stood, the churn's own meshes gone), and the debris audit reads them. */
+  const liveFields = new Set();
+  CBZ.tsuDebrisReset = function () {
+    liveFields.forEach(function (f) { try { f.dispose(); } catch (e) {} });
+    liveFields.clear();
+    if (CBZ.debris && CBZ.debris.medium) CBZ.debris.medium("tsunami", null);
+  };
+  (CBZ.debrisAuditSources || (CBZ.debrisAuditSources = {})).tsunami = function (o) {
+    const out = { floating: 0, fast: 0, high: 0, maxSpeed: 0, maxHeight: 0, items: 0, list: [] };
+    liveFields.forEach(function (f) {
+      if (!f.auditInto) return;
+      try { f.auditInto(out, o || {}); } catch (e) {}
+    });
+    return out;
+  };
+  const MAX_SP = 12;          // m/s: the fastest a kinematic piece of the field moves
+
   CBZ.tsuDebrisField = function (cfg) {
     cfg = cfg || {};
     const root = cfg.root || null;
@@ -245,10 +267,21 @@
         stranded: false, hitCd: 0, onStrand: opts.onStrand || null, dispose: !!opts.dispose,
         inst: opts.inst || null, churn: opts.churn || null,
         vx: 0, vz: 0, x0: x, z0: z, travel: 0, floated: false, piled: false, carried: false, stackY: 0,
+        half: 0.3, stackT: 0, body: opts.body || null, home: opts.home || null,
       };
+      // its own half-height: what it stands on the ground by (a proxy of an
+      // instanced batch has no geometry: the class's draft stands in)
+      if (it.inst) it.half = Math.max(0.05, it.cls.sink);
+      else if (!it.body && obj && obj.isObject3D) {
+        try {
+          _hb.setFromObject(obj);
+          if (!_hb.isEmpty()) it.half = Math.max(0.05, (_hb.max.y - _hb.min.y) / 2);
+        } catch (e) {}
+      }
       items.push(it); entrained++;
       return it;
     }
+    const _hb = new THREE.Box3();
     // an instanced piece's obj is a detached proxy: copy its pose into the batch
     function sync(it) {
       const I = it.inst; if (!I) return;
@@ -332,7 +365,9 @@
           it.vx += ((w.u || 0) * 0.35 - it.vx) * k; it.vz += ((w.v || 0) * 0.35 - it.vz) * k;
         } else { it.vx -= it.vx * k; it.vz -= it.vz * k; }
       }
-      const sp = Math.hypot(it.vx, it.vz);
+      let sp = Math.hypot(it.vx, it.vz);
+      // a piece goes with the water, never faster than a bore runs inland
+      if (sp > MAX_SP) { it.vx *= MAX_SP / sp; it.vz *= MAX_SP / sp; sp = MAX_SP; }
       if (sp > 0.02) {
         let nx = it.x + it.vx * dt, nz = it.z + it.vz * dt;
         // THE PILE: a wall stops it, and a piece already stopped at the wall
@@ -359,16 +394,31 @@
           if (c.upright) it.roll = (it.ph > 3.14 ? 1 : -1) * (0.35 + 0.25 * (it.ph % 1));
           if (it.onStrand) { try { it.onStrand(it); } catch (e) {} }
         }
-        // never lifted yet (a boat still lying where the drawdown left it):
-        // exactly where it lies; otherwise it settles onto the ground or the pile
+        /* WHAT IT LIES ON CAN LEAVE. stackY used to be read once, when it
+           grounded: the piece under it refloated or was hauled off and this
+           one stayed up on nothing. Twice a second the pile is read again
+           and it may only come DOWN (eased below). */
+        it.stackT += dt;
+        if (it.stackT > 0.5) { it.stackT = 0; if (it.stackY > 0) it.stackY = Math.min(it.stackY, stackAt(it)); }
         const ty = gnd + 0.22 + it.stackY, y = it.obj.position.y;
-        it.obj.position.set(it.x, !it.floated && it.y0 != null ? it.y0 : y > ty ? Math.max(ty, y - dt * 4) : ty, it.z);
+        /* Never lifted yet (a boat lying where the drawdown left it): where it
+           lies, but only if that is ON the ground. It used to be held at the
+           height it was taken at forever, and a wall taken off an upper
+           storey of a house that then went down hung in the air there. */
+        let hold = null;
+        if (!it.floated && it.y0 != null) hold = it.y0 - it.half - gnd > 0.5 ? Math.max(gnd + it.half, y - dt * 6) : it.y0;
+        it.obj.position.set(it.x, hold != null ? hold : y > ty ? Math.max(ty, y - dt * 4) : ty, it.z);
         it.obj.rotation.set(it.pitch, it.yaw, it.roll);
         sync(it);
         return;
       }
       it.stackY = 0;
-      const surf = seaY(it.x, it.z);
+      /* THE WATER IT IS IN, not the sea's. floats was decided on the LOCAL
+         depth (the run-up field) but the piece was drawn at seaY - its draft:
+         the shared sea surface, which at the tsunami's peak stands metres
+         over a street the run-up field has only ankle-deep. The surface it
+         rides is the ground under it plus the depth that floated it. */
+      const surf = Math.min(seaY(it.x, it.z), gnd + depth);
       const bob = Math.sin((CBZ.now || 0) * 0.005 + it.ph) * (c.upright ? 0.12 : 0.22);
       it.obj.position.set(it.x, Math.max(gnd + 0.1, surf - c.sink + bob), it.z);
       if (c.upright) {
@@ -394,7 +444,69 @@
       ram(it, i, sp, it.vx / sp, it.vz / sp, 1);
     }
 
-    return {
+    /* A PIECE OF A BUILDING IS A BODY (2026-10-15). It falls, collides,
+       piles and is carried by the water medium below in systems/debris.js;
+       this field only asks where it is and how fast, for the battering ram. */
+    function bodyStep(it, i) {
+      const b = it.body, m = b.mesh;
+      if (!m || !m.parent) { it.obj = null; it.body = null; return; }
+      const p = m.position;
+      it.travel += Math.hypot(p.x - it.x, p.z - it.z);
+      it.x = p.x; it.z = p.z;
+      if (!it.carried && Math.hypot(it.x - it.x0, it.z - it.z0) > 3) { it.carried = true; carried++; }
+      it.stranded = !!b.asleep;
+      const sp = Math.hypot(b.v.x, b.v.z);
+      if (checkPhase !== (i % 3) || it.hitCd > 0 || sp < 1.3) return;
+      ram(it, i, sp, b.v.x / sp, b.v.z / sp, 1);
+    }
+
+    /* THE WATER, as a fluid for every loose body (CBZ.debris.medium): the
+       run-up field's local depth and current where it has one, else the sea
+       over the ground and the event's flow. Registered while this field has
+       a flood to carry things in. */
+    const _mw = {};
+    let envDx = 1, envDz = 0, envFlow = 0, mediumOn = false;
+    function waterAt(x, y, z, out) {
+      const g = groundY(x, z);
+      if (flowAt) {
+        const w = flowAt(x, z, _mw);
+        const d = w && Number.isFinite(w.depth) ? w.depth : 0;
+        if (d < 0.05) return false;
+        out.surf = g + d; out.vx = w.u || 0; out.vz = w.v || 0; out.vy = 0; out.rho = 1000;
+        return true;
+      }
+      const sy = seaY(x, z);
+      if (!(sy - g > 0.05)) return false;
+      out.surf = sy; out.vx = envDx * envFlow; out.vz = envDz * envFlow; out.vy = 0; out.rho = 1000;
+      return true;
+    }
+    function medium(on) {
+      if (on === mediumOn || !CBZ.debris || !CBZ.debris.medium) return;
+      mediumOn = on;
+      CBZ.debris.medium("tsunami", on ? waterAt : null);
+    }
+    medium(true);
+
+    const api = {
+      /* A REAL PIECE OF A BUILDING into the water: the shared body sim takes
+         it whole (its own triangles, its own material; the merged shell it
+         was drawn in lets it go), and the water carries it as a force. */
+      takePiece(obj, kind) {
+        if (!obj) return null;
+        if (!CBZ.debris || !CBZ.debris.adopt) return api.takeWorld(obj, kind);
+        let v;
+        if (flowAt) {
+          const wp = obj.getWorldPosition(new THREE.Vector3());
+          const w = flowAt(wp.x, wp.z, _mw);
+          if (w && w.depth > 0.05) v = { x: (w.u || 0) * 0.5, y: 0.4, z: (w.v || 0) * 0.5 };
+        }
+        let r = null;
+        try { r = CBZ.debris.adopt(obj, { whole: "all", owner: "tsunami", maxLife: 120, velocity: v }); } catch (e) { r = null; }
+        const body = r && r.live && r.live[0];
+        if (!body) return null;
+        const p = body.mesh.position;
+        return add(body.mesh, p.x, p.z, kind, { body: body });
+      },
       /* ENTRAIN A REAL WORLD OBJECT. The caller has already taken it out of
          whatever system owned it (pulled its collider, marked the record dead)
          — this only takes over where it is drawn. */
@@ -408,8 +520,10 @@
       takeWorld(obj, kind, opts) {
         if (!obj || !root) return null;
         const wp = obj.getWorldPosition(new THREE.Vector3());
+        // where it stood, so the reset puts it back
+        const home = { parent: obj.parent, p: obj.position.clone(), q: obj.quaternion.clone(), s: obj.scale.clone(), vis: obj.visible };
         if (obj.parent !== root) root.attach(obj);
-        const it = add(obj, wp.x, wp.z, kind, opts);
+        const it = add(obj, wp.x, wp.z, kind, Object.assign({ home: home }, opts || {}));
         it.yaw = obj.rotation.y; it.pitch = obj.rotation.x; it.roll = obj.rotation.z;
         it.y0 = obj.position.y;
         return it;
@@ -422,10 +536,12 @@
         env = env || {};
         const dx = Number.isFinite(env.dx) ? env.dx : 1, dz = Number.isFinite(env.dz) ? env.dz : 0;
         const flow = Number.isFinite(env.flow) ? env.flow : 0;
+        envDx = dx; envDz = dz; envFlow = flow;
         checkPhase = (checkPhase + 1) % 3;
         for (let i = 0; i < items.length; i++) {
           const it = items[i], c = it.cls;
           if (!it.obj) continue;
+          if (it.body) { if (it.hitCd > 0) it.hitCd -= dt; bodyStep(it, i); continue; }
           if (it.churn) {
             const F = env.front;
             if (F && !(Number.isFinite(F.land) && F.land >= it.churn.rel)) {
@@ -469,7 +585,7 @@
             continue;
           }
           it.stranded = false;
-          const v = flow * c.drift;
+          const v = Math.max(-MAX_SP, Math.min(MAX_SP, flow * c.drift));
           const step2 = v * dt;
           it.x += dx * step2 - dz * it.lat * dt * Math.abs(v) * 0.25;
           it.z += dz * step2 + dx * it.lat * dt * Math.abs(v) * 0.25;
@@ -560,18 +676,41 @@
       },
 
       strandAll() {
+        medium(false);                       // the water has gone: nothing carries a body now
         for (let i = 0; i < items.length; i++) {
-          const it = items[i]; if (!it.obj) continue;
+          const it = items[i]; if (!it.obj || it.body) continue;
           if (it.churn) {
             const posed = it.churn.posed;
             it.churn = null; churnLive--;
             if (!posed) { if (!it.inst) it.obj.visible = false; it.obj = null; continue; }
           }
           const gnd = groundY(it.x, it.z);
-          it.obj.position.set(it.x, gnd + 0.22, it.z);
+          it.stackY = 0;
+          it.obj.position.set(it.x, gnd + Math.max(0.22, Math.min(it.half, 1.5)), it.z);
           it.obj.rotation.set(it.pitch, it.yaw, it.roll);
           sync(it);
-          it.stranded = true;
+          it.stranded = true; it.floated = true;
+        }
+      },
+      /* THE AUDIT (CBZ.debrisAuditSources.tsunami): a stranded piece of this
+         field's own (bodies are debris.js's to count) whose bottom is more
+         than half a metre over the ground plus whatever it is piled on. */
+      auditInto(out, o) {
+        const high = o.high || 120, fast = o.fast || 30;
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (!it.obj || it.body || it.churn) continue;
+          out.items++;
+          const y = it.obj.position.y, gnd = groundY(it.x, it.z);
+          const sp = Math.hypot(it.vx, it.vz);
+          if (sp > out.maxSpeed) out.maxSpeed = +sp.toFixed(1);
+          if (sp > fast) out.fast++;
+          const h = y - gnd;
+          if (h > out.maxHeight) out.maxHeight = +h.toFixed(1);
+          if (h > high) out.high++;
+          if (!it.stranded) continue;
+          const gap = (y - it.half) - (gnd + stackAt(it));
+          if (gap > 0.5) { out.floating++; if (out.list.length < 6) out.list.push({ kind: it.kind, x: +it.x.toFixed(1), y: +y.toFixed(1), z: +it.z.toFixed(1), gap: +gap.toFixed(2) }); }
         }
       },
       count() { return items.length; },
@@ -599,9 +738,22 @@
          came from. Only items explicitly flagged `dispose` (none, today) are
          removed; there are no pooled fakes left to destroy. */
       dispose() {
+        medium(false);
+        liveFields.delete(api);
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
-          if (it.dispose && it.obj && it.obj.parent) it.obj.parent.remove(it.obj);
+          if (it.body) continue;                     // debris.js owns it (owner 'tsunami')
+          if (it.dispose && it.obj && it.obj.parent) { it.obj.parent.remove(it.obj); continue; }
+          /* A WORLD OBJECT GOES HOME. A hull or a container the field lifted
+             off the harbour used to stay wherever the last flood left it, in
+             the field's root, untracked, for every match after. */
+          const H = it.home;
+          if (H && it.obj) {
+            const o = it.obj;
+            if (H.parent && o.parent !== H.parent) H.parent.add(o);
+            o.position.copy(H.p); o.quaternion.copy(H.q); o.scale.copy(H.s); o.visible = H.vis;
+            o.updateMatrixWorld(true);
+          }
         }
         // the churn's own batches (geometry + material stay in the page kit)
         for (let i = 0; i < churnMeshes.length; i++) {
@@ -613,6 +765,8 @@
         items.length = 0;
       },
     };
+    liveFields.add(api);
+    return api;
   };
 
 })();

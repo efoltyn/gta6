@@ -56,10 +56,10 @@
               FRONDS-FORWARD, fronds strip from ~33 m/s, and only a cat-4/5
               gust (62-78 m/s) takes the whole crown off.
      roofs    uplift peaks at the windward edge and the two corners beside
-              it, so each roof PEELS FROM ITS EDGES: a flap lifts and flutters
-              at the windward edge, tears away as a sheet of THIS roof's own
-              colour, and the bare decking behind it grows as a dark band in
-              from the edge. Peel starts at 30-40 m/s; a cat-5 strips roofs.
+              it, so each roof PEELS FROM ITS EDGES: sheets of THIS roof's own
+              colour tear off the windward edge and its corners as rigid
+              bodies, from wherever the roof is NOW. Peel starts at 30-40 m/s;
+              a cat-5 strips roofs.
      windows  a gust over ~46 m/s (or an opened roof, internal pressure)
               blows the WINDWARD face's glass in (world.shatter, the island's
               own panes).
@@ -67,14 +67,16 @@
               through ONE adapter (damageBuilding below: CBZ.collapse.damage
               when that API exists, the world's own ledger otherwise),
               capped so wind alone never levels a block.
-     debris   ONE instanced pool (one draw call) of real pieces with a source:
-              roof sheets, stripped fronds, branches, sign panels. Each is
-              aerodynamic — dragged toward the local wind, lifted in
-              proportion to v², tumbling — then skitters along the ground or
-              floats on the water, and STAYS (the aftermath is the evidence).
+     debris   the ONE body sim (systems/debris.js), owner "hurricane": roof
+              sheets and sign panels are rigid bodies, stripped fronds and
+              branches are its bits. The storm registers itself as a FLUID
+              (CBZ.debris.medium) while it lives, so the wind is a force on
+              them — capped, ceilinged, never a position — and gravity, the
+              buildings, the ground, rest and sleep are the shared sim's. They
+              STAY until resetWorld() (the aftermath is the evidence).
               The two Points streams (grit/spray low and fast, rag higher)
               stay as the fine material you cannot count.
-     signs    lean ∝ v², panel rips off at 30-42 m/s into the debris pool.
+     signs    lean ∝ v², the panel itself rips off at 30-42 m/s (debris.adopt).
      power    the island splits into DISTRICTS (the world's own, else a grid
               over its radius). A district browns out, FLICKERS for a second
               or two and goes dark when its peak gust passes its grid's
@@ -105,7 +107,8 @@
    stream. Flight paths, flicker, spray: runtime FX, Math.random.
 
    COST. All per-frame work is flat arrays and a few hundred quaternion
-   writes; the town adds 3 draw calls (debris pool, decking strips, spray)
+   writes; the town adds 1 draw call (spray; its pieces draw as the shared
+   sim's rubble)
    and a 9-vec4 uniform. Measured: CBZ.hurricaneAudit().tickMs. Built for a
    phone: nothing allocates per frame, nothing is per-lamp or per-pane.
 
@@ -396,192 +399,92 @@
   }
 
   /* ============================================================
-     THE DEBRIS POOL — one InstancedMesh of real pieces with real sources.
-     A piece is a box scaled to what it is (a roof sheet, a plank, a frond, a
-     sign panel) in its source's colour. States: 1 flying, 2 skittering on
-     the ground, 3 at rest, 4 afloat, 5 a FLAP still hinged to its roof edge.
+     WHAT THE WIND TEARS OFF — pieces in the ONE body sim (systems/debris.js).
+     This file used to keep a private pool (unit boxes, a private flutter
+     lift, states for flying / skittering / afloat / a hinged FLAP) and a
+     separate instanced strip of bare decking drawn over every peeled roof
+     edge. Neither knew the building: when a later quake, sinkhole or
+     collapse dropped or tilted a peeled house, its decking strips and flaps
+     stayed at the old roof height — the dark plates hovering over the town.
+     Both are gone. A roof sheet is a real rigid body in the roof's colour, a
+     frond or a branch is a debris bit, a sign is its own panel adopted; the
+     storm is a FLUID (CBZ.debris.medium) that pushes them, and gravity, the
+     ground, the buildings and the rest are the shared sim's.
      ============================================================ */
-  const DMAX = 180;
-  const KIND = { sheet: 0, board: 1, frond: 2, branch: 3, sign: 4 };
-  // per kind: drag rate toward the wind (1/s), lift per (m/s)^2, settle tilt
-  const KDRAG = [1.6, 0.9, 2.2, 1.0, 1.4];
-  const KLIFT = [0.0042, 0.0016, 0.0030, 0.0012, 0.0034];
-  let DP = null;
+  const OWNER = "hurricane";
   const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _c = new THREE.Color();
-  function debrisPool() {
-    if (DP) return DP;
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    mat.name = "hurricane-debris";
-    const mesh = new THREE.InstancedMesh(geo, mat, DMAX);
-    mesh.name = "hurricane-debris";
-    mesh.frustumCulled = false; mesh.castShadow = true; mesh.receiveShadow = true;
-    if (mesh.instanceMatrix.setUsage) mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    _m4.makeScale(0, 0, 0);
-    for (let i = 0; i < DMAX; i++) { mesh.setMatrixAt(i, _m4); mesh.setColorAt(i, _c.setRGB(1, 1, 1)); }
-    mesh.count = 0;
-    hostRoot().add(mesh);
-    const F = function () { return new Float32Array(DMAX); };
-    DP = {
-      mesh, geo, mat, top: 0, dirty: false,
-      st: new Uint8Array(DMAX), kind: new Uint8Array(DMAX), born: F(),
-      x: F(), y: F(), z: F(), vx: F(), vy: F(), vz: F(),
-      rx: F(), ry: F(), rz: F(), wx: F(), wy: F(), wz: F(),
-      sx: F(), sy: F(), sz: F(),
-      // a flap's hinge: the edge line it pivots about and its owner
-      hx: F(), hz: F(), hdx: F(), hdz: F(), flapK: F(), owner: new Int32Array(DMAX).fill(-1),
-      hits: new Uint8Array(DMAX),
-      clock: 0,
-    };
-    return DP;
+  const sheetMats = new Map();
+  function sheetMat(hex) {
+    let m = sheetMats.get(hex);
+    if (!m) { m = new THREE.MeshLambertMaterial({ color: hex }); m.name = "hurricane-roof-sheet"; m._shared = true; sheetMats.set(hex, m); }
+    return m;
   }
-  function debrisSlot() {
-    const P = debrisPool();
-    // a free slot, else the OLDEST resting piece, else the oldest airborne one
-    let best = -1, bestT = 1e9, bestFly = -1, bestFlyT = 1e9;
-    for (let i = 0; i < DMAX; i++) {
-      const s = P.st[i];
-      if (s === 0) return i;
-      if (s === 3 || s === 4) { if (P.born[i] < bestT) { bestT = P.born[i]; best = i; } }
-      else if (s !== 5 && P.born[i] < bestFlyT) { bestFlyT = P.born[i]; bestFly = i; }
-    }
-    return best >= 0 ? best : bestFly;
+  // a sheet of THIS roof's covering torn off its edge: a rigid body
+  function tearSheet(x, y, z, alongX, len, dep, hex, vx, vy, vz) {
+    const D = CBZ.debris; if (!D || !D.shatterBox) return 0;
+    const hl = len / 2, hd = dep / 2;
+    const box = alongX
+      ? { minX: x - hl, maxX: x + hl, minY: y, maxY: y + 0.035, minZ: z - hd, maxZ: z + hd }
+      : { minX: x - hd, maxX: x + hd, minY: y, maxY: y + 0.035, minZ: z - hl, maxZ: z + hl };
+    let out = null;
+    try {
+      // corrugated roofing is ~6 kg/m2 (not a 35 mm slab of steel), and it
+      // catches the wind on its face
+      out = D.shatterBox(box, sheetMat(hex), { whole: "one", kind: "metal", owner: OWNER, launch: false, grit: false, dust: false,
+        maxLife: 60, mass: Math.max(2, len * dep * 6), area: len * dep * 0.7, cd: 1.2, velocity: { x: vx, y: vy, z: vz }, angular: { x: (Math.random() - 0.5) * 6, y: (Math.random() - 0.5) * 4, z: (Math.random() - 0.5) * 6 } });
+    } catch (e) { out = null; }
+    const n = out ? out.pieces || 0 : 0;
+    if (n) town.debrisLaunched += n;
+    return n;
   }
-  function launchPiece(kind, x, y, z, sx, sy, sz, hex, vx, vy, vz) {
-    const P = debrisPool();
-    const i = debrisSlot();
-    if (i < 0) return -1;
-    P.st[i] = 1; P.kind[i] = kind; P.born[i] = P.clock; P.owner[i] = -1; P.hits[i] = 0;
-    P.x[i] = x; P.y[i] = y; P.z[i] = z;
-    P.vx[i] = vx || 0; P.vy[i] = vy || 0; P.vz[i] = vz || 0;
-    P.rx[i] = Math.random() * 6.28; P.ry[i] = Math.random() * 6.28; P.rz[i] = Math.random() * 6.28;
-    const spin = 3 + Math.random() * 7;
-    P.wx[i] = (Math.random() - 0.5) * spin; P.wy[i] = (Math.random() - 0.5) * spin; P.wz[i] = (Math.random() - 0.5) * spin;
-    P.sx[i] = sx; P.sy[i] = sy; P.sz[i] = sz;
-    P.mesh.setColorAt(i, _c.setHex(hex));
-    if (P.mesh.instanceColor) P.mesh.instanceColor.needsUpdate = true;
-    if (i + 1 > P.top) P.top = i + 1;
-    P.mesh.count = P.top;
-    P.dirty = true;
-    town.debrisLaunched++;
-    return i;
+  // a frond / a branch: one bit of the shared grit
+  function tearBit(shape, x, y, z, size, hex, vx, vy, vz) {
+    const D = CBZ.debris; if (!D || !D.bit) return 0;
+    let n = 0;
+    try { n = D.bit(x, y, z, { shape: shape, kind: shape === "flake" ? "foliage" : "wood", color: hex, size: size, vel: { x: vx, y: vy, z: vz }, owner: OWNER }) || 0; } catch (e) { n = 0; }
+    town.debrisLaunched += n;
+    return n;
   }
-  function writePiece(P, i) {
-    _e.set(P.rx[i], P.ry[i], P.rz[i]);
-    _q.setFromEuler(_e);
-    _p.set(P.x[i], P.y[i], P.z[i]);
-    _s.set(P.sx[i], P.sy[i], P.sz[i]);
-    _m4.compose(_p, _q, _s);
-    P.mesh.setMatrixAt(i, _m4);
-    P.dirty = true;
+  /* THE STORM IS A FLUID. While it lives, its wind field pushes every live
+     piece and bit (not only its own) through the shared sim. */
+  function fluid(x, y, z, out) {
+    if (!S) return false;
+    const w = windAt(x, z);
+    if (!(w.speed > 0.5)) return false;
+    // the wind is weaker in the ground's own boundary layer
+    const g = groundAt(x, z);
+    const k = Math.min(1, 0.55 + 0.45 * Math.max(0, y - g) / 10);
+    out.vx = w.x * w.speed * k; out.vz = w.z * w.speed * k;
+    out.vy = Math.min(4, w.speed * 0.05);
+    out.rho = 1.225;
+    out.ceil = g + 25;
+    return true;
   }
-  function tickPool(dt) {
-    const P = DP; if (!P) return;
-    P.clock += dt;
-    let live = 0;
-    for (let i = 0; i < P.top; i++) {
-      const s = P.st[i];
-      if (s === 0 || s === 3) continue;
-      live++;
-      if (s === 5) { tickFlap(P, i, dt); continue; }
-      const k = P.kind[i];
-      const w = windAt(P.x[i], P.z[i]);
-      const wvx = w.x * w.speed, wvz = w.z * w.speed;
-      const g = groundAt(P.x[i], P.z[i]);
-      const sea = seaRest() + (S ? S.surge : 0);
-      if (s === 4) {
-        // afloat: rides the surface, drifts with the wind's drag on it
-        P.x[i] += (wvx * 0.04 + (S ? S.fwdX * S.surge * 0.4 : 0)) * dt;
-        P.z[i] += (wvz * 0.04 + (S ? S.fwdZ * S.surge * 0.4 : 0)) * dt;
-        const surf = seaAt(P.x[i], P.z[i]);
-        if (surf < g + 0.02) { P.st[i] = 3; P.y[i] = g + 0.03; }
-        else P.y[i] = surf + 0.02;
-        writePiece(P, i);
-        continue;
-      }
-      // relative wind drives it; lift grows with the square of the relative speed
-      const rvx = wvx - P.vx[i], rvz = wvz - P.vz[i];
-      const rv = Math.hypot(rvx, rvz);
-      const kd = KDRAG[k] * Math.min(1, dt * 1.0);
-      P.vx[i] += rvx * kd; P.vz[i] += rvz * kd;
-      // flutter: a plate's lift flips with its attitude, so it climbs and dives
-      const flut = 0.55 + 0.45 * Math.sin(P.rx[i] * 1.7 + P.rz[i]);
-      P.vy[i] += (-9.8 + Math.min(14, KLIFT[k] * rv * rv * flut * (s === 2 ? 0.7 : 1)) ) * dt;
-      P.vy[i] *= 1 - Math.min(1, dt * 0.35);
-      P.x[i] += P.vx[i] * dt; P.y[i] += P.vy[i] * dt; P.z[i] += P.vz[i] * dt;
-      P.rx[i] += P.wx[i] * dt; P.ry[i] += P.wy[i] * dt; P.rz[i] += P.wz[i] * dt;
-      // a building's wall stops it (the island's colliders, if the engine has them)
-      if (CBZ.collide && (s === 1) && P.y[i] < g + 12) {
-        _p.set(P.x[i], P.y[i], P.z[i]);
-        const before = _p.x + _p.z;
-        try { CBZ.collide(_p, 0.3); } catch (e) {}
-        if (Math.abs(_p.x + _p.z - before) > 1e-4) {
-          P.x[i] = _p.x; P.z[i] = _p.z;
-          P.vx[i] *= -0.2; P.vz[i] *= -0.2; P.wx[i] *= 0.5; P.wz[i] *= 0.5;
-        }
-      }
-      if (sea > g && P.y[i] <= sea + 0.02) {
-        P.st[i] = 4; P.y[i] = sea + 0.02; P.vx[i] = P.vz[i] = P.vy[i] = 0;
-        P.rx[i] = (Math.random() - 0.5) * 0.2; P.rz[i] = (Math.random() - 0.5) * 0.2;
-      } else if (P.y[i] <= g + P.sy[i] * 0.5) {
-        P.y[i] = g + P.sy[i] * 0.5;
-        const sp = Math.hypot(P.vx[i], P.vz[i]);
-        if (w.speed > 22 && sp > 2) {
-          // SKITTER: it tumbles along the street while the wind still has it
-          P.st[i] = 2;
-          P.vy[i] = Math.abs(P.vy[i]) * 0.25 + Math.random() * 1.2;
-          P.vx[i] *= 0.7; P.vz[i] *= 0.7;
-          P.wx[i] *= 0.7; P.wz[i] *= 0.7;
-        } else {
-          P.st[i] = 3;
-          // at rest it lies FLAT on its biggest face
-          P.rx[i] = (Math.random() - 0.5) * 0.18; P.rz[i] = (Math.random() - 0.5) * 0.18;
-          P.vx[i] = P.vy[i] = P.vz[i] = 0;
-        }
-      }
-      writePiece(P, i);
-    }
-    // a resting piece the wind finds again is picked back up
-    if (S && (P.clock * 4 | 0) !== ((P.clock - dt) * 4 | 0)) {
-      for (let i = 0; i < P.top; i++) {
-        if (P.st[i] !== 3) continue;
-        const w = windAt(P.x[i], P.z[i]);
-        if (w.speed > 34 + 30 * h01(P.x[i], P.z[i], i)) {
-          P.st[i] = 2; P.vy[i] = 2 + Math.random() * 3;
-          P.wx[i] = (Math.random() - 0.5) * 6; P.wz[i] = (Math.random() - 0.5) * 6;
-        }
-      }
-    }
-    if (P.dirty) { P.mesh.instanceMatrix.needsUpdate = true; P.dirty = false; }
-    P.live = live;
+  function fluidOn(on) {
+    const D = CBZ.debris; if (!D || !D.medium) return;
+    try { D.medium(OWNER, on ? fluid : null); } catch (e) {}
   }
-  /* AFTER THE STORM the pieces still in the air come DOWN (the field is
-     calm, windAt answers 0) and flaps settle — they must never hang frozen
-     in mid-air once the def calls end(). Costs nothing once all are at rest. */
-  if (CBZ.onUpdate) CBZ.onUpdate(47.6, function (dt) {
-    if (S || !DP || !DP.live) return;
-    tickPool(Math.min(0.05, dt || 0.016));
-  });
-  /* real hits: a flying piece moving fast through a body. Checked at 10 Hz
-     on pieces above 14 m/s — the stochastic strike in the def stays as the
-     material you never see. */
+  /* real hits: a piece of the storm's own moving fast through a body.
+     Checked at 10 Hz on pieces above 14 m/s — the stochastic strike in the
+     def stays as the material you never see. */
   let hitClock = 0;
   function debrisHits(dt) {
-    const P = DP; if (!P || !WD || !WD.actors || !WD.hit) return;
+    const D = CBZ.debris;
+    if (!D || !D.forEachLive || !WD || !WD.actors || !WD.hit) return;
     hitClock += dt; if (hitClock < 0.1) return; hitClock = 0;
-    for (let i = 0; i < P.top; i++) {
-      if (P.st[i] !== 1 || P.hits[i]) continue;
-      const sp = Math.hypot(P.vx[i], P.vz[i]);
-      if (sp < 14) continue;
-      const px = P.x[i], py = P.y[i], pz = P.z[i];
+    D.forEachLive(function (b) {
+      if (b.owner !== OWNER || b._hurHit || b.asleep) return;
+      const sp = Math.hypot(b.v.x, b.v.z);
+      if (sp < 14) return;
+      const p = b.mesh.position;
       WD.actors(function (a) {
-        if (P.hits[i] || a.dead) return;
-        const dx = a.pos.x - px, dz = a.pos.z - pz;
-        if (dx * dx + dz * dz > 0.9 || py < a.pos.y - 0.2 || py > a.pos.y + 2.0) return;
-        P.hits[i] = 1; town.debrisHits++;
-        try { WD.hit(a, { dirx: P.vx[i] / sp, dirz: P.vz[i] / sp, speed: sp, kind: P.kind[i] }); } catch (e) {}
+        if (b._hurHit || a.dead) return;
+        const dx = a.pos.x - p.x, dz = a.pos.z - p.z;
+        if (dx * dx + dz * dz > 0.9 || p.y < a.pos.y - 0.2 || p.y > a.pos.y + 2.0) return;
+        b._hurHit = 1; town.debrisHits++;
+        try { WD.hit(a, { dirx: b.v.x / sp, dirz: b.v.z / sp, speed: sp, kind: b.kind === "metal" ? 0 : 4 }); } catch (e) {}
       });
-    }
+    });
   }
 
   /* ============================================================
@@ -663,8 +566,8 @@
             try { WD.hurtLine(t.x, t.z, t.x + st.fdx * st.H, t.z + st.fdz * st.H, 1.6, "crushed by a falling tree"); } catch (e) {}
           }
           // the crown hits: leaves and twigs burst off it
-          for (let k = 0; k < 2; k++) launchPiece(KIND.branch, t.x + st.fdx * st.H * 0.8, groundAt(t.x, t.z) + 1, t.z + st.fdz * st.H * 0.8,
-            0.9 + Math.random(), 0.09, 0.09, t.barkHex != null ? t.barkHex : 0x5a4636, w.x * 4, 2 + Math.random() * 2, w.z * 4);
+          for (let k = 0; k < 2; k++) tearBit("plank", t.x + st.fdx * st.H * 0.8, groundAt(t.x, t.z) + 1, t.z + st.fdz * st.H * 0.8,
+            0.9 + Math.random(), t.barkHex != null ? t.barkHex : 0x5a4636, w.x * 4, 2 + Math.random() * 2, w.z * 4);
         }
         applyTree(t, st, st.fall, st.fdz, -st.fdx, 0.05, 1);
         continue;
@@ -694,11 +597,11 @@
           const top = t.foliage.position;
           if (st.palm) {
             town.frondsStripped++;
-            launchPiece(KIND.frond, top.x, top.y, top.z, 2.6, 0.04, 0.55, t.leafHex != null ? t.leafHex : 0x2a4c14,
+            tearBit("flake", top.x, top.y, top.z, 1.3, t.leafHex != null ? t.leafHex : 0x2a4c14,
               w.x * v * 0.5, 2 + Math.random() * 3, w.z * v * 0.5);
           } else {
             town.branchesStripped++;
-            launchPiece(KIND.branch, top.x, top.y - 0.5, top.z, 1.2 + Math.random() * 0.8, 0.1, 0.1, t.barkHex != null ? t.barkHex : 0x5a4636,
+            tearBit("plank", top.x, top.y - 0.5, top.z, 1.2 + Math.random() * 0.8, t.barkHex != null ? t.barkHex : 0x5a4636,
               w.x * v * 0.4, 2 + Math.random() * 2, w.z * v * 0.4);
           }
         }
@@ -713,8 +616,8 @@
             st.topped = true; town.palmsTopped++;
             const top = t.foliage.position;
             t.foliage.visible = false;
-            for (let k = 0; k < 5; k++) launchPiece(KIND.frond, top.x + (Math.random() - 0.5), top.y, top.z + (Math.random() - 0.5),
-              2.6, 0.04, 0.55, t.leafHex != null ? t.leafHex : 0x2a4c14, w.x * v * 0.5, 1 + Math.random() * 4, w.z * v * 0.5);
+            for (let k = 0; k < 5; k++) tearBit("flake", top.x + (Math.random() - 0.5), top.y, top.z + (Math.random() - 0.5),
+              1.3, t.leafHex != null ? t.leafHex : 0x2a4c14, w.x * v * 0.5, 1 + Math.random() * 4, w.z * v * 0.5);
           }
         } else {
           st.down = 1; st.fall = tilt; st.fallV = Math.hypot(st.vx, st.vz) * 0.5;
@@ -745,28 +648,14 @@
 
   /* ============================================================
      ROOFS, WINDOWS, FRAME
-     Edges: 0 -z, 1 +z, 2 -x, 3 +x. Peel depth per edge in metres; the bare
-     decking left behind is one instanced strip per peeled edge.
+     Edges: 0 -z, 1 +z, 2 -x, 3 +x. Peel depth per edge in metres; every
+     ~0.9 m of edge peeled tears a sheet off as a rigid body. (The instanced
+     "bare decking" strips and hinged flaps that used to stand for the peel
+     are gone: they were drawn in world space off the building's ORIGINAL
+     roof height and hovered there once anything moved the building.)
      ============================================================ */
   const EDGE_N = [[0, -1], [0, 1], [-1, 0], [1, 0]];
-  let DK = null;                  // the decking strip pool
-  const DKMAX = 4 * 96;
   const touchedBldg = [];
-  function deckPool() {
-    if (DK) return DK;
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    const mat = new THREE.MeshLambertMaterial({ color: 0x5a4632 });   // bare OSB / felt
-    mat.name = "hurricane-roof-deck";
-    const mesh = new THREE.InstancedMesh(geo, mat, DKMAX);
-    mesh.name = "hurricane-roof-deck";
-    mesh.frustumCulled = false; mesh.receiveShadow = true;
-    _m4.makeScale(0, 0, 0);
-    for (let i = 0; i < DKMAX; i++) mesh.setMatrixAt(i, _m4);
-    mesh.count = 0;
-    hostRoot().add(mesh);
-    DK = { mesh, geo, mat, n: 0 };
-    return DK;
-  }
   function roofHexOf(b) {
     if (b.roofHex != null) return b.roofHex;
     if (b._hurRoofHex != null) return b._hurRoofHex;
@@ -790,81 +679,12 @@
     if (b._hur) return b._hur;
     const st = b._hur = {
       roofY: b.roofY != null ? b.roofY : (b.gy || 0) + b.h,
-      peel: [0, 0, 0, 0], sheet: [0, 0, 0, 0], deck: [-1, -1, -1, -1], flap: -1, flapEdge: -1,
+      peel: [0, 0, 0, 0], sheet: [0, 0, 0, 0], gy0: b.group ? b.group.position.y : null,
       thr: 28 + 12 * h01(b.x, b.z, 21), faces: 0, faceK: [0, 0, 0, 0], frame: 0, peak: 0, peeling: false, stripped: false, vs: 0,
       hex: roofHexOf(b),
     };
     touchedBldg.push(b);
     return st;
-  }
-  function writeDeck(b, st, e) {
-    const D = deckPool();
-    if (st.deck[e] < 0) { if (D.n >= DKMAX) return; st.deck[e] = D.n++; D.mesh.count = D.n; }
-    const dep = st.peel[e];
-    const n = EDGE_N[e];
-    const along = n[0] ? b.d : b.w;
-    // the band sits just proud of the roof along the edge, `dep` deep
-    const cx = b.x + n[0] * (b.w / 2 - dep / 2), cz = b.z + n[1] * (b.d / 2 - dep / 2);
-    _q.identity();
-    _p.set(cx, st.roofY + 0.025, cz);
-    _s.set(n[0] ? dep : along - 0.1, 0.05, n[0] ? along - 0.1 : dep);
-    _m4.compose(_p, _q, _s);
-    D.mesh.setMatrixAt(st.deck[e], _m4);
-    D.mesh.instanceMatrix.needsUpdate = true;
-  }
-  // a FLAP: a sheet still hinged on the windward edge, lifting and fluttering
-  function startFlap(b, st, e, w) {
-    const P = debrisPool();
-    const i = debrisSlot(); if (i < 0) return;
-    const n = EDGE_N[e];
-    const along = n[0] ? b.d : b.w;
-    const seg = Math.min(along * 0.4, 2.4 + 2 * h01(b.x, b.z, 30 + st.sheet[e]));
-    const off = (h01(b.x, b.z, 40 + st.sheet[e]) - 0.5) * (along - seg);
-    const inset = st.peel[e];
-    P.st[i] = 5; P.kind[i] = KIND.sheet; P.born[i] = P.clock; P.owner[i] = 1; P.hits[i] = 0;
-    // hinge line: inner edge of the sheet (it lifts from the outside in)
-    P.hx[i] = b.x + n[0] * (b.w / 2 - inset - 1.2) + (n[0] ? 0 : off);
-    P.hz[i] = b.z + n[1] * (b.d / 2 - inset - 1.2) + (n[1] ? 0 : off);
-    P.hdx[i] = n[0]; P.hdz[i] = n[1];
-    P.y[i] = st.roofY + 0.04; P.flapK[i] = 0; P.ry[i] = 0;
-    P.sx[i] = n[0] ? 1.2 : seg; P.sy[i] = 0.035; P.sz[i] = n[0] ? seg : 1.2;
-    P.mesh.setColorAt(i, _c.setHex(st.hex));
-    if (P.mesh.instanceColor) P.mesh.instanceColor.needsUpdate = true;
-    if (i + 1 > P.top) { P.top = i + 1; P.mesh.count = P.top; }
-    st.flap = i; st.flapEdge = e;
-    P.x[i] = P.hx[i]; P.z[i] = P.hz[i];
-    void w;
-  }
-  function tickFlap(P, i, dt) {
-    // flap angle chases a target that rises with how far the edge has peeled,
-    // with a hard flutter on top; drawn as a plate rotated about the hinge
-    const w = windAt(P.hx[i], P.hz[i]);
-    const flut = 0.25 * Math.sin(P.clock * (9 + w.speed * 0.15) + i);
-    const want = Math.min(1.25, 0.15 + P.flapK[i] * 1.1) + flut * Math.min(1, w.speed / 40);
-    P.ry[i] += (want - P.ry[i]) * Math.min(1, dt * 8);     // ry holds the flap angle here
-    const a = Math.max(0, P.ry[i]);
-    const nx = P.hdx[i], nz = P.hdz[i];
-    const half = 0.6;   // half the sheet's depth off the hinge
-    // the plate's centre swings up and out about the hinge
-    P.x[i] = P.hx[i] + nx * Math.cos(a) * half;
-    P.z[i] = P.hz[i] + nz * Math.cos(a) * half;
-    _p.set(P.x[i], P.y[i] + Math.sin(a) * half, P.z[i]);
-    // rotate about the hinge axis (perpendicular to the edge normal)
-    _ax.set(-nz, 0, nx);
-    _q.setFromAxisAngle(_ax, a);
-    _s.set(P.sx[i], P.sy[i], P.sz[i]);
-    _m4.compose(_p, _q, _s);
-    P.mesh.setMatrixAt(i, _m4);
-    P.dirty = true;
-  }
-  function releaseFlap(P, i, w) {
-    // TORN AWAY: the hinged sheet becomes a flying one with the wind under it
-    P.st[i] = 1; P.owner[i] = -1;
-    P.y[i] = P.y[i] + 0.6;
-    P.vx[i] = w.x * w.speed * 0.35; P.vz[i] = w.z * w.speed * 0.35; P.vy[i] = 3 + Math.random() * 4;
-    P.rx[i] = -P.ry[i] * P.hdz[i]; P.rz[i] = P.ry[i] * P.hdx[i]; P.ry[i] = Math.random() * 6.28;
-    P.wx[i] = (Math.random() - 0.5) * 9; P.wy[i] = (Math.random() - 0.5) * 6; P.wz[i] = (Math.random() - 0.5) * 9;
-    town.roofSheets++; town.debrisLaunched++;
   }
   let frameClock = 0;
   function tickBuildings(dt) {
@@ -899,38 +719,25 @@
           const cap = (n[0] ? b.w : b.d) * 0.5;
           const before = st.peel[e];
           st.peel[e] = Math.min(cap, before + rate * share);
-          if (st.peel[e] > before + 1e-4) writeDeck(b, st, e);
           // a sheet tears off every ~0.9 m of edge peeled
           while (st.peel[e] >= (st.sheet[e] + 1) * 0.9 && st.sheet[e] < 24) {
             st.sheet[e]++;
-            const P = debrisPool();
-            if (st.flap >= 0 && st.flapEdge === e && P.st[st.flap] === 5) { releaseFlap(P, st.flap, w0); st.flap = -1; }
-            else {
+            {
               const n2 = EDGE_N[e], along = n2[0] ? b.d : b.w;
               const off = (Math.random() - 0.5) * along * 0.8;
               const ex = b.x + n2[0] * (b.w / 2 - st.peel[e] * 0.5) + (n2[0] ? 0 : off);
               const ez = b.z + n2[1] * (b.d / 2 - st.peel[e] * 0.5) + (n2[1] ? 0 : off);
-              launchPiece(KIND.sheet, ex, st.roofY + 0.4, ez, 1.1 + Math.random() * 1.4, 0.035, 0.9 + Math.random() * 0.6, st.hex,
-                wx * v * 0.3, 3 + Math.random() * 4, wz * v * 0.3);
-              town.roofSheets++;
+              // the roof's CURRENT top (a building a quake has dropped peels
+              // from where its roof is now, not where it was built)
+              const ry = curRoofY(b, st);
+              if (tearSheet(ex, ry + 0.3, ez, !n2[0], 1.1 + Math.random() * 1.4, 0.9 + Math.random() * 0.6, st.hex,
+                wx * v * 0.3, 3 + Math.random() * 4, wz * v * 0.3)) town.roofSheets++;
             }
           }
           total += st.peel[e] / cap;
         }
         if (!st.peeling && total > 0.04) { st.peeling = true; town.roofsPeeling++; }
         if (total >= 2.2 && !st.stripped) { st.stripped = true; town.roofsStripped++; }
-        // the next flap lifts on the windward edge while it is still peeling
-        if (st.flap < 0 && !st.stripped) {
-          let best = -1, bf = 0.5;
-          for (let e = 0; e < 4; e++) { const f = -(EDGE_N[e][0] * wx + EDGE_N[e][1] * wz); if (f > bf) { bf = f; best = e; } }
-          if (best >= 0) startFlap(b, st, best, w0);
-        }
-        if (st.flap >= 0 && DP && DP.st[st.flap] === 5) {
-          const e = st.flapEdge;
-          DP.flapK[st.flap] = Math.min(1, (st.peel[e] - st.sheet[e] * 0.9) / 0.9);
-        }
-      } else if (st.flap >= 0 && DP && DP.st[st.flap] === 5) {
-        DP.flapK[st.flap] *= 1 - Math.min(1, dt * 0.5);     // it settles back, lifted
       }
       // ---- WINDOWS BLOWN IN on the windward face ----
       // glass answers the GUST, and not every pane at once: the share of a
@@ -969,7 +776,12 @@
   function restoreBuildings() {
     for (let i = 0; i < touchedBldg.length; i++) touchedBldg[i]._hur = null;
     touchedBldg.length = 0;
-    if (DK) { DK.n = 0; DK.mesh.count = 0; }
+  }
+  // where the roof is NOW: its built height moved with the group (a quake's
+  // settlement or a sinkhole's tilt carries the whole group)
+  function curRoofY(b, st) {
+    const g = b.group;
+    return g && st.gy0 != null ? st.roofY + (g.position.y - st.gy0) : st.roofY;
   }
 
   /* ============================================================
@@ -995,10 +807,20 @@
       _qa.setFromAxisAngle(_ax, st.lean);
       m.quaternion.copy(_qa).multiply(st.q0);
       if (w.speed > st.thr) {
-        st.gone = true; m.visible = false; town.signsDown++;
-        const y = s.y != null ? s.y : groundAt(s.x, s.z) + 2.2;
-        launchPiece(KIND.sign, s.x, y, s.z, s.w || 1.2, 0.05, s.h || 0.8, s.hex != null ? s.hex : 0x2d6b3c,
-          w.x * w.speed * 0.4, 2 + Math.random() * 3, w.z * w.speed * 0.4);
+        st.gone = true; town.signsDown++;
+        // the panel ITSELF rips off into the wind: its own geometry becomes a
+        // rigid body (the original hides; restoreSigns shows it again)
+        let n = 0;
+        if (CBZ.debris && CBZ.debris.adopt) {
+          try {
+            const out = CBZ.debris.adopt(m, { whole: "all", owner: OWNER, maxLife: 60,
+              velocity: { x: w.x * w.speed * 0.4, y: 2 + Math.random() * 3, z: w.z * w.speed * 0.4 },
+              angular: { x: (Math.random() - 0.5) * 5, y: (Math.random() - 0.5) * 3, z: (Math.random() - 0.5) * 5 } });
+            n = out ? out.pieces || 0 : 0;
+          } catch (e) { n = 0; }
+        }
+        town.debrisLaunched += n;
+        m.visible = false;
       }
     }
   }
@@ -1426,7 +1248,8 @@
       S.grit = buildCloud(520, 0.22, 0.5, 0xb6c0c8, 0.10, 0.3, 2.2);
       S.rag = buildCloud(190, 0.62, 0.85, 0x8a7a60, 0.16, 0.6, 7.0);
       if (WD) {
-        buildCoast(); wirePower(); debrisPool(); deckPool(); sprayPool();
+        buildCoast(); wirePower(); sprayPool();
+        fluidOn(true);
         // read every roof's colour now, not on the storm's first frame
         const B = list("buildings");
         for (let i = 0; i < B.length; i++) if (!B[i].fallen) bldgState(B[i]);
@@ -1437,6 +1260,8 @@
       disposeCloud(S.grit);
       disposeCloud(S.rag);
       S = null;
+      // the wind drops: what is still in the air comes down on its own
+      fluidOn(false);
       // the lights stay out and the debris stays down: the aftermath is the
       // evidence. resetWorld() (a new match) is what puts the town back.
       if (SP) { for (let i = 0; i < SPMAX; i++) { SP.life[i] = 0; SP.pos[i * 3 + 1] = -1e4; } SP.attr.needsUpdate = true; }
@@ -1446,12 +1271,9 @@
     resetWorld() {
       this.end();
       restoreTrees(); restoreBuildings(); restoreSigns(); restoreBoats(); restoreCars(); restorePower();
-      if (DP) {
-        DP.st.fill(0); DP.top = 0; DP.mesh.count = 0;
-        _m4.makeScale(0, 0, 0);
-        for (let i = 0; i < DMAX; i++) DP.mesh.setMatrixAt(i, _m4);
-        DP.mesh.instanceMatrix.needsUpdate = true;
-      }
+      // every sheet, sign panel, frond and branch it tore off: gone
+      fluidOn(false);
+      if (CBZ.debris && CBZ.debris.clear) { try { CBZ.debris.clear(OWNER); } catch (e) {} }
     },
     /* MATCH START: put the island's lamps on the grid NOW (a one-time shader
        recompile of a handful of lamp materials), so it lands behind the
@@ -1482,7 +1304,7 @@
       // ---- the town ----
       if (WD) {
         tickTrees(dt); tickBuildings(dt); tickSigns(dt); tickBoats(dt); tickCars(dt);
-        tickPool(dt); debrisHits(dt); tickSea(dt); tickPower(dt);
+        debrisHits(dt); tickSea(dt); tickPower(dt);
       }
       // ---- evidence for the audit ----
       const wc = windAt(S.cx, S.cz);
@@ -1586,7 +1408,8 @@
     const dot = evid.haveFront && evid.haveBack
       ? evid.frontX * evid.backX + evid.frontZ * evid.backZ : 1;
     let flying = 0, resting = 0;
-    if (DP) for (let i = 0; i < DP.top; i++) { const s = DP.st[i]; if (s === 1 || s === 2) flying++; else if (s === 3 || s === 4) resting++; }
+    // the storm's own pieces, read off the shared sim (bits are not counted)
+    if (CBZ.debris && CBZ.debris.forEachLive) CBZ.debris.forEachLive(function (b) { if (b.owner === OWNER) { if (b.asleep) resting++; else flying++; } });
     return {
       on: true,
       live: !!S,

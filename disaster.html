@@ -944,7 +944,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=island1014"></script>
-<script src="src/systems/debris.js?v=collapse1014c"></script>
+<script src="src/systems/debris.js?v=debris1015"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -960,7 +960,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads2town"></script>
 <script src="src/world/island_plan.js?v=plan1"></script>
 <script src="src/world/instance_proxy.js?v=proxy1"></script>
-<script src="src/world/disaster_arena.js?v=island2x"></script>
+<script src="src/world/disaster_arena.js?v=debris1015"></script>
 <script src="src/world/island_dressing.js?v=dress2town"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
@@ -1024,7 +1024,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/flashflood.js?v=ffroute1014"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
-<script src="src/systems/hurricane.js?v=collapse1014b"></script>
+<script src="src/systems/hurricane.js?v=debris1015"></script>
 <!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
@@ -1039,11 +1039,11 @@ document.body.appendChild(b);}}catch(e){}})();
      pressure front (one overpressure law: glass, trees, cars, buildings) and
      its late bang, craters with rim + ejecta blanket, curtain, plume, fires.
      REQUIRED by systems/disasters.js (no legacy shower any more). -->
-<script src="src/systems/meteor.js?v=collapse1014c"></script>
+<script src="src/systems/meteor.js?v=debris1015"></script>
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=collapse1014c"></script>
+<script src="src/systems/disasters.js?v=debris1015"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>
@@ -1075,7 +1075,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/water_spec.js?v=runup1014"></script>
 <!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_runup.js?v=runup1014"></script>
-<script src="src/world/tsunami_debris.js?v=runup1014"></script>
+<script src="src/world/tsunami_debris.js?v=debris1015"></script>
 <script src="src/world/tsunami_flow.js?v=runup1014"></script>
 <script src="src/world/tsunami_scene.js?v=runup1014"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
@@ -1432,7 +1432,7 @@ document.body.appendChild(b);}}catch(e){}})();
      skin on buildings that are still standing. Reverts: ?cfg_COLLAPSE_V2=0
      (callers fall back to their snap) · ?cfg_COLLAPSE_FRAGMENTS=0 (chunks
      turn to dust instead of pieces) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
-<script src="src/city/collapse.js?v=collapse1014c"></script>
+<script src="src/city/collapse.js?v=debris1015"></script>
 <script src="src/systems/strike.js?v=strike1013m"></script>
 <script src="src/city/structural.js?v=nukecost1013"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
@@ -1440,7 +1440,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=island1014"></script>
+<script src="src/systems/tornado.js?v=debris1015"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first

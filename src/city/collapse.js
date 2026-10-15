@@ -1948,6 +1948,13 @@
     if (near) for (let i = 0; i < near.length; i++) {
       const O = near[i];
       if (O.dead || O.upY < 0.55) continue;
+      /* A BODY RESTS ONLY ON A BODY UNDER IT. Two thin slabs that overlapped
+         each read the other as the floor: each step one was lifted onto the
+         other's top, then the other onto its top, and the pair climbed a
+         ladder of their own making at ~17 m/s to 700 m (the pieces of
+         buildings flying way up into the sky). What holds a body up is lower
+         than it is. */
+      if (O.pos.y >= B.pos.y) continue;
       const dx = x - O.pos.x, dy = y - O.pos.y, dz = z - O.pos.z;
       const R = O.R;
       // into the other body's frame (R is row-major, its transpose is the inverse)
@@ -3012,7 +3019,25 @@
     const D = norm(bld);
     if (!D) return false;
     const S = byGroup.get(D.grp);
-    if (S) dispose(S, true);
+    if (S) {
+      dispose(S, true);
+      /* AND ITS PIECES. dispose() ends the live bodies, but a body waiting
+         to be baked or dropping onto its rest went on to become kept rubble
+         of a building that no longer exists, on a lot being rebuilt (or
+         hanging where its support had been). They go now, with every piece
+         and every kept slab the structure handed to debris.js. */
+      const gone = function (B) {
+        if (B.S !== S) return false;
+        if (B.g.parent) B.g.parent.remove(B.g);
+        B.g.traverse(function (o) { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+        return true;
+      };
+      for (let k = baking.length - 1; k >= 0; k--) if (gone(baking[k])) baking.splice(k, 1);
+      for (let k = droppers.length - 1; k >= 0; k--) if (gone(droppers[k])) droppers.splice(k, 1);
+      for (let k = settled.length - 1; k >= 0; k--) if (settled[k].B.S === S) settled.splice(k, 1);
+      if (CBZ.debris) { try { CBZ.debris.clear(S.key); } catch (e) {} }
+      owners.delete(S.key);
+    }
     rubbleKeys.delete(D.key);
     const R = retired.get(D.grp);
     if (R) {
@@ -3397,6 +3422,26 @@
     for (const e of settled) if (e.B.g.parent) check(e.B, new Set(e.rec.cols));
     for (const B of baking) check(B, null);
     return out;
+  };
+  /* CBZ.debrisAudit's `collapse` source: kept structural rubble hanging
+     over nothing (C.unsupported), and the falling bodies' speed and height. */
+  (CBZ.debrisAuditSources || (CBZ.debrisAuditSources = {})).collapse = function (o) {
+    o = o || {};
+    const u = C.unsupported({ gap: o.gap || 0.5 });
+    const fastV = o.fast || 30, high = o.high || 120;
+    const r = { floating: u.air, worstGap: u.worst, list: u.list.slice(0, 6), falling: u.falling, kept: u.kept,
+      fast: 0, high: 0, maxSpeed: 0, maxHeight: 0 };
+    for (const B of bodies) {
+      const sp = B.v.length();
+      if (sp > r.maxSpeed) r.maxSpeed = +sp.toFixed(1);
+      if (sp > fastV) r.fast++;
+      let g = 0;
+      try { g = B.S.D.groundAt ? B.S.D.groundAt(B.pos.x, B.pos.z) : (CBZ.groundAt ? CBZ.groundAt(B.pos.x, B.pos.z) : 0); } catch (e) { g = 0; }
+      const h = B.pos.y + (B.lo ? B.lo.y : 0) - (isFinite(g) ? g : 0);
+      if (h > r.maxHeight) r.maxHeight = +h.toFixed(1);
+      if (h > high) { r.high++; if (r.list.length < 8) r.list.push({ key: B.S.key, high: +h.toFixed(1), y: +B.pos.y.toFixed(1), g: +(+g).toFixed(1), v: +B.v.y.toFixed(1), t: +B.t.toFixed(1), contact: !!B.contact }); }
+    }
+    return r;
   };
   C.resetStats = function () { for (const k in stats) stats[k] = 0; for (const k in profT) delete profT[k]; };
   C._structs = structs; C._bodies = bodies;
