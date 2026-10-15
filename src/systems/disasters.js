@@ -3216,21 +3216,26 @@
     ctx.st.erS = S || { x: h.x, z: h.z, peak: h.peak, r: h.r, rim: h.rim || 6.2 };
     return ctx.st.erS;
   }
+  /* THE ISLAND'S ONE FIRE AS A SERVICE (systems/wildfire.js): a disaster
+     that starts fires (the eruption, the meteor) lends it the same bridge
+     the wildfire event gets: THE structural ledger, the blast bus for a
+     car's tank, the shelter test, the wind, and a magnitude of its own. */
+  function wfService(ctx, mag) {
+    const WF = CBZ.wildfire;
+    if (!WF || !WF.attach) return null;
+    WF.attach(ctx.arena, {
+      hitBuilding: function (b, amount, o) { return structureHit(b, amount, ctx, Object.assign({ kind: "fire" }, o || {})); },
+      blast: function (kind, x, z, o) { survBlast(kind, x, z, Object.assign({ ctx: ctx }, o || {})); },
+      sheltered: function (a) { return sheltered(a); },
+      wind: function () { return windVec(); },
+      mag: mag,
+    });
+    return WF;
+  }
   function erHooks(ctx) {
     const WF = CBZ.wildfire;
-    /* THE ERUPTION'S FIRES ARE THE ISLAND'S ONE FIRE (systems/wildfire.js as
-       a service): lent the same bridge the wildfire event gets (THE
-       structural ledger, the blast bus for a car's tank, the shelter test),
-       plus the eruption's wind and a magnitude tied to the eruption's. */
-    if (WF && WF.attach) {
-      WF.attach(ctx.arena, {
-        hitBuilding: function (b, amount, o) { return structureHit(b, amount, ctx, Object.assign({ kind: "fire" }, o || {})); },
-        blast: function (kind, x, z, o) { survBlast(kind, x, z, Object.assign({ ctx: ctx }, o || {})); },
-        sheltered: function (a) { return sheltered(a); },
-        wind: function () { return windVec(); },
-        mag: 0.3 + 0.3 * Math.min(1, rollMag(ctx)),
-      });
-    }
+    // the eruption's fires burn at a magnitude tied to the eruption's
+    wfService(ctx, 0.3 + 0.3 * Math.min(1, rollMag(ctx)));
     return {
       shake(k) { if (CBZ.shake) CBZ.shake(k); },
       sound(name, x, z) { if (x != null) soundAt(name, x, z); else sound(name); },
@@ -4584,6 +4589,9 @@
 
     function beginV2(ctx) {
       mCtx = ctx;
+      // what the thermal pulse, a gutted house and a glowing block light is
+      // the island's one fire (meteor.js calls CBZ.wildfire directly)
+      wfService(ctx, 0.25 + 0.35 * Math.min(1, ctx.intensity || 0));
       CBZ.meteor.begin({
         root: root(), floor, rnd,
         cx: ctx.cx, cz: ctx.cz, R: ctx.R, intensity: ctx.intensity,

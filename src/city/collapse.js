@@ -256,6 +256,20 @@
     if (m.transparent && m.opacity < 0.9) return true;
     return /glass|window|pane/i.test(m.name || "");
   }
+  /* GLASS DRAWS AS THE PANE DID. The pools draw a building's glass with no
+     shadows, after the opaque world (renderOrder 1). Cut into the standing
+     bands, a falling block or the kept rubble, the same glass casting and
+     receiving shadows reads darker than the pane next to it that has not
+     broken yet, so every mesh of see-through glass keeps the pool's
+     settings. */
+  function glassDraw(ms) {
+    const m = ms.material;
+    if (!m || !(m.transparent || isGlass(m))) return ms;
+    if (!m.transparent && m.opacity >= 0.9) return ms;          // an opaque mirror-glass skin is a wall
+    ms.castShadow = false; ms.receiveShadow = false;
+    if (ms.renderOrder < 1) ms.renderOrder = 1;
+    return ms;
+  }
   function visibleIn(o, top) {
     for (let a = o; a && a !== top; a = a.parent) if (a.visible === false) return false;
     return true;
@@ -412,7 +426,9 @@
   const BAY_TARGET = PHONE ? 4.2 : 3.4;                // m: one structural bay (never finer than the building's own)
   const MAX_BAYS = PHONE ? 8 : 12;                     // per axis
   const BANDS = PHONE ? 6 : 10;                        // standing draw bands (storey groups)
-  const SLICE_MS = PHONE ? 4 : 7;                      // cutting budget per frame
+  const SLICE_MS = PHONE ? 3 : 6;                      // cutting budget per frame
+  const CUT_STEP = PHONE ? 511 : 1023;                 // triangles between yields (a slice must fit a phone frame)
+  const GATHER_STEP = PHONE ? 120 : 300;               // meshes / instances read between yields
   const MAX_PARTS = PHONE ? 8 : 14;                    // level groups a falling cluster is drawn in
   const ST = 11;                                       // floats per vertex: pos3 nrm3 uv2 col3
   const BAND = 0.9;                                    // m inside a face plane that is that face's wall
@@ -422,6 +438,10 @@
   const YARD = 5;                                      // past this outside the footprint: the yard's, not the building's
   const TOL = 0.5;                                     // m a support may be penetrated in one step
   const TICK = 0.1;                                    // load path solve period (s)
+  const W_MAX = 4;                                     // rad/s: the most a loose panel tumbles
+  const V_SIDE = 9;                                    // m/s: the most a split-off block keeps sideways
+  const PIECE_UP = 1.2;                                // m/s: the most a piece of a landing storey climbs
+  const PIECE_SPIN = 7;                                // rad/s: ... and tumbles
 
   const structs = [];                                  // live structures (cut, standing or falling)
   const byGroup = new WeakMap();                       // building group -> structure
@@ -429,7 +449,8 @@
   const holes = [];                                    // undermined ground: {x, z, r, depth}
   const bodies = [];                                   // falling structural bodies
   const stats = { cuts: 0, cutMs: 0, tris: 0, pieces: 0, bodiesMade: 0, maxAwake: 0, awakeSum: 0, frames: 0,
-    ms: 0, msMax: 0, carsCrushed: 0, baked: 0, shattered: 0, crushed: 0, blasted: 0 };
+    ms: 0, msMax: 0, carsCrushed: 0, baked: 0, shattered: 0, crushed: 0, blasted: 0,
+    capSettled: 0, capShattered: 0, drops: 0, rewoken: 0 };
 
   // ---- growable float buffer -----------------------------------------------
   function Buf() { this.a = new Float32Array(ST * 48); this.n = 0; }
@@ -530,7 +551,7 @@
       ready: false, swapped: false, disposed: false, gen: null, pending: [],
       meshes: [], pristine: [], dirty: new Set(), root: null,
       standingCount: 0, standingMass: 0, totalMass: 0, capMul: 1, active: 0, tick: 0,
-      levelLost: new Uint8Array(ns + 1), deadCols: [], deadPlats: [], newCols: [], newPlats: [],
+      levelLost: new Uint8Array(ns + 1), deadCols: [], deadPlats: [], newCols: [], newPlats: [], surgQ: [], surgI: 0,
       instHide: [], origCols: null, coreMat: null, topY: D.h,
       stats: { chunks: 0, tris: 0, crushed: 0, blasted: 0, detached: 0, bodies: 0, pieces: 0, baked: 0, carsCrushed: 0,
         tipped: 0, maxTilt: 0, pancaked: 0, firstFall: -1, lastSettle: -1, cutMs: 0, born: nowT,
@@ -608,32 +629,38 @@
   function inFoot(S, lx, ly, lz, pad) {
     return lx > -S.hw - pad && lx < S.hw + pad && lz > -S.hd - pad && lz < S.hd + pad && ly > -1 && ly < S.h + 4;
   }
-  function gatherSources(S) {
+  /* A generator, like the cut it feeds: a tower's group holds thousands of
+     meshes and its pools tens of thousands of instances, so reading them
+     yields to the frame every few hundred instead of landing on one. */
+  function* gatherSources(S) {
     const D = S.D, grp = D.grp, out = [];
     const solids = new Set(D.solids || []);
     const bld = D.b;
     const skinnable = !!(bld && CBZ.citySkin && CBZ.cityIsShellMat);
     grp.updateWorldMatrix(true, true);
-    grp.traverse(function (o) {
-      if (!o.isMesh || o.isSkinnedMesh) return;
-      if (o.userData && (o.userData.debrisPiece || o.userData.cbzCollapseShell)) return;
-      if (!solids.has(o) && !visibleIn(o, grp.parent)) return;
-      if (o._breached && !solids.has(o) && !o.visible) return;
+    const objs = [];
+    grp.traverse(function (o) { if (o.isMesh && !o.isSkinnedMesh) objs.push(o); });
+    let work = 0;
+    for (const o of objs) {
+      if ((work += o.isInstancedMesh ? o.count : 1) > GATHER_STEP) { work = 0; yield; }
+      if (o.userData && (o.userData.debrisPiece || o.userData.cbzCollapseShell)) continue;
+      if (!solids.has(o) && !visibleIn(o, grp.parent)) continue;
+      if (o._breached && !solids.has(o) && !o.visible) continue;
       const geo = o.geometry;
-      if (!geo || !geo.attributes || !geo.attributes.position) return;
+      if (!geo || !geo.attributes || !geo.attributes.position) continue;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       let any = false;
       for (const mm of mats) if (mm && mm.visible !== false && !(mm.transparent && mm.opacity < 0.05)) any = true;
-      if (!any) return;
+      if (!any) continue;
       if (o.isInstancedMesh) {
         const n = o.count, tri = (geo.index ? geo.index.count : geo.attributes.position.count) / 3;
-        if (n * tri > 60000) return;
+        if (n * tri > 60000) continue;
         for (let i = 0; i < n; i++) {
           o.getMatrixAt(i, _m4);
           const M = new THREE.Matrix4().multiplyMatrices(S.Linv, _m4b.multiplyMatrices(o.matrixWorld, _m4));
           out.push({ geo: geo, mat: o.material, M: M, glass: isGlass(mats[0]), col: o.instanceColor ? colorOf(o.instanceColor, i) : null });
         }
-        return;
+        continue;
       }
       let mt = o.material;
       if (skinnable && !Array.isArray(mt) && !isGlass(mt) && CBZ.cityIsShellMat(bld, mt)) {
@@ -647,7 +674,8 @@
         }
       }
       out.push({ geo: geo, mat: mt, M: new THREE.Matrix4().multiplyMatrices(S.Linv, o.matrixWorld), glass: isGlass(mats[0]), col: null });
-    });
+    }
+    yield;
     // the merged deco core/batch.js took out of the group (world space)
     const R = CBZ.batchRangesOf ? CBZ.batchRangesOf(grp) : null;
     if (R) for (const e of R) {
@@ -656,17 +684,29 @@
       if (!g || !g.attributes || !g.attributes.position || e.mesh._cbzPacked) continue;
       out.push({ geo: g, mat: e.mesh.material, M: new THREE.Matrix4().multiplyMatrices(S.Linv, e.mesh.matrixWorld), glass: false, col: null, start: e.start, count: e.count });
     }
-    // the panes (instanced pools, world records)
+    /* THE PANES (instanced pools, world records), cut from what the pool
+       DRAWS: the pool's own geometry (its front and back faces and two edge
+       slivers; a whole unit box adds a top and bottom layer of glass that
+       reads darker) and the material it shows right now (a lit pane shows
+       in the warm pool after dusk). The cut keeps the pool's draw settings
+       (no shadows, after the opaque world): see glassDraw(). */
     const panes = [];
     for (const gp of D.panes || []) {
       if (!gp || gp.shattered || gp.mesh || !(gp.hw > 0) || !(gp.hh > 0)) continue;
-      const pm = (gp.proxy && gp.proxy.material) || (gp.pool && gp.pool.material);
+      let pm = (gp.proxy && gp.proxy.material) || (gp.pool && gp.pool.material);
+      let pg = (gp.pool && gp.pool.geometry) || null;
+      if (gp.litPool && gp.litId >= 0 && gp.litPool.count > gp.litId) {
+        const a = gp.litPool.instanceMatrix.array, o = gp.litId * 16;
+        if (a[o] !== 0 || a[o + 5] !== 0) { pm = gp.litPool.material; pg = gp.litPool.geometry || pg; }
+      }
       if (!pm) continue;
+      if (!pg || !pg.attributes || !pg.attributes.position) pg = unitBox();
       const M = new THREE.Matrix4().makeScale(gp.hw * 2, gp.hh * 2, Math.max(gp.hd || 0, 0.006) * 2).setPosition(gp.x, gp.y, gp.z);
-      out.push({ geo: unitBox(), mat: pm, M: new THREE.Matrix4().multiplyMatrices(S.Linv, M), glass: true, col: null });
+      out.push({ geo: pg, mat: pm, M: new THREE.Matrix4().multiplyMatrices(S.Linv, M), glass: true, col: null });
       panes.push(gp);
     }
     S.panes = panes;
+    yield;
     // the instanced trim / veneer pools on the city root (world coordinates,
     // owned by no group): every instance standing on this building is read
     // and, at the swap, hidden
@@ -674,7 +714,7 @@
     if (grp.parent) hosts.add(grp.parent);
     if (CBZ.poolIdentityHost) { try { const h = CBZ.poolIdentityHost(grp); if (h) hosts.add(h); } catch (e) {} }
     const wc = new THREE.Vector3(D.ox, D.gy + D.h / 2, D.oz), wr = Math.hypot(D.w, D.d, D.h) / 2 + 3;
-    hosts.forEach(function (host) {
+    for (const host of hosts) {
       for (const im of host.children) {
         if (!im.isInstancedMesh || im === grp) continue;
         const ud = im.userData || {};
@@ -686,6 +726,7 @@
         const arr = im.instanceMatrix.array;
         for (let i = 0; i < im.count; i++) {
           const o = i * 16;
+          if ((++work & 4095) === 0) yield;
           if (arr[o] === 0 && arr[o + 5] === 0 && arr[o + 10] === 0) continue;      // a hidden instance
           _v3.set(arr[o + 12], arr[o + 13], arr[o + 14]).applyMatrix4(S.Linv);
           if (!inFoot(S, _v3.x, _v3.y, _v3.z, 1.2)) continue;
@@ -696,7 +737,7 @@
             M: new THREE.Matrix4().multiplyMatrices(S.Linv, _m4), glass: glassPool, col: im.instanceColor ? colorOf(im.instanceColor, i) : null });
         }
       }
-    });
+    }
     return out;
   }
   function colorOf(attr, i) { return [attr.getX(i), attr.getY(i), attr.getZ(i)]; }
@@ -809,7 +850,7 @@
   function* cutGen(S) {
     const t0 = performance.now();
     let srcs;
-    try { srcs = gatherSources(S); } catch (e) { console.warn("[collapse] gather", e); srcs = []; }
+    try { srcs = yield* gatherSources(S); } catch (e) { console.warn("[collapse] gather", e); srcs = []; }
     S.cutGatherMs = performance.now() - t0;
     yield;
     const nm = new THREE.Matrix3();
@@ -857,19 +898,22 @@
           }
           if (bad) continue;
           clipEmit(S, P, mt, glass, 0);
-          if ((++n & 2047) === 0) yield;
+          if ((++n & CUT_STEP) === 0) yield;
         }
       }
     }
     S.stats.tris = n;
-    finishCut(S);
+    yield* finishCut(S);
     S.stats.cutMs = Math.round(performance.now() - t0);
     stats.cuts++; stats.tris += n;
   }
 
   /* ---- after the cut: weights, the load graph, the design, the caps, the
      standing meshes ------------------------------------------------------ */
-  function finishCut(S) {
+  /* Also a generator: on a tower the weights, the graph, the design, the
+     caps, the standing meshes and the colliders' filing are each a frame's
+     worth of work, so each gets its own. */
+  function* finishCut(S) {
     const ns = S.ns, FH = S.FH, m = S.m;
     // solidity + mass
     for (const c of S.chunks) {
@@ -892,6 +936,7 @@
       if (c.s === ns && c.gb) c.top = Math.max(ylo(S, c.s) + 0.3, c.gb[3]);
       if (!c.gb) c.gb = [c.x0, c.x1, ylo(S, c.s), yhi(S, c.s), c.z0, c.z1];
     }
+    yield;
     // the graph. A FRAME (steel, concrete, curtain wall, timber posts) has
     // columns: a floor tile stands on the tile under it. Bearing masonry
     // and adobe have none: a floor spans between the walls, hanging off the
@@ -940,9 +985,11 @@
       if (c.tris || (frame && c.kind === 1 && c.s === 0)) continue;
       c.standing = false; c.void = true; c.hidden = true;
     }
+    yield;
     // THE DESIGN: intact loads, then capacity = safety factor x load. The
     // factor drops on a storey that is mostly glass: the soft storey.
     loads(S, true);
+    yield;
     // anything the building drew that the design could not find a way to
     // hold (a sign on a stalk, a lantern off a bracket) stays where it was
     // built for as long as something beside or under it stands
@@ -971,9 +1018,33 @@
     S.stats.chunks = S.chunks.filter(function (c) { return c.tris > 0; }).length;
     // the cut faces
     S.coreMat = mat(mix(shade(S.D.wall, m.tone), 0x8d8a84, 0.4));
-    for (const c of S.chunks) if (c.tris) addCaps(S, c);
-    buildStanding(S);
+    yield;
+    let k = 0;
+    for (const c of S.chunks) { if (c.tris) addCaps(S, c); if ((++k & 255) === 0) yield; }
+    yield* buildStanding(S);
+    yield* fileColliders(S);
     S.ready = true;
+  }
+  /* THE COLLIDERS' FILING, ahead of the swap: which chunks each of the
+     building's boxes and floors overlaps (the swap used to work this out on
+     the frame of the first hit, a few hundred boxes against every storey). */
+  function* fileColliders(S) {
+    const b = S.b;
+    S.colFile = new Map(); S.platFile = new Map();
+    if (!b) return;
+    const list = (b.colliders || []).slice();
+    for (const dr of b.doors || []) if (dr && dr.col) list.push(dr.col);
+    let k = 0;
+    for (const c of list) {
+      if (!c || c._cbzS || S.colFile.has(c)) continue;
+      S.colFile.set(c, chunksOverlapping(S, c.minX, c.maxX, c.y0 != null ? c.y0 : -1e9, c.y1 != null ? c.y1 : 1e9, c.minZ, c.maxZ));
+      if ((++k & 63) === 0) yield;
+    }
+    for (const p of b.platforms || []) {
+      if (!p || p._cbzS || S.platFile.has(p)) continue;
+      S.platFile.set(p, chunksOverlapping(S, p.minX, p.maxX, p.top - 0.05, p.top - 0.05, p.minZ, p.maxZ));
+      if ((++k & 63) === 0) yield;
+    }
   }
 
   /* CAPS: the inside of the material where the building was cut. A wall
@@ -1039,7 +1110,7 @@
      chunk a vertex range in it. A chunk that leaves is zeroed out of its
      range (degenerate, drawn as nothing); its own geometry is always read
      back from the pristine positions kept per mesh. */
-  function buildStanding(S) {
+  function* buildStanding(S) {
     const per = Math.max(1, Math.ceil((S.ns + 1) / BANDS));
     const root = new THREE.Group();
     root.name = "collapseStanding";
@@ -1085,12 +1156,14 @@
         g.computeBoundingSphere();
         const mesh = new THREE.Mesh(g, mt);
         mesh.castShadow = !PHONE; mesh.receiveShadow = true;
+        glassDraw(mesh);
         mesh.matrixAutoUpdate = false;
         mesh.name = "collapseBand";
         root.add(mesh);
         S.meshes.push(mesh);
         S.pristine.push(P.slice());
       });
+      yield;
     }
     for (const c of S.chunks) c.bufs = null;
     S.root = root;
@@ -1168,19 +1241,21 @@
     if (b) {
       const list = (b.colliders || []).slice();
       for (const dr of b.doors || []) if (dr && dr.col) list.push(dr.col);
+      const CF = S.colFile, PF = S.platFile;
       for (const c of list) {
         if (!c || c._cbzS) continue;
         c._cbzS = S;
-        c._cbzCh = chunksOverlapping(S, c.minX, c.maxX, c.y0 != null ? c.y0 : -1e9, c.y1 != null ? c.y1 : 1e9, c.minZ, c.maxZ);
+        c._cbzCh = (CF && CF.get(c)) || chunksOverlapping(S, c.minX, c.maxX, c.y0 != null ? c.y0 : -1e9, c.y1 != null ? c.y1 : 1e9, c.minZ, c.maxZ);
         for (const ch of c._cbzCh) (ch.origCols || (ch.origCols = [])).push(c);
         S.origCols.push(c);
       }
       for (const p of b.platforms || []) {
         if (!p || p._cbzS) continue;
         p._cbzS = S;
-        p._cbzCh = chunksOverlapping(S, p.minX, p.maxX, p.top - 0.05, p.top - 0.05, p.minZ, p.maxZ);
+        p._cbzCh = (PF && PF.get(p)) || chunksOverlapping(S, p.minX, p.maxX, p.top - 0.05, p.top - 0.05, p.minZ, p.maxZ);
         for (const ch of p._cbzCh) (ch.origPlats || (ch.origPlats = [])).push(p);
       }
+      S.colFile = null; S.platFile = null;
     }
     wrapCarve();
   }
@@ -1227,7 +1302,22 @@
     if (!c.standing) return;
     markGone(S, c);
     if (!keepDrawn) hideChunk(S, c);
-    surgery(S, c);
+    S.surgQ.push(c);
+  }
+  /* THE SURGERY QUEUE. Taking a chunk's share out of the building's boxes
+     and floors (and handing its neighbours theirs back) is a few clipped
+     boxes per chunk, which is nothing for one chunk and tens of
+     milliseconds for the 1,500 chunks of a tower top that tips at once. The
+     load path does not read the boxes (it reads the chunks, which leave at
+     once), so the boxes follow over the next frames inside a budget. */
+  const SURG_MS = PHONE ? 1 : 2;
+  function runSurgery(S, budget) {
+    const Q = S.surgQ;
+    if (S.surgI >= Q.length) return;
+    const t0 = performance.now();
+    let n = 0;
+    while (S.surgI < Q.length && (n < 1 || performance.now() - t0 < budget)) { surgery(S, Q[S.surgI++]); n++; }
+    if (S.surgI >= Q.length) { Q.length = 0; S.surgI = 0; }
   }
   function markGone(S, c) {
     c.standing = false;
@@ -1291,33 +1381,58 @@
       S.dirty.add(mesh);
     }
   }
-  function flushWorld(S) {
+  /* THE WORLD'S INDICES, IN PLACE AND IN BATCHES. A box comes out of the
+     collider grid by an indexOf in each cell it covers, and a cut building's
+     cells hold its every box and every share of one: taking a whole tipped
+     storey's boxes out on one frame was that search squared (the 20 ms frame
+     in the lab). At most a batch a frame comes out (the rest wait a frame or
+     two: an invisible wall for a few frames where the building just fell
+     away), and nothing marks a grid dirty for a full rebuild. `now` (the
+     structure is going) takes everything. */
+  const FLUSH_COLS = PHONE ? 48 : 128;
+  function flushWorld(S, now) {
     if (S.deadCols.length || S.deadPlats.length || S.deadLos) {
-      const cols = new Set(S.deadCols), plats = new Set(S.deadPlats), los = new Set(S.deadLos || []);
-      S.deadCols.length = 0; S.deadPlats.length = 0; S.deadLos = null;
+      const cap = now ? Infinity : FLUSH_COLS;
+      const cols = new Set(S.deadCols.length > cap ? S.deadCols.splice(0, cap) : S.deadCols.splice(0));
+      const plats = new Set(S.deadPlats.length > cap ? S.deadPlats.splice(0, cap) : S.deadPlats.splice(0));
+      const los = new Set(S.deadLos || []);
+      S.deadLos = null;
+      // the settled pieces lying on what just went are checked first
+      if (cols.size && CBZ.debris && CBZ.debris.disturb) {
+        let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+        cols.forEach(function (c) { if (c.minX < x0) x0 = c.minX; if (c.maxX > x1) x1 = c.maxX; if (c.minZ < z0) z0 = c.minZ; if (c.maxZ > z1) z1 = c.maxZ; });
+        if (isFinite(x0)) { try { CBZ.debris.disturb(x0, x1, z0, z1); } catch (e) {} }
+      }
       try {
         if (CBZ.structuralTakeOut) CBZ.structuralTakeOut(cols, plats, los);
         else {
           if (cols.size) {
-            if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(Array.from(cols));
+            if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(cols);
             else if (CBZ.micro && CBZ.micro.removeCollider) cols.forEach(function (c) { CBZ.micro.removeCollider(c); });
+            else if (CBZ.colliders) { const a = CBZ.colliders; let w = 0; for (let i = 0; i < a.length; i++) if (!cols.has(a[i])) a[w++] = a[i]; a.length = w; if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
           }
-          if (plats.size && CBZ.platforms) { const a = CBZ.platforms; let w = 0; for (let i = 0; i < a.length; i++) if (!plats.has(a[i])) a[w++] = a[i]; a.length = w; }
-          if (los.size && CBZ.losBlockers) { const a = CBZ.losBlockers; let w = 0; for (let i = 0; i < a.length; i++) if (!los.has(a[i])) a[w++] = a[i]; a.length = w; }
-          if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+          if (plats.size) {
+            if (CBZ.platformRemoveMany) CBZ.platformRemoveMany(plats);
+            else if (CBZ.platforms) { const a = CBZ.platforms; let w = 0; for (let i = 0; i < a.length; i++) if (!plats.has(a[i])) a[w++] = a[i]; a.length = w; if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty(); }
+          }
+          if (los.size) {
+            if (CBZ.losRemoveMany) CBZ.losRemoveMany(los);
+            else if (CBZ.losBlockers) { const a = CBZ.losBlockers; let w = 0; for (let i = 0; i < a.length; i++) if (!los.has(a[i])) a[w++] = a[i]; a.length = w; }
+          }
         }
       } catch (e) {}
-      if (plats.size && CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    }
+    if (S.newPlats.length && CBZ.platforms) {
+      if (CBZ.platformAddMany) CBZ.platformAddMany(S.newPlats.splice(0));
+      else { for (const p of S.newPlats) CBZ.platforms.push(p); S.newPlats.length = 0; if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty(); }
     }
     if (S.newCols.length) {
       for (const c of S.newCols) { try { if (CBZ.colliderAdd) CBZ.colliderAdd(c); else if (CBZ.colliders) CBZ.colliders.push(c); } catch (e) {} }
       S.newCols.length = 0;
     }
-    if (S.newPlats.length && CBZ.platforms) {
-      for (const p of S.newPlats) CBZ.platforms.push(p);
-      S.newPlats.length = 0;
-      if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
-    }
+    flushMeshes(S);
+  }
+  function flushMeshes(S) {
     if (S.dirty.size) {
       S.dirty.forEach(function (mesh) { mesh.geometry.attributes.position.needsUpdate = true; });
       S.dirty.clear();
@@ -1490,34 +1605,43 @@
 
   /* DETACH: the falling set, in connected clusters, each a rigid body of
      itself. */
+  /* Only what decides the fall happens on the detaching frame: the
+     clusters, the chunks leaving the load path, the bodies (numbers, no
+     geometry). The boxes follow through the surgery queue; each body's
+     picture is taken over part by part through the work queue, its bottom
+     part first. */
   let markId = 1;
   function detach(S, list, tipped) {
     const id = ++markId;
     for (const c of list) c.mark = id;
     const comps = [];
+    const st = [];
     for (const c of list) {
       if (c.mark !== id) continue;
       const comp = [];
-      const st = [c]; c.mark = -id;
+      st.length = 0; st.push(c); c.mark = -id;
       while (st.length) {
         const a = st.pop(); comp.push(a);
-        const nb = a.below.concat(a.above, a.lat);
-        for (const n of nb) if (n.mark === id) { n.mark = -id; st.push(n); }
+        for (const n of a.below) if (n.mark === id) { n.mark = -id; st.push(n); }
+        for (const n of a.above) if (n.mark === id) { n.mark = -id; st.push(n); }
+        for (const n of a.lat) if (n.mark === id) { n.mark = -id; st.push(n); }
       }
       comps.push(comp);
     }
     comps.sort(function (a, b) { return b.length - a.length; });
-    for (const c of list) if (c.standing) markGone(S, c);
-    for (const c of list) surgery(S, c);
+    for (const c of list) { if (c.standing) markGone(S, c); S.surgQ.push(c); }
     for (const comp of comps) {
       S.stats.detached += comp.length;
       // a lone empty cell (air, a room with nothing in it) has nothing to show
-      const real = comp.filter(function (c) { return c.tris > 0; });
-      if (!real.length) continue;
-      if (awake() >= BODY_CAP && real.length <= 2) { for (const c of real) queueShatter(S, c, null, 0.6); continue; }
+      let real = 0;
+      for (const c of comp) if (c.tris > 0) real++;
+      if (!real) continue;
+      if (awake() >= BODY_CAP && real <= 2) { for (const c of comp) if (c.tris) queueShatter(S, c, null, 0.6); continue; }
       const B = makeBody(S, comp, null);
       if (B && tipped) B.tip = true;
-      if (!B) for (const c of comp) hideChunk(S, c);
+      // no room in the budget even after the calmest settled: it goes as
+      // pieces of itself (never as nothing)
+      if (!B) for (const c of comp) { if (c.tris) queueShatter(S, c, null, 0.6); else hideChunk(S, c); }
     }
     if (S.stats.firstFall < 0) S.stats.firstFall = nowT - S.stats.born;
   }
@@ -1572,12 +1696,15 @@
       g.matrixAutoUpdate = false; g.matrix.copy(M);
       if (!holder) for (const ms of meshes) g.add(ms);
       g.updateMatrixWorld(true);
-      const n = Math.max(3, Math.min(Math.min(room - 2, PHONE ? 8 : 16), Math.round(2 + (mass || 2) * 1.1 * S.m.frag)));
+      // (pieces cost the cut linearly: a bay-sized chunk reads as broken in ten)
+      const n = Math.max(3, Math.min(Math.min(room - 2, PHONE ? 6 : 10), Math.round(2 + (mass || 2) * 1.1 * S.m.frag)));
       let r = null;
       try {
         r = D.shatter(g, {
           at: at, dir: dir || null, power: Math.max(0.4, Math.min(2.2, power || 0.6)),
           speed: 2.2 * S.m.spread, velocity: vel || null, maxPieces: n, owner: S.key, solid: true,
+          // a storey breaking up is thrown out and down, never up into the sky
+          maxUp: PIECE_UP, maxSpin: PIECE_SPIN,
           // a cut chunk is a piece of a building, not a pole: no stump of a
           // mullion or a post is left standing where the storey was
           snap: false,
@@ -1660,9 +1787,12 @@
   function buildPart(p) {
     if (p.meshes) return;
     const B = p.body, S = p.S;
-    if (!B || B.dead || S.disposed) { for (const c of p.chunks) hideChunk(S, c); p.meshes = []; return; }
+    // (a body that has died since -- settled, broken up, gone as pieces --
+    // still wants its picture: the kept rubble, the ghost and the pieces are
+    // made of it. Only a structure that is gone has nothing to copy from.)
+    if (!B || S.disposed) { for (const c of p.chunks) hideChunk(S, c); p.meshes = []; return; }
     p.meshes = geoOf(S, p.chunks.filter(function (c) { return c.tris; }), B.com);
-    for (const ms of p.meshes) { ms.castShadow = !PHONE; ms.receiveShadow = true; B.g.add(ms); }
+    for (const ms of p.meshes) { ms.castShadow = !PHONE; ms.receiveShadow = true; glassDraw(ms); B.g.add(ms); }
     for (const c of p.chunks) hideChunk(S, c);
     if (p.ghost && --p.ghost.n <= 0) dropGhost(p.ghost);
   }
@@ -1696,6 +1826,9 @@
       if (g[4] < z0) z0 = g[4]; if (g[5] > z1) z1 = g[5];
     }
     if (!(M > 0) || !isFinite(x0)) return null;
+    // THE HARD CAP: a slot is made (the calmest body lying on something
+    // settles, else the smallest still moving goes as pieces) or there is no body
+    if (!freeSlot(!!handed || list.length > 8)) return null;
     const com = new THREE.Vector3(cx / M, cy / M, cz / M);
     // parts: level groups, bottom first. Handed-over parts (a segment split
     // off a falling tower) keep their meshes: re-based on the new centre,
@@ -1718,6 +1851,7 @@
       B.q.copy(parent.q);
       B.v.copy(parent.v).add(new THREE.Vector3().crossVectors(parent.w, r));
       B.w.copy(parent.w);
+      tame(B);
     } else {
       B.pos.copy(com).applyMatrix4(S.L);
       B.q.copy(S.q);
@@ -1731,11 +1865,11 @@
         for (const ms of p.meshes) { if (off) ms.position.add(off); g.add(ms); }
       } else {
         if (ghost) { p.ghost = ghost; ghost.n++; }
-        if (!was) workHi.push(buildPart.bind(null, p));
+        // the bottom part (the one that lands) goes to the head of the queue:
+        // it is copied this same frame, inside the budget, never all at once
+        if (!was) { if (p === parts[0]) workHi.unshift(buildPart.bind(null, p)); else workHi.push(buildPart.bind(null, p)); }
       }
     }
-    // the first part (the one at the bottom, the one that lands) is made now
-    if (!handed && parts[0] && !parts[0].meshes) buildPart(parts[0]);
     g.position.copy(B.pos); g.quaternion.copy(B.q);
     (S.D.root || CBZ.scene).add(g);
     bodies.push(B);
@@ -1748,6 +1882,13 @@
     const lo = B.lo, hi = B.hi;
     const ex = Math.max(0.2, hi.x - lo.x), ey = Math.max(0.2, hi.y - lo.y), ez = Math.max(0.2, hi.z - lo.z);
     const M = B.mass;
+    // the most it may climb and spin: a block toppling about its foot never
+    // turns faster than a rod of its length falling flat from upright
+    // (sqrt(3g/L)), a loose panel may tumble a little more
+    const L = Math.max(ex, ey, ez), wTop = Math.sqrt(3 * G / L);
+    const multi = B.parts && B.parts.length > 1;
+    B.maxW = multi ? 1.3 * wTop : Math.min(W_MAX, Math.max(1.5, 2 * wTop));
+    B.maxUp = multi ? 0.6 : 1.5;
     B.iI = [12 / (M * (ey * ey + ez * ez)), 12 / (M * (ex * ex + ez * ez)), 12 / (M * (ex * ex + ey * ey))];
     B.radius = 0.5 * Math.hypot(ex, ey, ez);
     const P = [];
@@ -1965,6 +2106,14 @@
       // rolling resistance: a slab lying on its face stops rocking
       if (nC >= 3) { const f = Math.max(0, 1 - 3 * h); w.multiplyScalar(f); }
     }
+    /* NOTHING IS LAUNCHED. A long block landing on one end takes the whole
+       landing through one corner; the impulse loop answers with a spin and a
+       climb a building does not have (the far end of a 60 m tower thrown up
+       at 30 m/s). A falling building's mass comes down: whatever the contact
+       solve made, the climb and the tumble stay within what a mass that size
+       can do. */
+    if (v.y > B.maxUp) v.y = B.maxUp;
+    { const wl2 = w.length(); if (wl2 > B.maxW) w.multiplyScalar(B.maxW / wl2); }
     if (hardest > B.hard) B.hard = hardest;
     // rest
     const still = B.contact && v.lengthSq() < 0.12 && w.lengthSq() < 0.1;
@@ -2102,28 +2251,244 @@
     }
   }
   function buildAll(B) { for (const p of B.parts) if (!p.meshes) buildPart(p); }
-  // settle: the body becomes static rubble where it lies
-  /* SETTLE: the body is rubble where it lies. It is KEPT as it is (debris.js
+
+  /* ---- THE BUDGET, HARD ------------------------------------------------------
+     There are never more than BODY_CAP structural bodies awake. A body that
+     would be one too many first makes its own room: the CALMEST body that is
+     lying on something (not on another moving body) settles where it lies;
+     failing that, the smallest body still moving goes as pieces of itself. */
+  /* Making room costs a settle test (or a break-up) per body, so a storey
+     coming apart into forty clusters on one frame may make room only a few
+     times that frame: the rest of the small clusters go as pieces of
+     themselves (queued). A big block (a tower's top) always gets its slot. */
+  const FREE_PER_FRAME = PHONE ? 2 : 4;
+  let freeBudget = FREE_PER_FRAME;
+  function freeSlot(force) {
+    if (bodies.length < BODY_CAP) return true;
+    if (freeBudget <= 0 && !force) return false;
+    freeBudget--;
+    return freeOne() && bodies.length < BODY_CAP;
+  }
+  function freeOne() {
+    let best = null, be = Infinity;
+    for (const b of bodies) {
+      if (!b.contact || b.onBody || b.parts.length > 1 || b.t < 0.15) continue;
+      const e = b.v.lengthSq() + b.w.lengthSq() * Math.max(1, b.radius * b.radius);
+      if (e < be) { be = e; best = b; }
+    }
+    if (best) { bake(best); stats.capSettled++; return true; }
+    let sm = null;
+    for (const b of bodies) if (b.parts.length < 2 && (!sm || b.mass < sm.mass)) sm = b;
+    if (sm) { shatterBody(sm); stats.capShattered++; return true; }
+    return false;
+  }
+  // a body handed over as pieces of itself (its picture first, then the cut)
+  function shatterBody(B) {
+    const i = bodies.indexOf(B);
+    if (i >= 0) bodies.splice(i, 1);
+    B.dead = true;
+    const S = B.S;
+    B.g.position.copy(B.pos); B.g.quaternion.copy(B.q);
+    const at = B.pos.clone(), vel = B.v.clone().multiplyScalar(0.4), mass = B.mass;
+    if (vel.y > 0) vel.y = 0;
+    const real = B.chunks.filter(function (c) { return c.tris > 0; });
+    if (real.length < 2 || S.disposed) {
+      workHi.push(function () {
+        footprint(S, B);
+        buildAll(B);
+        if (B.g.parent) B.g.parent.remove(B.g);
+        B.g.updateMatrix();
+        shatterMeshes(S, B.g.children.slice(), B.g.matrix, at, null, 0.5, vel, mass, B.g);
+      });
+      return;
+    }
+    piecesOf(S, real, B.pos, B.q, B.com, vel, B.g, function () { footprint(S, B); });
+  }
+  /* PIECES, ONE CHUNK A JOB. A body (or a pancaking block's bottom storey)
+     breaking up is cut chunk by chunk in the pieces queue: one Voronoi of a
+     whole storey was a 15 ms job, and a long backlog goes as dust and grit
+     like any crushed storey. `pic` (the picture: the body's group, the shed
+     storey) stays drawn until the last of its chunks has gone. */
+  function piecesOf(S, list, pos0, q0, com0, vel, pic, onDone) {
+    let left = list.length;
+    const pos = pos0.clone(), q = q0.clone(), com = com0.clone();
+    const done = function () {
+      if (--left > 0) return;
+      if (onDone) { try { onDone(); } catch (e) {} }
+      if (pic) {
+        if (pic.parent) pic.parent.remove(pic);
+        pic.traverse(function (o) { if (o.isMesh && o.geometry && !o.geometry._shared) o.geometry.dispose(); });
+      }
+    };
+    if (!left) { left = 1; done(); return; }
+    for (const c of list) {
+      work.push(function (cheap) {
+        if (S.disposed) { done(); return; }
+        hideChunk(S, c);
+        const at = new THREE.Vector3(c.cx - com.x, c.cy - com.y, c.cz - com.z).applyQuaternion(q).add(pos);
+        if (cheap) {
+          try { if (CBZ.debris && CBZ.debris.chips) CBZ.debris.chips(at.x, at.y, at.z, { color: S.D.wall, count: 8, power: 1, dust: true }); } catch (e) {}
+          done(); return;
+        }
+        const hold = new THREE.Group();
+        hold.position.copy(pos); hold.quaternion.copy(q);
+        for (const ms of geoOf(S, [c], com)) hold.add(ms);
+        hold.updateMatrix(); hold.updateMatrixWorld(true);
+        shatterMeshes(S, hold.children.slice(), hold.matrix, at, null, 0.5, vel, c.mass, hold);
+        done();
+      });
+    }
+  }
+  // what a body inherits when it is split off a moving one: never thrown
+  function tame(B) {
+    const w = B.w, wl = w.length();
+    if (wl > B.maxW) w.multiplyScalar(B.maxW / wl);
+    if (B.v.y > B.maxUp) B.v.y = B.maxUp;
+    const hs = Math.hypot(B.v.x, B.v.z);
+    if (hs > V_SIDE) { B.v.x *= V_SIDE / hs; B.v.z *= V_SIDE / hs; }
+  }
+
+  /* ---- NOTHING RESTS ON NOTHING ----------------------------------------------
+     A body settles only where something holds it: the ground (or the floor
+     of a hole), its stump, kept rubble, a crushed car, a building. Resting on
+     another body that is still awake does not count (that one may go). The
+     test is geometric and fresh: the world's colliders near it right now
+     (minus its own kept solids), the standing chunks, the ground. A body that
+     is not held when it would settle does not settle: it drops, straight
+     down, until it lands on something, and is kept there. Kept rubble is
+     watched the same way (a few a frame): the slab it lay on can be carried
+     off, the stump under it can crush, a crater can open; then it drops
+     again. */
+  const HOLD = 0.3;                       // m: a hull point this close over a support is resting on it
+  function refreshCols(B, own) {
+    B.cols = [];
+    if (CBZ.queryCollidersNear) {
+      try {
+        const L = CBZ.queryCollidersNear(B.pos.x, B.pos.z, B.radius + 1.5, []);
+        for (const c of L) if (!c._cbzS && !c.carCollider && !(own && own.has(c))) B.cols.push(c);
+      } catch (e) {}
+    }
+    let f = 0;
+    const S = B.S, p = B.pos;
+    try { f = S.D.groundAt ? S.D.groundAt(p.x, p.z) : CBZ.groundAt ? CBZ.groundAt(p.x, p.z) : (CBZ.floorAt ? CBZ.floorAt(p.x, p.z, -50) : 0); } catch (e) { f = 0; }
+    B.floorY = isFinite(f) ? f : 0;
+    B.colsT = nowT;
+  }
+  // the smallest gap between the body's hull and what holds it up (< 0: in it)
+  function gapUnder(B) {
+    frameOf(B);
+    const R = B.R, p = B.pos, pts = B.pts;
+    const near = B.near; B.near = null;
+    let gap = Infinity;
+    for (let i = 0; i < pts.length; i += 3) {
+      const lx = pts[i], ly = pts[i + 1], lz = pts[i + 2];
+      const wx = p.x + R[0] * lx + R[1] * ly + R[2] * lz, wy = p.y + R[3] * lx + R[4] * ly + R[5] * lz, wz = p.z + R[6] * lx + R[7] * ly + R[8] * lz;
+      const sp = support(B, wx, wy, wz);
+      const d = wy - sp.h;
+      if (d < gap) gap = d;
+    }
+    B.near = near;
+    return gap;
+  }
+  function heldAt(B, own) {
+    refreshCols(B, own);
+    return gapUnder(B) <= HOLD;
+  }
+  const baking = [];                      // settling, waiting for their picture
+  const droppers = [];                    // settled where nothing holds them: falling straight down
+  const settled = [];                     // kept rubble, watched: {B, rec, t}
+  let watchI = 0;
+  // settle: the body becomes rubble where it lies (if something holds it)
+  function bake(B) {
+    const i0 = bodies.indexOf(B);
+    if (i0 >= 0) bodies.splice(i0, 1);
+    B.g.position.copy(B.pos); B.g.quaternion.copy(B.q);
+    B.v.set(0, 0, 0); B.w.set(0, 0, 0);
+    // it waits in the settle queue (frozen where it lies) for its picture
+    // and its turn: the support test is never a cascade inside one solve
+    if (baking.indexOf(B) < 0) baking.push(B);
+  }
+  function settleNow(B) {
+    if (heldAt(B, null)) keepBody(B);
+    else drop(B);
+  }
+  function drop(B) {
+    B.dead = true;
+    B.dropV = 0;
+    stats.drops++;
+    if (droppers.indexOf(B) < 0) droppers.push(B);
+  }
+  const SETTLE_PER_FRAME = PHONE ? 3 : 6;
+  function stepBaking() {
+    let n = SETTLE_PER_FRAME;
+    for (let i = baking.length - 1; i >= 0 && n > 0; i--) {
+      const B = baking[i];
+      let ready = true;
+      for (const p of B.parts) if (!p.meshes) { ready = false; break; }
+      if (!ready) continue;
+      baking.splice(i, 1);
+      settleNow(B);
+      n--;
+    }
+  }
+  function stepDroppers(dt) {
+    for (let i = droppers.length - 1; i >= 0; i--) {
+      const B = droppers[i];
+      if (!B.g.parent && B.kept) { droppers.splice(i, 1); continue; }
+      B.dropV = Math.min(40, B.dropV + G * dt);
+      let dy = B.dropV * dt, landed = false;
+      if (nowT - B.colsT > 0.1) refreshCols(B, null);
+      // in steps no longer than a support may be penetrated by
+      while (dy > 0) {
+        const st = Math.min(dy, 0.35);
+        const gap = gapUnder(B);
+        if (gap <= st + 0.02) { B.pos.y -= Math.max(0, gap); landed = true; break; }
+        B.pos.y -= st; dy -= st;
+      }
+      if (B.pos.y < -120) { droppers.splice(i, 1); if (B.g.parent) B.g.parent.remove(B.g); B.g.traverse(function (o) { if (o.isMesh && o.geometry) o.geometry.dispose(); }); continue; }
+      B.g.position.copy(B.pos);
+      if (!B.g.matrixAutoUpdate) { B.g.updateMatrix(); B.g.updateMatrixWorld(true); }
+      if (landed) { droppers.splice(i, 1); keepBody(B); }
+    }
+  }
+  /* KEEP: the body is rubble where it lies. It is KEPT as it is (debris.js
      keep: no copy into a rubble bucket, no re-merge of the cell around it),
      solid through colliders fitted to its own chunks, and its meshes are
      merged per material later, from the work queue. */
-  function bake(B) {
+  function keepBody(B) {
     const S = B.S;
-    buildAll(B);
-    const i0 = bodies.indexOf(B);
-    if (i0 >= 0) bodies.splice(i0, 1);
     B.dead = true;
     B.g.position.copy(B.pos); B.g.quaternion.copy(B.q);
-    B.g.updateMatrixWorld(true);
-    footprint(S, B);
-    S.stats.baked++; stats.baked++;
-    rubbleKeys.add(S.key);
-    S.stats.lastSettle = nowT - S.stats.born;
+    B.g.updateMatrix(); B.g.updateMatrixWorld(true);
+    if (!B.kept) {
+      footprint(S, B);
+      S.stats.baked++; stats.baked++;
+      rubbleKeys.add(S.key);
+      S.stats.lastSettle = nowT - S.stats.born;
+    }
     const D = CBZ.debris;
     if (D && D.keep) {
-      try { D.keep(B.g, { owner: S.key, cols: bodyCols(B) }); } catch (e) { console.warn("[collapse] keep", e); }
-      if (B.g.children.length > 3) workIdle.push(function () { mergeKept(B.g); });
+      let rec = null;
+      try { rec = D.keep(B.g, { owner: S.key, cols: bodyCols(B) }); } catch (e) { console.warn("[collapse] keep", e); }
+      if (rec) settled.push({ B: B, rec: rec, t: nowT });
+      if (!B.kept && B.g.children.length > 3) workIdle.push(function () { mergeKept(B.g); });
     } else if (B.g.parent) { B.g.parent.remove(B.g); B.g.traverse(function (o) { if (o.isMesh && o.geometry) o.geometry.dispose(); }); }
+    B.kept = true;
+  }
+  function watchSettled() {
+    if (!settled.length || !CBZ.debris || !CBZ.debris.unkeep) return;
+    let n = PHONE ? 2 : 4;
+    while (n-- > 0 && settled.length) {
+      if (watchI >= settled.length) watchI = 0;
+      const e = settled[watchI];
+      // cleared by its owner (a rebuilt lot, a reset): no longer ours to watch
+      if (!e.B.g.parent) { settled.splice(watchI, 1); continue; }
+      if (nowT - e.t < 0.5) { watchI++; continue; }
+      if (!heldAt(e.B, new Set(e.rec.cols))) {
+        if (CBZ.debris.unkeep(e.rec)) { settled.splice(watchI, 1); stats.rewoken++; drop(e.B); continue; }
+      }
+      watchI++;
+    }
   }
   /* The solids a settled body leaves: one box per chunk (one per level group
      on a big block), fitted to that chunk's own extent in the pose it came to
@@ -2171,17 +2536,22 @@
     return out;
   }
   // a kept body drawn as one mesh per material (its parts' meshes merged)
+  /* one material per call (a kept tower holds a hundred thousand vertices of
+     wall: merging all of it in one idle job was a frame of its own); the
+     rest re-queue */
   function mergeKept(g) {
     if (!g.parent) return;
     const byMat = new Map();
     for (const ms of g.children) {
-      if (!ms.isMesh) continue;
+      if (!ms.isMesh || ms.userData.debrisMerged) continue;
       let L = byMat.get(ms.material); if (!L) { L = []; byMat.set(ms.material, L); }
       L.push(ms);
     }
     const n3 = new THREE.Matrix3();
+    let done = false;
     byMat.forEach(function (L, mt) {
-      if (L.length < 2) return;
+      if (L.length < 2 || done) return;
+      done = true;
       let nv = 0;
       for (const ms of L) nv += ms.geometry.attributes.position.count;
       const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), Cc = new Float32Array(nv * 3);
@@ -2213,11 +2583,13 @@
       geo.computeBoundingSphere();
       const m = new THREE.Mesh(geo, mt);
       m.matrixAutoUpdate = false;
-      m.userData.debrisRubble = true;
+      m.userData.debrisRubble = true; m.userData.debrisMerged = true;
       m.castShadow = !PHONE; m.receiveShadow = true;
+      glassDraw(m);
       g.add(m);
     });
     g.updateMatrixWorld(true);
+    if (done) workIdle.push(function () { mergeKept(g); });
   }
   function footprint(S, B) {
     const F = S.stats.foot, a = B.aabb;
@@ -2226,7 +2598,7 @@
     // area actually covered, on a 1 m grid, from the body's oriented box
     const R = new THREE.Matrix4().makeRotationFromQuaternion(B.q);
     const lo = B.lo, hi = B.hi;
-    const stepX = Math.max(0.5, (hi.x - lo.x) / 24), stepZ = Math.max(0.5, (hi.z - lo.z) / 24), stepY = Math.max(0.5, (hi.y - lo.y) / 24);
+    const stepX = Math.max(0.5, (hi.x - lo.x) / 16), stepZ = Math.max(0.5, (hi.z - lo.z) / 16), stepY = Math.max(0.5, (hi.y - lo.y) / 4);
     const v = new THREE.Vector3();
     for (let x = lo.x; x <= hi.x; x += stepX) for (let y = lo.y; y <= hi.y; y += stepY) for (let z = lo.z; z <= hi.z; z += stepZ) {
       v.set(x, y, z).applyMatrix4(R).add(B.pos);
@@ -2237,7 +2609,6 @@
   // break a body apart: a tower into segments, a segment into chunks, a chunk into pieces
   function split(B) {
     const S = B.S;
-    const room = Math.max(0, BODY_CAP - bodies.length + 1);
     if (B.parts.length > 1) {
       const nSeg = Math.max(2, Math.min(6, Math.ceil(B.parts.length / 2)));
       const per = Math.ceil(B.parts.length / nSeg);
@@ -2252,46 +2623,70 @@
         for (const p of ps) if (p.meshes) for (const ms of p.meshes) B.g.remove(ms);
         const nb = makeBody(S, list, B, ps);
         if (nb) { nb.hard = 0; nb.split = (B.split || 0) + 1; }
-        else for (const p of ps) { if (p.meshes) for (const ms of p.meshes) ms.geometry.dispose(); else for (const c of p.chunks) hideChunk(S, c); }
+        else shatterParts(S, B, ps);
       }
       return;
     }
     const real = B.chunks.filter(function (c) { return c.tris > 0; });
     if (real.length > 1) {
-      // into groups of neighbouring chunks, as many as the budget allows
-      const n = Math.max(2, Math.min(real.length, Math.max(2, room), PHONE ? 6 : 12));
-      real.sort(function (a, b) { return (a.kind - b.kind) || (a.f - b.f) || (a.j - b.j) || (a.ix - b.ix) || (a.iz - b.iz); });
-      const per = Math.ceil(real.length / n);
-      buildAll(B);
-      // the old body stays on screen, frozen, until its pieces are drawn
+      // into groups of neighbouring chunks, as many as the budget holds
+      // (the body itself frees one slot; the calmest settled free the rest)
       const i0 = bodies.indexOf(B);
       if (i0 >= 0) bodies.splice(i0, 1);
+      let room = BODY_CAP - bodies.length;
+      for (const b of bodies) if (b.contact && !b.onBody && b.parts.length < 2) room++;
+      const n = Math.min(real.length, room, PHONE ? 6 : 12);
+      if (n < 2) { shatterBody(B); return; }
+      real.sort(function (a, b) { return (a.kind - b.kind) || (a.f - b.f) || (a.j - b.j) || (a.ix - b.ix) || (a.iz - b.iz); });
+      const per = Math.ceil(real.length / n);
+      // the old body stays on screen, frozen, until its pieces are drawn
+      // (its own picture is never copied here: what it has is the ghost,
+      // what it lacks is still queued and lands in the ghost)
       B.dead = true;
       B.g.position.copy(B.pos); B.g.quaternion.copy(B.q);
       const ghost = { g: B.g, n: 0, done: false };
       for (let i = 0; i < real.length; i += per) {
-        const nb = makeBody(S, real.slice(i, i + per), B, null, ghost);
+        const grp = real.slice(i, i + per);
+        const nb = makeBody(S, grp, B, null, ghost);
         if (nb) { nb.hard = 0; nb.split = (B.split || 0) + 1; }
+        else shatterChunks(S, B, grp);
       }
-      if (ghost.n <= 0) dropGhost(ghost);
+      if (ghost.n <= 0) workHi.push(function () { dropGhost(ghost); });
       return;
     }
     // one chunk, hard landing: pieces of itself
-    const c = real[0];
-    if (!c) { removeBody(B, false); return; }
-    const at = B.pos.clone();
-    footprint(S, B);
-    buildAll(B);
-    const i0 = bodies.indexOf(B);
-    if (i0 >= 0) bodies.splice(i0, 1);
-    B.dead = true;
-    B.g.position.copy(B.pos); B.g.quaternion.copy(B.q);
-    const vel = B.v.clone().multiplyScalar(0.4);
+    if (!real[0]) { removeBody(B, false); return; }
+    shatterBody(B);
+  }
+  // segments a full budget could not take: their pictures go as pieces
+  function shatterParts(S, B, ps) {
+    const pos = B.pos.clone(), q = B.q.clone(), com = B.com.clone();
+    const vel = B.v.clone().multiplyScalar(0.4); if (vel.y > 0) vel.y = 0;
+    let mass = 0; for (const p of ps) mass += p.mass;
     workHi.push(function () {
-      // the meshes keep their offsets inside the body group: shatter the group
-      if (B.g.parent) B.g.parent.remove(B.g);
-      B.g.updateMatrix();
-      shatterMeshes(S, B.g.children.slice(), B.g.matrix, at, null, 0.5, vel, c.mass, B.g);
+      const hold = new THREE.Group();
+      hold.position.copy(pos); hold.quaternion.copy(q);
+      for (const p of ps) {
+        if (!p.meshes) p.meshes = S.disposed ? [] : geoOf(S, p.chunks.filter(function (c) { return c.tris; }), com);
+        for (const c of p.chunks) hideChunk(S, c);
+        for (const ms of p.meshes) { if (ms.parent) ms.parent.remove(ms); hold.add(ms); }
+      }
+      hold.updateMatrix(); hold.updateMatrixWorld(true);
+      shatterMeshes(S, hold.children.slice(), hold.matrix, pos, null, 0.5, vel, mass, hold);
+    });
+  }
+  // a group of a broken body's chunks the budget could not take as a body
+  function shatterChunks(S, B, grp) {
+    const pos = B.pos.clone(), q = B.q.clone(), com = B.com.clone();
+    const vel = B.v.clone().multiplyScalar(0.4); if (vel.y > 0) vel.y = 0;
+    let mass = 0; for (const c of grp) mass += c.mass;
+    workHi.push(function () {
+      if (S.disposed) return;
+      const hold = new THREE.Group();
+      hold.position.copy(pos); hold.quaternion.copy(q);
+      for (const ms of geoOf(S, grp, com)) hold.add(ms);
+      hold.updateMatrix(); hold.updateMatrixWorld(true);
+      shatterMeshes(S, hold.children.slice(), hold.matrix, pos, null, 0.5, vel, mass, hold);
     });
   }
   // the bottom storey of a pancaking block is consumed
@@ -2309,11 +2704,14 @@
     (S.D.root || CBZ.scene).add(hold);
     hold.updateMatrix();
     const at = new THREE.Vector3(0, B.lo.y, 0).applyQuaternion(B.q).add(B.pos);
-    const vel = B.v.clone().multiplyScalar(0.3), pm = p.mass;
-    workHi.push(function () {
-      if (hold.parent) hold.parent.remove(hold);
-      shatterMeshes(S, hold.children.slice(), hold.matrix, at, null, 0.5, vel, pm, hold);
-    });
+    const vel = B.v.clone().multiplyScalar(0.3);
+    if (vel.y > 0) vel.y = 0;
+    if (S.disposed) {
+      workHi.push(function () {
+        if (hold.parent) hold.parent.remove(hold);
+        shatterMeshes(S, hold.children.slice(), hold.matrix, at, null, 0.5, vel, p.mass, hold);
+      });
+    } else piecesOf(S, p.chunks.filter(function (c) { return c.tris > 0; }), B.pos, B.q, B.com, vel, hold, null);
     S.stats.pancaked++;
     const set = new Set(p.chunks);
     B.chunks = B.chunks.filter(function (c) { return !set.has(c); });
@@ -2345,25 +2743,24 @@
     R[6] = 2 * (qx * qz - qy * qw); R[7] = 2 * (qy * qz + qx * qw); R[8] = 1 - 2 * (qx * qx + qy * qy);
     B.upY = R[4];
   }
-  /* THE SOFT CAP: more structural bodies awake than the device carries and
-     the calmest ones that are already lying on something settle where they
-     are (never one that is still falling). */
+  /* THE CAP IS HARD: makeBody makes its own room (freeSlot). This only
+     catches a body that got in some other way: calmest settled first. */
   function relieve() {
-    let over = bodies.length - BODY_CAP;
-    if (over <= 0) return;
-    const cand = bodies.filter(function (b) { return b.contact && b.t > 0.4 && b.parts.length < 2 && !b.onBody; })
-      .sort(function (a, b) { return (a.v.lengthSq() + a.w.lengthSq()) - (b.v.lengthSq() + b.w.lengthSq()); });
-    for (let i = 0; i < cand.length && over > 0; i++, over--) bake(cand[i]);
+    let guard = 16;
+    while (bodies.length > BODY_CAP && guard-- > 0) if (!freeOne()) break;
   }
+  const _step = [];
   function stepBodies(dt) {
     if (!bodies.length) return;
     relieve();
     const sub = Math.max(1, Math.min(4, Math.ceil(dt / (1 / 90))));
     const h = dt / sub;
     for (const B of bodies) frameOf(B);
+    for (const B of baking) frameOf(B);
     for (const B of bodies) {
       let L = null;
-      for (const O of bodies) {
+      for (let k = 0; k < bodies.length + baking.length; k++) {
+        const O = k < bodies.length ? bodies[k] : baking[k - bodies.length];
         if (O === B || O.S !== B.S && Math.abs(O.pos.x - B.pos.x) > 200) continue;
         const r = O.radius + B.radius + 0.5;
         if (Math.abs(O.pos.x - B.pos.x) > r || Math.abs(O.pos.z - B.pos.z) > r || O.pos.y > B.pos.y + 0.5) continue;
@@ -2371,9 +2768,12 @@
       }
       B.near = L;
     }
-    for (let i = bodies.length - 1; i >= 0; i--) {
-      const B = bodies[i];
-      if (!B || B.dead) continue;
+    // (a snapshot: a body settling, splitting or making room changes the list)
+    _step.length = 0;
+    for (let i = bodies.length - 1; i >= 0; i--) _step.push(bodies[i]);
+    for (let i = 0; i < _step.length; i++) {
+      const B = _step[i];
+      if (!B || B.dead || bodies.indexOf(B) < 0) continue;
       B.hard = 0; B.pancaking = false;
       for (let k = 0; k < sub && !B.dead; k++) {
         stepBody(B, h);
@@ -2408,11 +2808,15 @@
       if (B.parts.length > 1 && B.contact && !B.ownC.length && B.tilt < 0.62 && B.v.lengthSq() < 4 && nowT - B.lastShed > 0.3) { shedBottom(B); if (B.dead) continue; }
       // settle: still on something for half a second, or barely moving long
       // after the fall. Never while lying on another body that is still
-      // moving (it would be left hanging in the air when that one goes), and
-      // a block of storeys never settles whole: past its time it breaks up.
+      // awake (it would be left hanging in the air when that one goes: it
+      // waits for that one to settle, then lies on its rubble), and a block
+      // of storeys never settles whole: past its time it breaks up. Past
+      // half a minute it settles whatever it is doing, and bake() still
+      // keeps it nowhere nothing holds it: it drops.
       const one = B.parts.length < 2;
       if (B.t > 18 && !one) { split(B); continue; }
-      if (one && (!B.onBody || B.t > 24) && (B.calm > 0.5 || (B.contact && B.t > 8 && B.v.lengthSq() < 1 && B.w.lengthSq() < 0.5) || B.t > 18)) { bake(B); continue; }
+      if (one && !B.onBody && (B.calm > 0.5 || (B.contact && B.t > 8 && B.v.lengthSq() < 1 && B.w.lengthSq() < 0.5) || (B.contact && B.t > 18))) { bake(B); continue; }
+      if (one && B.t > 30) { bake(B); continue; }
       if (B.pos.y < -120) removeBody(B, false);
     }
   }
@@ -2623,6 +3027,11 @@
   function dispose(S, forRebuild) {
     if (S.disposed) return;
     try { finals.set(S.grp, summary(S)); } catch (e) {}
+    // the boxes still owed to chunks that left come out now (none may be
+    // left standing in the world as an invisible wall), and a body still
+    // waiting on its picture copies it before the bands go
+    runSurgery(S, Infinity);
+    for (const b of baking) if (b.S === S) buildAll(b);
     S.disposed = true;
     const i = structs.indexOf(S); if (i >= 0) structs.splice(i, 1);
     if (byGroup.get(S.grp) === S) byGroup.delete(S.grp);
@@ -2636,7 +3045,7 @@
     }
     for (const oc of S.origCols || []) { oc._cbzS = null; oc._cbzCh = null; oc._cbzGone = false; }
     if (S.b) for (const p of S.b.platforms || []) { p._cbzS = null; p._cbzCh = null; p._cbzGone = false; }
-    flushWorld(S);
+    flushWorld(S, true);
     if (S.root) {
       if (S.root.parent) S.root.parent.remove(S.root);
       for (const ms of S.meshes) ms.geometry.dispose();
@@ -2812,9 +3221,16 @@
           try { if (job.onGround) job.onGround(job); } catch (e) {}
           if (!job.quiet) { try { if (CBZ.sfx) { CBZ.sfx("collapse"); CBZ.sfx("rumble", { delay: 0.35 }); } if (CBZ.shake) CBZ.shake(Math.min(4.5, 1.6 + S.h * 0.055)); } catch (e) {} }
         }
-        if ((standing < 0.02 && !mine) || job.t > 30) {
-          // anything still standing (or still moving) settles where it is
-          for (const b of bodies.slice()) if (b.S === S) bake(b);
+        const waiting = baking.some(function (b) { return b.S === S; });
+        if ((standing < 0.02 && !mine && !waiting) || job.t > 30) {
+          // anything still moving settles where it is, the lowest first (so
+          // what lies on it finds its rubble), and only where something holds
+          // it (bake() drops the rest); what still waits on its picture is
+          // finished now, before the structure it copies from goes
+          const mineB = bodies.filter(function (b) { return b.S === S; })
+            .sort(function (a, b) { return (a.pos.y + a.lo.y) - (b.pos.y + b.lo.y); });
+          for (const b of mineB) bake(b);
+          for (const b of baking.slice()) if (b.S === S) { buildAll(b); baking.splice(baking.indexOf(b), 1); settleNow(b); }
           bakeStanding(S);
           if (!job.grounded) { job.grounded = true; try { if (job.onGround) job.onGround(job); } catch (e) {} }
           flushWorld(S);
@@ -2873,10 +3289,11 @@
      ============================================================ */
   function update(dt) {
     if (!(dt > 0)) return;
-    if (!structs.length && !bodies.length && !jobs.length && !work.length && !workHi.length && !workIdle.length) return;
+    if (!structs.length && !bodies.length && !jobs.length && !work.length && !workHi.length && !workIdle.length && !droppers.length && !baking.length && !settled.length) return;
     const t0 = performance.now();
     dt = Math.min(dt, 0.1);
     nowT += dt;
+    freeBudget = FREE_PER_FRAME;
     runCuts(SLICE_MS);
     let ta = performance.now(); prof("cut", ta - t0);
     for (let i = structs.length - 1; i >= 0; i--) {
@@ -2891,18 +3308,29 @@
         try { changed = solve(S); } catch (e) { console.warn("[collapse] solve", e); }
         if (!changed && !S.condemned) S.active -= TICK;
       }
-      flushWorld(S);
       { const tb = performance.now(); prof("solve", tb - ta); ta = tb; }
+      runSurgery(S, SURG_MS);
+      flushWorld(S);
+      { const tb = performance.now(); prof("boxes", tb - ta); ta = tb; }
       // a building nothing is left of, with nothing falling, is done
-      if (S.standingReal <= 0 && !S.job && !bodies.some(function (b) { return b.S === S; })) dispose(S, false);
+      if (S.standingReal <= 0 && !S.job && !bodies.some(function (b) { return b.S === S; }) && !baking.some(function (b) { return b.S === S; })) {
+        dispose(S, false);
+        const tb = performance.now(); prof("dispose", tb - ta); ta = tb;
+      }
     }
     ta = performance.now();
     stepBodies(dt);
     { const tb = performance.now(); prof("bodies", tb - ta); ta = tb; }
     runWork(WORK_MS);
+    stepBaking();
     { const tb = performance.now(); prof("work", tb - ta); ta = tb; }
+    stepDroppers(dt);
+    watchSettled();
+    { const tb = performance.now(); prof("settle", tb - ta); ta = tb; }
     stepJobs(dt);
-    for (const S of structs) flushWorld(S);
+    // what the bodies and the queue changed this frame: the standing bands'
+    // vertex ranges (the world's boxes went out once, in the loop above)
+    for (const S of structs) flushMeshes(S);
     prof("jobs", performance.now() - ta);
     const ms = performance.now() - t0;
     stats.frames++; stats.ms += ms; if (ms > stats.msMax) stats.msMax = ms;
@@ -2941,13 +3369,34 @@
         maxAwake: stats.maxAwake, awakeAvg: stats.frames ? +(stats.awakeSum / stats.frames).toFixed(2) : 0,
         msAvg: stats.frames ? +(stats.ms / stats.frames).toFixed(3) : 0, msMax: +stats.msMax.toFixed(2),
         carsCrushed: stats.carsCrushed, baked: stats.baked, shattered: stats.shattered, crushed: stats.crushed, blasted: stats.blasted,
-        cap: BODY_CAP, device: DEVICE,
+        cap: BODY_CAP, device: DEVICE, capSettled: stats.capSettled, capShattered: stats.capShattered,
+        drops: stats.drops, rewoken: stats.rewoken, dropping: droppers.length, baking: baking.length, kept: settled.length,
         prof: Object.keys(profT).reduce(function (o, k) { o[k] = { avg: +(profT[k].sum / Math.max(1, stats.frames)).toFixed(3), max: +profT[k].max.toFixed(1) }; return o; }, {}) };
     }
     const S = bld && bld.chunks ? bld : structFor(bld, false);
     if (S) return summary(S);
     const D = norm(bld);
     return D ? (finals.get(D.grp) || null) : null;
+  };
+  /* NOTHING IN THE AIR (the lab's probe): every settled body (kept rubble,
+     waiting on its picture) whose hull is more than `gap` m above whatever
+     could hold it (the ground, a stump, any collider but its own, a crushed
+     car). Bodies still awake and bodies dropping are falling, not resting:
+     they are counted apart. */
+  C.unsupported = function (o) {
+    const gap = (o && o.gap) || 0.5;
+    const out = { kept: settled.length, air: 0, worst: 0, falling: bodies.length + droppers.length, list: [] };
+    const check = function (B, own) {
+      refreshCols(B, own);
+      const d = gapUnder(B);
+      if (d > gap) {
+        out.air++; if (d > out.worst) out.worst = +d.toFixed(2);
+        if (out.list.length < 12) out.list.push({ key: B.S.key, x: +B.pos.x.toFixed(1), y: +(B.pos.y + B.lo.y).toFixed(1), z: +B.pos.z.toFixed(1), gap: +d.toFixed(2), chunks: B.chunks.length });
+      }
+    };
+    for (const e of settled) if (e.B.g.parent) check(e.B, new Set(e.rec.cols));
+    for (const B of baking) check(B, null);
+    return out;
   };
   C.resetStats = function () { for (const k in stats) stats[k] = 0; for (const k in profT) delete profT[k]; };
   C._structs = structs; C._bodies = bodies;
@@ -3096,6 +3545,8 @@
 
   C.reset = function () {
     for (const B of bodies.slice()) removeBody(B, false);
+    for (const B of baking.concat(droppers)) { if (B.g.parent) B.g.parent.remove(B.g); B.g.traverse(function (o) { if (o.isMesh && o.geometry) o.geometry.dispose(); }); }
+    baking.length = 0; droppers.length = 0; settled.length = 0; watchI = 0;
     for (const S of structs.slice()) dispose(S, true);
     jobs.length = 0;
     work.length = 0; workHi.length = 0; workIdle.length = 0;

@@ -85,9 +85,16 @@
    local gut (the lab). The GAME stays with the def: which points get hit
    (seeded), what an impact costs the actors, who the front knocks down.
 
+   FIRE IS THE ISLAND'S ONE FIRE. The thermal pulse, a gutted house and a
+   glowing block thrown out of the crater light the wildfire's own fuel bed,
+   crowns and houses (CBZ.wildfire.igniteAt / igniteTree / igniteBuilding,
+   systems/wildfire.js as a service): it spreads, smokes, chars and pays the
+   structural ledger exactly as a wildfire does. This file draws no flame of
+   its own any more.
+
    DRAW CALLS, all instanced and pooled: streaks/trains, glow, smoke+dust,
-   ejecta rocks, flames (the wildfire's own point-sprite flame), front rings.
-   Six, plus two meshes per crater (blanket, curtain). Nothing allocates per
+   ejecta rocks, front rings. Five, plus two meshes per crater (blanket,
+   curtain). Nothing allocates per
    frame; every front's targets are sorted ONCE by distance and walked with a
    cursor, so a front costs O(newly reached) per tick, never O(world).
 
@@ -102,8 +109,7 @@
   const SOUND_SPEED = 65;       // the dramatic speed of sound (see header)
   const P0 = 101.325;           // kPa
   const G = 9.81;               // ejecta fly under real gravity
-  const STREAK_CAP = 220, GLOW_CAP = 64, SMOKE_CAP = 640, ROCK_CAP = 220, FLAME_CAP = 160, RING_CAP = 12;
-  const FIRE_CAP = 28;
+  const STREAK_CAP = 220, GLOW_CAP = 64, SMOKE_CAP = 640, ROCK_CAP = 220, RING_CAP = 12;
 
   // per-object thresholds (kPa)
   const GLASS_LO = 0.5, GLASS_HI = 3.0;
@@ -271,22 +277,8 @@
       rock: makePool(lumpGeo(), CBZ.mat ? CBZ.mat(0xffffff) : new THREE.MeshLambertMaterial({ color: 0xffffff }), ROCK_CAP, 0),
       ring: makePool((function () { const g = new THREE.RingGeometry(0.93, 1, 72, 1); g.rotateX(-Math.PI / 2); return g; })(),
         new THREE.MeshBasicMaterial(Object.assign({ color: 0xffffff, opacity: 0.8, side: THREE.DoubleSide }, add)), RING_CAP, 5),
-      flame: null, flameN: 0,
     };
     P.rock.castShadow = true;
-    // THE FLAME IS THE WILDFIRE'S FLAME (one look for every fire on the island)
-    const fm = CBZ.wildfire && CBZ.wildfire.flameMaterial ? CBZ.wildfire.flameMaterial() : null;
-    if (fm) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(FLAME_CAP * 3), 3).setUsage(THREE.DynamicDrawUsage));
-      g.setAttribute("aSize", new THREE.BufferAttribute(new Float32Array(FLAME_CAP), 1).setUsage(THREE.DynamicDrawUsage));
-      g.setAttribute("aAlpha", new THREE.BufferAttribute(new Float32Array(FLAME_CAP), 1).setUsage(THREE.DynamicDrawUsage));
-      const sd = new Float32Array(FLAME_CAP); for (let i = 0; i < FLAME_CAP; i++) sd[i] = h01(i, 7, 1);
-      g.setAttribute("aSeed", new THREE.BufferAttribute(sd, 1));
-      g.setDrawRange(0, 0);
-      P.flame = new THREE.Points(g, fm);
-      P.flame.frustumCulled = false; P.flame.renderOrder = 8; P.flame.visible = false;
-    }
     return P;
   }
   const POOL_KEYS = ["streak", "glow", "smoke", "rock", "ring"];
@@ -381,12 +373,11 @@
       floor: opts.floor || world.ground,
       dirx: Math.cos(az), dirz: Math.sin(az),
       streaks: [], trains: [], bolides: [], smoke: [], flashes: [], fronts: [], sounds: [],
-      lightPulses: [], rocks: [], fires: [], movers: [], fallers: [], craters: [], curtains: [],
+      lightPulses: [], rocks: [], movers: [], fallers: [], craters: [], curtains: [],
       shower: null, streakCd: 0.1, t: 0, over: false, overT: 0, rocksDirty: true, arrivals: [],
       budget: { glass: 0, dust: 0 },
     };
     for (const k of POOL_KEYS) opts.root.add(pl[k]);
-    if (pl.flame) opts.root.add(pl.flame);
     hookReset(world.src);
     stats.events++;
     return true;
@@ -559,7 +550,9 @@
       if (dp >= BLDG_GUT) {
         if (!r._meteorGutted) { r._meteorGutted = true; stats.bldgGutted++; }
         gutGlass(r, f);
-        if (f.crater || f.alt < 50) addFire(bx, (r.gy || ev.floor(bx, bz)) + Math.min(r.h || 6, 6) * 0.5, bz, Math.max(r.w || 8, r.d || 8) * 0.4, 50 + frnd() * 30, null);
+        // a crater's fireball or a low burst's flash lights it: the ground
+        // floor from the heat outside, an airburst through the blown-in roof
+        if (f.crater || f.alt < 50) fireBuilding(r, f.crater ? "heat" : "vent");
       }
     }
   }
@@ -770,71 +763,40 @@
   }
 
   /* ======================================================================
-     FIRE — the wildfire's own point-sprite flame, owned here for the
-     sites the thermal pulse lights (a crown, a gutted house)
+     FIRE — the island's one fire (systems/wildfire.js as a service). The
+     thermal pulse lights crowns and the bed under them; a gutted house burns
+     floor by floor through the structural ledger; a glowing block lights the
+     bed where it lands. Spread, smoke, char and the reset are the wildfire's.
      ====================================================================== */
-  function addFire(x, y, z, r, life, tree) {
-    if (ev.fires.length >= FIRE_CAP) return null;
-    const n = tree ? 4 : 6;
-    const f = { x, y, z, r, life, age: 0, n, seed: frnd() * 100, tree: tree || null, smokeAcc: 0 };
-    ev.fires.push(f);
-    stats.fires++;
-    if (tree) {
-      stats.treesBurning++;
-      if (tree.foliage && tree.foliage.material && tree.foliage.material.color) {
-        if (!tree._mLeaf) tree._mLeaf = tree.foliage.material.color.getHex();
-        tree.foliage.material.color.setHex(0x1a120c);
-      }
-      tree.burnt = true;      // the island's reset regrows it (leafHex / barkHex)
-    }
-    if (CBZ.sfxAt) CBZ.sfxAt("fire", x, z, {});
-    return f;
+  function WF() { const W = CBZ.wildfire; return W && W.igniteAt ? W : null; }
+  function fireBuilding(b, how) {
+    const W = WF();
+    if (!W || !W.igniteBuilding) return false;
+    let ok = false;
+    try { ok = !!W.igniteBuilding(b, how); } catch (e) { ok = false; }
+    if (ok) stats.fires++;
+    return ok;
+  }
+  function fireGround(x, z, r) {
+    const W = WF();
+    if (!W) return false;
+    let ok = false;
+    try { ok = !!W.igniteAt(x, z, "meteor", r || 0); } catch (e) { ok = false; }
+    if (ok) stats.fires++;
+    return ok;
   }
   function ignite(cx, cz, R, p0) {
+    const W = WF();
+    if (!W) return;
     const T = ev.world.trees;
     for (let i = 0; i < T.length; i++) {
-      const t = T[i]; if (!t || t._mFire || t._mDown === "stripped") continue;
+      const t = T[i]; if (!t || t.burnt || t.burning || t._mDown === "stripped") continue;
       const d = Math.hypot(t.x - cx, t.z - cz);
       if (d > R) continue;
       if (frnd() > p0 * (1 - d / R)) continue;
-      t._mFire = true;
-      const top = t.foliage ? t.foliage.position.y : ev.floor(t.x, t.z) + 4;
-      addFire(t.x, top - 0.6, t.z, 1.4, 35 + frnd() * 30, t);
-    }
-  }
-  function tickFires(dt) {
-    let n = 0;
-    const fl = P.flame;
-    const pa = fl ? fl.geometry.attributes.position.array : null, sa = fl ? fl.geometry.attributes.aSize.array : null, aa = fl ? fl.geometry.attributes.aAlpha.array : null;
-    for (let i = ev.fires.length - 1; i >= 0; i--) {
-      const f = ev.fires[i]; f.age += dt;
-      if (f.age >= f.life) { ev.fires.splice(i, 1); continue; }
-      const fade = Math.min(1, f.age / 1.5) * Math.min(1, (f.life - f.age) / 8);
-      f.smokeAcc += dt;
-      if (f.smokeAcc > 0.5) { f.smokeAcc = 0; puff(f.x + (frnd() - 0.5) * f.r, f.y + 1.5, f.z + (frnd() - 0.5) * f.r, 1.2 + frnd(), 14 + frnd() * 8, 0x2e2925, 1.6, 2.2 + frnd()); }
-      if (!fl) continue;
-      for (let k = 0; k < f.n && n < FLAME_CAP; k++, n++) {
-        const a = f.seed + k * 2.39996;
-        pa[n * 3] = f.x + Math.cos(a) * f.r * 0.6 * ((k % 3) / 2);
-        pa[n * 3 + 1] = f.y + 0.2 + (k % 2) * 0.5;
-        pa[n * 3 + 2] = f.z + Math.sin(a) * f.r * 0.6 * ((k % 3) / 2);
-        sa[n] = (f.tree ? 2.4 : 3.2) * (0.8 + 0.4 * h01(k, f.seed, 3));
-        aa[n] = 0.85 * fade;
-      }
-    }
-    if (fl && (n > 0 || fl.visible)) {
-      fl.geometry.setDrawRange(0, n);
-      fl.visible = n > 0;
-      fl.geometry.attributes.position.needsUpdate = true;
-      fl.geometry.attributes.aSize.needsUpdate = true;
-      fl.geometry.attributes.aAlpha.needsUpdate = true;
-      const u = fl.material.uniforms;
-      if (u) {
-        u.uTime.value = ev.t;
-        const cv = CBZ.canvas;
-        u.uScale.value = Math.max(1, ((cv && cv.height) || 640) * 0.5);
-        if (u.uWind) { const w = wind(); u.uWind.value.set(w.x, w.z); }
-      }
+      let ok = false;
+      try { ok = !!W.igniteTree(t, "meteor"); } catch (e) { ok = false; }
+      if (ok) { stats.treesBurning++; stats.fires++; }
     }
   }
 
@@ -908,7 +870,7 @@
     if (big) curtain(x, z, gy, R);
     ejecta(x, z, gy, R, big ? 150 : 24, big);
     plume(x, z, gy, R, big);
-    if (big) { ignite(x, z, R * 2.6, 0.9); later(2, function () { secondaries(x, z, gy, R); }); }
+    if (big) { ignite(x, z, R * 2.6, 0.9); fireGround(x, z, R * 1.4); later(2, function () { secondaries(x, z, gy, R); }); }
     sp.ejecta = performance.now() - T0 - sp.crater - sp.blanket;
     launchFront(x, z, gy, 0, W, true, big, rec);
     sp.front = performance.now() - T0 - sp.crater - sp.blanket - sp.ejecta;
@@ -1055,7 +1017,7 @@
           stats.secondaries++;
           const fy = ev.floor(lx, lz);
           for (let k = 0; k < 3; k++) puff(lx + (frnd() - 0.5) * 2, fy + 0.8 + k * 0.6, lz + (frnd() - 0.5) * 2, 1.4 + frnd(), 8 + frnd() * 5, 0x7a6a5a, 1);
-          if (glow) addFire(lx, fy + 0.3, lz, 0.6, 18 + frnd() * 10, null);
+          if (glow) fireGround(lx, lz, 0);
         },
       });
     }
@@ -1193,7 +1155,6 @@
     tickMovers(dt);
     tickRocks(dt);
     tickCurtains(dt);
-    tickFires(dt);
 
     // smoke drifts on THE wind (stronger aloft) and swells
     const w = wind();
@@ -1218,7 +1179,7 @@
 
     // the afterglow ends when nothing is left moving or burning, or after
     // two minutes either way
-    if (ev.over && ((!ev.fronts.length && !ev.bolides.length && !ev.fires.length && !ev.movers.length && !ev.fallers.length && !ev.smoke.length && !ev.curtains.length && !ev.sounds.length) || ev.overT > 120)) hardStop(true);
+    if (ev.over && ((!ev.fronts.length && !ev.bolides.length && !ev.movers.length && !ev.fallers.length && !ev.smoke.length && !ev.curtains.length && !ev.sounds.length) || ev.overT > 120)) hardStop(true);
   }
 
   // one glowing segment of ionized train
@@ -1285,7 +1246,6 @@
       if (f.fire) orb(f.x, f.y, f.z, rr, u < 0.2 ? 0xffffff : u < 0.5 ? 0xffc070 : 0x8a3010, 1 - u * 0.7);
       else orb(f.x, f.y, f.z, rr, u < 0.3 ? 0xffffff : 0xffd9a0, 1 - u * 0.5);
     }
-    if (!P.flame) for (const f of ev.fires) orb(f.x, f.y + 0.6, f.z, f.r * (0.9 + 0.2 * Math.sin(ev.t * 13 + f.seed)), 0xff6a1a, 0.7);
     Gp.count = g; Gp.visible = g > 0;
     Gp.instanceMatrix.needsUpdate = true; Gp.instanceColor.needsUpdate = true;
 
@@ -1349,7 +1309,6 @@
       const low = Math.max(0, 1 - (bo.y - bo.gy) / 220);
       b = Math.max(b, (bo.big ? 0.55 : 0.12) * low);
     }
-    for (const f of ev.fires) b = Math.max(b, 0.05);
     return Math.min(1, b);
   }
 
@@ -1364,7 +1323,6 @@
     if (!ev) return;
     const pl = P;
     for (const k of POOL_KEYS) { const mp = pl[k]; if (mp.parent) mp.parent.remove(mp); mp.count = 0; mp.visible = false; }
-    if (pl.flame) { if (pl.flame.parent) pl.flame.parent.remove(pl.flame); pl.flame.visible = false; }
     for (const c of ev.curtains) { c.m.parent && c.m.parent.remove(c.m); c.m.geometry.dispose(); c.m.material.dispose(); }
     // anything mid-fall lands where it is headed; anything sliding stops
     for (const F of ev.fallers) poseTree(F.t, F.ux, F.uz, F.target);
@@ -1380,8 +1338,7 @@
         if (t.trunk) { t.trunk.position.copy(B.tp); t.trunk.quaternion.copy(B.tq); }
         if (t.foliage && B.fp) { t.foliage.position.copy(B.fp); t.foliage.quaternion.copy(B.fq); t.foliage.visible = B.fvis; }
       }
-      if (t._mLeaf != null && t.foliage && t.foliage.material && t.foliage.material.color && t.leafHex == null) t.foliage.material.color.setHex(t._mLeaf);
-      t._mBase = null; t._mDown = null; t._mLean = 0; t._mFire = false; t._mLeaf = null;
+      t._mBase = null; t._mDown = null; t._mLean = 0;
     }
     touched.trees.length = 0;
     for (const c of touched.cars) {
@@ -1430,7 +1387,7 @@
       a.glassByBand = Object.assign({}, ev.glassByBand || {});
       a.arrivals = ev.arrivals.slice();
       a.maxFellD = ev.maxFellD || 0;
-      a.smokeLive = ev.smoke.length; a.rocksLive = ev.rocks.length; a.firesLive = ev.fires.length;
+      a.smokeLive = ev.smoke.length; a.rocksLive = ev.rocks.length;
       a.frontsLive = ev.fronts.length; a.bangsPending = ev.sounds.length;
       a.carsMoving = ev.movers.length; a.treesFalling = ev.fallers.filter(function (f) { return !f.lean; }).length;
     }

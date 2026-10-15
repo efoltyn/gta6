@@ -376,6 +376,19 @@
     _coreMat.name = "debrisCore"; _coreMat._shared = true;
     return _coreMat;
   }
+  /* GLASS DRAWS AS GLASS. The panes a building is glazed with are drawn in
+     their pools with no shadows and after the opaque world (renderOrder 1).
+     A piece of a pane that casts and receives shadows reads darker than the
+     pane it came from, so anything made only of see-through materials keeps
+     the pane's own draw settings. */
+  function seeThrough(mat) {
+    if (Array.isArray(mat)) { if (!mat.length) return false; for (const m of mat) if (!m || !m.transparent) return false; return true; }
+    return !!(mat && mat.transparent);
+  }
+  function drawAsGlass(mesh) {
+    mesh.castShadow = false; mesh.receiveShadow = false;
+    if (mesh.renderOrder < 1) mesh.renderOrder = 1;
+  }
   // flat (zero-thickness) sources need both faces once they tumble
   const _dsCache = new WeakMap();
   function doubleSided(mat) {
@@ -1079,7 +1092,10 @@
       const wy = E[1] * lx + E[5] * ly + E[9] * lz + E[13];
       const wz = E[2] * lx + E[6] * ly + E[10] * lz + E[14];
       let fl = b.floorY;
-      const h = hfAt(wx, wz); if (h > fl && h < wy + 0.5) fl = h;
+      // rubble holds a piece from BELOW: a stamp over the piece's own middle
+      // is the top of a slab it is under, not a floor (it used to hook a
+      // piece's upper corners on the slab above and hold it there in the air)
+      const h = hfAt(wx, wz); if (h > fl && h < wy + 0.5 && h <= p.y + 0.05) fl = h;
       const d = fl - wy;
       if (d > -0.004 && nC < 8) { _cp[nC * 3] = wx - p.x; _cp[nC * 3 + 1] = wy - p.y; _cp[nC * 3 + 2] = wz - p.z; nC++; if (d > depth) depth = d; }
     }
@@ -1129,7 +1145,9 @@
     b.calm = calm ? b.calm + dt : 0;
     if (b.calm > SLEEP_T) return 3;
     if (b.t > b.maxLife && b.contact) return 1;
-    if (b.t > b.maxLife + 5) return 1;
+    // touching nothing long past its life (wedged, or falling into a hole):
+    // it goes as dust, it is never frozen where it hangs
+    if (b.t > b.maxLife + 5) return 2;
     if (p.y < -60 || !isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) return 2;
     return 0;
     function applyImpulse(b, jx, jy, jz) {
@@ -1200,6 +1218,7 @@
   function ownKey(owner, k) { let s = hfOwned.get(owner); if (!s) { s = new Set(); hfOwned.set(owner, s); } s.add(k); }
   function freeze(b) {
     const m = b.mesh, geo = m.geometry;
+    let lowX = m.position.x, lowZ = m.position.z, lowY = m.position.y;
     // never bake a piece into the ground: lift it by its deepest vertex
     if (!b.anchored) {
       _mm.compose(m.position, m.quaternion, _one);
@@ -1208,9 +1227,10 @@
       let low = Infinity;
       for (let i = 0; i < pts.length; i += 3) {
         const wy = e[1] * pts[i] + e[5] * pts[i + 1] + e[9] * pts[i + 2] + e[13];
-        if (wy < low) low = wy;
+        if (wy < low) { low = wy; lowX = e[0] * pts[i] + e[4] * pts[i + 1] + e[8] * pts[i + 2] + e[12]; lowZ = e[2] * pts[i] + e[6] * pts[i + 1] + e[10] * pts[i + 2] + e[14]; }
       }
-      if (low < fl) m.position.y += fl - low;
+      if (low < fl) { m.position.y += fl - low; low = fl; }
+      lowY = low;
     }
     m.updateMatrix();
     const root = m.parent || CBZ.scene;
@@ -1220,6 +1240,9 @@
     const P = geo.attributes.position.array, N = geo.attributes.normal.array, U = geo.attributes.uv.array, C = geo.attributes.color.array;
     const id = ++pieceSeq;
     const pos = m.position;
+    // what the support watch reads: its lowest point, its bounds, its stamps
+    const rec = { id, parts: [], rev: b.rev || 0, anch: !!b.anchored, x: lowX, z: lowZ, low: lowY, t: nowT, owner: b.owner, kind: b.kind, V: b.V || 0.01,
+      solid: !!b.solid, root, minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, top: -Infinity, b, hfs: [] };
     // the buckets that will draw this piece: its own mesh retires as soon as
     // they have all been rebuilt with it (see update)
     b.bks = [];
@@ -1238,10 +1261,21 @@
       const key = bucketKey(b.owner, pos.x, pos.z, mat);
       let bk = buckets.get(key);
       if (!bk) { bk = { key, mat, root, parts: [], mesh: null, dirty: false, owner: b.owner }; buckets.set(key, bk); }
-      bk.parts.push({ id, p, n: nn, u, c, x: pos.x, z: pos.z, t: nowT, perm: !!b.permanent });
+      const q = { id, p, n: nn, u, c, x: pos.x, z: pos.z, t: nowT, perm: !!b.permanent };
+      bk.parts.push(q);
       if (!bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
       b.bks.push(bk);
+      if (rec) {
+        rec.parts.push({ bk, q });
+        for (let i = 0; i < p.length; i += 3) {
+          const x = p[i], y = p[i + 1], z = p[i + 2];
+          if (x < rec.minX) rec.minX = x; if (x > rec.maxX) rec.maxX = x;
+          if (z < rec.minZ) rec.minZ = z; if (z > rec.maxZ) rec.maxZ = z;
+          if (y > rec.top) rec.top = y;
+        }
+      }
     }
+    if (rec.parts.length) recs.set(id, rec);
     // the height-field learns this piece's top so the next one piles on it
     _mm.compose(pos, m.quaternion, _one);
     const e = _mm.elements, pts = b.pts;
@@ -1253,10 +1287,21 @@
       const wz = e[2] * lx + e[6] * ly + e[10] * lz + e[14];
       const k = hfKey(wx, wz); const h = hf.get(k); if (b.owner) ownKey(b.owner, k);
       if (h == null || wy > h) hf.set(k, wy);
+      rec.hfs.push(Math.floor(wx / HF), Math.floor(wz / HF), wy);
       if (wy > top) top = wy;
     }
     // centre column: the top face over the piece's middle
-    { const k = hfKey(pos.x, pos.z), h = hf.get(k); if (b.owner) ownKey(b.owner, k); const mid = (top + pos.y) / 2; if (h == null || mid > h) hf.set(k, mid); }
+    { const k = hfKey(pos.x, pos.z), h = hf.get(k); if (b.owner) ownKey(b.owner, k); const mid = (top + pos.y) / 2; if (h == null || mid > h) hf.set(k, mid); rec.hfs.push(Math.floor(pos.x / HF), Math.floor(pos.z / HF), mid); }
+    if (recs.get(id) === rec) {
+      const seen = new Set();
+      for (let i = 0; i < rec.hfs.length; i += 3) {
+        const k = rec.hfs[i] * 73856093 ^ rec.hfs[i + 1] * 19349663;
+        if (seen.has(k)) continue; seen.add(k);
+        let L = stampIdx.get(k); if (!L) { L = []; stampIdx.set(k, L); }
+        if (L.length > 24) { let w = 0; for (let j = 0; j < L.length; j++) if (recs.get(L[j].id) === L[j]) L[w++] = L[j]; L.length = w; }
+        L.push(rec);
+      }
+    }
     if (b.solid && CBZ.colliders && top - pos.y > 0.35) {
       const r = Math.min(b.radius, Math.max(b.ext[0], b.ext[2]));
       const col = { minX: pos.x - r * 0.7, maxX: pos.x + r * 0.7, minZ: pos.z - r * 0.7, maxZ: pos.z + r * 0.7,
@@ -1269,6 +1314,313 @@
     staticCount++;
     b.pendingId = id;
     b.frozen = true;
+  }
+  /* ---- NOTHING RESTS ON NOTHING ------------------------------------------
+     A frozen piece remembers where its lowest point is, its footprint and
+     which height-field cells it raised. What it lies on (the ground, a
+     floor, a collider top, a piece of rubble lower than it) can go after
+     the piece has frozen: the storey under it detaches and falls, the
+     slab it lay on is moved, a crater opens. A watch walks the frozen pieces
+     a few a frame; one whose support has gone is taken back out of the
+     merged rubble and is a live piece again, and falls until it lands on
+     something. */
+  const recs = new Map();               // piece id -> {parts, low, x, z, bounds, stamps, ...}
+  const stampIdx = new Map();           // height-field cell -> the settled pieces that stamped it
+  let recIt = null, revivedN = 0, dissolvedN = 0;
+  const disturbed = [];                 // recs to check before the round (their support just changed)
+  /* disturb(box): something under this box just went (a storey's boxes
+     taken out, a kept slab moved, a piece revived): the pieces over it are
+     checked next, not on the watch's next round. */
+  function disturb(x0, x1, z0, z1) {
+    for (const r of recs.values()) {
+      if (r.anch || r.maxX < x0 || r.minX > x1 || r.maxZ < z0 || r.minZ > z1) continue;
+      if (!r.dist) { r.dist = true; disturbed.push(r); }
+    }
+  }
+  const SUP_TOL = 0.35;
+  /* A piece (or a kept slab) leaving the rubble takes its own height-field
+     stamps with it: the cells it raised are re-read from everything still
+     lying there. (A revived piece left standing on its own old stamp is held
+     up by itself: it froze again where it hung.) */
+  function restampCells(cells) {
+    if (!cells.size) return;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    cells.forEach(function (g, k) {
+      hf.delete(k);
+      if (g[0] * HF < x0) x0 = g[0] * HF; if ((g[0] + 1) * HF > x1) x1 = (g[0] + 1) * HF;
+      if (g[1] * HF < z0) z0 = g[1] * HF; if ((g[1] + 1) * HF > z1) z1 = (g[1] + 1) * HF;
+    });
+    for (const r of recs.values()) {
+      if (r.maxX < x0 - HF || r.minX > x1 + HF || r.maxZ < z0 - HF || r.minZ > z1 + HF) continue;
+      const a = r.hfs;
+      for (let i = 0; i < a.length; i += 3) {
+        const k = a[i] * 73856093 ^ a[i + 1] * 19349663;
+        if (!cells.has(k)) continue;
+        const h = hf.get(k);
+        if (h == null || a[i + 2] > h) hf.set(k, a[i + 2]);
+      }
+    }
+    for (const o of kept) for (const c of o.cols) {
+      if (c.y1 == null || !isFinite(c.y1)) continue;
+      cells.forEach(function (g, k) {
+        if ((g[0] + 1) * HF < c.minX || g[0] * HF > c.maxX || (g[1] + 1) * HF < c.minZ || g[1] * HF > c.maxZ) return;
+        const h = hf.get(k);
+        if (h == null || c.y1 > h) hf.set(k, c.y1);
+      });
+    }
+  }
+  /* What holds a settled piece NOW: the ground or a floor under its lowest
+     point, a collider top there (not its own solid), or the stamp of another
+     settled piece lying LOWER than it (the height-field is a max: a piece
+     lying on top of this one stamps the same cells, and two thin pieces must
+     never hold each other up in mid-air). */
+  /* (A tilted piece touches at a point above its lowest one, anywhere under
+     its footprint: a support counts from tol under its lowest point up to
+     its own middle.) */
+  function held(rec) {
+    const low = rec.low, hi = (low + rec.top) / 2 + 0.05;
+    const fl = floorUnder(rec, hi);
+    if (fl >= low - SUP_TOL) return true;
+    if (colTopUnder(rec, low - SUP_TOL, hi) != null) return true;
+    return stampUnderFoot(rec, low - SUP_TOL, hi) != null;
+  }
+  // the highest floor (ground, a storey's floor) at or under `hi`, read under
+  // the lowest point, the middle and the four corners of the footprint (a
+  // piece rests on a floor by whichever of them is over it)
+  function floorUnder(rec, hi) {
+    const x0 = rec.minX + 0.1, x1 = rec.maxX - 0.1, z0 = rec.minZ + 0.1, z1 = rec.maxZ - 0.1;
+    const xs = [rec.x, (rec.minX + rec.maxX) / 2, x0, x1, x0, x1], zs = [rec.z, (rec.minZ + rec.maxZ) / 2, z0, z0, z1, z1];
+    let best = -Infinity;
+    for (let i = 0; i < xs.length; i++) {
+      const f = floorAt(xs[i], zs[i], hi);
+      if (f <= hi && f > best) best = f;
+    }
+    return best;
+  }
+  // the highest collider top in [lo, hi] under the piece's footprint (not its own solid)
+  function colTopUnder(rec, lo, hi) {
+    if (!CBZ.queryCollidersNear) return null;
+    let best = null;
+    try {
+      const own = colOf.get(rec.id);
+      const cx = (rec.minX + rec.maxX) / 2, cz = (rec.minZ + rec.maxZ) / 2;
+      const R = Math.max(0.3, Math.hypot(rec.maxX - rec.minX, rec.maxZ - rec.minZ) / 2);
+      for (const c of CBZ.queryCollidersNear(cx, cz, R, _cols)) {
+        if (c === own || c.y1 == null || !isFinite(c.y1)) continue;
+        if (rec.maxX < c.minX - 0.1 || rec.minX > c.maxX + 0.1 || rec.maxZ < c.minZ - 0.1 || rec.minZ > c.maxZ + 0.1) continue;
+        if (c.y1 >= lo && c.y1 <= hi && (best == null || c.y1 > best)) best = c.y1;
+      }
+    } catch (e) { return null; }
+    return best;
+  }
+  // the highest stamp in [lo, hi] under the footprint of a settled piece whose
+  // bottom is under this one's middle (a piece lying ON this one never holds it)
+  function stampUnderFoot(rec, lo, hi) {
+    const gx0 = Math.floor(rec.minX / HF), gx1 = Math.floor(rec.maxX / HF), gz0 = Math.floor(rec.minZ / HF), gz1 = Math.floor(rec.maxZ / HF);
+    let best = null;
+    for (let cx = gx0; cx <= gx1; cx++) for (let cz = gz0; cz <= gz1; cz++) {
+      const L = stampIdx.get(cx * 73856093 ^ cz * 19349663);
+      if (!L) continue;
+      for (const r of L) {
+        if (r === rec || recs.get(r.id) !== r || r.low >= (rec.low + rec.top) / 2) continue;
+        const a = r.hfs;
+        for (let i = 0; i < a.length; i += 3) {
+          if (a[i] !== cx || a[i + 1] !== cz) continue;
+          const y = a[i + 2];
+          if (y >= lo && y <= hi && (best == null || y > best)) best = y;
+        }
+      }
+    }
+    return best;
+  }
+  // the highest stamp of a LOWER settled piece in the 3x3 cells round (x, z)
+  // within tol of `low` (null: none)
+  function stampUnder(rec, x, z, low, tol) {
+    const gx = Math.floor(x / HF), gz = Math.floor(z / HF);
+    let best = null;
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      const cx = gx + dx, cz = gz + dz;
+      const L = stampIdx.get(cx * 73856093 ^ cz * 19349663);
+      if (!L) continue;
+      for (const r of L) {
+        if (r === rec || recs.get(r.id) !== r || r.low >= low - 0.02) continue;
+        const a = r.hfs;
+        for (let i = 0; i < a.length; i += 3) {
+          if (a[i] !== cx || a[i + 1] !== cz) continue;
+          const y = a[i + 2];
+          if (y <= low + tol && y >= low - tol && (best == null || y > best)) best = y;
+        }
+      }
+    }
+    return best;
+  }
+  // back out of the merged rubble as a live piece of itself, at rest, to fall
+  function revive(rec) {
+    recs.delete(rec.id);
+    const cells = new Map();
+    for (let i = 0; i < rec.hfs.length; i += 3) cells.set(rec.hfs[i] * 73856093 ^ rec.hfs[i + 1] * 19349663, [rec.hfs[i], rec.hfs[i + 1]]);
+    restampCells(cells);
+    const fp = frozenPending.indexOf(rec.b);
+    if (fp >= 0) { frozenPending.splice(fp, 1); retire(rec.b); }
+    let nv = 0;
+    for (const e of rec.parts) {
+      const i = e.bk.parts.indexOf(e.q);
+      if (i < 0) return false;                         // already gone from the rubble
+      nv += e.q.p.length / 3;
+    }
+    for (const e of rec.parts) {
+      e.bk.parts.splice(e.bk.parts.indexOf(e.q), 1);
+      if (!e.bk.dirty) { e.bk.dirty = true; dirtyQ.push(e.bk); }
+    }
+    staticCount = Math.max(0, staticCount - 1);
+    dropCols(new Set([rec.id]));
+    if (!nv) return false;
+    const cx = (rec.minX + rec.maxX) / 2, cz = (rec.minZ + rec.maxZ) / 2, cy = (rec.low + rec.top) / 2;
+    const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), C = new Float32Array(nv * 3);
+    const geo = new THREE.BufferGeometry(), mats = [];
+    let o = 0;
+    for (const e of rec.parts) {
+      const q = e.q, n = q.p.length / 3;
+      for (let i = 0; i < n; i++) { P[(o + i) * 3] = q.p[i * 3] - cx; P[(o + i) * 3 + 1] = q.p[i * 3 + 1] - cy; P[(o + i) * 3 + 2] = q.p[i * 3 + 2] - cz; }
+      N.set(q.n, o * 3); U.set(q.u, o * 2); C.set(q.c, o * 3);
+      geo.addGroup(o, n, mats.length); mats.push(e.bk.mat);
+      o += n;
+    }
+    geo.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+    geo.setAttribute("color", new THREE.BufferAttribute(C, 3));
+    let material = mats;
+    if (mats.length === 1) { geo.clearGroups(); material = mats[0]; }
+    geo.computeBoundingSphere();
+    const ex = Math.max(0.02, (rec.maxX - rec.minX) / 2), ey = Math.max(0.02, (rec.top - rec.low) / 2), ez = Math.max(0.02, (rec.maxZ - rec.minZ) / 2);
+    const pts = new Float32Array(24);
+    for (let i = 0; i < 8; i++) { pts[i * 3] = i & 1 ? ex : -ex; pts[i * 3 + 1] = i & 2 ? ey : -ey; pts[i * 3 + 2] = i & 4 ? ez : -ez; }
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.position.set(cx, cy, cz);
+    mesh.userData.debrisPiece = true;
+    mesh.castShadow = !PHONE; mesh.receiveShadow = true;
+    if (seeThrough(material)) drawAsGlass(mesh);
+    if (live.length >= LIVE_CAP) makeRoom(live.length - LIVE_CAP + 1);
+    const body = addBody({ mesh, pts, radius: Math.hypot(ex, ey, ez), ext: [ex, ey, ez] }, { owner: rec.owner, solid: rec.solid, root: rec.root }, K(rec.kind), rec.kind, rec.V);
+    if (!body) { geo.dispose(); return false; }
+    // its support is what it was: no stale box keeps it up
+    body.ignore = null;
+    body.rev = (rec.rev || 0) + 1;
+    revivedN++;
+    disturb(rec.minX - 0.3, rec.maxX + 0.3, rec.minZ - 0.3, rec.maxZ + 0.3);
+    return true;
+  }
+  /* A piece the sim has put back four times where nothing holds it (wedged
+     against a wall, hooked under a slab) is not left hanging a fifth time:
+     it goes, as the dust and grit it would have made. */
+  function dissolve(rec) {
+    recs.delete(rec.id);
+    const fp = frozenPending.indexOf(rec.b);
+    if (fp >= 0) { frozenPending.splice(fp, 1); retire(rec.b); }
+    for (const e of rec.parts) {
+      const i = e.bk.parts.indexOf(e.q);
+      if (i < 0) continue;
+      e.bk.parts.splice(i, 1);
+      if (!e.bk.dirty) { e.bk.dirty = true; dirtyQ.push(e.bk); }
+    }
+    staticCount = Math.max(0, staticCount - 1);
+    dropCols(new Set([rec.id]));
+    const cells = new Map();
+    for (let i = 0; i < rec.hfs.length; i += 3) cells.set(rec.hfs[i] * 73856093 ^ rec.hfs[i + 1] * 19349663, [rec.hfs[i], rec.hfs[i + 1]]);
+    restampCells(cells);
+    try { chips((rec.minX + rec.maxX) / 2, (rec.low + rec.top) / 2, (rec.minZ + rec.maxZ) / 2, { kind: rec.kind, count: 8, power: 0.6, owner: rec.owner }); } catch (e) {}
+    disturb(rec.minX - 0.3, rec.maxX + 0.3, rec.minZ - 0.3, rec.maxZ + 0.3);
+    dissolvedN++;
+  }
+  function watchRubble() {
+    if (!recs.size) { disturbed.length = 0; return; }
+    let n = PHONE ? 8 : 24, woke = 0;
+    while (disturbed.length && n > 0 && woke < (PHONE ? 2 : 6)) {
+      const rec = disturbed.shift(); rec.dist = false;
+      if (recs.get(rec.id) !== rec) continue;
+      n--;
+      if (!held(rec)) { if (rec.rev >= 4) dissolve(rec); else if (revive(rec)) woke++; }
+    }
+    while (n-- > 0 && woke < (PHONE ? 2 : 6)) {
+      if (!recIt) recIt = recs.values();
+      const r = recIt.next();
+      if (r.done) { recIt = null; break; }
+      const rec = r.value;
+      if (rec.anch || nowT - rec.t < 0.5) continue;
+      if (!held(rec)) { if (rec.rev >= 4) dissolve(rec); else if (revive(rec)) woke++; }
+    }
+  }
+  /* AUDIT: settled pieces with nothing under them. A frozen piece, or a
+     sleeping one, whose lowest point is more than `gap` m above everything
+     that could hold it: the ground, any collider top (its own solid
+     excepted), and the top of any other settled piece under it. */
+  function unsupported(o) {
+    const gap = (o && o.gap) || 0.5;
+    const out = { frozen: 0, asleep: 0, air: 0, worst: 0, list: [] };
+    const best = (x, z, low, own, ownCol) => {
+      let s = floorAt(x, z, low + 0.5);
+      if (CBZ.queryCollidersNear) {
+        try {
+          for (const c of CBZ.queryCollidersNear(x, z, 0.3, _cols)) {
+            if (c === ownCol || c.y1 == null || !isFinite(c.y1)) continue;
+            if (x < c.minX - 0.3 || x > c.maxX + 0.3 || z < c.minZ - 0.3 || z > c.maxZ + 0.3) continue;
+            if (c.y1 <= low + 0.3 && c.y1 > s) s = c.y1;
+          }
+        } catch (e) {}
+      }
+      // another settled piece under it (lower than it: never one lying on it)
+      const st = stampUnder(own, x, z, low, Math.max(0.3, low - s));
+      if (st != null && st <= low + 0.3 && st > s) s = st;
+      // kept rubble's solids are colliders (counted above)
+      return s;
+    };
+    for (const r of recs.values()) {
+      if (r.anch) continue;
+      out.frozen++;
+      // a frozen piece: the ground under its lowest point, a collider top or
+      // a lower piece's stamp anywhere under its footprint up to its middle
+      const hi = (r.low + r.top) / 2 + 0.05;
+      let sp = floorUnder(r, hi);
+      const ct = colTopUnder(r, -Infinity, hi); if (ct != null && ct > sp) sp = ct;
+      const st = stampUnderFoot(r, -Infinity, hi); if (st != null && st > sp) sp = st;
+      const d = r.low - sp;
+      if (d > gap) {
+        out.air++; if (d > out.worst) out.worst = d;
+        if (out.list.length < 12) {
+          // why it hangs: what the sim's own contact reads under it
+          let hfMax = -Infinity;
+          for (let gx = Math.floor(r.minX / HF); gx <= Math.floor(r.maxX / HF); gx++) for (let gz = Math.floor(r.minZ / HF); gz <= Math.floor(r.maxZ / HF); gz++) {
+            const h = hf.get(gx * 73856093 ^ gz * 19349663); if (h != null && h <= hi && h > hfMax) hfMax = h;
+          }
+          const cols = [];
+          if (CBZ.queryCollidersNear) try {
+            for (const c of CBZ.queryCollidersNear((r.minX + r.maxX) / 2, (r.minZ + r.maxZ) / 2, 1.5, _cols)) {
+              if (c.y1 == null || c.y1 > r.top + 1 || c.y1 < r.low - 3) continue;
+              if (cols.length < 3) cols.push((c.debris ? "d" : c._cbzS ? "s" : "w") + (+c.y1.toFixed(1)) + (c.y0 != null ? "/" + (+c.y0.toFixed(1)) : ""));
+            }
+          } catch (e) {}
+          out.list.push({ x: +r.x.toFixed(1), y: +r.low.toFixed(1), z: +r.z.toFixed(1), gap: +d.toFixed(2), kind: r.kind, h: +(r.top - r.low).toFixed(2),
+            age: +(nowT - r.t).toFixed(1), rev: r.rev || 0, hf: isFinite(hfMax) ? +hfMax.toFixed(2) : null, cols: cols.join(" ") });
+        }
+      }
+    }
+    for (const b of live) {
+      if (!b.asleep) continue;
+      out.asleep++;
+      _mm.compose(b.mesh.position, b.mesh.quaternion, _one);
+      const e = _mm.elements, pts = b.pts;
+      let low = Infinity, lx = 0, lz = 0;
+      for (let i = 0; i < pts.length; i += 3) {
+        const wy = e[1] * pts[i] + e[5] * pts[i + 1] + e[9] * pts[i + 2] + e[13];
+        if (wy < low) { low = wy; lx = e[0] * pts[i] + e[4] * pts[i + 1] + e[8] * pts[i + 2] + e[12]; lz = e[2] * pts[i] + e[6] * pts[i + 1] + e[10] * pts[i + 2] + e[14]; }
+      }
+      const h = hfAt(lx, lz);
+      const d = low - Math.max(best(lx, lz, low, null, null), h <= low + 0.3 ? h : -Infinity);
+      if (d > gap) { out.air++; if (d > out.worst) out.worst = d; if (out.list.length < 12) out.list.push({ x: +lx.toFixed(1), y: +low.toFixed(1), z: +lz.toFixed(1), gap: +d.toFixed(2), kind: b.kind, asleep: true }); }
+    }
+    out.worst = +out.worst.toFixed(2);
+    return out;
   }
   function rebuildBucket(bk) {
     bk.dirty = false;
@@ -1288,6 +1640,7 @@
     const mesh = new THREE.Mesh(g, bk.mat);
     mesh.matrixAutoUpdate = false; mesh.updateMatrix();
     mesh.castShadow = !PHONE && !TABLET; mesh.receiveShadow = true;
+    if (seeThrough(bk.mat)) drawAsGlass(mesh);
     mesh.userData.debrisRubble = true;
     (bk.root || CBZ.scene).add(mesh);
     bk.mesh = mesh;
@@ -1314,6 +1667,7 @@
       if (bk.parts.length !== before && !bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
     }
     staticCount = Math.max(0, staticCount - drop.size);
+    for (const id of drop) recs.delete(id);
     // An evicted piece is gone from the picture; its solid box used to stay in
     // CBZ.colliders for the rest of the session (an invisible kerb where the
     // rubble had been, and one more box on every city-wide collider walk).
@@ -1974,6 +2328,7 @@
         if (!piece) continue;
         piece.mesh.castShadow = !PHONE && cell.V > 0.004;
         piece.mesh.receiveShadow = true;
+        if (seeThrough(piece.mesh.material)) drawAsGlass(piece.mesh);
         if ((cell.stump && o.anchorStump !== false) || cell.keep || o.settle) {
           // the base of a snapped pole stays planted: straight to rubble
           const body = addBody(piece, o, k, c.kind, cell.V);
@@ -2006,6 +2361,10 @@
         if (o.launch === false) body.v.set(0, 0, 0), body.w.set(0, 0, 0);
         if (fin(o.velocity)) body.v.add(o.velocity);
         if (fin(o.angular)) body.w.add(o.angular);
+        // a caller that knows its pieces must not be thrown skyward (a storey
+        // breaking up as it lands) caps the climb and the tumble
+        if (o.maxUp != null && body.v.y > o.maxUp) body.v.y = o.maxUp;
+        if (o.maxSpin > 0) { const wl = body.w.length(); if (wl > o.maxSpin) body.w.multiplyScalar(o.maxSpin / wl); }
         if (!isFinite(body.v.x + body.v.y + body.v.z)) body.v.set(0, 0, 0);
         if (!isFinite(body.w.x + body.w.y + body.w.z)) body.w.set(0, 0, 0);
         if (o.maxLife) body.maxLife = o.maxLife;
@@ -2135,7 +2494,9 @@
       const b = order[i];
       const idx = live.indexOf(b); if (idx < 0) continue;
       live.splice(idx, 1);
-      if (b.contact || b.t > 1.2) { freeze(b); frozenPending.push(b); }
+      // only a piece lying on something becomes rubble; one still in the air
+      // goes as the dust it would have made, never frozen in mid-air
+      if (b.contact) { freeze(b); frozenPending.push(b); }
       else retire(b);
       n--;
     }
@@ -2211,6 +2572,7 @@
       }
     }
     if (lateCols.length && (lateCols.length >= 64 || nowT - lateT > 0.5)) flushLateCols();
+    watchRubble();
     stepGrit(dt);
     stepDust(dt);
   }
@@ -2234,7 +2596,7 @@
     obj.updateMatrixWorld(true);
     obj.traverse(function (m) {
       m.matrixAutoUpdate = false; m.updateMatrix();
-      if (m.isMesh) { m.userData.debrisRubble = true; m.castShadow = !PHONE && !TABLET; m.receiveShadow = true; }
+      if (m.isMesh) { m.userData.debrisRubble = true; m.castShadow = !PHONE && !TABLET; m.receiveShadow = true; if (seeThrough(m.material)) drawAsGlass(m); }
     });
     obj.updateMatrixWorld(true);
     if (!obj.parent && CBZ.scene) CBZ.scene.add(obj);
@@ -2258,6 +2620,28 @@
     }
     kept.push(rec);
     return rec;
+  }
+  /* UNKEEP: kept rubble whose support went (city/collapse.js's watch) takes
+     its solids and its height-field back out, and stays in the scene: the
+     caller moves it, and keeps it again where it lands. The height-field
+     cells it raised are re-read from what is still kept there. */
+  function unkeep(rec) {
+    const i = kept.indexOf(rec);
+    if (i < 0) return false;
+    kept.splice(i, 1);
+    if (rec.cols.length) removeCols(rec.cols);
+    const cells = new Map();
+    for (const c of rec.cols) {
+      if (c.y1 == null || !isFinite(c.y1)) continue;
+      for (let gx = Math.floor(c.minX / HF); gx <= Math.floor(c.maxX / HF); gx++)
+        for (let gz = Math.floor(c.minZ / HF); gz <= Math.floor(c.maxZ / HF); gz++) cells.set(gx * 73856093 ^ gz * 19349663, [gx, gz]);
+    }
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const c of rec.cols) { if (c.minX < x0) x0 = c.minX; if (c.maxX > x1) x1 = c.maxX; if (c.minZ < z0) z0 = c.minZ; if (c.maxZ > z1) z1 = c.maxZ; }
+    rec.cols = [];
+    restampCells(cells);
+    if (isFinite(x0)) disturb(x0 - 0.3, x1 + 0.3, z0 - 0.3, z1 + 0.3);
+    return true;
   }
   function dropKept(test) {
     let n = 0;
@@ -2295,6 +2679,7 @@
     if (owner != null) { const ks = hfOwned.get(owner); if (ks) { for (const k of ks) hf.delete(k); hfOwned.delete(owner); } }
     else hfOwned.clear();
     staticCount = Math.max(0, staticCount - gone.size);
+    for (const id of gone) recs.delete(id);
     {
       // every solid box this owner's pieces registered (colOf), out in place
       const ids = new Set();
@@ -2342,6 +2727,7 @@
       if (bk.parts.length !== before && !bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
     }
     staticCount = Math.max(0, staticCount - gone.size);
+    for (const id of gone) recs.delete(id);
     n += gone.size;
     // the height-field is hashed, so walk the covered cells directly
     for (let gx = Math.floor((x - r) / HF); gx <= Math.floor((x + r) / HF); gx++)
@@ -2387,12 +2773,14 @@
       if (bk.parts.length !== before && !bk.dirty) { bk.dirty = true; dirtyQ.push(bk); }
     }
     staticCount = Math.max(0, staticCount - drop.size);
+    for (const id of drop) recs.delete(id);
     dropCols(drop, true);
     return drop.size;
   }
   // a fresh scene (mode switch) drops the old pools: they belong to its scene
   function hardReset() {
     clear();
+    recs.clear(); stampIdx.clear(); recIt = null; disturbed.length = 0;
     if (grit) { for (const v of grit.variants) { if (v.im.parent) v.im.parent.remove(v.im); v.im.geometry.dispose(); } grit = null; }
     if (dustSys) { if (dustSys.pts.parent) dustSys.pts.parent.remove(dustSys.pts); dustSys.g.dispose(); dustSys = null; }
   }
@@ -2432,13 +2820,14 @@
     impulse,
     update,
     KINDS,
-    keep,
+    keep, unkeep, disturb,
+    unsupported,
     stats() {
       let tris = 0; for (const bk of buckets.values()) for (const q of bk.parts) tris += q.p.length / 9;
       let gritLive = 0; if (grit) for (const v of grit.variants) for (const s of v.slots) if (s) gritLive++;
       let dustLive = 0; if (dustSys) for (const m of dustSys.motes) if (m) dustLive++;
       let asleep = 0; for (const b of live) if (b.asleep) asleep++;
-      return { live: live.length, asleep, static: staticCount, kept: kept.length, buckets: buckets.size, staticTris: tris, grit: gritLive, dust: dustLive,
+      return { live: live.length, asleep, static: staticCount, kept: kept.length, watched: recs.size, revived: revivedN, dissolved: dissolvedN, buckets: buckets.size, staticTris: tris, grit: gritLive, dust: dustLive,
         caps: { live: LIVE_CAP, static: STATIC_CAP, grit: GRIT_CAP, perCall: PER_CALL_CAP }, device: DEVICE };
     },
     // test hooks (node checks drive the fracture without a scene)

@@ -28,7 +28,8 @@
    cells under baked rubble, from the merged rubble meshes) and its extent
    east of the face, cars crushed. Whole run: bodies awake (avg / max), frame
    cost (whole sim step, avg / max ms) and the collapse module's share,
-   geometry bytes held by the standing cuts, heap. */
+   geometry bytes held by the standing cuts, heap; and what is IN THE AIR at
+   the end (settled bodies and pieces with nothing under them: must be 0). */
 (function () {
 "use strict";
 const SPECS = {
@@ -145,10 +146,20 @@ CBZ.lab.kit("collapse", {
     const heap = performance.memory ? Math.round((performance.memory.usedJSHeapSize - cost.heap0) / 1048576) : null;
     const pf = G.prof || {};
     lines.push("collapse.js per frame (avg/max ms): " + Object.keys(pf).map(function (k) { return k + " " + pf[k].avg + "/" + pf[k].max; }).join(", "));
-    lines.push("run: bodies awake avg " + G.awakeAvg + " / max " + G.maxAwake + " (cap " + G.cap + "), bodies made " + G.bodiesMade +
+    lines.push("run: bodies awake avg " + G.awakeAvg + " / max " + G.maxAwake + " (cap " + G.cap + ", hard: " + G.capSettled + " settled + " + G.capShattered + " broken up to make room), bodies made " + G.bodiesMade +
       " | frame " + (cost.n ? (cost.sum / cost.n).toFixed(2) : "?") + " ms avg / " + cost.max.toFixed(1) + " ms max (collapse.js " + G.msAvg + " / " + G.msMax + ") | heap +" + heap + " MB");
+    /* NOTHING IN THE AIR: settled bodies (kept rubble) and settled pieces
+       (frozen rubble, sleepers) more than 0.5 m over everything that could
+       hold them. Bodies still awake or dropping are falling, not resting. */
+    const airB = C.unsupported ? C.unsupported({ gap: 0.5 }) : { air: 0, kept: 0, worst: 0, falling: 0, list: [] };
+    const airP = CBZ.debris && CBZ.debris.unsupported ? CBZ.debris.unsupported({ gap: 0.5 }) : { air: 0, frozen: 0, asleep: 0, worst: 0, list: [] };
+    const inAir = airB.air + airP.air;
+    lines.push("in the air: " + inAir + " (bodies " + airB.air + " of " + airB.kept + " kept, worst " + airB.worst + " m; pieces " + airP.air + " of " + (airP.frozen + airP.asleep) + " settled, worst " + airP.worst + " m)" +
+      " | still falling " + airB.falling + " | dropped to support " + G.drops + " (re-woken off lost support " + G.rewoken + ")" +
+      (inAir ? " | " + JSON.stringify(airB.list.concat(airP.list).slice(0, 6)) : ""));
+    if (inAir > 0) ok = false;
     per.forEach(function (r) { if (r.chunks == null || r.chunks < 8) ok = false; });
-    return { ok: ok, summary: P.hit + "\n      " + lines.join("\n      "), data: { per: per, run: G, frameMs: cost.n ? cost.sum / cost.n : null, frameMaxMs: cost.max, heapMB: heap } };
+    return { ok: ok, summary: P.hit + "\n      " + lines.join("\n      "), data: { per: per, run: G, frameMs: cost.n ? cost.sum / cost.n : null, frameMaxMs: cost.max, heapMB: heap, peakAwake: G.maxAwake, inAir: inAir, airBodies: airB, airPieces: airP } };
   },
 });
 })();
