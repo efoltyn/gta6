@@ -93,8 +93,9 @@
    its own any more.
 
    DRAW CALLS, all instanced and pooled: streaks/trains, glow, smoke+dust,
-   ejecta rocks, front rings. Five, plus two meshes per crater (blanket,
-   curtain). Nothing allocates per
+   front rings. Four, plus two meshes per crater (blanket, curtain). The
+   ejecta rocks are systems/debris.js's shared loose bits (stone, hot ones
+   glowing): one physics, one reset, one audit for every piece. Nothing allocates per
    frame; every front's targets are sorted ONCE by distance and walked with a
    cursor, so a front costs O(newly reached) per tick, never O(world).
 
@@ -254,17 +255,6 @@
     c[i * 3 + 1] = ((hex >> 8) & 255) / 255 * s;
     c[i * 3 + 2] = (hex & 255) / 255 * s;
   }
-  function lumpGeo() {
-    let g = new THREE.IcosahedronGeometry(1, 0);
-    if (g.index) g = g.toNonIndexed();
-    const p = g.attributes.position.array;
-    for (let i = 0; i < p.length; i += 3) {
-      const f = 0.75 + h01(Math.round(p[i] * 50), Math.round(p[i + 1] * 50) + Math.round(p[i + 2] * 50), 3) * 0.45;
-      p[i] *= f; p[i + 1] *= f * 0.75; p[i + 2] *= f;
-    }
-    g.computeVertexNormals();
-    return g;
-  }
   let P = null;    // the pools
   function pools() {
     if (P) return P;
@@ -274,14 +264,12 @@
       glow: makePool(new THREE.SphereGeometry(1, 12, 9), new THREE.MeshBasicMaterial(Object.assign({ color: 0xffffff, opacity: 0.95 }, add)), GLOW_CAP),
       // a dodecahedron reads as a puff; a cube reads as a crate
       smoke: makePool(new THREE.DodecahedronGeometry(0.62, 0), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.42, depthWrite: false }), SMOKE_CAP, 6),
-      rock: makePool(lumpGeo(), CBZ.mat ? CBZ.mat(0xffffff) : new THREE.MeshLambertMaterial({ color: 0xffffff }), ROCK_CAP, 0),
       ring: makePool((function () { const g = new THREE.RingGeometry(0.93, 1, 72, 1); g.rotateX(-Math.PI / 2); return g; })(),
         new THREE.MeshBasicMaterial(Object.assign({ color: 0xffffff, opacity: 0.8, side: THREE.DoubleSide }, add)), RING_CAP, 5),
     };
-    P.rock.castShadow = true;
     return P;
   }
-  const POOL_KEYS = ["streak", "glow", "smoke", "rock", "ring"];
+  const POOL_KEYS = ["streak", "glow", "smoke", "ring"];
 
   /* ---- textures for the blanket's rays and the curtain's streaks ---- */
   let rayTex = null, curtainTex = null;
@@ -340,7 +328,7 @@
   function resetStats() {
     Object.assign(stats, {
       events: 0, streaksSpawned: 0, bolides: 0, fragments: 0, flares: 0,
-      airbursts: 0, groundImpacts: 0, cratersDug: 0, craterRefused: 0, ejecta: 0, ejectaLanded: 0, secondaries: 0,
+      airbursts: 0, groundImpacts: 0, cratersDug: 0, craterRefused: 0, ejecta: 0, secondaries: 0,
       bangsScheduled: 0, bangsHeard: 0, flashToBangLast: 0, flashToBangMax: 0, bigBursts: 0,
       panes: 0, treesDown: 0, treesLeaning: 0, treesStripped: 0, treesBurning: 0,
       carsPushed: 0, carsRolled: 0, carMaxMove: 0, bldgHits: 0, bldgGutted: 0, fires: 0,
@@ -373,8 +361,8 @@
       floor: opts.floor || world.ground,
       dirx: Math.cos(az), dirz: Math.sin(az),
       streaks: [], trains: [], bolides: [], smoke: [], flashes: [], fronts: [], sounds: [],
-      lightPulses: [], rocks: [], movers: [], fallers: [], craters: [], curtains: [],
-      shower: null, streakCd: 0.1, t: 0, over: false, overT: 0, rocksDirty: true, arrivals: [],
+      lightPulses: [], rockN: 0, movers: [], fallers: [], craters: [], curtains: [],
+      shower: null, streakCd: 0.1, t: 0, over: false, overT: 0, arrivals: [],
       budget: { glass: 0, dust: 0 },
     };
     for (const k of POOL_KEYS) opts.root.add(pl[k]);
@@ -959,10 +947,19 @@
   }
 
   /* the rocks of the curtain: launched from inside the transient cavity,
-     the inner ones fastest (they land furthest), on real arcs */
+     the inner ones fastest (they land furthest), on real arcs. They are
+     the shared loose bits of systems/debris.js (2026-10-15): the same
+     gravity, the same floor (a rock that comes down on a roof lies on the
+     roof, and falls again if the roof goes), rest, reset and audit as every
+     other piece. This file kept a private pool of them that flew through
+     buildings, landed on the bare terrain under a roof and was wiped
+     (mid-flight too) when the event's pools were torn down. A hot block
+     glows and smokes as it cools. */
   function ejecta(x, z, gy, R, n, big) {
+    const D = CBZ.debris;
+    if (!D || !D.bit) return;
     for (let i = 0; i < n; i++) {
-      if (ev.rocks.length >= ROCK_CAP) break;
+      if (ev.rockN >= ROCK_CAP) break;
       const a = frnd() * Math.PI * 2;
       const r0 = R * (0.2 + 0.7 * frnd());
       const land = R * (1.05 + (big ? 2.6 : 1.2) * Math.pow(1 - r0 / R, 1.5) * (0.6 + 0.8 * frnd()));
@@ -970,33 +967,17 @@
       const range = land - r0;
       const vv = Math.sqrt(G * range / Math.sin(2 * th));
       const s = (big ? 0.18 : 0.1) + Math.pow(frnd(), 3) * (big ? 0.6 : 0.25);
-      ev.rocks.push({
-        x: x + Math.cos(a) * r0, y: gy + 0.2, z: z + Math.sin(a) * r0,
-        vx: Math.cos(a) * vv * Math.cos(th), vy: vv * Math.sin(th), vz: Math.sin(a) * vv * Math.cos(th),
-        s, rx: frnd() * 6, ry: frnd() * 6, wx: (frnd() - 0.5) * 9, wy: (frnd() - 0.5) * 9,
-        landed: false, hot: frnd() < (big ? 0.18 : 0.08), heat: 1, color: frnd() < 0.5 ? 0x5a4c3e : 0x6e6355,
-      });
+      const hot = frnd() < (big ? 0.18 : 0.08);
+      try {
+        D.bit(x + Math.cos(a) * r0, gy + 0.2, z + Math.sin(a) * r0, {
+          shape: "stone", kind: "rock", color: frnd() < 0.5 ? 0x5a4c3e : 0x6e6355, size: s * 1.4,
+          vel: { x: Math.cos(a) * vv * Math.cos(th), y: vv * Math.sin(th), z: Math.sin(a) * vv * Math.cos(th) },
+          burn: hot ? 25 : 0, owner: "meteor",
+        });
+      } catch (e) {}
+      ev.rockN++;
       stats.ejecta++;
     }
-    ev.rocksDirty = true;
-  }
-  function tickRocks(dt) {
-    let moving = false;
-    for (let i = 0; i < ev.rocks.length; i++) {
-      const r = ev.rocks[i];
-      if (r.hot && r.heat > 0) { r.heat = Math.max(0, r.heat - dt / 25); moving = true; }
-      if (r.landed) continue;
-      moving = true;
-      r.vy -= G * dt;
-      r.x += r.vx * dt; r.y += r.vy * dt; r.z += r.vz * dt;
-      r.rx += r.wx * dt; r.ry += r.wy * dt;
-      const fy = ev.floor(r.x, r.z) + r.s * 0.45;
-      if (r.vy < 0 && r.y <= fy) {
-        r.y = fy; r.landed = true; stats.ejectaLanded++;
-        if (r.s > 0.35 && ev.budget.dust-- > 0) puff(r.x, fy + 0.3, r.z, 0.9 + r.s, 4 + frnd() * 3, 0x86766a, 0.9);
-      }
-    }
-    if (moving) ev.rocksDirty = true;
   }
 
   /* SECONDARY IMPACTS: the big blocks thrown furthest come down as rocks of
@@ -1153,7 +1134,6 @@
 
     tickFallers(dt);
     tickMovers(dt);
-    tickRocks(dt);
     tickCurtains(dt);
 
     // smoke drifts on THE wind (stronger aloft) and swells
@@ -1265,26 +1245,6 @@
     }
     Sm.count = m; Sm.visible = m > 0;
     Sm.instanceMatrix.needsUpdate = true; Sm.instanceColor.needsUpdate = true;
-
-    if (ev.rocksDirty) {
-      const Rk = pl.rock;
-      let q = 0;
-      for (const r of ev.rocks) {
-        if (q >= ROCK_CAP) break;
-        dummy.position.set(r.x, r.y, r.z); dummy.rotation.set(r.rx, r.ry, 0); dummy.scale.set(r.s, r.s, r.s); dummy.updateMatrix();
-        Rk.setMatrixAt(q, dummy.matrix);
-        if (r.hot && r.heat > 0) {
-          const k = r.heat;
-          const c = r.color;
-          const rr = Math.min(255, ((c >> 16) & 255) + 200 * k), gg = Math.min(255, ((c >> 8) & 255) + 70 * k), bb = (c & 255);
-          setColor(Rk, q, (rr << 16) | (gg << 8) | bb, 1);
-        } else setColor(Rk, q, r.color, 1);
-        q++;
-      }
-      Rk.count = q; Rk.visible = q > 0;
-      Rk.instanceMatrix.needsUpdate = true; Rk.instanceColor.needsUpdate = true;
-      ev.rocksDirty = false;
-    }
 
     let rg = 0;
     const Rg = pl.ring;
@@ -1407,7 +1367,7 @@
       a.glassByBand = Object.assign({}, ev.glassByBand || {});
       a.arrivals = ev.arrivals.slice();
       a.maxFellD = ev.maxFellD || 0;
-      a.smokeLive = ev.smoke.length; a.rocksLive = ev.rocks.length;
+      a.smokeLive = ev.smoke.length; a.rocksLive = ev.rockN;
       a.frontsLive = ev.fronts.length; a.bangsPending = ev.sounds.length;
       a.carsMoving = ev.movers.length; a.treesFalling = ev.fallers.filter(function (f) { return !f.lean; }).length;
     }

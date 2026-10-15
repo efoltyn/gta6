@@ -3382,8 +3382,10 @@
       const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
       const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
       let v = 0, k = 0;
+      const ranges = new Map();          // original -> [first index entry, count] in the merged copy
       for (const o of take) {
         const g = o.geometry, P = g.attributes.position, N = g.attributes.normal, c = o.material.color;
+        ranges.set(o, [k, g.index ? g.index.count : P.count]);
         _bm.multiplyMatrices(inv, o.matrixWorld);
         _bn.getNormalMatrix(_bm);
         for (let i = 0; i < P.count; i++) {
@@ -3410,11 +3412,42 @@
       let hidden = 0;
       const hid = group.userData.bakedHidden || (group.userData.bakedHidden = []);
       for (const o of take) {
-        if (keep.has(o) || losSet.has(o)) { o.visible = false; hidden++; hid.push(o); continue; }
+        if (keep.has(o) || losSet.has(o)) {
+          o.visible = false; hidden++; hid.push(o);
+          /* ITS TRIANGLES CAN LEAVE THE MERGED COPY. A disaster that takes this
+             original away (a wall torn off into the flood, a panel the wind
+             fells: systems/debris.js calls this when it hands the part to the
+             body sim) folds its range of the merged index to nothing, so the
+             building stops drawing a part that is now somewhere else. The
+             island's reset puts every cut shell back (shellRestore). */
+          const r = ranges.get(o);
+          if (r) o.userData.shellCut = function () { shellCut(mesh, r[0], r[1]); };
+          // where it belongs, so the reset can put a taken original back
+          o.userData.bakedHome = { parent: o.parent, p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone() };
+          continue;
+        }
         if (o.parent) o.parent.remove(o);
         if (o.geometry && !o.geometry._shared) o.geometry.dispose();
       }
       bakeStats.buildings++; bakeStats.meshesIn += total; bakeStats.meshesOut += total - take.length + 1; bakeStats.hidden += hidden;
+    }
+
+    const cutShells = new Set();
+    function shellCut(mesh, i0, n) {
+      const g = mesh.geometry, I = g.index;
+      if (!I || !(n > 0)) return;
+      if (!mesh.userData.pristineIndex) mesh.userData.pristineIndex = I.array.slice();
+      const A = I.array;
+      for (let i = i0; i + 2 < i0 + n && i + 2 < A.length; i += 3) { A[i + 1] = A[i]; A[i + 2] = A[i]; }
+      I.needsUpdate = true;
+      cutShells.add(mesh);
+    }
+    function shellRestore() {
+      cutShells.forEach(function (mesh) {
+        const P = mesh.userData.pristineIndex, I = mesh.geometry && mesh.geometry.index;
+        if (P && I) { I.array.set(P); I.needsUpdate = true; }
+      });
+      cutShells.clear();
     }
 
     function recSnap() {
@@ -5074,6 +5107,32 @@
       if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
     }
     const resetHooks = [];
+    /* EVERY TREE'S HOME, so the reset can put back one a disaster carried
+       off: the tsunami re-parents an uprooted trunk and crown into the flow
+       (systems/disasters.js) and nothing ever brought them back: the next
+       match had last match's trees lying in its streets, their stumps gone
+       and their colliders pulled. */
+    for (const t of flammable) {
+      const h = {};
+      if (t.trunk) h.trunk = { parent: t.trunk.parent, p: t.trunk.position.clone(), q: t.trunk.quaternion.clone(), s: t.trunk.scale.clone(), vis: t.trunk.visible };
+      if (t.foliage) h.foliage = { parent: t.foliage.parent, p: t.foliage.position.clone(), q: t.foliage.quaternion.clone(), s: t.foliage.scale.clone(), vis: t.foliage.visible };
+      t._home = h;
+    }
+    function treeHome(t) {
+      const H = t._home; if (!H) return;
+      for (const k of ["trunk", "foliage"]) {
+        const o = t[k], h = H[k];
+        if (!o || !h || !h.parent) continue;
+        if (o.parent !== h.parent) {
+          const was = o.parent;
+          h.parent.add(o);
+          if (was && was !== h.parent && was.parent && !was.children.length) was.parent.remove(was);
+        }
+        o.position.copy(h.p); o.quaternion.copy(h.q); o.scale.copy(h.s); o.visible = h.vis;
+      }
+      if (t.trunkCol && CBZ.colliders.indexOf(t.trunkCol) < 0) CBZ.colliders.push(t.trunkCol);
+      t._tsuUproot = 0;
+    }
     (function harbourAndBridges() {
       if (!PLAN) return;
       const BGU = THREE.BufferGeometryUtils;
@@ -5404,6 +5463,17 @@
            restored tower. Jobs that had not yet reached their swap never fire
            it, so their building is left standing and solid — which is exactly
            what the loop below is about to guarantee anyway. */
+        /* A SINKHOLE STILL OPENING is stopped first: its running sequence
+           used to be torn down only on the frame AFTER the reset (when
+           groundshaft.js noticed the emptied hole list), and in between it
+           undermined a building of the fresh island into pieces. */
+        {
+          const GK = CBZ.groundShaftKit;
+          if (GK) {
+            for (let i = GK.seqs.length - 1; i >= 0; i--) { try { GK.seqs[i].dispose(); } catch (e) {} }
+            for (let i = GK.live.length - 1; i >= 0; i--) if (GK.live[i].mode === "survival") { try { GK.disposeShaft(GK.live[i]); } catch (e) {} }
+          }
+        }
         if (CBZ.collapse && CBZ.collapse.reset) CBZ.collapse.reset();
         // a meteor's bowl (systems/craters.js) is permanent WITHIN a match;
         // the next match starts on the island's own ground, not last round's holes
@@ -5422,6 +5492,7 @@
           }
         }
         for (const t of flammable) {
+          if (t._tsuUproot) treeHome(t);
           t.burning = 0; t.burnt = false;
           if (t.foliage && t.foliage.material) t.foliage.material.color.setHex(t.leafHex != null ? t.leafHex : 0x3f9a4f);
           if (t.trunk && t.trunk.material) t.trunk.material.color.setHex(t.barkHex != null ? t.barkHex : 0x6b4a2a);
@@ -5443,6 +5514,25 @@
         // registered to put back (CBZ.island.onReset)
         resetBridges();
         for (const fn of resetHooks) { try { fn(arena); } catch (e) {} }
+        /* NOTHING OF THE LAST MATCH IS LEFT LYING (OR HANGING) IN THIS ONE.
+           Every loose piece of every disaster is a body, a frozen piece or a
+           bit in systems/debris.js, so one clear takes all of it (collapse.js
+           cleared its own owners above). The tsunami's field lets go of the
+           objects it took, every original a disaster pulled out of a merged
+           building goes home hidden, and every merged shell it was cut out of
+           is whole again. */
+        if (CBZ.tsuDebrisReset) { try { CBZ.tsuDebrisReset(); } catch (e) {} }
+        if (CBZ.debris && CBZ.debris.clear) { try { CBZ.debris.clear(); } catch (e) {} }
+        for (const b of fragile) {
+          b._tsuTorn = 0;
+          const hid = b.group && b.group.userData.bakedHidden;
+          if (hid) for (const o of hid) {
+            const home = o.userData.bakedHome;
+            if (home && o.parent !== home.parent) { home.parent.add(o); o.position.copy(home.p); o.quaternion.copy(home.q); o.scale.copy(home.s); }
+            o.visible = false; o.userData.debrisTaken = false;
+          }
+        }
+        shellRestore();
         for (let i = root.children.length - 1; i >= 0; i--) {
           const c = root.children[i];
           if (c.userData && c.userData.transient) {
@@ -5466,6 +5556,73 @@
        windows from close by; past 60 m it stops drawing, and it is back the
        moment the camera comes within 50 (the gap stops it flickering at the
        line). Same 4 Hz pass. */
+    /* THE ROOF AUDIT (CBZ.debrisAudit's `island` source). A building's
+       current roof is where its top is NOW: its roof line moved with its
+       group (a quake's settlement), or the top of what still stands of it
+       once city/collapse.js has cut it, or its ground once it is down. A
+       roof piece is anything loose drawn inside its footprint more than a
+       metre over that line with nothing under it: an original a disaster
+       took out of the merged shell, or an instance of any instanced pool of
+       loose pieces under the island (the old hurricane decking strips and
+       flaps were exactly this). Rigid bodies and frozen rubble are counted
+       by systems/debris.js itself. */
+    const _ra = new THREE.Matrix4(), _rv = new THREE.Vector3();
+    function roofNow(b) {
+      const C = CBZ.collapse;
+      if (C && C.isFractured && C.isFractured(b)) {
+        let st = null;
+        try { st = C.stats(b); } catch (e) { st = null; }
+        const FH = b.h / Math.max(1, b.storeys || 1);
+        if (st && st.standingLevels != null) return b.gy + Math.max(0, st.standingLevels - 1) * FH + FH;
+      }
+      if (b.fallen) return b.gy;
+      return (b.roofY != null ? b.roofY : b.gy + b.h) + (b.group ? b.group.position.y - b.gy : 0);
+    }
+    function roofHoverAt(x, y, z, list, why) {
+      for (let i = 0; i < fragile.length; i++) {
+        const b = fragile[i];
+        if (Math.abs(x - b.x) > b.w / 2 + 1.5 || Math.abs(z - b.z) > b.d / 2 + 1.5) continue;
+        const top = roofNow(b);
+        if (y < top + 1.0) return 0;
+        let fl = -Infinity;
+        try { fl = CBZ.floorAt ? CBZ.floorAt(x, z, y + 0.1) : surfaceHeightAt(x, z); } catch (e) {}
+        if (fl >= y - 1.0) return 0;              // it lies on something (a platform, a body, a stair)
+        if (list.length < 8) list.push({ x: +x.toFixed(1), y: +y.toFixed(1), z: +z.toFixed(1), roof: +top.toFixed(1), what: why });
+        return 1;
+      }
+      return 0;
+    }
+    (CBZ.debrisAuditSources || (CBZ.debrisAuditSources = {})).island = function () {
+      if (!arena || !CBZ.game || !CBZ.islandModeOn || !CBZ.islandModeOn(CBZ.game.mode)) return null;
+      const list = [];
+      let hover = 0, scanned = 0;
+      for (const b of fragile) {
+        const hid = b.group && b.group.userData.bakedHidden;
+        if (!hid) continue;
+        for (const o of hid) {
+          const home = o.userData.bakedHome;
+          if (!o.visible || !home || o.parent === home.parent) continue;
+          o.getWorldPosition(_rv); scanned++;
+          hover += roofHoverAt(_rv.x, _rv.y, _rv.z, list, "torn original");
+        }
+      }
+      root.updateMatrixWorld(true);
+      root.traverse(function (m) {
+        if (!m.isInstancedMesh || !m.visible || !(m.count > 0)) return;
+        if (!(m.userData.dynamic || /debris|deck|churn|flap|sheet/i.test(m.name || ""))) return;
+        for (let i = 0; i < m.count; i++) {
+          m.getMatrixAt(i, _ra);
+          const e = _ra.elements;
+          if (e[0] * e[0] + e[1] * e[1] + e[2] * e[2] < 1e-8) continue;    // a parked (zero-scale) slot
+          _rv.set(e[12], e[13], e[14]).applyMatrix4(m.matrixWorld);
+          if (_rv.y < -1000) continue;
+          scanned++;
+          hover += roofHoverAt(_rv.x, _rv.y, _rv.z, list, m.name || "instance");
+        }
+      });
+      return { roofHover: hover, scanned: scanned, list: list };
+    };
+
     const ROOM_FAR = 60, ROOM_NEAR = 50;
     let _tornT = 0;
     if (CBZ.onUpdate) CBZ.onUpdate(47.97, function (dt) {
@@ -5480,7 +5637,14 @@
         if (!ud) continue;
         if (b._tsuTorn || b.fallen || b._dmg > 0) {
           const hid = ud.bakedHidden;
-          if (hid) for (const o of hid) if (o.parent !== b.group && o.visible === false) o.visible = true;
+          // (and its merged copy is cut: it is drawn where it went, never twice)
+          if (hid) for (const o of hid) {
+            const home = o.userData.bakedHome;
+            if (o.parent !== (home ? home.parent : b.group) && o.visible === false && !o.userData.debrisTaken) {
+              o.visible = true;
+              if (o.userData.shellCut) { try { o.userData.shellCut(); } catch (e) {} }
+            }
+          }
         }
         const rooms = ud.rooms;
         if (!rooms || !rooms.length || !cam) continue;

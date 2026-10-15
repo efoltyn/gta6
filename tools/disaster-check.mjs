@@ -290,6 +290,35 @@ try {
           else if (active > 0) ended = true;              // it ran, and it is over
           if (i % 150 === 0) await new Promise(r => setTimeout(r, 0));
         }
+        /* SETTLE, THEN AUDIT (2026-10-15). Owner: "pieces of buildings don't
+           follow physics and sometimes fly way up in the air". Whatever this
+           disaster broke gets up to eight seconds to come down and lie still,
+           then CBZ.debrisAudit() (systems/debris.js + every source that owns
+           loose pieces: collapse.js, the island's roof check, the tsunami
+           field, the tornado's flyers) is asked what is hanging over nothing,
+           what is still streaking, and what is up in the sky. */
+        let settle = 0, quiet = 0;
+        for (let k = 0; k < 480 && ended; k++) {
+          CBZ.stepSim(1 / 60); settle++;
+          if (k % 60 === 59 && CBZ.debrisAudit) {
+            const a = CBZ.debrisAudit();
+            const falling = a.sources && a.sources.collapse ? a.sources.collapse.falling : 0;
+            // still for two checks running (a second apart): what a removed
+            // support drops has had its frame to start falling
+            if (a.debris.live === a.debris.asleep && !falling && !a.debris.gritAloft) { if (++quiet >= 2) break; } else quiet = 0;
+          }
+          if (k % 150 === 0) await new Promise(r => setTimeout(r, 0));
+        }
+        let pieces = null;
+        if (CBZ.debrisAudit) {
+          const a = CBZ.debrisAudit({ fast: 30, high: 120 });
+          pieces = { floating: a.floating, roofHover: a.roofHover, fast: a.fast, high: a.high,
+            maxSpeed: a.maxSpeed, maxHeight: a.maxHeight, live: a.live, settled: a.settled, settleTicks: settle,
+            grit: a.debris.gritAloft + "/" + a.debris.gritFloating,
+            why: [].concat(a.debris.floatList || [], (a.sources.collapse && a.sources.collapse.list) || [],
+              (a.sources.island && a.sources.island.list) || [], (a.debris.highList || [])).slice(0, 6),
+            bySource: Object.keys(a.sources).reduce(function (o, k) { const s = a.sources[k]; o[k] = (s.floating || 0) + (s.roofHover || 0) + "f/" + (s.high || 0) + "h"; return o; }, {}) };
+        }
         const p = CBZ.player;
         // the wildfire reports what it did to the REAL island (fuel bed, houses, cars, cost)
         const fire = ${JSON.stringify(id)} === 'wildfire' && CBZ.wildfireAudit ? CBZ.wildfireAudit() : undefined;
@@ -306,7 +335,7 @@ try {
             housesSwept: a.housesSwept, treesDown: a.treesDown, carsMoved: a.carsMoved, carsRolled: a.carsRolled, carsThrown: a.carsThrown,
             debrisLofted: a.debrisLofted, scarSections: a.scarSections, hailStones: a.hailStones, perf: pf };
         })(CBZ.tornado.audit(), CBZ.tornado.perf()) : undefined;
-        return { forced: true, active, warned, ticks, ended, tornado: tw, flood: ff ? { grid: ff.grid, maxDepth: +(+ff.maxDepth).toFixed(2), frontSpeed: +(+ff.frontSpeed).toFixed(2),
+        return { forced: true, active, warned, ticks, ended, tornado: tw, pieces, flood: ff ? { grid: ff.grid, maxDepth: +(+ff.maxDepth).toFixed(2), frontSpeed: +(+ff.frontSpeed).toFixed(2),
                    carsSwept: ff.carsSwept, carsFloated: ff.carsFloated, lids: ff.lidsPopped, bridges: ff.bridges, rooms: ff.roomsFlooded, frameMs: ff.frameMs, solveMs: ff.solveMsPerFrame, bodyMs: ff.bodyMsPerFrame, surfaceMs: ff.renderMsPerFrame, worstMs: ff.worstFrameMs, uploadKB: Math.round((ff.uploadBytes || 0) / 1024), silt: ff.siltArea, events: (CBZ.flashflood.events() || []).slice(0, 12) } : null, fire,
                  x: p.pos.x, y: p.pos.y, z: p.pos.z,
                  live: CBZ.bots ? CBZ.bots.filter(b => !b.dead).length : 0,
@@ -321,6 +350,29 @@ try {
       if (r.flood) say("              flood: " + JSON.stringify(r.flood));
       if (r.fire) say("              fire: " + JSON.stringify(r.fire));
       if (r.tornado) say("              " + JSON.stringify(r.tornado));
+      if (r.pieces) {
+        const P = r.pieces;
+        say("              pieces: floating " + P.floating + " (roof " + P.roofHover + ") · >30 m/s " + P.fast + " (max " + P.maxSpeed + ") · >120 m " + P.high
+          + " (max " + P.maxHeight + " m) · live " + P.live + " · settled " + P.settled + " · settle " + P.settleTicks + " ticks · " + JSON.stringify(P.bySource));
+        if (P.floating > 0) fail(id + ": " + P.floating + " pieces resting on nothing after it ended " + JSON.stringify(P.why));
+        if (P.high > 0) fail(id + ": " + P.high + " pieces more than 120 m up (max " + P.maxHeight + " m) " + JSON.stringify(P.why));
+      } else if (r.forced) fail(id + ": no CBZ.debrisAudit on this page");
+    }
+    /* THE RESET LEAVES NOTHING. A new match after the whole roster: every
+       piece of every disaster is gone (or was put back), not lying around or
+       hanging in the next match's sky. */
+    const after = await rig.evl(`(async () => {
+      CBZ.modes.survival.reset(CBZ.game);
+      for (let i = 0; i < 30; i++) CBZ.stepSim(1 / 60);
+      const a = CBZ.debrisAudit ? CBZ.debrisAudit() : null;
+      const owners = {};
+      if (CBZ.debris && CBZ.debris.forEachLive) CBZ.debris.forEachLive(function (b) { owners[b.owner] = (owners[b.owner] || 0) + 1; });
+      return a ? { floating: a.floating, high: a.high, live: a.live, settled: a.settled, grit: a.debris.gritAloft + a.debris.gritFloating, owners: owners } : null;
+    })()`, true);
+    sweep.afterReset = after;
+    if (after) {
+      say("  after reset   pieces: live " + after.live + " · settled " + after.settled + " · floating " + after.floating + " · >120 m " + after.high);
+      if (after.floating > 0 || after.high > 0 || after.live > 0 || after.settled > 0) fail("the match reset left pieces behind " + JSON.stringify(after));
     }
     if (sweep.neverActive.length) fail("never reached active: " + sweep.neverActive.join(", "));
   } else {

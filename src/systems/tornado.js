@@ -61,13 +61,19 @@
    against weight and friction make a car slide at ~EF2, roll at ~EF3 and
    fly at EF4-5, which is what the EF descriptions say.
 
-   EVERYTHING THAT FLIES is one integrator (stepFlyer): drag toward the local
-   wind (exponential relaxation, stable at any dt), lift, gravity, ground
-   friction, bounce, tumble, rest. Roofs, walls, crowns, cars. Small junk is
-   one InstancedMesh per shape (shingles, boards, roof sheet, masonry, leaves
-   tinted) on the same physics: it ORBITS because the inflow holds it, CLIMBS
-   because the updraft lifts it, and is THROWN OUT at the top because the
-   field turns to outflow there. Nothing is scripted to orbit.
+   EVERY PIECE OF A BUILDING IS A BODY IN systems/debris.js (2026-10-15).
+   The wind is a MEDIUM there (CBZ.debris.medium("tornado"), registered while
+   a vortex lives): drag toward the local wind, the updraft as the vertical
+   flow, under the debris sim's ceiling (no lift 30 m over the ground) and
+   its speed caps. Roofs and walls are adopted whole (throwPart / fellWall:
+   a felled wall is a body tipping over its own base edge, not a scripted
+   hinge); shingles, boards, roof sheet, masonry and leaves are the debris
+   sim's grit (CBZ.debris.bit). They ORBIT because the inflow holds them,
+   CLIMB because the updraft lifts them, are THROWN OUT where the field
+   turns to outflow, and come down, collide, pile and rest on what is under
+   them like every other piece. Nothing here sets a piece's position.
+   Cars (and torn tree crowns) keep the vehicle integrator (stepFlyer), held
+   to the same limits; a car left on a roof falls again if the roof goes.
 
    THE PATH: one ground-scar ribbon laid along the track at the measured
    width where the gust scours the ground (narrow, sharp, offset to the
@@ -860,156 +866,90 @@
   function bzOf(b) { return b.z != null ? b.z : b.oz; }
 
   /* ============================================================
-     SMALL DEBRIS — one InstancedMesh per shape, real physics (see header).
-     Module-level: wreckage outlives the vortex and lies where it fell.
+     SMALL DEBRIS — shingles, boards, roof sheet, chunks, leaves. There used
+     to be a private InstancedMesh pool here with its own integrator: no
+     building collisions, no cap on height (a shingle rode the updraft as
+     high as the field reached), resting only on the terrain. Every bit is
+     now systems/debris.js's grit (CBZ.debris.bit): gravity, the floor and
+     roofs, rest, the reset — and the wind is the "tornado" medium below,
+     acting on it as a force with the debris sim's ceiling and caps.
      ============================================================ */
-  // beta = 0.5 * rho * Cd * A / m (1/m): how hard the wind grips the piece
+  // per kind: the grit shape it is, its size (m), how hard the wind grips it
+  // (beta = 0.5 rho Cd A / m, 1/m), what it is made of
   const DK = [
-    { name: "shingle", beta: 0.10, cap: [60, 220] },
-    { name: "board",   beta: 0.012, cap: [30, 120] },
-    { name: "sheet",   beta: 0.09, cap: [16, 70] },
-    { name: "chunk",   beta: 0.006, cap: [30, 120] },
+    { name: "shingle", shape: "flake", size: 0.4, beta: 0.10, kind: "wood" },
+    { name: "board",   shape: "plank", size: 1.6, beta: 0.012, kind: "wood" },
+    { name: "sheet",   shape: "plate", size: 1.2, beta: 0.09, kind: "metal" },
+    { name: "chunk",   shape: "stone", size: 0.3, beta: 0.006, kind: "concrete" },
   ];
-  let deb = null;
-  function debrisPools() {
-    if (deb) return deb;
-    const root = arenaRoot();
-    if (!root) return null;
-    const geos = [];
-    geos.push(new THREE.BoxGeometry(0.42, 0.025, 0.32));
-    geos.push(new THREE.BoxGeometry(2.2, 0.05, 0.16));
-    const sheet = new THREE.PlaneGeometry(1.6, 0.8, 1, 10);
-    const sp = sheet.attributes.position;
-    for (let i = 0; i < sp.count; i++) sp.setZ(i, Math.sin(sp.getY(i) / 0.8 * 10 * Math.PI) * 0.025);
-    sheet.rotateX(-Math.PI / 2);
-    sheet.computeVertexNormals();
-    geos.push(sheet);
-    geos.push(new THREE.DodecahedronGeometry(0.22, 0));
-    deb = [];
-    for (let k = 0; k < DK.length; k++) {
-      const cap = qi(DK[k].cap[0], DK[k].cap[1]);
-      const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, side: k === 2 ? THREE.DoubleSide : THREE.FrontSide });
-      const mesh = new THREE.InstancedMesh(geos[k], mat, cap);
-      mesh.name = "tw-debris-" + DK[k].name;
-      mesh.frustumCulled = false;                    // instances span the whole path
-      mesh.castShadow = false; mesh.receiveShadow = false;
-      // r128 sizes instanceColor off `count` the FIRST time setColorAt runs:
-      // allocate it at full capacity now, then empty the draw
-      mesh.setColorAt(0, _col.setHex(0xffffff));
-      mesh.count = 0;
-      if (mesh.instanceMatrix.setUsage) mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.userData.dynamic = true;
-      root.add(mesh);
-      deb.push({ mesh, cap, beta: DK[k].beta,
-        p: new Float32Array(cap * 3), v: new Float32Array(cap * 3), q: new Float32Array(cap * 4),
-        ax: new Float32Array(cap * 3), w: new Float32Array(cap), sc: new Float32Array(cap), bm: new Float32Array(cap),
-        st: new Uint8Array(cap), age: new Float32Array(cap), gfn: null, ptr: 0, hi: 0, dirty: false });
-    }
-    return deb;
-  }
-  const _m4 = new THREE.Matrix4(), _p3 = new THREE.Vector3(), _q4 = new THREE.Quaternion(), _s3 = new THREE.Vector3(), _ax = new THREE.Vector3(), _dq = new THREE.Quaternion();
-  const _col = new THREE.Color(), _eu = new THREE.Euler();
   // spawn one piece; colorHex is the colour of the part it came off
   function spawnDebris(kind, x, y, z, vx, vy, vz, colorHex, scale, gfn, betaMul) {
-    const P = debrisPools();
-    if (!P) return -1;
-    const D = P[kind];
-    let i = -1;
-    for (let n = 0; n < D.cap; n++) {
-      const j = (D.ptr + n) % D.cap;
-      if (D.st[j] !== 1) { i = j; break; }
-    }
-    if (i < 0) i = D.ptr;                           // all airborne: recycle the oldest
-    D.ptr = (i + 1) % D.cap;
-    D.p[i * 3] = x; D.p[i * 3 + 1] = y; D.p[i * 3 + 2] = z;
-    D.v[i * 3] = vx; D.v[i * 3 + 1] = vy; D.v[i * 3 + 2] = vz;
-    _eu.set(Math.random() * 6.283, Math.random() * 6.283, 0);
-    _q4.setFromEuler(_eu);
-    D.q[i * 4] = _q4.x; D.q[i * 4 + 1] = _q4.y; D.q[i * 4 + 2] = _q4.z; D.q[i * 4 + 3] = _q4.w;
-    _ax.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
-    D.ax[i * 3] = _ax.x; D.ax[i * 3 + 1] = _ax.y; D.ax[i * 3 + 2] = _ax.z;
-    D.w[i] = 2 + Math.random() * 6;
-    D.sc[i] = scale || 1;
-    D.bm[i] = betaMul || 1;
-    D.st[i] = 1; D.age[i] = 0;
-    D.gfn = gfn || D.gfn || floorAt;
-    if (i + 1 > D.hi) { D.hi = i + 1; D.mesh.count = D.hi; }
-    _col.setHex(colorHex == null ? 0x7a6a58 : colorHex);
-    D.mesh.setColorAt(i, _col);
-    if (D.mesh.instanceColor) D.mesh.instanceColor.needsUpdate = true;
-    stats.debrisLofted++;
-    return i;
-  }
-  function writeInstance(D, i) {
-    _p3.set(D.p[i * 3], D.p[i * 3 + 1], D.p[i * 3 + 2]);
-    _q4.set(D.q[i * 4], D.q[i * 4 + 1], D.q[i * 4 + 2], D.q[i * 4 + 3]);
-    _s3.setScalar(D.sc[i]);
-    _m4.compose(_p3, _q4, _s3);
-    D.mesh.setMatrixAt(i, _m4);
-    D.dirty = true;
-  }
-  let airborneNow = 0;
-  function stepDebris(dt) {
-    if (!deb) return;
-    airborneNow = 0;
-    for (let k = 0; k < deb.length; k++) {
-      const D = deb[k], gfn = D.gfn || floorAt;
-      for (let i = 0; i < D.hi; i++) {
-        if (D.st[i] !== 1) continue;
-        airborneNow++;
-        D.age[i] += dt;
-        const ix = i * 3;
-        let x = D.p[ix], y = D.p[ix + 1], z = D.p[ix + 2];
-        let vx = D.v[ix], vy = D.v[ix + 1], vz = D.v[ix + 2];
-        fieldAt(x, z, _s, y);
-        const rx = _s.vx - vx, ry = _s.lift - vy, rz = _s.vz - vz;
-        const rel = Math.sqrt(rx * rx + ry * ry + rz * rz);
-        const f = 1 - Math.exp(-D.beta * D.bm[i] * rel * dt);
-        vx += rx * f; vy += ry * f; vz += rz * f;
-        vy -= G * dt;
-        x += vx * dt; y += vy * dt; z += vz * dt;
-        const gy = gfn(x, z);
-        if (y > stats.maxDebrisHeight + gy) stats.maxDebrisHeight = y - gy;
-        if (y <= gy + 0.03) {
-          const sp = Math.hypot(vx, vz);
-          if (vy < -5 && sp > 2) { vy = -vy * 0.22; vx *= 0.55; vz *= 0.55; y = gy + 0.04; }
-          else {
-            // lie flat where it fell (a random yaw), and stay
-            y = gy + 0.03 * D.sc[i];
-            _q4.setFromAxisAngle(_ax.set(0, 1, 0), h01(x, z, 0x7d1) * 6.283);
-            D.q[i * 4] = _q4.x; D.q[i * 4 + 1] = _q4.y; D.q[i * 4 + 2] = _q4.z; D.q[i * 4 + 3] = _q4.w;
-            D.st[i] = 2; vx = vy = vz = 0;
-          }
-        } else {
-          // tumble: spin about its own axis, faster in a stronger wind
-          const wr = D.w[i] * (0.4 + Math.min(1.5, rel / 30));
-          _ax.set(D.ax[ix], D.ax[ix + 1], D.ax[ix + 2]);
-          _dq.setFromAxisAngle(_ax, wr * dt);
-          _q4.set(D.q[i * 4], D.q[i * 4 + 1], D.q[i * 4 + 2], D.q[i * 4 + 3]).multiply(_dq);
-          D.q[i * 4] = _q4.x; D.q[i * 4 + 1] = _q4.y; D.q[i * 4 + 2] = _q4.z; D.q[i * 4 + 3] = _q4.w;
-        }
-        D.p[ix] = x; D.p[ix + 1] = y; D.p[ix + 2] = z;
-        D.v[ix] = vx; D.v[ix + 1] = vy; D.v[ix + 2] = vz;
-        writeInstance(D, i);
-      }
-      if (D.dirty) { D.mesh.instanceMatrix.needsUpdate = true; D.dirty = false; }
-    }
+    const D = CBZ.debris;
+    if (!D || !D.bit) return -1;
+    const K = DK[kind] || DK[3];
+    let n = 0;
+    try {
+      n = D.bit(x, y, z, { shape: K.shape, kind: K.kind, color: colorHex == null ? 0x7a6a58 : colorHex,
+        size: K.size * (scale || 1), vel: { x: vx, y: vy, z: vz }, beta: K.beta * (betaMul || 1), owner: "tornado" });
+    } catch (e) { n = 0; }
+    if (n) stats.debrisLofted++;
+    return n ? 0 : -1;
   }
   function debrisCounts() {
-    let fly = 0, rest = 0;
-    if (deb) for (const D of deb) for (let i = 0; i < D.hi; i++) { if (D.st[i] === 1) fly++; else if (D.st[i] === 2) rest++; }
-    return { airborne: fly, onGround: rest, total: fly + rest };
+    let aloft = 0, total = 0, maxH = 0;
+    try {
+      const D = CBZ.debris;
+      if (D && D.audit) { const a = D.audit({}); aloft = a.gritAloft + a.live - a.asleep; maxH = a.maxHeight; }
+      if (D && D.stats) total = D.stats().grit;
+    } catch (e) {}
+    if (maxH > stats.maxDebrisHeight) stats.maxDebrisHeight = maxH;
+    return { airborne: aloft, onGround: Math.max(0, total - aloft), total: total };
   }
   function clearDebris() {
-    if (!deb) return;
-    for (const D of deb) { D.st.fill(0); D.hi = 0; D.ptr = 0; D.mesh.count = 0; }
+    if (CBZ.debris && CBZ.debris.clear) { try { CBZ.debris.clear("tornado"); } catch (e) {} }
+  }
+
+  /* THE WIND AS A MEDIUM (CBZ.debris.medium). While a vortex lives, every
+     loose piece in the debris sim — the roofs and walls this file tears off,
+     the bits, AND the rubble any other system left lying in the path — is
+     pushed by the same field that does the damage: drag toward the local
+     wind, the updraft as the vertical flow, under the debris sim's ceiling
+     (no lift 30 m over the ground) and its speed caps. Nothing here sets a
+     piece's position. */
+  const _sm = { speed: 0, gust: 0, inflow: 0, lift: 0, vx: 0, vz: 0, r: 0, ef: -1, pressure: 0 };
+  // scratch for the instanced scar marks and hail
+  const _m4 = new THREE.Matrix4(), _p3 = new THREE.Vector3(), _q4 = new THREE.Quaternion(), _s3 = new THREE.Vector3();
+  function windMedium(x, y, z, out) {
+    if (!live.length) return false;
+    let vx = 0, vy = 0, vz = 0, any = false, gy = 0;
+    for (let i = 0; i < live.length; i++) {
+      const t = live[i];
+      const dx = x - t.x, dz = z - t.z;
+      if (dx * dx + dz * dz > t.outer * t.outer || t.k <= 0) continue;
+      const g = t.gfn(x, z);
+      gy = g;
+      fieldInto(t, x, z, _sm, y - g);
+      vx += _sm.vx; vz += _sm.vz; vy += _sm.lift; any = true;
+    }
+    if (!any) return false;
+    out.vx = vx; out.vy = vy; out.vz = vz; out.rho = AIR_RHO; out.ceil = gy + 30;
+    return true;
+  }
+  function mediumOn(on) {
+    const D = CBZ.debris;
+    if (D && D.medium) { try { D.medium("tornado", on ? windMedium : null); } catch (e) {} }
   }
 
   /* ============================================================
-     BIG FLYERS — roofs, walls, crowns and cars, one integrator.
+     BIG FLYERS — CARS and torn-off tree crowns (never a piece of a
+     building: roofs and walls are bodies in systems/debris.js now, see
+     throwPart). A car is a vehicle record other systems read (car.pos, its
+     collider, the island's flung flag), so it keeps this integrator, under
+     the debris sim's limits: speed <= LIMITS.V_MAX, climb <= V_UP, no lift
+     30 m over the ground, collision with every collider, and it lands on
+     what is under it (a roof, a deck), never through it to the terrain.
      The body is its CENTRE + orientation; the object's origin is placed
-     from it each frame (cOff), so a merged mesh whose origin is the
-     building's corner still tumbles about its own middle.
+     from it each frame (cOff).
      ============================================================ */
   const flyers = [];
   const _box = new THREE.Box3(), _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _qa = new THREE.Quaternion(), _up = new THREE.Vector3(0, 1, 0);
@@ -1065,6 +1005,18 @@
     _v.set(0, 0, 1).applyQuaternion(f.q); const c = Math.abs(_v.y) * f.half.z;
     return a + b + c;
   }
+  // what holds a flyer up at (x, z): the terrain, or a roof / deck / floor
+  // (CBZ.groundAt reads the platforms) reached from `fromY` (its bottom)
+  function supportY(f, x, z, fromY) {
+    let g = f.gfn(x, z);
+    if (CBZ.groundAt) {
+      let p = null;
+      try { p = +CBZ.groundAt(x, z, fromY); } catch (e) { p = null; }
+      if (Number.isFinite(p) && p > g && p <= fromY + 0.5) g = p;
+    }
+    return g;
+  }
+  function LIM() { return (CBZ.debris && CBZ.debris.LIMITS) || { V_MAX: 40, V_UP: 16, CEIL: 30 }; }
   // come to rest on the face nearest down: wheels, a side, or its roof
   function settle(f) {
     let best = null, bd = -2;
@@ -1075,13 +1027,15 @@
     }
     _v.set(best[0], best[1], best[2]).applyQuaternion(f.q);
     _qa.setFromUnitVectors(_v, _up);
+    const bottom = f.y - upHalf(f);
     f.q.premultiply(_qa);
-    f.y = f.gfn(f.x, f.z) + upHalf(f);
+    f.y = supportY(f, f.x, f.z, bottom + 0.3) + upHalf(f);
   }
   const _hit = { t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, c: null };
   const SWEEP_OPTS = { skip: function (c) { return !!c.debris || !!c._twOwn; } };
   function stepFlyer(f, dt) {
     f.age += dt;
+    const L = LIM();
     fieldAt(f.x, f.z, _s, f.y);
     const rx = _s.vx - f.vx, ry = _s.lift - f.vy, rz = _s.vz - f.vz;
     const relH2 = rx * rx + rz * rz, rel = Math.sqrt(relH2 + ry * ry);
@@ -1089,13 +1043,18 @@
     const Aeff = f.grounded ? f.area : (f.area + f.top) * 0.5;
     const beta = 0.5 * AIR_RHO * f.cd * Aeff / f.mass;
     const k = 1 - Math.exp(-beta * rel * dt);
-    let ax = 0, ay = 0, az = 0;
+    let ay = 0;
     f.vx += rx * k; f.vz += rz * k;
-    // the updraft on the planform + aerodynamic lift of the horizontal flow
-    const upA = 0.5 * AIR_RHO * (1.2 * f.top * Math.max(0, ry) * Math.abs(ry) + f.cl * f.top * relH2) / f.mass;
-    ay += upA - G;
-    const gy = f.gfn(f.x, f.z);
     const hh = upHalf(f);
+    const gy = supportY(f, f.x, f.z, f.y - hh + 0.3);
+    // the updraft on the planform + aerodynamic lift of the horizontal flow,
+    // and none of it over the ceiling: a car is thrown, it is not posted up
+    let upA = 0.5 * AIR_RHO * (1.2 * f.top * Math.max(0, ry) * Math.abs(ry) + f.cl * f.top * relH2) / f.mass;
+    if (f.y - hh - gy > (L.CEIL || 30)) upA = 0;
+    upA = Math.min(upA, 3 * G);
+    ay += upA - G;
+    // what it stood on went (a roof lifted, a deck dropped): it falls
+    if (f.grounded && f.y - hh - gy > 0.3) f.grounded = false;
     if (f.grounded) {
       // on the ground: weight, minus lift, presses it into friction
       const N = Math.max(0, G - upA);
@@ -1131,12 +1090,18 @@
       f.w += (wTarget - f.w) * Math.min(1, dt * 1.5);
     } else if (f.kind !== "car") f.w *= Math.max(0, 1 - dt * 4);
     else f.w *= Math.max(0, 1 - dt * 6);
+    // THE LIMITS (systems/debris.js LIMITS): one set for every loose body
+    {
+      const s2 = f.vx * f.vx + f.vy * f.vy + f.vz * f.vz, vm = L.V_MAX || 40, vu = L.V_UP || 16;
+      if (s2 > vm * vm) { const kk = vm / Math.sqrt(s2); f.vx *= kk; f.vy *= kk; f.vz *= kk; }
+      if (f.vy > vu) f.vy = vu;
+    }
     const px = f.x, py = f.y, pz = f.z;
     f.x += f.vx * dt; f.y += f.vy * dt; f.z += f.vz * dt;
     if (f.w > 0.01) { _qa.setFromAxisAngle(f.ax, f.w * dt); f.q.premultiply(_qa); }
-    // the world's colliders, for the heavy bodies (a car into a wall is a hit)
+    // the world's colliders, for every flyer in the air (a car into a wall is a hit)
     const LC = CBZ.looseContact;
-    if (LC && LC.sweep && (f.kind === "car" || f.kind === "roof") && !f.grounded) {
+    if (LC && LC.sweep && !f.grounded) {
       const pad = Math.min(1.2, Math.max(0.4, Math.min(f.half.x, f.half.z)));
       if (LC.sweep(px, py, pz, f.x, f.y, f.z, pad, _hit, SWEEP_OPTS)) {
         f.x = _hit.x; f.y = _hit.y; f.z = _hit.z;
@@ -1148,9 +1113,11 @@
         f.hits++;
       }
     }
-    const gy2 = f.gfn(f.x, f.z);
     const hh2 = upHalf(f);
-    const hNow = f.y - hh2 - gy2;
+    // support read from where its bottom WAS this step, so a fast fall onto
+    // a roof meets the roof instead of passing it to the floor below
+    const gy2 = supportY(f, f.x, f.z, Math.max(py, f.y) - hh2 + 0.3);
+    const hNow = f.y - hh2 - f.gfn(f.x, f.z);
     if (hNow > f.maxH) {
       f.maxH = hNow;
       const c = f.car;
@@ -1173,10 +1140,12 @@
       }
       f.tipped = false;                 // down again: the wind can roll it again
     }
-    // rest: on the ground, slow, and the wind no longer moving it
+    // rest: on the ground, slow, and the wind no longer moving it. (The age
+    // cap only ever settles a body that is ON something: it used to fire
+    // mid-air and teleport the body down to the terrain under it.)
     const sp2 = Math.hypot(f.vx, f.vz);
     if (f.grounded && sp2 < 0.25) { f.restT += dt; } else f.restT = 0;
-    if (f.restT > 0.4 || f.age > 40) {
+    if (f.restT > 0.4 || (f.age > 40 && f.grounded)) {
       settle(f);
       f.rest = true; f.vx = f.vy = f.vz = 0; f.w = 0;
       const thrown = Math.hypot(f.x - f.x0, f.z - f.z0);
@@ -1185,13 +1154,36 @@
     }
     placeFlyer(f);
   }
+  /* A RESTED FLYER IS HELD BY SOMETHING. A car left on a roof whose building
+     then goes (the next disaster, or this tornado's own later damage) falls
+     again: the parked list is re-read at 2 Hz. */
+  const parked = [];
+  let parkT = 0;
+  function watchParked(dt) {
+    parkT += dt;
+    if (parkT < 0.5 || !parked.length) return;
+    parkT = 0;
+    for (let i = parked.length - 1; i >= 0; i--) {
+      const f = parked[i];
+      if (!f.obj || !f.obj.parent || f.obj.userData._twFly) { parked.splice(i, 1); continue; }
+      const hh = upHalf(f), sup = supportY(f, f.x, f.z, f.y - hh + 0.3);
+      if (f.y - hh - sup <= 0.4) continue;
+      parked.splice(i, 1);
+      if (f.car && f.car._twCol) { dropCollider(f.car._twCol); f.car._twCol = null; }
+      if (f.car) f.car._twLift = true;
+      f.rest = false; f.grounded = false; f.restT = 0; f.age = 0; f.vy = 0;
+      f.obj.userData._twFly = f;
+      flyers.push(f);
+    }
+  }
   function stepFlyers(dt) {
     for (let i = flyers.length - 1; i >= 0; i--) {
       const f = flyers[i];
       if (!f.obj || f.dead) { flyers.splice(i, 1); continue; }
       stepFlyer(f, dt);
-      if (f.rest) { f.obj.userData._twFly = null; flyers.splice(i, 1); }
+      if (f.rest) { f.obj.userData._twFly = null; flyers.splice(i, 1); parked.push(f); }
     }
+    watchParked(dt);
   }
 
   /* ============================================================
@@ -1201,12 +1193,16 @@
      current ledger: the island bridge's hitBuilding (systems/disasters.js's
      ledger -> city/collapse.js) or city/structural.js for a city lot.
      `energy` is the wind's work on the face in joules: 0.5 rho v^3 x area x s.
+     CBZ.collapse.damage takes MEGAJOULES (an RPG ~3, a car bomb ~25). The
+     joules used to go straight in: a 3 MJ gust arrived as 3,000,000 MJ and
+     blew every chunk in the radius out at the blast cap, which is how a
+     tornado threw whole storeys into the sky. Converted here, once.
      ============================================================ */
   function structDamage(t, b, x, y, z, radius, energy, dirx, dirz, ledgerAmount) {
     const C = CBZ.collapse;
     stats.buildingHits++;
     if (C && typeof C.damage === "function") {
-      try { return C.damage(b, { x: x, y: y, z: z }, radius, energy, { x: dirx, y: 0, z: dirz }); } catch (e) {}
+      try { return C.damage(b, { x: x, y: y, z: z }, radius, energy / 1e6, { x: dirx, y: 0, z: dirz }); } catch (e) {}
     }
     const W = t && t.world;
     if (W && W.hitBuilding) {
@@ -1238,6 +1234,9 @@
       b.group.updateWorldMatrix(true, true);
       b.group.traverse(function (o) {
         if (!o.isMesh || !o.visible || !o.geometry) return;
+        // the island's merged shell is the WHOLE building (it fails through
+        // the collapse system), and its rooms are inside it: neither is a part
+        if (o.name === "island-shell" || (o.userData && o.userData.cbzInterior) || (o.name && o.name.indexOf("island-interior") === 0)) return;
         const m = Array.isArray(o.material) ? o.material[0] : o.material;
         if (m && m.transparent && m.opacity < 0.6) return;     // glass: the shatter path owns it
         _bb.setFromObject(o);
@@ -1296,17 +1295,39 @@
     const w = _bb.max.x - _bb.min.x, h = _bb.max.y - _bb.min.y, d = _bb.max.z - _bb.min.z;
     return { w: w, h: h, d: d, plan: Math.max(0.5, w * d), face: Math.max(0.5, Math.max(w, d) * h) };
   }
-  // throw a building part: it becomes a flyer with the wind already on it
-  function throwPart(t, o, kind, dirx, dirz, uplift) {
-    liberate(o);
+  // what a part is made of, for the debris sim (density, how it breaks)
+  function kindOfPart(o) {
+    const D = CBZ.debris;
+    if (D && D.kindOf) { try { return D.kindOf(Array.isArray(o.material) ? o.material[0] : o.material, o) || "wood"; } catch (e) {} }
+    return "wood";
+  }
+  /* THROW A BUILDING PART. It used to become a private "flyer": lift on its
+     whole planform at the relative wind squared with no ceiling (a roof sheet
+     climbed as long as the wind outran it), terrain-only landings, no wall
+     collisions for a wall panel, a forced teleport to the ground at 40 s.
+     Now the part is handed to systems/debris.js whole (CBZ.debris.adopt,
+     "all" = every mesh of it one rigid body) with its real kilos and area,
+     and the "tornado" medium carries it: one physics with every other piece.
+     The original is hidden by the adopt (and folded out of a merged shell);
+     the journal shows it again on restoreWorld. */
+  function throwPart(t, o, kind, dirx, dirz, uplift, angular) {
+    const D = CBZ.debris;
+    if (!D || !D.adopt || !o || o.userData._twThrown) return null;
+    jObj(o);
     const A = areaOf(o);
     const plan = kind === "roof" ? A.plan : A.face;
     const mass = kind === "roof" ? A.plan * 28 : A.face * 45;
-    const f = launch(o, { kind: kind, mass: mass, area: plan * 0.7, top: plan, cd: 1.2, cl: kind === "roof" ? 0.55 : 0.25,
-      gfn: t.gfn, grounded: false, vx: dirx * 6, vy: uplift || 4, vz: dirz * 6, spin: 1.5,
-      onImpact: function (ff, sp) { if (sp > 10 && ff.hits < 2) burst(ff.x, ff.y, ff.z, matHex(ff.obj), 3, 1, t.gfn, ff.vx, ff.vz); } });
-    if (f && kind === "roof") stats.roofParts++;
-    return f;
+    let out = null;
+    try {
+      out = D.adopt(o, { whole: "all", owner: "tornado", kind: kindOfPart(o), mass: mass, area: plan * 0.85, cd: 1.2, maxLife: 60,
+        velocity: { x: dirx * 6, y: Math.min(10, uplift || 4), z: dirz * 6 },
+        angular: angular || { x: (Math.random() - 0.5) * 2, y: (Math.random() - 0.5) * 1.5, z: (Math.random() - 0.5) * 2 } });
+    } catch (e) { out = null; }
+    if (!out || !out.pieces) return null;
+    o.userData._twThrown = true;
+    stats.flyersLaunched++;
+    if (kind === "roof") stats.roofParts++;
+    return out.live && out.live[0] || null;
   }
   // a handful of debris pieces in a part's colour (kind 1 boards / 3 chunks / 0 shingles)
   function burst(x, y, z, hex, n, kind, gfn, vx, vz) {
@@ -1315,24 +1336,36 @@
         (vx || 0) * 0.5 + (Math.random() - 0.5) * 6, 2 + Math.random() * 4, (vz || 0) * 0.5 + (Math.random() - 0.5) * 6, hex, 0.7 + Math.random() * 0.6, gfn);
     }
   }
-  // fell a wall panel about its downwind base edge
-  const hinges = [];
+  /* FELL A WALL PANEL. This was a kinematic hinge: the panel was rotated
+     about its base edge by a scripted angle to 88 degrees and left there
+     whatever was (or was not) under it. Now it is a rigid body in the debris
+     sim, started rotating about its downwind base edge with a shove from the
+     wind; its own hull contacts tip it over that edge and lay it on whatever
+     it lands on — the ground, rubble, another wall. */
   function fellWall(t, b, o, wx, wz) {
-    liberate(o);
+    if (!o || o.userData._twThrown) return;
     _bb.setFromObject(o);
     const w = _bb.max.x - _bb.min.x, d = _bb.max.z - _bb.min.z;
-    let fx = 0, fz = 0, px, pz;
-    if (w < d) { fx = wx >= 0 ? 1 : -1; px = fx > 0 ? _bb.max.x : _bb.min.x; pz = (_bb.min.z + _bb.max.z) * 0.5; }
-    else { fz = wz >= 0 ? 1 : -1; pz = fz > 0 ? _bb.max.z : _bb.min.z; px = (_bb.min.x + _bb.max.x) * 0.5; }
-    const axis = new THREE.Vector3(fx, 0, fz).cross(_up).negate().normalize();   // up x fall
-    hinges.push({ o: o, base: new THREE.Vector3(px, _bb.min.y, pz), axis: axis, a: 0, w: 0.3,
-      max: Math.PI / 2 - 0.04, q0: o.quaternion.clone(), p0: o.position.clone(), b: b, t: t });
+    let fx = 0, fz = 0;
+    if (w < d) fx = wx >= 0 ? 1 : -1;
+    else fz = wz >= 0 ? 1 : -1;
     // the panel's colliders go with it (a fallen wall is not a wall)
     if (b.colliders) for (const c of b.colliders.slice()) {
       if (c.maxX >= _bb.min.x - 0.3 && c.minX <= _bb.max.x + 0.3 && c.maxZ >= _bb.min.z - 0.3 && c.minZ <= _bb.max.z + 0.3) dropCollider(c);
     }
+    const axis = new THREE.Vector3(fx, 0, fz).cross(_up).negate().normalize();   // up x fall
+    const wr = 1.2;
+    const f = throwPart(t, o, "wall", fx * 0.25, fz * 0.25, 0.3, { x: axis.x * wr, y: 0, z: axis.z * wr });
+    if (!f) return;
+    burst((_bb.min.x + _bb.max.x) / 2, _bb.min.y + 0.3, (_bb.min.z + _bb.max.z) / 2, matHex(o), 2, 3, t.gfn);
+    if (CBZ.shake && camDist(_bb.min.x, _bb.min.z) < 40) CBZ.shake(0.12);
     stats.wallsDown++;
   }
+  /* TREES ONLY: an uprooted tree pivots about its root plate and a snapped
+     trunk leans about its break. A tree is not a piece of a building and its
+     trunk is still rooted at the pivot, so this stays a hinge (it never
+     carries a building part: fellWall above is a body now). */
+  const hinges = [];
   function stepHinges(dt) {
     for (let i = hinges.length - 1; i >= 0; i--) {
       const H = hinges[i];
@@ -1492,16 +1525,13 @@
     if (v >= DOD.swept && st.dod < 6 && st.separable) {
       st.dod = 6;
       b._twSwept = true;
-      // the felled walls (falling or lying) go up with the wind
-      for (const H of hinges) if (H.b === b) { H.a = H.max; if (!H.o.userData._twFly) throwPart(t, H.o, "wall", wx, wz, 5); }
-      for (const o of st.felled || []) if (!o.userData._twFly) throwPart(t, o, "wall", wx, wz, 5);
+      // the felled walls are bodies in the wind already: the gust that
+      // sweeps the slab picks them up off the ground (a shove through the
+      // debris sim, capped like every other), and any wall still standing goes
+      for (const o of P.walls.splice(0)) fellWall(t, b, o, wx, wz);
+      if (CBZ.debris && CBZ.debris.impulse) { try { CBZ.debris.impulse(bx, (b.gy || 0) + 1, bz, Math.max(b.w || 8, b.d || 8) * 0.8 + 2, 6); } catch (e) {} }
       b.fallen = true;
       stats.housesSwept++;
-    }
-    // remember the felled walls so a later sweep can loft them
-    if (st.separable && hinges.length) {
-      st.felled = st.felled || [];
-      for (const H of hinges) if (H.b === b && st.felled.indexOf(H.o) < 0) st.felled.push(H.o);
     }
     // ENGINEERED: past its roof, the structure is ground by the ledger while
     // the gust holds over the wall bar (a sustained load, never a strike)
@@ -1958,8 +1988,9 @@
     live.push(t);
     buildFunnel(t);
     // the pools are built on the spawn frame (already the heavy one), not
-    // mid-storm the first time a shingle, a hailstone or a scar needs one
-    debrisPools(); scarMesh(); hailPool();
+    // mid-storm the first time a hailstone or a scar needs one; the wind
+    // starts acting on every loose piece in the debris sim
+    scarMesh(); hailPool(); mediumOn(true);
     try {
       if (CBZ.sfx) { CBZ.sfx("wind"); CBZ.sfx("rumble", { delay: 0.4 }); }
       if (inCity()) T.siren(true);
@@ -1989,6 +2020,8 @@
     t.dead = true;
     t.roofs.clear();
     disposeFunnel(t);
+    // the last vortex gone: the wind lets go of every piece (they fall)
+    if (!live.length) mediumOn(false);
     if (!live.length && inCity()) T.siren(false);
     if (!hard) { try { if (CBZ.sfx) CBZ.sfx("wind", { volume: 0.5 }); } catch (e) {} }
     fireHook(T.onEnd, snapshot(t));
@@ -2370,7 +2403,7 @@
   function tick(dt) {
     if (!CBZ.CONFIG.TORNADO_CITY) { if (live.length) T.clear(); return; }
     director();
-    if (!live.length && !flyers.length && !hinges.length && !airborneNow && !(hail && hail.hi)) return;
+    if (!live.length && !flyers.length && !hinges.length && !parked.length && !(hail && hail.hi)) return;
     const t0 = performance.now();
     const d = dt > 0.25 ? 0.25 : dt;
     for (let i = live.length - 1; i >= 0; i--) {
@@ -2395,8 +2428,7 @@
     }
     _pt0 = performance.now();
     stepFlyers(d); lap("flyers");
-    stepHinges(d);
-    stepDebris(d); lap("debris");
+    stepHinges(d); lap("debris");
     stepHail(d); lap("hail");
     const ms = performance.now() - t0;
     perf.frames++; perf.ms += ms; perf.last = ms;
@@ -2411,9 +2443,14 @@
      ============================================================ */
   T.restoreWorld = function () {
     T.clear();
+    mediumOn(false);
     for (let i = flyers.length - 1; i >= 0; i--) { const f = flyers[i]; if (f.obj) f.obj.userData._twFly = null; }
     flyers.length = 0;
+    parked.length = 0;
     hinges.length = 0;
+    // every roof, wall and bit this storm put into the debris sim goes (the
+    // originals it hid come back through the journal below)
+    clearDebris();
     for (let i = journal.length - 1; i >= 0; i--) {
       const J = journal[i];
       try {
@@ -2421,7 +2458,7 @@
           const o = J.o;
           if (J.parent && o.parent !== J.parent) { if (o.parent) o.parent.remove(o); J.parent.add(o); }
           o.position.copy(J.p); o.quaternion.copy(J.q); o.scale.copy(J.s); o.visible = J.v;
-          o.userData._twJ = false; o.userData._twFly = null;
+          o.userData._twJ = false; o.userData._twFly = null; o.userData._twThrown = false;
         } else if (J.k === 1) { if (CBZ.colliders && CBZ.colliders.indexOf(J.c) < 0) CBZ.colliders.push(J.c); }
         else if (J.k === 2) { const k = CBZ.colliders ? CBZ.colliders.indexOf(J.c) : -1; if (k >= 0) CBZ.colliders.splice(k, 1); }
         else if (J.k === 3) { if (CBZ.platforms && CBZ.platforms.indexOf(J.p) < 0) CBZ.platforms.push(J.p); }
@@ -2445,11 +2482,36 @@
   if (CBZ.onUpdate) CBZ.onUpdate(0.03, function () {
     const orig = CBZ.cityGlassReset;
     if (typeof orig !== "function" || orig._tornadoResetWrapped) return;
-    const wrapped = function () { try { T.clear(); clearScar(); clearDebris(); clearHail(); } catch (e) {} return orig.apply(this, arguments); };
+    const wrapped = function () { try { T.clear(); mediumOn(false); flyers.length = 0; parked.length = 0; clearScar(); clearDebris(); clearHail(); } catch (e) {} return orig.apply(this, arguments); };
     for (const k in orig) if (k.endsWith("Wrapped")) wrapped[k] = orig[k];
     wrapped._tornadoResetWrapped = true;
     CBZ.cityGlassReset = wrapped;
   });
+
+  /* THE PIECES THIS FILE STILL MOVES ITSELF (cars, crowns), for
+     CBZ.debrisAudit(): resting with nothing under them, too fast, too high.
+     Roofs, walls and bits are the debris sim's own and are audited there. */
+  (CBZ.debrisAuditSources || (CBZ.debrisAuditSources = {})).tornado = function (o) {
+    o = o || {};
+    const fastV = o.fast || 30, high = o.high || 120;
+    const r = { floating: 0, fast: 0, high: 0, maxSpeed: 0, maxHeight: 0, flyers: flyers.length, parked: parked.length, list: [] };
+    const look = function (f, resting) {
+      const sp = resting ? 0 : Math.hypot(f.vx, f.vy, f.vz);
+      if (sp > r.maxSpeed) r.maxSpeed = +sp.toFixed(1);
+      if (sp > fastV) r.fast++;
+      const hh = upHalf(f), bottom = f.y - hh;
+      const h = bottom - f.gfn(f.x, f.z);
+      if (h > r.maxHeight) r.maxHeight = +h.toFixed(1);
+      if (h > high) r.high++;
+      if (resting || f.grounded) {
+        const gap = bottom - supportY(f, f.x, f.z, bottom + 0.3);
+        if (gap > 0.5) { r.floating++; if (r.list.length < 6) r.list.push({ kind: f.kind, x: +f.x.toFixed(1), y: +bottom.toFixed(1), z: +f.z.toFixed(1), gap: +gap.toFixed(2) }); }
+      }
+    };
+    for (const f of flyers) look(f, false);
+    for (const f of parked) if (f.obj && f.obj.parent) look(f, true);
+    return r;
+  };
 
   /* CBZ.tornadoAudit() — THE RATCHET: vortex implementations that are not
      this one. Baseline 1 (the old survival funnel), now 0; may only fall. */
@@ -2485,7 +2547,7 @@
           R: +t.R.toFixed(1), vmax: +t.vmax.toFixed(1), k: +t.k.toFixed(2), s0: +t.s0.toFixed(2), rope: +t.rope.toFixed(2),
           age: +t.age.toFixed(1), life: +t.life.toFixed(1), suction: t.sv ? t.sv.length : 0 };
       }),
-      flyers: flyers.length, hinges: hinges.length, journal: journal.length,
+      flyers: flyers.length, parked: parked.length, hinges: hinges.length, journal: journal.length,
       audit: CBZ.tornadoAudit(), perf: T.perf(),
       flags: { city: !!CBZ.CONFIG.TORNADO_CITY, structural: !!CBZ.CONFIG.TORNADO_STRUCTURAL, lift: !!CBZ.CONFIG.TORNADO_LIFT },
     };

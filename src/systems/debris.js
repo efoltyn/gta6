@@ -130,6 +130,93 @@
   const CELL = 16;                                         // static bucket size (m)
   const HF = 0.3;                                          // rubble height-field cell (m)
 
+  /* ---- THE LIMITS EVERY LOOSE PIECE OBEYS (2026-10-15) ------------------
+     Owner: "pieces of buildings don't follow physics and sometimes fly way up
+     in the air". Nothing here was capped: a blast's shove (impulse) took any
+     power it was handed, a launch's speed was power x mass x nearness with no
+     ceiling, and the only thing that could hold a piece up was a floor. Every
+     piece of every disaster now goes through the one body sim below, and the
+     sim refuses the impossible:
+       V_MAX    m/s   the fastest a piece of a building moves (a 40 m/s chunk
+                      is already a blast fragment; nothing in a disaster the
+                      island stages throws masonry faster)
+       V_UP     m/s   the fastest it CLIMBS (a 16 m/s climb tops out ~13 m up)
+       W_MAX  rad/s   tumble
+       A_MEDIUM  m/s2 the most a wind or a current accelerates a piece
+       CEIL     m     above this height over its floor a fluid gives a piece
+                      no more lift: a tornado carries debris round and out,
+                      it does not post it into orbit
+       ALT_MAX  m     a climbing piece this far over its floor stops climbing */
+  const V_MAX = 40, V_UP = 16, W_MAX = 20, A_MEDIUM = 3 * G, CEIL = 30, ALT_MAX = 90;
+  function clampBody(b) {
+    const v = b.v;
+    const s2 = v.x * v.x + v.y * v.y + v.z * v.z;
+    if (s2 > V_MAX * V_MAX) v.multiplyScalar(V_MAX / Math.sqrt(s2));
+    if (v.y > V_UP) v.y = V_UP;
+    const w2 = b.w.lengthSq();
+    if (w2 > W_MAX * W_MAX) b.w.multiplyScalar(W_MAX / Math.sqrt(w2));
+    if (!isFinite(v.x + v.y + v.z)) v.set(0, 0, 0);
+    if (!isFinite(b.w.x + b.w.y + b.w.z)) b.w.set(0, 0, 0);
+  }
+
+  /* ---- FLUIDS: WIND AND WATER ARE FORCES ON THE BODY (CBZ.debris.medium) --
+     A disaster that moves pieces with air or water registers the fluid, it
+     never sets a piece's position. medium(id, fn) / medium(id, null).
+       fn(x, y, z, out) -> truthy where the point is in that fluid, filling
+         out.vx, out.vy, out.vz   the fluid's velocity there (m/s)
+         out.rho                  its density (kg/m3; air 1.225, water 1000)
+         out.surf                 (optional) its top surface: the body's
+                                  submerged share scales the drag, and the
+                                  displaced water holds it up (buoyancy from
+                                  the body's own density, so timber floats
+                                  and concrete is only lightened)
+         out.ceil                 (optional) no upward push above this y
+     The force is quadratic drag, 0.5 rho Cd A |u - v| (u - v) / m, applied as
+     an exponential relaxation toward the fluid's velocity (stable at any
+     step: a piece can never overshoot the wind that carries it), capped at
+     A_MEDIUM, and the body still falls, collides, piles and sleeps exactly
+     as every other piece does. */
+  const media = new Map();
+  const _md = { vx: 0, vy: 0, vz: 0, rho: 1.225, surf: null, ceil: null };
+  function sampleMedium(fn, x, y, z) {
+    _md.vx = 0; _md.vy = 0; _md.vz = 0; _md.rho = 1.225; _md.surf = null; _md.ceil = null;
+    let ok = false;
+    try { ok = !!fn(x, y, z, _md); } catch (e) { ok = false; }
+    return ok && isFinite(_md.vx + _md.vy + _md.vz);
+  }
+  // returns the strongest fluid acceleration it applied (m/s2), 0 when none
+  function applyMedia(b, p, dt, apply) {
+    if (!media.size) return 0;
+    let peak = 0;
+    const hh = Math.max(0.05, (b.ext[0] + b.ext[1] + b.ext[2]) / 3);
+    const dens = b.mass / Math.max(1e-4, b.V || 1e-4);
+    for (const fn of media.values()) {
+      if (!sampleMedium(fn, p.x, p.y, p.z)) continue;
+      let frac = 1, buoy = 0;
+      if (_md.surf != null && isFinite(_md.surf)) {
+        frac = Math.max(0, Math.min(1, (_md.surf - (p.y - hh)) / (2 * hh)));
+        if (frac <= 0) continue;
+        buoy = Math.min(2 * G, G * frac * _md.rho / Math.max(50, dens));
+      }
+      const rx = _md.vx - b.v.x, ry = _md.vy - b.v.y, rz = _md.vz - b.v.z;
+      const rl = Math.sqrt(rx * rx + ry * ry + rz * rz);
+      const beta = 0.5 * _md.rho * (b.cd || 1) * (b.area || 1) / Math.max(0.05, b.mass) * frac;
+      const a = Math.min(A_MEDIUM, beta * rl * rl) + buoy;
+      if (a > peak) peak = a;
+      if (!apply) continue;
+      let k = 1 - Math.exp(-beta * rl * dt);
+      if (rl * k > A_MEDIUM * dt) k = A_MEDIUM * dt / rl;
+      let dvx = rx * k, dvy = ry * k + buoy * dt, dvz = rz * k;
+      // above its ceiling (or far up over its floor) the fluid stops lifting it
+      const ceil = _md.ceil != null && isFinite(_md.ceil) ? _md.ceil : b.floorY + CEIL;
+      if (dvy > 0 && p.y > ceil) dvy = 0;
+      b.v.x += dvx; b.v.y += dvy; b.v.z += dvz;
+      // water takes the tumble out of it
+      if (_md.surf != null) b.w.multiplyScalar(Math.max(0, 1 - 1.5 * frac * dt));
+    }
+    return peak;
+  }
+
   /* ==== LOOSE-BODY CONTACT (CBZ.looseContact, alias CBZ.debrisContact) =====
      The one swept test every loose thing in the game uses against the world
      colliders: rigid debris, quake masonry, tornado-thrown cars, human and
@@ -903,13 +990,17 @@
     const scene = o.root || CBZ.scene;
     if (!scene) return null;
     scene.add(piece.mesh);
-    const mass = Math.max(0.05, V * k.density);
+    // a caller that knows the part (a roof sheet's real kilos) says so
+    const mass = o.mass > 0 ? o.mass : Math.max(0.05, V * k.density);
     const [ex, ey, ez] = piece.ext;
     const I = mass * ((2 * ex) ** 2 + (2 * ey) ** 2 + (2 * ez) ** 2) / 18;
     const body = {
       mesh: piece.mesh, pts: piece.pts, radius: piece.radius, ext: piece.ext,
       v: new THREE.Vector3(), w: new THREE.Vector3(),
-      invM: 1 / mass, invI: 1 / Math.max(1e-4, I), mass, V,
+      invM: 1 / mass, invI: 1 / Math.max(1e-4, I), mass, V: o.mass > 0 ? Math.max(V, mass / k.density) : V,
+      // what a fluid grips: the mean projected area of its own box (a flat
+      // sheet catches the wind, a block does not), unless the caller knows it
+      area: o.area > 0 ? o.area : Math.max(0.01, 2 * (ex * ey + ey * ez + ex * ez)), cd: o.cd > 0 ? o.cd : 1.1,
       e: k.e, mu: k.mu, drag: k.drag, kind, t: 0, quiet: 0,
       owner: o.owner || null, solid: !!o.solid, maxLife: o.maxLife || 7,
       ignore: null, px: piece.mesh.position.x, pz: piece.mesh.position.z, py: piece.mesh.position.y,
@@ -1003,6 +1094,12 @@
       b._supT = b.sleepT;
       const f = supportUnder(b, b.mesh.position);
       if (f < b.floorY - 0.05) { b.floorY = f; wakeBody(b); return 0; }
+      // the same test frozen rubble is held to (its whole footprint, collider
+      // tops, the rubble under it): a sleeper whose rubble stamp went, or that
+      // came to rest on a floor read a step late, does not sleep in the air
+      if (!held(bodyRec(b))) { b.floorT = -1; wakeBody(b); return 0; }
+      // a wind or a current strong enough to beat its friction picks it up
+      if (media.size && applyMedia(b, b.mesh.position, 0, false) > b.mu * G * 0.6) { wakeBody(b); return 0; }
     }
     return b.sleepT > SLEEP_BAKE ? 1 : 0;
   }
@@ -1020,6 +1117,7 @@
      Baked rubble is static by design and is not touched. Returns bodies hit. */
   function impulse(x, y, z, R, power) {
     if (!(R > 0) || !(power > 0)) return 0;
+    power = Math.min(25, power);          // a shove, never a launch into the sky
     let n = 0;
     for (let i = 0; i < live.length; i++) {
       const b = live[i], p = b.mesh.position;
@@ -1031,6 +1129,7 @@
       const s = power * (1 - d / R) * 0.8;
       b.w.x += rr(-s, s); b.w.y += rr(-s, s); b.w.z += rr(-s, s);
       b.quiet = 0; b.calm = 0;
+      clampBody(b);
       n++;
     }
     return n;
@@ -1040,6 +1139,11 @@
     b.t += dt;
     b.v.y -= G * dt;
     if (b.drag) { const f = Math.max(0, 1 - b.drag * dt); b.v.x *= f; b.v.z *= f; if (b.v.y < 0) b.v.y *= Math.max(0, 1 - b.drag * 0.6 * dt); }
+    // the wind and the water, as forces (see FLUIDS)
+    if (media.size) b.inMedium = applyMedia(b, p, dt, true) > 0.5; else b.inMedium = false;
+    // nothing climbs out of reach: a piece far over its floor stops climbing
+    if (b.v.y > 0 && b.floorT >= 0 && p.y - b.floorY > ALT_MAX) b.v.y = 0;
+    clampBody(b);
     b.px = p.x; b.py = p.y; b.pz = p.z;
     p.x += b.v.x * dt; p.y += b.v.y * dt; p.z += b.v.z * dt;
     const wl = b.w.length();
@@ -1144,10 +1248,11 @@
     const calm = b.contact && vl2 < SLEEP_V2 && wl2 < SLEEP_W2;
     b.calm = calm ? b.calm + dt : 0;
     if (b.calm > SLEEP_T) return 3;
-    if (b.t > b.maxLife && b.contact) return 1;
+    // (a piece a fluid is still carrying is not done: it is not baked mid-slide)
+    if (b.t > b.maxLife && b.contact && !b.inMedium) return 1;
     // touching nothing long past its life (wedged, or falling into a hole):
     // it goes as dust, it is never frozen where it hangs
-    if (b.t > b.maxLife + 5) return 2;
+    if (b.t > b.maxLife + (b.inMedium ? 120 : 5)) return 2;
     if (p.y < -60 || !isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) return 2;
     return 0;
     function applyImpulse(b, jx, jy, jz) {
@@ -1332,6 +1437,7 @@
      taken out, a kept slab moved, a piece revived): the pieces over it are
      checked next, not on the watch's next round. */
   function disturb(x0, x1, z0, z1) {
+    gritDisturb(x0, x1, z0, z1);
     for (const r of recs.values()) {
       if (r.anch || r.maxX < x0 || r.minX > x1 || r.maxZ < z0 || r.minZ > z1) continue;
       if (!r.dist) { r.dist = true; disturbed.push(r); }
@@ -1350,6 +1456,7 @@
       if (g[0] * HF < x0) x0 = g[0] * HF; if ((g[0] + 1) * HF > x1) x1 = (g[0] + 1) * HF;
       if (g[1] * HF < z0) z0 = g[1] * HF; if ((g[1] + 1) * HF > z1) z1 = (g[1] + 1) * HF;
     });
+    gritDisturb(x0, x1, z0, z1);
     for (const r of recs.values()) {
       if (r.maxX < x0 - HF || r.minX > x1 + HF || r.maxZ < z0 - HF || r.minZ > z1 + HF) continue;
       const a = r.hfs;
@@ -1377,6 +1484,24 @@
   /* (A tilted piece touches at a point above its lowest one, anywhere under
      its footprint: a support counts from tol under its lowest point up to
      its own middle.) */
+  // a LIVE body as the record held() reads: its world footprint from its
+  // own hull points, its lowest point and its top
+  const _br = { id: null, minX: 0, maxX: 0, minZ: 0, maxZ: 0, low: 0, top: 0, x: 0, z: 0 };
+  function bodyRec(b) {
+    _mm.compose(b.mesh.position, b.mesh.quaternion, _one);
+    const e = _mm.elements, pts = b.pts;
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, lo = Infinity, hi = -Infinity, lx = 0, lz = 0;
+    for (let i = 0; i < pts.length; i += 3) {
+      const wx = e[0] * pts[i] + e[4] * pts[i + 1] + e[8] * pts[i + 2] + e[12];
+      const wy = e[1] * pts[i] + e[5] * pts[i + 1] + e[9] * pts[i + 2] + e[13];
+      const wz = e[2] * pts[i] + e[6] * pts[i + 1] + e[10] * pts[i + 2] + e[14];
+      if (wx < x0) x0 = wx; if (wx > x1) x1 = wx; if (wz < z0) z0 = wz; if (wz > z1) z1 = wz;
+      if (wy > hi) hi = wy;
+      if (wy < lo) { lo = wy; lx = wx; lz = wz; }
+    }
+    _br.minX = x0; _br.maxX = x1; _br.minZ = z0; _br.maxZ = z1; _br.low = lo; _br.top = hi; _br.x = lx; _br.z = lz;
+    return _br;
+  }
   function held(rec) {
     const low = rec.low, hi = (low + rec.top) / 2 + 0.05;
     const fl = floorUnder(rec, hi);
@@ -1608,16 +1733,14 @@
     for (const b of live) {
       if (!b.asleep) continue;
       out.asleep++;
-      _mm.compose(b.mesh.position, b.mesh.quaternion, _one);
-      const e = _mm.elements, pts = b.pts;
-      let low = Infinity, lx = 0, lz = 0;
-      for (let i = 0; i < pts.length; i += 3) {
-        const wy = e[1] * pts[i] + e[5] * pts[i + 1] + e[9] * pts[i + 2] + e[13];
-        if (wy < low) { low = wy; lx = e[0] * pts[i] + e[4] * pts[i + 1] + e[8] * pts[i + 2] + e[12]; lz = e[2] * pts[i] + e[6] * pts[i + 1] + e[10] * pts[i + 2] + e[14]; }
-      }
-      const h = hfAt(lx, lz);
-      const d = low - Math.max(best(lx, lz, low, null, null), h <= low + 0.3 ? h : -Infinity);
-      if (d > gap) { out.air++; if (d > out.worst) out.worst = d; if (out.list.length < 12) out.list.push({ x: +lx.toFixed(1), y: +low.toFixed(1), z: +lz.toFixed(1), gap: +d.toFixed(2), kind: b.kind, asleep: true }); }
+      const r = bodyRec(b);
+      if (held(r)) continue;
+      const hi = (r.low + r.top) / 2 + 0.05;
+      let sp = floorUnder(r, hi);
+      const ct = colTopUnder(r, -Infinity, hi); if (ct != null && ct > sp) sp = ct;
+      const st = stampUnderFoot(r, -Infinity, hi); if (st != null && st > sp) sp = st;
+      const d = r.low - sp;
+      if (d > gap) { out.air++; if (d > out.worst) out.worst = d; if (out.list.length < 12) out.list.push({ x: +r.x.toFixed(1), y: +r.low.toFixed(1), z: +r.z.toFixed(1), gap: +d.toFixed(2), kind: b.kind, asleep: true }); }
     }
     out.worst = +out.worst.toFixed(2);
     return out;
@@ -1800,6 +1923,8 @@
     return normalise(g);
   }
   function plateGeo() { return raggedGeo(9 + ((rng() * 5) | 0), rr(1.0, 1.7), rr(0.035, 0.07), rr(-0.35, 0.35), 0.62); }
+  // a board snapped off a frame: long, narrow, splintered at the ends
+  function plankGeo() { return raggedGeo(6 + ((rng() * 3) | 0), rr(6, 9), rr(0.12, 0.2), rr(-0.04, 0.04), 0.78); }
   function flakeGeo() { return raggedGeo(7 + ((rng() * 3) | 0), rr(1.0, 1.5), 0.04, rr(-0.2, 0.2), 0.8); }
   // merge non-indexed position/normal/color parts (each part's colour constant)
   function mergeParts(parts) {
@@ -1875,11 +2000,12 @@
   const PART_K = PHONE ? 0.4 : TABLET ? 0.65 : 1;
   const FAM = {
     //        variants  material  rest = resting half-height / size   e = bounce   size jitter
-    stone: { n: 4, mat: "stone", make: stoneGeo, cap: Math.floor(GRIT_CAP * 0.32 / 4), rest: 0.3, e: 0.25, jit: 1 },
-    clod:  { n: 4, mat: "stone", make: clodGeo, cap: Math.floor(GRIT_CAP * 0.36 / 4), rest: 0.18, e: 0.1, jit: 1 },
-    flake: { n: 2, mat: "stone", make: flakeGeo, cap: Math.floor(GRIT_CAP * 0.12 / 2), rest: 0.03, e: 0.05, jit: 1, flat: true, drag: 2.6 },
-    shard: { n: 2, mat: "glass", make: chipGeo, cap: Math.floor(GRIT_CAP * 0.2 / 2), rest: 0.05, e: 0.15, jit: 1, flat: true, drag: 0.4 },
-    plate: { n: 4, mat: "metal", make: plateGeo, cap: Math.max(8, Math.round(36 * PART_K)), rest: 0.05, e: 0.3, jit: [0.55, 1.35], flat: true, drag: 0.03 },
+    stone: { n: 4, mat: "stone", make: stoneGeo, cap: Math.floor(GRIT_CAP * 0.32 / 4), rest: 0.3, e: 0.25, jit: 1, beta: 0.006 },
+    clod:  { n: 4, mat: "stone", make: clodGeo, cap: Math.floor(GRIT_CAP * 0.36 / 4), rest: 0.18, e: 0.1, jit: 1, beta: 0.008 },
+    flake: { n: 2, mat: "stone", make: flakeGeo, cap: Math.floor(GRIT_CAP * 0.12 / 2), rest: 0.03, e: 0.05, jit: 1, flat: true, drag: 2.6, beta: 0.1 },
+    shard: { n: 2, mat: "glass", make: chipGeo, cap: Math.floor(GRIT_CAP * 0.2 / 2), rest: 0.05, e: 0.15, jit: 1, flat: true, drag: 0.4, beta: 0.02 },
+    plank: { n: 2, mat: "stone", make: plankGeo, cap: Math.floor(GRIT_CAP * 0.12 / 2), rest: 0.06, e: 0.2, jit: [0.7, 1.3], flat: true, drag: 0.05, beta: 0.012 },
+    plate: { n: 4, mat: "metal", make: plateGeo, cap: Math.max(8, Math.round(36 * PART_K)), rest: 0.05, e: 0.3, jit: [0.55, 1.35], flat: true, drag: 0.03, beta: 0.09 },
     link:  { n: 1, mat: "metal", make: linkGeo, cap: Math.max(16, Math.round(90 * PART_K)), rest: 0.07, e: 0.3, jit: [0.97, 1.03], flat: true },
     wheel: { n: 1, mat: "metal", make: wheelGeo, cap: Math.max(4, Math.round(16 * PART_K)), rest: 0.09, e: 0.35, jit: [0.97, 1.03], flat: true },
     hatch: { n: 1, mat: "metal", make: hatchGeo, cap: Math.max(4, Math.round(10 * PART_K)), rest: 0.05, e: 0.25, jit: [0.97, 1.03], flat: true },
@@ -1952,11 +2078,14 @@
       const V = pool[(rng() * pool.length) | 0];
       const slot = V.next; V.next = (V.next + 1) % V.slots.length;
       if (slot + 1 > V.hi) { V.hi = slot + 1; V.im.count = V.hi; }
-      const s = jitter(F, size);
+      const s = o.exact ? size * rr(0.88, 1.12) : jitter(F, size);
       const tone = F.mat === "metal" ? 0.88 + rng() * 0.2 : 0.78 + rng() * 0.34;
       const a = rng() * 6.283, up = rr(0.4, 1.0), sp = rr(1.2, 4.5) * power * (k.leaves ? 0.6 : 1) * (o.speed || 1);
       let vx = Math.cos(a) * sp * 0.7, vz = Math.sin(a) * sp * 0.7, vy = up * sp;
       if (dir) { vx += dir.x * sp * 0.9; vy += (dir.y || 0) * sp; vz += dir.z * sp * 0.9; }
+      // a caller that already knows how the bit leaves (a shingle torn off
+      // into a wind) hands its velocity; a little spread keeps a burst a burst
+      if (o.vel) { vx = (o.vel.x || 0) + rr(-0.6, 0.6); vy = (o.vel.y || 0) + rr(-0.4, 0.4); vz = (o.vel.z || 0) + rr(-0.6, 0.6); }
       const spin = F.jit === 1 ? 14 : 9;
       const q = {
         V, slot, x: x + rr(-0.2, 0.2) * (o.spread || 1), y, z: z + rr(-0.2, 0.2) * (o.spread || 1),
@@ -1964,6 +2093,8 @@
         rx: rng() * 6.283, ry: rng() * 6.283, rz: rng() * 6.283, sx: rr(-spin, spin), sy: rr(-spin, spin), sz: rr(-spin, spin) * 0.5,
         tx: rr(-0.06, 0.06), tz: rr(-0.06, 0.06),
         owner: o.owner || null, t: 0, floor: null, drag: F.drag != null ? F.drag : (k.leaves ? 2.6 : 0.1),
+        // how hard a wind / a current grips it (1/m): FLUIDS
+        beta: o.beta != null ? o.beta : (F.beta || 0),
         e: F.e, rest: F.rest, flat: !!F.flat,
         r: col.r * tone, g: col.g * tone, b: col.b * tone, burn: 0, burn0: 0, fire: false, smokeT: 0,
       };
@@ -1975,6 +2106,7 @@
       }
       if (V.slots[slot]) { const old = V.slots[slot]; old.dead = true; }
       V.slots[slot] = q;
+      q.mv = true;
       grit.moving.push(q);
       paintChip(q);
       writeChip(q);
@@ -1983,6 +2115,21 @@
     return n;
   }
   const BURN_CAP = PHONE ? 10 : 24;
+  let gritScanV = 0, gritScanI = 0, gritForced = 0, gritWoken = 0;
+  /* What a resting chip lay on changed HERE (rubble revived or hauled off, a
+     storey's boxes taken out): every chip at rest in the box is re-read next
+     frame, not when the slow round-robin reaches it. */
+  const gritBoxes = [];
+  function gritDisturb(x0, x1, z0, z1) {
+    if (!grit) return;
+    if (gritBoxes.length > 64) { gritBoxes.length = 0; gritBoxes.push([-Infinity, Infinity, -Infinity, Infinity]); return; }
+    gritBoxes.push([x0 - 0.5, x1 + 0.5, z0 - 0.5, z1 + 0.5]);
+  }
+  function gritHeld(q) {
+    const fl = floorAt(q.x, q.z, q.y + 0.3), h = hfAt(q.x, q.z);
+    return q.y - q.s * q.rest - Math.max(fl, h <= q.y + 0.1 ? h : -Infinity) <= 0.25;
+  }
+  function gritWake(q) { q.floor = null; q.t = 0; q.mv = true; grit.moving.push(q); gritWoken++; }
   function G0burning() { return grit ? grit.burning.length : 0; }
   function paintChip(q) {
     if (q.burn > 0) {
@@ -2016,17 +2163,42 @@
     const mv = grit.moving;
     for (let i = mv.length - 1; i >= 0; i--) {
       const q = mv[i];
-      if (q.dead) { mv.splice(i, 1); continue; }
+      if (q.dead) { (q.mv = false, mv.splice(i, 1)); continue; }
       q.t += dt;
       q.vy -= G * dt;
       if (q.drag) { const f = Math.max(0, 1 - q.drag * dt); q.vx *= f; q.vz *= f; if (q.vy < 0) q.vy *= Math.max(0.2, 1 - q.drag * 0.5 * dt); }
+      // the wind / the current carries it (FLUIDS), under the same ceiling
+      if (q.beta > 0 && media.size) for (const fn of media.values()) {
+        if (!sampleMedium(fn, q.x, q.y, q.z)) continue;
+        // (out of the water: water does not carry it)
+        if (_md.surf != null && isFinite(_md.surf) && q.y > _md.surf) continue;
+        const rx = _md.vx - q.vx, ry = _md.vy - q.vy, rz = _md.vz - q.vz;
+        const rl = Math.sqrt(rx * rx + ry * ry + rz * rz);
+        // beta is its grip on AIR; a denser fluid grips it harder (capped:
+        // a chip in a current goes with the current, no faster)
+        let k = 1 - Math.exp(-q.beta * Math.min(40, _md.rho / 1.225) * rl * dt);
+        if (rl * k > A_MEDIUM * dt) k = A_MEDIUM * dt / rl;
+        let dvy = ry * k;
+        const ceil = _md.ceil != null && isFinite(_md.ceil) ? _md.ceil : (q.floor != null ? q.floor : 0) + CEIL;
+        if (dvy > 0 && q.y > ceil) dvy = 0;
+        q.vx += rx * k; q.vy += dvy; q.vz += rz * k;
+      }
+      { const s2 = q.vx * q.vx + q.vy * q.vy + q.vz * q.vz; if (s2 > V_MAX * V_MAX) { const f = V_MAX / Math.sqrt(s2); q.vx *= f; q.vy *= f; q.vz *= f; } if (q.vy > V_UP) q.vy = V_UP; }
       q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt;
       q.rx += q.sx * dt; q.ry += q.sy * dt; q.rz += q.sz * dt;
       if (q.floor == null || (q.t % 0.25) < dt) {
         q.floor = floorAt(q.x, q.z, q.y + 0.5);
         const h = hfAt(q.x, q.z); if (h > q.floor && h < q.y + 0.4) q.floor = h;
       }
-      const rest = q.floor + q.s * q.rest;
+      let rest = q.floor + q.s * q.rest;
+      if (q.y <= rest) {
+        // the floor was read up to a quarter second ago, somewhere else: read
+        // it again here before landing on it (a chip sliding off a roof edge
+        // used to come to rest in the air beside the building)
+        q.floor = floorAt(q.x, q.z, q.y + 0.5);
+        const h2 = hfAt(q.x, q.z); if (h2 > q.floor && h2 < q.y + 0.4) q.floor = h2;
+        rest = q.floor + q.s * q.rest;
+      }
       if (q.y <= rest) {
         q.y = rest;
         if (q.fire && CBZ.blastFire) { q.fire = false; try { CBZ.blastFire(q.x, q.floor + 0.05, q.z, 8 + rng() * 14, 0.3 + q.s * 0.4); } catch (e) {} }
@@ -2038,11 +2210,38 @@
           // angle. An instance that never moves again costs nothing.
           q.vx = q.vy = q.vz = 0;
           if (q.flat) { q.rx = q.tx; q.rz = q.tz; }
-          writeChip(q); mv.splice(i, 1); continue;
+          writeChip(q); (q.mv = false, mv.splice(i, 1)); continue;
         }
       }
-      if (q.t > 6) { mv.splice(i, 1); }
+      /* It used to stop being stepped after six seconds wherever it was: a
+         chip still in the air (thrown high, or carried) froze there for the
+         rest of the match. Nothing stops mid-air now; it falls until it
+         lands. Past a minute aloft (a fluid that never lets go) it is put
+         down where it is. */
+      if (q.t > 60) { q.y = rest; q.vx = q.vy = q.vz = 0; gritForced++; writeChip(q); (q.mv = false, mv.splice(i, 1)); continue; }
       writeChip(q);
+    }
+    // A CHIP AT REST IS HELD BY SOMETHING: one lying on a roof whose
+    // building has since gone (or on rubble since hauled off) falls again.
+    // A slice of the pools is re-read each frame.
+    {
+      const V = grit.variants;
+      let n = PHONE ? 12 : 32;
+      while (n-- > 0 && V.length) {
+        if (gritScanV >= V.length) gritScanV = 0;
+        const v = V[gritScanV];
+        if (gritScanI >= v.slots.length) { gritScanI = 0; gritScanV++; continue; }
+        const q = v.slots[gritScanI++];
+        if (!q || q.dead || q.mv) continue;
+        if (!gritHeld(q)) gritWake(q);
+      }
+      while (gritBoxes.length) {
+        const B = gritBoxes.pop();
+        for (const v2 of V) for (const q of v2.slots) {
+          if (!q || q.dead || q.mv || q.x < B[0] || q.x > B[1] || q.z < B[2] || q.z > B[3]) continue;
+          if (!gritHeld(q)) gritWake(q);
+        }
+      }
     }
     const bn = grit.burning;
     if (bn.length) {
@@ -2190,7 +2389,7 @@
   }
   function shatter(source, o) {
     o = o || {};
-    const out = { pieces: 0, grit: 0, bodies: [] };
+    const out = { pieces: 0, grit: 0, bodies: [], live: [] };
     if (!source || !CBZ.scene) return out;
     try {
       const mats = [];
@@ -2368,10 +2567,24 @@
         if (!isFinite(body.v.x + body.v.y + body.v.z)) body.v.set(0, 0, 0);
         if (!isFinite(body.w.x + body.w.y + body.w.z)) body.w.set(0, 0, 0);
         if (o.maxLife) body.maxLife = o.maxLife;
+        clampBody(body);
         if (out.bodies) out.bodies.push(body.mesh);
+        out.live.push(body);
       }
       // hide the source now that its pieces stand in its place
-      if (source.isObject3D && o.hide !== false) source.visible = false;
+      if (source.isObject3D && o.hide !== false) {
+        source.visible = false;
+        source.userData.debrisTaken = true;     // its pieces draw it now (the island's torn-wall pass leaves it hidden)
+        /* A PART OF A MERGED SHELL LEAVES IT. A building drawn as one merged
+           mesh (world/disaster_arena.js bakeShell) keeps its originals hidden
+           as records; each carries userData.shellCut, which folds its own
+           triangles out of the merged copy. Without it the part flew off as a
+           body AND stayed drawn where it stood. */
+        source.traverse(function (m) {
+          const cut = m.userData && m.userData.shellCut;
+          if (typeof cut === "function") { try { cut(); } catch (e) {} }
+        });
+      }
       // grit + dust in the source's colours
       if (o.grit !== false && comps.length) {
         const g0 = comps[0];
@@ -2540,6 +2753,9 @@
           for (let s = 0; s < sub && !r; s++) r = stepBody(b, h);
           if (r === 3) { sleepBody(b); r = 0; }
         }
+        // nothing is baked where nothing holds it: it goes on falling
+        // (wedged where nothing below holds it for good: it goes as the dust it would make)
+        if (r === 1 && !held(bodyRec(b))) { if (b.t > b.maxLife + 10) r = 2; else { if (b.asleep) wakeBody(b); b.quiet = 0; b.calm = 0; b.floorT = -1; r = 0; } }
         if (r === 1) { live.splice(i, 1); freeze(b); frozenPending.push(b); }
         else if (r === 2) { live.splice(i, 1); retire(b); }
       }
@@ -2676,7 +2892,7 @@
       bk.parts.length = 0; rebuildBucket(bk);
       const qi = dirtyQ.indexOf(bk); if (qi >= 0) dirtyQ.splice(qi, 1);
     }
-    if (owner != null) { const ks = hfOwned.get(owner); if (ks) { for (const k of ks) hf.delete(k); hfOwned.delete(owner); } }
+    if (owner != null) { const ks = hfOwned.get(owner); if (ks) { for (const k of ks) hf.delete(k); hfOwned.delete(owner); gritDisturb(-Infinity, Infinity, -Infinity, Infinity); } }
     else hfOwned.clear();
     staticCount = Math.max(0, staticCount - gone.size);
     for (const id of gone) recs.delete(id);
@@ -2733,6 +2949,7 @@
     for (let gx = Math.floor((x - r) / HF); gx <= Math.floor((x + r) / HF); gx++)
       for (let gz = Math.floor((z - r) / HF); gz <= Math.floor((z + r) / HF); gz++)
         hf.delete(gx * 73856093 ^ gz * 19349663);
+    gritDisturb(x - r, x + r, z - r, z + r);
     if (grit) {
       const zero = new THREE.Matrix4().makeScale(0, 0, 0);
       for (const v of grit.variants) {
@@ -2785,7 +3002,90 @@
     if (dustSys) { if (dustSys.pts.parent) dustSys.pts.parent.remove(dustSys.pts); dustSys.g.dispose(); dustSys = null; }
   }
 
+  /* ---- THE AUDIT: nothing hangs, nothing streaks, nothing in orbit --------
+     audit({gap, fast, high}) over everything THIS file holds:
+       floating   settled pieces (frozen rubble, sleepers) more than `gap` m
+                  over whatever could hold them, plus resting grit with
+                  nothing under it
+       fast       live pieces moving faster than `fast` m/s (default 30)
+       high       pieces more than `high` m over the terrain (default 120)
+     CBZ.debrisAudit(o) adds every other system that owns loose pieces
+     (CBZ.debrisAuditSources: collapse.js's structural bodies, the island's
+     roof check, the tsunami field...) into one report with the same keys. */
+  function terrainAt(x, z) {
+    let g = null;
+    try {
+      const A = CBZ.surv && CBZ.surv.arena;
+      if (A && A.groundHeightAt && CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)) g = A.groundHeightAt(x, z);
+      else if (CBZ.groundAt) g = CBZ.groundAt(x, z);
+    } catch (e) { g = null; }
+    return isFinite(g) ? g : floorAt(x, z, 1e4);
+  }
+  function audit(o) {
+    o = o || {};
+    const fastV = o.fast || 30, high = o.high || 120;
+    const u = unsupported({ gap: o.gap || 0.5 });
+    const out = { live: live.length, asleep: 0, frozen: recs.size, kept: kept.length,
+      floating: u.air, worstGap: u.worst, floatList: u.list.slice(0, 8),
+      fast: 0, maxSpeed: 0, high: 0, maxHeight: 0, fastList: [], highList: [],
+      gritAloft: 0, gritFloating: 0, gritForced: gritForced, gritWoken: gritWoken, media: Array.from(media.keys()) };
+    for (const b of live) {
+      if (b.asleep) out.asleep++;
+      const p = b.mesh.position, sp = b.v.length();
+      if (sp > out.maxSpeed) out.maxSpeed = +sp.toFixed(1);
+      if (sp > fastV) { out.fast++; if (out.fastList.length < 6) out.fastList.push({ x: +p.x.toFixed(1), y: +p.y.toFixed(1), z: +p.z.toFixed(1), v: +sp.toFixed(1), owner: b.owner }); }
+      const h = p.y - terrainAt(p.x, p.z);
+      if (h > out.maxHeight) out.maxHeight = +h.toFixed(1);
+      if (h > high) { out.high++; if (out.highList.length < 6) out.highList.push({ x: +p.x.toFixed(1), y: +p.y.toFixed(1), z: +p.z.toFixed(1), h: +h.toFixed(1), owner: b.owner }); }
+    }
+    for (const r of recs.values()) {
+      const h = r.low - terrainAt(r.x, r.z);
+      if (h > out.maxHeight) out.maxHeight = +h.toFixed(1);
+      if (h > high) out.high++;
+    }
+    if (grit) for (const v of grit.variants) for (const q of v.slots) {
+      if (!q || q.dead) continue;
+      const h = q.y - terrainAt(q.x, q.z);
+      if (h > out.maxHeight) out.maxHeight = +h.toFixed(1);
+      if (h > high) out.high++;
+      if (q.mv) { out.gritAloft++; continue; }
+      const fl = floorAt(q.x, q.z, q.y + 0.3), hh = hfAt(q.x, q.z);
+      const sup = Math.max(fl, hh <= q.y + 0.1 ? hh : -Infinity);
+      if (q.y - q.s * q.rest - sup > 0.5) { out.gritFloating++; if (out.floatList.length < 8) out.floatList.push({ grit: q.V.fam, x: +q.x.toFixed(1), y: +q.y.toFixed(1), z: +q.z.toFixed(1), sup: +sup.toFixed(2), fl: +fl.toFixed(2), t: +q.t.toFixed(1), owner: q.owner }); }
+    }
+    out.floating += out.gritFloating;
+    return out;
+  }
+  const SOURCES = CBZ.debrisAuditSources || (CBZ.debrisAuditSources = {});
+  CBZ.debrisAudit = function (o) {
+    o = o || {};
+    const D = audit(o);
+    const rep = { floating: D.floating, fast: D.fast, high: D.high, maxSpeed: D.maxSpeed, maxHeight: D.maxHeight,
+      roofHover: 0, live: D.live, settled: D.frozen + D.kept, debris: D, sources: {} };
+    for (const k in SOURCES) {
+      let r = null;
+      try { r = SOURCES[k](o); } catch (e) { r = { error: String(e && e.message || e) }; }
+      if (!r) continue;
+      rep.sources[k] = r;
+      rep.floating += r.floating || 0;
+      rep.fast += r.fast || 0;
+      rep.high += r.high || 0;
+      rep.roofHover += r.roofHover || 0;
+      if (r.maxSpeed > rep.maxSpeed) rep.maxSpeed = r.maxSpeed;
+      if (r.maxHeight > rep.maxHeight) rep.maxHeight = r.maxHeight;
+    }
+    // a hovering roof piece is a floating piece too
+    rep.floating += rep.roofHover;
+    return rep;
+  };
+
   CBZ.debris = {
+    medium(id, fn) { if (typeof fn === "function") media.set(id, fn); else media.delete(id); return media.size; },
+    media: () => Array.from(media.keys()),
+    // every live body (strike passes: a falling piece that reaches a person)
+    forEachLive(fn) { for (let i = 0; i < live.length; i++) { try { fn(live[i]); } catch (e) {} } },
+    audit,
+    LIMITS: { V_MAX, V_UP, W_MAX, A_MEDIUM, CEIL, ALT_MAX },
     shatter,
     shatterBox: (box, material, o) => shatter({ box, material }, o),
     // the visible facade skin of a wall, as a shared material (see SKINS)
@@ -2812,6 +3112,17 @@
       return chunkGeos[Math.abs(i | 0) % chunkGeos.length];
     },
     chips,
+    /* ONE loose bit thrown exactly so: bit(x, y, z, {shape: 'flake'|'plank'|
+       'plate'|'stone'|'clod'|'shard', color, size (m), vel {x,y,z}, beta
+       (wind grip, 1/m; the shape's own by default), owner, count}). It is
+       the same instanced grit every other bit is: gravity, the fluids, the
+       floor, rest, the reset. */
+    bit(x, y, z, o) {
+      o = o || {};
+      return spawnGrit(x, y, z, { kind: o.kind || "concrete", shape: o.shape || "stone", color: o.color, count: o.count || 1,
+        size: o.size || 0.3, exact: o.exact !== false, vel: o.vel || { x: 0, y: 0, z: 0 }, beta: o.beta, owner: o.owner, power: 1, spread: o.spread || 0.5,
+        burn: o.burn, burnFrac: o.burn > 0 ? 1 : 0, fires: o.fires || 0 });
+    },
     wreckage,
     dust: (x, y, z, o) => dust(x, y, z, o),
     kindOf,
