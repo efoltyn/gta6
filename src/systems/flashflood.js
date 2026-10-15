@@ -1223,13 +1223,22 @@
      RENDER: the surface (one water material), spray, debris, lids, marks
      ====================================================================== */
   function floodMaterial() {
-    const decl = "attribute vec4 aFlow;\nattribute float aWall;\nvarying vec4 vFf;\nvarying float vWall;";
+    /* aShow: 1 where this vertex carries water, a bank or silt, 0 where the
+       sheet has nothing to say (dry ground, open sea). Interpolated and cut
+       at 0.5, so the sheet ends half a cell past its last drawn vertex and
+       never as the grid's square. Before it, every open-sea cell of the grid
+       was parked 8 cm under mean sea level as OPAQUE MUD: the swell's troughs
+       dipped through it and the translucent sea showed it, so the whole
+       domain read as a flickering brown square around the island, and it
+       stayed for the rest of the match (the sheet is kept as the silt). */
+    const decl = "attribute vec4 aFlow;\nattribute float aWall;\nattribute float aShow;\nvarying vec4 vFf;\nvarying float vWall;\nvarying float vShow;";
     // aFlow arrives as normalised bytes (half the upload): velocity in
     // +-10 m/s around 0.5, foam and silt as 0..1
-    const tail = "  vFf = vec4((aFlow.xy - 0.5) * 20.0, aFlow.zw);\n  vWall = aWall;";
+    const tail = "  vFf = vec4((aFlow.xy - 0.5) * 20.0, aFlow.zw);\n  vWall = aWall;\n  vShow = aShow;";
     const fdecl = [
       "varying vec4 vFf;",
       "varying float vWall;",
+      "varying float vShow;",
       "float ffHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }",
       "float ffNoise(vec2 p) {",
       "  vec2 i = floor(p), f = fract(p);",
@@ -1254,7 +1263,7 @@
     const ftail = [
       // the wall line: the street's water never stands inside a building
       // (the room has its own level, drawn by the room sheet)
-      "  if (vWall < 0.0) discard;",
+      "  if (vWall < 0.0 || vShow < 0.5) discard;",
       "  {",
       "    vec3 fN = normalize(vSeaNormal);",
       "    if (under > 0.5) fN = -fN;",
@@ -1308,6 +1317,9 @@
         m.transparent = false;
         if (m.userData.waterUniforms && m.userData.waterUniforms.uSeaOpacity) m.userData.waterUniforms.uSeaOpacity.value = 1;
         m.userData.floodField = true;
+        // the silt film lies 4.5 cm over the ground: pull it forward so a
+        // far slope never z-fights it into a flicker
+        m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -2;
         return m;
       } catch (e) { if (window.console) console.warn("[flashflood] water material:", e && e.message); }
     }
@@ -1336,6 +1348,8 @@
     aP.setUsage(THREE.DynamicDrawUsage); aN.setUsage(THREE.DynamicDrawUsage); aF.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute("position", aP); geo.setAttribute("normal", aN); geo.setAttribute("aFlow", aF);
     geo.setAttribute("aWall", new THREE.BufferAttribute(wall, 1));
+    const aS = new THREE.BufferAttribute(new Uint8Array(N2), 1, true); aS.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute("aShow", aS);
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     const mat = floodMaterial();
     const mesh = new THREE.Mesh(geo, mat);
@@ -1361,6 +1375,7 @@
       const rP = new THREE.BufferAttribute(rp, 3); rP.setUsage(THREE.DynamicDrawUsage);
       rg.setAttribute("position", rP); rg.setAttribute("normal", new THREE.BufferAttribute(rn, 3));
       rg.setAttribute("aFlow", new THREE.BufferAttribute(rf, 4, true)); rg.setAttribute("aWall", new THREE.BufferAttribute(rw, 1));
+      rg.setAttribute("aShow", new THREE.BufferAttribute(new Uint8Array(B.length * 4).fill(255), 1, true));
       rg.setIndex(new THREE.BufferAttribute(ri, 1));
       const rm = new THREE.Mesh(rg, mat);
       rm.name = "flashflood-rooms"; rm.frustumCulled = false; rm.userData.noCoat = true; rm.userData.transient = true;
@@ -1470,7 +1485,7 @@
     const R = F.render; if (!R || !R.mesh) return;
     const g = F.grid, n = g.n, bb = g.bb, ys = R.ys, drawn = R.drawn;
     const geo = R.mesh.geometry;
-    const P = geo.attributes.position.array, Nn = geo.attributes.normal.array, Fl = geo.attributes.aFlow.array;
+    const P = geo.attributes.position.array, Nn = geo.attributes.normal.array, Fl = geo.attributes.aFlow.array, Sh = geo.attributes.aShow.array;
     let j0, j1, i0, i1;
     if (full) { j0 = 0; j1 = n - 1; i0 = 0; i1 = n - 1; }
     else {
@@ -1525,6 +1540,7 @@
       const il = 127 / Math.sqrt(gx * gx + 1 + gz * gz);
       Nn[k * 3] = Math.round(-gx * il); Nn[k * 3 + 1] = Math.round(il); Nn[k * 3 + 2] = Math.round(-gz * il);
       const dk = drawn[k];
+      Sh[k] = dk ? 255 : 0;
       if (dk) { if (i < ni0) ni0 = i; if (i > ni1) ni1 = i; if (j < nj0) nj0 = j; if (j > nj1) nj1 = j; }
       if (dk === 1) {
         const sp = Math.hypot(g.ux[k], g.uz[k]);
@@ -1543,11 +1559,12 @@
     }
     if (!R.box) R.box = { i0: n, i1: -1, j0: n, j1: -1 };
     R.box.i0 = ni0; R.box.i1 = ni1; R.box.j0 = nj0; R.box.j1 = nj1;
-    const P3 = geo.attributes.position, N3 = geo.attributes.normal, F4 = geo.attributes.aFlow;
+    const P3 = geo.attributes.position, N3 = geo.attributes.normal, F4 = geo.attributes.aFlow, S1 = geo.attributes.aShow;
     const off = j0 * n, cnt = (j1 - j0 + 1) * n;
     P3.updateRange.offset = off * 3; P3.updateRange.count = cnt * 3; P3.needsUpdate = true;
     N3.updateRange.offset = off * 3; N3.updateRange.count = cnt * 3; N3.needsUpdate = true;
     F4.updateRange.offset = off * 4; F4.updateRange.count = cnt * 4; F4.needsUpdate = true;
+    S1.updateRange.offset = off; S1.updateRange.count = cnt; S1.needsUpdate = true;
     R.uploadBytes = cnt * 20;
     // the room sheets
     if (R.rooms) {

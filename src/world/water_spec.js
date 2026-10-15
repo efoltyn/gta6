@@ -2922,7 +2922,9 @@
     const arena = !!(opts && opts.arena);
     const L = [];
     L.push("vec4 wBase = " + wp0Expr + ";");
-    L.push("vec2 wXZ = vec2(cameraPosition.x + wBase.x, cameraPosition.z + wBase.z);");
+    // opts.worldXZ: the geometry is already laid out in world XZ (a fixed
+    // grid, not the camera-centred disc), so it is not re-centred
+    L.push(opts && opts.worldXZ ? "vec2 wXZ = wBase.xz;" : "vec2 wXZ = vec2(cameraPosition.x + wBase.x, cameraPosition.z + wBase.z);");
     L.push("float wDist = length(wXZ - cameraPosition.xz);");
     L.push(arena ? "float wInland = 0.0;" : "float wInland = cbzInlandFactor(wXZ);");
     L.push("float wFade = mix(1.0, " + gnum(FADE_FLOOR) + ", smoothstep(" + gnum(FADE_NEAR) + ", " + gnum(FADE_FAR) + ", wDist));");
@@ -2998,7 +3000,7 @@
       "  float wInland = 0.0;",
       "  vCbzSteep = wNormal.y;",
       "  vCbzFold = 0.0;",
-    ].join("\n") : CBZ.waterVertexBody("modelMatrix * vec4(position, 1.0)", { arena: kind === "arena" });
+    ].join("\n") : CBZ.waterVertexBody("modelMatrix * vec4(position, 1.0)", { arena: kind === "arena", worldXZ: !!opts.worldXZ });
     const fogScale = Number.isFinite(opts.fogScale) ? opts.fogScale : (kind === "city" ? 0.66 : 1.0);
     const vs = [
       CBZ.waterVertexDecl(),
@@ -3267,6 +3269,9 @@
     U.uRunB = { value: new THREE.Vector4(0, 0, 1, 2) };   // x0, z0, size (m), cells per side
     U.uRunOn = { value: 0 };
     U.uRunRest = { value: -0.8 };                        // the rest sea: bed above it is land
+    // 1 while the run-up overlay (below) is drawing the field's LAND: the
+    // sea sheet then leaves the land to it, so the two never z-fight
+    U.uRunOverlay = { value: 0 };
 
     const vDecl = [
       RUN_GLSL,
@@ -3396,25 +3401,106 @@
       "    }",
       "  }",
     ].join("\n");
+    /* THE LAND IS THE OVERLAY'S, THE SEA IS THE SHEET'S. The camera disc's
+       vertices are 8-25 m apart a hundred metres out (more on a phone tier),
+       and a run-up a metre or two deep over ground that climbs inland,
+       interpolated between vertices that far apart, lies UNDER the ground
+       for most of each triangle: the tsunami's peak drew a wrecked town with
+       no water in it. So the field's land (bed above the rest sea, less half
+       a metre of beach) is drawn by a grid at the field's own 2.5 m cells
+       (runOverlaySync below, same uniforms, same shading), and the sheet
+       keeps the sea. One partition test, evaluated per pixel on the same
+       texture by both, so they meet along one contour at the coast. */
+    const RUN_LAND = "(dwRun.x - dwRun.y > uRunRest - 0.5)";
     const fHead = [
       "  vec4 dwRun = vec4(0.0); float dwRunG = 0.0;",
       "  if (uRunOn > 0.5 && vRun.w > 0.01) {",
       "    dwRun = cbzRun(vSeaWorld.xz, dwRunG);",
       // a dry cell of the field is dry land: no sea is drawn on it
       "    if (dwRun.w > 0.5 && dwRun.y < 0.03) discard;",
+      "    if (uRunOverlay > 0.5 && dwRun.w > 0.5 && " + RUN_LAND + ") discard;",
       "  }",
     ].join("\n");
-    const mat = CBZ.waterSeaMaterial({
-      kind: "arena", uniforms: U, name: opts.name || "CBZ Disaster Water",
-      vertexDecl: vDecl, vertexTail: vTail, fragDecl: fDecl, fragTail: fTail,
-      fragHead: fHead, cutGuard: "dwRun.w < 0.5",
-      horizonFuse: false, transparent: opts.transparent === true,
-      depthWrite: opts.depthWrite == null ? (U.uSeaOpacity.value >= 0.999) : !!opts.depthWrite,
-    });
+    const fHeadOverlay = [
+      "  float dwRunG = 0.0;",
+      "  vec4 dwRun = cbzRun(vSeaWorld.xz, dwRunG);",
+      "  if (uRunOn < 0.5 || dwRun.w < 0.5 || dwRun.y < 0.03 || !" + RUN_LAND + ") discard;",
+    ].join("\n");
+    const fDeclAll = fDecl + "\nuniform float uRunOverlay;";
+    const build = function (overlay) {
+      return CBZ.waterSeaMaterial({
+        kind: "arena", uniforms: U, name: overlay ? "CBZ Run-up Water" : (opts.name || "CBZ Disaster Water"),
+        vertexDecl: vDecl, vertexTail: vTail, fragDecl: fDeclAll, fragTail: fTail,
+        fragHead: overlay ? fHeadOverlay : fHead, cutGuard: "dwRun.w < 0.5", worldXZ: overlay,
+        horizonFuse: false, transparent: opts.transparent === true,
+        depthWrite: opts.depthWrite == null ? (U.uSeaOpacity.value >= 0.999) : !!opts.depthWrite,
+      });
+    };
+    const mat = build(false);
     mat.opacity = U.uSeaOpacity.value;
     mat.userData.waterMode = "shared-disaster-fresnel";
+    mat.userData.buildRunOverlayMaterial = function () { return build(true); };
     return mat;
   };
+
+  /* THE RUN-UP OVERLAY: one grid vertex per field cell centre, laid in world
+     XZ, displaced and shaded by the sea's own program (worldXZ), so the flood
+     on the land is drawn at the resolution it is solved at. Built lazily the
+     first time a field is attached, rebuilt only when the field's domain
+     changes, hidden whenever no field is attached. */
+  function runOverlaySync(target, mat, u, F) {
+    let ov = mat.userData.runOverlay;
+    if (!F || !(u.uRunOn.value > 0.5)) {
+      if (ov) ov.visible = false;
+      u.uRunOverlay.value = 0;
+      return;
+    }
+    const parent = target && target.isObject3D ? target.parent : null;
+    if (!ov) {
+      if (!parent || !mat.userData.buildRunOverlayMaterial) { u.uRunOverlay.value = 0; return; }
+      ov = new THREE.Mesh(new THREE.BufferGeometry(), mat.userData.buildRunOverlayMaterial());
+      ov.name = "tsunami-runup-overlay";
+      ov.frustumCulled = false;
+      ov.renderOrder = target.renderOrder;
+      ov.userData.waterSurface = true;
+      ov.userData.noCoat = true;
+      ov.userData.terrain = true;        // batch.js / farcull.js keep their hands off
+      ov.userData.key = "";
+      mat.userData.runOverlay = ov;
+    }
+    if (parent && ov.parent !== parent) parent.add(ov);
+    const key = F.x0 + "|" + F.z0 + "|" + F.size + "|" + F.n;
+    if (ov.userData.key !== key) {
+      const n = F.n | 0, cell = F.size / n;
+      const pos = new Float32Array(n * n * 3), nor = new Float32Array(n * n * 3);
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        const k = (j * n + i) * 3;
+        pos[k] = F.x0 + (i + 0.5) * cell; pos[k + 2] = F.z0 + (j + 0.5) * cell;
+        nor[k + 1] = 1;
+      }
+      const idx = new (n * n > 65535 ? Uint32Array : Uint16Array)((n - 1) * (n - 1) * 6);
+      let o = 0;
+      for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
+        const a = j * n + i, b = a + 1, c = a + n, d = c + 1;
+        idx[o++] = a; idx[o++] = c; idx[o++] = b; idx[o++] = b; idx[o++] = c; idx[o++] = d;
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+      g.setIndex(new THREE.BufferAttribute(idx, 1));
+      ov.geometry.dispose();
+      ov.geometry = g;
+      ov.userData.key = key;
+    }
+    // the sheet's blend state, whatever the event has done to it
+    const om = ov.material;
+    if (om.transparent !== mat.transparent) { om.transparent = mat.transparent; om.needsUpdate = true; }
+    om.depthWrite = mat.depthWrite; om.opacity = mat.opacity;
+    // the grid IS world XZ (the arena root sits at the origin, as the disc assumes)
+    ov.position.set(0, 0, 0);
+    ov.visible = true;
+    u.uRunOverlay.value = 1;
+  }
 
   // Hand an arena sea its baked field (CBZ.waterBakeField handle).
   CBZ.waterSetField = function (target, field) {
@@ -3449,6 +3535,7 @@
         u.uRunRest.value = F.restY;
         u.uRunOn.value = 1;
       } else u.uRunOn.value = 0;
+      if (u.uRunOverlay) runOverlaySync(target, mat, u, tx ? F : null);
     }
     if (Number.isFinite(state.amp)) u.uDisasterAmp.value = +state.amp;
     if (Number.isFinite(state.chop)) u.uDisasterChop.value = +state.chop;

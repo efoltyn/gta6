@@ -315,19 +315,26 @@
     }
     g.putImageData(img, 0, 0);
     const deck = new THREE.CanvasTexture(c);
-    // rain shafts: vertical streaks, densest at the cloud, thinning to the ground
+    /* rain streaks: TILEABLE BOTH WAYS (the shader scrolls it down the shaft
+       and around it, and the old top-to-bottom gradient tiled into a hard
+       band sliding down the curtain). Only the alpha is read: thin falling
+       streaks over a soft even haze, every streak drawn twice across the
+       wrap so no row or column ever shows a seam. Mipmapped by default, so
+       a curtain 300 m out averages to haze instead of shimmering. */
     c = canvas(64, 256); g = c.getContext("2d");
-    const gr = g.createLinearGradient(0, 0, 0, 256);
-    gr.addColorStop(0, "rgba(220,224,230,0.85)"); gr.addColorStop(0.6, "rgba(220,224,230,0.55)"); gr.addColorStop(1, "rgba(220,224,230,0.25)");
-    g.fillStyle = gr; g.fillRect(0, 0, 64, 256);
-    g.globalCompositeOperation = "destination-out";
-    for (let i = 0; i < 160; i++) {
-      g.fillStyle = "rgba(0,0,0," + (0.25 + ((i * 29) % 50) / 100).toFixed(3) + ")";
-      g.fillRect((i * 37) % 64, (i * 71) % 256, 1, 18 + ((i * 13) % 60));
+    g.fillStyle = "rgba(255,255,255,0.30)"; g.fillRect(0, 0, 64, 256);
+    for (let i = 0; i < 230; i++) {
+      const x = (i * 37 + ((i * 7) % 5)) % 64, y = (i * 71) % 256, len = 22 + ((i * 13) % 70);
+      g.fillStyle = "rgba(255,255,255," + (0.25 + ((i * 29) % 50) / 100).toFixed(3) + ")";
+      g.fillRect(x, y, 1, len);
+      if (y + len > 256) g.fillRect(x, y - 256, 1, len);
     }
-    for (let i = 0; i < 6; i++) {                 // gaps between the shafts
-      g.fillStyle = "rgba(0,0,0,0.55)";
-      g.fillRect((i * 23 + 5) % 64, 0, 3 + (i % 3), 256);
+    g.globalCompositeOperation = "destination-out";
+    for (let i = 0; i < 90; i++) {
+      const x = (i * 23 + 11) % 64, y = (i * 53) % 256, len = 30 + ((i * 17) % 80);
+      g.fillStyle = "rgba(0,0,0,0.35)";
+      g.fillRect(x, y, 2, len);
+      if (y + len > 256) g.fillRect(x, y - 256, 2, len);
     }
     g.globalCompositeOperation = "source-over";
     const rain = c;
@@ -384,6 +391,87 @@
     g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
     return g;
+  }
+  /* THE RAIN SHAFT. It used to be a streak texture on two open cylinders with
+     MeshBasic alpha: an even see-through tube with a crisp silhouette, a
+     ruled top and bottom, and a straight cut at each end of the arc (owner:
+     "a see-through cylinder, looks fake"). A real shaft is a VOLUME: densest
+     where you look through the most of it, nothing at its edge. So:
+       - alpha follows |N.V|: through the middle of the shell (front and back
+         face both) it is dense, at the silhouette it is gone;
+       - the density is broken into SHAFTS round the circumference (a few
+         periodic octaves of angle, drifting, also sheared with height so the
+         shafts lean and braid instead of standing as stripes);
+       - streaks fall through it on a tileable texture at two scales/speeds;
+       - it dissolves into the cloud base at the top and into a ragged,
+         uneven foot at the ground, and an arc fades out at both ends. */
+  function rainShaftMat(map, arcLen) {
+    const U = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+      uMap: { value: null }, uColor: { value: new THREE.Color(0x2c3035) },
+      uOpacity: { value: 0 }, uTime: { value: 0 }, uArcLen: { value: arcLen },
+    }]);
+    U.uMap.value = map;
+    const m = new THREE.ShaderMaterial({
+      uniforms: U, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: true,
+      vertexShader: [
+        "varying vec2 vUv;",
+        "varying vec3 vN;",
+        "varying vec3 vW;",
+        "#include <fog_pars_vertex>",
+        "void main() {",
+        "  vUv = uv;",
+        "  vec4 wp = modelMatrix * vec4(position, 1.0);",
+        "  vW = wp.xyz;",
+        "  vN = normalize(mat3(modelMatrix) * normal);",
+        "  vec4 mvPosition = viewMatrix * wp;",
+        "  gl_Position = projectionMatrix * mvPosition;",
+        "  #include <fog_vertex>",
+        "}",
+      ].join("\n"),
+      fragmentShader: [
+        "uniform sampler2D uMap;",
+        "uniform vec3 uColor;",
+        "uniform float uOpacity;",
+        "uniform float uTime;",
+        "uniform float uArcLen;",
+        "varying vec2 vUv;",
+        "varying vec3 vN;",
+        "varying vec3 vW;",
+        "#include <fog_pars_fragment>",
+        "void main() {",
+        "  float th = vUv.x * uArcLen;",
+        "  float y = vUv.y;",
+        // shafts: integer frequencies round the full circle (seamless), each
+        // sheared with height and drifting at its own rate
+        "  float sh = 0.5 + 0.5 * (0.46 * sin(3.0 * th + 1.3 + 0.9 * y + 0.06 * uTime)",
+        "                        + 0.32 * sin(7.0 * th + 0.4 - 1.7 * y - 0.10 * uTime)",
+        "                        + 0.22 * sin(13.0 * th + 2.0 + 2.9 * y + 0.15 * uTime));",
+        "  float shaft = smoothstep(0.22, 0.86, sh);",
+        "  float rep = floor(uArcLen / 6.2832 * 6.0 + 0.5);",
+        "  float s1 = texture2D(uMap, vec2(vUv.x * max(1.0, rep), y * 1.1 + uTime * 1.5)).a;",
+        "  float s2 = texture2D(uMap, vec2(vUv.x * max(2.0, rep * 2.0) + 0.37, y * 2.1 + uTime * 2.4)).a;",
+        "  float streak = 0.40 + 0.85 * (s1 * 0.55 + s2 * 0.45);",
+        // a ragged foot (rain reaching the ground unevenly) and a top that
+        // melts into the cloud base
+        "  float foot = smoothstep(0.015, 0.05 + 0.10 * sh, y);",
+        "  float top = 1.0 - smoothstep(0.62 + 0.14 * sh, 0.98, y);",
+        "  vec3 V = normalize(cameraPosition - vW);",
+        "  float facing = abs(dot(normalize(vN), V));",
+        "  float edge = smoothstep(0.06, 0.70, facing);",
+        "  edge *= edge;",
+        "  float ends = uArcLen < 6.2 ? smoothstep(0.0, 0.28, min(vUv.x, 1.0 - vUv.x)) : 1.0;",
+        "  float a = uOpacity * (0.18 + 0.82 * shaft) * streak * foot * top * edge * ends;",
+        "  if (a < 0.004) discard;",
+        "  vec3 col = uColor * (0.82 + 0.36 * (1.0 - shaft)) * (0.9 + 0.2 * y);",
+        "  gl_FragColor = vec4(col, min(a, 0.9));",
+        "  #include <tonemapping_fragment>",
+        "  #include <encodings_fragment>",
+        "  #include <fog_fragment>",
+        "}",
+      ].join("\n"),
+    });
+    m.name = "tornado-rain-shaft";
+    return m;
   }
   function basicMat(o) {
     return new THREE.MeshBasicMaterial(Object.assign({ transparent: true, side: THREE.DoubleSide, depthWrite: false }, o));
@@ -454,14 +542,17 @@
     const deck = new THREE.Mesh(new THREE.CircleGeometry(Math.min(rCl * 6, 640), Math.max(16, seg + 6)), matDeck);
     deck.rotation.x = Math.PI / 2;                   // faces down at the player
     deck.position.y = H * 0.07;
-    // RAIN-WRAP on the rear flank and the precipitation core ahead-left. One
-    // material, two open arcs, each the height of the storm.
-    const matRain = basicMat({ map: cloneTex(X.rain, 5, 1), color: 0x2c3035, opacity: 0.0, fog: true });
+    // RAIN-WRAP on the rear flank and the precipitation core ahead-left: two
+    // soft rain shafts (rainShaftMat), each the height of the storm, the core
+    // widening toward the ground the way a precipitation shaft spreads
+    const rainMap = cloneTex(X.rain, 1, 1);
+    const matRain = rainShaftMat(rainMap, Math.PI * 1.15);
+    const matRainCore = rainShaftMat(rainMap, Math.PI * 2);
     const rainR = rCl * 1.25;
-    const rainWrap = new THREE.Mesh(new THREE.CylinderGeometry(rainR, rainR * 0.9, H * 1.05, seg + 4, 1, true, 0, Math.PI * 1.15), matRain);
+    const rainWrap = new THREE.Mesh(new THREE.CylinderGeometry(rainR, rainR * 0.9, H * 1.05, seg + 14, 6, true, 0, Math.PI * 1.15), matRain);
     rainWrap.position.y = -H * 0.5;
     const ffdR = rCl * 1.4;
-    const ffd = new THREE.Mesh(new THREE.CylinderGeometry(ffdR, ffdR, H * 1.05, seg + 4, 1, true, 0, Math.PI * 2), matRain);
+    const ffd = new THREE.Mesh(new THREE.CylinderGeometry(ffdR * 0.85, ffdR * 1.1, H * 1.05, seg + 14, 6, true, 0, Math.PI * 2), matRainCore);
     ffd.position.y = -H * 0.5;
     for (const m of [wall1, wall2, deck, rainWrap, ffd]) { m.renderOrder = 3; m.castShadow = m.receiveShadow = false; cloud.add(m); }
 
@@ -470,7 +561,7 @@
     // spine scratch: ring centres for the current frame
     const cen = new Float32Array((nR + 1) * 3);
     t.mesh = { grp, tubeIn, tubeOut, skirt, skirt2, dustPts, dust, cloud, wall1, wall2, deck, rainWrap, ffd,
-      matIn, matOut, matSkirt, matDust, matWall, matDeck, matRain, H, nR, nS, cen, skirtH, rCl, ffdR };
+      matIn, matOut, matSkirt, matDust, matWall, matDeck, matRain, matRainCore, rainMap, H, nR, nS, cen, skirtH, rCl, ffdR };
   }
 
   function disposeFunnel(t) {
@@ -479,7 +570,8 @@
     try {
       if (M.grp.parent) M.grp.parent.remove(M.grp);
       M.grp.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
-      for (const m of [M.matIn, M.matOut, M.matSkirt, M.matWall, M.matRain]) { if (m.map) m.map.dispose(); m.dispose(); }
+      for (const m of [M.matIn, M.matOut, M.matSkirt, M.matWall, M.matRain, M.matRainCore]) { if (m.map) m.map.dispose(); m.dispose(); }
+      if (M.rainMap) M.rainMap.dispose();
       M.matDust.dispose(); M.matDeck.dispose();
     } catch (e) {}
     t.mesh = null;
@@ -594,7 +686,8 @@
     M.matOut.map.offset.y -= sc * 0.6; M.matOut.map.offset.x -= spin * 0.07 * dt;
     M.matSkirt.map.offset.y -= sc * 0.8; M.matSkirt.map.offset.x -= spin * 0.2 * dt;
     M.matWall.map.offset.x += 0.02 * dt;
-    M.matRain.map.offset.y += dt * 1.6;
+    M.matRain.uniforms.uTime.value += dt;
+    M.matRainCore.uniforms.uTime.value += dt;
     // the debris-cloud shells and the dust live on the WIND's schedule
     const k = t.k;
     M.skirt.rotation.y -= spin * 0.7 * dt;
@@ -611,7 +704,9 @@
     M.matDust.opacity = 0.5 * fade * Math.min(1, k * 1.2);
     M.matWall.opacity = 0.92 * fade;
     M.matDeck.opacity = 0.96 * fade;
-    M.matRain.opacity = 0.42 * fade * Math.min(1, t.age / 3) * t.wrap;
+    const rainA = 0.5 * fade * Math.min(1, t.age / 3) * t.wrap;
+    M.matRain.uniforms.uOpacity.value = rainA;
+    M.matRainCore.uniforms.uOpacity.value = rainA;
   }
 
   function stepDust(t, M, dt) {
