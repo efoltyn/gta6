@@ -1214,6 +1214,11 @@
       },
       end(ctx) {
         weatherOff();
+        /* THE CHAIN: a Cat 2+ cyclone dumps its rain on the hills behind the
+           town, and the water comes down the channel after the wind has
+           gone. The flash flood is the hurricane's next link, not a second
+           roll of the dice. */
+        if (!ctx.st.chainTo && (this._catF || 0) >= 2 && rnd() < 0.7) ctx.st.chainTo = { id: "flashflood", delay: 2, why: "hurricane" };
         if (!ctx.st.h2) return;
         CBZ.hurricane.end();
         surgeSet(0);
@@ -1266,6 +1271,8 @@
       warn(ctx) {
         narrate("hint", "Wildfire spreading, don't get cornered!", 2.6); sound("fire");
         if (!CBZ.wildfire) return;
+        // a chained fire (the eruption lit it) grows from where it already burns
+        if (ctx.st.chainSeed) ctx.seed = ctx.st.chainSeed;
         CBZ.wildfire.beginWarn(ctx, {
           hitBuilding: function (b, amount, o) { return structureHit(b, amount, ctx, Object.assign({ kind: "fire" }, o || {})); },
           blast: function (kind, x, z, o) { survBlast(kind, x, z, Object.assign({ ctx: ctx }, o || {})); },
@@ -1509,7 +1516,21 @@
       },
       start(ctx) { startEruption(ctx); },
       active(dt, ctx) { tickEruption(dt, ctx); tick0(ctx, dt); },
-      end(ctx) { weatherOff(); endEruption(ctx); },
+      end(ctx) {
+        weatherOff(); endEruption(ctx);
+        /* THE CHAIN: the lava, the bombs and the density current lit the
+           island's fuel bed (the wildfire as a service). If that fire is
+           still going when the mountain quietens, it does not smoulder on
+           under the next disaster's warning: it BECOMES the next link, a
+           wildfire that grows out of the flank the eruption set alight. A
+           burp that lit nothing ends clean. */
+        const WF = CBZ.wildfire;
+        if (!ctx.st.chainTo && WF && WF.serving && WF.serving() && (ctx.st.erMag || 0) > 0.2 && rnd() < 0.75) {
+          const V = erSite(ctx);
+          const sx = V.x + (ctx.cx - V.x) * 0.35, sz = V.z + (ctx.cz - V.z) * 0.35;
+          ctx.st.chainTo = { id: "wildfire", delay: 2, why: "volcano", st: { chainSeed: { x: sx, z: sz } } };
+        }
+      },
       threat(x, z, ctx) { return eruptThreat(x, z, ctx); },
       safeDir(x, z, ctx) { const h = erSite(ctx); const dx = x - h.x, dz = z - h.z, d = Math.hypot(dx, dz) || 1; return { x: dx / d, z: dz / d }; },
     },
@@ -2028,7 +2049,9 @@
         const e = CBZ.waterEventGet ? CBZ.waterEventGet() : null;
         if (e && e.owner !== "survival-tsunami") return true;
         if (e || f._endT == null) return false;
-        return f.t - f._endT > 40 || f.landVol < Math.max(40, f.peakLandVol * 0.015);
+        // 14 s, not 40: the backwash belongs to the tsunami, and the calm
+        // after it must be calm (the director cuts it at its deadline anyway)
+        return f.t - f._endT > 14 || f.landVol < Math.max(40, f.peakLandVol * 0.015);
       },
     });
     ctx.st.run = F;
@@ -2513,7 +2536,11 @@
     gap: 8,
     cause: "swept away by the tsunami", tint: 0x2c5a78,
     warn(ctx) {
-      const st = ctx.st, a = rnd() * Math.PI * 2;
+      const st = ctx.st;
+      /* A CHAINED WAVE COMES FROM ITS SOURCE: the quake's epicentre or the
+         meteor's splash sits at `chainBearing` from the island, and the wave
+         travels away from it (the front runs along +d). */
+      const a = st.chainBearing != null ? st.chainBearing + Math.PI : rnd() * Math.PI * 2;
       st.dx = Math.cos(a); st.dz = Math.sin(a);
       st.warnT = 0; st.phase = "warn";
       /* THE SIZE OF THIS ONE (2026-08-29, owner: "all the natural disasters
@@ -3502,7 +3529,14 @@
   // reused per frame: the aftermath re-asserts the ash veil every tick and a
   // fresh literal each time is allocation for nothing
   const _ashScar = { srcX: 0, srcZ: 0, windX: 1, windZ: 0, amount: 0, reach: 60, lobe: 3, spread: 0.05 };
+  /* THE CALM SPEEDS THE SKY UP: the column and the umbrella disperse on
+     their own physics, which is minutes; inside the director's settle window
+     the sky scar runs on a 5x clock so the plume is gone before the next
+     siren (and the calm cuts it, on the record, if it still is not). */
+  let volSettleT = 0;
   CBZ.onAlways(28.06, function (dt) {
+    let skyDt = dt;
+    if (volSettleT > 0) { volSettleT -= dt; skyDt = dt * 5; }
     const inSurv = CBZ.game.mode === "survival" && !!(CBZ.surv && CBZ.surv.arena);
     if (volScars.length) {
       if (!inSurv) {
@@ -3543,7 +3577,7 @@
                 _ashScar.amount = Math.min(6, sc.peakDepth / ASH_VISUAL_FULL);
                 CBZ.weatherDrive({ ash: _ashScar }, 0.6);
               }
-            } else sc.update(dt, null);
+            } else sc.update(sc && sc.kind === "sky" ? skyDt : dt, null);
             // the sky retires itself once the column and the deck are gone
             if (sc && sc.done) { sc.dispose(); volScars.splice(i, 1); i--; }
           } catch (e) {}
@@ -3784,12 +3818,21 @@
         const off = src.offshore ? 1.3 : 0.55;
         ctx.st.epX = ctx.cx + Math.cos(src.bearing || 0) * ctx.R * off;
         ctx.st.epZ = ctx.cz + Math.sin(src.bearing || 0) * ctx.R * off;
+        /* 2026-10-15 (owner: "some should overlap, like earthquake to
+           tsunami or earthquake to volcano, but right now it's dumb"): the
+           branch is DECIDED by the rupture, never by a coin. An offshore
+           megathrust of M7.5+ always lifts the water column; an inland break
+           of M6.0+ whose epicentre is close under the mountain always loads
+           the magma. Either way the follow-on is a CHAIN (the director runs
+           it as the next link of this same round, with its own warning),
+           not an eruption smuggled inside the quake's own round. */
         if (CBZ.CONFIG.QUAKE_CHAIN !== false) {
-          if (src.offshore && q.tsunamigenic && rnd() < 0.85) ctx.st.chain = "tsunami";
-          else if (!src.offshore && q.M >= 6.2 && rnd() < 0.4) ctx.st.chain = "eruption";
-        } else if (rnd() < 0.4) ctx.st.chain = "eruption";
-        ctx.st.eruptArmed = ctx.st.chain === "eruption";
-        ctx.st.eruptAt = 4 + rnd() * 5;     // seconds into the quake it would hit
+          if (src.offshore && q.M >= 7.5) ctx.st.chain = "tsunami";
+          else if (!src.offshore && q.M >= 6.0) {
+            const V = erSite(ctx);
+            if (V && Math.hypot(ctx.st.epX - V.x, ctx.st.epZ - V.z) < ctx.R * 0.6) ctx.st.chain = "eruption";
+          }
+        }
       },
       active(dt, ctx) {
         ctx.st.T = (ctx.st.T || 0) + dt;
@@ -3827,12 +3870,13 @@
           }
         }
 
-        // surprise eruption part-way through (if this rupture went inland)
-        if (ctx.st.eruptArmed && !ctx.st.erupting) {
-          ctx.st.eruptAt -= dt;
-          if (ctx.st.eruptAt <= 0) { startEruption(ctx); qkChained++; }
+        // THE MOUNTAIN ANSWERS: the mainshock loaded the plumbing, the round
+        // closes on the unrest and the eruption is the chain's next link
+        if (ctx.st.chain === "eruption" && tail > 4 && !ctx.st.handed) {
+          ctx.st.handed = 1; qkChained++;
+          ctx.st.chainTo = { id: "volcano", delay: 1.5, why: "quake" };
+          ctx.st.endIn = 0;
         }
-        tickEruption(dt, ctx);
         tick0(ctx, dt);
 
         // ---- THE MAINSHOCK STOPS, AND THE SECOND WAVE OF DEATHS STARTS ----
@@ -3848,9 +3892,11 @@
         if (ctx.st.chain === "tsunami" && tail > 2.5) {
           const u = Math.min(1, (tail - 2.5) / 5.5);
           surgeSet(-2.8 * ease(u));
-          if (tail > 9.5 && !ctx.st.handed && dir.t > 1.4 && CBZ.disasters && CBZ.disasters.force) {
+          if (tail > 9.5 && !ctx.st.handed) {
             ctx.st.handed = 1; qkChained++;
-            CBZ.disasters.force("flood");
+            // the wave comes FROM the epicentre: it travels along -bearing
+            ctx.st.chainTo = { id: "flood", delay: 0.3, why: "quake", st: { chainBearing: (q && q.src && q.src.bearing) || 0 } };
+            ctx.st.endIn = 0;
             return;
           }
         }
@@ -3860,8 +3906,17 @@
         endEruption(ctx);
         if (qk()) { qk().hooks.structDamage = null; qk().end(); }   // .end() also ends the event
         qkQ = null;                       // the next occurrence rolls its own quake
-        // an armed chain that never fired must not leave the sea sucked out
-        if (ctx.st.chain === "tsunami" && !ctx.st.handed) surgeSet(0);
+        /* a decided chain whose round ran out before its beat still hands
+           off: the rupture already happened, so the sea or the mountain
+           answers whatever the clock says */
+        if (ctx.st.chainTo) { /* already handed off (or staged) */ }
+        else if (!ctx.st.handed && ctx.st.chain === "tsunami") {
+          ctx.st.handed = 1; qkChained++;
+          ctx.st.chainTo = { id: "flood", delay: 0.3, why: "quake", st: { chainBearing: (ctx.st.q && ctx.st.q.src && ctx.st.q.src.bearing) || 0 } };
+        } else if (!ctx.st.handed && ctx.st.chain === "eruption") {
+          ctx.st.handed = 1; qkChained++;
+          ctx.st.chainTo = { id: "volcano", delay: 1.5, why: "quake" };
+        }
       },
       threat(x, z, ctx) {
         let t = 0.2; const f = ctx.arena.fragile;
@@ -4675,6 +4730,17 @@
         ctx.st.big = true;
         const cls = headlineClass(ctx);
         let p = null;
+        /* AN IRON INTO THE SEA. Most of a planet is water, and an impact
+           offshore does not dig a crater on the island: it lifts the sea.
+           That splash is the chain into the TSUNAMI (the wave comes from the
+           impact's bearing), and the shower round closes once it lands. */
+        if (cls === "impact" && rnd() < 0.35) {
+          for (let k2 = 0; k2 < 12 && !p; k2++) {
+            const a3 = rnd() * 6.28, d3 = ctx.R * (1.15 + 0.25 * rnd());
+            const qx = ctx.cx + Math.cos(a3) * d3, qz = ctx.cz + Math.sin(a3) * d3;
+            if (floor(qx, qz) < seaY(qx, qz) - 2) { p = { x: qx, z: qz }; ctx.st.seaImpact = { x: qx, z: qz, bearing: a3, at: ctx.st.clock + 3.2 }; }
+          }
+        }
         if (cls === "impact") {
           // an iron needs ground a crater can be dug in (flat, dry, clear)
           for (let k2 = 0; k2 < 10 && !p; k2++) {
@@ -4692,6 +4758,13 @@
           const r = Math.min(18, cr.R) * 2.5;
           ctx.st.pending.push({ x: p.x, z: p.z, r, t: eta, t0: eta, m: CBZ.fx.groundMarker(p.x, p.z, r, 0xff5030) });
         }
+      }
+      // the splash has landed: the round closes and the sea is the next link
+      const SI = ctx.st.seaImpact;
+      if (SI && !SI.handed && ctx.st.clock > SI.at + 2.5) {
+        SI.handed = true;
+        ctx.st.chainTo = { id: "flood", delay: 0.5, why: "meteor", st: { chainBearing: SI.bearing } };
+        ctx.st.endIn = 0;
       }
       ctx.st.cd -= dt;
       if (ctx.st.cd <= 0) {
@@ -4807,8 +4880,10 @@
     return SEQUENCE.slice();   // vanishingly unlikely — fall back to the classic arc
   }
 
-  const dir = { state: "idle", t: 6, cur: null, curId: null, st: {}, idx: 0, occ: 0, intensity: 0.2, prog: 0, overT: 0, overName: null,
-    nextId: null, shuffledAt: -1, aliveAt: 0, killed: 0, cap: 0, last: null };
+  const dir = { state: "idle", t: 6, cur: null, curId: null, st: {}, idx: 0, pos: 0, occ: 0, intensity: 0.2, prog: 0, overT: 0, overName: null,
+    nextId: null, aliveAt: 0, killed: 0, cap: 0, last: null,
+    // pacing (see THE CALM below)
+    calm: false, calmT: 0, calmLen: 0, quietWait: 0, chain: null, link: null, links: [], clock: 0, log: [], cur_log: null };
   let curCtx = null;
 
   /* ============================================================
@@ -4843,7 +4918,109 @@
        event instead of a storm cell passing on the horizon.
      ============================================================ */
   const BRIEF = 7;          // s of announcement before the def's warn
-  const MIN_GAP = BRIEF + 4; // a quiet beat after the all-clear, then the next card
+
+  /* ============================================================
+     THE CALM, AND THE CHAIN (2026-10-15).
+
+     OWNER: "meteors last way too long and go into other disasters. There
+     needs to be a time of no disaster between each; right now they overlap,
+     which is dumb. Some should overlap, like earthquake to tsunami or
+     earthquake to volcano, but right now it's dumb."
+
+     What was wrong, measured in the code rather than guessed:
+       - the director's "gap" was max(def.gap, 11 s) and the 7 s brief lived
+         INSIDE it, so the island had about four quiet seconds between an
+         all-clear and the next siren;
+       - "ended" meant the def's timer ran out, not that its system stopped.
+         The meteor afterglow ran up to 120 s (a big body's dust train is
+         born with a 55-75 s life) and the fires its strikes lit kept
+         SPREADING as the wildfire service; the blizzard's snow melts on a
+         seven-minute clock and its drifts on four, so the town was still
+         white under the next tsunami; the storm deck takes half a minute to
+         clear; the tsunami backwash ran 40 s;
+       - the quake's follow-ons were bolted on: an eruption started INSIDE
+         the quake round on a 40% coin, and the tsunami was a force("flood")
+         that also jumped the run's shuffled order to wherever "flood" sat.
+
+     Now a round is: [chain of 1-3 linked disasters] -> CALM -> BRIEF -> next.
+
+       THE CALM. When a round ends the director calls settleWorld(): every
+       system with a lingering effect gets SETTLE seconds to fade it (snow
+       melts, water drains, the sky clears, the fire burns out and nothing
+       new catches, the meteor haze thins, the eruption's sky disperses).
+       Then a seeded SURV_CALM_MIN..MAX seconds of nothing at all. If a
+       system is still busy when the calm runs out (it should not be), the
+       calm waits up to QUIET_CAP more seconds and then cuts it, and the
+       timeline records what had to be cut.
+       What PERSISTS is damage: rubble, burn scars, craters, stranded
+       wrecks, the hardened lahar and the ash blanket on their own erosion.
+
+       THE CHAIN. A def that CAUSES another sets ctx.st.chainTo = { id,
+       delay, why, st } (and ctx.st.endIn to close its own round). The
+       director then skips the calm and the order: the next link's warning
+       starts `delay` seconds later as the same round (same round number,
+       same death share, one "survived"), its card naming what caused it.
+       Causal links only, each decided by the event's own physics:
+         quake offshore M7.5+            -> tsunami (from the epicentre)
+         quake inland M6+ under the cone -> volcano
+         volcano whose fires still burn  -> wildfire (from the flank)
+         hurricane Cat 2+                -> flash flood
+         meteor iron into the sea        -> tsunami (from the splash)
+       A chained id is struck from the rest of this cycle's order, so the
+       same disaster does not come round again a minute later.
+     ============================================================ */
+  if (CBZ.CONFIG.SURV_CALM_MIN == null) CBZ.CONFIG.SURV_CALM_MIN = 12;
+  if (CBZ.CONFIG.SURV_CALM_MAX == null) CBZ.CONFIG.SURV_CALM_MAX = 20;
+  const QUIET_CAP = 10;     // s the calm may stretch for a slow system before it is cut
+  const CHAIN_MAX = 3;      // links in one round
+  function calmMin() { return Math.max(2, +CBZ.CONFIG.SURV_CALM_MIN || 12); }
+  function calmMax() { return Math.max(calmMin(), +CBZ.CONFIG.SURV_CALM_MAX || 20); }
+  // every lingering effect is gone by this far into the calm
+  function settleSecs() { return Math.max(3, calmMin() * 0.7); }
+
+  /* ONE CALL PUTS THE ISLAND BACK TO A CLEAR DAY OVER `secs`. Each system
+     owns its own fade; this only asks. Damage is never on this list. */
+  function settleWorld(secs) {
+    weatherOff();
+    if (CBZ.weatherSettle) { try { CBZ.weatherSettle(secs); } catch (e) {} }
+    if (CBZ.blizzard && CBZ.blizzard.settle) { try { CBZ.blizzard.settle(secs); } catch (e) {} }
+    if (CBZ.meteor && CBZ.meteor.settle) { try { CBZ.meteor.settle(secs); } catch (e) {} }
+    if (CBZ.wildfire && CBZ.wildfire.settle) { try { CBZ.wildfire.settle(secs); } catch (e) {} }
+    if (CBZ.tornado && CBZ.tornado.count && CBZ.tornado.count()) { try { CBZ.tornado.stop(); CBZ.tornado.siren && CBZ.tornado.siren(false); } catch (e) {} }
+    if (CBZ.audioHush) { try { CBZ.audioHush(false); } catch (e) {} }
+    surgeSet(0);
+    volSettleT = calmMax() + QUIET_CAP;     // the whole calm, at most
+  }
+  /* WHAT IS STILL GOING. [] = the island is quiet. Read by the calm, the
+     timeline and the pacing check (tools/disaster-pacing-check.mjs). */
+  function busyList() {
+    const out = [];
+    try { if (CBZ.meteor && CBZ.meteor.busy && CBZ.meteor.busy()) out.push("meteor"); } catch (e) {}
+    try { if (CBZ.wildfire && CBZ.wildfire.busy && CBZ.wildfire.busy()) out.push("fire"); } catch (e) {}
+    try { if (CBZ.tornado && CBZ.tornado.count && CBZ.tornado.count()) out.push("tornado"); } catch (e) {}
+    try { if (CBZ.tsuRunup && CBZ.tsuRunup.current && CBZ.tsuRunup.current()) out.push("backwash"); } catch (e) {}
+    try { if (CBZ.blizzard && CBZ.blizzard.busy && CBZ.blizzard.busy()) out.push("drifts"); } catch (e) {}
+    try {
+      const W = CBZ.weather;
+      if (W && ((W.snowCover || 0) > 0.02 || (W.groundWater || 0) > 0.02 || W.driven)) out.push("weather");
+    } catch (e) {}
+    for (let i = 0; i < volScars.length; i++) if (volScars[i] && volScars[i].kind === "sky" && !volScars[i].done) { out.push("ashcloud"); break; }
+    return out;
+  }
+  // the calm ran out and something is STILL going: cut it, and say so
+  function forceQuiet(list) {
+    if (list.indexOf("meteor") >= 0 && CBZ.meteor && CBZ.meteor.hardStop) { try { CBZ.meteor.hardStop(); } catch (e) {} }
+    if (list.indexOf("fire") >= 0 && CBZ.wildfire && CBZ.wildfire.settle) { try { CBZ.wildfire.settle(0.5); } catch (e) {} }
+    if (list.indexOf("tornado") >= 0 && CBZ.tornado && CBZ.tornado.clear) { try { CBZ.tornado.clear(); } catch (e) {} }
+    if (list.indexOf("backwash") >= 0 && CBZ.tsuRunup) { try { CBZ.tsuRunup.detach(); } catch (e) {} }
+    if (list.indexOf("drifts") >= 0 && CBZ.blizzard && CBZ.blizzard.settle) { try { CBZ.blizzard.settle(0.5); } catch (e) {} }
+    if (list.indexOf("weather") >= 0 && CBZ.weatherSettle) { try { CBZ.weatherSettle(0.5); } catch (e) {} }
+    if (list.indexOf("ashcloud") >= 0) {
+      for (let i = volScars.length - 1; i >= 0; i--) if (volScars[i] && volScars[i].kind === "sky") { try { volScars[i].dispose(); } catch (e) {} volScars.splice(i, 1); }
+    }
+  }
+  function logPush(rec) { dir.log.push(rec); if (dir.log.length > 200) dir.log.shift(); return rec; }
+  const r1 = (v) => Math.round(v * 10) / 10;
   const ADVICE = {
     flood:      { kind: "high",        tip: "Get to high ground. Hills or the top floors of a tall building." },
     flashflood: { kind: "high",        tip: "Get off the low ground. Climb." },
@@ -4871,8 +5048,8 @@
   // the next id in this run's arc, reshuffling at the cycle boundary exactly
   // once (beginWarn and the brief both ask; whoever asks first shuffles)
   function peekNext() {
-    if (dir.idx > 0 && dir.idx % order.length === 0 && dir.shuffledAt !== dir.idx) { order = buildOrder(); dir.shuffledAt = dir.idx; }
-    return order[dir.idx % order.length];
+    if (dir.pos >= order.length) { order = buildOrder(); dir.pos = 0; }
+    return order[dir.pos];
   }
 
   function makeCtx(dt) {
@@ -4958,19 +5135,35 @@
   }
 
   function beginWarn() {
-    // survived a whole arc? reshuffle the next cycle from the same run stream
-    // (nuke-last + gentle-first keeps the wraparound pacing legal by itself)
-    const id = peekNext();
-    dir.idx++; dir.occ++;
+    const chain = dir.chain;
+    dir.chain = null;
+    let id;
+    if (chain && DEFS[chain.id]) {
+      /* THE NEXT LINK OF THIS ROUND: no new round number, no new death
+         share (the cap grows by half, the second wave is a second killer),
+         the order is untouched — the chained id was struck from it. */
+      id = chain.id;
+      dir.cap = Math.max(dir.cap + 1, Math.ceil(dir.cap * 1.5));
+      dir.links.push(id);
+    } else {
+      // survived a whole arc? reshuffle the next cycle from the same run stream
+      // (nuke-last + gentle-first keeps the wraparound pacing legal by itself)
+      id = peekNext();
+      dir.pos++; dir.idx++; dir.occ++;
+      dir.links = [id]; dir.link = null;
+      // the curve: this disaster's share of the living lobby
+      dir.aliveAt = liveBotCount(); dir.killed = 0;
+      dir.cap = dir.aliveAt <= ENDGAME ? 1 : Math.max(1, Math.ceil(dir.aliveAt * deathShare(dir.occ, dir.aliveAt)));
+      const late = dir.aliveAt <= 15 ? (15 - dir.aliveAt) / 15 : 0;
+      dir.intensity = Math.min(1.7, 0.42 + dir.occ * 0.12 + 0.5 * late);   // 1.7: the ceiling every def was tuned under
+    }
     dir.nextId = null;
-    // the curve: this disaster's share of the living lobby
-    dir.aliveAt = liveBotCount(); dir.killed = 0;
-    dir.cap = dir.aliveAt <= ENDGAME ? 1 : Math.max(1, Math.ceil(dir.aliveAt * deathShare(dir.occ, dir.aliveAt)));
-    const late = dir.aliveAt <= 15 ? (15 - dir.aliveAt) / 15 : 0;
-    dir.intensity = Math.min(1.7, 0.42 + dir.occ * 0.12 + 0.5 * late);   // 1.7: the ceiling every def was tuned under
-    dir.cur = DEFS[id]; dir.curId = id; dir.st = {}; dir.state = "warn"; dir.t = dir.cur.warnSecs;
+    dir.calm = false;
+    if (CBZ.wildfire && CBZ.wildfire.unlock) CBZ.wildfire.unlock();
+    dir.cur = DEFS[id]; dir.curId = id; dir.st = Object.assign({}, chain && chain.st); dir.state = "warn"; dir.t = dir.cur.warnSecs;
     dir.overT = 0; dir.overName = null;   // a new warning supersedes the all-clear
     curCtx = makeCtx(0);
+    dir.cur_log = logPush({ id, round: dir.occ, chainFrom: chain ? chain.from : null, warnAt: r1(dir.clock), activeAt: null, endAt: null });
     narrate("banner", dir.cur.name + " · INCOMING");
     // THE UNIVERSAL TELEGRAPH IS PHYSICAL: every warning lands with a jolt you
     // feel, warnAmbience() below tints the whole sky toward the hazard's mood,
@@ -4982,6 +5175,7 @@
   }
   function beginActive(ctx) {
     dir.state = "active"; dir.t = dir.cur.activeSecs;
+    if (dir.cur_log) dir.cur_log.activeAt = r1(dir.clock);
     if (CBZ.surv) CBZ.surv._cause = dir.cur.cause || "killed by the disaster";   // default cause for kill feed
     narrate("banner", dir.cur.name);
     try { dir.cur.start(ctx); } catch (e) { console.error("[disaster start]", e); }
@@ -4989,6 +5183,24 @@
   }
   function endActive(ctx) {
     try { dir.cur.end(ctx); } catch (e) { console.error("[disaster end]", e); }
+    if (dir.cur_log) dir.cur_log.endAt = r1(dir.clock);
+    /* A CAUSE HANDS OFF TO ITS EFFECT. The next link's warning is this
+       round's next beat: no calm, no settle (the quake's drawdown IS the
+       tsunami's first second, the eruption's fire IS the wildfire's seed). */
+    const ch = dir.st && dir.st.chainTo;
+    if (ch && DEFS[ch.id] && dir.links.length < CHAIN_MAX && ch.id !== dir.curId) {
+      // strike the effect from the rest of this cycle: it just happened
+      const k = order.indexOf(ch.id, dir.pos);
+      if (k >= 0) order.splice(k, 1);
+      dir.chain = { id: ch.id, from: dir.curId, why: ch.why || dir.curId, st: ch.st || null };
+      dir.link = dir.cur.name;
+      if (dir.cur_log) dir.cur_log.chainTo = ch.id;
+      if (CBZ.surv) CBZ.surv._cause = null;
+      dir.state = "idle"; dir.calm = false; dir.t = Math.max(0.05, +ch.delay || 0.5);
+      dir.nextId = ch.id;
+      dir.cur = null; dir.curId = null;
+      return;
+    }
     if (!CBZ.player.dead) { CBZ.surv.stats.disastersSurvived++; survivorSays(VOICE.after, 2 + Math.random() * 2); }
     if (CBZ.surv) CBZ.surv._cause = null;
     // The ALL-CLEAR is now the world going quiet: warnAmbience releases the
@@ -4998,9 +5210,18 @@
     dir.overName = dir.cur.name;
     dir.overT = Math.min(4, dir.cur.gap || 4);
     // what the round cost, for the SURVIVED card (systems/survivalhud.js)
-    dir.last = { id: dir.curId, name: dir.cur.name, n: dir.occ, killed: Math.max(0, dir.aliveAt - liveBotCount()), alive: CBZ.surv.aliveCount(), you: !CBZ.player.dead, t: CBZ.now };
-    // the last handful get less time to breathe between them
-    dir.state = "idle"; dir.t = Math.max(dir.cur.gap || 0, liveBotCount() <= ENDGAME ? BRIEF + 1.5 : MIN_GAP); dir.cur = null; dir.curId = null;
+    dir.last = { id: dir.curId, name: dir.links.map(function (k) { return DEFS[k] ? DEFS[k].name : k; }).join(" > "), chain: dir.links.slice(),
+      n: dir.occ, killed: Math.max(0, dir.aliveAt - liveBotCount()), alive: CBZ.surv.aliveCount(), you: !CBZ.player.dead, t: CBZ.now };
+    // THE CALM: everything this round left lingering fades over settleSecs(),
+    // then nothing at all until the calm runs out; then the brief. The last
+    // handful get the short end of the calm.
+    const sec = settleSecs();
+    settleWorld(sec);
+    dir.calmLen = liveBotCount() <= ENDGAME ? calmMin() : calmMin() + (calmMax() - calmMin()) * rnd();
+    dir.calm = true; dir.calmT = dir.calmLen; dir.quietWait = 0;
+    dir.link = null;
+    if (dir.cur_log) dir.cur_log.calm = r1(dir.calmLen);
+    dir.state = "idle"; dir.t = dir.calmLen + BRIEF; dir.cur = null; dir.curId = null;
   }
 
   // one answer to "how dangerous is (x,z) right now", warn phase included
@@ -5045,7 +5266,11 @@
       // 10 s: three seconds to look around the island, then the first card
       if (CBZ.tsuRunup) CBZ.tsuRunup.detach();   // a new match: no backwash left running
       dir.state = "idle"; dir.t = 10; dir.cur = null; dir.curId = null; dir.st = {}; dir.idx = 0; dir.occ = 0; dir.intensity = 0.2; dir.overT = 0; dir.overName = null; curCtx = null; fallingBuildings.length = 0; flungCars.length = 0;
-      dir.nextId = null; dir.shuffledAt = 0; dir.aliveAt = 0; dir.killed = 0; dir.cap = 0; dir.last = null;
+      dir.nextId = null; dir.pos = 0; dir.aliveAt = 0; dir.killed = 0; dir.cap = 0; dir.last = null;
+      dir.calm = false; dir.calmT = 0; dir.calmLen = 0; dir.quietWait = 0; dir.chain = null; dir.link = null; dir.links = [];
+      dir.clock = 0; dir.log.length = 0; dir.cur_log = null; volSettleT = 0;
+      // a fresh match starts dry and green, whatever the last one left
+      if (CBZ.weatherGroundReset) { try { CBZ.weatherGroundReset(); } catch (e) {} }
     },
     /* WHAT IS COMING AND WHAT SAVES YOU. null when the sky is quiet. phase
        "brief" = announced, the def's warn has not started; tLeft = seconds
@@ -5069,7 +5294,7 @@
       }
       if (id === "nuke" && dir.st && dir.st.gx != null) from = { x: dir.st.gx, z: dir.st.gz };
       if (id === "tornado" && dir.curId === "tornado" && dir.st && dir.st.x != null) from = { x: dir.st.x, z: dir.st.z };
-      return { id, name: def.name, phase, kind: a.kind, tip: a.tip, from, tLeft,
+      return { id, name: def.name, link: dir.link, phase, kind: a.kind, tip: a.tip, from, tLeft,
         warnSecs: def.warnSecs || 0, activeSecs: def.activeSecs || 0, brief: BRIEF, n: dir.curId ? dir.occ : dir.occ + 1 };
     },
     /* IS THIS SPOT THE RIGHT KIND OF PLACE for what is coming? One oracle
@@ -5151,6 +5376,25 @@
     },
     // the round just finished (name, number, what it cost), for the HUD
     lastResult() { return dir.last; },
+    /* THE PACE, for the HUD and the pacing check. calm: the quiet between
+       rounds (calmLeft = seconds until the next brief); chain: the next link
+       is already decided (its card is up as a brief). busy: what is still
+       fading. */
+    pace() {
+      return { calm: dir.calm, calmLeft: dir.calm ? Math.max(0, dir.calmT) : 0, calmLen: dir.calmLen,
+        chain: dir.chain ? dir.chain.id : null, link: dir.link, links: dir.links.slice(), busy: busyList(), clock: dir.clock };
+    },
+    // every warn / active / end / calm this match, in director seconds
+    timeline() { return dir.log.map(function (r) { return Object.assign({}, r); }); },
+    /* QA / storyboard: close the ACTIVE disaster now and hand off to `id`
+       through exactly the path a def's own chain takes (ctx.st.chainTo).
+       The physics normally decides this; this only lets a check stage it. */
+    chainNow(id, opts) {
+      if (dir.state !== "active" || !dir.st || !DEFS[id]) return false;
+      dir.st.chainTo = Object.assign({ id: id, delay: 0.5, why: "qa" }, opts || {});
+      dir.st.endIn = 0;
+      return true;
+    },
     round() { return dir.occ; },
     /* THE CURVE'S GATE (see BRIEF above). modes/survival.js killBot asks this
        before a disaster may take a bot: true = spare it (the share for this
@@ -5374,8 +5618,14 @@
     // opts.mag (QA): the size the next occurrence is built at, instead of the
     // seeded roll (the tornado reads it; tools/disaster-check.mjs --mag)
     force(id, opts) {
-      const i = order.indexOf(id);   // this run's shuffled arc
-      if (i < 0) return false;
+      let i = order.indexOf(id, dir.pos);   // this run's shuffled arc, from here on
+      if (i < 0) i = order.indexOf(id);
+      if (i < 0) {
+        // struck by a chain (or never in the arc): slot it in at the cursor
+        if (!DEFS[id]) return false;
+        i = Math.min(dir.pos, order.length);
+        order.splice(i, 0, id);
+      }
       dir.forceMag = opts && opts.mag != null ? +opts.mag : null;
       /* A WARNING HAS MESHES TOO. Ending only an ACTIVE def left every warn-
          phase artefact of the interrupted one in the world — the volcano's
@@ -5383,7 +5633,8 @@
          only end() removes them. Every def's end() already tolerates a run
          that never reached start() (endEruption returns on !erupting). */
       if (dir.cur && dir.cur.end && (dir.state === "active" || dir.state === "warn")) { try { dir.cur.end(makeCtx(0)); } catch (e) {} }
-      dir.idx = i; dir.state = "idle"; dir.t = 0.01; dir.cur = null;
+      dir.pos = i; dir.state = "idle"; dir.t = 0.01; dir.cur = null; dir.curId = null;
+      dir.calm = false; dir.chain = null; dir.link = null; dir.nextId = null;
       return true;
     },
   };
@@ -5670,8 +5921,25 @@
     const ctx = makeCtx(dt);
     if (dir.state === "active" && dir.cur) dir.prog = 1 - dir.t / dir.cur.activeSecs;
     curCtx = ctx; // refresh for bot fleeVector (1-frame latency is fine)
+    dir.clock += dt;
 
-    if (dir.state === "idle") {
+    if (dir.state === "idle" && dir.calm) {
+      // THE CALM: nothing happens; the lingering effects finish fading
+      if (dir.overT > 0) { dir.overT -= dt; if (dir.overT <= 0) dir.overName = null; }
+      dir.calmT -= dt;
+      dir.t = Math.max(0, dir.calmT) + BRIEF;
+      if (dir.calmT <= 0) {
+        const busy = busyList();
+        dir.quietWait += dt;
+        if (!busy.length || dir.quietWait > QUIET_CAP) {
+          if (busy.length) forceQuiet(busy);
+          const L = dir.cur_log;
+          if (L) { L.quietAt = r1(dir.clock); if (busy.length) L.cut = busy; }
+          dir.calm = false; dir.calmT = 0; dir.t = BRIEF;
+        }
+      }
+    }
+    else if (dir.state === "idle") {
       dir.t -= dt;
       // let the "IT'S OVER" all-clear breathe for a few seconds, then go quiet
       if (dir.overT > 0) { dir.overT -= dt; if (dir.overT <= 0) dir.overName = null; }
@@ -5685,6 +5953,12 @@
       if (dir.t <= 0) beginWarn();
     }
     else if (dir.state === "warn") { dir.t -= dt; warnAmbience(); if (dir.cur.warnTick) try { dir.cur.warnTick(dt, ctx); } catch (e2) {} if (dir.t <= 0) beginActive(ctx); }
-    else if (dir.state === "active") { dir.t -= dt; try { dir.cur.active(dt, ctx); } catch (e3) { console.error("[disaster active]", e3); } if (dir.t <= 0) endActive(ctx); }
+    else if (dir.state === "active") {
+      dir.t -= dt;
+      try { dir.cur.active(dt, ctx); } catch (e3) { console.error("[disaster active]", e3); }
+      // a def may close its own round early (a cause handing off to its effect)
+      if (dir.st && dir.st.endIn != null) { dir.t = Math.min(dir.t, dir.st.endIn); dir.st.endIn = null; }
+      if (dir.t <= 0) endActive(ctx);
+    }
   });
 })();

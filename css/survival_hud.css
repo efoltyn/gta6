@@ -65,6 +65,11 @@ body.mode-sharksim #dzGhost, body.mode-sharksim #dzHint { display: none; }
 #dzCard .dz-scale { color: var(--dz-ink); }
 #dzCard .dz-when { color: var(--dz-amber); }
 #dzCard.live .dz-name { font-size: 16px; }
+/* the calm between rounds: quiet colours, the ring filling toward the next one */
+#dzCard.calm .fuse { stroke: var(--dz-green); }
+#dzCard.calm .gl { stroke: var(--dz-dim); }
+#dzCard.calm .dz-name { font-weight: 600; color: var(--dz-dim); }
+#dzCard.calm .dz-when { color: var(--dz-dim); }
 
 /* ---- THE CLOCK: lasted, round, alive ---- */
 #dzStats {

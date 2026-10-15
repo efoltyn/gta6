@@ -211,6 +211,21 @@
   // the rain thin out and the light come back, because that easing IS the
   // all-clear now that nothing prints one.
   CBZ.weatherRelease = function () { drvHold = 0; ashHold = 0; };
+  /* THE CALM BETWEEN DISASTERS (systems/disasters.js's director). Release is
+     the sky easing back; SETTLE is the island drying out: the snow a
+     blizzard laid, the standing water and the storm deck all have to be gone
+     within `secs`, because the next disaster starts on a clear island. The
+     ambient clocks (seven minutes to melt, half a minute to clear) are for a
+     world nobody is about to hit again. The ash blanket is NOT touched: it is
+     a scar with its own erosion clock, like a crater or a burn. */
+  let settleT = 0, settleCover = 0, settlePool = 0;
+  CBZ.weatherSettle = function (secs) {
+    drvHold = 0;
+    secs = Math.max(0.05, +secs || 8);
+    settleT = secs;
+    settleCover = cover / secs; settlePool = Math.max(pool, poolAmb) / secs;
+  };
+  CBZ.weatherSettling = function () { return settleT > 0; };
   // THE one wind vector. Anything that needs "which way is the wind blowing"
   // reads this — never a private bearing.
   const _windOut = { x: 1, z: 0, speed: 0 };
@@ -622,6 +637,13 @@
       const snowNow = intensity * snowMix;
       cover = clamp01(cover + (snowNow > 0.05 ? SNOW_FILL * snowNow : -SNOW_MELT) * dt);
     }
+    // settling (CBZ.weatherSettle): a melt and a drain that finish on time
+    if (settleT > 0) {
+      settleT -= dt;
+      cover = settleT <= 0 ? 0 : Math.max(0, cover - settleCover * dt);
+      poolAmb = settleT <= 0 ? 0 : Math.max(0, poolAmb - settlePool * dt);
+      if (drv.cover >= 0) drv.cover = -1;
+    }
     if (cover > coverPeak) coverPeak = cover;
 
     // ---- the LOOK: wet is rain now, damp is rain lately ----
@@ -674,7 +696,7 @@
 
   // A new world (or a mode change) must not inherit the last one's puddles.
   CBZ.weatherGroundReset = function () {
-    pool = poolAmb = 0; cover = 0; wetLook = 0;
+    pool = poolAmb = 0; cover = 0; wetLook = 0; settleT = 0;
     ashHold = 0; ash.amount = 0; uAshK.value.set(0, 60, 3, 0.06);
     if (CBZ.groundWaterSet) CBZ.groundWaterSet(0);
   };
@@ -1158,7 +1180,7 @@
     // long after the last drop fell, so the dark path may only close when the
     // GROUND is dry too — otherwise a storm would leave the streets flooded
     // for the rest of the session.
-    const groundLive = pool > 0.0005 || cover > 0.0005 || wetLook > 0.0005 ||
+    const groundLive = pool > 0.0005 || cover > 0.0005 || wetLook > 0.0005 || settleT > 0 ||
       drv.pool > 0.0005 || drv.cover >= 0 || coatQueue.length > 0 ||
       // the ash blanket is ground state too: skipping the tick while it is
       // still standing would freeze the veil on the island for the rest of
@@ -1321,7 +1343,7 @@
     // an EYE overhead: the deck is open here whatever the rain implies
     if (drv.clear > 0) ocTarget = Math.min(ocTarget, 1 - drv.clear);
     const ocEase = drv.clear > 0 ? OC_EASE * 1.6
-      : (ocTarget < overcast && CFG.WEATHER_SLOW_CLEAR !== false) ? OC_EASE_DOWN : OC_EASE;
+      : (ocTarget < overcast && CFG.WEATHER_SLOW_CLEAR !== false && settleT <= 0) ? OC_EASE_DOWN : OC_EASE;
     overcast += (ocTarget - overcast) * Math.min(1, dt * ocEase);
     if (overcast < 0.0004) overcast = 0;
 

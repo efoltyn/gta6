@@ -1134,6 +1134,7 @@
     return b._wf;
   }
   function igniteFloor(b, k, how) {
+    if (F.quench) return;              // the calm: what burns burns out, nothing new catches
     const r = bRec(b);
     k = Math.max(0, Math.min(r.storeys - 1, k));
     if (r.fl[k].s !== 0 || b.fallen) return;
@@ -1328,7 +1329,7 @@
         if (q > 0) {
           r = carRec(c, p);
           r.heat += dtE * q;
-          if (r.heat >= 1) { r.s = 1; r.t = 0; stats.carsBurnt++; }
+          if (r.heat >= 1 && !F.quench) { r.s = 1; r.t = 0; stats.carsBurnt++; }
         }
       }
       if (!r || r.s === 0) continue;
@@ -1547,7 +1548,7 @@
   function beginWarn(ctx, bridge) {
     const A = ctx.arena;
     F.arena = A; F.bridge = bridge || null;
-    F.live = true; F.after = false; F.svc = false; F.svcQ.length = 0; F.t = 0; F.intensity = ctx.intensity || 0;
+    F.live = true; F.after = false; F.svc = false; F.svcQ.length = 0; F.t = 0; F.intensity = ctx.intensity || 0; F.quench = false; F.calmLock = false;
     F.spreadCd = 0; F.spotCd = 2.4; F.smokeLinger = 0;
     F.spots.length = 0; F.smoulders.length = 0; F.burningList.length = 0; F.sources.length = 0;
     zeroStats();
@@ -2035,6 +2036,9 @@
     return F.svcArena || (CBZ.surv && CBZ.surv.arena) || F.arena;
   }
   function serve() {
+    // the calm between disasters: nothing outside an event lights the island
+    // (an eruption's cooling bombs and lava kept relighting the bed after it)
+    if (F.calmLock) return null;
     const A = svcWorld();
     if (!A || !A.groundHeightAt || !A.center) return null;
     if (F.live) return F.arena === A ? A : null;      // the event's run takes it as it is
@@ -2047,7 +2051,7 @@
         if (G.mat) G.mat.uniforms.uAge.value = 0;      // a new fire re-blackens the old ash
       }
       const br = F.svcBridge;
-      F.arena = A; F.bridge = br || null; F.after = false; F.svc = true;
+      F.arena = A; F.bridge = br || null; F.after = false; F.svc = true; F.quench = false;
       F.mag = F._forceMag != null ? F._forceMag : (br && br.mag != null ? Math.max(0, Math.min(1, +br.mag)) : SVC_MAG);
       F.reach = 7 + 11 * F.mag;
       svcWind();
@@ -2161,7 +2165,48 @@
     if (G.ready) cellsStarve();
     F.after = true; F.svc = false; F.svcQ.length = 0;
   }
+  /* SETTLE: THE FIRE DOES NOT BECOME THE NEXT DISASTER. stop() leaves the
+     houses and cars to burn out on their own clocks (a tower runs for minutes)
+     and a meteor's or an eruption's service fire kept spreading after its
+     event was over, so a "different event" was still eating the island when
+     the next warning came. The director's calm calls this: the bed is
+     starved, nothing new catches (F.quench), and every floor, car and rubble
+     heap still alight finishes inside `secs`. The black, the gutted shells
+     and the wrecks stay; they are the scar. */
+  function settle(secs) {
+    secs = Math.max(0.5, +secs || 8);
+    if (F.live || F.svc) stop();
+    F.quench = true; F.calmLock = true;
+    F.svcQ.length = 0;
+    F.smokeLinger = Math.min(F.smokeLinger, secs * 0.5);
+    const A = F.arena;
+    const L = (A && A.fragile) || [];
+    for (let k = 0; k < L.length; k++) {
+      const r = L[k]._wf; if (!r) continue;
+      for (let f = 0; f < r.storeys; f++) { const fl = r.fl[f]; if (fl.s === 1) fl.T = Math.min(fl.T, fl.t + secs * 0.6); }
+      if (r.rubble > 0) r.rubble = Math.min(r.rubble, secs * 0.5);
+    }
+    const C = (A && A.cars) || [];
+    for (let k = 0; k < C.length; k++) {
+      const r = C[k]._wf; if (!r || r.s === 0) continue;
+      r.boomed = true;                         // no tank goes up in the calm
+      r.t = Math.max(r.t, 36 - secs * 0.6);   // 22 s alight + 14 s dying glow
+      if (r.s === 1 && r.t >= 22) { r.s = 2; }
+    }
+    if (G.ready) cellsStarve();
+  }
+  // something is still alight or still spreading (the burn scar is not)
+  function busy() {
+    if (F.live || F.svc || G.flamingN > 0 || F.burningList.length) return true;
+    const A = F.arena;
+    const L = (A && A.fragile) || [];
+    for (let k = 0; k < L.length; k++) { const r = L[k]._wf; if (r && (r.burning > 0.02 || r.rubble > 0)) return true; }
+    const C = (A && A.cars) || [];
+    for (let k = 0; k < C.length; k++) { const r = C[k]._wf; if (r && r.I > 0.02) return true; }
+    return false;
+  }
   function hardStop() {
+    F.quench = false; F.calmLock = false;
     F.live = false; F.after = false; F.burningList.length = 0; F.sources.length = 0;
     F.spots.length = 0; F.smoulders.length = 0; F.seed = null;
     F.svc = false; F.svcQ.length = 0;
@@ -2347,7 +2392,9 @@
   };
 
   CBZ.wildfire = {
-    beginWarn, begin, tick, stop,
+    beginWarn, begin, tick, stop, settle, busy,
+    // the next disaster's warning: fire may be lit again
+    unlock() { F.calmLock = false; },
     // the fire as a service (see "THE FIRE AS A SERVICE")
     attach, igniteAt: igniteAtPublic, igniteTree: igniteTreePublic,
     igniteBuilding: igniteBuildingPublic, igniteCar: igniteCarPublic,

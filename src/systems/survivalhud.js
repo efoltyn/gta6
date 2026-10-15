@@ -70,6 +70,8 @@
     open: HOUSE + "M3.5 3.5l17 17",
     clear: "M12 3.5 6.8 11h3L6.3 16h11.4l-3.5-5h3zM12 16v4M3.5 3.5l17 17",
     away: "M10 12a2 2 0 1 0 4 0a2 2 0 1 0-4 0M2.8 12h4.4M4.9 9.8 2.8 12l2.1 2.2M21.2 12h-4.4M19.1 9.8l2.1 2.2-2.1 2.2",
+    // the calm: a sun
+    calm: "M8.5 12a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6",
   };
   const RING_R = 17, RING_C = 2 * Math.PI * RING_R;
   const PEOPLE = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7.1" r="3.4"/><path d="M2.5 20.5c0-3.7 2.9-6.3 6.5-6.3s6.5 2.6 6.5 6.3z"/><circle cx="17.6" cy="8.6" r="2.5" opacity=".7"/><path d="M16.1 13.3c3.2-.6 6 1.8 6 5.2h-4.4c0-1.9-.6-3.7-1.6-5.2z" opacity=".7"/></svg>';
@@ -119,6 +121,21 @@
   function drawCard(dt) {
     const Dz = CBZ.disasters;
     const adv = on() && Dz && Dz.advice ? Dz.advice() : null;
+    /* THE CALM between rounds (the director's quiet): the card stays up,
+       says so, and its ring fills toward the next warning. */
+    const pace = !adv && on() && Dz && Dz.pace ? Dz.pace() : null;
+    if (pace && pace.calm) {
+      build();
+      lastAdv = null; cardFade = 0;
+      if (D.gl._k !== "calm") { D.gl._k = "calm"; D.gl.setAttribute("d", GLYPH.calm); }
+      const off = (RING_C * Math.max(0, Math.min(1, pace.calmLeft / Math.max(1, pace.calmLen)))).toFixed(1);
+      if (D.fuse._o !== off) { D.fuse._o = off; D.fuse.setAttribute("stroke-dashoffset", off); }
+      setText(D.name, "Calm");
+      setText(D.scale, "");
+      setText(D.when, clock(Math.ceil(pace.calmLeft)));
+      setCls(D.card, "on calm");
+      return;
+    }
     if (!adv) {
       // the sky cleared: hold the last card a beat, then let it go
       if (lastAdv) { cardFade = 1.2; lastAdv = null; }
@@ -138,7 +155,7 @@
       off = (RING_C * (1 - Math.max(0, Math.min(1, adv.tLeft / total)))).toFixed(1);
     }
     if (D.fuse._o !== off) { D.fuse._o = off; D.fuse.setAttribute("stroke-dashoffset", off); }
-    setText(D.name, title(adv.name));
+    setText(D.name, adv.link ? title(adv.link) + " \u2192 " + title(adv.name) : title(adv.name));
     const sc = Dz.scale && adv.phase !== "brief" ? Dz.scale() : null;
     setText(D.scale, sc || "");
     setText(D.when, active ? "" : clock(Math.ceil(Math.max(0, adv.tLeft))));
