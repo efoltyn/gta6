@@ -357,13 +357,45 @@
       }
     }
     const scar = c;
-    // a soft round sprite for the dust in the debris cloud
-    c = canvas(64, 64); g = c.getContext("2d");
-    const rg = g.createRadialGradient(32, 32, 2, 32, 32, 32);
-    rg.addColorStop(0, "rgba(255,255,255,0.9)"); rg.addColorStop(0.5, "rgba(255,255,255,0.45)"); rg.addColorStop(1, "rgba(255,255,255,0)");
-    g.fillStyle = rg; g.fillRect(0, 0, 64, 64);
+    /* THE FLYING DEBRIS: a hard, jagged chip (a shard of board, a clod, a
+       shingle seen edge-on), not a soft glowing dot. Every flake is drawn
+       as an irregular polygon so no speck reads as a disc. */
+    c = canvas(32, 32); g = c.getContext("2d");
+    g.fillStyle = "#fff"; g.beginPath();
+    for (let i = 0; i < 7; i++) {
+      const a = i / 7 * 6.2832, r = 6 + ((i * 37) % 9);
+      if (i === 0) g.moveTo(16 + Math.cos(a) * r, 16 + Math.sin(a) * r * 0.6); else g.lineTo(16 + Math.cos(a) * r, 16 + Math.sin(a) * r * 0.6);
+    }
+    g.closePath(); g.fill();
     const dust = new THREE.CanvasTexture(c);
-    texCache = { dense: wrap(dense), veil: wrap(veil), deck: deck, rain: wrap(rain), scar: wrap(scar), dust: dust };
+    /* THE CHURN: tileable fractal value noise (three periodic octaves) the
+       debris-cloud puffs are cut from, so every puff's edge is ragged and
+       no two read alike. Deterministic integer hash, never Math.random. */
+    const NN = 128;
+    c = canvas(NN, NN); g = c.getContext("2d");
+    const nimg = g.createImageData(NN, NN), nd = nimg.data;
+    const hsh = function (i, j, s) {
+      let h = Math.imul(i, 374761393) ^ Math.imul(j, 668265263) ^ Math.imul(s, 1442695041);
+      h = Math.imul(h ^ (h >>> 13), 1274126177);
+      return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+    };
+    const vn = function (x, y, P, s) {
+      const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+      const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+      const x0 = ((xi % P) + P) % P, y0 = ((yi % P) + P) % P, x1 = (x0 + 1) % P, y1 = (y0 + 1) % P;
+      const a = hsh(x0, y0, s), b = hsh(x1, y0, s), cc = hsh(x0, y1, s), dd = hsh(x1, y1, s);
+      return (a + (b - a) * u) * (1 - v) + (cc + (dd - cc) * u) * v;
+    };
+    for (let y = 0; y < NN; y++) for (let x = 0; x < NN; x++) {
+      const u = x / NN, w = y / NN;
+      const n = 0.52 * vn(u * 4, w * 4, 4, 11) + 0.30 * vn(u * 8, w * 8, 8, 23) + 0.18 * vn(u * 16, w * 16, 16, 37);
+      const v = Math.max(0, Math.min(255, Math.round((n - 0.18) / 0.64 * 255)));
+      const i4 = (y * NN + x) * 4;
+      nd[i4] = nd[i4 + 1] = nd[i4 + 2] = v; nd[i4 + 3] = 255;
+    }
+    g.putImageData(nimg, 0, 0);
+    const churn = wrap(c);
+    texCache = { dense: wrap(dense), veil: wrap(veil), deck: deck, rain: wrap(rain), scar: wrap(scar), dust: dust, churn: churn };
     return texCache;
   }
   function cloneTex(t, rx, ry) {
@@ -479,6 +511,184 @@
     m.name = "tornado-rain-shaft";
     return m;
   }
+  /* THE DEBRIS CLOUD. It was two open cones in MeshBasic (unlit) at linear
+     0x331d0c, 60% opacity: on screen a flat tan-orange, the same brightness
+     in a black storm as at noon, with a smooth round outline and a second,
+     narrower cone glowing through it: "a weird bright orange circle". A real
+     one (Moore, Joplin, El Reno, Bennington: see the commit) is the GROUND
+     torn up and spun: a dark, churning, opaque-to-ragged cloud the colour of
+     what it is eating (green-brown over grass, grey over a town, sand on a
+     beach, spray over water), lit like everything else by the overcast sky,
+     densest and darkest low and inside, breaking into tatters at the edge,
+     with sub-vortex columns on a violent one and chips flying out.
+     So it is ONE instanced draw of camera-facing puffs, each cut from a
+     tileable noise (no two alike, no outline), orbiting at the vortex's own
+     Rankine angular speed (the GPU moves them; the CPU only advances two
+     clocks), rising and flaring the way the inflow lifts and throws dirt,
+     tumbling. Shaded by the scene's own hemisphere and sun (CBZ.hemi /
+     CBZ.sun, read per frame), self-shadowed low and inside, fogged with the
+     scene. Normal blending, never additive, never emissive. */
+  const N_SV = 5;
+  function debrisCloudMat(churn) {
+    const svs = [];
+    for (let i = 0; i < N_SV; i++) svs.push(new THREE.Vector4(0, 0, 0, 0));
+    const U = THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+      uChurn: { value: null }, uAlb: { value: new THREE.Color(0.07, 0.06, 0.05) },
+      uSky: { value: new THREE.Color(0.5, 0.52, 0.55) }, uGnd: { value: new THREE.Color(0.2, 0.19, 0.17) },
+      uSun: { value: new THREE.Color(0.3, 0.3, 0.3) }, uSunDir: { value: new THREE.Vector3(0.4, 0.8, 0.2) },
+      uOpacity: { value: 0 }, uTime: { value: 0 }, uSpin: { value: 0 }, uRise: { value: 0 },
+      uR: { value: 10 }, uHt: { value: 10 }, uScale: { value: 1 }, uSv: { value: svs },
+    }]);
+    U.uChurn.value = churn;
+    const m = new THREE.ShaderMaterial({
+      uniforms: U, transparent: true, depthWrite: false, fog: true,
+      vertexShader: [
+        "attribute vec4 aP;",          // start angle, radius (x R), height phase, size (x R)
+        "attribute vec4 aQ;",          // rise rate, tumble rate, sub-vortex slot (-1 none), shade jitter
+        "uniform float uTime, uSpin, uRise, uR, uHt, uScale;",
+        "uniform vec4 uSv[" + N_SV + "];",
+        "varying vec2 vUv;",
+        "varying vec2 vC1;",
+        "varying vec2 vC2;",
+        "varying float vA;",
+        "varying float vOcc;",
+        "varying vec3 vRight;",
+        "varying vec3 vUp;",
+        "varying vec3 vFwd;",
+        "#include <fog_pars_vertex>",
+        "void main() {",
+        "  vUv = uv;",
+        "  float hn = fract(aP.z + uRise * (0.10 + 0.12 * aQ.x));",
+        "  float s = uScale;",
+        "  vec3 c;",
+        "  float size;",
+        "  float slot = aQ.z;",
+        "  vec4 sv = vec4(0.0);",
+        "  if (slot >= 0.0) { sv = uSv[int(slot + 0.5)]; }",
+        "  if (slot >= 0.0 && sv.w > 0.5) {",
+        // a sub-vortex column: a tight, fast, taller rope of dirt
+        "    float rr = sv.z * (0.5 + 0.9 * aP.y);",
+        "    float ang = aP.x + uTime * (3.0 + 2.0 * aQ.y);",
+        "    float h = hn * uHt * 1.25;",
+        "    c = vec3(sv.x + cos(ang) * rr, h, sv.y + sin(ang) * rr);",
+        "    size = sv.z * (1.4 + 1.6 * aP.w) * (0.6 + 0.8 * hn);",
+        "  } else {",
+        // the main cloud: dragged in along the ground, lifted, thrown out
+        "    float rr = uR * aP.y * (1.0 - 0.30 * hn + 0.65 * hn * hn) * s;",
+        "    float rs = max(rr, uR * 0.2);",
+        "    float om = rs <= uR ? 1.0 : (uR * uR) / (rs * rs);",
+        "    float ang = aP.x + uSpin * om * (0.75 + 0.25 * aQ.y);",
+        "    float h = hn * uHt * (0.35 + 0.65 * s);",
+        "    c = vec3(cos(ang) * rr, h, sin(ang) * rr);",
+        // turbulence: each puff wanders off its streamline
+        "    c += vec3(sin(uTime * 1.3 + aP.x * 5.0), 0.4 * sin(uTime * 0.9 + aP.z * 9.0), cos(uTime * 1.1 + aP.x * 3.0)) * uR * 0.14 * s;",
+        "    size = uR * aP.w * (0.55 + 0.95 * hn) * (0.4 + 0.6 * s);",
+        "  }",
+        "  c.y += size * 0.3;",
+        // fade in off the ground, out at the top (the wrap of hn is never seen)
+        "  vA = smoothstep(0.0, 0.07, hn) * (1.0 - smoothstep(0.55, 1.0, hn));",
+        // the bottom and the inside are in the cloud's own shadow
+        "  float rn = clamp(length(c.xz) / (uR * 1.6), 0.0, 1.0);",
+        "  vOcc = (0.42 + 0.58 * smoothstep(0.0, 0.85, hn)) * (0.70 + 0.30 * rn) * (0.85 + 0.3 * aQ.w);",
+        // tumble: the noise is rotated and drifted per puff
+        "  float rot = aP.x * 7.0 + uTime * (aQ.y - 0.5) * 1.6;",
+        "  float cr = cos(rot), sr = sin(rot);",
+        "  vec2 p = uv - 0.5;",
+        "  vec2 q = vec2(cr * p.x - sr * p.y, sr * p.x + cr * p.y);",
+        "  vC1 = q * 0.55 + vec2(aP.x * 0.37, aP.z * 1.7) + vec2(0.0, uTime * 0.035);",
+        "  vC2 = q * 1.25 + vec2(aP.w * 2.3, aP.x * 0.91) - vec2(uTime * 0.05, 0.0);",
+        "  vec4 mvPosition = modelViewMatrix * vec4(c, 1.0);",
+        "  mvPosition.xy += (uv - 0.5) * size * 2.0;",
+        // the view basis in world space, for the puff's fake sphere normal
+        "  vRight = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);",
+        "  vUp = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);",
+        "  vFwd = vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);",
+        "  gl_Position = projectionMatrix * mvPosition;",
+        "  #include <fog_vertex>",
+        "}",
+      ].join("\n"),
+      fragmentShader: [
+        "uniform sampler2D uChurn;",
+        "uniform vec3 uAlb, uSky, uGnd, uSun, uSunDir;",
+        "uniform float uOpacity;",
+        "varying vec2 vUv;",
+        "varying vec2 vC1;",
+        "varying vec2 vC2;",
+        "varying float vA;",
+        "varying float vOcc;",
+        "varying vec3 vRight;",
+        "varying vec3 vUp;",
+        "varying vec3 vFwd;",
+        "#include <fog_pars_fragment>",
+        "void main() {",
+        "  vec2 p = vUv * 2.0 - 1.0;",
+        "  float r2 = dot(p, p);",
+        "  if (r2 >= 1.0) discard;",
+        "  float n = texture2D(uChurn, vC1).r * 0.62 + texture2D(uChurn, vC2).r * 0.38;",
+        // a soft body eaten by the noise: ragged lobes, holes, no rim
+        "  float body = 1.0 - r2;",
+        "  float d = smoothstep(0.08, 0.62, body * (0.35 + 1.05 * n) - 0.12);",
+        "  float a = d * vA * uOpacity;",
+        "  if (a < 0.006) discard;",
+        // lit as a lumpy ball by the scene's sky, ground bounce and sun
+        "  vec3 nv = normalize(vec3(p * 0.85 + (n - 0.5) * 0.6, sqrt(max(0.0, 1.0 - r2)) + 0.25));",
+        "  vec3 nw = normalize(vRight * nv.x + vUp * nv.y + vFwd * nv.z);",
+        "  vec3 L = mix(uGnd, uSky, 0.5 + 0.5 * nw.y) + uSun * max(0.0, dot(nw, uSunDir)) * 0.55;",
+        "  vec3 col = uAlb * L * vOcc * (0.78 + 0.44 * n);",
+        "  gl_FragColor = vec4(col, min(a, 0.93));",
+        "  #include <tonemapping_fragment>",
+        "  #include <encodings_fragment>",
+        "  #include <fog_fragment>",
+        "}",
+      ].join("\n"),
+    });
+    m.name = "tornado-debris-cloud";
+    return m;
+  }
+  // nP puffs on one quad (instanced); deterministic per vortex id
+  function debrisCloudGeo(nP, t, height) {
+    const base = new THREE.PlaneGeometry(1, 1);
+    const g = new THREE.InstancedBufferGeometry();
+    g.setIndex(base.index);
+    g.setAttribute("position", base.attributes.position);
+    g.setAttribute("uv", base.attributes.uv);
+    const P = new Float32Array(nP * 4), Q = new Float32Array(nP * 4);
+    const nsv = t.sv ? t.sv.length : 0;
+    for (let i = 0; i < nP; i++) {
+      const f = function (s) {
+        let h = Math.imul(i + 1, 374761393) ^ Math.imul(s, 668265263) ^ Math.imul(t.id | 0, 1442695041);
+        h = Math.imul(h ^ (h >>> 13), 1274126177);
+        return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+      };
+      P[i * 4] = i * 2.39996 + f(1) * 0.8;                       // golden-angle start
+      // most of the mass inside 1.3 R, a ragged fringe out to 1.9 R
+      const u = f(2);
+      P[i * 4 + 1] = 0.25 + 1.05 * Math.sqrt(u) + (u > 0.82 ? (u - 0.82) * 3.2 : 0);
+      P[i * 4 + 2] = (i / nP + f(3) * 0.37) % 1;                // height phase, spread evenly
+      P[i * 4 + 3] = 0.45 + 0.55 * f(4);
+      Q[i * 4] = f(5);
+      Q[i * 4 + 1] = f(6);
+      Q[i * 4 + 2] = nsv && i % 6 === 0 ? ((i / 6) | 0) % nsv : -1;
+      Q[i * 4 + 3] = f(7);
+    }
+    g.setAttribute("aP", new THREE.InstancedBufferAttribute(P, 4));
+    g.setAttribute("aQ", new THREE.InstancedBufferAttribute(Q, 4));
+    g.instanceCount = nP;
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, height * 0.5, 0), t.R * 2.6 + height);
+    return g;
+  }
+  // what the wind lifts at (x, z), linear albedo: the island tells (grass
+  // becomes torn turf and soil, a street concrete grey, a beach sand, the
+  // sea spray); anywhere else a neutral grey-brown soil
+  const SOIL_DEF = [0.085, 0.072, 0.058];
+  const _soil = [0, 0, 0];
+  function loftColorAt(t, x, z, out) {
+    const W = t.world, I = !inCity() ? CBZ.island : null;
+    const fn = W && typeof W.dustColorAt === "function" ? W.dustColorAt : (I && typeof I.dustColorAt === "function" ? I.dustColorAt : null);
+    if (fn) { try { if (fn(x, z, out)) return out; } catch (e) {} }
+    out[0] = SOIL_DEF[0]; out[1] = SOIL_DEF[1]; out[2] = SOIL_DEF[2];
+    return out;
+  }
   function basicMat(o) {
     return new THREE.MeshBasicMaterial(Object.assign({ transparent: true, side: THREE.DoubleSide, depthWrite: false }, o));
   }
@@ -504,17 +714,23 @@
     tubeIn.name = "tw-funnel"; tubeOut.name = "tw-veil";
     for (const m of [tubeIn, tubeOut]) { m.renderOrder = 3; m.castShadow = m.receiveShadow = false; grp.add(m); }
 
-    // THE DEBRIS CLOUD's shells: dirt, not more cloud
+    // THE DEBRIS CLOUD (debrisCloudMat): dirt, not more cloud, one draw
     const seg = qi(10, 16);
     const skirtH = Math.max(7, t.R * (0.7 + 0.9 * wg));
-    const matSkirt = basicMat({ map: cloneTex(X.dense, 3, 1), color: 0x331d0c, opacity: 0.6, fog: false });
-    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(t.R * 1.1, t.R * 1.45, skirtH, seg, 1, true), matSkirt);
-    skirt.position.y = skirtH * 0.45;
-    const skirt2 = new THREE.Mesh(new THREE.CylinderGeometry(t.R * 0.7, t.R * 1.0, skirtH * 1.5, seg, 1, true), matSkirt);
-    skirt2.position.y = skirtH * 0.7;
-    for (const m of [skirt, skirt2]) { m.renderOrder = 3; m.castShadow = m.receiveShadow = false; grp.add(m); }
+    const cloudHt = skirtH * 1.9;
+    const matDebris = debrisCloudMat(X.churn);
+    matDebris.uniforms.uR.value = t.R;
+    matDebris.uniforms.uHt.value = cloudHt;
+    const debrisCloud = new THREE.Mesh(debrisCloudGeo(qi(40, 72), t, cloudHt), matDebris);
+    debrisCloud.name = "tw-debris-cloud";
+    debrisCloud.renderOrder = 4;                    // after the funnel: the dirt is in front of its foot
+    debrisCloud.castShadow = debrisCloud.receiveShadow = false;
+    grp.add(debrisCloud);
+    // what it has picked up so far: starts as the ground it formed over
+    loftColorAt(t, t.x, t.z, _soil);
+    const alb = [_soil[0], _soil[1], _soil[2]];
 
-    // THE DUST in the debris cloud: one Points draw, CPU-orbited
+    // THE FLYING DEBRIS: chips thrown round the cloud, one Points draw, CPU-orbited
     const nDust = qi(70, 240);
     const dpos = new Float32Array(nDust * 3);
     const dust = [];
@@ -527,8 +743,9 @@
     if (da.setUsage) da.setUsage(THREE.DynamicDrawUsage);
     dg.setAttribute("position", da);
     dg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, skirtH, 0), t.R * 2 + skirtH);
-    const matDust = new THREE.PointsMaterial({ map: X.dust, color: 0x3a2a1a, size: Math.max(4, t.R * 0.32), sizeAttenuation: true,
-      transparent: true, opacity: 0.5, depthWrite: false });
+    // dark chips against the sky (their colour is set from the light per frame)
+    const matDust = new THREE.PointsMaterial({ map: X.dust, color: 0x1a1612, size: Math.max(0.9, t.R * 0.045), sizeAttenuation: true,
+      transparent: true, opacity: 0.9, depthWrite: false, alphaTest: 0.3 });
     const dustPts = new THREE.Points(dg, matDust);
     dustPts.renderOrder = 4;
     grp.add(dustPts);
@@ -566,8 +783,9 @@
     root.add(grp);
     // spine scratch: ring centres for the current frame
     const cen = new Float32Array((nR + 1) * 3);
-    t.mesh = { grp, tubeIn, tubeOut, skirt, skirt2, dustPts, dust, cloud, wall1, wall2, deck, rainWrap, ffd,
-      matIn, matOut, matSkirt, matDust, matWall, matDeck, matRain, matRainCore, rainMap, H, nR, nS, cen, skirtH, rCl, ffdR };
+    t.mesh = { grp, tubeIn, tubeOut, debrisCloud, dustPts, dust, cloud, wall1, wall2, deck, rainWrap, ffd,
+      matIn, matOut, matDebris, matDust, matWall, matDeck, matRain, matRainCore, rainMap, H, nR, nS, cen, skirtH, rCl, ffdR,
+      alb, tSoil: 0 };
   }
 
   function disposeFunnel(t) {
@@ -576,9 +794,9 @@
     try {
       if (M.grp.parent) M.grp.parent.remove(M.grp);
       M.grp.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
-      for (const m of [M.matIn, M.matOut, M.matSkirt, M.matWall, M.matRain, M.matRainCore]) { if (m.map) m.map.dispose(); m.dispose(); }
+      for (const m of [M.matIn, M.matOut, M.matWall, M.matRain, M.matRainCore]) { if (m.map) m.map.dispose(); m.dispose(); }
       if (M.rainMap) M.rainMap.dispose();
-      M.matDust.dispose(); M.matDeck.dispose();
+      M.matDust.dispose(); M.matDeck.dispose(); M.matDebris.dispose();   // the churn map is the shared cache's
     } catch (e) {}
     t.mesh = null;
   }
@@ -690,29 +908,76 @@
     const sc = 0.5 * dt * (t.vmax / 60);
     M.matIn.map.offset.y -= sc; M.matIn.map.offset.x -= spin * 0.12 * dt;
     M.matOut.map.offset.y -= sc * 0.6; M.matOut.map.offset.x -= spin * 0.07 * dt;
-    M.matSkirt.map.offset.y -= sc * 0.8; M.matSkirt.map.offset.x -= spin * 0.2 * dt;
     M.matWall.map.offset.x += 0.02 * dt;
     M.matRain.uniforms.uTime.value += dt;
     M.matRainCore.uniforms.uTime.value += dt;
-    // the debris-cloud shells and the dust live on the WIND's schedule
+    // the debris cloud and the chips live on the WIND's schedule
     const k = t.k;
-    M.skirt.rotation.y -= spin * 0.7 * dt;
-    M.skirt2.rotation.y += spin * 0.5 * dt;
     const sk = Math.max(0.001, k * (1 - 0.7 * rope));
-    M.skirt.scale.set(sk * (1 + 0.14 * Math.sin(t.age * 1.9)), 0.3 + 0.7 * sk, sk);
-    M.skirt2.scale.set(sk * (1 + 0.18 * Math.sin(t.age * 2.6 + 1.4)), 0.3 + 0.7 * sk, sk);
+    stepDebrisCloud(t, M, dt, sk);
     stepDust(t, M, dt);
     // fades: in over the first second, out over the last 1.6 s
     const fade = Math.min(1, t.age / 1.0) * Math.min(1, Math.max(0, t.life - t.age) / 1.6);
     M.matIn.opacity = 0.84 * fade;
     M.matOut.opacity = 0.34 * fade;
-    M.matSkirt.opacity = 0.6 * fade * Math.min(1, k * 1.3);
-    M.matDust.opacity = 0.5 * fade * Math.min(1, k * 1.2);
+    M.matDebris.uniforms.uOpacity.value = 0.9 * fade * Math.min(1, k * 1.3) * (1 - 0.5 * rope);
+    M.matDust.opacity = 0.9 * fade * Math.min(1, k * 1.2);
     M.matWall.opacity = 0.92 * fade;
     M.matDeck.opacity = 0.96 * fade;
     const rainA = 0.5 * fade * Math.min(1, t.age / 3) * t.wrap;
     M.matRain.uniforms.uOpacity.value = rainA;
     M.matRainCore.uniforms.uOpacity.value = rainA;
+  }
+
+  /* The debris cloud's clocks, its colour and its light. The puffs move on
+     the GPU; here: the spin phase (vmax / R, the core's angular speed, times
+     the wind envelope), the rise, the sub-vortex positions, what it has
+     picked up (sampled under the vortex 3x a second and blended in over a
+     couple of seconds, so a cloud that rolls off a field into the town goes
+     from brown to grey), and the scene's hemisphere and sun. */
+  const _sunV = new THREE.Vector3();
+  function stepDebrisCloud(t, M, dt, sk) {
+    const U = M.matDebris.uniforms, k = t.k;
+    U.uTime.value += dt;
+    U.uSpin.value += (t.vmax / Math.max(1, t.R)) * k * 0.55 * dt;
+    U.uRise.value += (0.35 + 0.65 * k) * dt;
+    U.uScale.value = sk;
+    const sv = t.sv, S = U.uSv.value;
+    for (let i = 0; i < N_SV; i++) {
+      const v = sv && sv[i];
+      if (v && k > 0.3) S[i].set(v.x - t.x, v.z - t.z, v.rs * 1.6, 1); else S[i].w = 0;
+    }
+    M.tSoil -= dt;
+    if (M.tSoil <= 0) {
+      M.tSoil = 0.33;
+      let r = 0, g = 0, b = 0;
+      const rr = t.R * 0.8;
+      for (let i = 0; i < 5; i++) {
+        const a = i * 1.2566 + t.age;
+        loftColorAt(t, t.x + (i ? Math.cos(a) * rr : 0), t.z + (i ? Math.sin(a) * rr : 0), _soil);
+        r += _soil[0]; g += _soil[1]; b += _soil[2];
+      }
+      const w = 1 - Math.exp(-0.33 / 2.2), A = M.alb;
+      A[0] += (r / 5 - A[0]) * w; A[1] += (g / 5 - A[1]) * w; A[2] += (b / 5 - A[2]) * w;
+    }
+    // dust in the air scatters more than the packed ground it came from
+    U.uAlb.value.setRGB(M.alb[0] * 1.35, M.alb[1] * 1.35, M.alb[2] * 1.35);
+    const hemi = CBZ.hemi, sun = CBZ.sun;
+    if (hemi) {
+      const hi = Math.min(3, hemi.intensity || 0);
+      U.uSky.value.copy(hemi.color).multiplyScalar(hi);
+      U.uGnd.value.copy(hemi.groundColor || hemi.color).multiplyScalar(hi);
+    }
+    if (sun) {
+      _sunV.copy(sun.position);
+      if (sun.target) _sunV.sub(sun.target.position);
+      if (_sunV.lengthSq() < 1e-6) _sunV.set(0.4, 0.8, 0.2);
+      U.uSunDir.value.copy(_sunV.normalize());
+      U.uSun.value.copy(sun.color).multiplyScalar(Math.min(3, sun.intensity || 0));
+    }
+    // the chips: the same dirt, darker (small, edge-on, in the cloud's shadow)
+    const Lr = U.uSky.value.r * 0.6 + U.uGnd.value.r * 0.4, Lg = U.uSky.value.g * 0.6 + U.uGnd.value.g * 0.4, Lb = U.uSky.value.b * 0.6 + U.uGnd.value.b * 0.4;
+    M.matDust.color.setRGB(M.alb[0] * Lr * 0.7, M.alb[1] * Lg * 0.7, M.alb[2] * Lb * 0.7);
   }
 
   function stepDust(t, M, dt) {
@@ -1365,13 +1630,39 @@
      trunk leans about its break. A tree is not a piece of a building and its
      trunk is still rooted at the pivot, so this stays a hinge (it never
      carries a building part: fellWall above is a body now). */
+  /* AN UPROOTED TREE FALLS UNTIL IT MEETS THE GROUND (2026-10-19). The
+     fall was a fixed 78 degrees from vertical, whatever the ground did: on a
+     slope falling downhill the tree stopped short with its whole length
+     hanging over the hillside, and its crown (a hinge of its own) had no idea
+     where the trunk had stopped. Now the trunk's own reach (`reach`, metres
+     from the root plate) is tested against the ground as it goes: it stops
+     on the slope uphill, lies past horizontal downhill, and the crown rides
+     the trunk's angle (`lead`). */
   const hinges = [];
+  const _hv = new THREE.Vector3();
   function stepHinges(dt) {
     for (let i = hinges.length - 1; i >= 0; i--) {
       const H = hinges[i];
-      if (H.a >= H.max) { hinges.splice(i, 1); continue; }
+      if (H.lead) {
+        // the crown: wherever its trunk is (the trunk is stepped after it,
+        // so this is the trunk's angle as of its last step, final included)
+        H.a = H.lead.a;
+        _qa.setFromAxisAngle(H.axis, H.a);
+        H.o.quaternion.copy(_qa).multiply(H.q0);
+        _v.copy(H.p0).sub(H.base).applyQuaternion(_qa).add(H.base);
+        H.o.position.copy(_v);
+        if (H.lead.done) { H.done = true; hinges.splice(i, 1); }
+        continue;
+      }
+      if (H.a >= H.max) { H.done = true; hinges.splice(i, 1); continue; }
       H.w += (3.5 * Math.sin(H.a + 0.15) + 0.6) * dt;   // gravity's moment grows as it leans
       H.a = Math.min(H.max, H.a + H.w * dt);
+      if (H.reach > 0 && H.a > 0.35) {
+        // the trunk's reach point, this angle: on (or in) the ground = down
+        _hv.set(0, H.reach, 0).applyAxisAngle(H.axis, H.a).add(H.base);
+        const gfn = H.t ? H.t.gfn : floorAt;
+        if (_hv.y <= gfn(_hv.x, _hv.z) + 0.3) H.max = H.a;
+      }
       _qa.setFromAxisAngle(H.axis, H.a);
       H.o.quaternion.copy(_qa).multiply(H.q0);
       _v.copy(H.p0).sub(H.base).applyQuaternion(_qa).add(H.base);
@@ -1574,7 +1865,17 @@
       const base = new THREE.Vector3(tr.x, gy, tr.z);
       const axis = new THREE.Vector3(wx, 0, wz).cross(_up).negate().normalize();
       if (uproot) {
-        for (const o of [tr.trunk, tr.foliage]) if (o) { liberate(o); hinges.push({ o: o, base: base, axis: axis, a: 0, w: 0.4, max: Math.PI / 2 - 0.12, q0: o.quaternion.clone(), p0: o.position.clone(), b: null, t: t }); }
+        // how far up the trunk reaches (its top, less the crown's spread)
+        let reach = 0;
+        if (tr.trunk) { _bb.setFromObject(tr.trunk); if (!_bb.isEmpty()) reach = Math.max(0, (_bb.max.y - gy) * 0.85); }
+        let lead = null;
+        for (const o of [tr.trunk, tr.foliage]) if (o) {
+          liberate(o);
+          const H = { o: o, base: base, axis: axis, a: 0, w: 0.4, max: reach > 0 ? Math.PI / 2 + 0.45 : Math.PI / 2 - 0.12, q0: o.quaternion.clone(), p0: o.position.clone(), b: null, t: t,
+            reach: lead ? 0 : reach, lead: lead, done: false };
+          hinges.push(H);
+          if (!lead && o === tr.trunk) lead = H;
+        }
         burst(tr.x, gy + 0.3, tr.z, 0x4a3828, 3, 3, gfn);                      // the root ball tears the ground
       } else {
         // SNAPPED: the crown is torn off and flies; the trunk is left leaning

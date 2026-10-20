@@ -1049,7 +1049,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=island1014"></script>
-<script src="src/systems/debris.js?v=debris1015"></script>
+<script src="src/systems/debris.js?v=treesup1019"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -1065,7 +1065,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads2town"></script>
 <script src="src/world/island_plan.js?v=plan1"></script>
 <script src="src/world/instance_proxy.js?v=proxy1"></script>
-<script src="src/world/disaster_arena.js?v=debris1015"></script>
+<script src="src/world/disaster_arena.js?v=twdust1019"></script>
 <script src="src/world/island_dressing.js?v=dress2town"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
@@ -1095,13 +1095,13 @@ document.body.appendChild(b);}}catch(e){}})();
      builders. Must precede systems/disasters.js so the roster finds
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. REQUIRED: the
      old additive-stream fallback in disasters.js was deleted 2026-09-28. -->
-<script src="src/world/volcanofx.js?v=fire1014"></script>
+<script src="src/world/volcanofx.js?v=vlook1019"></script>
 <!-- THE ERUPTION'S SEQUENCE: world/eruption.js (CBZ.eruption) runs unrest,
      phreatic blast, Plinian column + umbrella, bombs, lightning, lava,
      collapse and lahar on volcanofx's builders, mode-agnostic (the lab's
      eruption kit drives the same file). Its fires are systems/wildfire.js's.
      Must precede systems/disasters.js. -->
-<script src="src/world/eruption.js?v=fire1014"></script>
+<script src="src/world/eruption.js?v=vlook1019"></script>
 <!-- THE QUAKE IS SHARED: systems/quake.js is the whole earthquake event (source
      and path, P/S/surface wave train, buildings by type and height, cracks,
      mains, liquefaction, cars, the crowd, what falls on whom), drop-cover,
@@ -1128,10 +1128,10 @@ document.body.appendChild(b);}}catch(e){}})();
      debris jams, bridge failure, manholes and the silt it leaves. Loads before
      world/water_spec.js; it reaches the material at runtime. -->
 
-<script src="src/systems/flashflood.js?v=islandglitch1015"></script>
+<script src="src/systems/flashflood.js?v=waterlook1019"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
-<script src="src/systems/hurricane.js?v=debris1015"></script>
+<script src="src/systems/hurricane.js?v=curtain1019"></script>
 <!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
@@ -1150,7 +1150,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=debris1015"></script>
+<script src="src/systems/disasters.js?v=waterlook1019"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>
@@ -1180,12 +1180,12 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=islandglitch1015"></script>
+<script src="src/world/water_spec.js?v=waterlook1019"></script>
 <!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
-<script src="src/world/tsunami_runup.js?v=runup1014"></script>
-<script src="src/world/tsunami_debris.js?v=debris1015"></script>
+<script src="src/world/tsunami_runup.js?v=waterlook1019"></script>
+<script src="src/world/tsunami_debris.js?v=curtain1019"></script>
 <script src="src/world/tsunami_flow.js?v=runup1014"></script>
-<script src="src/world/tsunami_scene.js?v=runup1014"></script>
+<script src="src/world/tsunami_scene.js?v=waterlook1019"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
 <script src="src/city/world.js?v=lodlight1012"></script>
@@ -1673,7 +1673,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=debris1015"></script>
+<script src="src/systems/tornado.js?v=twdust1019"></script>
 <script src="src/city/aircraftimpact.js?v=street1009"></script>
 <script src="src/city/shops.js?v=vault1013"></script>
 <script src="src/city/gunstore.js?v=peak1014c"></script>

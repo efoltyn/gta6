@@ -3056,7 +3056,58 @@
     out.floating += out.gritFloating;
     return out;
   }
+  /* THE TREES (2026-10-19, owner: "after a tsunami, trees and other things
+     stay FLOATING in the air"). None of the island's ~330 trees is a piece
+     of this sim or any source's, so nothing counted one: the tsunami's log,
+     the tornado's hinge, the hurricane's windthrow and the match reset all
+     move the real trunk and crown meshes, and a tree left hanging was
+     invisible to every audit. Asked here of the trees themselves, by the
+     same law as the grit: the trunk's lowest point over what it stands on
+     (the floor under it, or rubble), and a crown torn off its trunk over
+     the same. A crown still on its trunk is held by it. */
+  const _tbT = new THREE.Box3(), _tbF = new THREE.Box3();
+  function hiddenUp(o) { for (let a = o; a; a = a.parent) if (a.visible === false) return true; return false; }
+  function treeSupportUnder(box) {
+    const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
+    const fl = floorAt(cx, cz, box.min.y + 0.3), hh = hfAt(cx, cz);
+    return Math.max(fl, hh <= box.min.y + 0.1 ? hh : -Infinity);
+  }
+  function treeAudit() {
+    const A = CBZ.surv && CBZ.surv.arena;
+    if (!A || !Array.isArray(A.flammable) || !A.flammable.length) return null;
+    if (!(CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode))) return null;
+    const r = { floating: 0, fast: 0, high: 0, maxSpeed: 0, maxHeight: 0, trees: A.flammable.length, crowns: 0, moved: 0, list: [] };
+    for (let i = 0; i < A.flammable.length; i++) {
+      const t = A.flammable[i];
+      const tr = t.trunk, fo = t.foliage;
+      let trunkOn = false;
+      if (tr && tr.parent && !hiddenUp(tr)) {
+        tr.updateWorldMatrix(true, false);
+        _tbT.setFromObject(tr);
+        if (!_tbT.isEmpty()) {
+          trunkOn = true;
+          if (t._tsuUproot || Math.hypot((_tbT.min.x + _tbT.max.x) / 2 - t.x, (_tbT.min.z + _tbT.max.z) / 2 - t.z) > 1.5) r.moved++;
+          const gap = _tbT.min.y - treeSupportUnder(_tbT);
+          if (gap > r.maxHeight) r.maxHeight = +gap.toFixed(1);
+          if (gap > 120) r.high++;
+          if (gap > 0.5) { r.floating++; if (r.list.length < 6) r.list.push({ tree: i, part: "trunk", x: +t.x.toFixed(1), z: +t.z.toFixed(1), y: +_tbT.min.y.toFixed(2), gap: +gap.toFixed(2) }); }
+        }
+      }
+      if (fo && fo.parent && !hiddenUp(fo)) {
+        fo.updateWorldMatrix(true, false);
+        _tbF.setFromObject(fo);
+        if (_tbF.isEmpty()) continue;
+        if (trunkOn && _tbF.intersectsBox(_tbT.expandByScalar(1.0))) continue;   // held by its trunk
+        r.crowns++;
+        const gap = _tbF.min.y - treeSupportUnder(_tbF);
+        if (gap > 120) r.high++;
+        if (gap > 0.5) { r.floating++; if (r.list.length < 6) r.list.push({ tree: i, part: "crown", x: +t.x.toFixed(1), z: +t.z.toFixed(1), y: +_tbF.min.y.toFixed(2), gap: +gap.toFixed(2) }); }
+      }
+    }
+    return r;
+  }
   const SOURCES = CBZ.debrisAuditSources || (CBZ.debrisAuditSources = {});
+  if (!SOURCES.trees) SOURCES.trees = function () { return treeAudit(); };
   CBZ.debrisAudit = function (o) {
     o = o || {};
     const D = audit(o);

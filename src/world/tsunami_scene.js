@@ -37,7 +37,9 @@
   if (!CBZ || !THREE) return;
 
   const DRAW_MAX = 7.6;     // m: the deepest drawdown disasters.js can roll (6.7 * 1.13)
-  const DRY_SECS = 120;     // s for a flooded surface to go from soaked to dry silt
+  // s for a flooded surface to go from soaked to dry silt: the one flood
+  // residue clock (world/water_spec.js), shared with the flash flood
+  const DRY_SECS = CBZ.floodResidueDrySecs || 150;
   const MUD_N = 64;         // wetness/mud cells per side over the island
   const MUD_LIFT = 0.13;    // m the silt drape rides above the ground
   const BAND_LIFT = 0.08;   // m the seabed skin rides above the bed
@@ -93,6 +95,8 @@
   const tsu = { active: false, phase: "", t: 0, cx: 0, cz: 0, dx: 1, dz: 0, frontS: -1e9, ahead: 0 };
   const flood = { active: false };
   let drying = false;        // mud / stain still drying after the water left
+  let settleReq = 0;         // s: the calm asked for the marks to fade over this long
+  let fadeRate = 1.5;        // 1/s the marks fade at once the calm has begun
   let events = 0;            // how many flood events this arena has seen (audit)
 
   function live() {
@@ -651,7 +655,7 @@
           "varying vec3 vMdW; varying vec3 vMdN;",
           "uniform sampler2D uMud; uniform vec2 uMudO; uniform float uMudS; uniform vec2 uDrain;",
           "uniform float uTime; uniform vec3 uSky; uniform vec3 uSunDir; uniform vec3 uSunCol;",
-          NOISE, SHEEN,
+          NOISE, SHEEN, CBZ.floodResidueGLSL ? CBZ.floodResidueGLSL() : "",
           "float mdGloss; float mdPud; float n2; float n3;",
         ].join("\n"))
         .replace("#include <color_fragment>", [
@@ -663,34 +667,20 @@
           // metres of water that stood over THIS point at the peak, off the real
           // ground under the fragment: the inland limit is a contour, not a cell
           "  float reach = level - (vMdW.y - " + MUD_LIFT.toFixed(3) + ");",
-          "  float wet = m.g, thick = m.b;",
+          "  float wet = m.g;",
           "  vec2 p = vMdW.xz;",
-          "  vec2 pr = vec2(-uDrain.y, uDrain.x);",
-          "  float n1 = tsN(p * 0.17); n2 = tsN(p * 0.71 + 5.0); n3 = tsN(p * 2.9 + 1.3);",
-          // silt combed out along the drain
-          "  float streak = tsN(vec2(dot(p, pr) * 0.55, dot(p, uDrain) * 0.045) + n1 * 0.9);",
-          "  float cover = smoothstep(0.0, 0.3, reach);",
-          "  vec3 siltDry = vec3(0.235, 0.215, 0.180);",
-          "  vec3 siltWet = vec3(0.070, 0.060, 0.047);",
-          "  float wk = wet * wet * (3.0 - 2.0 * wet);",
-          "  vec3 col = mix(siltDry, siltWet, wk);",
-          "  col *= 0.82 + 0.36 * n2;",
-          "  col *= 1.0 - 0.30 * smoothstep(0.45, 0.85, streak);",
-          "  float a = cover * (0.32 + 0.40 * thick + 0.18 * n1) * mix(0.72, 1.0, wk);",
-          "  a *= 0.72 + 0.40 * smoothstep(0.3, 0.85, streak);",
-          // standing puddles, shrinking as it dries
-          "  float pth = 0.68 + (1.0 - wet) * 0.18;",
-          "  mdPud = smoothstep(pth, pth + 0.035, n1 * 0.62 + n2 * 0.28 + n3 * 0.10) * cover;",
-          "  col = mix(col, vec3(0.040, 0.037, 0.030), mdPud);",
-          "  a = max(a, mdPud * 0.95);",
-          // the wrack line where the water stopped, and the scum just below it
-          "  float lr = reach + 0.05 - (n2 - 0.5) * 0.14;",
-          "  float line = 1.0 - smoothstep(0.0, 0.16, abs(lr));",
-          "  float scum = (1.0 - smoothstep(0.0, 0.12, abs(lr - 0.26))) * smoothstep(0.42, 0.6, n3);",
-          "  col = mix(col, vec3(0.030, 0.026, 0.020), line);",
-          "  col = mix(col, vec3(0.30, 0.29, 0.26), scum * 0.85);",
-          "  a = max(a, max(line * 0.9, scum * 0.75));",
-          "  mdGloss = wk * (0.45 + 0.55 * mdPud) + mdPud * 0.25 * (1.0 - wk);",
+          "  n2 = tsN(p * 0.71 + 5.0); n3 = tsN(p * 2.9 + 1.3);",
+          // THE ONE FLOOD RESIDUE (world/water_spec.js cbzFloodResidue):
+          // thick where the water stood deep, the wrack at the reach, combed
+          // seaward by the drain, wet-dark drying to a pale crust
+          "  float thick = clamp(0.12 + m.b * 0.95, 0.0, 1.0);",
+          "  float edge = 1.0 - smoothstep(0.04, 0.42, reach);",
+          "  float rsG = 0.0;",
+          "  vec4 rs = cbzFloodResidue(p, thick, 1.0 - wet, edge, uDrain, rsG);",
+          "  vec3 col = rs.rgb;",
+          "  float a = rs.a * smoothstep(-0.04, 0.14, reach);",
+          "  mdPud = smoothstep(0.55, 0.9, rsG);",
+          "  mdGloss = rsG;",
           "  diffuseColor.rgb = col;",
           "  diffuseColor.a = clamp(a, 0.0, 1.0);",
           "  if (diffuseColor.a < 0.01) discard;",
@@ -786,7 +776,22 @@
     return stillWet;
   }
 
-  // ---- the high-water stain: open box shells around the standing buildings -----
+  /* ---- the high-water stain: open box shells around the standing buildings -----
+     THE CURTAIN BUG (2026-10-19, owner on an iPad, round 13): "this weird
+     thing that curves around buildings, looks almost like a fence". Each
+     shell stood 0.3 m OFF its facade and was as tall as the highest water
+     the street outside reached. A big wave buries a one-storey house under
+     8-14 m of water, so the mark rose metres past the roof: a free-standing
+     translucent grey box with the sky behind it, drip-streaked, its top line
+     tracing the footprint. And nothing took it down: it was cleared only by
+     the NEXT tsunami or a match reset, it stayed up when the building fell
+     (the sinkhole rounds), and the flash flood, which draws its own tide
+     marks (systems/flashflood.js buildMarks), got a second set from here.
+     Now the mark is ON the wall (6 cm out), never above the wall's top,
+     drops with its building, is the flash flood's only when no routed flood
+     is drawing them, and fades out in the calm after the round
+     (CBZ.tsunamiScene.settle, called by the director's settleWorld). */
+  const STAIN_OFF = 0.06;    // m the shell stands proud of the facade (polygon offset does the rest)
   function buildStain() {
     const list = (A.fragile || []).slice();
     const N = Math.max(1, list.length);
@@ -827,30 +832,17 @@
           "#endif",
         ].join("\n"));
       sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying vec4 vSt;\nvarying vec3 vStP;\nvarying float vStY;\n" + NOISE)
+        .replace("#include <common>", "#include <common>\nvarying vec4 vSt;\nvarying vec3 vStP;\nvarying float vStY;\n" + NOISE + "\n" + (CBZ.floodResidueGLSL ? CBZ.floodResidueGLSL() : ""))
         .replace("#include <color_fragment>", [
           "#include <color_fragment>",
           "{",
           "  float H = vSt.x;",
-          "  float below = (1.0 - vStY) * H;",               // m under the high-water line
-          "  float along = vStP.x + vStP.z;",
-          "  float b = below + (tsN(vec2(along * 0.9, 3.0)) - 0.5) * 0.10;",
-          "  if (b < 0.0 || vSt.y < 0.01) discard;",
-          "  float wet = vSt.z;",
-          "  float up = clamp(vStY, 0.0, 1.0);",
-          "  float drip = smoothstep(0.35, 0.8, tsN(vec2(along * 2.3, vStP.y * 0.13)));",
-          "  float mott = tsN(vec2(along * 0.7, vStP.y * 0.6));",
-          "  vec3 mud = mix(vec3(0.20, 0.18, 0.145), vec3(0.075, 0.065, 0.050), wet);",
-          "  float a = mix(0.62, 0.30, up) * (0.78 + 0.30 * drip + 0.12 * mott);",
-          "  a *= smoothstep(0.02, 0.10, b);",
-          // the crisp dark line at the top, then the scum band just under it
-          "  float line = 1.0 - smoothstep(0.035, 0.085, b);",
-          "  float scum = smoothstep(0.08, 0.11, b) * (1.0 - smoothstep(0.22, 0.34, b)) * smoothstep(0.35, 0.6, tsN(vec2(along * 4.0, vStP.y * 5.0)));",
-          "  vec3 col = mud * (0.85 + 0.3 * mott);",
-          "  col = mix(col, vec3(0.025, 0.022, 0.018), line);",
-          "  col = mix(col, vec3(0.34, 0.33, 0.30), scum * 0.9);",
-          "  a = max(a, max(line * 0.92, scum * 0.8));",
-          "  diffuseColor.rgb = col;",
+          "  if (vSt.y < 0.01) discard;",
+          // THE ONE WATERLINE (world/water_spec.js cbzWaterline)
+          "  vec4 wl = cbzWaterline((1.0 - vStY) * H, vStP.x + vStP.z, vStP.y, vSt.z);",
+          "  if (wl.a < 0.01) discard;",
+          "  diffuseColor.rgb = wl.rgb;",
+          "  float a = wl.a;",
           "  diffuseColor.a = clamp(a, 0.0, 1.0) * vSt.y;",
           "}",
         ].join("\n"));
@@ -867,12 +859,20 @@
     return {
       mesh, attr, list, N, zero,
       lvl: new Float32Array(N).fill(-99), cur: new Float32Array(N), wet: new Float32Array(N), show: new Float32Array(N),
+      fade: false,
     };
   }
   const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
+  // the top of the wall the mark is painted on (world y), or +inf when unknown
+  function wallTopOf(b, base) {
+    if (Number.isFinite(b.roofY)) return b.roofY;
+    return Number.isFinite(b.h) && b.h > 0 ? base + b.h : Infinity;
+  }
   function stainTick(dt, query) {
     const T = S.stain, arr = T.attr.array;
     let any = false, wetLeft = false, dirtyM = false;
+    // a routed flash flood paints its own tide marks on these same walls
+    if (query && !tsu.active && CBZ.flashflood && CBZ.flashflood.live) query = false;
     for (let i = 0; i < T.list.length; i++) {
       const b = T.list[i];
       if (b.fallen || T.lvl[i] < -90) {
@@ -894,9 +894,10 @@
         if (d > 0.04) T.wet[i] = 1;
         if (cur > T.lvl[i] && cur - base > 0.3) {
           T.lvl[i] = cur;
-          const H = cur - base + 0.05;
+          // never above the wall: water over the roof leaves no mark in the air
+          const H = Math.min(cur, wallTopOf(b, base)) - base + 0.05;
           _p.set(b.x, base - 0.05, b.z);
-          _s.set((b.w || 4) + 0.6, H, (b.d || 4) + 0.6);
+          _s.set((b.w || 4) + STAIN_OFF * 2, H, (b.d || 4) + STAIN_OFF * 2);
           _m4.compose(_p, _q, _s);
           T.mesh.setMatrixAt(i, _m4);
           dirtyM = true;
@@ -905,8 +906,9 @@
       } else T.cur[i] = -99;
       if (T.lvl[i] < -90) continue;
       // reveal once the water has dropped off the mark (never a line riding the surface)
-      const target = T.lvl[i] - T.cur[i] > 0.3 ? 1 : 0;
-      T.show[i] += (target - T.show[i]) * Math.min(1, dt * 1.5);
+      const target = !T.fade && T.lvl[i] - T.cur[i] > 0.3 ? 1 : 0;
+      T.show[i] += (target - T.show[i]) * Math.min(1, dt * (T.fade ? fadeRate : 1.5));
+      if (T.fade && T.show[i] < 0.01) T.show[i] = 0;
       if (T.cur[i] < -90 || T.cur[i] < T.lvl[i] - 0.05) T.wet[i] = Math.max(0, T.wet[i] - dt / DRY_SECS);
       if (T.wet[i] > 0) wetLeft = true;
       arr[i * 4 + 1] = T.show[i];
@@ -916,7 +918,35 @@
     if (dirtyM) T.mesh.instanceMatrix.needsUpdate = true;
     T.attr.needsUpdate = true;
     T.mesh.visible = any;
+    if (T.fade) {
+      // the calm's fade has run out: nothing of the marks is left at all
+      let lit = false;
+      for (let i = 0; i < T.N; i++) if (T.show[i] > 0) { lit = true; break; }
+      if (!lit) { clearStain(); return false; }
+      return true;
+    }
     return wetLeft;
+  }
+  // a building that has come down since its mark was made takes the mark with
+  // it (the slow pass runs this whenever any mark stands, water or not)
+  function stainFallen() {
+    const T = S.stain;
+    if (!T.mesh.visible) return;
+    let dirty = false;
+    for (let i = 0; i < T.list.length; i++) {
+      if (T.lvl[i] < -90 || !T.list[i].fallen) continue;
+      T.lvl[i] = -99; T.show[i] = 0; T.attr.array[i * 4 + 1] = 0;
+      T.mesh.setMatrixAt(i, T.zero); dirty = true;
+    }
+    if (dirty) { T.mesh.instanceMatrix.needsUpdate = true; T.attr.needsUpdate = true; }
+  }
+  function clearStain() {
+    if (!S) return;
+    const T = S.stain;
+    T.lvl.fill(-99); T.wet.fill(0); T.show.fill(0); T.cur.fill(-99); T.fade = false;
+    T.attr.array.fill(0); T.attr.needsUpdate = true;
+    for (let i = 0; i < T.N; i++) T.mesh.setMatrixAt(i, T.zero);
+    T.mesh.instanceMatrix.needsUpdate = true; T.mesh.visible = false;
   }
 
   /* =============================================================================
@@ -938,11 +968,7 @@
     const M = S.mud;
     M.lvl.fill(-99); M.dep.fill(0); M.wet.fill(0); M.lb.fill(0); M.data.fill(0);
     M.any = false; M.tex.needsUpdate = true; M.mesh.visible = false;
-    const T = S.stain;
-    T.lvl.fill(-99); T.wet.fill(0); T.show.fill(0); T.cur.fill(-99);
-    T.attr.array.fill(0); T.attr.needsUpdate = true;
-    for (let i = 0; i < T.N; i++) T.mesh.setMatrixAt(i, T.zero);
-    T.mesh.instanceMatrix.needsUpdate = true; T.mesh.visible = false;
+    clearStain();
   }
   function clearAll() {
     tsu.active = false; flood.active = false;
@@ -1021,11 +1047,12 @@
     } else if (S.fish.mesh.visible) {
       S.fish.mesh.visible = false;
     }
-    if (water || drying) {
+    if (water || drying || S.stain.fade) {
       const w1 = mudTick(dt, water);
       const w2 = stainTick(dt, water);
       drying = !water && (w1 || w2);
     }
+    stainFallen();
   }
 
   // 48.2: after the ocean has taken this frame's surge (47.9) and the beach's
@@ -1046,10 +1073,16 @@
     if (!isT && tsu.active) { tsu.active = false; drying = true; }
     if (isF && !flood.active) {
       ensureBuilt(); flood.active = true; events++;
+      S.stain.fade = false;
       S.mud.MU.uDrain.value.set(-(+e.dx || 1), -(+e.dz || 0));
     }
     if (!isF && flood.active) { flood.active = false; drying = true; }
+    if (isT || isF) settleReq = 0;           // a new flood writes its own marks
     if (!S) return;
+    if (settleReq > 0 && !tsu.active && !flood.active) {
+      if (S.stain.mesh.visible) { S.stain.fade = true; fadeRate = 5 / settleReq; }
+      settleReq = 0;
+    }
 
     if (tsu.active) {
       tsu.t += dt;
@@ -1085,17 +1118,41 @@
         if (S.mud.wet[k] > 0) wet++;
       }
       let stained = 0; for (let i = 0; i < S.stain.N; i++) if (S.stain.lvl[i] > -90) stained++;
+      /* the curtain law, measured: a drawn mark taller than its wall, one
+         standing on a fallen building, one standing off its facade */
+      let overWall = 0, onFallen = 0, maxMarkM = 0;
+      for (let i = 0; i < S.stain.list.length; i++) {
+        if (S.stain.lvl[i] < -90) continue;
+        const b = S.stain.list[i];
+        if (b.fallen) { onFallen++; continue; }
+        S.stain.mesh.getMatrixAt(i, _m4);
+        const H = _m4.elements[5];
+        if (H > maxMarkM) maxMarkM = H;
+        const base = b.gy != null ? b.gy : gh(b.x, b.z);
+        if (H - 0.06 > wallTopOf(b, base) - base + 0.01) overWall++;
+      }
       let fishShown = 0; for (let i = 0; i < S.fish.N; i++) if (S.fish.show[i] > 0.5) fishShown++;
       return {
         built: true, events, tsunami: tsu.active ? tsu.phase : null, flood: flood.active, drying,
         mudCells: reached, wetCells: wet, maxLevel: +maxLvl.toFixed(2),
-        stainedBuildings: stained, fishShown, fish: S.fish.N, reef: S.reef.count,
+        stainedBuildings: stained, stainOverWall: overWall, stainOnFallen: onFallen, stainFading: !!S.stain.fade, maxMarkM: +maxMarkM.toFixed(2),
+        fishShown, fish: S.fish.N, reef: S.reef.count,
         visible: {
           band: S.band.mesh.visible, fish: S.fish.mesh.visible, mud: S.mud.mesh.visible, stain: S.stain.mesh.visible,
         },
       };
     },
     reset: clearAll,
+    /* THE CALM (systems/disasters.js settleWorld): the high-water marks fade
+       off the walls over the next second or two and are gone before the
+       next round; the silt on the ground keeps drying on its own clock. */
+    settle(secs) {
+      if (!S) return false;
+      // the round's own event may still be letting go this frame (end() has
+      // just cleared it): the fade starts on the first dry pass
+      settleReq = Math.max(1, +secs || 6);
+      return true;
+    },
     // the four hulls on the bared shelf (Object3D each), for the wave to take
     boats() { return S && S.boats && S.boats.hulls ? S.boats.hulls.slice() : []; },
     /* one dinghy hull as its own mesh (L length, B beam, D depth, paint /

@@ -426,9 +426,21 @@
          rest of the match. It is the game's clock, not the soil's (real
          ground takes hours); the backwash itself is the solver's. */
       const sp0 = F.seep > 0 ? F.seep * dt : 0;
-      if (sp0 > 0) for (let j = 0; j < n; j++) for (let i = lo[j]; i <= hi[j]; i++) {
+      /* THE LEVEL DROPS, IT DOES NOT FADE. `seepEnd` (field seconds, set by
+         the owner) is when the land must be dry: over the last LAST_S
+         seconds before it every pond also loses a share of its OWN depth
+         (h * w / time left), so the shallow sheets go first on the plain
+         seep, the deep hollows hold longest, and all of it reaches the
+         ground exactly at the deadline: the field never detaches with a
+         pond still standing, which made the water blink off. */
+      const LAST_S = 9;
+      const rem = F.seepEnd > 0 ? F.seepEnd - t : Infinity;
+      const pk = rem < LAST_S ? Math.min(1, (1 - Math.max(0, rem) / LAST_S) * (1 - Math.max(0, rem) / LAST_S) * dt / Math.max(dt, rem)) : 0;
+      if (sp0 > 0 || pk > 0) for (let j = 0; j < n; j++) for (let i = lo[j]; i <= hi[j]; i++) {
         const k = j * n + i;
-        if (!forced[k] && h[k] > 0) h[k] = h[k] > sp0 ? h[k] - sp0 : 0;
+        if (forced[k] || !(h[k] > 0)) continue;
+        const loss = sp0 + h[k] * pk;
+        h[k] = h[k] > loss ? h[k] - loss : 0;
       }
       // ---- velocities, books, arrival
       landVol = 0;
@@ -562,7 +574,7 @@
 
     function reset() {
       h.fill(0); u.fill(0); v.fill(0); qx.fill(0); qz.fill(0);
-      F.seep = 0;
+      F.seep = 0; F.seepEnd = 0;
       hmax.fill(0); arrive.fill(-1);
       t = 0; steps = 0; subTotal = 0; msSum = 0; msN = 0; msMax = 0; peakLandVol = 0; landVol = 0; inflow = 0; hmLast = 4;
       for (let b = 0; b < blocks.length; b++) { const B = blocks[b]; B.rimLvl = -99; B.rimNow = -99; B.inLvl = -99; B.maxH = 0; B.maxHV2 = 0; }
@@ -598,7 +610,7 @@
     const F = {
       n: n, cell: dx, x0: x0, z0: z0, size: n * dx, restY: restY, NN: NN,
       zb: zb, h: h, u: u, v: v, hmax: hmax, arrive: arrive, coast: coast, forced: forced, bid: bid,
-      after: [], seep: 0,
+      after: [], seep: 0, seepEnd: 0,
       get ready() { return ready; },
       get t() { return t; },
       get blocks() { return blocks; },

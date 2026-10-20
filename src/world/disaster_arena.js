@@ -5970,6 +5970,20 @@
           minX: cx - R - 12, maxX: cx + R + 12, minZ: cz - R - 12, maxZ: bz1 + 12, seaR: FAR_WL },
         coast: coast, beachR: R + BEACH_W * 0.45, shelfR: SHORE_R,
         coastAt: function () { return R; },
+        /* what the wind lifts at (x, z), as linear albedo (systems/tornado.js's
+           debris cloud takes its colour from it): the sea gives spray, the
+           beach sand, a street concrete and asphalt grit, the grass torn turf
+           over soil (a field's debris cloud is brown with an olive cast, never
+           green). Returns `out`. */
+        dustColorAt: function (x, z, out) {
+          out = out || [0, 0, 0];
+          const set = function (r, g, b) { out[0] = r; out[1] = g; out[2] = b; return out; };
+          if (groundHeightAt(x, z) < OCEAN_Y + 0.05) return set(0.30, 0.32, 0.34);
+          if (Math.hypot(x - cx, z - cz) > R + 1) return set(0.25, 0.205, 0.125);
+          if (onRoad(x, z, 1, 1)) return set(0.075, 0.073, 0.072);
+          grassColorAt(x, z, out);
+          return set(out[0] * 0.4 + 0.051, out[1] * 0.4 + 0.041, out[2] * 0.4 + 0.030);
+        },
         buildings: fragile,
         helipads: fragile.filter(function (b) { return b.helipadCandidate; }),
         roads: { pieces: pieces, junctions: roadPlan ? roadPlan.junctions.map(function (j) { return { x: j.x, z: j.z, n: j.n, N: j.N, S: j.S, E: j.E, W: j.W }; }) : [],
