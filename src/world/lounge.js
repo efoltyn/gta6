@@ -261,47 +261,79 @@
     // comes from the shared kit, so its seats are declared to propuse at their
     // real cushion height — a body can be sat here later with no work.
     PD.roundTable(21.9, 40.9, { seatTone: 0x7a5230, tone: 0x9a8e78, spin: 0.4 });
-    // the game in progress: cards fanned across the top, dominoes at one edge
-    for (let i = 0; i < 5; i++) {
-      const a = 0.7 + i * 1.0, r = 0.16 + PD.h01(i * 4.3, 40.9, 0x9311) * 0.3;
-      const c = addBox(21.9 + Math.cos(a) * r, 0.815, 40.9 + Math.sin(a) * r,
-        0.13, 0.008, 0.19, i % 3 ? 0xf3efe2 : 0xd8cdb4, { cast: false });
-      c.rotation.y = a + PD.h01(i, 7, 0x9312) * 0.8;
+    // the game in progress: cards fanned across the top (the real 0.762 m
+    // stainless top, PD.roundTable), a squared deck, dominoes at one edge
+    // and the pot: a soft pack and three loose cigarettes. ONE mesh.
+    if (PD.Paint) {
+      const T = new PD.Paint(), TOP = 0.762;
+      for (let i = 0; i < 5; i++) {
+        const a = 0.7 + i * 1.0, r = 0.14 + PD.h01(i * 4.3, 40.9, 0x9311) * 0.24;
+        T.box(Math.cos(a) * r, TOP + 0.002 + i * 0.0006, Math.sin(a) * r, 0.063, 0.0012, 0.089,
+          i % 3 ? 0xf3efe2 : 0xd8cdb4, a + PD.h01(i, 7, 0x9312) * 0.8);   // a playing card, 63 x 89 mm
+      }
+      T.box(-0.12, TOP + 0.009, -0.18, 0.063, 0.018, 0.089, 0xe9e4d6, 0.3);         // the deck
+      T.box(-0.12, TOP + 0.0185, -0.18, 0.06, 0.001, 0.086, 0x8a2b2b, 0.3);         // its red back
+      for (let i = 0; i < 4; i++) {
+        T.box(0.3, TOP + 0.0055, -0.3 + i * 0.05, 0.048, 0.011, 0.024, 0xe8e2d2, 0.1 * i);   // dominoes, 48 x 24 mm
+        T.box(0.3, TOP + 0.0112, -0.3 + i * 0.05, 0.002, 0.0006, 0.022, 0x1a1a1a, 0.1 * i);  // their bar
+      }
+      T.box(-0.33, TOP + 0.011, 0.28, 0.054, 0.022, 0.087, 0xd9b23c, 0.5);          // the pot: a soft pack
+      for (let i = 0; i < 3; i++) {
+        T.cyl(-0.26 + i * 0.02, TOP + 0.004, 0.3 - i * 0.015, 0.004, 0.004, 0.084, 0xf0ece4, 6, Math.PI / 2, 0.3 * i);   // loose cigs
+      }
+      T.mesh(21.9, 0, 40.9, 0);
     }
-    for (let i = 0; i < 4; i++)
-      addBox(22.32, 0.816 + (i % 2) * 0.012, 40.55 + i * 0.11, 0.11, 0.02, 0.055,
-        0xe8e2d2, { cast: false });
-    addBox(21.55, 0.83, 41.2, 0.16, 0.04, 0.16, 0xd9b23c, { cast: false });   // the pot: a few cigs
 
     // ---- 4. BOOK SHELF (south wall) ---------------------------------------
-    // PRISON_PROP_USE_V1: this is a 1.9 m wide, 1.53 m tall unit of furniture
-    // standing on the floor and it had no collider, so the shelf, its two
-    // uprights and ten paperbacks were fifteen boxes you walked through. It
-    // keeps its geometry exactly — a dayroom shelf is a dayroom shelf — and
-    // gets ONE collider over the whole carcass, the way CBZ.prisonDress's
-    // roundTable gives one rect to a welded table rather than one per plank.
-    // Solid, it is also the only cover on the south wall.
-    const shelfMid = addBox(26.9, 0.95, WZ1 - 0.2, 1.9, 0.08, 0.34, 0x6a563c, { cast: false });
+    /* (2026-10-20) A dayroom bookcase as built: a 1.9 m x 1.53 m timber
+       carcass with a back panel, a plinth and a top, three shelves, and the
+       books ON them — a run of paperbacks of real sizes (108 x 175 mm mass
+       market, 135 x 210 mm trade), spines out, packed with gaps, a few
+       leaning and one lying flat. It was three planks, two uprights and ten
+       boxes, with no back: you saw the wall through it. ONE mesh, the same
+       one collider over the carcass. */
+    const SX = 26.9, SZ = WZ1 - 0.2, SW = 1.9, SD = 0.34, SH = 1.53;
+    const shelfMid = new THREE.Object3D();
     if (CBZ.colliders) {
       CBZ.colliders.push({
-        minX: 25.95, maxX: 27.85, minZ: WZ1 - 0.37, maxZ: WZ1 - 0.03,
-        y0: 0, y1: 1.53, ref: shelfMid,
+        minX: SX - SW / 2, maxX: SX + SW / 2, minZ: WZ1 - 0.37, maxZ: WZ1 - 0.03,
+        y0: 0, y1: SH, ref: shelfMid,
       });
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
-    addBox(26.9, 1.45, WZ1 - 0.2, 1.9, 0.08, 0.34, 0x6a563c, { cast: false });
-    addBox(26.9, 0.45, WZ1 - 0.2, 1.9, 0.08, 0.34, 0x6a563c, { cast: false });
-    for (const s of [-1, 1])
-      addBox(26.9 + s * 0.99, 0.95, WZ1 - 0.2, 0.08, 1.16, 0.34, 0x5b492f, { cast: false });
-    const SPINE = [0x8a3b32, 0x2f5d7a, 0x4a6b3a, 0x8a6a2b, 0x5b4a6b, 0x7a3b5a];
-    for (let i = 0; i < 10; i++) {                                   // battered paperbacks
-      const shelf = i < 4 ? 0.49 : (i < 7 ? 0.99 : 1.49);
-      const k = i < 4 ? i : (i < 7 ? i - 4 : i - 7);
-      const h = 0.2 + PD.h01(i * 2.7, shelf, 0x9321) * 0.1;
-      const b = addBox(26.05 + k * 0.31 + PD.h01(i, 1, 0x9322) * 0.05, shelf + h / 2,
-        WZ1 - 0.2, 0.055 + PD.h01(i, 2, 0x9323) * 0.05, h, 0.24,
-        SPINE[i % SPINE.length], { cast: false });
-      if (PD.h01(i, 3, 0x9324) > 0.8) b.rotation.z = 0.22;           // one always leaning
+    if (PD.Paint) {
+      const B = new PD.Paint(), WOOD = 0x6a563c, END = 0x5b492f, BACK = 0x4a3c2a;
+      B.box(0, SH / 2, SD / 2 - 0.01, SW, SH, 0.012, BACK);                  // back panel (local +z = wall)
+      for (const e of [-1, 1]) B.box(e * (SW / 2 - 0.0095), SH / 2, 0, 0.019, SH, SD, END);   // the ends
+      B.box(0, SH - 0.0095, 0, SW, 0.019, SD + 0.01, WOOD);                  // top
+      B.box(0, 0.05, -SD / 2 + 0.01, SW - 0.04, 0.1, 0.02, END);             // plinth
+      const SPINE = [0x8a3b32, 0x2f5d7a, 0x4a6b3a, 0x8a6a2b, 0x5b4a6b, 0x7a3b5a, 0xc9b98a, 0x2a2a2a, 0x9a5a2a];
+      const levels = [0.1, 0.56, 1.03];
+      for (let L = 0; L < 3; L++) {
+        const y = levels[L];
+        B.box(0, y + 0.0095, 0, SW - 0.04, 0.019, SD - 0.02, WOOD);          // the shelf
+        let x = -SW / 2 + 0.05, n = 0;
+        while (x < SW / 2 - 0.08) {
+          const r = PD.h01(L * 31 + n, 3.7, 0x9321);
+          if (r < 0.07) { x += 0.12 + r * 2; n++; continue; }               // a gap where books are out
+          const trade = r > 0.7, h = trade ? 0.21 : 0.175, d = trade ? 0.135 : 0.108;
+          const t = 0.018 + PD.h01(n, L, 0x9323) * 0.022;                    // spine thickness
+          const col = SPINE[((r * 97) | 0) % SPINE.length];
+          if (r > 0.95) {                                                     // one lying flat
+            B.box(x + h / 2, y + 0.019 + t / 2, -SD / 2 + 0.03 + d / 2, h, t, d, col);
+            x += h + 0.01;
+          } else {
+            const lean = r > 0.88 ? 0.2 : 0;
+            const g = new THREE.BoxGeometry(t, h, d);
+            if (lean) { g.translate(0, h / 2, 0); g.rotateZ(-lean); g.translate(x + Math.sin(lean) * h / 2, y + 0.019, -SD / 2 + 0.03 + d / 2); }
+            else g.translate(x + t / 2, y + 0.019 + h / 2, -SD / 2 + 0.03 + d / 2);
+            B.add(g, col);
+            x += lean ? Math.sin(lean) * h + t + 0.02 : t + 0.001;
+          }
+          n++;
+        }
+      }
+      B.mesh(SX, 0, SZ, 0);          // back (local +z) to the wall, books facing the room
     }
 
     // ---- 5. NOTICE BOARD (west wall, south of the door) -------------------

@@ -617,14 +617,33 @@
     addBox(23.5, 0.74, 7.10, 3.00, 0.26, 0.80, 0x3c2f22, { cast: false });    // apron / drawer bank
     addBox(22.10, 0.44, 7.10, 0.14, 0.86, 0.80, 0x39424e, { cast: false });   // legs
     addBox(24.90, 0.44, 7.10, 0.14, 0.86, 0.80, 0x39424e, { cast: false });
-    addBox(22.20, 1.10, 7.05, 0.26, 0.26, 0.22, 0x39424e, { cast: false });   // bench vise
-    addBox(22.20, 1.26, 7.05, 0.30, 0.08, 0.26, 0x8b95a1, { cast: false });
-    // the stripped gun: receiver in the vise, barrel + slide + mag laid out
-    addBox(22.55, 1.06, 7.05, 0.52, 0.14, 0.11, 0x161a20, { cast: false });   // receiver
-    addBox(22.60, 0.98, 7.05, 0.13, 0.20, 0.10, 0x161a20, { cast: false });   // grip stub
-    cyl(ROOT, 0.035, 0.62, mats.steel, 23.30, 1.02, 7.28, 0, 0, Math.PI / 2); // barrel out of the gun
-    addBox(23.28, 1.01, 6.92, 0.46, 0.10, 0.13, 0x48515c, { cast: false });   // slide
-    addBox(23.86, 1.03, 7.20, 0.10, 0.14, 0.30, 0x232a24, { cast: false });   // magazine
+    /* THE JOB ON THE BENCH (2026-10-20). It was a "receiver", a "grip stub",
+       a "slide" and a "magazine", four boxes, and a vise that was two more.
+       Now: a real 4 in bench vise bolted through the top (swivel base, body,
+       jaws with steel plates, the screw and its T-bar), and the room's own M4
+       model (the one on the rack, weapons/appearances) laid on its side on a
+       cleaning mat with a spare barrel beside it. */
+    if (CBZ.armoryKit) {
+      const AK = CBZ.armoryKit;
+      const bin = AK.bin(), W = new AK.Pen(bin, AK.yawM(22.20, 0.97, 7.05, 0), true), VG = 0x2f4a6b, VS = 0x8b95a1;
+      W.cyl(0, 0.012, 0, 0.075, 0.08, 0.024, VG, 18);                  // swivel base
+      W.box(0, 0.06, 0, 0.11, 0.07, 0.15, VG);                          // body
+      W.box(0, 0.115, -0.05, 0.12, 0.05, 0.04, VG);                     // fixed jaw
+      W.box(0, 0.115, 0.045, 0.12, 0.05, 0.04, VG);                     // moving jaw
+      for (const jz of [-0.029, 0.024]) W.box(0, 0.12, jz, 0.115, 0.04, 0.006, VS);   // the steel jaw plates
+      W.cyl(0, 0.075, 0.12, 0.009, 0.009, 0.16, VS, 8, Math.PI / 2);    // the screw
+      W.cyl(0, 0.075, 0.2, 0.006, 0.006, 0.17, VS, 8, 0, Math.PI / 2);  // T-bar handle
+      for (const bx of [-0.09, 0.09]) W.cyl(bx, 0.006, 0, 0.012, 0.012, 0.012, VS, 6);   // bolt heads
+      const MAT = new AK.Pen(bin, AK.yawM(23.35, 0.97, 7.05, 0), false);
+      MAT.box(0, 0.003, 0, 1.0, 0.006, 0.4, 0x1f3a2c);                  // the cleaning mat
+      bin.flush(ROOT);
+      const gun = buildRackModel("carbine");
+      gun.rotation.set(Math.PI / 2, Math.PI / 2, 0);                     // barrel along the bench, on its side
+      gun.updateMatrixWorld(true);
+      const gb = new THREE.Box3().setFromObject(gun);
+      gun.position.set(23.30 - (gb.min.x + gb.max.x) / 2, 0.976 - gb.min.y, 7.0 - (gb.min.z + gb.max.z) / 2);
+      ROOT.add(gun);
+    }
     addBox(24.20, 0.99, 7.05, 0.34, 0.05, 0.26, 0x2f3742, { cast: false });   // parts tray
     for (let i = 0; i < 5; i++) {
       cyl(ROOT, 0.017, 0.048, mats.brass, 24.10 + (i % 3) * 0.09, 1.03, 6.98 + ((i / 3) | 0) * 0.09, Math.PI / 2, 0, 0);
@@ -632,43 +651,65 @@
     addBox(24.62, 1.00, 7.10, 0.22, 0.06, 0.30, 0x9d2523, { cast: false });   // rag
 
     // ---- ammo shelving, north wall beside the cage
-    unit(25.28, -5.75, 27.42, -5.05, 1.80);   // the shelving, and every crate on it
-    addBox(26.35, 1.42, -5.40, 2.10, 0.07, 0.62, 0x39424e, { cast: false });
-    addBox(26.35, 0.86, -5.40, 2.10, 0.07, 0.62, 0x39424e, { cast: false });
-    addBox(25.34, 1.14, -5.40, 0.08, 1.32, 0.62, 0x39424e, { cast: false });
-    addBox(27.36, 1.14, -5.40, 0.08, 1.32, 0.62, 0x39424e, { cast: false });
-    for (let i = 0; i < 4; i++) {
-      addBox(25.60 + i * 0.50, 1.60, -5.40, 0.42, 0.29, 0.48, i % 2 ? 0x3f4a33 : 0x6e4a22, { cast: false });
-      addBox(25.60 + i * 0.50, 1.04, -5.40, 0.42, 0.29, 0.48, i % 2 ? 0x6e4a22 : 0x3f4a33, { cast: false });
-    }
-    for (let i = 0; i < 6; i++) {
-      cyl(ROOT, 0.021, 0.062, mats.brass, 25.46 + i * 0.36, 1.49, -5.14, Math.PI / 2, 0, 0);
+    unit(25.28, -5.75, 27.42, -5.05, 1.86);   // the shelving, and every can on it
+    /* angle-post steel shelving and M2A1 cans (CBZ.armoryKit), where there
+       were two planks on two boards and eight brown/green boxes. */
+    if (CBZ.armoryKit) {
+      const AK = CBZ.armoryKit, bin = AK.bin();
+      const sh = AK.shelving(bin, 26.35, -5.42, 0, { len: 2.1, deep: 0.6, h: 1.84, n: 4 });
+      for (let r = 0; r < 3; r++) {
+        for (let i = 0; i < 6; i++) {
+          if (r === 1 && i === 4) continue;                              // one drawn: the gap is the story
+          AK.ammoCan(bin, 25.52 + i * 0.335, sh.tops[r], -5.42 + ((i + r) % 2 ? 0.08 : -0.08), 0);
+        }
+      }
+      AK.ammoCan(bin, 25.6, sh.tops[3], -5.42, 0);                       // two high at the end of the top
+      AK.ammoCan(bin, 25.6, sh.tops[3] + 0.2, -5.42, 0.04);
+      bin.flush(ROOT);
     }
 
-    // ---- kevlar on a rail, west wall south of the door
-    /* three plate carriers hung by their drag handles on hooks off the rail:
-       front and back plate bags, shoulder straps over the top, the elastic
-       cummerbund at the sides, a triple mag pouch and an admin pouch on the
-       front. They were a green box each with two box "straps" and a box "row". */
-    if (CBZ.prisonDress && CBZ.prisonDress.Paint) {
-      const V = new CBZ.prisonDress.Paint(), OD = 0x3b4a33, OD2 = 0x2f3b29, WEB = 0x232a20;
-      for (let i = 0; i < 3; i++) {
-        const z = -1.30 - i * 1.15, x = 19.44;
-        V.box(x + 0.05, 2.28, z, 0.06, 0.58, 0.56, OD);                               // front plate bag
-        V.box(x - 0.05, 2.30, z, 0.06, 0.6, 0.56, OD2);                               // back plate bag
-        for (const e of [-1, 1]) {
-          V.box(x, 2.6, z + e * 0.2, 0.16, 0.035, 0.1, WEB);                           // shoulder strap over the top
-          V.box(x + 0.0, 2.2, z + e * 0.29, 0.1, 0.16, 0.02, WEB);                     // cummerbund
-        }
-        for (let k = -1; k <= 1; k++) V.box(x + 0.1, 2.1, z + k * 0.13, 0.05, 0.17, 0.11, OD2);   // mag pouches
-        V.box(x + 0.095, 2.34, z, 0.035, 0.14, 0.2, OD2);                               // admin pouch
-        V.box(x - 0.07, 2.63, z, 0.03, 0.06, 0.14, WEB);                                // drag handle
-        V.add(new THREE.TorusGeometry(0.045, 0.006, 4, 10, Math.PI).rotateY(Math.PI / 2).translate(19.36, 2.87, z), 0x8b95a1);  // hook
-        V.cyl(19.36, 2.76, z, 0.005, 0.005, 0.2, 0x8b95a1, 6);                         // hook stem to the handle
+    /* ==================================================================
+       THE ARMOUR (owner, 2026-10-20: "armor on people is very real, but
+       armor in the armor room is not very real"). The three "plate
+       carriers" here were Paint boxes: a box front, a box back, box straps.
+       Now every piece of armour in this room IS the armour people wear:
+       entities/combatkit.js's fitted carrier and entities/headwear.js's
+       lids, harvested off the one human body by CBZ.armoryKit and put on
+       real hardware at real size:
+         - west wall, north of the door: three carriers hung by their drag
+           handles on J-hooks, and over them a steel shelf of helmets;
+         - the north-west corner: two dress-form mannequins in full kit;
+         - south of the door: a floor rack of five riot shields;
+         - the west wall's south run: a bank of eight gear lockers.
+       ================================================================== */
+    if (CBZ.armoryKit) {
+      const AK = CBZ.armoryKit, bin = AK.bin(), E = Math.PI / 2;
+      const TAC = { loadout: "swat" }, OLIVE = { loadout: "rifleman", nation: "veridia" };
+      const BLACK_LID = { kind: "ballistic", variant: "swat", color: 0x1b1d1f };
+      const OD_LID = { kind: "ballistic", color: 0x4c5135 };
+      const RIOT = { kind: "riot", color: 0x14161b };
+      AK.hungCarrier(bin, 19.25, 1.80, -1.40, E, TAC);
+      AK.hungCarrier(bin, 19.25, 1.80, -2.30, E, TAC);
+      AK.hungCarrier(bin, 19.25, 1.80, -3.20, E, OLIVE);
+      // the helmet shelf over them: a 32 cm steel shelf on four gussets
+      const SP = new AK.Pen(bin, null, true), SHC = 0x4a525c, SY = 2.12;
+      SP.box(19.41, SY - 0.01, -2.30, 0.32, 0.02, 2.7, 0x5d6670);        // deck
+      SP.box(19.565, SY - 0.03, -2.30, 0.012, 0.05, 2.7, SHC);            // front lip
+      for (const gz of [-1.0, -1.85, -2.75, -3.6]) {
+        SP.box(19.27, SY - 0.17, gz, 0.03, 0.3, 0.04, SHC);               // wall strip
+        SP.bar([19.28, SY - 0.3, gz], [19.54, SY - 0.03, gz], 0.012, SHC, 6);   // the gusset's brace
       }
-      V.mesh(0, 0, 0);
+      AK.helmet(bin, 19.41, SY, -1.20, E, BLACK_LID);
+      AK.helmet(bin, 19.41, SY, -1.88, E, BLACK_LID);
+      AK.helmet(bin, 19.41, SY, -2.62, E, RIOT);
+      AK.helmet(bin, 19.41, SY, -3.38, E, OD_LID);
+      AK.mannequin(bin, 20.10, -4.95, 0, { loadout: "swat", helmet: BLACK_LID });
+      AK.mannequin(bin, 21.00, -4.95, 0, { loadout: "rifleman", nation: "veridia", helmet: RIOT });
+      const rk = AK.shieldRack(bin, 19.61, 2.60, E, 5);
+      if (CBZ.colliders) CBZ.colliders.push({ minX: 19.25, maxX: 19.27 + rk.hz * 2, minZ: 2.60 - rk.hx, maxZ: 2.60 + rk.hx, rack: true, noBreach: true });
+      AK.lockers(bin, 19.25 + 0.2335, 6.0, E, 8);
+      bin.flush(ROOT);
     }
-    addBox(19.36, 2.92, -2.45, 0.08, 0.08, 3.20, 0x8b95a1, { cast: false });  // the rail itself
 
     // ==================================================================
     //  THE INNER CAGE — the second door, and the reason there is a ladder
@@ -791,7 +832,19 @@
     // clear of the plinth (z -4.95..-4.05) and inside the cage (z -5.75..-2.2).
     if (FULL) {
       const HX = 24.55, HZ = -3.10;
-      addBox(24.98, 1.66, HZ, 0.20, 2.62, 1.62, 0x3c2f22, { solid: HONEST });  // backboard
+      /* a steel-framed pegboard panel on the cage's solid face (it was a
+         20 cm brown block): hardboard in a square-tube frame, and every gun
+         on two rubber-sleeved hook arms instead of a slab "bracket" */
+      if (HONEST) unit(24.88, HZ - 0.81, 25.13, HZ + 0.81, 3.0);
+      const HB = CBZ.armoryKit ? CBZ.armoryKit.bin() : null;
+      const HP = HB ? new CBZ.armoryKit.Pen(HB, null, true) : null;
+      if (HP) {
+        HP.box(25.10, 1.66, HZ, 0.008, 2.56, 1.56, 0x3f444b);                         // the board
+        for (let gy = 0.5; gy < 2.92; gy += 0.1) for (let gz = -0.7; gz <= 0.71; gz += 0.1)
+          if ((Math.round(gy * 10) + Math.round(gz * 10)) % 2 === 0) HP.box(25.095, gy, HZ + gz, 0.002, 0.012, 0.012, 0x1d2024);   // pegholes
+        for (const e of [-1, 1]) HP.box(25.08, 1.66, HZ + e * 0.79, 0.04, 2.62, 0.04, 0x2b313a);   // frame stiles
+        for (const yy of [0.35, 2.97]) HP.box(25.08, yy, HZ, 0.04, 0.04, 1.62, 0x2b313a);        // rails
+      } else addBox(24.98, 1.66, HZ, 0.20, 2.62, 1.62, 0x3c2f22, { cast: false });
       const heavy = [
         { id: "lmg", y: 2.42, name: "M249 LMG" },
         { id: "bazooka", y: 1.62, name: "RPG LAUNCHER" },
@@ -799,7 +852,11 @@
       ];
       for (let i = 0; i < heavy.length; i++) {
         const h = heavy[i];
-        addBox(24.74, h.y - 0.20, HZ, 0.44, 0.08, 1.30, 0x14181d, { cast: false });   // bracket
+        if (HP) for (const e of [-0.42, 0.42]) {                                       // two padded hook arms
+          HP.bar([25.09, h.y - 0.16, HZ + e], [24.50, h.y - 0.10, HZ + e], 0.009, 0x2b313a, 6);
+          HP.bar([24.50, h.y - 0.10, HZ + e], [24.47, h.y - 0.01, HZ + e], 0.011, 0x14161a, 6);
+          HP.cyl(24.80, h.y - 0.13, HZ + e, 0.016, 0.016, 0.5, 0x14161a, 8, 0, Math.PI / 2 - 0.1);   // rubber sleeve
+        } else addBox(24.74, h.y - 0.20, HZ, 0.44, 0.08, 1.30, 0x14181d, { cast: false });
         const pad = addBox(24.90, h.y - 0.44, HZ, 0.10, 0.09, 1.30, 0x202833, { cast: false, emissive: 0x080b10, ei: 0.5 });
         const model = buildRackModel(h.id);
         model.userData.dynamic = true;
@@ -810,11 +867,23 @@
           taken: false, cool: 0, x: 23.90, z: HZ, gated: true,
         });
       }
+      if (HB) HB.flush(ROOT);
     }
     // ammunition for it, because a locked rifle with no rounds is a prop
-    addBox(24.62, 0.22, -4.86, 0.72, 0.44, 0.52, 0x3f4a33, { solid: HONEST });   // ammo crate
-    addBox(24.62, 0.46, -4.86, 0.76, 0.06, 0.56, 0x2f3a26, { cast: false });
-    for (let i = 0; i < 4; i++) cyl(ROOT, 0.024, 0.075, mats.brass, 24.36 + i * 0.17, 0.52, -4.86, Math.PI / 2, 0, 0);
+    // (a wooden munitions crate and two M2A1 cans on it; they were two boxes
+    // with four brass pegs standing on the lid)
+    unit(24.24, -5.14, 25.0, -4.58, 0.7);
+    if (CBZ.armoryKit) {
+      const AK = CBZ.armoryKit, CB = AK.bin();
+      const top = AK.crate(CB, 24.62, 0, -4.86, 0, 0.72, 0.44, 0.52).top;
+      AK.ammoCan(CB, 24.45, top, -4.88, 0.1);
+      AK.ammoCan(CB, 24.80, top, -4.82, -0.15);
+      AK.crate(CB, 22.15, 0, -3.30, 0, 0.72, 0.56, 0.52, 0x3a4129);      // the demolition crate (below)
+      CB.flush(ROOT);
+    } else {
+      addBox(24.62, 0.22, -4.86, 0.72, 0.44, 0.52, 0x3f4a33, {});
+      addBox(22.15, 0.29, -3.30, 0.72, 0.58, 0.52, 0x2e3328, {});
+    }
     // ---- THE DEMOLITION CRATE. world/door.js has promised for a week that
     // the yard door's 5 lb price is paid with "a charge you had to steal from
     // the armory", and adminwing.js offers "or 5 lb of C4" on three of its
@@ -823,8 +892,7 @@
     // not a weapon unlock), behind the same two cage routes as the rifle.
     // Three bricks: one for the yard door with two to decide with — the
     // 7 lb control console needs a pair set together (det cord adds).
-    addBox(22.15, 0.26, -3.30, 0.72, 0.52, 0.52, 0x2e3328, { solid: HONEST });  // olive crate
-    addBox(22.15, 0.55, -3.30, 0.76, 0.06, 0.56, 0x232919, { cast: false });  // lid
+    unit(21.77, -3.58, 22.53, -3.02, 0.62);   // the olive crate (drawn with the ammo above)
     const c4Pad = addBox(22.15, 0.30, -2.80, 0.60, 0.11, 0.05, 0x202833, { cast: false, emissive: 0x080b10, ei: 0.5 });
     const c4Disp = new THREE.Group();
     for (let i = 0; i < 3; i++) {

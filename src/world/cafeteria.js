@@ -335,38 +335,99 @@
       S.add(m);
       return m;
     };
+    /* a pipe hanger: a 10 mm threaded drop rod to a clevis band slung round
+       the pipe (it was a 5 cm square post). (x, y, z) is the pipe's centre
+       line; o.r its radius (default 0.09), o.axis the run ("z" default). */
     K.hanger = function (x, y, z, drop, o) {
       o = o || {};
-      return addBox(x, y + drop / 2, z, o.w || 0.05, drop, o.w || 0.05,
-        o.color != null ? o.color : 0x6b7480, { cast: false });
+      const r = o.r != null ? o.r : 0.09, P = new Paint(), col = o.color != null ? o.color : 0x6b7480;
+      P.cyl(0, r + 0.03 + (drop - r - 0.03) / 2, 0, 0.005, 0.005, drop - r - 0.03, col, 6);   // the drop rod
+      P.add(new THREE.TorusGeometry(r + 0.008, 0.006, 4, 16, Math.PI).rotateZ(Math.PI), col);   // the clevis band
+      P.box(0, r + 0.02, 0, 0.03, 0.03, 0.03, col);                                            // the clevis bolt block
+      P.box(0, drop - 0.01, 0, 0.06, 0.02, 0.06, col);                                         // the ceiling anchor
+      return P.mesh(x, y, z, o.axis === "x" ? HALF : 0);
     };
-    // an elbow / flange collar where a run turns or passes a wall (1 mesh)
-    K.elbow = function (x, y, z, s, color) {
-      return addBox(x, y, z, s, s, s, color != null ? color : 0x5b6470, { cast: false });
-    };
+    // (K.elbow, a cube "elbow", is deleted: nothing called it.)
 
     // ---- fire kit ---------------------------------------------------------
-    K.extinguisher = function (x, y, z, face, o) {          // 3 meshes
+    // how far behind (x, y, z) the wall face is, along -n: wall-hung fittings
+    // sit ON the wall, not wherever the caller's number happened to land
+    function wallBack(x, y, z, n, def) {
+      const L = CBZ.colliders || [];
+      for (let t = 0.02; t <= 0.45; t += 0.01) {
+        const px = x - n[0] * t, pz = z - n[1] * t;
+        for (let i = 0; i < L.length; i++) {
+          const c = L[i];
+          if (px < c.minX || px > c.maxX || pz < c.minZ || pz > c.maxZ) continue;
+          if ((c.y0 != null && y < c.y0) || (c.y1 != null && y > c.y1)) continue;
+          return t;
+        }
+      }
+      return def;
+    }
+    /* THE EXTINGUISHER (2026-10-20; it was an 8-sided red post with a box
+       "valve" on a box "bracket"). A 5 lb ABC stored-pressure unit at its
+       real size (Buckeye/Amerex 5 lb: 16 3/8 in tall, 4 1/4 in shell): a
+       108 mm drawn-steel shell with a domed shoulder, the chrome valve body,
+       carry handle and squeeze lever, the pressure gauge, the safety pin's
+       ring, the black hose down the side into its clip, all on a wall hook
+       with the strap band. y is the shell's middle (as before). ONE mesh. */
+    K.extinguisher = function (x, y, z, face, o) {
       o = o || {};
-      const n = nrm(face);
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.56, 8),
-        CBZ.cmat ? CBZ.cmat(0xc0392b) : CBZ.mat(0xc0392b));
-      body.position.set(x, y, z); body.castShadow = false; body.receiveShadow = false;
-      S.add(body);
-      addBox(x, y + 0.36, z, 0.07, 0.16, 0.07, 0x2a2f38, { cast: false });   // neck/valve
-      addBox(x - n[0] * 0.11, y - 0.05, z - n[1] * 0.11, n[0] ? 0.08 : 0.24, 0.1,
-        n[0] ? 0.24 : 0.08, 0x9aa3ad, { cast: false });                       // wall bracket
+      const n = nrm(face), ry = Math.atan2(n[0], n[1]);
+      const P = new Paint(), RED = 0xb8261e, CHR = 0xb9bec4, BLK = 0x151515;
+      const R = 0.054, H = 0.3, off = R + 0.035;                      // shell centre off the wall (origin = the wall face)
+      P.cyl(0, 0, off, R, R, H, RED, 16);                              // the shell
+      P.add(new THREE.SphereGeometry(R, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, H / 2, off), RED);   // domed shoulder
+      P.add(new THREE.SphereGeometry(R, 16, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2).scale(1, 0.3, 1).translate(0, -H / 2, off), RED);
+      P.cyl(0, H / 2 + R + 0.015, off, 0.016, 0.02, 0.04, CHR, 10);   // the neck + valve body
+      P.box(0, H / 2 + R + 0.05, off - 0.01, 0.022, 0.02, 0.12, CHR);  // carry handle (rear)
+      P.box(0, H / 2 + R + 0.072, off - 0.015, 0.02, 0.012, 0.12, BLK); // squeeze lever over it
+      P.cyl(0.018, H / 2 + R + 0.02, off + 0.01, 0.015, 0.015, 0.008, 0xe9e6dd, 12, HALF, HALF);   // the gauge face
+      P.add(new THREE.TorusGeometry(0.012, 0.0025, 4, 10).translate(-0.02, H / 2 + R + 0.045, off + 0.03), 0xd8c23a);   // pin ring
+      P.cyl(0.0, H / 2 + R + 0.02, off + 0.035, 0.007, 0.007, 0.04, BLK, 6, HALF);                       // hose outlet
+      P.cyl(0.05, 0.02, off + 0.02, 0.007, 0.007, 0.36, BLK, 6);                                         // the hose, down the side
+      P.cyl(0.05, -0.17, off + 0.02, 0.011, 0.009, 0.05, BLK, 8);                                        // its nozzle in the clip
+      P.box(0, 0.05, 0.012, 0.05, 0.12, 0.024, 0x2a2d31);             // the wall hook plate
+      P.add(new THREE.TorusGeometry(R + 0.004, 0.004, 4, 18, Math.PI).rotateX(HALF).translate(0, 0.07, off), 0x2a2d31);   // strap band
+      const wb = wallBack(x, y, z, n, 0.17);
+      return P.mesh(x - n[0] * wb, y, z - n[1] * wb, ry);
     };
-    K.hoseCab = function (x, y, z, face, o) {               // 4 meshes
+    /* THE FIRE HOSE CABINET: a semi-recessed steel cabinet (24 x 30 x 8 in
+       class) with a trim frame proud of the wall, a full glass door in a
+       narrow frame with its latch, and behind the glass the hose racked on
+       its pin rack, the angle valve and the nozzle. The "FIRE HOSE" label is
+       gone: the red cabinet and the hose in it say it. ONE mesh + the glass. */
+    K.hoseCab = function (x, y, z, face, o) {
       o = o || {};
-      const n = nrm(face), nx = n[0], nz = n[1];
-      addBox(x, y, z, nx ? 0.24 : 0.76, 0.86, nx ? 0.76 : 0.24, 0xa8322a, { cast: false });
-      addBox(x + nx * 0.13, y, z + nz * 0.13, nx ? 0.03 : 0.6, 0.62, nx ? 0.6 : 0.03,
-        0x1b1f26, { cast: false });                                            // glazed door
-      addBox(x + nx * 0.15, y + 0.5, z + nz * 0.15, nx ? 0.03 : 0.6, 0.1,
-        nx ? 0.6 : 0.03, 0xf2f2e8, { cast: false });                           // FIRE HOSE label
-      addBox(x + nx * 0.16, y - 0.05, z + nz * 0.16, nx ? 0.02 : 0.1, 0.1,
-        nx ? 0.1 : 0.02, 0xe8d44f, { cast: false });                           // latch
+      const n = nrm(face), ry = Math.atan2(n[0], n[1]);
+      const P = new Paint(), RED = 0xa8322a, IN = 0x2a1615, HOSE = 0xd8d2c0, BR = 0xc9a24a;
+      const W = 0.62, H = 0.78, D = 0.2;                                 // surface-mounted, back on the wall
+      P.box(0, 0, 0.006, W, H, 0.012, IN);                              // the back
+      for (const e of [-1, 1]) {
+        P.box(e * (W / 2 - 0.006), 0, D / 2, 0.012, H, D, RED);         // sides
+        P.box(0, e * (H / 2 - 0.006), D / 2, W, 0.012, D, RED);         // top + bottom
+      }
+      for (const e of [-1, 1]) {                                        // the door's frame
+        P.box(e * (W / 2 - 0.02), 0, D - 0.008, 0.04, H, 0.016, RED);
+        P.box(0, e * (H / 2 - 0.02), D - 0.008, W, 0.04, 0.016, RED);
+      }
+      // the hose on its pin rack: flaked loops hanging off a horizontal pin
+      P.cyl(0, 0.22, 0.1, 0.008, 0.008, W - 0.1, BR, 8, 0, HALF);
+      for (let k = 0; k < 7; k++)
+        P.add(new THREE.TorusGeometry(0.17, 0.011, 4, 14, Math.PI).rotateZ(Math.PI).scale(0.25, 1, 1).rotateY(HALF).translate(-0.2 + k * 0.06, 0.22, 0.1), HOSE);
+      P.cyl(0.24, 0.27, 0.1, 0.025, 0.025, 0.08, BR, 10);               // the angle valve
+      P.cyl(0.24, 0.32, 0.1, 0.045, 0.045, 0.01, 0xb3241e, 12);         // its handwheel
+      P.cyl(0.25, -0.24, 0.1, 0.012, 0.022, 0.16, BR, 10);              // the nozzle, racked
+      P.box(W / 2 - 0.045, 0, D + 0.006, 0.025, 0.08, 0.012, 0xd9d9d9); // the latch
+      const wb = wallBack(x, y, z, n, 0.2);
+      const m = P.mesh(x - n[0] * wb, y, z - n[1] * wb, ry);
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.08, H - 0.08),
+        new THREE.MeshPhongMaterial({ color: 0xcfe0e8, specular: 0xffffff, shininess: 80, transparent: true, opacity: 0.18, depthWrite: false }));
+      glass.position.set(0, 0, D - 0.008);
+      glass.renderOrder = 2;
+      if (m) m.add(glass);
+      return m;
     };
 
     // ---- pinned paper (1 mesh) --------------------------------------------
@@ -383,72 +444,89 @@
       return m;
     };
 
-    // ---- milk crate (2 meshes) --------------------------------------------
-    // RETURNS ITS MESHES (PRISON_PROP_USE_V1). It returned undefined, so a
-    // caller could draw a crate and then had no way to hand it to
-    // systems/pushables.js — the same "two services that are both about
-    // furniture could not be composed" gap city/furniture.js:266 fixed with
-    // its own `parts`. Additive: nothing can regress on a return value that
-    // used to be undefined.
-    K.crate = function (x, y, z, o) {
-      o = o || {};
-      const c = o.color != null ? o.color : 0x3a6ea5;
-      const s = o.s || 0.44;
-      const body = addBox(x, y, z, s, s * 0.72, s, c, { cast: false });
-      const rim = addBox(x, y + s * 0.36, z, s + 0.03, 0.05, s + 0.03, 0x2d5580, { cast: false }); // rim
-      return { parts: [body, rim], s: s, top: y + s * 0.36 + 0.025 };
-    };
-    // a stack of cafeteria trays (1 mesh per tray)
+    // (K.crate, a two-box "milk crate", is deleted: nothing called it.)
+    /* a stack of cafeteria trays: 14 x 18 in moulded fibreglass trays with a
+       raised rim, each nested 2.5 cm into the one under it. ONE mesh. */
     K.trayStack = function (x, y, z, n, color) {
-      for (let i = 0; i < n; i++)
-        addBox(x, y + i * 0.05, z, 0.46, 0.035, 0.34,
-          color != null ? color : 0xb8bec6, { cast: false });
+      const P = new Paint(), col = color != null ? color : 0xb8bec6;
+      const W = 0.457, D = 0.356, dk = new THREE.Color(col).multiplyScalar(0.82).getHex();
+      for (let i = 0; i < n; i++) {
+        const yy = i * 0.022;
+        P.box(0, yy, 0, W - 0.02, 0.006, D - 0.02, dk);                     // the well
+        for (const e of [-1, 1]) {
+          P.box(0, yy + 0.01, e * (D / 2 - 0.008), W, 0.022, 0.016, col);    // rim
+          P.box(e * (W / 2 - 0.008), yy + 0.01, 0, 0.016, 0.022, D, col);
+        }
+      }
+      return P.mesh(x, y - 0.015, z, 0);
     };
 
-    // ---- the classic bolted round chow table (10 meshes) ------------------
-    // Pedestal, four stools on angled arms, no loose furniture — a prison
-    // table is one welded object bolted to the slab. Seats are declared to
-    // city/propuse.js at their REAL cushion height, so a body sits ON the
-    // stool instead of squatting through it.
+    /* ---- THE DETENTION DAYROOM TABLE (2026-10-20) ------------------------
+       It was a 12-sided disc on an 8-sided post with four boxes for arms and
+       four 10-sided pucks for stools. A real one is one welded stainless
+       object bolted to the slab. Reference: KryptoMax 4-seat round
+       stainless table (40 in top, 30 in high, 12 in stool tops at 18 in, 2 in
+       Sch. 40 pipe, 7.25 in mounting plates, 68 in overall) and the Maryland
+       Correctional Enterprises / correctionenterprises.com floor-mounted
+       four-person tables (39.5-40 in, 30-31 in high):
+         - a 12 ga top with a rolled bull-nose edge and a ring stiffener
+           under it, on a 2 in pipe pedestal with a gusseted floor plate;
+         - four stools, each a dished 12 in seat on its own pipe post with
+           its own floor plate, tied to the pedestal by a curved pipe arm
+           low down (the welded "spider" that stops a stool being torn off).
+       ONE mesh per table (it was ten). Colliders and seat anchors as before:
+       the top a waist-high obstacle, each stool a shin-high one, and the
+       seats declared at the stool's real top. */
     K.roundTable = function (x, z, o) {
       o = o || {};
-      const top = o.top != null ? o.top : 0.76, seatY = o.seat != null ? o.seat : 0.47;
-      const R = o.r != null ? o.r : 0.62, arm = o.arm != null ? o.arm : 0.86;
-      const tone = o.tone != null ? o.tone : 0xcfd4cb, steel = 0x6b7480;
-      const t = new THREE.Mesh(new THREE.CylinderGeometry(R, R, 0.09, 12),
-        CBZ.cmat ? CBZ.cmat(tone) : CBZ.mat(tone));
-      t.position.set(x, top, z); t.castShadow = false; t.receiveShadow = true;
-      S.add(t);
-      if (CBZ.colliders) CBZ.colliders.push({    // waist-high obstacle, not a pillar
-        minX: x - R, maxX: x + R, minZ: z - R, maxZ: z + R, y0: 0, y1: top + 0.09, ref: t,
-      });
-      const ped = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.19, top, 8),
-        CBZ.cmat ? CBZ.cmat(steel) : CBZ.mat(steel));
-      ped.position.set(x, top / 2, z); ped.castShadow = false; S.add(ped);
+      const top = o.top != null ? o.top : 0.762, seatY = o.seat != null ? o.seat : 0.457;
+      const R = o.r != null ? o.r : 0.508, arm = o.arm != null ? o.arm : 0.71;
+      const tone = o.tone != null ? o.tone : 0xcfd4cb, steel = 0x8f979f, plate = 0x6b7480;
+      const seatTone = o.seatTone != null ? o.seatTone : 0x3a6ea5;
+      const P = new Paint();
+      P.cyl(0, top - 0.008, 0, R, R, 0.016, tone, 32);                                 // the top
+      P.add(new THREE.TorusGeometry(R, 0.014, 6, 36).rotateX(HALF).translate(0, top - 0.012, 0), tone);   // bull-nose edge
+      P.add(new THREE.TorusGeometry(R * 0.55, 0.012, 4, 24).rotateX(HALF).translate(0, top - 0.03, 0), steel);  // ring stiffener
+      P.cyl(0, top / 2, 0, 0.03, 0.03, top - 0.02, steel, 12);                          // the pedestal pipe
+      P.cyl(0, 0.006, 0, 0.13, 0.13, 0.012, plate, 4, 0);                               // its floor plate
+      for (let g = 0; g < 4; g++) {
+        const ga = g * HALF + 0.785;
+        P.box(Math.cos(ga) * 0.05, 0.05, Math.sin(ga) * 0.05, 0.006, 0.08, 0.06, steel, HALF - ga);   // gussets
+      }
       for (let i = 0; i < 4; i++) {
         const a = (o.spin != null ? o.spin : 0.79) + i * HALF;
-        const sx = x + Math.cos(a) * arm, sz = z + Math.sin(a) * arm;
-        // r128 rotates local +x to (cos t, -sin t) about Y, so the strut needs
-        // ry = -a to lie ALONG the arm. Building it axis-aligned instead gives
-        // a square plate at 45 deg, which is what this looked like first pass.
-        const armM = addBox((x + sx) / 2, seatY - 0.09, (z + sz) / 2,
-          arm, 0.07, 0.09, steel, { cast: false });
-        armM.rotation.y = -a;
-        const st = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.07, 10),
-          CBZ.cmat ? CBZ.cmat(o.seatTone != null ? o.seatTone : 0x3a6ea5) : CBZ.mat(0x3a6ea5));
-        st.position.set(sx, seatY, sz); st.castShadow = false; st.receiveShadow = true;
-        S.add(st);
-        // NO DECOYS (world/clutter.js's rule): a stool you walk through is a
-        // decoy. Height-gated at 0.55 like the mess benches, so it is a
-        // shin-high obstacle rather than an invisible column.
+        const lx = Math.cos(a) * arm, lz = Math.sin(a) * arm;
+        // the curved arm: three straight runs of pipe, pedestal -> stool post
+        const pts = [[0, 0.14], [arm * 0.45, 0.12], [arm * 0.8, 0.16], [arm, 0.2]];
+        for (let k = 0; k < 3; k++) {
+          const r0 = pts[k][0], r1 = pts[k + 1][0], y0 = pts[k][1], y1 = pts[k + 1][1];
+          const L = Math.hypot(r1 - r0, y1 - y0), mid = (r0 + r1) / 2;
+          const g = new THREE.CylinderGeometry(0.022, 0.022, L, 8);
+          g.rotateZ(-HALF + Math.atan2(y1 - y0, r1 - r0));
+          g.rotateY(-a);
+          g.translate(Math.cos(a) * mid, (y0 + y1) / 2, Math.sin(a) * mid);
+          P.add(g, steel);
+        }
+        P.cyl(lx, (seatY - 0.02) / 2, lz, 0.025, 0.025, seatY - 0.02, steel, 10);      // the stool post
+        P.cyl(lx, 0.006, lz, 0.09, 0.09, 0.012, plate, 4);                              // its floor plate
+        P.cyl(lx, seatY - 0.008, lz, 0.152, 0.145, 0.016, seatTone, 24);               // the dished seat
+        P.add(new THREE.TorusGeometry(0.152, 0.008, 4, 24).rotateX(HALF).translate(lx, seatY - 0.004, lz), seatTone);
+        P.cyl(lx, seatY - 0.03, lz, 0.05, 0.03, 0.03, steel, 10);                       // the seat's spigot
+        const sx = x + lx, sz = z + lz;
         if (CBZ.colliders) CBZ.colliders.push({
-          minX: sx - 0.2, maxX: sx + 0.2, minZ: sz - 0.2, maxZ: sz + 0.2,
-          y0: 0, y1: 0.55, ref: st,
+          minX: sx - 0.16, maxX: sx + 0.16, minZ: sz - 0.16, maxZ: sz + 0.16,
+          y0: 0, y1: 0.55,
         });
         if (CBZ.roomSeatAnchor)
           CBZ.roomSeatAnchor(sx, 0, sz, Math.atan2(x - sx, z - sz), "stool", null,
-            { cushion: seatY + 0.035, floorBelow: 0 });
+            { cushion: seatY + 0.004, floorBelow: 0 });
       }
+      const t = P.mesh(x, 0, z, 0);
+      if (t) t.receiveShadow = true;
+      if (CBZ.colliders) CBZ.colliders.push({    // waist-high obstacle, not a pillar
+        minX: x - R, maxX: x + R, minZ: z - R, maxZ: z + R, y0: 0, y1: top + 0.02, ref: t,
+      });
+      return t;
     };
 
     /* ======================================================================

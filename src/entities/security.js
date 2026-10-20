@@ -62,6 +62,80 @@
     cam.lens.material.emissive.setHex(lit ? L.e : 0x000000);
   }
 
+  // one merged vertex-colour mesh per part (housing, bracket)
+  let VCM = null;
+  function Paint() { this.g = []; }
+  Paint.prototype.add = function (g, color) {
+    if (g.index) { const t = g.toNonIndexed(); g.dispose(); g = t; }
+    for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal") g.deleteAttribute(k);
+    const n = g.attributes.position.count, c = new THREE.Color(color), a = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+    g.setAttribute("color", new THREE.BufferAttribute(a, 3));
+    this.g.push(g); return this;
+  };
+  Paint.prototype.box = function (x, y, z, w, h, d, col) { return this.add(new THREE.BoxGeometry(w, h, d).translate(x, y, z), col); };
+  Paint.prototype.cyl = function (x, y, z, r0, r1, h, col, seg, rx) {
+    const g = new THREE.CylinderGeometry(r0, r1, h, seg || 12);
+    if (rx) g.rotateX(rx);
+    return this.add(g.translate(x, y, z), col);
+  };
+  Paint.prototype.mesh = function () {
+    if (!VCM) VCM = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    const BGU = THREE.BufferGeometryUtils;
+    const geo = this.g.length === 1 ? this.g[0] : BGU.mergeBufferGeometries(this.g, false);
+    if (this.g.length > 1) for (const q of this.g) q.dispose();
+    this.g = [];
+    return new THREE.Mesh(geo, VCM);
+  };
+
+  /* THE MOUNT, fitted to what the camera actually hangs off. Run once on the
+     first tick, when every room's colliders exist (security.js builds before
+     the rooms). Marches back from the camera, away from where it looks; the
+     first solid it meets is the wall the arm goes to. A camera standing over
+     a solid (a mast) gets a short post down to the cap instead. */
+  function inSolid(px, py, pz) {
+    const L = CBZ.colliders || [];
+    for (let i = 0; i < L.length; i++) {
+      const c = L[i];
+      if (px < c.minX || px > c.maxX || pz < c.minZ || pz > c.maxZ) continue;
+      if (c.y0 != null && py < c.y0) continue;
+      if (c.y1 != null && py > c.y1) continue;
+      return c;
+    }
+    return null;
+  }
+  function fitMount(cam) {
+    cam._mounted = true;
+    const p = cam.pos, a = cam.baseAngle, bx = -Math.sin(a), bz = -Math.cos(a);
+    const P = new Paint(), STEEL = 0xd2d5d8, PLATE = 0xc4c8cb;
+    const holder = new THREE.Group();
+    holder.rotation.y = a;                                    // local -z = toward the wall
+    cam.group.add(holder);
+    P.add(new THREE.SphereGeometry(0.022, 12, 8), STEEL);     // the ball joint under the body
+    const under = inSolid(p.x, p.y - 0.4, p.z);
+    if (under) {
+      // on a mast: a 48 mm post down to the cap, a clamp ring
+      P.cyl(0, -0.18, 0, 0.024, 0.024, 0.36, STEEL, 12);
+      P.cyl(0, -0.345, 0, 0.04, 0.04, 0.03, PLATE, 14);
+    } else {
+      let d = 0.25;
+      for (let t = 0.06; t <= 2.0; t += 0.03) {
+        if (inSolid(p.x + bx * t, p.y, p.z + bz * t)) { d = t; break; }
+      }
+      // the arm: from the ball joint, back and slightly up, to a round wall plate
+      const len = Math.max(0.08, d - 0.012);
+      const arm = new THREE.CylinderGeometry(0.016, 0.018, len, 10);
+      arm.rotateX(Math.PI / 2);
+      arm.translate(0, 0, -len / 2);
+      P.add(arm, STEEL);
+      P.cyl(0, 0, -d + 0.006, 0.055, 0.055, 0.012, PLATE, 18, Math.PI / 2);   // wall plate
+      for (const s of [-1, 1]) P.cyl(s * 0.034, 0, -d + 0.014, 0.006, 0.006, 0.006, 0x8b9096, 6, Math.PI / 2);   // its screws
+    }
+    const m = P.mesh();
+    m.position.y = -0.03;
+    holder.add(m);
+  }
+
   function makeCamera(x, y, z, baseAngle, options) {
     options = options || {};
     const sweepRange = options.range != null ? options.range : 1.2; // sweep angle in radians (~70 deg)
@@ -73,31 +147,49 @@
     grp.position.set(x, y, z);
     scene.add(grp);
 
-    // 1. Mount bracket (connected to wall)
-    const mount = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.36), mat(0x515a66));
-    mount.position.set(0, 0.2, -0.18);
-    grp.add(mount);
-
-    // 2. Camera body (rotates)
+    /* THE CAMERA, REMADE (2026-10-20). It was three boxes: a 24 cm grey
+       "mount" always behind it on -z whatever wall it was on, a 30 x 30 x
+       60 cm body, and an 18 cm square "lens". Now it is a bullet camera at
+       real size (reference: the Milesight mini bullet, 76 x 214 mm; UniFi G6
+       bullet, 86 x 210 mm with its mount): a round housing with a sunshield
+       hood over it, a black glass front with the lens in it and the IR ring
+       around it, a cable gland at the back, on a ball joint at the end of a
+       wall arm. The arm is fitted to whatever it hangs off on the first tick
+       (fitMount below): it reaches back to the wall behind the camera, or,
+       on a mast, drops to the mast's cap.
+       The status readout is the lit front face (glass + IR ring, 8 cm): the
+       one part of a camera that changes, and the one this file paints. */
     const bodyGrp = new THREE.Group();
-    bodyGrp.position.set(0, 0, 0);
     grp.add(bodyGrp);
+    const hb = new Paint();
+    const HOUS = 0xd8dbdd, SHADE = 0xc9ccce, DARKG = 0x111316, GL = 0x2a2d31;
+    hb.cyl(0, 0.045, 0.085, 0.043, 0.043, 0.22, HOUS, 18, Math.PI / 2);        // the housing
+    hb.cyl(0, 0.045, -0.03, 0.036, 0.043, 0.012, SHADE, 18, Math.PI / 2);       // rear cap
+    hb.cyl(0, 0.045, -0.045, 0.009, 0.009, 0.02, GL, 8, Math.PI / 2);           // cable gland
+    hb.cyl(0, 0.045, 0.198, 0.046, 0.046, 0.012, GL, 18, Math.PI / 2);          // front bezel
+    {
+      // the sunshield: a half shell over the housing, overhanging the glass
+      const g = new THREE.CylinderGeometry(0.052, 0.052, 0.27, 18, 1, true, -Math.PI / 2 - 0.3, Math.PI + 0.6);
+      g.rotateX(Math.PI / 2); g.rotateZ(Math.PI / 2);
+      g.translate(0, 0.045, 0.1);
+      hb.add(g, SHADE);
+    }
+    hb.box(0, 0.0, 0.03, 0.03, 0.02, 0.05, HOUS);                               // the mount boss under it
+    const housing = hb.mesh();
+    housing.castShadow = true;
+    bodyGrp.add(housing);
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.6), mat(0x2d3238));
-    body.position.set(0, 0, 0.1);
-    body.castShadow = true;
-    bodyGrp.add(body);
-
-    // 3. THE STATUS LENS — the whole HUD of this machine. Slightly larger
-    //    than the old dot (0.14 -> 0.18) because it is now carrying every
-    //    word that used to be printed across the middle of the screen, and
-    //    it is read from the floor of a 9 m hall.
+    // 3. THE STATUS LENS — the whole HUD of this machine: the camera's front
+    //    face, its glass and IR ring, lit in the state colour.
     const lens = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.18, 0.07),
+      new THREE.CircleGeometry(0.04, 20),
       mat(0x39ff88, { emissive: 0x14c258, ei: 1.35 })
     );
-    lens.position.set(0, 0, 0.4);
+    lens.position.set(0, 0.045, 0.2045);
     bodyGrp.add(lens);
+    const eye = new THREE.Mesh(new THREE.CircleGeometry(0.014, 16), mat(DARKG));   // the lens itself, in the lit ring
+    eye.position.set(0, 0.045, 0.2055);
+    bodyGrp.add(eye);
 
     // (4. THE DETECTION CONE IS DELETED. A camera emits nothing; a 10 m
     //  translucent red cylinder is a searchlight, and the prison already has
@@ -146,6 +238,7 @@
     const powerOut = breaker && breaker.sabotaged;
 
     for (const cam of CBZ.cameras) {
+      if (!cam._mounted) fitMount(cam);
       if (cam.destroyed) {
         setLamp(cam, "dead", 0);
         // A SMASHED CAMERA HANGS. One write on the frame it dies: the body
@@ -155,7 +248,7 @@
         if (!cam._sagged) {
           cam._sagged = true;
           cam.body.rotation.x = 1.15;
-          cam.body.rotation.z = 0.42;
+          cam.body.rotation.z = 0.42;   // hanging off the ball joint by its cable
           cam.seenT = cam.watchT = 0;
         }
         continue;
