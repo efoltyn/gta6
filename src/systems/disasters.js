@@ -4989,6 +4989,10 @@
     if (CBZ.wildfire && CBZ.wildfire.settle) { try { CBZ.wildfire.settle(secs); } catch (e) {} }
     if (CBZ.tornado && CBZ.tornado.count && CBZ.tornado.count()) { try { CBZ.tornado.stop(); CBZ.tornado.siren && CBZ.tornado.siren(false); } catch (e) {} }
     if (CBZ.audioHush) { try { CBZ.audioHush(false); } catch (e) {} }
+    // the high-water marks come off the walls (world/tsunami_scene.js, the
+    // flash flood's own); a mark is never left standing into the next round
+    if (CBZ.tsunamiScene && CBZ.tsunamiScene.settle) { try { CBZ.tsunamiScene.settle(secs); } catch (e) {} }
+    if (CBZ.flashflood && CBZ.flashflood.settleMarks) { try { CBZ.flashflood.settleMarks(); } catch (e) {} }
     surgeSet(0);
     volSettleT = calmMax() + QUIET_CAP;     // the whole calm, at most
   }

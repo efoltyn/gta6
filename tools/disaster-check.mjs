@@ -302,7 +302,9 @@ try {
           CBZ.stepSim(1 / 60); settle++;
           if (k % 60 === 59 && CBZ.debrisAudit) {
             const a = CBZ.debrisAudit();
-            const falling = a.sources && a.sources.collapse ? a.sources.collapse.falling : 0;
+            const falling = (a.sources && a.sources.collapse ? a.sources.collapse.falling : 0)
+              // the backwash still carrying the tsunami's wreckage (world/tsunami_debris.js)
+              + (a.sources && a.sources.tsunami ? a.sources.tsunami.afloat || 0 : 0);
             // still for two checks running (a second apart): what a removed
             // support drops has had its frame to start falling
             if (a.debris.live === a.debris.asleep && !falling && !a.debris.gritAloft) { if (++quiet >= 2) break; } else quiet = 0;
@@ -316,7 +318,18 @@ try {
             maxSpeed: a.maxSpeed, maxHeight: a.maxHeight, live: a.live, settled: a.settled, settleTicks: settle,
             grit: a.debris.gritAloft + "/" + a.debris.gritFloating,
             why: [].concat(a.debris.floatList || [], (a.sources.collapse && a.sources.collapse.list) || [],
-              (a.sources.island && a.sources.island.list) || [], (a.debris.highList || [])).slice(0, 6),
+              (a.sources.island && a.sources.island.list) || [], (a.sources.trees && a.sources.trees.list) || [],
+              (a.sources.tsunami && a.sources.tsunami.list) || [], (a.sources.tornado && a.sources.tornado.list) || [],
+              (a.debris.highList || [])).slice(0, 8),
+            trees: a.sources.trees ? { floating: a.sources.trees.floating, moved: a.sources.trees.moved, crowns: a.sources.trees.crowns } : null,
+            // the curtain law: a high-water mark never stands above its wall or on a fallen building
+            marks: (function () {
+              const ts = CBZ.tsunamiScene && CBZ.tsunamiScene.audit ? CBZ.tsunamiScene.audit() : null;
+              const fm = CBZ.flashflood && CBZ.flashflood.marksAudit ? CBZ.flashflood.marksAudit() : null;
+              return { stained: ts && ts.built ? ts.stainedBuildings : 0, overWall: ts && ts.built ? ts.stainOverWall : 0,
+                onFallen: (ts && ts.built ? ts.stainOnFallen : 0) + (fm ? fm.onFallen : 0), maxMarkM: ts && ts.built ? ts.maxMarkM : 0,
+                floodMarks: fm ? fm.buildings : 0 };
+            })(),
             bySource: Object.keys(a.sources).reduce(function (o, k) { const s = a.sources[k]; o[k] = (s.floating || 0) + (s.roofHover || 0) + "f/" + (s.high || 0) + "h"; return o; }, {}) };
         }
         const p = CBZ.player;
@@ -356,6 +369,12 @@ try {
           + " (max " + P.maxHeight + " m) · live " + P.live + " · settled " + P.settled + " · settle " + P.settleTicks + " ticks · " + JSON.stringify(P.bySource));
         if (P.floating > 0) fail(id + ": " + P.floating + " pieces resting on nothing after it ended " + JSON.stringify(P.why));
         if (P.high > 0) fail(id + ": " + P.high + " pieces more than 120 m up (max " + P.maxHeight + " m) " + JSON.stringify(P.why));
+        if (P.trees) say("              trees: floating " + P.trees.floating + " · moved " + P.trees.moved + " · loose crowns " + P.trees.crowns);
+        if (P.marks) {
+          say("              marks: " + JSON.stringify(P.marks));
+          if (P.marks.overWall > 0) fail(id + ": " + P.marks.overWall + " high-water marks stand above their wall (the curtain)");
+          if (P.marks.onFallen > 0) fail(id + ": " + P.marks.onFallen + " high-water marks left standing on fallen buildings");
+        }
       } else if (r.forced) fail(id + ": no CBZ.debrisAudit on this page");
     }
     /* THE RESET LEAVES NOTHING. A new match after the whole roster: every

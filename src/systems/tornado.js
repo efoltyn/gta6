@@ -1365,13 +1365,39 @@
      trunk leans about its break. A tree is not a piece of a building and its
      trunk is still rooted at the pivot, so this stays a hinge (it never
      carries a building part: fellWall above is a body now). */
+  /* AN UPROOTED TREE FALLS UNTIL IT MEETS THE GROUND (2026-10-19). The
+     fall was a fixed 78 degrees from vertical, whatever the ground did: on a
+     slope falling downhill the tree stopped short with its whole length
+     hanging over the hillside, and its crown (a hinge of its own) had no idea
+     where the trunk had stopped. Now the trunk's own reach (`reach`, metres
+     from the root plate) is tested against the ground as it goes: it stops
+     on the slope uphill, lies past horizontal downhill, and the crown rides
+     the trunk's angle (`lead`). */
   const hinges = [];
+  const _hv = new THREE.Vector3();
   function stepHinges(dt) {
     for (let i = hinges.length - 1; i >= 0; i--) {
       const H = hinges[i];
-      if (H.a >= H.max) { hinges.splice(i, 1); continue; }
+      if (H.lead) {
+        // the crown: wherever its trunk is (the trunk is stepped after it,
+        // so this is the trunk's angle as of its last step, final included)
+        H.a = H.lead.a;
+        _qa.setFromAxisAngle(H.axis, H.a);
+        H.o.quaternion.copy(_qa).multiply(H.q0);
+        _v.copy(H.p0).sub(H.base).applyQuaternion(_qa).add(H.base);
+        H.o.position.copy(_v);
+        if (H.lead.done) { H.done = true; hinges.splice(i, 1); }
+        continue;
+      }
+      if (H.a >= H.max) { H.done = true; hinges.splice(i, 1); continue; }
       H.w += (3.5 * Math.sin(H.a + 0.15) + 0.6) * dt;   // gravity's moment grows as it leans
       H.a = Math.min(H.max, H.a + H.w * dt);
+      if (H.reach > 0 && H.a > 0.35) {
+        // the trunk's reach point, this angle: on (or in) the ground = down
+        _hv.set(0, H.reach, 0).applyAxisAngle(H.axis, H.a).add(H.base);
+        const gfn = H.t ? H.t.gfn : floorAt;
+        if (_hv.y <= gfn(_hv.x, _hv.z) + 0.3) H.max = H.a;
+      }
       _qa.setFromAxisAngle(H.axis, H.a);
       H.o.quaternion.copy(_qa).multiply(H.q0);
       _v.copy(H.p0).sub(H.base).applyQuaternion(_qa).add(H.base);
@@ -1574,7 +1600,17 @@
       const base = new THREE.Vector3(tr.x, gy, tr.z);
       const axis = new THREE.Vector3(wx, 0, wz).cross(_up).negate().normalize();
       if (uproot) {
-        for (const o of [tr.trunk, tr.foliage]) if (o) { liberate(o); hinges.push({ o: o, base: base, axis: axis, a: 0, w: 0.4, max: Math.PI / 2 - 0.12, q0: o.quaternion.clone(), p0: o.position.clone(), b: null, t: t }); }
+        // how far up the trunk reaches (its top, less the crown's spread)
+        let reach = 0;
+        if (tr.trunk) { _bb.setFromObject(tr.trunk); if (!_bb.isEmpty()) reach = Math.max(0, (_bb.max.y - gy) * 0.85); }
+        let lead = null;
+        for (const o of [tr.trunk, tr.foliage]) if (o) {
+          liberate(o);
+          const H = { o: o, base: base, axis: axis, a: 0, w: 0.4, max: reach > 0 ? Math.PI / 2 + 0.45 : Math.PI / 2 - 0.12, q0: o.quaternion.clone(), p0: o.position.clone(), b: null, t: t,
+            reach: lead ? 0 : reach, lead: lead, done: false };
+          hinges.push(H);
+          if (!lead && o === tr.trunk) lead = H;
+        }
         burst(tr.x, gy + 0.3, tr.z, 0x4a3828, 3, 3, gfn);                      // the root ball tears the ground
       } else {
         // SNAPPED: the crown is torn off and flies; the trunk is left leaning
