@@ -1806,17 +1806,22 @@
     "  return mix(rg.x, rg.y, f.z);",
     "}",
     "float smax(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0); return mix(b, a, h) + k * h * (1.0 - h); }",
+    /* gH: the height the column's ENVELOPE reaches. While a deck is up the
+       column always reaches the deck (a collapsing column still feeds its
+       umbrella, it just thins), so there is never sky between them. gHs is
+       the standing height, which only shapes the collapsing foot. */
+    "float gH; float gHs;",
     "float colR(float y) {",
-    "  float H = max(uCol.x, 1.0);",
-    "  float u = clamp(y / H, 0.0, 1.0);",
+    "  float u = clamp(y / gH, 0.0, 1.0);",
+    "  float us = clamp(y / gHs, 0.0, 1.0);",
     "  float r = uCol.y * (0.8 + 0.2 * smoothstep(0.0, 0.08, u)) + 0.2 * max(y, 0.0);",
     "  r *= 1.0 + 0.4 * smoothstep(0.62, 1.0, u);",      // the head swells
-    "  r *= 1.0 + 1.4 * uCol.z * (1.0 - u);",            // a collapsing foot billows out
+    "  r *= 1.0 + 1.4 * uCol.z * (1.0 - us);",           // a collapsing foot billows out
     "  return max(r, 0.5);",
     "}",
     "float colEnv(vec3 q) {",
     "  if (uCol.w <= 0.001) return -9.0;",
-    "  float H = max(uCol.x, 1.0);",
+    "  float H = gH;",
     "  float u = clamp(q.y / H, 0.0, 1.2);",
     "  vec2 c = uCol2.xy * uCol2.z * u * u;",
     "  float r = colR(q.y);",
@@ -1824,6 +1829,7 @@
     "  float k = max(q.y - (H - 0.55 * r), 0.0) / (0.75 * r);",   // the rounded crown
     "  float e = 1.0 - length(vec2(d, k));",
     "  e = min(e, (q.y - uCol2.w + 1.5) / 3.0);",                  // rooted in the vent
+    "  e -= uCol.z * 0.45 * smoothstep(gHs * 0.8, gH, q.y);",      // collapsing: a thinner neck, still joined
     "  return e - (1.0 - uCol.w) * 1.3;",
     "}",
     "float umbRR(vec3 q) {",
@@ -1834,17 +1840,30 @@
     "  float ey = R + 0.22 * uUmb.w;",
     "  return length(vec2(a / ex, c / ey));",
     "}",
+    /* big billows on the deck's top AND belly, cheap trig (no fetch: the
+       envelope is evaluated four times per sample), drifting with the deck */
+    "vec2 umbLump(vec2 p, float th) {",
+    "  vec2 s = (p - uUmbDir * uTime * 2.2) / (th * 1.5);",
+    "  float a = sin(s.x + 1.6 * sin(s.y * 0.61)) * sin(s.y * 1.13 + 1.3 * sin(s.x * 0.73));",
+    "  vec2 s2 = s * 2.37 + vec2(5.1, 2.3);",
+    "  float b = sin(s2.x + s2.y * 0.4) * sin(s2.y - s2.x * 0.3);",
+    "  return vec2(a, b);",
+    "}",
     "float umbEnv(vec3 q) {",
     "  if (uUmb2.z <= 0.001) return -9.0;",
     "  float rr = umbRR(q);",
     "  float th = max(uUmb2.y, 1.0);",
     "  float g = max(1.0 - rr, 0.0);",
-    "  float dome = th * 0.45 * g * g;",
-    "  float hh = th * 0.5 * (1.0 - 0.55 * min(rr * rr, 1.0)) + dome * 0.5;",
-    "  float ev = 1.0 - abs(q.y - uUmb2.x - dome * 0.5) / max(hh, 0.5);",
-    "  return min(ev, (1.06 - rr) * 3.0) - (1.0 - uUmb2.z) * 1.3;",
+    "  vec2 L = umbLump(q.xz - uUmb.xy, th);",
+    // top: the overshoot dome over the column, cauliflower lumps everywhere
+    "  float top = uUmb2.x + th * (0.42 + 0.3 * g) + th * 0.8 * g * g * g + th * (0.34 * L.x + 0.18 * L.y) * (0.55 + 0.45 * g);",
+    // belly: thicker over the column, hanging lobes, never a flat plane
+    "  float bot = uUmb2.x - th * (0.36 + 0.34 * g) - th * (0.2 * max(L.y, 0.0) + 0.12 * L.x + 0.1);",
+    "  float hh = max((top - bot) * 0.5, 0.5);",
+    "  float ev = 1.0 - abs(q.y - (top + bot) * 0.5) / hh;",
+    "  return min(ev, (1.04 - rr - 0.07 * L.x) * 3.0) - (1.0 - uUmb2.z) * 1.3;",
     "}",
-    "float envAll(vec3 q) { return smax(colEnv(q), umbEnv(q), 0.35); }",
+    "float envAll(vec3 q) { return smax(colEnv(q), umbEnv(q), 0.6); }",
     // the fall streaks hanging under the downwind half of the deck
     "float fallDen(vec3 q) {",
     "  if (uUmb2.w <= 0.001) return 0.0;",
@@ -1872,7 +1891,9 @@
     "  float baseL = max((t1 - t0) / n, 0.6);",
     "  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));",
     "  vec3 acc = vec3(0.0); float T = 1.0; float tW = 0.0; float wSum = 0.0;",
-    "  float H = max(uCol.x, 1.0);",
+    "  gHs = max(uCol.x, 1.0);",
+    "  gH = mix(gHs, max(gHs, uUmb2.x), clamp(uUmb2.z * 2.0, 0.0, 1.0));",
+    "  float H = gH;",
     "  float th = max(uUmb2.y, 1.0);",
     "  float t = t0;",
     "  bool first = true;",
@@ -1880,7 +1901,7 @@
     "    if (t > t1 || T < 0.03) break;",
     "    vec3 q = ro + rd * t - uVent;",
     "    float ec = colEnv(q), eu = umbEnv(q);",
-    "    float e = smax(ec, eu, 0.35);",
+    "    float e = smax(ec, eu, 0.6);",
     "    float fd = fallDen(q);",
     // the local billow scale: the column's own radius here, or the deck's thickness
     "    float wU = smoothstep(-0.25, 0.25, eu - ec);",
@@ -1892,19 +1913,20 @@
     "    vec3 cc = vec3(q.x, q.y - uTime * uRise, q.z) / sc;",
     "    float sw = uTime * 0.05 + q.y / (H * 0.9 + 10.0);",
     "    cc.xz = mat2(cos(sw), -sin(sw), sin(sw), cos(sw)) * cc.xz;",
-    "    vec3 cu = vec3(q.x - uUmbDir.x * uTime * 2.2, q.y * 1.6, q.z - uUmbDir.y * uTime * 2.2) / sc;",
+    "    vec3 cu = vec3(q.x - uUmbDir.x * uTime * 2.2, q.y * 1.15, q.z - uUmbDir.y * uTime * 2.2) / sc;",
     "    vec3 c = mix(cc, cu, wU);",
     "    float n1 = vnoise(c) * 0.64 + vnoise(c * 2.13 + vec3(3.1, 1.7, 5.3)) * 0.36;",
-    "    float base = e + (n1 - 0.5) * 1.15;",
+    // the deck is eroded much harder than the column: billows, not a lens
+    "    float base = e + (n1 - 0.5) * mix(1.15, 1.6, wU);",
     "    float d = 0.0;",
     "    if (base > 0.0) {",
     "      float n2 = vnoise(c * 4.37 + vec3(1.7, -uTime * 0.25, 0.4));",
-    "      d = base - (1.0 - n2) * 0.38 * (1.0 - clamp(base * 1.6, 0.0, 1.0));",
+    "      d = base - (1.0 - n2) * mix(0.38, 0.62, wU) * (1.0 - clamp(base * 1.6, 0.0, 1.0));",
     "      d = clamp(d * 1.8, 0.0, 1.0);",
     "    }",
     "    float dd = d + fd * 0.22;",
     "    if (dd > 0.003) {",
-    "      float a = 1.0 - exp(-dd * uSigma * stepL / sc);",
+    "      float a = 1.0 - exp(-dd * uSigma * mix(1.8, 1.25, wU) * stepL / sc);",
     "      float L = sc * 1.1;",
     "      float o1 = envAll(q + uSunDir * L * 0.55);",
     "#if PLUME_TAPS > 1",
@@ -1926,8 +1948,11 @@
     "      lit = mix(lit, uDeep * 2.2, deep * 0.45);",
     "      lit *= 1.0 - 0.08 * wU;",
     "      vec3 col = mix(sh * (0.55 + 0.45 * occ), lit, clamp(Ts * uDay * (0.6 + 0.4 * occ), 0.0, 1.0));",
-    // the crater's light on the column's foot, strongest on the shadowed undersides
-    "      col += uVentCol * (uVentK * exp(-max(q.y, 0.0) / uVentReach) * (0.45 + 0.55 * (1.0 - Ts)) * (1.0 - wU));",
+    /* the crater's light on the column's FOOT only: the bottom ~12% of the
+       column, falling off fast. Ash is not fire; above that it is lit by the sun. */
+    "      float vy = max(q.y, 0.0);",
+    "      float vk = uVentK * exp(-vy / min(uVentReach, 0.045 * H + 2.0)) * (1.0 - smoothstep(0.05 * H, 0.13 * H, vy));",
+    "      col += uVentCol * (vk * (0.35 + 0.65 * (1.0 - Ts)) * (1.0 - wU));",
     "      if (uFlash.w > 0.01) {",
     "        vec3 fp = q + uVent - uFlash.xyz;",
     "        col += uFlashCol * (uFlash.w * exp(-dot(fp, fp) / max(uFlashR * uFlashR, 1.0)));",
@@ -2053,9 +2078,9 @@
     parent.add(mesh);
     // screen-authored palette (see screenHex): neutral, faintly warm, never blue
     const P = {
-      litD: new THREE.Color(screenHex(176, 169, 158)), shadeD: new THREE.Color(screenHex(60, 56, 53)),
-      deepD: new THREE.Color(screenHex(30, 27, 25)),
-      steamLitD: new THREE.Color(screenHex(222, 218, 210)), steamShadeD: new THREE.Color(screenHex(112, 109, 105)),
+      litD: new THREE.Color(screenHex(148, 139, 127)), shadeD: new THREE.Color(screenHex(50, 45, 41)),
+      deepD: new THREE.Color(screenHex(26, 23, 21)),
+      steamLitD: new THREE.Color(screenHex(194, 188, 178)), steamShadeD: new THREE.Color(screenHex(96, 92, 87)),
       litN: new THREE.Color(screenHex(30, 28, 27)), shadeN: new THREE.Color(screenHex(13, 12, 12)),
       deepN: new THREE.Color(screenHex(9, 8, 8)),
       steamN: new THREE.Color(screenHex(26, 25, 24)),
@@ -2088,7 +2113,8 @@
         let any = false;
         let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, z0 = 1e9, z1 = -1e9;
         if (c.w > 0.001) {
-          const H = Math.max(1, c.x);
+          // the shader's gH: the column reaches the deck while one is up
+          const H = Math.max(1, c.x, u2.z > 0.001 ? u2.x : 0);
           const rT = (c.y + 0.2 * H) * 1.4 * (1 + 1.4 * c.z) * 1.6 + 2;
           const lx = c2.x * c2.z, lz = c2.y * c2.z;
           x0 = Math.min(x0, Math.min(0, lx) - rT); x1 = Math.max(x1, Math.max(0, lx) + rT);
@@ -2100,8 +2126,8 @@
           const ext = (um.z + um.w) * 1.15 + u2.y;
           x0 = Math.min(x0, um.x - ext); x1 = Math.max(x1, um.x + ext);
           z0 = Math.min(z0, um.y - ext); z1 = Math.max(z1, um.y + ext);
-          const lowY = u2.w > 0.001 ? (vol.groundLocal - vol.ventLocal.y - 1) : (u2.x - u2.y * 1.2);
-          y0 = Math.min(y0, lowY); y1 = Math.max(y1, u2.x + u2.y * 1.3);
+          const lowY = u2.w > 0.001 ? (vol.groundLocal - vol.ventLocal.y - 1) : (u2.x - u2.y * 1.5);
+          y0 = Math.min(y0, lowY); y1 = Math.max(y1, u2.x + u2.y * 2.1);
           any = true;
         }
         mesh.visible = any;
@@ -2169,7 +2195,7 @@
     let flashK = 0;
     const handle = {
       kind: "column", group: vol.mesh, puffCount: 0, volume: vol,
-      get topY() { return baseY + height * hk; },
+      get topY() { return baseY + height * hk; },   // standing top; the drawn body still reaches the deck
       get standing() { return hk; },
       get collapsing() { return slumpT >= 0; },
       get done() { return done; },
@@ -2215,7 +2241,7 @@
         U.uCol.value.set(Math.max(0.5, height * hk * grow), r0, 1 - hk, pres);
         U.uCol2.value.set(wx || 0, wz || 0, height * 0.27 * hk, cut);
         const night = nightNow(opts);
-        U.uVentK.value = waning ? 0 : (0.28 + 0.62 * night);
+        U.uVentK.value = waning ? 0 : (0.12 + 0.7 * night);
         vol.light(night, fogless);
         vol.sync();
         return handle;
@@ -2833,7 +2859,9 @@
     const F_MID = new THREE.Color(screenHex(255, 140, 38));
     const F_OLD = new THREE.Color(screenHex(152, 30, 8));
     // one additive instanced draw for every clot (was one Sprite call each)
-    const B = puffBatch(N, { map: glowTex(), tiles: 1, additive: true, fog: false, parent: parent, renderOrder: 8 });
+    /* renderOrder 6, UNDER the plume volume (7): the fountain stands inside
+       the column's foot, so the ash must hide it, not have it glow through */
+    const B = puffBatch(N, { map: glowTex(), tiles: 1, additive: true, fog: false, parent: parent, renderOrder: 6 });
     const _fc = new THREE.Color();
     let seed = (((x * 73856093) | 0) ^ ((z * 19349663) | 0) ^ 0x1d3f77b1) >>> 0;
     const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
