@@ -1986,6 +1986,8 @@
      water and the wreckage it drags really do go back out to sea.
      ============================================================ */
   let tsuRun = null, tsuRunArena = null;
+  // s after the tsunami's end that the water on the land takes to drain
+  const TSU_DRAIN_SECS = 18;
   function tsuBlocks(A) {
     const I = CBZ.island;
     const list = (I && Array.isArray(I.buildings) && I.buildings.length) ? I.buildings : (A.fragile || []);
@@ -2049,9 +2051,13 @@
         const e = CBZ.waterEventGet ? CBZ.waterEventGet() : null;
         if (e && e.owner !== "survival-tsunami") return true;
         if (e || f._endT == null) return false;
-        // 14 s, not 40: the backwash belongs to the tsunami, and the calm
-        // after it must be calm (the director cuts it at its deadline anyway)
-        return f.t - f._endT > 14 || f.landVol < Math.max(40, f.peakLandVol * 0.015);
+        /* TSU_DRAIN_SECS (18), not 40: the backwash belongs to the tsunami
+           and the calm after it must be calm. Not 14 either, with a 1.5%
+           cut: that detached a field with every hollow still full, and the
+           ponds blinked off. The field's own deadline drain (seepEnd) has
+           the level dropping to the ground by then; the volume test only
+           stops a field that has really emptied early. */
+        return f.t - f._endT > TSU_DRAIN_SECS + 0.5 || f.landVol < Math.max(6, f.peakLandVol * 0.002);
       },
     });
     ctx.st.run = F;
@@ -2988,8 +2994,11 @@
         st.run._endT = st.run.t;
         const deb = st.debris, sdx = st.dx, sdz = st.dz, F = st.run;
         if (deb) F.after.push(function (dt) { deb.step(dt, { dx: sdx, dz: sdz, flow: 0, sediment: 0.6, front: null }); });
-        // and the ground soaks up what is left standing in the hollows
-        F.after.push(function () { F.seep = Math.min(0.08, 0.006 * (F.t - F._endT)); });
+        // and the ground soaks up what is left standing in the hollows: a
+        // slow seep that takes the thin sheets first, and a deadline by
+        // which the deepest pond has dropped to the mud (tsunami_runup.js)
+        F.seepEnd = F._endT + TSU_DRAIN_SECS;
+        F.after.push(function () { F.seep = Math.min(0.03, 0.0025 * (F.t - F._endT)); });
       }
       // ONE LINE PUTS THE SEA BACK. There is no mesh to reposition, no sheet
       // to delete and no swimmer to stand down.
@@ -5000,6 +5009,7 @@
     try { if (CBZ.wildfire && CBZ.wildfire.busy && CBZ.wildfire.busy()) out.push("fire"); } catch (e) {}
     try { if (CBZ.tornado && CBZ.tornado.count && CBZ.tornado.count()) out.push("tornado"); } catch (e) {}
     try { if (CBZ.tsuRunup && CBZ.tsuRunup.current && CBZ.tsuRunup.current()) out.push("backwash"); } catch (e) {}
+    try { if (CBZ.flashflood && CBZ.flashflood.busy && CBZ.flashflood.busy()) out.push("flood"); } catch (e) {}
     try { if (CBZ.blizzard && CBZ.blizzard.busy && CBZ.blizzard.busy()) out.push("drifts"); } catch (e) {}
     try {
       const W = CBZ.weather;
@@ -5014,6 +5024,7 @@
     if (list.indexOf("fire") >= 0 && CBZ.wildfire && CBZ.wildfire.settle) { try { CBZ.wildfire.settle(0.5); } catch (e) {} }
     if (list.indexOf("tornado") >= 0 && CBZ.tornado && CBZ.tornado.clear) { try { CBZ.tornado.clear(); } catch (e) {} }
     if (list.indexOf("backwash") >= 0 && CBZ.tsuRunup) { try { CBZ.tsuRunup.detach(); } catch (e) {} }
+    if (list.indexOf("flood") >= 0 && CBZ.flashflood) { try { CBZ.flashflood.clear({ keepSilt: true, now: true }); } catch (e) {} }
     if (list.indexOf("drifts") >= 0 && CBZ.blizzard && CBZ.blizzard.settle) { try { CBZ.blizzard.settle(0.5); } catch (e) {} }
     if (list.indexOf("weather") >= 0 && CBZ.weatherSettle) { try { CBZ.weatherSettle(0.5); } catch (e) {} }
     if (list.indexOf("ashcloud") >= 0) {
