@@ -5132,7 +5132,9 @@
     // loot: a PLAYER kill frisks the body for everything they were carrying;
     // an NPC-vs-NPC death just leaves a small stash pack on the ground.
     const playerKill = killer && CBZ.playerChar && killer.group === CBZ.playerChar.group;
-    if (playerKill && CBZ.econ && CBZ.econ.lootActor) CBZ.econ.lootActor(victim, {});
+    // (owner: "if I kill someone I shouldn't need to search": the drop above is
+    // the loot; the invisible frisk is only the flag-off fallback)
+    if (playerKill) { if (CBZ.CONFIG.PRISON_DROPS_V1 === false && CBZ.econ && CBZ.econ.lootActor) CBZ.econ.lootActor(victim, {}); }
     else if (!opts.noDrop && CBZ.addPack) CBZ.addPack(victim.group.position.x, victim.group.position.z, 6);
     // THE CLIQUE'S NERVE (CBZ.brain.morale). This used to send EVERY living
     // member of a dead shotcaller's set, anywhere in the compound, into a

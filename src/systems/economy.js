@@ -186,10 +186,20 @@
     n = n || 1;
     g.inventory[name] = (g.inventory[name] || 0) + n;
     if (name === "Shiv" || name === "Shank") syncShankWeapon();
-    // a rifle off a tower is a gun in your hands, not a line in the bag
-    if (name === "Rifle" && CBZ.unlockWeapon) {
+    // A KEYCARD IN THE BAG IS THE KEYCARD, however it got there: lifted off
+    // his belt, searched off a man on the floor, or picked up off the floor
+    // where a dead screw dropped it (systems/prisondrops.js grant). Only the
+    // lift used to set the door truth, so a card off a corpse opened nothing.
+    if (name === "Keycard") grantKeyItem(name);
+    // a rifle off a tower is a gun in your hands, not a line in the bag; so
+    // are the warden's pistol and a screw's taser picked up off the floor
+    const ARM = { Rifle: "carbine", Gun: "sidearm", Taser: "taser" };
+    // (weapon-data.js's legacy mirror writes a "Gun" row back into the bag when
+    // WEAPON_STRIP_SHARED is off; arming from it then would loop, so only the
+    // rifle converts in that configuration)
+    if (ARM[name] && CBZ.unlockWeapon && (name === "Rifle" || !CBZ.CONFIG || CBZ.CONFIG.WEAPON_STRIP_SHARED !== false)) {
       g.inventory[name] = Math.max(0, g.inventory[name] - n);
-      CBZ.unlockWeapon("carbine", { select: true });
+      CBZ.unlockWeapon(ARM[name], { select: true });
       if (CBZ.playerHolster) CBZ.playerHolster(false);
     }
     CBZ.refreshInventory && CBZ.refreshInventory();
@@ -1765,8 +1775,7 @@
     const got = rollDrops(actor, { pickpocket: !!opts.pickpocket });
     const cigs = got.cigs, items = got.items;
     if (cigs) addCigs(cigs);
-    // a keycard off a man is the door's keycard (grantKeyItem), not a souvenir
-    for (let i = 0; i < items.length; i++) { addItem(items[i], 1); grantKeyItem(items[i]); }
+    for (let i = 0; i < items.length; i++) addItem(items[i], 1);
     if (!opts.silent && (cigs > 0 || items.length)) {
       announceLoot(cigs, items);
       CBZ.sfx && CBZ.sfx("loot");
