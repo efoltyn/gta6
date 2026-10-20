@@ -38,6 +38,10 @@
    CBZ.faceMood(rig, mood, k, ms) lets a system force a mood for a while
    (reactions.js: the terrified stare at gunpoint).
 
+   rig.faceCamera (an Object3D, a camera): a face that is FILMED. It is always
+   the near tier (the player's camera is not the one looking at it) and the
+   eyes go to that lens. city/newsstudio.js's anchor reads the news this way.
+
    Runs LATE (88) so animChar has posed the neck this frame. No per-frame
    allocation in the hot loop.
 ============================================================ */
@@ -191,6 +195,13 @@
 
   // what is this person looking at? writes st.tgt, returns true, or false for "nothing"
   function pickTarget(rig, a, st, mood, now) {
+    // a face on camera plays to its lens: eye contact, whatever else is near
+    const lens = rig.faceCamera;
+    if (lens && lens.matrixWorld) {
+      const e = lens.matrixWorld.elements;
+      st.tgt.set(e[12], e[13], e[14]);
+      return true;
+    }
     // the fight / the threat
     if (a && (mood === "angry" || mood === "fear")) {
       const foe = a.rage || a.foe || a.attacker || a.threat || a.mem;
@@ -402,7 +413,7 @@
       if (!isNear && (i + frame) % FAR_EVERY) continue;     // far: nothing, most frames
       if (!g.visible) continue;
       let wantNear = true;
-      if (ce) {
+      if (ce && !rig.faceCamera) {          // a filmed face is near for its own camera
         const e = g.matrixWorld.elements;
         const dx = e[12] - cx, dy = e[13] - cy, dz = e[14] - cz, d2 = dx * dx + dy * dy + dz * dz;
         wantNear = isNear ? d2 < NEAR_OUT2 : d2 < NEAR_IN2;
