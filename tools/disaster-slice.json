@@ -4080,6 +4080,7 @@
   "src/city/police.js",
   "src/city/aircraft.js",
   "src/city/traffic.js",
+  "src/systems/volfx.js",
   "src/city/crashfx.js",
   "src/city/crashdeform.js",
   "src/systems/skidmarks.js",

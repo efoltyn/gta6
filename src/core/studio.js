@@ -756,7 +756,7 @@
       gives: "the researched mushroom: stem, cap, surge, collar, whiteout, and " +
              "a yield-to-radius model rather than a big orange ball",
       needs: ["look"],
-      files: ["city/nukefx.js"],
+      files: ["systems/volfx.js", "city/nukefx.js"],
       publishes: ["cityNukeFX", "nukeLethalAt"],
     },
 
@@ -809,7 +809,7 @@
          law, the picture (crashfx), the wall carve's ledger (fracture), the
          collapse engine, and systems/strike.js on top, which studio.boom is */
       needs: ["fx"],
-      files: ["weapons/munitiontable.js", "systems/breach.js", "city/crashfx.js", "city/fracture.js",
+      files: ["weapons/munitiontable.js", "systems/breach.js", "systems/volfx.js", "city/crashfx.js", "city/fracture.js",
         "city/collapse.js", "systems/strike.js"],
       publishes: ["munitionTable", "blastLaw", "cityBlastCore", "cityAirstrikeCollapse", "cityWallRuin",
         "cityFracture", "collapse", "strike"],

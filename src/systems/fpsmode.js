@@ -4617,6 +4617,20 @@
           // construction (the "rpg" row IS 1.9/13, straight off weapon-data),
           // so the picture and the damage are identical and only the building
           // bookkeeping is skipped.
+          // THE FACE IT HIT: its world normal (toward the shooter) seats the
+          // fireball volume off the face, and its colour is the dust it throws
+          // (city/crashfx.js surfTone). A ground hit reads the ground's own tone.
+          let surfNormal = null, surface = null;
+          if (wallStruck && wallStruck.face && wallStruck.object && wallStruck.object.getWorldQuaternion) {
+            const sn = wallStruck.face.normal.clone().applyQuaternion(wallStruck.object.getWorldQuaternion(wallQ));
+            if (sn.lengthSq() > 0.25) {
+              if (sn.dot(launchDir) > 0) sn.multiplyScalar(-1);
+              surfNormal = sn.normalize();
+            }
+            let sm = wallStruck.object.material;
+            if (Array.isArray(sm)) sm = sm[wallStruck.face.materialIndex || 0] || sm[0];
+            if (sm && sm.color) surface = { r: sm.color.r, g: sm.color.g, b: sm.color.b };
+          }
           const useBus = cityWorld && CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false &&
                          (w.blastPower || 1.4) === 1.9 && (w.blastRadius || 7) === 13;
           if (useBus) {
@@ -4624,6 +4638,7 @@
               byPlayer: true, airburst: airburst,
               dirx: launchDir.x, dirz: launchDir.z,
               kind: w.projPlain ? undefined : "rpg", dir: launchDir,
+              surface: surface, surfNormal: surfNormal,
             });
           } else {
             // CBZ.cityExplosion is the head of a wrapper chain that couples the
@@ -4635,7 +4650,12 @@
             // untouched and still runs the full chain.
             const boom = cityWorld ? CBZ.cityExplosion : (CBZ.cityBlastCore || null);
             if (boom) boom(pt.x, pt.z, { power: w.blastPower || 1.4, radius: w.blastRadius || 7, byPlayer: true, y: pt.y, airburst: airburst,
-              kind: w.projPlain ? undefined : "rpg", dir: launchDir });
+              kind: w.projPlain ? undefined : "rpg", dir: launchDir, surface: surface, surfNormal: surfNormal });
+          }
+          // the face that HELD keeps the soot and the fragment pocks (every
+          // mark ray-checked against the real geometry; glass refuses)
+          if (wallStruck && canLeaveBlastScar(wallStruck) && CBZ.blastSurfaceMark) {
+            try { CBZ.blastSurfaceMark(wallStruck, launchDir, w.blastPower || 1.4); } catch (e) {}
           }
           /* ENOUGH ROCKETS OPEN IT (systems/breach.js). The rocket banks its
              warhead mass into the wall it hit, at the STANDOFF coupling — a

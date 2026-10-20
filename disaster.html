@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 433
+     Natural Disaster Survival, standing alone: index.html minus the 434
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -1327,6 +1327,10 @@ document.body.appendChild(b);}}catch(e){}})();
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=w09290242x"></script>
 <script src="src/city/playercars.js?v=peak1014c"></script>
+<!-- systems/volfx.js: the volumetric fireball / smoke / fire (raymarched boxes
+     fitted to the room) + spark streaks, and THE shared 3D noise atlas
+     (CBZ.volNoise) that city/nukefx.js also marches. Before crashfx (its
+     blasts and fires draw through it) and nukefx (reads the atlas). -->
 <script src="src/city/cardyn.js?v=cars2aids"></script>
 <!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
