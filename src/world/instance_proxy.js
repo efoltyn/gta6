@@ -98,6 +98,9 @@
         }
         const im = new THREE.InstancedMesh(b.geo, lookOf(b.look), b.list.length);
         im.name = (opts.name || "proxy") + "-" + b.list.length;
+        // a DRAWING of live meshes, never a thing of its own: whoever moves
+        // things (world/sinkhole.js's instance lift) moves the mesh instead
+        im.userData.instanceProxy = true;
         im.frustumCulled = false;       // r128 culls an InstancedMesh by the geometry's own sphere at the origin
         im.castShadow = b.list.some(function (e) { return e.castShadow; });
         im.receiveShadow = true;

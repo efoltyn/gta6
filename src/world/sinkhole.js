@@ -805,13 +805,31 @@
     for (let i = 0; i < bl.length; i++) if (bl[i].group) skip.add(bl[i].group);
     const rigs = rigSet();
     const feet = [], uppers = [];    // small meshes standing on the ground / hung above it
+    /* A TREE IS ITS TRUNK AND ITS CROWN, whatever size the crown is. The
+       crown used to be found by the small-thing rule (under 4.5 m across,
+       under 9 m up, within 2.5 m of a footing): a broad crown failed it, the
+       trunk went down the shaft alone and its crown hung over the void. A
+       host that knows its trees (the island's arena: trunk + foliage per
+       record) pairs them here, and the crown rides its own trunk. */
+    const mates = new Map(), mated = new Set();
+    try {
+      const A = CBZ.surv && CBZ.surv.arena, T = A && K.survMode() ? A.flammable : null;
+      if (Array.isArray(T)) for (let i = 0; i < T.length; i++) {
+        const t = T[i];
+        if (t && t.trunk && t.foliage && t.trunk.isMesh && t.foliage.isMesh) { mates.set(t.trunk, t.foliage); mated.add(t.foliage); }
+      }
+    } catch (e) {}
     const merged = [], inst = [];
     K.root().traverse(function (o) {
       if (!o.isMesh || !o.visible || !o.geometry) return;
       if (isRig(o) || underAny(o, rigs) || underAny(o, skip)) return;
       const geo = o.geometry;
       if (!geo.boundingBox) geo.computeBoundingBox();
-      if (o.isInstancedMesh) { inst.push(o); return; }
+      // an instance proxy only draws meshes this scan already finds as
+      // themselves (the island's trees and cars): lifting its slots made a
+      // second copy of each tree fall in beside the real one
+      if (o.isInstancedMesh) { if (!(o.userData && o.userData.instanceProxy)) inst.push(o); return; }
+      if (mated.has(o)) return;                                         // rides its trunk (below)
       _box.copy(geo.boundingBox).applyMatrix4(o.matrixWorld);
       if (_box.max.x < x - R || _box.min.x > x + R || _box.max.z < z - R || _box.min.z > z + R) return;
       const sx = _box.max.x - _box.min.x, sz = _box.max.z - _box.min.z, sy = _box.max.y - _box.min.y;
@@ -837,8 +855,10 @@
       const f = feet[i];
       let g = null;
       for (let k = 0; k < G.length; k++) if (Math.hypot(G[k].x - f.x, G[k].z - f.z) < 0.8) { g = G[k]; break; }
-      if (!g) { g = { x: f.x, z: f.z, objs: [] }; G.push(g); }
-      g.objs.push(f.o);
+      if (!g) { g = { x: f.x, z: f.z, objs: [], nFeet: 0 }; G.push(g); }
+      g.objs.push(f.o); g.nFeet++;
+      const crown = mates.get(f.o);
+      if (crown && crown.parent && crown.visible) (g.crowns || (g.crowns = [])).push(crown);
     }
     for (let i = 0; i < uppers.length; i++) {
       const u = uppers[i];
@@ -851,7 +871,14 @@
       }
       if (best) best.objs.push(u.o);
     }
-    for (let k = 0; k < G.length; k++) seq.props.push({ objs: G[k].objs, x: G[k].x, z: G[k].z, kind: "prop" });
+    for (let k = 0; k < G.length; k++) {
+      const g = G[k], tree = !!(g.crowns && g.crowns.length);
+      // a tree's body is its TRUNK (frame + contacts): the crown gives under
+      // it on the floor of the hole rather than holding the trunk up in the air
+      const feetObjs = g.objs.slice(0, g.nFeet);
+      if (tree) g.objs = g.objs.concat(g.crowns);
+      seq.props.push({ objs: g.objs, frameObjs: tree ? feetObjs : null, x: g.x, z: g.z, kind: "prop" });
+    }
     for (let i = 0; i < merged.length && seq.props.length < 60; i++) extractMerged(seq, merged[i], R);
     for (let i = 0; i < inst.length && seq.props.length < 60; i++) extractInstances(seq, inst[i], R);
   }
@@ -1013,7 +1040,8 @@
     let objs = P.objs, undo = null;
     if (P.merged) { const L = liftMerged(seq, P); objs = [L.mesh]; undo = L.undo; }
     else if (P.inst) { const L = liftInstance(seq, P); objs = [L.mesh]; undo = L.undo; }
-    const b = makeBody(seq, objs, { kind: P.kind, density: P.kind === "post" ? 900 : 450, e: 0.1, mu: 0.7 });
+    const fr = P.frameObjs ? frameOf(P.frameObjs, 0) : null;
+    const b = makeBody(seq, objs, { kind: P.kind, density: P.kind === "post" ? 900 : 450, e: 0.1, mu: 0.7, frame: fr || undefined });
     if (!b) { P.failed = true; if (undo) undo(); return null; }
     b.undo = undo;
     b.asleep = true;
