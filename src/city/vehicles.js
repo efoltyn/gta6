@@ -716,17 +716,22 @@
      copies (they were ~16 MB of garbage per city build, all at the build's peak). */
   const _mnm = new THREE.Matrix3(), _mv = new THREE.Vector3();
   function mergeTransformed(parts) {
-    let vertices = 0, anyColor = false;
+    let vertices = 0, anyColor = false, anyUv = false;
     for (const p of parts) {
       vertices += p.g.index ? p.g.index.count : p.g.attributes.position.count;
       if (p.g.attributes.color) anyColor = true;
+      if (p.g.attributes.uv) anyUv = true;
     }
     const pos = new Float32Array(vertices * 3), nrm = new Float32Array(vertices * 3);
     const col = anyColor ? new Float32Array(vertices * 3) : null;
+    // UVS RIDE THE MERGE: a textured part (a canvas livery decal, emergencykit.js)
+    // merged without them samples one texel everywhere and vanishes under its
+    // alphaTest. Buckets are per material, so a textured bucket is all textured.
+    const uvs = anyUv ? new Float32Array(vertices * 2) : null;
     let o = 0;
     for (const p of parts) {
       const g = p.g, idx = g.index ? g.index.array : null;
-      const P = g.attributes.position, N = g.attributes.normal, C = g.attributes.color;
+      const P = g.attributes.position, N = g.attributes.normal, C = g.attributes.color, U = g.attributes.uv;
       const n = idx ? idx.length : P.count;
       const e = p.m.elements;
       _mnm.getNormalMatrix(p.m);
@@ -747,12 +752,14 @@
           if (C && C.itemSize === 3) { col[o] = C.getX(v); col[o + 1] = C.getY(v); col[o + 2] = C.getZ(v); }
           else { col[o] = 1; col[o + 1] = 1; col[o + 2] = 1; }
         }
+        if (uvs && U) { const q = (o / 3) * 2; uvs[q] = U.getX(v); uvs[q + 1] = U.getY(v); }
       }
     }
     const out = new THREE.BufferGeometry();
     out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
     if (col) out.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    if (uvs) out.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
     out.computeBoundingSphere();
     return out;
   }
@@ -2105,8 +2112,13 @@
     // sedans. 4.2 is the real ratio of a loaded tractor-trailer to a saloon,
     // not a feel knob.
     else if (bk === "semi") { mass = 4.2; armor = 0.34; repair = 0.72; }
+    // A RIGID HEAVY (an 18 t pumper, a 9 t armoured truck): lighter than a
+    // loaded artic, three times a saloon. Armour is the model's when it says
+    // (the SWAT truck is plate steel; a fire engine is not).
+    else if (bk === "truck") { mass = 3.0; armor = 0.3; repair = 0.78; }
     else if (bk === "hatch") { mass = 0.96; armor = 0.04; repair = 0.9; }
     if (s > 1.35) { mass *= 0.94; repair *= 1.25; }     // exotics are lighter and expensive to fix
+    if (model && model.armor != null) armor = model.armor;
     return { mass, armor, repair };
   }
 
@@ -4988,6 +5000,7 @@
     else if (bk === "pickup") { accel = 27; top = 32; turn = 2.0; grip = 5.2; brake = 26; }
     else if (bk === "van") { accel = 23; top = 29; turn = 1.85; grip = 4.8; brake = 24; }
     else if (bk === "semi") { accel = 14; top = 25; turn = 1.05; grip = 3.6; brake = 15; }
+    else if (bk === "truck") { accel = 18; top = 27; turn = 1.35; grip = 4.2; brake = 19; }
     else if (bk === "hatch") { accel = 29; top = 31; turn = 2.85; grip = 7.2; brake = 31; wheelbase = 2.42; steerLock = 0.6; }
     if (bk === "coupe") { wheelbase = 2.48; steerLock = 0.58; drag = 0.0055; rolling = 0.9; }
     else if (bk === "muscle") { wheelbase = 2.78; steerLock = 0.52; rolling = 1.05; }
@@ -5003,6 +5016,9 @@
        swept path still a hatchback's, so the trailer would pivot on its own
        middle and the corner would come out fine. It has to be the geometry. */
     else if (bk === "semi") { wheelbase = 8.6; steerLock = 0.30; drag = 0.0165; rolling = 2.6; }
+    // a rigid heavy: a pumper's 4.9 m wheelbase on a 0.40 rad lock is a ~11.5 m
+    // turning circle, about what a real custom-cab engine sweeps kerb to kerb
+    else if (bk === "truck") { wheelbase = 4.6; steerLock = 0.40; drag = 0.012; rolling = 2.0; }
     // Performance follows the model's market tier, not its visual length. The
     // old use of `s` accidentally made long vans faster than short sports cars.
     top *= 0.88 + rarity * 0.28;
@@ -5030,6 +5046,7 @@
       else if (bk === "pickup") { roll = 1.0; drift = 1.05; }
       else if (bk === "van") { roll = 1.3; drift = 1.1; }
       else if (bk === "semi") { roll = 1.5; drift = 1.25; }
+      else if (bk === "truck") { roll = 1.35; drift = 1.15; }
     }
     // DAMAGE degrades it: a smoking/burning car is gutless and squirrelly
     const d = carDmg(car);
@@ -5098,7 +5115,7 @@
     const bk = bodyKind(car);
     if (bk === "coupe") return "sports";
     if (bk === "muscle") return "muscle";
-    if (bk === "suv" || bk === "pickup" || bk === "van" || bk === "semi") return "truck";
+    if (bk === "suv" || bk === "pickup" || bk === "van" || bk === "semi" || bk === "truck") return "truck";
     return "sedan";
   }
   // THE GEARBOX lives in city/cardyn.js now (gear points, per-gear torque

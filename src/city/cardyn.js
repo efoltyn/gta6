@@ -142,6 +142,7 @@
     pickup:   { wf: 0.57, drive: 0.0 },
     van:      { wf: 0.55, drive: 0.0 },
     semi:     { wf: 0.45, drive: 0.0 },
+    truck:    { wf: 0.42, drive: 0.0 },    // rigid heavy (pumper, armoured truck): the pump/tank/plate sit over the rear axle
     motorcycle: { wf: 0.48, drive: 0.0 },
   };
   const CLASS_DEF = { wf: 0.56, drive: 0.5 };

@@ -40,7 +40,7 @@ CBZ.lab.ingredient("car", {
      at depth 0 (load-time edges only; see the kit for why), so the tracer
      would not follow them on its own */
   files: ["src/world/carfx.js", "src/city/economy.js", "src/city/carbody.js", "src/city/carwheels.js", "src/city/carparts.js",
-    "src/city/playercars.js", "src/city/cardyn.js", "src/city/vehicles.js"],
+    "src/city/playercars.js", "src/city/emergencykit.js", "src/city/cardyn.js", "src/city/vehicles.js"],
   make: function (W, o) {
     const THREE = window.THREE;
     const at = o.at || [0, -10];

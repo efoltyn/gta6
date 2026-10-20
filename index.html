@@ -1525,31 +1525,37 @@ document.body.appendChild(b);}}catch(e){}})();
      After blobshadows.js (same pool shape) and before vehicles.js: it only
      READS the fleet at order 37.7, after vehicles.js has moved it at 37. -->
 <script src="src/city/carlamps.js?v=lamps1"></script>
-<script src="src/city/medics.js?v=leave1014"></script>
+<script src="src/city/medics.js?v=emg1019"></script>
 <script src="src/city/security.js?v=verbs2b"></script>
 <script src="src/city/vips.js?v=popup1009b"></script>
-<script src="src/city/police.js?v=leave1014"></script>
+<script src="src/city/police.js?v=emg1019"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/aircraft.js?v=rounds1013m"></script>
-<script src="src/city/traffic.js?v=lodlight1012"></script>
-<script src="src/city/carparts.js?v=cars2"></script>
+<script src="src/city/traffic.js?v=emg1019"></script>
+<script src="src/city/carparts.js?v=emg1019"></script>
 <script src="src/city/carbody.js?v=cars2"></script>
 <script src="src/city/carwheels.js?v=cars2"></script>
 <!-- city/carseats.js: the ONE seat model (layouts per body, doors, the
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
-<script src="src/city/carseats.js?v=w09290242x"></script>
-<script src="src/city/playercars.js?v=peak1014c"></script>
+<script src="src/city/carseats.js?v=emg1019"></script>
+<script src="src/city/playercars.js?v=emg1019"></script>
+<!-- city/emergencykit.js: the emergency fleet (police Interceptor + Pursuit
+     liveries, the Type III ambulance, the pumper, the armoured SWAT truck)
+     on the shared car kit, and the one light-rig flasher. After playercars.js
+     (it builds through CBZ.cityCarKit); read lazily by carparts / traffic /
+     police / medics. -->
+<script src="src/city/emergencykit.js?v=emg1019"></script>
 <script src="src/city/crashfx.js?v=peak1014c"></script>
 <script src="src/city/crashdeform.js?v=carblood930"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
-<script src="src/city/cardyn.js?v=cars2aids"></script>
+<script src="src/city/cardyn.js?v=emg1019"></script>
 <!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=pf0930e"></script>
-<script src="src/city/vehicles.js?v=island1014"></script>
+<script src="src/city/vehicles.js?v=emg1019"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
 <script src="src/city/playeraircraft.js?v=island1014"></script>
