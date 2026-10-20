@@ -768,7 +768,8 @@
 
     // ---- the windows, read off what the grammar left open ------------------
     const fh = (CBZ.hash01 ? CBZ.hash01(ox, oz, 0xf4a3) : 0.3);
-    const frameCol = o.frameCol != null ? o.frameCol
+    // the grammar's own frame colour (facade_kit F.windowFrame) when it named one
+    const frameCol = o.frameCol != null ? o.frameCol : ctx.__winFrame != null ? ctx.__winFrame
       : [0xe6e1d6, 0x34312d, 0x6b6f73, 0xe6e1d6, 0x2c3a33][(fh * 5) | 0];
     const panes = glazeBuilding({
       group: group, ox: ox, oz: oz, gy: gy, w: o.w, d: o.d, storeys: o.storeys,

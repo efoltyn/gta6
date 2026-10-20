@@ -405,7 +405,7 @@
     F.box(ctx, f, 0, H + 0.02, W + 0.06, 0.14, P * 0.55, soffit, -0.01);
     // a threshold you can see you are meant to walk over, flush enough that
     // nothing in physics has to know about it
-    F.box(ctx, f, 0, 0.05, W + 0.30, 0.10, P + 0.16, jamb, -0.02);
+    F.box(ctx, f, 0, 0.05, W + 0.30, 0.10, Math.min(P + 0.16, 0.6), jamb, -0.02);   // a sill, not a jetty
   };
 
   // The shell's real doorway, so a facade and the carve agree on where the
@@ -529,39 +529,43 @@
     if (!(W > 0.2) || !(y1 - y0 > 0.2)) return;
     const cw = o.w != null ? o.w : 0.16, cp = o.proj != null ? o.proj : 0.08;
     const col = o.col, hc = o.headCol != null ? o.headCol : col;
+    // o.inset: stand the whole surround on a skin this thick (a cladding
+    // laid with F.cladAround), so its projections are measured from the skin
+    const ins = o.inset || 0;
+    const bx = function (t, cy, len, h, p, c) { F.box(ctx, f, t, cy, len, h, p, c, ins); };
     if (o.jambs !== false && cw > 0.01) {
-      for (const sg of [-1, 1]) F.rib(ctx, f, tc + sg * (W / 2 + cw / 2), y0, y1, cw, cp, col);
+      for (const sg of [-1, 1]) F.rib(ctx, f, tc + sg * (W / 2 + cw / 2), y0, y1, cw, cp, col, ins);
     }
     const head = o.head || "flat";
     const hh = o.headH != null ? o.headH : Math.max(0.16, cw * 1.2);
     const span = W + cw * 2 + (o.ears ? 0.16 : 0);
     if (head === "flat") {
-      F.box(ctx, f, tc, y1 + hh / 2, span, hh, cp, hc);
+      bx(tc, y1 + hh / 2, span, hh, cp, hc);
     } else if (head === "key") {
-      F.box(ctx, f, tc, y1 + hh / 2, span, hh, cp, hc);
-      F.box(ctx, f, tc, y1 + hh * 0.55, Math.min(0.34, W * 0.2), hh * 1.5, cp + 0.04, o.keyCol != null ? o.keyCol : hc);
+      bx(tc, y1 + hh / 2, span, hh, cp, hc);
+      bx(tc, y1 + hh * 0.55, Math.min(0.34, W * 0.2), hh * 1.5, cp + 0.04, o.keyCol != null ? o.keyCol : hc);
     } else if (head === "hood" || head === "cornice") {
       // a frieze then a projecting shelf: the hood mould / window cornice
-      F.box(ctx, f, tc, y1 + hh * 0.4, span, hh * 0.8, cp, hc);
-      F.box(ctx, f, tc, y1 + hh * 0.8 + 0.05, span + 0.16, 0.1, cp + (head === "cornice" ? 0.12 : 0.07), o.shelfCol != null ? o.shelfCol : hc);
+      bx(tc, y1 + hh * 0.4, span, hh * 0.8, cp, hc);
+      bx(tc, y1 + hh * 0.8 + 0.05, span + 0.16, 0.1, cp + (head === "cornice" ? 0.12 : 0.07), o.shelfCol != null ? o.shelfCol : hc);
     } else if (head === "pediment") {
-      F.box(ctx, f, tc, y1 + hh * 0.4, span, hh * 0.8, cp, hc);
+      bx(tc, y1 + hh * 0.4, span, hh * 0.8, cp, hc);
       // a stepped triangle: four courses, each narrower
       const rise = Math.min(0.55, W * 0.28);
       for (let i = 0; i < 4; i++) {
         const u = (i + 0.5) / 4;
-        F.box(ctx, f, tc, y1 + hh * 0.8 + u * rise, (span + 0.16) * (1 - u * 0.9), rise / 4 + 0.01, cp + 0.06, hc);
+        bx(tc, y1 + hh * 0.8 + u * rise, (span + 0.16) * (1 - u * 0.9), rise / 4 + 0.01, cp + 0.06, hc);
       }
     } else if (head === "seg" || head === "round" || head === "lancet") {
       const rise = o.rise != null ? o.rise : (head === "seg" ? Math.min(0.3, W * 0.18) : W * (head === "lancet" ? 0.75 : 0.5));
-      F.arch(ctx, f, tc, y1, W, rise, cw, cp, hc, head === "lancet" ? "pointed" : head === "round" ? "round" : "segmental");
-      if (o.keyCol != null) F.box(ctx, f, tc, y1 + rise * 0.82, 0.2, Math.max(0.2, rise * 0.45), cp + 0.04, o.keyCol);
+      F.arch(ctx, f, tc, y1, W, rise, cw, cp + ins, hc, head === "lancet" ? "pointed" : head === "round" ? "round" : "segmental");
+      if (o.keyCol != null) bx(tc, y1 + rise * 0.82, 0.2, Math.max(0.2, rise * 0.45), cp + 0.04, o.keyCol);
     }
     if (o.sill !== false) {
       const s = o.sill || {};
       const sh = s.h != null ? s.h : 0.1, sp = s.proj != null ? s.proj : cp + 0.06;
       const so = s.over != null ? s.over : cw + 0.06;
-      F.box(ctx, f, tc, y0 - sh / 2, W + so * 2, sh, sp, s.col != null ? s.col : col);
+      bx(tc, y0 - sh / 2, W + so * 2, sh, sp, s.col != null ? s.col : col);
     }
   };
 
@@ -585,7 +589,8 @@
     const faces = o.faces ? o.faces.map((s) => F.face(ctx, s)) : F.faces(ctx);
     const rest = H - fr;
     let yy = y;
-    const lay = function (cy, h, p, c, over) { for (const f of faces) F.band(ctx, f, cy, h, p, c, over); };
+    const ins = o.inset || 0;       // on a skin this thick
+    const lay = function (cy, h, p, c, over) { for (const f of faces) F.band(ctx, f, cy, h, p, c, over, ins); };
     if (fr > 0.02) { lay(yy + fr / 2, fr, o.friezeProj != null ? o.friezeProj : Math.max(0.04, P * 0.08), o.friezeCol != null ? o.friezeCol : col, 0.1); yy += fr; }
     // bed moulding
     const bed = rest * 0.16;
@@ -597,7 +602,7 @@
         const pitch = o.teeth === "dentil" ? Math.max(0.18, th * 1.6) : Math.max(0.45, P * 0.9);
         const n = Math.max(4, Math.round(f.span / pitch));
         const tw = (f.span / n) * (o.teeth === "dentil" ? 0.5 : 0.32);
-        F.merlons(ctx, f, yy + th / 2, n, tw, th, P * (o.teeth === "dentil" ? 0.42 : 0.82), o.teeth === "dentil" ? col : lip);
+        F.merlons(ctx, f, yy + th / 2, n, tw, th, P * (o.teeth === "dentil" ? 0.42 : 0.82) + ins, o.teeth === "dentil" ? col : lip);
       }
       // the dark soffit band behind the teeth: the shadow they stand in
       lay(yy + th / 2, th, P * 0.30, dark, 0.2);
@@ -1137,10 +1142,10 @@
       if (!onFace || y0 > HH || y1 < 0 ||
           tC - tH > HW || tC + tH < -HW) {
         if (onFace && proud > deepest && proud < 6.5 &&
-            Math.abs(tC) < 2.2 + tH && y0 < 3.4) deepest = proud;
+            Math.abs(tC) < 2.2 + tH && y0 < 3.4 && y1 > 0.6) deepest = proud;   // a plaza or step under 0.6 m is walked over, not framed
         return realDbox.apply(this, arguments);
       }
-      if (proud > deepest && proud < 6.5) deepest = proud;
+      if (proud > deepest && proud < 6.5 && y1 > 0.6) deepest = proud;
       if (tH * 2 > wallSpan && h > 0.5) { wallSpan = tH * 2; wallCol = col; }
       // ---- the box crosses the doorway: emit what is left of it ----------
       const t0 = tC - tH, t1 = tC + tH;

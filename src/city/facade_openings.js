@@ -479,7 +479,18 @@
     if (kind === "lobby" || kind === "office" || o.canopy) {
       const CW = W + 1.4, CD = kind === "shop" ? FO.DOOR.CANOPY_SHOP : FO.DOOR.CANOPY;
       const cy = Math.max(top + 0.12, yb + 2.45);
-      emitBox(E, f, t - CW / 2, t + CW / 2, cy, cy + 0.16, 0, CD, o.canopyCol != null ? o.canopyCol : 0x33373c);
+      const CC = o.canopyCol != null ? o.canopyCol : 0x33373c;
+      // a real canopy: a thin deck, a deeper fascia at its outer edge (where
+      // the name goes and the rain drips off), a lighter soffit you see from
+      // the step, and two hanger rods back to the wall above it
+      emitBox(E, f, t - CW / 2, t + CW / 2, cy + 0.02, cy + 0.14, 0, CD - 0.06, CC);
+      emitBox(E, f, t - CW / 2 - 0.04, t + CW / 2 + 0.04, cy - 0.12, cy + 0.2, CD - 0.06, CD, shadeHex(CC, 1.15));
+      emitBox(E, f, t - CW / 2 + 0.04, t + CW / 2 - 0.04, cy, cy + 0.02, 0.02, CD - 0.08, shadeHex(CC, 1.6));
+      for (const sg of [-1, 1]) {
+        const ht = t + sg * (CW / 2 - 0.18);
+        emitBox(E, f, ht - 0.025, ht + 0.025, cy + 0.14, cy + 0.95, 0, 0.05, shadeHex(CC, 0.85));
+        emitBox(E, f, ht - 0.025, ht + 0.025, cy + 0.14, cy + 0.2, 0.05, CD - 0.1, shadeHex(CC, 0.85));
+      }
       out.push("canopy");
       if (E.lamp && o.light !== false) {
         for (const sg of [-1, 1]) {
