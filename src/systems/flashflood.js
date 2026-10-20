@@ -120,7 +120,10 @@
       hmax: new Float32Array(N2), etaMax: new Float32Array(N2),
       wetT: new Float32Array(N2),          // seconds this cell has been wet
       drawH: new Float32Array(N2),         // depth a cell needs before it draws as water
-      siltK: new Float32Array(N2),         // 0 none, (0..1] mud film, 1 = dried
+      siltK: new Float32Array(N2),         // 0 none, (0..1] mud film: its drying clock (1 = long dry)
+      siltTh: new Float32Array(N2),        // 0..1 how much settled (deep, slow, standing water leaves most)
+      wetSum: new Float32Array(N2),        // seconds this cell has been wet, ever
+      combX: new Float32Array(N2), combZ: new Float32Array(N2),   // the last of the flow over it
       ocean: new Uint8Array(N2),
       room: new Int16Array(N2),            // building index + 1 (ground floor), 0 outside
       bridgeOf: new Int16Array(N2),        // bridge index + 1
@@ -340,11 +343,27 @@
   function drainBoost(t) {
     // the recession: the storm is spent, the soil and the drains take the
     // standing water. Gentle while the event runs (a front still on its way
-    // downstream keeps going); after the horn the AFTERMATH phase (see
-    // clear) drains what is left over a few seconds and leaves the mud.
-    if (F.ending) return Math.min(0.45, 0.06 + F.after * 0.09);
+    // downstream keeps going); after the horn the AFTERMATH (see clear)
+    // drains what is left over the calm. It was min(0.45, 0.06 + 0.09 t)
+    // m/s: half a metre of street water gone in three seconds, which is the
+    // "dries up way too fast" the owner saw. Now a slow seep takes the thin
+    // sheets first and drainProp() brings the deep hollows down last.
+    if (F.ending) return Math.min(0.02, 0.003 + F.after * 0.0012);
     const u = (t - F.warnSecs) / F.activeSecs;
     return u > 0.85 ? 0.12 * (u - 0.85) / 0.15 : 0;
+  }
+
+  /* THE LEVEL DROPS, IT DOES NOT FADE. Over the last DRAIN_LAST seconds of
+     the aftermath every pond also loses a share of its own depth (h * w /
+     time left): the deep low cells hold water longest and still reach the
+     mud exactly at AFTER_SECS, so nothing is left to snap away at the end. */
+  const DRAIN_LAST = 8;
+  function drainProp(dt) {
+    if (!F.ending) return 0;
+    const rem = AFTER_SECS - F.after;
+    if (rem >= DRAIN_LAST) return 0;
+    const r = Math.max(0, rem), w = (1 - r / DRAIN_LAST) * (1 - r / DRAIN_LAST);
+    return Math.min(1, w * dt / Math.max(dt, r));
   }
 
   function stepGrid(dt) {
@@ -352,7 +371,7 @@
     const zb = g.zb, h = g.h, qx = g.qx, qz = g.qz, wx = g.wx, wz = g.wz, man = g.man;
     const out = g.out, scl = g.scl;
     const I = hydro(F.t), Iin = hydro(Math.max(0, F.t - F.lag));
-    const boost = drainBoost(F.t);
+    const boost = drainBoost(F.t), prop = drainProp(dt);
     // ---- sources (they also widen the active box) ----
     if (I > 0) {
       const rain = g.rain;
@@ -472,7 +491,7 @@
           if (hk > keep) F.vSea += (hk - keep) * c * c;
           hk = keep;
         } else {
-          const loss = (inf[k] + boost) * dt;
+          const loss = (inf[k] + boost) * dt + hk * prop;
           if (loss > 0 && hk > 0) { const l = hk < loss ? hk : loss; hk -= l; F.vSoak += l * c * c; }
         }
         if (hk < 1e-6) hk = 0;
@@ -1188,9 +1207,12 @@
       if (g.hmax[k] === 0) S.cellsTouched++;
       if (h > g.hmax[k]) { g.hmax[k] = h; g.etaMax[k] = g.zb[k] + h; }
       g.wetT[k] += dt;
+      g.wetSum[k] += dt;
       if (!g.room[k] && h > S.maxDepth) { S.maxDepth = h; S.maxDepthAt = [+cellX(g, i).toFixed(1), +cellZ(g, j).toFixed(1)]; }
       const sp = Math.hypot(g.ux[k], g.uz[k]);
       if (h > 0.1 && sp > S.maxSpeed) S.maxSpeed = sp;
+      // the silt is combed the way the last of the water ran off it
+      if (sp > 0.25) { g.combX[k] = g.ux[k] / sp; g.combZ[k] = g.uz[k] / sp; }
       if (g.room[k]) { const r = g.room[k] - 1; if (h > F.roomMax[r]) F.roomMax[r] = h; }
       // THE FRONT: freshly wet cells, moving, with dry ground ahead
       if (g.wetT[k] < 1.2 && sp > 0.6 && h > 0.08 && fpts.length < 400) fpts.push(k);
@@ -1231,14 +1253,15 @@
        dipped through it and the translucent sea showed it, so the whole
        domain read as a flickering brown square around the island, and it
        stayed for the rest of the match (the sheet is kept as the silt). */
-    const decl = "attribute vec4 aFlow;\nattribute float aWall;\nattribute float aShow;\nvarying vec4 vFf;\nvarying float vWall;\nvarying float vShow;";
+    const decl = "attribute vec4 aFlow;\nattribute float aWall;\nattribute float aShow;\nattribute float aDepth;\nvarying vec4 vFf;\nvarying float vWall;\nvarying float vShow;\nvarying float vDep;";
     // aFlow arrives as normalised bytes (half the upload): velocity in
     // +-10 m/s around 0.5, foam and silt as 0..1
-    const tail = "  vFf = vec4((aFlow.xy - 0.5) * 20.0, aFlow.zw);\n  vWall = aWall;\n  vShow = aShow;";
+    const tail = "  vFf = vec4((aFlow.xy - 0.5) * 20.0, aFlow.zw);\n  vWall = aWall;\n  vShow = aShow;\n  vDep = aDepth;";
     const fdecl = [
       "varying vec4 vFf;",
       "varying float vWall;",
       "varying float vShow;",
+      "varying float vDep;",
       "float ffHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }",
       "float ffNoise(vec2 p) {",
       "  vec2 i = floor(p), f = fract(p);",
@@ -1260,6 +1283,17 @@
       "  return mix(a, b, abs(1.0 - 2.0 * p0));",
       "}",
     ].join("\n");
+    /* FLOODWATER, from the Ahr valley 2021, Derbyshire 2019 and every
+       street-level flash flood clip: OPAQUE (a few centimetres of it hide the
+       kerb), a turbid milky BROWN-GREY that is lighter and greyer where it is
+       churned, mottled with silt plumes, and a poor mirror: the sky it shows
+       is weak, brown-tinted and torn up by the chop. Its foam is DIRTY
+       off-white-tan, broken into clumps and streaks that ride the current,
+       and only where the water is fast, falling, slamming a wall or jammed
+       on a bridge; slack water carries a sparse scum and nothing else. The
+       last few centimetres at the margin are wet ground showing through.
+       The old sheet was a near-black chocolate with a 45% sky mirror and a
+       foam colour mixed in flat: a glossy blue-grey slab. */
     const ftail = [
       // the wall line: the street's water never stands inside a building
       // (the room has its own level, drawn by the room sheet)
@@ -1271,41 +1305,57 @@
       "    float sp = length(fl);",
       "    float near = 1.0 - smoothstep(22.0, 70.0, vSeaMisc.y);",
       "    float st = mix(0.5, ffStreak(vSeaWorld.xz, fl), near);",
+      "    float fine = mix(0.5, ffStreak(vSeaWorld.xz * 2.3 + 9.1, fl * 2.3), near);",
       "    float blot = ffFbm(vSeaWorld.xz * 0.045 + 3.1);",
-      // a ripple normal from the streak field: moving water catches the light
-      "    float e = 0.35;",
-      "    float sx = mix(0.5, ffStreak(vSeaWorld.xz + vec2(e, 0.0), fl), near), sz = mix(0.5, ffStreak(vSeaWorld.xz + vec2(0.0, e), fl), near);",
-      "    float amp = (0.035 + 0.07 * clamp(sp / 4.0, 0.0, 1.0)) * near;",
-      "    vec3 rN = normalize(fN + vec3((st - sx) / e, 0.0, (st - sz) / e) * amp);",
+      "    float rough = clamp(sp / 3.5, 0.0, 1.0);",
+      // THE CHOP, by screen derivatives of the moving pattern (no extra
+      // taps): boils and ripples riding the flow, rougher the faster it runs
+      "    float hgt = st * 0.65 + fine * 0.35;",
+      "    vec2 pX = dFdx(vSeaWorld.xz), pY = dFdy(vSeaWorld.xz);",
+      "    float hX = dFdx(hgt), hY = dFdy(hgt);",
+      "    float det = pX.x * pY.y - pX.y * pY.x;",
+      "    vec2 gW = abs(det) > 1e-6 ? vec2(pY.y * hX - pX.y * hY, -pY.x * hX + pX.x * hY) / det : vec2(0.0);",
+      "    float amp = (0.10 + 0.55 * rough) * near;",
+      "    vec3 rN = normalize(fN - vec3(gW.x, 0.0, gW.y) * amp);",
       "    vec3 L = normalize(uSunDir);",
       "    float ndl = max(dot(rN, L), 0.0);",
       "    float skyT = smoothstep(-0.12, 0.72, reflect(-V, rN).y);",
       "    #ifdef USE_FOG",
-      "      vec3 skyC = mix(fogColor * 1.10, fogColor * 0.62, skyT);",
+      "      vec3 skyC = mix(fogColor * 1.05, fogColor * 0.62, skyT);",
       "    #else",
       "      vec3 skyC = mix(uSkyLow, uSkyHigh, skyT);",
       "    #endif",
-      // MUD: a suspension, opaque, two-tone with silt plumes riding the flow
-      "    vec3 mud = mix(vec3(0.060, 0.040, 0.022), vec3(0.098, 0.068, 0.038), smoothstep(0.3, 0.8, blot)) * (0.92 + 0.16 * st);",
-      "    mud *= 0.55 + 0.45 * ndl;",
+      // THE BODY: a suspension, two-tone with the silt plumes riding the flow
+      "    vec3 body = mix(vec3(0.100, 0.080, 0.054), vec3(0.150, 0.121, 0.083), smoothstep(0.25, 0.85, blot));",
+      "    body *= 0.90 + 0.20 * st;",
+      // churned water carries more silt and more air: paler, greyer
+      "    body = mix(body, vec3(0.165, 0.148, 0.118), rough * 0.40);",
+      "    float dep = vDep * vDep * 2.0;",
+      // the margin: a centimetre or two over the ground reads as wet ground
+      "    body = mix(body * 0.62, body, smoothstep(0.02, 0.22, dep));",
+      "    vec3 col = body * (0.55 + 0.45 * ndl);",
+      // a poor mirror: the surface Fresnel, cut by the chop, tinted by the body under it
       "    float mf = 0.02 + 0.98 * pow(1.0 - clamp(dot(rN, V), 0.0, 1.0), 5.0);",
-      "    vec3 col = mix(mud, skyC * 0.8, clamp(mf * 0.6, 0.0, 0.45));",
-      "    col += uSunColor * pow(max(dot(rN, normalize(L + V)), 0.0), 90.0) * (0.35 + 0.9 * mf);",
-      // WHITEWATER: the churned leading edge, the fast channel, the jams
-      "    float fast = smoothstep(2.2, 6.0, sp);",
-      "    float foamK = clamp(vFf.z * smoothstep(0.35, 0.8, st) * 1.1 + fast * smoothstep(0.62, 0.92, st) * 0.55, 0.0, 0.85);",
-      "    vec3 foamC = vec3(0.42, 0.37, 0.30) * (0.55 + 0.5 * ndl);",
-      "    col = mix(col, foamC, foamK);",
-      // SILT: where the water has gone, a mud film; wet and glossy at first,
-      // matte and cracked as it dries (vFf.w climbs toward 1)
-      "    if (vFf.w > 0.001) {",
-      "      float dry = smoothstep(0.35, 1.0, vFf.w);",
-      "      float crack = smoothstep(0.92, 0.985, 1.0 - abs(ffNoise(vSeaWorld.xz * 1.9) * 2.0 - 1.0)) * dry;",
-      "      vec3 siltC = mix(vec3(0.17, 0.13, 0.085), vec3(0.30, 0.25, 0.18), dry * (0.6 + 0.4 * blot));",
-      "      siltC *= (0.42 + 0.58 * max(dot(fN, L), 0.0)) * (1.0 - crack * 0.45);",
-      "      siltC += uSunColor * pow(max(dot(fN, normalize(L + V)), 0.0), 60.0) * 0.25 * (1.0 - dry);",
-      "      col = mix(col, siltC, smoothstep(0.0, 0.08, vFf.w));",
-      "    }",
+      "    col = mix(col, skyC * vec3(0.92, 0.88, 0.80), clamp(mf * (0.45 - 0.25 * rough), 0.0, 0.24));",
+      "    col += uSunColor * pow(max(dot(rN, normalize(L + V)), 0.0), mix(90.0, 28.0, rough)) * (0.16 + 0.45 * mf) * (1.0 - 0.55 * rough);",
+      // FOAM: the CPU says where (the churning front band, steep faces, the
+      // walls it piles against, the bridge jams); the moving pattern says
+      // what shape: clumps and streaks along the flow, never a band
+      "    float fa = clamp(vFf.z + smoothstep(2.2, 6.0, sp) * 0.45, 0.0, 1.0);",
+      "    float pat = st * 0.55 + fine * 0.45;",
+      "    float thr = 1.0 - fa * 0.60;",
+      "    float fm = smoothstep(thr, thr + 0.12, pat) * step(0.02, fa);",
+      // slack water: a sparse scum of bubbles and litter in lines
+      "    fm = max(fm, smoothstep(0.93, 0.99, 1.0 - abs(st * 2.0 - 1.0)) * (1.0 - rough) * 0.28 * near);",
+      "    fm = mix(fa * 0.40, fm, near) * 0.85;",
+      // dirty off-white-tan, darker at its thin margins (the water shows through)
+      "    vec3 foamC = mix(body * 1.45, vec3(0.37, 0.335, 0.275), smoothstep(thr + 0.03, thr + 0.28, pat));",
+      "    foamC *= 0.62 + 0.38 * ndl;",
+      "    col = mix(col, foamC, fm);",
+      // where the water has gone the silt mesh takes over (flashflood-silt)
+      "    float siltK = smoothstep(0.0, 0.06, vFf.w);",
+      "    outAlpha = (1.0 - siltK) * mix(0.55, 1.0, smoothstep(0.015, 0.12, dep));",
+      "    if (outAlpha < 0.01) discard;",
       "    outColor = col;",
       "    solid = 1.0;",
       "  }",
@@ -1313,8 +1363,9 @@
     if (CBZ.waterSeaMaterial) {
       try {
         const m = CBZ.waterSeaMaterial({ kind: "external", name: "CBZ Flash Flood", vertexDecl: decl, vertexTail: tail, fragDecl: fdecl, fragTail: ftail,
-          horizonFuse: false, transparent: false, depthWrite: true });
-        m.transparent = false;
+          horizonFuse: false, transparent: true, depthWrite: true });
+        // blended for the margin (outAlpha); it still writes its depth
+        m.transparent = true;
         if (m.userData.waterUniforms && m.userData.waterUniforms.uSeaOpacity) m.userData.waterUniforms.uSeaOpacity.value = 1;
         m.userData.floodField = true;
         // the silt film lies 4.5 cm over the ground: pull it forward so a
@@ -1324,6 +1375,70 @@
       } catch (e) { if (window.console) console.warn("[flashflood] water material:", e && e.message); }
     }
     return new THREE.MeshLambertMaterial({ color: 0x3a2c1e, vertexColors: false });
+  }
+
+  /* THE SILT FILM: the flood sheet's own vertices, drawn by a Lambert
+     material (so it takes the scene's light and shadow exactly as the
+     ground it lies on does) with the one flood residue look
+     (world/water_spec.js cbzFloodResidue). Its edge is cut mid-cell on a
+     noise-warped threshold so the grid never shows, with the wrack line in
+     the band just inside it. It dries on its own clock (siltK, per cell) plus
+     uSiltAge, the seconds since the flood ended, which keeps running after
+     the solve has gone: like the burn scar it ages on, for the match. */
+  function siltMaterial(waterMat) {
+    const WU = waterMat && waterMat.userData && waterMat.userData.waterUniforms;
+    const U = {
+      uSiltAge: { value: 0 },
+      uSlSun: WU && WU.uSunDir ? WU.uSunDir : { value: new THREE.Vector3(0.4, 0.8, 0.3).normalize() },
+      uSlSunC: WU && WU.uSunColor ? WU.uSunColor : { value: new THREE.Color(1, 0.95, 0.85) },
+      uSlSky: WU && WU.uSkyLow ? WU.uSkyLow : { value: new THREE.Color(0.7, 0.75, 0.78) },
+    };
+    const m = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, depthWrite: false });
+    m.name = "flashflood-silt";
+    m.polygonOffset = true; m.polygonOffsetFactor = -2; m.polygonOffsetUnits = -4;
+    const GL = CBZ.floodResidueGLSL ? CBZ.floodResidueGLSL() : "";
+    const DRY = (CBZ.floodResidueDrySecs || 150).toFixed(1);
+    m.onBeforeCompile = function (sh) {
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = sh.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute vec4 aFlow;\nattribute float aWall;\nattribute float aShow;\nattribute float aDepth;\nvarying vec4 vSlF;\nvarying vec3 vSlW;\nvarying vec3 vSlN;\nvarying vec2 vSlS;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvSlF = vec4((aFlow.xy - 0.5) * 20.0, aFlow.zw);\nvSlW = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvSlN = normalize(mat3(modelMatrix) * objectNormal);\nvSlS = vec2(aShow, aDepth) + vec2(0.0, aWall < 0.0 ? -9.0 : 0.0);");
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", ["#include <common>",
+          "uniform float uSiltAge; uniform vec3 uSlSun; uniform vec3 uSlSunC; uniform vec3 uSlSky;",
+          "varying vec4 vSlF; varying vec3 vSlW; varying vec3 vSlN; varying vec2 vSlS;",
+          "float slGloss;", GL].join("\n"))
+        .replace("#include <color_fragment>", ["#include <color_fragment>",
+          "{",
+          "  if (vSlS.y < -1.0) discard;",                 // inside a building
+          "  float sk = smoothstep(0.0, 0.06, vSlF.w);",
+          "  if (sk < 0.02) discard;",
+          // the reach: a ragged contour, not the grid's square
+          "  float rag = cbzRsN(vSlW.xz * 0.45 + 7.0) * 0.6 + cbzRsN(vSlW.xz * 1.7) * 0.4;",
+          "  float cut = 0.5 + (rag - 0.5) * 0.36;",
+          "  if (vSlS.x < cut) discard;",
+          "  float edge = 1.0 - smoothstep(cut, cut + 0.24, vSlS.x);",
+          "  float dry = clamp((max(vSlF.w, 0.1) - 0.1) / 0.9 + uSiltAge / " + DRY + ", 0.0, 1.0);",
+          "  slGloss = 0.0;",
+          "  vec4 rs = cbzFloodResidue(vSlW.xz, clamp(vSlS.y, 0.0, 1.0), dry, edge, vSlF.xy, slGloss);",
+          "  diffuseColor.rgb = rs.rgb;",
+          "  diffuseColor.a = rs.a * sk;",
+          "  if (diffuseColor.a < 0.01) discard;",
+          "}"].join("\n"))
+        .replace("#include <envmap_fragment>", ["#include <envmap_fragment>",
+          "{",
+          // wet mud shines: a tight sun glint and a little (brown) sky at grazing
+          "  vec3 sV = normalize(cameraPosition - vSlW);",
+          "  vec3 sN = normalize(vSlN);",
+          "  float fr = 0.03 + 0.97 * pow(1.0 - max(dot(sN, sV), 0.0), 5.0);",
+          "  float sp = pow(max(dot(sN, normalize(uSlSun + sV)), 0.0), mix(60.0, 300.0, slGloss));",
+          "  outgoingLight = mix(outgoingLight, uSlSky * vec3(0.55, 0.52, 0.46), clamp(fr * slGloss * 0.45, 0.0, 0.4));",
+          "  outgoingLight += uSlSunC * sp * slGloss * 0.7;",
+          "}"].join("\n"));
+    };
+    m.customProgramCacheKey = function () { return "flashflood-silt"; };
+    m.userData.siltU = U;
+    return m;
   }
 
   function buildRender() {
@@ -1350,6 +1465,9 @@
     geo.setAttribute("aWall", new THREE.BufferAttribute(wall, 1));
     const aS = new THREE.BufferAttribute(new Uint8Array(N2), 1, true); aS.setUsage(THREE.DynamicDrawUsage);
     geo.setAttribute("aShow", aS);
+    // water: sqrt(depth / 2 m); silt: how thick the film is
+    const aD = new THREE.BufferAttribute(new Uint8Array(N2), 1, true); aD.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute("aDepth", aD);
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     const mat = floodMaterial();
     const mesh = new THREE.Mesh(geo, mat);
@@ -1359,6 +1477,15 @@
     mesh.receiveShadow = false; mesh.castShadow = false;
     R.parent.add(mesh);
     R.mesh = mesh; R.ys = new Float32Array(N2); R.drawn = new Uint8Array(N2);
+    // THE SILT: the same sheet, drawn a second time by a lit, blended film
+    // material (the scene's own light, like the ground under it) that only
+    // shows where the water has gone. Shares every byte of the upload.
+    const sm = new THREE.Mesh(geo, siltMaterial(mat));
+    sm.name = "flashflood-silt";
+    sm.frustumCulled = false; sm.receiveShadow = true; sm.castShadow = false;
+    sm.userData.noCoat = true; sm.userData.transient = true;
+    R.parent.add(sm);
+    R.silt = sm;
     // ---- the rooms: one quad per ground floor at the room's own level ----
     const B = F.W.buildings || [];
     if (B.length) {
@@ -1376,6 +1503,7 @@
       rg.setAttribute("position", rP); rg.setAttribute("normal", new THREE.BufferAttribute(rn, 3));
       rg.setAttribute("aFlow", new THREE.BufferAttribute(rf, 4, true)); rg.setAttribute("aWall", new THREE.BufferAttribute(rw, 1));
       rg.setAttribute("aShow", new THREE.BufferAttribute(new Uint8Array(B.length * 4).fill(255), 1, true));
+      rg.setAttribute("aDepth", new THREE.BufferAttribute(new Uint8Array(B.length * 4).fill(255), 1, true));
       rg.setIndex(new THREE.BufferAttribute(ri, 1));
       const rm = new THREE.Mesh(rg, mat);
       rm.name = "flashflood-rooms"; rm.frustumCulled = false; rm.userData.noCoat = true; rm.userData.transient = true;
@@ -1389,7 +1517,8 @@
     R.spray = [];
     for (let i = 0; i < N_SPRAY; i++) {
       const foam = i % 2 === 0;
-      col[i * 3] = foam ? 0.80 : 0.40; col[i * 3 + 1] = foam ? 0.77 : 0.31; col[i * 3 + 2] = foam ? 0.70 : 0.21;
+      // dirty spray: tan-grey froth and brown droplets (0.8 linear was paper white)
+      col[i * 3] = foam ? 0.46 : 0.22; col[i * 3 + 1] = foam ? 0.42 : 0.17; col[i * 3 + 2] = foam ? 0.35 : 0.11;
       pos[i * 3 + 1] = -1e4;
       R.spray.push({ x: 0, y: -1e4, z: 0, vx: 0, vy: 0, vz: 0, kill: 0, dead: true });
     }
@@ -1485,7 +1614,7 @@
     const R = F.render; if (!R || !R.mesh) return;
     const g = F.grid, n = g.n, bb = g.bb, ys = R.ys, drawn = R.drawn;
     const geo = R.mesh.geometry;
-    const P = geo.attributes.position.array, Nn = geo.attributes.normal.array, Fl = geo.attributes.aFlow.array, Sh = geo.attributes.aShow.array;
+    const P = geo.attributes.position.array, Nn = geo.attributes.normal.array, Fl = geo.attributes.aFlow.array, Sh = geo.attributes.aShow.array, Dp = geo.attributes.aDepth.array;
     let j0, j1, i0, i1;
     if (full) { j0 = 0; j1 = n - 1; i0 = 0; i1 = n - 1; }
     else {
@@ -1506,7 +1635,7 @@
       else {
         // the wet neighbours' level, OUTSIDE rooms (the street's sheet runs
         // flat to the wall line and is cut there by aWall)
-        let s = 0, w = 0;
+        let s = 0, w = 0, sn = 0;
         for (let b = 0; b < 8; b++) {
           const di = b < 3 ? b - 1 : b === 3 ? -1 : b === 4 ? 1 : b - 6;
           const dj = b < 3 ? -1 : b < 5 ? 0 : 1;
@@ -1514,6 +1643,7 @@
           if (ii < 0 || jj < 0 || ii >= n || jj >= n) continue;
           const kk = jj * n + ii;
           if (h[kk] > g.drawH[kk] && !ocean[kk] && !room[kk]) { s += zb[kk] + h[kk]; w++; }
+          else if (siltK[kk] > 0) sn++;
         }
         if (room[k] && w) { y = s / w; d = 2; }
         else if (w) {
@@ -1522,6 +1652,7 @@
           y = Math.min(s / w, zb[k] - 0.05); d = 2;
         } else if (ocean[k]) { y = F.seaY - 0.08; d = 0; }
         else if (siltK[k] > 0) { y = zb[k] + 0.045; d = 3; }
+        else if (sn && !room[k]) { y = zb[k] + 0.045; d = 0; }
         else { y = zb[k] - 3; d = 0; }
       }
       ys[k] = y; drawn[k] = d;
@@ -1549,23 +1680,37 @@
         const steep = Math.min(1, Math.hypot(gx, gz) * 2.2);
         if (steep * Math.min(1, sp / 3) > foam) foam = steep * Math.min(1, sp / 3);
         if (g.bridgeOf[k] && F.bridges[g.bridgeOf[k] - 1].block > 0.15) foam = Math.max(foam, 0.8);
+        // water driven against a wall piles up and breaks on it: the froth
+        // hugs the facade and the corners, not the open street
+        const wd = g.wall[k];
+        if (wd > 0 && wd < g.c * 1.5 && sp > 0.5) { const fw = (1 - wd / (g.c * 1.5)) * Math.min(1, sp / 2.5) * 0.85; if (fw > foam) foam = fw; }
         Fl[k * 4] = clamp(Math.round((g.ux[k] / 20 + 0.5) * 255), 0, 255);
         Fl[k * 4 + 1] = clamp(Math.round((g.uz[k] / 20 + 0.5) * 255), 0, 255);
         Fl[k * 4 + 2] = Math.round(foam * 255); Fl[k * 4 + 3] = 0;
+        // depth, sqrt over 2 m: fine at the shallow margin where it matters
+        Dp[k] = Math.round(Math.sqrt(Math.min(1, h[k] / 2)) * 255);
+      } else if (dk === 3) {
+        // the film: combed the way the last of the water ran, and its thickness
+        Fl[k * 4] = clamp(Math.round((g.combX[k] / 20 + 0.5) * 255), 0, 255);
+        Fl[k * 4 + 1] = clamp(Math.round((g.combZ[k] / 20 + 0.5) * 255), 0, 255);
+        Fl[k * 4 + 2] = 0; Fl[k * 4 + 3] = Math.round((0.1 + 0.9 * siltK[k]) * 255);   // 0.1.. so a fresh film is fully a film
+        Dp[k] = Math.round(g.siltTh[k] * 255);
       } else {
         Fl[k * 4] = 128; Fl[k * 4 + 1] = 128; Fl[k * 4 + 2] = 0;
-        Fl[k * 4 + 3] = Math.round((dk === 3 ? siltK[k] : (dk === 2 && siltK[k] > 0 ? 0.3 : 0)) * 255);
+        Fl[k * 4 + 3] = dk === 2 && siltK[k] > 0 ? 77 : 0;
+        Dp[k] = 0;
       }
     }
     if (!R.box) R.box = { i0: n, i1: -1, j0: n, j1: -1 };
     R.box.i0 = ni0; R.box.i1 = ni1; R.box.j0 = nj0; R.box.j1 = nj1;
-    const P3 = geo.attributes.position, N3 = geo.attributes.normal, F4 = geo.attributes.aFlow, S1 = geo.attributes.aShow;
+    const P3 = geo.attributes.position, N3 = geo.attributes.normal, F4 = geo.attributes.aFlow, S1 = geo.attributes.aShow, D1 = geo.attributes.aDepth;
     const off = j0 * n, cnt = (j1 - j0 + 1) * n;
     P3.updateRange.offset = off * 3; P3.updateRange.count = cnt * 3; P3.needsUpdate = true;
     N3.updateRange.offset = off * 3; N3.updateRange.count = cnt * 3; N3.needsUpdate = true;
     F4.updateRange.offset = off * 4; F4.updateRange.count = cnt * 4; F4.needsUpdate = true;
     S1.updateRange.offset = off; S1.updateRange.count = cnt; S1.needsUpdate = true;
-    R.uploadBytes = cnt * 20;
+    D1.updateRange.offset = off; D1.updateRange.count = cnt; D1.needsUpdate = true;
+    R.uploadBytes = cnt * 21;
     // the room sheets
     if (R.rooms) {
       const B = F.W.buildings, rp = R.rooms.geometry.attributes.position;
@@ -1584,7 +1729,19 @@
     const gz = (g.zb[k + (j < n - 1 ? n : 0)] - g.zb[k - (j > 0 ? n : 0)]) / (2 * g.c);
     return Math.hypot(gx, gz);
   }
-  // silt: a cell that held water and is now dry wears a film that dries out
+  /* silt: a cell that held water and is now dry wears a film that dries
+     out. siltK is its drying clock (0.02 the moment the water leaves, +1 per
+     DRY_SECS, the shader adds the time since the flood ended); siltTh is
+     how much settled there: deep water, and water that stood a long time
+     (the hollows, the slack behind a wall) leave the most. It was a 22 s
+     clock with no thickness at all: one wet tint that was "dry" before the
+     round's card had gone. */
+  const DRY_SECS = (CBZ.floodResidueDrySecs || 150);
+  const SILT_MIN_H = 0.06;            // m of peak water that leaves a film (what was drawn as water)
+  function siltThick(g, k, i, j) {
+    const flat = 1 - Math.min(1, steepAt(g, i, j) / 0.14) * 0.55;
+    return clamp((0.10 + 0.45 * Math.min(1, g.hmax[k] / 1.0) + 0.45 * Math.min(1, g.wetSum[k] / 40)) * flat, 0, 1);
+  }
   function updateSilt(dt) {
     const g = F.grid, n = g.n, bb = g.bb;
     const R = F.render;
@@ -1592,10 +1749,11 @@
     if (box.i1 < box.i0) return;
     for (let j = box.j0; j <= box.j1; j++) for (let i = box.i0; i <= box.i1; i++) {
       const k = j * n + i;
-      if (g.hmax[k] < 0.12 || g.room[k] || g.ocean[k]) continue;
+      if (g.hmax[k] < SILT_MIN_H || g.room[k] || g.ocean[k]) continue;
       if (g.h[k] > H_DRAW) { g.siltK[k] = 0; continue; }
       if (g.siltK[k] <= 0 && steepAt(g, i, j) > 0.14) continue;   // mud does not settle on a slope
-      g.siltK[k] = g.siltK[k] <= 0 ? 0.05 : Math.min(1, g.siltK[k] + dt / 22);
+      if (g.siltK[k] <= 0) { g.siltK[k] = 0.02; g.siltTh[k] = siltThick(g, k, i, j); }
+      else g.siltK[k] = Math.min(1, g.siltK[k] + dt / DRY_SECS);
     }
   }
 
@@ -1667,10 +1825,14 @@
     for (const im of R.debris) im.instanceMatrix.needsUpdate = true;
   }
 
-  /* the HIGH-WATER LINE: on every wall the flood stood against, a tide mark
-     at the highest level it reached, and a silt stain below it. Built once,
-     when the water has gone down off the walls. */
-  /* Never above the wall it is painted on, never on a building that has
+  /* the HIGH-WATER LINE: on every wall the flood stood against, a crisp
+     dark tide line at the highest level it reached, a scum band under it
+     and a mottled mud film below (world/water_spec.js cbzWaterline, the
+     tsunami's too), dark while wet and paling as it dries on the silt's
+     clock. One mesh: per vertex, the metres it lies under the line. It was
+     a flat 7 cm brown strip over a 0.38-alpha brown box. Built once, near
+     the end; the water in front of it hides it until the level drops.
+     Never above the wall it is painted on, never on a building that has
      come down (marksWatch below takes those off), and gone in the calm after
      the round (CBZ.flashflood.settleMarks). A mark is a stain ON a facade:
      the water that stood over a roof left nothing in the air. */
@@ -1683,11 +1845,11 @@
   function buildMarks() {
     const R = F.render; if (!R || R.marks || !THREE) return;
     const g = F.grid, B = F.W.buildings || [];
-    const lineP = [], stainP = [], stainC = [];
-    const spans = [];             // per building: its vertex ranges in both meshes
+    const P = [], Bv = [];
+    const spans = [];             // per building: its vertex range in the mesh
     for (const bd of B) {
       if (bd.src && bd.src.fallen) continue;
-      const sp = { src: bd.src || null, l0: lineP.length / 3, s0: stainP.length / 3, l1: 0, s1: 0 };
+      const sp = { src: bd.src || null, v0: P.length / 3, v1: 0 };
       const cap = wallTop(bd);
       // the street's peak level along each side of the footprint
       const sides = [[0, -1], [0, 1], [-1, 0], [1, 0]];
@@ -1702,23 +1864,51 @@
         const cxs = bd.x + s[0] * (hx + 0.03), czs = bd.z + s[1] * (hz + 0.03);
         const tx = s[0] === 0 ? 1 : 0, tz = s[0] === 0 ? 0 : 1;
         const ax = cxs - tx * L / 2, az = czs - tz * L / 2, bx = cxs + tx * L / 2, bz = czs + tz * L / 2;
-        quad(lineP, ax, az, bx, bz, top - 0.05, top + 0.02);
-        quad(stainP, ax, az, bx, bz, foot, top - 0.05);
+        const y1 = Math.min(top + 0.07, cap);
+        P.push(ax, foot, az, bx, foot, bz, ax, y1, az, bx, foot, bz, bx, y1, bz, ax, y1, az);
+        const b0 = top - foot, b1 = top - y1;
+        Bv.push(b0, b0, b1, b0, b1, b1);
       }
-      sp.l1 = lineP.length / 3; sp.s1 = stainP.length / 3;
-      if (sp.l1 > sp.l0 && sp.src) spans.push(sp);
+      sp.v1 = P.length / 3;
+      if (sp.v1 > sp.v0 && sp.src) spans.push(sp);
     }
-    if (!lineP.length) return;
-    function quad(arr, ax, az, bx, bz, y0, y1) { arr.push(ax, y0, az, bx, y0, bz, ax, y1, az, bx, y0, bz, bx, y1, bz, ax, y1, az); }
-    const lg = new THREE.BufferGeometry(); lg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(lineP), 3)); lg.computeVertexNormals();
-    const sg = new THREE.BufferGeometry(); sg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(stainP), 3)); sg.computeVertexNormals();
-    const lm = new THREE.Mesh(lg, new THREE.MeshLambertMaterial({ color: 0x2b2116, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 }));
-    const sm = new THREE.Mesh(sg, new THREE.MeshLambertMaterial({ color: 0x4a3b2a, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 }));
-    for (const m of [lm, sm]) { m.userData.transient = true; m.userData.noCoat = true; m.frustumCulled = false; R.parent.add(m); }
-    R.marks = [lm, sm];
-    marksLive = { line: lm, stain: sm, spans: spans, t: 0 };
+    if (!P.length) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(P), 3));
+    geo.setAttribute("aBelow", new THREE.BufferAttribute(new Float32Array(Bv), 1));
+    geo.computeVertexNormals();
+    const SU = R.silt && R.silt.material.userData.siltU;
+    const uAge = SU ? SU.uSiltAge : { value: 0 };
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    mat.name = "flashflood-highwater";
+    mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -2;
+    const GL = CBZ.floodResidueGLSL ? CBZ.floodResidueGLSL() : "";
+    const DRY = (CBZ.floodResidueDrySecs || 150).toFixed(1);
+    mat.onBeforeCompile = function (sh) {
+      sh.uniforms.uSiltAge = uAge;
+      sh.vertexShader = sh.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute float aBelow;\nvarying float vHwB;\nvarying vec3 vHwP;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvHwB = aBelow;\nvHwP = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", "#include <common>\nuniform float uSiltAge;\nvarying float vHwB;\nvarying vec3 vHwP;\n" + GL)
+        .replace("#include <color_fragment>", ["#include <color_fragment>",
+          "{",
+          "  float wet = 1.0 - clamp(uSiltAge / (" + DRY + " * 0.8), 0.0, 1.0);",
+          "  vec4 wl = cbzWaterline(vHwB, vHwP.x + vHwP.z, vHwP.y, wet);",
+          "  if (wl.a < 0.01) discard;",
+          "  diffuseColor.rgb = wl.rgb;",
+          "  diffuseColor.a = wl.a;",
+          "}"].join("\n"));
+    };
+    mat.customProgramCacheKey = function () { return "flashflood-highwater"; };
+    const m = new THREE.Mesh(geo, mat);
+    m.name = "flashflood-highwater";
+    m.userData.transient = true; m.userData.noCoat = true; m.frustumCulled = false;
+    R.parent.add(m);
+    R.marks = [m];
+    marksLive = { mesh: m, spans: spans, t: 0 };
     hookMarks();
-    F.stats.marks = lineP.length / 18;
+    F.stats.marks = P.length / 18;
   }
   // the marks outlive F (they are kept with the silt): their own watch
   let marksLive = null, marksHooked = false;
@@ -1730,14 +1920,14 @@
   function marksWatch(dt) {
     const M = marksLive;
     if (!M) return;
-    if (!M.line.parent) { marksLive = null; return; }
+    if (!M.mesh.parent) { marksLive = null; return; }
     M.t += Math.min(0.1, dt || 0);
     if (M.t < 0.5) return;
     M.t = 0;
     for (let i = M.spans.length - 1; i >= 0; i--) {
       const sp = M.spans[i];
       if (!sp.src || !sp.src.fallen) continue;
-      collapseSpan(M.line, sp.l0, sp.l1); collapseSpan(M.stain, sp.s0, sp.s1);
+      collapseSpan(M.mesh, sp.v0, sp.v1);
       M.spans.splice(i, 1);
     }
   }
@@ -1751,7 +1941,7 @@
     const M = marksLive;
     marksLive = null;
     if (!M) return false;
-    for (const m of [M.line, M.stain]) {
+    for (const m of [M.mesh]) {
       if (silt) { const k = silt.objs.indexOf(m); if (k >= 0) silt.objs.splice(k, 1); }
       if (F && F.render && F.render.marks) { const k = F.render.marks.indexOf(m); if (k >= 0) F.render.marks.splice(k, 1); }
       disposeObj(m);
@@ -1828,6 +2018,7 @@
   function disposeSilt() {
     if (!silt) return;
     for (const o of silt.objs) disposeObj(o);
+    if (silt.waterMat && silt.waterMat.dispose) silt.waterMat.dispose();
     silt = null;
   }
 
@@ -1837,9 +2028,18 @@
      settle where the water leaves them, and the mud shows. Then it freezes
      into the silt film, the tide marks and the wrecks. Its own frame hook,
      because the def that drove it has ended. */
-  const AFTER_SECS = 8;
+  // s the water takes to go down after the horn: most of the calm (the
+  // director's calm is 12-20 s and waits on busy() for the rest)
+  const AFTER_SECS = 16;
   let afterHooked = false;
+  function hookAfter() { if (!afterHooked && CBZ.onAlways) { afterHooked = true; CBZ.onAlways(48, afterTick); } }
   function afterTick(dt) {
+    // the film the last flood left goes on drying, for the rest of the match
+    if (silt && silt.U && !F) {
+      silt.age += Math.min(0.25, Math.max(0, dt || 0));
+      silt.U.uSiltAge.value = silt.age;
+      if ((silt.lightT -= dt || 0) <= 0 && silt.WU && CBZ.waterDriveCommonUniforms) { silt.lightT = 0.5; try { CBZ.waterDriveCommonUniforms(silt.WU); } catch (e) {} }
+    }
     if (!F || !F.ending) return;
     F.after += Math.min(0.1, dt || 0);
     tick(dt);
@@ -1853,7 +2053,7 @@
     if (!F) return;
     if (o.keepSilt && F.render && F.ready && !F.ending && !o.now) {
       F.ending = true; F.after = 0;
-      if (!afterHooked && CBZ.onAlways) { afterHooked = true; CBZ.onAlways(48, afterTick); }
+      hookAfter();
       event("flood", "the storm is spent: draining");
       return;
     }
@@ -1877,19 +2077,30 @@
         for (const p of F.debris) if (p.state === "afloat" || p.state === "jammed") { p.state = "stranded"; p.y = bedAt(p.x, p.z); }
         // ...and everything still wet becomes mud where it stood
         const g = F.grid;
-        for (let k = 0; k < g.h.length; k++) if (g.h[k] > H_SHOW && !g.ocean[k]) { if (g.hmax[k] >= 0.12 && !g.room[k] && steepAt(g, k % g.n, (k / g.n) | 0) <= 0.14) g.siltK[k] = Math.max(g.siltK[k], 0.2); g.h[k] = 0; }
+        for (let k = 0; k < g.h.length; k++) if (g.h[k] > H_SHOW && !g.ocean[k]) {
+          const i = k % g.n, j = (k / g.n) | 0;
+          if (g.hmax[k] >= SILT_MIN_H && !g.room[k] && steepAt(g, i, j) <= 0.14) { g.siltK[k] = 0.02; g.siltTh[k] = Math.max(g.siltTh[k], siltThick(g, k, i, j)); }
+          g.h[k] = 0;
+        }
         g.bb.i0 = 0; g.bb.i1 = g.n - 1; g.bb.j0 = 0; g.bb.j1 = g.n - 1;
         F.ready = true;
         updateSurface(true);
         buildMarks();
-        const keep = [R.mesh].concat(R.marks || []);
+        // the water sheet has nothing left to draw: drop it (its geometry
+        // is the silt's, so only its material goes) and keep the film
+        if (R.mesh.parent) R.mesh.parent.remove(R.mesh);
+        const WU = R.mesh.material && R.mesh.material.userData && R.mesh.material.userData.waterUniforms;
+        const keep = (R.silt ? [R.silt] : []).concat(R.marks || []);
         // stranded debris stays where it lies
         if (R.debris) { updateDebrisMeshes(); for (const im of R.debris) keep.push(im); }
         if (R.lids) keep.push(R.lids);
-        silt = { objs: keep };
-        disposeObj(R.sprayMesh); disposeObj(R.rooms);
+        silt = { objs: keep, U: R.silt ? R.silt.material.userData.siltU : null, WU: WU, age: 0, lightT: 0, waterMat: R.mesh.material };
+        hookAfter();
+        disposeObj(R.sprayMesh);
+        // the room sheets share the water material: take them without it
+        if (R.rooms) { if (R.rooms.parent) R.rooms.parent.remove(R.rooms); R.rooms.geometry.dispose(); }
       } else {
-        for (const k of ["mesh", "sprayMesh", "rooms", "lids"]) disposeObj(R[k]);
+        for (const k of ["mesh", "silt", "sprayMesh", "rooms", "lids"]) disposeObj(R[k]);
         if (R.debris) R.debris.forEach(disposeObj);
         if (R.marks) R.marks.forEach(disposeObj);
       }
@@ -1947,6 +2158,8 @@
 
   CBZ.flashflood = {
     start: start, tick: tick, clear: clear, islandWorld: islandWorld, settleMarks: settleMarks,
+    // the water is still going down (the director's calm waits on it)
+    busy: function () { return !!(F && F.ending); },
     marksAudit: function () {
       const M = marksLive;
       return { marks: !!M, buildings: M ? M.spans.length : 0,
@@ -1980,7 +2193,7 @@
         sprayLaunched: S ? S.sprayLaunched || 0 : 0,
         fieldInstalled: !!(CBZ.groundWaterField && CBZ.groundWaterField() === FIELD),
         siltLeft: !!silt,
-        drawCallsOwned: F && F.render ? 1 + (F.render.rooms ? 1 : 0) + 1 + (F.render.debris ? F.render.debris.length : 0) + (F.render.lids ? 1 : 0) + (F.render.marks ? 2 : 0) : 0,
+        drawCallsOwned: F && F.render ? 1 + (F.render.silt ? 1 : 0) + (F.render.rooms ? 1 : 0) + 1 + (F.render.debris ? F.render.debris.length : 0) + (F.render.lids ? 1 : 0) + (F.render.marks ? 1 : 0) : 0,
       };
     },
   };

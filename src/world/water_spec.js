@@ -3051,12 +3051,14 @@
       "  float foam = sh.a;",
       "  float solid = foam;",
       "  vec3 V = normalize(cameraPosition - vSeaWorld);",
+      // a tail's own coverage (a flood's shallow margin): 1 = the sea's alpha
+      "  float outAlpha = 1.0;",
       opts.fragTail || "",
       // HORIZON FUSE (aerial seam): converge on fogColor before the far clip so
       // the disc's rim lands exactly on the dome's below-horizon band.
       opts.horizonFuse === false ? "" :
         "  #ifdef USE_FOG\n  outColor = mix(outColor, fogColor, smoothstep(3600.0, 6400.0, vSeaMisc.y));\n  #endif",
-      "  gl_FragColor = vec4(outColor, uSeaOpacity * cbzSeaAlpha(V, vSeaMisc.y, under, solid));",
+      "  gl_FragColor = vec4(outColor, uSeaOpacity * cbzSeaAlpha(V, vSeaMisc.y, under, solid) * outAlpha);",
       "  #include <tonemapping_fragment>",
       "  #include <encodings_fragment>",
       "  #include <fog_fragment>",
@@ -3192,6 +3194,106 @@
   };
   const _runSY = {};
 
+  /* ============================================================
+     WHAT FLOODWATER LEAVES (2026-10-19). One look for the residue of every
+     flood in the game: the flash flood's silt (systems/flashflood.js) and
+     the tsunami's (world/tsunami_scene.js), and the waterline on the walls
+     they stood against.
+
+     OWNER: "it dries up way too fast and just leaves a weird colour on the
+     ground. Wildfires leave a very real colour." The old films were one flat
+     tint each (a 0.38-alpha brown box on the walls, an opaque brown sheet or
+     a 64-cell grey veil on the ground) with a clock that dried them in 22 s.
+     What the Ahr valley 2021, Derbyshire 2019 and the Tohoku "black tsunami"
+     deposits look like instead:
+       - a brown-grey MUD AND SILT FILM, thickest where the water was deep,
+         slow and stood longest (the lows, the slack behind things), thin and
+         patchy on the rises, so the ground shows through it;
+       - dark, glossy and near-black-brown while wet; it dries from the thin
+         edges and the high spots inward to a PALE grey-tan crust, the thick
+         pans last, and those shrink into plates (mud cracks);
+       - the drift the water carried, stranded in a ragged WRACK LINE at the
+         high-water mark (twigs, grass, litter, the odd pale scrap);
+       - on every wall a crisp dark tide line at the peak with a scum band
+         under it and a mottled film below, darker while wet.
+     Like the burn scar it is texture on the ground, never a colour pasted on
+     it: per-cell inputs, world-space noise at three scales so the grid never
+     shows, ragged edges. Seven value-noise taps a fragment: phone money.
+
+     cbzFloodResidue(p, thick, dry, edge, comb, out gloss) -> (albedo, cover)
+       p     world xz
+       thick 0..1 how much settled here
+       dry   0..1 the drying clock (0 just emerged, 1 long dry)
+       edge  0..1 inside the high-water band, where the wrack is stranded
+       comb  the direction the last of the water ran (zero: none)
+     cbzWaterline(b, along, y, wet) -> (albedo, cover)
+       b metres below the high-water line, along a coordinate along the wall
+     ============================================================ */
+  CBZ.floodResidueDrySecs = 150;
+  CBZ.floodResidueGLSL = function () {
+    return [
+      "float cbzRsH(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }",
+      "float cbzRsN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+      "  return mix(mix(cbzRsH(i), cbzRsH(i + vec2(1.0, 0.0)), f.x), mix(cbzRsH(i + vec2(0.0, 1.0)), cbzRsH(i + vec2(1.0, 1.0)), f.x), f.y); }",
+      "vec4 cbzFloodResidue(vec2 p, float thick, float dry, float edge, vec2 comb, out float gloss) {",
+      "  float n1 = cbzRsN(p * 0.13);",            // ~8 m: where it settled thicker
+      "  float n2 = cbzRsN(p * 0.61 + 5.3);",      // ~1.6 m mottling
+      "  float n3 = cbzRsN(p * 2.7 - 3.1);",       // ~0.4 m grain
+      // combed out along the last of the flow
+      "  float cl = length(comb);",
+      "  vec2 cd = cl > 0.01 ? comb / cl : vec2(1.0, 0.0);",
+      "  float stri = cl > 0.01 ? cbzRsN(vec2(dot(p, vec2(-cd.y, cd.x)) * 0.9, dot(p, cd) * 0.07) + n1 * 1.3) : 0.5;",
+      "  float th = clamp(thick * (0.62 + 0.76 * n1) + (n2 - 0.5) * 0.26 + (stri - 0.5) * 0.2, 0.0, 1.0);",
+      // the drying front: thin film and the rises first, the thick lows last
+      "  float dk = clamp(dry * 1.75 - th * 0.8 - (n2 - 0.5) * 0.34 - (n3 - 0.5) * 0.12, 0.0, 1.0);",
+      "  float d = smoothstep(0.22, 0.52, dk);",
+      "  vec3 wetC = mix(vec3(0.030, 0.026, 0.020), vec3(0.050, 0.043, 0.033), n2);",
+      "  vec3 dryC = mix(vec3(0.19, 0.172, 0.142), vec3(0.285, 0.262, 0.224), n2 * 0.6 + n3 * 0.4);",
+      // thin film dries to a dusty grey, the thick pans stay browner
+      "  dryC *= mix(vec3(1.03, 1.03, 1.05), vec3(0.90, 0.84, 0.74), th);",
+      "  vec3 col = mix(wetC, dryC, d);",
+      // half-dry: a damp darker rim just behind the drying front
+      "  col *= 1.0 - 0.22 * smoothstep(0.10, 0.22, dk) * (1.0 - smoothstep(0.22, 0.42, dk));",
+      // thick dried mud shrinks into plates
+      "  float cr = 1.0 - abs(cbzRsN(p * 1.15 + n2 * 0.7) * 2.0 - 1.0);",
+      "  float crack = smoothstep(0.90, 0.97, cr) * smoothstep(0.45, 0.8, th) * smoothstep(0.62, 0.95, dk);",
+      "  col *= 1.0 - 0.6 * crack;",
+      // coverage: thick buries the ground, thin lets it through; wet soil darkens more
+      "  float a = smoothstep(0.03, 0.5, th) * (0.5 + 0.48 * smoothstep(0.25, 0.75, th));",
+      "  a = max(a, (1.0 - d) * smoothstep(0.0, 0.2, thick) * 0.6);",
+      // water still standing in the deepest pockets
+      "  float pud = smoothstep(0.74, 0.82, th + n3 * 0.06) * (1.0 - smoothstep(0.12, 0.5, dry * 1.3));",
+      "  col = mix(col, vec3(0.028, 0.024, 0.019), pud);",
+      "  a = max(a, pud);",
+      // the wrack: what the water carried, dropped where it stopped
+      "  float clump = smoothstep(0.55, 0.78, cbzRsN(p * 1.9 + 11.0) * 0.6 + n3 * 0.4);",
+      "  float bits = smoothstep(0.80, 0.93, cbzRsN(p * 6.3 + 2.0));",
+      "  float wr = edge * clump;",
+      "  col = mix(col, mix(vec3(0.026, 0.021, 0.014), vec3(0.07, 0.056, 0.038), n3), wr);",
+      "  col = mix(col, vec3(0.30, 0.29, 0.26), edge * bits * (1.0 - wr) * 0.6);",
+      "  a = max(a, max(wr * 0.95, edge * bits * 0.55));",
+      "  gloss = (1.0 - d) * (0.35 + 0.65 * pud);",
+      "  return vec4(col, clamp(a, 0.0, 1.0));",
+      "}",
+      "vec4 cbzWaterline(float b, float along, float y, float wet) {",
+      "  b += (cbzRsN(vec2(along * 0.9, 3.0)) - 0.5) * 0.10;",
+      "  if (b < 0.0) return vec4(0.0);",
+      "  float drip = smoothstep(0.35, 0.8, cbzRsN(vec2(along * 2.3, y * 0.13)));",
+      "  float mott = cbzRsN(vec2(along * 0.7, y * 0.6));",
+      "  vec3 mud = mix(vec3(0.20, 0.18, 0.145), vec3(0.075, 0.065, 0.050), wet);",
+      // the film is heaviest low down, where the water stood longest
+      "  float a = mix(0.30, 0.62, smoothstep(0.1, 1.6, b)) * (0.78 + 0.30 * drip + 0.12 * mott);",
+      "  a *= smoothstep(0.02, 0.10, b);",
+      "  float line = 1.0 - smoothstep(0.035, 0.085, b);",
+      "  float scum = smoothstep(0.08, 0.11, b) * (1.0 - smoothstep(0.22, 0.34, b)) * smoothstep(0.35, 0.6, cbzRsN(vec2(along * 4.0, y * 5.0)));",
+      "  vec3 col = mud * (0.85 + 0.3 * mott);",
+      "  col = mix(col, vec3(0.025, 0.022, 0.018), line);",
+      "  col = mix(col, vec3(0.34, 0.33, 0.30), scum * 0.9);",
+      "  return vec4(col, clamp(max(a, max(line * 0.92, scum * 0.8)), 0.0, 1.0));",
+      "}",
+    ].join("\n");
+  };
+
   /* THE RUN-UP FIELD, READ ON THE GPU. One RGBA8 texel per cell, nearest-
      sampled and blended by hand (float textures cannot be linearly filtered
      on every phone; four fetches always can): RG = the drawn surface (16
@@ -3204,8 +3306,8 @@
     "uniform vec4 uRunB;",
     "uniform float uRunOn;",
     "vec4 cbzRunTexel(vec2 c) { return texture2D(uRunTex, (c + 0.5) / uRunB.w); }",
-    "vec4 cbzRun(vec2 xz, out float grad) {",
-    "  grad = 0.0;",
+    "vec4 cbzRun(vec2 xz, out vec2 grad) {",
+    "  grad = vec2(0.0);",
     "  vec2 g = (xz - uRunB.xy) / uRunB.z * uRunB.w - 0.5;",
     "  float e = min(min(g.x + 0.5, g.y + 0.5), min(uRunB.w - 0.5 - g.x, uRunB.w - 0.5 - g.y));",
     "  float w = clamp(e / 1.5, 0.0, 1.0);",
@@ -3219,7 +3321,8 @@
     "  vec4 sp = vec4(a.a, b.a, c.a, d.a) * " + gnum(RUN_ENC.speed) + ";",
     "  vec4 wq = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);",
     "  float cell = uRunB.z / uRunB.w;",
-    "  grad = length(vec2(mix(ee.y - ee.x, ee.w - ee.z, f.y), mix(ee.z - ee.x, ee.w - ee.y, f.x))) / cell;",
+    // the surface slope as a vector (+x, +z): the water runs down it
+    "  grad = vec2(mix(ee.y - ee.x, ee.w - ee.z, f.y), mix(ee.z - ee.x, ee.w - ee.y, f.x)) / cell;",
     "  return vec4(dot(ee, wq), dot(dd, wq), dot(sp, wq), w);",
     "}",
   ].join("\n");
@@ -3251,7 +3354,9 @@
     // metres the sheet is pulled DOWN ahead of the front (0 = off); CPU twin
     // CBZ.waterFrontDropAt
     U.uDwAhead = { value: 0 };
-    U.uDwMud = { value: new THREE.Color(opts.mudColor == null ? 0x171208 : opts.mudColor) };
+    // grey-brown-black, low in saturation (the old 0x171208 was an olive
+    // chocolate): the Tohoku "black tsunami" and the Aceh street surge
+    U.uDwMud = { value: new THREE.Color(opts.mudColor == null ? 0x15120e : opts.mudColor) };
     // the flood is a river with no banks: everything on it moves one way
     U.uDwFlow = { value: new THREE.Vector2(1, 0) };
     U.uDwFlowSpd = { value: 0 };
@@ -3259,8 +3364,10 @@
     // THE DRY DISC: (cx, cz, r, sink) — the sheet is pulled `sink` m down
     // inside r so a swell crest never stripes the plain. w = 0 is a no-op.
     U.uDwDryDisc = { value: new THREE.Vector4(0, 0, 0, 0) };
-    U.uDwSilt = { value: new THREE.Color(opts.siltColor == null ? 0x1f1810 : opts.siltColor) };
-    U.uDwFoam = { value: new THREE.Color(opts.dirtyFoamColor == null ? 0x8e8271 : opts.dirtyFoamColor) };
+    U.uDwSilt = { value: new THREE.Color(opts.siltColor == null ? 0x1b1610 : opts.siltColor) };
+    // dirty off-white: tan-grey once it carries the silt (0x8e8271 lands
+    // near white through ACES + sRGB, which is the clean cap the owner saw)
+    U.uDwFoam = { value: new THREE.Color(opts.dirtyFoamColor == null ? 0x574c3c : opts.dirtyFoamColor) };
     /* THE RUN-UP FIELD (world/tsunami_runup.js): while one is attached, the
        sheet over its domain IS the field's surface (one RGBA8 texel a cell,
        see RUN_GLSL), its swell scaled by the depth under it, its dry cells
@@ -3292,14 +3399,14 @@
       "  wWorld.y -= dwAk * (uDwAhead + 3.0 * dwDisc * step(uDwDryDisc.w, 0.01));",
       // the run-up field owns its domain: its surface, plus the swell scaled
       // by the depth under it (a flood a metre deep carries no metre swell)
-      "  float rG = 0.0;",
+      "  vec2 rG = vec2(0.0);",
       "  vec4 rS = uRunOn > 0.5 ? cbzRun(wXZ, rG) : vec4(0.0);",
       "  if (rS.w > 0.0) {",
       "    float rk = clamp(rS.y / 2.5, 0.0, 1.0);",
       "    wWorld.y = mix(wWorld.y, rS.x + wHeight * rk, rS.w);",
       "    wWorld.xz = mix(wWorld.xz, wXZ + wDisp.xz * rk, rS.w);",
       "  }",
-      "  vRun = vec4(rS.y, rS.z, rG, rS.w);",
+      "  vRun = vec4(rS.y, rS.z, length(rG), rS.w);",
     ].join("\n");
     const fDecl = [
       RUN_GLSL,
@@ -3370,11 +3477,23 @@
       "    float turb = dwSed * dwWet;",
       "    if (turb > 0.002) {",
       "      float bd = mix(max(0.0, -fdS), mix(60.0, 0.5, rFront), rLand);",
+      "      float land = step(0.5, rLand);",
+      // ON THE LAND the water runs down its own surface, not along the
+      // event's one bearing: round the blocks, out of the side streets, back
+      // to the sea in the backwash
       "      vec2 fl = uDwFlow;",
+      "      float dGl = length(dwRunGv);",
+      "      if (land > 0.5 && dGl > 0.004) {",
+      "        vec2 dG = -dwRunGv / dGl;",
+      "        vec2 fm2 = mix(uDwFlow, dG, smoothstep(0.004, 0.03, dGl));",
+      "        fl = length(fm2) > 0.01 ? normalize(fm2) : dG;",
+      "      }",
       "      vec2 ax = vec2(-fl.y, fl.x);",
-      "      vec2 adv = vSeaWorld.xz - fl * (uDwFlowSpd * uSeaTime);",
-      "      float sAl = dot(adv, fl);",
-      "      float sAc = dot(adv, ax);",
+      // the big silt plumes drift with the event (at 150 m a shear never shows)
+      "      vec2 eAx = vec2(-uDwFlow.y, uDwFlow.x);",
+      "      vec2 adv = vSeaWorld.xz - uDwFlow * (uDwFlowSpd * uSeaTime);",
+      "      float sAl = dot(adv, uDwFlow);",
+      "      float sAc = dot(adv, eAx);",
       "      float stand = mix(max(uDwStand, smoothstep(0.30, 1.0, behind)), 1.0 - smoothstep(0.4, 3.0, dwRun.z), rLand);",
       "      float plume = clamp(dwFbm(vec2(sAl, sAc) * 0.0068) * 0.72 +",
       "                          dwNoise(vec2(sAl * 0.0021, sAc * 0.0029) + 11.0) * 0.46, 0.0, 1.0);",
@@ -3382,22 +3501,58 @@
       "      vec3 mudBody = mix(uDwMud * 0.62, uDwSilt, smoothstep(0.18, 0.92, plume));",
       "      mudBody *= 0.52 + tndl * 0.44;",
       "      float mf = 0.02 + 0.98 * pow(1.0 - clamp(dot(tN, V), 0.0, 1.0), 5.0);",
-      "      vec3 turbCol = mix(mudBody, dwSkyC, clamp(mf * 0.80, 0.0, 0.62));",
-      "      turbCol += uSunColor * pow(max(dot(tN, tH), 0.0), 110.0) * (0.45 + 2.4 * mf);",
+      /* NOT A MIRROR. The old 62% sky at grazing made the inundation a
+         silver sheet: a churned suspension scatters what the surface would
+         reflect, so the sky it shows is weak and goes with the churn. */
+      "      float churn = clamp(land * max(rFront, smoothstep(1.5, 5.5, dwRun.z) * 0.6) + (1.0 - land) * (1.0 - stand) * 0.4, 0.0, 1.0);",
+      "      vec3 turbCol = mix(mudBody, dwSkyC * 0.85, clamp(mf * (0.55 - 0.3 * churn), 0.0, 0.34));",
+      "      turbCol += uSunColor * pow(max(dot(tN, tH), 0.0), mix(110.0, 40.0, churn)) * (0.30 + 1.2 * mf) * (1.0 - 0.6 * churn);",
       "      outColor = mix(outColor, turbCol, clamp(sed * 1.28, 0.0, 0.985));",
-      "      vec3 dfoam = mix(uFoamColor, uDwFoam, dwSed * 0.88);",
-      "      float tongue = dwFbm(vec2(sAc * 0.052 + 4.0, uSeaTime * 0.28));",
-      "      float boil = clamp(turb * exp(-bd / (2.0 + 5.4 * tongue)) * (0.50 + 0.80 * tongue), 0.0, 0.92);",
-      "      float streak = smoothstep(0.60, 0.95, dwFbm(vec2(sAl * 0.023, sAc * 0.30)));",
-      "      streak *= exp(-bd / 48.0) * (1.0 - stand * 0.70);",
-      "      float sc = dwFbm(vec2(sAl * 0.026 + 21.0, sAc * 0.205));",
-      "      float lines = smoothstep(0.92, 1.0, 1.0 - abs(sc * 2.0 - 1.0)) * smoothstep(0.26, 0.72, plume);",
-      "      float raft = smoothstep(0.72, 0.95, dwFbm(vec2(sAl * 0.048, sAc * 0.086) + 31.0));",
-      "      float whitew = clamp((streak * 0.38 + (lines * 0.32 + raft * 0.24) * stand) * turb, 0.0, 0.52);",
-      "      outColor = mix(outColor, dfoam, whitew);",
-      "      outColor = mix(outColor, mix(dfoam, uFoamColor, 0.30), boil);",
-      // a suspension is opaque: half a metre of Tohoku mud hid a car
-      "      solid = clamp(max(max(foam, boil), max(whitew, min(1.0, sed * 1.9))), 0.0, 1.0);",
+      // dirty foam, lit with the body's light (never a flat paper white)
+      "      vec3 dfoam = mix(uFoamColor, uDwFoam, clamp(dwSed * 1.1, 0.0, 1.0)) * (0.62 + 0.38 * tndl);",
+      "      if (land > 0.5) {",
+      /* THE CHURN ON THE LAND (Miyako, Kesennuma, Banda Aceh street
+         footage): no white cap. A black-brown surge whose froth is torn,
+         dirty and only where the water is fast, steep or slamming into
+         something (the field's slope says both: water piles up against a
+         wall), in clumps and streaks that ride the LOCAL current. Two-phase
+         flow map, so the pattern moves with the water and never shears. */
+      "        float near = 1.0 - smoothstep(60.0, 220.0, vSeaMisc.y);",
+      "        float spd = min(dwRun.z, 6.0);",
+      "        float fT = 1.9;",
+      "        float p0 = fract(uSeaTime / fT), p1 = fract(uSeaTime / fT + 0.5);",
+      "        vec2 q0 = vSeaWorld.xz - fl * spd * p0 * fT, q1 = vSeaWorld.xz - fl * spd * p1 * fT;",
+      "        float c0 = dwFbm(vec2(dot(q0, fl) * 0.30, dot(q0, ax) * 1.1));",
+      "        float c1 = dwFbm(vec2(dot(q1, fl) * 0.30, dot(q1, ax) * 1.1) + 7.3);",
+      "        float pat = mix(c0, c1, abs(1.0 - 2.0 * p0));",
+      "        float thr = 1.0 - churn * 0.62;",
+      "        float fmk = smoothstep(thr, thr + 0.13, pat) * step(0.03, churn);",
+      // the tongue of a bore running up a street: a churning lip of dirty foam
+      "        float lip = (1.0 - smoothstep(0.06, 0.45, dwRun.y)) * smoothstep(0.8, 2.6, dwRun.z);",
+      "        fmk = max(fmk, lip * smoothstep(0.32, 0.62, pat));",
+      // slack water: a sparse scum of bubbles and litter, nothing more
+      "        fmk = max(fmk, smoothstep(0.93, 0.99, 1.0 - abs(pat * 2.0 - 1.0)) * (1.0 - churn) * 0.30);",
+      "        fmk = mix(churn * 0.42, fmk, near) * 0.86 * turb;",
+      // thin foam shows the water through: darker at its margins
+      "        vec3 fcol = mix(mudBody * 1.6, dfoam, smoothstep(thr + 0.02, thr + 0.28, pat));",
+      "        outColor = mix(outColor, fcol, fmk);",
+      // a suspension is opaque: half a metre of Tohoku mud hid a car;
+      // only the last few centimetres at the margin let the wet ground through
+      "        solid = clamp(max(fmk, min(1.0, sed * 1.9)), 0.0, 1.0);",
+      "        outAlpha = mix(0.6, 1.0, smoothstep(0.03, 0.16, dwRun.y));",
+      "      } else {",
+      "        float tongue = dwFbm(vec2(sAc * 0.052 + 4.0, uSeaTime * 0.28));",
+      "        float boil = clamp(turb * exp(-bd / (2.0 + 5.4 * tongue)) * (0.50 + 0.80 * tongue), 0.0, 0.92);",
+      "        float streak = smoothstep(0.60, 0.95, dwFbm(vec2(sAl * 0.023, sAc * 0.30)));",
+      "        streak *= exp(-bd / 48.0) * (1.0 - stand * 0.70);",
+      "        float sc = dwFbm(vec2(sAl * 0.026 + 21.0, sAc * 0.205));",
+      "        float lines = smoothstep(0.92, 1.0, 1.0 - abs(sc * 2.0 - 1.0)) * smoothstep(0.26, 0.72, plume);",
+      "        float raft = smoothstep(0.72, 0.95, dwFbm(vec2(sAl * 0.048, sAc * 0.086) + 31.0));",
+      "        float whitew = clamp((streak * 0.38 + (lines * 0.32 + raft * 0.24) * stand) * turb, 0.0, 0.52);",
+      "        outColor = mix(outColor, dfoam, whitew);",
+      "        outColor = mix(outColor, mix(dfoam, uFoamColor, 0.12), boil);",
+      "        solid = clamp(max(max(foam, boil), max(whitew, min(1.0, sed * 1.9))), 0.0, 1.0);",
+      "      }",
       "    }",
       "  }",
     ].join("\n");
@@ -3413,17 +3568,19 @@
        texture by both, so they meet along one contour at the coast. */
     const RUN_LAND = "(dwRun.x - dwRun.y > uRunRest - 0.5)";
     const fHead = [
-      "  vec4 dwRun = vec4(0.0); float dwRunG = 0.0;",
+      "  vec4 dwRun = vec4(0.0); vec2 dwRunGv = vec2(0.0);",
       "  if (uRunOn > 0.5 && vRun.w > 0.01) {",
-      "    dwRun = cbzRun(vSeaWorld.xz, dwRunG);",
+      "    dwRun = cbzRun(vSeaWorld.xz, dwRunGv);",
       // a dry cell of the field is dry land: no sea is drawn on it
       "    if (dwRun.w > 0.5 && dwRun.y < 0.03) discard;",
       "    if (uRunOverlay > 0.5 && dwRun.w > 0.5 && " + RUN_LAND + ") discard;",
       "  }",
+      "  float dwRunG = length(dwRunGv);",
     ].join("\n");
     const fHeadOverlay = [
-      "  float dwRunG = 0.0;",
-      "  vec4 dwRun = cbzRun(vSeaWorld.xz, dwRunG);",
+      "  vec2 dwRunGv = vec2(0.0);",
+      "  vec4 dwRun = cbzRun(vSeaWorld.xz, dwRunGv);",
+      "  float dwRunG = length(dwRunGv);",
       "  if (uRunOn < 0.5 || dwRun.w < 0.5 || dwRun.y < 0.03 || !" + RUN_LAND + ") discard;",
     ].join("\n");
     const fDeclAll = fDecl + "\nuniform float uRunOverlay;";
@@ -3763,8 +3920,12 @@
       uBodyMud: { value: new THREE.Color(0.072, 0.058, 0.040) },
       uGlowSea: { value: new THREE.Color(0.045, 0.15, 0.13) },   // green-blue thin water
       uGlowMud: { value: new THREE.Color(0.12, 0.11, 0.07) },
-      uFoamClean: { value: new THREE.Color(0.84, 0.90, 0.90) },  // wet foam, faintly sea-tinted
-      uFoamMud: { value: new THREE.Color(0.66, 0.62, 0.55) },
+      // wet foam, faintly sea-tinted: aerated water, not snow (0.84-0.90
+      // landed as a paper-white cap through ACES)
+      uFoamClean: { value: new THREE.Color(0.64, 0.69, 0.68) },
+      // dirty off-white-tan: 0.66 landed paper white through ACES + sRGB, the
+      // "smooth white crest" the owner called fake once the bore is on land
+      uFoamMud: { value: new THREE.Color(0.40, 0.355, 0.29) },
     });
     // the light uniforms are SHARED objects across the face's materials
     uni.uSunDir = light.uSunDir; uni.uSunCol = light.uSunCol;
@@ -3920,8 +4081,8 @@
       "  float foam = max( max( rollF, backF ), max( footF, skirtF ) );",
       /* HOLES: churn is torn, never a blanket. Dark water shows through
          between the boils, most at the ragged margins of each band. */
-      "  float hole = 1.0 - smoothstep( 0.20, 0.42, cA.x * 0.55 + nB * 0.45 );",
-      "  foam *= 1.0 - hole * mix( 0.8, 0.3, rollF );",
+      "  float hole = 1.0 - smoothstep( 0.20 + 0.08 * tb, 0.42 + 0.08 * tb, cA.x * 0.55 + nB * 0.45 );",
+      "  foam *= 1.0 - hole * mix( 0.85, 0.45, rollF );",
       // ...and combed into flow streaks everywhere but the very top of the churn
       "  float core = smoothstep( edge + 0.02, edge + 0.10, up ) * ( 1.0 - sk );",
       "  foam *= mix( mix( 0.22 + 0.78 * streak, 1.0, core * 0.55 ), 1.0, far );",
@@ -3961,10 +4122,10 @@
       // storm sky in the face: horizon glare low, the heavy overcast above
       "  vec3 skyR = mix( uGndCol * 0.6, mix( uSkyCol * 1.35, uSkyCol * 0.95, smoothstep( 0.25, 0.9, Rv.y ) ), smoothstep( -0.15, 0.12, Rv.y ) );",
       "  float refl = 0.05 + 0.75 * fres;",
-      "  bodyLit = mix( bodyLit, skyR, refl * ( 1.0 - 0.35 * tb ) );",
+      "  bodyLit = mix( bodyLit, skyR, refl * ( 1.0 - 0.6 * tb ) );",
       // SHEEN: every ripple crest that tilts up at the bright sky flashes
       "  float sheen = pow( smoothstep( 0.22, 0.70, Rv.y ), 3.0 ) * smoothstep( 0.0, 0.5, dot( N, V ) );",
-      "  bodyLit += uSkyCol * sheen * ( 0.30 + 0.5 * fres ) * ( 1.0 - 0.4 * tb ) * ( 1.0 - far );",
+      "  bodyLit += uSkyCol * sheen * ( 0.30 + 0.5 * fres ) * ( 1.0 - 0.7 * tb ) * ( 1.0 - far );",
       "  vec3 Hv = normalize( uSunDir + V );",
       "  float ndh = max( dot( N, Hv ), 0.0 );",
       "  bodyLit += uSunCol * ( pow( ndh, 120.0 ) * 1.4 + pow( ndh, 16.0 ) * 0.10 ) * ( 1.0 - tb * 0.5 );",
@@ -3985,8 +4146,9 @@
       "  vec3 trans = mix( vec3( 0.035, 0.20, 0.17 ), vec3( 0.10, 0.12, 0.07 ), tb * 0.75 );",
       "  bodyLit += trans * thinL * ( uSkyCol * 0.9 + uSunCol * ( 0.25 + 1.8 * back ) ) * ( 0.8 + 0.4 * r0 );",
       // ---- the foam: lit boils with dark creases, dirty with sediment
-      "  vec3 fc = mix( uFoamClean, uFoamMud, tb * tb * 0.8 + tb * 0.2 );",
-      "  fc = mix( fc, uFoamClean, far * 0.6 );",
+      "  vec3 fc = mix( uFoamClean, uFoamMud, smoothstep( 0.0, 0.7, tb ) );",
+      // far out the churn averages to the white line, unless it is mud
+      "  fc = mix( fc, uFoamClean, far * 0.6 * ( 1.0 - tb * 0.7 ) );",
       "  float ao = mix( 0.80, 1.0, smoothstep( 0.0, 0.75, cA.x ) ) * mix( 0.78, 1.0, smoothstep( 0.2, 0.9, cB.x ) ) * mix( 1.0, mix( 0.82, 1.0, boilV ), roll );",
       "  ao = mix( ao, 1.0, far * 0.75 );",
       /* WET FOAM, NOT SNOW (2026-09-28). Aerated water is mostly water: its
@@ -4073,8 +4235,8 @@
       uTime: { value: 0 }, uHs: { value: 1 }, uH: { value: H }, uCurl: { value: 0.5 },
       uTurbid: { value: 0 }, uSpray: { value: 1 }, uWind: { value: 6 }, uScale: { value: 450 },
       uSeaLocal: { value: 0.5 },
-      uClean: { value: new THREE.Color(0.90, 0.93, 0.95) },
-      uMud: { value: new THREE.Color(0.70, 0.66, 0.58) },
+      uClean: { value: new THREE.Color(0.72, 0.75, 0.76) },
+      uMud: { value: new THREE.Color(0.42, 0.385, 0.32) },
     });
     uni.uSunCol = light.uSunCol; uni.uSkyCol = light.uSkyCol;
     const VERT = [
@@ -4139,7 +4301,7 @@
       "  }",
       // no crest to tear where the wave has tapered into the sea
       "  a *= uSpray * mix( 1.0, smoothstep( 0.25, 0.6, position.y / max( 0.001, uH / uHs ) ), ground );",
-      "  vec3 c = mix( uClean, uMud, uTurbid * uTurbid * 0.8 ) * ( 0.9 + 0.1 * s.y );",
+      "  vec3 c = mix( uClean, uMud, smoothstep( 0.0, 0.7, uTurbid ) ) * ( 0.9 + 0.1 * s.y );",
       // spray is lit from everywhere at once (it scatters): never darker than overcast
       "  vec3 lit = max( uSkyCol * 0.95 + uSunCol * 0.55, vec3( 0.42 ) );",
       "  vCol = vec4( c * lit, a );",
@@ -4466,10 +4628,11 @@
       su.uScale.value = ph * 0.5;
     }
     if (h.wakeL) {
-      const wu = h.wakeL.mat.uniforms, mud = turbid * turbid;
+      const wu = h.wakeL.mat.uniforms, mud = Math.min(1, turbid / 0.7);
       wu.uTime.value = t;
       wu.uY.value = seaLocal + 0.22;
-      wu.uColor.value.setRGB(0.91 - mud * 0.3, 0.93 - mud * 0.34, 0.91 - mud * 0.36);
+      // torn whitewater behind a muddy front is tan-grey froth, not paper
+      wu.uColor.value.setRGB(0.68 - mud * 0.33, 0.71 - mud * 0.37, 0.70 - mud * 0.42);
       // clean water leaves no wake to see
       wu.uOpacity.value = turbid * (0.22 + 0.14 * Math.abs(Math.sin(t * 1.3)));
       h.wakeL.mesh.visible = turbid > 0.05;

@@ -37,7 +37,9 @@
   if (!CBZ || !THREE) return;
 
   const DRAW_MAX = 7.6;     // m: the deepest drawdown disasters.js can roll (6.7 * 1.13)
-  const DRY_SECS = 120;     // s for a flooded surface to go from soaked to dry silt
+  // s for a flooded surface to go from soaked to dry silt: the one flood
+  // residue clock (world/water_spec.js), shared with the flash flood
+  const DRY_SECS = CBZ.floodResidueDrySecs || 150;
   const MUD_N = 64;         // wetness/mud cells per side over the island
   const MUD_LIFT = 0.13;    // m the silt drape rides above the ground
   const BAND_LIFT = 0.08;   // m the seabed skin rides above the bed
@@ -653,7 +655,7 @@
           "varying vec3 vMdW; varying vec3 vMdN;",
           "uniform sampler2D uMud; uniform vec2 uMudO; uniform float uMudS; uniform vec2 uDrain;",
           "uniform float uTime; uniform vec3 uSky; uniform vec3 uSunDir; uniform vec3 uSunCol;",
-          NOISE, SHEEN,
+          NOISE, SHEEN, CBZ.floodResidueGLSL ? CBZ.floodResidueGLSL() : "",
           "float mdGloss; float mdPud; float n2; float n3;",
         ].join("\n"))
         .replace("#include <color_fragment>", [
@@ -665,34 +667,20 @@
           // metres of water that stood over THIS point at the peak, off the real
           // ground under the fragment: the inland limit is a contour, not a cell
           "  float reach = level - (vMdW.y - " + MUD_LIFT.toFixed(3) + ");",
-          "  float wet = m.g, thick = m.b;",
+          "  float wet = m.g;",
           "  vec2 p = vMdW.xz;",
-          "  vec2 pr = vec2(-uDrain.y, uDrain.x);",
-          "  float n1 = tsN(p * 0.17); n2 = tsN(p * 0.71 + 5.0); n3 = tsN(p * 2.9 + 1.3);",
-          // silt combed out along the drain
-          "  float streak = tsN(vec2(dot(p, pr) * 0.55, dot(p, uDrain) * 0.045) + n1 * 0.9);",
-          "  float cover = smoothstep(0.0, 0.3, reach);",
-          "  vec3 siltDry = vec3(0.235, 0.215, 0.180);",
-          "  vec3 siltWet = vec3(0.070, 0.060, 0.047);",
-          "  float wk = wet * wet * (3.0 - 2.0 * wet);",
-          "  vec3 col = mix(siltDry, siltWet, wk);",
-          "  col *= 0.82 + 0.36 * n2;",
-          "  col *= 1.0 - 0.30 * smoothstep(0.45, 0.85, streak);",
-          "  float a = cover * (0.32 + 0.40 * thick + 0.18 * n1) * mix(0.72, 1.0, wk);",
-          "  a *= 0.72 + 0.40 * smoothstep(0.3, 0.85, streak);",
-          // standing puddles, shrinking as it dries
-          "  float pth = 0.68 + (1.0 - wet) * 0.18;",
-          "  mdPud = smoothstep(pth, pth + 0.035, n1 * 0.62 + n2 * 0.28 + n3 * 0.10) * cover;",
-          "  col = mix(col, vec3(0.040, 0.037, 0.030), mdPud);",
-          "  a = max(a, mdPud * 0.95);",
-          // the wrack line where the water stopped, and the scum just below it
-          "  float lr = reach + 0.05 - (n2 - 0.5) * 0.14;",
-          "  float line = 1.0 - smoothstep(0.0, 0.16, abs(lr));",
-          "  float scum = (1.0 - smoothstep(0.0, 0.12, abs(lr - 0.26))) * smoothstep(0.42, 0.6, n3);",
-          "  col = mix(col, vec3(0.030, 0.026, 0.020), line);",
-          "  col = mix(col, vec3(0.30, 0.29, 0.26), scum * 0.85);",
-          "  a = max(a, max(line * 0.9, scum * 0.75));",
-          "  mdGloss = wk * (0.45 + 0.55 * mdPud) + mdPud * 0.25 * (1.0 - wk);",
+          "  n2 = tsN(p * 0.71 + 5.0); n3 = tsN(p * 2.9 + 1.3);",
+          // THE ONE FLOOD RESIDUE (world/water_spec.js cbzFloodResidue):
+          // thick where the water stood deep, the wrack at the reach, combed
+          // seaward by the drain, wet-dark drying to a pale crust
+          "  float thick = clamp(0.12 + m.b * 0.95, 0.0, 1.0);",
+          "  float edge = 1.0 - smoothstep(0.04, 0.42, reach);",
+          "  float rsG = 0.0;",
+          "  vec4 rs = cbzFloodResidue(p, thick, 1.0 - wet, edge, uDrain, rsG);",
+          "  vec3 col = rs.rgb;",
+          "  float a = rs.a * smoothstep(-0.04, 0.14, reach);",
+          "  mdPud = smoothstep(0.55, 0.9, rsG);",
+          "  mdGloss = rsG;",
           "  diffuseColor.rgb = col;",
           "  diffuseColor.a = clamp(a, 0.0, 1.0);",
           "  if (diffuseColor.a < 0.01) discard;",
@@ -844,30 +832,17 @@
           "#endif",
         ].join("\n"));
       sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying vec4 vSt;\nvarying vec3 vStP;\nvarying float vStY;\n" + NOISE)
+        .replace("#include <common>", "#include <common>\nvarying vec4 vSt;\nvarying vec3 vStP;\nvarying float vStY;\n" + NOISE + "\n" + (CBZ.floodResidueGLSL ? CBZ.floodResidueGLSL() : ""))
         .replace("#include <color_fragment>", [
           "#include <color_fragment>",
           "{",
           "  float H = vSt.x;",
-          "  float below = (1.0 - vStY) * H;",               // m under the high-water line
-          "  float along = vStP.x + vStP.z;",
-          "  float b = below + (tsN(vec2(along * 0.9, 3.0)) - 0.5) * 0.10;",
-          "  if (b < 0.0 || vSt.y < 0.01) discard;",
-          "  float wet = vSt.z;",
-          "  float up = clamp(vStY, 0.0, 1.0);",
-          "  float drip = smoothstep(0.35, 0.8, tsN(vec2(along * 2.3, vStP.y * 0.13)));",
-          "  float mott = tsN(vec2(along * 0.7, vStP.y * 0.6));",
-          "  vec3 mud = mix(vec3(0.20, 0.18, 0.145), vec3(0.075, 0.065, 0.050), wet);",
-          "  float a = mix(0.62, 0.30, up) * (0.78 + 0.30 * drip + 0.12 * mott);",
-          "  a *= smoothstep(0.02, 0.10, b);",
-          // the crisp dark line at the top, then the scum band just under it
-          "  float line = 1.0 - smoothstep(0.035, 0.085, b);",
-          "  float scum = smoothstep(0.08, 0.11, b) * (1.0 - smoothstep(0.22, 0.34, b)) * smoothstep(0.35, 0.6, tsN(vec2(along * 4.0, vStP.y * 5.0)));",
-          "  vec3 col = mud * (0.85 + 0.3 * mott);",
-          "  col = mix(col, vec3(0.025, 0.022, 0.018), line);",
-          "  col = mix(col, vec3(0.34, 0.33, 0.30), scum * 0.9);",
-          "  a = max(a, max(line * 0.92, scum * 0.8));",
-          "  diffuseColor.rgb = col;",
+          "  if (vSt.y < 0.01) discard;",
+          // THE ONE WATERLINE (world/water_spec.js cbzWaterline)
+          "  vec4 wl = cbzWaterline((1.0 - vStY) * H, vStP.x + vStP.z, vStP.y, vSt.z);",
+          "  if (wl.a < 0.01) discard;",
+          "  diffuseColor.rgb = wl.rgb;",
+          "  float a = wl.a;",
           "  diffuseColor.a = clamp(a, 0.0, 1.0) * vSt.y;",
           "}",
         ].join("\n"));
