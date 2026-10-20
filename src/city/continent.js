@@ -610,6 +610,21 @@
     }
     const BAY0 = 28, BAY1 = 95;          // bay ring: QUAY line → 95u out
     const hasCity = isFinite(city.minX);
+    /* THE BEACH OWNS ITS SHORELINE. Along the south seawall's beach gap the
+       waterline is not the ruled QUAY line: city/beach.js publishes how many
+       metres the sand pushes out past it at each x (a crescent with cusps,
+       0 outside the span), and the bay term below moves its near edge by
+       exactly that. Everything that reads this field (the sea's land cut,
+       swim.js, boats, wildlife, the plate) then agrees with the drawn sand
+       by construction instead of the sand painting a waterline 10 m away
+       from the one you actually wade in at. */
+    const beachBulge = (HARBOR && hasCity && typeof CBZ.cityBeachBulge === "function")
+      ? function (x, z) { return +CBZ.cityBeachBulge(city, x, z) || 0; } : null;
+    function baySigned(x, z, bd) {
+      const b0 = beachBulge ? BAY0 + beachBulge(x, z) : BAY0;
+      return bd <= b0 ? (b0 - bd)
+           : (bd >= BAY1 ? (bd - BAY1) : -Math.min(bd - b0, BAY1 - bd));
+    }
     function bayDist(x, z) {
       // CHEBYSHEV distance outside the city rect — deliberately square, so
       // the water ring is the EXACT complement of the rectangular underlay
@@ -778,9 +793,7 @@
       const e = plateInsideDistance(x, z);
       let s = e - coastInset(x, z);
       if (HARBOR) {
-        const bd = bayDist(x, z);
-        const sBay = bd <= BAY0 ? (BAY0 - bd)
-                   : (bd >= BAY1 ? (bd - BAY1) : -Math.min(bd - BAY0, BAY1 - bd));
+        const sBay = baySigned(x, z, bayDist(x, z));
         if (sBay < s) s = sBay;
       }
       if (s < 12 && inSolidRegion(x, z, 8)) s = 12;   // POIs are never carved
@@ -811,9 +824,7 @@
       const e = plateInsideDistance(x, z);
       let s = e - coastInset(x, z);
       if (HARBOR) {
-        const bd = bayDist(x, z);
-        const sBay = bd <= BAY0 ? (BAY0 - bd)
-                   : (bd >= BAY1 ? (bd - BAY1) : -Math.min(bd - BAY0, BAY1 - bd));
+        const sBay = baySigned(x, z, bayDist(x, z));
         if (sBay < s) s = sBay;
       }
       if (s < 12 && inSolidRegion(x, z, 8)) s = 12;

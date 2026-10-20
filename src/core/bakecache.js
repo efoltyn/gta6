@@ -72,7 +72,7 @@
      its bare name, so an unversioned edit on a dev box is not caught; the
      release flow bumps ?v= on every change.) */
   let _sigBase = null;
-  const TERRAIN_FILES = /\/(continent|river|waterfield|worldmap|biome_[a-z]+|terrain[a-z_]*|mountain_detail|alpine_skin|rockscliffs|layout|seed|cityground|highwaynet|highways|settlements|landscape[a-z_]*|water_survival|config)\.js/;
+  const TERRAIN_FILES = /\/(continent|river|waterfield|worldmap|biome_[a-z]+|terrain[a-z_]*|mountain_detail|alpine_skin|rockscliffs|layout|seed|cityground|highwaynet|highways|settlements|landscape[a-z_]*|water_survival|config|beach)\.js/;   // beach: city/beach.js shapes the south shoreline (CBZ.cityBeachBulge)
   CBZ.bakeSig = function (own) {
     if (_sigBase == null) {
       let s = "seed:" + (CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : (CBZ.CONFIG && CBZ.CONFIG.WORLD_SEED));

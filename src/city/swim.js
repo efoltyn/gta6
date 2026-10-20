@@ -487,7 +487,19 @@
     let shelf = 99;
     if (wf && wf.shoreAt) shelf = Math.max(0, -wf.shoreAt(x, z)) * SHELF_SLOPE;
     const deep = CBZ.cityWaterDepthAt ? CBZ.cityWaterDepthAt(x, z) : 24;
-    const d = Math.min(shelf, deep > 0 ? deep : 24);
+    let d = Math.min(shelf, deep > 0 ? deep : 24);
+    // THE BEACH HAS A DRAWN BED. Off the city beach the 1.1 m-per-metre shelf
+    // above would put you chest deep one stride past the waterline, over sand
+    // you can see sloping gently away under you. city/beach.js publishes the
+    // sand it draws (mean sea level, never the live crest), and where it has
+    // one the shallower of the two wins: you wade out the way the slope says.
+    if (CBZ.cityBeachBedY) {
+      const by = CBZ.cityBeachBedY(x, z);
+      if (by != null && Number.isFinite(by)) {
+        const bd = Math.max(0, (CBZ.SEA_Y != null ? CBZ.SEA_Y : -0.48) - by);
+        if (bd < d) d = bd;
+      }
+    }
     return Number.isFinite(d) ? Math.max(0, d) : 0;
   }
   CBZ.citySeaBedDepthAt = cityBedDepthAt;
