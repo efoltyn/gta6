@@ -56,7 +56,7 @@ CBZ.lab.ingredient("island", {
       machines: function () { return CBZ.islandVehicles; },
       state: function () {
         const V = CBZ.islandVehicles;
-        return { buildMs: W.islandBuildMs, radius: A.radius, towers: (A.elevators || []).length, propCars: (A.cars || []).length,
+        return { buildMs: W.islandBuildMs, radius: A.radius, towers: (A.elevators || []).length, realCars: (A.cars || []).length, carSpots: (A.carSpots || []).length, propCars: 0,
           machines: V ? V.state() : null };
       },
     };

@@ -89,7 +89,7 @@
   const freeRecs = [], freeEntries = [];
   const paintMats = new Map();                  // paint signature -> { mat, refs }
   const safeHook = new WeakMap();               // material -> onBeforeCompile is instancing-safe
-  let newPoolsThisFrame = 0, frame = 0, fullDraw = false;
+  let newPoolsThisFrame = 0, frame = 0, fullDraw = false, lastMode = null;
   const _found = [];                            // acquire scratch: meshes
   const _keys = [];                             // acquire scratch: pool keys
   const _sigs = [];                             // acquire scratch: paint signature or null
@@ -305,21 +305,31 @@
     if (p.warmUntil && !p.members.length) {      // compile-only draw: one instance collapsed to a point far below the map
       arr.set(WARM, 0);
       if (col) { col[0] = col[1] = col[2] = 1; }
-      p.mesh.count = 1; p.mesh.visible = true;
+      p.mesh.count = 1; p.mesh.visible = true; p.nIn = p.nAll = 1;
       p.mesh.instanceMatrix.needsUpdate = true;
       if (col) p.mesh.instanceColor.needsUpdate = true;
       p.dirty = false;
       return;
     }
-    for (let i = 0; i < p.members.length; i++) {
-      const e = p.members[i];
-      if (!all && !e.rec.inView) continue;
-      arr.set(e.m, n * 16);
-      if (col) { col[n * 3] = e.cr; col[n * 3 + 1] = e.cg; col[n * 3 + 2] = e.cb; }
-      n++;
+    /* IN VIEW FIRST, THEN THE REST — ALL OF THEM WRITTEN. `count` draws the
+       in-view prefix for the camera this was culled for; a render through ANY
+       other camera (a storyboard shot, a monitor, a lens moved after the last
+       tick) draws the whole pool instead (onBeforeRender below), so a pooled
+       car is never missing from a view it was not culled for. */
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < p.members.length; i++) {
+        const e = p.members[i];
+        const inv = all || e.rec.inView;
+        if (pass === 0 ? !inv : inv) continue;
+        arr.set(e.m, n * 16);
+        if (col) { col[n * 3] = e.cr; col[n * 3 + 1] = e.cg; col[n * 3 + 2] = e.cb; }
+        n++;
+      }
+      if (pass === 0) p.nIn = n;
     }
-    p.mesh.count = n;
-    p.mesh.visible = n > 0;
+    p.nAll = n;
+    p.mesh.count = p.nIn;
+    p.mesh.visible = p.nIn > 0;
     p.mesh.instanceMatrix.needsUpdate = true;
     if (col) p.mesh.instanceColor.needsUpdate = true;
     p.dirty = false;
@@ -347,7 +357,48 @@
     cam.updateMatrixWorld();
     _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
     _fr.setFromProjectionMatrix(_pm);
+    _cullCam = cam; _cullPM.set(_pm.elements);
     return true;
+  }
+  /* WHICH VIEW THE POOLS WERE CULLED FOR. A render through another camera,
+     or through this one after it moved (a storyboard reframing between the
+     tick and the draw, a cutscene cut), is not that view. */
+  let _cullCam = null;
+  const _cullPM = new Float32Array(16), _vpm = new THREE.Matrix4();
+  function sameView(cam) {
+    if (!cam || cam !== _cullCam) return false;
+    if (cam.matrixWorldAutoUpdate !== false && cam.parent == null) cam.updateMatrixWorld();
+    _vpm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    const e = _vpm.elements;
+    for (let k = 0; k < 16; k++) if (Math.abs(e[k] - _cullPM[k]) > 1e-4 * (1 + Math.abs(e[k]))) return false;
+    return true;
+  }
+  /* EVERY RENDER CHECKS ITS CAMERA ONCE. The pools draw the prefix culled
+     for the main camera at the last tick; a render through any other camera
+     (a monitor, a mirror, a storyboard or screenshot tool's lens), or through
+     the main one after it was moved past that tick, draws every pooled car
+     for that one render. One compare per render call, nothing per frame. */
+  function wrapRender() {
+    const R = CBZ.renderer;
+    if (!R || R._carInstWrapped || typeof R.render !== "function") return;
+    R._carInstWrapped = true;
+    const orig = R.render;
+    R.render = function (scene, camera) {
+      let flipped = false;
+      if (poolList.length && !sameView(camera)) {
+        for (let i = 0; i < poolList.length; i++) {
+          const p = poolList[i];
+          if (p.nAll > p.nIn && !p.warmUntil) { p._flip = true; p.mesh.count = p.nAll; p.mesh.visible = true; flipped = true; }
+        }
+      }
+      try { return orig.apply(this, arguments); }
+      finally {
+        if (flipped) for (let i = 0; i < poolList.length; i++) {
+          const p = poolList[i];
+          if (p._flip) { p._flip = false; p.mesh.count = p.nIn; p.mesh.visible = p.nIn > 0; }
+        }
+      }
+    };
   }
   // side + near planes only (r128 plane order: 0 right, 1 left, 2 bottom, 3 top, 4 far, 5 near)
   function sphereInView(r) {
@@ -547,11 +598,16 @@
   function frameTick() {
     frame++;
     newPoolsThisFrame = 0;
+    if (poolList.length) wrapRender();
     const g = CBZ.game;
-    if (!g || g.mode !== "city") {
+    // every vehicle world (config.js CBZ.VEHICLE_MODES: the island parks its
+    // whole street through these pools too); a world switch lets every proxy go
+    const live = !!(g && (CBZ.vehicleModeOn ? CBZ.vehicleModeOn(g.mode) : g.mode === "city"));
+    if (!live || g.mode !== lastMode) {
+      lastMode = g ? g.mode : null;
       if (proxies.length) releaseAll();
       for (let i = 0; i < poolList.length; i++) if (poolList[i].dirty) rebuild(poolList[i]);
-      return;
+      if (!live) return;
     }
     if (!proxies.length && !poolList.length) return;
     const view = scratch() && frustumReady();

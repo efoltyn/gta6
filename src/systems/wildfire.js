@@ -1265,7 +1265,23 @@
     }
   }
 
-  /* ---- cars ------------------------------------------------------------- */
+  /* ---- cars -------------------------------------------------------------
+     THE FIRE LIGHTS A CAR; THE CAR BURNS AS A CAR. Every car the island
+     parks is a real vehicle (world/island_vehicles.js), and city/vehicles.js
+     already owns everything that happens to a burning one: the flames off the
+     bonnet, the engine eaten by the heat, the fuel-tank cook-off through the
+     ordnance bus (CBZ.detonate "carcook", sized by the car's own fuel load),
+     and the charred, crazed, tyre-less husk (crashdeform's burn-out) left
+     standing after. So this file decides only WHEN the fire takes it (the
+     heat it is lying in) and hands it over with CBZ.cityCarIgnite on a fuse of
+     the fire's own timing; the boom it then watches for is the vehicle's.
+     The old private path (swap every mesh to a char material, a blast of its
+     own on a timer) stays only for a record that is not a vehicle. */
+  function vehOf(c) {
+    if (!CBZ.cityCarIgnite || !c) return null;
+    if (c.pos && c.group && c.heading != null) return c;
+    return c.car && c.car.pos && c.car.group ? c.car : null;
+  }
   function carPos(c) { return c.group ? c.group.position : { x: c.x, y: 0, z: c.z }; }
   function charCar(c) {
     const r = c._wf; if (!c.group || r.charred) return;
@@ -1282,6 +1298,15 @@
   }
   function carRec(c, p) {
     return c._wf || (c._wf = { s: 0, heat: 0, t: 0, boomAt: 6 + 4 * h01(Math.round(p.x), Math.round(p.z), 0x61), boomed: false, charred: false });
+  }
+  // the car is alight: a vehicle burns as one (vehicles.js), on this fire's clock
+  function catchCar(c, r) {
+    r.s = 1; r.t = 0; stats.carsBurnt++;
+    const v = vehOf(c);
+    if (v && !v.dead) {
+      r.veh = v;
+      try { CBZ.cityCarIgnite(v, false, { fuse: r.boomAt, fuseOnly: true, burnsOut: false, quiet: true }); } catch (e) { r.veh = null; }
+    }
   }
   function restoreCar(c) {
     const r = c._wf;
@@ -1329,21 +1354,25 @@
         if (q > 0) {
           r = carRec(c, p);
           r.heat += dtE * q;
-          if (r.heat >= 1 && !F.quench) { r.s = 1; r.t = 0; stats.carsBurnt++; }
+          if (r.heat >= 1 && !F.quench) catchCar(c, r);
         }
       }
       if (!r || r.s === 0) continue;
       r.t += dt;
       if (r.s === 1) {
-        if (r.t > 3.5) charCar(c);
-        if (!r.boomed && r.t >= r.boomAt) {
+        if (r.t > 3.5 && !r.veh) charCar(c);
+        // a vehicle's boom is its own cook-off (vehicles.js explodeCar); this
+        // only answers it with the fire's embers. Anything else booms here.
+        const boomNow = r.veh ? !!(r.veh._exploded || (r.veh.dead && r.t >= r.boomAt + 2)) : r.t >= r.boomAt;
+        if (!r.boomed && boomNow) {
           r.boomed = true; stats.carsExploded++;
+          if (r.veh) r.boomAt = r.t;                   // the intensity curve below reads off the real moment
           const br = F.bridge;
-          if (br && br.blast) { try { br.blast("carcook", p.x, p.z, { r: 4.5, dmg: 55, cause: "caught in a burning car's blast", knockback: 7, fling: 3 }); } catch (e) {} }
+          if (!r.veh && br && br.blast) { try { br.blast("carcook", p.x, p.z, { r: 4.5, dmg: 55, cause: "caught in a burning car's blast", knockback: 7, fling: 3 }); } catch (e) {} }
           for (let i = 0; i < 26; i++) spawnEmber(p.x, p.y + 1, p.z, (jit() - 0.5) * 9, 3 + jit() * 6, (jit() - 0.5) * 9, 0.8 + jit() * 0.8);
           for (let i = 0; i < 6; i++) spawnSmoke(p.x, p.y + 1.5, p.z, false, true, 1);
           igniteDisc(p.x, p.z, 6, 6);
-          if (!br || !br.blast) { if (CBZ.sfxAt) CBZ.sfxAt("explosion", p.x, p.z); }
+          if (!r.veh && (!br || !br.blast)) { if (CBZ.sfxAt) CBZ.sfxAt("explosion", p.x, p.z); }
         }
         if (r.t >= 22) r.s = 2;
       }
@@ -2146,7 +2175,8 @@
     if (!c || c.flung || !serve()) return false;
     const r = carRec(c, carPos(c));
     if (r.s !== 0) return false;
-    r.s = 1; r.t = 0; r.heat = 1; stats.carsBurnt++;
+    r.heat = 1;
+    catchCar(c, r);
     litBy(why || "car");
     return true;
   }

@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 434
+     Natural Disaster Survival, standing alone: index.html minus the 431
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -823,7 +823,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/camera.js?v=island1014"></script>
-<script src="src/systems/physics.js?v=mrg10200039"></script>
+<script src="src/systems/physics.js?v=mrg10200048"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -964,9 +964,9 @@ document.body.appendChild(b);}}catch(e){}})();
      builder lays exactly what it says, so it loads first. -->
 <script src="src/world/island_roads.js?v=roads2town"></script>
 <script src="src/world/island_plan.js?v=plan1"></script>
-<script src="src/world/island_building.js?v=mrg10200039"></script>
-<script src="src/world/instance_proxy.js?v=mrg10200039"></script>
-<script src="src/world/disaster_arena.js?v=mrg10200039"></script>
+<script src="src/world/island_building.js?v=mrg10200048"></script>
+<script src="src/world/instance_proxy.js?v=mrg10200048"></script>
+<script src="src/world/disaster_arena.js?v=mrg10200048"></script>
 <script src="src/world/island_dressing.js?v=dress2town"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
@@ -1027,14 +1027,14 @@ document.body.appendChild(b);}}catch(e){}})();
      debris jams, bridge failure, manholes and the silt it leaves. Loads before
      world/water_spec.js; it reaches the material at runtime. -->
 
-<script src="src/systems/flashflood.js?v=waterlook1019"></script>
+<script src="src/systems/flashflood.js?v=realcars1021"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
 <script src="src/systems/hurricane.js?v=curtain1019"></script>
 <!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
-<script src="src/systems/wildfire.js?v=pace1015b"></script>
+<script src="src/systems/wildfire.js?v=realcars1020"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
@@ -1049,7 +1049,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=waterlook1019"></script>
+<script src="src/systems/disasters.js?v=realcars1021"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jtv1019b"></script>
@@ -1337,13 +1337,14 @@ document.body.appendChild(b);}}catch(e){}})();
      fitted to the room) + spark streaks, and THE shared 3D noise atlas
      (CBZ.volNoise) that city/nukefx.js also marches. Before crashfx (its
      blasts and fires draw through it) and nukefx (reads the atlas). -->
+<script src="src/city/crashdeform.js?v=mrg10200048"></script>
 <script src="src/city/cardyn.js?v=cars2aids"></script>
 <!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
-<script src="src/city/carlod.js?v=pf0930e"></script>
-<script src="src/city/vehicles.js?v=island1014"></script>
-<script src="src/city/carinstances.js?v=pf0930e"></script>
+<script src="src/city/carlod.js?v=realcars1020"></script>
+<script src="src/city/vehicles.js?v=realcars1020"></script>
+<script src="src/city/carinstances.js?v=realcars1021"></script>
 <script src="src/city/playeraircraft.js?v=island1014"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
@@ -1377,7 +1378,7 @@ document.body.appendChild(b);}}catch(e){}})();
      cars (vehicles.js), a rooftop helipad with a flyable helicopter
      (playeraircraft.js CBZ.airParkFlyable), the island's weather fed into both.
      After vehicles.js, playeraircraft.js, bailout.js and aircraft_doors.js. -->
-<script src="src/world/island_vehicles.js?v=island1014"></script>
+<script src="src/world/island_vehicles.js?v=realcars1021"></script>
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the
@@ -1543,6 +1544,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
 <script src="src/systems/helditems.js?v=arms1009b"></script>
+<script src="src/city/carstrike.js?v=physicsm1011"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
@@ -1698,6 +1700,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/agency.js?v=leave1014"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
+<script src="src/systems/humancontact.js?v=jailai1020"></script>
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
      (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
      the army's "route" order) route on it. Pure maths, loads first. -->

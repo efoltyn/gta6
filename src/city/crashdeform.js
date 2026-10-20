@@ -1223,15 +1223,15 @@
   let wob = 0;
   const _sparkPos = { x: 0, y: 0.12, z: 0 }, _sparkUp = { x: 0, y: 1, z: 0 };
   CBZ.onUpdate(37.9, function (dt) {
-    if (dead || !damaged.length || (g && g.mode !== "city")) return;
+    // every vehicle world (config.js CBZ.VEHICLE_MODES): the island's cars dent too
+    const vw = !g || (CBZ.vehicleModeOn ? CBZ.vehicleModeOn(g.mode) : g.mode === "city");
+    if (dead || !damaged.length || !vw) return;
     wob += dt;
-    // drain any fading entries first (independent of the city-mode gate below
-    // so a fade started just before a mode switch still finishes cleanly)
+    // drain any fading entries first
     if (fading.length) for (let i = fading.length - 1; i >= 0; i--) {
       const e = fading[i];
       if (stepFade(e, dt)) fading.splice(i, 1);
     }
-    if (g && g.mode !== "city") return;
     const cam = CBZ.camera && CBZ.camera.position;
     for (let i = damaged.length - 1; i >= 0; i--) {
       const e = damaged[i], car = e.car;

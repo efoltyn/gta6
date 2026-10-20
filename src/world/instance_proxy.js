@@ -1,13 +1,14 @@
 /* ============================================================
    world/instance_proxy.js — MANY LIVE MESHES, A FEW DRAW CALLS.
 
-   The disaster island has ~330 trees and ~90 parked cars. Each was its own
-   mesh, because each has to stay its own OBJECT: the wildfire recolours a
-   tree's own material and scales its crown, the quake sways crowns, the
-   tsunami re-parents a trunk into a log and rolls it away, the hurricane
-   bends and windthrows, the director flings cars, lightning splits a trunk
-   into strips cut from its own geometry and material. Two draws a tree and
-   one a car was ~750 draw calls before a single building, on a phone.
+   The disaster island has ~330 trees. Each was its own mesh, because each
+   has to stay its own OBJECT: the wildfire recolours a tree's own material
+   and scales its crown, the quake sways crowns, the tsunami re-parents a
+   trunk into a log and rolls it away, the hurricane bends and windthrows,
+   lightning splits a trunk into strips cut from its own geometry and
+   material. Two draws a tree was ~660 draw calls before a single building,
+   on a phone. (The island's cars are real vehicles now and draw through the
+   vehicle system's own pools, city/carinstances.js; nothing here is a car.)
 
    So the meshes stay exactly what they were — same objects, same parents,
    same materials, same `visible`, raycastable — and stop DRAWING: each is

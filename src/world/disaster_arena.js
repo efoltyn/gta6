@@ -29,8 +29,10 @@
    KIND of shelter for each hazard, high ground, and luck.
 
    COST, for a phone: a building's opaque shell draws as ONE mesh (bakeShell),
-   every tree and parked car as an instance (world/instance_proxy.js), the
-   streets in 7 draws, the dressing in 8, the harbour in 4.
+   every tree as an instance (world/instance_proxy.js), the streets in 7
+   draws, the dressing in 8, the harbour in 4. The parked cars are real
+   vehicles (world/island_vehicles.js) drawn past 35 m by the vehicle
+   system's own pools (city/carinstances.js, far tier city/carlod.js).
 
    CBZ.buildDisasterArena() builds once and returns the arena descriptor;
    CBZ.island is the same island as data for the disasters (see publish()).
@@ -4390,166 +4392,33 @@
       CBZ.survRoadStats = roadNet.stats;
     }
 
-    /* ---- CARS: a real car in ONE draw ---------------------------------------
-       Each car is ONE merged geometry with colour per vertex and one shared
-       glossy material for the fleet, cached per (shape, paint). What it used
-       to get wrong, and now does not:
-         - the body was a slab down to 0.34 m with the tyres buried in it: no
-           wheel arches, so it read as a box on rollers. The side profile now
-           has real arches cut round each wheel, with a dark wheel tub behind
-           so you cannot see through the car under them;
-         - the tyres were closed black cylinders with a pale cylinder poking
-           OUT of them. Now: an open tread, black sidewalls, and a silver rim
-           set IN the tyre, the way a wheel looks;
-         - paint was the hex read as LINEAR and darkened, which on this sRGB
-           pipeline made every car pastel (a red car photographed pink). The
-           paint is now the hex decoded to linear, so a red car is red, and
-           the fleet is the colours cars actually are (mostly white, silver,
-           grey and black, a few blues and reds);
-         - no grille, plates, mirrors or pillars: added (one box each);
-         - wheels sat 4 cm INSIDE the asphalt (roads are laid 4 cm proud of the
-           plain): the car now stands on the road surface.
-       The record the tsunami flings (group/x/z/oy/rotY/collider) is unchanged;
-       the collider's ref is the body mesh as before. */
+    /* ---- CARS: SPOTS, NOT PROPS ----------------------------------------------
+       The island used to draw ~90 parked cars of its own: one merged
+       extruded-profile mesh each on a box collider, drawn through an
+       instanced proxy, flung about by the disasters and never driven, with a
+       few of them swapped for real cars at match start. Owner: "there's some
+       real cars, some fake. Get rid of the fakes." So this builder no longer
+       makes a car at all. It says where one is parked, facing which way, in
+       which paint: `cars` stays EMPTY here and arena.carSpots holds the spots.
+       world/island_vehicles.js stands a real Gang City vehicle (city/
+       vehicles.js, the same models, enterable, drivable, and billed by
+       disasters through CBZ.vehicleDisaster) on every spot, and its record is
+       what arena.cars holds from then on.
+       Heading: the spot's `yaw` is the plan's (rotation.y sending a body's
+       local -z front along the lane); a vehicle's heading points its +z, so a
+       real car faces the plan's way at yaw + PI. */
     const CAR_COLORS = [0xe7e7e3, 0xb9bdc2, 0x17191c, 0x5d6268, 0xe7e7e3, 0x9aa0a6, 0x1d3150, 0x7e1616, 0xb5a585, 0x2a3f34];
-    const carMat = new THREE.MeshPhongMaterial({ color: 0xffffff, vertexColors: true, shininess: 60, specular: 0x3a3a3a });
-    carMat.name = "survival-car";
-    const carGeos = new Map();
-    const CAR_SHAPES = [
-      // side profile (length axis, height) + greenhouse profile. Profile +x is
-      // the FRONT (it ends up at -z after profileGeo's rotation).
-      { body: [[-2.1, 0.34], [2.1, 0.34], [2.13, 0.72], [1.95, 0.93], [0.78, 1.03], [-1.55, 1.05], [-2.06, 0.98], [-2.13, 0.62]],
-        cab: [[0.80, 1.0], [0.02, 1.62], [-1.02, 1.62], [-1.58, 1.0]], wb: 1.35 },                  // saloon
-      { body: [[-2.0, 0.36], [2.05, 0.36], [2.08, 0.74], [1.9, 0.95], [0.9, 1.05], [-1.95, 1.07], [-2.05, 0.98], [-2.08, 0.62]],
-        cab: [[0.92, 1.02], [0.12, 1.66], [-1.72, 1.68], [-1.96, 1.02]], wb: 1.3 },                  // hatchback
-      { body: [[-2.15, 0.40], [2.15, 0.40], [2.17, 0.82], [2.0, 1.04], [0.95, 1.12], [-2.12, 1.12], [-2.17, 1.04], [-2.19, 0.66]],
-        cab: [[0.97, 1.08], [0.35, 1.78], [-0.75, 1.78], [-0.95, 1.08]], wb: 1.45 },                 // pickup
-    ];
-    const WHEEL_R = 0.37, ARCH_R = 0.45;
-    function tintGeo(g, r, gg, b) {
-      const n = g.attributes.position.count, c = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) { c[i * 3] = r; c[i * 3 + 1] = gg; c[i * 3 + 2] = b; }
-      g.setAttribute("color", new THREE.BufferAttribute(c, 3));
-      if (!g.attributes.uv) g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(n * 2), 2));
-      return g;
-    }
-    // the body's side profile with a wheel arch cut round each axle
-    function archedBody(pts, wb) {
-      const out = [pts[0]];
-      const y0 = pts[0][1], dy = Math.max(0, WHEEL_R - y0);
-      const half = Math.sqrt(Math.max(0, ARCH_R * ARCH_R - dy * dy));
-      for (const c of [-wb, wb]) {                 // rear axle first: the edge runs rear -> front
-        out.push([c - half, y0]);
-        for (let k = 0; k <= 8; k++) {
-          const a = Math.PI - (k / 8) * Math.PI;
-          out.push([c + Math.cos(a) * ARCH_R, WHEEL_R + Math.sin(a) * ARCH_R]);
-        }
-        out.push([c + half, y0]);
-      }
-      for (let i = 1; i < pts.length; i++) out.push(pts[i]);
-      return out;
-    }
-    function profileGeo(pts, width, bevel) {
-      const sh = new THREE.Shape();
-      sh.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; i++) sh.lineTo(pts[i][0], pts[i][1]);
-      sh.closePath();
-      const g = new THREE.ExtrudeGeometry(sh, { depth: width - bevel * 2, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8, bevelSegments: 2, curveSegments: 4 });
-      g.translate(0, 0, -(width - bevel * 2) / 2);
-      g.rotateY(Math.PI / 2);                    // profile x -> car length (z)
-      return g.index ? g.toNonIndexed() : g;
-    }
-    function boxAt(w, h, d, x, y, z, rgb) {
-      const b = new THREE.BoxGeometry(w, h, d).toNonIndexed();
-      b.translate(x, y, z);
-      return tintGeo(b, rgb[0], rgb[1], rgb[2]);
-    }
-    function carGeo(shapeIdx, paintHex) {
-      const key = shapeIdx + "|" + paintHex;
-      if (carGeos.has(key)) return carGeos.get(key);
-      const S = CAR_SHAPES[shapeIdx];
-      // the hex is an sRGB swatch: decode it, then a touch under for the clear coat
-      const pc = new THREE.Color(paintHex).convertSRGBToLinear().multiplyScalar(0.9);
-      const P = [pc.r, pc.g, pc.b];
-      const GLASS = [0.028, 0.036, 0.046], BLACK = [0.02, 0.02, 0.022], TYRE = [0.022, 0.022, 0.024];
-      const RIM = [0.42, 0.43, 0.45], TRIM = [0.03, 0.03, 0.032];
-      const parts = [];
-      parts.push(tintGeo(profileGeo(archedBody(S.body, S.wb), 1.92, 0.1), P[0], P[1], P[2]));
-      parts.push(tintGeo(profileGeo(S.cab, 1.62, 0.07), GLASS[0], GLASS[1], GLASS[2]));
-      // wheel tub / floor pan: what you see behind the tyre through the arch
-      const bodyLen = Math.abs(S.body[1][0] - S.body[0][0]);
-      parts.push(boxAt(1.4, 0.5, bodyLen - 0.3, 0, S.body[0][1] + 0.3, 0, BLACK));
-      // painted roof over the greenhouse, and B-pillars down its sides
-      const roofY = S.cab[1][1], rz0 = S.cab[1][0], rz1 = S.cab[2][0];
-      parts.push(boxAt(1.58, 0.07, Math.abs(rz0 - rz1) + 0.1, 0, roofY + 0.02, -(rz0 + rz1) / 2, P));
-      const bz = -(S.cab[0][0] + S.cab[3][0]) / 2 + (shapeIdx === 2 ? 0.2 : 0.05);
-      for (const s of [-1, 1]) parts.push(boxAt(0.02, roofY - S.cab[0][1], 0.11, s * 0.815, (roofY + S.cab[0][1]) / 2, bz, P));
-      // tyres: open tread, black sidewalls, a silver rim set into the tyre
-      const wz = S.wb;
-      [[0.86, wz], [-0.86, wz], [0.86, -wz], [-0.86, -wz]].forEach(function (w) {
-        const t = new THREE.CylinderGeometry(WHEEL_R, WHEEL_R, 0.26, 18, 1, true).toNonIndexed();
-        t.rotateZ(Math.PI / 2); t.translate(w[0], WHEEL_R, w[1]);
-        parts.push(tintGeo(t, TYRE[0], TYRE[1], TYRE[2]));
-        for (const s of [-1, 1]) {
-          const ring = new THREE.RingGeometry(0.23, WHEEL_R, 18, 1).toNonIndexed();
-          ring.rotateY(s * Math.PI / 2); ring.translate(w[0] + s * 0.13, WHEEL_R, w[1]);
-          parts.push(tintGeo(ring, TYRE[0] * 1.3, TYRE[1] * 1.3, TYRE[2] * 1.3));
-        }
-        const h = new THREE.CylinderGeometry(0.23, 0.23, 0.22, 14).toNonIndexed();
-        h.rotateZ(Math.PI / 2); h.translate(w[0], WHEEL_R, w[1]);
-        parts.push(tintGeo(h, RIM[0], RIM[1], RIM[2]));
-        const hub = new THREE.CylinderGeometry(0.07, 0.07, 0.235, 8).toNonIndexed();
-        hub.rotateZ(Math.PI / 2); hub.translate(w[0], WHEEL_R, w[1]);
-        parts.push(tintGeo(hub, TRIM[0], TRIM[1], TRIM[2]));
-      });
-      // lamps, grille, plates: front is -z after the profile rotation
-      const fz = -S.body[2][0] - 0.01, rzb = -S.body[7][0] + 0.01, ly = 0.78;
-      [[0.62, fz, 0.9, 0.88, 0.75], [-0.62, fz, 0.9, 0.88, 0.75], [0.66, rzb, 0.45, 0.02, 0.02], [-0.66, rzb, 0.45, 0.02, 0.02]].forEach(function (l) {
-        parts.push(boxAt(0.42, 0.13, 0.06, l[0], ly, l[1], [l[2], l[3], l[4]]));
-      });
-      parts.push(boxAt(0.72, 0.16, 0.05, 0, ly - 0.02, fz, TRIM));                       // grille
-      parts.push(boxAt(0.5, 0.11, 0.03, 0, S.body[0][1] + 0.18, fz - 0.02, [0.62, 0.62, 0.58]));   // plates
-      parts.push(boxAt(0.5, 0.11, 0.03, 0, S.body[0][1] + 0.26, rzb + 0.02, [0.62, 0.6, 0.35]));
-      // mirrors at the foot of the A-pillars
-      const mz = -S.cab[0][0] + 0.12;
-      for (const s of [-1, 1]) parts.push(boxAt(0.14, 0.1, 0.16, s * 1.02, S.cab[0][1] + 0.06, mz, P));
-      // dark bumper/sill band
-      parts.push(boxAt(1.96, 0.16, bodyLen + 0.1, 0, S.body[0][1] + 0.06, 0, TRIM));
-      const g = THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false);
-      g.computeBoundingSphere();
-      parts.forEach(function (p) { p.dispose(); });
-      carGeos.set(key, g);
-      return g;
-    }
-    /* A CAR, standing on whatever is under it (asphalt, a car park's
-       surface, a driveway), nose along `yaw` (rotation.y: the body's front is
-       its local -z, so yaw 0 points -z, PI/2 points -x). The old signature
-       (x, z, vertical, color, facing +-1) still works for the dressing's
-       showroom forecourt. The record the director and the storms read is
-       unchanged: group / x / z / oy / rotY / collider / flung. */
     const CAR_LIFT = 0.045;       // the asphalt sits 4 cm proud of the plain
-    const carProxy = CBZ.instanceProxy ? CBZ.instanceProxy(root, { name: "island-cars",
-      modeOn: function () { return !!(CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)); } }) : null;
+    const carSpots = [];
     function makeCar(x, z, yaw, color, facing) {
       if (typeof yaw === "boolean") {
         // legacy: (vertical, facing) -> a heading
         const flip = facing != null ? facing > 0 : h01g(x, z, 0xca8) < 0.5;
         yaw = (yaw ? 0 : Math.PI / 2) + (flip ? Math.PI : 0);
       }
-      const gy = surfaceHeightAt(x, z) + CAR_LIFT;
-      const g = new THREE.Group();
-      g.position.set(x, gy, z); g.rotation.y = yaw; root.add(g);
-      const shape = (h01g(x, z, 0xca7) * CAR_SHAPES.length) | 0;
-      const body = new THREE.Mesh(carGeo(shape, color), carMat);
-      body.castShadow = true; body.receiveShadow = true; g.add(body);
-      const along = Math.abs(Math.round(Math.sin(yaw))) === 1;    // nose along x
-      const hw = along ? 2.2 : 1.1, hd = along ? 1.1 : 2.2;
-      const c = { minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd, ref: body, noCam: true };
-      CBZ.colliders.push(c);
-      const car = { group: g, x, z, oy: gy, rotY: yaw, collider: c, flung: false };
-      cars.push(car);
-      if (carProxy) carProxy.add(body, carMat, g);
-      return g;
+      const spot = { x: x, z: z, y: surfaceHeightAt(x, z) + CAR_LIFT, heading: yaw + Math.PI, color: color, i: carSpots.length };
+      carSpots.push(spot);
+      return spot;
     }
 
     /* ---- GAS STATIONS: world/fuel_station.js builds them (the same builder
@@ -4669,14 +4538,11 @@
       }
       K.plane("ceiling", -w / 2 + T, -d / 2 + T, w / 2 - T, d / 2 - T, SH - 0.004, 0xffffff, true, null, null, 2.4);
       // display cars (for sale), standing on the tiles, and the sales desk
-      const onFloor = function () {
-        const car = cars[cars.length - 1];
-        if (!car) return;
-        car.group.position.y = gy + fy; car.oy = gy + fy;
-      };
-      makeCar(ox - 4.6, oz + 1.6, true, 0xe24b4b); onFloor();
-      makeCar(ox + 4.6, oz + 1.6, true, 0x3c6fd6); onFloor();
-      makeCar(ox, oz + 4.2, false, 0xf2c43d); onFloor();
+      // (real cars on the showroom floor: the spot carries the floor's height)
+      const onFloor = function (s) { s.y = gy + fy; s.floor = true; };
+      onFloor(makeCar(ox - 4.6, oz + 1.6, true, 0xe24b4b));
+      onFloor(makeCar(ox + 4.6, oz + 1.6, true, 0x3c6fd6));
+      onFloor(makeCar(ox, oz + 4.2, false, 0xf2c43d));
       const cols = [];
       const host = furnHost(K, ox, oz, gy, cols, fy, null);
       const R = { x0: -w / 2 + T, x1: w / 2 - T, z0: -d / 2 + T, z1: d / 2 - T };
@@ -5413,7 +5279,6 @@
     // hydrants, the farm, the rocks (world/island_dressing.js; result also at
     // CBZ.islandDressing.current). It reads the plan for where each goes.
     const islandDress = CBZ.islandDressing ? CBZ.islandDressing.build({ root: root, cx: cx, cz: cz, R: R, plan: PLAN, ROADW: ROADW, groundHeightAt: groundHeightAt, surfaceHeightAt: surfaceHeightAt, onRoad: onRoad, placed: placed, fragile: fragile, roadSegs: roadSegs, h01: h01g, trees: flammable, rocks: rockSites, cars: cars, makeCar: makeCar, showroom: dl1 ? { x: dl1.x, z: dl1.z, w: 18, d: 13 } : null, stations: stationSites, oceanY: OCEAN_Y }) : null;
-    if (carProxy) carProxy.build();
 
     arena = {
       root, center: { x: cx, z: cz }, radius: R,
@@ -5427,7 +5292,10 @@
       // published for tools and spawners; physics reads them via the height
       // field, never this list
       islets,
-      hills, fragile, flammable, cars, elevators, glass: allGlass, groundHeightAt: surfaceHeightAt,
+      hills, fragile, flammable, elevators, glass: allGlass, groundHeightAt: surfaceHeightAt,
+      // THE CARS ARE REAL VEHICLES: `cars` is filled by world/island_vehicles.js
+      // with the city/vehicles.js records it stands on `carSpots` (see makeCar)
+      cars, carSpots,
       // the street grid's own test and the town between the buildings
       // (world/island_dressing.js: fences, benches, bales, the pier...), so a
       // later dresser (quake.js's utility poles) never stands in a road or a fence
@@ -5517,17 +5385,9 @@
           if (t.foliage && t.foliage.material) t.foliage.material.color.setHex(t.leafHex != null ? t.leafHex : 0x3f9a4f);
           if (t.trunk && t.trunk.material) t.trunk.material.color.setHex(t.barkHex != null ? t.barkHex : 0x6b4a2a);
         }
-        // park flung/wrecked cars back where they started
-        for (const car of cars) {
-          if (car.flung) {
-            car.group.position.set(car.x, car.oy, car.z);
-            car.group.rotation.set(0, car.rotY, 0);
-            if (CBZ.colliders.indexOf(car.collider) === -1) CBZ.colliders.push(car.collider);
-            car.flung = false;
-          }
-          // its windows were shattered off the real pane (disasters.js flingCar)
-          if (car._pane) { car._pane.visible = true; car._pane = null; }
-        }
+        // (the cars are real vehicles: world/island_vehicles.js puts every one
+        // back on its spot for the new match, rebuilding the ones a disaster
+        // or a driver left wrecked)
         // re-glaze every shattered window for the new match
         for (const gp of allGlass) { if (gp.shattered) { gp.shattered = false; if (gp.show) gp.show(); else gp.mesh.visible = true; } }
         // a bridge the flood took stands again; then whatever a disaster
@@ -6046,8 +5906,9 @@
         glass: allGlass,
         randomPoint: function (a, b) { return arena.randomPoint(a, b); },
         stats: function () {
-          return { radius: R, buildings: fragile.length, cars: cars.length, trees: flammable.length, boats: harbourOut.boats.length,
-            bake: bakeStats, trees_draws: treeProxy ? treeProxy.stats() : null, cars_draws: carProxy ? carProxy.stats() : null };
+          // cars: the real vehicles standing (island_vehicles.js), of carSpots spots
+          return { radius: R, buildings: fragile.length, cars: cars.length, carSpots: carSpots.length, propCars: 0, trees: flammable.length, boats: harbourOut.boats.length,
+            bake: bakeStats, trees_draws: treeProxy ? treeProxy.stats() : null, cars_draws: CBZ.carInstanceAudit ? CBZ.carInstanceAudit() : null };
         },
       };
       arena.island = I;

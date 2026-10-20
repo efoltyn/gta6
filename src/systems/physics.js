@@ -438,8 +438,10 @@
   const _carNear = [];
   CBZ.onUpdate(0.02, function () { carStale = true; });
   function carDimsOf(car) { return car._visualDims || car.dims || null; }
+  const _carBucketPool = [];              // a parked street rebuilds this every frame: no fresh arrays
   function rebuildCarGrid() {
     carStale = false;
+    carBuckets.forEach(function (b) { b.length = 0; _carBucketPool.push(b); });
     carBuckets.clear();
     // every vehicle world (config.js CBZ.VEHICLE_MODES), each seeing only its own records
     const cars = (!CBZ.game || (CBZ.vehicleModeOn ? CBZ.vehicleModeOn() : CBZ.game.mode === "city")) ? CBZ.cityCars : null;
@@ -450,7 +452,9 @@
       if (!car || !car.pos || !carDimsOf(car)) continue;
       if (vw && wm && !vw(car, wm)) continue;
       const g = car.group;
-      if (g && (!g.parent || g.visible === false)) continue;     // despawned / parked out of the scene
+      // despawned / parked out of the scene (a car carinstances.js draws in a
+      // pool has its own group hidden, and is every bit as solid)
+      if (g && (!g.parent || (g.visible === false && !car._proxy))) continue;
       if (car._roadBody == null) car._roadBody = isTraversalRoadCar(car);
       if (!car._roadBody) continue;                              // boats + aircraft have their own hulls
       const d = carDimsOf(car);
@@ -460,7 +464,7 @@
       for (let gx = x0; gx <= x1; gx++) for (let gz = z0; gz <= z1; gz++) {
         const k = colKey(gx, gz);
         let b = carBuckets.get(k);
-        if (!b) { b = []; carBuckets.set(k, b); }
+        if (!b) { b = _carBucketPool.pop() || []; carBuckets.set(k, b); }
         b.push(car);
       }
     }

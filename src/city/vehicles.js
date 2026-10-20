@@ -206,9 +206,9 @@
   // How hard the body is allowed to follow the ground. A real suspension is a
   // low-pass filter, not a rigid follower: without this a 40 m plate triangle
   // edge reads as a step, and cars twitch on it.
-  const TERRAIN_EASE = 9;          // 1/s exponential approach on ride height
+  // (ride height is not eased any more: it is the support, see terrainSeat)
   const TERRAIN_ATT_EASE = 6;      // 1/s on pitch/roll
-  const TERRAIN_MAX_TILT = 0.55;   // rad — a car never stands on its nose
+  const TERRAIN_MAX_TILT = 0.8;    // rad (46 deg): past this no road car is still on its wheels; the support lifts the low end clear
   /* `fromY` IS WHAT LETS A CAR DRIVE ONTO STEEL. Passed, this consults
      CBZ.mpGroundAt — the SAME query the player's feet make (physics.js's
      groundAt calls it right after its static-platform loop) — so a car and a
@@ -285,43 +285,95 @@
     return b;
   }
   CBZ.cityCarGroundY = groundY;
-  // Sample the four corners and fold them into ride height + terrain attitude.
-  // `near` false = one probe, flat attitude (the far-car budget).
+  /* A CAR STANDS ON ITS WHEELS, AND THE GROUND IS SOLID UNDER EACH ONE.
+     Owner: "driving up the mountain or the volcano, the car sinks into and
+     overlaps the ground." Three faults, all here:
+       1. the ride height was an EXPONENTIAL CHASE of the wheels' mean height
+          (9 /s). Climbing at v up a slope s the ground rises v*s per second
+          and a chase lags it by v*s/9: 20 m/s up a 1-in-2 volcano flank ran
+          the car 1.1 m INTO the hill, and the same lag floated it 1.1 m over
+          the slope coming down;
+       2. the probes were at 45% of the car's length and width, not under
+          the wheels, and nothing at all looked under the floor pan or the
+          bumpers, so a crest went through the belly and a dip's far bank
+          through the nose;
+       3. the attitude was clamped at 0.55 rad (31 deg): any steeper flank,
+          and the volcano is mostly steeper, buried the uphill end.
+     Now: each wheel samples the ground under its own contact patch (the
+     wheelbase and track), the floor pan and both bumpers are sampled too,
+     and the ride height is the LOWEST height at which nothing of the car is
+     below the ground on the attitude it actually has this frame. It is
+     never under that (no chase upward: a tyre cannot be inside a hill); it
+     drops toward it under gravity, so a car follows a descent and leaves the
+     road over a crest it takes too fast. The attitude still eases (the
+     springs), and the lift is computed on the eased attitude, so the easing
+     can never put a wheel under ground either. The slope's gradient is kept
+     (car._terrGX/_terrGZ) for the drive step's gravity along the hill. */
+  const BELLY_CLEAR = 0.17;        // m, tyre contact to floor pan (a saloon's ~15-20 cm)
+  const BUMPER_CLEAR = 0.24;       // m, tyre contact to the bumpers' lower edge
   function terrainSeat(car, near, dt) {
     if (!TERRAIN_ON()) { car._terrY = 0; car._terrPitch = 0; car._terrRoll = 0; return 0; }
     const h = +car.heading || 0;
     const fx = Math.sin(h), fz = Math.cos(h);
     const d = vehicleDims(car);
-    const half = Math.max(1, (d && d.length ? d.length : 4.2) * 0.45);
-    const halfW = Math.max(0.6, (d && d.width ? d.width : 1.9) * 0.45);
+    const len = d && d.length ? d.length : 4.2;
+    const half = Math.max(0.6, (d && d.wheelbase ? d.wheelbase : len * 0.6) * 0.5);   // axle to centre
+    const halfW = Math.max(0.5, (d && d.width ? d.width : 1.9) * 0.42);                // contact patch to centre
+    const halfL = Math.max(half + 0.2, len * 0.5);                                      // bumper to centre
     let gy, pitch = 0, roll = 0;
+    let fL = 0, fR = 0, bL = 0, bR = 0, gC = -Infinity, gN = -Infinity, gT = -Infinity;
     // the DRIVEN car — and only the driven car — asks about moving decks too
     const fromY = car.player ? (car._terrY != null ? car._terrY : (car.pos.y || 0)) : null;
     if (near) {
       // right vector = (fz, -fx) with this file's (sin,cos) forward convention
-      const rx = fz, rz = -fx;
-      const fL = groundY(car.pos.x + fx * half + rx * halfW, car.pos.z + fz * half + rz * halfW, fromY, car);
-      const fR = groundY(car.pos.x + fx * half - rx * halfW, car.pos.z + fz * half - rz * halfW, fromY, car);
-      const bL = groundY(car.pos.x - fx * half + rx * halfW, car.pos.z - fz * half + rz * halfW, fromY, car);
-      const bR = groundY(car.pos.x - fx * half - rx * halfW, car.pos.z - fz * half - rz * halfW, fromY, car);
+      const rx = fz, rz = -fx, px = car.pos.x, pz = car.pos.z;
+      fL = groundY(px + fx * half + rx * halfW, pz + fz * half + rz * halfW, fromY, car);
+      fR = groundY(px + fx * half - rx * halfW, pz + fz * half - rz * halfW, fromY, car);
+      bL = groundY(px - fx * half + rx * halfW, pz - fz * half + rz * halfW, fromY, car);
+      bR = groundY(px - fx * half - rx * halfW, pz - fz * half - rz * halfW, fromY, car);
+      gC = groundY(px, pz, fromY, car);
+      gN = groundY(px + fx * halfL, pz + fz * halfL, fromY, car);
+      gT = groundY(px - fx * halfL, pz - fz * halfL, fromY, car);
       gy = (fL + fR + bL + bR) * 0.25;
+      const tanF = ((fL + fR) - (bL + bR)) * 0.5 / (half * 2);     // rise per metre forward
+      const tanL = ((fL + bL) - (fR + bR)) * 0.5 / (halfW * 2);    // rise per metre to the left (+r)
+      car._terrGX = fx * tanF + rx * tanL; car._terrGZ = fz * tanF + rz * tanL;
       // nose-up is NEGATIVE rotation.x with this rig (see the airborne pitch,
       // which uses -vy), so climbing (front higher than back) pitches negative.
-      pitch = -Math.atan2(((fL + fR) - (bL + bR)) * 0.5, half * 2);
-      roll = Math.atan2(((fL + bL) - (fR + bR)) * 0.5, halfW * 2);
+      pitch = -Math.atan(tanF);
+      roll = Math.atan(tanL);
       if (pitch > TERRAIN_MAX_TILT) pitch = TERRAIN_MAX_TILT; else if (pitch < -TERRAIN_MAX_TILT) pitch = -TERRAIN_MAX_TILT;
       if (roll > TERRAIN_MAX_TILT) roll = TERRAIN_MAX_TILT; else if (roll < -TERRAIN_MAX_TILT) roll = -TERRAIN_MAX_TILT;
     } else {
       gy = groundY(car.pos.x, car.pos.z, fromY, car);
+      car._terrGX = 0; car._terrGZ = 0;
     }
-    // suspension damping. A car that has never been seated snaps to the ground
-    // on its first frame (no drop-in from y=0 when it spawns on a hill).
-    const k = dt > 0 ? 1 - Math.exp(-TERRAIN_EASE * dt) : 1;
+    // the springs: the attitude eases (a car that has never been seated
+    // takes the ground's at once: no drop-in from y=0 when it spawns on a hill)
     const ka = dt > 0 ? 1 - Math.exp(-TERRAIN_ATT_EASE * dt) : 1;
-    car._terrY = car._terrY == null ? gy : car._terrY + (gy - car._terrY) * k;
     car._terrPitch = car._terrPitch == null ? pitch : car._terrPitch + (pitch - car._terrPitch) * ka;
     car._terrRoll = car._terrRoll == null ? roll : car._terrRoll + (roll - car._terrRoll) * ka;
-    return car._terrY;
+    // THE SUPPORT: the lowest ride height with every wheel, the floor pan and
+    // both bumpers on or above the ground, on the attitude the car HAS
+    let sup = gy;
+    if (near) {
+      const tp = Math.tan(car._terrPitch), tr = Math.tan(car._terrRoll);
+      // a point at `along` (forward +) and `lat` (left +) sits at y - tp*along + tr*lat
+      sup = Math.max(
+        fL + tp * half - tr * halfW, fR + tp * half + tr * halfW,
+        bL - tp * half - tr * halfW, bR - tp * half + tr * halfW,
+        gC - BELLY_CLEAR,
+        gN + tp * halfL - BUMPER_CLEAR, gT - tp * halfL - BUMPER_CLEAR);
+    }
+    const prev = car._terrY;
+    if (prev == null || !(dt > 0) || !Number.isFinite(prev)) { car._terrY = sup; car._terrVy = 0; return sup; }
+    // off the ground it falls (the drive step's own gravity, CBZ.PHYS.G_VEHICLE);
+    // on it, it rides the support at the support's own rate
+    let vy = (car._terrVy || 0) - 19.2 * dt;
+    let y = prev + vy * dt;
+    if (y <= sup) { vy = Math.max(-30, Math.min(30, (sup - prev) / dt)); y = sup; }
+    car._terrY = y; car._terrVy = vy;
+    return y;
   }
   // THE call every ambient/AI/wreck site makes instead of writing a literal 0.
   //   seatCar(car, dt, extraY, near) — extraY is the site's own offset (a
@@ -3129,10 +3181,13 @@
       try { if (CBZ.cityWaterAt(x, z)) return null; } catch (e) {}
     }
     const root = vehicleRoot();
-    // purge fixtures whose group belongs to a torn-down arena root
+    // purge fixtures whose group belongs to a torn-down arena root OF THIS
+    // WORLD (the island standing its fleet must not purge Gang City's kerbs,
+    // which live under another root in another world on the same page)
+    const world = (g.mode !== "city" && CBZ.vehicleModeOn && CBZ.vehicleModeOn()) ? g.mode : "city";
     for (let i = CBZ.cityCars.length - 1; i >= 0; i--) {
       const old = CBZ.cityCars[i];
-      if (old._propParked && old._arenaRoot !== root) CBZ.cityCars.splice(i, 1);
+      if (old._propParked && old._arenaRoot !== root && (old._world || "city") === world) CBZ.cityCars.splice(i, 1);
     }
     const econ = CBZ.cityEcon;
     let model = null;
@@ -3933,7 +3988,7 @@
   function emitTireSmoke(car, side) {
     const a = car.heading, hx = Math.sin(a), hz = Math.cos(a), sx = Math.cos(a), sz = -Math.sin(a);
     if (side == null) side = Math.random() < 0.5 ? 1 : -1;   // a slide boils BOTH rears (caller passes ±1)
-    spawnVPart(car.pos.x - hx * 1.3 + sx * side * 0.95, 0.3, car.pos.z - hz * 1.3 + sz * side * 0.95, "tire");
+    spawnVPart(car.pos.x - hx * 1.3 + sx * side * 0.95, (car.pos.y || 0) + 0.3, car.pos.z - hz * 1.3 + sz * side * 0.95, "tire");
   }
 
   // ---- SKID MARKS — rubber the PLAYER's rear wheels leave under slides,
@@ -4289,7 +4344,7 @@
       car._smkT = (car._smkT || 0) + dt;
       if (car._smkT > 0.34) {
         car._smkT = 0;
-        spawnVPart(car.pos.x + (Math.random() - 0.5) * 1.6, 1.5,
+        spawnVPart(car.pos.x + (Math.random() - 0.5) * 1.6, (car.pos.y || 0) + 1.5,
                    car.pos.z + (Math.random() - 0.5) * 1.6, "smoke");
       }
     }
@@ -4317,12 +4372,15 @@
   // for ambient + abandoned wrecks too, independent of the AI lane logic), then
   // reap exploded wrecks — AFTER every per-car pass has finished this frame so we
   // never mutate cityCars mid-iteration.
+  // (every vehicle world: a car that burns on the island cooks off on the
+  // island, not only once somebody drives it back to Gang City)
   CBZ.onUpdate(38, function (dt) {
-    if (g.mode !== "city") return;
+    if (!CBZ.vehicleModeOn(g.mode)) return;
     const cars = CBZ.cityCars;
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
       if (c._sleep || c._proxy) continue;    // parked + inert: asleep far, or drawn by carinstances.js
+      if ((c._world || "city") !== g.mode) continue;
       syncOccupants(c);                      // driver body appears/vanishes with control state
       // a passenger who froze in his seat: still there, still yours, and the
       // moment you actually drive off with him it stops being a jack.
@@ -4354,7 +4412,8 @@
         if (car._smkT > rate) {
           car._smkT = 0;
           const a = car.heading, hx = Math.sin(a) * 1.7, hz = Math.cos(a) * 1.7;
-          spawnVPart(car.pos.x + hx + (Math.random() - 0.5) * 0.6, 1.1, car.pos.z + hz + (Math.random() - 0.5) * 0.6, "smoke");
+          // (heights are off the car, not off sea level: a car on a hill smokes from its bonnet)
+          spawnVPart(car.pos.x + hx + (Math.random() - 0.5) * 0.6, (car.pos.y || 0) + 1.1, car.pos.z + hz + (Math.random() - 0.5) * 0.6, "smoke");
         }
       }
     }
@@ -4372,7 +4431,7 @@
         if (car._fireT > 0.06) {
           car._fireT = 0;
           const a = car.heading, hx = Math.sin(a) * 1.7, hz = Math.cos(a) * 1.7;
-          spawnVPart(car.pos.x + hx + (Math.random() - 0.5) * 0.7, 1.0, car.pos.z + hz + (Math.random() - 0.5) * 0.7, "fire");
+          spawnVPart(car.pos.x + hx + (Math.random() - 0.5) * 0.7, (car.pos.y || 0) + 1.0, car.pos.z + hz + (Math.random() - 0.5) * 0.7, "fire");
         }
       }
       // tick damage to whoever's inside while it burns
@@ -5702,6 +5761,23 @@
     _dynIn.steer = steer;
     _dynIn.air = !!(car._airborne && (car._airY || 0) > 0.05);
     _dynIn.flatPull = pullRate ? pullRate * DP.L / Math.max(8, spd0) : 0;
+    /* THE HILL PULLS. Gravity along the slope the wheels are on (terrainSeat's
+       gradient, last frame's): climbing costs the engine g*sin(theta), so a
+       saloon labours up the volcano and stalls where its torque runs out;
+       coasting, it rolls back down; across the slope it is a side force the
+       tyres must hold, and on a flank steeper than their grip (~40 deg on
+       loose ground) they cannot, and it slides off the line. Nothing on the
+       flat changes (the gradient is zero there). */
+    if (!_dynIn.air && !car._airborne && (car._terrGX || car._terrGZ)) {
+      const gxs = car._terrGX || 0, gzs = car._terrGZ || 0, s2 = gxs * gxs + gzs * gzs;
+      const k = -9.81 / Math.sqrt(1 + s2);             // g*sin(theta) along the slope, downhill (real g: the chassis's torque is real)
+      const ax = gxs * k, az = gzs * k;
+      S.vx += (ax * sh0 + az * ch0) * dt;               // along the car (forward +)
+      S.vy += (ax * ch0 - az * sh0) * dt;               // across it (the chassis's lateral axis)
+      // past the tyres' grip on a loose flank the drive goes too: the wheels spin on scree
+      const tanS = Math.sqrt(s2);
+      if (tanS > 0.84) _dynIn.throttle *= Math.max(0, 1 - (tanS - 0.84) / 0.3);
+    }
     CD.step(S, _dynIn, DP, dt);
     car.heading = S.heading;
     car.v = S.vx;
@@ -6269,7 +6345,14 @@
   // partner: there is nothing left of it to wreck, and running carCrash on a
   // dead record would re-enter the damage ladder it has already finished.
   // (race cars touch each other through the racing model's own contact, city/speedway_race.js)
-  function solidCar(c) { return c && (!c.dead || c._husk) && !c._raceCar && CBZ.vehicleInWorld(c, g.mode); }
+  // (a car a disaster is carrying is out of the solve: CBZ.vehicleDisaster owns where it goes)
+  function solidCar(c) { return c && (!c.dead || c._husk) && !c._raceCar && !c._disaster && CBZ.vehicleInWorld(c, g.mode); }
+  // something that can drive INTO a contact this frame (a parked car shoved
+  // by one is a mover from then on: carCrash hands it velocity and a wreck timer)
+  function carMoving(c) {
+    return !!(c.player || (c.ai && c.road) || c.wreckT > 0 || c._runaway || c.npcDriver || c.v || c.vx || c.vz);
+  }
+  const _rcAct = [];
   function resolveCars(dt) {
     const cars = CBZ.cityCars, n = cars.length;
     carGrid.clear();
@@ -6279,6 +6362,24 @@
        each other apart at 37.6 every frame, against a latch re-asserted at
        12.7. Nothing else can reach it (it is inside a box), so removing it from
        the grid entirely is both correct and free. */
+    /* TWO CARS AT REST CANNOT HIT EACH OTHER. A contact needs something
+       moving into it: the driven car, traffic, a car still sliding off a
+       crash. A street of parked cars used to be bucketed and pair-tested
+       every frame for nothing (the island parks ~90). Only a pair with at
+       least one MOVER is solved now, and a world with no mover at all
+       (every parked island) does no work here past this one flag pass. */
+    if (_rcAct.length < n) _rcAct.length = n;
+    let movers = 0;
+    for (let i = 0; i < n; i++) {
+      const a = cars[i];
+      const m = solidCar(a) && !a._heldBy && carMoving(a);
+      _rcAct[i] = m;
+      if (m) movers++;
+    }
+    if (!movers) {
+      for (let i = 0; i < n; i++) { const a = cars[i]; if (a && a._crashCD > 0) a._crashCD -= dt; }
+      return;
+    }
     for (let i = 0; i < n; i++) {
       const a = cars[i]; if (!solidCar(a) || a._heldBy) continue;
       if (a._crashCD > 0) a._crashCD -= dt;
@@ -6289,12 +6390,15 @@
       if (bucket) bucket.push(i); else carGrid.set(key, [i]);
     }
     for (let i = 0; i < n; i++) {
-      const a = cars[i]; if (!solidCar(a) || a._heldBy) continue;
+      if (!_rcAct[i]) continue;                    // the outer car of every pair is a mover
+      const a = cars[i];
       const gx = Math.floor(a.pos.x / CAR_GRID_CELL), gz = Math.floor(a.pos.z / CAR_GRID_CELL);
       for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
         const bucket = carGrid.get(((gx + ox) + 1024) * 4096 + ((gz + oz) + 1024)); if (!bucket) continue;
         for (let bi = 0; bi < bucket.length; bi++) {
-          const j = bucket[bi]; if (j <= i) continue;
+          const j = bucket[bi];
+          // mover-mover pairs once (from the lower index); mover-parked from the mover
+          if (j === i || (j < i && _rcAct[j])) continue;
           const b = cars[j]; if (!solidCar(b)) continue;
           if (a._husk && b._husk) continue;            // two wrecks already at rest
           const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d2 = dx * dx + dz * dz;
@@ -6374,7 +6478,9 @@
     const fwd = (car.v || 0) >= 0 ? 1 : -1;
     const CS = CBZ.carStrike;
     const reach = (vehicleDims(car).length || 4.4) * 0.5 + 1.2;
-    for (const p of CBZ.cityPeds) {
+    const cast = castRoster();             // the city's peds, or this world's own cast
+    for (let ci = 0; ci < cast.length; ci++) {
+      const p = cast[ci];
       if (p.dead || p.inCar || p.culled) continue;
       const dx = p.pos.x - car.pos.x, dz = p.pos.z - car.pos.z;
       if (dx * dx + dz * dz > reach * reach) continue;
@@ -6394,11 +6500,16 @@
       const sgn = (dx * hz - dz * hx) >= 0 ? 1 : -1;
       let nx = hx * fwd + hz * sgn * 0.5, nz = hz * fwd - hx * sgn * 0.5;
       const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
-      BI.apply(p, Math.max(BI.BRUSH, imp.tier), { nx, nz, dv: imp.dv, e: imp.e, mode: "city", side: sgn });
+      BI.apply(p, Math.max(BI.BRUSH, imp.tier), { nx, nz, dv: imp.dv, e: imp.e, mode: g.mode, side: sgn });
       if (imp.tier >= BI.SHOVE) {
         p.alarmed = Math.max(p.alarmed || 0, 4);
-        if (CBZ.humanContact && CBZ.city) CBZ.humanContact.react(p, { mode: "city", source: CBZ.city.playerActor, kind: imp.tier >= BI.DOWN ? "run-over" : "shoved", severity: imp.tier >= BI.DOWN ? 0.8 : 0.5 });
-        if (imp.tier >= BI.DOWN && CBZ.cityCrime) CBZ.cityCrime(15, { x: p.pos.x, z: p.pos.z, type: "reckless" });
+        if (g.mode === "city") {
+          if (CBZ.humanContact && CBZ.city) CBZ.humanContact.react(p, { mode: "city", source: CBZ.city.playerActor, kind: imp.tier >= BI.DOWN ? "run-over" : "shoved", severity: imp.tier >= BI.DOWN ? 0.8 : 0.5 });
+          if (imp.tier >= BI.DOWN && CBZ.cityCrime) CBZ.cityCrime(15, { x: p.pos.x, z: p.pos.z, type: "reckless" });
+        } else if (imp.tier >= BI.DOWN && CBZ.hurtWorldActor) {
+          // a bumper at walking-to-jogging pace bruises: priced by the energy it handed over
+          CBZ.hurtWorldActor(p, Math.round(4 + imp.dv * imp.dv * 1.5), { dir: { x: nx, z: nz }, force: 2, cause: "run over", byPlayer: true });
+        }
         // PUT DOWN BY A CAR: the bumper takes his legs for real (the strike
         // owns the body and takes the car's lost momentum); a shove is a step
         if (imp.tier >= BI.DOWN && CS && hitInfo) {
@@ -6416,6 +6527,7 @@
   CBZ.cityCarRunOver = function (car, vmag) { if (car && car.pos && vmag > 0) runOver(car, vmag); };
   function runOver(car, vmag) {
     const P = CBZ.player;
+    const cityHit = g.mode === "city";
     if (!car.player && !P.dead && !P.driving && !(car.playerHitCD > 0)) {
       const pdx = P.pos.x - car.pos.x, pdz = P.pos.z - car.pos.z;
       // YOU ARE HIT BY THE CAR'S SHAPE, like everybody else (carstrike.js:
@@ -6435,10 +6547,12 @@
         // you get hit the SAME way you hit others: a fast car FLINGS you into a
         // ragdoll tumble (physics.js owns the airborne state); a slow one knocks
         // you down. Damage and shake scale hard with speed.
-        if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(165, 12 + vmag * 5), car.pos.x, car.pos.z, "run over", false, car.npcDriver || null, vmag < 18);
-        if (!P.dead && CBZ.body && CBZ.city) {
-          if (vmag > 13) CBZ.body.fling(CBZ.city.playerActor, { fromX: car.pos.x, fromZ: car.pos.z, force: 6 + vmag * 0.5, up: 4 + vmag * 0.24 });
-          else CBZ.body.knockdown(CBZ.city.playerActor, { fromX: car.pos.x, fromZ: car.pos.z, force: 8 + vmag * 0.4, t: 1.6 });
+        if (cityHit && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(165, 12 + vmag * 5), car.pos.x, car.pos.z, "run over", false, car.npcDriver || null, vmag < 18);
+        else if (!cityHit && CBZ.hurtWorldPlayer) CBZ.hurtWorldPlayer(Math.min(165, 12 + vmag * 5), car.pos.x, car.pos.z, "run over");
+        const pa = cityHit ? (CBZ.city && CBZ.city.playerActor) : (CBZ.surv && CBZ.surv.playerActor);
+        if (!P.dead && CBZ.body && pa) {
+          if (vmag > 13) CBZ.body.fling(pa, { fromX: car.pos.x, fromZ: car.pos.z, force: 6 + vmag * 0.5, up: 4 + vmag * 0.24 });
+          else CBZ.body.knockdown(pa, { fromX: car.pos.x, fromZ: car.pos.z, force: 8 + vmag * 0.4, t: 1.6 });
         }
         if (car.npcDriver && CBZ.cityNpcOffense) CBZ.cityNpcOffense(car.npcDriver, 48, "vehicular-assault");
         if (CBZ.shake) CBZ.shake(0.4 + Math.min(1.2, vmag * 0.05));
@@ -6495,7 +6609,34 @@
         // the strike engages his body with this car's real shape; false = no
         // full body for him (far, over budget): the cheap paths below stand
         let struck = false;
-        if (vmag >= CRASH.pedLethal) {
+        if (!cityHit) {
+          /* ANOTHER WORLD'S CAST (the island's survivors): the same strike, its
+             mode's own damage funnel (systems/modecaps.js hurtWorldActor ->
+             survival.js hurt/killBot) instead of the city's ped kill. The body
+             is thrown ALONG the car's travel (a bonnet carries a man forward,
+             it does not blow him radially off its centre), off to the side he
+             was struck on; below the lethal speed he is knocked down and hurt
+             by the energy (~v^2), above it he is killed and launched. */
+          const tv = Math.hypot(car.vx || 0, car.vz || 0) > 0.5 ? 1 / Math.hypot(car.vx, car.vz) : 0;
+          const hx2 = tv ? car.vx * tv : Math.sin(car.heading || 0) * ((car.v || 0) >= 0 ? 1 : -1);
+          const hz2 = tv ? car.vz * tv : Math.cos(car.heading || 0) * ((car.v || 0) >= 0 ? 1 : -1);
+          const side = (dx * hz2 - dz * hx2) >= 0 ? 1 : -1;
+          let ux = hx2 + hz2 * side * 0.3, uz = hz2 - hx2 * side * 0.3;
+          const ul = Math.hypot(ux, uz) || 1; ux /= ul; uz /= ul;
+          imp.dir = { x: ux, z: uz }; imp.cause = "run over";
+          if (car.player) { imp.byPlayer = true; imp.by = CBZ.player; }
+          const k = vmag / CRASH.pedLethal;
+          if (lethal) {
+            imp.force = 6 + vmag * 0.45; imp.fling = Math.min(9, 3 + vmag * 0.28);
+            if (CBZ.hurtWorldActor) CBZ.hurtWorldActor(p, 1000, imp);
+            if (CS && p.dead) struck = CS.strike(p, car, hitInfo, vmag);
+          } else {
+            imp.force = 4 + vmag * 0.5; imp.fling = 0;
+            if (CS) struck = CS.strike(p, car, hitInfo, vmag);
+            if (!struck && CBZ.body) CBZ.body.hit(p, { dir: imp.dir, force: imp.force, knockdown: 1.2 + k * 1.6 });
+            if (CBZ.hurtWorldActor) CBZ.hurtWorldActor(p, Math.round(70 * k * k), imp);
+          }
+        } else if (vmag >= CRASH.pedLethal) {
           CBZ.cityKillPed && CBZ.cityKillPed(p, imp, "run over");
           if (CS && p.dead) struck = CS.strike(p, car, hitInfo, vmag);
           // no full strike for him (over the body budget): the bumper still wears him
@@ -6776,9 +6917,62 @@
   CBZ.citySleepCar = sleepCar;
   function sleepable(c) {
     return !c.player && !c.dead && !c.ai && !c._heldBy && !c._runaway && !c._raceCar && !(c.wreckT > 0) &&
-      !c._onFire && !c._smoking && !c._husk && !(c.occ && c.occ.jacked) && !c.npcDriver;
+      !c._onFire && !c._smoking && !c._husk && !(c.occ && c.occ.jacked) && !c.npcDriver && !c._disaster;
   }
   CBZ.cityCarSleepable = sleepable;     // carinstances.js re-checks it on every proxy, every frame
+
+  /* ============================================================
+     THE DISASTER DOOR — CBZ.vehicleDisaster. The ONE way a disaster acts on a
+     real vehicle. A disaster that physically carries a car off (the tornado's
+     flyer, the tsunami's debris field, the flood's floating body, the
+     meteor's blast wave, the sinkhole's throat, the hurricane's shove) takes
+     it here first, and from then until it lets go the car's group is the
+     disaster's: this file stops seating it (order 37 skips it, so no parkSeat
+     snaps it back onto the road), it never sleeps or proxies (it is moving,
+     it must draw itself), it leaves the car-vs-car solve, and whoever was
+     driving it is put out. The car is billed the way the vehicle system bills
+     any hit (cityDamageCar: dents, engine, the smoke/fire/cook-off ladder):
+     a car a disaster has thrown is a wreck, so it is dead to the driver.
+     Fire and debris need no door: cityCarIgnite / cityDamageCar (impactbus's
+     blast sweep, collapse.js's crushCars) already are the vehicle's own.
+
+       take(car, why)     -> true when the disaster now holds it
+       release(car)       the disaster lets go: it is a wreck where it lies,
+                          seated on the ground again by the parked pass
+       held(car)          the cause it is held by, or null
+
+     The island's car records (world/island_vehicles.js) route their `flung`
+     flag through take/release, so every disaster that has always written
+     `car.flung = true` goes through this door without knowing it exists.
+     ============================================================ */
+  function disasterTake(c, why) {
+    if (!c || !c.group) return false;
+    if (c._disaster) return true;
+    // whoever is at the wheel is out first: a car the water or the wind has is not being driven
+    if (c.player && CBZ.player && CBZ.player.driving && CBZ.player._vehicle === c && CBZ.cityExitVehicle) {
+      try { CBZ.cityExitVehicle(); } catch (e) {}
+    }
+    wakeCar(c);
+    c._disaster = why || "disaster";
+    c._disasterTouched = true;
+    c.ai = false; c.road = null; c.v = 0; c.vx = 0; c.vz = 0; c.wreckT = 0; c.spin = 0; c._runaway = false;
+    if (c.group) c.group.visible = true;
+    if (!c.dead && CBZ.cityDamageCar) { try { CBZ.cityDamageCar(c, 45, { crash: true, crumple: true, cause: c._disaster }); } catch (e) {} }
+    c._wrecked = c._disaster;
+    return true;
+  }
+  function disasterRelease(c) {
+    if (!c || !c._disaster) return;
+    c._disaster = null;
+    // it lies where the disaster left it: the parked pass seats it on the ground there
+    if (c.group) c.heading = c.group.rotation.y;
+    c._parkX = c._parkZ = c._parkH = null;
+  }
+  CBZ.vehicleDisaster = {
+    take: disasterTake,
+    release: disasterRelease,
+    held: function (c) { return (c && c._disaster) || null; },
+  };
   const PROXY_IN2 = 35 * 35;            // == carinstances.js PROXY_IN (it re-checks the band itself)
   function wakeSlice(camx, camz) {
     sleepRing();                        // the fog can change with the quality tier / weather
@@ -6851,12 +7045,22 @@
   const _wildLive = [];
   let _wildReach = 2.3;
   let _wildStamp = -1;
+  /* WHO A CAR CAN HIT IS THE WORLD'S CAST. In Gang City that is the ped
+     roster; in any other vehicle world (the disaster island's survivors) it
+     is that mode's own actors (systems/modecaps.js CBZ.worldActors), and the
+     same strike below runs on them: there is no second run-over anywhere. */
+  const _worldCast = [];
+  function castRoster() {
+    if (g.mode === "city" || !CBZ.worldActors) return CBZ.cityPeds;
+    try { CBZ.worldActors(_worldCast); } catch (e) { _worldCast.length = 0; }
+    return _worldCast;
+  }
   function bodyGrids() {
     const st = CBZ._matrixOwnStamp || 0;
     if (st === _bodyStamp && _pedBodyGrid) return;
     _bodyStamp = st;
     if (!_pedBodyGrid) _pedBodyGrid = CBZ.makeGrid(BODY_CELL);
-    const peds = CBZ.cityPeds;
+    const peds = castRoster();
     for (let i = 0; i < peds.length; i++) peds[i]._vgi = i;
     _pedBodyGrid.rebuild(peds, _bodyVec);
   }
@@ -6955,15 +7159,28 @@
       !(c.npcDriver && !c._occOwnsDriver);
   }
 
+  /* EVERY VEHICLE WORLD, ONE PASS. This pass was Gang City's alone, so a car
+     parked in any other vehicle world (the disaster island, config.js
+     CBZ.VEHICLE_MODES) was never seated, never slept and never proxied: each
+     one drew its ~22 meshes itself, every frame, forever. The parked half
+     below (seat, sleep, the carinstances.js pools, the knocked-car slide) has
+     no opinion about which world it is in; only the traffic half (lanes,
+     signals, the downtown grid) is the city's, and a car outside the city
+     never has a lane. So the pass runs in every vehicle world over that
+     world's own records, and the lane half is reached only in the city. */
   CBZ.onUpdate(37, function (dt) {
-    if (g.mode !== "city") return;
-    const A = CBZ.city.arena; if (!A) return;
-    hookScareBus();
+    if (!CBZ.vehicleModeOn(g.mode)) return;
+    const cityWorld = g.mode === "city";
+    const A = cityWorld ? (CBZ.city && CBZ.city.arena) : null;
+    if (cityWorld && !A) return;
+    if (cityWorld) hookScareBus();
     const baseDt = dt;
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     _vframe++;
-    rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
-    bodyGrids();        // the ped index for the lane-brake scan and runOver (wildGrid builds on demand)
+    if (cityWorld) {
+      rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
+      bodyGrids();        // the ped index for the lane-brake scan and runOver (wildGrid builds on demand)
+    }
     wakeSlice(camx, camz);
     // THE DOWNTOWN GRID BOX (one road width of margin). Inside it the (N+1)^2
     // intersection grid — its signals, its stop lines, its turning — is the
@@ -6971,10 +7188,17 @@
     // CLAMPS to the grid's edge, so there a car turns at the real junctions
     // roadrules.js derives from the road list (metro arterials, towns,
     // mini-cities, the annex) instead.
-    const gridX0 = (A.minX != null ? A.minX : -1e9) - A.ROAD, gridX1 = (A.maxX != null ? A.maxX : 1e9) + A.ROAD;
-    const gridZ0 = (A.minZ != null ? A.minZ : -1e9) - A.ROAD, gridZ1 = (A.maxZ != null ? A.maxZ : 1e9) + A.ROAD;
+    const gA = A || { ROAD: 0 };
+    const gridX0 = (gA.minX != null ? gA.minX : -1e9) - gA.ROAD, gridX1 = (gA.maxX != null ? gA.maxX : 1e9) + gA.ROAD;
+    const gridZ0 = (gA.minZ != null ? gA.minZ : -1e9) - gA.ROAD, gridZ1 = (gA.maxZ != null ? gA.maxZ : 1e9) + gA.ROAD;
     for (const c of CBZ.cityCars) {
       if (c._sleep || c._proxy) continue;
+      // a record of another world stacked on these coordinates is not here
+      if ((c._world || "city") !== g.mode) continue;
+      // A DISASTER IS CARRYING IT (CBZ.vehicleDisaster.take): its group is
+      // the disaster's until it lets go, so nothing here may re-seat it; the
+      // record only follows the yaw it is being thrown at
+      if (c._disaster) { if (c.group) c.heading = c.group.rotation.y; continue; }
       // a Bullring race car is posed by its own race (city/speedway_race.js), parked or racing
       if (c._raceCar) continue;
       dt = baseDt;     // reset each car (a strided far car overrides this below)
@@ -7091,7 +7315,7 @@
         aiSlipStep(c, dt, 5.5);           // bleeds lateral slip by surface grip; rewrites c.vx/vz/v
         c.pos.x += c.vx * dt; c.pos.z += c.vz * dt;
         const pushed = collideVehicle(c);
-        if (A.clampToCity) A.clampToCity(c.pos, wallRadius(c));
+        if (A && A.clampToCity) A.clampToCity(c.pos, wallRadius(c));
         // CARS_NO_WATER: a spun-out AI car that slides past a region gap onto
         // open water doesn't float at y=0 forever — it drowns where it stopped.
         if ((!CBZ.CONFIG || CBZ.CONFIG.CARS_NO_WATER !== false) && overWater(c.pos.x, c.pos.z)) {
@@ -7148,6 +7372,7 @@
         if (c.wreckT <= 0 && c.abandoned) c.ai = false;   // settle as an abandoned wreck
         continue;
       }
+      if (!cityWorld) continue;          // lanes, signals and the grid below are the city's
       if (c.playerHitCD > 0) c.playerHitCD = Math.max(0, c.playerHitCD - dt);
       if (c.npcDriver && c.roadRageTarget && advanceRoadRage(c, dt, A)) continue;
       if (c.ranRedCD > 0) c.ranRedCD -= dt;
