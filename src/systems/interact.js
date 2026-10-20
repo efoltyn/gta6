@@ -123,6 +123,41 @@
     // PUNCH on the man whose verbs you tapped (the fire button swings at
     // whoever is in front). combat.js punch writes the blow into the jail's law.
     punch:    { label: "Punch",     fn: (a) => (CBZ.punch ? CBZ.punch(a) : { ok: false, msg: "" }) },
+    // ---- A MAN ON THE FLOOR (knocked down, knocked out): the disaster game's
+    // DOWN set (systems/handverbs.js) plus his pockets and your boot
+    // over the shoulder: grapple.grab on a man who is down is CBZ.verbs.carry
+    pickUp:   { label: "Pick up",   fn: (a) => {
+      const G = CBZ.grapple;
+      const S = G && G.grab ? G.grab(a) : null;
+      if (!S) return { ok: false, msg: "" };
+      handsOn(a);
+      return { ok: true, msg: "" };
+    } },
+    // by the collar, heels on the ground; you walk slow (handverbs loadScale)
+    drag:     { label: "Drag",      fn: (a) => {
+      const V = CBZ.verbs, pa = V && V.playerActor ? V.playerActor() : null;
+      const S = V && pa && V.drag ? V.drag(pa, a) : null;
+      if (!S) return { ok: false, msg: "" };
+      handsOn(a);
+      return { ok: true, msg: "" };
+    } },
+    // SEARCH: every pocket, what he REALLY carries (economy.js rollLoadout:
+    // cigs, his keycard, a shiv). It empties him, so it is offered only while
+    // he still has something. A screw who sees it sees a theft.
+    frisk:    { label: "Search",    fn: (a) => {
+      const E = CBZ.econ;
+      if (!E || !E.lootActor) return { ok: false, msg: "" };
+      const got = E.lootActor(a, {});
+      if (!got || (!got.cigs && !got.items.length)) { if (CBZ.sfx) CBZ.sfx("whoosh"); }
+      if (CBZ.reportCrime) CBZ.reportCrime(staff(a) ? 40 : 14, { type: "steal", actorRole: CBZ.game.role });
+      if (!staff(a)) {
+        a.playerGrudge = Math.min(14, (a.playerGrudge || 0) + 2);
+        a.grudgeWhy = "you going through my pockets";
+      }
+      return { ok: true, msg: "" };
+    } },
+    // a boot in him (combat.js punch on a floored man is the ground blow)
+    kick:     { label: "Kick",      fn: (a) => (CBZ.punch ? CBZ.punch(a) : { ok: false, msg: "" }) },
     // SHOVE him off you: CBZ.verbs' palms, and hands on a man is a blow
     shove:    { label: "Shove",     fn: (a) => {
       const V = CBZ.verbs, pa = V && V.playerActor ? V.playerActor() : null;
@@ -285,6 +320,17 @@
     if (H && H.t === a) {
       const out = H.set.map(function (x) { return "h:" + x.id; });
       if (H.kind === "hold" && !staff(a) && CBZ.game.role !== "cop") out.push("steal");
+      return out;
+    }
+    // HE IS ON THE FLOOR (inmate, guard or warden): Search while he has
+    // anything, Pick up, Drag, Kick. Pickpocket is not offered: on a man who
+    // cannot feel your hand, Search IS the pickpocket, all of it.
+    if (a.ko > 0 && CBZ.game.role !== "cop") {
+      const E = CBZ.econ;
+      const left = E && E.rollDrops ? E.rollDrops(a, { peek: true }) : null;
+      const out = [];
+      if (!a.looted && (!left || left.cigs > 0 || left.items.length)) out.push("frisk");
+      out.push("pickUp", "drag", "kick");
       return out;
     }
     // HELD AT GUNPOINT: a drawn gun outranks a conversation
@@ -473,6 +519,13 @@
   function up(a) {
     return !!(a && a.group && !a.dead && !a.escaped && a.data && (!(a.ko > 0) || CBZ.game.role === "cop"));
   }
+  /* A MAN YOUR HANDS CAN GET TO: on his feet OR on the floor (up() is only the
+     standing man, for who may walk up and speak). A man you dropped used to
+     lose every verb the moment he went down, and so did a man knocked out in
+     your arms: his Throw / Drop vanished mid-carry. */
+  function reach(a) {
+    return !!(a && a.group && !a.dead && !a.escaped && a.data);
+  }
   function d2Of(a) {
     const P = CBZ.player.pos, q = a.group.position;
     const dx = P.x - q.x, dz = P.z - q.z;
@@ -502,7 +555,7 @@
     candidates(_cand);
     for (let i = 0; i < _cand.length; i++) {
       const a = _cand[i];
-      if (!up(a)) continue;
+      if (!reach(a)) continue;
       const d2 = d2Of(a);
       if (d2 > RANGE * RANGE) continue;
       const d = Math.sqrt(d2) || 0.001;
@@ -555,13 +608,13 @@
   }
   function heldTarget() {
     const H = CBZ.handVerbs ? CBZ.handVerbs.held() : null;
-    return H && H.t && up(H.t) ? H.t : null;
+    return H && H.t && reach(H.t) ? H.t : null;
   }
   function pickCurrent(dt) {
     const held = heldTarget();
     if (held) return held;
     if (touchUI()) {
-      if (selected && (!up(selected) || d2Of(selected) > (RANGE * 1.6) * (RANGE * 1.6))) selected = null;
+      if (selected && (!reach(selected) || d2Of(selected) > (RANGE * 1.6) * (RANGE * 1.6))) selected = null;
       return selected;
     }
     // KEYBOARD: the faced man, held a beat through a glance away (so a
@@ -569,7 +622,7 @@
     const f = faced();
     if (f) { faceT = HOLD_T; return f; }
     faceT -= dt;
-    if (current && faceT > 0 && up(current) && d2Of(current) < RANGE * RANGE * 1.4 && !heldTargetStale(current)) return current;
+    if (current && faceT > 0 && reach(current) && d2Of(current) < RANGE * RANGE * 1.4 && !heldTargetStale(current)) return current;
     return null;
   }
   function heldTargetStale(a) { return !clearTo(a); }
@@ -679,7 +732,7 @@
   function doAction(idx, fresh) {
     if (cooldown > 0 || CBZ.game.state !== "playing") return;
     const who = fresh ? (current || shownFor) : (shownFor || current);
-    if (!who || !up(who)) return;
+    if (!who || !reach(who)) return;
     const verbs = (!fresh && who === shownFor && shownVerbs.length) ? shownVerbs : capVerbs(verbsFor(who));
     if (!(idx >= 0) || idx >= verbs.length) return;
     cooldown = 0.35;
@@ -707,7 +760,7 @@
   // systems/touch.js: a tap on a person selects him (null: tap elsewhere)
   CBZ.prisonPeople = {
     select: function (a) {
-      if (a && !up(a)) a = null;
+      if (a && !reach(a)) a = null;
       selected = a || null;
       return !!selected;
     },

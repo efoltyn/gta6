@@ -1765,7 +1765,8 @@
     const got = rollDrops(actor, { pickpocket: !!opts.pickpocket });
     const cigs = got.cigs, items = got.items;
     if (cigs) addCigs(cigs);
-    for (let i = 0; i < items.length; i++) addItem(items[i], 1);
+    // a keycard off a man is the door's keycard (grantKeyItem), not a souvenir
+    for (let i = 0; i < items.length; i++) { addItem(items[i], 1); grantKeyItem(items[i]); }
     if (!opts.silent && (cigs > 0 || items.length)) {
       announceLoot(cigs, items);
       CBZ.sfx && CBZ.sfx("loot");

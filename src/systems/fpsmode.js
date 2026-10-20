@@ -3738,7 +3738,8 @@
       if (!guardish && a.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(a, "ko", 7, { source: w.key || "taser" });
       if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(a, w.key);
       CBZ.doHitstop && CBZ.doHitstop(0.075);
-      if (CBZ.econ && CBZ.econ.lootActor) CBZ.econ.lootActor(a, {}); // frisk the stunned target
+      // the jail searches a tased man by hand (Search on him, systems/interact.js)
+      if (CBZ.game.mode !== "escape" && CBZ.econ && CBZ.econ.lootActor) CBZ.econ.lootActor(a, {}); // frisk the stunned target
       return { head: false, down: true, dmg };
     }
 
