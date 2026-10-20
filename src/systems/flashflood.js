@@ -1831,12 +1831,26 @@
      tsunami's too), dark while wet and paling as it dries on the silt's
      clock. One mesh: per vertex, the metres it lies under the line. It was
      a flat 7 cm brown strip over a 0.38-alpha brown box. Built once, near
-     the end; the water in front of it hides it until the level drops. */
+     the end; the water in front of it hides it until the level drops.
+     Never above the wall it is painted on, never on a building that has
+     come down (marksWatch below takes those off), and gone in the calm after
+     the round (CBZ.flashflood.settleMarks). A mark is a stain ON a facade:
+     the water that stood over a roof left nothing in the air. */
+  function wallTop(bd) {
+    const b = bd.src;
+    if (b && Number.isFinite(b.roofY)) return b.roofY;
+    if (b && Number.isFinite(b.h) && b.h > 0) return (Number.isFinite(b.gy) ? b.gy : (bd.floorY || 0)) + b.h;
+    return Infinity;
+  }
   function buildMarks() {
     const R = F.render; if (!R || R.marks || !THREE) return;
     const g = F.grid, B = F.W.buildings || [];
     const P = [], Bv = [];
+    const spans = [];             // per building: its vertex range in the mesh
     for (const bd of B) {
+      if (bd.src && bd.src.fallen) continue;
+      const sp = { src: bd.src || null, v0: P.length / 3, v1: 0 };
+      const cap = wallTop(bd);
       // the street's peak level along each side of the footprint
       const sides = [[0, -1], [0, 1], [-1, 0], [1, 0]];
       for (const s of sides) {
@@ -1844,16 +1858,19 @@
         const ox = bd.x + s[0] * (hx + g.c * 0.6), oz = bd.z + s[1] * (hz + g.c * 0.6);
         const k = cellOf(g, ox, oz);
         if (k < 0 || g.hmax[k] < 0.15 || g.room[k]) continue;
-        const top = g.etaMax[k], foot = g.zb[k] - 0.05;
+        const top = Math.min(g.etaMax[k], cap), foot = g.zb[k] - 0.05;
+        if (top - foot < 0.2) continue;
         const L = s[0] === 0 ? bd.w : bd.d;
         const cxs = bd.x + s[0] * (hx + 0.03), czs = bd.z + s[1] * (hz + 0.03);
         const tx = s[0] === 0 ? 1 : 0, tz = s[0] === 0 ? 0 : 1;
         const ax = cxs - tx * L / 2, az = czs - tz * L / 2, bx = cxs + tx * L / 2, bz = czs + tz * L / 2;
-        const y1 = top + 0.07;
+        const y1 = Math.min(top + 0.07, cap);
         P.push(ax, foot, az, bx, foot, bz, ax, y1, az, bx, foot, bz, bx, y1, bz, ax, y1, az);
         const b0 = top - foot, b1 = top - y1;
         Bv.push(b0, b0, b1, b0, b1, b1);
       }
+      sp.v1 = P.length / 3;
+      if (sp.v1 > sp.v0 && sp.src) spans.push(sp);
     }
     if (!P.length) return;
     const geo = new THREE.BufferGeometry();
@@ -1889,7 +1906,47 @@
     m.userData.transient = true; m.userData.noCoat = true; m.frustumCulled = false;
     R.parent.add(m);
     R.marks = [m];
+    marksLive = { mesh: m, spans: spans, t: 0 };
+    hookMarks();
     F.stats.marks = P.length / 18;
+  }
+  // the marks outlive F (they are kept with the silt): their own watch
+  let marksLive = null, marksHooked = false;
+  function collapseSpan(mesh, v0, v1) {
+    const a = mesh.geometry.attributes.position;
+    for (let v = v0; v < v1; v++) a.array[v * 3 + 1] = -1e4;
+    a.needsUpdate = true;
+  }
+  function marksWatch(dt) {
+    const M = marksLive;
+    if (!M) return;
+    if (!M.mesh.parent) { marksLive = null; return; }
+    M.t += Math.min(0.1, dt || 0);
+    if (M.t < 0.5) return;
+    M.t = 0;
+    for (let i = M.spans.length - 1; i >= 0; i--) {
+      const sp = M.spans[i];
+      if (!sp.src || !sp.src.fallen) continue;
+      collapseSpan(M.mesh, sp.v0, sp.v1);
+      M.spans.splice(i, 1);
+    }
+  }
+  function hookMarks() {
+    if (marksHooked || !CBZ.onAlways) return;
+    marksHooked = true;
+    CBZ.onAlways(48.1, marksWatch);
+  }
+  // the calm after the round: the tide marks come off the walls (the silt stays)
+  function settleMarks() {
+    const M = marksLive;
+    marksLive = null;
+    if (!M) return false;
+    for (const m of [M.mesh]) {
+      if (silt) { const k = silt.objs.indexOf(m); if (k >= 0) silt.objs.splice(k, 1); }
+      if (F && F.render && F.render.marks) { const k = F.render.marks.indexOf(m); if (k >= 0) F.render.marks.splice(k, 1); }
+      disposeObj(m);
+    }
+    return true;
   }
 
   let roarCd = 0;
@@ -2100,9 +2157,14 @@
   }
 
   CBZ.flashflood = {
-    start: start, tick: tick, clear: clear, islandWorld: islandWorld,
+    start: start, tick: tick, clear: clear, islandWorld: islandWorld, settleMarks: settleMarks,
     // the water is still going down (the director's calm waits on it)
     busy: function () { return !!(F && F.ending); },
+    marksAudit: function () {
+      const M = marksLive;
+      return { marks: !!M, buildings: M ? M.spans.length : 0,
+        onFallen: M ? M.spans.filter(function (sp) { return sp.src && sp.src.fallen; }).length : 0 };
+    },
     depthAt: depthAt, levelAt: levelAt, flowAt: flowAt, frontPoints: frontPoints, threatAt: threatAt,
     stats: stats, arrival: arrival,
     storm: function () { return F ? F.W.storm : null; },

@@ -491,6 +491,18 @@
      TREES
      ============================================================ */
   const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _ax = new THREE.Vector3(), _v = new THREE.Vector3();
+  /* WHERE A FALLING TREE LANDS: when the point 85% of the way up to its
+     crown meets the ground along its fall (it used to stop at a fixed 81
+     degrees, short of a downhill slope, its length hanging over the hill). */
+  const FALL_MAX = Math.PI / 2 + 0.45;
+  const _lv = new THREE.Vector3();
+  function treeLands(t, st, a) {
+    if (a >= FALL_MAX) return true;
+    if (a < 0.35) return false;
+    _ax.set(st.fdz, 0, -st.fdx).normalize();
+    _lv.set(0, st.H * 0.85, 0).applyAxisAngle(_ax, a).add(st.p0);
+    return _lv.y <= groundAt(_lv.x, _lv.z) + 0.3;
+  }
   const touchedTrees = [];
   function isPalm(t) {
     if (t.palm != null) return !!t.palm;
@@ -558,10 +570,9 @@
         // WINDTHROW: it goes over about its root plate, accelerating like a
         // falling pole, with the wind still shoving the crown
         st.fallV += (9.8 / Math.max(3, st.H) * 1.5 * Math.sin(Math.max(0.05, st.fall)) + 0.002 * v * v / st.H) * dt;
-        st.fall += st.fallV * dt;
-        const rest = 1.42;
-        if (st.fall >= rest) {
-          st.fall = rest; st.down = 2;
+        st.fall = Math.min(FALL_MAX, st.fall + st.fallV * dt);
+        if (treeLands(t, st, st.fall)) {
+          st.down = 2;
           if (WD && WD.hurtLine) {
             try { WD.hurtLine(t.x, t.z, t.x + st.fdx * st.H, t.z + st.fdz * st.H, 1.6, "crushed by a falling tree"); } catch (e) {}
           }
@@ -626,6 +637,26 @@
           if (st.district >= 0 && PW) PW.treesIn[st.district]++;
           if (t.trunkCol && WD && WD.release) { try { WD.release(t.trunkCol); } catch (e) {} }
         }
+      }
+    }
+  }
+  /* THE WIND DROPS (2026-10-19): tickTrees only runs while the storm does,
+     so a tree going over when the card ended froze half way down, leaning
+     on nothing, for the rest of the match, and every bent tree kept the lean
+     of the last gust. On end(): what was falling lands, what was bending
+     stands back up. */
+  function settleTrees() {
+    for (let i = 0; i < touchedTrees.length; i++) {
+      const t = touchedTrees[i], st = t._hur;
+      if (!st || t._tsuUproot || !t.trunk || !t.foliage) continue;
+      if (st.down === 1) {
+        let a = st.fall;
+        while (!treeLands(t, st, a)) a = Math.min(FALL_MAX, a + 0.04);
+        st.fall = a; st.down = 2; st.fallV = 0;
+        applyTree(t, st, st.fall, st.fdz, -st.fdx, 0.05, 1);
+      } else if (!st.down) {
+        st.tx = st.tz = st.vx = st.vz = 0;
+        applyTree(t, st, 0, 1, 0, 0, 1);
       }
     }
   }
@@ -1260,6 +1291,7 @@
       disposeCloud(S.grit);
       disposeCloud(S.rag);
       S = null;
+      settleTrees();
       // the wind drops: what is still in the air comes down on its own
       fluidOn(false);
       // the lights stay out and the debris stays down: the aftermath is the

@@ -1049,7 +1049,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=island1014"></script>
-<script src="src/systems/debris.js?v=debris1015"></script>
+<script src="src/systems/debris.js?v=curtain1019"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -1131,7 +1131,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/flashflood.js?v=waterlook1019"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
-<script src="src/systems/hurricane.js?v=debris1015"></script>
+<script src="src/systems/hurricane.js?v=curtain1019"></script>
 <!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
@@ -1183,7 +1183,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/water_spec.js?v=waterlook1019"></script>
 <!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_runup.js?v=waterlook1019"></script>
-<script src="src/world/tsunami_debris.js?v=debris1015"></script>
+<script src="src/world/tsunami_debris.js?v=curtain1019"></script>
 <script src="src/world/tsunami_flow.js?v=runup1014"></script>
 <script src="src/world/tsunami_scene.js?v=waterlook1019"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
@@ -1667,7 +1667,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=debris1015"></script>
+<script src="src/systems/tornado.js?v=curtain1019"></script>
 <script src="src/city/aircraftimpact.js?v=street1009"></script>
 <script src="src/city/shops.js?v=vault1013"></script>
 <script src="src/city/gunstore.js?v=peak1014c"></script>
