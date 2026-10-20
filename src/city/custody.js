@@ -61,8 +61,37 @@
    opens it when the car carrying him has left draw range (or, for an arrest
    nobody could see, where nobody can see).
 
+   A SURRENDER ALWAYS RESOLVES (owner 2026-10-20, Gang City: "They put their
+   hands up and act like they're going to be detained, but nobody goes to
+   detain them"). The man stood there with his hands up for a full minute and
+   then walked off, silently, whenever the hands that were sent could not
+   reach him: an agent's walk is a straight line (protection.js moveOrder
+   skips pednav), so a corner or a wall between them was the end of it; an
+   agent seated in the motorcade was "sent" and never moved; a cuff verb that
+   never finished held the job forever; an officer streamed out of the world
+   was still "the lead". Now every responder walks on the nav grid, a
+   responder who makes no ground in STALL_T is unstuck, then replaced by the
+   next nearest, a unit with its own crew is dispatched at REACH_T, the
+   player's own hands are asked when nobody else is near, and only after all
+   of that (GIVEUP_T) does he lower his hands, say so, and walk off
+   (CBZ.leave). Nothing ends in silence.
+
+   HELD, NOT SHIPPED (owner 2026-10-20): a man YOU detained (the President's
+   Detain, opts.hold) is not driven off on his own. He is cuffed and kept: the
+   agent who cuffed him walks him at your shoulder wherever you go (into the
+   back of your car when you drive, out again when you get out), or you march
+   him yourself; walk far enough away and the agent stands with him for you.
+   You decide, with his own verbs:
+     Jail      a unit comes and he goes through the pipeline above (or, in the
+               back of your car, the precinct desk takes him: Hand over)
+     Search    the pat-down: what he carries, said over the searcher's head
+     Execute   shot where he stands: the normal death, the President's bill
+     Release   the cuffs come off and he walks away (CBZ.leave)
+   node tools/custody-check.mjs plays all of it, and every stall, in a vm.
+
    PUBLIC: CBZ.custody = { take, cancel, jobOf, cuffed, holds, jobs,
-     book, records, held, get, release, pardon, trial, visit, facility, audit }
+     book, records, held, get, release, pardon, trial, visit, facility, audit,
+     jail, search, execute, free }
 ============================================================ */
 (function () {
   "use strict";
@@ -81,6 +110,17 @@
   const UNIT_BACK = 42;                 // m: where the unit starts down the lane
   const DRAW_R = 140, GONE_MIN = 70;    // m: out of draw range / out of sight (inside traffic.js's 150 m recycle ring)
   const SEEK_R = 70;                    // m: officers on scene
+  // THE SURRENDER ALWAYS RESOLVES
+  const STALL_T = 4;                    // s without closing half a metre: that responder is stuck
+  const REACH_T = 14;                   // s with nobody's hands on him: a unit is dispatched with its crew
+  const GIVEUP_T = 45;                  // s: truly nobody can come; he lowers his hands and walks off
+  const PLAYER_WAIT = 20;               // s more while the player's own hands are close
+  const CUFF_VERB_MAX = 7;              // s: a cuff verb that never finishes is finished for it
+  // HELD WITH YOU
+  const HOLD_GAP = 2.6;                 // m: the holder walks him this far off your shoulder
+  const HOLD_FAR = 32;                  // m: you went further; the holder stands and keeps him
+  const SEAT_R = 14;                    // m: your car this near when you drive: he goes in the back
+  const OUT_T = 1.2;                    // s after you get out before he is taken out of your car
 
   // who is taking him: the agency (its uniform, its car, its words)
   const AGENCY = {
@@ -126,6 +166,36 @@
     if (CBZ.leave && CBZ.leave.unseen) { try { return !!CBZ.leave.unseen({ x: x, z: z }, { minDistance: minD == null ? 40 : minD, far: DRAW_R }); } catch (e) { return false; } }
     if (!CBZ.npcTransitionSafe) return true;
     try { return !!CBZ.npcTransitionSafe(x, z, { minDistance: minD == null ? 40 : minD, maxDistance: DRAW_R, occlusion: true }); } catch (e) { return false; }
+  }
+
+  // still a body in this world (not streamed out, not exited, not dead)
+  function inWorld(o) {
+    if (!o || o.dead || o._gone || o._custodyExit || !o.pos) return false;
+    const a = CBZ.cityPeds, b = CBZ.cityCops;
+    if ((a || b) && !(a && a.indexOf(o) >= 0) && !(b && b.indexOf(o) >= 0)) return false;
+    return true;
+  }
+  let CLOCK = 0;
+  /* THE WALK GOES ROUND THE WALL. A body custody walks is a moveOrder (an
+     agent: protection.js) or a hand step (a cop), and both are a straight
+     line: peds.js skips pednav for a moveOrder. A corner between the agent
+     and the man was a wall he pressed into for a minute while the man stood
+     there with his hands up. This asks the nav grid (systems/navgrid.js, the
+     one leave.js walks on) for the next waypoint when the line is blocked. */
+  function navNext(o, x, z) {
+    const G = CBZ.navGrid;
+    if (!G || !G.ready || !G.plan || !G.lineBlocked || !G.inWindow) return null;
+    if (!safe(G.ready) || Math.abs(o.pos.y || 0) > 1.2) return null;
+    if (!G.inWindow(o.pos.x, o.pos.z) || !G.inWindow(x, z)) return null;
+    let N = o._cuNav;
+    if (!N || hyp(N.gx, N.gz, x, z) > 2.5 || CLOCK - N.at > 3) {
+      const blocked = !!safe(function () { return G.lineBlocked(o.pos.x, o.pos.z, x, z, 0.6); });
+      const pts = blocked ? safe(function () { return G.plan({ x: o.pos.x, z: o.pos.z }, { x: x, z: z }, { actor: o }); }) : null;
+      N = o._cuNav = { gx: x, gz: z, at: CLOCK, pts: pts && pts.length > 1 ? pts : null, i: 0 };
+    }
+    if (!N.pts) return null;
+    while (N.i < N.pts.length - 1 && hyp(o.pos.x, o.pos.z, N.pts[N.i].x, N.pts[N.i].z) < 0.9) N.i++;
+    return N.i < N.pts.length - 1 ? N.pts[N.i] : null;      // the last leg is the goal itself
   }
 
   // ================================================================
@@ -233,7 +303,8 @@
   const JOBS = [];
   const LEAVERS = [];        // bodies and cars walking / driving out of the world
   let JSEQ = 0;
-  const STATS = { taken: 0, cuffed: 0, seated: 0, departed: 0, delivered: 0, offscreen: 0, cancelled: 0, blocked: 0, walked: 0, intake: 0, refusedSeat: 0 };
+  const STATS = { taken: 0, cuffed: 0, seated: 0, departed: 0, delivered: 0, offscreen: 0, cancelled: 0, blocked: 0, walked: 0, intake: 0, refusedSeat: 0,
+    unstuck: 0, swapped: 0, dispatched: 0, nobody: 0, cuffForced: 0, held: 0, jailed: 0, executed: 0, freed: 0, searched: 0 };
   function jobOf(t) { for (let i = 0; i < JOBS.length; i++) if (JOBS[i].t === t && !JOBS[i].done) return JOBS[i]; return null; }
 
   function isOfficerOf(q, key, j) {
@@ -245,9 +316,14 @@
     if (key === "gang") { const gid = j && j.gang; return gid != null && (q.gangId === gid || (q.gang && (q.gang.id === gid || q.gang === gid))); }
     return false;
   }
+  // a body that can walk to him right now (not in a seat, not in somebody's car door)
+  function canWalk(q) {
+    return !!(q && !q.inCar && !q._cbzSeat && !q._cbzArc && !q._airPilot && !q._swatPassenger && q._protRole !== "counter-sniper" &&
+      !(CBZ.boardingHolds && safe(function () { return CBZ.boardingHolds(q); })));
+  }
   function usableOfficer(q, t) {
-    return !!(q && q !== t && !q.dead && q.pos && !q.player && !q.isPlayer && !q.restraint && !q._custodyJob && !q.inCar &&
-      !q._airPilot && !q._swatPassenger && !(q.ko > 0));
+    return !!(q && q !== t && !q.dead && q.pos && !q.player && !q.isPlayer && !q.restraint && !q._custodyJob && canWalk(q) &&
+      !(q.ko > 0) && inWorld(q));
   }
   function findOfficers(key, t, n, j) {
     const out = [];
@@ -257,6 +333,7 @@
       for (let i = 0; i < L.length; i++) {
         const q = L[i];
         if (!usableOfficer(q, t) || out.indexOf(q) >= 0 || !isOfficerOf(q, key, j)) continue;
+        if (j && (q._cuStuck === j.id || j.officers.indexOf(q) >= 0)) continue;   // already tried for this man
         const d = dist(q, t);
         if (d > SEEK_R) continue;
         out.push(q);
@@ -298,20 +375,24 @@
     // hand on the man's arm until the walk timed out)
     const VS = o._verbS;
     if (VS && !VS.done && !(VS.verb === "escort" && VS.a === o && VS.phase === "hold")) return d;
+    // round the wall, not into it: the next waypoint when the line is blocked
+    const w = d > stop ? navNext(o, x, z) : null;
+    const wx = w ? w.x : x, wz = w ? w.z : z;
     const PR = CBZ.protection;
     if (PR && PR.moveToward && CBZ.cityPeds && CBZ.cityPeds.indexOf(o) >= 0) {
       if (d <= stop) { if (PR.release) safe(function () { PR.release(o); }); o.state = "idle"; o.speed = 0; faceTo(o, x, z); return d; }
-      PR.moveToward(o, x, z, spd, dt);
+      PR.moveToward(o, wx, wz, spd, dt);
       return d;
     }
     // a body no brain walks while it works for us (a cop: police.js yields him)
     let sp = 0;
     if (d > stop) {
-      const s = Math.min(d - stop, spd * dt);
-      o.pos.x += dx / d * s; o.pos.z += dz / d * s;
+      const ex = wx - o.pos.x, ez = wz - o.pos.z, ed = Math.hypot(ex, ez) || 1;
+      const s = Math.min(w ? ed : d - stop, spd * dt);
+      o.pos.x += ex / ed * s; o.pos.z += ez / ed * s;
       if (CBZ.collide) safe(function () { CBZ.collide(o.pos, 0.45, 0, 1.7); });
       sp = dt > 0 ? s / dt : 0;
-      faceTo(o, x, z);
+      faceTo(o, wx, wz);
     }
     o.speed = sp;
     if (o.target && o.target.set) o.target.set(o.pos.x, 0, o.pos.z);
@@ -346,9 +427,29 @@
     if (A && typeof A.cuffable === "function") { const r = safe(function () { return A.cuffable(t); }); if (r) return true; }
     return !!(t.surrender || t.poseHandsUp || (t.char && t.char.handsUp) || (t.ko || 0) > 0);
   }
+  // the hands on him: a live officer of THIS job still in the world
   function lead(j) {
-    for (let i = 0; i < j.officers.length; i++) { const o = j.officers[i]; if (o && !o.dead && !o.restraint && !(o.ko > 0)) return o; }
+    for (let i = 0; i < j.officers.length; i++) {
+      const o = j.officers[i];
+      if (o && !o.dead && !o.restraint && !(o.ko > 0) && o._custodyJob === j.id && inWorld(o)) return o;
+    }
     return null;
+  }
+  // an officer streamed out of the world, killed, or taken by another job is
+  // not on this one any more (he used to stay "the lead" and nobody came)
+  function prune(j) {
+    for (let i = j.officers.length - 1; i >= 0; i--) {
+      const o = j.officers[i];
+      if (o && !o.dead && o._custodyJob === j.id && inWorld(o)) continue;
+      if (o && o._custodyJob === j.id) releaseOfficer(j, o);
+      j.officers.splice(i, 1);
+    }
+  }
+  // more hands: the nearest free officers of the agency (within `r` when given)
+  function recruit(j, n, r) {
+    const add = findOfficers(j.key, j.t, n, j).filter(function (q) { return r == null || dist(q, j.t) < r; });
+    for (let i = 0; i < add.length; i++) { claim(j, add[i]); j.officers.push(add[i]); }
+    return add.length;
   }
   function claim(j, o) {
     o._custodyJob = j.id;
@@ -382,14 +483,21 @@
     const key = agencyKey(opts.by);
     const j = mkJob(t, key, opts);
     if (!opts.handsOff) {
-      let off = (opts.officers || []).filter(function (q) { return usableOfficer(q, t) || (q && q._order && q._order.force && !q.dead); });
+      // the hands sent: never one sitting in the motorcade or on a roof post
+      // (they were "sent", never moved, and the man waited with his hands up)
+      let off = (opts.officers || []).filter(function (q) {
+        return usableOfficer(q, t) || (q && q._order && q._order.force && !q.dead && !q.restraint && canWalk(q) && inWorld(q));
+      });
       if (!off.length) off = findOfficers(key, t, 2, j);
       if (!off.length) {
         // AN ARREST NOBODY SEES happens where nobody sees it
         if (unseen(t.pos.x, t.pos.z, 60)) { JOBS.push(j); offscreen(j); return j; }
         off = spawnOfficers(key, t, 2);
         j.spawned = off.slice();
-        if (!off.length) return null;
+        if (!off.length) {
+          // nobody at all on foot: a unit with its crew, or the giver's own hands
+          if (!dispatch(j) && !playerHands(j)) return null;
+        }
       }
       j.officers = off;
       for (let i = 0; i < off.length; i++) claim(j, off[i]);
@@ -406,6 +514,7 @@
       id: ++JSEQ, t: t, by: opts.by != null ? opts.by : key, key: key, verb: opts.verb === "detain" ? "detain" : "arrest", opts: opts,
       gang: key === "gang" ? String(opts.by).split(":")[1] : null,
       officers: [], spawned: [], phase: "close", pt: 0, age: 0, ordered: false, resist: null, cuffed: false, done: false,
+      reach: null, dispatched: false, crewOut: false, playerHands: false, held: false, searched: false, riding: null, outT: 0,
       car: null, unit: null, rec: null, seized: [], cuffS: null, friskS: null, fallT: 0, retry: 0, said: {}, boardTries: 0, parkT: 0,
     };
   }
@@ -417,6 +526,9 @@
     j.cuffed = true; j.cuffedAt = j.age;
     const gun = t.armed && t.weapon ? t.weapon : null;
     const Rs = R();
+    // the player's own hands did it (restrain.js's Cuff): that file already
+    // priced it, so the act below is not fired a second time
+    const ownHands = !!(t.restraint && t.restraint.by === "player");
     if (!t.restraint) {
       let ok = false;
       if (Rs && Rs.cuff) ok = !!safe(function () { return Rs.cuff(t, { by: (AGENCY[j.key] || AGENCY.police).name, seize: true, custody: true }); });
@@ -429,11 +541,15 @@
     j.rec = book(t, { verb: j.verb, by: j.by, status: "taken", seized: j.seized });
     if (gun && j.rec.seized.indexOf(gun) < 0) j.rec.seized.push(gun);
     // THE ACT: the political model hears it now, with the witnesses who saw it
-    if (j.opts.act && CBZ.politics && CBZ.politics.act) {
+    if (j.opts.act && !ownHands && CBZ.politics && CBZ.politics.act) {
       const ao = Object.assign({}, j.opts.actOpts || {}, { target: t, by: j.opts.actBy || (j.opts.actOpts && j.opts.actOpts.by) || j.by, keepBody: true });
       safe(function () { CBZ.politics.act(j.verb, ao); });
     }
+    if (j.cuffS && !j.cuffS.done && j.cuffS.cancel) safe(function () { j.cuffS.cancel(); });
+    j.cuffS = null;
     if (j.opts.onCuffed) safe(function () { j.opts.onCuffed(j); });
+    // HELD, NOT SHIPPED: the man you detained stays with you until you decide
+    if (j.opts.hold) { enterHold(j); return; }
     requestUnit(j);
     j.phase = j.opts.handsOff ? "wait" : "frisk"; j.pt = 0;
   }
@@ -536,7 +652,7 @@
     const st = u.plan.stop;
     const d = hyp(car.pos.x, car.pos.z, st.x, st.z);
     if (d < u.best - 0.05) { u.best = d; u.stall = 0; } else u.stall += dt;
-    if (d < 0.6 || u.stall > 3 || u.t > 25) { u.state = "parked"; car.v = 0; car.vx = 0; car.vz = 0; return; }
+    if (d < 0.6 || u.stall > 3 || u.t > 25) { u.state = "parked"; car.v = 0; car.vx = 0; car.vz = 0; crewOut(j); return; }
     const hd = u.plan.seg ? u.plan.heading : Math.atan2(st.x - car.pos.x, st.z - car.pos.z);
     driveCar(car, hd, clamp((d - 0.3) * 1.1, 1.5, 11), dt);
   }
@@ -545,6 +661,264 @@
     const h = car.heading || 0, fx = Math.sin(h), fz = Math.cos(h), rx = Math.cos(h), rz = -Math.sin(h);
     const side = near && near.pos ? (((near.pos.x - car.pos.x) * rx + (near.pos.z - car.pos.z) * rz) >= 0 ? 1 : -1) : 1;
     return { x: car.pos.x + rx * side * 1.7 - fx * 0.7, z: car.pos.z + rz * side * 1.7 - fz * 0.7 };
+  }
+
+  // ================================================================
+  //  A SURRENDER ALWAYS RESOLVES. Somebody is coming, visibly, or he is told
+  //  nobody is and walks off. Never a man with his hands up and nobody.
+  // ================================================================
+  // the responder this frame, with his progress watched
+  function responder(j, dt) {
+    prune(j);
+    let L = lead(j);
+    if (!L && !j.playerHands) { if (recruit(j, 2)) L = lead(j); else if (!j.dispatched) dispatch(j); }
+    if (!L && !j.playerHands && !(j.unit && j.unit.state === "coming")) playerHands(j);
+    if (!L) return null;
+    const d = dist(L, j.t);
+    let Rr = j.reach;
+    if (!Rr || Rr.who !== L) Rr = j.reach = { who: L, best: d, stall: 0, tries: 0 };
+    if (d < Rr.best - 0.5) { Rr.best = d; Rr.stall = 0; }
+    else if (d > CUFF_R + 1.3 && !(j.cuffS && !j.cuffS.done)) Rr.stall += dt;
+    if (Rr.stall > STALL_T) { Rr.stall = 0; Rr.best = d; unstick(j, L, Rr); L = lead(j); }
+    return L;
+  }
+  // he made no ground: first shake loose whatever has him (a verb that never
+  // ended, a stale walk), then hand the job to the next nearest, then a unit
+  function unstick(j, L, Rr) {
+    if (!Rr.tries) {
+      Rr.tries = 1; STATS.unstuck++;
+      const VS = L._verbS, V = VB();
+      if (VS && !VS.done && VS !== j.cuffS && VS !== j.friskS && V && V.release) safe(function () { V.release(L, "set"); });
+      L._cuNav = null;
+      if (CBZ.protection && CBZ.protection.release) safe(function () { CBZ.protection.release(L); });
+      return;
+    }
+    STATS.swapped++;
+    L._cuStuck = j.id;
+    releaseOfficer(j, L);
+    const i = j.officers.indexOf(L); if (i >= 0) j.officers.splice(i, 1);
+    if (lead(j)) return;                              // his partner is still coming
+    if (recruit(j, 2)) return;
+    if (!j.dispatched) dispatch(j);
+    playerHands(j);
+  }
+  // A UNIT WITH ITS CREW: the agency's car comes to the kerb beside him and two
+  // get out (crewOut). No car in this world: two come on foot.
+  function dispatch(j) {
+    if (j.dispatched) return false;
+    j.dispatched = true; STATS.dispatched++;
+    const L = lead(j);
+    if (L) say(L, "Need a unit here.", 1.6);
+    if (!j.car) requestUnit(j);
+    if (j.car) return true;
+    const off = spawnOfficers(j.key, j.t, 2);
+    for (let i = 0; i < off.length; i++) { claim(j, off[i]); j.officers.push(off[i]); j.spawned.push(off[i]); }
+    j.crewOut = off.length > 0;
+    return off.length > 0;
+  }
+  function crewOut(j) {
+    if (!j.dispatched || j.crewOut || j.cuffed || !j.car || !CBZ.cityPostNpc) return;
+    j.crewOut = true;
+    const A = AGENCY[j.key] || AGENCY.police;
+    for (let i = 0; i < 2; i++) {
+      const door = doorSpot(j.car, i ? null : j.t);
+      const p = safe(function () { return CBZ.cityPostNpc(door.x + i * 0.8, door.z + i * 0.5, { job: A.job, src: "custody:crew" }); });
+      if (p) { claim(j, p); j.officers.unshift(p); j.spawned.push(p); }
+    }
+  }
+  // NOBODY ELSE IS NEAR: the man who gave the order may put the cuffs on
+  // himself (restrain.js's Cuff shows on a man with his hands up)
+  function playerHands(j) {
+    if (j.playerHands || j.opts.handsOff) return j.playerHands;
+    const P = CBZ.player, own = j.opts.owner === "president" || j.opts.owner === "player";
+    if (!own || !P || !P.pos || P.dead || dist(P, j.t) > 25) return false;
+    j.playerHands = true; j.playerAt = j.age;
+    return true;
+  }
+  // somebody's hands are on him, or about to be
+  function closing(j) {
+    const L = lead(j);
+    if (j.cuffS && !j.cuffS.done) return true;
+    if (L && dist(L, j.t) < CUFF_R + 1.5) return true;
+    if (L && dist(L, j.t) < 25 && j.reach && j.reach.who === L && j.reach.stall < 1.5) return true;
+    if (j.unit && j.unit.state === "coming" && j.age < GIVEUP_T + 20) return true;
+    const P = CBZ.player;
+    if (j.playerHands && P && P.pos && dist(P, j.t) < 6 && j.age < GIVEUP_T + PLAYER_WAIT) return true;
+    return false;
+  }
+  // TRULY NOBODY: his hands come down, he says so, he walks off
+  function giveUp(j) {
+    const t = j.t;
+    STATS.nobody++;
+    if (j.ordered || t.surrender) say(t, "Guess nobody's coming.", 2);
+    finish(j, "nobody");
+    walkFree(t, "custody:nobody");
+  }
+  // a free man walks away (systems/leave.js); a man at his own post goes back to it
+  function walkFree(t, tag) {
+    if (!t || t.dead || t._custodyExit) return;
+    lowerHands(t);
+    if (t._post || t._occupySrc || t.staffPost || t._iOnly || t._presStaff || t._presOfficer) return;
+    t.controlled = false; t.state = "walk";
+    if (CBZ.leave && CBZ.leave.go) safe(function () { CBZ.leave.go(t, { tag: tag || "custody:free" }); });
+  }
+
+  // ================================================================
+  //  HELD WITH YOU (opts.hold): cuffed, walked at your shoulder by the agent
+  //  who cuffed him (or by you), until you choose Jail / Execute / Release
+  // ================================================================
+  function playerCar() {
+    const P = CBZ.player;
+    return P && P.driving && P._vehicle && !P._vehicle.dead ? P._vehicle : null;
+  }
+  function enterHold(j) {
+    j.phase = "hold"; j.pt = 0; j.held = true; STATS.held++;
+    const L = lead(j);
+    // one pair of hands keeps him; the other goes back to what he was doing
+    for (let i = j.officers.length - 1; i >= 0; i--) {
+      const o = j.officers[i];
+      if (o === L) continue;
+      if (j.spawned.indexOf(o) >= 0) leave(o, j); else releaseOfficer(j, o);
+      j.officers.splice(i, 1);
+    }
+    // a unit that brought the hands has nobody to take yet: it goes back
+    if (j.car && j.unit && !j.departed) { CARS_LEAVING.push({ car: j.car, unit: j.unit, t: 0 }); pullOut(j.car, j.unit); j.car = null; j.unit = null; }
+  }
+  function stepHold(j, dt) {
+    const t = j.t, P = CBZ.player, Rs = R(), s = rstate(t);
+    // IN THE BACK OF YOUR CAR: he rides with you; the hands go back to work
+    if (s === "in_vehicle") {
+      const car = t.restraint.vehicle;
+      if (j.riding !== car) {
+        j.riding = car; j.outT = 0;
+        for (let i = j.officers.length - 1; i >= 0; i--) { const o = j.officers[i]; if (j.spawned.indexOf(o) >= 0) leave(o, j); else releaseOfficer(j, o); }
+        j.officers.length = 0;
+      }
+      // you got out beside him: he is taken out with you
+      if (P && !P.driving && car && car.pos && hyp(P.pos.x, P.pos.z, car.pos.x, car.pos.z) < 8) {
+        j.outT += dt;
+        if (j.outT > OUT_T && Rs && Rs.unseat) { safe(function () { Rs.unseat(t); }); j.outT = 0; }
+      } else j.outT = 0;
+      return;
+    }
+    j.riding = null;
+    if (s === "boarding") {
+      if (j.pt > LOAD_MAX && Rs && Rs.unseat) { safe(function () { Rs.unseat(t); }); j.pt = 0; }
+      return;
+    }
+    j.pt = 0;
+    // YOU DRIVE: into the back seat of your car
+    const car = playerCar();
+    if (car && dist(t, car) < SEAT_R && Math.abs(car.v || 0) < 3 && Rs && Rs.seat) {
+      const H = lead(j);
+      if (safe(function () { return Rs.seat(t, car); })) { if (H && !j.said.back) { j.said.back = true; say(H, "In the back.", 1.4); } return; }
+    }
+    // the player is marching him himself: his hands, not an agent's
+    if (s === "escorted" && !t.restraint.officer) return;
+    prune(j);
+    let L = lead(j);
+    // an agent near him takes him over (yours, when you were the one holding him)
+    if (!L && !j.opts.handsOff && recruit(j, 1, 25)) L = lead(j);
+    if (!L) {
+      // your own hands: he walks with you when you are at his side
+      if (P && P.pos && !P.dead && !P.driving && dist(t, P) < 2.6 && s === "cuffed" && Rs && Rs.escort) safe(function () { Rs.escort(t); });
+      return;
+    }
+    if (rstate(t) === "cuffed" && Rs && Rs.escort) safe(function () { Rs.escort(t, L); });
+    if (rstate(t) === "cuffed" && !(Rs && Rs.escort && VB())) { t.restraint.state = "escorted"; t.restraint.officer = L; }
+    // you walked off (or drove off): the agent stands with him and keeps him
+    if (!P || !P.pos || P.dead || P.driving || dist(P, t) > HOLD_FAR) { stand(L, t, dt); placeEscorted(j, L); return; }
+    // at your shoulder, on his side of you
+    let ax = L.pos.x - P.pos.x, az = L.pos.z - P.pos.z;
+    const n = Math.hypot(ax, az);
+    if (n < 0.01) { ax = 1; az = 0; } else { ax /= n; az /= n; }
+    const gx = P.pos.x + ax * HOLD_GAP, gz = P.pos.z + az * HOLD_GAP;
+    const dd = hyp(L.pos.x, L.pos.z, gx, gz);
+    goTo(L, gx, gz, dd > 6 ? 3.4 : dd > 2 ? 2.2 : WALK, dt, 0.7);
+    placeEscorted(j, L);
+  }
+  // ---- the four choices --------------------------------------------------------------
+  function heldJob(x) { const j = x && x.t && x.phase ? x : jobOf(x); return j && j.cuffed && j.held && !j.done ? j : null; }
+  // JAIL: a unit comes for him and he goes through the pipeline; in the back
+  // of your car he is yours to drive in (the desk's Hand over takes him)
+  function jail(x) {
+    const j = heldJob(x);
+    if (!j) return false;
+    j.held = false; STATS.jailed++;
+    const L = lead(j), t = j.t;
+    if (rstate(t) === "in_vehicle") {
+      j.phase = "desk"; j.pt = 0;
+      const f = facilityFor("police");
+      if (f.x != null && CBZ.fullMap && CBZ.fullMap.setWaypoint) safe(function () { CBZ.fullMap.setWaypoint(f.x, f.z, f.name); });
+      return true;
+    }
+    if (L) say(L, "Taking him in.", 1.6);
+    requestUnit(j);
+    j.phase = L ? "escort" : "wait"; j.pt = 0; j.parkT = 0;
+    return true;
+  }
+  // SEARCH: the pat-down; what he carries is said over the searcher's head
+  function search(x) {
+    const j = heldJob(x);
+    if (!j || j.searched) return false;
+    j.searched = true; STATS.searched++;
+    const t = j.t, L = lead(j), V = VB();
+    const hands = L || (V && V.playerActor ? safe(V.playerActor) : null);
+    if (V && V.frisk && hands) safe(function () { return V.frisk(hands, t, { far: true }); });
+    const found = j.seized.slice();
+    if (t.armed && t.weapon) found.push(t.weapon);
+    const keys = CBZ.cityKeys && CBZ.cityKeys.pedKeys ? safe(function () { return CBZ.cityKeys.pedKeys(t); }) : null;
+    if (keys && keys.length) {
+      found.push(keys.length > 1 ? keys.length + " keys" : "a key");
+      if (CBZ.cityKeys.lift) safe(function () { CBZ.cityKeys.lift(t, "gunpoint"); });   // the keys are yours now
+    }
+    if ((t.cash | 0) > 0) found.push("$" + (t.cash | 0));
+    if (j.rec) for (let i = 0; i < found.length; i++) if (j.rec.seized.indexOf(found[i]) < 0 && !/^\$/.test(found[i])) j.rec.seized.push(found[i]);
+    const line = found.length ? found.join(", ") + "." : "He's clean.";
+    const by = L || (CBZ.city && CBZ.city.playerActor) || null;
+    if (by) say(by, line, 2.4);
+    j.found = found;
+    return true;
+  }
+  // EXECUTE: shot where he stands. The normal death (city/peds.js
+  // cityKillPed: the corpse, the alarm, the witnesses); the agent's shot is
+  // the President's to answer for (city/orders.js bills a man killed under his
+  // order), yours is murder like any other
+  function execute(x) {
+    const j = heldJob(x);
+    if (!j) return false;
+    const t = j.t, L = lead(j), P = CBZ.player;
+    j.executed = true; STATS.executed++;
+    let imp;
+    if (L) {
+      if (CBZ.cityBrain && CBZ.cityBrain.unholster) safe(function () { CBZ.cityBrain.unholster(L); });
+      faceTo(L, t.pos.x, t.pos.z);
+      if (CBZ.muzzleFlash) safe(function () { CBZ.muzzleFlash({ x: L.pos.x, y: (L.pos.y || 0) + 1.4, z: L.pos.z }, {}); });
+      imp = { fromX: L.pos.x, fromZ: L.pos.z, force: 6, fling: 3, attacker: L, byPlayer: false };
+    } else {
+      const m = CBZ.playerMuzzleWorld ? safe(CBZ.playerMuzzleWorld) : null;
+      if (CBZ.muzzleFlash && P && P.pos) safe(function () { CBZ.muzzleFlash(m || { x: P.pos.x, y: 1.4, z: P.pos.z }, {}); });
+      imp = { fromX: P ? P.pos.x : t.pos.x, fromZ: P ? P.pos.z : t.pos.z, force: 6, fling: 3 };
+    }
+    if (CBZ.sfx) safe(function () { CBZ.sfx("report"); });
+    if (CBZ.cityKillPed) safe(function () { CBZ.cityKillPed(t, imp, "executed"); });
+    if (!t.dead) { t.dead = true; t.hp = 0; }
+    // an agent's shot on the President's word is the President's bill
+    if (L && j.opts.owner === "president" && CBZ.cityOrders2 && CBZ.cityOrders2.billKill) safe(function () { CBZ.cityOrders2.billKill(t); });
+    else if (L && j.opts.owner === "player" && CBZ.cityCrime) safe(function () { CBZ.cityCrime(250, { x: t.pos.x, z: t.pos.z, type: "murder" }); });
+    finish(j, "dead");
+    return true;
+  }
+  // RELEASE: the cuffs come off and he walks away
+  function free(x) {
+    const j = x && x.t && x.phase ? x : jobOf(x);
+    if (!j || !j.cuffed || j.departed || j.done) return false;
+    const t = j.t, L = lead(j);
+    STATS.freed++;
+    cancel(j, { free: true });
+    if (L) say(L, "You're free to go.", 1.8);
+    walkFree(t, "custody:released");
+    return true;
   }
 
   // ================================================================
@@ -588,8 +962,17 @@
     }
   }
   function stepClose(j, dt) {
-    const t = j.t, L = lead(j);
-    if (!L) { finish(j, "no-officers"); return; }
+    const t = j.t, L = responder(j, dt);
+    if (!L) {
+      // nobody's hands yet: a unit is coming, or yours are asked. A man who
+      // was already told keeps his hands up while they come.
+      if (j.playerHands && !j.ordered) {
+        const P = CBZ.player;
+        if (P && P.pos && dist(P, t) < ORDER_R) { j.ordered = true; j.resist = null; say(t, "Okay! Okay!", 1.6); }
+      }
+      if (j.ordered && !j.resist) holdStill(t);
+      return;
+    }
     const d = dist(L, t);
     if (!j.ordered && d < ORDER_R) {
       j.ordered = true;
@@ -603,11 +986,13 @@
       if (j.resist) { j.phase = "subdue"; j.pt = 0; return; }
       if (d < CUFF_R + 1.2 && cuffable(t)) { j.phase = "cuff"; j.pt = 0; return; }
     }
-    if (j.age > 60) finish(j, "timeout");
   }
   function stepSubdue(j, dt) {
-    const t = j.t, L = lead(j);
-    if (!L) { finish(j, "no-officers"); return; }
+    const t = j.t;
+    prune(j);
+    let L = lead(j);
+    if (!L && recruit(j, 2)) L = lead(j);
+    if (!L) { say(t, "Later.", 1.2); finish(j, "escaped"); return; }     // nobody left to chase him
     const d = dist(L, t);
     if (j.resist === "run" && t.target && t.target.set && !(t.ko > 0)) {
       // he keeps running away from them
@@ -636,13 +1021,15 @@
     if (j.pt > CHASE_MAX) { say(L, "Lost him.", 1.6); finish(j, "escaped"); }
   }
   function stepCuff(j, dt) {
-    const t = j.t, L = lead(j);
+    const t = j.t;
     if (rstate(t) === "cuffed" || rstate(t) === "escorted") { cuffedEvent(j); return; }
-    if (!L) { finish(j, "no-officers"); return; }
+    const L = responder(j, dt);
     if (!(t.ko > 0)) holdStill(t);
+    if (!L) { j.phase = "close"; j.pt = 0; return; }          // his hands went; the next come in
     flank(j, L, dt, 2.2);
     if (j.cuffS) {
-      if (!j.cuffS.done) return;
+      // a cuff verb that never finishes is finished for it: the cuffs go on
+      if (!j.cuffS.done) { j.cuffT = (j.cuffT || 0) + dt; if (j.cuffT > CUFF_VERB_MAX) { STATS.cuffForced++; cuffedEvent(j); } return; }
       const out = j.cuffS.result && j.cuffS.result.outcome;
       const V = VB();
       j.cuffS = null;
@@ -656,7 +1043,7 @@
     const V = VB();
     if (V && V.cuff && j.fallT < 4) {
       const S = safe(function () { return V.cuff(L, t, { far: true }); });
-      if (S) { j.cuffS = S; return; }
+      if (S) { j.cuffS = S; j.cuffT = 0; return; }
     }
     // no hands to animate (or the verb would not start): the cuffs still take their time
     stand(L, t, dt);
@@ -681,7 +1068,14 @@
   }
   // walked by the arm to the back door
   function stepEscort(j, dt) {
+    prune(j);
+    if (!lead(j) && !j.opts.handsOff) recruit(j, 1, 30);
     const t = j.t, L = lead(j), car = j.car, u = j.unit;
+    // still in the back of somebody else's car (yours): out first, then walked
+    if (rstate(t) === "in_vehicle" && car && t.restraint.vehicle !== car) {
+      if (u && u.state === "parked" && !playerCar() && R() && R().unseat) safe(function () { R().unseat(t); });
+      return;
+    }
     if (rstate(t) === "in_vehicle" && t.restraint.vehicle === car) { j.phase = "load"; j.pt = 0; return; }
     if (!car) {
       requestUnit(j);
@@ -1143,6 +1537,7 @@
       return;
     }
     dt = dt || 0;
+    CLOCK += dt;
     for (let i = JOBS.length - 1; i >= 0; i--) {
       const j = JOBS[i];
       if (!j || j.done) { JOBS.splice(i, 1); continue; }
@@ -1151,6 +1546,14 @@
       if (t.dead) { finish(j, "dead"); continue; }
       // the ties came off by some other hand (the player cut him loose): free
       if (j.cuffed && !t.restraint && !j.offscreen) { if (j.rec && IN_CUSTODY[j.rec.status]) j.rec.status = "released"; t._custody = null; finish(j, "freed"); continue; }
+      // somebody's hands got the cuffs on (yours, restrain.js's Cuff): custody from here
+      if (!j.cuffed && (rstate(t) === "cuffed" || rstate(t) === "escorted")) cuffedEvent(j);
+      // THE SURRENDER ALWAYS RESOLVES: a unit at REACH_T, and only when
+      // truly nobody is coming does he give up waiting
+      if (!j.cuffed && (j.phase === "close" || j.phase === "cuff")) {
+        if (!j.dispatched && j.age > REACH_T && !closing(j)) dispatch(j);
+        if (j.age > GIVEUP_T && !closing(j)) { giveUp(j); continue; }
+      }
       unitStep(j, dt);
       switch (j.phase) {
         case "close": stepClose(j, dt); break;
@@ -1169,6 +1572,11 @@
             if (j.parkT > 4 && dist(t, j.car) < 30) { j.phase = "board"; j.pt = 0; }
           }
           break;
+        case "hold": stepHold(j, dt); break;
+        case "desk":
+          // in the back of your car on the way to the desk; out of it, he is held again
+          if (rstate(t) !== "in_vehicle" && rstate(t) !== "boarding") { j.phase = "hold"; j.held = true; j.pt = 0; }
+          break;
         case "walkoff": case "walkin": stepWalk(j, dt); break;
         case "board": stepBoard(j, dt); break;
         case "load": stepLoad(j, dt); break;
@@ -1185,11 +1593,23 @@
   function wire() {
     const I = CBZ.interactions;
     if (!I || !I.register) return false;
+    // THE MAN YOU HOLD: his verbs are your choice (E = Jail, the rest on the wheel)
+    const yours = function (t) { const j = jobOf(t); return j && j.cuffed && !j.departed && (j.opts.owner === "player" || j.opts.owner === "president") ? j : null; };
+    const holding = function (t) { const j = yours(t); return j && j.held ? j : null; };
+    I.register("ped", { id: "cu-jail", prio: 79, campaignSafe: true, anyone: true,
+      canShow: function (t) { return !!holding(t); }, label: "Jail",
+      onSelect: function (t) { jail(t); if (I.refresh) I.refresh(); } });
+    I.register("ped", { id: "cu-search", wheel: true, prio: 62, campaignSafe: true, anyone: true,
+      canShow: function (t) { const j = holding(t); return !!(j && !j.searched && rstate(t) !== "in_vehicle"); }, label: "Search",
+      onSelect: function (t) { search(t); if (I.refresh) I.refresh(); } });
+    I.register("ped", { id: "cu-execute", wheel: true, prio: 40, bad: true, campaignSafe: true, anyone: true,
+      canShow: function (t) { const j = holding(t); return !!(j && rstate(t) !== "in_vehicle" && rstate(t) !== "boarding"); }, label: "Execute",
+      onSelect: function (t) { execute(t); if (I.refresh) I.refresh(); } });
     // LET HIM GO: the cuffs come off before the car takes him (whoever gave the order)
-    I.register("ped", { id: "cu-let-go", prio: 79, campaignSafe: true, anyone: true,
-      canShow: function (t) { const j = jobOf(t); return !!(j && j.cuffed && !j.departed && (j.opts.owner === "player" || j.opts.owner === "president")); },
+    I.register("ped", { id: "cu-let-go", wheel: true, prio: 70, campaignSafe: true, anyone: true,
+      canShow: function (t) { return !!yours(t) && rstate(t) !== "boarding"; },
       label: "Release",
-      onSelect: function (t) { const j = jobOf(t); const L = j && lead(j); cancel(t, { free: true }); if (L) say(L, "You're free to go.", 1.8); } });
+      onSelect: function (t) { free(t); if (I.refresh) I.refresh(); } });
     return true;
   }
   let wired = wire();          // else the tick wires it once the registry is up
@@ -1197,7 +1617,8 @@
   CBZ.custody = {
     take: take, cancel: cancel, jobOf: jobOf, holds: holds, blocked: blocked, intake: intake,
     cuffed: function (t) { const j = jobOf(t); return !!(j && j.cuffed); },
-    jobs: function () { return JOBS.map(function (j) { return { id: j.id, name: j.t && j.t.name, phase: j.phase, cuffed: j.cuffed, departed: !!j.departed, car: !!j.car, unit: j.unit ? j.unit.state : null, by: j.by, verb: j.verb }; }); },
+    jobs: function () { return JOBS.map(function (j) { return { id: j.id, name: j.t && j.t.name, phase: j.phase, cuffed: j.cuffed, departed: !!j.departed, car: !!j.car, unit: j.unit ? j.unit.state : null, by: j.by, verb: j.verb, held: !!j.held, holder: (lead(j) || {}).name || (j.held ? "player" : null), dispatched: !!j.dispatched, playerHands: !!j.playerHands }; }); },
+    jail: jail, search: search, execute: execute, free: free,
     book: book, records: records, held: held, get: get, release: release, pardon: pardon, trial: trial, visit: visit,
     facility: facilityFor, agencyKey: agencyKey,
     audit: function () { return Object.assign({ jobs: JOBS.length, leavers: LEAVERS.length, held: held().length, records: store().records.length }, STATS); },

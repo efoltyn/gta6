@@ -164,7 +164,10 @@
     // But only when it was YOU: `by` is the taker, and an NPC crew's kidnapping
     // is that crew's business, not a charge filed against a player who was not
     // in the same postcode.
-    if (ped.restraint.by === "player" && !isWanted(ped) && CBZ.cityCrime) {
+    // A detention the state ordered on him (city/custody.js has a job: the
+    // President's Detain, and nobody else's hands could reach him) is not one.
+    const lawful = !!(CBZ.custody && CBZ.custody.jobOf && CBZ.custody.jobOf(ped));
+    if (ped.restraint.by === "player" && !isWanted(ped) && !lawful && CBZ.cityCrime) {
       CBZ.cityCrime(50, { x: ped.pos.x, z: ped.pos.z, type: "kidnapping" });
     }
     I.refresh();
@@ -392,7 +395,10 @@
     const pay = wanted ? bountyFor(ped) : 0;
     const tag = ped.bountyTag || "";
     const CU = CBZ.custody;
-    if (wanted && CU && CU.intake) {
+    // a man the state detained (custody.js holds him: the President's Detain,
+    // then Jail and you drove him in) is booked like a collar, paid only for paper
+    const detainee = !!(CU && CU.jobOf && CU.jobOf(ped));
+    if ((wanted || detainee) && CU && CU.intake) {
       // out of the back seat by its own door, then off your hands
       if (r.state === "in_vehicle" || r.state === "boarding") unseat(ped);
       if (r.state === "escorted") { letGo(ped, "set"); r.state = "cuffed"; r.officer = null; }
@@ -400,10 +406,12 @@
       ped.npcHeat = 0; ped.npcWanted = 0; ped.rage = null; ped.rampage = null;
       const S = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
       if (!CU.intake(ped, S || { x: ped.pos.x, z: ped.pos.z }, { by: "player" })) return false;
-      CBZ.city && CBZ.city.addCash(pay);
-      CBZ.city && CBZ.city.addRespect(4);
-      if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city && CBZ.city.big("COLLAR + $" + pay + (tag ? " — " + tag : ""));
+      if (pay > 0) {
+        CBZ.city && CBZ.city.addCash(pay);
+        CBZ.city && CBZ.city.addRespect(4);
+        if (CBZ.sfx) CBZ.sfx("coin");
+        CBZ.city && CBZ.city.big("COLLAR + $" + pay + (tag ? " — " + tag : ""));
+      }
       if (CBZ.pushKill) CBZ.pushKill(nm(ped) + " was turned in", "#7ed957");
       I.refresh();
       return true;
