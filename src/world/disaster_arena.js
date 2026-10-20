@@ -217,10 +217,14 @@
   let _s = 1337;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
-  const FH = 3.4;     // floor-to-floor height
-  const WT = 0.3;     // wall thickness
-  const SW = 3.6;     // broad stairwell strip (two easy lanes along the -x interior wall)
-  const DOORW = 1.8;  // front doorway width
+  // THE BUILDING'S NUMBERS AND ITS PLAN (world/island_building.js): floor
+  // height, wall, the stair strip down the -x wall, the street door; the
+  // stairs, landings, slabs, guards and roof every makeBuilding lays
+  const IB = CBZ.islandBuilding;
+  const FH = IB.FH;       // floor-to-floor height
+  const WT = IB.WT;       // wall thickness
+  const SW = IB.SW;       // the stair strip (two lanes along the -x interior wall)
+  const DOORW = IB.DOORW; // front doorway width
 
 
   /* ============================================================
@@ -248,12 +252,7 @@
      the arena's own lbox/tbox walls, and a facade may only add a walk surface
      through ctx.plat (a porch deck or a flight of steps), never a wall.
   ============================================================ */
-  function shadeHex(hex, f) {
-    const r = Math.max(0, Math.min(255, (((hex >> 16) & 255) * f) | 0));
-    const g2 = Math.max(0, Math.min(255, (((hex >> 8) & 255) * f) | 0));
-    const b = Math.max(0, Math.min(255, ((hex & 255) * f) | 0));
-    return (r << 16) | (g2 << 8) | b;
-  }
+  const shadeHex = IB.shadeHex;
 
   /* ============================================================
      THE FINISH: what turns the island's boxes into buildings
@@ -712,19 +711,9 @@
       return m;
     }
 
-    const ctx = {
-      ox: ox, oz: oz, w: o.w, d: o.d, storeys: o.storeys,
-      FH: o.fh, WT: o.wt, rTop: o.rTop, pp: o.pp, doorSide: o.doorSide,
-      slabCx: 0, slabCz: 0, slabW: o.w - 2 * o.wt, slabD: o.d - 2 * o.wt,
-      garageGround: false, showroom: false, civic: null,
-      dress: { style: o.style },
-      pal: { wall: o.color, stone: shadeHex(o.color, 1.14), dirt: 0x2a2420, kind: "brick", id: null },
-      color: o.color,
-      TRIM: shadeHex(o.color, 1.16),
-      BASE: shadeHex(o.color, 0.60),
-      PIL: shadeHex(o.color, 1.06),
-      MULL: 0x39404a,
-      hash: function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; },
+    // the host's numbers (world/island_building.js: the SAME ctx the shell
+    // plan probed the crown with before the stairs were laid), plus emitters
+    const ctx = Object.assign(IB.facadeCtx(o), {
       dbox: dbox,
       // A facade never needs a collider on this island — the arena's own walls
       // already carry them — so lbox is deliberately the deco path too.
@@ -748,7 +737,7 @@
       lamp: function (lx, ly, lz, r, col) { if (inFence(lx - r, lx + r, lz - r, lz + r)) addMesh(new THREE.SphereGeometry(r, 8, 6), col, lx, ly, lz, true); },
       disc: function () {},                 // clock faces: civic only, not here
       plaque: function () {}, seal: function () {},
-    };
+    });
 
     /* THE LIFT TOP. A tower's lift shaft is handed to the kit BEFORE the
        grammar runs: the kit dry-runs the grammar, finds the top of the crown's
@@ -2882,7 +2871,8 @@
     function houseInterior(H) {
       const ox = H.ox, oz = H.oz, gy = H.gy, w = H.w, d = H.d, storeys = H.storeys;
       const ixMin = H.ixMin, ixMax = H.ixMax, izMin = H.izMin, izMax = H.izMax;
-      const sEdge = ixMin + SW, laneW = SW / 2, rTop = storeys * FH;
+      const PL = H.plan, sEdge = PL.sEdge, laneW = SW / 2, rTop = storeys * FH;
+      const hasStair = PL.flights.length > 0, roofUp = PL.roof.access;
       const hh = function (s) { return h01g(ox, oz, s); };
       const K = inKit(ox, oz);
       const cols = H.cols, covers = [];
@@ -2916,7 +2906,7 @@
       // foot of the stair: both stay clear.
       {
         const fy = fyOf(0);
-        const R = { x0: sEdge + 0.35, x1: ixMax, z0: izMin + 1.3, z1: izMax };
+        const R = { x0: hasStair ? sEdge + 0.35 : ixMin + 0.35, x1: ixMax, z0: izMin + 1.3, z1: izMax };
         const blocks = [{ x0: -DOORW / 2 - 0.7, x1: DOORW / 2 + 0.7, z0: izMin, z1: izMin + 2.4 }];
         const host = furnHost(K, ox, oz, gy, cols, fy, null);
         // the windows of this storey, in plan (for "a table goes by a window")
@@ -3088,38 +3078,53 @@
         else domeLight(K, x, yc, z);
       }
       // a light under every landing, for the flight below it
-      for (const lg of H.landings) domeLight(K, (lg.x0 + lg.x1) / 2, lg.L * FH - 0.2, (lg.z0 + lg.z1) / 2, 2.6, 0.2);
+      for (const lg of H.landings) domeLight(K, (lg.x0 + lg.x1) / 2, lg.y - 0.2, (lg.z0 + lg.z1) / 2, 2.6, 0.2);
 
       /* ---- FLOORS AND CEILINGS ----------------------------------------- */
       K.plane(groundKey, ixMin, izMin, ixMax, izMax, 0.08, groundTint, false, K.floorLit(0.08));
       for (let L = 1; L <= storeys; L++) {
         const roof = L === storeys, y = L * FH;
         const lg = landingAt(L);
+        // a roof nobody climbs to is closed over the stair strip: one slab
+        const closed = roof && !roofUp;
+        const x0 = closed ? ixMin : sEdge;
         const key = roof ? "concrete" : "wood", tint = roof ? 0x9a978f : upTint;
         const lit = roof ? null : K.floorLit(y);
-        K.plane(key, sEdge, izMin, ixMax, izMax, y, tint, false, lit);
-        if (lg) K.plane(key, lg.x0, lg.z0, lg.x1, lg.z1, y, tint, false, lit);
+        K.plane(key, x0, izMin, ixMax, izMax, y, tint, false, lit);
+        if (lg && !closed) K.plane(key, lg.x0, lg.z0, lg.x1, lg.z1, y, tint, false, lit);
         // the ceiling of the storey below, under the slab and the landing
         const yc = y - 0.2, cl = K.ceilLit(yc);
-        K.plane("plaster", sEdge, izMin, ixMax, izMax, yc, IN_CEIL, true, cl);
-        if (lg) K.plane("plaster", lg.x0, lg.z0, lg.x1, lg.z1, yc, IN_CEIL, true, cl);
+        K.plane("plaster", x0, izMin, ixMax, izMax, yc, IN_CEIL, true, cl);
+        if (lg && !closed) K.plane("plaster", lg.x0, lg.z0, lg.x1, lg.z1, yc, IN_CEIL, true, cl);
         // the slab's edge where it meets the stairwell, painted (the 20 cm
         // of concrete you see from the stair), and the landing's inner edge
-        const segs = lg ? (lg.z0 <= izMin + 0.01 ? [[lg.z1, izMax]] : [[izMin, lg.z0]]) : [[izMin, izMax]];
-        for (const sg of segs) if (sg[1] - sg[0] > 0.02)
-          K.quad("plaster", [sEdge - 0.004, yc, sg[0]], [sEdge - 0.004, yc, sg[1]], [sEdge - 0.004, y, sg[1]], [sEdge - 0.004, y, sg[0]], [-1, 0, 0], paintUp);
-        if (lg) {
+        if (!closed) {
+          const segs = lg ? (lg.z0 <= izMin + 0.01 ? [[lg.z1, izMax]] : [[izMin, lg.z0]]) : [[izMin, izMax]];
+          for (const sg of segs) if (sg[1] - sg[0] > 0.02)
+            K.quad("plaster", [sEdge - 0.004, yc, sg[0]], [sEdge - 0.004, yc, sg[1]], [sEdge - 0.004, y, sg[1]], [sEdge - 0.004, y, sg[0]], [-1, 0, 0], paintUp);
+        }
+        if (lg && !closed) {
           const zi = lg.z0 <= izMin + 0.01 ? lg.z1 : lg.z0, sgn = lg.z0 <= izMin + 0.01 ? 1 : -1;
           K.quad("plaster", [lg.x0, yc, zi + sgn * 0.004], [lg.x1, yc, zi + sgn * 0.004], [lg.x1, y, zi + sgn * 0.004], [lg.x0, y, zi + sgn * 0.004], [0, 0, sgn], paintUp);
         }
         if (roof) {
           // the membrane turns up the inside of the parapets
-          K.box("concrete", (sEdge + ixMax) / 2, y + 0.075, izMax - 0.01, ixMax - sEdge, 0.15, 0.02, 0x8a877f, 4 | 32);
-          K.box("concrete", (sEdge + ixMax) / 2, y + 0.075, izMin + 0.01, ixMax - sEdge, 0.15, 0.02, 0x8a877f, 4 | 16);
+          K.box("concrete", (x0 + ixMax) / 2, y + 0.075, izMax - 0.01, ixMax - x0, 0.15, 0.02, 0x8a877f, 4 | 32);
+          K.box("concrete", (x0 + ixMax) / 2, y + 0.075, izMin + 0.01, ixMax - x0, 0.15, 0.02, 0x8a877f, 4 | 16);
           K.box("concrete", ixMax - 0.01, y + 0.075, (izMin + izMax) / 2, 0.02, 0.15, izMax - izMin - 0.04, 0x8a877f, 4 | 2);
+          if (closed) K.box("concrete", ixMin + 0.01, y + 0.075, (izMin + izMax) / 2, 0.02, 0.15, izMax - izMin - 0.04, 0x8a877f, 4 | 1);
         }
       }
-
+      // a dog-leg's half landings: floor, ceiling and their two edges
+      for (const lg of H.landings) {
+        if (lg.L % 1 === 0) continue;
+        const y = lg.y, yc = y - 0.2;
+        K.plane("wood", lg.x0, lg.z0, lg.x1, lg.z1, y, upTint, false, K.floorLit(y));
+        K.plane("plaster", lg.x0, lg.z0, lg.x1, lg.z1, yc, IN_CEIL, true, K.ceilLit(yc));
+        const zi = lg.z0 <= izMin + 0.01 ? lg.z1 : lg.z0, sgn = lg.z0 <= izMin + 0.01 ? 1 : -1;
+        K.quad("plaster", [lg.x0, yc, zi + sgn * 0.004], [lg.x1, yc, zi + sgn * 0.004], [lg.x1, y, zi + sgn * 0.004], [lg.x0, y, zi + sgn * 0.004], [0, 0, sgn], paintUp);
+        K.quad("plaster", [lg.x1 + 0.004, yc, lg.z0], [lg.x1 + 0.004, yc, lg.z1], [lg.x1 + 0.004, y, lg.z1], [lg.x1 + 0.004, y, lg.z0], [1, 0, 0], paintUp);
+      }
       /* ---- WALLS: plaster skin, skirting, window reveals, the door ------ */
       const faces = [
         { s: 0, n: -d / 2 + WT, inward: 1, a0: ixMin, a1: ixMax, glassN: -(d / 2 - 0.07) },
@@ -3151,86 +3156,86 @@
       /* ---- THE STAIR ------------------------------------------------------
          Each flight is a closed stair: oak treads with a nosing over painted
          risers on a solid body whose underside is the sloped soffit, between
-         two stringers, with a rail on the open side. Drawn over the SAME
-         physics ramp it always had (the treads straddle the ramp's line). */
-      const RISE = FH / 9;
-      for (const F of H.flights) {
-        const k = F.k, dir = F.dir, run = F.rampEndZ - F.startZ, rd = run / 9;
-        const xa = F.lx0 + 0.04, xb = F.lx0 + laneW - 0.04;
-        const yP = function (z) { return k * FH + (z - F.startZ) / run * FH; };
-        const floorClamp = k === 0 ? 0.08 : k * FH - 0.2;
-        const ySoff = function (z) { return Math.max(floorClamp, yP(z) - 0.32); };
-        for (let i = 1; i <= 9; i++) {
-          const z0 = F.startZ + (i - 1) * rd, z1 = F.startZ + i * rd;
-          const top = k * FH + (i - 0.5) * RISE;
-          // the body under this tread: flat top, sloped bottom (the soffit)
-          const ya = ySoff(z0), yb = ySoff(z1), yt = top - 0.035;
-          K.hexa("plaster", [[xa, ya, z0], [xb, ya, z0], [xb, yb, z1], [xa, yb, z1],
-            [xa, yt, z0], [xb, yt, z0], [xb, yt, z1], [xa, yt, z1]], IN_TRIM);
-          // the tread, 35 mm oak, its nosing 25 mm over the riser below
-          const zn = z0 - dir * 0.025;
-          K.box("wood", (xa + xb) / 2, top - 0.0175, (zn + z1) / 2, xb - xa, 0.035, Math.abs(z1 - zn), upTint);
-        }
-        // stringers both sides: a sloped board from the soffit to over the nosings
-        const zS = F.startZ, zE = F.rampEndZ;
-        for (let sd = 0; sd < 2; sd++) {
-          const x0 = sd ? xb : F.lx0 + 0.005, x1 = sd ? F.lx0 + laneW - 0.005 : xa;
-          const b0 = ySoff(zS) - 0.02, b1 = ySoff(zE) - 0.02, t0 = yP(zS) + RISE / 2 + 0.07, t1 = yP(zE) + RISE / 2 + 0.07;
-          K.hexa("flat", [[x0, b0, zS], [x1, b0, zS], [x1, b1, zE], [x0, b1, zE],
-            [x0, t0, zS], [x1, t0, zS], [x1, t1, zE], [x0, t1, zE]], IN_TRIM);
-        }
-        // the rail, on the side open to the other lane: newels, balusters, a
-        // sloped oak handrail 0.9 m over the pitch line
-        const xr = (k % 2 === 0) ? F.lx0 + laneW - 0.03 : F.lx0 + 0.03;
-        const zr0 = zS + dir * 0.15, zr1 = zE - dir * 0.1;
+         two stringers, with a rail on every open side. Drawn from the plan's
+         flight record (world/island_building.js), over the SAME treads its
+         walk surface is: riser i at zb + i·going, tread i's top yb + i·rise,
+         the last riser onto the landing at zt. */
+      const railAlong = function (F, xr, pitch) {
+        // newels at both ends, balusters, a sloped oak handrail 0.9 m over
+        // the pitch line
+        const zr0 = F.zb + F.dir * 0.15, zr1 = F.zt - F.dir * 0.1;
         const RH = 0.9;
-        const hr0 = yP(zr0) + RISE / 2 + RH, hr1 = yP(zr1) + RISE / 2 + RH;
+        const hr0 = pitch(zr0) + RH, hr1 = pitch(zr1) + RH;
         K.hexa("flat", [[xr - 0.03, hr0 - 0.05, zr0], [xr + 0.03, hr0 - 0.05, zr0], [xr + 0.03, hr1 - 0.05, zr1], [xr - 0.03, hr1 - 0.05, zr1],
           [xr - 0.03, hr0, zr0], [xr + 0.03, hr0, zr0], [xr + 0.03, hr1, zr1], [xr - 0.03, hr1, zr1]], 0x5c3d26);
         for (const zn of [zr0, zr1]) {
-          const yb = yP(zn) + RISE / 2 + 0.05, yt = yP(zn) + RISE / 2 + RH + 0.08;
+          const yb = pitch(zn) + 0.02, yt = pitch(zn) + RH + 0.08;
           K.box("flat", xr, (yb + yt) / 2, zn, 0.08, yt - yb, 0.08, 0x5c3d26);
         }
         const nb = Math.max(2, Math.floor(Math.abs(zr1 - zr0) / 0.36));
         for (let j = 1; j < nb; j++) {
           const zn = zr0 + (zr1 - zr0) * j / nb;
-          const yb = yP(zn) + RISE / 2 + 0.07, yt = yP(zn) + RISE / 2 + RH - 0.05;
+          const yb = pitch(zn) + 0.04, yt = pitch(zn) + RH - 0.05;
           K.box("flat", xr, (yb + yt) / 2, zn, 0.025, yt - yb, 0.025, IN_TRIM, 1 | 2 | 16 | 32);
         }
+      };
+      for (const F of H.flights) {
+        const dir = F.dir, g = F.going, rise = F.rise, n = F.risers;
+        const xa = F.x0 + 0.04, xb = F.x1 - 0.04;
+        // the pitch line, through every nosing (riser i's top edge)
+        const pitch = function (z) { return F.yb + rise + (z - F.zb) * dir / g * rise; };
+        const floorClamp = F.L0 === 0 ? 0.08 : F.yb - 0.2;
+        const ySoff = function (z) { return Math.max(floorClamp, pitch(z) - 0.32); };
+        for (let i = 1; i < n; i++) {
+          const z0 = F.zb + dir * (i - 1) * g, z1 = F.zb + dir * i * g;
+          const top = F.yb + i * rise;
+          // the body under this tread: flat top, sloped bottom (the soffit)
+          const za = Math.min(z0, z1), zb2 = Math.max(z0, z1);
+          const ya = ySoff(za), yb = ySoff(zb2), yt = top - 0.035;
+          K.hexa("plaster", [[xa, ya, za], [xb, ya, za], [xb, yb, zb2], [xa, yb, zb2],
+            [xa, yt, za], [xb, yt, za], [xb, yt, zb2], [xa, yt, zb2]], IN_TRIM);
+          // the tread, 35 mm oak, its nosing 25 mm over the riser below
+          const zn = z0 - dir * 0.025;
+          K.box("wood", (xa + xb) / 2, top - 0.0175, (zn + z1) / 2, xb - xa, 0.035, Math.abs(z1 - zn), upTint);
+        }
+        // (the last riser is the landing slab's own edge at zt)
+        // stringers both sides: a sloped board from the soffit to over the nosings
+        const zS = F.zb, zE = F.zt;
+        for (let sd = 0; sd < 2; sd++) {
+          const x0 = sd ? xb : F.x0 + 0.005, x1 = sd ? F.x1 - 0.005 : xa;
+          const b0 = ySoff(zS) - 0.02, b1 = ySoff(zE) - 0.02, t0 = pitch(zS) + 0.07, t1 = pitch(zE) + 0.07;
+          K.hexa("flat", [[x0, b0, zS], [x1, b0, zS], [x1, b1, zE], [x0, b1, zE],
+            [x0, t0, zS], [x1, t0, zS], [x1, t1, zE], [x0, t1, zE]], IN_TRIM);
+        }
+        // a rail on every open side (the plan's guards are its colliders)
+        for (const xo of F.open || []) railAlong(F, xo === F.x1 ? F.x1 - 0.03 : F.x0 + 0.03, pitch);
       }
-      // THE STAIRWELL EDGE on every upper floor (and the roof when no bulkhead
-      // encloses it): a painted knee wall under an oak cap along the slab's
-      // edge, open only where the landing meets the floor. Solid: walking off
-      // the floor into a three-storey drop used to be one step to the left.
-      const kneeWall = function (L, z0, z1) {
-        if (z1 - z0 < 0.1) return;
-        const y = L * FH, zc = (z0 + z1) / 2;
-        K.box("plaster", sEdge + 0.05, y + 0.475, zc, 0.1, 0.95, z1 - z0, L === storeys ? 0xd8d4ca : paintUp, 63 & ~8);
-        K.box("flat", sEdge + 0.05, y + 0.97, zc, 0.14, 0.04, z1 - z0 + 0.02, 0x5c3d26);
-        const c = { minX: ox + sEdge, maxX: ox + sEdge + 0.1, minZ: oz + z0, maxZ: oz + z1, ref: null, y0: gy + y, y1: gy + y + 0.99 };
-        CBZ.colliders.push(c); cols.push(c);
-      };
-      const kneeFor = function (L) {
-        const lg = landingAt(L);
-        if (!lg) { kneeWall(L, izMin, izMax); return; }
-        if (lg.z0 <= izMin + 0.01) kneeWall(L, lg.z1 + 0.05, izMax); else kneeWall(L, izMin, lg.z0 - 0.05);
-      };
-      for (let L = 1; L < storeys; L++) kneeFor(L);
+      // THE STAIRWELL EDGES: a painted knee wall under an oak cap along each
+      // upper floor's slab edge (open only where the landing meets the
+      // floor), along a half landing's room side, and across the top
+      // landing's edge over the well. The plan's guards; makeBuilding laid
+      // their colliders.
+      for (const gd of PL.guards) {
+        if (gd.kind === "rail") continue;
+        const yb = gd.y0, h = gd.y1 - gd.y0 - 0.04;
+        const along = gd.z1 - gd.z0 > gd.x1 - gd.x0;
+        const cx = (gd.x0 + gd.x1) / 2, cz = (gd.z0 + gd.z1) / 2;
+        const lx = gd.x1 - gd.x0, lz = gd.z1 - gd.z0;
+        K.box("plaster", cx, yb + h / 2, cz, lx, h, lz, gd.L >= storeys ? 0xd8d4ca : paintUp, 63 & ~8);
+        K.box("flat", cx, yb + h + 0.02, cz, along ? 0.14 : lx + 0.02, 0.04, along ? lz + 0.02 : 0.14, 0x5c3d26);
+      }
 
       /* ---- THE ROOF ------------------------------------------------------
-         The stair came up through a 3.6 m hole in the roof, open to the sky
-         (and the rain). Now it arrives in a BULKHEAD: the building's own
-         walls carried up a storey round the stair, roofed, with a doorway
-         onto the roof where the top landing is. Only where the facade has
-         not stood its own crown there; else the stairwell keeps a knee wall
-         and the roof edge a parapet. */
-      const BH = 2.6, bx1 = sEdge + 0.12;
+         The stair arrives in a BULKHEAD: the building's own walls carried up
+         a storey round the stair, roofed, with a doorway onto the roof where
+         the top landing is. Only on a roof the plan says is a place (no crown
+         in the stairwell or over the roof, a clear apron at the door); every
+         other roof is closed over the strip and has no way up. */
+      const BH = IB.BH, bx1 = sEdge + IB.BXT;
       const crownIn = function (x0, x1, z0, z1, y0, y1) {
         for (const c of H.crown) if (c[1] > x0 && c[0] < x1 && c[5] > z0 && c[4] < z1 && c[3] > y0 && c[2] < y1) return true;
         return false;
       };
-      const topLg = landingAt(storeys);
-      const bulk = !crownIn(-w / 2, bx1, -d / 2, d / 2, rTop + PPH_ROOF, rTop + BH + 0.3);
       const late = H.late;             // shell boxes laid after the facade flush
       const wallBox = function (x0, x1, z0, z1, y0, y1, solid) {
         late.push([(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, x1 - x0, y1 - y0, z1 - z0, H.color, true]);
@@ -3239,17 +3244,11 @@
           CBZ.colliders.push(c); cols.push(c);
         }
       };
-      if (bulk) {
-        const yA = rTop, yB = rTop + BH;
-        wallBox(-w / 2, -w / 2 + WT, -d / 2, d / 2, yA, yB, true);                 // -x
-        wallBox(-w / 2 + WT, bx1, -d / 2, -d / 2 + WT, yA, yB, true);              // -z
-        wallBox(-w / 2 + WT, bx1, d / 2 - WT, d / 2, yA, yB, true);                // +z
-        // the front, onto the roof: a doorway where the top landing is
-        const dz0 = topLg ? Math.max(izMin, topLg.z0 + 0.05) : izMin, dz1 = topLg ? Math.min(izMax, topLg.z1 - 0.05) : izMin + 1.1;
-        const DH = 2.2;
-        wallBox(sEdge, bx1, izMin, dz0, yA, yB, true);
-        wallBox(sEdge, bx1, dz1, izMax, yA, yB, true);
-        wallBox(sEdge, bx1, dz0, dz1, yA + DH, yB, false);
+      const BK = PL.roof.bulkhead;
+      if (BK) {
+        const yA = BK.y0, yB = BK.y1, DH = BK.doorH;
+        const dz0 = PL.roof.door.z0, dz1 = PL.roof.door.z1;
+        for (const wl of BK.walls) wallBox(wl.x0, wl.x1, wl.z0, wl.z1, wl.y0, wl.y1, wl.solid);
         // its roof: a slab, and over it the roofing, lapped 4 cm over every
         // edge as a drip; a ceiling under it
         late.push([(-w / 2 + bx1) / 2, yB + 0.0825, 0, bx1 + w / 2, 0.165, d, IN_STRUCT, true]);
@@ -3267,23 +3266,19 @@
         K.box("flat", sEdge + 0.06, yA + DH / 2, dz0 + 0.008, 0.12, DH, 0.016, IN_TRIM, 16);
         K.box("flat", sEdge + 0.06, yA + DH / 2, dz1 - 0.008, 0.12, DH, 0.016, IN_TRIM, 32);
         domeLight(K, ixMin + SW / 2, yB - 0.002, (izMin + izMax) / 2, 2.4, 0.2);
-        // (the bulkhead's own front wall is the stairwell's guard at roof
-        // level, so the roof keeps its parapet only over the slab)
-      } else {
-        // no bulkhead: a parapet on the stair strip's roof edges, and the
-        // stairwell's knee wall at roof level too
-        H.parapet(-w / 2, -w / 2 + WT, -d / 2, d / 2);
-        H.parapet(-w / 2 + WT, sEdge, -d / 2, -d / 2 + WT);
-        H.parapet(-w / 2 + WT, sEdge, d / 2 - WT, d / 2);
-        kneeFor(storeys);
       }
+      // the roof plant stays off the apron outside the bulkhead door
+      const apronX1 = BK ? bx1 + IB.APRON + 0.2 : -Infinity;
+      const onApron = function (x0, x1, z0, z1) {
+        return BK && x0 < apronX1 && z1 > PL.roof.door.z0 - 0.2 && z0 < PL.roof.door.z1 + 0.2;
+      };
       // ROOF PLANT: a condenser on a curb at the back of the roof (the thing
       // a flat roof actually carries), and two vent stacks, clear of the
       // stair, the parapet and any crown the facade stood there
       const hvacAt = function (x, z) {
         const hx = 0.5, hz = 0.5;
         if (x - hx < sEdge + 0.9 || x + hx > ixMax - 0.25 || z - hz < izMin + 0.25 || z + hz > izMax - 0.25) return false;
-        if (crownIn(x - hx, x + hx, z - hz, z + hz, rTop, rTop + 1.1)) return false;
+        if (crownIn(x - hx, x + hx, z - hz, z + hz, rTop, rTop + 1.1) || onApron(x - hx, x + hx, z - hz, z + hz)) return false;
         const y = rTop;
         K.box("flat", x, y + 0.05, z, 1.0, 0.1, 1.0, 0x55585c, 63 & ~8);
         K.box("flat", x, y + 0.46, z, 0.9, 0.72, 0.9, 0xb4b6b3, 63 & ~8);
@@ -3303,15 +3298,16 @@
       if (!H.crownsRoof && !hvacAt(ixMax - 0.95, izMax - 0.95)) hvacAt(ixMax - 0.95, izMin + 0.95);
       if (!H.crownsRoof) for (let j = 0; j < 2; j++) {
         const vx = sEdge + 1.2 + j * 0.9, vz = izMax - 0.35;
-        if (vx > ixMax - 1.6 || crownIn(vx - 0.1, vx + 0.1, vz - 0.1, vz + 0.1, rTop, rTop + 0.6)) continue;
+        if (vx > ixMax - 1.6 || crownIn(vx - 0.1, vx + 0.1, vz - 0.1, vz + 0.1, rTop, rTop + 0.6) || onApron(vx - 0.1, vx + 0.1, vz - 0.1, vz + 0.1)) continue;
         K.box("flat", vx, rTop + 0.28, vz, 0.11, 0.56, 0.11, 0x5f6164, 63 & ~8);
         K.box("flat", vx, rTop + 0.58, vz, 0.16, 0.04, 0.16, 0x4a4c4f);
+        const c = { minX: ox + vx - 0.08, maxX: ox + vx + 0.08, minZ: oz + vz - 0.08, maxZ: oz + vz + 0.08, ref: null, y0: gy + rTop, y1: gy + rTop + 0.6 };
+        CBZ.colliders.push(c); cols.push(c);
       }
 
       K.flush(H.group, false);
       return covers;
     }
-    const PPH_ROOF = 0.7;
 
     /* ---- A BUILDING THAT FACES ITS STREET ---------------------------------
        makeBuilding lays every record (colliders, walk platforms, stair ramps
@@ -3526,7 +3522,6 @@
       const cols = [], plats = [], glassList = [], shellMerge = [];
       const ixMin = -w / 2 + WT, ixMax = w / 2 - WT;   // interior x span
       const izMin = -d / 2 + WT, izMax = d / 2 - WT;   // interior z span
-      const sx = ixMin + SW / 2;                       // stairwell strip centre (x)
 
       // local box; opts.solid → height-gated collider, opts.plat → walkable top,
       // opts.los → camera/vision blocker. Coords are local to bgroup; the
@@ -3613,26 +3608,39 @@
         }
       }
 
-      // floor slabs (levels 1..storeys; the top one is the ROOF). Each slab
-      // covers the interior MINUS the open stairwell strip on the -x side.
-      const slabW = ixMax - (ixMin + SW), slabCx = (ixMin + SW + ixMax) / 2, slabD = izMax - izMin, slabCz = (izMin + izMax) / 2;
-      // The walk surface (the platform record) is exactly the old slab's; the
-      // VISIBLE slab is the structure between the finished floor (15 mm oak
-      // or tile, laid by the interior pass) and the ceiling board (12 mm).
-      for (let L = 1; L <= storeys; L++) {
-        lbox(slabCx, L * FH - 0.1, slabCz, slabW, 0.2, slabD, 0xb9bec6, { plat: true, noVis: true });
-        shellMerge.push([slabCx, L * FH - 0.1015, slabCz, slabW, 0.173, slabD, 0x8e8a82, true]);
-      }
-      // a slab over the stairwell strip on the GROUND floor's far side would
-      // block the climb, so we leave the strip open all the way up. The roof
-      // edge is a PARAPET all the way round, in the wall's own finish under a
-      // stone coping, and it is solid: it used to be a paint-only box you
-      // walked straight through (and there was none at all on -x). The run
-      // over the stair strip is laid after the facade, because that is where
-      // a stair bulkhead may stand instead (see THE ROOF).
+      /* THE PLAN (world/island_building.js). The facade's crown is probed
+         FIRST (the kit's dry run, the same ctx the dressing gets), because
+         it decides whether this roof is a place: a stair goes up only to a
+         roof you can stand on. Then every slab, landing, flight, guard,
+         parapet and roof collider below is laid from the plan, the plan
+         tools/island-stairs-check.mjs audits in node. */
       const rTop = storeys * FH;
-      const PPH = 0.7, sEdge = ixMin + SW;              // parapet height; the stair strip's +x edge
-      const parapet = function (x0, x1, z0, z1, merge) {
+      const dressing = !!(style && CBZ.facadeCrownProbe && !(CBZ.CONFIG && CBZ.CONFIG.SURV_FACADES === false));
+      let crown0 = [];
+      if (dressing) {
+        try {
+          crown0 = CBZ.facadeCrownProbe(IB.facadeCtx({ ox: ox, oz: oz, w: w, d: d, storeys: storeys, fh: FH, wt: WT,
+            rTop: rTop, pp: 0.7, doorSide: 0, color: color, style: style }));
+        } catch (e) { crown0 = []; }
+      }
+      const PL = IB.plan({ w: w, d: d, storeys: storeys, crown: crown0 });
+      const sEdge = PL.sEdge;
+
+      // THE SLABS: every upper floor and the roof (the room minus the stair
+      // strip; a roof nobody climbs to closes over the strip as well). The
+      // walk surface is the platform record; the VISIBLE slab is the
+      // structure between the finished floor (15 mm oak or tile, laid by the
+      // interior pass) and the ceiling board (12 mm).
+      for (const s of PL.slabs) {
+        const cx = (s.x0 + s.x1) / 2, cz = (s.z0 + s.z1) / 2, sw = s.x1 - s.x0, sd = s.z1 - s.z0;
+        lbox(cx, s.y - 0.1, cz, sw, 0.2, sd, 0xb9bec6, { plat: true, noVis: true });
+        shellMerge.push([cx, s.y - 0.1015, cz, sw, 0.173, sd, 0x8e8a82, true]);
+      }
+      // THE ROOF EDGE: a parapet in the wall's own finish under a stone
+      // coping, solid, on every edge the plan says (over the slab; round the
+      // strip too where no bulkhead stands there)
+      const PPH = IB.PPH;
+      const parapet = function (x0, x1, z0, z1) {
         const cxp = (x0 + x1) / 2, czp = (z0 + z1) / 2, pw = x1 - x0, pd = z1 - z0;
         if (pw < 0.05 || pd < 0.05) return;
         shellMerge.push([cxp, rTop + PPH / 2, czp, pw, PPH, pd, color, true]);
@@ -3640,54 +3648,44 @@
         const c = { minX: ox + x0, maxX: ox + x1, minZ: oz + z0, maxZ: oz + z1, ref: null, y0: gy + rTop, y1: gy + rTop + PPH + 0.06 };
         CBZ.colliders.push(c); cols.push(c);
       };
-      parapet(sEdge, w / 2, d / 2 - WT, d / 2);            // +z (over the slab)
-      parapet(w / 2 - WT, w / 2, -d / 2 + WT, d / 2 - WT);  // +x
-      parapet(sEdge, w / 2, -d / 2, -d / 2 + WT);          // -z (over the slab)
+      for (const p of PL.roof.parapets) parapet(p.x0, p.x1, p.z0, p.z1);
 
-      // TWO-LANE switchback stairs. The up-flight and the down-flight must
-      // never share an (x,z), or groundAt() (highest surface within step
-      // reach) would escalate you onto whichever flight is higher and you
-      // could never walk DOWN. So flight k takes the LEFT lane on even
-      // storeys and the RIGHT lane on odd ones, reversing its run each time;
-      // the only ramps stacked over any point are then two storeys (2·FH)
-      // apart — far outside STEP_UP — so support is unambiguous both ways.
-      // Each flight's walkable surface is a smooth ramp (you glide, no tread
-      // hopping); a flat landing at each level bridges the two lanes.
-      const nSteps = 9;
-      const LD = 1.1;   // flat landing depth at the top of each flight
-      const zA = izMin + 0.3, zB = izMax - 0.3;
-      const laneW = SW / 2;
-      const flights = [], landings = [];
-      for (let k = 0; k < storeys; k++) {
-        const dir = (k % 2 === 0) ? 1 : -1;
-        const startZ = dir > 0 ? zA : zB, endZ = dir > 0 ? zB : zA;
-        const rampEndZ = endZ - dir * LD;       // ramp stops where the landing starts…
-        const lx0 = (k % 2 === 0) ? ixMin : ixMin + laneW;   // this flight's lane
-        // smooth physics ramp confined to the lane, k·FH (at startZ) → (k+1)·FH
-        // (at rampEndZ). It ENDS at the landing's inner edge and meets it at the
-        // SAME height, so there's no shelf-edge drop when you step off — that was
-        // the descent glitch on short flights.
-        // THE ONE STAIR SYSTEM (systems/stairs.js): same ramp record, now with
-        // 0.3 m of flat overlap onto the landing/floor at each end (no seam)
-        // and an AI link, so a survivor can be sent upstairs.
+      /* THE STAIR. Each flight is one walk surface (systems/stairs.js): the
+         treads themselves (`steps`: over the i-th going the surface is the
+         i-th tread, the last going flush with the landing it arrives on), a
+         stepped soffit under it (nobody walks into the back of a flight),
+         and an AI link, so a survivor can be sent upstairs. The flights
+         alternate lanes, so the only flights stacked over a point are two
+         storeys apart and groundAt is never ambiguous going down. The flight
+         you SEE is drawn by the interior pass from the same record. */
+      const laneW = IB.LANE;
+      for (const F of PL.flights) {
+        const xc = (F.x0 + F.x1) / 2;
         CBZ.stairs.flight({
-          bottom: { x: ox + lx0 + laneW / 2, y: gy + k * FH, z: oz + startZ },
-          top: { x: ox + lx0 + laneW / 2, y: gy + (k + 1) * FH, z: oz + rampEndZ },
-          width: laneW - 0.08, overlap: 0.3, plats: plats, owner: bgroup,
+          bottom: { x: ox + xc, y: gy + F.yb, z: oz + F.zb },
+          top: { x: ox + xc, y: gy + F.yt, z: oz + F.zt + F.dir * F.going },
+          width: laneW - 0.08, overlap: 0.3, steps: F.risers, underside: true, plats: plats, cols: cols, owner: bgroup,
         });
-        // the flight you SEE is drawn by the interior pass (closed steps on a
-        // soffit between stringers, a rail) from this record
-        flights.push({ k: k, dir: dir, lx0: lx0, startZ: startZ, rampEndZ: rampEndZ, endZ: endZ });
-        // flat landing across BOTH lanes, from 10 cm under the ramp's top
-        // edge out to the END WALL, at exactly (k+1)·FH — bridges the two
-        // lanes and meets the next flight. (It used to stop 20 cm short of
-        // the wall, a slot down the full width of the stair you could see,
-        // and stand over, straight to the floor below.)
-        const lz0 = dir > 0 ? rampEndZ - 0.1 : izMin, lz1 = dir > 0 ? izMax : rampEndZ + 0.1;
-        const lzc = (lz0 + lz1) / 2;
-        lbox(ixMin + SW / 2, (k + 1) * FH - 0.1, lzc, SW, 0.2, lz1 - lz0, 0xb4b9c1, { plat: true, noVis: true });
-        shellMerge.push([ixMin + SW / 2, (k + 1) * FH - 0.1015, lzc, SW, 0.173, lz1 - lz0, 0x8e8a82, true]);
-        landings.push({ L: k + 1, x0: ixMin, x1: ixMin + SW, z0: lz0, z1: lz1 });
+      }
+      // THE LANDINGS: across both lanes at each end the flights meet, at
+      // least a lane deep, out to the end wall
+      for (const lg of PL.landings) {
+        const cx = (lg.x0 + lg.x1) / 2, cz = (lg.z0 + lg.z1) / 2;
+        lbox(cx, lg.y - 0.1, cz, lg.x1 - lg.x0, 0.2, lg.z1 - lg.z0, 0xb4b9c1, { plat: true, noVis: true });
+        shellMerge.push([cx, lg.y - 0.1015, cz, lg.x1 - lg.x0, 0.173, lg.z1 - lg.z0, 0x8e8a82, true]);
+      }
+      // THE GUARDS: the stairwell's knee walls, the rails on every flight's
+      // open side, the edge of the top landing over the well (all drawn by
+      // the interior pass; these are their height-gated colliders)
+      for (const g of PL.guards) {
+        const c = { minX: ox + g.x0, maxX: ox + g.x1, minZ: oz + g.z0, maxZ: oz + g.z1, ref: null, y0: gy + g.y0, y1: gy + g.y1 };
+        CBZ.colliders.push(c); cols.push(c);
+      }
+      // THE ROOF'S CROWN, SOLID: every piece the grammar stood in head height
+      // over a roof the stair reaches (a cupola, a finial, a chimney stack)
+      for (const s of PL.roof.solids) {
+        const c = { minX: ox + s.x0, maxX: ox + s.x1, minZ: oz + s.z0, maxZ: oz + s.z1, ref: null, y0: gy + s.y0, y1: gy + s.y1 };
+        CBZ.colliders.push(c); cols.push(c);
       }
 
       // THE FACADE. Emitted last so it dresses the finished shell, and into
@@ -3706,15 +3704,17 @@
       const covers = houseInterior({
         group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, color: color,
         ixMin: ixMin, ixMax: ixMax, izMin: izMin, izMax: izMax,
-        flights: flights, landings: landings, cols: cols, late: shellMerge, parapet: parapet,
+        plan: PL, flights: PL.flights, landings: PL.landings, cols: cols, late: shellMerge,
         holes: dressed.holes, crown: dressed.crown, crownsRoof: dressed.crownsRoof,
       });
       flushLateShell(bgroup, shellMerge, gy);
 
       /* THE ROOF, as data: the slab you can stand on (everything but the
-         stair strip, which carries the bulkhead), reached by the stair. */
+         stair strip, which carries the bulkhead), when the stair reaches it.
+         A roof the facade crowned (a hipped roof, an attic, a dome) has no
+         way up: roofAccess false, roof.access null. */
       const rTopL = storeys * FH;
-      const roofPt = { x: ox + (ixMin + SW + ixMax) / 2, y: gy + rTopL, z: oz };
+      const roofPt = { x: ox + (sEdge + ixMax) / 2, y: gy + rTopL, z: oz };
 
       // turn it to face its street (records and all), then draw its static
       // shell in one call (see bakeShell)
@@ -3734,8 +3734,9 @@
         // the building's own frame: lw x ld with the door on its local -z,
         // turned rotY (a quarter turn at a time) to face its street
         lw: w, ld: d, rotY: yaw,
-        roofY: gy + rTopL, roofHex: color, roofAccess: true,
-        roof: Object.assign(roofHalf(ixMin + SW + 0.1, ixMax, izMin, izMax), { y: gy + rTopL, access: "stairs", x: roofPt.x, z: roofPt.z }),
+        roofY: gy + rTopL, roofHex: color, roofAccess: PL.roof.access,
+        roof: Object.assign(roofHalf(sEdge + 0.1, ixMax, izMin, izMax), { y: gy + rTopL, access: PL.roof.access ? "stairs" : null, x: roofPt.x, z: roofPt.z }),
+        stairs: { mode: PL.mode, flights: PL.flights.length, levels: PL.levels, roof: PL.roof.access, why: PL.roof.why },
         helipadCandidate: false, helipad: null,
         facadeStyle: style || null,        // so a tool can photograph "the pagoda one"
         color: color,                      // the shell's real wall colour — city/collapse.js
@@ -3747,20 +3748,20 @@
         colliders: cols, platforms: plats, glass: glassList, fallen: false,
         // THE GROUND-FLOOR PLAN, building-local: the room inside the walls and
         // the strips that must stay walkable. The stair strip runs the whole
-        // depth of the -x side; the door is on -z, and the walk from the door
-        // to the foot of the stairs (zA, the -z end of lane one) runs along
-        // the front wall, so that whole front band stays clear too. The
+        // depth of the -x side (when the building has a stair at all); the
+        // door is on -z, and the walk from the door to the foot of the stairs
+        // (the approach landing at the -z end of lane one) runs along the
+        // front wall, so that whole front band stays clear too. The
         // interior pass furnished it round these; `covers` are the sturdy
         // tables and desks it put in (WORLD {x, y, z, r}), which
         // systems/quake.js registers for drop-cover-hold-on.
         interior: {
           kind: "house", yaw: yaw,
           x0: ixMin, x1: ixMax, z0: izMin, z1: izMax,
-          keepOut: [
-            { x0: ixMin, x1: ixMin + SW + 0.35, z0: izMin, z1: izMax, why: "stairs" },
+          keepOut: (PL.flights.length ? [{ x0: ixMin, x1: sEdge + 0.35, z0: izMin, z1: izMax, why: "stairs" }] : []).concat([
             { x0: -DOORW / 2 - 0.7, x1: DOORW / 2 + 0.7, z0: izMin, z1: izMin + 2.4, why: "door" },
             { x0: ixMin, x1: ixMax, z0: izMin, z1: izMin + 1.3, why: "front walk" },
-          ],
+          ]),
           covers: covers,
         },
       };
@@ -4171,6 +4172,25 @@
         tbox(0, hy - 0.14, 0, 2 * s + 0.3, 0.28, 2 * s + 0.3, 0x8b9097, { los: true, cast: true, merge: true });
         for (let cz2 = -1; cz2 <= 1; cz2 += 2) for (let cx2 = -1; cx2 <= 1; cx2 += 2)
           tbox(cx2 * (s + 0.08), topY + 0.1 + (lift.head - 0.38) / 2, cz2 * (s + 0.08), 0.16, lift.head - 0.38, 0.16, 0x5a626d, { merge: true });
+      }
+      /* THE ROOF STOP'S EDGE AND CROWN (world/island_building.js towerRoof).
+         The walls stopped AT the roof and the grammar's parapet is deco, so a
+         roof the lift stops on was a step off into the street. A parapet in
+         the shell's finish now stands on the wall line all round, solid, and
+         every crown piece in head height over the walk ring is a collider
+         (you walk round a crown's mass, not through it). */
+      const TR = IB.towerRoof({ w: w, d: d, tw: TW, realH: realH, s: s, crown: (dressedT && dressedT.crown) || [],
+        roofStop: !(lift && lift.roofBuried) });
+      for (const p of TR.parapets) {
+        const pw = p.x1 - p.x0, pd = p.z1 - p.z0, ph = p.y1 - p.y0 - 0.06;
+        tbox((p.x0 + p.x1) / 2, p.y0 + ph / 2, (p.z0 + p.z1) / 2, pw, ph, pd, color, { los: true, merge: true });
+        tbox((p.x0 + p.x1) / 2, p.y0 + ph + 0.03, (p.z0 + p.z1) / 2, pw + (pw > pd ? 0 : 0.08), 0.06, pd + (pw > pd ? 0.08 : 0), 0xc9c2b4, { merge: true });
+        const c = { minX: ox + p.x0, maxX: ox + p.x1, minZ: oz + p.z0, maxZ: oz + p.z1, ref: null, y0: gy + p.y0, y1: gy + p.y1 };
+        CBZ.colliders.push(c); cols.push(c);
+      }
+      for (const sd of TR.solids) {
+        const c = { minX: ox + sd.x0, maxX: ox + sd.x1, minZ: oz + sd.z0, maxZ: oz + sd.z1, ref: null, y0: gy + sd.y0, y1: gy + sd.y1 };
+        CBZ.colliders.push(c); cols.push(c);
       }
       // rooftop plant, only on a roof nobody built a crown on, and clear of
       // the shaft AND of the apron you step out onto. It was a bare grey box;
@@ -5830,6 +5850,20 @@
           minX: cx - R - 12, maxX: cx + R + 12, minZ: cz - R - 12, maxZ: bz1 + 12, seaR: FAR_WL },
         coast: coast, beachR: R + BEACH_W * 0.45, shelfR: SHORE_R,
         coastAt: function () { return R; },
+        /* what the wind lifts at (x, z), as linear albedo (systems/tornado.js's
+           debris cloud takes its colour from it): the sea gives spray, the
+           beach sand, a street concrete and asphalt grit, the grass torn turf
+           over soil (a field's debris cloud is brown with an olive cast, never
+           green). Returns `out`. */
+        dustColorAt: function (x, z, out) {
+          out = out || [0, 0, 0];
+          const set = function (r, g, b) { out[0] = r; out[1] = g; out[2] = b; return out; };
+          if (groundHeightAt(x, z) < OCEAN_Y + 0.05) return set(0.30, 0.32, 0.34);
+          if (Math.hypot(x - cx, z - cz) > R + 1) return set(0.25, 0.205, 0.125);
+          if (onRoad(x, z, 1, 1)) return set(0.075, 0.073, 0.072);
+          grassColorAt(x, z, out);
+          return set(out[0] * 0.4 + 0.051, out[1] * 0.4 + 0.041, out[2] * 0.4 + 0.030);
+        },
         buildings: fragile,
         helipads: fragile.filter(function (b) { return b.helipadCandidate; }),
         roads: { pieces: pieces, junctions: roadPlan ? roadPlan.junctions.map(function (j) { return { x: j.x, z: j.z, n: j.n, N: j.N, S: j.S, E: j.E, W: j.W }; }) : [],

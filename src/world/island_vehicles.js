@@ -904,6 +904,38 @@
     armVerbs();
   });
 
+  /* CBZ.islandCarsAudit() — is every island car standing, and DRAWN? No
+     node, no tool: one call in the page. A car is drawn by itself (its group
+     and every parent visible, in the scene), or by the vehicle system's pools
+     (_proxy: carinstances.js holds it in a live instanced mesh), or it is
+     asleep past the fog (hidden on purpose). Anything else is `hidden`: a car
+     nobody draws. belowGround: its wheels more than 0.3 m inside the island. */
+  function shownInScene(o) {
+    let n = o, top = null;
+    while (n) { if (n.visible === false) return false; top = n; n = n.parent; }
+    return !!(top && top.isScene);
+  }
+  CBZ.islandCarsAudit = function () {
+    const A = S.arena, cam = CBZ.camera && CBZ.camera.position;
+    const out = { spots: A && A.carSpots ? A.carSpots.length : 0, built: S.cars.length, queued: S.queue.length,
+      inArena: A && A.cars ? A.cars.length : 0, visibleNear: 0, near: 0, drawnSelf: 0, pooled: 0, asleep: 0, held: 0,
+      hidden: 0, belowGround: 0, hiddenSample: [], props: 0,
+      pools: CBZ.carInstanceAudit ? CBZ.carInstanceAudit() : null };
+    for (let i = 0; i < S.cars.length; i++) {
+      const c = S.cars[i].car, g0 = c.group;
+      const d = cam ? Math.hypot(c.pos.x - cam.x, c.pos.z - cam.z) : 0;
+      const self = !!(g0 && shownInScene(g0));
+      if (c._disaster) out.held++;
+      if (self) out.drawnSelf++;
+      else if (c._proxy) out.pooled++;
+      else if (c._sleep) out.asleep++;
+      else { out.hidden++; if (out.hiddenSample.length < 5) out.hiddenSample.push({ x: Math.round(c.pos.x), z: Math.round(c.pos.z), d: Math.round(d), vis: g0 ? g0.visible : null, parent: !!(g0 && g0.parent), deferred: !!c._deferred, kids: g0 ? g0.children.length : 0 }); }
+      if (d < 80) { out.near++; if (self || c._proxy) out.visibleNear++; }
+      if (c.pos.y < groundAt(c.pos.x, c.pos.z) - 0.3) out.belowGround++;
+    }
+    return out;
+  };
+
   // ---- what the lab and the tools read ----
   CBZ.islandVehicles = {
     state: function () {

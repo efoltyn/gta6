@@ -382,6 +382,8 @@
         rMax: reg.R * (0.45 + 0.8 * M), stretch: reg.R * (0.3 + 0.7 * M),
         spreadSecs: 12 + 12 * M, groundY: Math.min(S.peak * 0.2, groundAt(reg.cx, reg.cz) + 4),
         fogless: true, parent: parent, salt: 0x0b12,
+        // one body with the column: the head flows into the deck, no seam
+        column: C,
       });
     }
 

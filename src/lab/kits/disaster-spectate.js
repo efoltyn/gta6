@@ -28,7 +28,7 @@ CBZ.lab.kit("disaster-spectate", {
   about: "kill the disaster player: death beat, pull-back to the spectator camera, scripted desktop + touch flying, disasters still running, play again",
   uses: ["player"],
   mode: "survival",
-  files: ["src/vendor/BufferGeometryUtils.js", "src/vendor/noise.js", "src/modes/survival.js", "src/world/disaster_arena.js",
+  files: ["src/vendor/BufferGeometryUtils.js", "src/vendor/noise.js", "src/modes/survival.js", "src/world/island_building.js", "src/world/disaster_arena.js",
     "src/entities/survivorbot.js", "src/systems/disasters.js", "src/systems/survivalhud.js", "src/systems/spectator.js"],
   // the island and the roster read these at run time behind feature tests
   symbols: ["vegetationKit", "treeCrownGeo", "treeTrunkGeo", "islandDressing", "islandRoadKit", "buildFuelStation", "dressFacade",

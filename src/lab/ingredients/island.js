@@ -20,7 +20,7 @@
    handle: arena, machines() (CBZ.islandVehicles), state() */
 CBZ.lab.ingredient("island", {
   // BufferGeometryUtils is THREE's, not a CBZ symbol: the tracer cannot see it
-  files: ["src/vendor/BufferGeometryUtils.js", "src/world/island_roads.js", "src/world/disaster_arena.js", "src/world/island_dressing.js",
+  files: ["src/vendor/BufferGeometryUtils.js", "src/world/island_roads.js", "src/world/island_building.js", "src/world/disaster_arena.js", "src/world/island_dressing.js",
     "src/systems/interactions.js", "src/modes/survival.js", "src/systems/stairs.js", "src/systems/liftcore.js",
     "src/city/airframe_kit.js", "src/city/airframes.js", "src/city/aircraftphysics.js",
     "src/world/carfx.js", "src/city/economy.js", "src/city/carbody.js", "src/city/carwheels.js", "src/city/carparts.js",

@@ -72,6 +72,18 @@
               coastline — replacing an additive disc that was see-through
               AND a perfect circle, the two forbidden words at once.
 
+   OWNER, 2026-10-19: "fix magma" and "the ash... looks like 2D blocks...
+   like separate clouds coming out of it". Two rebuilds, each with its
+   notes at its site:
+
+     THE MELT   is LIT now (Phong + a crack shader, meltMaterial): black-
+                grey basalt plates that take the sun, with emissive Voronoi
+                cracks that open with heat, tear wide in the fast core and
+                at the front, shear along the banks and close as it cools.
+     THE SKY    the column and the umbrella are ONE raymarched volume
+                (THE PLUME VOLUME, after city/nukefx.js's mushroom cloud):
+                no puff cards, no sprite edges, one draw call.
+
    The only TRANSPARENT thing in a lava flow here is the heat haze
    ABOVE it — additive sprites, never the flow itself — plus one or two
    pooled PointLights so the thing actually illuminates the hillside at
@@ -458,9 +470,6 @@
   // scorched inboard rock that only shows at the nose and the melt's banks.
   //   A -> rgb(38,22,22)   B -> rgb(61,36,30)   C -> rgb(126,54,28)  (lit)
   const CRUST_A = 0x0e0a06, CRUST_B = 0x181310, CRUST_C = 0x3e2013;
-  // the UNLIT lid over the melt: dark rock (D) warming to ember-heated rock
-  // beside a crack (W).   D -> rgb(32,26,25)    W -> rgb(111,47,27)
-  const _LID_D = new THREE.Color(0x070503), _LID_W = new THREE.Color(0x200b05);
   /* THE MELT RAMP, and it is a TEMPERATURE ramp now, not a brightness ramp:
        A  the dull red of a cooling toe / a dying seam   rgb(143,23,2)
        B  the open channel while it is moving            rgb(219,64,0)
@@ -469,163 +478,183 @@
      ventGlow's, and a melt that reaches white is the pale-gold slab again. */
   const MELT_A = 0x300701, MELT_B = 0x6a1004, MELT_C = 0xd8480f;
 
-  /* THE LID, as a smooth field that TRAVELS.
+  /* ============ THE MELT IS A CRUST WITH CRACKS IN IT ==================
+     OWNER, 2026-10-19: "fix magma". What shipped was an unlit orange ribbon
+     with a sine-ridge "lace" multiplied into it: every dark part of the flow
+     was UNLIT dark orange, so the crust never caught the sun and the whole
+     thing read as one glowing strip with a pattern printed on it.
 
-     CBZ.hash01 is a hash, not a noise: sampled along a line it is white
-     static, so plates cannot be built from it. Three incommensurate sines
-     in (along, across) give a smooth, non-repeating field for the price of
-     three sin() a vertex — and shifting their common phase is what makes
-     the whole pattern slide downstream. `ph` IS the flow.
+     The reference (Kilauea fissure 8 channel 2018, Fagradalsfjall 2021,
+     Etna and Nyiragongo flow fields) is the other way round:
+       - the surface is a LID: black-grey basalt crust, LIT like any rock,
+         with a dull sheen where it is fresh;
+       - what glows is what shows THROUGH it: bright orange-yellow cracks
+         between crust plates, wider and hotter where the flow is fast and
+         fresh, closing to thin red seams as it cools;
+       - the fast middle of a fed channel stays torn open (incandescent,
+         with rafts of crust riding it), the margins weld over;
+       - the front and the vent are brightest: freshly broken rock;
+       - the crust plates shear past each other along the banks.
 
-     OWNER, 2026-08-15, with two reference photographs (Fuego by night, an
-     Etna flow field close up): "use these as a bible... don't make it look
-     geometric". The photographed close-up settles what the pattern IS, and
-     the previous field had it inverted. A flow field is not bright plates
-     drifting on darkness — it is a DARK crusted surface with a bright
-     anastomosing LACE cracked through it: thin connected filaments of melt
-     wrapping irregular black islands. Bands of any kind read as geometry;
-     a connected irregular network reads as rock coming apart.
-
-     A ridge transform gets exactly that from the same three sines. The sum
-     is a smooth signed field; its ZERO-CROSSINGS are guaranteed-connected
-     wandering curves, so `1 - |f|` lights precisely those curves and leaves
-     everything away from them as lid. A slow warp term bends the whole
-     lattice so no filament runs straight for long — the "zig-zaggy"
-     complaint was cured upstream in the walk, and it must not sneak back in
-     through the pattern. */
-
-  /* ============ THE LACE IS A TEXTURE, NOT A VERTEX COLOUR ==============
-     Everything above computes a beautiful anastomosing network and the
-     rasteriser was throwing most of it away. Do the arithmetic: the flows
-     these beats photograph are ~17 m long by ~9 m wide, they are drawn on a
-     station every ~2.4 m by nine columns, and a filament is 3-4 m across.
-     That is barely one vertex per filament, and Gouraud interpolation across
-     a 1.1 m x 2.4 m quad is a low-pass filter — measured on the shipped
-     numbers, a field that is 15% dark plate at full resolution comes out 2%
-     dark once it has been through the vertex grid. The lace could not be
-     seen because it was being averaged out before it was drawn.
-
-     Making the grid fine enough is the wrong answer (four times the vertices,
-     rewritten at 30 Hz, to draw something that does not move relative to the
-     rock). The right one is to stop asking the geometry to carry it: the lace
-     goes into ONE tiled texture, sampled per FRAGMENT, and the mesh carries
-     only the smooth things — how hot this stretch is, how far across the
-     channel this vertex sits. Vertex colours and the map MULTIPLY in r128's
-     MeshBasicMaterial, so the texel is authored as a RATIO against MELT_C:
-     1.0 on a filament, and walking down through the channel stop to the dark
-     lid in the plate interiors. A cooler stretch of flow has a cooler vertex
-     colour and the same texel then paints a cooler network — which is what a
-     real flow does, and it costs nothing.
-
-     It is also FASTER than what it replaces: ring() no longer evaluates five
-     sines a vertex a frame, and pays two uv floats instead.
-
-     TILES IN Y, and it has to: uv.y is (metres down the flow - metres the
-     lid has advected) / LACE_L, which runs off both ends. So every along-flow
-     frequency here is an integer number of cycles per LACE_L. Across, uv.x is
-     0.5 + metres/LACE_W and LACE_W is wide enough (20 m) that the widest
-     flood never reaches an edge — a pattern that repeated across the ribbon
-     would be a lattice, which is the one thing the bible forbids.
+     So the melt mesh is a lit MeshPhongMaterial now, and the crack network
+     is a real cellular field instead of three sines:
+       TEXTURE  512^2 tileable Voronoi, R = distance to the nearest plate
+                edge (F2 - F1, 0 on a crack), G = a per-plate random,
+                B = a finer second generation of cracks inside the plates.
+                Built in slices during the warning, like before.
+       SHADER   onBeforeCompile on the Phong program. The vertex colour stops
+                being a colour and carries three smooth fields: r = heat
+                envelope (vent, front, channel core), g = surface speed
+                across the channel, b = how cooled this stretch is. Per
+                fragment: crack width opens with heat and closes with
+                cooling, the core tears open, plate rims glow beside the
+                cracks, and the crust is albedo for the scene's own lights.
+                Two crack layers crossfade on a 6 s cycle so the plates SHEAR
+                (centre faster than banks) without the texture stretching.
+     Opaque, as ever: incandescence is emission, never alpha.
      ===================================================================== */
   const LACE_W = 20, LACE_L = 24;       // metres the texture spans
   let _laceTex = null, _lace = null;
-  /* BUILT IN SLICES. The pixel loop is ~30 ms on a desktop and three or four
-     times that on a phone, and it used to run inside the frame the first lava
-     crossed the rim — the eruption's own worst hitch. laceBegin/laceRows let
-     V.prewarm() paint it a few rows per frame during the warning, while the
-     mountain is only steaming; laceTex() finishes whatever is left. */
-  function laceBegin() {
-    /* 512, not 256: at 256 the texture carries 10.7 px per metre, and a
-       player being chased by this thing gets a lot closer than the 20-60 m
-       the storyboard frames it at — the crack edges went soft under
-       magnification. 21 px/m holds up to about four metres away, and the
-       whole thing is built ONCE, lazily, on the first eruption (~30 ms with
-       the ramp precomputed below; per-pixel Color.lerp made it three times
-       that). */
-    /* A TYPED ARRAY, NOT A CANVAS. The texel loop already writes raw RGBA,
-       so the 2D canvas was only ever a carrier — and it cost twice: a 1 MB
-       backing store against iOS Safari's total canvas-memory cap (the cap
-       that left late textures uploading blank on iPhone), and a putImageData
-       that the lab timed at 16 ms to 3.3 s depending on what else the GPU
-       was doing. A DataTexture uploads the same bytes straight from JS. */
-    const S = 512;
-    const D = new Uint8Array(S * S * 4);
-    // the ramp the texel walks, as ratios against MELT_C (the vertex colour's
-    // top stop) — so texel x vColour reproduces the ramp exactly at the vent
-    const top = new THREE.Color(MELT_C);
-    const stops = [new THREE.Color(_LID_D), new THREE.Color(_LID_W), new THREE.Color(MELT_B), top];
-    const KY = 6.2831853 / LACE_L, KX = 6.2831853 / LACE_W;
-    /* the ramp as a 256-entry lookup, so the pixel loop is four sines and
-       three array reads instead of four sines and a Color allocation dance.
-       The two breakpoints are read off the field's own measured distribution
-       (p25 = 0.11, p50 = 0.44, p75 = 0.74), so they are AREA FRACTIONS, not
-       guesses: ~33% dark plate, ~28% warm rock beside a crack, ~39%
-       incandescent — and only the top few per cent reaches MELT_C. */
-    const LUT = new Uint8Array(256 * 3);
-    for (let q = 0; q < 256; q++) {
-      const t = q / 255;
-      const seg3 = t < 0.22 ? 0 : (t < 0.55 ? 1 : 2);
-      const k3 = seg3 === 0 ? t / 0.22 : (seg3 === 1 ? (t - 0.22) / 0.33 : (t - 0.55) / 0.45);
-      _c3.copy(stops[seg3]).lerp(stops[seg3 + 1], clamp(k3, 0, 1));
-      LUT[q * 3] = Math.round(255 * clamp(_c3.r / top.r, 0, 1));
-      LUT[q * 3 + 1] = Math.round(255 * clamp(_c3.g / top.g, 0, 1));
-      LUT[q * 3 + 2] = Math.round(255 * clamp(_c3.b / top.b, 0, 1));
+  function ihash(i, j, s) {
+    let h = (i * 374761393 + j * 668265263 + s * 1274126177) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+  // one jittered feature point per cell of a periodic NX x NY grid
+  function vorGrid(NX, NY, salt) {
+    const n = NX * NY, fx = new Float32Array(n), fy = new Float32Array(n), id = new Float32Array(n);
+    for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) {
+      const k = j * NX + i;
+      fx[k] = 0.12 + 0.76 * ihash(i, j, salt);
+      fy[k] = 0.12 + 0.76 * ihash(i, j, salt + 1);
+      id[k] = ihash(i, j, salt + 2);
     }
-    _lace = { S: S, D: D, LUT: LUT, KY: KY, KX: KX, row: 0 };
+    return { NX: NX, NY: NY, fx: fx, fy: fy, id: id };
+  }
+  function laceBegin() {
+    const S = 512;
+    // plates ~2.2 m across x ~2.7 m along; the fine cracks ~0.9 m
+    _lace = { S: S, D: new Uint8Array(S * S * 4), row: 0, A: vorGrid(9, 9, 7101), B: vorGrid(22, 26, 7301) };
+  }
+  // F2 - F1 (0 on a cell edge) and the nearest cell's random
+  const _vor = { e: 0, id: 0 };
+  function voronoi(u, v, G) {
+    const NX = G.NX, NY = G.NY;
+    const iu = Math.floor(u), iv = Math.floor(v);
+    let f1 = 9, f2 = 9, id = 0;
+    for (let dj = -1; dj <= 1; dj++) {
+      const cj = iv + dj, wj = ((cj % NY) + NY) % NY;
+      for (let di = -1; di <= 1; di++) {
+        const ci = iu + di, k = wj * NX + (((ci % NX) + NX) % NX);
+        const ax = ci + G.fx[k] - u, ay = cj + G.fy[k] - v;
+        const d = ax * ax + ay * ay;
+        if (d < f1) { f2 = f1; f1 = d; id = G.id[k]; }
+        else if (d < f2) f2 = d;
+      }
+    }
+    _vor.e = Math.sqrt(f2) - Math.sqrt(f1); _vor.id = id;
+    return _vor;
   }
   function laceRows(n) {
-    const L = _lace, S = L.S, D = L.D, LUT = L.LUT, KY = L.KY, KX = L.KX;
+    const L = _lace, S = L.S, D = L.D;
     const end = Math.min(S, L.row + n);
+    const TAU = 6.2831853, A = L.A, B = L.B;
     for (let py = L.row; py < end; py++) {
-      const sm = (py / S) * LACE_L;              // metres along
+      const y = py / S;
       for (let pxi = 0; pxi < S; pxi++) {
-        const vm = (pxi / S - 0.5) * LACE_W;     // metres across
-        const a = sm * KY, b = vm * KX;
-        /* Four sines, along-flow periods 8 / 4.8 / 12 / 3.4 m and across-flow
-           8 / 11 / 4.7 / 3.7 m: plates four to seven metres, filaments one to
-           two. The first cut ran everything at 3-5 m and photographed as
-           STATIC — a plate has to be several times a filament's width or the
-           eye reads noise instead of rock. The coefficients are CYCLES PER
-           LACE_L, which is what makes the tile seamless in y: measured, the
-           two edges agree to 0.00000. */
-        /* AND THE WARP IS MOST OF THE WORK. With the phase warp at 1.1 the
-           first print of this came out as a LATTICE of near-identical black
-           ovals — a leopard skin, which is geometry wearing a texture. A
-           three-term warp bending the phase by up to ~2.5 rad, applied to
-           three of the four terms, is what turns the grid into a branching
-           network with islands of every size, and the fourth high-frequency
-           term roughens the filament edges so they are not drawn with a pen. */
-        const w = Math.sin(a * 1 + b * 0.9) + 0.62 * Math.sin(a * 2 - b * 1.6 + 2.1)
-                + 0.35 * Math.sin(a * 3 + b * 2.9 + 0.6);
-        const f =
-          0.50 * Math.sin(a * 3 + b * 2.5 + 1.9 * w) +
-          0.30 * Math.sin(a * 5 - b * 1.8 + 1.7 + 1.3 * w) +
-          0.14 * Math.sin(a * 2 + b * 4.3 + 4.1 + 0.8 * w) +
-          0.10 * Math.sin(a * 7 - b * 5.4 + 0.7);
-        /* RIDGE: 1 on the zero-crossing curves, 0 deep inside a plate. The
-           zero-crossings of a smooth signed field are guaranteed-CONNECTED
-           wandering curves, which is the whole reason the lace anastomoses
-           instead of speckling. */
-        /* THE CORE. 2026-09-27, OWNER: "when a volcano looks dumb" — the
-           eruption shot showed an orange vein net skinned over the whole
-           cone, because the lace was the ONLY thing the melt drew: every
-           square metre was equally likely to be a filament. A fed channel
-           is not a net. Its middle, where the flow is fastest, stays OPEN
-           and incandescent; the crust plates only weld over the slower
-           margins. So a bright core rides the channel's own centreline
-           (uv.x 0.5 carries the meander, so the core meanders with it),
-           ~1-1.6 m wide, necking where a raft of crust drifts across it,
-           and the lace is dimmed to the margins around it. */
-        const cw = 1.05 + 0.4 * Math.sin(a * 2 + 0.7) + 0.2 * Math.sin(a * 5 + b * 0.3 + 2.2);
-        const bridge = 0.72 + 0.28 * Math.sin(a * 4 + 1.3) * Math.sin(a * 7 + 0.4);
-        const core = Math.exp(-(vm * vm) / (cw * cw)) * bridge;
-        const q = (clamp(Math.max((1 - Math.abs(f) * 1.6) * 0.78, core), 0, 1) * 255) | 0;
-        const o = (py * S + pxi) * 4, q3 = q * 3;
-        D[o] = LUT[q3]; D[o + 1] = LUT[q3 + 1]; D[o + 2] = LUT[q3 + 2]; D[o + 3] = 255;
+        const x = pxi / S;
+        // a periodic warp (integer cycles per tile) so no edge runs straight
+        const wx = 0.30 * Math.sin(TAU * (2 * y + x) + 1.3) + 0.16 * Math.sin(TAU * (5 * x - 3 * y) + 0.4);
+        const wy = 0.30 * Math.sin(TAU * (2 * x - y) + 2.1) + 0.16 * Math.sin(TAU * (4 * y + 3 * x) + 4.0);
+        const a = voronoi(x * A.NX + wx, y * A.NY + wy, A);
+        const e1 = a.e, id = a.id;
+        const b = voronoi(x * B.NX + wx * 1.7, y * B.NY + wy * 1.7, B);
+        const o = (py * S + pxi) * 4;
+        D[o] = Math.min(255, (e1 * 2.1 * 255) | 0);
+        D[o + 1] = (id * 255) | 0;
+        D[o + 2] = Math.min(255, (b.e * 2.1 * 255) | 0);
+        D[o + 3] = 255;
       }
     }
     L.row = end;
     return end >= S;
+  }
+
+  /* the melt's temperature ramp, LINEAR (r128 Color.setHex does no
+     conversion), measured on screen through the shipped tone map:
+       A 0x300701 -> rgb(143,23,2)   a dull red seam
+       B 0x6a1004 -> rgb(219,64,0)   the open channel
+       C 0xd8480f -> rgb(255,180,66) incandescent cracks
+       W            yellow-white     freshly broken rock: front and vent only */
+  function lin3(hex) { _c1.setHex(hex); return "vec3(" + _c1.r.toFixed(4) + "," + _c1.g.toFixed(4) + "," + _c1.b.toFixed(4) + ")"; }
+  const MELT_PARS = [
+    "uniform float uCyc;",
+    "uniform float uShear;",
+    "uniform float uFlick;",
+    "vec3 meltRamp(float t) {",
+    "  vec3 c = mix(vec3(0.0), " + lin3(MELT_A) + ", smoothstep(0.02, 0.28, t));",
+    "  c = mix(c, " + lin3(MELT_B) + ", smoothstep(0.22, 0.55, t));",
+    "  c = mix(c, " + lin3(MELT_C) + ", smoothstep(0.5, 0.82, t));",
+    "  c = mix(c, vec3(1.25, 0.72, 0.28), smoothstep(0.84, 1.0, t));",
+    "  return c;",
+    "}",
+    // one crack layer: x = how much melt shows, y = plate-rim warmth, z = plate random
+    "vec3 meltLayer(vec4 tx, float heat, float cool, float sp) {",
+    "  float edge = tx.r, fine = tx.b, rnd = tx.g;",
+    "  float w = mix(0.07, 0.5, heat * heat) * (1.0 - 0.7 * cool);",
+    "  float crack = 1.0 - smoothstep(w * 0.45, w + 0.05, edge);",
+    "  float wf = 0.2 * heat * (1.0 - cool);",
+    "  float fc = (1.0 - smoothstep(wf * 0.4, wf + 0.03, fine)) * step(0.01, wf) * 0.65 * smoothstep(0.15, 0.5, edge);",
+    // the fast core is torn open, and rafts of crust ride it
+    "  float open = smoothstep(0.68, 0.95, heat * (0.55 + 0.45 * sp) + (rnd - 0.5) * 0.45);",
+    "  float melt = max(max(crack, fc), open);",
+    "  float rim = (1.0 - smoothstep(w, w + 0.24, edge)) * (1.0 - melt);",
+    "  return vec3(melt, rim, rnd);",
+    "}",
+  ].join("\n");
+  const MELT_FRAG = [
+    "float heatV = clamp(vColor.r, 0.0, 1.0);",
+    "float spV = clamp(vColor.g, 0.0, 1.0);",
+    "float coolV = clamp(vColor.b, 0.0, 1.0);",
+    "float p1 = fract(uCyc), p2 = fract(uCyc + 0.5);",
+    "float w1 = 1.0 - abs(2.0 * p1 - 1.0);",
+    "float shK = uShear * max(spV - 0.3, 0.0);",
+    "vec3 L1 = meltLayer(texture2D(map, vUv - vec2(0.0, shK * p1)), heatV, coolV, spV);",
+    "vec3 L2 = meltLayer(texture2D(map, vUv + vec2(0.5, 0.37) - vec2(0.0, shK * p2)), heatV, coolV, spV);",
+    "vec3 Lm = mix(L2, L1, w1);",
+    "float meltK = Lm.x;",
+    // what shows through is as hot as the stretch it is in; plate rims and
+    // fresh crust carry a dull red of their own until they cool
+    "float tMelt = meltK * smoothstep(0.02, 0.3, heatV) * (0.5 + 0.5 * heatV);",
+    "float tPlate = (Lm.y * 0.42 * heatV + heatV * 0.22 * (1.0 - coolV) * (0.5 + 0.5 * Lm.z)) * (1.0 - meltK);",
+    "float tGlow = max(tMelt, tPlate);",
+    "totalEmissiveRadiance = meltRamp(tGlow) * uFlick;",
+    // the crust: dark basalt, a little warmer where fresh, lit by the scene
+    "vec3 crustC = mix(vec3(0.060, 0.054, 0.050), vec3(0.105, 0.094, 0.086), Lm.z) * mix(vec3(1.08, 0.94, 0.86), vec3(1.0), coolV);",
+    "diffuseColor.rgb = max(crustC * (1.0 - meltK), vec3(0.0));",
+  ].join("\n");
+  function meltMaterial() {
+    const mat = new THREE.MeshPhongMaterial({
+      map: laceTex(), vertexColors: true, flatShading: true,
+      shininess: 14, specular: 0x14120f,
+      side: THREE.DoubleSide, fog: true,
+      polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
+    });
+    const uni = { uCyc: { value: 0 }, uShear: { value: 0 }, uFlick: { value: 1 } };
+    mat.userData.melt = uni;
+    mat.onBeforeCompile = function (sh) {
+      sh.uniforms.uCyc = uni.uCyc;
+      sh.uniforms.uShear = uni.uShear; sh.uniforms.uFlick = uni.uFlick;
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", "#include <common>\n" + MELT_PARS)
+        .replace("#include <map_fragment>", MELT_FRAG)
+        .replace("#include <color_fragment>", "")
+        // glowing melt has no sheen; the crust keeps its dull one
+        .replace("#include <specularmap_fragment>", "float specularStrength = 1.0 - meltK;");
+    };
+    mat.customProgramCacheKey = function () { return "volcano-melt-2"; };
+    return mat;
   }
   function laceTex() {
     if (_laceTex) return _laceTex;
@@ -651,10 +680,12 @@
   /* V.prewarm(ms): spend up to `ms` this frame building what the first lava
      will need. Returns true when there is nothing left to build. */
   V.prewarm = function (ms) {
+    // the plume's program links on a hidden throwaway while the mountain only steams
+    if (!_plumeWarm) plumeWarm();
     if (_laceTex) return true;
     if (!_lace) laceBegin();
     const t0 = performance.now(), budget = ms > 0 ? +ms : 3;
-    while (_lace.row < _lace.S && performance.now() - t0 < budget) laceRows(16);
+    while (_lace.row < _lace.S && performance.now() - t0 < budget) laceRows(4);
     if (_lace.row >= _lace.S) laceTex();
     return !!_laceTex;
   };
@@ -891,14 +922,10 @@
     chGeo.setAttribute("color", new THREE.BufferAttribute(kCol, 3));
     chGeo.setAttribute("uv", new THREE.BufferAttribute(kUv, 2));
     chGeo.setIndex(new THREE.BufferAttribute(kIdx, 1));
-    /* map x vertexColors, both plain r128 multiplies: the vertex colour is
-       the smooth envelope (how hot this stretch of river is, how far across
-       the channel this vertex sits) and the map is the lace. Still opaque,
-       still unlit — incandescent rock does not answer to the sun. */
-    const chMat = new THREE.MeshBasicMaterial({
-      vertexColors: true, side: THREE.DoubleSide, fog: true, map: laceTex(),
-      polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6,
-    });
+    /* lit crust with emissive cracks (see meltMaterial): the vertex colour
+       carries the smooth fields, the map carries the crack network. */
+    const chMat = meltMaterial();
+    const meltU = chMat.userData.melt;
     const chan = new THREE.Mesh(chGeo, chMat);
     chan.frustumCulled = false;
     chan.renderOrder = 3;
@@ -972,6 +999,10 @@
        it is pushing; the melt behind it is not. ~2.4x is the ratio that reads
        as "a river with a lid on it" rather than as a conveyor belt. */
     const skinV = speed * 2.4;
+    /* the banks' crust moves at a third of the core's: the shader's two
+       crossfaded crack layers carry the difference on a SHEAR_T cycle */
+    const BANK_V = 0.35, SHEAR_T = 6;
+    meltU.uShear.value = skinV * (1 - BANK_V) * SHEAR_T / LACE_L / 0.7;
     /* EVERY FLOW WEARS THE SAME TEXTURE, so without this every stem on the
        cone would wear the same crack network in the same place — five copies
        of one photograph. A hashed metre offset down the lace slides each
@@ -1058,19 +1089,23 @@
            apron and the freshest rock. */
         let env = across * open * Math.pow(hot, 1.6);
         env = Math.max(env, flood * across);
-        ramp3(clamp(env, 0, 1), MELT_A, MELT_B, MELT_C, _c3);
-        /* AND THE RAMP'S BOTTOM STOP IS NOT BLACK — MELT_A is a dull red,
-           which is right for a dying seam and wrong for dead rock. A quench
-           drives `hot` to ~0.05 and env with it, so this last multiply is
-           what actually lands the settled scar on black instead of on maroon.
-           (Measured on the shipped build before it existed: rgb(72,24,19).) */
-        _c3.multiplyScalar(Math.min(1, env * 4.5));
-        kCol[off] = _c3.r * grM; kCol[off + 1] = _c3.g * grM; kCol[off + 2] = _c3.b * grM;
-        /* THE LACE'S OWN COORDINATES. uv.x is metres across the flow, uv.y is
-           metres down it MINUS the metres the lid has advected — which is the
-           whole animation: the crack network travels downstream at the
-           surface velocity and the geometry never moves. `ph` arrives here in
-           METRES (it used to be radians of the old sine field). */
+        /* THE FRONT IS FRESHLY BROKEN ROCK: the last few metres behind the
+           nose are torn open as it bulldozes its own crust, so they glow
+           hotter than the stretch behind them. */
+        const front = clamp(1 - (adv - s) / 5, 0, 1) * hot;
+        env = Math.max(env, front * across * 0.95);
+        /* NOT A COLOUR ANY MORE: the melt shader (meltMaterial) reads these
+           as data — r heat envelope, g surface speed (core fast, banks
+           slow: the plates shear), b how cooled this stretch is (cracks
+           close and the crust's warm cast goes). A quench drives hot to
+           ~0.04 and the cracks shut to black rock by themselves. */
+        kCol[off] = clamp(env * grM, 0, 1);
+        kCol[off + 1] = 0.3 + 0.7 * (1 - amu * amu);
+        kCol[off + 2] = clamp(1 - hot, 0, 1);
+        /* THE CRACKS' OWN COORDINATES. uv.x is metres across the flow, uv.y
+           metres down it MINUS the metres the lid has advected at the BANK
+           speed; the shader adds the faster core on top (the shear). The
+           geometry never moves. */
         const uo = k * 2;
         kUv[uo] = 0.5 + (mu * hw) / LACE_W;
         kUv[uo + 1] = (s - ph) / LACE_L;
@@ -1105,7 +1140,7 @@
     }
 
     function writeStations(from, to) {
-      const ph = phT * skinV + laceOff;   // METRES the lid has travelled
+      const ph = phT * skinV * BANK_V + laceOff;   // METRES the banks' lid has travelled
       for (let i = from; i <= to && i < N; i++) {
         const p = path.pts[i], st = stationThick(i);
         // the second quench factor lands the settled flow at ~4% hot: black
@@ -1154,7 +1189,7 @@
       }
       const st = stationThick(i);
       ring(i, _v.x, _v.y, _v.z, nx, nz, hw, st.t * (0.55 + 0.45 * frac),
-        hot0[i] * (1 - 0.58 * st.cool) * (1 - 0.9 * st.qk), adv, phT * skinV + laceOff, cGY, mGY);
+        hot0[i] * (1 - 0.58 * st.cool) * (1 - 0.9 * st.qk), adv, phT * skinV * BANK_V + laceOff, cGY, mGY);
       // put the station's own bed back — the nose borrowed those slots
       for (let c = 0; c < COLS; c++) {
         const k = i * COLS + c;
@@ -1265,7 +1300,8 @@
         // encoding is what bleached the melt toward white in the peek shots
         // a dying surface stops breathing too — the flicker rides (1 - qk)
         const fl = 0.96 + (0.06 * Math.sin(age * 5.3) + Math.random() * 0.04 - 0.04) * (1 - qk);
-        chMat.color.setScalar(clamp(fl, 0.75, 1.04));
+        meltU.uFlick.value = clamp(fl, 0.75, 1.04);
+        meltU.uCyc.value = phT / SHEAR_T;
 
         for (let i = 0; i < haze.length; i++) {
           const H = haze[i], s = adv * H.u;
@@ -1288,7 +1324,7 @@
         }
         // fully chilled: one last frame just wrote the black-rock colours,
         // so the scar can stop paying for updates it no longer shows
-        if (qk >= 1) { settled = true; chMat.color.setScalar(1); }
+        if (qk >= 1) { settled = true; meltU.uFlick.value = 1; }
         return handle;
       },
       /* the eruption stopped feeding this flow. It stalls, chills black over
@@ -1344,50 +1380,11 @@
   };
 
   /* ============================================================
-     ASH COLUMN — the pillar over the vent, and the fountain under it.
-
-     The wide reference photograph's second subject after the lava: a FAT,
-     coherent, dark convective column standing over the crater, bulging into
-     a cauliflower head, leaning downwind. It is built from overlapping
-     camera-facing sprites wearing a lumpy cauliflower alpha, each with a
-     LIFECYCLE — born at the vent, climbing while it expands, decelerating
-     into the head, spreading there, recycled inside the crowd dense enough
-     to mask it. Nothing oscillates; all motion is travel.
-
-     2026-09-01, THREE MEASURED FAULTS, from photographs of the shipped page:
-
-     1. IT WAS A PENCIL. `axisR = r0 * (0.22 + 0.76*hh + ...)` put the stem
-        radius at 0.22*r0 — 2.4 m — under a 72 m mountain, so the column
-        photographed as a 5-10 m string of legible round puffs. A convective
-        plume does the opposite: it leaves a mouth the size of the VENT and
-        ENTRAINS ambient air as it climbs, widening ~0.2 m per metre of
-        rise. Radius now starts at r0 and grows with the climb, and every
-        puff is sized off the LOCAL radius, so the overlap depth (4-6 cards
-        through any ray) holds whether the plume is 20 m or 90 m across.
-        Density comes from bigger sprites, not more of them.
-
-     2. IT FLOATED. A puff's opacity ran up over u < 0.085, and 0.085 of
-        this rise curve is 13 m — so the column's base hung three storeys
-        above the crater with nothing but sparse fountain sparks in the gap.
-        Birth is now inside the first ~2 m, where the vent apron and the
-        fountain cover the pop.
-
-     3. IT WAS PALE. THE LINEAR-HEX TRAP: a material colour in this r128
-        build is LINEAR, and every pixel then walks ACES + the film grade +
-        the sRGB encode on its way to the screen (core/renderer.js). The
-        edge tier 0x292824 — near-black in a hex picker — leaves that
-        pipeline at rgb(196), which is why the night column photographed
-        LIGHTER THAN THE NIGHT SKY. Colours here are authored in SCREEN
-        bytes and inverted back through the shipped transform (screenHex),
-        so "soot" is soot on the glass.
-
-     The light on the soot is baked per puff per frame from three terms: a
-     height ramp (dark brown-grey throat, mid-grey body, lighter crown), a
-     SUN-SIDE lift taken from the puff's bearing against the real sun
-     direction (core/lights.js's sun vs its target), and the VENT UNDERLIGHT
-     — the ~28 m of column standing on the crater goes rose-orange from
-     below, scaled by night. That last one is the Fuego photograph in one
-     line: a black pillar with a burning foot.
+     THE ERUPTION SKY. The column and the umbrella used to live here as
+     110-200 camera-facing puff cards each; they are one raymarched volume
+     now (THE PLUME VOLUME, below the puff batch). The batch itself stays
+     for what really is particles: the fumaroles, the phreatic jets, the
+     fountain's clots.
      ============================================================ */
 
   /* ---- SCREEN BYTES -> LINEAR MATERIAL HEX ----------------------------
@@ -1694,6 +1691,472 @@
     return handle;
   };
 
+  /* ============================================================
+     THE PLUME VOLUME — the column and the umbrella are ONE raymarched body.
+
+     OWNER, 2026-10-19: "the ash that comes out of the volcano looks like 2D
+     blocks, like rocks almost coming out of it... very 2D, like separate
+     clouds coming out of it." He was right, and no tuning of the billboards
+     could fix it. A column built from 110-200 camera-facing puff cards is a
+     stack of stickers: each card has its own lit lobe pattern baked into a
+     texture, so every card reads as its own lump; the cards have hard
+     silhouettes against the sky, so the edge of the plume is a row of
+     coins; and the light was painted per card, so the column had no
+     self-shadow and the umbrella had no belly.
+
+     The reference footage (Pinatubo 12 June 1991, Calbuco 22 April 2015,
+     Taal 12 January 2020, Eyjafjallajokull April 2010) agrees on one
+     picture:
+       - ONE dense, continuous convective body: cauliflower billows that
+         overlap and merge, never separate puffs with sky between them;
+       - grey to dark grey-brown, the sun side markedly lighter, the
+         undersides of every billow and the whole umbrella belly in their
+         own shadow;
+       - near the vent the jet is darkest (it is still mostly rock), with
+         a dirty-white steam fringe at its margin;
+       - it rises with rolling internal motion, the head bulging at the
+         rising front, then flattens into a dark umbrella that spreads at
+         neutral buoyancy and drifts downwind, with fall streaks hanging
+         under its downwind half;
+       - at night, a black pillar whose foot is lit orange by the crater.
+
+     So both are now drawn the way city/nukefx.js draws the mushroom cloud
+     (one box-proxy mesh, one fragment shader marching a density field),
+     cut down to what a phone can afford:
+       ENVELOPE  analytic: a leaning, entraining column (radius = vent +
+                 0.2 m per metre climbed, a bulbous head at the rising
+                 front, a billowing foot when it collapses) smooth-unioned
+                 with the off-centre umbrella lens, so the head flows into
+                 the deck with no seam.
+       NOISE     value noise from a 256x256 RGBA texture (two layers in R/G,
+                 one fetch per octave, built in a millisecond, WebGL1 safe).
+                 Coordinates advect UP the column at the rise speed and OUT
+                 with the deck, so the billows roll instead of sliding.
+                 Scaled to the local radius, so a burp and the big one are
+                 both cauliflower and never noise soup.
+       LIGHT     Beer-Lambert accumulation; sun transmittance from two
+                 envelope taps toward the sun (no nested march); sky
+                 occlusion from one tap overhead; the crater's glow on the
+                 foot; plume lightning as a point bloom. Colours are
+                 authored in SCREEN bytes (screenHex), so the ash lands
+                 neutral grey on the glass. No blue anywhere in the ramp
+                 (the 2026 iOS purple-speckle fix was a blue tint coming out),
+                 and every output is clamped so a mediump NaN can never
+                 reach the blend.
+       COST      one draw call for column + umbrella; empty space costs one
+                 envelope evaluation and no fetch; step count rides the
+                 quality tier; no lights, no per-frame allocation.
+     ============================================================ */
+  let _plumeNoise = null;
+  function plumeNoise() {
+    if (_plumeNoise) return _plumeNoise;
+    const S = 256, D = new Uint8Array(S * S * 4);
+    let seed = 0x2545f491 >>> 0;
+    const R = new Uint8Array(S * S);
+    for (let i = 0; i < S * S; i++) { seed = (seed * 1664525 + 1013904223) >>> 0; R[i] = seed >>> 24; }
+    // G(x,y) = R(x-37, y-17): the next z layer of the same lattice (iq's trick),
+    // so one bilinear fetch returns both z layers of a 3D value noise
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const o = (y * S + x) * 4;
+      D[o] = R[y * S + x];
+      D[o + 1] = R[((y - 17) & 255) * S + ((x - 37) & 255)];
+      D[o + 2] = 0; D[o + 3] = 255;
+    }
+    const tx = new THREE.DataTexture(D, S, S, THREE.RGBAFormat);
+    tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
+    tx.magFilter = THREE.LinearFilter; tx.minFilter = THREE.LinearFilter;
+    tx.generateMipmaps = false;
+    tx.needsUpdate = true;
+    _plumeNoise = tx;
+    return tx;
+  }
+  const PLUME_VS = [
+    "varying vec3 vWorld;",
+    "void main() {",
+    "  vec4 w = modelMatrix * vec4(position, 1.0);",
+    "  vWorld = w.xyz;",
+    "  gl_Position = projectionMatrix * viewMatrix * w;",
+    "  gl_Position.z = min(gl_Position.z, gl_Position.w * 0.99999);",
+    "}",
+  ].join("\n");
+  const PLUME_FS = [
+    "uniform sampler2D uNoise;",
+    "uniform mat4 projectionMatrix;",
+    "uniform vec3 uBoxMin; uniform vec3 uBoxMax;",
+    "uniform vec3 uVent;",
+    "uniform vec4 uCol;",    // standing top (m over vent), vent radius, collapse foot, presence
+    "uniform vec4 uCol2;",   // wind x, wind z, lean at the top (m), waning base cut (m)
+    "uniform vec4 uUmb;",    // deck centre x, z (rel vent), radius, downwind stretch
+    "uniform vec4 uUmb2;",   // deck height (rel vent), thickness, presence, fall streaks
+    "uniform vec2 uUmbDir;",
+    "uniform float uGround; uniform float uTime; uniform float uSteps; uniform float uSigma; uniform float uRise;",
+    "uniform vec3 uSunDir;",
+    "uniform vec3 uLit; uniform vec3 uShade; uniform vec3 uDeep; uniform vec3 uSteamLit; uniform vec3 uSteamShade;",
+    "uniform vec3 uVentCol; uniform float uVentK; uniform float uVentReach; uniform float uDay;",
+    "uniform vec4 uFlash; uniform float uFlashR; uniform vec3 uFlashCol;",
+    "uniform vec4 uFog; uniform vec3 uFogCol;",
+    "varying vec3 vWorld;",
+    "",
+    "float vnoise(vec3 x) {",
+    "  vec3 p = floor(x); vec3 f = x - p;",
+    "  f = f * f * (3.0 - 2.0 * f);",
+    "  p = mod(p, 256.0);",
+    "  vec2 uv = p.xy + vec2(37.0, 17.0) * p.z + f.xy;",
+    "  vec2 rg = texture2D(uNoise, (uv + 0.5) / 256.0).yx;",
+    "  return mix(rg.x, rg.y, f.z);",
+    "}",
+    "float smax(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0); return mix(b, a, h) + k * h * (1.0 - h); }",
+    /* gH: the height the column's ENVELOPE reaches. While a deck is up the
+       column always reaches the deck (a collapsing column still feeds its
+       umbrella, it just thins), so there is never sky between them. gHs is
+       the standing height, which only shapes the collapsing foot. */
+    "float gH; float gHs;",
+    "float colR(float y) {",
+    "  float u = clamp(y / gH, 0.0, 1.0);",
+    "  float us = clamp(y / gHs, 0.0, 1.0);",
+    "  float r = uCol.y * (0.8 + 0.2 * smoothstep(0.0, 0.08, u)) + 0.2 * max(y, 0.0);",
+    "  r *= 1.0 + 0.4 * smoothstep(0.62, 1.0, u);",      // the head swells
+    "  r *= 1.0 + 1.4 * uCol.z * (1.0 - us);",           // a collapsing foot billows out
+    "  return max(r, 0.5);",
+    "}",
+    "float colEnv(vec3 q) {",
+    "  if (uCol.w <= 0.001) return -9.0;",
+    "  float H = gH;",
+    "  float u = clamp(q.y / H, 0.0, 1.2);",
+    "  vec2 c = uCol2.xy * uCol2.z * u * u;",
+    "  float r = colR(q.y);",
+    "  float d = length(q.xz - c) / r;",
+    "  float k = max(q.y - (H - 0.55 * r), 0.0) / (0.75 * r);",   // the rounded crown
+    "  float e = 1.0 - length(vec2(d, k));",
+    "  e = min(e, (q.y - uCol2.w + 1.5) / 3.0);",                  // rooted in the vent
+    "  e -= uCol.z * 0.45 * smoothstep(gHs * 0.8, gH, q.y);",      // collapsing: a thinner neck, still joined
+    "  return e - (1.0 - uCol.w) * 1.3;",
+    "}",
+    "float umbRR(vec3 q) {",
+    "  vec2 d = q.xz - uUmb.xy;",
+    "  float a = dot(d, uUmbDir), c = d.x * uUmbDir.y - d.y * uUmbDir.x;",
+    "  float R = max(uUmb.z, 1.0);",
+    "  float ex = mix(R * 0.9, R + uUmb.w, smoothstep(-0.25 * R, 0.25 * R, a));",
+    "  float ey = R + 0.22 * uUmb.w;",
+    "  return length(vec2(a / ex, c / ey));",
+    "}",
+    /* big billows on the deck's top AND belly, cheap trig (no fetch: the
+       envelope is evaluated four times per sample), drifting with the deck */
+    "vec2 umbLump(vec2 p, float th) {",
+    "  vec2 s = (p - uUmbDir * uTime * 2.2) / (th * 1.5);",
+    "  float a = sin(s.x + 1.6 * sin(s.y * 0.61)) * sin(s.y * 1.13 + 1.3 * sin(s.x * 0.73));",
+    "  vec2 s2 = s * 2.37 + vec2(5.1, 2.3);",
+    "  float b = sin(s2.x + s2.y * 0.4) * sin(s2.y - s2.x * 0.3);",
+    "  return vec2(a, b);",
+    "}",
+    "float umbEnv(vec3 q) {",
+    "  if (uUmb2.z <= 0.001) return -9.0;",
+    "  float rr = umbRR(q);",
+    "  float th = max(uUmb2.y, 1.0);",
+    "  float g = max(1.0 - rr, 0.0);",
+    "  vec2 L = umbLump(q.xz - uUmb.xy, th);",
+    // top: the overshoot dome over the column, cauliflower lumps everywhere
+    "  float top = uUmb2.x + th * (0.42 + 0.3 * g) + th * 0.8 * g * g * g + th * (0.34 * L.x + 0.18 * L.y) * (0.55 + 0.45 * g);",
+    // belly: thicker over the column, hanging lobes, never a flat plane
+    "  float bot = uUmb2.x - th * (0.36 + 0.34 * g) - th * (0.2 * max(L.y, 0.0) + 0.12 * L.x + 0.1);",
+    "  float hh = max((top - bot) * 0.5, 0.5);",
+    "  float ev = 1.0 - abs(q.y - (top + bot) * 0.5) / hh;",
+    "  return min(ev, (1.04 - rr - 0.07 * L.x) * 3.0) - (1.0 - uUmb2.z) * 1.3;",
+    "}",
+    "float envAll(vec3 q) { return smax(colEnv(q), umbEnv(q), 0.6); }",
+    // the fall streaks hanging under the downwind half of the deck
+    "float fallDen(vec3 q) {",
+    "  if (uUmb2.w <= 0.001) return 0.0;",
+    "  float top = uUmb2.x - uUmb2.y * 0.35;",
+    "  if (q.y > top) return 0.0;",
+    "  float rr = umbRR(q);",
+    "  vec2 d = q.xz - uUmb.xy;",
+    "  float dw = smoothstep(-0.1 * uUmb.z, 0.5 * uUmb.z, dot(d, uUmbDir));",
+    "  float s = vnoise(vec3(q.x * 0.045, q.y * 0.004 + uTime * 0.06, q.z * 0.045));",
+    "  float hgt = clamp((q.y - (uGround - uVent.y)) / max(top - (uGround - uVent.y), 1.0), 0.0, 1.0);",
+    "  return uUmb2.w * (1.0 - smoothstep(0.55, 0.95, rr)) * dw * smoothstep(0.45, 0.8, s) * (0.25 + 0.75 * hgt) * smoothstep(0.0, 0.15, hgt);",
+    "}",
+    "",
+    "void main() {",
+    "  vec3 ro = cameraPosition;",
+    "  vec3 rd = normalize(vWorld - ro);",
+    "  vec3 inv = 1.0 / (sign(rd) * max(abs(rd), vec3(1e-5)) + vec3(step(abs(rd), vec3(0.0))) * 1e-5);",
+    "  vec3 ta = (uBoxMin - ro) * inv, tb = (uBoxMax - ro) * inv;",
+    "  vec3 tmn = min(ta, tb), tmx = max(ta, tb);",
+    "  float t0 = max(max(max(tmn.x, tmn.y), tmn.z), 0.0);",
+    "  float t1 = min(min(tmx.x, tmx.y), tmx.z);",
+    "  if (rd.y < -1e-4) t1 = min(t1, (uGround - ro.y) / rd.y);",
+    "  if (!(t1 > t0)) discard;",
+    "  float n = max(uSteps, 8.0);",
+    "  float baseL = max((t1 - t0) / n, 0.6);",
+    "  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));",
+    "  vec3 acc = vec3(0.0); float T = 1.0; float tW = 0.0; float wSum = 0.0;",
+    "  gHs = max(uCol.x, 1.0);",
+    "  gH = mix(gHs, max(gHs, uUmb2.x), clamp(uUmb2.z * 2.0, 0.0, 1.0));",
+    "  float H = gH;",
+    "  float th = max(uUmb2.y, 1.0);",
+    "  float t = t0;",
+    "  bool first = true;",
+    "  for (int i = 0; i < PLUME_MAXI; i++) {",
+    "    if (t > t1 || T < 0.03) break;",
+    "    vec3 q = ro + rd * t - uVent;",
+    "    float ec = colEnv(q), eu = umbEnv(q);",
+    "    float e = smax(ec, eu, 0.6);",
+    "    float fd = fallDen(q);",
+    // the local billow scale: the column's own radius here, or the deck's thickness
+    "    float wU = smoothstep(-0.25, 0.25, eu - ec);",
+    "    float sc = mix(colR(q.y) * 0.85 + 2.0, th * 0.9 + 2.0, wU);",
+    "    float stepL = clamp(sc * 0.3, baseL * 0.25, baseL * 2.0);",
+    "    if (first) { t += stepL * jit; first = false; continue; }",
+    "    if (e < -0.6 && fd <= 0.0) { t += stepL + (-e - 0.6) * sc * 0.7; continue; }",
+    // advected coordinates: up the column at the rise speed, out with the deck
+    "    vec3 cc = vec3(q.x, q.y - uTime * uRise, q.z) / sc;",
+    "    float sw = uTime * 0.05 + q.y / (H * 0.9 + 10.0);",
+    "    cc.xz = mat2(cos(sw), -sin(sw), sin(sw), cos(sw)) * cc.xz;",
+    "    vec3 cu = vec3(q.x - uUmbDir.x * uTime * 2.2, q.y * 1.15, q.z - uUmbDir.y * uTime * 2.2) / sc;",
+    "    vec3 c = mix(cc, cu, wU);",
+    "    float n1 = vnoise(c) * 0.64 + vnoise(c * 2.13 + vec3(3.1, 1.7, 5.3)) * 0.36;",
+    // the deck is eroded much harder than the column: billows, not a lens
+    "    float base = e + (n1 - 0.5) * mix(1.15, 1.6, wU);",
+    "    float d = 0.0;",
+    "    if (base > 0.0) {",
+    "      float n2 = vnoise(c * 4.37 + vec3(1.7, -uTime * 0.25, 0.4));",
+    "      d = base - (1.0 - n2) * mix(0.38, 0.62, wU) * (1.0 - clamp(base * 1.6, 0.0, 1.0));",
+    "      d = clamp(d * 1.8, 0.0, 1.0);",
+    "    }",
+    "    float dd = d + fd * 0.22;",
+    "    if (dd > 0.003) {",
+    "      float a = 1.0 - exp(-dd * uSigma * mix(1.8, 1.25, wU) * stepL / sc);",
+    "      float L = sc * 1.1;",
+    "      float o1 = envAll(q + uSunDir * L * 0.55);",
+    "#if PLUME_TAPS > 1",
+    "      float o2 = envAll(q + uSunDir * L * 1.6);",
+    "#else",
+    "      float o2 = o1 - 0.2;",
+    "#endif",
+    "      float od = max(o1 + 0.35, 0.0) + max(o2 + 0.35, 0.0) * 1.3 + d * 0.55;",
+    "      float Ts = exp(-od * 2.2);",
+    "      float up = envAll(q + vec3(0.0, L * 0.9, 0.0));",
+    "      float occ = clamp(1.0 - max(up + 0.3, 0.0) * 1.1, 0.18, 1.0);",
+    "      float hy = clamp(q.y / H, 0.0, 1.0);",
+    // a dirty-white steam fringe round the jet's margin, low on the column
+    "      float steam = (1.0 - smoothstep(0.05, 0.3, hy)) * (1.0 - smoothstep(0.0, 0.4, base)) * (1.0 - wU);",
+    // and the jet's core is darkest: it is still mostly rock
+    "      float deep = (1.0 - smoothstep(0.0, 0.35, hy)) * smoothstep(0.2, 0.7, base) * (1.0 - wU);",
+    "      vec3 lit = mix(uLit, uSteamLit, steam * 0.75);",
+    "      vec3 sh = mix(mix(uShade, uSteamShade, steam * 0.7), uDeep, deep * 0.7);",
+    "      lit = mix(lit, uDeep * 2.2, deep * 0.45);",
+    "      lit *= 1.0 - 0.08 * wU;",
+    "      vec3 col = mix(sh * (0.55 + 0.45 * occ), lit, clamp(Ts * uDay * (0.6 + 0.4 * occ), 0.0, 1.0));",
+    /* the crater's light on the column's FOOT only: the bottom ~12% of the
+       column, falling off fast. Ash is not fire; above that it is lit by the sun. */
+    "      float vy = max(q.y, 0.0);",
+    "      float vk = uVentK * exp(-vy / min(uVentReach, 0.045 * H + 2.0)) * (1.0 - smoothstep(0.05 * H, 0.13 * H, vy));",
+    "      col += uVentCol * (vk * (0.35 + 0.65 * (1.0 - Ts)) * (1.0 - wU));",
+    "      if (uFlash.w > 0.01) {",
+    "        vec3 fp = q + uVent - uFlash.xyz;",
+    "        col += uFlashCol * (uFlash.w * exp(-dot(fp, fp) / max(uFlashR * uFlashR, 1.0)));",
+    "      }",
+    "      float wgt = T * a;",
+    "      acc += wgt * col;",
+    "      tW += wgt * t; wSum += wgt;",
+    "      T *= 1.0 - a;",
+    "    }",
+    "    t += stepL;",
+    "  }",
+    "  float alpha = 1.0 - T;",
+    "  if (!(alpha > 0.004)) discard;",
+    "  float tHit = wSum > 1e-4 ? tW / wSum : t0;",
+    "  vec3 cOut = max(acc / alpha, vec3(0.0));",
+    "  if (uFog.x > 0.5) cOut = mix(cOut, uFogCol, smoothstep(uFog.y, uFog.z, tHit));",
+    "#ifdef HAS_FRAG_DEPTH",
+    "  vec4 clip = projectionMatrix * viewMatrix * vec4(ro + rd * tHit, 1.0);",
+    "  gl_FragDepthEXT = clamp(clip.z / clip.w * 0.5 + 0.5, 0.0, 0.999999);",
+    "#endif",
+    "  gl_FragColor = vec4(cOut, 1.0);",
+    "  #include <tonemapping_fragment>",
+    "  #include <encodings_fragment>",
+    "  gl_FragColor = vec4(clamp(gl_FragColor.rgb, 0.0, 1.0) * alpha, alpha);",
+    "}",
+  ].join("\n");
+
+  /* The shared program: every plume material is built with the same source
+     and defines, so r128's program cache links it ONCE — and V.prewarm()
+     builds a throwaway one during the unrest so that link happens while
+     the mountain is only steaming, not in the frame the column is born. */
+  function plumeTier() {
+    const steps = Math.round(q(14, 30));
+    return { steps: steps, maxi: Math.round(q(40, 72)), taps: q(0, 1) > 0.5 ? 2 : 1 };
+  }
+  function plumeMaterial() {
+    const R = CBZ.renderer;
+    const fragDepth = !!(R && R.capabilities && (R.capabilities.isWebGL2 ||
+      (R.extensions && R.extensions.has && R.extensions.has("EXT_frag_depth"))));
+    const tier = plumeTier();
+    const C = function () { return new THREE.Color(0, 0, 0); };
+    const U = {
+      uNoise: { value: plumeNoise() },
+      uBoxMin: { value: new THREE.Vector3() }, uBoxMax: { value: new THREE.Vector3() },
+      uVent: { value: new THREE.Vector3() },
+      uCol: { value: new THREE.Vector4(1, 5, 0, 0) },
+      uCol2: { value: new THREE.Vector4(1, 0, 0, 0) },
+      uUmb: { value: new THREE.Vector4(0, 0, 10, 0) },
+      uUmb2: { value: new THREE.Vector4(100, 20, 0, 0) },
+      uUmbDir: { value: new THREE.Vector2(1, 0) },
+      uGround: { value: 0 }, uTime: { value: 0 }, uSteps: { value: tier.steps }, uSigma: { value: 5.0 }, uRise: { value: 8 },
+      uSunDir: { value: new THREE.Vector3(0.5, 0.7, 0.3).normalize() },
+      uLit: { value: C() }, uShade: { value: C() }, uDeep: { value: C() },
+      uSteamLit: { value: C() }, uSteamShade: { value: C() },
+      uVentCol: { value: C() }, uVentK: { value: 0 }, uVentReach: { value: 20 }, uDay: { value: 1 },
+      uFlash: { value: new THREE.Vector4() }, uFlashR: { value: 20 }, uFlashCol: { value: C() },
+      uFog: { value: new THREE.Vector4() }, uFogCol: { value: C() },
+    };
+    const defs = { PLUME_MAXI: tier.maxi, PLUME_TAPS: tier.taps };
+    if (fragDepth) defs.HAS_FRAG_DEPTH = 1;
+    const mat = new THREE.ShaderMaterial({
+      uniforms: U, vertexShader: PLUME_VS, fragmentShader: PLUME_FS, defines: defs,
+      transparent: true, depthWrite: false, depthTest: true,
+      side: THREE.BackSide, fog: false,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+      blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+    });
+    mat.extensions = { fragDepth: fragDepth };
+    return mat;
+  }
+  let _plumeBox = null;
+  function plumeBox() { return _plumeBox || (_plumeBox = new THREE.BoxGeometry(1, 1, 1)); }
+  let _plumeWarm = null;
+  function plumeWarm() {
+    if (_plumeWarm || !CBZ.scene) return;
+    try {
+      const m = new THREE.Mesh(plumeBox(), plumeMaterial());
+      m.frustumCulled = false; m.scale.setScalar(0.001); m.position.set(0, -500, 0);
+      m.renderOrder = 7;
+      let frames = 0;
+      /* linked after its first draw; it then just stays hidden. Disposing it
+         would drop r128's last reference to the program and the real column
+         would link it again in its own birth frame. */
+      m.onAfterRender = function () { if (++frames >= 2) m.visible = false; };
+      CBZ.scene.add(m);
+      _plumeWarm = m;
+    } catch (e) { _plumeWarm = {}; }
+  }
+
+  const _sun3 = new THREE.Vector3(0.5, 0.7, 0.3);
+  function sunDir3() {
+    const s = CBZ.sun;
+    if (s && s.position) {
+      let dx = s.position.x, dy = s.position.y, dz = s.position.z;
+      const tg = CBZ.sunTarget;
+      if (tg && tg.position) { dx -= tg.position.x; dy -= tg.position.y; dz -= tg.position.z; }
+      const L = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (L > 1e-4) _sun3.set(dx / L, Math.max(-0.2, dy / L), dz / L).normalize();
+    } else {
+      const b = sunBearing();
+      _sun3.set(b.x * 0.6, 0.8, b.z * 0.6).normalize();
+    }
+    return _sun3;
+  }
+  function nightNow(opts) {
+    return (opts && opts.night != null) ? clamp(+opts.night, 0, 1)
+      : clamp(1 - (0.5 + 2.2 * (CBZ.sunHeight != null ? CBZ.sunHeight : 0.5)), 0, 1);
+  }
+
+  /* plumeVolume(parent): the one body both handles write into. The column
+     owns the vent and the clock; the umbrella attaches to the column's
+     volume (or makes its own when raised alone). Released by refcount. */
+  function plumeVolume(parent) {
+    const mat = plumeMaterial();
+    const U = mat.uniforms;
+    const mesh = new THREE.Mesh(plumeBox(), mat);
+    mesh.name = "volcanoPlumeVolume";
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 7;
+    mesh.castShadow = mesh.receiveShadow = false;
+    mesh.visible = false;
+    parent.add(mesh);
+    // screen-authored palette (see screenHex): neutral, faintly warm, never blue
+    const P = {
+      litD: new THREE.Color(screenHex(148, 139, 127)), shadeD: new THREE.Color(screenHex(50, 45, 41)),
+      deepD: new THREE.Color(screenHex(26, 23, 21)),
+      steamLitD: new THREE.Color(screenHex(194, 188, 178)), steamShadeD: new THREE.Color(screenHex(96, 92, 87)),
+      litN: new THREE.Color(screenHex(30, 28, 27)), shadeN: new THREE.Color(screenHex(13, 12, 12)),
+      deepN: new THREE.Color(screenHex(9, 8, 8)),
+      steamN: new THREE.Color(screenHex(26, 25, 24)),
+    };
+    U.uVentCol.value.setHex(screenHex(236, 112, 40));
+    U.uFlashCol.value.setHex(screenHex(228, 230, 238));
+    const vent = new THREE.Vector3(), _wp = new THREE.Vector3();
+    const box = { x0: -1, x1: 1, y0: -1, y1: 1, z0: -1, z1: 1 };
+    const vol = {
+      mesh: mesh, U: U, refs: 0, t: 0, owner: null, parent: parent,
+      ventLocal: new THREE.Vector3(), groundLocal: 0,
+      setVent(x, y, z) { vol.ventLocal.set(x, y, z); return vol; },
+      light(night, fogless) {
+        const k = night;
+        U.uLit.value.copy(P.litD).lerp(P.litN, k);
+        U.uShade.value.copy(P.shadeD).lerp(P.shadeN, k * 0.92);
+        U.uDeep.value.copy(P.deepD).lerp(P.deepN, k);
+        U.uSteamLit.value.copy(P.steamLitD).lerp(P.steamN, k);
+        U.uSteamShade.value.copy(P.steamShadeD).lerp(P.steamN, k * 0.92);
+        U.uDay.value = 1 - k;
+        U.uSunDir.value.copy(sunDir3());
+        const f = CBZ.scene && CBZ.scene.fog;
+        if (!fogless && f && f.isFog) { U.uFog.value.set(1, f.near, f.far, 0); U.uFogCol.value.copy(f.color); }
+        else U.uFog.value.x = 0;
+      },
+      /* the march box, recomputed from the shape uniforms every update:
+         column + deck + fall streaks, with room for the noise to bulge */
+      sync() {
+        const c = U.uCol.value, c2 = U.uCol2.value, um = U.uUmb.value, u2 = U.uUmb2.value;
+        let any = false;
+        let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, z0 = 1e9, z1 = -1e9;
+        if (c.w > 0.001) {
+          // the shader's gH: the column reaches the deck while one is up
+          const H = Math.max(1, c.x, u2.z > 0.001 ? u2.x : 0);
+          const rT = (c.y + 0.2 * H) * 1.4 * (1 + 1.4 * c.z) * 1.6 + 2;
+          const lx = c2.x * c2.z, lz = c2.y * c2.z;
+          x0 = Math.min(x0, Math.min(0, lx) - rT); x1 = Math.max(x1, Math.max(0, lx) + rT);
+          z0 = Math.min(z0, Math.min(0, lz) - rT); z1 = Math.max(z1, Math.max(0, lz) + rT);
+          y0 = Math.min(y0, c2.w - 2); y1 = Math.max(y1, H + rT * 0.45 + 2);
+          any = true;
+        }
+        if (u2.z > 0.001) {
+          const ext = (um.z + um.w) * 1.15 + u2.y;
+          x0 = Math.min(x0, um.x - ext); x1 = Math.max(x1, um.x + ext);
+          z0 = Math.min(z0, um.y - ext); z1 = Math.max(z1, um.y + ext);
+          const lowY = u2.w > 0.001 ? (vol.groundLocal - vol.ventLocal.y - 1) : (u2.x - u2.y * 1.5);
+          y0 = Math.min(y0, lowY); y1 = Math.max(y1, u2.x + u2.y * 2.1);
+          any = true;
+        }
+        mesh.visible = any;
+        if (!any) return;
+        box.x0 = x0; box.x1 = x1; box.y0 = y0; box.y1 = y1; box.z0 = z0; box.z1 = z1;
+        const v = vol.ventLocal;
+        mesh.position.set(v.x + (x0 + x1) * 0.5, v.y + (y0 + y1) * 0.5, v.z + (z0 + z1) * 0.5);
+        mesh.scale.set(Math.max(0.1, x1 - x0), Math.max(0.1, y1 - y0), Math.max(0.1, z1 - z0));
+        // the shader works in WORLD space: the parent may sit anywhere
+        _wp.set(0, 0, 0);
+        if (parent.matrixWorld) _wp.setFromMatrixPosition(parent.matrixWorld);
+        vent.copy(v).add(_wp);
+        U.uVent.value.copy(vent);
+        U.uGround.value = vol.groundLocal + _wp.y;
+        U.uBoxMin.value.set(vent.x + x0, vent.y + y0, vent.z + z0);
+        U.uBoxMax.value.set(vent.x + x1, vent.y + y1, vent.z + z1);
+      },
+      acquire(who) { vol.refs++; if (!vol.owner) vol.owner = who; return vol; },
+      release(who) {
+        if (vol.owner === who) vol.owner = null;
+        if (--vol.refs > 0) { vol.sync(); return; }
+        if (mesh.parent) mesh.parent.remove(mesh);
+        mat.dispose();
+      },
+    };
+    return vol;
+  }
+  V.plumeVolume = plumeVolume;
+
   V.ashColumn = function (o) {
     o = o || {};
     const parent = o.parent || CBZ.scene;
@@ -1701,91 +2164,38 @@
     const baseY = o.y != null ? +o.y : 0;
     const height = o.height > 0 ? +o.height : 55;
     const r0 = o.r > 0 ? +o.r : 7;
-    /* `fogless`: the column is the eruption's LANDMARK, and a 180 m pillar
-       whose head sits 250+ m from any camera on a 240 m island was being
-       dissolved by the eruption's own 380 m fog wall — the most dramatic
-       silhouette in nature, fading out precisely because it was tall enough
-       to matter. Soot against sky owes the air nothing (city/nukefx.js's
-       lobes made the same call), so the caller may exempt it. */
-    const useFog = o.fogless ? false : true;
-    // Screen-authored soot. Base is near-black (fresh ash in its own shadow,
-    // the jet still full of rock), the body a dark neutral, the crown a shade
-    // lighter where it is out in the open; NIGHT is a silhouette and SUN is
-    // the lit face of the head; VENT is the crater's light thrown up onto the
-    // column's foot (applied to each puff's UNDERSIDE, in the shader).
-    const CH_BASE = screenHex(22, 19, 17);
-    const CH_BODY = screenHex(46, 43, 41);
-    const CH_CROWN = screenHex(74, 70, 66);
-    const C_NIGHT = new THREE.Color(screenHex(12, 12, 15));
-    const C_SUN = new THREE.Color(screenHex(176, 166, 150));
-    const C_VENT = screenHex(236, 112, 40);
-    // how far up the crater's own glow reaches — the Fuego photograph's
-    // burning foot is roughly two vent diameters of lit column
-    const VENT_REACH = 20 + 1.1 * r0;
-    /* One instanced draw now (see puffBatch), so the population is set by
-       fill rate, not by draw calls: more, smaller-relative puffs give the
-       head its cauliflower lobes instead of a few big discs. */
-    const N = qi(110, 200);
-    const B = puffBatch(N, {
-      map: puffAtlas(), tiles: 3, fog: useFog, parent: parent, renderOrder: 7, underCol: C_VENT,
-    });
-    /* u = life/RISE: 0 birth at the vent, 1 arrival at the head, then a
-       bounded cauliflower hold before recycle. Births fill the whole cycle
-       at a constant cadence: the plume grows honestly from an empty vent,
-       then reaches a steady state where every lifecycle age is represented
-       and no recycle can open a missing-age hole through the middle. */
-    const RISE = 5.5, END = 1.45;
-    // A local seeded stream makes the silhouette stable without stealing
-    // random calls from bomb, lava and hazard gameplay downstream.
-    let seed = (((x * 73856093) | 0) ^ ((z * 19349663) | 0) ^ 0x61a5c3d7) >>> 0;
-    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    const puffs = [];
-    for (let i = 0; i < N; i++) {
-      const role = i % 10 < 3 ? 0 : (i % 10 < 8 ? 1 : 2);   // core / body / edge
-      // sqrt keeps the population area-uniform across the disc instead of
-      // piling every puff onto the axis; the edge tier is allowed past 1 so
-      // the silhouette has a ragged coastline
-      const rr = role === 0 ? 0.44 * Math.sqrt(rnd())
-        : (role === 1 ? 0.26 + 0.56 * Math.sqrt(rnd()) : 0.66 + 0.46 * rnd());
-      puffs.push({
-        role: role,
-        life: -(i / N) * RISE * END,
-        ang: rnd() * 6.2832,
-        rr: rr,
-        ph: rnd() * 6.2832,
-        sz: (role === 0 ? 1.06 : (role === 1 ? 0.98 : 0.82)) * (0.78 + 0.44 * rnd()),
-        aspect: 0.74 + rnd() * 0.54,
-        rot: (rnd() - 0.5) * 0.5,
-        spin: (rnd() - 0.5) * 0.05,   // a slow rock, never a turn (the lit mask)
-        wind: 0.76 + rnd() * 0.38,
-        tile: i % 3,
-        maxOp: role === 0 ? 0.62 : (role === 1 ? 0.5 : 0.3),
-      });
-    }
-    const col = new THREE.Color();
-    let t = 0, dead = false;
+    /* `fogless`: the column is the eruption's LANDMARK — a 180 m pillar
+       whose head sits 250+ m from any camera was being dissolved by the
+       eruption's own fog wall (city/nukefx.js made the same call). */
+    const fogless = !!o.fogless;
+    const vol = plumeVolume(parent);
+    vol.setVent(x, baseY, z);
+    const U = vol.U;
+    /* RISE: the head reaches full height in ~5.5 s (gas-thrust jet slowing
+       to neutral buoyancy) and the column grows honestly from an empty vent
+       instead of appearing whole. */
+    const RISE = 5.5;
+    U.uCol.value.set(0.5, r0, 0, 1);
+    U.uRise.value = 3 + 0.075 * height;          // the billows' climb, m/s
+    U.uVentReach.value = 20 + 1.1 * r0;          // the crater's glow reaches ~2 vent diameters up
+    let t = 0, dead = false, done = false;
     /* COLLAPSE. A Plinian column stands only while the jet keeps it
        buoyant: when the mass flux outruns the air it can entrain, the dense
-       core stops rising and FALLS BACK on the vent — the column visibly
-       drops to a squat fountain while its foot billows outward over the rim,
-       and that outward billow is the birth of the density current. hk is the
-       standing fraction of the column: it sags to ~0.38 over 1.2 s, holds
-       while the collapse feeds the current, and rebuilds over six seconds as
-       the jet re-establishes. */
+       core falls back on the vent and its foot billows outward over the
+       rim — the birth of the density current. hk is the standing fraction:
+       it sags to ~0.38 over 1.2 s, holds while the collapse feeds the
+       current, and rebuilds over six seconds. */
     let slumpT = -1, hk = 1;
     function ease(u) { u = clamp(u, 0, 1); return u * u * (3 - 2 * u); }
-    /* WANING: the vent stops feeding the column. Nothing pops — every puff
-       already aloft finishes its own life, recycled puffs are simply not
-       reborn, and when the last one has dispersed the handle reports done. */
-    let waning = false, done = false;
-    /* LIGHTNING INSIDE THE PLUME lights the ash around the channel from
-       within: a cold blue-white bloom on the puffs nearest the bolt, gone in
-       a tenth of a second. Baked into the per-puff colour, so no light. */
-    const C_FLASH = new THREE.Color(screenHex(214, 220, 255));
-    let flashK = 0, fx0 = 0, fy0 = 0, fz0 = 0, fr = 20;
+    /* WANING: the vent stops feeding the column. The root lifts off the
+       vent and climbs after the last of the ash while the body thins, so
+       the pillar detaches and disperses instead of popping. */
+    let waning = false, waneT = 0;
+    const WANE = 9;
+    let flashK = 0;
     const handle = {
-      kind: "column", group: B.mesh, puffCount: N,
-      get topY() { return baseY + height * hk; },
+      kind: "column", group: vol.mesh, puffCount: 0, volume: vol,
+      get topY() { return baseY + height * hk; },   // standing top; the drawn body still reaches the deck
       get standing() { return hk; },
       get collapsing() { return slumpT >= 0; },
       get done() { return done; },
@@ -1794,16 +2204,21 @@
       wane() { waning = true; return handle; },
       flash(px, py, pz, k, rad) {
         flashK = Math.max(flashK, k == null ? 1 : +k);
-        fx0 = px; fy0 = py; fz0 = pz; fr = rad > 0 ? +rad : 20;
+        let wx = 0, wy = 0, wz = 0;
+        if (parent.matrixWorld) { const e = parent.matrixWorld.elements; wx = e[12]; wy = e[13]; wz = e[14]; }
+        U.uFlash.value.set(px + wx, py + wy, pz + wz, flashK);
+        U.uFlashR.value = rad > 0 ? +rad : 20;
         return handle;
       },
-      /* opts.night (0 day .. 1 night) is the caller's day clock — tickEruption
-         already computes it and it is the difference between a black
-         silhouette and a grey smudge. Absent, the sky's own sun height
-         answers, so a column raised by anything else still knows the hour. */
+      /* opts.night (0 day .. 1 night) is the caller's day clock; absent, the
+         sky's own sun height answers. */
       update(dt, wx, wz, opts) {
-        if (dead) return handle;
+        if (dead || done) return handle;
+        if (!(dt > 0)) return handle;
+        if (dt > 0.2) dt = 0.2;
         t += dt;
+        vol.t += dt;
+        U.uTime.value = vol.t;
         if (slumpT >= 0) {
           slumpT += dt;
           if (slumpT < 1.2) hk = 1 - 0.62 * ease(slumpT / 1.2);
@@ -1813,97 +2228,33 @@
         }
         flashK *= Math.exp(-dt * 16);
         if (flashK < 0.01) flashK = 0;
-        const bx = wx || 0, bz = wz || 0;
-        const night = (opts && opts.night != null) ? clamp(+opts.night, 0, 1)
-          : clamp(1 - (0.5 + 2.2 * (CBZ.sunHeight != null ? CBZ.sunHeight : 0.5)), 0, 1);
-        const day = 1 - night;
-        const sd = sunBearing();
-        const H = height * hk, foot = 1 - hk;
-        let alive = 0;
-        for (let i = 0; i < puffs.length; i++) {
-          const P = puffs[i];
-          P.life += dt;
-          if (P.life < 0) { if (waning) P.life = -1e9; B.hide(i); continue; }
-          let u = P.life / RISE;
-          if (u >= END) {
-            if (waning) { P.life = -1e9; B.hide(i); continue; }
-            P.life = 0; u = 0;
-            P.ang = rnd() * 6.2832;
-            P.ph = rnd() * 6.2832;
-            P.wind = 0.76 + rnd() * 0.38;
-          }
-          const climb = Math.min(1, u);
-          // Buoyant ash leaves the throat fast (the gas-thrust jet) and slows
-          // as it reaches neutral buoyancy. That crowd — not one giant disc —
-          // is the head.
-          const hh = 1 - Math.pow(1 - climb, 1.45);
-          const head = clamp((u - 1) / (END - 1), 0, 1);
-          /* ENTRAINMENT IS THE SHAPE: a jet the width of the vent for the
-             first tenth (the gas-thrust region is narrow and dense), then
-             ~0.2 m of radius per metre climbed, then a broad turbulent cap
-             that spreads sideways at neutral buoyancy — an anvil, not a ball. */
-          const jet = hh < 0.1 ? 0.75 + 2.5 * hh : 1;
-          alive++;
-          // a collapsing column's foot billows OUT over the rim
-          const axisR = (r0 * jet + 0.2 * hh * H) * (1 + 1.05 * head) * (1 + 1.4 * foot * (1 - hh));
-          const lean = H * 0.27 * hh * hh * P.wind;
-          // A slow helical roll belongs to convection; nothing is added to
-          // world position as a sinusoid, so no puff bounces on a fixed seat.
-          const drift = P.ang + hh * 0.72 + t * (0.018 + P.spin * 0.08);
-          const radial = axisR * P.rr * (1 + head * (P.role === 2 ? 0.34 : 0.12));
-          const capLift = head * H * (0.02 + 0.04 * Math.sin(P.ph));
-          const py = baseY + hh * H + capLift;
-          // sized off the LOCAL radius: overlap depth is scale-free, so the
-          // burp and the big one are both masses rather than strings; puffs
-          // keep swelling as they age (the billow)
-          const sc = axisR * (0.5 + 0.42 * P.sz) * (1 + 0.22 * head) * (0.85 + 0.15 * climb);
-          // BORN AT THE CRATER — full inside ~2 % of the rise (about 2 m),
-          // behind the vent apron and the fountain
-          const born = clamp(u / 0.016, 0, 1);
-          const dying = u < 1.2 ? 1 : clamp((END - u) / (END - 1.2), 0, 1);
-          const op = P.maxOp * born * dying * (1 + 0.25 * (1 - hh));   // the dense foot
-          P.rot += P.spin * dt;
-          // ---- the light on the soot, baked per puff ----
-          ramp3(hh, CH_BASE, CH_BODY, CH_CROWN, col);
-          if (night > 0) col.lerp(C_NIGHT, night * 0.88);
-          /* THE SUN SIDE. A convecting head is a solid, and the half of it
-             facing the sun is markedly lighter — that one cue is most of
-             what makes a plume read as a volume in daylight. */
-          if (day > 0.02) {
-            const sunSide = (Math.cos(drift) * sd.x + Math.sin(drift) * sd.z) * P.rr;
-            if (sunSide > 0) col.lerp(C_SUN, sunSide * day * (0.10 + 0.46 * hh));
-          }
-          /* AND THE VENT LIGHTS THE FOOT FROM BELOW. Fuego by night: the
-             pillar is black except for the stretch standing on the crater,
-             whose undersides are rose-orange. */
-          const dy = py - baseY;
-          let under = 0;
-          if (dy < VENT_REACH) {
-            const gk = 1 - dy / VENT_REACH;
-            under = gk * gk * (0.28 + 0.62 * night);
-          }
-          const px = x + Math.cos(drift) * radial + bx * lean, pz = z + Math.sin(drift) * radial + bz * lean;
-          if (flashK > 0) {
-            const ddx = px - fx0, ddy = py - fy0, ddz = pz - fz0;
-            const pr = Math.exp(-(ddx * ddx + ddy * ddy + ddz * ddz) / (fr * fr));
-            if (pr > 0.02) col.lerp(C_FLASH, Math.min(0.85, flashK * pr));
-          }
-          B.set(i,
-            px, py, pz,
-            sc * P.aspect, sc * (1.12 - (P.aspect - 0.74) * 0.3), P.rot, P.tile,
-            col.r, col.g, col.b, Math.min(0.85, op), under);
+        U.uFlash.value.w = flashK;
+        const grow = 1 - Math.pow(1 - Math.min(1, t / RISE), 1.45);
+        let pres = 1, cut = 0;
+        if (waning) {
+          waneT += dt;
+          const k = clamp(waneT / WANE, 0, 1);
+          pres = 1 - k * k;
+          cut = height * hk * ease(k) * 0.85;
+          if (k >= 1) { done = true; pres = 0; }
         }
-        B.commit();
-        if (waning && alive === 0) done = true;
+        U.uCol.value.set(Math.max(0.5, height * hk * grow), r0, 1 - hk, pres);
+        U.uCol2.value.set(wx || 0, wz || 0, height * 0.27 * hk, cut);
+        const night = nightNow(opts);
+        U.uVentK.value = waning ? 0 : (0.12 + 0.7 * night);
+        vol.light(night, fogless);
+        vol.sync();
         return handle;
       },
       dispose() {
         if (dead) return;
         dead = true;
-        B.dispose();
+        U.uCol.value.w = 0;
+        vol.release(handle);
         const k = LIVE.column.indexOf(handle); if (k >= 0) LIVE.column.splice(k, 1);
       },
     };
+    vol.acquire(handle);
     LIVE.column.push(handle);
     return handle;
   };
@@ -1911,32 +2262,23 @@
   /* ============================================================
      THE UMBRELLA CLOUD — where a Plinian column stops climbing.
 
-     A Plinian column is a buoyant plume: it climbs until its mixture of
-     hot gas, ash and entrained air is no denser than the air around it,
-     overshoots a little, and then SPREADS SIDEWAYS as a gravity current at
-     that neutral-buoyancy height. That flat, dark, ever-widening deck is
-     the umbrella, and it is the eruption's real footprint: the ash that
-     buries the downwind town falls OUT OF IT, not out of the column, which
-     is why the fall marches across the island as the deck spreads instead
-     of appearing everywhere at once.
+     A Plinian column climbs until its mixture of hot gas, ash and entrained
+     air is no denser than the air around it, overshoots a little, then
+     SPREADS SIDEWAYS as a gravity current at that height. That flat, dark,
+     ever-widening deck is the eruption's real footprint: the ash that
+     buries the downwind town falls OUT OF IT.
 
-     The physics in the shape:
-       SPREAD   a radial gravity current: r ~ t^(3/4) (Sparks et al.), from
-                the column head's own width out to rMax, so it opens fast
-                and then creeps.
-       WIND     an umbrella cannot spread upwind faster than the wind
-                pushes it back, so the deck is an off-centre lens stretched
-                downwind — a fan, not a disc.
-       LENS     thickest over the vent (the overshoot dome), thin at the
-                rim; the belly is in its own shadow and the top is lit.
-       CURTAINS once the deck is a few seconds old, ash falls out of its
-                downwind half in long soft grey streaks — the fall streaks
-                every photograph of an ashfall shows hanging under the cloud.
+       SPREAD   r ~ t^(3/4) (Sparks et al.), from the head's width to rMax.
+       WIND     it cannot spread upwind faster than the wind pushes it back,
+                so the deck is an off-centre lens stretched downwind.
+       LENS     thickest over the vent (the overshoot dome), thin at the rim;
+                belly in its own shadow (the volume's sun taps do that).
+       CURTAINS once the deck is a few seconds old, fall streaks hang under
+                its downwind half.
 
-     One instanced draw (puffBatch). Puffs keep a near-upright rotation (the
-     lit puff mask, see puffTex). coverAt(x, z) is the analytic footprint the
-     caller reads to darken the sky and cut visibility under the deck, so the
-     darkness and the picture can never disagree about where the cloud is.
+     Drawn by the column's plume volume (one body, no seam where the head
+     meets the deck). coverAt(x, z) is the analytic footprint the caller
+     reads to darken the sky — the same lens the shader draws.
      ============================================================ */
   V.umbrella = function (o) {
     o = o || {};
@@ -1949,41 +2291,23 @@
     const stretchMax = o.stretch > 0 ? +o.stretch : 80;
     const T = o.spreadSecs > 0 ? +o.spreadSecs : 22;
     const groundY = o.groundY != null ? +o.groundY : 0;
-    const useFog = !o.fogless;
-    const CH_BELLY = screenHex(28, 25, 23);
-    const CH_MID = screenHex(50, 46, 43);
-    const CH_TOP = screenHex(86, 81, 76);
-    const CH_FALL = screenHex(58, 55, 52);
-    const C_NIGHT = new THREE.Color(screenHex(10, 10, 13));
-    const C_SUN = new THREE.Color(screenHex(170, 160, 146));
-    const C_FLASH = new THREE.Color(screenHex(214, 220, 255));
-    const C_FALL = new THREE.Color(CH_FALL);
-    const N = qi(72, 150);
-    const B = puffBatch(N, { map: puffAtlas(), tiles: 3, fog: useFog, parent: parent, renderOrder: 7 });
-    let seed = ((o.salt | 0) ^ 0x7f4a7c15) >>> 0;
-    const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-    const P = [];
-    for (let i = 0; i < N; i++) {
-      const curtain = i % 7 === 6;
-      P.push({
-        curtain: curtain,
-        ang: rnd() * 6.2832,
-        // curtains hang under the DOWNWIND half: an angle off the wind bearing
-        da: (rnd() - 0.5) * 1.9,
-        rr: curtain ? 0.3 + 0.65 * rnd() : Math.min(1.12, Math.sqrt(rnd()) * 1.1),
-        hf: rnd() * 2 - 1,
-        sz: 0.75 + 0.5 * rnd(),
-        aspect: 0.8 + 0.5 * rnd(),
-        rot: (rnd() - 0.5) * 0.4,
-        ph: rnd() * 6.2832,
-        tile: i % 3,
-      });
+    const fogless = !!o.fogless;
+    // ride the column's volume when there is one over this vent
+    let col = o.column && o.column.volume ? o.column : null;
+    if (!col) {
+      for (let i = LIVE.column.length - 1; i >= 0; i--) {
+        const c = LIVE.column[i];
+        if (c.volume && c.volume.parent === parent && Math.hypot(c.x - x0, c.z - z0) < 30) { col = c; break; }
+      }
     }
-    const col = new THREE.Color();
+    const vol = col ? col.volume : plumeVolume(parent);
+    if (!col) vol.setVent(x0, y0 - thick, z0);
+    const U = vol.U;
+    const vy = vol.ventLocal.y;
     let age = 0, feed = 1, fade = 1, cx = x0, cz = z0, R = r0, S = 0, dead = false, done = false;
-    let ux = 1, uz = 0, flashK = 0, fx0 = 0, fy0 = 0, fz0 = 0, fr = 30;
+    let ux = 1, uz = 0, flashK = 0;
     const handle = {
-      kind: "umbrella", group: B.mesh, puffCount: N, y: y0, thick: thick,
+      kind: "umbrella", group: vol.mesh, puffCount: 0, y: y0, thick: thick, volume: vol,
       get radius() { return R; },
       get stretch() { return S; },
       get downwindReach() { return R + S; },
@@ -1995,25 +2319,28 @@
       starve() { feed = 0; return handle; },
       flash(px, py, pz, k, rad) {
         flashK = Math.max(flashK, k == null ? 1 : +k);
-        fx0 = px; fy0 = py; fz0 = pz; fr = rad > 0 ? +rad : 30;
+        let wx = 0, wy = 0, wz = 0;
+        if (parent.matrixWorld) { const e = parent.matrixWorld.elements; wx = e[12]; wy = e[13]; wz = e[14]; }
+        U.uFlash.value.set(px + wx, py + wy, pz + wz, Math.max(U.uFlash.value.w, flashK));
+        U.uFlashR.value = Math.max(U.uFlashR.value, rad > 0 ? +rad : 30);
         return handle;
       },
-      /* 0..1: how much deck is overhead at (x, z). The off-centre lens the
-         puffs are laid out on, solved analytically: upwind it reaches R,
-         downwind R + stretch, across a little more than R. */
+      /* 0..1: how much deck is overhead at (x, z) — the shader's own lens */
       coverAt(x, z) {
         if (dead || fade <= 0) return 0;
         const dx = x - cx, dz = z - cz;
         const a = dx * ux + dz * uz, c = -dx * uz + dz * ux;
         const ex = a > 0 ? R + S : R * 0.9, ey = R + 0.22 * S;
-        const q = (a * a) / (ex * ex) + (c * c) / (ey * ey);
-        return fade * clamp((1.12 - q) / 0.42, 0, 1) * clamp(age / 3, 0, 1);
+        const qq = (a * a) / (ex * ex) + (c * c) / (ey * ey);
+        return fade * clamp((1.12 - qq) / 0.42, 0, 1) * clamp(age / 3, 0, 1);
       },
       update(dt, wx, wz, opts) {
         if (dead || done) return handle;
         if (!(dt > 0)) return handle;
         if (dt > 0.2) dt = 0.2;
         age += dt;
+        // the column owns the clock while it stands; alone, the deck keeps it
+        if (!vol.owner || vol.owner === handle || (vol.owner.done)) { vol.t += dt; U.uTime.value = vol.t; }
         const wl = Math.hypot(wx || 0, wz || 0);
         if (wl > 1e-3) {
           ux += ((wx / wl) - ux) * Math.min(1, dt * 0.5);
@@ -2030,66 +2357,30 @@
           cx += ux * ws * dt; cz += uz * ws * dt;
           S += ws * 0.4 * dt;
           fade -= dt / 26;
-          if (fade <= 0) { fade = 0; done = true; B.commit(); handle.group.visible = false; return handle; }
+          if (fade <= 0) { fade = 0; done = true; U.uUmb2.value.z = 0; U.uUmb2.value.w = 0; vol.sync(); return handle; }
         }
         flashK *= Math.exp(-dt * 14);
         if (flashK < 0.01) flashK = 0;
-        const night = (opts && opts.night != null) ? clamp(+opts.night, 0, 1)
-          : clamp(1 - (0.5 + 2.2 * (CBZ.sunHeight != null ? CBZ.sunHeight : 0.5)), 0, 1);
-        const day = 1 - night;
-        const sd = sunBearing();
-        const windA = Math.atan2(uz, ux);
+        if (vol.owner === handle || !vol.owner || vol.owner.done) U.uFlash.value.w = flashK;
         const grow = clamp(age / 2.5, 0, 1);
         const fallK = clamp((age - 5) / 6, 0, 1) * fade;
-        const base = y0 - thick * 0.5;
-        for (let i = 0; i < N; i++) {
-          const p = P[i];
-          const ang = p.curtain ? windA + p.da : p.ang;
-          const ca = Math.cos(ang), sa = Math.sin(ang);
-          const d = ca * ux + sa * uz;
-          const push = S * p.rr * Math.pow(clamp((d + 0.35) / 1.35, 0, 1), 1.6);
-          const px = cx + ca * R * p.rr + ux * push;
-          const pz = cz + sa * R * p.rr + uz * push;
-          if (p.curtain) {
-            if (fallK <= 0.01 || base - groundY < 8) { B.hide(i); continue; }
-            const hgt = base - groundY;
-            const w = (0.12 * R + 9) * p.sz;
-            col.copy(C_FALL);
-            if (night > 0) col.lerp(C_NIGHT, night * 0.85);
-            B.set(i, px + ux * hgt * 0.12, groundY + hgt * 0.5, pz + uz * hgt * 0.12,
-              w, hgt * 1.05, p.rot * 0.3, p.tile, col.r, col.g, col.b, 0.15 * fallK * (1.2 - p.rr * 0.5), 0);
-            continue;
-          }
-          const lens = 1 - 0.55 * p.rr * p.rr;
-          const dome = thick * 0.4 * Math.pow(Math.max(0, 1 - p.rr), 2);
-          const py = y0 + p.hf * thick * 0.5 * lens + dome + Math.sin(age * 0.25 + p.ph) * thick * 0.05;
-          const sc = (0.2 * R + 0.55 * thick + 6) * p.sz * (0.8 + 0.4 * (1 - Math.min(1, p.rr)));
-          // belly in its own shadow, top in the light
-          ramp3((p.hf + 1) * 0.5, CH_BELLY, CH_MID, CH_TOP, col);
-          if (night > 0) col.lerp(C_NIGHT, night * 0.9);
-          if (day > 0.02 && p.hf > 0) {
-            const sunSide = (ca * sd.x + sa * sd.z) * Math.min(1, p.rr);
-            if (sunSide > 0) col.lerp(C_SUN, sunSide * day * 0.35 * p.hf);
-          }
-          if (flashK > 0) {
-            const ddx = px - fx0, ddy = py - fy0, ddz = pz - fz0;
-            const pr = Math.exp(-(ddx * ddx + ddy * ddy + ddz * ddz) / (fr * fr));
-            if (pr > 0.02) col.lerp(C_FLASH, Math.min(0.8, flashK * pr));
-          }
-          const edge = clamp((1.14 - p.rr) / 0.3, 0, 1);
-          B.set(i, px, py, pz, sc * p.aspect, sc * 0.62, p.rot, p.tile,
-            col.r, col.g, col.b, 0.62 * edge * fade * grow, 0);
-        }
-        B.commit();
+        U.uUmb.value.set(cx - vol.ventLocal.x, cz - vol.ventLocal.z, R, S);
+        U.uUmb2.value.set(y0 - vy, thick, fade * grow, (y0 - thick * 0.5 - groundY) > 8 ? fallK * 0.8 : 0);
+        U.uUmbDir.value.set(ux, uz);
+        vol.groundLocal = groundY;
+        if (!col || col.done) vol.light(nightNow(opts), fogless);
+        vol.sync();
         return handle;
       },
       dispose() {
         if (dead) return;
         dead = true;
-        B.dispose();
+        U.uUmb2.value.z = 0; U.uUmb2.value.w = 0;
+        vol.release(handle);
         const k = LIVE.umbrella.indexOf(handle); if (k >= 0) LIVE.umbrella.splice(k, 1);
       },
     };
+    vol.acquire(handle);
     LIVE.umbrella.push(handle);
     return handle;
   };
@@ -2568,19 +2859,27 @@
     const F_MID = new THREE.Color(screenHex(255, 140, 38));
     const F_OLD = new THREE.Color(screenHex(152, 30, 8));
     // one additive instanced draw for every clot (was one Sprite call each)
-    const B = puffBatch(N, { map: glowTex(), tiles: 1, additive: true, fog: false, parent: parent, renderOrder: 8 });
+    /* renderOrder 6, UNDER the plume volume (7): the fountain stands inside
+       the column's foot, so the ash must hide it, not have it glow through */
+    const B = puffBatch(N, { map: glowTex(), tiles: 1, additive: true, fog: false, parent: parent, renderOrder: 6 });
     const _fc = new THREE.Color();
     let seed = (((x * 73856093) | 0) ^ ((z * 19349663) | 0) ^ 0x1d3f77b1) >>> 0;
     const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
     const clots = [];
+    /* THE JET AND THE SPATTER. Fissure 8 and Fagradalsfjall both show a
+       fire fountain as two things: a dense, low, near-vertical JET of
+       incandescent clots standing on the vent (the brightest, most
+       continuous thing in the frame) and the individual spatter thrown
+       higher and wider out of it, cooling red on the way down. A third of
+       the clots are the jet: slower, fatter, tighter to the axis. */
     function launch(P) {
-      const a = rnd() * 6.2832, rr = Math.sqrt(rnd()) * mouth;
+      const a = rnd() * 6.2832, rr = Math.sqrt(rnd()) * mouth * (P.jet ? 0.6 : 1);
       P.x = x + Math.cos(a) * rr; P.y = baseY; P.z = z + Math.sin(a) * rr;
       // tilt off vertical inside the cone, thrown roughly outward from the
       // axis so the fan opens the way a jet does instead of crossing itself
-      const tilt = CONE * (0.2 + 0.8 * rnd());
+      const tilt = P.jet ? CONE * 0.4 * rnd() : CONE * (0.2 + 0.8 * rnd());
       const az = a + (rnd() - 0.5) * 1.5;
-      const sp = V0 * (0.48 + 0.64 * rnd());
+      const sp = V0 * (P.jet ? 0.22 + 0.26 * rnd() : 0.48 + 0.64 * rnd());
       const st = Math.sin(tilt);
       P.vx = Math.cos(az) * st * sp;
       P.vy = Math.cos(tilt) * sp;
@@ -2588,11 +2887,11 @@
       P.age = 0;
       P.gy = null;
       // the clots thrown hardest are the big bombs
-      P.sz = 0.5 + 1.05 * (0.35 * rnd() + 0.65 * clamp((sp / V0 - 0.48) / 0.64, 0, 1));
+      P.sz = P.jet ? 1.2 + 0.9 * rnd() : 0.5 + 1.05 * (0.35 * rnd() + 0.65 * clamp((sp / V0 - 0.48) / 0.64, 0, 1));
       P.tf = Math.max(0.35, 2 * P.vy / G);
     }
     for (let i = 0; i < N; i++) {
-      const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, tf: 1, sz: 1, gy: null, wait: (i / N) * 1.2 };
+      const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, age: 0, tf: 1, sz: 1, gy: null, wait: (i / N) * 1.2, jet: i % 3 === 0 };
       launch(P);
       clots.push(P);
     }
@@ -2625,7 +2924,9 @@
           const col = _fc;
           if (k < 0.42) col.copy(F_HOT).lerp(F_MID, k / 0.42);
           else col.copy(F_MID).lerp(F_OLD, (k - 0.42) / 0.58);
-          const op = 0.82 * (1 - 0.6 * k) * clamp(P.age / 0.06, 0, 1);
+          // the jet stays hot; spatter falling back has lost most of its light
+          if (P.jet) col.copy(F_HOT).lerp(F_MID, Math.min(1, k * 1.3));
+          const op = (P.jet ? 0.7 : 0.82) * (1 - 0.6 * k) * (P.vy < 0 && !P.jet ? 0.75 : 1) * clamp(P.age / 0.06, 0, 1);
           /* A CLOT IS MOVING. Stretching the card along the flight — most of
              which is vertical — is the whole difference between a bead and a
              tracer, and it costs one scale component. It relaxes to a round
@@ -3813,11 +4114,9 @@
     }
     let pyroBlobs = 0;
     for (let i = 0; i < LIVE.pyro.length; i++) pyroBlobs += LIVE.pyro[i].blobCount || 0;
-    let columnPuffs = 0;
-    for (let i = 0; i < LIVE.column.length; i++) {
-      const c = LIVE.column[i];
-      columnPuffs += c.puffCount || (c.group ? c.group.children.length : 0);
-    }
+    // the column and the umbrella are one raymarched volume (THE PLUME VOLUME)
+    const vols = [];
+    LIVE.column.concat(LIVE.umbrella).forEach(function (h) { if (h.volume && vols.indexOf(h.volume) < 0) vols.push(h.volume); });
     let fountainClots = 0;
     for (let i = 0; i < LIVE.fountain.length; i++) fountainClots += LIVE.fountain[i].clotCount || 0;
     let ashPeak = 0, ashCells = 0;
@@ -3849,7 +4148,7 @@
       lavaBranches: census.branches,
       ventGlows: LIVE.vent.length,
       ashColumns: LIVE.column.length,
-      columnPuffs: columnPuffs,
+      plumeVolumes: vols.length,
       // the ballistic lava fountain (V.fountain) — clots, not Points
       fountains: LIVE.fountain.length,
       fountainClots: fountainClots,

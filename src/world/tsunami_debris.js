@@ -219,6 +219,26 @@
     });
     return out;
   };
+  /* NOTHING IS LEFT HANGING WHEN THE WATER STOPS BEING STEPPED (2026-10-19,
+     owner: "after a tsunami, trees and other things stay FLOATING in the
+     air"). A field's pieces were only ever moved by its own step(), which the
+     tsunami calls through the backwash and stops calling the moment the
+     run-up field detaches (drained, the 14 s cut, the calm's forceQuiet).
+     Whatever was afloat or still coming down at that instant froze there: a
+     pine a metre over the street, tumbled to whatever angle the last frame
+     gave it. Now a field that has not been stepped for a moment lays every
+     piece of its own down under gravity (CBZ.tsuDebrisSettle snaps them). */
+  const IDLE_MS = 300;
+  if (CBZ.onUpdate) CBZ.onUpdate(28.4, function (dt) {
+    if (!liveFields.size) return;
+    const now = performance.now();
+    liveFields.forEach(function (f) { if (f.idle && now - f.lastStep() > IDLE_MS) { try { f.idle(Math.min(0.1, dt || 0)); } catch (e) {} } });
+  });
+  CBZ.tsuDebrisSettle = function () {
+    let n = 0;
+    liveFields.forEach(function (f) { if (f.settleAll) { try { n += f.settleAll(); } catch (e) {} } });
+    return n;
+  };
   const MAX_SP = 12;          // m/s: the fastest a kinematic piece of the field moves
 
   CBZ.tsuDebrisField = function (cfg) {
@@ -278,6 +298,9 @@
           if (!_hb.isEmpty()) it.half = Math.max(0.05, (_hb.max.y - _hb.min.y) / 2);
         } catch (e) {}
       }
+      // a tree turns about the vertical first, so lying down is one pitch
+      // whatever heading it has (see restTarget)
+      if (k === "log" && obj && obj.rotation && !it.inst) obj.rotation.order = "YXZ";
       items.push(it); entrained++;
       return it;
     }
@@ -289,6 +312,81 @@
       I.mesh.setMatrixAt(I.i, it.obj.matrix);
       I.mesh.instanceMatrix.needsUpdate = true;
     }
+    /* ---- AT REST: what the water leaves lies ON the ground ---------------
+       A stranded piece used to be put at ground + 0.22 m whatever its pose
+       (the tumble's last angles, its origin wherever its builder put it), so
+       a tree pivoted at its trunk's middle stood on end half in the street or
+       hung with its root plate in the air. Its rest pose now: a TREE lies
+       down along the ground (one pitch about its own heading, its trunk on
+       the ground, the crown flattened under it); a hull on its bilge;
+       anything else on its nearest face (a quarter turn of pitch and roll).
+       Its height is measured off its own geometry in that pose, and it gets
+       there by falling (gravity), never by a snap, except at strandAll. */
+    const HALF_PI = Math.PI / 2;
+    const snapQ = function (a) { return Math.round(a / HALF_PI) * HALF_PI; };
+    const _rb = new THREE.Box3(), _rm = new THREE.Matrix4(), _rq = new THREE.Quaternion(), _re = new THREE.Euler(), _r0 = new THREE.Vector3();
+    // the part a piece stands on: a tree's trunk (the crown gives under it)
+    function supportOf(it) {
+      const o = it.obj;
+      if (it.kind === "log" && o.children && o.children.length) return o.children[0];
+      return o;
+    }
+    // the lowest point of the piece with its origin at y = 0 and rotation q
+    function lowAt(it, q) {
+      const o = it.obj;
+      if (it.inst) {
+        const g = it.inst.mesh.geometry;
+        if (!g.boundingBox) g.computeBoundingBox();
+        _rm.compose(_r0.set(0, 0, 0), q, o.scale);
+        _rb.copy(g.boundingBox).applyMatrix4(_rm);
+        return _rb.isEmpty() ? -it.half : _rb.min.y;
+      }
+      const px = o.position.x, py = o.position.y, pz = o.position.z;
+      _rq.copy(o.quaternion);
+      o.position.set(0, 0, 0); o.quaternion.copy(q); o.updateMatrixWorld(true);
+      _rb.setFromObject(supportOf(it));
+      let off = 0;
+      if (o.parent) { o.parent.updateWorldMatrix(true, false); off = o.parent.matrixWorld.elements[13]; }
+      o.position.set(px, py, pz); o.quaternion.copy(_rq); o.updateMatrixWorld(true);
+      return _rb.isEmpty() ? -it.half : _rb.min.y - off;
+    }
+    function restTarget(it) {
+      const c = it.cls;
+      let px = it.pitch, pz = it.roll;
+      const py = it.yaw;
+      if (it.kind === "log") { px = (it.sx >= 0 ? 1 : -1) * HALF_PI; pz = 0; }
+      else if (c.upright) px = 0;
+      else { px = snapQ(px); pz = snapQ(pz); }
+      _re.set(px, py, pz, it.obj.rotation.order || "XYZ");
+      const q = new THREE.Quaternion().setFromEuler(_re);
+      return { q: q, px: px, py: py, pz: pz, base: -lowAt(it, q) };
+    }
+    // the height its origin rests at here: on the ground (plus whatever it is
+    // piled on), or afloat where the sea still stands over the ground
+    function restY(it, R) {
+      const gnd = groundY(it.x, it.z);
+      let ty = gnd + it.stackY + R.base - 0.03;
+      const sea = seaY(it.x, it.z);
+      if (Number.isFinite(sea) && sea - gnd > it.cls.draft) ty = Math.max(ty, sea - it.cls.sink);
+      return ty;
+    }
+    // one step toward the rest pose; true once it is there
+    function settleStep(it, dt, snap) {
+      const o = it.obj;
+      const R = it.rest || (it.rest = restTarget(it));
+      const ty = restY(it, R), y = o.position.y;
+      let ny;
+      if (snap || y <= ty) { ny = ty; it.fallV = 0; }
+      else { it.fallV = Math.min(14, (it.fallV || 0) + 9.8 * dt); ny = Math.max(ty, y - it.fallV * dt); }
+      o.position.set(it.x, ny, it.z);
+      if (snap) o.quaternion.copy(R.q); else o.quaternion.slerp(R.q, Math.min(1, dt * 4));
+      const done = ny <= ty + 1e-3 && (snap || o.quaternion.angleTo(R.q) < 0.02);
+      if (done) { o.quaternion.copy(R.q); it.pitch = R.px; it.yaw = R.py; it.roll = R.pz; it.atRest = true; }
+      sync(it);
+      return done;
+    }
+    function unrest(it) { it.rest = null; it.atRest = false; it.fallV = 0; }
+    let lastStep = performance.now(), idleDone = false;
     const churnMeshes = [];     // the batches + car clones this field made
     const _pose = {};
     let churnLive = 0;
@@ -355,6 +453,7 @@
         it.vz += ((w.v || 0) * c.drift - it.vz) * k;
         if (!it.floated) { it.floated = true; it.stranded = false; }
         it.stranded = false;
+        if (it.rest || it.atRest) unrest(it);
       } else {
         // GROUNDED: the bottom takes its speed off in a second; a strong
         // enough current still shoves it along the street (a car dragged on
@@ -383,6 +482,7 @@
         const moved = Math.hypot(nx - it.x, nz - it.z);
         it.x = nx; it.z = nz;
         it.travel += moved;
+        if (moved > 1e-3 && !floats) it.atRest = false;      // dragged on: the ground under it changed
         if (!it.carried && floats && Math.hypot(it.x - it.x0, it.z - it.z0) > 3) { it.carried = true; carried++; }
       }
       const gnd = groundY(it.x, it.z);
@@ -399,17 +499,23 @@
            one stayed up on nothing. Twice a second the pile is read again
            and it may only come DOWN (eased below). */
         it.stackT += dt;
-        if (it.stackT > 0.5) { it.stackT = 0; if (it.stackY > 0) it.stackY = Math.min(it.stackY, stackAt(it)); }
-        const ty = gnd + 0.22 + it.stackY, y = it.obj.position.y;
+        if (it.stackT > 0.5) {
+          it.stackT = 0;
+          if (it.stackY > 0) { const ns = Math.min(it.stackY, stackAt(it)); if (ns < it.stackY - 0.01) it.atRest = false; it.stackY = ns; }
+        }
         /* Never lifted yet (a boat lying where the drawdown left it): where it
            lies, but only if that is ON the ground. It used to be held at the
            height it was taken at forever, and a wall taken off an upper
            storey of a house that then went down hung in the air there. */
-        let hold = null;
-        if (!it.floated && it.y0 != null) hold = it.y0 - it.half - gnd > 0.5 ? Math.max(gnd + it.half, y - dt * 6) : it.y0;
-        it.obj.position.set(it.x, hold != null ? hold : y > ty ? Math.max(ty, y - dt * 4) : ty, it.z);
-        it.obj.rotation.set(it.pitch, it.yaw, it.roll);
-        sync(it);
+        if (!it.floated && it.y0 != null) {
+          const y = it.obj.position.y;
+          const hold = it.y0 - it.half - gnd > 0.5 ? Math.max(gnd + it.half, y - dt * 6) : it.y0;
+          it.obj.position.set(it.x, hold, it.z);
+          it.obj.rotation.set(it.pitch, it.yaw, it.roll);
+          sync(it);
+          return;
+        }
+        if (!it.atRest) settleStep(it, dt, false);
         return;
       }
       it.stackY = 0;
@@ -537,6 +643,7 @@
         const dx = Number.isFinite(env.dx) ? env.dx : 1, dz = Number.isFinite(env.dz) ? env.dz : 0;
         const flow = Number.isFinite(env.flow) ? env.flow : 0;
         envDx = dx; envDz = dz; envFlow = flow;
+        lastStep = performance.now(); idleDone = false;
         checkPhase = (checkPhase + 1) % 3;
         for (let i = 0; i < items.length; i++) {
           const it = items[i], c = it.cls;
@@ -580,11 +687,11 @@
               it.obj.rotation.set(it.pitch, it.yaw, it.roll);
               if (it.onStrand) { try { it.onStrand(it); } catch (e) {} }
             }
-            it.obj.position.set(it.x, gnd + 0.22, it.z);
-            sync(it);
+            if (!it.atRest) settleStep(it, dt, false);
             continue;
           }
           it.stranded = false;
+          if (it.rest || it.atRest) unrest(it);
           const v = Math.max(-MAX_SP, Math.min(MAX_SP, flow * c.drift));
           const step2 = v * dt;
           it.x += dx * step2 - dz * it.lat * dt * Math.abs(v) * 0.25;
@@ -684,22 +791,61 @@
             it.churn = null; churnLive--;
             if (!posed) { if (!it.inst) it.obj.visible = false; it.obj = null; continue; }
           }
-          const gnd = groundY(it.x, it.z);
           it.stackY = 0;
-          it.obj.position.set(it.x, gnd + Math.max(0.22, Math.min(it.half, 1.5)), it.z);
-          it.obj.rotation.set(it.pitch, it.yaw, it.roll);
-          sync(it);
+          unrest(it);
+          settleStep(it, 0, true);
           it.stranded = true; it.floated = true;
         }
+      },
+      // when nothing steps the field any more: every piece comes down
+      lastStep: function () { return lastStep; },
+      idle(dt) {
+        if (idleDone) return;
+        let all = true;
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (!it.obj || it.body) continue;
+          if (it.churn) {
+            const posed = it.churn.posed;
+            it.churn = null; churnLive--;
+            if (!posed) { if (!it.inst) it.obj.visible = false; it.obj = null; continue; }
+          }
+          if (!it.floated && it.y0 != null && !it.stranded) continue;   // never lifted: where it was
+          if (!it.stranded) { it.stranded = true; it.stackY = stackAt(it); unrest(it); }
+          it.vx = it.vz = 0;
+          if (!it.atRest && !settleStep(it, dt, false)) all = false;
+        }
+        if (all) idleDone = true;
+      },
+      // at once (tools, a reset that keeps the wreckage): every piece at rest
+      settleAll() {
+        let n = 0;
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (!it.obj || it.body || it.churn || it.atRest) continue;
+          if (!it.floated && it.y0 != null && !it.stranded) continue;
+          it.stranded = true; it.vx = it.vz = 0;
+          unrest(it); settleStep(it, 0, true); n++;
+        }
+        return n;
       },
       /* THE AUDIT (CBZ.debrisAuditSources.tsunami): a stranded piece of this
          field's own (bodies are debris.js's to count) whose bottom is more
          than half a metre over the ground plus whatever it is piled on. */
+      /* Measured off the piece's own geometry where it is now (the old test
+         took the half-height it had when it was picked up, so a tree that had
+         turned over read as resting whatever it hung on). A piece still
+         afloat while its water is being stepped is `afloat`, not floating;
+         once the field is idle, everything counts. */
       auditInto(out, o) {
         const high = o.high || 120, fast = o.fast || 30;
+        const idle = performance.now() - lastStep > IDLE_MS;
+        if (out.afloat == null) out.afloat = 0;
+        if (out.trees == null) out.trees = 0;
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
           if (!it.obj || it.body || it.churn) continue;
+          if (!it.inst && !it.obj.parent) continue;
           out.items++;
           const y = it.obj.position.y, gnd = groundY(it.x, it.z);
           const sp = Math.hypot(it.vx, it.vz);
@@ -708,9 +854,23 @@
           const h = y - gnd;
           if (h > out.maxHeight) out.maxHeight = +h.toFixed(1);
           if (h > high) out.high++;
-          if (!it.stranded) continue;
-          const gap = (y - it.half) - (gnd + stackAt(it));
-          if (gap > 0.5) { out.floating++; if (out.list.length < 6) out.list.push({ kind: it.kind, x: +it.x.toFixed(1), y: +y.toFixed(1), z: +it.z.toFixed(1), gap: +gap.toFixed(2) }); }
+          if (!it.stranded && !idle) { out.afloat++; continue; }
+          if (!it.floated && it.y0 != null && !it.stranded) continue;      // never lifted
+          const sea = seaY(it.x, it.z);
+          if (Number.isFinite(sea) && sea - gnd > it.cls.draft) continue;  // afloat on standing water
+          let low;
+          if (it.inst) low = y + lowAt(it, it.obj.quaternion);
+          else {
+            it.obj.updateMatrixWorld(true);
+            _rb.setFromObject(supportOf(it));
+            low = _rb.isEmpty() ? y - it.half : _rb.min.y;
+          }
+          const gap = low - (gnd + stackAt(it));
+          if (gap > 0.5) {
+            out.floating++;
+            if (it.kind === "log") out.trees++;
+            if (out.list.length < 6) out.list.push({ kind: it.kind, x: +it.x.toFixed(1), y: +y.toFixed(1), z: +it.z.toFixed(1), gap: +gap.toFixed(2), atRest: !!it.atRest });
+          }
         }
       },
       count() { return items.length; },
