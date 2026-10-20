@@ -380,6 +380,11 @@
     // a detention or an escort takes the two nearest pairs of hands
     let pool = all;
     if (mode !== "attack") {
+      // hands that can walk to him: not a man in a seat of the motorcade, not
+      // a counter-sniper on a roof (sent, never moved; the man stood there
+      // with his hands up and nobody came)
+      const walkers = all.filter(function (q) { return !q.inCar && !q._cbzSeat && !q._cbzArc && q._protRole !== "counter-sniper"; });
+      if (walkers.length) all = walkers;
       pool = all.slice().sort(function (a, b) { return hyp(a.pos.x, a.pos.z, t.pos.x, t.pos.z) - hyp(b.pos.x, b.pos.z, t.pos.x, t.pos.z); }).slice(0, 2);
     }
     const crew = [], no = [];
@@ -414,6 +419,9 @@
       const CU = CBZ.custody;
       const j = CU && CU.take ? CU.take(t, {
         by: "ss", verb: "detain", officers: crew, owner: "president", act: true, actBy: "president",
+        // HELD, NOT SHIPPED: he stays with you, cuffed, until you choose
+        // Jail / Search / Execute / Release on him (city/custody.js)
+        hold: true,
         actOpts: { ideology: (t && t.ideology) || null, institution: institution(crew[0]) },
         onCuffed: function () {
           const L = lead(PF.crew.filter(function (q) { return q && !q.dead; }));
@@ -505,10 +513,12 @@
     if (o.t > 9 || d > 6) { if (!t._occupySrc && !t._post) t.controlled = false; clear(a); return; }
     follow(a, t, 1.2, dt);
   }
-  // THE BILL, once, when the man dies under the order
+  // THE BILL, once per man, when he dies under the order (or is executed in
+  // custody on it: custody.js calls billKill)
   function bill(t) {
-    if (PF.billed) return;
-    PF.billed = true;
+    if (!t || t._ordBilled) return;
+    t._ordBilled = true;
+    if (PF.target === t) PF.billed = true;
     let seen = 0;
     const L = CBZ.cityPeds || [];
     for (let i = 0; i < L.length; i++) {
@@ -558,6 +568,11 @@
     if (PF.by === "president" && !presSeat()) { standDown(true); return; }
     let busy = false;
     for (let i = 0; i < PF.crew.length; i++) { const q = PF.crew[i]; if (q && !q.dead && q._order && q._order.force) { busy = true; break; } }
+    // a detention stands while custody has the job: the agents it handed
+    // back (stuck, swapped for a unit's crew, the second pair of hands once
+    // he is cuffed) do not call it off. This race cancelled a Detain before
+    // the cuffs and left the man with nobody on him.
+    if (!busy && PF.mode === "detain" && CBZ.custody && CBZ.custody.jobOf && CBZ.custody.jobOf(t)) busy = true;
     if (!busy) standDown(true);
   });
 
@@ -700,6 +715,8 @@
   CBZ.cityOrders2 = {
     give: give, clear: clear, worksForYou: worksForYou, attackerOf: attackerOf,
     order: order, standDown: standDown,
+    // a man executed in the President's custody: the same bill as a death under the order
+    billKill: function (t) { if (t && presSeat()) bill(t); },
     // the same order, by its old name (president_public.js escorts a protester)
     takeDown: function (t, mode) { return order({ by: presSeat() ? "president" : "player", verb: mode || "attack", target: t }); },
     force: function () { return force().slice(); },
