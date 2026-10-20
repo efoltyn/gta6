@@ -149,7 +149,14 @@
       // which is the same reason `crownsRoof` and `minStoreys` live here.
       // Omitted → collapse.js infers from storeys/plan/masonry, which is a
       // defensible default and a worse answer than yours.
-      structure: def.structure || null });
+      structure: def.structure || null,
+      // WHICH WINDOW the host glazes this grammar's openings with: a key of
+      // city/facade_openings.js FO.STYLES ("sash", "loft", "deco", "civic",
+      // "lancet", "deep", "curtain", "ribbon", "steel", ...) or a function
+      // (storeys) -> key. Omitted -> picked from `structure` as before. The
+      // author knows a 1905 loft wears a Chicago window and a 1930 tower a
+      // steel casement; a table of materials does not.
+      window: def.window || null });
   };
   CBZ.facadeList = function () { return Array.from(REG.values()).map((f) => ({ id: f.id, label: f.label })); };
   CBZ.facadeDef = function (id) { return REG.get(id) || null; };
@@ -413,6 +420,296 @@
   F.roof = function (ctx) {
     return { cx: ctx.slabCx, cz: ctx.slabCz, w: ctx.slabW, d: ctx.slabD,
       y: ctx.rTop + ctx.pp, base: Math.min(ctx.slabW, ctx.slabD) };
+  };
+
+  /* ============================================================
+     2b. THE REAL-PROPORTION VOCABULARY (2026-10 facade rewrite)
+     ============================================================
+     The first generation of grammars drew a building as BANDS: a glass strip
+     the full width of a face, piers laid over it, the host left to find
+     "windows" in whatever gaps the bands left. That is why so many towers
+     read as striped boxes with a white sash frame in a 6 m wide hole: the
+     grammar never said where a window WAS or how big it was.
+
+     These helpers let a grammar say it, in the units real buildings are
+     drawn in (the numbers come from the references written up per grammar):
+
+       F.storey(ctx, k)        the floor line, sill and head of storey k
+       F.cladAround(...)       the wall skin of one band of a face, laid as
+                               the pieces AROUND a list of openings — every
+                               opening is then found by the host exactly as
+                               drawn, and gets a real framed window in it
+       F.surround(...)         an architrave round one opening: jambs, a
+                               head (flat, keystone, hood, cornice, pediment,
+                               segmental, lancet), a sill with real projection
+       F.cornice(...)          a profiled cornice: frieze, bed moulding,
+                               dentils or modillions, corona, cymatium; every
+                               layer a ring so the four faces mitre
+       F.storefront(...)       the 1880-1930 commercial front: end piers,
+                               bulkhead, display glass, transom, signband and
+                               storefront cornice, optional awning
+       F.windowFrame(ctx, hex) the frame colour the host's windows take
+
+     Every helper is pure coordinate math over ctx + emitters, like the rest
+     of F. A host that hands in a bay grid (the metros, ctx.grid) paints its
+     own wall and windows, so F.cladAround lays nothing there: the relief
+     (piers, sills, cornices) still lands on the host's bays. */
+
+  // The frame colour of the real windows the host builds in this grammar's
+  // openings (buildings.js reads ctx.__winFrame; a host without it keeps its
+  // own pick). Bronze on a Seagram, black steel on a deco tower, white on a
+  // brick loft — part of the style, so the author says it.
+  F.windowFrame = function (ctx, hex) { ctx.__winFrame = hex >>> 0; return hex; };
+
+  // The window band of storey k as the HOST will cut it. buildings.js finds
+  // openings between 0.55 m and FH - 0.45 m above each floor line and clamps
+  // them 0.3 m in from the slabs; asking for more is asking for a hole the
+  // host will not make. `sill` / `head` are fractions you may override.
+  F.storey = function (ctx, k, sill, head) {
+    const FH = ctx.FH, y = k * FH;
+    const s = sill != null ? sill : Math.min(0.95, FH * 0.29);
+    const h = head != null ? head : FH - 0.48;
+    return { y: y, top: y + FH, sill: y + Math.max(0.56, Math.min(s, FH - 1.2)),
+      head: y + Math.min(FH - 0.46, Math.max(h, 1.4)) };
+  };
+
+  // Openings along a face: `n` windows of width `ww` centred in bays, as
+  // [{t0, t1, t}] in face tangent terms. Skips any that foul the doorway
+  // when `k === 0` on the door face.
+  F.openRow = function (ctx, f, n, ww, margin, k) {
+    const out = [];
+    for (const b of F.bays(f, n, margin)) {
+      const w = Math.min(ww, b.w - 0.3);
+      if (w < 0.5) continue;
+      if (k === 0 && !F.clearsDoor(ctx, f, b.t, w + 0.6)) continue;
+      out.push({ t: b.t, t0: b.t - w / 2, t1: b.t + w / 2, w: w });
+    }
+    return out;
+  };
+
+  /* THE WALL SKIN AROUND ITS OPENINGS. Lays face f's cladding from y0 to y1
+     as solid rectangles around `holes` ([{t0, t1, y0, y1}], face tangent
+     terms), `proj` proud of the wall, extended `over` past each corner so the
+     faces meet. This is the move that makes a window exactly the size the
+     grammar drew: the host's scan finds the clear rectangle and builds a
+     framed, glazed opening in it, with the skin's thickness as extra reveal
+     depth. A skin thicker than ~0.25 m IS a deep-set window (brutalism).
+     o: { over, inset, minW } */
+  function rectsAround(a0, a1, y0, y1, hs) {
+    const FO = CBZ.facadeOpenings;
+    if (FO && FO.solidRects) return FO.solidRects(a0, a1, y0, y1, hs);
+    return [[a0, a1, y0, y1]];
+  }
+  F.cladAround = function (ctx, f, y0, y1, holes, proj, col, o) {
+    o = o || {};
+    if (ctx.grid && !o.always) return;            // the host paints its own wall
+    if (!(y1 - y0 > 0.02) || !(proj > 0)) return;
+    const over = o.over == null ? proj : o.over;      // = proj: the corner closes
+    const a0 = -f.span / 2 - over, a1 = f.span / 2 + over;
+    const hs = [];
+    for (const h of holes || []) hs.push({ a0: h.t0, a1: h.t1, y0: h.y0, y1: h.y1 });
+    for (const r of rectsAround(a0, a1, y0, y1, hs)) {
+      if (r[1] - r[0] < (o.minW || 0.02) || r[3] - r[2] < 0.02) continue;
+      F.box(ctx, f, (r[0] + r[1]) / 2, (r[2] + r[3]) / 2, r[1] - r[0], r[3] - r[2], proj, col, o.inset || 0);
+    }
+  };
+
+  /* AN ARCHITRAVE ROUND ONE OPENING (t0..t1 x y0..y1 on face f). Nothing it
+     lays crosses the opening itself, so the host's window stays clear.
+       o.w      casing width (0.12-0.25 m)         o.proj  casing projection
+       o.col    casing colour                     o.jambs false: no side casings
+       o.sill   { h, proj, over, col } | false    a sill under the opening
+       o.head   "flat" | "key" | "hood" | "cornice" | "pediment" | "seg" |
+                "lancet" | "round" | "none"
+       o.headH  head height                        o.headCol, o.keyCol
+       o.ears   true: the casing steps out at the head (a Greek ear) */
+  F.surround = function (ctx, f, t0, t1, y0, y1, o) {
+    o = o || {};
+    const W = t1 - t0, tc = (t0 + t1) / 2;
+    if (!(W > 0.2) || !(y1 - y0 > 0.2)) return;
+    const cw = o.w != null ? o.w : 0.16, cp = o.proj != null ? o.proj : 0.08;
+    const col = o.col, hc = o.headCol != null ? o.headCol : col;
+    if (o.jambs !== false && cw > 0.01) {
+      for (const sg of [-1, 1]) F.rib(ctx, f, tc + sg * (W / 2 + cw / 2), y0, y1, cw, cp, col);
+    }
+    const head = o.head || "flat";
+    const hh = o.headH != null ? o.headH : Math.max(0.16, cw * 1.2);
+    const span = W + cw * 2 + (o.ears ? 0.16 : 0);
+    if (head === "flat") {
+      F.box(ctx, f, tc, y1 + hh / 2, span, hh, cp, hc);
+    } else if (head === "key") {
+      F.box(ctx, f, tc, y1 + hh / 2, span, hh, cp, hc);
+      F.box(ctx, f, tc, y1 + hh * 0.55, Math.min(0.34, W * 0.2), hh * 1.5, cp + 0.04, o.keyCol != null ? o.keyCol : hc);
+    } else if (head === "hood" || head === "cornice") {
+      // a frieze then a projecting shelf: the hood mould / window cornice
+      F.box(ctx, f, tc, y1 + hh * 0.4, span, hh * 0.8, cp, hc);
+      F.box(ctx, f, tc, y1 + hh * 0.8 + 0.05, span + 0.16, 0.1, cp + (head === "cornice" ? 0.12 : 0.07), o.shelfCol != null ? o.shelfCol : hc);
+    } else if (head === "pediment") {
+      F.box(ctx, f, tc, y1 + hh * 0.4, span, hh * 0.8, cp, hc);
+      // a stepped triangle: four courses, each narrower
+      const rise = Math.min(0.55, W * 0.28);
+      for (let i = 0; i < 4; i++) {
+        const u = (i + 0.5) / 4;
+        F.box(ctx, f, tc, y1 + hh * 0.8 + u * rise, (span + 0.16) * (1 - u * 0.9), rise / 4 + 0.01, cp + 0.06, hc);
+      }
+    } else if (head === "seg" || head === "round" || head === "lancet") {
+      const rise = o.rise != null ? o.rise : (head === "seg" ? Math.min(0.3, W * 0.18) : W * (head === "lancet" ? 0.75 : 0.5));
+      F.arch(ctx, f, tc, y1, W, rise, cw, cp, hc, head === "lancet" ? "pointed" : head === "round" ? "round" : "segmental");
+      if (o.keyCol != null) F.box(ctx, f, tc, y1 + rise * 0.82, 0.2, Math.max(0.2, rise * 0.45), cp + 0.04, o.keyCol);
+    }
+    if (o.sill !== false) {
+      const s = o.sill || {};
+      const sh = s.h != null ? s.h : 0.1, sp = s.proj != null ? s.proj : cp + 0.06;
+      const so = s.over != null ? s.over : cw + 0.06;
+      F.box(ctx, f, tc, y0 - sh / 2, W + so * 2, sh, sp, s.col != null ? s.col : col);
+    }
+  };
+
+  /* A PROFILED CORNICE at height y (the bottom of the frieze), on every
+     face. The real cornice of a 1900 block projects 0.6-1.2 m and is 0.9-1.8 m
+     tall; the profile, bottom to top, is frieze (flush-ish), bed moulding,
+     dentils or modillions, the corona (the deep plain face that casts the
+     shadow line), and a cymatium lip. Each layer is a ring, so corners mitre.
+       o.h      total height       o.proj   corona projection
+       o.col    main colour        o.dark   soffit / shadow colour
+       o.lip    cymatium colour    o.teeth  "dentil" | "modillion" | "corbel" | null
+       o.frieze frieze height (0 = none)
+       o.faces  restrict to these face indices
+     Returns the height of the top of the cornice. */
+  F.cornice = function (ctx, y, o) {
+    o = o || {};
+    const H = o.h != null ? o.h : 0.9, P = o.proj != null ? o.proj : 0.6;
+    const col = o.col != null ? o.col : ctx.TRIM, dark = o.dark != null ? o.dark : F.shade(col, 0.7);
+    const lip = o.lip != null ? o.lip : F.shade(col, 1.06);
+    const fr = o.frieze != null ? o.frieze : H * 0.35;
+    const faces = o.faces ? o.faces.map((s) => F.face(ctx, s)) : F.faces(ctx);
+    const rest = H - fr;
+    let yy = y;
+    const lay = function (cy, h, p, c, over) { for (const f of faces) F.band(ctx, f, cy, h, p, c, over); };
+    if (fr > 0.02) { lay(yy + fr / 2, fr, o.friezeProj != null ? o.friezeProj : Math.max(0.04, P * 0.08), o.friezeCol != null ? o.friezeCol : col, 0.1); yy += fr; }
+    // bed moulding
+    const bed = rest * 0.16;
+    lay(yy + bed / 2, bed, P * 0.28, col, 0.2); yy += bed;
+    // the teeth
+    const th = rest * 0.26;
+    if (o.teeth) {
+      for (const f of faces) {
+        const pitch = o.teeth === "dentil" ? Math.max(0.18, th * 1.6) : Math.max(0.45, P * 0.9);
+        const n = Math.max(4, Math.round(f.span / pitch));
+        const tw = (f.span / n) * (o.teeth === "dentil" ? 0.5 : 0.32);
+        F.merlons(ctx, f, yy + th / 2, n, tw, th, P * (o.teeth === "dentil" ? 0.42 : 0.82), o.teeth === "dentil" ? col : lip);
+      }
+      // the dark soffit band behind the teeth: the shadow they stand in
+      lay(yy + th / 2, th, P * 0.30, dark, 0.2);
+    } else lay(yy + th / 2, th, P * 0.45, dark, 0.2);
+    yy += th;
+    // corona
+    const cor = rest * 0.40;
+    lay(yy + 0.03, 0.06, P * 0.98, dark, 0.3 + P);      // the drip under it, darker
+    lay(yy + cor / 2, cor, P, col, 0.3 + P); yy += cor;
+    // cymatium
+    const cym = rest - bed - th - cor;
+    lay(yy + cym / 2, cym, P * 1.04, lip, 0.32 + P); yy += cym;
+    return yy;
+  };
+
+  /* THE COMMERCIAL STOREFRONT (1880-1930), on face f, ground storey.
+     From the preservation guides (Washington DAHP "Anatomy of a Main Street
+     Building", NPS Brief 11, Salt Lake City / Roanoke storefront guides): a
+     bulkhead 0.3-0.6 m, display glass above it to 2.4-3 m, a transom band
+     0.3-0.9 m over that, a signband (fascia) 0.6-0.9 m on the beam, and a
+     storefront cornice capping it, all framed by masonry end piers. The
+     ground storey of these buildings ran 4.3-5.5 m; ours is ctx.FH, so the
+     signband rides up over the floor line the way real ones lap the
+     second-floor beam, and the second storey's sills start over it.
+
+     o: { pierW, pierCol, frame (the iron / timber of the front), bulk (its
+          panel colour), glass (a declared F.glass colour), sign (fascia
+          colour), cornCol, bays (display bays across the front), awning
+          (colour | null), proj (depth of the front assembly), signH }
+     Returns { top } — the height above which the upper wall may start. */
+  F.storefront = function (ctx, f, o) {
+    o = o || {};
+    const FH = ctx.FH;
+    const pierW = o.pierW != null ? o.pierW : Math.max(0.5, Math.min(1.0, f.span * 0.06));
+    const P = o.proj != null ? o.proj : 0.14;
+    const frame = o.frame != null ? o.frame : 0x2e2f30;
+    const bulkC = o.bulk != null ? o.bulk : F.shade(frame, 1.25);
+    const pierC = o.pierCol != null ? o.pierCol : ctx.color;
+    const signC = o.sign != null ? o.sign : F.shade(frame, 1.1);
+    const cornC = o.cornCol != null ? o.cornCol : pierC;
+    const BULK = Math.min(0.58, FH * 0.17);
+    const HEAD = FH - 0.46;                        // the host's top of opening
+    const signH = o.signH != null ? o.signH : Math.min(0.85, Math.max(0.55, FH * 0.22));
+    const sign0 = HEAD;                            // fascia starts at the window head
+    const sign1 = Math.max(FH + 0.25, sign0 + signH);
+    const inner = f.span / 2 - pierW;
+    // the host glazes this storey as a shop front, not as the upper sashes
+    F.windowStyle(ctx, f.s, 0, o.style || "storefront");
+    // END PIERS: full storefront height, the masonry coming down to grade
+    for (const sg of [-1, 1]) F.rib(ctx, f, sg * (inner + pierW / 2), 0, sign1 + 0.3, pierW + 0.02, P + 0.06, pierC);
+    // THE RUNS of display glass: the whole front, or the two halves either
+    // side of the entrance (the host keeps DOORHALF clear for the door, its
+    // lantern and its number: a narrow pier stands there)
+    const door = f.s === ctx.doorSide && !ctx.noDoor;
+    const dh = (ctx.doorW || F.DOOR_W) / 2 + 0.75;
+    const runs = door ? [[-inner, -dh], [dh, inner]] : [[-inner, inner]];
+    if (door) {
+      for (const sg of [-1, 1]) {
+        const a = (ctx.doorW || F.DOOR_W) / 2 + 0.3;
+        if (dh - a > 0.1) F.rib(ctx, f, sg * (a + dh) / 2, 0, HEAD + 0.02, dh - a, P, frame);
+      }
+    }
+    const mw = 0.09;
+    for (const r of runs) {
+      const len = r[1] - r[0];
+      if (len < 0.5) {
+        if (len > 0.02) F.rib(ctx, f, (r[0] + r[1]) / 2, 0, HEAD + 0.02, len, P, frame);
+        continue;
+      }
+      const n = Math.max(1, Math.round(len / (o.bayW || 2.4)));
+      const step = len / n;
+      for (let i = 0; i < n; i++) {
+        const tc = r[0] + (i + 0.5) * step;
+        // bulkhead: a raised panel in its frame
+        F.box(ctx, f, tc, BULK / 2, step, BULK, P, frame);
+        if (step > 1.0) F.box(ctx, f, tc, BULK / 2, step - 0.26, BULK - 0.2, P + 0.025, bulkC);
+        if (i > 0) F.rib(ctx, f, r[0] + i * step, BULK, HEAD + 0.02, mw, P * 0.8, frame);
+      }
+    }
+    // the head rail and the beam: a frame rail over the whole front, then
+    // the fascia board, then the storefront cornice
+    F.box(ctx, f, 0, HEAD + 0.05, inner * 2, 0.1, P, frame);
+    F.box(ctx, f, 0, (sign0 + 0.1 + sign1) / 2, inner * 2, sign1 - sign0 - 0.1, P * 0.8, signC);
+    F.box(ctx, f, 0, sign0 + 0.13, inner * 2 + 0.02, 0.06, P * 0.8 + 0.04, F.shade(signC, 0.75));
+    // storefront cornice: a small one (0.25-0.4 m projection)
+    F.box(ctx, f, 0, sign1 + 0.06, f.span + 0.06, 0.12, P + 0.12, F.shade(cornC, 0.8));
+    F.box(ctx, f, 0, sign1 + 0.18, f.span + 0.14, 0.14, P + 0.28, cornC);
+    F.box(ctx, f, 0, sign1 + 0.29, f.span + 0.18, 0.07, P + 0.33, F.shade(cornC, 1.07));
+    // the awning: a canvas shed over each run, its valance hanging
+    if (o.awning != null) {
+      const ad = Math.min(1.2, Math.max(0.8, FH * 0.3));
+      const ay = HEAD - 0.02;
+      for (const r of runs) {
+        const len = r[1] - r[0];
+        if (len < 1.0) continue;
+        const tc = (r[0] + r[1]) / 2;
+        for (let s2 = 0; s2 < 4; s2++) {
+          const u = (s2 + 0.5) / 4;
+          F.box(ctx, f, tc, ay - u * 0.5, len - 0.12, 0.5 / 4 + 0.03, ad * (s2 + 1) / 4, s2 % 2 ? o.awning : F.shade(o.awning, 0.9), P);
+        }
+        F.box(ctx, f, tc, ay - 0.5 - 0.11, len - 0.12, 0.22, 0.04, F.shade(o.awning, 0.85), P + ad - 0.04);
+      }
+    }
+    return { top: sign1 + 0.36, head: HEAD, bulk: BULK, pierW: pierW };
+  };
+
+  // WHICH WINDOW a given storey of a given face wears, when it is not the
+  // grammar's default (def.window): a shop front on the ground storey, a
+  // lobby's tall glazing, a deco tower's steel casements over a stone base.
+  // `k` may be "*" for every storey of that face. Read by buildings.js.
+  F.windowStyle = function (ctx, s, k, id) {
+    (ctx.__winStyle || (ctx.__winStyle = {}))[s + ":" + k] = id;
   };
 
   CBZ.FACADE_F = F;

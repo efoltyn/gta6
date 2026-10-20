@@ -148,6 +148,66 @@
     // a house: a casement pair in a painted frame
     house:    { rev: 0.12, fw: 0.06, fd: 0.07, frame: 0xf1eee6, mull: 0.9, transom: 0, muntin: null,
       sill: { h: 0.07, proj: 0.06, over: 0.06, col: "trim" }, lintel: null, glass: "clear" },
+
+    /* ---- the commercial / civic / tower set (2026-10 facade rewrite) ----
+       Each is a real window type with its real members. New keys:
+         split   fractions of the width where the mullions stand (instead of
+                 an even S.mull pitch): a Chicago window is [0.22, 0.78]
+         kick    an opaque kick panel this high at the foot of the light
+                 (a shop front's bulkhead, a curtain wall's spandrel glass)
+         bead    a glazing bead: a thin stop round every light, proud of the
+                 glass, so each pane sits in a moulded frame, not a slot
+         frames  the frame colours a host may pick from for this style
+         band    true: a glass band, one opening per storey (the host joins
+                 openings parted by a fin)                                  */
+    // a Chicago window: wide fixed centre light flanked by two narrow
+    // double-hung sashes, in a deep brick reveal (Reliance, Marquette, 1895)
+    loft:     { rev: 0.20, fw: 0.07, fd: 0.09, frame: 0x2a2724, split: [0.24, 0.76], transom: 0, muntin: "sashSide",
+      sill: { h: 0.10, proj: 0.08, over: 0.10, col: "stone" }, lintel: null, glass: "clear", bead: true,
+      frames: [0x2a2724, 0x3b2a22, 0x4a4f45, 0xd9d4c6] },
+    // a steel casement (Crittall / Hope's, 1925-40): slim black steel, a
+    // horizontal glazing bar every ~0.45 m — the deco and moderne window
+    deco:     { rev: 0.16, fw: 0.045, fd: 0.06, frame: 0x1e2124, mull: 0.95, transom: 0.72, muntin: "hbars",
+      sill: { h: 0.08, proj: 0.06, over: 0.05, col: "stone" }, lintel: null, glass: "clear",
+      frames: [0x1e2124, 0x2b3a34, 0x5a4a32] },
+    // a gothic / collegiate window: stone mullion pair, a transom, small
+    // leaded quarries (the grammar draws the pointed head round it)
+    lancet:   { rev: 0.22, fw: 0.08, fd: 0.10, frame: 0x6a675e, split: [0.5], transom: 0.74, muntin: "grid",
+      sill: { h: 0.12, proj: 0.09, over: 0.06, col: "stone" }, lintel: null, glass: "clear",
+      frames: [0x6a675e, 0x3c3a36] },
+    // brutalist: a dark anodised frame deep in a concrete reveal, no sill
+    // (the concrete IS the sill), one horizontal transom
+    deep:     { rev: 0.34, fw: 0.06, fd: 0.08, frame: 0x26231f, mull: 1.35, transom: 0, muntin: null,
+      sill: null, lintel: null, glass: "clear", bead: true,
+      frames: [0x26231f, 0x3a3631, 0x5b5c5a] },
+    // a ribbon / spandrel curtain wall (Lever House, the 1960 office slab):
+    // flush glazing on a 1.5 m module, a spandrel kick at the sill
+    ribbon:   { rev: 0.08, fw: 0.05, fd: 0.07, frame: 0x8d9399, mull: 1.5, transom: 0, muntin: null,
+      sill: null, lintel: null, glass: "clear", band: true, kick: 0.0,
+      frames: [0x8d9399, 0x2a2f35, 0x4a4036] },
+    // high-tech: structural glazing on a stainless frame, 1.8 m module,
+    // a transom at door-head height
+    steel:    { rev: 0.10, fw: 0.055, fd: 0.08, frame: 0xa7adb2, mull: 1.8, transom: 0.68, muntin: null,
+      sill: null, lintel: null, glass: "clear", band: true,
+      frames: [0xa7adb2, 0x6c7378, 0x2c3034] },
+    // the ground storey of a commercial block: display glass on a slim
+    // frame, a transom light over it, a bulkhead the grammar builds below
+    storefront: { rev: 0.14, fw: 0.06, fd: 0.09, frame: 0x24282d, mull: 2.2, transom: 0.80, muntin: null,
+      sill: null, lintel: null, glass: "clear", bead: true,
+      frames: [0x24282d, 0x3d2c22, 0x2d3b33, 0x5b3324] },
+    // a tower lobby: storey-high plate glass, wide module, no transom
+    lobby:    { rev: 0.16, fw: 0.07, fd: 0.10, frame: 0x2a2620, mull: 2.4, transom: 0, muntin: null,
+      sill: null, lintel: null, glass: "clear",
+      frames: [0x2a2620, 0x8d9399, 0x4a4036] },
+  };
+  /* THE STYLE A FACADE-KIT GRAMMAR'S WINDOWS TAKE: what the grammar
+     declared (def.window, a key or (storeys) -> key), else by structure. */
+  FO.styleFor = function (def, storeys) {
+    if (def && def.window) {
+      const w = typeof def.window === "function" ? def.window(storeys) : def.window;
+      if (w && FO.STYLES[w]) return w;
+    }
+    return FO.styleForStructure(def ? def.structure : null, storeys);
   };
   // which style a facade-kit grammar's walls want, by what it is made of
   FO.styleForStructure = function (structure, storeys) {
@@ -160,6 +220,12 @@
       default: return storeys >= 8 ? "curtain" : "sash";
     }
   };
+  function shadeHex(hex, f) {
+    const r = Math.max(0, Math.min(255, (((hex >> 16) & 255) * f) | 0));
+    const g = Math.max(0, Math.min(255, (((hex >> 8) & 255) * f) | 0));
+    const b = Math.max(0, Math.min(255, ((hex & 255) * f) | 0));
+    return (r << 16) | (g << 8) | b;
+  }
   function resolveCol(c, pal) {
     if (typeof c === "number") return c;
     if (pal && pal[c] != null) return pal[c];
@@ -187,19 +253,36 @@
     emitBox(E, f, t0, t1, y0, y0 + fw, oF0, oF1, FC);
     emitBox(E, f, t0, t0 + fw, y0 + fw, y1 - fw, oF0, oF1, FC);
     emitBox(E, f, t1 - fw, t1, y0 + fw, y1 - fw, oF0, oF1, FC);
-    // lights: mullions every S.mull metres, a transom at S.transom of the height
-    const iT0 = t0 + fw, iT1 = t1 - fw, iY0 = y0 + fw, iY1 = y1 - fw;
-    const nM = S.mull > 0 ? Math.max(1, Math.min(12, Math.round((iT1 - iT0) / S.mull))) : 1;
+    // lights: mullions at S.split fractions, or every S.mull metres; a
+    // transom at S.transom of the height; a kick panel S.kick high at the foot
+    const iT0 = t0 + fw, iT1 = t1 - fw, iT = iT1 - iT0;
+    let iY0 = y0 + fw;
+    const iY1 = y1 - fw;
     const mw = fw * 0.8, md = fd * 0.78;
+    const cuts = [];
+    if (S.split && iT > 1.1) for (const fr of S.split) cuts.push(iT0 + iT * fr);
+    else {
+      const nM = S.mull > 0 ? Math.max(1, Math.min(12, Math.round(iT / S.mull))) : 1;
+      for (let i = 1; i < nM; i++) cuts.push(iT0 + iT * i / nM);
+    }
     const cols = [];
-    const step = (iT1 - iT0) / nM;
-    for (let i = 0; i < nM; i++) {
-      const a = iT0 + i * step + (i > 0 ? mw / 2 : 0), b = iT0 + (i + 1) * step - (i < nM - 1 ? mw / 2 : 0);
-      cols.push([a, b]);
-      if (i > 0) emitBox(E, f, iT0 + i * step - mw / 2, iT0 + i * step + mw / 2, iY0, iY1, -rev - md / 2, -rev + md / 2, FC);
+    let a = iT0;
+    for (const c of cuts) {
+      cols.push([a, c - mw / 2]);
+      emitBox(E, f, c - mw / 2, c + mw / 2, iY0, iY1, -rev - md / 2, -rev + md / 2, FC);
+      a = c + mw / 2;
+    }
+    cols.push([a, iT1]);
+    // the kick: an opaque panel in the frame plane, a rail over it
+    const kick = (S.kick && H > 1.6) ? Math.min(S.kick, H * 0.3) : 0;
+    if (kick > 0.1) {
+      const ky = iY0 + kick;
+      emitBox(E, f, iT0, iT1, iY0, ky - mw / 2, -rev - md / 2, -rev + md / 2 - 0.01, o.kickCol != null ? o.kickCol : shadeHex(FC, 0.82));
+      emitBox(E, f, iT0, iT1, ky - mw / 2, ky + mw / 2, oF0, oF1, FC);
+      iY0 = ky + mw / 2;
     }
     const rows = [];
-    if (S.transom && H > 1.6) {
+    if (S.transom && iY1 - iY0 > 1.5) {
       const ty = iY0 + (iY1 - iY0) * S.transom;
       emitBox(E, f, iT0, iT1, ty - mw / 2, ty + mw / 2, -rev - md / 2, -rev + md / 2, FC);
       rows.push([iY0, ty - mw / 2], [ty + mw / 2, iY1]);
@@ -208,6 +291,7 @@
     let n = 0;
     const PT = 0.02;
     for (const c of cols) for (const r of rows) {
+      if (c[1] - c[0] < 0.05 || r[1] - r[0] < 0.05) continue;
       const tc = (c[0] + c[1]) / 2, yc = (r[0] + r[1]) / 2;
       const b = FO.at(f, tc, yc, -rev, c[1] - c[0], r[1] - r[0], PT);
       // win: every light of one window names the same opening, so a host can
@@ -217,9 +301,24 @@
     }
     // glazing bars in front of the glass (never in the frame's plane)
     const bo0 = -rev + PT / 2 + 0.004, bo1 = -rev + fd / 2 - 0.012;
+    /* THE GLAZING BEAD: a 22 mm stop round each light, standing in front of
+       the glass and behind the frame's face, so a pane reads as SET IN a
+       moulded frame and the light picks out a line round it. Four thin boxes
+       per light, merged with the trim: geometry, not draw calls. */
+    if (S.bead && bo1 - bo0 > 0.006) {
+      const bw = 0.022;
+      for (const c of cols) for (const r of rows) {
+        if (c[1] - c[0] < 0.2 || r[1] - r[0] < 0.2) continue;
+        emitBox(E, f, c[0], c[1], r[1] - bw, r[1], bo0, bo1, FC);
+        emitBox(E, f, c[0], c[1], r[0], r[0] + bw, bo0, bo1, FC);
+        emitBox(E, f, c[0], c[0] + bw, r[0] + bw, r[1] - bw, bo0, bo1, FC);
+        emitBox(E, f, c[1] - bw, c[1], r[0] + bw, r[1] - bw, bo0, bo1, FC);
+      }
+    }
     if (S.muntin && bo1 - bo0 > 0.004) {
       const bw = 0.03;
-      for (const c of cols) for (const r of rows) {
+      for (let ci = 0; ci < cols.length; ci++) for (const r of rows) {
+        const c = cols[ci];
         const cw = c[1] - c[0], rh = r[1] - r[0];
         if (S.muntin === "sash") {
           // meeting rail + one glazing bar each way per sash
@@ -227,6 +326,18 @@
           emitBox(E, f, c[0], c[1], my - bw * 0.8, my + bw * 0.8, bo0, bo1 + 0.006, FC);
           if (cw > 0.7) emitBox(E, f, (c[0] + c[1]) / 2 - bw / 2, (c[0] + c[1]) / 2 + bw / 2, r[0], r[1], bo0, bo1, FC);
           if (rh > 1.2) for (const fy of [0.25, 0.75]) { const yy = r[0] + rh * fy; emitBox(E, f, c[0], c[1], yy - bw / 2, yy + bw / 2, bo0, bo1, FC); }
+        } else if (S.muntin === "sashSide") {
+          // the Chicago window: the narrow side lights are double-hung (a
+          // meeting rail), the wide centre is one fixed sheet
+          if (cols.length > 1 && (ci === 0 || ci === cols.length - 1)) {
+            const my = (r[0] + r[1]) / 2;
+            emitBox(E, f, c[0], c[1], my - bw * 0.9, my + bw * 0.9, bo0, bo1 + 0.006, FC);
+          }
+        } else if (S.muntin === "hbars") {
+          // steel casement: horizontal bars every ~0.42 m, one vertical when wide
+          const ny = Math.max(1, Math.round(rh / 0.42));
+          for (let j = 1; j < ny; j++) { const yy = r[0] + rh * j / ny; emitBox(E, f, c[0], c[1], yy - 0.012, yy + 0.012, bo0, bo1, FC); }
+          if (cw > 0.85) { const tt = (c[0] + c[1]) / 2; emitBox(E, f, tt - 0.012, tt + 0.012, r[0], r[1], bo0, bo1, FC); }
         } else if (S.muntin === "grid") {
           const nx = Math.max(1, Math.round(cw / 0.45)), ny = Math.max(1, Math.round(rh / 0.45));
           for (let i = 1; i < nx; i++) { const tt = c[0] + cw * i / nx; emitBox(E, f, tt - bw / 2, tt + bw / 2, r[0], r[1], bo0, bo1, FC); }
