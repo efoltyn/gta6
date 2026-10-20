@@ -1330,7 +1330,7 @@ document.body.appendChild(b);}}catch(e){}})();
      no dynamic lights); pushes the shared lamp emissives up after dark.
      After blobshadows.js (same pool shape) and before vehicles.js: it only
      READS the fleet at order 37.7, after vehicles.js has moved it at 37. -->
-<script src="src/city/carlamps.js?v=lamps1"></script>
+<script src="src/city/carlamps.js?v=cardraws1020"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/carparts.js?v=emg1019"></script>
 <script src="src/city/carbody.js?v=cars2"></script>
@@ -1344,15 +1344,15 @@ document.body.appendChild(b);}}catch(e){}})();
      fitted to the room) + spark streaks, and THE shared 3D noise atlas
      (CBZ.volNoise) that city/nukefx.js also marches. Before crashfx (its
      blasts and fires draw through it) and nukefx (reads the atlas). -->
-<script src="src/city/crashdeform.js?v=mrg10200048"></script>
+<script src="src/city/crashdeform.js?v=cardraws1020"></script>
 <script src="src/city/emergencykit.js?v=mrg10200048"></script>
 <script src="src/city/cardyn.js?v=emg1019"></script>
 <!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=mrg10200048"></script>
-<script src="src/city/vehicles.js?v=mrg10200048"></script>
-<script src="src/city/carinstances.js?v=mrg10200048"></script>
+<script src="src/city/vehicles.js?v=cardraws1020"></script>
+<script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playeraircraft.js?v=planes1020"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
@@ -1559,7 +1559,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
 <script src="src/systems/helditems.js?v=arms1009b"></script>
-<script src="src/city/carstrike.js?v=physicsm1011"></script>
+<script src="src/city/carstrike.js?v=cardraws1020"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
@@ -2249,7 +2249,7 @@ document.body.appendChild(b);}}catch(e){}})();
        - detail_kit.js FIRST; the other four only register passes into it.
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
-<script src="src/core/farcull.js?v=merge1014c"></script>
+<script src="src/core/farcull.js?v=cardraws1020"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=merge1014c"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>

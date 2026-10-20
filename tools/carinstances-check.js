@@ -38,7 +38,9 @@ mover.pos.x = 5; mover.pos.z = -210; mover.heading = 0.3; mover.group.rotation.y
 const t1 = poolT(mover);
 ok(Math.abs(t1[0] - t0[0]) > 1 && mover._proxy, "instance followed the car (" + t0[0].toFixed(2) + " -> " + t1[0].toFixed(2) + ")");
 mover.pos.set(0, 0, -100); tick();
-ok(!mover._proxy && mover.group.visible === true, "released inside 142 m and drawn itself");
+ok(mover._proxy, "still pooled at 100 m (near radius is 45 m from the eye)");
+mover.pos.set(0, 0, -30); tick();
+ok(!mover._proxy && mover.group.visible === true, "released inside 41 m and drawn itself");
 mover.pos.set(0, 0, -600); tick();
 got = CI.acquire(mover, true); ok(!got, "no proxy past the fog ring");
 // parked path unchanged
@@ -47,5 +49,60 @@ got = false; for (let i = 0; i < 12 && !got; i++) { got = CI.acquire(parked); ti
 ok(got && parked._proxy, "parked car proxied at 100 m");
 parked.pos.x += 0.5; tick();
 ok(!parked._proxy, "a parked proxy that moves is released");
+
+// ---- near traffic (45-85 m): EXACT matrices, brake-lamp rekey, seat blob, hidden parts ----
+const near = makeCar(0, -60, true);
+const nvis = new THREE.Group(); near.group.add(nvis); near.group.userData.carVisual = nvis;
+const lamp = new THREE.Mesh(new THREE.BoxGeometry(1, 0.2, 0.1), new THREE.MeshLambertMaterial({ color: 0x220000 }));
+lamp.position.set(0, 0.8, -2); nvis.add(lamp);
+const brake = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+const blob = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.5), new THREE.MeshLambertMaterial({ vertexColors: true }));
+blob.userData.occupant = true; blob.position.set(0.4, 0.5, 0.2); nvis.add(blob);
+const bar = new THREE.Mesh(new THREE.BoxGeometry(1, 0.1, 0.3), new THREE.MeshLambertMaterial({ color: 0x0000ff }));
+bar.visible = false; nvis.add(bar);
+// a wheel mesh that spins in place (the exact path must see it)
+const spin = near.group.children[1];
+near.v = 5;
+got = false; for (let i = 0; i < 12 && !got; i++) { got = CI.acquire(near, true); tick(); }
+ok(got && near._proxy && near._proxyRec.exact, "near mover pooled in EXACT mode at 60 m");
+ok(near._proxyRec.entries.some((e) => e.src === blob), "the seat blob is pooled with the car");
+spin.rotation.x = 1.0; near.pos.z = -61; near.group.position.z = -61; tick();
+{
+  const e = near._proxyRec.entries.find((q) => q.src === spin);
+  spin.updateWorldMatrix(true, false);
+  let d = 0; for (let k = 0; k < 16; k++) d = Math.max(d, Math.abs(e.m[k] - spin.matrixWorld.elements[k]));
+  ok(d < 1e-5, "exact entry = the wheel's own spun world matrix (max diff " + d + ")");
+}
+// brake lamps: the pool for the brake material is made, warms, and the entry MOVES to it
+for (let i = 0; i < 12; i++) { lamp.material = (i & 1) ? lamp.material : brake; near.pos.z -= 0.01; near.group.position.z = near.pos.z; tick(); if (!near._proxy) CI.acquire(near, true); }
+lamp.material = brake; near.pos.z -= 0.01; near.group.position.z = near.pos.z; tick(); if (!near._proxy) { for (let i = 0; i < 8 && !near._proxy; i++) { tick(); CI.acquire(near, true); } }
+ok(near._proxy, "car still pooled with its brake lamps on");
+{
+  const e = near._proxy && near._proxyRec.entries.find((q) => q.src === lamp);
+  ok(e && e.pool.mat === brake, "lamp entry drawn with the brake material");
+  const lampOff = lamp.material = new THREE.MeshLambertMaterial({ color: 0x220001 });   // unknown material: no pool yet
+  tick();
+  ok(!near._proxy || (near._proxyRec.entries.find((q) => q.src === lamp) || {}).mat === lampOff, "an unpooled material never draws stale");
+}
+for (let i = 0; i < 12 && !near._proxy; i++) { tick(); CI.acquire(near, true); }
+ok(near._proxy, "re-pooled after the new material's pool warmed");
+bar.visible = true; tick();
+ok(!near._proxy, "a hidden part that comes on (a lightbar) releases the proxy");
+bar.visible = false;
+// a promoted rig at the wheel: never pooled near
+near.npcDriver = { pos: new THREE.Vector3() }; near._proxyRetry = 0;
+ok(!CI.acquire(near, true), "near mover with a rigged driver is refused");
+near.npcDriver = null; near._proxyRetry = 0;
+// EXACT -> RELATIVE past 85 m and back
+for (let i = 0; i < 12 && !near._proxy; i++) { tick(); CI.acquire(near, true); }
+near.pos.z = -120; near.group.position.z = -120; tick();
+ok(near._proxy && !near._proxyRec.exact, "past 85 m the proxy follows by relative matrices");
+near.pos.z = -70; near.group.position.z = -70; tick();
+ok(near._proxy && near._proxyRec.exact, "back inside 75 m it is exact again");
+// 3D distance: a car right under a camera 120 m up is pooled
+CBZ.camera.position.set(0, 120, -70); CBZ.camera.updateMatrixWorld();
+const under = makeCar(3, -70, false);
+got = false; for (let i = 0; i < 12 && !got; i++) { got = CI.acquire(under); tick(); }
+ok(got, "a parked car 120 m below the eye is pooled (3D distance)");
 console.log(fails ? `FAIL ${fails}` : "OK carinstances: parked + moving proxies", JSON.stringify(CBZ.carInstanceAudit()));
 process.exit(fails ? 1 : 0);

@@ -896,7 +896,7 @@
     for (let i = 0; i < L.length; i++) {
       const c = L[i];
       if (!c || c.dead || !c.pos || !(Math.abs(c.v || 0) > 0.3)) continue;
-      if (c.group && c.group.visible === false) continue;
+      if (c.group && c.group.visible === false && !c._proxy) continue;   // pooled (carinstances.js) is still drawn
       if (cam) { const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z; if (dx * dx + dz * dz > 90 * 90) continue; }
       _moving.push(c);
     }

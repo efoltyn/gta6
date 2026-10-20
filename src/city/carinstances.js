@@ -129,17 +129,30 @@
 
   // Walk the car exactly as projectObject would: an invisible node hides its
   // subtree. Returns false for anything this module cannot reproduce.
-  let _mover = false;
-  let _cabOff = false, _cabSeen = false;        // the cabin's far cut (playercars.js CBZ.cabinFar) for this acquire                           // collect() for a MOVING car (acquire(c, true))
+  let _mover = false;                           // collect() for a MOVING car (acquire(c, true))
+  let _cabOff = false, _cabSeen = false;        // the cabin's far cut (playercars.js CBZ.cabinFar) for this acquire
+  const _hid = [];                              // acquire scratch: nodes that were hidden (a dark lightbar, a parked door)
+  // the seated blob (vehicles.js occGeo/occMat: one shared merged body per
+  // variant, one shared material): a plain leaf mesh, poolable like any part
+  function seatBlob(o) {
+    return o.isMesh && !o.isSkinnedMesh && !o.isInstancedMesh && !o.children.length && o.onBeforeRender === NOOP_RENDER;
+  }
   function collect(o) {
-    if (o.visible === false) return true;
-    // a seated body: vehicles.js owns its show/hide. A MOVING car is proxied
-    // only past MOVE_R (~150 m), where the driver behind the glass is under a
-    // pixel: the pools draw the car without him (and without his subtree).
-    if (_mover && o.userData && o.userData.occupant) return true;
+    // HIDDEN IS A STATE TOO. A node that is off now (a dark lightbar, a
+    // headlamp cone, a promoted seat's blob) is remembered, and the proxy
+    // is dropped the frame it comes on, so the pools never draw a car
+    // missing something its real self would show.
+    if (o.visible === false) { _hid.push(o); return true; }
+    // a seated body. A MOVING car draws its seat blobs through the pools like
+    // any other part (the driver stays behind the glass at every distance);
+    // anything else seated (a promoted rig) is not this module's to draw:
+    // acquire() refuses a near mover that has one, a far one leaves it out.
+    if (o.userData && o.userData.occupant) {
+      if (!_mover) { if (o.isMesh) return false; }
+      else if (!seatBlob(o)) return true;
+    }
     if (o.isMesh) {
       if (o.isSkinnedMesh || o.isInstancedMesh) return false;
-      if (o.userData && o.userData.occupant) return false;
       if (o.onBeforeRender !== NOOP_RENDER) return false;
       const geo = o.geometry;
       if (!geo || !geo.isBufferGeometry || !geo.attributes.position) return false;
@@ -342,14 +355,19 @@
       m: new Float32Array(16), cr: 1, cg: 1, cb: 1 };
   }
   function newRec() {
-    return freeRecs.pop() || { mover: false, car: null, entries: [], cx: 0, cy: 0, cz: 0, r: 0, inView: true, px: 0, pz: 0, ph: 0,
-      gx: 0, gy: 0, gz: 0, rx: 0, ry: 0, rz: 0, vis: null, gch: 0, vch: 0, lod: false, lodPending: false, cabOff: false, hasCab: false };
+    return freeRecs.pop() || { mover: false, exact: false, car: null, entries: [], hid: [], cx: 0, cy: 0, cz: 0, r: 0, inView: true, px: 0, pz: 0, ph: 0,
+      gx: 0, gy: 0, gz: 0, rx: 0, ry: 0, rz: 0, vis: null, gch: 0, vch: 0, lod: false, lodPending: false, cabOff: false, hasCab: false,
+      vpx: 0, vpy: 0, vpz: 0, vrx: 0, vry: 0, vrz: 0, st: 0 };
   }
+  /* DISTANCE IS FROM THE EYE, IN 3D. It was ground distance, so from a
+     helicopter 120 m up every car under it counted as 0 m away and drew
+     itself whole (~22 draws a car): that was most of the aerial frame. */
   function carDist2(c) {
     const cam = CBZ.camera && CBZ.camera.position;
     if (!cam) return 0;
     const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z;
-    return dx * dx + dz * dz;
+    const dy = (c.group && c.group.position ? c.group.position.y : (c.pos.y || 0)) - cam.y;
+    return dx * dx + dy * dy + dz * dz;
   }
   function frustumReady() {
     const cam = CBZ.camera;
@@ -410,16 +428,31 @@
 
   /* ACQUIRE: vehicles.js calls this for a settled, sleepable, awake parked car
      past PROXY_IN. Returns true when the car is now drawn by the pools. */
-  /* MOVING TRAFFIC (mover = true): a car driving past MOVE_R used to be
-     hidden (vehicles.js's 150 m cull) and so popped into view at 150 m, well
-     inside the fog. It is proxied instead: the same pools, each entry keeping
-     its mesh's matrix RELATIVE to the car, recomposed from the car's live
-     transform every frame (frameTick), out to the fog ring. */
-  const MOVE_R = 150, MOVE_IN2 = MOVE_R * MOVE_R, MOVE_OUT2 = (MOVE_R - 8) * (MOVE_R - 8);
+  /* MOVING TRAFFIC (mover = true): a driving car past MOVE_R (45 m from the
+     eye) is drawn by the same pools, so only the traffic around the player
+     is whole meshes. Two ways an entry follows its car (frameTick):
+       EXACT (inside EXACT_R): the car's own subtree world matrices, fresh
+         every frame it changed (updateWorldMatrix is not subject to
+         core/matrixskip's hidden skip), so the wheels roll and steer, the
+         body pitches and rolls on its springs, the brake lamps and the seat
+         blobs show, exactly as the real car would draw them;
+       RELATIVE (past it, where vehicles.js no longer rolls wheels or springs
+         a body): each entry's matrix relative to the car, recomposed from the
+         car's live transform, out to the fog ring.
+     A car crossing EXACT_R switches in place. A near mover with a promoted
+     rig in a seat (vehicles.js promotes inside 24 m, hands back past 40 m)
+     or an emergency unit (lightbar, rear doors, own AI) is refused. */
+  const MOVE_R = 45, MOVE_IN2 = MOVE_R * MOVE_R, MOVE_OUT2 = (MOVE_R - 4) * (MOVE_R - 4);
+  const EXACT_IN2 = 75 * 75, EXACT_OUT2 = 85 * 85;
   const _gw = new THREE.Matrix4(), _gi = new THREE.Matrix4(), _rm = new THREE.Matrix4();
+  function moverRefused(c, d2) {
+    if (c.player || c._heldBy || c.wreckT > 0 || c._onFire || c._emergency) return true;
+    return d2 < EXACT_OUT2 && !!(c.npcDriver || c._occRigged || (c.occ && c.occ.rigs > 0));
+  }
   function acquire(c, mover) {
     if (!c || c._proxy || c._sleep || !c.group || !c.pos || !ready()) return false;
     if (c._proxyRetry && frame < c._proxyRetry) return false;       // refused or invalidated recently
+    if (mover && moverRefused(c, carDist2(c))) { c._proxyRetry = frame + 30; return false; }
     const grp = c.group;
     if ((!mover && grp.visible === false) || !grp.parent) return false;
     const d2 = carDist2(c);
@@ -432,9 +465,9 @@
     if (CBZ.carLodRestore) CBZ.carLodRestore(c);
     const L = CBZ.carLod, lod = !!(L && L.wantLod(d2, false));
     let lodPending = false;
-    _found.length = 0; _keys.length = 0; _sigs.length = 0; _negs.length = 0; _geos.length = 0;
+    _found.length = 0; _keys.length = 0; _sigs.length = 0; _negs.length = 0; _geos.length = 0; _hid.length = 0;
     const ok = collect(grp); _mover = false; grp.visible = wasVis;
-    if (!ok || !_found.length) { _found.length = 0; c._proxyRetry = frame + 120; return false; }
+    if (!ok || !_found.length) { _found.length = 0; _hid.length = 0; c._proxyRetry = frame + 120; return false; }
     // world matrices straight from the transforms (updateWorldMatrix is not
     // subject to core/matrixskip's hidden/stamped skips)
     grp.updateWorldMatrix(true, true);
@@ -471,17 +504,21 @@
     // re-composed its world matrices and rebuilt a key string per mesh, for
     // every waiting car, every frame (the top cost under vehicles.js's
     // traffic pass while driving). The car draws itself meanwhile, as before.
-    if (missing) { _found.length = 0; c._proxyRetry = frame + 3; return false; }
+    if (missing) { _found.length = 0; _hid.length = 0; c._proxyRetry = frame + 3; return false; }
     const view = frustumReady();
     const rec = newRec();
     rec.car = c;
     rec.mover = !!mover;
+    rec.exact = !!mover && d2 < EXACT_IN2;
+    for (let i = 0; i < _hid.length; i++) rec.hid.push(_hid[i]);
+    _hid.length = 0;
     if (mover) _gi.copy(grp.matrixWorld).invert();
     rec.px = c.pos.x; rec.pz = c.pos.z; rec.ph = c.heading;
     rec.gx = grp.position.x; rec.gy = grp.position.y; rec.gz = grp.position.z;
     rec.rx = grp.rotation.x; rec.ry = grp.rotation.y; rec.rz = grp.rotation.z;
     rec.vis = (grp.userData && grp.userData.carVisual) || null;
     rec.gch = grp.children.length; rec.vch = rec.vis ? rec.vis.children.length : 0;
+    if (mover) markExact(rec);
     grp.getWorldPosition(_v2);
     rec.cx = _v2.x; rec.cy = _v2.y; rec.cz = _v2.z;
     let rad = 0;
@@ -521,8 +558,57 @@
     return true;
   }
 
+  // what an EXACT mover's last recompose saw beyond the group transform:
+  // the body visual's attitude (springs) and the steer; the wheels only turn
+  // while c.v is not 0, so a car stopped at a light costs a compare a frame
+  function markExact(rec) {
+    const c = rec.car, v = rec.vis;
+    if (v) { rec.vpx = v.position.x; rec.vpy = v.position.y; rec.vpz = v.position.z; rec.vrx = v.rotation.x; rec.vry = v.rotation.y; rec.vrz = v.rotation.z; }
+    rec.st = c._aiSteer || 0;
+  }
+  function exactSame(rec) {
+    const c = rec.car, grp = c.group, v = rec.vis;
+    if (c.v || c.pos.x !== rec.px || c.pos.z !== rec.pz || c.heading !== rec.ph) return false;
+    if (grp.position.y !== rec.gy || grp.rotation.x !== rec.rx || grp.rotation.z !== rec.rz) return false;
+    if ((c._aiSteer || 0) !== rec.st) return false;
+    if (v && (v.position.x !== rec.vpx || v.position.y !== rec.vpy || v.position.z !== rec.vpz ||
+        v.rotation.x !== rec.vrx || v.rotation.y !== rec.vry || v.rotation.z !== rec.vrz)) return false;
+    return true;
+  }
+  function exactRec(rec) {
+    if (exactSame(rec)) return;
+    const c = rec.car, grp = c.group;
+    rec.px = c.pos.x; rec.pz = c.pos.z; rec.ph = c.heading; rec.gy = grp.position.y; rec.rx = grp.rotation.x; rec.rz = grp.rotation.z;
+    markExact(rec);
+    grp.updateWorldMatrix(false, true);
+    const E = rec.entries;
+    for (let i = 0; i < E.length; i++) {
+      const e = E[i], dst = e.m, src = e.src.matrixWorld.elements;
+      for (let k = 0; k < 16; k++) dst[k] = src[k];
+      if (e.pool.neg) { dst[0] = -dst[0]; dst[4] = -dst[4]; dst[8] = -dst[8]; dst[12] = -dst[12]; }
+      e.pool.dirty = true;
+    }
+    const w = grp.matrixWorld.elements;
+    rec.cx = w[12]; rec.cy = w[13]; rec.cz = w[14];
+  }
+  // EXACT -> RELATIVE: freeze each entry's current pose relative to the car
+  function toRelative(rec) {
+    const grp = rec.car.group;
+    grp.updateWorldMatrix(false, true);
+    _gi.copy(grp.matrixWorld).invert();
+    const E = rec.entries;
+    for (let i = 0; i < E.length; i++) {
+      const e = E[i];
+      if (!e.rel) e.rel = new Float32Array(16);
+      _rm.multiplyMatrices(_gi, e.src.matrixWorld);
+      e.rel.set(_rm.elements);
+    }
+    rec.exact = false;
+    rec.px = NaN;                                // recompose on the next move
+  }
   // a moving proxy follows its car: every entry = car world x its relative matrix
   function moveRec(rec) {
+    if (rec.exact) { exactRec(rec); return; }
     const c = rec.car, grp = c.group;
     if (c.pos.x === rec.px && c.pos.z === rec.pz && c.heading === rec.ph &&
         grp.position.y === rec.gy && grp.rotation.x === rec.rx && grp.rotation.z === rec.rz) return;
@@ -559,7 +645,7 @@
       if (e.rel) e.rel = null;
       freeEntries.push(e);
     }
-    rec.entries.length = 0; rec.car = null; rec.vis = null; rec.mover = false;
+    rec.entries.length = 0; rec.hid.length = 0; rec.car = null; rec.vis = null; rec.mover = false; rec.exact = false;
     const k = proxies.indexOf(rec);
     if (k >= 0) { proxies[k] = proxies[proxies.length - 1]; proxies.pop(); }
     freeRecs.push(rec);
@@ -584,13 +670,44 @@
     if (vis !== rec.vis || (!rec.mover && grp.children.length !== rec.gch) || (vis && vis.children.length !== rec.vch)) return false;
     const sl = CBZ.cityCarSleepable;
     if (!rec.mover && sl && !sl(c)) return false;
-    if (rec.mover && (c.player || c._heldBy || c.wreckT > 0 || c._onFire)) return false;
+    if (rec.mover && moverRefused(c, rec.exact ? 0 : EXACT_OUT2)) return false;
+    const H = rec.hid;
+    for (let i = 0; i < H.length; i++) if (H[i].visible !== false) return false;
     const E = rec.entries;
     for (let i = 0; i < E.length; i++) {
       const e = E[i], o = e.src;
-      if (o.material !== e.mat || o.geometry !== e.geo || o.visible === false || !o.parent) return false;
+      if (o.geometry !== e.geo || o.visible === false || !o.parent) return false;
+      if (o.material !== e.mat && !(rec.mover && rekey(e))) return false;
       if (e.paint) { const col = e.mat.color; if (col.r !== e.cr || col.g !== e.cg || col.b !== e.cb) return false; }
     }
+    return true;
+  }
+  /* A MATERIAL SWAP ON A MOVING CAR IS A POOL MOVE, NOT A RELEASE. The brake
+     lamps flip their meshes between two shared materials (vehicles.js
+     setBrake) many times a minute in traffic; releasing on every flip would
+     put the car back to ~22 draws for two seconds each time. The entry moves
+     to the (geometry, new material) pool instead. A pool that does not exist
+     yet is made (rate-limited, it warms like any other) and the car draws
+     itself until it has: _rekeyMiss asks frameTick for a short retry. */
+  let _rekeyMiss = false;
+  function rekey(e) {
+    const o = e.src, m = o.material, p0 = e.pool;
+    if (e.paint || !m || Array.isArray(m) || !matOk(m) || isPaint(m)) return false;
+    const key = p0.geo.id + "|M" + m.id + "|" + (p0.cast ? 1 : 0) + (p0.recv ? 1 : 0) + "|" + p0.order + "|" + (p0.neg ? "n" : "p");
+    const p = pools.get(key);
+    if (!p) {
+      if (newPoolsThisFrame < NEW_POOLS_PER_FRAME) getPool(key, o, p0.geo, false, p0.neg, null);
+      _rekeyMiss = true;
+      return false;
+    }
+    if (p.warmUntil) { _rekeyMiss = true; return false; }
+    const mem = p0.members, last = mem.pop();   // swap-remove from the old pool
+    if (last !== e) { mem[e.idx] = last; last.idx = e.idx; }
+    p0.dirty = true;
+    e.pool = p; e.mat = m; e.idx = p.members.length;
+    p.members.push(e);
+    if (p.members.length > p.cap) grow(p, p.members.length);
+    p.dirty = true; p.emptyAt = 0;
     return true;
   }
 
@@ -620,12 +737,16 @@
       // something changed the car: it draws itself, and is not re-captured for
       // ~2 s (a lightbar or anything else that swaps materials on a timer
       // would otherwise be captured and released every other frame)
-      if (!stillExact(rec)) { release(c); c._proxyRetry = frame + 120; continue; }
+      _rekeyMiss = false;
+      if (!stillExact(rec)) { release(c); c._proxyRetry = frame + (_rekeyMiss ? 4 : 120); continue; }
       const d2 = carDist2(c);
       if (rec.mover) {
         // near again: the real car draws itself; past the fog: hidden (vehicles.js's cull)
         if (d2 < MOVE_OUT2) { release(c); continue; }
         if (d2 > SD2) { release(c); if (c.group) c.group.visible = false; continue; }
+        if (rec.exact ? d2 > EXACT_OUT2 : d2 < EXACT_IN2) {
+          if (rec.exact) toRelative(rec); else { rec.exact = true; rec.px = NaN; }
+        }
         moveRec(rec);
       } else {
         if (d2 < PROXY_OUT2) { release(c); continue; }
@@ -678,7 +799,7 @@
 
   CBZ.carInstances = {
     acquire: acquire, release: release, releaseAll: releaseAll,
-    MOVE_R: MOVE_R,
+    MOVE_R: MOVE_R, MOVE_IN2: MOVE_IN2, MOVE_OUT2: MOVE_OUT2,
     PROXY_IN: PROXY_IN, PROXY_OUT: PROXY_OUT,
     _frameTick: frameTick,                       // exposed for the pure-node bookkeeping check
   };

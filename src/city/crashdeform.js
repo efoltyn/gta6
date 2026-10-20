@@ -439,6 +439,9 @@
       if (out.envMap) out.envMap = null;
       if (out.map) out.map = null;             // soot covers the livery
       out.transparent = false; out.opacity = 1;
+      // vehicles.js mergePlainColourParts: the trim colours ride the vertices;
+      // soot is one colour, so the char drops them (and the emissive hook)
+      if (src._cbzVcMerge) { out.vertexColors = false; out.onBeforeCompile = THREE.Material.prototype.onBeforeCompile; out.customProgramCacheKey = THREE.Material.prototype.customProgramCacheKey; }
       out.needsUpdate = true;
       // one per SOURCE material for the whole city, and never disposed — the
       // `_shared` flag is also what stops vehicles.js's teardown traverse from

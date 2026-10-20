@@ -146,8 +146,14 @@
     const k = "c" + rt + "," + rb + "," + seg;
     return geoCache[k] || (geoCache[k] = new THREE.CylinderGeometry(rt, rb, 1, seg, 1, false));
   }
-  function Acc() { this.p = []; this.n = []; this.c = []; this.i = []; }
+  /* REPLAY: a baked accumulator (core/bakecache.js hit) keeps every call
+     site running (the colliders, seats, platforms and the shared rng stream
+     interleaved with the geometry calls stay exactly as they were) but adds
+     no vertices: build() wraps the arrays this same code produced last
+     visit. */
+  function Acc(baked) { this.p = []; this.n = []; this.c = []; this.i = []; this.baked = baked || null; }
   Acc.prototype.geo = function (gm, m4, col) {
+    if (this.baked) return;
     const P = gm.attributes.position, N = gm.attributes.normal, base = this.p.length / 3;
     _n3.getNormalMatrix(m4);
     for (let k = 0; k < P.count; k++) {
@@ -162,6 +168,7 @@
   };
   // a box centred at (x,y,z), size (w,h,d), rotated (rx, ry, rz) in YXZ order
   Acc.prototype.box = function (x, y, z, w, h, d, col, ry, rx, rz) {
+    if (this.baked) return;
     _e.set(rx || 0, ry || 0, rz || 0, "YXZ"); _q.setFromEuler(_e);
     _m4.compose(_v.set(x, y, z), _q, _s.set(w, h, d));
     this.geo(unitBox(), _m4.clone(), col);
@@ -169,6 +176,7 @@
   // a cylinder from base point (x,y,z) running `len` along its axis, tilted
   // by (rx, rz) about its base; axis is +Y before the tilt
   Acc.prototype.cyl = function (x, y, z, rt, rb, len, seg, col, rx, rz, ry) {
+    if (this.baked) return;
     _e.set(rx || 0, ry || 0, rz || 0, "YXZ"); _q.setFromEuler(_e);
     const off = new THREE.Vector3(0, len / 2, 0).applyQuaternion(_q);
     _m4.compose(_v.set(x + off.x, y + off.y, z + off.z), _q, _s.set(1, len, 1));
@@ -176,6 +184,7 @@
   };
   // a cylinder between two points
   Acc.prototype.rod = function (ax, ay, az, bx, by, bz, r, seg, col) {
+    if (this.baked) return;
     const dx = bx - ax, dy = by - ay, dz = bz - az, L = Math.hypot(dx, dy, dz);
     if (!(L > 1e-4)) return;
     _q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx / L, dy / L, dz / L));
@@ -185,6 +194,7 @@
   // a flat quad (a,b,c,d CCW seen from the side its normal faces); twoSided
   // adds the reversed face with `back` colour
   Acc.prototype.quad = function (a, b, c, d, col, twoSided, back) {
+    if (this.baked) return;
     const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     const L = Math.hypot(nx, ny, nz) || 1; nx /= L; ny /= L; nz /= L;
@@ -197,15 +207,31 @@
     if (twoSided) add([a, d, c, b], [-nx, -ny, -nz], back || col);
   };
   Acc.prototype.tri = function (a, b, c, col, twoSided, back) { this.quad(a, b, c, c, col, twoSided, back); };
+  // the arrays build() draws, as typed arrays (what the bake stores)
+  Acc.prototype.arrays = function (gm) {
+    if (this.baked) return this.baked;
+    const a = gm.attributes, s = gm.boundingSphere;
+    return { p: a.position.array, n: a.normal.array, c: a.color.array, i: gm.index.array,
+      s: new Float32Array([s.center.x, s.center.y, s.center.z, s.radius]) };
+  };
   Acc.prototype.build = function (name, mat) {
-    if (!this.i.length) return null;
+    const B = this.baked;
+    if (!(B ? B.i.length : this.i.length)) return null;
     const gm = new THREE.BufferGeometry();
-    gm.setAttribute("position", new THREE.Float32BufferAttribute(this.p, 3));
-    gm.setAttribute("normal", new THREE.Float32BufferAttribute(this.n, 3));
-    gm.setAttribute("color", new THREE.Float32BufferAttribute(this.c, 3));
-    const nv = this.p.length / 3;
-    gm.setIndex(nv > 65535 ? new THREE.Uint32BufferAttribute(this.i, 1) : new THREE.Uint16BufferAttribute(this.i, 1));
-    gm.computeBoundingSphere();
+    if (B) {
+      gm.setAttribute("position", new THREE.BufferAttribute(B.p, 3));
+      gm.setAttribute("normal", new THREE.BufferAttribute(B.n, 3));
+      gm.setAttribute("color", new THREE.BufferAttribute(B.c, 3));
+      gm.setIndex(new THREE.BufferAttribute(B.i, 1));
+      gm.boundingSphere = new THREE.Sphere(new THREE.Vector3(B.s[0], B.s[1], B.s[2]), B.s[3]);
+    } else {
+      gm.setAttribute("position", new THREE.Float32BufferAttribute(this.p, 3));
+      gm.setAttribute("normal", new THREE.Float32BufferAttribute(this.n, 3));
+      gm.setAttribute("color", new THREE.Float32BufferAttribute(this.c, 3));
+      const nv = this.p.length / 3;
+      gm.setIndex(nv > 65535 ? new THREE.Uint32BufferAttribute(this.i, 1) : new THREE.Uint16BufferAttribute(this.i, 1));
+      gm.computeBoundingSphere();
+    }
     const m = new THREE.Mesh(gm, mat);
     m.name = name;
     m.matrixAutoUpdate = false;
@@ -267,7 +293,26 @@
     const WSTEP = 2;
     const WN = Math.ceil((AX1 - AX0) / WSTEP) + 1;
     const Wtab = new Float32Array(WN);
-    for (let i = 0; i < WN; i++) {
+    /* BAKED ONCE PER VERSION (core/bakecache.js). The remade beach cost ~41 ms
+       at boot against the old one's ~8: ~1.9k raw shore-field samples for
+       this waterline (each walks every river and lake), ~46k profile
+       evaluations for the sand grid and its analytic normals, and ~55k
+       vertices pushed one by one into the structure mesh. All three are a
+       pure function of the shore (the continent plate's signature names its
+       every input), this span, the seed and the code (?v= of beach.js is in
+       bakeSig), so a later visit takes last visit's arrays. Everything with a
+       side effect (colliders, seats, platforms, the rng stream) still runs. */
+    const BSIG = (CBZ.bakeSig && CBZ.bakeGet && CBZ._plateSig && shoreAt)
+      ? CBZ.bakeSig("beach|" + CBZ._plateSig + "|" + CBZ.bakeHash({ AX0: AX0, AX1: AX1, X0: X0, X1: X1, minX: minX, minZ: minZ, ES: ES, cx: cx, cz: cz, SEA: SEA, WSTEP: WSTEP, WN: WN, B: B }))
+      : null;
+    let BAKE = null;
+    try { BAKE = BSIG ? CBZ.bakeGet("city-beach", BSIG) : null; } catch (e) { BAKE = null; }
+    if (BAKE && !(BAKE.w && BAKE.w.length === WN && BAKE.pos && BAKE.col && BAKE.sh && BAKE.nrm && BAKE.idx &&
+        BAKE.sp && BAKE.sn && BAKE.sc && BAKE.si && BAKE.ss && BAKE.ss.length === 4 && BAKE.sp.length === BAKE.sn.length && BAKE.sp.length === BAKE.sc.length &&
+        BAKE.gm && BAKE.gc && BAKE.gm.length / 16 === BAKE.gc.length / 3)) BAKE = null;
+    const bakeOut = {};
+    if (BAKE) Wtab.set(BAKE.w);
+    else for (let i = 0; i < WN; i++) {
       const x = AX0 + i * WSTEP;
       let w = 28 + bulgeAt(X0, X1, x);
       if (shoreAt) {
@@ -392,7 +437,7 @@
       CBZ.platforms.push({ minX: Math.min(x0, x1), maxX: Math.max(x0, x1), minZ: Math.min(z0, z1), maxZ: Math.max(z0, z1), top });
     };
 
-    const A = new Acc();                         // the one static structure mesh
+    const A = new Acc(BAKE ? { p: BAKE.sp, n: BAKE.sn, c: BAKE.sc, i: BAKE.si, s: BAKE.ss } : null);   // the one static structure mesh
     const structMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
     structMat.name = "beach-structures";
     let structMesh = null;                        // assigned at the end; colliders ref a proxy until then
@@ -421,9 +466,15 @@
       const NR = LAND.length + MID + SEAW.length;
       const bandR0 = LAND.length + MID + 3, bandR1 = LAND.length + MID + 3 + 21;   // the swash rows [dl 8 .. -2]
       const n = NC * NR;
-      const pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
-      const aShore = new Float32Array(n), aSw = new Float32Array(n * 4);
-      for (let j = 0; j < NR; j++) {
+      const hit = !!(BAKE && BAKE.pos.length === n * 3 && BAKE.col.length === n * 3 && BAKE.sh.length === n && BAKE.nrm.length === n * 3 &&
+        BAKE.idx.length === (NC - 1) * (NR - 1) * 6);
+      const pos = hit ? BAKE.pos : new Float32Array(n * 3), col = hit ? BAKE.col : new Float32Array(n * 3);
+      const aShore = hit ? BAKE.sh : new Float32Array(n), aSw = new Float32Array(n * 4);
+      if (hit) for (let k = 0; k < n; k++) {
+        const dl = aShore[k];
+        aSw[k * 4] = dl > 9 ? -9 : 0; aSw[k * 4 + 2] = dl > 9 ? -9 : 0; aSw[k * 4 + 3] = -9;
+      }
+      if (!hit) for (let j = 0; j < NR; j++) {
         for (let i = 0; i < NC; i++) {
           const x = XS[i], w = W(x), ds = dStart(x);
           let d;
@@ -452,10 +503,10 @@
           col[k * 3] = c[0] * grain; col[k * 3 + 1] = c[1] * grain; col[k * 3 + 2] = c[2] * grain;
         }
       }
-      const idx = new Uint32Array((NC - 1) * (NR - 1) * 6);
+      const idx = hit ? BAKE.idx : new Uint32Array((NC - 1) * (NR - 1) * 6);
       let w = 0;
       // rows run seaward (z decreases with j): (a,b,c)/(b,d,c) faces +Y
-      for (let j = 0; j < NR - 1; j++) for (let i = 0; i < NC - 1; i++) {
+      if (!hit) for (let j = 0; j < NR - 1; j++) for (let i = 0; i < NC - 1; i++) {
         const a = j * NC + i, b = a + 1, c = a + NC, d = c + 1;
         idx[w++] = a; idx[w++] = b; idx[w++] = c;
         idx[w++] = b; idx[w++] = d; idx[w++] = c;
@@ -471,8 +522,8 @@
       // ANALYTIC normals off the profile itself: computeVertexNormals would
       // average in the zero-area rows the seawall clamp collapses and the
       // 3 cm sliver at each span end, and print a dark seam down x = X0/X1
-      const nrm = new Float32Array(n * 3), E = 0.3;
-      for (let k = 0; k < n; k++) {
+      const nrm = hit ? BAKE.nrm : new Float32Array(n * 3), E = 0.3;
+      if (!hit) for (let k = 0; k < n; k++) {
         const x = pos[k * 3], d = minZ - pos[k * 3 + 2];
         const gx = (sandYd(x + E, d) - sandYd(x - E, d)) / (2 * E);
         const gd = (sandYd(x, d + E) - sandYd(x, d - E)) / (2 * E);   // dy/dd; d runs along -z
@@ -481,6 +532,7 @@
       }
       gm.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
       gm.computeBoundingSphere();
+      bakeOut.pos = pos; bakeOut.col = col; bakeOut.sh = aShore; bakeOut.nrm = nrm; bakeOut.idx = idx;
 
       const mat = sandMaterial();
       const m = new THREE.Mesh(gm, mat);
@@ -639,7 +691,8 @@
     // =====================================================================
     (function dune() {
       // ---- crossovers: a 1.8 m timber walk down each cut, boardwalk → backshore
-      for (const gx of GAPS) {
+      // (geometry only: nothing to do when the structure mesh is baked)
+      if (!A.baked) for (const gx of GAPS) {
         const da = BWK.d1, db = 13.9;
         for (let d = da; d < db - 0.01; d += 0.16) {
           const d2 = Math.min(db, d + 0.14);
@@ -670,12 +723,12 @@
         const L = run[1] - run[0];
         if (L < 2) continue;
         const np = Math.max(1, Math.round(L / 2.5));
-        for (let k = 0; k <= np; k++) {
+        if (!A.baked) for (let k = 0; k <= np; k++) {
           const px = run[0] + L * k / np, py = sandYd(px, FD);
           A.box(px, py + 0.45, fz, 0.08, 1.2, 0.08, C.woodGrey);
         }
         // slats: 4 cm wide, 11 cm apart, a few leaning or sand-buried
-        for (let x = run[0] + 0.06; x < run[1] - 0.04; x += 0.11) {
+        if (!A.baked) for (let x = run[0] + 0.06; x < run[1] - 0.04; x += 0.11) {
           const y0 = sandYd(x, FD) - 0.08;
           const hgt = 0.86 + (h01(x * 13, 1, 0xfe1) - 0.5) * 0.12;
           const lean = (h01(x * 13, 2, 0xfe2) - 0.5) * 0.06;
@@ -719,7 +772,8 @@
         return gm;
       })();
       const spots = [];
-      for (let x = X0 + 2; x < X1 - 2; x += 0.55) {
+      const gHit = !!(BAKE && BAKE.gm.length);
+      if (!gHit) for (let x = X0 + 2; x < X1 - 2; x += 0.55) {
         for (let d = 5.6; d < 13.6; d += 0.55) {
           const jx = x + (h01(x, d, 0xa11) - 0.5) * 0.5, jd = d + (h01(x, d, 0xa12) - 0.5) * 0.5;
           const cover = duneH(jx) * ss(5.6, 7.4, jd) * (1 - ss(10.5, 13.0, jd));
@@ -729,12 +783,18 @@
           spots.push([jx, jd]);
         }
       }
-      if (spots.length) {
+      const nG = gHit ? BAKE.gm.length / 16 : spots.length;
+      if (!gHit) { bakeOut.gm = new Float32Array(0); bakeOut.gc = new Float32Array(0); }
+      if (nG) {
         const gMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, side: THREE.DoubleSide });
         gMat.name = "beach-dune-grass";
-        const im = new THREE.InstancedMesh(tuftGeo, gMat, spots.length);
+        const im = new THREE.InstancedMesh(tuftGeo, gMat, nG);
         const dm = new THREE.Object3D(), tint = new THREE.Color();
-        spots.forEach(function (s, i) {
+        if (gHit) {
+          im.instanceMatrix.array.set(BAKE.gm);
+          if (im.setColorAt) { im.setColorAt(0, tint.setRGB(1, 1, 1)); im.instanceColor.array.set(BAKE.gc); }
+        }
+        if (!gHit) spots.forEach(function (s, i) {
           const y = sandYd(s[0], s[1]) - 0.03, k = 0.7 + h01(s[0], s[1], 0xa15) * 0.7;
           dm.position.set(s[0], y, zOf(s[1]));
           dm.rotation.set(0, h01(s[0], s[1], 0xa16) * Math.PI * 2, 0);
@@ -746,6 +806,7 @@
         });
         im.instanceMatrix.needsUpdate = true;
         if (im.instanceColor) im.instanceColor.needsUpdate = true;
+        if (!gHit) { bakeOut.gm = im.instanceMatrix.array; bakeOut.gc = im.instanceColor ? im.instanceColor.array : new Float32Array(nG * 3); }
         im.castShadow = false; im.receiveShadow = true;
         im.name = "beach-dune-grass"; im.userData.beach = "grass";
         root.add(im);
@@ -1378,6 +1439,13 @@
 
     // ---- the structure mesh: everything above, one draw call -------------
     structMesh = A.build("beach-structures", structMat);
+    if (BSIG && !BAKE && CBZ.bakePut && bakeOut.pos && bakeOut.gm) {
+      try {
+        const SA = structMesh ? A.arrays(structMesh.geometry) : { p: new Float32Array(0), n: new Float32Array(0), c: new Float32Array(0), i: new Uint16Array(0), s: new Float32Array(4) };
+        CBZ.bakePut("city-beach", BSIG, { w: Wtab, pos: bakeOut.pos, col: bakeOut.col, sh: bakeOut.sh, nrm: bakeOut.nrm, idx: bakeOut.idx,
+          sp: SA.p, sn: SA.n, sc: SA.c, si: SA.i, ss: SA.s, gm: bakeOut.gm || new Float32Array(0), gc: bakeOut.gc || new Float32Array(0) });
+      } catch (e) { /* a full disk is a miss next time, never a broken beach */ }
+    }
     if (structMesh) {
       structMesh.castShadow = true; structMesh.receiveShadow = true;
       root.add(structMesh);

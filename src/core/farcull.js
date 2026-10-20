@@ -227,6 +227,36 @@
     return b;
   }
 
+  /* A NEW CITY IS JUDGED WHOLE, ON ITS FIRST FRAME. The sweep below is
+     budgeted (32 fresh group measures a sweep, 4 sweeps a second), which is
+     right for a world that is already measured and wrong for one that is
+     not: a fresh city has ~1-2k building groups, so the first several
+     SECONDS after the loader went drew every far building's unbatched live
+     parts (doors, signs, panes, collider-ref trim: 300-500 draw calls of
+     fog colour) until the crawl reached them. The first frame of a root is
+     drawn behind the boot card (systems/state.js holds it until frames are
+     cheap), so the whole root is measured and judged right there, once,
+     with no budget; from then on everything is a cached bound and the sweep
+     is the flat distance test it was meant to be. Streamed jobs are judged
+     as they join (CBZ.farcullAdopt). */
+  let primedRoot = null;
+  function primeAll(root, P, covers, RV, RB) {
+    const kids = root.children;
+    let n = 0;
+    for (let i = 0; i < kids.length; i++) {
+      const o = kids[i];
+      if (!o || (!o.isMesh && !o.isGroup)) continue;
+      const b = boundsFor(o);
+      if (b.dynamic) continue;
+      judge(o, b, P, covers, RV, RB);
+      n++;
+    }
+    _primeStats.roots++; _primeStats.judged = n;
+    return n;
+  }
+  const _primeStats = { roots: 0, judged: 0, ms: 0 };
+  CBZ.farcullPrimeStats = _primeStats;
+
   let lastSweepAt = 0, cursor = 0;
   CBZ.onAlways(3.6, function () {
     // WALL-CLOCK pacing, not game-dt: dt is clamped to 0.05s/frame, so on a
@@ -280,6 +310,13 @@
       return;
     }
     if (!P) return;
+    if (root !== primedRoot) {
+      primedRoot = root;
+      const t0 = performance.now();
+      primeAll(root, P, covers, RV, RB);
+      _primeStats.ms = Math.round((performance.now() - t0) * 10) / 10;
+      return;
+    }
     // First-time measurements are the expensive part (a group pays a Box3
     // subtree walk) — measured 30-50ms hitch-stacks right after a tier drop
     // when ~1000 unmeasured children landed in one sweep. Cap fresh measures

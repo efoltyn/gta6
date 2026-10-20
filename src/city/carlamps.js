@@ -158,7 +158,8 @@
   // a car with its lamps on: something is driving it (ambient AI, an NPC, the
   // player) and it is drawn. Parked fixtures and wrecks sit dark.
   function lit(c) {
-    if (!c || !c.pos || !c.group || !c.group.visible || c.dead) return false;
+    // drawn = its own meshes or the instanced pools (city/carinstances.js)
+    if (!c || !c.pos || !c.group || (!c.group.visible && !c._proxy) || c.dead) return false;
     if (c.player) return true;
     if (c._propParked || c.abandoned || c._husk) return false;
     return !!(c.ai || c.npcDriver);

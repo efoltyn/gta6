@@ -394,8 +394,15 @@
     c._terrY = c._terrPitch = c._terrRoll = null;     // snap onto the hill, no drop-in
     seatCar(c, 0, 0, true);
   }
+  /* DRAWN = its own meshes OR the instanced pools (city/carinstances.js).
+     Everything that animates what you see (wheels, springs, brake lamps,
+     the precise ground seat) asks this, not group.visible, or a pooled car
+     would freeze its wheels and kill its brake lamps the moment it went
+     into the pools. */
+  function carDrawn(c) { return !!(c && c.group && (c.group.visible || c._proxy)); }
+  CBZ.cityCarDrawn = carDrawn;
   function seatCar(c, dt, extraY, near) {
-    const base = terrainSeat(c, near == null ? !!c.group.visible : !!near, dt || 0);
+    const base = terrainSeat(c, near == null ? carDrawn(c) : !!near, dt || 0);
     const y = base + (extraY || 0);
     c.group.position.set(c.pos.x, y, c.pos.z);
     let px = c._terrPitch || 0, rz = c._terrRoll || 0;
@@ -436,7 +443,7 @@
     return list;
   }
   function rollWheels(c, dt) {
-    if (!c.group || !c.group.visible || !dt) { c._wheelRolled = false; return; }
+    if (!carDrawn(c) || !dt) { c._wheelRolled = false; return; }
     const cam = CBZ.camera.position;
     const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z;
     if (dx * dx + dz * dz > 70 * 70) { c._wheelRolled = false; c._suspV = null; return; }
@@ -859,8 +866,179 @@
       grp.add(merged);
       meshes.forEach((mesh) => grp.remove(mesh));
     });
+    mergePlainColourParts(grp, keep);
     grp.userData.sourceParts = sourceParts;
     grp.userData.drawMeshes = grp.children.reduce((n, o) => n + (isMesh(o) ? 1 : 0), 0);
+  }
+
+  /* ONE DRAW FOR EVERY PLAIN-COLOUR PART OF A CAR. After the per-material
+     merge a car still drew 5-7 meshes whose materials differ ONLY in colour
+     and emissive: the world/materials.js cmat() trim, badge, reflector,
+     grille and housing colours carparts.js and playercars.js dress a body
+     with (Lambert, or their identical Standard twin on a PBR tier). Each was
+     its own draw call, ~6 of a car's ~22. They are merged here into ONE mesh
+     whose geometry carries each part's colour as a vertex colour and its
+     emissive x intensity as a per-vertex `cbzEmis`, drawn through one shared
+     material (white, vertexColors, a one-line hook that reads the emissive
+     off the vertex). diffuse x vColor and the emissive are the same numbers
+     the separate materials fed the shader, so the picture is identical.
+     The pair of materials (Lambert + Standard twin) is linked through
+     _cbzTwin exactly like cmat's, so core/gfx.js's tier flip swaps it with
+     the rest of the world, and the twin is listed in CBZ.pbrTwins so its
+     envMap is back-filled like every other twin.
+     NOT merged: tail lamps (setBrake swaps them), the shared head/tail lamp
+     materials (carlamps.js pushes their emissive at night), anything
+     textured, transparent, vertex-coloured, shader-hooked, tagged in
+     userData (screens, glass, wheels, doors, occupants), nested, or kept. */
+  const _vcMats = new Map();                 // flag signature -> { lam, std }
+  function vcEmisHook(sh) {
+    sh.vertexShader = sh.vertexShader
+      .replace("#include <common>", "#include <common>\nattribute vec3 cbzEmis;\nvarying vec3 vCbzEmis;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\n\tvCbzEmis = cbzEmis;");
+    sh.fragmentShader = sh.fragmentShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vCbzEmis;")
+      .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n\ttotalEmissiveRadiance = vCbzEmis;");
+  }
+  function vcEmisKey() { return "cbzCarVcEmis"; }
+  function vcMatFrom(src) {
+    const m = src.clone();
+    m.color.setRGB(1, 1, 1);
+    if (m.emissive) m.emissive.setRGB(0, 0, 0);     // the hook supplies it; a hookless clone (a burnt wreck) has none
+    m.emissiveIntensity = 1;
+    m.vertexColors = true;
+    m.onBeforeCompile = vcEmisHook;
+    m.customProgramCacheKey = vcEmisKey;
+    m._shared = true; m._cbzVcMerge = true;
+    m.name = "car-vc-merge";
+    return m;
+  }
+  const NOOP_OBC = THREE.Material.prototype.onBeforeCompile;
+  const NOOP_ORENDER = THREE.Object3D.prototype.onBeforeRender;
+  let _lampF, _lampT;
+  function plainColourKey(o, keep) {
+    if (!o.isMesh || o.isSkinnedMesh || o.isInstancedMesh || keep.has(o) || o.visible === false || o.children.length) return null;
+    if (o.onBeforeRender !== NOOP_ORENDER || o.frustumCulled === false) return null;
+    for (const k in o.userData) if (k !== "noSeal") return null;
+    const g = o.geometry, m = o.material;
+    if (!g || !g.attributes || !g.attributes.position || g._cbzFar || (g.groups && g.groups.length)) return null;
+    if (g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length) return null;
+    if (!m || Array.isArray(m) || m.visible === false || isTailMat(m)) return null;
+    if (_lampF === undefined) {
+      _lampF = _lampT = null;
+      try { if (CBZ.vehicleMat) { _lampF = CBZ.vehicleMat("lightFront"); _lampT = CBZ.vehicleMat("lightTail"); } } catch (e) { /* headless */ }
+    }
+    if (m === _lampF || m === _lampT) return null;
+    const pbr = !!m._cbzPbr;
+    const L = pbr ? m._cbzTwin : m;
+    if (!L || L.type !== "MeshLambertMaterial" || !L._shared || L === _lampF || L === _lampT) return null;
+    if (pbr && (m.type !== "MeshStandardMaterial" || L._cbzTwin !== m)) return null;
+    const both = L._cbzTwin ? [L, L._cbzTwin] : [L];
+    for (let i = 0; i < both.length; i++) {
+      const q = both[i];
+      if (q.vertexColors || q.transparent || q.opacity !== 1 || q.alphaTest || q.wireframe) return null;
+      if (q.map || q.alphaMap || q.emissiveMap || q.lightMap || q.aoMap || q.specularMap || q.bumpMap || q.normalMap ||
+          q.roughnessMap || q.metalnessMap || q.displacementMap) return null;
+      if (q.onBeforeCompile !== NOOP_OBC || q.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey) return null;
+      if (q === L && q.envMap) return null;         // (a twin's envMap is CBZ.ENV, the same on all of them)
+    }
+    const T = pbr ? m : null;          // (every cmat twin is world/materials.js makeTwin's: same constants)
+    return [pbr ? 1 : 0, L.side, L.flatShading ? 1 : 0, L.fog ? 1 : 0, L.depthTest ? 1 : 0, L.depthWrite ? 1 : 0,
+      L.blending, L.colorWrite ? 1 : 0, L.toneMapped ? 1 : 0, L.dithering ? 1 : 0,
+      L.polygonOffset ? L.polygonOffsetFactor + "/" + L.polygonOffsetUnits : 0,
+      T ? [T.roughness, T.metalness, T.envMapIntensity, T.flatShading ? 1 : 0, T.side].join("/") : "-",
+      o.castShadow ? 1 : 0, o.receiveShadow ? 1 : 0, o.renderOrder | 0].join("|");
+  }
+  /* THE TWIN FOLLOWS ITS SOURCES. cmat() mints a Lambert's Standard twin
+     lazily, the first time it is asked for that colour on a PBR tier, and
+     core/gfx.js then flips every mesh wearing the Lambert to it. So the
+     merged Lambert has a twin exactly when EVERY source Lambert it stands
+     for has one (a getter, read by gfx's swap): a car merged before the
+     tier armed flips with the rest of the world when it does, never alone. */
+  function vcMatsFor(key, srcs) {
+    let rec = _vcMats.get(key);
+    if (!rec) {
+      const lam = vcMatFrom(srcs[0]);
+      lam._cbzPbr = false;
+      rec = { lam: lam, std: null, srcs: new Set() };
+      Object.defineProperty(lam, "_cbzTwin", {
+        configurable: true,
+        get: function () {
+          if (rec.std) return rec.std;
+          let tw = null;
+          for (const L of rec.srcs) { if (!L._cbzTwin) return undefined; tw = tw || L._cbzTwin; }
+          if (!tw) return undefined;
+          const std = vcMatFrom(tw);
+          std._cbzPbr = true; std._cbzTwin = lam;
+          if (CBZ.pbrTwins) CBZ.pbrTwins.push(std);   // core/gfx.js envBackfill keeps its envMap with the tier
+          rec.std = std;
+          return std;
+        },
+      });
+      _vcMats.set(key, rec);
+    }
+    for (let i = 0; i < srcs.length; i++) rec.srcs.add(srcs[i]);
+    return rec;
+  }
+  const _vcGeoCache = new Map();
+  function mergeVcParts(parts) {
+    let key = "vcE|" + mergeKey(parts);
+    for (let i = 0; i < parts.length; i++) {
+      const c = parts[i].col, e = parts[i].emi;
+      key += c.r.toFixed(6) + "," + c.g.toFixed(6) + "," + c.b.toFixed(6) + "/" + e[0].toFixed(6) + "," + e[1].toFixed(6) + "," + e[2].toFixed(6) + ";";
+    }
+    let geo = _vcGeoCache.get(key);
+    if (geo) return geo;
+    geo = mergeTransformed(parts);
+    const n = geo.attributes.position.count;
+    const col = new Float32Array(n * 3), emi = new Float32Array(n * 3);
+    let o = 0;
+    for (let i = 0; i < parts.length; i++) {
+      const g = parts[i].g, cnt = g.index ? g.index.count : g.attributes.position.count;
+      const c = parts[i].col, e = parts[i].emi;
+      for (let v = 0; v < cnt; v++, o += 3) {
+        col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b;
+        emi[o] = e[0]; emi[o + 1] = e[1]; emi[o + 2] = e[2];
+      }
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setAttribute("cbzEmis", new THREE.BufferAttribute(emi, 3));
+    if (geo.attributes.uv) geo.deleteAttribute("uv");   // untextured parts only: the uv was never read
+    geo._shared = true;
+    _vcGeoCache.set(key, geo);
+    return geo;
+  }
+  function mergePlainColourParts(grp, keep) {
+    if (CBZ.CONFIG && CBZ.CONFIG.CAR_VC_MERGE === false) return;
+    if (!THREE.BufferGeometry.prototype.deleteAttribute) return;
+    const buckets = new Map();
+    for (const o of grp.children) {
+      const k = plainColourKey(o, keep);
+      if (k) (buckets.get(k) || buckets.set(k, []).get(k)).push(o);
+    }
+    buckets.forEach((meshes, key) => {
+      if (meshes.length < 2) return;
+      const parts = [];
+      for (const mesh of meshes) {
+        const m = mesh.material, L = m._cbzPbr ? m._cbzTwin : m;
+        mesh.updateMatrix();
+        const ei = L.emissiveIntensity != null ? L.emissiveIntensity : 1;
+        const em = L.emissive || { r: 0, g: 0, b: 0 };
+        parts.push({ g: mesh.geometry, m: mesh.matrix.clone(), col: L.color, emi: [em.r * ei, em.g * ei, em.b * ei] });
+      }
+      let geo;
+      try { geo = mergeVcParts(parts); } catch (e) { return; }
+      const proto = meshes[0], pm = proto.material;
+      const mats = vcMatsFor(key, meshes.map((mesh) => mesh.material._cbzPbr ? mesh.material._cbzTwin : mesh.material));
+      const merged = new THREE.Mesh(geo, (pm._cbzPbr && mats.lam._cbzTwin) || mats.lam);
+      merged.castShadow = proto.castShadow;
+      merged.receiveShadow = proto.receiveShadow;
+      merged.renderOrder = proto.renderOrder;
+      merged.userData.noSeal = true;
+      merged.userData.vcMerge = meshes.length;
+      merged.matrixAutoUpdate = false;
+      grp.add(merged);
+      meshes.forEach((mesh) => grp.remove(mesh));
+    });
   }
 
   /* ---- THE DOORS: shut ones are baked, open ones are live -----------------
@@ -6870,18 +7048,24 @@
   // back on screen). This is the single biggest CPU saving in the traffic loop.
   let _vframe = 0, _vslice = 0;
   const FARCAR_D2 = 150 * 150;
-  /* A MOVING CAR PAST 150 m IS DRAWN BY THE POOLS, NOT HIDDEN. The old cull
-     hid traffic past 150 m, so every car popped into view there, well inside
-     the fog. city/carinstances.js proxies it instead (its meshes follow the
-     car's transform every frame) out to the fog ring, where it is hidden. */
+  /* ONLY THE TRAFFIC AROUND YOU IS WHOLE MESHES. A moving car past
+     carInstances.MOVE_R (45 m from the EYE, in 3D: from a helicopter the
+     street below is not 0 m away) is drawn by city/carinstances.js's shared
+     instanced pools, wheels, springs, brake lamps and seat blobs included,
+     out to the fog ring, where it is hidden. A car the pools cannot take
+     (warming, a promoted rig at the wheel, an emergency unit) draws itself
+     out to 150 m, as before. `d2` is the ground distance the callers have;
+     the height is added here. */
   function moverVis(c, d2) {
     const CI = CBZ.carInstances;
-    if (d2 < 150 * 150) {
-      if (c._proxy && c._proxyRec && c._proxyRec.mover && CI) CI.release(c);
-      c.group.visible = true; return true;
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (cam) { const dy = c.group.position.y - cam.y; d2 += dy * dy; }
+    if (c._proxy) {
+      if (CI && c._proxyRec && c._proxyRec.mover && d2 < CI.MOVE_OUT2) { CI.release(c); c.group.visible = true; return true; }
+      c.group.visible = false; return false;                      // the pools draw it
     }
-    if (c._proxy) { c.group.visible = false; return false; }      // the pools draw it
-    if (CI && CBZ.carSleepD2 && d2 < CBZ.carSleepD2() && CI.acquire(c, true)) return false;
+    if (CI && d2 > CI.MOVE_IN2 && CBZ.carSleepD2 && d2 < CBZ.carSleepD2() && CI.acquire(c, true)) return false;
+    if (d2 < 150 * 150) { c.group.visible = true; return true; }
     c.group.visible = false; return false;
   }
   /* PARKED CARS SLEEP. ~500 cars live in cityCars and most are parked; both
@@ -7263,7 +7447,9 @@
           if (settled && c.group) {
             const pdx = c.pos.x - camx, pdz = c.pos.z - camz, pd2 = pdx * pdx + pdz * pdz;
             if (pd2 > SLEEP_D2 && sleepable(c)) { sleepCar(c); continue; }
-            if (pd2 > PROXY_IN2 && sleepable(c) && CBZ.carInstances && CBZ.carInstances.acquire(c)) continue;
+            // the proxy band is measured from the EYE (carinstances.js re-checks it in 3D)
+            const pdy = c.group.position.y - CBZ.camera.position.y;
+            if (pd2 + pdy * pdy > PROXY_IN2 && sleepable(c) && CBZ.carInstances && CBZ.carInstances.acquire(c)) continue;
             if (pd2 > 3600 && CBZ.CONFIG.CAR_MATRIX_HOLD !== false) c.group._cbzMatrixOwnedFrame = CBZ._matrixOwnStamp;
           }
         }
@@ -7410,7 +7596,7 @@
         if (c.v > 9 && (c.reckless || c.pullover === 4)) runOver(c, c.v);
         const tdx = c.pos.x - CBZ.camera.position.x, tdz = c.pos.z - CBZ.camera.position.z;
         moverVis(c, tdx * tdx + tdz * tdz);
-        setBrake(c, c.group.visible && tv < c.v - 0.4);   // easing off into the corner
+        setBrake(c, carDrawn(c) && tv < c.v - 0.4);   // easing off into the corner
         continue;
       }
       const r = c.road;
@@ -7831,7 +8017,7 @@
       moverVis(c, cdx * cdx + cdz * cdz);
       // brake lights flare while the driver is shedding speed (red / queue /
       // ped ahead) or held stopped — only swapped for cars you can see.
-      setBrake(c, c.group.visible && (target < c.v - 0.6 || (c.v < 0.45 && target < 0.6)));
+      setBrake(c, carDrawn(c) && (target < c.v - 0.6 || (c.v < 0.45 && target < 0.6)));
     }
   });
 
