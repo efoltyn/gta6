@@ -848,6 +848,8 @@
       t.cols = (r && r.colliders) || [];
       for (const c of t.cols) { if (CBZ.colliderAdd) CBZ.colliderAdd(c); else CBZ.colliders.push(c); }
       if (!CBZ.colliderAdd && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      // a promoted building's walls are its own now (city/metro_promote.js)
+      if (CBZ.metroFabric.afterCols && t.fab) CBZ.metroFabric.afterCols(M.plan, t.fab);
       t.fabBuilt = true;
       t.nearEmpty = !!(r && r.empty);
       t.built = !!(t.gndBuilt && t.fabBuilt);
@@ -903,12 +905,12 @@
     if (on) {
       if (!t.readyU) t.readyU = { value: 0 };
       if (!t.fadeNear) { t.fadeNear = MF.fadeMaterial("near", { ready: t.readyU, swap: SWAP_U }); t.fadeFar = MF.fadeMaterial("far", { ready: t.readyU, swap: SWAP_U }); }
-      if (f.mesh.material !== t.fadeNear) f.mesh.material = t.fadeNear;
-      if (f.far.material !== t.fadeFar) f.far.material = t.fadeFar;
+      // (setMaterial: a tile with a building cut out draws through groups,
+      // which needs its material as a one-entry array — city/metro_promote.js)
+      MF.setMaterial(f.mesh, t.fadeNear); MF.setMaterial(f.far, t.fadeFar);
     } else {
       const m = MF.material();
-      if (f.mesh.material !== m) f.mesh.material = m;
-      if (f.far.material !== m) f.far.material = m;
+      MF.setMaterial(f.mesh, m); MF.setMaterial(f.far, m);
     }
   }
   function showTile(t, x, z) {
@@ -976,7 +978,7 @@
         const t = job.t;
         if (job.part === "kit") {
           if (t.built && t.lodBuilt === job.lod && !job.rebuild) continue;
-          t.lod = job.lod; t.anchor = job.anchor;
+          t.lod = job.lod; t.anchor = job.anchor; t.kitDirty = false;
           _cur = { M: job.M, t: t, part: "kit", J: CBZ.metroFabric.job(job.M.plan, t, "kit"), t0: performance.now() };
           continue;
         }
@@ -1212,7 +1214,8 @@
         if (d >= KIT_R) continue;
         const lod = kitLevel(c, d);
         const a = c.built ? c.anchor : null;
-        const moved = !!(a && Math.abs(alt - a.y) > a.slack);
+        // (kitDirty: a building in it was promoted or restored, metro_promote.js)
+        const moved = !!(a && Math.abs(alt - a.y) > a.slack) || !!c.kitDirty;
         if (c.built && c.lodBuilt === lod && !moved) continue;
         const job = { M: M, t: c, part: "kit", lod: lod, rebuild: moved, d: d, anchor: { y: alt, slack: Math.max(15, 0.3 * eyeH) } };
         (lod <= 1 ? kitNear : kitFar).push(job);
@@ -1531,6 +1534,11 @@
     const t = BUILT.byKey.get(Math.floor(rec.fab.x / TILE) + "," + Math.floor(rec.fab.z / TILE));
     return !!(t && t.fab && t.fab.farBuilt && !t.farEmpty);
   };
+  // city/airspace.js: every built-world building as data (its far record —
+  // footprint, height, lot), so an aircraft can hit a building that exists
+  // only as a far draw and a flight can be routed over a skyline it cannot
+  // see. Read-only; the array is replaced on a world rebuild.
+  CBZ.metroBuiltRecords = function () { return BUILT.recs; };
   function builtAudit() {
     if (!BUILT.M) return null;
     let ready = 0, gone = 0;

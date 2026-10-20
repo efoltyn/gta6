@@ -36,22 +36,51 @@
        of the airframe the same frame, because an aeroplane you stole is not
        an aeroplane the airline still operates.
 
-   THE PROFILE IS SCALE-HONEST, NOT ABSOLUTE-HONEST, and that is a decision
-   rather than an oversight. Halloran and Cape Harbor are 2.2 km apart. A
-   real A320 needs ~30 km to climb to cruise and come back down; flown to the
-   real numbers this aeroplane would be at 400 ft over the far threshold
-   still accelerating. So the SHAPE is preserved — a steeper climb than
-   descent, top-of-descent well before the field, a stabilised final on the
-   centreline, wheels in the touchdown zone — and the magnitudes are scaled
-   to the world the owner actually flies in. Cruise altitude is 6% of the leg
-   (90-380 m), and the altitude is a closed-form TRAPEZOID of distance rather
-   than an integrated climb rate, which is why it cannot oscillate, cannot
-   overshoot and lands at exactly zero every time:
+   THE PROFILE IS A REAL ONE (2026-10-19; owner: "planes fly too low, and
+   they fly through buildings"). It used to be "scale-honest": cruise at 6%
+   of the 2.2 km leg (90-380 m), a 9 deg climb and a 5.5 deg descent flown
+   STRAIGHT between the fields — which put an airliner across the downtown
+   at tower height, through towers the old altitude never knew existed (the
+   Kingsbridge CBD runs to 70 storeys; the Gang City flagship is 166 m).
+   Now a flight is planned the way one is filed:
 
-       alt = min(cruise, flown * tan(9deg), toTouchdown * tan(5.5deg))
+     DEPARTURE  straight out on the runway heading for 6 km, climbing at
+                7 deg (an A320's all-engine gradient is 6-10 deg).
+     EN ROUTE   up to CRUISE_ALT (3,000 m: ten times the tallest roof in
+                the world, inside the 14 km far plane so the jet is still a
+                glint in the sky) and across. The fields are 2.2 km apart, so
+                the route is LENGTHENED to what the climb and the descent
+                actually need (a dog-leg out over open country, on the side
+                away from the downtown) rather than the profile squashed to
+                fit the map.
+     ARRIVAL    a 4 deg descent to the intermediate fix, 8 km of level-ish
+                intermediate on the extended centreline, then the FINAL: a
+                3 deg glideslope from the final approach fix at 600 m
+                (2,000 ft, 11.5 km out) to the touchdown zone — the ILS.
 
-   On a leg too short for cruise the two caps simply cross below it and the
-   aeroplane flies a triangle. Nothing special-cases the short leg.
+   Altitude is still a CLOSED FORM of distance (so it cannot oscillate and
+   lands at exactly field elevation): the lower of the cruise, the climb line
+   in distance FLOWN since liftoff, and the descent line in path distance
+   REMAINING to touchdown. Speed is the same: 250 kt in the terminal area,
+   290 kt en route, 140 kt at the final fix, V_APP over the threshold.
+
+   CLEARANCE IS CHECKED, NOT ASSUMED (planFlight). Every candidate route —
+   both departure ends x both arrival ends — is sampled every 150 m against
+   city/airspace.js (every building in the world as a record, near and far)
+   and the terrain, inside a corridor that widens from the runway at 15%
+   (the ICAO approach/departure surface splay). The required margin grows
+   from 35 m at the runway end to the en-route 300 m. A route whose climb
+   meets a roof is flown at a steeper gradient (up to 14 deg); one whose
+   approach does is flown steeper (up to a 5.5 deg London City glideslope);
+   the route that needs the least of that wins — which is how a flight goes
+   AROUND a skyline when the other runway end gives it a clean path, and
+   OVER it when nothing does.
+
+   AND IF IT STILL HITS SOMETHING, IT HITS IT. Every airborne frame sweeps the
+   airframe (fuselage + both wingtips) against city/airspace.js; a contact is
+   a strike through city/aircraftimpact.js (the building carve, the fuel
+   fire, the occupants) and a shot-down airliner falls out of the sky and
+   crashes where it lands instead of hanging where the rocket found it.
 
    Flags: `AIRLINE_V1=false` -> no shuttles, the fleet stays parked, and the
    world is exactly the one before this file. Ratchet:
@@ -64,6 +93,9 @@
   if (!CBZ) return;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
   if (CFG.AIRLINE_V1 == null) CFG.AIRLINE_V1 = true;
+  // airborne airframe sweep against every building (city/airspace.js) and the
+  // terrain; false = the flight never tests what it flies through
+  if (CFG.AIRLINE_COLLIDE == null) CFG.AIRLINE_COLLIDE = true;
 
   // ---- the numbers, all in metres and seconds ---------------------------
   const TAXI_SPD = 8.5;          // apron/taxiway speed
@@ -81,17 +113,28 @@
      every registered field instead of leaving it to arithmetic nobody redoes. */
   const ROLL_ACC = 4.5;          // take-off acceleration
   const VR = 66;                 // rotate speed
-  const V_CLIMB = 92;
-  const V_CRUISE = 132;
+  const V_CLIMB = 92;            // V2 + a margin, at liftoff
+  const V_TERM = 128;            // 250 kt: the terminal-area speed
+  const V_CRUISE = 150;          // 290 kt en route (cruise is below FL100)
+  const V_FAF = 72;              // 140 kt at the final approach fix
   const V_APP = 58;              // over the threshold
   const BRAKE = 3.2;             // after touchdown (brakes + reversers)
-  const TAN_CLIMB = Math.tan(9 * Math.PI / 180);
-  const TAN_GLIDE = Math.tan(5.5 * Math.PI / 180);
-  const FINAL_D = 700;           // final approach fix, before the threshold
+  const G = 9.81;
+  const DEG = Math.PI / 180;
+  const CRUISE_ALT = Math.max(3000, Math.min(10000, +CFG.AIRLINE_CRUISE_M || 3000));
+  const TAN_CLIMB = Math.tan(7 * DEG), TAN_CLIMB_MAX = Math.tan(14 * DEG);
+  const TAN_GS = Math.tan(3 * DEG), TAN_GS_MAX = Math.tan(5.5 * DEG);
+  const TAN_DESC = Math.tan(4 * DEG), TAN_DESC_MAX = Math.tan(6 * DEG);
+  const FAF_ALT = 600;           // glideslope intercept above the field (2,000 ft)
+  const IF_LEG = 8000;           // intermediate segment on the centreline
+  const DEP_LEG = 6000;          // straight-out climb on the runway heading
+  const CRUISE_SEG = 8000;       // the least level flight a route is planned with
   const FLARE_D = 60;            // the profile commands zero THIS far short of
                                  // the aiming point, to absorb the ease lag
-  const MAX_PITCH = 9 * Math.PI / 180;
-  const MAX_BANK = 15 * Math.PI / 180;
+  const MAX_PITCH = 12 * DEG;
+  const MAX_BANK = 25 * DEG;     // airline standard bank angle
+  const MOC_FIELD = 35, MOC_ENROUTE = 300;   // obstacle clearance at the runway end / en route
+  const SAMPLE = 150;            // route clearance sampling, metres
   const TURN_S = 45;             // on stand, doors shut
   const BOARD_S = 40;            // doors open at the gate
   const HOLD_MAX = 150;          // how long a ticket holds the aeroplane
@@ -209,8 +252,7 @@
   function routeOut(s) {
     const ap = s.at, g = s.gate;
     const H = ap.runway.len / 2;
-    const course = headingTo(ap.x, ap.z, s.to.x, s.to.z);
-    const end = endForCourse(ap, course);
+    const end = (s.flight && s.flight.de) || endForCourse(ap, headingTo(ap.x, ap.z, s.to.x, s.to.z));
     s.depEnd = end;
     // BACKTRACK, which is what a field with connectors rather than a
     // full-length parallel taxiway actually does: cross onto the runway at the
@@ -265,18 +307,245 @@
     s.tug = null;
   }
 
-  function armAir(s) {
+  /* ==============================================================
+     THE FLIGHT PLAN (see the header). Filed when the doors close,
+     before the pushback, because it decides which runway end the
+     aeroplane taxis to.
+     ============================================================== */
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function lineupPt(ap, end) { return ap.toWorld(end.sign * (ap.runway.len / 2 - 25), 0); }
+  function farEndPt(ap, end) { return ap.toWorld(-end.sign * (ap.runway.len / 2), 0); }
+  function cityCentre() {
+    const a = CBZ.city && CBZ.city.arena;
+    return a && a.center ? { x: a.center.x, z: a.center.z } : { x: 0, z: 0 };
+  }
+
+  // The altitude a plan commands `flown` metres past liftoff with `rem`
+  // metres of path left to the touchdown point: the lower of the cruise, the
+  // climb line and the descent line (the en-route descent to the final fix,
+  // then the glideslope). Absolute world y.
+  function profAlt(F, flown, rem) {
+    const climb = F.depY + Math.max(0, flown) * F.tanC;
+    const desc = rem <= F.fafD
+      ? F.arrY + Math.max(0, rem - FLARE_D) * F.tanGS
+      : F.arrY + FAF_ALT + (rem - F.fafD) * F.tanD;
+    return Math.min(F.cruise, climb, desc);
+  }
+
+  function makePlan(from, to, de, ae, gr) {
+    const fd = fwd(de.dir), ad = fwd(ae.dir);
+    const lu = lineupPt(from, de), fe = farEndPt(from, de);
+    const LO = { x: lu.x + fd.x * TAKEOFF_RUN, z: lu.z + fd.z * TAKEOFF_RUN };
+    const DEP = { x: fe.x + fd.x * DEP_LEG, z: fe.z + fd.z * DEP_LEG };
+    const TD = { x: ae.tdz.x, z: ae.tdz.z };
+    const fafD = FAF_ALT / gr.tanGS + FLARE_D;          // path metres, final fix -> touchdown
+    const FAF = { x: TD.x - ad.x * fafD, z: TD.z - ad.z * fafD };
+    const IFX = { x: TD.x - ad.x * (fafD + IF_LEG), z: TD.z - ad.z * (fafD + IF_LEG) };
+    const depY = +from.y || 0, arrY = +to.y || 0;
+    let wps = [LO, DEP, IFX, FAF, TD];
+    let M = null;
+    // THE ROUTE IS AS LONG AS THE PROFILE NEEDS. The fields are a couple of
+    // kilometres apart; a climb to cruise and a descent from it are tens. So
+    // the en-route leg doglegs through a waypoint off the DEP -> IF line, on
+    // the side `gr.side`, far enough out that both fit with level flight
+    // between them.
+    const runEnd = dist(LO.x, LO.z, fe.x, fe.z);
+    const need = (gr.cruise - depY) / gr.tanC + CRUISE_SEG + Math.max(0, gr.cruise - arrY - FAF_ALT) / gr.tanD + IF_LEG + fafD;
+    const L0 = dist(LO.x, LO.z, DEP.x, DEP.z) + dist(DEP.x, DEP.z, IFX.x, IFX.z) + IF_LEG + fafD;
+    if (L0 < need) {
+      const lx = IFX.x - DEP.x, lz = IFX.z - DEP.z;
+      const d = Math.hypot(lx, lz);
+      let nx, nz;
+      if (d > 1) { nx = -lz / d; nz = lx / d; } else { nx = -fd.z; nz = fd.x; }
+      const extra = need - L0;
+      const h = Math.sqrt(Math.max(0, Math.pow((d + extra) / 2, 2) - Math.pow(d / 2, 2)));
+      M = { x: (DEP.x + IFX.x) / 2 + nx * h * gr.side, z: (DEP.z + IFX.z) / 2 + nz * h * gr.side };
+      wps = [LO, DEP, M, IFX, FAF, TD];
+    }
+    const cum = new Array(wps.length);
+    cum[wps.length - 1] = 0;
+    for (let i = wps.length - 2; i >= 0; i--) cum[i] = cum[i + 1] + dist(wps[i].x, wps[i].z, wps[i + 1].x, wps[i + 1].z);
+    return {
+      wps: wps, cum: cum, total: cum[0], iIF: wps.length - 3, iFAF: wps.length - 2,
+      fafD: fafD, depY: depY, arrY: arrY, tanC: gr.tanC, tanGS: gr.tanGS, tanD: gr.tanD, cruise: gr.cruise,
+      de: de, ae: ae, ad: ad, TD: TD, M: M, side: gr.side,
+      runEnd: runEnd, tdThr: dist(TD.x, TD.z, ae.x, ae.z),
+    };
+  }
+
+  /* IS THE PLAN CLEAR? Walk it every SAMPLE metres. At each point: the
+     altitude the plan commands, the tallest building (every building in the
+     world, city/airspace.js) and the terrain inside the corridor, and the
+     margin required there. Returns what the plan would NEED to clear all of
+     it — a climb gradient, a descent scale, a cruise level — and `worst`,
+     the largest shortfall the plan as given has (0 = clear). */
+  function checkPlan(F) {
+    const AS = CBZ.airspace;
+    const out = { needC: F.tanC, needK: 1, needCr: F.cruise, worst: 0, samples: 0 };
+    if (!AS || !AS.corridorTop) return out;
+    const W = F.wps;
+    for (let i = 0; i < W.length - 1; i++) {
+      const a = W[i], b = W[i + 1];
+      const L = dist(a.x, a.z, b.x, b.z);
+      if (L < 1) continue;
+      const ux = (b.x - a.x) / L, uz = (b.z - a.z) / L;
+      let t = 0;
+      while (t < L) {
+        const rem = F.cum[i] - t, flown = F.total - rem;
+        const dDep = flown - F.runEnd, dArr = rem - F.tdThr;
+        const alt = profAlt(F, flown, rem);
+        const dField = Math.min(dDep, dArr);
+        const x = a.x + ux * t, z = a.z + uz * t;
+        t += alt >= F.cruise - 1 && dField > 15000 ? SAMPLE * 4 : SAMPLE;
+        if (dDep < 0 || dArr < 0) continue;              // over the runway itself
+        const Wc = Math.min(1500, 100 + 0.15 * dField);   // the ICAO surface splay
+        const moc = Math.min(MOC_ENROUTE, MOC_FIELD + 0.03 * dField);
+        const req = AS.corridorTop(x, z, Wc, ux, uz) + moc;
+        out.samples++;
+        if (alt >= req) continue;
+        out.worst = Math.max(out.worst, req - alt);
+        const climb = F.depY + flown * F.tanC;
+        const desc = rem <= F.fafD ? F.arrY + Math.max(0, rem - FLARE_D) * F.tanGS : F.arrY + FAF_ALT + (rem - F.fafD) * F.tanD;
+        if (climb <= desc && climb < F.cruise) out.needC = Math.max(out.needC, (req - F.depY) / Math.max(1, flown));
+        else if (desc < climb && desc < F.cruise) out.needK = Math.max(out.needK, (req - F.arrY) / Math.max(1, desc - F.arrY));
+        else out.needCr = Math.max(out.needCr, req);
+      }
+    }
+    return out;
+  }
+
+  function gradeFor(c, side) {
+    return {
+      tanC: Math.min(TAN_CLIMB_MAX, Math.max(TAN_CLIMB, c.needC * 1.03)),
+      tanGS: Math.min(TAN_GS_MAX, TAN_GS * Math.max(1, c.needK * 1.03)),
+      tanD: Math.min(TAN_DESC_MAX, TAN_DESC * Math.max(1, c.needK * 1.03)),
+      cruise: Math.min(10000, Math.max(CRUISE_ALT, c.needCr + 50)),
+      side: side,
+    };
+  }
+
+  // Every departure end x every arrival end x both dogleg sides; the plan that
+  // needs the least steepening, flies the least far and keeps its dogleg off
+  // the downtown wins. Then it is re-checked once, as it will be flown.
+  function planFlight(s) {
     const from = s.at, to = s.to;
     const course = headingTo(from.x, from.z, to.x, to.z);
-    const arr = endForCourse(to, course);
-    s.arrEnd = arr;
-    const d = fwd(arr.dir);
-    s.faf = { x: arr.x - d.x * FINAL_D, z: arr.z - d.z * FINAL_D };
-    s.td = { x: arr.tdz.x, z: arr.tdz.z };
-    s.legD = CBZ.airportDistance(from, to);
-    s.cruiseAlt = Math.max(90, Math.min(380, s.legD * 0.06));
+    const cc = cityCentre();
+    let best = null, bestCost = Infinity;
+    for (let i = 0; i < from.ends.length; i++) for (let j = 0; j < to.ends.length; j++) for (let k = -1; k <= 1; k += 2) {
+      const de = from.ends[i], ae = to.ends[j];
+      const g0 = { tanC: TAN_CLIMB, tanGS: TAN_GS, tanD: TAN_DESC, cruise: CRUISE_ALT, side: k };
+      let F, c;
+      try { F = makePlan(from, to, de, ae, g0); } catch (e) { continue; }
+      if (k > 0 && !F.M) continue;                       // no dogleg: both sides are one plan
+      try { c = checkPlan(F); } catch (e) { continue; }
+      const gr = gradeFor(c, k);
+      let cost = (gr.tanC / TAN_CLIMB - 1) * 4 + (gr.tanGS / TAN_GS - 1) * 8 + (gr.cruise - CRUISE_ALT) / 500
+        + F.total / 25000 + (1 - Math.cos(de.dir - course)) * 0.25 + (1 - Math.cos(ae.dir - course)) * 0.25;
+      if (F.M) cost += Math.max(0, 6000 - dist(F.M.x, F.M.z, cc.x, cc.z)) / 3000;
+      // a shortfall the steepening caps cannot cover counts heavily
+      if (c.needC > TAN_CLIMB_MAX) cost += 50;
+      if (TAN_GS * c.needK > TAN_GS_MAX) cost += 50;
+      if (cost < bestCost) { bestCost = cost; best = { F: F, gr: gr, c: c }; }
+    }
+    if (!best) return null;
+    let F = best.F, c = best.c;
+    const gr = best.gr;
+    if (gr.tanC !== F.tanC || gr.tanGS !== F.tanGS || gr.cruise !== F.cruise) {
+      F = makePlan(from, to, F.de, F.ae, gr);
+      c = checkPlan(F);
+    }
+    F.residual = Math.round(c.worst);                    // metres short of clearance as filed (audit: 0)
+    F.samples = c.samples;
+    s.flight = F;
+    s.depEnd = F.de; s.arrEnd = F.ae;
+    return F;
+  }
+
+  function armAir(s) {
+    if (!s.flight) planFlight(s);
+    const F = s.flight;
+    s.arrEnd = F.ae;
+    s.td = { x: F.TD.x, z: F.TD.z };
+    s.faf = F.wps[F.iFAF];
+    s.legD = F.total;
+    s.cruiseAlt = F.cruise;
     s.liftoff = { x: s.grp.position.x, z: s.grp.position.z };
-    s.onFinal = false;
+    s.onFinal = false; s.awp = 1; s.flown = 0; s.vy = 0; s.rem = F.total;
+  }
+
+  /* ==============================================================
+     WHAT IT HITS. city/airspace.js knows every building (near
+     colliders and far records); city/aircraftimpact.js knows what an
+     airliner does to one.
+     ============================================================== */
+  function airDims(s) {
+    if (s._dims) return s._dims;
+    const d = (s.rec && s.rec.aircraftDims) || (s.grp.userData && s.grp.userData.aircraftDims) || null;
+    s._dims = {
+      length: Math.max(8, (d && d.length) || 38), span: Math.max(6, (d && d.span) || 34),
+      height: Math.max(3, (d && d.height) || 12), fuselage: Math.max(2, (d && d.fuselage) || 4),
+    };
+    return s._dims;
+  }
+  function groundY(x, z) {
+    let gy = CBZ.airspace && CBZ.airspace.terrainAt ? CBZ.airspace.terrainAt(x, z) : 0;
+    if (CBZ.floorAt) { const f = +CBZ.floorAt(x, z); if (isFinite(f) && f > gy) gy = f; }
+    return gy;
+  }
+  const _sa = { x: 0, y: 0, z: 0 }, _sb = { x: 0, y: 0, z: 0 };
+  function strikeCheck(s, before, falling) {
+    const AS = CBZ.airspace;
+    if (!AS || !AS.sweepAirframe || CFG.AIRLINE_COLLIDE === false) return false;
+    const P = s.grp.position, F = s.flight;
+    if (!falling && F) {
+      // the runway, its approach lights and the field's own masts are not
+      // obstacles to the aeroplane using them
+      if (s.flown < F.runEnd + 1500 && P.y - F.depY < 45) return false;
+      if (s.onFinal && P.y - F.arrY < 45) return false;
+    }
+    const d = airDims(s), cy = d.height * 0.35;
+    _sa.x = before.x; _sa.y = before.y + cy; _sa.z = before.z;
+    _sb.x = P.x; _sb.y = P.y + cy; _sb.z = P.z;
+    let h = null;
+    try { h = AS.sweepAirframe(_sa, _sb, d); } catch (e) { h = null; }
+    if (h) { crash(s, h); return true; }
+    const gy = groundY(P.x, P.z);
+    if (P.y < gy - 0.3) { crash(s, { x: P.x, y: gy, z: P.z, building: false }); return true; }
+    return false;
+  }
+  function crash(s, hit) {
+    if (s.crashed) return;
+    const rec = s.rec, grp = s.grp;
+    const f = fwd(grp.rotation.y);
+    // a falling airliner was shot down, and the only thing in the city that
+    // shoots airliners down is the player
+    const byPlayer = s.phase === "falling";
+    s.crashed = true;
+    if (s.playerAboard && CBZ.cityHurtPlayer) { try { CBZ.cityHurtPlayer(9999, hit.x, hit.z, "plane crash", false, null, false); } catch (e) {} }
+    const cab = grp.userData && grp.userData.cabin && grp.userData.cabin.passengerCabin;
+    if (cab && cab.state !== "destroyed") {
+      cab.state = "destroyed"; cab.active = false;
+      if (CBZ.citySpillCabin) { try { CBZ.citySpillCabin(cab, hit.x, hit.z, byPlayer); } catch (e) {} }
+    }
+    rec.destroyed = true; rec.hot = false; rec.hijackable = false; rec.hp = 0;
+    if (grp.userData) { grp.userData.destroyed = true; grp.userData.hijackable = false; grp.userData.craft = null; }
+    if (CBZ.cityAircraftStrike) {
+      try {
+        CBZ.cityAircraftStrike(rec, hit, { group: grp, cls: "airliner", dims: airDims(s),
+          vx: f.x * s.spd, vy: s.vy || 0, vz: f.z * s.spd, byPlayer: byPlayer });
+      } catch (e) {}
+    } else if (CBZ.cityAirstrikeExplosion) {
+      try { CBZ.cityAirstrikeExplosion(hit.x, hit.z, { power: 3.2, radius: 18, y: hit.y, byPlayer: byPlayer }); } catch (e) {}
+    }
+    if (CBZ.cityFlavor) { try { CBZ.cityFlavor(hit.building ? "An airliner has flown into a building!" : "An airliner has crashed!", "#ff8b6b"); } catch (e) {} }
+    // INTO A BUILDING the hull does not survive as a hull: the deformation
+    // above sheared its sections off as debris carrying its momentum, and the
+    // rest of it is inside the building. On the ground the wreck stays where
+    // it came down (the impact cartwheels it).
+    if (hit.building) { if (grp.parent) grp.parent.remove(grp); }
+    else { grp.position.y = hit.y; }
+    abandon(s, "the aircraft crashed");
   }
 
   // ---- the shared mover: steer toward a point, obeying a turn rate ------
@@ -306,8 +575,15 @@
   function tick(s, dt) {
     const rec = s.rec;
     if (!rec || !rec.group || !rec.group.parent) { abandon(s, "the aircraft is gone"); return; }
-    if (rec.taken) { abandon(s, "the aircraft was taken"); return; }
-    if (rec.destroyed) { abandon(s, "the aircraft was destroyed"); return; }
+    // SHOT DOWN IN THE AIR, IT FALLS. It used to be abandoned on the spot and
+    // hang where the rocket found it; now it is flown down ballistically until
+    // it meets a building or the ground (the "falling" phase below).
+    if (rec.destroyed && !s.crashed) {
+      if (s.phase === "air") {
+        s.phase = "falling"; s.t = 0;
+        s.rollRate = (Math.random() < 0.5 ? -1 : 1) * (0.12 + Math.random() * 0.25);
+      } else if (s.phase !== "falling") { abandon(s, "the aircraft was destroyed"); return; }
+    } else if (rec.taken) { abandon(s, "the aircraft was taken"); return; }
 
     const before = { x: s.grp.position.x, y: s.grp.position.y, z: s.grp.position.z };
     s.playerAboard = !!(CBZ.cabinRider && CBZ.cabinRider(rec));
@@ -341,6 +617,9 @@
           }
           if (CBZ.cityAircraftDoorSet) { try { CBZ.cityAircraftDoorSet(rec, false); } catch (e) {} }
           if (s.gate && s.gate.occupant === rec) s.gate.occupant = null;
+          // FILE THE PLAN: it picks the runway end the taxi goes to
+          s.flight = null;
+          try { planFlight(s); } catch (e) { try { console.error("[airline plan]", e); } catch (e2) {} }
           /* A NOSE-IN STAND IS LEFT BACKWARDS. The kit parks every airliner
              nose to the terminal (the jet bridge is on its L1 door), so the
              departure starts with a PUSHBACK: a tug on the nose gear walks it
@@ -357,8 +636,7 @@
         const l = ap.toLocal(s.grp.position.x, s.grp.position.z);
         const remain = l.lz - ap.taxiZ;
         // which way along the taxiway: toward the connector for the end in use
-        const course = headingTo(ap.x, ap.z, s.to.x, s.to.z);
-        const end = endForCourse(ap, course);
+        const end = s.depEnd || endForCourse(ap, headingTo(ap.x, ap.z, s.to.x, s.to.z));
         const conn = nearestConn(ap, end.sign * (ap.runway.len / 2 - 60));
         const want = ap.dirWorld(conn >= (g ? g.lx : l.lx) ? 0 : Math.PI);   // local +X or -X
         if (remain > 0.4) {
@@ -447,78 +725,111 @@
         break;
       }
       case "air": {
-        // ---- horizontal: fly to the final approach fix, then the touchdown
-        const toFaf = dist(s.grp.position.x, s.grp.position.z, s.faf.x, s.faf.z);
-        const fafToTd = dist(s.faf.x, s.faf.z, s.td.x, s.td.z);
-        // ON FINAL IS A LATCH, not a distance test. Once the fix is behind
-        // you the distance to it grows again, and an un-latched test turns the
-        // aeroplane round to go back and fly over it — measured, on the first
-        // approach ever flown.
-        if (!s.onFinal && toFaf < 60) s.onFinal = true;
-        const beyondFaf = s.onFinal;
-        const tgt = beyondFaf ? s.td : s.faf;
-        const toTd = beyondFaf
-          ? dist(s.grp.position.x, s.grp.position.z, s.td.x, s.td.z)
-          : toFaf + fafToTd;
-        // A stabilised final is allowed a firmer turn than an en-route leg:
-        // measured, rate one put the wheels down 15 m off a 30 m centreline —
-        // on the paint, but on the EDGE of it. Lining up is the one thing an
-        // approach is for.
-        const t = steer(s, tgt.x, tgt.z, beyondFaf ? AIR_TURN * 2.2 : AIR_TURN, dt);
-        /* ---- speed: a CLOSED FORM OF DISTANCE, exactly like the altitude
-           above, and for the same reason. The first version bled speed at a
-           fixed rate from a fixed range and simply ran out of runway to do it
-           in: measured, the aeroplane crossed Cape Harbor's threshold at
-           75 m/s instead of 58, which is 879 m of braking on 750 m of
-           concrete. Tying the speed to distance-to-touchdown makes crossing
-           the threshold at V_APP a property of the arithmetic rather than a
-           hope, on any leg length. The implied deceleration is steep because
-           the legs are 2 km rather than the 30 km a real approach uses —
-           the same scaling the climb profile already declares. */
-        const vWant = Math.min(V_CRUISE, V_APP + Math.max(0, toTd - 120) * 0.075);
-        accelTo(s, vWant, toTd > 1100 ? 1.3 : 4.0, dt);
-        advance(s, dt);
-        // ---- vertical: the closed-form trapezoid (see the header)
-        const flown = dist(s.grp.position.x, s.grp.position.z, s.liftoff.x, s.liftoff.z);
-        // THE FLARE BIAS. The profile is commanded to ZERO from FLARE_D short
-        // of the touchdown point, not at it, because the easing below lags —
-        // and an aeroplane still 12 m up as it crosses the touchdown point
-        // does not land, it flies past and comes round again. Measured, on the
-        // first approach ever flown: 250 sim-seconds orbiting Cape Harbor.
-        const want = Math.max(0, Math.min(s.cruiseAlt, flown * TAN_CLIMB, Math.max(0, toTd - FLARE_D) * TAN_GLIDE));
+        const F = s.flight;
+        const P = s.grp.position;
+        const W = F.wps;
+        // the turn the aeroplane can actually fly: standard bank at this speed
+        const omega = G * Math.tan(MAX_BANK) / Math.max(40, s.spd);
+        // ---- lateral: the waypoint chain, then the localizer
+        if (!s.onFinal) {
+          // A WAYPOINT IS PASSED BY A HALF-PLANE, never by a capture radius:
+          // a 6 km turn circle orbits any radius smaller than itself. The
+          // fly-by lead starts the turn early by R tan(turn/2).
+          const a = W[s.awp - 1], b = W[s.awp], c = W[s.awp + 1];
+          const lx = b.x - a.x, lz = b.z - a.z, ll = Math.hypot(lx, lz) || 1;
+          const along = ((P.x - b.x) * lx + (P.z - b.z) * lz) / ll;
+          let lead = 0;
+          if (c) {
+            const ox = c.x - b.x, oz = c.z - b.z, ol = Math.hypot(ox, oz) || 1;
+            const turn = Math.acos(Math.max(-1, Math.min(1, (lx * ox + lz * oz) / (ll * ol))));
+            lead = Math.min((s.spd / omega) * Math.tan(Math.min(turn, 2.4) / 2), 0.45 * Math.min(ll, ol));
+          }
+          if (along >= -lead) { s.awp++; if (s.awp > F.iIF) s.onFinal = true; }
+        }
+        let t;
+        if (s.onFinal) {
+          // THE LOCALIZER: pursue a point on the extended centreline ahead,
+          // which lines the aeroplane up smoothly from any intercept angle.
+          const ad = F.ad;
+          const alongTd = (P.x - F.TD.x) * ad.x + (P.z - F.TD.z) * ad.z;   // negative before the aiming point
+          const ahead = Math.max(0, Math.min(-alongTd, Math.max(900, s.spd * 22)));
+          t = steer(s, F.TD.x + ad.x * (alongTd + ahead), F.TD.z + ad.z * (alongTd + ahead), omega * 1.5, dt);
+        } else {
+          t = steer(s, W[s.awp].x, W[s.awp].z, omega, dt);
+        }
+        // path distance left to the touchdown point
+        const rem = s.onFinal
+          ? Math.max(0, -((P.x - F.TD.x) * F.ad.x + (P.z - F.TD.z) * F.ad.z))
+          : Math.hypot(W[s.awp].x - P.x, W[s.awp].z - P.z) + F.cum[s.awp];
+        s.rem = rem;
+        // ---- speed: a closed form of distance flown and distance left, so
+        // crossing the threshold at V_APP is arithmetic, not a hope
+        const vDep = Math.min(V_CRUISE, V_CLIMB + s.flown * 0.012);
+        let vArr;
+        if (rem <= F.fafD) vArr = V_APP + (V_FAF - V_APP) * clamp01((rem - 400) / Math.max(1, F.fafD - 400));
+        else if (rem <= F.fafD + IF_LEG) vArr = V_FAF + (V_TERM - V_FAF) * clamp01((rem - F.fafD) / IF_LEG);
+        else vArr = Math.min(V_CRUISE, V_TERM + (rem - F.fafD - IF_LEG) * 0.004);
+        const vWant = Math.min(vDep, vArr);
+        accelTo(s, vWant, s.spd > vWant ? (rem < F.fafD ? 1.2 : 0.9) : 1.5, dt);
+        const mv = advance(s, dt);
+        s.flown += Math.hypot(mv.dx, mv.dz);
+        // ---- vertical: the closed-form profile (see the header)
+        const want = profAlt(F, s.flown, rem);
         const prevAlt = s.alt;
-        // ease rather than snap, so the profile's two corners are rounded the
-        // way a real aeroplane rounds them — but tighten it near the ground,
-        // where the lag is the difference between a landing and a go-around.
-        s.alt += (want - s.alt) * Math.min(1, dt * (s.alt < 25 ? 3.6 : 1.8));
-        s.grp.position.y = s.alt;
+        // ease rather than snap, so the profile's corners are rounded the way
+        // an aeroplane rounds them; tighter near the ground, where the lag is
+        // the difference between a landing and a go-around
+        s.alt += (want - s.alt) * Math.min(1, dt * (s.onFinal && s.alt - F.arrY < 25 ? 3.6 : 1.4));
+        P.y = s.alt;
+        s.vy = (s.alt - prevAlt) / Math.max(1e-4, dt);
         // attitude: pitch from the actual flight-path angle, bank from the
-        // actual turn rate. Both are consequences, never animations.
-        const fpa = s.spd > 1 ? Math.atan2((s.alt - prevAlt) / Math.max(1e-4, dt), s.spd) : 0;
+        // actual turn rate (a coordinated turn: tan(bank) = omega v / g)
+        const fpa = s.spd > 1 ? Math.atan2(s.vy, s.spd) : 0;
         s.pitch += (Math.max(-MAX_PITCH, Math.min(MAX_PITCH, fpa)) - s.pitch) * Math.min(1, dt * 2);
-        const bWant = Math.max(-MAX_BANK, Math.min(MAX_BANK, t.rate * 2.6));
+        const bWant = Math.max(-MAX_BANK, Math.min(MAX_BANK, Math.atan(t.rate * s.spd / G)));
         s.bank += (bWant - s.bank) * Math.min(1, dt * 2);
         s.grp.rotation.z = s.pitch; s.grp.rotation.x = s.bank;
-        // ARE THE WHEELS DOWN? Two ways, and the second is the one that makes
-        // it impossible to miss: either the profile has flown you onto the
+        // ---- what it flies into
+        if (strikeCheck(s, before, false)) return;
+        // ARE THE WHEELS DOWN? Either the profile has flown you onto the
         // ground near the aiming point, OR you are PAST it measured along the
-        // landing direction. A distance test alone is a test that grows again
-        // the moment you overfly the mark, which is a go-around nobody asked
-        // for and a shuttle that never arrives.
-        const ld = fwd(s.arrEnd.dir);
-        const past = (s.grp.position.x - s.td.x) * ld.x + (s.grp.position.z - s.td.z) * ld.z;
-        if (beyondFaf && ((s.alt < 0.35 && toTd < 90) || past >= 0)) {
-          s.grp.position.y = 0; s.alt = 0;
-          s.pitch = 0; s.bank = 0;
+        // landing direction (a distance test alone grows again the moment you
+        // overfly the mark: a go-around nobody asked for).
+        const ld = F.ad;
+        const past = (P.x - s.td.x) * ld.x + (P.z - s.td.z) * ld.z;
+        if (s.onFinal && ((s.alt - F.arrY < 0.35 && rem < 90) || past >= 0)) {
+          P.y = F.arrY; s.alt = F.arrY;
+          s.pitch = 0; s.bank = 0; s.vy = 0;
           s.grp.rotation.z = 0; s.grp.rotation.x = 0;
           s.phase = "rollout"; s.t = 0;
           // arriving: the far field is now home.
           const prev = s.at; s.at = s.to; s.to = prev;
+          s.flight = null;
           s.gate = freeGate(s.at, rec);
           if (!s.gate) { s.stranded = true; s.gate = s.at.gates[0] || null; }
           if (s.gate) s.gate.occupant = rec;
           if (s.playerAboard) note("Welcome to " + s.at.name + ".", 4);
         }
+        break;
+      }
+      case "falling": {
+        // SHOT DOWN: no lift, no pilot. Gravity, the momentum it had, the
+        // nose dropping and a slow roll, a smoke trail down the arc — until
+        // it meets a building or the ground.
+        const P = s.grp.position;
+        s.t += dt;
+        s.vy = (s.vy || 0) - G * 0.85 * dt;
+        s.spd = Math.max(30, s.spd - 2.5 * dt);
+        advance(s, dt);
+        P.y += s.vy * dt;
+        s.alt = P.y;
+        s.pitch = Math.max(-1.1, s.pitch - dt * 0.3);
+        s.bank += (s.rollRate || 0) * dt;
+        s.grp.rotation.z = s.pitch; s.grp.rotation.x = s.bank;
+        s.smokeT = (s.smokeT || 0) - dt;
+        if (s.smokeT <= 0 && CBZ.cityCrashSmoke) { s.smokeT = 0.08; try { CBZ.cityCrashSmoke(P.x, P.y + 2, P.z); } catch (e) {} }
+        if (strikeCheck(s, before, true)) return;
+        if (s.t > 90) { crash(s, { x: P.x, y: groundY(P.x, P.z), z: P.z, building: false }); return; }
         break;
       }
       case "rollout": {
@@ -664,10 +975,10 @@
     }
     if (s.to !== ap) return null;
     let d = 0;
-    if (s.phase === "air") {
-      const toTd = dist(s.grp.position.x, s.grp.position.z, s.td.x, s.td.z);
-      d = toTd / V_CRUISE + 70;             // + rollout, taxi in, turnaround
-    } else d = (s.legD || 2000) / V_CRUISE + 160;
+    // a planned leg averages ~115 m/s from liftoff to touchdown (the climb,
+    // the 290 kt en route, the 140 kt final)
+    if (s.phase === "air") d = (s.rem || 0) / 115 + 70;     // + rollout, taxi in, turnaround
+    else d = (s.flight ? s.flight.total : (s.legD || 60000)) / 115 + 160;
     return d;
   }
 
@@ -728,7 +1039,7 @@
   }
 
   CBZ.airlineAudit = function () {
-    let stranded = 0, crewed = 0, airborne = 0;
+    let stranded = 0, crewed = 0, airborne = 0, unclear = 0;
     const rows = [];
     let shortFields = 0;
     const shortWhere = [];
@@ -747,14 +1058,24 @@
         for (const seat of cab.seats) if (seat.cockpit && seat.occupant) pilots++;
       }
       if (pilots > 0) crewed++;
+      const F = s.flight;
       rows.push({
         id: s.id, phase: s.phase, at: s.at.code, to: s.to.code,
         spd: Math.round(s.spd), alt: Math.round(s.alt), pilots: pilots,
         gate: s.gate ? s.gate.id : null,
+        plan: F ? {
+          dep: F.de.name, arr: F.ae.name, km: +(F.total / 1000).toFixed(1), cruise: Math.round(F.cruise),
+          climbDeg: +(Math.atan(F.tanC) / DEG).toFixed(1), gsDeg: +(Math.atan(F.tanGS) / DEG).toFixed(1),
+          dogleg: !!F.M, residual: F.residual || 0, samples: F.samples || 0,
+        } : null,
       });
+      if (F && F.residual > 0) unclear++;
     }
     return {
       shuttles: shuttles.length, airborne: airborne, crewed: crewed,
+      // RATCHET: filed plans that could not be made to clear every building
+      // and the terrain (0 = every flight in the sky is above what it flies over)
+      unclear: unclear, cruiseAlt: CRUISE_ALT,
       stranded: stranded, ticket: ticket ? ticket.id : null, rows: rows,
       shortFields: shortFields, shortWhere: shortWhere,
       takeoffRun: Math.round(TAKEOFF_RUN), landingRun: Math.round(LANDING_RUN),

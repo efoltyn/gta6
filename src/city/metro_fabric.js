@@ -2755,6 +2755,8 @@
     // the facade cells (no geometry, no mesh until one streams in)
     let kit = [];
     if (!opts.noKit) { try { kit = kitPrepare(P, masks, opts.root); } catch (e) { if (typeof console !== "undefined") console.warn("[metro_fabric] facade cells", e); } }
+    // what city/metro_promote.js needs to find one building's tile and cells
+    P.__mfByKey = byKey; P.__mfT = T; P.__mfKit = kit;
     /* a building appended to P.bldgs after prepare (city/metro.js BUILT: a
        shell nobody planned) joins its tile; returns { tile, fresh } (fresh: a
        tile that did not exist, its meshes now under opts.root) */
@@ -2802,7 +2804,9 @@
     if (JOB) runJob(JOB, Infinity);            // a sync caller cut in: finish the one in flight first
     const kit = far === "kit";
     const J = { P: P, tile: tile, far: far === true, kit: kit, ids: far === true && !!P.farIds, lod: kit ? (tile.lod | 0) : 0, anchor: kit ? tile.anchor || null : null,
-      chunks: kit ? [] : null, vbase: 0, k: 0, st: 0, ms: 0, done: false, result: null, marks: null };
+      chunks: kit ? [] : null, vbase: 0, k: 0, st: 0, ms: 0, done: false, result: null, marks: null,
+      // per building: [index, first index entry, end index entry, first collider, end collider]
+      rng: kit ? null : [] };
     JOB = J;
     nv = 0; ni = 0;
     if (kit) { oX = (tile.ix + 0.5) * KIT_CELL; oZ = (tile.iz + 0.5) * KIT_CELL; }
@@ -2829,6 +2833,7 @@
         while (J.kb || J.k < tile.idx.length) {
           if (!J.kb) {
             const i = tile.idx[J.k++];
+            if (P.__cut && P.__cut.has(i)) continue;      // promoted (city/metro_promote.js): drawn on its own
             try { J.kb = kitBegin(P, vbOf(P, i), masks[i], J.lod); } catch (e) { J.kb = null; if (typeof console !== "undefined") console.warn("[metro_fabric] facade", B[i] && B[i].id, e); }
             if (!J.kb) continue;
             J.kb.i = i; J.kb.v0 = J.vbase + nv;
@@ -2843,7 +2848,7 @@
         KIT_ANCHOR = null;
       } else while (J.k < tile.idx.length) {
         const i = tile.idx[J.k++];
-        const v0 = nv;
+        const v0 = nv, i0 = ni, c0 = COLS ? COLS.length : 0;
         const vb = vbOf(P, i);
         BVAR = vb.v ? vb.v.vbits | 0 : 0;
         tY = +vb.y || 0; bId = i;
@@ -2852,6 +2857,7 @@
         BVAR = 0; tY = 0;
         frame(0, 0, 0);
         if (J.marks) J.marks.push(i, v0, nv);
+        if (J.rng) J.rng.push(i, i0, ni, c0, COLS ? COLS.length : 0);
         if (now() >= end) break;
       }
       if (J.k >= tile.idx.length) while (J.st < stations.length) { station(P, P.stations[stations[J.st++]]); frame(0, 0, 0); }
@@ -2927,6 +2933,12 @@
     mesh.geometry = g;
     if (old && old !== g) old.dispose();
     if (far) tile.farBuilt = true; else tile.built = true;
+    // THE CUT-OUT RANGES: where each building's triangles and colliders sit in
+    // this build, so one building can be taken out of the merged mesh by draw
+    // groups (city/metro_promote.js) without touching the GPU buffers, which a
+    // far tile no longer has a CPU copy of
+    if (far) tile.farRng = J.rng; else { tile.nearRng = J.rng; tile.colsAll = COLS; }
+    applyCut(J.P, tile, far);
     // the far tile's window lights replace this tile's last set (a GPU-lost
     // rebuild writes the same key)
     if (far && CBZ.lodLights) CBZ.lodLights.windows(J.P.id + ":" + tile.key, WN, WP || new Float32Array(0), WA || new Uint8Array(0), WB || new Uint8Array(0));
@@ -2990,7 +3002,87 @@
     tile.mesh.geometry = g;
     if (old) old.dispose();
     tile.built = false;
+    tile.nearRng = null; tile.colsAll = null;
+    setMaterial(tile.mesh, Array.isArray(tile.mesh.material) ? tile.mesh.material[0] : tile.mesh.material);
     tile.mesh.visible = false;
+  }
+
+  /* ---------------------------------------------------------------------
+     ONE BUILDING OUT OF THE MERGED MESH (city/metro_promote.js).
+     A tile is one geometry; a building is a contiguous run of its index
+     buffer (the writer emits buildings one after another), recorded per
+     build in tile.nearRng / tile.farRng. Cutting one is DRAW GROUPS around
+     its run: no buffer is edited (a far tile has no CPU copy left to edit),
+     the mesh draws the complement, and the material becomes a one-entry
+     array so three honours the groups. Cut buildings are also skipped by
+     the facade-cell writer and their near colliders are taken out.
+     --------------------------------------------------------------------- */
+  function setMaterial(mesh, m) {
+    if (!mesh) return;
+    const g = mesh.geometry;
+    const cut = !!(g && g.groups && g.groups.length);
+    const cur = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    if (cur !== m || Array.isArray(mesh.material) !== cut) mesh.material = cut ? [m] : m;
+  }
+  function applyCut(P, tile, far) {
+    const mesh = far ? tile.far : tile.mesh;
+    if (!mesh || !mesh.geometry) return 0;
+    const g = mesh.geometry, rng = far ? tile.farRng : tile.nearRng, cut = P && P.__cut;
+    const base = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    if (g.groups && g.groups.length) g.clearGroups();
+    const iv = [];
+    if (rng && cut && cut.size && g.index) {
+      for (let k = 0; k < rng.length; k += 5) if (cut.has(rng[k]) && rng[k + 2] > rng[k + 1]) iv.push([rng[k + 1], rng[k + 2]]);
+    }
+    if (iv.length) {
+      iv.sort(function (a, b) { return a[0] - b[0]; });
+      const N = g.index.count;
+      let s = 0;
+      for (const q of iv) { if (q[0] > s) g.addGroup(s, q[0] - s, 0); s = Math.max(s, q[1]); }
+      if (N > s) g.addGroup(s, N - s, 0);
+      if (!g.groups.length) g.addGroup(0, 0, 0);        // all of it cut: an empty draw
+    }
+    setMaterial(mesh, base);
+    return iv.length;
+  }
+  function colsOf(tile, i) {
+    const out = [], rng = tile.nearRng, all = tile.colsAll;
+    if (!rng || !all) return out;
+    for (let k = 0; k < rng.length; k += 5) if (rng[k] === i) for (let c = rng[k + 3]; c < rng[k + 4]; c++) if (all[c]) out.push(all[c]);
+    return out;
+  }
+  function tileOfBuilding(P, i) {
+    const b = P && P.bldgs && P.bldgs[i];
+    if (!b || !P.__mfByKey) return null;
+    const T = P.__mfT || 800;
+    return P.__mfByKey.get(Math.floor(b.x / T) + "," + Math.floor(b.z / T)) || null;
+  }
+  // cut (on) or restore (off) building i of plan P everywhere it is drawn
+  function cutBuilding(P, i, on) {
+    const S = P.__cut || (P.__cut = new Set());
+    if (on) S.add(i); else S.delete(i);
+    const t = tileOfBuilding(P, i);
+    let cols = [];
+    if (t) {
+      if (t.built) applyCut(P, t, false);
+      if (t.farBuilt) applyCut(P, t, true);
+      if (t.built) cols = colsOf(t, i);
+      if (cols.length) {
+        if (on) { if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(cols); }
+        else for (const c of cols) if (CBZ.colliders.indexOf(c) < 0) { if (CBZ.colliderAdd) CBZ.colliderAdd(c); else CBZ.colliders.push(c); }
+      }
+    }
+    for (const c of P.__mfKit || []) if (c.built && c.idx.indexOf(i) >= 0) c.kitDirty = true;
+    return { tile: t, colliders: cols.length };
+  }
+  // a near build's colliders were just registered (city/metro.js fabDone):
+  // the cut buildings' go straight back out
+  function afterCols(P, tile) {
+    if (!P || !P.__cut || !P.__cut.size || !tile) return 0;
+    let out = [];
+    for (const i of P.__cut) { const c = colsOf(tile, i); if (c.length) out = out.concat(c); }
+    if (out.length && CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(out);
+    return out.length;
   }
   // release the writer's scratch (after a burst of tile builds)
   function trim() { if (JOB) return; POS = NRM = AC = AG = AP = AU = IDX = FID = null; CAP = ICAP = 0; }
@@ -3026,6 +3118,7 @@
   const API = {
     build: build, prepare: prepare, buildTile: buildTile, buildFarTile: buildFarTile, job: job, runJob: runJob,
     disposeTile: disposeTile, trim: trim, material: material, fadeMaterial: fadeMaterial, tick: tick, uniforms: U,
+    cutBuilding: cutBuilding, applyCut: applyCut, afterCols: afterCols, setMaterial: setMaterial, tileOfBuilding: tileOfBuilding,
     // facade cells: prepare() returns them as .kit; build one with
     // job(P, cell, "kit") + runJob, drop it with disposeKit
     // the fabric's view of every building of a plan (variants; the plan's own
