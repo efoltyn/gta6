@@ -1073,7 +1073,8 @@
   const _hp = new THREE.Vector3(), _hf = new THREE.Vector3(), _hu = new THREE.Vector3(), _ht = new THREE.Vector3();
   const _hq = new THREE.Quaternion(), _cq = new THREE.Quaternion();
   const _flipY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
-  let headWp = 0, headWr = 0, wasDown = false;
+  let headWp = 0, headWr = 0, wasDown = false, rideInit = false;
+  const _rp = new THREE.Vector3(), _rq = new THREE.Quaternion();
   const ss01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   function headRide(dt) {
     const ch = CBZ.playerChar, cam = CBZ.camera;
@@ -1104,9 +1105,20 @@
       ch.head.getWorldPosition(_hp); ch.head.getWorldQuaternion(_hq);
       _hf.set(0, 0, 1).applyQuaternion(_hq); _hu.set(0, 1, 0).applyQuaternion(_hq);
       _hp.addScaledVector(_hf, 0.09).addScaledVector(_hu, 0.04);     // the eyes, not the middle of the skull
-      cam.position.lerp(_hp, headWp);
-      if (headWr > 0) { _cq.copy(_hq).multiply(_flipY); cam.quaternion.slerp(_cq, headWr); }
-    }
+      _cq.copy(_hq).multiply(_flipY);
+      /* A STEADY EYE ON THE FLOOR. The head bone carries the taser lock's
+         buzz (meleeposes.js: ~15 Hz on the neck) and every ground blow's jolt;
+         a lens bolted to it strobed. The ride is low-passed (~0.08 s): the
+         fall, the roll and the get-up still carry the view, the buzz does not. */
+      // (the mount keeps the hard ride: its blows are meant to land in the lens)
+      if (!rideInit || !down) { _rp.copy(_hp); _rq.copy(_cq); rideInit = true; }
+      else {
+        const k = 1 - Math.exp(-dt * 12);
+        _rp.lerp(_hp, k); _rq.slerp(_cq, k);
+      }
+      cam.position.lerp(_rp, headWp);
+      if (headWr > 0) cam.quaternion.slerp(_rq, headWr);
+    } else rideInit = false;
     // the mount draws the view onto his face (gently: the mouse still looks)
     if (mk > 0.3 && !down && CBZ.player._gnpOn) {
       const t = CBZ.player._gnpOn, tch = t.char || t.ch;

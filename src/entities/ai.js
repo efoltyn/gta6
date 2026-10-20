@@ -2358,7 +2358,6 @@
       "New warden's worse. Wait and see.",
       "Kitchen's watering the milk again.",
       "They're gonna toss the whole tier. Soon.",
-      "Guy in seven hung up. Nobody talks about it.",
       "Parole board's denying everybody this year.",
     ]);
   }
@@ -4028,14 +4027,14 @@
       ? `Bring it, we're square.`
       : `Bring it, keep ${c.cut}.`;
     if (c.kind === "repo") {
-      return `${who} has my ${c.item}. ${c.place} Bring it back` +
+      return `${who} has my ${c.item}. Get it back` +
         (c.workOff ? `, we're square.` : `, keep ${c.cut}.`);
     }
     if (c.kind === "roughUp") {
-      return `${who} owes me ${owed}. ${c.place} Put him down` +
+      return `${who} owes me ${owed}. Put him down` +
         (c.workOff ? `, we're square.` : `. ${c.cut} for you.`);
     }
-    return `${who} owes me ${owed}. ${c.place} ${cut}`;
+    return `${who} owes me ${owed}. ${cut}`;
   }
   // the card's one line — the pitch is SPOKEN, this is what you glance at
   function contractText(n, c) {
@@ -4178,17 +4177,17 @@
   function dodgeLine(c, onHand) {
     if (c.kind === "repo") {
       return onHand > 0
-        ? `That ${c.item}? It's spoken for. Take ${onHand} instead.`
-        : `I don't have the ${c.item} on me. Ask somebody else.`;
+        ? `The ${c.item}'s spoken for. Take ${onHand}.`
+        : `Don't have it on me.`;
     }
     if (c.kind === "roughUp") {
       return onHand > 0
-        ? `Don't. I got ${onHand} right here. Take it to him.`
+        ? `Don't. Here's ${onHand}. Take it to him.`
         : `He sent you? I got nothing.`;
     }
-    if (onHand <= 0) return `This about the ${c.amt}? I'm empty. ${DODGE_DAYS[(rng() * DODGE_DAYS.length) | 0]}.`;
-    if (onHand >= c.amt) return `Alright. Here's the ${c.amt}. Tell him we're done.`;
-    return `This about the ${c.amt}? I got ${onHand} on me. ${DODGE_DAYS[(rng() * DODGE_DAYS.length) | 0]} for the rest.`;
+    if (onHand <= 0) return `I'm empty. ${DODGE_DAYS[(rng() * DODGE_DAYS.length) | 0]}.`;
+    if (onHand >= c.amt) return `Here. Tell him we're done.`;
+    return `${onHand} now. Rest ${DODGE_DAYS[(rng() * DODGE_DAYS.length) | 0]}.`;
   }
   function debtorOnHand(n) {
     const load = (CBZ.econ && CBZ.econ.rollLoadout) ? CBZ.econ.rollLoadout(n) : null;
@@ -4377,7 +4376,7 @@
       line = `The ${c.item}. Knew he had it.`;
     } else if (c.kind === "roughUp") {
       clearTab(holder, c.debtor);
-      line = `Heard him hit the floor from here.`;
+      line = `Heard him hit the floor.`;
     } else {
       const brought = Math.min(c.got || 0, c.amt);
       const keep = Math.min(c.cut, brought);
@@ -7028,7 +7027,7 @@
           }
           bookDebtorGrudge(n, "you shaking me down over somebody else's money", 4);
           n.aiState = "flee"; n.fleeT = 1.8 + rng() * 1.2;
-          say(n, take > 0 ? `Take it. Take all of it.` : `I got NOTHING. Look at me.`, null, 2.4);
+          say(n, take > 0 ? `Take it. Take all of it.` : `I got nothing. Look at me.`, null, 2.4);
           return { ok: true, msg: "" };
         }
         if (a.kind === "snitchThreat") {

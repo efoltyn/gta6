@@ -175,6 +175,17 @@
     const fade = Math.min(1, rec.life / Math.min(0.20, rec.max));
     pointOnTarget(rec, rec.localA, rec.worldA);
     pointOnTarget(rec, rec.localB, rec.worldB);
+    // THE PROBES FLY: the darts travel out along the wire before they land;
+    // only on landing does the target lock up (a miss never locks anything)
+    const flyK = rec.fly > 0 ? Math.min(1, rec.age / rec.fly) : 1;
+    if (flyK < 1) {
+      rec.worldA.lerpVectors(rec.source, rec.worldA, flyK);
+      rec.worldB.lerpVectors(rec.source, rec.worldB, flyK);
+    } else if (rec.pending) {
+      hit(rec.pending, Math.max(0.18, rec.life));
+      rec.pending = null;
+    }
+    const landed = flyK >= 1;
     writeWire(rec, 0, rec.worldA);
     writeWire(rec, 1, rec.worldB);
 
@@ -194,18 +205,18 @@
     tmpA.copy(rec.worldA).add(rec.worldB).multiplyScalar(0.5);
     for (let i = 0; i < rec.glows.length; i++) {
       const glow = rec.glows[i];
-      glow.visible = rec.life > 0;
+      glow.visible = rec.life > 0 && landed && !!rec.targetGroup;
       glow.position.copy(i ? rec.worldB : rec.worldA);
       glow.scale.setScalar(0.18 + pulse * 0.13);
       glow.material.opacity = fade * (0.42 + pulse * 0.34);
     }
-    rec.light.visible = rec.life > 0;
+    rec.light.visible = rec.life > 0 && landed && !!rec.targetGroup;
     rec.light.position.copy(tmpA);
     rec.light.intensity = fade * (0.45 + pulse * 0.75);
 
     for (let i = 0; i < rec.arcs.length; i++) {
       const arc = rec.arcs[i];
-      arc.visible = !!rec.targetGroup && rec.life > 0;
+      arc.visible = !!rec.targetGroup && rec.life > 0 && landed;
       if (!arc.visible) continue;
       writeArc(rec, arc, i);
       arc.material.opacity = fade * (0.58 + 0.42 * Math.abs(Math.sin(rec.age * 76 + rec.phase + i * 1.9)));
@@ -214,7 +225,7 @@
     if (rec.life <= 0) {
       for (const o of [...rec.wires, ...rec.darts, ...rec.arcs]) o.visible = false;
       for (const glow of rec.glows) glow.visible = false;
-      rec.light.visible = false; rec.targetGroup = null;
+      rec.light.visible = false; rec.targetGroup = null; rec.pending = null;
     }
   }
 
@@ -227,6 +238,9 @@
     rec.life = rec.max;
     rec.age = 0;
     rec.phase = (cursor * 2.399963229728653) % (Math.PI * 2);
+    rec.fly = opts.fly > 0 ? Math.min(0.4, opts.fly) : 0;
+    rec.pending = null;
+    if (rec.fly > 0) rec.life = rec.max = rec.max + rec.fly;
     rec.targetGroup = targetGroup(opts.target);
     if (rec.targetGroup) {
       rec.targetGroup.updateWorldMatrix(true, false);
@@ -241,7 +255,7 @@
       rec.localA.copy(to).addScaledVector(side, -0.055);
       rec.localB.copy(to).addScaledVector(side, 0.055);
     }
-    if (opts.target) hit(opts.target, rec.max);
+    if (opts.target) { if (rec.fly > 0) rec.pending = opts.target; else hit(opts.target, rec.max); }
     updateRecord(rec, 0);
     return rec;
   }
@@ -264,12 +278,11 @@
      storyboard: a guard tasing a man at arm's length with the weapon hanging
      at his hip. CBZ.actorReadyPose is the same setReadyPose with no `.pos`
      read in it, and the guard's yaw is already owned by his own hunt turn. */
-  function presentTaser(actor, dt) {
-    try { if (CBZ.actorAimAt) CBZ.actorAimAt(actor, { pos: CBZ.player.pos }, dt); } catch (_) {}
+  function presentTaser(actor, dt, aimPos) {
+    try { if (CBZ.actorAimAt) CBZ.actorAimAt(actor, { pos: aimPos || actor._taseAim || CBZ.player.pos }, dt); } catch (_) {}
     try { if (CBZ.actorReadyPose) CBZ.actorReadyPose(actor); } catch (_) {}
   }
-  function actorTasePlayer(actor) {
-    if (!actor || !CBZ.player || !CBZ.playerChar || !CBZ.playerChar.group) return false;
+  function drawOn(actor) {
     let draw = drawn.find((d) => d.actor === actor);
     if (!draw) {
       draw = {
@@ -286,12 +299,38 @@
     actor._holstered = false;
     actor._gunLowered = false;
     actor._gunHidden = false;
-    presentTaser(actor, 1);
+  }
+  /* opts.hit (default true): the probes land in the body and it locks.
+     false: they fly past him (wide of the shoulder, into the floor behind)
+     and nothing on him moves. opts.fly: seconds the darts are in the air. */
+  function shoot(actor, ch, tpos, opts) {
+    opts = opts || {};
+    drawOn(actor);
+    actor._taseAim = tpos;
+    presentTaser(actor, 1, tpos);
     const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(actor, tmpA) : tmpA.set(actor.group.position.x, actor.group.position.y + 1.35, actor.group.position.z);
-    CBZ.playerChar.group.updateWorldMatrix(true, false);
-    const to = CBZ.playerChar.group.localToWorld(tmpB.set(0, 1.18, 0.08));
-    fire(from, to, { target: CBZ.playerChar, duration: 0.82 });
+    ch.group.updateWorldMatrix(true, false);
+    const to = ch.group.localToWorld(tmpB.set(0, 1.18, 0.08));
+    const hitIt = opts.hit !== false;
+    if (!hitIt) {
+      // past him: over the shoulder on a random side, and on into the floor
+      dir.copy(to).sub(from); const dl = dir.length() || 1; dir.multiplyScalar(1 / dl);
+      side.crossVectors(dir, UP); if (side.lengthSq() < 1e-4) side.set(1, 0, 0); else side.normalize();
+      to.addScaledVector(side, (Math.random() < 0.5 ? -1 : 1) * (0.45 + Math.random() * 0.3)).addScaledVector(dir, 1.2);
+      to.y = Math.max((ch.group.position.y || 0) + 0.05, to.y - 0.9);
+    }
+    fire(from, to, { target: hitIt ? ch : null, duration: 0.82, fly: opts.fly || 0 });
     return true;
+  }
+  function actorTasePlayer(actor, opts) {
+    if (!actor || !CBZ.player || !CBZ.playerChar || !CBZ.playerChar.group) return false;
+    return shoot(actor, CBZ.playerChar, CBZ.player.pos, opts);
+  }
+  // a screw on an inmate (systems/brain_prison.js): the same probes, his body
+  function actorTaseActor(actor, target, opts) {
+    const ch = target && (target.char || target.ch);
+    if (!actor || !actor.group || !ch || !ch.group) return false;
+    return shoot(actor, ch, target.group ? target.group.position : ch.group.position, opts);
   }
 
   function updateDrawn(dt) {
@@ -309,6 +348,7 @@
         restoreField(a, "_gunLowered", p.lowered);
         restoreField(a, "_gunHidden", p.hidden);
         try { if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(a); } catch (_) {}
+        a._taseAim = null;
       }
       drawn.splice(i, 1);
     }
@@ -319,7 +359,7 @@
     updateDrawn(dt);
   });
 
-  CBZ.taserFx = { fire, hit, actorTasePlayer };
+  CBZ.taserFx = { fire, hit, actorTasePlayer, actorTaseActor };
   CBZ.taserFxAudit = function () {
     let active = 0, wires = 0, arcs = 0, darts = 0;
     for (const rec of pool) {

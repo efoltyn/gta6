@@ -500,6 +500,7 @@
      file only asks it. subduedUntil is the clock for the rest (pinned, the
      floor) and for a build without vitals. */
   let subduedUntil = -1, subduedWhy = null, clock = 0;
+  let pendingTase = null;         // a hit in flight: { t, fly, dx, dz, locked, down }
   function vitalsTase() { const Vt = CBZ.vitals; return Vt && typeof Vt.tase === "function" && typeof Vt.state === "function" ? Vt : null; }
   function playerA() { const Vb = V(); try { return Vb && Vb.playerActor ? Vb.playerActor() : CBZ.player; } catch (e) { return CBZ.player; } }
   function vitalsTased() {
@@ -508,6 +509,7 @@
     try { return Vt.state(playerA()) === "tased"; } catch (e) { return false; }
   }
   A.subduedWhy = function () {
+    if (pendingTase) return "tased";              // the probes are in the air / he has just locked up
     if (clock < subduedUntil) return subduedWhy;
     return vitalsTased() ? "tased" : null;
   };
@@ -523,7 +525,7 @@
     subduedWhy = why;
   };
   A.unsubdue = function () {
-    subduedUntil = -1; subduedWhy = null;
+    subduedUntil = -1; subduedWhy = null; pendingTase = null;
     // the trigger is off: the one taser clock (vitals) stops for him too
     const Vt = vitalsTase();
     if (Vt && Vt.peek) { try { const R = Vt.peek(playerA()); if (R && R.tasedT > 0) R.tasedT = 0; } catch (e) {} }
@@ -546,7 +548,22 @@
      ============================================================ */
   // a taser rides for its whole five-second cycle: he is on the floor for
   // most of it, long enough for the officer to walk in and kneel on him
-  const TASE = { RANGE: 6.5, STUN: 4.2, DOWN: 3.6, RELOAD: 2.6 };
+  /* ONE AUTHORED BEAT (owner, 2026-10-20: "it gets super glitchy when they
+     tase you"). It was one frame: the wires drawn full length, the lock, the
+     input gone and the fall started together, and the wires and the lock
+     landed on you even when the roll said MISS (you jolted and kept running).
+     Now:
+       0          the probes leave the gun (systems/taserfx.js flies them)
+       FLY        they land (d / PROBE_SPEED): the lock, the input gone, the
+                  arcs on you. A miss flies past you and nothing locks.
+       FLY+RIGID  the legs go: the real fall along the line of the shot,
+                  started ONCE (a body already on the floor is kept there,
+                  never stood up to fall again)
+       STUN       the cycle ends, the rig's get-up plays, and the stick comes
+                  back when the body is on its feet (physics.js holds the
+                  stick while the rig is off its feet).
+     A second tase while one is riding is refused (busy): one cycle at a time. */
+  const TASE = { RANGE: 6.5, STUN: 4.2, DOWN: 3.6, RELOAD: 2.6, PROBE_SPEED: 45, RIGID: 0.3 };
   A.TASE = TASE;
   A.taseChance = function (d, targetSpeed, tierHit) {
     if (!(d <= TASE.RANGE)) return 0;
@@ -560,25 +577,50 @@
     const P = CBZ.player, op = posOf(officer);
     if (!P || !op || P.dead) return { hit: false, d: 99 };
     const d = Math.hypot(P.pos.x - op.x, P.pos.z - op.z);
+    // one cycle at a time: a man already riding the wire is not shot again
+    if (pendingTase || vitalsTased() || (clock < subduedUntil && subduedWhy === "tased")) return { hit: true, d: d, busy: true };
     const t = A.tier(officer);
     // how fast he is really going (the measured ground speed, not one frame's)
     const pv = V() && V()._pv;
     const sp = pv ? Math.hypot(pv.x, pv.z) : (+P.speed || 0);
     const p = opts.chance != null ? opts.chance : A.taseChance(d, sp, t.taseHit);
     const r = opts.rng ? opts.rng() : Math.random();
-    // the probes fly either way: the wire is the feedback
-    if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) { try { CBZ.taserFx.actorTasePlayer(officer); } catch (e) {} }
+    const hit = r < p;
+    const fly = Math.min(0.2, Math.max(0.05, d / TASE.PROBE_SPEED));
+    // the probes fly either way: the wire is the feedback (a miss goes past him)
+    if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) { try { CBZ.taserFx.actorTasePlayer(officer, { hit: hit, fly: fly }); } catch (e) {} }
     if (CBZ.sfx) { try { CBZ.sfx("tase"); } catch (e) {} }
-    if (!(r < p)) return { hit: false, d: d };
-    A.subdue(TASE.STUN, "tased");
-    const Vb = V();
-    if (Vb && Vb.knockdown && Vb.playerActor) {
-      const dx = P.pos.x - op.x, dz = P.pos.z - op.z, l = Math.hypot(dx, dz) || 1;
-      try { Vb.knockdown(Vb.playerActor(), { dir: { x: dx / l, z: dz / l }, dur: TASE.DOWN, ko: false }); } catch (e) {}
-    }
-    if (CBZ.shake) { try { CBZ.shake(0.5); } catch (e) {} }
+    if (!hit) return { hit: false, d: d };
+    const dx = P.pos.x - op.x, dz = P.pos.z - op.z, l = Math.hypot(dx, dz) || 1;
+    pendingTase = { t: 0, fly: fly, dx: dx / l, dz: dz / l, locked: false };
     return { hit: true, d: d };
   };
+  function stepTase(dt) {
+    const T = pendingTase;
+    if (!T) return;
+    const P = CBZ.player;
+    if (!P || P.dead) { pendingTase = null; return; }
+    T.t += dt;
+    if (!T.locked && T.t >= T.fly) {
+      // contact: every muscle locks, the stick is gone for the cycle
+      T.locked = true;
+      A.subdue(TASE.STUN, "tased");
+      if (CBZ.shake) { try { CBZ.shake(0.35); } catch (e) {} }
+    }
+    if (!T.locked || T.t < T.fly + TASE.RIGID) return;
+    pendingTase = null;
+    const pc = CBZ.playerChar, f = pc && pc.fall;
+    if (f && f.on && f.phase !== "getup") {
+      // already on the floor: he stays there for the ride (tick holds the fall)
+      f.dur = Math.max(f.dur || 0, TASE.DOWN);
+      return;
+    }
+    const Vb = V();
+    if (Vb && Vb.knockdown && Vb.playerActor) {
+      try { Vb.knockdown(Vb.playerActor(), { dir: { x: T.dx, z: T.dz }, dur: TASE.DOWN, ko: false }); } catch (e) {}
+    }
+  }
+  A.tasePending = function () { return !!pendingTase; };
 
   /* ============================================================
      THE TAKE — the one physical arrest of the player.
@@ -945,6 +987,7 @@
       if (P._grappleT > 0) P._grappleT -= dt;
       else if (P._wind != null && P._wind < 1) P._wind = Math.min(1, P._wind + 0.09 * dt);
     }
+    if (pendingTase) stepTase(dt);
     if (live && !live.done) stepTake(live, dt);
     tickLoose(dt);
     // THE BODY RIDES THE TASER: while the one taser clock says tased (or a

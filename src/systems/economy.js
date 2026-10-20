@@ -678,8 +678,7 @@
     // night in a cellblock is a whisper
     nightTalk: ["Keep it down.",
                 "Can't sleep either, huh.",
-                "Hear him two cells down? Every night.",
-                "I dream about cereal. Just cereal."],
+                "Hear him two cells down? Every night."],
     yardTalk: ["Hot one today.",
                "That court's ours. Don't.",
                "Heard they're shipping ten guys out Friday.",
@@ -790,7 +789,7 @@
      ========================================================================== */
   const PHONE_TIME_SECS = 90;
   // He says the terms in his own mouth: what the money is, and where it goes.
-  const PHONE_TERMS = "Not in smokes. My sister's got an app.";
+  const PHONE_TERMS = "Not smokes. Send it to my sister.";
   // Once per officer. Long, because it is the only time the game explains it.
   const PHONE_TEACH = "What am I doing with cigarettes?";
   function hasPhoneAccess() { return hasItem("Burner Phone") || (g.phoneTimeT || 0) > 0; }
@@ -824,7 +823,7 @@
   function outsidePaidLine() {
     if (!phoneBridge() || g._phoneBridgeSaid) return "";
     g._phoneBridgeSaid = 1;
-    return "Money landed on my sister's app.";
+    return "Sister got it.";
   }
   function outsidePaidPrefix() { const s = outsidePaidLine(); return s ? s + " " : ""; }
 
@@ -848,7 +847,7 @@
       // "That's N for the X" rather than a possessive: the item pool has
       // plurals in it (Pills, Smokes) and "Pills's 4" is not a sentence.
       const short = Math.max(1, price - (g.cigs || 0));
-      return { ok: false, msg: `That's ${price} for the ${offer.item}. You're ${short} short.` };
+      return { ok: false, msg: `${price} for the ${offer.item}. You're short.` };
     }
     addCigs(-price);
     /* A SERVICE IS NOT A THING YOU CARRY. Phone Time buys a WINDOW, so it
@@ -889,7 +888,7 @@
     // HE HANDS IT OVER WITH THE TERMS ON IT. A rented phone is the one thing
     // in this shop the seller does not let out of his sight, and saying so is
     // the whole difference between buying a handset and buying a shift on one.
-    if (service) return { ok: true, msg: "Ten minutes, and it stays where I can see it." };
+    if (service) return { ok: true, msg: "Ten minutes. It stays where I can see it." };
     // ...and he names it on the way out too, so the sale reads as a sale and
     // not as a number leaving your pocket. The discount/markup reason, when
     // he has one, is the second half — his voice, not a spreadsheet row.
@@ -1042,7 +1041,7 @@
       if (CBZ.pickupNote) CBZ.pickupNote(it, { rare: isRare(it) });
       return { ok: true, msg: "Here. Take this." };
     }
-    return { ok: true, msg: actor.data.tip || "Thanks, friend." };
+    return { ok: true, msg: actor.data.tip || "Thanks." };
   }
 
   /* ---------- PAYOFF: corrupt authority can clean up heat ----------

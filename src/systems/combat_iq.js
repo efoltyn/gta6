@@ -131,7 +131,13 @@
   // the position layer is a CITY brain: battle.html consumes posture() for its
   // beloved chase-and-retreat (BATTLE-GRAND-PLAN: "do not lose it") and runs
   // its own wall projection, so every 3b/3c line below is inert off-city.
-  function cityMode() { return !!(CBZ.game && CBZ.game.mode === "city"); }
+  // THE JAIL COUNTS AS A CITY HERE (2026-10-20, owner: "they run towards you
+  // instead of shooting at you from far away"). Cell Block Z's screws and its
+  // armed cons fight through posture() too (entities/guards.js gunfight,
+  // systems/brain_prison.js engage) on the same physics.js colliders, so the
+  // position layer (pick a spot, plant, peek, hide) is theirs as well. Only
+  // battle.html keeps its old chase-and-retreat math.
+  function cityMode() { const m = CBZ.game && CBZ.game.mode; return m === "city" || m === "escape"; }
 
   // seeded LCG for moment-to-moment rolls (own stream — never a world stream)
   let _s = 1013904;
@@ -332,6 +338,7 @@
   CBZ.combatIQ = CBZ.combatIQ || {};
   const IQ = CBZ.combatIQ;
   IQ.ROLE = ROLE; IQ.WEAP = WEAP; IQ.TIER_DPS = TIER_DPS; IQ.DPS_CAP = DPS_CAP;
+  IQ.fighters = IQ.fighters || [];
   IQ.profile = function (a) { return C.NPC_IQ_TIERS === false ? null : profile(a); };
 
   /* ============================================================ THE SIGHT
@@ -1013,7 +1020,9 @@
   const _sepOut = { x: 0, z: 0 };
   function separate(a, gx, gz, tgt) {
     let ox = 0, oz = 0, n = 0;
-    const lists = [CBZ.cityPeds, CBZ.cityCops];
+    // IQ.fighters: bodies from games with no city roster (the jail's screws
+    // and armed cons fight through proxies listed there) space out too
+    const lists = [CBZ.cityPeds, CBZ.cityCops, IQ.fighters];
     for (let li = 0; li < lists.length && n < 4; li++) {
       const list = lists[li]; if (!list) continue;
       for (let i = 0; i < list.length; i++) {
@@ -1231,6 +1240,129 @@
     if ((a._iqSupp || 0) <= 0 && (a._iqRepoT || 0) > 0.9) a._iqRepoT = 0.9;
     a._iqSupp = Math.max(a._iqSupp || 0, secs == null ? 1.4 : secs);
     a._iqCovT = 0;                                             // re-probe cover NOW
+  };
+
+  /* ============================================================
+     5b. THE BODY ADAPTER — the same fight for a body shaped {group, char}.
+
+     The jail's screws and armed cons are `{ group, char, ... }` with their
+     own movers (entities/guards.js walkTo, entities/npc.js + prisonnav), not
+     city peds with `.pos` and a `.target` the ped mover walks. They used to
+     have no gunfight at all: a hunting screw walked straight at a man holding
+     a rifle to give him an order, and an armed con stood in the open where he
+     happened to be and fired on a fixed cadence (owner: "they run towards you
+     instead of shooting at you from far away").
+
+     engageBody() runs THIS file's posture() on a proxy that shares the body's
+     position (so cover, the fire token, the band, the plant, the peek and the
+     hide are the city's, line for line) and answers the caller in its own
+     terms: where to walk (x, z), whether to stand and deliver (halt), what
+     the slot is, whether he can see the mark, and a shot (fire) when the
+     trigger is pulled this frame (hit already rolled). The caller moves the
+     body, draws the tracer and deals the damage through its own game's seam.
+
+       IQ.markOf(key, pos)            ONE mark object per target (packs/tokens
+                                      are keyed by it, so every caller fighting
+                                      the player must pass the same one)
+       IQ.engageBody(a, mark, dt, o)  o: { weapon, kind, aggr, maxHp, speed, dmg }
+       IQ.releaseBody(a)              he left the fight: drop the position/token
+     ============================================================ */
+  const MARKS = Object.create(null);
+  IQ.markOf = function (key, pos) {
+    let m = MARKS[key];
+    if (!m) m = MARKS[key] = { pos: pos, isPlayer: key === "player" };
+    m.pos = pos;
+    return m;
+  };
+  function vecLike() {
+    return { x: 0, y: 0, z: 0, set: function (x, y, z) { this.x = x; this.y = y; this.z = z; return this; } };
+  }
+  function bodyProxy(a, o) {
+    let P = a._iqBody;
+    if (!P) {
+      P = a._iqBody = { pos: a.group.position, group: a.group, target: vecLike(), armed: true, owner: a };
+      P.target.set(a.group.position.x, 0, a.group.position.z);
+      IQ.fighters.push(P);
+    }
+    P.pos = a.group.position; P.group = a.group;
+    P.weapon = o.weapon || P.weapon || "Pistol";
+    P.kind = o.kind || a.kind || null;
+    P.aggr = o.aggr != null ? o.aggr : a.aggr;
+    P.armed = true;
+    P.dead = !!a.dead; P.ko = a.ko || 0;
+    P.maxHp = a.maxHp || o.maxHp || 100;
+    P.hp = a.hp != null ? a.hp : P.maxHp;
+    P.speed = o.speed || 0;
+    if (a._brain) P._brain = a._brain;      // one memory of where the mark was
+    // a round that landed on him is incoming fire: he wants the wall
+    if (P._hpWas != null && P.hp < P._hpWas - 0.5) IQ.suppress(P, 1.4);
+    P._hpWas = P.hp;
+    P._ebF = nowMs();
+    return P;
+  }
+  // a proxy whose body stopped fighting is out of the spacing and the queue
+  function sweepProxies() {
+    const t = nowMs(), L = IQ.fighters;
+    for (let i = L.length - 1; i >= 0; i--) {
+      const P = L[i];
+      if (!P.owner || P.owner.dead || P.owner._iqBody !== P) { L.splice(i, 1); continue; }
+      if (t - (P._ebF || 0) > 800) P._iqTgt = null;
+    }
+  }
+  let _ebSweepF = -1;
+  const _eb = { slot: "", x: 0, z: 0, halt: false, sees: false, dist: 0, fire: null, hit: false };
+  IQ.engageBody = function (a, tgt, dt, o) {
+    if (!on() || !a || !a.group || !tgt || !tgt.pos) return null;
+    o = o || {};
+    const fr = nowMs();
+    if (fr !== _ebSweepF) { _ebSweepF = fr; sweepProxies(); }
+    const P = bodyProxy(a, o);
+    const slot = IQ.posture(P, tgt, dt);
+    if (slot == null) return null;
+    const p = P.pos;
+    const dist = Math.hypot(tgt.pos.x - p.x, tgt.pos.z - p.z);
+    const gate = IQ.moveGate(P, tgt, dist, slot);
+    const out = _eb;
+    out.slot = slot; out.x = P.target.x; out.z = P.target.z;
+    out.halt = !!(gate && gate.halt) || Math.hypot(P.target.x - p.x, P.target.z - p.z) < 0.45;
+    // (no aiTactics LOS layer on this page: the world is open, as posture assumes)
+    out.sees = P.sees == null ? true : !!P.sees; out.dist = dist;
+    // THE TRIGGER. Tucked behind his box he holds it; on the edge, on his
+    // spot with the token, or with the mark on top of him he fires.
+    const may = (slot === "fire" || slot === "peek" || dist < 6) && !o.holdFire;
+    trigger(P, tgt, dist, dt, o.dmg, out.sees && may, out);
+    return out;
+  };
+  // the body's own cooldown (on the proxy), the shared fire gate and the roll
+  function trigger(P, tgt, dist, dt, dmg, may, out) {
+    out.fire = null; out.hit = false;
+    P._ebCD = (P._ebCD || 0) - (dt || 0);
+    if (!may || P._ebCD > 0) return out;
+    const r = IQ.shot(P, tgt, dist, dt || 0, dmg);
+    if (r) {
+      P._ebCD = r.cd;
+      if (r.fire) { out.fire = r; out.hit = rng() < r.hit; }
+    } else P._ebCD = 0.8;
+    return out;
+  }
+  /* a body that holds a position someone ELSE picked for him (the warden's
+     detail stands between the warden and the gun) still shoots through the
+     same gate: the reaction beat, the settle, the burst rhythm, the token's
+     pacing. sees = the caller's own sight test. */
+  const _fb = { fire: null, hit: false };
+  IQ.fireBody = function (a, tgt, dt, o, sees) {
+    if (!on() || !a || !a.group || !tgt || !tgt.pos) return null;
+    o = o || {};
+    const P = bodyProxy(a, o);
+    const dist = Math.hypot(tgt.pos.x - P.pos.x, tgt.pos.z - P.pos.z);
+    IQ.aimTick(P, tgt, dt || 0);
+    return trigger(P, tgt, dist, dt, o.dmg, !!sees, _fb);
+  };
+  IQ.releaseBody = function (a) {
+    const P = a && a._iqBody;
+    if (!P) return;
+    P._iqPos = null; P._iqPlant = false; P._iqTgt = null; P._iqAimOn = null;
+    P.searchT = 0; P.searchGoal = null; P._sweepGoal = null; P._iqCov = null;
   };
 
   // ============================================================

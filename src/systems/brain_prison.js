@@ -1073,6 +1073,8 @@
     if (ch && !n.cuffed && !n.intimidMode && !n._lawBy) { ch.handsUp = false; ch.surrender = false; }
     if (!n.intimidMode) n.poseAimBack = false;
     n._gunPose = null;
+    // out of the gunfight: his picked spot and his place in the fire queue go
+    if (CBZ.combatIQ && CBZ.combatIQ.releaseBody) CBZ.combatIQ.releaseBody(n);
   }
   /* PLAY an answer to a gun on the body. Returns a move speed (0 = still),
      or null when the answer is his normal movement (a rush: the hunt). */
@@ -1085,15 +1087,8 @@
       return null;
     }
     stopHunt(n);
-    if (r === "fight") {
-      // ENGAGE: a man with a gun of his own stands and shoots back from where
-      // he is — he does not walk up to you
-      setPose(n, "aim");
-      exec.stop(n);
-      exec.face(n, sx, sz);
-      engageFire(n, sx, sz);
-      return 0;
-    }
+    // a gun of his own: "fight" fights, "cover" gets to a wall with it first
+    if (r === "fight" || (r === "cover" && capabilityOf(n) === "gun")) return engageGun(n, sx, sz, r === "cover");
     if (r === "flee") {
       clearPose(n);
       const c = how === "hide" ? n._hideCell : null;
@@ -1117,7 +1112,40 @@
     clearPose(n);
     return null;
   }
-  // a man with a gun fires from where he stands on a cadence, when he can see you
+  /* ENGAGE: a man with a gun of his own fights you from range, never a walk
+     up to the muzzle. CBZ.combatIQ's shared posture picks his spot (his
+     weapon's band, a real wall between you, its edge to lean out of, a hide
+     when he is hit) and its fire token keeps four armed cons from all opening
+     at once. This used to be: stand in the open where he happened to be and
+     fire on a fixed cadence (engageFire, now only the fallback for a page
+     without combat_iq.js). holdFire = the brain said "cover": the wall first. */
+  function engageGun(n, sx, sz, holdFire) {
+    setPose(n, "aim");
+    const IQ = CBZ.combatIQ;
+    const P = CBZ.player;
+    const R = IQ && IQ.engageBody && P && P.pos ? IQ.engageBody(n, IQ.markOf("player", P.pos), frameDt, {
+      weapon: n.weapon || "Pistol", kind: "inmate", aggr: 0.8, maxHp: 100,
+      speed: CBZ.moves ? (CBZ.moves.motor(n).speed || 0) : 0, dmg: 22, holdFire: !!holdFire,
+    }) : null;
+    if (!R) {
+      exec.stop(n);
+      exec.face(n, sx, sz);
+      if (!holdFire) engageFire(n, sx, sz);
+      return 0;
+    }
+    if (R.fire && CBZ.prisonNpcFire) { try { CBZ.prisonNpcFire(n, { hit: R.hit, dmg: R.fire.dmg }); } catch (e) {} }
+    if (R.halt) {
+      exec.stop(n);
+      exec.face(n, sx, sz);
+      return 0;
+    }
+    // walking to his spot with the gun on you: the motor's strafe footwork
+    if (n.target && n.target.set) { n.target.set(R.x, 0, R.z); n.pause = 0; }
+    if (R.sees) { n._faceYaw = Math.atan2(sx - n.group.position.x, sz - n.group.position.z); n._faceTTL = 0.3; }
+    const leg = Math.hypot(R.x - n.group.position.x, R.z - n.group.position.z);
+    return (n.baseSpeed || 2) * (leg > 6 && !R.sees ? 1.6 : 1.1);
+  }
+  // the fallback: fires from where he stands on a cadence, when he can see you
   function engageFire(n, sx, sz) {
     const t = now();
     if (n._engFireT == null || n._engFireT < t - 5) n._engFireT = t + 0.6 + rng() * 0.6;
@@ -1497,6 +1525,8 @@
       if (n.cuffed) { n.cuffed = false; if (n.char) { n.char.cuffed = false; n.char.surrender = false; } }
       n._cuffT = 0; n._lawBy = null; n._lawAns = null; n._routT = 0; n._lawHeldT = 0; n._restCD = 0;
       n._gunResp = null; n._gunUntil = 0; n._gunPose = null; n._hideCell = null;
+      // (the crouch itself too: dropping only the flag left the knees folded)
+      if (n._medicCrouch && CBZ.moves && CBZ.moves.crouch) { try { CBZ.moves.crouch(n, false); } catch (e) {} }
       n._medicFor = null; n._medicBy = null; n._medicT = 0; n._medicCrouch = false;
     }
   };

@@ -2949,7 +2949,9 @@
       const floorD = walkGroundAt(player.pos.x, player.pos.z, player.pos.y) + 0.3;   // lying body rests ON the floor, not through it
       if (player.pos.y <= floorD) { player.pos.y = floorD; player.vy = 0; player.grounded = true; }
       playerChar.group.position.set(player.pos.x, player.pos.y, player.pos.z);
-      playerChar.group.rotation.z = CBZ.damp(playerChar.group.rotation.z, Math.PI / 2, 11, dt);
+      // a body already lying in the rig's own fall (meleeposes.js) is not
+      // rolled onto its side as well: that laid him down twice
+      if (!(playerChar.fall && playerChar.fall.on)) playerChar.group.rotation.z = CBZ.damp(playerChar.group.rotation.z, Math.PI / 2, 11, dt);
       playerChar.group.scale.y += (1 - playerChar.group.scale.y) * (1 - Math.pow(0.001, dt));
       animChar(playerChar, 0, dt);
       return;
@@ -2985,7 +2987,18 @@
     // your body and your keys are the struggle (systems/arrest.js), not a walk
     const heldNow = !!(CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld());
     if (heldNow) mx = mz = 0;
-    const stunned = player.stun > 0 || !!player._cityArrested || heldNow;
+    // OFF HIS FEET (the rig's fall: tased, tackled, knocked down, and the
+    // get-up after it): the body goes nowhere until the legs are under it.
+    // The stun clock used to run out mid get-up and the stick walked a man
+    // who was still rising off the floor: the crouched slide across the room.
+    // (a fall some system forgot to release never strands the stick for good:
+    // past half a minute with no capture scene running, the old behaviour)
+    const pcf = playerChar.fall;
+    player._offFeetT = pcf && pcf.on ? (player._offFeetT || 0) + dt : 0;
+    const offFeet = !!(pcf && pcf.on) && (player._offFeetT < 30 ||
+      !!(player.captureState && player.captureState !== "normal"));
+    if (offFeet) mx = mz = 0;
+    const stunned = player.stun > 0 || !!player._cityArrested || heldNow || offFeet;
     // the melee hit reaction (systems/combat.js playerHitReact): a beat of
     // slow, not a lock — you keep the controls while a fist rocks you
     if (player.hitLock > 0) player.hitLock -= dt;

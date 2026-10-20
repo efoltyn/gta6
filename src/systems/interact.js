@@ -502,9 +502,26 @@
     if (!msg || !actor) return;
     speak(actor, msg, secs || 2.8, true);
   }
+  /* THE CROWD IS NOT A CHORUS. Two mouths saying the same words inside a few
+     seconds (three screws all yelling "Break it up!", two inmates both going
+     "Damn." at one knockout) read as one script running on everybody, so the
+     second is dropped. Unprompted chatter (not forced, not a man mid-
+     conversation with you) also keeps a block-wide gap: one aside at a time. */
+  const SAME_GAP = 6, AMBIENT_GAP = 3.5;
+  let lastLine = "", lastLineBy = null, lastLineAt = -1e9, lastAmbientAt = -1e9;
+  function sayClock() { return (CBZ.now || Date.now()) / 1000; }
   function prisonSay(actor, line, opts) {
     opts = opts || {};
-    return speak(actor, line, opts.secs || 2.2, !!opts.force);
+    const t = sayClock();
+    if (line === lastLine && actor !== lastLineBy && t - lastLineAt < SAME_GAP) return false;
+    const engaged = !!opts.force || !!(actor && actor.approach && (actor.approach.t || 0) > 0);
+    if (!engaged && t - lastAmbientAt < AMBIENT_GAP) return false;
+    const ok = speak(actor, line, opts.secs || 2.2, !!opts.force);
+    if (ok) {
+      lastLine = line; lastLineBy = actor; lastLineAt = t;
+      if (!engaged) lastAmbientAt = t;
+    }
+    return ok;
   }
   CBZ.prisonSay = prisonSay;
   CBZ.prisonSayAudit = function () { return CBZ.speech ? CBZ.speech.audit() : null; };

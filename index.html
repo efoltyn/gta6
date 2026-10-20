@@ -630,7 +630,7 @@ document.body.appendChild(b);}}catch(e){}})();
      avoidance, stuck recovery, foot-matched stride, formations). Pure math;
      every AI mover in every game steps through it. Before poses.js so the
      rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
-<script src="src/entities/moves.js?v=sink1011"></script>
+<script src="src/entities/moves.js?v=jailai1020"></script>
 <!-- THE FEET PLANT (entities/gait.js): cadence, stride and the planted-foot
      leg solve every human walks with; animChar calls it (after moves.js). -->
 <script src="src/entities/gait.js?v=hmove1011"></script>
@@ -674,7 +674,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
      player (hands on, two wrists, the escort) every game's law calls. -->
-<script src="src/systems/arrest.js?v=nored0930"></script>
+<script src="src/systems/arrest.js?v=jailai1020"></script>
 <!-- systems/cuffedplayer.js: what a cuffed player can do (hands gate at the window's capture
      phase, speed/stamina/get-up numbers, the grey bar) and how the room treats him; reads
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
@@ -716,7 +716,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=twister1014"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
-<script src="src/systems/economy.js?v=jtv1019c"></script>
+<script src="src/systems/economy.js?v=mrg10200039"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=slotkey1013"></script>
@@ -774,7 +774,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=jailv1001"></script>
+<script src="src/entities/guards.js?v=jailai1020"></script>
 <script src="src/entities/searchlight.js?v=tow929"></script>
 <script src="src/entities/keycard.js?v=bodyfix1009b"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
@@ -787,8 +787,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE CARS: the yard sorts itself by race (heritage -> car), no colours.
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=jailv1001"></script>
-<script src="src/entities/npc.js?v=jailv1001"></script>
-<script src="src/entities/ai.js?v=jtv1019c"></script>
+<script src="src/entities/npc.js?v=mrg10200039"></script>
+<script src="src/entities/ai.js?v=mrg10200039"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -888,18 +888,18 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. remaining systems -->
 <script src="src/systems/quests.js?v=verbs2b"></script>
-<script src="src/systems/prisonvoice.js?v=jailv1001"></script>
+<script src="src/systems/prisonvoice.js?v=jailai1020"></script>
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=island1014"></script>
-<script src="src/systems/physics.js?v=jtv1019b"></script>
+<script src="src/systems/physics.js?v=mrg10200039"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
-<script src="src/entities/towerwatch.js?v=tow929"></script>
+<script src="src/entities/towerwatch.js?v=jailai1020"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -931,11 +931,11 @@ document.body.appendChild(b);}}catch(e){}})();
      (whose LOS/search/flank primitives it composes and never re-implements)
      and BEFORE every consumer: gangs.js, peds.js, police.js, city/combat.js.
      Revert with ?cfg_NPC_COMBAT_IQ=0. -->
-<script src="src/systems/combat_iq.js?v=terrainm1011"></script>
+<script src="src/systems/combat_iq.js?v=jailai1020"></script>
 <!-- ONE TASER VISUAL OWNER. Player fire and the prison capture escalation both
      launch its pooled twin probes/wires and electrical body arc; it also draws
      the shared taser appearance in a guard's real weapon socket for that beat. -->
-<script src="src/systems/taserfx.js?v=taser1"></script>
+<script src="src/systems/taserfx.js?v=jailai1020"></script>
 <!-- The blades half the wing was already carrying. Owns only WHEN an inmate's
      shank comes out of the waistband and how the one arm holding it is posed;
      what a stab DOES lives in systems/combat.js. Loads beside taserfx for the
@@ -943,17 +943,17 @@ document.body.appendChild(b);}}catch(e){}})();
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
-<script src="src/systems/capture.js?v=rpgblast1013"></script>
+<script src="src/systems/capture.js?v=jailai1020"></script>
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
-<script src="src/systems/brain_prison.js?v=vit3"></script>
+<script src="src/systems/brain_prison.js?v=jailai1020"></script>
 <script src="src/systems/markers.js?v=allmain2"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=leave1014"></script>
 <script src="src/systems/lockdown.js?v=nored0930"></script>
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=jailv1001"></script>
+<script src="src/systems/prisonwarden.js?v=jailai1020"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=jailv1001"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
@@ -965,7 +965,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/dashboard.js?v=cars1"></script>
 <script src="src/systems/combat.js?v=jtv1019b"></script>
 <script src="src/systems/killstreaks.js?v=jailv1001"></script>
-<script src="src/systems/interact.js?v=jtv1019b"></script>
+<script src="src/systems/interact.js?v=mrg10200039"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
 <script src="src/systems/prisontrade.js?v=jailside1001"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
@@ -1042,7 +1042,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/gamepad.js?v=ekey2"></script>
 <script src="src/systems/fpsmode.js?v=mrg10200039"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
-<script src="src/systems/intimidate.js?v=jailv1001"></script>
+<script src="src/systems/intimidate.js?v=jailai1020"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
      Additive: registers its own updaters (gated by game.mode) and builds
@@ -1464,7 +1464,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
-<script src="src/entities/moves_posture.js?v=solid1011b"></script>
+<script src="src/entities/moves_posture.js?v=jailai1020"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=boot1014"></script>
 <script src="src/city/economy.js?v=vit3"></script>
@@ -2019,7 +2019,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/campaign_ui.js?v=slotkey1013"></script>
 <script src="src/city/campaign.js?v=ekey2"></script>
 <script src="src/city/cinematics.js?v=btn1011"></script>
-<script src="src/systems/humancontact.js?v=mobwall1013"></script>
+<script src="src/systems/humancontact.js?v=jailai1020"></script>
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
      (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
      the army's "route" order) route on it. Pure maths, loads first. -->

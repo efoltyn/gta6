@@ -65,9 +65,9 @@
   function h2(ax, az, bx, bz) { return Math.hypot(ax - bx, az - bz); }
 
   const LINES = {
-    ladder: ["Off my ladder.", "Get down. Now.", "Not one more rung."],
+    ladder: ["Off my ladder.", "Get down. Now.", "Stay off it."],
     shot: ["Shots fired!", "Contact, yard side!"],
-    talk: ["Twelve hours up a pole.", "Nobody comes up here.", "Back off my tower."],
+    talk: ["Nobody comes up here.", "Back off my tower."],
     over: ["Man over the wall!", "Jumper! Over the side!", "He's over! Hit the alarm!"],
   };
   function say(g, list, secs) {

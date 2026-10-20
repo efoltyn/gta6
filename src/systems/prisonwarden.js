@@ -169,9 +169,9 @@
     inspect: ["Stand up.", "Bunk's a mess.", "Let me see your hands."],
     arrival: ["Another one. Walk him in."],
     paYard: {
-      calm: ["Yard is open. Keep it clean."],
-      tense: ["Yard is open. Anybody carrying steel goes to the hole."],
-      furious: ["Somebody in this yard cut a man. I will find him."],
+      calm: ["Yard's open. Keep it clean."],
+      tense: ["Yard's open. Anybody carrying goes to the hole."],
+      furious: ["Somebody cut a man. I'll find him."],
     },
     paGun: ["Lockdown. Nobody moves until it's found."],
     gunDraw: ["Down. On the floor.", "Don't."],
@@ -181,7 +181,7 @@
     protect: ["You'll have an officer on you."],
     favorAsk: ["Somebody buried a blade in my yard. Find it."],
     handOver: ["Good. We're square."],
-    threatWin: ["...Get out of my office."],
+    threatWin: ["Get out of my office."],
     threatLose: ["Officer. Take him down."],
     silent: ["Next time you talk.", "Suit yourself. Next time it's the hole."],
     hands: ["Hands on the wall.", "Hands. Wall. Now."],
@@ -1158,16 +1158,179 @@
     if (w.intimidMode === "scared" || w._escort) return false;
     handOff(w);
     if (gunBody(w, dt)) return true;
+    if (detailBody(w, dt)) return true;
     if (!S.meet && !S.call) watchFloor(w, dt);
     if (inspectBody(w, dt)) return true;
     return false;
   }
 
   /* ==========================================================
+     4e. HIS DETAIL (owner, 2026-10-20: "nobody protects the warden")
+         His escort walked a pace behind him on rounds and that was all: a
+         man with a gun out across the tier, a con with a blade coming up the
+         landing, and nobody moved until a fist actually landed on him. Now a
+         THREAT on him is read four times a second, and it does three things:
+           ALARM   once per episode: his call, the record (a gun on the warden
+                   is a lockdown), heat, and every officer in reach comes
+           DETAIL  the nearest three officers drop what they are doing and put
+                   their bodies on the line between him and it (entities/
+                   guards.js detailStep): against a gun they hold that line
+                   and shoot from it; against a blade or fists the first of
+                   them goes hands-on once it is at his side
+           HIM     he walks out of it, away from the threat and behind them,
+                   to his office when that is the way away; he never runs at
+                   it and never stands in the open watching
+     ========================================================== */
+  const DETAIL_N = 3, DETAIL_R = 35, DETAIL_HOLD = 6;
+  S.detail = { threat: null, until: 0, alarmAt: -1e9, scanT: 0, members: [], flee: null, fleeT: 0 };
+  LINE.detail = ["Officers.", "On me."];
+  function inmateThreat(w) {
+    const list = CBZ.npcs || [];
+    const wp = w.group.position;
+    let best = null, bd = 1e9;
+    for (let i = 0; i < list.length; i++) {
+      const n = list[i];
+      if (!n || !n.group || n.dead || (n.ko | 0) > 0 || n.cuffed || n.escaped) continue;
+      const d = Math.hypot(n.group.position.x - wp.x, n.group.position.z - wp.z);
+      if (d > 18) continue;
+      let kind = null;
+      if ((n.hasGun || (n.armed && n.weapon)) && !n._shankOut && (n._gunResp === "fight" || n.aiState === "fight")) kind = "gun";
+      else if (n._shankOut && d < 4.5 && (n.aiState === "fight" || (n.huntPlayer || 0) > 0 || n._wardenGrudge)) kind = "blade";
+      if (!kind || d >= bd) continue;
+      bd = d; best = { who: n, x: n.group.position.x, z: n.group.position.z, kind: kind, player: false, d: d };
+    }
+    return best;
+  }
+  function playerThreat(w) {
+    const p = P();
+    if (!p || !playerFree()) return null;
+    const wp = w.group.position;
+    const d = Math.hypot(p.x - wp.x, p.z - wp.z);
+    if (d > 26) return null;
+    const PB = CBZ.prisonBrain;
+    let weapon = "none";
+    try { weapon = PB && PB.shooter ? PB.shooter().weapon : "none"; } catch (e) { weapon = "none"; }
+    let kind = null;
+    if (weapon === "gun") {
+      // a gun out where he can see it, or where it can see him
+      let sees = d < 8;
+      const per = CBZ.brain && CBZ.brain.perception;
+      if (!sees && per && per.seesPoint) { try { sees = !!per.seesPoint(w, p.x, 0, p.z, { range: 26, fovHalf: Math.PI }); } catch (e) { sees = false; } }
+      if (sees) kind = "gun";
+    } else if (weapon === "melee" && d < 6) kind = "blade";
+    else if (S.hitAt != null && S.now - S.hitAt < 12 && d < 12) kind = "hands";
+    return kind ? { who: CBZ.player, x: p.x, z: p.z, kind: kind, player: true, d: d } : null;
+  }
+  function detailOk(gd) {
+    return able(gd) && !gd._escort && gd.intimidMode !== "scared" && !(gd.bribed > 0) && !gd._shakedown;
+  }
+  function releaseDetail() {
+    const D = S.detail;
+    for (let i = 0; i < D.members.length; i++) if (D.members[i]) D.members[i]._wardenDetail = null;
+    D.members.length = 0;
+    D.threat = null; D.flee = null;
+  }
+  function driveDetail(w, dt) {
+    const D = S.detail;
+    if (!w || w.dead || (w.ko | 0) > 0 || w.asleep || g.role === "cop") { if (D.members.length || D.threat) releaseDetail(); return; }
+    D.scanT -= dt;
+    if (D.scanT <= 0) {
+      D.scanT = 0.25;
+      const a = playerThreat(w), b = inmateThreat(w);
+      const th = a && b ? (a.d <= b.d ? a : b) : (a || b);
+      if (th) {
+        const fresh = !D.threat || S.now > D.until;
+        D.threat = th; D.until = S.now + DETAIL_HOLD;
+        if (fresh && S.now - D.alarmAt > 30) {
+          D.alarmAt = S.now;
+          say(w, pick(LINE.detail), 1.4);
+          incident(th.kind === "gun" ? "gun" : "alarm", { player: th.player, seen: true, seenBy: w, at: { x: th.x, z: th.z } });
+          if (th.player) {
+            if (CBZ.addHeat) { try { CBZ.addHeat(th.kind === "gun" ? 30 : 15); } catch (e) {} }
+            offense("assault", { by: w, seenBy: w, severity: 3, why: "warden", at: { x: th.x, z: th.z } });
+            // the block comes: every officer in reach is after you
+            for (const gd of CBZ.guards || []) {
+              if (!detailOk(gd)) continue;
+              const gp = gd.group.position;
+              if (Math.hypot(gp.x - th.x, gp.z - th.z) > 45) continue;
+              gd.hunt = Math.max(gd.hunt || 0, 4);
+              gd.alert = Math.max(gd.alert || 0, 1);
+            }
+          }
+        }
+      } else if (D.threat) {
+        // he lost sight of it: the detail holds the last place it was a while
+        D.threat.d = Math.hypot(D.threat.x - w.group.position.x, D.threat.z - w.group.position.z);
+      }
+    }
+    if (!D.threat || S.now > D.until) { if (D.members.length || D.threat) releaseDetail(); return; }
+    const th = D.threat;
+    if (th.who && th.who.group && !th.player) { th.x = th.who.group.position.x; th.z = th.who.group.position.z; }
+    if (th.player && P()) { th.x = P().x; th.z = P().z; }
+    // the detail: whoever is on it and still able, topped up from the nearest
+    for (let i = D.members.length - 1; i >= 0; i--) {
+      const gd = D.members[i];
+      if (!detailOk(gd)) { if (gd) gd._wardenDetail = null; D.members.splice(i, 1); }
+    }
+    const wp = w.group.position;
+    while (D.members.length < DETAIL_N) {
+      let best = null, bd = DETAIL_R;
+      for (const gd of CBZ.guards || []) {
+        if (!detailOk(gd) || gd._wardenDetail || D.members.indexOf(gd) >= 0) continue;
+        const d = Math.hypot(gd.group.position.x - wp.x, gd.group.position.z - wp.z);
+        if (d < bd) { bd = d; best = gd; }
+      }
+      if (!best) break;
+      // whatever he was doing for the warden is dropped for the warden
+      if (best._wardenEscort) { best._wardenEscort = false; if (boost()) boost().restore("wardenescort", best); const k = S.escorts.indexOf(best); if (k >= 0) S.escorts.splice(k, 1); }
+      D.members.push(best);
+    }
+    // the line: on the bearing from him to it, the first man closest
+    let ux = th.x - wp.x, uz = th.z - wp.z;
+    const ul = Math.hypot(ux, uz) || 1; ux /= ul; uz /= ul;
+    const px = -uz, pz = ux;
+    for (let i = 0; i < D.members.length; i++) {
+      const gd = D.members[i];
+      const lat = i === 0 ? 0 : (i === 1 ? -1.1 : 1.1);
+      const fwd = Math.min(ul * 0.5, i === 0 ? 1.5 : 1.9);
+      const R = gd._wardenDetail || (gd._wardenDetail = {});
+      R.x = wp.x + ux * fwd + px * lat; R.z = wp.z + uz * fwd + pz * lat;
+      R.tx = th.x; R.tz = th.z; R.wx = wp.x; R.wz = wp.z;
+      R.kind = th.kind; R.player = th.player; R.who = th.who; R.i = i;
+    }
+  }
+  // HIS FEET while it is on: out of it, behind his officers
+  function detailBody(w, dt) {
+    const D = S.detail;
+    if (!D.threat || S.now > D.until || S.gun.armed) return false;
+    const th = D.threat, wp = w.group.position;
+    const dT = Math.hypot(th.x - wp.x, th.z - wp.z);
+    if (!D.flee || S.now > D.fleeT) {
+      D.fleeT = S.now + 1.5;
+      const ox = (OFFICE.x0 + OFFICE.x1) * 0.5, oz = (OFFICE.z0 + OFFICE.z1) * 0.5;
+      const threatInOffice = inRect(OFFICE, th.x, th.z);
+      const officeAway = !threatInOffice && Math.hypot(ox - th.x, oz - th.z) > dT + 2 && Math.hypot(ox - wp.x, oz - wp.z) < 30;
+      if (officeAway) D.flee = { x: ox, z: oz };
+      else {
+        const ax = wp.x - th.x, az = wp.z - th.z, al = Math.hypot(ax, az) || 1;
+        D.flee = { x: wp.x + ax / al * 12, z: wp.z + az / al * 12 };
+      }
+    }
+    const left = Math.hypot(D.flee.x - wp.x, D.flee.z - wp.z);
+    if (left < 1.2 || (dT > 18 && th.kind !== "gun")) {
+      if (CBZ.guardStand) CBZ.guardStand(w, dt);
+      if (CBZ.guardFaceTo) CBZ.guardFaceTo(w, th.x, th.z, 0.0001, dt);
+      return true;
+    }
+    if (CBZ.guardWalkTo) CBZ.guardWalkTo(w, D.flee.x, D.flee.z, 3.6, dt, 0.6);
+    return true;
+  }
+
+  /* ==========================================================
      5. THE TICK
      ========================================================== */
   function reset() {
-    endShakedown(); endCall(); releaseEscorts();
+    endShakedown(); endCall(); releaseEscorts(); releaseDetail(); S.detail.until = 0; S.detail.alarmAt = -1e9;
     S.incidents.length = 0; S.pending = null; S.meet = null; S.favor = null; S.owes = false;
     S.lastShake = -1e9; S.lastLockEnd = -1e9; S.lockdownMine = false; S.immuneSeq = -1;
     S.blockSeq = 0; S.lastBlock = null; S.wakeSeq = -1; S.begSeq = null; S.paQueue = null; S.lastInc = null; S.morningT = 0;
@@ -1273,6 +1436,7 @@
       else if (Math.hypot(P().x - w.group.position.x, P().z - w.group.position.z) < 7) { say(w, S.ack.line, 2.2); S.ack = null; }
     }
     driveEscorts(dt);
+    driveDetail(w, dt);
     driveShakedown(dt);
     if (!S.call && deliverable()) startCall();
     driveCall(dt);
@@ -1346,6 +1510,9 @@
     noteOrder: noteOrder,
     order: orderOfficer,
     armed: function () { return !!S.gun.armed; },
+    // entities/guards.js: an officer on his detail stands where this put him
+    detailLive: function (gd) { return !!(gd && S.detail.threat && S.now <= S.detail.until && S.detail.members.indexOf(gd) >= 0); },
+    detail: function () { const D = S.detail; return D.threat && S.now <= D.until ? { kind: D.threat.kind, player: D.threat.player, n: D.members.length } : null; },
   };
 
   CBZ.prisonWardenAudit = function () {
