@@ -293,8 +293,19 @@
       let nx = geo.nx, nz = geo.nz, doorAlong = null;
       const door = b && b.door;
       if (door && isFinite(door.nx) && isFinite(door.nz) && (Math.abs(door.nx) > 0.9 || Math.abs(door.nz) > 0.9)) {
-        nx = Math.abs(door.nx) > 0.9 ? (door.nx > 0 ? 1 : -1) : 0;
-        nz = nx ? 0 : (door.nz > 0 ? 1 : -1);
+        // The door's AXIS comes from its normal, its SENSE from where it is.
+        // The two builders disagree on the normal's sign: buildings.js's
+        // doorInfo normal points INTO the building (its door point stands
+        // 1.6 m inside the door), towngen's points out at the street. Read
+        // literally, every Gang City parcel looked for its road out of the
+        // BACK of the lot and painted its driveway there, away from the kerb
+        // world.js had dropped at the front. The door point is on the street
+        // side of the lot's centre either way.
+        const ax = Math.abs(door.nx) > 0.9;
+        const off = ax ? door.x - lot.cx : door.z - lot.cz;
+        const sg = Math.abs(off) > 0.5 ? (off > 0 ? 1 : -1) : ((ax ? door.nx : door.nz) > 0 ? 1 : -1);
+        nx = ax ? sg : 0;
+        nz = ax ? 0 : sg;
         doorAlong = (door.x - lot.cx) * nx + (door.z - lot.cz) * nz;
       }
 
@@ -328,18 +339,33 @@
       const kerbX = lot.cx + nx * (kAlong - 0.2), kerbZ = lot.cz + nz * (kAlong - 0.2);
       // the building's own face: the door point stands 1.6 m off it
       // (buildings.js's doorPt), so back that off; else the pad's inner edge.
-      const frontage = doorAlong != null
+      // (the building's own face when its record says where it stands: a
+      // house on a lot is off the lot's centre and short of its door point)
+      const bOx = b && isFinite(b.ox) ? b.ox : (b && b.x != null && isFinite(b.x) ? b.x : null);
+      const bOz = b && isFinite(b.oz) ? b.oz : (b && b.z != null && isFinite(b.z) ? b.z : null);
+      const faceAt = (doorAlong != null && bOx != null && bOz != null && isFinite(b.w) && isFinite(b.d))
+        ? (bOx - lot.cx) * nx + (bOz - lot.cz) * nz + (nx ? b.w : b.d) / 2 : null;
+      const frontage = faceAt != null ? Math.max(1, faceAt)
+        : doorAlong != null
         ? Math.max(1, doorAlong - 1.6)
         : (nx ? (lot.w || 30) : (lot.d || 30)) / 2 - 1;
       const run = (kAlong - 0.2) - frontage + 0.6;
       if (run < 1.0) { _roadless++; continue; }             // the door already IS the kerb
+      /* A HOUSE ON A LOT SAYS WHERE ITS DRIVE IS (city/house_yard.js): down
+         one side of the parcel to its garage, 3.2 m wide, instead of 5.4 m up
+         the centreline into its front door. Only where nothing has cut a kerb
+         for the centreline already (a town; the grid's kerb ring runs before
+         any house exists, so a grid house keeps its garage on the centreline). */
+      const dAt = b && isFinite(b.driveAt) && !lot.grid ? b.driveAt : 0;
+      const dHalf = b && isFinite(b.driveHalf) && !lot.grid ? b.driveHalf : DRIVE_W / 2;
+      const otx = -nz * dAt, otz = nx * dAt;                // along the street
       const a = {
         nx: nx, nz: nz,
-        x: lot.cx + nx * kAlong, z: lot.cz + nz * kAlong,
-        kerbX: kerbX, kerbZ: kerbZ,
-        standX: kerbX - nx * STAND_IN, standZ: kerbZ - nz * STAND_IN,
+        x: lot.cx + nx * kAlong + otx, z: lot.cz + nz * kAlong + otz,
+        kerbX: kerbX + otx, kerbZ: kerbZ + otz,
+        standX: kerbX - nx * STAND_IN + otx, standZ: kerbZ - nz * STAND_IN + otz,
         heading: Math.atan2(nz, -nx),                       // see the header
-        half: DRIVE_W / 2,
+        half: dHalf, atX: otx, atZ: otz,
       };
 
       // ---- THE APRON. A paved run from the building's frontage out toward
@@ -365,20 +391,20 @@
       if (!groundOwns && (!kitted || along >= 0.4)) {
         const off = kitted ? 0 : -0.3;
         const ay = kitted ? ST.yLot + 0.02 : 0.12;
-        const mx = lot.cx + nx * (frontage + along / 2 + off);
-        const mz = lot.cz + nz * (frontage + along / 2 + off);
-        const aw = a.nx ? along : DRIVE_W, ad = a.nx ? DRIVE_W : along;
+        const mx = lot.cx + nx * (frontage + along / 2 + off) + otx;
+        const mz = lot.cz + nz * (frontage + along / 2 + off) + otz;
+        const aw = a.nx ? along : 2 * dHalf, ad = a.nx ? 2 * dHalf : along;
         apron.push(quad(mx, mz, aw, ad, ay));
         // ---- THE DROPPED KERB (off-grid only): the flared mouth from the
         // kerb line out to the carriageway edge, so the transition is
         // surfaced, not a step into air.
         if (!kitted) {
-          const dw = a.nx ? 1.6 : DRIVE_W + FLARE * 2, dd = a.nx ? DRIVE_W + FLARE * 2 : 1.6;
+          const dw = a.nx ? 1.6 : 2 * dHalf + FLARE * 2, dd = a.nx ? 2 * dHalf + FLARE * 2 : 1.6;
           dropped.push(quad(a.kerbX + a.nx * 0.55, a.kerbZ + a.nz * 0.55, dw, dd, 0.13));
         }
         // ---- the two painted edge lines that make the crossing read from a car
         for (const s of [-1, 1]) {
-          const ox = a.nz ? s * (DRIVE_W / 2) : 0, oz = a.nx ? s * (DRIVE_W / 2) : 0;
+          const ox = a.nz ? s * dHalf : 0, oz = a.nx ? s * dHalf : 0;
           const ew = a.nx ? along : 0.16, ed = a.nx ? 0.16 : along;
           edges.push(quad(mx + ox, mz + oz, ew, ed, ay + 0.015));
         }
@@ -409,7 +435,7 @@
       // anything JSON-serialised a building (worldstate.js commits descriptors
       // built out of these objects).
       if (b) {
-        b.approach = { x: a.x, z: a.z, nx: a.nx, nz: a.nz, half: a.half,
+        b.approach = { x: a.x, z: a.z, nx: a.nx, nz: a.nz, half: a.half, atX: a.atX, atZ: a.atZ,
                        standX: a.standX, standZ: a.standZ, heading: a.heading };
       }
     }

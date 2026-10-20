@@ -59,6 +59,7 @@ env.load("src/city/citytemplates.js");
 env.load("src/city/villagekit.js");
 env.load("src/city/settlements.js");
 env.load("src/city/roadrules.js");
+env.load("src/city/house_yard.js");
 env.load("src/city/towngen.js");
 // countries data
 CBZ.addLandmass = () => {};
@@ -116,9 +117,11 @@ for (const t of towns) {
     for (const L of town.lots) {
       const hw = L.w / 2, hd = L.d / 2;
       for (const [ax, az] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, 0]]) if (RG(L.cx + ax * hw * 0.98, L.cz + az * hd * 0.98) !== 2) bad.lotOnStreet++;
-      // 3) the door steps out onto the footway
+      // 3) the door steps out onto the footway — or, for a house standing
+      //    back on its lot (city/house_yard.js), onto its own front yard
       const dp = L.building.door;
-      if (RG(dp.x, dp.z) !== 1) bad.doorOff++;
+      const houseLot = L.building.driveHalf != null;
+      if (RG(dp.x, dp.z) !== 1 && !(houseLot && RG(dp.x, dp.z) === 2)) bad.doorOff++;
     }
     // 4) no street record crosses a block
     for (const r of roads) {

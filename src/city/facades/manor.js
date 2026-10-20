@@ -47,6 +47,8 @@
       const SK = 0.06;
       const upFrom = ST >= 2 ? FH : FH * 0.55;             // half-timbering from here up
 
+      H.publish({ body: lower, trim: timber, roof: roof, flat: false });
+
       // ---- THE PARTI: a main cross gable and a smaller nested one ----------------
       const gS = H.sign(0x3b06);
       const g1w = HP.clamp(S * 0.36, 3.2, 5.6), g1t = gS * (S / 2 - g1w / 2 - 0.25);

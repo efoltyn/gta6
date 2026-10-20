@@ -4010,6 +4010,7 @@
   "src/world/yardfurniture.js",
   "src/city/settlements.js",
   "src/city/towngen.js",
+  "src/city/house_yard.js",
   "src/city/speedway_structures.js",
   "src/city/betslip.js",
   "src/city/island_speedway.js",

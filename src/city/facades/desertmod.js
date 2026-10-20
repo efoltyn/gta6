@@ -49,6 +49,8 @@
       const stoneT0 = sS > 0 ? H.DOOR_CLEAR - 0.2 : -S / 2 - SK, stoneT1 = sS > 0 ? S / 2 + SK : -H.DOOR_CLEAR + 0.2;
       const screenOn = !ctx.grid && !H.noDoor && S >= 9;
 
+      H.publish({ body: white, trim: white, roof: white, flat: true });
+
       // ---- THE OPENINGS: glass walls to the street (on the non-stone side), clerestories elsewhere
       const holes = [];
       const dh = H.doorHole();

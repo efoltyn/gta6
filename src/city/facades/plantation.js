@@ -45,6 +45,8 @@
       const dep = HP.clamp(H.unit * 0.2, 2.2, 3.0);
       const gST = Math.min(2, ST);                          // the gallery's storeys
 
+      H.publish({ body: white, trim: white, roof: roof, flat: false });
+
       // ---- THE OPENINGS: tall, floor-length, symmetric ---------------------------
       const holes = [];
       const dh = H.doorHole();

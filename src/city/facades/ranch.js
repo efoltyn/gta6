@@ -50,6 +50,8 @@
       const SK = 0.05;
       const wains = 0.95;                               // the brick wainscot's top
 
+      H.publish({ body: body, trim: trim, roof: roof, flat: false, ownGarage: true });
+
       // ---- THE PARTI: garage at one end, picture window beside the door ------
       const gS = H.sign(0x7a08);
       const garW = S >= 15 ? 4.9 : 2.75;

@@ -45,6 +45,8 @@
       const SK = 0.24;                                          // the earth wall's thickness proud of the shell
       const parTop = rTop + H.PP + 0.3;
 
+      H.publish({ body: earth, trim: VIGA, roof: earthD, flat: true });
+
       // ---- THE OPENINGS: small and deep ----------------------------------------------
       const holes = [];
       const dh = H.doorHole();

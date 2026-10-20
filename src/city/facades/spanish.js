@@ -55,6 +55,8 @@
       const arcT0 = towerSide < 0 ? -S / 2 + towW + 0.1 : -S / 2 + 0.3, arcT1 = towerSide > 0 ? S / 2 - towW - 0.1 : S / 2 - 0.3;
       const arcDep = HP.clamp(H.unit * 0.17, 1.8, 2.4);
 
+      H.publish({ body: stucco, trim: wood, roof: tile, flat: false });
+
       // ---- THE OPENINGS: small and deep ------------------------------------------
       const holes = [];
       const dh = H.doorHole();

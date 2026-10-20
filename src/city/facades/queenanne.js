@@ -51,6 +51,8 @@
       const glass = F.glass(ctx, 0x1d252d);
       const SK = 0.05;
 
+      H.publish({ body: body, trim: trim, roof: roof, flat: false });
+
       // ---- THE PARTI: which corner gets the tower, which half the bay -------
       let sT = H.sign(0x9a02);
       if (spec && spec.turret === "left") sT = -1;

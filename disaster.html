@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 433
+     Natural Disaster Survival, standing alone: index.html minus the 434
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -1104,7 +1104,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facade_kit.js?v=reach1013"></script>
 <!-- THE HOUSE PARTS: the one carpentry (coursed roofs with eaves, skins with real
      holes, trims, porches, chimneys, dormers) every domestic grammar below builds with. -->
-<script src="src/city/facades/house_parts.js?v=house1020"></script>
+<script src="src/city/facades/house_parts.js?v=house1020b"></script>
 <script src="src/city/facades/brick.js?v=fac1009"></script>
 <script src="src/city/facades/stone.js?v=fac1009"></script>
 <script src="src/city/facades/mosque.js?v=fk1"></script>
@@ -1113,8 +1113,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facades/hightech.js?v=fac1009"></script>
 <script src="src/city/facades/pagoda.js?v=fk1"></script>
 <script src="src/city/facades/gothic.js?v=fac1009"></script>
-<script src="src/city/facades/adobe.js?v=house1020"></script>
-<script src="src/city/facades/victorian.js?v=house1020"></script>
+<script src="src/city/facades/adobe.js?v=house1020b"></script>
+<script src="src/city/facades/victorian.js?v=house1020b"></script>
 <!-- TOWER GRAMMARS. Same contract, written for the 40-storey end of the range
      (buildings.js's own makeMegaTower is 52 storeys / ~166m). These declare
      minStoreys so FACADE_KIT_CITY only ever hands them to real towers. -->
@@ -1135,17 +1135,20 @@ document.body.appendChild(b);}}catch(e){}})();
      and courses that FRAME the host glass, which is the thing the owner asked
      for. They declare maxStoreys so FACADE_KIT_CITY never hands a mansion
      grammar to a tower. -->
-<script src="src/city/facades/greekrev.js?v=house1020"></script>
-<script src="src/city/facades/romanvilla.js?v=house1020"></script>
-<script src="src/city/facades/spanish.js?v=house1020"></script>
-<script src="src/city/facades/manor.js?v=house1020"></script>
-<script src="src/city/facades/queenanne.js?v=house1020"></script>
-<script src="src/city/facades/plantation.js?v=house1020"></script>
-<script src="src/city/facades/machiya.js?v=house1020"></script>
-<script src="src/city/facades/desertmod.js?v=house1020"></script>
-<script src="src/city/facades/techhouse.js?v=house1020"></script>
-<script src="src/city/facades/ranch.js?v=house1020"></script>
-<script src="src/city/facades/brickhouse.js?v=house1020"></script>
+<script src="src/city/facades/greekrev.js?v=house1020b"></script>
+<script src="src/city/facades/romanvilla.js?v=house1020b"></script>
+<script src="src/city/facades/spanish.js?v=house1020b"></script>
+<script src="src/city/facades/manor.js?v=house1020b"></script>
+<script src="src/city/facades/queenanne.js?v=house1020b"></script>
+<script src="src/city/facades/plantation.js?v=house1020b"></script>
+<script src="src/city/facades/machiya.js?v=house1020b"></script>
+<script src="src/city/facades/desertmod.js?v=house1020b"></script>
+<script src="src/city/facades/techhouse.js?v=house1020b"></script>
+<script src="src/city/facades/ranch.js?v=house1020b"></script>
+<script src="src/city/facades/brickhouse.js?v=house1020b"></script>
+<!-- THE HOUSE LOT: a detached house standing on its land (front yard, side yards, the
+     garage wing on the driveway, walk, hedge / fence, back fence, mailbox). towngen.js and
+     buildings.js call it at build time. -->
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
 <script src="src/city/worldmap.js?v=farcopy1013"></script>
@@ -1583,7 +1586,7 @@ document.body.appendChild(b);}}catch(e){}})();
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=speed1014"></script>
 <script src="src/city/metro_ground.js?v=peak1014"></script>
-<script src="src/city/metro.js?v=peak1014c"></script>
+<script src="src/city/metro.js?v=house1020b"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- WHO A PERSON IS AND WHAT YOU CAN DO TO HIM: the role -> verbs table the
      registry filters every street verb through, the one-line title over a
@@ -1620,7 +1623,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=peak1014"></script>
+<script src="src/city/cityground.js?v=house1020b"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a

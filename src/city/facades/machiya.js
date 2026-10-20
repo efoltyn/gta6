@@ -47,6 +47,8 @@
       const stone = 0x8a8680, bamboo = 0x8a7448;
       const SK = 0.1;
 
+      H.publish({ body: plaster, trim: wood, roof: tile, flat: false });
+
       // ---- THE OPENINGS ---------------------------------------------------------------
       const holes = [];
       const dh = H.doorHole();

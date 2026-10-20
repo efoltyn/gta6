@@ -326,10 +326,12 @@
   }
   function faceOf(lot, b) {
     const ap = b && b.approach;
-    if (ap && (ap.nx || ap.nz)) return { nx: ap.nx, nz: ap.nz, half: ap.half || 2.7, drive: true };
+    if (ap && (ap.nx || ap.nz)) return { nx: ap.nx, nz: ap.nz, half: ap.half || 2.7, drive: true,
+      // a drive off the centreline (a house's side drive): its lateral centre
+      at: ap.nx ? (ap.atZ || 0) : (ap.atX || 0) };
     const d = b && b.door;
     if (d && isFinite(d.x) && isFinite(d.z)) {
-      const dx = d.x - (isFinite(b.ox) ? b.ox : lot.cx), dz = d.z - (isFinite(b.oz) ? b.oz : lot.cz);
+      const dx = d.x - (isFinite(b.ox) ? b.ox : (b.x != null && isFinite(b.x) ? b.x : lot.cx)), dz = d.z - (isFinite(b.oz) ? b.oz : (b.z != null && isFinite(b.z) ? b.z : lot.cz));
       if (Math.abs(dx) > Math.abs(dz)) return { nx: dx > 0 ? 1 : -1, nz: 0, half: 0, drive: false };
       return { nx: 0, nz: dz > 0 ? 1 : -1, half: 0, drive: false };
     }
@@ -395,7 +397,7 @@
     grime = Math.max(grime, dB < 99 ? Math.exp(-Math.max(0, dB) / 0.32) : 0);   // drip line / splash-back at the wall
 
     const F = o.face, al = lx * F.nx + lz * F.nz, lat = F.nx ? lz : lx;
-    const inDrive = F.drive && B && Math.abs(lat) <= F.half && al > o.front - 0.05;
+    const inDrive = F.drive && B && Math.abs(lat - (F.at || 0)) <= F.half && al > o.front - 0.05;
 
     switch (o.kind) {
       case "core":                      // Midtown: two-tone pavers wall to kerb
@@ -433,13 +435,14 @@
       // the driveway: pour-concrete (asphalt in the yards), wheel tracks,
       // an oil drip where cars stand, the lawn scuffed along its edges
       g = 0; e = 0; a = o.kind === "industrial" ? 1 : 0; p = o.kind === "core" ? 1 : 0;
-      const tk = Math.abs(Math.abs(lat) - 0.8);
+      const latD = lat - (F.at || 0);
+      const tk = Math.abs(Math.abs(latD) - 0.8);
       stain = Math.max(stain, 0.85 * Math.exp(-(tk * tk) / (0.24 * 0.24)));
-      const oil = Math.hypot(lat * 1.6, al - (o.front + 2.2));
+      const oil = Math.hypot(latD * 1.6, al - (o.front + 2.2));
       stain = Math.max(stain, 0.9 * Math.exp(-oil / 0.7));
       wear = Math.max(0.2, wear * 0.5);
     } else if (F.drive && B && (g > 0)) {
-      const off = Math.abs(lat) - F.half;
+      const off = Math.abs(lat - (F.at || 0)) - F.half;
       if (off > 0 && off < 0.6 && al > o.front) wear = Math.max(wear, 0.55 * (1 - off / 0.6));
     }
     writeTexel(S, M, o.i, g, e, a, p, grime, stain, wear, tone);
@@ -515,7 +518,10 @@
         }),
       };
     } else if (b && isFinite(b.w) && isFinite(b.d) && b.w > 1) {
-      o.b = { x: (isFinite(b.ox) ? b.ox : lot.cx) - lot.cx, z: (isFinite(b.oz) ? b.oz : lot.cz) - lot.cz, hw: b.w / 2, hd: b.d / 2 };
+      // (a house on a lot stands off its centre: a deferred record carries x/z)
+      const bx0 = isFinite(b.ox) ? b.ox : (b.x != null && isFinite(b.x) ? b.x : lot.cx);
+      const bz0 = isFinite(b.oz) ? b.oz : (b.z != null && isFinite(b.z) ? b.z : lot.cz);
+      o.b = { x: bx0 - lot.cx, z: bz0 - lot.cz, hw: b.w / 2, hd: b.d / 2 };
       o.front = o.b.x * o.face.nx + o.b.z * o.face.nz + (o.face.nx ? o.b.hw : o.b.hd);
       // a lawned parcel whose door is not served by a driveway gets a front walk
       const dr = b.door;

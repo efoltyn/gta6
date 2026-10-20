@@ -56,6 +56,8 @@
       const SK = 0.06;
       const tall = ST >= 6;
 
+      H.publish({ body: body, trim: trim, roof: slate, flat: false });
+
       // ---- THE OPENINGS ---------------------------------------------------------
       const holes = [];
       const dh = H.doorHole();

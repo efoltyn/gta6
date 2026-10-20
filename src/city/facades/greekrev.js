@@ -46,6 +46,8 @@
       const dep = HP.clamp(H.unit * 0.21, 2.2, 3.0);
       const axis = df.horiz ? "z" : "x";                     // the ridge runs back from the street
 
+      H.publish({ body: white, trim: white, roof: roof, flat: false });
+
       // ---- THE OPENINGS -------------------------------------------------------------
       const holes = [];
       const dh = H.doorHole();

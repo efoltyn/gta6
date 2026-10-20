@@ -60,6 +60,8 @@
       const hipped = H.hash(0xb109) < 0.3;
       const SK = 0.05;                                   // the brick skin's depth
 
+      H.publish({ body: brick, trim: trim, roof: slate, flat: false });
+
       // ---- THE OPENINGS ------------------------------------------------------
       const holes = [];
       const dh = H.doorHole();

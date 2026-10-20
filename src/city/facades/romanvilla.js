@@ -46,6 +46,8 @@
       const towOn = !ctx.grid && S >= 12 && H.hash(0x4e04) < 0.5;
       const towS = H.sign(0x4e05), towW = HP.clamp(H.unit * 0.3, 3.2, 4.4);
 
+      H.publish({ body: stucco, trim: stone, roof: tile, flat: false });
+
       // ---- THE OPENINGS: few, small, high on the street; fuller elsewhere -------
       const holes = [];
       const dh = H.doorHole();

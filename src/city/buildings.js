@@ -8745,11 +8745,33 @@
            homes (the property ladder) are always built. */
         standBack(storeys, { district: dk, facade: "office", dress: streetDress(lot, storeys, false) || false });
         const HS = CBZ.slice;
+        /* A HOUSE STREET'S HOME IS A HOUSE ON A LOT (city/house_yard.js).
+           Northpoint and Crownhill wear house grammars, and every one of their
+           30 m parcels used to hold a single 23 m three-storey block filling
+           it to the setback: a Georgian the size of an office. A streamed home
+           there is now a house of a house's size, standing back behind a front
+           yard beside a garage on the lot's centreline (the driveway the
+           approach lays), its land dressed when the shell is. Listed homes
+           (the property ladder) and the unstreamed build keep their block:
+           their furnishing draws from the city rng as it builds, and a
+           different plan would draw differently. Pure geometry: no rng. */
+        const hDr = !listed && HS && HS.stream && CBZ.houseLot ? streetDress(lot, storeys, false) : null;
+        const HLOT = hDr && hDr.style && (HOUSE_STYLES[hDr.style] || TOWNHOUSE_STYLES[hDr.style])
+          ? CBZ.houseLot.plan({ cx: lot.cx, cz: lot.cz, w: lot.w, d: lot.d,
+              nx: side === 2 ? -1 : side === 3 ? 1 : 0, nz: side === 0 ? -1 : side === 1 ? 1 : 0,
+              want: { w: 12.5, d: 11.5 }, minW: 9, minD: 9, front: 7.5, garage: true, driveFixed: true })
+          : null;
+        if (HLOT) {
+          w = HLOT.w; d = HLOT.d;
+          door = doorInfo(HLOT.x, HLOT.z, w, d, side);
+          doorPt = { x: door.x + door.nx * 1.6, z: door.z + door.nz * 1.6, nx: door.nx, nz: door.nz };
+        }
         if (!listed && HS && HS.stream && CBZ.sliceAt) {
           lot.kind = "tower";
           // (w, d and the wall colour the shell will have: city/metro.js
           // BUILT draws the block's far copy before the shell exists)
-          lot.building = { name: "Apartments", sign: color, side, door: doorPt, storeys: storeys, h: storeys * FH, w: w, d: d, deferred: true,
+          lot.building = { name: HLOT ? "House" : "Apartments", sign: color, side, door: doorPt, storeys: storeys, h: storeys * FH, w: w, d: d, deferred: true,
+            x: HLOT ? HLOT.x : lot.cx, z: HLOT ? HLOT.z : lot.cz,
             farWall: shellColorway(lot.cx, lot.cz, color, { district: dk, facade: "office" }).color };
           lot.building.home = {
             tier: tierDef.tier, id: tierDef.id, name: tierDef.name, price: 0, rent: tierDef.rent || 0,
@@ -8758,8 +8780,10 @@
           };
           const lotRef = lot, stC = storeys, colC = color, sideC = side, dkC = dk, sbC = setback, wC = w, dC = d, tierC = tierDef;
           homeCell(lot, function () {
-            const bb = makeBuilding(root, lotRef.cx, lotRef.cz, wC, dC, stC, colC, sideC,
-              { district: dkC, facade: "office", dress: streetDress(lotRef, stC, false) || false, reach: sbC });
+            const hl = HLOT;
+            const bb = makeBuilding(root, hl ? hl.x : lotRef.cx, hl ? hl.z : lotRef.cz, wC, dC, stC, colC, sideC,
+              hl ? { district: dkC, facade: "office", dress: streetDress(lotRef, stC, false) || false }
+                 : { district: dkC, facade: "office", dress: streetDress(lotRef, stC, false) || false, reach: sbC });
             const topY2 = (stC - 1) * FH;
             furnishHome(bb, rng, tierC, topY2);
             const pool2 = (tierC.tier >= 4 && stC >= 3) ? Math.max(1, Math.min(stC - 2, stC - 2)) : -1;
@@ -8768,6 +8792,7 @@
               else furnishApartmentFloor(bb, k * FH, (lotRef.i | 0) * 5 + (lotRef.j | 0) * 3 + k);
             }
             resFacade(bb, sideC, wC, dC, bb.wallColor != null ? bb.wallColor : colC, lotRef);
+            if (hl) { try { CBZ.houseLot.dress(root, Object.assign({}, hl, { y: city.street && city.street.yLot != null ? city.street.yLot : 0.03 })); } catch (e) {} }
             // the record keeps what it said (door, home, owner...); the shell's fields join it
             // (the data keys are the ones it had before its first shell: a re-run
             // after the streamer freed it must take the NEW shell's fields)

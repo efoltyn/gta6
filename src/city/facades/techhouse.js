@@ -46,6 +46,8 @@
       const SK = 0.06;
       const split = ST >= 2 ? FH : -1;                         // the material change
 
+      H.publish({ body: render, trim: metal, roof: metal, flat: true });
+
       // ---- THE OPENINGS: wide glass to the street, slots elsewhere ------------------
       const holes = [];
       const dh = H.doorHole();

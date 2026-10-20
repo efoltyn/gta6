@@ -110,6 +110,15 @@
   const HP = {};
   HP.clamp = clamp; HP.shade = shade; HP.mix = mix; HP.spans = spans;
 
+  /* WHAT THIS HOUSE IS PAINTED. A grammar publishes its body / trim / roof
+     colours against the building's world origin, so whatever is built round
+     the house afterwards (city/house_yard.js: its garage wing, its fence)
+     wears the house's own palette instead of guessing one. Deterministic: the
+     same position always publishes the same colours (a dry run included). */
+  const PAL = new Map();
+  const palKey = function (x, z) { return Math.round(x * 4) + "," + Math.round(z * 4); };
+  HP.palAt = function (x, z) { return PAL.get(palKey(x, z)) || null; };
+
   /* ---- THE BUILDER -----------------------------------------------------------
      H = HP.begin(ctx, F): the house's own numbers and the part emitters,
      bound to this ctx. Every part below hangs off H. */
@@ -136,6 +145,11 @@
     // the wall colour this street is painted in, for a light mix-in only
     H.base = (ctx.pal && ctx.pal.wall) || ctx.color || 0x9a948a;
     H.tint = function (hex, t) { return mix(hex, H.base, t == null ? 0.08 : t); };
+    H.publish = function (p) {
+      if (ctx.grid || !isFinite(ctx.ox) || !isFinite(ctx.oz)) return;
+      if (PAL.size > 20000) PAL.clear();
+      PAL.set(palKey(ctx.ox, ctx.oz), p);
+    };
     const emit = typeof ctx.lbox === "function" ? ctx.lbox : ctx.dbox;
 
     // a local AABB

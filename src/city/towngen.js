@@ -642,17 +642,34 @@
            buildings.js fitShell sizes the shell from the grammar's own depth
            (never under 8 m), and the parcel line is handed to makeBuilding as
            opts.reach, the fence that keeps any remainder on the lot. */
-        const fit = CBZ.cityFitShell ? CBZ.cityFitShell(lt.cx, lt.cz, lt.w, lt.d, 0.75, storeys,
+        /* A HOME IS A HOUSE ON A LOT (city/house_yard.js). It used to be the
+           lot less 75 cm a side: a 14 x 14 m box shouldered against the next
+           one, its front door on the footway. Now it stands back behind a
+           front yard with side yards, beside a garage on the lot's centreline
+           (where city/approach.js lays the driveway), and the land round it is
+           dressed after the shell is built. Pure geometry: no rng draw. */
+        const HLOT = !isShop && CBZ.houseLot && !RURAL ? CBZ.houseLot.plan({
+          cx: lt.cx, cz: lt.cz, w: lt.w, d: lt.d, nx: lt.door.nx, nz: lt.door.nz,
+          want: { w: Math.min(12.5, (lt.door.nx ? lt.d : lt.w) - 2 * CBZ.houseLot.SIDE), d: Math.min(11.5, (lt.door.nx ? lt.w : lt.d) * 0.55) },
+          garage: storeys <= 3,
+        }) : null;
+        const fit = !HLOT && CBZ.cityFitShell ? CBZ.cityFitShell(lt.cx, lt.cz, lt.w, lt.d, 0.75, storeys,
           typeof sideArg === "number" ? sideArg : null, baseOpts) : null;
-        const w = Math.max(8, fit ? fit.w : lt.w - 1.5), d = Math.max(8, fit ? fit.d : lt.d - 1.5);
-        const lotReach = Math.min(lt.w - w, lt.d - d) / 2;
+        const w = HLOT ? HLOT.w : Math.max(8, fit ? fit.w : lt.w - 1.5), d = HLOT ? HLOT.d : Math.max(8, fit ? fit.d : lt.d - 1.5);
+        const bx = HLOT ? HLOT.x : lt.cx, bz = HLOT ? HLOT.z : lt.cz;
+        // the lot fence: a house's yards are its own margins (the plan keeps
+        // them clear), so only a shell filling its parcel is fenced
+        const lotReach = HLOT ? -1 : Math.min(lt.w - w, lt.d - d) / 2;
         const shellOpts = lotReach > 0.05 ? Object.assign({}, baseOpts, { reach: lotReach }) : baseOpts;
-        const doorPt = { x: lt.door.x + lt.door.nx * 1.6, z: lt.door.z + lt.door.nz * 1.6, nx: lt.door.nx, nz: lt.door.nz };
+        // the door point: 1.6 m out from the door, wherever the house stands
+        const doorPt = HLOT
+          ? { x: bx + lt.door.nx * (HLOT.hd / 2 + 1.6), z: bz + lt.door.nz * (HLOT.hd / 2 + 1.6), nx: lt.door.nx, nz: lt.door.nz }
+          : { x: lt.door.x + lt.door.nx * 1.6, z: lt.door.z + lt.door.nz * 1.6, nx: lt.door.nx, nz: lt.door.nz };
         if (PLAN) {
           // the shell this lot will raise, as cityMakeBuilding will raise it
           // (its colour: buildings.js shellColorway, the shell's own answer)
-          const cw = CBZ.cityShellColorway ? CBZ.cityShellColorway(lt.cx, lt.cz, color, shellOpts) : null;
-          planned.push({ x: lt.cx, z: lt.cz, w: w, d: d, storeys: storeys, color: cw ? cw.color : color,
+          const cw = CBZ.cityShellColorway ? CBZ.cityShellColorway(bx, bz, color, shellOpts) : null;
+          planned.push({ x: bx, z: bz, w: w, d: d, storeys: storeys, color: cw ? cw.color : color,
             facade: cw ? cw.facade : "office", masonry: !!(cw && cw.masonry), shop: isShop, fh: (shellOpts && shellOpts.fh > 2.4 && shellOpts.fh < 8) ? +shellOpts.fh : 3.2 });
           continue;
         }
@@ -684,6 +701,9 @@
           street: kit ? { footway: FOOTWAY, yLot: LOT_Y, ground: true } : { footway: 0, yLot: 0.03, rural: true },
         };
         const bb = lotRec.building;
+        // a house on a lot: where it stands and where its own drive runs
+        // (city/approach.js lays the drive there instead of on the centreline)
+        if (HLOT) { bb.x = bx; bb.z = bz; bb.w = w; bb.d = d; bb.driveAt = HLOT.driveAt; bb.driveHalf = HLOT.driveHalf; }
         if (isShop) {
           // T2 — a vendor STANDS at a counter just inside the door (mirror
           // buildings.js vsx/vsz: a couple metres in from the door face) and the
@@ -706,7 +726,7 @@
         }
         const buildShell = function (late) {
           let b = null;
-          try { b = mk(root, lt.cx, lt.cz, w, d, storeys, color, sideArg, shellOpts); } catch (e) { b = null; }
+          try { b = mk(root, bx, bz, w, d, storeys, color, sideArg, shellOpts); } catch (e) { b = null; }
           if (!b) return;
           // the shell's record under the data decided above (which wins, as the
           // object spread used to make it)
@@ -757,6 +777,9 @@
           // neutral) name plate seated tight against the wall facing the street.
           // cityMakeBuilding does NOT hang signAwning (that lives in the mainland
           // shop pass), so the town mounts its own compact facade board here.
+          // the house's land: garage wing, walk, front hedge or fence, back
+          // fence, shrubs, mailbox (city/house_yard.js)
+          if (HLOT) { try { CBZ.houseLot.dress(root, Object.assign({}, HLOT, { y: LOT_Y })); } catch (e) {} }
           if (isShop && pick.name) mountShopSign(lt, color, pick.name, w, d);
           if (isShop) shopCanopy(lt, w, d, sk);
           // a late parcel's canopy is merged with it (the town's merge ran long
