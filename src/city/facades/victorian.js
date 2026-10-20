@@ -119,6 +119,9 @@
       const axis = df.horiz ? "x" : "z";
       const rB = rTop + 0.14;
       let topY;
+      // a metro row or block (ctx.grid) is roofed by the fabric; only its
+      // entrance is left to dress
+      if (ctx.grid) { entrance(); return; }
       if (mansard) {
         // the lower slope: near-vertical slate, bell-cast at the foot, sealing
         // the shell's parapet inside it
@@ -186,6 +189,8 @@
         }
       }
 
+      entrance();
+      function entrance() {
       // ---- THE ENTRANCE: pilasters, a bracketed hood, a stone stoop -------------------
       H.doorColour(H.pick(0x7c03, DOOR));
       H.doorcase("pilaster", { col: trim, skin: SK, w: 0.18, cap: trimD,
@@ -199,6 +204,7 @@
           H.fb(df, t - 0.06, t + 0.06, hy - 0.55, hy, SK, SK + 0.2, trim);
           H.fb(df, t - 0.06, t + 0.06, hy - 0.2, hy, SK, SK + 0.75, trim);
         }
+      }
       }
     },
   });

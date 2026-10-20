@@ -131,6 +131,9 @@
       }
 
       // ---- THE ROOF ----------------------------------------------------------------
+      // A metro row (ctx.grid) is roofed by the fabric itself: a kit roof there
+      // would only be clipped into a slab over the terrace. Its wall relief stays.
+      if (ctx.grid) return;
       const r = H.roof({ kind: hipped ? "hip" : "gable", axis: ridgeX ? "x" : "z", base: base, pitch: pitch, step: 0.14,
         eave: eave, rake: 0.18, roof: slate, roof2: HP.shade(slate, 0.9), core: brick,
         soffit: trim, fascia: trim, gutter: null, ridge: HP.shade(slate, 0.8), rakeBoard: true, hipCaps: true });
