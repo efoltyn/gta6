@@ -30,13 +30,13 @@
     toCop: ["I ain't done nothing, CO.", "Search me. I'm clean.", "When's my phone call, CO?",
       "You new? You look new.", "Sink's been leaking three weeks, boss.", "Morning, boss."],
     seesGun: ["Where'd you get that?", "Put that away.",
-      "You're gonna get the whole block tossed.", "Don't point that at me.", "You crazy? Put it away."],
-    seesBlade: ["Put that away. Not here.", "Carrying in the open? Stupid.", "Easy with that."],
+      "You're gonna get the whole block tossed.", "Don't point that at me.", "You crazy?"],
+    seesBlade: ["Put that away. Not here.", "In the open? Stupid.", "Easy with that."],
     // the moment a man hits the floor, from somebody who saw it
-    witnessKo: ["Damn.", "He's out.", "Oh, he's DONE.", "Somebody get him up.", "Ohhh."],
+    witnessKo: ["Damn.", "He's out.", "He's done.", "Somebody get him up.", "Ohhh."],
     // later, face to face
     sawFight: ["Saw what you did to him.", "His people saw that.", "He had it coming.",
-      "Watch your back now.", "Heard him hit the floor from here."],
+      "Watch your back now.", "Heard him hit the floor."],
     hurt: ["You're bleeding on my floor.", "Who got you?", "You look like hell.", "Keep pressure on that."],
     freshFish: ["Fresh fish.", "What you in for?", "Don't sit there. Not yet.",
       "First night's the worst.", "Keep your eyes down a week."],
@@ -48,9 +48,12 @@
     coToCop: ["Quiet one so far.", "Radio's been dead all morning.", "Two hours to relief.",
       "Warden's in a mood.", "Coffee's burnt again."],
   };
+  let lastPick = null;
   function pick(a) {
     const r = CBZ.econ && CBZ.econ.rng ? CBZ.econ.rng() : Math.random();
-    return a[Math.floor(r * a.length) % a.length];
+    let i = Math.floor(r * a.length) % a.length;
+    if (a.length > 1 && a[i] === lastPick) i = (i + 1) % a.length;
+    return (lastPick = a[i]);
   }
   function rnd() { return CBZ.econ && CBZ.econ.rng ? CBZ.econ.rng() : Math.random(); }
   function escape() { const g = CBZ.game; return !!(g && g.mode === "escape" && g.state === "playing"); }
@@ -105,7 +108,7 @@
   function speak(a, line, cd) {
     if (!CBZ.prisonSay || !line) return false;
     const ok = !!CBZ.prisonSay(a, line, { secs: 2.2 });
-    if (ok) { a._voiceCD = now() + (cd || 60); globalCD = 5 + rnd() * 5; }
+    if (ok) { a._voiceCD = now() + (cd || 60); globalCD = 14 + rnd() * 14; }
     return ok;
   }
   function tick(dt) {
@@ -117,36 +120,36 @@
       kos = k; koAt = now(); koSpot = P && P.pos ? { x: P.pos.x, z: P.pos.z } : null;
       if (koSpot) {
         const w = nearest(CBZ.npcs || [], koSpot.x, koSpot.z, 11, (a) => !guardish(a) && ready(a));
-        if (w && rnd() < 0.8) speak(w, pick(V.witnessKo), 30);
+        if (w && rnd() < 0.55) speak(w, pick(V.witnessKo), 60);
       }
     }
     if (k < kos) kos = k;                         // a new run reset the count
     if (globalCD > 0) { globalCD -= dt; return; }
     tickT -= dt;
     if (tickT > 0) return;
-    tickT = 0.6;
+    tickT = 1.2 + rnd() * 0.8;
     if (!P || !P.pos || P.dead) return;
     const x = P.pos.x, z = P.pos.z;
     if (g.role === "cop") {
       const a = nearest(CBZ.npcs || [], x, z, 4, (n) => !guardish(n) && ready(n));
-      if (a && rnd() < 0.18) speak(a, pick(V.toCop), 90);
+      if (a && rnd() < 0.1) speak(a, pick(V.toCop), 150);
       return;
     }
     const h = held();
     if (h) {
       const a = nearest(CBZ.npcs || [], x, z, 6, (n) => !guardish(n) && ready(n));
-      if (a && rnd() < 0.35) speak(a, pick(h === "gun" ? V.seesGun : V.seesBlade), 45);
+      if (a && rnd() < 0.2) speak(a, pick(h === "gun" ? V.seesGun : V.seesBlade), 120);
       return;
     }
     if (hurt()) {
       const a = nearest(CBZ.npcs || [], x, z, 4, (n) => !guardish(n) && ready(n));
-      if (a && rnd() < 0.12) speak(a, pick(V.hurt), 90);
+      if (a && rnd() < 0.08) speak(a, pick(V.hurt), 150);
       return;
     }
     // a CO on his round, to an inmate minding his business; never while hot
     if ((g.heat || 0) < 20 && !(g.lastKnown && g.lastKnown.t > 0)) {
       const c = nearest(CBZ.guards || [], x, z, 5, (n) => ready(n) && !(n.alert > 0.3));
-      if (c && rnd() < 0.05) speak(c, pick(V.coProcedure), 120);
+      if (c && rnd() < 0.03) speak(c, pick(V.coProcedure), 180);
     }
   }
   if (CBZ.onUpdate) CBZ.onUpdate(40.7, tick);

@@ -312,7 +312,14 @@
       const stride = imp ? 1 : (near ? 3 : (d2 < FAR2() ? 7 : 16));
       n._aiAcc = (n._aiAcc || 0) + dt;
       if (stride === 1 || ((frame + n.slice) % stride === 0)) {
-        speed = CBZ.aiThink(n, n._aiAcc) || n.speed;
+        /* 0 IS AN ORDER: STAND. The brain returns 0 for a man who must not
+           move (hands up at gunpoint, winded, cuffed, squared up at punching
+           range, a medic down over a body) and null/undefined for "no
+           opinion". `|| n.speed` turned every 0 into a walk, so a man with
+           his hands up or his knees bent kept gliding to his last target
+           with the pose still on him. Only a missing answer falls back. */
+        const said = CBZ.aiThink(n, n._aiAcc);
+        speed = said == null || said !== said ? n.speed : said;
         n._spd = speed; n._aiAcc = 0;
       } else {
         speed = n._spd != null ? n._spd : n.speed;

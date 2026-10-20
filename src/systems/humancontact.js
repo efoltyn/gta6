@@ -442,7 +442,16 @@
   function reactCity(a, source, level, severity) {
     const src = source && isPlayer(source) ? realPlayerActor("city") : source;
     if (a.kind === "cop") {
-      if (severity >= 0.7 && source && isPlayer(source)) {
+      // the same ladder as a screw's (staffContact): a bump is a look and a
+      // word (read.js), a second one inside 40 s or a real shove is noted,
+      // the third, or force, is assaulting an officer
+      if (!source || !isPlayer(source)) return;
+      if (severity < 0.45 && a._pushAt != null && clock - a._pushAt < 2.5) return;
+      if (a._pushAt == null || clock - a._pushAt > 40) a._pushN = 0;
+      a._pushAt = clock;
+      a._pushN = (a._pushN || 0) + (severity >= 0.7 ? 3 : severity >= 0.45 ? 2 : 1);
+      if (a._pushN >= 3 || severity >= 0.7) {
+        a._pushN = 0;
         if (CBZ.cityCrime) CBZ.cityCrime(30, { x: a.pos.x, z: a.pos.z, type: "assault-officer" });
         a.curTarget = realPlayerActor("city"); a.retarget = 0;
       }
@@ -474,10 +483,72 @@
     }
   }
 
+  /* A HAND ON A SCREW (owner, 2026-10-20: "if you run into a cop, they
+     don't get mad at you"). It was one line: alert 1.1 s and a 2-4 s hunt
+     that ended before he got his order out, the same for a shoulder brush as
+     for a sprint that put him on the floor, no word, no push, no record. And
+     a brush never reached here at all unless it was the third in a row.
+     Now contact with an officer is a LADDER he remembers (40 s):
+       1  a brush: he turns on you, "Watch it." (his eyes stay on you)
+       2  again, or a real shove: he puts you back a step with both hands,
+          "Back off." It goes on the record (minor: the next order is a
+          warning, not cuffs) and he watches you a while
+       3+ or force (a stumble, a man on the floor): assault on staff. The
+          record, the hunt, the order and the cuffs (prisonlaw.js), and the
+          warden hears of it. */
+  const STAFF_LINES = { bump: ["Watch it.", "Hey. Watch it."], push: ["Back off.", "Step back."] };
+  function staffSay(a, kind) {
+    const L = STAFF_LINES[kind];
+    if (!L || !CBZ.prisonSay) return;
+    try { CBZ.prisonSay(a, L[(rng() * L.length) | 0], { secs: 1.5, force: true }); } catch (e) { /* no speaker */ }
+  }
+  function staffContact(a, source, severity) {
+    if (a.dead || (a.ko || 0) > 0 || a.asleep || a._escort || a.intimidMode === "scared" || (a.bribed || 0) > 0) return;
+    const G = CBZ.game || {};
+    if (G.role === "cop") return;                       // a colleague's elbow
+    const P = CBZ.player, pp = P && P.pos, gp = posOf(a);
+    if (!pp || !gp) return;
+    // a man in cuffs, on the floor or being walked is not bumping anybody
+    if (P.dead || (P.captureState && P.captureState !== "normal") || (CBZ.playerChar && CBZ.playerChar.cuffed)) return;
+    // one shoulder is one bump: a brush inside 2.5 s of the last is the same one
+    if (severity < 0.45 && a._pushAt != null && clock - a._pushAt < 2.5) return;
+    if ((a._pushAt == null) || clock - a._pushAt > 40) a._pushN = 0;
+    a._pushAt = clock;
+    a._pushN = (a._pushN || 0) + (severity >= 0.7 ? 3 : severity >= 0.45 ? 2 : 1);
+    // he turns on you and keeps you in his eyes
+    a.alert = Math.max(a.alert || 0, 2.5);
+    a.sus = Math.max(a.sus || 0, 0.5); a.susX = pp.x; a.susZ = pp.z; a.susHold = Math.max(a.susHold || 0, 2);
+    if (CBZ.guardFaceTo) { try { CBZ.guardFaceTo(a, pp.x, pp.z, 0.0001, 1 / 30); } catch (e) { /* not a guard body */ } }
+    const n = a._pushN;
+    if (n >= 3 || severity >= 0.7) {
+      a._pushN = 0;
+      if (CBZ.prisonOffense) { try { CBZ.prisonOffense("assault", { severity: 3, seenBy: a, why: "staff" }); } catch (e) { /* no law */ } }
+      a.hunt = Math.max(a.hunt || 0, 6);
+      if (CBZ.addHeat) { try { CBZ.addHeat(10); } catch (e) { /* no heat */ } }
+      return;
+    }
+    if (n >= 2) {
+      // both hands on your chest: a step back along the line between you
+      let nx = pp.x - gp.x, nz = pp.z - gp.z;
+      const d = Math.hypot(nx, nz) || 1; nx /= d; nz /= d;
+      _pushEv.nx = nx; _pushEv.nz = nz; _pushEv.dv = 1.5; _pushEv.e = 1.6; _pushEv.mode = "escape"; _pushEv.source = a; _pushEv.spin = 0;
+      applyPlayer(SHOVE, _pushEv, "escape");
+      // his arms do it (character.js's shove beat, the one brain_prison.js's PB.shove plays)
+      if (a.char && !(a.char.punchT > 0)) { a.char.punchKind = "shove"; a.char.punchDur = 0.30; a.char.punchT = 0.30; }
+      staffSay(a, "push");
+      if (CBZ.prisonOffense) { try { CBZ.prisonOffense("minor", { seenBy: a, why: "staff" }); } catch (e) { /* no law */ } }
+      if (CBZ.addHeat) { try { CBZ.addHeat(3); } catch (e) { /* no heat */ } }
+      a.alert = Math.max(a.alert || 0, 5);
+      return;
+    }
+    staffSay(a, "bump");
+  }
+  const _pushEv = {};
+
   function reactEscape(a, source, level, severity) {
     const byPlayer = source && isPlayer(source);
-    if (a.kind === "guard") {
-      if (byPlayer) { a.alert = Math.max(a.alert || 0, 1.1); a.hunt = Math.max(a.hunt || 0, 2 + severity * 2); }
+    if (a.kind === "guard" || a.kind === "warden") {
+      if (byPlayer) staffContact(a, source, severity);
       return;
     }
     if (!byPlayer) return;
@@ -539,7 +610,8 @@
     if (B && B.memory && B.memory.grudge && src && severity >= 0.3) {
       try { B.memory.grudge(a, src, 0.15 + severity * 0.5); } catch (e) { /* not a brain actor */ }
     }
-    if (event.source && isPlayer(event.source)) {
+    // (an officer in the jail said his own line in staffContact)
+    if (event.source && isPlayer(event.source) && !(m === "escape" && (a.kind === "guard" || a.kind === "warden"))) {
       if (CBZ.cityContactReact) {
         try { CBZ.cityContactReact(a, event.kind || "bump", severity); } catch (e) { /* read.js off */ }
       } else if (event.kind === "shoved" || event.kind === "repeated-shove") {
@@ -580,6 +652,15 @@
   }
   function lying(a) {
     if (!a) return false;
+    if (isPlayer(a) && !a._remote) {
+      // YOU, ON THE FLOOR (tased, tackled, knocked down: the rig's fall) are a
+      // body on the floor like any other: stepped over, never a standing
+      // capsule. As one, every screw walking in to cuff you shoved you along
+      // the floor, and a running one bowled you into a SECOND knockdown.
+      const P = CBZ.player, pc = CBZ.playerChar, f = pc && pc.fall;
+      if (!P || P.dead) return !!P;
+      return (P.ko || 0) > 0 || !!(f && f.on && f.phase !== "getup");
+    }
     if (a.dead || (a.ko || 0) > 0) return true;
     const ch = a.char || a.ch;
     if (ch && ch.fall && ch.fall.on) return true;
@@ -671,6 +752,12 @@
     if (tier === BRUSH) {
       // a brush is nothing, three in a row from the same man is something
       if (!byPlayer) return;
+      // ...except to a man in uniform: your shoulder in an officer is noticed
+      // every time (staffContact keeps his own count)
+      if ((m === "escape" && (victim.kind === "guard" || victim.kind === "warden")) || (m === "city" && victim.kind === "cop")) {
+        react(victim, { mode: m, source: src, kind: "bump", severity: sev });
+        return;
+      }
       victim._bumpCount = (victim._bumpCount || 0) + 1;
       if (victim._bumpCount >= 3 && reactionLevel(victim) > 0.6) {
         victim._bumpCount = 0;
@@ -790,7 +877,7 @@
       if (P) { const dx = p.x - P.x, dz = p.z - P.z; if (dx * dx + dz * dz > 40 * 40) return; }   // cheap reject first
       if (!lying(a)) return;
       if (a._phys && a._phys.heldBy) return;
-      if (CBZ.verbs && CBZ.verbs.held) { try { if (CBZ.verbs.held(a)) return; } catch (e) { /* no verbs */ } }
+      if (CBZ.verbs && CBZ.verbs.held) { try { if (CBZ.verbs.held(isPlayer(a) ? realPlayerActor() : a)) return; } catch (e) { /* no verbs */ } }
       downed.push(a);
     }
     if (m === "city") {
@@ -839,7 +926,7 @@
     if (c && c.f === capFrame) return c;
     if (!c) c = D._bcCap = { f: 0, ax: 0, az: 0, bx: 0, bz: 0, r: CAP_R };
     c.f = capFrame;
-    const p = posOf(D), ch = D.char || D.ch;
+    const p = posOf(D), ch = D.char || D.ch || (isPlayer(D) && !D._remote ? CBZ.playerChar : null);
     if (ch && ch.head && ch.body && ch.group && ch.group.visible !== false && wpos(ch.head, _cw) && wpos(ch.body, _cw2)) {
       let ux = _cw.x - _cw2.x, uz = _cw.z - _cw2.z;
       const L = Math.hypot(ux, uz);
@@ -891,6 +978,9 @@
         for (let k = 0; k < bucket.length; k++) {
           const D = bucket[k];
           if (D === S || S._gnpOn === D || (isPlayer(S) && CBZ.player && CBZ.player._gnpOn === D)) continue;
+          // the officer walking in to kneel on him (the same verb, still in
+          // its approach) is going to him on purpose: never pushed off him
+          if (S._bcSess && S._bcSess === sessionOf(D)) continue;
           const dp = posOf(D);
           if (Math.abs((dp.y || 0) - (p.y || 0)) > 1.2) continue;
           const cap = capsuleOf(D);
@@ -945,7 +1035,7 @@
       const a = list[i], p = posOf(a);
       if (!p) continue;
       a._bcSkip = false;
-      if (!isPlayer(a) && !a._remote && lying(a)) { a._bcDown = true; continue; }
+      if (!a._remote && lying(a)) { a._bcDown = true; continue; }
       a._bcDown = false;
       const S = a._remote ? null : sessionOf(a);
       a._bcSess = S;

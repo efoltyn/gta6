@@ -331,7 +331,9 @@
       // his radio window, if open, is now HELD — detection.js reads this mode.
       // The pose is the message; guards.js barks "heldup" on the transition.
     } else {
-      // DEFY: he comes for you, and the drawn gun is itself what he calls in.
+      // DEFY: he is in it, and the drawn gun is itself what he calls in. The
+      // hunt hands him to entities/guards.js's gunfight while your gun is
+      // out: his sidearm, from cover, at range, never a walk at your muzzle.
       gd.hunt = Math.max(gd.hunt || 0, 3.2);
       gd.alert = 1.0;
       if (!gd._radioed && gd.radioT == null) gd.radioT = 3.2;

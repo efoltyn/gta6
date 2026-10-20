@@ -378,6 +378,46 @@ function runConverge(seedX) {
   ok("no token keeps maneuvering", IQ.moveGate(c, t, 10, "cover").halt === false);
 }
 
+/* ============================================================ 11. THE JAIL BODY ADAPTER */
+{
+  // owner 2026-10-20: "they run towards you instead of shooting at you from
+  // far away". A {group}-shaped prison screw fighting through engageBody()
+  // takes a spot in his pistol's band, stops on it and shoots; he never walks
+  // the 30 m to the muzzle. Two screws on one man take turns and space out.
+  console.log("[11] the jail: a screw with a sidearm fights from range (engageBody)");
+  const CBZ = boot({ mode: "escape", boxes: [{ minX: -3, maxX: 3, minZ: 13, maxZ: 14, y0: 0, y1: 2.4 }] });
+  const IQ = CBZ.combatIQ;
+  const P = { x: 0, y: 0, z: 0 };
+  const t = IQ.markOf("player", P);
+  const body = (x, z) => ({ group: { position: { x, y: 0, z }, rotation: { y: 0 } }, kind: "guard", hp: 140, maxHp: 140 });
+  const g1 = body(-4, 30), g2 = body(5, 31);
+  let minD = 1e9, fired = 0, halted = 0, both = 0;
+  for (let i = 0; i < 900; i++) {
+    CBZ.now += 16;
+    for (const g of [g1, g2]) {
+      const R = IQ.engageBody(g, t, 0.016, { weapon: "Pistol", kind: "guard", maxHp: 140, speed: 0, dmg: 20 });
+      if (!R) continue;
+      const gp = g.group.position;
+      if (!R.halt) {
+        const dx = R.x - gp.x, dz = R.z - gp.z, d = Math.hypot(dx, dz);
+        if (d > 0.01) { const s = Math.min(3.4 * 0.016, d); gp.x += dx / d * s; gp.z += dz / d * s; }
+      } else if (i > 450) halted++;
+      if (R.fire) fired++;
+      minD = Math.min(minD, Math.hypot(gp.x, gp.z));
+    }
+    if (i > 450 && g1._iqBody._iqTgt === t && g2._iqBody._iqTgt === t) both++;
+  }
+  const d1 = Math.hypot(g1.group.position.x, g1.group.position.z), d2 = Math.hypot(g2.group.position.x, g2.group.position.z);
+  ok("never walks into the muzzle", minD > 4.5, "closest " + minD.toFixed(1) + " m");
+  ok("ends inside his pistol's band", d1 >= 4.5 && d1 <= 15 && d2 >= 4.5 && d2 <= 15, d1.toFixed(1) + " / " + d2.toFixed(1) + " m");
+  ok("stands to deliver once there", halted > 300, halted + " halted frames");
+  ok("and shoots", fired > 4, fired + " rounds");
+  ok("both stay registered on the mark", both > 400);
+  ok("they do not stack on one spot", Math.hypot(g1.group.position.x - g2.group.position.x, g1.group.position.z - g2.group.position.z) > 1.5);
+  IQ.releaseBody(g1);
+  ok("release drops his position", g1._iqBody._iqPos == null && g1._iqBody._iqTgt == null);
+}
+
 console.log("");
 if (fails) { console.error("TACTICS: FAIL — " + fails + " of " + (fails + passes) + " assertions"); process.exit(1); }
-console.log("TACTICS: ok — " + passes + " assertions across 13 scenarios");
+console.log("TACTICS: ok — " + passes + " assertions across 14 scenarios");

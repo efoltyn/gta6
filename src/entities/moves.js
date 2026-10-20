@@ -274,6 +274,15 @@
       m.arrived = true; m.gx = tx; m.gz = tz;
     }
 
+    // A CROUCH IS A PLACE, NOT A GAIT. CBZ.moves.crouch (a medic down over a
+    // body, a man tying a lace) is a posture held on the spot; the brain that
+    // set it is not always the one that walks him next (a rout, a fight, the
+    // law, a run reset all took him away without the matching crouch(false)),
+    // so the knees stayed folded and the root walked: the "crouching while
+    // sliding" glide. The body that is ordered somewhere stands up first.
+    // A deliberate crouch-walk opts in with crouch(a, true, { walk: true }).
+    if (!m.arrived && speedMax > 0.3 && dist > stop + 0.2) uncrouch(m.actor);
+
     let wx = 0, wz = 0, want = 0;
     let hx = 0, hz = 0;
     if (m.doorBlockT > 0) m.doorBlockT -= dt;
@@ -443,6 +452,16 @@
 
     m.gait = gaitOf(m.gs);
     return m;
+  }
+
+  // a held CBZ.moves.crouch (moves_posture.js recOf: state "crouch") ends
+  // the moment the motor is told to take the body somewhere
+  function uncrouch(a) {
+    const R = a && a._pz;
+    if (!R || R.state !== "crouch" || R.crouchWalk || R.seq) return;
+    const ch = a === CBZ.player ? CBZ.playerChar : a.char;
+    if (ch) ch.crouch = false;
+    R.state = "stand";
   }
 
   /* Turn a standing body toward a yaw at the gait's own rate (the one

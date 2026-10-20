@@ -683,8 +683,11 @@
     d.t += dt;
     player.stun = Math.max(player.stun || 0, 0.5);
     player.captureState = "downed"; player.captureT = 60;
-    const ch = CBZ.playerChar;
-    ch.group.rotation.z = CBZ.damp(ch.group.rotation.z, Math.PI / 2, 10, dt);
+    // ON THE FLOOR IS THE RIG'S FALL (meleeposes.js), held: the same body the
+    // carry and the cuffs pick up. This used to roll the whole group onto its
+    // side, then the haul's holdDown started a real fall from standing on top
+    // of it (he unrolled, stood, and fell over a second time).
+    holdDown(dt, 1);
     if (d.t < DOWN_BEAT) return;
     // hauled off the floor: to the infirmary, or in cuffs if this was an escape
     const escapeCap = !!(CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture());
@@ -1073,7 +1076,9 @@
         if (CBZ.sfx) { try { CBZ.sfx("tase"); } catch (er) {} }
         if (CBZ.shake) CBZ.shake(0.55);
       }
-      if (ch.body) ch.body.rotation.x += 0.28 * Math.max(0, 1 - e.t / ESC.TASE);
+      // (the shudder is the rig's taser lock, entities/meleeposes.js: the old
+      // `body.rotation.x += 0.28` here ACCUMULATED on a damped joint every
+      // frame and folded the torso through the floor)
       if (lead) screwStep(lead, px, pz, ESC.REACH, px, pz, false, dt);
       if (second) { const f = flank(px, pz, 1); screwStep(second, f.x, f.z, 0.2, px, pz, false, dt); }
       if (e.t >= ESC.TASE) { e.phase = "lift"; e.t = 0; }
@@ -1361,10 +1366,23 @@
   }
   function tase() {
     const a = arrest, gd = a.gd;
+    // ALREADY ON THE FLOOR (a tackle, a knockdown, the last tase still
+    // riding): no second shot, he walks in to the body. Firing again here was
+    // the re-tase that stood you up and dropped you a second time.
+    const A0 = AR();
+    if (A0 && A0.downState && A0.downState(pa())) {
+      a.phase = "tased"; a.t = 0; a.after = 0; a.tasedAt = clock();
+      a.taseCD = Math.max(a.taseCD || 0, A0.TASE ? A0.TASE.RELOAD : 2.6);
+      gd._escort = true;
+      return;
+    }
     law("tases");
     const r = AR() && AR().tase ? AR().tase(gd) : { hit: true };
     if (!AR()) { player.stun = 1.85; }
     if (r.hit) {
+      // the cartridge is spent: no new probes until this cycle is over and
+      // he has reloaded (getting up and running is not an instant re-tase)
+      a.taseCD = Math.max(a.taseCD || 0, A0 && A0.TASE ? A0.TASE.STUN + A0.TASE.RELOAD : 4.5);
       a.phase = "tased"; a.t = 0; a.after = 0; a.tasedAt = clock();
       // (the rig's own knockdown is the fall; "subdued" keeps the yard off you)
       setCaptureState(AR() ? "subdued" : "tased", 1.35);
@@ -1609,7 +1627,11 @@
       // he walks in to the body while the probes hold you
       screwStep(gd, px, pz, ESC.REACH, px, pz, d > 2.5, dt);
       const subdued = AR() ? AR().subdued() : (player.stun || 0) > 0.05;
-      if (subdued && d <= ESC.REACH + 0.5) {
+      // the probes are still landing / he is still locked upright: hands go
+      // on the man on the FLOOR, never on one half way down (that was a
+      // standing cuff started under a fall that began a beat later)
+      const settling = !!(AR() && AR().tasePending && AR().tasePending());
+      if (subdued && !settling && d <= ESC.REACH + 0.5) {
         // on you while you are jelly: he kneels on you and cuffs you where
         // you lie (a verbs.js without the ground cuff hauls you up first)
         const V = VB();
@@ -1998,7 +2020,9 @@
       // a ragdolled body is posed by its points (city/ragdoll.js, order 25);
       // tipping the group over here would twist the pose it just wrote
       if (ragged && !(CBZ.ragdollPoints && CBZ.ragdollPoints(WOUND_ACTOR))) ragged = false;
-      if (!ragged) CBZ.playerChar.group.rotation.z = CBZ.damp(CBZ.playerChar.group.rotation.z, Math.PI / 2, 11, dt);
+      // (a body already lying in the rig's fall stays as it lies: rolling the
+      // group on top of the fall laid him down twice)
+      if (!ragged && !(CBZ.playerChar.fall && CBZ.playerChar.fall.on)) CBZ.playerChar.group.rotation.z = CBZ.damp(CBZ.playerChar.group.rotation.z, Math.PI / 2, 11, dt);
       if (fadeEl) fadeEl.style.opacity = "0";
       // A REAL LOSS, seen first: the body drops, then the card (state.js
       // styleLossCard reads reason "dead").
@@ -2022,14 +2046,14 @@
     }
     healTick(dt);
 
+    /* THE OLD PRONE ROLL IS GONE. A "tased" / "tackled" / "cuffed" capture
+       state used to roll the whole player group 90 degrees onto its side AND
+       add 0.28 rad to the torso pitch every frame, on top of the real fall
+       the rig was already playing (meleeposes.js): two bodies lying down at
+       once, one of them spinning. The rig's fall is the one way down now;
+       this only counts the state's clock and eases a stale roll back out. */
     if (player.captureT > 0) {
       player.captureT -= dt;
-      const prone = player.captureState === "tased" || player.captureState === "tackled" || player.captureState === "cuffed";
-      if (prone) {
-        const side = player.captureState === "tackled" ? -1 : 1;
-        CBZ.playerChar.group.rotation.z = CBZ.damp(CBZ.playerChar.group.rotation.z, side * Math.PI / 2, 10, dt);
-        if (CBZ.playerChar.body) CBZ.playerChar.body.rotation.x += player.captureState === "tased" ? 0.28 : 0.10;
-      }
       if (player.captureT <= 0 && !esc) setCaptureState("normal", 0);
     } else if ((!player.captureState || player.captureState === "normal") && Math.abs(CBZ.playerChar.group.rotation.z) > 0.001) {
       CBZ.playerChar.group.rotation.z = CBZ.damp(CBZ.playerChar.group.rotation.z, 0, 9, dt);

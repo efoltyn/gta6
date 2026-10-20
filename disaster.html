@@ -610,7 +610,7 @@ document.body.appendChild(b);}}catch(e){}})();
      avoidance, stuck recovery, foot-matched stride, formations). Pure math;
      every AI mover in every game steps through it. Before poses.js so the
      rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
-<script src="src/entities/moves.js?v=sink1011"></script>
+<script src="src/entities/moves.js?v=jailai1020"></script>
 <!-- THE FEET PLANT (entities/gait.js): cadence, stride and the planted-foot
      leg solve every human walks with; animChar calls it (after moves.js). -->
 <script src="src/entities/gait.js?v=hmove1011"></script>
@@ -653,7 +653,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
      player (hands on, two wrists, the escort) every game's law calls. -->
-<script src="src/systems/arrest.js?v=nored0930"></script>
+<script src="src/systems/arrest.js?v=jailai1020"></script>
 <!-- systems/cuffedplayer.js: what a cuffed player can do (hands gate at the window's capture
      phase, speed/stamina/get-up numbers, the grey bar) and how the room treats him; reads
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
@@ -817,16 +817,16 @@ document.body.appendChild(b);}}catch(e){}})();
      and state.js, which call CBZ.prisonTier at runtime. -->
 
 <!-- 4b. remaining systems -->
-<script src="src/systems/prisonvoice.js?v=jailv1001"></script>
+<script src="src/systems/prisonvoice.js?v=jailai1020"></script>
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/camera.js?v=island1014"></script>
-<script src="src/systems/physics.js?v=island1014"></script>
+<script src="src/systems/physics.js?v=jailai1020"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
-<script src="src/entities/towerwatch.js?v=tow929"></script>
+<script src="src/entities/towerwatch.js?v=jailai1020"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -864,7 +864,7 @@ document.body.appendChild(b);}}catch(e){}})();
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=jailv1001"></script>
+<script src="src/systems/prisonwarden.js?v=jailai1020"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=jailv1001"></script>
 <script src="src/systems/weather.js?v=pace1015"></script>
@@ -1281,7 +1281,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
-<script src="src/entities/moves_posture.js?v=solid1011b"></script>
+<script src="src/entities/moves_posture.js?v=jailai1020"></script>
 <script src="src/city/economy.js?v=vit3"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority

@@ -65,7 +65,7 @@
      CBZ.moves.climb(actor, bed, opts)   explicit top-bunk entry
      CBZ.moves.stand(actor, opts)        from whatever posture (sit, lie, kneel)
      CBZ.moves.kneel(actor, opts|false)  opts {face, at:{x,z}}
-     CBZ.moves.crouch(actor, on)
+     CBZ.moves.crouch(actor, on, {walk})  held on the spot; walk:true keeps it moving
      CBZ.moves.board(actor, carSpec, opts) / .alight(actor, carSpec, opts)
                                          through a car door (section 4); .skip,
                                          .carBeat, .carAbort, .eyeY
@@ -1055,13 +1055,17 @@
     return true;
   };
 
-  MV.crouch = function (a, on) {
+  // A held crouch is a posture on the spot: CBZ.moves.step stands the body up
+  // the moment it is ordered somewhere (moves.js uncrouch). `opts.walk` keeps
+  // it through the walk, for a body that means to move crouched.
+  MV.crouch = function (a, on, opts) {
     const ch = a && charOf(a);
     if (!ch) return false;
     const R = recOf(a);
     if (R.seq || (R.state !== "stand" && R.state !== "crouch")) return false;
     ch.crouch = !!on;
     R.state = on ? "crouch" : "stand";
+    R.crouchWalk = !!(on && opts && opts.walk);
     return true;
   };
 

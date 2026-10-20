@@ -556,7 +556,7 @@
   const RADIO = [
     "Post four. Got him for you.",
     "He's yours. Same spot.",
-    "Control, eyes on. Passing it up.",
+    "Control, I got eyes on him.",
   ];
   function racketBark(g) {
     const game = CBZ.game || {};
@@ -1099,7 +1099,7 @@
       };
       n.approachCD = Math.min(n.approachCD || 2, 0.9 + rng() * 2.0);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "?");
-      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "He went that way. South gate.", { force: true });
+      if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "He went that way.", { force: true });
       return;
     }
 
@@ -1220,15 +1220,17 @@
     if (barkCD > 0 || !CBZ.game || CBZ.game.mode !== "escape" || CBZ.game.state !== "playing") return;
     if (g.dead || g.ko > 0 || g.bribed > 0) return;
     let pool = null;
+    // most state changes say nothing: a screw who turns his head does not
+    // announce it, and a search that starts is a man walking, not a line
     if (s === "hunt" && prev !== "capture" && prev !== "search") pool = g.kind === "warden" ? BARKS.huntWarden : BARKS.hunt;
-    else if (s === "suspicious" && Math.random() < 0.5) pool = BARKS.suspicious;
-    else if (s === "search" && prev === "hunt") pool = BARKS.search;
-    else if (s === "investigate" && Math.random() < 0.35) pool = BARKS.investigate;
+    else if (s === "suspicious" && Math.random() < 0.25) pool = BARKS.suspicious;
+    else if (s === "search" && prev === "hunt" && Math.random() < 0.4) pool = BARKS.search;
+    else if (s === "investigate" && Math.random() < 0.15) pool = BARKS.investigate;
     else if (s === "heldup") pool = BARKS.heldup;
     if (!pool) return;
     const dx = player.pos.x - g.group.position.x, dz = player.pos.z - g.group.position.z;
     if (dx * dx + dz * dz > 26 * 26) return;   // out of earshot
-    barkCD = 3.5;
+    barkCD = 6 + Math.random() * 4;
     const line = pool[(Math.random() * pool.length) | 0];
     if (CBZ.prisonSay) CBZ.prisonSay(g, line, { force: true });
   }
@@ -1349,6 +1351,7 @@
      Returns the straight distance still left to (tx, tz). */
   const GMV = { speed: 1.4, stop: 0.3, leg: false, face: null, strafe: false,
     nbrs: null, nbrN: 0, lod: 0, accel: 0, turnRate: 0 };
+  let walkFace = null;   // a yaw walkTo holds while it walks (null = face the way he goes)
   const _gNbrs = [];
   function guardLod(g) {
     const dx = g.group.position.x - player.pos.x, dz = g.group.position.z - player.pos.z;
@@ -1392,7 +1395,9 @@
     const routed = !!(S && S.pts && S.gx != null && Math.hypot(T.x - S.gx, T.z - S.gz) > 0.3)
       || !!(g._lvl && g._lvl.pts);
     O.speed = sp; O.stop = routed ? 0.3 : (stop || 0.3); O.leg = routed || !!leg;
-    O.face = null; O.strafe = false; O.turnRate = 0;
+    // walkFace (the gunfight below): the muzzle stays on the mark while the
+    // legs carry him to his spot (the motor's strafe footwork)
+    O.face = walkFace; O.strafe = walkFace != null; O.turnRate = 0;
     O.accel = sp > 3 ? 5.2 : 0;
     O.lod = guardLod(g);
     O.nbrs = null; O.nbrN = 0;
@@ -1618,6 +1623,168 @@
     g._returning = true;
   }
 
+  /* ---- A GUN ON THE FLOOR ------------------------------------------------------
+     OWNER (2026-10-20): "they run towards you instead of shooting at you from
+     far away." Every hunting branch below walks him AT you to give the order
+     (capture.js's arrest ladder: order at 4.2 m, stand-off at 1.9 m), and it
+     did that to a man holding a rifle from the gun room the same as to a man
+     holding nothing. The order is for an unarmed man. A man with a lethal gun
+     out gets the officer's sidearm and the shared gunfight: CBZ.combatIQ's
+     posture (the fire token, the weapon's band, a picked spot he plants on,
+     the far side of a real collider and its edge to peek from, the hide when
+     he is hit), the same one the city's police and gangs fight through.
+     He closes only when it makes sense: you put the gun away (the order
+     again), or you are down. A taser or a blade in your hand is still the
+     arrest: the taser outranges a knife. */
+  const GF_HOLD = 6;            // s he stays in the gunfight after his last reason
+  const GF_DMG = 20;            // the caller damage combatIQ derives his per-hit off
+  const _gfMuzzle = new THREE.Vector3();
+  function playerGunOut() {
+    const PB = CBZ.prisonBrain;
+    if (!PB || !PB.shooter) return false;
+    let S = null;
+    try { S = PB.shooter(); } catch (e) { return false; }
+    return !!(S && S.weapon === "gun" && S.lethal);
+  }
+  function drawSidearm(g) {
+    if (!g._sidearm) g._sidearm = { weapon: g.weapon, armed: g.armed, hol: g._holstered };
+    // re-asserted every frame: a taser beat (systems/taserfx.js) restores
+    // whatever it found when it is done, and that must not leave him empty
+    if (g.weapon !== "Pistol" || !g.armed || g._holstered) {
+      g.weapon = "Pistol"; g.armed = true; g._holstered = false;
+      if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(g); } catch (e) {} }
+    }
+  }
+  function holsterSidearm(g) {
+    const s = g._sidearm;
+    if (!s) return;
+    g._sidearm = null;
+    if (s.weapon === undefined) delete g.weapon; else g.weapon = s.weapon;
+    if (s.armed === undefined) delete g.armed; else g.armed = s.armed;
+    if (s.hol === undefined) delete g._holstered; else g._holstered = s.hol;
+    if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(g); } catch (e) {} }
+    if (CBZ.combatIQ && CBZ.combatIQ.releaseBody) CBZ.combatIQ.releaseBody(g);
+    g._gfT = 0;
+  }
+  function fireSidearm(g, R) {
+    const gp = g.group.position, pp = player.pos;
+    let from = null;
+    try { from = CBZ.actorMuzzle ? CBZ.actorMuzzle(g, _gfMuzzle) : null; } catch (e) { from = null; }
+    if (!from) from = _gfMuzzle.set(gp.x + Math.sin(g.group.rotation.y) * 0.5, gp.y + 1.45, gp.z + Math.cos(g.group.rotation.y) * 0.5);
+    const py = pp.y || 0;
+    const to = R.hit ? { x: pp.x, y: py + 1.3, z: pp.z }
+      : { x: pp.x + (Math.random() - 0.5) * 2.4, y: py + 0.5 + Math.random() * 1.4, z: pp.z + (Math.random() - 0.5) * 2.4 };
+    if (CBZ.tracer) { try { CBZ.tracer({ x: from.x, y: from.y, z: from.z }, to, { color: 0xffd24a, life: 0.07, muzzleScale: 1.1 }); } catch (e) {} }
+    if (CBZ.worldSfx) { try { CBZ.worldSfx("shoot_pistol", gp.x, gp.z, { ref: 30, volume: 1 }); } catch (e) {} }
+    else if (CBZ.sfx) { try { CBZ.sfx("shoot_pistol"); } catch (e) {} }
+    // every brain in earshot hears it (the yard scatters, the block comes)
+    const PB = CBZ.prisonBrain;
+    if (PB && PB.noise) { try { PB.noise(gp.x, gp.z, 40, "gunshot", g); } catch (e) {} }
+    if (R.hit && CBZ.hurtPlayer) {
+      try { CBZ.hurtPlayer(R.fire.dmg, gp.x, gp.z, { weapon: "gun", by: g, shake: 0.45, stun: 0.12 }); } catch (e) {}
+    }
+  }
+  function gunfightStep(g, dt, pdx, pdz) {
+    if (g.kind === "warden" || (CBZ.game && CBZ.game.role === "cop")) return false;
+    const IQ = CBZ.combatIQ;
+    if (!IQ || !IQ.engageBody || ctx.invuln || !playerGunOut()) return false;
+    const dist = Math.hypot(pdx, pdz);
+    // what puts him in it: he is after you, or he can see the gun on you
+    const was = g._gfT > 0;
+    if (g.hunt > 0 || (g.seesPlayer && dist < 34)) g._gfT = GF_HOLD;
+    else g._gfT = (g._gfT || 0) - dt;
+    if (!(g._gfT > 0)) return false;
+    // THE CHALLENGE: a man who comes on you with the gun out is told once
+    // before the first round (put it down inside that beat and it is the
+    // order and the cuffs again, not a gunfight)
+    if (!was) {
+      g._gfWarnT = 1.3;
+      // (unforced: one voice for the room, not every screw at once)
+      if (CBZ.guardLine) CBZ.guardLine(g, "order", { secs: 1.4 });
+    }
+    if (g._gfWarnT > 0) g._gfWarnT -= dt;
+    // a gun seen is the law's business at once: the record, and the hunt
+    // that keeps every other screw in it coming (radio, lockdown, the warden)
+    if (g.seesPlayer) {
+      g.hunt = Math.max(g.hunt || 0, 2.5);
+      g.alert = 1;
+      if (!(g._gfReported > 0) && CBZ.prisonOffense) {
+        g._gfReported = 20;
+        try { CBZ.prisonOffense("assault", { severity: 3, seenBy: g, why: "gun" }); } catch (e) {}
+      }
+    }
+    if (g._gfReported > 0) g._gfReported -= dt;
+    if (g._yardCase && CBZ.prisonBrain && CBZ.prisonBrain.endCase) CBZ.prisonBrain.endCase(g);
+    g.investigate = null; g._returning = false;
+    drawSidearm(g);
+    const m = CBZ.moves.motor(g);
+    const R = IQ.engageBody(g, IQ.markOf("player", player.pos), dt, {
+      weapon: "Pistol", kind: "guard", maxHp: 140, speed: m.speed || 0, dmg: GF_DMG,
+      holdFire: g._gfWarnT > 0,
+    });
+    if (!R) return false;
+    const aimYaw = Math.atan2(pdx, pdz);
+    lookAtPoint(g, player.pos.x, player.pos.z);
+    if (R.halt) {
+      stand(g, dt);
+      faceTo(g, player.pos.x, player.pos.z, 0.0001, dt);
+    } else {
+      // repositioning: a run to a far spot, a working pace to a near one,
+      // eyes (and muzzle) on you whenever he has you
+      const leg = Math.hypot(R.x - g.group.position.x, R.z - g.group.position.z);
+      walkFace = R.sees ? aimYaw : null;
+      walkTo(g, R.x, R.z, g.speed * (leg > 6 && !R.sees ? 1.6 : 1.15), dt, 0.35, false);
+      walkFace = null;
+    }
+    // the arms come up on the mark AFTER the legs' pose (animChar ran in
+    // walkTo/stand), so the walk cycle never drags the gun to the hip
+    if (CBZ.actorReadyPose) { try { CBZ.actorReadyPose(g, dt); } catch (e) {} }
+    if (R.fire) fireSidearm(g, R);
+    noteState(g, R.slot === "cover" || R.slot === "hide" ? "cover" : "gunfight");
+    return true;
+  }
+
+  /* ---- THE WARDEN'S DETAIL (systems/prisonwarden.js driveDetail places him) ---
+     He runs to the spot on the line between the warden and the threat and
+     holds it, facing it. Against your gun he draws and fires from there
+     (CBZ.combatIQ.fireBody: the same reaction, settle and burst rhythm as
+     every other shooter); against fists or a blade the first man of the
+     detail goes hands-on once the threat is at the warden's side (the hunt
+     and the arrest below). */
+  function detailStep(g, dt) {
+    const D = g._wardenDetail, W = CBZ.warden;
+    if (!D || !W || !W.detailLive || !W.detailLive(g)) { g._wardenDetail = null; return false; }
+    const p = g.group.position;
+    const atWarden = Math.hypot(D.tx - D.wx, D.tz - D.wz);
+    if (D.kind !== "gun" && D.i === 0 && atWarden < 3.2) {
+      if (D.player) { g.hunt = Math.max(g.hunt || 0, 3); g.alert = 1; }
+      return false;
+    }
+    const aimYaw = Math.atan2(D.tx - p.x, D.tz - p.z);
+    const toPt = Math.hypot(D.x - p.x, D.z - p.z);
+    lookAtPoint(g, D.tx, D.tz);
+    if (toPt > 0.6) {
+      walkFace = toPt < 4 ? aimYaw : null;
+      walkTo(g, D.x, D.z, g.speed * (toPt > 4 ? 1.7 : 1.1), dt, 0.4, false);
+      walkFace = null;
+    } else {
+      stand(g, dt);
+      faceTo(g, D.tx, D.tz, 0.0001, dt);
+    }
+    if (D.kind === "gun" && D.player && playerGunOut() && CBZ.combatIQ && CBZ.combatIQ.fireBody) {
+      drawSidearm(g);
+      if (CBZ.actorReadyPose) { try { CBZ.actorReadyPose(g, dt); } catch (e) {} }
+      const dx = player.pos.x - p.x, dz = player.pos.z - p.z;
+      const sees = guardSeesPoint(g, player.pos.x, player.pos.y || 0, player.pos.z, 1) || dx * dx + dz * dz < 16;
+      const R = CBZ.combatIQ.fireBody(g, CBZ.combatIQ.markOf("player", player.pos), dt, {
+        weapon: "Pistol", kind: "guard", maxHp: 140, speed: CBZ.moves.motor(g).speed || 0, dmg: GF_DMG,
+      }, sees);
+      if (R && R.fire) fireSidearm(g, R);
+    } else if (g._sidearm && !playerGunOut()) holsterSidearm(g);
+    noteState(g, "detail");
+    return true;
+  }
+
   // ---- per-guard think ----------------------------------------------------------
   function think(g, dt) {
     const pdx = player.pos.x - g.group.position.x, pdz = player.pos.z - g.group.position.z;
@@ -1659,9 +1826,14 @@
 
     // ON ESCORT DUTY (systems/capture.js's haul scene owns the body).
     if (g._escort) {
+      // forget his own walk ONCE, on the way in. capture.js walks him on the
+      // same motor (screwStep) after this runs; zeroing it every frame here
+      // restarted his stride from rest each frame, so a screw "running in"
+      // to a tased man crept at a few cm/s with his legs barely moving while
+      // the probes ran out, and the man got up before he arrived.
+      if (g.state !== "escort") still(g);
       noteState(g, "escort");
       g.hunt = 0; g.alert = 0; g.investigate = null; g.approach = null; g._chase = null; g.sus = 0;
-      still(g);
       updateFlashlight(g, dt);
       return false;
     }
@@ -1733,6 +1905,15 @@
       try { own = !!CBZ.warden.body(g, dt); } catch (e) { own = false; }
       if (own) { noteState(g, "warden"); updateFlashlight(g, dt); return true; }
     }
+
+    // ---- THE WARDEN'S DETAIL (systems/prisonwarden.js): a threat on him puts
+    // the nearest officers between him and it, and walks him out of it. While
+    // the threat holds, that is the job, ahead of any chase.
+    if (g._wardenDetail && detailStep(g, dt)) { updateFlashlight(g, dt); return true; }
+
+    // ---- A GUN ON THE FLOOR: ranged, from cover, never a walk at the muzzle
+    if (gunfightStep(g, dt, pdx, pdz)) { updateFlashlight(g, dt); return true; }
+    if (g._sidearm) holsterSidearm(g);
 
     // ---- HUNT --------------------------------------------------------------
     // Somebody zeroed the hunt from outside (a bribe, a payoff, a held-up
@@ -1925,6 +2106,8 @@
 
   function updateGuard(g, dt) {
     g._lookWant = 0;
+    // a man down, asleep, held up or on another job does not keep a pistol out
+    if (g._sidearm && (g.dead || g.ko > 0 || g.asleep || g._escort || g.intimidMode === "scared" || g.approach)) holsterSidearm(g);
     if (think(g, dt)) neckTurn(g, dt);
   }
 
@@ -1952,7 +2135,10 @@
       list.push({ g, d });
     }
     list.sort((a, b) => a.d - b.d);
-    const send = opts.ambient ? 1 : 2;
+    // a gunshot is not a dropped tray: three go, not two, and nobody in
+    // earshot just turns his head and carries on with his round
+    const shot = opts.type === "gunfire" || opts.type === "gunshot";
+    const send = opts.ambient ? 1 : (shot ? 3 : 2);
     let sent = 0;
     for (const it of list) {
       const g = it.g;
@@ -1970,7 +2156,10 @@
         g._returning = false;
         g._earCD = opts.ambient ? 25 : 6;
         sent++;
-      } else if (!busy) g.sus = Math.max(g.sus || 0, SUS_ON + 0.02);   // a head turns
+      } else if (!busy) {
+        g.sus = Math.max(g.sus || 0, shot ? SUS_CHECK + 0.02 : SUS_ON + 0.02);   // a head turns (a shot: he goes to look)
+        if (shot) g.alert = Math.max(g.alert || 0, 2.5);
+      }
     }
     return sent;
   }
