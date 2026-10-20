@@ -820,7 +820,15 @@
     dx /= dl; dz /= dl;
 
     const grp = s.group;
-    const building = !!facadeAt(x, y, z);
+    // WHAT WAS HIT is known by whoever detected the contact (the airframe
+    // sweep in playeraircraft.js, airtraffic.js, systems/airline.js, all via
+    // city/airspace.js): a live collider or a far building RECORD, which has
+    // no collider at all. Only a caller with no hit falls back to asking the
+    // collider set.
+    const hit = s.hit || (s.obj && s.obj._airHit) || null;
+    const building = hit
+      ? (hit.building != null ? !!hit.building : !!(hit.rec || (hit.collider && tallCollider(hit.collider))))
+      : !!facadeAt(x, y, z);
     // A NaN speed from a half-initialised record must not poison the kinetic
     // arithmetic downstream. (The bus degrades a non-finite energy to
     // multiplier 1 rather than NaN, so this is belt-and-braces — but a NaN
@@ -871,6 +879,12 @@
       // FALLING DEBRIS off a wounded high floor. Only from a real height —
       // debris off a shopfront is just the ejecta cone, already drawn.
       if (building && y > 12) shedHighDebris(s, x, y, z, dx, dz, scale);
+
+      // THE BUILDING TAKES THE AIRFRAME (see BUILDING STRIKE below): the
+      // collapse system carves the hole the fuselage and wings cut, the fuel
+      // burns the struck floors, the people on them die.
+      if (building) { try { buildingStrike(s, x, y, z, dx, dz, vImp, mass, hit); } catch (e) {} }
+      else { try { killZone(x, y, z, Math.max(6, s.dims.span * 0.6), s, "plane crash"); } catch (e) {} }
     }
 
     // THE AIRFRAME'S OWN END — city/crashdeform.js, extended from cars to
@@ -961,6 +975,182 @@
     }
     return best;
   }
+
+  function tallCollider(c) {
+    return !!c && ((c.y1 == null ? 18 : c.y1) - (c.y0 || 0)) > 2.5 && !isAircraftCollider(c);
+  }
+
+  /* ============================================================
+     BUILDING STRIKE — what the building does with an airframe in it.
+
+     The ordnance bus (above) already priced the hit for the structural
+     ledger: penetration, the severed floor width, the fire automaton, the
+     load path. What it never did was touch the BUILDING ITSELF: the
+     ledger's numbers changed, the facade got a wound dressing, and the
+     tower stood there with no hole in it until the ledger condemned it.
+     This is the rest of the sequence, through the shared systems only:
+
+       THE CARVE   CBZ.collapse.damage — the one structural model — at the
+                   seats the airframe actually cut: the fuselage at the
+                   face, both wings either side of it, and the deepest point
+                   the wreck reached (the penetration e-fold, the same
+                   LAMBDA structural.js uses). Chunks inside each seat lose
+                   integrity by energy/toughness; the ones that reach zero
+                   are blown INTO the building along the travel axis as
+                   pieces of themselves (the plane's momentum, carried), and
+                   the load path decides what that leaves hanging.
+       THE ENERGY  in megajoules, collapse.js's unit: the airframe's kinetic
+                   energy plus the share of its fuel's chemical energy that
+                   does structural work (most of it is the fireball). An
+                   A320-class hull at 130 m/s: ~610 MJ kinetic + ~940 MJ
+                   coupled fuel = ~1,550 MJ. A Cessna at 40 m/s: ~15 MJ —
+                   less than a car bomb, which is what it is.
+       THE FIRE    the struck floor and the floors either side (an airliner
+                   two each way) are lit on the structural ledger, whose
+                   fire automaton spreads, heats and weakens them; enough
+                   of that and the load path fails later. Fuel fireballs
+                   roll out of the entry face and, for a big airframe, out
+                   of the far side.
+       THE PEOPLE  everyone on the struck floors inside the cut dies, through
+                   the kill bus (peds, the player if he is standing there,
+                   the crowd at street level for a low strike).
+     ============================================================ */
+  const FUEL_FRAC = { small: 0.18, jet: 0.30, airliner: 0.25 };   // fuel as a share of the airframe's mass
+  const FUEL_MJ_KG = 43;                                          // jet A / avgas
+  const FUEL_COUPLE = 0.0012;                                     // share of that chemical energy doing structural work
+  function strikeMJ(cls, mass, v) {
+    return 0.5 * mass * v * v / 1e6 + mass * (FUEL_FRAC[cls] || 0.2) * FUEL_MJ_KG * FUEL_COUPLE;
+  }
+  A.energyMJ = function (cls, dims, v) {
+    cls = okCls(cls);
+    return strikeMJ(cls, massOf(cls, dims ? normDims(dims) : DEF_DIMS[cls]), v);
+  };
+  function strikeLot(x, z, hit) {
+    if (hit && hit.lot) return hit.lot;
+    if (hit && hit.rec && hit.rec.lot) return hit.rec.lot;
+    const S = CBZ.structure;
+    return S && S.lotAt ? S.lotAt(x, z, 6) : null;
+  }
+  function fuelBall(x, y, z, radius, power, byPlayer) {
+    const fn = CBZ.cityAirstrikeExplosion || CBZ.cityExplosion;
+    if (!fn) return;
+    try {
+      // noDamage: the strike was priced once, above; this is the fuel burning
+      fn(x, z, { power: power, radius: radius, y: y, byPlayer: !!byPlayer, noDamage: true,
+                 _impact: true, _airImpact: true, kind: "fuel" });
+    } catch (e) {}
+  }
+  function buildingStrike(s, x, y, z, dx, dz, v, mass, hit) {
+    const d = s.dims, cls = s.cls;
+    const E = strikeMJ(cls, mass, v);
+    const lot = strikeLot(x, z, hit);
+    const bld = lot && lot.building;
+    const row = CBZ.impact && CBZ.impact.row ? CBZ.impact.row(ROW[cls] || "crashSmall") : null;
+    const pen = row && row.pen > 0 ? row.pen : (cls === "airliner" ? 26 : cls === "jet" ? 12 : 4);
+    let depth = LAMBDA * Math.log(1 + pen);
+    // how far through the building the travel axis runs (for the exit fire)
+    let through = 0;
+    if (bld && bld.w > 0 && bld.d > 0) {
+      through = Math.abs(dx) * bld.w + Math.abs(dz) * bld.d;
+      depth = Math.min(depth, through * 0.6);
+    } else if (hit && hit.rec) {
+      through = 2 * (Math.abs(dx) * hit.rec.ex + Math.abs(dz) * hit.rec.ez);
+      depth = Math.min(depth, through * 0.6);
+    }
+    // ---- the carve
+    let carved = 0;
+    if (bld && CBZ.collapse && CBZ.collapse.damage) {
+      const rx = -dz, rz = dx;
+      const Rc = Math.max(2.2, d.height * 0.45 + 1);
+      const Rw = Math.max(1.6, d.span * 0.14);
+      const wing = d.span * 0.32;
+      const dir = { x: dx, y: -0.1, z: dz };
+      // [depth into the face, offset across it, radius, share of E]
+      const seats = [[0.6, 0, Rc, 0.38], [0.6, wing, Rw, 0.16], [0.6, -wing, Rw, 0.16], [Math.max(1.2, depth), 0, Rc * 0.85, 0.30]];
+      for (let i = 0; i < seats.length; i++) {
+        const q = seats[i];
+        if (q[1] && Math.abs(q[1]) < 1.2) continue;           // a light single's wings are the fuselage seat
+        const p = { x: x + dx * q[0] + rx * q[1], y: y - (q[1] ? 0.3 : 0), z: z + dz * q[0] + rz * q[1] };
+        try { if (CBZ.collapse.damage(bld, p, q[2], E * q[3], dir)) carved++; } catch (e) {}
+      }
+    }
+    // ---- the struck floors burn
+    const S = CBZ.structure;
+    if (lot && S && S.ignite) {
+      const FH = (bld && bld.FH) || 3.2;
+      const f0 = Math.max(0, Math.floor((y - 0.2) / FH) || 0);
+      const span = cls === "airliner" ? 2 : cls === "jet" ? 1 : 0;
+      for (let k = -span; k <= span; k++) { try { S.ignite(lot, f0 + k); } catch (e) {} }
+    }
+    // ---- the fuel
+    const fuelKg = mass * (FUEL_FRAC[cls] || 0.2);
+    if (fuelKg > 120) {
+      const R = Math.min(30, 4 + Math.cbrt(fuelKg) * 0.9);
+      fuelBall(x - dx * 2.5, y + 1.5, z - dz * 2.5, R * 0.6, Math.min(3.2, 1.2 + R / 18), s.byPlayer);
+      // a big airframe's fuel goes THROUGH: the far-side fireball
+      if (cls !== "small" && through > 0 && through < 70) {
+        fuelBall(x + dx * (through + 3), y + 2, z + dz * (through + 3), R * 0.45, Math.min(2.6, 1 + R / 22), s.byPlayer);
+      }
+    }
+    // ---- the people on those floors
+    killZone(x + dx * depth * 0.5, y, z + dz * depth * 0.5,
+      Math.max(6, d.span * 0.55 + depth * 0.5), s, "killed in the plane strike",
+      ((bld && bld.FH) || 3.2) * (cls === "airliner" ? 2.5 : 1.5) + 2);
+    return { energyMJ: E, carved: carved, lot: lot };
+  }
+
+  // Everyone inside the cut dies. Horizontal radius R, vertical band vb
+  // either side of the impact height. The player is spared only from his
+  // OWN crash, where playeraircraft.js's crash path decides his fate.
+  function killZone(x, y, z, R, s, cause, vb) {
+    vb = vb || 6;
+    const by = s.byPlayer ? CBZ.player : null;
+    let n = 0;
+    try {
+      const peds = CBZ.cityPeds || [];
+      for (let i = 0; i < peds.length && n < 40; i++) {
+        const p = peds[i];
+        if (!p || p.dead || !p.pos) continue;
+        const ex = p.pos.x - x, ez = p.pos.z - z;
+        if (ex * ex + ez * ez > R * R || Math.abs(p.pos.y - y) > vb) continue;
+        if (CBZ.cityKillPed) { CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: 14, fling: 6, byPlayer: !!s.byPlayer, by: by }, cause); n++; }
+      }
+    } catch (e) {}
+    try {
+      const P = CBZ.player;
+      if (!s.byPlayer && P && !P.dead && P.pos && CBZ.cityHurtPlayer &&
+          Math.hypot(P.pos.x - x, P.pos.z - z) < R && Math.abs(P.pos.y - y) < vb) {
+        CBZ.cityHurtPlayer(9999, x, z, cause, false, null, false);
+      }
+    } catch (e) {}
+    try {
+      if (y - floorAt(x, z) < 8 && CBZ.crowds && CBZ.crowds.crush) CBZ.crowds.crush(x, z, R * 0.7, { cause: cause, byPlayer: !!s.byPlayer });
+    } catch (e) {}
+    return n;
+  }
+
+  /* PUBLIC: an airframe has met a building (or the ground) — run the whole
+     catastrophe for it. The detector (whoever swept the airframe) hands over
+     what it hit; nothing here re-detects.
+       obj   the airframe's record (registry key for once-only)
+       hit   { x, y, z, nx?, nz?, rec?, collider?, lot?, building? }
+       info  { group, cls, dims, vx, vy, vz, speed, byPlayer, heli, entryDrawn } */
+  CBZ.cityAircraftStrike = A.strike = function (obj, hit, info) {
+    if (!obj || !hit || isDone(obj)) return null;
+    info = info || {};
+    const grp = info.group || obj.group || obj.grp || null;
+    const dims = info.dims ? normDims(info.dims) : dimsFor(obj, grp);
+    const cls = info.cls ? okCls(info.cls) : classOf(obj, dims);
+    const vx = +info.vx || 0, vy = +info.vy || 0, vz = +info.vz || 0;
+    const s = {
+      obj: obj, group: grp, dims: dims, cls: cls, heli: !!info.heli,
+      x: hit.x, y: hit.y, z: hit.z, vx: vx, vy: vy, vz: vz,
+      speed: info.speed != null ? +info.speed : Math.hypot(vx, vy, vz),
+      heading: info.heading || 0, byPlayer: !!info.byPlayer,
+      handled: false, idle: 0, stale: 0, seen: 1, hit: hit,
+    };
+    return impactFrom(s, hit.x, hit.y, hit.z, info.entryDrawn ? {} : null);
+  };
 
   /* PUBLIC: run the catastrophe at a point without a tracked airframe (a
      mission scripting a strike, a test probe). info = {cls, speed, dirx, dirz,

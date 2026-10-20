@@ -1530,6 +1530,11 @@
     const t = BUILT.byKey.get(Math.floor(rec.fab.x / TILE) + "," + Math.floor(rec.fab.z / TILE));
     return !!(t && t.fab && t.fab.farBuilt && !t.farEmpty);
   };
+  // city/airspace.js: every built-world building as data (its far record —
+  // footprint, height, lot), so an aircraft can hit a building that exists
+  // only as a far draw and a flight can be routed over a skyline it cannot
+  // see. Read-only; the array is replaced on a world rebuild.
+  CBZ.metroBuiltRecords = function () { return BUILT.recs; };
   function builtAudit() {
     if (!BUILT.M) return null;
     let ready = 0, gone = 0;

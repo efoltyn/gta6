@@ -2108,8 +2108,26 @@
     if (travel < 0.015) return null;
     const dims = airframeDims(craft);
     let best = sweepWorld(craft, from, to, dims, null);
+    best = sweepFar(craft, from, to, dims, best);
     best = sweepAircraft(craft, from, to, dims, best);
     return best;
+  }
+  /* THE FAR CITY IS SOLID TOO. sweepWorld only sees CBZ.colliders, and a
+     building exists as colliders only once its near tile is built round the
+     camera: at 250 m/s a jet out-runs the streamer, and a far tower drawn as
+     an HLOD had nothing in it to hit. city/airspace.js holds every building
+     in the world as a RECORD (footprint, yaw, height) and accepts a record
+     hit only where no near collider covers it, so this never double-counts
+     the near city and never invents a wall the real geometry lacks. Records
+     only here: sweepWorld already did the colliders. */
+  function sweepFar(craft, from, to, dims, best) {
+    const AS = CBZ.airspace;
+    if (!AS || !AS.sweepAirframe || g.mode !== "city") return best;
+    const c0 = { x: from.x, y: from.y + dims.height * 0.31, z: from.z };
+    const c1 = { x: to.x, y: to.y + dims.height * 0.31, z: to.z };
+    const h = AS.sweepAirframe(c0, c1, dims, { colliders: false });
+    if (!h || (best && h.t >= best.t)) return best;
+    return { t: h.t, x: h.x, y: h.y, z: h.z, nx: h.nx, ny: h.ny, nz: h.nz, collider: null, record: h.rec, lot: h.lot, part: h.part || "fuselage" };
   }
   CBZ.cityAircraftSweepProbe = function (craft, from, to) {
     const h = sweptAirframeImpact(craft, from, to);
@@ -2183,8 +2201,13 @@
     const y = impact && impact.y != null ? impact.y : craft.pos.y;
     const z = impact && impact.z != null ? impact.z : craft.pos.z;
     const heavy = craft.airClass === "airliner";
-    const buildingHit = !!(impact && impact.collider && !aircraftColliderRef(impact.collider) &&
-      ((impact.collider.y1 == null ? 18 : impact.collider.y1) - (impact.collider.y0 || 0)) > 2.5);
+    const buildingHit = !!(impact && ((impact.collider && !aircraftColliderRef(impact.collider) &&
+      ((impact.collider.y1 == null ? 18 : impact.collider.y1) - (impact.collider.y0 || 0)) > 2.5) || impact.record));
+    // what was hit, for city/aircraftimpact.js's building strike (the blast
+    // below is what it claims; a far-building RECORD has no collider for it
+    // to find on its own)
+    if (impact && (impact.collider || impact.record)) craft._airHit = { x: x, y: y, z: z, nx: impact.nx, nz: impact.nz, collider: impact.collider || null,
+      rec: impact.record || null, lot: impact.lot || null, building: buildingHit };
     const major = buildingHit && impactSpeed >= (heavy ? 24 : 30);
     const power = heavy ? 3.2 : 2.4, radius = heavy ? 18 : 13;
     // outside Gang City the crash is the shared ordnance bus's blast

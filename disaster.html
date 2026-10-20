@@ -1334,7 +1334,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carlod.js?v=pf0930e"></script>
 <script src="src/city/vehicles.js?v=island1014"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
-<script src="src/city/playeraircraft.js?v=island1014"></script>
+<script src="src/city/playeraircraft.js?v=planes1020"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1412,6 +1412,12 @@ document.body.appendChild(b);}}catch(e){}})();
      declared and OFF: a passenger deck in a machine the player is flying is
      playeraircraft.js/bailout.js's wave, and the button says so. -->
 <script src="src/city/passengerseat.js?v=exit1"></script>
+<!-- AIRSPACE: every building in the world (metro plan records + the built
+     world's far records, near colliders on top) as one index an aircraft can
+     hit and a flight can be planned over: CBZ.airspace.topNear / ringTop /
+     sweep / sweepAirframe. Read by playeraircraft.js, airtraffic.js and
+     systems/airline.js at runtime; needs nothing loaded before it. -->
+<script src="src/city/airspace.js?v=planes1020"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
@@ -1580,7 +1586,7 @@ document.body.appendChild(b);}}catch(e){}})();
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=speed1014"></script>
 <script src="src/city/metro_ground.js?v=peak1014"></script>
-<script src="src/city/metro.js?v=peak1014c"></script>
+<script src="src/city/metro.js?v=planes1020"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- WHO A PERSON IS AND WHAT YOU CAN DO TO HIM: the role -> verbs table the
      registry filters every street verb through, the one-line title over a
