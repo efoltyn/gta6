@@ -22,7 +22,7 @@ CBZ.lab.kit("island", {
   about: "the disaster island built whole: size, buildings, overlaps, lot lines, cars on roads, boot time",
   files: ["src/vendor/BufferGeometryUtils.js", "src/city/facade_openings.js", "src/city/facade_kit.js", "src/city/facades/*.js",
     "src/world/vegetation.js", "src/world/fuel_station.js", "src/world/hull_loft.js", "src/world/water_hulls.js",
-    "src/systems/stairs.js", "src/world/island_roads.js", "src/world/island_plan.js", "src/world/instance_proxy.js",
+    "src/systems/stairs.js", "src/world/island_roads.js", "src/world/island_plan.js", "src/world/island_building.js", "src/world/instance_proxy.js",
     "src/world/disaster_arena.js", "src/world/island_dressing.js"],
   duration: 0.1,
   setup: function (W) {
