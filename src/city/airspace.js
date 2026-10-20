@@ -426,6 +426,32 @@
   };
 
   AS.records = function () { fresh(); return recs; };
+  // the records whose oriented box (padded by `pad`) contains (x, y, z):
+  // what a blast at that point is inside of (city/metro_promote.js)
+  AS.recordsAt = function (x, y, z, pad, out) {
+    fresh();
+    out = out || [];
+    out.length = 0;
+    pad = pad || 0;
+    const sid = ++stamp;
+    const ix0 = Math.floor((x - pad) / CELL), ix1 = Math.floor((x + pad) / CELL);
+    const iz0 = Math.floor((z - pad) / CELL), iz1 = Math.floor((z + pad) / CELL);
+    for (let ix = ix0; ix <= ix1; ix++) for (let iz = iz0; iz <= iz1; iz++) {
+      const c = cells.get(key(ix, iz));
+      if (!c) continue;
+      for (let i = 0; i < c.list.length; i++) {
+        const r = c.list[i];
+        if (r._s === sid) continue;
+        r._s = sid;
+        if (y != null && (y < r.y0 - pad || y > r.y1 + pad)) continue;
+        const rx = x - r.cx, rz = z - r.cz;
+        const lx = rx * r.co - rz * r.si, lz = rx * r.si + rz * r.co;
+        if (Math.abs(lx) > r.hw + pad || Math.abs(lz) > r.hd + pad) continue;
+        out.push(r);
+      }
+    }
+    return out;
+  };
   CBZ.airspaceAudit = function () {
     fresh();
     const src = {};

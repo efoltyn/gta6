@@ -384,13 +384,20 @@
      demolition.js used, lifted here so there is exactly ONE answer to the
      question in the codebase.
      ============================================================ */
+  // LOTS THAT ARE NOT THE ARENA'S: a metro building promoted out of its
+  // merged tile into a real shell (city/metro_promote.js) registers its lot
+  // here, so every blast, fire and collapse finds it the same way.
+  S.extraLots = [];
   function lotAt(x, z, margin) {
     const A = arena();
-    if (!A || !A.lots) return null;
+    const XL = S.extraLots;
+    if ((!A || !A.lots) && !XL.length) return null;
     margin = margin == null ? 3 : margin;
     let best = null, bd = 1e9;
-    for (let i = 0; i < A.lots.length; i++) {
-      const lot = A.lots[i], b = lot.building;
+    const L0 = (A && A.lots) || [];
+    const NL = L0.length + XL.length;
+    for (let i = 0; i < NL; i++) {
+      const lot = i < L0.length ? L0[i] : XL[i - L0.length], b = lot.building;
       if (!b || lot.demolished) continue;
       /* NaN IS NOT A DISTANCE. With an incomplete footprint `d` comes out NaN,
          and NaN passes BOTH guards below (`NaN > margin` is false, `NaN >= bd`

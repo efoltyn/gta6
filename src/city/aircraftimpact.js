@@ -1040,24 +1040,9 @@
                  _impact: true, _airImpact: true, kind: "fuel" });
     } catch (e) {}
   }
-  function buildingStrike(s, x, y, z, dx, dz, v, mass, hit) {
+  function carveAndBurn(lot, s, x, y, z, dx, dz, E, depth) {
     const d = s.dims, cls = s.cls;
-    const E = strikeMJ(cls, mass, v);
-    const lot = strikeLot(x, z, hit);
     const bld = lot && lot.building;
-    const row = CBZ.impact && CBZ.impact.row ? CBZ.impact.row(ROW[cls] || "crashSmall") : null;
-    const pen = row && row.pen > 0 ? row.pen : (cls === "airliner" ? 26 : cls === "jet" ? 12 : 4);
-    let depth = LAMBDA * Math.log(1 + pen);
-    // how far through the building the travel axis runs (for the exit fire)
-    let through = 0;
-    if (bld && bld.w > 0 && bld.d > 0) {
-      through = Math.abs(dx) * bld.w + Math.abs(dz) * bld.d;
-      depth = Math.min(depth, through * 0.6);
-    } else if (hit && hit.rec) {
-      through = 2 * (Math.abs(dx) * hit.rec.ex + Math.abs(dz) * hit.rec.ez);
-      depth = Math.min(depth, through * 0.6);
-    }
-    // ---- the carve
     let carved = 0;
     if (bld && CBZ.collapse && CBZ.collapse.damage) {
       const rx = -dz, rz = dx;
@@ -1081,6 +1066,34 @@
       const f0 = Math.max(0, Math.floor((y - 0.2) / FH) || 0);
       const span = cls === "airliner" ? 2 : cls === "jet" ? 1 : 0;
       for (let k = -span; k <= span; k++) { try { S.ignite(lot, f0 + k); } catch (e) {} }
+    }
+    return carved;
+  }
+  function buildingStrike(s, x, y, z, dx, dz, v, mass, hit) {
+    const d = s.dims, cls = s.cls;
+    const E = strikeMJ(cls, mass, v);
+    const lot = strikeLot(x, z, hit);
+    const bld = lot && lot.building;
+    const row = CBZ.impact && CBZ.impact.row ? CBZ.impact.row(ROW[cls] || "crashSmall") : null;
+    const pen = row && row.pen > 0 ? row.pen : (cls === "airliner" ? 26 : cls === "jet" ? 12 : 4);
+    let depth = LAMBDA * Math.log(1 + pen);
+    // how far through the building the travel axis runs (for the exit fire)
+    let through = 0;
+    if (bld && bld.w > 0 && bld.d > 0) {
+      through = Math.abs(dx) * bld.w + Math.abs(dz) * bld.d;
+      depth = Math.min(depth, through * 0.6);
+    } else if (hit && hit.rec) {
+      through = 2 * (Math.abs(dx) * hit.rec.ex + Math.abs(dz) * hit.rec.ez);
+      depth = Math.min(depth, through * 0.6);
+    }
+    // ---- the carve and the fire: on the real building. A metro building
+    // drawn inside a merged tile is PROMOTED to one first (city/
+    // metro_promote.js: a real shell, cut out of the tile, a lot in the
+    // ledger) and takes the same cut a frame or two later.
+    let carved = 0;
+    if (lot) carved = carveAndBurn(lot, s, x, y, z, dx, dz, E, depth);
+    else if (hit && hit.rec && hit.rec.src === "metro" && CBZ.metroPromote && CBZ.metroPromote.request) {
+      CBZ.metroPromote.request(hit.rec, function (plot) { if (plot) { try { carveAndBurn(plot, s, x, y, z, dx, dz, E, depth); } catch (e) {} } });
     }
     // ---- the fuel
     const fuelKg = mass * (FUEL_FRAC[cls] || 0.2);

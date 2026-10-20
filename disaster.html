@@ -1417,7 +1417,7 @@ document.body.appendChild(b);}}catch(e){}})();
      hit and a flight can be planned over: CBZ.airspace.topNear / ringTop /
      sweep / sweepAirframe. Read by playeraircraft.js, airtraffic.js and
      systems/airline.js at runtime; needs nothing loaded before it. -->
-<script src="src/city/airspace.js?v=planes1020"></script>
+<script src="src/city/airspace.js?v=promote1020"></script>
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
@@ -1440,13 +1440,19 @@ document.body.appendChild(b);}}catch(e){}})();
      turn to dust instead of pieces) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
 <script src="src/city/collapse.js?v=debris1015"></script>
 <script src="src/systems/strike.js?v=strike1013m"></script>
-<script src="src/city/structural.js?v=nukecost1013"></script>
+<script src="src/city/structural.js?v=promote1020"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
 <script src="src/systems/tornado.js?v=debris1015"></script>
+<!-- METRO PROMOTION: a metro (Kingsbridge / Kingsport / Karvel) building hit by
+     anything big is cut out of its merged tile mesh and rebuilt as a real shell
+     (cityMakeBuilding) with colliders and a structural lot, then handed to
+     CBZ.collapse. Lazy, one at a time; restored on stream-out and reset. Wraps
+     CBZ.detonate (impactbus.js) at runtime. ?cfg_METRO_PROMOTE=0 = off. -->
+<script src="src/city/metro_promote.js?v=promote1020"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
@@ -1580,13 +1586,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
 <script src="src/city/countryside.js?v=fortb1009"></script>
-<script src="src/city/metro_fabric.js?v=reach1013"></script>
+<script src="src/city/metro_fabric.js?v=promote1020"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=speed1014"></script>
 <script src="src/city/metro_ground.js?v=peak1014"></script>
-<script src="src/city/metro.js?v=planes1020"></script>
+<script src="src/city/metro.js?v=promote1020"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- WHO A PERSON IS AND WHAT YOU CAN DO TO HIM: the role -> verbs table the
      registry filters every street verb through, the one-line title over a
