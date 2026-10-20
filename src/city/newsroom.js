@@ -11,11 +11,14 @@
    filler, and every apartment, hideout and crash pad in the fit-out had a
    blue glowing box with a red bar under it standing in for a picture.
 
-   NOW: ONE STORE OF STORIES, ONE CANVAS, ONE TEXTURE, ONE MATERIAL. Every
-   screen in the game is a plane carrying the same material; the canvas is
-   repainted at most twice a second and only while a registered screen is
-   near the player (beyond NEAR m nothing is painted at all). One 512x288
-   upload, however many sets are on.
+   NOW: ONE STORE OF STORIES, ONE PICTURE, ONE MATERIAL. Every screen in the
+   game is a plane carrying the same material. The picture is a real studio
+   (city/newsstudio.js: a game character in a suit reading at a desk, cut now
+   and then to a field camera in the real city or to the weather map), drawn
+   once for every set, only while a set is on screen within NEAR m, with this
+   file's overlay (bug, headline, bottom line) on top: see 5b. Where the
+   studio cannot draw, and for the LIVE feeds, the flat canvas below is the
+   picture, repainted at most twice a second.
 
    WHERE STORIES COME FROM (every one is something that happened):
      - CBZ.news.push(headline, opts)       any file with a real headline
@@ -67,7 +70,7 @@
 
   // ---------------------------------------------------------------- tuning
   const W = 512, H = 288;
-  const NEAR = 30;            // m: a screen this close (and this storey) is painted
+  const NEAR = 40;            // m: a screen this close (and this storey) gets a picture
   const CLOSE = 9;            // m: this close it is painted twice a second, else once
   const STOREY = 4.5;         // m of height difference that still counts as "this storey"
   const HOLD = 9;             // s a story stays on screen
@@ -1019,6 +1022,11 @@
   }
 
   /* ---- the painter ------------------------------------------------------- */
+  // THE FLAT PICTURE: only where the 3D studio cannot draw (no WebGL renderer:
+  // the node checks, a failed build) and for the LIVE feeds. There is no
+  // painted person in it any more: the anchor is a real body in
+  // city/newsstudio.js, and where that cannot draw the set shows the channel's
+  // globe over an empty desk rather than a cartoon of a man.
   function paint() {
     if (!CTX) return;
     const c = CTX, t = CLOCK;
@@ -1031,13 +1039,15 @@
     c.fillStyle = bg; c.fillRect(0, 0, W, H);
     c.fillStyle = "rgba(90,140,220,.14)";
     for (let i = 0; i < 9; i++) c.fillRect(20 + i * 56, 26, 34, 150);
-    c.fillStyle = "rgba(255,255,255,.05)";
-    c.beginPath(); c.arc(150, 100, 86, 0, Math.PI * 2); c.fill();
-    c.strokeStyle = "rgba(160,200,255,.12)"; c.lineWidth = 1;
-    for (let i = -3; i <= 3; i++) { c.beginPath(); c.ellipse(150, 100, 86, Math.abs(i) * 14 + 4, 0, 0, Math.PI * 2); c.stroke(); }
     c.fillStyle = "#0f2446";
     for (let i = 0; i < 16; i++) { const bh = 20 + ((i * 37) % 50); c.fillRect(i * 32, 176 - bh, 28, bh); }
-    drawAnchor(c, 150, t);
+    c.fillStyle = "rgba(255,255,255,.06)";
+    c.beginPath(); c.arc(150, 110, 70, 0, Math.PI * 2); c.fill();
+    c.strokeStyle = "rgba(160,200,255,.18)"; c.lineWidth = 1;
+    for (let i = -3; i <= 3; i++) { c.beginPath(); c.ellipse(150, 110, 70, Math.abs(i) * 11 + 3, 0, 0, Math.PI * 2); c.stroke(); }
+    c.fillStyle = "#c0392b"; c.fillRect(92, 94, 116, 32);
+    c.fillStyle = "#fff"; c.font = "bold 22px Arial, sans-serif"; c.textAlign = "center"; c.textBaseline = "middle";
+    c.fillText("NEWS ONE", 150, 111); c.textAlign = "left";
     // the desk
     const dk = c.createLinearGradient(0, 178, 0, 240);
     dk.addColorStop(0, "#1a2f55"); dk.addColorStop(1, "#0a1428");
@@ -1047,7 +1057,15 @@
     drawFootage(c, s, look, t);
     // channel bug + LIVE + clock
     channelBug(c, t, ".55");
-    // the lower third: a tag and the headline, big, one line each
+    lowerThird(c, s, t);
+    // the glass: faint scanlines
+    c.fillStyle = "rgba(0,0,0,.07)";
+    for (let y = 0; y < H; y += 3) c.fillRect(0, y, W, 1);
+    N.painted++;
+  }
+  // the lower third: a tag and the headline, big, one line each, and the
+  // next story on the bottom line. The same furniture over every picture.
+  function lowerThird(c, s, t) {
     const brk = s.kind === "breaking" && t < N.breakingUntil;
     c.textAlign = "left";
     const tag = brk ? "BREAKING" : (s.cat ? String(s.cat).slice(0, 12) : null);
@@ -1062,10 +1080,6 @@
     c.fillStyle = "#101010";
     fitText(c, short(s.h, 60).toUpperCase(), 12, 242, W - 24, 26, false, 18);
     bottomLine(c, "NEXT", "#f4c542", "#0a0f19");
-    // the glass: faint scanlines
-    c.fillStyle = "rgba(0,0,0,.07)";
-    for (let y = 0; y < H; y += 3) c.fillRect(0, y, W, 1);
-    N.painted++;
   }
   function lookOf(cat) {
     cat = String(cat || "");
@@ -1124,28 +1138,6 @@
     if (!out.length) out.push(fallback().h);
     return out;
   }
-  function drawAnchor(c, cx, t) {
-    const nod = Math.sin(t * 1.7) * 1.2, talk = (Math.floor(t * 6) % 3) ? 1 : 0;
-    c.fillStyle = "#1b1f2a";
-    c.beginPath();
-    c.moveTo(cx - 62, 186); c.lineTo(cx - 50, 146); c.quadraticCurveTo(cx, 132, cx + 50, 146); c.lineTo(cx + 62, 186); c.closePath(); c.fill();
-    c.fillStyle = "#f2f2f2";
-    c.beginPath(); c.moveTo(cx - 13, 140); c.lineTo(cx, 166); c.lineTo(cx + 13, 140); c.closePath(); c.fill();
-    c.fillStyle = "#8e2430";
-    c.beginPath(); c.moveTo(cx - 4, 146); c.lineTo(cx + 4, 146); c.lineTo(cx + 6, 172); c.lineTo(cx, 178); c.lineTo(cx - 6, 172); c.closePath(); c.fill();
-    c.fillStyle = "#c79a7a";
-    c.fillRect(cx - 9, 124 + nod, 18, 18);
-    c.beginPath(); c.ellipse(cx, 104 + nod, 21, 26, 0, 0, Math.PI * 2); c.fill();
-    c.fillStyle = "#3a2a1f";
-    c.beginPath(); c.ellipse(cx, 88 + nod, 22, 13, 0, Math.PI, Math.PI * 2); c.fill();
-    c.fillRect(cx - 22, 86 + nod, 5, 14); c.fillRect(cx + 17, 86 + nod, 5, 14);
-    c.fillStyle = "#2a1d16";
-    c.fillRect(cx - 10, 101 + nod, 5, 3); c.fillRect(cx + 5, 101 + nod, 5, 3);
-    c.fillRect(cx - 11, 96 + nod, 7, 2); c.fillRect(cx + 4, 96 + nod, 7, 2);
-    c.fillStyle = "#7d3b34";
-    c.fillRect(cx - 6, 116 + nod, 12, 2 + talk * 2);
-  }
-
   /* ---- the footage box over the anchor's shoulder ------------------------ */
   const FX = 296, FY = 44, FW = 204, FH = 142;
   function drawFootage(c, s, look, t) {
@@ -1437,7 +1429,226 @@
   }
 
   /* ========================================================================
-     6. THE FRAME LOOP: clock, rotation, polls, and a paint only when a
+     5b. THE BROADCAST: a real studio behind the words (city/newsstudio.js)
+
+     The picture on every TV is now one shared render: the anchor (a real
+     CBZ.human body in a suit, at a desk, in a small studio scene that is never
+     part of the world) or, cut to now and then, a FIELD REPORT (the real city
+     from a camera on a kerb near you) or the WEATHER MAP (a full-frame
+     graphic). Over all three goes the OVERLAY: its own transparent canvas with
+     the channel bug, the over-the-shoulder box, the tag, the headline and the
+     bottom line, at exactly the sizes the flat picture uses, so every set
+     reads the same from the doorway.
+
+     THE BUDGET. The studio is drawn ONLY while a screen is on screen (in the
+     camera's frustum, facing it) and within NEAR m on your storey: 8 pictures
+     a second for the anchor, 5 for a field shot, into 512x288, one picture
+     for every set. A field shot is at most FIELD_HOLD s, at least FIELD_GAP s
+     apart, and only in the city at quality tier 2 or better. The overlay is
+     repainted at most twice a second. Nothing on screen: nothing is drawn and
+     the anchor's face stops (systems/facial.js skips a hidden rig).
+     The LIVE feeds (the President's address, the results desk) stay the flat
+     canvas.
+     ======================================================================== */
+  const STUDIO_FPS = 8, FIELD_FPS = 5;
+  const FIELD_GAP = 22, FIELD_HOLD = 7, CUT_AT = 4;      // s
+  const FIELD_LOOKS = { police: 1, fire: 1, collapse: 1, traffic: 1, turf: 1, strike: 1, war: 1, nuke: 1, tsunami: 1, quake: 1 };
+  let OV = null, OVCTX = null, OVTEX = null;
+  const ST = {
+    on: false, onAt: -1e9, acc: 0, shot: "anchor", shotAt: 0, story: null, storyAt: 0,
+    plan: null, fieldAt: -1e9, ovAt: -1e9, ovDirty: true, force: false, fails: 0, off: false,
+    framing: "desk", stories: 0, pictures: 0,
+  };
+  function ensureOverlay() {
+    if (OV) return true;
+    if (typeof document === "undefined") return false;
+    OV = document.createElement("canvas"); OV.width = W; OV.height = H;
+    OVCTX = OV.getContext("2d");
+    OVTEX = new THREE.CanvasTexture(OV);
+    if (THREE.sRGBEncoding != null) OVTEX.encoding = THREE.sRGBEncoding;
+    OVTEX.generateMipmaps = false;
+    OVTEX.minFilter = THREE.LinearFilter;
+    return true;
+  }
+  function studio() { return CBZ.newsStudio || null; }
+  function studioOn() {
+    const NS = studio();
+    return !!(NS && !ST.off && !LIVE.spec && NS.ok() && ensureOverlay());
+  }
+  function fieldOK() {
+    if (g.mode !== "city" || !CBZ.scene || !CBZ.player) return false;
+    const tier = CBZ.getQualityLevel ? CBZ.getQualityLevel() : 4;
+    return tier >= 2;
+  }
+
+  // IS A SET ON SCREEN? in range, this storey, facing the camera, in its frustum
+  let _fr = null, _pm = null, _sph = null, _cp = null;
+  function screenOnScreen() {
+    const P = player(), cam = CBZ.camera;
+    if (!P || !P.pos || !cam) return false;
+    if (!_fr) { _fr = new THREE.Frustum(); _pm = new THREE.Matrix4(); _sph = new THREE.Sphere(); _cp = new THREE.Vector3(); }
+    cam.updateMatrixWorld();
+    _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    _fr.setFromProjectionMatrix(_pm);
+    _cp.setFromMatrixPosition(cam.matrixWorld);
+    for (let i = SCREENS.length - 1; i >= 0; i--) {
+      const o = SCREENS[i];
+      if (!o || o.visible === false || !attached(o)) continue;
+      const e = o.matrixWorld.elements;
+      const x = e[12], y = e[13], z = e[14];
+      if (Math.abs(y - P.pos.y) > STOREY + 1.5) continue;
+      if (Math.hypot(x - P.pos.x, z - P.pos.z) > NEAR) continue;
+      if ((_cp.x - x) * e[8] + (_cp.y - y) * e[9] + (_cp.z - z) * e[10] <= 0) continue;   // its back
+      const sx = Math.hypot(e[0], e[1], e[2]), sy = Math.hypot(e[4], e[5], e[6]);
+      _sph.center.set(x, y, z); _sph.radius = 0.6 * Math.max(sx, sy, 0.2);
+      if (_fr.intersectsSphere(_sph)) return true;
+    }
+    return false;
+  }
+
+  // what the anchor reads: the headline, then the line under it
+  function spoken(s) {
+    const sub = s.sub && s.sub !== s.h ? ". " + s.sub : "";
+    return clean(s.h) + sub;
+  }
+  // a new story: plan its shots (anchor first, then the cut) and start reading
+  function direct() {
+    const NS = studio();
+    const s = N.cur || fallback();
+    if (s !== ST.story) {
+      ST.story = s; ST.storyAt = CLOCK; ST.stories++;
+      const look = s.look || lookOf(s.cat);
+      const brk = s.kind === "breaking" && CLOCK < N.breakingUntil;
+      ST.plan = "anchor";
+      if (look === "weather") ST.plan = "weather";
+      else if (FIELD_LOOKS[look] && fieldOK() && CLOCK - ST.fieldAt > FIELD_GAP) ST.plan = "field";
+      // a breaking story is read close; the rest alternate wide and close
+      ST.framing = brk ? "close" : (ST.stories % 3 === 0 ? "close" : "desk");
+      NS.framing(ST.framing);
+      NS.say(spoken(s));
+      setShot("anchor");
+    }
+    const since = CLOCK - ST.storyAt;
+    if (ST.shot === "anchor" && ST.plan !== "anchor" && since >= CUT_AT) {
+      if (ST.plan === "field" && NS.field()) { ST.fieldAt = CLOCK; setShot("field"); }
+      else if (ST.plan === "weather") setShot("weather");
+      ST.plan = "anchor";
+    } else if (ST.shot === "field" && CLOCK - ST.shotAt >= FIELD_HOLD) setShot("anchor");
+  }
+  function setShot(k) {
+    if (ST.shot === k) return;
+    ST.shot = k; ST.shotAt = CLOCK; ST.ovDirty = true; ST.force = true;
+  }
+
+  // the overlay: the furniture over the picture (transparent where the picture shows)
+  function paintOverlay() {
+    const c = OVCTX, t = CLOCK;
+    const s = N.cur || fallback();
+    const look = s.look || lookOf(s.cat);
+    c.clearRect(0, 0, W, H);
+    if (ST.shot === "weather") paintWeatherMap(c, t);
+    else if (ST.shot === "anchor") drawFootage(c, s, look, t);
+    channelBug(c, t, ".55");
+    if (ST.shot === "field") {
+      const sp = studio().fieldSpot();
+      const where = sp ? districtAt(sp.x, sp.z) : null;
+      const label = short((where || homeCity().name || "").toUpperCase(), 22);
+      if (label) {
+        c.font = "bold 18px Arial, sans-serif"; c.textAlign = "left"; c.textBaseline = "middle";
+        const lw = c.measureText(label).width + 22;
+        c.fillStyle = "rgba(0,0,0,.6)"; c.fillRect(12, 46, lw, 28);
+        c.fillStyle = "#fff"; c.fillText(label, 23, 61);
+      }
+    }
+    lowerThird(c, s, t);
+    c.fillStyle = "rgba(0,0,0,.05)";
+    for (let y = 0; y < 196; y += 3) c.fillRect(0, y, W, 1);
+  }
+  // THE WEATHER MAP: the real districts where they are, the real sky over
+  // them, the hour. Big type only (the 8 px label lesson).
+  function paintWeatherMap(c, t) {
+    const Wt = CBZ.weather || {};
+    const rain = !!Wt.raining, snow = (Wt.snow || 0) > 0.4, over = Wt.overcast || 0;
+    const hr = hour(), nt = hr < 6 || hr >= 20;
+    const bg = c.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#0c2a4a"); bg.addColorStop(1, "#071628");
+    c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    // the map: the districts as land, the rest as sea
+    let Z = null;
+    try { Z = CBZ.cityZones ? CBZ.cityZones() : null; } catch (e) { Z = null; }
+    const MX = 24, MY = 52, MW = 300, MH = 136;
+    c.fillStyle = "#123a5e"; c.fillRect(MX, MY, MW, MH);
+    if (Z && Z.length) {
+      let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+      for (let i = 0; i < Z.length; i++) { x0 = Math.min(x0, Z[i].cx); x1 = Math.max(x1, Z[i].cx); z0 = Math.min(z0, Z[i].cz); z1 = Math.max(z1, Z[i].cz); }
+      const k = Math.min((MW - 50) / Math.max(1, x1 - x0), (MH - 40) / Math.max(1, z1 - z0));
+      const ox = MX + (MW - (x1 - x0) * k) / 2, oz = MY + (MH - (z1 - z0) * k) / 2;
+      c.fillStyle = "#3f6b3a";
+      for (let i = 0; i < Z.length; i++) { c.beginPath(); c.arc(ox + (Z[i].cx - x0) * k, oz + (Z[i].cz - z0) * k, 22, 0, Math.PI * 2); c.fill(); }
+      c.fillStyle = "#4f7d45";
+      for (let i = 0; i < Z.length; i++) { c.beginPath(); c.arc(ox + (Z[i].cx - x0) * k, oz + (Z[i].cz - z0) * k, 13, 0, Math.PI * 2); c.fill(); }
+    }
+    // the sky over it: cloud, rain or snow drifting across the map
+    c.save(); c.beginPath(); c.rect(MX, MY, MW, MH); c.clip();
+    if (over > 0.3 || rain) {
+      c.fillStyle = "rgba(220,226,235," + Math.min(0.55, 0.2 + over * 0.4).toFixed(2) + ")";
+      for (let i = 0; i < 6; i++) {
+        const x = MX + ((i * 71 + t * 9) % (MW + 80)) - 40, y = MY + 20 + (i * 37) % (MH - 30);
+        c.beginPath(); c.ellipse(x, y, 46, 18, 0, 0, Math.PI * 2); c.fill();
+      }
+    }
+    if (rain) {
+      c.strokeStyle = snow ? "rgba(255,255,255,.85)" : "rgba(120,190,255,.7)"; c.lineWidth = 2;
+      const o = (t * 40) % 16;
+      for (let x = MX; x < MX + MW + 16; x += 13) for (let y = MY - 16; y < MY + MH; y += 16) {
+        c.beginPath(); c.moveTo(x - 2, y + o); c.lineTo(x - 6, y + o + 8); c.stroke();
+      }
+    }
+    c.restore();
+    c.strokeStyle = "rgba(160,200,255,.4)"; c.lineWidth = 2; c.strokeRect(MX, MY, MW, MH);
+    // the reading: the sky in one word, big, and the hour
+    const sky = snow ? "SNOW" : rain ? ((Wt.intensity || 0) > 0.6 ? "HEAVY RAIN" : "RAIN") : over > 0.6 ? "CLOUDY" : nt ? "CLEAR NIGHT" : "SUNNY";
+    c.textAlign = "left"; c.textBaseline = "middle";
+    c.fillStyle = "#f4c542"; c.fillRect(340, 52, 150, 30);
+    c.fillStyle = "#0a0f19"; c.font = "bold 18px Arial, sans-serif"; c.fillText("WEATHER", 352, 68);
+    c.fillStyle = "#fff"; fitText(c, sky, 340, 112, 160, 30, false, 18);
+    // the icon
+    if (!rain && over < 0.6) {
+      c.fillStyle = nt ? "#e9e6d8" : "#ffd34a";
+      c.beginPath(); c.arc(420, 160, 22, 0, Math.PI * 2); c.fill();
+      if (nt) { c.fillStyle = "#0b2340"; c.beginPath(); c.arc(430, 152, 19, 0, Math.PI * 2); c.fill(); }
+    } else {
+      c.fillStyle = "#d8dee8";
+      c.beginPath(); c.ellipse(410, 162, 34, 16, 0, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(426, 150, 20, 16, 0, 0, Math.PI * 2); c.fill();
+    }
+    if ((Wt.wind || 0) > 0.6) { c.fillStyle = "#dfe7f2"; fitText(c, "STRONG WIND", 340, 196 - 8, 160, 15, false, 12); }
+  }
+
+  // one studio frame, when it is due
+  function studioTick(dt) {
+    const NS = studio();
+    ST.acc += Math.min(0.5, dt);
+    if (CLOCK - ST.onAt >= 0.25) { ST.onAt = CLOCK; ST.on = screenOnScreen(); }
+    if (!ST.on) { NS.idle(); return; }
+    direct();
+    const gap = 1 / (ST.shot === "field" ? FIELD_FPS : STUDIO_FPS);
+    if (ST.acc < gap && !ST.force) return;
+    if (ST.ovDirty || N.dirty || CLOCK - ST.ovAt >= 0.5) {
+      ST.ovAt = CLOCK; ST.ovDirty = false; N.dirty = false;
+      try { paintOverlay(); OVTEX.needsUpdate = true; } catch (e) {}
+    }
+    const tex = NS.render(ST.shot, OVTEX, ST.acc);
+    ST.acc = 0; ST.force = false;
+    if (tex) { ST.fails = 0; ST.pictures++; N.painted++; if (MAT.map !== tex) MAT.map = tex; }
+    else if (++ST.fails >= 3) { ST.off = true; useFlat(); }      // the studio cannot draw here: the flat picture
+  }
+  function useFlat() {
+    if (MAT && MAT.map !== TEX) { MAT.map = TEX; N.dirty = true; N.paintAt = -1e9; }
+  }
+
+  /* ========================================================================
+     6. THE FRAME LOOP: clock, rotation, polls, and a picture only when a
         screen is in the room with you
      ======================================================================== */
   let pollAcc = 0, nearAcc = 0;
@@ -1449,8 +1660,11 @@
     if (!SCREENS.length || !CV) return;
     nearAcc += dt;
     if (nearAcc >= 0.25) { nearAcc = 0; N.nearest = nearestScreen(); }
-    if (N.nearest > NEAR) return;
+    if (N.nearest > NEAR) { if (studio()) studio().idle(); return; }
     rotate();
+    if (studioOn()) { try { studioTick(dt); } catch (e) {} return; }
+    if (studio()) studio().idle();
+    useFlat();
     const gap = N.nearest < CLOSE ? 0.5 : 1.0;
     if (CLOCK - N.paintAt < gap && !(N.dirty && CLOCK - N.paintAt > 0.2)) return;
     N.paintAt = CLOCK; N.dirty = false;
@@ -1462,6 +1676,8 @@
     if (!ensureCanvas()) return false;
     rotate();
     N.paintAt = CLOCK; N.dirty = false;
+    if (studioOn()) { ST.force = true; ST.ovDirty = true; ST.onAt = -1e9; return true; }
+    useFlat();
     paint(); TEX.needsUpdate = true;
     return true;
   }
@@ -1490,6 +1706,8 @@
         stories: N.stories.length, current: N.cur ? N.cur.h : null, screens: SCREENS.length,
         nearest: Math.round(N.nearest), painted: N.painted, pushed: N.pushed, events: N.events,
         hooked: Object.assign({}, SEEN.hooked), canvas: CV ? W + "x" + H : null,
+        picture: MAT && TEX && MAT.map !== TEX ? "studio" : "flat", shot: ST.shot, onScreen: ST.on,
+        pictures: ST.pictures, studio: studio() && studio().audit ? studio().audit() : null,
       };
     },
     _poll: poll, _tick: tick,
