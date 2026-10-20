@@ -89,7 +89,7 @@
   const freeRecs = [], freeEntries = [];
   const paintMats = new Map();                  // paint signature -> { mat, refs }
   const safeHook = new WeakMap();               // material -> onBeforeCompile is instancing-safe
-  let newPoolsThisFrame = 0, frame = 0, fullDraw = false;
+  let newPoolsThisFrame = 0, frame = 0, fullDraw = false, lastMode = null;
   const _found = [];                            // acquire scratch: meshes
   const _keys = [];                             // acquire scratch: pool keys
   const _sigs = [];                             // acquire scratch: paint signature or null
@@ -548,10 +548,14 @@
     frame++;
     newPoolsThisFrame = 0;
     const g = CBZ.game;
-    if (!g || g.mode !== "city") {
+    // every vehicle world (config.js CBZ.VEHICLE_MODES: the island parks its
+    // whole street through these pools too); a world switch lets every proxy go
+    const live = !!(g && (CBZ.vehicleModeOn ? CBZ.vehicleModeOn(g.mode) : g.mode === "city"));
+    if (!live || g.mode !== lastMode) {
+      lastMode = g ? g.mode : null;
       if (proxies.length) releaseAll();
       for (let i = 0; i < poolList.length; i++) if (poolList[i].dirty) rebuild(poolList[i]);
-      return;
+      if (!live) return;
     }
     if (!proxies.length && !poolList.length) return;
     const view = scratch() && frustumReady();

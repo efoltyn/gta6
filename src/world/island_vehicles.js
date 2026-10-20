@@ -1,34 +1,57 @@
 /* ============================================================
    world/island_vehicles.js — THE DISASTER ISLAND'S REAL MACHINES.
 
-   The island used to have cars you could only look at: one merged mesh each
-   on a box collider (world/disaster_arena.js makeCar), thrown about by the
-   disasters and never driven. Gang City has the whole vehicle stack — the
-   lofted cars (city/playercars.js), the chassis (city/cardyn.js driven by
-   city/vehicles.js), the cabin seat, the chase camera, the seat exit, the
-   helicopters (city/playeraircraft.js + city/airframes.js), the door arc and
-   the bailout. This file is NOT a second one of any of those. It is the
-   island's side of the contract config.js opened (CBZ.VEHICLE_MODES): it
-   says WHICH machines stand WHERE on the island, wires the walk-up verbs,
-   and feeds the island's weather into them.
+   Gang City has the whole vehicle stack — the lofted cars (city/
+   playercars.js), the chassis (city/cardyn.js driven by city/vehicles.js),
+   the cabin seat, the chase camera, the seat exit, the helicopters (city/
+   playeraircraft.js + city/airframes.js), the door arc and the bailout, the
+   parked-car sleep and the instanced far pools (city/carinstances.js +
+   city/carlod.js). This file is NOT a second one of any of those. It is the
+   island's side of the contract config.js opened (CBZ.VEHICLE_MODES): it says
+   WHICH machines stand WHERE on the island, wires the walk-up verbs, and feeds
+   the island's weather into them.
 
-   1. REAL CARS. A share of the arena's parked prop cars (arena.cars, the
-      record every disaster throws) become real CBZ.cityCars records built by
-      CBZ.cityAddParkedCar at the prop's own spot and heading. The prop mesh
-      is hidden and its collider lifted; the arena record keeps pointing at
-      the real car's group, so the tsunami, the flood, the sinkhole and the
-      tornado keep throwing it with THEIR OWN fling, exactly as before. A car
-      a disaster has thrown is a wreck (dead): you cannot drive a car that
-      just cartwheeled down the street.
-      "Drive" is pinned on the car ([E] / tap), CBZ.cityEnterVehicle seats
-      you, the chassis drives it, systems/seat_exit.js gets you out.
-      WHILE YOU DRIVE IT the car leaves the arena list (no disaster may
-      teleport the car you are steering back to where it was parked), and the
-      island's weather acts on the chassis itself instead (drivenWeather):
-      the hurricane's and the tornado's wind push it through its tyres, an
-      EF2+ core lifts it into the air on the same law tornado.js uses for a
-      parked car, flood water past two feet takes its grip and floods the
-      engine, a building coming down on it wrecks it.
+   1. EVERY CAR IS REAL. Owner: "there's some real cars, some fake. Get rid of
+      the fakes." The island used to draw ~90 prop cars of its own (an
+      extruded-profile mesh on a box collider each, behind an instanced proxy)
+      and swap 8 of them for real cars at match start. world/disaster_arena.js
+      now builds NO car: it publishes arena.carSpots (where a car is parked,
+      which way, in what paint) and this file stands a real vehicle on every
+      spot through CBZ.cityAddParkedCar: the same models the city parks,
+      enterable ([E] / tap "Drive"), drivable on the real chassis, solid to
+      bodies and to other cars. Those vehicle RECORDS are what arena.cars
+      holds, so every disaster that reads the island's cars reads vehicles.
+
+      COST. Parked, a car costs nothing per frame: city/vehicles.js seats it
+      once, then it is drawn by the shared instanced pools past 35 m (far tier:
+      carlod.js's sub-pixel twins) and slept past the fog, exactly like a city
+      street; the car-vs-car solve skips any pair with no mover in it. The
+      island's town fleet is four catalog styles (a small town's hatchback,
+      saloon, SUV and pickup) so the pools stay a handful of draws, whatever
+      the paint. The fleet is built a few cars a frame (nearest first), never
+      ninety in one hitch, and between matches only the cars a match actually
+      touched are rebuilt; the rest are put back on their spots.
+
+      DISASTERS act on these records through the one door city/vehicles.js
+      opens, CBZ.vehicleDisaster: a disaster that carries a car off (the
+      tornado's flyer, the tsunami's debris field, the flood's floating body,
+      the meteor's blast wave, the sinkhole's throat, the hurricane's shove)
+      sets the record's `flung` flag, which on these records IS take() /
+      release(): the car is woken out of the pools, its driver put out, it is
+      billed as a wreck, and the vehicle system stops seating it while the
+      disaster has it. Fire (wildfire.js -> CBZ.cityCarIgnite: the vehicle's
+      own burn and cook-off), blasts (impactbus.js) and falling buildings
+      (collapse.js crushCars) already were the vehicle's own damage paths.
+      The rest pose (x, z, oy, rotY: what the quake's rattle and the
+      hurricane's rocking swing a parked car about) follows the car wherever
+      it is left.
+
+      WHILE YOU DRIVE ONE it leaves arena.cars (no disaster may snatch the car
+      you are steering back to where it was parked), and the island's weather
+      acts on the chassis itself instead (drivenWeather): the hurricane's and
+      the tornado's wind push it through its tyres, an EF2+ core lifts it into
+      the air on the same law tornado.js uses for a parked car, flood water
+      past two feet takes its grip and floods the engine.
 
    2. THE HELIPAD. One tower (CBZ.island.buildings when the island publishes
       it, else the arena's towers: the tallest with an open roof) gets a real
@@ -53,8 +76,7 @@
       aircraft in the air.
 
    Everything here re-runs per match (the arena's reset() puts the town back;
-   this puts the machines back). Phone budget: CONFIG.ISLAND_REAL_CARS real
-   cars (default 8); the rest of the street stays the light props.
+   this puts the machines back).
    ============================================================ */
 (function () {
   "use strict";
@@ -63,7 +85,6 @@
   const THREE = window.THREE;
   const g = CBZ.game;
   const CFG = CBZ.CONFIG || (CBZ.CONFIG = {});
-  if (CFG.ISLAND_REAL_CARS == null) CFG.ISLAND_REAL_CARS = 8;
   if (CFG.ISLAND_HELIPAD == null) CFG.ISLAND_HELIPAD = true;
 
   const WORLD = "survival";
@@ -71,12 +92,18 @@
   const HELI_REACH = 4.2;          // m from the cabin to offer "Board"
   const PAD_RISE = 3.0;            // deck walk surface over the roof walk surface (clears the lift car)
   const DECK_T = 0.25;             // deck slab thickness
+  // a small island town's fleet: catalog names (city/economy.js), one per body kind
+  const TOWN_MODELS = ["Kotori Sprout", "Bison Vista", "Bison Frontier", "Bison Rampart"];
+  const PHONE = (CBZ.deviceClass || "") === "phone";
+  const BUILD_PER_FRAME = PHONE ? 2 : 5;   // cars stood up per frame (a car is a few ms to build)
+  const REST_MOVE = 0.6;           // m a parked car must be moved before its rest pose follows it
 
   // the live state, rebuilt per match
   const S = {
     arena: null,                   // the surv.arena the machines were built for
     stats: null,                   // surv.stats identity (a new object = a new match)
-    cars: [],                      // { car, entry, prop:{group, collider}, dummy }
+    cars: [],                      // { car, spot, out } one per standing vehicle
+    queue: [],                     // spots still to stand a car on
     pad: null,                     // the helipad record (built once per arena)
     heli: null,                    // the parked craft
     fallenSeen: new Set(),         // towers already handled as fallen this match
@@ -107,90 +134,122 @@
   }
 
   /* ============================================================
-     1. REAL CARS
+     1. THE FLEET
      ============================================================ */
-  function pickEntries(A, n) {
-    const list = (A.cars || []).filter(function (e) { return e && e.group && !e.flung && !e.realCar; });
-    if (!list.length || n <= 0) return [];
-    // spread round the town: order by bearing from the island centre, take
-    // every k-th, offset by a seeded phase
-    const cx = A.center ? A.center.x : 0, cz = A.center ? A.center.z : 0;
-    list.sort(function (a, b) { return Math.atan2(a.z - cz, a.x - cx) - Math.atan2(b.z - cz, b.x - cx); });
-    const step = list.length / Math.min(n, list.length);
-    const phase = hash01(cx, cz, 5) * step;
-    const out = [];
-    for (let i = 0; i < Math.min(n, list.length); i++) out.push(list[Math.floor(phase + i * step) % list.length]);
-    return out;
+  // a car you can still get into and drive away
+  function drivable(c) { return !!(c && !c.dead && !c._husk && !c._disaster && !c._wrecked && !c._scrapped && !c._flooded); }
+
+  /* THE RECORD'S ISLAND HALF. What every disaster has always read off an
+     island car: its rest pose (x, z, oy, rotY), a collider (none: the vehicle
+     is solid through the car resolvers in physics.js and vehicles.js) and the
+     `flung` flag, which on a vehicle IS the disaster door. */
+  function dressRecord(car, spot) {
+    car._world = WORLD;
+    car.owned = true;                 // an island car is anybody's: no theft, no witnesses
+    car._islandCar = true;
+    car._islandSpot = spot;
+    car.ai = false;
+    car.x = spot.x; car.z = spot.z; car.oy = spot.y; car.rotY = spot.heading;
+    car.collider = null;
+    const d = car.dims || {};
+    car.roofH = +d.height || 1.45;
+    Object.defineProperty(car, "flung", {
+      configurable: true, enumerable: true,
+      get: function () { return !!car._disaster; },
+      set: function (v) {
+        const D = CBZ.vehicleDisaster;
+        if (!D) return;
+        if (v) D.take(car, cause("wrecked by the disaster")); else D.release(car);
+      },
+    });
   }
-  // the catalog cars a small island town plausibly parks (economy.js names)
-  const TOWN_MODELS = null;   // null = cityAddParkedCar's position-hashed catalog pick
-  function buildCars(A) {
-    if (!CBZ.cityAddParkedCar) return;
-    const want = Math.max(0, CFG.ISLAND_REAL_CARS | 0);
-    const picks = pickEntries(A, want);
-    for (let i = 0; i < picks.length; i++) {
-      const e = picks[i];
-      let car = null;
-      try { car = CBZ.cityAddParkedCar(e.x, e.z, e.rotY || 0, { force: true, modelName: TOWN_MODELS ? TOWN_MODELS[i % TOWN_MODELS.length] : null }); } catch (err) { car = null; }
-      if (!car) continue;
-      car._world = WORLD;
-      car.owned = true;                 // an island car is anybody's: no theft, no witnesses
-      car._islandCar = true;
-      car.ai = false;
-      car.pos.y = e.oy != null ? e.oy : groundAt(e.x, e.z);
-      if (car.group) { car.group.position.y = car.pos.y; car.group.rotation.set(0, car.heading, 0); }
-      // the prop leaves; the arena record now IS the real car
-      const prop = { group: e.group, collider: e.collider };
-      if (e.group) e.group.visible = false;
-      const ci = CBZ.colliders.indexOf(e.collider);
-      if (ci >= 0) CBZ.colliders.splice(ci, 1);
-      // A stand-in for the record's collider: the arena's reset() and every
-      // fling pull and push `collider` on CBZ.colliders. The real car is
-      // solid through the car resolver (physics.js), so this one is a 1 cm
-      // box a kilometre underground that nothing can ever touch.
-      const dummy = { minX: e.x, maxX: e.x + 0.01, minZ: e.z, maxZ: e.z + 0.01, y0: -1000, y1: -999.99, ref: null, noCam: true, noAircraft: true };
-      e.group = car.group; e.collider = dummy; e.realCar = car;
-      S.cars.push({ car: car, entry: e, prop: prop, dummy: dummy, base: { x: e.x, z: e.z } });
+  function standCar(spot) {
+    if (!CBZ.cityAddParkedCar) return null;
+    const model = TOWN_MODELS[(hash01(spot.x, spot.z, 11) * TOWN_MODELS.length) | 0];
+    let car = null;
+    try { car = CBZ.cityAddParkedCar(spot.x, spot.z, spot.heading, { force: true, modelName: model, color: spot.color }); } catch (e) { car = null; }
+    if (!car) return null;
+    dressRecord(car, spot);
+    homeCar(car, spot);
+    return car;
+  }
+  // stand it back on its spot, as parked (the parked pass re-seats it on the ground)
+  function homeCar(car, spot) {
+    car.heading = spot.heading;
+    car.v = 0; car.vx = 0; car.vz = 0; car.wreckT = 0; car.spin = 0;
+    if (car.group) {
+      car.group.position.set(spot.x, spot.y, spot.z);     // car.pos IS this vector
+      car.group.rotation.set(0, spot.heading, 0);
+      car.group.scale.set(1, 1, 1);
     }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    car.x = spot.x; car.z = spot.z; car.oy = spot.y; car.rotY = spot.heading;
+    // a showroom car stands on the tiles, not on the ground under the floor:
+    // seat it there and leave it (the parked pass re-seats only a car that moved)
+    if (spot.floor) { car._parkX = spot.x; car._parkZ = spot.z; car._parkH = spot.heading; car._terrY = spot.y; car._terrPitch = car._terrRoll = 0; }
+    else { car._parkX = car._parkZ = car._parkH = null; car._terrY = car._terrPitch = car._terrRoll = null; }
   }
-  function teardownCars() {
-    const Pl = P();
+  // still exactly the car the spot was given: nothing hit, burnt, moved or drove it
+  function pristine(car, spot, A) {
+    if (!car || car._scrapped || car._reap || car.dead || car._husk || car._exploded || car._disaster || car._disasterTouched) return false;
+    if (car._everDriven || car._playerLeft || car._wrecked || car._flats || car._wf || car._onFire || car._smoking) return false;
+    if (car.crumple > 0 || (car.engineHp != null && car.engineHp < 100)) return false;
+    if (!car.group || car.group.parent !== A.root || CBZ.cityCars.indexOf(car) < 0) return false;
+    return Math.abs(car.pos.x - spot.x) < 0.05 && Math.abs(car.pos.z - spot.z) < 0.05;
+  }
+  function scrapCar(car) {
+    if (!car) return;
+    if (CBZ.cityScrapCar) { try { CBZ.cityScrapCar(car); return; } catch (e) {} }
+    if (car.group && car.group.parent) car.group.parent.remove(car.group);
+    const i = CBZ.cityCars.indexOf(car); if (i >= 0) CBZ.cityCars.splice(i, 1);
+  }
+  function scrapFleet() {
+    for (let i = 0; i < S.cars.length; i++) scrapCar(S.cars[i].car);
+    S.cars.length = 0; S.queue.length = 0;
+    if (S.arena && S.arena.cars) S.arena.cars.length = 0;
+  }
+  /* A NEW MATCH: every untouched car is put back on its spot as it stands;
+     every car the last match touched (thrown, floated, burnt, crushed,
+     dented, driven off) is scrapped through the vehicle system's own door and
+     its spot queued for a fresh one. A new island: every spot is queued. */
+  function resetFleet(A) {
+    const spots = A.carSpots || [];
+    const keep = [];
+    const have = new Set();
     for (let i = 0; i < S.cars.length; i++) {
       const r = S.cars[i];
-      if (Pl && Pl._vehicle === r.car && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
-      const e = r.entry;
-      // the record goes back to the prop it was
-      e.group = r.prop.group; e.collider = r.prop.collider; e.realCar = null;
-      if (e.group) { e.group.visible = true; e.group.position.set(e.x, e.oy, e.z); e.group.rotation.set(0, e.rotY, 0); }
-      const di = CBZ.colliders.indexOf(r.dummy); if (di >= 0) CBZ.colliders.splice(di, 1);
-      if (e.collider && CBZ.colliders.indexOf(e.collider) < 0) CBZ.colliders.push(e.collider);
-      if (r.out) restoreEntry(r);
-      if (CBZ.cityScrapCar) { try { CBZ.cityScrapCar(r.car); } catch (err) {} }
-      else if (r.car.group && r.car.group.parent) r.car.group.parent.remove(r.car.group);
+      if (pristine(r.car, r.spot, A)) { homeCar(r.car, r.spot); r.out = false; keep.push(r); have.add(r.spot); }
+      else scrapCar(r.car);
     }
-    S.cars.length = 0;
+    S.cars = keep;
+    if (A.cars) { A.cars.length = 0; for (let i = 0; i < keep.length; i++) A.cars.push(keep[i].car); }
+    S.queue = spots.filter(function (s) { return !have.has(s); });
+    // nearest the player first: the street you are standing in is real at once
+    const Pl = P(), px = Pl && Pl.pos ? Pl.pos.x : 0, pz = Pl && Pl.pos ? Pl.pos.z : 0;
+    S.queue.sort(function (a, b) { return ((b.x - px) * (b.x - px) + (b.z - pz) * (b.z - pz)) - ((a.x - px) * (a.x - px) + (a.z - pz) * (a.z - pz)); });
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  // a few cars a frame off the end of the queue (the nearest is last)
+  function buildSome() {
+    const A = S.arena;
+    if (!A || !S.queue.length || !CBZ.cityAddParkedCar) return;
+    for (let n = 0; n < BUILD_PER_FRAME && S.queue.length; n++) {
+      const spot = S.queue.pop();
+      const car = standCar(spot);
+      if (!car) continue;
+      S.cars.push({ car: car, spot: spot, out: false });
+      if (A.cars) A.cars.push(car);
+    }
   }
   // the driven car is out of the arena list, so no disaster writes its group
   function liftEntry(r) {
     const A = S.arena; if (!A || !A.cars || r.out) return;
-    const i = A.cars.indexOf(r.entry);
+    const i = A.cars.indexOf(r.car);
     if (i >= 0) { A.cars.splice(i, 1); r.out = true; }
   }
   function restoreEntry(r) {
     const A = S.arena; if (!A || !A.cars || !r.out) return;
-    if (A.cars.indexOf(r.entry) < 0) A.cars.push(r.entry);
+    if (A.cars.indexOf(r.car) < 0) A.cars.push(r.car);
     r.out = false;
-  }
-  function wreck(r, why) {
-    const car = r.car;
-    if (car.dead) return;
-    const Pl = P();
-    if (Pl && Pl._vehicle === car && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
-    if (CBZ.cityDamageCar) { try { CBZ.cityDamageCar(car, 60, { crash: true, crumple: true }); } catch (e) {} }
-    car.dead = true; car._husk = true; car.ai = false; car.v = 0; car.vx = 0; car.vz = 0;
-    r.wrecked = why || "wrecked";
   }
 
   // the car's flank distance from a point (its own frame, the OBB)
@@ -286,42 +345,34 @@
 
   function carsTick(dt) {
     const Pl = P();
-    for (let i = 0; i < S.cars.length; i++) {
-      const r = S.cars[i], car = r.car, e = r.entry;
-      const driven = !!(Pl && Pl._vehicle === car && Pl.driving);
-      if (driven) {
-        liftEntry(r);
-        drivenWeather(r, dt);
+    const driven = Pl && Pl.driving ? Pl._vehicle : null;
+    for (let i = S.cars.length - 1; i >= 0; i--) {
+      const r = S.cars[i], car = r.car;
+      // a husk the vehicle system retired, a car scrapped: gone until the next match
+      if (car._scrapped || car._reap) {
+        S.cars.splice(i, 1);
+        const A = S.arena, k = A && A.cars ? A.cars.indexOf(car) : -1;
+        if (k >= 0) A.cars.splice(k, 1);
         continue;
       }
-      if (r.out) {
-        // left where it was parked: the arena record follows it
-        e.x = car.pos.x; e.z = car.pos.z; e.oy = car.pos.y; e.rotY = car.heading || 0;
-        restoreEntry(r);
-        r.base.x = e.x; r.base.z = e.z;
-      }
-      // a disaster threw it (the record's own fling): it is a wreck now
-      if (e.flung && !car.dead) wreck(r, "thrown");
-      // shoved by the storm or another car: the record's rest point follows
-      if (!e.flung && !car.dead && Math.hypot(car.pos.x - r.base.x, car.pos.z - r.base.z) > 0.8) {
-        e.x = car.pos.x; e.z = car.pos.z; r.base.x = e.x; r.base.z = e.z;
+      if (car === driven) { liftEntry(r); drivenWeather(r, dt); continue; }
+      if (r.out) restoreEntry(r);
+      if (car._disaster || car._husk) continue;
+      // left somewhere else (driven off and parked, shoved): its rest pose follows,
+      // once it has come to a stop (never the few cm a rattle swings it)
+      const p = car.pos;
+      if (!(car.wreckT > 0) && !car.v && (Math.abs(p.x - car.x) > REST_MOVE || Math.abs(p.z - car.z) > REST_MOVE)) {
+        car.x = p.x; car.z = p.z; car.oy = p.y; car.rotY = car.heading || 0;
       }
     }
   }
 
-  // a tower coming down crushes the machines on and beside it
+  // a tower coming down takes its helipad (the cars under it are crushed by
+  // city/collapse.js crushCars, the vehicle system's own crush)
   function fallenTick() {
-    const A = S.arena; if (!A || !A.fragile) return;
-    for (let b of A.fragile) {
-      if (!b.fallen || S.fallenSeen.has(b)) continue;
-      S.fallenSeen.add(b);
-      const hx = (b.w || 8) / 2 + 1.5, hz = (b.d || 8) / 2 + 1.5;
-      for (let i = 0; i < S.cars.length; i++) {
-        const r = S.cars[i], c = r.car.pos;
-        if (Math.abs(c.x - b.x) < hx && Math.abs(c.z - b.z) < hz) wreck(r, "crushed");
-      }
-      if (S.pad && S.pad.b === b) dropPad();
-    }
+    const A = S.arena; if (!A || !A.fragile || !S.pad) return;
+    const b = S.pad.b;
+    if (b.fallen && !S.fallenSeen.has(b)) { S.fallenSeen.add(b); dropPad(); }
   }
 
   /* ============================================================
@@ -732,10 +783,10 @@
      ============================================================ */
   CBZ.islandCarDrive = function () {
     const r = S.armCar; const Pl = P();
-    if (!r || !Pl || Pl.dead || Pl.driving || r.car.dead) return false;
+    if (!r || !Pl || Pl.dead || Pl.driving || !drivable(r.car)) return false;
     if (!CBZ.cityEnterVehicle) return false;
     const ok = CBZ.cityEnterVehicle(r.car);
-    if (ok) liftEntry(r);
+    if (ok) { r.car._everDriven = true; liftEntry(r); }
     return ok;
   };
   CBZ.islandHeliBoard = function () {
@@ -757,7 +808,9 @@
     let best = null, bd = CAR_REACH;
     for (let i = 0; i < S.cars.length; i++) {
       const r = S.cars[i], c = r.car;
-      if (c.dead || c.player || !c.group || !c.group.visible) continue;
+      // ~90 cars: a box reject first, the car's own OBB only for the few in reach
+      if (Math.abs(c.pos.x - px) > 5 || Math.abs(c.pos.z - pz) > 5) continue;
+      if (!drivable(c) || c.player || !c.group) continue;
       if (Math.abs(c.pos.y - py) > 1.6) continue;
       const gap = carGap(c, px, pz);
       if (gap < bd) { bd = gap; best = r; }
@@ -787,14 +840,15 @@
   function setup() {
     const A = CBZ.surv.arena;
     if (S.arena !== A) {
-      // a new island (first match, or a rebuilt arena): the pad is per arena
+      // a new island (first match, or a rebuilt arena): the pad and the fleet are per arena
       if (S.pad && S.pad.root && S.pad.root.parent) S.pad.root.parent.remove(S.pad.root);
       S.pad = null;
+      scrapFleet();
       S.arena = A;
       if (CFG.ISLAND_HELIPAD !== false) { try { S.pad = buildPad(A); } catch (e) { console.error("[island helipad]", e); S.pad = null; } }
     }
     if (S.pad) { if (S.pad.b.fallen) dropPad(); else raisePad(); }
-    try { buildCars(A); } catch (e) { console.error("[island cars]", e); }
+    try { resetFleet(A); } catch (e) { console.error("[island cars]", e); }
     if (S.pad && !S.pad.dropped) { try { S.heli = parkHeli(); } catch (e) { console.error("[island heli]", e); S.heli = null; } }
     S.fallenSeen.clear();
     S.drivenLift = 0; S.drivenFloat = 0;
@@ -804,7 +858,7 @@
     if (Pl && Pl._aircraft && S.heli && Pl._aircraft === S.heli && CBZ.cityPlayerAircraftExit) {
       try { CBZ.cityPlayerAircraftExit(); } catch (e) {}
     }
-    teardownCars();
+    if (Pl && Pl.driving && Pl._vehicle && Pl._vehicle._islandCar && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
     unparkHeli();
   }
 
@@ -822,6 +876,7 @@
       S.stats = st;
       setup();
     }
+    buildSome();
     if (!(dt > 0)) return;
     dt = Math.min(dt, 0.1);
     const Pl = P();
@@ -853,10 +908,18 @@
   CBZ.islandVehicles = {
     state: function () {
       const Pl = P();
+      const A = S.arena;
       return {
+        // THE COUNT THE OWNER ASKED FOR: every parked car is a vehicle record;
+        // the island builds no prop car at all (props is a constant 0)
+        fleet: { spots: A && A.carSpots ? A.carSpots.length : 0, real: S.cars.length, props: 0, queued: S.queue.length,
+          inArena: A && A.cars ? A.cars.length : 0,
+          asleep: S.cars.filter(function (r) { return r.car._sleep; }).length,
+          pooled: S.cars.filter(function (r) { return r.car._proxy; }).length,
+          held: S.cars.filter(function (r) { return r.car._disaster; }).length },
         cars: S.cars.map(function (r) {
-          return { x: +r.car.pos.x.toFixed(2), z: +r.car.pos.z.toFixed(2), dead: !!r.car.dead, wrecked: r.wrecked || null,
-            driven: !!(Pl && Pl._vehicle === r.car), model: r.car.model ? r.car.model.name : null };
+          return { x: +r.car.pos.x.toFixed(2), z: +r.car.pos.z.toFixed(2), dead: !!r.car.dead, wrecked: r.car._wrecked || null,
+            held: r.car._disaster || null, driven: !!(Pl && Pl._vehicle === r.car), model: r.car.model ? r.car.model.name : null };
         }),
         pad: S.pad ? { tower: { x: S.pad.b.ox, z: S.pad.b.oz, w: S.pad.b.w, d: S.pad.b.d, h: S.pad.b.h, gy: S.pad.b.gy },
           deckY: +S.pad.deckY.toFixed(2), roofY: +S.pad.roofY.toFixed(2), dropped: S.pad.dropped,
@@ -870,6 +933,6 @@
     cars: function () { return S.cars.map(function (r) { return r.car; }); },
     heli: function () { return S.heli; },
     pad: function () { return S.pad; },
-    rebuild: function () { if (S.stats) teardown(); S.stats = null; },
+    rebuild: function () { if (S.stats) teardown(); scrapFleet(); S.stats = null; },
   };
 })();

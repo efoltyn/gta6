@@ -855,7 +855,8 @@
     if (jobs.length) pump();
     const g = CBZ.game;
     const cars = CBZ.cityCars;
-    if (!g || g.mode !== "city" || !cars || !CBZ.camera) return;
+    // every vehicle world (config.js CBZ.VEHICLE_MODES), each over its own records
+    if (!g || !cars || !CBZ.camera || !(CBZ.vehicleModeOn ? CBZ.vehicleModeOn(g.mode) : g.mode === "city")) return;
     updateK();
     const cam = CBZ.camera.position;
     for (let i = 0; i < cars.length; i++) {
@@ -864,6 +865,7 @@
       // makes one visible again runs before this pass (999.4), so it is
       // re-tiered before the frame that shows it
       if (!c || !c.group || c._sleep || c._proxy || c.group.visible === false) continue;
+      if ((c._world || "city") !== g.mode) continue;
       if (c._raceCar) continue;                       // a Bullring stock car carries its own near/far LOD (race_car.js)
       const tr0 = c._lodTrack, was = !!(tr0 && tr0.on);
       let on = false;

@@ -2146,15 +2146,12 @@
         soundAt("collapse", a.pos.x, a.pos.z);
       },
     });
-    /* THE TOE ARRIVES LOADED: the arena's own parked-car meshes (shared
-       geometry and paint, not copies) plus lumber, pallets and roof sections
-       ride the foot of the front and drop out of it across the crossing. */
-    const tpl = [], seen = new Set();
-    (A.cars || []).forEach(function (c) {
-      const b = c && c.group && c.group.children[0];
-      if (b && b.isMesh && !seen.has(b.geometry)) { seen.add(b.geometry); tpl.push(b); }
-    });
-    st.debris.churn({ cars: tpl.slice(0, 4), halfW: ctx.R * 1.05 });
+    /* THE TOE ARRIVES LOADED with lumber, pallets and roof sections that ride
+       the foot of the front and drop out of it across the crossing. No cars:
+       it used to clone the old prop cars' meshes into the toe, cars that were
+       never parked anywhere. The cars in this wave are the island's real
+       vehicles, taken off the street where they stand (tsuSmash*). */
+    st.debris.churn({ cars: [], halfW: ctx.R * 1.05 });
     /* THE BOATS GO TOO: the hulls the drawdown left on the mud
        (world/tsunami_scene.js), and anything the island's harbour publishes
        as afloat or stacked on its quay (CBZ.island.harbour.boats /
@@ -2377,24 +2374,32 @@
   function tsuSmashRun(ctx, F) {
     const st = ctx.st, A = ctx.arena;
     const field = tsuDebris(ctx);
+    /* THE CARS GO WITH THE WATER (owner: "only trees get swept up in the
+       tsunami, cars should too"). Every car is a real vehicle: the water
+       takes it through the vehicle door (takeCar: woken, out of the parked
+       pools, the driver out, billed as a wreck), and the debris field carries
+       it from where it stood: afloat past ~0.55 m (CBZ.tsuDebrisDraft.car),
+       moving with the run-up's own local current, tumbling at the water's
+       speed, piling against the walls that stop it and onto the cars already
+       stopped there, and grounded where the water leaves it. Shallower but
+       fast water still drags one along on its wheels (the field's grounded
+       push). The old punt (flingCar's arc first, the field after it landed)
+       is gone from this path: a bore does not throw a car, it carries it. */
+    const draft = CBZ.tsuDebrisDraft ? CBZ.tsuDebrisDraft.car : 0.55;
     if (A.cars) for (let i = 0; i < A.cars.length; i++) {
-      const car = A.cars[i]; if (car.flung) continue;
-      const r = tsuRunAt(ctx, car.x, car.z);
-      if (!r || r.depth < 0.45) continue;
+      const car = A.cars[i]; if (car.flung || !car.group) continue;
+      const p = car.group.position;
+      const r = tsuRunAt(ctx, p.x, p.z);
+      if (!r || r.depth < draft * 0.5) continue;
       const hv2 = r.depth * r.speed * r.speed;
-      const sp = r.speed || 1;
-      if (hv2 > 14 && r.depth < 2.2) {
-        // the bore's own blow: rolled over before it is afloat
-        flingCar(car, r.u / sp, r.v / sp, field ? 6 + Math.min(6, hv2 * 0.2) : 12, field ? 2.2 : 6);
-        if (field) tsuWatchCar(ctx, car);
-      } else if (field && r.depth >= (CBZ.tsuDebrisDraft ? CBZ.tsuDebrisDraft.car : 0.55)) {
-        // AFLOAT: pulled off the street and handed to the water as it is
-        car.flung = true;
-        const ci = CBZ.colliders.indexOf(car.collider);
-        if (ci >= 0) { CBZ.colliders.splice(ci, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
-        const g = car.group;
-        if (g) { const it = field.takeWorld(g, "car"); if (it) { it.vx = r.u * 0.4; it.vz = r.v * 0.4; } }
+      if (!field) {
+        if (hv2 > 14) { const sp = r.speed || 1; flingCar(car, r.u / sp, r.v / sp, 12, 6); }
+        continue;
       }
+      if (r.depth < draft && hv2 < 6 * draft) continue;          // ankle-deep and slack: it stays parked
+      if (!takeCar(car, "swept away by the tsunami")) continue;
+      const it = field.takeWorld(car.group, "car");
+      if (it) { it.vx = r.u * 0.4; it.vz = r.v * 0.4; }
     }
     if (field && A.flammable) for (let i = 0; i < A.flammable.length; i++) {
       const t = A.flammable[i];
@@ -4058,11 +4063,23 @@
   // ---- a car ripped loose by the tsunami: pull its collider, hurl it in the
   //      wave's travel direction with an upward kick + spin; the ticker below
   //      integrates gravity until it crashes back down to rest as wreckage ----
+  /* THE ONE DOOR TO A CAR. The island's cars are real vehicles (world/
+     island_vehicles.js on city/vehicles.js): a disaster that is about to move
+     one takes it through CBZ.vehicleDisaster first (woken out of the parked
+     pools so it draws, the driver put out, billed as a wreck, left out of the
+     car solve and the parked seat while it is carried). `flung` stays the
+     flag the island's records and every disaster's skip test read. */
+  function takeCar(car, why) {
+    if (!car || car.flung) return false;
+    if (CBZ.vehicleDisaster && car.pos && car.group) CBZ.vehicleDisaster.take(car, why || surv()._cause || "wrecked by the disaster");
+    car.flung = true;
+    const i = car.collider ? CBZ.colliders.indexOf(car.collider) : -1;
+    if (i >= 0) { CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+    return true;
+  }
   const flungCars = [];
   function flingCar(car, dirx, dirz, force, up) {
-    if (!car || car.flung) return; car.flung = true;
-    const i = CBZ.colliders.indexOf(car.collider); if (i >= 0) CBZ.colliders.splice(i, 1);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (!takeCar(car)) return;
     flungCars.push({
       car, g: car.group,
       vx: dirx * force + (rnd() - 0.5) * 2, vy: up + rnd() * 3, vz: dirz * force + (rnd() - 0.5) * 2,
@@ -4460,11 +4477,7 @@
           out.push({ obj: c.group, x: c.group.position.x, z: c.group.position.z, yaw: c.group.rotation.y, rec: c,
             // off the street: its collider goes, and `flung` is the flag the
             // arena's reset() parks it back by
-            take: function () {
-              c.flung = true;
-              const k = CBZ.colliders.indexOf(c.collider); if (k >= 0) CBZ.colliders.splice(k, 1);
-              if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-            } });
+            take: function () { takeCar(c, "swallowed by the sinkhole"); } });
         }
         return out;
       },
@@ -5403,7 +5416,7 @@
        next warn, so the after-effects of a disaster bill to it. */
     spareBot(b, cause) {
       if (CBZ.game.mode !== "survival" || !dir.occ) return false;
-      if (cause && /beaten|punch|thrown|shoved|fists/.test(cause)) return false;   // your hands are not the weather
+      if (cause && /beaten|punch|thrown|shoved|fists|run over/.test(cause)) return false;   // your hands (and your bumper) are not the weather
       if (dir.killed >= dir.cap) return true;
       dir.killed++;
       return false;

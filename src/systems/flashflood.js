@@ -807,6 +807,14 @@
     const g = F.grid, S = F.stats;
     for (let i = 0; i < F.cars.length; i++) {
       const cb = F.cars[i];
+      // a real vehicle the water has not taken yet is wherever it was last
+      // parked or driven (never where it stood when the flood began), and the
+      // one being driven is the chassis's business (island_vehicles.js)
+      if (!cb.freed && cb.car.group) {
+        if (cb.car.player) continue;
+        const gp0 = cb.car.group.position;
+        if (gp0.x !== cb.x || gp0.z !== cb.z) { cb.x = cb.x0 = gp0.x; cb.z = cb.z0 = gp0.z; cb.yaw = cb.car.group.rotation.y; cb.lift = gp0.y - bedAt(gp0.x, gp0.z); }
+      }
       if (cb.jammed) { holdOnJam(cb, cb.jammed); continue; }
       const s = sample(cb.x, cb.z, _cs);
       const d = s.d;

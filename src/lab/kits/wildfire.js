@@ -121,7 +121,7 @@ CBZ.lab.kit("wildfire", {
     // the cars
     const cars = carsAt.map(function (c, i) {
       const H = W.add("car", { name: "car" + i, at: [c.x, c.z], heading: c.h });
-      return { group: H.car.group, x: c.x, z: c.z, name: "car" + i };
+      return { group: H.car.group, x: c.x, z: c.z, name: "car" + i, car: H.car };   // car: the vehicle the fire hands to vehicles.js
     });
 
     const arena = {

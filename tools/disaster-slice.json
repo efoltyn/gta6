@@ -4081,7 +4081,6 @@
   "src/city/aircraft.js",
   "src/city/traffic.js",
   "src/city/crashfx.js",
-  "src/city/crashdeform.js",
   "src/systems/skidmarks.js",
   "src/systems/dustfx.js",
   "src/city/playerair.js",
@@ -4123,7 +4122,6 @@
   "src/city/death.js",
   "src/city/camera.js",
   "src/city/ragdoll.js",
-  "src/city/carstrike.js",
   "src/city/leaderboard.js",
   "src/city/zillow.js",
   "src/city/bank.js",
@@ -4196,7 +4194,6 @@
   "src/city/campaign_ui.js",
   "src/city/campaign.js",
   "src/city/cinematics.js",
-  "src/systems/humancontact.js",
   "src/systems/navigation.js",
   "src/systems/navgrid.js",
   "src/systems/prisonnav.js",
@@ -4446,6 +4443,9 @@
   "src/systems/seat_exit.js",
   "src/systems/touch_vehicle.js",
   "src/world/island_vehicles.js",
-  "src/city/waterfield.js"
+  "src/city/waterfield.js",
+  "src/city/carstrike.js",
+  "src/systems/humancontact.js",
+  "src/city/crashdeform.js"
  ]
 }
