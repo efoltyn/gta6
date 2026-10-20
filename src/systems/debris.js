@@ -3067,10 +3067,25 @@
      the same. A crown still on its trunk is held by it. */
   const _tbT = new THREE.Box3(), _tbF = new THREE.Box3();
   function hiddenUp(o) { for (let a = o; a; a = a.parent) if (a.visible === false) return true; return false; }
+  /* WATER HOLDS UP WHAT FLOATS IN IT. A log riding the backwash is the
+     tsunami field's (it counts it `afloat`), not a tree hanging over the
+     street: the surface of any water medium (the run-up sheet) or the sea
+     that stands over its lowest point is what it lies on. */
+  function waterSurfAt(x, y, z) {
+    let s = -Infinity;
+    for (const fn of media.values()) {
+      if (!sampleMedium(fn, x, y, z)) continue;
+      if (_md.rho >= 500 && _md.surf != null && isFinite(_md.surf) && _md.surf > s) s = _md.surf;
+    }
+    try { if (CBZ.survSeaHeightAt) { const sy = CBZ.survSeaHeightAt(x, z); if (isFinite(sy) && sy > s) s = sy; } } catch (e) {}
+    return s;
+  }
   function treeSupportUnder(box) {
     const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
     const fl = floorAt(cx, cz, box.min.y + 0.3), hh = hfAt(cx, cz);
-    return Math.max(fl, hh <= box.min.y + 0.1 ? hh : -Infinity);
+    const ws = waterSurfAt(cx, box.min.y, cz);
+    // (a log riding the surface bobs a hand over it: within half a metre is in it)
+    return Math.max(fl, hh <= box.min.y + 0.1 ? hh : -Infinity, ws > box.min.y - 0.5 ? ws : -Infinity);
   }
   function treeAudit() {
     const A = CBZ.surv && CBZ.surv.arena;
@@ -3087,6 +3102,12 @@
         if (!_tbT.isEmpty()) {
           trunkOn = true;
           if (t._tsuUproot || Math.hypot((_tbT.min.x + _tbT.max.x) / 2 - t.x, (_tbT.min.z + _tbT.max.z) / 2 - t.z) > 1.5) r.moved++;
+          /* ONE OWNER PER PIECE. An uprooted tree the tsunami field still
+             carries is that field's log: it floats, piles on the wreckage
+             under it (which this floor + rubble test cannot see) and is
+             audited there (CBZ.debrisAuditSources.tsunami). Counted twice it
+             was "hanging" whenever it lay on another log or rode the water. */
+          if (t._tsuUproot && CBZ.tsuDebrisOwns && CBZ.tsuDebrisOwns(tr)) { r.carried = (r.carried || 0) + 1; continue; }
           const gap = _tbT.min.y - treeSupportUnder(_tbT);
           if (gap > r.maxHeight) r.maxHeight = +gap.toFixed(1);
           if (gap > 120) r.high++;

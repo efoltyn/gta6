@@ -234,6 +234,19 @@
     const now = performance.now();
     liveFields.forEach(function (f) { if (f.idle && now - f.lastStep() > IDLE_MS) { try { f.idle(Math.min(0.1, dt || 0)); } catch (e) {} } });
   });
+  // is this object (or the group it rides in) a piece a live field carries?
+  CBZ.tsuDebrisOwns = function (obj) {
+    let hit = false;
+    liveFields.forEach(function (f) {
+      if (hit || !f.items) return;
+      const L = f.items();
+      for (let i = 0; i < L.length; i++) {
+        const o = L[i].obj;
+        if (o && !L[i].body && (o === obj || (obj && obj.parent === o))) { hit = true; return; }
+      }
+    });
+    return hit;
+  };
   CBZ.tsuDebrisSettle = function () {
     let n = 0;
     liveFields.forEach(function (f) { if (f.settleAll) { try { n += f.settleAll(); } catch (e) {} } });
@@ -856,8 +869,6 @@
           if (h > high) out.high++;
           if (!it.stranded && !idle) { out.afloat++; continue; }
           if (!it.floated && it.y0 != null && !it.stranded) continue;      // never lifted
-          const sea = seaY(it.x, it.z);
-          if (Number.isFinite(sea) && sea - gnd > it.cls.draft) continue;  // afloat on standing water
           let low;
           if (it.inst) low = y + lowAt(it, it.obj.quaternion);
           else {
@@ -865,7 +876,26 @@
             _rb.setFromObject(supportOf(it));
             low = _rb.isEmpty() ? y - it.half : _rb.min.y;
           }
-          const gap = low - (gnd + stackAt(it));
+          /* AFLOAT IS HELD: the sea, or the run-up sheet where the field has
+             one, standing deep enough to float it, or over its lowest point
+             at all (a moored hull sits IN the water, its keel under the
+             surface, whatever the depth under it). */
+          let surf = seaY(it.x, it.z);
+          if (!Number.isFinite(surf)) surf = -Infinity;
+          if (flowAt) { const w = flowAt(it.x, it.z, _fl); if (w && Number.isFinite(w.depth) && w.depth > 0.05 && gnd + w.depth > surf) surf = gnd + w.depth; }
+          if (surf - gnd > it.cls.draft || surf > low) continue;            // afloat on standing water
+          /* WHAT IT TOUCHES, NOT WHAT IS UNDER ITS ORIGIN. A hull the
+             drawdown left on its bilge on the sloping shelf (tsunami_scene.js
+             beds it 12 cm into the mud at its lowest vertex) touches the mud
+             up the slope; the seabed under its middle is half a metre lower,
+             and the old single-point test called it hanging. The highest
+             ground anywhere under its own footprint is what holds it. */
+          let foot = gnd;
+          if (!it.inst && !_rb.isEmpty()) {
+            foot = Math.max(foot, groundY(_rb.min.x, _rb.min.z), groundY(_rb.max.x, _rb.min.z),
+              groundY(_rb.min.x, _rb.max.z), groundY(_rb.max.x, _rb.max.z));
+          }
+          const gap = low - Math.max(gnd + stackAt(it), foot);
           if (gap > 0.5) {
             out.floating++;
             if (it.kind === "log") out.trees++;
