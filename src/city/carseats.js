@@ -73,6 +73,10 @@
     "tesla-s": "sedan5", "tesla-3": "sedan5", "tesla-y": "sedan5", hatch: "sedan5",
     "tesla-x": "suv6", suv: "suv7",
     cybertruck: "pickup6", van: "van3", semi: "cab2",
+    // the emergency fleet (city/emergencykit.js): a cruiser seats five, an
+    // E-450 cutaway cab and the armoured truck's cockpit two, a custom pumper
+    // cab two up front and a crew of three behind
+    interceptor: "sedan5", pursuit: "sedan5", ambulance: "cab2", firetruck: "van6", bearcat: "cab2",
   };
   const SEAT_IDS = [
     { L: "driver", R: "shotgun", C: "frontC" },

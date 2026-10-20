@@ -24,7 +24,7 @@ CBZ.lab.ingredient("island", {
     "src/systems/interactions.js", "src/modes/survival.js", "src/systems/stairs.js", "src/systems/liftcore.js",
     "src/city/airframe_kit.js", "src/city/airframes.js", "src/city/aircraftphysics.js",
     "src/world/carfx.js", "src/city/economy.js", "src/city/carbody.js", "src/city/carwheels.js", "src/city/carparts.js",
-    "src/city/carseats.js", "src/city/playercars.js", "src/city/cardyn.js", "src/city/vehicles.js",
+    "src/city/carseats.js", "src/city/playercars.js", "src/city/emergencykit.js", "src/city/cardyn.js", "src/city/vehicles.js",
     "src/city/playeraircraft.js", "src/city/aircraft_doors.js", "src/systems/seat_exit.js",
     "src/world/island_vehicles.js", "src/city/facades/*.js"],
   /* what the island builder reaches through aliases (const VKIT =

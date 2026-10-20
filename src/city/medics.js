@@ -121,15 +121,34 @@
   }
 
   // ---- THE VAN ------------------------------------------------------------
-  // Where the rear doors are, in world space. The truck is 5.4 m long and its
-  // group's +Z is forward (traffic.js sets grp.rotation.y = heading and drives
-  // along sin/cos of it), so the tail is 2.9 m back along that heading.
+  // Where the rear doors are, in world space: half the real body's length
+  // (the Type III is ~7.1 m, city/emergencykit.js) plus a step back along
+  // the heading (traffic.js sets grp.rotation.y = heading, +Z forward).
   const _rear = { x: 0, z: 0 };
   function vanRear(e) {
     const s = Math.sin(e.heading || 0), c = Math.cos(e.heading || 0);
-    _rear.x = e.pos.x - s * 2.9;
-    _rear.z = e.pos.z - c * 2.9;
+    const back = ((e.dims && e.dims.length) || 7.1) / 2 + 0.35;
+    _rear.x = e.pos.x - s * back;
+    _rear.z = e.pos.z - c * back;
     return _rear;
+  }
+  // THE REAR DOORS OPEN FOR THE CREW: swung out while anybody from this unit
+  // is off the truck, shut again before it drives (emergencykit.rearDoors)
+  function poseRearDoors(dt) {
+    const EK = CBZ.emergencyKit;
+    const emgs = CBZ.cityEmergencyUnits ? CBZ.cityEmergencyUnits() : null;
+    if (!EK || !EK.rearDoors || !emgs) return;
+    for (let i = 0; i < emgs.length; i++) {
+      const e = emgs[i];
+      if (!e || e.kind !== "ambulance") continue;
+      const want = (e.state === "work" && medicsOn(e) > 0) ? 1 : 0;
+      const cur = e._rearOpenT || 0;
+      if (cur === want && !e._rearPosed) continue;
+      const nxt = want > cur ? Math.min(want, cur + dt * 1.4) : Math.max(want, cur - dt * 1.8);
+      e._rearOpenT = nxt;
+      e._rearPosed = nxt > 0;
+      EK.rearDoors(e, nxt);
+    }
   }
   // A step-off point beside the tailgate — never INSIDE the hull, so the first
   // frame of a debussing medic is not a body standing in a van.
@@ -292,6 +311,8 @@
         if (pending) { const m = makeMedic(pending.pos.x, pending.pos.z); m.body = pending; medics.push(m); }
       }
     }
+
+    poseRearDoors(dt);
 
     // ================= THE CREW =================
     for (let i = medics.length - 1; i >= 0; i--) {

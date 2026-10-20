@@ -57,10 +57,8 @@
    skin, real slats / fins / diamond mesh strands set inside it. Parts stop
    where the skin turns into the flank (safeX), so nothing spikes off a
    corner. Every car carries a plain plate (no text, no marque), and the
-   fleet liveries are built here too: model.livery "police" (white doors +
-   roof over the black paint, a shaped roof bar whose red/blue halves
-   city/police.js flashes by name, push bar, spotlight) and "taxi" (the
-   roof sign).
+   taxi livery is built here too (the roof sign); the police livery is
+   city/emergencykit.js's (model.livery "police").
 
    Loads BEFORE playercars.js / vehicles.js (index.html order).
 ============================================================ */
@@ -115,13 +113,6 @@
     if (!g3) { g3 = new THREE.BoxGeometry(w, h, d); g3._shared = true; boxGeos.set(k, g3); }
     return g3;
   }
-  const cylGeos = new Map();
-  function cylGeo(r, h, seg) {
-    const k = r + "|" + h + "|" + (seg || 12);
-    let g3 = cylGeos.get(k);
-    if (!g3) { g3 = new THREE.CylinderGeometry(r, r, h, seg || 12); g3._shared = true; cylGeos.set(k, g3); }
-    return g3;
-  }
   function add(root, w, h, d, x, y, z, material) {
     const m = new THREE.Mesh(boxGeo(w, h, d), material);
     m.position.set(x || 0, y || 0, z || 0);
@@ -159,6 +150,7 @@
     cybertruck: "voltra",
     muscle: "bison", lowrider: "bison", suv: "bison", van: "bison", pickup: "bison",
     hatch: "kotori",
+    interceptor: "bison", pursuit: "bison", ambulance: "bison",
   };
 
   // ---- legacy bumper masses: ONLY for a body that does not carry its own
@@ -834,6 +826,7 @@
     suv: "suv", pickup: "truck", van: "van", semi: "semi", cybertruck: "cyber",
     porsche: "sports", ferrari: "super", enzo: "super", aventador: "super", veyron: "super",
     muscle: "muscle", lowrider: "classic",
+    interceptor: "suv", pursuit: "muscle", ambulance: "van",
   };
   function klass(ctx) { return CLASS[ctx.style] || (ctx.sport ? "super" : "sedan"); }
   const TALL = { suv: 1, truck: 1, van: 1, semi: 1, cyber: 1 };
@@ -1261,62 +1254,10 @@
     });
   }
 
-  /* THE BLACK-AND-WHITE (model.livery "police"). Doors and the roof/pillars
-     (the loft's "upper" paint zone) go white over the car's black paint; a
-     shaped roof bar whose red and blue halves are the visibility-flip
-     meshes city/police.js flashes (it finds them by name — see rbDecorate),
-     a push bar and a driver's-side spotlight. The white is NOT _bodyPaint, so
-     a respray leaves the livery alone. */
-  let policeWhite = null;
-  function whitePaint() {
-    if (policeWhite) return policeWhite;
-    const m = vmat("paint", 0xeef1f4, { metalness: 0.3, roughness: 0.4 });
-    if (m.flatShading) { m.flatShading = false; m.needsUpdate = true; }
-    m._bodyPaint = false; m._shared = true;
-    policeWhite = m;
-    return m;
-  }
-  const lbMats = {};
-  function lbMat(k, c) {
-    if (!lbMats[k]) { lbMats[k] = new THREE.MeshBasicMaterial({ color: c }); lbMats[k]._shared = true; }
-    return lbMats[k];
-  }
-  function policeLightbar(ctx) {
-    const bar = new THREE.Group();
-    bar.name = "police_lightbar";
-    const base = new THREE.Mesh(trapGeo(1.12, 0.05, 0.3, 0.26), darkTrim());
-    base.name = "lb_base"; bar.add(base);
-    const red = new THREE.Mesh(trapGeo(0.44, 0.075, 0.26, 0.2), lbMat("red", 0xff2d3e));
-    red.name = "lb_red"; red.position.set(0.3, 0.05, 0); bar.add(red);
-    const blue = new THREE.Mesh(trapGeo(0.44, 0.075, 0.26, 0.2), lbMat("blue", 0x2d6bff));
-    blue.name = "lb_blue"; blue.position.set(-0.3, 0.05, 0); bar.add(blue);
-    const mid = new THREE.Mesh(trapGeo(0.14, 0.06, 0.24, 0.2), lbMat("mid", 0xdfe9f4));
-    mid.name = "lb_mid"; mid.position.set(0, 0.05, 0); bar.add(mid);
-    bar.position.set(0, ctx.roofY + 0.012, (ctx.roofZ || 0) + (ctx.roofLen || 1) * 0.12);
-    bar.traverse(function (o) { o.userData.noSeal = true; });
-    return bar;
-  }
-  function applyPolice(root, ctx) {
-    const white = whitePaint();
-    root.traverse(function (o) {
-      if (!o.material || !o.userData) return;
-      const z = o.userData.paintZone;
-      if (z === "upper" || z === "door") o.material = white;
-    });
-    root.add(policeLightbar(ctx));
-    // push bar: a blade + two uprights ahead of the nose
-    const pbY = ctx.baseY + 0.16, w = ctx.w;
-    const z = surfZ(ctx, 1, 0, pbY) + 0.1;
-    add(root, w * 0.5, 0.2, 0.06, 0, pbY, z, darkTrim()).userData.noSeal = true;
-    [1, -1].forEach(function (s) { add(root, 0.06, 0.34, 0.06, s * w * 0.2, pbY - 0.02, z - 0.02, darkTrim()).userData.noSeal = true; });
-    // A-pillar spotlight, driver's side (+x)
-    const sp = new THREE.Mesh(cylGeo(0.06, 0.12, 10), reverseM());
-    sp.rotation.x = Math.PI / 2;
-    sp.position.set(ctx.w * 0.47, (ctx.beltY || ctx.roofY - 0.4) + 0.12, (ctx.zCowl != null ? ctx.zCowl : 0.8) - 0.3);
-    sp.userData.noSeal = true;
-    root.add(sp);
-  }
-
+  /* FLEET LIVERIES THAT ARE MORE THAN A PART: the police black-and-white
+     (and every emergency livery) is city/emergencykit.js — conformal canvas
+     decals, the LED bar city/police.js flashes by name, push bumper,
+     spotlight, antennas. This file only hands it the face context. */
   // ============================================================
   //  PER-MODEL IDENTITY — the small bolt-ons that split two
   //  same-silhouette siblings apart, plus the fleet liveries.
@@ -1324,7 +1265,7 @@
   function applyModelIdentity(root, model, ctx) {
     if (!model || !ctx) return;
     const ds = model.designStyle;
-    if (model.livery === "police") applyPolice(root, ctx);
+    if (model.livery === "police" && CBZ.emergencyKit) CBZ.emergencyKit.policeLivery(root, ctx, model);
     if (model.livery === "taxi" || ds === "cab") addTaxiSign(root, ctx);
     if (ds === "kanzler") {
       // hood ornament + a chrome rocker strip between the arches
@@ -1438,11 +1379,16 @@
     addTaxiSign: addTaxiSign,
     addRoofRails: addRoofRails,
     addBumpers: addBumpers,
+    // the on-skin placement verbs, for liveries built outside this file
+    // (city/emergencykit.js) so nothing re-derives the fascia grid
+    surfZ: surfZ, topAt: topAt, put: put,
+    darkTrim: darkTrim, chrome: chrome,
     rimStyleFor: function (styleOrBrand) {
       // a body that wears something other than its marque's signature wheel
       // (carwheels.js styles): the lowrider on laced wire, a work van on
       // steelies, the muscle car on a five-spoke, the German coupe on a mesh
-      const own = { lowrider: "wire", van: "steel", muscle: "sport5", porsche: "mesh" }[styleOrBrand];
+      const own = { lowrider: "wire", van: "steel", muscle: "sport5", porsche: "mesh",
+        interceptor: "steel", pursuit: "steel", ambulance: "steel", firetruck: "sixlug", bearcat: "steel" }[styleOrBrand];
       if (own) return own;
       const b = BRANDS[styleOrBrand] || BRANDS[STYLE_BRAND[styleOrBrand]];
       return (b && b.rim) || "sport5";

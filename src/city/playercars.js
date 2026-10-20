@@ -112,6 +112,15 @@
     // pickup) with a name, but NOT a stop on the [C] ring — inserting it into
     // STYLE_ORDER would renumber every saved index after it.
     pickup: "Bison Rampart",
+    // THE EMERGENCY FLEET (city/emergencykit.js). Same rule as `semi`: real,
+    // buildable bodies with names, never stops on the [C] ring. The two
+    // cruisers are loft rows in BODY below; the three heavies are registered
+    // builders (CBZ.carStyleBuilders) in emergencykit.js.
+    interceptor: "Police Interceptor",
+    pursuit: "Police Pursuit",
+    ambulance: "Ambulance",
+    firetruck: "Fire Engine",
+    bearcat: "SWAT Armored Truck",
   };
 
   // ---- per-style HANDLING FEEL hooks (GTA vehicle-class inspired) ----
@@ -147,6 +156,14 @@
     // not stop, it will not turn, and the tail rolls.
     pickup:     { class: "suv",    accel: 0.98, top: 0.94, turn: 0.82, grip: 0.86, brake: 0.90, drift: 1.1, roll: 1.2 },
     semi:       { class: "van",    accel: 0.58, top: 0.74, turn: 0.52, grip: 0.70, brake: 0.62, drift: 1.25, roll: 1.5 },
+    // the emergency fleet: police-package cruisers are tuned up from their
+    // civilian classes (heavier brakes, stiffer springs); the heavies drive
+    // like what they weigh — an 18 t pumper, a 9 t armoured truck
+    interceptor: { class: "suv",    accel: 1.10, top: 1.06, turn: 0.94, grip: 1.00, brake: 1.08, drift: 0.95, roll: 0.80 },
+    pursuit:     { class: "muscle", accel: 1.16, top: 1.12, turn: 1.00, grip: 1.04, brake: 1.08, drift: 1.10, roll: 0.55 },
+    ambulance:   { class: "van",    accel: 0.80, top: 0.86, turn: 0.72, grip: 0.80, brake: 0.82, drift: 1.10, roll: 1.35 },
+    firetruck:   { class: "van",    accel: 0.62, top: 0.80, turn: 0.58, grip: 0.74, brake: 0.66, drift: 1.20, roll: 1.45 },
+    bearcat:     { class: "van",    accel: 0.70, top: 0.84, turn: 0.66, grip: 0.82, brake: 0.72, drift: 1.10, roll: 1.25 },
   };
   const DEFAULT_FEEL = { class: "sedan", accel: 1.0, top: 1.0, turn: 1.0, grip: 1.0, brake: 1.0, drift: 1.0, roll: 0.6 };
   // (d) THE ONE FEEL LOOKUP. FEEL above covers the road silhouettes; a
@@ -1598,7 +1615,7 @@
        ant si fuel    shark-fin antenna / mid-engine side intake / fuel flap (default on)
   ============================================================ */
   const BODY = {
-    // -- sedans (the taxi and the police cruiser are liveries on tesla-3) --
+    // -- sedans (the taxi is a livery on tesla-3; the police cruisers have their own rows below) --
     // Model 3: 4.69 L, 2.875 WB, 1.44 H, overhangs 0.84 / 0.97, a short
     // boot lid, the screen base well forward, small fender humps
     "tesla-3":   { L: 4.69, W: 1.85, FO: 0.84, WB: 2.875, R: 0.335, WW: 0.235, gap: 0.04, yB: 0.15, nL: 0.08, tL: 0.10,
@@ -1694,11 +1711,32 @@
                    tum: 0.78, rcN: 0.05, rcT: 0.03, bulge: 0.0, tuck: 0.0, doors: 2, bp: -1.72, sgR: -2.35, rows: 2,
                    hoodC: 0.12, roofC: 0.0, deckC: 0.06, winF: 0.0, winR: 0.0, eTN: 0.0, eTT: 0.0, archTrim: true,
                    roll: 0, hoodBow: 0.0, flat: true, bgR: -2.05, cl: 0, fuel: false },
+    /* -- THE POLICE PACKAGE. Two real cruisers instead of a livery on a
+       Model 3 (the old "police car" was a 4.69 m EV saloon with a bar on it).
+       Interceptor = 2020+ Police Interceptor Utility (Explorer): 198.8 in
+       (5.05 m) long, 78.9 in (2.00 m) wide, 69.4 in (1.76 m) high, 119.1 in
+       (3.025 m) wheelbase, 255/60R18 (0.76 m tyre) on black steelies; a
+       tall square nose, a raked tailgate, the D-pillar blacked out.
+       Pursuit = Charger Pursuit: 198.4 in (5.04 m) long, 75.0 in (1.905 m)
+       wide, 58.4 in (1.48 m) high, 120.2 in (3.05 m) wheelbase, 225/60R18;
+       a long low hood, a short boot, four doors. Livery, bar, push bumper,
+       spotlight and antennas: city/emergencykit.js (model.livery "police"). */
+    interceptor: { L: 5.05, W: 2.00, FO: 0.93, WB: 3.025, R: 0.38, WW: 0.255, gap: 0.05, yB: 0.25, nL: 0.08, tL: 0.10,
+                   cowl: -0.60, rf: -1.46, rr: -3.55, deck: -4.02, yN: 0.96, yC: 1.10, yD: 1.12, yT: 1.09, roof: 1.76,
+                   tum: 0.86, rcN: 0.24, rcT: 0.18, bulge: 0.025, tuck: 0.008, doors: 2, bp: -1.66, sgR: -3.60, dp: [-2.95], rows: 2,
+                   hoodC: 0.03, roofC: 0.035, winF: 0.15, winR: 0.35, eTN: 0.04, eTT: 0.02, archTrim: true, roll: 0.03, fp: 0.012, hoodBow: 0.01,
+                   lid: "gate", ant: true, shIn: 0.04, shD: 0.03, seats: "sedan5" },
+    pursuit:     { L: 5.04, W: 1.905, FO: 0.93, WB: 3.05, R: 0.365, WW: 0.235, gap: 0.04, yB: 0.15, nL: 0.07, tL: 0.09,
+                   cowl: -0.82, rf: -1.60, rr: -2.68, deck: -3.30, yN: 0.82, yC: 0.98, yD: 1.03, yT: 1.01, roof: 1.48,
+                   tum: 0.80, rcN: 0.18, rcT: 0.14, bulge: 0.03, tuck: 0.012, doors: 2, bp: -1.80, sgR: -2.80, rows: 2,
+                   hoodC: 0.03, roofC: 0.045, winF: 0.2, winR: 0.55, eTN: 0.03, eTT: 0.02, cl: 0.009, roll: 0.04, fp: 0.015,
+                   lid: "boot", ant: true, seats: "sedan5" },
   };
   const BODY_COLOR = {
     "tesla-s": 0xd1262f, "tesla-3": 0x67717b, "tesla-x": 0x185bd6, "tesla-y": 0x1470e3,
     porsche: 0xf3cf39, aventador: 0xf28c28, ferrari: 0xd1262f, enzo: 0xe02025, veyron: 0x202225,
     muscle: 0x161922, lowrider: 0x7d2bd6, hatch: 0x2ec4d6, suv: 0x2e3a4a, pickup: 0xe24b4b, cybertruck: 0xa8afb2,
+    interceptor: 0x111317, pursuit: 0x111317,
   };
   const PAINT_OPTS_EXTRA = { cybertruck: { metalness: 0.86, roughness: 0.32, envMapIntensity: 1.2 }, suv: { metalness: 0.45, roughness: 0.42, envMapIntensity: 0.9 }, pickup: { metalness: 0.46, roughness: 0.40, envMapIntensity: 0.95 } };
 
@@ -1974,7 +2012,7 @@
       ? sharedMat("caliper-red", 0xc23030, { emissive: 0x2a0808, ei: 0.4 })
       : sharedMat("caliper-dk", 0x3a3f45);
     const rf = ({ ferrari: 0.72, enzo: 0.72, aventador: 0.73, veyron: 0.72, porsche: 0.71, muscle: 0.62, lowrider: 0.57,
-      hatch: 0.63, suv: 0.58, pickup: 0.56, "tesla-x": 0.64, "tesla-y": 0.64 })[style] || 0.67;
+      hatch: 0.63, suv: 0.58, pickup: 0.56, "tesla-x": 0.64, "tesla-y": 0.64, interceptor: 0.62, pursuit: 0.62 })[style] || 0.67;
     placeWheels(root, S, rimStyle, calMat, rf);
     root.userData.vehicleDims = { width: b.W, length: b.L, height: S.yRoof, wheelbase: b.WB };
     root.userData.partCtx = loftCtx(style, S, B, b, paint);
@@ -2959,6 +2997,10 @@
       else if (style === "semi") { if (CFG.SEMI_TRUCK_V1 === false) return null; template = makeSemi(); }
       else if (style === "motorcycle") template = makeMotorcycle();
       else if (style === "helicopter") template = makeHelicopter();
+      // REGISTERED BODIES (city/emergencykit.js: ambulance, fire engine, SWAT
+      // truck) build themselves from CBZ.cityCarKit — the same materials,
+      // wheels, doors and cabin solver as every body in this file.
+      else if (CBZ.carStyleBuilders && CBZ.carStyleBuilders[style]) template = CBZ.carStyleBuilders[style]();
       // (c) REGISTERED MARINE HULLS build themselves (world/water_hulls.js).
       // `buildable` is deliberately not `get`: the registry also carries a
       // record for "boat" — the physics spec + price for the runabout below —
@@ -3307,8 +3349,13 @@
   // never invents a parallel material path.
   CBZ.cityCarKit = {
     sharedMat, roleMat, paintMat, vmat,
-    glassMat, chromeMat, lightFrontMat, lightTailMat,
-    boxGeo, prismGeo, addBox, addPrism, addSphere, slopeBox,
+    glassMat, chromeMat, lightFrontMat, lightTailMat, plateMat, cabinMat,
+    boxGeo, prismGeo, rboxGeo, addBox, addPrism, addSphere, addShaped, slopeBox,
+    // the body-building verbs a registered builder (CBZ.carStyleBuilders)
+    // needs to be a first-class car: lofted shell parts, hinged doors, the
+    // ONE cabin solver, mirrors and real wheels
+    addBody, loftDoor, dressCabin, addMirrors, makeWheel, placeWheels, loftCtx,
+    BODY: BODY,
   };
   /* ============================================================
      CBZ.carCabinAudit() — THE RATCHET for this wave.

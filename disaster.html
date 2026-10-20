@@ -1329,26 +1329,27 @@ document.body.appendChild(b);}}catch(e){}})();
      READS the fleet at order 37.7, after vehicles.js has moved it at 37. -->
 <script src="src/city/carlamps.js?v=lamps1"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
-<script src="src/city/carparts.js?v=cars2"></script>
+<script src="src/city/carparts.js?v=emg1019"></script>
 <script src="src/city/carbody.js?v=cars2"></script>
 <script src="src/city/carwheels.js?v=cars2"></script>
 <!-- city/carseats.js: the ONE seat model (layouts per body, doors, the
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
-<script src="src/city/carseats.js?v=w09290242x"></script>
-<script src="src/city/playercars.js?v=peak1014c"></script>
+<script src="src/city/carseats.js?v=mrg10200048"></script>
+<script src="src/city/playercars.js?v=mrg10200048"></script>
 <!-- systems/volfx.js: the volumetric fireball / smoke / fire (raymarched boxes
      fitted to the room) + spark streaks, and THE shared 3D noise atlas
      (CBZ.volNoise) that city/nukefx.js also marches. Before crashfx (its
      blasts and fires draw through it) and nukefx (reads the atlas). -->
 <script src="src/city/crashdeform.js?v=mrg10200048"></script>
-<script src="src/city/cardyn.js?v=cars2aids"></script>
+<script src="src/city/emergencykit.js?v=mrg10200048"></script>
+<script src="src/city/cardyn.js?v=emg1019"></script>
 <!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
-<script src="src/city/carlod.js?v=realcars1020"></script>
-<script src="src/city/vehicles.js?v=realcars1020"></script>
-<script src="src/city/carinstances.js?v=realcars1021"></script>
+<script src="src/city/carlod.js?v=mrg10200048"></script>
+<script src="src/city/vehicles.js?v=mrg10200048"></script>
+<script src="src/city/carinstances.js?v=mrg10200048"></script>
 <script src="src/city/playeraircraft.js?v=island1014"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the

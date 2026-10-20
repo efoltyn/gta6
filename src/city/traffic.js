@@ -741,7 +741,7 @@
   });
 
   /* ============================================================
-     EMERGENCY VEHICLES — self-contained meshes that drive to incidents.
+     EMERGENCY VEHICLES — real fleet bodies (city/emergencykit.js) that drive to incidents.
        AMBULANCE  → a body on the ground. WHO DECIDES which body: under
                     EMS_RESPONSE, city/morgue.js. This file keeps everything
                     that makes an ambulance an ambulance — the road router,
@@ -755,7 +755,7 @@
        FIRE TRUCK → a burning car (extinguishes it if it reaches it in time;
                     otherwise works the smoking scene afterward). Unchanged —
                     this file remains its only dispatcher.
-     Shared geometry/materials, a hard cap, distance LOD + culling.
+     Bodies through CBZ.cityMakeCar (merged, LOD, instanced), a hard cap, culling.
   ============================================================ */
   // 2 ambulances, not 1: the morgue clusters deaths, so one unit already
   // serves a whole scene — the second exists so a second incident across town
@@ -767,143 +767,22 @@
   const emg = [];
   let emgScanT = 0;
 
-  // shared meshes (built lazily, tagged _shared so resets never dispose them).
-  // ONE unit box, scaled per mesh, builds every hull/trim block — zero per-spawn
-  // geometry allocation, and despawnEmergency never has to dispose geometry.
-  let G = null;
-  function geos() {
-    if (G) return G;
-    G = {
-      unit: new THREE.BoxGeometry(1, 1, 1),
-      wheel: new THREE.CylinderGeometry(0.5, 0.5, 0.46, 10),
-    };
-    for (const k in G) G[k]._shared = true;
-    return G;
+  /* THE BODIES are city/emergencykit.js's — a Type III ambulance (an E-450
+     cutaway cab and a 14 ft module) and a custom-cab pumper — built by the
+     same CBZ.cityMakeCar pipeline as every car in the city: merged into its
+     material buckets, doors baked, far LOD, instanced when parked, a driver
+     in the seat. This file used to stack ~60 scaled unit cubes per truck on a
+     5.4 m "van" footprint; that is gone. A unit here is that cityCars record
+     with the dispatch state written onto it (one identity, as before). */
+  function emgModel(kind) {
+    const EK = CBZ.emergencyKit;
+    return (EK && EK.models && EK.models[kind]) || null;
   }
-  const tireMat = (function () { const m = new THREE.MeshLambertMaterial({ color: 0x14161b }); m._shared = true; return m; })();
-  // shared accent materials — shiny carfx roles when available (glass/steel are
-  // SHARED cache entries there), plain Lambert otherwise. All _shared: the
-  // despawn disposer must never free them.
-  let EMS = null;
-  function emgAccents() {
-    if (EMS) return EMS;
-    function sh(role, hex) {
-      let m = null;
-      if (CBZ.vehicleMat) { try { m = CBZ.vehicleMat(role, hex); } catch (e) { m = null; } }
-      if (!m || !m.isMaterial) m = new THREE.MeshLambertMaterial({ color: hex });
-      m._shared = true;
-      return m;
-    }
-    EMS = { glass: sh("glass", 0x101a24), steel: sh("metal", 0x9aa3ab) }; // glass was 0x10161c — frost-window margin
-    return EMS;
-  }
-  // scaled-unit-box brick: the whole emergency build is this call over and over
-  function ebox(grp, mat, sx, sy, sz, px, py, pz) {
-    const m = new THREE.Mesh(geos().unit, mat);
-    m.scale.set(sx, sy, sz);
-    m.position.set(px, py, pz);
-    grp.add(m);
-    return m;
-  }
-
-  function buildEmergency(kind) {
-    const gg = geos();
-    const acc = emgAccents();
-    const grp = new THREE.Group();
-    const isFire = kind === "firetruck";
-    // Per-instance paints — despawnEmergency disposes EXACTLY the five keys we
-    // return (body/cab/bar/redMat/bluMat); every other material here is _shared.
-    // ambulance: white box + red livery. firetruck: crimson rig + white cab roof.
-    const bodyMat = new THREE.MeshLambertMaterial({ color: isFire ? 0xc4231b : 0xeef3f6 });
-    const cabMat = new THREE.MeshLambertMaterial({ color: isFire ? 0xe8ecef : 0xd23b3b });
-    const barMat = new THREE.MeshLambertMaterial({ color: 0x111316 });
-    // flash mats — flashBeacon() drives emissiveIntensity on these two, KEEP.
-    const redMat = new THREE.MeshLambertMaterial({ color: 0xff2a2a, emissive: 0xff0000, emissiveIntensity: 1 });
-    const bluMat = new THREE.MeshLambertMaterial({ color: 0x2a6bff, emissive: 0x1133ff, emissiveIntensity: 0.2 });
-
-    if (isFire) {
-      // FIRE ENGINE — crimson cab-over rig: pump body, white cab roof, silver
-      // diamond-plate skirt, roof ladder on a turntable, rear hose-reel drum.
-      ebox(grp, bodyMat, 2.2, 1.5, 3.3, 0, 1.15, -1.0);           // pump body (top 1.9)
-      ebox(grp, bodyMat, 2.1, 1.15, 1.7, 0, 1.05, 1.7);           // cab-over nose
-      ebox(grp, cabMat, 2.14, 0.16, 1.74, 0, 1.7, 1.7);           // white cab roof
-      ebox(grp, acc.glass, 1.88, 0.55, 0.1, 0, 1.3, 2.57);        // windshield
-      ebox(grp, acc.glass, 0.08, 0.5, 1.0, -1.07, 1.22, 1.7);     // cab side glass
-      ebox(grp, acc.glass, 0.08, 0.5, 1.0, 1.07, 1.22, 1.7);
-      ebox(grp, barMat, 1.6, 0.45, 0.12, 0, 0.68, 2.6);           // grille block
-      ebox(grp, acc.steel, 2.34, 0.3, 0.3, 0, 0.4, 2.62);         // front bumper
-      ebox(grp, acc.steel, 2.3, 0.26, 0.28, 0, 0.4, -2.7);        // rear step
-      ebox(grp, acc.steel, 0.08, 0.4, 3.3, -1.12, 0.55, -1.0);    // diamond-plate skirt
-      ebox(grp, acc.steel, 0.08, 0.4, 3.3, 1.12, 0.55, -1.0);
-      ebox(grp, acc.steel, 2.2, 0.4, 0.08, 0, 0.55, -2.66);
-      // ladder assembly: turntable block, two rails, rungs spanning them
-      ebox(grp, barMat, 0.9, 0.24, 0.9, 0, 2.0, -0.4);            // turntable
-      ebox(grp, acc.steel, 0.1, 0.12, 3.2, -0.3, 2.26, -0.8);     // rails
-      ebox(grp, acc.steel, 0.1, 0.12, 3.2, 0.3, 2.26, -0.8);
-      for (let rz = -2.2; rz <= 0.65; rz += 0.7) ebox(grp, acc.steel, 0.52, 0.06, 0.1, 0, 2.26, rz);
-      const drum = new THREE.Mesh(gg.wheel, barMat);              // rear hose-reel drum
-      drum.rotation.x = Math.PI / 2;
-      drum.scale.set(0.72, 0.62, 0.72);
-      drum.position.set(0, 1.5, -2.52); grp.add(drum);
-      // lightbar on the cab roof: red / white / blue segments (flash logic below)
-      ebox(grp, barMat, 1.9, 0.14, 0.42, 0, 1.85, 1.7);
-      ebox(grp, redMat, 0.55, 0.2, 0.38, -0.6, 2.0, 1.7);
-      ebox(grp, cabMat, 0.36, 0.16, 0.36, 0, 1.99, 1.7);
-      ebox(grp, bluMat, 0.55, 0.2, 0.38, 0.6, 2.0, 1.7);
-      ebox(grp, barMat, 0.14, 0.3, 0.12, -1.18, 1.42, 2.42);      // mirrors
-      ebox(grp, barMat, 0.14, 0.3, 0.12, 1.18, 1.42, 2.42);
-    } else {
-      // AMBULANCE — white patient module towering over a lower cab, red stripe
-      // band + red crosses, rear double-door seam, chunky bumpers.
-      ebox(grp, bodyMat, 2.2, 1.7, 3.5, 0, 1.3, -0.9);            // patient module (top 2.15)
-      ebox(grp, bodyMat, 2.06, 0.95, 1.5, 0, 1.0, 1.6);           // cab shell
-      ebox(grp, bodyMat, 2.06, 0.55, 0.5, 0, 0.78, 2.42);         // hood nose
-      ebox(grp, acc.glass, 1.82, 0.5, 0.1, 0, 1.26, 2.36);        // windshield
-      ebox(grp, acc.glass, 0.08, 0.42, 0.85, -1.05, 1.18, 1.55);  // cab side glass
-      ebox(grp, acc.glass, 0.08, 0.42, 0.85, 1.05, 1.18, 1.55);
-      // red stripe band: module flanks, cab flanks, tail
-      ebox(grp, cabMat, 0.06, 0.34, 3.5, -1.12, 1.26, -0.9);
-      ebox(grp, cabMat, 0.06, 0.34, 3.5, 1.12, 1.26, -0.9);
-      ebox(grp, cabMat, 0.05, 0.3, 1.5, -1.05, 0.95, 1.6);
-      ebox(grp, cabMat, 0.05, 0.3, 1.5, 1.05, 0.95, 1.6);
-      ebox(grp, cabMat, 2.2, 0.34, 0.06, 0, 1.26, -2.68);
-      // red cross blocks above the stripe: both module sides + the rear doors
-      ebox(grp, cabMat, 0.06, 0.6, 0.2, -1.12, 1.82, -0.9);
-      ebox(grp, cabMat, 0.06, 0.2, 0.6, -1.12, 1.82, -0.9);
-      ebox(grp, cabMat, 0.06, 0.6, 0.2, 1.12, 1.82, -0.9);
-      ebox(grp, cabMat, 0.06, 0.2, 0.6, 1.12, 1.82, -0.9);
-      ebox(grp, cabMat, 0.2, 0.6, 0.06, 0, 1.85, -2.68);
-      ebox(grp, cabMat, 0.6, 0.2, 0.06, 0, 1.85, -2.68);
-      // rear double-door seam inset + handles
-      ebox(grp, barMat, 0.05, 1.35, 0.05, 0, 1.32, -2.67);
-      ebox(grp, barMat, 0.18, 0.06, 0.05, -0.32, 1.5, -2.67);
-      ebox(grp, barMat, 0.18, 0.06, 0.05, 0.32, 1.5, -2.67);
-      ebox(grp, acc.steel, 2.3, 0.28, 0.3, 0, 0.42, 2.6);         // chunky bumpers
-      ebox(grp, acc.steel, 2.3, 0.28, 0.3, 0, 0.42, -2.7);
-      // lightbar on the cab roof: red / white / blue segments (flash logic below)
-      ebox(grp, barMat, 1.9, 0.14, 0.42, 0, 1.55, 1.5);
-      ebox(grp, redMat, 0.55, 0.2, 0.38, -0.6, 1.7, 1.5);
-      ebox(grp, bodyMat, 0.36, 0.16, 0.36, 0, 1.69, 1.5);
-      ebox(grp, bluMat, 0.55, 0.2, 0.38, 0.6, 1.7, 1.5);
-      ebox(grp, barMat, 0.14, 0.28, 0.12, -1.14, 1.32, 2.28);     // mirrors
-      ebox(grp, barMat, 0.14, 0.28, 0.12, 1.14, 1.32, 2.28);
-    }
-    // wheel arches over each axle
-    for (const ax of [-1.1, 1.1]) for (const az of [1.7, -1.7]) ebox(grp, tireMat, 0.14, 0.32, 1.15, ax, 0.92, az);
-    // four wheels (footprint unchanged — spawnEmergency's dims {2.2, 5.4} still true)
-    for (let i = 0; i < 4; i++) {
-      const w = new THREE.Mesh(gg.wheel, tireMat);
-      w.rotation.z = Math.PI / 2;
-      w.position.set(i % 2 === 0 ? -1.05 : 1.05, 0.5, i < 2 ? 1.7 : -1.7);
-      // EMERGENCY_STEALABLE: tagged so a stolen truck spins its wheels while
-      // driven (cityPromotePlayerCar's collectWheels finds playerWheel meshes).
-      w.userData.playerWheel = true;
-      grp.add(w);
-    }
-    // No floating "AMBULANCE"/"FIRE" word: the shape, livery (red truck / white
-    // box) and flashing red+blue beacons read as an emergency vehicle on sight.
-    // A label over the roof broke the fourth wall and was removed.
-    return { grp, redMat, bluMat, body: bodyMat, cab: cabMat, bar: barMat };
+  // the unit's light rig (police_lightbar / lb_red / lb_blue / lb_mid), found
+  // once the body exists; false = a body with no rig (never searched again)
+  function emgBar(e) {
+    if (e._emgBar == null && !e._deferred && CBZ.emergencyKit) e._emgBar = CBZ.emergencyKit.barOf(e.group) || false;
+    return e._emgBar || null;
   }
 
   // Is (x,z) off the downtown grid (outside its box by more than a road)?
@@ -947,7 +826,8 @@
   }
 
   function spawnEmergency(kind, tx, tz) {
-    const A = CBZ.city.arena; if (!A) return null;
+    const A = CBZ.city.arena; if (!A || !CBZ.cityMakeCar) return null;
+    const model = emgModel(kind); if (!model) return null;
     const ap = offDowntown(A, tx, tz) ? roadApproach(A, tx, tz) : null;
     // downtown: enter from the city edge along a road far from the incident
     const r = ap ? ap.road : A.roads[(Math.random() * A.roads.length) | 0];
@@ -957,58 +837,41 @@
     if (ap) { sx = ap.sx; sz = ap.sz; }
     else if (r.vertical) { sx = r.x + lane; sz = r.z - dir * (r.len / 2 - 4); }
     else { sx = r.x - dir * (r.len / 2 - 4); sz = r.z + lane; }
-    const built = buildEmergency(kind);
-    built.grp.position.set(sx, 0, sz);
-    A.root.add(built.grp);
-    const e = {
-      kind, grp: built.grp, pos: built.grp.position, mats: built,
-      tx, tz, heading: 0, v: 0, state: "drive", t: 0, beaconT: Math.random() * 2,
-      siren: 0, target: null,
-      // dims feed vehicles.js's shared wall resolver (cityCollideVehicle) so the
-      // truck hull collides exactly like every other driven car in the city.
-      dims: { width: 2.2, length: 5.4, height: 2.6, wheelbase: 3.4 },
-      cx: null, cz: null, stuckT: 0,
-      // road-bound unit (an off-grid scene): it drives THIS record, in lane
-      road: ap ? ap.road : null, roadDir: ap ? ap.dir : 0,
-    };
-    if (ap) e.heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
-    // EMERGENCY_STEALABLE: the truck is ALSO a first-class CBZ.cityCars record
-    // (same object — one identity). That makes it (a) visible to the interact
-    // system ("Boost it"/"Get in" via cityNearestCar), (b) SOLID to all other
-    // traffic via resolveCars — no more ghosting through cars — and (c) fully
-    // drivable by the order-11 player loop once entered. While it's still on
-    // duty the bespoke dispatch AI below keeps the wheel (e.ai stays false, so
-    // vehicles.js's order-37 lane AI never fights it).
-    if ((!CBZ.CONFIG || CBZ.CONFIG.EMERGENCY_STEALABLE !== false) && CBZ.cityRegisterVehicle) {
-      CBZ.cityRegisterVehicle(built.grp, {
-        record: e, body: "van", style: "van",
-        // persist: a mid-life spawnCityTraffic/clearCars sweep must never
-        // dispose a truck the dispatch loop is still driving (despawnEmergency
-        // owns the real teardown, incl. the cityCars splice).
-        persist: true,
-        // modest chop value — an ambulance is a joke payday, not a jackpot
-        model: { name: kind === "firetruck" ? "Fire Engine" : "Ambulance", value: 3800, rarity: 0.5, body: "van" },
-        dims: { width: 2.2, length: 5.4, height: 2.6, wheelbase: 3.4 },
-        color: kind === "firetruck" ? 0xc4231b : 0xeef3f6,
-      });
-      e._emergency = kind;
-      // the lightbar's red beacon material matches the brake-light detector —
-      // setBrake would swap it to a frozen "brake" clone mid-strobe and fight
-      // flashBeacon. The truck has no authored brake lamps: let the beacon own it.
-      e._tailMeshes = [];
-    }
+    const heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+    let e = null;
+    try { e = CBZ.cityMakeCar(sx, sz, heading, !!r.vertical, model, 0.2); } catch (er) { e = null; }
+    if (!e) return null;
+    // the dispatch state, on the car record itself
+    e.kind = kind; e.grp = e.group;
+    e.tx = tx; e.tz = tz; e.heading = heading; e.v = 0;
+    e.state = "drive"; e.t = 0; e.beaconT = Math.random() * 2; e.siren = 0; e.target = null;
+    e.cx = null; e.cz = null; e.stuckT = 0;
+    // road-bound unit (an off-grid scene): it drives THIS record, in lane
+    e.road = ap ? ap.road : null; e.roadDir = ap ? ap.dir : 0;
+    // the bespoke dispatch AI below keeps the wheel while it is on duty
+    // (ai false: vehicles.js's lane AI never fights it), and a traffic reset
+    // never reaps a unit mid-call (despawnEmergency owns its teardown)
+    e.ai = false; e._persist = true; e._emergency = kind;
+    e._emgBar = null;
     emg.push(e);
     return e;
   }
 
   function despawnEmergency(e) {
-    if (e.grp && e.grp.parent) e.grp.parent.remove(e.grp);
-    if (e.mats) {
-      // dispose only the per-instance materials we built (geoms are _shared)
-      ["body", "cab", "redMat", "bluMat", "bar"].forEach(function (k) { const m = e.mats[k]; if (m && m.dispose && !m._shared) m.dispose(); });
-    }
-    // EMERGENCY_STEALABLE: drop the cityCars registration with the truck, or a
-    // ghost record keeps colliding/getting offered as enterable.
+    if (e._proxy && CBZ.cityWakeCar) CBZ.cityWakeCar(e);
+    const grp = e.group || e.grp;
+    if (grp && grp.parent) grp.parent.remove(grp);
+    // dispose what is this car's own (the body's geometries and fleet
+    // materials are _shared templates; a respray's paint clone is not)
+    if (grp) grp.traverse(function (o) {
+      if (o.isSprite) return;
+      if (o.geometry && !o.geometry._shared && o.geometry.dispose) o.geometry.dispose();
+      const m = o.material;
+      if (Array.isArray(m)) m.forEach(function (x) { if (x && !x._shared && x.dispose) x.dispose(); });
+      else if (m && !m._shared && m.dispose) m.dispose();
+    });
+    // drop the cityCars registration with the truck, or a ghost record keeps
+    // colliding/getting offered as enterable
     if (CBZ.cityCars) { const ci = CBZ.cityCars.indexOf(e); if (ci >= 0) CBZ.cityCars.splice(ci, 1); }
   }
   // stolen units: no longer dispatch-driven (vehicles.js owns them as ordinary
@@ -1291,16 +1154,15 @@
       emgFootPush(e, speed);
       return;
     }
-    // registered as a real cityCars record (EMERGENCY_STEALABLE) → vehicles.js
-    // resolveCars already owns truck-vs-car separation/crashes; a second
-    // hand-rolled push here would double-shove the player's car every frame.
-    if (e._emergency) return;
-    emgCarPush(e, speed);
+    // every unit is a real cityCars record: vehicles.js resolveCars owns
+    // truck-vs-car separation and crashes (a hand-rolled push here would
+    // double-shove the player's car every frame)
   }
   function emgFootPush(e, speed) {
     const P = CBZ.player;
     {
-      const hw = 1.1 + (P.radius || 0.45), hl = 2.7 + (P.radius || 0.45);
+      const dm = e.dims || {};
+      const hw = (dm.width || 2.2) / 2 + (P.radius || 0.45), hl = (dm.length || 5.4) / 2 + (P.radius || 0.45);
       const s = Math.sin(e.heading), c = Math.cos(e.heading);
       const dx = P.pos.x - e.pos.x, dz = P.pos.z - e.pos.z;
       const lx = dx * c - dz * s, lz = dx * s + dz * c;
@@ -1322,42 +1184,12 @@
       return;
     }
   }
-  function emgCarPush(e, speed) {
-    const P = CBZ.player;
-    // your car vs the truck: push apart + kill the closing speed (a wall of
-    // steel with right of way — you bounce off, it barely notices)
-    const car = P._vehicle;
-    if (!car) return;
-    const dx = car.pos.x - e.pos.x, dz = car.pos.z - e.pos.z;
-    const d = Math.hypot(dx, dz), min = 4.3;
-    if (d >= min || d < 0.001) return;
-    const nx = dx / d, nz = dz / d, push = (min - d);
-    car.pos.x += nx * push * 0.85; car.pos.z += nz * push * 0.85;
-    e.pos.x -= nx * push * 0.15; e.pos.z -= nz * push * 0.15;
-    const closing = Math.abs((car.vx || 0) * nx + (car.vz || 0) * nz) + speed * 0.5;
-    car.vx = (car.vx || 0) * 0.45 + nx * 2; car.vz = (car.vz || 0) * 0.45 + nz * 2;
-    car.v = (car.v || 0) * 0.5;
-    e.v *= 0.55;
-    if (closing > 8 && emgRunCD <= 0) {
-      emgRunCD = 0.9;
-      if (CBZ.cityDamageCar) CBZ.cityDamageCar(car, Math.min(40, closing * 2.2), { fromX: e.pos.x, fromZ: e.pos.z });
-      // attribute to the emergency vehicle that hit your car — not a generic
-      // "car crash" (the owner was T-boned by an ambulance and the note lied).
-      // "firetruck" is one word so killfeed.js's /\bfire\b/ can't mis-file it as
-      // an explosion; "car was rammed" carries the `car` keyword so the feed
-      // still buckets it as a vehicle death.
-      const emgReason = "in a crash with " + (e.kind === "firetruck" ? "a firetruck" : "an ambulance");
-      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.min(35, closing * 1.4), e.pos.x, e.pos.z, emgReason, false, null, true);
-      if (CBZ.sfx) { try { CBZ.sfx("crash"); } catch (er) {} }
-      if (CBZ.shake) CBZ.shake(0.6);
-    }
-  }
 
+  // the same named-layer flasher every police unit uses (emergencykit.js)
   function flashBeacon(e, dt) {
-    e.beaconT += dt;
-    const on = (e.beaconT % 0.6) < 0.3;
-    if (e.mats.redMat) e.mats.redMat.emissiveIntensity = on ? 1.4 : 0.06;
-    if (e.mats.bluMat) e.mats.bluMat.emissiveIntensity = on ? 0.06 : 1.4;
+    e.beaconT = (e.beaconT || 0) + dt;
+    const bar = emgBar(e);
+    if (bar && CBZ.emergencyKit) CBZ.emergencyKit.flash(bar, e.beaconT);
   }
 
   function emergencyArrive(e) {

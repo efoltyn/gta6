@@ -2122,7 +2122,7 @@
   //  driving). They are CARS in CBZ.cityCars, never cop peds in CBZ.cityCops, so
   //  they NEVER touch liveCops()/the finite-force pool — they're pure visible
   //  presence on top of the foot beat. They reuse the EXACT cruiser look the
-  //  roadblock uses (CRUISER_MODEL + rbDecorate over cityMakeCar). Seeded toward
+  //  roadblock uses (cruiserModel() + rbDecorate over cityMakeCar). Seeded toward
   //  UNDER-COVERED districts so the police presence spreads across the whole map
   //  (cops-weighted via the arena's copBeatPoint), not just downtown.
   //  WHY: you should SEE the police rolling the city, lights cresting a block,
@@ -2197,7 +2197,7 @@
     const x = r.vertical ? r.x + lane : r.x + along;
     const z = r.vertical ? r.z + along : r.z + lane;
     const heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
-    const c = CBZ.cityMakeCar(x, z, heading, r.vertical, CRUISER_MODEL, 0.28);
+    const c = CBZ.cityMakeCar(x, z, heading, r.vertical, cruiserModel(), 0.28);
     if (!c) return null;
     // dress it as a black-and-white (guarded — rbDecorate no-ops on a box rig)
     try { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(c, rbDecorate); else rbDecorate(c); } catch (e) { /* box rig / headless — skip livery, still drives */ }
@@ -2250,55 +2250,17 @@
   //  the way forces its living occupants out at the wreck; stealing it does
   //  the same.  The finite-force pool therefore remains literal at every stage.
   // ============================================================
-  const SWAT_VAN_MODEL = { name: "SWAT Van", value: 12000, color: 0x181c1f, s: 1.16, body: "van", detailStyle: "van", designStyle: "armored" };
+  /* The vehicle is the armoured rescue truck (city/emergencykit.js
+     "bearcat": 6.6 m of plate steel on a heavy chassis, POLICE / SWAT, its
+     own light rig). The old one was the cargo van with five black slabs and
+     a placard glued to it (dressSwatVan); that is deleted. The bar is found
+     by name like every unit's (rbDecorate). */
+  const SWAT_VAN_FALLBACK = { name: "SWAT Armored Truck", value: 12000, rarity: 0.55, color: 0x15181b, body: "truck", detailStyle: "bearcat", armor: 0.6, s: 1 };
+  function swatVanModel() {
+    const EK = CBZ.emergencyKit;
+    return (EK && EK.models && EK.models.bearcat) || SWAT_VAN_FALLBACK;
+  }
   let swatVan = null, swatVanCD = 0, svFlashT = 0;
-  let _svMats = null;
-  function svMatsGet() {
-    if (_svMats) return _svMats;
-    const dark = new THREE.MeshLambertMaterial({ color: 0x22262b }); dark._shared = true;
-    // "SWAT" side placard: one tiny canvas → ONE shared texture/material for
-    // every van this run (runtime visual — canvas text is fine here).
-    let plate = dark;
-    try {
-      const cv = document.createElement("canvas"); cv.width = 64; cv.height = 24;
-      const cx = cv.getContext("2d");
-      cx.fillStyle = "#101316"; cx.fillRect(0, 0, 64, 24);
-      cx.strokeStyle = "#3a4046"; cx.strokeRect(0.5, 0.5, 63, 23);
-      cx.fillStyle = "#e8ecef"; cx.font = "bold 16px Arial, sans-serif";
-      cx.textAlign = "center"; cx.textBaseline = "middle"; cx.fillText("SWAT", 32, 13);
-      const tex = new THREE.CanvasTexture(cv);
-      plate = new THREE.MeshLambertMaterial({ map: tex });
-      plate._shared = true;
-    } catch (e) { /* stub canvas — placard falls back to plain armor dark */ }
-    _svMats = { dark, plate };
-    return _svMats;
-  }
-  // bolt the SWAT dressing onto a freshly-built van (armored.js dressTruck
-  // language, self-contained): armor skirts, big SWAT flank placards, a rear
-  // blast-door slab, nose bumper + a mini red/blue bar updateSwatVan flashes.
-  function dressSwatVan(c) {
-    const M = rbMats(), S = svMatsGet();
-    const w = (c.dims && c.dims.width) || 2.14, l = (c.dims && c.dims.length) || 4.9, h = (c.dims && c.dims.height) || 2.27;
-    [1, -1].forEach((s) => {
-      const sk = new THREE.Mesh(M.geo, S.dark); sk.scale.set(0.06, 0.42, l * 0.55);
-      sk.position.set(s * (w / 2 + 0.02), 0.66, 0); c.group.add(sk);
-      const pl = new THREE.Mesh(M.geo, S.plate); pl.scale.set(0.04, 0.62, 1.9);
-      pl.position.set(s * (w / 2 + 0.04), h * 0.6, 0.15); c.group.add(pl);
-    });
-    const rear = new THREE.Mesh(M.geo, S.dark); rear.scale.set(w * 0.85, 1.5, 0.1);
-    rear.position.set(0, h * 0.52, -l / 2 - 0.04); c.group.add(rear);
-    const seam = new THREE.Mesh(M.geo, M.dark); seam.scale.set(0.07, 1.5, 0.12);
-    seam.position.set(0, h * 0.52, -l / 2 - 0.05); c.group.add(seam);
-    const bumper = new THREE.Mesh(M.geo, S.dark); bumper.scale.set(w * 0.7, 0.3, 0.14);
-    bumper.position.set(0, 0.62, l / 2 + 0.08); c.group.add(bumper);
-    const base = new THREE.Mesh(M.geo, M.dark); base.scale.set(1.3, 0.1, 0.36);
-    base.position.set(0, h + 0.1, l * 0.16); c.group.add(base);
-    const red = new THREE.Mesh(M.geo, M.red); red.scale.set(0.5, 0.16, 0.3);
-    red.position.set(-0.34, h + 0.18, l * 0.16); c.group.add(red);
-    const blue = new THREE.Mesh(M.geo, M.blue); blue.scale.set(0.5, 0.16, 0.3);
-    blue.position.set(0.34, h + 0.18, l * 0.16); c.group.add(blue);
-    c._rbBar = { red, blue, phase: 0 };
-  }
   function seatSwat(cop, van, driver) {
     cop._swatPassenger = van;
     cop._swatDriver = !!driver;
@@ -2315,7 +2277,7 @@
     const h = van.heading || 0;
     const bx = -Math.sin(h), bz = -Math.cos(h);             // rear of van
     const px = Math.cos(h), pz = -Math.sin(h);              // right side
-    const L = ((van.dims && van.dims.length) || 4.9) * 0.5;
+    const L = ((van.dims && van.dims.length) || 6.6) * 0.5;
     let n = 0;
     for (let i = 0; i < team.length; i++) {
       const cop = team[i]; if (!cop || cop.dead) continue;
@@ -2364,9 +2326,9 @@
     const x = r.vertical ? r.x + lane : r.x + along;
     const z = r.vertical ? r.z + along : r.z + lane;
     const heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
-    const van = CBZ.cityMakeCar(x, z, heading, r.vertical, SWAT_VAN_MODEL, 0.2);
+    const van = CBZ.cityMakeCar(x, z, heading, r.vertical, swatVanModel(), 0.2);
     if (!van) return;
-    try { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(van, dressSwatVan); else dressSwatVan(van); } catch (e) { /* livery is cosmetic — never lose the van */ }
+    try { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(van, rbDecorate); else rbDecorate(van); } catch (e) { /* the bar is cosmetic — never lose the van */ }
     van.road = r; van.lane = lane; van.dirSign = dir;
     van.laneIdx = lanesPerDirP(r) - 1; van.vertical = !!r.vertical;
     van.baseV = Math.max(13, ((TRP().cruise && TRP().cruise[1]) || 12) + 2);
@@ -2399,8 +2361,8 @@
     }
     if (v._rbBar) {
       svFlashT += dt;
-      const on = ((svFlashT * 5) | 0) & 1;
-      v._rbBar.red.visible = !!on; v._rbBar.blue.visible = !on;
+      if (CBZ.emergencyKit) CBZ.emergencyKit.flash(v._rbBar, svFlashT);
+      else { const on = ((svFlashT * 5) | 0) & 1; if (v._rbBar.red) v._rbBar.red.visible = !!on; if (v._rbBar.blue) v._rbBar.blue.visible = !on; }
     }
     if (v._swatPhase === "enroute") {
       v._swatAge = (v._swatAge || 0) + dt;
@@ -2615,7 +2577,16 @@
     carPool: [], copPool: [], // detached, reusable records — never rebuilt per staging
     flashT: 0, leaveT: 0, age: 0,
   };
-  const CRUISER_MODEL = { name: "Police Cruiser", value: 3200, color: 0x16181d, body: "sedan", designStyle: "malibu", livery: "police" };
+  /* THE FLEET. A unit is a Police Interceptor Utility or a Charger Pursuit
+     (city/emergencykit.js: real proportions, the black-and-white, the LED
+     bar, push bumper, spotlight, unit numbers). The old record put a
+     "police" livery on the tesla-3 saloon; this is the fallback only if that
+     file is not loaded. */
+  const CRUISER_FALLBACK = { name: "Police Interceptor", value: 4200, rarity: 0.6, color: 0x111317, body: "suv", detailStyle: "interceptor", livery: "police", unit: "12" };
+  function cruiserModel() {
+    const EK = CBZ.emergencyKit;
+    return (EK && EK.cruiserModel) ? EK.cruiserModel() : CRUISER_FALLBACK;
+  }
   let rbM = null;             // shared light-bar/livery mats + ONE unit cube (built once, never disposed)
   function rbMats() {
     if (rbM) return rbM;
@@ -2625,8 +2596,8 @@
     rbM.geo._shared = true;
     return rbM;
   }
-  /* THE BLACK-AND-WHITE IS BUILT, NOT GLUED. CRUISER_MODEL carries
-     livery:"police", so the car builder (carparts.js applyPolice) paints
+  /* THE BLACK-AND-WHITE IS BUILT, NOT GLUED. The cruiser models carry
+     livery:"police", so the car builder (emergencykit.js policeLivery) paints
      the doors and roof white over the black body, fits a shaped roof bar,
      a push bar and a spotlight — all ON the body's own surfaces. The old
      version here bolted flat white slabs to the flanks and matte boxes on
@@ -2776,7 +2747,7 @@
       let c = null;
       while (RB.carPool.length && !c) { const r = RB.carPool.pop(); if (rbCarUsable(r)) c = r; else rbDispose(r.group); }
       if (c) { CBZ.cityCars.push(c); A.root.add(c.group); }
-      else { c = CBZ.cityMakeCar ? CBZ.cityMakeCar(cx, cz, heading, uz !== 0, CRUISER_MODEL, 0) : null; if (c) { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(c, rbDecorate); else rbDecorate(c); } }
+      else { c = CBZ.cityMakeCar ? CBZ.cityMakeCar(cx, cz, heading, uz !== 0, cruiserModel(), 0) : null; if (c) { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(c, rbDecorate); else rbDecorate(c); } }
       if (!c) { rbAbort(); return false; }
       c.pos.set(cx, 0, cz); c.heading = heading;
       c.group.position.set(cx, 0, cz); c.group.rotation.set(0, heading, 0);
@@ -2958,7 +2929,7 @@
   CBZ.cityMarkCruiser = function (car) { if (car && car.group) rbDecorate(car); return car; };
   // and the model those units are built from, so a caller does not have to
   // retype the literal to get the same vehicle.
-  CBZ.cityCruiserModel = function () { return CRUISER_MODEL; };
+  CBZ.cityCruiserModel = cruiserModel;
 
   // pick the best target for a cop: the player (if wanted) or an NPC offender.
   //
