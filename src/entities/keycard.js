@@ -190,13 +190,50 @@
      who is missing it". Storytelling for six boxes and no draw call of its
      own — every piece is opaque, non-emissive, empty userData, so core/
      batch.js folds it into the cell block's existing static merge. */
-  addBox(15.38, 1.86, -11.50, 0.16, 0.70, 0.62, 0x2f3742, { cast: false });                   // cabinet body
-  addBox(15.30, 1.86, -11.50, 0.02, 0.62, 0.54, 0x1b1e23, { cast: false });                   // dark interior
-  addBox(15.20, 1.86, -11.03, 0.34, 0.68, 0.04, 0x39424e, { cast: false });                   // door, swung open
-  addBox(15.05, 1.84, -11.05, 0.06, 0.06, 0.04, 0x8b95a1, { cast: false });                   // handle
-  for (let i = 0; i < 4; i++) {
-    addBox(15.29, 2.06, -11.72 + i * 0.15, 0.04, 0.04, 0.03, 0x8b95a1, { cast: false });      // hooks
-    if (i) addBox(15.27, 1.96, -11.72 + i * 0.15, 0.05, 0.14, 0.03, 0xb8bec7, { cast: false }); // tags — hook 0 is EMPTY
+  /* (2026-10-20) The cabinet was six boxes: a body, a "dark interior", a
+     door slab, a 6 cm cube handle, four cube hooks and three box tags. It is
+     a wall key cabinet now, at the size of a real 48-key steel unit scaled
+     up to a duty post's 60 keys (reference: Cathedral KC48 25 x 18 x 8 cm,
+     Amazon Basics 48-key 25 x 18 x 7 cm): a folded steel case on the east
+     wall, a key-numbered hook bar per row (5 rows of 12 hook pins, every
+     pin a bent wire, a coloured tag on most of them), the door hinged on its
+     north edge and hanging open past 100 degrees with the cam lock in it.
+     The FIRST pin on the top row is bare: that is where the card hung. */
+  if (CBZ.armoryKit) {
+    const AK = CBZ.armoryKit, bin = AK.bin(), P = new AK.Pen(bin, null, false);
+    const FX = 15.5, CW = 0.46, CH = 0.56, CD = 0.09, CZ = -11.5, CY = 1.86, GREY = 0x2f3742, IN = 0x1e2228, PIN = 0xb8bec7;
+    const zA = CZ - CW / 2, zB = CZ + CW / 2;
+    P.box(FX - 0.004, CY, CZ, 0.008, CH, CW, IN);                                     // the back
+    for (const e of [-1, 1]) {
+      P.box(FX - CD / 2, CY + e * (CH / 2 - 0.006), CZ, CD, 0.012, CW, GREY);        // top / bottom
+      P.box(FX - CD / 2, CY, CZ + e * (CW / 2 - 0.006), CD, CH, 0.012, GREY);        // sides
+    }
+    const TAGS = [0xd9b64c, 0xb3362a, 0x2f6b9a, 0x3a8a4a, 0xd9dee5];
+    for (let r = 0; r < 5; r++) {
+      const ry = CY + CH / 2 - 0.08 - r * 0.1;
+      P.box(FX - 0.012, ry + 0.012, CZ, 0.012, 0.02, CW - 0.04, 0x3d4652);            // the hook bar
+      for (let c = 0; c < 12; c++) {
+        const pz = zA + 0.04 + c * (CW - 0.08) / 11;
+        P.bar([FX - 0.018, ry + 0.012, pz], [FX - 0.05, ry + 0.012, pz], 0.0018, PIN, 5);   // the pin
+        P.bar([FX - 0.05, ry + 0.012, pz], [FX - 0.05, ry + 0.022, pz], 0.0018, PIN, 5);    // its upturn
+        if (r === 0 && c === 0) continue;                                              // bare: the card's
+        const h = (r * 12 + c) * 2654435761 >>> 0;
+        if ((h & 7) === 3) continue;                                                    // a few signed out
+        P.box(FX - 0.046, ry - 0.022, pz, 0.003, 0.05, 0.022, TAGS[(h >>> 4) % TAGS.length]);   // its tag
+        P.box(FX - 0.05, ry - 0.008, pz + 0.006, 0.004, 0.035, 0.008, 0x8b95a1);         // the key behind it
+      }
+    }
+    // the door, hinged on the cabinet's north edge (zA), open ~105 degrees
+    const open = -1.83, hx = FX - CD, hz = zA;
+    const dm = new THREE.Matrix4().makeRotationY(open);
+    dm.setPosition(hx, 0, hz);
+    const D = new AK.Pen(bin, dm, false);
+    D.box(0, CY, CW / 2, 0.012, CH, CW, 0x39424e);                                    // the leaf (local z from the hinge)
+    D.box(-0.008, CY, CW / 2, 0.006, CH - 0.06, CW - 0.06, 0x3f4855);                  // its pressed panel
+    D.cyl(-0.012, CY + 0.02, CW - 0.04, 0.011, 0.011, 0.012, 0xc4cad1, 12, 0, Math.PI / 2);    // the cam lock
+    D.box(0.008, CY, CW / 2, 0.003, 0.2, 0.14, 0xe4e0d4);                            // the key index card inside
+    for (const hy of [CY - 0.2, CY + 0.2]) D.cyl(0, hy, 0, 0.005, 0.005, 0.05, 0x8b95a1, 6);   // hinges
+    bin.flush(scene);
   }
 
   // ==================================================================
@@ -209,7 +246,6 @@
   // fob hangs off whoever's pockets actually hold one, and only while they do:
   // lifted, looted, or hung in the safe for the night, and the belt is bare.
   const brass = mat(0xd6a33b, { emissive: 0x4a3308, ei: 0.45 });
-  const fobRingMat = mat(0x8b95a1);
   const tagMat = mat(0xc94d3a, { emissive: 0x4a0f0c, ei: 0.5 });
   function makeFob(man) {
     const M = CBZ.charMounts ? CBZ.charMounts(man.char) : null;
@@ -218,16 +254,18 @@
     f.position.set(-0.30 * s, 1.02 * s, 0.15 * s);   // left hip, forward of the seam
     f.rotation.set(0, 0, 0.18);
     f.userData.mover = true;                          // keep the batcher out of it
-    const ringM = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.055, 0.012), fobRingMat);
-    ringM.position.set(0, 0.075, 0);
-    const shank = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.13, 0.011), brass);
-    const bow = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.011), brass);
-    bow.position.y = 0.04;
-    const bit = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.028, 0.011), brass);
-    bit.position.set(0.015, -0.055, 0);
-    const tag = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.085, 0.010), tagMat);
-    tag.position.set(0.055, -0.01, 0.004);
-    f.add(ringM, shank, bow, bit, tag);
+    // a real jail key on a split ring with its red tag (CBZ.armoryKit.keyGroup);
+    // it was four brass boxes and a box ring
+    if (CBZ.armoryKit) {
+      const k = CBZ.armoryKit.keyGroup({ scale: 1.2, glow: true });
+      k.position.set(0, 0.09, 0);
+      f.add(k);
+    } else {
+      const shank = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.13, 0.011), brass);
+      const tag = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.085, 0.010), tagMat);
+      tag.position.set(0.055, -0.01, 0.004);
+      f.add(shank, tag);
+    }
     f.traverse(function (o) { o.castShadow = false; });
     man.char.body.add(f);
     return f;

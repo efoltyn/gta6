@@ -1011,14 +1011,53 @@
         or is not wearing.
      ========================================================== */
   const SAFE = { x: 18.6, z: -55.9, open: false, t: 0, msg: 0, stocked: false };
+  /* THE SAFE, REMADE (2026-10-20). It was a solid 1.0 x 1.9 x 1.2 box with
+     a box plinth, a box "top rail" hidden inside it, a box door, a box
+     handle and a box key on a box hook: open it and you looked at the
+     body's own flat face. A real walk-up office safe of this size is a
+     HOLLOW steel body: 8 cm walls lined in grey felt, a door frame with a
+     relieved step round the opening, a recessed plinth, and a 12 cm door
+     with a raised border panel, two hinge barrels, a three-spoke handle,
+     the combination dial in a fixed bezel and, on the lock edge, the three
+     live bolts that throw into the jamb. Inside: the property shelf and an
+     upper shelf with the key hook screwed under it. Same footprint, the
+     same collider, the same pivot/leaf/dial/spoke/hook/fob contract. */
   (function safeBody() {
-    addBox(SAFE.x, 0.95, SAFE.z, 1.0, 1.9, 1.2, 0x2b3038, { solid: true, blockLOS: false });
-    addBox(SAFE.x, 0.06, SAFE.z, 1.1, 0.12, 1.3, 0x1c2026, { cast: false });        // plinth
-    addBox(SAFE.x - 0.02, 1.42, SAFE.z, 0.9, 0.22, 1.0, 0x353c46, { cast: false }); // top rail
+    const AK = CBZ.armoryKit;
+    const col = { minX: SAFE.x - 0.5, maxX: SAFE.x + 0.5, minZ: SAFE.z - 0.6, maxZ: SAFE.z + 0.6 };
+    CBZ.colliders.push(col);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    const BODY = 0x2b3038, FELT = 0x4a4f55, X0 = SAFE.x - 0.5, Z0 = SAFE.z - 0.6, Z1 = SAFE.z + 0.6;
+    if (AK) {
+      const bin = AK.bin(), B = new AK.Pen(bin, null, true);
+      B.box(SAFE.x, 0.06, SAFE.z, 0.94, 0.12, 1.14, 0x1c2026);                       // recessed plinth
+      B.box(SAFE.x + 0.46, 1.01, SAFE.z, 0.08, 1.78, 1.2, BODY);                    // back
+      B.box(SAFE.x, 1.86, SAFE.z, 1.0, 0.08, 1.2, BODY);                            // top
+      B.box(SAFE.x, 0.16, SAFE.z, 1.0, 0.08, 1.2, BODY);                            // floor
+      for (const e of [-1, 1]) B.box(SAFE.x, 1.01, SAFE.z + e * 0.56, 1.0, 1.78, 0.08, BODY);   // sides
+      // the front frame round the opening (the leaf closes against it)
+      B.box(X0 + 0.04, 1.01, Z0 + 0.05, 0.08, 1.78, 0.1, 0x252a31);
+      B.box(X0 + 0.04, 1.01, Z1 - 0.05, 0.08, 1.78, 0.1, 0x252a31);
+      B.box(X0 + 0.04, 1.84, SAFE.z, 0.08, 0.06, 1.2, 0x252a31);
+      B.box(X0 + 0.04, 0.18, SAFE.z, 0.08, 0.06, 1.2, 0x252a31);
+      // felt lining
+      B.box(SAFE.x + 0.415, 1.01, SAFE.z, 0.01, 1.62, 1.02, FELT);
+      for (const e of [-1, 1]) B.box(SAFE.x, 1.01, SAFE.z + e * 0.515, 0.82, 1.62, 0.01, FELT);
+      B.box(SAFE.x, 1.815, SAFE.z, 0.82, 0.01, 1.02, FELT);
+      B.box(SAFE.x, 0.205, SAFE.z, 0.82, 0.01, 1.02, FELT);
+      // the strike plates the bolts throw into, in the lock-side jamb
+      for (const by of [0.45, 1.0, 1.55]) B.box(X0 + 0.04, by, Z1 - 0.1, 0.07, 0.07, 0.02, 0x9aa0a8);
+      // the upper shelf, and the key hook screwed under it
+      B.box(SAFE.x + 0.02, 1.47, SAFE.z, 0.8, 0.03, 1.0, 0x4a525c);
+      B.cyl(SAFE.x + 0.1, 1.43, SAFE.z - 0.2, 0.004, 0.004, 0.05, 0xc9a24a, 6);
+      const hk = new THREE.TorusGeometry(0.012, 0.003, 4, 10, Math.PI * 1.3);
+      hk.rotateY(HALF); hk.translate(SAFE.x + 0.1, 1.395, SAFE.z - 0.2);
+      B.geo(hk, 0xc9a24a);
+      bin.flush(ROOT);
+    } else {
+      addBox(SAFE.x, 0.95, SAFE.z, 1.0, 1.9, 1.2, BODY, { blockLOS: false });
+    }
     // The door, on a pivot at its west edge, so it SWINGS toward the room.
-    // Built with plain meshes rather than addBox: addBox parents to
-    // CBZ.prisonRoot (materials.js:73), and a leaf that has to ride a pivot
-    // must be built into that pivot, not adopted out of the world.
     const pivot = new THREE.Group();
     pivot.position.set(SAFE.x - 0.5, 0, SAFE.z - 0.55);
     pivot.userData.mover = true;
@@ -1031,21 +1070,48 @@
       return m;
     }
     const leaf = part(0.12, 1.72, 1.06, 0x39424e, -0.02, 0.95, 0.53);
+    if (AK) {
+      const lb = AK.bin(), L = new AK.Pen(lb, null, true), RIM = 0x434d5a, HW = 0x9aa0a8, CH = 0xc4cad1;
+      // the raised border panel on the face
+      L.box(-0.085, 0.95, 0.04, 0.012, 1.62, 0.05, RIM);
+      L.box(-0.085, 0.95, 1.02, 0.012, 1.62, 0.05, RIM);
+      L.box(-0.085, 1.74, 0.53, 0.012, 0.05, 1.0, RIM);
+      L.box(-0.085, 0.16, 0.53, 0.012, 0.05, 1.0, RIM);
+      // two hinge barrels on the hinge edge
+      for (const hy of [0.42, 1.48]) L.cyl(-0.06, hy, -0.005, 0.03, 0.03, 0.22, HW, 12);
+      // the three-spoke handle wheel (on its hub, below the dial)
+      L.cyl(-0.1, 0.68, 0.80, 0.03, 0.03, 0.05, CH, 12, 0, HALF);
+      for (let k = 0; k < 3; k++) {
+        const a = k * Math.PI * 2 / 3 + 0.3, ey = 0.68 + Math.cos(a) * 0.13, ez = 0.80 + Math.sin(a) * 0.13;
+        L.bar([-0.12, 0.68, 0.80], [-0.12, ey, ez], 0.009, CH, 8);
+        L.cyl(-0.12, ey, ez, 0.018, 0.018, 0.036, CH, 10, 0, HALF);
+      }
+      // the dial's fixed bezel with its index mark
+      const bz = new THREE.TorusGeometry(0.135, 0.012, 6, 28);
+      bz.rotateY(HALF); bz.translate(-0.08, 1.05, 0.72);
+      L.geo(bz, CH);
+      L.box(-0.085, 1.205, 0.72, 0.012, 0.025, 0.012, 0xd9dee5);
+      // the live bolts on the lock edge, throwing past it into the jamb
+      for (const by of [0.45, 1.0, 1.55]) L.cyl(-0.02, by, 1.09, 0.025, 0.025, 0.07, CH, 10, HALF);
+      lb.flush(pivot);
+    }
     const dial = part(0.10, 0.26, 0.26, 0x9aa0a8, -0.10, 1.05, 0.72);
     dial.geometry.dispose();
     dial.geometry = new THREE.CylinderGeometry(0.12, 0.125, 0.06, 28).rotateZ(Math.PI / 2);   // a dial is round
-    const spoke = part(0.11, 0.05, 0.22, 0x2b3038, -0.11, 1.05, 0.72);  // the dial's index mark
-    part(0.09, 0.09, 0.42, 0x6b7480, -0.10, 0.68, 0.80);       // handle
+    const spoke = part(0.11, 0.05, 0.22, 0x2b3038, -0.136, 1.05, 0.72);  // the dial's index mark
+    spoke.geometry.dispose();
+    spoke.geometry = new THREE.BoxGeometry(0.012, 0.03, 0.012);         // a raised finger grip on the dial's rim
     SAFE.dial = dial; SAFE.spoke = spoke;
     dial.userData.mover = true; spoke.userData.mover = true;
     // the HOOK. This is the readout: a key hanging on it, or nothing.
-    const hook = addBox(SAFE.x + 0.1, 1.42, SAFE.z - 0.2, 0.07, 0.16, 0.07, 0x8b95a1, { cast: false });
-    const keyFob = addBox(SAFE.x + 0.1, 1.22, SAFE.z - 0.2, 0.06, 0.3, 0.16, 0xd9b64c,
+    const hook = { position: new THREE.Vector3(SAFE.x + 0.1, 1.395, SAFE.z - 0.2) };
+    const keyFob = AK ? AK.keyGroup({ scale: 1.6, glow: true }) : addBox(SAFE.x + 0.1, 1.22, SAFE.z - 0.2, 0.06, 0.3, 0.16, 0xd9b64c,
       { emissive: 0x6a5510, ei: 0.35, cast: false });
+    if (AK) { keyFob.position.set(SAFE.x + 0.1, 1.392, SAFE.z - 0.2); keyFob.rotation.y = HALF; ROOT.add(keyFob); }
     keyFob.userData.mover = true;
     keyFob.visible = false;
     // an interior shelf with the confiscated property on it
-    addBox(SAFE.x, 0.72, SAFE.z, 0.86, 0.05, 1.02, 0x4a525c, { cast: false });
+    addBox(SAFE.x, 0.72, SAFE.z, 0.82, 0.05, 1.0, 0x4a525c, { cast: false });
     // ...and the shelf is a support, so what is laid on it stays on it
     (CBZ.platforms || (CBZ.platforms = [])).push({
       minX: SAFE.x - 0.43, maxX: SAFE.x + 0.43, minZ: SAFE.z - 0.51, maxZ: SAFE.z + 0.51, top: 0.745 });

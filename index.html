@@ -711,7 +711,7 @@ document.body.appendChild(b);}}catch(e){}})();
      parse-time dependencies, so it loads before its first consumers
      (entities/security.js, entities/guards.js). -->
 <script src="src/systems/brain.js?v=dismiss1014"></script>
-<script src="src/entities/security.js"></script>
+<script src="src/entities/security.js?v=jas1020"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=twister1014"></script>
@@ -757,9 +757,11 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
-<script src="src/world/cafeteria.js?v=door929"></script>
-<script src="src/world/lounge.js?v=news0930"></script>
-<script src="src/world/gunroom.js?v=jailv1001"></script>
+<script src="src/world/cafeteria.js?v=jas1020"></script>
+<script src="src/world/lounge.js?v=jas1020"></script>
+<!-- the armory display kit: the real carriers/helmets people wear, harvested onto mannequins, hooks and shelves (CBZ.armoryKit) -->
+<script src="src/world/armorykit.js?v=jas1020"></script>
+<script src="src/world/gunroom.js?v=jas1020"></script>
 <script src="src/world/ventilation.js?v=m489457"></script>
 <script src="src/world/escape_routes.js?v=tow929"></script>
 <script src="src/world/southblock.js?v=door929"></script>
@@ -776,7 +778,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/vision.js"></script>
 <script src="src/entities/guards.js?v=jailai1020"></script>
 <script src="src/entities/searchlight.js?v=tow929"></script>
-<script src="src/entities/keycard.js?v=bodyfix1009b"></script>
+<script src="src/entities/keycard.js?v=jas1020"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
 <script src="src/entities/npclife.js?v=w09290250y"></script>
@@ -796,7 +798,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=fac1009"></script>
+<script src="src/world/adminwing.js?v=jas1020"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -884,7 +886,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (it turns their tables), after entities/guards.js, entities/security.js
      and systems/economy.js (it turns their records), and BEFORE capture.js
      and state.js, which call CBZ.prisonTier at runtime. -->
-<script src="src/systems/prisontiers.js?v=leave1014"></script>
+<script src="src/systems/prisontiers.js?v=jas1020"></script>
 
 <!-- 4b. remaining systems -->
 <script src="src/systems/quests.js?v=verbs2b"></script>

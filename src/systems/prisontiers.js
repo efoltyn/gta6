@@ -351,9 +351,30 @@
         paints. Two files writing one material is exactly the fault its own
         header was written to record.
      ========================================================== */
+  /* A CAMERA MAST: a 168 mm galvanised steel pole on a square base plate
+     with four anchor nuts, a cap plate at the top (the camera's post stands
+     on it: entities/security.js fitMount). It was a 26 cm square box with a
+     50 cm square slab on top. Same collider (the pole's square). */
   function mast(x, z, h) {
-    const m = addBox(x, h / 2, z, 0.26, h, 0.26, 0x6b7480, { solid: true });
-    addBox(x, h + 0.06, z, 0.5, 0.12, 0.5, 0x515a66, { cast: false });
+    const ROOT = CBZ.prisonRoot || CBZ.scene, THREE = window.THREE;
+    const col = { minX: x - 0.13, maxX: x + 0.13, minZ: z - 0.13, maxZ: z + 0.13 };
+    if (!ROOT || !THREE || !THREE.BufferGeometryUtils) return addBox(x, h / 2, z, 0.26, h, 0.26, 0x6b7480, { solid: true });
+    const parts = [
+      new THREE.CylinderGeometry(0.084, 0.084, h, 16).translate(x, h / 2, z),             // the pole
+      new THREE.BoxGeometry(0.4, 0.025, 0.4).translate(x, 0.0125, z),                      // base plate
+      new THREE.CylinderGeometry(0.12, 0.12, 0.02, 16).translate(x, h + 0.01, z),          // cap plate
+      new THREE.CylinderGeometry(0.095, 0.095, 0.06, 16).translate(x, 0.055, z),           // base collar
+    ];
+    for (const sx of [-1, 1]) for (const sz of [-1, 1])
+      parts.push(new THREE.CylinderGeometry(0.018, 0.018, 0.04, 6).translate(x + sx * 0.15, 0.045, z + sz * 0.15));   // anchor nuts
+    for (let i = 0; i < parts.length; i++) { if (parts[i].index) parts[i] = parts[i].toNonIndexed(); parts[i].deleteAttribute("uv"); }
+    const m = new THREE.Mesh(THREE.BufferGeometryUtils.mergeBufferGeometries(parts, false), CBZ.mat(0x9aa2aa));
+    m.castShadow = true; m.receiveShadow = true;
+    ROOT.add(m);
+    col.ref = m;
+    CBZ.colliders.push(col);
+    m.userData.collider = col;
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return m;
   }
   const EXTRA = [
