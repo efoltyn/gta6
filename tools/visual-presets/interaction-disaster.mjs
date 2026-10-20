@@ -5,7 +5,7 @@
   interaction surface in the repo (#survVerbs — thumb-docked 48px pill
   buttons, cyan glass, press states), while DESKTOP gets the prison's plain
   #interact key-row list with none of that. Two beats — free (Grab/Punch/
-  Shove) and carrying (Throw/Set down) — across the device matrix, so the
+  Shove) and carrying (Throw/Drop) — across the device matrix, so the
   phone dock and the desktop card sit side by side in one report.
 
   HUD stays visible — the HUD is the subject. Camera is the player's own.
@@ -50,7 +50,7 @@ export default {
     },
     {
       id: "held-verbs",
-      label: "Carrying — Throw / Set down",
+      label: "Carrying — Throw / Drop",
       focus:
         "Mid-carry the verb set swaps. The context change is the system's best trick — does each surface make it legible?",
     },

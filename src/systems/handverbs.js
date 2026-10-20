@@ -41,7 +41,8 @@
   }
 
   const THROW = { id: "throw", label: "Throw", fn: () => G() && G().release(true) };
-  const SET_DOWN = { id: "setDown", label: "Set down", fn: () => G() && G().release(false) };
+  // owner (2026-10-19, iPad): "Set down should be Drop." One word, never cut.
+  const SET_DOWN = { id: "setDown", label: "Drop", fn: () => G() && G().release(false) };
   const CARRY = { id: "carry", label: "Carry", fn: () => { const v = VB(); if (v && tgt) v.carry(me(), tgt); } };
   const LET_GO = { id: "letGo", label: "Let go", fn: () => G() && G().release(false) };
   const HOLD_VERBS = [THROW, CARRY, SET_DOWN];

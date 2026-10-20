@@ -91,7 +91,7 @@
   C.barDisabled = function (cuffed) { return !!cuffed; };
   // prison card verbs that need hands (hand over, take, search, tie, cuff)
   const HAND_VERBS = { trade: 1, steal: 1, bribe: 1, payoff: 1, pay: 1, rob: 1, restrain: 1, detain: 1,
-    search: 1, settle: 1, whand: 1, squash: 1, paySilence: 1, befriend: 0 };
+    search: 1, settle: 1, whand: 1, squash: 1, paySilence: 1, punch: 1, shove: 1, befriend: 0 };
   C.verbAllowed = function (v) { return !HAND_VERBS[v]; };
 
   // ---- the room ----

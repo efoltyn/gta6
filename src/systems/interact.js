@@ -31,9 +31,9 @@
    live by tools/prison-onthing-check.mjs.
 
    GRAB is the disaster game's grab (systems/handverbs.js + grapple.js +
-   CBZ.verbs): pressing it swaps in the hold set (Throw / Carry / Set down)
+   CBZ.verbs): pressing it swaps in the hold set (Throw / Carry / Drop)
    on the man in your hands, the same buttons the disaster dock shows, plus
-   the prison's one extra (Steal, his pockets while you hold him). Hands on a
+   the prison's one extra (Pickpocket, his pockets while you hold him). Hands on a
    man is a blow in the prison's eyes (systems/prisonlaw.js): on an officer
    or the warden it is an assault.
 
@@ -117,7 +117,21 @@
     } },
     bribe:    { label: "Bribe",     fn: (a) => CBZ.econ.bribe(a) },
     payoff:   { label: "Payoff",    fn: (a) => CBZ.econ.payoff(a) },
-    steal:    { label: "Steal",     fn: (a) => CBZ.econ.steal(a) },
+    // PICKPOCKET (owner 2026-10-19: "I want the pickpocket button back"). The
+    // jail's lift was always this verb; it said "Steal". His word now.
+    steal:    { label: "Pickpocket", fn: (a) => CBZ.econ.steal(a) },
+    // PUNCH on the man whose verbs you tapped (the fire button swings at
+    // whoever is in front). combat.js punch writes the blow into the jail's law.
+    punch:    { label: "Punch",     fn: (a) => (CBZ.punch ? CBZ.punch(a) : { ok: false, msg: "" }) },
+    // SHOVE him off you: CBZ.verbs' palms, and hands on a man is a blow
+    shove:    { label: "Shove",     fn: (a) => {
+      const V = CBZ.verbs, pa = V && V.playerActor ? V.playerActor() : null;
+      if (!V || !pa || !V.shove) return { ok: false, msg: "" };
+      if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim(true);
+      if (!V.shove(pa, a, { force: true })) return { ok: false, msg: "" };
+      handsOn(a);
+      return { ok: true, msg: "" };
+    } },
     // GRAB: the disaster game's grab, on this man
     grab:     { label: "Grab",      fn: (a) => {
       const G = CBZ.grapple;
@@ -327,7 +341,7 @@
       const money = (a.corrupt && guardPayoffWorthIt()) ? "payoff" : "bribe";
       const deals = !!(CBZ.prisonTradeDeals && CBZ.prisonTradeDeals(a));
       const lead = canTell ? "tell" : (deals ? "trade" : null);
-      return lead ? [lead, money, "steal", "grab"] : [money, "steal", "grab"];
+      return lead ? [lead, money, "steal", "grab"] : [money, "steal", "grab", "shove"];
     }
     /* AN INMATE: one headline (what this man is to you right now), then the
        three things you can do with anybody: deal, lift, take hold. */
@@ -345,7 +359,10 @@
       : claiming ? "collect"
       : recruiting ? "join"
       : null;
-    return head ? [head, "trade", "steal", "grab"] : ["trade", "steal", "grab"];
+    // FOUR SEATS, ALWAYS FILLED (owner on iPad: "there's not enough"): with no
+    // headline the fourth is your fist on him. Trade stays first because it is
+    // the E key, and E on a man you happen to face must never be an assault.
+    return head ? [head, "trade", "steal", "grab"] : ["trade", "steal", "grab", "punch"];
   }
   // HAGGLE and THREATEN are the same rung: the one this man answers to
   function pressureVerb(a) {
@@ -415,7 +432,8 @@
     if (isHand(v)) { const h = handVerb(v.slice(2)); return h ? h.label : ""; }
     if (VERB[v] && VERB[v].label) return VERB[v].label;
     const raw = String((CBZ.cityCampaignPrisonLabel && CBZ.cityCampaignPrisonLabel(a, v)) || v);
-    return shortText(raw.split(/\s+[—–-]\s+/)[0], 18);
+    // the head of the line, whole: a button word is never ellipsised
+    return raw.split(/\s+[—–-]\s+/)[0];
   }
   function capVerbs(v) {
     // CUFFED (CBZ.arrest.playerCuffed): only what a mouth can do

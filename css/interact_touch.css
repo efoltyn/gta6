@@ -83,6 +83,13 @@
 @media (orientation: portrait){
   :root{ --sv-bottom: calc(78px + env(safe-area-inset-bottom, 0px)); }
 }
+/* A TABLET'S THUMB (owner, iPad 2026-10-19: "buttons are a little bit too
+   small on iPad"). 48 is a phone number; an iPad held in two hands gets 58,
+   the same capsule the jail's person dock wears (css/hud.css .wdock). */
+@media (min-width: 700px) and (min-height: 550px){
+  :root{ --sv-h: 58px; --sv-gap: 12px; }
+  .svbtn{ min-width: 132px; max-width: 240px; font-size: 18px; padding: 0 22px; }
+}
 
 /* ============================================================
    1. THE CAPSULE — one button grammar for every touch verb
@@ -104,7 +111,7 @@
   border: 1.5px solid rgba(127,231,255,.5);
   background: rgba(10,20,32,.68); color: #eaf4ff;
   font-family: Fredoka, system-ui, sans-serif;
-  font-weight: 600; font-size: 16px; letter-spacing: .6px; text-align: center;
+  font-weight: 600; font-size: 16px; letter-spacing: .6px; text-align: center; white-space: nowrap;
   -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
   touch-action: manipulation; -webkit-tap-highlight-color: transparent;
   cursor: pointer;
@@ -113,9 +120,9 @@
 /* the prison's label + status chip inside that capsule. The chip is a
    price or a meter word ("25", "armed"); the authored sentence stays on
    the button as its aria-label, read out rather than printed. */
+/* the verb is never ellipsised: the chip beside it yields instead */
 .svbtn .pi-lab{
-  font: inherit; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font: inherit; flex: none; white-space: nowrap;
 }
 /* the chip YIELDS FIRST. A verb the thumb cannot read is a broken control; a
    price that ellipsises is merely a shorter price. */

@@ -680,7 +680,9 @@ body.touch .wprompt.band{bottom:max(calc(168px + var(--tb-lift, 0px) + env(safe-
    squeeze (flex:none), and a pill wider than the glass caps there with an
    ellipsis on the sub first instead of spilling past its rim. */
 .wprompt .tpill{margin:0; gap:7px; white-space:nowrap; max-width:min(340px, calc(100vw - 24px)); box-sizing:border-box;}
-.wprompt .tpill > .wverb{flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;}
+/* THE VERB IS NEVER CUT (owner, iPad: "'Set do…' is stupid"). The button is
+   sized to its word; only the sub chip may yield. */
+.wprompt .tpill > .wverb{flex:none; overflow:visible; text-overflow:clip;}
 .wprompt .tpill > .wkey{flex:none;}
 body:not(.touch) .wprompt .tpill{
   display:inline-flex; align-items:center; gap:8px; padding:6px 12px 6px 7px;
@@ -711,7 +713,7 @@ body.touch .wprompt:not(.band)::after{background:rgba(13,26,40,.85); border-colo
 .wprompt .wname .wrole{font-weight:500; font-size:12px; opacity:.78;}
 body:not(.touch) .wprompt.wside .tpill{padding:4px 11px 4px 5px; font-size:14px; background:rgba(9,14,20,.78);}
 body:not(.touch) .wprompt.wside.lead .tpill{background:rgba(14,30,44,.92); border-color:rgba(125,231,255,.6);}
-body.touch .wprompt.wside .tpill{min-height:46px; min-width:96px; justify-content:flex-start; margin:0;}
+body.touch .wprompt.wside .tpill{min-height:56px; min-width:112px; justify-content:flex-start; margin:0;}
 body.touch .wprompt.wside.lead .tpill{background:rgba(25,70,104,.94); border-color:rgba(160,238,255,.85);}
 body.touch .wprompt .wname{font-size:16px;}
 
@@ -720,14 +722,23 @@ body.touch .wprompt .wname{font-size:16px;}
    no caret pointing at a spot the column deliberately stands off.
      .wabs   beside the thing's projected rect (a man's body, a door + frame)
      .wdock  touch: a person's verbs in the dock left of the thumb cluster,
-             compact capsules (44px tap height, 6px gaps), one column width */
+             thumb capsules (58px tall on a tablet, 10px gaps), one column
+             width = the widest word, never cut (owner, iPad 2026-10-19:
+             "buttons are a little bit too small on iPad"; Apple's floor is
+             44pt and a game thumb mid-fight needs more) */
 .wprompt.wabs, .wprompt.wdock{transform:none !important; padding:0;}
 .wprompt.wabs::after, .wprompt.wdock::after{display:none;}
-body.touch .wprompt.wdock .tpill{display:flex; width:100%; box-sizing:border-box; min-height:44px; min-width:84px;
-  padding:0 16px; margin:0; justify-content:center; font-size:15px; border-radius:22px; box-shadow:0 2px 0 rgba(0,0,0,.35);}
+body.touch .wprompt.wdock .tpill{display:flex; width:100%; box-sizing:border-box; min-height:58px; min-width:132px;
+  padding:0 22px; margin:0; justify-content:center; font-size:18px; border-radius:29px; box-shadow:0 3px 0 rgba(0,0,0,.35);}
 body.touch .wprompt.wdock.lead .tpill{background:rgba(25,70,104,.94); border-color:rgba(160,238,255,.85);}
-body.touch .wprompt.wdock .wname{font-size:14px; padding:0 2px 2px;}
-body.touch .wprompt.wdock .wname .wrole{font-size:11px;}
+body.touch .wprompt.wdock .wname{font-size:16px; padding:0 2px 4px;}
+body.touch .wprompt.wdock .wname .wrole{font-size:12px;}
+/* a landscape PHONE is ~390px tall: name + four 58px capsules would climb
+   into the top HUD, so the phone keeps 50px (still over Apple's 44) */
+@media (max-height: 520px){
+  body.touch .wprompt.wdock .tpill{min-height:50px; min-width:112px; font-size:16px; border-radius:25px; padding:0 18px;}
+  body.touch .wprompt.wside .tpill{min-height:50px;}
+}
 
 /* TRADE (systems/prisontrade.js): your pockets and his on one table */
 #prisonTrade{position:fixed; inset:0; z-index:62; display:none; align-items:center; justify-content:center;
