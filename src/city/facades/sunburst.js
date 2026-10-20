@@ -1,73 +1,67 @@
 /* ============================================================
-   city/facades/sunburst.js — "Radiator Crown", 1930.
+   city/facades/sunburst.js — "Radiator Crown", 1930: the Chrysler idea.
 
-   THE READ. The Chrysler idea is a bargain: the shaft is an ordinary pale
-   brick office building, and every scrap of money, metal and invention is
-   spent in the last twenty metres. So this grammar is written top-down. The
-   crown is solved first from ctx.rTop, the shaft gets whatever discipline is
-   left, and the base is treated as a separate small building because it is
-   the only part of a 128 m tower a player on foot will ever touch.
+   REFERENCES (2026-10 rewrite)
+     Chrysler Building (William Van Alen, 1930): a white-brick shaft striped
+       with grey brick at the window lines, nickel-chrome steel spandrels at
+       the setbacks, radiator-cap eagles at the 61st-floor corners, and the
+       crown: seven tiers of radiating stainless arches, each perforated by
+       triangular windows, under a needle.
+       https://www.cnn.com/2025/04/28/style/chrysler-building-art-deco-centennial
+       https://www.dezeen.com/2025/03/04/chrysler-building-art-deco-centenary/
+       https://en.wikipedia.org/wiki/Art_Deco_in_the_United_States
 
-   WHY EACH ELEMENT EXISTS
+   THE BARGAIN. The shaft is an ordinary pale brick office building and the
+   money is spent in the last fifth: so the shaft here is disciplined and
+   cheap, and the crown is the event.
 
-     THE CROWN (the whole point)
-       Seven tiers of radiating arches, each tier NARROWER in plan and TALLER
-       in apex than the one below, all springing from a common shoulder. Each
-       tier is drawn as stacked courses whose half-width follows a semicircle,
-       which is the honest way to draw a fan out of axis-aligned merged boxes
-       and reads as a nested set of fans converging on a point from any
-       distance. The tiers overlap deliberately: a fan that starts where the
-       last one ended is a wedding cake, a fan that starts INSIDE the last one
-       is a sunburst. Bright nickel arrises are laid on every course edge so
-       the assembly catches light as a set of concentric rings, which is what
-       makes the real thing legible against the sky at a kilometre.
+   THE PROPORTIONS (metres; nothing scales off the building)
+     bay               2.9 m: a white brick pier 0.66 m wide, 0.28 m proud,
+                       and a pair of steel casements ~2.2 m between them
+     grey bands        the spandrel at every floor line in dark grey brick,
+                       0.12 m proud, behind the piers: the horizontal stripe
+                       you see on the real shaft is the spandrel showing
+                       between white piers
+     base              2 storeys of polished black granite (3 on a 30+
+                       storey tower): piers 0.9 m, tall lobby glass, a nickel
+                       cornice 0.5 m proud, a radiating fan over the entrance
+                       (the crown's motif brought down to the door)
+     belt              one nickel frieze two-thirds up the shaft, 0.45 m proud
+     shoulder          a 0.55 m nickel ring at the roof line, the four corner
+                       eagles thrusting 0.85 m out of the corners — kept
+                       inside the 1 m the lot allows (they reached 3 m)
+     crown             24 % of the building in all: fans 62 % of it, the
+                       needle 38 %. Seven tiers, each narrower and taller,
+                       each springing INSIDE the last: that overlap is what
+                       makes a sunburst and not a wedding cake.
 
-     TRIANGULAR LIGHTS
-       Two radiating rows of triangular dormer windows punched into every
-       tier, on all four faces, counted down as the tiers narrow. This is the
-       detail that separates a Chrysler crown from a generic stepped dome: a
-       dome has a smooth edge, this one is perforated with dark triangles.
-
-     THE SPIRE
-       A slender stepped mast standing on the crown, a real fraction of the
-       crown's height rather than a toothpick, with collars breaking its taper
-       so it reads as structure, and a small finial. The mast is merged boxes;
-       only the knob and the very tip are real meshes (two of them).
-
-     CORNER EAGLES
-       At the transition where the shaft stops and the crown begins, a bold
-       stepped triangular ornament thrusts OUT and UP from each corner. They
-       are the famous ones, they are what stops the crown looking like a hat
-       balanced on a box, and they give the silhouette four barbs at exactly
-       the height the eye reads as the top of the building.
-
-     THE SHAFT
-       Deliberately restrained so the crown wins: continuous vertical piers
-       running the full height uninterrupted, a recessed spandrel and a dark
-       glass band per storey (two cheap boxes per face per floor and nothing
-       else), and two chevron transition bands that break the height into
-       thirds without spending geometry per storey.
-
-     THE BASE
-       Dark polished granite, tall narrow openings between heavy piers, a
-       showroom cornice, and an entrance surround with a radiating metal fan
-       over the door — the crown's own motif, brought down to eye level, which
-       is how a real deco tower ties its top to its bottom.
-
-   COLOUR is anchored to real mid values rather than derived by lightening the
-   host, because this renderer clips above about 0x99 and a crown that washes
-   to white loses every arris the tiers are made of. Pale brick shaft, mid
-   nickel-steel crown a full step cooler and brighter than the brick, near
-   black granite base.
-
-   BUDGET. Everything is ctx.dbox except two meshes at the spire tip. Detail
-   is BANDED: nothing repeats per storey except two boxes per face, so a
-   40-storey subject stays far under the sheet's box-per-storey ceiling.
+   COST. Piers one box per line for the whole height, one grey band per floor
+   line per face, ornament only at the base, the belt and the crown.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !CBZ.registerFacade) return;
+
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+  function bayGrid(F, f, pitch, cornerW, pierW) {
+    const n = F.bayCount(f, pitch, 1, 18);
+    const L = F.bayLines(f, n, cornerW / 2);
+    const inner = L.slice(1, L.length - 1);
+    const bays = [];
+    for (let i = 0; i < n; i++) {
+      const a = i === 0 ? -f.span / 2 + cornerW : L[i] + pierW / 2;
+      const b = i === n - 1 ? f.span / 2 - cornerW : L[i + 1] - pierW / 2;
+      if (b - a > 0.5) bays.push({ t0: a, t1: b, t: (a + b) / 2, w: b - a });
+    }
+    return { lines: inner, bays: bays };
+  }
+  function boxCut(ctx, F, f, cy, h, proj, col, cut) {
+    if (!(cut > 0)) { F.band(ctx, f, cy, h, proj, col, proj * 2); return; }
+    const a = f.span / 2 + proj, len = a - cut;
+    if (len > 0.02) for (const sg of [-1, 1]) F.box(ctx, f, sg * (cut + len / 2), cy, len, h, proj, col);
+  }
 
   CBZ.registerFacade("sunburst", {
     label: "Radiator Crown",
@@ -75,271 +69,209 @@
     structure: "steel",
     crownsRoof: true,
     minStoreys: 14,
+    window: "deco",
     build: function (ctx, F, spec) {
-      const FH = ctx.FH, H = ctx.rTop, ST = ctx.storeys;
+      const FH = ctx.FH, H = ctx.rTop, ST = Math.max(1, ctx.storeys | 0);
       const W2 = ctx.w / 2, D2 = ctx.d / 2;
-      const small = Math.min(ctx.w, ctx.d);
-      const e = F.entrance(ctx);
       const faces = F.faces(ctx);
+      const e = F.entrance(ctx);
 
       // ---------------- palette ----------------
-      // Anchored, not derived: the host colour only tints the brick.
-      const BRICK = F.mix(ctx.color, 0x877d70, 0.86);
-      const PIER = F.shade(BRICK, 1.14);      // the lit face of a pier
-      const SPAND = F.shade(BRICK, 0.62);     // recessed spandrel
-      const VOID = F.glass(ctx, 0x14171c);                  // glazing, the darkest thing here
-      const NICK = 0x848f9b;                  // nickel steel: cooler than brick
-      const NLIT = F.shade(NICK, 1.14);       // arrises catching the sun
-      const NDRK = F.shade(NICK, 0.44);       // the shaded side of a course
-      const GRAN = 0x32353b;                  // polished black granite
-      const GLINT = F.shade(GRAN, 1.55);      // its chamfers and reveals
+      // white brick off the street's own colour, grey brick bands, nickel
+      const BRICK = F.mix(ctx.color, 0xe4e0d6, 0.55);
+      const PIER = BRICK;
+      const BAND = F.mix(ctx.color, ctx.hash(0x5b1) < 0.5 ? 0x5a5c60 : 0x6a5f55, 0.78);
+      const NICK = ctx.hash(0x5b2) < 0.7 ? 0xb9c3cb : 0xc8a13c;    // nickel, or a brass variant
+      const NLIT = F.shade(NICK, 1.08);
+      const NDRK = F.shade(NICK, 0.62);
+      const GRAN = 0x2a2a2c, GLINT = 0x55575c;
+      const VOID = F.glass(ctx, 0x161a20);
+      F.windowFrame(ctx, ctx.hash(0x5b3) < 0.5 ? 0x1e2124 : 0x3a3f45);
+
+      const PITCH = 2.9, PW = 0.66, PP = 0.28, CW = 1.2, SP = 0.12;
+      const sillOff = FH >= 3.6 ? 0.85 : 0.75;
+      const sill = (k) => k * FH + sillOff, head = (k) => (k + 1) * FH - 0.46;
 
       // ================================================================
-      //  0. THE VERTICAL SPLIT — solved from the top down
+      //  0. THE VERTICAL SPLIT
       // ================================================================
-      // The crown is sized FIRST, as a fraction of the whole elevation, and
-      // the shaft is only ever what is left between the base and the crown.
-      const CH = Math.max(FH * 3.0, Math.min(H * 0.26, H * 0.28));  // crown assembly
-      const nBase = Math.max(2, Math.min(5, Math.round(15 / FH)));
-      const yBase = Math.min(nBase * FH, H * 0.20);                  // top of granite
-      const yShaftTop = H;                                           // crown stands on rTop
+      const CH = clamp(H * 0.24, FH * 3, 60);         // crown: fans + needle
+      const nb = ST >= 30 ? 3 : 2;                    // granite base storeys
+      const yBase = nb * FH;
+      const portalHalf = (!ctx.noDoor && !e.driveIn) ? 1.6 : 0;
+      const pTop = clamp(yBase - 1.6, 3.2, 6.4);
+      const cut = portalHalf > 0 ? portalHalf + 0.95 : 0;
 
       // ================================================================
-      //  1. THE BASE — a different building
+      //  1. BASE + SHAFT, every face
       // ================================================================
-      // Granite plane, heavy piers, tall narrow openings between them. It is
-      // clad edge to edge first so the tower has one continuous street wall
-      // and the piers have something dark to stand against.
       for (const f of faces) {
-        F.band(ctx, f, yBase / 2, yBase, 0.14, GRAN, 0.18);
-        const n = F.bayCount(f, 3.4, 3, 9);
-        const lines = F.bayLines(f, n, Math.max(0.8, f.span * 0.06));
-        const bays = F.bays(f, n, Math.max(0.8, f.span * 0.06));
-        const oy0 = yBase * 0.14, oy1 = yBase * 0.80;
-        for (const b of bays) {
-          const ow = Math.min(b.w * 0.52, (oy1 - oy0) * 0.34);
-          if (!F.clearsDoor(ctx, f, b.t, ow + 1.4)) continue;
-          F.box(ctx, f, b.t, (oy0 + oy1) / 2, ow, oy1 - oy0, 0.08, VOID, 0);
-          F.box(ctx, f, b.t, oy1 + 0.16, ow + 0.5, 0.22, 0.30, NICK, 0.14);   // metal head
-          F.box(ctx, f, b.t, oy0 - 0.12, ow + 0.5, 0.20, 0.30, GLINT, 0.14);  // sill
-        }
-        for (const t of lines) {
-          if (!F.clearsDoor(ctx, f, t, 1.2)) continue;
-          F.rib(ctx, f, t, 0.0, yBase - 0.30, Math.max(0.6, f.span * 0.035), 0.30, GRAN, 0.14);
-          F.rib(ctx, f, t, 0.0, yBase - 0.30, 0.12, 0.36, GLINT, 0.14);       // polished arris
-        }
-        // the shop-front cornice that ends the base as its own storey
-        F.band(ctx, f, yBase - 0.16, 0.34, 0.52, GRAN, 0.5, 0.10);
-        F.band(ctx, f, yBase + 0.06, 0.16, 0.60, NICK, 0.6, 0.10);
-        F.band(ctx, f, yBase + 0.24, 0.12, 0.40, NLIT, 0.5, 0.10);
-      }
+        const isDoor = f.s === ctx.doorSide;
+        const g = bayGrid(F, f, PITCH, CW, PW);
+        const c = isDoor ? cut : 0;
+        for (let k = 0; k < nb; k++) F.windowStyle(ctx, f.s, k, "lobby");
 
-      // THE ENTRANCE SURROUND — the crown's fan brought to the pavement.
-      {
-        const df = e.f;
-        const pw = e.gap + 2.6, ph = Math.min(yBase - 1.4, e.head + 1.6);
-        if (ph > 2.0) {
-          F.box(ctx, df, 0, ph / 2, pw + 1.8, ph, 0.44, GRAN, 0.10);          // surround
-          F.box(ctx, df, 0, ph / 2, pw, ph, 0.12, F.shade(GRAN, 0.6), 0.44);  // recess
-          for (const sg of [-1, 1])
-            F.rib(ctx, df, sg * (pw / 2 + 0.34), 0.1, ph + 0.5, 0.30, 0.56, NICK, 0.10);
-          // the radiating fan: ribs of a half-sunburst over the opening
-          const fr = Math.min(pw * 0.56, (yBase - ph) * 0.9);
-          const rays = 9;
-          for (let i = 0; i < rays; i++) {
-            const a = Math.PI * (i + 0.5) / rays;              // 0..PI across the head
-            const t = Math.cos(a) * fr * 0.92;
-            const hy = Math.sin(a) * fr;
-            F.box(ctx, df, t, ph + 0.10 + hy / 2, 0.20, Math.max(0.2, hy), 0.50, i % 2 ? NICK : NLIT, 0.10);
+        // corner piers: granite in the base, brick above
+        for (const sg of [-1, 1]) {
+          const t = sg * (f.span / 2 - CW / 2);
+          F.rib(ctx, f, t, 0, yBase, CW + 0.04, PP + 0.08, GRAN);
+          F.rib(ctx, f, t, yBase, H, CW, PP, PIER);
+        }
+        for (const t of g.lines) {
+          const inPortal = c && Math.abs(t) < c + PW / 2;
+          if (!inPortal) {
+            F.rib(ctx, f, t, 0, yBase, PW + 0.2, PP + 0.08, GRAN);
+            F.rib(ctx, f, t, 0, yBase, 0.1, PP + 0.12, GLINT);            // polished arris
           }
-          F.box(ctx, df, 0, ph + 0.08, pw + 2.2, 0.26, 0.60, NLIT, 0.10);     // the fan's springing
+          F.rib(ctx, f, t, inPortal ? pTop + 1.4 : yBase, H, PW, PP, PIER);
         }
-      }
-
-      // ================================================================
-      //  2. THE SHAFT — restrained on purpose
-      // ================================================================
-      // Continuous piers first. They run unbroken from the base cornice to
-      // the crown shoulder, which is the single move that makes a deco tower
-      // read as vertical rather than as forty stacked floors.
-      const shaftY0 = yBase + 0.40, shaftY1 = yShaftTop;
-      const pierProj = Math.max(0.30, Math.min(0.55, small * 0.018));
-      for (const f of faces) {
-        const n = F.bayCount(f, 3.2, 4, 12);
-        const lines = F.bayLines(f, n, Math.max(0.6, f.span * 0.045));
-        const pw = Math.max(0.45, f.span / (n * 3.2));
-        for (const t of lines) {
-          F.rib(ctx, f, t, shaftY0, shaftY1, pw, pierProj, PIER, 0);
-          F.rib(ctx, f, t, shaftY0, shaftY1, pw * 0.28, pierProj * 1.16, F.shade(PIER, 1.10), 0);
-        }
-        // TWO BOXES PER STOREY PER FACE and nothing else: a dark glass band
-        // set back behind the piers, and a recessed spandrel under it.
-        const k0 = Math.ceil(shaftY0 / FH), k1 = Math.floor((shaftY1 - FH * 0.2) / FH);
-        for (let k = k0; k <= k1; k++) {
-          const y = k * FH;
-          F.box(ctx, f, 0, y + FH * 0.60, f.span + 0.1, FH * 0.52, 0.06, VOID, -0.02);
-          F.box(ctx, f, 0, y + FH * 0.20, f.span + 0.1, FH * 0.26, 0.10, SPAND, 0);
-        }
-      }
-
-      // TRANSITION BANDS. Two chevron courses break the shaft into thirds
-      // without costing anything per storey.
-      const bandYs = [shaftY0 + (shaftY1 - shaftY0) * 0.36, shaftY0 + (shaftY1 - shaftY0) * 0.68];
-      for (let bi = 0; bi < bandYs.length; bi++) {
-        const by = bandYs[bi];
-        const bh = Math.max(0.8, FH * 0.55);
-        F.ring(ctx, by, bh, pierProj * 1.5, F.shade(BRICK, 0.86), 0.4, 0);
-        F.ring(ctx, by + bh * 0.56, 0.20, pierProj * 1.9, NICK, 0.5, 0);
-        F.ring(ctx, by - bh * 0.56, 0.20, pierProj * 1.9, F.shade(NICK, 0.7), 0.5, 0);
-        for (const f of faces) {
-          const cn = Math.max(4, Math.min(16, Math.round(f.span / 2.2)));
-          const cs = F.bays(f, cn, 0.4);
-          for (const c of cs) {
-            // a chevron: two short courses meeting at the bay centre
-            const half = c.w * 0.30;
-            for (const sg of [-1, 1]) {
-              F.box(ctx, f, c.t + sg * half * 0.55, by + bh * 0.10, half, bh * 0.22, pierProj * 1.7, NLIT, 0);
-              F.box(ctx, f, c.t + sg * half * 0.95, by - bh * 0.14, half * 0.6, bh * 0.22, pierProj * 1.7, NICK, 0);
+        // the granite plinth and the base's mezzanine bands
+        boxCut(ctx, F, f, 0.28, 0.56, 0.18, GRAN, c);
+        for (let k = 1; k <= ST; k++) {
+          const y0 = head(k - 1), y1 = k === ST ? H : sill(k);
+          if (y1 - y0 < 0.05) continue;
+          const base = k < nb;
+          boxCut(ctx, F, f, (y0 + y1) / 2, y1 - y0, base ? SP + 0.04 : SP, base ? GRAN : BAND, (c && y0 < pTop + 1.4) ? c : 0);
+          // a nickel panel in each bay over the base and at the shoulder
+          if ((k === nb || k === ST - 1) && y1 - y0 > 0.7) {
+            for (const b of g.bays) {
+              if (c && y0 < pTop + 1.4 && Math.abs(b.t) < c + b.w / 2) continue;
+              F.box(ctx, f, b.t, (y0 + y1) / 2, b.w - 0.3, y1 - y0 - 0.3, SP + 0.03, NICK);
             }
           }
         }
+        // the base cornice: granite, then nickel
+        const by = yBase - 0.46;
+        const bc = c && pTop + 1.4 > by ? c : 0;
+        boxCut(ctx, F, f, by + 0.2, 0.4, PP + 0.22, GRAN, bc);
+        boxCut(ctx, F, f, by + 0.47, 0.14, PP + 0.3, NICK, bc);
       }
 
-      // ================================================================
-      //  3. THE SHOULDER — where the shaft stops and the metal starts
-      // ================================================================
-      const shH = Math.max(0.9, FH * 0.7);
-      F.ring(ctx, H - shH * 0.5, shH, pierProj * 2.2, F.shade(BRICK, 0.80), 0.5, 0);
-      F.ring(ctx, H - 0.10, 0.34, pierProj * 2.9, NICK, 0.7, 0);
-      F.ring(ctx, H + 0.16, 0.16, pierProj * 2.4, NLIT, 0.6, 0);
-
-      // ---- CORNER EAGLES ------------------------------------------------
-      // A stepped triangular form thrusting out and up from each corner at
-      // exactly the shoulder line. Six courses, each shorter and pushed
-      // further out, so the profile is a barb rather than a bracket.
-      {
-        const steps = 6;
-        const reach = Math.max(0.7, Math.min(small * 0.085, 2.0));
-        const rise = Math.max(1.8, Math.min(FH * 2.2, small * 0.26, CH * 0.55));
-        const len = Math.max(1.0, small * 0.115);
-        for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-          for (let i = 0; i < steps; i++) {
-            const u = (i + 0.5) / steps;
-            const out = reach * Math.pow(u, 0.65);    // further out as it rises
-            const l = len * (1 - u * 0.42);
-            const th = rise / steps + 0.03;
-            const cy = H - shH * 0.35 + u * rise;
-            const col = i % 2 ? NICK : NLIT;
-            ctx.dbox(sx * (W2 + out * 0.5), cy, sz * (D2 + out * 0.72), l, th, l * 0.75, col);
-            ctx.dbox(sx * (W2 + out * 0.72), cy, sz * (D2 + out * 0.5), l * 0.75, th, l, col);
+      // ---- THE ENTRANCE: stepped granite reveals and a radiating fan ----
+      if (portalHalf > 0) {
+        const f = e.f;
+        for (let i = 0; i < 2; i++) {
+          const hw = portalHalf + 0.15 + 0.3 * i, top = pTop + 0.3 * i, pj = 0.36 + 0.2 * i;
+          for (const sg of [-1, 1]) F.rib(ctx, f, sg * hw, 0, top, 0.3, pj, i ? GRAN : NDRK);
+          F.box(ctx, f, 0, top + 0.15, hw * 2 + 0.3, 0.3, pj, i ? GRAN : NDRK);
+        }
+        // the fan: rays of a half sunburst between the door head and the
+        // portal head, nickel on a black granite tympanum
+        const y0 = 2.95, fr = Math.min(portalHalf * 0.95, pTop - y0);
+        if (fr > 0.3) {
+          F.box(ctx, f, 0, (y0 + pTop) / 2, portalHalf * 2, pTop - y0, 0.08, GRAN);
+          const rays = 9;
+          for (let i = 0; i < rays; i++) {
+            const a = Math.PI * (i + 0.5) / rays;
+            const t = Math.cos(a) * fr * 0.9, hy = Math.sin(a) * fr;
+            F.box(ctx, f, t, y0 + hy / 2, 0.12, Math.max(0.15, hy), 0.16, i % 2 ? NICK : NLIT);
           }
-          // the head: a short blunt block finishing the barb, so the ornament
-          // ends in a mass rather than tapering away into a wire.
-          ctx.dbox(sx * (W2 + reach * 0.92), H - shH * 0.35 + rise * 1.02, sz * (D2 + reach * 0.92),
-            len * 0.60, rise * 0.22, len * 0.60, NLIT);
-          ctx.dbox(sx * (W2 + reach * 0.92), H - shH * 0.35 + rise * 1.18, sz * (D2 + reach * 0.92),
-            len * 0.34, rise * 0.14, len * 0.34, NICK);
+        }
+        // a nickel crest over the portal
+        F.box(ctx, f, 0, pTop + 0.95, (portalHalf + 0.9) * 2, 0.2, 0.7, NLIT);
+      }
+
+      // ---- THE BELT: one nickel frieze two-thirds up the shaft ----------
+      {
+        const kb = Math.round(nb + (ST - nb) * 0.66);
+        const y0 = head(kb - 1), y1 = sill(kb);
+        if (kb > nb && kb < ST - 1 && y1 - y0 > 0.6) {
+          const bh = y1 - y0;
+          F.ring(ctx, (y0 + y1) / 2, bh, PP + 0.12, F.shade(BAND, 0.9), 0.5);
+          F.ring(ctx, y0 + 0.06, 0.12, PP + 0.18, NICK, 0.6);
+          F.ring(ctx, y1 - 0.06, 0.12, PP + 0.18, NICK, 0.6);
+          for (const f of faces) {
+            const n = Math.max(4, Math.round(f.span / 1.8));
+            F.merlons(ctx, f, (y0 + y1) / 2, n, 0.5, bh * 0.4, PP + 0.16, NLIT);
+          }
         }
       }
 
       // ================================================================
-      //  4. THE CROWN — nested fans of radiating arches
+      //  2. THE SHOULDER AND THE CORNER EAGLES
       // ================================================================
-      // Geometry of one tier: it springs from a shoulder low in the assembly
-      // and rises to its own apex. Half-width follows sqrt(1-u*u), so the
-      // profile is a semicircle drawn in courses. Each successive tier is
-      // narrower in plan and higher at the apex, and starts INSIDE the last
-      // one — that overlap is what makes the group read as a sunburst.
-      const TIERS = 7;
-      const HT = CH * 0.56;                 // the fans
-      const HS = CH - HT;                   // the spire
-      const yC = H + 0.30;                  // the crown's own datum
-      // HOW WIDE THE CROWN MAY BE. A fan whose rise is less than its own
-      // half-span is a dome, not a sunburst — proved by the 14-storey render,
-      // where a full-width crown flattened into a lid. So the crown's plan is
-      // capped by its own height: on a tall subject it takes the whole
-      // footprint, on a squat one it steps back onto the roof and reads as a
-      // separate lantern, which is the correct move at that scale anyway.
-      const CS = Math.min(1, (CH * 0.56) / (Math.max(W2, D2) * 0.95));
-      const COURSES = 10;
+      F.ring(ctx, H + 0.12, 0.24, 0.45, NDRK, 0.6);
+      F.ring(ctx, H + 0.40, 0.32, 0.55, NICK, 0.7);
+      F.ring(ctx, H + 0.62, 0.12, 0.45, NLIT, 0.6);
+      {
+        const steps = 5, reach = 0.55, rise = clamp(FH * 1.6, 2.4, 6), len = 1.2;
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+          for (let i = 0; i < steps; i++) {
+            const u = (i + 0.5) / steps;
+            const out = reach * Math.pow(u, 0.7);
+            const l = len * (1 - u * 0.4);
+            const th = rise / steps + 0.03, cy = H + 0.7 + u * rise;
+            const col = i % 2 ? NICK : NLIT;
+            ctx.dbox(sx * (W2 + out - l / 2), cy, sz * (D2 + out * 0.6 - l * 0.375), l, th, l * 0.75, col);
+            ctx.dbox(sx * (W2 + out * 0.6 - l * 0.375), cy, sz * (D2 + out - l / 2), l * 0.75, th, l, col);
+          }
+          ctx.dbox(sx * (W2 + reach - 0.3), H + 0.7 + rise * 1.05, sz * (D2 + reach - 0.3), 0.6, rise * 0.18, 0.6, NLIT);
+        }
+      }
 
-      // a box on one of the crown's four faces, at a given plane distance
+      // ================================================================
+      //  3. THE CROWN — nested fans of radiating arches
+      // ================================================================
+      const TIERS = 7, COURSES = 8;
+      const HT = CH * 0.62, HS = CH - HT;
+      const yC = H + 0.7;
+      // a fan whose rise is less than its own half-span is a dome: the
+      // crown's plan is capped by its own height
+      const CS = Math.min(1, (HT * 0.95) / (Math.max(W2, D2) * 0.95));
       function cface(horiz, sgn, t, cy, len, h, proj, col, plane) {
         const n = plane + proj / 2;
         if (horiz) ctx.dbox(t, cy, sgn * n, len, h, proj, col);
         else ctx.dbox(sgn * n, cy, t, proj, h, len, col);
       }
-
-      // a triangular dormer light: three shrinking courses, dark, with a
-      // bright sill so it reads as a punched opening and not a smudge.
       function triLight(horiz, sgn, t, y, wid, h, plane) {
-        const st = 3;
-        for (let i = 0; i < st; i++) {
-          const u = (i + 0.5) / st;
-          cface(horiz, sgn, t, y + u * h, wid * (1 - u * 0.86), h / st + 0.02, 0.26, VOID, plane);
+        for (let i = 0; i < 3; i++) {
+          const u = (i + 0.5) / 3;
+          cface(horiz, sgn, t, y + u * h, wid * (1 - u * 0.86), h / 3 + 0.02, 0.2, VOID, plane);
         }
-        cface(horiz, sgn, t, y - h * 0.10, wid * 1.22, h * 0.16, 0.34, NLIT, plane);
       }
-
       for (let i = 0; i < TIERS; i++) {
-        const k = 1 - 0.128 * i;                        // plan shrink per tier
+        const k = 1 - 0.125 * i;
         const hx = W2 * k * CS, hz = D2 * k * CS;
-        const y0 = yC + HT * 0.34 * (i / (TIERS - 1));  // springing, creeping up
-        const apex = yC + HT * (0.34 + 0.66 * (i + 1) / TIERS);
+        const y0 = yC + HT * 0.30 * (i / (TIERS - 1));
+        const apex = yC + HT * (0.30 + 0.70 * (i + 1) / TIERS);
         const span = apex - y0;
         if (span < 0.4) continue;
         for (let j = 0; j < COURSES; j++) {
           const u = (j + 0.5) / COURSES;
           const frac = Math.sqrt(Math.max(0.02, 1 - u * u));
-          const ch = span / COURSES + 0.03;
-          const cy = y0 + u * span;
+          const ch = span / COURSES + 0.03, cy = y0 + u * span;
           const lx = hx * frac * 2, lz = hz * frac * 2;
           ctx.dbox(0, cy, 0, lx, ch, lz, j % 2 ? NICK : NDRK);
-          // the arris: a bright lip standing proud of each course edge, which
-          // is what makes the tiers read as concentric rings from far away.
-          ctx.dbox(0, cy + ch * 0.42, 0, lx + 0.11, ch * 0.18, lz + 0.11, NLIT);
+          ctx.dbox(0, cy + ch * 0.42, 0, lx + 0.1, ch * 0.16, lz + 0.1, NLIT);   // the bright arris
         }
-        // TRIANGULAR LIGHTS: two radiating rows per tier, on all four faces.
+        // TRIANGULAR LIGHTS: one radiating row per tier, all four faces
         const nL = Math.max(2, 6 - i);
-        for (const row of [0.30, 0.58]) {
-          const frac = Math.sqrt(Math.max(0.02, 1 - row * row));
-          const y = y0 + row * span;
-          const lh = Math.min(span * 0.22, HT * 0.10);
-          for (const horiz of [true, false]) {
-            const halfT = (horiz ? hx : hz) * frac;
-            const plane = (horiz ? hz : hx) * frac;
-            const step = (halfT * 2 * 0.82) / nL;
-            if (step < 0.5) continue;
-            for (const sgn of [-1, 1]) {
-              for (let m = 0; m < nL; m++) {
-                const t = -halfT * 0.82 + (m + 0.5) * step;
-                triLight(horiz, sgn, t, y, Math.min(step * 0.52, lh * 0.8), lh, plane);
-              }
-            }
+        const row = 0.34, frac = Math.sqrt(1 - row * row), y = y0 + row * span;
+        const lh = Math.min(span * 0.24, 2.4);
+        for (const horiz of [true, false]) {
+          const halfT = (horiz ? hx : hz) * frac, plane = (horiz ? hz : hx) * frac;
+          const step = (halfT * 2 * 0.82) / nL;
+          if (step < 0.6) continue;
+          for (const sgn of [-1, 1]) for (let m = 0; m < nL; m++) {
+            const t = -halfT * 0.82 + (m + 0.5) * step;
+            triLight(horiz, sgn, t, y, Math.min(step * 0.5, lh * 0.8), lh, plane);
           }
         }
       }
 
-      // ================================================================
-      //  5. THE SPIRE
-      // ================================================================
+      // ---- THE NEEDLE ----
       {
-        const segs = 14;
-        const yS = yC + HT * 1.00;
-        const r0 = Math.max(0.45, small * CS * 0.085);
+        const segs = 10, yS = yC + HT;
+        const r0 = clamp(Math.min(W2, D2) * CS * 0.16, 0.4, 1.6);
         for (let i = 0; i < segs; i++) {
           const u = i / segs, u1 = (i + 1) / segs;
-          const r = r0 * (1 - u1 * 0.86);
-          const sh = (HS * 0.86) / segs;
-          ctx.dbox(0, yS + (u + (u1 - u) / 2) * HS * 0.86, 0, r * 2, sh + 0.02, r * 2, i % 2 ? NICK : NLIT);
-          // collars: a wider band every third segment so the mast reads as a
-          // built lattice instead of an extruded pencil.
-          if (i % 3 === 1) ctx.dbox(0, yS + u1 * HS * 0.86, 0, r * 3.0, sh * 0.22, r * 3.0, NLIT);
+          const r = r0 * (1 - u1 * 0.86), sh = (HS * 0.9) / segs;
+          ctx.dbox(0, yS + (u + u1) / 2 * HS * 0.9, 0, r * 2, sh + 0.02, r * 2, i % 2 ? NICK : NLIT);
+          if (i % 3 === 1) ctx.dbox(0, yS + u1 * HS * 0.9, 0, r * 2.8, sh * 0.2, r * 2.8, NLIT);
         }
-        const yK = yS + HS * 0.86;
-        const knob = Math.max(0.28, r0 * 0.42);
-        ctx.ball(0, yK + knob, 0, knob, NLIT);              // real mesh 1
-        ctx.cone(0, yK + knob * 1.6, 0, knob * 0.62, HS * 0.14, NLIT);  // real mesh 2
+        const yK = yS + HS * 0.9, knob = Math.max(0.25, r0 * 0.35);
+        ctx.ball(0, yK + knob, 0, knob, NLIT);
+        ctx.cone(0, yK + knob * 1.6, 0, knob * 0.5, HS * 0.1, NLIT);
       }
     },
   });

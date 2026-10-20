@@ -4044,6 +4044,8 @@
     }
     const veneerRecs = [];                        // the masonry veneer tiles, fixed planes for the resolver
     let kitDressedDef = null, kitDoorDrawn = false, kitGlass = null;
+    // the grammar's own window decisions (facade_kit F.windowStyle / F.windowFrame)
+    let kitWinStyle = null, kitWinFrame = null;
     // the facade's glass: the colours it declared (F.glass), or a dark cool panel
     const kitIsGlass = function (c) { return (kitGlass && kitGlass.has(c >>> 0)) || FO.isGlassHex(c); };
     let roofCrowned = false, dressedId = null;
@@ -4261,6 +4263,8 @@
       // the kit's own door reveal brings a threshold of its own
       kitDoorDrawn = !!(dressed && ctxC.__kitDoor);
       kitGlass = ctxC.__glass || null;
+      kitWinStyle = ctxC.__winStyle || null;
+      kitWinFrame = ctxC.__winFrame != null ? ctxC.__winFrame : null;
       if (dressed) dressedId = dressed.id;
       ctxC.dbox = hostDbox; ctxC.lbox = hostLbox;
       if (dressed) {
@@ -4307,7 +4311,12 @@
     if (dressedKit) {
       // WHERE THE FACADE LEFT THE WALL OPEN — the grammar is the author of
       // its own windows; its painted glass marks them
-      const styleId = FO.styleForStructure(dressedKit.structure, storeys);
+      const styleId = FO.styleFor ? FO.styleFor(dressedKit, storeys) : FO.styleForStructure(dressedKit.structure, storeys);
+      // a storey the grammar glazed differently (a shop front under loft sashes)
+      const styleOf = function (s, k) {
+        const w = kitWinStyle && (kitWinStyle[s + ":" + k] || kitWinStyle[s + ":*"]);
+        return w && FO.STYLES[w] ? w : styleId;
+      };
       const found = FO.scan(kitRecs, { w: w, d: d, storeys: storeys, fh: FH, doorSide: doorSide, isGlass: kitIsGlass,
         doorHalf: opts.garageGround ? 0 : DOORHALF, tower: storeys >= 8,
         skip: function (f, k) { return special(f, k); } });
@@ -4317,7 +4326,7 @@
         if (t1 - t0 < 0.45) continue;
         const k = op.k, y0 = Math.max(op.y0, k * FH + 0.3), y1 = Math.min(op.y1, (k + 1) * FH - 0.3);
         if (y1 - y0 < 0.45) continue;
-        openings.push({ s: op.s, k: k, t0: t0, t1: t1, y0: y0, y1: y1, style: styleId, bare: op.bare, lintel: false, forced: !!op.forced, reach: op.reach || 0 });
+        openings.push({ s: op.s, k: k, t0: t0, t1: t1, y0: y0, y1: y1, style: styleOf(op.s, k), bare: op.bare, lintel: false, forced: !!op.forced, reach: op.reach || 0 });
       }
       /* A CURTAIN WALL IS ONE OPENING PER STOREY. A glass grammar paints its
          glass bay by bay between thin fins; read literally that is a framed
@@ -4326,7 +4335,7 @@
          parted by less than 45 cm (a fin, a mullion), they are one opening:
          the band glazes behind the grammar's fins, which still stand in front
          of it, and the window's own mullions divide it on the module. */
-      if (styleId === "curtain" || styleId === "industrial") {
+      if (styleId === "curtain" || styleId === "industrial" || (FO.STYLES[styleId] && FO.STYLES[styleId].band)) {
         openings.sort(function (a, b) { return a.s - b.s || a.k - b.k || a.t0 - b.t0; });
         const merged = [];
         for (const op of openings) {
@@ -4489,7 +4498,13 @@
       industrial: [0x2e3338, 0x3c4a3c],
       house: [0xf1eee6, 0x3a4a5a, 0x2c2c2c],
     };
-    const framePick = function (st) { const a = FRAMES[st] || FRAMES.curtain; return a[Math.min(a.length - 1, (h01b(0xf4a3) * a.length) | 0)]; };
+    const framePick = function (st) {
+      // the grammar named its frame (a Seagram's bronze): every window takes it,
+      // except a shop front, which is the shop's
+      if (kitWinFrame != null && st !== "storefront" && st !== "shop") return kitWinFrame;
+      const a = FRAMES[st] || (FO.STYLES[st] && FO.STYLES[st].frames) || FRAMES.curtain;
+      return a[Math.min(a.length - 1, (h01b(0xf4a3) * a.length) | 0)];
+    };
     const WPAL = { trim: TRIM, stone: MPAL ? MPAL.stone : shadeHex(TRIM, 1.18) };
     const trimLocal = [];                         // the module's boxes, building-local, fixed planes for the resolver
     /* THE WINDOW A PANE BELONGS TO, in world terms: what a break needs to put
