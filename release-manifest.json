@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "888a3e9c36cb118bed1b48b0c21b6df790915c26",
-  "createdAt": "2026-10-15T16:39:27.138Z",
+  "sourceCommit": "04f408c75e3612357aac26159d9378120e1f9df5",
+  "createdAt": "2026-10-20T04:11:41.937Z",
   "fileCount": 1418,
-  "totalBytes": 51186836,
+  "totalBytes": 51229264,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -2523,8 +2523,8 @@
     },
     {
       "file": "src/lab/deps.json",
-      "bytes": 342853,
-      "sha256": "1b24b247358913dcc7659b2a88d731c359bd28411fa9ac194ade4e226233c9c2"
+      "bytes": 343021,
+      "sha256": "d1eefa17962c5e17d2c2ae4f3e59c768ccde31ccf908549289668b8bd0b6b8e6"
     },
     {
       "file": "src/lab/ingredients/building.js",
@@ -3123,8 +3123,8 @@
     },
     {
       "file": "src/systems/debris.js",
-      "bytes": 87476,
-      "sha256": "2cb57e77e80f0c18d9027715bd6baae38ab1ed4500bb611fd0be82d722511cbc"
+      "bytes": 89127,
+      "sha256": "20b12d561e5c6ef388f0e5587c95125334cef92c77630d2add08a9ecbb575a71"
     },
     {
       "file": "src/systems/detection.js",
@@ -3148,8 +3148,8 @@
     },
     {
       "file": "src/systems/disasters.js",
-      "bytes": 121284,
-      "sha256": "a11f0f5ffc1d7679b62fe2876f04b28fd9736a584d90bd9188aa3856bc75d798"
+      "bytes": 121715,
+      "sha256": "3faed8d407bf6178c9cbcb816cf01bb21a11fc94cca0aba9eeb525e7c5fca099"
     },
     {
       "file": "src/systems/dustfx.js",
@@ -3193,8 +3193,8 @@
     },
     {
       "file": "src/systems/flashflood.js",
-      "bytes": 56505,
-      "sha256": "26d8b1dc4d027270e1a22a7a9f162605243e223f8b37670f0f6ba61a583b5aeb"
+      "bytes": 64429,
+      "sha256": "bea4f1e070bceffdd8876bce2817e06e1a0d2c3c01d4f33a0108f9dec0300b60"
     },
     {
       "file": "src/systems/fphands.js",
@@ -3293,8 +3293,8 @@
     },
     {
       "file": "src/systems/hurricane.js",
-      "bytes": 33779,
-      "sha256": "b5e4a1f2a54a8a777d33032594a3d9f6013a0bf14203247ffcf7df44e019db33"
+      "bytes": 34405,
+      "sha256": "ff3dd93e6b0f5a1798a3c37391f3b9c4f5fd091770ba98aa02281d0f6a49ba98"
     },
     {
       "file": "src/systems/impactbus.js",
@@ -3688,8 +3688,8 @@
     },
     {
       "file": "src/systems/tornado.js",
-      "bytes": 67218,
-      "sha256": "983e2a918079d3f84e39eb3b9ed24b420087706aa103c0b83ee5fefa6271c232"
+      "bytes": 75275,
+      "sha256": "a1c6473f983df36083b051d1a15680c22e423ba2d520b88be391b3ba1f8cf348"
     },
     {
       "file": "src/systems/touch.js",
@@ -4593,8 +4593,8 @@
     },
     {
       "file": "src/world/disaster_arena.js",
-      "bytes": 150282,
-      "sha256": "de22bc67672aee7de2277c77d7b49c53c31277989c9fdf7cce9c2e8616a92fe4"
+      "bytes": 150604,
+      "sha256": "760211af75c16d82a92e1683dc35f88e9cdd9d8d0a32382bb4facac067c44e20"
     },
     {
       "file": "src/world/door.js",
@@ -4603,8 +4603,8 @@
     },
     {
       "file": "src/world/eruption.js",
-      "bytes": 18453,
-      "sha256": "62cf0c9ab07f38c590fa8e977d7becdd5eceacd7929dfea6788428a29ef290f6"
+      "bytes": 18462,
+      "sha256": "633c25bd6ba546690eb637e416a68efd352a907e252117d587865b1741539f18"
     },
     {
       "file": "src/world/escape_routes.js",
@@ -4813,8 +4813,8 @@
     },
     {
       "file": "src/world/tsunami_debris.js",
-      "bytes": 17120,
-      "sha256": "5e4021424f27f2c9b8893a2c3e23a0c619198b1ca21930b7d9c15aaa1ab5385f"
+      "bytes": 20736,
+      "sha256": "4c2df5f224bcf344c5e479697f20b77442cc41a0d69d91fc05a78cd8abbfbf20"
     },
     {
       "file": "src/world/tsunami_flow.js",
@@ -4823,13 +4823,13 @@
     },
     {
       "file": "src/world/tsunami_runup.js",
-      "bytes": 15022,
-      "sha256": "f40042c6e38954bb9570c24b3c51d8c5c95f264b4c2576f66fe8abff6c4e856d"
+      "bytes": 15229,
+      "sha256": "9bf5134c8ff7cdb868ba62f7bad22ab0329b518132c2c7bae61ec319c4bb641d"
     },
     {
       "file": "src/world/tsunami_scene.js",
-      "bytes": 31205,
-      "sha256": "125fc87e46ce9523bd7772e1407d360d23fb087388f02e47cd2b747c7d4280bb"
+      "bytes": 31114,
+      "sha256": "81c228d5c75768d4d872ca08869db89995454dcc196eb881250a9060f35f27ab"
     },
     {
       "file": "src/world/utility_lines.js",
@@ -4848,8 +4848,8 @@
     },
     {
       "file": "src/world/volcanofx.js",
-      "bytes": 64890,
-      "sha256": "81e02948332c3bbb37c82a2baed7daf827c53fba7ced4be43ee3af9c1eb1c256"
+      "bytes": 78903,
+      "sha256": "db2fc947c1564fe81665631ecf21c0d08f80f592a366be4e0efc154932ea17f8"
     },
     {
       "file": "src/world/water_buoyancy.js",
@@ -4883,8 +4883,8 @@
     },
     {
       "file": "src/world/water_spec.js",
-      "bytes": 116885,
-      "sha256": "0c67803cde34272dcbd3aeca76a19490c4cb80351f2fa384c2a9f8721a147d9f"
+      "bytes": 122330,
+      "sha256": "2dacb0281feae6a226f1a4c70851ed0660178b53caf617b837054181c83b17f7"
     },
     {
       "file": "src/world/water_stability.js",
@@ -7028,28 +7028,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 63493,
-      "sha256": "3703eea32b0cfac1e2e49e465cb04c369b5cafdd93a43b6fbac6aa5319d1c72f"
+      "bytes": 63503,
+      "sha256": "3082597a5859447b1e0a1de03c775d2fa6ad90823f5c3dd81eac1fcfd56d1710"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 63536,
-      "sha256": "918ba84fb1ff233b36abbd544d6b11eae73c03dcca7bb4ebb805b02d43231f7a"
+      "bytes": 63546,
+      "sha256": "31b365441a65c33342fef1de9eb2aee643ab3e3033506ae33b553750f9fd1327"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 63505,
-      "sha256": "d233c958fb2399c4cfc052517bcd0079cbfee2171082a8dcda65b154e53a068d"
+      "bytes": 63515,
+      "sha256": "8dd677ace1e4fb06fa14298b9eae9646ebc76583e44852505c298dc2b0bbc808"
     },
     {
       "file": "gang-city.html",
-      "bytes": 63460,
-      "sha256": "42dec3d43f38f122b99226c55b452bc44747c2d19baaf5bfb8927fcd2c51d1d7"
+      "bytes": 63470,
+      "sha256": "88b6b7b99228949e77de0681a59670e1084032f80937a18e87b1f019c6c389af"
     },
     {
       "file": "gun-game.html",
-      "bytes": 63482,
-      "sha256": "1c5a92d3d16ed8cb4ef021afb408aa7f0a4eb23c7efde94d86e72dd5024e67bc"
+      "bytes": 63492,
+      "sha256": "9de9228065e33fe997ead4ec75aa727fed259fc4ce5fc91e0c9c1f99bc9e1015"
     },
     {
       "file": "games/battle.html",
