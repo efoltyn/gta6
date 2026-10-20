@@ -3022,8 +3022,11 @@
       player.crouch = sliding || st.mode !== "stand";
       player.prone = st.mode === "prone" && !sliding;
     } else if (st.mode !== "stand" || st.slideT >= 0 || player.prone) stanceReset();
+    // A BODY IN YOUR HANDS (systems/handverbs.js loadScale): dragging is a
+    // slow walk and never a run; a man over the shoulder is a heavy walk
+    const loadScale = CBZ.handVerbs && CBZ.handVerbs.loadScale ? CBZ.handVerbs.loadScale() : 1;
     player.sprint = !overview && !mapOpen && !stunned && !player.crouch && hitSlow === 1 &&
-      !!keys["shift"] && len > 0 && staminaReady &&
+      !!keys["shift"] && len > 0 && staminaReady && loadScale > 0.5 &&
       !(CBZ.vitals && CBZ.vitals.weak(player) > 0.5);            // too much blood gone to run
     const sprintMul = sprintMulNow();
     // a leg wound (city/death.js injury model) publishes player._moveScale (&lt;1)
@@ -3036,7 +3039,7 @@
     const CPm = CBZ.cuffedPlayer;
     const cuffedMove = CPm ? CPm.on() : !!playerChar.cuffed;
     const cuffScale = CPm ? CPm.moveScale(cuffedMove, player.sprint) : (cuffedMove ? 0.7 : 1);
-    const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1) * cuffScale *
+    const woundScale = (player._moveScale != null ? player._moveScale : 1) * (player._rideScale || 1) * cuffScale * loadScale *
       (CBZ.vitals ? CBZ.vitals.speedMul(player) : 1);            // groggy, bled, a shot leg, wrapping a wound (systems/vitals.js)
     const moveSpeed = (player.prone ? T.walkSpeed * PRONE_SPEED
       : player.crouch ? T.crouchSpeed

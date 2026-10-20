@@ -41,7 +41,8 @@
   }
 
   const THROW = { id: "throw", label: "Throw", fn: () => G() && G().release(true) };
-  const SET_DOWN = { id: "setDown", label: "Set down", fn: () => G() && G().release(false) };
+  // owner (2026-10-19, iPad): "Set down should be Drop." One word, never cut.
+  const SET_DOWN = { id: "setDown", label: "Drop", fn: () => G() && G().release(false) };
   const CARRY = { id: "carry", label: "Carry", fn: () => { const v = VB(); if (v && tgt) v.carry(me(), tgt); } };
   const LET_GO = { id: "letGo", label: "Let go", fn: () => G() && G().release(false) };
   const HOLD_VERBS = [THROW, CARRY, SET_DOWN];
@@ -88,5 +89,15 @@
     for (let i = 0; i < all.length; i++) if (all[i].id === id) return all[i];
     return null;
   }
-  CBZ.handVerbs = { held: held, near: near, verb: verb, throwWord: throwWord, THROW_WORD: THROW_WORD };
+  /* WHAT A BODY IN YOUR HANDS DOES TO YOUR LEGS (systems/physics.js reads it
+     into the walk speed). A man dragged by the collar is a slow walk and no
+     run; a man over your shoulder is a heavy walk. Nothing in hand: 1. */
+  function loadScale() {
+    const v = VB(), pa = me();
+    if (!v || !pa || !v.holding(pa)) return 1;
+    const S = v.sessionOf(pa);
+    if (!S || S.a !== pa) return 1;
+    return S.verb === "drag" ? 0.45 : S.verb === "carry" ? 0.75 : 1;
+  }
+  CBZ.handVerbs = { held: held, near: near, verb: verb, loadScale: loadScale, throwWord: throwWord, THROW_WORD: THROW_WORD };
 })();

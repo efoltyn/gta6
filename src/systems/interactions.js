@@ -400,7 +400,7 @@
     const w = window.innerWidth || 800, h = window.innerHeight || 600;
     const nx = Math.max(-1 + EDGE * 2, Math.min(1 - EDGE * 2, _pv.x));
     const ny = Math.max(-1 + EDGE * 4, Math.min(1 - EDGE * 2, _pv.y));
-    const rowH = onTouch() ? 54 : 36;
+    const rowH = onTouch() ? 66 : 36;
     let sy0 = Math.round((-ny * 0.5 + 0.5) * h);
     if (p.side && p.group) {
       const top = sy0 + groupRows.min * rowH - rowH / 2, bot = sy0 + groupRows.max * rowH + rowH / 2;
@@ -553,14 +553,25 @@
       p.wrap.style.width = "";
       p._lay = cls; p._nat = null;
     }
-    if (!p._nat || !p._nat.w) p._nat = { w: p.wrap.offsetWidth, h: p.wrap.offsetHeight };
+    /* "Set do…" (owner, iPad 2026-10-19) WAS THIS LINE. offsetWidth rounds
+       the column's widest word to a whole pixel, often DOWN (84.4 -> 84); the
+       dock then fixed every pill at that width and the text overflowed by a
+       fraction of a pixel, which is all text-overflow needs to cut the word.
+       Measured now at max-content, sub-pixel, rounded UP. */
+    if (!p._nat || !p._nat.w) {
+      const prev = p.wrap.style.width;
+      p.wrap.style.width = "max-content";
+      const r = p.wrap.getBoundingClientRect();
+      p.wrap.style.width = prev;
+      p._nat = { w: Math.ceil(r.width) + 1, h: Math.ceil(r.height) };
+    }
     return p._nat;
   }
 
   // a person's verbs on a touchscreen: name on top, the lead verb at the
   // bottom nearest the thumb, one width, tight gaps
   function layoutDock(list) {
-    const gap = 6;
+    const gap = 10;   // a thumb between two 56px capsules, not a hair
     const name = list.filter(function (p) { return p.label; });
     const verbs = list.filter(function (p) { return !p.label; }).sort(function (a, b) { return b.row - a.row; });
     const ordered = name.concat(verbs);
@@ -590,7 +601,7 @@
     const touch = onTouch();
     const R = screenRect(boxes);
     if (!R) { for (let i = 0; i < list.length; i++) list[i].wrap.style.visibility = "hidden"; besideState.rect = null; return; }
-    const gap = touch ? 6 : 4;
+    const gap = touch ? 10 : 4;
     const ordered = list.slice().sort(function (a, b) { return (a.label ? -1 : 0) - (b.label ? -1 : 0) || a.row - b.row; });
     let bw = 0, bh = 0;
     for (let i = 0; i < ordered.length; i++) {

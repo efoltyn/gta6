@@ -242,7 +242,13 @@
       if (a.looted && !a._synced) { S.cigs[id] = 0; S.item[id] = 0; a._chain.visible = false; a._synced = true; }
       if (a.dead) {                                   // KILLED — drop loot, remove from the live crowd, ragdoll briefly
         if (!S.dead[id]) {
-          if (!a.looted && CBZ.econ && CBZ.econ.lootActor) CBZ.econ.lootActor(a);
+          // his pockets fall to the floor where he lies (systems/prisondrops.js)
+          // and you walk over them; the invisible frisk into your bag is only
+          // the flag-off fallback
+          if (!a.looted) {
+            if (CBZ.prisonDrop && CBZ.CONFIG.PRISON_DROPS_V1 !== false) CBZ.prisonDrop(a);
+            else if (CBZ.econ && CBZ.econ.lootActor) CBZ.econ.lootActor(a);
+          }
           S.cigs[id] = 0; S.item[id] = 0; S.dead[id] = 1; a._chain.visible = false; a._corpseT = 5;
         }
         a._corpseT -= dt; if (CBZ.animChar) CBZ.animChar(rig, 0, dt);

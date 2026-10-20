@@ -12,7 +12,7 @@
    CBZ.stepSim, then asserts:
      - the faced inmate wears his verbs (E/J/K/L pills in #prisonPrompts),
        no #interact card, no #pinteract rail, the noun audit is 0
-     - Grab holds him and swaps in the hold set; Set down gives the verbs back
+     - Grab holds him and swaps in the hold set; Drop gives the verbs back
      - Trade opens the table with real items; a gift and a request+Accept
        move items between g.inventory and his loadout
      - the warden wears two or more verbs
@@ -306,7 +306,7 @@ const rel = await ev(`(function(){
   return { held: CBZ.grapple && CBZ.grapple.holding(), verbs: CBZ.prisonVerbsFor(a) };
 })()`);
 log("  release: " + JSON.stringify(rel));
-check("Set down lets him go, the normal verbs come back", rel && !rel.held && rel.verbs.indexOf("grab") >= 0, rel);
+check("Drop lets him go, the normal verbs come back", rel && !rel.held && rel.verbs.indexOf("grab") >= 0, rel);
 
 // 3) TRADE: the table opens with both pockets, a gift moves for real
 const trade = await ev(`(function(){

@@ -152,7 +152,9 @@
     CBZ.game.koLog[actor.data.name] = true;
     if (!guardish && actor.gang >= 0 && CBZ.noteGangIncident) CBZ.noteGangIncident(actor, "ko", 8, { source: "melee down" });
     if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(actor, "melee");
-    if (CBZ.econ && CBZ.econ.lootActor) CBZ.econ.lootActor(actor, {}); // frisk the downed body
+    // NO AUTO-FRISK. His pockets used to empty into your bag the frame he
+    // hit the floor; now they are a verb on him (Search, systems/interact.js),
+    // with your hand in them and a screw able to see it.
   }
 
 
