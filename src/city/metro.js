@@ -1421,7 +1421,8 @@
       if (b.group) rec = builtPut(shellRec(b, lot), "lots");
       else {
         const w = +b.w || +lot.w, d = +b.d || +lot.d;
-        rec = builtPut({ x: +lot.cx, z: +lot.cz, y: 0, w: w, d: d, h: +b.h, storeys: b.storeys, color: b.farWall != null ? b.farWall : b.sign, facade: "office" }, "lots");
+        // a house stands off its lot's centre (city/house_yard.js): its record says where
+        rec = builtPut({ x: b.x != null && isFinite(b.x) ? +b.x : +lot.cx, z: b.z != null && isFinite(b.z) ? +b.z : +lot.cz, y: 0, w: w, d: d, h: +b.h, storeys: b.storeys, color: b.farWall != null ? b.farWall : b.sign, facade: "office" }, "lots");
       }
       if (rec) rec.lot = lot;
     }
