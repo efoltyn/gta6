@@ -3067,7 +3067,7 @@
      the same. A crown still on its trunk is held by it. */
   const _tbT = new THREE.Box3(), _tbF = new THREE.Box3();
   function hiddenUp(o) { for (let a = o; a; a = a.parent) if (a.visible === false) return true; return false; }
-  function supportUnder(box) {
+  function treeSupportUnder(box) {
     const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
     const fl = floorAt(cx, cz, box.min.y + 0.3), hh = hfAt(cx, cz);
     return Math.max(fl, hh <= box.min.y + 0.1 ? hh : -Infinity);
@@ -3087,7 +3087,7 @@
         if (!_tbT.isEmpty()) {
           trunkOn = true;
           if (t._tsuUproot || Math.hypot((_tbT.min.x + _tbT.max.x) / 2 - t.x, (_tbT.min.z + _tbT.max.z) / 2 - t.z) > 1.5) r.moved++;
-          const gap = _tbT.min.y - supportUnder(_tbT);
+          const gap = _tbT.min.y - treeSupportUnder(_tbT);
           if (gap > r.maxHeight) r.maxHeight = +gap.toFixed(1);
           if (gap > 120) r.high++;
           if (gap > 0.5) { r.floating++; if (r.list.length < 6) r.list.push({ tree: i, part: "trunk", x: +t.x.toFixed(1), z: +t.z.toFixed(1), y: +_tbT.min.y.toFixed(2), gap: +gap.toFixed(2) }); }
@@ -3099,7 +3099,7 @@
         if (_tbF.isEmpty()) continue;
         if (trunkOn && _tbF.intersectsBox(_tbT.expandByScalar(1.0))) continue;   // held by its trunk
         r.crowns++;
-        const gap = _tbF.min.y - supportUnder(_tbF);
+        const gap = _tbF.min.y - treeSupportUnder(_tbF);
         if (gap > 120) r.high++;
         if (gap > 0.5) { r.floating++; if (r.list.length < 6) r.list.push({ tree: i, part: "crown", x: +t.x.toFixed(1), z: +t.z.toFixed(1), y: +_tbF.min.y.toFixed(2), gap: +gap.toFixed(2) }); }
       }
