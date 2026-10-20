@@ -208,126 +208,20 @@
   };
 
   /* ============================================================
-     THE NOISE ATLAS. 64^3 tileable noise stored as 64 slices of 64x64 in an
-     8x8 atlas with a 1-texel wrap border (528x528 RGBA8), so it works in
-     WebGL1 and WebGL2 alike. Channels:
-       R  perlin-worley billow (low frequency: the big cauliflower lumps)
-       G  worley fbm           (mid: edge erosion)
-       B  perlin fbm           (fine: wisps)
-     Built in idle slices after boot, finished synchronously only if a
-     warhead lands before the build did (behind the whiteout).
+     THE NOISE ATLAS lives in systems/volfx.js (CBZ.volNoise) since
+     2026-10-20: the RPG fireball and the fires march the same 64^3 volume,
+     so there is one atlas, built once in idle slices. Same layout
+     (528x528 RGBA8, 8x8 slices of 64x64 with a wrap border), same channels.
      ============================================================ */
-  const NS = 64, TILE = NS + 2, ATL = TILE * 8;
-  const noise = { data: null, tex: null, z: 0, done: false };
-  function ihash(x, y, z, s) {
-    let h = (x * 374761393 + y * 668265263 + z * 2147483647 + s * 1274126177) | 0;
-    h = Math.imul(h ^ (h >>> 13), 1274126177);
-    h ^= h >>> 16;
-    return (h >>> 0) / 4294967296;
-  }
-  function wrapi(i, p) { i %= p; return i < 0 ? i + p : i; }
-  function perlin(x, y, z, P, s) {
-    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
-    const xf = x - xi, yf = y - yi, zf = z - zi;
-    const u = xf * xf * xf * (xf * (xf * 6 - 15) + 10);
-    const v = yf * yf * yf * (yf * (yf * 6 - 15) + 10);
-    const w = zf * zf * zf * (zf * (zf * 6 - 15) + 10);
-    let acc = 0;
-    for (let c = 0; c < 8; c++) {
-      const dx = c & 1, dy = (c >> 1) & 1, dz = (c >> 2) & 1;
-      const gx = wrapi(xi + dx, P), gy = wrapi(yi + dy, P), gz = wrapi(zi + dz, P);
-      const th = ihash(gx, gy, gz, s) * 6.2831853, ph = Math.acos(ihash(gx, gy, gz, s + 7) * 2 - 1);
-      const g0 = Math.sin(ph) * Math.cos(th), g1 = Math.sin(ph) * Math.sin(th), g2 = Math.cos(ph);
-      const d = g0 * (xf - dx) + g1 * (yf - dy) + g2 * (zf - dz);
-      acc += d * (dx ? u : 1 - u) * (dy ? v : 1 - v) * (dz ? w : 1 - w);
-    }
-    return acc;                                  // ~[-0.87, 0.87]
-  }
-  function worley(x, y, z, P, s) {
-    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
-    let best = 9;
-    for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const cx = xi + dx, cy = yi + dy, cz = zi + dz;
-      const wx = wrapi(cx, P), wy = wrapi(cy, P), wz = wrapi(cz, P);
-      const fx = cx + ihash(wx, wy, wz, s) - x;
-      const fy = cy + ihash(wx, wy, wz, s + 1) - y;
-      const fz = cz + ihash(wx, wy, wz, s + 2) - z;
-      const d = fx * fx + fy * fy + fz * fz;
-      if (d < best) best = d;
-    }
-    return Math.min(1, Math.sqrt(best));        // 0 at a feature point
-  }
-  const _vox = new Uint8Array(NS * NS * 4);
-  function buildSlice(z) {
-    const f = 1 / NS;
-    for (let y = 0; y < NS; y++) for (let x = 0; x < NS; x++) {
-      const px = x * f, py = y * f, pz = z * f;
-      // R: perlin fbm remapped by inverted worley = rounded billows
-      const pf = perlin(px * 4, py * 4, pz * 4, 4, 11) * 0.62 +
-                 perlin(px * 8, py * 8, pz * 8, 8, 12) * 0.28 +
-                 perlin(px * 16, py * 16, pz * 16, 16, 13) * 0.10;
-      const w1 = 1 - worley(px * 4, py * 4, pz * 4, 4, 21);
-      const p01 = clamp(pf * 0.9 + 0.5, 0, 1);
-      const billow = clamp((p01 - (1 - w1)) / (1 - (1 - w1) * 0.999) , 0, 1) * 0.55 + w1 * 0.45;
-      // G: worley fbm
-      const wg = (1 - worley(px * 6, py * 6, pz * 6, 6, 31)) * 0.62 +
-                 (1 - worley(px * 12, py * 12, pz * 12, 12, 32)) * 0.26 +
-                 (1 - worley(px * 24, py * 24, pz * 24, 24, 33)) * 0.12;
-      // B: fine perlin
-      const pb = perlin(px * 16, py * 16, pz * 16, 16, 41) * 0.66 + perlin(px * 32, py * 32, pz * 32, 32, 42) * 0.34;
-      const o = (y * NS + x) * 4;
-      _vox[o] = Math.round(clamp(billow, 0, 1) * 255);
-      _vox[o + 1] = Math.round(clamp(wg, 0, 1) * 255);
-      _vox[o + 2] = Math.round(clamp(pb * 0.9 + 0.5, 0, 1) * 255);
-      _vox[o + 3] = 255;
-    }
-    // copy into the atlas tile with its wrap border
-    const tx = (z % 8) * TILE, ty = Math.floor(z / 8) * TILE;
-    const D = noise.data;
-    for (let j = 0; j < TILE; j++) {
-      const sy = wrapi(j - 1, NS);
-      for (let i = 0; i < TILE; i++) {
-        const sx = wrapi(i - 1, NS);
-        const si = (sy * NS + sx) * 4, di = ((ty + j) * ATL + tx + i) * 4;
-        D[di] = _vox[si]; D[di + 1] = _vox[si + 1]; D[di + 2] = _vox[si + 2]; D[di + 3] = 255;
-      }
-    }
-  }
-  function noiseStep(budgetMs) {
-    if (noise.done) return true;
-    if (!noise.data) noise.data = new Uint8Array(ATL * ATL * 4);
-    const t0 = performance.now();
-    while (noise.z < NS) {
-      buildSlice(noise.z++);
-      if (budgetMs != null && performance.now() - t0 > budgetMs) break;
-    }
-    if (noise.z >= NS) {
-      noise.tex = new THREE.DataTexture(noise.data, ATL, ATL, THREE.RGBAFormat);
-      noise.tex.magFilter = THREE.LinearFilter;
-      noise.tex.minFilter = THREE.LinearFilter;
-      noise.tex.generateMipmaps = false;
-      noise.tex.wrapS = noise.tex.wrapT = THREE.ClampToEdgeWrapping;
-      noise.tex.needsUpdate = true;
-      noise.done = true;
-      if (U) U.uNoise.value = noise.tex;
-    }
-    return noise.done;
-  }
-  let idleArmed = false;
-  function armIdleBuild() {
-    if (idleArmed || noise.done) return;
-    idleArmed = true;
-    const ric = window.requestIdleCallback;
-    const tick = function (deadline) {
-      if (noise.done) return;
-      const budget = deadline && deadline.timeRemaining ? Math.max(1, deadline.timeRemaining() - 1) : 4;
-      noiseStep(Math.min(budget, 6));
-      if (!noise.done) {
-        if (ric) ric(tick, { timeout: 2000 }); else setTimeout(tick, 50);
-      }
-    };
-    setTimeout(function () { if (ric) ric(tick, { timeout: 2000 }); else tick(null); }, 4000);
-  }
+  const VN = CBZ.volNoise || { done: false, tex: null, z: 0, step: function () { return false; }, arm: function () {}, onReady: function () {} };
+  const noise = {
+    get done() { return VN.done; },
+    get tex() { return VN.tex; },
+    get z() { return VN.z; },
+  };
+  function noiseStep(budgetMs) { return VN.step(budgetMs); }
+  function armIdleBuild() { VN.arm(); }
+  VN.onReady(function (tex) { if (U) U.uNoise.value = tex; });
 
   /* ============================================================
      THE VOLUME SHADER

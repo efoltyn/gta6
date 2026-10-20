@@ -1040,7 +1040,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ekey2"></script>
-<script src="src/systems/fpsmode.js?v=jtv1019b"></script>
+<script src="src/systems/fpsmode.js?v=mrg10200039"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=jailv1001"></script>
 
@@ -1544,7 +1544,12 @@ document.body.appendChild(b);}}catch(e){}})();
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=w09290242x"></script>
 <script src="src/city/playercars.js?v=peak1014c"></script>
-<script src="src/city/crashfx.js?v=peak1014c"></script>
+<!-- systems/volfx.js: the volumetric fireball / smoke / fire (raymarched boxes
+     fitted to the room) + spark streaks, and THE shared 3D noise atlas
+     (CBZ.volNoise) that city/nukefx.js also marches. Before crashfx (its
+     blasts and fires draw through it) and nukefx (reads the atlas). -->
+<script src="src/systems/volfx.js?v=blastvol1020"></script>
+<script src="src/city/crashfx.js?v=blastvol1020"></script>
 <script src="src/city/crashdeform.js?v=carblood930"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
@@ -1665,7 +1670,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/collapse.js?v=debris1015"></script>
 <script src="src/systems/strike.js?v=strike1013m"></script>
 <script src="src/city/structural.js?v=nukecost1013"></script>
-<script src="src/city/nukefx.js?v=nukecost1013"></script>
+<script src="src/city/nukefx.js?v=blastvol1020"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
