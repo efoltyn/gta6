@@ -89,18 +89,10 @@
      the shared original: CBZ.cmat caches by colour, and a pair of grey
      trousers can be the same material object as the pavement.
      ============================================================ */
-  const exClones = new Map();
+  const exSeen = new Set();
   function exemptMat(m) {
-    if (!m || (m.defines && m.defines.CBZ_NOMASK)) return m;
-    let c = exClones.get(m);
-    if (!c) {
-      c = m.clone();
-      if (m.onBeforeCompile) c.onBeforeCompile = m.onBeforeCompile;
-      if (m.customProgramCacheKey) c.customProgramCacheKey = m.customProgramCacheKey;
-      if (CBZ.groundMaskExempt) CBZ.groundMaskExempt(c);
-      exClones.set(m, c);
-      audit.exempted++;
-    }
+    const c = K.exemptClone(m);
+    if (c !== m && !exSeen.has(c)) { exSeen.add(c); audit.exempted++; }
     return c;
   }
   function exemptObject(obj, save) {
@@ -267,9 +259,8 @@
     jetMat = new THREE.PointsMaterial({ color: 0xc9dbe2, size: 0.32, transparent: true, opacity: 0.72, depthWrite: false });
     if (CBZ.groundMaskExempt) [secMat, darkMat, puddleMat, pipeMat, jetMat].forEach(CBZ.groundMaskExempt);
   }
-  function hexRGB(hex, k, out) {
-    out[0] = (((hex >> 16) & 255) / 255) * k; out[1] = (((hex >> 8) & 255) / 255) * k; out[2] = ((hex & 255) / 255) * k;
-  }
+  // the section's hexes are sRGB paint chips; a vertex colour is linear
+  function hexRGB(hex, k, out) { return K.lin(hex, k, out); }
   function makeSlab(seq, poly, thick) {
     const S = seq.sampler;
     let cx = 0, cz = 0;
@@ -328,7 +319,9 @@
     let topMat;
     if (tri && tri.mat) topMat = exemptMat(tri.mat);
     else {
-      topMat = new THREE.MeshLambertMaterial({ color: seq.shaftTop != null ? seq.shaftTop : seq.surfaceColor });
+      const tc = K.lin(seq.surfaceColor, 1, [0, 0, 0]);
+      topMat = new THREE.MeshLambertMaterial();
+      topMat.color.setRGB(tc[0], tc[1], tc[2]);
       if (CBZ.groundMaskExempt) CBZ.groundMaskExempt(topMat);
     }
     const m = new THREE.Mesh(geo, [topMat, secMat]);
@@ -1605,10 +1598,10 @@
     if (h) {
       // the next ring of crust breaks off and tips in
       calve(seq, r0, rNew);
-      const keep = { gy: h.gy, depth: h.depth, seed: h.seed, born: h.born, top: h.topColor, topSampled: h.topSampled, water: h.waterLevel };
+      const keep = { gy: h.gy, depth: h.depth, seed: h.seed, born: h.born, top: h.topColor, topSampled: h.topSampled, surf: h.surf, water: h.waterLevel };
       K.disposeShaft(h);
       seq.shaft = CBZ.groundShaft(seq.x, seq.z, { r: rNew, depth: keep.depth, gy: keep.gy, seed: keep.seed, surface: seq.surface, road: seq.road,
-        top: keep.top, topSampled: keep.topSampled, water: keep.water, keepInside: true });
+        top: keep.top, topSampled: keep.topSampled, surf: keep.surf, water: keep.water, keepInside: true });
       if (seq.shaft) seq.shaft.born = keep.born;
       for (let i = 0; i < seq.pipes.length; i++) seatPipe(seq, seq.pipes[i]);
     }
@@ -1685,7 +1678,8 @@
       seq.dust.setActive(f);
       if (f <= 0.001) { try { seq.dust.dispose(); } catch (e) {} seq.dust = null; }
     }
-    if (seq.cracks && seq.t > 4) { K.root().remove(seq.cracks.mesh); seq.cracks.mesh.geometry.dispose(); seq.cracks = null; }
+    /* the cracks STAY: the ground round a collapse is still broken after it
+       opens (they go with the event, disposeEvent) */
   }
 
   function disposeEvent(seq) {
