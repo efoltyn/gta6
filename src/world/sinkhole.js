@@ -254,18 +254,31 @@
     secMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
     darkMat = new THREE.MeshLambertMaterial({ color: 0x15100b });
     puddleMat = new THREE.MeshPhongMaterial({ color: 0x4b555c, specular: 0x9aa4ac, shininess: 70, transparent: true, opacity: 0.78, depthWrite: false });
-    crackMat = new THREE.MeshBasicMaterial({ color: 0x0b0907, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+    /* the shaft rim's own crack decal (groundshaft.js rimCrackMat): it
+       MULTIPLIES the surface under it, so a crack across tarmac is the
+       tarmac darkened and one across the footway is the footway darkened */
+    crackMat = K.crackMat ? K.crackMat() : new THREE.MeshBasicMaterial({ color: 0x0b0907, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
     pipeMat = new THREE.MeshLambertMaterial({ color: 0x3b3f42, side: THREE.DoubleSide });
     jetMat = new THREE.PointsMaterial({ color: 0xc9dbe2, size: 0.32, transparent: true, opacity: 0.72, depthWrite: false });
     if (CBZ.groundMaskExempt) [secMat, darkMat, puddleMat, pipeMat, jetMat].forEach(CBZ.groundMaskExempt);
   }
   // the section's hexes are sRGB paint chips; a vertex colour is linear
   function hexRGB(hex, k, out) { return K.lin(hex, k, out); }
-  function makeSlab(seq, poly, thick) {
+  /* A SLAB IS A PIECE OF WHAT IS THERE. Its top is the ground's own mesh
+     material (the sampler); its section, its thickness and the debris it
+     breaks into are decided by the surface AT ITS OWN CENTROID
+     (K.surfaceAt), so the slabs off a road are asphalt over base course and
+     the ones off the verge beside it are turf over topsoil. */
+  const SLAB_D = [0, 0.07, 0.12, 0.27, 0.35, 0.5, 0.55];
+  const _surf = { kind: null, tone: [0, 0, 0], torn: [0, 0, 0] };
+  function makeSlab(seq, poly) {
     const S = seq.sampler;
     let cx = 0, cz = 0;
     for (let i = 0; i < poly.length; i++) { cx += poly[i][0]; cz += poly[i][1]; }
     cx /= poly.length; cz /= poly.length;
+    const surf = K.surfaceAt ? K.surfaceAt(cx, cz, _surf, seq.surface) : { kind: "turf", tone: [0.07, 0.1, 0.035] };
+    const kind = surf.kind;
+    const thick = kind === "road" || kind === "walk" ? 0.5 : 0.55;
     const hit = S ? S.at(cx, cz) : null;
     const topY = hit ? hit.y : seq.gy;
     const tri = hit ? hit.tri : null;
@@ -286,10 +299,13 @@
       for (let k = 0; k < 3; k++) { if (tc) C.push(tc[0], tc[1], tc[2]); else C.push(1, 1, 1); }
     }
     const topCount = P.length / 3;
-    // the cut faces: the section's own layers down to the slab's thickness
-    const L = seq.layers;
+    // the cut faces: the section under THIS kind of cover, down to the slab's
+    // thickness (the same bands the shaft's torn face shows: K.coverHexAt)
     const bands = [];
-    for (let i = 0; i < L.length && L[i].top < thick; i++) bands.push([L[i].top, Math.min(thick, L[i].bot), L[i].c]);
+    for (let i = 0; i < SLAB_D.length - 1 && SLAB_D[i] < thick; i++) {
+      const t0 = SLAB_D[i], t1 = Math.min(thick, SLAB_D[i + 1]);
+      bands.push([t0, t1, K.coverHexAt ? K.coverHexAt(seq.layerH, kind, (t0 + t1) * 0.5) : 0x6a4d31]);
+    }
     for (let i = 0; i < n; i++) {
       const p = poly[i], q = poly[(i + 1) % n];
       const ya = yAt(p[0], p[1]), yb = yAt(q[0], q[1]);
@@ -319,7 +335,7 @@
     let topMat;
     if (tri && tri.mat) topMat = exemptMat(tri.mat);
     else {
-      const tc = K.lin(seq.surfaceColor, 1, [0, 0, 0]);
+      const tc = surf.tone;
       topMat = new THREE.MeshLambertMaterial();
       topMat.color.setRGB(tc[0], tc[1], tc[2]);
       if (CBZ.groundMaskExempt) CBZ.groundMaskExempt(topMat);
@@ -329,6 +345,7 @@
     m.castShadow = true; m.receiveShadow = true;
     m.userData.sinkBody = true;
     m.userData.transient = true;
+    m.userData.surfKind = kind;
     K.root().add(m);
     return m;
   }
@@ -664,7 +681,7 @@
     if (!m) return;
     if (CBZ.debris && CBZ.debris.shatter) {
       try {
-        CBZ.debris.shatter(m, { kind: seq.road ? "asphalt" : "dirt", power: 0.5, maxPieces: PHONE ? 3 : 5, owner: "groundshaft", dust: 0.5, grit: 0.4,
+        CBZ.debris.shatter(m, { kind: K.debrisKind ? K.debrisKind(m.userData.surfKind) : "dirt", power: 0.5, maxPieces: PHONE ? 3 : 5, owner: "groundshaft", dust: 0.5, grit: 0.4,
           velocity: { x: b.v.x * 0.3, y: 0, z: b.v.z * 0.3 } });
       } catch (e) {}
     }
@@ -1407,17 +1424,28 @@
       dropSecs: o.dropSecs != null ? o.dropSecs : 0.8,
       growSecs: o.growSecs != null ? o.growSecs : 6,
       phase: "warn", shaft: null, done: false, seed: o.seed != null ? o.seed : h01(x, z, 1),
-      surface: o.surface || "asphalt", road: o.road != null ? !!o.road : (o.surface || "asphalt") === "asphalt",
+      // the caller's word for the ground: a hint for a world with no surface
+      // records, never the answer (groundshaft.js surfaceAt)
+      surface: o.surface || null,
       bodies: [], props: [], cars: [], buildings: [], pipes: [], roads: [], jammed: [], fell: [], slabs: [], solids: [],
       inflow: 0, carsDown: 0, log: [], logT: 0, awake: 0, mask: null, sagS: 0,
     };
-    seq.surfaceColor = seq.road ? 0x2f2e2c : (K.survMode() ? 0x4c5a34 : 0x554129);
     /* every world transform is read below (the ground, what stands on it):
        bring them up to date once, here, rather than trust the last render
        (a page that has not drawn yet — the lab, a frame skipped — has none) */
     K.root().updateMatrixWorld(true);
-    // the section the slabs are cut through: the SAME layer list the wall uses
-    seq.layers = K.layersOf({ depth: seq.depth, road: seq.road, seed: o.seed != null ? o.seed : (x * 0.37 + z * 0.11) });
+    /* the section below the cover: the SAME layer list the shaft wall uses,
+       its cover the one most of the ring will turn out to be (a quick
+       16-bearing read of what is actually there) */
+    const cnt = { road: 0, walk: 0, turf: 0, bare: 0 };
+    if (K.surfaceAt) for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * TAU;
+      cnt[K.surfaceAt(x + Math.cos(a) * r, z + Math.sin(a) * r, _surf, seq.surface).kind]++;
+    }
+    let cover = "turf", best = -1;
+    for (const k in cnt) if (cnt[k] > best) { best = cnt[k]; cover = k; }
+    seq.layerH = { depth: seq.depth, cover: cover, seed: o.seed != null ? o.seed : (x * 0.37 + z * 0.11) };
+    seq.layers = K.layersOf(seq.layerH);
     seq.sampler = buildSampler(x, z, r * 1.45, gy, null);
     seq.sagAt = function (px, pz) {
       const d = Math.hypot(px - x, pz - z);
@@ -1433,7 +1461,6 @@
     }
     // the cover over the cavity: slabs that will sag and drop
     const rings = [[0, 0.36, 1], [0.36, 0.72, 6], [0.72, 1.0, 9]];
-    const thick = seq.road ? 0.5 : 0.55;
     for (let i = 0; i < rings.length; i++) {
       const rg = rings[i];
       const n = rg[2], a0 = h01(seq.seed, i, 11) * TAU;
@@ -1441,7 +1468,7 @@
         const poly = n === 1
           ? (function () { const P = []; for (let k = 0; k < 8; k++) { const a = (k / 8) * TAU; const rr = seq.coreR * rg[1] * (0.97 + h01(k, 3, seq.seed) * 0.05); P.push([x + Math.cos(a) * rr, z + Math.sin(a) * rr]); } return P; })()
           : annulusCell(seq, seq.coreR * rg[0], seq.coreR * rg[1], a0 + (j / n) * TAU, a0 + ((j + 1) / n) * TAU);
-        const m = makeSlab(seq, poly, thick);
+        const m = makeSlab(seq, poly);
         seq.slabs.push({ m: m, p0: m.position.clone(), d: Math.hypot(m.position.x - x, m.position.z - z), a: Math.atan2(m.position.z - z, m.position.x - x) });
       }
     }
@@ -1543,7 +1570,7 @@
     seq.phase = "drop"; seq.t = 0;
     seq.rNow = seq.coreR;
     seq.shaft = CBZ.groundShaft(seq.x, seq.z, {
-      r: seq.coreR, depth: seq.depth, gy: seq.gy, seed: seq.opts.seed, surface: seq.surface, road: seq.road,
+      r: seq.coreR, depth: seq.depth, gy: seq.gy, seed: seq.opts.seed, surface: seq.surface,
       keepInside: true, water: 0.4,
     });
     if (!seq.shaft) { seq.phase = "open"; return; }
@@ -1598,10 +1625,10 @@
     if (h) {
       // the next ring of crust breaks off and tips in
       calve(seq, r0, rNew);
-      const keep = { gy: h.gy, depth: h.depth, seed: h.seed, born: h.born, top: h.topColor, topSampled: h.topSampled, surf: h.surf, water: h.waterLevel };
+      const keep = { gy: h.gy, depth: h.depth, seed: h.seed, born: h.born, water: h.waterLevel };
       K.disposeShaft(h);
-      seq.shaft = CBZ.groundShaft(seq.x, seq.z, { r: rNew, depth: keep.depth, gy: keep.gy, seed: keep.seed, surface: seq.surface, road: seq.road,
-        top: keep.top, topSampled: keep.topSampled, surf: keep.surf, water: keep.water, keepInside: true });
+      seq.shaft = CBZ.groundShaft(seq.x, seq.z, { r: rNew, depth: keep.depth, gy: keep.gy, seed: keep.seed, surface: seq.surface,
+        water: keep.water, keepInside: true });
       if (seq.shaft) seq.shaft.born = keep.born;
       for (let i = 0; i < seq.pipes.length; i++) seatPipe(seq, seq.pipes[i]);
     }
@@ -1618,11 +1645,11 @@
   function calve(seq, r0, r1) {
     // slabs a road really breaks into: 3.5-4.5 m along the rim
     const n = Math.max(5, Math.round(TAU * r1 / (PHONE ? 4.5 : 3.6)));
-    const a0 = rnd() * TAU, thick = seq.road ? 0.5 : 0.55;
+    const a0 = rnd() * TAU;
     for (let j = 0; j < n; j++) {
       const a = a0 + (j / n) * TAU, b = a0 + ((j + 1) / n) * TAU;
       const poly = annulusCell(seq, r0, r1, a, b);
-      const m = makeSlab(seq, poly, thick);
+      const m = makeSlab(seq, poly);
       const body = makeBody(seq, [m], { kind: "slab", density: 2300, e: 0.08, mu: 0.8, frame: slabFrame(m) });
       if (!body) continue;
       const am = (a + b) / 2;
@@ -1774,6 +1801,6 @@
     const r = o.r || (9 + rnd() * 4);
     const site = o.x != null ? { x: o.x, z: o.z } : CBZ.groundShaftSite({ r: r, minDist: o.minDist || 45, maxDist: o.maxDist || 300 });
     if (!site) return null;
-    return CBZ.groundShaftCollapse(site.x, site.z, Object.assign({}, o, { r: r, depth: o.depth || r * 3.2, surface: "asphalt" }));
+    return CBZ.groundShaftCollapse(site.x, site.z, Object.assign({}, o, { r: r, depth: o.depth || r * 3.2 }));
   };
 })();

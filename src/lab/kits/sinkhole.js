@@ -170,7 +170,8 @@ CBZ.lab.kit("sinkhole", {
       pl.pos.set(s.x + Math.cos(away) * s.r * 0.86, 0, s.z + Math.sin(away) * s.r * 0.86);
       W.track.playerAt = { bearingDeg: +(away * 180 / Math.PI % 360).toFixed(1), x: +pl.pos.x.toFixed(2), z: +pl.pos.z.toFixed(2) };
       W.seq = CBZ.groundShaftCollapse(s.x, s.z, {
-        r: s.r, depth: +P.depth || s.r * 3.2, surface: "asphalt", road: true,
+        // `surface` is only the fallback for a page with no street records
+        r: s.r, depth: +P.depth || s.r * 3.2, surface: "asphalt",
         warnSecs: +P.warn || 4, growSecs: +P.grow || 6,
         buildings: function () {
           return [{ x: b.ox, z: b.oz, w: b.w, d: b.d, h: b.h, gy: 0, storeys: b.storeys, group: B.root,

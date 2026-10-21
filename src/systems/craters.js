@@ -92,10 +92,9 @@
       if (!can.ok) return refuse(can.why || "law");
     }
     const surface = o.surface || (CBZ.game && CBZ.game.mode === "survival" ? "soil" : "asphalt");
-    // `top`: a caller that already knows what lies round the hole (a meteor's
-    // ejecta blanket covers the collar) names it, and the shaft skips its
-    // raycast for the ground colour
-    const shaft = CBZ.groundShaft(x, z, { r: r, surface: surface, bowl: true, depth: o.depth, top: o.top });
+    // the rim reads what is actually round the hole per bearing; `surface` is
+    // only its fallback where the world keeps no surface records
+    const shaft = CBZ.groundShaft(x, z, { r: r, surface: surface, bowl: true, depth: o.depth });
     if (!shaft) return refuse("cutFailed");
     shaft.crater = true;
     craters.push({ shaft: shaft, surface: surface, at: CBZ.now || 0 });

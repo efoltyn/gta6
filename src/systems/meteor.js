@@ -836,7 +836,7 @@
        body only digs while two slots are still free. */
     const room = !CBZ.craterAudit || big || CBZ.craterAudit().craters < (CBZ.CONFIG.CRATER_MAX || 12) - 2;
     if (CBZ.groundCrater && cr.R >= 2.5 && room) {
-      shaft = CBZ.groundCrater(x, z, { force: true, r: Math.min(18, cr.R), depth: Math.min(8, cr.depth), surface: "soil", top: 0x7a6a56 });
+      shaft = CBZ.groundCrater(x, z, { force: true, r: Math.min(18, cr.R), depth: Math.min(8, cr.depth), surface: "soil" });
       if (shaft) stats.cratersDug++; else stats.craterRefused++;
     }
     sp.crater = performance.now() - T0;

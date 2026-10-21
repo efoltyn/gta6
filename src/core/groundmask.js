@@ -85,15 +85,69 @@
 
   const SLOTS = Math.max(1, Math.min(32, CBZ.CONFIG.GROUND_MASK_SLOTS | 0));
   /* The band, in metres about each hole's own surface height.
-     UP: every ground layer measured over a city junction sits within 0.06 m of
-     grade (plate 0.00, road 0.04, lane paint 0.057, the shaft's own collar
-     0.035). 0.12 clears all of them and still leaves a person's shin, a kerb
-     face and a building's ground floor standing.
+     UP: everything that paves a street sits a little over grade, and the
+     highest of it is the FOOTWAY: city/streetkit.js lays the carriageway at
+     0.05 and the footway / kerb top at 0.18, and the island's sidewalks
+     stand 0.15 over a 0.04 road. The band used to stop at 0.12, so a hole
+     cut at road grade that reached the kerb kept a footway slab drawing
+     across its mouth (the old lip collar happened to hide it). 0.35 takes
+     every paving layer and the kerb face and still leaves a building's
+     foundation alone (no hole is allowed under one: groundShaftCanOpen).
      DOWN: the island's ocean plane is at y=-0.8 and its seabed shelf at -1.35,
      and BOTH were showing through the rim as a blue crescent before the mask
      reached them. 6 m takes those and any authored pad below grade, while the
      shaft liner below it is exempt by #define anyway. */
-  const BAND_UP = 0.12, BAND_DOWN = 6.0;
+  const BAND_UP = 0.35, BAND_DOWN = 6.0;
+
+  /* THE CUT EDGE IS NOT A CIRCLE. A hole's mouth is torn, and the edge the
+     ground stops at has to be the SAME polyline as the top of the shaft's
+     torn face, or there is a seam: a sliver of void where the face is inside
+     the cut, a sliver of ground floating over the void where it is outside.
+     The old answer was to lay a collar ring over the seam and paint it the
+     colour of one raycast at the centre. The answer now is that there is no
+     seam: each hole may hand over a PROFILE, PROFILE_N radii (multiples of
+     its r) at the bearings i * 2pi / PROFILE_N, and the shader cuts along the
+     CHORDS between them, exactly the straight edges the shaft draws between
+     the same vertices. A hole with no profile is the regular PROFILE_N-gon
+     inscribed in its circle (a sinkhole's sagging crust, any other owner).
+
+     The profiles ride in ONE small data texture (PROFILE_N x SLOTS, two bytes
+     per radius, nearest-filtered), written only when a slot's profile
+     changes. A texture uniform has two traps in r128, each silent:
+       - UniformsUtils.clone() CLONES a Texture per material, so it is handed
+         over inside a one-element ARRAY (sampler2D uCbzProf[1]): .slice()
+         keeps the element shared, the trick the slot array already uses.
+       - a ShaderMaterial that #includes the fog chunks but was never attached
+         would leave the sampler on unit 0, and a samplerCube of its own on
+         unit 0 is a draw error. So the sampler only exists where CBZ_PROF is
+         defined: prepended to every THREE.ShaderLib fragment shader below,
+         and set by groundMaskAttach on the custom materials that ask. */
+  const PROFILE_N = 64;
+  const PROF_LO = 0.5, PROF_HI = 1.5;
+  function quantize(m) {
+    const v = Math.round((Math.min(PROF_HI, Math.max(PROF_LO, m)) - PROF_LO) * 65535);
+    return v / 65535 + PROF_LO;
+  }
+  const profData = new Uint8Array(PROFILE_N * SLOTS * 4);
+  const profTex = new THREE.DataTexture(profData, PROFILE_N, SLOTS, THREE.RGBAFormat, THREE.UnsignedByteType);
+  profTex.magFilter = THREE.NearestFilter; profTex.minFilter = THREE.NearestFilter;
+  profTex.generateMipmaps = false; profTex.flipY = false;
+  profTex.wrapS = profTex.wrapT = THREE.ClampToEdgeWrapping;
+  const rowSrc = new Array(SLOTS).fill(undefined);
+  function writeRow(i, prof) {
+    if (rowSrc[i] === prof) return false;
+    rowSrc[i] = prof;
+    for (let k = 0; k < PROFILE_N; k++) {
+      const m = prof ? prof[k] : 1;
+      const v = Math.round((Math.min(PROF_HI, Math.max(PROF_LO, m)) - PROF_LO) * 65535);
+      const o = (i * PROFILE_N + k) * 4;
+      profData[o] = v >> 8; profData[o + 1] = v & 255; profData[o + 2] = 0; profData[o + 3] = 255;
+    }
+    return true;
+  }
+  for (let i = 0; i < SLOTS; i++) writeRow(i, null);
+  profTex.needsUpdate = true;
+  const uProf = { value: [profTex] };
 
   const slots = [];
   for (let i = 0; i < SLOTS; i++) slots.push(new THREE.Vector4(0, 0, 0, 0));
@@ -108,21 +162,55 @@
     "#else\n" +
     "  vCbzGW = ( modelMatrix * vec4( position, 1.0 ) ).xyz;\n" +
     "#endif\n";
-  const GLSL_PARS_F = "uniform vec4 uCbzHoles[" + SLOTS + "];\nvarying vec3 vCbzGW;\n";
+  const NF = PROFILE_N.toFixed(1), SF = SLOTS.toFixed(1);
+  const DA = (Math.PI * 2) / PROFILE_N;
+  const GLSL_PARS_F =
+    "uniform vec4 uCbzHoles[" + SLOTS + "];\nvarying vec3 vCbzGW;\n" +
+    "#ifdef CBZ_PROF\n" +
+    "uniform sampler2D uCbzProf[ 1 ];\n" +
+    "float cbzProfAt( float i, float row ) {\n" +
+    "  vec4 t = texture2D( uCbzProf[ 0 ], vec2( ( i + 0.5 ) / " + NF + ", row ) );\n" +
+    "  return dot( t.rg, vec2( 65280.0, 255.0 ) ) / 65535.0 + " + PROF_LO.toFixed(1) + ";\n" +
+    "}\n" +
+    "#endif\n";
   /* length(a - b), NEVER distance(a, b) (2026-09-27). This is spliced into
      fog_fragment, i.e. into EVERY material's fragment shader, including the
      vendor mirror sea (world/waterfx.js) whose main() declares
      `float distance = length(worldToEye);`. ESSL 1.00 then refuses the call
      ("'distance' : function name expected") and three draws the mirror with
      a dead program: at quality tier >= 2 the city ocean rendered NOTHING.
-     water_spec.js's INLAND_FN note records the same trap. */
+     water_spec.js's INLAND_FN note records the same trap.
+     THE CHORD: between bearings a0 and a1 = a0 + DA with radii r0 and r1, the
+     straight edge meets the ray at bearing t at
+       r(t) = r0 r1 sin(DA) / (r0 sin(t - a0) + r1 sin(a1 - t)),
+     which is r0 at a0, r1 at a1 and a straight line between: the same edge a
+     triangle strip through those two vertices draws. Tested multiplied out
+     (no divide), and only inside 1.5 r: everything else costs two compares. */
   const GLSL_FRAG =
     "\n#ifndef CBZ_NOMASK\n" +
     "  for ( int cbzI = 0; cbzI < " + SLOTS + "; cbzI++ ) {\n" +
     "    vec4 cbzH = uCbzHoles[ cbzI ];\n" +
     "    if ( cbzH.z <= 0.0 ) break;\n" +
-    "    if ( vCbzGW.y < cbzH.w + " + BAND_UP.toFixed(2) + " && vCbzGW.y > cbzH.w - " + BAND_DOWN.toFixed(2) + " &&\n" +
-    "         length( vCbzGW.xz - cbzH.xy ) < cbzH.z ) discard;\n" +
+    "    if ( vCbzGW.y < cbzH.w + " + BAND_UP.toFixed(2) + " && vCbzGW.y > cbzH.w - " + BAND_DOWN.toFixed(2) + " ) {\n" +
+    "      vec2 cbzD = vCbzGW.xz - cbzH.xy;\n" +
+    "      float cbzL = length( cbzD );\n" +
+    "      if ( cbzL < cbzH.z * " + PROF_LO.toFixed(2) + " ) discard;\n" +
+    "#ifdef CBZ_PROF\n" +
+    "      if ( cbzL < cbzH.z * " + PROF_HI.toFixed(2) + " ) {\n" +
+    "        float cbzT = atan( cbzD.y, cbzD.x );\n" +
+    "        if ( cbzT < 0.0 ) cbzT += 6.28318530718;\n" +
+    "        float cbzI0 = min( floor( cbzT * " + (PROFILE_N / (Math.PI * 2)).toFixed(8) + " ), " + (PROFILE_N - 1).toFixed(1) + " );\n" +
+    "        float cbzRow = ( float( cbzI ) + 0.5 ) / " + SF + ";\n" +
+    "        float cbzR0 = cbzProfAt( cbzI0, cbzRow );\n" +
+    "        float cbzR1 = cbzProfAt( mod( cbzI0 + 1.0, " + NF + " ), cbzRow );\n" +
+    "        float cbzA0 = cbzI0 * " + DA.toFixed(8) + ";\n" +
+    "        float cbzDen = cbzR0 * sin( cbzT - cbzA0 ) + cbzR1 * sin( cbzA0 + " + DA.toFixed(8) + " - cbzT );\n" +
+    "        if ( cbzL * max( cbzDen, 1e-5 ) < cbzH.z * cbzR0 * cbzR1 * " + Math.sin(DA).toFixed(8) + " ) discard;\n" +
+    "      }\n" +
+    "#else\n" +
+    "      if ( cbzL < cbzH.z ) discard;\n" +
+    "#endif\n" +
+    "    }\n" +
     "  }\n" +
     "#endif\n";
 
@@ -155,7 +243,14 @@
 
     for (const k in THREE.ShaderLib) {
       const sh = THREE.ShaderLib[k];
-      if (sh && sh.uniforms) { sh.uniforms.uCbzHoles = uHoles; state.libs++; }
+      if (!sh || !sh.uniforms) continue;
+      sh.uniforms.uCbzHoles = uHoles;
+      // the profile sampler exists only where it is bound (see PROFILE_N)
+      if (typeof sh.fragmentShader === "string" && sh.fragmentShader.indexOf("CBZ_PROF") < 0) {
+        sh.fragmentShader = "#define CBZ_PROF 1\n" + sh.fragmentShader;
+        sh.uniforms.uCbzProf = uProf;
+      }
+      state.libs++;
     }
     state.installed = true;
     return true;
@@ -168,6 +263,9 @@
   CBZ.groundMaskAttach = function (mat) {
     if (!mat || !mat.uniforms) return false;
     mat.uniforms.uCbzHoles = uHoles;
+    mat.uniforms.uCbzProf = uProf;
+    mat.defines = mat.defines || {};
+    if (!mat.defines.CBZ_PROF) { mat.defines.CBZ_PROF = 1; mat.needsUpdate = true; }
     return true;
   };
 
@@ -203,8 +301,10 @@
   const rank = [];
   /* Hand it every open hole; it fills the slots nearest-first and returns the
      ones that won, so the caller can stop drawing the ones that did not.
-     Entries: { x, z, r, y, src } — r is the DISCARD radius (the wall's outer
-     edge, not the removed floor), y is that hole's surface height. */
+     Entries: { x, z, r, y, src, prof? } — r is the discard radius, y is that
+     hole's surface height, prof (optional) the PROFILE_N radii in multiples
+     of r, each already passed through CBZ.groundMaskProfile.quantize so the
+     caller's geometry and the shader cut along the identical polyline. */
   CBZ.groundMaskApply = function (entries) {
     const out = [];
     if (!state.installed) { state.filled = 0; return out; }
@@ -218,11 +318,15 @@
       rank.sort(function (a, b) { return score(a, ex, ez, px, pz) - score(b, ex, ez, px, pz); });
       rank.length = SLOTS;
     }
+    let dirty = false;
     for (let i = 0; i < SLOTS; i++) {
       const h = rank[i];
-      if (h) { slots[i].set(h.x, h.z, h.r, h.y); out.push(h.src !== undefined ? h.src : h); }
-      else slots[i].set(0, 0, 0, 0);
+      if (h) {
+        slots[i].set(h.x, h.z, h.r, h.y); out.push(h.src !== undefined ? h.src : h);
+        if (writeRow(i, h.prof || null)) dirty = true;
+      } else slots[i].set(0, 0, 0, 0);
     }
+    if (dirty) profTex.needsUpdate = true;
     state.filled = out.length;
     return out;
   };
@@ -252,6 +356,10 @@
   if (CBZ.onUpdate) CBZ.onUpdate(28.55, function () { if (providers.length) CBZ.groundMaskSync(); });
 
   CBZ.groundMaskSlots = SLOTS;
+  /* the profile contract: PROFILE_N bearings from +x toward +z, radii as
+     multiples of the entry's r inside [lo, hi], quantised to what the
+     texture stores */
+  CBZ.groundMaskProfile = { N: PROFILE_N, lo: PROF_LO, hi: PROF_HI, quantize: quantize };
   // the eye the slots are ranked from — published so the audit measures the
   // SAME point the ranking used, rather than keeping a second copy of it
   CBZ.groundMaskEye = function () { return { x: eyeX(), z: eyeZ() }; };
@@ -262,7 +370,7 @@
       slots: SLOTS,
       filled: state.filled,
       shaderLibsPatched: state.libs,
-      bandUp: BAND_UP, bandDown: BAND_DOWN,
+      bandUp: BAND_UP, bandDown: BAND_DOWN, profileN: PROFILE_N,
       // the whole point: this must stay 0 forever
       sweptMeshes: 0, raycasts: 0,
     };

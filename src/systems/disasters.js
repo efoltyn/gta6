@@ -4698,20 +4698,22 @@
      the whole event (cracks and sag, the cover dropping, the edges calving,
      the things on top going in). What this file supplies is what only it
      owns: the island's CARS (their records, their colliders, the flung flag
-     the arena's reset puts back), its BUILDINGS (and the structural ledger a
-     falling one must go through) and whether the site is a road. The old seam
+     the arena's reset puts back) and its BUILDINGS (and the structural ledger
+     a falling one must go through). Whether the ground is road, footway or
+     turf is NOT said here: the rim reads it per bearing from the island's own
+     records (groundshaft.js surfaceAt), so a hole across a road and its verge
+     is asphalt on one side and turf on the other. The old seam
      threw every car inside the radius straight down with flingCar; a car now
      goes in when the ground under its wheels does, nose first. */
   function stageHole(ctx, x, z, r) {
     if (!CBZ.groundShaftCollapse) { return { x: x, z: z, r: r, legacy: openHole(ctx, x, z, r) }; }
     const A = ctx.arena;
-    const road = !!(A.onRoad && A.onRoad(x, z));
     // as deep as the island allows: a karst throat a good three radii down,
     // kept above the depth debris and bodies are culled at
     const gy = floor(x, z);
     const depth = Math.max(r * 2.4, Math.min(r * 3.2, gy + 52));
     return CBZ.groundShaftCollapse(x, z, {
-      r: r, depth: depth, surface: road ? "asphalt" : "soil", road: road,
+      r: r, depth: depth,
       warnSecs: 3.4, growSecs: 6,
       cars: function () {
         const out = [], C = A.cars || [];
