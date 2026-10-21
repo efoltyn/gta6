@@ -411,6 +411,38 @@
     if (CBZ.waterField.isSurfaceWater(nx, nz, 0.5)) { P.pos.x = nx; P.pos.z = nz; }
   }
 
+  /* THE TORRENT (2026-10-20). Fast flood water is not a drift you swim
+     against, it takes you: drag acts on your velocity RELATIVE to the water,
+     so in a tsunami's run-up or backwash, or a flash flood's channel, you go
+     toward the water's own speed in a second or two, the stroke buys a little
+     steering and no more, and the eddies buffet you across the current and
+     heave you up and down. Read off CBZ.waterTurbidAt (world/tsunami_silt.js),
+     the same current the underwater medium grades by, so what you see go past
+     and what carries you are one flow. Below ~0.8 m/s it is nothing at all. */
+  const _torQ = {};
+  let torT = 0;
+  function torrent(P, fdt) {
+    S.torrent = 0;
+    if (!CBZ.waterTurbidAt) return;
+    const q = CBZ.waterTurbidAt(P.pos.x, P.pos.z, _torQ);
+    const sp = q.speed;
+    if (!(sp > 0.8)) return;
+    const t = clamp01((sp - 0.8) / 3.2), k = t * t * (3 - 2 * t);
+    torT += fdt;
+    const a = 1 - Math.exp(-1.6 * k * fdt);
+    S.vx += (q.u * 0.8 - S.vx) * a;
+    S.vz += (q.v * 0.8 - S.vz) * a;
+    const ux = q.u / sp, uz = q.v / sp;
+    const n1 = Math.sin(torT * 1.9) * 0.6 + Math.sin(torT * 3.3 + 1.2) * 0.4;
+    const n2 = Math.sin(torT * 1.3 + 2.1) * 0.6 + Math.sin(torT * 2.7 + 0.4) * 0.4;
+    const n3 = Math.sin(torT * 1.6 + 4.0) * 0.6 + Math.sin(torT * 3.9 + 2.2) * 0.4;
+    const g = sp * k * 1.1 * fdt;
+    S.vx += (-uz * n1 + ux * n2 * 0.5) * g;
+    S.vz += (ux * n1 + uz * n2 * 0.5) * g;
+    S.vy += n3 * sp * k * 1.3 * fdt;
+    S.torrent = k;
+  }
+
   function hurtDrowning(P, dmg) {
     if (survOn() && CBZ.surv && CBZ.surv.hurt) {
       CBZ.surv.hurt(CBZ.surv.playerActor, dmg, { cause: "drowned" });
@@ -1068,9 +1100,11 @@
     if (stepLen > 1e-4) { desX = (stepX / stepLen) * want; desZ = (stepZ / stepLen) * want; }
     let dvx = desX - S.vx, dvz = desZ - S.vz;
     const dm = Math.hypot(dvx, dvz);
-    const amax = SWIM_ACCEL * fdt;
+    // in a torrent the stroke steers, it does not drive
+    const amax = SWIM_ACCEL * fdt * (1 - 0.65 * (S.torrent || 0));
     if (dm > amax && dm > 1e-6) { dvx *= amax / dm; dvz *= amax / dm; }
     S.vx += dvx; S.vz += dvz;
+    torrent(P, fdt);
 
     // 3. Position from OUR velocity, anchored at the pre-input spot, then a
     //    real wall resolve so the seawall/hull still stops you.
@@ -1399,6 +1433,7 @@
     _state.headUnder = swimming && S.headUnder;
     _state.surfaceY = S.surf;
     _state.speed = swimming ? Math.hypot(S.vx, S.vz) : 0;
+    _state.torrent = swimming ? (S.torrent || 0) : 0;   // 0..1 how hard the flood has you
     _state.climbVerb = swimming ? climbVerb : "";
     _state.climb = !!_state.climbVerb;
     if (P && CFG.WATER_BREATH !== false) { P.breath = breath; P.breathMax = BREATH_MAX; }

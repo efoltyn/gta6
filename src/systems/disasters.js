@@ -2013,10 +2013,10 @@
     const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
     if (W) {
       W.amp = st.waveAmp; W.chop = st.chopAmp; W.foam = st.foamGain;
-      /* THE SEDIMENT LOAD RIDES THE ARENA'S OWN WAVE RECORD, so the ocean
-         shader picks it up on the SAME 47.9 pass that already follows the
-         surge (world/disaster_arena.js) — no second drive call, and nothing
-         can render a clean blue sea on the frame the soup arrives. */
+      /* THE BORE'S LOAD rides the arena's wave record for the flow sheets
+         round the buildings (world/tsunami_flow.js). It no longer colours the
+         SEA: the sea is brown only where the silt field placed it
+         (world/tsunami_silt.js), from the water that actually ran over land. */
       W.sediment = st.sediment || 0;
       W.frontC = [ctx.cx, ctx.cz];
       W.frontDir = [st.dx, st.dz];
@@ -5695,7 +5695,8 @@
            mistaken for a run that did. ---- */
         faceShared: !!(CBZ.CONFIG.TSU_FACE_V2 !== false && st.face),
         sediment: st.sediment != null ? +(+st.sediment).toFixed(3) : 0,
-        shaderSediment: U && U.uDwSediment ? +U.uDwSediment.value.toFixed(3) : null,
+        // the sea's brown is placed, not phased: the silt field's books
+        silt: CBZ.tsuSilt ? CBZ.tsuSilt.audit() : null,
         shoal: st.shoal != null ? +(+st.shoal).toFixed(3) : null,
         /* How much of itself the bore has left, and how tall the wall
            actually is right now. `spent` is 1 at the beach and runs to nearly

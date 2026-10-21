@@ -493,6 +493,7 @@
   let loopBus = null;
   let pressureFilter = null;
   let pressureGain = null;
+  let uwFilter = null;
   const buffers = new Map();
   const loading = new Map();
   const failed = new Set();
@@ -620,7 +621,11 @@
     pressureFilter.type = "lowpass"; pressureFilter.frequency.value = 22000;
     pressureFilter.Q.value = 0.3;
     pressureGain = ctx.createGain(); pressureGain.gain.value = 1;
-    pressureFilter.connect(pressureGain); pressureGain.connect(master);
+    // the head under water: one more lowpass on the whole world mix (sfx AND
+    // loops, i.e. the ambience), opened wide in air. CBZ.audioUnderwater.
+    uwFilter = ctx.createBiquadFilter();
+    uwFilter.type = "lowpass"; uwFilter.frequency.value = 22000; uwFilter.Q.value = 0.5;
+    pressureFilter.connect(pressureGain); pressureGain.connect(uwFilter); uwFilter.connect(master);
     sfxBus = ctx.createGain(); sfxBus.gain.value = 0.84; sfxBus.connect(pressureFilter);
     loopBus = ctx.createGain(); loopBus.gain.value = 0.72; loopBus.connect(pressureFilter);
     warmAudioCache();
@@ -1676,6 +1681,90 @@
     } catch (e) {}
     return true;
   };
+  /* ---- UNDER THE WATER ---------------------------------------------------
+     CBZ.audioUnderwater(k, murk): k 0..1 how far under the ear is (the
+     eased muffle of world/water_underwater.js), murk 0..1 how thick the water
+     is. The whole world mix goes through one lowpass that closes to ~900 Hz
+     in clear water and ~450 Hz in a flood's suspension. Change-gated. */
+  let uwLast = -1;
+  CBZ.audioUnderwater = function (k, murk) {
+    if (!ctx || !uwFilter) return;
+    k = k > 0 ? (k > 1 ? 1 : k) : 0;
+    const m = murk > 0 ? (murk > 1 ? 1 : murk) : 0;
+    const lo = 900 - 450 * m;
+    const f = k > 0.002 ? 22000 * Math.pow(lo / 22000, k) : 22000;
+    if (Math.abs(f - uwLast) < Math.max(4, uwLast * 0.01)) return;
+    uwLast = f;
+    try { uwFilter.frequency.setTargetAtTime(f, ctx.currentTime, 0.06); } catch (e) {}
+  };
+
+  /* ---- THE TORRENT: what fast flood water sounds like from inside it ------
+     CBZ.torrentVoice(level, grind): a held voice, both 0..1, set every frame
+     by whoever owns the ear (world/water_underwater.js). Synthesised from the
+     shared noise buffer, nothing to load:
+       roar   noise through a low band (~120 Hz), slowly surging: the weight
+              of the water going past the ears;
+       grind  a crackle loop (sparse decaying clicks, built once) through a
+              mid band: gravel, glass and wreckage dragged along the bed, its
+              own volume lurching.
+     Routed AFTER the underwater lowpass (straight to the master), because it
+     is already the sound of the water from inside it. Stops its sources a
+     couple of seconds after it goes quiet. */
+  let tv = null, crackle = null;
+  function crackleBuf() {
+    if (crackle) return crackle;
+    const len = (ctx.sampleRate * 2.2) | 0;
+    const b = ctx.createBuffer(1, len, ctx.sampleRate), d = b.getChannelData(0);
+    let n = 0;
+    while (n < len) {
+      n += (ctx.sampleRate * (0.004 + Math.random() * 0.05)) | 0;
+      const amp = 0.25 + Math.random() * 0.75, dec = ctx.sampleRate * (0.002 + Math.random() * 0.012);
+      for (let i = 0; i < dec * 4 && n + i < len; i++) d[n + i] += (Math.random() * 2 - 1) * amp * Math.exp(-i / dec);
+    }
+    crackle = b;
+    return b;
+  }
+  function torrentStart() {
+    const t = ctx.currentTime;
+    const out = ctx.createGain(); out.gain.value = 0.0001; out.connect(master);
+    const roar = ctx.createBufferSource(); roar.buffer = noiseBuf(); roar.loop = true;
+    const rlp = ctx.createBiquadFilter(); rlp.type = "lowpass"; rlp.frequency.value = 160; rlp.Q.value = 0.9;
+    const rg = ctx.createGain(); rg.gain.value = 0;
+    roar.connect(rlp); rlp.connect(rg); rg.connect(out);
+    const grit = ctx.createBufferSource(); grit.buffer = crackleBuf(); grit.loop = true;
+    const gbp = ctx.createBiquadFilter(); gbp.type = "bandpass"; gbp.frequency.value = 700; gbp.Q.value = 0.8;
+    const glp = ctx.createBiquadFilter(); glp.type = "lowpass"; glp.frequency.value = 1300;
+    const gg = ctx.createGain(); gg.gain.value = 0;
+    grit.connect(gbp); gbp.connect(glp); glp.connect(gg); gg.connect(out);
+    roar.start(t, Math.random()); grit.start(t, Math.random() * 2);
+    tv = { out: out, roar: roar, grit: grit, rg: rg, gg: gg, rlp: rlp, quietT: 0 };
+  }
+  function torrentStop() {
+    if (!tv) return;
+    try { tv.roar.stop(); tv.grit.stop(); tv.out.disconnect(); } catch (e) {}
+    tv = null;
+  }
+  CBZ.torrentVoice = function (level, grind) {
+    if (!ctx || !master || ctx.state !== "running") return;
+    level = level > 0 ? (level > 1 ? 1 : level) : 0;
+    grind = grind > 0 ? (grind > 1 ? 1 : grind) : 0;
+    if (!tv) { if (level < 0.02) return; torrentStart(); }
+    const t = ctx.currentTime;
+    if (level < 0.01) {
+      if (!tv.quietT) tv.quietT = t;
+      else if (t - tv.quietT > 2.5) { torrentStop(); return; }
+    } else tv.quietT = 0;
+    // the water surges and the wreckage lurches: slow incommensurate swells
+    const surge = 0.75 + 0.25 * Math.sin(t * 0.9) * Math.sin(t * 0.37 + 1.3);
+    const lurch = 0.55 + 0.45 * Math.max(0, Math.sin(t * 1.7) * 0.6 + Math.sin(t * 2.9 + 0.8) * 0.4);
+    try {
+      tv.out.gain.setTargetAtTime(Math.max(0.0001, level * 0.9), t, 0.25);
+      tv.rg.gain.setTargetAtTime(0.75 * surge, t, 0.2);
+      tv.gg.gain.setTargetAtTime(grind * 0.55 * lurch, t, 0.12);
+      tv.rlp.frequency.setTargetAtTime(110 + 90 * level * surge, t, 0.3);
+    } catch (e) {}
+  };
+
   // A spatial sound request must name its emitter. This helper deliberately
   // computes distance at the caller boundary rather than turning "wanted" or
   // another abstract state into global audio.

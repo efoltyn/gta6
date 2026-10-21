@@ -3410,12 +3410,17 @@
     U.uDisasterTint = U.uSeaColor;
     if (opts.shallowColor != null) U.uShallowColor.value.set(opts.shallowColor);
     U.uDisasterShallow = U.uShallowColor;
-    /* ---- SEDIMENT LOAD (the Miyako term) --------------------------------
-       A tsunami that has crossed a beach is not water any more, it is a
-       suspension: sand, silt, sewage, ground-up timber, and it reads
-       GRAY-BLACK, heaviest AT the leading edge. Zero by default, so every
-       other consumer renders clean water. */
-    U.uDwSediment = { value: 0 };
+    /* ---- THE SEDIMENT IS A PLACE, NOT A PHASE (2026-10-20) --------------
+       Water that has crossed land is a suspension: sand, silt, sewage,
+       ground-up timber. It used to be one uniform (uDwSediment) laid over the
+       whole sea on the wave's side of a ruled line, so from the air the ocean
+       went brown-black to the horizon against a turquoise lee. Now the brown
+       is where the scour put it: the run-up's water on the land (rLand
+       below) and the silt field (world/tsunami_silt.js), seeded from that
+       water, carried out to sea by the backwash, spread and settled. The
+       open sea stays the sea. uSiltB = (x0, z0, size, on). */
+    U.uSiltTex = { value: null };
+    U.uSiltB = { value: new THREE.Vector4(0, 0, 1, 0) };
     U.uDwFrontC = { value: new THREE.Vector2(0, 0) };     // event origin, world XZ
     U.uDwFrontDir = { value: new THREE.Vector2(1, 0) };   // unit travel direction
     U.uDwFrontS = { value: -1e9 };                        // signed front position along dir
@@ -3423,9 +3428,11 @@
     // metres the sheet is pulled DOWN ahead of the front (0 = off); CPU twin
     // CBZ.waterFrontDropAt
     U.uDwAhead = { value: 0 };
-    // grey-brown-black, low in saturation (the old 0x171208 was an olive
-    // chocolate): the Tohoku "black tsunami" and the Aceh street surge
-    U.uDwMud = { value: new THREE.Color(opts.mudColor == null ? 0x15120e : opts.mudColor) };
+    // FLOOD WATER, NOT INK. The Tohoku aerials read a light grey-brown (the
+    // heavy load) going green-grey where it thins, with sky on it; the old
+    // 0x15120e x 0.62 landed near black through ACES. LINEAR: these land at
+    // about sRGB (128,116,96) and (112,116,100) lit from above.
+    U.uDwMud = { value: new THREE.Color(opts.mudColor == null ? 0x1c1812 : opts.mudColor) };
     // the flood is a river with no banks: everything on it moves one way
     U.uDwFlow = { value: new THREE.Vector2(1, 0) };
     U.uDwFlowSpd = { value: 0 };
@@ -3435,7 +3442,7 @@
     // THE DRY DISC: (cx, cz, r, sink) — the sheet is pulled `sink` m down
     // inside r so a swell crest never stripes the plain. w = 0 is a no-op.
     U.uDwDryDisc = { value: new THREE.Vector4(0, 0, 0, 0) };
-    U.uDwSilt = { value: new THREE.Color(opts.siltColor == null ? 0x1b1610 : opts.siltColor) };
+    U.uDwSilt = { value: new THREE.Color(opts.siltColor == null ? 0x181a14 : opts.siltColor) };
     // dirty off-white: tan-grey once it carries the silt (0x8e8271 lands
     // near white through ACES + sRGB, which is the clean cap the owner saw)
     U.uDwFoam = { value: new THREE.Color(opts.dirtyFoamColor == null ? 0x574c3c : opts.dirtyFoamColor) };
@@ -3516,7 +3523,16 @@
       RUN_GLSL,
       "varying vec4 vRun;",
       "uniform float uRunRest;",
-      "uniform float uDwSediment;",
+      "uniform sampler2D uSiltTex;",
+      "uniform vec4 uSiltB;",
+      // the silt field's load at a world point, its outer cell fading to clean sea
+      "float cbzSilt(vec2 xz) {",
+      "  if (uSiltB.w < 0.5) return 0.0;",
+      "  vec2 uv = (xz - uSiltB.xy) / uSiltB.z;",
+      "  float e = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));",
+      "  if (e <= 0.0) return 0.0;",
+      "  return texture2D(uSiltTex, uv).r * clamp(e * 40.0, 0.0, 1.0);",
+      "}",
       "uniform vec2 uDwFrontC;",
       "uniform vec2 uDwFrontDir;",
       "uniform float uDwFrontS;",
@@ -3589,17 +3605,24 @@
       "  return g * (1.0 - smoothstep(1.0, 3.0, px));",
       "}",
     ].join("\n");
-    /* THE TURBID FRONT, from the Tohoku helicopter footage: the inundation is
-       DARK gray-brown, OPAQUE and GLOSSY; mottled with silt plumes drifting
-       with the current; and its white is STRUCTURE — a boiling roll at the
-       leading edge, torn streaks along the flow behind it, and a sparse scum
-       network where the water has stood. Gated on uDwSediment, which is 0 for
-       every clean sea, so they run not one instruction of it. */
+    /* THE TURBID WATER, from the Tohoku helicopter footage: the inundation is
+       grey-brown, OPAQUE and still glossy; mottled with silt plumes drifting
+       with the current; and its white is STRUCTURE — torn froth along the
+       flow, a sparse scum network where the water has stood. Gated on the
+       PLACED load (the run-up's land water, the silt field), so the open sea
+       and every clean sea run not one instruction of it. */
     const fTail = [
       // run-up water on the land is flood water whatever the sea is doing:
       // it stays mud through the backwash, after the event has cleared
       "  float rLand = dwRun.w * smoothstep(uRunRest - 1.2, uRunRest + 0.3, dwRun.x - dwRun.y) * step(0.03, dwRun.y);",
-      "  float dwSed = max(uDwSediment, 0.92 * rLand);",
+      // the silt plume: the field is ~14 m cells, so its edge is torn by the
+      // same slow noise that mottles the mud, drifting with the water
+      "  float dwSilt = cbzSilt(vSeaWorld.xz);",
+      "  if (dwSilt > 0.004) {",
+      "    float sn = dwFbm(vSeaWorld.xz * 0.035 + uDwFlow * uSeaTime * 0.012);",
+      "    dwSilt = clamp(dwSilt * (0.45 + 1.1 * sn) - 0.04, 0.0, 1.0);",
+      "  }",
+      "  float dwSed = max(dwSilt, 0.92 * rLand);",
       // derivatives outside every branch (undefined in non-uniform flow)
       "  vec3 dwP3x = dFdx(vSeaWorld), dwP3y = dFdy(vSeaWorld);",
       "  if (dwSed > 0.002) {",
@@ -3615,16 +3638,14 @@
       "    vec3 tN = normalize(mix(normalize(vSeaNormal), dwNg, dwStep));",
       "    float fdS = dot(vSeaWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS;",
       "    float behind = clamp(-fdS / max(1.0, uDwFrontRun), 0.0, 1.0);",
-      "    float dwWet = 1.0 - smoothstep(-1.0, 7.0, fdS);",
       // ON THE LAND the field says what is flood: water standing on ground
       // above the rest sea, wherever it got to, whatever the front line says.
       // It churns where it is fast AND steep (the race round a corner, the
       // backwash pouring off a kerb), its slack is still.
       "    float rFront = smoothstep(0.12, 0.7, dwRunG) * smoothstep(0.6, 3.2, dwRun.z);",
       "    rFront = max(rFront, (1.0 - smoothstep(0.08, 0.7, dwRun.y)) * smoothstep(0.8, 2.6, dwRun.z));",
-      "    dwWet = max(dwWet, rLand);",
       "    behind = mix(behind, 0.35 * (1.0 - rFront), rLand);",
-      "    float turb = dwSed * dwWet;",
+      "    float turb = dwSed;",
       "    if (turb > 0.002) {",
       "      float bd = mix(max(0.0, -fdS), mix(60.0, 0.5, rFront), rLand);",
       "      float land = step(0.5, rLand);",
@@ -3669,8 +3690,9 @@
       "      float plume = clamp(dwFbm(vec2(sAl, sAc) * 0.0068) * 0.72 +",
       "                          dwNoise(vec2(sAl * 0.0021, sAc * 0.0029) + 11.0) * 0.46, 0.0, 1.0);",
       "      float sed = turb * mix(1.0, 0.92, behind);",
-      "      vec3 mudBody = mix(uDwMud * 0.62, uDwSilt, smoothstep(0.18, 0.92, plume));",
-      "      mudBody *= 0.52 + tndl * 0.44;",
+      // heavy load toward the brown, the thinning plume toward the green-grey
+      "      vec3 mudBody = mix(uDwMud, uDwSilt, clamp(smoothstep(0.18, 0.92, plume) * 0.7 + (1.0 - sed) * 0.6, 0.0, 1.0));",
+      "      mudBody *= 0.55 + tndl * 0.45;",
       "      float mf = 0.02 + 0.98 * pow(1.0 - clamp(dot(tN, V), 0.0, 1.0), 5.0);",
       /* NOT A MIRROR. The old 62% sky at grazing made the inundation a
          silver sheet: a churned suspension scatters what the surface would
@@ -3678,9 +3700,10 @@
          chop's slopes catch it in broken flecks, which is what reads as
          water moving rather than a brown plane. */
       "      float churn = clamp(land * max(rFront, smoothstep(1.5, 5.5, dwRun.z) * 0.6) + (1.0 - land) * (1.0 - stand) * 0.4, 0.0, 1.0);",
-      "      vec3 turbCol = mix(mudBody, dwSkyC * 0.85, clamp(mf * (0.60 - 0.3 * churn), 0.0, 0.38));",
+      // it is still water: some sky at every angle, more at grazing
+      "      vec3 turbCol = mix(mudBody, dwSkyC * 0.85, clamp(0.07 + mf * (0.70 - 0.3 * churn), 0.0, 0.5));",
       "      turbCol += uSunColor * pow(max(dot(tN, tH), 0.0), mix(110.0, 40.0, churn)) * (0.30 + 1.2 * mf) * (1.0 - 0.5 * churn);",
-      "      outColor = mix(outColor, turbCol, clamp(sed * 1.28, 0.0, 0.985));",
+      "      outColor = mix(outColor, turbCol, clamp(sed * 1.2, 0.0, 0.985));",
       /* THE FROTH. Where the water is breaking (the race behind a bore, the
          run round a building, the first tens of metres behind the sea front)
          it carries more of it, thinning to a sparse scum where it has stood.
@@ -3695,7 +3718,8 @@
       "      } else {",
       "        spd = uDwFlowSpd;",
       "        float boilZ = exp(-bd / 14.0);",
-      "        dens = boilZ * 0.75 + 0.40 * exp(-bd / 50.0) * (1.0 - stand) + 0.10 + 0.12 * stand;",
+      // a thin plume far out carries no raft of scum, only the thick water does
+      "        dens = (boilZ * 0.75 + 0.40 * exp(-bd / 50.0) * (1.0 - stand) + 0.10 + 0.12 * stand) * smoothstep(0.35, 0.85, turb);",
       "        fresh = boilZ;",
       "      }",
       "      dens = clamp(dens, 0.0, 1.0) * clamp(turb * 1.15, 0.0, 1.0) * (1.0 - dwStep);",
@@ -3832,6 +3856,7 @@
     return true;
   };
 
+  const _siltB = {};
   CBZ.waterDriveDisasterSurface = function (target, state) {
     const mat = target && target.material ? target.material : target;
     const u = mat && mat.userData && mat.userData.waterUniforms;
@@ -3872,17 +3897,22 @@
         if (mat.depthWrite !== solid) mat.depthWrite = solid;
       }
     }
-    // a sea of floodwater draws its white water as clumps (the disaster
-    // tail); the clean sea's crest lines step aside as the soup arrives
-    if (u.uLineFoam) {
-      const sd = Number.isFinite(state.sediment) ? +state.sediment : (u.uDwSediment ? u.uDwSediment.value : 0);
-      const k = Math.max(0, Math.min(1, (sd - 0.02) / 0.3));
-      u.uLineFoam.value = Math.min(1 - k * k * (3 - 2 * k), Number.isFinite(state.lineFoam) ? Math.max(0, +state.lineFoam) : 1);
+    // the crest lines are the director's to thin; the brown water covers
+    // them per pixel by its own load (the disaster tail mixes over them)
+    if (u.uLineFoam) u.uLineFoam.value = Number.isFinite(state.lineFoam) ? Math.max(0, +state.lineFoam) : 1;
+    // the silt field: where the water is brown (world/tsunami_silt.js)
+    if (u.uSiltB) {
+      const SL = CBZ.tsuSilt;
+      const stx = SL && SL.live ? SL.texture() : null;
+      if (stx) {
+        const b = SL.bounds(_siltB);
+        u.uSiltTex.value = stx;
+        u.uSiltB.value.set(b.x0, b.z0, b.size, 1);
+      } else u.uSiltB.value.w = 0;
     }
     // ---- the turbid-front block. Absent from `state` = untouched, so an
     //      existing caller keeps its clean water without knowing this exists.
-    if (u.uDwSediment) {
-      if (Number.isFinite(state.sediment)) u.uDwSediment.value = Math.max(0, Math.min(1, +state.sediment));
+    if (u.uDwFrontC) {
       if (state.frontC) u.uDwFrontC.value.set(+state.frontC[0] || 0, +state.frontC[1] || 0);
       if (state.frontDir) {
         const dx = +state.frontDir[0] || 0, dz = +state.frontDir[1] || 0;
@@ -4888,9 +4918,10 @@
     }
     out.foam = phase === "sweep" ? Math.max(0, 1 - Math.abs(fd) / Math.max(1, +e.frontWidth || 18)) : 0;
     /* THE SEDIMENT LOAD AND THE UNDERTOW, on the same descriptor, because they
-       are the same water. `sediment` is what makes the front gray-black and is
-       also the honest "is this a debris soup" test for anything entrained in
-       it. `undertow` is the flow being NEGATIVE — the drain dragging seaward —
+       are the same water. `sediment` is the bore's own load (the wall's
+       colour, the white water's dirt) and the honest "is this a debris soup"
+       test for anything entrained in it; the SEA's colour is the silt field's
+       (world/tsunami_silt.js), placed where the scour was. `undertow` is the flow being NEGATIVE — the drain dragging seaward —
        which is the half of a tsunami that actually drowns people, and it is a
        sign, not a second field. */
     out.sediment = out.wet && Number.isFinite(e.sediment) ? e.sediment : 0;

@@ -4280,11 +4280,9 @@
   "src/games/jail.js",
   "src/systems/newlife.js",
   "src/world/water_helm.js",
-  "src/world/water_underwater.js",
   "src/world/water_wake.js",
   "src/world/water_float.js",
   "src/world/water_impact.js",
-  "src/world/water_survival.js",
   "src/world/detail_kit.js",
   "src/world/utility_lines.js",
   "src/world/street_furniture.js",
@@ -4448,6 +4446,8 @@
   "src/city/carstrike.js",
   "src/systems/humancontact.js",
   "src/city/crashdeform.js",
-  "src/systems/controls.js"
+  "src/systems/controls.js",
+  "src/world/water_underwater.js",
+  "src/world/water_survival.js"
  ]
 }

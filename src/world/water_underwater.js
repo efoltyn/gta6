@@ -71,6 +71,9 @@
       that trip point plus a volume trim. That is a genuine lowpass over the
       whole mix with zero new audio infrastructure — reusing a shared
       capability instead of adding a parallel one.
+      (2026-10-20: audio.js now has that bus, CBZ.audioUnderwater, a lowpass
+      over the whole mix including the loops; the wrap stays for the
+      distance-trip slap. The flood's own roar is CBZ.torrentVoice.)
 
    6. THE CAMERA. Registered at order 50.5, i.e. AFTER systems/camera.js's one
       and only writer (onAlways(50)), so we always see its final result and can
@@ -447,6 +450,53 @@
   let kDepth = 0;      // 0..1 "how deep is this water" — the one grading number
   let glow = 0;        // 0..1 how much of the bright surface ceiling is in view
 
+  /* ============================================================
+     THE FLOOD IS NOT THE SEA (2026-10-20)
+
+     Owner: "being underwater during a tsunami doesn't feel like being under
+     normal water." It did not, because nothing here knew there was anything
+     in the water: under the flood you got the clear sea's blue-green, its
+     forty metres of sight and its sunlit column. Water that has run over a
+     town is a suspension. Divers in flood water report visibility of an arm's
+     length or less, brown-grey, and DARK a metre down because the load eats
+     the light; it is full of grit and shreds of whatever it went through, and
+     it moves you.
+
+     So the medium reads the local turbidity (CBZ.waterTurbidAt, world/
+     tsunami_silt.js: the silt field over the sea, the run-up's water on the
+     land, a flash flood's water) and the current there, and:
+       - the colour goes to a lit grey-brown that darkens within a metre or
+         two, the sighting range to 2 m in a thin plume and 0.5 m in the
+         thick of it, the directional terms (which need clear water) to none;
+       - the light dies on a ~1 m scale instead of 5 m, caustics and shafts
+         go (there is no sun in it to make them);
+       - the snow becomes a dense cloud of grit in a 7 m box, streaming with
+         the current, with darker tumbling flecks of debris in it;
+       - in fast water (city/swim.js does the shoving) the eye is thrown
+         about, and the ear gets a muffled roar and the grinding of what is
+         being dragged along the bed (systems/audio.js torrentVoice) while the
+         rest of the mix goes low-passed (audioUnderwater).
+     Clear water anywhere else stays exactly what it was: every term below is
+     multiplied by murkK, which is 0 there.
+     ============================================================ */
+  const MURK_C = { r: 0.20, g: 0.175, b: 0.115 };   // LINEAR: lit flood water a hand under
+  const MURK_R_THIN = 2.2, MURK_R_THICK = 0.5;      // m of sight: a plume, the full load
+  const MURK_BOX = 7;                               // m: the grit cloud's wrap box
+  let murk = 0, murkK = 0, flowU = 0, flowV = 0, flowSpd = 0, torrent = 0;
+  const _turbQ = {};
+  function readMurk(depth, dt) {
+    let tw = 0, u = 0, v = 0;
+    if (depth > -0.3 && CBZ.waterTurbidAt) {
+      const q = CBZ.waterTurbidAt(_eye.x, _eye.z, _turbQ);
+      tw = q.turb || 0; u = q.u || 0; v = q.v || 0;
+    }
+    const e = Math.min(1, (dt || 0.016) * 2.2);
+    murk += (tw - murk) * e; if (murk < 0.002) murk = 0;
+    flowU += (u - flowU) * e; flowV += (v - flowV) * e;
+    flowSpd = Math.hypot(flowU, flowV);
+    murkK = smoothstep(0.04, 0.5, murk);
+  }
+
   // ============================================================
   //  DOM
   // ============================================================
@@ -630,6 +680,8 @@
   const SNOW_ALPHA = 0.95;      // peak alpha in shallow daylight
   const SNOW_DRIFT_X = 0.045, SNOW_DRIFT_Z = 0.028, SNOW_SINK = 0.035;   // m/s
   let snow = null, snowU = null;
+  let snowT = -1;
+  const snowOff = { x: 0, y: 0, z: 0 };
 
   function buildSnow() {
     const pos = new Float32Array(SNOW_N * 3);
@@ -658,6 +710,10 @@
       uSurfY: { value: 0 },
       uOpacity: { value: 0 },
       uColor: { value: new THREE.Color(0xf2eedd) },
+      // the flood's load: 0 clear .. 1 a full suspension (grit + debris flecks)
+      uMurk: { value: 0 },
+      uNear: { value: 1.1 },
+      uJit: { value: 0.22 },
     };
     const mat = new THREE.ShaderMaterial({
       uniforms: snowU,
@@ -675,12 +731,22 @@
         "uniform float uScale;",
         "uniform float uFadeFar;",
         "uniform float uSurfY;",
+        "uniform float uMurk;",
+        "uniform float uNear;",
+        "uniform float uJit;",
         "varying float vAlpha;",
+        "varying float vDeb;",
+        "varying float vSpin;",
         "void main() {",
         // world-anchored lattice + current, wrapped into the box around the eye
         "  vec3 p = position * uBox + uDrift;",
         "  float ph = aRand * 6.2831853;",
-        "  p += vec3(sin(uTime * 0.37 + ph * 3.0), sin(uTime * 0.29 + ph * 5.0) * 0.6, cos(uTime * 0.31 + ph * 7.0)) * 0.22;",
+        // turbulence: slow sway in clear water, a churn in the flood
+        "  float tf = 1.0 + 3.0 * uMurk;",
+        "  p += vec3(sin(uTime * 0.37 * tf + ph * 3.0), sin(uTime * 0.29 * tf + ph * 5.0) * 0.6, cos(uTime * 0.31 * tf + ph * 7.0)) * uJit;",
+        // one fleck in fourteen is a shred of something (bark, plaster, cloth)
+        "  vDeb = step(0.93, fract(aRand * 7.31)) * uMurk;",
+        "  vSpin = mod(ph + uTime * (1.5 + 4.0 * fract(aRand * 3.7)) * uMurk, 6.2831853);",
         "  vec3 rel = mod(p - cameraPosition, uBox) - 0.5 * uBox;",
         "  vec3 w = cameraPosition + rel;",
         "  vec4 mv = viewMatrix * vec4(w, 1.0);",
@@ -689,21 +755,32 @@
         "  float zv = max(0.05, -mv.z);",
         // never above the water: straddling the surface, the top half is air
         "  float wet = step(w.y, uSurfY - 0.12);",
-        "  vAlpha = wet * smoothstep(0.30, 1.10, dist) * (1.0 - smoothstep(uFadeFar * 0.45, uFadeFar, dist))",
+        "  vAlpha = wet * smoothstep(uNear * 0.27, uNear, dist) * (1.0 - smoothstep(uFadeFar * 0.45, uFadeFar, dist))",
         "         * (0.45 + 0.55 * fract(aRand * 13.37));",
-        "  gl_PointSize = clamp(uSize * (0.55 + 0.9 * aRand) * uScale / zv, 1.0, 26.0) * wet;",
+        "  vAlpha = mix(vAlpha, min(1.0, vAlpha * 1.6), vDeb);",
+        "  gl_PointSize = clamp(uSize * (0.55 + 0.9 * aRand) * (1.0 + 4.0 * vDeb) * uScale / zv, 1.0, mix(26.0, 44.0, vDeb)) * wet;",
         "}",
       ].join("\n"),
       fragmentShader: [
         "uniform vec3 uColor;",
         "uniform float uOpacity;",
         "varying float vAlpha;",
+        "varying float vDeb;",
+        "varying float vSpin;",
         "void main() {",
-        "  float d = length(gl_PointCoord - 0.5) * 2.0;",
+        "  vec2 q = gl_PointCoord - 0.5;",
+        "  float d = length(q) * 2.0;",
+        // a debris fleck is a tumbling torn sliver, not a mote
+        "  if (vDeb > 0.01) {",
+        "    float cs = cos(vSpin), sn = sin(vSpin);",
+        "    vec2 r = vec2(cs * q.x - sn * q.y, sn * q.x + cs * q.y);",
+        "    float sl = max(abs(r.x) * 2.0, abs(r.y) * (3.2 + 2.0 * sin(vSpin + r.x * 9.0)));",
+        "    d = mix(d, sl, vDeb);",
+        "  }",
         "  if (d > 1.0) discard;",
-        "  float a = pow(1.0 - d, 1.6) * vAlpha * uOpacity;",
+        "  float a = mix(pow(1.0 - d, 1.6), 0.9, vDeb) * vAlpha * uOpacity;",
         "  if (a < 0.003) discard;",
-        "  gl_FragColor = vec4(uColor, a);",
+        "  gl_FragColor = vec4(uColor * (1.0 - 0.6 * vDeb), a);",
         "}",
       ].join("\n"),
     });
@@ -722,20 +799,36 @@
     if (!snow || !snowU) return;
     // Downwelling light on the flakes: strongest in the first metres, and in a
     // shallow column (low k) where the sand throws light back up.
-    const lit = (0.30 + 0.70 * Math.exp(-depth / 18)) * (1 - 0.45 * kDepth);
-    const op = SNOW_ALPHA * lit * day * shown;
+    const mk = murkK;
+    let lit = (0.30 + 0.70 * Math.exp(-depth / 18)) * (1 - 0.45 * kDepth);
+    // in the mud the grit is lit by what little light gets in, but there is
+    // a LOT of it: dense, close, and never sparse
+    lit += ((0.22 + 0.78 * Math.exp(-depth / 1.5)) - lit) * mk;
+    const op = (SNOW_ALPHA * lit + (0.85 - SNOW_ALPHA * lit) * mk * (0.4 + 0.6 * lit)) * day * shown;
     snowU.uOpacity.value = op;
     snow.visible = op > 0.004;
     if (!snow.visible) return;
     // Sparser in the deep: draw a prefix of the (uniformly random) buffer.
-    snow.geometry.setDrawRange(0, Math.floor(SNOW_N * (0.35 + 0.65 * lit)));
-    const B = SNOW_BOX;
-    // Wrap the drift on the CPU so the shader never sees a large float.
-    snowU.uDrift.value.set((t * SNOW_DRIFT_X) % B, (-t * SNOW_SINK) % B, (t * SNOW_DRIFT_Z) % B);
+    snow.geometry.setDrawRange(0, Math.floor(SNOW_N * Math.min(1, 0.35 + 0.65 * lit + mk)));
+    const B = SNOW_BOX + (MURK_BOX - SNOW_BOX) * mk;
+    snowU.uBox.value = B;
+    snowU.uMurk.value = mk;
+    snowU.uNear.value = 1.1 - 0.85 * mk;
+    snowU.uJit.value = 0.22 + 0.30 * mk;
+    // The drift integrates: the slow clear-water fall, plus the flood's own
+    // current streaming the grit past (the swimmer is carried more slowly
+    // than the water, so the load goes by). Wrapped on the CPU so the shader
+    // never sees a large float.
+    const sdt = snowT >= 0 ? Math.max(0, Math.min(0.1, t - snowT)) : 0;
+    snowT = t;
+    snowOff.x = (snowOff.x + (SNOW_DRIFT_X + flowU * 0.55 * mk) * sdt) % 1000;
+    snowOff.y = (snowOff.y - SNOW_SINK * (1 - mk) * sdt + Math.sin(t * 0.9) * 0.25 * mk * sdt) % 1000;
+    snowOff.z = (snowOff.z + (SNOW_DRIFT_Z + flowV * 0.55 * mk) * sdt) % 1000;
+    snowU.uDrift.value.set(snowOff.x % B, snowOff.y % B, snowOff.z % B);
     snowU.uTime.value = t % 6283.1853;
     snowU.uSurfY.value = surfY;
     // Fade inside both the box (no wrap pop) and the medium's own range.
-    snowU.uFadeFar.value = Math.min(B * 0.5 - 0.6, Math.max(5, _sight.r0 * 0.55));
+    snowU.uFadeFar.value = Math.min(B * 0.5 - 0.6 + 0.3 * mk, Math.max(5 - 3.2 * mk, _sight.r0 * (0.55 + 2.0 * mk)));
     const cam = CBZ.camera, cvs = CBZ.renderer && CBZ.renderer.domElement;
     if (cam && cvs && cvs.height > 0) {
       snowU.uScale.value = cvs.height / (2 * Math.tan((cam.fov || 60) * Math.PI / 360));
@@ -745,10 +838,12 @@
     // light that reaches them. The DOM veil over the canvas grades it further.
     const mx = Math.max(tint.r, tint.g, tint.b, 1e-3);
     const bright = 0.55 + 0.45 * lit;
+    // the flood's grit is its own colour: tan-grey silt, dimmed by the light
+    const gb = (0.30 + 0.70 * lit) * mk;
     snowU.uColor.value.setRGB(
-      (0.96 * 0.65 + (tint.r / mx) * 0.35) * bright,
-      (0.94 * 0.65 + (tint.g / mx) * 0.35) * bright,
-      (0.86 * 0.65 + (tint.b / mx) * 0.35) * bright);
+      (0.96 * 0.65 + (tint.r / mx) * 0.35) * bright * (1 - mk) + 0.46 * gb,
+      (0.94 * 0.65 + (tint.g / mx) * 0.35) * bright * (1 - mk) + 0.41 * gb,
+      (0.86 * 0.65 + (tint.b / mx) * 0.35) * bright * (1 - mk) + 0.32 * gb);
   }
 
   function buildFx() {
@@ -981,7 +1076,7 @@
       // is a sheet, not a shape, which is the exact pale wash the note above
       // is about. The angle-shaped half of that experiment (the Snell window
       // in water_spec.js) kept the gain and cost nothing; this half did not.
-      ceilU.uStrength.value = 0.45 * dfade * dfade * day;
+      ceilU.uStrength.value = 0.45 * dfade * dfade * day * (1 - murkK);
       ceilU.uColor.value.setRGB(
         Math.min(1, 0.32 + tint.r * 1.0),
         Math.min(1, 0.54 + tint.g * 0.7),
@@ -989,7 +1084,7 @@
     }
     if (shafts && shaftMat) {
       const gfade = Math.max(0, 1 - depth / 30);
-      shaftMat.opacity = 0.30 * gfade * gfade * day;
+      shaftMat.opacity = 0.30 * gfade * gfade * day * (1 - murkK);
       const vis = shaftMat.opacity > 0.004;
       for (let i = 0; i < shafts.length; i++) {
         const m = shafts[i];
@@ -1318,12 +1413,16 @@
       }
       return;
     }
-    const d = Math.max(0, depth);
-    const lit = LIGHT_FLOOR + (1 - LIGHT_FLOOR) * Math.exp(-d / LIGHT_SCALE);
+    // a suspension eats the light: the e-folding falls to ~1 m and the floor
+    // (what the scattered light keeps of a shadow side) most of the way to black
+    const mk = murkK;
+    const d = Math.max(0, depth) + 0.6 * mk;
+    const lf = LIGHT_FLOOR * (1 - 0.6 * mk), af = AMB_FLOOR * (1 - 0.5 * mk);
+    const lit = lf + (1 - lf) * Math.exp(-d / (LIGHT_SCALE / (1 + 5 * mk)));
     // The scattered half arrives over every longer slant there is, so it is
     // the one the water eats first. Its floor is what keeps a shadow side
     // dark-blue rather than black.
-    const litA = AMB_FLOOR + (1 - AMB_FLOOR) * Math.exp(-d / AMB_SCALE);
+    const litA = af + (1 - af) * Math.exp(-d / (AMB_SCALE / (1 + 5 * mk)));
     const f = 1 - amount * (1 - lit);
     sun.intensity = baseSun * f; litSun = sun.intensity;
     if (hemi) { hemi.intensity = baseHemi * (1 - amount * (1 - litA)); litHemi = hemi.intensity; }
@@ -1740,6 +1839,13 @@
     muffle += (target - muffle) * Math.min(1, (dt || 0.016) * 3.6);
     if (muffle < 0.004) muffle = 0;
 
+    // what is in the water at the eye, and how fast it is going
+    readMurk(gone ? -1 : depth, dt);
+    torrent = shown * smoothstep(0.7, 4.0, flowSpd);
+    const hearing = !!(g && g.state === "playing") && CFG.WATER_MUFFLE !== false;
+    if (CBZ.audioUnderwater) CBZ.audioUnderwater(hearing ? muffle : 0, murkK);
+    if (CBZ.torrentVoice) CBZ.torrentVoice(hearing ? torrent : 0, hearing ? torrent * (0.35 + 0.65 * murkK) : 0);
+
     // THE GROUND MUST TAKE THE WATER'S COLOUR. world/terrain_overhaul.js dials
     // fog down to 12% on the backdrop/shelf tiles so distant ranges recede
     // properly in air; underwater that left the seabed shaded as if it were a
@@ -1792,12 +1898,25 @@
        nothing in steady state — where easing them in would have made the walk
        run on every frame of the transition for no visible gain, since the fog
        RANGE itself switches instantly at the surface crossing anyway. */
+    /* THE SUSPENSION (see THE FLOOD IS NOT THE SEA): the colour, the range
+       and the grade all go to the mud by the same murkK, after the clear-water
+       solve, so a plume's edge eases between the two. */
+    if (murkK > 0) {
+      const dl = day * (0.10 + 0.90 * Math.exp(-Math.max(0, depth) / 1.3));
+      _tint.r += (MURK_C.r * dl - _tint.r) * murkK;
+      _tint.g += (MURK_C.g * dl - _tint.g) * murkK;
+      _tint.b += (MURK_C.b * dl - _tint.b) * murkK;
+      const r = MURK_R_THIN + (MURK_R_THICK - MURK_R_THIN) * smoothstep(0.3, 0.95, murk);
+      _sight.r0 += (r - _sight.r0) * murkK;
+      _sight.aniso *= 1 - murkK; _sight.sil *= 1 - murkK;
+      kDepth += (1 - kDepth) * 0.6 * murkK;
+    }
     if (CBZ.setFogAniso) CBZ.setFogAniso(submerged ? _sight.aniso : 0, submerged ? _sight.sil : 0);
     // SURFACE-FROM-BELOW (ref 5): looking up toward the sun, the ceiling is
     // bright and rippling; looking down or out, it is not. One dot product,
     // faded out by the eye's own depth and by the day.
     const el = clamp01(camElevation());
-    glow = Math.pow(el, 1.35) * (1 - d01 * 0.85) * day * (1 - inland * 0.6);
+    glow = Math.pow(el, 1.35) * (1 - d01 * 0.85) * day * (1 - inland * 0.6) * (1 - murkK);
 
     if (overlay) {
       const vis = submerged || shown > 0.002;
@@ -1839,8 +1958,11 @@
            The ramp's SHALLOW end barely moves (k = 0.1 gives 0.35 against the
            old 0.43), because the shallows were never the problem: this only
            reshapes the deep end, where the sheet had reached 96%. */
-        overlay.style.opacity = String(Math.min(0.45, 0.30 + kDepth * 0.46) * shown);
-        if (rays) rays.style.opacity = String(Math.max(0, 0.34 - d01 * 0.34) * shown);
+        // in the mud the veil IS most of the picture: there is nothing past a
+        // metre to keep contrast for
+        const veil = Math.min(0.45, 0.30 + kDepth * 0.46);
+        overlay.style.opacity = String((veil + (0.80 - veil) * murkK) * shown);
+        if (rays) rays.style.opacity = String(Math.max(0, 0.34 - d01 * 0.34) * shown * (1 - murkK));
         paintOverlay(depth, kDepth);
       }
     }
@@ -1908,7 +2030,7 @@
        The lake divisor is gone from here too: murk is now inside `c`, where it
        belongs, so it shortens the range through the physics instead of through
        a post-multiply. */
-    myFog.far = _sight.r0 * q;
+    myFog.far = _sight.r0 * (q + (1 - q) * murkK);
     /* THE FIRST FEW METRES OF WATER ARE GLASS (2026-08-25). `near` was a flat
        0.4 m, which means smoothstep started eating a body the moment it left
        the lens: at the phone's own tier (far ~17 m) the ridden shark four to
@@ -2089,9 +2211,15 @@
   // onAlways(50) and there is no later writer, so hooking just past it means
   // we always see its finished result and can never be clobbered mid-frame.
   let camFov = 0, sway = 0;
+  let wobApplied = false;
+  const _wobE = new THREE.Euler(0, 0, 0, "YXZ");
+  const _wobQ = new THREE.Quaternion(), _wobInv = new THREE.Quaternion(), _wobAfter = new THREE.Quaternion();
   CBZ.onAlways(50.5, function (dt) {
     const cam = CBZ.camera;
     if (!cam) return;
+    // last frame's tumble comes back off first if nothing rewrote the lens
+    if (wobApplied && cam.quaternion.equals(_wobAfter)) cam.quaternion.multiply(_wobInv);
+    wobApplied = false;
     // Our in-world FX live on layer 2. simulation.js's overview takes the
     // camera's mask exclusively (layers.set(1)); only re-enable ours while the
     // camera is in its normal mask, so we never break that.
@@ -2126,6 +2254,30 @@
     cam.position.x += Math.sin(sway * 0.53) * 0.035 * k;
     cam.position.y += Math.sin(sway * 0.79 + 1.1) * 0.045 * k;
     cam.position.z += Math.cos(sway * 0.61 + 2.3) * 0.035 * k;
+    /* TUMBLED. In fast water the eye is thrown about: a lurch along the
+       current, a heave, and a roll and pitch that never settle. Sums of
+       incommensurate sines (no allocation, no RNG draw). camera.js rewrites
+       the orientation every frame on every rig that matters; for one that
+       does not, last frame's tilt is taken back off first, so it can never
+       wind up. */
+    const tq = torrent * k;
+    if (tq > 0.01) {
+      const s = sway;
+      const n1 = Math.sin(s * 1.73) * 0.55 + Math.sin(s * 3.11 + 1.7) * 0.30 + Math.sin(s * 5.9 + 0.4) * 0.15;
+      const n2 = Math.sin(s * 2.07 + 2.2) * 0.55 + Math.sin(s * 3.67 + 0.3) * 0.30 + Math.sin(s * 6.3 + 2.9) * 0.15;
+      const n3 = Math.sin(s * 1.31 + 4.1) * 0.6 + Math.sin(s * 4.3 + 1.1) * 0.4;
+      const fl = flowSpd > 1e-3 ? 1 / flowSpd : 0;
+      const lurch = (0.5 + 0.5 * n3) * 0.16 * tq;
+      cam.position.x += flowU * fl * lurch + n2 * 0.06 * tq;
+      cam.position.y += n1 * 0.09 * tq;
+      cam.position.z += flowV * fl * lurch - n1 * 0.06 * tq;
+      _wobE.set(n2 * 0.07 * tq, n3 * 0.05 * tq, n1 * 0.16 * tq);
+      _wobQ.setFromEuler(_wobE);
+      cam.quaternion.multiply(_wobQ);
+      _wobInv.copy(_wobQ).invert();
+      _wobAfter.copy(cam.quaternion);
+      wobApplied = true;
+    }
   });
 
   // ============================================================
@@ -2172,4 +2324,12 @@
   // How muffled the mix currently is (0..1) — published so a future audio
   // system can read the same ramp instead of re-deriving it.
   CBZ.cityWaterMuffle = function () { return muffle; };
+  // What is in the water at the eye (THE FLOOD IS NOT THE SEA): the eased
+  // turbidity, its grade weight, the current, and how hard it is throwing you.
+  CBZ.waterMurk = function () {
+    return { murk: +murk.toFixed(3), k: +murkK.toFixed(3), flowSpeed: +flowSpd.toFixed(2),
+      torrent: +torrent.toFixed(3), range: +_sight.r0.toFixed(2) };
+  };
+  // for tools/shader checks: the grit cloud's material, built on demand
+  CBZ._uwSnowMaterial = function () { if (!snow) buildSnow(); return snow.material; };
 })();

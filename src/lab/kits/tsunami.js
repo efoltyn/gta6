@@ -48,7 +48,7 @@
 CBZ.lab.kit("tsunami", {
   about: "a coast, a slope, a street of buildings and cars: the tsunami's run-up, wreckage and backwash, measured",
   uses: ["building", "car"],
-  files: ["src/vendor/BufferGeometryUtils.js", "src/world/water_spec.js", "src/world/tsunami_runup.js", "src/world/tsunami_debris.js", "src/world/tsunami_scene.js"],
+  files: ["src/vendor/BufferGeometryUtils.js", "src/world/water_spec.js", "src/world/tsunami_runup.js", "src/world/tsunami_silt.js", "src/world/tsunami_debris.js", "src/world/tsunami_scene.js"],
   params: { wave: 6, draw: 5, hold: 12, style: "brick", sea: 1 },
   depth: 0,
   duration: 70,

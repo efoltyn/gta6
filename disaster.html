@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 430
+     Natural Disaster Survival, standing alone: index.html minus the 428
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -691,7 +691,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/brain.js?v=dismiss1014"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=twister1014"></script>
+<script src="src/systems/audio.js?v=silt1020"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
@@ -1049,7 +1049,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=ww1020"></script>
+<script src="src/systems/disasters.js?v=silt1020"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=feel1020"></script>
@@ -1078,9 +1078,11 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=ww1020"></script>
+<script src="src/world/water_spec.js?v=silt1020"></script>
 <!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_runup.js?v=tsudir1020"></script>
+<!-- where the water is brown: the silt the run-up scoured off the land, carried out to sea by the backwash, spread and settled (the sea shader's turbidity mask), and CBZ.waterTurbidAt, the one turbidity + current query the underwater medium and the swimmer read -->
+<script src="src/world/tsunami_silt.js?v=silt1020"></script>
 <!-- the bore on the land and its white water: wall pieces on the run-up's own fronts, steps and cascades, and lit foam / mist volume off them (two particle pools, depth-sorted) -->
 <script src="src/world/tsunami_whitewater.js?v=ww1020"></script>
 <script src="src/world/tsunami_debris.js?v=tsuowns1020"></script>
@@ -1577,7 +1579,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/fitout_plans.js?v=loose1013"></script>
 <script src="src/city/fitout_work.js?v=loose1013"></script>
 <script src="src/city/fitout_gang.js?v=loose1013"></script>
-<script src="src/city/swim.js?v=beach1020"></script>
+<script src="src/city/swim.js?v=silt1020"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
      world/water_spec.js — because everything that cares about water in this
      game already reads sea level. It authors no water mesh, no flood damage
@@ -2211,6 +2213,7 @@ document.body.appendChild(b);}}catch(e){}})();
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
+<script src="src/world/water_underwater.js?v=silt1020"></script>
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
 <!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
      over, and a hull that goes over stays over — inverted, keel up, its people
@@ -2237,6 +2240,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (publishes the bathymetry pair); it retries on the update bus if either is
      still missing, so a future reorder degrades to a late install rather than a
      silent no-op. Revert with ?cfg_SURV_SHARED_WATER_FX=0. -->
+<script src="src/world/water_survival.js?v=sweep0929"></script>
 
 <!-- WORLD DRESSING (5 layers) — the "lived-in" pass: street furniture, power
      poles + catenary-sagging wires, road wear/paint/puddles, and rooftop and
