@@ -264,6 +264,7 @@
     // same mode gate as collide(): stamped city colliders are phantom walls
     // in the prison/survival coordinate space, so queries skip them there.
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     const gx0 = Math.floor((x - radius) / COL_CELL), gx1 = Math.floor((x + radius) / COL_CELL);
     const gz0 = Math.floor((z - radius) / COL_CELL), gz1 = Math.floor((z + radius) / COL_CELL);
     for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
@@ -271,7 +272,7 @@
       if (!bucket) continue;
       for (let i = 0; i < bucket.length; i++) {
         const c = bucket[i];
-        if (c._city && !cityOn) continue;
+        if ((c._city && !cityOn) || (c._prison && !prisonOn)) continue;
         if (c._qSeen === qid) continue;
         c._qSeen = qid;
         out.push(c);
@@ -298,6 +299,7 @@
     gridFresh();
     pad = pad || 0;
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     const minX = Math.min(ax, bx) - pad, maxX = Math.max(ax, bx) + pad;
     const minZ = Math.min(az, bz) - pad, maxZ = Math.max(az, bz) + pad;
     const gx0 = Math.floor(minX / COL_CELL), gx1 = Math.floor(maxX / COL_CELL);
@@ -307,7 +309,7 @@
       if (!bucket) continue;
       for (let i = 0; i < bucket.length; i++) {
         const c = bucket[i];
-        if (c._city && !cityOn) continue;
+        if ((c._city && !cityOn) || (c._prison && !prisonOn)) continue;
         if (c.minX == null) continue;
         // slab reject against the segment's own bounding box first
         if (c.maxX < minX || c.minX > maxX || c.maxZ < minZ || c.minZ > maxZ) continue;
@@ -520,6 +522,7 @@
     // city mode: the airport/military rects overlap the prison's coordinate
     // space, and their hidden geometry must not wall off jail rooms.
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     const rr = radius > PEN_EPS ? (radius - PEN_EPS) * (radius - PEN_EPS) : 0;
     // how far the body may be pushed before its candidate set is stale: the
     // rest of COL_PAD for a person (so the gather stays ONE bucket), a flat
@@ -547,7 +550,7 @@
         const nCol = cols.length;
         for (let i = 0, N = nCol + carN; i < N; i++) {
           const c = i < nCol ? cols[i] : _carNear[i - nCol];
-          if (c._city && !cityOn) continue;
+          if ((c._city && !cityOn) || (c._prison && !prisonOn)) continue;
           // body clears this box. An object (noStep) is measured from the
           // body's real feet: the step line does not stride over furniture.
           if (c.y0 != null && (headY <= c.y0 || (c.noStep ? feetY - STEP_SOLID : feetY) >= c.y1)) continue;
@@ -780,6 +783,7 @@
     if (!(len2 > 1e-12)) return false;
     gridFresh();
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     const ext = radius > COL_PAD ? radius - COL_PAD : 0;
     const minX = (ax < bx ? ax : bx) - radius, maxX = (ax > bx ? ax : bx) + radius;
     const minZ = (az < bz ? az : bz) - radius, maxZ = (az > bz ? az : bz) + radius;
@@ -794,7 +798,7 @@
         const c = bucket[i];
         if (c._qSeen === qid) continue;
         c._qSeen = qid;
-        if (c._city && !cityOn) continue;
+        if ((c._city && !cityOn) || (c._prison && !prisonOn)) continue;
         if (c.y0 != null && (headY <= c.y0 || (c.noStep ? feetY - STEP_SOLID : feetY) >= c.y1)) continue;
         if (!(c.maxX >= minX && c.minX <= maxX && c.maxZ >= minZ && c.minZ <= maxZ)) continue;
         if (sweepBox(ax, az, vx, vz, radius, c, best)) { best = SW.t; bnx = SW.nx; bnz = SW.nz; bc = c; }
@@ -894,6 +898,7 @@
     const noCam = !!opts.noCam, skip = opts.skip || null, filter = opts.filter || null;
     const y0d = opts.y0 != null ? opts.y0 : -1e9, y1d = opts.y1 != null ? opts.y1 : 1e9;
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     const qid = ++colQueryId;
     let best = maxT, bc = null, bax = -1, bsg = 0, bori = false, bco = 1, bsi = 0, bIn = false;
     // DDA over the 8 m cells the ray's XZ shadow crosses
@@ -911,7 +916,7 @@
           const c = bucket[i];
           if (c._qSeen === qid) continue;
           c._qSeen = qid;
-          if (c._city && !cityOn) continue;
+          if ((c._city && !cityOn) || (c._prison && !prisonOn)) continue;
           if (c === skip || (noCam && c.noCam) || c.minX == null) continue;
           const t = rayBox3(c, ox, oy, oz, dx, dy, dz, best, y0d, y1d);
           if (t === -1) continue;
@@ -2429,12 +2434,13 @@
     const b = colBuckets.get(colKey(Math.floor(x / COL_CELL), Math.floor(z / COL_CELL)));
     if (!b) return -Infinity;
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     const hi = feetY + STEP_UP, onTop = feetY + ON_TOP_EPS, base = feetY + 0.1;
     let best = -Infinity;
     for (let i = 0; i < b.length; i++) {
       const c = b[i];
       if (c.y0 == null || c.y0 > base || c.y1 <= best || c.y1 > (c.noStep ? onTop : hi)) continue;
-      if (c._city && !cityOn) continue;
+      if ((c._city && !cityOn) || (c._prison && !prisonOn)) continue;
       if (x < c.minX || x > c.maxX || z < c.minZ || z > c.maxZ) continue;
       if (c.yaw ? (c.hw < STAND_MIN / 2 || c.hd < STAND_MIN / 2)
         : (c.maxX - c.minX < STAND_MIN || c.maxZ - c.minZ < STAND_MIN)) continue;   // a rail: blocker, never floor

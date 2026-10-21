@@ -101,6 +101,27 @@
   // The frame lists are ordered by registration sequence instead (loop.js).
   const NOT_BUSES = { updaters: 1, always: 1 };
 
+  /* THE PRISON'S SOLIDS ARE THE PRISON'S.
+
+     The compound is built at the origin and HIDDEN in every other game
+     (systems/state.js), but its colliders stayed solid there. Hundreds are
+     boxes whose meshes were batched away or are not drawn at all (corridor
+     walls, the outer fence's 158 m runs, the cell-block shells):
+     tools/island-ghost-colliders.mjs counted 379 invisible walls from the
+     prison in a disaster match, and the same boxes stand over Gang City's
+     airport, which shares those coordinates (city/mode.js says as much
+     about the city's own boxes). Every record a prison builder pushes is
+     stamped _prison here, and every reader that already skips a `_city` box
+     outside the city (physics.js collide/queries/sweeps/step tops, the nav
+     grid, the camera, verbs, the gun game's cover scans) skips a `_prison`
+     box while CBZ.prisonRoot is hidden. A gate, not a removal: the prison's
+     own doors re-add their leaves every frame they are shut, so taking the
+     records out of the list would not keep them out. */
+  function stampOwn(arr, from, to) {
+    if (!arr) return;
+    for (let i = from; i < to; i++) { const c = arr[i]; if (c && typeof c === "object") c._prison = true; }
+  }
+
   /* EAGER UNLESS THE PAGE STARTS IN GANG CITY. config.js has already read the
      start mode (?mode=, a page's START_MODE, the menu's remembered game). A
      page that starts on the jail, the title or any other game builds each
@@ -112,7 +133,10 @@
   CBZ.definePrison = function (name, fn) {
     if (EAGER) {
       const t0 = performance.now();
+      const c0 = CBZ.colliders ? CBZ.colliders.length : 0, p0 = CBZ.platforms ? CBZ.platforms.length : 0;
       try { fn(); } catch (e) { report.errors.push(name + ": " + (e && e.message)); console.error("[prison] " + name, e); }
+      stampOwn(CBZ.colliders, c0, CBZ.colliders ? CBZ.colliders.length : 0);
+      stampOwn(CBZ.platforms, p0, CBZ.platforms ? CBZ.platforms.length : 0);
       report.builders.push({ name: String(name), ms: +(performance.now() - t0).toFixed(2) });
       built = true; report.built = true;
       return;
@@ -203,6 +227,7 @@
     for (let i = 0; i < buses.length; i++) {
       const arr = buses[i], got = arr.length - keep[i];
       if (got > 0) { inserted.set(arr, (inserted.get(arr) || 0) + got); gained.set(arr, got); }
+      if (got > 0 && (arr === CBZ.colliders || arr === CBZ.platforms)) stampOwn(arr, keep[i], arr.length);
       if (lifted[i] && lifted[i].length) appendAll(arr, lifted[i]);
     }
     q.gained = gained;
