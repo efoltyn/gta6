@@ -681,7 +681,10 @@
           // THE ONE FLOOD RESIDUE (world/water_spec.js cbzFloodResidue):
           // thick where the water stood deep, the wrack at the reach, combed
           // seaward by the drain, wet-dark drying to a pale crust
-          "  float thick = clamp(0.12 + m.b * 0.95, 0.0, 1.0);",
+          // m.b IS the deposit (mudTick: peak depth x the load the water
+          // carried there). No floor: water that only wetted a place leaves
+          // it wet-dark for a while and then nothing.
+          "  float thick = clamp(m.b * 1.05, 0.0, 1.0);",
           "  float edge = 1.0 - smoothstep(0.04, 0.42, reach);",
           "  float rsG = 0.0;",
           "  vec4 rs = cbzFloodResidue(p, thick, 1.0 - wet, edge, uDrain, rsG);",
@@ -713,14 +716,56 @@
       mesh, tex, data, MU, N, ox, oz, span, gnd, land,
       lvl: new Float32Array(NN).fill(-99), dep: new Float32Array(NN), wet: new Float32Array(NN),
       lb: new Uint8Array(NN), any: false,
+      dirOn: false, ldx: 0, ldz: 0, lcx: cx, lcz: cz, sCoast: -R, lLen: Math.max(30, R * 0.68),
     };
   }
   function levelByte(l) { return Math.max(1, Math.min(255, Math.round(((l + 2) / 25) * 255))); }
 
+  /* WHAT THE WATER DROPS, AND WHERE (2026-10-20). Owner, on the storyboard's
+     aftermath: the whole island under one grey-brown film, the lee and the
+     high ground included. The deposit was `0.12 + peakDepth/3`: a 12% film
+     on every cell the water so much as wetted, whatever wetted it, which
+     dried to the same pale grey crust everywhere. A tsunami deposit is the
+     load the wave scoured off the shelf and the facing shore, and it falls
+     out as the flow slows: thickest just inside the facing coast and in the
+     deep lows there, thinning inland, a trace on the far side, and nothing
+     where the water was only a sheet. So the deposit is the peak depth (the
+     run-up field's, through depthAt) times the load still in suspension at
+     that distance inland along the wave's travel. A flash flood has no
+     single front: its load is everywhere. */
+  function mudLoad(M, x, z) {
+    if (!M.dirOn) return 1;
+    const ds = Math.max(0, (x - M.lcx) * M.ldx + (z - M.lcz) * M.ldz - M.sCoast);
+    return 0.12 + 0.88 * Math.exp(-ds / M.lLen);
+  }
+  function mudDeposit(dep, load) {
+    // a sheet under ~15 cm leaves a stain that dries off; metres of standing
+    // sea leave the full pan
+    const d = clamp01((dep - 0.15) / 2.6);
+    return clamp01(Math.pow(d, 0.8) * load);
+  }
   // One 5 Hz pass over the cells. `query` = the water is up somewhere, so ask it.
   function mudTick(dt, query) {
     const M = S.mud, N = M.N, NN = N * N;
     let changed = false, stillWet = false;
+    if (query && tsu.active) {
+      // the wave's bearing and the facing coast it scoured, along that bearing
+      if (!M.dirOn || M.ldx !== tsu.dx || M.ldz !== tsu.dz) {
+        M.dirOn = true; M.ldx = tsu.dx; M.ldz = tsu.dz; M.lcx = tsu.cx; M.lcz = tsu.cz;
+        let sMin = 1e9, sMax = -1e9;
+        const step0 = M.span / N;
+        for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+          if (!M.land[j * N + i]) continue;
+          const x = M.ox + (i + 0.5) * step0, z = M.oz + (j + 0.5) * step0;
+          const sv = (x - M.lcx) * M.ldx + (z - M.lcz) * M.ldz;
+          if (sv < sMin) sMin = sv; if (sv > sMax) sMax = sv;
+        }
+        if (sMin > sMax) { sMin = -A.radius; sMax = A.radius; }
+        M.sCoast = sMin;
+        // e-folding: a third of the island's crossing
+        M.lLen = Math.max(30, (sMax - sMin) * 0.34);
+      }
+    } else if (query && flood.active) M.dirOn = false;
     if (query) {
       const step = M.span / N;
       for (let j = 0; j < N; j++) {
@@ -751,7 +796,10 @@
         stillWet = true; changed = true;
       }
       data[k * 4 + 1] = Math.round(M.wet[k] * 255);
-      data[k * 4 + 2] = Math.round(clamp01(M.dep[k] / 3) * 255);
+      if (M.dep[k] > 0) {
+        const j = (k / N) | 0, i = k - j * N, step = M.span / N;
+        data[k * 4 + 2] = Math.round(mudDeposit(M.dep[k], mudLoad(M, M.ox + (i + 0.5) * step, M.oz + (j + 0.5) * step)) * 255);
+      } else data[k * 4 + 2] = 0;
       data[k * 4 + 3] = 255;
     }
     if (changed) {
@@ -975,6 +1023,7 @@
     if (!S) return;
     const M = S.mud;
     M.lvl.fill(-99); M.dep.fill(0); M.wet.fill(0); M.lb.fill(0); M.data.fill(0);
+    M.dirOn = false;
     M.any = false; M.tex.needsUpdate = true; M.mesh.visible = false;
     clearStain();
   }
