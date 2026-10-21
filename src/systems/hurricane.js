@@ -366,7 +366,8 @@
        fling(car, dirx, dirz, force, up) the world's own car tumble
        release(collider)    take a collider out of the world
        actors(fn)           visit every body (for real debris hits)
-       hit(actor, {dirx, dirz, speed, kind})  a piece struck a body
+       hit(actor, {dirx, dirz, speed, mass, energy, x, y, z})  a real piece
+                            crossed a body's capsule (speed relative, energy J)
        hurtLine(x0,z0,x1,z1, width, cause)    a falling tree's footprint
      ============================================================ */
   let WD = null;
@@ -464,25 +465,75 @@
     const D = CBZ.debris; if (!D || !D.medium) return;
     try { D.medium(OWNER, on ? fluid : null); } catch (e) {}
   }
-  /* real hits: a piece of the storm's own moving fast through a body.
-     Checked at 10 Hz on pieces above 14 m/s — the stochastic strike in the
-     def stays as the material you never see. */
-  let hitClock = 0;
+  /* REAL HITS ONLY (owner: "it says I'm getting killed by hurricane debris,
+     and I'm not even hit by the debris"). The def used to roll a hidden
+     "debris strike" on everyone standing in eyewall wind and bill it to
+     debris; that roll is gone (disasters.js). The ONLY debris wound now is a
+     piece of the storm's own (a roof sheet, a plank, a sign panel in
+     systems/debris.js) whose path this frame actually crosses a body: the
+     segment it swept since last frame, tested against the body's capsule
+     (feet to crown, shoulder radius plus the piece's own thickness). The
+     wound is the piece's kinetic energy at the speed it met you RELATIVE to
+     you, so a palm frond stings, a plank hurts and a steel roof sheet at
+     eyewall speed kills. Every frame, not 10 Hz: at 30 m/s a piece crosses
+     three metres in a tenth of a second, which a point test simply missed
+     or, worse, billed from a metre away. */
+  const CAP_R = 0.34, CAP_LO = 0.1, CAP_HI = 1.8;
+  const _hitO = { dirx: 0, dirz: 0, speed: 0, mass: 0, energy: 0, x: 0, y: 0, z: 0 };
+  // squared distance between segment P0-P1 and the vertical segment
+  // (ax, y0..y1, az); writes the closest point on P0-P1 as a parameter
+  let _segU = 0;
+  function segCapsuleD2(x0, y0, z0, x1, y1, z1, ax, ay0, ay1, az) {
+    // closest approach in XZ along the swept segment, then the height there
+    const dx = x1 - x0, dz = z1 - z0, L2 = dx * dx + dz * dz;
+    let u = L2 > 1e-8 ? ((ax - x0) * dx + (az - z0) * dz) / L2 : 0;
+    u = u < 0 ? 0 : u > 1 ? 1 : u;
+    _segU = u;
+    const px = x0 + dx * u, pz = z0 + dz * u, py = y0 + (y1 - y0) * u;
+    const ex = px - ax, ez = pz - az;
+    const ey = py < ay0 ? ay0 - py : py > ay1 ? py - ay1 : 0;
+    return ex * ex + ez * ez + ey * ey;
+  }
   function debrisHits(dt) {
     const D = CBZ.debris;
     if (!D || !D.forEachLive || !WD || !WD.actors || !WD.hit) return;
-    hitClock += dt; if (hitClock < 0.1) return; hitClock = 0;
+    const P = CBZ.player;
     D.forEachLive(function (b) {
-      if (b.owner !== OWNER || b._hurHit || b.asleep) return;
-      const sp = Math.hypot(b.v.x, b.v.z);
-      if (sp < 14) return;
+      if (b.owner !== OWNER || b.asleep || !b.mesh) return;
       const p = b.mesh.position;
+      // where it was when we last looked (a new piece starts here)
+      if (b._hx == null) { b._hx = p.x; b._hy = p.y; b._hz = p.z; return; }
+      const x0 = b._hx, y0 = b._hy, z0 = b._hz;
+      b._hx = p.x; b._hy = p.y; b._hz = p.z;
+      if (b._hurHit) return;
+      const sp = Math.hypot(b.v.x, b.v.y, b.v.z);
+      if (sp < 8) return;                        // a piece sliding along the ground hurts nobody
+      const thick = Math.min(0.25, (b.radius || 0.2) * 0.5);
+      const R = CAP_R + thick, R2 = R * R;
+      const minX = Math.min(x0, p.x) - R - 0.1, maxX = Math.max(x0, p.x) + R + 0.1;
+      const minZ = Math.min(z0, p.z) - R - 0.1, maxZ = Math.max(z0, p.z) + R + 0.1;
       WD.actors(function (a) {
-        if (b._hurHit || a.dead) return;
-        const dx = a.pos.x - p.x, dz = a.pos.z - p.z;
-        if (dx * dx + dz * dz > 0.9 || p.y < a.pos.y - 0.2 || p.y > a.pos.y + 2.0) return;
+        if (b._hurHit || a.dead || !a.pos) return;
+        const ax = a.pos.x, az = a.pos.z;
+        if (ax < minX || ax > maxX || az < minZ || az > maxZ) return;
+        const ay = a.pos.y || 0;
+        if (segCapsuleD2(x0, y0, z0, p.x, p.y, p.z, ax, ay + CAP_LO, ay + CAP_HI, az) > R2) return;
+        // relative speed: the piece's velocity less the body's own
+        let avx = 0, avz = 0;
+        if (a.isPlayer && P) { avx = P.moveX || 0; avz = P.moveZ || 0; }
+        else if (a.vel) { avx = a.vel.x || 0; avz = a.vel.z || 0; }
+        const rvx = b.v.x - avx, rvy = b.v.y, rvz = b.v.z - avz;
+        const rel = Math.hypot(rvx, rvy, rvz);
+        const mass = Math.max(0.05, b.mass || 1);
+        const energy = 0.5 * mass * rel * rel;     // joules
+        if (rel < 8 || energy < 25) return;      // it touched you; it did not hurt you
         b._hurHit = 1; town.debrisHits++;
-        try { WD.hit(a, { dirx: b.v.x / sp, dirz: b.v.z / sp, speed: sp, kind: b.kind === "metal" ? 0 : 4 }); } catch (e) {}
+        const hz = Math.hypot(rvx, rvz) || 1;
+        _hitO.dirx = rvx / hz; _hitO.dirz = rvz / hz; _hitO.speed = rel; _hitO.mass = mass; _hitO.energy = energy;
+        _hitO.x = x0 + (p.x - x0) * _segU; _hitO.y = y0 + (p.y - y0) * _segU; _hitO.z = z0 + (p.z - z0) * _segU;
+        try { WD.hit(a, _hitO); } catch (e) {}
+        // the piece gave most of its speed to the body it struck
+        b.v.multiplyScalar(0.35);
       });
     });
   }

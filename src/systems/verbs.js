@@ -3021,7 +3021,11 @@
       if (CBZ.worldActors) list = CBZ.worldActors(_cand);
       else list = CBZ.bots || [];
     }
-    let best = null, bd = r;
+    // opts.look: the man you LOOK at wins, not the one at your elbow — the
+    // distance is weighted by how far off your view line he stands, so a man
+    // dead ahead at 4 m beats one at 2 m off your shoulder
+    const look = !!opts.look;
+    let best = null, bd = look ? Infinity : r;
     for (let i = 0; i < list.length; i++) {
       const t = list[i];
       if (!t || t === a || isPlayerA(t) || t.dead) continue;
@@ -3032,13 +3036,16 @@
       if (opts.down === true && !dn) continue;
       if (opts.down !== true && !opts.anyDown && dn) continue;
       const dx = T.pos.x - A.pos.x, dz = T.pos.z - A.pos.z, d = Math.hypot(dx, dz);
-      if (d > bd || d < 0.05) continue;
+      if (d > r || d < 0.05) continue;
       if (Math.abs(T.pos.y - A.pos.y) > 1.2) continue;
-      if ((dx / d) * dx0 + (dz / d) * dz0 < cone) continue;
+      const dot = (dx / d) * dx0 + (dz / d) * dz0;
+      if (dot < cone) continue;
+      const w = look ? d * (1 + 6 * (1 - dot)) : d;
+      if (w > bd) continue;
       // no verbs through a wall
       _wbY = A.pos.y || 0; _wbX = A.pos.x; _wbZ = A.pos.z; _wbDX = dx / d; _wbDZ = dz / d; _wbL = d;
       if (CBZ.segmentHitsCollider && CBZ.segmentHitsCollider(A.pos.x, A.pos.z, T.pos.x, T.pos.z, 0, wallBetween)) continue;
-      bd = d; best = t;
+      bd = w; best = t;
     }
     return best;
   }

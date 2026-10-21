@@ -117,6 +117,9 @@
   cursor: pointer;
 }
 .svbtn:active{ background: rgba(127,231,255,.28); }
+/* a verb that needs him at your fist while he is still a few steps off */
+.svbtn.off{ opacity: .42; border-color: rgba(127,231,255,.22); }
+.svbtn.off:active{ background: rgba(10,20,32,.68); }
 /* the prison's label + status chip inside that capsule. The chip is a
    price or a meter word ("25", "armed"); the authored sentence stays on
    the button as its aria-label, read out rather than printed. */

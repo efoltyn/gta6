@@ -70,12 +70,26 @@
         rows: def.rows || [], note: def.note || "",
         touchRows: def.touchRows || null,
         touchNote: def.touchNote == null ? null : def.touchNote,
+        // anyKey: ANY key (or a click, or on touch the first tap) closes it,
+        // and the press still does its job (W walks the moment the card goes)
+        anyKey: !!def.anyKey,
       };
     },
     has: function (id) { return !!defs[id]; },
     ids: function () { return Object.keys(defs); },
     show: function (id) { if (defs[id]) { openId = id; render(); } },
-    hide: function () { if (openId) { seen[openId] = true; openId = ""; render(); } },
+    hide: function () {
+      if (!openId) return;
+      const d = defs[openId];
+      seen[openId] = true; openId = "";
+      if (d && d.anyKey && el && el.style.display !== "none") {
+        // it fades rather than blinks: the first step is already being taken
+        el.classList.add("out");
+        setTimeout(function () { el.classList.remove("out"); if (!openId) render(); }, 320);
+        return;
+      }
+      render();
+    },
     /* CLOSE IT WITHOUT COUNTING IT AS READ. `hide()` means "I have read this,
        never show me again" — right for a dismissing keypress, wrong for the
        game taking the card away because something started. Boarding a car on a
@@ -99,6 +113,13 @@
      matters: the parachute outranks the aircraft you just left. */
   function context() {
     const g = CBZ.game, P = CBZ.player;
+    // THE DISASTER ISLAND has one card, on foot, at the start of a match
+    // (owner: "the controls should be shown until the player presses a key")
+    if (g && g.mode === "survival") {
+      if (g.state !== "playing" || !P || P.dead || P.driving || P._aircraft) return "";
+      if (CBZ.surv && CBZ.surv.spectating) return "";
+      return "island";
+    }
     if (!g || g.mode !== "city" || !P || P.dead) return "";
     if (CBZ.cityChuteState && CBZ.cityChuteState()) return "chute";
     const craft = P._aircraft;
@@ -144,6 +165,10 @@
       "#cCtrl .dismiss{margin-top:13px;padding-top:11px;text-align:center;color:#8fa3b8;",
       "font-size:12.5px;border-top:1px solid rgba(255,255,255,.10)}",
       "body.touch #cCtrl{font-size:15px}",
+      "#cCtrl{transition:opacity .3s ease}",
+      "#cCtrl.out{opacity:0;pointer-events:none}",
+      // the island's card: a quiet sheet, not a modal; the world shows round it
+      "#cCtrl.any{background:rgba(10,14,20,.8);pointer-events:none}",
     ].join("");
     document.head.appendChild(css);
     el = document.createElement("div");
@@ -197,9 +222,12 @@
       rows += '<tr><td class="k">' + keys(r[0]) + '</td><td class="d">' + esc(r[1]) + "</td></tr>";
     }
     const note = touch && d.touchNote != null ? d.touchNote : d.note;
-    const dismiss = touch
-      ? '<button type="button" class="close">Got it</button>'
-      : '<div class="dismiss">' + keys("Space") + " / " + keys("Esc") + " to close</div>";
+    const dismiss = d.anyKey
+      ? '<div class="dismiss">' + (touch ? "Tap anywhere" : "Press any key") + "</div>"
+      : touch
+        ? '<button type="button" class="close">Got it</button>'
+        : '<div class="dismiss">' + keys("Space") + " / " + keys("Esc") + " to close</div>";
+    el.classList.toggle("any", !!d.anyKey);
     el.innerHTML =
       "<h3>" + esc(d.title) + "</h3><table>" + rows + "</table>" +
       (note ? '<div class="note">' + esc(note) + "</div>" : "") +
@@ -243,6 +271,8 @@
     document.addEventListener("keydown", function (e) {
       if (!on() || e.repeat) return;
       const k = (e.key || "");
+      // an any-key card: the press closes it AND still does what it does
+      if (openId && defs[openId] && defs[openId].anyKey) { C.hide(); return; }
       // A KEY CLOSES IT. Space is the primary because it is the one key every
       // player already has a thumb on and because it is the throttle/collective
       // on the two cards that actually pop — so the same press that dismisses
@@ -255,9 +285,14 @@
       if (k === "?" || (k === "/" && e.shiftKey)) {
         if (CBZ.cityMenuOpen) return;
         e.preventDefault();
-        C.show(context() || "foot");
+        C.show(context() || (CBZ.game && CBZ.game.mode === "survival" ? "island" : "foot"));
       }
     });
+    // a click or the first tap closes an any-key card too (capture: it must
+    // hear the tap even when a HUD button below stops it)
+    const anyClose = function () { if (openId && defs[openId] && defs[openId].anyKey) C.hide(); };
+    document.addEventListener("mousedown", anyClose, true);
+    document.addEventListener("touchstart", anyClose, { capture: true, passive: true });
   }
 
   /* ======================================================================
@@ -396,6 +431,37 @@
       ["LOOK BACK", "Hold to look behind"],
     ],
     note: "Nobody is driving unless somebody else is: an empty wheel means the car coasts to a stop. Jumping out at speed hurts, and the car keeps going without you.",
+  });
+
+  /* THE DISASTER ISLAND, on foot. Pops at the start of a match and stays
+     until any key / click / tap (anyKey); once closed it stays closed for the
+     rest of the session, so a restart goes straight to the island.
+     Read from: physics.js (WASD, Shift, Space, C/Ctrl stance machine),
+     grapple.js (LMB punch, RMB shove, E grab held, LMB throws), island_vehicles.js
+     + seat_exit.js (E drives and gets out off the city), survival_interact.js
+     (I J K L on the card), inventory.js (digits), camera.js (Esc pauses). */
+  C.declare("island", {
+    title: "Controls",
+    anyKey: true,
+    rows: [
+      ["W / A / S / D", "Move"],
+      ["Mouse", "Look"],
+      ["Shift", "Sprint"],
+      ["Space", "Jump"],
+      ["C", "Crouch, slide at a sprint"],
+      ["Mouse 1 / Mouse 2", "Punch / shove"],
+      ["Hold E", "Grab and hold a person"],
+      ["E", "Drive, get out"],
+      ["I / J / K / L", "The moves on the person you look at"],
+      ["1-9", "Use what you carry"],
+      ["Esc", "Pause"],
+    ],
+    touchRows: [
+      ["STICK", "Move, push further to run"],
+      ["DRAG", "Look"],
+      ["PRESS STICK", "Crouch"],
+      ["BUTTONS", "Look at a person to grab, punch or shove"],
+    ],
   });
 
   // Evidence: which contexts have a card, and which the player has read.

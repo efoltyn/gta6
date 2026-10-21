@@ -49,40 +49,65 @@
   const CARRY_VERBS = [THROW, SET_DOWN];
   const DRAG_VERBS = [LET_GO];
   const FREE_VERBS = [
-    { id: "grab", label: "Grab", fn: (t) => G() && G().grab(t || tgt) },
+    { id: "grab", label: "Grab", fn: (t) => G() && G().grab(t || tgt, farOpts(t || tgt)) },
     { id: "punch", label: "Punch", fn: () => G() && G().punch() },
     { id: "shove", label: "Shove", fn: () => G() && G().push() },
-    { id: "tackle", label: "Tackle", fn: () => { const v = VB(); if (v && tgt) v.tackle(me(), tgt); } },
+    { id: "tackle", label: "Tackle", fn: () => { const v = VB(); if (v && tgt) v.tackle(me(), tgt, farOpts(tgt)); } },
   ];
   const DOWN_VERBS = [
-    { id: "pickUp", label: "Pick up", fn: (t) => G() && G().grab(t || tgt) },
-    { id: "drag", label: "Drag", fn: () => { const v = VB(); if (v && tgt) v.drag(me(), tgt); } },
+    { id: "pickUp", label: "Pick up", fn: (t) => G() && G().grab(t || tgt, farOpts(t || tgt)) },
+    { id: "drag", label: "Drag", fn: () => { const v = VB(); if (v && tgt) v.drag(me(), tgt, farOpts(tgt)); } },
   ];
 
-  const _R = { t: null, set: null, kind: "" };
+  const _R = { t: null, set: null, kind: "", off: {}, far: 0 };
   function held() {
     const v = VB(), pa = me();
     if (!v || !pa) return null;
     const S = v.sessionOf(pa);
     if (!(S && S.a === pa && v.holding(pa))) return null;
     tgt = S.t;
-    _R.t = S.t;
+    _R.t = S.t; _R.off = OFF_NONE; _R.far = 0;
     if (S.verb === "drag") { _R.set = DRAG_VERBS; _R.kind = "drag"; }
     else if (S.verb === "carry") { _R.set = CARRY_VERBS; _R.kind = "carry"; }
     else { _R.set = HOLD_VERBS; _R.kind = "hold"; }
     if (_R.set !== DRAG_VERBS) THROW.label = throwWord();
     return _R;
   }
+  /* WHO YOUR HANDS ARE ABOUT (owner: "interaction options don't pop up until
+     you're right in front of the person"). The grab's own reach is ~1.6 m, so
+     the card used to appear only at arm's length. Now the man you LOOK at
+     within LOOK_R (line of sight, view-weighted: verbs.pick opts.look) gets
+     his verbs from a normal talking distance. The verbs that walk you in
+     (Grab, Pick up, Drag, Tackle: verbs.js opts.far) work from there; the
+     ones that need him at your fist (Punch, Shove) wait, greyed, until he
+     is in reach (_R.off). */
+  const LOOK_R = 5.5, LOOK_DOWN_R = 4.5, LOOK_CONE = 0.8;
+  const OFF_FAR = { punch: true, shove: true };
+  const OFF_NONE = {};
+  function distTo(t) {
+    const pa = me(), v = VB();
+    const A = pa && v && v.body ? v.body(pa) : null, T = t && v && v.body ? v.body(t) : null;
+    if (!A || !A.pos || !T || !T.pos) return 0;
+    return Math.hypot(T.pos.x - A.pos.x, T.pos.z - A.pos.z);
+  }
   function near() {
     const v = VB(), pa = me();
     if (!v || !pa) return null;
-    const up = v.pick(pa, "grab");
+    _R.off = OFF_NONE; _R.far = 0;
+    const up = v.pick(pa, "grab", { look: true });
     if (up) { tgt = up; _R.t = up; _R.set = FREE_VERBS; _R.kind = "free"; return _R; }
-    const dn = v.pick(pa, "carry", { down: true });
+    const dn = v.pick(pa, "carry", { down: true, look: true });
     if (dn) { tgt = dn; _R.t = dn; _R.set = DOWN_VERBS; _R.kind = "down"; return _R; }
+    const fu = v.pick(pa, "grab", { look: true, reach: LOOK_R, cone: LOOK_CONE });
+    if (fu) { tgt = fu; _R.t = fu; _R.set = FREE_VERBS; _R.kind = "free"; _R.far = distTo(fu); _R.off = OFF_FAR; return _R; }
+    const fd = v.pick(pa, "carry", { down: true, look: true, reach: LOOK_DOWN_R, cone: LOOK_CONE });
+    if (fd) { tgt = fd; _R.t = fd; _R.set = DOWN_VERBS; _R.kind = "down"; _R.far = distTo(fd); return _R; }
     tgt = null;
     return null;
   }
+  // the walk-in a menu verb needs to reach the man the card is about
+  // (undefined = he is in reach, the verb starts where you stand)
+  function farOpts(t) { return t && t === _R.t && _R.far > 0 ? { far: _R.far + 0.5 } : undefined; }
   // the one verb a game borrows by id (the prison's Grab on its own cluster)
   function verb(id) {
     const all = FREE_VERBS.concat(DOWN_VERBS, HOLD_VERBS, DRAG_VERBS);

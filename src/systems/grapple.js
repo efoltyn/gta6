@@ -53,7 +53,6 @@
   if (CBZ.CONFIG.SURV_THROW_INTACT == null) CBZ.CONFIG.SURV_THROW_INTACT = true;
   const intactOn = () => CBZ.CONFIG.SURV_THROW_INTACT !== false;
 
-  const PUNCH_FORCE = 6;
   const BOT_R = 0.5;
   const _corpseC = { x: 0, z: 0 };   // scratch for the corpse-extent wall push
   function G() { return (CBZ.TUNE && CBZ.TUNE.gravity) || 22; }
@@ -817,7 +816,9 @@
   }
   // `who` (optional): the man a game already chose (the prison's cluster is
   // ON him, so the grab goes to him, not to whoever the cone finds first)
-  function grab(who) {
+  // `opts` (optional): verbs.js start options — the survival card passes
+  // { far } when the man you looked at is a few steps off, so you walk in
+  function grab(who, opts) {
     const v = VB(), pa = me();
     if (!v || !pa || v.holding(pa)) return null;
     // a man on his feet is taken by the collar; a man already down is lifted
@@ -827,12 +828,16 @@
       up = !(B && B.down && B.down());
       t = who;
     } else {
-      const u = v.pick(pa, "grab");
-      t = u || v.pick(pa, "carry", { down: true });
+      const u = v.pick(pa, "grab", { look: true });
+      t = u || v.pick(pa, "carry", { down: true, look: true });
       up = !!u;
+      // nobody at arm's length: the man the card is about (you looked at him
+      // a few steps off), and you walk in to take him
+      const H = !t && CBZ.handVerbs && CBZ.handVerbs.near ? CBZ.handVerbs.near() : null;
+      if (H && H.t && H.far > 0) { t = H.t; up = H.kind === "free"; opts = { far: H.far + 0.5 }; }
     }
     if (!t) return null;
-    const S = up ? v.grab(pa, t) : v.carry(pa, t);
+    const S = up ? v.grab(pa, t, opts) : v.carry(pa, t, opts);
     if (S && CBZ.sfx) CBZ.sfx("whoosh");
     return S || null;
     // NO caption (owner: "I know that I have grabbed"). The body in your hands
@@ -856,9 +861,9 @@
     if (!t || t.dead) return;
     const P = CBZ.player.pos, d = res.dir || { x: 0, z: 1 };
     const mul = (res.dmgMul || 1) * (res.blocked ? 0.25 : 1);
-    // A BEATING ADDS UP. The ledger (systems/trauma.js) turns repeated blows
-    // into bruises, then split skin; this only reports the blow.
-    if (CBZ.trauma) CBZ.trauma.strike(t, PUNCH_FORCE * mul, { dir: { x: d.x, y: 0.35, z: d.z }, fromX: P.x, fromZ: P.z, y: 1.5 });
+    // THE BLOOD LEDGER IS FED ONCE, by verbs_strike's landing (it knows the
+    // blow's real power, zone and contact height). This line used to feed it
+    // a second time per punch, which is half of why a fist bled so fast.
     // A FIST KNOCKS A MAN OUT; it does not empty a health bar (systems/
     // vitals.js). Only a long beating of a man already out kills him.
     const VT = CBZ.vitals;

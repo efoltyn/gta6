@@ -84,8 +84,8 @@
 
   // ---- the ledger's units ---------------------------------------------------
   // 1.0 trauma unit ≈ "enough to open a person up on its own". A solid punch is
-  // a fifth of that, so the third or fourth one draws blood — the owner's "punch
-  // someone a bunch of times". A landing is measured in the speed it happened
+  // a fifth of that, but fists no longer bleed through this ledger: T.strike
+  // keeps its own blunt memory (nosebleed, light spatter, never a pool). A landing is measured in the speed it happened
   // at, because that is the number physics already has.
   const FIRST_BLOOD = 0.6;     // ledger value at which skin actually opens
   const DECAY = 0.033;         // units/sec — a beating lands inside ~30s, older hits don't count
@@ -103,6 +103,13 @@
   // one impact this severe opens you up on its own, no history required —
   // this is the clause that makes "fall from far" bleed the first time.
   const LONE_HIT = 0.42;
+  // A FIST (T.strike). Units are the same flesh units: a jab is ~0.2, a
+  // full-power hook ~0.36.
+  const BLUNT_DECAY = 0.02;    // units/sec off the blunt memory
+  const NOSE_AT = 1.0;         // head-blow total that opens a nose (~4-5 clean head shots)
+  const HARD_HIT = 0.33;       // one blow at least this hard can split skin...
+  const HARD_AFTER = 0.7;      // ...on a man who has already taken a few
+  const BLUNT_CD = 2.5;        // s between any two blunt bleeds on one body
 
   // ---- THE CAUSE TABLE ------------------------------------------------------
   // First match wins, so the bloodless rows come FIRST: "crushed by a volcanic
@@ -172,6 +179,10 @@
        Ordered FIRST among the bleeding rows so "torn apart by a great white"
        reads as the shark that did it rather than as the tornado. */
     [/maul|bitten|\bbit\b|savag|devour|\beaten\b|shark|jaws/, { amount: 1.5, limbs: 1, style: "bite" }],
+    // battered by the WIND (exposure in a hurricane eyewall or a tornado's
+    // outer field): grit and being thrown about, a whole body, light blood.
+    // Before the tornado row, which is the funnel itself.
+    [/\bwinds\b/, { amount: 0.7, limbs: 0, style: "burst" }],
     // the island's worst: a tornado does not kill you, it disassembles you
     [/torn apart|tornado/, { amount: 1.75, limbs: 2, style: "tear", slowmo: 0.45 }],
     // crushed: burst and pooled, with the ground wearing most of it. Rubble
@@ -285,6 +296,7 @@
     if (sev < 0.45) return;                       // a graze does not trail
     r.bleedFor = Math.max(r.bleedFor || 0, 4 + Math.min(9, sev * 5.5));
     r.drop = 0;
+    r.dripMul = 1;                                // a real wound runs at full size
     if (r.trailing) return;
     if (bleeders.length >= TRAIL_CAP) {
       // evict the driest — never the man who was just opened up
@@ -317,7 +329,7 @@
       const heavy = Math.min(1, r.bleedFor / 6);
       if (CBZ.goreDrip) {
         CBZ.goreDrip(p.x + (Math.random() - 0.5) * 0.5, p.z + (Math.random() - 0.5) * 0.5,
-          0.12 + heavy * 0.24 + Math.random() * 0.08);
+          (0.12 + heavy * 0.24 + Math.random() * 0.08) * (r.dripMul || 1));
       }
     }
   }
@@ -327,12 +339,65 @@
        CBZ.body.hit (punch 6, push 12, throw 13), so no call site invents a
        scale. A shove is a big number that barely breaks skin, so the flesh
        weight is separate from the knockback weight: opts.flesh scales it. */
+    /* A FIST IS NOT A WOUND (owner: "blood's coming out way too fast when
+       punching someone"). This used to run the same accrue() a fall does, so
+       the ledger crossed FIRST_BLOOD on the second punch and every punch after
+       it sprayed (0.22 s cooldown), pooled and trailed. It was also fed TWICE
+       per survival punch (verbs_strike's landing and grapple.js's landPunch).
+       Blunt blows now keep their own memory and draw blood the way real ones
+       do: a bare-knuckle beating opens a nose after a run of head shots, a
+       genuinely hard blow on a man already worked over throws a light spatter,
+       and neither ever pools. Pools are for falls, slams and real wounds
+       (slam() and the gun/blade paths are untouched). */
     strike(a, force, opts) {
-      if (!on()) return 0;
+      if (!on() || !alive(a) || sealed(a)) return 0;
       opts = opts || {};
       const f = Math.max(0, +force || 0);
       const add = f * 0.036 * (opts.flesh == null ? 1 : opts.flesh);
-      return accrue(a, add, add, opts);
+      if (add <= 0) return 0;
+      const r = rec(a); if (!r) return 0;
+      // half of it still counts on the shared ledger: a beaten man who is
+      // then thrown off a ledge opens sooner, and a beating to death carries
+      // its toll into deathGore. It can never cross the bar on its own here.
+      r.v = Math.min(MAX, r.v + add * 0.5);
+      r.hits++;
+      const bdt = clock - (r.bt == null ? clock : r.bt);
+      r.bt = clock;
+      r.bb = Math.max(0, (r.bb || 0) - BLUNT_DECAY * bdt) + add;
+      const zone = opts.zone ? ("" + opts.zone) : "";
+      const head = zone ? /head|jaw|face|nose|chin/.test(zone) : (opts.y != null && opts.y > 1.4);
+      if (head) r.bh = Math.max(0, (r.bh || 0) - BLUNT_DECAY * bdt) + add;
+      else if (r.bh) r.bh = Math.max(0, r.bh - BLUNT_DECAY * bdt);
+      if (r.bcd != null && r.bcd > clock) return 0;
+      const p = a.pos;
+      // THE NOSEBLEED: a run of head shots inside a minute. Once open it drips
+      // where he walks for a few seconds, small drops, then stops.
+      if (head && r.bh >= NOSE_AT && !(r.noseT > clock)) {
+        r.bcd = clock + BLUNT_CD;
+        r.noseT = clock + 25;
+        if (CBZ.goreImpact) CBZ.goreImpact(p.x, p.y + (opts.y != null ? opts.y : 1.55), p.z, {
+          dir: { x: (opts.dir && opts.dir.x) || 0, y: -0.8, z: (opts.dir && opts.dir.z) || 0 },
+          amount: 0.25, mist: false, pool: false, player: !!a.isPlayer });
+        r.bleedFor = Math.max(r.bleedFor || 0, 5);
+        r.dripMul = 0.45;
+        r.drop = 0;
+        if (!r.trailing && bleeders.length < TRAIL_CAP) { r.trailing = true; r.lx = p.x; r.lz = p.z; bleeders.push(a); }
+        return 0.3;
+      }
+      // an open nose hit again keeps dripping (no new spray)
+      if (head && r.noseT > clock && !(add >= HARD_HIT)) {
+        r.bleedFor = Math.max(r.bleedFor || 0, 4);
+        if (!r.trailing && bleeders.length < TRAIL_CAP) { r.dripMul = 0.45; r.drop = 0; r.trailing = true; r.lx = p.x; r.lz = p.z; bleeders.push(a); }
+        return 0;
+      }
+      // A HARD BLOW ON A MAN ALREADY WORKED OVER: a light spatter, no pool
+      if (add >= HARD_HIT && r.bb >= HARD_AFTER) {
+        r.bcd = clock + BLUNT_CD;
+        if (CBZ.goreImpact) CBZ.goreImpact(p.x, p.y + (opts.y != null ? opts.y : 1.4), p.z, {
+          dir: opts.dir, amount: 0.22, mist: false, pool: false, player: !!a.isPlayer });
+        return 0.2;
+      }
+      return 0;
     },
 
     /* A BODY MET A SURFACE AT `speed` m/s. opts.wall → it was a wall, which is

@@ -2712,20 +2712,35 @@
      no stamina), Shift / the stick rim SPRINTS (walkSpeed x CITY.sprintMul,
      stamina-limited), and a gentle stick push still WALKS. Running out of
      wind or being hungry drops a sprint to the run, never to a walk.
-     Other modes keep walk-by-default (jail sneaks, survival is tuned against
-     its 6.4 sprint in systems/predator.js). */
+     THE DISASTER ISLAND rides the same ladder on its own numbers (owner:
+     "the player feels slow": every WASD press there was the jail's 2 m/s
+     stroll and the 6.4 sprint was the only way to cover ground, until
+     stamina or hunger took it away). A gentle stick walks (SURV.walkSpeed
+     1.7), a full push JOGS (SURV.runSpeed 4.0, no stamina), Shift sprints
+     (SURV.sprintSpeed 6.8, stamina-limited). The jail keeps walk-by-default. */
   const RUN_STICK = 0.55;        // touch stick deflection at/above which you run
-  function cityGait() { return !!(CBZ.game && CBZ.game.mode === "city"); }
-  function sprintMulNow() {
-    const S = cityGait() ? CBZ.CITY : CBZ.SURV;
-    return (S && S.sprintMul) || (CBZ.SURV && CBZ.SURV.sprintMul) || 1.7;
+  function gaitMode() {
+    const m = CBZ.game && CBZ.game.mode;
+    return m === "city" ? "city" : m === "survival" ? "survival" : "";
   }
+  // the full-sprint speed in m/s before wounds (predator.js reads it as the quarry speed)
+  function sprintSpeedNow() {
+    const gm = gaitMode(), SV = CBZ.SURV;
+    if (gm === "survival" && SV && SV.sprintSpeed > 0) return SV.sprintSpeed;
+    const S = gm === "city" ? CBZ.CITY : SV;
+    return T.walkSpeed * ((S && S.sprintMul) || (SV && SV.sprintMul) || 1.7);
+  }
+  CBZ.playerSprintSpeed = sprintSpeedNow;
   // the speed a held direction produces without Shift
   function cruiseSpeed() {
-    if (!cityGait()) return T.walkSpeed;
+    const gm = gaitMode();
+    if (!gm) return T.walkSpeed;
+    const SV = CBZ.SURV;
+    const walk = gm === "survival" && SV && SV.walkSpeed > 0 ? SV.walkSpeed : T.walkSpeed;
     const ax = CBZ.touchStickAxis && CBZ.touchStickAxis();
-    if (ax && Math.hypot(ax.x, ax.y) < RUN_STICK) return T.walkSpeed;
-    return T.runSpeed || T.walkSpeed;
+    if (ax && Math.hypot(ax.x, ax.y) < RUN_STICK) return walk;
+    const run = gm === "survival" ? (SV && SV.runSpeed) : T.runSpeed;
+    return run || walk;
   }
   const CROUCH_BODY_H = 1.2;     // stance-crouch/slide collision height (standing BODY_H 1.7)
   const PRONE_BODY_H = 0.5;      // prone collision height — crawl under height-gated walls
@@ -2790,12 +2805,11 @@
         if (slideOK) {
           // SLIDE: carry the sprint you brought in, slightly hotter, along the
           // direction you're pushing (else the one you were moving on, else facing).
-          const sMul = sprintMulNow();
           st.slideT = 0;
           // floor = the wound-scaled sprint speed, for the same-frame desktop
           // press where the memory hasn't sampled yet — a limping player must
           // slide at a limping burst, not the healthy 6.4.
-          st.slideV0 = Math.max(st.lastSprintV, T.walkSpeed * sMul * (c.wound || 1)) * SLIDE_BOOST;
+          st.slideV0 = Math.max(st.lastSprintV, sprintSpeedNow() * (c.wound || 1)) * SLIDE_BOOST;
           if (c.len > 0) { st.dirX = c.mx / c.len; st.dirZ = c.mz / c.len; }
           else if (st.lastMoveX || st.lastMoveZ) { st.dirX = st.lastMoveX; st.dirZ = st.lastMoveZ; }
           else { st.dirX = -Math.sin(CBZ.cam.yaw); st.dirZ = -Math.cos(CBZ.cam.yaw); }
@@ -3045,7 +3059,7 @@
     player.sprint = !overview && !mapOpen && !stunned && !player.crouch && hitSlow === 1 &&
       !!keys["shift"] && len > 0 && staminaReady && loadScale > 0.5 &&
       !(CBZ.vitals && CBZ.vitals.weak(player) > 0.5);            // too much blood gone to run
-    const sprintMul = sprintMulNow();
+    const sprintSpeed = sprintSpeedNow();
     // a leg wound (city/death.js injury model) publishes player._moveScale (&lt;1)
     // so a shot-up player can't run away — the limp you SEE is also the limp you FEEL.
     // _rideScale (>1) = mounted on an animal (city/wildlife_tame.js publishes
@@ -3060,7 +3074,7 @@
       (CBZ.vitals ? CBZ.vitals.speedMul(player) : 1);            // groggy, bled, a shot leg, wrapping a wound (systems/vitals.js)
     const moveSpeed = (player.prone ? T.walkSpeed * PRONE_SPEED
       : player.crouch ? T.crouchSpeed
-      : (player.sprint ? T.walkSpeed * sprintMul : cruiseSpeed())) * woundScale * hitSlow;
+      : (player.sprint ? sprintSpeed : cruiseSpeed())) * woundScale * hitSlow;
     let desX = 0, desZ = 0;
     if (len > 0) { mx /= len; mz /= len; }
     if (sliding) {

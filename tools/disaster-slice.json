@@ -4106,7 +4106,6 @@
   "src/city/activities.js",
   "src/city/heists.js",
   "src/city/fuel.js",
-  "src/systems/controls.js",
   "src/city/roadrules.js",
   "src/city/airside.js",
   "src/systems/airline.js",
@@ -4448,6 +4447,7 @@
   "src/city/waterfield.js",
   "src/city/carstrike.js",
   "src/systems/humancontact.js",
-  "src/city/crashdeform.js"
+  "src/city/crashdeform.js",
+  "src/systems/controls.js"
  ]
 }

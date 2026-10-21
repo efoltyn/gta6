@@ -1977,7 +1977,7 @@
     if (P && !P.dead && P.pos && Math.hypot(P.pos.x - f.x, P.pos.z - f.z) < r && Math.abs((P.pos.y || 0) + 0.9 - f.y) < 2.2) {
       try {
         if (inCity() && CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(Math.round(sp * 2), f.x, f.z, CAUSE, false, null, false);
-        else if (CBZ.surv && CBZ.surv.hurt && CBZ.surv.player) CBZ.surv.hurt(CBZ.surv.player, sp * 2, { fromX: f.x, fromZ: f.z });
+        else if (CBZ.surv && CBZ.surv.hurt && CBZ.surv.playerActor) CBZ.surv.hurt(CBZ.surv.playerActor, sp * 2, { fromX: f.x, fromZ: f.z, cause: "crushed by a car the tornado threw" });
       } catch (e) {}
     }
   }
@@ -2485,7 +2485,8 @@
      PEOPLE. Every death goes through the shared kill bus.
      ============================================================ */
   const PEOPLE_TICK = 0.2;
-  const CAUSE = "torn apart by the tornado";
+  const CAUSE = "torn apart by the tornado";              // the core: you were IN the funnel
+  const WIND_CAUSE = "battered to death by the tornado's winds";   // the field around it
   function hitPeople(t, dt) {
     t.tPeople += dt;
     const tick = t.tPeople >= PEOPLE_TICK;
@@ -2508,12 +2509,12 @@
             // a room holds until the gust is past what takes its walls down
             if (inside && _s.gust < DOD.most) {
               if (_s.gust > 30 && !a._twSafe) { a._twSafe = true; stats.shelterSaves++; }
-              if (_s.gust > 55) { try { CBZ.surv.hurt(a, _s.gust * 0.04 * dt); } catch (e) {} }
+              if (_s.gust > 55) { try { CBZ.surv.hurt(a, _s.gust * 0.04 * dt, { cause: WIND_CAUSE }); } catch (e) {} }
               return;
             }
             a._twSafe = false;
           }
-          if (_s.gust > 60 && d < t.R * 0.9) { try { CBZ.surv.hurt(a, 1e6, { fromX: t.x, fromZ: t.z, fling: 8 }); } catch (e) {} return; }   // only a >60 m/s (EF2+) core kills outright, and disasterhurt.js warns first
+          if (_s.gust > 60 && d < t.R * 0.9) { try { CBZ.surv.hurt(a, 1e6, { fromX: t.x, fromZ: t.z, fling: 8, cause: CAUSE }); } catch (e) {} return; }   // only a >60 m/s (EF2+) core kills outright, and disasterhurt.js warns first
           const drag = Math.min(9, _s.gust * 0.10);
           if (a.isPlayer) dragPlayer(t, dt, drag);
           else {
@@ -2522,7 +2523,8 @@
             a.pos.z += _s.vz * inv * drag * dt;
             if (CBZ.collide) { try { CBZ.collide(a.pos, 0.5); } catch (e) {} }
           }
-          if (_s.gust > 30) { try { CBZ.surv.hurt(a, (_s.gust - 24) * 0.25 * dt); } catch (e) {} }
+          // EXPOSURE, said for what it is: no invisible debris in it
+          if (_s.gust > 30) { try { CBZ.surv.hurt(a, (_s.gust - 24) * 0.25 * dt, { cause: WIND_CAUSE }); } catch (e) {} }
         });
       }
       return;
