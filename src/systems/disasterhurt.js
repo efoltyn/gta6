@@ -92,7 +92,7 @@
     // a car's cabin is a Faraday cage
     current: /ground current|side flash|current jumped|electrocut/,
     // a car's cabin keeps most of it out
-    exposure: /ash|frozen|blizzard|cold|hypotherm|smoke|airburst|hurricane debris/,
+    exposure: /ash|frozen|blizzard|cold|hypotherm|smoke|airburst|hurricane debris|hurricane winds|tornado's winds/,
     // indoors: the bolt goes to earth through the building
     indoorsSafe: /ground current|side flash off a building|current jumped/,
     // a wall between you and it takes it

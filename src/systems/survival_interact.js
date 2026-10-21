@@ -55,6 +55,10 @@
   }
 
   let verbs = [], shown = false, cd = 0;
+  // verbs that need him at your fist while he is still a few steps off
+  // (CBZ.handVerbs near(): the card shows from a look at ~5 m now)
+  let off = {};
+  const NO_OFF = {};
 
   // ---- ratchet declaration (see CBZ.prisonPromptAudit in interactions.js).
   // act:null = the key glyph is gone but the ACTION already had a touch
@@ -91,7 +95,7 @@
       // the buttons (none in the water: the swim verb has no person)
       const nm = key.indexOf("swim:") === 0 ? "" : nameOf(tgt);
       dock.innerHTML = set.map((v, i) =>
-        '<button class="svbtn" type="button" data-i="' + i + '">' + v.label + "</button>").join("") +
+        '<button class="svbtn' + (off[v.id] ? " off" : "") + '" type="button" data-i="' + i + '">' + v.label + "</button>").join("") +
         (nm ? '<div class="sv-who"></div>' : "");
       if (nm) dock.querySelector(".sv-who").textContent = nm;
       dock.classList.toggle("swim", key.indexOf("swim:") === 0);
@@ -118,8 +122,8 @@
   function target() {
     const H = CBZ.handVerbs;
     const r = H ? (H.held() || H.near()) : null;
-    if (!r) { tgt = null; return null; }
-    tgt = r.t; _T.set = r.set;
+    if (!r) { tgt = null; off = NO_OFF; return null; }
+    tgt = r.t; _T.set = r.set; off = r.off || NO_OFF;
     return _T;
   }
 
@@ -134,7 +138,7 @@
     return typeof n === "string" ? n.replace(/^the |^a |^an /, "") : "";
   }
   CBZ.survivalWhoOf = nameOf;
-  function keyOf(set) { let k = nameOf(tgt) + "#"; for (let i = 0; i < set.length; i++) k += set[i].label + "|"; return k; }
+  function keyOf(set) { let k = nameOf(tgt) + "#"; for (let i = 0; i < set.length; i++) k += set[i].label + (off[set[i].id] ? "~" : "") + "|"; return k; }
   function render(set) {
     verbs = set;
     const key = keyOf(set);
@@ -144,12 +148,13 @@
     if (el.name.textContent !== nm) el.name.textContent = nm;
     if (el.note.textContent) el.note.textContent = "";
     el.opts.innerHTML = verbs.map((v, i) =>
-      `<div class="iopt" data-i="${i}"><span class="ikey">${OPT_KEYS[i].toUpperCase()}</span>` +
+      `<div class="iopt${off[v.id] ? " off" : ""}" data-i="${i}"><span class="ikey">${OPT_KEYS[i].toUpperCase()}</span>` +
       `<span class="ilab">${v.label}</span></div>`).join("");
   }
 
   function doAction(i) {
     if (cd > 0 || !shown || i >= verbs.length) return;
+    if (off[verbs[i].id]) return;              // he is not at your fist yet
     cd = 0.3;
     try { verbs[i].fn(); } catch (e) {}
   }
@@ -182,7 +187,7 @@
     // where that verb has always lived.
     const swim = (live && CBZ.touchMode) ? swimOffer() : null;
     if (swim) {
-      verbs = swim;
+      verbs = swim; off = NO_OFF;
       renderDock(swim, "swim:" + swim[0].label);
       el.interact.classList.remove("show");
       shown = true;

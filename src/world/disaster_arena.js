@@ -4313,6 +4313,13 @@
         y: stop0, v: 0, slabTop: 0.1, doors: doors, litBtn: litBtn, litAt: -1, idle: 0,
         m: CBZ.liftCore ? CBZ.liftCore.create(stops.length, 0) : null };
       for (let k = 0; k < storeys; k++) poseLandingDoors(e, k);
+      // THE CAR'S LID, for the camera only (systems/camera.js camColliders):
+      // the car is a mesh riding the shaft, so no lens test knew it had a
+      // ceiling and the third-person boom flew out over it. Not a physics
+      // wall (colliders push sideways; a lid must never shove a jumper out of
+      // the car). Ridden with the car below.
+      e.camLid = { minX: ox - s, maxX: ox + s, minZ: oz - s, maxZ: oz + s, y0: gy + stop0 + 2.3, y1: gy + stop0 + 2.38, mode: "survival" };
+      (CBZ.camColliders || (CBZ.camColliders = [])).push(e.camLid);
       elevators.push(e);
 
       b._wallMat = finishMat(color, gy);
@@ -5764,6 +5771,7 @@
         if (showLit) { const b2 = btnAt(e, e.litAt); e.litBtn.position.set(b2.x - e.ox, b2.y - e.gy, b2.z - 0.012 - e.oz); }
         if (e.litBtn.visible !== showLit) e.litBtn.visible = showLit;
         e.mesh.position.y = e.y;
+        if (e.camLid) { e.camLid.y0 = e.gy + e.y + 2.3; e.camLid.y1 = e.gy + e.y + 2.38; }
         // the rig reads carMesh.position.y itself at 9.5; only the legacy
         // fallback record still needs poking
         if (e.plat) e.plat.top = e.gy + e.y + e.slabTop;

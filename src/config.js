@@ -324,7 +324,12 @@
   CBZ.SURV = {
     arena: { cx: 0, cz: 600, radius: 240 }, // far from the prison; own ground+sun (twice the old 120 m island: world/island_plan.js)
     playerHpRegen: 0,        // no passive regen — disasters are deadly
-    sprintMul: 3.2,
+    sprintMul: 3.2,          // x TUNE.walkSpeed: the non-city, non-island fallback sprint (jail, gun game)
+    // THE ISLAND GAIT (systems/physics.js gait ladder): a gentle stick walks,
+    // a full push jogs with no stamina, Shift sprints on the stamina tank
+    walkSpeed: 1.7,
+    runSpeed: 4.0,
+    sprintSpeed: 6.8,
     staminaMax: 100,
     staminaDrain: 12,        // per second while sprinting: ~8 s flat out from full
     staminaRegen: 18,        // per second while not: a full tank back in ~5.5 s

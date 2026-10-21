@@ -965,7 +965,7 @@
     //      one-wind-number windstorm and its HURRICANE_V2 flag are purged;
     //      git is the undo. ----
     hurricane: {
-      name: "HURRICANE", emoji: "", warnSecs: 5, gap: 7, cause: "killed by hurricane debris", tint: 0x46505a,
+      name: "HURRICANE", emoji: "", warnSecs: 5, gap: 7, cause: "killed in the hurricane", tint: 0x46505a,
       // an eye + two eyewalls need room to be three different experiences,
       // and a BIG storm LASTS: cat-1 ~22 s, cat-5 ~35 s
       get activeSecs() { return Math.round(19 + 3.2 * (this._catF || 3)); },
@@ -1032,13 +1032,19 @@
           fling: flingCar,
           release: release,
           actors: function (fn) { surv().forEachActor(fn); },
-          // a REAL piece (a roof sheet, a plank) moving fast through a body
+          /* a REAL piece (a roof sheet, a plank) whose swept path crossed this
+             body (systems/hurricane.js debrisHits). The wound is its kinetic
+             energy at the relative speed: ~1 hp per 40 J, so a 0.3 kg frond
+             at 25 m/s is a sting (2), a 3 kg plank at 30 m/s a real wound
+             (34), a 12 kg steel sheet at 35 m/s fatal. No sheltered check: a
+             piece that reached you came through whatever was in the way. */
           hit: function (a, o) {
-            if (sheltered(a) || (CBZ.body && CBZ.body.busy(a))) return;
+            if (CBZ.body && CBZ.body.busy(a)) return;
             CBZ.hurricane.count("debrisStrikes", 1);
-            if (CBZ.body) CBZ.body.hit(a, { dir: { x: o.dirx, z: o.dirz }, force: 6 + o.speed * 0.25, knockdown: o.speed > 24 ? 1.0 : 0 });
+            const mom = o.mass * o.speed;               // kg m/s
+            if (CBZ.body) CBZ.body.hit(a, { dir: { x: o.dirx, z: o.dirz }, force: Math.min(18, 2 + mom * 0.08), knockdown: mom > 90 ? 1.0 : 0 });
             const wasDead = !!a.dead;
-            surv().hurt(a, scale(8 + o.speed * 0.35, ctx), { cause: "killed by hurricane debris", dir: { x: o.dirx, z: o.dirz } });
+            surv().hurt(a, Math.min(400, o.energy / 40), { cause: "killed by hurricane debris", dir: { x: o.dirx, z: o.dirz } });
             if (!wasDead && a.dead) CBZ.hurricane.count("debrisKills", 1);
           },
           // a windthrown tree comes down across whoever is in its length
@@ -1171,17 +1177,16 @@
             if (CBZ.collide) CBZ.collide(a.pos, 0.5);
             if (!a._lift) a.pos.y = floor(a.pos.x, a.pos.z);   // a body on a floor keeps it (the mover re-stands it)
           }
-          // FLYING DEBRIS IS THE WOUND: at eyewall speeds loose material is
-          // airborne and a strike is a real hit, not ambient chip damage
-          if (w.speed > 24 && rnd() < dt * (w.speed - 24) * 0.022) {
-            H.count("debrisStrikes", 1);
-            if (CBZ.body) CBZ.body.hit(a, { dir: { x: w.x, z: w.z }, force: 6 + w.speed * 0.22, knockdown: rnd() < 0.4 ? 1.0 : 0 });
-            const wasDead = !!a.dead;
-            // a 2x4 at eyewall speed is a wound, not chip damage — ~14-20 by
-            // intensity, so repeated strikes on someone who stays in the open
-            // genuinely finish them
-            surv().hurt(a, scale(14, ctx), { cause: "killed by hurricane debris", dir: { x: w.x, z: w.z } });
-            if (!wasDead && a.dead) H.count("debrisKills", 1);
+          /* NO INVISIBLE DEBRIS. This used to roll a hidden "strike" on anyone
+             in eyewall wind (a 14-20 hp wound billed "killed by hurricane
+             debris" with nothing in the air near them). Debris wounds now come
+             only from real pieces crossing a body (world.hit above, fed by
+             systems/hurricane.js debrisHits). What the open eyewall does to a
+             body by itself is EXPOSURE: wind-driven rain, grit and being
+             thrown about. It is slow, it is said for what it is, and a cat-1
+             band costs nothing: about 2 hp/s at 40 m/s, 4 at 55, 6 at 70. */
+          if (w.speed > 32) {
+            surv().hurt(a, (w.speed - 32) * 0.16 * dt, { cause: "battered to death by the hurricane winds" });
           }
         });
         // ---- gust turbulence on top of the mean field ----
@@ -4137,14 +4142,17 @@
       // (the collapse engine's fragments land on the hole's floor); a mound
       // on the footprint would be rubble standing on air
       if (opts.noRubble) return;
-      if (ctx && surv()) {
-        for (let i = 0; i < 6; i++) {
-          surv().hurtRadius(b.x + (rnd() - 0.5) * b.w * 1.4, b.z + (rnd() - 0.5) * b.d * 1.4, 1.6, scale(30, ctx));
-        }
-      }
       // came down through collapse.js's structural model: the building's own
       // chunks already lie where they fell, kept as solid rubble; no mound
+      // (and no invented hits: those chunks are the bodies that land on people)
       if (!CBZ.debris || (job && job.S)) return;
+      // THE MOUND LANDS ON WHOEVER IS UNDER IT, and only inside the mound's
+      // own footprint (it used to scatter hits half a footprint past it)
+      if (ctx && surv()) {
+        for (let i = 0; i < 6; i++) {
+          surv().hurtRadius(b.x + (rnd() - 0.5) * b.w * 1.15, b.z + (rnd() - 0.5) * b.d * 1.15, 1.6, scale(30, ctx), { cause: "crushed under collapsing rubble" });
+        }
+      }
       const tall = b.h > 24;
       CBZ.debris.pile({
         x: b.x, z: b.z, y: b.gy || undefined,

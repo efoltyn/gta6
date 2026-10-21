@@ -528,7 +528,7 @@
       if (CBZ.trauma && CBZ.trauma.strike) {
         try {
           CBZ.trauma.strike(c, 3 + 7 * res.power, { dir: { x: res.dir.x, y: 0.3, z: res.dir.z }, fromX: S.Ba.pos.x, fromZ: S.Ba.pos.z,
-            y: res.point.y - ((Bt.pos && Bt.pos.y) || 0), flesh: S.kind === "shove" ? 0.2 : 1 });
+            y: res.point.y - ((Bt.pos && Bt.pos.y) || 0), zone: res.zone, flesh: S.kind === "shove" ? 0.2 : 1 });
         } catch (e) { /* trauma off in this mode */ }
       }
       if (S.weapon && S.weapon.blade && CBZ.bodyWound) {
@@ -1404,7 +1404,7 @@
     if (CBZ.trauma && CBZ.trauma.strike) {
       try {
         CBZ.trauma.strike(M.t, 3 + 7 * res.power, { dir: { x: res.dir.x, y: -0.6, z: res.dir.z }, fromX: Ba.pos.x, fromZ: Ba.pos.z,
-          y: res.point.y - ((Bt.pos && Bt.pos.y) || 0), flesh: 1 });
+          y: res.point.y - ((Bt.pos && Bt.pos.y) || 0), zone: res.zone, flesh: 1 });
       } catch (e) { /* trauma off in this mode */ }
     }
     const cut = !!(S.weapon && S.weapon.blade);

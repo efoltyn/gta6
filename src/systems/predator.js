@@ -210,8 +210,9 @@
   //     grace lapses.
   const PROVOKE_GRACE = 3.5;
   // --- §N. WHAT A COMMITTED PREDATOR MUST BE ABLE TO DO: CATCH YOU.
-  //     The player sprints at TUNE.walkSpeed * SURV.sprintMul = 2.0 * 3.2 =
-  //     6.4 u/s. (physics.js's "~7*1.7=11.9" comment is stale by two tunes;
+  //     The player sprints at CBZ.playerSprintSpeed() (physics.js; 6.8 on the
+  //     island since the gait ladder, SURV.sprintSpeed). The table below was
+  //     written against the old 6.4 u/s. (physics.js's "~7*1.7=11.9" comment is stale by two tunes;
   //     read the constants, never the comment.) Against 6.4 the derived rush
   //     speeds split cleanly in two:
   //       CAN catch you   wolf 10.2 · tiger 10.8 · cheetah 13.7 · boar 8.7
@@ -2400,6 +2401,10 @@
   // the literal is a fallback for a build where physics.js has not published
   // them yet, not a second opinion.
   function predatorQuarrySpeed() {
+    if (CBZ.playerSprintSpeed) {
+      const ps = CBZ.playerSprintSpeed();
+      if (ps > 1 && isFinite(ps)) return ps;
+    }
     const S = CBZ.SURV;
     const T = CBZ.TUNE;
     const w = T && typeof T.walkSpeed === "number" && T.walkSpeed > 0 ? T.walkSpeed : 0;

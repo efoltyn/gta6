@@ -14,7 +14,7 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=jtv1019">
+<link rel="stylesheet" href="css/hud.css?v=feel1020">
 <link rel="stylesheet" href="css/survival_hud.css?v=pace1015">
 <link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
@@ -22,7 +22,7 @@
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
 <link rel="stylesheet" href="css/city.css?v=spec1014">
 <link rel="stylesheet" href="css/campaign.css?v=neck1001b">
-<link rel="stylesheet" href="css/interact_touch.css?v=jtv1019">
+<link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
 </head>
 <body class="campaign-build">
@@ -439,7 +439,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=island240b"></script>
+<script src="src/config.js?v=feel1020"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=peak1014c"></script>
@@ -669,7 +669,7 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=mc5ae55"></script>
-<script src="src/systems/verbs.js?v=nored0930"></script>
+<script src="src/systems/verbs.js?v=feel1020"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
@@ -681,7 +681,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/cuffedplayer.js?v=jtv1019b"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
 <script src="src/entities/meleeposes.js?v=melee1011"></script>
-<script src="src/systems/verbs_strike.js?v=melee1011"></script>
+<script src="src/systems/verbs_strike.js?v=feel1020"></script>
 <script src="src/systems/melee.js?v=melee1011"></script>
 <script src="src/systems/bodyfall.js?v=neck1001"></script>
 <!-- CBZ.leave: PEOPLE WALK OUT, NOBODY VANISHES. Every game's "his part is over"
@@ -895,8 +895,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=island1014"></script>
-<script src="src/systems/physics.js?v=mrg10200048"></script>
+<script src="src/systems/camera.js?v=feel1020"></script>
+<script src="src/systems/physics.js?v=feel1020"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
@@ -1070,15 +1070,15 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_plan.js?v=plan1"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=mrg10200048"></script>
+<script src="src/world/disaster_arena.js?v=feel1020"></script>
 <script src="src/world/island_dressing.js?v=dress2town"></script>
-<script src="src/systems/grapple.js?v=jailv1001"></script>
+<script src="src/systems/grapple.js?v=feel1020"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
 <script src="src/modes/survival.js?v=island1014"></script>
 <!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
      instant death, i-frames, no chip, physical shelter, regen. survival.js's
      surv.hurt hands the player to it. -->
-<script src="src/systems/disasterhurt.js?v=fair1014"></script>
+<script src="src/systems/disasterhurt.js?v=feel1020"></script>
 <script src="src/modes/shark_sim.js?v=nored0930"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
@@ -1136,7 +1136,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/flashflood.js?v=tsudir1020"></script>
 <!-- seam:hurricane — a cyclone, not a wind number: systems/hurricane.js owns the
      tracking eye, the eyewall field, the surge curve and the advected debris. -->
-<script src="src/systems/hurricane.js?v=curtain1019"></script>
+<script src="src/systems/hurricane.js?v=feel1020"></script>
 <!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
@@ -1155,11 +1155,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=tsudir1020"></script>
+<script src="src/systems/disasters.js?v=mrg10202040"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
-<script src="src/systems/handverbs.js?v=jtv1019b"></script>
-<script src="src/systems/survival_interact.js?v=jailv1001"></script>
+<script src="src/systems/handverbs.js?v=feel1020"></script>
+<script src="src/systems/survival_interact.js?v=feel1020"></script>
 <script src="src/systems/survivalhud.js?v=pace1015"></script>
 <!-- THE DEAD PLAYER'S CAMERA on the disaster island: death orbit, pull-back,
      then free flight (WASD / touch) while the round keeps running. -->
@@ -1689,7 +1689,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=mrg10200048"></script>
+<script src="src/systems/tornado.js?v=feel1020"></script>
 <script src="src/city/aircraftimpact.js?v=mrg10200048"></script>
 <script src="src/city/metro_promote.js?v=mrg10200048"></script>
 <script src="src/city/shops.js?v=vault1013"></script>
@@ -1739,7 +1739,7 @@ document.body.appendChild(b);}}catch(e){}})();
      read as a broken aircraft. One registry, declared next to the key tests that
      consume them; pops once per context and stays until dismissed; [?] reopens.
      Revert with ?cfg_CONTROLS_CARD=0. -->
-<script src="src/systems/controls.js?v=ekey2"></script>
+<script src="src/systems/controls.js?v=feel1020"></script>
 <script src="src/city/roadrules.js?v=metro0929"></script>
 <!-- AIRSIDE GROUND TRAFFIC (owner: "cars spawning randomly inside airport near
      runway — it's dumb"). Two halves of one fix. roadrules.js now CLOSES the
@@ -2070,12 +2070,12 @@ document.body.appendChild(b);}}catch(e){}})();
      nothing itself. After gore.js + wounds.js (routes through CBZ.goreImpact,
      CBZ.gore and CBZ.bodyWound), before core/loop.js so its clock makes the
      boot sort. Consumers: grapple.js, physics.js, modes/survival.js. -->
-<script src="src/systems/trauma.js?v=rpgblast1013"></script>
+<script src="src/systems/trauma.js?v=feel1020"></script>
 <!-- PREDATOR GRAMMAR — the shared answer to "a thing hunts you and takes you":
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
      same brain. After wounds.js (routes through CBZ.bodyBite). -->
-<script src="src/systems/predator.js?v=nocine1011"></script>
+<script src="src/systems/predator.js?v=feel1020"></script>
 <!-- The LAND sibling of the swim rig. Land animals had no jaw articulation and
      no spine bend at all — a bear grabbing you moved nothing. Discovery is
      geometric (no species table), so all 45 species animate from one change.
