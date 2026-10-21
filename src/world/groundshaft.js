@@ -73,8 +73,7 @@
    near lip occludes everything below it — so a shaft is only as dark as its
    first three metres, and those were its brightest surfaces. `skyOcc()` below
    is the fix and carries the full account: ONE occlusion ladder for the wall,
-   the lip section and the stair, plus a collar that wears the colour of the
-   ground it sheared from. `shaftAudit().throatShade` is the ratchet.
+   the lip section and the stair; the ground runs to the torn edge itself. `shaftAudit().throatShade` is the ratchet.
 
    PLACEMENT LAW: A SINKHOLE IS NOT A MOUNTAIN FEATURE. OWNER: "sinkholes should
    only happen on the ground not on sides of mountain." `CBZ.groundShaftSlope`
@@ -264,10 +263,10 @@
   const maskReq = [];
   /* Publish every live shaft to the mask, take back the ones that won a slot,
      and stop drawing the rest — a ring lying on solid grass is the loud lie;
-     untouched ground at 90 m is the quiet one. The DISCARD radius is the wall's
-     outer edge (r * 1.06), not the removed floor: between the two lies the
-     sliver of ground the wall stands behind, and on the island that sliver is
-     where the sea was showing through as a blue crescent at the rim. */
+     untouched ground at 90 m is the quiet one. The cut is the torn face's own
+     top edge (surveyRim's profile), not a circle: it used to be r * 1.06,
+     out past the face, and the ring of missing ground between was covered by
+     a lip collar. Now the ground runs to the face and stops on it. */
   // core/groundmask.js deals the slots for EVERY owner of holes now, so this
   // file publishes its shafts and reads back which of them won one.
   if (CBZ.groundMaskProvide) {
@@ -275,7 +274,8 @@
       maskReq.length = 0;
       for (let i = 0; i < live.length; i++) {
         const h = live[i];
-        maskReq.push({ x: h.x, z: h.z, r: h.r * 1.06, y: h.gy, src: h });
+        // r x prof[i] IS the torn face's top polyline (surveyRim)
+        maskReq.push({ x: h.x, z: h.z, r: h.r, y: h.gy, src: h, prof: h.rim ? h.rim.prof : null });
       }
       /* a running sinkhole EVENT may stand its own crust in for the ground
          before any shaft exists (world/sinkhole.js: the sagging cover is real
@@ -508,102 +508,17 @@
   const GRAZE_D = 0.35;      // radii below the rim — the sliver the near lip leaves
   function throatShade(h) { return skyOcc(h, h.r * GRAZE_D); }
 
-  /* THE SURFACE ITSELF, not just its colour. One downward ray finds what the
-     hole was cut from: its material, its vertex tint at that point (linear,
-     as the ground's own vertices carry it) and the AFFINE map from world xz
-     to its UVs (the ground is planar-mapped, so three vertices of the hit
-     triangle give the map everywhere). The collar is then drawn IN that
-     material with those UVs, so the turf or the tarmac runs on unbroken to the
-     torn edge: the old collar was a flat hex (the sample refused every mapped
-     ground, i.e. all of them, and fell back to 0x2f2e2c) laid as a smooth
-     untextured annulus across textured grass and road, which is the grey band.
-     Cached per centre, so a widening sinkhole's five re-cuts ray once. */
-  const surfCache = new Map();
-  const _tri = new THREE.Triangle(), _bc = new THREE.Vector3(), _pa = new THREE.Vector3(), _pb = new THREE.Vector3(), _pc = new THREE.Vector3();
-  function groundSurfaceAt(x, z, gy) {
-    const key = Math.round(x * 4) + "," + Math.round(z * 4) + "," + Math.round(gy * 4) + "," + (CBZ.game ? CBZ.game.mode : "");
-    if (surfCache.has(key)) return surfCache.get(key);
-    let out = null;
-    try {
-      const rc = new THREE.Raycaster(new THREE.Vector3(x, gy + 50, z), new THREE.Vector3(0, -1, 0), 0, 100);
-      if (CBZ.camera) rc.camera = CBZ.camera;      // r128 Sprite.raycast derefs this
-      const hits = rc.intersectObject(root(), true) || [];
-      for (let i = 0; i < hits.length && !out; i++) {
-        const o = hits[i].object;
-        if (!o || !o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || !o.visible || !o.material) continue;
-        let p = o, mine = false;
-        // anything this project DREW to replace ground is not the ground it
-        // replaced — a shaft's liner, a dig site's soil, a falling slab
-        while (p) {
-          const u = p.userData;
-          if (u && (u.groundShaft || u.digSite || u.sinkBody || u.debrisPiece || u.isActor)) { mine = true; break; }
-          p = p.parent;
-        }
-        if (mine) continue;
-        // a canopy, a roof or a sign is not the ground; the ground is the
-        // surface at the height the shaft's own rim was solved from
-        const py = hits[i].point.y;
-        if (py > gy + 2.5 || py < gy - 2.5) continue;
-        const face = hits[i].face;
-        const mat = Array.isArray(o.material) ? (face && o.material[face.materialIndex]) || o.material[0] : o.material;
-        // lane paint and decals are see-through layers ON the ground
-        if (!mat || !mat.color || mat.transparent || mat.isShaderMaterial) continue;
-        const geo = o.geometry, pos = geo.attributes && geo.attributes.position;
-        if (!pos || !face) continue;
-        _pa.fromBufferAttribute(pos, face.a).applyMatrix4(o.matrixWorld);
-        _pb.fromBufferAttribute(pos, face.b).applyMatrix4(o.matrixWorld);
-        _pc.fromBufferAttribute(pos, face.c).applyMatrix4(o.matrixWorld);
-        const ca = geo.getAttribute("color");
-        const col = [1, 1, 1];
-        if (mat.vertexColors && ca) {
-          _tri.set(_pa, _pb, _pc).getBarycoord(hits[i].point, _bc);
-          col[0] = ca.getX(face.a) * _bc.x + ca.getX(face.b) * _bc.y + ca.getX(face.c) * _bc.z;
-          col[1] = ca.getY(face.a) * _bc.x + ca.getY(face.b) * _bc.y + ca.getY(face.c) * _bc.z;
-          col[2] = ca.getZ(face.a) * _bc.x + ca.getZ(face.b) * _bc.y + ca.getZ(face.c) * _bc.z;
-        }
-        // the affine world-xz -> uv map, from the hit triangle
-        let uvm = null;
-        const ua = geo.getAttribute("uv");
-        if (mat.map && ua) {
-          const ex = _pb.x - _pa.x, ez = _pb.z - _pa.z, fx = _pc.x - _pa.x, fz = _pc.z - _pa.z;
-          const det = ex * fz - ez * fx;
-          if (Math.abs(det) > 1e-8) {
-            const du1 = ua.getX(face.b) - ua.getX(face.a), du2 = ua.getX(face.c) - ua.getX(face.a);
-            const dv1 = ua.getY(face.b) - ua.getY(face.a), dv2 = ua.getY(face.c) - ua.getY(face.a);
-            const ux = (du1 * fz - du2 * ez) / det, uz = (du2 * ex - du1 * fx) / det;
-            const vx = (dv1 * fz - dv2 * ez) / det, vz = (dv2 * ex - dv1 * fx) / det;
-            uvm = [ua.getX(face.a) - ux * _pa.x - uz * _pa.z, ux, uz, ua.getY(face.a) - vx * _pa.x - vz * _pa.z, vx, vz];
-          }
-        }
-        // a mapped ground with no usable UVs cannot be continued: next layer
-        if (mat.map && !uvm) continue;
-        const q = (v) => Math.max(0, Math.min(255, Math.round(v * 255)));
-        out = {
-          mat: mat, col: col, uvm: uvm,
-          /* the flat colour, LINEAR-packed. A textured surface does not keep
-             its colour in material.color (that is a TINT of the map, white
-             for the city's road plates — reading it once produced a WHITE lip
-             collar round every city hole), so a mapped surface has no flat
-             answer: hex is null and the caller falls back. */
-          hex: mat.map ? null : (q(mat.color.r * col[0]) << 16) | (q(mat.color.g * col[1]) << 8) | q(mat.color.b * col[2]),
-        };
-      }
-    } catch (e) { out = null; /* no answer is not a crash: the caller falls back */ }
-    if (surfCache.size > 48) surfCache.delete(surfCache.keys().next().value);
-    surfCache.set(key, out);
-    return out;
+  /* THE GROUND'S COLOUR AT A POINT, published for systems/digsite.js (its
+     undisturbed top band). It was a downward raycast that refused every
+     textured surface (all of the island and city ground are textured, so it
+     answered null and the dig fell back to its olive); it is now the same
+     per-point answer the shaft rim reads (surfaceAt, below), packed as a
+     LINEAR hex the way the dig decodes it. One implementation, no rays. */
+  function groundColorAt(x, z) {
+    const s = surfaceAt(x, z, null, null);
+    const q = function (v) { return Math.max(0, Math.min(255, Math.round(v * 255))); };
+    return (q(s.tone[0]) << 16) | (q(s.tone[1]) << 8) | q(s.tone[2]);
   }
-  function groundColorAt(x, z, gy) {
-    const s = groundSurfaceAt(x, z, gy);
-    return s ? s.hex : null;
-  }
-  /* PUBLISHED, because a second thing needed it. systems/digsite.js was
-     painting its undisturbed surface a hardcoded olive, which is a fine guess
-     for grass and wrong everywhere else — photographed on the island it was a
-     34 m cream disc lying in green grass. It needs the answer this function
-     already works out (including the two things it learned the hard way: a
-     textured plate's material.color is a white TINT, not a colour, and a
-     vertexColors ground needs its face tint applied). One implementation. */
   CBZ.groundColorAt = groundColorAt;
 
   /* ============================================================
@@ -639,9 +554,17 @@
     if (h._layers) return h._layers;
     const L = [];
     const D = h.depth;
-    if (h.road) {
+    /* the cover is what the rim survey found most of round the hole
+       (surveyRim); the torn face at the lip is per segment, this is the
+       hole's own wall behind it */
+    const cover = h.cover || (h.rim && h.rim.cover) || "turf";
+    if (cover === "road") {
       L.push({ name: "asphalt", top: 0, bot: 0.12, c: 0x2b2a28, rf: 1.0, n: 0.008 });
       L.push({ name: "base course", top: 0.12, bot: 0.5, c: 0x8a7f6c, rf: 1.006, n: 0.012 });
+    } else if (cover === "walk") {
+      L.push({ name: "paving", top: 0, bot: 0.12, c: 0x8d8a83, rf: 1.0, n: 0.006 });
+      L.push({ name: "bedding", top: 0.12, bot: 0.27, c: 0xa08e6a, rf: 1.004, n: 0.01 });
+      L.push({ name: "base course", top: 0.27, bot: 0.5, c: 0x8a7f6c, rf: 1.006, n: 0.012 });
     } else {
       L.push({ name: "topsoil", top: 0, bot: 0.35, c: 0x3b2a1a, rf: 1.0, n: 0.012 });
     }
@@ -730,8 +653,13 @@
         const a = (i / seg) * TAU;
         // a boundary row keeps one jitter for both its rows, so the step
         // between two layers is a clean ledge and the faces stay closed
-        const rad = wallRadius(h, R.dm, a, R.L, R.edge ? 0 : j);
-        pos[p] = Math.cos(a) * rad; pos[p + 1] = y; pos[p + 2] = Math.sin(a) * rad;
+        let rad = wallRadius(h, R.dm, a, R.L, R.edge ? 0 : j);
+        /* behind the torn face (buildRim) wherever the two overlap in depth:
+           the face is the edge you see, and a wall vertex poking in front of
+           it is a band of strata standing proud of the lip. The top row sits
+           a hair under the drawn surface, never level with it. */
+        if (R.dm < secMax(h) + 0.01) rad = Math.max(rad, faceAt(h, a) * backAt(R.dm) + 0.05);
+        pos[p] = Math.cos(a) * rad; pos[p + 1] = y - (R.dm === 0 ? 0.03 : 0); pos[p + 2] = Math.sin(a) * rad;
         layerColor(h, R.dm, a, R.L.c, c);
         col[p] = c[0]; col[p + 1] = c[1]; col[p + 2] = c[2];
         p += 3;
@@ -889,245 +817,434 @@
   }
 
   /* ============================================================
-     THE TORN RIM. Owner: "the rims of sinkholes are this weird gray color
-     that's very unrealistic." They were, for three reasons, all fixed here:
+     WHAT IS ACTUALLY THERE, AT EVERY BEARING ROUND THE RIM
 
-       1. THE COLLAR WAS A FLAT HEX. It is the intact ground between the
-          removed floor and the mask's discard circle, and it was painted one
-          colour: the ground sample refused every TEXTURED surface (correctly
-          — a map's material.color is a tint), the island's grass and road and
-          the city's plates are all textured, so every collar fell back to
-          0x2f2e2c — then laid that hex in as a LINEAR vertex colour (0.18,
-          three times real asphalt) — a smooth grey annulus round the hole on
-          grass and road alike. The collar now IS the ground: the material the
-          hole was cut from (an exempt clone), its UVs continued from the hit
-          triangle's planar map, its vertex tint. The turf or tarmac runs on to
-          the torn edge and the ring cannot be seen because it is not there.
-       2. ONE MESH, AVERAGED NORMALS. Collar and cut face shared a row of
-          vertices, so computeVertexNormals tilted the collar's inner edge 45°
-          and the per-vertex Lambert lit it as a band of its own. Two meshes
-          now: the collar faces straight up like the ground it continues, the
-          section faces the hole.
-       3. THE SECTION'S PAINT CHIPS WERE READ AS LINEAR (see lin()): the base
-          course went in at 0.55 albedo, a pale grey stripe under the road.
+     The owner, after the collar was given the ground's own material: "Now the
+     sinkhole always shows green grass on the edge. Was that really a solution,
+     or did you just change the default? Why does there even need to be a
+     rim?" He was right on all three counts:
+       - the collar copied ONE downward ray at the hole's CENTRE, so a hole
+         straddling a road and a verge wore whichever one the centre hit, all
+         the way round;
+       - road-vs-grass was the CALLER's `road` flag, never the surface, and
+         every island caller passed "soil", so every island hole was turf;
+       - and the collar only existed to cover the seam the circular ground
+         mask left between the cut and the torn face.
+     So there is no collar any more. The ground mask cuts along the torn
+     face's own top edge (core/groundmask.js, PROFILE), the ground you see up
+     to the lip is the real terrain / road / footway mesh, and what the edge
+     IS, is asked at each of PROFILE_N bearings from the world's own records:
 
-     What a real collapse rim is (Guatemala City 2010, Winter Park 1981, the
-     Florida road failures, Daisetta): the torn edge of whatever was on top.
-     A ROAD breaks as slabs, so its edge is angular and notched, the black
-     wearing course over a lighter gravel base, the base washed out back
-     under the crust. GROUND tears: the turf mat overhangs the cut on its own
-     roots, droops, and the roots hang out of the dark moist topsoil under
-     it. Either way the surface round it is cracked radially and in tension
-     arcs, and broken pieces lie on the lip. All of that is built once per
-     cut, merged per material: ~4 draw calls for the whole rim.
+       island   CBZ.island.roads.walkAt  -1 carriageway, >= 0 footway
+                (world/island_roads.js), else the terrain: turf, or sand on
+                the beach ring, its tone from CBZ.island.grassColorAt /
+                dustColorAt
+       city     CBZ.streetKit.regionAt   0 carriageway, 1 footway, 2 lot
+                (city/streetkit.js), and on a lot CBZ.groundCover (the lot
+                splat's own grass answer: city/cityground.js coverAt) says
+                lawn or paving; off the street grid, CBZ.detailKit.onRoad
+                (the city road records) and the cover registry again
+       nothing  the caller's `surface` hint, which only a world with no
+                surface records of its own (a lab page) ever reaches
      ============================================================ */
+  const MASK_N = CBZ.groundMaskProfile ? CBZ.groundMaskProfile.N : 64;
+  const quantR = CBZ.groundMaskProfile ? CBZ.groundMaskProfile.quantize : function (m) { return m; };
+  // linear albedo of what a paved surface is made of (the street kits'
+  // asphalt reads ~0.05, a concrete footway ~0.28, bare earth ~0.12)
+  const TONE = { road: [0.052, 0.051, 0.05], walk: [0.29, 0.28, 0.26], bare: [0.15, 0.115, 0.08] };
+  const SOIL_LIN = [0.051, 0.041, 0.030];
+  const _cov = {};
+  /* surfaceAt(x, z, out) -> out { kind: "road"|"walk"|"turf"|"bare",
+     tone: linear rgb of the surface, torn: linear rgb of a torn clod of it }
+     `hint` is the caller's last-resort guess (see above). */
+  function surfaceAt(x, z, out, hint) {
+    out = out || { kind: null, tone: [0, 0, 0], torn: [0, 0, 0] };
+    let kind = null, grass = null;
+    if (survMode()) {
+      const I = CBZ.island, R = I && I.roads;
+      let w = -2;
+      if (R && R.walkAt) w = R.walkAt(x, z);
+      else if (R && R.onRoad && R.onRoad(x, z, 0, 0)) w = -1;
+      else if (!I && CBZ.surv.arena.onRoad && CBZ.surv.arena.onRoad(x, z, 0, 0)) w = -1;
+      if (w === -1) kind = "road";
+      else if (w >= 0) kind = "walk";
+      else if (I && Math.hypot(x - I.cx, z - I.cz) > I.R - 4) kind = "bare";      // the beach ring
+      else {
+        kind = "turf";
+        if (I && I.grassColorAt) grass = I.grassColorAt(x, z, out.tone);
+        else if (I && I.dustColorAt) {
+          // dustColorAt is torn turf (grass x 0.4 over soil): undo the mix
+          const d = I.dustColorAt(x, z, out.tone);
+          for (let k = 0; k < 3; k++) d[k] = Math.max(0.01, (d[k] - SOIL_LIN[k]) / 0.4);
+          grass = d;
+        }
+      }
+    } else {
+      const SK = CBZ.streetKit;
+      const reg = SK && SK.regionAt ? SK.regionAt(x, z) : -1;
+      if (reg === 0) kind = "road";
+      else if (reg === 1) kind = "walk";
+      else {
+        const DK = CBZ.detailKit;
+        if (reg === -1 && DK && DK.onRoad && DK.onRoad(x, z, 0)) kind = "road";
+        else {
+          const owned = CBZ.groundCover ? CBZ.groundCover.at(x, z, _cov) : false;
+          if (owned && _cov.g > 0.3) {
+            kind = "turf";
+            out.tone[0] = _cov.r; out.tone[1] = _cov.gr; out.tone[2] = _cov.b;
+            grass = out.tone;
+          } else if (owned || reg === 2) kind = "walk";      // a paved lot, a plaza, a yard
+        }
+      }
+    }
+    if (!kind) kind = hint === "asphalt" ? "road" : (hint === "soil" ? "turf" : "bare");
+    if (kind === "turf" && !grass) { out.tone[0] = 0.07; out.tone[1] = 0.1; out.tone[2] = 0.035; grass = out.tone; }
+    out.kind = kind;
+    if (kind !== "turf") { const t = TONE[kind]; out.tone[0] = t[0]; out.tone[1] = t[1]; out.tone[2] = t[2]; }
+    // a torn piece: asphalt and paving are the same through; turf is a clod
+    // of soil with the grass on top (the island's dustColorAt mix)
+    for (let k = 0; k < 3; k++) out.torn[k] = kind === "turf" ? out.tone[k] * 0.4 + SOIL_LIN[k] : out.tone[k];
+    return out;
+  }
+  /* the DRAWN top at a point: the street kits lift the carriageway and the
+     footway over the field the floor query answers with, and the torn face
+     has to reach the surface you can see, not the one you stand on */
+  function topYAt(x, z) {
+    const y = rawFloor(x, z);
+    if (survMode()) {
+      const R = CBZ.island && CBZ.island.roads;
+      if (R && R.walkAt && R.walkAt(x, z) === -1) return y + (R.lift != null ? R.lift : 0.04);
+      return y;
+    }
+    const SK = CBZ.streetKit;
+    const s = SK && SK.heightAt ? SK.heightAt(x, z) : null;
+    return s != null && s > y ? s : y;
+  }
+
+  /* ============================================================
+     THE RIM SURVEY — one pass of MASK_N bearings, and everything about the
+     edge is derived from it: the cut the ground mask makes, the torn face,
+     the overhang, the roots, the broken pieces and the cracks.
+
+     The edge is ONE polyline, at the bearings a_i = i * 2pi / MASK_N, radii
+     cut[i] — the ground mask cuts along its chords (groundmask.js) and the
+     torn face's top row is the same vertices, so the ground meets the face
+     with no seam to hide. Per vertex, by what tore there:
+       road   asphalt breaks as SLABS: a notch every four vertices, flat
+              between, the face sheared clean
+       walk   paving breaks on its JOINTS: a smaller notch every two
+       turf   tears ragged vertex to vertex, and the turf mat OVERHANGS the
+              cut on its roots by 5-35 cm: the mask stops short of the face
+              (cut < face), so the real ground mesh itself reaches out over
+              the void, with the mat's dark underside and roots under it
+       bare   ragged, no mat to hang
+     ============================================================ */
+  function surveyRim(h) {
+    const N = MASK_N, dA = TAU / N;
+    const vk = new Array(N), tone = new Array(N), torn = new Array(N);
+    const S = { kind: null, tone: [0, 0, 0], torn: [0, 0, 0] };
+    // read just outside where the lip will be: what is there now, intact
+    const probeR = h.mouth * 1.06 + 0.3;
+    for (let i = 0; i < N; i++) {
+      const a = i * dA;
+      surfaceAt(h.x + Math.cos(a) * probeR, h.z + Math.sin(a) * probeR, S, h.hint);
+      vk[i] = S.kind; tone[i] = S.tone.slice(); torn[i] = S.torn.slice();
+    }
+    // a lone bearing that disagrees with both neighbours is a sample landing
+    // on a seam, not a strip of footway 1 m wide
+    for (let i = 0; i < N; i++) {
+      const p = (i + N - 1) % N, n = (i + 1) % N;
+      if (vk[p] === vk[n] && vk[i] !== vk[p]) { vk[i] = vk[p]; tone[i] = tone[p]; torn[i] = torn[p]; }
+    }
+    // a segment is what both its ends are; across a boundary, its middle
+    const sk = new Array(N);
+    for (let i = 0; i < N; i++) {
+      const j = (i + 1) % N;
+      if (vk[i] === vk[j]) { sk[i] = vk[i]; continue; }
+      const a = (i + 0.5) * dA;
+      sk[i] = surfaceAt(h.x + Math.cos(a) * probeR, h.z + Math.sin(a) * probeR, S, h.hint).kind;
+    }
+    const face = new Float32Array(N + 1), cut = new Float32Array(N + 1), y = new Float32Array(N + 1);
+    const prof = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const a = i * dA, ca = Math.cos(a), sa = Math.sin(a);
+      const k = vk[i];
+      const smooth = (hs(h, ca * 4.1, sa * 4.1) - 0.5) * 0.08;
+      const jag = k === "road" ? hs(h, (i >> 2) + 40, 21) * 0.05 + hs(h, i, 23) * 0.01
+                : k === "walk" ? hs(h, (i >> 1) + 60, 24) * 0.03 + hs(h, i, 25) * 0.006
+                : hs(h, i, 22) * 0.035;
+      let e = h.mouth * (1.035 + smooth + jag);
+      e = Math.max(h.mouth + 0.03, e);
+      // the mat overhangs only where turf is on both sides of the bearing
+      const mat = k === "turf" && sk[i] === "turf" && sk[(i + N - 1) % N] === "turf";
+      const want = mat ? 0.05 + hs(h, ca * 6.3, sa * 6.3 + 3) * 0.3 : 0;
+      const oh = Math.max(0, Math.min(want, e - h.mouth - 0.02));
+      // the cut, quantised to exactly what the mask texture will hold
+      const m = quantR((e - oh) / h.r);
+      prof[i] = m;
+      cut[i] = m * h.r;
+      face[i] = oh > 0 ? e : cut[i];
+      // the drawn top, the higher of the edge and a step out (a kerb that
+      // starts mid-segment still meets the face, never a slot of daylight)
+      const px = h.x + ca * cut[i], pz = h.z + sa * cut[i];
+      y[i] = Math.max(topYAt(px, pz), topYAt(px + ca * 0.2, pz + sa * 0.2));
+    }
+    face[N] = face[0]; cut[N] = cut[0]; y[N] = y[0];
+    // the hole's cover, by majority: what the deep wall's top layers and
+    // the rubble at the bottom are made of
+    const count = { road: 0, walk: 0, turf: 0, bare: 0 };
+    for (let i = 0; i < N; i++) count[sk[i]]++;
+    let cover = "turf", best = -1;
+    for (const k in count) if (count[k] > best) { best = count[k]; cover = k; }
+    return { N: N, dA: dA, vk: vk, sk: sk, tone: tone, torn: torn, face: face, cut: cut, y: y, prof: prof, count: count, cover: cover };
+  }
+  // the torn face's radius at any bearing (the wall below keeps behind it)
+  function faceAt(h, a) {
+    const R = h.rim;
+    if (!R) return h.mouth * 1.035;
+    let f = (a / R.dA) % R.N; if (f < 0) f += R.N;
+    const i = Math.floor(f), t = f - i;
+    return R.face[i] + (R.face[i + 1] - R.face[i]) * t;
+  }
+  function rimIndex(h, a) {
+    const R = h.rim;
+    let f = Math.round(a / R.dA) % R.N; if (f < 0) f += R.N;
+    return f;
+  }
+  // a torn piece of whatever the rim is at that bearing (linear rgb)
+  function rimTornAt(h, a) { return h.rim ? h.rim.torn[rimIndex(h, a)] : 0x4a3727; }
+
+  /* THE SECTION UNDER EACH KIND OF COVER, in metres (the real thicknesses:
+     a wearing course over its base, a paving slab on its sand bed, a turf
+     mat over topsoil), then the hole's own soil (layersOf). */
+  const ROOTMAT = 0x2b2117;
+  function coverHexAt(h, kind, dm) {
+    if (kind === "road") return dm < 0.12 ? 0x2b2a28 : dm < 0.5 ? 0x8a7f6c : layerAt(h, dm).c;
+    if (kind === "walk") return dm < 0.12 ? 0x8d8a83 : dm < 0.27 ? 0xa08e6a : dm < 0.5 ? 0x8a7f6c : layerAt(h, dm).c;
+    if (kind === "turf") return dm < 0.07 ? ROOTMAT : dm < 0.35 ? 0x3b2a1a : layerAt(h, dm).c;
+    return dm < 0.35 ? 0x4a3727 : layerAt(h, dm).c;
+  }
+  // the band boundaries every kind shares, so neighbouring segments of
+  // different kinds share their vertices' radii and the face has no slots
+  const SEC_D = [0, 0.07, 0.12, 0.27, 0.35, 0.5, 2.1];
+  // never deeper than the hole: a breach through a 0.6 m roof stops there
+  function secMax(h) { return Math.min(SEC_D[SEC_D.length - 1], h.depth); }
+  // the crust stands proud, the loose layers under it are washed back
+  function backAt(dm) { return dm <= 0.12 ? 1 : dm <= 0.5 ? 1 + 0.014 * (dm - 0.12) / 0.38 : 1.014 + 0.014 * Math.min(1, (dm - 0.5) / 1.6); }
+
+  /* CRACKS ARE IN THE SURFACE, NOT ON IT. A crack is a darker line OF the
+     ground it runs through — dark on concrete, darker on asphalt, a black
+     line in turf — so the decal multiplies what is already drawn under it
+     (dst x src) instead of laying a colour down: the tarmac's own tone,
+     darkened, wherever it crosses tarmac, and the footway's where it crosses
+     the footway. Display-space factor ~0.38 (0.12 linear, encoded on output).
+     Shared with world/sinkhole.js's warning cracks. */
   let crackMat = null;
   function rimCrackMat() {
     if (!crackMat) {
-      crackMat = new THREE.MeshBasicMaterial({ color: 0x0b0907, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+      crackMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, blending: THREE.MultiplyBlending, transparent: true, depthWrite: false,
+        fog: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+      });
+      crackMat.color.setRGB(0.12, 0.112, 0.105);
       crackMat._shared = true;
-      if (CBZ.groundMaskExempt) CBZ.groundMaskExempt(crackMat);
     }
     return crackMat;
   }
-  function buildLip(h) {
-    const seg = 64;
-    const road = !!h.road;
+  // the hidden under-edge pieces (cap, overhang underside) face ONE way, so
+  // they cannot be seen through the ground they sit under
+  let capMat = null, undMat = null;
+  function rimMats() {
+    if (!capMat) {
+      capMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 });
+      undMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+      capMat._shared = undMat._shared = true;
+      if (CBZ.groundMaskExempt) { CBZ.groundMaskExempt(capMat); CBZ.groundMaskExempt(undMat); }
+    }
+  }
+
+  function buildRim(h) {
+    mats(); rimMats();
+    const R = h.rim, N = R.N, dA = R.dA;
     const g = new THREE.Group();
     g.position.set(h.x, 0, h.z);
-    /* THE TORN EDGE: always at or OUTSIDE the removed floor, so the edge you
-       see is an edge you can stand on. A road breaks into slabs, so its edge
-       is NOTCHED (a step every four vertices, flat between); turf tears, so
-       its edge is ragged vertex to vertex. */
-    const inner = new Float32Array(seg + 1);
-    for (let i = 0; i < seg; i++) {
-      const a = (i / seg) * TAU;
-      const smooth = (hs(h, Math.cos(a) * 4.1, Math.sin(a) * 4.1) - 0.5) * 0.08;
-      const jag = road ? hs(h, (i >> 2) + 40, 21) * 0.05 + hs(h, i, 23) * 0.01
-                       : hs(h, i, 22) * 0.035;
-      inner[i] = h.mouth * (1.035 + smooth + jag);
-    }
-    inner[seg] = inner[0];
-    /* The turf overhang: the grass mat reaches past the cut on its roots by
-       5-35 cm (never past the removed floor) and sags at its tip. */
-    const oh = new Float32Array(seg + 1);
-    if (!road) {
-      for (let i = 0; i < seg; i++) {
-        const a = (i / seg) * TAU;
-        const want = 0.05 + hs(h, Math.cos(a) * 6.3, Math.sin(a) * 6.3 + 3) * 0.3;
-        oh[i] = Math.max(0, Math.min(want, inner[i] - h.mouth - 0.02));
-      }
-      oh[seg] = oh[0];
-    }
-    // the collar reaches just past the mask's discard circle (r x 1.06) and stops
-    const COLLAR_OUT = 1.17;
-    const TOP = 0.035;
+    const c = [0, 0, 0];
+    // the face's radius at vertex i and depth dm: a function of the two
+    // alone, so every row that meets another meets it exactly
+    const faceRad = function (i, ca, sa, dm) {
+      const crumb = dm > 0.13 ? 1 + (hs(h, ca * 7.7 + dm * 3.1, sa * 7.7) - 0.5) * 0.014 : 1;
+      return R.face[i] * backAt(dm) * crumb;
+    };
 
-    /* ---- 1. THE COLLAR: the ground itself, in its own material ---- */
-    const S = h.surf;
-    const fl = [0, 0, 0];
-    if (!S) { if (h.topSampled) { fl[0] = ((h.topColor >> 16) & 255) / 255; fl[1] = ((h.topColor >> 8) & 255) / 255; fl[2] = (h.topColor & 255) / 255; } else lin(h.topColor, 1, fl); }
-    const cRows = road ? [[0, 0, 0.9], [0, 1.03, 1], [0, COLLAR_OUT, 1]]
-                       : [[1, 0, 0.72], [0, 1.0, 0.9], [0, 1.05, 1], [0, COLLAR_OUT, 1]];
+    /* ---- 1. THE TORN FACE, per segment, by what is there ----
+       Every segment is its own two columns of vertices (so a road segment
+       and a turf one beside it each keep their own bands), on radii that
+       depend on depth alone (so the columns meet). The top row is the cut
+       polyline at the drawn surface; for turf it is the cut UNDER the mat. */
     {
-      const nr = cRows.length;
-      const P = new Float32Array((seg + 1) * nr * 3), N = new Float32Array((seg + 1) * nr * 3);
-      const C = new Float32Array((seg + 1) * nr * 3), U = new Float32Array((seg + 1) * nr * 2);
-      const I = [];
-      let p = 0, q = 0;
-      for (let j = 0; j < nr; j++) {
-        const R = cRows[j];
-        for (let i = 0; i <= seg; i++) {
-          const a = (i / seg) * TAU;
-          // R[0] = this is the overhang TIP row (radius inside the cut, sagging)
-          const rad = R[0] ? inner[i] - oh[i] : (R[1] === 0 ? inner[i] : inner[i] * R[1]);
-          const y = h.gy + TOP - (R[0] ? oh[i] * 0.35 : 0);
-          const lx = Math.cos(a) * rad, lz = Math.sin(a) * rad;
-          P[p] = lx; P[p + 1] = y; P[p + 2] = lz;
-          N[p] = 0; N[p + 1] = 1; N[p + 2] = 0;
-          /* the torn edge itself darkens: crumbs of soil over the turf, the
-             fracture dust on the tarmac — the one value step that marks the
-             lip, done in the ground's own hue */
-          const k = R[2] * (0.94 + hs(h, i, 31 + j) * 0.06);
-          const base = S ? S.col : fl;
-          C[p] = base[0] * k; C[p + 1] = base[1] * k; C[p + 2] = base[2] * k;
-          if (S && S.uvm) {
-            const wx = h.x + lx, wz = h.z + lz, M = S.uvm;
-            U[q] = M[0] + M[1] * wx + M[2] * wz; U[q + 1] = M[3] + M[4] * wx + M[5] * wz;
+      const P = [], C = [], Nn = [], I = [];
+      const dMax = secMax(h);
+      for (let s = 0; s < N; s++) {
+        const kind = R.sk[s];
+        for (let b = 0; b < SEC_D.length - 1 && SEC_D[b] < dMax - 0.005; b++) {
+          const d0 = SEC_D[b], d1 = Math.min(dMax, SEC_D[b + 1]);
+          const hex = coverHexAt(h, kind, (d0 + d1) * 0.5);
+          const base = P.length / 3;
+          for (let col = 0; col < 2; col++) {
+            const i = s + col, a = (i % N) * dA, ca = Math.cos(a), sa = Math.sin(a);
+            for (let row = 0; row < 2; row++) {
+              const dm = row ? d1 : d0;
+              const rad = faceRad(i, ca, sa, dm);
+              P.push(ca * rad, R.y[i] - dm, sa * rad);
+              Nn.push(-ca, 0, -sa);
+              // the sky the face sees: open at the very top, the contact
+              // shadow under the crust, wetter further down
+              const sky = Math.exp(-dm / 0.22);
+              const kL = (0.8 * sky + skyOcc(h, dm) * (1 - sky)) * wetAt(dm) * (0.82 + hs(h, ca * 5.3, sa * 5.3 + b * 1.7) * 0.36);
+              lin(hex, kL, c);
+              C.push(c[0], c[1], c[2]);
+            }
           }
-          p += 3; q += 2;
+          // columns (top, bottom) x 2: inward-facing
+          I.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+        }
+        // the closing ledge at the bottom of the section, out to past the
+        // wall, so nothing behind the face shows through underneath it
+        {
+          const base = P.length / 3, dm = dMax;
+          lin(layerAt(h, dm).c, skyOcc(h, dm) * 0.6, c);
+          for (let col = 0; col < 2; col++) {
+            const i = s + col, a = (i % N) * dA, ca = Math.cos(a), sa = Math.sin(a);
+            const r0 = faceRad(i, ca, sa, dm), r1 = h.r * 1.22;
+            P.push(ca * r0, R.y[i] - dm, sa * r0, ca * r1, R.y[i] - dm, sa * r1);
+            Nn.push(0, -1, 0, 0, -1, 0);
+            C.push(c[0], c[1], c[2], c[0], c[1], c[2]);
+          }
+          // facing down: a ledge seen from the floor of the hole
+          I.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
         }
       }
-      for (let j = 0; j < nr - 1; j++) for (let i = 0; i < seg; i++) {
-        const a = j * (seg + 1) + i, b = a + 1, d = a + (seg + 1), e = d + 1;
-        // wound to face UP: the ground's material is single-sided
-        I.push(a, b, d, b, e, d);
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(P, 3));
-      geo.setAttribute("normal", new THREE.BufferAttribute(N, 3));
-      geo.setAttribute("color", new THREE.BufferAttribute(C, 3));
-      geo.setAttribute("uv", new THREE.BufferAttribute(U, 2));
-      geo.setIndex(I);
-      const collar = new THREE.Mesh(geo, S ? exemptClone(S.mat) : lipMat);
-      // ground takes ground's shadows: an unshadowed annulus in a shadowed
-      // field is the ring again, drawn in light
-      collar.receiveShadow = true;
-      collar.userData.groundShaftCollar = true;
-      g.add(collar);
-    }
-
-    /* ---- 2. THE SECTION under the edge, facing the hole ----
-       Rows are the section's own layers (layersOf) down to 2.1 m, two per
-       layer so each boundary is a ledge. The crust stands PROUD and the
-       loose layers under it are washed BACK (rf > 1 is further from the
-       centre), which is the undercut every photographed collapse has. Light:
-       the top few centimetres see the open sky, everything under the crust
-       is in its contact shadow (skyOcc), and earth darkens as it gets wetter
-       further down (wetAt). */
-    const P = [], C = [], I = [];
-    const LY = layersOf(h);
-    const rows = [];
-    const ROOTMAT = 0x2b2117;
-    if (!road) {
-      rows.push({ tip: true, dy: TOP, c: ROOTMAT, k: 0.55 });            // the turf's underside at the tip
-      rows.push({ rf: 1.0, dy: -0.07, c: ROOTMAT, k: 0.5 });             // back under the mat to the cut
-    } else {
-      rows.push({ rf: 1.0, dy: TOP, c: LY[0].c, k: 0.85 });              // the broken asphalt edge, in the sky
-    }
-    const skip = road ? 0 : 0.07;
-    for (let i = 0; i < LY.length && LY[i].top < 2.1; i++) {
-      const ly = LY[i], t0 = Math.max(skip, ly.top), bot = Math.min(2.1, ly.bot);
-      if (bot <= t0) continue;
-      const back = ly.name === "asphalt" ? 1.0 : ly.name === "base course" ? 1.014 : ly.name === "topsoil" ? 1.006 : 1.028;
-      rows.push({ rf: back, dy: -t0, c: ly.c }, { rf: back, dy: -bot, c: ly.c });
-    }
-    for (let j = 0; j < rows.length; j++) {
-      const R = rows[j], dm = Math.max(0, -R.dy);
-      // the sky the face sees: open at the very top, the contact shadow below
-      const sky = Math.exp(-dm / 0.22);
-      const kL = R.k != null ? R.k : (0.8 * sky + skyOcc(h, dm) * (1 - sky)) * wetAt(dm);
-      for (let i = 0; i <= seg; i++) {
-        const a = (i / seg) * TAU, ca = Math.cos(a), sa = Math.sin(a);
-        const crumb = R.tip ? 1 : 1 + (hs(h, ca * 7.7 + j * 1.3, sa * 7.7) - 0.5) * 0.014;
-        const rad = R.tip ? inner[i] - oh[i] : inner[i] * R.rf * crumb;
-        const y = h.gy + R.dy - (R.tip ? oh[i] * 0.35 + 0.025 : 0);
-        P.push(ca * rad, y, sa * rad);
-        const mot = 0.82 + hs(h, ca * 5.3, sa * 5.3 + R.dy * 11) * 0.36;
-        const c = lin(R.c, kL * mot, [0, 0, 0]);
-        C.push(c[0], c[1], c[2]);
-      }
-    }
-    for (let j = 0; j < rows.length - 1; j++) for (let i = 0; i < seg; i++) {
-      const a = j * (seg + 1) + i, b = a + 1, d = a + (seg + 1), e = d + 1;
-      I.push(a, d, b, b, d, e);
-    }
-    /* ROOTS out of the turf's underside: thin hanging strands, each a narrow
-       quad turned to face the hole, 15-60 cm, leaning in a little. */
-    if (!road) {
-      const nRoot = Math.min(140, Math.round(TAU * h.r * 2.2));
-      const rc = lin(0x6a5440, 0.42, [0, 0, 0]);
-      for (let k = 0; k < nRoot; k++) {
-        const f = hs(h, k, 41), a = f * TAU;
-        const i0 = Math.min(seg - 1, Math.floor(f * seg));
-        const radT = inner[i0] - oh[i0] * hs(h, k, 42);
-        const len = 0.15 + hs(h, k, 43) * 0.45, w = 0.012 + hs(h, k, 44) * 0.02;
-        const ca = Math.cos(a), sa = Math.sin(a), tx = -sa * w, tz = ca * w;
-        const y0 = h.gy - 0.03 - oh[i0] * 0.2, lean = 0.05 + hs(h, k, 45) * 0.12;
-        const bx = ca * radT, bz = sa * radT, ex = ca * (radT - lean), ez = sa * (radT - lean);
-        const base = P.length / 3;
-        P.push(bx - tx, y0, bz - tz, bx + tx, y0, bz + tz, ex + tx * 0.3, y0 - len, ez + tz * 0.3, ex - tx * 0.3, y0 - len, ez - tz * 0.3);
-        for (let v = 0; v < 4; v++) C.push(rc[0], rc[1], rc[2]);
-        I.push(base, base + 1, base + 2, base, base + 2, base + 3);
-      }
-    }
-    {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+      geo.setAttribute("normal", new THREE.Float32BufferAttribute(Nn, 3));
       geo.setAttribute("color", new THREE.Float32BufferAttribute(C, 3));
       geo.setIndex(I);
-      geo.computeVertexNormals();
-      const face = new THREE.Mesh(geo, lipMat);
-      face.receiveShadow = true;
-      g.add(face);
+      const m = new THREE.Mesh(geo, lipMat);
+      m.receiveShadow = true;
+      g.add(m);
     }
 
-    /* ---- 3. WHAT LIES ON THE LIP: the broken pieces of the edge ----
-       a road leaves slabs of its wearing course and spilled gravel; ground
-       leaves clods of soil and the odd lump of clay thrown up. */
+    /* ---- 2. UNDER THE EDGE ----
+       turf: the mat's underside, from the tip of the real ground's overhang
+       back and down to the cut, roots hanging out of it;
+       paved: a narrow cap just under the surface past the edge, pushed back
+       in depth, so no rasterisation sliver along the edge can show the void */
+    {
+      const P = [], C = [], Nn = [], I = [];
+      const und = [], capP = [], capC = [], capN = [], capI = [];
+      for (let s = 0; s < N; s++) {
+        const i = s, j = s + 1;
+        const ai = i * dA, aj = (j % N) * dA;
+        const ci = Math.cos(ai), si = Math.sin(ai), cj = Math.cos(aj), sj = Math.sin(aj);
+        if (R.sk[s] === "turf" && (R.face[i] > R.cut[i] + 0.005 || R.face[j] > R.cut[j] + 0.005)) {
+          const base = P.length / 3;
+          P.push(ci * R.cut[i], R.y[i] - 0.004, si * R.cut[i], ci * R.face[i], R.y[i] - 0.07, si * R.face[i],
+                 cj * R.cut[j], R.y[j] - 0.004, sj * R.cut[j], cj * R.face[j], R.y[j] - 0.07, sj * R.face[j]);
+          for (let v = 0; v < 4; v++) { Nn.push(0, -1, 0); lin(ROOTMAT, 0.5 * (0.85 + hs(h, s, 70 + v) * 0.3), c); C.push(c[0], c[1], c[2]); }
+          I.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+          und.push(s);
+        } else if (R.sk[s] !== "turf") {
+          const base = capP.length / 3;
+          lin(coverHexAt(h, R.sk[s], 0.02), 0.35, c);
+          capP.push(ci * R.cut[i], R.y[i] - 0.004, si * R.cut[i], ci * (R.cut[i] + 0.1), R.y[i] - 0.03, si * (R.cut[i] + 0.1),
+                    cj * R.cut[j], R.y[j] - 0.004, sj * R.cut[j], cj * (R.cut[j] + 0.1), R.y[j] - 0.03, sj * (R.cut[j] + 0.1));
+          for (let v = 0; v < 4; v++) { capN.push(0, 1, 0); capC.push(c[0], c[1], c[2]); }
+          capI.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
+        }
+      }
+      // roots out of the mat's underside: thin strands turned to the hole
+      if (und.length) {
+        const nRoot = Math.min(140, Math.round(und.length / N * TAU * h.r * 2.2));
+        const rc = lin(0x6a5440, 0.42, [0, 0, 0]);
+        for (let k = 0; k < nRoot; k++) {
+          const s = und[Math.floor(hs(h, k, 41) * und.length) % und.length];
+          const f = hs(h, k, 46), a = (s + f) * dA;
+          const tip = R.cut[s] + (R.cut[s + 1] - R.cut[s]) * f, root = R.face[s] + (R.face[s + 1] - R.face[s]) * f;
+          const radT = tip + (root - tip) * hs(h, k, 42);
+          const len = 0.15 + hs(h, k, 43) * 0.45, w = 0.012 + hs(h, k, 44) * 0.02;
+          const ca = Math.cos(a), sa = Math.sin(a), tx = -sa * w, tz = ca * w;
+          const y0 = R.y[s] - 0.03, lean = 0.05 + hs(h, k, 45) * 0.12;
+          const bx = ca * radT, bz = sa * radT, ex = ca * (radT - lean), ez = sa * (radT - lean);
+          const base = P.length / 3;
+          P.push(bx - tx, y0, bz - tz, bx + tx, y0, bz + tz, ex + tx * 0.3, y0 - len, ez + tz * 0.3, ex - tx * 0.3, y0 - len, ez - tz * 0.3);
+          for (let v = 0; v < 4; v++) { C.push(rc[0], rc[1], rc[2]); Nn.push(-ca, 0, -sa); }
+          // both faces: a root is seen from either side
+          I.push(base, base + 1, base + 2, base, base + 2, base + 3, base, base + 2, base + 1, base, base + 3, base + 2);
+        }
+      }
+      const mk = function (P, C, Nn, I, mat) {
+        if (!P.length) return;
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+        geo.setAttribute("normal", new THREE.Float32BufferAttribute(Nn, 3));
+        geo.setAttribute("color", new THREE.Float32BufferAttribute(C, 3));
+        geo.setIndex(I);
+        const m = new THREE.Mesh(geo, mat);
+        m.receiveShadow = true;
+        g.add(m);
+      };
+      mk(P, C, Nn, I, undMat);
+      mk(capP, capC, capN, capI, capMat);
+    }
+
+    /* ---- 3. WHAT LIES ON THE LIP: broken pieces OF what is there ----
+       on tarmac, slabs of the wearing course and spilled base gravel; on a
+       footway, paving fragments and bedding sand; on turf, clods of soil
+       with the grass still on top; on bare ground, clods. Each one lies on
+       the real surface at its own spot, in that spot's own tone. */
     if (!h.through) {
       const B = BoxBuf();
       const n = Math.min(30, Math.max(8, Math.round(TAU * h.r / 1.3)));
+      const top = [0, 0, 0], side = [0, 0, 0];
       for (let k = 0; k < n; k++) {
         const a = hs(h, k, 51) * TAU;
-        const i0 = Math.min(seg - 1, Math.floor((a / TAU) * seg));
-        const d = inner[i0] * (1.03 + hs(h, k, 52) * 0.22);
-        const kind = hs(h, k, 53);
-        let sx, sy, sz, hex, kk;
-        if (road) {
-          if (kind < 0.55) { const s = 0.25 + hs(h, k, 54) * 0.55; sx = s; sy = 0.08 + hs(h, k, 55) * 0.06; sz = s * (0.6 + hs(h, k, 56) * 0.5); hex = 0x2b2a28; kk = 0.95; }
-          else { const s = 0.1 + hs(h, k, 54) * 0.18; sx = s; sy = s * 0.6; sz = s; hex = 0x8a7f6c; kk = 0.8; }
+        const i0 = rimIndex(h, a);
+        const d = R.cut[i0] * (1.02 + hs(h, k, 52) * 0.2) + 0.08;
+        const px = Math.cos(a) * d, pz = Math.sin(a) * d;
+        const kind = R.vk[i0], tone = R.tone[i0], torn = R.torn[i0];
+        const pick = hs(h, k, 53);
+        let sx, sy, sz;
+        if (kind === "road") {
+          if (pick < 0.6) { const s = 0.25 + hs(h, k, 54) * 0.55; sx = s; sy = 0.08 + hs(h, k, 55) * 0.06; sz = s * (0.6 + hs(h, k, 56) * 0.5); top[0] = tone[0]; top[1] = tone[1]; top[2] = tone[2]; side[0] = tone[0] * 0.8; side[1] = tone[1] * 0.8; side[2] = tone[2] * 0.8; }
+          else { const s = 0.1 + hs(h, k, 54) * 0.18; sx = s; sy = s * 0.6; sz = s; lin(0x8a7f6c, 0.8, top); lin(0x8a7f6c, 0.65, side); }
+        } else if (kind === "walk") {
+          if (pick < 0.7) { const s = 0.2 + hs(h, k, 54) * 0.4; sx = s; sy = 0.05 + hs(h, k, 55) * 0.04; sz = s * (0.7 + hs(h, k, 56) * 0.4); top[0] = tone[0]; top[1] = tone[1]; top[2] = tone[2]; side[0] = tone[0] * 0.75; side[1] = tone[1] * 0.75; side[2] = tone[2] * 0.75; }
+          else { const s = 0.1 + hs(h, k, 54) * 0.14; sx = s; sy = s * 0.45; sz = s; lin(0xa08e6a, 0.75, top); lin(0xa08e6a, 0.6, side); }
         } else {
           const s = 0.14 + hs(h, k, 54) * 0.36; sx = s; sy = s * (0.5 + hs(h, k, 55) * 0.4); sz = s * (0.7 + hs(h, k, 56) * 0.4);
-          hex = kind < 0.8 ? 0x4a3727 : 0x8f5434; kk = kind < 0.8 ? 0.85 : 0.6;
+          const clay = pick > 0.85;
+          if (kind === "turf" && !clay) { top[0] = torn[0]; top[1] = torn[1]; top[2] = torn[2]; }
+          else lin(clay ? 0x8f5434 : 0x4a3727, clay ? 0.6 : 0.85, top);
+          lin(clay ? 0x8f5434 : 0x4a3727, clay ? 0.5 : 0.7, side);
         }
-        B.chunk(Math.cos(a) * d, h.gy + TOP + sy * 0.22, Math.sin(a) * d, sx, sy, sz, hs(h, k, 57) * TAU, hex, kk, k + 7);
+        const gy = topYAt(h.x + px, h.z + pz);
+        B.chunk(px, gy + sy * 0.22, pz, sx, sy, sz, hs(h, k, 57) * TAU, side, 1, k + 7, top);
       }
       const m = B.mesh(rockMat);
       if (m) { m.receiveShadow = true; m.castShadow = true; g.add(m); }
     }
 
     /* ---- 4. CRACKS in the surface round it: radial fractures out from the
-       edge, and tension arcs concentric with it a little way back. One
-       ribbon mesh lying a centimetre over whatever the ground is there. */
+       edge and tension arcs concentric with it a little way back, each
+       vertex on the drawn surface at its own spot. One ribbon mesh. */
     if (h.cracks !== false && !h.through) {
       const lines = [];
       const nR = 9 + Math.floor(hs(h, 61, 1) * 6);
       for (let k = 0; k < nR; k++) {
         let a = (k / nR) * TAU + (hs(h, k, 62) - 0.5) * 0.5;
-        const i0 = Math.min(seg - 1, Math.floor((((a % TAU) + TAU) % TAU) / TAU * seg));
-        let rr = inner[i0] * 0.995;
-        const end = inner[i0] * (1.22 + hs(h, k, 63) * 0.5) + 0.6;
+        const i0 = rimIndex(h, a);
+        let rr = R.cut[i0] + 0.02;
+        const end = R.cut[i0] * (1.22 + hs(h, k, 63) * 0.5) + 0.6;
         const pts = [];
         while (rr < end) { pts.push([Math.cos(a) * rr, Math.sin(a) * rr]); const st = 0.35 + hs(h, k, rr * 3.1) * 0.5; rr += st; a += (hs(h, k + 9, rr * 2.3) - 0.5) * 0.22 / Math.max(1, rr * 0.2); }
         lines.push({ pts: pts, w: 0.05 + hs(h, k, 64) * 0.06 });
@@ -1150,10 +1267,8 @@
           const dx = Bq[0] - A[0], dz = Bq[1] - A[1], ln = Math.hypot(dx, dz) || 1;
           const wa = L.w * (1 - 0.8 * j / Q.length), wb = L.w * (1 - 0.8 * (j + 1) / Q.length);
           const ox = -dz / ln, oz = dx / ln;
-          // a hair over the collar; outside it, clear of a road that sits a
-          // few centimetres proud of the terrain it is laid on
-          const ya = Math.max(h.gy + TOP + 0.015, rawFloor(h.x + A[0], h.z + A[1]) + 0.05);
-          const yb = Math.max(h.gy + TOP + 0.015, rawFloor(h.x + Bq[0], h.z + Bq[1]) + 0.05);
+          const ya = topYAt(h.x + A[0], h.z + A[1]) + 0.012;
+          const yb = topYAt(h.x + Bq[0], h.z + Bq[1]) + 0.012;
           CP.push(A[0] + ox * wa, ya, A[1] + oz * wa, Bq[0] + ox * wb, yb, Bq[1] + oz * wb, Bq[0] - ox * wb, yb, Bq[1] - oz * wb);
           CP.push(A[0] + ox * wa, ya, A[1] + oz * wa, Bq[0] - ox * wb, yb, Bq[1] - oz * wb, A[0] - ox * wa, ya, A[1] - oz * wa);
         }
@@ -1171,38 +1286,49 @@
 
   // ---- a tiny merged-box builder: rubble, wedged slabs and the stair all
   //      land in ONE geometry each, so a whole shaft is ~6 draw calls ----
+  /* a colour is a sRGB paint-chip hex OR an already-linear [r, g, b] (a
+     surface's own sampled tone); either way it lands linear, times k */
+  function toLin(c, k, out) {
+    if (Array.isArray(c) || (c && c.length === 3)) { out[0] = c[0] * k; out[1] = c[1] * k; out[2] = c[2] * k; return out; }
+    return lin(c | 0, k, out);
+  }
   function BoxBuf() {
     const P = [], C = [], I = [];
+    const cs = [0, 0, 0], ct = [0, 0, 0];
     return {
-      add(cx, cy, cz, sx, sy, sz, yaw, hex, k) {
+      add(cx, cy, cz, sx, sy, sz, yaw, col, k) {
         const co = Math.cos(yaw || 0), si = Math.sin(yaw || 0);
         const base = P.length / 3;
         const hx = sx / 2, hy = sy / 2, hz = sz / 2;
         const V = [[-hx, -hy, -hz], [hx, -hy, -hz], [hx, hy, -hz], [-hx, hy, -hz],
           [-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz]];
+        toLin(col, k, cs);
         for (let i = 0; i < 8; i++) {
           const v = V[i];
           P.push(cx + v[0] * co - v[2] * si, cy + v[1], cz + v[0] * si + v[2] * co);
-          const kk = k * (i > 3 ? 1 : 0.82);
-          C.push(_lin[(hex >> 16) & 255] * kk, _lin[(hex >> 8) & 255] * kk, _lin[hex & 255] * kk);
+          const kk = i > 3 ? 1 : 0.82;
+          C.push(cs[0] * kk, cs[1] * kk, cs[2] * kk);
         }
         const F = [0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1, 3, 2, 6, 3, 6, 7, 1, 5, 6, 1, 6, 2, 0, 3, 7, 0, 7, 4];
         for (let i = 0; i < F.length; i++) I.push(base + F[i]);
       },
-      // an irregular broken chunk (debris.js's shared cut solid, ~1 m across)
-      // scaled to (sx, sy, sz); a plain box only when debris.js is absent
-      chunk(cx, cy, cz, sx, sy, sz, yaw, hex, k, variant) {
+      /* an irregular broken chunk (debris.js's shared cut solid, ~1 m across)
+         scaled to (sx, sy, sz); a plain box only when debris.js is absent.
+         `top` (optional): the colour of its upper face, for a piece of a
+         surface whose top is not its body (a clod with the grass on it). */
+      chunk(cx, cy, cz, sx, sy, sz, yaw, col, k, variant, top) {
         const g = CBZ.debris && CBZ.debris.chunkGeo ? CBZ.debris.chunkGeo(variant) : null;
-        if (!g) { this.add(cx, cy, cz, sx, sy, sz, yaw, hex, k); return; }
+        if (!g) { this.add(cx, cy, cz, sx, sy, sz, yaw, top != null ? top : col, k); return; }
         const pa = g.attributes.position;
         const co = Math.cos(yaw || 0), si = Math.sin(yaw || 0);
         const base = P.length / 3;
-        const r = _lin[(hex >> 16) & 255] * k, gg = _lin[(hex >> 8) & 255] * k, b = _lin[hex & 255] * k;
+        toLin(col, k, cs);
+        toLin(top != null ? top : col, k, ct);
         for (let i = 0; i < pa.count; i++) {
           const x = pa.getX(i) * sx, y = pa.getY(i) * sy, z = pa.getZ(i) * sz;
           P.push(cx + x * co - z * si, cy + y, cz + x * si + z * co);
-          const kk = y > 0 ? 1 : 0.82;
-          C.push(r * kk, gg * kk, b * kk);
+          if (y > sy * 0.18) C.push(ct[0], ct[1], ct[2]);
+          else { const kk = y > 0 ? 1 : 0.82; C.push(cs[0] * kk, cs[1] * kk, cs[2] * kk); }
           I.push(base + i);
         }
       },
@@ -1247,7 +1373,7 @@
       const s = slab ? 0.9 + hs(h, i, 4) * 1.6 : 0.5 + hs(h, i, 4) * 0.9;
       B.chunk(h.x + Math.cos(a) * d, y, h.z + Math.sin(a) * d,
         s, slab ? 0.22 + hs(h, i, 5) * 0.2 : s * (0.5 + hs(h, i, 5) * 0.4), s * (0.6 + hs(h, i, 6) * 0.6),
-        hs(h, i, 7) * TAU, slab ? h.surfaceColor : 0x4a4036, 0.16 + hs(h, i, 8) * 0.1, i);
+        hs(h, i, 7) * TAU, slab ? rimTornAt(h, a) : 0x4a4036, 0.16 + hs(h, i, 8) * 0.1, i);
     }
     // wedged slabs → the void spaces
     const nV = wedges;
@@ -1256,7 +1382,7 @@
       const rr = h.r * 0.72;
       const px = h.x + Math.cos(a) * rr, pz = h.z + Math.sin(a) * rr;
       const w = Math.max(3.2, h.r * 0.55);
-      B.add(px, h.bottom + 1.15, pz, w * 0.8, 0.45, w, a, h.surfaceColor, 0.2);
+      B.add(px, h.bottom + 1.15, pz, w * 0.8, 0.45, w, a, rimTornAt(h, a), 0.2);
       B.add(px + Math.cos(a) * 0.1, h.bottom + 0.45, pz + Math.sin(a) * 0.1, 0.7, 1.0, 0.7, a, 0x3a332c, 0.16);
       h.voids.push({ x: px - Math.cos(a) * 0.7, z: pz - Math.sin(a) * 0.7, r: Math.max(1.6, w * 0.42) });
     }
@@ -1300,7 +1426,7 @@
       // yaw = a puts the box's local +x along the RADIUS, so `wide` is radial
       // and `arc` tangential — swap them and the stair spirals through its wall
       B.add(h.x + Math.cos(a) * rm, y - 0.22, h.z + Math.sin(a) * rm,
-        wide, 0.44, arc, a, i % 4 === 3 ? h.surfaceColor : 0x6b6154, k);
+        wide, 0.44, arc, a, i % 4 === 3 ? rimTornAt(h, a) : 0x6b6154, k);
     }
     return B.mesh(rockMat);
   }
@@ -1330,7 +1456,9 @@
       mouth: r * 0.93,          // the floor is gone a hair inside the visible rim
       gy: gy, depth: depth, bottom: gy - depth,
       seed: opts.seed != null ? opts.seed : (x * 0.37 + z * 0.11),
-      surfaceColor: opts.surface === "asphalt" ? 0x2f2e2c : (opts.surface === "soil" ? 0x554129 : (survMode() ? 0x4c5a34 : 0x2f2e2c)),
+      /* the caller's word for the ground, read ONLY where the world keeps
+         no surface records of its own (surfaceAt's last resort) */
+      hint: opts.surface || null,
       mode: CBZ.game ? CBZ.game.mode : null,
       grp: new THREE.Group(),
       voids: [],
@@ -1351,9 +1479,6 @@
       coneH: opts.bowl ? Math.min(0.5, depth * 0.12) : Math.min(4.2, depth * 0.11),
       stepN: 0, stepA0: 0, stepArc: STAIR_ARC, stepIn: r * 0.78,
       born: CBZ.now || 0,
-      /* the section's top layers: a road is asphalt over base course, open
-         ground is topsoil (layersOf) */
-      road: opts.road != null ? !!opts.road : opts.surface === "asphalt",
       // metres of standing water above the bottom, carried across re-cuts
       waterLevel: opts.water > 0 ? +opts.water : 0,
       /* the sinkhole EVENT (world/sinkhole.js) takes everything standing in
@@ -1361,24 +1486,11 @@
          them first would delete the cars it is about to tip in */
       keepInside: !!opts.keepInside,
     };
-    /* Sampled BEFORE the group joins the scene, so the raycast cannot find an
-       earlier row of our own collar and copy a copy. `opts.top` lets a caller
-       state the colour outright; a failed sample falls back to the section
-       colour, which is what the collar always used to be. */
-    /* the SURFACE the hole is cut from (material, tint, UV map) — the collar
-       is drawn in it (buildLip). A caller that names `top` outright (a
-       meteor's ejecta blanket) gets a flat collar of that colour instead;
-       a re-cut carries `surf` (and the cache would answer it anyway). */
-    h.surf = opts.surf !== undefined ? opts.surf : (opts.top != null && !opts.topSampled ? null : groundSurfaceAt(x, z, gy));
     h.cracks = opts.cracks !== false;
-    const top = opts.top != null ? opts.top : (h.surf ? h.surf.hex : null);
-    h.topColor = top != null ? top : h.surfaceColor;
-    /* Carried, not re-derived. Every shaft is re-cut five or six times as it
-       grows and each re-cut passes the colour in, so deriving "was this
-       sampled" from `opts.top == null` reported false for every hole in the
-       game the moment it finished opening — the colour was the sampled one,
-       the flag had simply forgotten where it came from. */
-    h.topSampled = opts.topSampled != null ? !!opts.topSampled : (top != null && opts.top == null);
+    /* WHAT IS THERE, ROUND THE WHOLE EDGE, before anything is built: the
+       cut the mask makes, the face, the cover the wall is a section of */
+    h.rim = surveyRim(h);
+    h.cover = h.rim.cover;
     if (CBZ.CONFIG.SHAFT_ESCAPE !== false && !h.bowl) {
       h.stepN = Math.max(6, Math.min(34, Math.round(depth / 1.3)));
       h.stepA0 = stairA0(h.seed);
@@ -1386,7 +1498,7 @@
       h.stepIn = h.mouth * 0.78;
     }
     const wall = buildWall(h);
-    const lip = buildLip(h);
+    const lip = buildRim(h);
     const rubble = h.through ? null : buildFloorFurniture(h);
     const dish = buildDish(h);
     const stair = buildStair(h);
@@ -1575,12 +1687,19 @@
      sinkhole must still crush people) and hurts whoever it lands on.
      ============================================================ */
   const slabMats = new Map();
-  function slabMat(hex) {
-    let m = slabMats.get(hex);
-    if (!m) { const c = lin(hex, 1, [0, 0, 0]); m = new THREE.MeshLambertMaterial(); m.color.setRGB(c[0], c[1], c[2]); m._shared = true; slabMats.set(hex, m); }
+  // a colour is a sRGB hex or a sampled linear [r, g, b] (toLin); cached by
+  // value, quantised, so a widening hole does not mint a material a calving
+  function slabMat(col) {
+    const c = toLin(col, 1, [0, 0, 0]);
+    const key = Math.round(c[0] * 400) + "," + Math.round(c[1] * 400) + "," + Math.round(c[2] * 400);
+    let m = slabMats.get(key);
+    if (!m) { m = new THREE.MeshLambertMaterial(); m.color.setRGB(c[0], c[1], c[2]); m._shared = true; slabMats.set(key, m); }
     return m;
   }
-  function slabKind(hex) { return hex === 0x2f2e2c ? "asphalt" : "dirt"; }
+  /* the debris system's material class for a piece OF a surface kind
+     (systems/debris.js: asphalt breaks angular and grey-gritted, concrete
+     the same paler, earth into clods) */
+  function debrisKind(kind) { return kind === "road" ? "asphalt" : kind === "walk" ? "concrete" : "dirt"; }
   const _chunkV = new THREE.Vector3(), _chunkW = new THREE.Vector3();
   function dropChunk(o) {
     const s = o.size || 1.2;
@@ -1590,7 +1709,7 @@
       _chunkV.set(o.vx || 0, o.vy || 0, o.vz || 0);
       _chunkW.set((rnd() - 0.5) * 5, (rnd() - 0.5) * 2, (rnd() - 0.5) * 5);
       CBZ.debris.shatterBox({ minX: o.x - s / 2, maxX: o.x + s / 2, minY: o.y - hh / 2, maxY: o.y + hh / 2, minZ: o.z - dd / 2, maxZ: o.z + dd / 2 },
-        slabMat(col), { kind: slabKind(col), launch: false, velocity: _chunkV, angular: _chunkW,
+        slabMat(col), { kind: o.kind ? debrisKind(o.kind) : "dirt", launch: false, velocity: _chunkV, angular: _chunkW,
           maxPieces: s > 1.4 ? 4 : 3, size: Math.max(0.25, s * 0.5), owner: "groundshaft", dust: 0.6, grit: 0.5 });
     }
     chunks.push({
@@ -1654,6 +1773,10 @@
     mats: function () { mats(); return { wall: wallMat, rock: rockMat, lip: lipMat }; },
     BoxBuf: BoxBuf, dropChunk: dropChunk, disposeShaft: disposeShaft, shaftFloor: shaftFloor,
     syncMask: syncMask,
+    // what the ground IS at a point, and a section under each kind of it:
+    // world/sinkhole.js's crust slabs and cracks read the same answers
+    surfaceAt: surfaceAt, topYAt: topYAt, coverHexAt: coverHexAt, debrisKind: debrisKind,
+    crackMat: rimCrackMat, toLin: toLin,
   };
 
   /* ============================================================
@@ -1796,7 +1919,7 @@
       dbgEl.textContent =
         "shafts " + a.shafts + "  LIDS " + a.lidsOverMouth + "  rings " + a.ringsOnSolidGround +
         "\nslots " + a.maskSlots + "/" + a.unslottedShafts + " unslotted  swept " + a.sweptMeshes +
-        "\ncollar " + a.collarSampled +
+        "\nrim road " + a.rimSegments.road + " walk " + a.rimSegments.walk + " turf " + a.rimSegments.turf + " bare " + a.rimSegments.bare +
         "\nthroat " + a.throatShade + "  q" + (CBZ.qualityAutoStats ? CBZ.qualityAutoStats.level : "?") +
         "  pbr" + ((CBZ.gfxTier && CBZ.gfxTier.pbr) ? 1 : 0) +
         "\ngl" + (cap && cap.isWebGL2 ? 2 : 1) + " " + (cap ? cap.precision : "?");
@@ -1818,7 +1941,7 @@
        ringsOnSolidGround
                        0  — HARD INVARIANT, and the one this file got wrong for
                             a whole release: a shaft DRAWN over ground that is
-                            still being drawn. That is a lip collar lying on
+                            still being drawn. That is a torn rim lying on
                             unbroken grass with the road running across it —
                             a hole you cannot see and fall into anyway, because
                             the floor query never had the mask's slot limit.
@@ -1834,8 +1957,13 @@
                           as a hole or as a ring. It was 0.63.
        rimShade           the ladder at the rim itself — the brightest surface
                           anywhere in the shaft (was 1.0: fully lit)
-       collarSampled      shafts whose lip collar wears the colour of the
-                          ground it was cut from rather than generic soil
+       rimSegments        rim segments, summed over live shafts, by what the
+                          survey found there (road / walk / turf / bare): a
+                          hole across a road and a verge counts in both, and
+                          a city junction hole that reads all turf is the
+                          bug the owner photographed
+       rimProfiled        shafts whose ground cut is the torn face's own
+                          polyline (the mask profile), not a circle
        lidsOverMouth   0  HARD INVARIANT once a hole has finished opening, and
                           the only field that can catch a ground mask which
                           silently did not take: a flat, visible, UNMASKED
@@ -1906,7 +2034,8 @@
   }
   CBZ.shaftAudit = function () {
     let worst = 0, onSlope = 0, dow = 0, deepest = 0, priv = 0, rings = 0, nearUn = Infinity, inUn = 0;
-    let lids = 0, sampled = 0, surfaced = 0, throat = 0, rim = 0;
+    let lids = 0, profiled = 0, throat = 0, rim = 0;
+    const segs = { road: 0, walk: 0, turf: 0, bare: 0 };
     const eye = CBZ.groundMaskEye ? CBZ.groundMaskEye()
       : { x: CBZ.camera ? CBZ.camera.position.x : 0, z: CBZ.camera ? CBZ.camera.position.z : 0 };
     const ex = eye.x, ez = eye.z;
@@ -1918,8 +2047,7 @@
       dow += h.depth / (h.r * 2);
       if (h.depth > deepest) deepest = h.depth;
       if (pub.indexOf(h) < 0) priv++;
-      if (h.topSampled) sampled++;
-      if (h.surf) surfaced++;
+      if (h.rim) { profiled++; for (const k in segs) segs[k] += h.rim.count[k] || 0; }
       throat += throatShade(h);
       rim += skyOcc(h, 0);
       /* ONLY A SETTLED HOLE IS ASKED. A shaft still growing is re-cut six or
@@ -1954,9 +2082,8 @@
       // near 1.0, so this has to stay well under it.
       throatShade: live.length ? +(throat / live.length).toFixed(3) : 0,
       rimShade: live.length ? +(rim / live.length).toFixed(3) : 0,
-      collarSampled: sampled,
-      // collars drawn IN the ground they were cut from (material + UVs), not a flat hex
-      collarInGround: surfaced,
+      rimSegments: segs,
+      rimProfiled: profiled,
       lidsOverMouth: lids,
       nearestUnslotted: nearUn === Infinity ? null : +nearUn.toFixed(1),
       holeSlopeMax: +worst.toFixed(3),

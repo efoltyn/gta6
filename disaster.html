@@ -514,7 +514,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ONE STAIR SYSTEM: flight walk surfaces + level links + AI routes. Before any world builder (the prison builds at parse time). -->
 <script src="src/systems/stairs.js?v=sink1011"></script>
 <!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
-<script src="src/systems/craters.js?v=meteor1014"></script>
+<script src="src/systems/craters.js?v=norim1020"></script>
 <!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
 <!-- A TUNNEL IS A HOLE LYING DOWN: a swept carving with its lid intact. -->
 <!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
@@ -966,7 +966,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_plan.js?v=plan1"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=feel1020"></script>
+<script src="src/world/disaster_arena.js?v=norim1020"></script>
 <script src="src/world/island_dressing.js?v=dress2town"></script>
 <script src="src/systems/grapple.js?v=feel1020"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
@@ -984,10 +984,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
-<script src="src/world/groundshaft.js?v=rim1020"></script>
+<script src="src/world/groundshaft.js?v=norim1020"></script>
 <!-- THE SINKHOLE EVENT (warning, cover collapse, calving, what goes in) reads
      the shaft through CBZ.groundShaftKit, so it loads right after it. -->
-<script src="src/world/sinkhole.js?v=rim1020"></script>
+<script src="src/world/sinkhole.js?v=norim1020"></script>
 <!-- THE VOLCANO IS SHARED: world/volcanofx.js owns the opaque crusted lava,
      the pyroclastic density current, the lahar and the ash LOAD, all keyed on
      a position + a height field so a city-side eruption calls the same four
@@ -1045,11 +1045,11 @@ document.body.appendChild(b);}}catch(e){}})();
      pressure front (one overpressure law: glass, trees, cars, buildings) and
      its late bang, craters with rim + ejecta blanket, curtain, plume, fires.
      REQUIRED by systems/disasters.js (no legacy shower any more). -->
-<script src="src/systems/meteor.js?v=debris1015"></script>
+<script src="src/systems/meteor.js?v=norim1020"></script>
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=mrg10202040"></script>
+<script src="src/systems/disasters.js?v=norim1020"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=feel1020"></script>

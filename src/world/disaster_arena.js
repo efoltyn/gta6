@@ -5877,7 +5877,18 @@
         helipads: fragile.filter(function (b) { return b.helipadCandidate; }),
         roads: { pieces: pieces, junctions: roadPlan ? roadPlan.junctions.map(function (j) { return { x: j.x, z: j.z, n: j.n, N: j.N, S: j.S, E: j.E, W: j.W }; }) : [],
           lanes: lanes, bridges: harbourOut.bridges, segs: roadSegs,
-          inStreet: function (r) { return P ? !!P.inStreet(r, 0) : false; }, onRoad: onRoad },
+          inStreet: function (r) { return P ? !!P.inStreet(r, 0) : false; }, onRoad: onRoad,
+          /* what the street IS at a point, not just whether one is near:
+             >= 0 the footway's height over the ground, -1 the carriageway,
+             -2 no street (island_roads.js walkAt). onRoad answers for the
+             whole corridor, verge and footways included, so a sinkhole rim
+             could not tell asphalt from paving from it. */
+          walkAt: function (x, z) { return roadNet && roadNet.walkAt ? roadNet.walkAt(x, z) : -2; },
+          // asphalt over the plain (island_roads.js LIFT): the drawn road top
+          lift: CBZ.islandRoadKit && CBZ.islandRoadKit.C ? CBZ.islandRoadKit.C.LIFT : 0.04 },
+        // the turf's own linear albedo at a point (the same field the grass
+        // vertex colours are painted from)
+        grassColorAt: function (x, z, out) { return grassColorAt(x, z, out || [0, 0, 0]); },
         // the harbour is a LIST of seawall / pier points (what the storm's surf
         // hits hardest: systems/hurricane.js harbour()) carrying the rest of
         // the harbour as named fields
