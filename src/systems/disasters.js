@@ -1861,6 +1861,71 @@
   // signed sweep coordinate of a point along the travel direction
   function tsuS(ctx, x, z) { const st = ctx.st; return (x - ctx.cx) * st.dx + (z - ctx.cz) * st.dz; }
 
+  /* ---- ONE SIDE, NOT ALL OF THEM (2026-10-20) -----------------------------
+     Owner: "the tsunami seems to come from all sides of the island and meet
+     in the middle. It should come from one side and go to the other." The
+     levels above were island-wide: once the straight front had passed the
+     flanks and the far beach, every coast stood under the same head of sea
+     and the run-up (world/tsunami_runup.js forces its sea cells to exactly
+     that) poured in from all of them at once. Now the sea carries the
+     island's SHADOW (world/water_spec.js cbzLeeShadow / waterLeeShadow): the
+     facing coast takes the whole wave, the flanks a glancing share, and the
+     lee only a small late wrap-around, so the water crosses the island in
+     the wave's direction and runs out of the far side. `lee` is published
+     on the event: b / a = metres the fully shadowed sea sits below the
+     water behind / ahead of the front. */
+  /* the sea after a tsunami: brown and heaving, settling over ~45 s */
+  let tsuSeaCalm = null;
+  function tsuSeaCalmStep(dt) {
+    const c = tsuSeaCalm;
+    if (!c) return;
+    const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
+    if (!W) { tsuSeaCalm = null; return; }
+    c.t += dt;
+    const k = Math.min(1, c.t / c.dur), e = 1 - (1 - k) * (1 - k);
+    W.amp = c.amp + (0.86 - c.amp) * e;
+    W.chop = c.chop + (0.72 - c.chop) * e;
+    W.foam = c.foam + (0.34 - c.foam) * e;
+    W.sediment = c.sed * (1 - e);
+    W.flowSpeed = 0.5 * (1 - e);
+    W.churn = c.churn * (1 - e);
+    W.lineFoam = 0.3 + 0.7 * e;
+    if (k >= 1) { W.sediment = 0; W.stand = 0; W.flowSpeed = 0; W.churn = 0; W.lineFoam = 1; tsuSeaCalm = null; }
+  }
+  const TSU_WRAP = 0.16;          // the lee's wrap-around crest, as a share of the facing one
+  const TSU_LEE_DRAW = 0.45;      // ...and of the drawdown (it reaches the lee late)
+  function tsuLeeGeom(ctx) {
+    const st = ctx.st, A = ctx.arena;
+    const rest = A && A.oceanY != null ? A.oceanY : -0.8;
+    const cx = ctx.cx, cz = ctx.cz, dx = st.dx, dz = st.dz;
+    let x0 = cx - ctx.R * 1.3, x1 = cx + ctx.R * 1.3, z0 = cz - ctx.R * 1.3, z1 = cz + ctx.R * 1.3;
+    const IB = CBZ.island && CBZ.island.bounds;
+    if (IB && Number.isFinite(IB.x0) && Number.isFinite(IB.x1) && Number.isFinite(IB.z0) && Number.isFinite(IB.z1)) {
+      x0 = IB.x0; x1 = IB.x1; z0 = IB.z0; z1 = IB.z1;
+    }
+    const step = Math.max(4, Math.max(x1 - x0, z1 - z0) / 96);
+    let sMin = 1e9, sMax = -1e9, lMin = 1e9, lMax = -1e9, n = 0;
+    for (let z = z0; z <= z1; z += step) for (let x = x0; x <= x1; x += step) {
+      if (!(floor(x, z) > rest + 0.4)) continue;
+      const rx = x - cx, rz = z - cz, s = rx * dx + rz * dz, l = -rx * dz + rz * dx;
+      if (s < sMin) sMin = s; if (s > sMax) sMax = s;
+      if (l < lMin) lMin = l; if (l > lMax) lMax = l;
+      n++;
+    }
+    if (!n) { sMin = lMin = -ctx.R; sMax = lMax = ctx.R; }
+    const lw = Math.max(20, (lMax - lMin) * 0.5 * 0.9);
+    return { on: 1, b: 0, a: 0, lc: (lMin + lMax) * 0.5, lw: lw, d0: 22 + 0.18 * lw,
+      sMid: (sMin + sMax) * 0.5, sMin: sMin, sMax: sMax };
+  }
+  // set the lee from the three levels (surge metres): the sea behind the
+  // front, ahead of it, and what the fully shadowed lee is standing at
+  function tsuLee(st, behind, ahead, leeBehind, leeAhead) {
+    const L = st.lee;
+    if (!L) return;
+    L.b = behind - leeBehind;
+    L.a = ahead - (leeAhead == null ? leeBehind : leeAhead);
+  }
+
   /* ---- THE WAVE'S SPEED OVER GROUND (TSU_SHOAL_V2) ------------------------
      c = √(g·d): a tsunami is fastest over deep water and SPENDS that speed
      standing up as the bottom rises. The only bathymetry this arena has is
@@ -1955,11 +2020,20 @@
       W.flowSpeed = 0.6 + Math.abs(Number.isFinite(flow) ? flow : 0) * 0.9;
       W.stand = st.phase === "sweep" ? 0 : (st.phase === "flooded" ? 1 : 0.8);
       W.aheadDrop = st.aheadDrop || 0;
+      /* THE BOIL AND THE WHITE WATER (world/water_spec.js uDwChurn /
+         dwFoamClumps): the sea heaves hardest behind a live bore, keeps
+         churning while the town is under and through the wave train, and
+         its crest lines give way to the flood's own clumps. */
+      const rise = st.phase === "drain" ? Math.min(1, Math.abs(st.undertow || 0) / 6) : 0;
+      W.churn = st.phase === "warn" ? 0 : st.phase === "sweep" ? (st.broke ? 1 : 0.35 + 0.5 * (st.shoal || 0))
+        : st.phase === "flooded" ? 0.55 : 0.3 + 0.45 * rise;
+      W.lineFoam = 0.3;
     }
     if (CBZ.waterEventSet) CBZ.waterEventSet({
       owner: "survival-tsunami", kind: "tsunami", phase: st.phase,
       cx: ctx.cx, cz: ctx.cz, dx: st.dx, dz: st.dz,
       frontS: st.frontS, frontWet: -2, frontWidth: 20, aheadDrop: st.aheadDrop || 0,
+      lee: st.lee || null,
       level: CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : st.level,
       waveAmp: st.waveAmp, chopAmp: st.chopAmp,
       sediment: st.sediment || 0,
@@ -1986,8 +2060,6 @@
      water and the wreckage it drags really do go back out to sea.
      ============================================================ */
   let tsuRun = null, tsuRunArena = null;
-  // s after the tsunami's end that the water on the land takes to drain
-  const TSU_DRAIN_SECS = 18;
   function tsuBlocks(A) {
     const I = CBZ.island;
     const list = (I && Array.isArray(I.buildings) && I.buildings.length) ? I.buildings : (A.fragile || []);
@@ -2051,13 +2123,13 @@
         const e = CBZ.waterEventGet ? CBZ.waterEventGet() : null;
         if (e && e.owner !== "survival-tsunami") return true;
         if (e || f._endT == null) return false;
-        /* TSU_DRAIN_SECS (18), not 40: the backwash belongs to the tsunami
-           and the calm after it must be calm. Not 14 either, with a 1.5%
-           cut: that detached a field with every hollow still full, and the
-           ponds blinked off. The field's own deadline drain (seepEnd) has
-           the level dropping to the ground by then; the volume test only
-           stops a field that has really emptied early. */
-        return f.t - f._endT > TSU_DRAIN_SECS + 0.5 || f.landVol < Math.max(6, f.peakLandVol * 0.002);
+        /* NO CLOCK (2026-10-20). This used to detach 18.5 s after the card
+           whatever the land still held, and the ponds blinked off with it.
+           The field now stays until the ground has really taken the water
+           (the seep in end() below), and the director's calm waits for it
+           (busyList "backwash"): the next card does not start on a drowned
+           town. */
+        return f.landVol < Math.max(3, f.peakLandVol * 0.0015);
       },
     });
     ctx.st.run = F;
@@ -2523,8 +2595,9 @@
     st.waveAmp = 1.06; st.chopAmp = 0.98; st.foamGain = 0.62;
     if (st.wave) st.wave.visible = false;
     tsuLevels(st, st.floodSurge, st.floodSurge);
+    tsuLee(st, st.floodSurge, st.floodSurge, TSU_WRAP * st.floodSurge);
     tsuPublish(ctx, 1.6);
-    narrate("hint", "THE ISLAND IS UNDER, swim, climb, survive", 3);
+    narrate("hint", "The town is under. Climb.", 3);
   }
 
   /* THE CLOCK (TSU_PACE_V2, declared in city/tsunami.js — which loads after
@@ -2537,6 +2610,14 @@
      now 22 s and the front spends more of it moving. ?cfg_TSU_PACE_V2=0
      restores the old numbers exactly. */
   const TSU_FAST = () => CBZ.CONFIG.TSU_PACE_V2 !== false;
+  /* THE TRAIN after the first crest: [seconds since the backwash began,
+     level]. A positive level is that share of the first crest's flood
+     surge, a negative one that share of the trough (half the drawdown). */
+  const TSU_TRAIN = [
+    [0, 1.0], [6.0, -1.0], [9.0, -1.0],          // the backwash, and the sea held out
+    [14.0, 0.52], [16.0, 0.52], [21.0, -0.55],   // the second crest, and its run back
+    [25.0, 0.26], [26.5, 0.26], [31.5, 0.0],     // the third, and the sea settling
+  ];
   const TSUNAMI_V2 = {
     name: "TSUNAMI", emoji: "",
     get warnSecs() { return TSU_FAST() ? 6 : 10; },
@@ -2544,7 +2625,9 @@
        below); the extra ten seconds are the run-up finishing its climb and
        the BACKWASH, which used to be a 2.7 s fade and is now the water
        actually running back down the streets to the sea. */
-    get activeSecs() { return TSU_FAST() ? 26 : 32; },
+    // an upper bound: the card ends itself when the wave train has run out
+    // (st.endIn in the drain), ~50 s in, the backwash and two more crests
+    get activeSecs() { return TSU_FAST() ? 58 : 70; },
     gap: 8,
     cause: "swept away by the tsunami", tint: 0x2c5a78,
     warn(ctx) {
@@ -2554,6 +2637,7 @@
          travels away from it (the front runs along +d). */
       const a = st.chainBearing != null ? st.chainBearing + Math.PI : rnd() * Math.PI * 2;
       st.dx = Math.cos(a); st.dz = Math.sin(a);
+      st.lee = tsuLeeGeom(ctx);    // the island's shadow on this bearing
       st.warnT = 0; st.phase = "warn";
       /* THE SIZE OF THIS ONE (2026-08-29, owner: "all the natural disasters
          are cookie cutter size"). A per-occurrence magnitude roll — the
@@ -2599,7 +2683,14 @@
          a siren because it is information you have to KNOW how to read rather
          than a label telling you what to feel (city/tsunami.js's argument,
          and this is now the same one number driving it). */
-      surgeSet((st.draw != null ? st.draw : TSU_DRAW) * (k * k * (3 - 2 * k)));
+      const drawK = (st.draw != null ? st.draw : TSU_DRAW) * (k * k * (3 - 2 * k));
+      surgeSet(drawK);
+      /* THE TROUGH COMES FROM THE WAVE'S SIDE. A leading-depression tsunami
+         empties the facing shelf first; the lee only feels it late and
+         weakly (the island shelters it), so the drawdown is a half-strength
+         echo there that starts once the facing side is already bare. */
+      const lk = Math.max(0, Math.min(1, (k - 0.45) / 0.55));
+      tsuLee(st, drawK, drawK, drawK * TSU_LEE_DRAW * lk * lk * (3 - 2 * lk));
       st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : st.level;
       st.waveAmp = 0.86 + k * 0.38;
       st.chopAmp = 0.72 + k * 0.62;
@@ -2788,6 +2879,18 @@
           ahead += (behind - ahead) * ease(out);
         }
         tsuLevels(st, behind, ahead);
+        /* THE LEE: still drawn (the half-strength trough) until the front is
+           across, then a small late wrap-around once the wave has passed the
+           island's far shore. The water that reaches the lee coast first is
+           the run-up crossing the land, not the sea coming round. */
+        {
+          const L = st.lee;
+          const leeAhead = drawM * TSU_LEE_DRAW * (1 - land) * (1 - land);
+          const sM = L ? L.sMax : ctx.R;
+          const wk = Math.max(0, Math.min(1, (st.frontS - sM) / (0.6 * ctx.R + 52)));
+          const wrapTop = TSU_WRAP * st.floodSurge;
+          tsuLee(st, behind, ahead, leeAhead + (wrapTop - leeAhead) * ease(wk), leeAhead);
+        }
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0.8;
         const aheadY = (ctx.arena && ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8) + ahead;
         const fx0 = ctx.cx + st.dx * st.frontS, fz0 = ctx.cz + st.dz * st.frontS;
@@ -2924,6 +3027,7 @@
       } else if (st.phase === "flooded") {
         st.floodT += dt;
         tsuLevels(st, st.floodSurge, st.floodSurge);
+        tsuLee(st, st.floodSurge, st.floodSurge, TSU_WRAP * st.floodSurge);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : st.floodSurge;
         st.sediment = 0.95;
         tsuPublish(ctx, 1.6);
@@ -2946,44 +3050,64 @@
           if (st.floodT < base) st.floodBudget = base;
           else if (growing) st.floodBudget = Math.min(11, Math.max(st.floodBudget || base, st.floodT + 0.25));
         } else st.floodBudget = base;
-        if (st.floodT > st.floodBudget) { st.phase = "drain"; st.drainFrom = st.floodSurge; narrate("hint", "The water is DRAINING, move!", 2.4); }
-      } else {  // drain — slow, and what it drags out with it is the memory
-        const cur = CBZ.waterSurge ? CBZ.waterSurge() : 0;
-        // the SEA falls in ~5 s; the land's water then runs back on its own.
-        /* ...AND IT FALLS PAST REST. A tsunami is a wave TRAIN: behind the
-           crest comes the next trough, and with the run-up field on the sea
-           goes back out below its rest level (half the drawdown) — the head
-           that drags the backwash off the land — then eases back to rest in
-           the event's last four seconds, so end() puts back nothing visible. */
-        const left = ctx.activeSecs - (st.activeT || 0);
-        const trough = st.run ? 0.5 * (st.draw != null ? st.draw : TSU_DRAW) * Math.min(1, Math.max(0, (left - 0.3) / 4)) : 0;
-        const rate = dt * (st.floodSurge + 1.5) / (TSU_FAST() ? 5 : 6.4);
-        const next = cur > trough ? Math.max(trough, cur - rate) : Math.min(trough, cur + rate * 0.6);
-        tsuLevels(st, next, next);
+        if (st.floodT > st.floodBudget) { st.phase = "drain"; st.drainFrom = st.floodSurge; st.trainT = 0; st.trainPrev = st.floodSurge; narrate("hint", "It's going back out. Hold on.", 2.4); }
+      } else {  // drain — the backwash and the wave train behind it
+        /* A TSUNAMI IS A WAVE TRAIN, NOT ONE WAVE (2026-10-20, owner: "the
+           way tsunamis disappear is unrealistic"). The old drain walked the
+           sea down to a trough and the event ended on a clock: one crest and
+           a fade. Every Tohoku and Aceh record shows the sea going out HARD
+           (the backwash, the half that drags the town out with it), then a
+           second and a third crest, each lower, minutes apart, the sea brown
+           and heaving the whole time. Time-compressed here to ~30 s; the
+           crests come from the same side as the first (the lee shadow still
+           holds), and what the land still holds after the last one drains
+           on its own (world/tsunami_runup.js), long after this card. */
+        st.trainT = (st.trainT || 0) + dt;
+        const F0 = st.floodSurge, T0 = 0.5 * (st.draw != null ? st.draw : TSU_DRAW);
+        const sc = TSU_FAST() ? 0.8 : 1;
+        const K = TSU_TRAIN;
+        const tt = st.trainT / sc;
+        let lvl = 0;
+        if (tt >= K[K.length - 1][0]) lvl = 0;
+        else for (let i = 1; i < K.length; i++) {
+          if (tt > K[i][0]) continue;
+          const a0 = K[i - 1], a1 = K[i];
+          const u = Math.max(0, Math.min(1, (tt - a0[0]) / Math.max(0.001, a1[0] - a0[0])));
+          const v0 = a0[1] >= 0 ? a0[1] * F0 : -a0[1] * T0, v1 = a1[1] >= 0 ? a1[1] * F0 : -a1[1] * T0;
+          lvl = v0 + (v1 - v0) * u * u * (3 - 2 * u);
+          break;
+        }
+        const dS = dt > 0 ? (lvl - (st.trainPrev != null ? st.trainPrev : lvl)) / dt : 0;
+        st.trainPrev = lvl;
+        tsuLevels(st, lvl, lvl);
+        // the lee: a small late echo of each crest, a weaker trough
+        tsuLee(st, lvl, lvl, lvl > 0 ? TSU_WRAP * lvl : lvl * 0.6);
         st.level = CBZ.survSeaMeanY ? CBZ.survSeaMeanY() : 0;
-        const drainK = Math.max(0, Math.min(1, Math.max(0, next) / Math.max(0.1, st.floodSurge)));
-        st.drainK = drainK;      // 1 = still fully inundated, 0 = the sea is back
-        st.waveAmp = 0.86 + 0.30 * drainK; st.chopAmp = 0.60 + 0.42 * drainK; st.foamGain = 0.34 + 0.28 * drainK;
-        // the water that leaves is the dirtiest water there has been — it is
-        // carrying the town out with it
-        st.sediment = Math.min(1, 0.55 + 0.45 * drainK);
+        const drainK = Math.max(0, Math.min(1, Math.max(0, lvl) / Math.max(0.1, F0)));
+        st.drainK = drainK;      // 1 = still fully inundated, 0 = the sea is at or under rest
+        // the sea stays heaving and brown through the whole train
+        const agit = 1 - 0.4 * Math.min(1, tt / K[K.length - 1][0]);
+        st.waveAmp = 0.86 + 0.42 * agit; st.chopAmp = 0.72 + 0.62 * agit; st.foamGain = 0.40 + 0.30 * agit;
+        st.sediment = Math.min(1, 0.62 + 0.38 * agit);
         /* ---- THE UNDERTOW (TSU_UNDERTOW) --------------------------------
            Everything the wave brought in leaves through the same gap, faster
            than it arrived, and this is the half that drowns the people who
-           survived the impacts. The number is deliberately past swim.js's
-           fast stroke (2.15 m/s): applyCurrent moves you 0.34 x flow, so at
-           drainK 1 the sea is taking you seaward at ~3.1 m/s and swimming
-           straight at it loses. The answer is not to swim — it is to be
-           holding on to something, or to already be high. */
-        const undertow = CBZ.CONFIG.TSU_UNDERTOW === false ? -0.7 * drainK : -(1.8 + 7.4 * drainK);
+           survived the impacts. Strongest while the sea is FALLING fastest
+           (the first backwash is the violent one), and each later crest
+           pushes back in before its own, weaker, run back out. */
+        const fall = Math.max(0, Math.min(1, -dS / Math.max(0.5, F0 / 5)));
+        const rise = Math.max(0, Math.min(1, dS / Math.max(0.5, F0 / 5)));
+        const undertow = CBZ.CONFIG.TSU_UNDERTOW === false ? -0.7 * drainK
+          : (rise > 0.05 ? 1.2 + 2.6 * rise : -(1.2 + 8.0 * fall));
         st.undertow = undertow;
         tsuPublish(ctx, undertow);
-        floodActors(dt, ctx, CBZ.CONFIG.TSU_UNDERTOW === false ? -0.7 : -(1.1 + 2.4 * drainK),
-          "dragged out to sea by the undertow", st.dx, st.dz);
+        floodActors(dt, ctx, CBZ.CONFIG.TSU_UNDERTOW === false ? -0.7 : (rise > 0.05 ? 1.2 * rise : -(1.1 + 2.4 * fall)),
+          rise > 0.05 ? "drowned in the flood" : "dragged out to sea by the undertow", st.dx, st.dz);
         tsuCarHandoff(ctx);
         tsuFlotsam(dt, ctx, undertow);
-        tsuUndertowDrown(dt, ctx, drainK);
+        tsuUndertowDrown(dt, ctx, Math.max(drainK, fall));
         tsuWade(dt, ctx);
+        if (tt >= K[K.length - 1][0]) st.endIn = 0;     // the sea is back at rest: the card ends here
       }
       // heavier fog with your face at the surface — city/swim.js owns the
       // swimmer now, so this reads its published state instead of a local flag
@@ -2999,11 +3123,15 @@
         st.run._endT = st.run.t;
         const deb = st.debris, sdx = st.dx, sdz = st.dz, F = st.run;
         if (deb) F.after.push(function (dt) { deb.step(dt, { dx: sdx, dz: sdz, flow: 0, sediment: 0.6, front: null }); });
-        // and the ground soaks up what is left standing in the hollows: a
-        // slow seep that takes the thin sheets first, and a deadline by
-        // which the deepest pond has dropped to the mud (tsunami_runup.js)
-        F.seepEnd = F._endT + TSU_DRAIN_SECS;
-        F.after.push(function () { F.seep = Math.min(0.03, 0.0025 * (F.t - F._endT)); });
+        // and the ground soaks up what is left standing in the hollows: the
+        // same few centimetres a second everywhere, so the thin sheets on
+        // the rises go first and the deep hollows hold their water longest.
+        // F.hurry (the calm running long) only steepens the ramp.
+        F.hurry = 0;
+        F.after.push(function () {
+          const a = F.t - F._endT;
+          F.seep = Math.min(0.025 + 0.06 * F.hurry, (0.0012 + 0.004 * F.hurry) * a);
+        });
       }
       // ONE LINE PUTS THE SEA BACK. There is no mesh to reposition, no sheet
       // to delete and no swimmer to stand down.
@@ -3012,10 +3140,14 @@
       // an event cancelled mid-stand must not leave the world muted
       if (CBZ.audioHush) CBZ.audioHush(false);
       const W = CBZ.survSeaWave ? CBZ.survSeaWave() : null;
-      // the sediment goes with it — one match's soup must never tint the next
-      if (W) { W.amp = 0.86; W.chop = 0.72; W.foam = 0.34; W.opacity = 1; W.sediment = 0; W.flowSpeed = 0; W.stand = 0; W.aheadDrop = 0; }
+      /* THE SEA DOES NOT SNAP CLEAN. The soup and the heave settle over the
+         calm (tsuSeaCalmStep, on the director's tick); a new card's own
+         writes cancel it, so one event's soup never tints the next. */
+      if (W) {
+        W.opacity = 1; W.flowSpeed = 0.5; W.stand = 1; W.aheadDrop = 0;
+        tsuSeaCalm = { t: 0, dur: 45, amp: W.amp, chop: W.chop, foam: W.foam, sed: Math.max(0.55, W.sediment || 0), churn: Math.max(0.25, W.churn || 0) };
+      }
       const o = ctx.arena && ctx.arena.ocean;
-      if (o && CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(o, { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1, sediment: 0 });
       if (o) o.position.y = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;
       if (CBZ.waterEventClear) CBZ.waterEventClear("survival-tsunami");
       st.sediment = 0;
@@ -4995,6 +5127,12 @@
   if (CBZ.CONFIG.SURV_CALM_MIN == null) CBZ.CONFIG.SURV_CALM_MIN = 12;
   if (CBZ.CONFIG.SURV_CALM_MAX == null) CBZ.CONFIG.SURV_CALM_MAX = 20;
   const QUIET_CAP = 10;     // s the calm may stretch for a slow system before it is cut
+  const WATER_CAP = 120;    // s more it waits for water on the land (a runaway guard, never the plan)
+  function hurryWater(k) {
+    const F = CBZ.tsuRunup && CBZ.tsuRunup.current ? CBZ.tsuRunup.current() : null;
+    if (F && F._endT != null) F.hurry = Math.max(F.hurry || 0, k);
+    if (CBZ.flashflood && CBZ.flashflood.hurry) { try { CBZ.flashflood.hurry(k); } catch (e) {} }
+  }
   const CHAIN_MAX = 3;      // links in one round
   function calmMin() { return Math.max(2, +CBZ.CONFIG.SURV_CALM_MIN || 12); }
   function calmMax() { return Math.max(calmMin(), +CBZ.CONFIG.SURV_CALM_MAX || 20); }
@@ -5166,6 +5304,7 @@
   function beginWarn() {
     const chain = dir.chain;
     dir.chain = null;
+    tsuSeaCalm = null;          // a new card owns the sea's look from here
     let id;
     if (chain && DEFS[chain.id]) {
       /* THE NEXT LINK OF THIS ROUND: no new round number, no new death
@@ -5948,6 +6087,7 @@
     }
 
     const ctx = makeCtx(dt);
+    tsuSeaCalmStep(dt);
     if (dir.state === "active" && dir.cur) dir.prog = 1 - dir.t / dir.cur.activeSecs;
     curCtx = ctx; // refresh for bot fleeVector (1-frame latency is fine)
     dir.clock += dt;
@@ -5960,7 +6100,18 @@
       if (dir.calmT <= 0) {
         const busy = busyList();
         dir.quietWait += dt;
-        if (!busy.length || dir.quietWait > QUIET_CAP) {
+        /* WATER IS NEVER CUT (2026-10-20, owner: "the way tsunamis and flash
+           floods disappear is unrealistic"). A drowned town still draining
+           holds the calm open instead of being switched off: past QUIET_CAP
+           the ground is only asked to take it faster (still a falling level,
+           never a snap), and the next card waits until it is mostly gone. */
+        const wet = busy.filter(function (b) { return b === "backwash" || b === "flood"; });
+        const dryBusy = busy.filter(function (b) { return b !== "backwash" && b !== "flood"; });
+        if (wet.length && dir.quietWait > QUIET_CAP) hurryWater(Math.min(1, (dir.quietWait - QUIET_CAP) / 30));
+        const waterOver = !wet.length || dir.quietWait > QUIET_CAP + WATER_CAP;
+        // the dry stragglers (a fire, the ash) are still cut on the old cap
+        if (!waterOver && dir.quietWait > QUIET_CAP && dryBusy.length) forceQuiet(dryBusy);
+        if (!busy.length || (dir.quietWait > QUIET_CAP && waterOver)) {
           if (busy.length) forceQuiet(busy);
           const L = dir.cur_log;
           if (L) { L.quietAt = r1(dir.clock); if (busy.length) L.cut = busy; }

@@ -165,6 +165,10 @@
     const BU = {
       uSea: { value: oy }, uFront: { value: new THREE.Vector4(cx, cz, 1, 0) },
       uFrontS: { value: -1e9 }, uAhead: { value: 0 }, uDry: { value: 0 }, uOn: { value: 0 },
+      // the island's shadow on the wave (world/water_spec.js cbzLeeShadowP):
+      // the lee's shelf drains later and less than the facing one
+      uLeeF: { value: new THREE.Vector4(0, 0, 1, 0) }, uLee: { value: new THREE.Vector4(0, 0, 0, 1) },
+      uLee2: { value: new THREE.Vector4(20, 0, 0, 0) },
       uCenter: { value: new THREE.Vector2(cx, cz) },
     };
     const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, depthWrite: false });
@@ -180,6 +184,8 @@
           "#include <common>",
           "varying vec3 vSbW; varying float vSbT;",
           "uniform float uSea; uniform vec4 uFront; uniform float uFrontS; uniform float uAhead;",
+          "uniform vec4 uLeeF; uniform vec4 uLee; uniform vec4 uLee2;",
+          CBZ.waterLeeGLSL || "float cbzLeeShadowP(vec2 xz, vec4 F, vec4 L, vec4 L2) { return 0.0; }",
           "uniform float uDry; uniform float uOn; uniform vec2 uCenter; uniform float uTime;",
           "uniform vec3 uSky; uniform vec3 uSunDir; uniform vec3 uSunCol;",
           NOISE, SHEEN,
@@ -192,7 +198,9 @@
           // the sea's local level, front-aware: the CPU twin is CBZ.waterFrontDropAt
           "  float fd = dot(p - uFront.xy, uFront.zw) - uFrontS;",
           "  float fk = clamp((fd + 1.0) / 8.0, 0.0, 1.0);",
-          "  float seaL = uSea - uAhead * fk * fk * (3.0 - 2.0 * fk);",
+          "  fk = fk * fk * (3.0 - 2.0 * fk);",
+          "  float seaL = uSea - uAhead * fk;",
+          "  if (uLee2.w > 0.5) seaL -= cbzLeeShadowP(p, uLeeF, uLee, uLee2) * mix(uLee.x, uLee.y, fk);",
           "  float above = (vSbW.y - " + BAND_LIFT.toFixed(3) + ") - seaL;",
           "  float vd = length(cameraPosition - vSbW);",
           "  float nearK = 1.0 - smoothstep(14.0, 55.0, vd);",
@@ -1101,6 +1109,7 @@
       B.U.uFront.value.set(tsu.cx, tsu.cz, tsu.dx, tsu.dz);
       B.U.uFrontS.value = tsu.frontS;
       B.U.uAhead.value = tsu.ahead;
+      if (!CBZ.waterLeeUniformsFill || !CBZ.waterLeeUniformsFill(B.U.uLeeF.value, B.U.uLee.value, B.U.uLee2.value)) B.U.uLee2.value.w = 0;
       B.U.uDry.value = clamp01(tsu.t / 60);
     }
 

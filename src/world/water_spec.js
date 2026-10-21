@@ -1574,6 +1574,8 @@
        the wall reaches it. aheadDrop 0 (the default) is a no-op everywhere. */
     u.uSeaFront = { value: new THREE.Vector4(0, 0, 1, 0) };
     u.uSeaFrontS = { value: new THREE.Vector3(-1e9, 0, 0) };
+    u.uSeaLee = { value: new THREE.Vector4(0, 0, 0, 1) };
+    u.uSeaLee2 = { value: new THREE.Vector4(20, 0, 0, 0) };
     u.uInlandBodies = { value: inlandVecs };
     // BY REFERENCE, like uInlandBodies: waterSyncLandBoxes() mutates the
     // Vector4s in place, so a world built after the material still reaches the
@@ -1588,6 +1590,7 @@
     u.uChopGain = { value: 1.0 };
     // x = run-up range (m), y = leading-edge brightness gain, z = enabled
     u.uSwash = { value: new THREE.Vector4(SWASH_RANGE, 1.0, swashOn() ? 1 : 0, 0) };
+    u.uLineFoam = { value: 1 };
     u.uMoonDir = { value: new THREE.Vector3(0.34, -0.84, -0.42).normalize() };
     u.uMoonColor = { value: new THREE.Color(0xa8c0e2) };
     u.uMoon = { value: 0 };
@@ -1693,10 +1696,17 @@
     }
     if (u.uSeaFront) {
       const e = CBZ.waterEventGet ? CBZ.waterEventGet() : null;
-      if (e && e.aheadDrop > 0.001) {
+      const lee = e && e.lee && e.lee.on ? e.lee : null;
+      if (e && (e.aheadDrop > 0.001 || lee)) {
         u.uSeaFront.value.set(+e.cx || 0, +e.cz || 0, +e.dx || 0, +e.dz || 0);
-        u.uSeaFrontS.value.set(+e.frontS || 0, +e.aheadDrop, _surge);
+        u.uSeaFrontS.value.set(Number.isFinite(e.frontS) ? +e.frontS : -1e9, Math.max(0, +e.aheadDrop || 0), _surge);
       } else u.uSeaFrontS.value.y = 0;
+      if (u.uSeaLee) {
+        if (lee) {
+          u.uSeaLee.value.set(+lee.b || 0, +lee.a || 0, +lee.lc || 0, Math.max(1, +lee.lw || 1));
+          u.uSeaLee2.value.set(Math.max(1, +lee.d0 || 20), +lee.sMid || 0, +lee.sMax || 0, 1);
+        } else u.uSeaLee2.value.w = 0;
+      }
     }
 
     // Direction TO the sun (light travels sun -> target, so it is target->sun),
@@ -1899,17 +1909,67 @@
   // can cost a vertex texture unit, and WebGL1 is allowed to expose zero) —
   // which is exactly why the depth term above is a uniform circle set rather
   // than a fetch from the baked shore field the FRAGMENT stage uses.
+  /* THE SEA'S LEVEL UNDER A TRAVELLING WAVE (2026-10-20). Owner: "the
+     tsunami seems to come from all sides of the island and meet in the
+     middle". It did: the sea behind the straight front was ONE level, so the
+     moment the line had passed the island's flanks and its far shore, every
+     coast was under the same head of water and the run-up poured in from all
+     of them. A real tsunami arriving from one bearing hits the FACING coast
+     first and hardest, runs along the flanks at a glancing angle (less), and
+     the lee only gets a small, late wrap-around (refraction/diffraction).
+     So the drop below the published mean has two terms:
+       ahead  the water the front has not reached yet (aheadDrop, as before);
+       lee    the island's shadow: a smooth exposure field off the island's
+              own extent along and across the travel (cbzLeeShadow), times a
+              lee drop for the water behind the front (Lb) and ahead of it
+              (La, signed: negative RAISES the lee, which is how the drawdown
+              reaches the facing shelf first and the lee later and less).
+     CPU twin: frontFormulaDrop() below. Same constants, same shape.
+       uSeaFront  (cx, cz, dx, dz)     uSeaFrontS (frontS, aheadDrop, surge)
+       uSeaLee    (Lb, La, lc, Lw)     uSeaLee2   (D0, sMid, sMax, on)       */
+  const LEE_EXP = 1.3, LEE_SPREAD = 0.35;
+  // the shadow alone, on explicit parameters (world/tsunami_scene.js's
+  // seabed skin declares its own uniforms and calls this)
+  const LEE_GLSL = CBZ.waterLeeGLSL = [
+    "float cbzLeeShadowP(vec2 xz, vec4 F, vec4 L, vec4 L2) {",
+    "  vec2 r = xz - F.xy;",
+    "  float s = dot(r, F.zw);",
+    "  float rl = dot(r, vec2(-F.w, F.z)) - L.z, rs = s - L2.y;",
+    "  float e = pow(clamp(0.5 - 0.5 * rs / max(length(vec2(rl, rs)), 1.0), 0.0, 1.0), " + gnum(LEE_EXP) + ");",
+    "  float D = L2.x + " + gnum(LEE_SPREAD) + " * max(0.0, s - L2.z);",
+    "  return (1.0 - e) * (1.0 - smoothstep(L.w, L.w + D, abs(rl)));",
+    "}",
+  ].join("\n");
+  // CPU side of the same uniforms: (front vec4, lee vec4, lee2 vec4) from the event
+  CBZ.waterLeeUniformsFill = function (F, L, L2) {
+    const e = waterEvent, lee = e && e.lee && e.lee.on ? e.lee : null;
+    if (!lee) { L2.w = 0; return false; }
+    F.set(+e.cx || 0, +e.cz || 0, +e.dx || 0, +e.dz || 0);
+    L.set(+lee.b || 0, +lee.a || 0, +lee.lc || 0, Math.max(1, +lee.lw || 1));
+    L2.set(Math.max(1, +lee.d0 || 20), +lee.sMid || 0, +lee.sMax || 0, 1);
+    return true;
+  };
+  const FRONT_DROP_GLSL = [
+    "uniform vec4 uSeaFront;",
+    "uniform vec3 uSeaFrontS;",
+    "uniform vec4 uSeaLee;",
+    "uniform vec4 uSeaLee2;",
+    LEE_GLSL,
+    "float cbzLeeShadow(vec2 xz) { return cbzLeeShadowP(xz, uSeaFront, uSeaLee, uSeaLee2); }",
+    "float cbzFrontDrop(vec2 xz) {",
+    "  if (uSeaFrontS.y < 0.001 && uSeaLee2.w < 0.5) return 0.0;",
+    "  float fk = clamp((dot(xz - uSeaFront.xy, uSeaFront.zw) - uSeaFrontS.x + 1.0) / 8.0, 0.0, 1.0);",
+    "  fk = fk * fk * (3.0 - 2.0 * fk);",
+    "  float d = max(uSeaFrontS.y, 0.0) * fk;",
+    "  if (uSeaLee2.w > 0.5) d += cbzLeeShadow(xz) * mix(uSeaLee.x, uSeaLee.y, fk);",
+    "  return d;",
+    "}",
+  ].join("\n");
   CBZ.waterVertexDecl = function () {
     return [
       "uniform float uSeaTime;",
       "uniform float uSeaY;",
-      "uniform vec4 uSeaFront;",
-      "uniform vec3 uSeaFrontS;",
-      "float cbzFrontDrop(vec2 xz) {",
-      "  if (uSeaFrontS.y < 0.001) return 0.0;",
-      "  float fk = clamp((dot(xz - uSeaFront.xy, uSeaFront.zw) - uSeaFrontS.x + 1.0) / 8.0, 0.0, 1.0);",
-      "  return uSeaFrontS.y * fk * fk * (3.0 - 2.0 * fk);",
-      "}",
+      FRONT_DROP_GLSL,
       "uniform float uWaveAmp;",
       "uniform float uDeepGain;",
       "uniform float uChopGain;",
@@ -2184,16 +2244,10 @@
       "uniform vec4 uSeaLandBounds;",
       "uniform float uSeaHasLandMask;",
       "uniform float uShoreCut;",
-      "uniform vec4 uSeaFront;",
-      "uniform vec3 uSeaFrontS;",
-      "float cbzFrontDrop(vec2 xz) {",
-      "  if (uSeaFrontS.y < 0.001) return 0.0;",
-      "  float fk = clamp((dot(xz - uSeaFront.xy, uSeaFront.zw) - uSeaFrontS.x + 1.0) / 8.0, 0.0, 1.0);",
-      "  return uSeaFrontS.y * fk * fk * (3.0 - 2.0 * fk);",
-      "}",
+      FRONT_DROP_GLSL,
       // the shoreline cut where the surge has actually arrived (see uSeaFront)
       "float cbzShoreCutAt(vec2 xz) {",
-      "  if (uSeaFrontS.y < 0.001) return uShoreCut;",
+      "  if (uSeaFrontS.y < 0.001 && uSeaLee2.w < 0.5) return uShoreCut;",
       "  return 0.5 + min(0.42, max(0.0, uSeaFrontS.z - cbzFrontDrop(xz)) * " + gnum(SHORE_CUT_PER_M) + ");",
       "}",
       "uniform vec4 uInlandBodies[" + MAX_INLAND + "];",
@@ -2211,6 +2265,7 @@
       "uniform float uCapThresh;",
       "uniform vec4 uSurf;",
       "uniform vec4 uSwash;",
+      "uniform float uLineFoam;",
       "uniform float uGlitter;",
       "uniform float uShoreFx;",
       "uniform vec3 uSkyLow;",
@@ -2658,7 +2713,10 @@
       "  float cap = cbzWhitecap(p, hN, fade, inland);",
       "  float brk = smoothstep(0.10, 0.45, fold) * (0.45 + n * 1.0) * fade * (1.0 - inland);",
       "  float contact = (uWater2.z > 0.5 && dist < 240.0) ? cbzContactFoam(p, n) : 0.0;",
-      "  float foam = clamp(surf * 0.66 + cap * 0.60 + brk * 0.55 + contact * 0.80 + streak, 0.0, 0.94) * (1.0 - under * 0.72);",
+      // uLineFoam: 1 everywhere but a disaster soup, whose white water is
+      // drawn as clumps by its own tail (the crest lines read as a net of
+      // thin white lines over a brown sea)
+      "  float foam = clamp((surf * 0.66 + cap * 0.60 + brk * 0.55 + streak) * uLineFoam + contact * 0.80, 0.0, 0.94) * (1.0 - under * 0.72);",
       // foam is lace, not paint: thin where it is thin
       "  float lace = smoothstep(0.30, 0.80, n + foam * 0.55);",
       "  vec3 foamCol = uFoamColor * (0.80 + 0.20 * ndl);",
@@ -3361,6 +3419,8 @@
     U.uDwFlow = { value: new THREE.Vector2(1, 0) };
     U.uDwFlowSpd = { value: 0 };
     U.uDwStand = { value: 0 };
+    // 0..1: how hard the flood's surface heaves (the boil, see vTail)
+    U.uDwChurn = { value: 0 };
     // THE DRY DISC: (cx, cz, r, sink) — the sheet is pulled `sink` m down
     // inside r so a swell crest never stripes the plain. w = 0 is a no-op.
     U.uDwDryDisc = { value: new THREE.Vector4(0, 0, 0, 0) };
@@ -3388,6 +3448,11 @@
       "uniform vec2 uDwFrontDir;",
       "uniform float uDwFrontS;",
       "uniform float uDwAhead;",
+      "uniform float uDwChurn;",
+      "uniform vec2 uDwFlow;",
+      "float dwVH(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }",
+      "float dwVN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+      "  return mix(mix(dwVH(i), dwVH(i + vec2(1.0, 0.0)), f.x), mix(dwVH(i + vec2(0.0, 1.0)), dwVH(i + vec2(1.0, 1.0)), f.x), f.y); }",
     ].join("\n");
     const vTail = [
       "  float dwDisc = 1.0 - smoothstep(uDwDryDisc.z - 8.0, uDwDryDisc.z, length(wWorld.xz - uDwDryDisc.xy));",
@@ -3396,7 +3461,9 @@
       // under the island there it is calm water again, so the dry disc's 3 m
       // sink comes back with it (swell crests never stripe the plain)
       "  float dwAk = uDwAhead > 0.001 ? smoothstep(-1.0, 7.0, dot(wWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS) : 0.0;",
-      "  wWorld.y -= dwAk * (uDwAhead + 3.0 * dwDisc * step(uDwDryDisc.w, 0.01));",
+      // the sea's own level under the travelling wave (ahead of the front AND
+      // the island's lee: FRONT_DROP_GLSL, the one function every sea shares)
+      "  wWorld.y -= cbzFrontDrop(wWorld.xz) + dwAk * 3.0 * dwDisc * step(uDwDryDisc.w, 0.01);",
       // the run-up field owns its domain: its surface, plus the swell scaled
       // by the depth under it (a flood a metre deep carries no metre swell)
       "  vec2 rG = vec2(0.0);",
@@ -3407,6 +3474,20 @@
       "    wWorld.xz = mix(wWorld.xz, wXZ + wDisp.xz * rk, rS.w);",
       "  }",
       "  vRun = vec4(rS.y, rS.z, length(rG), rS.w);",
+      /* THE BOIL: the water behind a bore is not a sheet, it heaves. Mounds
+         a few metres across rising and collapsing, carried with the flow:
+         most violent in the first tens of metres behind the front and in the
+         fast, deep water on the land, a slow heave in the rest of the flood. */
+      "  if (uDwChurn > 0.001) {",
+      "    float fdV = dot(wWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS;",
+      "    float zone = (1.0 - smoothstep(-2.0, 3.0, fdV)) * (0.30 + 0.70 * exp(min(0.0, fdV) / 22.0));",
+      "    float onLand = rS.w * step(0.03, rS.y);",
+      "    float lz = min(1.0, rS.z / 5.0) * clamp(rS.y / 0.9, 0.0, 1.0);",
+      "    float amp = uDwChurn * mix(zone * 1.25, lz * 0.55, onLand);",
+      "    vec2 bp = wWorld.xz - uDwFlow * uSeaTime * 1.6;",
+      "    float bn = dwVN(bp * 0.21 + vec2(uSeaTime * 0.13, -uSeaTime * 0.09)) * 0.6 + dwVN(bp * 0.53 + uSeaTime * vec2(-0.31, 0.27)) * 0.4;",
+      "    wWorld.y += amp * (bn - 0.42);",
+      "  }",
     ].join("\n");
     const fDecl = [
       RUN_GLSL,
@@ -3436,6 +3517,37 @@
       "float dwFbm(vec2 p) {",
       "  vec2 r = vec2(p.x * 0.862 + p.y * 0.507, p.y * 0.862 - p.x * 0.507);",
       "  return dwNoise(p) * 0.62 + dwNoise(r * 2.31 + 17.7) * 0.38;",
+      "}",
+      /* WHITEWATER CLUMPS: (coverage, relief, pattern). Advected along the
+         local flow by the two-phase flow-map trick (the pattern rides the
+         water and never shears), at most 1.5:1 along the flow, domain-warped
+         so it never reads as cells or stripes, and gathered by a ~14 m
+         cluster field into patches and rafts. dens 0 = none, 1 = a solid
+         churn with dark holes. */
+      /* px: metres one pixel covers. The clumps are a metre-scale pattern,
+         and past ~60 m a metre is under a pixel: thresholded, it broke into
+         white salt-and-pepper speckle (the first look at this showed exactly
+         that on the far flood). So the detail is FILTERED by footprint: it
+         eases to its own mean and the threshold softens, and what is left
+         at range is the ten-metre cluster field, patches, never dots. */
+      "vec3 dwFoamClumps(vec2 p, vec2 fl, float spd, float dens, float px) {",
+      "  if (dens < 0.004) return vec3(0.0);",
+      "  vec2 ax = vec2(-fl.y, fl.x);",
+      "  float fT = 2.2;",
+      "  float p0 = fract(uSeaTime / fT), p1 = fract(uSeaTime / fT + 0.5);",
+      "  vec2 q0 = p - fl * spd * p0 * fT, q1 = p - fl * spd * p1 * fT + 13.7;",
+      "  vec2 u0 = vec2(dot(q0, fl) * 0.42, dot(q0, ax) * 0.62);",
+      "  vec2 u1 = vec2(dot(q1, fl) * 0.42, dot(q1, ax) * 0.62);",
+      "  float w0 = dwNoise(u0 * 0.37 + 2.0), w1 = dwNoise(u1 * 0.37 + 2.0);",
+      "  float c0 = dwFbm(u0 + w0 * 1.8) * 0.72 + dwNoise(u0 * 2.9 + w0 * 2.0) * 0.28;",
+      "  float c1 = dwFbm(u1 + w1 * 1.8) * 0.72 + dwNoise(u1 * 2.9 + w1 * 2.0) * 0.28;",
+      "  float pat = mix(c0, c1, abs(1.0 - 2.0 * p0));",
+      "  float aa = smoothstep(0.18, 0.9, px);",
+      "  pat = mix(pat, 0.5, aa * 0.85);",
+      "  float big = dwNoise(p * 0.071 + 5.0) * 0.6 + dwNoise(p * 0.19 - 3.0) * 0.4;",
+      "  float thr = 1.0 - dens * (0.60 + 0.55 * big);",
+      "  float w = 0.08 + 0.30 * aa;",
+      "  return vec3(smoothstep(thr, thr + w, pat), smoothstep(thr, thr + 0.28 + 0.2 * aa, pat), pat);",
       "}",
     ].join("\n");
     /* THE TURBID FRONT, from the Tohoku helicopter footage: the inundation is
@@ -3508,50 +3620,71 @@
       "      vec3 turbCol = mix(mudBody, dwSkyC * 0.85, clamp(mf * (0.55 - 0.3 * churn), 0.0, 0.34));",
       "      turbCol += uSunColor * pow(max(dot(tN, tH), 0.0), mix(110.0, 40.0, churn)) * (0.30 + 1.2 * mf) * (1.0 - 0.6 * churn);",
       "      outColor = mix(outColor, turbCol, clamp(sed * 1.28, 0.0, 0.985));",
-      // dirty foam, lit with the body's light (never a flat paper white)
-      "      vec3 dfoam = mix(uFoamColor, uDwFoam, clamp(dwSed * 1.1, 0.0, 1.0)) * (0.62 + 0.38 * tndl);",
+      /* THE WHITE WATER (2026-10-20 rebuild). Owner: "the white lines, the
+         white part of the tsunami still suck" and, when the first answer was
+         to take the white out: "I don't want you to remove the foam, I want
+         it to look real". What read as fake, measured against Miyako,
+         Kesennuma and Natori street footage and the Ahr 2021 floods:
+           - LINES: the sea's foam was value noise stretched 13:1 along the
+             flow and thresholded (thin parallel stripes), a ridge network of
+             the same noise (a net of hairlines), and the clean sea's crest
+             foam (whitecap / surf bands) over a sea whose chop the event
+             had tripled: a mesh of thin white lines from any height;
+           - NO VOLUME: one flat foam colour mixed in by coverage, lit only by
+             the water's own normal, so it was paint on a sheet;
+           - A BAND: a smooth exponential boil right behind the front, the
+             same brightness for its whole length;
+           - and the wall that should have carried the real breaking white
+             water was not drawn at all (see the bore face's `far`).
+         Real whitewater is aerated water in CLUMPS and rafts at the metre
+         scale, gathered into patches at the ten-metre scale, densest where
+         the water breaks (the bore's front, the race round a building, the
+         lip of a tongue running up a street) and thinning behind into a torn
+         dirty froth; it has relief (a lit side, a shadowed side, a dark
+         crease at its edge where the water shows), it is grey off-white
+         where it is fresh and the colour of the mud it carries where it is
+         not, and it moves with the water under it. So: dwFoamClumps (flow-
+         advected, near-isotropic, domain-warped, clustered), shaded by its
+         own relief through the screen derivatives, coloured fresh-to-old. */
+      "      vec3 dfFresh = mix(uFoamColor * 0.84, vec3(0.50, 0.48, 0.43), clamp(dwSed, 0.0, 1.0));",
+      "      float near = 1.0 - smoothstep(70.0, 260.0, vSeaMisc.y);",
+      "      float dens = 0.0, spd = 0.0, fresh = 0.0;",
       "      if (land > 0.5) {",
-      /* THE CHURN ON THE LAND (Miyako, Kesennuma, Banda Aceh street
-         footage): no white cap. A black-brown surge whose froth is torn,
-         dirty and only where the water is fast, steep or slamming into
-         something (the field's slope says both: water piles up against a
-         wall), in clumps and streaks that ride the LOCAL current. Two-phase
-         flow map, so the pattern moves with the water and never shears. */
-      "        float near = 1.0 - smoothstep(60.0, 220.0, vSeaMisc.y);",
-      "        float spd = min(dwRun.z, 6.0);",
-      "        float fT = 1.9;",
-      "        float p0 = fract(uSeaTime / fT), p1 = fract(uSeaTime / fT + 0.5);",
-      "        vec2 q0 = vSeaWorld.xz - fl * spd * p0 * fT, q1 = vSeaWorld.xz - fl * spd * p1 * fT;",
-      "        float c0 = dwFbm(vec2(dot(q0, fl) * 0.30, dot(q0, ax) * 1.1));",
-      "        float c1 = dwFbm(vec2(dot(q1, fl) * 0.30, dot(q1, ax) * 1.1) + 7.3);",
-      "        float pat = mix(c0, c1, abs(1.0 - 2.0 * p0));",
-      "        float thr = 1.0 - churn * 0.62;",
-      "        float fmk = smoothstep(thr, thr + 0.13, pat) * step(0.03, churn);",
-      // the tongue of a bore running up a street: a churning lip of dirty foam
+      "        spd = min(dwRun.z, 6.0);",
+      // the tongue of a bore running up a street: shallow AND fast
       "        float lip = (1.0 - smoothstep(0.06, 0.45, dwRun.y)) * smoothstep(0.8, 2.6, dwRun.z);",
-      "        fmk = max(fmk, lip * smoothstep(0.32, 0.62, pat));",
-      // slack water: a sparse scum of bubbles and litter, nothing more
-      "        fmk = max(fmk, smoothstep(0.93, 0.99, 1.0 - abs(pat * 2.0 - 1.0)) * (1.0 - churn) * 0.30);",
-      "        fmk = mix(churn * 0.42, fmk, near) * 0.86 * turb;",
-      // thin foam shows the water through: darker at its margins
-      "        vec3 fcol = mix(mudBody * 1.6, dfoam, smoothstep(thr + 0.02, thr + 0.28, pat));",
-      "        outColor = mix(outColor, fcol, fmk);",
+      "        dens = max(churn, lip) * 0.95 + (1.0 - churn) * 0.10;",
+      "        fresh = max(rFront, lip);",
+      "      } else {",
+      "        spd = uDwFlowSpd;",
+      "        float tongue = dwFbm(vec2(sAc * 0.052 + 4.0, uSeaTime * 0.28));",
+      "        float boilZ = exp(-bd / (5.0 + 9.0 * tongue));",
+      "        dens = boilZ * (0.70 + 0.30 * tongue) + 0.50 * exp(-bd / 40.0) * (1.0 - stand) + 0.12 + 0.14 * stand;",
+      "        fresh = boilZ;",
+      "      }",
+      "      dens = clamp(dens, 0.0, 1.0) * clamp(turb * 1.15, 0.0, 1.0);",
+      "      vec2 rdx = dFdx(vSeaWorld.xz), rdy = dFdy(vSeaWorld.xz);",
+      "      float fpx = max(length(rdx), length(rdy));",
+      "      vec3 fcl = dwFoamClumps(vSeaWorld.xz, fl, spd, dens, fpx);",
+      // relief -> a world-space slope -> a bump on the water's normal
+      "      float rdet = rdx.x * rdy.y - rdx.y * rdy.x;",
+      "      float rex = dFdx(fcl.y), rey = dFdy(fcl.y);",
+      "      vec2 rg = abs(rdet) > 1e-5 ? vec2(rdy.y * rex - rdx.y * rey, rdx.x * rey - rdy.x * rex) / rdet : vec2(0.0);",
+      "      rg = clamp(rg * 0.8, vec2(-2.5), vec2(2.5)) * near * (1.0 - smoothstep(0.25, 0.9, fpx));",
+      "      vec3 fN = normalize(tN - vec3(rg.x, 0.0, rg.y));",
+      "      float fSun = clamp(dot(fN, tL) * 0.55 + 0.45, 0.0, 1.0);",
+      "      vec3 fAlb = mix(uDwFoam, dfFresh, clamp(fresh * 1.25, 0.0, 1.0) * (0.45 + 0.55 * fcl.y));",
+      "      vec3 fLit = fAlb * (0.36 + 0.56 * fSun) + dwSkyC * 0.10 * fSun;",
+      // the thin margin of a clump is water with bubbles in it: the body shows
+      "      fLit = mix(mudBody * 1.45, fLit, smoothstep(0.0, 0.5, fcl.y));",
+      "      outColor = mix(outColor, fLit, fcl.x);",
+      "      if (land > 0.5) {",
       // a suspension is opaque: half a metre of Tohoku mud hid a car;
       // only the last few centimetres at the margin let the wet ground through
-      "        solid = clamp(max(fmk, min(1.0, sed * 1.9)), 0.0, 1.0);",
+      "        solid = clamp(max(fcl.x, min(1.0, sed * 1.9)), 0.0, 1.0);",
       "        outAlpha = mix(0.6, 1.0, smoothstep(0.03, 0.16, dwRun.y));",
       "      } else {",
-      "        float tongue = dwFbm(vec2(sAc * 0.052 + 4.0, uSeaTime * 0.28));",
-      "        float boil = clamp(turb * exp(-bd / (2.0 + 5.4 * tongue)) * (0.50 + 0.80 * tongue), 0.0, 0.92);",
-      "        float streak = smoothstep(0.60, 0.95, dwFbm(vec2(sAl * 0.023, sAc * 0.30)));",
-      "        streak *= exp(-bd / 48.0) * (1.0 - stand * 0.70);",
-      "        float sc = dwFbm(vec2(sAl * 0.026 + 21.0, sAc * 0.205));",
-      "        float lines = smoothstep(0.92, 1.0, 1.0 - abs(sc * 2.0 - 1.0)) * smoothstep(0.26, 0.72, plume);",
-      "        float raft = smoothstep(0.72, 0.95, dwFbm(vec2(sAl * 0.048, sAc * 0.086) + 31.0));",
-      "        float whitew = clamp((streak * 0.38 + (lines * 0.32 + raft * 0.24) * stand) * turb, 0.0, 0.52);",
-      "        outColor = mix(outColor, dfoam, whitew);",
-      "        outColor = mix(outColor, mix(dfoam, uFoamColor, 0.12), boil);",
-      "        solid = clamp(max(max(foam, boil), max(whitew, min(1.0, sed * 1.9))), 0.0, 1.0);",
+      "        solid = clamp(max(foam, max(fcl.x, min(1.0, sed * 1.9))), 0.0, 1.0);",
       "      }",
       "    }",
       "  }",
@@ -3711,6 +3844,13 @@
         if (mat.depthWrite !== solid) mat.depthWrite = solid;
       }
     }
+    // a sea of floodwater draws its white water as clumps (the disaster
+    // tail); the clean sea's crest lines step aside as the soup arrives
+    if (u.uLineFoam) {
+      const sd = Number.isFinite(state.sediment) ? +state.sediment : (u.uDwSediment ? u.uDwSediment.value : 0);
+      const k = Math.max(0, Math.min(1, (sd - 0.02) / 0.3));
+      u.uLineFoam.value = Math.min(1 - k * k * (3 - 2 * k), Number.isFinite(state.lineFoam) ? Math.max(0, +state.lineFoam) : 1);
+    }
     // ---- the turbid-front block. Absent from `state` = untouched, so an
     //      existing caller keeps its clean water without knowing this exists.
     if (u.uDwSediment) {
@@ -3741,6 +3881,7 @@
         u.uDwStand.value = Math.max(0, Math.min(1, +state.stand));
       }
       if (Number.isFinite(state.frontS)) u.uDwFrontS.value = +state.frontS;
+      if (u.uDwChurn) u.uDwChurn.value = Number.isFinite(state.churn) ? Math.max(0, Math.min(1.5, +state.churn)) : 0;
       if (u.uDwAhead) u.uDwAhead.value = Number.isFinite(state.aheadDrop) ? Math.max(0, +state.aheadDrop) : 0;
       if (Number.isFinite(state.frontRun)) u.uDwFrontRun.value = Math.max(1, +state.frontRun);
       if (state.mud != null) u.uDwMud.value.set(state.mud);
@@ -3777,7 +3918,6 @@
                finite differences; fragment paints foam, holes, tongues,
                debris and the far white line.
        draw 2  crest spray + mist: GPU-animated point sprites.
-       draw 3  the wake: torn whitewater streaming back behind the front.
 
      CBZ.tsuFaceBuild({width, height, rnd}) -> handle   (caller adds handle.group)
      CBZ.tsuFaceUpdate(handle, {t, dt, height, turbid, curl, foam, x, y, z,
@@ -4085,11 +4225,17 @@
       "  foam *= 1.0 - hole * mix( 0.85, 0.45, rollF );",
       // ...and combed into flow streaks everywhere but the very top of the churn
       "  float core = smoothstep( edge + 0.02, edge + 0.10, up ) * ( 1.0 - sk );",
+      /* THE WHITE LINE. Far out (or while the face is still low) the churn is
+         sub-pixel and what the eye sees is a bright white line on the sea.
+         (DECLARED HERE, before its first use. From 2026-09-28 to 2026-10-20
+         the line below read `far` two lines before this declaration: an
+         undeclared identifier is a GLSL compile error, so the whole bore
+         face failed to link and was never drawn. The tsunami was its spray
+         sprites and the flat wake shreds with no wave under them, which is
+         the "white part at the top" the owner kept seeing.) */
+      "  float far = max( smoothstep( 280.0, 900.0, dist ), 1.0 - smoothstep( 3.5, 9.0, uH ) );",
       "  foam *= mix( mix( 0.22 + 0.78 * streak, 1.0, core * 0.55 ), 1.0, far );",
       "  foam = clamp( foam * ( 0.85 + 0.30 * uFoam ), 0.0, 1.0 );",
-      /* THE WHITE LINE. Far out (or while the face is still low) the churn is
-         sub-pixel and what the eye sees is a bright white line on the sea. */
-      "  float far = max( smoothstep( 280.0, 900.0, dist ), 1.0 - smoothstep( 3.5, 9.0, uH ) );",
       "  foam = mix( foam, max( foam, smoothstep( 0.40, 0.75, up + 0.25 * side ) * ( 1.0 - sk ) ), far );",
       // ---- normal
       "  vec3 nrm = normalize( vNrm );",
@@ -4311,7 +4457,11 @@
       "  vCol.a *= smoothstep( 1.5, 9.0, dz );",
       "  vPuff = vec3( s.z * 17.0 + gen * 3.1, s.w, kd );",
       "  gl_Position = projectionMatrix * mvPosition;",
-      "  gl_PointSize = vCol.a > 0.003 ? clamp( size * projectionMatrix[1][1] * uScale / max( 0.5, dz ), 1.0, 420.0 ) : 0.0;",
+      // a droplet smaller than a couple of pixels is a white dot, not spray:
+      // it fades out instead of being clamped up to a one-pixel speck
+      "  float psz = size * projectionMatrix[1][1] * uScale / max( 0.5, dz );",
+      "  vCol.a *= smoothstep( 1.2, 3.5, psz );",
+      "  gl_PointSize = vCol.a > 0.003 ? clamp( psz, 1.0, 420.0 ) : 0.0;",
       "  #include <fog_vertex>",
       "}",
     ].join("\n");
@@ -4347,84 +4497,12 @@
     return { points: pts, geo: geo, mat: mat, count: N };
   }
 
-  /* ============================================================
-     THE WAKE: torn whitewater lying on the surface BEHIND the front and
-     streaming back toward the sea, so the eye reads which way the water is
-     going. Tapered shreds (a rectangle reads as a rectangle from every angle)
-     in one draw; each shred slides back on its own rate and wraps, all in
-     the vertex shader.
-     ============================================================ */
-  function tsuWakeBuild(W, rnd) {
-    const P = [], C = [], A = [], I = [];
-    const cnt = Math.max(16, Math.min(60, Math.round(W / 11)));
-    const TS = [0, 0.55, 1];
-    for (let i = 0; i < cnt; i++) {
-      const x = (rnd() - 0.5) * W * 0.94, z = -(2 + rnd() * 6);
-      const wid = 0.7 + rnd() * 2.4, taper = 0.6 + rnd() * 0.4, reach = 22 + rnd() * 70;
-      const yaw = (rnd() - 0.5) * 0.5, cy = Math.cos(yaw), sy = Math.sin(yaw);
-      const bright = 0.66 + rnd() * 0.34, fade = 0.45 + rnd() * 0.4;
-      const ph = rnd() * 6.283, flow = 9 + rnd() * 22, amp = 0.1 + rnd() * 0.18, cyc = rnd();
-      const q = P.length / 3;
-      for (let r = 0; r < 3; r++) {
-        const t = TS[r], w = wid * (1 - t * taper), fwd = -reach * t * t;
-        for (let e = 0; e < 2; e++) {
-          const u = e ? 1 : -1;
-          P.push(x + u * w * cy - fwd * sy * 0.3, 0.0, z + u * w * sy * 0.5 + fwd);
-          C.push(bright * (1 - t * fade));
-          A.push(ph, flow, amp, cyc);
-        }
-      }
-      I.push(q, q + 2, q + 1, q + 1, q + 2, q + 3, q + 2, q + 4, q + 3, q + 3, q + 4, q + 5);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
-    geo.setAttribute("aB", new THREE.Float32BufferAttribute(C, 1));
-    geo.setAttribute("aW", new THREE.Float32BufferAttribute(A, 4));
-    geo.setIndex(I);
-    const uni = THREE.UniformsUtils.clone(THREE.UniformsLib.fog);
-    Object.assign(uni, {
-      uTime: { value: 0 }, uSpan: { value: 200 }, uY: { value: 0.3 }, uOpacity: { value: 0 },
-      uColor: { value: new THREE.Color(0.91, 0.93, 0.91) },
-    });
-    const VERT = [
-      "attribute float aB;",
-      "attribute vec4 aW;",   // phase, flow m/s, bob amp, cycle offset
-      "uniform float uTime, uSpan, uY;",
-      "varying float vA;",
-      "#include <fog_pars_vertex>",
-      "void main() {",
-      "  float u = fract( uTime * aW.y / uSpan + aW.w );",
-      "  vec3 p = position;",
-      "  p.z -= u * uSpan;",
-      "  p.y = uY + sin( uTime * 1.6 + aW.x ) * aW.z;",
-      "  vA = aB * smoothstep( 0.0, 0.06, u ) * ( 1.0 - smoothstep( 0.55, 1.0, u ) );",
-      "  vec4 mvPosition = modelViewMatrix * vec4( p, 1.0 );",
-      "  gl_Position = projectionMatrix * mvPosition;",
-      "  #include <fog_vertex>",
-      "}",
-    ].join("\n");
-    const FRAG = [
-      "uniform vec3 uColor;",
-      "uniform float uOpacity;",
-      "varying float vA;",
-      "#include <fog_pars_fragment>",
-      "void main() {",
-      "  gl_FragColor = vec4( uColor, uOpacity * vA );",
-      "  #include <tonemapping_fragment>",
-      "  #include <encodings_fragment>",
-      "  #include <fog_fragment>",
-      "}",
-    ].join("\n");
-    const mat = new THREE.ShaderMaterial({
-      name: "CBZ Bore Wake", uniforms: uni, vertexShader: VERT, fragmentShader: FRAG,
-      transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: true,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.frustumCulled = false;
-    mesh.renderOrder = 4;
-    return { mesh: mesh, geo: geo, mat: mat };
-  }
-
+  /* THE WAKE SHREDS ARE GONE (2026-10-20). Sixty flat tapered strips, one
+     flat colour each, sliding back over the sea behind the front: from any
+     height they read as exactly what they were, white lines painted on the
+     water. The churn behind a bore is now the sea's own surface (the
+     disaster material's whitewater clumps and its boiling displacement, see
+     dwFoamClumps / uDwChurn), so it rides the real water and its real flow. */
   CBZ.tsuFaceBuild = function (opts) {
     opts = opts || {};
     const H = Number.isFinite(opts.height) ? +opts.height : 34;
@@ -4536,8 +4614,6 @@
 
     const spray = tsuSprayBuild(W, H, (x) => hJit[colAt(x)], (x) => zJit[colAt(x)], rnd, light);
     geoms.push(spray.geo); mats.push(spray.mat); grp.add(spray.points);
-    const wake = tsuWakeBuild(W, rnd);
-    geoms.push(wake.geo); mats.push(wake.mat); grp.add(wake.mesh);
 
     return {
       group: grp, wall: wall, basePos: new Float32Array(pos),
@@ -4545,9 +4621,9 @@
       // evidence: relative std-dev of crest height along the front (0 = a
       // ruler), and the end columns' height as a fraction of the mean
       crestVar: crestVar, endTaper: endTaper,
-      spray: spray, wakeL: wake, light: light,
-      drawCalls: 3, sprayCount: spray.count,
-      foams: [spray.points], streaks: [], wake: [wake.mesh],
+      spray: spray, light: light,
+      drawCalls: 2, sprayCount: spray.count,
+      foams: [spray.points], streaks: [],
       geoms: geoms, mats: mats,
     };
   };
@@ -4627,16 +4703,6 @@
       const ph = r && r.domElement ? r.domElement.height : 900;
       su.uScale.value = ph * 0.5;
     }
-    if (h.wakeL) {
-      const wu = h.wakeL.mat.uniforms, mud = Math.min(1, turbid / 0.7);
-      wu.uTime.value = t;
-      wu.uY.value = seaLocal + 0.22;
-      // torn whitewater behind a muddy front is tan-grey froth, not paper
-      wu.uColor.value.setRGB(0.68 - mud * 0.33, 0.71 - mud * 0.37, 0.70 - mud * 0.42);
-      // clean water leaves no wake to see
-      wu.uOpacity.value = turbid * (0.22 + 0.14 * Math.abs(Math.sin(t * 1.3)));
-      h.wakeL.mesh.visible = turbid > 0.05;
-    }
     return true;
   };
 
@@ -4645,7 +4711,7 @@
     if (h.group && h.group.parent) h.group.parent.remove(h.group);
     for (let i = 0; i < (h.geoms || []).length; i++) h.geoms[i].dispose();
     for (let i = 0; i < (h.mats || []).length; i++) if (h.mats[i].dispose) h.mats[i].dispose();
-    h.group = null; h.wall = null; h.spray = null; h.wakeL = null; h.geoms = []; h.mats = [];
+    h.group = null; h.wall = null; h.spray = null; h.geoms = []; h.mats = [];
     return true;
   };
 
@@ -4669,12 +4735,32 @@
      published mean because the tsunami front has not reached it yet. Every
      survival water query subtracts this, so the swimmer, the drowning test,
      the debris and the bots all agree with the sheet that is drawn. */
+  // the island's shadow at (x, z) for a published lee record (cbzLeeShadow)
+  function leeShadow(e, L, x, z) {
+    const dx = +e.dx || 0, dz = +e.dz || 0, rx = x - (+e.cx || 0), rz = z - (+e.cz || 0);
+    const s = rx * dx + rz * dz;
+    const rl = (-rx * dz + rz * dx) - (+L.lc || 0), rs = s - (+L.sMid || 0);
+    let c = 0.5 - 0.5 * rs / Math.max(Math.hypot(rl, rs), 1);
+    c = c < 0 ? 0 : c > 1 ? 1 : c;
+    const ex = Math.pow(c, LEE_EXP);
+    const lw = Math.max(1, +L.lw || 1), D = Math.max(1, +L.d0 || 20) + LEE_SPREAD * Math.max(0, s - (+L.sMax || 0));
+    let t = (Math.abs(rl) - lw) / D; t = t < 0 ? 0 : t > 1 ? 1 : t;
+    return (1 - ex) * (1 - t * t * (3 - 2 * t));
+  }
+  CBZ.waterLeeShadow = function (x, z) {
+    const e = waterEvent;
+    return e && e.lee && e.lee.on ? leeShadow(e, e.lee, x, z) : 0;
+  };
   function frontFormulaDrop(x, z) {
     const e = waterEvent;
-    if (!e || !(e.aheadDrop > 0.001)) return 0;
-    const fd = (x - (+e.cx || 0)) * (+e.dx || 0) + (z - (+e.cz || 0)) * (+e.dz || 0) - (+e.frontS || 0);
+    const L = e && e.lee && e.lee.on ? e.lee : null;
+    if (!e || (!(e.aheadDrop > 0.001) && !L)) return 0;
+    const fd = (x - (+e.cx || 0)) * (+e.dx || 0) + (z - (+e.cz || 0)) * (+e.dz || 0) - (Number.isFinite(e.frontS) ? +e.frontS : -1e9);
     let k = (fd + 1) / 8; k = k < 0 ? 0 : k > 1 ? 1 : k;
-    return e.aheadDrop * k * k * (3 - 2 * k);
+    k = k * k * (3 - 2 * k);
+    let d = Math.max(0, +e.aheadDrop || 0) * k;
+    if (L) d += leeShadow(e, L, x, z) * ((+L.b || 0) + ((+L.a || 0) - (+L.b || 0)) * k);
+    return d;
   }
   /* THE STRAIGHT FRONT, alone: what the SEA does (the drawn-back water ahead
      of the bore, the raised water behind it). The run-up field forces its

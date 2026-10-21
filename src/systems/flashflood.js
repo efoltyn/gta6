@@ -336,42 +336,42 @@
     if (t < Wd) return 0.25 + 0.35 * (t / Wd);
     const u = (t - Wd) / A;
     if (u < 0.10) return 0.6 + 0.4 * (u / 0.10);
-    if (u < 0.28) return 1;
-    if (u < 0.45) return 1 - (u - 0.28) / 0.17;
-    return 0;
+    if (u < 0.24) return 1;
+    /* THE RECESSION LIMB IS A TAIL, NOT A RAMP (2026-10-20, owner: "the way
+       flash floods disappear is unrealistic"). The inflow used to fall
+       linearly to nothing by 45% of the event, so the channel emptied as one
+       block. A real hydrograph falls fast and then trails off for a long
+       time: the cell upstream eases first, the water already in the channel
+       keeps running down it, and the level drops progressively from the top
+       of the catchment to the sea. Same storm volume as the old ramp (the
+       shorter peak pays for the tail); it reaches zero exactly at the horn. */
+    const r = Math.min(1, (u - 0.24) / 0.76);
+    return (Math.exp(-5 * r) - RECESS_TAIL) / (1 - RECESS_TAIL);
   }
+  const RECESS_TAIL = Math.exp(-5);
   function drainBoost(t) {
-    // the recession: the storm is spent, the soil and the drains take the
-    // standing water. Gentle while the event runs (a front still on its way
-    // downstream keeps going); after the horn the AFTERMATH (see clear)
-    // drains what is left over the calm. It was min(0.45, 0.06 + 0.09 t)
-    // m/s: half a metre of street water gone in three seconds, which is the
-    // "dries up way too fast" the owner saw. Now a slow seep takes the thin
-    // sheets first and drainProp() brings the deep hollows down last.
-    if (F.ending) return Math.min(0.02, 0.003 + F.after * 0.0012);
+    // the recession: the storm is spent and the soil and the drains take
+    // the standing water. Gentle while the event runs (a front still on its
+    // way downstream keeps going); after the horn the AFTERMATH (see clear)
+    // keeps the solve running: the inflow is gone, so the channel drops from
+    // upstream, the streets run off downhill, and this seep (growing as the
+    // ground and the drains catch up) takes the thin sheets first and the
+    // deep hollows last. There is no deadline that forces every pond to the
+    // mud at a fixed second any more (the old drainProp did, and the water
+    // shrank everywhere at once like a fade): what is still standing when
+    // the land has run off stays as puddles in the silt (finish()).
+    if (F.ending) return Math.min(0.035, 0.004 + F.after * 0.0014);
     const u = (t - F.warnSecs) / F.activeSecs;
-    return u > 0.85 ? 0.12 * (u - 0.85) / 0.15 : 0;
+    return u > 0.85 ? 0.06 * (u - 0.85) / 0.15 : 0;
   }
-
-  /* THE LEVEL DROPS, IT DOES NOT FADE. Over the last DRAIN_LAST seconds of
-     the aftermath every pond also loses a share of its own depth (h * w /
-     time left): the deep low cells hold water longest and still reach the
-     mud exactly at AFTER_SECS, so nothing is left to snap away at the end. */
-  const DRAIN_LAST = 8;
-  function drainProp(dt) {
-    if (!F.ending) return 0;
-    const rem = AFTER_SECS - F.after;
-    if (rem >= DRAIN_LAST) return 0;
-    const r = Math.max(0, rem), w = (1 - r / DRAIN_LAST) * (1 - r / DRAIN_LAST);
-    return Math.min(1, w * dt / Math.max(dt, r));
-  }
+  function drainProp() { return 0; }
 
   function stepGrid(dt) {
     const g = F.grid, n = g.n, c = g.c, n1 = n + 1;
     const zb = g.zb, h = g.h, qx = g.qx, qz = g.qz, wx = g.wx, wz = g.wz, man = g.man;
     const out = g.out, scl = g.scl;
     const I = hydro(F.t), Iin = hydro(Math.max(0, F.t - F.lag));
-    const boost = drainBoost(F.t), prop = drainProp(dt);
+    const boost = drainBoost(F.t), prop = drainProp();
     // ---- sources (they also widen the active box) ----
     if (I > 0) {
       const rain = g.rain;
@@ -1277,18 +1277,51 @@
       "  return mix(mix(ffHash(i), ffHash(i + vec2(1.0, 0.0)), u.x), mix(ffHash(i + vec2(0.0, 1.0)), ffHash(i + vec2(1.0, 1.0)), u.x), u.y);",
       "}",
       "float ffFbm(vec2 p) { return ffNoise(p) * 0.62 + ffNoise(p * 2.31 + 17.7) * 0.38; }",
-      // streaks along the local flow, by the two-phase flow-map trick so the
-      // pattern moves with the water without shearing apart over time
-      "float ffStreak(vec2 p, vec2 fl) {",
+      /* WHY IT LOOKED FAKE (2026-10-20). The old foam was ffStreak: value
+         noise squeezed 4.6:1 along the flow (and 2.3x finer again for the
+         second octave), thresholded. Thresholding stretched noise gives
+         long thin PARALLEL LINES a hand-span apart, and the slack-water
+         "scum" was the noise's ridge line (1-|2n-1|), a network of thin
+         white lines. Far away the pattern was replaced by a flat fa*0.4
+         tint, which drew the CPU's front band as one uniform pale stripe.
+         No foam had any relief: one colour, lit by N.L of the water under
+         it. Real flood froth (Ahr 2021, Boscastle) is CLUMPS: rafts and
+         blobs half a metre to a few metres across, lumpy, lit on top and
+         shadowed in their creases, torn into ragged patches with dark water
+         between them, smeared only a little along the current, thickest at
+         the front, at the drops and against walls and bridges.
+
+         ffBoil: a smooth cellular field (log-sum-exp Worley), the billow
+         shape of a raft of foam. ffClump: two of them advected by the
+         two-phase flow map so they ride the local current without
+         shearing, stretched at most 1.8:1 along the flow, domain-warped so
+         no two clumps share an outline. */
+      "vec2 ffH2(vec2 p) { return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }",
+      "float ffBoil(vec2 q) {",
+      "  vec2 i = floor(q), f = fract(q);",
+      "  float S = 0.0;",
+      "  for (int yy = -1; yy <= 1; yy++) for (int xx = -1; xx <= 1; xx++) {",
+      "    vec2 g = vec2(float(xx), float(yy));",
+      "    vec2 r = g + ffH2(i + g) * 0.85 + 0.075 - f;",
+      "    S += exp(-6.0 * dot(r, r));",
+      "  }",
+      "  return clamp(1.0 + log(max(S, 1e-5)) / 6.0 * 1.7, 0.0, 1.0);",
+      "}",
+      "float ffClump(vec2 p, vec2 fl, float cell, float stretch) {",
       "  float sp = length(fl);",
       "  vec2 fd = sp > 0.02 ? fl / sp : vec2(1.0, 0.0);",
       "  vec2 ax = vec2(-fd.y, fd.x);",
-      "  float T = 1.7;",
+      "  float T = 2.1;",
       "  float p0 = fract(uSeaTime / T), p1 = fract(uSeaTime / T + 0.5);",
       "  vec2 q0 = p - fl * (p0 * T), q1 = p - fl * (p1 * T);",
-      "  float a = ffFbm(vec2(dot(q0, fd) * 0.35, dot(q0, ax) * 1.6));",
-      "  float b = ffFbm(vec2(dot(q1, fd) * 0.35, dot(q1, ax) * 1.6) + 7.3);",
-      "  return mix(a, b, abs(1.0 - 2.0 * p0));",
+      "  vec2 w0 = vec2(ffNoise(q0 * 0.31), ffNoise(q0 * 0.31 + 5.7)) * 1.4;",
+      "  vec2 w1 = vec2(ffNoise(q1 * 0.31 + 2.2), ffNoise(q1 * 0.31 + 9.1)) * 1.4;",
+      "  float a = ffBoil(vec2(dot(q0, fd) / stretch, dot(q0, ax)) / cell + w0);",
+      "  float b = ffBoil(vec2(dot(q1, fd) / stretch, dot(q1, ax)) / cell + w1 + 3.7);",
+      "  float m = abs(1.0 - 2.0 * p0);",
+      // the cross-fade halves a pattern's contrast mid-blend: put it back
+      "  float v = mix(a, b, m);",
+      "  return clamp(0.5 + (v - 0.5) / mix(1.0, 0.72, 1.0 - abs(2.0 * m - 1.0)), 0.0, 1.0);",
       "}",
     ].join("\n");
     /* FLOODWATER, from the Ahr valley 2021, Derbyshire 2019 and every
@@ -1311,19 +1344,36 @@
       "    if (under > 0.5) fN = -fN;",
       "    vec2 fl = vFf.xy;",
       "    float sp = length(fl);",
-      "    float near = 1.0 - smoothstep(22.0, 70.0, vSeaMisc.y);",
-      "    float st = mix(0.5, ffStreak(vSeaWorld.xz, fl), near);",
-      "    float fine = mix(0.5, ffStreak(vSeaWorld.xz * 2.3 + 9.1, fl * 2.3), near);",
-      "    float blot = ffFbm(vSeaWorld.xz * 0.045 + 3.1);",
+      "    float near = 1.0 - smoothstep(30.0, 110.0, vSeaMisc.y);",
       "    float rough = clamp(sp / 3.5, 0.0, 1.0);",
-      // THE CHOP, by screen derivatives of the moving pattern (no extra
-      // taps): boils and ripples riding the flow, rougher the faster it runs
-      "    float hgt = st * 0.65 + fine * 0.35;",
+      // the churn of the water itself: metre-scale boils riding the flow
+      "    float st = ffFbm((vSeaWorld.xz - fl * uSeaTime * 0.7) * 0.42);",
+      "    float fine = near > 0.01 ? ffNoise((vSeaWorld.xz - fl * uSeaTime * 0.8) * 1.3 + 9.1) : 0.5;",
+      "    float blot = ffFbm(vSeaWorld.xz * 0.045 + 3.1);",
+      // ---- WHERE THE FOAM IS: the CPU's mask (front, drops, walls, the
+      // jam) plus fast water; WHAT SHAPE: clumps at two scales riding the flow
+      "    float fa = clamp(vFf.z + smoothstep(2.2, 6.0, sp) * 0.45, 0.0, 1.0);",
+      "    float cl = near > 0.01 ? ffClump(vSeaWorld.xz * 1.0 + 13.0, fl, 1.25, 1.0 + 0.8 * rough) : 0.5;",
+      "    float cs = near > 0.01 ? ffClump(vSeaWorld.xz + 31.0, fl, 0.55, 1.2) : 0.5;",
+      // far off the clumps are sub-pixel: a coarse patchiness instead of a flat tint
+      "    float farP = ffFbm((vSeaWorld.xz - fl * uSeaTime * 0.6) * 0.33 + 4.4);",
+      "    float pat = mix(farP, cl * 0.55 + cs * 0.25 + st * 0.20, near);",
+      "    float thr = 0.98 - fa * 0.62;",
+      // soft lumpy margins, then perforated: dark water between the rafts
+      "    float fm = smoothstep(thr - 0.04, thr + 0.16, pat);",
+      "    fm *= smoothstep(0.18, 0.46, cs * 0.6 + fine * 0.4 + fa * 0.25);",
+      "    fm *= step(0.02, fa);",
+      // slack water: sparse small rafts of scum and litter, never lines
+      "    fm = max(fm, smoothstep(0.80, 0.92, cs) * smoothstep(0.55, 0.85, cl) * (1.0 - rough) * 0.35 * near);",
+      "    fm = clamp(fm, 0.0, 0.95);",
+      // THE CHOP, by screen derivatives of the moving pattern (no extra taps):
+      // the water's boils, plus the foam standing proud as LUMPS on it
+      "    float hgt = st * 0.55 + fine * 0.2 + fm * (0.5 + 0.6 * cl);",
       "    vec2 pX = dFdx(vSeaWorld.xz), pY = dFdy(vSeaWorld.xz);",
       "    float hX = dFdx(hgt), hY = dFdy(hgt);",
       "    float det = pX.x * pY.y - pX.y * pY.x;",
       "    vec2 gW = abs(det) > 1e-6 ? vec2(pY.y * hX - pX.y * hY, -pY.x * hX + pX.x * hY) / det : vec2(0.0);",
-      "    float amp = (0.10 + 0.55 * rough) * near;",
+      "    float amp = (0.10 + 0.50 * rough + 0.6 * fm) * near;",
       "    vec3 rN = normalize(fN - vec3(gW.x, 0.0, gW.y) * amp);",
       "    vec3 L = normalize(uSunDir);",
       "    float ndl = max(dot(rN, L), 0.0);",
@@ -1333,11 +1383,11 @@
       "    #else",
       "      vec3 skyC = mix(uSkyLow, uSkyHigh, skyT);",
       "    #endif",
-      // THE BODY: a suspension, two-tone with the silt plumes riding the flow
-      "    vec3 body = mix(vec3(0.100, 0.080, 0.054), vec3(0.150, 0.121, 0.083), smoothstep(0.25, 0.85, blot));",
-      "    body *= 0.90 + 0.20 * st;",
+      // THE BODY: a brown-grey suspension, two-tone with silt plumes riding the flow
+      "    vec3 body = mix(vec3(0.100, 0.082, 0.058), vec3(0.150, 0.126, 0.090), smoothstep(0.25, 0.85, blot));",
+      "    body *= 0.88 + 0.24 * st;",
       // churned water carries more silt and more air: paler, greyer
-      "    body = mix(body, vec3(0.165, 0.148, 0.118), rough * 0.40);",
+      "    body = mix(body, vec3(0.168, 0.152, 0.124), rough * 0.40);",
       "    float dep = vDep * vDep * 2.0;",
       // the margin: a centimetre or two over the ground reads as wet ground
       "    body = mix(body * 0.62, body, smoothstep(0.02, 0.22, dep));",
@@ -1346,19 +1396,15 @@
       "    float mf = 0.02 + 0.98 * pow(1.0 - clamp(dot(rN, V), 0.0, 1.0), 5.0);",
       "    col = mix(col, skyC * vec3(0.92, 0.88, 0.80), clamp(mf * (0.45 - 0.25 * rough), 0.0, 0.24));",
       "    col += uSunColor * pow(max(dot(rN, normalize(L + V)), 0.0), mix(90.0, 28.0, rough)) * (0.16 + 0.45 * mf) * (1.0 - 0.55 * rough);",
-      // FOAM: the CPU says where (the churning front band, steep faces, the
-      // walls it piles against, the bridge jams); the moving pattern says
-      // what shape: clumps and streaks along the flow, never a band
-      "    float fa = clamp(vFf.z + smoothstep(2.2, 6.0, sp) * 0.45, 0.0, 1.0);",
-      "    float pat = st * 0.55 + fine * 0.45;",
-      "    float thr = 1.0 - fa * 0.60;",
-      "    float fm = smoothstep(thr, thr + 0.12, pat) * step(0.02, fa);",
-      // slack water: a sparse scum of bubbles and litter in lines
-      "    fm = max(fm, smoothstep(0.93, 0.99, 1.0 - abs(st * 2.0 - 1.0)) * (1.0 - rough) * 0.28 * near);",
-      "    fm = mix(fa * 0.40, fm, near) * 0.85;",
-      // dirty off-white-tan, darker at its thin margins (the water shows through)
-      "    vec3 foamC = mix(body * 1.45, vec3(0.37, 0.335, 0.275), smoothstep(thr + 0.03, thr + 0.28, pat));",
-      "    foamC *= 0.62 + 0.38 * ndl;",
+      // THE FOAM: dirty tan froth with VOLUME. Lit by its own lumpy normal,
+      // the sky from above, its creases and thin margins showing the brown
+      // water through; never a flat paper white.
+      "    float core = smoothstep(thr + 0.04, thr + 0.30, pat);",
+      "    vec3 froth = mix(vec3(0.255, 0.228, 0.185), vec3(0.385, 0.360, 0.305), cl * 0.6 + cs * 0.4);",
+      "    froth *= mix(vec3(0.86, 0.82, 0.74), vec3(1.0), 1.0 - fa * 0.5);",
+      "    float fl2 = 0.40 + 0.42 * max(dot(rN, L), 0.0) + 0.18 * rN.y;",
+      "    vec3 foamC = mix(body * 1.35, froth * fl2, core);",
+      "    foamC *= mix(0.72, 1.0, smoothstep(0.25, 0.75, cs));",
       "    col = mix(col, foamC, fm);",
       // where the water has gone the silt mesh takes over (flashflood-silt)
       "    float siltK = smoothstep(0.0, 0.06, vFf.w);",
@@ -1520,20 +1566,80 @@
     buildSpray(R); buildDebrisMeshes(R); buildLids(R);
   }
 
+  /* THE SPRAY: round, lumpy, dirty puffs, never squares. The old one was a
+     PointsMaterial (square sprites, one flat colour, full opacity until they
+     hit the water), which is what read as confetti over the front. Each
+     particle now carries a seed and its age: the sprite grows and thins as
+     it flies, its edge is a soft noisy billow (gl_PointCoord falloff plus a
+     two-octave value noise), droplets are small and brown, froth puffs are
+     bigger, tan, and lit by the scene's sky and sun. */
+  function sprayMaterial() {
+    const uni = THREE.UniformsUtils.clone(THREE.UniformsLib.fog);
+    Object.assign(uni, { uScale: { value: 450 }, uLight: { value: new THREE.Color(0.75, 0.74, 0.70) } });
+    const VERT = [
+      "attribute vec2 aInfo;",     // seed 0..1, age 0..1
+      "uniform float uScale;",
+      "uniform vec3 uLight;",
+      "varying vec4 vCol;",
+      "varying float vSeed;",
+      "#include <fog_pars_vertex>",
+      "void main() {",
+      "  float sd = aInfo.x, age = aInfo.y;",
+      "  bool froth = sd < 0.55;",
+      "  float size = froth ? (0.35 + 0.55 * fract(sd * 7.3)) * (0.8 + 1.6 * age) : (0.08 + 0.10 * fract(sd * 11.1)) * (1.0 + 0.5 * age);",
+      "  vec3 c = froth ? mix(vec3(0.30, 0.27, 0.22), vec3(0.42, 0.39, 0.33), fract(sd * 3.7)) : vec3(0.20, 0.16, 0.11);",
+      "  float a = (froth ? 0.55 : 0.85) * smoothstep(0.0, 0.06, age) * (1.0 - smoothstep(0.45, 1.0, age));",
+      "  vCol = vec4(c * uLight, a);",
+      "  vSeed = sd * 37.0;",
+      "  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);",
+      "  float dz = -mvPosition.z;",
+      "  vCol.a *= smoothstep(0.8, 4.0, dz);",
+      "  gl_Position = projectionMatrix * mvPosition;",
+      // under a couple of pixels a droplet is a white dot: fade it, never clamp it up
+      "  float psz = size * projectionMatrix[1][1] * uScale / max(0.5, dz);",
+      "  vCol.a *= smoothstep(1.2, 3.5, psz);",
+      "  gl_PointSize = vCol.a > 0.003 && position.y > -9000.0 ? clamp(psz, 1.0, 160.0) : 0.0;",
+      "  #include <fog_vertex>",
+      "}",
+    ].join("\n");
+    const FRAG = [
+      "varying vec4 vCol;",
+      "varying float vSeed;",
+      "#include <fog_pars_fragment>",
+      "float spH(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }",
+      "float spN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+      "  return mix(mix(spH(i), spH(i + vec2(1.0, 0.0)), f.x), mix(spH(i + vec2(0.0, 1.0)), spH(i + vec2(1.0, 1.0)), f.x), f.y); }",
+      "void main() {",
+      "  vec2 c = gl_PointCoord * 2.0 - 1.0;",
+      "  float d = dot(c, c);",
+      "  if (d > 1.0) discard;",
+      "  vec2 q = gl_PointCoord * 3.0 + vec2(vSeed, vSeed * 0.7);",
+      "  float n = spN(q) * 0.65 + spN(q * 2.3 + 4.1) * 0.35;",
+      "  float a = vCol.a * (1.0 - d) * smoothstep(0.2, 0.8, n + 0.45 * (1.0 - d));",
+      // lit from above: the top of the puff a little brighter than its belly
+      "  vec3 col = vCol.rgb * (0.85 + 0.3 * (0.5 - c.y * 0.5));",
+      "  gl_FragColor = vec4(col, a);",
+      "  #include <tonemapping_fragment>",
+      "  #include <encodings_fragment>",
+      "  #include <fog_fragment>",
+      "}",
+    ].join("\n");
+    return new THREE.ShaderMaterial({ name: "CBZ Flash Flood Spray", uniforms: uni, vertexShader: VERT, fragmentShader: FRAG,
+      transparent: true, depthWrite: false, fog: true });
+  }
   function buildSpray(R) {
-    const pos = new Float32Array(N_SPRAY * 3), col = new Float32Array(N_SPRAY * 3);
+    const pos = new Float32Array(N_SPRAY * 3), info = new Float32Array(N_SPRAY * 2);
     R.spray = [];
     for (let i = 0; i < N_SPRAY; i++) {
-      const foam = i % 2 === 0;
-      // dirty spray: tan-grey froth and brown droplets (0.8 linear was paper white)
-      col[i * 3] = foam ? 0.46 : 0.22; col[i * 3 + 1] = foam ? 0.42 : 0.17; col[i * 3 + 2] = foam ? 0.35 : 0.11;
       pos[i * 3 + 1] = -1e4;
-      R.spray.push({ x: 0, y: -1e4, z: 0, vx: 0, vy: 0, vz: 0, kill: 0, dead: true });
+      info[i * 2] = hash01(i, 5); info[i * 2 + 1] = 1;
+      R.spray.push({ x: 0, y: -1e4, z: 0, vx: 0, vy: 0, vz: 0, kill: 0, dead: true, age: 0, ttl: 1, froth: info[i * 2] < 0.55 });
     }
     const g = new THREE.BufferGeometry();
     const a = new THREE.BufferAttribute(pos, 3); a.setUsage(THREE.DynamicDrawUsage);
-    g.setAttribute("position", a); g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    const m = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.42, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, sizeAttenuation: true }));
+    const b = new THREE.BufferAttribute(info, 2); b.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute("position", a); g.setAttribute("aInfo", b);
+    const m = new THREE.Points(g, sprayMaterial());
     m.frustumCulled = false; m.renderOrder = 3; m.userData.transient = true; m.userData.noCoat = true;
     R.parent.add(m); R.sprayMesh = m;
   }
@@ -1544,7 +1650,7 @@
       const p = R.spray[i]; if (!p.dead) continue;
       p.x = x + (rnd() - 0.5) * spread; p.z = z + (rnd() - 0.5) * spread; p.y = y + rnd() * 0.3;
       p.vx = (rnd() - 0.5) * 3; p.vz = (rnd() - 0.5) * 3; p.vy = up * (0.5 + rnd() * 0.7);
-      p.kill = y - 0.4; p.dead = false; n++;
+      p.kill = y - 0.4; p.dead = false; p.age = 0; p.ttl = 1.2 + rnd() * 0.8; n++;
     }
     F.stats.sprayLaunched = (F.stats.sprayLaunched || 0) + n;
   }
@@ -1684,10 +1790,17 @@
       if (dk === 1) {
         const sp = Math.hypot(g.ux[k], g.uz[k]);
         // foam: the leading churn band, steep faces, the bridge jam, the spouts
-        let foam = g.wetT[k] < 2.2 && h[k] > 0.1 ? (1 - g.wetT[k] / 2.2) * Math.min(1, sp / 2) : 0;
+        // (the front was a 2.2 s band of equal strength behind every newly
+        // wet cell: drawn far off as one pale stripe. Now it is strongest
+        // right at the tongue, lasts longer where the tongue is fast and
+        // deep, and every cell carries its own share, so the front reads as
+        // torn rafts, not a ruled band; the shader decides the shape)
+        const fr = 2.6 + Math.min(2.4, sp * 0.6);
+        let foam = g.wetT[k] < fr && h[k] > 0.06 ? Math.pow(1 - g.wetT[k] / fr, 1.4) * Math.min(1, sp / 1.6) * (0.55 + 0.45 * hash01(k, 77)) : 0;
         const steep = Math.min(1, Math.hypot(gx, gz) * 2.2);
         if (steep * Math.min(1, sp / 3) > foam) foam = steep * Math.min(1, sp / 3);
-        if (g.bridgeOf[k] && F.bridges[g.bridgeOf[k] - 1].block > 0.15) foam = Math.max(foam, 0.8);
+        // the jam: water piling over the wreckage, by how hard it is running
+        if (g.bridgeOf[k] && F.bridges[g.bridgeOf[k] - 1].block > 0.15) foam = Math.max(foam, Math.min(0.95, 0.5 + sp * 0.15 + 0.25 * hash01(k, 91)));
         // water driven against a wall piles up and breaks on it: the froth
         // hugs the facade and the corners, not the open street
         const wd = g.wall[k];
@@ -1768,7 +1881,7 @@
   function updateSpray(dt) {
     const R = F.render; if (!R || !R.sprayMesh) return;
     const g = F.grid, n = g.n;
-    const arr = R.sprayMesh.geometry.attributes.position.array;
+    const arr = R.sprayMesh.geometry.attributes.position.array, inf = R.sprayMesh.geometry.attributes.aInfo.array;
     const fp = F.front.pts;
     let budget = 40;
     // sources: the front, the manhole spouts
@@ -1799,15 +1912,30 @@
           p.vy = 0.8 + rnd() * 1.4 + sp * 0.25;
           p.kill = eta - 0.3; p.dead = false; spawned = true;
         }
-        if (spawned) { budget--; F.stats.sprayLaunched = (F.stats.sprayLaunched || 0) + 1; }
+        if (spawned) { budget--; p.age = 0; p.ttl = p.froth ? 1.4 + rnd() * 1.1 : 0.7 + rnd() * 0.5; F.stats.sprayLaunched = (F.stats.sprayLaunched || 0) + 1; }
       } else {
-        p.vy -= G * dt;
+        // froth is light: the air holds it back and it falls slower
+        const kd = Math.max(0, 1 - (p.froth ? 1.6 : 0.3) * dt);
+        p.vy -= G * (p.froth ? 0.55 : 1) * dt;
+        p.vx *= kd; p.vz *= kd;
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-        if (p.y < p.kill && p.vy < 0) { p.dead = true; p.y = -1e4; }
+        p.age += dt;
+        if ((p.y < p.kill && p.vy < 0) || p.age > p.ttl) { p.dead = true; p.y = -1e4; }
       }
       arr[i * 3] = p.x; arr[i * 3 + 1] = p.y; arr[i * 3 + 2] = p.z;
+      inf[i * 2 + 1] = p.dead ? 1 : Math.min(1, p.age / p.ttl);
     }
     R.sprayMesh.geometry.attributes.position.needsUpdate = true;
+    R.sprayMesh.geometry.attributes.aInfo.needsUpdate = true;
+    const su = R.sprayMesh.material.uniforms;
+    if (su && su.uScale) {
+      const rr = CBZ.renderer;
+      su.uScale.value = (rr && rr.domElement ? rr.domElement.height : 900) * 0.5;
+      // the scene's own light: the hemisphere sky plus a share of the sun
+      const hemi = CBZ.hemi, sun = CBZ.sun, L = su.uLight.value;
+      if (hemi) L.setRGB(hemi.color.r * hemi.intensity * 0.8, hemi.color.g * hemi.intensity * 0.8, hemi.color.b * hemi.intensity * 0.8);
+      if (sun) { L.r += sun.color.r * sun.intensity * 0.35; L.g += sun.color.g * sun.intensity * 0.35; L.b += sun.color.b * sun.intensity * 0.35; }
+    }
   }
 
   function updateDebrisMeshes() {
@@ -2036,11 +2164,30 @@
      settle where the water leaves them, and the mud shows. Then it freezes
      into the silt film, the tide marks and the wrecks. Its own frame hook,
      because the def that drove it has ended. */
-  // s the water takes to go down after the horn: most of the calm (the
-  // director's calm is 12-20 s and waits on busy() for the rest)
-  const AFTER_SECS = 16;
+  /* HOW LONG IT RUNS: until the land has run off, not to a clock. The
+     solve keeps going after the horn until no water deeper than PUDDLE_H
+     is left on the land (what is still standing then is a puddle, and stays
+     one in the silt: see finish), or the run-off has gone under a couple of
+     cubic metres. AFTER_MAX is only a runaway guard; the director's calm
+     waits on draining() / landWet() rather than cutting the water off. */
+  const AFTER_MAX = 90;
+  const PUDDLE_H = 0.07;
   let afterHooked = false;
   function hookAfter() { if (!afterHooked && CBZ.onAlways) { afterHooked = true; CBZ.onAlways(48, afterTick); } }
+  // land water right now: volume (m3), deepest cell (m), cells wet vs cells ever wet
+  function landWater() {
+    const g = F && F.grid; if (!g) return { vol: 0, maxH: 0, wet: 0, ever: 0 };
+    let v = 0, mh = 0, wet = 0, ever = 0;
+    const h = g.h, oc = g.ocean, hm = g.hmax;
+    for (let k = 0; k < h.length; k++) {
+      if (oc[k]) continue;
+      if (hm[k] > SILT_MIN_H) ever++;
+      const hk = h[k];
+      if (hk > H_DRAW) { wet++; v += hk; if (hk > mh) mh = hk; }
+    }
+    return { vol: v * g.c * g.c, maxH: mh, wet: wet, ever: ever };
+  }
+  let lwT = 0, lwLast = null;
   function afterTick(dt) {
     // the film the last flood left goes on drying, for the rest of the match
     if (silt && silt.U && !F) {
@@ -2051,16 +2198,16 @@
     if (!F || !F.ending) return;
     F.after += Math.min(0.1, dt || 0);
     tick(dt);
-    let v = 0;
-    const g = F.grid;
-    if (F.after > 1) for (let k = 0; k < g.h.length; k += 7) if (!g.ocean[k]) v += g.h[k];
-    if (F.after >= AFTER_SECS || (F.after > 1 && v * 7 * g.c * g.c < 2)) finish({ keepSilt: true });
+    if ((lwT -= dt || 0) > 0 && F.after < AFTER_MAX) return;
+    lwT = 0.5;
+    const L = lwLast = landWater();
+    if (F.after >= AFTER_MAX || (F.after > 2 && (L.maxH < PUDDLE_H || L.vol < 2))) finish({ keepSilt: true });
   }
   function clear(o) {
     o = o || {};
     if (!F) return;
     if (o.keepSilt && F.render && F.ready && !F.ending && !o.now) {
-      F.ending = true; F.after = 0;
+      F.ending = true; F.after = 0; lwLast = null; lwT = 0;
       hookAfter();
       event("flood", "the storm is spent: draining");
       return;
@@ -2087,7 +2234,16 @@
         const g = F.grid;
         for (let k = 0; k < g.h.length; k++) if (g.h[k] > H_SHOW && !g.ocean[k]) {
           const i = k % g.n, j = (k / g.n) | 0;
-          if (g.hmax[k] >= SILT_MIN_H && !g.room[k] && steepAt(g, i, j) <= 0.14) { g.siltK[k] = 0.02; g.siltTh[k] = Math.max(g.siltTh[k], siltThick(g, k, i, j)); }
+          /* WHAT IS STILL STANDING STAYS STANDING: the last centimetres in
+             the hollows become the residue's puddles (cbzFloodResidue draws
+             standing water where the film is thickest and fresh), so the
+             sheet hands over to a glossy pool in the mud instead of
+             vanishing. On a slope it is just the wet film. */
+          if (g.hmax[k] >= SILT_MIN_H && !g.room[k]) {
+            const flat = steepAt(g, i, j) <= 0.14;
+            g.siltK[k] = 0.02;
+            g.siltTh[k] = Math.max(g.siltTh[k], flat ? Math.min(1, 0.8 + 3 * g.h[k]) : siltThick(g, k, i, j));
+          }
           g.h[k] = 0;
         }
         g.bb.i0 = 0; g.bb.i1 = g.n - 1; g.bb.j0 = 0; g.bb.j1 = g.n - 1;
@@ -2168,6 +2324,20 @@
     start: start, tick: tick, clear: clear, islandWorld: islandWorld, settleMarks: settleMarks,
     // the water is still going down (the director's calm waits on it)
     busy: function () { return !!(F && F.ending); },
+    /* THE DIRECTOR'S HOLD: while the aftermath runs, how much is still on
+       the land. landWet() is the share of the cells this flood wetted that
+       still carry drawn water (0..1, 0 = run off); draining() the details.
+       Hold the next card while landWet() > ~0.08 instead of cutting it. */
+    draining: function () {
+      if (!F || !F.ending) return null;
+      const L = lwLast || landWater();
+      return { after: +F.after.toFixed(1), volM3: Math.round(L.vol), maxDepthM: +L.maxH.toFixed(2), landWet: L.ever ? +(L.wet / L.ever).toFixed(3) : 0 };
+    },
+    landWet: function () {
+      if (!F) return 0;
+      const L = F.ending && lwLast ? lwLast : landWater();
+      return L.ever ? L.wet / L.ever : 0;
+    },
     marksAudit: function () {
       const M = marksLive;
       return { marks: !!M, buildings: M ? M.spans.length : 0,
