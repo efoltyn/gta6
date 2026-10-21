@@ -837,6 +837,21 @@
       else { ta = (minZ - oz) / dz; tb = (maxZ - oz) / dz; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
       if (t0 > 0.001 && t0 < best) best = t0;   // t0<=0 → pivot already inside; ignore
     }
+    // CAMERA-ONLY BOXES (CBZ.camColliders): surfaces a lens must not pass
+    // that are not physics walls — a moving lift car's ceiling (world/
+    // disaster_arena.js keeps its box on the car every frame). A handful at
+    // most, so no grid: the same slab test.
+    const cc = CBZ.camColliders;
+    if (cc && cc.length) {
+      for (let i = 0; i < cc.length; i++) {
+        const c = cc[i];
+        // a box belongs to one world (city, prison and island share coordinates)
+        if (!c || c.off || (c.mode && !(CBZ.game && CBZ.game.mode === c.mode))) continue;
+        const t = slabT(ox, oy, oz, dx, dy, dz, c.minX - rad, c.maxX + rad,
+          (c.y0 != null ? c.y0 : -1e4) - rad, (c.y1 != null ? c.y1 : 1e4) + rad, c.minZ - rad, c.maxZ + rad, best);
+        if (t > 0.001 && t < best) best = t;
+      }
+    }
     return best;
   }
 
@@ -1156,6 +1171,10 @@
   const INT_HEIGHT_DROP = 0.18;                // over-the-head pivot eases to over-the-shoulder
   const ROOM_TAU = 0.30;                       // damp time constant (both directions)
   let roomT = 0, roomCeil = CEIL_PROBE, roomSpan = ROOM_PROBE * 2, encK = 0;
+  let pivCap = 1e9;                            // the highest the pivot may sit (under the lid over you)
+  // where the room probes stand: the rig height, except on the island, whose
+  // 2.1-2.4 m outdoor pivot is above a lift car's lid (probe from the head)
+  function roomProbeH() { return CBZ.game && CBZ.game.mode === "survival" ? Math.min(height, 1.55) : height; }
   const _upRay = new THREE.Raycaster();
   const _upOrg = new THREE.Vector3(), _upDir = new THREE.Vector3(0, 1, 0);
   function sstep(a, b, x) {
@@ -1265,7 +1284,7 @@
   let _selfFlip = false;       // the setFPS call about to land is ours
   function tightFP(fdt) {
     const on = CBZ.CONFIG.CAM_TIGHT_FP !== false && !!CBZ.setFPS && !!CBZ.fps;
-    const live = on && CBZ.game.mode === "escape" && CBZ.game.state === "playing" &&
+    const live = on && (CBZ.game.mode === "escape" || CBZ.game.mode === "survival") && CBZ.game.state === "playing" &&
       !player.dead && !player.driving && !(CBZ.simView && CBZ.simView.active) &&
       !(CBZ.cineCam && CBZ.cineCam.active);
     if (!live) {
@@ -1285,7 +1304,7 @@
     if (tfpPrev !== null && nowFP !== tfpPrev && !_selfFlip) { autoFP = false; autoFPBlock = true; }
     _selfFlip = false;
 
-    senseRoom(player.pos.x, player.pos.y + height, player.pos.z, fdt);
+    senseRoom(player.pos.x, player.pos.y + roomProbeH(), player.pos.z, fdt);
     const tight = roomSpan <= FP_SPAN_IN && roomCeil <= FP_CEIL_IN;
     const open = roomSpan >= FP_SPAN_OUT;
     if (open) autoFPBlock = false;
@@ -1843,8 +1862,8 @@
     // are the same ones; only who is allowed to ask changed. Chute/driving still
     // opt out, and CAM_ROOM_BOOM=false still reverts the lot.
     const roomK = (!player.driving && !chuteState && CBZ.CONFIG.CAM_ROOM_BOOM !== false &&
-        (TP || CBZ.game.mode === "escape"))
-      ? senseRoom(player.pos.x, player.pos.y + height, player.pos.z, fdt)
+        (TP || CBZ.game.mode === "escape" || CBZ.game.mode === "survival"))
+      ? senseRoom(player.pos.x, player.pos.y + roomProbeH(), player.pos.z, fdt)
       : (encK = 0);
     const wantDist = roomK > 0
       ? Math.min(desiredZoom, desiredZoom + (roomBoom() - desiredZoom) * roomK)
@@ -1910,7 +1929,26 @@
     const rightX = Math.cos(yaw), rightZ = -Math.sin(yaw);
     const fwdX = -Math.sin(yaw), fwdZ = -Math.cos(yaw);
     const sK = TP ? shoulderK : 1;   // shoulder-swap ease; spent on the offsets below
-    const baseY = ty + (!TP && shoulder ? 0.08 : 0);
+    let baseY = ty + (!TP && shoulder ? 0.08 : 0);
+    /* THE PIVOT STAYS IN THE ROOM (owner: "in small rooms like elevators the
+       camera can end up outside the room you're in"). The island frames the
+       pivot 2.08-2.42 m over your feet (it reads the ground around you
+       outdoors), and an island lift car is 2.3 m to its lid. A pivot ABOVE the
+       lid starts every boom test on the far side of it: the sweep skips a box
+       the origin is already in, so the lens flew out over the car, through the
+       shaft, into whatever was there. Now the pivot is held under whatever is
+       over your head (colliders, LOS shells and camera-only boxes, one probe a
+       frame from chest height), dropping at once and easing back up. */
+    if (!player.driving && !chuteState) {
+      const chestY = player.pos.y + 1.0;
+      const free = clearDist(tx, chestY, tz, tx, chestY + 3.2, tz, 0.22);
+      const cap = chestY + Math.max(0.35, free - 0.12);
+      // down at once; up eased (a beam overhead is not a strobe), but a jump
+      // of more than a storey (a respawn, a teleport) is just taken
+      pivCap = (cap < pivCap || cap - pivCap > 2.5) ? cap : pivCap + (cap - pivCap) * (1 - Math.exp(-6 * fdt));
+      if (!(pivCap > -1e8)) pivCap = cap;
+      if (baseY > pivCap) baseY = Math.max(player.pos.y + 0.9, pivCap);
+    } else pivCap = 1e9;
 
     // orbit offset from yaw/pitch. rigPitch === cam.pitch unless the frame is
     // pinned (CAM_TP_FIXED_ANGLE), in which case the whole boom — arm clamp,
@@ -1972,7 +2010,7 @@
     // orbit purposes, or the pure orbit below would frame against a point the
     // camera is not actually swinging around.
     const dyExtra = TP ? 0 : (shoulder ? -0.05 : (meleeFocus ? 0.02 : (surv ? 0.34 : 0.14)));
-    const pivotY = baseY + dyExtra;
+    const pivotY = Math.min(baseY + dyExtra, Math.max(baseY, pivCap));
     let dx = baseX + ox + rightX * camSide;
     let dy = pivotY + oy;
     let dz = baseZ + oz + rightZ * camSide;
