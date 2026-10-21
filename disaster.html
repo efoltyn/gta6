@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 432
+     Natural Disaster Survival, standing alone: index.html minus the 431
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -28,7 +28,6 @@
 <link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=deck1011">
-<link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
 <link rel="stylesheet" href="css/city.css?v=spec1014">
 <link rel="stylesheet" href="css/campaign.css?v=neck1001b">
@@ -118,8 +117,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <div id="survFlash"></div>
 <div id="fade"></div>
 
-<!-- live yard rankings overlay (systems/dashboard.js) -->
-<div id="dashboard"></div>
 
 <!-- shared full-screen navigation map (systems/fullmap.js) -->
 <div id="fullMap" aria-hidden="true">
@@ -893,7 +890,7 @@ document.body.appendChild(b);}}catch(e){}})();
      holds. city/elevators.js and world/disaster_arena.js are its two bodies;
      both load after this. -->
 <script src="src/systems/liftcore.js?v=lift1"></script>
-<script src="src/systems/escapeplan.js?v=jailv1001"></script>
+<script src="src/systems/escapeplan.js?v=noranks1020"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
      drops on the pavement. Needs THREE + actorweapons + materials, all

@@ -505,7 +505,6 @@
       '<div class="ep-top"><span class="ep-now"></span><span class="ep-sub ep-cigs"></span></div>' +
       '<div class="ep-lost"></div>' +
       '<div class="ep-btns"><button type="button" data-ep="map">Map</button>' +
-      '<button type="button" data-ep="ranks">Ranks</button>' +
       '<button type="button" data-ep="close">Close</button></div>';
     document.body.appendChild(panel);
     panel.addEventListener("click", function (e) {
@@ -515,7 +514,6 @@
       const act = b.getAttribute("data-ep");
       if (act === "close") setOpen(false);
       else if (act === "map") { setOpen(false); if (CBZ.fullMap && CBZ.fullMap.toggle) CBZ.fullMap.toggle(); }
-      else if (act === "ranks") { setOpen(false); if (CBZ.dashboardCycle) CBZ.dashboardCycle(); }
     });
     return panel;
   }
