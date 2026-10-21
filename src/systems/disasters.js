@@ -1958,93 +1958,6 @@
     return 1.18 * (0.5 + 0.5 * spent);
   }
 
-  /* ---- THE BROKEN BORE, BAND BY BAND (see water_spec.js TSU_BANDS) --------
-     Each of the face's columns scans the run-up field along the travel
-     direction from where it was: the open sea (forced cells) is the
-     scripted wave's, a standing building is passed through (the water goes
-     round it), and the first open cell under 0.35 m is that street's
-     front. The column stands there on the ground, as tall as the water
-     behind it heaped by its speed, or as the crash's wall falling onto it
-     over the first seconds ashore; a column whose water has stopped is
-     slack flood, not a bore, and fades. Columns still at sea (the flanks of
-     a round island meet the wave later) stay the wave until their own coast.
-     Returns { cols: [dz, dy, k] x bands, sRef, H, alive }. */
-  const _boreQ = {}, _boreS = new Float32Array(24), _boreD = new Float32Array(24);
-  function tsuBoreBands(ctx, st, F, dt, seaY) {
-    const face = st.face;
-    if (!face || !F || !CBZ.tsuFaceBands) return null;
-    const N = CBZ.tsuFaceBands, W = face.width || ctx.R * 2.7;
-    const sx = st.dz, sz = -st.dx;               // the face's local +x in the world
-    let Bd = st.bands;
-    if (!Bd || Bd.n !== N || Bd.run !== F || Bd.face !== face) {
-      Bd = st.bands = {
-        n: N, run: F, face: face, s: new Float32Array(N).fill(st.frontS), v: new Float32Array(N),
-        landT: new Float32Array(N).fill(-1), dy: new Float32Array(N), crest: new Float32Array(N),
-        top0: new Float32Array(N),
-        cols: new Float32Array(N * 3), crashTop: (st.faceY != null ? st.faceY : seaY - 1.2) + (st.faceH || 10),
-      };
-    }
-    const ddt = Math.max(1e-3, dt || 0);
-    const seaPost = Math.exp(-Math.max(0, st.crashT) * 0.35);
-    const VMAX = 14;                              // m/s: no bore on land outruns this
-    let sRef = 1e9, maxC = 0;
-    for (let b = 0; b < N; b++) {
-      const xl = (b / (N - 1) - 0.5) * W;
-      const ox = ctx.cx + sx * xl, oz = ctx.cz + sz * xl;
-      const s0 = Bd.s[b];
-      let sLand = NaN, front = NaN, bedF = seaY, nW = 0, outside = false;
-      for (let s = s0 - 5; s <= s0 + 45; s += 2.5) {
-        const px = ox + st.dx * s, pz = oz + st.dz * s;
-        const r = F.sample(px, pz, _boreQ);
-        if (!(r.in > 0.5)) { if (s > s0) outside = true; break; }
-        if (r.forced > 0.5) continue;
-        if (!(sLand === sLand)) sLand = s;
-        if (F.blockAt(px, pz)) continue;
-        if (r.depth < 0.35) { front = s; bedF = r.bed; break; }
-        _boreS[nW] = s; _boreD[nW] = r.depth; nW++;
-        bedF = r.bed;
-      }
-      const onLand = sLand === sLand && sLand <= st.frontS + 2.5;
-      let c = 0, dy = 0, ns;
-      if (onLand) {
-        if (!(front === front)) front = outside ? s0 : s0 + VMAX * ddt;
-        ns = Math.max(s0, Math.min(front, s0 + VMAX * ddt));
-        const v = (ns - s0) / ddt;
-        Bd.v[b] += (v - Bd.v[b]) * Math.min(1, ddt * 3);
-        // landing: the wall it brings is the one it was at sea, not a fresh crash
-        if (Bd.landT[b] < 0) { Bd.landT[b] = 0; Bd.top0[b] = seaY + Math.max(0, Bd.crashTop - seaY) * seaPost; }
-        else Bd.landT[b] += ddt;
-        const post = Math.exp(-Bd.landT[b] * 0.8);
-        // the flood's depth in the 15 m behind its edge (the edge itself tapers to nothing)
-        let depth = 0;
-        for (let q = 0; q < nW; q++) if (_boreS[q] >= ns - 15 && _boreD[q] > depth) depth = _boreD[q];
-        const moving = Math.max(0, Math.min(1, (Bd.v[b] - 0.4) / 1.6));
-        const bore = depth * (0.8 + 0.5 * moving);
-        const fall = Math.max(0, Bd.top0[b] - bedF) * post;
-        c = Math.max(bore, fall) * Math.max(post, moving) * Math.min(1, depth / 0.6 + post);
-        dy = bedF - seaY;
-      } else {
-        // still the wave at sea here: where the scripted front is, as tall as it was
-        ns = Math.max(s0, st.frontS);
-        c = Math.max(0, Bd.crashTop - seaY) * seaPost;
-        Bd.v[b] = 0;
-      }
-      Bd.s[b] = ns;
-      Bd.crest[b] = c < 0.3 ? 0 : c;
-      Bd.dy[b] = dy;
-      if (Bd.crest[b] > 0) { if (ns < sRef) sRef = ns; if (Bd.crest[b] > maxC) maxC = Bd.crest[b]; }
-    }
-    const alive = maxC > 0;
-    if (!alive) sRef = st.frontS;
-    const H = Math.max(4.5, maxC + 1.2);
-    for (let b = 0; b < N; b++) {
-      Bd.cols[b * 3] = Bd.s[b] - sRef;
-      Bd.cols[b * 3 + 1] = Bd.dy[b];
-      Bd.cols[b * 3 + 2] = Bd.crest[b] / (H - 1.2);
-    }
-    return { cols: Bd.cols, sRef: sRef, H: H, alive: alive };
-  }
-
   /* THE CRASH. The stand ends: the lip comes down along the whole front at
      once — a line of white water, the roar, the hardest shake the event has —
      and the bore is released into the town. This IS landfall now; the old
@@ -2059,6 +1972,17 @@
     for (let i = -2; i <= 2; i++) {
       CBZ.fx.blast(fx0 + px * i * (ctx.R * 0.28), fz0 + pz * i * (ctx.R * 0.28),
         { maxR: i === 0 ? 26 : 18, color: 0xd9f2ff, shake: i === 0 ? 1.25 : 0, life: 0.8 });
+    }
+    /* THE LIP COMES DOWN AS WATER, NOT AS A FADE: the whole front throws a
+       tumbling mass of white water and mist forward onto the shore while the
+       face fades out under it, and the bore on the land
+       (world/tsunami_whitewater.js) takes over from the run-up's own fronts. */
+    if (CBZ.tsuWhite) {
+      const zs = (st.faceH || st.H || 20) / 34;
+      CBZ.tsuWhite.burst({
+        x: fx0 + st.dx * 5 * zs, z: fz0 + st.dz * 5 * zs, dx: st.dx, dz: st.dz,
+        width: ctx.R * 2.2, y: st.faceY != null ? st.faceY + 1.2 : -0.8, H: Math.max(6, (st.faceH || 20) * 0.8),
+      });
     }
     narrate("toast", "BRACE!");
     sound("collapse"); sound("water"); sound("rumble");
@@ -2112,8 +2036,8 @@
       W.flowSpeed = 0.6 + Math.abs(Number.isFinite(flow) ? flow : 0) * 0.9;
       W.stand = st.phase === "sweep" ? 0 : (st.phase === "flooded" ? 1 : 0.8);
       W.aheadDrop = st.aheadDrop || 0;
-      /* THE BOIL AND THE WHITE WATER (world/water_spec.js uDwChurn /
-         dwFoamClumps): the sea heaves hardest behind a live bore, keeps
+      /* THE BOIL AND THE FROTH (world/water_spec.js uDwChurn / dwFroth /
+         dwChopGrad): the sea heaves hardest behind a live bore, keeps
          churning while the town is under and through the wave train, and
          its crest lines give way to the flood's own clumps. */
       const rise = st.phase === "drain" ? Math.min(1, Math.abs(st.undertow || 0) / 6) : 0;
@@ -2225,6 +2149,9 @@
       },
     });
     ctx.st.run = F;
+    // the bore and its white water ride this field's fronts from now until
+    // it detaches (world/tsunami_whitewater.js)
+    if (CBZ.tsuWhite) CBZ.tsuWhite.attach(root());
     return F;
   }
   // the field's answer at (x, z), or null when it is not running
@@ -2376,7 +2303,7 @@
     const st = ctx.st;
     // the front the churn rides: only while the wall is standing in the sweep
     const front = (st.phase === "sweep" && st.face && st.wave && st.wave.visible !== false && st.faceH && st.faceY != null) ? {
-      x: ctx.cx + st.dx * (st.faceS != null ? st.faceS : st.frontS), z: ctx.cz + st.dz * (st.faceS != null ? st.faceS : st.frontS), dx: st.dx, dz: st.dz,
+      x: ctx.cx + st.dx * (st.crashS != null ? st.crashS : st.frontS), z: ctx.cz + st.dz * (st.crashS != null ? st.crashS : st.frontS), dx: st.dx, dz: st.dz,
       H: st.faceH, seaY: st.faceY + 1.2, turbid: st.sediment || 0,
       t: CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001,
       v: st.frontV != null ? st.frontV : st.speed,
@@ -2686,6 +2613,7 @@
     st.frontV = 0;                 // the front is gone; a stale sweep speed is a lie
     st.waveAmp = 1.06; st.chopAmp = 0.98; st.foamGain = 0.62;
     if (st.wave) st.wave.visible = false;
+    if (CBZ.tsuWhite) CBZ.tsuWhite.seaFront(null);
     tsuLevels(st, st.floodSurge, st.floodSurge);
     tsuLee(st, st.floodSurge, st.floodSurge, TSU_WRAP * st.floodSurge);
     tsuPublish(ctx, 1.6);
@@ -2873,7 +2801,8 @@
          began: stars in the sky of every shot. The spray belongs to the lip
          (the face's own GPU spray, below), and nowhere else. */
       st.sediment = 0; st.undertowT = 0; st.carWatch = null;
-      st.faceS = null; st.bands = null;
+      st.crashS = null;
+      if (CBZ.tsuWhite) CBZ.tsuWhite.seaFront(null);
       tsuRunStart(ctx);                         // the land is a flow from here on
       st.debris = undefined;                    // built lazily on first contact
       tsuPublish(ctx, 2.2);
@@ -3059,23 +2988,26 @@
           const step = Math.max(0, (ctx.arena && ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8) + faceBehind - aheadY);
           st.faceH = Math.max(2, st.H * hs + step - 1.2);
           st.faceY = aheadY - 1.2;
-          /* AFTER THE CRASH THE WALL RIDES THE FLOOD'S OWN FRONT. It used to
-             sink into the flood in a second and a half and hide, so from the
-             sea there was no wave at all and on the land only a flat sheet
-             with a step in it. A broken bore is still a wall of tumbling
-             water as high as the flood behind it: tsuBoreBands lays the
-             face's columns on the run-up field's leading edge, band by band
-             (it bends round the blocks and runs up each street at the
-             water's own pace), lets the crash height fall onto that bore
-             over a few seconds, and keeps the part still at sea a wave. */
-          let cols = null;
-          if (st.run && st.broke) {
-            const B = tsuBoreBands(ctx, st, st.run, dt, aheadY);
-            if (B) { cols = B.cols; st.faceS = B.sRef; st.faceH = B.H; }
-            if (st.wave) st.wave.visible = !!(B && B.alive);
+          /* AFTER THE CRASH THE FACE IS NOT THE BORE (2026-10-20). One
+             straight wave cannot follow a ragged run-up up thirty streets, and
+             dragging it there (the old 32-column tsuBoreBands) drew a low
+             strip hidden in a cow-print sheet. The face comes down where it
+             broke: it stays at the crash line, sinks and fades over ~1.1 s
+             under the crash burst, and the bore is world/tsunami_whitewater.js
+             from then on: walls and white water on the run-up field's own
+             fronts, and on the straight wave still running along the flanks
+             (the sea front published here, every frame of the sweep). */
+          let fade = 1, faceS = st.frontS;
+          if (st.broke) {
+            if (st.crashS == null) { st.crashS = st.frontS; st.crashY = st.faceY; st.crashH = st.faceH; }
+            const k = Math.max(0, Math.min(1, st.crashT / 1.1));
+            fade = 1 - k * k;
+            faceS = st.crashS; st.faceY = st.crashY; st.faceH = st.crashH * (1 - 0.55 * k);
+            if (st.wave) st.wave.visible = fade > 0.01;
+            if (CBZ.tsuWhite) CBZ.tsuWhite.seaFront({ cx: ctx.cx, cz: ctx.cz, dx: st.dx, dz: st.dz, s: st.frontS, half: ctx.R * 1.35, v: st.frontV });
           }
           CBZ.tsuFaceUpdate(st.face, {
-            cols: cols,
+            fade: fade,
             t: CBZ.waterClock ? CBZ.waterClock() : CBZ.now * 0.001, dt: dt,
             height: st.faceH, turbid: turbid,
             // a spent surge does not overhang: the curl goes with the height
@@ -3083,8 +3015,8 @@
             foam: st.foamGain,
             // the crash tears the whole crest into the air for a beat
             spray: st.broke && st.crashT < 0.9 ? 1.9 - st.crashT : 1,
-            x: st.faceS != null ? ctx.cx + st.dx * st.faceS : fx0, y: st.faceY + (cols ? 0 : Math.sin(CBZ.now * 0.005) * 0.4),
-            z: st.faceS != null ? ctx.cz + st.dz * st.faceS : fz0, seaY: aheadY,
+            x: ctx.cx + st.dx * faceS, y: st.faceY + Math.sin(CBZ.now * 0.005) * 0.4,
+            z: ctx.cz + st.dz * faceS, seaY: st.broke ? st.faceY + 1.2 : aheadY,
             dirX: st.dx, dirZ: st.dz,
           });
           grp.rotation.z = Math.sin(CBZ.now * 0.0035) * 0.016;
@@ -3250,6 +3182,9 @@
       const o = ctx.arena && ctx.arena.ocean;
       if (o) o.position.y = ctx.arena.oceanY != null ? ctx.arena.oceanY : -0.8;
       if (CBZ.waterEventClear) CBZ.waterEventClear("survival-tsunami");
+      // the bore's white water stays on for the backwash (it follows the
+      // run-up field, which stays attached until the land has drained)
+      if (CBZ.tsuWhite) CBZ.tsuWhite.seaFront(null);
       st.sediment = 0;
       if (st.face) {
         if (CBZ.tsuFaceDispose) CBZ.tsuFaceDispose(st.face);
@@ -5768,6 +5703,10 @@
            stops being an opinion about a screenshot. */
         spent: st.spent != null ? +(+st.spent).toFixed(3) : null,
         faceH: st.faceH != null ? +(+st.faceH).toFixed(1) : null,
+        // the bore on the land and its white water (world/tsunami_whitewater.js):
+        // how many fronts / steps / impacts the run-up has right now, how many
+        // wall pieces and particles are drawn
+        whitewater: CBZ.tsuWhite ? CBZ.tsuWhite.stats() : null,
         /* THE SHOALING ARC (TSU_SHOAL_V2), as numbers: how fast the front is
            actually moving over ground right now, whether the wave is in its
            held stand at the beach, and how long ago the lip came down. A

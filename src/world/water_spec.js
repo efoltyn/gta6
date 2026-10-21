@@ -3489,15 +3489,27 @@
          a few metres across rising and collapsing, carried with the flow:
          most violent in the first tens of metres behind the front and in the
          fast, deep water on the land, a slow heave in the rest of the flood. */
-      "  if (uDwChurn > 0.001) {",
-      "    float fdV = dot(wWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS;",
-      "    float zone = (1.0 - smoothstep(-2.0, 3.0, fdV)) * (0.30 + 0.70 * exp(min(0.0, fdV) / 22.0));",
-      "    float onLand = rS.w * step(0.03, rS.y);",
-      "    float lz = min(1.0, rS.z / 5.0) * clamp(rS.y / 0.9, 0.0, 1.0);",
-      "    float amp = uDwChurn * mix(zone * 1.25, lz * 0.55, onLand);",
+      /* ...AND ON THE LAND IT IS A TORRENT (2026-10-20). Fast shallow water
+         over a town stands up in waves that hold their place (a diamond of
+         crossing trains, pulsing, pinned by the bed) and boils that ride the
+         current. Driven by the run-up field's own speed and depth (Froude-
+         ish: a metre and a half at 5 m/s heaves ~0.35 m), not by the event's
+         phase: the backwash running off after the card has ended still
+         heaves, and a slack pond is flat. */
+      "  float onLand = rS.w * step(0.03, rS.y);",
+      "  float aL = onLand * clamp(rS.y / 0.8, 0.0, 1.0) * min(0.7, 0.055 * rS.z * sqrt(max(rS.y, 0.05)) + 0.02 * rS.z);",
+      "  float fdV = dot(wWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS;",
+      "  float zone = (1.0 - smoothstep(-2.0, 3.0, fdV)) * (0.30 + 0.70 * exp(min(0.0, fdV) / 22.0));",
+      "  float aS = uDwChurn * zone * 1.25 * (1.0 - onLand);",
+      "  if (aL + aS > 0.002) {",
+      "    vec2 lp = wWorld.xz - uDwFrontC;",
+      "    vec2 fx = uDwFlow, fy = vec2(-uDwFlow.y, uDwFlow.x);",
+      "    vec2 o1 = fx * 0.574 + fy * 0.819, o2 = fx * 0.574 - fy * 0.819;",
+      "    float sw = sin(dot(lp, fx) * 0.62 + 0.8 * sin(uSeaTime * 0.7)) * (0.7 + 0.3 * sin(uSeaTime * 1.3 + dot(lp, fy) * 0.05))",
+      "             + 0.6 * sin(dot(lp, o1) * 0.86 + uSeaTime * 0.4) * sin(dot(lp, o2) * 0.86 - uSeaTime * 0.5);",
       "    vec2 bp = wWorld.xz - uDwFlow * uSeaTime * 1.6;",
       "    float bn = dwVN(bp * 0.21 + vec2(uSeaTime * 0.13, -uSeaTime * 0.09)) * 0.6 + dwVN(bp * 0.53 + uSeaTime * vec2(-0.31, 0.27)) * 0.4;",
-      "    wWorld.y += amp * (bn - 0.42);",
+      "    wWorld.y += aL * (0.45 * sw + 0.9 * (bn - 0.45)) + aS * ((bn - 0.42) + 0.35 * sw);",
       "  }",
     ].join("\n");
     const fDecl = [
@@ -3531,71 +3543,50 @@
       "  vec2 r = vec2(p.x * 0.862 + p.y * 0.507, p.y * 0.862 - p.x * 0.507);",
       "  return dwNoise(p) * 0.62 + dwNoise(r * 2.31 + 17.7) * 0.38;",
       "}",
-      /* WHITEWATER CLUMPS: (coverage, relief, pattern), gathered by a ~14 m
-         cluster field into patches and rafts. dens 0 = none, 1 = a solid
-         churn with dark holes.
-
-         THE HATCHING (2026-10-20, owner: "fake streaks", the storyboard's
-         coast shots). Three things drew lines instead of foam:
-           1. A ROTATING FRAME. The pattern was looked up at
-              (dot(p, fl), dot(p, ax)) with p the WORLD position (hundreds of
-              metres) and fl the local flow, which on the land is the run-up
-              surface's own slope and turns from pixel to pixel. A few degrees
-              of turn times 400 m is metres of lookup per pixel: the pattern
-              was smeared into arcs and fans converging on the flow's
-              vanishing point. Now the flow only TRANSLATES the lookup (the
-              two-phase flow-map offset, at most a dozen metres), and the
-              pattern itself is isotropic in world space.
-           2. A DOMAIN WITH NO HEIGHT IN IT. The flood's front is a STEP in
-              the sheet (the sea held metres above the street at the coast,
-              the bore's step on the run-up field) and on a near-vertical face
-              world xz barely changes from the bottom of the face to the top:
-              every pixel column read one value, a curtain of vertical lines.
-              Steep facets now take the pattern from the two vertical planes
-              (zy, xy), weighted by the facet normal, so a wall of water
-              churns like the flat water does.
-           3. FOOTPRINT. px is the 3D size of a pixel on the surface (the
-              larger axis, so a grazing view filters by its LONG side), and
-              every octave fades to its mean once it is under ~2 pixels: what
-              is left far off or edge-on is blobs, never resolved lines.
-         Ng is the facet normal (up-facing), P the world point. */
-      "float dwClumpPat(vec2 q, float px) {",
-      "  float w = dwNoise(q * 0.19 + 2.0);",
-      "  vec2 r = q * 0.5 + vec2(w, 1.0 - w) * 1.5;",
-      "  vec2 rr = vec2(r.x * 0.862 + r.y * 0.507, r.y * 0.862 - r.x * 0.507) * 2.31 + 17.7;",
-      "  float n0 = mix(0.5, dwNoise(r), 1.0 - smoothstep(0.7, 1.6, px));",
-      "  float n1 = mix(0.5, dwNoise(rr), 1.0 - smoothstep(0.3, 0.7, px));",
-      "  float n2 = mix(0.5, dwNoise(q * 1.9 + w * 2.0), 1.0 - smoothstep(0.18, 0.42, px));",
-      "  return n0 * 0.50 + n1 * 0.30 + n2 * 0.20;",
+      /* THE FROTH AND THE CHOP (2026-10-20). The sheet's white water was
+         dwFoamClumps: thresholded noise with a 0.08-wide edge in the full
+         fresh-foam colour, so from every height it was white blotches lying
+         flat on the water (cow print), and on the steps of the sheet the
+         same pattern stood up as a curtain. The breaking white water is not
+         the sheet's job any more: it is lit VOLUME on the bore's fronts
+         (world/tsunami_whitewater.js). What the surface behind a bore
+         actually carries is a torn, dirty FROTH, the colour of the mud it is
+         riding with a little air in it, soft-edged, never paper; and what
+         makes it read as moving water is its RELIEF: standing waves and
+         boils, which a vertex grid metres apart cannot carry, so they are a
+         normal here (dwChopGrad), finer than any grid, fading with the
+         pixel's footprint so nothing ever resolves as lines. */
+      "float dwFrothPat(vec2 q, float px) {",
+      "  float w = dwNoise(q * 0.11 + 3.0);",
+      "  vec2 r = q + vec2(w, -w) * 3.0;",
+      "  float big = dwNoise(r * 0.17);",
+      "  float mid = mix(0.5, dwNoise(r * 0.55 + 7.1), 1.0 - smoothstep(0.5, 1.4, px));",
+      "  float fine = mix(0.5, dwNoise(r * 1.7 - 2.3), 1.0 - smoothstep(0.15, 0.45, px));",
+      "  return big * 0.5 + mid * 0.32 + fine * 0.18;",
       "}",
-      "float dwBig(vec2 q) { return dwNoise(q * 0.071 + 5.0) * 0.6 + dwNoise(q * 0.19 - 3.0) * 0.4; }",
-      "vec3 dwFoamClumps(vec3 P, vec3 Ng, vec2 fl, float spd, float dens, float px) {",
-      "  if (dens < 0.004) return vec3(0.0);",
-      "  float wall = smoothstep(0.30, 0.62, 1.0 - Ng.y);",
-      "  float pat = 0.5, big = 0.5;",
-      "  if (wall < 0.999) {",
-      "    float fT = 2.2;",
-      "    float p0 = fract(uSeaTime / fT), p1 = fract(uSeaTime / fT + 0.5);",
-      "    vec2 q0 = P.xz - fl * spd * p0 * fT, q1 = P.xz - fl * spd * p1 * fT + 13.7;",
-      "    pat = mix(dwClumpPat(q0, px), dwClumpPat(q1, px), abs(1.0 - 2.0 * p0));",
-      "    big = dwBig(P.xz);",
-      "  }",
-      "  if (wall > 0.001) {",
-      // the face of a step pours and rolls: the pattern slides down it
-      "    float dn = uSeaTime * (0.8 + 0.35 * spd);",
-      "    vec2 wx = vec2(P.z, P.y + dn), wz = vec2(P.x, P.y + dn);",
-      "    vec2 ww = Ng.xz * Ng.xz; ww = ww * ww; ww /= max(1e-4, ww.x + ww.y);",
-      "    float pw = 0.0, bw = 0.0;",
-      "    if (ww.x > 0.02) { pw += ww.x * dwClumpPat(wx, px); bw += ww.x * dwBig(wx); }",
-      "    if (ww.y > 0.02) { pw += ww.y * dwClumpPat(wz + 7.3, px); bw += ww.y * dwBig(wz + 7.3); }",
-      "    float wsum = (ww.x > 0.02 ? ww.x : 0.0) + (ww.y > 0.02 ? ww.y : 0.0);",
-      "    pw /= max(1e-4, wsum); bw /= max(1e-4, wsum);",
-      "    pat = mix(pat, pw, wall); big = mix(big, bw, wall);",
-      "  }",
-      "  float aa = smoothstep(0.25, 1.2, px);",
-      "  float thr = 1.0 - dens * (0.60 + 0.55 * big);",
-      "  float w = 0.08 + 0.30 * aa;",
-      "  return vec3(smoothstep(thr, thr + w, pat), smoothstep(thr, thr + 0.28 + 0.2 * aa, pat), pat);",
+      // carried by the flow: a two-phase lookup, so the offset stays bounded
+      "float dwFroth(vec2 P, vec2 fl, float spd, float px) {",
+      "  float fT = 2.6;",
+      "  float p0 = fract(uSeaTime / fT), p1 = fract(uSeaTime / fT + 0.5);",
+      "  float a = dwFrothPat(P - fl * spd * p0 * fT, px);",
+      "  float b = dwFrothPat(P - fl * spd * p1 * fT + 11.3, px);",
+      "  return mix(a, b, abs(1.0 - 2.0 * p0));",
+      "}",
+      // the slope of the chop at p (metres from the event origin): a diamond of
+      // standing trains pinned in place, a short cross train, and advected boils
+      "vec2 dwChopGrad(vec2 p, vec2 fl, float px) {",
+      "  vec2 ax = vec2(-fl.y, fl.x);",
+      "  vec2 o1 = fl * 0.574 + ax * 0.819, o2 = fl * 0.574 - ax * 0.819;",
+      "  float t = uSeaTime;",
+      "  vec2 g = fl * (0.20 * cos(dot(p, fl) * 1.05 + 0.6 * sin(t * 0.9)) * (0.75 + 0.25 * sin(t * 1.7)));",
+      "  g += o1 * (0.16 * cos(dot(p, o1) * 1.5 - t * 1.1));",
+      "  g += o2 * (0.16 * cos(dot(p, o2) * 1.5 + t * 1.3));",
+      "  vec2 o3 = normalize(fl * 0.3 + ax);",
+      "  g += o3 * (0.12 * (1.0 - smoothstep(0.3, 0.8, px)) * cos(dot(p, o3) * 2.7 + t * 2.3));",
+      "  vec2 q = p * 0.33 - fl * t * 0.5;",
+      "  float b0 = dwNoise(q), bx = dwNoise(q + vec2(0.35, 0.0)), bz = dwNoise(q + vec2(0.0, 0.35));",
+      "  g += vec2(bx - b0, bz - b0) * 0.85;",
+      "  return g * (1.0 - smoothstep(1.0, 3.0, px));",
       "}",
     ].join("\n");
     /* THE TURBID FRONT, from the Tohoku helicopter footage: the inundation is
@@ -3613,36 +3604,23 @@
       "  vec3 dwP3x = dFdx(vSeaWorld), dwP3y = dFdy(vSeaWorld);",
       "  if (dwSed > 0.002) {",
       /* THE FACET: the sheet's own normal (vSeaNormal) is the swell's, taken
-         before the event moved the surface, so on the flood's front step (the
-         sea held metres above the street, the bore's step over the land) it
-         still points straight up and the face of the step was shaded, and
-         patterned, as flat water. The screen derivatives give the real
-         surface: it drives the foam's projection and lights the step. */
+         before the event moved the surface, so on the flood's steps it still
+         points straight up. The screen derivatives give the real surface:
+         the step is lit as the slope it is (the bore's own wall stands in
+         front of it, world/tsunami_whitewater.js, and carries the white). */
       "    vec3 dwNg = cross(dwP3x, dwP3y);",
       "    dwNg = dot(dwNg, dwNg) > 1e-10 ? normalize(dwNg) : vec3(0.0, 1.0, 0.0);",
       "    if (dwNg.y < 0.0) dwNg = -dwNg;",
       "    float dwStep = smoothstep(0.30, 0.62, 1.0 - dwNg.y);",
       "    vec3 tN = normalize(mix(normalize(vSeaNormal), dwNg, dwStep));",
-      "    if (under > 0.5) tN = -tN;",
-      "    vec3 tL = normalize(uSunDir);",
-      "    vec3 tH = normalize(tL + V);",
-      "    float tndl = max(dot(tN, tL), 0.0);",
-      "    float skyT = smoothstep(-0.12, 0.72, reflect(-V, tN).y);",
-      "    #ifdef USE_FOG",
-      "      vec3 dwSkyC = mix(fogColor * 1.12, fogColor * 0.60, skyT);",
-      "    #else",
-      "      vec3 dwSkyC = mix(uSkyLow, uSkyHigh, skyT);",
-      "    #endif",
       "    float fdS = dot(vSeaWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS;",
       "    float behind = clamp(-fdS / max(1.0, uDwFrontRun), 0.0, 1.0);",
       "    float dwWet = 1.0 - smoothstep(-1.0, 7.0, fdS);",
       // ON THE LAND the field says what is flood: water standing on ground
       // above the rest sea, wherever it got to, whatever the front line says.
-      // Its froth is where it is fast AND steep (the bore's face, the race
-      // round a corner, the backwash pouring off a kerb), its slack is still.
+      // It churns where it is fast AND steep (the race round a corner, the
+      // backwash pouring off a kerb), its slack is still.
       "    float rFront = smoothstep(0.12, 0.7, dwRunG) * smoothstep(0.6, 3.2, dwRun.z);",
-      // the leading edge of water still on the move is a lip of froth
-      // (shallow AND fast: the tongue of a bore running up a street)
       "    rFront = max(rFront, (1.0 - smoothstep(0.08, 0.7, dwRun.y)) * smoothstep(0.8, 2.6, dwRun.z));",
       "    dwWet = max(dwWet, rLand);",
       "    behind = mix(behind, 0.35 * (1.0 - rFront), rLand);",
@@ -3660,13 +3638,34 @@
       "        vec2 fm2 = mix(uDwFlow, dG, smoothstep(0.004, 0.03, dGl));",
       "        fl = length(fm2) > 0.01 ? normalize(fm2) : dG;",
       "      }",
-      "      vec2 ax = vec2(-fl.y, fl.x);",
       // the big silt plumes drift with the event (at 150 m a shear never shows)
       "      vec2 eAx = vec2(-uDwFlow.y, uDwFlow.x);",
       "      vec2 adv = vSeaWorld.xz - uDwFlow * (uDwFlowSpd * uSeaTime);",
       "      float sAl = dot(adv, uDwFlow);",
       "      float sAc = dot(adv, eAx);",
       "      float stand = mix(max(uDwStand, smoothstep(0.30, 1.0, behind)), 1.0 - smoothstep(0.4, 3.0, dwRun.z), rLand);",
+      // the pixel's footprint on the SURFACE, its long side (a grazing view
+      // filters by how far one pixel reaches, not by how narrow it is)
+      "      float fpx = max(length(dwP3x), length(dwP3y));",
+      /* THE CHOP: standing waves and boils as relief. On the land it is the
+         field's own Froude-ish heave (fast and deep heaves, a slack pond is
+         a mirror); on the sea it is the churn behind the front and the heave
+         of the wave train, calming where the water has stood. */
+      "      float chopA = land > 0.5",
+      "        ? clamp(0.10 * dwRun.z * sqrt(max(dwRun.y, 0.05)) + 0.05 * dwRun.z, 0.0, 1.0) * clamp(dwRun.y / 0.5, 0.0, 1.0)",
+      "        : clamp(turb, 0.0, 1.0) * (0.35 + 0.65 * (1.0 - stand));",
+      "      vec2 cg = dwChopGrad(vSeaWorld.xz - uDwFrontC, uDwFlow, fpx) * chopA * (1.0 - dwStep);",
+      "      tN = normalize(tN - vec3(cg.x, 0.0, cg.y));",
+      "      if (under > 0.5) tN = -tN;",
+      "      vec3 tL = normalize(uSunDir);",
+      "      vec3 tH = normalize(tL + V);",
+      "      float tndl = max(dot(tN, tL), 0.0);",
+      "      float skyT = smoothstep(-0.12, 0.72, reflect(-V, tN).y);",
+      "      #ifdef USE_FOG",
+      "        vec3 dwSkyC = mix(fogColor * 1.12, fogColor * 0.60, skyT);",
+      "      #else",
+      "        vec3 dwSkyC = mix(uSkyLow, uSkyHigh, skyT);",
+      "      #endif",
       "      float plume = clamp(dwFbm(vec2(sAl, sAc) * 0.0068) * 0.72 +",
       "                          dwNoise(vec2(sAl * 0.0021, sAc * 0.0029) + 11.0) * 0.46, 0.0, 1.0);",
       "      float sed = turb * mix(1.0, 0.92, behind);",
@@ -3675,78 +3674,45 @@
       "      float mf = 0.02 + 0.98 * pow(1.0 - clamp(dot(tN, V), 0.0, 1.0), 5.0);",
       /* NOT A MIRROR. The old 62% sky at grazing made the inundation a
          silver sheet: a churned suspension scatters what the surface would
-         reflect, so the sky it shows is weak and goes with the churn. */
+         reflect, so the sky it shows is weak and goes with the churn. The
+         chop's slopes catch it in broken flecks, which is what reads as
+         water moving rather than a brown plane. */
       "      float churn = clamp(land * max(rFront, smoothstep(1.5, 5.5, dwRun.z) * 0.6) + (1.0 - land) * (1.0 - stand) * 0.4, 0.0, 1.0);",
-      "      vec3 turbCol = mix(mudBody, dwSkyC * 0.85, clamp(mf * (0.55 - 0.3 * churn), 0.0, 0.34));",
-      "      turbCol += uSunColor * pow(max(dot(tN, tH), 0.0), mix(110.0, 40.0, churn)) * (0.30 + 1.2 * mf) * (1.0 - 0.6 * churn);",
+      "      vec3 turbCol = mix(mudBody, dwSkyC * 0.85, clamp(mf * (0.60 - 0.3 * churn), 0.0, 0.38));",
+      "      turbCol += uSunColor * pow(max(dot(tN, tH), 0.0), mix(110.0, 40.0, churn)) * (0.30 + 1.2 * mf) * (1.0 - 0.5 * churn);",
       "      outColor = mix(outColor, turbCol, clamp(sed * 1.28, 0.0, 0.985));",
-      /* THE WHITE WATER (2026-10-20 rebuild). Owner: "the white lines, the
-         white part of the tsunami still suck" and, when the first answer was
-         to take the white out: "I don't want you to remove the foam, I want
-         it to look real". What read as fake, measured against Miyako,
-         Kesennuma and Natori street footage and the Ahr 2021 floods:
-           - LINES: the sea's foam was value noise stretched 13:1 along the
-             flow and thresholded (thin parallel stripes), a ridge network of
-             the same noise (a net of hairlines), and the clean sea's crest
-             foam (whitecap / surf bands) over a sea whose chop the event
-             had tripled: a mesh of thin white lines from any height;
-           - NO VOLUME: one flat foam colour mixed in by coverage, lit only by
-             the water's own normal, so it was paint on a sheet;
-           - A BAND: a smooth exponential boil right behind the front, the
-             same brightness for its whole length;
-           - and the wall that should have carried the real breaking white
-             water was not drawn at all (see the bore face's `far`).
-         Real whitewater is aerated water in CLUMPS and rafts at the metre
-         scale, gathered into patches at the ten-metre scale, densest where
-         the water breaks (the bore's front, the race round a building, the
-         lip of a tongue running up a street) and thinning behind into a torn
-         dirty froth; it has relief (a lit side, a shadowed side, a dark
-         crease at its edge where the water shows), it is grey off-white
-         where it is fresh and the colour of the mud it carries where it is
-         not, and it moves with the water under it. So: dwFoamClumps (flow-
-         advected, near-isotropic, domain-warped, clustered), shaded by its
-         own relief through the screen derivatives, coloured fresh-to-old. */
-      "      vec3 dfFresh = mix(uFoamColor * 0.84, vec3(0.50, 0.48, 0.43), clamp(dwSed, 0.0, 1.0));",
-      "      float near = 1.0 - smoothstep(70.0, 260.0, vSeaMisc.y);",
+      /* THE FROTH. Where the water is breaking (the race behind a bore, the
+         run round a building, the first tens of metres behind the sea front)
+         it carries more of it, thinning to a sparse scum where it has stood.
+         Soft-edged rafts and holes, mud-coloured with air in it, lit by the
+         chop: at most three quarters cover, never a flat white patch. */
       "      float dens = 0.0, spd = 0.0, fresh = 0.0;",
       "      if (land > 0.5) {",
       "        spd = min(dwRun.z, 6.0);",
-      // the tongue of a bore running up a street: shallow AND fast
       "        float lip = (1.0 - smoothstep(0.06, 0.45, dwRun.y)) * smoothstep(0.8, 2.6, dwRun.z);",
-      "        dens = max(churn, lip) * 0.95 + (1.0 - churn) * 0.10;",
+      "        dens = max(churn, lip) * 0.85 + (1.0 - churn) * 0.12;",
       "        fresh = max(rFront, lip);",
       "      } else {",
       "        spd = uDwFlowSpd;",
-      "        float tongue = dwFbm(vec2(sAc * 0.052 + 4.0, uSeaTime * 0.28));",
-      "        float boilZ = exp(-bd / (5.0 + 9.0 * tongue));",
-      "        dens = boilZ * (0.70 + 0.30 * tongue) + 0.50 * exp(-bd / 40.0) * (1.0 - stand) + 0.12 + 0.14 * stand;",
+      "        float boilZ = exp(-bd / 14.0);",
+      "        dens = boilZ * 0.75 + 0.40 * exp(-bd / 50.0) * (1.0 - stand) + 0.10 + 0.12 * stand;",
       "        fresh = boilZ;",
       "      }",
-      "      dens = clamp(dens, 0.0, 1.0) * clamp(turb * 1.15, 0.0, 1.0);",
-      "      vec2 rdx = dwP3x.xz, rdy = dwP3y.xz;",
-      // the pixel's footprint on the SURFACE, its long side (a grazing view
-      // filters by how far one pixel reaches, not by how narrow it is)
-      "      float fpx = max(length(dwP3x), length(dwP3y));",
-      "      vec3 fcl = dwFoamClumps(vSeaWorld, dwNg, fl, spd, dens, fpx);",
-      // relief -> a world-space slope -> a bump on the water's normal
-      "      float rdet = rdx.x * rdy.y - rdx.y * rdy.x;",
-      "      float rex = dFdx(fcl.y), rey = dFdy(fcl.y);",
-      "      vec2 rg = abs(rdet) > 1e-5 ? vec2(rdy.y * rex - rdx.y * rey, rdx.x * rey - rdy.x * rex) / rdet : vec2(0.0);",
-      "      rg = clamp(rg * 0.8, vec2(-2.5), vec2(2.5)) * near * (1.0 - smoothstep(0.25, 0.9, fpx)) * (1.0 - dwStep);",
-      "      vec3 fN = normalize(tN - vec3(rg.x, 0.0, rg.y));",
-      "      float fSun = clamp(dot(fN, tL) * 0.55 + 0.45, 0.0, 1.0);",
-      "      vec3 fAlb = mix(uDwFoam, dfFresh, clamp(fresh * 1.25, 0.0, 1.0) * (0.45 + 0.55 * fcl.y));",
-      "      vec3 fLit = fAlb * (0.36 + 0.56 * fSun) + dwSkyC * 0.10 * fSun;",
-      // the thin margin of a clump is water with bubbles in it: the body shows
-      "      fLit = mix(mudBody * 1.45, fLit, smoothstep(0.0, 0.5, fcl.y));",
-      "      outColor = mix(outColor, fLit, fcl.x);",
+      "      dens = clamp(dens, 0.0, 1.0) * clamp(turb * 1.15, 0.0, 1.0) * (1.0 - dwStep);",
+      "      float fr = dwFroth(vSeaWorld.xz, fl, spd, fpx);",
+      "      float thr = 1.0 - dens * 0.62;",
+      "      float cov = smoothstep(thr - 0.20, thr + 0.24, fr) * (0.30 + 0.45 * dens);",
+      "      float fSun = clamp(dot(tN, tL) * 0.55 + 0.45, 0.0, 1.0);",
+      "      vec3 fAlb = mix(mudBody * 1.6, uDwFoam * (0.62 + 0.30 * fresh), smoothstep(0.0, 0.6, cov));",
+      "      vec3 fLit = fAlb * (0.45 + 0.55 * fSun) + dwSkyC * 0.06 * fSun;",
+      "      outColor = mix(outColor, fLit, cov);",
       "      if (land > 0.5) {",
       // a suspension is opaque: half a metre of Tohoku mud hid a car;
       // only the last few centimetres at the margin let the wet ground through
-      "        solid = clamp(max(fcl.x, min(1.0, sed * 1.9)), 0.0, 1.0);",
+      "        solid = clamp(max(cov, min(1.0, sed * 1.9)), 0.0, 1.0);",
       "        outAlpha = mix(0.6, 1.0, smoothstep(0.03, 0.16, dwRun.y));",
       "      } else {",
-      "        solid = clamp(max(foam, max(fcl.x, min(1.0, sed * 1.9))), 0.0, 1.0);",
+      "        solid = clamp(max(foam, max(cov, min(1.0, sed * 1.9))), 0.0, 1.0);",
       "      }",
       "    }",
       "  }",
@@ -3983,7 +3949,7 @@
 
      CBZ.tsuFaceBuild({width, height, rnd}) -> handle   (caller adds handle.group)
      CBZ.tsuFaceUpdate(handle, {t, dt, height, turbid, curl, foam, x, y, z,
-                                dirX, dirZ, seaY?})
+                                dirX, dirZ, seaY?, fade?})
        seaY (optional, world y of the water surface) seats the skirt and the
        wake on the water; without it the live waterEvent level is used.
      CBZ.tsuFaceDispose(handle)
@@ -3999,35 +3965,12 @@
     [6.2, 0.11], [8.4, 0.06], [10.6, 0.025], [13.0, 0.0],        // the skirt
   ];
   const TSU_CREST_K = 6, TSU_TOE_K = 12;
-  /* THE BROKEN BORE FOLLOWS THE WATER (2026-10-20). After the crash the wall
-     used to sink into the flood in ~1.5 s and hide: from then on the
-     "tsunami" was a flat brown sheet with a step at its edge, and from the
-     sea there was no wall at all. A broken tsunami bore is still a wall: a
-     tumbling front of white water and wreckage as high as the flood behind
-     it, running up every street at its own pace. So the face carries
-     TSU_BANDS columns across its width, each (forward offset m, base lift m,
-     height scale): the caller lays every column on the run-up field's own
-     leading edge in that band (see systems/disasters.js tsuBoreBands), so
-     the wall bends to the ragged front, rides the ground, stands tall where
-     the water is deep and fast, and is gone where there is no bore. Absent
-     (the default (0, 0, 1) everywhere) the face is the one straight wave. */
-  const TSU_BANDS = 32;
-  CBZ.tsuFaceBands = TSU_BANDS;
-  const TSU_COL_GLSL = [
-    "uniform vec3 uCol[" + TSU_BANDS + "];",
-    "vec3 colAt( float x ) {",
-    "  float t = clamp( ( x / ( 2.0 * uHalfW ) + 0.5 ) * " + (TSU_BANDS - 1) + ".0, 0.0, " + (TSU_BANDS - 1) + ".0 );",
-    "  float fi = floor( t );",
-    "  int i = int( fi );",
-    "  int j = int( min( fi + 1.0, " + (TSU_BANDS - 1) + ".0 ) );",
-    "  return mix( uCol[ i ], uCol[ j ], t - fi );",
-    "}",
-  ].join("\n");
-  function tsuColUniform() {
-    const a = [];
-    for (let i = 0; i < TSU_BANDS; i++) a.push(new THREE.Vector3(0, 0, 1));
-    return { value: a };
-  }
+  /* THIS FACE IS THE WAVE AT SEA ONLY (2026-10-20). Once it breaks, the
+     bore on the land is world/tsunami_whitewater.js: geometry laid on the
+     run-up field's own fronts, and white water as lit volume. The face's
+     32-column bending (tsuBoreBands) that tried to drag one straight wave
+     along a ragged front is gone; at the crash the caller fades it out
+     (`fade`) while the crash burst and the bore take over. */
   const TSU_COLS = 224;
   const TSU_ROWS = 50;
 
@@ -4147,7 +4090,7 @@
       uLumpS: { value: 4 }, uLumpA: { value: 1.5 }, uRollV: { value: 3 },
       uLobe: { value: new THREE.Vector4() }, uLobeFrom: { value: 0.79 },
       uLP: { value: new THREE.Vector3() }, uHalfW: { value: 160 },
-      uCol: tsuColUniform(),
+      uFade: { value: 1 },
       uBodySea: { value: new THREE.Color(0.045, 0.085, 0.074) },
       uBodyMud: { value: new THREE.Color(0.072, 0.058, 0.040) },
       uGlowSea: { value: new THREE.Color(0.045, 0.15, 0.13) },   // green-blue thin water
@@ -4171,8 +4114,6 @@
       "uniform float uTime, uTurbid, uCurl, uH, uHs, uSkirt, uSeaLocal, uLumpS, uLumpA, uRollV, uLobeFrom, uHalfW;",
       "uniform vec4 uLobe;",
       "uniform vec3 uLP;",
-      TSU_COL_GLSL,
-      "varying float vColK;",
       "varying vec4 vFace;",
       "varying vec4 vAux;",      // skirt, skirt distance, roll mask, boil height
       "varying vec3 vWPos;",
@@ -4213,10 +4154,6 @@
       "  float mound = uSeaLocal + 0.28 + ( 0.05 + 0.07 * uTurbid ) * uH * pow( 1.0 - sdn, 1.6 );",
       "  p.y = mix( p.y, mound, sk );",
       "  p.z += sk * sdn * ( uSkirt - 1.0 ) * 8.1 * ( uH / 34.0 );",
-      // the column: on the run-up's own front, on its own ground, its own height
-      "  vec3 cb = colAt( x );",
-      "  p.y = uSeaLocal + ( p.y - uSeaLocal ) * cb.z + cb.y;",
-      "  p.z += cb.x;",
       "  return p;",
       "}",
       "float boil( float x, float arcL, float roll ) {",
@@ -4249,7 +4186,6 @@
       "  vec3 qs = ps + n0 * bs * amp;",
       "  vec3 nL = normalize( cross( qs - q0, qx - q0 ) );",
       "  vFace = vec4( x, arcL, u, side );",
-      "  vColK = colAt( x ).z;",
       "  vAux = vec4( sk, sdn, roll, b0 );",
       "  vec4 wp = modelMatrix * vec4( q0, 1.0 );",
       "  vWPos = wp.xyz;",
@@ -4261,10 +4197,9 @@
     ].join("\n");
 
     const FRAG = [
-      "uniform float uTime, uTurbid, uCurlN, uH, uHs, uFoam, uLumpS, uRollV, uHalfW;",
+      "uniform float uTime, uTurbid, uCurlN, uH, uHs, uFoam, uLumpS, uRollV, uHalfW, uFade;",
       "uniform vec3 uSunDir, uSunCol, uSkyCol, uGndCol;",
       "uniform vec3 uBodySea, uBodyMud, uGlowSea, uGlowMud, uFoamClean, uFoamMud;",
-      "varying float vColK;",
       "varying vec4 vFace;",
       "varying vec4 vAux;",
       "varying vec3 vWPos;",
@@ -4427,8 +4362,8 @@
       "  float a = mix( smoothstep( 0.0, 0.14, up ), 1.0, side );",
       "  a *= mix( 1.0, clamp( skirtF * 1.3 + 0.18 * ( 1.0 - smoothstep( 0.0, 0.9, sdn ) ), 0.0, 1.0 ), sk );",
       "  a *= 1.0 - smoothstep( 0.88, 1.0, abs( x ) / uHalfW );",
-      // a column with no bore in it (dry ground ahead of nothing, open sea)
-      "  a *= smoothstep( 0.02, 0.10, vColK );",
+      // the crash hand-off: the wave comes down and the bore takes over
+      "  a *= uFade;",
       "  if ( a < 0.02 ) discard;",
       "  gl_FragColor = vec4( col, a );",
       "  #include <tonemapping_fragment>",
@@ -4495,7 +4430,7 @@
     Object.assign(uni, {
       uTime: { value: 0 }, uHs: { value: 1 }, uH: { value: H }, uCurl: { value: 0.5 },
       uTurbid: { value: 0 }, uSpray: { value: 1 }, uWind: { value: 6 }, uScale: { value: 450 },
-      uSeaLocal: { value: 0.5 }, uHalfW: { value: W * 0.5 },
+      uSeaLocal: { value: 0.5 }, uHalfW: { value: W * 0.5 }, uFade: { value: 1 },
       uClean: { value: new THREE.Color(0.72, 0.75, 0.76) },
       uMud: { value: new THREE.Color(0.42, 0.385, 0.32) },
     });
@@ -4503,9 +4438,8 @@
     const VERT = [
       "attribute vec4 aSeed;",
       "attribute float aKind;",
-      "uniform float uTime, uHs, uH, uCurl, uTurbid, uSpray, uWind, uScale, uSeaLocal, uHalfW;",
+      "uniform float uTime, uHs, uH, uCurl, uTurbid, uSpray, uWind, uScale, uSeaLocal, uHalfW, uFade;",
       "uniform vec3 uClean, uMud, uSunCol, uSkyCol;",
-      TSU_COL_GLSL,
       "varying vec4 vCol;",
       "varying vec3 vPuff;",   // seed, lumpiness, kind
       "#include <fog_pars_vertex>",
@@ -4572,12 +4506,7 @@
       "  vec3 c = mix( uClean, uMud, smoothstep( 0.0, 0.7, uTurbid ) * mix( 0.45, 0.85, step( 2.5, kd ) ) ) * ( 0.9 + 0.1 * s.y );",
       // spray is lit from everywhere at once (it scatters): never darker than overcast
       "  vec3 lit = max( uSkyCol * 0.95 + uSunCol * 0.55, vec3( 0.42 ) );",
-      // the same column as the wall it is torn off
-      "  vec3 cb = colAt( position.x );",
-      "  p.y = uSeaLocal + ( p.y - uSeaLocal ) * cb.z + cb.y;",
-      "  p.z += cb.x;",
-      "  a *= smoothstep( 0.02, 0.10, cb.z );",
-      "  vCol = vec4( c * lit, a );",
+      "  vCol = vec4( c * lit, a * uFade );",
       "  vec4 mvPosition = modelViewMatrix * vec4( p, 1.0 );",
       "  float dz = -mvPosition.z;",
       // a puff that reaches the lens fades instead of filling the frame
@@ -4627,9 +4556,10 @@
   /* THE WAKE SHREDS ARE GONE (2026-10-20). Sixty flat tapered strips, one
      flat colour each, sliding back over the sea behind the front: from any
      height they read as exactly what they were, white lines painted on the
-     water. The churn behind a bore is now the sea's own surface (the
-     disaster material's whitewater clumps and its boiling displacement, see
-     dwFoamClumps / uDwChurn), so it rides the real water and its real flow. */
+     water. The churn behind a bore is the sea's own surface (its froth, chop
+     and boiling displacement: dwFroth / dwChopGrad / uDwChurn), and the
+     breaking white water is volume on the bore's fronts
+     (world/tsunami_whitewater.js). */
   CBZ.tsuFaceBuild = function (opts) {
     opts = opts || {};
     const H = Number.isFinite(opts.height) ? +opts.height : 34;
@@ -4740,7 +4670,7 @@
     grp.add(wall);
 
     const spray = tsuSprayBuild(W, H, (x) => hJit[colAt(x)], (x) => zJit[colAt(x)], rnd, light);
-    spray.mat.uniforms.uCol = wu.uCol;           // ONE set of columns for wall and spray
+    spray.mat.uniforms.uFade = wu.uFade;         // ONE fade for wall and spray
     geoms.push(spray.geo); mats.push(spray.mat); grp.add(spray.points);
 
     return {
@@ -4780,15 +4710,8 @@
     const seaLocal = Number.isFinite(seaY) ? Math.max(-1, Math.min(H * 0.3, seaY - h.group.position.y)) : 0.5;
 
     const u = h.wall.material.uniforms;
-    // the columns (see TSU_BANDS): s.cols = [dz, dy, k] x TSU_BANDS, or none
-    const cv = u.uCol.value, cs = s.cols;
-    if (cs && cs.length >= TSU_BANDS * 3) {
-      for (let i = 0; i < TSU_BANDS; i++) cv[i].set(+cs[i * 3] || 0, +cs[i * 3 + 1] || 0, Math.max(0, +cs[i * 3 + 2] || 0));
-      h.colsOn = true;
-    } else if (h.colsOn) {
-      for (let i = 0; i < TSU_BANDS; i++) cv[i].set(0, 0, 1);
-      h.colsOn = false;
-    }
+    // s.fade 0..1: the crash hand-off (wall and spray together)
+    u.uFade.value = Number.isFinite(s.fade) ? Math.max(0, Math.min(1, +s.fade)) : 1;
     u.uTime.value = t;
     u.uTurbid.value = turbid;
     u.uCurl.value = curl;
