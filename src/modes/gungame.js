@@ -229,9 +229,10 @@
       }
     }
     const cityOn = g.mode === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     const cols = [];
     for (const c of CBZ.colliders || []) {
-      if (!c || (c._city && !cityOn)) continue;
+      if (!c || (c._city && !cityOn) || (c._prison && !prisonOn)) continue;
       if (c.maxX < bb.minX - 2 || c.minX > bb.maxX + 2 || c.maxZ < bb.minZ - 2 || c.minZ > bb.maxZ + 2) continue;
       cols.push(c);
       const i0 = Math.max(0, Math.floor((c.minX - BODY_R - x0) / CS)), i1 = Math.min(w - 1, Math.floor((c.maxX + BODY_R - x0) / CS));
@@ -500,8 +501,9 @@
   }
   function colliderAt(x, z, fl) {
     const cityOn = g.mode === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     for (const c of CBZ.colliders || []) {
-      if (!c || (c._city && !cityOn)) continue;
+      if (!c || (c._city && !cityOn) || (c._prison && !prisonOn)) continue;
       if (x < c.minX - 0.15 || x > c.maxX + 0.15 || z < c.minZ - 0.15 || z > c.maxZ + 0.15) continue;
       if (c.y0 != null && c.y1 != null && (c.y1 <= fl + 0.4 || c.y0 >= fl + 1.9)) continue;
       return true;

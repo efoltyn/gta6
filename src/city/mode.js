@@ -278,6 +278,36 @@
   };
   CBZ.city = city;
 
+  /* AND EVERY CITY BOX AFTER THE BUILD. The stamp in build() only reaches
+     what the build itself registered. Half the city registers its solids
+     LATER, while you play it: the elevators and the climbable fire escapes
+     (city/elevators.js builds them on the first city frame), the metro's
+     streamed tiles (city/metro.js fabDone), the walk-in fit-outs, demolition
+     remnants, debris. None of those carried _city, so after one visit to
+     Gang City they stayed solid in every other game, with the city hidden:
+     the city has content in the slice cells that overlap the disaster
+     island's coordinates (src/city/slice_manifest.js), and any of those
+     late boxes stood on the island with nothing drawn. Rule: a box pushed
+     while the game is IN the city belongs to the city. Every push site goes
+     through Array push (CBZ.colliderAdd/AddMany included), so the list's own
+     push carries the stamp, installed once, when the city is built. */
+  let stampedList = null;
+  function stampLaterCityBoxes() {
+    const L = CBZ.colliders;
+    if (!L || stampedList === L) return;
+    stampedList = L;
+    const prev = L.push;
+    Object.defineProperty(L, "push", { configurable: true, writable: true, value: function () {
+      if (g.mode === "city") {
+        for (let i = 0; i < arguments.length; i++) {
+          const c = arguments[i];
+          if (c && typeof c === "object") c._city = true;
+        }
+      }
+      return prev.apply(this, arguments);
+    } });
+  }
+
   function build() {
     if (city.built) return;
     // every program the live scene already needs starts linking on the GPU
@@ -305,6 +335,7 @@
         if (c && typeof c === "object") c._city = true;
       }
     }
+    stampLaterCityBoxes();
     baseFloor = CBZ.floorAt || null;
     // _city marks this wrapper so reset()'s reinstall check below never captures
     // it back into baseFloor. Without the marker, reset() set baseFloor to this

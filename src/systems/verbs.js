@@ -581,12 +581,13 @@
     o.point.x = px + dx * reach; o.point.z = pz + dz * reach; o.point.y = feetY;
     let best = reach + 1e-3;
     const cityOn = mode() === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     // 1) SOLIDS along the line: a wall, or something waist-high
     if (CBZ.queryCollidersNear) {
       const list = CBZ.queryCollidersNear(px + dx * reach * 0.5, pz + dz * reach * 0.5, reach * 0.5 + 1.2, _cols);
       for (let i = 0; i < list.length; i++) {
         const c = list[i];
-        if (!c || c._city && !cityOn) continue;
+        if (!c || (c._city && !cityOn) || (c._prison && !prisonOn)) continue;
         if (c.noVerb || c.walkable) continue;
         const t = rayHit(c, px, pz, dx, dz, 0.28);
         if (t < 0 || t >= best) continue;
@@ -3046,6 +3047,7 @@
   let _wbX = 0, _wbZ = 0, _wbDX = 0, _wbDZ = 0, _wbL = 0;
   function wallBetween(c) {
     if (c._city && mode() !== "city") return false;
+    if (c._prison && CBZ.prisonRoot && CBZ.prisonRoot.visible === false) return false;
     if (!(c.y1 == null || c.y1 > _wbY + 1.3)) return false;   // a waist-high rail you reach over
     const t = rayHit(c, _wbX, _wbZ, _wbDX, _wbDZ, 0);
     return t >= 0 && t < _wbL;

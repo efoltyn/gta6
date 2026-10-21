@@ -128,9 +128,10 @@
     }
     const cols = CBZ.colliders || [];
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
-      if (c._city && !cityOn) continue;
+      if ((c._city && !cityOn) || (c._prison && !prisonOn)) continue;
       if (c.maxX < centreX - reach || c.minX > centreX + reach) continue;
       if (c.maxZ < centreZ - reach || c.minZ > centreZ + reach) continue;
       out.push(c);
@@ -216,12 +217,13 @@
     const t0 = (window.performance && performance.now) ? performance.now() : Date.now();
     const N = job.n, buf = job.buf, jx = job.oX, jz = job.oZ;
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const prisonOn = !CBZ.prisonRoot || CBZ.prisonRoot.visible !== false;
     const end = Math.min(job.boxes.length, job.i + BOX_BUDGET);
     for (let i = job.i; i < end; i++) {
       const c = job.boxes[i];
       // the same two skips CBZ.collide applies, so the grid agrees with the
       // wall resolver about what is actually solid for THIS body
-      if (c._city && !cityOn) continue;
+      if ((c._city && !cityOn) || (c._prison && !prisonOn)) continue;
       if (c.y0 != null && (c.y0 >= HEAD || c.y1 <= FOOT)) continue;
       let x0 = ((c.minX - BODY_R - jx) / STEP) | 0, x1 = ((c.maxX + BODY_R - jx) / STEP) | 0;
       let z0 = ((c.minZ - BODY_R - jz) / STEP) | 0, z1 = ((c.maxZ + BODY_R - jz) / STEP) | 0;
