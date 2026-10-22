@@ -54,6 +54,7 @@ const SNAP = `
     else if (v instanceof Map || v instanceof Set) out.maps[k] = v.size;
   }
   out.state = CBZ.archipelago.state();
+  out.look = CBZ.lookTex ? CBZ.lookTex.audit() : null;
   return out;
 `;
 
@@ -168,6 +169,7 @@ const GPU_SEE = `
 const GPU_WHY = (verbose) => `
   var G = window.__gpu; if (!G) return null;
   if (!G.base) { G.base = new Set(G.live); return { based: G.base.size }; }
+
   var inScene = new Set();
   CBZ.scene.traverse(function (o) {
     if (o.geometry) inScene.add(o.geometry);
@@ -184,12 +186,24 @@ const GPU_WHY = (verbose) => `
   }); };
   [CBZ.cityPeds, CBZ.cityCars, CBZ.cityCops, CBZ.cityWildlife, CBZ.npcs, CBZ.guards, CBZ.bots].forEach(function (L) { (L || []).forEach(function (a) { if (a) own(a.group); }); });
   var by = {}, n = { geo: 0, tex: 0, pedTex: 0 };
+  // ON THE GPU: three hooks 'dispose' on upload, but so does anyone else who
+  // listens for it (entities/pedinstance.js on every paged outfit atlas, which
+  // never uploads). A texture three holds has its GL texture; a geometry, a
+  // GL buffer for its position (or first) attribute.
+  var R = CBZ.renderer, held = function (x) {
+    if (x.isTexture) { var p = R.properties.get(x); return !!(p && p.__webglTexture); }
+    var a = x.index || (x.attributes && (x.attributes.position || x.attributes[Object.keys(x.attributes)[0]]));
+    if (!a) return true;
+    if (a.isInterleavedBufferAttribute) a = a.data;
+    return !!(R.attributes && R.attributes.get ? R.attributes.get(a) : true);
+  };
   G.live.forEach(function (x) {
-    if (G.base.has(x)) return;
+    if (G.base.has(x) || !held(x)) return;
     var tag = inScene.has(x) ? "[in scene] " : owned.has(x) ? "[owned off-scene] " : "";
     var d = G.desc.get(x) || ((x.isTexture ? "texture " : "geometry ") + (x.name || x.type) + " (never seen in the scene)");
     // a body's painted look (city/clothes.js outfit atlases, entities/tattoo.js
-    // ink charts): caches that keep every look for the session, by design
+    // ink charts): on the GPU while worn, the unworn ones kept to a budget
+    // (core/texfree.js CBZ.lookTex) and for a while; past that they are a leak
     if (!tag && x.isTexture && /character-model|pedinst/.test(d)) tag = "[ped look cache] ";
     if (!tag) { if (x.isTexture) n.tex++; else n.geo++; }
     else if (tag === "[ped look cache] ") n.pedTex++;
@@ -229,7 +243,7 @@ export default async function (t) {
     s.listeners = await listeners(t);
     t.log(label, JSON.stringify({ geo: s.gpuGeo, tex: s.gpuTex, prog: s.programs, upd: s.updaters, alw: s.always, col: s.colliders, plat: s.platforms,
       los: s.los, cam: s.camCol, objs: s.sceneObjs, lis: s.listeners, peds: s.peds, cars: s.cars, cops: s.cops, venues: s.venues, safes: s.safes, vaults: s.vaults,
-      full: s.state.full, active: s.state.active }));
+      full: s.state.full, active: s.state.active, look: s.look ? [s.look.resident, s.look.residentMB, s.look.idleResidentMB, s.look.evicted, s.look.revived] : null }));
     return s;
   };
   await t.fn(GPU_HOOK);
@@ -275,7 +289,10 @@ export default async function (t) {
     for (const w of why.list) t.log("  gpu held:", w[0], w[1]);
     if (why.geo > 4 * R) leaks.push(`${why.geo} GPU geometries held by nothing (rounds 2..${rounds})`);
     if (why.tex > 4 * R) leaks.push(`${why.tex} GPU textures held by nothing (rounds 2..${rounds})`);
-    if (why.pedTex) notes.push(`ped look caches +${why.pedTex} textures (city/clothes.js outfits, entities/tattoo.js charts: kept for the session by design)`);
+    // the unworn looks are held to a budget: what a round adds is replaced, not piled up
+    const lk = last.look;
+    if (why.pedTex) notes.push(`ped look caches +${why.pedTex} textures not worn by anyone in the scene` + (lk ? ` (CBZ.lookTex: ${lk.resident} resident, ${lk.idleResidentMB} of ${lk.budgetMB} MB unworn, ${lk.evicted} put away, ${lk.revived} drawn again after)` : ""));
+    if (lk && (last.gpuTex - base.gpuTex) / R > 1.5) leaks.push(`gpuTex ${base.gpuTex} -> ${last.gpuTex} (> 1.5 a round with the look budget on)`);
   }
   if ((last.gpuGeo - base.gpuGeo) / R > 60) leaks.push(`gpuGeo ${base.gpuGeo} -> ${last.gpuGeo} (> 60 a round)`);
   if ((last.sceneObjs - base.sceneObjs) / R > 80) leaks.push(`sceneObjs ${base.sceneObjs} -> ${last.sceneObjs} (> 80 a round)`);

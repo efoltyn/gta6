@@ -686,7 +686,9 @@
           // fear face + body lean-ease below, and the flash/recoil run regardless.
           // Jail (guards/npcs) never set char.handsUp here, so this never trips for
           // them — their hands-up keeps coming from this additive path, UNCHANGED.
-          const animOwnsArms = !!(a.char && (a.char.handsUp || a.char.surrender));
+          // (a crouched cover pose, poses.js coverHead, holds its hands over the
+          // head itself: the cringe would drag them forward off the skull)
+          const animOwnsArms = !!(a.char && (a.char.handsUp || a.char.surrender || (a.char.pose && CBZ.charPoses && CBZ.charPoses[a.char.pose] && CBZ.charPoses[a.char.pose].crouch)));
           if (!animOwnsArms) {
             if (parts.la) {
               const before = parts.la.rotation.x;

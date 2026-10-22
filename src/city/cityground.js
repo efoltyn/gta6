@@ -855,6 +855,18 @@
 
     const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, envMapIntensity: 0.2 });
     mat.name = "city-ground";
+    /* THE SPLAT IS THIS GROUND'S OWN. It reaches the shader as a uniform, so
+       a pass that frees what a dropped island drew (CBZ.freeObjectsSteps:
+       every texture on a material's own keys) never saw it: every island
+       round trip left two 512x512 splats on the GPU and their 2 MB of
+       arrays in `states`. On the material they are found and disposed with
+       the island, and a town's dispose takes its state out of the world. */
+    mat.cgSplat = S; mat.cgMask = M;
+    if (!main) S.addEventListener("dispose", function () {
+      const i = states.indexOf(state); if (i >= 0) states.splice(i, 1);
+      const q = queue.indexOf(state); if (q >= 0) queue.splice(q, 1);
+      if (state.M) state.M.dispose();
+    });
     const U = {
       uCgS: { value: S }, uCgM: { value: M },
       uCgT1: { value: detailTex.T1 }, uCgT2: { value: detailTex.T2 }, uCgT3: { value: detailTex.T3 },

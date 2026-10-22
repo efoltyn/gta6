@@ -3214,7 +3214,7 @@
     const bounds = new THREE.Vector4(cx - half, cz - half, cx + half, cz + half);
     let row = 0;
     const h = {
-      tex: tex, bounds: bounds, done: typeof groundAt !== "function",
+      tex: tex, bounds: bounds, done: typeof groundAt !== "function", baked: true,
       // bake for at most `ms` milliseconds (whole rows); true when complete.
       // Time-sliced rather than row-counted: a ground function's cost is the
       // world's business, and the frame budget is ours.
@@ -3882,6 +3882,11 @@
     u.uSeaLandMask.value = field.tex;
     u.uSeaLandBounds.value.copy(field.bounds);
     u.uSeaHasLandMask.value = 1;
+    /* A FIELD BAKED HERE IS THE SEA'S OWN: the one it replaces goes (each
+       Isles island the sea moves to bakes a new 512x512 shore field; the old
+       ones stayed on the GPU with their 1 MB arrays, 2 a round trip) */
+    const old = mat.userData.waterField;
+    if (old && old !== field && old.baked && old.tex && old.tex !== field.tex) { old.done = true; old.tex.dispose(); }
     mat.userData.waterField = field;
     return true;
   };

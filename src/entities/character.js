@@ -8289,7 +8289,10 @@
     // CROUCH is a real pose now (hips drop, knees fold, torso hinges forward),
     // not the old whole-group scale.y accordion squash. cb eases 0→1 so
     // entering/leaving a crouch flows through the same damped targets.
-    ch._cb = damp(ch._cb || 0, ch.crouch ? 1 : 0, 12, dt);
+    // (a held pose can be a crouch: poses.js coverHead, a civilian taking
+    // cover, folds the legs the same way while he stays put)
+    const _pc = !moving && ch.pose && CBZ.charPoses && CBZ.charPoses[ch.pose];
+    ch._cb = damp(ch._cb || 0, ch.crouch || (_pc && _pc.crouch) ? 1 : 0, 12, dt);
     const cb = ch._cb;
     const hipAmp = (0.30 + 0.26 * norm + 0.16 * run2) * (1 - 0.35 * cb) * GA.hipAmp;
     const swing = sinP * hipAmp;

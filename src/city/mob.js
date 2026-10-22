@@ -202,6 +202,7 @@
   const amob = new Int16Array(CAP).fill(-1);                           // mob slot, -1 free
   const aside = new Uint8Array(CAP);                                   // 0 crowd, 1 police
   const arole = new Uint8Array(CAP);
+  const ahorn = new Uint8Array(CAP);                                   // a leader with the bullhorn in hand (instanced)
   const aact = new Uint8Array(CAP);
   const atim = new Float32Array(CAP);
   const acd = new Float32Array(CAP);                                   // a thrower's / fighter's next go
@@ -408,6 +409,10 @@
       onLife: onLife, promote: function (r, why) { return realize(r, why); }, onPanic: function (x, z, r) { if (!m.gone) alarmAt(m, x, z, r); },
       dodge: true,                       // a car coming: this file walks them out of its lane (S.dodgeT)
       beforeCut: function () { cutClips(m); },
+      // a crowd forming nearer the player asks for rows (crowdstore make):
+      // people at the back of this one go home, out of sight (the souls the
+      // news counts stay)
+      onYield: function (n) { return yieldRows(m, n); },
     });
     if (!m.G) { MOBS[slot] = null; return null; }
     m.affIx = (m.groups.length ? m.groups : [{ name: null }]).map(function (gr) { return affOfGroup(gr, m); });
@@ -415,6 +420,7 @@
     // take simulated bodies from crowds farther from the player (their souls,
     // the number the news counts, do not change)
     const want = Math.min(size, Math.floor(BUD.agents * 0.9));
+    if (room() < want && ST.make) ST.make(want, m.G);
     if (room() < want) reclaim(want, m);
     const n = Math.min(want, room());
     // A PACKED KNOT (~1.8 people per square metre) whose front edge is the
@@ -464,7 +470,7 @@
       else if (r < 0.62 + 0.10 * m.violent) role = ROLE.thrower;
       else if (r < 0.62 + 0.16 * m.violent) role = ROLE.climber;
       else if (r < 0.62 + 0.26 * m.violent) role = ROLE.fighter;
-      arole[i] = role;
+      arole[i] = role; ahorn[i] = 0;
       asign[i] = (h01(k, m.seed, 8) * m.slogans.length) | 0;
       // friends: neighbours in a 2.6 m cell of the knot came together
       afr[i] = ((Math.floor(lx / 2.6) + 512) << 10) | ((Math.floor(lz / 2.6) + 512) & 1023);
@@ -506,6 +512,18 @@
       }
       o.agents = o.agents.filter(function (j) { return amob[j] === o.slot; });
     }
+  }
+  function yieldRows(o, n) {
+    if (o.gone) return 0;
+    let crowd = 0, freed = 0;
+    for (let j = 0; j < o.agents.length; j++) if (aside[o.agents[j]] === 0) crowd++;
+    for (let j = o.agents.length - 1; j >= 0 && freed < n && crowd > MIN_KEEP; j--) {
+      const i = o.agents[j];
+      if (aside[i] !== 0 || arig[i] >= 0 || !unseenRow(i)) continue;
+      release(i); crowd--; freed++;
+    }
+    if (freed) o.agents = o.agents.filter(function (j) { return amob[j] === o.slot; });
+    return freed;
   }
   // what the news calls it: a number people can picture, and the place
   function many(m) { return m.size >= 20000 ? "Tens of thousands" : m.size >= 1500 ? "Thousands" : m.size >= 200 ? "Hundreds" : "A crowd"; }
@@ -1088,7 +1106,9 @@
       aph[i] += ddt * (sp > 0.15 ? sp * (sp > RUN_AT ? GAIT.run : GAIT.walk) : 0);     // the baked stride: feet do not skate
       S.posT[i] = ST.clock();
       if (aclimb[i] > 0 && (arole[i] !== ROLE.climber || !L)) aclimb[i] = Math.max(0, aclimb[i] - ddt * 1.2);
-      if (!coarse || (stepN & 7) === 0 || aact[i] === ACT.cover) ay[i] = floorAt(ax[i], az[i]) + aclimb[i] - (aact[i] === ACT.cover ? 0.45 : 0);
+      // (a cover-taker crouches on his own feet: the coverHead clip; only the
+      // old seated stand-in sat 0.45 below its chair)
+      if (!coarse || (stepN & 7) === 0 || aact[i] === ACT.cover) ay[i] = floorAt(ax[i], az[i]) + aclimb[i] - (aact[i] === ACT.cover && CL.coverHead == null ? 0.45 : 0);
       if (aside[i] === 1) { const Lo = lineOf(i); if (Lo && !Lo.broken) ahd[i] = Math.atan2(Lo.nx, Lo.nz); }
     }
     if (m._culled) cull(m);
@@ -1268,6 +1288,7 @@
     const ped = R.ped;
     if (!ped) return;
     ped.moveOrder = null;
+    if (ped._mobCover) { ped._mobCover = false; if (ped.char && CBZ.setCharPose) { try { CBZ.setCharPose(ped.char, "stand"); } catch (e) {} } }
     if (ped.dead) return;            // a body stays where it fell
     if (R.cop) {
       if (CBZ.cityPostRelease) { try { CBZ.cityPostRelease(ped, "stand-down"); } catch (e) {} }
@@ -1299,6 +1320,14 @@
       return;
     }
     ax[i] = ped.pos.x; az[i] = ped.pos.z; ay[i] = ped.pos.y || 0;
+    // TAKING COVER: down on his heels, hands over his head (poses.js
+    // coverHead), what he held let go first; back up when the mob sends him
+    const cov = aact[i] === ACT.cover && aside[i] === 0;
+    if (cov !== !!ped._mobCover && ped.char && CBZ.setCharPose) {
+      if (cov && (ped._pubProp || ped._mobShield)) dropHeldProp(ped, null);
+      ped._mobCover = cov;
+      try { CBZ.setCharPose(ped.char, cov ? "coverHead" : "stand"); } catch (e) {}
+    }
     const busy = ped.state === "flee" || ped.state === "fight" || ped.state === "confront" || ped.state === "film" || ped.ko || ped.restraint || ped.poseCower > 0;
     if (busy && aact[i] !== ACT.flee) { ped.moveOrder = null; return; }      // the brain has him; his own reaction wins
     // a car: out of its lane; a slow one nosing into him gets the hood banged
@@ -1867,10 +1896,12 @@
   // an instanced person goes down (or breaks and runs): what they held drops
   function dropAgentProp(i, fx, fz) {
     const r = arole[i];
-    if (r !== ROLE.sign && r !== ROLE.flag && r !== ROLE.officer) return false;
+    // a leader lets go of the bullhorn only if it was in his hand
+    if (r === ROLE.leader ? !ahorn[i] : (r !== ROLE.sign && r !== ROLE.flag && r !== ROLE.officer)) return false;
     const m = amob[i] >= 0 ? MOBS[amob[i]] : null;
     const x = ax[i], y = ay[i], z = az[i], h = ahd[i];
-    if (r !== ROLE.officer) arole[i] = ROLE.plain;
+    if (r === ROLE.leader) { ahorn[i] = 0; arole[i] = ROLE.fist; }
+    else if (r !== ROLE.officer) arole[i] = ROLE.plain;
     if (r === ROLE.officer && (S.life[i] === ST.ALIVE)) return false;        // a retreating officer keeps his shield
     let vx = 0, vz = 0;
     if (fx != null && isFinite(fx) && (fx !== 0 || fz !== 0)) { const dx = x - fx, dz = z - fz, l = Math.hypot(dx, dz) || 1; vx = dx / l * 1.2; vz = dz / l * 1.2; }
@@ -1887,13 +1918,19 @@
       try {
         if (r === ROLE.officer) giveShield(fake);
         else if (r === ROLE.sign) props.sign(fake, m ? m.slogans[asign[i] % m.slogans.length] : "HEAR US", m ? m.support : false);
+        else if (r === ROLE.leader) {
+          // the same horn a full rig holds, in the fist the clip held it in
+          if (props.bullhorn) props.bullhorn(fake);
+          const g = gripOf("bullhorn", abody[i]);
+          if (g && fake._pubProp) fake._pubProp.position.set(g.x, g.y, g.z);
+        }
         else props.flag(fake);
       } catch (e) {}
       const ok = dropHeldProp(fake, fx != null ? { fromX: fx, fromZ: fz } : null);
       if (holder.parent) holder.parent.remove(holder);
       if (ok) return true;
     }
-    FALLEN.push({ k: r === ROLE.officer ? "shield" : r === ROLE.sign ? "sign" : "flag", x: x + vx * 0.4, y: y, z: z + vz * 0.4, h: h,
+    FALLEN.push({ k: r === ROLE.officer ? "shield" : r === ROLE.sign ? "sign" : r === ROLE.leader ? "horn" : "flag", x: x + vx * 0.4, y: y, z: z + vz * 0.4, h: h,
       text: m ? m.slogans[asign[i] % m.slogans.length] : "HEAR US", support: m ? m.support : false, flag: m ? m.flag : null, t: CLOCK });
     if (FALLEN.length > FALLEN_CAP) FALLEN.shift();
     DROPS.flat++;
@@ -2066,7 +2103,7 @@
   // holds it (crowdstore S.drawn / S.clip). Only what is no longer held (the
   // dropped boards lying in the road) and things in flight are drawn apart.
   const PROP_CAP = Math.min(2048, CAP >> 2), STICK_CAP = Math.min(4096, CAP);
-  const R_ = { built: false, root: null, parts: null, signs: Object.create(null), flags: Object.create(null), shots: null };
+  const R_ = { built: false, root: null, parts: null, signs: Object.create(null), flags: Object.create(null), shots: null, horn: null };
   const PARTS = ["shield", "stick"];
   function instanced(geo, mat, cap) {
     const m = new THREE.InstancedMesh(geo, mat, cap);
@@ -2099,10 +2136,9 @@
     P.stick = instanced(X.box, X.stick, STICK_CAP);
     for (const k of PARTS) grp.add(P[k]);
     const set = { root: grp, parts: P, signs: Object.create(null), flags: Object.create(null), horn: null, phone: null };
-    if (held) {
-      set.horn = instanced(X.horn, X.hornM, 64); set.phone = instanced(X.box, X.phoneM, 256);
-      grp.add(set.horn); grp.add(set.phone);
-    }
+    // bullhorns in hand, or lying where they were dropped
+    set.horn = instanced(X.horn, X.hornM, 64); grp.add(set.horn);
+    if (held) { set.phone = instanced(X.box, X.phoneM, 256); grp.add(set.phone); }
     return set;
   }
   function build() {
@@ -2112,7 +2148,7 @@
     const root = arenaRoot(); if (!root) { R_.built = false; return false; }
     // the global set: what lies on the ground, and what is in the air
     const set = propSet(root, "mob-fallen", false);
-    R_.root = set.root; R_.parts = set.parts; R_.signs = set.signs; R_.flags = set.flags;
+    R_.root = set.root; R_.parts = set.parts; R_.signs = set.signs; R_.flags = set.flags; R_.horn = set.horn;
     R_.shots = instanced(new THREE.BoxGeometry(0.09, 0.22, 0.09), new THREE.MeshLambertMaterial({ color: 0x5a7a4a }), 32);
     R_.root.add(R_.shots);
     readGait();
@@ -2226,7 +2262,7 @@
   function clipFor(i, m) {
     const r = arole[i], act = aact[i], sp = asp[i];
     if (act === ACT.down) { _clip = "down"; _phase = 0; _rate = 0; return; }
-    if (act === ACT.cover) { _clip = "sit"; _phase = h01(i, 3, 9); _rate = 0.25; _now = 0; return; }
+    if (act === ACT.cover) { _clip = CL.coverHead != null ? "coverHead" : "sit"; _phase = h01(i, 3, 9); _rate = 0.25; _now = 0; return; }
     if (sp > 0.3 || act === ACT.flee) {
       const run = sp > RUN_AT || act === ACT.flee;
       _clip = run ? "run" : (r === ROLE.sign ? "signWalk" : r === ROLE.flag ? "flagWalk" : "walk");
@@ -2248,6 +2284,7 @@
     else if (pulse && (r === ROLE.fist || r === ROLE.plain)) _clip = "fist";
     else _clip = "idle";
     _rate = POSE_RATE[_clip] || 0.25;
+    if (_clip === "bullhorn") ahorn[i] = 1;            // it is in his hand now: it drops, it never vanishes
     // THE CHANT IS ONE RHYTHM: everyone pumping on it is on the same beat
     // (the phase "as of now" from the chant's start, a hair of human slop)
     if ((_clip === "fist" || _clip === "bullhorn") && pulse && !act && m.chantT0) {
@@ -2279,7 +2316,7 @@
       if (amob[i] !== mi || arig[i] >= 0) continue;
       // a runner lets go of the sign as they break (it drops, it never vanishes
       // in the air); so does somebody getting down low
-      if ((aact[i] === ACT.flee || aact[i] === ACT.cover) && (arole[i] === ROLE.sign || arole[i] === ROLE.flag)) {
+      if ((aact[i] === ACT.flee || aact[i] === ACT.cover) && (arole[i] === ROLE.sign || arole[i] === ROLE.flag || (arole[i] === ROLE.leader && ahorn[i]))) {
         _runnerDrop = true;
         dropAgentProp(i, S.panicT[i] > 0 ? S.fleeX[i] : m.centroid.x, S.panicT[i] > 0 ? S.fleeZ[i] : m.centroid.z);
         _runnerDrop = false;
@@ -2334,6 +2371,8 @@
       const f = FALLEN[k];
       const dx = f.x - cx, dz = f.z - cz;
       if (dx * dx + dz * dz > PROP2) continue;
+      // a bullhorn lies on its side, the mouth along where he was facing
+      if (f.k === "horn") { base(f.h, 0); if (R_.horn && R_.horn.count < R_.horn.instanceMatrix.count) putBox(R_.horn, R_.horn.count++, f.x, f.y + 0.1, f.z, 0, 0, 0, 0, 0, 1, 1, 1); continue; }
       base(f.h, -Math.PI / 2);
       if (f.k === "shield") { if (P.shield.count < P.shield.instanceMatrix.count) { putBox(P.shield, P.shield.count++, f.x, f.y, f.z, 0.3, 0.5, 0.03, 0, 0, 0.6, 1.0, 0.04); } continue; }
       if (f.k === "sign") {

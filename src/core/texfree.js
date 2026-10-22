@@ -250,5 +250,141 @@
     if (typeof repaint === "function") t._cbzRepaint = repaint;
     return t;
   };
+  /* ---- A PERSON'S LOOK IS ON THE GPU WHILE SOMEBODY WEARS IT -------------
+     city/clothes.js paints one atlas per outfit key and entities/tattoo.js one
+     chart per piece of ink; every wearer of a key shares the one texture. They
+     used to stay on the GPU for the whole session once drawn: every island
+     round trip, every new street, left 4-5 more behind (the Isles leak check
+     counted them). Now each look is a RECORD here: the rigs wearing it (weak
+     refs, so a dropped rig is no holder), its textures, and when it was last
+     worn. A look nobody in the scene wears is kept while the unworn ones fit
+     a budget (MB; a phone's is smaller), least recently worn out first, and
+     never longer than IDLE_S. Out = its GPU copy goes (the texture's own
+     dispose, so three and the ped pages let go of it); the texture object,
+     its material and every number read off it stay, and the next draw
+     uploads it again, painted again from its key (both painters are pure).
+       CBZ.lookTex.track(key, [tex...])  the textures of a look (replaces)
+       CBZ.lookTex.wear(ch, slot, key)   rig ch wears key in slot (null = off)
+       CBZ.lookTex.audit()               what is resident, worn, gone */
+  CBZ.lookTex = (function () {
+    const BUDGET_MB = { phone: 3, tablet: 6, desktop: 16 };
+    const IDLE_S = 90, LOOK_SWEEP_S = 4;
+    const recs = new Map();
+    const L = { evicted: 0, evictedMB: 0, revived: 0 };
+    const okWR = typeof WeakRef === "function";
+    const clock = function () { return performance.now() / 1000; };
+    function rec(key) {
+      let r = recs.get(key);
+      if (!r) { r = { key: key, texs: [], wear: new Set(), last: clock(), mb: 0, out: false }; recs.set(key, r); }
+      return r;
+    }
+    function bytesOf(t) {
+      const w = t._cbzLazyW || (t.image && t.image.width) || 0, h = t._cbzLazyH || (t.image && t.image.height) || 0;
+      const mip = t.generateMipmaps !== false && t.minFilter !== THREE.LinearFilter && t.minFilter !== THREE.NearestFilter;
+      return w * h * 4 * (mip ? 4 / 3 : 1) / 1048576;
+    }
+    function resident(t) {
+      const R = CBZ.renderer, p = R && R.properties ? R.properties.get(t) : null;
+      return !!(p && p.__webglInit);
+    }
+    function track(key, list) {
+      if (!key) return;
+      const r = rec(key);
+      r.texs = [];
+      for (let i = 0; i < list.length; i++) {
+        const t = list[i];
+        if (!t || !t.isTexture) continue;
+        r.texs.push(t);
+        if (t._cbzLookRec) { t._cbzLookRec = r; continue; }
+        t._cbzLookRec = r;
+        // an upload after the look was put away: somebody draws it that no
+        // wear() named (a preview, a corpse clone); count it as worn now
+        const prev = t.onUpdate;
+        t.onUpdate = function () {
+          const rr = t._cbzLookRec;
+          if (rr && rr.out) { rr.out = false; rr.last = clock(); L.revived++; }
+          if (prev) return prev.apply(this, arguments);
+        };
+      }
+    }
+    function wearing(ch, key) {
+      const W = ch._lookWear;
+      if (!W) return false;
+      for (const s in W) if (W[s] === key) return true;
+      return false;
+    }
+    function wear(ch, slot, key) {
+      if (!ch || !okWR) return;
+      const W = ch._lookWear || (ch._lookWear = {});
+      const old = W[slot];
+      if (old === key || (old == null && key == null)) return;
+      const wr = ch._lookWR || (ch._lookWR = new WeakRef(ch));
+      W[slot] = key || null;
+      if (old != null && !wearing(ch, old)) { const r = recs.get(old); if (r) r.wear.delete(wr); }
+      if (key != null) { const r = rec(key); r.wear.add(wr); r.last = clock(); }
+    }
+    // in the scene: a parked or dropped rig wears nothing anyone can see
+    function attached(ch) {
+      const S = CBZ.scene;
+      let o = ch.group;
+      for (let i = 0; o && i < 64; i++) { if (o === S) return true; o = o.parent; }
+      return false;
+    }
+    function putAway(r) {
+      for (let i = 0; i < r.texs.length; i++) {
+        const t = r.texs[i];
+        if (!resident(t)) continue;
+        L.evictedMB += bytesOf(t);
+        // the PROTOTYPE's dispose: the owners' own dispose() marks a texture
+        // dead (their caches rebuild a dead look); this one only lets the GPU
+        // copy go
+        THREE.Texture.prototype.dispose.call(t);
+      }
+      r.out = true;
+      L.evicted++;
+    }
+    function budget() { return BUDGET_MB[CBZ.deviceClass] || BUDGET_MB.desktop; }
+    function sweepLooks() {
+      if (!okWR || !CBZ.renderer || !CBZ.scene) return;
+      const now = clock(), idle = [];
+      let idleMB = 0;
+      recs.forEach(function (r) {
+        let held = 0;
+        r.wear.forEach(function (wr) {
+          const ch = wr.deref();
+          if (!ch || !wearing(ch, r.key)) { r.wear.delete(wr); return; }
+          if (attached(ch)) held++;
+        });
+        if (held) { r.last = now; return; }
+        let mb = 0;
+        for (let i = 0; i < r.texs.length; i++) if (resident(r.texs[i])) mb += bytesOf(r.texs[i]);
+        r.mb = mb;
+        if (mb > 0) { idle.push(r); idleMB += mb; }
+        else if (!r.wear.size && !r.texs.length) recs.delete(r.key);
+      });
+      idle.sort(function (a, b) { return a.last - b.last; });
+      const B = budget();
+      for (let i = 0; i < idle.length; i++) {
+        const r = idle[i];
+        if (idleMB <= B && now - r.last < IDLE_S) break;
+        putAway(r);
+        idleMB -= r.mb;
+      }
+    }
+    setInterval(sweepLooks, LOOK_SWEEP_S * 1000);
+    function audit() {
+      let n = 0, mb = 0, worn = 0, idleMB = 0, texs = 0;
+      recs.forEach(function (r) {
+        let rm = 0;
+        for (let i = 0; i < r.texs.length; i++) { texs++; if (resident(r.texs[i])) { n++; rm += bytesOf(r.texs[i]); } }
+        mb += rm;
+        if (r.wear.size) worn++; else idleMB += rm;
+      });
+      return { looks: recs.size, textures: texs, resident: n, residentMB: +mb.toFixed(2), worn: worn, idleResidentMB: +idleMB.toFixed(2),
+        budgetMB: budget(), evicted: L.evicted, evictedMB: +L.evictedMB.toFixed(2), revived: L.revived };
+    }
+    return { track: track, wear: wear, audit: audit, sweep: sweepLooks };
+  })();
+
   CBZ.texFreeAudit = function () { sweep(); return { tracked: tracked.length, created: A.tracked, freed: A.freed, freedMB: +A.freedMB.toFixed(1), lazyPainted: A.lazyPainted, lazyReleased: A.lazyReleased, repaintedAfterFree: A.repaintedAfterFree, sample: A.names.slice() }; };
 })();

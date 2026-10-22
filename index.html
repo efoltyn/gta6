@@ -447,7 +447,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=venue1022"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
-<script src="src/core/texfree.js?v=peak1014c"></script>
+<script src="src/core/texfree.js?v=looks1022b"></script>
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=beach1020"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
@@ -615,10 +615,10 @@ document.body.appendChild(b);}}catch(e){}})();
        every body's hand (character.js builds it) — so it loads before bodies -->
   <script src="src/systems/fphands.js?v=peak1014"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
-  <script src="src/entities/tattoo.js?v=peak1014c"></script>
+  <script src="src/entities/tattoo.js?v=looks1022b"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=trunk1022"></script>
+  <script src="src/entities/character.js?v=looks1022b"></script>
   <script src="src/entities/headwear.js?v=armourm1011"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -648,7 +648,7 @@ document.body.appendChild(b);}}catch(e){}})();
      door registry), is refused if not, and it shuts behind them. Asked by
      CBZ.moves.step and by systems/navgrid.js. -->
 <script src="src/systems/bodydoors.js?v=sink1014"></script>
-<script src="src/entities/poses.js?v=protest1022"></script>
+<script src="src/entities/poses.js?v=looks1022b"></script>
 <!-- A SOLDIER (entities/soldier.js): rifle carries, cover, reload, the throw,
      hit reactions, wounds, the dive and the crawl, on the shared body. -->
 <!-- SOLDIER KIT (entities/combatkit.js): plate carriers, helmets, eye pro,
@@ -662,12 +662,12 @@ document.body.appendChild(b);}}catch(e){}})();
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=heldprops1022"></script>
+<script src="src/entities/crowdgpu.js?v=looks1022b"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
      one damage path, and counts the dead for the news. After crowdgpu. -->
-<script src="src/entities/crowdstore.js?v=isledaylife1022"></script>
+<script src="src/entities/crowdstore.js?v=looks1022b"></script>
 <!-- CBZ.verbs: THE ONE library of what two people do to each other with their
      hands, for every game: grab, carry, throw, shove, tackle, cuff, frisk,
      drag, escort, choke, shield, mug (verbs.js), the bodies both of them wear
@@ -973,7 +973,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
-<script src="src/systems/reactions.js?v=bodymove1022"></script>
+<script src="src/systems/reactions.js?v=looks1022b"></script>
 <script src="src/systems/facial.js?v=tvanchor1020"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=pace1015"></script>
@@ -1207,7 +1207,7 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=seanight1022"></script>
+<script src="src/world/water_spec.js?v=looks1022b"></script>
 <!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_runup.js?v=tsudir1020"></script>
 <!-- where the water is brown: the silt the run-up scoured off the land, carried out to sea by the backwash, spread and settled (the sea shader's turbidity mask), and CBZ.waterTurbidAt, the one turbidity + current query the underwater medium and the swimmer read -->
@@ -1390,7 +1390,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/speedway_race.js: you walk in and get into a car with F. -->
 <script src="src/race/race_core.js?v=speedway1009"></script>
 <script src="src/race/race_track.js?v=mem1014"></script>
-<script src="src/race/race_venue.js?v=mem1014"></script>
+<script src="src/race/race_venue.js?v=looks1022b"></script>
 <script src="src/race/race_physics.js?v=ric0929"></script>
 <script src="src/race/race_ai.js?v=speedway1009"></script>
 <script src="src/race/race_session.js?v=speedway1009"></script>
@@ -1500,7 +1500,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=hands1022"></script>
 <script src="src/city/economy.js?v=isleopen1022"></script>
-<script src="src/city/clothes.js?v=shoulder1014"></script>
+<script src="src/city/clothes.js?v=looks1022b"></script>
 <script src="src/city/outfits.js?v=islesave1022"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <script src="src/city/hunger.js?v=stam1009"></script>
@@ -2024,7 +2024,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=house1020b"></script>
+<script src="src/city/cityground.js?v=looks1022b"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -2590,7 +2590,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/warroom.js?v=football1014"></script>
 <script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=gateprotest2"></script>
-<script src="src/city/president_public.js?v=protest1022"></script>
+<script src="src/city/president_public.js?v=looks1022b"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on
@@ -2603,7 +2603,7 @@ document.body.appendChild(b);}}catch(e){}})();
      breaches. The one mass crowd for every political crowd (the gate protest,
      a rally the President calls, the Capitol march): the nearest are ordinary
      rigs, the rest one instanced fill, capped per device. -->
-<script src="src/city/mob.js?v=heldprops1022"></script>
+<script src="src/city/mob.js?v=looks1022b"></script>
 <!-- THE ORDER TO FIRE ON THE CROWD (city/fireorder.js): you in uniform, a
      crowd (mob.js in Gang City; the town hall on the islands), your officer's
      "Fire." as CBZ.command.bigOrder's three answers. After mob.js, coup.js,

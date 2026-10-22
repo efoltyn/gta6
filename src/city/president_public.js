@@ -1363,7 +1363,11 @@
     const still = r === "freeze" || r === "cover" || r === "surrender";
     ped.poseCower = Math.max(ped.poseCower || 0, still ? 1.6 : 0.5);
     const beat = 0.12 + Math.min(0.9, d / 45) + h01(ped.id | 0, (d * 10) | 0, 71) * 0.45;
-    PANIC.push({ ped: ped, list: list, x: x, z: z, t: -(beat + (still ? 0.9 + h01(ped.id | 0, 3, 72) * 1.1 : 0)) });
+    // taking cover: down on his heels, hands over his head (poses.js
+    // coverHead), whatever he held let go first
+    const cover = r === "cover";
+    if (cover) { if (ped._pubProp && CBZ.dropHeldProp) { try { CBZ.dropHeldProp(ped, { fromX: x, fromZ: z }); } catch (e) {} } setPose(ped, "coverHead"); }
+    PANIC.push({ ped: ped, list: list, x: x, z: z, cover: cover, t: -(beat + (still ? 0.9 + h01(ped.id | 0, 3, 72) * 1.1 : 0)) });
   }
   function tickPanic(dt) {
     for (let i = PANIC.length - 1; i >= 0; i--) {
@@ -1371,6 +1375,7 @@
       q.t += dt;
       if (q.t < 0 && q.ped && !q.ped.dead) continue;
       PANIC.splice(i, 1);
+      if (q.cover && q.ped && q.ped.char && q.ped.char.pose === "coverHead") setPose(q.ped, null);
       if (q.ped && !q.ped.dead) startDrift(q.ped, q.list, { x: q.x, z: q.z }, true);
     }
   }

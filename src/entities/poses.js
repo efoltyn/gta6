@@ -116,6 +116,7 @@
   // animChar uses: ch.parts.{la,ra} (upper-arm pivots) + ch.low.{la,ra}
   // (elbow joints). Rates sit at/above animChar's arm rate (~14) so the pose
   // dominates the frame it owns.
+  const TAU_COVER = (Math.PI * 2) / 4.0;  // one breath per crowdgpu bake loop (4 s)
   const POSES = {
     // hands low and forward over the felt (table height, not the chest) —
     // dealing / croupier; the right hand works the cards a little
@@ -296,10 +297,24 @@
       const up = t < 0.12 ? t / 0.12 : t < 0.32 ? 1 : t < 0.44 ? 1 - (t - 0.32) / 0.12 : 0;
       crowdArms(ch, dt, -0.05, 0.08, -0.35 - up * 0.45, -0.2 - up * 0.2, -0.2, -0.85 - up * 1.45);
     },
+    // TAKING COVER (a civilian at the first shots: city/mob.js's cover-takers,
+    // full rig or baked into the crowd by crowdgpu.js): down on the heels
+    // (the row's `crouch` folds the legs, animChar's own crouch), both hands
+    // over the head, the elbows in round the face; the shoulders shake a
+    // little with the breath.
+    coverHead(ch, dt) {
+      ch._pubT = (ch._pubT || 0) + dt;
+      const s = Math.sin(ch._pubT * TAU_COVER + (ch._pubPh || 0)) * 0.035;
+      // (measured on the rig, crouched: the elbows beside the face and a hand
+      // in front of it, each forearm up over the ear to the crown)
+      armsTo(ch, dt, 14, -2.5 + s, 0.2, -1.0, -0.8, -2.5 - s, -0.2, 1.0, -0.8);
+    },
     // explicit neutral (defensive no-op; setCharPose maps "stand" -> null so the
     // idle gait owns the arms instead of freezing them here).
     stand(ch, dt) {},
   };
+  POSES.coverHead.crouch = true;         // the legs fold under him (character.js reads it)
+  POSES.coverHead.twist = true;          // owns shoulder twist (held level at 0)
   POSES.foldarms.twist = true;           // owns shoulder twist (animChar leaves rotation.y to it)
   // contract-vocabulary aliases so packages/ped brains can name poses naturally
   POSES.handsOnTable = POSES.table;

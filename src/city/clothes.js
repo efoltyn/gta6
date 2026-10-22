@@ -3220,6 +3220,10 @@
     // copy paints it again (an outfit is often built for a body nobody sees
     // for a while: the boot builds ~70 of them before the first frame)
     if (tex._cbzRelease) tex._cbzRelease();
+    // on the GPU while somebody wears it (core/texfree.js CBZ.lookTex): an
+    // outfit nobody in the scene wears gives its GPU copy back, and the next
+    // wearer's first draw paints it again from the key
+    if (CBZ.lookTex) CBZ.lookTex.track("cloth:" + key, set.yoke ? [tex, set.yoke.tex] : [tex]);
     return set;
   }
 
@@ -3703,6 +3707,7 @@
         sleeveHeads(ch, null);
         if (CBZ.humanSeatBadge && s.badge && s.badge.length) CBZ.humanSeatBadge(ch, 0);   // off the shell, back onto the shirt
         ch._clothesKey = null;
+        if (CBZ.lookTex) CBZ.lookTex.wear(ch, "cloth", null);
         // …and the MATERIAL memo with it. Behaviourally a no-op today (the
         // "already wearing it" early-out below needs BOTH to match and the key
         // is now null), but leaving a stripped rig pointing at the garment it
@@ -3795,6 +3800,7 @@
     if (!yoked) restore(s.collar);
     ch._clothesKey = key;
     ch._clothesMat = m;
+    if (CBZ.lookTex) CBZ.lookTex.wear(ch, "cloth", "cloth:" + key);
     return yoked ? outParts : set.parts;
   }
 

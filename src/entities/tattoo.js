@@ -1633,6 +1633,8 @@
     const dispose = t.dispose;
     t.dispose = function () { t._cbzDead = true; TEX.delete(id); return dispose.apply(this, arguments); };
     TEX.set(id, t);
+    // on the GPU while somebody wears it (core/texfree.js CBZ.lookTex)
+    if (CBZ.lookTex) CBZ.lookTex.track("ink:" + id, [t]);
     return t;
   }
   /* LAZY CHARTS. A chart is 10-40 ms of canvas work and a yard dressing its
@@ -1791,6 +1793,15 @@
     const head = s.head && s.head[0];
     if (head && inkHead(head, prof ? prof.head : null) < 0) wait = true;
     if (wait) WAIT.add(ch);
+    // the charts this man wears (CBZ.lookTex: a chart nobody in the scene
+    // wears gives its GPU copy back)
+    const LT = CBZ.lookTex;
+    if (LT) {
+      const ik = function (kind, k) { return k ? "ink:" + kind + "|" + k : null; };
+      LT.wear(ch, "ink-a0", ik("arm", prof && prof.arm[0])); LT.wear(ch, "ink-a1", ik("arm", prof && prof.arm[1]));
+      LT.wear(ch, "ink-h0", ik("hand", prof && prof.hand[0])); LT.wear(ch, "ink-h1", ik("hand", prof && prof.hand[1]));
+      LT.wear(ch, "ink-hd", ik("head", prof && prof.head));
+    }
     return !!prof;
   }
 
@@ -1823,7 +1834,9 @@
         if (k && !sleeved && near(base.color.getHex(), rigSkin(ch))) key = k;
       }
     }
-    const tex = key ? ready(kind === "hand" ? "fphand" : "fore", key) : null;
+    const fk = kind === "hand" ? "fphand" : "fore";
+    const tex = key ? ready(fk, key) : null;
+    if (ch && CBZ.lookTex) CBZ.lookTex.wear(ch, "ink-fp" + mesh.id, tex ? "ink:" + fk + "|" + key : null);
     if (!tex) { if (mesh.material !== base) mesh.material = base; return; }
     const id = base.uuid + "|" + tex.userData.cbzInk;
     let m = FPM.get(id);

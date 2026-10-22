@@ -141,6 +141,10 @@
     // instanced horn / phone is drawn IN the hand that holds it.
     { id: "bullhorn", gait: false, pose: "pubBullhorn", period: FIST_P, n: 12, impOf: "fist", grip: "r" },
     { id: "film", gait: false, pose: "film", period: 4.0, n: 6, impOf: "idle", grip: "r" },
+    // TAKING COVER: crouched on the heels, hands over the head (poses.js
+    // coverHead folds the legs itself); its own impostor frames, it is a
+    // different shape from anyone standing or sitting
+    { id: "coverHead", gait: false, pose: "coverHead", period: 4.0, n: 8, imp: 2 },
   ];
   const CLIP_IX = Object.create(null);
   let ROWS = 0, IMP_ROWS = 0;

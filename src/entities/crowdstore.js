@@ -234,6 +234,8 @@
       cap: Math.max(1, Math.min(CAP, o.cap | 0 || 4096)), maxDraw: o.maxDraw || 300,
       own: !!o.own, lifeOn: o.life !== false, frame: !!o.frame, aff: aff(o.aff || 0),
       onLife: o.onLife || null, onPanic: o.onPanic || null, beforeCut: o.beforeCut || null, promote: o.promote || null,
+      onYield: o.onYield || null,      // (n) -> rows the owner gave back for a crowd nearer the player (make())
+      seenT: CLOCK, hid: false,
       dodge: !!o.dodge,                // the owner steps its people out of a car's way itself (reads S.dodgeT)
       moving: !!o.moving, cutDt: o.cutDt || (o.own ? 0.1 : 0.25),
       rows: [], layer: null, dirty: true, lastCut: -1e9, cutX: 1e9, cutZ: 1e9, m: null,
@@ -382,7 +384,7 @@
   function capsule(r, ox, oy, oz, dx, dy, dz, hh, maxT) {
     const cx = S.wx[r], cz = S.wz[r], by = S.wy[r];
     const low = S.life[r] === HURT;
-    const sit = !low && (S.clip[r] === CLIP.sit || S.clip[r] === CLIP.sitCheer);
+    const sit = !low && (S.clip[r] === CLIP.sit || S.clip[r] === CLIP.sitCheer || S.clip[r] === CLIP.coverHead);
     const R = low ? 0.34 : 0.27;
     const y0 = by + (low ? 0.02 : sit ? 0.15 : 0.3), y1 = by + (low ? 0.5 : sit ? 1.2 : 1.5);
     const top = by + (sit ? 1.3 : 1.62);
@@ -1331,7 +1333,7 @@
     L.commit(cam && cam.isCamera ? cam : null);
     // who the GPU actually drew this cut: what they hold is drawn with them, never before them
     const sh = L.shown, nl = L.count ? L.count() : 0;
-    if (sh) for (let li = 0; li < nl; li++) if (sh[li]) S.drawn[LROW[li]] = 1;
+    if (sh) for (let li = 0; li < nl; li++) if (sh[li]) { S.drawn[LROW[li]] = 1; G.seenT = CLOCK; }
     G.dirty = false; G.lastCut = CLOCK;
     const c = camPos(); if (c) { G.cutX = c.x; G.cutZ = c.z; }
     return rows.length;
@@ -1344,6 +1346,11 @@
     for (let j = 0; j < n; j++) {
       const G = GROUPS[(rr0 + j) % n];
       if (!G || G.frame || G.gone || !G.shown) continue;
+      // UNDER A HIDDEN PARENT (a venue the player is far from hides its
+      // group): nothing of it can draw, so it is not cut (the speedway's
+      // twelve thousand fans were walked every two seconds from across the map)
+      if (hiddenUp(G)) { if (!G.hid) { G.hid = true; if (G.layer) G.layer.clear(); undrawn(G); } continue; }
+      if (G.hid) { G.hid = false; G.dirty = true; }
       const age = CLOCK - G.lastCut;
       const moved = c ? Math.hypot(c.x - G.cutX, c.z - G.cutZ) : 0;
       const moving = G.own || G.moving || anyActive(G);
@@ -1354,6 +1361,38 @@
       cut(G, null);
     }
     rr0 = n ? (rr0 + 1) % n : 0;
+  }
+  function hiddenUp(G) {
+    for (let o = G.parent, i = 0; o && i < 32; o = o.parent, i++) if (o.visible === false) return true;
+    return false;
+  }
+  /* ROWS GO WHERE THE PLAYER IS. The store is one pool (a tablet's 12,288
+     rows); a crowd far from the player that nobody has seen for a while (the
+     speedway's stands, a march across the map) gives its rows back to the
+     crowd forming near him (the Mansion protest got 317 bodies on a tablet:
+     the stands held the other 11,831). make(n, asker): free rows until n are
+     free, asking the farthest unseen groups first (their owner's onYield:
+     a venue drops its stands and rebuilds them when the player comes back,
+     a mob sends people home; the souls the news counts never change). */
+  const _yc = [];
+  function make(n, asker) {
+    if (nFree >= n) return true;
+    const c = camPos();
+    _yc.length = 0;
+    for (let i = 0; i < GROUPS.length; i++) {
+      const G = GROUPS[i];
+      if (!G || G.gone || G === asker || !G.onYield || !G.rows.length) continue;
+      if (!(G.hid || !G.shown || hiddenUp(G) || CLOCK - G.seenT > 8)) continue;
+      mw(G); toWorld(G, G.rows[0]);
+      G._yd = c ? Math.hypot(S.wx[G.rows[0]] - c.x, S.wz[G.rows[0]] - c.z) : 0;
+      _yc.push(G);
+    }
+    _yc.sort(function (a, b) { return b._yd - a._yd; });
+    for (let k = 0; k < _yc.length && nFree < n; k++) {
+      try { _yc[k].onYield(n - nFree); } catch (e) { console.error("[crowds] yield", e); }
+    }
+    _yc.length = 0;
+    return nFree >= n;
   }
   function anyActive(G) {
     // a still crowd with people running / crawling in it moves this cut
@@ -1382,7 +1421,7 @@
   // ---------------------------------------------------------------- public
   CBZ.crowds = {
     S: S, FREE: FREE, ALIVE: ALIVE, HURT: HURT, DEAD: DEAD, CLIP: CLIP,
-    cap: function () { return CAP; }, device: DEVICE, clock: function () { return CLOCK; }, hi: function () { return hi; }, live: function () { return live; }, room: function () { return nFree; },
+    cap: function () { return CAP; }, device: DEVICE, make: make, clock: function () { return CLOCK; }, hi: function () { return hi; }, live: function () { return live; }, room: function () { return nFree; },
     group: group, aff: aff, affOf: function (i) { return AFFS[i] || null; }, clip: clipIx,
     blast: blast, ring: ring, nuke: nuke, ray: ray, shoot: shoot, runOver: runOver, panic: panic, noteDead: noteDead,
     // run row r from (x, z) for `secs` without telling its owner (the owner's

@@ -705,11 +705,17 @@
     function recut() {
       if (!CS || !CG || !crowdCount) return;
       if (!crowdG) {
+        // the stands take their rows back from crowds far from here (a
+        // protest across the map), as the stands gave them when far away
+        if (CS.make) CS.make(crowdCount, null);
         crowdRow = new Int32Array(crowdCount).fill(-1);
         const seatOf = new Map();
         crowdG = CS.group({ name: "race", kind: "race", place: "the speedway", who: "race fans", parent: group, mode: "city", cap: crowdCount, maxDraw: 700,
           aff: { id: "fans:speedway", name: "race fans" },
-          onLife: (r) => { const i = seatOf.get(r); if (i != null) { crowdRow[i] = -1; seatOf.delete(r); } } });
+          onLife: (r) => { const i = seatOf.get(r); if (i != null) { crowdRow[i] = -1; seatOf.delete(r); } },
+          // far away and unseen: the stands empty (their rows go to the crowd
+          // near the player) and fill again the next time the venue is drawn
+          onYield: () => { const G = crowdG, n = G ? G.count() : 0; crowdG = null; crowdRow = null; cutEx = -1; if (G) G.dispose(); return n; } });
         if (!crowdG) return;
         for (let i = 0; i < crowdCount; i++) {
           if (crowd.look[i] < 0) continue;
