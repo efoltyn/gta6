@@ -67,17 +67,51 @@
   }
 
   const _c = new THREE.Color();
+  // the island build's slice clock (world/disaster_arena.js), and a run to the end
+  function late() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
+  function drain(it) { let r = it.next(); while (!r.done) r = it.next(); return r.value; }
   function kit(b, opts) {
     opts = opts || {};
     const F = frameOf(b);
     const ox = b.ox, oy = b.gy || 0, oz = b.oz;
-    const buckets = { solid: { p: [], n: [], c: [] }, glow: { p: [], n: [], c: [] }, glass: { p: [], n: [], c: [] } };
+    /* (the buckets are float32 from the start, in fixed chunks of 4,096
+       faces: a tower's fit-out is millions of numbers, and as JS arrays they
+       were a garbage storm and a ~300 ms Float32Array copy in one step; the
+       values are the same, stored as float32 either way, and a full chunk
+       is never copied until the flush lays them end to end) */
+    // (a chunk is 128 faces at first, doubling to 4,096: most kits are a
+    // stairwell's few boxes, a few towers' are millions of numbers)
+    const CH = 18 * 4096, CH0 = 18 * 128;
+    function Buf() { return { ch: [], P: null, N: null, C: null, o: 0, cap: 0, len: 0 }; }
+    const buckets = { solid: Buf(), glow: Buf(), glass: Buf() };
     const cols = [], plats = [];
     const meshes = [];
     function face(B, ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz, nx, ny, nz, r, g2, bl) {
       // two triangles a-b-c, a-c-d
-      B.p.push(ax, ay, az, bx, by, bz, cx, cy, cz, ax, ay, az, cx, cy, cz, dx, dy, dz);
-      for (let i = 0; i < 6; i++) { B.n.push(nx, ny, nz); B.c.push(r, g2, bl); }
+      if (B.o >= B.cap) {
+        const cap = B.cap ? Math.min(CH, B.cap * 2) : CH0;
+        B.P = new Float32Array(cap); B.N = new Float32Array(cap); B.C = new Float32Array(cap);
+        B.ch.push([B.P, B.N, B.C]); B.o = 0; B.cap = cap;
+      }
+      const P = B.P, N = B.N, C = B.C;
+      let o = B.o;
+      P[o] = ax; P[o + 1] = ay; P[o + 2] = az; P[o + 3] = bx; P[o + 4] = by; P[o + 5] = bz;
+      P[o + 6] = cx; P[o + 7] = cy; P[o + 8] = cz; P[o + 9] = ax; P[o + 10] = ay; P[o + 11] = az;
+      P[o + 12] = cx; P[o + 13] = cy; P[o + 14] = cz; P[o + 15] = dx; P[o + 16] = dy; P[o + 17] = dz;
+      for (let i = 0; i < 6; i++, o += 3) { N[o] = nx; N[o + 1] = ny; N[o + 2] = nz; C[o] = r; C[o + 1] = g2; C[o + 2] = bl; }
+      B.o = o; B.len += 18;
+    }
+    // the chunks end to end (attribute q: 0 position, 1 normal, 2 colour)
+    function* joined(B, q) {
+      const out = new Float32Array(B.len);
+      let at = 0;
+      for (let i = 0; i < B.ch.length; i++) {
+        const a = B.ch[i][q], n = Math.min(a.length, B.len - at);
+        out.set(n === a.length ? a : a.subarray(0, n), at);
+        at += n;
+        if (late()) yield 0;
+      }
+      return out;
     }
     function addBox(B, x, y, z, w, h, d, col, nb) {
       _c.setHex(col == null ? 0x8a8f95 : col);
@@ -148,18 +182,20 @@
         const c = F.w(lx, lz);
         return Fn(c.x, oy + ly, c.z, F.wyaw(lyaw), Object.assign({ box: K.box, ox: 0, oz: 0, tone: "auto" }, o || {}));
       },
-      flush: function () {
+      flush: function () { return drain(K.flushSteps()); },
+      // the same, a bucket's copy and bounds a step (CBZ.sliceLate)
+      flushSteps: function* () {
         const MM = mats();
         const parent = opts.parent || (b.group && b.group.parent) || null;
         if (!parent) return meshes;
         for (const k of ["solid", "glow", "glass"]) {
           const B = buckets[k];
-          if (!B.p.length) continue;
+          if (!B.len) continue;
           const geo = new THREE.BufferGeometry();
-          geo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(B.p), 3));
-          geo.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(B.n), 3));
-          geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(B.c), 3));
-          geo.computeBoundingSphere();
+          geo.setAttribute("position", new THREE.BufferAttribute(yield* joined(B, 0), 3));
+          geo.setAttribute("normal", new THREE.BufferAttribute(yield* joined(B, 1), 3));
+          geo.setAttribute("color", new THREE.BufferAttribute(yield* joined(B, 2), 3));
+          if (CBZ.sphereSteps) yield* CBZ.sphereSteps(geo); else geo.computeBoundingSphere();
           const m = new THREE.Mesh(geo, MM[k]);
           m.position.set(ox, oy, oz);
           m.name = "island-fit-" + (opts.name || b.use || "venue");
@@ -176,7 +212,8 @@
             (ud.rooms || (ud.rooms = [])).push(m);
             if (ud.roomsOn === false) m.visible = false;
           }
-          B.p.length = 0; B.n.length = 0; B.c.length = 0;
+          buckets[k] = Buf();
+          if (late()) yield 0;
         }
         return meshes;
       },
@@ -278,8 +315,9 @@
     }
     return K;
   }
-  function flushMesh(b, K, name) {
-    const out = K.flush(b.group, name || "island-exec");
+  function flushMesh(b, K, name) { return drain(flushMeshSteps(b, K, name)); }
+  function* flushMeshSteps(b, K, name) {
+    const out = K.flushSteps ? yield* K.flushSteps(b.group, name || "island-exec") : K.flush(b.group, name || "island-exec");
     const ud = b.group.userData;
     for (const m of out) { (ud.rooms || (ud.rooms = [])).push(m); if (ud.roomsOn === false) m.visible = false; }
     return out;
@@ -425,13 +463,22 @@
   }
   // every collider already on this floor that is not a wall (a counter, a
   // case, a safe, a desk, a pane), as building-local rects
+  const _near = [];
   function blockCols(occ, b, F, R) {
-    const cols = CBZ.colliders;
+    let cols = CBZ.colliders;
     if (!cols || !cols.length) return;
     const FR = frameOf(b);
     const a = FR.w(R.x0, R.z0), c = FR.w(R.x1, R.z1);
     const W = { x0: Math.min(a.x, c.x), x1: Math.max(a.x, c.x), z0: Math.min(a.z, c.z), z1: Math.max(a.z, c.z) };
     const y0 = F.y + 0.15, y1 = F.y + 1.9;
+    /* (the room's own few, from the physics grid, not every wall on the sea:
+       the grid holds every box over this rect, and what is blocked is the
+       same whatever order the boxes come in. Inside an island's build the
+       lists are its own, not the grid's: those are walked.) */
+    if (!CBZ.islandOwnLists && CBZ.queryCollidersNear && CBZ.colliderGridInSync && CBZ.colliderGridInSync()) {
+      const hx = (W.x1 - W.x0) / 2 + 0.5, hz = (W.z1 - W.z0) / 2 + 0.5;
+      cols = CBZ.queryCollidersNear((W.x0 + W.x1) / 2, (W.z0 + W.z1) / 2, Math.max(hx, hz), _near);
+    }
     for (let i = 0; i < cols.length; i++) {
       const q = cols[i];
       if (!q || q.minX == null) continue;
@@ -852,12 +899,13 @@
   };
 
   /* ---- the lights: the trade's ceiling, lenses only (no light objects) --- */
-  function lights(D, kind) {
+  function* lights(D, kind) {
     const R = D.R, c = D.ceil, K = D.K;
     const W = R.x1 - R.x0, L = R.z1 - R.z0;
     if (kind === "panel" || kind === "tube") {
       const nx = Math.max(1, Math.round(W / 2.4)), nz = Math.max(1, Math.round(L / 2.4));
       for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+        if (late()) yield 0;
         const x = R.x0 + W * (i + 0.5) / nx, z = R.z0 + L * (j + 0.5) / nz;
         if (kind === "tube") {
           K.lbox(x, c - 0.03, z, 0.14, 0.05, 1.25, 0xc8ccd2);
@@ -873,6 +921,7 @@
     const pin = kind === "pin";
     const nx = Math.max(1, Math.round(W / (pin ? 1.8 : 2.4)));
     for (let i = 0; i < nx; i++) {
+      if (late()) yield 0;
       const x = R.x0 + W * (i + 0.5) / nx;
       if (!pin) K.lbox(x, c - 0.018, (R.z0 + R.z1) / 2, 0.04, 0.03, L - 0.8, 0x1d1f23);
       const n = Math.max(1, Math.floor((L - 0.8) / 1.15));
@@ -891,7 +940,7 @@
   }
 
   /* ---- packing a wall run ----------------------------------------------- */
-  function packWall(D, w) {
+  function* packWall(D, w) {
     const Fr = wallOf(D.R, w.edge);
     const BW = w.w || 1.0, BD = w.d || 0.45, FRONT = w.front != null ? w.front : 0.9, GAP = w.gap || 0;
     const lo = Math.max(Fr.lo, w.from != null ? w.from : -1e9), hi = Math.min(Fr.hi, w.to != null ? w.to : 1e9);
@@ -910,12 +959,13 @@
         D.occ.block(ft); D.claimed.push(ft);
         n++;
         a += BW + GAP;
+        if (late()) yield 0;
       } else a += 0.1;
     }
     return n;
   }
   // free-standing pieces: the floor scanned from the back, an aisle round each
-  function packCentre(D, o) {
+  function* packCentre(D, o) {
     const R = D.R, dirZ = o.dir !== "x";
     const lens = o.len || [3.6, 2.4, 1.2];
     const L0 = Array.isArray(lens) ? lens : [lens];
@@ -940,13 +990,17 @@
           try { fn(D, Fr, dirZ ? z : x, L, d, Object.assign({ seed: D.seed + 997 + n * 31 }, o)); } catch (e) { console.error("[island dress centre]", e); }
           D.occ.block(foot); D.claimed.push(foot);
           n++;
+          if (late()) yield 0;
         }
       }
     }
     return n;
   }
 
-  function dress(b, spec) {
+  function dress(b, spec) { return drain(dressSteps(b, spec)); }
+  // the planner as a generator: it yields on the slice clock between its
+  // pieces (a fit-out that is a generator itself takes it with yield*)
+  function* dressSteps(b, spec) {
     const IV = CBZ.islandVenue;
     if (!IV || !b || !b.interior || !b.group) return null;
     spec = spec || {};
@@ -987,6 +1041,7 @@
     for (const r of b._claims || []) if ((r.k | 0) === k) occ.block(r);
     for (const p of b._posts || []) if ((p.k | 0) === k) occ.block({ x0: p.lx - 0.5, x1: p.lx + 0.5, z0: p.lz - 0.5, z1: p.lz + 0.5 });
     if (spec.cols !== false) blockCols(occ, b, F, R);
+    if (late()) yield 0;
     // ---- the staff door at the back (a shop with no back room)
     if (spec.backDoor) {
       const Fr = wallOf(R, "z1");
@@ -1004,10 +1059,13 @@
     }
     // ---- the venue's own pieces first (its test corner, its stations, its
     // seats), then the walls, the shop window, the centre round them
-    if (typeof spec.extra === "function") { try { spec.extra(D); } catch (e) { console.error("[island dress extra]", e); } }
-    for (const w of spec.walls || []) packWall(D, w);
-    if (spec.window && b._stairwell && k === 0) packWall(D, Object.assign({ from: 1.7, w: 1.1, d: 0.6, front: 0.15, mods: ["window"] }, spec.window, { edge: "z0" }));
-    if (spec.centre) for (const c of [].concat(spec.centre)) packCentre(D, c);
+    if (typeof spec.extra === "function") {
+      try { const x = spec.extra(D); if (x && typeof x.next === "function") yield* x; } catch (e) { console.error("[island dress extra]", e); }
+      if (late()) yield 0;
+    }
+    for (const w of spec.walls || []) yield* packWall(D, w);
+    if (spec.window && b._stairwell && k === 0) yield* packWall(D, Object.assign({ from: 1.7, w: 1.1, d: 0.6, front: 0.15, mods: ["window"] }, spec.window, { edge: "z0" }));
+    if (spec.centre) for (const c of [].concat(spec.centre)) yield* packCentre(D, c);
     // ---- the floor, the ceiling, the name
     if (spec.floor) {
       const fl = spec.floor, R2 = spec.floor.rect || R;
@@ -1020,7 +1078,7 @@
         K.lbox(R2.x1 - 0.4, F.yLocal + 0.0095, cz, bw, 0.003, L - 0.8, fl.border);
       }
     }
-    if (spec.lights !== false) lights(D, spec.lights || "track");
+    if (spec.lights !== false) yield* lights(D, spec.lights || "track");
     if (spec.sign) {
       const S = spec.signAt || {};
       const sw = S.w || Math.min(3.2, (R.x1 - R.x0) * 0.5);
@@ -1039,7 +1097,7 @@
       D.box(Fr, p.a, 0.008, p.y - p.h / 2 - 0.03, p.w + 0.06, 0.016, p.h + 0.06, p.frame != null ? p.frame : 0x1a1a1a);
       panel(b, null, pp.x, y + p.y, pp.z, p.w, p.h, Fr.yaw, p.tex, false);
     }
-    if (!spec.K) K.flush();
+    if (!spec.K) yield* K.flushSteps();
     // what was stood here is the building's: the money pass (a safe) and a
     // later dressing keep off it
     if (IV.claim) for (const r of D.claimed) IV.claim(b, k, r);
@@ -1097,7 +1155,7 @@
 
   CBZ.islandFit = { kit: kit, frame: frameOf, text: text, panel: panel, fixtures: fixtures, hour: hour, onShift: onShift, hash: hash, live: live,
     meshKit: meshKit, flushMesh: flushMesh, solid: solid, seat: seat,
-    dress: dress, room: roomOf, ceil: ceilOf, MODS: MODS, CENTRE: CENTRE, PAL: PAL, stock: stock, wallOf: wallOf, frameAt: frameAt,
+    dress: dress, dressSteps: dressSteps, flushMeshSteps: flushMeshSteps, room: roomOf, ceil: ceilOf, MODS: MODS, CENTRE: CENTRE, PAL: PAL, stock: stock, wallOf: wallOf, frameAt: frameAt,
     targetTex: targetTex, chartTex: chartTex };
 
 })();

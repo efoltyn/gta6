@@ -967,8 +967,12 @@
       z0: Math.max(-ctx.d / 2 + wt, shaft.z0 - ring), z1: Math.min(ctx.d / 2 - wt, shaft.z1 + ring),
     };
     const all = CBZ.facadeCrownProbe(ctx);
-    // massive pieces only: a mast or a finial is not something to stand on
-    const mass = all.filter(function (p) { return Math.min(p[1] - p[0], p[5] - p[4]) > thin; });
+    // massive pieces only: a mast or a finial is not something to stand on;
+    // and only those over the deck's reach (every point asked below lies in
+    // the shaft or in lim: the rest of the facade can never answer, and the
+    // two samplers walked every box of it for every point)
+    const U = { x0: Math.min(lim.x0, shaft.x0), x1: Math.max(lim.x1, shaft.x1), z0: Math.min(lim.z0, shaft.z0), z1: Math.max(lim.z1, shaft.z1) };
+    const mass = all.filter(function (p) { return Math.min(p[1] - p[0], p[5] - p[4]) > thin && p[1] > U.x0 && p[0] < U.x1 && p[5] > U.z0 && p[4] < U.z1; });
     const STEP = 0.3;
     function cover(y, R) {
       let n = 0, hit = 0;

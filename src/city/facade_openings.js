@@ -632,7 +632,11 @@
     const l = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
     return l < 0.14 && b >= r && b >= g * 0.9;
   };
-  FO.scan = function (recs, o) {
+  function drain(it) { let r = it.next(); while (!r.done) r = it.next(); return r.value; }
+  FO.scan = function (recs, o) { return drain(FO.scanSteps(recs, o, NEVER)); };
+  // the same, yielding on the island build's slice clock between storeys
+  FO.scanSteps = function* (recs, o, lateFn) {
+    const late = clockOf(lateFn);
     const isGlass = o.isGlass || FO.isGlassHex;
     const faces = FO.faces(o.w, o.d);
     const DEEP_CLAD = 0.34, STEP = 0.06, VSTEP = 0.05;
@@ -686,7 +690,9 @@
         return false;
       };
       const half = f.span / 2 - 0.45;
+      if (late()) yield 0;
       for (let k = 0; k < o.storeys; k++) {
+        if (late()) yield 0;
         if (o.skip && o.skip(f, k)) continue;
         const shop = false;
         const b0 = k * o.fh + 0.55, b1 = (k + 1) * o.fh - 0.45;
@@ -763,7 +769,9 @@
      opening; a grammar's glass box is cleared from the opening through its
      whole depth (it was a painting of the window that is now real). Proud
      ornament (a frame, a shutter, a column) is kept. In place on `recs`. */
-  FO.cutRecs = function (recs, holes, o) {
+  FO.cutRecs = function (recs, holes, o) { return drain(FO.cutRecsSteps(recs, holes, o, NEVER)); };
+  FO.cutRecsSteps = function* (recs, holes, o, lateFn) {
+    const late = clockOf(lateFn);
     if (!holes.length) return recs;
     const SUB = CBZ.FACADE_F && CBZ.FACADE_F.subtractBox;
     if (!SUB) return recs;
@@ -781,6 +789,7 @@
     const kept = [];
     const queue = recs.slice();
     for (let qi = 0; qi < queue.length; qi++) {
+      if ((qi & 31) === 31 && late()) yield 0;
       const b = queue[qi];
       const bx0 = b[0] - b[3] / 2, bx1 = b[0] + b[3] / 2, by0 = b[1] - b[4] / 2, by1 = b[1] + b[4] / 2, bz0 = b[2] - b[5] / 2, bz1 = b[2] + b[5] / 2;
       const vols = isGlass(b[6]) ? volGlass : vol;
@@ -838,12 +847,18 @@
      through world/disaster_arena.js) can spread one building's pass over
      frames. resolveCoplanar runs it to the end, as it always ran. */
   FO.resolveCoplanar = function (recs, walls, tol) {
-    const it = FO.resolveCoplanarSteps(recs, walls, tol);
+    const it = FO.resolveCoplanarSteps(recs, walls, tol, NEVER);
     let r = it.next();
     while (!r.done) r = it.next();
     return r.value;
   };
-  FO.resolveCoplanarSteps = function* (recs, walls, tol) {
+  /* (it yields on the island build's slice clock, CBZ.sliceLate: when the
+     running slice has had its millisecond, wherever the pass is; `late` is
+     that clock, or never for a run to the end) */
+  function NEVER() { return false; }
+  function clockOf(late) { return late || CBZ.sliceLate || NEVER; }
+  FO.resolveCoplanarSteps = function* (recs, walls, tol, lateFn) {
+    const late = clockOf(lateFn);
     tol = tol == null ? 0.0068 : tol;   // a hair over the 5 mm the census holds us to
     /* THE STEP IS SET BY THE DEPTH BUFFER, NOT BY THE CENSUS. A face this
        resolver moved used to land 10 mm from the one it cleared, and 10 mm is
@@ -983,6 +998,7 @@
         const put = function (i) { const k = cellOf(B[i * 6 + a * 2 + s]); let L = idx.get(k); if (!L) { L = []; idx.set(k, L); } L.push(i); };
         const take = function (i) { const k = cellOf(B[i * 6 + a * 2 + s]); const L = idx.get(k); if (L) { const q = L.indexOf(i); if (q >= 0) L.splice(q, 1); } };
         for (let i = 0; i < n; i++) put(i);
+        if (late()) yield 0;
         const overlapsUV = function (i, j) {
           return Math.min(B[i * 6 + u * 2 + 1], B[j * 6 + u * 2 + 1]) - Math.max(B[i * 6 + u * 2], B[j * 6 + u * 2]) >= 0.002 &&
                  Math.min(B[i * 6 + v * 2 + 1], B[j * 6 + v * 2 + 1]) - Math.max(B[i * 6 + v * 2], B[j * 6 + v * 2]) >= 0.002;
@@ -1003,6 +1019,7 @@
         const order = [];
         for (let i = 0; i < n; i++) order.push(i);
         order.sort(function (p, q) { return B[p * 6 + a * 2 + s] - B[q * 6 + a * 2 + s]; });
+        if (late()) yield 0;
         const dir = s === 1 ? -1 : 1;              // "back" = into the box
         let c0 = 0;
         while (c0 < order.length) {
@@ -1022,7 +1039,7 @@
             for (let x = 0; x < L.length; x++) pos[L[x]] = x;
             const byU = L.slice().sort(function (p, q) { return B[p * 6 + u * 2] - B[q * 6 + u * 2]; });
             for (let xp = 0; xp < byU.length; xp++) for (let yp = xp + 1; yp < byU.length; yp++) {
-              if (++work >= 2500) { work = 0; yield 0; }
+              if (++work >= 64) { work = 0; if (late()) yield 0; }
               const pp = byU[xp], qq = byU[yp];
               if (B[qq * 6 + u * 2] >= B[pp * 6 + u * 2 + 1]) break;   // no u overlap from here on
               const i = pos[pp] < pos[qq] ? pp : qq, j = i === pp ? qq : pp;
@@ -1041,6 +1058,7 @@
               const H = Array.from(hit).sort(function (p, q) { return q - p; });   // latest first
               const base = B[H[0] * 6 + a * 2 + s];
               for (let r = 1; r < H.length; r++) {
+                if (late()) yield 0;
                 const i = H[r];
                 if (!clash(i, B[i * 6 + a * 2 + s])) continue;    // an earlier move already freed it
                 const size = B[i * 6 + a * 2 + 1] - B[i * 6 + a * 2];
@@ -1060,14 +1078,14 @@
             }
           }
           c0 = c1;
-          if ((work += 8) >= 2500) { work = 0; yield 0; }
+          if ((work += 8) >= 64) { work = 0; if (late()) yield 0; }
         }
         // a deco face lying in a fixed face (a wall's, a slab's): out of it,
         // to the nearest free plane in EPS (20 mm) steps (never onto another face)
         if (W.length) {
           const outDir = s === 1 ? 1 : -1;
           for (let i = 0; i < n; i++) {
-            if ((work += 4) >= 2500) { work = 0; yield 0; }
+            if ((work += 4) >= 64) { work = 0; if (late()) yield 0; }
             const p0 = B[i * 6 + a * 2 + s];
             if (!fixedAt(i, p0)) continue;
             for (let k = 1; k <= 12; k++) {

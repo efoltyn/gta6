@@ -149,7 +149,8 @@
   };
   Own.prototype.attach = function () {
     if (CBZ.colliderAddMany) CBZ.colliderAddMany(this.cols); else for (const c of this.cols) CBZ.colliders.push(c);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // (colliderAddMany keeps the grid: a dirty mark was a full rebuild)
+    if (!CBZ.colliderAddMany && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   };
   Own.prototype.dispose = function () {
     if (this.done) return;

@@ -273,9 +273,12 @@
   }
   // the back room behind its partition, its safe in it (a shop too shallow
   // for one keeps its safe behind the counter)
-  function backRoom(b, lot, R, door) {
+  function* backRoom(b, lot, R, door) {
     const SF = CBZ.shopFloor, FIT = CBZ.islandFit;
-    if (R.P0 && R.P0.back && SF && SF.shell) return SF.shell(R.P0, lot, { goods: "boxes", door: door || null, safeGrade: "floor", safeOf: 900 + 2600 * (FIT ? FIT.hash(b.name || String(b.ox)) : 0.5) });
+    if (R.P0 && R.P0.back && SF && SF.shell) {
+      const so = { goods: "boxes", door: door || null, safeGrade: "floor", safeOf: 900 + 2600 * (FIT ? FIT.hash(b.name || String(b.ox)) : 0.5) };
+      return SF.shellSteps ? yield* SF.shellSteps(R.P0, lot, so) : SF.shell(R.P0, lot, so);
+    }
     if (IV.safe && !b._safeDone) {
       try { IV.safe(b, { k: 0, lx: R.x1 - 0.5, lz: R.z1 - 0.42, yaw: Math.PI, grade: "floor", name: "safe" }); } catch (e) {}
     }
@@ -343,7 +346,10 @@
   }
 
   /* ---- DRESS THE REST (world/island_fitkit.js) ---------------------------- */
-  function dressRoom(b, R, use, keep, over) {
+  // (the fit-outs are generators on the island build's slice clock,
+  // world/disaster_arena.js CBZ.sliceLate: a stage of the shop a step)
+  function late() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
+  function* dressRoom(b, R, use, keep, over) {
     const FIT = CBZ.islandFit, Rc = recipes();
     if (!FIT || !FIT.dress || !Rc) return null;
     const rc = Rc[use] || {};
@@ -352,7 +358,7 @@
       sign: b.name || null, signAt: { ly: FIT.ceil(b, 0) - 0.36, w: Math.min(2.4, (R.x1 - R.x0) * 0.4) },
       backDoor: !(R.P0 && R.P0.back),
     });
-    try { return FIT.dress(b, spec); } catch (e) { console.error("[island shop dress " + use + "]", e); return null; }
+    try { return FIT.dressSteps ? yield* FIT.dressSteps(b, spec) : FIT.dress(b, spec); } catch (e) { console.error("[island shop dress " + use + "]", e); return null; }
   }
 
   /* ---- A SHELVED SHOP (storegoods) ---------------------------------------
@@ -360,12 +366,14 @@
      group at the room's middle): its wall bays stand on both side walls
      (the stairwell wall is one) and its lanes run down the room's middle,
      not the building's. */
-  function goodsShop(b, lot, job, T) {
+  function* goodsShop(b, lot, job, T) {
     const R = roomOf(b);
     IV.clear(b, 0);
-    const shell = backRoom(b, lot, R);
+    const shell = yield* backRoom(b, lot, R);
+    if (late()) yield 0;
     const L = lot.building, WT = IB().WT;
     const K = counterAndClerk(b, lot, R, { job: JOB[b.use] || "shop assistant" });
+    if (late()) yield 0;
     let m = null, sub = null;
     const cxL = (R.x0 + R.x1) / 2, czL = (R.z0 + R.z1) / 2;
     if (CBZ.storeGoodsMount && T) {
@@ -396,11 +404,12 @@
       shim.building.clerkPost = K.post; shim.building.clerkB = b; shim.building.clerkVia = rt.via; shim.building.clerkDoor = rt.door;
       shim.building.where = SFk && SFk.whereKey ? SFk.whereKey(IV.island ? IV.island(b) : null) : "isle";
       m = CBZ.storeGoodsMount(shim);
+      if (late()) yield 0;
     }
     // what the store stood, in the building's frame, for the dresser
     const keep = [];
     if (m && m.plan && m.plan.rects) for (const r of m.plan.rects) keep.push({ x0: r.x0 + cxL - 0.05, x1: r.x1 + cxL + 0.05, z0: r.z0 + czL - 0.05, z1: r.z1 + czL + 0.05, pad: r.wall ? 0 : 0.6 });
-    dressRoom(b, R, b.use, keep);
+    yield* dressRoom(b, R, b.use, keep);
     return function () {
       if (m) m.dispose();
       if (sub && sub.parent) sub.parent.remove(sub);
@@ -409,12 +418,13 @@
   }
 
   /* ---- AN OUTFITTER / A TAILOR (clothingstore) ----------------------------- */
-  function clothesShop(b, lot, job, tailor) {
+  function* clothesShop(b, lot, job, tailor) {
     if (!CBZ.clothingStoreMount) return null;
     const R = roomOf(b);
     IV.clear(b, 0);
     // (the staff door behind the cash wrap: the fitting room has the + corner)
-    const shell = backRoom(b, lot, R, "x0");
+    const shell = yield* backRoom(b, lot, R, "x0");
+    if (late()) yield 0;
     const F = R.F, WT = IB().WT;
     // the cash wrap on the stair side, the fitting room on the other (local +x)
     const cw = Math.max(1.8, Math.min(2.4, (R.x1 - R.x0) * 0.32));
@@ -454,6 +464,7 @@
     const isle = IV.island ? IV.island(b) : null;
     const mnt = CBZ.clothingStoreMount(shim, { cs: cs, tailor: tailor, root: job && job.arena && job.arena.root,
       post: K.post, b: b, via: rt.via, door: rt.door, where: SFk && SFk.whereKey ? SFk.whereKey(isle) : "isle" });
+    if (late()) yield 0;
     // what the store stands (it dresses when you come near: its plan, kept
     // here in the building's frame): the side runs, the spine, the forms
     // by the door, the folded table, the cash wrap, the fitting room
@@ -476,7 +487,7 @@
         walls: [{ edge: "z1", mods: ["cubbies"], w: 1.2, d: 0.45, front: 0.9, pal: P.cloth }],
         centre: { mod: "rail", len: [1.6, 1.2], d: 0.6, aisle: 0.95, max: 4, pal: P.cloth },
       };
-      dressRoom(b, R, tailor ? "suits" : "clothing", keep, over);
+      yield* dressRoom(b, R, tailor ? "suits" : "clothing", keep, over);
     }
     return function () { if (mnt) mnt.dispose(); if (shell) shell.dispose(); };
   }
@@ -500,12 +511,14 @@
   IV.on("clothing", function (b, lot, job) { return clothesShop(b, lot, job, false); });
   IV.on("suits", function (b, lot, job) { return clothesShop(b, lot, job, true); });
   for (const use in TRADE) IV.on(use, function (b, lot, job) { return goodsShop(b, lot, job, TRADE[use]); });
-  for (const use of COUNTER_ONLY) IV.on(use, function (b, lot, job) {
+  for (const use of COUNTER_ONLY) IV.on(use, function* (b, lot, job) {
     const R = roomOf(b);
     IV.clear(b, 0);
-    const shell = backRoom(b, lot, R);
+    const shell = yield* backRoom(b, lot, R);
+    if (late()) yield 0;
     counterAndClerk(b, lot, R, { job: JOB[use] || "shop assistant" });
-    dressRoom(b, R, use, []);
+    if (late()) yield 0;
+    yield* dressRoom(b, R, use, []);
     return function () { if (shell) shell.dispose(); };
   });
 })();

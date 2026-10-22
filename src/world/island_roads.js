@@ -768,11 +768,11 @@
   // a big JS array into a Float32Array a slice a step (a streamed island's
   // largest single allocations, world/archipelago.js)
   function* f32Steps(arr) {
-    const out = new Float32Array(arr.length), CH = 60000;
+    const out = new Float32Array(arr.length), CH = 16384;
     for (let i = 0; i < arr.length; i += CH) {
       const e = Math.min(arr.length, i + CH);
       for (let j = i; j < e; j++) out[j] = arr[j];
-      yield 0;
+      if (!CBZ.sliceLate || CBZ.sliceLate()) yield 0;
     }
     return out;
   }
@@ -816,6 +816,8 @@
   }
   function* steps(o) {
     let __dn = 0;      // the seam counter (a yield every few loop turns)
+    // the island build's slice clock (world/disaster_arena.js)
+    const late = CBZ.sliceLate || function () { return (++__dn & 3) === 0; };
     const THREE = o.THREE, P = o.plan, ground = o.ground;
     // o.skip(x, z): true where something else draws the street (a bridge
     // deck carries its own asphalt and walks, so a failed span takes them
@@ -859,11 +861,12 @@
       return V(x, base(x, z) + LIFT, z, (off + HW) / 7, (t + vOff) / TEX_V, c[0], c[1], c[2]);
     }
     for (const p of P.pieces) {
-      if ((++__dn & 3) === 0) yield 0;
+      if (late()) yield 0;
       const vOff = Math.floor(wh(p.fixed, p.a, 0x7011) * 8) * 3.5;
       const ta = p.jA ? p.a : p.a + GUT, tb = p.jB ? p.b : p.b - GUT;
       const n = Math.max(1, Math.ceil((tb - ta) / 2));
       for (let k = 0; k < n; k++) {
+        if (late()) yield 0;
         const t0 = ta + (tb - ta) * k / n, t1 = ta + (tb - ta) * (k + 1) / n;
         if (skip && skip(px(p, (t0 + t1) / 2, 0), pz(p, (t0 + t1) / 2, 0))) continue;
         for (let c = 0; c < OFFS.length - 1; c++) {
@@ -887,7 +890,7 @@
     /* ---------------- JUNCTIONS ---------------- */
     yield 0;
     for (const jn of P.junctions) {
-      if ((++__dn & 3) === 0) yield 0;
+      if (late()) yield 0;
       const X = jn.x, Zc = jn.z;
       const x0 = X - HW + (jn.W ? 0 : GUT), x1 = X + HW - (jn.E ? 0 : GUT);
       const z0 = Zc - HW + (jn.S ? 0 : GUT), z1 = Zc + HW - (jn.N ? 0 : GUT);
@@ -941,7 +944,7 @@
       return pts;   // from (HW, HW+FIL) to (HW+FIL, HW) in local |u|,|w|
     }
     for (const zn of Z.zones) {
-      if ((++__dn & 3) === 0) yield 0;
+      if (late()) yield 0;
       if (!zn.fillet) continue;
       const f = zn.fillet, pts = arcPts(f);
       const cxp = f.jx + f.sx * HW, czp = f.jz + f.sz * HW;
@@ -1133,7 +1136,7 @@
       return false;
     };
     for (const p of P.pieces) {
-      if ((++__dn & 3) === 0) yield 0;
+      if (late()) yield 0;
       const len = p.b - p.a;
       // centre line: double yellow approaching each junction, broken elsewhere
       const dbl = [];
@@ -1320,7 +1323,7 @@
     let nSigns = 0;
     const sigHeads = [];
     for (const f of furn) {
-      if ((++__dn & 3) === 0) yield 0;
+      if (late()) yield 0;
       const y0 = surfY(f.x, f.z);
       if (f.kind === "barricade") {
         const rx = f.nz, rz = -f.nx;
@@ -1371,7 +1374,7 @@
     const colliders = o.colliders;
     const heads = [];             // the glow at each head (world/island_night.js)
     for (const L of lights) {
-      if ((++__dn & 3) === 0) yield 0;
+      if (late()) yield 0;
       const p = L.p, y0 = surfY(L.x, L.z);
       const dx = -L.side * p.Cx, dz = -L.side * p.Cz;          // toward the road
       obox(furA, L.x, y0 + 0.12, L.z, dx, dz, 0.2, 0.2, 0.14, 5, CONC);   // footing
@@ -1449,7 +1452,7 @@
       g.setAttribute("normal", new THREE.BufferAttribute(yield* f32Steps(acc.n), 3));
       g.setAttribute("uv", new THREE.BufferAttribute(yield* f32Steps(acc.uv), 2));
       g.setAttribute("color", new THREE.BufferAttribute(yield* f32Steps(acc.c), 3));
-      g.computeBoundingSphere(); g.computeBoundingBox();
+      if (CBZ.sphereSteps) yield* CBZ.sphereSteps(g, true); else { g.computeBoundingSphere(); g.computeBoundingBox(); }
       yield 0;
       const m = new THREE.Mesh(g, mat);
       m.name = name;

@@ -141,7 +141,7 @@
       if (o.plat) {
         const p = { minX: c.x - hw, maxX: c.x + hw, minZ: c.z - hd, maxZ: c.z + hd, top: b.gy + ly + h / 2 };
         if (CBZ.platformAddMany) CBZ.platformAddMany([p]); else (CBZ.platforms || (CBZ.platforms = [])).push(p);
-        if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+        if (!CBZ.platformAddMany && CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
       }
       if (o.los) (CBZ.losBlockers || (CBZ.losBlockers = [])).push(m);
       return m;
@@ -265,7 +265,8 @@
       if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(dropCols);
       else for (const c of dropCols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
       if (b.colliders) { const s = new Set(dropCols); let w = 0; for (const c of b.colliders) if (!s.has(c)) b.colliders[w++] = c; b.colliders.length = w; }
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      // (colliderRemoveMany keeps the grid; a dirty mark was a full rebuild)
+      if (!CBZ.colliderRemoveMany && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     }
     return true;
   }
@@ -287,22 +288,39 @@
       for (let i = 0; i < got.length; i++) L.push(got[i]);
     }
     // a list the fit-out CREATED is all the island's
-    for (const k in CBZ) {
-      const v = CBZ[k];
-      if (!Array.isArray(v) || marks.seen.has(v) || !v.length) continue;
-      marks.seen.add(v);
+    for (const v of CBZ.listNew(marks)) {
       let L = job.buses.get(v);
       if (!L) job.buses.set(v, (L = []));
       for (let i = 0; i < v.length; i++) L.push(v[i]);
     }
   }
-  function runOne(job, b, fn) {
-    const marks = job.buses ? census() : null;
-    let undo = null;
-    try { undo = fn(b, lotFor(b), job); }
+  /* A FIT-OUT MAY BE A GENERATOR (function*): it yields between its
+     fixtures (a floor of desks, a shelf of goods) and returns its dispose.
+     fitSteps runs it a step at a time, one census a step (nothing else runs
+     inside a step, so what the lists gained is the fit-out's); run anywhere
+     else (a fit-out registered while islands stand) it runs to the end. */
+  function isIter(x) { return !!x && typeof x.next === "function" && typeof x[Symbol.iterator] === "function"; }
+  function* runOneSteps(job, b, fn) {
+    let marks = job.buses ? census() : null;
+    let undo = null, it = null;
+    try { undo = fn(b, lotFor(b), job); if (isIter(undo)) { it = undo; undo = null; } }
     catch (e) { console.error("[island venue " + (b.use || "?") + "]", e); }
     finally { if (marks) settle(job, marks); }
+    while (it) {
+      yield 0;
+      if (job.disposed) { try { it.return(); } catch (e) {} break; }
+      marks = job.buses ? census() : null;
+      let r = null;
+      try { r = it.next(); }
+      catch (e) { console.error("[island venue " + (b.use || "?") + "]", e); it = null; }
+      finally { if (marks) settle(job, marks); }
+      if (r && r.done) { undo = r.value; it = null; }
+    }
     if (typeof undo === "function") (job._venueUndo || (job._venueUndo = [])).push(undo);
+  }
+  function runOne(job, b, fn) {
+    const go = function () { const it = runOneSteps(job, b, fn); for (let r = it.next(); !r.done; r = it.next()) {} };
+    if (CBZ.sliceSync) CBZ.sliceSync(go); else go();
   }
   function* fitSteps(job) {
     if (!job || !job.arena || job.disposed || live.has(job)) return;
@@ -311,18 +329,29 @@
       const fns = b && b.use ? fits.get(b.use) : null;
       const all = b && b.use ? fits.get("*") : null;
       if ((!fns || !fns.length) && (!all || !all.length)) continue;
-      if (fns) for (const fn of fns.slice()) runOne(job, b, fn);
-      if (all) for (const fn of all.slice()) runOne(job, b, fn);
-      yield 0;
+      if (fns) for (const fn of fns.slice()) { yield* runOneSteps(job, b, fn); if (CBZ.sliceLate && CBZ.sliceLate()) yield 0; }
+      if (all) for (const fn of all.slice()) { yield* runOneSteps(job, b, fn); if (CBZ.sliceLate && CBZ.sliceLate()) yield 0; }
+      if (job.disposed) return;
     }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // (no blanket markCollidersDirty: every fit-out files its records
+    // through colliderAddMany / colliderRemoveMany, which keep the grid as a
+    // rebuild would make it; a dirty mark here rebuilt every wall on the sea
+    // in one frame, just as the island arrived)
   }
   function drop(job) {
+    const it = dropSteps(job);
+    for (let r = it.next(); !r.done; r = it.next()) {}
+  }
+  // the same, on the slice clock (world/disaster_arena.js islandDisposeSteps)
+  function* dropSteps(job) {
     if (!job || !live.has(job)) return;
     live.delete(job);
     const U = job._venueUndo || [];
     job._venueUndo = null;
-    for (let i = U.length - 1; i >= 0; i--) { try { U[i](); } catch (e) { console.error("[island venue dispose]", e); } }
+    for (let i = U.length - 1; i >= 0; i--) {
+      try { U[i](); } catch (e) { console.error("[island venue dispose]", e); }
+      if (CBZ.sliceLate && CBZ.sliceLate()) yield 0;
+    }
     for (const b of recordsOf(job)) if (b) { b._venueLot = null; b._stairwell = undefined; b._claims = null; b._posts = null; }
   }
   function on(use, fn) {
@@ -369,5 +398,5 @@
   }
 
   CBZ.islandVenue = { on: on, list: list, lotFor: lotFor, floor: floor, clear: clear, island: island,
-    staff: staff, fitSteps: fitSteps, drop: drop, has: has, stairwell: stairwell, claim: claim };
+    staff: staff, fitSteps: fitSteps, drop: drop, dropSteps: dropSteps, has: has, stairwell: stairwell, claim: claim };
 })();

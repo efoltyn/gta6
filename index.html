@@ -547,7 +547,7 @@ document.body.appendChild(b);}}catch(e){}})();
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=peak1014"></script>
 <script src="src/world/materials.js?v=nostep1013"></script>
-<script src="src/world/fuel_station.js?v=mem1014"></script>
+<script src="src/world/fuel_station.js?v=stutter1022"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
@@ -1085,14 +1085,14 @@ document.body.appendChild(b);}}catch(e){}})();
      world/island_building.js is each building's stairs, landings, slabs and
      roof as data (node-checkable by tools/island-stairs-check.mjs); the
      builder lays exactly what it says, so it loads first. -->
-<script src="src/world/island_roads.js?v=isleopen1022"></script>
+<script src="src/world/island_roads.js?v=misleopstutte"></script>
 <script src="src/world/island_plan.js?v=isleopen1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=isleleak1022"></script>
-<script src="src/world/island_dressing.js?v=isleopen1022"></script>
+<script src="src/world/disaster_arena.js?v=stutter1022"></script>
+<script src="src/world/island_dressing.js?v=misleopstutte"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
-<script src="src/world/island_venue.js?v=isleopen1022"></script>
+<script src="src/world/island_venue.js?v=misleopstutte"></script>
 <script src="src/world/island_night.js?v=lampglow1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
 <script src="src/entities/survivorbot.js?v=people1022"></script>
@@ -1237,14 +1237,14 @@ document.body.appendChild(b);}}catch(e){}})();
      the-hole rects, the facade scan + cut, the no-shared-plane pass and the
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
-<script src="src/city/facade_openings.js?v=isles1023"></script>
+<script src="src/city/facade_openings.js?v=stutter1022"></script>
 <script src="src/city/buildings.js?v=isleclose1022"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
      govcomplex.js does to this same office shell: a spec at the call site.
      Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
-<script src="src/city/facade_kit.js?v=mrg10200048"></script>
+<script src="src/city/facade_kit.js?v=stutter1022"></script>
 <script src="src/city/facades/brick.js?v=mrg10200048"></script>
 <script src="src/city/facades/stone.js?v=mrg10200048"></script>
 <script src="src/city/facades/mosque.js?v=mrg10200048"></script>
@@ -1297,7 +1297,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/fracture.js?v=nukecost1013"></script>
 <script src="src/city/demolition.js?v=collapse1014b"></script>
 <script src="src/city/elevators.js?v=lpanel1022"></script>
-<script src="src/city/exec_office.js?v=civic1022"></script>
+<script src="src/city/exec_office.js?v=stutter1022"></script>
 <script src="src/city/escalators.js?v=air0929r"></script>
 <script src="src/city/roofloot.js?v=cd0929"></script>
 <script src="src/city/beach.js?v=cardraws1020"></script>
@@ -1642,10 +1642,10 @@ document.body.appendChild(b);}}catch(e){}})();
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
 <script src="src/world/archipelago_map.js?v=isles1022"></script>
-<script src="src/world/archipelago.js?v=islesave1022"></script>
-<script src="src/world/island_lodging.js?v=isleclose1022"></script>
+<script src="src/world/archipelago.js?v=mislesastutte"></script>
+<script src="src/world/island_lodging.js?v=misleclstutte"></script>
 <script src="src/world/island_town.js?v=isleopen1022"></script>
-<script src="src/world/island_police.js?v=isleopen1022"></script>
+<script src="src/world/island_police.js?v=misleopstutte"></script>
 <!-- THE ISLANDS' PEOPLE (world/island_people.js): Gang City's street crowd
      (city/peds.js) on the island in force, with homes and work in its
      buildings, the trades' hours and shutters, and the posted staff
@@ -1742,8 +1742,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/shopfloor.js: what every counter shop shares (the clerk, the till of
      goods in your hands not yet paid for, hot goods, the islands' shop rooms
      and showcase glass). Before gunstore.js, jewelry.js, pawnshop.js. -->
-<script src="src/city/shopfloor.js?v=isleopen1022"></script>
-<script src="src/city/gunstore.js?v=isleopen1022"></script>
+<script src="src/city/shopfloor.js?v=misleopstutte"></script>
+<script src="src/city/gunstore.js?v=misleopstutte"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <script src="src/city/gunmods.js?v=isleopen1022"></script>
@@ -1754,7 +1754,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
-<script src="src/city/jewelry.js?v=isleclose1022"></script>
+<script src="src/city/jewelry.js?v=misleclstutte"></script>
 <script src="src/city/careers.js?v=dismiss1014"></script>
 <script src="src/city/activities.js?v=nored0930"></script>
 <script src="src/city/heists.js?v=ijkl1022"></script>
@@ -1869,7 +1869,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/zillow.js?v=fac1009"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <script src="src/city/bank.js?v=isledaylife1022"></script>
-<script src="src/city/pawnshop.js?v=isleopen1022"></script>
+<script src="src/city/pawnshop.js?v=misleopstutte"></script>
 <script src="src/city/clothingstore.js?v=isleopen1022"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
@@ -1880,14 +1880,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ISLANDS' SHOPS (world/island_shops.js): every island outfitter, tailor,
      optician, phone shop and trade fitted with the store systems above, per
      building, through CBZ.islandVenue; a counter and a clerk in each. -->
-<script src="src/world/island_shops.js?v=isleclose1022"></script>
+<script src="src/world/island_shops.js?v=misleclstutte"></script>
 <!-- THE ISLANDS' MONEY (city/islandmoney.js): every island bank a banking hall
      with tellers, a manager's loan desk, an ATM, guards and the strongroom
      (city/bank.js cityVaultRoom); a safe or a cash box in every building with
      a use (city/bank.js citySafe); the loan shark's office and his collectors
      (CBZ.loanShark, the demand ladder). After bank.js, island_venue.js,
      interactions.js and island_shops.js (whose counters it gives a till). -->
-<script src="src/city/islandmoney.js?v=islesold1022"></script>
+<script src="src/city/islandmoney.js?v=mislesostutte"></script>
 <!-- THE ISLES' CIVIC WAVE: the fit-out kit (world/island_fitkit.js: one merge per
      room, the exec floor's pieces, signs), the motel and the used car lot as
      built places (world/island_lots.js, called by disaster_arena.js's build),
@@ -1895,12 +1895,12 @@ document.body.appendChild(b);}}catch(e){}})();
      office (island_civic.js), the flats over the shops (island_homes.js) and
      the office towers (island_offices.js). After island_venue.js (the seam),
      exec_office.js, furniture.js, propuse.js and city/interactions.js. -->
-<script src="src/world/island_fitkit.js?v=fitout1022"></script>
-<script src="src/world/island_lots.js?v=civic1022"></script>
+<script src="src/world/island_fitkit.js?v=stutter1022"></script>
+<script src="src/world/island_lots.js?v=stutter1022"></script>
 <script src="src/world/island_dealers.js?v=misleopisleso"></script>
-<script src="src/world/island_civic.js?v=fitout1022"></script>
-<script src="src/world/island_homes.js?v=islesold1022"></script>
-<script src="src/world/island_offices.js?v=fitout1022"></script>
+<script src="src/world/island_civic.js?v=stutter1022"></script>
+<script src="src/world/island_homes.js?v=mislesostutte"></script>
+<script src="src/world/island_offices.js?v=stutter1022"></script>
 <!-- THE ISLES REMEMBER (world/isles_save.js): the archipelago's slice of the one
      character ledger (city/worldstate.js CBZ.cityWorldIsles): the island and
      where you stood, the clock, cars, flats, the room, the army, the shark's
@@ -2767,7 +2767,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/gfx.js?v=flicker1009b"></script>
 <script src="src/city/localinst.js?v=li2"></script>
 <script src="src/core/profile.js?v=street1009"></script>
-<script src="src/core/fxwarm.js?v=boot1014b"></script>
+<script src="src/core/fxwarm.js?v=stutter1022"></script>
 <script src="src/city/cctv.js?v=w09290242x"></script>
 <script src="src/core/loop.js?v=front1001"></script>
 <script src="src/main.js?v=sharkmode1"></script>

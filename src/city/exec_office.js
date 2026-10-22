@@ -575,24 +575,36 @@
       },
       // bake every bucket into ONE mesh per material under `group`
       flush: function (group, name) {
+        const it = K.flushSteps(group, name, true);
+        let r = it.next();
+        while (!r.done) r = it.next();
+        return r.value;
+      },
+      // the same merge as a generator: it yields on the island build's slice
+      // clock (CBZ.sliceLate) between parts, so an island fit-out's merge of
+      // a furnished tower is spread over frames
+      flushSteps: function* (group, name, whole) {
+        const late = whole || !CBZ.sliceLate ? function () { return false; } : CBZ.sliceLate;
         const out = [];
-        buckets.forEach(function (parts, mat) {
+        for (const [mat, parts] of buckets) {
           let nv = 0;
           for (const g of parts) nv += g.attributes.position.count;
           const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), col = new Float32Array(nv * 3);
           let o3 = 0, o2 = 0;
-          for (const g of parts) {
+          for (let pi = 0; pi < parts.length; pi++) {
+            const g = parts[pi];
             pos.set(g.attributes.position.array, o3); nrm.set(g.attributes.normal.array, o3);
             col.set(g.attributes.color.array, o3); uv.set(g.attributes.uv.array, o2);
             o3 += g.attributes.position.count * 3; o2 += g.attributes.position.count * 2;
             g.dispose();
+            if ((pi & 15) === 15 && late()) yield 0;
           }
           const geo = new THREE.BufferGeometry();
           geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
           geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
           geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
           geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-          geo.computeBoundingSphere();
+          if (!whole && CBZ.sphereSteps) yield* CBZ.sphereSteps(geo); else geo.computeBoundingSphere();
           const mesh = new THREE.Mesh(geo, mat);
           mesh.name = name || "exec-office";
           // non-empty userData: core/batch.js leaves the kit's own merged
@@ -604,7 +616,8 @@
           mesh.matrixAutoUpdate = false; mesh.updateMatrix();
           group.add(mesh);
           out.push(mesh);
-        });
+          if (late()) yield 0;
+        }
         buckets.clear();
         return out;
       },
