@@ -678,9 +678,17 @@
      and the dome's fog band. DO NOT ADD RING MESHES BACK. */
 
   /* ---------------- 3. stars -----------------------------------------
-     Disabled by design.  Screen-space Points read as white weather/dust
-     floating in front of the HUD and terrain from an aircraft.  The authored
-     sky gradient, sun and moon carry time-of-day without fake specks. */
+     They were switched off because they read as white dust floating in front
+     of the terrain from an aircraft. That was a draw-order bug, not a reason
+     to have no stars: they were TRANSPARENT points 780 m out, drawn after
+     every opaque surface, so land two kilometres away failed the depth test
+     against them and they painted over it; and the rig sat at sea level, so
+     from altitude the "upper hemisphere" was below the camera, over the sea.
+     Now they are OPAQUE-pass points drawn right after the dome and before
+     anything else (renderOrder -5, no depth written), so every real surface
+     overwrites them, and they hang on the CAMERA's height, never below its
+     horizon. Shown on the isles' night (owner: "super dark ... stars,
+     moon"); Gang City's sky stays exactly as it was. */
   const STARS = 800;
   const starGeo = new THREE.BufferGeometry();
   (function () {
@@ -701,8 +709,9 @@
   })();
   const starMat = new THREE.PointsMaterial({
     size: 1.7, sizeAttenuation: false, vertexColors: true,
-    transparent: true, opacity: 0, depthWrite: false, fog: false,
+    transparent: false, depthWrite: false, fog: false, blending: THREE.AdditiveBlending,
   });
+  starMat.color.setScalar(0);
   const stars = new THREE.Points(starGeo, starMat);
   stars.renderOrder = -5; stars.visible = false;
   rig.add(stars);
@@ -1162,9 +1171,18 @@
       lastPaintAt = CBZ.now; forcePaint = false;
     }
 
-    // No floating point-stars: keep the object inert so no per-frame scene
-    // rebuild is needed and older save/config state cannot turn it back on.
-    stars.visible = false;
+    // THE STARS (see 3.): the isles' dark only, fading in once the blue hour
+    // is over, gone under a storm deck, a little fewer under a bright moon
+    {
+      const gm = CBZ.game && CBZ.game.mode;
+      let sk = gm === "archipelago" ? clamp01((night - 0.6) / 0.35) * (1 - clamp01(frame.stormK * 1.5)) : 0;
+      sk *= 1 - 0.45 * fin(CBZ.moonIllum, 0.5);
+      stars.visible = sk > 0.01;
+      if (stars.visible) {
+        starMat.color.setScalar(sk);
+        stars.position.set(0, fin(CBZ.camera.position.y, 0) - rig.position.y, 0);
+      }
+    }
 
     // sun + moon ride daynight's angle
     _p.set(Math.cos(a) * 80, Math.sin(a) * 95, -10).normalize();

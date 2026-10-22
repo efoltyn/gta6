@@ -454,7 +454,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the streamer, farcull and the scatter hand-overs read (CBZ.sight()). -->
 <script src="src/core/sight.js?v=farcopy1013"></script>
 <!-- the far night lights (GTA "LOD lights"): one sprite per real lamp, lit window, car, beacon and airfield light; three draws, to the horizon -->
-<script src="src/core/lodlights.js?v=lodlight1012"></script>
+<script src="src/core/lodlights.js?v=night1022"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
 <script src="src/core/citystream.js?v=merge1014c"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
@@ -527,8 +527,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- A TUNNEL IS A HOLE LYING DOWN: a swept carving with its lid intact. -->
 <!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
 <script src="src/core/lights.js?v=flicker1009b"></script>
-<script src="src/core/sky.js?v=boot1013"></script>
-<script src="src/core/daynight.js?v=pres1012"></script>
+<script src="src/core/sky.js?v=night1022"></script>
+<script src="src/core/daynight.js?v=night1022"></script>
 
 <!-- 2. world geometry -->
 <!-- Procedural surface library: tiling colour + normal + roughness CanvasTextures
@@ -803,7 +803,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (city) buys one shadowless SpotLight + floor pool, toggled through
      CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
      prisonnight.js (CBZ.prisonLights.level prices the dark). -->
-<script src="src/systems/playerflashlight.js?v=colcore1"></script>
+<script src="src/systems/playerflashlight.js?v=night1022"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
@@ -984,13 +984,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_plan.js?v=venue1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=venue1022"></script>
+<script src="src/world/disaster_arena.js?v=mvenue1night1"></script>
 <script src="src/world/island_dressing.js?v=venue1022"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
 <script src="src/world/island_venue.js?v=venue1022"></script>
+<script src="src/world/island_night.js?v=night1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
 <script src="src/entities/survivorbot.js?v=misles1bodymo"></script>
-<script src="src/modes/survival.js?v=isles1022"></script>
+<script src="src/modes/survival.js?v=night1022"></script>
 <!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
      instant death, i-frames, no chip, physical shelter, regen. survival.js's
      surv.hurt hands the player to it. -->
@@ -1355,7 +1356,7 @@ document.body.appendChild(b);}}catch(e){}})();
      no dynamic lights); pushes the shared lamp emissives up after dark.
      After blobshadows.js (same pool shape) and before vehicles.js: it only
      READS the fleet at order 37.7, after vehicles.js has moved it at 37. -->
-<script src="src/city/carlamps.js?v=cardraws1020"></script>
+<script src="src/city/carlamps.js?v=night1022"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/carparts.js?v=emg1019"></script>
 <script src="src/city/carbody.js?v=cars2"></script>
@@ -1417,6 +1418,7 @@ document.body.appendChild(b);}}catch(e){}})();
      each one and dropped behind you. archipelago_map.js is the map as data;
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
+<script src="src/world/island_lodging.js?v=night1022"></script>
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the

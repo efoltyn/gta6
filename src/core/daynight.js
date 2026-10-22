@@ -57,6 +57,10 @@
      timetable (count, yard, lights-out) is the escape game's pillar and
      systems/prisonschedule.js sizes every block off this table.
      THE ISLAND (survival) keeps 15 min so a disaster round holds its hour.
+     THE ISLES (archipelago) run the city's GTA day: it is the world the city
+     folds into, and its night is a place you sleep through in a bed, not a
+     tint that sweeps past (modes/survival.js grades it, world/island_night.js
+     lights it, world/island_lodging.js is where you spend it).
      Everything else (gungame, sharksim, menus) keeps the old 150 s.
 
      Nobody may hard-code a day length: read CBZ.dayCycleSeconds() (the
@@ -65,7 +69,7 @@
      ?daysecs=150 gives back the old toy city day).
      ============================================================ */
   const DEFAULT_CYCLE = 150;
-  const MODE_CYCLE = { city: 48 * 60, escape: 720, survival: 900 };
+  const MODE_CYCLE = { city: 48 * 60, escape: 720, survival: 900, archipelago: 48 * 60 };
   CBZ.DAY_SECONDS = MODE_CYCLE;         // the dial, published where it is read
   let urlDay = 0;
   try {

@@ -648,10 +648,14 @@
     if (!ST.built || g.mode !== MODE) return;
     const V = ST.map.view;
     if (CBZ.scene.fog) { CBZ.scene.fog.near = V.fogNear; CBZ.scene.fog.far = V.fogFar; }
-    const P = CBZ.player;
+    // (the DIRECTION is the clock's: survival.js aimed the sun, or the moon
+    // after dark, at the island in force; the same aim is carried over to you)
+    const P = CBZ.player, T = CBZ.sunTarget;
     if (P && P.pos && CBZ.sun) {
-      CBZ.sun.position.set(P.pos.x + 70, P.pos.y + 140, P.pos.z - 50);
-      if (CBZ.sunTarget) CBZ.sunTarget.position.set(P.pos.x, P.pos.y, P.pos.z);
+      const S = CBZ.sun.position;
+      const ox = T ? S.x - T.position.x : 70, oy = T ? S.y - T.position.y : 140, oz = T ? S.z - T.position.z : -50;
+      S.set(P.pos.x + ox, P.pos.y + oy, P.pos.z + oz);
+      if (T) T.position.set(P.pos.x, P.pos.y, P.pos.z);
     }
   });
 
@@ -691,9 +695,11 @@
       }
       if (CBZ.clearSpectate) CBZ.clearSpectate();
       if (CBZ.survEnv && CBZ.SURV_CLEAR_SKY) Object.assign(CBZ.survEnv, CBZ.SURV_CLEAR_SKY, { flash: 0, flashColor: 0xffffff });
-      const sp = spawnPoint(A);
+      // the room you last slept in, while it is still yours (world/island_lodging.js)
+      const LG = CBZ.islandLodging;
+      const sp = (LG && LG.wakeSpot && LG.wakeSpot(A)) || spawnPoint(A);
       const P = CBZ.player, PC = CBZ.playerChar;
-      const gy = A.groundHeightAt(sp.x, sp.z);
+      const gy = sp.y != null ? sp.y : A.groundHeightAt(sp.x, sp.z);
       P.pos.set(sp.x, gy, sp.z);
       P.vy = 0; P.grounded = true;
       P.hp = 100; P.dead = false; P.ko = 0; P.stun = 0; P._death = null;

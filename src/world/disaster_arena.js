@@ -2535,6 +2535,9 @@
       }
       m.name = "island-interior:" + key;
       m._shared = true;
+      // the rooms' own light after dark (world/island_night.js): the isles'
+      // interiors are lit by their fixtures, never by the night outside
+      if (CBZ.islandRoomLight) CBZ.islandRoomLight(m, key === "glow");
       inMats[key] = m;
       return m;
     }
@@ -2808,13 +2811,40 @@
         return true;
       };
     }
-    // one CBZ.furnish call with the city's seat registry closed: an island's
-    // chairs are not the city's anchors (see systems/quake.js's old note)
+    /* One CBZ.furnish call with the city's seat registry closed: an island's
+       chairs are not the city's anchors (see systems/quake.js's old note).
+       The registrars are STUBS, not null: with them null, furniture.js falls
+       through to world/roombuild.js's load-order queue, which kept every
+       island seat and bed at its BUILDING-LOCAL coordinates and filed them on
+       the next flush, as phantom furniture round the world origin.
+       A BED IS KEPT (islandBeds, in its building's frame): once the building
+       has turned to face its street, placeBeds() puts it in the world, and
+       the isles register it when the island joins the world (job.attachSteps;
+       every bed on the isles can be climbed into and slept in). */
+    const islandBeds = [];
+    function bedKeep(x, y, z, hx, hz, len, top, kind) {
+      islandBeds.push({ lx: x, ly: y || 0, lz: z, hx: hx || 0, hz: hz || 0, len: len || 2, ltop: top, kind: kind || "bed", b: null });
+      return null;
+    }
+    function seatSkip() { return null; }
+    // the beds kept since `from`, into the world through the building's turn
+    function placeBeds(from, b) {
+      if (!b) { islandBeds.length = from; return; }
+      const yaw = b.rotY || 0, co = Math.round(Math.cos(yaw)), si = Math.round(Math.sin(yaw));
+      for (let i = from; i < islandBeds.length; i++) {
+        const r = islandBeds[i];
+        r.x = b.ox + r.lx * co + r.lz * si; r.z = b.oz - r.lx * si + r.lz * co;
+        const hx = r.hx * co + r.hz * si, hz = -r.hx * si + r.hz * co;
+        r.hx = hx; r.hz = hz;
+        r.y = b.gy + r.ly; r.top = b.gy + r.ltop;
+        r.b = b;
+      }
+    }
     function furnish(name, host, x, y, z, yaw, o) {
       const F = CBZ.furnish;
       if (!F || typeof F[name] !== "function") return null;
       const sSeat = CBZ.propRegisterSeat, sBed = CBZ.propRegisterBed;
-      CBZ.propRegisterSeat = null; CBZ.propRegisterBed = null;
+      CBZ.propRegisterSeat = seatSkip; CBZ.propRegisterBed = bedKeep;
       const opts = { box: host, ox: 0, oz: 0, solid: true };
       if (o) for (const k in o) opts[k] = o[k];
       try { return name === "lamp" ? F.lamp(x, y, z, opts) : F[name](x, y, z, yaw || 0, opts); }
@@ -4786,6 +4816,7 @@
       const pal = KIND_PAL[l.kind] || PALETTE;
       const color = pal[(h01g(l.x, l.z, 0x7a1) * pal.length) | 0];
       let b = null;
+      const bed0 = islandBeds.length;
       if (l.kind === "showroom") {
         const sr = makeShowroom(l.x, l.z);
         dl1 = { x: l.x, z: l.z };
@@ -4802,6 +4833,7 @@
         b.street = l.street ? l.street.name : null;
         built++;
       }
+      placeBeds(bed0, b);
       placed.push({ x: l.x, z: l.z, w: l.wx, d: l.wz, lot: l.lot, b: b });
       if (CBZ.bootStep && built % 12 === 0) CBZ.bootStep("island:town");
       yield 0;   // one building a step
@@ -6131,6 +6163,10 @@
         bridges: harbourOut.bridges,
         manholes: roadNet && roadNet.manholes ? roadNet.manholes : [],
         streetLights: roadNet && roadNet.lights ? roadNet.lights.map(function (l) { return { x: l.x, z: l.z }; }) : [],
+        // every bed in a building, in the world: { x, y, z, hx, hz (to the
+        // pillow), len, top (mattress), kind, b (its building), rec (the
+        // propuse record while the island is in the world, isles only) }
+        beds: islandBeds.filter(function (r) { return !!r.b; }),
         // register a function to run when the island is reset between matches
         onReset: function (fn) { if (typeof fn === "function" && resetHooks.indexOf(fn) < 0) resetHooks.push(fn); return fn; },
         lowGround: P ? P.lowGround : [],
@@ -6401,6 +6437,15 @@
       // an archipelago island's venues fit out now: whole, in the world, and
       // still hidden (world/island_venue.js; disposed with the island)
       if (ISL.world === "archipelago" && CBZ.islandVenue && CBZ.islandVenue.fitSteps) yield* CBZ.islandVenue.fitSteps(job);
+      // THE ISLES' BEDS are beds (city/propuse.js: climb in, lie down, sleep).
+      // The disaster island's stay furniture: a round does not sleep the night.
+      const I = job.arena && job.arena.island;
+      if (ISL.world === "archipelago" && I && I.beds && CBZ.propRegisterBed) {
+        for (const r of I.beds) {
+          r.rec = CBZ.propRegisterBed(r.x, r.y, r.z, r.hx, r.hz, r.len, r.top, r.kind, null);
+          if (r.rec) { r.rec._lotR = true; r.rec.home = r.b; }
+        }
+      }
     };
     return job;
   };
@@ -6455,6 +6500,12 @@
     // the shared lists rides job.buses with the rest)
     if (CBZ.islandVenue && CBZ.islandVenue.drop) { try { CBZ.islandVenue.drop(job); } catch (e) { console.error("[island venue drop]", e); } }
     if (A && arena === A) CBZ.islandActivate(null, null);
+    // its beds leave the bed registry with it
+    const islBeds = A && A.island && A.island.beds;
+    if (islBeds && CBZ.propUnregister) {
+      CBZ.propUnregister(islBeds.map(function (r) { return r.rec; }));
+      for (const r of islBeds) r.rec = null;
+    }
     if (A) {
       for (const e of A.elevators || []) if (e.rig && e.rig.release) { try { e.rig.release(); } catch (err) {} }
       if (CBZ.stairs && CBZ.stairs.removeOwner) for (const b of A.fragile || []) { try { CBZ.stairs.removeOwner(b.group); } catch (err) {} yield 0; }
