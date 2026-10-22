@@ -63,7 +63,9 @@
   function roomOf(b, k) {
     const IV = CBZ.islandVenue, F = IV.floor(b, k), I = b.interior || {};
     let sx = F.local.x0;
-    for (const r of I.keepOut || []) if (r.why === "stairs") sx = Math.max(sx, r.x1 + 0.1);
+    // (the ground floor's stair is behind its stairwell wall: the room starts at its face)
+    const sw = (k | 0) === 0 ? b._stairwell : null;
+    for (const r of I.keepOut || []) if (r.why === "stairs") sx = Math.max(sx, sw ? sw.face + 0.02 : r.x1 + 0.1);
     return { F: F, y: F.yLocal + 0.015, X0: sx, X1: F.local.x1, Z0: F.local.z0, Z1: F.local.z1,
       cx: (sx + F.local.x1) / 2, sEdge: sx - 0.45 };
   }
@@ -296,6 +298,14 @@
     // the chamber's chairs and the mayor's office: one merge per material
     if (MK) FIT.flushMesh(b, MK, "island-cityhall");
     K.flush();
+    // the hall's walls panelled to the dado, its ceiling lit by panels
+    if (FIT.dress) {
+      try {
+        FIT.dress(b, { kind: "cityhall", room: { x0: R0.X0, x1: R0.X1, z0: R0.Z0, z1: R0.Z1 }, lights: "panel",
+          walls: [{ edge: "x0", mods: ["panel"], w: 1.2, d: 0.06, front: 0, back: 0x6b4a33, upper: 0xe4ded2, mirror: false },
+                  { edge: "x1", mods: ["panel"], w: 1.2, d: 0.06, front: 0, back: 0x6b4a33, upper: 0xe4ded2, mirror: false }] });
+      } catch (e) { console.error("[town hall dress]", e); }
+    }
     halls.push(H);
     return function () {
       const i = halls.indexOf(H);
@@ -427,6 +437,34 @@
       K.lbox(s[0], s[1], s[2], quarter ? 0.02 : pw + 0.06, ph + 0.06, quarter ? pw + 0.06 : 0.02, 0x1a1a1a);
     }
     K.flush();
+    // the rest of a recruiting office: filing cabinets and brochure racks
+    // down the walls, the corporal's desk at the back, the television on the
+    // wall playing the service's film, panel lights (the posters keep their wall)
+    if (FIT.dress) {
+      try {
+        const keep = [
+          { x0: cx - 2.1, x1: cx - 1.3, z0: Z1 - 0.7, z1: Z1 }, { x0: cx + 1.3, x1: cx + 2.1, z0: Z1 - 0.7, z1: Z1 },
+          { x0: X1 - 0.7, x1: X1, z0: (Z0 + Z1) / 2 - 0.45, z1: (Z0 + Z1) / 2 + 0.45 },
+          { x0: cx - 1.6, x1: cx + 1.6, z0: dz - 1.7, z1: dz + 1.1 },
+        ];
+        FIT.dress(b, {
+          kind: "recruit", room: { x0: X0, x1: X1, z0: Z0, z1: Z1 }, keep: keep, lights: "panel",
+          walls: [{ edge: "x0", mods: ["brochures", "cabinets", "cabinets"], w: 0.96, d: 0.5, front: 0.9, col: 0x4b5234, pal: [0x3e4a2f, 0x1d2a44, 0xe9e2cf, 0xc9a24a] },
+                  { edge: "x1", mods: ["cabinets"], w: 0.96, d: 0.5, front: 0.9, col: 0x6a7078 }],
+          extra: function (D) {
+            const Kd = D.K, yy = D.y;
+            // the television on the stair-side wall, high, facing the room
+            const tz = (Z0 + Z1) / 2 + 0.6, tx = X0 + 0.04;
+            Kd.lbox(tx + 0.03, yy + 2.0, tz, 0.06, 0.7, 1.2, 0x15171b);
+            Kd.lbox(tx + 0.065, yy + 2.0, tz, 0.006, 0.62, 1.12, 0x2f4a3a, { glow: true });
+            Kd.lbox(tx + 0.05, yy + 1.55, tz, 0.08, 0.2, 0.12, 0x2a2c30);
+            // the corporal's desk at the back corner, his screen, a chair
+            const r = { x0: X1 - 2.4, x1: X1 - 0.2, z0: Z1 - 2.4, z1: Z1 - 0.2 };
+            if (D.place(r)) D.furnish("desk", X1 - 1.3, Z1 - 1.35, Math.PI, { len: 1.4, deep: 0.7, tone: "cool" });
+          },
+        });
+      } catch (e) { console.error("[recruiting office dress]", e); }
+    }
     const O = { b: b, iid: iid, sergeant: null, desk: null, co: null };
     O.sergeant = IV.staff(b, cx, dz + 0.75, Math.PI, { job: "recruiting sergeant", hours: [8, 18], near: 160,
       dress: { archetype: "military", job: "recruiter" }, name: "Sgt. " + nameOf(iid + "sgt") });
