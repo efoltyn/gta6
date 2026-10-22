@@ -851,8 +851,10 @@
       let eTap = false;
       for (let i = 0; i < keep.length; i++) { out.push(keep[i]); if (keep[i].key === "e" && !keep[i].hold) eTap = true; }
       // the alias is the first option that hurts nobody: a tap of E never
-      // mugs a man or sends your crew at him (that takes its own letter)
-      if (!eTap) for (let i = 0; i < n; i++) if (!out[i].bad) { out.push(Object.assign({}, out[i], { key: "e", alias: true })); break; }
+      // mugs a man or sends your crew at him (that takes its own letter).
+      // `harm` is that rule without the warm rim: an order (city/orders.js
+      // Detain, Kill, Threaten) is drawn plain, and is still never a tap of E.
+      if (!eTap) for (let i = 0; i < n; i++) if (!out[i].bad && !(out[i].opt && out[i].opt.harm)) { out.push(Object.assign({}, out[i], { key: "e", alias: true })); break; }
       out._pass = pass; out._extra = extra; out._speak = sp; out.dualRide = dual;
       return out;
     }

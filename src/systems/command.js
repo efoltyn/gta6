@@ -73,9 +73,15 @@
        issuers only; default true), quiet (no answers spoken), exec (fn(man,
        order, target, from, opts) instead of the game's), pushed, game }
      decide(from, man, order, target?, ctx?) -> { answer, margin, weight, auth, stand }
-     authority(from, man, order?) -> 0..1   standing(man, from) -> 0..1
-     weight(order, man, target, from) -> 0..1.2   strain(man) -> 0..1
+     authority(from, man, order?, game?) -> 0..1   standing(man, from, game?) -> 0..1
+     weight(order, man, target, from, game?, out?) -> 0..1.2 (out.reason: kid |
+       cuffed | own | notable | unarmed, the word a refusal is said in)   strain(man) -> 0..1
      can(from, man, order?) -> bool  (has the issuer any claim on him for this)
+     threaten(from, man, opts?) -> { answer: obey|cowed|walk|fight|none, order, target }
+       the order he said no to again, backed by fear (or a man leaned on)
+     pending(man, from?) -> his fresh no / "Sir?" { from, order, target, t, answer } | null
+     The game whose hooks answer for a man is the world's (city, prison), never
+     the sub-system his brain is registered under (a detail agent's "protection").
      use(game, hooks) hooks: { authority(from, man, order), standing(man, from),
        kin(man, target), notable(target), law(man), lead(man) (rank 0..1),
        exec(man, order, target, from, opts) -> bool, turn(man, from, how),
@@ -132,13 +138,19 @@
     return !!(C && a === C.playerActor);
   }
   function out(a) { return !a || a.dead || a.escaped || (a.hp != null && a.hp <= 0 && a.maxHp) || (a.ko || 0) > 0; }
+  // WHOSE CHAIN OF COMMAND HE IS IN: the world's game first. A body's brain
+  // names the sub-system that walks him (a Secret Service agent is brain game
+  // "protection", the detail brain's), never the game whose hooks answer for
+  // him. Reading the brain first sent every agent of the President's detail
+  // to a game with no hooks: no authority, so every Kill and Detain the
+  // President gave went to nobody and nothing happened at all.
   function gameOf(a, opts) {
     if (opts && opts.game) return opts.game;
-    const b = a && a._brain;
-    if (b && b.game) return b.game;
     const m = CBZ.game && CBZ.game.mode;
     if (m === "city") return "city";
     if (m === "escape") return "prison";
+    const b = a && a._brain;
+    if (b && b.game) return b.game;
     return m || "*";
   }
 
@@ -243,9 +255,9 @@
   }
 
   // ================================================================ AUTHORITY
-  function authority(from, man, order) {
+  function authority(from, man, order, game) {
     if (!from || !man || from === man || out(man)) return 0;
-    const game = gameOf(man);
+    game = game || gameOf(man);
     const v = call(game, "authority", from, man, order);
     if (v != null) return clamp01(+v || 0);
     if (man._cmdBy === from) return 1;
@@ -258,15 +270,16 @@
     }
     return 0;
   }
-  function can(from, man, order) {
+  function can(from, man, order, game) {
     const o = norm(order);
     if (!o) return false;
-    if (authority(from, man, o) <= 0) return false;
-    if (ORDERS[o].law && !lawHands(man, gameOf(man))) return false;
+    game = game || gameOf(man);
+    if (authority(from, man, o, game) <= 0) return false;
+    if (ORDERS[o].law && !lawHands(man, game)) return false;
     return true;
   }
-  function standing(man, from) {
-    const game = gameOf(man);
+  function standing(man, from, game) {
+    game = game || gameOf(man);
     const v = call(game, "standing", man, from);
     if (v != null && isFinite(v)) return clamp01(+v);
     const P = persona(man);
@@ -277,7 +290,7 @@
   const STRAIN_DECAY = 0.004;     // per s: a bad order fades in a few minutes
   function rec(man) {
     let r = man._cmd;
-    if (!r) r = man._cmd = { strain: 0, t: now(), hes: null, refused: 0, obeyed: 0, turned: false, last: null };
+    if (!r) r = man._cmd = { strain: 0, t: now(), hes: null, refused: 0, obeyed: 0, turned: false, last: null, no: null };
     const t = now(), dt = t - r.t;
     if (dt > 0) { r.strain = Math.max(0, r.strain - dt * STRAIN_DECAY); r.t = t; }
     return r;
@@ -316,30 +329,36 @@
     } catch (e) { n = 0; }
     return n;
   }
-  function weight(order, man, target, from) {
+  // why: an out object; .reason gets what weighs most on him ("kid",
+  // "cuffed", "own", "notable", "unarmed"), the word his refusal is said in
+  function weight(order, man, target, from, game, why) {
     const o = norm(order);
+    if (why) why.reason = null;
     if (!o) return 0;
     const O = ORDERS[o];
     let w = O.w;
     if (!target || !O.harm) return w;
-    const game = gameOf(man);
+    game = game || gameOf(man);
     const role = roleOf(target);
     const armed = capability(target);
     const coming = hostileTo(target, man, from);
+    let top = 0, reason = null;
+    const add = function (v, r) { w += v; if (r && v > top) { top = v; reason = r; } };
     if (o === "kill") {
-      if (armed === "none") w += 0.14;
-      if (restrained(target)) w += 0.3;              // an execution
-      if (LAW[role]) w += 0.14;
+      if (armed === "none" && !coming) add(0.14, "unarmed");
+      if (restrained(target)) add(0.3, "cuffed");              // an execution
+      if (LAW[role]) add(0.14, "own");
       if (coming) w -= armed === "gun" ? 0.45 : 0.3;
     } else {
       if (coming) w -= 0.18;
-      if (o === "take" && restrained(target)) w += 0.22;   // beating a man in cuffs
+      if (o === "take" && restrained(target)) add(0.22, "cuffed");   // beating a man in cuffs
     }
-    if (role === "kid" || target.kid || target.child) w += 0.7;
-    if (call(game, "kin", man, target)) w += o === "kill" ? 0.42 : 0.2;
+    if (role === "kid" || target.kid || target.child) add(0.7, "kid");
+    if (call(game, "kin", man, target)) add(o === "kill" ? 0.42 : 0.3, "own");
     const notable = call(game, "notable", target);
-    if (notable || target.vip || target.official || target.senator || target._presOfficer) w += o === "kill" ? 0.24 : 0.12;
+    if (notable || target.vip || target.official || target.senator || target._presOfficer) add(o === "kill" ? 0.24 : 0.2, "notable");
     if (!coming) w += Math.min(0.16, witnesses(target, game) * 0.025);
+    if (why) why.reason = reason;
     return clamp(w, 0, 1.2);
   }
   function danger(order, man, target) {
@@ -361,19 +380,19 @@
   const OBEY_M = 0.1;
   function decide(from, man, order, target, ctx) {
     const o = norm(order);
-    const res = { answer: "refuse", margin: -1, weight: 0, auth: 0, stand: 0, why: "" };
+    const res = { answer: "refuse", margin: -1, weight: 0, auth: 0, stand: 0, why: "", reason: null };
     if (!o || !man || out(man)) { res.why = "out"; return res; }
     const game = gameOf(man, ctx);
-    const auth = authority(from, man, o);
+    const auth = authority(from, man, o, game);
     res.auth = auth;
     if (auth <= 0) { res.why = "authority"; return res; }
     if (ORDERS[o].law && !lawHands(man, game)) { res.why = "law"; return res; }
     const R = rec(man);
     if (R.turned && R.turned === from) { res.answer = "refuse"; res.why = "turned"; return res; }
     const P = persona(man);
-    const stand = standing(man, from);
+    const stand = standing(man, from, game);
     res.stand = stand;
-    const w = weight(o, man, target, from);
+    const w = weight(o, man, target, from, game, res);
     res.weight = w;
     let owed = call(game, "owed", man, from);
     owed = owed != null && isFinite(owed) ? clamp01(owed) : 0;
@@ -383,7 +402,10 @@
     const pushed = !!(ctx && ctx.pushed);
     const will = 0.3 * auth + 0.45 * stand + 0.2 * P.discipline + 0.1 * P.loyalty
       - 0.35 * R.strain - 0.25 * owed - (1 - morale) * 0.15 + (pushed ? 0.12 : 0) + ((ctx && ctx.delta) || 0);
-    const conscience = 0.35 + 0.65 * (1 - P.aggression);
+    // A CONSCIENCE IS HIS OWN. Men of one service share a temper; what an
+    // order costs each of them is not the same, so the few who will not are
+    // always particular men, never a dice roll on the whole detail.
+    const conscience = 0.35 + 0.65 * (1 - P.aggression) + (hash(man, 41) - 0.5) * 0.36;
     const cost = w * conscience;
     const dng = danger(o, man, target);
     const jit = (hash(man, 31 + R.obeyed + R.refused) - 0.5) * 0.08;
@@ -407,6 +429,9 @@
   function obeyAloud(man, o, w, lead, from) {
     if (!lead) return false;
     if (w >= 0.3) return true;
+    // the player sent his men at a man: the one who leads it says so, so you
+    // see who is doing it
+    if (isPlayer(from) && ORDERS[o].at) return true;
     if (ORDERS[o].calm) return hash(man, 77 + rec(man).obeyed) < 0.3;
     return isPlayer(from) ? hash(man, 91 + rec(man).obeyed) < 0.35 : hash(man, 93 + rec(man).obeyed) < 0.2;
   }
@@ -432,9 +457,9 @@
     if (f) { try { const r = f(man, o, target, from, opts || {}); if (r != null) return r !== false; } catch (e) { return false; } }
     return execDefault(man, o, target, from, opts);
   }
-  function turnOn(man, from, w, opts) {
+  function turnOn(man, from, w, opts, forced) {
     const P = persona(man);
-    const how = capability(man) !== "none" && P.aggression > 0.45 && P.courage > 0.5 ? "fight" : "walk";
+    const how = forced || (capability(man) !== "none" && P.aggression > 0.45 && P.courage > 0.5 ? "fight" : "walk");
     const R = rec(man);
     R.turned = from; R.strain = 0;
     const game = gameOf(man, opts);
@@ -501,7 +526,11 @@
       }
       if (a === "hesitate") R.hes = { from: from, order: o, target: target || null, t: t };
       const lead = i === 0;
-      const ctx = { order: o, from: from, to: man, target: target, by: isPlayer(from) ? from : null, force: true };
+      const ctx = { order: o, from: from, to: man, target: target, by: isPlayer(from) ? from : null, force: true, why: d.reason };
+      // a NO (or a "Sir?") is remembered on him: who asked, what, about whom.
+      // It is what a Threaten presses (threaten() below) and what makes him a
+      // man his own issuer can turn the rest on.
+      R.no = a === "obey" ? null : { from: from, order: o, target: target || null, t: t, answer: a, opts: opts };
       if (a === "obey") {
         R.obeyed++;
         if (d.weight > 0.3) R.strain = Math.min(1, R.strain + (d.weight - 0.3) * (0.35 + 0.65 * (1 - persona(man).aggression)) * 0.5);
@@ -532,9 +561,11 @@
       }
       res.answers.push({ man: man, answer: a, margin: d.margin });
       emit("answer", { from: from, man: man, order: o, target: target, answer: a, margin: d.margin, weight: d.weight, game: game });
-      // his answer pulls the rest: the lead's most of all
-      if (lead) delta += a === "obey" ? 0.05 : a === "hesitate" ? -0.04 : -0.18;
-      else if (a === "refuse" || a === "turn") delta -= 0.06;
+      // his answer pulls the rest, the lead's most: a little. The men who say
+      // no are particular men; one refusal does not walk a whole detail off
+      // an order (it used to: the lead's no took 0.18 off everybody).
+      if (lead) delta += a === "obey" ? 0.05 : a === "hesitate" ? -0.03 : -0.07;
+      else if (a === "refuse" || a === "turn") delta -= 0.03;
     }
     // the group's answer: what most of them did, a turn always counted
     const n = res.answers.length;
@@ -543,6 +574,70 @@
       : res.obey.length * 2 >= n ? "obey" : res.hesitate.length >= res.refuse.length ? "hesitate" : "refuse";
     mutinyCheck(from, list, o, game, t);
     return res;
+  }
+
+  // ================================================================ THREATEN
+  /* THE ORDER BACKED BY FEAR. Your man said no, or "Sir?", and you lean on
+     him. Fear wins and he does it now; or it breaks him: he walks off the
+     job, or, with nothing left for you and a gun on him, he turns it on you.
+     A man with no order pending is only leaned on: the fear goes in, what he
+     thinks of you comes down (the game's ledger, cost kind "threat"), and a
+     man who already thought little of you walks.
+     threaten(from, man, opts) -> { answer, order, target }
+       answer: obey | cowed | walk | fight | none
+       opts: { aimed (the issuer's gun is on him), armed, game } */
+  function threaten(from, man, opts) {
+    opts = opts || {};
+    const res = { answer: "none", order: null, target: null };
+    if (!from || !man || out(man) || man === from || isPlayer(man)) return res;
+    const game = gameOf(man, opts);
+    if (authority(from, man, null, game) <= 0) return res;
+    const R = rec(man), t = now(), P = persona(man);
+    const stand = standing(man, from, game);
+    // how hard it lands: his own nerve, and the issuer's gun on him
+    const press = clamp01(0.3 + (1 - P.courage) * 0.35 + (opts.aimed ? 0.25 : opts.armed ? 0.1 : 0));
+    call(game, "cost", man, from, "threat", press);
+    R.strain = Math.min(1, R.strain + 0.08);
+    const I = issRec(from);
+    let no = R.no && R.no.from === from && t - R.no.t < 90 ? R.no : null;
+    if (no && no.target && out(no.target)) no = null;
+    R.no = null;
+    const ctx = { order: no ? no.order : null, from: from, to: man, target: no ? no.target : null, by: isPlayer(from) ? from : null, force: true };
+    const breakHim = function (floor) {
+      const how = capability(man) !== "none" && stand < floor && P.courage > 0.45 ? "fight" : "walk";
+      if (I) I.refusals.push(t, t);
+      speak(man, "turn", ctx);
+      turnOn(man, from, 1, opts, how);
+      res.answer = how;
+      emit("answer", { from: from, man: man, order: ctx.order, target: ctx.target, answer: "turn", margin: -1, weight: 1, game: game });
+      return res;
+    };
+    if (!no) {
+      // leaned on for nothing: cowed, unless he had nothing left for you
+      if (stand < 0.25 + hash(man, 57 + R.refused) * 0.15) return breakHim(0.18);
+      speak(man, "cowed", ctx);
+      res.answer = "cowed";
+      return res;
+    }
+    res.order = no.order; res.target = no.target;
+    const d = decide(from, man, no.order, no.target, { pushed: true, delta: press * 0.25, game: game });
+    if (d.answer === "obey" || d.answer === "hesitate") {
+      if (exec(man, no.order, no.target, from, no.opts || opts)) {
+        R.obeyed++;
+        speak(man, "obey", ctx);
+        res.answer = "obey";
+        emit("answer", { from: from, man: man, order: no.order, target: no.target, answer: "obey", margin: d.margin, weight: d.weight, game: game });
+        return res;
+      }
+      return res;
+    }
+    return breakHim(0.35);
+  }
+  // his standing NO (or "Sir?") to this issuer, while it is fresh
+  function pending(man, from) {
+    const r = man && man._cmd && man._cmd.no;
+    if (!r || (from && r.from !== from) || now() - r.t > 90) return null;
+    return r;
   }
 
   // ================================================================ MUTINY
@@ -555,8 +650,8 @@
     const sour = [];
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
-      if (out(m) || authority(from, m) <= 0) continue;
-      const st = standing(m, from), sr = rec(m).strain;
+      if (out(m) || authority(from, m, null, game) <= 0) continue;
+      const st = standing(m, from, game), sr = rec(m).strain;
       sStand += st; sStrain += sr; n++;
       if (st < 0.5 || sr > 0.35 || rec(m).turned === from) sour.push(m);
     }
@@ -703,6 +798,7 @@
     __core: true,
     ORDERS: ORDERS, norm: norm,
     issue: issue, decide: decide, authority: authority, standing: standing, weight: weight, strain: strain, can: can,
+    threaten: threaten, pending: pending,
     use: use, on: on, emit: emit,
     toPlayer: toPlayer, playerOrders: function () { return YOU.slice(); }, cancelPlayer: cancelPlayer,
     bigOrder: bigOrder, tick: tick, audit: audit,
