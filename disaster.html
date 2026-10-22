@@ -980,14 +980,14 @@ document.body.appendChild(b);}}catch(e){}})();
      world/island_building.js is each building's stairs, landings, slabs and
      roof as data (node-checkable by tools/island-stairs-check.mjs); the
      builder lays exactly what it says, so it loads first. -->
-<script src="src/world/island_roads.js?v=isleleak1022"></script>
-<script src="src/world/island_plan.js?v=civic1022"></script>
+<script src="src/world/island_roads.js?v=isleopen1022"></script>
+<script src="src/world/island_plan.js?v=isleopen1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
 <script src="src/world/disaster_arena.js?v=isleleak1022"></script>
-<script src="src/world/island_dressing.js?v=lampglow1022"></script>
+<script src="src/world/island_dressing.js?v=isleopen1022"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
-<script src="src/world/island_venue.js?v=isleleak1022"></script>
+<script src="src/world/island_venue.js?v=isleopen1022"></script>
 <script src="src/world/island_night.js?v=lampglow1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
 <script src="src/entities/survivorbot.js?v=people1022"></script>
@@ -1317,7 +1317,7 @@ document.body.appendChild(b);}}catch(e){}})();
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=jailai1020"></script>
-<script src="src/city/economy.js?v=goods1022"></script>
+<script src="src/city/economy.js?v=isleopen1022"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
@@ -1377,7 +1377,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=mrg10200048"></script>
-<script src="src/city/vehicles.js?v=mislelaprotes"></script>
+<script src="src/city/vehicles.js?v=isleopen1022"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playeraircraft.js?v=mlandblisles1"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1418,7 +1418,7 @@ document.body.appendChild(b);}}catch(e){}})();
      each one and dropped behind you. archipelago_map.js is the map as data;
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
-<script src="src/world/island_lodging.js?v=fitout1022"></script>
+<script src="src/world/island_lodging.js?v=isleopen1022"></script>
 <!-- THE ISLANDS' PEOPLE (world/island_people.js): Gang City's street crowd
      (city/peds.js) on the island in force, with homes and work in its
      buildings, the trades' hours and shutters, and the posted staff
@@ -1611,7 +1611,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ISLANDS' SHOPS (world/island_shops.js): every island outfitter, tailor,
      optician, phone shop and trade fitted with the store systems above, per
      building, through CBZ.islandVenue; a counter and a clerk in each. -->
-<script src="src/world/island_shops.js?v=fitout1022"></script>
+<script src="src/world/island_shops.js?v=isleopen1022"></script>
 <!-- THE ISLANDS' MONEY (city/islandmoney.js): every island bank a banking hall
      with tellers, a manager's loan desk, an ATM, guards and the strongroom
      (city/bank.js cityVaultRoom); a safe or a cash box in every building with
@@ -1625,6 +1625,14 @@ document.body.appendChild(b);}}catch(e){}})();
      office (island_civic.js), the flats over the shops (island_homes.js) and
      the office towers (island_offices.js). After island_venue.js (the seam),
      exec_office.js, furniture.js, propuse.js and city/interactions.js. -->
+<!-- THE ISLES' EVENINGS AND EMERGENCIES: the bars (world/island_bar.js: the
+     counter, stools, booths, the pool table, the bartender, a drink through
+     city/drinking.js, the evening crowd and its fights) and the fire station
+     and hospital the island's fire truck and ambulance roll out of
+     (world/island_emergency.js; city/traffic.js drives them). After
+     island_fitkit.js and island_venue.js (the seam). -->
+<script src="src/world/island_bar.js?v=isleopen1022"></script>
+<script src="src/world/island_emergency.js?v=isleopen1022"></script>
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
      in or at the door of is fitted out for real (finished floors, bathrooms,
      kitchens, bedrooms, stockrooms, a gang's count room, baked light from

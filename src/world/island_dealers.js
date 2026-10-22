@@ -309,12 +309,12 @@
     if (P && P.pos && Math.hypot(P.pos.x - b.ox, P.pos.z - b.oz) < 30) return;
     const lot = CBZ.islandVenue && CBZ.islandVenue.lotFor ? CBZ.islandVenue.lotFor(b) : null;
     if (!lot) return;
-    const D = lot.building.door;                       // nx/nz: OUT of the building
-    const x = D.x + D.nx * 6.5 + D.nz * 3, z = D.z + D.nz * 6.5 - D.nx * 3;
+    const D = lot.building.door;                       // nx/nz: INTO the building
+    const x = D.x - D.nx * 6.5 - D.nz * 3, z = D.z - D.nz * 6.5 + D.nx * 3;
     const A = CBZ.surv && CBZ.surv.arena;
     const y = (A && A.groundHeightAt ? A.groundHeightAt(x, z) : c.pos.y) + 0.045;
     if (!unseen(c.pos.x, c.pos.y, c.pos.z) || !unseen(x, y, z)) return;
-    place(c, x, y, z, Math.atan2(D.nz, -D.nx), false);
+    place(c, x, y, z, Math.atan2(-D.nz, D.nx), false);
     r.showroom = null;
   }
   let ownT = 0;

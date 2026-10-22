@@ -1405,7 +1405,7 @@
       // assignUses) and a named one says it over the door: the places you
       // can go into and do something first, then the town's trades
       const VENUE = { police: 1, guns: 1, pawn: 1, loans: 1, jewelry: 1, eyewear: 1, clothing: 1, suits: 1, phones: 1,
-        motel: 1, recruit: 1, usedcars: 1, bank: 1, cityhall: 1, hotel: 1, cardealer: 1 };
+        motel: 1, recruit: 1, usedcars: 1, bank: 1, cityhall: 1, hotel: 1, cardealer: 1, bar: 1, hospital: 1, firestation: 1 };
       const lots = PL.lots.some(function (l) { return l.use; })
         ? PL.lots.filter(function (l) { return VENUE[l.use]; }).concat(PL.lots.filter(function (l) { return !VENUE[l.use]; }))
         : PL.lots;

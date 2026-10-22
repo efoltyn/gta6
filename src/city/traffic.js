@@ -88,8 +88,11 @@
   let lightT = 0, ticketCD = 0, prevInside = false;
 
   CBZ.onUpdate(36, function (dt) {
-    if (g.mode !== "city") return;
-    const A = CBZ.city.arena; if (!A) return;
+    // Gang City's grid, or an island town's signalled crossings
+    // (world/island_town.js: the same phase clock, the same law)
+    if (!(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) return;
+    const A = g.mode === "city" ? CBZ.city.arena : (CBZ.econArena ? CBZ.econArena() : null);
+    if (!A || !A.intersections) return;
 
     // drive the lamp colours (throttled — the colour only changes a few times
     // per cycle, but cheap enough to refresh a couple of times a second)
@@ -832,6 +835,8 @@
   // serves a whole scene — the second exists so a second incident across town
   // is not queued behind a shootout's clean-up. (Owner's cap: 2-3.)
   const EMG_MAX = { ambulance: 2, firetruck: 1 };
+  // Gang City and the islands (CBZ.economyMode): the street systems' worlds
+  function emgOn() { return !!g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city"); }
   function morgueOwnsEms() {
     return !!(CBZ.CONFIG && CBZ.CONFIG.EMS_RESPONSE !== false && CBZ.morgueUnitScene);
   }
@@ -896,10 +901,74 @@
              sx: r.vertical ? r.x + lane : r.x + sa, sz: r.vertical ? r.z + sa : r.z + lane };
   }
 
+  /* THE ISLANDS (world/island_town.js: no grid, a town of straight runs).
+     A unit rolls out of its own station (world/island_emergency.js: the
+     fire station's engine bay, the hospital's ambulance bay), on the road
+     in front of its door, and drives the island's streets to the scene:
+     a route of road records, turning at each junction (steerEmergency).
+     No station on the island, or one in plain view of you: it comes up the
+     road nearest the scene from out of sight, as out in the world. */
+  function nearestRoad(A, x, z, pad) {
+    let best = null, bd = 1e9;
+    for (const r of A.roads || []) {
+      const along = r.vertical ? z - r.z : x - r.x, perp = Math.abs(r.vertical ? x - r.x : z - r.z);
+      if (Math.abs(along) > r.len / 2 - (pad || 0)) continue;
+      if (perp < bd) { bd = perp; best = r; }
+    }
+    return best && bd < 40 ? best : null;
+  }
+  function crosses(a, b) {
+    if (a.vertical === b.vertical) return false;
+    const v = a.vertical ? a : b, h = a.vertical ? b : a;
+    return Math.abs(v.x - h.x) <= h.len / 2 + 1 && Math.abs(h.z - v.z) <= v.len / 2 + 1;
+  }
+  function roadRoute(A, from, to) {
+    if (from === to) return [from];
+    const R = A.roads || [], prev = new Map([[from, null]]), q = [from];
+    while (q.length) {
+      const r = q.shift();
+      if (r === to) break;
+      for (const o of R) if (!prev.has(o) && crosses(r, o)) { prev.set(o, r); q.push(o); }
+    }
+    if (!prev.has(to)) return null;
+    const out = [];
+    for (let r = to; r; r = prev.get(r)) out.unshift(r);
+    return out;
+  }
+  function alongOf(r, x, z) { return r.vertical ? z - r.z : x - r.x; }
+  // the along coordinate this leg of a route runs to: the next junction, or
+  // (the last leg) the point abreast of the scene
+  function legGoal(e, tx, tz) {
+    const rr = e.road, R = e.route;
+    if (R && e.routeI < R.length - 1) { const n = R[e.routeI + 1]; return alongOf(rr, n.vertical ? n.x : rr.x, n.vertical ? rr.z : n.z); }
+    return alongOf(rr, tx, tz);
+  }
+  function stationStart(A, kind, tx, tz) {
+    const EM = CBZ.islandEmergency;
+    const st = EM && EM.station ? EM.station(kind === "firetruck" ? "fire" : "ambulance") : null;
+    if (!st) return null;
+    const r0 = nearestRoad(A, st.x, st.z, 6), r1 = nearestRoad(A, tx, tz, 3);
+    if (!r0 || !r1) return null;
+    const route = roadRoute(A, r0, r1);
+    if (!route) return null;
+    const lim = r0.len / 2 - 4;
+    const sa = Math.max(-lim, Math.min(lim, alongOf(r0, st.x, st.z)));
+    const probe = { road: r0, route: route, routeI: 0 };
+    const ga = legGoal(probe, tx, tz);
+    const dir = ga >= sa ? 1 : -1, lane = laneOffset(r0, dir, 0);
+    const sx = r0.vertical ? r0.x + lane : r0.x + sa, sz = r0.vertical ? r0.z + sa : r0.z + lane;
+    // a truck does not appear out of nothing in front of you
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (cam && CBZ.roadInView && Math.hypot(sx - cam.x, sz - cam.z) < 140 && CBZ.roadInView(sx, sz)) return null;
+    return { road: r0, dir: dir, sx: sx, sz: sz, route: route };
+  }
+
   function spawnEmergency(kind, tx, tz) {
-    const A = CBZ.city.arena; if (!A || !CBZ.cityMakeCar) return null;
+    const A = streetArena(); if (!A || !CBZ.cityMakeCar) return null;
     const model = emgModel(kind); if (!model) return null;
-    const ap = offDowntown(A, tx, tz) ? roadApproach(A, tx, tz) : null;
+    const isle = !!A.noGrid;
+    const ap = isle ? (stationStart(A, kind, tx, tz) || roadApproach(A, tx, tz)) : offDowntown(A, tx, tz) ? roadApproach(A, tx, tz) : null;
+    if (isle && !ap) return null;                 // no road reaches it: nobody drives through the houses
     // downtown: enter from the city edge along a road far from the incident
     const r = ap ? ap.road : A.roads[(Math.random() * A.roads.length) | 0];
     const dir = ap ? ap.dir : (Math.random() < 0.5 ? 1 : -1);
@@ -919,6 +988,7 @@
     e.cx = null; e.cz = null; e.stuckT = 0;
     // road-bound unit (an off-grid scene): it drives THIS record, in lane
     e.road = ap ? ap.road : null; e.roadDir = ap ? ap.dir : 0;
+    e.route = ap && ap.route ? ap.route : null; e.routeI = 0;
     // the bespoke dispatch AI below keeps the wheel while it is on duty
     // (ai false: vehicles.js's lane AI never fights it), and a traffic reset
     // never reaps a unit mid-call (despawnEmergency owns its teardown)
@@ -989,7 +1059,7 @@
   // must not be ignored because one engine was finishing a minor car fire.
   CBZ.cityDispatchEmergencyAt = function (kind, x, z, opts) {
     if (kind !== "firetruck" && kind !== "ambulance") return null;
-    if (g.mode !== "city" || !CBZ.city || !CBZ.city.arena) return null;
+    if (!emgOn() || !streetArena()) return null;
     // RE-TASK ONLY WHAT IS ACTUALLY FREE. This loop used to grab the first unit
     // of the right kind, full stop — which was harmless while the cap was ONE
     // and this was the only dispatcher, and is not now: a second call would
@@ -1058,7 +1128,7 @@
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
       if (c.player) continue;
-      if (c._emgClaimed) continue;
+      if (c._emgClaimed || !here(c)) continue;
       if (c._onFire || (c._smoking && (c.engineHp != null && c.engineHp < 30))) return c;
     }
     return null;
@@ -1126,12 +1196,25 @@
     // this frame's aim point: a 3-leg Manhattan route along real roads
     let aimX, aimZ;
     if (e.road) {
+      // A ROUTE (the islands): at the junction with the next road of it, turn
+      // onto that road, heading for the junction after (or the scene)
+      if (e.route && e.routeI < e.route.length - 1) {
+        const ja = legGoal(e, tx, tz), pa0 = alongOf(e.road, e.pos.x, e.pos.z);
+        if (Math.abs(ja - pa0) < 3.5) {
+          e.routeI++; e.road = e.route[e.routeI];
+          const ga = legGoal(e, tx, tz), pa1 = alongOf(e.road, e.pos.x, e.pos.z);
+          e.roadDir = ga >= pa1 ? 1 : -1;
+        }
+      }
+      const via = !!(e.route && e.routeI < e.route.length - 1);
       // ROAD-BOUND: keep the lane of its own record and run to the point on it
       // abreast of the target (the kerb there); past the record's end, stop.
       const rr = e.road, lane = laneOffset(rr, e.roadDir, 0), lim = rr.len / 2 - 3;
-      const ta = Math.max(-lim, Math.min(lim, rr.vertical ? tz - rr.z : tx - rr.x));
+      const ta = via ? legGoal(e, tx, tz) : Math.max(-lim, Math.min(lim, rr.vertical ? tz - rr.z : tx - rr.x));
       cx = rr.vertical ? rr.x + lane : rr.x + ta; cz = rr.vertical ? rr.z + ta : rr.z + lane;
-      e.cx = cx; e.cz = cz;
+      // (a junction on the way is not the kerb it parks at)
+      e.cx = via ? null : cx; e.cz = via ? null : cz;
+      e._legX = cx; e._legZ = cz;
       // aim a few metres ahead along the lane (steady heading), or at the kerb once close
       const pa = rr.vertical ? e.pos.z - rr.z : e.pos.x - rr.x;
       const ahead = Math.max(-lim, Math.min(lim, pa + e.roadDir * 12));
@@ -1164,7 +1247,7 @@
     // emergency vehicles roll fast — they have right of way (ignore the lights)
     let topV = Math.max(11, (TR().cruise ? TR().cruise[1] : 12) * 1.3);
     // a road-bound unit rolls up to its kerb point instead of overshooting it
-    if (e.road && e.state === "drive") topV = Math.min(topV, 2 + Math.hypot(e.cx - e.pos.x, e.cz - e.pos.z) * 0.6);
+    if (e.road && e.state === "drive") topV = Math.min(topV, (e.cx == null ? 6 : 2) + Math.hypot(e._legX - e.pos.x, e._legZ - e.pos.z) * 0.6);
     // ...but a real unit BRAKES for whoever's in its path instead of plowing
     // through the scene it came to help ("just drive through shit"): scan the
     // lane ahead for peds and cars and ease off. Cheap: ≤2 trucks alive, ever.
@@ -1310,10 +1393,13 @@
     }
   }
 
-  let emgLastElapsed = 0;
+  let emgLastElapsed = 0, emgArena = null;
   CBZ.onUpdate(36.7, function (dt) {
-    if (g.mode !== "city") { if (emg.length || liveHonks.length) CBZ.cityEmergencyReset(); return; }
-    const A = CBZ.city.arena; if (!A) return;
+    if (!emgOn()) { if (emg.length || liveHonks.length) CBZ.cityEmergencyReset(); return; }
+    const A = streetArena(); if (!A) return;
+    // a new island in force (or back to Gang City): the units of the last go
+    if (emgArena && emgArena !== A && emg.length) CBZ.cityEmergencyReset();
+    emgArena = A;
     // new life / replay wipes the arena root out from under us → drop our refs
     if (g.elapsed + 0.001 < emgLastElapsed) CBZ.cityEmergencyReset();
     emgLastElapsed = g.elapsed;
@@ -1379,17 +1465,18 @@
           // ARRIVE at the scene itself — or PARK at the curb nearest it (a
           // mid-block body can't be reached by road; real ambulances park outside)
           const atCurb = e.cx != null && Math.hypot(e.pos.x - e.cx, e.pos.z - e.cz) < 3.5;
+          const enRoute = !!(e.route && e.routeI < e.route.length - 1);
           // (a road-bound unit's kerb can be further from a mid-superblock
           // scene: the metro's local streets are not road records, so the
           // arterial kerb IS the nearest a truck gets — the crew walks it)
-          if (d < 6 || (atCurb && (d < 60 || e.road))) { emergencyArrive(e); e.state = "work"; e.t = 0; e.stuckT = 0; }
+          if ((d < 6 && !enRoute) || (atCurb && (d < 60 || e.road))) { emergencyArrive(e); e.state = "work"; e.t = 0; e.stuckT = 0; }
           else if (e.stuckT > 2.5) {
             // wedged (wreck/queue in the lane): a real unit stops where it is and
             // works the scene from there — never grinds through geometry.
             if (d < 45) emergencyArrive(e);
             e.state = d < 45 ? "work" : "leave"; e.t = 0; e.stuckT = 0;
           }
-          else if (e.t > 28) { e.state = "leave"; e.t = 0; }   // gave up / blocked
+          else if (e.t > (e.route ? 75 : 28)) { e.state = "leave"; e.t = 0; }   // gave up / blocked (a station run is a longer drive)
         }
       } else if (e.state === "work") {
         e.t += dt; e.v *= Math.pow(0.1, dt);
@@ -1403,6 +1490,7 @@
         if (!held && e.t > 3.5) { e.state = "leave"; e.t = 0; if (e.target) e.target._emgClaimed = false; }
       } else { // leave: roll off ALONG A ROAD toward the nearest edge, then despawn
         e.t += dt;
+        e.route = null;
         if (e.road) {
           // road-bound: carry on down its own record, then vanish once out of
           // sight (never pop out in front of the player)

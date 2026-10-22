@@ -451,8 +451,13 @@
   }
   CBZ.morgueReset = reset;
 
+  let lastStreet = null;
   CBZ.onUpdate(34.5, function (dt) {
-    if (!g || g.mode !== "city") return;
+    // Gang City and the islands (CBZ.economyMode); a new island in force is a
+    // new street, its scenes its own
+    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) return;
+    const St = CBZ.econArena ? CBZ.econArena() : null;
+    if (St !== lastStreet) { reset(); lastStreet = St; }
     if (g.elapsed + 0.001 < lastElapsed) reset();     // new life / replay
     lastElapsed = g.elapsed;
     if (g.state !== "playing") return;

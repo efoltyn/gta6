@@ -408,7 +408,7 @@
     const gs = o.gs;
     const S = {
       kind: o.kind, lot: o.lot, gs: gs, FY: o.fy, root: o.root, where: o.where, arena: o.arena || null,
-      bench: o.bench !== false, armorSpots: o.armorSpots || null, group: null, slots: [], dressed: false, near: false, dead: false,
+      bench: o.bench !== false, benchAt: o.benchAt || null, armorSpots: o.armorSpots || null, group: null, slots: [], dressed: false, near: false, dead: false,
       cx: (gs.bounds.minX + gs.bounds.maxX) / 2, cz: (gs.bounds.minZ + gs.bounds.maxZ) / 2,
       clerk: o.clerk, inStore: o.inStore, cols: [], tillCand: null, till: null,
     };
@@ -876,15 +876,23 @@
      an oil bottle, an articulated lamp. Kept off the room's centre line,
      which is the customer's walk from the door to the counter. */
   function buildBench(S, group, C, L, D, FY) {
-    let inx = S.cx - C.x, inz = S.cz - C.z; const il = Math.hypot(inx, inz) || 1; inx /= il; inz /= il;
-    let lat = L * 0.28;
-    let wx = C.x + C.tx * lat + inx * 1.6, wz = C.z + C.tz * lat + inz * 1.6;
-    const latC = (wx - S.cx) * C.tx + (wz - S.cz) * C.tz;
-    if (Math.abs(latC) < 1.62) { const shift = (latC >= 0 ? 1 : -1) * 1.62 - latC; wx += C.tx * shift; wz += C.tz * shift; }
-    const B = S.gs.bounds;
-    wx = Math.max(B.minX + 0.75, Math.min(B.maxX - 0.75, wx));
-    wz = Math.max(B.minZ + 0.75, Math.min(B.maxZ - 0.75, wz));
-    const k = KIT.create().frame(wx, 0, wz, KIT.yawOf(C.tx, C.tz));
+    let wx, wz, yaw;
+    if (S.benchAt) {
+      // an island gun store: the bench stands in the back room, its pegboard
+      // against the partition (S.benchAt: world spot + the frame's yaw)
+      wx = S.benchAt.x; wz = S.benchAt.z; yaw = S.benchAt.yaw;
+    } else {
+      let inx = S.cx - C.x, inz = S.cz - C.z; const il = Math.hypot(inx, inz) || 1; inx /= il; inz /= il;
+      const lat = L * 0.28;
+      wx = C.x + C.tx * lat + inx * 1.6; wz = C.z + C.tz * lat + inz * 1.6;
+      const latC = (wx - S.cx) * C.tx + (wz - S.cz) * C.tz;
+      if (Math.abs(latC) < 1.62) { const shift = (latC >= 0 ? 1 : -1) * 1.62 - latC; wx += C.tx * shift; wz += C.tz * shift; }
+      const B = S.gs.bounds;
+      wx = Math.max(B.minX + 0.75, Math.min(B.maxX - 0.75, wx));
+      wz = Math.max(B.minZ + 0.75, Math.min(B.maxZ - 0.75, wz));
+      yaw = KIT.yawOf(C.tx, C.tz);
+    }
+    const k = KIT.create().frame(wx, 0, wz, yaw);
     const T = FY + 0.9, STEEL = 0x3c4148;
     k.box(0, T + 0.025, 0, 1.2, 0.05, 0.62, 0x9c7447);                                  // butcher block
     for (let i = 1; i < 12; i++) k.box(-0.6 + i * 0.1, T + 0.0505, 0, 0.003, 0.001, 0.62, 0x7d5a35);
@@ -932,6 +940,11 @@
     k.cyl(lx + 0.32, T + 0.42, lz + 0.1, 0.03, 0.065, 0.08, 0x22252a, "metal", 0.35, 0, -0.5);
     k.cyl(lx + 0.34, T + 0.385, lz + 0.115, 0.055, 0.055, 0.004, 0xfff1d8, "glow", 0.35, 0, -0.5);
     k.build(group);
+    // the island's back-room bench is a solid thing to walk round
+    if (S.kind === "island") {
+      const q = Math.abs(Math.sin(yaw)) > 0.5;
+      solidBox(S, wx, wz, q ? 0.66 : 1.24, q ? 1.24 : 0.66, FY, FY + 0.95);
+    }
     S.slots.push({ name: "Gunsmith Bench", mod: true, store: S, sold: false, x: wx, y: T + 0.1, z: wz, reach: CASE_REACH + 0.6, dot: CASE_DOT - 0.08 });
   }
 
@@ -1177,7 +1190,7 @@
     const zone = F.counterZone(P0, desc);
     const where = F.whereKey(lot.island);
     const clerk = F.postedClerk({ b: b, lot: lot, lx: zone.post.lx, lz: zone.post.lz, face: zone.post.face,
-      armed: "Shotgun", job: "gunsmith" });
+      armed: "Shotgun", job: "gunsmith", via: zone.route.via, door: zone.route.door });
     F.register(P0, desc, clerk, -desc.counter.L / 2 + 0.55, (lot.name || "gun store") + " register");
     // the armoury's forms down the +x side wall, facing into the shop
     const armorSpots = [], inward = P0.v(-1, 0);
@@ -1185,8 +1198,21 @@
       const p = P0.w(P0.x1 - 0.5, lz);
       armorSpots.push({ x: p.x, z: p.z, face: Math.atan2(inward.x, inward.z) });
     }
+    // THE GUNSMITH BENCH, in the back room: against the partition, beside the
+    // staff door (city/shopfloor.js shell: the doorway at the + end), the
+    // aisle between it and the shelving on the back wall
+    let benchAt = null;
+    if (P0.back && CBZ.gunModsOpenBench) {
+      const dx = P0.x1 - 0.85, bx = dx - 0.475 - 0.2 - 0.62;
+      if (bx - 0.62 > P0.x0 + 0.1) {
+        const p = P0.w(bx, P0.zP + 0.07 + 0.33);
+        benchAt = { x: p.x, z: p.z, yaw: F.yawToward(P0, 0, 1) };
+        if (IV.claim) IV.claim(b, 0, { x0: bx - 0.65, x1: bx + 0.65, z0: P0.zP, z1: P0.zP + 0.75 });
+      }
+    }
     const S = makeStore({
-      kind: "island", lot: lot, gs: desc, fy: P0.fy, root: CBZ.scene, clerk: clerk, where: where, bench: false, armorSpots: armorSpots,
+      kind: "island", lot: lot, gs: desc, fy: P0.fy, root: CBZ.scene, clerk: clerk, where: where,
+      bench: !!benchAt, benchAt: benchAt, armorSpots: armorSpots,
       arena: job && job.arena, inStore: function (x, z) { return P0.inside(x, z, 0.4); },
       nearDoor: P0.nearDoor, behind: zone.behind,
     });

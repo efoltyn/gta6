@@ -25,12 +25,18 @@
                            finder); keep right on one 3.5 m lane each way,
                            exactly where the island paints them
        ROAD                7 (the carriageway's width)
-       noGrid              true: no Gang-City signal grid, every junction
-                           is a derived one (stop signs, no lights)
+       noGrid              true: no Gang-City signal grid; the junctions
+                           are derived ones, signed STOP, except the
+                           town's main crossings, which are signalled
+       intersections       the signalled crossings (world/island_roads.js
+                           jn.signal), each { x, z, light } with the lamps
+                           city/traffic.js's light cycle colours; read by
+                           city/vehicles.js like Gang City's grid
+       nearestIntersection(x, z) the nearest signalled crossing (within 60 m)
+       signalAt(x, z)      is there a signalled crossing here
        minX..maxZ          the island's bounds
        root, island        the island's root group, CBZ.island's record
        randomRoadPoint() / copBeatPoint() / clampToCity(p, r) /
-       nearestIntersection() (always null) / intersections ([]) /
        lots ([]) / shopLots ([]) / noSpawn ([])
      CBZ.islandTownDrop(A) an island is going away (archipelago.js drops
                            it, or the mode is left): every traffic car,
@@ -168,13 +174,27 @@
       const a1 = Math.max(-half, Math.min(half, a0 + dir * (25 + rnd() * 30)));
       return runPoint(r, a1, side * SW);
     }
+    // THE SIGNALLED CROSSINGS (an archipelago town's main 4-ways)
+    // (world/island_roads.js leaves them on the island's root as it builds)
+    const SG = A.root && A.root.userData ? A.root.userData.islandSignals : null;
+    const signals = SG && SG.lamps ? SG.at.map(function (j) {
+      return { x: j.x, z: j.z, light: { ns: [SG.lamps.ns], ew: [SG.lamps.ew] }, island: true };
+    }) : [];
     const T = {
       island: I, arena: A, root: A.root, beatNext: beatNext,
       roads: roads, ROAD: 2 * HW, noGrid: true,
       minX: B ? B.x0 : cx - Rr, maxX: B ? B.x1 : cx + Rr, minZ: B ? B.z0 : cz - Rr, maxZ: B ? B.z1 : cz + Rr,
       center: { x: cx, z: cz }, radius: Rr,
-      intersections: [], lots: [], shopLots: [], noSpawn: [],
-      nearestIntersection: function () { return null; },
+      intersections: signals, lots: [], shopLots: [], noSpawn: [],
+      nearestIntersection: function (x, z) {
+        let best = null, bd = 60;
+        for (const it of signals) { const d = Math.hypot(it.x - x, it.z - z); if (d < bd) { bd = d; best = it; } }
+        return best;
+      },
+      signalAt: function (x, z) {
+        for (const it of signals) if (Math.abs(it.x - x) < 4.5 && Math.abs(it.z - z) < 4.5) return it;
+        return null;
+      },
       randomRoadPoint: function () { return roadPoint(false); },
       copBeatPoint: function () { return roadPoint(true); },
       randomSidewalkPoint: function () { return roadPoint(true); },

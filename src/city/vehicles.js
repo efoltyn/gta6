@@ -7752,7 +7752,8 @@
       if (A.noGrid && !panicking && CBZ.roadJunctionAt && (!c.reckless || c.driver.aggr < 0.8) && c.pullover !== 4) {
         const sfx = r.vertical ? 0 : c.dirSign, sfz = r.vertical ? c.dirSign : 0;
         const SJ = CBZ.roadJunctionAt(c.pos.x + sfx * 13, c.pos.z + sfz * 13, 0);
-        if (SJ && (SJ.a === r || SJ.b === r)) {
+        // (a signalled crossing is the lights' business, above)
+        if (SJ && (SJ.a === r || SJ.b === r) && !(A.signalAt && A.signalAt(SJ.x, SJ.z))) {
           if (SJ !== c._stopJ) {
             const dJ = r.vertical ? (SJ.z - c.pos.z) * c.dirSign : (SJ.x - c.pos.x) * c.dirSign;
             const stopAt = (r.vertical ? SJ.hb : SJ.ha) + 1.6 + halfLen;

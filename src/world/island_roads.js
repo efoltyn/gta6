@@ -211,7 +211,35 @@
         pieces.push(p);
       }
     }
-    return { pieces: pieces, junctions: junctions };
+    /* THE SIGNALS (o.signals: a town of the archipelago; the disaster
+       island's crossings stay signed STOP). A town's main crossings, the
+       4-ways where two long streets meet, get traffic lights: the longest
+       pairs first, nearer the middle of town, no two within 80 m, at most
+       four. jn.signal marks them; build() plants the heads instead of the
+       STOP signs, and world/island_town.js hands them to Gang City's light
+       cycle (city/traffic.js) as the town's intersections. */
+    if (o.signals) {
+      const total = function (runs) { let t = 0; for (const r of runs) t += r[1] - r[0]; return t; };
+      const four = junctions.filter(function (jn) { return jn.n === 4; });
+      let mx = 0, mz = 0;
+      for (const jn of four) { mx += jn.x; mz += jn.z; }
+      if (four.length) { mx /= four.length; mz /= four.length; }
+      const cand = [];
+      for (const jn of four) {
+        const la = total(lines.ave[jn.i]), lc = total(lines.cross[jn.j]);
+        if (la < 120 || lc < 120) continue;
+        cand.push({ jn: jn, score: la + lc - Math.hypot(jn.x - mx, jn.z - mz) * 0.8 });
+      }
+      cand.sort(function (a, b) { return b.score - a.score || a.jn.x - b.jn.x || a.jn.z - b.jn.z; });
+      const pick = [];
+      for (const c of cand) {
+        if (pick.length >= 4) break;
+        if (pick.some(function (q) { return Math.hypot(q.x - c.jn.x, q.z - c.jn.z) < 80; })) continue;
+        c.jn.signal = true;
+        pick.push(c.jn);
+      }
+    }
+    return { pieces: pieces, junctions: junctions, signals: !!o.signals };
   }
   function px(p, t, off) { return p.ox + p.Ax * t + p.Cx * off; }
   function pz(p, t, off) { return p.oz + p.Az * t + p.Cz * off; }
@@ -1157,9 +1185,9 @@
             mkT(Math.max(t0, t1), s * (HW + 0.62), 1, 1), mkT(Math.max(t0, t1), s * (HW + 0.02), 0, 1), 0, 1, 0);
         }
         const famLegs = p.vertical ? (jn.N ? 1 : 0) + (jn.S ? 1 : 0) : (jn.E ? 1 : 0) + (jn.W ? 1 : 0);
-        const control = jn.n === 4 ? "stop" : (jn.n === 3 && famLegs === 1) ? "yield" : null;
+        const control = jn.signal ? "signal" : jn.n === 4 ? "stop" : (jn.n === 3 && famLegs === 1) ? "yield" : null;
         const lo0 = ls > 0 ? 0.2 : -2.9, lo1 = ls > 0 ? 2.9 : -0.2;
-        if (control === "stop") {
+        if (control === "stop" || control === "signal") {
           const s0 = tj(p, end, SB0), s1 = tj(p, end, SB1);
           decalQuad(p, Math.min(s0, s1), Math.max(s0, s1), lo0, lo1, 0, WHITE);
         } else if (control === "yield") {
@@ -1193,7 +1221,8 @@
         // the sign on the right-hand corner of the approach, facing it
         if (control) {
           const ts = tj(p, end, SB1 + 0.5), off = ls * 4.45;
-          furn.push({ kind: control, x: px(p, ts, off), z: pz(p, ts, off), nx: -sigmaIn * p.Ax, nz: -sigmaIn * p.Az, allWay: control === "stop" });
+          furn.push({ kind: control, x: px(p, ts, off), z: pz(p, ts, off), nx: -sigmaIn * p.Ax, nz: -sigmaIn * p.Az, allWay: control === "stop",
+            axis: p.vertical ? "ns" : "ew" });
         }
       }
       // manholes (one per block, in a lane) and oil stains where cars wait/park
@@ -1289,6 +1318,7 @@
     const TRI = [[-0.45, 0.39], [0.45, 0.39], [0, -0.39]];
     const RECT = function (w, h) { return [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]; };
     let nSigns = 0;
+    const sigHeads = [];
     for (const f of furn) {
       if ((++__dn & 3) === 0) yield 0;
       const y0 = surfY(f.x, f.z);
@@ -1300,6 +1330,24 @@
           plate(f.x, y0 + hy, f.z, f.nx, f.nz, rail, 6, 2.4, 0.2);
           plate(f.x, y0 + hy, f.z, -f.nx, -f.nz, rail, 6, 2.4, 0.2);
         }
+        nSigns++;
+        continue;
+      }
+      // A SIGNAL: a steel pole, its head on the street side facing the
+      // approach, a backplate round three lenses (the lenses are lamps:
+      // drawn below, coloured by the light cycle)
+      if (f.kind === "signal") {
+        const PH = 3.4;
+        obox(furA, f.x, y0 + PH / 2, f.z, f.nx, f.nz, 0.06, 0.06, PH / 2, 5, STEEL);
+        obox(furA, f.x, y0 + 0.08, f.z, f.nx, f.nz, 0.14, 0.14, 0.08, 5, CONC);
+        const hy = y0 + PH - 0.55;
+        obox(furA, f.x + f.nx * 0.12, hy, f.z + f.nz * 0.12, f.nx, f.nz, 0.11, 0.17, 0.5, 5, DARK);
+        obox(furA, f.x + f.nx * 0.12, hy, f.z + f.nz * 0.12, f.nx, f.nz, 0.02, 0.24, 0.58, 5, DARK);      // backplate
+        for (let k = 0; k < 3; k++) {
+          sigHeads.push({ x: f.x + f.nx * 0.24, y: hy + 0.33 - k * 0.33, z: f.z + f.nz * 0.24, nx: f.nx, nz: f.nz, axis: f.axis, lamp: k });
+          obox(furA, f.x + f.nx * 0.27, hy + 0.4 - k * 0.33, f.z + f.nz * 0.27, f.nx, f.nz, 0.07, 0.13, 0.015, 5, DARK);   // visor
+        }
+        if (o.colliders) o.colliders.push({ minX: f.x - 0.1, maxX: f.x + 0.1, minZ: f.z - 0.1, maxZ: f.z + 0.1, y0: y0 - 0.2, y1: y0 + PH, ref: null, noCam: true });
         nSigns++;
         continue;
       }
@@ -1438,6 +1486,43 @@
       night(CBZ.lightsOnAmount ? CBZ.lightsOnAmount() : (CBZ.nightAmount || 0));
     });
     void lensMesh;
+    /* THE SIGNAL LAMPS: one instanced lens per colour per axis (six draws
+       for the island), each lens a disc facing its approach. The light cycle
+       (city/traffic.js) colours each axis' material: P.signalLamps is the
+       {ns, ew} record of {red, yel, grn} lamps its axisSet expects. */
+    if (sigHeads.length) {
+      const LAMP = [0xff3b3b, 0xffcf3b, 0x39ff66];
+      const lensG = new THREE.CylinderGeometry(0.105, 0.105, 0.03, 12);
+      lensG.rotateX(Math.PI / 2);
+      const lamps = { ns: { red: null, yel: null, grn: null }, ew: { red: null, yel: null, grn: null } };
+      const KEY = ["red", "yel", "grn"];
+      const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _up = new THREE.Vector3(0, 1, 0);
+      for (const ax of ["ns", "ew"]) for (let k = 0; k < 3; k++) {
+        const list = sigHeads.filter(function (h) { return h.axis === ax && h.lamp === k; });
+        if (!list.length) continue;
+        const mat = new THREE.MeshBasicMaterial({ color: 0x20242a });
+        mat.name = "survival-signal-" + ax + "-" + KEY[k];
+        const im = new THREE.InstancedMesh(lensG, mat, list.length);
+        for (let i = 0; i < list.length; i++) {
+          const h = list[i];
+          _p.set(h.x, h.y, h.z);
+          _q.setFromAxisAngle(_up, Math.atan2(h.nx, h.nz));
+          _m.compose(_p, _q, _s);
+          im.setMatrixAt(i, _m);
+        }
+        im.instanceMatrix.needsUpdate = true;
+        im.name = mat.name;
+        im.userData.dynamic = true; im.userData.noCoat = true;
+        im.frustumCulled = false;
+        o.root.add(im);
+        meshes[mat.name] = im;
+        lamps[ax][KEY[k]] = { material: mat, lit: false, color: LAMP[k] };
+      }
+      P.signalLamps = lamps;
+      // (the island's record carries copies of the junctions: the town reads
+      // its signals off the island's root, world/island_town.js)
+      if (o.root && o.root.userData) o.root.userData.islandSignals = { lamps: lamps, at: P.junctions.filter(function (j) { return j.signal; }).map(function (j) { return { x: j.x, z: j.z }; }) };
+    }
     // the heads glow from every side, not only from under the lens
     const glow = CBZ.islandLampGlow ? CBZ.islandLampGlow(o.root, heads) : null;
     if (glow) meshes["survival-streetlight-glow"] = glow.points;
@@ -1447,7 +1532,7 @@
       fourWay: P.junctions.filter(function (j) { return j.n === 4; }).length,
       tee: P.junctions.filter(function (j) { return j.n === 3; }).length,
       deadEnds: P.pieces.reduce(function (s, p) { return s + (p.jA ? 0 : 1) + (p.jB ? 0 : 1); }, 0),
-      signs: nSigns, lights: lights.length, zones: Z.zones.length,
+      signs: nSigns, lights: lights.length, zones: Z.zones.length, signals: P.junctions.filter(function (j) { return j.signal; }).length,
       verts: { road: roadA.count(), junc: juncA.count(), walk: walkA.count(), paint: decA.count(), furniture: furA.count(), pools: poolA.count() },
       draws: Object.keys(meshes).length,
     };
