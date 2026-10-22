@@ -144,6 +144,12 @@
     if (k === "guard") return "guard";
     if (k === "security" || a.bodyguard || a._detail) return "security";
     if (k === "military" || a.milRank) return "soldier";
+    // THE JOB IS THE UNIFORM: a Secret Service agent, a hired guard, a soldier
+    // or an officer posted as a street body (kind "civilian") still answers
+    // as what he is ("No, sir.", never a passer-by's "Not him.")
+    if (a._protUnit || /secret service|security/i.test(a.job || "")) return "security";
+    if (a.organization === "military" || a.job === "soldier") return "soldier";
+    if (a.job === "police officer") return "cop";
     if (a.vip || a.isPresident || a.official) return "vip";
     if (a.role === "inmate" || k === "inmate" || (CBZ.game && CBZ.game.mode === "escape" && a.data && !a.kind)) return "inmate";
     if ((typeof a.gang === "string" && a.gang) || k === "gang") return "gangster";
@@ -473,7 +479,7 @@
       law: ["Yes, sir.", "On it.", "Copy."],
       soldier: ["Yes, sir.", "Sir."],
       gangster: ["Say less.", "On it.", "Bet."],
-      security: ["Understood.", "On it."],
+      security: ["Yes, sir.", "Copy.", "Understood."],
       inmate: ["Alright.", "Yeah, yeah.", "Okay."],
       "*": ["Okay.", "On it."],
     },
@@ -488,9 +494,17 @@
       law: ["No, sir.", "Not him, sir.", "I can't do that."],
       soldier: ["No, sir.", "Not this, sir."],
       gangster: ["Nah.", "Not him.", "Do it yourself."],
-      security: ["Not my job.", "No."],
+      security: ["No, sir.", "I can't do that, sir."],
       inmate: ["No.", "Make me.", "Nah."],
       "*": ["No.", "Not him."],
+    },
+    // leaned on (command.threaten) with nothing pending: he takes it
+    cowed: {
+      law: ["Sir.", "Understood, sir."],
+      soldier: ["Sir."],
+      gangster: ["Alright. Alright.", "Easy."],
+      inmate: ["Alright.", "Easy."],
+      "*": ["Okay.", "Alright."],
     },
     turn: {
       law: ["Not anymore.", "That's enough."],
@@ -538,10 +552,31 @@
     // everything was said a moment ago: silence beats a chorus
     return null;
   }
+  // A NO SAYS WHY, when one thing weighs most (command.js weight's reason):
+  // the man he was told to shoot has nothing in his hands, is a kid, is tied,
+  // is one of their own, is somebody.
+  const WHY = {
+    refuse: {
+      unarmed: { law: ["Sir, he's unarmed.", "He's unarmed, sir."], "*": ["He's unarmed.", "He's got nothing."] },
+      kid: { law: ["Sir, that's a kid.", "Not a kid, sir."], "*": ["That's a kid.", "Not a kid."] },
+      cuffed: { law: ["Sir, he's restrained.", "He's cuffed, sir."], "*": ["He's tied up.", "Not like this."] },
+      own: { law: ["He's one of ours, sir.", "Not one of ours, sir."], "*": ["He's one of us.", "Not him."] },
+      notable: { law: ["Not him, sir.", "Sir, I can't. Not him."], "*": ["Not him.", "You know who that is?"] },
+    },
+    hesitate: {
+      unarmed: { law: ["Sir? He's unarmed."], "*": ["He's unarmed."] },
+      kid: { law: ["Sir? That's a kid."], "*": ["That's a kid."] },
+      cuffed: { law: ["Sir? He's restrained."], "*": ["He's tied up."] },
+      own: { law: ["Sir? He's one of ours."], "*": ["One of us?"] },
+      notable: { law: ["Sir? Him?"], "*": ["Him?"] },
+    },
+  };
   function poolFor(topic, a, ctx) {
     const T = LINES[topic] || LINES[ALIAS[topic]];
     if (!T) return null;
     const r = (ctx && ctx.role) || role(a);
+    const Wt = ctx && ctx.why && WHY[topic] && WHY[topic][ctx.why];
+    if (Wt) return Wt[r] || Wt[groupOf(r)] || Wt["*"];
     if (ctx && ctx.mood && T[ctx.mood]) return T[ctx.mood];
     return T[r] || T[groupOf(r)] || T["*"] || null;
   }
@@ -787,6 +822,19 @@
         return D(T > 0.4 ? "sprint" : "cower", "friendKilled", 0.8);
       }
       case "restrained": return D("cower", "restrained", 0.6);
+      // SOMEBODY THREATENED HIM to his face (the city's Threaten). He answers
+      // by who he is: the law squares up or draws, a hard man with a gun
+      // draws, a man with a detail calls it, the rest back off or go quiet.
+      case "threatened": {
+        if (ctx.guarded && st !== "ready") return D("call", "security", 0.9);
+        if (law) return cap === "gun" && T > 0.45 ? D("draw", "standoff", 0.6) : D("squareUp", "warn", 0.6);
+        if (st === "ready") return T > 0.5 ? D("draw", "standoff", 0.7) : D("squareUp", "scoffFight", 0.6);
+        if (st === "tough") return T > 0.6 ? D("backOff", "dontWantTrouble", 0.5) : D("squareUp", "scoffFight", 0.6);
+        if (ctx.aimed && T > 0.55) return D("handsUp", "comply", 0.6);
+        if (T > 0.7) return D("hurry", "scared", 0.5);
+        if (T > 0.38) return D("backOff", "dontWantTrouble", 0.45);
+        return D("walkOff", null, 0);
+      }
     }
     return D("ignore");
   }
@@ -795,7 +843,7 @@
   // events the grab verbs own the body for: we only speak
   const SPEAK_ONLY = { held: 1, carried: 1, thrown: 1, runOver: 1, restrained: 1 };
   // how often a man may be asked the same question (s)
-  const REACT_GAP = { bumped: 2.5, shoved: 1.5, repeated: 1.5, nearMiss: 3, carCutoff: 3, seeGun: 2.5, aimedAt: 6, seeHit: 3, seeRun: 4, seeBody: 8, held: 2.5, carried: 4 };
+  const REACT_GAP = { threatened: 2, bumped: 2.5, shoved: 1.5, repeated: 1.5, nearMiss: 3, carCutoff: 3, seeGun: 2.5, aimedAt: 6, seeHit: 3, seeRun: 4, seeBody: 8, held: 2.5, carried: 4 };
   function react(a, ev, ctx) {
     const _res = { how: "ignore", line: null };
     if (!a || !ev || isPlayer(a)) return _res;
