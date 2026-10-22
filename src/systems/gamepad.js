@@ -9,7 +9,7 @@
      • Right stick  look             • Right stick  look (drive-by aim)
      • LT (hold)    aim / ADS        • RT           accelerate
      • RT           fire             • LT           brake / reverse
-     • LB           next weapon      • RB / A       handbrake
+     • LB (tap)     next weapon      • RB / A       handbrake
      • RB           prev weapon      • Y            get out
      • A            sprint           • Start        pause
      • X            jump
@@ -19,7 +19,13 @@
      • D-pad Right  E (Gang City), held as long as the button is: a tap uses
                     the thing / a person's first option, a hold is the grab
      • D-pad Left   Q, the wheel: every option a person or thing has
+     • LB held +    a person's I J K L, laid out the way the keys are:
+       Y / X / A / B  Y = I (top), X = J (left), A = K (bottom), B = L
+                    (right). LB let go without one is the weapon swap.
      • Start        pause/resume
+   WHICH BUTTON IS SHOWN. While the pad is the last thing you touched
+   (CBZ.padActive()), the option chips print the pad's button, not the key
+   (CBZ.padGlyph(key): "LB+Y" for I, "Y" for F, the d-pad arrow for E / Q).
 
    A CINEMATIC QUESTION (city/campaign_ui.js, CBZ.padPrompt): while three
    answers stand round the d-pad, d-pad up / left / right answer it and the
@@ -53,6 +59,22 @@
 
   let padIndex = -1;
   let announced = false;
+
+  // ---- WHICH HAND IS ON THE GAME: the pad, or the keyboard and mouse ----
+  function nowMs() { return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now(); }
+  let lastPadT = -1e9, lastKbT = 0;
+  addEventListener("keydown", function (e) { if (e.isTrusted !== false) lastKbT = nowMs(); }, true);
+  addEventListener("mousedown", function (e) { if (e.isTrusted !== false) lastKbT = nowMs(); }, true);
+  addEventListener("mousemove", function (e) { if (Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0) > 3) lastKbT = nowMs(); }, true);
+  function padTouched(pad) {
+    for (let i = 0; i < pad.buttons.length; i++) if (pressed(pad, i)) return true;
+    for (let i = 0; i < Math.min(4, pad.axes.length); i++) if (Math.abs(pad.axes[i] || 0) > 0.35) return true;
+    return false;
+  }
+  CBZ.padActive = function () { return padIndex >= 0 && lastPadT > lastKbT; };
+  // the pad's button for a key the option chips print (null: no pad button)
+  const GLYPH = { i: "LB+Y", j: "LB+X", k: "LB+A", l: "LB+B", f: "Y", e: "\u25B6", q: "\u25C0", m: "\u25B2" };
+  CBZ.padGlyph = function (key) { return GLYPH[String(key || "").toLowerCase()] || null; };
 
   addEventListener("gamepadconnected", function (e) {
     if (padIndex < 0) padIndex = e.gamepad.index;
@@ -131,6 +153,10 @@
     if (CBZ.keys) CBZ.keys.e = on;
   }
 
+  // the talk shoulder (LB held): face button -> option key
+  const CHORD = [[B.Y, "i"], [B.X, "j"], [B.A, "k"], [B.B, "l"]];
+  let lbHeld = false, lbChord = false;
+
   // aim / fire are level-driven but only emitted on CHANGE, so a mouse player
   // is never overridden by a resting trigger.
   let prevAim = false, prevFire = false;
@@ -144,6 +170,7 @@
     const pad = activePad();
     if (!pad) { if (Object.keys(held).length) releaseAllKeys(); setAim(false); setFire(false); padE(false); return; }
     dt = Math.min(dt || 0.016, 0.05);
+    if (padTouched(pad)) lastPadT = nowMs();
 
     // ---- menu / flow (works on the title + pause screens) ----
     if (g.state !== "playing") {
@@ -246,22 +273,34 @@
       if (lx < -0.2) want["a"] = true;
       if (lx > 0.2) want["d"] = true;
       const moving = (lx || ly);
-      if (down(pad, B.A) && moving) want["shift"] = true;   // sprint
-      if (down(pad, B.X)) want[" "] = true;                 // jump (physics edge-detects)
+      // LB HELD IS THE TALK SHOULDER: the face buttons are a person's I J K L
+      // (Y top = I, X left = J, A bottom = K, B right = L, the keys' own
+      // diamond) and nothing else while it is down. LB let go without one of
+      // them is the weapon swap it always was.
+      const lb = pressed(pad, B.LB);
+      if (lb) {
+        if (!lbHeld) { lbHeld = true; lbChord = false; }
+        for (let c = 0; c < CHORD.length; c++) if (edge(pad, CHORD[c][0])) { tapKey(CHORD[c][1]); lbChord = true; }
+      } else if (lbHeld) {
+        lbHeld = false;
+        if (!lbChord && CBZ.fpsNextWeapon) CBZ.fpsNextWeapon();     // next weapon
+      }
+      if (!lb && down(pad, B.A) && moving) want["shift"] = true;   // sprint
+      if (!lb && down(pad, B.X)) want[" "] = true;                 // jump (physics edge-detects)
 
       setAim(lt > TRIG_ON);                                 // LT hold = ADS
       setFire(rt > TRIG_ON);                                // RT = fire
 
-      if (edge(pad, B.B) && CBZ.fpsReload) CBZ.fpsReload();          // reload
-      if (edge(pad, B.LB) && CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); // next weapon
+      if (!lb && edge(pad, B.B) && CBZ.fpsReload) CBZ.fpsReload();   // reload
       if (edge(pad, B.RB) && CBZ.fpsPrevWeapon) CBZ.fpsPrevWeapon(); // prev weapon
       // THE KEYBOARD MAP ON A PAD: Y = F (get in / get out of anything),
       // D-pad right = E held as long as the button is (use the thing; a hold
       // is the grab), D-pad left = Q (the verb wheel: a person's I J K L and
       // the rest; D-pad right then fires its highlighted verb).
       // (Gang City only; the other games keep Y as their one hand key, E)
-      const city = CBZ.game && CBZ.game.mode === "city";
-      if (edge(pad, B.Y) && !(CBZ.seatExit && CBZ.seatExit())) tapKey(city ? "f" : "e");
+      // (Gang City and the islands: the one key map, city/interactions.js)
+      const city = !!(CBZ.game && (CBZ.game.mode === "city" || (CBZ.economyMode && CBZ.economyMode())));
+      if (!lb && edge(pad, B.Y) && !(CBZ.seatExit && CBZ.seatExit())) tapKey(city ? "f" : "e");
       edge(pad, B.DRIGHT);
       padE(!!city && pressed(pad, B.DRIGHT));
       if (edge(pad, B.DLEFT) && city) tapKey("q");

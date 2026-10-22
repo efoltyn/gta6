@@ -21,7 +21,7 @@
 <link rel="stylesheet" href="css/mobile.css?v=mob1022b">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
 <link rel="stylesheet" href="css/city.css?v=lpanel1022">
-<link rel="stylesheet" href="css/campaign.css?v=cinelp1022">
+<link rel="stylesheet" href="css/campaign.css?v=cmd1022o">
 <link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
 </head>
@@ -590,7 +590,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/pushables.js?v=loose1013"></script>
 <script src="src/world/carfx.js?v=speed1014"></script>
 <script src="src/world/ground.js?v=dsl3"></script>
-<script src="src/world/cellblock.js?v=nopitch1022"></script>
+<script src="src/world/cellblock.js?v=cmd1022o"></script>
 <script src="src/world/yard.js?v=tow929"></script>
 <script src="src/world/razorwire.js?v=dsl3"></script>
 <script src="src/world/towers.js?v=tow929"></script>
@@ -722,7 +722,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/brain.js?v=nopitch1022"></script>
 <!-- systems/command.js: CBZ.command, orders obeyed or not (every game). Pure
      logic over CBZ.brain + CBZ.voice; games register their bodies (use). -->
-<script src="src/systems/command.js?v=ord1022b"></script>
+<script src="src/systems/command.js?v=cmd1022o"></script>
 <script src="src/entities/security.js?v=jas1020"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
@@ -802,7 +802,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=nopitch1022"></script>
 <script src="src/entities/npc.js?v=nopitch1022"></script>
-<script src="src/entities/ai.js?v=mnopitcbodymo"></script>
+<script src="src/entities/ai.js?v=cmd1022o"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -969,7 +969,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reinforcements.js?v=leave1014"></script>
 <script src="src/systems/lockdown.js?v=nopitch1022"></script>
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=cmd1022"></script>
+<script src="src/systems/prisonwarden.js?v=cmd1022o"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
@@ -980,7 +980,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/combat.js?v=mvoice1butt10"></script>
 <script src="src/systems/killstreaks.js?v=jailv1001"></script>
-<script src="src/systems/interact.js?v=cmd1022"></script>
+<script src="src/systems/interact.js?v=cmd1022o"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
 <script src="src/systems/prisontrade.js?v=nopitch1022"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
@@ -1059,7 +1059,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
-<script src="src/systems/gamepad.js?v=ijkl1022"></script>
+<script src="src/systems/gamepad.js?v=cmd1022o"></script>
 <script src="src/systems/fpsmode.js?v=mpeoplegoods1"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=voice1022"></script>
@@ -1507,7 +1507,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->
-<script src="src/city/law.js?v=people1022"></script>
+<script src="src/city/law.js?v=cmd1022o"></script>
 <script src="src/city/wanted.js?v=people1022"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=boot1013"></script>
@@ -1521,7 +1521,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=hands1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=people1022"></script>
+<script src="src/city/peds.js?v=cmd1022o"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1531,7 +1531,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/ladder.js: CBZ.cityLadder, the city body for CBZ.brain.demand (the
      demand ladder: a mugger, a doorman, a corner crew, a guard asking first).
      peds.js think() yields to it; nothing runs at parse. -->
-<script src="src/city/ladder.js?v=people1022"></script>
+<script src="src/city/ladder.js?v=cmd1022o"></script>
 <script src="src/entities/pedinstance.js?v=isleleak1022"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
@@ -1761,7 +1761,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
 <script src="src/city/verbword.js?v=btn1011"></script>
-<script src="src/city/interactions.js?v=mvenue1ord102"></script>
+<script src="src/city/interactions.js?v=cmd1022o"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
@@ -1835,7 +1835,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/interact.js?v=people1022"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=people1022"></script>
+<script src="src/city/orders.js?v=cmd1022o"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -1923,7 +1923,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/construction.js?v=news0930"></script>
 <script src="src/city/companies.js?v=fallstay1"></script>
 <script src="src/city/citystaff.js?v=leave1014"></script>
-<script src="src/city/playergang.js?v=dismiss1014"></script>
+<script src="src/city/playergang.js?v=cmd1022o"></script>
 <script src="src/city/promotion.js?v=rank1"></script>
 <script src="src/city/schedule.js?v=w09290219"></script>
 <script src="src/city/aigoals.js?v=dismiss1014"></script>
@@ -2071,7 +2071,7 @@ document.body.appendChild(b);}}catch(e){}})();
      people running real verbs, Holler is the social feed where a post is the
      act); phone.js draws it in 3D on a canvas screen and routes taps onto
      the glass. Also the city's one text sink (CBZ.cityPhoneNotify). -->
-<script src="src/city/phone_apps.js?v=football1014"></script>
+<script src="src/city/phone_apps.js?v=cmd1022o"></script>
 <script src="src/city/phone.js?v=phone2b"></script>
 <script src="src/city/killfeed.js?v=street1009"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
@@ -2104,9 +2104,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/agency.js?v=ijkl1022"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
-<script src="src/city/campaign_ui.js?v=fatal1022"></script>
+<script src="src/city/campaign_ui.js?v=cmd1022o"></script>
 <script src="src/city/campaign.js?v=camp1022b"></script>
-<script src="src/city/cinematics.js?v=mijkl10bodymo"></script>
+<script src="src/city/cinematics.js?v=cmd1022o"></script>
 <script src="src/systems/humancontact.js?v=bodymove1022"></script>
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
      (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
@@ -2509,7 +2509,7 @@ document.body.appendChild(b);}}catch(e){}})();
      cartel, an insurer or the victim's own relatives. Loads LAST of the sea
      family: it needs marine hulls, berths, yachts, sea crew, factions, gangs,
      captives, mission, power details and garrison all present above. -->
-<script src="src/city/piracy.js?v=leave1014"></script>
+<script src="src/city/piracy.js?v=cmd1022o"></script>
 
 <!-- THE CAPTAIN — the boat-captain career spine: the spawn-at-the-helm origin
      (origins.js's `voyage` verb defers into it), crew orders on real bodies
@@ -2519,7 +2519,7 @@ document.body.appendChild(b);}}catch(e){}})();
      marina hard stand. Loads after piracy.js (marineAutopilot, pirateProvoke)
      and before water_helm; every cross-read is feature-detected.
      Revert with ?cfg_CAPTAIN_V1=0. -->
-<script src="src/city/captain.js?v=cd0929"></script>
+<script src="src/city/captain.js?v=cmd1022o"></script>
 <!-- BOAT WALK — the jump key at the wheel stands you up onto your own deck
      (CBZ.boatStandUp, called by water_helm's Space edge and the touch GET UP
      pill), and a "take the helm" walk-up card at every hull's helm station
@@ -2594,6 +2594,11 @@ document.body.appendChild(b);}}catch(e){}})();
      a rally the President calls, the Capitol march): the nearest are ordinary
      rigs, the rest one instanced fill, capped per device. -->
 <script src="src/city/mob.js?v=heldprops1022"></script>
+<!-- THE ORDER TO FIRE ON THE CROWD (city/fireorder.js): you in uniform, a
+     crowd (mob.js in Gang City; the town hall on the islands), your officer's
+     "Fire." as CBZ.command.bigOrder's three answers. After mob.js, coup.js,
+     campaign_ui.js and orders.js; reads them all lazily. -->
+<script src="src/city/fireorder.js?v=fire1022"></script>
 <!-- THE NATIONAL ADDRESS (city/address.js): the address order puts the
      President on every TV (newsroom.js live feed); 3 to 5 statements, verb x
      target off the real world, each one a CBZ.politics.act. After politics.js. -->

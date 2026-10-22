@@ -3862,6 +3862,7 @@
   "world/yardfurniture.js"
  ],
  "drop": [
+  "src/city/fireorder.js",
   "src/vendor/WaterReflect.js",
   "src/vendor/DRACOLoader.js",
   "src/vendor/GLTFLoader.js",

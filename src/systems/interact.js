@@ -188,6 +188,7 @@
     // (systems/command.js: the uniform, what he thinks of you, his nerve)
     oback:    { label: "Back off",  fn: (a) => orderCon(a, "back") },
     odrop:    { label: "Drop it",   fn: (a) => orderCon(a, "drop") },
+    ocell:    { label: "Cell",      fn: (a) => orderCon(a, "cell") },
     join:     { label: "Join",      fn: (a) => CBZ.joinGang(a) },
     // ---- a crew collecting a debt you really owe (ai.js CBZ.prisonDemand):
     // pay it, or take the work that clears it. Walking off, running, swinging
@@ -302,6 +303,15 @@
   }
   CBZ.prisonWhoFor = whoFor;
 
+  // he has a cell of his own and is not in it (nor already on his way)
+  function outOfCell(a) {
+    const CB = CBZ.cellblock;
+    if (!CB || !CB.cells || !CB.sendHome || !a || !a.group || a._goHome || !(a._cellIdx >= 0)) return false;
+    const c = CB.cells[a._cellIdx];
+    if (!c || c.owner !== a) return false;
+    const p = a.group.position;
+    return CB.cellAt(p.x, p.z, -0.3, p.y) !== c;
+  }
   // THE RULE (systems/arrest.js): hands up / on his knees / down / out
   function cuffOk(a) {
     const AR = CBZ.arrest;
@@ -350,12 +360,17 @@
       if (PD().canWorkOff(a)) out.push("workOff");
       if (out.length) { out.push("grab", "punch"); return out; }
     }
+    // HE CAME BACK FOR WHAT YOU TOOK (ai.js ROBBED): give it back, or answer
+    // him with your hands
+    if (dem && dem.kind === "robbed" && (CBZ.game.cigs || 0) > 0) return ["pay", "grab", "punch"];
     // A COP: toss him, cuff him (only a man who gave up or is down), and the
     // orders a uniform gives: steel out is "Drop it", trouble is "Back off"
     if (CBZ.game.role === "cop" && !staff(a)) {
       const out = cuffOk(a) ? ["search", "detain"] : ["search"];
       if (a._shankOut) out.unshift("odrop");
       else if (a.aiState === "fight" || (a.huntPlayer || 0) > 0 || (a.playerGrudge || 0) >= 6) out.push("oback");
+      // out of his own cell: the order back to it (world/cellblock.js walks him)
+      if (!a._shankOut && a.aiState !== "fight" && outOfCell(a)) out.push("ocell");
       return out;
     }
     // THE MAN WHO REPORTED YOU, once you know it: lean on him, pay him, or take hold of him

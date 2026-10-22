@@ -512,7 +512,7 @@ body.campaign-phone-open .campaign-phone-peek { display: none !important; }
 .cine-ans[data-slot="left"] { grid-area: left; text-align: right; justify-self: end; }
 .cine-ans[data-slot="right"] { grid-area: right; text-align: left; justify-self: start; }
 .cine-ans.empty { visibility: hidden; }
-.cine-ans:hover { color: #fff; }
+.cine-ans:hover, .cine-ans.hover { color: #fff; }
 .cine-ans.picked { color: #ffd27a; }
 .cine-prompt.ready .cine-ans:not(.picked) { opacity: 1; }
 .cine-deck:has(.picked) .cine-ans:not(.picked) { opacity: .35; }

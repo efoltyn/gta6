@@ -2715,6 +2715,8 @@
     let item = "";
     if (ped.loot && econ) { econ.add(ped.loot, 1); item = ped.loot; ped.loot = null; }
     ped.robbed = true; ped.alarmed = 8; ped.fear = 10;
+    // he remembers what you took, and may come back for it (city/ladder.js)
+    if (CBZ.cityLadder && CBZ.cityLadder.robbed) { try { CBZ.cityLadder.robbed(ped, got, item); } catch (e) {} }
     CBZ.cityAlarm(ped.pos.x, ped.pos.z, 16, 1, CBZ.city.playerActor);
     // robbing a boss's wife of her millions is a personal insult to the crew.
     if (ped.protectGang) CBZ.cityFamilyHarmed(ped, true, false);
