@@ -305,6 +305,40 @@
     return z;
   }
 
+  // keep the part of a closed 2D polygon where a*x + b*y + c >= 0 (one
+  // Sutherland-Hodgman pass): the tail cap is cut along the lid's edges
+  function clipHalf(poly, a, b, c) {
+    const out = [];
+    if (!poly || poly.length < 3) return out;
+    const f = (q) => a * q[0] + b * q[1] + c;
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i], q = poly[(i + 1) % poly.length];
+      const fp = f(p), fq = f(q);
+      if (fp >= 0) out.push(p);
+      if ((fp >= 0) !== (fq >= 0)) {
+        const t = fp / (fp - fq);
+        out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+      }
+    }
+    const clean = [];
+    for (let i = 0; i < out.length; i++) {
+      const l = clean[clean.length - 1];
+      if (l && Math.hypot(out[i][0] - l[0], out[i][1] - l[1]) < 1e-5) continue;
+      clean.push(out[i]);
+    }
+    if (clean.length > 2 && Math.hypot(clean[0][0] - clean[clean.length - 1][0], clean[0][1] - clean[clean.length - 1][1]) < 1e-5) clean.pop();
+    return clean.length >= 3 ? clean : [];
+  }
+  // outer x of a section's flank (Lip..G0 chain) at height y, -1 off it
+  function sideXOf(sc, y) {
+    const p = sc.pts; let xo = -1;
+    for (let i = P.Lip; i < P.G0; i++) {
+      const a = p[i], b = p[i + 1];
+      if ((a[1] - y) * (b[1] - y) <= 0 && a[1] !== b[1]) xo = Math.max(xo, lerp(a[0], b[0], (y - a[1]) / (b[1] - a[1])));
+    }
+    return xo;
+  }
+
   // ---- geometry accumulators ----------------------------------------------
   function Acc() { this.p = []; this.n = []; }
   Acc.prototype.tri = function (a, b, c, na, nb, nc) {
@@ -411,6 +445,38 @@
       const zc = (zs[s] + zs[s + 1]) / 2;
       return zc > bed.z0 && zc < bed.z1;
     }
+    /* THE BOOT LID / TAILGATE IS A PANEL THAT OPENS (trunk wave, 2026-10-22).
+       Owner: carry a man to the back of a car and put him IN THE TRUNK. The
+       seam was a painted line; the lid is now the shell cells it outlined,
+       cut out of the body and handed back as a hinged leaf (out.lid), with a
+       real black box under it (the cavity) that a curled body fits in.
+         boot  the deck from the tail to the backlight base + the top of the
+               tail face; hinged at the backlight base, the tail rises
+         gate  the same deck + the backlight; hinged at the roof's rear edge
+       The tail face is cut ABOVE the tail lamps (the lamps stay on the body,
+       nothing is left hanging in the air when it opens) and, on a gate,
+       inside the D-pillars. */
+    const lid = (function () {
+      const k = S.rearLid;
+      if ((k !== "boot" && k !== "gate") || bed || S.flat || S.openTail || S.trunk === false) return null;
+      const zT = SH.zT;
+      const sT = SH.section(zT + 0.002), sL = SH.section(zT + 0.02);
+      const lowT = sT.pts[P.R][1], topT = sT.pts[P.RC][1];
+      const lampTop = lerp(sL.pts[P.R][1], sL.pts[P.RC][1], 0.68) + 0.09;     // carparts tailY + the tallest lens
+      let cutY = Math.max(lerp(lowT, sT.yEdge, k === "gate" ? 0.36 : 0.58), lampTop);
+      cutY = Math.min(cutY, Math.min(sT.yEdge, topT) - 0.05);
+      const sx = sideXOf(sT, cutY);
+      const halfX = Math.max(0.2, k === "gate" ? sx * 0.62 : sx - 0.09);
+      const zH = k === "gate" ? S.zRoofR : S.zDeck;
+      const hs = SH.section(zH);
+      return { kind: k, cutY: cutY, halfX: halfX, zHinge: zH, yHinge: hs.pts[P.RC][1], zDeck: S.zDeck };
+    })();
+    function cellLid(s, b) {
+      if (!lid || b < 8) return false;
+      const zc = (zs[s] + zs[s + 1]) / 2;
+      if (zc < lid.zDeck) return true;                                  // the deck
+      return lid.kind === "gate" && b >= 11 && zc < lid.zHinge;         // the backlight
+    }
     const V = (s, p, side) => { const q = secs[s].pts[p]; return [side * q[0], q[1], zs[s]]; };
 
     // pass 1: area-weighted smooth normals per (station, point, group, side)
@@ -451,6 +517,25 @@
 
     // pass 2: emit body cells by material (door + bed cells skipped)
     const acc = { paint: new Acc(), paintU: new Acc(), glass: new Acc(), trim: new Acc(), under: new Acc() };
+    // the lid's own buckets: outer paint, its glass (a tailgate's backlight),
+    // and the dark inner skin you see when it stands open
+    const lacc = lid ? { paint: new Acc(), glass: new Acc(), dark: new Acc() } : null;
+    const LID_T = 0.028;
+    // a lid cell, outside and in: the skin exactly where the body's was (so
+    // shut it IS the body), and the inner panel LID_T under it, facing in
+    function lidCell(q, n, m) {
+      const tgt = m === "glass" ? lacc.glass : m === "trim" ? lacc.dark : lacc.paint;
+      const tris = [[0, 1, 2], [0, 2, 3]];
+      for (const t of tris) {
+        const a = q[t[0]], b = q[t[1]], c = q[t[2]];
+        if (triArea2(a, b, c) <= 1e-9) continue;
+        tgt.tri(a, b, c, n[t[0]], n[t[1]], n[t[2]]);
+        if (m === "glass") continue;
+        const nn = [n[t[0]], n[t[1]], n[t[2]]].map((v, i) => v || faceN(a, b, c));
+        const ia = a.map((v, k) => v - nn[0][k] * LID_T), ib = b.map((v, k) => v - nn[1][k] * LID_T), ic = c.map((v, k) => v - nn[2][k] * LID_T);
+        lacc.dark.tri(ia, ic, ib, nn[0].map((v) => -v), nn[2].map((v) => -v), nn[1].map((v) => -v));
+      }
+    }
     for (let side = -1; side <= 1; side += 2) {
       for (let s = 0; s < NS - 1; s++) {
         for (let b = 0; b < NP - 1; b++) {
@@ -458,6 +543,7 @@
           const m = cellMat(s, b), gid = cellGroup(s, b), q = cellQuad(s, b, side);
           // S.flat: faceted on purpose (the stainless wedge truck) — face normals
           const n = S.flat ? [null, null, null, null] : [q[4], q[5], q[6], q[7]].map((ix) => normalAt(ix[0], ix[1], gid, side));
+          if (cellLid(s, b)) { lidCell(q, n, m === "paintU" ? "paint" : m); continue; }
           if (triArea2(q[0], q[1], q[2]) > 1e-9) acc[m].tri(q[0], q[1], q[2], n[0], n[1], n[2]);
           if (triArea2(q[0], q[2], q[3]) > 1e-9) acc[m].tri(q[0], q[2], q[3], n[0], n[2], n[3]);
         }
@@ -492,7 +578,122 @@
     }
     const lowY = (s) => secs[s].pts[P.R][1];
     cap(NS - 1, 1, (cy) => cy < lowY(NS - 1) ? "trim" : "paint");
-    if (!S.openTail) cap(0, -1, (cy) => cy < lowY(0) ? "trim" : "paint");
+    if (!S.openTail && !lid) cap(0, -1, (cy) => cy < lowY(0) ? "trim" : "paint");
+    let lidOut = null;
+    if (lid) lidOut = cutLid();
+
+    /* THE LID, ITS HOLE AND THE BOX UNDER IT (see `lid` above). The tail cap
+       is split along the lid's lower edge (cutY) and inside its sides
+       (±halfX): the body keeps the face under the lip and the two corner
+       posts, the lid takes the panel between them. Then the hole is made
+       solid from the inside — black jambs on the cut edges and a sealed
+       trunk (floor, walls, the wheel tubs, a front bulkhead on a boot) — so
+       an open lid shows a trunk, not the inside of a hollow shell. */
+    function cutLid() {
+      const zT = zs[0], secT = secs[0];
+      const yl = lid.cutY, xg = lid.halfX;
+      const ring = capPoly(0);
+      const triPoly = function (poly, z, dirZ, tgt, mfn) {
+        if (!poly || poly.length < 3) return;
+        let tris;
+        try { tris = THREE.ShapeUtils.triangulateShape(poly.map((q) => new THREE.Vector2(q[0], q[1])), []); } catch (e) { return; }
+        const n = [0, 0, dirZ];
+        for (const t of tris) {
+          const a = [poly[t[0]][0], poly[t[0]][1], z], b = [poly[t[1]][0], poly[t[1]][1], z], c = [poly[t[2]][0], poly[t[2]][1], z];
+          const target = mfn ? acc[mfn((a[1] + b[1] + c[1]) / 3)] : tgt;
+          const f = faceN(a, b, c);
+          if (f[2] * dirZ >= 0) target.tri(a, b, c, n, n, n); else target.tri(a, c, b, n, n, n);
+        }
+      };
+      const below = clipHalf(ring, 0, -1, yl);                 // y <= yl
+      const above = clipHalf(ring, 0, 1, -yl);                 // y >= yl
+      const capM = (cy) => cy < lowY(0) ? "trim" : "paint";
+      triPoly(below, zT, -1, null, capM);
+      triPoly(clipHalf(above, -1, 0, -xg), zT, -1, null, capM);   // x <= -xg: the right-hand post
+      triPoly(clipHalf(above, 1, 0, -xg), zT, -1, null, capM);    // x >= xg: the left-hand post
+      const face = clipHalf(clipHalf(above, -1, 0, xg), 1, 0, xg);   // |x| <= xg: the lid's face
+      triPoly(face, zT, -1, lacc.paint, null);
+      triPoly(face, zT + LID_T, 1, lacc.dark, null);              // its inner panel
+      const J = 0.07, jt = acc.trim;
+      // the lip under the lid's face, and the two jambs up the corner posts
+      quadDir(jt, [-xg, yl, zT], [xg, yl, zT], [xg, yl, zT + J], [-xg, yl, zT + J], [0, 1, 0]);
+      const topAtX = (x) => upperY(secT, x);
+      [1, -1].forEach(function (sd) {
+        const x = sd * xg, yt = topAtX(xg);
+        quadDir(jt, [x, yl, zT], [x, yt, zT], [x, yt, zT + J], [x, yl, zT + J], [-sd, 0, 0]);
+      });
+
+      // ---- the trunk box (black, the body's `under` bucket) ----
+      const floorY = S.floorY != null ? S.floorY : S.yB + 0.13;
+      const zA = zT + 0.03;
+      const zB = lid.kind === "boot" ? S.zDeck : S.zDeck + 0.12;
+      const zl = [zA];
+      for (let s = 0; s < NS; s++) if (zs[s] > zA + 0.02 && zs[s] < zB - 0.02) zl.push(zs[s]);
+      zl.push(zB);
+      // the box's half-width: inside the narrowest point of the skin at that z
+      const xwAt = function (z) {
+        const p = SH.section(z).pts;
+        let m = p[P.G0][0];
+        for (let i = P.R; i <= P.G0; i++) m = Math.min(m, p[i][0]);
+        return Math.max(0.25, m - 0.045);
+      };
+      const wallTop = (z) => SH.section(z).pts[P.G0][1] - 0.012;
+      const U = acc.under;
+      for (let k = 0; k + 1 < zl.length; k++) {
+        const z0 = zl[k], z1 = zl[k + 1], x0 = xwAt(z0), x1 = xwAt(z1);
+        quadDir(U, [-x0, floorY, z0], [x0, floorY, z0], [x1, floorY, z1], [-x1, floorY, z1], [0, 1, 0]);      // floor
+        [1, -1].forEach(function (sd) {
+          const s0 = SH.section(z0).pts, s1 = SH.section(z1).pts;
+          quadDir(U, [sd * x0, floorY, z0], [sd * x1, floorY, z1], [sd * x1, wallTop(z1), z1], [sd * x0, wallTop(z0), z0], [-sd, 0, 0]);   // side wall
+          // the ledge from the wall's top out to the deck edge
+          quadDir(jt, [sd * x0, wallTop(z0), z0], [sd * x1, wallTop(z1), z1], [sd * s1[P.G0][0], s1[P.G0][1], z1], [sd * s0[P.G0][0], s0[P.G0][1], z0], [0, 1, 0]);
+        });
+      }
+      // the tail wall inside the face: full width under the lip, the posts above it
+      const xa = xwAt(zA);
+      quadDir(U, [-xa, floorY, zA], [xa, floorY, zA], [xa, yl, zA], [-xa, yl, zA], [0, 0, 1]);
+      if (xa > xg + 0.01) {
+        [1, -1].forEach(function (sd) {
+          quadDir(U, [sd * xg, yl, zA], [sd * xa, yl, zA], [sd * xa, wallTop(zA), zA], [sd * xg, topAtX(xg) - 0.01, zA], [0, 0, 1]);
+        });
+      }
+      // a boot's front wall (the parcel-shelf bulkhead), its top following the deck
+      if (lid.kind === "boot") {
+        const sB = SH.section(zB), xb = xwAt(zB), nx = 8;
+        for (let i = 0; i < nx; i++) {
+          const xa0 = lerp(-xb, xb, i / nx), xa1 = lerp(-xb, xb, (i + 1) / nx);
+          quadDir(U, [xa0, floorY, zB], [xa1, floorY, zB], [xa1, upperY(sB, xa1) - 0.012, zB], [xa0, upperY(sB, xa0) - 0.012, zB], [0, 0, -1]);
+        }
+      }
+      // the rear wheel tubs, where the arch reaches into the trunk
+      const Ra = SH.Ra, zR = SH.zR;
+      const t0 = Math.max(zA, zR - Ra - 0.02), t1 = Math.min(zB, zR + Ra + 0.02);
+      let tub = null;
+      if (t1 - t0 > 0.04 && S.trackHalf) {
+        const xt = Math.max(0.3, S.trackHalf - S.wheelW / 2 - 0.07);
+        const ty = S.wheelR + Ra + 0.03;
+        const xo = Math.min(xwAt(t0), xwAt(t1));
+        if (xt < xo - 0.02 && ty > floorY + 0.05) {
+          tub = { z0: t0, z1: t1, x: xt, y: ty };
+          [1, -1].forEach(function (sd) {
+            quadDir(U, [sd * xt, floorY, t0], [sd * xt, floorY, t1], [sd * xt, ty, t1], [sd * xt, ty, t0], [-sd, 0, 0]);
+            quadDir(U, [sd * xt, ty, t0], [sd * xt, ty, t1], [sd * xo, ty, t1], [sd * xo, ty, t0], [0, 1, 0]);
+            quadDir(U, [sd * xt, floorY, t0], [sd * xo, floorY, t0], [sd * xo, ty, t0], [sd * xt, ty, t0], [0, 0, -1]);
+            if (t1 < zB - 0.01) quadDir(U, [sd * xt, floorY, t1], [sd * xo, floorY, t1], [sd * xo, ty, t1], [sd * xt, ty, t1], [0, 0, 1]);
+          });
+        }
+      }
+      // the lid's hinge: on the centre line of the deck (boot) or the roof (gate)
+      const openRx = lid.kind === "gate" ? 1.32 : 1.22;
+      return {
+        kind: lid.kind,
+        geos: { paint: lacc.paint.geo(), glass: lacc.glass.geo(), dark: lacc.dark.geo() },
+        hinge: { y: lid.yHinge, z: lid.zHinge }, openRx: openRx,
+        cutY: yl, halfX: xg, deckHalfX: secT.xG0,
+        cavity: { z0: zA, z1: zB, halfX: Math.min(xwAt(zA), xwAt(zB)), floorY: floorY, tub: tub,
+          topY: Math.min(wallTop(zA), wallTop(zB)) },
+      };
+    }
 
     // pass 4: DOORS — leaves re-sampled from the same section, and jambs on the hole
     const doorOut = [];
@@ -677,11 +878,11 @@
     }
 
     // pass 6: PANEL DETAIL — shut lines, cowl, wipers, antenna (trim bucket)
-    if (S.details !== false) addDetails(S, SH, acc.trim, doors, zs);
+    if (S.details !== false) addDetails(S, SH, acc.trim, doors, zs, lidOut);
 
     const geos = {};
     for (const k in acc) geos[k] = acc[k].geo();
-    const out = { geos: geos, doors: doorOut, section: SH.section, shape: SH, stations: zs, secs: secs };
+    const out = { geos: geos, doors: doorOut, lid: lidOut, section: SH.section, shape: SH, stations: zs, secs: secs };
     CBZ.carBody.last = out;          // the most recent loft (node checks / debugging)
     return out;
   }
@@ -711,19 +912,11 @@
     }
     return p[P.RC][1];
   }
-  function addDetails(S, SH, out, doors, zs) {
+  function addDetails(S, SH, out, doors, zs, lidOut) {
     const sec = SH.section;
     const zN = SH.zN, zT = SH.zT, zF = SH.zF, zR = SH.zR, Ra = SH.Ra;
     const OFF = 0.0025, SEAM = 0.007;
-    // outer x of the flank at height y (Lip..G0 chain), -1 when off it
-    function sideX(sc, y) {
-      const p = sc.pts; let xo = -1;
-      for (let i = P.Lip; i < P.G0; i++) {
-        const a = p[i], b = p[i + 1];
-        if ((a[1] - y) * (b[1] - y) <= 0 && a[1] !== b[1]) xo = Math.max(xo, lerp(a[0], b[0], (y - a[1]) / (b[1] - a[1])));
-      }
-      return xo;
-    }
+    const sideX = sideXOf;
     const h = 0.01;
     function topPt(x, z) {
       const y = upperY(sec(z), x);
@@ -846,7 +1039,19 @@
     const lid = S.rearLid || null;
     const secT = sec(zT + 0.002);
     const lowT = secT.pts[P.R][1];
-    if (lid === "boot" || lid === "gate") {
+    if (lidOut) {
+      // A LID THAT OPENS: its shut lines are drawn on the BODY side of the cut
+      // (under the lip and outside the corner posts), so they stay put when
+      // the lid lifts; the lid's own edges are the body's creases
+      const yl = lidOut.cutY, xg = lidOut.halfX, zf = zT - 0.0005, d = SEAM * 0.6;
+      const yTop = upperY(secT, xg) - 0.004;
+      strip(range(-xg - d, xg + d, 0.1).map((x) => facePt(x, yl - d, zf, -1)), SEAM);
+      [1, -1].forEach((sd) => strip(range(yl - d, yTop, 0.08).map((y) => facePt(sd * (xg + d), y, zf, -1)), SEAM));
+      if (lidOut.kind === "gate") {
+        const zg = lidOut.hinge.z + 0.012, xr = sec(zg).pts[P.G1][0] * 0.94;
+        strip(range(-xr, xr, 0.1).map((x) => topPt(x, zg)), SEAM);
+      }
+    } else if (lid === "boot" || lid === "gate") {
       const yl = lerp(lowT, secT.yEdge, lid === "gate" ? 0.36 : 0.58);
       const xg = Math.max(0.2, sideX(secT, yl) - (lid === "gate" ? 0.05 : 0.09));
       const zf = zT - 0.0005;

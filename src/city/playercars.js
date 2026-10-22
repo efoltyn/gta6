@@ -1142,7 +1142,9 @@
     });
     const fwH = Math.max(0.12, dashTopY - 0.05 - floorY);
     A.box(cabW - 0.12, fwH, 0.07, 0, floorY + fwH * 0.5, zF - 0.05, TONE.struct);          // firewall
-    A.box(cabW - 0.12, wallH, 0.07, 0, floorY + wallH * 0.5, zR + 0.05, TONE.struct);      // rear bulkhead
+    // a tailgate car's room runs on to the tail (carbody.js cutLid's box is its
+    // cargo floor): no wall across it, or the open gate looks at a bulkhead
+    if (!o.openRear) A.box(cabW - 0.12, wallH, 0.07, 0, floorY + wallH * 0.5, zR + 0.05, TONE.struct);      // rear bulkhead
     // headliner: PALE — the biggest surface a camera above the belt sees, and a
     // dark one turns the cabin into a hole
     A.rbox(Math.max(0.4, roofW - 0.10), 0.035, Math.max(0.30, (zTF - zTR) * 0.98), 0.012, 0, roofY - 0.028, (zTR + zTF) * 0.5, TONE.head);
@@ -1859,6 +1861,81 @@
     return g;
   }
 
+  /* ---- THE BOOT LID / TAILGATE as a hinged group (trunk wave). The leaf is
+     the shell cells carbody.js cut out of the deck (and, on a gate, the
+     backlight) plus the top of the tail face, with its dark inner panel.
+     Origin = the hinge, on the centre line: rotation.x = +openRx * t lifts
+     the tail end (CBZ.carLidPose in vehicles.js; city/cartrunk.js poses it).
+     userData.carLid is plain JSON (template clones copy userData by JSON):
+     the numbers the trunk needs — the cut, the hinge, the box under it. */
+  function loftLid(root, L, paint, glass, dark) {
+    const g = new THREE.Group();
+    g.name = "trunk_lid";
+    g.position.set(0, L.hinge.y, L.hinge.z);
+    const mk = function (geo, mat, zone) {
+      if (!geo) return null;
+      geo.translate(0, -L.hinge.y, -L.hinge.z);
+      geo._shared = true;
+      const m = new THREE.Mesh(geo, mat);
+      m.castShadow = false;
+      m.userData.noSeal = true;
+      if (zone) m.userData.paintZone = zone;
+      g.add(m);
+      return m;
+    };
+    mk(L.geos.paint, paint, "lid");
+    mk(L.geos.glass, glass, null);
+    mk(L.geos.dark, dark, null);
+    const C = L.cavity;
+    g.userData.carLid = {
+      kind: L.kind, hy: L.hinge.y, hz: L.hinge.z, openRx: L.openRx,
+      cutY: L.cutY, halfX: L.halfX, deckHalfX: L.deckHalfX,
+      cavity: { z0: C.z0, z1: C.z1, halfX: C.halfX, floorY: C.floorY, topY: C.topY,
+        tub: C.tub ? { z0: C.tub.z0, z1: C.tub.z1, x: C.tub.x, y: C.tub.y } : null },
+    };
+    root.add(g);
+    return g;
+  }
+  /* WHAT RIDES THE LID. The brand face, the model identity and the body's own
+     accents (the hatch's roof spoiler, a lip spoiler, deck stripes) are laid on
+     the shell as separate meshes; one that sits wholly on the part of the
+     shell that is now the lid moves into the lid group, or it would hang in
+     the air when the lid lifts. Run per instance, after the face. */
+  const _lidBox = new THREE.Box3();
+  function adoptLidParts(root) {
+    let lidG = null;
+    for (let i = 0; i < root.children.length; i++) {
+      const o = root.children[i];
+      if (o.userData && o.userData.carLid) { lidG = o; break; }
+    }
+    if (!lidG) return 0;
+    const L = lidG.userData.carLid;
+    const zTail = root.userData.partCtx && root.userData.partCtx.rearZ != null ? root.userData.partCtx.rearZ : -9;
+    let n = 0;
+    const kids = root.children.slice();
+    for (let i = 0; i < kids.length; i++) {
+      const o = kids[i];
+      if (o === lidG || !o.isMesh || !o.geometry) continue;
+      const ud = o.userData || {};
+      if (ud.paintZone || ud.playerWheel || ud.carDoor || ud.carLid) continue;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      const gb = o.geometry.boundingBox;
+      if (!gb || !isFinite(gb.min.x)) continue;
+      o.updateMatrix();
+      _lidBox.copy(gb).applyMatrix4(o.matrix);
+      const B = _lidBox;
+      if (B.min.y < L.cutY - 0.01) continue;                       // reaches under the lip: the body's
+      if (B.max.z > L.hz + 0.06 || (B.min.z + B.max.z) / 2 > L.hz - 0.01) continue;   // ahead of the hinge
+      const ax = Math.max(Math.abs(B.min.x), Math.abs(B.max.x));
+      const onFace = B.min.z < zTail + 0.15;
+      if (ax > (onFace ? L.halfX + 0.02 : L.deckHalfX + 0.08)) continue;   // a corner post's, or off the side
+      o.position.x -= lidG.position.x; o.position.y -= lidG.position.y; o.position.z -= lidG.position.z;
+      lidG.add(o);
+      n++;
+    }
+    return n;
+  }
+
   // body mesh from a loft geometry; noSeal because it is authored exact
   function addBody(root, geo, mat, zone) {
     if (!geo) return null;
@@ -1934,6 +2011,8 @@
     // the doors, cut from the shell (see carbody.js pass 4)
     const cabDark = cabinMat();
     B.doors.forEach(function (D) { loftDoor(root, D, paint, glass, cabDark); });
+    // the boot lid / tailgate, cut from the shell too (carbody.js cutLid)
+    if (B.lid) loftLid(root, B.lid, paint, glass, trim);
     // the cabin, read off the same shell
     const zF = S.axles[0], zR = S.axles[1];
     const midCab = B.section((S.zRoofF + S.zRoofR) / 2);
@@ -1965,6 +2044,8 @@
       beltY: midCab.yEdge, roofY: S.yRoof - S.roofCrown - 0.02,
       floorY: S.floorY, rows: b.rows, doorSpans: spans, seatLayout: b.seats || undefined,
       doors: S.doors.map((d) => ({ id: d.id, side: d.side, row: d.row, z0: d.z0, z1: d.z1 })),
+      // a tailgate opens onto the cargo floor (no back wall to the room)
+      openRear: !!(B.lid && B.lid.kind === "gate"),
     });
     // mirrors at the A-pillar base, plates/lamps/grilles come with the brand face
     // on the front door, just behind its leading edge (the A-pillar base)
@@ -2049,6 +2130,14 @@
       sport: /^(porsche|ferrari|enzo|aventador|veyron)$/.test(style),
       lines: CBZ.carBody.lines(B, 32),
       doors: S.doors.map((d) => [d.z0, d.z1, d.side]),
+      // the opening lid (carbody.js cutLid): anything laid on the deck or the
+      // tail above lidCutY rides the lid (adoptLidParts), so a face part must
+      // either sit under it or be happy to lift with it
+      lidKind: B.lid ? B.lid.kind : null, lidCutY: B.lid ? B.lid.cutY : null,
+      lidHingeZ: B.lid ? B.lid.hinge.z : null, lidHalfX: B.lid ? B.lid.halfX : null,
+      // a pickup's open bed (city/cartrunk.js lays a body in it)
+      bed: S.bed ? { z0: S.bed.z0, z1: S.bed.z1, floorY: S.bed.floorY,
+        halfX: B.section((S.bed.z0 + S.bed.z1) / 2).pts[P.G0][0] - 0.07 } : null,
       paint: paint,
     };
   }
@@ -2929,6 +3018,7 @@
       // out in the showroom colour.
       const rig = o._cbzDoorRig;
       if (rig && rig.doors) for (let i = 0; i < rig.doors.length; i++) if (!rig.doors[i].parent) rig.doors[i].traverse(paintOne);
+      if (rig && rig.lid && !rig.lid.parent) rig.lid.traverse(paintOne);
       paintOne(o);
     });
     function paintOne(o) {
@@ -3044,6 +3134,7 @@
       if (model) CBZ.carParts.applyModelIdentity(clone, model, ctx);
     }
     if (color != null) recolorBody(clone, color);
+    adoptLidParts(clone);
     return clone;
   }
 

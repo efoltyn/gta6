@@ -426,6 +426,8 @@
       angry: ["You killed {him}!", "You're dead for that!"],
     },
     restrained: { "*": ["Let me go.", "These are too tight.", "Where are you taking me?"] },
+    // shut in a car's trunk (city/cartrunk.js): through the lid
+    trunk: { "*": ["Let me out!", "Help! I'm in here!", "Let me out of here!", "Somebody! Help!"] },
     // kneeling by somebody he loved
     grief: { "*": ["No. No!", "Somebody help!", "Please. Please.", "Wake up. Wake up!"], kid: ["Mom? Mom!", "Get up. Please.", "Daddy?"] },
     // a grudge that waited for you

@@ -1055,10 +1055,15 @@
   const DOOR_ARC = 1.15;   // rad, fully open — a real front door stops at ~65°
   function bakeShutDoors(visual) {
     const doors = [];
-    for (const o of visual.children.slice()) if (o.userData && o.userData.carDoor) doors.push(o);
-    if (!doors.length) return;
+    let lid = null;
+    for (const o of visual.children.slice()) {
+      if (o.userData && o.userData.carDoor) doors.push(o);
+      else if (o.userData && o.userData.carLid && !lid) lid = o;
+    }
+    if (!doors.length && !lid) return;
     const buckets = new Map();
-    for (const g of doors) {
+    const leaves = lid ? doors.concat([lid]) : doors;
+    for (const g of leaves) {
       g.rotation.set(0, 0, 0);
       g.updateMatrix();
       for (const m of g.children) {
@@ -1085,7 +1090,7 @@
       visual.add(merged);
       shut.push(merged);
     });
-    visual._cbzDoorRig = { doors: doors, shut: shut, split: false };
+    visual._cbzDoorRig = { doors: doors, lid: lid, shut: shut, split: false };
   }
   function doorRigOf(car) {
     if (!car) return null;
@@ -1109,24 +1114,71 @@
     if (car && car._proxy) wakeCar(car);           // a door moving is the real car's job
     const rig = doorRigOf(car);
     if (!rig) return false;
-    const vis = rig.shut.length ? rig.shut[0].parent : null;
     let g = null;
     for (let i = 0; i < rig.doors.length; i++) if (rig.doors[i].userData.carDoor.id === id) { g = rig.doors[i]; break; }
-    if (!g || !vis) return false;
+    if (!g || !rig.shut.length) return false;
     t = Math.max(0, Math.min(1, +t || 0));
     g._cbzOpenT = t;
     g.rotation.y = -g.userData.carDoor.side * DOOR_ARC * t;
-    let any = false;
-    for (let i = 0; i < rig.doors.length; i++) if (rig.doors[i]._cbzOpenT > 0.002) { any = true; break; }
+    rigSplit(rig);
+    return true;
+  };
+  /* The first leaf that opens (a door or the lid) hides the bake and hangs
+     every live leaf; the last one shutting puts the bake back. */
+  function rigSplit(rig) {
+    const vis = rig.shut.length ? rig.shut[0].parent : null;
+    if (!vis) return;
+    let any = !!(rig.lid && rig.lid._cbzOpenT > 0.002);
+    for (let i = 0; !any && i < rig.doors.length; i++) if (rig.doors[i]._cbzOpenT > 0.002) any = true;
     if (any && !rig.split) {
       rig.split = true;
       for (let i = 0; i < rig.shut.length; i++) rig.shut[i].visible = false;
       for (let i = 0; i < rig.doors.length; i++) { rig.doors[i].visible = true; vis.add(rig.doors[i]); }
+      if (rig.lid) { rig.lid.visible = true; vis.add(rig.lid); }
     } else if (!any && rig.split) {
       rig.split = false;
       for (let i = 0; i < rig.shut.length; i++) rig.shut[i].visible = true;
       for (let i = 0; i < rig.doors.length; i++) vis.remove(rig.doors[i]);
+      if (rig.lid) vis.remove(rig.lid);
     }
+  }
+  /* THE BOOT LID / TAILGATE (playercars.js loftLid, city/cartrunk.js). The
+     spec is the lid group's userData.carLid (kind, hinge, the cut, the trunk
+     box under it); null = a body with no lid (a coupe's engine cover, a bike,
+     a van's hold, a pickup's open bed). A visual that was never baked (a
+     restyled player car) keeps its lid live in the tree: posed in place. */
+  function liveLid(car) {
+    const grp = car && (car.group || car);
+    const vis = grp && grp.userData ? (grp.userData.carVisual || grp) : null;
+    if (!vis || !vis.children) return null;
+    for (let i = 0; i < vis.children.length; i++) {
+      const o = vis.children[i];
+      if (o.userData && o.userData.carLid) return o;
+    }
+    return null;
+  }
+  function lidOf(car) {
+    const rig = doorRigOf(car);
+    if (rig) return rig.lid || null;
+    return liveLid(car);
+  }
+  CBZ.carLid = function (car) {
+    const g = lidOf(car);
+    return g ? g.userData.carLid : null;
+  };
+  CBZ.carLidGroup = function (car) { return lidOf(car); };
+  CBZ.carLidOpenT = function (car) { const g = lidOf(car); return g ? (g._cbzOpenT || 0) : 0; };
+  // t 0 = shut, 1 = up. Unlike a door it STAYS where it is put: nobody's
+  // sweep shuts a trunk lid, its owner (cartrunk.js) does.
+  CBZ.carLidPose = function (car, t) {
+    if (car && car._proxy) wakeCar(car);
+    const g = lidOf(car);
+    if (!g) return false;
+    t = Math.max(0, Math.min(1, +t || 0));
+    g._cbzOpenT = t;
+    g.rotation.x = (g.userData.carLid.openRx || 1.2) * t;
+    const rig = doorRigOf(car);
+    if (rig && rig.lid === g) rigSplit(rig);
     return true;
   };
   // the live door leaf group (hinge origin, swings with carDoorPose), or null

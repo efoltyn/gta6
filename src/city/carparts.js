@@ -1193,22 +1193,28 @@
   // ---- a strip laid along the body's top line (stripes), skipping glass ---
   function topStrip(root, ctx, xOff, halfW, material, lift) {
     if (!ctx.lines || !ctx.lines.top) return;
-    const T = ctx.lines.top, pos = [];
+    const T = ctx.lines.top, pos = [], lidPos = [];
+    // the run over an opening boot lid is its own strip, so it lifts with
+    // the lid (playercars.js adoptLidParts) instead of floating over the hole
+    const zLid = ctx.lidKind ? ctx.lidHingeZ : null;
     for (let i = 0; i + 1 < T.length; i++) {
       const a = T[i], b = T[i + 1];
       const onGlass = (g) => g > 0.02 && g < 0.98;
       if (onGlass(a[4]) || onGlass(b[4])) continue;
       const ya = a[1] + lift, yb = b[1] + lift;
       const x0 = xOff - halfW, x1 = xOff + halfW;
-      pos.push(x0, ya, a[0], x1, ya, a[0], x1, yb, b[0], x0, ya, a[0], x1, yb, b[0], x0, yb, b[0]);
+      const out = (zLid != null && Math.max(a[0], b[0]) <= zLid + 1e-4) ? lidPos : pos;
+      out.push(x0, ya, a[0], x1, ya, a[0], x1, yb, b[0], x0, ya, a[0], x1, yb, b[0], x0, yb, b[0]);
     }
-    if (!pos.length) return;
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    g.computeVertexNormals();
-    const m = new THREE.Mesh(g, material);
-    m.userData.noSeal = true;
-    root.add(m);
+    [pos, lidPos].forEach(function (list) {
+      if (!list.length) return;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(list, 3));
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, material);
+      m.userData.noSeal = true;
+      root.add(m);
+    });
   }
   function topAt(ctx, z) {
     const T = ctx.lines && ctx.lines.top;
