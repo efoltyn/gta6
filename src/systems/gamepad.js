@@ -74,7 +74,16 @@
   CBZ.padActive = function () { return padIndex >= 0 && lastPadT > lastKbT; };
   // the pad's button for a key the option chips print (null: no pad button)
   const GLYPH = { i: "LB+Y", j: "LB+X", k: "LB+A", l: "LB+B", f: "Y", e: "\u25B6", q: "\u25C0", m: "\u25B2" };
-  CBZ.padGlyph = function (key) { return GLYPH[String(key || "").toLowerCase()] || null; };
+  // THE PRISON'S CARD (systems/interact.js) keys a man's options E J K L and
+  // its E is the pad's Y (the one hand key there): LB + X/A/B are J/K/L on
+  // both cards, and the chord's top button is the card's first key, I in the
+  // city and E in the prison
+  function escapeMode() { return !!(CBZ.game && CBZ.game.mode === "escape"); }
+  const GLYPH_ESC = { e: "Y", j: "LB+X", k: "LB+A", l: "LB+B" };
+  CBZ.padGlyph = function (key) {
+    const k = String(key || "").toLowerCase();
+    return (escapeMode() ? GLYPH_ESC[k] : GLYPH[k]) || null;
+  };
 
   addEventListener("gamepadconnected", function (e) {
     if (padIndex < 0) padIndex = e.gamepad.index;
@@ -280,7 +289,11 @@
       const lb = pressed(pad, B.LB);
       if (lb) {
         if (!lbHeld) { lbHeld = true; lbChord = false; }
-        for (let c = 0; c < CHORD.length; c++) if (edge(pad, CHORD[c][0])) { tapKey(CHORD[c][1]); lbChord = true; }
+        for (let c = 0; c < CHORD.length; c++) if (edge(pad, CHORD[c][0])) {
+          const k = CHORD[c][1];
+          tapKey(k === "i" && escapeMode() ? "e" : k);
+          lbChord = true;
+        }
       } else if (lbHeld) {
         lbHeld = false;
         if (!lbChord && CBZ.fpsNextWeapon) CBZ.fpsNextWeapon();     // next weapon

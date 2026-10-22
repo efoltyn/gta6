@@ -823,6 +823,8 @@
     let r = null;
     try { r = ch.run ? ch.run() : { ok: true }; } catch (e) { r = { ok: false, why: "The line went dead." }; }
     const line = clean(said(r));
+    // he said "Sir?": the line stays open on the same question
+    if (r && r.pending) { CONV.reply = line; speak(line); return { ok: false, line: line, result: r, pending: true }; }
     CONV.state = "done"; CONV.reply = line; CONV.endAt = CLOCK + END_HOLD; CONV.result = r; CONV.onDrop = null;
     speak(line);
     emit("phone-call", { text: "Call with " + CONV.name + ": " + ch.label, with: CONV.id, choice: choiceId, ok: !!(r && r.ok) });
@@ -924,12 +926,12 @@
       let out = null;
       const opts = { game: "office", say: false, quiet: true,
         exec: function () { out = run(); return !(out && out.ok === false); } };
-      let r = Cm.issue(PA(), man, order, target || null, opts);
-      // a "Sir?" down a phone line is answered on the same call: you say it
-      // again, and that is the push (he does it, or he says no)
-      if (!out && r.answer === "hesitate") { opts.pushed = true; r = Cm.issue(PA(), man, order, target || null, opts); }
+      const r = Cm.issue(PA(), man, order, target || null, opts);
       if (out) return out;
-      if (r.answer === "hesitate") return { ok: false, why: "Are you sure, sir?" };
+      // "Sir?" stands as a "Sir?", the same as to his face: the order is
+      // pending on him (command.js), the call stays open on it, and giving
+      // the same order again inside the window is the push (choose() below)
+      if (r.answer === "hesitate") return { ok: false, pending: true, why: "Sir?" };
       if (r.answer === "turn") return { ok: false, why: "I won't be part of this." };
       return { ok: false, why: "No, sir." };
     };

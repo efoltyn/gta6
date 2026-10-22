@@ -122,7 +122,10 @@
     else b.setAttribute("data-tkey", String(act));
     const key = document.createElement("span");
     key.className = "ikey wkey";
-    const letter = (opts.key || (String(act).charAt(0) === "@" ? "e" : String(act))).toUpperCase();
+    const raw = opts.key || (String(act).charAt(0) === "@" ? "e" : String(act));
+    // the pad's button while the pad is in hand (systems/gamepad.js)
+    const pg = CBZ.padActive && CBZ.padActive() && CBZ.padGlyph ? CBZ.padGlyph(raw) : null;
+    const letter = pg || String(raw).toUpperCase();
     key.textContent = opts.hold ? "HOLD " + letter : letter;
     const word = document.createElement("span");
     word.className = "wverb";
@@ -245,7 +248,7 @@
     }
     const sig = act + "|" + verb + "|" + (opts.sub || "") + "|" + (opts.hold ? 1 : 0) + "|" + (opts.at ? 1 : 0) + "|" + (opts.key || "") +
       "|" + (opts.lead ? 1 : 0) + "|" + (opts.group ? 1 : 0) + "|" + (opts.stack || "") +
-      "|" + (opts.side ? 1 : 0) + "|" + (opts.label ? 1 : 0);
+      "|" + (opts.side ? 1 : 0) + "|" + (opts.label ? 1 : 0) + "|" + (CBZ.padActive && CBZ.padActive() ? "pad" : "");
     let p = pills.get(id);
     if (!p || p.sig !== sig) {
       if (p && p.wrap.parentNode) p.wrap.parentNode.removeChild(p.wrap);
