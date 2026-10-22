@@ -10,15 +10,6 @@ export const meta = { world: "city", fresh: true, dirties: true, timeoutMs: 4 * 
 
 export default async function (t) {
   await t.step(60);
-  await t.fn(`
-    window.__hides = [];
-    var O = THREE.Object3D.prototype;
-    CBZ.scene.traverse(function (o) { if (o.name && o.name.indexOf("crowdgpu:") === 0) { var v = o.visible; delete o.visible; o.__vis = v; } });
-    Object.defineProperty(O, "visible", { configurable: true, get: function () { return this.__vis !== false; }, set: function (x) {
-      if (!x && this.__vis !== false && this.name && this.name.indexOf("crowdgpu:") === 0 && window.__hides.length < 8) window.__hides.push(this.name + " " + String(new Error().stack).split("\n").slice(1, 7).join(" | "));
-      this.__vis = !!x; } });
-    return true;
-  `);
   const a0 = await t.fn(`
     var PP = CBZ.presidentPublic; if (!PP || !PP._protestNow) return { err: "no _protestNow" };
     PP._protestNow(14);
@@ -49,16 +40,16 @@ export default async function (t) {
     var bodyG = null, propG = null, meshes = [];
     CBZ.scene.traverse(function (o) {
       if (o.name === "crowdgpu:" + id) bodyG = o;
-      if (o.name === "mob-props") propG = o;
+      if (o.name === "mob-held:" + id) propG = o;
     });
     if (bodyG) bodyG.children.forEach(function (m) { meshes.push([m.name, m.visible, m.geometry && m.geometry.instanceCount, m.material && m.material.type]); });
     var cam = CBZ.camera && CBZ.camera.position;
     return { rows: rows, bodiesDrawn: bodiesDrawn, signs: signs, signsDrawn: signsDrawn, hidden: hidden, noLook: look, dy: dy,
       gpu: G.audit(), layer: grp.layer ? grp.layer.drawn : null, bodyChain: bodyG ? chain(bodyG) : null, propChain: propG ? chain(propG) : null,
-      meshes: meshes, hides: window.__hides, groups: (function () { var L = []; CBZ.scene.traverse(function (o) { if (o.name && o.name.indexOf("crowdgpu:") === 0) L.push(o.name + ":" + o.visible); }); return L; })(), audit: M.audit(), cam: cam ? [cam.x, cam.y, cam.z] : null, mode: CBZ.game.mode };
+      meshes: meshes, groups: (function () { var L = []; CBZ.scene.traverse(function (o) { if (o.name && o.name.indexOf("crowdgpu:") === 0) L.push(o.name + ":" + o.visible); }); return L; })(), audit: M.audit(), cam: cam ? [cam.x, cam.y, cam.z] : null, mode: CBZ.game.mode };
   `);
   if (!a || a.err || a.__err) return { ok: false, summary: "read: " + JSON.stringify(a) };
   t.log("protest", JSON.stringify(a));
-  const ok = a.signsDrawn <= a.bodiesDrawn;
-  return { ok: ok, summary: JSON.stringify({ rows: a.rows, bodiesDrawn: a.bodiesDrawn, signs: a.signs, signsDrawn: a.signsDrawn, dy: a.dy, layer: a.layer, gpuOk: a.gpu.ok, atlas: a.gpu.atlas, bodyChain: a.bodyChain, propChain: a.propChain, meshes: a.meshes, hides: a.hides, groups: a.groups }) };
+  const ok = a.signsDrawn <= a.bodiesDrawn && !/HIDDEN/.test(a.bodyChain || "") && /crowdgpu:/.test(a.propChain || "");
+  return { ok: ok, summary: JSON.stringify({ rows: a.rows, bodiesDrawn: a.bodiesDrawn, signs: a.signs, signsDrawn: a.signsDrawn, dy: a.dy, layer: a.layer, gpuOk: a.gpu.ok, atlas: a.gpu.atlas, bodyChain: a.bodyChain, propChain: a.propChain, meshes: a.meshes, groups: a.groups }) };
 }

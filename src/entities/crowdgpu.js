@@ -653,6 +653,19 @@
     g.instanceCount = 0;
     return { geo: g, A: A, cap: cap, n: 0 };
   }
+  /* WHERE A LAYER REALLY IS. Every body is placed by the vertex shader, so the
+     geometry's own bounds are ONE prototype body at the layer's origin. Any
+     system that measures the scene (core/viewscope.js hides subtrees past the
+     fog or out of view; core/farcull.js, city/cctv.js measure subtrees) took
+     a protest kilometres from the world origin for a 2 m thing AT the origin,
+     past the fog, and hid the bodies while the signs they hold (real
+     InstancedMeshes, measured by their instances) stayed drawn: the owner's
+     forest of placards with nobody under them. So each commit writes the
+     true extent of what it drew into every mesh's bounds (empty when it drew
+     nobody, which a measurer reads as "nothing here", never as "hide"). */
+  function setBounds(meshes, box, sph) {
+    for (let k = 0; k < meshes.length; k++) { const g = meshes[k].P.geo; g.boundingBox = box; g.boundingSphere = sph; }
+  }
   function layer(opts) {
     opts = opts || {};
     const cap = Math.max(1, opts.cap | 0 || 256);
@@ -719,11 +732,14 @@
       const mi = new THREE.Mesh(PI.geo, GPU.impMat);
       mi.frustumCulled = false; mi.castShadow = false; mi.visible = false; mi.matrixAutoUpdate = false; mi.name = "crowd-lod3";
       group.add(mi); meshes.push({ mesh: mi, P: PI, body: -1, lod: 3 });
+      _box.makeEmpty(); _sph.center.set(0, 0, 0); _sph.radius = -1;
+      setBounds(meshes, _box, _sph);
       parent.add(group);
       LAYERS.push(L);
       return true;
     }
     const _v = new THREE.Vector3();
+    const _box = new THREE.Box3(), _sph = new THREE.Sphere();
     function put(P, i, row0, frames, body) {
       const k = P.n++, o = k * 4, A = P.A;
       const lk = LOOKS[slook[i]] || LOOKS[0];
@@ -779,8 +795,12 @@
       for (let k = 0; k < meshes.length; k++) meshes[k].P.n = 0;
       const imp = bakeAtlas() ? meshes[meshes.length - 1].P : null;
       let n1 = 0, n2 = 0, n3 = 0;
+      let bx0 = Infinity, by0 = Infinity, bz0 = Infinity, bx1 = -Infinity, by1 = -Infinity, bz1 = -Infinity;
       for (let k = 0; k < m; k++) {
         const i = order[k];
+        if (sx[i] < bx0) bx0 = sx[i]; if (sx[i] > bx1) bx1 = sx[i];
+        if (sy[i] < by0) by0 = sy[i]; if (sy[i] > by1) by1 = sy[i];
+        if (sz[i] < bz0) bz0 = sz[i]; if (sz[i] > bz1) bz1 = sz[i];
         const lk = LOOKS[slook[i]] || LOOKS[0], body = lk.body;
         const Cl = CLIPS[sclip[i]];
         const dx = sx[i] - cx, dz = sz[i] - cz, d = Math.sqrt(dx * dx + dz * dz);
@@ -797,6 +817,13 @@
         if (P.n) for (const a in P.A) { const at = P.A[a]; at.needsUpdate = true; if (at.updateRange) { at.updateRange.offset = 0; at.updateRange.count = P.n * 4; } }
       }
       L.drawn = [0, n1, n2, n3];
+      // the extent of the people drawn (plus a body, plus the walk the GPU
+      // carries them on between cuts), in the layer's own space
+      if (m > 0) {
+        _box.min.set(bx0 - 1.5, by0 - 0.5, bz0 - 1.5); _box.max.set(bx1 + 1.5, by1 + 2.6, bz1 + 1.5);
+        _box.getBoundingSphere(_sph);
+      } else { _box.makeEmpty(); _sph.center.set(0, 0, 0); _sph.radius = -1; }
+      setBounds(meshes, _box, _sph);
       return m;
     }
     return L;

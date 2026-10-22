@@ -1609,6 +1609,7 @@
     if (atier[i] > T_FRONT) atier[i] = T_FRONT;
     STATS.realized++;
     // the instanced copy and its sign are gone from this very frame
+    S.drawn[i] = 0;
     if (R_.root) draw(CLOCK);
     return R.ped;
   }
@@ -2030,6 +2031,7 @@
     for (let k = m.agents.length - 1; k >= 0; k--) if (amob[m.agents[k]] === m.slot) release(m.agents[k]);
     m.agents.length = 0;
     // the living went home; the hurt and the dead stay, the store's now
+    if (m.PS) { if (m.PS.root.parent) m.PS.root.parent.remove(m.PS.root); m.PS = null; }
     if (m.G) { m.G.release(); m.G = null; }
     for (let k = LINES.length - 1; k >= 0; k--) if (LINES[k].mob === m.id) LINES.splice(k, 1);
     m.gone = true;
@@ -2054,6 +2056,15 @@
   // promoted. This file only says which clip each person is playing (cutClips,
   // when the store re-cuts). What stays instanced boxes here is what IS a box:
   // shields, sign boards, sticks, flags, bottles.
+  // WHAT THEY HOLD IS DRAWN BY THE SAME DRAW AS THEIR BODY (owner: "their
+  // signs generate before the people generate, so it looks like there's
+  // floating signs"). Each mob's held props (boards, sticks, flags, shields,
+  // bullhorns, phones) live INSIDE its body layer's own group (crowdgpu
+  // layer.root): whatever hides the bodies (the fog/frustum scope, a mode
+  // root, the layer not built yet) hides what they hold with them, and a
+  // prop goes on a row only when the last cut drew that row in the clip that
+  // holds it (crowdstore S.drawn / S.clip). Only what is no longer held (the
+  // dropped boards lying in the road) and things in flight are drawn apart.
   const PROP_CAP = Math.min(2048, CAP >> 2), STICK_CAP = Math.min(4096, CAP);
   const R_ = { built: false, root: null, parts: null, signs: Object.create(null), flags: Object.create(null), shots: null };
   const PARTS = ["shield", "stick"];
@@ -2064,27 +2075,64 @@
     m.userData.dynamic = true; m.userData.transient = true;
     return m;
   }
+  // shared geometry and materials (one of each for every prop set)
+  let SH_ = null;
+  function shared() {
+    if (SH_) return SH_;
+    const hg = new THREE.CylinderGeometry(0.105, 0.045, 0.28, 8); hg.rotateX(Math.PI / 2);
+    SH_ = {
+      box: new THREE.BoxGeometry(1, 1, 1), horn: hg,
+      shield: new THREE.MeshLambertMaterial({ color: 0xc8d6e2, transparent: true, opacity: 0.55, depthWrite: false }),
+      stick: new THREE.MeshLambertMaterial({ color: 0x8a6a44 }),
+      hornM: new THREE.MeshLambertMaterial({ color: 0xe6e1d3 }), phoneM: new THREE.MeshLambertMaterial({ color: 0x15171a }),
+      signMats: Object.create(null), flagMats: Object.create(null),
+    };
+    for (const k in SH_) if (SH_[k] && SH_[k].isMaterial) SH_[k]._shared = true;
+    return SH_;
+  }
+  function propSet(parent, name, held) {
+    const X = shared();
+    const grp = new THREE.Group(); grp.name = name; grp.userData.dynamic = true;
+    parent.add(grp);
+    const P = {};
+    P.shield = instanced(X.box, X.shield, held ? 160 : 120);
+    P.stick = instanced(X.box, X.stick, STICK_CAP);
+    for (const k of PARTS) grp.add(P[k]);
+    const set = { root: grp, parts: P, signs: Object.create(null), flags: Object.create(null), horn: null, phone: null };
+    if (held) {
+      set.horn = instanced(X.horn, X.hornM, 64); set.phone = instanced(X.box, X.phoneM, 256);
+      grp.add(set.horn); grp.add(set.phone);
+    }
+    return set;
+  }
   function build() {
     if (R_.built) return !!R_.root;
     R_.built = true;
     if (!THREE.InstancedMesh || typeof document === "undefined") return false;
     const root = arenaRoot(); if (!root) { R_.built = false; return false; }
-    const grp = new THREE.Group(); grp.name = "mob-props"; grp.userData.dynamic = true;
-    root.add(grp); R_.root = grp;
-    const P = {};
-    P.shield = instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0xc8d6e2, transparent: true, opacity: 0.55, depthWrite: false }), 120);
-    P.stick = instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0x8a6a44 }), STICK_CAP);
-    for (const k of PARTS) grp.add(P[k]);
-    R_.parts = P;
+    // the global set: what lies on the ground, and what is in the air
+    const set = propSet(root, "mob-fallen", false);
+    R_.root = set.root; R_.parts = set.parts; R_.signs = set.signs; R_.flags = set.flags;
     R_.shots = instanced(new THREE.BoxGeometry(0.09, 0.22, 0.09), new THREE.MeshLambertMaterial({ color: 0x5a7a4a }), 32);
-    grp.add(R_.shots);
-    // a leader's bullhorn and a filmer's phone, in the hand the bake measured
-    const hg = new THREE.CylinderGeometry(0.105, 0.045, 0.28, 8); hg.rotateX(Math.PI / 2);
-    R_.horn = instanced(hg, new THREE.MeshLambertMaterial({ color: 0xe6e1d3 }), 64);
-    R_.phone = instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0x15171a }), 256);
-    grp.add(R_.horn); grp.add(R_.phone);
+    R_.root.add(R_.shots);
     readGait();
     return true;
+  }
+  // a mob's held props: a child of ITS body layer's group (rebuilt with it)
+  function heldSet(m) {
+    const L = m.G && m.G.layer, lr = L && L.root;
+    if (!lr) { if (m.PS) blankSet(m.PS); return null; }
+    if (m.PS && m.PS.root.parent === lr) return m.PS;
+    if (m.PS && m.PS.root.parent) m.PS.root.parent.remove(m.PS.root);
+    m.PS = propSet(lr, "mob-held:" + m.id, true);
+    return m.PS;
+  }
+  function blankSet(set) {
+    for (const k in set.parts) set.parts[k].count = 0;
+    for (const k in set.signs) set.signs[k].count = 0;
+    for (const k in set.flags) set.flags[k].count = 0;
+    if (set.horn) set.horn.count = 0;
+    if (set.phone) set.phone.count = 0;
   }
   function readGait() {
     if (GAIT.read || !CBZ.crowdGPU) return;
@@ -2093,31 +2141,47 @@
     if (r && r.radPerM > 0) GAIT.run = r.radPerM;
     GAIT.read = true;
   }
-  function signMesh(text, support) {
+  function signMesh(set, text, support) {
     const key = (support ? "s:" : "p:") + text;
-    if (R_.signs[key]) return R_.signs[key];
-    let mats = null;
-    const props = PP();
-    if (props && props.signMats) { try { mats = props.signMats(text, support); } catch (e) { mats = null; } }
-    if (!mats) { const e = new THREE.MeshLambertMaterial({ color: 0xefe6cf }); mats = [e, e, e, e, e, e]; }
-    const m = instanced(new THREE.BoxGeometry(1, 1, 1), mats, PROP_CAP);
-    R_.root.add(m);
-    R_.signs[key] = m;
+    if (set.signs[key]) return set.signs[key];
+    const X = shared();
+    let mats = X.signMats[key];
+    if (!mats) {
+      const props = PP();
+      if (props && props.signMats) { try { mats = props.signMats(text, support); } catch (e) { mats = null; } }
+      if (!mats) { const e = new THREE.MeshLambertMaterial({ color: 0xefe6cf }); mats = [e, e, e, e, e, e]; }
+      X.signMats[key] = mats;
+    }
+    const m = instanced(X.box, mats, PROP_CAP);
+    set.root.add(m);
+    set.signs[key] = m;
     return m;
   }
-  function flagMesh(id) {
+  function flagMesh(set, id) {
     const key = String(id || "home");
-    if (R_.flags[key]) return R_.flags[key];
-    let tex = null;
-    const F = CBZ.flags;
-    if (F && F.texture) { try { tex = F.texture(id || (F.home ? F.home() : "republic")); } catch (e) { tex = null; } }
-    const face = new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex || null, side: THREE.DoubleSide });
-    if (!tex) face.color.setHex(0x1d3c7a);
-    const edge = new THREE.MeshLambertMaterial({ color: 0xdedad0 });
-    const m = instanced(new THREE.BoxGeometry(1, 1, 1), [face, face, edge, edge, edge, edge], PROP_CAP);
-    R_.root.add(m);
-    R_.flags[key] = m;
+    if (set.flags[key]) return set.flags[key];
+    const X = shared();
+    let mats = X.flagMats[key];
+    if (!mats) {
+      let tex = null;
+      const F = CBZ.flags;
+      if (F && F.texture) { try { tex = F.texture(id || (F.home ? F.home() : "republic")); } catch (e) { tex = null; } }
+      const face = new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex || null, side: THREE.DoubleSide });
+      if (!tex) face.color.setHex(0x1d3c7a);
+      const edge = new THREE.MeshLambertMaterial({ color: 0xdedad0 });
+      mats = X.flagMats[key] = [face, face, edge, edge, edge, edge];
+    }
+    const m = instanced(X.box, mats, PROP_CAP);
+    set.root.add(m);
+    set.flags[key] = m;
     return m;
+  }
+  function flushSet(set) {
+    for (const k in set.parts) { const M = set.parts[k]; M.instanceMatrix.needsUpdate = M.count > 0; }
+    for (const k in set.signs) set.signs[k].instanceMatrix.needsUpdate = set.signs[k].count > 0;
+    for (const k in set.flags) set.flags[k].instanceMatrix.needsUpdate = set.flags[k].count > 0;
+    if (set.horn) set.horn.instanceMatrix.needsUpdate = set.horn.count > 0;
+    if (set.phone) set.phone.instanceMatrix.needsUpdate = set.phone.count > 0;
   }
   // one box: T(x,y,z) * B * T(pivot) * Rx(rx) * T(0,oy,0) * S(sx,sy,sz), B = Ry(h) [* Rx(bp)]
   const _B = new Float32Array(9);
@@ -2195,26 +2259,24 @@
     if (!R_.built) build();
     if (!R_.root) return;
     const t0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
-    const P = R_.parts;
-    const n = { shield: 0, stick: 0 };
-    for (const k in R_.signs) R_.signs[k].count = 0;
-    for (const k in R_.flags) R_.flags[k].count = 0;
     const pp = player(), cam = CBZ.camera;
     const cx = cam && cam.position ? cam.position.x : (pp ? pp.x : 0), cz = cam && cam.position ? cam.position.z : (pp ? pp.z : 0);
     const PROP2 = 130 * 130;                   // props past this are a pixel or two
-    let bodies = 0, nh = 0, np = 0;
+    let bodies = 0;
     for (let mi = 0; mi < MOBS.length; mi++) {
      const m = MOBS[mi]; if (!m) continue;
      const A = m.agents;
+     bodies += A.length;
+     // no body layer, no held props: they are its children
+     const H = heldSet(m);
+     if (H) blankSet(H);
      // a crowd entirely past the prop range draws no props (its bodies are the store's)
      const far = Math.hypot(m.centroid.x - cx, m.centroid.z - cz) > 130 + Math.sqrt(A.length) * 4 + 450;
-     bodies += A.length;
-     if (far) continue;
+     if (far && !H) continue;
+     const P = H ? H.parts : null;
      for (let k = 0; k < A.length; k++) {
       const i = A[k];
       if (amob[i] !== mi || arig[i] >= 0) continue;
-      const x = ax[i], y = ay[i], z = az[i];
-      const dx = x - cx, dz = z - cz;
       // a runner lets go of the sign as they break (it drops, it never vanishes
       // in the air); so does somebody getting down low
       if ((aact[i] === ACT.flee || aact[i] === ACT.cover) && (arole[i] === ROLE.sign || arole[i] === ROLE.flag)) {
@@ -2222,50 +2284,49 @@
         dropAgentProp(i, S.panicT[i] > 0 ? S.fleeX[i] : m.centroid.x, S.panicT[i] > 0 ? S.fleeZ[i] : m.centroid.z);
         _runnerDrop = false;
       }
+      if (!H || far) continue;
+      const x = ax[i], y = ay[i], z = az[i];
+      const dx = x - cx, dz = z - cz;
       if (dx * dx + dz * dz > PROP2 || aact[i] === ACT.down || aact[i] === ACT.flee || aact[i] === ACT.cover) continue;
-      // A SIGN IS ONLY EVER IN A HAND THAT IS THERE (owner: "their signs
-      // generate before the people generate, so it looks like there's floating
-      // signs"). The store marks who the GPU actually drew on its last cut
-      // (crowdgpu layer.shown: in range, in front, inside a tier's cap) and
-      // with which clip; the prop is drawn only on that body, in the pose
-      // that holds it. No body yet, no sign.
+      // only on a body the last cut DREW, in the clip that holds the thing
       if (!S.drawn[i]) continue;
       const r = arole[i], cl = S.clip[i];
       base(ahd[i], 0);
-      if (r === ROLE.officer && n.shield < P.shield.instanceMatrix.count) {
-        putBox(P.shield, n.shield, x, y, z, -0.1, 1.05, 0.42, 0, 0, 0.6, 1.0, 0.04); n.shield++;
+      if (r === ROLE.officer) {
+        if (P.shield.count < P.shield.instanceMatrix.count) { putBox(P.shield, P.shield.count, x, y, z, -0.1, 1.05, 0.42, 0, 0, 0.6, 1.0, 0.04); P.shield.count++; }
       } else if (r === ROLE.sign) {
         if (cl !== CL.sign && cl !== CL.signWalk) continue;
         // the same placard a full rig holds (president_public.js giveSign),
         // where poses.js pubPlacard puts it: the stick upright in both fists
         // in front of the chest, the board over the head
         const L = placard();
-        const sm = signMesh(m.slogans[asign[i] % m.slogans.length], m.support);
+        const sm = signMesh(H, m.slogans[asign[i] % m.slogans.length], m.support);
         const gy = L.gripY + Math.sin(t * 1.4 + i) * 0.017, gz = L.gripZ;
         if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, x, y, z, 0, gy + L.boardY, gz + L.boardZ, 0, 0, L.boardW, L.boardH, L.boardT); sm.count++; }
-        if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, x, y, z, 0, gy + L.stickBot + L.stickLen / 2, gz, 0, 0, L.stickW, L.stickLen, L.stickW * 0.6); n.stick++; }
+        if (P.stick.count < STICK_CAP) { putBox(P.stick, P.stick.count, x, y, z, 0, gy + L.stickBot + L.stickLen / 2, gz, 0, 0, L.stickW, L.stickLen, L.stickW * 0.6); P.stick.count++; }
       } else if (r === ROLE.flag) {
         if (cl !== CL.flag && cl !== CL.flagWalk) continue;
-        const fm = flagMesh(m.flag);
+        const fm = flagMesh(H, m.flag);
         if (fm.count < fm.instanceMatrix.count) {
           const wv = Math.sin(t * 2.2 + i * 0.7) * 0.1;
           putBox(fm, fm.count, x, y, z, -0.22, 2.2, 0.0, wv, 0, 0.02, 0.4, 0.62); fm.count++;
         }
-        if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, x, y, z, -0.22, 1.92, 0.3, 0, 0, 0.034, 0.9, 0.034); n.stick++; }
+        if (P.stick.count < STICK_CAP) { putBox(P.stick, P.stick.count, x, y, z, -0.22, 1.92, 0.3, 0, 0, 0.034, 0.9, 0.034); P.stick.count++; }
       } else if (cl === CL.bullhorn) {
         const g = gripOf("bullhorn", abody[i]);
-        if (g && nh < R_.horn.instanceMatrix.count) { putBox(R_.horn, nh++, x, y, z, g.x, g.y + 0.075, g.z + 0.13, 0, 0, 1, 1, 1); }
+        if (g && H.horn.count < H.horn.instanceMatrix.count) { putBox(H.horn, H.horn.count++, x, y, z, g.x, g.y + 0.075, g.z + 0.13, 0, 0, 1, 1, 1); }
       } else if (cl === CL.film) {
         const g = gripOf("film", abody[i]);
-        if (g && np < R_.phone.instanceMatrix.count) { putBox(R_.phone, np++, x, y, z, g.x, g.y + 0.05, g.z + 0.02, 0, 0, 0.072, 0.145, 0.012); }
+        if (g && H.phone.count < H.phone.instanceMatrix.count) { putBox(H.phone, H.phone.count++, x, y, z, g.x, g.y + 0.05, g.z + 0.02, 0, 0, 0.072, 0.145, 0.012); }
       }
      }
+     if (H) flushSet(H);
     }
-    R_.horn.count = nh; R_.horn.instanceMatrix.needsUpdate = nh > 0;
-    R_.phone.count = np; R_.phone.instanceMatrix.needsUpdate = np > 0;
     // WHAT WAS DROPPED, lying flat where it fell (past the rigid-body range):
     // local (a, b, c) -> (a, c, -b) under Ry(h) Rx(-pi/2): the stick along the
     // ground, the board's face to the sky
+    blankSet(R_);
+    const P = R_.parts;
     if (!fallenTtl) fallenTtl = (ST.audit && ST.audit().bodyTtl) || 600;
     const ttl = fallenTtl;
     while (FALLEN.length && CLOCK - FALLEN[0].t > ttl) FALLEN.shift();
@@ -2274,21 +2335,18 @@
       const dx = f.x - cx, dz = f.z - cz;
       if (dx * dx + dz * dz > PROP2) continue;
       base(f.h, -Math.PI / 2);
-      if (f.k === "shield") { if (n.shield < P.shield.instanceMatrix.count) { putBox(P.shield, n.shield, f.x, f.y, f.z, 0.3, 0.5, 0.03, 0, 0, 0.6, 1.0, 0.04); n.shield++; } continue; }
+      if (f.k === "shield") { if (P.shield.count < P.shield.instanceMatrix.count) { putBox(P.shield, P.shield.count++, f.x, f.y, f.z, 0.3, 0.5, 0.03, 0, 0, 0.6, 1.0, 0.04); } continue; }
       if (f.k === "sign") {
         // face up, the board resting on its own stick (the laid rig prop's frame)
         const L = placard(), y0 = f.y + 0.016;
-        if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, f.x, y0, f.z, 0, L.stickBot + L.stickLen / 2, 0, 0, 0, L.stickW, L.stickLen, L.stickW * 0.6); n.stick++; }
-        const sm = signMesh(f.text, f.support);
+        if (P.stick.count < STICK_CAP) { putBox(P.stick, P.stick.count++, f.x, y0, f.z, 0, L.stickBot + L.stickLen / 2, 0, 0, 0, L.stickW, L.stickLen, L.stickW * 0.6); }
+        const sm = signMesh(R_, f.text, f.support);
         if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, f.x, y0, f.z, 0, L.boardY, L.boardZ, 0, 0, L.boardW, L.boardH, L.boardT); sm.count++; }
         continue;
       }
-      if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, f.x, f.y, f.z, 0.45, 0.35, 0.02, 0, 0, 0.034, 1.0, 0.034); n.stick++; }
+      if (P.stick.count < STICK_CAP) { putBox(P.stick, P.stick.count++, f.x, f.y, f.z, 0.45, 0.35, 0.02, 0, 0, 0.034, 1.0, 0.034); }
     }
-    P.shield.count = n.shield; P.stick.count = n.stick;
-    for (const k in P) { const M = P[k]; M.instanceMatrix.needsUpdate = M.count > 0; }
-    for (const k in R_.signs) R_.signs[k].instanceMatrix.needsUpdate = R_.signs[k].count > 0;
-    for (const k in R_.flags) R_.flags[k].instanceMatrix.needsUpdate = R_.flags[k].count > 0;
+    flushSet(R_);
     // projectiles in flight
     const SH = R_.shots; let ns = 0;
     base(0, 0);
@@ -2307,11 +2365,7 @@
   }
   function blank() {
     if (!R_.root) return;
-    if (R_.horn) R_.horn.count = 0;
-    if (R_.phone) R_.phone.count = 0;
-    for (const k in R_.parts) R_.parts[k].count = 0;
-    for (const k in R_.signs) R_.signs[k].count = 0;
-    for (const k in R_.flags) R_.flags[k].count = 0;
+    blankSet(R_);
     if (R_.shots) R_.shots.count = 0;
   }
 
