@@ -37,6 +37,10 @@
   // Steeper at the top: the now-RARE 5★ floods the streets with heavy units so it
   // FEELS overwhelming — a brutal crescendo to match the much harder wanted climb.
   const COP_TARGET = [0, 2, 4, 8, 12, 20];
+  /* THE ONE GATE: the economy's worlds (Gang City and the islands) have a law.
+     CBZ.economyMode is the shared answer; the fallback is the same two modes. */
+  function econ() { return CBZ.economyMode ? !!CBZ.economyMode() : (g.mode === "city" || g.mode === "archipelago"); }
+  function onIsles() { return g.mode === "archipelago"; }
   let lastCrimeT = 0, busting = false, arrestScene = null;
   // V2 module state: the base-trespass lock, the "military hardware just got
   // stolen" stamp (lets forceStars escalate an air theft to a real 5★), and the
@@ -473,7 +477,7 @@
 
   // ---- DISGUISE: pull a mask up and witnesses can't ID you (no stars). [T] ----
   addEventListener("keydown", function (e) {
-    if (e.repeat || g.mode !== "city" || g.state !== "playing") return;
+    if (e.repeat || !econ() || g.state !== "playing") return;
     if ((e.key || "").toLowerCase() !== "t") return;
     e.preventDefault();
     g.cityMasked = !g.cityMasked;
@@ -981,6 +985,9 @@
   // where the jail takes you in. The gate is games/jail.js's compound door;
   // with no jail package mounted the precinct desk stands in.
   function stationGate() {
+    // the islands: the island's own station (world/island_police.js) — its
+    // kerb, its door, its counter
+    if (onIsles()) return CBZ.islandPolice && CBZ.islandPolice.gate ? CBZ.islandPolice.gate(false) : null;
     const st = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
     if (!st) return null;
     const d = st.lot && st.lot.building && st.lot.building.door;
@@ -989,6 +996,9 @@
     return { x: st.x, z: st.z, nx: nx / nl, nz: nz / nl, desk: { x: st.x, z: st.z } };
   }
   function jailGate() {
+    // the islands have no County: a heavy collar goes into the island
+    // station's lock-up first, and the prison transfer comes from there
+    if (onIsles()) return (CBZ.islandPolice && CBZ.islandPolice.gate ? CBZ.islandPolice.gate(true) : null);
     const j = CBZ.cityJailGate && CBZ.cityJailGate();
     return j || stationGate();
   }
@@ -1071,7 +1081,7 @@
   if (CBZ.mission && CBZ.mission.onInterrupt) {
     CBZ.mission.onInterrupt(function (reason) {
       if (reason === "death") abortArc("dead");
-      else if (reason === "mode" && g.mode !== "city") abortArc("mode");
+      else if (reason === "mode" && !econ()) abortArc("mode");
     });
   }
   CBZ.cityArrestActive = function () { return !!(arrestScene && !arrestScene.finished && arrestScene.phase !== "legacy"); };
@@ -1173,6 +1183,7 @@
   function bookIn(sc) {
     if (!sc || sc.finished) return;
     if (sc.petty) { pettyRelease(sc); return; }
+    if (onIsles() && islandHold(sc)) return;
     const lost = forfeit(sc);
     let took = false;
     if (CBZ.cityBookIn) {
@@ -1201,6 +1212,75 @@
     if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(lost, toJail, { note: (sc.opts || {}).note });
     else toJail();
   }
+  /* ============================================================
+     THE ISLAND LOCK-UP. A heavy collar on the islands is walked into a cell
+     of the island's own station (world/island_police.js). He is turned loose
+     of the cuffs inside, the officer steps back out through the door, the
+     door is shut and locked behind him, and he waits there; only then does
+     the prison transfer come (the legacy overlay + toJail: the island has no
+     County to book him at). Returns false if there is no cell to put him in
+     (no station, or the walk never reached one): the transfer comes at once.
+     ============================================================ */
+  const CELL_HOLD = 16;          // s behind the bars before the van
+  function islandHold(sc) {
+    const IP = CBZ.islandPolice, P = CBZ.player;
+    if (!IP || !IP.cellAt || !P || !sc.atDesk) return false;
+    const cell = IP.cellAt(P.pos.x, P.pos.z);
+    if (!cell || cell.locked) return false;
+    if (sc.take && !sc.take.done) { try { sc.take.finish(); } catch (e) {} }
+    sc.take = null;
+    dropHolds(sc);
+    forfeit(sc);
+    evidenceSeize();                                   // the property bag, at the cell
+    sc.phase = "cell"; sc.t = 0; sc.cell = cell; sc._shut = false;
+    return true;
+  }
+  function islandCellTick(sc, dt) {
+    const P = CBZ.player, ch = CBZ.playerChar, cop = sc.cop, cell = sc.cell;
+    const IP = CBZ.islandPolice;
+    if (!sc._shut) {
+      // the officer goes back out through the door before it shuts
+      if (P) { P._cityArrested = true; P.speed = 0; }
+      if (ch) { ch.cuffed = true; if (CBZ.animChar) CBZ.animChar(ch, 0, dt); }
+      let clear = true;
+      if (cop && !cop.dead && IP && IP.cellAt(cop.pos.x, cop.pos.z) === cell) {
+        clear = false;
+        const f = cell.front;
+        if (CBZ.moves && cop.group) {
+          const m = CBZ.moves.motor(cop);
+          _copHands.face = Math.atan2(f.x - cop.pos.x, f.z - cop.pos.z);
+          CBZ.moves.step(m, cop.pos, cop.group.rotation.y, f.x, f.z, _copHands, dt);
+          cop.group.rotation.y = m.yaw;
+          cop.group.position.set(cop.pos.x, cop.pos.y || 0, cop.pos.z);
+          if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, m.gs, dt);
+        }
+      }
+      if (clear || sc.t > 5) {
+        if (!clear && cop && !cop.dead) {                // still in the doorway: out he steps
+          cop.pos.x = cell.front.x; cop.pos.z = cell.front.z;
+          if (cop.group) cop.group.position.set(cop.pos.x, cop.pos.y || 0, cop.pos.z);
+          if (CBZ.bodyTeleported) CBZ.bodyTeleported(cop);
+        }
+        if (IP && IP.lockUp) IP.lockUp(cell.i, P);
+        // the ties come off through the bars; the cell holds him now
+        if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(false); } catch (e) {} }
+        if (ch) { ch.cuffed = false; ch.handsUp = false; }
+        if (P) P._cityArrested = false;
+        if (cop) cop._arrestingPlayer = false;
+        sc._shut = true; sc.t = 0;
+      }
+      return;
+    }
+    if (P) P._cityArrested = false;
+    if (sc.t < CELL_HOLD) return;
+    // THE VAN: the island's prisoners go to the prison
+    sc.finished = true;
+    if (IP && IP.unlock) IP.unlock(cell.i);
+    const opts = sc.opts || {};
+    if (CBZ.cityBustOverlay) CBZ.cityBustOverlay(sc.lost || 0, toJail, { note: opts.note });
+    else toJail();
+  }
+
   // ============================================================
   //  PETTY RELEASE — the 1-2 star ending. Charged once, at the desk (or on the
   //  kerb when no unit could ride you in): a fine scaled by stars (cooperating
@@ -1242,10 +1322,14 @@
     arrestScene = null; busting = false;
     if (CBZ.cityWantedReset) CBZ.cityWantedReset();          // heat, stars, g.busted
     const P = CBZ.player, gate = stationGate();
-    if (P && P.pos && gate && g.mode === "city") {
-      const x = gate.x + gate.nx * 3.2, z = gate.z + gate.nz * 3.2;
-      P.pos.set(x, 0, z); P.vy = 0; P.grounded = true; P.speed = 0;
-      const yaw = Math.atan2(gate.nx, gate.nz);                // out the door, at the street
+    if (P && P.pos && gate && econ()) {
+      // the door step, facing the street (an island station names it; the
+      // city's desk gate is the door and its outward normal)
+      const O = gate.out || { x: gate.x + gate.nx * 3.2, z: gate.z + gate.nz * 3.2, nx: gate.nx, nz: gate.nz };
+      const x = O.x, z = O.z;
+      const y = (g.mode !== "city" && CBZ.floorAt) ? CBZ.floorAt(x, z, 50) : 0;
+      P.pos.set(x, isFinite(y) ? y : 0, z); P.vy = 0; P.grounded = true; P.speed = 0;
+      const yaw = Math.atan2(O.nx, O.nz);                // out the door, at the street
       if (CBZ.playerChar && CBZ.playerChar.group) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, yaw, 0); }
       if (CBZ.cam) { CBZ.cam.yaw = yaw + Math.PI; if (CBZ.CITY_TP) CBZ.cam.pitch = CBZ.CITY_TP.PITCH; }
       if (typeof CBZ.cityFaceOpen === "function") { try { CBZ.cityFaceOpen(P); } catch (e) {} }   // mode.js: the open view
@@ -1275,9 +1359,9 @@
     const sc = arrestScene;
     // NO COLLAR, NO LATCH: busted with no scene and nothing booking you in
     // (busting is held through the booking) is a latch nobody cleared
-    if (!sc && !busting && g.busted && g.mode === "city") g.busted = false;
+    if (!sc && !busting && g.busted && econ()) g.busted = false;
     if (!sc || sc.finished) return;
-    if (g.mode !== "city") { abortArc("mode"); return; }
+    if (!econ()) { abortArc("mode"); return; }
     if (!(dt > 0) || dt > 0.4) dt = 0.05;
     const P = CBZ.player, ch = CBZ.playerChar, c = sc.cop;
     if (P && P.dead) { abortArc("dead"); return; }
@@ -1288,6 +1372,9 @@
     const locked = !(sc.take && !sc.take.done) && sc.phase !== "cuffed";
     if (P) { P._cityArrested = locked; if (locked) P.speed = 0; }
     if (sc.stars0 == null) sc.stars0 = Math.max(1, g.wanted | 0);
+
+    // ---- THE ISLAND LOCK-UP (islandHold): behind the bars, then the van ----
+    if (sc.phase === "cell") { islandCellTick(sc, dt); return; }
 
     // ---- LEGACY (flag off, or an arc that gave up): the original pose. ----
     if (sc.phase === "legacy") {
@@ -1483,6 +1570,39 @@
     if (sc.phase === "walkin") {
       const gate = sc.gate || (sc.gate = gateFor(sc));
       if (!gate) { if (sc.take) sc.take.finish(); bookIn(sc); return; }
+      // A GATE WITH A WAY IN (an island station: the step, inside the door,
+      // the hall, the cell door, the cell): walked point by point, the last
+      // one being the desk
+      if (gate.path && gate.path.length) {
+        if (sc._wp == null) sc._wp = 0;
+        const last = sc._wp >= gate.path.length - 1;
+        const wp = gate.path[Math.min(sc._wp, gate.path.length - 1)];
+        const AR0 = CBZ.arrest;
+        if (!sc.take && !sc._walkTake && AR0 && AR0.take && cop && !cop.dead) {
+          sc._walkTake = true;
+          sc.take = CBZ.cityArrestTake(cop, { arc: sc.opts && sc.opts.arc, arcWalk: true }) || null;
+          if (sc.take === true) sc.take = null;
+        }
+        if (sc.take) {
+          sc._goal = wp;
+          if (sc.take.phase === "arrived") {
+            if (!last) { sc._wp++; sc.t = 0; if (sc.take.resume) sc.take.resume(); return; }
+            sc.take.finish(); sc.take = null;
+            sc.atDesk = true;
+            bookIn(sc); return;
+          }
+          if (sc.t >= MARCH_MAX * 2.2) { sc.take.finish(); sc.take = null; bookIn(sc); }
+          return;
+        }
+        const movedW = marchTo(P, ch, cop, wp.x, wp.z, dt);
+        if (movedW <= 0.0001) {
+          if (!last) { sc._wp++; sc.t = 0; return; }
+          sc.atDesk = true;
+          bookIn(sc); return;
+        }
+        if (sc.t >= MARCH_MAX) { bookIn(sc); return; }
+        return;
+      }
       const target = (!sc._atGate && gate.gate) ? gate.gate : (gate.desk || gate);
       // cuffed and walked in by the take (a fresh one after the ride)
       const AR = CBZ.arrest;
@@ -1742,7 +1862,7 @@
     return !!(CBZ.cityChopperPaints && CBZ.cityChopperPaints());
   }
   CBZ.onUpdate(33, function (dt) {
-    if (g.mode !== "city") return;
+    if (!econ()) return;
     const sinceCrime = CBZ.now - lastCrimeT;
     const stars = g.wanted | 0;
     if (stars <= 0 || g.busted || (CBZ.player && CBZ.player.dead)) { unseenT = 0; evadeState = 0; }
@@ -1797,7 +1917,7 @@
   // crew and your gang membership, and kill any open contract: one bad
   // firefight erased an hour of progress. Progress now survives the hospital.
   function deathPenalty() {
-    if (g.mode !== "city") return;
+    if (!econ()) return;
     g.heat = 0; g.wanted = 0; g.cityCopTarget = 0;
     if (CBZ.CONFIG.CITY_WANTED_CLEARS_ON_DEATH !== false && g.escapedConvict) {
       if (CBZ.cityClearConvict) CBZ.cityClearConvict(); else g.escapedConvict = false;

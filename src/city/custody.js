@@ -1531,9 +1531,10 @@
   // ================================================================
   //  THE TICK (36.45: after orders.js 36.4, before restrain.js 38.5)
   // ================================================================
+  function econ() { return CBZ.economyMode ? !!CBZ.economyMode() : (g.mode === "city" || g.mode === "archipelago"); }
   function tick(dt) {
     if (!wired) wired = wire();
-    if (g.mode !== "city") {
+    if (!econ()) {
       // the city is torn down with everyone in it: the cuffed are held, the rest never happened
       for (let i = JOBS.length - 1; i >= 0; i--) { const j = JOBS[i]; if (j.rec && IN_CUSTODY[j.rec.status]) j.rec.status = "held"; j.done = true; }
       JOBS.length = 0; LEAVERS.length = 0; CARS_LEAVING.length = 0;

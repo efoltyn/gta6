@@ -262,7 +262,19 @@
   let CELL = CELL_MIN;
   let grid = null, gridN = -1, gridRef = null, gridGen = 0, gMinX = 0, gMinZ = 0, gW = 0, gH = 0;
 
+  /* THE ROAD NETWORK IN FORCE. Gang City's, or, on the islands, the island
+     town's (world/island_town.js presents the active island's streets in
+     this file's road record shape): one set of road rules, whichever world
+     the traffic is driving. */
+  function econNet() {
+    const g0 = CBZ.game;
+    if (!g0 || g0.mode === "city" || !CBZ.econArena) return null;
+    const T = CBZ.econArena();
+    return T && T.roads ? T : null;
+  }
   function roadsList() {
+    const N = econNet();
+    if (N) return N.roads;
     const c = CBZ.city;
     if (!c) return null;
     const A = c.arena && c.arena.roads ? c.arena : c;
@@ -437,7 +449,7 @@
      ====================================================================== */
 
   function access() { return on() && CBZ.CONFIG.ROAD_TRAFFIC_ACCESS !== false; }
-  function arena() { const c = CBZ.city; return (c && c.arena) || c || null; }
+  function arena() { const N = econNet(); if (N) return N; const c = CBZ.city; return (c && c.arena) || c || null; }
   let placed = 0, crossRejected = 0, spacingRejects = 0;   // evidence for the audit below
   // How far inside a keep-out a car must be before the AUDIT calls it a
   // trespass rather than a vehicle sitting at the gate line. One car length.
@@ -941,7 +953,7 @@
     if (juncN !== R.length || juncRef !== R || !junc) {
       junc = buildJunctions(R);
       let lots = A ? A.lots : null;
-      if (!lots) { const c = CBZ.city; const B = (c && c.arena && c.arena.lots) ? c.arena : c; lots = (B && B.lots) || null; }
+      if (!lots) { const N = econNet(); if (N) lots = N.lots || null; else { const c = CBZ.city; const B = (c && c.arena && c.arena.lots) ? c.arena : c; lots = (B && B.lots) || null; } }
       const lotIdx = lots && lots.length > 24 ? bucketIndex(lots, function (L) {
         if (!Number.isFinite(L.cx) || !Number.isFinite(L.cz)) return null;
         const lw = (L.w != null ? L.w : 0) / 2, ld = (L.d != null ? L.d : L.w || 0) / 2;

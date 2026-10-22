@@ -366,6 +366,10 @@
       shooter._lawShotT = T;
     }
     const loud = loudness || 48, k = kind || "gunshot";
+    // the islands' townsfolk (the survivor crowd) scatter from it too
+    if (g.mode === "archipelago" && CBZ.survivorsHearShot && (k === "gunshot" || k === "explosion")) {
+      try { CBZ.survivorsHearShot(x, z, shooter || null); } catch (e) {}
+    }
     try {
       const CB = CBZ.cityBrain;
       if (CB && typeof CB.hearBang === "function") CB.hearBang(x, z, loud, k, shooter || null);
@@ -692,7 +696,7 @@
   function witnessIsCop(w) { return !!(w && (w.kind === "cop" || (w._brain && w._brain.game === GAME))); }
   L.onWitnessReport = function (r) {
     if (!r || !r.perp) return false;
-    if (g.mode && g.mode !== "city") return false;
+    if (g.mode && g.mode !== "city" && g.mode !== "archipelago" && !(CBZ.economyMode && CBZ.economyMode())) return false;
     if (witnessIsCop(r.witness)) return false;       // an officer who saw it radioed it in on the spot
     if (QUEUE.length >= QMAX) QUEUE.shift();
     // where does dispatch think he is? the witness's own last sighting of him
@@ -764,7 +768,8 @@
     QUEUE.length = 0; PRIM.clear(); L.tackleCD = 0; PS.stillT = 0; g._citySurrender = false;
   };
   if (typeof CBZ.onUpdate === "function") {
-    CBZ.onUpdate(32.7, function (dt) { if (g.mode === "city") L.frame(dt); });
+    // the law runs wherever the economy does (Gang City and the islands)
+    CBZ.onUpdate(32.7, function (dt) { if (CBZ.economyMode ? CBZ.economyMode() : (g.mode === "city" || g.mode === "archipelago")) L.frame(dt); });
   }
 
   if (typeof module !== "undefined" && module.exports) module.exports = L;

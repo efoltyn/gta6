@@ -2626,8 +2626,32 @@
   // LAW router turns into stars (the ONLY way the player gets them). `perp`
   // defaults to the player — an NPC's crime (a rampage, an NPC heist) MUST
   // pass its NPC: the old tagger pinned every crime in earshot on the player.
+  /* THE ISLANDS' WITNESSES. On the archipelago the townsfolk are the island
+     crowd (entities/survivorbot.js), not this roster. The ones who could see
+     it answer it with their bodies (CBZ.survivorsWitness: the timid run, a
+     few freeze), the nearest says a few real words (CBZ.voice), and the
+     nearest two ring it in: city/law.js takes the calls exactly as it takes a
+     street witness's, and dispatch raises the stars after its own delay. */
+  const _isleW = [];
+  function isleWitnesses(x, z, sev, type, who) {
+    if (g.mode !== "archipelago" || !CBZ.survivorsWitness) return false;
+    const py = who && who.pos ? (who.pos.y || 0) : 0;
+    const W = CBZ.survivorsWitness(x, z, who, _isleW, py + 1);
+    const L = CBZ.cityLaw;
+    let calls = 0;
+    for (let i = 0; i < W.length; i++) {
+      const b = W[i];
+      if (i === 0 && CBZ.voice && CBZ.voice.say) { try { CBZ.voice.say(b, "witness", { by: who }); } catch (e) {} }
+      if (calls < 2 && L && L.onWitnessReport && who) {
+        try { if (L.onWitnessReport({ perp: who, witness: b, x: x, z: z, heat: sev, type: type })) calls++; } catch (e) {}
+      }
+    }
+    _isleW.length = 0;
+    return true;
+  }
   CBZ.cityTagWitnesses = function (x, z, sev, type, perp) {
     const who = perp || CBZ.city.playerActor;
+    if (isleWitnesses(x, z, sev, type, who)) return;
     if (CBZ.cityBrain && CBZ.cityBrain.crime(type, x, z, who, sev) >= 0) return;
     // no brain loaded (a stripped slice): remember and fear, nobody calls
     const r2 = 30 * 30;

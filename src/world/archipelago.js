@@ -47,8 +47,13 @@
 
    PEOPLE are the island's own (entities/survivorbot.js's crowd, the
    island's people), stood on the island in force at points nobody is
-   looking at, and gone with it. TRAFFIC: none yet (the island has parked
-   real cars; a driving town is city/vehicles.js's, follow-up).
+   looking at, and gone with it. They are the island's witnesses too (city/
+   peds.js cityTagWitnesses asks them, city/law.js takes their calls).
+   TRAFFIC, POLICE, WANTED: Gang City's own, on the island in force
+   (world/island_town.js presents it as a town: city/vehicles.js drives its
+   streets, city/traffic.js keeps its pool, city/police.js runs its force out
+   of its station, world/island_police.js). An island dropped behind you takes
+   its cars and officers with it (CBZ.islandTownDrop).
 
    API
      CBZ.archipelago.state()   what is standing, building, far; the island
@@ -368,6 +373,8 @@
   function dropNear(I) {
     if (I === ST.active) return;
     if (I.arena) rescue(I.arena.root);
+    // its traffic, its officers and its station's fittings go with it
+    if (I.arena && CBZ.islandTownDrop) { try { CBZ.islandTownDrop(I.arena); } catch (e) { console.error("[archipelago town drop]", e); } }
     // taken down a frame's share at a time (registries first, then the GPU)
     const job = I.job;
     if (job) chore(I.id + ":drop", CBZ.islandDisposeSteps ? CBZ.islandDisposeSteps(job) : (function* () { CBZ.islandDispose(job); })());
@@ -513,6 +520,8 @@
     const P = CBZ.player;
     if (P && P._aircraft && P._aircraft._world === MODE && CBZ.cityPlayerAircraftExit) { try { CBZ.cityPlayerAircraftExit(); } catch (e) {} }
     if (P && P.driving && P._vehicle && P._vehicle._world === MODE && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
+    // the island force, the island traffic and the wanted state end with the islands
+    if (CBZ.islandTownLeave) { try { CBZ.islandTownLeave(); } catch (e) { console.error("[archipelago town leave]", e); } }
     // the island machines (world/island_vehicles.js): the jet, the boat, the
     // cars, the helipad and its stair, if they stand on one of these islands
     const IV = CBZ.islandVehicles;
@@ -694,6 +703,8 @@
         surv.stats = { total: 1, placement: 0, disastersSurvived: 0 };
       }
       if (CBZ.clearSpectate) CBZ.clearSpectate();
+      // a run begins clean: no stars, no collar in progress
+      if (CBZ.cityWantedReset) { try { CBZ.cityWantedReset(); } catch (e) {} }
       if (CBZ.survEnv && CBZ.SURV_CLEAR_SKY) Object.assign(CBZ.survEnv, CBZ.SURV_CLEAR_SKY, { flash: 0, flashColor: 0xffffff });
       // the room you last slept in, while it is still yours (world/island_lodging.js)
       const LG = CBZ.islandLodging;
@@ -733,11 +744,26 @@
     actors: function (out) {
       const b = CBZ.bots || [];
       for (let i = 0; i < b.length; i++) out.push(b[i]);
+      // the island's police (city/police.js runs its force here): a blast,
+      // a car, a falling wall reaches an officer like anybody else
+      const c = CBZ.cityCops || [];
+      for (let i = 0; i < c.length; i++) if (c[i] && !c[i].dead && !c[i]._airPilot && !c[i]._swatPassenger) out.push(c[i]);
       return out;
     },
     hurt: function (a, dmg, imp) {
+      if (a && a.kind === "cop" && CBZ.cityHurtCop) { CBZ.cityHurtCop(a, dmg, imp); return true; }
       if (!CBZ.surv || !CBZ.surv.hurt) return false;
+      const was = !!(a && a.dead);
       CBZ.surv.hurt(a, dmg, imp);
+      // THE PLAYER HURT SOMEBODY: that is a crime on the islands as in the city.
+      // cityCrime tags the witnesses (the crowd that saw it, any officer who
+      // did) and only their calls raise stars.
+      const P = CBZ.player;
+      const byP = !!(imp && (imp.byPlayer || imp.by === P || (imp.by && imp.by.isPlayer) || imp.attacker === P));
+      if (byP && a && a !== (CBZ.surv && CBZ.surv.playerActor) && CBZ.cityCrime && a.pos) {
+        const killed = !was && !!a.dead;
+        try { CBZ.cityCrime(killed ? 250 : 50, { x: a.pos.x, z: a.pos.z, type: killed ? "murder" : "assault" }); } catch (e) {}
+      }
       return true;
     },
     hurtPlayer: function (dmg, x, z, cause) {

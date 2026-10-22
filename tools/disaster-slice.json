@@ -4304,7 +4304,9 @@
   "src/city/speedway_race.js",
   "src/city/roles.js",
   "src/world/archipelago_map.js",
-  "src/world/archipelago.js"
+  "src/world/archipelago.js",
+  "src/world/island_town.js",
+  "src/world/island_police.js"
  ],
  "needed": [
   "src/city/facade_kit.js",

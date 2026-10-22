@@ -152,6 +152,15 @@
   const lanesPerDir = (r) => (CBZ.roadLanesPerDir ? CBZ.roadLanesPerDir(r) : Math.max(1, (TR().lanesPerDir != null ? TR().lanesPerDir : 2) | 0));
   const laneWidth = () => (TR().laneW != null ? TR().laneW : 3.6);
   const laneOffset = (r, dir, idx) => CBZ.roadLaneCenter(r, dir, idx);   // config.js: keep right on every axis
+  // a record of another vehicle world stacked on these coordinates is not
+  // traffic here (Gang City's fleet while you are on the islands, and back)
+  const here = (c) => (c._world || "city") === g.mode && !(CBZ.islandTownForeign && CBZ.islandTownForeign(c));
+  // the street world the pool runs on: Gang City's arena, or the island in
+  // force as a town (world/island_town.js)
+  function streetArena() {
+    if (g.mode === "city") return (CBZ.city && CBZ.city.arena) || null;
+    return CBZ.econArena ? CBZ.econArena() : null;
+  }
 
   // ---- driver personalities ---------------------------------------------
   // A car's aggression stat already lives on c.driver.aggr (0..1) and c.reckless.
@@ -316,6 +325,8 @@
   // the far traffic's lamps (core/lodlights.js) thin out on the same clock
   CBZ.trafficHourDensity = hourDensityMul;
   function computeTarget(A) {
+    // an island town keeps most of its own small pool round you
+    if (A.noGrid) return Math.max(2, Math.round(islandTarget() * 0.6));
     // base on number of road segments (≈ block grid) — bigger grid → more cars.
     const roads = (A.roads && A.roads.length) || 16;
     const base = (TR().traffic != null ? TR().traffic : (CBZ.CITY && CBZ.CITY.traffic) || 66);
@@ -345,7 +356,7 @@
     const cam = CBZ.camera.position;
     let near = 0;
     for (const c of CBZ.cityCars) {
-      if (!c.ai || c.dead || c.owned || c.player || !c.road || c.abandoned) continue;
+      if (!c.ai || c.dead || c.owned || c.player || !c.road || c.abandoned || !here(c)) continue;
       const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z;
       if (dx * dx + dz * dz < NEAR2) near++;
     }
@@ -358,7 +369,7 @@
     // pick the farthest healthy, idle-ish ambient car to relocate
     let pick = null, pd = FAR2;
     for (const c of CBZ.cityCars) {
-      if (!c.ai || c.dead || c.owned || c.player || !c.road || c._patrolCar) continue;   // never yank a police patrol cruiser
+      if (!c.ai || c.dead || c.owned || c.player || !c.road || c._patrolCar || !here(c)) continue;   // never yank a police patrol cruiser
       if (c.abandoned || c.wreckT > 0 || c.turning || c.npcDriver || c.pullover || c.roadRageTarget || (c._rageT || 0) > 0) continue;
       if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking) continue;   // don't teleport visible wrecks
       // NEVER TELEPORT A CAR WITH PEOPLE IN IT (vehicles.js CAR_OCCUPANCY_REAL).
@@ -427,7 +438,7 @@
      fresh crew. Damaged, burnt, shot-up, owned, parked-dressing and scripted
      cars are left exactly where they are: those are evidence, not stock. */
   function reclaimable(c, cam) {
-    if (c.player || c.dead || c.ai || c.owned || c._persist || c._propParked || c._heldBy || c.hold) return false;
+    if (c.player || c.dead || c.ai || c.owned || c._persist || c._propParked || c._heldBy || c.hold || !here(c)) return false;
     if (!(c.baseV > 0) || !(c.abandoned || c._playerLeft)) return false;   // was ambient traffic once
     if (c._patrolCar || c._emergency || c._raceCar || c._cineLocked || c.npcDriver) return false;
     if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking || c._flats || (c.engineHp != null && c.engineHp < 70)) return false;
@@ -491,7 +502,7 @@
     const cam = CBZ.camera.position;
     let pick = null, pd = minD2;
     for (const c of CBZ.cityCars) {
-      if (!c.ai || c.dead || c.owned || c.player || !c.road || c._patrolCar) continue;   // never yank a police patrol cruiser
+      if (!c.ai || c.dead || c.owned || c.player || !c.road || c._patrolCar || !here(c)) continue;   // never yank a police patrol cruiser
       if (c.abandoned || c.wreckT > 0 || c.turning || c.npcDriver || c.pullover || c.roadRageTarget || (c._rageT || 0) > 0) continue;
       if ((c.crumple || 0) > 0.05 || c._onFire || c._smoking) continue;
       if (c._occRigged || (c.occ && c.occ.jacked)) continue;   // people in it — see recycleOne
@@ -538,7 +549,7 @@
   // outlying segments, never pile cars onto one the player's already near).
   function segHasCar(r, rad2) {
     for (const c of CBZ.cityCars) {
-      if (!c.ai || c.dead || c.player || c.owned || !c.road) continue;
+      if (!c.ai || c.dead || c.player || c.owned || !c.road || !here(c)) continue;
       const dx = c.pos.x - r.x, dz = c.pos.z - r.z;
       if (dx * dx + dz * dz < rad2) return true;
     }
@@ -591,16 +602,75 @@
     }
   }
 
+  /* ---- THE ISLAND'S OWN FLEET -------------------------------------------
+     An island town (world/island_town.js) starts with no traffic at all: the
+     city's pool is built with the city. So the island in force gets a pool of
+     its own size (a handful on a phone, a dozen on a desktop, swelling and
+     thinning with the hour like the city's), every car put on a road out of
+     sight, one at a time, through the same CBZ.roadPick / CBZ.cityMakeCar the
+     city uses, and driven by the same lane keeper. When another island takes
+     over, the last island's cars and cruisers leave the world where nobody can
+     see them go (an island dropped behind you takes the rest with it:
+     CBZ.islandTownDrop). The recycle above then keeps the bubble around you
+     full, exactly as it does downtown. */
+  const ISLE_SMALL = CBZ.deviceClass === "phone" || CBZ.deviceClass === "tablet";
+  let _isleT = 0, _isleSweepT = 0;
+  function islandTarget() {
+    const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : 2;
+    const base = ISLE_SMALL ? 6 : 12;
+    return Math.max(2, Math.round(base * (q <= 1 ? 0.6 : 1) * hourDensityMul()));
+  }
+  function islandPool(A, dt) {
+    _isleSweepT -= dt;
+    if (_isleSweepT <= 0) {
+      _isleSweepT = 0.5;
+      // the last island's fleet goes where nobody sees it go
+      const cars = CBZ.cityCars, P = CBZ.player;
+      for (let i = cars.length - 1; i >= 0; i--) {
+        const c = cars[i];
+        if (!c || c._world !== g.mode || c._islandCar || c._persist || c.player || (P && P._vehicle === c)) continue;
+        // only the street's own: the pool, the force's units, a car on the lane AI
+        if (!(c._isleTraffic || c._cruiser || c._patrolCar || c._rbBar || c.ai)) continue;
+        if (!CBZ.islandTownForeign || !CBZ.islandTownForeign(c)) continue;
+        if (seen(c)) continue;
+        if (CBZ.cityScrapCar) CBZ.cityScrapCar(c);
+      }
+    }
+    if (g.state !== "playing" || !CBZ.cityMakeCar || !CBZ.roadPick) return;
+    _isleT -= dt;
+    if (_isleT > 0) return;
+    _isleT = 0.6;
+    let n = 0;
+    for (const c of CBZ.cityCars) if (c && c._isleTraffic === A.root && !c.dead) n++;
+    if (n >= islandTarget()) return;
+    const P = CBZ.player;
+    const spot = CBZ.roadPick({ near: P && P.pos, minDist: 45, maxDist: 360, camMin: 55, unseen: true, tries: 12, spread: 90 });
+    if (!spot) return;
+    if (CBZ.sightCanSee && CBZ.sightCanSee(spot.x, 1, spot.z, 3)) return;
+    const econ = CBZ.cityEcon;
+    const reckless = Math.random() < (TR().recklessFrac != null ? TR().recklessFrac : 0.18) * 0.6;
+    const aggr = reckless ? 0.65 + Math.random() * 0.35 : 0.15 + Math.random() * 0.35;
+    let c = null;
+    try { c = CBZ.cityMakeCar(spot.x, spot.z, spot.heading, spot.vertical, econ && econ.pickCar ? econ.pickCar(Math.random() < 0.08) : null, aggr); } catch (e) { c = null; }
+    if (!c) return;
+    CBZ.roadPlace(c, spot);
+    const lim = (A.roads[0] && A.roads[0].speedLimit) || 25;
+    const cruise = lim * 0.447;                                  // the posted limit, in m/s
+    c.baseV = cruise * (0.82 + Math.random() * 0.3) * (reckless ? 1.35 : 1);
+    c.v = c.baseV * 0.6; c.reckless = reckless; c.ai = true;
+    c._isleTraffic = A.root;
+  }
+
   // ---- behaviour + density tick (order 36.5: after lights, before AI 37) --
   let beh = 0;
   CBZ.onUpdate(36.5, function (dt) {
-    if (g.mode !== "city") { return; }
-    const A = CBZ.city.arena; if (!A) return;
+    const A = streetArena(); if (!A) return;
     if (A !== lastArena) {
       lastArena = A; targetNear = computeTarget(A);
-      seedHighwaysOnBind(A);     // TRAF-1: every highway starts visibly alive on arrival
+      if (!A.noGrid) seedHighwaysOnBind(A);     // TRAF-1: every highway starts visibly alive on arrival
       _farSeedT = 2;             // stagger the first ongoing far-seed a beat after bind
     }
+    if (A.noGrid) islandPool(A, dt);
 
     updateHonks(dt);
 
@@ -641,7 +711,7 @@
     for (let k = 0; k < SLICE; k++) {
       beh = (beh + 1) % cars.length;
       const c = cars[beh];
-      if (!c || c.player || c.dead || !c.ai || !c.road || c.owned) continue;
+      if (!c || c.player || c.dead || !c.ai || !c.road || c.owned || !here(c)) continue;
       tagDriver(c);
       if (c.honkCD > 0) c.honkCD -= dt * (cars.length / SLICE);   // compensate slicing
       const arch = ARCH[c.trafArch] || ARCH.normal;
