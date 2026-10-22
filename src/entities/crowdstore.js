@@ -188,6 +188,25 @@
     const l = Math.hypot(out[0], out[1]) || 1; out[0] /= l; out[1] /= l;
     return out;
   }
+  /* A ROW'S MOVE IN THE WORLD goes through the one mover (systems/
+     bodymove.js CBZ.bodyMove): a crowd body thrown by a blast or a car, or
+     running from one, is swept against the walls every walker meets and slid
+     along them, never put through them. (lx, lz) is the row's LOCAL
+     displacement; its world spot is refreshed here. */
+  const _rowP = { x: 0, y: 0, z: 0 };
+  const ROW_O = { posture: "stand", radius: 0.25, cars: false, clearRadius: 0.3 };
+  function rowMove(G, r, lx, lz) {
+    if (!CBZ.bodyMove) { S.x[r] += lx; S.z[r] += lz; return; }
+    mw(G); toWorld(G, r);
+    const e = G.m;
+    const wdx = e ? e[0] * lx + e[8] * lz : lx, wdz = e ? e[2] * lx + e[10] * lz : lz;
+    _rowP.x = S.wx[r]; _rowP.y = S.wy[r]; _rowP.z = S.wz[r];
+    CBZ.bodyMove(_rowP, wdx, 0, wdz, ROW_O);
+    const ax = _rowP.x - S.wx[r], az = _rowP.z - S.wz[r];
+    S.wx[r] = _rowP.x; S.wz[r] = _rowP.z;
+    if (e) { S.x[r] += e[0] * ax + e[2] * az; S.z[r] += e[8] * ax + e[10] * az; }
+    else { S.x[r] += ax; S.z[r] += az; }
+  }
   function modeOk(G) {
     if (!G.mode) return true;
     const m = G_().mode;
@@ -653,7 +672,7 @@
       if (to === DEAD && d > 0.5) {
         // thrown a little way out from the seat of the blast
         const G = GROUPS[S.grp[r]], th = Math.max(0, 1 - d / R) * 3.5 * Math.min(2, power || 1);
-        if (th > 0.1) { const l = dirLocal(G, dx / d, dz / d, _dl); S.x[r] += l[0] * th; S.z[r] += l[1] * th; }
+        if (th > 0.1) { mw(G); const l = dirLocal(G, dx / d, dz / d, _dl); rowMove(G, r, l[0] * th, l[1] * th); }
       }
       if (casualty(r, to, cause, ev)) { if (to === DEAD) { dead++; if (d < R * 0.8) goreAt(r, true); } else hurt++; }
     });
@@ -833,7 +852,7 @@
             const G = GROUPS[S.grp[rr]], d = Math.hypot(dx, dz) || 1;
             const ped = G && G.promote && n < REAL_MAX && camNear(rr, REAL_R) >= 0 ? realize(rr, "car") : null;
             if (ped) { forceOnPed(ped, to, x, z, o, 4 + speed * 0.5, "car crash"); n++; rr = nx_; continue; }
-            if (G) { const l = dirLocal(G, dx / d, dz / d, _dl); const th = 0.6 + speed * 0.12; S.x[rr] += l[0] * th; S.z[rr] += l[1] * th; }
+            if (G) { mw(G); const l = dirLocal(G, dx / d, dz / d, _dl); const th = 0.6 + speed * 0.12; rowMove(G, rr, l[0] * th, l[1] * th); }
             if (casualty(rr, to, "car crash", ev)) { n++; if (to === DEAD) goreAt(rr, false); }
           }
         }
@@ -937,7 +956,7 @@
           const seated = S.clip[r] === CLIP.sit || S.clip[r] === CLIP.sitCheer;
           const sp = (seated ? 2.2 : 3.6) + h01(r, 17, 3) * 1.0;
           S.vx[r] = l[0] * sp; S.vz[r] = l[1] * sp;
-          S.x[r] += S.vx[r] * dt; S.z[r] += S.vz[r] * dt; S.posT[r] = CLOCK;
+          rowMove(G, r, S.vx[r] * dt, S.vz[r] * dt); S.posT[r] = CLOCK;
           S.yaw[r] = Math.atan2(S.vx[r], S.vz[r]);
           gaits();
           S.phase[r] = ((S.phase[r] + dt * sp * GAITR / TAU) % 1 + 1) % 1;
@@ -955,7 +974,7 @@
           const sp = crawl ? 0.32 : 0.6;
           gaits();
           S.vx[r] = l[0] * sp; S.vz[r] = l[1] * sp;
-          S.x[r] += S.vx[r] * dt; S.z[r] += S.vz[r] * dt; S.posT[r] = CLOCK;
+          rowMove(G, r, S.vx[r] * dt, S.vz[r] * dt); S.posT[r] = CLOCK;
           S.yaw[r] = Math.atan2(S.vx[r], S.vz[r]);
           const rpm = crawl ? GAITC : GAITL;
           S.phase[r] = ((S.phase[r] + dt * sp * rpm / TAU) % 1 + 1) % 1; S.rate[r] = sp * rpm / TAU; S.pnow[r] = 1;

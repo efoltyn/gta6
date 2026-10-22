@@ -32,6 +32,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  const FOOT_PUSH_O = { posture: "stand", cars: false, clearRadius: 0.38 };
   const g = CBZ.game;
   const THREE = window.THREE;
 
@@ -1168,8 +1169,13 @@
       const lx = dx * c - dz * s, lz = dx * s + dz * c;
       if (Math.abs(lx) >= hw || Math.abs(lz) >= hl) return;
       const px = hw - Math.abs(lx), pz = hl - Math.abs(lz);
-      if (px < pz) { const d = lx >= 0 ? px : -px; P.pos.x += d * c; P.pos.z += -d * s; }
-      else { const d = lz >= 0 ? pz : -pz; P.pos.x += d * s; P.pos.z += d * c; }
+      // out of the truck's box through the one mover (systems/bodymove.js):
+      // never shoved through the wall behind you
+      let mx, mz;
+      if (px < pz) { const d = lx >= 0 ? px : -px; mx = d * c; mz = -d * s; }
+      else { const d = lz >= 0 ? pz : -pz; mx = d * s; mz = d * c; }
+      if (CBZ.bodyMove) CBZ.bodyMove(P, mx, 0, mz, FOOT_PUSH_O);
+      else { P.pos.x += mx; P.pos.z += mz; }
       if (speed > 6 && emgRunCD <= 0) {
         emgRunCD = 0.9;
         // "firetruck" stays ONE word on purpose: killfeed.js buckets a death by

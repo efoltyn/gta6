@@ -239,9 +239,14 @@
       // no verlet slot available — carry it the cheap way (the pre-existing
       // lift used exactly this write, so nothing regresses)
       const s = Math.sin(m.group.rotation.y), c = Math.cos(m.group.rotation.y);
-      b.group.position.set(m.pos.x + s * 0.18, (m.pos.y || 0) + 1.05, m.pos.z + c * 0.18);
+      const tx = m.pos.x + s * 0.18, tz = m.pos.z + c * 0.18, bp = b.group.position;
+      // carried through the one mover (systems/bodymove.js): on the shoulder,
+      // thin, so only a crossing stops it
+      if (CBZ.bodyMove) { CBZ.bodyMove(bp, tx - bp.x, 0, tz - bp.z, CARRY_O); bp.y = (m.pos.y || 0) + 1.05; }
+      else bp.set(tx, (m.pos.y || 0) + 1.05, tz);
     }
   }
+  const CARRY_O = { posture: "stand", radius: 0.15, feet: -0.6, height: 0.7, cars: false, clear: false };
   function dropBody(m) {
     const b = m.body;
     if (b) {

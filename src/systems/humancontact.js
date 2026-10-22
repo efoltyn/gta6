@@ -296,6 +296,7 @@
      resolve's rate, and slid against the world.
      ============================================================ */
   const kicks = [];
+  const _kickO = { posture: "stand", radius: 0.3, clearRadius: 0.4, out: { hit: false, nx: 0, nz: 0, c: null, pushed: false, landed: false, y: 0, floor: 0 } };
   function kick(a, vx, vz) {
     const p = posOf(a); if (!p) return;
     for (let i = 0; i < kicks.length; i++) {
@@ -307,8 +308,13 @@
   function stepKicks(dt) {
     for (let i = kicks.length - 1; i >= 0; i--) {
       const k = kicks[i];
-      k.p.x += k.vx * dt; k.p.z += k.vz * dt;
-      if (CBZ.collide) { try { CBZ.collide(k.p, k.r, (k.p.y || 0) + 0.25, (k.p.y || 0) + 1.7); } catch (e) { /* no world */ } }
+      // THE ONE MOVER (systems/bodymove.js): swept and slid along the wall;
+      // what the wall takes comes off the push
+      if (CBZ.bodyMove) {
+        _kickO.clearRadius = k.r;
+        const sw = CBZ.bodyMove(k.p, k.vx * dt, 0, k.vz * dt, _kickO);
+        if (sw.hit || sw.pushed) { const vn = k.vx * sw.nx + k.vz * sw.nz; if (vn < 0) { k.vx -= vn * sw.nx; k.vz -= vn * sw.nz; } }
+      } else { k.p.x += k.vx * dt; k.p.z += k.vz * dt; }
       const dec = Math.exp(-9 * dt);
       k.vx *= dec; k.vz *= dec;
       if (k.vx * k.vx + k.vz * k.vz < 0.01) kicks.splice(i, 1);
@@ -1161,7 +1167,9 @@
     // positional: you give most of it, he is planted
     const mv = Math.sqrt(dx * dx + dz * dz) < min ? min - Math.sqrt(dx * dx + dz * dz) : 0;
     if (mv > 0) {
-      P.pos.x -= nx * mv * 0.75; P.pos.z -= nz * mv * 0.75;
+      // (the player's give goes through the one mover: never into a wall)
+      if (CBZ.bodyMove) CBZ.bodyMove(P, -nx * mv * 0.75, 0, -nz * mv * 0.75, null);
+      else { P.pos.x -= nx * mv * 0.75; P.pos.z -= nz * mv * 0.75; }
       S.posX[id] += nx * mv * 0.25; S.posZ[id] += nz * mv * 0.25;
       P.speed = Math.min(P.speed || 0, 1.5);
       blocks++;

@@ -1691,7 +1691,7 @@
     if (ped.maxHp) ped.hp = ped.maxHp;
     if (CBZ.vitals && CBZ.vitals.reset) { try { CBZ.vitals.reset(ped); } catch (e) {} }
     if (CBZ.woundsForget) { try { CBZ.woundsForget(ped); } catch (e) {} }
-    ped.pos.set(S.x[r], S.y[r], S.z[r]);
+    ped.pos.set(S.x[r], S.y[r], S.z[r]); if (CBZ.bodyTeleported) CBZ.bodyTeleported(ped);
     ped.group.rotation.y = S.yaw[r];
     // a new ordinary person (no role from the rig's last life; level.js deals one)
     ped.archetype = "resident"; ped.job = null; ped.gang = null; ped.vendor = null; ped.vagrant = false;
@@ -1736,7 +1736,7 @@
         }
         if (CBZ.cityPedStash) { try { CBZ.cityPedStash(ped); } catch (e) {} }
         ped._parked = true; ped.group.visible = false; ped.moveOrder = null;
-        ped.pos.set(PARK, 0, PARK); if (ped.target) ped.target.set(PARK, 0, PARK);
+        ped.pos.set(PARK, 0, PARK); if (ped.target) ped.target.set(PARK, 0, PARK); if (CBZ.bodyTeleported) CBZ.bodyTeleported(ped);
         ped.rage = null; ped.mem = null; ped.state = "walk"; ped.path = null; ped.finalGoal = null;
         ped.cliqueId = null; ped.friends = null; ped._streetRow = -1;
         if (CBZ.setCharPose && ped.char) CBZ.setCharPose(ped.char, "stand");

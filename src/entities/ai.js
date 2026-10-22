@@ -4235,8 +4235,9 @@
       if (ch._shotR && ch._shotR.queued) return;
       if (V.step(actor, dx / d, dz / d, Math.min(0.7, 0.12 + f * 0.4), 0.3)) return;
     }
-    actor.group.position.x += (dx / d) * f;
-    actor.group.position.z += (dz / d) * f;
+    // (the nudge through the one mover, systems/bodymove.js: never through a wall)
+    if (CBZ.bodyMove) CBZ.bodyMove(actor, (dx / d) * f, 0, (dz / d) * f, null);
+    else { actor.group.position.x += (dx / d) * f; actor.group.position.z += (dz / d) * f; }
   }
 
   const GANG_NAMES = (function () {

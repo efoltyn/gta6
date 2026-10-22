@@ -144,6 +144,7 @@
   //      rides on top of it), perpendicular to the current look direction —
   //      plus, past LURCH_LEVEL, an occasional bigger one-off lurch + shake. -
   let lurchT = 0, lurchVX = 0, lurchVZ = 0;
+  const _drO = { posture: "stand", radius: 0.3, clearRadius: 0.38 };
   function applyStumble(level, dt, t) {
     const P = CBZ.player, cam = CBZ.cam;
     if (!P || !P.pos || P.driving || P.dead) return;
@@ -159,8 +160,7 @@
     const yaw = cam ? cam.yaw : 0;
     const rx = Math.cos(yaw), rz = -Math.sin(yaw);      // "right" vector (matches physics.js's own rx/rz)
     const sway = Math.sin(t * 0.7) * DRIFT_PER_LEVEL * level;
-    P.pos.x += rx * sway * dt;
-    P.pos.z += rz * sway * dt;
+    let mx = rx * sway * dt, mz = rz * sway * dt;
     // big lurches are a short DECAYING VELOCITY, not an instant jump — an
     // instant 0.5-1.2m pos write can cross a whole wall in one frame (this
     // runs AFTER physics has already resolved the frame), i.e. tunneling.
@@ -177,16 +177,17 @@
       }
     } else { lurchT = 0; lurchVX = lurchVZ = 0; }
     if (lurchVX || lurchVZ) {
-      P.pos.x += lurchVX * dt; P.pos.z += lurchVZ * dt;
+      mx += lurchVX * dt; mz += lurchVZ * dt;
       const dec = Math.pow(0.002, dt); lurchVX *= dec; lurchVZ *= dec;
       if (Math.abs(lurchVX) < 0.05 && Math.abs(lurchVZ) < 0.05) lurchVX = lurchVZ = 0;
     }
-    // never end a drunk frame inside a wall — with the player's real standing
-    // band, so collide()'s height gate ignores floors above/below (same
-    // feetY/headY contract physics.js's own resolver passes).
-    // (the player's OWN body and band, physics.js resolveCollisions: radius
-    // P.radius, feet + 0.42 so a step stays a step, head at 1.7)
-    if (CBZ.collide) CBZ.collide(P.pos, P.radius || 0.38, P.pos.y + 0.42, P.pos.y + 1.7);
+    // the sway and the lurch go through the one mover (systems/bodymove.js):
+    // swept against the walls with the player's real standing band (feet +
+    // 0.42 so a step stays a step, head at 1.7) and cleared at his own
+    // radius, so a drunk frame never ends inside a wall or past one
+    _drO.clearRadius = P.radius || 0.38;
+    if (CBZ.bodyMove) CBZ.bodyMove(P, mx, 0, mz, _drO);
+    else { P.pos.x += mx; P.pos.z += mz; }
   }
 
   // ---- soft dark vignette pulse on OUR OWN div --------------------------

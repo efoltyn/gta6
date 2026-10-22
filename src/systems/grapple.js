@@ -54,13 +54,22 @@
   const intactOn = () => CBZ.CONFIG.SURV_THROW_INTACT !== false;
 
   const BOT_R = 0.5;
-  const _corpseC = { x: 0, z: 0 };   // scratch for the corpse-extent wall push
-  const _corpseA = { x: 0, z: 0 };
-  const _corpseSw = { hit: false, t: 1, x: 0, z: 0, nx: 0, nz: 0, c: null };
-  const _bodySw = { hit: false, nx: 0, nz: 0, c: null };
-  // the swept body's radius: a man's shoulders, so a shoved body still goes
-  // through an open doorway it is driven at (collide's BOT_R only clears overlap)
-  const SWEEP_R = 0.3;
+  // every root move in this file goes through THE ONE MOVER (systems/
+  // bodymove.js CBZ.bodyMove): swept against the walker's colliders, slid
+  // along what it meets, overlap cleared at BOT_R
+  const _bodySw = { hit: false, nx: 0, nz: 0, c: null, pushed: false, landed: false, y: 0, floor: 0 };
+  const _flightO = { posture: "stand", radius: 0.3, feet: 0.1, height: 1.6, cars: false, clearRadius: 0.5, out: _bodySw };
+  const _slideO = { posture: "down", radius: 0.3, baseY: 0, feet: 0.2, height: 1.7, cars: false, clearRadius: 0.5, out: _bodySw };
+  const _corpseO = { posture: "down", radius: 0.3, baseY: 0, feet: 0.2, height: 0.6, reachX: 0, reachZ: 0, clearRadius: 0.5, out: _bodySw };
+  const _standO = { posture: "stand", clearRadius: 0.38, out: _bodySw };
+  // (sweep radius 0.3: a man's shoulders, so a shoved body still goes
+  // through an open doorway it is driven at; BOT_R only clears overlap)
+  function moveRoot(grp, dx, dy, dz, o) {
+    if (CBZ.bodyMove) return CBZ.bodyMove(grp.position, dx, dy, dz, o);
+    grp.position.x += dx; grp.position.y += dy; grp.position.z += dz;
+    _bodySw.hit = _bodySw.pushed = false;
+    return _bodySw;
+  }
   function G() { return (CBZ.TUNE && CBZ.TUNE.gravity) || 22; }
   /* THE FLOOR A BODY IS OVER. CBZ.groundAt counts platforms (roofs, decks,
      stairs, walkways) where floorAt only knew terrain + carvings, so a body
@@ -557,28 +566,18 @@
       const n = Math.max(1, Math.ceil(Math.hypot(p.vx, p.vy, p.vz) * dt / 0.3));
       const sdt = dt / n;
       for (let sub = 0; sub < n; sub++) {
-        // THE FLIGHT IS SWEPT (CBZ.sweepMove): the body stops on the face it
-        // meets, door leaf or wall, instead of being pushed out of whichever
-        // side of it the step ended nearer. collide() then only clears overlap.
-        const sy = grp.position.y;
-        let swN = null;
-        if (CBZ.sweepMove) {
-          const sw = CBZ.sweepMove(grp.position, p.vx * sdt, p.vz * sdt, SWEEP_R, sy + 0.1, sy + 1.6, _bodySw);
-          if (sw.hit) swN = sw;
-        } else { grp.position.x += p.vx * sdt; grp.position.z += p.vz * sdt; }
-        grp.position.y += p.vy * sdt;
-        if (CBZ.collide) {
+        // THE FLIGHT GOES THROUGH THE ONE MOVER: the body stops on the face
+        // it meets, door leaf or wall, instead of being pushed out of
+        // whichever side of it the step ended nearer.
+        const sw = moveRoot(grp, p.vx * sdt, p.vy * sdt, p.vz * sdt, _flightO);
+        {
           // WHAT THE WALL TOOK IS WHAT YOU HIT. The sweep's face (or what
-          // collide() pushed back) is the only evidence in this file that the
-          // body was DRIVEN INTO something — the owner's "pushed hard into
-          // something". Its normal is the surface, and the speed along it is
-          // the speed of the collision.
-          const bx = grp.position.x, bz = grp.position.z;
-          CBZ.collide(grp.position, BOT_R);
-          const cdx = grp.position.x - bx, cdz = grp.position.z - bz;
-          const cd = Math.hypot(cdx, cdz);
-          if (swN || cd > 0.004) {
-            const nx = swN ? swN.nx : cdx / cd, nz = swN ? swN.nz : cdz / cd;
+          // the overlap clear pushed back) is the only evidence in this file
+          // that the body was DRIVEN INTO something — the owner's "pushed
+          // hard into something". Its normal is the surface, and the speed
+          // along it is the speed of the collision.
+          if (sw.hit || sw.pushed) {
+            const nx = sw.nx, nz = sw.nz;
             const into = -(p.vx * nx + p.vz * nz);      // closing speed on the face
             // a soft contact just stops going INTO the face (a hard one rebounds below)
             if (into > 0 && into <= 4) { p.vx += nx * into; p.vz += nz * into; }
@@ -720,17 +719,16 @@
     // player's department (physics.js, which tracks platforms); bots ride the
     // ground field, so a slide just rides the slope down and settles.
     if (Math.abs(p.kx) > 0.02 || Math.abs(p.kz) > 0.02) {
-      // the slide is SWEPT: a shoved body stops against the wall or the shut
-      // door it is driven into (and slides along it), never through it
-      if (CBZ.sweepMove) {
-        const flat = Math.min(1, Math.abs(grp.rotation.x) / 1.5708);
-        const fy = grp.position.y - (cityGround ? FLAT_LIFT * flat : 0);
-        const sw = CBZ.sweepMove(grp.position, p.kx * dt, p.kz * dt, SWEEP_R, fy + 0.2, fy + 0.5 + 1.2 * (1 - flat), _bodySw);
-        if (sw.hit) { const vn = p.kx * sw.nx + p.kz * sw.nz; if (vn < 0) { p.kx -= vn * sw.nx; p.kz -= vn * sw.nz; } }
-      } else { grp.position.x += p.kx * dt; grp.position.z += p.kz * dt; }
+      // the slide goes through the one mover: a shoved body stops against the
+      // wall or the shut door it is driven into (and slides along it), never
+      // through it, and what the wall took comes off the slide
+      const flat = Math.min(1, Math.abs(grp.rotation.x) / 1.5708);
+      _slideO.baseY = grp.position.y - (cityGround ? FLAT_LIFT * flat : 0);
+      _slideO.height = 0.5 + 1.2 * (1 - flat);
+      const sw = moveRoot(grp, p.kx * dt, 0, p.kz * dt, _slideO);
+      if (sw.hit || sw.pushed) { const vn = p.kx * sw.nx + p.kz * sw.nz; if (vn < 0) { p.kx -= vn * sw.nx; p.kz -= vn * sw.nz; } }
       const dec = Math.pow(0.0009, dt);
       p.kx *= dec; p.kz *= dec;
-      if (CBZ.collide) CBZ.collide(grp.position, BOT_R);
       // city downed/dead/flat bodies rest ON the surface (lifted by flatness);
       // other sliding bodies hug the floor exactly. Applied LAST so nothing sinks.
       grp.position.y = cityGround ? cityRestY(grp) : floorAt(grp.position.x, grp.position.z, grp.position.y + 0.3);
@@ -747,29 +745,18 @@
     // the only point collide() above tested) toward where the HEAD fell, so the
     // head/torso end can clip into a wall the feet are clear of (dead people "fall
     // through walls"). Collide the head end too and shove the WHOLE body out by the
-    // same delta. City + actually-flat only; cheap (one extra collide on a corpse).
-    if (cityGround && CBZ.collide) {
+    // same delta. City + actually-flat only; cheap (one extra sweep on a corpse).
+    if (cityGround && CBZ.bodyMove) {
       const flat = Math.min(1, Math.abs(grp.rotation.x) / 1.5708);
       if (flat > 0.4) {
         const ry = grp.rotation.y || 0, ext = 1.7 * flat;
         const hs = grp.rotation.x > 0 ? 1 : -1;                    // face down: head ahead of the feet
-        const hx = hs * Math.sin(ry) * ext, hz = hs * Math.cos(ry) * ext;   // toward the head
-        // swept from the feet to the head: a head past a thin wall's middle
-        // is stopped on the near face (the side the body lies on), where a
-        // push-out of the head point alone would have left it on the far one
-        const fy = grp.position.y - FLAT_LIFT * flat;
-        if (CBZ.sweepCircle) {
-          _corpseA.x = grp.position.x; _corpseA.z = grp.position.z;
-          _corpseC.x = grp.position.x + hx; _corpseC.z = grp.position.z + hz;
-          if (CBZ.sweepCircle(_corpseA, _corpseC, SWEEP_R * 0.8, fy + 0.2, fy + 0.6, _corpseSw)) {
-            grp.position.x += _corpseSw.x - _corpseC.x;
-            grp.position.z += _corpseSw.z - _corpseC.z;
-          }
-        }
-        _corpseC.x = grp.position.x + hx; _corpseC.z = grp.position.z + hz;
-        CBZ.collide(_corpseC, BOT_R);
-        grp.position.x += _corpseC.x - (grp.position.x + hx);        // shift body by the head's push
-        grp.position.z += _corpseC.z - (grp.position.z + hz);
+        // the mover's far-end sweep, feet to head: a head past a thin wall's
+        // middle is stopped on the near face (the side the body lies on),
+        // where a push-out of the head point alone would leave it on the far one
+        _corpseO.reachX = hs * Math.sin(ry) * ext; _corpseO.reachZ = hs * Math.cos(ry) * ext;
+        _corpseO.baseY = grp.position.y - FLAT_LIFT * flat;
+        CBZ.bodyMove(grp.position, 0, 0, 0, _corpseO);
       }
     }
     // OWN a city body that is dead or still laid flat even after the knockdown
@@ -1053,9 +1040,12 @@
     if (P._phys && !P.dead) {
       const p = P._phys;
       if ((Math.abs(p.kx) > 0.02 || Math.abs(p.kz) > 0.02) && !(p.down > 0)) {
-        P.pos.x += p.kx * dt; P.pos.z += p.kz * dt;
+        // the one mover, standing: swept, slid along the wall, its push spent
+        _standO.clearRadius = P.radius || 0.38;
+        const sw = CBZ.bodyMove ? CBZ.bodyMove(P, p.kx * dt, 0, p.kz * dt, _standO) : null;
+        if (!sw) { P.pos.x += p.kx * dt; P.pos.z += p.kz * dt; }
+        else if (sw.hit || sw.pushed) { const vn = p.kx * sw.nx + p.kz * sw.nz; if (vn < 0) { p.kx -= vn * sw.nx; p.kz -= vn * sw.nz; } }
         const dec = Math.pow(0.0009, dt); p.kx *= dec; p.kz *= dec;
-        if (CBZ.collide) CBZ.collide(P.pos, P.radius || 0.55);
       }
       if (p.fl > 0) p.fl = Math.max(0, p.fl - dt);
     }

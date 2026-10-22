@@ -106,6 +106,7 @@
 (function () {
   "use strict";
   const CBZ = (typeof window !== "undefined" && window.CBZ) || null;
+  const BOARD_WALK_O = { posture: "stand", cars: false, clearRadius: 0.38 };
   if (!CBZ) return;
   const THREE = (typeof window !== "undefined" && window.THREE) || null;
   const g = CBZ.game;
@@ -1512,7 +1513,10 @@
       const dx = w.x - P.pos.x, dz = w.z - P.pos.z, d = Math.hypot(dx, dz);
       if (d > 0.25 && B.t < 4) {
         const step = Math.min(d, 3.4 * dt);
-        P.pos.x += dx / d * step; P.pos.z += dz / d * step;
+        // the walk to the door goes through the one mover (systems/bodymove.js):
+        // walls stop it; the car he is walking to does not
+        if (CBZ.bodyMove) CBZ.bodyMove(P, dx / d * step, 0, dz / d * step, BOARD_WALK_O);
+        else { P.pos.x += dx / d * step; P.pos.z += dz / d * step; }
         const ch = CBZ.playerChar;
         if (ch && ch.group) {
           ch.group.position.x = P.pos.x; ch.group.position.z = P.pos.z;

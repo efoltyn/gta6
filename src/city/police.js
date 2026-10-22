@@ -1216,7 +1216,7 @@
       if (!p) break;
       p._airPilot = true; p._airPilotPrev = { ambient: !!p.ambient, state: p.state };
       p.curTarget = null; p.npcTarget = null; p.sees = false; p.speed = 0;
-      p.pos.set(chopper.homeX, 0, chopper.homeZ);
+      p.pos.set(chopper.homeX, 0, chopper.homeZ); if (CBZ.bodyTeleported) CBZ.bodyTeleported(p);
       p.group.visible = false;
       // TRUTHFUL JOB — cityTitle() reads a.job, so the overhead pill and the
       // dossier say what this officer actually does aboard the aircraft.
@@ -1259,7 +1259,7 @@
       unseatCop(p);
       p._airPilot = false; p.state = "patrol"; p.curTarget = null; p.npcTarget = null; p.sees = false;
       if (p._airCrewPrevJob != null) { p.job = p._airCrewPrevJob; p._airCrewPrevJob = null; }
-      p.pos.set(chopper.homeX + 3.2 + i * 1.5, 0, chopper.homeZ + 1.5);
+      p.pos.set(chopper.homeX + 3.2 + i * 1.5, 0, chopper.homeZ + 1.5); if (CBZ.bodyTeleported) CBZ.bodyTeleported(p);
       if (p.group) { p.group.position.copy(p.pos); p.group.visible = true; }
       if ((g.wanted | 0) === 0 && !p.swat) holsterGun(p);
     }
@@ -1538,7 +1538,7 @@
       // already had this ordering — this is police.js catching up to it.)
       p._airPilot = false;               // corpse takes the normal dead-cop path (deadT tick + cull)
       if (p._airCrewPrevJob != null) { p.job = p._airCrewPrevJob; p._airCrewPrevJob = null; }
-      p.pos.set(ix + 1.6 + i * 1.3, surfY, iz + 1.1 - i * 0.9);   // thrown clear of the fireball
+      p.pos.set(ix + 1.6 + i * 1.3, surfY, iz + 1.1 - i * 0.9);   // thrown clear of the fireball if (CBZ.bodyTeleported) CBZ.bodyTeleported(p);
       if (p.group) { p.group.position.copy(p.pos); p.group.visible = true; }
       if (p.dead) continue;
       if (CBZ.cityHurtCop) CBZ.cityHurtCop(p, 99999, { byPlayer: true, fromX: ix, fromZ: iz, force: 13 });
@@ -1986,7 +1986,7 @@
     ped.controlled = false; ped.companion = false; ped.hostage = false;
     ped.surrender = false; ped.surrenderT = 0;
     ped._parked = true; ped.group.visible = false;
-    ped.pos.set(-9999, 0, -9999); ped.target.set(-9999, 0, -9999);
+    ped.pos.set(-9999, 0, -9999); ped.target.set(-9999, 0, -9999); if (CBZ.bodyTeleported) CBZ.bodyTeleported(ped);
     ped.speed = 0; ped.state = "walk"; ped.path = null; ped.finalGoal = null; ped.mem = null;
     return true;
   };
@@ -2296,7 +2296,7 @@
       const back = L + 1.0 + (i >> 1) * 1.15;
       const side = (i & 1 ? 1 : -1) * (0.85 + (i >> 1) * 0.35);
       cop._swatPassenger = null; cop._swatDriver = false; cop.inCar = false;
-      cop.pos.set(van.pos.x + bx * back + px * side, 0, van.pos.z + bz * back + pz * side);
+      cop.pos.set(van.pos.x + bx * back + px * side, 0, van.pos.z + bz * back + pz * side); if (CBZ.bodyTeleported) CBZ.bodyTeleported(cop);
       cop.group.visible = true; cop.state = "fight"; cop.pause = 0;
       cop.curTarget = CBZ.city && CBZ.city.playerActor; cop.sees = false;
       if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(cop);
@@ -3763,6 +3763,8 @@
     openCarry: openCarry,
   });
   function finalizeMove(c) {
+    // a crossing taken back by the net before the push-out (systems/bodymove.js)
+    if (CBZ.bodyNet) CBZ.bodyNet.settle(c);
     if (CBZ.collide) CBZ.collide(c.pos, COP_R, c.pos.y, c.pos.y + 1.7);
     if (CBZ.city.arena) CBZ.city.arena.clampToCity(c.pos, COP_R);
     c.pos.y = 0;

@@ -645,7 +645,7 @@ document.body.appendChild(b);}}catch(e){}})();
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
      one damage path, and counts the dead for the news. After crowdgpu. -->
-<script src="src/entities/crowdstore.js?v=street1009"></script>
+<script src="src/entities/crowdstore.js?v=bodymove1022"></script>
 <!-- CBZ.verbs: THE ONE library of what two people do to each other with their
      hands, for every game: grab, carry, throw, shove, tackle, cuff, frisk,
      drag, escort, choke, shield, mug (verbs.js), the bodies both of them wear
@@ -656,7 +656,7 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=mc5ae55"></script>
-<script src="src/systems/verbs.js?v=butt1022"></script>
+<script src="src/systems/verbs.js?v=bodymove1022"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
@@ -668,9 +668,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/cuffedplayer.js?v=butt1022"></script>
 <script src="src/entities/verbposes.js?v=butt1022"></script>
 <script src="src/entities/meleeposes.js?v=melee1011"></script>
-<script src="src/systems/verbs_strike.js?v=feel1020"></script>
+<script src="src/systems/verbs_strike.js?v=bodymove1022"></script>
 <script src="src/systems/melee.js?v=butt1022"></script>
-<script src="src/systems/bodyfall.js?v=landblood1022"></script>
+<script src="src/systems/bodyfall.js?v=bodymove1022"></script>
 <!-- CBZ.leave: PEOPLE WALK OUT, NOBODY VANISHES. Every game's "his part is over"
      (a staffer, an aide, the dismissed, a crowd going home) walks him out by a
      door or away from the camera and takes him off the world only when nobody
@@ -831,8 +831,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/camera.js?v=hands1022"></script>
-<script src="src/systems/physics.js?v=landblood1022"></script>
+<script src="src/systems/physics.js?v=bodymove1022"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
+<!-- THE ONE MOVER (CBZ.bodyMove) every human body is moved through, and the per-frame net (onUpdate 99.97) that puts back anything that crossed a wall. After physics.js (sweepCircle/collide/walkGroundAt). -->
+<script src="src/systems/bodymove.js?v=bodymove1022"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
@@ -848,7 +850,7 @@ document.body.appendChild(b);}}catch(e){}})();
      a floating dock + hinged gangway, marina pontoons, and yacht decks.
      Next adopters are one line each — elevators.js (the teleporting cab is
      the reason this exists) and the airliner cabin deck. -->
-<script src="src/systems/actorcollide.js?v=colcore1"></script>
+<script src="src/systems/actorcollide.js?v=bodymove1022"></script>
 <!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
      transform: clear lie direction, wall depenetration at both ends of the
      body, limb sprawl. entities/npc.js + entities/guards.js call its tick
@@ -981,8 +983,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
 <script src="src/world/disaster_arena.js?v=mlpanelisles1"></script>
 <script src="src/world/island_dressing.js?v=isles1022"></script>
-<script src="src/systems/grapple.js?v=landblood1022"></script>
-<script src="src/entities/survivorbot.js?v=isles1022"></script>
+<script src="src/systems/grapple.js?v=bodymove1022"></script>
+<script src="src/entities/survivorbot.js?v=misles1bodymo"></script>
 <script src="src/modes/survival.js?v=isles1022"></script>
 <!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
      instant death, i-frames, no chip, physical shelter, regen. survival.js's
@@ -1062,7 +1064,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=silt1020"></script>
+<script src="src/systems/disasters.js?v=bodymove1022"></script>
 <!-- THE HANDS' VERBS (Grab, and the hold set that swaps in), one copy shared by
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=hands1022"></script>
@@ -1488,7 +1490,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=feel1020"></script>
+<script src="src/systems/tornado.js?v=bodymove1022"></script>
 <script src="src/city/metro_promote.js?v=mrg10200048"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
@@ -1739,7 +1741,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/agency.js?v=ijkl1022"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
-<script src="src/systems/humancontact.js?v=voice1022"></script>
+<script src="src/systems/humancontact.js?v=bodymove1022"></script>
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
      (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
      the army's "route" order) route on it. Pure maths, loads first. -->
@@ -2121,7 +2123,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=cine1022"></script>
-<script src="src/city/motorcade.js?v=ijkl1022"></script>
+<script src="src/city/motorcade.js?v=mijkl10bodymo"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
      readiness, the Bureau's thread, a former who comes back; the Chief of

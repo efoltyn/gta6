@@ -110,18 +110,21 @@
   function moveBy(B, dx, dz) {
     const p = B.pos;
     if (!p || (!dx && !dz)) return;
-    p.x += dx; p.z += dz;
+    // THE ONE MOVER (systems/bodymove.js): the stagger step is swept, so a
+    // blow never knocks a man through the wall or the shut door behind him
+    const bx = p.x, bz = p.z;
+    if (CBZ.bodyMove) {
+      _sO.clearRadius = B.isPlayer ? ((CBZ.player && CBZ.player.radius) || 0.45) : 0.42;
+      _sO.posture = B.down() ? "down" : "stand";
+      CBZ.bodyMove(p, dx, 0, dz, _sO);
+    } else { p.x += dx; p.z += dz; }
+    const mx = p.x - bx, mz = p.z - bz;
     const ch = B.ch;
-    if (ch && ch.group && ch.group.position !== p) { ch.group.position.x += dx; ch.group.position.z += dz; }
+    if (ch && ch.group && ch.group.position !== p) { ch.group.position.x += mx; ch.group.position.z += mz; }
     const g = B.a && B.a.group;
-    if (g && g.position !== p && (!ch || g !== ch.group)) { g.position.x += dx; g.position.z += dz; }
-    if (CBZ.collide) {
-      const bx = p.x, bz = p.z;
-      CBZ.collide(p, B.isPlayer ? ((CBZ.player && CBZ.player.radius) || 0.45) : 0.42);
-      const cx = p.x - bx, cz = p.z - bz;
-      if ((cx || cz) && ch && ch.group && ch.group.position !== p) { ch.group.position.x += cx; ch.group.position.z += cz; }
-    }
+    if (g && g.position !== p && (!ch || g !== ch.group)) { g.position.x += mx; g.position.z += mz; }
   }
+  const _sO = { posture: "stand", radius: 0.3, clearRadius: 0.42, out: { hit: false, nx: 0, nz: 0, c: null, pushed: false, landed: false, y: 0, floor: 0 } };
 
   /* ---- the blow table: natural reach (m, centre to centre, two adults with
      no step), power, and the stagger step a clean one forces ---- */

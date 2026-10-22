@@ -1780,6 +1780,7 @@
     Mv.step(m, p.pos, p.group.rotation.y, p.pos.x + hx * 4, p.pos.z + hz * 4, _bumMo, dt);
     p.group.rotation.y = m.yaw;
     if (m.speed > 0.01) {
+      if (CBZ.bodyNet) CBZ.bodyNet.settle(p);          // a crossing taken back before the push-out
       if (CBZ.collide) CBZ.collide(p.pos, PED_R, p.pos.y + PED_FOOT, p.pos.y + 1.7);
       const A = CBZ.city && CBZ.city.arena;
       if (A && A.clampToCity) A.clampToCity(p.pos, PED_R);
@@ -4241,7 +4242,7 @@
       if (d > 60 && !P.driving && !P._aircraft) {
         const wx = P.pos.x + 3, wz = P.pos.z;
         const safe = CBZ.npcTransitionSafe ? CBZ.npcTransitionSafe(wx, wz) : true;
-        if (safe) ped.pos.set(wx, 0, wz);
+        if (safe) { ped.pos.set(wx, 0, wz); if (CBZ.bodyTeleported) CBZ.bodyTeleported(ped); }
       }
       if (d > 4.5) { const fp = companionFollowPoint(ped, P); ped.target.set(fp.x, 0, fp.z); }
       else { ped.target.set(ped.pos.x, 0, ped.pos.z); faceTo(ped, P.pos.x, P.pos.z, 1.5); }
@@ -6715,23 +6716,20 @@
       return;
     }
 
-    // ANTI-TUNNEL DEPENETRATION: CBZ.collide is a SINGLE-PASS circle-vs-box push
-    // (shared with the player — do not edit it). One pass at a corner can shove the
-    // body OUT of one wall and INTO the adjacent one, leaving it half-clipped; a
-    // fast or non-active ped can then squeeze straight through. So we run it 2–3
-    // times: each pass resolves whatever the previous push created, and we stop
-    // early once a pass no longer moves the body (fully resolved). The clamp runs
-    // between passes too so a building edge + the city bounds both settle.
-    if (CBZ.collide) {
-      for (let pass = 0; pass < 3; pass++) {
-        const bx = ped.pos.x, bz = ped.pos.z;
-        CBZ.collide(ped.pos, PED_R, ped.pos.y + PED_FOOT, ped.pos.y + 1.7);
-        if (CBZ.city && CBZ.city.arena) CBZ.city.arena.clampToCity(ped.pos, PED_R);
-        // converged: the last pass didn't push us anywhere → no overlap left
-        if (Math.abs(ped.pos.x - bx) < 0.002 && Math.abs(ped.pos.z - bz) < 0.002) break;
-      }
-    } else if (CBZ.city && CBZ.city.arena) {
+    // NO TUNNELLING. A push-out only sees where the body ended up: a fast or
+    // off-screen ped (a sprint, a stride tick integrating half a second) whose
+    // centre crossed a thin wall or door leaf's middle was pushed out the FAR
+    // side. So the net (systems/bodymove.js CBZ.bodyNet.settle) first takes
+    // back whatever part of this frame's step crossed a face, then collide()
+    // clears the overlap (it converges on its own: deepest first, two-plane
+    // solve, up to four passes — the old 3x loop here predates that), then
+    // the city bounds; a bounds clamp that moved him is cleared once more.
+    if (CBZ.bodyNet) CBZ.bodyNet.settle(ped);
+    if (CBZ.collide) CBZ.collide(ped.pos, PED_R, ped.pos.y + PED_FOOT, ped.pos.y + 1.7);
+    if (CBZ.city && CBZ.city.arena) {
+      const bx = ped.pos.x, bz = ped.pos.z;
       CBZ.city.arena.clampToCity(ped.pos, PED_R);
+      if (CBZ.collide && (Math.abs(ped.pos.x - bx) > 0.002 || Math.abs(ped.pos.z - bz) > 0.002)) CBZ.collide(ped.pos, PED_R, ped.pos.y + PED_FOOT, ped.pos.y + 1.7);
     }
     settleFeet(ped, dt);
     /* STUCK: the motor was carrying real speed and the walls ate most of it.

@@ -35,6 +35,7 @@
   const SWIM_TURN_PANIC = 2.3;    // rad/s with a fin behind it
 
   const BOT_RADIUS = 0.5;
+  const _swimO = { posture: "stand", radius: 0.3, cars: false, clearRadius: 0.5 };
   const ANIM_DIST2 = 62 * 62;     // beyond this, freeze animation
   let frame = 0;
 
@@ -1410,6 +1411,8 @@
     }
     // the player's band (feet + 0.42): a riser is stood on, and the
     // height-gated upper-floor walls of buildings do not block them at ground level
+    // (the net, systems/bodymove.js, first takes back a step that crossed a face)
+    if (CBZ.bodyNet) CBZ.bodyNet.settle(b);
     if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y + 0.42, b.pos.y + 1.7);
     b.pos.y = CBZ.surv ? easeFeet(b.pos.y, standY(b), dt) : 0;
     if (animate) animChar(b.char, m.gs, dt);
@@ -1467,11 +1470,12 @@
     }
     const want = dist > 0.8 ? (panic ? PANIC_SPEED : SWIM_SPEED) * gate : 0;
     b.speed = damp(b.speed, want, panic ? 3.4 : 1.9, dt);
-    if (dist > 1e-4 && b.speed > 1e-4) {
-      b.pos.x += (dx / dist) * b.speed * dt;
-      b.pos.z += (dz / dist) * b.speed * dt;
-    }
-    if (CBZ.collide) CBZ.collide(b.pos, BOT_RADIUS, b.pos.y + 0.42, b.pos.y + 1.7);
+    // the stroke goes through the one mover (systems/bodymove.js): a pier,
+    // a hull, a sea wall stop it on their face
+    const sdx = dist > 1e-4 && b.speed > 1e-4 ? (dx / dist) * b.speed * dt : 0;
+    const sdz = dist > 1e-4 && b.speed > 1e-4 ? (dz / dist) * b.speed * dt : 0;
+    if (CBZ.bodyMove) { _swimO.clearRadius = BOT_RADIUS; CBZ.bodyMove(b.pos, sdx, 0, sdz, _swimO); }
+    else { b.pos.x += sdx; b.pos.z += sdz; }
 
     /* VERTICAL. The float line is the same one the player settles on —
        FLOAT_DEPTH below the LIVE surface, so the body rides the swell instead
@@ -1670,6 +1674,7 @@
            back down to the bottom every frame by the collision pass and the
            swim looked like it did nothing at all. */
         clamp(a) {
+          if (CBZ.bodyNet && !a._p) CBZ.bodyNet.settle(a);
           if (CBZ.collide) CBZ.collide(a.pos, a.r || BOT_RADIUS, a.pos.y + 0.42, a.pos.y + 1.7);
           if (!a._p && !a.swim) a.pos.y = CBZ.surv ? easeFeet(a.pos.y, standY(a), 1 / 60) : 0;
         },

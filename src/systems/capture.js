@@ -75,6 +75,7 @@
   function beatOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.PRISON_CELL_BEAT); }
 
   const BODY_R = 0.55;       // player capsule radius (systems/physics.js)
+  const _marchO = { posture: "stand", radius: 0.3, feet: 0, height: 1.7, clearRadius: BODY_R };
   const INTAKE_T = 8;        // intake hold when a city arrest lands you here
   let heldDoor = null;       // the ONE cell index this file has locked (or null)
 
@@ -143,6 +144,7 @@
     try { p = c.playerSpawn(); } catch (e) { p = null; }
     if (!p || !isFinite(+p.x) || !isFinite(+p.z)) return false;
     player.pos.set(+p.x, isFinite(+p.y) ? +p.y : 0, +p.z);
+    if (CBZ.bodyTeleported) CBZ.bodyTeleported(player);
     player.vy = 0;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(player.pos);
     return true;
@@ -925,6 +927,7 @@
   const INFIRMARY = { x0: 26, x1: 42, z0: 88, z1: 104, wakeX: 31.9, wakeZ: 92.2, docX: 33, docZ: 96 };
   function landInInfirmary() {
     player.pos.set(INFIRMARY.wakeX, 0, INFIRMARY.wakeZ);
+    if (CBZ.bodyTeleported) CBZ.bodyTeleported(player);
     player.vy = 0;
     const ch = CBZ.playerChar;
     if (ch && ch.group) {
@@ -1166,8 +1169,10 @@
           VB().walk(held, held, e.tx - e.hx * 0.9, e.tz - e.hz * 0.9, ESC.WALK_SPD, dt, Math.atan2(e.hx, e.hz));
           moved = Math.hypot(ox - lp.x, oz - lp.z); lp.x = ox; lp.z = oz;
         } else {
-          P.pos.x += e.hx * step; P.pos.z += e.hz * step; P.vy = 0;
-          if (CBZ.collide) { try { CBZ.collide(P.pos, BODY_R, 0, 1.7); } catch (er) {} }
+          // the march goes through the one mover (systems/bodymove.js)
+          if (CBZ.bodyMove) { _marchO.clearRadius = BODY_R; CBZ.bodyMove(P, e.hx * step, 0, e.hz * step, _marchO); }
+          else { P.pos.x += e.hx * step; P.pos.z += e.hz * step; }
+          P.vy = 0;
           moved = Math.hypot(P.pos.x - ox, P.pos.z - oz);
         }
         e.stall = moved < 0.25 * step ? e.stall + dt : 0;
@@ -1197,7 +1202,7 @@
       // other cuffing is the hole, which is time, not a strike.
       dropHolds(e);
       camDrop(); releaseScrews();
-      if (!landInCell()) { P.pos.copy(CBZ.SPAWN); P.vy = 0; ch.group.position.copy(P.pos); }
+      if (!landInCell()) { P.pos.copy(CBZ.SPAWN); P.vy = 0; if (CBZ.bodyTeleported) CBZ.bodyTeleported(P); ch.group.position.copy(P.pos); }
       g.detection = 0; g.invuln = 2.0;
       if (e.kind === "transfer") {
         g.caughtCount++;
@@ -1546,7 +1551,7 @@
     const gd = H.gd;
     if (H.h && !H.h.done) H.h.finish();
     if (!walked) {
-      if (!landInCell()) { player.pos.copy(CBZ.SPAWN); player.vy = 0; CBZ.playerChar.group.position.copy(player.pos); }
+      if (!landInCell()) { player.pos.copy(CBZ.SPAWN); player.vy = 0; if (CBZ.bodyTeleported) CBZ.bodyTeleported(player); CBZ.playerChar.group.position.copy(player.pos); }
     }
     g.detection = 0; g.invuln = Math.max(g.invuln || 0, 1.5);
     haul = null;
