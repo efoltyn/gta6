@@ -803,6 +803,9 @@
         if (r.orphan) r.relaxed = true;
         continue;
       }
+      // MID-SENTENCE (city/ladder.js: "Sir. Put the gun away."): the demand
+      // ladder has the body until it is answered; the post takes him back after
+      if (a._ladder) continue;
       CBZ.cityPostTick(a, dt);
     }
   });

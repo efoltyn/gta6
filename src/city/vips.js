@@ -679,7 +679,61 @@
       if (P && !P.dead && PA && hyp(P.pos.x - pr.pos.x, P.pos.z - pr.pos.z) < 60 &&
           ((CBZ.cityHasGun && CBZ.cityHasGun()) || (P._fighting || 0) > 0)) th = PA;
     }
-    if (th && th !== slot.threat) engage(slot, th);
+    if (th && th !== slot.threat) { endCrowd(slot); engage(slot, th); return; }
+    crowd(slot);
+  }
+
+  // ---------- "Security!": the player crowding the principal ----------------
+  // A man who walks up into a VIP's face and stays there: the principal calls
+  // for his people and the nearest of them runs the demand ladder (kind
+  // "security", CBZ.brain.demand): "Sir, step back." -> "Step back. Now." ->
+  // "Back off!" -> the shove. Step back and it is over ("Thank you, sir.").
+  // A gun in your hand is the detail's own drill (brain_protection.js), not
+  // this; a swing is a fight (engage).
+  function endCrowd(slot) {
+    const gd = slot.crowd;
+    if (gd && CBZ.brain && CBZ.brain.demand) { try { CBZ.brain.demand.cancel(gd); } catch (e) {} }
+    slot.crowd = null; slot.crowdT = 0;
+  }
+  const _cs = { dist: 0, speed: 0, armed: false, aiming: false, attacking: false, fled: false };
+  function crowd(slot) {
+    const DM = CBZ.brain && CBZ.brain.demand;
+    const P = CBZ.player, PA = CBZ.city && CBZ.city.playerActor, pr = slot.principal;
+    if (!DM || !P || !PA || P.dead || P.driving || slot.threat || pr.dead) { endCrowd(slot); return; }
+    const d = hyp(P.pos.x - pr.pos.x, P.pos.z - pr.pos.z);
+    const armed = !!(CBZ.cityHasGun && CBZ.cityHasGun());
+    if (slot.crowd) {
+      const gd = slot.crowd;
+      if (gd.dead || armed) { endCrowd(slot); return; }
+      _cs.dist = d; _cs.speed = +P.speed || 0; _cs.armed = false; _cs.aiming = false;
+      _cs.attacking = (P._fighting || 0) > 0 && d < 3; _cs.fled = d > 30;
+      let r = null;
+      try { r = DM.step(gd, 0.33, _cs); } catch (e) { r = null; }
+      if (!r || r.step === "done") { slot.crowd = null; slot.crowdCD = 6; return; }
+      if (r.step === "act") {
+        slot.crowd = null; slot.crowdCD = 5;
+        if (_cs.attacking) { engage(slot, PA); return; }
+        const V = CBZ.verbs;
+        if (V && V.start) { try { V.start("shove", gd, PA, {}); } catch (e) {} }
+      }
+      return;
+    }
+    if ((slot.crowdCD = (slot.crowdCD || 0) - 0.33) > 0) return;
+    if (armed || pr.enterT > 0 || d > 2.4) { slot.crowdT = 0; return; }
+    slot.crowdT = (slot.crowdT || 0) + 0.33;
+    if (slot.crowdT < 1.2) return;
+    let gd = null, bd = 1e9;
+    for (const q of slot.guards) {
+      if (!q || q.dead) continue;
+      const dq = hyp(q.pos.x - P.pos.x, q.pos.z - P.pos.z);
+      if (dq < bd) { bd = dq; gd = q; }
+    }
+    if (!gd) return;
+    let call = null;
+    if (CBZ.voice && CBZ.voice.line) { try { call = CBZ.voice.line(pr, "call", { ladder: { kind: "security", step: "call", armed: false } }); } catch (e) { call = null; } }
+    if (CBZ.citySay) CBZ.citySay(pr, call || "Security!", null, { secs: 1.8, force: true });
+    try { DM.begin(gd, PA, "security", { hold: true, armed: !!gd.armed }); } catch (e) { return; }
+    slot.crowd = gd; slot.crowdT = 0;
   }
 
   // ---------- driving: the principal walks the lap ---------------------------

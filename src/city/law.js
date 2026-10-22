@@ -515,9 +515,9 @@
   function fallbackLine(c, ph) {
     switch (ph) {
       case "warn": return "Police! Stop right there!";
-      case "order": return "Hands where I can see them!";
-      case "escalate": return "STOP! Stop running!";
-      case "lethal": return "Drop the weapon! DROP IT!";
+      case "order": return "Hands up!";
+      case "escalate": return "Get on the ground!";
+      case "lethal": return "Put the gun down!";
     }
     return null;
   }

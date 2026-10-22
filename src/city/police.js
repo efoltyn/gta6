@@ -623,10 +623,22 @@
   // brandishing, 1 star. The officer still voices it himself (silent case).
   const STOP_LIMIT = 14;
   const _stopSt = { speed: 0, armed: true, aiming: false, attacking: false, fled: false, seen: true, dist: 0 };
+  // THE GUN STOP IS THE COP RUNG OF THE DEMAND LADDER (CBZ.brain.demand
+  // "cop" = brain.authority): demand -> warn -> show, then the call-in. The
+  // words ask the voice book first (systems/voice.js, feature-detected).
   const STOP_WARN = [
-    { t: 5, line: "Put it away. Now." },
-    { t: 9.5, line: "Last warning! Holster that weapon!" },
+    { t: 5, step: "warn", line: "Put the gun down. Now." },
+    { t: 9.5, step: "show", line: "Last warning! Put the gun down!" },
   ];
+  function ladderLine(c, step, fallback) {
+    const VO = CBZ.voice;
+    if (VO && typeof VO.line === "function") {
+      let s = null;
+      try { s = VO.line(c, step, { ladder: { kind: "cop", step: step, armed: true, targetArmed: true }, target: CBZ.city && CBZ.city.playerActor }); } catch (e) { s = null; }
+      if (s) return s;
+    }
+    return fallback;
+  }
   function beginStop(cop) {
     STOP.cop = cop; STOP.asked = 1; STOP.warnI = 0; STOP.case = null;
     if (cop._law && cop._law.suspect) LAW.release(cop);     // one case per officer: the stop is it
@@ -657,9 +669,9 @@
     cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
     cop._duty = null;            // the open carry outranks a move-along
     drawGun(cop, "order");       // challenge stance: gun OUT but lowered (_gunLowered)
-    copSay(cop, STOP.susp >= 2.2 ? "You again. Last warning."
+    copSay(cop, ladderLine(cop, "demand", STOP.susp >= 2.2 ? "You again. Last warning."
       : STOP.susp >= 1.2 ? "You again? Put that away."
-      : "Hey! Is that a gun? Put it away.", 2.4);
+      : "Hey. Put the gun away."), 2.4);
     if (CBZ.sfx) CBZ.sfx("whoosh");
   }
   function endStop(calm) {
@@ -676,7 +688,7 @@
   // COMPLIANCE IS YOUR STATE: the gun went away by your own controls.
   function stopComplied() {
     const c = STOP.cop;
-    if (c) { c._stopRefused = 0; c._gunLowered = true; copSay(c, "Good. Have a nice day.", 2.2); }
+    if (c) { c._stopRefused = 0; c._gunLowered = true; copSay(c, ladderLine(c, "comply", "Good. Keep it that way."), 2.2); }
     endStop(true);
   }
 
@@ -772,7 +784,7 @@
       // he SAYS it, louder each time, over his head, on the case's clock
       // (scaled to its patience, so a shorter re-challenge warns sooner)
       const w = STOP_WARN[STOP.warnI | 0];
-      if (w && K && K.t >= w.t * (K.patience / STOP_LIMIT)) { STOP.warnI = (STOP.warnI | 0) + 1; copSay(c, w.line, 2.4); }
+      if (w && K && K.t >= w.t * (K.patience / STOP_LIMIT)) { STOP.warnI = (STOP.warnI | 0) + 1; copSay(c, ladderLine(c, w.step, w.line), 2.4); }
       return;
     }
 

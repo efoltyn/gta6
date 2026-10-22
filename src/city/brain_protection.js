@@ -59,7 +59,7 @@
        ALERT  (a weapon seen, nobody firing): the two agents nearest the
               threat step in between; the rest KEEP THEIR SECTORS (a
               diversion is the classic setup). The nearest one challenges
-              through CBZ.brain.authority (roe "protect") when it is loaded.
+              through CBZ.brain.demand ("security": "Drop the gun!").
        COVER  (shots, an attacker, a hit): every agent reacts after his own
               reaction time (0.12-0.55 s, never all on one frame). The one
               nearest the threat shouts. The CP grabs the man (act.verb
@@ -790,42 +790,45 @@
     }
   }
 
-  // ---- 9. the authority ladder on the man with the gun (alert only) ------
-  // The words and the escalation are the core's authority ladder (roe
-  // "protect": lethal only for an armed man pointing it). A detail agent
-  // CHALLENGES FROM WHERE HE STANDS: the ladder's approach / cuff / chase
-  // moves are overridden the same frame by his own slot (a detail never
-  // leaves the man to go and make an arrest; the police do that).
+  // ---- 9. the demand ladder on the man with the gun (alert only) ---------
+  // CBZ.brain.demand kind "security": a man holding a gun near the principal
+  // is past asking, so it opens at SHOW ("Drop the gun!"); the gun put away
+  // ends it ("Thank you, sir."), the gun pointed at them is the ACT (env.engage).
+  // A detail agent CHALLENGES FROM WHERE HE STANDS: the ladder only decides
+  // and speaks; his own slot moves him (a detail never leaves the man to go
+  // and make an arrest; the police do that).
   function challenge(D, env, dt) {
     const B = brain();
-    if (D.phase !== "alert" || !D.screen.length || !D.threat || !B || !B.authority) { endChallenge(D, B); return; }
+    const DM = B && B.demand;
+    if (D.phase !== "alert" || !D.screen.length || !D.threat || !DM) { endChallenge(D, B); return; }
     const q = D.screen[0];
-    const Au = B.authority;
     if (D.authorityOn !== q) {
       endChallenge(D, B);
-      try { Au.begin(q, D.threat, "weapon near the protectee", { roe: "protect", skipWarn: true }); D.authorityOn = q; } catch (e) { return; }
+      try { DM.begin(q, D.threat, "security", { hold: true, armed: true }); D.authorityOn = q; } catch (e) { return; }
     }
     D.authT = (D.authT || 0) - dt;
     if (D.authT > 0) return;
     D.authT = 0.25;
     const t = D.threat, tp = P(t), pl = isPlayer(t);
-    const st = {
-      speed: t.speed || (pl && t._protSpeed) || 0, handsUp: !!(t.poseHandsUp || t.surrender), kneeling: false, prone: false,
-      armed: pl ? !!(CBZ.cityHasGun && CBZ.cityHasGun()) : !!t.armed,
-      aiming: pl ? !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon()) : !!(t.state === "fight" || t.rage),
-      attacking: !!(t.rage && (t.rage === env.principal || t.rage._det)), fled: tp ? hyp(tp.x, tp.z, D.px, D.pz) > 40 : true,
-    };
+    const st = D._dst || (D._dst = { dist: 0, speed: 0, armed: false, aiming: false, attacking: false, fled: false, handsUp: false });
+    st.speed = t.speed || (pl && t._protSpeed) || 0;
+    st.handsUp = !!(t.poseHandsUp || t.surrender);
+    st.armed = pl ? !!(CBZ.cityHasGun && CBZ.cityHasGun()) : !!t.armed;
+    st.aiming = pl ? !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon()) : !!(t.state === "fight" || t.rage);
+    st.attacking = !!(t.rage && (t.rage === env.principal || t.rage._det));
+    st.dist = tp ? hyp(tp.x, tp.z, D.px, D.pz) : 99;
+    st.fled = st.dist > 40;
+    st.complied = !st.armed;                  // the gun away is all the detail asks
     let r = null;
-    try { r = Au.step(q, 0.25, st); } catch (e) { r = null; }
-    // his own slot wins this frame: driveMember re-issues his order after this
-    if (r && r.phase === "lethal" && env.engage && D.engagers.indexOf(q) < 0) {
+    try { r = DM.step(q, 0.25, st); } catch (e) { r = null; }
+    if (r && r.step === "act" && (r.act === "shoot" || st.armed) && env.engage && D.engagers.indexOf(q) < 0) {
       D.engagers.push(q);
       try { env.engage(q, t); } catch (e) {}
     }
   }
   function endChallenge(D, B) {
     if (!D.authorityOn) return;
-    if (B && B.authority && B.authority.cancel) { try { B.authority.cancel(D.authorityOn); } catch (e) {} }
+    if (B && B.demand) { try { B.demand.cancel(D.authorityOn); } catch (e) {} }
     D.authorityOn = null;
   }
 

@@ -1476,6 +1476,56 @@
      writes ped.mem/alarmed/rage/state, which peds.js's shipped think() reads.
      ====================================================================== */
   let sweepT = 0;
+  /* THE TRESPASS LADDER. true while somebody is asking him to leave (or the
+     beat after he was thrown out): the alarm waits on the answer. */
+  function askingNow(rec, k, P, actor) {
+    const L = CBZ.cityLadder;
+    if (!L) return false;
+    const t = nowMs() / 1000;
+    const q = rec.asker;
+    if (q && !q.dead && q._ladder) return true;
+    if (t < (rec.askUntil || 0)) return true;
+    if (rec.asked) return false;
+    rec.asked = true;
+    // the nearest of them on this floor, on his feet and not already fighting
+    let best = null, bd = 18 * 18;
+    for (let i = 0; i < rec.peds.length; i++) {
+      const p = rec.peds[i];
+      if (!p || p.dead || p.ko > 0 || p.rage || p._ladder || p._occupyNoFight) continue;
+      if (Math.abs((p.pos.y || 0) - (P.pos.y || 0)) > 2.2) continue;
+      const dx = p.pos.x - P.pos.x, dz = p.pos.z - P.pos.z, d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = p; }
+    }
+    if (!best) return false;
+    const gang = rec.preset === "gang";
+    const e = L.begin(best, "trespass", {
+      hard: gang || rec.preset === "military" ? true : undefined,
+      act: gang ? "beat" : null,
+      inside: function () {
+        const h = CBZ.cityAccessAt(P.pos.x, P.pos.y || 0, P.pos.z);
+        return !!(h && h.rec === rec && !CBZ.cityMayEnter(actor, rec.lot, h.floor));
+      },
+      onAct: function (p, r) {
+        if (r.act === "beat" || r.act === "shoot") {
+          // he would not go: the building learns he is here
+          rec.askUntil = 0;
+          CBZ.cityOccupyAlarm(rec.lot, actor, p._occupyFloor != null ? p._occupyFloor : k);
+          if (!rec.tres && CBZ.cityCrime && rec.crime) { try { CBZ.cityCrime(45, { type: rec.crime, x: P.pos.x, z: P.pos.z }); } catch (e) {} }
+          rec.tres = true;
+        }
+        return false;
+      },
+      onEnd: function (p, r) {
+        // thrown out: a beat to see if he comes back. Backed off from a gun,
+        // or gave up asking: the next sweep raises it.
+        const o = r && r.outcome;
+        rec.askUntil = o === "backed" || o === "gaveup" ? 0 : nowMs() / 1000 + 5;
+      },
+    });
+    if (!e) return false;
+    rec.asker = best;
+    return true;
+  }
   const ORDER = (CBZ.PRIO && CBZ.PRIO.after) ? CBZ.PRIO.after(CBZ.PRIO.POLICE, 7) : 35.07;
   // just after POLICE(35) so an alarm raised here is executed by the ped
   // brain (34) on the NEXT tick, exactly like aigoals.js's layering.
@@ -1540,17 +1590,20 @@
           if (p.rage && !p._occupyAwake) { CBZ.cityOccupyAlarm(rec.lot, p.rage, p._occupyFloor); break; }
         }
       }
-      if (!hit || hit.rec !== rec) { rec.tres = false; continue; }
-      if (CBZ.cityMayEnter(actor, rec.lot, hit.floor)) { rec.tres = false; continue; }
+      if (!hit || hit.rec !== rec) { rec.tres = false; rec.asked = false; continue; }
+      if (CBZ.cityMayEnter(actor, rec.lot, hit.floor)) { rec.tres = false; rec.asked = false; continue; }
+      // ASKED BEFORE ANYTHING ELSE (the demand ladder, city/ladder.js): the
+      // nearest of them on this floor comes over. "Can I help you?" -> "You
+      // can't be in here." -> "Get out. Now." -> he grabs you and throws you
+      // out. A gang house skips the asking and beats you. Only a man who will
+      // not go (or pulls a gun on them, or swings) brings the building down.
+      if (rec.alarmT <= 0 && askingNow(rec, hit.floor, P, actor)) continue;
       // KEEP the floor you are standing on hot for as long as you stand on it
       // (the alarm decays otherwise, and a guard who forgets you mid-fight
-      // reads as broken); the toast/crime report fires once per entry.
+      // reads as broken); the crime report fires once per entry.
       CBZ.cityOccupyAlarm(rec.lot, actor, hit.floor, { silent: rec.tres });
       if (rec.tres) continue;
       rec.tres = true;
-      if (CBZ.cityFlavor) {
-        try { CBZ.cityFlavor((rec.label || "Restricted floor") + " · you are not supposed to be here.", "#ff9c6b"); } catch (e) {}
-      }
       // cityCrime's signature is crime(amount, opts) (wanted.js:357) — passing
       // the type as the FIRST argument charged nothing and fed a NaN into the
       // panic term downstream.

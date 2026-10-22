@@ -443,6 +443,7 @@
   function driveGuard(rec, dt) {
     const p = rec.ped, q = rec.guard;
     if (!q || q.dead) { rec.guard = null; return; }
+    if (q._ladder) return;                 // "Drop the gun!" (city/ladder.js) owns him
     q.fear = 0; q.alarmed = 0; q.surrender = false;
     if (q.armed && q.ammo < 4) q.ammo = 40;
     // is anyone (incl. the player) a live threat to the principal?
@@ -667,22 +668,16 @@
     if (!isTycoon(p)) return;
     if (p._milliShaken) { note((p.name || "They") + " has nothing left to give.", 1.8); return; }
     const PA = CBZ.city && CBZ.city.playerActor;
-    // if they have a live bodyguard nearby, it's a FIGHT, not a payday
-    const rec = M.tycoons.find((r) => r.ped === p);
-    const guard = rec && rec.guard;
+    // A LIVE BODYGUARD RIGHT THERE: he does not pay, he calls for him. The
+    // guard runs the demand ladder (kind "security", CBZ.brain.demand) on the
+    // man with the gun: "Drop the gun!" — put it away and it is over, point
+    // it at him (or keep it out) and he opens fire.
     if (guard && !guard.dead && hyp(guard.pos.x - p.pos.x, guard.pos.z - p.pos.z) < 20) {
-      if (rng() < 0.5) {
-        // sometimes they pay anyway, scared — but the guard reacts
-        guard.rage = PA; guard.state = "fight";
-        p._milliThreat = PA; p._milliThreatT = 12;
-      } else {
-        if (CBZ.citySay) CBZ.citySay(p, "You think my security lets that happen?", null, { secs: 2.4, force: true });
-        if (guard) { guard.rage = PA; guard.state = "fight"; }
-        p._milliThreat = PA; p._milliThreatT = 12;
-        p.fear = 4; p.state = "flee"; if (CBZ.cityFleeFrom && PA) CBZ.cityFleeFrom(p, PA.pos.x, PA.pos.z);
-        if (CBZ.cityCrime) CBZ.cityCrime(90, { x: p.pos.x, z: p.pos.z, type: "armed-robbery" });
-        return;
-      }
+      if (CBZ.citySay) CBZ.citySay(p, "Security!", null, { secs: 1.8, force: true });
+      p.fear = 4; p.state = "flee"; if (CBZ.cityFleeFrom && PA) CBZ.cityFleeFrom(p, PA.pos.x, PA.pos.z);
+      if (CBZ.cityCrime) CBZ.cityCrime(90, { x: p.pos.x, z: p.pos.z, type: "armed-robbery" });
+      if (!(CBZ.cityLadder && CBZ.cityLadder.begin(guard, "security", { armed: !!guard.armed }))) { p._milliThreat = PA; p._milliThreatT = 12; }
+      return;
     }
     // they pay. A huge score scaled to their fortune.
     const bag = p._milliBag || 200000;
