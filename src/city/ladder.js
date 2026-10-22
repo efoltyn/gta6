@@ -312,7 +312,7 @@
   };
 
   if (CBZ.onUpdate) CBZ.onUpdate((CBZ.PRIO && CBZ.PRIO.after) ? CBZ.PRIO.after(CBZ.PRIO.PED_BRAIN, 3) : 34.3, function (dt) {
-    if (!g || g.mode !== "city") return;
+    if (!g || !(CBZ.economyMode && CBZ.economyMode())) return;   // Gang City and the islands
     registerPay();
     if (g.state && g.state !== "playing") return;
     step(Math.min(0.1, dt || 0));

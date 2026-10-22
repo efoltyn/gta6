@@ -1531,7 +1531,7 @@
   // ================================================================
   //  THE TICK (36.45: after orders.js 36.4, before restrain.js 38.5)
   // ================================================================
-  function econ() { return CBZ.economyMode ? !!CBZ.economyMode() : (g.mode === "city" || g.mode === "archipelago"); }
+  function econ() { return CBZ.economyMode(); }
   function tick(dt) {
     if (!wired) wired = wire();
     if (!econ()) {

@@ -69,7 +69,7 @@ function world(o) {
     return c;
   };
   const CBZ = W.CBZ = {
-    game: { mode: "city" }, player: P, CONFIG: {}, city: { playerActor: P },
+    game: { mode: "city" }, economyMode: () => true, player: P, CONFIG: {}, city: { playerActor: P },
     onUpdate: (ord, fn) => { W.upd.push({ o: ord, fn }); W.upd.sort((a, b) => a.o - b.o); },
     interactions: I,
     cityPeds: peds, cityCops: [], cityCars: cars,

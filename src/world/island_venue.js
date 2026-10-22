@@ -278,72 +278,26 @@
      staff(b, lx, lz, face, opts) -> post
          a worker posted at (lx, lz) on b's ground floor (building frame),
          facing local yaw `face` (0 = local +z, into the room from the door):
-         the clerk behind a shop counter. He is one of the island's own
-         people (entities/survivorbot.js) holding his spot (bot.post), so a
-         gun fired in the shop hits him, a killing sends him running, and he
-         speaks over his head like anybody. He is stood where nobody is
-         looking (systems/leave.js unseen) while his island is the one in
-         force; the crowd swept by an island change is stood again the same
-         way; one who was KILLED stays dead (post.lost) until the island is
+         the clerk behind a shop counter. He is one of the island's people,
+         Gang City's street crowd (world/island_people.js post: a city ped
+         held on his spot): a gun drawn on him puts his hands up, he can be
+         robbed, threatened, grabbed and killed like anybody, and he speaks
+         over his head. He is stood where nobody is looking while his shop is
+         open and you are near, walks out of his door and home at closing,
+         and one who was KILLED stays dead (post.lost) until the island is
          built again. He leaves with the island.
-           opts: { job ("clerk"), look: fn() -> {x, z} | null (who he faces) }
+           opts: { job ("clerk"), look: fn(post, ped, dt) -> {x, z} | null
+                   (who he faces), armed (default: the trades that keep a
+                   gun under the counter) }
            post.body() -> the living body or null; post.x/z/face (world)  */
-  const posts = new Set();
   function staff(b, lx, lz, face, opts) {
-    if (!b) return null;
-    opts = opts || {};
-    const F = frame(b), w = F.toWorld(lx, lz);
-    const post = {
-      b: b, x: w.x, z: w.z, y: b.gy + floorLocal(b, 0), face: (face || 0) + F.yaw,
-      job: opts.job || "clerk", look: opts.look || null, ped: null, lost: false,
-      body: function () { const p = post.ped; return p && !p.dead ? p : null; },
-    };
-    posts.add(post);
+    const PP = CBZ.islandPeople;
+    if (!b || !PP || !PP.post) return null;
+    const post = PP.post(b, { lx: lx, lz: lz, face: face || 0 }, opts || {});
     const job = jobOf(b);
-    if (job) (job._venueUndo || (job._venueUndo = [])).push(function () { unstaff(post); });
+    if (post && job) (job._venueUndo || (job._venueUndo = [])).push(function () { PP.unpost(post); });
     return post;
   }
-  function unstaff(post) {
-    posts.delete(post);
-    const p = post.ped;
-    post.ped = null;
-    if (p && !p.dead && CBZ.removeSurvivorBot) CBZ.removeSurvivorBot(p);
-  }
-  function staffMint(post, A) {
-    if (!CBZ.spawnSurvivorBotAt) return;
-    if (CBZ.leave && CBZ.leave.unseen && !CBZ.leave.unseen({ x: post.x, y: post.y, z: post.z })) return;
-    let p = null;
-    try { p = CBZ.spawnSurvivorBotAt(post.x, post.z); } catch (e) { p = null; }
-    if (!p) return;
-    p.post = { x: post.x, z: post.z, face: post.face, look: null };
-    p.job = post.job;
-    p._venueStaff = post.b.use || true;
-    if (p.group) { p.group.rotation.y = post.face; if (A.root && p.group.parent !== A.root) A.root.add(p.group); }
-    post.ped = p;
-  }
-  let staffAcc = 0;
-  if (CBZ.onUpdate) CBZ.onUpdate(41.9, function (dt) {
-    if (!posts.size) return;
-    staffAcc += dt || 0;
-    if (staffAcc < 0.25) return;
-    const step = staffAcc; staffAcc = 0;
-    const A = CBZ.surv && CBZ.surv.arena;
-    for (const post of posts) {
-      const p = post.ped;
-      if (p) {
-        if (p.dead) { post.lost = true; post.ped = null; continue; }
-        if ((CBZ.bots || []).indexOf(p) < 0) { post.ped = null; continue; }     // swept with the crowd
-        let at = null;
-        if (post.look) { try { at = post.look(post, p, step); } catch (e) { at = null; } }
-        p.post.look = at || null;
-        continue;
-      }
-      if (post.lost || !A || !CBZ.game || CBZ.game.mode !== "archipelago") continue;
-      const j = jobOf(post.b);
-      if (!j || j.arena !== A) continue;               // only the island in force has people
-      staffMint(post, A);
-    }
-  });
 
   CBZ.islandVenue = { on: on, list: list, lotFor: lotFor, floor: floor, clear: clear, island: island,
     staff: staff, fitSteps: fitSteps, drop: drop, has: has };

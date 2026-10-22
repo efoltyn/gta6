@@ -66,7 +66,7 @@
   function mode() { return (g && g.mode) || ""; }
   // the economy's worlds (Gang City and the islands) are policed by the city's
   // force: its officers, its gun law
-  function econ() { return CBZ.economyMode ? !!CBZ.economyMode() : (mode() === "city" || mode() === "archipelago"); }
+  function econ() { return CBZ.economyMode(); }
   const V = () => CBZ.verbs || null;
 
   /* ============================================================

@@ -39,7 +39,7 @@
   const COP_TARGET = [0, 2, 4, 8, 12, 20];
   /* THE ONE GATE: the economy's worlds (Gang City and the islands) have a law.
      CBZ.economyMode is the shared answer; the fallback is the same two modes. */
-  function econ() { return CBZ.economyMode ? !!CBZ.economyMode() : (g.mode === "city" || g.mode === "archipelago"); }
+  function econ() { return CBZ.economyMode(); }
   function onIsles() { return g.mode === "archipelago"; }
   let lastCrimeT = 0, busting = false, arrestScene = null;
   // V2 module state: the base-trespass lock, the "military hardware just got

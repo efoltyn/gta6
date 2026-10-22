@@ -474,7 +474,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
      in front of him (threat by sight, the one line picker, panic by sight).
      Before read.js / peds.js / prisonvoice.js, which all call it. -->
-<script src="src/systems/voice.js?v=money1022"></script>
+<script src="src/systems/voice.js?v=mmoney1people"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -683,7 +683,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
      player (hands on, two wrists, the escort) every game's law calls. -->
-<script src="src/systems/arrest.js?v=islelaw1022"></script>
+<script src="src/systems/arrest.js?v=people1022"></script>
 <!-- systems/cuffedplayer.js: what a cuffed player can do (hands gate at the window's capture
      phase, speed/stamina/get-up numbers, the grey bar) and how the room treats him; reads
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
@@ -1060,7 +1060,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ijkl1022"></script>
-<script src="src/systems/fpsmode.js?v=venue1022"></script>
+<script src="src/systems/fpsmode.js?v=people1022"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=voice1022"></script>
 
@@ -1092,10 +1092,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/disaster_arena.js?v=mvenue1night1"></script>
 <script src="src/world/island_dressing.js?v=venue1022"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
-<script src="src/world/island_venue.js?v=money1022"></script>
+<script src="src/world/island_venue.js?v=mmoney1people"></script>
 <script src="src/world/island_night.js?v=night1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
-<script src="src/entities/survivorbot.js?v=mislelashops1"></script>
+<script src="src/entities/survivorbot.js?v=people1022"></script>
 <script src="src/modes/survival.js?v=night1022"></script>
 <!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
      instant death, i-frames, no chip, physical shelter, regen. survival.js's
@@ -1293,7 +1293,7 @@ document.body.appendChild(b);}}catch(e){}})();
      buildings.js call it at build time. -->
 <script src="src/city/house_yard.js?v=house1020b"></script>
 <script src="src/city/interiorlight.js?v=winhole1014"></script>
-<script src="src/city/citynav.js?v=curb1013"></script>
+<script src="src/city/citynav.js?v=people1022"></script>
 <script src="src/city/fracture.js?v=nukecost1013"></script>
 <script src="src/city/demolition.js?v=collapse1014b"></script>
 <script src="src/city/elevators.js?v=lpanel1022"></script>
@@ -1507,8 +1507,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->
-<script src="src/city/law.js?v=islelaw1022"></script>
-<script src="src/city/wanted.js?v=islelaw1022"></script>
+<script src="src/city/law.js?v=people1022"></script>
+<script src="src/city/wanted.js?v=people1022"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=boot1013"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
@@ -1521,17 +1521,17 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=hands1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=islelaw1022"></script>
+<script src="src/city/peds.js?v=people1022"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
-<script src="src/city/brain_city.js?v=voice1022"></script>
+<script src="src/city/brain_city.js?v=people1022"></script>
 <!-- city/ladder.js: CBZ.cityLadder, the city body for CBZ.brain.demand (the
      demand ladder: a mugger, a doorman, a corner crew, a guard asking first).
      peds.js think() yields to it; nothing runs at parse. -->
-<script src="src/city/ladder.js?v=ladder1022"></script>
+<script src="src/city/ladder.js?v=people1022"></script>
 <script src="src/entities/pedinstance.js?v=peak1014c"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
@@ -1568,7 +1568,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=bodymove1022"></script>
 <script src="src/city/security.js?v=ladder1022"></script>
 <script src="src/city/vips.js?v=mladdervoice1"></script>
-<script src="src/city/police.js?v=islelaw1022"></script>
+<script src="src/city/police.js?v=people1022"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/aircraft.js?v=rounds1013m"></script>
 <script src="src/city/traffic.js?v=islelaw1022"></script>
@@ -1642,10 +1642,16 @@ document.body.appendChild(b);}}catch(e){}})();
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
 <script src="src/world/archipelago_map.js?v=isles1022"></script>
-<script src="src/world/archipelago.js?v=mmvenueislela"></script>
+<script src="src/world/archipelago.js?v=people1022"></script>
 <script src="src/world/island_lodging.js?v=night1022"></script>
 <script src="src/world/island_town.js?v=islelaw1022"></script>
-<script src="src/world/island_police.js?v=islelaw1022"></script>
+<script src="src/world/island_police.js?v=people1022"></script>
+<!-- THE ISLANDS' PEOPLE (world/island_people.js): Gang City's street crowd
+     (city/peds.js) on the island in force, with homes and work in its
+     buildings, the trades' hours and shutters, and the posted staff
+     (CBZ.islandVenue.staff). After island_town.js, island_venue.js, peds.js
+     and archipelago.js. -->
+<script src="src/world/island_people.js?v=people1022"></script>
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the
@@ -1822,10 +1828,10 @@ document.body.appendChild(b);}}catch(e){}})();
      with real per-segment limits it wins automatically with no edit here.
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <script src="src/city/carcluster.js?v=speedunit1"></script>
-<script src="src/city/interact.js?v=ijkl1022"></script>
+<script src="src/city/interact.js?v=people1022"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=ord1022b"></script>
+<script src="src/city/orders.js?v=people1022"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -1835,9 +1841,9 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=vault1013"></script>
-<script src="src/city/restrain.js?v=islelaw1022"></script>
-<script src="src/city/custody.js?v=islelaw1022"></script>
-<script src="src/city/combat.js?v=butt1022"></script>
+<script src="src/city/restrain.js?v=people1022"></script>
+<script src="src/city/custody.js?v=people1022"></script>
+<script src="src/city/combat.js?v=people1022"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
      entries above). Loads right after city/combat.js, whose lightAttack/

@@ -730,11 +730,13 @@
   }
 
   // ================== SOURCES: what can be targeted ==================
+  // (the people, the police and the dead are the islands' too: city/peds.js
+  // runs on the island in force, world/island_people.js stands them there)
   // Base prios mirror the old strict chain (vendor > club > stash > cop > ped >
   // corpse > car) but the registry's facing weighting can pull the thing you're
   // actually LOOKING AT ahead of a near-tied neighbor — that's the point.
   I.registerSource({
-    id: "src-gunpoint", kind: "ped:gunpoint", layers: ["ped:civ", "ped"], prio: 0, gunpoint: true, driving: false,
+    id: "src-gunpoint", islands: true, kind: "ped:gunpoint", layers: ["ped:civ", "ped"], prio: 0, gunpoint: true, driving: false,
     find: function (px, pz, ctx, push) {
       if (!ctx.gunDrawn) return;
       const p = aimedPed(px, pz);
@@ -742,19 +744,19 @@
     },
   });
   I.registerSource({
-    id: "src-vendor", kind: "vendor", layers: ["ped:vendor", "ped"], prio: 12, driving: false,
+    id: "src-vendor", islands: true, kind: "vendor", layers: ["ped:vendor", "ped"], prio: 12, driving: false,
     find: function (px, pz, ctx, push) { pushNear(CBZ.cityPeds, px, pz, (p) => p.vendor && !p.dead, push); },
   });
   I.registerSource({
-    id: "src-cop", kind: "cop", layers: ["ped:cop", "ped"], prio: 8, driving: false,
+    id: "src-cop", islands: true, kind: "cop", layers: ["ped:cop", "ped"], prio: 8, driving: false,
     find: function (px, pz, ctx, push) { pushNear(CBZ.cityCops, px, pz, (q) => !q.dead, push); },
   });
   I.registerSource({
-    id: "src-ped", kind: "ped", layers: ["ped:civ", "ped"], prio: 6, driving: false,
+    id: "src-ped", islands: true, kind: "ped", layers: ["ped:civ", "ped"], prio: 6, driving: false,
     find: function (px, pz, ctx, push) { pushNear(CBZ.cityPeds, px, pz, (q) => !q.vendor && !q.dead && !q.player, push); },
   });
   I.registerSource({
-    id: "src-corpse", kind: "corpse", layers: ["corpse"], prio: 4, driving: false,
+    id: "src-corpse", islands: true, kind: "corpse", layers: ["corpse"], prio: 4, driving: false,
     find: function (px, pz, ctx, push) {
       if ((g.cityOutfitChanging || 0) > 0) return;
       const b = nearestDressedBody(px, pz);

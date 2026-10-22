@@ -67,6 +67,9 @@
   let _dx = null, _dz = null, _dnx = null, _dnz = null, _dN = 0;
 
   function arenaNow() {
+    // the islands have no city nav (their streets are world/island_town.js's):
+    // a flee asked there must never build Gang City behind the player's back
+    if (CBZ.game && CBZ.game.mode === "archipelago") return null;
     // prefer the cached live descriptor; fall back to (re)building once.
     const a = (CBZ.city && CBZ.city.arena) || (CBZ.buildCity ? CBZ.buildCity() : null);
     return a || null;

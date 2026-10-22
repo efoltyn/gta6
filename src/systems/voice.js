@@ -302,7 +302,7 @@
     const spd = ctx && ctx.speed != null ? ctx.speed : speedOf(src);
     if (spd > 6) lv += clamp01((spd - 6) / 18) * 0.45 * clamp01(1 - d / 20);
     // a crowd running round him
-    if (CBZ.cityPanicAt && CBZ.game && CBZ.game.mode === "city") {
+    if (CBZ.cityPanicAt && CBZ.economyMode && CBZ.economyMode()) {
       try { lv += Math.min(0.15, CBZ.cityPanicAt(op.x, op.z) * 0.08); } catch (e) {}
     }
     // what his own brain has already made of this same man
@@ -626,7 +626,7 @@
     if (g.mode === "escape" && CBZ.prisonSay) {
       try { return !!CBZ.prisonSay(a, text, { secs: secs, force: toYou || !!(ctx && ctx.force) }); } catch (e) { return false; }
     }
-    if (g.mode === "city") {
+    if (CBZ.economyMode && CBZ.economyMode()) {
       const P = CBZ.player;
       if (P && (P._aircraft || P.dead)) return false;
       if (P && P.driving && !toYou && a._vehicle !== P._vehicle) return false;
@@ -767,14 +767,14 @@
       }
       case "bumped": {
         if (T > 0.5) return D("walkOff");
-        const gap = CBZ.cityReadGap && CBZ.game && CBZ.game.mode === "city" && ctx.by && isPlayer(ctx.by) ? safe(CBZ.cityReadGap, a) : 0;
+        const gap = CBZ.cityReadGap && CBZ.economyMode && CBZ.economyMode() && ctx.by && isPlayer(ctx.by) ? safe(CBZ.cityReadGap, a) : 0;
         if (gap >= 1 || ag < 0.28) return D("glance", "bumpSorry", gap >= 1 ? 0.45 : 0.2);
         if (ag > 0.66 && (r === "gangster" || r === "inmate")) return D("squareUp", "bumped", 0.6);
         return D("glance", "bumped", 0.3);
       }
       case "shoved": case "repeated": {
         if (T > 0.55) return D("hurry", "dontWantTrouble", 0.3);
-        const gap = CBZ.cityReadGap && CBZ.game && CBZ.game.mode === "city" && ctx.by && isPlayer(ctx.by) ? safe(CBZ.cityReadGap, a) : 0;
+        const gap = CBZ.cityReadGap && CBZ.economyMode && CBZ.economyMode() && ctx.by && isPlayer(ctx.by) ? safe(CBZ.cityReadGap, a) : 0;
         if (law) return D("squareUp", "shoved", 0.7);
         if ((ag > 0.6 || st === "ready" || st === "tough") && T < 0.45 && gap < 2) return D(ev === "repeated" ? "fight" : "squareUp", "shoveBack", 0.7);
         if (ag > 0.3 && gap < 1) return D("backOff", "shoved", 0.55);

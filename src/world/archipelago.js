@@ -45,10 +45,12 @@
    whole island where it stands built, its terrain phase where it does not
    yet, and the abyssal plain everywhere else.
 
-   PEOPLE are the island's own (entities/survivorbot.js's crowd, the
-   island's people), stood on the island in force at points nobody is
-   looking at, and gone with it. They are the island's witnesses too (city/
-   peds.js cityTagWitnesses asks them, city/law.js takes their calls).
+   PEOPLE are Gang City's (city/peds.js, one human one brain), living on
+   the island in force: world/island_people.js stands them out of sight,
+   gives them homes and work in the island's own buildings, keeps the hours
+   and takes them away where nobody sees it; an island dropped behind you
+   takes its people with it. (The disaster island's survivor crowd is the
+   disaster game's; here it is only ever a boat's crew, world/sea_craft.js.)
    TRAFFIC, POLICE, WANTED: Gang City's own, on the island in force
    (world/island_town.js presents it as a town: city/vehicles.js drives its
    streets, city/traffic.js keeps its pool, city/police.js runs its force out
@@ -84,7 +86,6 @@
   const BUDGET_MS = SMALL ? 4 : 6;
   const BUDGET_MAX = SMALL ? 8 : 12;
   const SWITCH_HYST = 250;         // m nearer another whole island must be to become THE island
-  const PEOPLE = SMALL ? 14 : 28;
   const ISLES_STAKE = 2500;        // $ in your pocket when you first land (see reset)
 
   const ST = {
@@ -373,8 +374,9 @@
   function dropNear(I) {
     if (I === ST.active) return;
     if (I.arena) rescue(I.arena.root);
-    // its traffic, its officers and its station's fittings go with it
+    // its traffic, its officers, its station's fittings and its people go with it
     if (I.arena && CBZ.islandTownDrop) { try { CBZ.islandTownDrop(I.arena); } catch (e) { console.error("[archipelago town drop]", e); } }
+    if (I.arena && CBZ.islandPeople) { try { CBZ.islandPeople.drop(I.arena); } catch (e) { console.error("[archipelago people drop]", e); } }
     // taken down a frame's share at a time (registries first, then the GPU)
     const job = I.job;
     if (job) chore(I.id + ":drop", CBZ.islandDisposeSteps ? CBZ.islandDisposeSteps(job) : (function* () { CBZ.islandDispose(job); })());
@@ -398,30 +400,8 @@
     // where nobody is looking, one at a time; its sea fills from the last one's
     if (prev !== I) {
       if (CBZ.clearSurvivorBots) CBZ.clearSurvivorBots();
-      chore(I.id + ":people", populate(A));
+      if (CBZ.islandPeople) chore(I.id + ":people", CBZ.islandPeople.populate(A));
       if (prev) chore(I.id + ":sealife", migrateLife(A));
-    }
-  }
-  const _v = new THREE.Vector3();
-  function unseen(x, y, z) {
-    const cam = CBZ.camera;
-    if (!cam) return true;
-    if (Math.hypot(cam.position.x - x, cam.position.z - z) < 90) return false;
-    _v.set(x, y, z).project(cam);
-    const onScreen = _v.z > -1 && _v.z < 1 && Math.abs(_v.x) < 1.25 && Math.abs(_v.y) < 1.25;
-    return !onScreen || Math.hypot(cam.position.x - x, cam.position.z - z) > ST.map.view.fogFar;
-  }
-  function* populate(A) {
-    if (!CBZ.spawnSurvivorBotAt || !A.randomPoint) return;
-    const minD = A.hills && A.hills[0] ? 12 : 0;
-    let placed = 0;
-    for (let k = 0; k < PEOPLE * 6 && placed < PEOPLE; k++) {
-      if (ST.active && ST.active.arena !== A) return;        // the island changed again
-      const p = A.randomPoint(minD, A.radius * 0.82);
-      const y = A.groundHeightAt(p.x, p.z);
-      if (!unseen(p.x, y + 1, p.z)) continue;
-      try { CBZ.spawnSurvivorBotAt(p.x, p.z); placed++; } catch (e) { return; }
-      yield 0;
     }
   }
   /* THE SEA LIFE (city/wildlife.js, the shark sim's and the disaster island's
@@ -517,6 +497,8 @@
   function teardown(clearPeople) {
     if (!ST.built) return;
     if (clearPeople && CBZ.clearSurvivorBots) { try { CBZ.clearSurvivorBots(); } catch (e) {} }
+    // the islands' people leave with the islands (the next mode stands its own)
+    if (CBZ.islandPeople) { try { CBZ.islandPeople.leave(); } catch (e) { console.error("[archipelago people leave]", e); } }
     const P = CBZ.player;
     if (P && P._aircraft && P._aircraft._world === MODE && CBZ.cityPlayerAircraftExit) { try { CBZ.cityPlayerAircraftExit(); } catch (e) {} }
     if (P && P.driving && P._vehicle && P._vehicle._world === MODE && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
@@ -735,15 +717,18 @@
         if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       }
       if (CBZ.resetZoom) CBZ.resetZoom();
-      if (!(CBZ.bots && CBZ.bots.length)) { const it = populate(A); for (let r = it.next(); !r.done; r = it.next()) {} }
+      if (CBZ.islandPeople) { const it = CBZ.islandPeople.populate(A); for (let r = it.next(); !r.done; r = it.next()) {} }
       if (CBZ.killFeedReset) CBZ.killFeedReset();
     },
-    // the island's own verbs and buses (survival's actor model: people are
-    // the island's crowd, a death goes through surv.hurt)
+    // the island's own verbs and buses: the street's people and police are
+    // Gang City's (a hit goes to city/peds.js / city/police.js), a boat's
+    // crew is survival's (surv.hurt)
     caps: { traverse: 1, stepLedge: 1, blast: 1, blastActors: 1, breach: 1 },
     actors: function (out) {
       const b = CBZ.bots || [];
       for (let i = 0; i < b.length; i++) out.push(b[i]);
+      const pd = CBZ.cityPeds || [];
+      for (let i = 0; i < pd.length; i++) if (pd[i] && !pd[i].dead && pd[i]._isleRoot) out.push(pd[i]);
       // the island's police (city/police.js runs its force here): a blast,
       // a car, a falling wall reaches an officer like anybody else
       const c = CBZ.cityCops || [];
@@ -752,6 +737,7 @@
     },
     hurt: function (a, dmg, imp) {
       if (a && a.kind === "cop" && CBZ.cityHurtCop) { CBZ.cityHurtCop(a, dmg, imp); return true; }
+      if (a && a._isleRoot && CBZ.cityHurtPed) { CBZ.cityHurtPed(a, dmg, imp); return true; }
       if (!CBZ.surv || !CBZ.surv.hurt) return false;
       const was = !!(a && a.dead);
       CBZ.surv.hurt(a, dmg, imp);

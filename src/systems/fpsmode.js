@@ -188,6 +188,8 @@
   /* NO GUNPLAY: the island games (survival, the shark sim) give the pointer
      to the grapple and the mount. The archipelago is an island world where
      money is real (CBZ.economyMode): a gun bought there is a gun you shoot. */
+  // Gang City and the islands: the street's people, its police and its law
+  function econWorld() { return !!(CBZ.economyMode && CBZ.economyMode()); }
   function noGunplay(m) {
     m = m || (CBZ.game && CBZ.game.mode);
     if (!(CBZ.islandModeOn && CBZ.islandModeOn(m))) return false;
@@ -3203,7 +3205,11 @@
       }
     };
     if (CBZ.game.mode === "city") { scan(CBZ.cityPeds); scan(CBZ.cityCops); if (CBZ.cityMedics) scan(CBZ.cityMedics); if (CBZ.cityWildlife) scan(CBZ.cityWildlife); if (CBZ.cityArmy) scan(CBZ.cityArmy); }   // same gun, city targets (wildlife are huntable too)
-    else { scan(CBZ.guards); scan(CBZ.npcs); if (islandShots()) scan(CBZ.bots); }   // the islands' people
+    // THE ISLANDS (CBZ.economyMode): the street is Gang City's people and
+    // police (city/peds.js, city/police.js run on the island in force), the
+    // sea's animals, and the few island bodies still survival's (a boat's crew)
+    else if (econWorld()) { scan(CBZ.cityPeds); scan(CBZ.cityCops); if (CBZ.cityMedics) scan(CBZ.cityMedics); if (CBZ.cityWildlife) scan(CBZ.cityWildlife); scan(CBZ.bots); }
+    else { scan(CBZ.guards); scan(CBZ.npcs); if (islandShots()) scan(CBZ.bots); }   // the island games' people
     // multiplayer: remote player avatars + host-synced puppet NPCs are real targets
     if (CBZ.net && CBZ.net.active && CBZ.net.targetList) scan(CBZ.net.targetList());
     // THE CROWDS (entities/crowdstore.js): every rally, march and grandstand
@@ -3271,7 +3277,7 @@
   }
   function findCorpseHit(origin, dir, maxT) {
     let best = null, bestDist = maxT, bestHead = false;
-    if (CBZ.game.mode !== "city") {
+    if (!econWorld()) {
       const seen = new Set();
       const scanBody = function (list) {
         if (!list) return;
@@ -3698,8 +3704,8 @@
     return { head: hit.head, down, dropped, dmg };
   }
 
-  // the archipelago's people are survival's (CBZ.bots): a round goes
-  // through the mode's own bus (archipelago.js hurt -> surv.hurt)
+  // the island games' people are survival's (CBZ.bots): a round goes
+  // through the mode's own bus (surv.hurt, or archipelago.js hurt)
   function islandShots() { return !!(CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode) && !noGunplay(CBZ.game.mode)); }
   function islandGunHit(a, hit, w) {
     const def = CBZ.modes && CBZ.modes[CBZ.game.mode];
@@ -3717,6 +3723,8 @@
     const a = hit.actor;
     if (CBZ.game.mode === "city") return cityGunHit(a, hit, w, shotDir);
     if (islandShots() && CBZ.bots && CBZ.bots.indexOf(a) >= 0) return islandGunHit(a, hit, w);
+    // the islands' street people, police and animals take a round the city's way
+    if (econWorld()) return cityGunHit(a, hit, w, shotDir);
     const guardish = a.kind === "guard" || a.kind === "warden";
     if (a.hp == null) a.hp = maxHpOf(a);
     // (e) same shared per-class falloff evaluator as cityGunHit above.
@@ -4497,7 +4505,7 @@
     // a launcher does not freeze the world on the press: the round has to be
     // seen leaving the tube on this frame, not 6% of the way out of it
     if (!w.explosive) CBZ.doHitstop && CBZ.doHitstop(w.key === "shotgun" ? 0.028 : 0.014);
-    if (CBZ.game.mode !== "city") CBZ.reportCrime && CBZ.reportCrime(w.heat, { type: w.nonlethal ? "taser" : "gunfire", actorRole: CBZ.game.role, weapon: w.key });
+    if (!econWorld()) CBZ.reportCrime && CBZ.reportCrime(w.heat, { type: w.nonlethal ? "taser" : "gunfire", actorRole: CBZ.game.role, weapon: w.key });
     // A taser expends a front cartridge; there is no hot brass case to eject.
     if (!taserShot) ejectCasing(w);
 
@@ -4911,7 +4919,7 @@
       // launching a rocket is at least as loud as discharging a firearm. This
       // fires at LAUNCH (the report is "shots fired", not "it landed") so a
       // witness reacts to the whoosh/launch sound immediately, same as before.
-      if (CBZ.game.mode === "city" && CBZ.cityCrime) {
+      if (econWorld() && CBZ.cityCrime) {
         CBZ.cityCrime(120, { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "shots-fired" });
         CBZ.cityEvent && CBZ.cityEvent("bullet-impact", { weapon: w.key, panic: 4, damage: 0.3 }, { silent: true, noWanted: true });
         CBZ.cityAlarm && CBZ.cityAlarm(CBZ.player.pos.x, CBZ.player.pos.z, 40, 1.6, CBZ.city.playerActor);
@@ -4972,7 +4980,7 @@
        ballistic shot, so this is a no-op rather than a branch. */
     roundFeedback(w, cal, acc);
     // discharging a firearm in the city is a witnessed crime (city wanted system)
-    if (CBZ.game.mode === "city" && CBZ.cityCrime) {
+    if (econWorld() && CBZ.cityCrime) {
       CBZ.cityCrime(w.nonlethal ? 20 : (acc.hitSomething ? 100 : 55), { x: CBZ.player.pos.x, z: CBZ.player.pos.z, type: "shots-fired" });
       CBZ.cityEvent && CBZ.cityEvent("bullet-impact", { weapon: w.key, panic: w.nonlethal ? 1 : 3, damage: acc.hitSomething ? 0 : 0.3 }, { silent: true, noWanted: true });
       CBZ.cityAlarm && CBZ.cityAlarm(CBZ.player.pos.x, CBZ.player.pos.z, 24, 1.2, CBZ.city.playerActor);

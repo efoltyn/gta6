@@ -389,6 +389,9 @@
       onHands: onHands,
       thrown: thrownHurt,
     };
+    // the islands' street is the same street (city/peds.js runs there): the
+    // same hands, the same grip fights, the same crimes
+    CBZ.handVerbs.games.archipelago = CBZ.handVerbs.games.city;
   }
 
   /* THE OWNED BODY. While your hands have him (a grip, a carry, a drag) he is
@@ -468,7 +471,7 @@
   }
   function stowStart(car) {
     const P = CBZ.player;
-    if (stowJob || !P || P.dead || P.driving || P._aircraft || g.mode !== "city") return false;
+    if (stowJob || !P || P.dead || P.driving || P._aircraft || !CBZ.economyMode()) return false;
     const t = handTarget();
     if (!t || t.dead || t !== handPed || st(t) !== "grappled") return false;
     const seat = stowSeat(car);
@@ -516,7 +519,7 @@
     const j = stowJob;
     if (!j) return;
     const P = CBZ.player, car = j.car, p = j.ped;
-    if (g.mode !== "city" || g.state !== "playing" || !P || P.dead || P.driving || p.dead ||
+    if (!CBZ.economyMode() || g.state !== "playing" || !P || P.dead || P.driving || p.dead ||
       !car || car.dead || !car.group || !car.group.parent) { stowAbort(); return; }
     j.t += dt;
     const S = CBZ.boarding.seatFor(car, j.seatId);
@@ -661,7 +664,7 @@
     // the pen (escape) and takes them off itself, so there they are posed, not
     // cut. Every other mode still strips them.
     // (the islands are policed by the same force: the cuffs stay on there too)
-    if (!(CBZ.economyMode ? CBZ.economyMode() : (g.mode === "city" || g.mode === "archipelago"))) {
+    if (!CBZ.economyMode()) {
       handT = null; handPed = null;
       if (restrained.length) releaseAll();
       // the prison's haul scene ties the player itself and takes them off
@@ -863,7 +866,7 @@
   // struggle is worn down; the wheel has the rest of the hold set.
   function heldNow() { const H = HV(); return H ? H.held() : null; }
   I.registerSource({
-    id: "src-hands", kind: "pedheld", layers: ["pedheld"], prio: 45, driving: false,
+    id: "src-hands", islands: true, kind: "pedheld", layers: ["pedheld"], prio: 45, driving: false,
     find: function (px, pz, ctx, push) { const H = heldNow(); if (H && H.t && !H.t.dead) push(H.t, 0); },
   });
   I.describe("pedheld", function (t) { return { label: (t && t.name) || "" }; });
