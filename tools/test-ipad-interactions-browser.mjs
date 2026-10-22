@@ -250,9 +250,11 @@ try {
     "Scope overlaps the closer swipe-up Fire target", JSON.stringify(aim.geometry));
 
   // The campaign's words go over the speaker's head (CBZ.speech) or nowhere:
-  // the #campaignDialogue line text and #citySpeech band are gone. So the act
-  // must still resolve, the words must never sit in a HUD box, and at most
-  // ONE over-head copy of the line may exist (no second owner echoing it).
+  // the old #campaignDialogue box and #citySpeech band are gone, and the one
+  // prompt left on the glass (#cinePrompt, city/campaign_ui.js) only carries
+  // a line as the subtitle of a scene the camera frames. So the act must still
+  // resolve, an unframed line must never sit in the prompt's subtitle, and at
+  // most ONE over-head copy of the line may exist (no second owner echoing it).
   const subtitle = await json(`(() => {
     CBZ.CONFIG.CITY_HITMAN_CAMPAIGN = true;
     CBZ.cityCampaignRestore({
@@ -261,8 +263,9 @@ try {
     });
     if (CBZ.speech) CBZ.speech.clear();
     const result = CBZ.cityCampaignPrisonAct("campaign-escape", { kind: "warden" });
-    const box = document.querySelector("#campaignDialogue .campaign-dialogue-text");
-    const boxText = box ? (box.textContent || "").trim() : "";
+    const framed = !!(CBZ.cineActive && CBZ.cineActive());
+    const box = document.querySelector("#cinePrompt.show .cine-line");
+    const boxText = box && !framed ? (box.textContent || "").trim() : "";
     const lines = CBZ.speech ? CBZ.speech.audit().lines : [];
     const copies = lines.filter((l) => /camera/i.test(l.text)).length;
     if (CBZ.campaignUI && CBZ.campaignUI.clearDialogue) CBZ.campaignUI.clearDialogue();

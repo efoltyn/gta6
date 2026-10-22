@@ -2289,6 +2289,9 @@
         const out = innerRob.apply(this, arguments);
         try {
           if (target) {
+            // he remembers what you took, and may come back for it (ROBBED below)
+            const took = ((CBZ.game && CBZ.game.cigs) || 0) - before;
+            if (took > 0 && !target.dead) rememberRobbed(target, took);
             creditCollected(target, ((CBZ.game && CBZ.game.cigs) || 0) - before);
             const c = contractAgainst(target);
             if (c && wanted && CBZ.econ.hasItem(wanted)) { c.done = true; c.got = 1; }
@@ -2772,6 +2775,16 @@
     gaveup: ["Next time.", "This ain't over."],
     backoff: ["Alright. Alright.", "Easy. We'll talk later."],
   };
+  const ROBBED_LINES = {
+    demand: ["Give it back.", "That's mine. Give it back."],
+    warn: ["I said give it back."],
+    show: ["Last chance."],
+    comply: ["That's right."],
+    left: ["This ain't over."],
+    fled: ["Run, then. We know where you sleep."],
+    gaveup: ["Next time."],
+    backoff: ["Alright. Alright."],
+  };
   function beginDemand(n, kind, opts) {
     opts = opts || {};
     const L = DM();
@@ -2781,8 +2794,10 @@
     try {
       c = L.begin(n, CBZ.player, kind === "rules" ? "trespass" : "rob", {
         mood: kind === "debt" ? "debt" : null,
-        leaveR: kind === "debt" ? 16 : 0,
-        lines: opts.lines || (kind === "debt" ? DEBT_LINES : null),
+        leaveR: kind === "debt" || kind === "robbed" ? 16 : 0,
+        lines: opts.lines || (kind === "debt" ? DEBT_LINES : kind === "robbed" ? ROBBED_LINES : null),
+        hard: kind === "robbed" ? (opts.friends || []).length >= 2 : undefined,
+        friends: kind === "robbed" ? (opts.friends || []).length : undefined,
         armed: false,
       });
     } catch (e) { c = null; }
@@ -2790,6 +2805,7 @@
     n._demand = {
       active: true, kind, gang: opts.gang != null ? opts.gang : n.gang,
       cost: opts.cost || 0, paid: false, inside: opts.inside || null, t: 0,
+      friends: opts.friends || null,
     };
     n.aiState = "demandPlayer";
     n.foe = null; n.pause = 0; n.social = null;
@@ -2831,7 +2847,9 @@
     if (out === "acted") {
       // he does what he said: a real fight, the one blow at a time aiThink throws
       if (r.act === "throw" || r.act === "shove") n._huntStyle = "shove";
-      requestHunt(n, D.kind === "debt" ? 9 : 6, D.kind === "debt" ? "debt" : "rules");
+      requestHunt(n, D.kind === "debt" ? 9 : 6, D.kind === "debt" ? "debt" : D.kind === "robbed" ? "wronged" : "rules");
+      // the friends he brought: their hands are in it with his
+      if (D.friends) for (const f of D.friends) if (alive(f) && f.group) requestHunt(f, 7, "wronged");
       if (D.kind === "debt" && gang >= 0) addGangStanding(gang, -3);
       return;
     }
@@ -2873,7 +2891,18 @@
   // the tab; he takes it and goes.
   function payDemand(n) {
     const D = demandOf(n);
-    if (!D || D.kind !== "debt") return { ok: false, msg: "" };
+    if (!D || (D.kind !== "debt" && D.kind !== "robbed")) return { ok: false, msg: "" };
+    if (D.kind === "robbed") {
+      // what you took off him, back in his hand (or what you have of it)
+      const have = (CBZ.game && CBZ.game.cigs) || 0;
+      if (have <= 0) return { ok: false, msg: "" };
+      const back = Math.min(have, D.cost || 1);
+      CBZ.econ.addCigs(-back);
+      n.playerGrudge = Math.max(0, (n.playerGrudge || 0) - 3);
+      CBZ.sfx && CBZ.sfx("coin");
+      D.paid = true;
+      return { ok: true, msg: "" };
+    }
     const cigs = (CBZ.game && CBZ.game.cigs) || 0;
     if (cigs <= 0) return { ok: false, msg: "" };
     const amt = Math.min(cigs, D.cost || debtDemandCost(D.gang));
@@ -2970,6 +2999,55 @@
     }
   }
 
+  /* ROBBED: HE COMES BACK FOR IT (owner: "someone you robbed comes back and
+     demands it"). A man you robbed (the gunpoint rob, intimidate.js) keeps
+     what you took on his mind. A while later, once he has you in sight, a
+     man with the nerve for it, or his crew behind him, walks up with them and
+     runs the demand ladder on you (CBZ.brain.demand "rob", the take is what
+     you took): Pay is the decision on him; walking off, running and swinging
+     are your body, and when it comes to hands his friends' are in it too. */
+  const ROBBED = [];
+  const ROB_BACK_MIN = 70, ROB_BACK_SPREAD = 120, ROB_GIVEUP = 900;
+  let robbedT = 0;
+  function rememberRobbed(n, took) {
+    if (!n || n === CBZ.player || n.kind === "guard" || n.kind === "warden") return;
+    const now = (CBZ.game && +CBZ.game.elapsed) || 0;
+    for (const r of ROBBED) if (r.n === n) { r.amt += took; return; }
+    ROBBED.push({ n: n, amt: took, t0: now, due: now + ROB_BACK_MIN + rng() * ROB_BACK_SPREAD });
+    if (ROBBED.length > 10) ROBBED.shift();
+  }
+  function updateRobbedComeback(dt) {
+    const g = CBZ.game || {};
+    if (g.state !== "playing" || !ROBBED.length) return;
+    robbedT -= dt;
+    if (robbedT > 0) return;
+    robbedT = 1;
+    if (g.role === "cop" || demandBusy() || huntersNow() > 0 || playerDownedNow() || playerCuffedNow()) return;
+    const now = +g.elapsed || 0;
+    for (let i = ROBBED.length - 1; i >= 0; i--) {
+      const r = ROBBED[i], n = r.n;
+      if (!alive(n) || n.cuffed || now - r.t0 > ROB_GIVEUP || now < r.t0 - 1) { ROBBED.splice(i, 1); continue; }
+      if (now < r.due || n._demand || n.aiState === "fight" || n.aiState === "flee" || (n.fleeT || 0) > 0 || heldInCell(n) || n.intimidMode) continue;
+      const d = playerDist(n);
+      if (d > 16 || d < 2.5) continue;                 // he has to have found you
+      // who he brings: his crew, standing near him
+      const friends = [];
+      if (n.gang >= 0) for (const m of CBZ.npcs || []) {
+        if (friends.length >= 2) break;
+        if (m === n || !alive(m) || m.gang !== n.gang || m._demand || m.cuffed || heldInCell(m) || m.aiState === "fight") continue;
+        if (dist(m, n) < 12) friends.push(m);
+      }
+      const p = n.personality || {};
+      const nerve = (p.nerve != null ? p.nerve : 0.5) + friends.length * 0.18;
+      ROBBED.splice(i, 1);
+      if (nerve < 0.55) return;                        // he lets it go
+      if (beginDemand(n, "robbed", { cost: r.amt, friends: friends })) {
+        // his friends walk up behind him and stand there
+        for (const f of friends) { f.aiState = "shadowPlayer"; f.shadowT = Math.max(f.shadowT || 0, 18); f.foe = null; }
+      }
+      return;
+    }
+  }
   function updateGangPresence(dt) {
     const g = CBZ.game || {};
     if (g.state !== "playing" || (CBZ.player.stun || 0) > 0) return;
@@ -4460,6 +4538,7 @@
   CBZ.onUpdate(42, esc(updateGangPresence));
 
   CBZ.onUpdate(42.4, esc(updateGangThresholds));
+  CBZ.onUpdate(42.45, esc(updateRobbedComeback));
 
   CBZ.onUpdate(43.5, esc(updateWatcherDirector));
   CBZ.onUpdate(44, esc(updateBlockRumors));

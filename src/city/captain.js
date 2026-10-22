@@ -644,8 +644,23 @@
         every street verb lives on; words, never key glyphs, so touch gets its
         pills free). Each order is a rank verb on seacrew's ladder.
      ========================================================================== */
-  let ordersWired = false;
+  let ordersWired = false, crewClaimed = false;
+  function PA() { return (CBZ.city && CBZ.city.playerActor) || CBZ.player; }
+  /* EVERY ORDER IS DECIDED (systems/command.js). Your crew are your men
+     (city/orders.js claim: the master's word over his own deck), and each
+     of them answers it: does it, says "Sir?" (give it again), or will not.
+     Enough bad orders and refusals and the crew turns, like any other. */
+  function tell(men, order, body) {
+    const Cm = CBZ.command;
+    if (!Cm || !Cm.issue) { let n = 0; for (const q of men) if (body(q) !== false) n++; return n; }
+    const r = Cm.issue(PA(), men, order, null, { game: "city", exec: function (q) { return body(q) !== false; } });
+    return r.obey.length;
+  }
   function wireOrders() {
+    if (!crewClaimed && CBZ.cityOrders2 && CBZ.cityOrders2.claim) {
+      crewClaimed = true;
+      CBZ.cityOrders2.claim(function (p) { return isMyCrew(p) ? (playerIsCaptain() ? 1 : 0.7) : null; });
+    }
     if (ordersWired || C.CAPTAIN_ORDERS === false || !CBZ.interactions || !CBZ.interactions.register) return;
     ordersWired = true;
     const I = CBZ.interactions;
@@ -656,7 +671,7 @@
       id: "capt-castlines", slot: "j", prio: 40,
       canShow: function (p) { return on() && isMyCrew(p) && !(helm && helm.ped === p); },
       label: function (p) { return p._captFishing ? "Reel in" : "Fish"; },
-      onSelect: function (p) { orderLines(p, !p._captFishing); },
+      onSelect: function (p) { const cast = !p._captFishing; tell([p], cast ? "go" : "back", function (q) { orderLines(q, cast); }); },
     });
 
     // TAKE THE HELM — the mate's verb ("moor" is the rung that may take her
@@ -666,7 +681,10 @@
       id: "capt-takehelm", slot: "i", prio: 40,
       canShow: function (p) { return on() && isMyCrew(p) && crewCan(p, "moor") && !!specOf(boat); },
       label: function (p) { return (helm && helm.ped === p) ? "Take over" : "Steer"; },
-      onSelect: function (p) { (helm && helm.ped === p) ? handBack(p) : takeHelm(p); },
+      onSelect: function (p) {
+        if (helm && helm.ped === p) tell([p], "back", handBack);
+        else tell([p], "go", takeHelm);
+      },
     });
 
     // ALL HANDS ARM UP — the captain's order (your rung, not theirs), and the
@@ -690,7 +708,7 @@
         return !!mateAboard();
       },
       label: function () { return "Hand over"; },
-      onSelect: function () { const m = mateAboard(); if (m) takeHelm(m); },
+      onSelect: function () { const m = mateAboard(); if (m) tell([m], "go", takeHelm); },
     });
   }
   function mateAboard() {
@@ -711,14 +729,12 @@
       let rec = null;
       if (CBZ.fishWorkRod) { try { rec = CBZ.fishWorkRod(p, null); } catch (e) {} }
       if (rec) { rec.mesh.visible = true; if (fishRods.indexOf(rec) < 0) fishRods.push(rec); }
-      note((p.name || "The deckhand") + " puts a line in the water.", 1.8);
     } else {
       p._captFishing = false;
       for (const r of fishRods) if (r.ped === p && r.mesh) r.mesh.visible = false;
       const R = roster();
       const st = p._captStation || R[R.length - 1].st;
       stationPed(p, st, !!p._captSit);
-      note("Lines stowed.", 1.4);
     }
   }
 
@@ -747,37 +763,37 @@
       course: { x: boat.pos.x + Math.sin(h) * 600, z: boat.pos.z + Math.cos(h) * 600 },
       speed: num(S.cruiseMs, 4.5) * 0.8,
     };
-    note((p.name || "The mate") + " has the helm, she'll hold this heading. Walk your deck.", 2.6);
+
   }
   function handBack(p) {
     helm = null;
     nOrders++;
     const st = p._captStation || roster()[0].st;
     stationPed(p, st, !!p._captSit);
-    note("You have the helm back the moment you step to the wheel.", 2.0);
   }
 
+  // ALL HANDS: the order to the whole crew, and each man answers it; the
+  // ones who obey take a gun from the locker (or put it back)
   function armAll(up) {
     nOrders++;
-    armedUp = !!up;
-    let n = 0;
-    for (const c of liveCrew()) {
-      if (up) {
-        // the NPC arming idiom (peds.js/origins.js — armed/weapon/ammo + sync)
-        c.armed = true;
-        c.weapon = c.weapon || (crewCan(c, "moor") ? "Shotgun" : "Pistol");
-        c.ammo = Math.max(c.ammo || 0, 48);
-        c._captAggr0 = c._captAggr0 == null ? (c.aggr || 0.12) : c._captAggr0;
-        c.aggr = 0.6;
-      } else {
-        c.armed = false; c.weapon = null; c.rage = null;
-        if (c._captAggr0 != null) c.aggr = c._captAggr0;
-      }
-      if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(c); } catch (e) {} }
-      n++;
+    const n = tell(liveCrew().slice(), up ? "guard" : "back", function (c) { armOne(c, up); });
+    if (up) { if (n) armedUp = true; }
+    else armedUp = liveCrew().some(function (c) { return c.armed && c._captAggr0 != null; });
+  }
+  function armOne(c, up) {
+    if (up) {
+      // the NPC arming idiom (peds.js/origins.js — armed/weapon/ammo + sync)
+      c.armed = true;
+      c.weapon = c.weapon || (crewCan(c, "moor") ? "Shotgun" : "Pistol");
+      c.ammo = Math.max(c.ammo || 0, 48);
+      c._captAggr0 = c._captAggr0 == null ? (c.aggr || 0.12) : c._captAggr0;
+      c.aggr = 0.6;
+    } else {
+      c.armed = false; c.weapon = null; c.rage = null;
+      if (c._captAggr0 != null) c.aggr = c._captAggr0;
     }
-    note(up ? ("All hands armed · " + n + " gun" + (n === 1 ? "" : "s") + " on deck.")
-            : "Guns back in the locker.", 2.2);
+    if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(c); } catch (e) {} }
+    return true;
   }
 
   // Armed crew FIGHT the boarders; unarmed crew are ordinary scared people
@@ -795,7 +811,7 @@
       if (d < bd) { bd = d; threat = p; }
     }
     if (!threat) return;
-    for (const c of liveCrew()) if (!c.rage || c.rage.dead) c.rage = threat;
+    for (const c of liveCrew()) if (c.armed && (!c.rage || c.rage.dead)) c.rage = threat;
   }
 
   // The catches ACCRUE — fishing.js's own species registry and wildlife's own

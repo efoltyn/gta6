@@ -623,6 +623,13 @@
        iPad     the same pill, docked on the right rail
      A hostile verb (bad) wears the warm rim, never red text in a paragraph.
      Row records need { key, proposal } and may carry { label, bad }. */
+  // THE CHIP SAYS THE BUTTON YOUR HAND IS ON: the key, or the pad's button
+  // while the pad is the last thing touched (systems/gamepad.js)
+  function keyChip(key) {
+    const k = String(key || "e");
+    if (CBZ.padActive && CBZ.padActive() && CBZ.padGlyph) { const gl = CBZ.padGlyph(k); if (gl) return gl; }
+    return k.toUpperCase();
+  }
   function rowsHTML(rows) {
     const touchVerbs = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
     const docked = touchVerbs && CBZ.touchInteractionDocked && CBZ.touchInteractionDocked();
@@ -630,7 +637,7 @@
       const word = esc(verbText(r));
       const bad = r.bad ? " ibad" : "";
       if (!touchVerbs) {
-        return `<div class="iopt${bad}" data-i="${i}"><span class="ikey">${esc(String(r.key || "e").toUpperCase())}</span>` +
+        return `<div class="iopt${bad}" data-i="${i}"><span class="ikey">${esc(keyChip(r.key))}</span>` +
           `<span class="ilab">${word}</span></div>`;
       }
       if (!docked) return `<div class="iopt tverb tyes${bad}" data-i="${i}"><span class="ilab">${word}</span></div>`;
@@ -654,7 +661,7 @@
     const pills = rows.map((r, i) => {
       const word = r.more ? "More" : esc(verbText(r));
       const cls = "vpill" + (i === 0 && !r.more ? " lead" : "") + (r.bad ? " bad" : "") + (r.more ? " more" : "");
-      const key = r.key ? `<span class="vkey">${esc(String(r.key).toUpperCase())}</span>` : "";
+      const key = r.key ? `<span class="vkey">${esc(keyChip(r.key))}</span>` : "";
       return `<button type="button" class="${cls}" data-i="${i}" aria-label="${word}">${key}<span class="vword">${word}</span></button>`;
     }).join("");
     return `<div class="vcluster${placed ? " placed" : ""}">${pills}</div>`;
@@ -906,6 +913,7 @@
     let fp = pick.kind + ":" + (pick.gunpoint ? "G" : "") + (t && t.name || "") + "/" + (desc.label || "") + "/" + (desc.role || "") + "|" +
       (rows[0] && rows[0].proposal || "") + ":" + (rows[0] && rows[0].standing ? rows[0].standing.score : "") + "|";
     for (const r of shown) fp += r.key + (r.hold ? "H" : "") + r.label + (r.bad ? "!" : "") + ";";
+    if (CBZ.padActive && CBZ.padActive()) fp += "|pad";
     dom();
     if (noteEl) {
       // NO LINE ON THE CARD (owner, 2026-08-04 + 2026-09-27). No restated

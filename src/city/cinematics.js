@@ -196,7 +196,7 @@
       const h = SHOTS[i], a = h.asker;
       // beaten to it: he is dead, down, tied, or you are already dead
       const off = !a || a.dead || a.ko > 0 || a.restraint || a.surrender || !h.target || h.target.dead ||
-        (h.target === CBZ.player && CBZ.player.dead) || g.mode !== "city";
+        (h.target === CBZ.player && CBZ.player.dead) || !(g.mode === "city" || (CBZ.economyMode && CBZ.economyMode()));
       if (off || h.done) { if (a && !a.dead) a.attackCD = 0; SHOTS.splice(i, 1); continue; }
       h.t += dt;
       if (CBZ.actorAimAt) { try { CBZ.actorAimAt(a, h.target, dt); } catch (e) {} }

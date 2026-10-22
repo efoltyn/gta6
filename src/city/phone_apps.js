@@ -627,7 +627,17 @@
       ] };
     }
     if (id === "crew") {
-      const order = function (k, line) { return function () { if (!CBZ.cityPlayerGangOrder) return { ok: false, why: "Nobody picked up." }; try { CBZ.cityPlayerGangOrder(k); } catch (e) {} return { ok: true, line: line }; }; };
+      // the order goes to every man of the gang and each decides
+      // (playergang.js issueOrder -> systems/command.js); the voice on the
+      // line is the answer most of them gave
+      const order = function (k, line) { return function () {
+        if (!CBZ.cityPlayerGangOrder) return { ok: false, why: "Nobody picked up." };
+        let r = null;
+        try { r = CBZ.cityPlayerGangOrder(k); } catch (e) { r = null; }
+        if (r && r.ok) return { ok: true, line: r.refused ? "Some of us." : line };
+        const a = r && r.answer;
+        return { ok: false, why: a === "hesitate" ? "You sure about that?" : a === "refuse" || a === "turn" ? "No." : "Can't." };
+      }; };
       return { line: "Yeah, boss?", choices: [
         { id: "follow", label: "Come to me", run: order("follow", "On our way.") },
         { id: "hold", label: "Hold here", run: order("hold", "We'll hold it.") },
@@ -871,6 +881,60 @@
   // ---- who calls you, and when ----
   const CALLED = {};          // key -> day it last rang
   function calledRecently(key, days) { return CALLED[key] != null && day() - CALLED[key] < days; }
+  /* AN ORDER DOWN THE LINE IS STILL AN ORDER (systems/command.js). The
+     General told to hit back, the Chief of Staff told to put soldiers on the
+     street: each is a man with a claim on him (the seat) deciding, by what he
+     thinks of the President (president_staff.js loyalty) and what the order
+     asks of his conscience, remembered across calls (strain), so the man who
+     was made to do one ugly thing is the one who says no to the next. A no is
+     his line on the phone and a step on the dissent ladder; a man pushed past
+     it turns, and the army hears about it. One record per post, so his memory
+     is the post's. */
+  const OFFICE = {};
+  function officeMan(role) {
+    if (!staffPerson(role)) return null;
+    return OFFICE[role] || (OFFICE[role] = { _officeRole: role, name: role });
+  }
+  if (CBZ.command && CBZ.command.use) CBZ.command.use("office", {
+    authority: function (from, man) { return man && man._officeRole && Pres() && us() ? 1 : 0; },
+    standing: function (man) {
+      const PS = CBZ.presidentStaff;
+      let l = 60;
+      try { if (PS && PS.loyalty) l = PS.loyalty(man._officeRole); } catch (e) { l = 60; }
+      return Math.max(0, Math.min(1, (+l || 0) / 100));
+    },
+    witnesses: function () { return 0; },
+    lead: function () { return 1; },
+    turn: function (man) {
+      const D = CBZ.dissent;
+      if (D && D.bump) { try { D.bump(man._officeRole === "general" ? 4 : 2, 2, man._officeRole === "general" ? 10 : 3); } catch (e) {} }
+      return true;
+    },
+    cost: function (man, from, kind) {
+      const D = CBZ.dissent;
+      if (kind === "refuse" && D && D.bump) { try { D.bump(1, 1, man._officeRole === "general" ? 2 : 0); } catch (e) {} }
+    },
+  });
+  // the street, when the order is about it (an order to clear it has people in it)
+  const STREET = { _crowd: true, name: "the street" };
+  function command(role, order, target, run) {
+    return function () {
+      const Cm = CBZ.command, man = officeMan(role);
+      if (!Cm || !Cm.issue || !man) return run();
+      let out = null;
+      const opts = { game: "office", say: false, quiet: true,
+        exec: function () { out = run(); return !(out && out.ok === false); } };
+      let r = Cm.issue(PA(), man, order, target || null, opts);
+      // a "Sir?" down a phone line is answered on the same call: you say it
+      // again, and that is the push (he does it, or he says no)
+      if (!out && r.answer === "hesitate") { opts.pushed = true; r = Cm.issue(PA(), man, order, target || null, opts); }
+      if (out) return out;
+      if (r.answer === "hesitate") return { ok: false, why: "Are you sure, sir?" };
+      if (r.answer === "turn") return { ok: false, why: "I won't be part of this." };
+      return { ok: false, why: "No, sir." };
+    };
+  }
+  function PA() { return (CBZ.city && CBZ.city.playerActor) || CBZ.player; }
   function staffCall(role, line, choices, key, vm) {
     const cab = cabinet(), c = cab[role];
     if (!c || c.dead) return null;
@@ -886,7 +950,7 @@
       if (!D) return;
       if (d.name === "movement") staffCall("chief", "There's a march tomorrow. Thousands. Say something to them.", [
         { id: "address", label: "Address them", run: function () { return D.concede(); } },
-        { id: "streets", label: "Clear the streets", run: function () { return D.crackdown(); } },
+        { id: "streets", label: "Clear the streets", run: command("chief", "kill", STREET, function () { return D.crackdown(); }) },
       ], "dissent:movement:" + day(), "Call me. It's the march.");
       else if (d.name === "army") staffCall("chief", "Officers met last night without you. The General was there.", [
         { id: "relieve", label: "Relieve him", run: function () { return D.purge(); } },
@@ -903,7 +967,7 @@
       ], "dissent:coup:" + day(), "Call me. Troops are moving.");
     } else if (evt === "war-declared" && d.defender === me && !d.byPlayer) {
       staffCall("general", "They hit first. I need orders.", [
-        { id: "strike", label: "Hit back", run: function () { return strike("strike"); } },
+        { id: "strike", label: "Hit back", run: command("general", "kill", null, function () { return strike("strike"); }) },
         { id: "hold", label: "Hold", run: function () { return { ok: true, line: "Holding." }; } },
       ], "war:" + (d.warId || d.attacker), "Call me. It's " + shortName(d.attacker) + ".");
     }

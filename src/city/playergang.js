@@ -69,7 +69,7 @@
       g.playerGang = {
         id: "player", name: null, color: 0x7ed957,
         members: [], turf: [], boss: null,
-        founded: false, order: "follow", orderTarget: null,
+        founded: false, order: "follow",
         center: null,
       };
     }
@@ -81,7 +81,8 @@
     if (!pg.id) pg.id = "player";
     if (!pg.members) pg.members = [];
     if (!pg.turf) pg.turf = [];
-    if (pg.order == null) pg.order = "follow";
+    // (an old save's "attack": that order is on the man now, city/orders.js Kill)
+    if (pg.order == null || pg.order === "attack") pg.order = "follow";
     return pg;
   }
   CBZ.cityPlayerGangEnsure = ensure;
@@ -802,36 +803,6 @@
     }
   }
 
-  // ---- enemy targeting for the ATTACK order ----
-  function aimedEnemy() {
-    const P = CBZ.player, px = P.pos.x, pz = P.pos.z;
-    const y = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(y), fz = -Math.cos(y);
-    let best = null, bestDot = 0.35, bd = 60;
-    const consider = (p) => {
-      if (!p || p.dead || p === P) return;
-      if (CBZ.cityPlayerGangIsMember(p)) return;
-      if (p.faction === "player" || p.companion) return;
-      const dx = p.pos.x - px, dz = p.pos.z - pz, d = Math.hypot(dx, dz);
-      if (d < 0.5 || d > bd) return;
-      const dot = (dx / d) * fx + (dz / d) * fz;
-      if (dot > bestDot) { bestDot = dot; best = p; }
-    };
-    for (const p of CBZ.cityPeds) consider(p);
-    if (CBZ.cityCops) for (const c of CBZ.cityCops) consider(c);
-    // fall back to plain nearest hostile if nothing in the cone
-    if (!best) {
-      let nd = 28 * 28;
-      const near = (p) => {
-        if (!p || p.dead || CBZ.cityPlayerGangIsMember(p) || p.faction === "player" || p.companion) return;
-        const dd = (p.pos.x - px) * (p.pos.x - px) + (p.pos.z - pz) * (p.pos.z - pz);
-        if (dd < nd) { nd = dd; best = p; }
-      };
-      for (const p of CBZ.cityPeds) if (p.gang && p.gang !== "player") near(p);
-      if (!best && (g.wanted | 0) >= 1 && CBZ.cityCops) for (const c of CBZ.cityCops) near(c);
-    }
-    return best;
-  }
-
   // nearest unlooted RIVAL stash block (the gangs.js stash metadata) — the
   // target for the RAID STASH order. Allies' stashes are off the table.
   function nearestRivalStashLot(x, z) {
@@ -872,99 +843,99 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
-  // ---- the order system ----
+  /* ---- THE ORDER SYSTEM. Every order to the gang is an order to each man in
+     it (systems/command.js): he does it, says "Sir?" (give it again), or will
+     not, and the man who will not keeps doing what he was doing (m._pgNo is
+     the order he refused, and nothing here pushes it onto him). Refusals and
+     bad orders pile up; a gang that thinks little of you mutinies (city/
+     orders.js: the lieutenant takes it and they come for you).
+     The attack order is not here: sending your people at a man is Kill, on
+     the man himself (city/orders.js). ---- */
+  const CMD_OF = { hold: "hold", follow: "come", disperse: "go", raid: "take", fortify: "guard" };
   function issueOrder(kind) {
     const pg = ensure();
-    if (!pg.founded) { CBZ.city.note("Found or take over a gang first.", 1.8); return; }
+    if (!pg.founded) return { ok: false, why: "" };
     const mem = liveMembers();
-    if (!mem.length) { CBZ.city.note("No crew to command.", 1.6); return; }
-    pg.order = kind; pg.orderTarget = null;
-    // (CUT: the "⚔ ATTACK" / "🛡 HOLD HERE" / "🏃 FOLLOW" / "🚶 DISPERSE"
-    // centre flashes — a popup restating the button YOU just pressed. The
-    // quiet note reads like your own call going out, and the crew visibly
-    // moving on it + the orders chip ARE the confirmation.)
-    if (kind === "attack") {
-      const foe = aimedEnemy();
-      if (!foe) { CBZ.city.note("No enemy in sight to attack.", 1.8); pg.order = "follow"; applyOrder(); return; }
-      pg.orderTarget = foe;
-      CBZ.city.note("Crew attacks " + (foe.name || (foe.kind === "cop" ? "the cop" : "the target")) + "!", 2);
-      // attacking the cops openly is a crime spree
-      if (foe.kind === "cop") CBZ.cityCrime && CBZ.cityCrime(60, { x: foe.pos.x, z: foe.pos.z, type: "gang-assault" });
-      if (foe.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(foe.gang, 1);
-    } else if (kind === "hold") {
-      const P = CBZ.player; pg.holdPoint = { x: P.pos.x, z: P.pos.z };
-      claimTurfAt(P.pos.x, P.pos.z);
-      CBZ.city.note("Crew posts up and holds this block.", 2);
-    } else if (kind === "follow") {
-      CBZ.city.note("Crew falls in with you.", 1.6);
-    } else if (kind === "disperse") {
-      CBZ.city.note("Crew melts back to the turf.", 1.6);
-    } else if (kind === "raid") {
-      // RAID STASH: send the crew at the nearest rival stash block. Reuses the
-      // gangs.js stash/raid fields (raidT/raidLot/raidGang) so the existing
-      // return infra walks everyone home if the push stalls.
-      const P = CBZ.player;
-      const lot = nearestRivalStashLot(P.pos.x, P.pos.z);
-      if (!lot) { CBZ.city.note("No rival stash in reach to raid.", 2); pg.order = "follow"; applyOrder(); return; }
-      pg.raidLot = lot; pg.raidGangId = (lot.building && lot.building.gang) || null; pg.raidClock = 40;
-      const foe = pg.raidGangId ? gangRecById(pg.raidGangId) : null;
-      const zn = CBZ.cityZoneAt ? CBZ.cityZoneAt(lot.cx, lot.cz) : null;
-      CBZ.city.note("Crew rolls on the " + (foe ? foe.name : "rival") + " stash" + (zn ? " in " + zn.name : "") + ". Clear the block and they crack it.", 3);
-      if (pg.raidGangId && CBZ.cityGangProvoke) CBZ.cityGangProvoke(pg.raidGangId, 0.8);
-    } else if (kind === "fortify") {
-      // FORTIFY: spread the crew across YOUR blocks as standing guards (the
-      // same hold/guard plumbing, one post per member round-robin over turf).
-      if (!pg.turf.length) { CBZ.city.note("No turf to fortify, claim a block first.", 2); pg.order = "follow"; applyOrder(); return; }
-      CBZ.city.note("Crew spreads out to fortify your " + pg.turf.length + " block" + (pg.turf.length > 1 ? "s" : "") + ".", 2.2);
+    if (!mem.length || !CMD_OF[kind]) return { ok: false, why: "" };
+    const P = CBZ.player;
+    // what the order needs to exist at all
+    let lot = null;
+    if (kind === "raid") {
+      lot = nearestRivalStashLot(P.pos.x, P.pos.z);
+      if (!lot) return { ok: false, why: "" };
     }
-    applyOrder();
+    if (kind === "fortify" && !pg.turf.length) return { ok: false, why: "" };
+    const was = pg.order, wasHold = pg.holdPoint;
+    pg.order = kind;
+    if (kind === "hold") pg.holdPoint = { x: P.pos.x, z: P.pos.z };
+    if (kind === "raid") { pg.raidLot = lot; pg.raidGangId = (lot.building && lot.building.gang) || null; pg.raidClock = 40; }
+    // each man decides; the ones who obey take the order's body
+    const Cm = CBZ.command, PA = (CBZ.city && CBZ.city.playerActor) || P;
+    const fi = { n: 0 };
+    let r = null;
+    if (Cm && Cm.issue) {
+      r = Cm.issue(PA, mem, CMD_OF[kind], null, { game: "city", exec: function (m) { m._pgNo = null; applyTo(m, pg, P, fi); return true; } });
+      for (const m of mem) if (r.obey.indexOf(m) < 0) m._pgNo = kind;
+    } else for (const m of mem) { m._pgNo = null; applyTo(m, pg, P, fi); }
+    const obeyed = r ? r.obey.length : mem.length;
+    if (!obeyed) {
+      // nobody went: the gang's order is what it was
+      pg.order = was; pg.holdPoint = wasHold;
+      if (kind === "raid") { pg.raidLot = null; pg.raidGangId = null; }
+      for (const m of mem) if (m._pgNo === kind) m._pgNo = null;
+      return { ok: false, answer: r ? r.answer : "refuse", why: "" };
+    }
+    if (kind === "hold") claimTurfAt(P.pos.x, P.pos.z);
+    if (kind === "raid" && pg.raidGangId && CBZ.cityGangProvoke) CBZ.cityGangProvoke(pg.raidGangId, 0.8);
+    g.cityCrew = mem.length;
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     showOrdersHud();
+    return { ok: true, answer: r ? r.answer : "obey", n: obeyed, refused: mem.length - obeyed };
   }
   CBZ.cityPlayerGangOrder = issueOrder;
 
-  // push the current order onto every member's ped fields. The ped brain
-  // (peds.js) does the heavy lifting from these inputs each frame.
+  // push the current order onto every member's ped fields (the ped brain,
+  // peds.js, does the heavy lifting from these inputs each frame). A man who
+  // refused it (m._pgNo) is left as he is.
+  function applyTo(m, pg, P, fi) {
+    if (pg.order === "follow") {
+      m.companion = true; m.guard = null; m.rage = null;
+    } else if (pg.order === "hold") {
+      m.companion = false; m.rage = null;
+      const gp = pg.holdPoint || pg.center || { x: P.pos.x, z: P.pos.z };
+      m.guard = { x: gp.x, z: gp.z }; m.homeGuard = { x: gp.x, z: gp.z };
+      m.target.set(gp.x + (Math.random() - 0.5) * 4, 0, gp.z + (Math.random() - 0.5) * 4); m.pause = 0; m.path = null;
+    } else if (pg.order === "disperse") {
+      m.companion = false; m.rage = null;
+      const h = m.homeGuard || pg.center || { x: P.pos.x, z: P.pos.z };
+      m.guard = { x: h.x, z: h.z };
+      m.target.set(h.x + (Math.random() - 0.5) * 6, 0, h.z + (Math.random() - 0.5) * 6); m.pause = 0; m.path = null;
+    } else if (pg.order === "raid") {
+      m.companion = false;
+      const lot = pg.raidLot;
+      if (lot) {
+        m.homeGuard = m.homeGuard || (m.guard ? { x: m.guard.x, z: m.guard.z } : (pg.center ? { x: pg.center.x, z: pg.center.z } : null));
+        m.guard = { x: lot.cx + (Math.random() - 0.5) * 6, z: lot.cz + (Math.random() - 0.5) * 6 };
+        m.raidT = 26 + Math.random() * 8; m.raidLot = lot; m.raidGang = pg.raidGangId || null;
+        m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null;
+      }
+    } else if (pg.order === "fortify") {
+      m.companion = false; m.rage = null;
+      const lot = pg.turf.length ? pg.turf[fi.n++ % pg.turf.length] : null;
+      if (lot) {
+        // the post IS the new home: a fortified member stays garrisoned
+        m.guard = { x: lot.cx + (Math.random() - 0.5) * 4, z: lot.cz + (Math.random() - 0.5) * 4 };
+        m.homeGuard = { x: m.guard.x, z: m.guard.z };
+        m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null;
+      }
+    }
+  }
   function applyOrder() {
     const pg = g.playerGang; if (!pg || !pg.founded) return;
     const mem = liveMembers();
     const P = CBZ.player;
-    let fi = 0;   // fortify: round-robin post index over pg.turf
-    for (const m of mem) {
-      if (pg.order === "follow") {
-        m.companion = true; m.guard = null; m.rage = null;
-      } else if (pg.order === "attack") {
-        m.companion = false; m.guard = null;
-        if (pg.orderTarget && !pg.orderTarget.dead) { m.rage = pg.orderTarget; m.state = "fight"; m.target.set(pg.orderTarget.pos.x, 0, pg.orderTarget.pos.z); m.pause = 0; m.path = null; }
-      } else if (pg.order === "hold") {
-        m.companion = false; m.rage = null;
-        const gp = pg.holdPoint || pg.center || { x: P.pos.x, z: P.pos.z };
-        m.guard = { x: gp.x, z: gp.z }; m.homeGuard = { x: gp.x, z: gp.z };
-        m.target.set(gp.x + (Math.random() - 0.5) * 4, 0, gp.z + (Math.random() - 0.5) * 4); m.pause = 0; m.path = null;
-      } else if (pg.order === "disperse") {
-        m.companion = false; m.rage = null;
-        const h = m.homeGuard || pg.center || { x: P.pos.x, z: P.pos.z };
-        m.guard = { x: h.x, z: h.z };
-        m.target.set(h.x + (Math.random() - 0.5) * 6, 0, h.z + (Math.random() - 0.5) * 6); m.pause = 0; m.path = null;
-      } else if (pg.order === "raid") {
-        m.companion = false;
-        const lot = pg.raidLot;
-        if (lot) {
-          m.homeGuard = m.homeGuard || (m.guard ? { x: m.guard.x, z: m.guard.z } : (pg.center ? { x: pg.center.x, z: pg.center.z } : null));
-          m.guard = { x: lot.cx + (Math.random() - 0.5) * 6, z: lot.cz + (Math.random() - 0.5) * 6 };
-          m.raidT = 26 + Math.random() * 8; m.raidLot = lot; m.raidGang = pg.raidGangId || null;
-          m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null;
-        }
-      } else if (pg.order === "fortify") {
-        m.companion = false; m.rage = null;
-        const lot = pg.turf[fi++ % pg.turf.length];
-        if (lot) {
-          // the post IS the new home — a fortified member stays garrisoned
-          m.guard = { x: lot.cx + (Math.random() - 0.5) * 4, z: lot.cz + (Math.random() - 0.5) * 4 };
-          m.homeGuard = { x: m.guard.x, z: m.guard.z };
-          m.target.set(m.guard.x, 0, m.guard.z); m.pause = 0; m.path = null;
-        }
-      }
-    }
+    const fi = { n: 0 };
+    for (const m of mem) { if (m._pgNo && m._pgNo === pg.order) continue; applyTo(m, pg, P, fi); }
     g.cityCrew = mem.length;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
@@ -1021,7 +992,7 @@
     }
     const mem = liveMembers();
     const lts = mem.filter((m) => m.rank === "lt").length;
-    const orderName = { follow: "FOLLOW", attack: "ATTACK", hold: "HOLD", disperse: "DISPERSE", raid: "RAID STASH", fortify: "FORTIFY" }[pg.order] || "—";
+    const orderName = { follow: "FOLLOW", hold: "HOLD", disperse: "DISPERSE", raid: "RAID STASH", fortify: "FORTIFY" }[pg.order] || "—";
     // the boss's ledger line (city/racket.js, feature-detected): the book is
     // as much "your gang" as the bodies are
     const bk = CBZ.cityRacketBook ? CBZ.cityRacketBook() : null;
@@ -1094,15 +1065,12 @@
       }
     }
     if (pg.founded) {
-      add("attack", "ATTACK, target your aim", "#ff9a9a");
-      add("hold", "HOLD HERE, claim + defend this block");
-      add("follow", "FOLLOW me");
-      add("disperse", "DISPERSE to turf");
+      add("hold", "Hold this block");
+      add("follow", "Follow me");
+      add("disperse", "Back to the turf");
       // RAID STASH: only offered when a rival stash is actually out there
-      if (nearestRivalStashLot(CBZ.player.pos.x, CBZ.player.pos.z)) {
-        add("raidstash", "RAID the nearest rival stash, crew hits it", "#ffd166");
-      }
-      if (pg.turf.length) add("fortify", "FORTIFY, post crew across your turf", "#7fd0ff");
+      if (nearestRivalStashLot(CBZ.player.pos.x, CBZ.player.pos.z)) add("raidstash", "Raid their stash", "#ffd166");
+      if (pg.turf.length) add("fortify", "Fortify the turf", "#7fd0ff");
       add("promote", "⬆ PROMOTE nearest crew → Lieutenant", "#7fd0ff");
       add("claimturf", "CLAIM this block as turf");
       // ---- takeover meta (turf.js): buy a weakly-held district, broker pacts ----
@@ -1167,7 +1135,6 @@
     closeMenu();
     if (act === "found") CBZ.cityPlayerGangFound();
     else if (act === "claim") { if (pendingClaim && pendingClaim.rec) claimRivalGang(pendingClaim.rec); }
-    else if (act === "attack") issueOrder("attack");
     else if (act === "hold") issueOrder("hold");
     else if (act === "follow") issueOrder("follow");
     else if (act === "disperse") issueOrder("disperse");
@@ -1385,26 +1352,13 @@
       m.npcWanted = 0;   // your soldiers don't rack up their own heat for riding with you
     }
 
-    // ATTACK: chase the target; when it's down, sweep to the next nearby foe
-    if (pg.order === "attack") {
-      if (!pg.orderTarget || pg.orderTarget.dead) {
-        const next = aimedEnemy();
-        if (next) { pg.orderTarget = next; }
-        else { pg.order = "follow"; applyOrder(); CBZ.city.note("Target down. Crew regroups on you.", 2); showOrdersHud(); }
-      }
-      if (pg.order === "attack" && pg.orderTarget && !pg.orderTarget.dead) {
-        for (const m of mem) {
-          if (m.companion) m.companion = false;
-          if (m.rage !== pg.orderTarget) { m.rage = pg.orderTarget; m.state = "fight"; }
-          m.target.set(pg.orderTarget.pos.x, 0, pg.orderTarget.pos.z);
-        }
-      }
-    } else if (pg.order === "follow") {
+    if (pg.order === "follow") {
       // make sure followers stay on the companion brain (a fight may have flipped one)
-      for (const m of mem) if (!m.companion) { m.companion = true; m.rage = null; m.guard = null; }
+      for (const m of mem) if (!m.companion && m._pgNo !== "follow") { m.companion = true; m.rage = null; m.guard = null; }
     } else if (pg.order === "hold" || pg.order === "disperse" || pg.order === "fortify") {
       // re-assert the guard post for any member that drifted off it (unless mid-fight)
       for (const m of mem) {
+        if (m._pgNo === pg.order) continue;
         if (m.companion) m.companion = false;
         if (!m.guard) { const gp = (pg.order === "hold" ? (pg.holdPoint || pg.center) : (m.homeGuard || pg.center)); if (gp) m.guard = { x: gp.x, z: gp.z }; }
       }

@@ -2147,9 +2147,39 @@
        RESCUER  — a contract from the party that actually loses money: the
                   vessel's owner, or the payer of a live demand.
      ========================================================================= */
+  /* THE CREW DECIDES (systems/command.js). A rung you hold is a claim on
+     the men of the crew you signed with (city/orders.js claim), and an
+     order through it is answered like any other: the man the rest look to
+     answers first and pulls them, and a crew you keep sending where it
+     would not go, or that keeps saying no, turns on you. */
+  function memberOf(p) {
+    if (!p || p.dead || !p.pirateCrew || !p._pirCrew) return null;
+    const F = CBZ.factions;
+    let t = -1;
+    try { t = F && F.tier ? F.tier(ORG) : -1; } catch (e) { t = -1; }
+    return t >= 0 ? p._pirCrew : null;
+  }
+  let claimed = false;
+  function claimCrew() {
+    if (claimed || !CBZ.cityOrders2 || !CBZ.cityOrders2.claim) return;
+    claimed = true;
+    CBZ.cityOrders2.claim(function (p) {
+      if (!memberOf(p)) return null;
+      return playerCan("standdown") ? 1 : playerCan("boarding") ? 0.75 : 0.4;
+    });
+  }
+  function crewOrder(cr, order) {
+    const men = cr.members.filter(function (m) { return m && !m.dead; });
+    const Cm = CBZ.command, PA = (CBZ.city && CBZ.city.playerActor) || CBZ.player;
+    if (!men.length) return false;
+    if (!Cm || !Cm.issue) return true;
+    const r = Cm.issue(PA, men, order, null, { game: "city", exec: function () { return true; } });
+    return r.answer === "obey";
+  }
   function registerVerbs() {
     const I = CBZ.interactions;
     if (!I || !I.register) return 0;
+    claimCrew();
     let n = 0;
 
     // SIGN ON. The join itself is factions.js's — this is only the door.
@@ -2182,10 +2212,10 @@
       label: function () { return "Board"; },
       onSelect: function (p) {
         const cr = p._pirCrew;
+        if (!cr || cr.state !== "approach" || !crewOrder(cr, "take")) return;
         cr.state = "board"; cr.boardT = 0;
         burnCovers(cr);
         _ordered++;
-        say(p, "Aye.");
       },
     }); n++;
 
@@ -2198,7 +2228,7 @@
         return playerCan("standdown");
       },
       label: function () { return "Call off"; },
-      onSelect: function (p) { standDown(p._pirCrew, "captain", true); },
+      onSelect: function (p) { const cr = p._pirCrew; if (cr && crewOrder(cr, "back")) standDown(cr, "captain", true); },
     }); n++;
 
     // CUT SOMEBODY LOOSE. Any hostage, held by anyone, if you can reach them.

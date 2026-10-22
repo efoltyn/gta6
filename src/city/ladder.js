@@ -18,6 +18,8 @@
      cityLadder.of(ped) -> entry | null   cityLadder.cancel(ped)
      cityLadder.pay(ped)                  hand a mugger what he asked for
      cityLadder.hold(ped, dt) -> bool     peds.js think(): the ladder owns him
+     cityLadder.robbed(ped, cash, item)   peds.js cityRobPed: he remembers it
+       (HE COMES BACK FOR IT below)
 
    A mugging is paid with a DECISION on the mugger ("Pay $40", E), never a
    line. Everything else is the player's body: walk out, put the gun away,
@@ -299,14 +301,112 @@
     registered = true;
     I.register("ped", {
       id: "ladder-pay", slot: "e", prio: 95,
-      canShow: function (p) { const e = p && p._ladder; return !!(e && e.kind === "rob" && !e.paid && (g.cash | 0) > 0); },
+      canShow: function (p) { const e = p && p._ladder; return !!(e && e.kind === "rob" && !e.paid && !e.opts.noPay && (g.cash | 0) > 0); },
       label: function (p) { const e = p._ladder; return "Pay $" + Math.min(g.cash | 0, e ? e.take : 0); },
       onSelect: function (p) { pay(p); },
     });
   }
 
+  /* ---- HE COMES BACK FOR IT (owner: "someone you robbed comes back and
+     demands it"). A man you robbed remembers what you took (peds.js
+     cityRobPed calls robbed()). If he has the nerve, or friends to bring, he
+     comes back a while later, once he has found you, and runs the same
+     ladder a mugger runs, with what you took as the take: "Give it back."
+     Paying it back is the decision on him (E); walking, running, drawing and
+     swinging are your body, and the ladder reads them. His friends walk up
+     with him and stand with him, and when it comes to hands theirs are in
+     it. A meek man on his own never comes back. ---- */
+  const OWED = [];
+  const BACK_MIN = 50, BACK_SPREAD = 110, BACK_GIVEUP = 600, FIND_R = 70;
+  const BACK_LINES = {
+    demand: ["Give it back.", "That's mine. Give it back."],
+    warn: ["I said give it back."],
+    show: ["Last chance."],
+    comply: ["That's right."],
+    fled: ["Yeah, run."],
+  };
+  let backT = 0;
+  function robbed(ped, cash, item) {
+    if (!ped || ped.dead || ped.vendor || ped.kind === "cop" || ped.companion || ped.recruited) return;
+    if ((cash | 0) <= 0 && !item) return;
+    for (let i = 0; i < OWED.length; i++) if (OWED[i].ped === ped) { OWED[i].cash += cash | 0; return; }
+    OWED.push({ ped: ped, cash: cash | 0, item: item || "", due: T + BACK_MIN + Math.random() * BACK_SPREAD, t0: T });
+    if (OWED.length > 12) OWED.shift();
+  }
+  function freeBody(p) {
+    return !!(p && !p.dead && p.pos && p.group && !p._ladder && !p.rage && !p.companion && !p.recruited && !p.staffPost &&
+      !p._islandPost && !p.vendor && p.kind !== "cop" && !p._iOnly && !p.controlled && !p.inCar && !p.surrender &&
+      !((p.ko || 0) > 0) && !p.restraint && !p._custodyJob && !p._order && p.state !== "flee");
+  }
+  // who he brings: his own set first, then the hard men standing with him
+  function friendsOf(ped) {
+    const L = CBZ.cityPeds || [], out = [];
+    for (let pass = 0; pass < 2 && out.length < 2; pass++) {
+      for (let i = 0; i < L.length && out.length < 2; i++) {
+        const p = L[i];
+        if (p === ped || out.indexOf(p) >= 0 || !freeBody(p)) continue;
+        const d = hyp(p.pos.x - ped.pos.x, p.pos.z - ped.pos.z);
+        if (pass === 0 ? !(ped.gang && p.gang === ped.gang && d < 30) : !(d < 18 && (p.aggr || 0) >= 0.35)) continue;
+        out.push(p);
+      }
+    }
+    return out;
+  }
+  function comeBack(o) {
+    const ped = o.ped, P = CBZ.player;
+    const friends = friendsOf(ped);
+    const nerve = (ped.aggr || 0) + friends.length * 0.2;
+    if (nerve < 0.45) return true;                  // he lets it go
+    const take = Math.max(10, Math.min(g.cash | 0, o.cash || 20));
+    const men = [];
+    const lead = begin(ped, "rob", {
+      take: take, lines: BACK_LINES, leaveR: 0, patience: [45, 4, 3], friends: friends.length,
+      hard: friends.length >= 2 || (ped.aggr || 0) > 0.75,
+      // his friends' hands are in it when his are
+      onAct: function (p, r) {
+        for (let i = 0; i < men.length; i++) {
+          const f = men[i];
+          if (!f || f.dead) continue;
+          cancel(f);
+          if (r && (r.act === "beat" || r.act === "shoot" || r.act === "chase")) { f.rage = PA(); f.state = "fight"; }
+        }
+        return false;
+      },
+      // paid back, or it is over another way: they go with him
+      onEnd: function (p, r) {
+        for (let i = 0; i < men.length; i++) if (men[i] && men[i]._ladder) cancel(men[i]);
+        if (r && r.outcome === "complied" && CBZ.cityRelShift) { try { CBZ.cityRelShift(p, "paid", 0.4); } catch (e) {} }
+      },
+    });
+    if (!lead) return false;
+    for (let i = 0; i < friends.length; i++) {
+      const e = begin(friends[i], "rob", { take: take, silent: true, noPay: true, leaveR: 0, patience: [45, 4, 3], hard: true });
+      if (e) men.push(friends[i]);
+    }
+    return true;
+  }
+  function tickBack(dt) {
+    backT -= dt;
+    if (backT > 0 || !OWED.length) return;
+    backT = 1;
+    const P = CBZ.player;
+    if (!P || P.dead || P.driving || g.busted) return;
+    // one at a time: nobody comes back while somebody is already in your face
+    for (let i = 0; i < LIVE.length; i++) if (LIVE[i].kind === "rob" && !LIVE[i].opts.noPay) return;
+    for (let i = OWED.length - 1; i >= 0; i--) {
+      const o = OWED[i], ped = o.ped;
+      const gone = !ped || ped.dead || ped.culled || (CBZ.cityPeds && CBZ.cityPeds.indexOf(ped) < 0) || T - o.t0 > BACK_GIVEUP;
+      if (gone) { OWED.splice(i, 1); continue; }
+      if (T < o.due || !freeBody(ped)) continue;
+      if (hyp(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z) > FIND_R) continue;      // he has not found you
+      if (comeBack(o)) OWED.splice(i, 1);
+      return;
+    }
+  }
+
   CBZ.cityLadder = {
-    begin: begin, cancel: cancel, pay: pay, hold: holdThink,
+    begin: begin, cancel: cancel, pay: pay, hold: holdThink, robbed: robbed,
+    owed: function () { return OWED.map(function (o) { return { name: o.ped && o.ped.name, cash: o.cash, in: Math.max(0, Math.round(o.due - T)) }; }); },
     of: function (ped) { return (ped && ped._ladder) || null; },
     live: LIVE,
   };
@@ -316,5 +416,6 @@
     registerPay();
     if (g.state && g.state !== "playing") return;
     step(Math.min(0.1, dt || 0));
+    tickBack(Math.min(0.1, dt || 0));
   });
 })();

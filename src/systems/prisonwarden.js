@@ -1091,6 +1091,8 @@
       if (o === "back") { man.aiState = "flee"; man.fleeT = 2.2; man.foe = null; return true; }
       if (o === "drop") { if (!man._shankOut) return false; man._shankOut = false; man._steelT = 0; return true; }
       if (o === "hold" || o === "line" || o === "search") { man.pause = Math.max(man.pause || 0, 4); man.aiState = "wander"; man.foe = null; return true; }
+      // back to his own cell: world/cellblock.js walks him there, leaf by leaf
+      if (o === "cell") return !!(CBZ.cellblock && CBZ.cellblock.sendHome && CBZ.cellblock.sendHome(man));
       return false;
     },
     turn: function (man, from) {

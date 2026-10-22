@@ -720,6 +720,15 @@
   }
   L.pending = function () { return QUEUE.length; };
   L.reportedRecently = function (p, within) { return p && p._lawReportT != null && T - p._lawReportT < (within || 30); };
+  // ON THE RADIO NOW: a man the command put on the department's books
+  // (city/orders.js, an officer ordered to take him) is a man every officer
+  // nearby has heard about, the same as a witness's call landing
+  L.radio = function (p) {
+    if (!p || p.dead || isPlayerActor(p)) return false;
+    p._lawReportT = T;
+    if (p.pos) { p._lawReportX = p.pos.x; p._lawReportZ = p.pos.z; }
+    return true;
+  };
 
   let _subFor = null, _unsub = [];
   function hookReports() {

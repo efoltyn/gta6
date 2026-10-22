@@ -2835,8 +2835,64 @@
      calls this right before it moves anybody; a held man's target is clamped
      into his box here, so the navigator is handed a point he can reach and he
      walks to the bars and STOPS there, facing whatever he wanted. */
+  /* BACK TO YOUR CELL. An order (systems/command.js "cell": an officer's
+     word to an inmate, the cop role's "Cell") that he obeys is this: his own
+     cell is his errand, through every leaf on the way. Out of whatever cell
+     he stands in through its door, along the aisle, up the stair to his tier
+     (systems/prisonnav.js reads the tier off a goal in his cell), into his
+     own through its door, and there he stays a while. A fight, a flight, a
+     hunt, a knock-down, a collar or the clock ends it.
+       CBZ.cellblock.sendHome(n) -> bool   (false: no cell of his own, or he
+                                           is already behind his own leaf) */
+  const HOME_MAX = 75, HOME_STAY = 30;
+  function clock() { const g = CBZ.game; return g && isFinite(+g.elapsed) ? +g.elapsed : 0; }
+  function sendHome(n) {
+    if (!n || n === "player" || !n.group || !n.target || n.dead || n.escaped || n.cuffed) return false;
+    const c = n._cellIdx != null && n._cellIdx >= 0 ? cells[n._cellIdx] : null;
+    if (!c || c.owner !== n || held(n)) return false;
+    n._goHome = { t0: clock(), inAt: -1 };
+    n.pause = 0; n.foe = null; n.social = null;
+    if (n.aiState && n.aiState !== "wander") { n.aiState = "wander"; n.aiTimer = 1; }
+    return true;
+  }
+  function inOwn(c, p) { return inBox(cellBox(c), p, -0.3) && (!c.tier || p.y > (c.fy || 0) - 0.8); }
+  function homeStep(n) {
+    const H = n._goHome, c = n._cellIdx >= 0 ? cells[n._cellIdx] : null, s = n.aiState, now = clock();
+    if (!c || c.owner !== n || n.dead || n.ko > 0 || n.escaped || n.cuffed || (n.huntPlayer || 0) > 0 || n.foe || n._demand ||
+        (s && s !== "wander" && s !== "socialize") || now - H.t0 > HOME_MAX || now < H.t0 - 1) { n._goHome = null; return false; }
+    const p = n.group.position, t = n.target;
+    if (inOwn(c, p)) {
+      // home: he stands in his cell (the room is his to pace) for a while
+      if (H.inAt < 0) H.inAt = now;
+      if (now - H.inAt > HOME_STAY) { n._goHome = null; return false; }
+      clampInto(paceBox(c, false), t);
+      n.social = null;
+      return true;
+    }
+    H.inAt = -1;
+    n.pause = 0;
+    const from = cellAt(p.x, p.z, -0.25, p.y);
+    if (from && from !== c) {                       // out of this one through its own leaf
+      const m = facePoint(from, (from.oa + from.ob) / 2, 1.3);
+      t.x = m.x; t.z = m.z;
+      return true;
+    }
+    // into his own through its leaf: the mouth, then (in the lane) inside
+    const mid = (c.oa + c.ob) / 2;
+    const level = !c.tier || Math.abs(p.y - (c.fy || 0)) < 1.2;
+    const depth = c.dx !== 0 ? (p.x - c.faceX) * c.dx : (p.z - c.faceZ) * c.dz;
+    const lat = c.dx !== 0 ? p.z - (c.faceZ + mid) : p.x - (c.faceX + mid);
+    const inLane = level && depth < 1.45 && Math.abs(lat) < DOOR_W / 2 + 0.15;
+    const aim = facePoint(c, mid, inLane ? -0.9 : 1.3);
+    t.x = aim.x; t.z = aim.z;
+    return true;
+  }
   CBZ.npcConfine = function (n) {
     if (!n || !n.target || !n.group) return false;
+    if (n._goHome) {
+      if (held(n)) n._goHome = null;
+      else if (homeStep(n)) return true;
+    }
     if (held(n)) {
       const c = cells[n._cellIdx];
       clampInto(paceBox(c, !!(n.char && n.char.sitting)), n.target);
@@ -3015,6 +3071,7 @@
     playerCell: playerCell,
     setDoor: setDoor,
     assign: assign,
+    sendHome: sendHome,
     cellAt: cellAt,
     freeCell: freeCell,
     lockAll: lockAll,

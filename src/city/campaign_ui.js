@@ -1179,7 +1179,12 @@
        input      pad d-pad up/left/right (systems/gamepad.js asks
                   CBZ.padPrompt; the pad drives nothing else while it is up),
                   arrows, W/A/D, 1/2/3 left to right, a tap or click. Movement
-                  keys are held while it is up.
+                  keys are held while it is up. UNDER POINTER LOCK (the mouse
+                  is the camera, there is no cursor) the prompt keeps the lock
+                  and the game running and lends the mouse a cursor of its
+                  own: it starts on the screen-centre reticle, the mouse moves
+                  it (and not the camera), the answer under it lights, and a
+                  left click picks that answer (never fires the gun).
      It is also where a question with nobody and nothing to pin its answers
      on lands (a voice on the phone): the old bottom reply strip is gone. */
   const DIRS = ["up", "left", "right"];
@@ -1262,6 +1267,11 @@
     CP.el.classList.add("show");
     document.body.classList.add("campaign-dialogue-active", "cine-prompt-open");
     clearMovementKeys();
+    hoverSet(null);
+    // a trigger held when the question came is let go: the click that
+    // answers it must not be a shot either
+    if (CBZ.fpsFire) { try { CBZ.fpsFire(false); } catch (e) {} }
+    if (locked()) cursorShow();
     return true;
   }
   function closeCine() {
@@ -1269,7 +1279,62 @@
     CP.open = false; CP.ready = false; CP.slots = {}; CP.meta = null; CP.speaker = null;
     if (CP.el) CP.el.classList.remove("show", "ready");
     if (document.body) document.body.classList.remove("cine-prompt-open");
+    cursorHide();
   }
+  /* THE PROMPT'S OWN CURSOR, under pointer lock (see "input" above). Window
+     capture listeners, so the camera (camera.js / fpsmode.js listen on the
+     document) never sees the mouse while a question stands, and a click is
+     an answer, not a shot. */
+  const CUR = { el: null, x: 0, y: 0, on: false, hover: null };
+  function locked() { return !!(document.pointerLockElement && !CBZ.touchMode); }
+  function cursorShow() {
+    if (!document.body) return;
+    if (!CUR.el) {
+      CUR.el = make("div", "cine-cursor");
+      CUR.el.setAttribute("aria-hidden", "true");
+      CUR.el.style.cssText = "position:fixed;left:0;top:0;width:14px;height:14px;margin:-7px 0 0 -7px;border:2px solid #ffd27a;" +
+        "border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.55);pointer-events:none;z-index:2147483000;display:none";
+      document.body.appendChild(CUR.el);
+    }
+    if (!CUR.on) { CUR.x = innerWidth / 2; CUR.y = innerHeight / 2; CUR.on = true; }
+    CUR.el.style.transform = "translate(" + CUR.x.toFixed(1) + "px," + CUR.y.toFixed(1) + "px)";
+    CUR.el.style.display = "block";
+  }
+  function cursorHide() {
+    CUR.on = false;
+    if (CUR.el) CUR.el.style.display = "none";
+    hoverSet(null);
+  }
+  function slotAt(x, y) {
+    const el = document.elementFromPoint ? document.elementFromPoint(x, y) : null;
+    const b = el && el.closest ? el.closest(".cine-ans[data-slot]") : null;
+    return b && CP.el && CP.el.contains(b) && !b.classList.contains("empty") ? b.getAttribute("data-slot") : null;
+  }
+  function hoverSet(dir) {
+    if (CUR.hover === dir) return;
+    if (CUR.hover && CP.btn[CUR.hover]) CP.btn[CUR.hover].classList.remove("hover");
+    CUR.hover = dir;
+    if (dir && CP.btn[dir]) CP.btn[dir].classList.add("hover");
+  }
+  function cursorLive() { return CP.open && !state.open && locked(); }
+  addEventListener("mousemove", function (e) {
+    if (!cursorLive()) { if (CUR.on) cursorHide(); return; }
+    e.stopPropagation();
+    cursorShow();
+    CUR.x = Math.max(0, Math.min(innerWidth, CUR.x + (e.movementX || 0)));
+    CUR.y = Math.max(0, Math.min(innerHeight, CUR.y + (e.movementY || 0)));
+    CUR.el.style.transform = "translate(" + CUR.x.toFixed(1) + "px," + CUR.y.toFixed(1) + "px)";
+    hoverSet(CP.ready ? slotAt(CUR.x, CUR.y) : null);
+  }, true);
+  addEventListener("mousedown", function (e) {
+    if (!cursorLive()) return;
+    e.preventDefault(); e.stopPropagation();
+    if (e.button !== 0) return;
+    if (!CUR.on) cursorShow();
+    const dir = CP.ready ? slotAt(CUR.x, CUR.y) : null;
+    if (dir) cinePick(dir);
+  }, true);
+
   function cinePick(dir) {
     if (!CP.open || !CP.ready || CP.picked) return false;
     const c = CP.slots[dir];
@@ -1485,7 +1550,7 @@
     if (peek) peek.classList.toggle("available", livePlay() && !state.open);
     // Speech outlives the campaign: any origin (the President's office, the
     // Bureau) talks through this card, so only LEAVING play clears it.
-    if (!playableMode() && state.dialogue) clearDialogue();
+    if (!playableMode() && !(CBZ.economyMode && CBZ.economyMode()) && state.dialogue) clearDialogue();
     hideWorldNameTags();
     if (clockEl && state.open) clockEl.textContent = nowLabel();
   }

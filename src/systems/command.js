@@ -71,7 +71,8 @@
             refuse[], turn[], answers: [{ man, answer, margin }] }
        to: one man or an array. opts: { at {x,z}, say (issuer speaks, NPC
        issuers only; default true), quiet (no answers spoken), exec (fn(man,
-       order, target, from, opts) instead of the game's), pushed, game }
+       order, target, from, opts) instead of the game's), pushed, game,
+       delta (a pull on every answer: the man beside them already said no) }
      decide(from, man, order, target?, ctx?) -> { answer, margin, weight, auth, stand }
      authority(from, man, order?, game?) -> 0..1   standing(man, from, game?) -> 0..1
      weight(order, man, target, from, game?, out?) -> 0..1.2 (out.reason: kid |
@@ -147,7 +148,8 @@
   function gameOf(a, opts) {
     if (opts && opts.game) return opts.game;
     const m = CBZ.game && CBZ.game.mode;
-    if (m === "city") return "city";
+    // the islands are Gang City's people, police and orders (city/orders.js)
+    if (m === "city" || m === "archipelago") return "city";
     if (m === "escape") return "prison";
     const b = a && a._brain;
     if (b && b.game) return b.game;
@@ -509,7 +511,9 @@
     const t = now();
     const I = issRec(from);
     if (I) I.n++;
-    let delta = 0;
+    // opts.delta: what has already happened to this order before anyone here
+    // answers it (a man beside them lowered his rifle first)
+    let delta = +opts.delta || 0;
     let spoke = 0;
     for (let i = 0; i < list.length; i++) {
       const man = list[i];
