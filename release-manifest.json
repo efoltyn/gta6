@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "c9557002886ee1b0f235d7714f75fcc10f086fed",
-  "createdAt": "2026-10-22T19:12:02.028Z",
-  "fileCount": 1463,
-  "totalBytes": 52600563,
+  "sourceCommit": "cd0644d3d2895abee2479039642f4e8ee1b6ac5e",
+  "createdAt": "2026-10-22T20:30:04.859Z",
+  "fileCount": 1465,
+  "totalBytes": 52733030,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -7212,6 +7212,11 @@
       "sha256": "ad5d8870d1e389914f9cba8d35be313c4327c69ee0a221e482e9bf7621136fe5"
     },
     {
+      "file": "the-isles.html",
+      "bytes": 66247,
+      "sha256": "b7ca987a7a22d65e78fc067b3f3d8f78371936a23c56f70810d42356fee6152e"
+    },
+    {
       "file": "shark-sim.html",
       "bytes": 66188,
       "sha256": "b0ba324cdd355f98ba082027e033ccc2b5f829c14c530c1fc5e882bf782ddb22"
@@ -7272,6 +7277,11 @@
       "sha256": "6dd2e9e9da040878f31bf74969a9c1da23bcf3e866b43281e480556c0df2007e"
     },
     {
+      "file": "thumbs/the-isles.jpg",
+      "bytes": 66006,
+      "sha256": "9eaf18632f32d8ef30d702964c0f4c72a26ee0986d544c973ce4c487745c992b"
+    },
+    {
       "file": "thumbs/shark-sim.jpg",
       "bytes": 50874,
       "sha256": "d3e8e786353f3f8740a2f5fa6c3073cb33934602f41d174f32022e96e6356085"
@@ -7313,8 +7323,8 @@
     },
     {
       "file": "index.html",
-      "bytes": 3854,
-      "sha256": "eefc91f32faafe5d8eb1996cbe86b55704bf74a1ad59421459adcc2e1fed9490"
+      "bytes": 4068,
+      "sha256": "5466ceba5c28714864c1e99b1aa890b0db623b67699c0b01e28bd5f86414433c"
     },
     {
       "file": ".nojekyll",

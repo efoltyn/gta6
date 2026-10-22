@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>The Isles</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111923'/%3E%3Cpath d='M12 48V28h12v20zm16 0V12h24v36z' fill='%23ffd451'/%3E%3C/svg%3E">
+
+<link rel="stylesheet" href="css/fonts.css">
+
+
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/hud.css?v=feel1020">
+<link rel="stylesheet" href="css/survival_hud.css?v=pace1015">
+<link rel="stylesheet" href="css/screens.css?v=isles1022">
+<link rel="stylesheet" href="css/shark_title.css?v=nored0930">
+<link rel="stylesheet" href="css/mobile.css?v=mob1022b">
+<link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
+<link rel="stylesheet" href="css/city.css?v=lpanel1022">
+<link rel="stylesheet" href="css/campaign.css?v=cmd1022o">
+<link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
+<link rel="stylesheet" href="css/title_hub.css?v=islesave1022">
+<meta name="description" content="Five islands kilometres apart on one sea: real shops, banks with vaults, police, hotels, night, and people who react to what they see. Fly or sail between them.">
+<script>window.CBZ=Object.assign(window.CBZ||{},{START_MODE:"archipelago"});</script>
+</head>
+<body class="campaign-build">
+<script>
+/* FIRST PAINT IS THE RIGHT GAME. The #title markup below holds every game's
+   card, and with no body.mode-* class the CSS shows the PRISON's (Cell Block
+   Z is the unclassed default). state.js applies the mode class, but it is
+   script ~210 of ~710: on a 36 MB page the prison card painted for seconds
+   before Gang Life (or Disaster, Gun Game, Shark) replaced it, every load.
+   So the boot mode is resolved HERE, before any title markup parses, and the
+   same body classes state.js's setMode toggles go on now; setMode later
+   re-applies them, so there is still one set of classes and one owner.
+   The resolution mirrors src/config.js exactly (?mode= beats a page's
+   START_MODE, then the menu's remembered game); keep the two in step.
+   Shark pages also get html.boot-sharksim + the ocean boot screen
+   (css/shark_title.css; modes/shark_title.js takes it down): CrazyGames
+   rejected the build for "a quick shot of another game at the start". */
+(function(){try{var C=window.CBZ||{},m=null;
+try{m=new URLSearchParams(location.search).get("mode");}catch(e){}
+if(!m)m=C.START_MODE;
+if(!m){try{m=localStorage.getItem("cbz.hub.last");}catch(e){}}
+var cls={city:["mode-city"],survival:["mode-survival"],gungame:["mode-gungame"],sharksim:["mode-survival","mode-sharksim"],archipelago:["mode-survival","mode-archipelago"],escape:[]}[m];
+if(!cls)return;
+for(var i=0;i<cls.length;i++)document.body.classList.add(cls[i]);
+if(m==="sharksim"){document.documentElement.classList.add("boot-sharksim");
+var b=document.createElement("div");b.id="sharkBoot";b.innerHTML='<div class="sb-mark">SHARK SIM</div><div class="sb-bar"><i></i></div>';
+document.body.appendChild(b);}}catch(e){}})();
+</script>
+<div id="game"></div>
+
+
+<div id="hud">
+  <div id="objective" class="panel"><span class="tag">Objective</span><div id="objText">Escape your cell and find the keycard.</div></div>
+  <div id="topright">
+    
+    <div id="survTop" class="pill panel"><b id="aliveCount">100</b><svg class="aliveIc" viewBox="0 0 24 24" role="img" aria-label="survivors alive"><circle cx="9" cy="7.1" r="3.4"/><path d="M2.5 20.5c0-3.7 2.9-6.3 6.5-6.3s6.5 2.6 6.5 6.3z"/><circle cx="17.6" cy="8.6" r="2.5" opacity=".7"/><path d="M16.1 13.3c3.2-.6 6 1.8 6 5.2h-4.4c0-1.9-.6-3.7-1.6-5.2z" opacity=".7"/></svg></div>
+    <div id="timer" class="pill panel">00:00</div>
+    <div id="cigs" class="pill panel"><span class="ic"></span><span id="cigText">0</span></div>
+  </div>
+
+  <div id="hint" class="panel"></div>
+
+  
+  <div id="interact" class="panel">
+    <div id="interactName">INMATE</div>
+    <div id="interactNote">Rep ♥ 0</div>
+    <div id="interactOpts"></div>
+  </div>
+
+  <div id="detectWrap" class="panel">
+    <div class="lab"><span>Wanted</span><span id="detectState">Clear</span></div>
+    <div id="detectBarBg"><div id="detectBar"></div></div>
+  </div>
+
+  <div id="compass" class="panel"><div id="compassArrow">▲</div><span id="compassDist">--</span></div>
+
+  <canvas id="minimap" class="panel" width="112" height="168"></canvas>
+  <div id="simHud" class="panel"></div>
+
+  
+  <div id="survBars">
+    <div class="sbar"><span class="slab">HEALTH</span><div class="sbarbg"><div id="hpBar"></div></div></div>
+    <div class="sbar"><span class="slab">STAMINA</span><div class="sbarbg"><div id="stamBar"></div></div></div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="hitfx"></div>
+  <div id="crosshair"></div>
+  <div id="ammo"></div>
+  <div id="weaponStrip" class="panel"></div>
+</div>
+<div id="flash"></div>
+<div id="survFlash"></div>
+<div id="fade"></div>
+
+
+
+<div id="fullMap" aria-hidden="true">
+  <div class="fullmap-shell panel">
+    <div class="fullmap-head">
+      <div><b id="fullMapTitle">AREA MAP</b><span id="fullMapPlaceHint">Click or right-click to place a waypoint</span></div>
+      <button id="fullMapClose" type="button" aria-label="Close map">Close [M]</button>
+    </div>
+    <canvas id="fullMapCanvas" width="960" height="620"></canvas>
+    
+    <div id="fullMapZoom">
+      <button id="fullMapZoomIn" type="button" aria-label="Zoom in">+</button>
+      <button id="fullMapZoomOut" type="button" aria-label="Zoom out">−</button>
+    </div>
+    <div id="fullMapLegend" class="fullmap-legend"></div>
+    
+    <div class="fullmap-foot"><span id="fullMapReadout">No waypoint set</span><div class="fullmap-actions"><button id="fullMapLaunch" type="button" class="fullmap-launch" hidden>Launch Patriot</button><button id="fullMapClear" type="button" class="fullmap-clear">[Space] clear waypoint</button></div></div>
+  </div>
+</div>
+<div id="waypointGuide" class="panel">
+  <span id="waypointArrow">▲</span><span id="waypointDist">--</span><span id="waypointLabel">Waypoint</span><span class="waypoint-mapkey">[M] map</span>
+</div>
+
+
+<div id="title" class="screen">
+  <div class="card-box">
+    <div class="hub-hero">
+    
+    <div class="mode-escape-only">
+      <div class="hub-kicker">Prison Escape</div>
+      <div class="logo">CELL BLOCK <span class="z">Z</span></div>
+      <div class="sub">Lay low, make friends, get out.</div>
+      <div id="roleSelect" class="role-select" aria-label="Choose role">
+        <button class="role-btn active" type="button" data-role="inmate">
+          <span>Inmate</span><small>Escape the block</small>
+        </button>
+        <button class="role-btn" type="button" data-role="cop">
+          <span>Cop</span><small>Patrol with gear</small>
+        </button>
+      </div>
+      
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys keys-touch">
+          <div class="row"><span class="keycol"><span class="tcap">Left stick</span></span><span class="lab">Move, rim to sprint, press to sneak</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Fire</span></span><span class="lab">Punch or fire</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Jump</span></span><span class="lab">Jump, vault</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Reload</span></span><span class="lab">Reload</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Word pills</span></span><span class="lab">Interact, the pill names the action</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Minimap</span></span><span class="lab">Tap it for the map</span></div>
+          <div class="row"><span class="keycol"><span class="tcap">Ranks</span></span><span class="lab">Yard rankings</span></div>
+        </div>
+        <div class="keys keys-kbd">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Ctrl / C</span></span><span class="lab">Sneak</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Interact</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">F</span> / <span class="kbd">R</span></span><span class="lab">Fire, reload</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">Rankings</span></div>
+        </div>
+      </details>
+    </div>
+
+    
+    <div class="mode-survival-only">
+      <div class="hub-kicker">100 players, one island</div>
+      <div class="logo">DISASTER <span class="z">SURVIVAL</span></div>
+      <div class="sub">Tsunamis, volcanoes, quakes. Last one alive wins.</div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch, throw</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Grab / drop</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">Climb high</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
+        </div>
+      </details>
+    </div>
+
+    
+    <div class="mode-sharksim-only">
+      <div class="hub-kicker">You are the shark</div>
+      <div class="logo">SHARK <span class="z">SIM</span></div>
+      <div class="sub">Eat. Grow. Become the megalodon.</div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Swim</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Lunge</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Space</span> <span class="kbd">C</span></span><span class="lab">Rise, dive</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Mouth</span></span><span class="lab">Bite is automatic. Point it at food</span></div>
+        </div>
+      </details>
+    </div>
+
+    
+    <div class="mode-archipelago-only">
+      <div class="hub-kicker">Five islands, one sea</div>
+      <div class="logo">THE <span class="z">ISLES</span></div>
+      <div class="sub">Take the jet. Take the boat.</div>
+    </div>
+
+    
+    <div class="mode-gungame-only">
+      <div class="hub-kicker">Weapon-ladder deathmatch</div>
+      <div class="logo">GUN <span class="z">GAME</span></div>
+      <div class="sub">Every kill climbs the ladder. The last rung is bare fists.</div>
+      <div class="gg-map-label">Choose your map</div>
+      <div id="gungameMapSelect" class="gg-map-select" aria-label="Choose map"></div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Shift</span></span><span class="lab">Sprint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Fire, punch</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">R-Click</span></span><span class="lab">Aim</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">R</span></span><span class="lab">Reload</span></div>
+        </div>
+      </details>
+    </div>
+
+    
+    <div class="mode-city-only">
+      <div class="hub-kicker">Open-world crime</div>
+      <div class="logo">GANG <span class="z">LIFE</span></div>
+      <div class="sub">Make money any way you can. Cops escalate to five stars.</div>
+      
+      <div class="origin-label">Choose your story</div>
+      <div id="originSelect" class="origin-select" aria-label="Choose your story">
+        <button class="origin-btn origin-btn-contract" type="button" data-origin="contract"><b>The Hitman</b></button>
+        <button class="origin-btn active" type="button" data-origin="exec"><b>The Executive</b></button>
+        <button class="origin-btn" type="button" data-origin="pilot"><b>The Pilot</b></button>
+        <button class="origin-btn" type="button" data-origin="racer"><b>The Racer</b></button>
+        <button class="origin-btn" type="button" data-origin="captain"><b>The Captain</b></button>
+        <button class="origin-btn" type="button" data-origin="president"><b>The President</b></button>
+        <button class="origin-btn" type="button" data-origin="hustler"><b>The Hustler</b></button>
+        <button class="origin-btn" type="button" data-origin="debtor"><b>The Debtor</b></button>
+        <button class="origin-btn" type="button" data-origin="wick"><b>The Marked</b></button>
+        <button class="origin-btn" type="button" data-origin="barfly"><b>The Barfly</b></button>
+        <button class="origin-btn" type="button" data-origin="tenant"><b>The Tenant</b></button>
+        <button class="origin-btn origin-btn-roll" type="button" data-origin="random"><b>Roll The Dice</b><span id="originRollLine"></span></button>
+      </div>
+      
+      <div id="originPlaneWrap" class="origin-plane-wrap" style="display:none">
+        <div class="origin-label origin-sublabel">Choose your aircraft</div>
+        <div id="originPlaneSelect" class="origin-plane-select" aria-label="Choose your aircraft"></div>
+      </div>
+      <div id="originBoatWrap" class="origin-plane-wrap" style="display:none">
+        <div class="origin-label origin-sublabel">Choose your boat</div>
+        <div id="originBoatSelect" class="origin-plane-select" aria-label="Choose your boat"></div>
+      </div>
+      <details class="controls">
+        <summary>Controls</summary>
+        <div class="keys">
+          <div class="row"><span class="keycol"><span class="kbd">WASD</span></span><span class="lab">Move, drive</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Punch, fire</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">E</span></span><span class="lab">Yes, take the offer</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">I</span></span><span class="lab">No, refuse</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">J</span></span><span class="lab">Punch, start a fight</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map, waypoint</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">City Power</span></div>
+          <div class="row"><span class="keycol"><span class="kbd">U</span></span><span class="lab">Switch character</span></div>
+        </div>
+        <div class="controls-note">Everything else is on the card in front of you. Walk up and it shows the buttons.</div>
+      </details>
+    </div>
+
+    <div class="smallnote mode-escape-only">Lay low and guards ignore you. Cause trouble and they hunt.</div>
+    <div class="smallnote mode-escape-only" id="bestStat"></div>
+    <div class="smallnote mode-survival-only">Reach high ground before the water does.</div>
+    </div>
+
+    
+    <div class="title-actions">
+    <div id="qualityPreset" class="quality-preset" aria-label="Choose graphics quality">
+      <div class="quality-preset-label">Graphics</div>
+      <div class="quality-select">
+        <button class="quality-btn" type="button" data-quality-preset="fast" aria-pressed="false"><span>Fast</span></button>
+        <button class="quality-btn active" type="button" data-quality-preset="medium" aria-pressed="true"><span>Medium</span></button>
+        <button class="quality-btn" type="button" data-quality-preset="best" aria-pressed="false"><span>Best</span></button>
+      </div>
+    </div>
+    <button class="btn" id="playBtn">Play</button>
+    <button class="new-life-btn mode-city-only" id="newLifeBtn" type="button">
+      <span>New Life</span>
+    </button>
+    </div>
+
+    
+    <div id="modeSelect" class="mode-select" hidden><button class="mode-btn active" type="button" data-mode="archipelago">The Isles</button></div>
+  </div>
+</div>
+
+
+<div id="pause" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="font-size:clamp(32px,6vw,46px)">PAUSED</div>
+    
+    <button class="btn" id="resumeBtn">Resume</button>
+    
+    <button class="btn btn-quiet" id="pauseMenuBtn" type="button">Main Menu</button>
+    <div class="smallnote">Esc resumes</div>
+  </div>
+</div>
+
+
+<div id="escFade" aria-hidden="true"></div>
+<div id="escEnd" class="screen hidden">
+  <div class="card-box">
+    <div class="end-line" id="escEndLine"></div>
+    <button class="btn" id="escEndAgain" type="button">Play Again</button>
+    <button class="btn btn-quiet" id="escEndMenu" type="button">Main Menu</button>
+  </div>
+</div>
+
+
+<div id="survwin" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="color:var(--green);text-shadow:0 4px 0 var(--green-d),0 6px 0 var(--green-d)">VICTORY ROYALE</div>
+    <div class="sub" style="color:#3c7a52">Last one standing</div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="swPlace">#1</div><div class="l" id="swTotal">of 100</div></div>
+      <div class="stat"><div class="v" id="swTime">--</div><div class="l">Survived</div></div>
+      <div class="stat"><div class="v" id="swDis">0</div><div class="l">Disasters</div></div>
+    </div>
+    <button class="btn" id="survAgainBtn">Play Again</button>
+    <button class="btn btn-quiet" id="survMenuBtn" type="button">Main Menu</button>
+  </div>
+</div>
+
+
+<div id="survlose" class="screen hidden">
+  <div class="card-box">
+    <div class="logo" style="color:#ff5b5b;text-shadow:0 4px 0 #b11226,0 6px 0 #7c0c1a">ELIMINATED</div>
+    <div class="sub" style="color:#b06868">The disasters claimed you</div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="slPlace">#--</div><div class="l" id="slTotal">of 100</div></div>
+      <div class="stat"><div class="v" id="slTime">--</div><div class="l">Survived</div></div>
+      <div class="stat"><div class="v" id="slDis">0</div><div class="l">Disasters</div></div>
+    </div>
+    <button class="btn" id="loseAgainBtn">Try Again</button>
+    <button class="btn btn-quiet" id="loseMenuBtn" type="button">Main Menu</button>
+  </div>
+</div>
+
+
+<script src="src/vendor/three.r128.min.js?v=pf0930e"></script>
+
+<script src="src/core/instcull.js?v=treelod1012"></script>
+<script src="src/vendor/DRACOLoader.js"></script>
+<script src="src/vendor/GLTFLoader.js"></script>
+<script src="src/vendor/BufferGeometryUtils.js"></script>
+
+<script src="src/vendor/fflate.min.js"></script>
+<script src="src/vendor/3MFLoader.js"></script>
+<script src="src/vendor/RGBELoader.js"></script>
+
+<script src="src/vendor/noise.js"></script>
+
+<script src="src/world/layout.js?v=seawave1"></script>
+<script src="src/world/rockscliffs.js?v=rock2"></script>
+<script src="src/world/terrain.js?v=nodash1"></script>
+
+<script src="src/world/terrain_overhaul.js?v=wreal0929"></script>
+
+<script src="src/world/mountain_detail.js?v=sink1011"></script>
+
+<script src="src/world/alpine_skin.js?v=wreal0929"></script>
+
+
+
+
+<script src="src/config.js?v=venue1022"></script>
+
+<script src="src/core/texfree.js?v=looks1022b"></script>
+<script src="src/core/drawcheck.js?v=pf0930a"></script>
+<script src="src/core/bakecache.js?v=beach1020"></script>
+<script src="src/core/rectgrid.js?v=phonefit1"></script>
+<script src="src/core/slice.js?v=boot1014"></script>
+
+<script src="src/core/sight.js?v=farcopy1013"></script>
+
+<script src="src/core/lodlights.js?v=isleair1022"></script>
+
+<script src="src/core/citystream.js?v=merge1014c"></script>
+<script src="src/core/seed.js?v=w09290242x"></script>
+
+<script src="src/systems/modecaps.js?v=rpgblast1013"></script>
+
+<script src="src/systems/speech.js?v=nopitch1022"></script>
+
+<script src="src/systems/voice.js?v=trunk1022"></script>
+
+<script src="src/weapons/munitiontable.js?v=strike1013m"></script>
+<script src="src/systems/breach.js?v=strike1013m"></script>
+
+<script src="src/systems/airports.js?v=air1"></script>
+
+<script src="src/world/treeaudit.js?v=allmain1"></script>
+
+<script src="src/world/vegetation.js?v=peak1014c"></script>
+
+<script src="src/world/treelod.js?v=farcopy1013"></script>
+
+<script src="src/world/treefoot.js?v=sight1011"></script>
+<script src="src/world/forestlook.js?v=wreal0929"></script>
+<script src="src/core/prio.js?v=arch2"></script>
+<script src="src/core/lightpin.js?v=w09290242x"></script>
+<script src="src/core/matrixskip.js?v=mskip1"></script>
+
+
+
+
+<script src="src/core/scene.js?v=neutralhaze1"></script>
+<script src="src/core/prisonlazy.js?v=isleleak1022"></script>
+<script src="src/core/renderer.js?v=safeboot1014"></script>
+
+<script src="src/core/groundmask.js?v=norim1020"></script>
+
+<script src="src/systems/solidground.js?v=ric0929"></script>
+
+<script src="src/systems/stairs.js?v=sink1011"></script>
+
+<script src="src/systems/craters.js?v=norim1020"></script>
+
+<script src="src/systems/bunkerspace.js?v=bunker1"></script>
+
+<script src="src/systems/tunnels.js?v=tunnel1"></script>
+
+<script src="src/systems/digsite.js?v=dig1"></script>
+<script src="src/core/lights.js?v=flicker1009b"></script>
+<script src="src/core/sky.js?v=night1022"></script>
+<script src="src/core/daynight.js?v=night1022"></script>
+
+
+
+<script src="src/world/textures_surface.js?v=peak1014"></script>
+<script src="src/world/materials.js?v=nostep1013"></script>
+<script src="src/world/fuel_station.js?v=stutter1022"></script>
+<script src="src/world/prisonkit.js?v=tow929b"></script>
+
+<script src="src/world/ladderkit.js?v=lad1"></script>
+<script src="src/world/corridorkit.js?v=isleleak1022"></script>
+
+<script src="src/world/textures_masonry.js?v=masonry1"></script>
+
+<script src="src/core/mission.js?v=markphoto1"></script>
+
+<script src="src/city/furniture.js?v=loose1013"></script>
+
+<script src="src/city/newsroom.js?v=tvanchor1020"></script>
+
+<script src="src/city/newsstudio.js?v=tvanchor1020"></script>
+
+<script src="src/systems/pushables.js?v=loose1013"></script>
+<script src="src/world/carfx.js?v=speed1014"></script>
+<script src="src/world/ground.js?v=dsl3"></script>
+<script src="src/world/cellblock.js?v=cmd1022o"></script>
+<script src="src/world/yard.js?v=tow929"></script>
+<script src="src/world/razorwire.js?v=dsl3"></script>
+<script src="src/world/towers.js?v=tow929"></script>
+
+<script src="src/world/clutter.js?v=dsl3"></script>
+<script src="src/world/door.js?v=jdeb1001"></script>
+<script src="src/world/exit.js?v=doors929"></script>
+
+
+
+
+<script src="src/systems/proptypes.js?v=arch2"></script>
+
+
+  
+  <script src="src/systems/fphands.js?v=peak1014"></script>
+  
+  <script src="src/entities/tattoo.js?v=looks1022b"></script>
+  
+  <script src="src/entities/footwear.js?v=feet1"></script>
+  <script src="src/entities/character.js?v=looks1022b"></script>
+  <script src="src/entities/headwear.js?v=armourm1011"></script>
+  
+  <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
+  
+  <script src="src/entities/eyewear.js?v=armourm1011"></script>
+  
+  <script src="src/entities/watch.js?v=protestcpu1022"></script>
+  
+  <script src="src/systems/bodymass.js?v=physicsm1011"></script>
+
+<script src="src/entities/moves.js?v=jailai1020"></script>
+
+<script src="src/entities/gait.js?v=butt1022"></script>
+
+<script src="src/systems/bodydoors.js?v=sink1014"></script>
+<script src="src/entities/poses.js?v=looks1022b"></script>
+
+
+<script src="src/warlord/camo.js?v=armourm1011"></script>
+<script src="src/systems/armour.js?v=armourm1011"></script>
+<script src="src/entities/combatkit.js?v=kitfix1013"></script>
+<script src="src/entities/soldier.js?v=drone1012"></script>
+
+<script src="src/entities/crowdgpu.js?v=protestcpu1022"></script>
+
+<script src="src/entities/crowdstore.js?v=looks1022b"></script>
+
+
+<script src="src/entities/handcuffs.js?v=mc5ae55"></script>
+<script src="src/systems/verbs.js?v=bodymove1022"></script>
+
+<script src="src/systems/arrest.js?v=people1022"></script>
+
+<script src="src/systems/cuffedplayer.js?v=butt1022"></script>
+<script src="src/entities/verbposes.js?v=butt1022"></script>
+<script src="src/entities/meleeposes.js?v=melee1011"></script>
+<script src="src/systems/verbs_strike.js?v=bodymove1022"></script>
+<script src="src/systems/melee.js?v=butt1022"></script>
+<script src="src/systems/bodyfall.js?v=bodymove1022"></script>
+
+<script src="src/systems/leave.js?v=leave1014"></script>
+
+
+<script src="src/systems/eyes.js?v=rounds1013"></script>
+<script src="src/systems/vitals.js?v=landblood1022"></script>
+<script src="src/systems/verbs_pickup.js?v=w09290250"></script>
+<script src="src/entities/player.js?v=pf0930c"></script>
+<script src="src/entities/coins.js"></script>
+
+
+<script src="src/systems/brain.js?v=nopitch1022"></script>
+
+<script src="src/systems/command.js?v=cmd1022o"></script>
+<script src="src/entities/security.js?v=jas1020"></script>
+
+
+<script src="src/systems/audio.js?v=silt1020"></script>
+<script src="src/systems/hud.js?v=nored0930"></script>
+<script src="src/systems/economy.js?v=venue1022"></script>
+
+
+<script src="src/weapons/weapon-data.js?v=slotkey1013"></script>
+<script src="src/weapons/ballistics.js?v=strike1013m"></script>
+<script src="src/weapons/weapon-scale.js?v=w09290250"></script>
+<script src="src/weapons/optics.js?v=anchor1"></script>
+<script src="src/weapons/appearances/sidearm.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/shotgun.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/carbine.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/smg.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/taser.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/bazooka.js?v=mc9fb2f"></script>
+<script src="src/weapons/appearances/glauncher.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/grenade.js?v=anchor1"></script>
+<script src="src/weapons/appearances/c4.js?v=mil0929"></script>
+
+<script src="src/weapons/munitions.js?v=rounds1013m"></script>
+<script src="src/weapons/appearances/ak47.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/revolver.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/deagle.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/uzi.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/sniper.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/lmg.js?v=mce86a5"></script>
+<script src="src/weapons/appearances/shank.js?v=anchor1"></script>
+
+<script src="src/weapons/flashlight.js?v=anchor1"></script>
+<script src="src/systems/actorweapons.js?v=hmove1011"></script>
+<script src="src/city/weapon_thumbnails.js?v=duty1"></script>
+<script src="src/systems/holsterprops.js?v=bodyfix1009b"></script>
+
+<script src="src/systems/gunhands.js?v=mce86a5"></script>
+<script src="src/systems/prisondrops.js?v=m489457"></script>
+
+
+<script src="src/world/roombuild.js"></script>
+<script src="src/world/cafeteria.js?v=jas1020"></script>
+<script src="src/world/lounge.js?v=jas1020"></script>
+
+<script src="src/world/armorykit.js?v=jas1020"></script>
+<script src="src/world/gunroom.js?v=jas1020"></script>
+<script src="src/world/ventilation.js?v=m489457"></script>
+<script src="src/world/escape_routes.js?v=tow929"></script>
+<script src="src/world/southblock.js?v=door929"></script>
+
+<script src="src/world/roofs.js?v=dsl3"></script>
+
+
+<script src="src/entities/vision.js"></script>
+<script src="src/entities/guards.js?v=nopitch1022"></script>
+<script src="src/entities/searchlight.js?v=tow929"></script>
+<script src="src/entities/keycard.js?v=jas1020"></script>
+
+<script src="src/entities/npclife.js?v=w09290250y"></script>
+
+<script src="src/entities/heritage.js?v=w09290250"></script>
+
+<script src="src/systems/prisoncars.js?v=nopitch1022"></script>
+<script src="src/entities/npc.js?v=nopitch1022"></script>
+<script src="src/entities/ai.js?v=cmd1022o"></script>
+
+<script src="src/world/adminwing.js?v=nopitch1022"></script>
+
+
+<script src="src/world/prisonwings.js?v=jdeb1001"></script>
+<script src="src/world/prisongrounds.js?v=tow929"></script>
+<script src="src/world/corridors.js?v=door929"></script>
+
+
+<script src="src/systems/dayplan.js?v=w09290219"></script>
+<script src="src/systems/fixtures.js?v=w09290204"></script>
+<script src="src/systems/rest.js?v=eng1"></script>
+
+
+<script src="src/systems/prisonschedule.js?v=door929"></script>
+<script src="src/systems/prisonnight.js?v=w09290204"></script>
+
+<script src="src/systems/playerflashlight.js?v=night1022"></script>
+<script src="src/world/prisonlook.js?v=look1"></script>
+
+<script src="src/systems/prisonrest.js?v=nopitch1022"></script>
+
+
+<script src="src/systems/prisontiers.js?v=nopitch1022"></script>
+
+
+<script src="src/systems/quests.js?v=nopitch1022"></script>
+<script src="src/systems/prisonvoice.js?v=voice1022"></script>
+<script src="src/systems/input.js?v=haskbd1014"></script>
+<script src="src/systems/spatialgrid.js?v=pf0930v"></script>
+<script src="src/systems/reality.js?v=support1"></script>
+<script src="src/systems/npcgrid.js?v=scale2"></script>
+<script src="src/systems/camera.js?v=hands1022"></script>
+<script src="src/systems/physics.js?v=bodymove1022"></script>
+<script src="src/systems/meshcollider.js?v=meshcol1"></script>
+
+<script src="src/systems/bodymove.js?v=bodymove1022"></script>
+
+<script src="src/systems/climb.js?v=speedway1009"></script>
+
+<script src="src/entities/towerwatch.js?v=nopitch1022"></script>
+
+<script src="src/systems/platforms_moving.js?v=pres0929b"></script>
+<script src="src/systems/actorcollide.js?v=bodymove1022"></script>
+
+<script src="src/systems/prisoncorpse.js?v=fallreal1"></script>
+<script src="src/entities/ambientstate.js?v=contact1"></script>
+<script src="src/entities/crowd.js?v=voice1022"></script>
+<script src="src/systems/simulation.js?v=scale8"></script>
+<script src="src/systems/detection.js?v=nopitch1022"></script>
+<script src="src/systems/aitactics.js?v=tac1"></script>
+
+<script src="src/systems/combat_iq.js?v=jailai1020"></script>
+
+<script src="src/systems/taserfx.js?v=jailai1020"></script>
+
+<script src="src/systems/prisonshanks.js?v=armed1"></script>
+<script src="src/systems/prisonlaw.js?v=law1"></script>
+<script src="src/systems/capture.js?v=mnopitcbodymo"></script>
+
+<script src="src/systems/brain_prison.js?v=mnopitcbodymo"></script>
+<script src="src/systems/markers.js?v=nopitch1022"></script>
+<script src="src/systems/music.js?v=samples1"></script>
+<script src="src/systems/reinforcements.js?v=leave1014"></script>
+<script src="src/systems/lockdown.js?v=nopitch1022"></script>
+
+<script src="src/systems/prisonwarden.js?v=cmd1022o"></script>
+
+<script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
+<script src="src/systems/difficulty.js?v=sharkmode1"></script>
+<script src="src/systems/reactions.js?v=looks1022b"></script>
+<script src="src/systems/facial.js?v=tvanchor1020"></script>
+<script src="src/systems/ambient.js"></script>
+<script src="src/systems/weather.js?v=pace1015"></script>
+<script src="src/systems/compass.js"></script>
+<script src="src/systems/combat.js?v=mvoice1butt10"></script>
+<script src="src/systems/killstreaks.js?v=jailv1001"></script>
+<script src="src/systems/interact.js?v=cmd1022o"></script>
+
+<script src="src/systems/prisontrade.js?v=nopitch1022"></script>
+
+<script src="src/systems/prisonfriends.js?v=nopitch1022"></script>
+
+<script src="src/systems/liftpanel.js?v=lpanel1022"></script>
+<script src="src/systems/interactions.js?v=cmd1022p"></script>
+
+<script src="src/systems/prisondoorwatch.js?v=jailv1001"></script>
+
+<script src="src/systems/liftcore.js?v=lpanel1022"></script>
+<script src="src/systems/escapeplan.js?v=noranks1020"></script>
+
+<script src="src/city/itemassets.js?v=vit3"></script>
+
+<script src="src/city/itemicons.js?v=vit3"></script>
+<script src="src/systems/hotbar_model.js?v=goods1022"></script>
+<script src="src/systems/helditem_model.js?v=mil0929"></script>
+<script src="src/systems/inventory.js?v=goods1022"></script>
+
+<script src="src/systems/bootprogress.js?v=slice0929b"></script>
+<script src="src/systems/state.js?v=islesave1022"></script>
+
+<script src="src/systems/glcontext.js?v=safeboot1014"></script>
+
+<script src="src/systems/fixedstep.js?v=fixed1"></script>
+<script src="src/systems/save.js?v=end1"></script>
+
+<script src="src/systems/escapeend.js?v=end1"></script>
+<script src="src/systems/runstats.js?v=end1"></script>
+<script src="src/systems/touch.js?v=goods1022"></script>
+<script src="src/systems/touch_vehicle.js?v=deck1011"></script>
+
+
+<script src="src/systems/touch_layout.js?v=deck1011"></script>
+<script src="src/systems/seat_exit.js?v=deck1011"></script>
+
+<script src="src/systems/gamepad.js?v=cmd1022p"></script>
+<script src="src/systems/fpsmode.js?v=mpeoplegoods1"></script>
+<script src="src/systems/gunfx.js?v=rounds1013m"></script>
+<script src="src/systems/intimidate.js?v=voice1022"></script>
+
+
+<script src="src/systems/fx.js?v=island1014"></script>
+<script src="src/systems/debris.js?v=treewater1020"></script>
+
+<script src="src/systems/lightningfx.js?v=bolt1"></script>
+
+<script src="src/world/island_roads.js?v=misleopstutte"></script>
+<script src="src/world/island_plan.js?v=isleopen1022"></script>
+<script src="src/world/island_building.js?v=mrg10200048"></script>
+<script src="src/world/instance_proxy.js?v=mrg10200048"></script>
+<script src="src/world/disaster_arena.js?v=stutter1022"></script>
+<script src="src/world/island_dressing.js?v=misleopstutte"></script>
+
+<script src="src/world/island_venue.js?v=misleopstutte"></script>
+<script src="src/world/island_night.js?v=lampglow1022"></script>
+<script src="src/systems/grapple.js?v=bodymove1022"></script>
+<script src="src/entities/survivorbot.js?v=people1022"></script>
+<script src="src/modes/survival.js?v=night1022"></script>
+
+<script src="src/systems/disasterhurt.js?v=feel1020"></script>
+<script src="src/modes/shark_sim.js?v=nored0930"></script>
+
+<script src="src/modes/shark_title.js?v=uicut1"></script>
+<script src="src/systems/title_hub.js?v=spec1014"></script>
+
+<script src="src/modes/gungame.js?v=hands1022"></script>
+
+<script src="src/world/groundshaft.js?v=norim1020"></script>
+
+<script src="src/world/sinkhole.js?v=norim1020"></script>
+
+<script src="src/world/volcanofx.js?v=plume1020"></script>
+
+<script src="src/world/eruption.js?v=vlook1019"></script>
+
+<script src="src/systems/quake.js?v=seis1014"></script>
+
+
+
+
+
+
+<script src="src/systems/flashflood.js?v=tsudir1020"></script>
+
+<script src="src/systems/hurricane.js?v=feel1020"></script>
+
+<script src="src/systems/wildfire.js?v=realcars1020"></script>
+
+
+
+<script src="src/systems/blizzard.js?v=pace1015"></script>
+
+<script src="src/systems/meteor.js?v=norim1020"></script>
+
+
+
+<script src="src/systems/disasters.js?v=bodymove1022"></script>
+
+<script src="src/systems/handverbs.js?v=hands1022"></script>
+<script src="src/systems/survival_interact.js?v=hands1022"></script>
+<script src="src/systems/survivalhud.js?v=pace1015"></script>
+
+<script src="src/systems/spectator.js?v=spec1014"></script>
+
+<script src="src/net/survnet.js?v=survnet1"></script>
+
+<script src="src/systems/gungamehud.js?v=deathcam1009"></script>
+
+
+
+<script src="src/world/water_spec.js?v=looks1022b"></script>
+
+<script src="src/world/tsunami_runup.js?v=tsudir1020"></script>
+
+<script src="src/world/tsunami_silt.js?v=silt1020"></script>
+
+<script src="src/world/tsunami_whitewater.js?v=ww1020"></script>
+<script src="src/world/tsunami_debris.js?v=tsuowns1020"></script>
+<script src="src/world/tsunami_flow.js?v=runup1014"></script>
+<script src="src/world/tsunami_scene.js?v=bore1020b"></script>
+
+<script src="src/city/streetkit.js?v=metro0929"></script>
+<script src="src/city/world.js?v=lodlight1012"></script>
+
+<script src="src/city/flags.js?v=btn1011m"></script>
+<script src="src/city/interior_programs.js?v=leave1014"></script>
+
+<script src="src/city/keys.js?v=cd0929"></script>
+
+<script src="src/city/buildings_civic.js?v=flagm1001"></script>
+
+<script src="src/city/facade_openings.js?v=stutter1022"></script>
+<script src="src/city/buildings.js?v=isleclose1022"></script>
+
+<script src="src/city/facade_kit.js?v=stutter1022"></script>
+<script src="src/city/facades/brick.js?v=mrg10200048"></script>
+<script src="src/city/facades/stone.js?v=mrg10200048"></script>
+<script src="src/city/facades/mosque.js?v=mrg10200048"></script>
+<script src="src/city/facades/artdeco.js?v=mrg10200048"></script>
+<script src="src/city/facades/brutalist.js?v=mrg10200048"></script>
+<script src="src/city/facades/hightech.js?v=mrg10200048"></script>
+<script src="src/city/facades/pagoda.js?v=mrg10200048"></script>
+<script src="src/city/facades/gothic.js?v=mrg10200048"></script>
+<script src="src/city/facades/adobe.js?v=mrg10200048"></script>
+<script src="src/city/facades/victorian.js?v=mrg10200048"></script>
+<script src="src/city/facades/house_parts.js?v=mrg10200048"></script>
+
+<script src="src/city/facades/intl.js?v=faccom1020"></script>
+<script src="src/city/facades/ziggurat.js?v=faccom1020"></script>
+<script src="src/city/facades/sunburst.js?v=faccom1020"></script>
+<script src="src/city/facades/bundled.js?v=faccom1020"></script>
+<script src="src/city/facades/pyramid.js?v=faccom1020"></script>
+<script src="src/city/facades/faceted.js?v=faccom1020"></script>
+<script src="src/city/facades/pencil.js?v=faccom1020"></script>
+<script src="src/city/facades/postmodern.js?v=faccom1020"></script>
+<script src="src/city/facades/neogothic.js?v=faccom1020"></script>
+<script src="src/city/facades/megabrace.js?v=faccom1020"></script>
+
+<script src="src/city/facades/greekrev.js?v=house1020b"></script>
+<script src="src/city/facades/romanvilla.js?v=house1020b"></script>
+<script src="src/city/facades/spanish.js?v=house1020b"></script>
+<script src="src/city/facades/manor.js?v=house1020b"></script>
+<script src="src/city/facades/queenanne.js?v=house1020b"></script>
+<script src="src/city/facades/plantation.js?v=house1020b"></script>
+<script src="src/city/facades/machiya.js?v=house1020b"></script>
+<script src="src/city/facades/desertmod.js?v=house1020b"></script>
+<script src="src/city/facades/techhouse.js?v=house1020b"></script>
+<script src="src/city/facades/ranch.js?v=house1020b"></script>
+<script src="src/city/facades/brickhouse.js?v=house1020b"></script>
+<script src="src/city/facade_demo.js?v=fk2"></script>
+
+<script src="src/city/house_yard.js?v=house1020b"></script>
+<script src="src/city/interiorlight.js?v=winhole1014"></script>
+<script src="src/city/citynav.js?v=people1022"></script>
+<script src="src/city/fracture.js?v=nukecost1013"></script>
+<script src="src/city/demolition.js?v=collapse1014b"></script>
+<script src="src/city/elevators.js?v=lpanel1022"></script>
+<script src="src/city/exec_office.js?v=stutter1022"></script>
+<script src="src/city/escalators.js?v=air0929r"></script>
+<script src="src/city/roofloot.js?v=cd0929"></script>
+<script src="src/city/beach.js?v=cardraws1020"></script>
+<script src="src/city/expansion.js?v=ground1001"></script>
+
+<script src="src/city/worldmap.js?v=farcopy1013"></script>
+
+<script src="src/city/waterfield.js?v=ffroute1014"></script>
+<script src="src/city/highways.js?v=peak1014c"></script>
+
+<script src="src/city/highwaynet.js?v=maplabels1009"></script>
+
+<script src="src/city/interchange.js?v=flick1"></script>
+
+<script src="src/city/assets.js?v=nodash1"></script>
+<script src="src/city/placement.js?v=peak1014"></script>
+<script src="src/city/official_assets.js?v=cars1"></script>
+
+<script src="src/systems/chunks.js?v=arch2"></script>
+<script src="src/systems/pieces.js?v=pres0929b"></script>
+
+<script src="src/systems/building.js?v=cpd1-st1"></script>
+
+<script src="src/systems/structdamage.js?v=cpd1"></script>
+
+<script src="src/systems/baseclaim.js?v=nodash1"></script>
+
+<script src="src/systems/buildmode.js?v=cpd1"></script>
+
+<script src="src/city/compoundkit.js?v=cd0929"></script>
+
+<script src="src/world/props.js?v=dsl3"></script>
+
+<script src="src/world/yardfurniture.js?v=dsl3"></script>
+
+<script src="src/city/settlements.js?v=pres0929b"></script>
+<script src="src/city/towngen.js?v=house1020b"></script>
+
+<script src="src/city/betslip.js?v=onebet1"></script>
+
+<script src="src/race/race_core.js?v=speedway1009"></script>
+<script src="src/race/race_track.js?v=mem1014"></script>
+<script src="src/race/race_venue.js?v=looks1022b"></script>
+<script src="src/race/race_physics.js?v=ric0929"></script>
+<script src="src/race/race_ai.js?v=speedway1009"></script>
+<script src="src/race/race_session.js?v=speedway1009"></script>
+<script src="src/race/race_car.js?v=mem1014"></script>
+<script src="src/city/island_speedway.js?v=leave1014"></script>
+<script src="src/city/speedway_race.js?v=farform1011m"></script>
+
+<script src="src/city/airframe_kit.js?v=af0929b"></script>
+<script src="src/city/airframes.js?v=af0929b"></script>
+<script src="src/city/island_airport.js?v=ijkl1022"></script>
+
+<script src="src/city/airport_kit.js?v=peak1014c"></script>
+<script src="src/city/airport_capeharbor.js?v=air0929r"></script>
+
+<script src="src/city/mil_air.js?v=army1013m"></script>
+
+<script src="src/world/basekit.js?v=lodlight1012"></script>
+
+<script src="src/city/army.js?v=rounds1013"></script>
+<script src="src/city/island_military.js?v=speed1014"></script>
+<script src="src/city/biome_desert.js?v=sink1011"></script>
+<script src="src/city/biome_forest.js?v=noblock1013"></script>
+<script src="src/city/biome_farmland.js?v=layout2b"></script>
+<script src="src/city/biome_snow.js?v=padtri1013"></script>
+<script src="src/city/snowboard.js?v=ric0929"></script>
+
+<script src="src/city/bunkers.js?v=fortb1009"></script>
+
+<script src="src/world/wildnature.js?v=treelod1012"></script>
+
+<script src="src/city/wildlife_rig.js?v=sharkfix3"></script>
+<script src="src/city/wildlife_species.js?v=attach1"></script>
+<script src="src/city/wildlife/forest_deer.js?v=attach1"></script>
+<script src="src/city/wildlife/bears.js?v=attach1"></script>
+<script src="src/city/wildlife/canines.js?v=dogs1009b"></script>
+<script src="src/city/wildlife/apes.js?v=beasts1"></script>
+<script src="src/city/wildlife/bigcats.js?v=attach1"></script>
+<script src="src/city/wildlife/megafauna.js?v=attach1"></script>
+<script src="src/city/wildlife/farm.js?v=attach1"></script>
+<script src="src/city/wildlife/snow_ungulates.js?v=attach1"></script>
+<script src="src/city/wildlife/small_game.js?v=attach1"></script>
+<script src="src/city/wildlife/snakes.js?v=wild1"></script>
+<script src="src/city/wildlife/aquatic.js?v=sweep0929"></script>
+
+<script src="src/city/wildlife_traits.js?v=indiv1"></script>
+<script src="src/city/wildlife.js?v=realpop1012"></script>
+<script src="src/city/wildlife_tame.js?v=ekey2"></script>
+
+<script src="src/units/kit/gait.js?v=cheetah1011m"></script>
+<script src="src/units/kit/quadrig.js?v=npcw1011"></script>
+<script src="src/units/kit/loft.js?v=npcw1011"></script>
+<script src="src/city/dogmodel.js?v=npcw1011"></script>
+<script src="src/city/dogbrain.js?v=dogs1009b"></script>
+<script src="src/city/dogs.js?v=sight1011m"></script>
+
+
+<script src="src/systems/bite_angles.js?v=biteangles1"></script>
+<script src="src/city/creature_combat.js?v=sweep0929"></script>
+<script src="src/city/companions.js?v=allmain1"></script>
+
+<script src="src/city/arena_venue.js?v=mem1014"></script>
+<script src="src/city/arena_fights.js?v=nostep1013"></script>
+
+<script src="src/city/street_hardware.js?v=farform1011m"></script>
+<script src="src/city/props.js?v=lodlight1012"></script>
+
+<script src="src/city/propuse.js?v=night1022"></script>
+
+<script src="src/entities/moves_posture.js?v=jailai1020"></script>
+<script src="src/city/adboard.js?v=cd0929"></script>
+<script src="src/city/mode.js?v=hands1022"></script>
+<script src="src/city/economy.js?v=isleopen1022"></script>
+<script src="src/city/clothes.js?v=looks1022b"></script>
+<script src="src/city/outfits.js?v=islesave1022"></script>
+<script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
+<script src="src/city/hunger.js?v=stam1009"></script>
+
+<script src="src/city/law.js?v=cmd1022o"></script>
+<script src="src/city/wanted.js?v=mtrunk1trunk1"></script>
+<script src="src/city/identity.js?v=perm1"></script>
+<script src="src/city/worldstate.js?v=islesave1022"></script>
+
+<script src="src/city/factions.js?v=verbs2b"></script>
+<script src="src/city/gangs.js?v=rounds1013m"></script>
+<script src="src/city/social.js?v=voice1022"></script>
+<script src="src/city/realestate.js?v=tap0929"></script>
+<script src="src/city/view.js?v=trunk1022"></script>
+<script src="src/city/los.js?v=city4"></script>
+<script src="src/systems/casttraits.js?v=brainmoves1"></script>
+<script src="src/city/peds.js?v=cmd1022o"></script>
+
+<script src="src/city/brain_city.js?v=people1022"></script>
+
+<script src="src/city/ladder.js?v=cmd1022o"></script>
+<script src="src/entities/pedinstance.js?v=isleleak1022"></script>
+
+<script src="src/city/occupy.js?v=ladder1022"></script>
+
+<script src="src/city/childhood.js?v=pf0930c"></script>
+<script src="src/city/level.js?v=popup1009b"></script>
+
+<script src="src/city/read.js?v=voice1022"></script>
+<script src="src/city/sizeup.js?v=lvl1y"></script>
+<script src="src/city/bling.js?v=goods1022"></script>
+<script src="src/city/club.js?v=ladder1022"></script>
+
+<script src="src/city/streetlife.js?v=isleleak1022"></script>
+<script src="src/city/blobshadows.js?v=cars1"></script>
+
+<script src="src/city/carlamps.js?v=night1022"></script>
+<script src="src/city/medics.js?v=isleopen1022"></script>
+<script src="src/city/security.js?v=ladder1022"></script>
+<script src="src/city/vips.js?v=mladdervoice1"></script>
+<script src="src/city/police.js?v=cmd1022p"></script>
+<script src="src/city/aircraftphysics.js?v=planes1009b"></script>
+<script src="src/city/aircraft.js?v=rounds1013m"></script>
+<script src="src/city/traffic.js?v=isleclose1022"></script>
+<script src="src/city/carparts.js?v=mtrunk1trunk1"></script>
+<script src="src/city/carbody.js?v=mtrunk1trunk1"></script>
+<script src="src/city/carwheels.js?v=cars2"></script>
+
+<script src="src/city/carseats.js?v=trunk1022"></script>
+<script src="src/city/playercars.js?v=mtrunk1trunk1"></script>
+
+<script src="src/systems/volfx.js?v=mrg10200048"></script>
+<script src="src/city/crashfx.js?v=mrg10200048"></script>
+<script src="src/city/crashdeform.js?v=cardraws1020"></script>
+<script src="src/city/emergencykit.js?v=mtrunk1trunk1"></script>
+<script src="src/systems/skidmarks.js?v=skid1"></script>
+<script src="src/systems/dustfx.js?v=dust1"></script>
+<script src="src/city/cardyn.js?v=emg1019"></script>
+
+<script src="src/city/carlod.js?v=mrg10200048"></script>
+<script src="src/city/vehicles.js?v=mmisleotrunk1"></script>
+<script src="src/city/carinstances.js?v=cardraws1020"></script>
+<script src="src/city/playerair.js?v=phone1001"></script>
+<script src="src/city/playeraircraft.js?v=mlandblisles1"></script>
+
+<script src="src/city/cockpit_panel.js?v=cockpit1"></script>
+<script src="src/city/cockpit_shapes.js?v=cockpit1x0"></script>
+<script src="src/city/cockpit.js?v=af0929"></script>
+<script src="src/city/cockpit_view.js?v=nocine1011"></script>
+
+<script src="src/city/bailout.js?v=island1014"></script>
+
+<script src="src/city/aircraft_doors.js?v=island1014"></script>
+
+<script src="src/world/island_vehicles.js?v=islesold1022"></script>
+
+<script src="src/world/archipelago_map.js?v=isles1022"></script>
+<script src="src/world/archipelago.js?v=mislesastutte"></script>
+<script src="src/world/island_lodging.js?v=misleclstutte"></script>
+<script src="src/world/island_town.js?v=isleopen1022"></script>
+<script src="src/world/island_police.js?v=misleopstutte"></script>
+
+<script src="src/world/island_people.js?v=isleclose1022"></script>
+
+<script src="src/city/vehicle_hold.js?v=cd0929"></script>
+
+<script src="src/city/boarding.js?v=trunk1022"></script>
+
+<script src="src/city/pullout.js?v=po0930"></script>
+
+<script src="src/city/passengerseat.js?v=exit1"></script>
+
+<script src="src/city/airspace.js?v=promote1020"></script>
+
+<script src="src/city/airtraffic.js?v=planes1020"></script>
+
+<script src="src/systems/impactbus.js?v=strike1013m"></script>
+
+<script src="src/city/collapse.js?v=debris1015"></script>
+<script src="src/systems/strike.js?v=strike1013m"></script>
+<script src="src/city/structural.js?v=mrg10200048"></script>
+<script src="src/city/nukefx.js?v=mrg10200048"></script>
+
+<script src="src/systems/tornado.js?v=bodymove1022"></script>
+<script src="src/city/aircraftimpact.js?v=mrg10200048"></script>
+<script src="src/city/metro_promote.js?v=mrg10200048"></script>
+<script src="src/city/shops.js?v=isleclose1022"></script>
+
+<script src="src/city/shopfloor.js?v=misleopstutte"></script>
+<script src="src/city/gunstore.js?v=misleopstutte"></script>
+
+<script src="src/city/gunmods.js?v=isleopen1022"></script>
+
+<script src="src/systems/sights.js?v=hands1022"></script>
+
+<script src="src/systems/lockon.js?v=ads1"></script>
+<script src="src/city/jewelry.js?v=misleclstutte"></script>
+<script src="src/city/careers.js?v=dismiss1014"></script>
+<script src="src/city/activities.js?v=nored0930"></script>
+<script src="src/city/heists.js?v=ijkl1022"></script>
+
+<script src="src/city/verbword.js?v=btn1011"></script>
+<script src="src/city/interactions.js?v=cmd1022o"></script>
+
+<script src="src/city/verbwheel.js?v=goods1022"></script>
+
+<script src="src/city/fuel.js?v=layout2b"></script>
+
+
+<script src="src/systems/controls.js?v=feel1020"></script>
+<script src="src/city/roadrules.js?v=islelaw1022"></script>
+
+<script src="src/city/airside.js?v=air0929r"></script>
+
+<script src="src/systems/airline.js?v=planes1020"></script>
+<script src="src/city/ticketing.js?v=cd0929"></script>
+
+<script src="src/city/checkpoints.js?v=seawave1"></script>
+
+<script src="src/city/carcluster.js?v=speedunit1"></script>
+<script src="src/city/interact.js?v=people1022"></script>
+
+<script src="src/city/orders.js?v=cmd1022o"></script>
+
+<script src="src/city/roleverbs.js?v=vault1013"></script>
+<script src="src/city/restrain.js?v=protestcpu1022"></script>
+
+<script src="src/city/cartrunk.js?v=trunk1022"></script>
+<script src="src/city/custody.js?v=people1022"></script>
+<script src="src/city/combat.js?v=mpeoplegoods1"></script>
+
+<script src="src/systems/resources.js?v=ground1001"></script>
+<script src="src/city/explosives.js?v=mil0929"></script>
+<script src="src/systems/helditems.js?v=arms1009b"></script>
+<script src="src/city/armored.js?v=deslop1"></script>
+<script src="src/city/death.js?v=rpgblast1013"></script>
+<script src="src/city/camera.js?v=deathcam1009"></script>
+<script src="src/city/ragdoll.js?v=bodymove1022"></script>
+<script src="src/city/carstrike.js?v=protest1022"></script>
+<script src="src/city/leaderboard.js?v=rg0929"></script>
+<script src="src/city/zillow.js?v=fac1009"></script>
+
+<script src="src/city/bank.js?v=isledaylife1022"></script>
+<script src="src/city/pawnshop.js?v=misleopstutte"></script>
+<script src="src/city/clothingstore.js?v=isleopen1022"></script>
+
+<script src="src/city/storegoods.js?v=isleclose1022"></script>
+
+<script src="src/world/island_shops.js?v=misleclstutte"></script>
+
+<script src="src/city/islandmoney.js?v=mislesostutte"></script>
+
+<script src="src/world/island_fitkit.js?v=stutter1022"></script>
+<script src="src/world/island_lots.js?v=stutter1022"></script>
+<script src="src/world/island_dealers.js?v=misleopisleso"></script>
+<script src="src/world/island_civic.js?v=stutter1022"></script>
+<script src="src/world/island_homes.js?v=mislesostutte"></script>
+<script src="src/world/island_offices.js?v=stutter1022"></script>
+
+<script src="src/world/isles_save.js?v=islesold1022"></script>
+<script src="src/world/island_bar.js?v=isleclose1022"></script>
+<script src="src/world/island_emergency.js?v=isleclose1022"></script>
+
+<script src="src/city/fitout.js?v=merge1014c"></script>
+<script src="src/city/fitout_plans.js?v=loose1013"></script>
+<script src="src/city/fitout_work.js?v=loose1013"></script>
+<script src="src/city/fitout_gang.js?v=loose1013"></script>
+<script src="src/city/family.js?v=ekey2"></script>
+<script src="src/city/swim.js?v=silt1020"></script>
+
+<script src="src/city/tsunami.js?v=news0930"></script>
+<script src="src/city/empire.js?v=rounds1013m"></script>
+<script src="src/city/construction.js?v=news0930"></script>
+<script src="src/city/companies.js?v=fallstay1"></script>
+<script src="src/city/citystaff.js?v=leave1014"></script>
+<script src="src/city/playergang.js?v=cmd1022o"></script>
+<script src="src/city/promotion.js?v=rank1"></script>
+<script src="src/city/schedule.js?v=w09290219"></script>
+<script src="src/city/aigoals.js?v=dismiss1014"></script>
+<script src="src/city/officejobs.js?v=living1"></script>
+<script src="src/city/cityevents.js?v=street1009"></script>
+<script src="src/city/story.js?v=night1"></script>
+<script src="src/city/wealth.js?v=nodash1"></script>
+<script src="src/city/turf.js?v=news0930"></script>
+<script src="src/city/gangops.js?v=cd0929"></script>
+
+<script src="src/city/militaryvehicles.js?v=landblood1022"></script>
+
+<script src="src/city/strategic.js?v=mem1014"></script>
+<script src="src/city/squadai.js?v=sim1"></script>
+<script src="src/city/loyalty.js?v=cd0929"></script>
+
+<script src="src/city/wallet.js?v=sim2"></script>
+<script src="src/city/housing.js?v=winhole1014"></script>
+<script src="src/city/citytemplates.js?v=pres0929b"></script>
+<script src="src/city/minicities.js?v=farcopy1013"></script>
+
+
+<script src="src/city/zoning.js?v=base1012"></script>
+<script src="src/city/metroplan.js?v=reach1013"></script>
+
+<script src="src/city/countryside.js?v=fortb1009"></script>
+<script src="src/city/metro_fabric.js?v=promote1020"></script>
+
+<script src="src/world/grassfield.js?v=speed1014"></script>
+<script src="src/city/metro_ground.js?v=peak1014"></script>
+<script src="src/city/metro.js?v=mrg10200048"></script>
+<script src="src/city/metro_structs.js?v=wreal0929"></script>
+<script src="src/city/spawnplaces.js?v=sim2"></script>
+<script src="src/city/scenedirector.js?v=w09290218"></script>
+<script src="src/systems/custom_dialogue.js?v=ce1"></script>
+
+<script src="src/city/roles.js?v=dismiss1014"></script>
+
+<script src="src/city/dialogue.js?v=btn1011"></script>
+
+<script src="src/city/racket.js?v=verbs2b"></script>
+<script src="src/city/aim_dossier.js?v=popup1009b"></script>
+<script src="src/city/captives.js?v=trunk1022"></script>
+<script src="src/city/millionaires.js?v=ladder1022"></script>
+<script src="src/city/regionlife.js?v=street1009"></script>
+<script src="src/city/modshop.js?v=cd0929"></script>
+<script src="src/city/stuntjumps.js?v=metro0929"></script>
+<script src="src/city/storage.js?v=tap0929"></script>
+
+<script src="src/city/marina.js?v=fac1009"></script>
+<script src="src/city/boatyard.js?v=cd0929"></script>
+
+<script src="src/city/approach.js?v=house1020b"></script>
+
+<script src="src/city/cityground.js?v=looks1022b"></script>
+
+<script src="src/city/fishing.js?v=cd0929"></script>
+
+<script src="src/city/yachts.js?v=army1013m"></script>
+<script src="src/city/seacrew.js?v=yacht1"></script>
+<script src="src/city/armor.js?v=armourm1011"></script>
+
+<script src="src/systems/prisonoutfits.js?v=fit1"></script>
+
+<script src="src/city/pelts.js?v=nodash1"></script>
+
+<script src="src/city/gigs.js?v=w09290250y"></script>
+<script src="src/city/gigfleet.js?v=nodash1"></script>
+<script src="src/city/giglife.js?v=w09290250y"></script>
+<script src="src/city/hud.js?v=venue1022"></script>
+
+<script src="src/city/drinking.js?v=isleopen1022"></script>
+<script src="src/city/charpanel.js?v=shades1009b"></script>
+
+<script src="src/city/mugshot.js?v=w09290250"></script>
+
+<script src="src/city/inventory.js?v=money1022"></script>
+
+<script src="src/city/phone_apps.js?v=cmd1022p"></script>
+<script src="src/city/phone.js?v=phone2b"></script>
+<script src="src/city/killfeed.js?v=street1009"></script>
+
+<script src="src/city/morgue.js?v=isleopen1022"></script>
+
+<script src="src/city/origins.js?v=ladder1022"></script>
+
+
+<script src="src/city/hitman_paper.js?v=inworld1"></script>
+<script src="src/city/hitman_hands.js?v=hands1022"></script>
+<script src="src/city/hitman_room.js?v=mem1014"></script>
+<script src="src/city/hitman.js?v=w09290219"></script>
+<script src="src/city/dossier.js?v=inworld1"></script>
+<script src="src/city/hitman_fallout.js?v=w09290219"></script>
+<script src="src/city/agency.js?v=ijkl1022"></script>
+
+<script src="src/city/campaign_ui.js?v=cmd1022o"></script>
+<script src="src/city/campaign.js?v=camp1022b"></script>
+<script src="src/city/cinematics.js?v=cmd1022o"></script>
+<script src="src/systems/humancontact.js?v=bodymove1022"></script>
+
+<script src="src/systems/roadgraph.js?v=curb1013"></script>
+<script src="src/systems/convoy.js?v=curb1013"></script>
+<script src="src/systems/navigation.js?v=convoy1011"></script>
+
+<script src="src/systems/navgrid.js?v=ghost1020"></script>
+<script src="src/systems/prisonnav.js?v=nav2-st1"></script>
+
+<script src="src/city/pednav.js?v=nav2"></script>
+<script src="src/systems/fullmap.js?v=football1014"></script>
+
+
+
+<script src="src/systems/surfacedecal.js?v=carblood930"></script>
+<script src="src/systems/gore.js?v=landblood1022"></script>
+<script src="src/systems/wounds.js?v=holes1009b"></script>
+
+<script src="src/systems/trauma.js?v=landblood1022"></script>
+
+<script src="src/systems/predator.js?v=feel1020"></script>
+
+<script src="src/systems/predator_anim.js?v=allmain1"></script>
+
+<script src="src/systems/ape_combat.js?v=bal2m1012"></script>
+
+<script src="src/systems/quadruped_ragdoll.js?v=loose1"></script>
+
+<script src="src/city/wildlife_shark.js?v=sweep0929"></script>
+
+<script src="src/city/wildlife_orca.js?v=sharkfix3"></script>
+
+<script src="src/city/marine_predation.js?v=sweep0929"></script>
+
+<script src="src/city/marine_frenzy.js?v=sharkfix3"></script>
+
+<script src="src/systems/childsafe.js?v=street1009"></script>
+
+
+<script src="src/net/net.js?v=nodash1"></script>
+<script src="src/net/netpersist.js?v=w09290219"></script>
+<script src="src/net/netactors.js?v=mp2"></script>
+<script src="src/net/networld.js?v=vit3"></script>
+<script src="src/net/netvoice.js?v=nodash1"></script>
+<script src="src/net/netui.js?v=nodash1"></script>
+
+
+<script src="src/city/familytree.js?v=w09290219"></script>
+<script src="src/city/inheritance.js?v=famtree1"></script>
+<script src="src/city/births.js?v=w09290219"></script>
+<script src="src/city/familypanel.js?v=nodash1"></script>
+
+<script src="src/city/kinship.js?v=protestcpu1022"></script>
+
+<script src="src/city/tells.js?v=tells1"></script>
+
+
+<script src="src/systems/basesave.js?v=bld1"></script>
+
+
+
+<script src="src/sim/currency.js?v=cur1"></script>
+
+<script src="src/sim/forex.js?v=tap0929"></script>
+
+<script src="src/sim/centralbank.js?v=nodash1"></script>
+
+<script src="src/sim/inflation.js?v=w09290219"></script>
+
+<script src="src/sim/bonds.js?v=nodash1"></script>
+
+<script src="src/sim/hyperinflation.js?v=nodash1"></script>
+<script src="src/sim/market.js?v=w09290219"></script>
+<script src="src/sim/econstate.js?v=w09290219"></script>
+<script src="src/sim/npcecon.js?v=w09290219"></script>
+<script src="src/sim/corporations.js?v=w09290219"></script>
+<script src="src/sim/stocks.js?v=w09290219"></script>
+<script src="src/sim/billionaires.js?v=nodash1"></script>
+
+<script src="src/city/take.js?v=nodash1"></script>
+
+<script src="src/city/insurance.js?v=verbs2b"></script>
+<script src="src/sim/motorsport.js?v=nodash1"></script>
+
+
+<script src="src/city/polity.js?v=pres1012"></script>
+
+
+<script src="src/city/brain_protection.js?v=mladdervoice1"></script>
+<script src="src/city/protection.js?v=leave1014"></script>
+<script src="src/city/officials.js?v=leave1014"></script>
+<script src="src/city/approval.js?v=boot1013"></script>
+<script src="src/city/elections.js?v=address1008"></script>
+
+
+<script src="src/systems/hunger.js?v=polsim1008b"></script>
+
+<script src="src/city/villagekit.js?v=fac1009"></script>
+<script src="src/city/countries.js?v=farcopy1013"></script>
+
+<script src="src/city/casino.js?v=pf0930a"></script>
+
+<script src="src/city/river.js?v=wreal0929"></script>
+
+<script src="src/city/continent.js?v=beach1020"></script>
+<script src="src/city/demographics.js?v=world1"></script>
+
+<script src="src/city/relations.js?v=world1"></script>
+
+<script src="src/city/regimes.js?v=boot1013"></script>
+
+<script src="src/city/crown.js?v=nodash1"></script>
+
+<script src="src/city/militia.js?v=cd0929"></script>
+
+<script src="src/city/contracts.js?v=cd0929"></script>
+
+
+<script src="src/city/arsenal_data.js?v=strike1013m"></script>
+<script src="src/city/polwar.js?v=army1013m"></script>
+
+<script src="src/city/migration.js?v=nodash1"></script>
+
+<script src="src/city/civilwar.js?v=polsim1008b"></script>
+
+<script src="src/city/officialdom.js?v=cd0929"></script>
+<script src="src/city/candidacy.js?v=cd0929"></script>
+<script src="src/city/civic.js?v=nodash1"></script>
+<script src="src/city/statecraft.js?v=garfix1014"></script>
+
+
+<script src="src/city/power.js?v=leave1014"></script>
+
+<script src="src/city/garrison.js?v=ladder1022"></script>
+
+<script src="src/city/fortresponse.js?v=army1013m"></script>
+
+<script src="src/city/piracy.js?v=cmd1022o"></script>
+
+
+<script src="src/city/captain.js?v=cmd1022o"></script>
+
+<script src="src/city/boatwalk.js?v=cd0929"></script>
+
+
+<script src="src/city/govcomplex.js?v=leave1014"></script>
+
+
+<script src="src/city/presidency.js?v=cine1022"></script>
+<script src="src/city/politics.js?v=btn1011"></script>
+
+<script src="src/city/president_office.js?v=cine1022"></script>
+<script src="src/city/motorcade.js?v=mijkl10bodymo"></script>
+
+<script src="src/city/president_staff.js?v=leave1014"></script>
+
+<script src="src/city/warroom.js?v=football1014"></script>
+<script src="src/city/frontline.js?v=army1013m"></script>
+<script src="src/city/perimeter.js?v=protestcpu1022"></script>
+<script src="src/city/president_public.js?v=protestcpu1022"></script>
+
+<script src="src/city/dissent.js?v=army1013m"></script>
+<script src="src/city/coup.js?v=fatal1022"></script>
+<script src="src/city/president_regime.js?v=flagm1001"></script>
+
+<script src="src/city/mob.js?v=protestcpu1022"></script>
+
+<script src="src/city/fireorder.js?v=fire1022"></script>
+
+<script src="src/city/address.js?v=placard1013"></script>
+
+<script src="src/city/transfer.js?v=leave1014"></script>
+
+
+<script src="src/city/cashstore.js?v=deslop1"></script>
+
+<script src="src/city/propertyvault.js?v=deslop1"></script>
+
+<script src="src/city/plots.js?v=leave1014"></script>
+<script src="src/city/compoundcrew.js?v=leave1014"></script>
+
+
+<script src="src/net/sqlitedb.js?v=vault1013"></script>
+
+
+<script src="src/core/packages.js?v=peak1014c"></script>
+<script src="src/games/casino.js?v=onebet1"></script>
+<script src="src/games/ocean.js?v=nodash1"></script>
+
+<script src="src/games/boxing.js?v=onebet1"></script>
+<script src="src/games/airport.js?v=air0929r"></script>
+<script src="src/games/military.js?v=base1012"></script>
+<script src="src/games/government.js?v=peak1014c"></script>
+<script src="src/games/police.js?v=dogs1009b"></script>
+<script src="src/games/jail.js?v=nostep1013"></script>
+<script src="src/systems/newlife.js?v=islesave1022"></script>
+
+
+<script src="src/core/quality.js?v=safeboot1014"></script>
+
+
+
+<script src="src/world/hull_loft.js?v=loft1"></script>
+<script src="src/world/water_hulls.js?v=sharkscene1-st1"></script>
+<script src="src/world/water_helm.js?v=boats1"></script>
+
+
+<script src="src/world/water_underwater.js?v=silt1020"></script>
+<script src="src/world/water_buoyancy.js?v=isles1022"></script>
+
+<script src="src/world/water_stability.js?v=capsize1"></script>
+<script src="src/world/water_wake.js?v=water1011"></script>
+
+<script src="src/world/water_float.js?v=water1011"></script>
+
+<script src="src/world/sea_craft.js?v=sharkfix2"></script>
+<script src="src/world/sea_scene.js?v=sharkscene1"></script>
+<script src="src/world/water_impact.js?v=rounds1013m"></script>
+
+<script src="src/world/water_survival.js?v=isles1023"></script>
+
+
+<script src="src/world/detail_kit.js?v=detail1x"></script>
+<script src="src/world/utility_lines.js?v=detail1t"></script>
+<script src="src/world/street_furniture.js?v=deslop1"></script>
+<script src="src/world/world_grime.js?v=detail1"></script>
+<script src="src/world/building_dress.js?v=roof1-st1"></script>
+<script src="src/core/farcull.js?v=cardraws1020"></script>
+
+<script src="src/core/viewscope.js?v=merge1014c"></script>
+<script src="src/core/losgrid.js?v=nukecost1013"></script>
+<script src="src/core/staticfreeze.js?v=sf1"></script>
+<script src="src/systems/settings.js?v=nodash1"></script>
+<script src="src/core/batch.js?v=collapse1014b"></script>
+
+<script src="src/core/gfx.js?v=flicker1009b"></script>
+<script src="src/city/localinst.js?v=li2"></script>
+<script src="src/core/profile.js?v=street1009"></script>
+<script src="src/core/fxwarm.js?v=stutter1022"></script>
+<script src="src/city/cctv.js?v=w09290242x"></script>
+<script src="src/core/loop.js?v=front1001"></script>
+<script src="src/main.js?v=sharkmode1"></script>
+<a href="./" id="portalHome" style="position:fixed;left:12px;top:10px;z-index:2147483000;font:700 13px/1 Fredoka,Arial,sans-serif;letter-spacing:.08em;color:#fff;text-decoration:none;background:rgba(4,20,36,.55);padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.25)">◀ ALL GAMES</a>
+<style>body.state-playing #portalHome{display:none}</style>
+</body>
+</html>
