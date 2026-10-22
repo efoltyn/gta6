@@ -733,6 +733,12 @@
   function boreOf(rec, veh, from, out) {
     const R = veh && veh.rig;
     if (R && R.gunDirWorld) { try { const d = R.gunDirWorld(out); if (d && isFinite(d.x) && d.lengthSq() > 1e-6) return d.normalize(); } catch (e) {} }
+    // the barrel's own axis: every rig's muzzle rides its tube looking down it
+    // (+z), so this is the bore even where the gun sits off the turret's centre
+    // (the JLTV's CROWS mount: the trunnion-to-muzzle line ran 7 degrees wide)
+    if (R && R.muzzle && R.muzzle.isObject3D) {
+      try { R.muzzle.getWorldDirection(out); if (isFinite(out.x) && out.lengthSq() > 1e-6) return out.normalize(); } catch (e) {}
+    }
     const pivot = R && ((R.gun && R.gun.isObject3D && R.gun) || (R.turret && R.turret.isObject3D && R.turret));
     if (pivot) {
       pivot.getWorldPosition(_pv);
@@ -785,6 +791,44 @@
     if (CBZ.cityCrime) { try { CBZ.cityCrime(90, { x: rec.pos.x, z: rec.pos.z, type: "shots-fired" }); } catch (e) {} }
     return true;
   }
+  /* WHERE A ROUND MEETS THE GROUND. The ground under the round's far end is
+     not the ground it hits: on Gang City's flat streets the two agree, but on
+     an island the far end of a 1.5 km ray is the sea bed, so a burst laid on
+     the quay ten metres out struck 60 m under the sea a quarter of a
+     kilometre away. The ray is marched over the surface instead (steps as
+     long as the round's height above it, so a hill ahead is met too), then
+     the crossing is bisected; over water the surface is the sea's. */
+  const _gh = { t: 0, wet: false };
+  function surfaceAt(x, z, fromY) {
+    let y = floorY(x, z, fromY);
+    _gh.wet = false;
+    if (CBZ.waterSeaY && CBZ.cityWaterAt) {
+      try { const sy = +CBZ.waterSeaY(); if (sy > y && CBZ.cityWaterAt(x, z)) { y = sy; _gh.wet = true; } } catch (e) {}
+    }
+    return y;
+  }
+  function groundHit(wp, d, tMax) {
+    let t0 = 0, h0 = wp.y - surfaceAt(wp.x, wp.z, wp.y);
+    if (h0 < 0) return tMax;                         // a muzzle below its own floor: no ground test
+    for (let i = 0; i < 160 && t0 < tMax; i++) {
+      const t1 = Math.min(tMax, t0 + Math.max(0.6, Math.min(25, h0)));
+      const y1 = wp.y + d.y * t1;
+      const h1 = y1 - surfaceAt(wp.x + d.x * t1, wp.z + d.z * t1, y1 + 0.5);
+      if (h1 <= 0) {
+        let a = t0, b = t1;
+        for (let k = 0; k < 7; k++) {
+          const m = (a + b) / 2, ym = wp.y + d.y * m;
+          if (ym - surfaceAt(wp.x + d.x * m, wp.z + d.z * m, ym + 0.5) > 0) a = m; else b = m;
+        }
+        surfaceAt(wp.x + d.x * b, wp.z + d.z * b, wp.y + d.y * b + 0.5);
+        _gh.t = b;
+        return b;
+      }
+      t0 = t1; h0 = h1;
+    }
+    _gh.t = -1;
+    return tMax;
+  }
   // deterministic dispersion pattern (mils), no Math.random in a weapon
   const DISP = [[0, 0], [1.2, -0.8], [-1.0, 0.9], [0.6, 1.3], [-1.4, -0.5], [0.9, -1.2]];
   const _hit = { hit: false };
@@ -797,11 +841,9 @@
     d.x += dd[0] * 0.002; d.y += dd[1] * 0.002; d.normalize();
     let t = B.range;
     if (CBZ.rayColliders) { try { const c = CBZ.rayColliders(wp.x, wp.y, wp.z, d.x, d.y, d.z, B.range, _hit); if (c) t = _hit.t; } catch (e) {} }
-    if (d.y < -1e-3) {
-      const gy = floorY(wp.x + d.x * t, wp.z + d.z * t);
-      const tg = (wp.y - gy) / -d.y;
-      if (tg > 0 && tg < t) t = tg;
-    }
+    const tg = groundHit(wp, d, t);
+    const wet = tg < t && tg === _gh.t && _gh.wet;
+    if (tg < t) t = tg;
     const hx = wp.x + d.x * t, hy = wp.y + d.y * t, hz = wp.z + d.z * t;
     // the round, seen: its munition's calibre and speed, a tracer in every
     // autocannon round's base and one in five of a machine gun's belt; the
@@ -812,7 +854,10 @@
         weapon: mg ? (W.w.wid || "m2_50cal") : undefined, belt: mg ? 5 : undefined, tracer: mg ? undefined : true,
         mm: !mg && row ? row.cal : undefined, v: !mg && row ? row.v : undefined }); } catch (e) {}
     }
-    if (t < B.range - 1 && CBZ.detonate) {
+    // a round into the sea splashes; one into anything else strikes it
+    let splashed = false;
+    if (wet && CBZ.waterHit) { try { splashed = !!CBZ.waterHit(hx, hy, hz, { kind: "bullet", byPlayer: true }); } catch (e) { splashed = false; } }
+    if (!splashed && t < B.range - 1 && CBZ.detonate) {
       try { CBZ.detonate(hx, hy, hz, B.warhead, { byPlayer: true, dirx: d.x, dirz: d.z }); } catch (e) {}
     }
     rigFire(veh, shot, wp);
