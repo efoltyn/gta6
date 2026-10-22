@@ -120,8 +120,56 @@
       const lat = side * (onWalk ? HW + 1.0 : HW * 0.44);
       return r.vertical ? { x: r.x + lat, z: r.z + along, vertical: true } : { x: r.x + along, z: r.z + lat, vertical: false };
     }
+    /* A BEAT ALONG THE PAVEMENT. From where the walker is: the pavement he is
+       on (the nearest run's sidewalk, his side of it), the next point 25-55 m
+       on along it; at the corner of the block he turns onto the street that
+       meets it there (either way: one of them crosses at the corner), and at
+       a dead end he turns back. Each leg is a straight line on a sidewalk or
+       across a junction, never through the houses. `who` keeps the heading
+       (who._beatDir). */
+    const SW = HW + 1.0, CORNER = HW + 1.0;
+    function runFrame(r, x, z) {
+      return r.vertical ? { a: z - r.z, l: x - r.x } : { a: x - r.x, l: z - r.z };
+    }
+    function runPoint(r, a, l) { return r.vertical ? { x: r.x + l, z: r.z + a } : { x: r.x + a, z: r.z + l }; }
+    function beatNext(p, who) {
+      if (!roads.length || !p) return roadPoint(true);
+      let r = null, bd = 1e9, f = null;
+      for (const q of roads) {
+        const ff = runFrame(q, p.x, p.z), half = q.len / 2;
+        const d = Math.hypot(Math.max(0, Math.abs(ff.a) - half), Math.abs(Math.abs(ff.l) - SW));
+        if (d < bd) { bd = d; r = q; f = ff; }
+      }
+      const side = f.l >= 0 ? 1 : -1;
+      const half = Math.max(1, r.len / 2 - CORNER);
+      let dir = who && who._beatDir ? who._beatDir : (rnd() < 0.5 ? -1 : 1);
+      const a0 = Math.max(-half, Math.min(half, f.a));
+      if (Math.abs(a0 - dir * half) < 1.5) {
+        // at the corner: the streets that meet here, their pavement through it
+        const c = runPoint(r, dir * half, side * SW);
+        const turns = [];
+        for (const q of roads) {
+          if (q === r || q.vertical === r.vertical) continue;
+          const g2 = runFrame(q, c.x, c.z);
+          if (Math.abs(Math.abs(g2.l) - SW) < 2.2 && Math.abs(g2.a) <= q.len / 2 + 1) turns.push({ q: q, g: g2 });
+        }
+        if (turns.length) {
+          const t = turns[(rnd() * turns.length) | 0];
+          const h2 = Math.max(1, t.q.len / 2 - CORNER);
+          const d2 = rnd() < 0.5 ? -1 : 1;
+          if (who) who._beatDir = d2;
+          const a2 = Math.max(-h2, Math.min(h2, t.g.a + d2 * (25 + rnd() * 30)));
+          const s2 = t.g.l >= 0 ? 1 : -1;
+          return runPoint(t.q, a2, s2 * SW);
+        }
+        dir = -dir;                                              // a dead end: back the way he came
+      }
+      if (who) who._beatDir = dir;
+      const a1 = Math.max(-half, Math.min(half, a0 + dir * (25 + rnd() * 30)));
+      return runPoint(r, a1, side * SW);
+    }
     const T = {
-      island: I, arena: A, root: A.root,
+      island: I, arena: A, root: A.root, beatNext: beatNext,
       roads: roads, ROAD: 2 * HW, noGrid: true,
       minX: B ? B.x0 : cx - Rr, maxX: B ? B.x1 : cx + Rr, minZ: B ? B.z0 : cz - Rr, maxZ: B ? B.z1 : cz + Rr,
       center: { x: cx, z: cz }, radius: Rr,

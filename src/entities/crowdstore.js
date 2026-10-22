@@ -219,6 +219,8 @@
   function modeOk(G) {
     if (!G.mode) return true;
     const m = G_().mode;
+    // "street": the pavement crowd (city/streetlife.js), Gang City's and the islands'
+    if (G.mode === "street") return !m || m === "city" || m === "archipelago";
     return G.mode === "city" ? (!m || m === "city") : m === G.mode;
   }
 
@@ -931,7 +933,7 @@
   }
   function carPass() {
     if (live <= 0) return;
-    const md = G_().mode; if (md && md !== "city") { _cars.length = 0; return; }
+    const md = G_().mode; if (md && md !== "city" && md !== "archipelago") { _cars.length = 0; return; }
     const M = carList(); if (!M.length) return;
     ensureHash();
     for (let k = 0; k < M.length; k++) carAmong(M[k], footprint(M[k], _fp));

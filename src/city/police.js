@@ -925,6 +925,11 @@
     }
     const c = makeCop(x, z, swat, ambient);
     if (station && station.inside && station.inside.y != null) c.pos.y = station.inside.y;   // on the station's floor
+    // OUT OF THE DOOR FIRST. He starts in the hall; walked straight at a beat
+    // point down the street he met the front wall and stood there, and every
+    // officer the station fielded joined the clump at the desk. The front step
+    // is on the door's axis from the hall, so that leg is a clear line.
+    if (station && station.inside && station.out) c._exitPt = { x: station.out.x, z: station.out.z, ix: station.inside.x, iz: station.inside.z, t: 0 };
     if (!ambient) { c._dispatched = true; c._dispatchOrigin = station ? { x: station.x, z: station.z, name: "precinct" } : { x, z, name: "remote post" }; }
     c._force = true;            // drawn from the finite roster (vs scripted guards)
     forcePool--;               // one officer moves from reserve → deployed
@@ -3189,6 +3194,16 @@
       // a cop running a GUN STOP is driven by updateGunStop() — keep him out of the
       // normal hunt/arrest logic so he just stands you down over the weapon.
       if (c.gunstop) { c.sees = false; continue; }
+      // ---- LEAVING THE STATION (see spawnCop): to the front step, then the
+      // beat or the hunt. Not while the man he is after is in the hall with
+      // him; a leg that cannot be walked in 12 s is given up.
+      if (c._exitPt) {
+        const X = c._exitPt, ex = X.x - c.pos.x, ez = X.z - c.pos.z;
+        X.t += dt;
+        const inHall = P && P.pos && stars > 0 && Math.hypot(P.pos.x - X.ix, P.pos.z - X.iz) < 10;
+        if (Math.hypot(ex, ez) < 1.0 || X.t > 12 || inHall) c._exitPt = null;
+        else { c.sees = false; exitStep(c, X.x, X.z, c.baseSpeed * (stars > 0 ? 1.2 : 0.75), dt, _near); continue; }
+      }
       // ---- RADIO BEAT: stopped, eyes toward the trouble, hand on the shoulder
       // mic. He is briefly NOT advancing — visible (exploitable) procedure; the
       // reinforcement hold in maintain() releases as this call ends.
@@ -3685,8 +3700,11 @@
       // min floor — nowhere is left wholly unpatrolled). Falls back to a plain
       // road point if the arena lacks the weighted picker (stripped/headless).
       if (!c.patrolGoal || Math.hypot(c.pos.x - c.patrolGoal.x, c.pos.z - c.patrolGoal.z) < 4) {
+        // an island town walks its beat ALONG its pavements, corner to corner
+        // (world/island_town.js beatNext): a point anywhere on the island,
+        // walked in a straight line, went through the houses in between
         const weighted = (CBZ.CONFIG && CBZ.CONFIG.CITY_PATROL_DISTRICT_WEIGHT !== false) && A.copBeatPoint;
-        const rp = weighted ? A.copBeatPoint() : A.randomRoadPoint();
+        const rp = A.beatNext ? A.beatNext(c.pos, c) : weighted ? A.copBeatPoint() : A.randomRoadPoint();
         c.patrolGoal = { x: rp.x, z: rp.z };
       }
       stepTo(c, c.patrolGoal.x - c.pos.x, c.patrolGoal.z - c.pos.z, c.baseSpeed * 0.6, dt, near);
@@ -3802,6 +3820,19 @@
       if (out && (out.x || out.z)) { c._steerX = out.x; c._steerZ = out.z; hx = out.x; hz = out.z; }
     } else { c._steerX = 0; c._steerZ = 0; }
     Mv.step(m, c.pos, c.group.rotation.y, c.pos.x + hx * 4, c.pos.z + hz * 4, _copStep, dt);
+    c.group.rotation.y = m.yaw;
+    c.speed = m.speed;
+    finalizeMove(c);
+    if (near) animChar(c.char, m.gs, dt);
+  }
+  // the leg out of a station's hall: straight down the door's axis on the
+  // motor alone. The brain's walk and the city's context kernel steered him
+  // round the hall instead (the kernel reads Gang City's blocks, not an
+  // island building's walls), and three officers circled the desk all day.
+  function exitStep(c, x, z, spd, dt, near) {
+    const Mv = CBZ.moves, m = Mv.motor(c);
+    _copStep.speed = spd; _copStep.accel = 3.6;
+    Mv.step(m, c.pos, c.group.rotation.y, x, z, _copStep, dt);
     c.group.rotation.y = m.yaw;
     c.speed = m.speed;
     finalizeMove(c);

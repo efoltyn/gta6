@@ -1515,9 +1515,21 @@
     // A ROOM YOU CAN STAND IN, OR NO ROOM AT ALL. A 2 m strongroom you clip
     // through is worse than the set dressing it replaces, so a building that
     // cannot hold one is REFUSED and counted (the audit's `refused`).
-    const rd = Math.min(spec.tier === "reserve" ? 6.2 : 4.6, Math.max(2.9, hDeep * 0.55));
-    const rw = Math.min(spec.tier === "reserve" ? 8.4 : 6.4, Math.max(3.4, hTan * 0.86));
-    if (hDeep < rd + 2.6 || hTan < rw + 0.4) { VTALLY.refused++; return null; }
+    let rd = Math.min(spec.tier === "reserve" ? 6.2 : 4.6, Math.max(2.9, hDeep * 0.55));
+    let rw = Math.min(spec.tier === "reserve" ? 8.4 : 6.4, Math.max(3.4, hTan * 0.86));
+    if (b.frame) {
+      /* AN ISLAND BANK MEASURES ITS HALL, NOT ITS HALF. The Gang City test
+         below wants the partition 2.6 m past the building's middle, which
+         refused Port Royal's 16 x 12 m bank by 4 cm while it had an 8 m deep
+         hall in front of the room. What the hall must hold is the door band
+         (2.4), a queue (1.5), the counter and the staff aisle behind it (2.5):
+         6.4 m from the door wall. The room gives up depth, then width, to
+         keep that — and is refused only when even a 2.6 x 3.0 m room can't. */
+      const hall = 6.4;
+      rd = Math.min(rd, 2 * hDeep - hall);
+      rw = Math.min(rw, hTan - 0.4);
+      if (rd < 2.6 || rw < 3.0) { VTALLY.refused++; return null; }
+    } else if (hDeep < rd + 2.6 || hTan < rw + 0.4) { VTALLY.refused++; return null; }
     const tier = spec.tier || "branch";
     const dw = Math.min(2.4, rw - 1.0), dh = tier === "reserve" ? 2.5 : 2.3;
     // the partition plane, in building-local coords: rd back from the far wall.
@@ -1982,10 +1994,31 @@
     }
     return Math.floor(sf._bal);
   }
+  /* A SAFE IS DARK GUNMETAL. It used the strongroom's steel (0x5d6672, the
+     door's face plate 0x8b97a6), and the engine's hex is LINEAR albedo: under
+     a lit shop ceiling that face plate came out a pale blue-white box with a
+     gold handle, read as a house fridge in every shop on the islands. A real
+     safe is near-black painted steel with a machined bevel, a black dial
+     in a bright index ring, and a chrome lever. */
+  let SM = null;
+  function smats() {
+    if (SM) return SM;
+    SM = {
+      body: CBZ.cmat(0x111316),        // the painted carcass
+      door: CBZ.cmat(0x16191d),        // the door leaf
+      face: CBZ.cmat(0x1d2126),        // the recessed face panel (a shade up, so the door reads as a door)
+      inside: CBZ.cmat(0x0b0c0e),      // the inside of the box
+      ring: CBZ.cmat(0x8a9099),        // the dial's index ring, the knob: bright machined steel
+      dial: CBZ.cmat(0x060607),        // the dial face
+      chrome: CBZ.cmat(0x6b7178),      // the lever and the hinges
+      note: vmats().note,
+    };
+    return SM;
+  }
   CBZ.citySafe = function (spec) {
     if (!spec || !spec.parent || !THREE) return null;
     const G = SAFE_GRADE[spec.grade] || SAFE_GRADE.floor;
-    const M2 = vmats();
+    const M2 = smats();
     const yaw = spec.yaw || 0;
     const toW = spec.toWorld || function (x, z) { return { x: x, z: z }; };
     const grp = new THREE.Group();
@@ -1994,10 +2027,10 @@
     grp.name = "safe-" + (spec.grade || "floor");
     const w = G.w, h = G.h, d = G.d, t = Math.min(0.06, w * 0.12);
     // a hollow body, so an open door shows the inside of a box, not a slab
-    vbox(grp, w, h, t, M2.steelD, 0, h / 2, -d / 2 + t / 2);
-    for (const sx of [-1, 1]) vbox(grp, t, h, d, M2.steel, sx * (w / 2 - t / 2), h / 2, 0);
-    vbox(grp, w, t, d, M2.steel, 0, h - t / 2, 0);
-    vbox(grp, w, t, d, M2.steel, 0, t / 2, 0);
+    vbox(grp, w, h, t, M2.inside, 0, h / 2, -d / 2 + t / 2);
+    for (const sx of [-1, 1]) vbox(grp, t, h, d, M2.body, sx * (w / 2 - t / 2), h / 2, 0);
+    vbox(grp, w, t, d, M2.body, 0, h - t / 2, 0);
+    vbox(grp, w, t, d, M2.body, 0, t / 2, 0);
     // the money inside, visible the moment the door is off
     const bricks = [];
     const nB = G.bricks;
@@ -2017,14 +2050,27 @@
     const pivot = new THREE.Group();
     pivot.position.set(-w / 2, 0, d / 2);
     grp.add(pivot);
-    vbox(pivot, w, h, 0.06, M2.steel, w / 2, h / 2, 0.03);
-    vbox(pivot, w * 0.9, h * 0.9, 0.012, M2.steelL, w / 2, h / 2, 0.066);
+    vbox(pivot, w, h, 0.06, M2.door, w / 2, h / 2, 0.03);
+    vbox(pivot, w * 0.84, h * 0.84, 0.012, M2.face, w / 2, h / 2, 0.066);
+    // the hinges on the hung edge
+    for (const hy of [0.22, 0.78]) vcyl(pivot, 0.018, 0.018, Math.min(0.12, h * 0.16), 8, M2.chrome, -0.012, h * hy, 0.03);
     if (G.hp > 0) {
-      const dial = vcyl(pivot, Math.min(0.08, w * 0.14), Math.min(0.08, w * 0.14), 0.04, 16, M2.brass, w * 0.62, h * 0.58, 0.09, Math.PI / 2, 0, 0);
-      dial.castShadow = false;
-      vbox(pivot, 0.03, Math.min(0.22, h * 0.3), 0.04, M2.brass, w * 0.86, h * 0.45, 0.1);
+      // the combination dial: a black face in a bright index ring, a knurled
+      // knob, the index mark above it
+      const dr = Math.min(0.075, w * 0.13), dx = w * 0.42, dy = h * 0.6;
+      vcyl(pivot, dr * 1.18, dr * 1.18, 0.014, 20, M2.ring, dx, dy, 0.078, Math.PI / 2, 0, 0);
+      vcyl(pivot, dr, dr, 0.03, 20, M2.dial, dx, dy, 0.09, Math.PI / 2, 0, 0);
+      vcyl(pivot, dr * 0.42, dr * 0.48, 0.035, 12, M2.ring, dx, dy, 0.12, Math.PI / 2, 0, 0);
+      vbox(pivot, 0.008, dr * 0.32, 0.006, M2.ring, dx, dy + dr * 1.34, 0.074);
+      // the lever: a boss and a handle off it, the way a safe door is pulled
+      const lx = w * 0.42, ly = h * 0.34, ll = Math.min(0.16, w * 0.3);
+      vcyl(pivot, 0.022, 0.022, 0.04, 10, M2.chrome, lx, ly, 0.09, Math.PI / 2, 0, 0);
+      vbox(pivot, ll, 0.024, 0.024, M2.chrome, lx + ll / 2, ly, 0.115);
+      vbox(pivot, 0.028, 0.028, 0.05, M2.chrome, lx + ll, ly, 0.1);
     } else {
-      vbox(pivot, w * 0.3, 0.025, 0.04, M2.brass, w * 0.5, h * 0.8, 0.09);
+      // a cash box: a keyed lock and a pull
+      vcyl(pivot, 0.016, 0.016, 0.02, 10, M2.ring, w * 0.5, h * 0.62, 0.08, Math.PI / 2, 0, 0);
+      vbox(pivot, w * 0.3, 0.022, 0.03, M2.chrome, w * 0.5, h * 0.82, 0.085);
     }
     spec.parent.add(grp);
     // where it is in the world

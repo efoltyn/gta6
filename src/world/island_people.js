@@ -230,7 +230,10 @@
   function target() {
     const q = CBZ.qualityLevel == null ? 2 : CBZ.qualityLevel;
     const qm = q <= 0 ? 0.5 : q === 1 ? 0.7 : q === 2 ? 0.85 : 1;
-    return Math.max(3, Math.round(BASE * qm * hourMul()));
+    // the pavement crowd (city/streetlife.js) fills the footways now: these
+    // are the town's own walkers on their errands among them, so fewer rigs
+    const base = CBZ.streetLife ? Math.round(BASE * 0.7) : BASE;
+    return Math.max(3, Math.round(base * qm * hourMul()));
   }
   function isMine(p, root) { return !!(p && p._isleRoot && (!root || p._isleRoot === root)); }
   function free(p) {
@@ -295,7 +298,7 @@
   }
 
   /* ---- THE CROWD'S UPKEEP ------------------------------------------------- */
-  let tickT = 0, lastMode = null;
+  let tickT = 0, lastMode = null, clk = 0;
   function upkeep(A, PA) {
     const Pl = CBZ.player && CBZ.player.pos;
     if (!Pl) return;
@@ -469,6 +472,129 @@
     }
   }
 
+  /* ---- THE CUSTOMERS -------------------------------------------------------
+     An open shop near you has somebody in it: one or two people (a few in
+     the bank, the café, the town hall) standing at the stock, the counter or
+     the window, the way a customer stands, each for a minute or two and then
+     out of the door and away (CBZ.leave), and another in their place a while
+     later. They are the street's people (cast by district, robbable, hands up
+     under a gun), stood on the shop floor where nobody is looking, on a spot
+     clear of the keep-outs and of everything the fit-out put down. */
+  const CUST_USES = {
+    guns: 1, pawn: 1, jewelry: 1, eyewear: 1, clothing: 1, suits: 1, phones: 1, bank: 3, loans: 1, cityhall: 3, recruit: 1,
+    cafe: 2, diner: 3, deli: 2, bakery: 2, grocer: 2, chemist: 2, hardware: 1, books: 1, barber: 1, newsagent: 1, florist: 1,
+    butcher: 1, icecream: 2, laundry: 1, chandlery: 1, shop: 1, surfshop: 1, diveshop: 1, market: 2,
+  };
+  const CUST_NEAR = CBZ.deviceClass === "phone" ? 38 : SMALL ? 46 : 58;
+  const CUST_CAP = CBZ.deviceClass === "phone" ? 5 : SMALL ? 7 : 11;
+  const custs = new Set();
+  function hitR(a, r) { return a.x0 < r.x1 && a.x1 > r.x0 && a.z0 < r.z1 && a.z1 > r.z0; }
+  // the shop floor's free standing places, building-local (found once)
+  function custSpots(b) {
+    if (b._custSpots) return b._custSpots;
+    const IV = CBZ.islandVenue;
+    const out = [];
+    b._custSpots = out;
+    if (!IV || !IV.floor) return out;
+    const F = IV.floor(b, 0), L = F.local, B = F.bounds;
+    const cols = [];
+    for (const c of b.colliders || []) {
+      if (!c || c.minX == null) continue;
+      if (c.y1 != null && c.y1 < F.y + 0.1) continue;
+      if (c.y0 != null && c.y0 > F.y + 1.7) continue;
+      if (c.minX < B.x0 - 0.02 || c.maxX > B.x1 + 0.02 || c.minZ < B.z0 - 0.02 || c.maxZ > B.z1 + 0.02) continue;   // a wall
+      cols.push(c);
+    }
+    const I = b.interior;
+    if (I && I.furn) for (const f of I.furn) if (f.L === 0 && !f.cleared && f.cols) for (const c of f.cols) cols.push(c);
+    const R = 0.42;
+    for (let lz = L.z0 + 0.9; lz <= L.z1 - 0.7; lz += 0.85) {
+      for (let lx = L.x0 + 0.7; lx <= L.x1 - 0.7; lx += 0.85) {
+        const r = { x0: lx - R, x1: lx + R, z0: lz - R, z1: lz + R };
+        let ok = true;
+        for (const q of F.keepOut) if (hitR(r, q)) { ok = false; break; }
+        if (!ok) continue;
+        const w = F.toWorld(lx, lz);
+        let near = null, nd = 2.2;
+        for (const c of cols) {
+          const cx = Math.max(c.minX, Math.min(w.x, c.maxX)), cz = Math.max(c.minZ, Math.min(w.z, c.maxZ));
+          const d = Math.hypot(cx - w.x, cz - w.z);
+          if (d < R + 0.08) { ok = false; break; }
+          if (d < nd) { nd = d; near = { x: cx, z: cz }; }
+        }
+        if (!ok) continue;
+        // a customer stands AT something (a shelf, a case, the counter) when
+        // there is something to stand at; else he looks to the back of the shop
+        const face = near ? Math.atan2(near.x - w.x, near.z - w.z) : F.yaw + Math.PI;
+        out.push({ x: w.x, z: w.z, face: face, at: !!near });
+      }
+    }
+    // the places at the stock first, the middle of the floor last
+    out.sort(function (a, c) { return (c.at ? 1 : 0) - (a.at ? 1 : 0) || h01s(a.x, a.z) - h01s(c.x, c.z); });
+    return out;
+  }
+  function h01s(x, z) { const s = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return s - Math.floor(s); }
+  function custLeave(C) {
+    custs.delete(C);
+    const p = C.ped;
+    C.ped = null;
+    if (!p || p.dead) return;
+    p.staffPost = null; p._islandPost = null;
+    const L = C.b._venueLot, D = L && L.building && L.building.door;
+    const route = D ? [{ x: D.x - D.nx * 1.0, z: D.z - D.nz * 1.0 }, { x: D.x, z: D.z, door: true }, { x: D.x + D.nx * 3, z: D.z + D.nz * 3 }] : null;
+    if (CBZ.leave && CBZ.leave.go) CBZ.leave.go(p, { route: route, remove: despawn, tag: "isle:customer" });
+    else despawn(p);
+  }
+  function custTick(A, PA) {
+    const Pl = CBZ.player && CBZ.player.pos;
+    if (!Pl) return;
+    const now = clk;
+    let n = 0;
+    for (const C of Array.from(custs)) {
+      const p = C.ped;
+      if (!p || p.dead || CBZ.cityPeds.indexOf(p) < 0 || !p.staffPost) { custs.delete(C); if (p && !p.dead && p._islandPost === C) p._islandPost = null; continue; }
+      const d = Math.hypot(p.pos.x - Pl.x, p.pos.z - Pl.z);
+      const here = under(C.b.group, A.root);
+      if (!here || (d > CUST_NEAR + 60 && unseen(p.pos.x, p.pos.y, p.pos.z))) { custs.delete(C); despawn(p); continue; }
+      if (!isOpen(C.b) || C.b.fallen || now > C.until) { custLeave(C); continue; }
+      n++;
+    }
+    if (g.state !== "playing" || n >= CUST_CAP) return;
+    // the nearest open shop short of its people gets one, where nobody sees him come
+    let best = null, bd = CUST_NEAR;
+    for (const l of PA.shopLots) {
+      const b = l.b, want = CUST_USES[b.use];
+      if (!want || b.fallen || !isOpen(b) || !b.group || !under(b.group, A.root)) continue;
+      const d = Math.hypot(b.x - Pl.x, b.z - Pl.z);
+      if (d >= bd) continue;
+      let have = 0;
+      for (const C of custs) if (C.b === b) have++;
+      if (have >= Math.max(1, Math.round(want * hourMul()))) continue;
+      if ((b._custNext || 0) > now) continue;
+      bd = d; best = b;
+    }
+    if (!best) return;
+    best._custNext = now + 8 + rnd() * 20;
+    const spots = custSpots(best);
+    if (!spots.length) return;
+    const taken = [];
+    for (const C of custs) if (C.b === best) taken.push(C.spot);
+    for (let t = 0; t < 4; t++) {
+      const s = spots[Math.min(spots.length - 1, (rnd() * Math.min(spots.length, 6)) | 0)];
+      if (taken.indexOf(s) >= 0) continue;
+      const F = CBZ.islandVenue.floor(best, 0);
+      if (!unseen(s.x, F.y, s.z)) return;
+      const ped = stand(A, PA, s.x, s.z, { staff: true, _y: F.y, cash: 20 + ((rnd() * 120) | 0) });
+      if (!ped) return;
+      const C = { b: best, spot: s, ped: ped, until: now + 45 + rnd() * 75 };
+      ped.staffPost = { x: s.x, z: s.z, face: s.face };
+      ped._islandPost = C; ped._customer = best.use;
+      if (ped.group) ped.group.rotation.y = s.face;
+      custs.add(C);
+      return;
+    }
+  }
+
   /* ---- THE SHUTTERS ------------------------------------------------------- */
   const shutters = new Set();
   const SHUT_USES = Object.keys(HOURS);
@@ -607,6 +733,7 @@
     const PA = arenaOf(A);
     if (!PA) return;
     const d = Math.min(0.1, Math.max(0, dt || 0));
+    clk += d;
     tickT -= d;
     const decide = tickT <= 0;
     if (decide) {
@@ -614,6 +741,7 @@
       if (CBZ.net && CBZ.net.noSim && CBZ.net.noSim()) return;
       upkeep(A, PA);
       staffTick(A, PA, 0.4);
+      custTick(A, PA);
     }
     shutterTick(A, d, decide);
   });
@@ -645,6 +773,7 @@
     const L = CBZ.cityPeds || [];
     for (let i = L.length - 1; i >= 0; i--) if (L[i] && L[i]._isleRoot) despawn(L[i]);
     for (const P of posts) P.ped = null;
+    custs.clear();
     const D = CBZ.cityDrops || [];
     if (D.length) {
       for (let i = D.length - 1; i >= 0; i--) {

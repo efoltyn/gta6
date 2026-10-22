@@ -127,7 +127,12 @@
   function rnd() { SEED = (Math.imul(SEED, 1664525) + 1013904223) >>> 0; return SEED / 4294967296; }
   function pick(L) { return L[(rnd() * L.length) | 0]; }
   function G_() { return CBZ.game || (CBZ.game = {}); }
-  function arena() { return CBZ.city && CBZ.city.arena; }
+  // Gang City's arena; on the islands (mode "archipelago") the street is the
+  // island in force (siteForIsle below), and Gang City's arena is not it
+  function onIsles() { return G_().mode === "archipelago"; }
+  function streetMode() { const m = G_().mode; return !m || m === "city" || m === "archipelago"; }
+  function isleArena() { const A = CBZ.surv && CBZ.surv.arena; return onIsles() && A && A.island && A.root ? A : null; }
+  function arena() { return onIsles() ? null : CBZ.city && CBZ.city.arena; }
   function playerPos() { const P = CBZ.player; return P && P.pos ? P.pos : null; }
   function hourNow() {
     if (CBZ.cityHour) { try { const h = +CBZ.cityHour(); if (isFinite(h)) return h; } catch (e) {} }
@@ -328,7 +333,7 @@
   function eX(site, e, u, v) { return site.nx[site.ea[e]] + site.etx[e] * u - site.etz[e] * v; }
   function eZ(site, e, u, v) { return site.nz[site.ea[e]] + site.etz[e] * u + site.etx[e] * v; }
   function groundY(x, z) {
-    const A = arena();
+    const A = onIsles() ? isleArena() : arena();
     if (A && A.groundHeightAt) { try { const y = +A.groundHeightAt(x, z); if (isFinite(y)) return y; } catch (e) {} }
     if (CBZ.floorAt) { try { const y = +CBZ.floorAt(x, z); if (isFinite(y)) return y; } catch (e) {} }
     return 0;
@@ -486,6 +491,116 @@
     return s;
   }
 
+  /* ---- AN ISLAND TOWN (mode "archipelago"): the island's streets
+     (world/island_town.js roads: straight runs, axis-aligned, 3.5 m half
+     carriageway, the footway 3.5-5.5 m off the centre line) close into
+     BLOCKS, and a block's footway is a ring exactly like a downtown lot's:
+     the pavement 4.5 m off each of the four streets round it. A block is a
+     rectangle whose four sides are street and that no street runs right
+     across (a stub into it is a cul-de-sac, the block stands). Smallest
+     first, no two overlapping. What the people are doing there comes from
+     the buildings on the block (world/island_people.js's lots: their trade,
+     their district), and their doors are its door spots. A small town is
+     not a downtown: ISLE_K thins the city's per-metre densities. */
+  const ISLE_K = 0.6, ISLE_SW = 4.5;
+  const ISLE_USE = { core: "core", commercial: "commercial", industrial: "industrial", projects: "projects", residential: "residential" };
+  function isleRings(A) {
+    const T = CBZ.islandTown && CBZ.islandTown.of ? CBZ.islandTown.of(A) : null;
+    const roads = (T && T.roads) || [];
+    if (!roads.length) return [];
+    const V = [], H = [];
+    for (const r of roads) (r.vertical ? V : H).push({ f: r.vertical ? r.x : r.z, a: (r.vertical ? r.z : r.x) - r.len / 2, b: (r.vertical ? r.z : r.x) + r.len / 2 });
+    const lines = function (L) {
+      const fs = L.map(function (q) { return q.f; }).sort(function (a, b) { return a - b; });
+      const out = [];
+      for (const f of fs) if (!out.length || f - out[out.length - 1] > 1.5) out.push(f);
+      return out;
+    };
+    const xs = lines(V), zs = lines(H);
+    const covered = function (L, f, a, b) {
+      for (const q of L) if (Math.abs(q.f - f) < 1.5 && q.a <= a + 2.5 && q.b >= b - 2.5) return true;
+      return false;
+    };
+    const across = function (L, lo, hi, a, b) {
+      for (const q of L) if (q.f > lo + 1.5 && q.f < hi - 1.5 && q.a <= a + 2.5 && q.b >= b - 2.5) return true;
+      return false;
+    };
+    const cand = [];
+    for (let i = 0; i < xs.length; i++) for (let j = i + 1; j < xs.length; j++) {
+      const x0 = xs[i], x1 = xs[j];
+      if (x1 - x0 < 16) continue;
+      if (x1 - x0 > 240) break;
+      for (let k = 0; k < zs.length; k++) for (let l = k + 1; l < zs.length; l++) {
+        const z0 = zs[k], z1 = zs[l];
+        if (z1 - z0 < 16) continue;
+        if (z1 - z0 > 240) break;
+        if (!covered(H, z0, x0, x1) || !covered(H, z1, x0, x1) || !covered(V, x0, z0, z1) || !covered(V, x1, z0, z1)) continue;
+        if (across(V, x0, x1, z0, z1) || across(H, z0, z1, x0, x1)) continue;
+        cand.push({ x0: x0, x1: x1, z0: z0, z1: z1, area: (x1 - x0) * (z1 - z0) });
+      }
+    }
+    cand.sort(function (a, b) { return a.area - b.area; });
+    const PA = CBZ.islandPeople && CBZ.islandPeople.arenaOf ? CBZ.islandPeople.arenaOf(A) : null;
+    const lots = (PA && PA.all) || [];
+    const out = [];
+    for (const c of cand) {
+      let hit = false;
+      for (const o of out) if (c.x0 < o.bx1 - 1 && c.x1 > o.bx0 + 1 && c.z0 < o.bz1 - 1 && c.z1 > o.bz0 + 1) { hit = true; break; }
+      if (hit) continue;
+      // the buildings on the block: what its pavement is for
+      const dk = {};
+      let shops = 0, food = 0, office = 0, homes = 0, night = 0, n = 0;
+      for (const l of lots) {
+        if (!(l.cx > c.x0 && l.cx < c.x1 && l.cz > c.z0 && l.cz < c.z1)) continue;
+        n++;
+        const kd = (l.district && l.district.kind) || "residential";
+        dk[kd] = (dk[kd] | 0) + 1;
+        if (l.kind === "home") homes++;
+        else if (l.kind === "food") { food++; shops++; }
+        else if (l.kind === "office" || l.kind === "bank" || l.kind === "cityhall") office++;
+        else if (l.kind === "hotel") night++;
+        else shops++;
+      }
+      let kind = "residential", bn = -1;
+      for (const k in dk) if (dk[k] > bn) { bn = dk[k]; kind = k; }
+      kind = ISLE_USE[kind] || "residential";
+      const m = Object.assign({}, USE[kind]);
+      if (shops) m.s += Math.min(0.6, 0.12 * shops) + (food ? 0.1 : 0);
+      if (office) m.o += Math.min(0.5, 0.15 * office);
+      if (night) m.n += 0.2;
+      const busy = n ? (shops + office) / n : 0;
+      const I = clamp(0.35 + busy * 0.65 + (kind === "core" ? 0.15 : 0), 0.25, 1);
+      out.push({ x0: c.x0 + ISLE_SW, x1: c.x1 - ISLE_SW, z0: c.z0 + ISLE_SW, z1: c.z1 - ISLE_SW, hw: 0.85, mix: m,
+        base: m.base * ISLE_K * (n ? 1 : 0.4), I: I, office: office > 0, kind: kind, bx0: c.x0, bx1: c.x1, bz0: c.z0, bz1: c.z1 });
+    }
+    return out;
+  }
+  function siteForIsle(A) {
+    const rings = isleRings(A);
+    if (!rings.length) return null;
+    const s = buildSite("isle", A, rings, null);
+    binObstacles(s, []);
+    // the doors: every island building on a ring's pavement
+    const PA = CBZ.islandPeople && CBZ.islandPeople.arenaOf ? CBZ.islandPeople.arenaOf(A) : null;
+    for (const l of (PA && PA.all) || []) {
+      const d = l.building && l.building.door;
+      if (!d || !isFinite(d.x) || !isFinite(d.nx)) continue;
+      const ex = -d.nx, ez = -d.nz;                  // (island_people's lots carry the inward normal)
+      const q = nearestSide(s, d.x + ex * 3, d.z + ez * 3, 12);
+      if (!q) continue;
+      const rx = -s.etz[q.e], rz = s.etx[q.e];
+      if (-(rx * ex + rz * ez) < 0.6) continue;
+      const p = project(s, q.e, d.x, d.z);
+      if (p.v < 0.3 || p.v > 14) continue;
+      const home = l.kind === "home", office = l.kind === "office" || l.kind === "bank" || l.kind === "cityhall";
+      addSpot(s, { type: "door", e: q.e, u: clamp(p.u, 0.5, s.elen[q.e] - 0.5), x: d.x + ex * 0.35, z: d.z + ez * 0.35,
+        ex: ex, ez: ez, tx: -ez, tz: ex, kd: p.v, shop: home || office ? null : (l.kind === "food" ? "food" : "shop"), office: office, home: home, cap: 1, lot: l });
+    }
+    benchSpots(s);
+    frontSpots(s);
+    return s;
+  }
+
   // ---- the hour on every pavement
   function refreshDensity(site, h) {
     const mul = CFG.STREET_DENSITY > 0 ? +CFG.STREET_DENSITY : 1;
@@ -503,7 +618,7 @@
   let GS = null;
   function storeGroup() {
     if (GS && !GS.gone) return GS;
-    GS = ST.group({ name: "street", kind: "street", who: "pedestrians", mode: "city", cap: BUD.rows + 260,
+    GS = ST.group({ name: "street", kind: "street", who: "pedestrians", mode: "street", cap: BUD.rows + 260,
       maxDraw: R + 140, own: true, moving: true, cutDt: 0.1, aff: "public", onLife: onLife,
       // the store's hand-over (a round, a blast, a car near the lens): the
       // struck person becomes a real body on that call
@@ -915,7 +1030,7 @@
       const l = site.sgrid.get(gkey(i, j)); if (!l) continue;
       for (let k = 0; k < l.length; k++) {
         const s = site.spots[l[k]];
-        if (s.type !== "door" || s.occ >= s.cap) continue;
+        if (s.type !== "door" || s.occ >= s.cap || (s.lot && s.lot.demolished)) continue;
         const d = Math.hypot(s.x - P.x, s.z - P.z);
         if (d < 14 || d > 70) continue;
         const sc = rnd() * 60 + (site.edens[s.e] > 0 ? 0 : 40);
@@ -1013,6 +1128,7 @@
       for (let t = 0; t < l.length; t++) {
         const s = site.spots[l[(k0 + t) % l.length]];
         if (!s || s.occ >= s.cap) continue;
+        if (s.lot && s.lot.demolished) continue;          // an island shop that is shut (or came down)
         if (type) { if (s.type === type) return s; continue; }
         if (s.type === "door") continue;
         if (s.type === "bench" && (n > 2 || (n === 2 && !pairSeat(site, s)) || hasKid(g))) continue;
@@ -1116,7 +1232,8 @@
   let xOpen = true, zOpen = true, xSince = -99, zSince = -99, sigOk = false;
   function signalTick() {
     const ph = CBZ.cityPhase ? (function () { try { return CBZ.cityPhase(); } catch (e) { return null; } })() : null;
-    if (!ph) { sigOk = false; xOpen = zOpen = true; return; }
+    // (an island town has no lights: stop signs, you look and you cross)
+    if (!ph || onIsles()) { sigOk = false; xOpen = zOpen = true; return; }
     sigOk = true;
     // walking along x crosses the N-S street: walk while N-S is red and E-W green
     const ox = ph.ns === "red" && ph.ew === "green", oz = ph.ew === "red" && ph.ns === "green";
@@ -1631,8 +1748,10 @@
     return null;
   }
   function makePooled(build) {
-    const A = arena();
-    if (!A || !A.root || !CBZ.cityMakePed || !CBZ.cityPeds) return null;
+    // the pool rides the scene on the islands: it outlives the island it was
+    // made on (an island's root goes with the island)
+    const A = arena(), root = onIsles() ? CBZ.scene : A && A.root;
+    if (!root || !CBZ.cityMakePed || !CBZ.cityPeds) return null;
     let ped = null;
     try {
       const opts = { kind: "civilian", gender: build === "f" ? "f" : build === "kid" ? (rnd() < 0.5 ? "f" : "m") : "m" };
@@ -1642,7 +1761,7 @@
     if (!ped) return null;
     ped._crowd = true; ped._parked = true; ped._street = true; ped.group.visible = false;
     ped.pos.set(PARK, 0, PARK); if (ped.target) ped.target.set(PARK, 0, PARK);
-    A.root.add(ped.group);
+    root.add(ped.group);
     CBZ.cityPeds.push(ped);
     return ped;
   }
@@ -1822,7 +1941,7 @@
       }
       if (d > rout && G_()._citySpecTarget !== ped) unpromote(r, true);   // (your killer stays real for the kill-cam)
     }
-    if (G_().mode !== "city") return;
+    if (!streetMode()) return;
     // promote: the nearest, a whole group at a time
     const G = GS; if (!G || !poolReady && !freeAny()) return;
     let made = 0;
@@ -1971,6 +2090,18 @@
   // ================================================================ sites: build what is near
   let siteT = 99;
   function ensureSites(px, pz) {
+    // the island in force: its own blocks, and nothing of Gang City's
+    {
+      const IA = isleArena();
+      let ii = -1;
+      for (let i = 0; i < SITES.length; i++) if (SITES[i] && SITES[i].key === "isle") ii = i;
+      if (ii >= 0 && SITES[ii].src !== IA) { dropSite(ii); ii = -1; }
+      if (IA) {
+        for (let i = 0; i < SITES.length; i++) if (SITES[i] && SITES[i].key !== "isle") dropSite(i);
+        if (ii < 0) { let s = null; try { s = siteForIsle(IA); } catch (e) { console.error("[streetlife isle]", e); } if (s) addSite(s); }
+        return;
+      }
+    }
     const A = arena();
     // the downtown grid (and its annex)
     let si = -1;
@@ -2017,7 +2148,7 @@
     const t0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
     CLOCK += dt;
     const P = playerPos();
-    if (G_().mode && G_().mode !== "city") { if (gCount) clearAll(); return; }
+    if (!streetMode()) { if (gCount) clearAll(); return; }
     if (!observed()) { if (gCount) clearAll(); observedWas = false; return; }
     if (!P) return;
     wrapPanic();

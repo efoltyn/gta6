@@ -871,7 +871,8 @@
       const b = CBZ.bots || [];
       for (let i = 0; i < b.length; i++) out.push(b[i]);
       const pd = CBZ.cityPeds || [];
-      for (let i = 0; i < pd.length; i++) if (pd[i] && !pd[i].dead && pd[i]._isleRoot) out.push(pd[i]);
+      // (the island's own people, and the pavement crowd's real bodies: city/streetlife.js)
+      for (let i = 0; i < pd.length; i++) if (pd[i] && !pd[i].dead && (pd[i]._isleRoot || (pd[i]._street && !pd[i]._parked))) out.push(pd[i]);
       // the island's police (city/police.js runs its force here): a blast,
       // a car, a falling wall reaches an officer like anybody else
       const c = CBZ.cityCops || [];
@@ -880,7 +881,7 @@
     },
     hurt: function (a, dmg, imp) {
       if (a && a.kind === "cop" && CBZ.cityHurtCop) { CBZ.cityHurtCop(a, dmg, imp); return true; }
-      if (a && a._isleRoot && CBZ.cityHurtPed) { CBZ.cityHurtPed(a, dmg, imp); return true; }
+      if (a && (a._isleRoot || a._street) && CBZ.cityHurtPed) { CBZ.cityHurtPed(a, dmg, imp); return true; }
       if (!CBZ.surv || !CBZ.surv.hurt) return false;
       const was = !!(a && a.dead);
       CBZ.surv.hurt(a, dmg, imp);

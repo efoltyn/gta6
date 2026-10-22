@@ -409,6 +409,9 @@
     S.rec = {
       x: S.door.x, z: S.door.z, island: true,
       inside: { x: S.intakeW.x, z: S.intakeW.z, y: b.floorTop != null ? b.floorTop : b.gy + 0.08 },
+      // the front step: an officer who starts in the hall walks out to here
+      // along the door's axis before his beat (city/police.js _exitPt)
+      out: { x: S.door.x + n.x * 2.5, z: S.door.z + n.z * 2.5 },
       lot: { cx: b.x, cz: b.z, w: b.w, d: b.d, kind: "police", name: b.name || "Police",
         building: { door: { x: S.door.x, z: S.door.z, nx: n.x, nz: n.z }, h: b.roofY != null ? b.roofY : b.gy + b.h, rotY: yaw,
           flatRoof: !!(b.roofAccess && b.roof && b.roof.access) } },
