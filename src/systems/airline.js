@@ -955,6 +955,13 @@
     if (dt > 0.25) dt = 0.25;                 // a stall must not teleport an aeroplane
     for (let i = shuttles.length - 1; i >= 0; i--) {
       const s = shuttles[i];
+      // A FIELD THE CITY STREAMER BUILT AGAIN (it frees a far airfield and
+      // re-runs its builder on the way back) registers a fresh record under
+      // the same id. A shuttle bound for it flies to the live one: holding the
+      // old record held the whole old airfield (its group, its 42 MB ground)
+      // for as long as the shuttle flew.
+      const fresh = s.to && CBZ.airportById ? CBZ.airportById(s.to.id) : null;
+      if (fresh && fresh !== s.to) s.to = fresh;
       try { tick(s, dt); } catch (e) { try { console.error("[airline]", s.id, e); } catch (e2) {} abandon(s, "a fault"); }
       if (s.dead) shuttles.splice(i, 1);
     }

@@ -38,9 +38,58 @@
   // THREE.CanvasTexture and the isCanvasTexture flag hold as before)
   const Orig = THREE.CanvasTexture;
   class Watched extends Orig {
-    constructor(a, b, c, d, e, f, g, h, i) { super(a, b, c, d, e, f, g, h, i); tracked.push(new WeakRef(this)); A.tracked++; }
+    constructor(a, b, c, d, e, f, g, h, i) { super(a, b, c, d, e, f, g, h, i); tracked.push(new WeakRef(this)); A.tracked++; this._cbzOwner = CBZ._texOwner || null; }
   }
   THREE.CanvasTexture = Watched;
+
+  /* ---- WHO MADE IT: a texture knows the streamed job it was born in ------
+     core/citystream.js sets CBZ._texOwner while a job builds. When that job
+     is FREED, what it made is its own to give back, even when the picture
+     cannot come back (a canvas released above, a data texture whose bytes
+     its owner packed away): the job's next run paints new ones. Without
+     this the streamer left every such texture on the GPU: a 4096 airfield
+     ground (42 MB) and two town splats per round trip past Cape Harbor. */
+  const OrigData = THREE.DataTexture;
+  if (OrigData) {
+    class OwnedData extends OrigData {
+      constructor(a, b, c, d, e, f, g, h, i, j, k) { super(a, b, c, d, e, f, g, h, i, j, k); this._cbzOwner = CBZ._texOwner || null; }
+    }
+    THREE.DataTexture = OwnedData;
+  }
+  /* CBZ.texDisposable(t, opts): may a teardown dispose t? THE one rule for
+     both teardowns (core/citystream.js freeJob, world/disaster_arena.js
+     freeObjectsSteps). A texture three can upload again from what it holds
+     (a self-painting canvas, an intact canvas, a data texture with its
+     bytes, a loaded image) may always go: the next draw brings it back.
+     One that cannot come back (a canvas released above, a data texture
+     whose bytes were packed away) goes only when the teardown OWNS it:
+     opts.owner is the job being freed and the texture was born in it
+     (opts.dataGone: an island root owns every data texture under it).
+     A render target's texture (the environment map, a feed) has nothing to
+     upload: disposing one made every later render throw (8540e9bc).
+     opts.shared: a _shared one that can come back may go too (the streamer
+     takes a far job's shared canvases off the GPU; they upload again). */
+  function reuploadable(t) {
+    if (t._cbzLazy) return true;
+    const im = t.image;
+    if (!im) return false;
+    if (t.isCanvasTexture) return typeof im.getContext === "function" && im.width > 1 && !t._cbzFreed;
+    if (im.data) return true;
+    return (typeof HTMLImageElement !== "undefined" && im instanceof HTMLImageElement && im.complete) ||
+           (typeof ImageBitmap !== "undefined" && im instanceof ImageBitmap);
+  }
+  CBZ.texDisposable = function (t, opts) {
+    if (!t || !t.isTexture) return false;
+    if (reuploadable(t)) return !t._shared || !!(opts && opts.shared);
+    if (t._shared || !opts) return false;
+    if (opts.owner && t._cbzOwner === opts.owner) return true;
+    return !!(opts.dataGone && t.isDataTexture && t.image && "data" in t.image);
+  };
+  // ... and the dispose itself (a self-painting canvas also hands its canvas back)
+  CBZ.texDispose = function (t) {
+    t.dispose();
+    if (t._cbzLazy && t._cbzRelease) t._cbzRelease();
+  };
 
   // a repaint after the canvas went: say so (the texture now uploads 1x1)
   const TP = THREE.Texture.prototype, desc = Object.getOwnPropertyDescriptor(TP, "needsUpdate");
@@ -137,6 +186,7 @@
   CBZ.lazyCanvasTexture = function (w, h, paint, opts) {
     opts = opts || {};
     const t = new Orig(undefined);          // not Watched: this one frees itself
+    t._cbzOwner = CBZ._texOwner || null;
     let cv = null;
     Object.defineProperty(t, "image", {
       configurable: true, enumerable: true,
