@@ -7200,7 +7200,10 @@
       if (ch.typing) ch.typing = false;
 
       const roll = back ? LIE_ROLL_BACK : LIE_ROLL_SIDE;
-      const curl = (back ? 0.05 : 0.13) + dv * 0.05;      // spine curls over the knees
+      // `tight`: curled up small on his side (a body put in a car's trunk,
+      // city/cartrunk.js): knees to the chest, chin down, arms round the shins
+      const tight = !!L.tight && !back;
+      const curl = tight ? 0.42 : (back ? 0.05 : 0.13) + dv * 0.05;      // spine curls over the knees
       ch.body.position.x = damp(ch.body.position.x, br * brAmp, sr, dt);   // chest RISE: +x is up under the roll
       ch.body.position.y = damp(ch.body.position.y, -0.02, sr, dt);
       ch.body.position.z = damp(ch.body.position.z, 0, sr, dt);
@@ -7213,8 +7216,8 @@
       // across the other; the bottom leg stays long against the mattress.
       const kneeFor = (a) => Math.max(0.10, Math.min(1.95,
         a + Math.asin(Math.max(-1, Math.min(1, (THIGH / SHIN) * Math.sin(a))))));
-      const hipA = (back ? 0.22 : 0.44) + dv * 0.10;
-      const aTop = hipA * 1.25, aBot = hipA * 0.78;
+      const hipA = tight ? 1.18 : (back ? 0.22 : 0.44) + dv * 0.10;
+      const aTop = hipA * (tight ? 1.12 : 1.25), aBot = hipA * (tight ? 0.98 : 0.78);
       const twist = back ? 0.22 : 0.05;            // a back sleeper's toes fall outward
       if (ch.parts.rl) {
         ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, -aTop, sr, dt);
@@ -7238,19 +7241,19 @@
       // uses the opposite sign to relax inward. The old signs sent both arms
       // farther OUTBOARD and left a detached-looking hand above the sleeper.
       if (ch.parts.ra) {
-        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, (fold ? -0.46 : -0.14) + br * 0.020, sr, dt);
+        ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, (tight ? -1.05 : fold ? -0.46 : -0.14) + br * 0.020, sr, dt);
         ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt);
         ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, (fold ? 0.68 : 0.18) + dv * 0.06, sr, dt);
         ch.parts.ra.position.z = damp(ch.parts.ra.position.z, fold ? 0.05 : 0.02, sr, dt);
       }
-      setElbow(J.ra, fold ? -1.10 : -0.40, sr);
+      setElbow(J.ra, tight ? -1.55 : fold ? -1.10 : -0.40, sr);
       if (ch.parts.la) {
-        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.30 + br * 0.016, sr, dt);
+        ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, (tight ? -0.95 : -0.30) + br * 0.016, sr, dt);
         ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt);
         ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, -0.18 - dv * 0.05, sr, dt);
         ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.04, sr, dt);
       }
-      setElbow(J.la, -0.58, sr);
+      setElbow(J.la, tight ? -1.45 : -0.58, sr);
 
       // HEAD. Chin tucks toward the chest (the universal sleeping curl) and
       // the crown tips toward the mattress so the cheek actually meets the
@@ -7258,7 +7261,7 @@
       // DOWN under the roll. A back sleeper is already face-up and only needs
       // a whisker of it.
       if (ch.neck) {
-        ch.neck.rotation.x = damp(ch.neck.rotation.x, 0.14 + br * 0.012, sr, dt);
+        ch.neck.rotation.x = damp(ch.neck.rotation.x, (tight ? 0.38 : 0.14) + br * 0.012, sr, dt);
         ch.neck.rotation.z = damp(ch.neck.rotation.z, (back ? 0.06 : 0.20) + dv * 0.05, sr, dt);
       }
       // Publish what we wrote, exactly as slidePose/pronePose do: the KO and
