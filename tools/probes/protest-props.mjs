@@ -18,6 +18,16 @@ export default async function (t) {
     return { ok: true, pen: pen ? [pen.at.x, pen.at.z] : null };
   `);
   if (!a0 || a0.err || a0.__err) return { ok: false, summary: "setup: " + JSON.stringify(a0) };
+  await t.step(30);
+  await t.fn(`
+    window.__hides = [];
+    CBZ.scene.traverse(function (o) {
+      if (!o.name || o.name.indexOf("crowdgpu:") !== 0 || o.__spy) return;
+      o.__spy = true; var v = o.visible;
+      Object.defineProperty(o, "visible", { configurable: true, get: function () { return v; }, set: function (x) { if (!x && v && window.__hides.length < 6) window.__hides.push(o.name + " " + String(new Error().stack).split("\n").slice(1, 6).join(" | ")); v = x; } });
+    });
+    return true;
+  `);
   await t.step(240);
   const a = await t.fn(`
     var ST = CBZ.crowds, S = ST.S, M = CBZ.mob, G = CBZ.crowdGPU;
@@ -46,10 +56,10 @@ export default async function (t) {
     var cam = CBZ.camera && CBZ.camera.position;
     return { rows: rows, bodiesDrawn: bodiesDrawn, signs: signs, signsDrawn: signsDrawn, hidden: hidden, noLook: look, dy: dy,
       gpu: G.audit(), layer: grp.layer ? grp.layer.drawn : null, bodyChain: bodyG ? chain(bodyG) : null, propChain: propG ? chain(propG) : null,
-      meshes: meshes, audit: M.audit(), cam: cam ? [cam.x, cam.y, cam.z] : null, mode: CBZ.game.mode };
+      meshes: meshes, hides: window.__hides, groups: (function () { var L = []; CBZ.scene.traverse(function (o) { if (o.name && o.name.indexOf("crowdgpu:") === 0) L.push(o.name + ":" + o.visible); }); return L; })(), audit: M.audit(), cam: cam ? [cam.x, cam.y, cam.z] : null, mode: CBZ.game.mode };
   `);
   if (!a || a.err || a.__err) return { ok: false, summary: "read: " + JSON.stringify(a) };
   t.log("protest", JSON.stringify(a));
   const ok = a.signsDrawn <= a.bodiesDrawn;
-  return { ok: ok, summary: JSON.stringify({ rows: a.rows, bodiesDrawn: a.bodiesDrawn, signs: a.signs, signsDrawn: a.signsDrawn, dy: a.dy, layer: a.layer, gpuOk: a.gpu.ok, atlas: a.gpu.atlas, bodyChain: a.bodyChain, propChain: a.propChain, meshes: a.meshes }) };
+  return { ok: ok, summary: JSON.stringify({ rows: a.rows, bodiesDrawn: a.bodiesDrawn, signs: a.signs, signsDrawn: a.signsDrawn, dy: a.dy, layer: a.layer, gpuOk: a.gpu.ok, atlas: a.gpu.atlas, bodyChain: a.bodyChain, propChain: a.propChain, meshes: a.meshes, hides: a.hides, groups: a.groups }) };
 }
