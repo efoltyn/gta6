@@ -215,10 +215,19 @@
       heat: 0.55,
       hostileTo: ["gang", "cell"],
       friendlyTo: ["army", "agency"],
-      // There is no police academy in this game and inventing one here would be
-      // a door that opens onto nothing. Refuse with the reason rather than
-      // letting canJoin() return a cheerful yes nobody can act on.
-      admission: { test: function () { return "The department doesn't take walk-ins."; } },
+      // THE DOOR IN IS THE PRECINCT STEP (THE CAREER below): a clean record,
+      // no colours, no file. Rank is seniority on the job (240 s a rung), the
+      // same needScale the army's garrison uses; the Chief is appointed.
+      needScale: { served: 240, orders: 0, bodies: 0, contrib: 0 },
+      admission: {
+        cleanRecord: true,
+        test: function (F) {
+          if (g.cityMembership && g.cityMembership.gangId) return "Not with your colours.";
+          if (g.playerGang && g.playerGang.founded) return "Not with your colours.";
+          if (F && F.isMember && F.isMember("cell")) return "Not with your file.";
+          return true;
+        },
+      },
       lore: "Six rungs. Each one gives an order the rung below it cannot.",
     });
   }
@@ -302,6 +311,9 @@
   function arrestFirst() {
     if (!(CBZ.CONFIG && CBZ.CONFIG.CITY_ARREST_FIRST)) return false;
     if (!commandOn() || !watchStood) return true;
+    // the chair may be yours (THE CAREER below): you hold the order then
+    const F = CBZ.factions;
+    try { if (F && F.rank && F.rank(POLICE_ID) === "chief") return true; } catch (e) {}
     return !!watchAlive("chief");
   }
 
@@ -1006,6 +1018,101 @@
       if (spec.key === "chief") watchStood = true;
     }
   }
+  /* ---- THE CAREER: ENLIST ON THE STEP, RISE BY SERVICE, AND THE CHAIR ------
+     The watch on the precinct step (the Lieutenant, the Captain, the Chief)
+     swears you in: "Enlist" on any of them. You are a patrol officer of the
+     department (factions "police"): the uniform, a service pistol, and rank
+     that comes with time on the job (factions.js credits seniority every
+     second; 240 s a rung) up to Captain. The Chief is APPOINTED, never
+     promoted on merit (the ladder's locked rung), and there are two ways to
+     the chair:
+       · it is empty (the Chief is dead: the vacancy above) and you hold
+         Captain: the department appoints you instead of posting a new one;
+       · you have served as Captain as long again as it took to make it: the
+         Chief retires (walks off the step, CBZ.leave) and hands it to you.
+     As Chief the department's officers take your Kill and Detain
+     (city/orders.js commandsPolice). Leaving the department, or a record
+     (two stars), ends it. ---- */
+  const CAREER = { retireAt: null, t: 0 };
+  function F_() { return CBZ.factions || null; }
+  function copMember() { const F = F_(); try { return !!(F && F.isMember && F.isMember(POLICE_ID)); } catch (e) { return false; } }
+  function copRankKey() { const F = F_(); try { return F && F.rank ? F.rank(POLICE_ID) : null; } catch (e) { return null; } }
+  function enlist(c) {
+    const F = F_();
+    if (!F || !F.canJoin || !F.join) return;
+    const can = F.canJoin(POLICE_ID);
+    if (!can.ok) { copBark(c, [can.why || "No."]); return; }
+    F.join(POLICE_ID, "enlisted");
+    try {
+      const own = g.cityOutfitsOwned || (g.cityOutfitsOwned = {});
+      own.police = true;
+      if (CBZ.cityWearOutfit) CBZ.cityWearOutfit("police", { silent: true });
+      if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon("Pistol");
+      if (CBZ.cityAddAmmo) CBZ.cityAddAmmo(36);
+    } catch (e) {}
+    copBark(c, ["Welcome to the department, officer."]);
+  }
+  function appointChief(why) {
+    const F = F_();
+    if (!F || !F.promote) return false;
+    let ok = false;
+    try { ok = !!F.promote(POLICE_ID, "chief"); } catch (e) { ok = false; }
+    if (ok) {
+      // the chair is filled: the standing order is held again (by you)
+      vacancy.chief = 1e9;
+      watchStood = true;
+      CAREER.retireAt = null;
+      if (CBZ.news && CBZ.news.push) { try { CBZ.news.push("New Police Chief sworn in", { cat: "SECURITY", sub: why || "", phone: true }); } catch (e) {} }
+    }
+    return ok;
+  }
+  // the player's own record of time on the job (factions credits)
+  function copServed() {
+    const F = F_();
+    let m = null;
+    try { m = F && F.membership ? F.membership(POLICE_ID) : null; } catch (e) { m = null; }
+    return m && m.credits ? +m.credits.served || 0 : 0;
+  }
+  function careerTick(dt) {
+    CAREER.t -= dt;
+    if (CAREER.t > 0) return;
+    CAREER.t = 1;
+    if (!copMember()) { CAREER.retireAt = null; if (vacancy.chief >= 1e8) vacancy.chief = 0; return; }
+    const rk = copRankKey();
+    if (rk === "chief") {
+      // a Chief with a record is a Chief no more
+      if ((g.wanted | 0) >= 2) { const F = F_(); try { F.leave(POLICE_ID, "dismissed"); } catch (e) {} vacancy.chief = 60; }
+      return;
+    }
+    if (rk !== "captain") return;
+    const chief = watchAlive("chief");
+    if (!chief) { if (watchStood || commandPosted) appointChief("appointed to the empty chair"); return; }
+    // the old man retires once you have served as Captain as long again
+    if (CAREER.retireAt == null) CAREER.retireAt = copServed() + 5 * 240;
+    if (copServed() >= CAREER.retireAt) {
+      copBark(chief, ["It's yours now."]);
+      chief._watch = false; chief._watchLost = true;
+      const i = watch.indexOf(chief); if (i >= 0) watch.splice(i, 1);
+      if (CBZ.leave && CBZ.leave.go) { try { CBZ.leave.go(chief, { tag: "chief-retires" }); } catch (e) {} }
+      else chief.giveUp = true;
+      appointChief("the Chief retires");
+    }
+  }
+  let careerWired = false;
+  function wireCareer() {
+    const I = CBZ.interactions;
+    if (careerWired || !I || !I.register) return;
+    careerWired = true;
+    I.register("ped:cop", { id: "cop-enlist", prio: 30, campaignSafe: true,
+      canShow: function (c) { return !!(c && c._watch && !c.dead && !copMember() && F_() && (g.wanted | 0) === 0); },
+      label: "Enlist", onSelect: function (c) { enlist(c); } });
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(35.2, function (dt) {
+    if (!econ() || g.state !== "playing") return;
+    wireCareer();
+    careerTick(Math.min(0.1, dt || 0));
+  });
+
   // a commander went down: start the vacancy clock ONCE, and let the city hear
   // it. cityHurtCop already routes the kill through the shared death bus; this
   // only records that the chair is empty.
