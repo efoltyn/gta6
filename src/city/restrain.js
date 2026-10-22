@@ -295,6 +295,8 @@
     const s = st(ped);
     if (s !== "in_vehicle" && s !== "boarding") return false;
     const car = ped.restraint.vehicle;
+    // a man you carried in with no ties on comes out a free man (stow below)
+    if (ped.restraint.loose) { release(ped); return true; }
     unseatBody(ped, car);
     ped.restraint.state = "cuffed";
     ped.restraint.vehicle = null;
@@ -403,6 +405,7 @@
     return S && S.a === me && HOLDS[S.verb] && !S.tFree && (S.phase !== "approach" || S.t === handT) ? S.t : null;
   }
   function letLoose(ped) {
+    if (ped._stowing) return;          // going in the back of your car (stow below)
     if (st(ped) === "grappled") { ped.restraint = null; untrack(ped); }
     ped.controlled = false;
     if (ped.char) ped.char.guardBroke = 0;
@@ -426,6 +429,155 @@
     }
     I.refresh();
   }
+
+  /* ---- THE MAN IN YOUR HANDS GOES IN THE BACK (stow) ------------------------
+     OWNER (2026-10-22): "when I press E to drive a car but I'm holding a
+     person over my shoulder, it should put them in the trunk or backseat: my
+     character should physically open it and throw them in, unless I drop
+     them before entering the vehicle."
+
+     Every way into a car ends in CBZ.cityEnterVehicle (F, the ride router,
+     the door pin, a tap on the car, the pad's Y), so this is one wrap on it.
+     With a man in your hands (a grip, a carry, a drag) and a free seat that
+     is not the wheel, the press becomes: you walk to that seat's door (the
+     back first: CBZ.boarding.seatFor), its real door swings open
+     (CBZ.boarding.door), you set him down into it and he is on the seat
+     (CBZ.boarding.load: the one seat placement every boarding ends in), the
+     door shuts, and then the ordinary entry runs (your own door, the wheel).
+     Drop him first (tap E) and F is just F. A full car, or one somebody is
+     driving: F is just F, and he drops when you get in.
+
+     NO TRUNK. No car body has a lid that opens, and a man put in a shut box
+     nobody can see is exactly the hidden-rig bug this file deleted ("they
+     just disappear"). The back seat is behind glass, through a real door.
+
+     He rides as cargo: restraint "in_vehicle" with `loose` (no ties on him).
+     Drag out (E on the car, rs-unseat) takes him out again a free man; a
+     wreck lets him go. A cuffed man is not carried: he is marched, then
+     Stuffed in (rs-stuff). */
+  const STOW_WALK_MAX = 6;        // s: the walk to the door gives up after this
+  const STOW_REACH = 0.85;        // m from the stand point that counts as at the door
+  const STOW_OPEN_T = 0.4, STOW_PUT_MAX = 1.4, STOW_SHUT_T = 0.35;
+  let stowJob = null;
+  function stowSeat(car) {
+    const B = CBZ.boarding;
+    if (!car || car.dead || car.player || !B || !B.seatFor || !B.load || !B.door) return null;
+    if (car.npcDriver && !car.npcDriver.dead) return null;
+    if (CBZ.carNpcDriven && CBZ.carNpcDriven(car)) return null;
+    return B.seatFor(car);
+  }
+  function stowStart(car) {
+    const P = CBZ.player;
+    if (stowJob || !P || P.dead || P.driving || P._aircraft || g.mode !== "city") return false;
+    const t = handTarget();
+    if (!t || t.dead || t !== handPed || st(t) !== "grappled") return false;
+    const seat = stowSeat(car);
+    if (!seat) return false;
+    t._stowing = true;
+    stowJob = { car: car, seatId: seat.id, ped: t, phase: "walk", t: 0 };
+    return true;
+  }
+  function stowKeys(on) { const k = CBZ.keys; if (k) { k.w = !!on; if (!on) k.shift = false; } }
+  function faceTo(x, z, dt, rate) {
+    const P = CBZ.player, cam = CBZ.cam;
+    if (!cam || !P) return;
+    const want = Math.atan2(-(x - P.pos.x), -(z - P.pos.z));
+    let d = want - cam.yaw;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    cam.yaw += d * Math.min(1, dt * (rate || 9));
+  }
+  // walked off, shot, or he got loose: the beat is over, he is in your hands
+  // or on the ground exactly as the hands left him
+  function stowAbort() {
+    const j = stowJob; stowJob = null;
+    if (!j) return;
+    if (j.phase === "walk") stowKeys(false);
+    const p = j.ped;
+    p._stowing = false;
+    if (st(p) === "grappled" && !held(p)) { if (p === handPed) { handPed = null; handT = null; } letLoose(p); }
+  }
+  function stowSeatIn(j) {
+    const p = j.ped, car = j.car;
+    if (CBZ.bodyFall && CBZ.bodyFall.active && CBZ.bodyFall.active(p) && CBZ.bodyFall.clear) CBZ.bodyFall.clear(p);
+    p._stowing = false;
+    if (p === handPed) { handPed = null; handT = null; }
+    if (!CBZ.boarding.load(p, car, j.seatId)) {
+      if (st(p) === "grappled") letLoose(p);
+      return false;
+    }
+    p.restraint = { state: "in_vehicle", by: "player", t: 0, vehicle: car, loose: true };
+    track(p);
+    noteCaptive(car, p);
+    I.refresh();
+    return true;
+  }
+  CBZ.onUpdate(33.2, function (dt) {
+    const j = stowJob;
+    if (!j) return;
+    const P = CBZ.player, car = j.car, p = j.ped;
+    if (g.mode !== "city" || g.state !== "playing" || !P || P.dead || P.driving || p.dead ||
+      !car || car.dead || !car.group || !car.group.parent) { stowAbort(); return; }
+    j.t += dt;
+    const S = CBZ.boarding.seatFor(car, j.seatId);
+    if (!S) { stowAbort(); return; }
+    if (j.phase === "walk") {
+      if (!held(p)) { stowAbort(); return; }                 // he was dropped on the way
+      const d = Math.hypot(S.x - P.pos.x, S.z - P.pos.z);
+      if (d <= STOW_REACH || (j.t > STOW_WALK_MAX && d < 2.2)) {
+        stowKeys(false);
+        j.phase = "open"; j.t = 0;
+        if (CBZ.sfx) { try { CBZ.sfx("door_open"); } catch (e) {} }
+        return;
+      }
+      if (j.t > STOW_WALK_MAX) { stowAbort(); return; }
+      faceTo(S.x, S.z, dt, 9);
+      stowKeys(true);
+      return;
+    }
+    if (j.phase === "open") {
+      if (!held(p)) { stowAbort(); return; }
+      faceTo(S.doorX, S.doorZ, dt, 12);
+      CBZ.boarding.door(car, j.seatId, Math.min(1, j.t / STOW_OPEN_T));
+      if (j.t >= STOW_OPEN_T) { letGo(p, "set"); j.phase = "put"; j.t = 0; }
+      return;
+    }
+    if (j.phase === "put") {
+      CBZ.boarding.door(car, j.seatId, 1);
+      if (held(p) && j.t < STOW_PUT_MAX) return;              // he is still coming off your shoulder
+      if (held(p)) letGo(p, "drop");
+      j.phase = stowSeatIn(j) ? "shut" : "enter"; j.t = 0;
+      return;
+    }
+    if (j.phase === "shut") {
+      CBZ.boarding.door(car, j.seatId, Math.max(0, 1 - j.t / STOW_SHUT_T));
+      if (j.t < STOW_SHUT_T) return;
+      if (CBZ.sfx) { try { CBZ.sfx("door_close"); } catch (e) {} }
+      j.phase = "enter";
+    }
+    // and now you get in, through your own door
+    stowJob = null;
+    if (CBZ.cityEnterVehicle) CBZ.cityEnterVehicle(car);
+  });
+  // one wrap on the one way into a car (after city/boarding.js's door arc)
+  let stowWrapTries = 0;
+  function wrapEnterForStow() {
+    const f = CBZ.cityEnterVehicle;
+    if (typeof f !== "function") return false;
+    if (f._stowWrapped) return true;
+    if (!f._boardWrapped && ++stowWrapTries < 100) return false;   // outside the door arc's wrap
+    const w = function (car, opts) {
+      if (opts && opts.instant) return f.apply(this, arguments);
+      if (stowJob) return true;                 // the beat is running: this press is spent
+      if (stowStart(car)) return true;
+      return f.apply(this, arguments);
+    };
+    for (const k in f) { if (/Wrapped$/.test(k)) w[k] = f[k]; }
+    w._stowWrapped = true;
+    CBZ.cityEnterVehicle = w;
+    return true;
+  }
+  if (!wrapEnterForStow()) { const iv = setInterval(function () { if (wrapEnterForStow()) clearInterval(iv); }, 100); }
 
   // ---- TURN IN: the desk pays for paper, and only for paper ------------------
   /* HE IS WALKED IN, NOT ERASED. A collar handed over here used to go through
@@ -580,6 +732,12 @@
       if (r.state === "in_vehicle") {
         const car = r.vehicle;
         // car blown up / despawned → they tumble out at the wreck, still tied
+        if (r.loose && (!car || car.dead || !car.group || !car.group.parent || !(ped._cbzSeat && ped._cbzSeat.veh === car))) {
+          // carried in untied: the wreck (or a lost seat) lets him go free
+          release(ped, { silent: true });
+          if (car && car.dead) ped.ko = Math.max(ped.ko || 0, 2);
+          continue;
+        }
         if (!car || car.dead || !car.group || !car.group.parent) {
           unseatBody(ped, car);
           r.state = "cuffed"; r.vehicle = null;
@@ -685,8 +843,10 @@
   });
 
   // ---- THE HANDS ON THE STREET (the one grab: systems/handverbs.js) ----------
-  // HOLD E on a person: Grab (Pick up on a man who is down). E stays his tap
-  // verb; the hands are the heavier one. A clinch only works empty-handed or
+  // HOLD E on a person: Grab (Pick up on a man who is down). His options are
+  // on I J K L (tap E is the first of them); the hands are hold E, and the
+  // man in your hands is tap E (set down) / hold E (tie) / I (Carry). The
+  // throw is the attack button's. A clinch only works empty-handed or
   // with a one-hand gun: you cannot take a man by the collar around a rifle.
   const HV = () => CBZ.handVerbs || null;
   function downed(p) { const v = VB(), B = v && v.body ? v.body(p) : null; return !!(B && B.down && B.down()); }
@@ -725,7 +885,7 @@
     onSelect: () => { if (CBZ.grapple) CBZ.grapple.release(true); },
   });
   I.register("pedheld", {
-    id: "rs-hand-carry", wheel: true, prio: 70,
+    id: "rs-hand-carry", prio: 70,
     canShow: () => { const H = heldNow(); return !!(H && H.kind === "hold"); },
     label: "Carry",
     onSelect: (p) => { const v = VB(); if (v && pa()) v.carry(pa(), p); },

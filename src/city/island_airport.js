@@ -1271,9 +1271,9 @@
     // the milvehicle layer means interactions.js's dualRideRows builds the
     // airliner's two-verb card from this option + militaryvehicles.js's
     // "milveh-take" (the ONE ride that keeps a card — verbs, never YES/NO):
-    //   [E] BOARD   (this — elevator-style walk-in, harmless; the E-router
-    //               yields to the card so E boards instead of hijacking)
-    //   [I] HIJACK  (fly it — militaryvehicles.js, loud, 4★)
+    //   [F] BOARD   (this — elevator-style walk-in, harmless. F is the one
+    //               key into any vehicle, 2026-10-22; it outranks the theft)
+    //   Q HIJACK    (fly it — militaryvehicles.js, loud, 4★: the wheel)
     // Both rows fire the options' own onSelect. The board reach is the milvehicle
     // candidate's own 5.5m footprint reach (militaryvehicles.js) — NOT the door
     // itself: the solid hull AABB spans the whole wing/fuselage footprint, so
@@ -1284,7 +1284,7 @@
     // into the cabin — the same "walk up → door slides → step in" elevator
     // grammar, without demanding a door-touch the collider forbids.
     CBZ.interactions.register("milvehicle", {
-      id: "airliner_board", slot: "i", prio: 1,
+      id: "airliner_board", slot: "i", ride: true, prio: 1,
       canShow: function (v, ctx) {
         if (!v || v.flightKind !== "airliner" || v.taken) return false;
         if (!v.group || !v.group.parent || !v.group.userData || !v.group.userData.cabin) return false;
@@ -1333,7 +1333,7 @@
       },
       options: [
         {
-          id: "airliner_exit", slot: "e", label: "Get off",
+          id: "airliner_exit", slot: "e", ride: true, label: "Get off",
           /* YOU CANNOT STEP OFF AN AEROPLANE THAT IS FLYING. This gate had no
              reason to exist while an airliner was a thing bolted to a gate;
              systems/airline.js flies this same hull with you in it, and the

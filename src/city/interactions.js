@@ -27,18 +27,30 @@
      • SLOT EXCLUSIVITY — per key slot the highest-prio passing option
        wins. That's how branch menus (your soldier vs a stranger) stay
        mutually exclusive WITHOUT every gate re-checking its siblings.
-     • THE KEY MAP (owner 2026-09-29: "E does too many things... it's very
-       stupid"). One key, one meaning, like GTA and RDR:
-         E       the ONE obvious verb on the thing you are LOOKING at
-         hold E  that thing's heavier verb, only where one is authored
-                 (option `hold:true`, e.g. feed-and-tame a horse)
-         F       get in / get out. Every option flagged `ride:true` (a car,
-                 a horse, a plane, the state car) and the ride router; the
-                 way out of any seat is systems/seat_exit.js's, also on F
+     • THE KEY MAP (owner 2026-10-22: "IJKL are great for interaction
+       options, always ... E is very very overused ... entering the
+       helicopter is F but E is entering other vehicles, it's just dumb").
+       One rule per key, the same on every thing and every vehicle:
+         E       USE the thing you are looking at: a door, a counter, a
+                 lift, a crate, a chair. On a living thing (a person, a dog,
+                 a horse) tap E is his first harmless option (never a mug,
+                 never an order to hurt him: those keep their own letter).
+         hold E  THE HANDS on a person (grab / pick up; with a man in your
+                 hands tap E sets him down, hold E ties him). On a thing,
+                 its heavier verb where one is authored (`hold:true`).
+         F       ENTER / EXIT ANY VEHICLE OR MOUNT: car, truck, bike, boat,
+                 helicopter, plane, airliner, the state car, a horse. Every
+                 option flagged `ride:true` and the ride router; the way out
+                 of any seat is systems/seat_exit.js's, also on F. With a man
+                 in your hands, F at a car puts him in the back first
+                 (city/restrain.js stow).
+         I J K L A LIVING THING'S OPTIONS, best first, on him: his trade,
+                 his money, the orders about him, the answers to what he
+                 just said. Never a verb the attack button already does
+                 (Punch is LMB): those are `wheel:true`.
          Q       the wheel: EVERYTHING you can do to this thing, laid round
-                 it (city/verbwheel.js). An order to your people about a
-                 man sits on that man (city/orders.js).
-       Touch collapses all four into "tap the thing" (systems/touch.js).
+                 it (city/verbwheel.js), past the four keys.
+       Touch collapses all of them into "tap the thing" (systems/touch.js).
      • TARGETING — facing-weighted proximity scoring (the camera ray in
        this engine IS the yaw cone) with HYSTERESIS: the current target
        keeps the panel unless a rival scores meaningfully better, so the
@@ -398,15 +410,35 @@
 
   // Resolve a candidate into its KEY ROWS. OWNER DOCTRINE: a card lists ONLY
   // doable actions; declining is walking away, never a "NO" row. The whole
-  // gated pool is sorted once by authored priority and split by KEY:
+  // gated pool is sorted once by authored priority and split by KEY.
+  // A THING:
   //   E tap   the best ordinary verb      (at most one)
   //   E hold  the best `hold:true` verb   (at most one)
   //   F       the best `ride:true` verb   (at most one)
+  // A LIVING THING (a person, the man in your hands, a dog, an animal):
+  //   I J K L its first four options, best first (finishRows keys them)
+  //   E       the hands (rs-hand-*: hold E grab, tap E set him down), else
+  //           tap E is his first harmless option
+  //   F       the mount (a horse) or the ride he offers (the state car)
   // Everything else in the pool is still reachable: it is the Q wheel's
-  // (rows._pass, in this same order). Nothing is discarded any more; the old
-  // one-row funnel threw ~40 registered person verbs away a line before the
-  // screen, which is how "talk, then hire" became the only flow there was.
+  // (rows._pass, in this same order). A `wheel:true` verb is never a key:
+  // that is where a verb the attack button already does (Punch) lives.
   function isRide(o) { return !!(o && o.ride); }
+  const OPT_KEYS = ["i", "j", "k", "l"];
+  function living(cand) {
+    const ls = cand && cand.layers;
+    if (!ls) return false;
+    for (let i = 0; i < ls.length; i++) {
+      const l = ls[i];
+      if (l === "ped" || l === "pedheld" || l === "dog" || l === "animal" || l.indexOf("ped:") === 0) return true;
+    }
+    return false;
+  }
+  // THE HANDS (city/restrain.js): the only verbs on a person's E. Grab /
+  // Pick up is hold E, the man in your hands goes down on tap E and is tied
+  // on hold E. Carry is an option (I); Throw is the attack button's (LMB).
+  const HAND_E = { "rs-hand-grab": 1, "rs-hand-drop": 1, "rs-hand-cuff": 1 };
+  function isHand(o) { return !!(o && HAND_E[o.id]); }
   function onDuty() {
     const Pz = CBZ.presidency;
     if (!Pz || typeof Pz.seat !== "function") return false;
@@ -477,14 +509,26 @@
     // street verb left standing. They stay on his wheel (Q / a tap), with
     // everything else he can do; his orders (`anyone`) keep their keys.
     const duty = onDuty();
-    for (const o of pass) {
-      if (o.wheel) continue;                // a `wheel` verb is never a key
-      if (duty && o.bad && o.layer && !o.anyone) continue;
-      if (isRide(o)) { if (!ride) ride = o; }
-      else if (o.hold) { if (!hold) hold = o; }
-      else if (!tap) tap = o;
-    }
     const rows = [];
+    if (living(cand)) {
+      // every option a row (keyed "o" here; finishRows hands out I J K L),
+      // the hands on E, the mount on F
+      for (const o of pass) {
+        if (o.wheel) continue;
+        if (duty && o.bad && o.layer && !o.anyone) continue;
+        if (isRide(o)) { if (!ride) ride = o; }
+        else if (isHand(o)) { if (o.hold) { if (!hold) hold = o; } else if (!tap) tap = o; }
+        else rows.push(keyRow("o", false, o, t, ctx));
+      }
+    } else {
+      for (const o of pass) {
+        if (o.wheel) continue;                // a `wheel` verb is never a key
+        if (duty && o.bad && o.layer && !o.anyone) continue;
+        if (isRide(o)) { if (!ride) ride = o; }
+        else if (o.hold) { if (!hold) hold = o; }
+        else if (!tap) tap = o;
+      }
+    }
     if (tap) rows.push(keyRow("e", false, tap, t, ctx));
     if (hold) rows.push(keyRow("e", true, hold, t, ctx));
     if (ride) rows.push(keyRow("f", false, ride, t, ctx));
@@ -777,12 +821,34 @@
       if (vr && vr.length) { if (!vr._pass) vr._pass = rows._pass; vr._speak = rows._speak; rows = vr; break; }
     }
 
-    // ONLY E AND F ARE KEYS. A provider row on any other letter (dialogue's
-    // second answer) moves into the Q wheel, first in line, never a key.
+    const pass = rows._pass, sp = rows._speak, dual = rows.dualRide;
+    if (living(pick)) {
+      // A LIVING THING: his options (or a provider's answers: dialogue's two)
+      // take I J K L in order, the fifth on is the Q wheel's. Tap E is the
+      // first harmless one (an `alias` row, never drawn) unless the hands
+      // own E (the man in your hands: set him down).
+      const out = [], keep = [];
+      let extra = null, n = 0;
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (r.alias) continue;
+        if (r.key === "f" || isHand(r.opt)) { keep.push(r); continue; }
+        if (n < OPT_KEYS.length) out.push(Object.assign({}, r, { key: OPT_KEYS[n++], hold: false }));
+        else (extra || (extra = [])).push(r);
+      }
+      let eTap = false;
+      for (let i = 0; i < keep.length; i++) { out.push(keep[i]); if (keep[i].key === "e" && !keep[i].hold) eTap = true; }
+      // the alias is the first option that hurts nobody: a tap of E never
+      // mugs a man or sends your crew at him (that takes its own letter)
+      if (!eTap) for (let i = 0; i < n; i++) if (!out[i].bad) { out.push(Object.assign({}, out[i], { key: "e", alias: true })); break; }
+      out._pass = pass; out._extra = extra; out._speak = sp; out.dualRide = dual;
+      return out;
+    }
+    // A THING: only E and F are keys. A provider row on any other letter
+    // moves into the Q wheel, first in line, never a key.
     let extra = null;
     for (let i = 0; i < rows.length; i++) if (rows[i].key !== "e" && rows[i].key !== "f") { extra = extra || []; extra.push(rows[i]); }
     if (extra) {
-      const pass = rows._pass, sp = rows._speak, dual = rows.dualRide;
       rows = rows.filter((r) => r.key === "e" || r.key === "f");
       rows._pass = pass; rows._extra = extra; rows._speak = sp; rows.dualRide = dual;
     }
@@ -801,9 +867,13 @@
     // chair now (placeCard below), and nothing else ever said the chair was a
     // verb, so the President's chair, the desk and the phone read as scenery.
     // a hold row's chip reads "HOLD E", so the card never shows two bare E's
-    const shown = (SILENT_RIDE[pick.kind] ? rows.filter((r) => r.key !== "f") : rows)
+    // An `alias` row (tap E = a person's [I] option) is never drawn twice; a
+    // pinned verb that owns E right now takes the E rows off the card (a
+    // person's I J K L stay on him).
+    const pinE = useOwner("e") === "pill";
+    const shown = rows.filter((r) => !r.alias && !(SILENT_RIDE[pick.kind] && r.key === "f") && !(pinE && r.key === "e"))
       .map((r) => (r.hold ? Object.assign({}, r, { key: "hold " + r.key }) : r));
-    if (!shown.length || CBZ.touchMode || (CBZ.verbWheel && CBZ.verbWheel.isOpen()) || useOwner("e") === "pill") {
+    if (!shown.length || CBZ.touchMode || (CBZ.verbWheel && CBZ.verbWheel.isOpen())) {
       quietPanel(pick.kind);
       return;
     }
@@ -946,8 +1016,9 @@
      E: tap fires the E verb on keydown; if the target also has a HOLD verb,
      the press arms a timer instead - past HOLD_T the hold verb fires, a quick
      release fires the tap. F: the ride verb of the thing you are looking at,
-     else the ride router (the nearest car / plane / hull). Q is the wheel's
-     (city/verbwheel.js). I, J, K and L are no longer interaction keys. */
+     else the ride router (the nearest car / plane / hull). I J K L: the
+     option on that key of the living thing you are looking at (fires on
+     keydown, no hold). Q is the wheel's (city/verbwheel.js). */
   let holdKey = "", holdT = 0, holdFired = false;
   function rowFor(key, hold) {
     for (const r of currentRows) if (r.key === key && !!r.hold === !!hold) return r;
@@ -983,6 +1054,17 @@
       if (CBZ.cityTryNearestRide && CBZ.cityTryNearestRide()) e.preventDefault();
       return;
     }
+    if (OPT_KEYS.indexOf(k) >= 0) {
+      if (!current || !currentRows.length || (CBZ.verbWheel && CBZ.verbWheel.isOpen())) return;
+      const t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+      if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return;
+      const r = rowFor(k, false);
+      if (!r) return;
+      e.preventDefault();
+      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      if (!e.repeat) fire(r);
+      return;
+    }
     if (k !== "e" || !current || !currentRows.length) return;
     // the wheel is modal, and an order waiting for its "who" owns E (its pin)
     if (CBZ.verbWheel && CBZ.verbWheel.isOpen()) return;
@@ -1005,9 +1087,10 @@
     if (tap) fire(tap);   // released before the threshold → the tap verb
   });
 
-  // Is a live prompt offering an action on this key right now? charpanel.js
-  // and familypanel.js ask before claiming a letter. Only E and F are
-  // interaction keys now, so their I / L are always theirs.
+  // Is a live prompt offering an action on this key right now? Every other
+  // listener on E / F / I / J / K / L asks before claiming a letter
+  // (familypanel.js's L, agency.js's J folder, heists.js's K): a person's
+  // options win while you are looking at him.
   function hasSlot(key) {
     if (!current || !currentRows || !currentRows.length) return false;
     if (g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen || (CBZ.player && CBZ.player.dead)) return false;

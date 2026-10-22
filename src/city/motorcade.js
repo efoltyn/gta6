@@ -1800,7 +1800,7 @@
         if (rec && rec.name) { ped.name = rec.name; ped.nameKnown = true; }
         ped._presStaff = "driver";
         if (CBZ.interactions && CBZ.interactions.registerFor) {
-          CBZ.interactions.registerFor(ped, { id: "mc-door-drive", slot: "e", prio: 30, campaignSafe: true, forceYes: true, anyone: true,
+          CBZ.interactions.registerFor(ped, { id: "mc-door-drive", slot: "e", ride: true, prio: 30, campaignSafe: true, forceYes: true, anyone: true,
             label: "Drive",
             canShow: function () { return !ped.dead && playerPresident() && !!stateCar() && !BOARD && !(RUN && (RUN.phase === "drive" || RUN.phase === "evac")); },
             onSelect: function () { askWhere(ped); } });

@@ -5,9 +5,11 @@
    "stupidly simple, make the logic clear, but then have tremendous variety of
    interaction." So the keys stay dumb and the variety lives on the thing:
 
-     E   the one obvious verb on what you look at     (city/interactions.js)
-     F   get in / get out                             (city/interactions.js,
+     E   use the thing you look at; hold E on a person is the grab
+                                                      (city/interactions.js)
+     F   into / out of any vehicle or mount           (city/interactions.js,
                                                         systems/seat_exit.js)
+     I J K L  a living thing's first four options     (city/interactions.js)
      Q   THIS: the verbs of the thing you are looking at (a person, a car, a
          counter, your own car while you drive), in one short column beside
          it: the obvious one first and biggest, then the few that fit this

@@ -1289,7 +1289,7 @@
     const k = (e.key || "").toLowerCase();
 
     // [K] backs out of a cased/queued score (the board uses its own clicks)
-    if (k === "k" && !CBZ.cityMenuOpen) {
+    if (k === "k" && !CBZ.cityMenuOpen && !e.defaultPrevented && !(CBZ.cityInteractHasSlot && CBZ.cityInteractHasSlot("k"))) {
       const h = ensure();
       if (h.phase === "case") { e.preventDefault(); abort("Backed out of the score."); return; }
     }
