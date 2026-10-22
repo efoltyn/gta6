@@ -82,6 +82,10 @@
                                   Neighbours: don't retarget or re-pose a
                                   body while this is true.
      CBZ.propUseAudit()         — the ratchet counter (see below)
+     CBZ.propUnregister(recs)   — records leave with the world that built them
+     CBZ.propSleep(P, bed, { lieOnly: true }) + CBZ.propRestNight(bed)
+                                — get in now, sleep the night as a second choice
+     bed.isMine()               — optional on a record: "yours tonight" (a rented room)
    Seats are single-occupancy with stale-claim tolerance (a dead/recycled
    occupant frees the seat lazily — correctness never depends on a release
    call), and a walk-claim expires on its own if its owner never arrives.
@@ -344,6 +348,40 @@
     };
     beds.push(rec);
     return rec;
+  };
+  /* A WORLD THAT LEAVES TAKES ITS FURNITURE WITH IT. The registries only ever
+     grew (a whole-world reset was the one way out), which was right for a
+     city built once and wrong for the isles, whose islands stream in and out
+     (world/disaster_arena.js registers an island's beds when it joins the
+     world and calls this when it leaves). Records go, their coordinate keys
+     go (the island coming back registers the same beds again), and a body in
+     one of them is stood up first. Seats and beds both; nulls are skipped. */
+  function keyOf(r) { return Math.round(r.x * 10) + "," + Math.round((r.y || 0) * 10) + "," + Math.round(r.z * 10); }
+  CBZ.propUnregister = function (list) {
+    if (!list) return 0;
+    const gone = new Set();
+    for (let i = 0; i < list.length; i++) if (list[i]) gone.add(list[i]);
+    if (!gone.size) return 0;
+    const P = CBZ.player;
+    if (P && (gone.has(P._propBed) || gone.has(P._propSeat))) {
+      if (P._propSeat) CBZ.propStand(P, { instant: true }); else CBZ.propWake(P, { instant: true });
+    }
+    let n = 0;
+    for (const L of [beds, seats]) {
+      let w = 0;
+      for (let i = 0; i < L.length; i++) {
+        const r = L[i];
+        if (!gone.has(r)) { L[w++] = r; continue; }
+        const o = r.occupant;
+        if (o && o !== P && (o._propBed === r || o._propSeat === r)) lostBody(o);
+        (L === beds ? bedKeys : seatKeys).delete(keyOf(r));
+        r.occupant = null; r._gone = true;
+        n++;
+      }
+      L.length = w;
+    }
+    for (let i = claimed.length - 1; i >= 0; i--) if (gone.has(claimed[i])) claimed.splice(i, 1);
+    return n;
   };
   // called by props.js's regDynAd for every board that can carry the live
   // WANTED poster. entry.lastKey (the props.js dynAds record) is the live
@@ -745,6 +783,9 @@
      conservative direction — you get the weaker heal and the risk. */
   function bedOwned(bed) {
     const g = CBZ.game;
+    // a bed that knows whose it is tonight (a room the isles' hotels rented
+    // you: world/island_lodging.js)
+    if (typeof bed.isMine === "function") { try { if (bed.isMine()) return true; } catch (e) {} }
     const lot = bed.lot || lotOf(bed);
     if (!lot) return false;
     if (g && g.cityHome && g.cityHome.lot === lot) return true;
@@ -800,6 +841,20 @@
     try { msg += restPayoff(bed); } catch (e) {}
     if (CBZ.city && CBZ.city.note) CBZ.city.note(msg, 2.6);
   }
+  /* THE NIGHT, AS ITS OWN DECISION: the player already lying in `bed`
+     (propSleep with lieOnly) chooses to sleep. The same skip and the same
+     payoff bedDown gives, without the note: the caller owns the fade and
+     whatever a full night in a room that is yours is worth on top. */
+  CBZ.propRestNight = function (bed) {
+    const P = CBZ.player;
+    if (!on() || !P || !bed || P._propBed !== bed) return null;
+    const skipped = skipToMorning();
+    const g = CBZ.game;
+    if (g && g.tired != null) g.tired = 0;
+    let line = "";
+    try { line = restPayoff(bed); } catch (e) {}
+    return { skipped: skipped, owned: bedOwned(bed), line: line };
+  };
   CBZ.propSleep = function (actor, bed, opts) {
     if (!on() || !actor || !bed || !isFree(bed)) return false;
     if (actor.dead || (actor.ko | 0) > 0 || actor.driving) return false;
@@ -818,8 +873,11 @@
       actor._propLie = true;
       if (actor.pos) { actor.speed = 0; actor.path = null; }
     }
-    // the time-skip and the heal fire once the body is actually IN the bed
-    const o = { onDone: isP ? bedDown : bedNpcDone, onAbort: lostBody, instant: !!(opts && opts.instant) || !bed._reg };
+    // the time-skip and the heal fire once the body is actually IN the bed;
+    // opts.lieOnly: the player only gets in, and sleeping is its own decision
+    // after (CBZ.propRestNight, the isles' "Sleep")
+    const lieOnly = !!(opts && opts.lieOnly);
+    const o = { onDone: isP ? (lieOnly ? null : bedDown) : bedNpcDone, onAbort: lostBody, instant: !!(opts && opts.instant) || !bed._reg };
     if (M.lie(actor, bed, o)) return true;
     o.instant = true;
     if (M.lie(actor, bed, o)) return true;

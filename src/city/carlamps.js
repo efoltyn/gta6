@@ -24,7 +24,7 @@
    Slots are refreshed every frame for cars inside LAMP_GATE of the
    camera (a 25 + 9 vertex write per slot, zero allocation; the ground
    under a pool is re-sampled only when its car moved/turned); the cap keeps
-   the pool bounded no matter how big the fleet gets. City-gated;
+   the pool bounded no matter how big the fleet gets. Gang City and the isles;
    headless builds no meshes and the update no-ops.
 ============================================================ */
 (function () {
@@ -209,7 +209,9 @@
 
   CBZ.onUpdate(37.7, function () {
     const g = CBZ.game;
-    if (!g || g.mode !== "city") { if (head && head.visible) { head.visible = tail.visible = false; } return; }
+    // the isles' cars are the same city/vehicles.js records (world/island_vehicles.js)
+    const isles = !!(g && g.mode === "archipelago");
+    if (!g || (g.mode !== "city" && !isles)) { if (head && head.visible) { head.visible = tail.visible = false; } return; }
     if (!built) build();
     if (!head) return;
     const night = Math.max(0, Math.min(1, CBZ.nightAmount || 0));
@@ -227,8 +229,9 @@
       return;
     }
     head.visible = tail.visible = true;
-    const A = CBZ.city && CBZ.city.arena;
-    const f = A && typeof A.groundDecalY === "function" ? A.groundDecalY : null;
+    const A = isles ? null : CBZ.city && CBZ.city.arena;
+    const IA = isles && CBZ.surv ? CBZ.surv.arena : null;   // the island's drawn ground (road tops included)
+    const f = A && typeof A.groundDecalY === "function" ? A.groundDecalY : (IA && typeof IA.groundAt === "function" ? IA.groundAt : null);
     const cam = CBZ.camera.position;
     let n = 0, budget = RESAMPLE_BUDGET;
     const cars = CBZ.cityCars || [];

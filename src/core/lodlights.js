@@ -417,7 +417,12 @@
   function smooth(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
   function tick(dt) {
     const g = CBZ.game;
-    const live = !!(g && g.mode === "city" && ROOT && CITY);
+    // THE ISLES carry their night to the horizon the same way: their lamps and
+    // lit windows are static groups (world/island_night.js, keys "isle:*"),
+    // hung on the scene because the archipelago has no city root. The city's
+    // own groups stay in the buffers, thirty kilometres off past the haze.
+    const isles = !!(g && g.mode === "archipelago" && CBZ.scene);
+    const live = !!(g && ((g.mode === "city" && ROOT && CITY) || isles));
     const n = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
     const night = live ? smooth(0.1, 0.55, n) : 0;
     U.uNight.value = night;
@@ -427,15 +432,15 @@
     dt = +dt || 0.016;
     U.uTime.value = (U.uTime.value + dt) % 7200;
     // late passes and new roads/shells (streamed builders add both)
-    sweepT -= dt;
-    if (sweepT <= 0) {
+    if (!isles) sweepT -= dt;
+    if (!isles && sweepT <= 0) {
       sweepT = 2;
       const nr = (CITY.roads || []).length;
       if (nr !== roadsSeen) { roadsSeen = nr; try { buildTraffic(CITY); } catch (e) { console.error("[lodlights] traffic", e); } }
       const sh = (CITY.root && CITY.root.userData && CITY.root.userData.shells) || [];
       if (sh.length !== shellsSeen) { shellsSeen = sh.length; try { buildShellBeacons(CITY); } catch (e) { console.error("[lodlights] beacons", e); } }
     }
-    for (const L of LAYERS) L.flush(ROOT);
+    for (const L of LAYERS) L.flush(isles ? CBZ.scene : ROOT);
     if (!show) return;
     const MF = CBZ.metroFabric && CBZ.metroFabric.uniforms;
     U.uLate.value = MF && MF.uMfLate ? MF.uMfLate.value : 0;

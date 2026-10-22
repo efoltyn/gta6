@@ -79,7 +79,8 @@
     if (!g) return false;
     const m = g.mode;
     if (m === "escape") return ((g.inventory && g.inventory[ITEM.escape]) || 0) > 0;
-    if (m === "city") return ((g.cityInv && g.cityInv[ITEM.city]) || 0) > 0;
+    // the isles carry the city's pockets (the economy runs on both)
+    if (m === "city" || m === "archipelago") return ((g.cityInv && g.cityInv[ITEM.city]) || 0) > 0;
     return false;
   }
 
@@ -623,7 +624,7 @@
 
   function tick(dt) {
     const m = mode();
-    const has = (m === "escape" || m === "city") && owned();
+    const has = (m === "escape" || m === "city" || m === "archipelago") && owned();
     // LOSING IT PUTS IT OUT: sold, frisked, dropped on death, a new run.
     if (!has && lit) { lit = false; publish(); }
     const cuffs = has && cuffed();

@@ -422,13 +422,23 @@
   CBZ.survIslandDayF = islandDayF;
   const _gA = new THREE.Color(), _gB = new THREE.Color();
   const MOON = 0x8fa7dc, NIGHT_SKY = 0x2a3a60, NIGHT_FOG = 0x0c1422, DUSK_FOG = 0xd98a62, DUSK_SUN = 0xff9a52;
+  /* THE ISLES' NIGHT IS DARK. The archipelago (world/archipelago.js) runs
+     this same clock grade with a darker floor. The disaster round keeps its
+     readable 0.30 moonlight (a match has to be playable at midnight); the
+     isles do not. Unlit is deep blue-black, the moon's phase decides how much
+     you see by it, and what you DO see by is real light: street lamps, the
+     lit rooms behind the windows (world/island_night.js), headlights, your
+     torch. Never a grey wash laid over the day. */
+  const ARCH_NIGHT = { moon: 0.15, sky: 0x0a1222, fog: 0x02050b, hemi0: 0.035, hemiMoon: 0.05 };
   CBZ.onAlways(93, function () {
     const isSurv = CBZ.islandModeOn(g.mode);   // sharksim shares the island's sky
     setShadow(isSurv ? "survival" : "escape");
     if (!isSurv) { if (CBZ.sunTarget) CBZ.sunTarget.position.set(0, 0, 18); return; }
     const A = surv.arena; if (!A) return;
     const e = CBZ.survEnv;
-    const graded = g.mode === "survival";
+    const arch = g.mode === "archipelago";
+    const graded = g.mode === "survival" || arch;
+    const illum = Number.isFinite(CBZ.moonIllum) ? Math.max(0, Math.min(1, CBZ.moonIllum)) : 0.8;
     const ang = graded && Number.isFinite(CBZ.sunAngle) ? CBZ.sunAngle : 0.95;
     const up = Math.sin(ang);
     const dayF = graded ? islandDayF(up) : 1;
@@ -446,7 +456,8 @@
         _gA.setHex(e.sunColor);
         if (dusk > 0) _gA.lerp(_gB.setHex(DUSK_SUN), dusk * 0.55 * dayF);
         CBZ.sun.color.copy(_gA.lerp(_gB.setHex(MOON), 1 - dayF));
-        CBZ.sun.intensity = e.sunInt * dayF + (1 - dayF) * 0.30 * mood;
+        const moonK = arch ? ARCH_NIGHT.moon * mood * (0.2 + 0.8 * illum) : 0.30 * mood;
+        CBZ.sun.intensity = e.sunInt * dayF + (1 - dayF) * moonK;
       } else {
         CBZ.sun.position.set(A.center.x + 70, 140, A.center.z - 50);
         CBZ.sun.color.setHex(e.sunColor); CBZ.sun.intensity = e.sunInt;
@@ -455,14 +466,16 @@
     if (CBZ.sunTarget) CBZ.sunTarget.position.set(A.center.x, 6, A.center.z);
     if (CBZ.hemi) {
       CBZ.hemi.color.setHex(e.hemiColor);
-      if (graded) CBZ.hemi.color.lerp(_gB.setHex(NIGHT_SKY), (1 - dayF) * 0.85);
-      CBZ.hemi.intensity = e.hemiInt * (0.30 + 0.70 * dayF) + e.flash * 4;
+      if (graded) CBZ.hemi.color.lerp(_gB.setHex(arch ? ARCH_NIGHT.sky : NIGHT_SKY), (1 - dayF) * (arch ? 1 : 0.85));
+      const floor = arch ? ARCH_NIGHT.hemi0 + ARCH_NIGHT.hemiMoon * illum : 0.30;
+      CBZ.hemi.intensity = e.hemiInt * (floor + (1 - floor) * dayF) + e.flash * 4;
     }
     if (CBZ.scene.fog) {
       const fc = CBZ.scene.fog.color.setHex(e.fog);
       if (graded) {
         if (dusk > 0) fc.lerp(_gB.setHex(DUSK_FOG), dusk * 0.45 * dayF);
-        _gA.copy(fc).multiplyScalar(0.16).lerp(_gB.setHex(NIGHT_FOG), 0.5);
+        if (arch) _gA.setHex(ARCH_NIGHT.fog);
+        else _gA.copy(fc).multiplyScalar(0.16).lerp(_gB.setHex(NIGHT_FOG), 0.5);
         fc.lerp(_gA, 1 - dayF);
       }
       CBZ.scene.fog.near = e.fogNear; CBZ.scene.fog.far = e.fogFar;
@@ -472,7 +485,7 @@
     // after dark the tint eases off so sky.js's own night palette shows
     if (CBZ.skyDome && CBZ.skyDome.material) {
       const dc = CBZ.skyDome.material.color.setHex(e.fog);
-      if (graded) dc.lerp(_gB.setRGB(1, 1, 1), (1 - dayF) * 0.6);
+      if (graded) dc.lerp(_gB.setRGB(1, 1, 1), (1 - dayF) * (arch ? 1 : 0.6));
     }
   });
 
