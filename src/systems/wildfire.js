@@ -1133,8 +1133,11 @@
     b._wf = { fl, slots, storeys, FH, gy, tower, heat: 0, ember: 0, dep: 0, burning: 0, rubble: 0, done: false, igAt: -1, vuln: tower ? 0.3 : 1 };
     return b._wf;
   }
-  function igniteFloor(b, k, how) {
-    if (F.quench) return;              // the calm: what burns burns out, nothing new catches
+  function igniteFloor(b, k, how, local) {
+    // the calm: what burns burns out, nothing new catches — except a LOCAL
+    // fire lit inside one building (an airframe in its 12th floor), which
+    // is that building's, not the bed's
+    if (F.quench && !local) return;
     const r = bRec(b);
     k = Math.max(0, Math.min(r.storeys - 1, k));
     if (r.fl[k].s !== 0 || b.fallen) return;
@@ -2064,10 +2067,13 @@
   function svcWorld() {
     return F.svcArena || (CBZ.surv && CBZ.surv.arena) || F.arena;
   }
-  function serve() {
+  function serve(local) {
     // the calm between disasters: nothing outside an event lights the island
-    // (an eruption's cooling bombs and lava kept relighting the bed after it)
-    if (F.calmLock) return null;
+    // (an eruption's cooling bombs and lava kept relighting the bed after it).
+    // A LOCAL fire (one building's storey, lit from inside) still burns: the
+    // service runs it, but the bed stays starved (F.quench) so it cannot
+    // spread out into the island.
+    if (F.calmLock && !local) return null;
     const A = svcWorld();
     if (!A || !A.groundHeightAt || !A.center) return null;
     if (F.live) return F.arena === A ? A : null;      // the event's run takes it as it is
@@ -2080,7 +2086,7 @@
         if (G.mat) G.mat.uniforms.uAge.value = 0;      // a new fire re-blackens the old ash
       }
       const br = F.svcBridge;
-      F.arena = A; F.bridge = br || null; F.after = false; F.svc = true; F.quench = false;
+      F.arena = A; F.bridge = br || null; F.after = false; F.svc = true; F.quench = !!F.calmLock;
       F.mag = F._forceMag != null ? F._forceMag : (br && br.mag != null ? Math.max(0, Math.min(1, +br.mag)) : SVC_MAG);
       F.reach = 7 + 11 * F.mag;
       svcWind();
@@ -2431,8 +2437,8 @@
     // one STOREY lit from inside (an airframe in the 12th floor burns the
     // 12th floor, not the attic or the lobby)
     igniteFloor(b, k, why) {
-      if (!b || b.fallen || !serve()) return false;
-      igniteFloor(b, k | 0, why || "impact");
+      if (!b || b.fallen || !serve(true)) return false;
+      igniteFloor(b, k | 0, why || "impact", true);
       litBy(why || "impact");
       return true;
     },

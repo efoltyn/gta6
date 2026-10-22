@@ -2793,7 +2793,10 @@
       }
     }
     L.stamp(x, y, z);
-    const busOwned = opts._impact || (CBZ.impact && CBZ.impact.inBusBlast && CBZ.impact.inBusBlast());
+    // an airframe's crash blast is priced by its strike (city/aircraftimpact.js
+    // A.claims): the explosion that carries it must not charge the ledger too
+    const busOwned = opts._impact || (CBZ.impact && CBZ.impact.inBusBlast && CBZ.impact.inBusBlast()) ||
+      (CBZ.cityAircraftImpact && CBZ.cityAircraftImpact.claims && CBZ.cityAircraftImpact.claims(x, y, z));
     if (!busOwned && !dup && CBZ.structure && CBZ.structure.charge) {
       try {
         CBZ.structure.charge(x, y, z, W, { kind: opts.ordnance || opts.kind || "explosion",

@@ -2197,26 +2197,31 @@
       isle: (where && where.isle) || null, building: buildingHit };
     const major = buildingHit && impactSpeed >= (heavy ? 24 : 30);
     const power = heavy ? 3.2 : 2.4, radius = heavy ? 18 : 13;
-    // outside Gang City the crash is the shared ordnance bus's blast
-    // (systems/impactbus.js -> modecaps.js): it hurts whoever stands there
-    // through THAT mode's own damage path, never the city's
-    if (g.mode !== "city" && CBZ.detonate) { try { CBZ.detonate(x, y, z, "missile", { scale: heavy ? 1.3 : 0.7 }); } catch (e) {} }
-    else if (CBZ.cityAirstrikeExplosion) { try { CBZ.cityAirstrikeExplosion(x, z, { power, radius, byPlayer: true, y }); } catch (e) {} }
-    else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: heavy ? 2.7 : 2.0, radius: heavy ? 15 : 10, byPlayer: true, y }); } catch (e) {} }
-    if (g.mode === "city" && CBZ.cityShatter) { try { CBZ.cityShatter(x, z, radius + 5); } catch (e) {} }
-    /* THE BUILDING TAKES THE AIRFRAME through city/aircraftimpact.js (the hole
-       at the struck storey, the fire there, the ejecta, the airframe breaking
-       up, the ledger and the collapse engine). In the city it claimed the
-       blast above already; anywhere else (The Isles, the disaster island) it
-       is handed the hit here, while the velocity it hit with still exists.
-       The legacy beats that stood here — three cityDamageBuilding seats and a
-       burst of grey boxes — were a second, weaker damage path beside it. */
-    if (AI && CBZ.cityAircraftStrike && impact) {
+    /* ONE STRIKE, ONE PATH. The crash is city/aircraftimpact.js's: it prices
+       the airframe's mass and speed through the ordnance bus ONCE (the
+       fireball, the people it reaches, the glass, the ledger at the struck
+       storey, the collapse engine's hole, the fire, the ejecta, the airframe
+       breaking up). The crash used to fire its own airstrike blast first,
+       which charged the building through the blast chain before the strike
+       priced it again: two hits for one plane. Off the city the strike
+       detonates through that mode's own blast route. Only a contact the
+       strike does not price (a slow bump under the strike speed, or no
+       impact module on the page) keeps the plain blast. */
+    let struck = null;
+    if (AI && CBZ.cityAircraftStrike) {
       try {
-        CBZ.cityAircraftStrike(craft, craft._airHit || { x: x, y: y, z: z, nx: impact.nx, nz: impact.nz },
+        struck = CBZ.cityAircraftStrike(craft, craft._airHit || { x: x, y: y, z: z, nx: impact && impact.nx, nz: impact && impact.nz },
           { group: craft.group, vx: craft.vx, vy: craft.vy, vz: craft.vz, speed: impactSpeed,
-            heading: craft.heading, byPlayer: true, heli: craft.kind === "heli", entryDrawn: true });
-      } catch (e) {}
+            heading: craft.heading, byPlayer: true, heli: craft.kind === "heli", entryDrawn: false });
+      } catch (e) { struck = null; }
+    }
+    if (!struck || !struck.strike) {
+      // outside Gang City the crash is the shared ordnance bus's blast
+      // (systems/impactbus.js -> modecaps.js): it hurts whoever stands there
+      // through THAT mode's own damage path, never the city's
+      if (g.mode !== "city" && CBZ.detonate) { try { CBZ.detonate(x, y, z, "missile", { scale: heavy ? 1.3 : 0.7 }); } catch (e) {} }
+      else if (CBZ.cityAirstrikeExplosion) { try { CBZ.cityAirstrikeExplosion(x, z, { power, radius, byPlayer: true, y }); } catch (e) {} }
+      else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: heavy ? 2.7 : 2.0, radius: heavy ? 15 : 10, byPlayer: true, y }); } catch (e) {} }
     }
     if (buildingHit && impactSpeed > 16 && CBZ.cityReportMajorIncident) {
       try { CBZ.cityReportMajorIncident(x, y, z, { kind: "aircraft-building-impact", severity: Math.min(2.5, (heavy ? 1.15 : 0.8) + impactSpeed / 70) }); } catch (e) {}

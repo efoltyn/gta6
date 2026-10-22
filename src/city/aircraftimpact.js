@@ -1430,6 +1430,22 @@
     if (claimed && claimed.strike && opts) { try { opts._airImpact = true; } catch (e) {} }
   }
 
+  /* A.claims(x, y, z): is this blast an airframe's crash that the strike is
+     about to price? buildings.js blastBuildings asks before charging the
+     ledger, so a crash path that fires its own explosion (an AI jet, the
+     airtraffic fleet) is still ONE structural hit — the strike's — and not
+     the explosion's charge plus the strike. */
+  A.claims = function (x, y, z) {
+    if (!CBZ.CONFIG.AIR_IMPACT_V1 || !samples.size || !inCity()) return false;
+    if (y == null) y = floorAt(x, z) + 1.2;
+    let hit = false;
+    samples.forEach(function (s) {
+      if (hit || s.handled || !dying(s) || s.speed < minSpeed(s)) return;
+      if (Math.hypot(s.x - x, (s.y - y) * 0.6, s.z - z) <= MATCH_R) hit = true;
+    });
+    return hit;
+  };
+
   function wrapBoom(name) {
     const orig = CBZ[name];
     if (typeof orig !== "function" || orig._airCrashWrapped) return;

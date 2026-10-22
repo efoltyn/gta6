@@ -527,7 +527,48 @@
     return out;
   }
 
-  function makeStruct(D) {
+  /* THE REGION. A strike into the 30th floor of a 38-storey tower used to cut
+     the WHOLE tower at full resolution — every storey clipped down every
+     pier, every pane of every floor copied in as glass, a cap on every
+     piece: 150k triangles in, ~450k out, ~60 MB of arrays and the same again
+     on the GPU (measured on the tablet profile), enough on its own to take
+     an iPad tab down. Only the storeys round the damage are cut fine now:
+     REGION_PAD storeys either side of the damage sphere. Above and below,
+     the building is still cut into its storeys (so it stands, sags,
+     pancakes and topples as before, storey by storey), but a storey is not
+     clipped down its piers (a triangle goes whole to the bay its centre is
+     in), gets no caps, and its glass stays in the instanced pane pools
+     drawing as it always did: a pane is only turned into geometry when the
+     piece it is on actually comes away (geoOf). A condemnation, a quake or
+     an undermine — damage that is everywhere at once — still cuts it all. */
+  const REGION_PAD = PHONE ? 2 : TABLET ? 2 : 3;
+  /* THE BUDGET: what every standing cut building holds in arrays (its bands
+     and their pristine copy; the GPU holds the bands again). Past it, a new
+     cut keeps to the struck storey and one either side. */
+  const CUT_BUDGET = (PHONE ? 16 : TABLET ? 32 : 96) * 1048576;
+  function bandBytes(S) {
+    let b = 0;
+    for (const ms of S.meshes) { const A = ms.geometry.attributes; for (const k in A) if (A[k].array) b += A[k].array.byteLength; }
+    for (const p of S.pristine) b += p.byteLength;
+    return b;
+  }
+  C.liveBytes = function () { let b = 0; for (const S of structs) if (!S.disposed) b += S.bytes || 0; return b; };
+  function regionOf(D, hint) {
+    const ns = D.storeys;
+    if (!hint || !isFinite(hint.y)) return { all: true, fine: null };
+    const k = Math.floor((hint.y - D.gy + SL) / D.FH);
+    const pad = (C.liveBytes() > CUT_BUDGET ? 1 : REGION_PAD) + Math.ceil(Math.max(0, hint.r || 0) / D.FH);
+    const s0 = Math.max(0, k - pad), s1 = Math.min(ns, k + pad);
+    if (s0 <= 0 && s1 >= ns) return { all: true, fine: null };
+    const fine = new Uint8Array(ns + 1);
+    for (let s = s0; s <= s1; s++) fine[s] = 1;
+    return { all: false, fine: fine };
+  }
+  // the region is a SET of storeys (a second strike lower down adds its own
+  // storeys, never the untouched ones between the two)
+  function fineLevel(S, s) { return S.region.all || S.region.fine[s] === 1; }
+  function fineSpan(S, a, b) { if (S.region.all) return true; for (let s = a; s <= b; s++) if (S.region.fine[s] !== 1) return false; return true; }
+  function makeStruct(D, hint) {
     const P = C.profile({ w: D.w, d: D.d, h: D.h, storeys: D.storeys, FH: D.FH, style: D.style, masonry: D.masonry, material: D.material });
     const m = P.m;
     const ns = D.storeys, FH = D.FH;
@@ -558,6 +599,7 @@
       standingCount: 0, standingMass: 0, totalMass: 0, capMul: 1, active: 0, tick: 0,
       levelLost: new Uint8Array(ns + 1), deadCols: [], deadPlats: [], newCols: [], newPlats: [], surgQ: [], surgI: 0,
       instHide: [], origCols: null, coreMat: null, topY: D.h,
+      region: regionOf(D, hint), livePanes: [], liveInst: [], readback: null,
       stats: { chunks: 0, tris: 0, crushed: 0, blasted: 0, detached: 0, bodies: 0, pieces: 0, baked: 0, carsCrushed: 0,
         tipped: 0, maxTilt: 0, pancaked: 0, firstFall: -1, lastSettle: -1, cutMs: 0, born: nowT,
         foot: { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, cells: new Set() } },
@@ -658,12 +700,24 @@
     for (const k in g.attributes) { const a = g.attributes[k]; if (a && !a.array) gone.push(a); }
     if (g.index && !g.index.array) gone.push(g.index);
     if (!CBZ.batchReadbackGeo || !CBZ.batchReadbackGeo(g)) return false;
-    (S.readback || (S.readback = [])).push.apply(S.readback, gone);
+    (S.readback || (S.readback = new Map())).set(g, { attrs: gone, n: 0 });
     return !!(pos.array && (!g.index || g.index.array));
+  }
+  // every source that reads a read-back geometry holds it; the last one to
+  // be cut drops its arrays at once (cutGen), not at the end of the cut
+  function holdReadback(S, srcs) {
+    if (!S.readback) return;
+    for (const s of srcs) { const r = S.readback.get(s.geo || s.ig); if (r) r.n++; }
+  }
+  function doneReadback(S, g) {
+    const r = S.readback && S.readback.get(g);
+    if (!r || --r.n > 0) return;
+    for (const a of r.attrs) a.array = null;
+    S.readback.delete(g);
   }
   function releaseReadback(S) {
     if (!S.readback) return;
-    for (const a of S.readback) a.array = null;
+    S.readback.forEach(function (r) { for (const a of r.attrs) a.array = null; });
     S.readback = null;
   }
   function* gatherSources(S) {
@@ -693,7 +747,7 @@
         for (let i = 0; i < n; i++) {
           o.getMatrixAt(i, _m4);
           const M = new THREE.Matrix4().multiplyMatrices(S.Linv, _m4b.multiplyMatrices(o.matrixWorld, _m4));
-          out.push({ geo: geo, mat: o.material, M: M, glass: isGlass(mats[0]), col: o.instanceColor ? colorOf(o.instanceColor, i) : null });
+          out.push({ k: "inst", geo: geo, mat: o.material, M: M, glass: isGlass(mats[0]), col: o.instanceColor ? colorOf(o.instanceColor, i) : null });
         }
         continue;
       }
@@ -708,7 +762,7 @@
           if (sk) mt = sk;
         }
       }
-      out.push({ geo: geo, mat: mt, M: new THREE.Matrix4().multiplyMatrices(S.Linv, o.matrixWorld), glass: isGlass(mats[0]), col: null });
+      out.push({ k: "own", geo: geo, mat: mt, M: new THREE.Matrix4().multiplyMatrices(S.Linv, o.matrixWorld), glass: isGlass(mats[0]), col: null });
     }
     yield;
     // the merged deco core/batch.js took out of the group (world space)
@@ -718,7 +772,7 @@
       const g = e.mesh.geometry;
       if (!g || !g.attributes || !g.attributes.position || e.mesh._cbzPacked) continue;
       if (!readable(S, g)) continue;
-      out.push({ geo: g, mat: e.mesh.material, M: new THREE.Matrix4().multiplyMatrices(S.Linv, e.mesh.matrixWorld), glass: false, col: null, start: e.start, count: e.count });
+      out.push({ k: e.mesh._cbzRoom ? "room" : "batch", geo: g, mat: e.mesh.material, M: new THREE.Matrix4().multiplyMatrices(S.Linv, e.mesh.matrixWorld), glass: false, col: null, start: e.start, count: e.count });
     }
     /* THE PANES (instanced pools, world records), cut from what the pool
        DRAWS: the pool's own geometry (its front and back faces and two edge
@@ -729,6 +783,12 @@
     const panes = [];
     for (const gp of D.panes || []) {
       if (!gp || gp.shattered || gp.mesh || !(gp.hw > 0) || !(gp.hh > 0)) continue;
+      // a pane on a storey outside the region stays in its pool, drawing; it
+      // becomes geometry only if its piece comes away (geoOf / hideChunk)
+      if (!S.region.all) {
+        _v3.set(gp.x, gp.y, gp.z).applyMatrix4(S.Linv);
+        if (!fineLevel(S, levelOf(S, _v3.y))) { S.livePanes.push(gp); continue; }
+      }
       let pm = (gp.proxy && gp.proxy.material) || (gp.pool && gp.pool.material);
       let pg = (gp.pool && gp.pool.geometry) || null;
       if (gp.litPool && gp.litId >= 0 && gp.litPool.count > gp.litId) {
@@ -738,7 +798,7 @@
       if (!pm) continue;
       if (!pg || !pg.attributes || !pg.attributes.position) pg = unitBox();
       const M = new THREE.Matrix4().makeScale(gp.hw * 2, gp.hh * 2, Math.max(gp.hd || 0, 0.006) * 2).setPosition(gp.x, gp.y, gp.z);
-      out.push({ geo: pg, mat: pm, M: new THREE.Matrix4().multiplyMatrices(S.Linv, M), glass: true, col: null });
+      out.push({ k: "pane", geo: pg, mat: pm, M: new THREE.Matrix4().multiplyMatrices(S.Linv, M), glass: true, col: null });
       panes.push(gp);
     }
     S.panes = panes;
@@ -766,10 +826,21 @@
           if (arr[o] === 0 && arr[o + 5] === 0 && arr[o + 10] === 0) continue;      // a hidden instance
           _v3.set(arr[o + 12], arr[o + 13], arr[o + 14]).applyMatrix4(S.Linv);
           if (!inFoot(S, _v3.x, _v3.y, _v3.z, 1.2)) continue;
+          // a pane outside the region keeps drawing from its pool (its record
+          // is a live pane: see S.livePanes)
+          const fine = fineLevel(S, levelOf(S, _v3.y));
+          if ((lit || (glassPool && D.panes)) && !fine) continue;
+          // trim / veneer outside the region likewise stays an instance in its
+          // pool, drawing; its piece takes it as geometry only if it comes away
+          if (!fine) {
+            S.liveInst.push({ im: im, i: i, m: arr.slice(o, o + 16), x: arr[o + 12], y: arr[o + 13], z: arr[o + 14],
+              mat: im.instanceColor ? vcMat(im.material) : im.material, col: im.instanceColor ? colorOf(im.instanceColor, i) : null });
+            continue;
+          }
           S.instHide.push({ im: im, i: i, m: arr.slice(o, o + 16) });
           if (lit || (glassPool && D.panes)) continue;                               // the panes come in through their records
           _m4.fromArray(arr, o);
-          out.push({ geo: im.geometry.index ? null : im.geometry, ig: im.geometry, mat: im.instanceColor ? vcMat(im.material) : im.material,
+          out.push({ k: "pool", geo: im.geometry.index ? null : im.geometry, ig: im.geometry, mat: im.instanceColor ? vcMat(im.material) : im.material,
             M: new THREE.Matrix4().multiplyMatrices(S.Linv, _m4), glass: glassPool, col: im.instanceColor ? colorOf(im.instanceColor, i) : null });
         }
       }
@@ -803,6 +874,23 @@
       if (v[0] < x0) x0 = v[0]; if (v[0] > x1) x1 = v[0];
       if (v[1] < y0) y0 = v[1]; if (v[1] > y1) y1 = v[1];
       if (v[2] < z0) z0 = v[2]; if (v[2] > z1) z1 = v[2];
+    }
+    // OUTSIDE THE REGION a triangle is only cut at the storey lines (so each
+    // storey keeps its own), never down the piers
+    if (!S.region.all) {
+      const ka = levelOf(S, y0 + EPS), kb = levelOf(S, y1 - EPS);
+      if (!fineSpan(S, ka, kb)) {
+        if (kb <= ka || y1 - y0 <= 0.02) return null;
+        const k0 = Math.max(1, Math.floor((y0 + SL) / S.FH) + 1);
+        const k1 = Math.min(S.ns, Math.ceil((y1 + SL) / S.FH) - 1);
+        if (k0 <= k1) {
+          const k = Math.round((k0 + k1) / 2), Y = k * S.FH - SL;
+          if (Y > y0 + EPS && Y < y1 - EPS) return [1, Y];
+          const Y0 = k0 * S.FH - SL;
+          if (Y0 > y0 + EPS && Y0 < y1 - EPS) return [1, Y0];
+        }
+        return null;
+      }
     }
     if (x1 - x0 > 0.02) { const x = splitOf(S, S.xs, [x0, x1]); if (x != null) return [0, x]; }
     if (z1 - z0 > 0.02) { const z = splitOf(S, S.zs, [z0, z1]); if (z != null) return [2, z]; }
@@ -844,6 +932,9 @@
     cx /= P.length; cy /= P.length; cz /= P.length;
     const c = chunkAt(S, cx, cy, cz);
     if (!c) return;
+    // a refine files only into its own storeys' standing (or empty) pieces:
+    // a piece that has already come away does not get its slab back
+    if (S.refining && (!c.refine || (!c.standing && !c.void))) return;
     if (!c.bufs) c.bufs = new Map();
     let B = c.bufs.get(mat);
     if (!B) { B = new Buf(); c.bufs.set(mat, B); }
@@ -887,6 +978,7 @@
     const t0 = performance.now();
     let srcs;
     try { srcs = yield* gatherSources(S); } catch (e) { console.warn("[collapse] gather", e); srcs = []; }
+    holdReadback(S, srcs);
     S.cutGatherMs = performance.now() - t0;
     yield;
     const nm = new THREE.Matrix3();
@@ -938,6 +1030,10 @@
           if ((++n & CUT_STEP) === 0) yield;
         }
       }
+      doneReadback(S, geo);
+      const sk = S.stats.srcK || (S.stats.srcK = {});
+      sk[src.k || "?"] = (sk[src.k || "?"] || 0) + n - (S._nPrev || 0);
+      S._nPrev = n;
     }
     S.stats.tris = n;
     releaseReadback(S);
@@ -953,6 +1049,23 @@
      worth of work, so each gets its own. */
   function* finishCut(S) {
     const ns = S.ns, FH = S.FH, m = S.m;
+    // the live panes (outside the region, still in their pools) belong to the
+    // piece they sit in: its glass, as if they had been cut into it
+    for (const gp of S.livePanes) {
+      const c = chunkAtWorld(S, gp.x, gp.y, gp.z);
+      if (!c) continue;
+      (c.livePanes || (c.livePanes = [])).push(gp);
+      c.tris += 12; c.vtris = (c.vtris || 0) + 12;
+      if (c.kind === 0) c.glA += 4 * gp.hh * Math.max(gp.hw, gp.hd || 0);
+    }
+    for (const it of S.liveInst) {
+      const c = chunkAtWorld(S, it.x, it.y, it.z);
+      if (!c) continue;
+      (c.liveInst || (c.liveInst = [])).push(it);
+      const g = it.im.geometry;
+      const vt = Math.max(1, ((g.index ? g.index.count : g.attributes.position.count) / 3) | 0);
+      c.tris += vt; c.vtris = (c.vtris || 0) + vt;
+    }
     // solidity + mass
     for (const c of S.chunks) {
       const lvH = Math.max(0.5, Math.min(yhi(S, c.s), c.s < ns ? 1e9 : yhi(S, c.s)) - ylo(S, c.s));
@@ -973,6 +1086,23 @@
       c.top = yhi(S, c.s);
       if (c.s === ns && c.gb) c.top = Math.max(ylo(S, c.s) + 0.3, c.gb[3]);
       if (!c.gb) c.gb = [c.x0, c.x1, ylo(S, c.s), yhi(S, c.s), c.z0, c.z1];
+    }
+    // OUTSIDE THE REGION a wall's veneer and trim are still instances in their
+    // pools, so its measured solidity undercounts it: it takes the solidity
+    // its own face shows inside the region (the same facade), never less
+    if (!S.region.all) {
+      const sum = [0, 0, 0, 0], num = [0, 0, 0, 0];
+      for (const c of S.chunks) if (c.kind === 0 && c.tris && fineLevel(S, c.s) && c.s < ns) { sum[c.f] += c.sol; num[c.f]++; }
+      for (const c of S.chunks) {
+        if (c.kind !== 0 || !c.tris || fineLevel(S, c.s) || !num[c.f]) continue;
+        const ref = sum[c.f] / num[c.f];
+        if (ref <= c.sol) continue;
+        const lvH = Math.max(0.5, Math.min(yhi(S, c.s), c.s < ns ? 1e9 : yhi(S, c.s)) - ylo(S, c.s));
+        const len = c.f < 2 ? c.x1 - c.x0 : c.z1 - c.z0;
+        c.sol = ref;
+        c.mass = len * Math.min(lvH, FH) * WT * Math.max(0.15, c.sol) * m.rho + 0.05;
+        if (c.s === ns) c.mass *= 0.5;
+      }
     }
     yield;
     // the graph. A FRAME (steel, concrete, curtain wall, timber posts) has
@@ -1020,7 +1150,9 @@
        The one exception is the ground storey of a frame, which stands on its
        columns whether the cut found anything drawn there or not. */
     for (const c of S.chunks) {
-      if (c.tris || (frame && c.kind === 1 && c.s === 0)) continue;
+      // (outside the region a slab went whole to the bay its centre is in:
+      // the frame's other bays on that storey still stand on their columns)
+      if (c.tris || (frame && c.kind === 1 && (c.s === 0 || !fineLevel(S, c.s)))) continue;
       c.standing = false; c.void = true; c.hidden = true;
     }
     yield;
@@ -1058,7 +1190,9 @@
     S.coreMat = mat(mix(shade(S.D.wall, m.tone), 0x8d8a84, 0.4));
     yield;
     let k = 0;
-    for (const c of S.chunks) { if (c.tris) addCaps(S, c); if ((++k & 255) === 0) yield; }
+    // caps on the region's pieces only: outside it a storey breaks as whole
+    // bays, and nothing there was cut down a pier to need one
+    for (const c of S.chunks) { if (c.tris && fineLevel(S, c.s)) addCaps(S, c); if ((++k & 255) === 0) yield; }
     yield* buildStanding(S);
     yield* fileColliders(S);
     S.ready = true;
@@ -1156,55 +1290,204 @@
     root.position.set(S.ox, S.gy, S.oz); root.rotation.y = S.yaw;
     root.updateMatrix(); root.updateMatrixWorld(true);
     for (let b0 = 0; b0 <= S.ns; b0 += per) {
-      const byMat = new Map();
-      for (let s = b0; s < Math.min(S.ns + 1, b0 + per); s++) {
-        for (const c of S.levels[s]) {
-          if (!c.bufs) continue;
-          c.bufs.forEach(function (B, mt) {
-            if (!B.n) return;
-            let L = byMat.get(mt); if (!L) { L = []; byMat.set(mt, L); }
-            L.push([c, B]);
-          });
-        }
-      }
-      byMat.forEach(function (L, mt) {
-        let nv = 0;
-        for (const it of L) nv += it[1].n / ST;
-        const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), Cc = new Float32Array(nv * 3);
-        const mi = S.meshes.length;
-        let o = 0;
-        for (const it of L) {
-          const c = it[0], A = it[1].a, n = it[1].n / ST;
-          (c.rg || (c.rg = [])).push(mi, o, n);
-          for (let v = 0; v < n; v++, o++) {
-            const s = v * ST;
-            P[o * 3] = A[s]; P[o * 3 + 1] = A[s + 1]; P[o * 3 + 2] = A[s + 2];
-            N[o * 3] = A[s + 3]; N[o * 3 + 1] = A[s + 4]; N[o * 3 + 2] = A[s + 5];
-            U[o * 2] = A[s + 6]; U[o * 2 + 1] = A[s + 7];
-            Cc[o * 3] = A[s + 8]; Cc[o * 3 + 1] = A[s + 9]; Cc[o * 3 + 2] = A[s + 10];
-          }
-        }
-        const g = new THREE.BufferGeometry();
-        const pa = new THREE.BufferAttribute(P, 3);
-        pa.setUsage(THREE.DynamicDrawUsage);
-        g.setAttribute("position", pa);
-        g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
-        g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
-        g.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
-        g.computeBoundingSphere();
-        const mesh = new THREE.Mesh(g, mt);
-        mesh.castShadow = !PHONE; mesh.receiveShadow = true;
-        glassDraw(mesh);
-        mesh.matrixAutoUpdate = false;
-        mesh.name = "collapseBand";
-        root.add(mesh);
-        S.meshes.push(mesh);
-        S.pristine.push(P.slice());
-      });
+      const list = [];
+      for (let s = b0; s < Math.min(S.ns + 1, b0 + per); s++) for (const c of S.levels[s]) list.push(c);
+      makeBands(S, list, root);
+      // this band's cut buffers are copied: let them go now, not after the
+      // last band (the peak was every chunk's buffers AND every band at once)
+      for (const c of list) c.bufs = null;
       yield;
     }
     for (const c of S.chunks) c.bufs = null;
     S.root = root;
+    S.bytes = bandBytes(S);
+  }
+  // one merged mesh per material from these chunks' cut buffers, each chunk
+  // a vertex range in it (c.rg)
+  function makeBands(S, list, root) {
+    const byMat = new Map();
+    for (const c of list) {
+      if (!c.bufs) continue;
+      c.bufs.forEach(function (B, mt) {
+        if (!B.n) return;
+        let L = byMat.get(mt); if (!L) { L = []; byMat.set(mt, L); }
+        L.push([c, B]);
+      });
+    }
+    byMat.forEach(function (L, mt) {
+      let nv = 0;
+      for (const it of L) nv += it[1].n / ST;
+      // a vertex colour only a vertex-coloured material reads: everywhere
+      // else it was 12 bytes a vertex in JS and 12 more on the GPU, unread
+      const vc = !!(mt && mt.vertexColors);
+      const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), Cc = vc ? new Float32Array(nv * 3) : null;
+      const mi = S.meshes.length;
+      let o = 0;
+      for (const it of L) {
+        const c = it[0], A = it[1].a, n = it[1].n / ST;
+        (c.rg || (c.rg = [])).push(mi, o, n);
+        for (let v = 0; v < n; v++, o++) {
+          const s = v * ST;
+          P[o * 3] = A[s]; P[o * 3 + 1] = A[s + 1]; P[o * 3 + 2] = A[s + 2];
+          N[o * 3] = A[s + 3]; N[o * 3 + 1] = A[s + 4]; N[o * 3 + 2] = A[s + 5];
+          U[o * 2] = A[s + 6]; U[o * 2 + 1] = A[s + 7];
+          if (Cc) { Cc[o * 3] = A[s + 8]; Cc[o * 3 + 1] = A[s + 9]; Cc[o * 3 + 2] = A[s + 10]; }
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      const pa = new THREE.BufferAttribute(P, 3);
+      pa.setUsage(THREE.DynamicDrawUsage);
+      g.setAttribute("position", pa);
+      g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+      if (Cc) g.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
+      g.computeBoundingSphere();
+      const mesh = new THREE.Mesh(g, mt);
+      mesh.castShadow = !PHONE; mesh.receiveShadow = true;
+      glassDraw(mesh);
+      mesh.matrixAutoUpdate = false;
+      mesh.name = "collapseBand";
+      root.add(mesh);
+      mesh.updateMatrixWorld(true);
+      S.meshes.push(mesh);
+      S.pristine.push(P.slice());
+    });
+  }
+
+  /* ============================================================
+     REFINE — a later hit OUTSIDE the region. The storeys it reaches (and
+     REGION_PAD either side) are cut fine now, from what they already draw:
+     each standing piece hands back its own triangles (the band copy), they
+     go down the piers like the region's did, and the storeys get their caps
+     and new bands. The old ranges go dark. Incremental and sliced: a second
+     strike higher up a tower costs the storeys it hits, never the tower.
+     ============================================================ */
+  /* A band rebuilt without the ranges no chunk refers to any more (the
+     refine took them): the memory goes with them, the chunks still in it
+     keep their geometry, their zeroed (hidden) state and their pristine. */
+  function compactBand(S, mi) {
+    const mesh = S.meshes[mi];
+    if (!mesh) return;
+    const old = mesh.geometry, A = old.attributes, pp = S.pristine[mi];
+    const keep = [];
+    let nv = 0;
+    for (const c of S.chunks) {
+      const rg = c.rg;
+      if (rg) for (let k = 0; k < rg.length; k += 3) if (rg[k] === mi) { keep.push(c, k); nv += rg[k + 2]; }
+    }
+    if (nv >= A.position.count * 0.9) return;
+    const vc = !!A.color;
+    const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), Cc = vc ? new Float32Array(nv * 3) : null, PR = new Float32Array(nv * 3);
+    const op = A.position.array, on = A.normal.array, ou = A.uv.array, oc = vc ? A.color.array : null;
+    let o = 0;
+    for (let i = 0; i < keep.length; i += 2) {
+      const rg = keep[i].rg, k = keep[i + 1], st = rg[k + 1], n = rg[k + 2];
+      P.set(op.subarray(st * 3, (st + n) * 3), o * 3);
+      PR.set(pp.subarray(st * 3, (st + n) * 3), o * 3);
+      N.set(on.subarray(st * 3, (st + n) * 3), o * 3);
+      U.set(ou.subarray(st * 2, (st + n) * 2), o * 2);
+      if (Cc) Cc.set(oc.subarray(st * 3, (st + n) * 3), o * 3);
+      rg[k + 1] = o;
+      o += n;
+    }
+    const g = new THREE.BufferGeometry();
+    const pa = new THREE.BufferAttribute(P, 3);
+    pa.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute("position", pa);
+    g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+    if (Cc) g.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
+    g.computeBoundingSphere();
+    mesh.geometry = g;
+    old.dispose();
+    S.pristine[mi] = PR;
+    if (!nv) mesh.visible = false;
+  }
+  function wantRefine(S, ly0, ly1) {
+    if (S.region.all) return;
+    const a = levelOf(S, ly0), b = levelOf(S, ly1);
+    if (fineSpan(S, Math.max(0, a), Math.min(S.ns, b))) return;
+    const w = S.wantRefine || (S.wantRefine = [a, b]);
+    if (a < w[0]) w[0] = a;
+    if (b > w[1]) w[1] = b;
+  }
+  function* refineGen(S, a, b) {
+    const s0 = Math.max(0, a - REGION_PAD), s1 = Math.min(S.ns, b + REGION_PAD);
+    const lv = [];
+    for (let s = s0; s <= s1; s++) if (!fineLevel(S, s)) { lv.push(s); S.region.fine[s] = 1; }
+    if (S.region.fine.every(function (v) { return v === 1; })) S.region = { all: true, fine: null };
+    // 1) every standing piece of those storeys gives its triangles back
+    const byMat = new Map(), touched = new Set();
+    for (const s of lv) {
+      for (const c of S.levels[s]) {
+        if (!c.standing || !c.rg) continue;
+        const rg = c.rg;
+        for (let k = 0; k < rg.length; k += 3) {
+          const mi = rg[k], st = rg[k + 1], n = rg[k + 2];
+          const mesh = S.meshes[mi];
+          if (!mesh) continue;
+          const A = mesh.geometry.attributes, pp = S.pristine[mi];
+          const nn = A.normal.array, uu = A.uv.array, cc = A.color ? A.color.array : null;
+          let B = byMat.get(mesh.material); if (!B) { B = new Buf(); byMat.set(mesh.material, B); }
+          B.need(n * ST);
+          const F = B.a;
+          for (let v = 0; v < n; v++) {
+            const q = st + v, o = B.n + v * ST;
+            F[o] = pp[q * 3]; F[o + 1] = pp[q * 3 + 1]; F[o + 2] = pp[q * 3 + 2];
+            F[o + 3] = nn[q * 3]; F[o + 4] = nn[q * 3 + 1]; F[o + 5] = nn[q * 3 + 2];
+            F[o + 6] = uu[q * 2]; F[o + 7] = uu[q * 2 + 1];
+            if (cc) { F[o + 8] = cc[q * 3]; F[o + 9] = cc[q * 3 + 1]; F[o + 10] = cc[q * 3 + 2]; }
+            else { F[o + 8] = 1; F[o + 9] = 1; F[o + 10] = 1; }
+          }
+          B.n += n * ST;
+          mesh.geometry.attributes.position.array.fill(0, st * 3, (st + n) * 3);
+          S.dirty.add(mesh); touched.add(mi);
+        }
+        c.rg = null; c.gb = null; c.tris = c.vtris || 0;
+      }
+    }
+    // (the struck storeys' own pieces only: nothing else may take a piece)
+    for (const s of lv) for (const c of S.levels[s]) if (!c.rg && !c.bufs) c.refine = true;
+    yield;
+    // 2) down the piers, into the pieces of their own storeys
+    S.refining = true;
+    const V = new Float32Array(ST * 3);
+    const P = [V.subarray(0, ST), V.subarray(ST, ST * 2), V.subarray(ST * 2, ST * 3)];
+    let n = 0;
+    try {
+      for (const ent of byMat) {
+        const mt = ent[0], B = ent[1], A = B.a, glass = isGlass(mt);
+        for (let t = 0; t + ST * 3 <= B.n; t += ST * 3) {
+          for (let j = 0; j < 3; j++) { const v = P[j], o = t + j * ST; for (let k = 0; k < ST; k++) v[k] = A[o + k]; }
+          clipEmit(S, P, mt, glass, 0);
+          if ((++n & CUT_STEP) === 0) yield;
+        }
+      }
+    } finally { S.refining = false; }
+    byMat.clear();
+    // 3) the pieces that now hold something stand; their caps; their bands
+    const list = [];
+    for (const s of lv) for (const c of S.levels[s]) {
+      c.refine = false;
+      if (!c.bufs) { if (!c.gb) c.gb = [c.x0, c.x1, ylo(S, c.s), yhi(S, c.s), c.z0, c.z1]; continue; }
+      if (c.void) {
+        c.void = false; c.hidden = false; c.standing = true;
+        S.standingCount++; S.standingMass += c.mass; S.totalMass += c.mass; S.standingReal++;
+      }
+      if (!c.gb) c.gb = [c.x0, c.x1, ylo(S, c.s), yhi(S, c.s), c.z0, c.z1];
+      addCaps(S, c);
+      list.push(c);
+    }
+    yield;
+    makeBands(S, list, S.root);
+    for (const c of list) c.bufs = null;
+    // the coarse copies those storeys used to be drawn from go (the bands
+    // they sat in are rebuilt without them)
+    touched.forEach(function (mi) { compactBand(S, mi); });
+    S.active = Math.max(S.active, 3);
+    stats.refines = (stats.refines || 0) + 1;
+    S.bytes = bandBytes(S);
+    S.ready = true;
   }
 
   /* A set of chunks' own geometry, building-local minus `off`, one geometry
@@ -1225,29 +1508,113 @@
       let nv = 0;
       for (let k = 0; k < L.length; k += 3) nv += L[k + 2];
       if (!nv) return;
-      const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), Cc = new Float32Array(nv * 3);
+      const vc = !!S.meshes[L[0]].geometry.attributes.color;
+      const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), Cc = vc ? new Float32Array(nv * 3) : null;
       let o = 0;
       for (let k = 0; k < L.length; k += 3) {
         const mi = L[k], st = L[k + 1], n = L[k + 2];
         const src = S.meshes[mi].geometry.attributes, pp = S.pristine[mi];
-        const nn = src.normal.array, uu = src.uv.array, cc = src.color.array;
+        const nn = src.normal.array, uu = src.uv.array, cc = src.color ? src.color.array : null;
         for (let v = 0; v < n; v++, o++) {
           const s = st + v;
           P[o * 3] = pp[s * 3] - off.x; P[o * 3 + 1] = pp[s * 3 + 1] - off.y; P[o * 3 + 2] = pp[s * 3 + 2] - off.z;
           N[o * 3] = nn[s * 3]; N[o * 3 + 1] = nn[s * 3 + 1]; N[o * 3 + 2] = nn[s * 3 + 2];
           U[o * 2] = uu[s * 2]; U[o * 2 + 1] = uu[s * 2 + 1];
-          Cc[o * 3] = cc[s * 3]; Cc[o * 3 + 1] = cc[s * 3 + 1]; Cc[o * 3 + 2] = cc[s * 3 + 2];
+          if (Cc) {
+            if (cc) { Cc[o * 3] = cc[s * 3]; Cc[o * 3 + 1] = cc[s * 3 + 1]; Cc[o * 3 + 2] = cc[s * 3 + 2]; }
+            else { Cc[o * 3] = 1; Cc[o * 3 + 1] = 1; Cc[o * 3 + 2] = 1; }
+          }
         }
       }
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(P, 3));
       g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
       g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
-      g.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
+      if (Cc) g.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
       g.computeBoundingSphere();
       out.push(new THREE.Mesh(g, mt));
     });
+    // the glass of a piece outside the region was never cut: it is still
+    // its panes in the pools, so the piece takes them now, as geometry
+    const live = [];
+    for (const c of list) {
+      if (c.livePanes) for (const gp of c.livePanes) {
+        const q = paneSrc(gp);
+        if (q) live.push({ geo: q.pg, mat: q.pm, M: new THREE.Matrix4().makeScale(gp.hw * 2, gp.hh * 2, Math.max(gp.hd || 0, 0.006) * 2).setPosition(gp.x, gp.y, gp.z), col: null });
+      }
+      if (c.liveInst) for (const it of c.liveInst) live.push({ geo: it.im.geometry, mat: it.mat, M: new THREE.Matrix4().fromArray(it.m), col: it.col });
+    }
+    if (live.length) for (const ms of liveMeshes(S, live, off)) out.push(ms);
     return out;
+  }
+  /* Live panes (never cut) as building-local glass meshes, one per material,
+     the same box the cut would have made of them (gatherSources). */
+  const _pm = HAS3 ? new THREE.Matrix4() : null, _pv = HAS3 ? new THREE.Vector3() : null;
+  function paneSrc(gp) {
+    let pm = (gp.proxy && gp.proxy.material) || (gp.pool && gp.pool.material);
+    let pg = (gp.pool && gp.pool.geometry) || null;
+    if (gp.litPool && gp.litId >= 0 && gp.litPool.count > gp.litId) {
+      const a = gp.litPool.instanceMatrix.array, o = gp.litId * 16;
+      if (a[o] !== 0 || a[o + 5] !== 0) { pm = gp.litPool.material; pg = gp.litPool.geometry || pg; }
+    }
+    if (!pg || !pg.attributes || !pg.attributes.position || !pg.attributes.position.array || (pg.index && !pg.index.array)) pg = unitBox();
+    return pm ? { pm: pm, pg: pg } : null;
+  }
+  /* Live items (never cut: panes in their pools, trim / veneer instances) as
+     building-local meshes, one per material: items {geo, mat, M (world),
+     col}. A geometry whose arrays have gone to the GPU only is read back
+     for this (it is a pool's shared unit shape: small, and kept). */
+  function liveMeshes(S, items, off) {
+    const byMat = new Map();
+    for (const it of items) {
+      const g = it.geo;
+      if (!g || !g.attributes || !g.attributes.position || !it.mat) continue;
+      if (!g.attributes.position.array || (g.index && !g.index.array)) { if (!CBZ.batchReadbackGeo || !CBZ.batchReadbackGeo(g)) continue; }
+      let L = byMat.get(it.mat); if (!L) { L = []; byMat.set(it.mat, L); }
+      L.push(it);
+    }
+    const out = [];
+    byMat.forEach(function (L, mt) {
+      let nv = 0;
+      for (const it of L) { const g = it.geo; nv += g.index ? g.index.count : g.attributes.position.count; }
+      if (!nv) return;
+      const vc = !!mt.vertexColors;
+      const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), Cc = vc ? new Float32Array(nv * 3) : null;
+      let o = 0;
+      for (const it of L) {
+        const g = it.geo;
+        _pm.multiplyMatrices(S.Linv, it.M);
+        const pos = g.attributes.position, nrm = g.attributes.normal, uv = g.attributes.uv, col = g.attributes.color, idx = g.index;
+        const n = idx ? idx.count : pos.count;
+        for (let v = 0; v < n; v++, o++) {
+          const i = idx ? idx.getX(v) : v;
+          _pv.fromBufferAttribute(pos, i).applyMatrix4(_pm);
+          P[o * 3] = _pv.x - off.x; P[o * 3 + 1] = _pv.y - off.y; P[o * 3 + 2] = _pv.z - off.z;
+          if (nrm && nrm.array) { _pv.fromBufferAttribute(nrm, i).transformDirection(_pm); N[o * 3] = _pv.x; N[o * 3 + 1] = _pv.y; N[o * 3 + 2] = _pv.z; }
+          else N[o * 3 + 1] = 1;
+          if (uv && uv.array) { U[o * 2] = uv.getX(i); U[o * 2 + 1] = uv.getY(i); }
+          if (Cc) {
+            if (it.col) { Cc[o * 3] = it.col[0]; Cc[o * 3 + 1] = it.col[1]; Cc[o * 3 + 2] = it.col[2]; }
+            else if (col && col.array) { Cc[o * 3] = col.getX(i); Cc[o * 3 + 1] = col.getY(i); Cc[o * 3 + 2] = col.getZ(i); }
+            else { Cc[o * 3] = 1; Cc[o * 3 + 1] = 1; Cc[o * 3 + 2] = 1; }
+          }
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+      if (Cc) g.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
+      g.computeBoundingSphere();
+      out.push(glassDraw(new THREE.Mesh(g, mt)));
+    });
+    return out;
+  }
+  // a live pane stops drawing from its pool (its piece has come away)
+  function hidePane(gp) {
+    if (!gp || gp._cbzLiveGone) return;
+    gp._cbzLiveGone = true;
+    try { if (gp.mesh) gp.mesh.visible = false; else if (CBZ._paneShow) CBZ._paneShow(gp, false); } catch (e) {}
   }
 
   /* ---- THE SWAP: the real building out, its chunks in, on one frame ------- */
@@ -1259,6 +1626,7 @@
     (D.root || CBZ.scene).add(S.root);
     try { if (CBZ.batchHideGroup) CBZ.batchHideGroup(grp); } catch (e) {}
     grp.visible = false;
+    evictReplaced(S);
     for (const gp of S.panes || []) {
       if (gp.shattered) continue;
       gp._cbzWasWhole = true;
@@ -1296,6 +1664,39 @@
       S.colFile = null; S.platFile = null;
     }
     wrapCarve();
+  }
+  /* THE REPLACED MESHES GIVE THEIR GPU COPY BACK. The building's own merged
+     meshes (core/batch.js ranges that are WHOLLY this building's) are hidden
+     by the swap and its chunks draw instead, but they went on holding their
+     vertex buffers on the GPU for as long as the session lasted: the tower
+     twice over. They are evicted the way core/farcull.js evicts a far mesh
+     (dropped from the GPU; a GPU-only one read back and packed first), and
+     C.forget expands them again when the building is rebuilt. */
+  function evictReplaced(S) {
+    const R = CBZ.batchRangesOf ? CBZ.batchRangesOf(S.grp) : null;
+    if (!R) return;
+    for (const e of R) {
+      const m = e && e.whole ? e.mesh : null, g = m && m.geometry;
+      const a = g && g.attributes && g.attributes.position;
+      if (!a || !a._cbzUploaded || !g._evictable || m.visible) continue;
+      const drop = function () {
+        g.dispose();
+        for (const k in g.attributes) g.attributes[k]._cbzUploaded = false;
+        if (g.index) g.index._cbzUploaded = false;
+      };
+      if (!CBZ.geoReuploadable || CBZ.geoReuploadable(g)) { drop(); continue; }
+      if (!CBZ.batchQueueEvict) continue;
+      CBZ.batchQueueEvict(g, function () { return !m.visible && !S.disposed; }, function () {
+        if (CBZ.geoCompactOwned) CBZ.geoCompactOwned(g);
+        drop();
+      });
+    }
+    S.evicted = true;
+  }
+  function expandReplaced(grp) {
+    const R = CBZ.batchRangesOf ? CBZ.batchRangesOf(grp) : null;
+    if (!R || !CBZ.geoExpandAll) return;
+    for (const e of R) { const g = e && e.whole && e.mesh ? e.mesh.geometry : null; if (g && g._cbzNoDraw) { try { CBZ.geoExpandAll(g); } catch (er) {} } }
   }
   function chunkAtWorld(S, x, y, z) {
     _v3.set(x, y, z).applyMatrix4(S.Linv);
@@ -1405,12 +1806,28 @@
       gp.shattered = true;
       if (gp.col) S.deadCols.push(gp.col);
     }
+    for (const gp of c.livePanes || []) {
+      if (gp.shattered) continue;
+      gp.shattered = true;
+      if (gp.col) S.deadCols.push(gp.col);
+    }
     if (S.b && S.b.doors) for (const dr of S.b.doors) if (dr && dr.col && dr.col._cbzGone && !dr.demolished) { dr.demolished = true; dr.colIn = false; }
     if (!S.losGone && S.b && S.b.losMeshes) { S.losGone = true; S.deadLos = S.b.losMeshes.slice(); }
   }
   function hideChunk(S, c) {
     if (c.hidden || S.disposed) return;
     c.hidden = true;
+    if (c.livePanes) for (const gp of c.livePanes) hidePane(gp);
+    if (c.liveInst) {
+      for (const it of c.liveInst) {
+        if (it.gone) continue;
+        it.gone = true;
+        it.im.instanceMatrix.array.fill(0, it.i * 16, it.i * 16 + 15);
+        it.im.instanceMatrix.array[it.i * 16 + 15] = 1;               // the swap's own zero-scale matrix
+        it.im.instanceMatrix.needsUpdate = true;
+        S.instHide.push({ im: it.im, i: it.i, m: it.m });          // a rebuild puts it back (dispose / forget)
+      }
+    }
     const rg = c.rg;
     if (rg) for (let k = 0; k < rg.length; k += 3) {
       const mesh = S.meshes[rg[k]];
@@ -2597,16 +3014,16 @@
     byMat.forEach(function (L, mt) {
       if (L.length < 2 || done) return;
       done = true;
-      let nv = 0;
-      for (const ms of L) nv += ms.geometry.attributes.position.count;
-      const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), Cc = new Float32Array(nv * 3);
+      let nv = 0, vc = false;
+      for (const ms of L) { nv += ms.geometry.attributes.position.count; if (ms.geometry.attributes.color) vc = true; }
+      const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), Cc = vc ? new Float32Array(nv * 3) : null;
       let o = 0;
       for (const ms of L) {
         ms.updateMatrix();
         const e = ms.matrix.elements, A = ms.geometry.attributes;
         n3.getNormalMatrix(ms.matrix);
         const q = n3.elements;
-        const pa = A.position.array, na = A.normal.array, ua = A.uv.array, ca = A.color.array;
+        const pa = A.position.array, na = A.normal.array, ua = A.uv.array, ca = A.color ? A.color.array : null;
         for (let i = 0; i < A.position.count; i++, o++) {
           const x = pa[i * 3], y = pa[i * 3 + 1], z = pa[i * 3 + 2];
           P[o * 3] = e[0] * x + e[4] * y + e[8] * z + e[12];
@@ -2615,7 +3032,10 @@
           const a = na[i * 3], b2 = na[i * 3 + 1], c = na[i * 3 + 2];
           N[o * 3] = q[0] * a + q[3] * b2 + q[6] * c; N[o * 3 + 1] = q[1] * a + q[4] * b2 + q[7] * c; N[o * 3 + 2] = q[2] * a + q[5] * b2 + q[8] * c;
           U[o * 2] = ua[i * 2]; U[o * 2 + 1] = ua[i * 2 + 1];
-          Cc[o * 3] = ca[i * 3]; Cc[o * 3 + 1] = ca[i * 3 + 1]; Cc[o * 3 + 2] = ca[i * 3 + 2];
+          if (Cc) {
+            if (ca) { Cc[o * 3] = ca[i * 3]; Cc[o * 3 + 1] = ca[i * 3 + 1]; Cc[o * 3 + 2] = ca[i * 3 + 2]; }
+            else { Cc[o * 3] = 1; Cc[o * 3 + 1] = 1; Cc[o * 3 + 2] = 1; }
+          }
         }
         g.remove(ms);
         ms.geometry.dispose();
@@ -2624,7 +3044,7 @@
       geo.setAttribute("position", new THREE.BufferAttribute(P, 3));
       geo.setAttribute("normal", new THREE.BufferAttribute(N, 3));
       geo.setAttribute("uv", new THREE.BufferAttribute(U, 2));
-      geo.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
+      if (Cc) geo.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
       geo.computeBoundingSphere();
       const m = new THREE.Mesh(geo, mt);
       m.matrixAutoUpdate = false;
@@ -2869,13 +3289,16 @@
   /* ============================================================
      6. THE API.
      ============================================================ */
-  function structFor(x, start) {
+  /* hint {y, r}: the world height and radius of the damage that made this
+     structure — the cut is bounded to the storeys round it (see REGION).
+     No hint (a condemnation, a quake, an undermine, a tool): the whole. */
+  function structFor(x, start, hint) {
     const D = norm(x);
     if (!D || typeof THREE === "undefined") return null;
     let S = byGroup.get(D.grp);
     if (S && !S.disposed) return S;
     if (!start) return null;
-    S = makeStruct(D);
+    S = makeStruct(D, hint);
     S.gen = cutGen(S);
     owners.add(S.key);
     byGroup.set(D.grp, S);
@@ -2893,7 +3316,11 @@
           const r = S.gen.next();
           if (r.done) { S.gen = null; break; }
         }
-      } catch (e) { console.warn("[collapse] cut failed", e); S.gen = null; S.failed = true; releaseReadback(S); }
+      } catch (e) {
+        console.warn("[collapse] cut failed", e); S.gen = null; S.refining = false; releaseReadback(S);
+        // a refine that fails leaves the standing building as it was drawn
+        if (S.root && S.meshes.length) S.ready = true; else S.failed = true;
+      }
       if (performance.now() - t0 >= budgetMs) break;
     }
   }
@@ -2913,10 +3340,15 @@
   C.damage = function (bld, point, radius, energy, dir, opts) {
     opts = opts || {};
     if (!CBZ.CONFIG.COLLAPSE_V2 || !point || !(radius > 0) || !(energy > (opts.frac ? 0 : MIN_E))) return null;
-    const S = bld && bld.chunks ? bld : structFor(bld, true);
+    const S = bld && bld.chunks ? bld : structFor(bld, true, opts.frac >= 1 ? null : { y: point.y, r: radius });
     if (!S || S.failed) return null;
     const req = { k: "dmg", p: { x: point.x, y: point.y, z: point.z }, r: radius, e: energy, dir: dir || null, o: opts, bld: bld };
-    if (!S.ready || S.pending.length) { S.pending.push(req); return { queued: true, key: S.key }; }
+    // a hit on storeys the bounded cut left coarse cuts them fine first
+    if (!S.region.all && !opts.frac) {
+      _v3.set(point.x, point.y, point.z).applyMatrix4(S.Linv);
+      wantRefine(S, _v3.y - radius, _v3.y + radius);
+    }
+    if (!S.ready || S.pending.length || S.wantRefine) { S.pending.push(req); return { queued: true, key: S.key }; }
     return applyReq(S, req);
   };
   function applyDamage(S, p, R, E, dir) {
@@ -3077,6 +3509,7 @@
       owners.delete(S.key);
     }
     rubbleKeys.delete(D.key);
+    expandReplaced(D.grp);
     const R = retired.get(D.grp);
     if (R) {
       const touched = new Set();
@@ -3362,6 +3795,7 @@
     for (let i = structs.length - 1; i >= 0; i--) {
       const S = structs[i];
       if (!S.ready) continue;
+      if (S.wantRefine && !S.gen) { const w = S.wantRefine; S.wantRefine = null; S.ready = false; S.gen = refineGen(S, w[0], w[1]); continue; }
       while (S.pending.length) { const q = S.pending.shift(); try { applyReq(S, q); } catch (e) { console.warn("[collapse] request", e); } }
       if (!S.swapped) continue;
       S.tick += dt;
@@ -3420,9 +3854,14 @@
       firstFall: st.firstFall >= 0 ? +st.firstFall.toFixed(2) : null, lastSettle: st.lastSettle >= 0 ? +st.lastSettle.toFixed(2) : null,
       soft: S.soft, sf: S.sf ? S.sf.map(function (v) { return +v.toFixed(2); }) : null,
       footprint: isFinite(F.minX) ? { minX: +F.minX.toFixed(1), maxX: +F.maxX.toFixed(1), minZ: +F.minZ.toFixed(1), maxZ: +F.maxZ.toFixed(1), area: F.cells.size } : null,
-      memBytes: S.meshes.reduce(function (a, m) { const g = m.geometry.attributes; return a + (g.position.array.byteLength + g.normal.array.byteLength + g.uv.array.byteLength + g.color.array.byteLength); }, 0)
+      memBytes: S.meshes.reduce(function (a, m) { const g = m.geometry.attributes; return a + (g.position.array.byteLength + g.normal.array.byteLength + g.uv.array.byteLength + (g.color ? g.color.array.byteLength : 0)); }, 0)
         + S.pristine.reduce(function (a, p) { return a + p.byteLength; }, 0),
       drawCalls: S.meshes.length,
+      // the bounded cut: which storeys were cut fine, what each half holds
+      region: S.region.all ? "all" : (function () { const r = []; let a = -1; for (let s = 0; s <= S.ns + 1; s++) { const f = s <= S.ns && S.region.fine[s] === 1; if (f && a < 0) a = s; if (!f && a >= 0) { r.push(a + "-" + (s - 1)); a = -1; } } return r.join(","); })(),
+      vertsFine: S.meshes.length ? S.chunks.reduce(function (a, c) { if (!c.rg || !fineLevel(S, c.s)) return a; for (let k = 2; k < c.rg.length; k += 3) a += c.rg[k]; return a; }, 0) : 0,
+      vertsCoarse: S.meshes.length ? S.chunks.reduce(function (a, c) { if (!c.rg || fineLevel(S, c.s)) return a; for (let k = 2; k < c.rg.length; k += 3) a += c.rg[k]; return a; }, 0) : 0,
+      livePanes: S.livePanes.length, liveInst: S.liveInst.length, srcTris: st.srcK || null,
       outcome: st.maxTilt > 0.75 ? "topple" : st.pancaked >= 2 ? "pancake" : st.detached > 0 ? "partial" : st.crushed + st.blasted > 0 ? "holed" : "intact",
     };
   }
@@ -3433,7 +3872,7 @@
         msAvg: stats.frames ? +(stats.ms / stats.frames).toFixed(3) : 0, msMax: +stats.msMax.toFixed(2),
         carsCrushed: stats.carsCrushed, baked: stats.baked, shattered: stats.shattered, crushed: stats.crushed, blasted: stats.blasted,
         cap: BODY_CAP, device: DEVICE, capSettled: stats.capSettled, capShattered: stats.capShattered,
-        drops: stats.drops, rewoken: stats.rewoken, dropping: droppers.length, baking: baking.length, kept: settled.length,
+        drops: stats.drops, rewoken: stats.rewoken, refines: stats.refines || 0, liveMB: +(C.liveBytes() / 1048576).toFixed(1), dropping: droppers.length, baking: baking.length, kept: settled.length,
         prof: Object.keys(profT).reduce(function (o, k) { o[k] = { avg: +(profT[k].sum / Math.max(1, stats.frames)).toFixed(3), max: +profT[k].max.toFixed(1) }; return o; }, {}) };
     }
     const S = bld && bld.chunks ? bld : structFor(bld, false);
