@@ -140,6 +140,8 @@
     stab: ["body", [0, 2.24, -8.26]],
     pylIL: ["body", [1.30, 1.86, 0.30]], pylIR: ["body", [-1.30, 1.86, 0.30]],
     pylOL: ["body", [2.20, 1.86, 0.30]], pylOR: ["body", [-2.20, 1.86, 0.30]],
+    // the two crew, their own node so a host can empty a parked Apache
+    crew: ["body", [0, 0, 0]],
   };
   // Hydra tube pattern of the M261 (19 x 70 mm, hexagonal)
   const TUBES = (function () {
@@ -348,11 +350,11 @@
     [[3.82, 1.18], [2.25, 1.60]].forEach(function (c) {
       const z = c[0], y = c[1];
       put("body", [at(box(0.56, 0.72, 0.10), 0, y + 0.40, z - 0.24), at(box(0.06, 0.40, 0.46), 0.27, y + 0.22, z), at(box(0.06, 0.40, 0.46), -0.27, y + 0.22, z)], C.gunmetal);
-      put("body", [at(box(0.40, 0.52, 0.26), 0, y + 0.44, z - 0.02),
+      put("crew", [at(box(0.40, 0.52, 0.26), 0, y + 0.44, z - 0.02),
         rod([0.21, y + 0.62, z], [0.15, y + 0.34, z + 0.34], 0.055, 6), rod([-0.21, y + 0.62, z], [-0.15, y + 0.34, z + 0.34], 0.055, 6),
         at(cylY(0.06, 0.06, 0.10, 8), 0, y + 0.74, z)], C.suit);
-      put("body", at(new THREE.SphereGeometry(0.135, 12, 9), 0, y + 0.86, z + 0.01), C.helmet);
-      put("body", [at(box(0.22, 0.07, 0.04), 0, y + 0.84, z + 0.135), at(new THREE.CylinderGeometry(0.018, 0.018, 0.07, 6), -0.05, y + 0.84, z + 0.17, PI / 2)], C.visor);
+      put("crew", at(new THREE.SphereGeometry(0.135, 12, 9), 0, y + 0.86, z + 0.01), C.helmet);
+      put("crew", [at(box(0.22, 0.07, 0.04), 0, y + 0.84, z + 0.135), at(new THREE.CylinderGeometry(0.018, 0.018, 0.07, 6), -0.05, y + 0.84, z + 0.17, PI / 2)], C.visor);
     });
 
     // =================================================================
@@ -679,6 +681,17 @@
       settle: function () { R.seeded = false; tick(R, true, 0, null); },
       muzzleWorld: function (out, shot) { return muzzle(R, out, shot); },
       fire: function (shot) { fire(R, shot); },
+      // the rails and pods loaded again (a host's rearm: landed at its pad)
+      rearm: function () {
+        R.hfShot = 0; R.hyShot = 0;
+        [[hf, hfPos], [hy, hyPos]].forEach(function (p) {
+          for (let s = 0; s < 2; s++) {
+            const im = p[0][s];
+            for (let i = 0; i < p[1].length; i++) im.setMatrixAt(i, _m.makeTranslation(p[1][i][0], p[1][i][1], p[1][i][2]));
+            im.instanceMatrix.needsUpdate = true;
+          }
+        });
+      },
       aimError: function (shot) {
         if (!shot || shot.wid !== "m230_30mm") return 0;
         const ay = clamp(N.aimYaw.rotation.y, -GUN.yawMax, GUN.yawMax), ap = clamp(N.aimPitch.rotation.x, GUN.up, GUN.down);
@@ -697,6 +710,12 @@
     root.userData.chinGun = { yaw: N.aimYaw.name, pitch: N.aimPitch.name, muzzle: N.barrel.name };
     root.userData.rig = rig;
     root.userData.aircraftDims = { family: "AH-64E", length: DIM.length, span: DIM.rotorSpan, height: DIM.height, bodyW: DIM.wingSpan, bodyL: 15.5 };
+    // the host's handles (city/playeraircraft.js, cockpit.js): the crew
+    // figure a host shows when somebody flies it, and the cockpit view's eye,
+    // the pilot's (the rear seat, under the IHADSS visor)
+    N.crew.userData.crewFigure = true;
+    root.userData.pilot = N.crew;
+    root.userData.cockpit = { eye: { x: 0, y: 2.45, z: 2.38 } };
     root.userData.crewSeats = [
       { job: "Pilot", x: 0, y: 1.60, z: 2.25, yaw: 0, cushionH: 0.42, floorBelow: 0.42 },
       { job: "Copilot/Gunner", x: 0, y: 1.18, z: 3.82, yaw: 0, cushionH: 0.42, floorBelow: 0.42 },

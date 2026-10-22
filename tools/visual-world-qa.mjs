@@ -373,7 +373,10 @@ try {
     // camera when the Fort layout changes with the seed.
     const x=-220,z=-86,y=1.25;
     if(window.__visualQaJet&&window.__visualQaJet.parent)window.__visualQaJet.parent.remove(window.__visualQaJet);
-    const jet=CBZ.debugBuildAircraft.jet();jet.name="visual-qa-player-jet";jet.position.set(x,y,z);root.add(jet);window.__visualQaJet=jet;
+    // the player jet is the F-35A unit: null until its file is on the page.
+    // HARNESS TRAP: the pose does not wait for the load, so a cold page shows an empty apron here
+    if(CBZ.airWantJet)CBZ.airWantJet();
+    const jet=CBZ.debugBuildAircraft.jet()||new THREE.Group();jet.name="visual-qa-player-jet";jet.position.set(x,CBZ.floorAt?CBZ.floorAt(x,z):0,z);root.add(jet);window.__visualQaJet=jet;
     const jp=jet.userData.plume||[];jp.forEach((p,i)=>CBZ.setRocketPlume(p,1,3.2+i*.13,1.8,1));
     const car=(CBZ.cityCars||[]).find(c=>c&&!c.dead&&c.group);
     let cp=[];

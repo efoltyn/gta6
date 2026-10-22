@@ -21,8 +21,11 @@
    Everything reuses the existing explosion / crashfx machinery and is fully
    feature-detected. Wanted-air (police gunship/jets) lives in aircraft.js; this
    is the player's and the state's side: CBZ.cityStrikeFlight is the ONE
-   strike flight every bombing jet flies (your phone's F-22, a President's
-   strike package, an enemy air raid — city/warroom.js).
+   strike flight every bombing jet flies (your phone's F-35, a President's
+   strike package, an enemy air raid — city/warroom.js). The jets are the
+   F-35A (units/vehicles/f35.js, through city/unitmodels.js): the same
+   airframe your hangar keeps and Fort Brandt parks, its bays opening for the
+   release.
 
    Exposes: CBZ.cityCallChopper, CBZ.cityCallAirstrike, CBZ.cityAirServices
             (status for the phone), CBZ.cityClearPlayerAir, CBZ.cityStrikeFlight.
@@ -123,9 +126,6 @@
       matSeat: shared(vmat('interior', 0x14171c)),        // seats + dark insets
       matBlade:shared(vmat('metal', 0x1e242b)),           // solid rotor blades
       matGlow: M(0xffd98a, { emissive: 0xffd98a, ei: 0.7 }),   // warm landing-light bar
-      matJet:  shared(vmat('paint', 0x39424f)),           // strike jet slate
-      matJetMetal: shared(vmat('metal', 0x565e68)),       // burner cans / rails
-      matGlass:shared(vmat('glass', 0x101a24)),           // jet canopy (was 0x10161c — frost-window margin, same near-black read)
       // ONE-OFF transparent bubble glass: the shared carfx 'glass' is opaque on
       // purpose (sort cost at 100s of cars), but a single summoned chopper can
       // afford true see-through panes — you SEE the seats you're about to take.
@@ -151,25 +151,7 @@
       rotorDisc:shared(new THREE.CircleGeometry(4.5, 20)),       // spin blur disc
       rotorTail:shared(new THREE.BoxGeometry(0.05, 1.4, 0.26)),  // one tail blade
       navBead:  shared(new THREE.BoxGeometry(0.15, 0.15, 0.15)),
-      // airstrike jet — sculpted fuselage, LERX chines, cans, pylons (mirrors
-      // the 5★ police jet's kit, in your own slate paint)
-      jetBody:  shared(taperBox(1.3, 1.05, 7.6, { nz: 0.26, tz: 0.6, top: 0.72, bot: 0.62, segD: 10 })),
-      jetNose:  shared(new THREE.ConeGeometry(0.26, 1.3, 8)),    // fine radar-boom tip
-      jetCanopy:shared(taperBox(0.8, 0.55, 1.9, { nz: 0.5, tz: 0.95, top: 0.45 })),
-      jetChine: shared(taperBox(0.46, 0.08, 2.4, { nz: 0.3 })),  // LERX strake (one side)
-      jetWing:  shared(taperBox(3.4, 0.16, 3.0, { nz: 0.35, tz: 0.78, segW: 4 })),   // one swept delta half
-      jetTail:  shared(taperBox(0.14, 1.3, 1.1, { nz: 0.7, tz: 0.45, top: 0.5 })),   // one canted vertical tail
-      jetStab:  shared(taperBox(1.5, 0.12, 0.9, { nz: 0.4, tz: 0.7 })),
-      jetIntake:shared(taperBox(0.42, 0.6, 1.6, { nz: 0.7, top: 0.7 })),
-      jetCan:   shared(new THREE.CylinderGeometry(0.26, 0.22, 0.7, 8)),   // afterburner can
-      jetCanIn: shared(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 8)),   // dark nozzle throat
-      pylon:    shared(new THREE.BoxGeometry(0.1, 0.3, 0.8)),             // underwing bomb pylon
-      bombTip:  shared(new THREE.ConeGeometry(0.18, 0.35, 7)),            // nose of the slung store
-      bomb:     shared(new THREE.CylinderGeometry(0.18, 0.18, 1.2, 7)),
-      burn:     shared(new THREE.SphereGeometry(0.5, 7, 6)),
       rotorMat: shared(new THREE.MeshBasicMaterial({ color: 0x0e1015, transparent: true, opacity: 0.5, depthWrite: false })),
-      flameMat: shared(new THREE.MeshBasicMaterial({ color: 0xffb14a, transparent: true, opacity: 0.9, depthWrite: false })),
-      bombMat:  shared(new THREE.MeshBasicMaterial({ color: 0x20242b })),
       navR:     shared(new THREE.MeshBasicMaterial({ color: 0xff2a22 })),
       navG:     shared(new THREE.MeshBasicMaterial({ color: 0x18ff3a })),
       navW:     shared(new THREE.MeshBasicMaterial({ color: 0xeaf4ff })),
@@ -393,49 +375,26 @@
     return { x: P.pos.x - Math.sin(y) * 34, z: P.pos.z - Math.cos(y) * 34, label: "your sights" };
   }
 
-  // Mesh-only builder (no scene/target dependency) — used by strikeFlight and
-  // exposed for tools/studio.mjs asset photography (CBZ.debugBuildPlayerAir).
-  function buildStrikeJetGroup() {
-    const a = assets();
-    const grp = new THREE.Group();
-    const body = new THREE.Mesh(a.jetBody, a.matJet); grp.add(body);
-    // fine needle nose tip capping the sculpted fuselage taper (apex forward)
-    const nose = new THREE.Mesh(a.jetNose, a.matJet); nose.rotation.x = Math.PI / 2; nose.position.z = 4.15; grp.add(nose);
-    // REFLECTIVE GLASS canopy (was painted hull before — it never read as a cockpit)
-    const canopy = new THREE.Mesh(a.jetCanopy, a.matGlass); canopy.position.set(0, 0.56, 1.7); grp.add(canopy);
-    // LERX chines blending the wing roots up the forward fuselage
-    const chL = new THREE.Mesh(a.jetChine, a.matJet); chL.position.set(-0.42, 0.1, 1.85); chL.rotation.y = 0.12; grp.add(chL);
-    const chR = new THREE.Mesh(a.jetChine, a.matJet); chR.position.set(0.42, 0.1, 1.85); chR.rotation.y = -0.12; grp.add(chR);
-    const inL = new THREE.Mesh(a.jetIntake, a.matJet); inL.position.set(-0.7, -0.12, 0.6); grp.add(inL);
-    const inR = new THREE.Mesh(a.jetIntake, a.matJet); inR.position.set(0.7, -0.12, 0.6); grp.add(inR);
-    // swept TAPERED delta halves — roots sink into the fuselage sides, slight dihedral
-    const wingL = new THREE.Mesh(a.jetWing, a.matJet); wingL.position.set(-1.9, -0.18, -0.7); wingL.rotation.y = 0.32; wingL.rotation.z = 0.06; grp.add(wingL);
-    const wingR = new THREE.Mesh(a.jetWing, a.matJet); wingR.position.set(1.9, -0.18, -0.7); wingR.rotation.y = -0.32; wingR.rotation.z = -0.06; grp.add(wingR);
-    const stabL = new THREE.Mesh(a.jetStab, a.matJet); stabL.position.set(-0.85, 0, -3.3); stabL.rotation.y = 0.2; grp.add(stabL);
-    const stabR = new THREE.Mesh(a.jetStab, a.matJet); stabR.position.set(0.85, 0, -3.3); stabR.rotation.y = -0.2; grp.add(stabR);
-    // canted twin tails, roots overlapping the rear fuselage top
-    const tailL = new THREE.Mesh(a.jetTail, a.matJet); tailL.position.set(-0.42, 0.75, -2.95); tailL.rotation.z = 0.22; grp.add(tailL);
-    const tailR = new THREE.Mesh(a.jetTail, a.matJet); tailR.position.set(0.42, 0.75, -2.95); tailR.rotation.z = -0.22; grp.add(tailR);
-    // UNDERWING PYLONS with visible slung bombs — these are the stores the drop
-    // "releases": releaseFrom hides a pair the moment its live bomb leaves, so
-    // the ordnance you see on the run-in is the ordnance that falls.
-    const stores = [];
-    for (const sx of [-1, 1]) {
-      const py = new THREE.Mesh(a.pylon, a.matJetMetal); py.position.set(sx * 1.15, -0.4, -0.55); grp.add(py);
-      const bm = new THREE.Mesh(a.bomb, a.bombMat); bm.rotation.x = Math.PI / 2; bm.position.set(sx * 1.15, -0.66, -0.55); grp.add(bm);
-      const bt = new THREE.Mesh(a.bombTip, a.bombMat); bt.rotation.x = Math.PI / 2; bt.position.set(sx * 1.15, -0.66, 0.2); grp.add(bt);
-      stores.push(bm, bt);
-    }
-    // twin afterburner cans with dark throats; the glow pulses behind them
-    for (const sx of [-1, 1]) {
-      const can = new THREE.Mesh(a.jetCan, a.matJetMetal); can.rotation.x = Math.PI / 2; can.position.set(sx * 0.24, -0.05, -4.05); grp.add(can);
-      const thr = new THREE.Mesh(a.jetCanIn, a.matSeat); thr.rotation.x = Math.PI / 2; thr.position.set(sx * 0.24, -0.05, -4.42); grp.add(thr);
-    }
-    const burn = new THREE.Mesh(a.burn, a.flameMat); burn.scale.set(0.7, 0.7, 1.4); burn.position.set(0, -0.05, -4.6); grp.add(burn);
-    // nav lights: port red / stbd green at the wingtips, white on the spine
-    const nL = (m, x, y, z) => { const b = new THREE.Mesh(a.navBead, m); b.position.set(x, y, z); grp.add(b); };
-    nL(a.navR, -3.4, -0.2, -0.9); nL(a.navG, 3.4, -0.2, -0.9); nL(a.navW, 0, 0.35, -3.6);
-    return { grp, burn, stores };
+  /* THE STRIKE JET IS THE F-35A (units/vehicles/f35.js through
+     city/unitmodels.js): one model per machine. null until the unit file is
+     on the page (wantJet asks for it; a flight's jets are built the frame it
+     lands, 1.4 km out, long before anyone can see them). The pilot is in it,
+     the gear is up, the bays carry a 2,000 lb JDAM each and open for the
+     release. */
+  function wantJet() {
+    const M = CBZ.milModels;
+    if (M && M.load && !(M.has && M.has("jet"))) { try { M.load(["jet"]); } catch (e) {} }
+  }
+  function buildStrikeJet() {
+    const M = CBZ.milModels;
+    if (!(M && M.has && M.has("jet"))) { wantJet(); return null; }
+    const made = M.jet();
+    if (!made || !made.group) return null;
+    const grp = made.group, ud = grp.userData;
+    if (ud.pilot) ud.pilot.visible = true;            // somebody is flying this one
+    const R = made.rig && made.rig.state;
+    if (R) R.load = "jdam";
+    return { grp: grp, rig: made.rig };
   }
 
   /* ==========================================================================
@@ -516,37 +475,49 @@
       onImpact: typeof opts.onImpact === "function" ? opts.onImpact : null,
       onDone: typeof opts.onDone === "function" ? opts.onDone : null,
     };
-    const yaw = Math.atan2(h.x, h.z);
+    f.yaw = Math.atan2(h.x, h.z); f.root = r; f.agl = agl;
+    wantJet();
     for (let j = 0; j < nJets; j++) {
-      const built = buildStrikeJetGroup();
       // echelon: the lead on the line, wingmen alternating right/left and back
       const lat = j === 0 ? 0 : (j % 2 ? 1 : -1) * Math.ceil(j / 2) * 18;
       const back = Math.ceil(j / 2) * 32;
       // (hz, -hx) is the unit to the right of the heading
-      built.grp.position.set(tx - h.x * (FLIGHT.RUNIN + back) + h.z * lat, y + j * 3, tz - h.z * (FLIGHT.RUNIN + back) - h.x * lat);
-      built.grp.rotation.y = yaw;
-      r.add(built.grp);
+      const pos = new THREE.Vector3(tx - h.x * (FLIGHT.RUNIN + back) + h.z * lat, y + j * 3, tz - h.z * (FLIGHT.RUNIN + back) - h.x * lat);
       // this jet's stick: walked along the track through the aimpoint, under its own lane
       const aims = [];
       for (let k = 0; k < per; k++) {
         const d = (k - (per - 1) / 2) * FLIGHT.STICK;
         aims.push({ x: tx + h.x * d + h.z * lat, z: tz + h.z * d - h.x * lat });
       }
-      f.jets.push({ group: built.grp, burn: built.burn, stores: built.stores, pos: built.grp.position, aims: aims, next: 0, flight: f });
+      const jt = { group: null, rig: null, pos: pos, aims: aims, next: 0, flight: f };
+      seatJet(jt);
+      f.jets.push(jt);
     }
     flights.push(f);
     return f;
   }
+  // the airframe on its track (now, or the frame its file lands)
+  function seatJet(jt) {
+    if (jt.group) return true;
+    const built = buildStrikeJet();
+    if (!built) return false;
+    const f = jt.flight;
+    built.grp.position.copy(jt.pos);
+    built.grp.rotation.order = "YXZ";
+    built.grp.rotation.y = f.yaw;
+    f.root.add(built.grp);
+    jt.group = built.grp; jt.rig = built.rig; jt.pos = built.grp.position;
+    return true;
+  }
+  const _drive = { thr: 0.8, agl: 95, speed: 140, vy: 0, pilot: null };
 
   function releaseFrom(jt, a) {
     const f = jt.flight;
-    // the slung store visibly leaves its pylon (stores are [bomb, tip] pairs)
-    if (jt.stores) {
-      const si = (jt.next % 2) * 2;
-      if (jt.stores[si]) jt.stores[si].visible = false;
-      if (jt.stores[si + 1]) jt.stores[si + 1].visible = false;
-    }
-    _relP.x = jt.pos.x; _relP.y = jt.pos.y - 0.9; _relP.z = jt.pos.z;
+    // the store leaves its bay (the F-35 carries one JDAM a side; a longer
+    // stick keeps the doors open and walks the rest off the same racks)
+    const R = jt.rig && jt.rig.state;
+    if (R && R.nJ < 2) R.nJ++;
+    _relP.x = jt.pos.x; _relP.y = jt.pos.y + 0.6; _relP.z = jt.pos.z;
     let b = null;
     if (CBZ.strategicRelease) {
       try { b = CBZ.strategicRelease(f.kind, _relP, f.rv, { by: f.by, byPlayer: f.byPlayer, stateAct: f.stateAct }); } catch (e) { b = null; }
@@ -585,7 +556,18 @@
     for (let j = 0; j < f.jets.length; j++) {
       const jt = f.jets[j];
       jt.pos.x += f.hx * step; jt.pos.z += f.hz * step;
-      if (jt.burn) jt.burn.scale.z = 1.4 + Math.sin(f.t * 30 + j) * 0.4;
+      if (!jt.group) seatJet(jt);
+      if (jt.group) {
+        // the bays open about two seconds before the first release and stay
+        // open through the stick (the unit's own doors, ~1 s to swing)
+        const R = jt.rig && jt.rig.state;
+        if (R && jt.next < jt.aims.length) {
+          const a0 = jt.aims[jt.next];
+          const toRel = ((a0.x - f.hx * f.lead) - jt.pos.x) * f.hx + ((a0.z - f.hz * f.lead) - jt.pos.z) * f.hz;
+          if (toRel < f.spd * 2.2) R.bayHold = Math.max(R.bayHold, R.clock + 1.5);
+        }
+        if (CBZ.milAirDrive) { _drive.agl = f.agl; _drive.speed = f.spd; CBZ.milAirDrive(jt.group, _drive, dt); }
+      }
       // release each store the instant the jet crosses its solved release point
       while (jt.next < jt.aims.length) {
         const a = jt.aims[jt.next];
@@ -685,14 +667,14 @@
   CBZ.cityCallAirstrike = function (tgt) {
     if (g.mode !== "city" || g.state !== "playing") return false;
     if (!canStrike()) {
-      note("No F-22 yet. Buy a hangar (penthouse deck [H] or the airport Private Hangar [P]→Services), STEAL the F-22 from the military base, then land it in your hangar to keep it.", 4.2);
+      note("No F-35 yet. Buy a hangar (penthouse deck [H] or the airport Private Hangar [P]→Services), STEAL an F-35 from the military base, then land it in your hangar to keep it.", 4.2);
       return false;
     }
     if (strikeCD > 0) { note("Jet rearming · " + Math.ceil(strikeCD) + "s.", 2); return false; }
     tgt = tgt || strikeTarget();
     if (!tgt) { note("No target, set a waypoint [M] or aim at the ground.", 2.6); return false; }
     if (((g.cash || 0) + (g.cityBank || 0)) < STRIKE_COST) { note("An airstrike costs " + money(STRIKE_COST) + ".", 2.6); return false; }
-    // your F-22: one jet, its two slung Mk-84s walked across the mark
+    // your F-35: one jet, its two 2,000 lb JDAMs walked across the mark
     const f = strikeFlight({ x: tgt.x, z: tgt.z, jets: 1, bombs: 2, alt: 70, byPlayer: true, label: tgt.label || "" });
     if (!f) { note("The jet can't get airborne right now.", 2); return false; }
     charge(STRIKE_COST);
@@ -724,7 +706,7 @@
   // ---- studio hook: pure mesh builders for tools/studio.mjs expr shots ----
   CBZ.debugBuildPlayerAir = {
     chopper: function () { return buildChopperGroup().grp; },
-    strikeJet: function () { return buildStrikeJetGroup().grp; },
+    strikeJet: function () { const b = buildStrikeJet(); return b ? b.grp : null; },
   };
 
   function teardown() { despawnChopper(); despawnAllFlights(); chopperCD = 0; strikeCD = 0; g.cityChopperRide = false; }

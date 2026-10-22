@@ -415,7 +415,7 @@
              "factory answers null and the page falls back. Real geometry, not boxes",
       needs: ["look"],
       files: ["world/basekit.js", "city/mil_air.js", "units/unitkit.js", "units/manifest.js", "units/kit/vehicle.js",
-        "city/island_military.js", "city/strategic.js"],
+        "city/unitmodels.js", "city/island_military.js", "city/strategic.js"],
       publishes: ["milModels", "strategicModels"],
     },
 
@@ -493,7 +493,7 @@
       // the try/catch round each one swallowed the missing factory.
       needs: ["military", "citycore"],
       files: ["world/basekit.js", "city/mil_air.js", "units/unitkit.js", "units/manifest.js", "units/kit/vehicle.js",
-        "city/island_military.js"],
+        "city/unitmodels.js", "city/island_military.js"],
       publishes: [],
     },
     airport: {

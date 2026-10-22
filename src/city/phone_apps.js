@@ -523,7 +523,7 @@
     let air = null;
     try { air = CBZ.cityAirServices ? CBZ.cityAirServices() : null; } catch (e) { air = null; }
     if (air && air.helipad && !me) out.push({ id: "pilot", name: "Pilot", role: "Chopper", kind: "service" });
-    if (air && air.hangar) out.push({ id: "jet", name: "Hangar", role: "F-22", kind: "service" });
+    if (air && air.hangar) out.push({ id: "jet", name: "Hangar", role: "F-35", kind: "service" });
     if (CBZ.cityGig) out.push({ id: "dispatch", name: "Dispatch", role: "Work", kind: "service" });
     return out;
   }

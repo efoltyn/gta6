@@ -163,13 +163,13 @@
     // hangar (→ F-22) is a separate add-on offered here once you own the tower.
     const isPent = !!g.cityOwnsPenthouse || isPenthouse(home);
     if (isPent && g.cityOwnsHangar) {
-      actions.push({ label: "Hangar", fn: () => { CBZ.city.note("Your F-22 sits in the deck hangar, walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
+      actions.push({ label: "Hangar", fn: () => { CBZ.city.note("Your F-35 sits in the deck hangar, walk up and take it out, or call an airstrike from your phone. The chopper waits on the helipad. · F fly · LMB missiles", 3.2); } });
     } else if (isPent) {
       actions.push({ label: "Buy hangar " + money(hangarPrice()), fn: buyHangar });
     }
     let html = "<div style='font-size:20px;font-weight:700;margin-bottom:6px'>" + home.name + "</div>";
     html += "<div style='font-size:12px;color:#8a93a3;margin-bottom:10px'>Your home · safe " + money(g.cityBank || 0) + "</div>";
-    if (g.cityOwnsHeli) html += "<div style='font-size:12px;color:#7ed957;margin-bottom:8px'>Helicopter ready on the pad" + (g.cityOwnsHangar ? " · F-22 in the hangar" : "") + "</div>";
+    if (g.cityOwnsHeli) html += "<div style='font-size:12px;color:#7ed957;margin-bottom:8px'>Helicopter ready on the pad" + (g.cityOwnsHangar ? " · F-35 in the hangar" : "") + "</div>";
     actions.forEach((a, i) => { html += "<div class='reRow' data-k='" + (i + 1) + "' style='padding:4px 0'><b style='color:#ffd166'>" + (i + 1) + "</b> " + a.label + "</div>"; });
     html += "<div class='reRow reBtn' data-k='escape'>CLOSE</div>";
     open(html);

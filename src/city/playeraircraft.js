@@ -48,15 +48,6 @@
     return cmat(color != null ? color : 0x808890, opts);
   }
 
-  // ---- SHAPE HELPER: r128 has NO geometry.vertices[] — sculpt the
-  // position attribute directly, then recompute normals so lighting is right.
-  // taperBox builds a BoxGeometry then scales each vertex's X/Y by a factor that
-  // depends on its Z (z=+halfDepth → nose factor `nz`, z=-halfDepth → tail
-  // factor `tz`), optionally squashing the underside (`belly`<1 narrows the
-  // bottom, rounding the keel). One geometry, one draw call. NOT cached/shared —
-  // each sculpted body is unique, so the disposer (which skips _shared) frees it.
-  // taperBox lives ONCE in world/carfx.js now (was copied into 6 builders).
-  function taperBox(w, h, d, opt) { return CBZ.taperBox(w, h, d, opt); }
 
   // ---- tunables --------------------------------------------------------
   // The dynamics are pure steps in city/aircraftphysics.js (heliStep,
@@ -203,44 +194,19 @@
   }
 
   // ============================================================
-  //  MODELS — both reuse cached shared mats/geoms (cmat/boxGeom) so a fleet of
-  //  rotors/pods costs almost no extra draw setup. A clear nose "muzzle" empty
-  //  is tagged on each so missiles spawn from the gun, not the centroid.
+  //  MODELS. The helicopters are city/airframes.js's, the jet is the F-35A
+  //  unit (units/vehicles/f35.js). All that is built here is the hidden
+  //  pilot silhouette the heli's cockpit eye solver reads, in two module
+  //  singletons the disposer never frees (_shared).
   // ============================================================
   function assets() {
     if (G) return G;
     const shared = (o) => { if (o) o._shared = true; return o; };
-    // every body material is a MODULE-LEVEL SINGLETON reused by every craft, so
-    // flag them _shared — the disposer must NEVER free them (a carfx vehicleMat
-    // may be cache-shared with the cars; freeing it would break them).
     G = {
-      // BODY PANELS routed through the new env-mapped vehicle roles → instant
-      // shine (auto-fall back to flat cmat). Player birds get sleek hero colours:
-      // a deep gunmetal-navy chopper, a charcoal stealth-grey jet.
-      mBody:   shared(vmat('paint', 0x2b3340, { emissive: 0x0c0e12, ei: 0.2 })),   // heli fuselage
-      mDark:   shared(vmat('metal', 0x1b1f26, { emissive: 0x060708, ei: 0.15 })),  // skids / booms / dark trim
-      mGrey:   shared(vmat('metal', 0x707884, { emissive: 0x202329, ei: 0.25 })),  // mast / pods / wings
-      mGlass:  shared(vmat('glass', 0x16242e, { emissive: 0x0a151c, ei: 0.4 })),   // canopy glass (reflective)
-      mJet:    shared(vmat('paint', 0x3a414c, { emissive: 0x10131a, ei: 0.1 })),   // jet skin
-      mJetDk:  shared(vmat('metal', 0x262b33, { emissive: 0x0a0d12, ei: 0.12 })),  // chines / nozzles / dark structure
-      mMissile:shared(vmat('chrome', 0xd8dde4, { emissive: 0x3a3e44, ei: 0.2 })),  // missile bodies
-      mWarn:   shared(cmat(0xff5a3a, { emissive: 0xff3018, ei: 0.7 })),            // muzzle / afterburner core (kept hot/flat)
-      // emissive NAV lights — wingtip red (port) / green (stbd), white tail beacon
-      navR:    shared(vmat('lightTail',  0xff2a22, { emissive: 0xff1810, ei: 0.95 })),
-      navG:    shared(cmat(0x18ff3a, { emissive: 0x10ff30, ei: 0.95 })),
-      navW:    shared(vmat('lightFront', 0xffffff, { emissive: 0xeaf4ff, ei: 0.9 })),
-      // (the rotor-blur disc material is PER-CRAFT now — spinRotors animates its
-      // opacity with rotor rate, so it can't live in this shared cache)
-      // solid blade material (the real spinning blades read as metal, not blur)
-      bladeMat: shared(vmat('metal', 0x202833, { emissive: 0x080a0e, ei: 0.2 })),
+      mDark:   shared(vmat('metal', 0x1b1f26, { emissive: 0x060708, ei: 0.15 })),
+      mGrey:   shared(vmat('metal', 0x707884, { emissive: 0x202329, ei: 0.25 })),
     };
     return G;
-  }
-
-  // tiny emissive nav-light bead
-  function navLight(grp, mat, x, y, z) {
-    const m = new THREE.Mesh(boxGeo(0.16, 0.16, 0.16), mat);
-    m.position.set(x, y, z); grp.add(m); return m;
   }
 
   // the firing point: an EMPTY node, never a mesh. It used to be a glowing
@@ -256,16 +222,16 @@
     grp.userData.muzzleLocal = new THREE.Vector3(x, y, z);
   }
 
-  /* ---- HELICOPTERS are city/airframes.js's: one lofted light twin with
-     real window holes, doors, cabin seats, rotor blur and lights, in civil,
-     police, news, medical, VIP and this file's armed variant. Here we only
-     add what a FLYABLE craft needs on top: the hidden pilot silhouette the
-     cockpit eye solver reads, the muzzle, the measured belly and the door
-     the boarding arc opens. ------------------------------------------------- */
+  /* ---- CIVIL HELICOPTERS are city/airframes.js's: one lofted light twin
+     with real window holes, doors, cabin seats, rotor blur and lights, in
+     civil, police, news, medical and VIP. Here we only add what a FLYABLE
+     craft needs on top: the hidden pilot silhouette the cockpit eye solver
+     reads, the nose point, the measured belly and the door the boarding arc
+     opens. (The armed one is the AH-64 below, not a variant of this.) ------- */
   const _heliBelly = new Map();
   function buildHeliAirframe(opts) {
     opts = opts || {};
-    const variant = opts.variant || (opts.vip ? "vip" : (opts.armed === false ? "civil" : "gunship"));
+    const variant = opts.variant || (opts.vip ? "vip" : "civil");
     const grp = CBZ.airframes.build("heli", { variant: variant, livery: opts.livery });
     grp.name = opts.name || variant + "-heli";
     const rig = CBZ.airframes.rig(grp);
@@ -281,8 +247,7 @@
     grp.userData.pilot = heliPilot;
     // the pilot's door is the "canopy" the boarding arc swings open
     if (rig.doors.R) { grp.userData.canopy = rig.doors.R.node; grp.userData.canopyDoor = "R"; }
-    if (variant === "gunship") addMuzzle(grp, 0, -0.52, 3.78);
-    else { grp.userData.unarmed = true; grp.userData.muzzleLocal = new THREE.Vector3(0, -0.2, 3.7); }
+    grp.userData.unarmed = true; grp.userData.muzzleLocal = new THREE.Vector3(0, -0.2, 3.7);
     // BELLY IS MEASURED, NOT TYPED: origin to the lowest point of the model
     if (!_heliBelly.has(variant)) {
       const bb = new THREE.Box3(), tb = new THREE.Box3();
@@ -296,13 +261,26 @@
     }
     grp.userData.belly = _heliBelly.get(variant);
     // `pilot:false` — the caller seats its own crew (airtraffic.js does)
-    if (opts.pilot !== false) seatCosmeticPilot(grp, "heli", opts.name || (variant === "gunship" ? "Missile Helicopter" : "Helicopter"));
+    if (opts.pilot !== false) seatCosmeticPilot(grp, "heli", opts.name || "Helicopter");
     return grp;
   }
 
-  // the player's armed gunship: gunmetal over charcoal
+  /* THE PLAYER'S ARMED HELICOPTER IS THE AH-64 APACHE (units/vehicles/
+     ah64_apache.js), the same airframe Fort Brandt parks and NPC War flies:
+     its rotors at their real rpm, its gear, its chin gun, its Hellfire rails
+     (the missiles leave from them), its two crew. It used to be the civil
+     light twin (city/airframes.js) with a "gunship" pod bolted on. Built
+     through city/unitmodels.js; null until the unit file is on the page
+     (placeHeli asks again when it lands). */
   function buildHeli() {
-    return buildHeliAirframe({ variant: "gunship", name: "Missile Helicopter", livery: { body: 0x2b3340, belly: 0x1d232c, accent: 0x3a4250 } });
+    if (!(CBZ.milModels && CBZ.milModels.has && CBZ.milModels.has("attackHeli"))) { wantUnit("attackHeli"); return null; }
+    const made = CBZ.milModels.attackHeli();
+    if (!made || !made.group) return null;
+    const ud = made.group.userData;
+    made.group.name = "AH-64 Apache";
+    ud.groundOffset = 0;               // the wheels at the origin
+    ud.belly = 0.02;
+    return made.group;
   }
   // the head-of-state transport: deep green over white, gold cheat line
   function buildVipHeli(opts) {
@@ -311,132 +289,60 @@
       livery: Object.assign({ body: 0x1f3b2d, belly: 0xe9e8e2, accent: 0xc9a24a }, opts.livery || {}) });
   }
 
-  // ---- F-22 RAPTOR: angular delta-wing fuselage, twin tails, canopy, missiles
-  function buildJet() {
-    const a = assets();
-    const grp = new THREE.Group();
-    // SLEEK SCULPTED FUSELAGE (+Z forward): the spine everything plugs into. The
-    // box pinches to a sharp nose (nz small), necks down at the tail, narrows the
-    // spine (top) and rounds the belly (bot) — one curved draw call, no seams.
-    const body = new THREE.Mesh(taperBox(1.55, 1.05, 8.8, { nz: 0.18, tz: 0.62, top: 0.72, bot: 0.62, segD: 10 }), a.mJet);
-    grp.add(body);
-    // a fine needle nose tip extending the taper to a point (radar boom feel)
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.16, 1.35, 8), a.mJetDk);
-    tip.rotation.x = -Math.PI / 2; tip.position.set(0, -0.02, 4.85); grp.add(tip);
-    // radome seam collar where the dark nosecone meets the skin — crisps the nose
-    const seam = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.12, 10), a.mJetDk);
-    seam.rotation.x = Math.PI / 2; seam.position.set(0, -0.01, 4.15); grp.add(seam);
-    // BUBBLE CANOPY — REAL transparent glass now; tagged for the door arc.
-    const canopy = new THREE.Mesh(taperBox(0.9, 0.62, 2.4, { nz: 0.45, tz: 0.95, top: 0.45, bot: 1.0 }), a.mGlass);
-    canopy.position.set(0, 0.5, 1.85); grp.add(canopy);
-    grp.userData.canopy = canopy;
-    // cockpit tub + ejection-seat back + pilot silhouette under the clear bubble
-    const jetSeat = new THREE.Mesh(boxGeo(0.4, 0.44, 0.12), a.mJetDk);
-    jetSeat.position.set(0, 0.38, 1.35); grp.add(jetSeat);
-    const jetPilot = new THREE.Group();
-    const jpTorso = new THREE.Mesh(boxGeo(0.34, 0.38, 0.22), a.mJetDk); jpTorso.position.set(0, 0.42, 1.55); jetPilot.add(jpTorso);
-    const jpHead = new THREE.Mesh(boxGeo(0.2, 0.2, 0.2), a.mGrey); jpHead.position.set(0, 0.7, 1.55); jetPilot.add(jpHead);
-    jetPilot.visible = false;
-    grp.add(jetPilot);
-    grp.userData.pilot = jetPilot;
-    // chined forebody shoulders (LERX) — angular blends overlapping the body sides
-    [-1, 1].forEach((s) => {
-      const chine = new THREE.Mesh(taperBox(1.1, 0.4, 4.4, { nz: 0.25, tz: 0.85, top: 0.7 }), a.mJetDk);
-      chine.position.set(s * 0.78, -0.12, 1.9); chine.rotation.y = s * 0.12; grp.add(chine);
-    });
-    // side air intakes hugging the lower fuselage, with near-black inner mouths
-    // proud of the front face so the duct reads as an opening, not a slab
-    [-1, 1].forEach((s) => {
-      const intake = new THREE.Mesh(taperBox(0.5, 0.62, 2.0, { nz: 0.7, tz: 1.0, top: 0.7 }), a.mJetDk);
-      intake.position.set(s * 0.82, -0.18, 0.7); grp.add(intake);
-      const mouth = new THREE.Mesh(boxGeo(0.3, 0.4, 0.16), a.mDark);
-      mouth.position.set(s * 0.82, -0.2, 1.66); grp.add(mouth);
-    });
-    // CLEAN DELTA WINGS (swept, tapered) with a touch of DIHEDRAL (tips raised).
-    // Roots driven through the fuselage; each wing tapers toward the tip + carries
-    // a pylon + a real-looking missile (nose cone + body + tail fins) underneath.
-    [-1, 1].forEach((s) => {
-      const wing = new THREE.Mesh(taperBox(4.7, 0.16, 3.5, { nz: 0.35, tz: 0.78, top: 1, bot: 1, segW: 4 }), a.mJet);
-      wing.position.set(s * 2.45, -0.16, -0.6); wing.rotation.y = s * 0.34; wing.rotation.z = s * -0.07; grp.add(wing);
-      // pylon
-      const pylon = new THREE.Mesh(boxGeo(0.14, 0.26, 1.1), a.mJetDk); pylon.position.set(s * 2.25, -0.34, 0.1); grp.add(pylon);
-      // under-wing missile (cone tip + chrome body + 4 tail fins) — reads as ordnance
-      const msl = new THREE.Group(); msl.position.set(s * 2.25, -0.52, 0.1);
-      const mb = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 1.7, 8), a.mMissile); mb.rotation.x = Math.PI / 2; msl.add(mb);
-      const mc = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.5, 8), a.mMissile); mc.rotation.x = -Math.PI / 2; mc.position.z = 1.1; msl.add(mc);
-      [0, 1].forEach((f) => {
-        const fin = new THREE.Mesh(boxGeo(0.62, 0.04, 0.34), a.mJetDk);   // a fin plate across the tail
-        fin.position.z = -0.72; fin.rotation.z = f * Math.PI / 2; msl.add(fin);   // f=0 horiz pair, f=1 vert → cruciform
-      });
-      grp.add(msl);
-    });
-    // twin canted vertical tails — tapered, bases sunk into the aft deck
-    [-1, 1].forEach((s) => {
-      const tail = new THREE.Mesh(taperBox(0.16, 1.6, 1.8, { nz: 0.7, tz: 0.45, top: 0.5 }), a.mJet);
-      tail.position.set(s * 0.78, 0.68, -3.4); tail.rotation.z = s * 0.32; grp.add(tail);
-    });
-    // horizontal stabilators — tapered, inboard ends buried in the rear fuselage
-    [-1, 1].forEach((s) => {
-      const stab = new THREE.Mesh(taperBox(2.6, 0.12, 1.5, { nz: 0.4, tz: 0.7 }), a.mJet);
-      stab.position.set(s * 1.45, -0.1, -3.8); stab.rotation.y = s * 0.12; grp.add(stab);
-    });
-    // AFTERBURNER CANS: twin nozzles flaring out of the tail + the hot glow plume
-    [-0.5, 0.5].forEach((s) => {
-      const noz = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 1.1, 12), a.mJetDk);
-      noz.rotation.x = Math.PI / 2; noz.position.set(s, -0.05, -4.35); grp.add(noz);
-      // dark inner can mouth
-      const mouth = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.2, 12), a.mDark);
-      mouth.rotation.x = Math.PI / 2; mouth.position.set(s, -0.05, -4.85); grp.add(mouth);
-    });
-    const burn = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 8), a.mWarn);
-    burn.scale.set(0.7, 0.7, 1.6); burn.position.set(0, -0.05, -5.0); grp.add(burn);
-    grp.userData.burn = burn;
-    // AFTERBURNER PLUMES — the same reusable hot-core / shock-diamond exhaust
-    // used by the base fighters and chop-shop car boosters.  Keeping one power
-    // contract matters: a better rocket effect now upgrades every propelled
-    // machine instead of leaving three slightly different fake flame cones.
-    let plumeMat = null;
-    const plume = [];
-    [-0.5, 0.5].forEach((s) => {
-      let p;
-      if (CBZ.createRocketPlume) {
-        p = CBZ.createRocketPlume({ name: "player-jet-afterburner", lightRange: 12 });
-        if (!plumeMat && p.userData) plumeMat = p.userData.outerMaterial;
-        if (CBZ.setRocketPlume) CBZ.setRocketPlume(p, 0, 0);
-      } else {
-        plumeMat = plumeMat || new THREE.MeshBasicMaterial({ color: 0xff8c3a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-        const pg = new THREE.ConeGeometry(0.3, 1.5, 10);
-        pg.translate(0, 0.75, 0);                     // base at the mesh origin
-        p = new THREE.Mesh(pg, plumeMat);
-        p.rotation.x = -Math.PI / 2;                  // apex points -Z (astern)
-      }
-      p.position.set(s, -0.05, -4.9); grp.add(p); plume.push(p);
-    });
-    grp.userData.plume = plume; grp.userData.plumeMat = plumeMat;
-    // LANDING GEAR (nose leg + two mains): chunky struts + wheel drums. The
-    // whole group is toggled by integrateV2() — down under ~9m AGL, tucked above.
-    // A parked Raptor always shows it (built visible; exitAircraft re-lowers).
-    const gear = new THREE.Group();
-    function leg(x, z, wr, sh) {
-      const strut = new THREE.Mesh(taperBox(0.16, sh, 0.16, { top: 0.75 }), a.mGrey);
-      strut.position.set(x, -0.23 - sh / 2, z); gear.add(strut);
-      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(wr, wr, 0.16, 10), a.mDark);
-      wheel.rotation.z = Math.PI / 2; wheel.position.set(x, -1.0 + wr, z); gear.add(wheel);
-    }
-    leg(0, 3.0, 0.18, 0.62);          // nose leg (under the forward fuselage)
-    leg(-0.78, -0.4, 0.22, 0.58);     // port main (under the intake trunk)
-    leg(0.78, -0.4, 0.22, 0.58);      // stbd main
-    grp.add(gear);
-    grp.userData.gear = gear;
-    // NAV LIGHTS: port wingtip red, stbd wingtip green, white tailfin beacon
-    navLight(grp, a.navR, -2.7, 0.0, -1.4);
-    navLight(grp, a.navG,  2.7, 0.0, -1.4);
-    navLight(grp, a.navW,  0, 1.4, -3.9);
-    // nose muzzle (unchanged firing point + marker)
-    addMuzzle(grp, 0, 0, 5.6);
-    grp.userData.belly = 0.6;
-    seatCosmeticPilot(grp, "jet", "F-22 Raptor");   // see buildHeli
+  /* ---- THE JET IS THE F-35A. One model per machine: the fighter you own,
+     the one parked on an island runway and the ones on Fort Brandt's flight
+     line are all units/vehicles/f35.js (the airframe NPC War flies), built
+     through city/unitmodels.js. Its own rig works its gear (up above 8 m),
+     its bay doors (open for the release, shut behind it), its canopy (the
+     boarding arc swings it on its hinge), its control surfaces, its nozzle
+     glow and afterburner (off the throttle), and it carries its own pilot.
+     The unit file is not on the page at boot: buildJet answers null until it
+     is, and asks for it (wantF35); whoever wanted a jet asks again on its
+     next pass (placeJet's heal pass, island_vehicles' runway). The old
+     generic "F-22" built here out of taper boxes is deleted. ---------------- */
+  // ONE LOAD PER UNIT FILE, then the owned fleet takes its place
+  const _unitP = Object.create(null);
+  function wantUnit(kind) {
+    const M = CBZ.milModels;
+    if (!M || !M.load || (M.has && M.has(kind)) || _unitP[kind]) return _unitP[kind] || null;
+    _unitP[kind] = M.load([kind]).then(function () {
+      _unitP[kind] = null;
+      try { refreshFleet(); } catch (e) {}
+    }).catch(function () { _unitP[kind] = null; });
+    return _unitP[kind];
+  }
+  function f35Ready() { return !!(CBZ.milModels && CBZ.milModels.has && CBZ.milModels.has("jet")); }
+  function wantF35() { return wantUnit("jet"); }
+  CBZ.airWantJet = wantF35;
+  function buildJet(o) {
+    o = o || {};
+    if (!f35Ready()) { wantF35(); return null; }
+    const made = CBZ.milModels.jet({ nation: o.nation });
+    if (!made || !made.group) return null;
+    const grp = made.group, ud = grp.userData, rig = made.rig;
+    grp.name = o.name || "F-35A";
+    // the wheels stand on the deck at the origin (the unit's ground line)
+    ud.groundOffset = 0;
+    ud.belly = 0.02;
+    // the internal load the bays show when they open: two AMRAAMs inboard,
+    // a 2,000 lb JDAM on each heavy station (the player's missiles leave
+    // from the AMRAAM stations, aircraft.js flies them)
+    if (rig && rig.state) rig.state.load = "jdam";
+    if (o.unarmed) ud.unarmed = true;
     return grp;
+  }
+  const BAY_SHOT = { wid: "aim120c" };
+  // THE BAYS OPEN FOR THE SHOT. A craft whose airframe has weapon bays (the
+  // F-35) keeps them shut until you pull the trigger; the doors take about a
+  // second, the round leaves when they are open (flight loop below), and they
+  // close a couple of seconds after the last one.
+  function bayReady(craft) {
+    const ud = craft.group && craft.group.userData, rig = ud && ud.rig, R = rig && rig.state;
+    if (!rig || typeof rig.canFire !== "function" || !R || R.bayHold == null) return true;
+    R.bayHold = Math.max(R.bayHold, R.clock + 2.4);       // ask for the doors (and keep them)
+    if (rig.canFire(BAY_SHOT)) return true;
+    if (!(craft._bayWait > 0)) craft._bayWait = 1.8;     // the shot waits on the doors
+    return false;
   }
 
   // Shared runtime adapter for owned jets and adopted airport/base aircraft.
@@ -465,7 +371,7 @@
 
   // ---- studio hook: pure mesh builders for tools/studio.mjs expr shots
   // (no arena/scene dependency — returns a fresh Object3D). Dev-only cost: nil.
-  CBZ.debugBuildAircraft = { heli: buildHeli, jet: buildJet, vip: buildVipHeli };
+  CBZ.debugBuildAircraft = { heli: buildHeli, jet: function () { return buildJet(); }, vip: buildVipHeli };
 
   // ============================================================
   //  SPAWN / PLACEMENT
@@ -511,7 +417,8 @@
     // Civilian airport theft reuses the exact parked airliner/private-jet group,
     // and (swap fix) so does a commandeered MILITARY jet/bomber/heli. Owned
     // craft keep using the purpose-built flight models.
-    const grp = opts.group || (kind === "jet" ? buildJet() : buildHeli());
+    const grp = opts.group || (kind === "jet" ? buildJet({ unarmed: opts.armed === false }) : buildHeli());
+    if (!grp) return null;               // the jet's unit file is still on its way
     if (opts.group) {
       // an adopted parked prop may have been matrix-frozen as static scenery by
       // the perf pass — the root moves every frame now, so wake its matrix.
@@ -519,6 +426,10 @@
     }
     if (!grp.parent) root.add(grp);
     const armed = opts.armed !== false;
+    // a unit airframe (the F-35, the AH-64) is real-size: the chase boom
+    // comes off its footprint, the way a commandeered base machine's does
+    const udC = grp.userData, dimC = udC.unitDrive && udC.aircraftDims;
+    const footC = dimC ? Math.max(dimC.length || 0, dimC.span || 0) : 0;
     const craft = {
       kind, group: grp, muzzle: grp.userData.muzzleLocal || new THREE.Vector3(0, 0, 3),
       pos: grp.position, heading: 0, pitch: 0, roll: 0,
@@ -531,16 +442,16 @@
       maxAmmo: armed ? (kind === "jet" ? JET_AMMO : HELI_AMMO) : 0,
       rotorSpin: 0,
       belly: opts.belly != null ? opts.belly : (grp.userData.belly || 1.0),
-      groundOffset: opts.groundOffset,
+      groundOffset: opts.groundOffset != null ? opts.groundOffset : grp.userData.groundOffset,
       modelYawOffset: opts.modelYawOffset || 0,
       externalGroup: !!opts.group,
       sourceRec: opts.sourceRec || null,
       civilian: !!opts.civilian,
       armed,
-      displayName: opts.name || (kind === "jet" ? "F-22 RAPTOR" : "MISSILE CHOPPER"),
-      cameraBack: opts.cameraBack,
-      cameraUp: opts.cameraUp,
-      cameraAhead: opts.cameraAhead,
+      displayName: opts.name || (kind === "jet" ? "F-35A LIGHTNING II" : "AH-64 APACHE"),
+      cameraBack: opts.cameraBack != null ? opts.cameraBack : (footC ? Math.max(9.5, Math.min(32, footC * 0.85)) : undefined),
+      cameraUp: opts.cameraUp != null ? opts.cameraUp : (footC ? Math.max(10, Math.min(15, footC * 0.42)) : undefined),
+      cameraAhead: opts.cameraAhead != null ? opts.cameraAhead : (footC ? Math.max(6, Math.min(18, footC * 0.5)) : undefined),
       // ---- damage / aero state (new) ----
       hp: CRAFT_MAX_HP, maxHp: CRAFT_MAX_HP,
       autorotating: false,     // heli engine-out fallback state
@@ -577,7 +488,7 @@
   const _craftEuler = new THREE.Euler();
   const _craftYawQ = new THREE.Quaternion();
   const _craftUp = new THREE.Vector3(0, 1, 0);
-  const _milDrive = { thr: 0, agl: 0, speed: 0, vy: 0 };
+  const _milDrive = { thr: 0, agl: 0, speed: 0, vy: 0, pilot: "player" };
   // pitch + = nose UP, roll + = RIGHT wing down, heading about world Y: the
   // one convention every flight step (heliStep, planeStep), the bailout
   // spiral and the chase cam share. Euler order YXZ is the aircraft order
@@ -721,15 +632,15 @@
     if (!heli) { heli = makeCraft("heli"); if (!heli) return; }
     if (_aircraftFlying() === heli) return; // don't yank it out from under the pilot
     const px = pad.x, pz = pad.z;
-    const py = (pad.y != null ? pad.y : floorY(px, pz)) + heli.belly;
+    const py = (pad.y != null ? pad.y : floorY(px, pz)) + (heli.groundOffset != null ? heli.groundOffset : heli.belly);
     heli.pos.set(px, py, pz);
     heli.heading = 0; heli.pitch = 0; heli.roll = 0;
     heli.vx = heli.vy = heli.vz = 0; heli.speed = 0; heli.yawRate = 0; heli.bank = 0; heli.autorotating = false;
     setCraftRotation(heli, 0, 0, 0);
-    if (RESUPPLY_AT_BASE) { heli.ammo = heli.maxAmmo; heli.hp = heli.maxHp; }
+    if (RESUPPLY_AT_BASE) { heli.ammo = heli.maxAmmo; heli.hp = heli.maxHp; rearmRig(heli); }
   }
 
-  // base the F-22 on the deck hangar
+  // base the F-35 on the deck hangar
   function placeJet() {
     if (!g.cityOwnsJet) { if (jet) { disposeGroup(jet.group); jet = null; } return; }
     const t = tower(); const h = t && t.hangar;
@@ -737,16 +648,25 @@
     if (!jet) { jet = makeCraft("jet"); if (!jet) return; }
     if (_aircraftFlying() === jet) return;
     const px = h.x, pz = h.z;
-    const py = (h.y != null ? h.y : floorY(px, pz)) + jet.belly + 0.4;
+    const py = (h.y != null ? h.y : floorY(px, pz)) + (jet.groundOffset != null ? jet.groundOffset : jet.belly + 0.4);
     jet.pos.set(px, py, pz);
     jet.heading = 0; jet.pitch = 0; jet.roll = 0;
     jet.vx = jet.vy = jet.vz = 0; jet.speed = JET_MIN; jet.throttle = JET_MIN;
     jet.airspeed = 0; jet.thr = null; jet.sag = 0; jet.onGround = true;
     setCraftRotation(jet, 0, 0, 0);
-    if (RESUPPLY_AT_BASE) { jet.ammo = jet.maxAmmo; jet.hp = jet.maxHp; }
+    if (RESUPPLY_AT_BASE) { jet.ammo = jet.maxAmmo; jet.hp = jet.maxHp; rearmRig(jet); }
   }
 
+  // the airframe's own stores back on their racks (the F-35's AMRAAMs)
+  function rearmRig(craft) {
+    const rig = craft && craft.group && craft.group.userData.rig;
+    if (rig && typeof rig.rearm === "function") { try { rig.rearm(); } catch (e) {} }
+  }
   function refreshFleet() {
+    // the owned machines' unit files, asked for as soon as they are owned (a
+    // jet kept in the airport hangar is pulled out with no tower to park in)
+    if (g.cityOwnsJet) wantF35();
+    if (g.cityOwnsHeli) wantUnit("attackHeli");
     placeHeli();
     placeJet();
     _lastHeliFlag = !!g.cityOwnsHeli;
@@ -765,12 +685,13 @@
   function spawnStolenJet(x, z, heading, opts) {
     opts = opts || {};
     const root = arenaRoot(); if (!root) return null;
+    if (!f35Ready()) { wantF35(); return null; }   // the F-35's file is on its way
     // if a hot/parked jet object already exists and isn't being flown, recycle it
     if (jet && _aircraftFlying() !== jet) { disposeGroup(jet.group); jet = null; }
     const craft = makeCraft("jet"); if (!craft) return null;
     jet = craft;
     const gy = floorY(x, z);
-    craft.pos.set(x, gy + craft.belly + GROUND_PAD, z);
+    craft.pos.set(x, gy + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD), z);
     craft.heading = (heading || 0); craft.pitch = 0; craft.roll = 0;
     craft.vx = craft.vy = craft.vz = 0; craft.speed = JET_MIN; craft.throttle = JET_MIN;
     craft.group.position.copy(craft.pos);
@@ -1015,7 +936,10 @@
      ============================================================ */
   const worldParked = [];
   function parkCollider(craft) {
-    const len = 8.2, wid = 2.1, ht = 2.6;
+    // a unit airframe publishes its body (the F-35: 15.7 m by 2.9 m); the
+    // helicopter is the light twin's cabin
+    const dimA = craft.group && craft.group.userData.aircraftDims, dimP = dimA && dimA.bodyL ? dimA : null;
+    const len = dimP && dimP.bodyL ? dimP.bodyL : 8.2, wid = dimP && dimP.bodyW ? dimP.bodyW : 2.1, ht = dimP && dimP.height ? Math.min(3, dimP.height * 0.62) : 2.6;
     const h = craft.heading || 0, ca = Math.abs(Math.cos(h)), sa = Math.abs(Math.sin(h));
     // the cabin, not the tail boom's full reach: walk round the tail, not into the cab
     const ex = (ca * wid / 2 + sa * len / 2) * 0.8, ez = (sa * wid / 2 + ca * len / 2) * 0.8;
@@ -1035,12 +959,14 @@
   }
   function parkFlyable(o) {
     o = o || {};
-    // kind "jet": the owned fighter's airframe (buildJet), unarmed, parked on
-    // a runway threshold (the archipelago's airstrips); default the heli
+    // kind "jet": the F-35A (buildJet), unarmed, parked on a runway
+    // threshold (the archipelago's airstrips); null until the unit file is on
+    // the page (the caller asks again); default the heli
     const isJet = o.kind === "jet";
     if (!arenaRoot() || (!isJet && !CBZ.airframes)) return null;
-    const grp = isJet ? buildJet() : buildHeliAirframe({ variant: o.variant || "vip", name: o.name || "Helicopter", livery: o.livery, pilot: false });
-    const craft = makeCraft(isJet ? "jet" : "heli", { group: grp, armed: false, name: o.name || (isJet ? "Jet" : "Helicopter") });
+    const grp = isJet ? buildJet({ unarmed: true, name: o.name }) : buildHeliAirframe({ variant: o.variant || "vip", name: o.name || "Helicopter", livery: o.livery, pilot: false });
+    if (!grp) return null;
+    const craft = makeCraft(isJet ? "jet" : "heli", { group: grp, armed: false, name: o.name || (isJet ? "F-35A" : "Helicopter") });
     if (!craft) return null;
     craft.externalGroup = false;          // ours, built here: no airport registry behind it
     craft.rotorParts = null;
@@ -1050,7 +976,7 @@
     // belly plus GROUND_PAD, a margin for typed belly numbers; this
     // airframe's belly is MEASURED (buildHeliAirframe), so it rests on its skids.
     // A jet sits on its gear the way the hangar jet does (placeJet).
-    craft.groundOffset = isJet ? craft.belly + 0.4 : craft.belly + 0.02;
+    craft.groundOffset = isJet ? (grp.userData.groundOffset != null ? grp.userData.groundOffset : craft.belly + 0.4) : craft.belly + 0.02;
     if (isJet) { craft.speed = JET_MIN; craft.throttle = JET_MIN; craft.airspeed = 0; craft.thr = null; craft.sag = 0; craft.onGround = true; }
     craft.heading = o.heading || 0; craft.pitch = 0; craft.roll = 0;
     craft.pos.set(o.x, (o.y || 0) + craft.groundOffset, o.z);
@@ -1106,7 +1032,7 @@
     const P = CBZ.player;
     return P && P._aircraft ? P._aircraft : null;
   }
-  function craftLabel(c) { return (c && c.displayName) || (c && c.kind === "jet" ? "F-22" : "Heli"); }
+  function craftLabel(c) { return (c && c.displayName) || (c && c.kind === "jet" ? "F-35" : "Heli"); }
 
   // CBZ.heliAudit() census provider (city/aircraft.js owns the audit; every
   // rotorcraft owner pushes ONE of these). The player's own bird counts as
@@ -1397,6 +1323,9 @@
     opts = opts || {};
     if (!pilotOn() || !craft || !craft.group) return null;
     const ud = craft.group.userData || {};
+    // the airframe brought its own pilot (the F-35's suit and HMDS helmet):
+    // he is the one in the seat; the flight shows and hides him
+    if (ud.pilot && ud.pilot.userData && ud.pilot.userData.crewFigure) return null;
     if (ud.pilotRig) {
       // the body was built with the airframe; boarding is what puts YOUR
       // clothes on it
@@ -1548,7 +1477,7 @@
     // a commandeered base machine is impounded; only the Raptor talks hangars.
     aircraftNote(craft.fromProp
       ? "The commandeered aircraft was impounded, military hardware doesn't stay yours."
-      : "The stolen F-22 was impounded, you never got it to a hangar.", 2.6, "Flight Ops");
+      : "The stolen F-35 was impounded, you never got it to a hangar.", 2.6, "Flight Ops");
     return true;
   }
 
@@ -1683,9 +1612,30 @@
   // the steal-it notice instead of a money buy. WHY: a $3M button made the apex
   // jet just another purchase; risking your life to lift it off a 4★ base and
   // sweating it back to your hangar is the felt earn.
+  /* A BASE F-35 IS THE TROPHY. Fort Brandt's fighters are the same F-35A
+     your hangar keeps, so the one you lift off the flight line and land in a
+     hangar you own is yours: it leaves the base's books (its stand stays
+     empty) and becomes the owned jet. Bombers, helicopters and freighters are
+     still impounded when you leave them. */
+  function keepableFromBase(craft) {
+    const rec = craft && craft.sourceRec;
+    return !!(rec && rec.unitId === "f35" && !g.cityOwnsJet && !(jet && jet !== craft));
+  }
+  function adoptFromBase(craft) {
+    const rec = craft.sourceRec;
+    if (rec) { rec.taken = true; rec.kept = true; rec.destroyed = true; }       // off the base's books: never boardable as a base prop again
+    craft.fromProp = false; craft.externalGroup = false; craft.sourceRec = null;
+    if (stolenAir === craft) stolenAir = null;
+    if (craft.group) {
+      craft.group.userData.craft = craft;
+      const ud = craft.group.userData;
+      if (ud.unitVeh) ud.unitVeh.id = "owned:f35";
+    }
+    jet = craft;
+  }
   function jetNotBuyable() {
-    if (g.cityOwnsJet) { aircraftNote("The F-22 is already yours, it's in your hangar.", 2.4, "Flight Ops"); return false; }
-    aircraftNote("The F-22 can't be bought, steal it from the military base and land it in a hangar you own.", 3.4, "Flight Ops");
+    if (g.cityOwnsJet) { aircraftNote("The F-35 is already yours, it's in your hangar.", 2.4, "Flight Ops"); return false; }
+    aircraftNote("The F-35 can't be bought, steal one from the military base and land it in a hangar you own.", 3.4, "Flight Ops");
     return false;
   }
   CBZ.cityBuyJet = jetNotBuyable;
@@ -1725,6 +1675,7 @@
   // ============================================================
   //  FIRE MISSILES (left-click while flying)
   // ============================================================
+  const _railPt = new THREE.Vector3();
   function fireMissile(craft) {
     if (!craft || craft.fireCD > 0) return;
     if (craft.armed === false) return;          // commercial aircraft do not grow F-22 weapons when hijacked
@@ -1732,10 +1683,18 @@
       aircraftNote("Out of missiles, land on the pad/hangar to resupply.", 1.6, "Flight Ops");
       return;
     }
-    // world-space muzzle position + forward direction
-    const m = craft.group.userData.muzzle;
+    // an airframe with weapon bays fires when its doors are open
+    if (!bayReady(craft)) return;
+    craft._bayWait = 0;
+    // world-space muzzle position + forward direction: a unit airframe names
+    // its own launch point (the F-35's AMRAAM station in the open bay), and
+    // its rig spends the round (the missile drops off its rack)
+    const ud0 = craft.group.userData;
+    const m = ud0.muzzle;
     let mx, my, mz;
-    if (m) { const wp = m.getWorldPosition(new THREE.Vector3()); mx = wp.x; my = wp.y; mz = wp.z; }
+    const lp = ud0.rig && CBZ.milAirPoint ? CBZ.milAirPoint(craft.group, "rail", craft.maxAmmo - craft.ammo, _railPt) : null;
+    if (lp) { mx = lp.x; my = lp.y; mz = lp.z; if (CBZ.milAirFire) CBZ.milAirFire(craft.group, "rail", craft.maxAmmo - craft.ammo); }
+    else if (m) { const wp = m.getWorldPosition(new THREE.Vector3()); mx = wp.x; my = wp.y; mz = wp.z; }
     else { mx = craft.pos.x; my = craft.pos.y; mz = craft.pos.z; }
     // forward dir from heading + pitch (the craft's nose vector)
     const cp = Math.cos(craft.pitch);
@@ -2548,6 +2507,13 @@
       return;
     }
     if (craft.fireCD > 0) craft.fireCD = Math.max(0, craft.fireCD - dt);
+    if (craft._bayWait > 0) {
+      // the trigger was pulled with the bays shut: the round goes the moment
+      // the doors are open (or never, if they jam past the wait)
+      craft._bayWait -= dt;
+      const rig = craft.group.userData.rig;
+      if (rig && rig.canFire && rig.canFire(BAY_SHOT)) fireMissile(craft);
+    }
     if (craft.kind === "heli") flyHeliV2(craft, dt); else flyWing(craft, dt);
     integrateV2(craft, dt);
     // a wall strike / slammed touchdown crashed the craft this frame —
@@ -2556,14 +2522,15 @@
     tickDamageSmoke(craft, dt);
     // ---- KEEP-GATE: land a HOT stolen F-22 inside a hangar you OWN, slow, and
     // it becomes permanently yours. This is the only way to keep the trophy.
-    if (craft.hot && !craft.fromProp && craft.kind === "jet" && craft.speed < 16 && hangarKeepHit(craft.pos.x, craft.pos.z)) {
+    if (craft.hot && (!craft.fromProp || keepableFromBase(craft)) && craft.kind === "jet" && craft.speed < 16 && hangarKeepHit(craft.pos.x, craft.pos.z)) {
+      if (craft.fromProp) adoptFromBase(craft);
       craft.hot = false;
       g.cityOwnsJet = true;
       _lastJetFlag = true;
       if (CBZ.cityClearWanted) CBZ.cityClearWanted();
       else if (CBZ.city && CBZ.city.clearWanted) CBZ.city.clearWanted();
-      if (campaignActive()) aircraftNote("The Raptor is yours.", 2.8, "Flight Ops");
-      else if (CBZ.city && CBZ.city.big) CBZ.city.big("THE RAPTOR IS YOURS");
+      if (campaignActive()) aircraftNote("The F-35 is yours.", 2.8, "Flight Ops");
+      else if (CBZ.city && CBZ.city.big) CBZ.city.big("THE F-35 IS YOURS");
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(60);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();

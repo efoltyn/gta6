@@ -931,8 +931,9 @@
   function parkJet(A) {
     const st = A.airstrip && A.airstrip.stand;
     if (!st || !CBZ.airParkFlyable) return null;
-    return CBZ.airParkFlyable({ kind: "jet", x: st.x, y: A.airstrip.deck, z: st.z, heading: st.heading,
-      name: "Island Jet", livery: { body: 0xd9dde2, belly: 0x2a3a4e, accent: 0xb8862a } });
+    // the F-35A (playeraircraft.js buildJet: the units/vehicles airframe),
+    // unarmed, its bays shut; null while its file is still loading
+    return CBZ.airParkFlyable({ kind: "jet", x: st.x, y: A.airstrip.deck, z: st.z, heading: st.heading, name: "F-35A" });
   }
   function setup() {
     const A = CBZ.surv.arena;
@@ -1008,6 +1009,13 @@
     buildSome();
     if (!(dt > 0)) return;
     dt = Math.min(dt, 0.1);
+    // THE RUNWAY'S F-35 ARRIVES WITH ITS FILE. The jet is the units/vehicles
+    // F-35A, which loads on demand: until it is on the page parkJet answers
+    // null (and has asked for it), so ask again once a second.
+    if (islandHopping() && !S.jet && S.arena && S.arena.airstrip && (S.jetT = (S.jetT || 0) - dt) <= 0) {
+      S.jetT = 1;
+      try { S.jet = parkJet(S.arena); } catch (e) { console.error("[island jet]", e); S.jet = null; S.jetT = 30; }
+    }
     restockHeld(dt);
     const Pl = P();
     // dead at the wheel: out, so the death's own fall plays (physics.js

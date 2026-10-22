@@ -107,6 +107,17 @@
         inY: null,                                  // jets aren't walk-in decks; step ends at the hull
       };
     }
+    if (ud && ud.canopy && ud.canopySill) {
+      // the airframe says where you climb in (the F-35: its port-side ladder)
+      const S = ud.canopySill;
+      return {
+        kind: "canopy",
+        doorLocal: { x: S.x, z: S.z },
+        outLocal: { x: S.out != null ? S.out : S.x + 0.8 * Math.sign(S.x || 1), z: S.z },
+        inLocal: { x: 0, z: S.z },
+        inY: null,
+      };
+    }
     if (ud && ud.canopy) {
       const cz = ud.canopy.position ? ud.canopy.position.z : 0.9;
       return {
@@ -199,6 +210,8 @@
   }
 
   function poseCanopy(grp, t) {
+    // a canopy that knows its own hinge poses itself (units/vehicles/f35.js)
+    if (typeof grp.userData.canopyPose === "function") { try { grp.userData.canopyPose(t); } catch (e) {} return; }
     // an airframe's door swings on its own hinge (city/airframes.js)
     if (CBZ.airframes && CBZ.airframes.rig(grp)) { CBZ.airframes.poseDoor(grp, grp.userData.canopyDoor || null, t); return; }
     const c = grp.userData.canopy;

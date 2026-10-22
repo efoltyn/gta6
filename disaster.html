@@ -1254,7 +1254,7 @@ document.body.appendChild(b);}}catch(e){}})();
      their gear/surface/door/light animation and a distance LOD. Before every
      module that parks, flies or boards one. -->
 <script src="src/city/airframe_kit.js?v=af0929b"></script>
-<script src="src/city/airframes.js?v=af0929b"></script>
+<script src="src/city/airframes.js?v=f35one1022"></script>
 <!-- THE AIRFIELD KIT: CBZ.buildAirfield draws EVERY airfield from one spec
      (runway + ICAO paint, lights, approach lights, PAPI, taxiways, nose-in
      stands with docking jet bridges, the walkable terminal, tower, hangars,
@@ -1266,7 +1266,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/mil_air.js?v=army1013m"></script>
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
 <!-- ONE ARMY (city/army.js): the door to NPC War's battle core, sim and unit kit. Only the API + loader ride the page; the unit files and the war engine load when a force or Fort Brandt's motor pool needs them. -->
-<script src="src/city/army.js?v=rounds1013"></script>
+<script src="src/city/army.js?v=f35one1022"></script>
+<!-- ONE UNIT, BUILT FOR THE CITY (city/unitmodels.js): CBZ.milModels, the one path that builds a units/vehicles machine outside the battle (Fort Brandt, the player's F-35, the airbase, The Isles' army). After army.js (its loader), before island_military. -->
+<script src="src/city/unitmodels.js?v=f35one1022"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
@@ -1379,7 +1381,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carlod.js?v=mrg10200048"></script>
 <script src="src/city/vehicles.js?v=mmisleotrunk1"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
-<script src="src/city/playeraircraft.js?v=mlandblisles1"></script>
+<script src="src/city/playeraircraft.js?v=f35one1022"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1407,12 +1409,12 @@ document.body.appendChild(b);}}catch(e){}})();
      control hands over (and the reverse on exit). Wired behind the existing
      board/enter APIs — militaryvehicles.js + playeraircraft.js call into it,
      island_airport.js panel/airstair easing honours its open flag. -->
-<script src="src/city/aircraft_doors.js?v=island1014"></script>
+<script src="src/city/aircraft_doors.js?v=f35one1022"></script>
 <!-- THE DISASTER ISLAND'S REAL MACHINES: a share of the parked cars become real
      cars (vehicles.js), a rooftop helipad with a flyable helicopter
      (playeraircraft.js CBZ.airParkFlyable), the island's weather fed into both.
      After vehicles.js, playeraircraft.js, bailout.js and aircraft_doors.js. -->
-<script src="src/world/island_vehicles.js?v=islesold1022"></script>
+<script src="src/world/island_vehicles.js?v=f35one1022"></script>
 <!-- THE ARCHIPELAGO (mode "archipelago"): the disaster island's package built
      many times over on one sea, kilometres apart, streamed in as you near
      each one and dropped behind you. archipelago_map.js is the map as data;
