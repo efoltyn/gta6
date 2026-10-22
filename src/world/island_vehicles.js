@@ -216,7 +216,7 @@
   // keep: the one machine the player is in (crossing to the next island in it)
   function scrapFleet(keep) {
     for (let i = 0; i < S.cars.length; i++) if (S.cars[i].car !== keep) scrapCar(S.cars[i].car);
-    S.cars.length = 0; S.queue.length = 0;
+    S.cars.length = 0; S.queue.length = 0; held.length = 0;
     if (S.arena && S.arena.cars) S.arena.cars.length = 0;
     for (let i = 0; i < S.boats.length; i++) if (S.boats[i].car !== keep) scrapCar(S.boats[i].car);
     S.boats.length = 0;
@@ -237,17 +237,40 @@
     S.cars = keep;
     if (A.cars) { A.cars.length = 0; for (let i = 0; i < keep.length; i++) A.cars.push(keep[i].car); }
     S.queue = spots.filter(function (s) { return !have.has(s); });
+    held.length = 0;
     // nearest the player first: the street you are standing in is real at once
     const Pl = P(), px = Pl && Pl.pos ? Pl.pos.x : 0, pz = Pl && Pl.pos ? Pl.pos.z : 0;
     S.queue.sort(function (a, b) { return ((b.x - px) * (b.x - px) + (b.z - pz) * (b.z - pz)) - ((a.x - px) * (a.x - px) + (a.z - pz) * (a.z - pz)); });
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
   // a few cars a frame off the end of the queue (the nearest is last)
+  /* A SOLD SPOT STAYS SOLD. A dealer's spot whose car you bought (your car
+     standing on it, or bought off it today: world/island_dealers.js
+     spotTaken) gets no new car on top of yours; it waits here and is
+     restocked only once it is empty and nobody is looking at it. */
+  const held = [];
+  let heldT = 0;
+  function spotTaken(spot) {
+    const D = CBZ.islandDealers;
+    return !!(spot && spot.sale && D && D.spotTaken && D.spotTaken(spot));
+  }
+  function restockHeld(dt) {
+    if (!held.length || (heldT += dt) < 2) return;
+    heldT = 0;
+    for (let i = held.length - 1; i >= 0; i--) {
+      const s = held[i];
+      if (spotTaken(s)) continue;
+      if (CBZ.leave && CBZ.leave.unseen && !CBZ.leave.unseen({ x: s.x, y: s.y, z: s.z })) continue;
+      held.splice(i, 1);
+      S.queue.push(s);
+    }
+  }
   function buildSome() {
     const A = S.arena;
     if (!A || !S.queue.length || !CBZ.cityAddParkedCar) return;
     for (let n = 0; n < BUILD_PER_FRAME && S.queue.length; n++) {
       const spot = S.queue.pop();
+      if (spotTaken(spot)) { held.push(spot); continue; }
       const car = standCar(spot);
       if (!car) continue;
       S.cars.push({ car: car, spot: spot, out: false });
@@ -985,6 +1008,7 @@
     buildSome();
     if (!(dt > 0)) return;
     dt = Math.min(dt, 0.1);
+    restockHeld(dt);
     const Pl = P();
     // dead at the wheel: out, so the death's own fall plays (physics.js
     // yields the body to a vehicle while P.driving)
