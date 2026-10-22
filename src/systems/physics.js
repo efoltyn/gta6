@@ -235,7 +235,7 @@
     const ext = reach - COL_PAD;
     if (ext <= 0) return colBuckets.get(colKey(Math.floor(x / COL_CELL), Math.floor(z / COL_CELL))) || EMPTY_COLS;
     const out = _gather;
-    out.length = 0;
+    let n = 0;
     const qid = ++colQueryId;
     const gx0 = Math.floor((x - ext) / COL_CELL), gx1 = Math.floor((x + ext) / COL_CELL);
     const gz0 = Math.floor((z - ext) / COL_CELL), gz1 = Math.floor((z + ext) / COL_CELL);
@@ -246,9 +246,10 @@
         const c = bucket[i];
         if (c._qSeen === qid) continue;
         c._qSeen = qid;
-        out.push(c);
+        out[n++] = c;
       }
     }
+    out.length = n;
     return out;
   }
 
@@ -256,10 +257,21 @@
   // without resolving a collision. Callers own/reuse `out`; results are the
   // same collider objects from CBZ.colliders, deduplicated across grid cells.
   // This runs for every steering ped and crowd agent every frame.
-  CBZ.queryCollidersNear = function (x, z, radius, out) {
+  //
+  //   queryCollidersNear(x, z, r, out) -> out, out.length = the count
+  //   queryCollidersInto(x, z, r, buf) -> the count n; buf[0..n) are the
+  //     boxes and buf keeps whatever lies past n (its length is never cut)
+  //
+  /* ZERO GARBAGE. `out.length = 0` then push() threw the scratch array's
+     backing store away on every query and grew it back 4, 8, 16... (a
+     debris piece in a tower meets a hundred stacked boxes: ~5 KB of garbage
+     per piece per substep). Writing by index and setting the length once
+     still trims the store whenever a query returns under half the last one
+     and regrows it on the next big one; the Into form never cuts the length,
+     so a hot caller that reuses one buffer allocates nothing at all. */
+  function queryInto(x, z, radius, out) {
     gridFresh();
-    out = out || [];
-    out.length = 0;
+    let n = 0;
     const qid = ++colQueryId;
     // same mode gate as collide(): stamped city colliders are phantom walls
     // in the prison/survival coordinate space, so queries skip them there.
@@ -275,9 +287,15 @@
         if ((c._city && !cityOn) || (c._prison && !prisonOn)) continue;
         if (c._qSeen === qid) continue;
         c._qSeen = qid;
-        out.push(c);
+        out[n++] = c;
       }
     }
+    return n;
+  }
+  CBZ.queryCollidersInto = queryInto;
+  CBZ.queryCollidersNear = function (x, z, radius, out) {
+    out = out || [];
+    out.length = queryInto(x, z, radius, out);
     return out;
   };
 

@@ -246,13 +246,59 @@
      CBZ.collide); defBot likewise (default -Infinity).
      Pure arithmetic, zero allocation per call; headless-safe. */
   const LC_EPS = 0.002;
-  function lcBand(c, o) {
-    _LC[0] = c.y0 != null ? c.y0 : (o && o.defBot != null ? o.defBot : -Infinity);
-    _LC[4] = c.y1 != null ? c.y1 : (o && o.defTop != null ? o.defTop : Infinity);
-  }
+  /* ---- ZERO GARBAGE PER CALL ----------------------------------------------
+     A jet into a tower drops a few hundred pieces through a column of a
+     hundred stacked boxes each, and this is the loop every one of them runs
+     every substep. Three things in it used to make a number on the heap per
+     collider per piece per step (~2 GB of garbage over one strike on the
+     tablet profile, the iPad's heap peak):
+       - doubles handed to a call that is not inlined are boxed: the inputs
+         ride typed scratch arrays instead (_LS here, _SL for the slab test);
+       - the city's colliders come in dozens of hidden classes, so every
+         c.minX read is a megamorphic load, and a megamorphic load of a
+         number field copies it into a fresh heap number. Inside one
+         debris frame each collider is read ONCE into a row of LCT (keyed by
+         a small-integer stamp on the collider) and every later piece reads
+         the row;
+       - the skip test was a closure per body called per collider.
+     The public segment/pushOut keep their signatures and read the collider
+     itself (no frame open = no cache), so a caller outside the debris step
+     (ragdolls, the tornado) always sees the box as it is now. */
+  // _LS = [ax,ay,az, bx,by,bz, pad, padY, defBot, defTop]
+  const _LS = new Float64Array(10);
   // (doubles in a Float64Array: a double stored in a module-scope `let` is a
   // fresh heap number per store, per collider, per debris body, per step)
-  const _LC = new Float64Array(5);   // [band0, t, axis, sign, band1]
+  const _LC = new Float64Array(4);   // [-, t, axis, sign]
+  /* a collider's numbers, one row of LCT_W:
+     [minX,maxX,minZ,maxZ, y0,y1, yaw, cx,cz,hw,hd, flags]
+     flags: 1 = has y0, 2 = has y1, 4 = no minX (not a box) */
+  const LCT_W = 12;
+  let LCT = new Float64Array(LCT_W * 512);
+  let lcGen = 1, lcSlot = 1, lcOpen = false;   // slot 0: the uncached scratch row
+  function lcFrame(open) {
+    lcOpen = open;
+    if (open) { lcGen = lcGen >= 0x3fffffff ? 1 : lcGen + 1; lcSlot = 1; }
+  }
+  function lcRow(c, cached) {
+    let o = 0;
+    if (cached && lcOpen) {
+      if (c._lcg === lcGen) return c._lci;
+      if ((lcSlot + 1) * LCT_W > LCT.length) { const n = new Float64Array(LCT.length * 2); n.set(LCT); LCT = n; }
+      o = lcSlot * LCT_W; lcSlot++;
+      c._lcg = lcGen; c._lci = o;
+    }
+    const T = LCT;
+    let f = 0;
+    if (c.minX == null) f |= 4;
+    T[o] = c.minX; T[o + 1] = c.maxX; T[o + 2] = c.minZ; T[o + 3] = c.maxZ;
+    if (c.y0 != null) { f |= 1; T[o + 4] = c.y0; }
+    if (c.y1 != null) { f |= 2; T[o + 5] = c.y1; }
+    const yw = c.yaw;
+    if (yw) { T[o + 6] = yw; T[o + 7] = c.cx; T[o + 8] = c.cz; T[o + 9] = c.hw; T[o + 10] = c.hd; }
+    else T[o + 6] = 0;
+    T[o + 11] = f;
+    return o;
+  }
   // slab test of A + t*D against [x0,x1]x[y0,y1]x[z0,z1]; writes _LC[1]/_LC[2]/_LC[3]
 
   /* INPUTS IN A TYPED SCRATCH, NOT ARGUMENTS. lcSlab is too big to inline,
@@ -295,36 +341,45 @@
     _LC[1] = tmin; _LC[2] = axis; _LC[3] = sg;
     return 1;
   }
-  function lcSegment(ax, ay, az, bx, by, bz, pad, cols, out, o) {
-    const dx = bx - ax, dy = by - ay, dz = bz - az;
-    const skip = o && o.skip, sides = !!(o && o.sides);
-    const py = o && o.padY != null ? o.padY : pad;
+  /* the segment test on _LS: the first of cols[0..n) the segment enters.
+     skip: the caller's skip(c) or null; dbg: a debris body's own test (skip
+     settled debris and the boxes in `ign`, the ones it was born inside);
+     cached: read colliders through this frame's rows. */
+  function lcSegIn(cols, n, sides, skip, dbg, ign, cached, out) {
+    const S = _LS;
+    const ax = S[0], ay = S[1], az = S[2];
+    const dx = S[3] - ax, dy = S[4] - ay, dz = S[5] - az;
+    const pad = S[6], py = S[7], dB = S[8], dT = S[9];
     let best = Infinity, bnx = 0, bny = 0, bnz = 0, bc = null;
-    for (let i = 0; i < cols.length; i++) {
+    for (let i = 0; i < n; i++) {
       const c = cols[i];
-      if (!c || c.minX == null) continue;
-      if (skip && skip(c)) continue;
-      lcBand(c, o);
-      const y1 = _LC[4], y0 = _LC[0];
+      if (!c) continue;
+      if (dbg && (c.debris || (ign !== null && ign.has(c)))) continue;
+      // (the caller's skip first: it may run a contact query of its own)
+      if (skip !== null && skip(c)) continue;
+      const r = lcRow(c, cached), T = LCT, f = T[r + 11];
+      if (f & 4) continue;                                    // not a box
+      // the height band: no y0 = defBot, no y1 = defTop
+      const y0 = (f & 1) ? T[r + 4] : dB, y1 = (f & 2) ? T[r + 5] : dT;
       if (!(y1 > y0)) continue;
-      let r, nx = 0, ny = 0, nz = 0;
-      if (c.yaw) {
-        const co = Math.cos(c.yaw), si = Math.sin(c.yaw);
-        const rx = ax - c.cx, rz = az - c.cz;
+      let nx = 0, ny = 0, nz = 0;
+      const yaw = T[r + 6];
+      if (yaw) {
+        const co = Math.cos(yaw), si = Math.sin(yaw);
+        const rx = ax - T[r + 7], rz = az - T[r + 8];
         const lx = rx * co - rz * si, lz = rx * si + rz * co;         // world -> local (physics.js oriPush)
         const ldx = dx * co - dz * si, ldz = dx * si + dz * co;
+        const hw = T[r + 9], hd = T[r + 10];
         _SL[0] = lx; _SL[1] = ay; _SL[2] = lz; _SL[3] = ldx; _SL[4] = dy; _SL[5] = ldz;
-        _SL[6] = -c.hw - pad; _SL[7] = c.hw + pad; _SL[8] = y0 - py; _SL[9] = y1 + py; _SL[10] = -c.hd - pad; _SL[11] = c.hd + pad;
-        r = lcSlab();
-        if (r !== 1 || _LC[1] >= best || (sides && _LC[2] === 1)) continue;
+        _SL[6] = -hw - pad; _SL[7] = hw + pad; _SL[8] = y0 - py; _SL[9] = y1 + py; _SL[10] = -hd - pad; _SL[11] = hd + pad;
+        if (lcSlab() !== 1 || _LC[1] >= best || (sides && _LC[2] === 1)) continue;
         let lnx = 0, lnz = 0;
         if (_LC[2] === 0) lnx = _LC[3]; else if (_LC[2] === 2) lnz = _LC[3]; else ny = _LC[3];
         nx = lnx * co + lnz * si; nz = -lnx * si + lnz * co;          // local -> world
       } else {
         _SL[0] = ax; _SL[1] = ay; _SL[2] = az; _SL[3] = dx; _SL[4] = dy; _SL[5] = dz;
-        _SL[6] = c.minX - pad; _SL[7] = c.maxX + pad; _SL[8] = y0 - py; _SL[9] = y1 + py; _SL[10] = c.minZ - pad; _SL[11] = c.maxZ + pad;
-        r = lcSlab();
-        if (r !== 1 || _LC[1] >= best || (sides && _LC[2] === 1)) continue;
+        _SL[6] = T[r] - pad; _SL[7] = T[r + 1] + pad; _SL[8] = y0 - py; _SL[9] = y1 + py; _SL[10] = T[r + 2] - pad; _SL[11] = T[r + 3] + pad;
+        if (lcSlab() !== 1 || _LC[1] >= best || (sides && _LC[2] === 1)) continue;
         if (_LC[2] === 0) nx = _LC[3]; else if (_LC[2] === 1) ny = _LC[3]; else nz = _LC[3];
       }
       best = _LC[1]; bnx = nx; bny = ny; bnz = nz; bc = c;
@@ -336,6 +391,44 @@
     out.z = az + dz * best + bnz * LC_EPS;
     return true;
   }
+  // the shortest exit of the point _LS[0..2] (grown by _LS[6], band by _LS[7]) from c
+  function lcPushIn(c, sides, cached, out) {
+    const r = lcRow(c, cached), T = LCT, S = _LS, f = T[r + 11];
+    const y0 = (f & 1) ? T[r + 4] : S[8], y1 = (f & 2) ? T[r + 5] : S[9];
+    const x = S[0], y = S[1], z = S[2], pad = S[6], py = S[7];
+    if (y < y0 - py || y > y1 + py) return false;
+    let lx = x, lz = z, hx0, hx1, hz0, hz1, co = 1, si = 0;
+    const yaw = T[r + 6];
+    if (yaw) {
+      co = Math.cos(yaw); si = Math.sin(yaw);
+      const rx = x - T[r + 7], rz = z - T[r + 8];
+      lx = rx * co - rz * si; lz = rx * si + rz * co;
+      hx0 = -T[r + 9]; hx1 = T[r + 9]; hz0 = -T[r + 10]; hz1 = T[r + 10];
+    } else { hx0 = T[r]; hx1 = T[r + 1]; hz0 = T[r + 2]; hz1 = T[r + 3]; }
+    hx0 -= pad; hx1 += pad; hz0 -= pad; hz1 += pad;
+    if (lx <= hx0 || lx >= hx1 || lz <= hz0 || lz >= hz1) return false;
+    let d = lx - hx0, nx = -1, nz = 0, ny = 0;
+    if (hx1 - lx < d) { d = hx1 - lx; nx = 1; nz = 0; }
+    if (lz - hz0 < d) { d = lz - hz0; nx = 0; nz = -1; }
+    if (hz1 - lz < d) { d = hz1 - lz; nx = 0; nz = 1; }
+    if (!sides && isFinite(y1) && y1 + py - y < d) { d = y1 + py - y; nx = 0; nz = 0; ny = 1; }
+    d += LC_EPS;
+    const wnx = yaw ? nx * co + nz * si : nx, wnz = yaw ? -nx * si + nz * co : nz;
+    out.nx = wnx; out.ny = ny; out.nz = wnz; out.c = c; out.t = 0;
+    out.x = x + wnx * d; out.y = y + ny * d; out.z = z + wnz * d;
+    return true;
+  }
+  function lcOpts(pad, o) {
+    _LS[6] = pad;
+    _LS[7] = o && o.padY != null ? o.padY : pad;
+    _LS[8] = o && o.defBot != null ? o.defBot : -Infinity;
+    _LS[9] = o && o.defTop != null ? o.defTop : Infinity;
+  }
+  function lcSegment(ax, ay, az, bx, by, bz, pad, cols, out, o) {
+    _LS[0] = ax; _LS[1] = ay; _LS[2] = az; _LS[3] = bx; _LS[4] = by; _LS[5] = bz;
+    lcOpts(pad, o);
+    return lcSegIn(cols, cols.length, !!(o && o.sides), (o && o.skip) || null, false, null, false, out);
+  }
   const _lcCols = [];
   function lcSweep(ax, ay, az, bx, by, bz, pad, out, o) {
     if (!CBZ.queryCollidersNear) return false;
@@ -346,29 +439,9 @@
     return lcSegment(ax, ay, az, bx, by, bz, pad, cols, out, o);
   }
   function lcPushOut(x, y, z, pad, c, out, o) {
-    lcBand(c, o);
-    const y1 = _LC[4], y0 = _LC[0];
-    const py = o && o.padY != null ? o.padY : pad;
-    if (y < y0 - py || y > y1 + py) return false;
-    let lx = x, lz = z, hx0, hx1, hz0, hz1, co = 1, si = 0;
-    if (c.yaw) {
-      co = Math.cos(c.yaw); si = Math.sin(c.yaw);
-      const rx = x - c.cx, rz = z - c.cz;
-      lx = rx * co - rz * si; lz = rx * si + rz * co;
-      hx0 = -c.hw; hx1 = c.hw; hz0 = -c.hd; hz1 = c.hd;
-    } else { hx0 = c.minX; hx1 = c.maxX; hz0 = c.minZ; hz1 = c.maxZ; }
-    hx0 -= pad; hx1 += pad; hz0 -= pad; hz1 += pad;
-    if (lx <= hx0 || lx >= hx1 || lz <= hz0 || lz >= hz1) return false;
-    let d = lx - hx0, nx = -1, nz = 0, ny = 0;
-    if (hx1 - lx < d) { d = hx1 - lx; nx = 1; nz = 0; }
-    if (lz - hz0 < d) { d = lz - hz0; nx = 0; nz = -1; }
-    if (hz1 - lz < d) { d = hz1 - lz; nx = 0; nz = 1; }
-    if (!(o && o.sides) && isFinite(y1) && y1 + py - y < d) { d = y1 + py - y; nx = 0; nz = 0; ny = 1; }
-    d += LC_EPS;
-    const wnx = c.yaw ? nx * co + nz * si : nx, wnz = c.yaw ? -nx * si + nz * co : nz;
-    out.nx = wnx; out.ny = ny; out.nz = wnz; out.c = c; out.t = 0;
-    out.x = x + wnx * d; out.y = y + ny * d; out.z = z + wnz * d;
-    return true;
+    _LS[0] = x; _LS[1] = y; _LS[2] = z;
+    lcOpts(pad, o);
+    return lcPushIn(c, !!(o && o.sides), false, out);
   }
   function lcGround(x, z, fromY) {
     let g;
@@ -976,14 +1049,32 @@
   /* ================= 3. SIMULATE ========================================= */
   const live = [];                      // rigid bodies in flight / settling
   const hf = new Map();                 // rubble height-field
-  function hfKey(x, z) { return Math.floor(x / HF) * 73856093 ^ Math.floor(z / HF) * 19349663; }
+  /* A height-field cell's key: 15 bits of each cell index, < 2^30, so it is a
+     small integer (never a boxed double handed to Map.get) and has no hash
+     collisions closer than 9.8 km. The old xor-of-products key ran past the
+     small-integer range: every hull vertex of every falling piece allocated
+     a number to look up its cell. */
+  function hk(gx, gz) { return ((gx & 0x7fff) << 15) | (gz & 0x7fff); }
+  function hfKey(x, z) { return hk(Math.floor(x / HF), Math.floor(z / HF)); }
   function hfAt(x, z) { const v = hf.get(hfKey(x, z)); return v == null ? -Infinity : v; }
   function floorAt(x, z, fromY) {
     let f = 0;
     try { f = CBZ.floorAt ? CBZ.floorAt(x, z, fromY) : (CBZ.groundAt ? CBZ.groundAt(x, z) : 0); } catch (e) { f = 0; }
     return isFinite(f) ? f : 0;
   }
-  const _cols = [];
+  // (one scratch per query shape, filled by count: see colsNear)
+  const _cols = [], _colsS = [], _colsB = [];
+  /* the colliders near (x, z) into buf[0..n), returning n. Through
+     physics.js's queryCollidersInto the buffer's length is never cut, so the
+     hot loops allocate nothing (a cut length trims the array's store and the
+     next big query grows it back). A world without it (microboot, the node
+     sims) answers through queryCollidersNear. */
+  function colsNear(x, z, r, buf) {
+    if (CBZ.queryCollidersInto) return CBZ.queryCollidersInto(x, z, r, buf);
+    const a = CBZ.queryCollidersNear(x, z, r, buf);
+    if (a !== buf) for (let i = 0; i < a.length; i++) buf[i] = a[i];
+    return a.length;
+  }
   const _q = new THREE.Quaternion(), _wq = new THREE.Quaternion(), _mm = new THREE.Matrix4(), _one = new THREE.Vector3(1, 1, 1);
 
   function addBody(piece, o, k, kind, V) {
@@ -1009,14 +1100,21 @@
       // block is not). Growing boxes by the full bounding radius would hold a
       // long plank a metre off every wall.
       pad: Math.max(0.03, Math.min(0.3, Math.min(ex, ey, ez) * 0.8)),
-      calm: 0, asleep: false, sleepT: 0, _skip: null, _opts: null,
+      calm: 0, asleep: false, sleepT: 0,
+      /* EVERY FIELD A BODY WILL EVER CARRY, BORN HERE. A field added later
+         (inMedium on the first step, lastFx on the first knock, _supT asleep,
+         the freeze fields) gave live bodies five or six hidden classes: the
+         step's reads went megamorphic, and a megamorphic read of a number
+         field boxes a fresh heap number per read, per body, per substep. */
+      inMedium: false, _supT: 0, lastFx: 0, rev: 0, anchored: false,
+      frozen: false, pendingId: null, bks: null,
     };
     // colliders the piece is born inside (its own wall, being removed this
     // frame) must not trap it
     if (CBZ.queryCollidersNear) {
       try {
         const p = piece.mesh.position;
-        for (const c of CBZ.queryCollidersNear(p.x, p.z, 0.2, _cols)) {
+        for (const c of CBZ.queryCollidersNear(p.x, p.z, 0.2, _colsB)) {
           if (inCol(c, p.x, p.y, p.z)) (body.ignore || (body.ignore = new Set())).add(c);
         }
       } catch (e) {}
@@ -1038,7 +1136,7 @@
 
   let nowT = 0;
   const _cp = new Float32Array(24);
-  const _wp = new THREE.Vector3(), _r = new THREE.Vector3(), _vr = new THREE.Vector3(), _tmp = new THREE.Vector3(), _tan = new THREE.Vector3();
+  const _wp = new THREE.Vector3(), _tmp = new THREE.Vector3();
   const _hit = { t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, c: null };
   // one contact against a collider face: place the piece on the face, bounce
   // the normal velocity by its restitution, let the face's friction take
@@ -1066,11 +1164,17 @@
     if (CBZ.queryCollidersNear) {
       try {
         // point query: only a collider under the centre can hold it up
-        for (const c of CBZ.queryCollidersNear(p.x, p.z, 0.25, _cols)) {
-          if (c.y1 == null || c.debris) continue;
+        const cols = _colsS, n = colsNear(p.x, p.z, 0.25, cols);
+        const px = p.x, pz = p.z, top = p.y + 0.05;
+        for (let i = 0; i < n; i++) {
+          const c = cols[i];
+          if (c.debris) continue;
+          const r = lcRow(c, true), T = LCT;
+          if (!(T[r + 11] & 2)) continue;                 // no y band: not a top
           if (b.ignore && b.ignore.has(c)) continue;
-          if (p.x < c.minX || p.x > c.maxX || p.z < c.minZ || p.z > c.maxZ) continue;
-          if (c.y1 <= p.y + 0.05 && c.y1 > f) f = c.y1;
+          if (px < T[r] || px > T[r + 1] || pz < T[r + 2] || pz > T[r + 3]) continue;
+          const y1 = T[r + 5];
+          if (y1 <= top && y1 > f) f = y1;
         }
       } catch (e) {}
     }
@@ -1167,17 +1271,21 @@
       try {
         const pad = b.pad;
         const mx = (p.x + b.px) * 0.5, mz = (p.z + b.pz) * 0.5;
-        const reach = Math.hypot(p.x - b.px, p.z - b.pz) * 0.5 + pad + 0.1;
-        const cols = CBZ.queryCollidersNear(mx, mz, reach, _cols);
-        if (cols.length) {
-          b._skip = b._skip || ((c) => c.debris || (b.ignore != null && b.ignore.has(c)));
-          if (lcSegment(b.px, b.py, b.pz, p.x, p.y, p.z, pad, cols, _hit, b._opts || (b._opts = { skip: b._skip }))) {
+        const rdx = p.x - b.px, rdz = p.z - b.pz;
+        const reach = Math.sqrt(rdx * rdx + rdz * rdz) * 0.5 + pad + 0.1;   // (Math.hypot: a builtin call, a boxed result)
+        const cols = _cols, nc = colsNear(mx, mz, reach, cols);
+        if (nc) {
+          const ign = b.ignore || null, S = _LS;
+          S[0] = b.px; S[1] = b.py; S[2] = b.pz; S[3] = p.x; S[4] = p.y; S[5] = p.z;
+          S[6] = pad; S[7] = pad; S[8] = -Infinity; S[9] = Infinity;
+          if (lcSegIn(cols, nc, false, null, true, ign, true, _hit)) {
             wallHit(b, p, _hit);
           } else {
-            for (let i = 0; i < cols.length; i++) {
+            S[0] = p.x; S[1] = p.y; S[2] = p.z; S[6] = pad * 0.5; S[7] = S[6];
+            for (let i = 0; i < nc; i++) {
               const c = cols[i];
-              if (c.debris || (b.ignore && b.ignore.has(c))) continue;
-              if (lcPushOut(p.x, p.y, p.z, pad * 0.5, c, _hit, null)) { wallHit(b, p, _hit); break; }
+              if (c.debris || (ign !== null && ign.has(c))) continue;
+              if (lcPushIn(c, false, true, _hit)) { wallHit(b, p, _hit); break; }
             }
           }
         }
@@ -1199,32 +1307,53 @@
       // rubble holds a piece from BELOW: a stamp over the piece's own middle
       // is the top of a slab it is under, not a floor (it used to hook a
       // piece's upper corners on the slab above and hold it there in the air)
-      const h = hfAt(wx, wz); if (h > fl && h < wy + 0.5 && h <= p.y + 0.05) fl = h;
+      // (hfAt written out: stepBody is past the inliner's budget, and a call
+      // boxes its two coordinates, per hull vertex, per piece, per substep)
+      const hv = hf.get(((Math.floor(wx / HF) & 0x7fff) << 15) | (Math.floor(wz / HF) & 0x7fff));
+      const h = hv == null ? -Infinity : hv;
+      if (h > fl && h < wy + 0.5 && h <= p.y + 0.05) fl = h;
       const d = fl - wy;
       if (d > -0.004 && nC < 8) { _cp[nC * 3] = wx - p.x; _cp[nC * 3 + 1] = wy - p.y; _cp[nC * 3 + 2] = wz - p.z; nC++; if (d > depth) depth = d; }
     }
     b.contact = nC > 0;
     if (nC) {
       let hardest = 0;
+      /* Written out in scalars, the same arithmetic in the same order as the
+         Vector3 calls it replaces (crossVectors/add/length/divideScalar and
+         applyImpulse): stepBody is past the inliner's budget, and each of
+         those calls boxed its numbers, ~3 KB per resting piece per substep. */
+      const v = b.v, w = b.w, invM = b.invM, invI = b.invI;
       for (let it = 0; it < 4; it++) {
         for (let c = 0; c < nC; c++) {
-          _r.set(_cp[c * 3], _cp[c * 3 + 1], _cp[c * 3 + 2]);
-          _vr.crossVectors(b.w, _r).add(b.v);
-          const vn = _vr.y;
+          const rx = _cp[c * 3], ry = _cp[c * 3 + 1], rz = _cp[c * 3 + 2];
+          // vr = w x r + v
+          let wx = w.x, wy = w.y, wz = w.z;
+          const vn = (wz * rx - wx * rz) + v.y;
           if (vn >= 0) continue;
           if (it === 0 && -vn > hardest) hardest = -vn;
-          const rn2 = _r.x * _r.x + _r.z * _r.z;
+          const rn2 = rx * rx + rz * rz;
           const rest = it === 0 && -vn > 1.5 ? b.e : 0;
-          const jn = -(1 + rest) * vn / (b.invM + b.invI * rn2);
-          applyImpulse(b, 0, jn, 0);
-          _vr.crossVectors(b.w, _r).add(b.v);
-          _tan.set(_vr.x, 0, _vr.z);
-          const vt = _tan.length();
+          const jn = -(1 + rest) * vn / (invM + invI * rn2);
+          // impulse (0, jn, 0) at r
+          v.x += 0 * invM; v.y += jn * invM; v.z += 0 * invM;
+          w.x += invI * (ry * 0 - rz * jn);
+          w.y += invI * (rz * 0 - rx * 0);
+          w.z += invI * (rx * jn - ry * 0);
+          wx = w.x; wy = w.y; wz = w.z;
+          let tx = (wy * rz - wz * ry) + v.x, tz = (wx * ry - wy * rx) + v.z, ty = 0;
+          const vt = Math.sqrt(tx * tx + ty * ty + tz * tz);
           if (vt > 1e-6) {
-            _tan.divideScalar(vt);
-            _tmp.crossVectors(_r, _tan);
-            const jt = Math.min(vt / (b.invM + b.invI * _tmp.lengthSq()), b.mu * jn);
-            applyImpulse(b, -_tan.x * jt, 0, -_tan.z * jt);
+            const iv = 1 / vt;
+            tx *= iv; ty *= iv; tz *= iv;
+            // |r x t|^2
+            const cx = ry * tz - rz * ty, cy = rz * tx - rx * tz, cz = rx * ty - ry * tx;
+            const jt = Math.min(vt / (invM + invI * (cx * cx + cy * cy + cz * cz)), b.mu * jn);
+            // impulse (-tx jt, 0, -tz jt) at r
+            const jx = -tx * jt, jy = 0, jz = -tz * jt;
+            v.x += jx * invM; v.y += jy * invM; v.z += jz * invM;
+            w.x += invI * (ry * jz - rz * jy);
+            w.y += invI * (rz * jx - rx * jz);
+            w.z += invI * (rx * jy - ry * jx);
           }
         }
       }
@@ -1255,13 +1384,6 @@
     if (b.t > b.maxLife + (b.inMedium ? 120 : 5)) return 2;
     if (p.y < -60 || !isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) return 2;
     return 0;
-    function applyImpulse(b, jx, jy, jz) {
-      b.v.x += jx * b.invM; b.v.y += jy * b.invM; b.v.z += jz * b.invM;
-      // w += invI * (r x j)
-      b.w.x += b.invI * (_r.y * jz - _r.z * jy);
-      b.w.y += b.invI * (_r.z * jx - _r.x * jz);
-      b.w.z += b.invI * (_r.x * jy - _r.y * jx);
-    }
   }
   function impactFx(b, pt, speed) {
     if (speed > 4) wakeNear(pt.x, pt.y, pt.z, 0.6);
@@ -1400,7 +1522,7 @@
     if (recs.get(id) === rec) {
       const seen = new Set();
       for (let i = 0; i < rec.hfs.length; i += 3) {
-        const k = rec.hfs[i] * 73856093 ^ rec.hfs[i + 1] * 19349663;
+        const k = hk(rec.hfs[i], rec.hfs[i + 1]);
         if (seen.has(k)) continue; seen.add(k);
         let L = stampIdx.get(k); if (!L) { L = []; stampIdx.set(k, L); }
         if (L.length > 24) { let w = 0; for (let j = 0; j < L.length; j++) if (recs.get(L[j].id) === L[j]) L[w++] = L[j]; L.length = w; }
@@ -1461,7 +1583,7 @@
       if (r.maxX < x0 - HF || r.minX > x1 + HF || r.maxZ < z0 - HF || r.minZ > z1 + HF) continue;
       const a = r.hfs;
       for (let i = 0; i < a.length; i += 3) {
-        const k = a[i] * 73856093 ^ a[i + 1] * 19349663;
+        const k = hk(a[i], a[i + 1]);
         if (!cells.has(k)) continue;
         const h = hf.get(k);
         if (h == null || a[i + 2] > h) hf.set(k, a[i + 2]);
@@ -1512,11 +1634,14 @@
   // the highest floor (ground, a storey's floor) at or under `hi`, read under
   // the lowest point, the middle and the four corners of the footprint (a
   // piece rests on a floor by whichever of them is over it)
+  const _fuX = new Float64Array(6), _fuZ = new Float64Array(6);
   function floorUnder(rec, hi) {
     const x0 = rec.minX + 0.1, x1 = rec.maxX - 0.1, z0 = rec.minZ + 0.1, z1 = rec.maxZ - 0.1;
-    const xs = [rec.x, (rec.minX + rec.maxX) / 2, x0, x1, x0, x1], zs = [rec.z, (rec.minZ + rec.maxZ) / 2, z0, z0, z1, z1];
+    const xs = _fuX, zs = _fuZ;
+    xs[0] = rec.x; xs[1] = (rec.minX + rec.maxX) / 2; xs[2] = x0; xs[3] = x1; xs[4] = x0; xs[5] = x1;
+    zs[0] = rec.z; zs[1] = (rec.minZ + rec.maxZ) / 2; zs[2] = z0; zs[3] = z0; zs[4] = z1; zs[5] = z1;
     let best = -Infinity;
-    for (let i = 0; i < xs.length; i++) {
+    for (let i = 0; i < 6; i++) {
       const f = floorAt(xs[i], zs[i], hi);
       if (f <= hi && f > best) best = f;
     }
@@ -1530,10 +1655,17 @@
       const own = colOf.get(rec.id);
       const cx = (rec.minX + rec.maxX) / 2, cz = (rec.minZ + rec.maxZ) / 2;
       const R = Math.max(0.3, Math.hypot(rec.maxX - rec.minX, rec.maxZ - rec.minZ) / 2);
-      for (const c of CBZ.queryCollidersNear(cx, cz, R, _cols)) {
-        if (c === own || c.y1 == null || !isFinite(c.y1)) continue;
-        if (rec.maxX < c.minX - 0.1 || rec.minX > c.maxX + 0.1 || rec.maxZ < c.minZ - 0.1 || rec.minZ > c.maxZ + 0.1) continue;
-        if (c.y1 >= lo && c.y1 <= hi && (best == null || c.y1 > best)) best = c.y1;
+      const cols = _colsS, n = colsNear(cx, cz, R, cols);
+      const rx0 = rec.minX, rx1 = rec.maxX, rz0 = rec.minZ, rz1 = rec.maxZ;
+      for (let i = 0; i < n; i++) {
+        const c = cols[i];
+        if (c === own) continue;
+        const r = lcRow(c, true), T = LCT;
+        if (!(T[r + 11] & 2)) continue;
+        const y1 = T[r + 5];
+        if (!isFinite(y1)) continue;
+        if (rx1 < T[r] - 0.1 || rx0 > T[r + 1] + 0.1 || rz1 < T[r + 2] - 0.1 || rz0 > T[r + 3] + 0.1) continue;
+        if (y1 >= lo && y1 <= hi && (best == null || y1 > best)) best = y1;
       }
     } catch (e) { return null; }
     return best;
@@ -1544,7 +1676,7 @@
     const gx0 = Math.floor(rec.minX / HF), gx1 = Math.floor(rec.maxX / HF), gz0 = Math.floor(rec.minZ / HF), gz1 = Math.floor(rec.maxZ / HF);
     let best = null;
     for (let cx = gx0; cx <= gx1; cx++) for (let cz = gz0; cz <= gz1; cz++) {
-      const L = stampIdx.get(cx * 73856093 ^ cz * 19349663);
+      const L = stampIdx.get(hk(cx, cz));
       if (!L) continue;
       for (const r of L) {
         if (r === rec || recs.get(r.id) !== r || r.low >= (rec.low + rec.top) / 2) continue;
@@ -1565,7 +1697,7 @@
     let best = null;
     for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
       const cx = gx + dx, cz = gz + dz;
-      const L = stampIdx.get(cx * 73856093 ^ cz * 19349663);
+      const L = stampIdx.get(hk(cx, cz));
       if (!L) continue;
       for (const r of L) {
         if (r === rec || recs.get(r.id) !== r || r.low >= low - 0.02) continue;
@@ -1583,7 +1715,7 @@
   function revive(rec) {
     recs.delete(rec.id);
     const cells = new Map();
-    for (let i = 0; i < rec.hfs.length; i += 3) cells.set(rec.hfs[i] * 73856093 ^ rec.hfs[i + 1] * 19349663, [rec.hfs[i], rec.hfs[i + 1]]);
+    for (let i = 0; i < rec.hfs.length; i += 3) cells.set(hk(rec.hfs[i], rec.hfs[i + 1]), [rec.hfs[i], rec.hfs[i + 1]]);
     restampCells(cells);
     const fp = frozenPending.indexOf(rec.b);
     if (fp >= 0) { frozenPending.splice(fp, 1); retire(rec.b); }
@@ -1652,7 +1784,7 @@
     staticCount = Math.max(0, staticCount - 1);
     dropCols(new Set([rec.id]));
     const cells = new Map();
-    for (let i = 0; i < rec.hfs.length; i += 3) cells.set(rec.hfs[i] * 73856093 ^ rec.hfs[i + 1] * 19349663, [rec.hfs[i], rec.hfs[i + 1]]);
+    for (let i = 0; i < rec.hfs.length; i += 3) cells.set(hk(rec.hfs[i], rec.hfs[i + 1]), [rec.hfs[i], rec.hfs[i + 1]]);
     restampCells(cells);
     try { chips((rec.minX + rec.maxX) / 2, (rec.low + rec.top) / 2, (rec.minZ + rec.maxZ) / 2, { kind: rec.kind, count: 8, power: 0.6, owner: rec.owner }); } catch (e) {}
     disturb(rec.minX - 0.3, rec.maxX + 0.3, rec.minZ - 0.3, rec.maxZ + 0.3);
@@ -1687,7 +1819,7 @@
       let s = floorAt(x, z, low + 0.5);
       if (CBZ.queryCollidersNear) {
         try {
-          for (const c of CBZ.queryCollidersNear(x, z, 0.3, _cols)) {
+          for (const c of CBZ.queryCollidersNear(x, z, 0.3, _colsB)) {
             if (c === ownCol || c.y1 == null || !isFinite(c.y1)) continue;
             if (x < c.minX - 0.3 || x > c.maxX + 0.3 || z < c.minZ - 0.3 || z > c.maxZ + 0.3) continue;
             if (c.y1 <= low + 0.3 && c.y1 > s) s = c.y1;
@@ -1716,11 +1848,11 @@
           // why it hangs: what the sim's own contact reads under it
           let hfMax = -Infinity;
           for (let gx = Math.floor(r.minX / HF); gx <= Math.floor(r.maxX / HF); gx++) for (let gz = Math.floor(r.minZ / HF); gz <= Math.floor(r.maxZ / HF); gz++) {
-            const h = hf.get(gx * 73856093 ^ gz * 19349663); if (h != null && h <= hi && h > hfMax) hfMax = h;
+            const h = hf.get(hk(gx, gz)); if (h != null && h <= hi && h > hfMax) hfMax = h;
           }
           const cols = [];
           if (CBZ.queryCollidersNear) try {
-            for (const c of CBZ.queryCollidersNear((r.minX + r.maxX) / 2, (r.minZ + r.maxZ) / 2, 1.5, _cols)) {
+            for (const c of CBZ.queryCollidersNear((r.minX + r.maxX) / 2, (r.minZ + r.maxZ) / 2, 1.5, _colsB)) {
               if (c.y1 == null || c.y1 > r.top + 1 || c.y1 < r.low - 3) continue;
               if (cols.length < 3) cols.push((c.debris ? "d" : c._cbzS ? "s" : "w") + (+c.y1.toFixed(1)) + (c.y0 != null ? "/" + (+c.y0.toFixed(1)) : ""));
             }
@@ -2739,7 +2871,13 @@
   }
 
   /* ================= frame ================================================ */
+  // one debris frame = one contact-row frame: every collider is read once
+  // per frame however many pieces meet it (see ZERO GARBAGE PER CALL)
   function update(dt) {
+    lcFrame(true);
+    try { stepFrame(dt); } finally { lcFrame(false); }
+  }
+  function stepFrame(dt) {
     if (!(dt > 0)) return;
     dt = Math.min(dt, 0.05);
     nowT += dt;
@@ -2827,7 +2965,7 @@
       if (c.y1 != null && isFinite(c.y1)) {
         for (let gx = Math.floor(c.minX / HF); gx <= Math.floor(c.maxX / HF); gx++) {
           for (let gz = Math.floor(c.minZ / HF); gz <= Math.floor(c.maxZ / HF); gz++) {
-            const k = gx * 73856093 ^ gz * 19349663, h = hf.get(k);
+            const k = hk(gx, gz), h = hf.get(k);
             if (h == null || c.y1 > h) hf.set(k, c.y1);
             if (rec.owner) ownKey(rec.owner, k);
           }
@@ -2850,7 +2988,7 @@
     for (const c of rec.cols) {
       if (c.y1 == null || !isFinite(c.y1)) continue;
       for (let gx = Math.floor(c.minX / HF); gx <= Math.floor(c.maxX / HF); gx++)
-        for (let gz = Math.floor(c.minZ / HF); gz <= Math.floor(c.maxZ / HF); gz++) cells.set(gx * 73856093 ^ gz * 19349663, [gx, gz]);
+        for (let gz = Math.floor(c.minZ / HF); gz <= Math.floor(c.maxZ / HF); gz++) cells.set(hk(gx, gz), [gx, gz]);
     }
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     for (const c of rec.cols) { if (c.minX < x0) x0 = c.minX; if (c.maxX > x1) x1 = c.maxX; if (c.minZ < z0) z0 = c.minZ; if (c.maxZ > z1) z1 = c.maxZ; }
@@ -2948,7 +3086,7 @@
     // the height-field is hashed, so walk the covered cells directly
     for (let gx = Math.floor((x - r) / HF); gx <= Math.floor((x + r) / HF); gx++)
       for (let gz = Math.floor((z - r) / HF); gz <= Math.floor((z + r) / HF); gz++)
-        hf.delete(gx * 73856093 ^ gz * 19349663);
+        hf.delete(hk(gx, gz));
     gritDisturb(x - r, x + r, z - r, z + r);
     if (grit) {
       const zero = new THREE.Matrix4().makeScale(0, 0, 0);
