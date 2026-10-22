@@ -1092,10 +1092,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/disaster_arena.js?v=mvenue1night1"></script>
 <script src="src/world/island_dressing.js?v=venue1022"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
-<script src="src/world/island_venue.js?v=venue1022"></script>
+<script src="src/world/island_venue.js?v=shops1022"></script>
 <script src="src/world/island_night.js?v=night1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
-<script src="src/entities/survivorbot.js?v=misles1bodymo"></script>
+<script src="src/entities/survivorbot.js?v=shops1022"></script>
 <script src="src/modes/survival.js?v=night1022"></script>
 <!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
      instant death, i-frames, no chip, physical shelter, regen. survival.js's
@@ -1856,13 +1856,17 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <script src="src/city/bank.js?v=venue1022"></script>
 <script src="src/city/pawnshop.js?v=venue1022"></script>
-<script src="src/city/clothingstore.js?v=venue1022"></script>
+<script src="src/city/clothingstore.js?v=shops1022"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
      near you, plus its real catalog stock as the real item models, buyable
      where they stand. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
-<script src="src/city/storegoods.js?v=venue1022"></script>
+<script src="src/city/storegoods.js?v=shops1022"></script>
+<!-- THE ISLANDS' SHOPS (world/island_shops.js): every island outfitter, tailor,
+     optician, phone shop and trade fitted with the store systems above, per
+     building, through CBZ.islandVenue; a counter and a clerk in each. -->
+<script src="src/world/island_shops.js?v=shops1022"></script>
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
      in or at the door of is fitted out for real (finished floors, bathrooms,
      kitchens, bedrooms, stockrooms, a gang's count room, baked light from

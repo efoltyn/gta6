@@ -3,10 +3,17 @@
    the wardrobe.
 
    Civilians spawn plain (white tee, blue jeans), so a LOOK is something you
-   go and get, and this is where. Everything on the floor is stock you can
-   buy: walk up to a garment or a dressed form, [E], the money leaves and it
-   is on your back. The full-length mirror by the fitting room opens your
-   wardrobe (mix what you own, buy the tuxedo).
+   go and get, and this is where. Everything on the floor is stock: walk up
+   to a garment or a dressed form and TAKE it (it is in your hands), try it
+   on at the full-length mirror or in the fitting room, and PAY at the
+   counter. Walk out with it unpaid and the clerk calls it (the demand
+   ladder, then the police). The mirror also opens your wardrobe (mix what
+   you own; the tuxedo is taken off its form there).
+
+   ONE FILE, EVERY STORE: Gang City's outfitter is one instance; every island
+   outfitter and tailor (world/island_shops.js, CBZ.clothingStoreMount) is
+   another. A tailor hangs suits, shirts, ties and trousers, fewer of them,
+   on darker wood, at a tailor's prices.
 
    THE ROOM, built like a real menswear floor (2026-09-27 de-slop):
      • side walls: slatwall panels with face-out arms, one garment per arm,
@@ -48,10 +55,6 @@
   // in a build path: the world must be identical per seed on every client.
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
 
-  const S = { lot: null, cs: null, group: null, winGroup: null, slots: [], built: false,
-              near: false, cx: 0, cz: 0, cols: [],
-              arena: null, noLotArena: null, panelOpen: false, panel: null };
-
   function econ() { return CBZ.cityEcon || null; }
   function num(v, d) { return (typeof v === "number" && isFinite(v)) ? v : d; }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
@@ -75,7 +78,9 @@
     else h = (r - gr) / d + 4;
     return h / 6;
   }
-  function partitionStock() {
+  // what a TAILOR stocks: the cut pieces (lookOf's types), not the streetwear
+  const TAILORED = { suit: 1, blazer: 1, tie: 1, bowtie: 1, collar: 1, trousers: 1 };
+  function partitionStock(tailor) {
     const e = econ();
     const list = (e && e.itemsByTag) ? e.itemsByTag("clothing") : [];
     const wall = [], jackets = [], tux = [];
@@ -84,6 +89,8 @@
       if (!it || !it.visualId || !CBZ.cityComposableSpec) continue;
       const sp = CBZ.cityComposableSpec(it.visualId);
       if (!sp) continue;
+      if (tailor && !sp.painted && !TAILORED[lookOf(it.visualId).type]) continue;
+      if (tailor && sp.painted && sp.painted !== "tuxedo" && sp.painted !== "suit") continue;
       if (sp.painted === "tuxedo") { tux.push(it); continue; }   // the apex, sold at the mirror
       it._slot = sp.slot || "shirt";
       it._hue = hueOf(sp.color != null ? sp.color : 0x8a8f97);
@@ -422,14 +429,18 @@
   // ============================================================
   //  FIXTURES
   // ============================================================
-  const MDF = 0xe9e5dc, SLAT = 0xd9d4ca, GROOVE = 0xb9b3a8, OAK = 0x8a6a4a;
+  // the finishes: a bright outfitter's white slatwall and oak, a tailor's
+  // dark-stained panelling (FIN is set per store as its displays are built)
+  const FIN_SHOP = { mdf: 0xe9e5dc, slat: 0xd9d4ca, groove: 0xb9b3a8, oak: 0x8a6a4a, clad: 0x4a3a2c, trim: 0xb9a27a };
+  const FIN_TAILOR = { mdf: 0x3b2a1f, slat: 0x4a3326, groove: 0x2a1b12, oak: 0x5e3b22, clad: 0x2a1b12, trim: 0xb08a4a };
+  let FIN = FIN_SHOP;
   // a slatwall panel on a wall face (local frame: centred at x=0, the panel's
   // face toward +Z), with its horizontal grooves
   function slatwall(k, P, len, y0, y1) {
     const h = y1 - y0;
-    bx(k, P, 0, y0 + h / 2, -0.01, len, h, 0.02, SLAT);
-    for (let y = y0 + 0.15; y < y1 - 0.05; y += 0.15) bx(k, P, 0, y, 0.0015, len, 0.012, 0.004, GROOVE);
-    bx(k, P, 0, y1 + 0.02, -0.005, len + 0.04, 0.04, 0.03, MDF);                 // cap
+    bx(k, P, 0, y0 + h / 2, -0.01, len, h, 0.02, FIN.slat);
+    for (let y = y0 + 0.15; y < y1 - 0.05; y += 0.15) bx(k, P, 0, y, 0.0015, len, 0.012, 0.004, FIN.groove);
+    bx(k, P, 0, y1 + 0.02, -0.005, len + 0.04, 0.04, 0.03, FIN.mdf);             // cap
     bx(k, P, 0, y0 / 2, -0.005, len + 0.04, y0, 0.03, 0x3a3630);                // kick down to the floor
   }
   // a face-out waterfall arm leaving the panel at local z=0 toward +Z
@@ -441,9 +452,9 @@
   // the nesting table of folded stacks
   function foldTable(k, P, w, d, cols) {
     const top = 0.78;
-    bx(k, P, 0, top - 0.02, 0, w, 0.04, d, OAK, "gloss");
+    bx(k, P, 0, top - 0.02, 0, w, 0.04, d, FIN.oak, "gloss");
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) bx(k, P, sx * (w / 2 - 0.05), (top - 0.04) / 2, sz * (d / 2 - 0.05), 0.05, top - 0.04, 0.05, 0x2a2622);
-    bx(k, P, 0, 0.22, 0, w - 0.1, 0.03, d - 0.1, OAK, "gloss");                  // lower shelf
+    bx(k, P, 0, 0.22, 0, w - 0.1, 0.03, d - 0.1, FIN.oak, "gloss");              // lower shelf
     const n = Math.max(2, Math.floor(w / 0.36));
     const rr = CBZ.storeFixtureKit.rng(Math.round(w * 100 + d * 7));
     for (let i = 0; i < n; i++) {
@@ -460,19 +471,34 @@
       bx(k, P, (i - 0.5) * 0.4, 0.252 + j * 0.034, 0, 0.28, 0.03, 0.22, cols[(i + 2) % cols.length]);
   }
 
-  // ---- build the displays once per city ------------------------------------
-  function buildDisplays() {
+  // ============================================================
+  //  ONE STORE = ONE INSTANCE. Gang City's outfitter is one of them (found on
+  //  the city's lots); every island outfitter and tailor is another, mounted
+  //  by world/island_shops.js through CBZ.clothingStoreMount and taken down
+  //  with its island. Same racks, same forms, same mirror, same counter.
+  // ============================================================
+  const STORES = [];
+  function newStore(o) {
+    return Object.assign({ lot: null, cs: null, group: null, winGroup: null, root: null, slots: [], built: false,
+      dressed: false, near: false, cx: 0, cz: 0, cols: [], tux: null, tailor: false, mult: 1,
+      island: false, arena: null, clerk: null, till: null }, o || {});
+  }
+
+  // ---- build the displays (lazily, when you come down the street) ----------
+  function buildDisplays(S) {
     const cs = S.cs, KIT = CBZ.storeFixtureKit;
     if (!KIT) return;
+    FIN = S.tailor ? FIN_TAILOR : FIN_SHOP;
     const group = new THREE.Group();
     S.group = group;
-    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+    const root = S.root || (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
     root.add(group);
     S.cx = cs.cx; S.cz = cs.cz;
     const b = S.lot.building;
-    const inx = cs.inx, inz = cs.inz, tx = cs.tx, tz = cs.tz;
+    const tx = cs.tx, tz = cs.tz, inx = cs.inx, inz = cs.inz;
     const halfTan = cs.halfTan, halfIn = cs.halfIn, wt = cs.wt;
     const FF = cs.ff, CEIL = cs.ceil;
+    const walk = cs.walk || 0;                  // depth the walk along the front wall keeps (islands)
     const yaw = KIT.yawOf(tx, tz);
     // kit-local: x = lateral (tangent), z = halfIn - depth (so +Z faces the door)
     const kit = KIT.create().frame(cs.cx, 0, cs.cz, yaw);
@@ -483,28 +509,35 @@
     };
     const col = function (lat0, lat1, d0, d1, y1) {
       const a = at(lat0, d0), c2 = at(lat1, d1);
-      const r = { minX: Math.min(a.x, c2.x), maxX: Math.max(a.x, c2.x), minZ: Math.min(a.z, c2.z), maxZ: Math.max(a.z, c2.z), y0: 0, y1: FF + y1 };
+      const r = { minX: Math.min(a.x, c2.x), maxX: Math.max(a.x, c2.x), minZ: Math.min(a.z, c2.z), maxZ: Math.max(a.z, c2.z), y0: FF - 0.2, y1: FF + y1 };
       if (CBZ.colliders) { CBZ.colliders.push(r); S.cols.push(r); }
     };
 
-    const { wall, forms, tux } = partitionStock();
-    const darkForms = h01(cs.cx, cs.cz, "formtone") > 0.5;
+    const { wall, forms, tux } = partitionStock(S.tailor);
+    const darkForms = S.tailor || h01(cs.cx, cs.cz, "formtone") > 0.5;
     const looks = {};
     const lookFor = function (vid) { return looks[vid] || (looks[vid] = lookOf(vid)); };
+    const itemSlot = function (it, x, y, z, extra) {
+      const sp = CBZ.cityComposableSpec(it.visualId);
+      return Object.assign({ kind: "item", store: S, name: it.name, visualId: it.visualId, label: it.label,
+        drip: (sp && sp.drip) || it.drip || 0, x: x, y: y, z: z, reach: RACK_REACH, dot: RACK_DOT }, extra || null);
+    };
 
     // ---- THE RUNS -----------------------------------------------------------
     // Both side walls get slatwall + a face-out arm per garment; a deep room
     // also gets a double-sided spine down the middle. The runs stop short of
     // the back wall so the fitting corner and the cash wrap have their room.
+    // A tailor hangs fewer pieces further apart.
     const railLen = Math.max(2.4, 2 * halfIn - 3.2);
     const wallFace = halfTan - wt;
     const REACH = 0.34;
+    const d00 = Math.max(0.9, walk + 0.45);
     const runs = [];
     [-1, 1].forEach(function (sgn) {
-      runs.push({ lat: sgn * (wallFace - REACH + 0.05), face: -sgn, panel: sgn * wallFace, d0: 0.9, d1: 0.9 + Math.max(0.2, railLen - 0.6) });
+      runs.push({ lat: sgn * (wallFace - REACH + 0.05), face: -sgn, panel: sgn * wallFace, d0: d00, d1: d00 + Math.max(0.2, railLen - 0.6 - (d00 - 0.9)) });
     });
-    const gd0 = 3.4, gd1 = 2 * halfIn - 4.3;
-    const spine = (gd1 - gd0) >= 2.4 && halfTan >= 3.4;
+    const gd0 = Math.max(3.4, walk + 1.2), gd1 = 2 * halfIn - 4.3;
+    const spine = !S.tailor && (gd1 - gd0) >= 2.4 && halfTan >= 3.4;
     if (spine) [-1, 1].forEach(function (sgn) {
       runs.push({ lat: sgn * (0.07 + REACH - 0.05), face: sgn, panel: sgn * 0.07, d0: gd0, d1: gd1, spine: true });
     });
@@ -518,7 +551,7 @@
     if (spine) {
       const mid = (gd0 + gd1) / 2, len = (gd1 - gd0) + 0.9, p = L2(0, mid);
       const P = xf(p.x, FF, p.z, 0);                                               // local z runs down the room
-      bx(kit, P, 0, 1.16, 0, 0.1, 2.2, len, MDF);                              // carcass between the faces
+      bx(kit, P, 0, 1.16, 0, 0.1, 2.2, len, FIN.mdf);                              // carcass between the faces
       bx(kit, P, 0, 0.03, 0, 0.34, 0.06, len + 0.1, 0x2a2622);                     // plinth
       col(-0.2, 0.2, gd0 - 0.45, gd1 + 0.45, 2.3);
     }
@@ -544,40 +577,33 @@
       const t = n > 1 ? (posOf[i] / (n - 1)) : 0.5;
       const depth = run.d0 + t * (run.d1 - run.d0);
       const L = lookFor(it.visualId);
-      // long pieces ride a higher arm so a hem never touches the floor
       const y = FF + ARM_Y;
       const pp = L2(run.panel, depth);
       arm(kit, xf(pp.x, FF, pp.z, faceYaw(run.face, 0)), ARM_Y, REACH);
       const gp = L2(run.lat, depth);
       garment(kit, xf(gp.x, y, gp.z, faceYaw(run.face, 0)), L);
       const w = at(run.lat, depth);
-      const sp = CBZ.cityComposableSpec(it.visualId);
-      S.slots.push({ kind: "item", name: it.name, visualId: it.visualId, label: it.label,
-                     drip: (sp && sp.drip) || it.drip || 0, x: w.x, y: y, z: w.z,
-                     reach: RACK_REACH, dot: RACK_DOT });
+      S.slots.push(itemSlot(it, w.x, y, w.z));
     });
 
     // ---- THE ENTRANCE HEROES ----------------------------------------------
     // Clustered to one side of the door (the lot's own coin) so no form ever
     // stands in the lane you walk in by.
-    const heroSide = h01(cs.cx, cs.cz, "heroes") < 0.5 ? -1 : 1;
+    const heroSide = cs.heroSide || (h01(cs.cx, cs.cz, "heroes") < 0.5 ? -1 : 1);
     forms.forEach(function (it, i) {
       const lat = heroSide * Math.min(halfTan - 0.9, 1.4 + i * 1.1);
-      const depth = 2.15 + (i % 2) * 0.35;
+      const depth = Math.max(2.15, walk + 0.5) + (i % 2) * 0.35;
       const p = L2(lat, depth), seed = h01(cs.cx + i, cs.cz, "form");
       mannequin(kit, xf(p.x, FF, p.z, (seed - 0.5) * 0.6), lookFor(it.visualId), darkForms, seed);
       const w = at(lat, depth);
       col(lat - 0.2, lat + 0.2, depth - 0.2, depth + 0.2, 1.8);
-      const sp = CBZ.cityComposableSpec(it.visualId);
-      S.slots.push({ kind: "item", name: it.name, visualId: it.visualId, label: it.label,
-                     drip: (sp && sp.drip) || it.drip || 0, x: w.x, y: FF + 1.2, z: w.z,
-                     reach: RACK_REACH, dot: RACK_DOT, mannequin: true });
+      S.slots.push(itemSlot(it, w.x, FF + 1.2, w.z, { mannequin: true }));
     });
     S._forms = forms.length;
 
     // ---- THE FOLDED TABLE (the other side of the door lane) -----------------
-    const tLat = -heroSide * 1.9, tDepth = 2.7, TW = 1.4, TD = 0.8;
-    if (wallFace - REACH - 0.3 - (Math.abs(tLat) + TW / 2) >= 0.8 && 2 * halfIn > 7) {
+    const tLat = -heroSide * 1.9, tDepth = Math.max(2.7, walk + 0.9), TW = 1.4, TD = 0.8;
+    if (!S.tailor && wallFace - REACH - 0.3 - (Math.abs(tLat) + TW / 2) >= 0.8 && 2 * halfIn > 7) {
       const p = L2(tLat, tDepth);
       const cols = [];
       for (let i = 0; i < wall.length && cols.length < 6; i += Math.max(1, Math.floor(wall.length / 6))) cols.push(lookFor(wall[i].visualId).c);
@@ -587,22 +613,32 @@
     }
 
     // ---- THE CASH WRAP ------------------------------------------------------
-    const C = KIT.counterOf(S.lot);
+    // Where you PAY: the till slot stands on the customer side of it.
+    const C = b.counter || KIT.counterOf(S.lot);
     if (C) {
       const CL = Math.max(C.w, C.d), CD = Math.min(C.w, C.d);
       const ck = KIT.create().frame(C.x, 0, C.z, KIT.yawOf(C.tx, C.tz));
-      const top = KIT.dressCounter(ck, CL, CD, C.top, FF, { clad: 0x4a3a2c, trim: 0xb9a27a, work: 0xe8e4da, kick: 0x1a1612 });
+      const top = KIT.dressCounter(ck, CL, CD, C.top, FF, { clad: FIN.clad, trim: FIN.trim, work: S.tailor ? 0x1a1410 : 0xe8e4da, kick: 0x1a1612 });
       KIT.till(ck, -CL / 2 + 0.55, top, CD);
       // paper carrier bags standing at the other end, a tissue stack, a hanger bin
       const ex = CL / 2 - 0.3;
       for (let i = 0; i < 3; i++) {
-        ck.box(ex - i * 0.02, top + 0.16, -CD / 2 + 0.2 + i * 0.03, 0.3, 0.32, 0.11, 0xb58a5a);
+        ck.box(ex - i * 0.02, top + 0.16, -CD / 2 + 0.2 + i * 0.03, 0.3, 0.32, 0.11, S.tailor ? 0x1c1a18 : 0xb58a5a);
         ck.torus(ex - i * 0.02, top + 0.33, -CD / 2 + 0.2 + i * 0.03, 0.06, 0.004, 0x3a2a1c, "solid", 0, 0, 0, Math.PI, 8);
       }
       ck.box(ex - 0.45, top + 0.02, -CD / 2 + 0.22, 0.4, 0.04, 0.3, 0xf6f4ee);
       ck.box(ex - 0.2, FF + 0.22, -CD / 2 - 0.35, 0.4, 0.44, 0.3, 0x2a2c30);        // hanger bin behind the counter
       for (let i = 0; i < 6; i++) ck.box(ex - 0.34 + i * 0.05, FF + 0.47, -CD / 2 - 0.35, 0.01, 0.1, 0.24, BLACK_H, "gloss", 0, 0, 0.3);
+      if (S.tailor) {
+        // the tailor's things on the worktop: a tape measure, a chalk, a pad of swatches
+        ck.torus(ex - 0.95, top + 0.012, 0, 0.05, 0.012, 0xe8d24a, "solid", Math.PI / 2, 0, 0);
+        ck.box(ex - 0.7, top + 0.01, 0.08, 0.05, 0.012, 0.03, 0xf2f0ea);
+        for (let i = 0; i < 4; i++) ck.box(ex - 1.25 + i * 0.012, top + 0.006 + i * 0.004, -0.05, 0.12, 0.004, 0.08, [0x1c2433, 0x3a3a40, 0x5a4632, 0x22303a][i]);
+      }
       ck.build(group);
+      const tw = { x: C.x - C.inx * (CD / 2 + 0.5), z: C.z - C.inz * (CD / 2 + 0.5) };
+      S.till = { kind: "till", store: S, x: tw.x, y: top, z: tw.z, reach: RACK_REACH, dot: 0.4 };
+      S.slots.push(S.till);
     }
 
     // ---- THE FITTING ROOM + MIRROR ------------------------------------------
@@ -618,22 +654,22 @@
       return !!b.clearFloorPoint(w.x - bx0, w.z - bz0, pad);
     };
     const BW = 1.3, BD = 1.4, WH = 2.3;                     // booth width (lateral), depth, wall height
-    let sgn = h01(cs.cx, cs.cz, "fitroom") < 0.5 ? -1 : 1;
+    let sgn = cs.fitSide || (h01(cs.cx, cs.cz, "fitroom") < 0.5 ? -1 : 1);
     const boothFits = function (s2) {
       const mid = s2 * (wallFace - BW / 2);
       return clearAt(mid, back - BD / 2, 0.5) && clearAt(mid, back - BD - 0.6, 0.5);
     };
     let fr = (halfTan - 1.5) >= 2.9;
-    if (fr && !boothFits(sgn)) { if (boothFits(-sgn)) sgn = -sgn; else fr = false; }
+    if (fr && !boothFits(sgn)) { if (!cs.fitSide && boothFits(-sgn)) sgn = -sgn; else fr = false; }
     if (fr) {
       const inner = sgn * wallFace, part = sgn * (wallFace - BW);
       const front = back - BD;
       // the partition wall between the booth and the shop floor
       const pw = L2(part, back - BD / 2);
       const PW = xf(pw.x, FF, pw.z, 0);
-      bx(kit, PW, 0, WH / 2, 0, 0.08, WH, BD, MDF);
+      bx(kit, PW, 0, WH / 2, 0, 0.08, WH, BD, FIN.mdf);
       bx(kit, PW, 0, 0.05, 0, 0.1, 0.1, BD + 0.01, 0x3a3630);
-      bx(kit, PW, 0, WH + 0.02, 0, 0.1, 0.04, BD + 0.02, OAK, "gloss");
+      bx(kit, PW, 0, WH + 0.02, 0, 0.1, 0.04, BD + 0.02, FIN.oak, "gloss");
       col(part - 0.05, part + 0.05, front, back, WH);
       // curtain track hung off the ceiling on two drop rods, curtain mostly drawn
       const tr = L2((inner + part) / 2, front);
@@ -646,32 +682,37 @@
       const toWall = inner > part ? 1 : -1;                  // the curtain bunches toward the side wall
       for (let i = 0; i < folds; i++) {
         const x = toWall * (BW / 2 - 0.02 - (i + 0.5) * fw);
-        bx(kit, PT, x, trackY - 0.03 - ch / 2, (i % 2) * 0.035, fw * 1.25, ch, 0.012, 0x5a4a3c, "solid", 0, (i % 2 ? 0.45 : -0.45), 0);
+        bx(kit, PT, x, trackY - 0.03 - ch / 2, (i % 2) * 0.035, fw * 1.25, ch, 0.012, S.tailor ? 0x2a2230 : 0x5a4a3c, "solid", 0, (i % 2 ? 0.45 : -0.45), 0);
       }
       // inside: a bench against the back wall and a hook on the side wall
       const bn = L2((inner + part) / 2, back - 0.22);
       const PB = xf(bn.x, FF, bn.z, 0);
-      bx(kit, PB, 0, 0.44, 0, BW - 0.2, 0.04, 0.36, OAK, "gloss");
+      bx(kit, PB, 0, 0.44, 0, BW - 0.2, 0.04, 0.36, FIN.oak, "gloss");
       for (const e of [-1, 1]) bx(kit, PB, e * (BW / 2 - 0.2), 0.21, 0, 0.04, 0.42, 0.3, 0x2a2622);
       const hk = L2(inner, back - BD * 0.55);
       const PH = xf(hk.x, FF + 1.75, hk.z, faceYaw(-sgn, 0));
       bx(kit, PH, 0, 0, 0.025, 0.03, 0.03, 0.05, CHROME, "metal");
       if (wall.length) garment(kit, xf(0, 0, 0.06, 0, PH), lookFor(wall[wall.length - 1].visualId));
+      // stepping into the booth is trying on too
+      const bw = at((inner + part) / 2, back - BD / 2);
+      S.slots.push({ kind: "booth", store: S, x: bw.x, y: FF + 1.2, z: bw.z, reach: 1.6, dot: 0.2 });
     }
     const mlat = sgn * wallFace, mdepth = back - BD - 0.42;
     const mp = L2(mlat, mdepth);
     const PM = xf(mp.x, FF, mp.z, faceYaw(-sgn, 0));
-    bx(kit, PM, 0, 1.05, 0.03, 0.78, 1.96, 0.05, 0x1d1f23, "gloss");               // frame
+    bx(kit, PM, 0, 1.05, 0.03, 0.78, 1.96, 0.05, S.tailor ? 0x3a2414 : 0x1d1f23, "gloss");   // frame
     bx(kit, PM, 0, 1.05, 0.058, 0.68, 1.84, 0.006, 0xbccbd2, "metal");             // silvered glass
     bx(kit, PM, 0, 0.05, 0.045, 0.8, 0.1, 0.08, 0x1d1f23, "gloss");                // foot rail
     const mw = at(mlat - sgn * 0.1, mdepth);
-    S.slots.push({ kind: "mirror", x: mw.x, y: FF + 1.2, z: mw.z,
+    S.slots.push({ kind: "mirror", store: S, x: mw.x, y: FF + 1.2, z: mw.z,
                    reach: RACK_REACH + 0.4, dot: 0.45, tux: tux });
+    // no counter in the plan: you pay at the mirror
+    if (!S.till) S.till = S.slots[S.slots.length - 1];
     S._alcove = !!fr;
     S.tux = tux;
     kit.build(group);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("clothing-store", b, group);
+    if (CBZ.interiorTrackFixture && !S.island) CBZ.interiorTrackFixture("clothing-store", b, group);
 
     // ---- THE WINDOW (street-facing, display only) --------------------------
     // Its own group: the floor is hard-gated to "player is inside the shell"
@@ -686,12 +727,13 @@
     for (let i = 0; i < forms.length && wlooks.length < 2; i++) wlooks.push(forms[i].visualId);
     const lat0 = Math.min(halfTan - 1.1, 2.1);
     let nWin = 0;
-    if (wlooks.length && lat0 >= 1.3) {
+    // (an island shop's front walk runs along that glass: no window risers there)
+    if (wlooks.length && lat0 >= 1.3 && !walk) {
       for (let i = 0; i < wlooks.length; i++) {
         const lat = (i === 0 ? -1 : 1) * lat0, depth = wt + 0.75;
         const p = L2(lat, depth);
         const PR = xf(p.x, FF, p.z, 0);
-        bx(wk, PR, 0, 0.14, 0, 1.1, 0.24, 0.9, MDF);                                // riser
+        bx(wk, PR, 0, 0.14, 0, 1.1, 0.24, 0.9, FIN.mdf);                            // riser
         bx(wk, PR, 0, 0.03, 0, 1.12, 0.06, 0.92, 0x2a2622);                         // riser kick
         mannequin(wk, xf(0, 0.26, 0, (i === 0 ? 0.25 : -0.25), PR), lookFor(wlooks[i]), darkForms, h01(cs.cx, cs.cz, "win" + i));
         // ceiling track + two spot heads aimed at the form (a lamp lens is the
@@ -710,76 +752,276 @@
     }
     wk.build(wg);
     S._window = nWin;
-    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("clothing-window", b, wg);
+    if (CBZ.interiorTrackFixture && !S.island) CBZ.interiorTrackFixture("clothing-window", b, wg);
   }
 
-
-  // ---- buying / wearing ------------------------------------------------------
-  function actOn(slot) {
-    if (!slot) return;
-    if (slot.kind === "mirror") { openPanel(); return; }
-    buyOrWear(slot.name, slot.visualId, slot.label);
+  function undress(S) {
+    for (const grp of [S.group, S.winGroup]) {
+      if (!grp) continue;
+      if (grp.parent) grp.parent.remove(grp);
+      grp.traverse(function (o) { if (o.isMesh && o.geometry && !o.geometry._shared) { try { o.geometry.dispose(); } catch (e) {} } });
+    }
+    if (S.cols.length && CBZ.colliders) {
+      const set = new Set(S.cols), C = CBZ.colliders;
+      let w = 0;
+      for (let i = 0; i < C.length; i++) if (!set.has(C[i])) C[w++] = C[i];
+      C.length = w;
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
+    S.cols = []; S.group = null; S.winGroup = null; S.slots = []; S.till = null; S.dressed = false; S.near = false;
   }
-  function buyOrWear(name, visualId, label) {
-    const e = econ();
-    if (!e || !CBZ.city) return;
-    // already own it → just put it on (free re-wear).
-    if (CBZ.cityOwnsItem && CBZ.cityOwnsItem(visualId)) {
-      if (CBZ.cityWear) CBZ.cityWear(visualId);
-      note("Pulled the " + (label || name) + " on.", 1.6);
-      return;
+
+  // ============================================================
+  //  TAKE IT OFF THE RACK, TRY IT ON, PAY AT THE COUNTER.
+  //  A garment you pick up is in your hands (HELD); the mirror or the
+  //  fitting room puts what you hold on your back (the look you came in
+  //  with is kept, and comes back if you put the piece down); the till
+  //  takes the money and it is yours. Walk out holding it and the clerk
+  //  calls it: the demand ladder (CBZ.brain.demand: "Hey!" -> "Bring it
+  //  back." -> the police). Come back in and it is over; keep going and it
+  //  is stolen: yours, and a theft on your record.
+  // ============================================================
+  const HAND_MAX = 4;
+  const HELD = { store: null, items: [], snap: null, theft: null };
+  function priceOf(S, name) { return Math.round(e_buy(name) * (S && S.mult || 1)); }
+  function heldTotal() { let t = 0; for (const h of HELD.items) t += h.price; return t; }
+  function holding(vid) { for (const h of HELD.items) if (h.visualId === vid) return h; return null; }
+  const owned = (s) => !!(CBZ.cityOwnsItem && CBZ.cityOwnsItem(s.visualId));
+  function clerkOf(S) {
+    const v = S && S.lot && S.lot.building && S.lot.building.vendor;
+    return v && !v.dead && v.pos ? v : null;
+  }
+  function clerkSay(S, line) {
+    const v = clerkOf(S);
+    if (v && line && CBZ.speech && CBZ.speech.say) { try { CBZ.speech.say(v, line, { force: true }); } catch (e) {} }
+  }
+
+  function take(slot) {
+    const S = slot.store;
+    if (HELD.store && HELD.store !== S) dropAll(false);
+    if (holding(slot.visualId)) return;
+    if (HELD.items.length >= HAND_MAX) { note("Your hands are full.", 1.4); return; }
+    HELD.store = S;
+    HELD.items.push({ name: slot.name, visualId: slot.visualId, label: slot.label, price: priceOf(S, slot.name), tried: false });
+    if (CBZ.sfx) CBZ.sfx("pickup");
+  }
+  function putBack(slot) {
+    const h = holding(slot.visualId);
+    if (!h) return;
+    HELD.items.splice(HELD.items.indexOf(h), 1);
+    if (h.tried) {
+      const still = HELD.items.filter(function (o) { return o.tried; });
+      restoreLook();
+      for (const o of still) wearTrial(o);
     }
-    const price = e_buy(name);
-    if (!CBZ.city.spend(price)) {
-      note("The " + (label || name) + " runs " + fmt$(price) + ". Come back with the money.", 2);
-      return;
+    if (!HELD.items.length) clearHeld();
+  }
+
+  /* the look you walked in with, kept while you try things on: the owned
+     sets, the composite, the worn record */
+  function snapLook() {
+    if (HELD.snap) return;
+    HELD.snap = {
+      items: Object.assign({}, g.cityItemsOwned || {}),
+      outfits: Object.assign({}, g.cityOutfitsOwned || {}),
+      fit: g.cityFit ? { shirt: g.cityFit.shirt, legs: g.cityFit.legs, items: (g.cityFit.items || []).slice() } : null,
+      id: g.cityOutfitId || null, rec: g.cityWornOutfit || null,
+    };
+  }
+  function restoreLook() {
+    const s = HELD.snap;
+    if (!s) return;
+    g.cityItemsOwned = Object.assign({}, s.items);
+    g.cityOutfitsOwned = Object.assign({}, s.outfits);
+    if (s.fit) g.cityFit = { shirt: s.fit.shirt, legs: s.fit.legs, items: s.fit.items.slice() };
+    const plain = !s.rec || s.rec.id === "civvies" || s.id === "street" || s.id === "civvies" || s.id === "basics" || s.id === "hoodie";
+    if (plain || !CBZ.cityWearOutfit || !CBZ.cityWearOutfit(s.id)) {
+      if (s.fit && CBZ.citySetFitShirt) CBZ.citySetFitShirt(s.fit.shirt);
     }
-    if (CBZ.cityGrantItem) CBZ.cityGrantItem(visualId);
-    if (CBZ.cityWear) CBZ.cityWear(visualId);
-    if (CBZ.sfx) CBZ.sfx("coin");
-    const drip = (CBZ.cityComposableSpec && CBZ.cityComposableSpec(visualId) || {}).drip || 0;
-    if (CBZ.city.addRespect) CBZ.city.addRespect(price >= 600 ? 3 : 1);
-    if (price >= 600 && CBZ.city.big) CBZ.city.big("" + (label || name) + ", fresh fit off the rack!");
-    note("Bought the " + (label || name) + " for " + fmt$(price) + (drip ? " (+" + drip + " drip)." : "."), 2.2);
+    for (const h of HELD.items) h.tried = false;
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+  function wearTrial(h) {
+    if (CBZ.cityGrantItem) CBZ.cityGrantItem(h.visualId);
+    if (CBZ.cityWear) CBZ.cityWear(h.visualId);
+    h.tried = true;
+  }
+  function tryOn() {
+    if (!HELD.items.length) return;
+    snapLook();
+    for (const h of HELD.items) if (!h.tried) wearTrial(h);
+    if (CBZ.sfx) CBZ.sfx("cloth");
+  }
+  function clearHeld() { HELD.store = null; HELD.items.length = 0; HELD.snap = null; HELD.theft = null; }
+  // down they go (left the shop by a door that is not a theft: the store
+  // went away, you drove off in a car the clerk never saw you reach)
+  function dropAll(keepTried) {
+    if (!keepTried) restoreLook();
+    clearHeld();
+  }
+
+  function pay(S) {
+    if (!HELD.items.length || HELD.store !== S || !CBZ.city) return;
+    const total = heldTotal();
+    if (!CBZ.city.spend(total)) {
+      note(fmt$(total) + ". You don't have it.", 1.8);
+      return;
+    }
+    let respect = 0, big = null;
+    for (const h of HELD.items) {
+      if (CBZ.cityGrantItem) CBZ.cityGrantItem(h.visualId);
+      if (CBZ.cityWear) CBZ.cityWear(h.visualId);
+      if (h.price >= 600) { respect += 3; big = h.label || h.name; } else respect += 1;
+    }
+    if (CBZ.city.addRespect) CBZ.city.addRespect(respect);
+    if (CBZ.sfx) CBZ.sfx("coin");
+    clerkSay(S, S.tailor ? "It suits you." : "Thank you.");
+    if (big && CBZ.city.big) CBZ.city.big(big + ", paid for.");
+    else note("Paid " + fmt$(total) + ".", 1.6);
+    HELD.snap = null;                       // the new look is the look now
+    clearHeld();
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+    if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+  }
+
+  // the goods leave with you, unpaid: they are yours now, and it is a theft
+  function stolen(S, seen, armed) {
+    for (const h of HELD.items) {
+      if (CBZ.cityGrantItem) CBZ.cityGrantItem(h.visualId);
+      if (h.tried && CBZ.cityWear) CBZ.cityWear(h.visualId);
+    }
+    const P = CBZ.player;
+    if (seen && CBZ.cityCrime && P) CBZ.cityCrime(armed ? 90 : 65, { type: armed ? "robbery" : "theft", x: P.pos.x, z: P.pos.z, instant: true });
+    HELD.snap = null;
+    clearHeld();
+    if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
+  }
+
+  const THEFT_LINES = {
+    demand: ["Hey! You didn't pay for that.", "Hey! You have to pay for that."],
+    warn: ["Bring it back. Now.", "Bring that back in here."],
+    show: ["I'm calling the police.", "Last chance."],
+    showAtGun: ["Okay! Okay!"],
+    act: ["Police! I've been robbed!", "Somebody call the police!"],
+    comply: ["Thank you.", "Pay at the counter."],
+    gaveup: ["I'm calling the police."],
+    backoff: ["Okay! Take it! Take it!"],
+    standoff: ["Please. Just go."],
+  };
+  function playerActor() { return (CBZ.city && CBZ.city.playerActor) || (CBZ.surv && CBZ.surv.playerActor) || CBZ.player; }
+  function armedNow() { return !!(CBZ.cityHasGun && CBZ.cityHasGun()); }
+  // he walked out holding it. The clerk who can see the door starts the
+  // ladder; nobody at the counter (dead, gone) and it simply goes with you.
+  function beginTheft(S) {
+    const v = clerkOf(S), pa = playerActor();
+    const outsideWith = function () { return HELD.store === S && HELD.items.length > 0 && !inStore(S, CBZ.player.pos.x, CBZ.player.pos.z, 0.6); };
+    if (!v || !pa) { stolen(S, false, false); return; }
+    const T = { S: S, v: v, t: 0, case: null, city: false, done: false };
+    HELD.theft = T;
+    const finish = function (outcome) {
+      if (T.done) return;
+      T.done = true;
+      if (outcome === "complied" || outsideWith() === false) { HELD.theft = null; return; }
+      stolen(S, true, outcome === "backed");
+    };
+    // Gang City's clerk is a city ped: the city body for the ladder walks him
+    if (!S.island && CBZ.cityLadder && CBZ.cityLadder.begin) {
+      const e = CBZ.cityLadder.begin(v, "trespass", {
+        lines: THEFT_LINES, hold: true, patience: [2.6, 2.6, 1.6], inside: outsideWith,
+        onAct: function () { finish("acted"); return true; },
+        onEnd: function (ped, r) { finish(r && r.outcome); },
+      });
+      if (e) { T.city = true; T.finish = finish; return; }
+    }
+    const DM = CBZ.brain && CBZ.brain.demand;
+    if (DM) {
+      try { T.case = DM.begin(v, pa, "trespass", { lines: THEFT_LINES, hold: true, patience: [2.6, 2.6, 1.6] }); } catch (e) { T.case = null; }
+    }
+    if (!T.case) { clerkSay(S, THEFT_LINES.demand[0]); T.fallback = true; }
+    T.outsideWith = outsideWith; T.finish = finish;
+  }
+  const _ts = { dist: 0, speed: 0, armed: false, aiming: false, attacking: false, paid: false, inside: true, complied: false, fled: false, handsUp: false };
+  function theftTick(dt) {
+    const T = HELD.theft;
+    if (!T || T.done) return;
+    T.t += dt;
+    // the city ladder runs itself; one that never closes (its man swept away)
+    // is a theft nobody finished calling
+    if (T.city) { if (T.t > 30) T.finish("gaveup"); return; }
+    const P = CBZ.player, v = T.v;
+    if (!v || v.dead) { T.finish("gaveup"); return; }
+    if (T.fallback) {
+      if (!T.outsideWith()) T.finish("complied");
+      else if (T.t > 4) { clerkSay(T.S, THEFT_LINES.act[0]); T.finish("acted"); }
+      return;
+    }
+    const DM = CBZ.brain.demand;
+    _ts.dist = Math.hypot(P.pos.x - v.pos.x, P.pos.z - v.pos.z);
+    _ts.speed = P.driving ? 12 : (+P.speed || 0);
+    _ts.armed = armedNow();
+    _ts.aiming = _ts.armed && !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon());
+    _ts.inside = T.outsideWith();
+    _ts.complied = !_ts.inside;
+    _ts.fled = !!P.driving;
+    let r = null;
+    try { r = DM.step(v, dt, _ts); } catch (e) { r = null; }
+    if (!r) { T.finish("gaveup"); return; }
+    if (r.step === "act" || r.step === "done") T.finish(r.outcome || (r.step === "act" ? "acted" : "gaveup"));
   }
 
   // ---- THE RACKS ARE CANDIDATES (city/interactions.js registerFixtures) -----
-  // Every garment, form and the mirror is a thing in the registry: E buys (or
-  // wears) the one you look at, Q / a tap on it shows its verbs. No private
-  // prompt and no private E listener.
-  function inStore(px, pz) {
-    const B = S.cs && S.cs.bounds;
-    return !!B && px >= B.minX - 1.5 && px <= B.maxX + 1.5 && pz >= B.minZ - 1.5 && pz <= B.maxZ + 1.5;
+  // Every garment, form, the mirror, the booth and the till is a thing in the
+  // registry: E does the best verb on the one you look at, Q / a tap on it
+  // shows its verbs. No private prompt and no private E listener.
+  function inStore(S, px, pz, lip) {
+    const B = S && S.cs && S.cs.bounds;
+    const m = lip == null ? 1.5 : lip;
+    return !!B && px >= B.minX - m && px <= B.maxX + m && pz >= B.minZ - m && pz <= B.maxZ + m;
   }
-  const owned = (s) => !!(CBZ.cityOwnsItem && CBZ.cityOwnsItem(s.visualId));
+  const _list = [];
   let fixturesWired = false;
   function wireFixtures() {
     if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
     fixturesWired = true;
+    const isItem = (s) => s.kind === "item";
+    const mirrorish = (s) => s.kind === "mirror" || s.kind === "booth";
     CBZ.interactions.registerFixtures({
       id: "clothes-rack", kind: "clothes-rack", prio: 9, islands: true,
-      list: function (ctx, px, pz) { return S.built && S.near && !S.panelOpen && inStore(px, pz) ? S.slots : null; },
+      list: function (ctx, px, pz) {
+        if (UI.open) return null;
+        _list.length = 0;
+        for (const S of STORES) if (S.dressed && S.near && inStore(S, px, pz)) for (const s of S.slots) _list.push(s);
+        return _list.length ? _list : null;
+      },
       reach: function (s) { return s.reach || RACK_REACH; },
       dot: function (s) { return s.dot || RACK_DOT; },
-      name: function (s) { return s.kind === "mirror" ? "" : (s.label || s.name); },
+      name: function (s) {
+        if (s.kind === "till") return HELD.items.length ? "Counter" : "";
+        if (mirrorish(s)) return "";
+        return (s.label || s.name) + (owned(s) ? "" : "  " + fmt$(priceOf(s.store, s.name)));
+      },
       verbs: [
-        { id: "clothes-wardrobe", slot: "e", prio: 5, label: "Try on", canShow: (s) => s.kind === "mirror", onSelect: () => openPanel() },
-        { id: "clothes-wear", slot: "e", prio: 5, label: "Wear", canShow: (s) => s.kind !== "mirror" && owned(s), onSelect: actOn },
-        { id: "clothes-buy", slot: "e", prio: 5, label: (s) => "Buy " + fmt$(e_buy(s.name)),
-          canShow: (s) => s.kind !== "mirror" && !owned(s), onSelect: actOn },
+        { id: "clothes-wear", slot: "e", prio: 5, label: "Wear", canShow: (s) => isItem(s) && owned(s) && !holding(s.visualId), onSelect: function (s) { if (CBZ.cityWear) CBZ.cityWear(s.visualId); } },
+        { id: "clothes-take", slot: "e", prio: 5, label: "Take", canShow: (s) => isItem(s) && !owned(s) && !holding(s.visualId), onSelect: take },
+        { id: "clothes-putback", slot: "e", prio: 5, label: "Put back", canShow: (s) => isItem(s) && !!holding(s.visualId), onSelect: putBack },
+        { id: "clothes-tryon", slot: "e", prio: 6, label: "Try on",
+          canShow: (s) => mirrorish(s) && HELD.store === s.store && HELD.items.some(function (h) { return !h.tried; }), onSelect: tryOn },
+        { id: "clothes-wardrobe", slot: "e", prio: 4, label: "Wardrobe", canShow: (s) => s.kind === "mirror", onSelect: (s) => openPanel(s.store) },
+        { id: "clothes-pay", slot: "e", prio: 7, label: () => "Pay " + fmt$(heldTotal()),
+          canShow: (s) => s === (s.store && s.store.till) && HELD.store === s.store && HELD.items.length > 0, onSelect: (s) => pay(s.store) },
       ],
     });
   }
 
   // ============================================================
   //  THE WARDROBE PANEL (at the mirror): list OWNED composables grouped by
-  //  slot — number keys wear, the slot letter strips it — plus a BUY TUXEDO
-  //  row. Mirrors the bank panel: a fixed centre card, Esc/E closes, number
-  //  keys act. Built lazily, repopulated each open.
+  //  slot — number keys wear, the slot letter strips it — plus the store's
+  //  apex piece (the tuxedo) to take to the counter. A fixed centre card,
+  //  Esc/E closes, number keys act. Built lazily, repopulated each open.
   // ============================================================
+  const UI = { open: false, panel: null, rows: null, prevMenu: undefined, store: null };
   function panelEl() {
-    if (S.panel) return S.panel;
+    if (UI.panel) return UI.panel;
     if (typeof document === "undefined" || !document.body) return null;
     const d = document.createElement("div");
     d.id = "clothingPanel";
@@ -787,7 +1029,7 @@
       "background:rgba(13,16,21,.96);border:1px solid #6a4f7a;border-radius:16px;padding:18px 22px;color:#e8eef7;" +
       "font-family:Fredoka,system-ui,sans-serif;font-size:15px;min-width:320px;max-width:86vw;box-shadow:0 18px 60px rgba(0,0,0,.6)";
     document.body.appendChild(d);
-    S.panel = d;
+    UI.panel = d;
     return d;
   }
   // the owned composables grouped by their composable slot (shirt/jacket/neck/
@@ -804,77 +1046,83 @@
       const sp = CBZ.cityComposableSpec && CBZ.cityComposableSpec(it.visualId);
       if (!sp || sp.painted) continue;                 // the tuxedo has its own row
       if (!(CBZ.cityOwnsItem && CBZ.cityOwnsItem(it.visualId))) continue;
+      if (holding(it.visualId)) continue;              // on trial, not yours yet
       rows.push({ visualId: it.visualId, label: it.label, slot: sp.slot || "item", worn: !!wornSet[it.visualId] });
     }
     return rows;
   }
+  function tuxLabel(t) { return String(t.label || t.name).replace(" (Composable)", ""); }
   function renderPanel() {
     const d = panelEl(); if (!d) return;
-    const rows = ownedRows();
-    let html = "<div style='font-weight:700;font-size:18px;margin-bottom:6px;color:#e2c2f4'>Your Wardrobe</div>";
-    html += "<div style='color:#8a93a3;font-size:12px;margin-bottom:12px'>Mix what you own, tap a number to wear it, the letter to take it off.</div>";
-    S._panelRows = rows;
-    if (!rows.length) {
-      html += "<div style='color:#9aa0a6;margin-bottom:10px'>Nothing owned yet, buy a shirt or blazer off the racks first.</div>";
-    } else {
-      rows.forEach((r, i) => {
-        const mark = r.worn ? "<span style='color:#7ed957'> ✓ worn</span>" : "";
-        html += "<div style='display:flex;justify-content:space-between;gap:14px;padding:3px 0'>" +
-          "<span><b style='color:#e2c2f4'>" + (i + 1) + "</b> &nbsp;" + r.label + mark + "</span>" +
-          "<span style='color:#7f8794'>[" + r.slot + "]</span></div>";
-      });
-    }
-    // the apex purchase: the tuxedo, sold here at the mirror.
-    if (S.tux) {
-      const owned = CBZ.cityOwnsItem && CBZ.cityOwnsItem(S.tux.visualId);
+    const S = UI.store, rows = ownedRows();
+    let html = "<div style='font-weight:700;font-size:18px;margin-bottom:12px;color:#e2c2f4'>Wardrobe</div>";
+    UI.rows = rows;
+    rows.forEach((r, i) => {
+      const mark = r.worn ? "<span style='color:#7ed957'> ✓</span>" : "";
+      html += "<div style='display:flex;justify-content:space-between;gap:14px;padding:3px 0'>" +
+        "<span><b style='color:#e2c2f4'>" + (i + 1) + "</b> &nbsp;" + r.label + mark + "</span>" +
+        "<span style='color:#7f8794'>" + r.slot + "</span></div>";
+    });
+    // the apex piece: the tuxedo, taken off its form here and paid for at the counter
+    const tux = S && S.tux;
+    if (tux) {
+      const own = CBZ.cityOwnsItem && CBZ.cityOwnsItem(tux.visualId) && !holding(tux.visualId);
+      const held = !!holding(tux.visualId);
       html += "<div style='border-top:1px solid #3a3140;margin:12px 0 8px'></div>";
       html += "<div style='display:flex;justify-content:space-between;gap:14px;padding:3px 0'>" +
-        "<span><b style='color:#ffd166'>T</b> &nbsp;" + S.tux.label.replace(" (Composable)", "") + (owned ? "<span style='color:#7ed957'> ✓ owned</span>" : "") + "</span>" +
-        "<span style='color:#d9a8ee'>" + (owned ? "wear it" : fmt$(e_buy(S.tux.name))) + "</span></div>";
+        "<span><b style='color:#ffd166'>T</b> &nbsp;" + tuxLabel(tux) + (own ? "<span style='color:#7ed957'> ✓</span>" : "") + "</span>" +
+        "<span style='color:#d9a8ee'>" + (own ? "Wear" : held ? "Put back" : "Take " + fmt$(priceOf(S, tux.name))) + "</span></div>";
     }
     html += "<div style='border-top:1px solid #3a3140;margin:12px 0 4px'></div>";
     if (!CBZ.touchMode) html += "<div style='color:#8a93a3;font-size:12px'>[Esc] / [E] close</div>";
     d.innerHTML = html;
   }
-  function openPanel() {
+  function openPanel(S) {
     const d = panelEl(); if (!d) return;
-    S.panelOpen = true;
+    UI.open = true; UI.store = S || null;
     // remember the engine's prior fire-block state, then hold it true while
     // styling (CBZ.cityMenuOpen is the engine's existing fire chokepoint).
-    S._prevMenu = CBZ.cityMenuOpen;
+    UI.prevMenu = CBZ.cityMenuOpen;
     CBZ.cityMenuOpen = true;
     renderPanel();
     d.style.display = "block";
   }
   function closePanel() {
-    if (S.panel) S.panel.style.display = "none";
-    S.panelOpen = false;
-    CBZ.cityMenuOpen = S._prevMenu;                     // restore EXACTLY what it was
-    S._prevMenu = undefined;
+    if (UI.panel) UI.panel.style.display = "none";
+    UI.open = false; UI.store = null;
+    CBZ.cityMenuOpen = UI.prevMenu;                     // restore EXACTLY what it was
+    UI.prevMenu = undefined;
   }
   function panelKey(k) {
     if (k === "escape" || k === "e") { closePanel(); return; }
-    if (k === "t" && S.tux) {
-      buyOrWear(S.tux.name, S.tux.visualId, S.tux.label.replace(" (Composable)", ""));
+    const S = UI.store;
+    if (k === "t" && S && S.tux) {
+      const t = S.tux, slot = { store: S, name: t.name, visualId: t.visualId, label: tuxLabel(t) };
+      if (holding(t.visualId)) putBack(slot);
+      else if (CBZ.cityOwnsItem && CBZ.cityOwnsItem(t.visualId)) { if (CBZ.cityWear) CBZ.cityWear(t.visualId); }
+      else take(slot);
       renderPanel();
       return;
     }
     const n = parseInt(k, 10);
-    if (!isNaN(n) && n >= 1 && S._panelRows && n <= S._panelRows.length) {
-      const r = S._panelRows[n - 1];
+    if (!isNaN(n) && n >= 1 && UI.rows && n <= UI.rows.length) {
+      const r = UI.rows[n - 1];
       if (r.worn) { if (CBZ.cityUnwear) CBZ.cityUnwear(r.visualId); }
       else { if (CBZ.cityWear) CBZ.cityWear(r.visualId); }
       renderPanel();
     }
   }
 
-  // ---- find the lot + build once (self-healing, bank/gunstore pattern) -------
-  function ensure() {
+  // ---- Gang City's store: find the lot + frame it (self-healing) -------------
+  const CITY = newStore();
+  function ensureCity() {
+    const S = CITY;
     const arena = CBZ.city && CBZ.city.arena;
     if (S.built) {
       if (S.arena === arena) return true;
-      S.built = false; S.dressed = false; S.group = null; S.winGroup = null; S.slots = []; S.near = false; S.lot = null; S.cs = null; S.tux = null;
-      S.cols = [];                                        // the old arena's collider list went with it
+      undress(S);
+      S.built = false; S.lot = null; S.cs = null; S.tux = null;
+      const i = STORES.indexOf(S); if (i >= 0) STORES.splice(i, 1);
     }
     if (!arena || !econ() || !CBZ.cityComposableSpec) return false;
     if (S.noLotArena === arena) return false;
@@ -921,58 +1169,98 @@
     // district away, and held, hidden, never uploaded (dress() below)
     S.cx = S.cs.cx; S.cz = S.cs.cz; S.dressed = false;
     S.built = true;
+    STORES.push(S);
     return true;
   }
   const DRESS_R = 80;         // past the window's 26 m read, with room to build it unseen
-  function dress() {
+  function dress(S) {
     if (!S.built || S.dressed) return;
     S.dressed = true;
-    buildDisplays();
+    buildDisplays(S);
   }
+
+  /* ---- AN ISLAND OUTFITTER OR TAILOR ------------------------------------------
+     CBZ.clothingStoreMount(lot, opts) -> { store, dispose }
+       lot.building: { counter (WORLD {x, z, w, d, top, tx, tz, inx, inz}),
+         vendor (the clerk, a getter), clearFloorPoint(dx, dz, pad) (world
+         offsets from ox/oz), ox, oz }
+       opts.cs: the room's frame, the same record ensureCity derives ({cx, cz,
+         inx, inz, tx, tz, halfIn, halfTan, wt, ff, ceil, dwx, dwz, bounds,
+         walk, fitSide, heroSide}); opts.tailor; opts.root (the island's). */
+  CBZ.clothingStoreMount = function (lot, opts) {
+    opts = opts || {};
+    if (!lot || !lot.building || !opts.cs) return null;
+    const S = newStore({ lot: lot, cs: opts.cs, root: opts.root || null, island: true,
+      tailor: !!opts.tailor, mult: opts.tailor ? 1.4 : 1 });
+    S.cx = S.cs.cx; S.cz = S.cs.cz; S.built = true;
+    STORES.push(S);
+    return {
+      store: S,
+      dispose: function () {
+        if (HELD.store === S) dropAll(false);
+        if (UI.open && UI.store === S) closePanel();
+        undress(S);
+        S.built = false;
+        const i = STORES.indexOf(S); if (i >= 0) STORES.splice(i, 1);
+      },
+    };
+  };
 
   // ---- per-frame --------------------------------------------------------------
   CBZ.onUpdate(38.6, function (dt) {
-    // (the islands: this store's island lot comes through CBZ.islandVenue; until then
-    //  Gang City's own lot is the only one, and it is never reached from the islands)
-    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city") || !(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) {
-      if (S.group && S.group.visible) S.group.visible = false;
-      if (S.winGroup && S.winGroup.visible) S.winGroup.visible = false;
-      S.near = false; if (S.panelOpen) closePanel(); return;
+    const econOn = !!g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city");
+    const cityOn = econOn && (CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"));
+    if (cityOn) ensureCity();
+    if (!econOn) {
+      for (const S of STORES) { if (S.group) S.group.visible = false; if (S.winGroup) S.winGroup.visible = false; S.near = false; }
+      if (UI.open) closePanel();
+      if (HELD.items.length) dropAll(false);
+      return;
     }
-    if (!ensure()) return;
+    if (!STORES.length) return;
     wireFixtures();
     const P = CBZ.player;
-    const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
-    if (!S.dressed && dx * dx + dz * dz < DRESS_R * DRESS_R) dress();
-    // The racks may ONLY render when the player is actually INSIDE the store
-    // shell (plus a small doorway lip). r128's raycaster can't cull a hung
-    // garment behind opaque walls, so the merch was reading through the glass
-    // from the street ("White Trousers $80" floating outside). Gating on the
-    // walkable bounds — not a 55m radius — keeps every sample sealed in the room.
-    const B = S.cs.bounds;
-    const inside = (P.pos.x >= B.minX - 1.2 && P.pos.x <= B.maxX + 1.2 &&
-                    P.pos.z >= B.minZ - 1.2 && P.pos.z <= B.maxZ + 1.2);
-    const near = inside && (dx * dx + dz * dz) < VIS_R * VIS_R;
-    if (S.group && S.group.visible !== near) S.group.visible = near;
-    // THE WINDOW runs the opposite gate to the sales floor: it is meant to be
-    // seen THROUGH the storefront glass, so it draws when you are out on the
-    // pavement in front of this shop (or inside). Standing behind or beside the
-    // building shows you nothing — that is the wall-see-through bug this file
-    // already paid for once.
-    if (S.winGroup) {
-      const ox = P.pos.x - S.cs.dwx, oz = P.pos.z - S.cs.dwz;
-      const out = ox * -S.cs.inx + oz * -S.cs.inz;                 // metres out from the shopfront
-      const side = Math.abs(ox * S.cs.tx + oz * S.cs.tz);          // metres along it
-      const winVis = near || (out > 0.2 && out < WIN_R && side < S.cs.halfTan + 4);
-      if (S.winGroup.visible !== winVis) S.winGroup.visible = winVis;
+    for (const S of STORES) {
+      const live = S.island || cityOn;
+      if (!live) { if (S.group) S.group.visible = false; if (S.winGroup) S.winGroup.visible = false; S.near = false; continue; }
+      const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
+      if (!S.dressed && dx * dx + dz * dz < DRESS_R * DRESS_R && (CBZ.storeFixtureKit && CBZ.cityComposableSpec && econ())) dress(S);
+      // The racks may ONLY render when the player is actually INSIDE the store
+      // shell (plus a small doorway lip). r128's raycaster can't cull a hung
+      // garment behind opaque walls, so the merch was reading through the glass
+      // from the street ("White Trousers $80" floating outside). Gating on the
+      // walkable bounds — not a 55m radius — keeps every sample sealed in the room.
+      const inside = inStore(S, P.pos.x, P.pos.z, 1.2);
+      const near = inside && (dx * dx + dz * dz) < VIS_R * VIS_R;
+      if (S.group && S.group.visible !== near) S.group.visible = near;
+      // THE WINDOW runs the opposite gate to the sales floor: it is meant to be
+      // seen THROUGH the storefront glass, so it draws when you are out on the
+      // pavement in front of this shop (or inside). Standing behind or beside the
+      // building shows you nothing — that is the wall-see-through bug this file
+      // already paid for once.
+      if (S.winGroup) {
+        const ox = P.pos.x - S.cs.dwx, oz = P.pos.z - S.cs.dwz;
+        const out = ox * -S.cs.inx + oz * -S.cs.inz;                 // metres out from the shopfront
+        const side = Math.abs(ox * S.cs.tx + oz * S.cs.tz);          // metres along it
+        const winVis = near || (out > 0.2 && out < WIN_R && side < S.cs.halfTan + 4);
+        if (S.winGroup.visible !== winVis) S.winGroup.visible = winVis;
+      }
+      S.near = near;
+      if (UI.open && UI.store === S && (!near || g.state !== "playing" || P.dead || P.driving)) closePanel();
     }
-    S.near = near;
-    if (S.panelOpen && (!near || g.state !== "playing" || P.dead || P.driving)) closePanel();
+    // what is in your hands: out of the door with it is the clerk's business;
+    // dead, or the store gone, it simply drops
+    const H = HELD.store;
+    if (H) {
+      if (P.dead || STORES.indexOf(H) < 0) dropAll(false);
+      else if (!HELD.theft && HELD.items.length && !inStore(H, P.pos.x, P.pos.z, 0.6)) beginTheft(H);
+      else theftTick(dt);
+    }
   });
 
   // the wardrobe panel is modal: it owns every key while it is up
   addEventListener("keydown", function (e) {
-    if (!S.panelOpen) return;
+    if (!UI.open) return;
     e.preventDefault();
     if (e.stopImmediatePropagation) e.stopImmediatePropagation();
     e.stopPropagation();
@@ -982,29 +1270,42 @@
   // ---- public hooks (interact/shops feature-detect; harness drives) ----------
   // is the store live (for this lot)? interact.js hides the clerk's "Browse the
   // racks" verb when it is, so the in-world racks are the ONE way to shop here.
-  CBZ.cityClothingLive = function (lot) { return !!(S.built && S.lot && (!lot || lot === S.lot)); };
-  CBZ.cityClothingLot = function () { return (S.built && S.lot) || null; };
-  // headless/harness handle: buy/wear a named composable off the floor.
+  function storeOfLot(lot) { for (const S of STORES) if (S.built && S.lot && (!lot || S.lot === lot)) return S; return null; }
+  CBZ.cityClothingLive = function (lot) { return !!storeOfLot(lot); };
+  CBZ.cityClothingLot = function () { return (CITY.built && CITY.lot) || null; };
+  // what you are holding and haven't paid for (the HUD, a probe)
+  CBZ.clothingHeld = function () {
+    return { items: HELD.items.map(function (h) { return { name: h.name, label: h.label, price: h.price, tried: h.tried }; }),
+             total: heldTotal(), theft: !!HELD.theft, store: HELD.store ? (HELD.store.island ? "island" : "city") : null };
+  };
+  // headless/harness handle: take a named piece off the nearest dressed store's
+  // floor and pay for it at its counter (the same two verbs a player uses).
   CBZ.cityClothingBuy = function (labelOrName) {
-    if (!ensure()) return false;
-    dress();
-    let slot = S.slots.find((x) => x.kind === "item" && (x.name === labelOrName || x.label === labelOrName));
-    if (slot) { buyOrWear(slot.name, slot.visualId, slot.label); return true; }
-    if (S.tux && (S.tux.name === labelOrName || S.tux.label === labelOrName || labelOrName === "Tuxedo")) {
-      buyOrWear(S.tux.name, S.tux.visualId, "Tuxedo"); return true;
-    }
-    return false;
+    const P = CBZ.player;
+    let best = null, bd = 1e18;
+    if (CITY.built || ensureCity()) { /* the city store counts too */ }
+    for (const S of STORES) { const d = P ? Math.hypot(P.pos.x - S.cx, P.pos.z - S.cz) : 0; if (d < bd) { bd = d; best = S; } }
+    if (!best) return false;
+    dress(best);
+    let slot = best.slots.find((x) => x.kind === "item" && (x.name === labelOrName || x.label === labelOrName));
+    if (!slot && best.tux && (best.tux.name === labelOrName || best.tux.label === labelOrName || labelOrName === "Tuxedo"))
+      slot = { store: best, name: best.tux.name, visualId: best.tux.visualId, label: "Tuxedo" };
+    if (!slot) return false;
+    if (owned(slot)) { if (CBZ.cityWear) CBZ.cityWear(slot.visualId); return true; }
+    take(slot);
+    pay(best);
+    return true;
   };
   CBZ.cityClothingState = function () {
-    if (!S.built) return null;
-    dress();
+    if (!CITY.built) return null;
+    dress(CITY);
     return {
-      lot: !!S.lot,
-      items: S.slots.filter((s) => s.kind === "item").map((s) => ({
-        name: s.name, visualId: s.visualId, price: e_buy(s.name), drip: s.drip,
-        owned: !!(CBZ.cityOwnsItem && CBZ.cityOwnsItem(s.visualId)), mannequin: !!s.mannequin })),
-      tux: S.tux ? { name: S.tux.name, visualId: S.tux.visualId, price: e_buy(S.tux.name) } : null,
-      panelOpen: !!S.panelOpen,
+      lot: !!CITY.lot,
+      items: CITY.slots.filter((s) => s.kind === "item").map((s) => ({
+        name: s.name, visualId: s.visualId, price: priceOf(CITY, s.name), drip: s.drip,
+        owned: owned(s), mannequin: !!s.mannequin })),
+      tux: CITY.tux ? { name: CITY.tux.name, visualId: CITY.tux.visualId, price: priceOf(CITY, CITY.tux.name) } : null,
+      panelOpen: !!UI.open, held: CBZ.clothingHeld(),
     };
   };
   // EXPORT ONLY (a gate/probe calls this; nothing in the game does). What the
@@ -1012,9 +1313,10 @@
   // screenshot: display forms, the street window, how many hanging runs the
   // catalog got spread over, and the whole group's real mesh count — the last
   // one is the perf ceiling this file has to live under.
-  CBZ.cityClothingDressAudit = function () {
-    if (!S.built) return null;
-    dress();
+  CBZ.cityClothingDressAudit = function (which) {
+    const S = which === "island" ? STORES.find(function (x) { return x.island; }) : CITY;
+    if (!S || !S.built) return null;
+    dress(S);
     let meshes = 0, sprites = 0, winMeshes = 0;
     const count = function (o) { if (o.isMesh) meshes++; else if (o.isSprite) sprites++; };
     if (S.group) S.group.traverse(count);
@@ -1026,9 +1328,9 @@
       mannequins: (S._forms | 0) + (S._window | 0),
       runs: S._runs | 0, gondola: !!S._gondola, alcove: !!S._alcove,
       hangers: items.length - (S._forms | 0), // garments on a rail (vs on a form)
-      slots: S.slots.length, items: items.length,
+      slots: S.slots.length, items: items.length, till: !!S.till, tailor: !!S.tailor,
       meshes: meshes, winMeshes: winMeshes, sprites: sprites,
-      winVisible: !!(S.winGroup && S.winGroup.visible),
+      winVisible: !!(S.winGroup && S.winGroup.visible), stores: STORES.length,
     };
   };
 })();

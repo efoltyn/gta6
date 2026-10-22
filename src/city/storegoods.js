@@ -569,7 +569,8 @@
   function counterOf(b, F) {
     const s = CBZ.fitoutSiteOf ? CBZ.fitoutSiteOf(b) : null;
     const rec = s && s.floors && s.floors[0];
-    const K = rec && rec.info && rec.info.counter;
+    // an island shop (world/island_shops.js) stands its own counter and says where
+    const K = (rec && rec.info && rec.info.counter) || b.counterLocal || null;
     if (!K) return null;
     const cIn = F.d(K.x, K.z), cLat = F.l(K.x, K.z);
     const hIn = (F.along ? K.w : K.d) / 2, hLat = (F.along ? K.d : K.w) / 2;
@@ -582,10 +583,11 @@
 
   function planWalls(plan, prof, F, b, K) {
     const out = [];
-    const end = Math.min(2 * F.halfIn - 5.0, K ? K.cIn - K.hIn - 1.8 : 1e9);
+    const H = b.planHints || {};
+    const end = Math.min(2 * F.halfIn - (H.backKeep != null ? H.backKeep : 5.0), K ? K.cIn - K.hIn - 1.8 : 1e9);
     for (let si = 0; si < prof.walls.length; si++) {
       const s = prof.walls[si];
-      const L0 = prof.wallStart, n = Math.floor((end - L0) / BAY);
+      const L0 = H.wallStart != null ? H.wallStart : prof.wallStart, n = Math.floor((end - L0) / BAY);
       if (n < 1) continue;
       // test each bay: centre + both ends, with the unit's half-depth as pad
       const ok = [];
@@ -653,13 +655,38 @@
     return out;
   }
 
+  /* DISPLAY TABLES (an island optician's frames, a phone shop's handsets):
+     a waist-high table either side of the walk from the door to the till,
+     the real stock on its top facing the aisle. Only when the shop asks
+     (b.planHints.tables) and only where the floor is clear. */
+  const TABLE = { len: 1.6, wid: 0.8, top: 0.9 };
+  function planTables(plan, F, b, K) {
+    const n = (b.planHints && b.planHints.tables) | 0, out = [];
+    if (!n) return out;
+    const d0 = 2.2, d1 = K ? K.cIn - K.hIn - 1.2 : 2 * F.halfIn - 3;
+    if (d1 - d0 < TABLE.len) return out;
+    const dm = (d0 + d1) / 2;
+    const runEdge = F.Ti - (plan.runs.length ? WALL.deep + 1.1 : 0.9);
+    for (const s of [1, -1]) {
+      if (out.length >= n) break;
+      const c = s * Math.min(runEdge - TABLE.wid / 2, 1.5 + TABLE.wid / 2);
+      if (Math.abs(c) < 1.2 + TABLE.wid / 2) continue;
+      let ok = true;
+      for (let t = -TABLE.len / 2; t <= TABLE.len / 2 + 1e-6; t += TABLE.len / 2) if (!clearAt(b, F, dm + t, c, TABLE.wid / 2 + 0.1)) { ok = false; break; }
+      if (!ok) continue;
+      out.push({ c: c, d0: dm - TABLE.len / 2, d1: dm + TABLE.len / 2, fd: -s });
+    }
+    return out;
+  }
+
   function planLot(lot) {
     const e = econ(), b = lot && lot.building;
     if (!e || !b) return null;
     if (b.gunstore || b.jewelry) return null;                    // flagship walk-ins
     const kind = (b.shop && b.shop.kind) || lot.kind || "";
     if (SKIP[kind]) return null;
-    const stock = (e.stockFor(kind) || []).filter(function (n) { return !!e.ITEMS[n]; });
+    // (an island trade names its own: the chandlery's torches and first aid)
+    const stock = (b.stock || e.stockFor(kind) || []).filter(function (n) { return !!e.ITEMS[n]; });
     if (!stock.length) return null;
     if (typeof b.clearFloorPoint !== "function") return null;
     const F = frameOf(b);
@@ -693,7 +720,8 @@
 
     // ---- the runs, the lanes, and what takes a slice of them ----
     plan.runs = planWalls(plan, prof, F, b, K);
-    plan.lanes = planLanes(plan, prof, F, b, K);
+    plan.lanes = (b.planHints && b.planHints.lanes === 0) ? [] : planLanes(plan, prof, F, b, K);
+    plan.tables = planTables(plan, F, b, K);
     // the cooler takes the BACK bays of the first run on its preferred side
     if (prof.cooler && plan.runs.length) {
       const pref = plan.runs.filter(function (r) { return r.s === 1; }).concat(plan.runs.filter(function (r) { return r.s === -1; }));
@@ -735,6 +763,7 @@
     if (plan.cooler) R(plan.cooler.d0, plan.cooler.d1, plan.cooler.s * F.Ti, plan.cooler.s * (F.Ti - COOL.deep - 0.05), true);
     if (plan.coffee) R(plan.coffee.d0, plan.coffee.d1, plan.coffee.s * F.Ti, plan.coffee.s * (F.Ti - 0.7), true);
     for (const g of plan.lanes) R(g.d0, g.d1, g.c - GOND.half - 0.02, g.c + GOND.half + 0.02, false);
+    for (const t of plan.tables) R(t.d0, t.d1, t.c - TABLE.wid / 2, t.c + TABLE.wid / 2, false);
     if (b.group) RECTS.set(b.group, plan.rects);
 
     refreshWorld(plan);
@@ -774,6 +803,11 @@
         board(plan, { kind: "cap", lane: g, d: e < 0 ? g.d0 : g.d1, l: g.c, ax: "tan", len: 2 * GOND.half - 0.1, fd: e,
           sd: GOND.cap - 0.06, y: FY + lv, clr: clr, level: k });
       }
+    }
+    // the display tables: one board each, the top, facing the main aisle
+    for (const t of plan.tables || []) {
+      board(plan, { kind: "table", d: (t.d0 + t.d1) / 2, l: t.c + t.fd * (TABLE.wid / 2 - 0.04), ax: "in", len: TABLE.len - 0.12,
+        fd: t.fd, sd: TABLE.wid - 0.16, y: FY + TABLE.top, clr: 0.5, level: REAL_LEVEL });
     }
     // the cooler's shelves
     if (plan.cooler) {
@@ -858,7 +892,7 @@
     // everything else: a section of a wall bay at the 0.96 board, spread down
     // the runs (then the gondola top boards if the walls ran out)
     const rest = stock.filter(function (n) { return !used.has(n); });
-    const pool = eye.concat(gTop);
+    const pool = plan.boards.filter(function (bo) { return bo.kind === "table"; }).concat(eye, gTop);
     if (!pool.length) return;
     // sections: 0.72 m each, walking the boards front-to-back, alternating sides
     const sections = [];
@@ -990,8 +1024,12 @@
   if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
     const A = city || CBZ._settlementArena || (CBZ.city && CBZ.city.arena) || null;
     if (!A) return;
-    for (let i = PLANS.length - 1; i >= 0; i--) if (PLANS[i]._arena !== A) PLANS.splice(i, 1);
-    teardownAll();
+    for (let i = PLANS.length - 1; i >= 0; i--) {
+      if (PLANS[i]._island) continue;                     // an island shop is its island's
+      if (PLANS[i]._arena !== A) { teardownPlan(PLANS[i]); PLANS.splice(i, 1); }
+    }
+    for (let i = 0; i < PLANS.length; i++) if (!PLANS[i]._island) teardownPlan(PLANS[i]);
+    S.live = S.live.filter(function (p) { return p._island; });
     const lots = A.shopLots || A.lots || [];
     for (let i = 0; i < lots.length; i++) {
       const lot = lots[i];
@@ -1117,6 +1155,15 @@
       fbox(kit, F, "fix", C.d0 + 1.0, s * (F.Ti - 0.25), FY + 0.92, 0.26, 0.2, 0.1, 0x2a2d31);
       fbox(kit, F, "fix", C.d0 + 2.36, s * (F.Ti - 0.25), FY + 0.92, 0.18, 0.18, 0.12, COL.steel);
     }
+    // ---- display tables: a lacquered top on a plinth with a lit edge ----
+    for (const t of plan.tables || []) {
+      const dm = (t.d0 + t.d1) / 2, L = t.d1 - t.d0, W = TABLE.wid;
+      fbox(kit, F, "fix", dm, t.c, FY + 0.1, L - 0.3, W - 0.3, TABLE.top - 0.14, COL.black);               // plinth
+      fbox(kit, F, "fix", dm, t.c, FY, L - 0.24, W - 0.24, 0.1, COL.kick);                                  // kick
+      fbox(kit, F, "fix", dm, t.c, FY + TABLE.top - 0.04, L, W, 0.04, 0xeeeeea);                            // top
+      fbox(kit, F, "fix", dm, t.c, FY + TABLE.top - 0.075, L - 0.02, W - 0.02, 0.035, COL.steel);           // edge band
+      fbox(kit, F, "glow", dm, t.c + t.fd * (W / 2 - 0.15), FY + TABLE.top - 0.16, L - 0.36, 0.01, 0.02, 0xf3f8fa);   // under-lip light
+    }
     // ---- the hot food warmer on the counter ----
     if (plan.warmer) {
       const Wm = plan.warmer, y = Wm.top, wl = Wm.l, wd = Wm.d;
@@ -1155,6 +1202,7 @@
     for (const g of plan.lanes) add(g.d0, g.d1, g.c - GOND.half, g.c + GOND.half, GOND.h);
     if (plan.cooler) add(plan.cooler.d0, plan.cooler.d1, plan.cooler.s * F.Ti, plan.cooler.s * (F.Ti - COOL.deep), COOL.h);
     if (plan.coffee) add(plan.coffee.d0, plan.coffee.d1, plan.coffee.s * F.Ti, plan.coffee.s * (F.Ti - 0.64), 0.92);
+    for (const t of plan.tables || []) add(t.d0, t.d1, t.c - TABLE.wid / 2, t.c + TABLE.wid / 2, TABLE.top);
     return cols;
   }
 
@@ -1330,7 +1378,11 @@
     const g = CBZ.game;
     // (the islands: their shelves come through CBZ.islandVenue; Gang City's
     //  shelves stand only in Gang City)
-    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city") || !(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) { if (S.live.length) teardownAll(); return; }
+    // Gang City's shelves stand only in Gang City; an island's (mounted by
+    // world/island_shops.js through CBZ.storeGoodsMount) wherever money is real
+    const econ = !!g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city");
+    const cityOn = econ && (CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"));
+    if (!econ) { if (S.live.length) teardownAll(); return; }
     if (!PLANS.length) return;
     if (S.live.length) {
       const night = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
@@ -1346,6 +1398,7 @@
     const near = [];
     for (let i = 0; i < PLANS.length; i++) {
       const p = PLANS[i];
+      if (!p._island && !cityOn) continue;
       const d = Math.hypot(p.cx - px, p.cz - pz);
       if (d <= LIVE_R) near.push([d, p]);
     }
@@ -1375,6 +1428,33 @@
     }
     S.live = want;
   });
+
+  /* ---- AN ISLAND SHOP'S SHELVES ---------------------------------------------
+     CBZ.storeGoodsMount(lot) -> { plan, dispose } | null
+       lot: { kind, cx, cz, building: { shop: { kind }, localDoor {nx, nz} (the
+       INWARD normal, building-local), w, d, wt, floorTops (local), group,
+       clearFloorPoint(lx, lz, pad), counterLocal {x, z, w, d}, planHints
+       { wallStart, backKeep, tables, lanes }, vendor (the clerk who watches) } }
+       The same plan, fixtures, goods and verbs as a Gang City store, stood
+       and torn down by the same tick; dispose takes it out for good (its
+       island leaving). */
+  CBZ.storeGoodsMount = function (lot) {
+    if (!lot || !lot.building || !lot.building.group) return null;
+    let p = null;
+    try { p = planLot(lot); } catch (err) { console.error("[storegoods island]", err); p = null; }
+    if (!p) return null;
+    p._island = true;
+    PLANS.push(p);
+    return {
+      plan: p,
+      dispose: function () {
+        teardownPlan(p);
+        const i = PLANS.indexOf(p); if (i >= 0) PLANS.splice(i, 1);
+        const k = S.live.indexOf(p); if (k >= 0) S.live.splice(k, 1);
+        BY_LOT.delete(lot);
+      },
+    };
+  };
 
   /* ============================================================
      4. THE VERBS — one zone, every store in the city
