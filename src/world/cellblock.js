@@ -2638,7 +2638,8 @@
   }
   // nothing in the brain wants him anywhere: the only state a man lounges in
   function calm(n) {
-    return !(n.ko > 0) && !n.intimidMode && !(n.huntPlayer > 0) && !n.approach && !n.rage
+    return !(n.ko > 0) && !n.intimidMode && !(n.huntPlayer > 0) && !n._demand && !n.rage
+
       && (!n.aiState || n.aiState === "wander");
   }
   /* His wander box follows the door — the room while it is shut, the aisle

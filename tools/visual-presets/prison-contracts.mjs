@@ -102,7 +102,7 @@ export default {
     noteChars: { label: "Card note line", unit: "chars", better: "higher" },
   },
   metricsNote:
-    "contractRow counts COLLECT/SETTLE/WORK and the accept-row of a contract or debtorDodge approach. " +
+    "contractRow counts the COLLECT / SETTLE / WORK / TAKE verbs on the man. " +
     "spokenChars reads the live over-head lines (CBZ.speech.audit()), so a beat that " +
     "nobody speaks scores zero by construction, which is the point.",
 
@@ -181,35 +181,22 @@ export default {
       for (const n of CBZ.npcs || []) {
         if (!n) continue;
         n._tabs = null;
-        n.standingOffer = null;
-        n.approachCD = 0;
         n.playerGrudge = 0; n.playerFear = 0; n.huntPlayer = 0;
-        if (n.approach && CBZ.clearNpcApproach) CBZ.clearNpcApproach(n);
-        else n.approach = null;
-        if (n.aiState === "approachPlayer" || n.aiState === "fight") { n.aiState = "wander"; n.foe = null; }
+        if (CBZ.prisonDemand) CBZ.prisonDemand.cancel(n);
+        if (n.aiState === "fight") { n.aiState = "wander"; n.foe = null; }
       }
       CBZ.game.cigs = 20;
       if (CBZ.el && CBZ.el.cigText) CBZ.el.cigText.textContent = 20;
     };
 
-    /* NOBODY ELSE TALKS DURING THE SHOT. ai.js allows exactly one live
-       approach in the prison at a time (playerApproachBusy), which is right —
-       and it ate the first cornering run: while the player walked the six
-       metres to Dice, a passing inmate opened a stash-cover pitch, so the
-       corner never fired and the picture was of somebody else's sales patter.
-       That interruption is real behaviour and stays in the game; it just isn't
-       what this pair is a claim about. */
+    /* NOBODY ELSE COLLECTS DURING THE SHOT. A crew demand (ai.js
+       CBZ.prisonDemand) is real behaviour; it just isn't what this pair is a
+       claim about. */
     const hushOthers = (except) => {
       for (const n of CBZ.npcs || []) {
         if (!n || n === except) continue;
-        if (n.approach && CBZ.clearNpcApproach) CBZ.clearNpcApproach(n);
-        else n.approach = null;
-        n.standingOffer = null;
-        n.approachCD = 60;
-        if (n.aiState === "approachPlayer") { n.aiState = "wander"; n.aiTimer = 0.2; }
+        if (CBZ.prisonDemand) CBZ.prisonDemand.cancel(n);
       }
-      for (const g of CBZ.guards || []) if (g && g.approach) g.approach = null;
-      if (except) except.approachCD = 0;
     };
 
     const creditor = byName("Mack") || byName("Red Hook");
@@ -274,21 +261,10 @@ export default {
 
     if (id === "workoff") {
       /* THE DEEP CUT: your own tab turning into somebody else's collection.
-         Staged the way it actually happens — you are broke, the Reds' book has
-         you down for more than you are carrying, and the collector who walks
-         over has a crew claim to send you after instead of a beating.
-
-         The tab is seeded on RED HOOK, not on Mack: a man holding his own ripe
-         claim pitches a CONTRACT (that is the first beat of this preset), so
-         to reach the work-it-off leg the claim has to belong to the crew and
-         not to the collector. That is the "Dice owes us too" line, literally.
-
-         And the pitch is an ARRIVAL: the player waits eight metres out until
-         Mack decides to come over, because interact.js only speaks an
-         approach's long pitch when the focused actor CHANGES (autoListen). A
-         demand raised while you are already stood at the card is silent — a
-         real gap, pre-existing, and one the contract offers route around by
-         speaking for themselves (ai.js's offerContract). */
+         You are broke, the Reds' book has you down for more than you are
+         carrying, and the collector who comes over (a real debt: ai.js's
+         demand ladder) has a crew claim to send you after: WORK on him.
+         The tab is seeded on RED HOOK, the crew's, so it is "Dice owes us too". */
       const crew = byName("Red Hook") ||
         (CBZ.npcs || []).find((n) => n !== creditor && n.gang === creditor.gang && n !== debtor);
       if (on && crew) CT.seed(crew, debtor, { amt: 7, why: "the domino game" });
@@ -296,61 +272,12 @@ export default {
       if (CBZ.el && CBZ.el.cigText) CBZ.el.cigText.textContent = 3;
       if (CBZ.game.gangProtection) CBZ.game.gangProtection[creditor.gang] = 0;
       if (CBZ.addGangDebt) CBZ.addGangDebt(creditor.gang, 22);
-      const ap = posOf(creditor);
-      /* WAITING FOR A DIE TO COME UP NEEDS THE WORLD HELD STILL. The first run
-         of this beat stood eight metres out for thirty sim-seconds and came
-         back with a photograph of a GUARD shouting "You're mine, inmate!" —
-         detection had climbed the whole time, a thief had emptied the pockets
-         the demand is priced against, and Mack had rolled a turf job and
-         parked it as a standing offer, which then blocked every later roll.
-         So each iteration re-pins the four things the debt-collect branch in
-         ai.js actually reads (distance, cigs, debt, no other business). */
-      for (let i = 0; i < 220; i++) {
-        P.pos.set(ap.x + 8, ap.y, ap.z);
-        if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
-        CBZ.game.detection = 0; CBZ.game.wanted = 0; CBZ.game.gangJob = null;
-        CBZ.game.cigs = 3;
-        if (CBZ.el && CBZ.el.cigText) CBZ.el.cigText.textContent = 3;
-        if (CBZ.game.gangProtection) CBZ.game.gangProtection[creditor.gang] = 0;
-        if (CBZ.gangDebt && CBZ.gangDebt(creditor.gang) < 20 && CBZ.addGangDebt) {
-          CBZ.addGangDebt(creditor.gang, 22 - CBZ.gangDebt(creditor.gang));
-        }
-        hushOthers(creditor);
-        creditor.standingOffer = null;
-        // A collector needs a REASON to come over, and ai.js's readiest one is
-        // having heard the block talking about your tab. rememberBlockRead is
-        // the same call gossip makes; without it this beat is a bare 2-7% die
-        // per tick and one frame of the full run rolled 27 sim-seconds of
-        // nothing and photographed his market stall instead.
-        if (CBZ.rememberBlockRead) CBZ.rememberBlockRead(creditor, "debt", 90, "gossip");
-        /* HOLD OUT FOR THE OFFER WE CAME TO PHOTOGRAPH. Breaking on any
-           debtCollect was not enough: one frame of the full run caught a
-           collection demand raised in a tick where the work-it-off gate had
-           not yet resolved, and the pair printed as no-change. So a demand
-           without the WORK leg on it is discarded and he is asked again. */
-        const ap2 = creditor.approach;
-        if (ap2 && (ap2.kind !== "debtCollect" || !ap2.workOff)) {
-          if (CBZ.clearNpcApproach) CBZ.clearNpcApproach(creditor); else creditor.approach = null;
-          creditor.standingOffer = null;
-          creditor.approachCD = 0;
-        }
-        step(0.3);
-        if (creditor.approach && creditor.approach.kind === "debtCollect" &&
-            (creditor.approach.workOff || !on)) break;
-      }
-      /* HEAR THE LONG VERSION. A collector who has already reached you has
-         `greeted` set (ai.js's approachPlayer greet block), and interact.js
-         skips autoListen on a greeted approach — so the four-clause answer,
-         the one that names the man who owes the crew, is only reachable by
-         walking up to him mid-jog or returning to a standing offer. Both are
-         real; clearing the flag here reproduces exactly that arrival rather
-         than inventing anything. His SHORT opener now carries the offer too
-         (approachText's debtCollect branch), which is the fix for the players
-         who never hit that window. */
-      if (creditor.approach) creditor.approach.greeted = false;
+      CBZ.game.detection = 0; CBZ.game.wanted = 0; CBZ.game.gangJob = null;
+      hushOthers(creditor);
       standAt(creditor);
+      if (CBZ.prisonDemand) CBZ.prisonDemand.begin(creditor, "debt", { gang: creditor.gang, cost: 8 });
       clearRoom(creditor);
-      step(0.25);                     // card opens → autoListen speaks his demand
+      step(0.5);                      // he says it; Pay / Work on him
     } else if (id === "creditor-pitch") {
       hushOthers(creditor);
       standAt(creditor);
@@ -363,10 +290,7 @@ export default {
       hushOthers(creditor);
       standAt(creditor);
       step(0.4);
-      if (on) {
-        live = CT.offer(creditor, null, "collect");
-        if (live && CBZ.resolveNpcApproach) CBZ.resolveNpcApproach(creditor, "accept");
-      }
+      if (on) live = CT.offer(creditor, null, "collect");     // COLLECT pressed: the job is yours
       step(0.3);
       /* NOW GO AND FIND HIM — and KEEP finding him.
          Dice is the fastest body in the yard (speed 2.75) and he does not
@@ -379,7 +303,7 @@ export default {
         hushOthers(debtor);
         standAt(debtor);
         step(0.2);
-        if (debtor.approach && debtor.approach.kind === "debtorDodge") break;
+        if (CT && CT.live() && CT.live().dodged) break;
       }
       standAt(debtor);
       clearRoom(debtor);
@@ -391,7 +315,6 @@ export default {
       step(0.4);
       if (on) {
         live = CT.offer(creditor, null, "collect");
-        if (live && CBZ.resolveNpcApproach) CBZ.resolveNpcApproach(creditor, "accept");
         const c = CT.live();
         if (c) {
           // what a pickpocket / gunpoint rob / his own partial would have
@@ -402,9 +325,6 @@ export default {
         }
       }
       hushOthers(creditor);
-      // and he stays quiet about his OWN business — without this he opens a
-      // stash-cover pitch on both sides and the settle row never gets a card
-      creditor.approachCD = 90;
       standAt(creditor);
       clearRoom(creditor);
       step(0.3);
@@ -447,15 +367,13 @@ export default {
       (n) => n && n.data && n.data.name &&
         n.data.name.replace(/^the |^a |^an /, "").toUpperCase() === cardName
     );
-    const shownKind = shown && shown.approach ? shown.approach.kind : "";
+    const shownKind = shown && CBZ.prisonDemand && CBZ.prisonDemand.of(shown) ? "demand" : "";
     /* NO CLOSING WORD BOUNDARY. The tablet rail concatenates the one-word
        label and its chip with no separator — "SETTLE9 of 9", "WORKoff the
        tab" — so /\bsettle\b/ scored 0 on frames whose pixels plainly show the
        button. Match the label as a PREFIX, which is what it is. */
     const rowWords = rowsText.join(" ").toLowerCase();
-    const contractRow =
-      (/\b(collect|settle|work)/.test(rowWords) ||
-        shownKind === "contract" || shownKind === "debtorDodge") ? 1 : 0;
+    const contractRow = /\b(collect|settle|work|take)/.test(rowWords) ? 1 : 0;
     const screen = (rowWords + " " + sayLine + " " + noteText).toLowerCase();
     const debtorName = (debtor.data.name || "").replace(/^the |^a |^an /, "").toLowerCase();
     const namesTarget = debtorName && screen.indexOf(debtorName) >= 0 ? 1 : 0;
@@ -469,8 +387,9 @@ export default {
       creditor: creditor.data.name,
       debtor: debtor.data.name,
       job: live ? `${live.kind} ${live.amt} (${live.why})` : "",
-      pitch: creditor.approach ? creditor.approach.kind : "",
-      workLeg: !!(creditor.approach && creditor.approach.workOff),
+      demand: shownKind,
+      workLeg: !!(CBZ.prisonDemand && CBZ.prisonDemand.canWorkOff(creditor)),
+
       gangDebt: CBZ.gangDebt ? CBZ.gangDebt(creditor.gang) : null,
       cigs: CBZ.game.cigs,
       audit: CT && CT.audit ? CT.audit() : null,

@@ -343,7 +343,7 @@
   function freeScrew(gd) {
     // the warden never runs the ladder himself: he orders an officer to (prisonwarden.js)
     return !!(gd && gd.group && gd.kind !== "warden" && !gd.dead && !(gd.ko > 0) && !gd.asleep && !(gd.bribed > 0) && !gd.tied &&
-      !gd._escort && gd.intimidMode !== "scared" && !gd.approach && !(gd.hunt > 0) && !gd._yardCase && !(gd.pause > 0));
+      !gd._escort && gd.intimidMode !== "scared" && !(gd.hunt > 0) && !gd._yardCase && !(gd.pause > 0));
   }
   // begin a case: officer -> inmate. The authority record lives on gd._brain.case.
   function beginCase(gd, n, reason) {
@@ -486,7 +486,8 @@
     const V = CBZ.vitals;
     return !!(m && m.group && !m.dead && !(m.ko > 0) && !m.escaped && !isStaff(m) && !m._medicFor &&
       m.aiState !== "fight" && !m.foe && !((m.huntPlayer || 0) > 0) && !m.cuffed && !m._lawBy &&
-      !((m._routT || 0) > 0) && !m.approach && !m._propSeat && !m._propLie && V.state(m) === "ok" && !V.bleeding(m));
+      !((m._routT || 0) > 0) && !m._demand && !m._propSeat
+ && !m._propLie && V.state(m) === "ok" && !V.bleeding(m));
   }
   function carriesRoll(m) {
     if (isMedic(m)) return true;

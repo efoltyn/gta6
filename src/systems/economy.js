@@ -10,34 +10,7 @@
   "use strict";
   const CBZ = window.CBZ;
   const g = CBZ.game;
-
-  /* ==========================================================================
-     PRISON_PHONE_BRIDGE — WHAT CIGARETTES CANNOT BUY
-
-     Cigarettes are this game's one currency and they stay that way. But a
-     corrections officer does not end his career for tobacco. Every real staff
-     corruption case runs the same way: the inmate's PEOPLE pay the officer's
-     PEOPLE — a payment app, cash to a wife, a money order to a sister — and
-     the yard currency only ever buys the bottom rung: a moment of blindness, a
-     soft count, a look the other way. Those stay priced in smokes (bribe()).
-
-     So the split this flag draws is not a second wallet. It is a CAPABILITY:
-     the deep services — burying paperwork, buying a racket's protection,
-     killing a statement, buying a name off the log — require that you can
-     REACH THE STREET at all. That is the Burner Phone, an item the game
-     already sells, already rolls onto dealers and bent officers, and never
-     had a job. Now it has the only job worth having.
-
-     The cigarettes still leave your pocket at the same magnitude. They stand
-     for what your people sent his people; the officer says so out loud the
-     first time, once, and then the game shuts up about it.
-
-     ?cfg_PRISON_PHONE_BRIDGE=0 → exactly the behaviour that shipped: cigs buy
-     everything, no rental, no gate, and the strings below revert to theirs.
-     ========================================================================== */
   CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PRISON_PHONE_BRIDGE == null) CBZ.CONFIG.PRISON_PHONE_BRIDGE = true;
-  function phoneBridge() { return !CBZ.CONFIG || CBZ.CONFIG.PRISON_PHONE_BRIDGE !== false; }
 
   // contraband you can buy / sell / LOOT. value = cigarettes.
   // `tag` groups stock (goods/drugs are shop pools; valuables/tools are
@@ -57,15 +30,6 @@
     "Tattoo Gun":      { value: 14, tag: "goods",     rarity: "uncommon" },
     "Cigarette Carton":{ value: 22, tag: "goods",     rarity: "uncommon" },
     Ramen:             { value: 30, tag: "goods",     rarity: "rare" }, // top-shelf prison currency
-    /* --- services (bought, never carried) ---------------------------------
-       A REAL PHONE IS RENTED IN SHIFTS. Owning one outright is rare and worth
-       18; ten minutes on somebody else's is what most men in a yard actually
-       buy, which is why this row is a SERVICE and not an item: nothing lands
-       in your bag, a WINDOW opens (g.phoneTimeT) and one deep transaction
-       spends it. `tag:"service"` keeps it out of SELLABLE/DRUGS/VALUABLES, so
-       no loot table, no gift roll and no drop can ever mint it — pickOffer()
-       below is the only door it comes through. */
-    "Phone Time":      { value: 8,  tag: "service",   rarity: "common", service: true },
     // --- drugs (dealer stock + loot) ---
     Pills:             { value: 14, tag: "drugs",     rarity: "uncommon" },
     Powder:            { value: 22, tag: "drugs",     rarity: "rare" },
@@ -132,23 +96,14 @@
   const SELLABLE = Object.keys(ITEMS).filter((k) => ITEMS[k].tag === "goods");
   const DRUGS = Object.keys(ITEMS).filter((k) => ITEMS[k].tag === "drugs");
   const VALUABLES = Object.keys(ITEMS).filter((k) => ITEMS[k].tag === "valuables");
-  const SERVICES = Object.keys(ITEMS).filter((k) => ITEMS[k].tag === "service");
   // the infirmary's shelf: what Doc Mercer sells (pool "med")
   const MED = ["Bandage", "Bandage", "Painkillers"];
-  function isService(name) { return !!(ITEMS[name] && ITEMS[name].service); }
 
   // pick a fresh offer from a given stock pool ("goods" | "drugs" | "fenced")
   function pickOffer(pool) {
     let list = SELLABLE;
     if (pool === "drugs") list = DRUGS;
     else if (pool === "med") list = MED;
-    /* THE TWO MEN WITH AN OUTSIDE LINE SELL MINUTES ON IT. A dealer's whole
-       trade already runs through a phone and a fence's does too — they are the
-       people a yard rents a handset from. The old-timer's goods stall does
-       not: he sells things you can hold. Guarded by the flag FIRST so that
-       with PRISON_PHONE_BRIDGE off this branch never even draws from rng()
-       and the stock stream is bit-for-bit what it always was. */
-    if (phoneBridge() && SERVICES.length && (pool === "drugs" || pool === "fenced") && rng() < 0.18) list = SERVICES;
     const item = list[Math.floor(rng() * list.length)];
     const base = ITEMS[item].value;
     const markup = pool === "fenced" ? -2 : Math.floor(rng() * 4); // thieves fence cheap
@@ -439,11 +394,7 @@
       }
     }
   }
-  function hurryApproach(actor, seconds) {
-    if (!actor || actor.approach || actor.dead || (actor.ko || 0) > 0 || actor.escaped) return;
-    if (actor.aiState === "fight" || actor.aiState === "snitch" || actor.huntPlayer > 0) return;
-    actor.approachCD = Math.min(actor.approachCD || seconds, seconds);
-  }
+  // what the block heard about you moves how this man feels about you
   function reactToRead(actor, kind, strength) {
     const p = actor.personality || {};
     const sameCrew = playerSameGang(actor);
@@ -458,32 +409,20 @@
       const predator = actor.role === "thief" || actor.role === "dealer" || rivalCrew || (actor.gang >= 0 && !sameCrew && !protectedHere && standing < 8);
       if ((predator || greedy) && bold) {
         actor.playerGrudge = Math.min(14, (actor.playerGrudge || 0) + Math.min(0.45, strength * 0.018));
-        hurryApproach(actor, 0.8 + rng() * 2.8);
       } else if ((sameCrew || protectedHere || standing > 24) && loyal) {
         actor.playerTrust = Math.min(14, (actor.playerTrust || 0) + Math.min(0.35, strength * 0.014));
-        hurryApproach(actor, 2.2 + rng() * 3.2);
       }
     } else if (kind === "badge" && strength > 9) {
-      if (actor.gang >= 0) {
-        actor.playerGrudge = Math.min(14, (actor.playerGrudge || 0) + Math.min(0.35, strength * 0.012));
-        if (!sameCrew || standing < 18 || greedy) hurryApproach(actor, 1.4 + rng() * 3.2);
-      } else if (actor.role === "dealer" || actor.role === "thief" || (p.snitch || 0.5) > 0.62) {
-        hurryApproach(actor, 2.0 + rng() * 3.5);
-      }
+      if (actor.gang >= 0) actor.playerGrudge = Math.min(14, (actor.playerGrudge || 0) + Math.min(0.35, strength * 0.012));
     } else if ((kind === "snitch" || kind === "heat") && strength > 9) {
       if (sameCrew || protectedHere || standing > 24 || (actor.playerTrust || 0) > 4) {
         actor.playerTrust = Math.min(14, (actor.playerTrust || 0) + Math.min(0.30, strength * 0.012));
-        hurryApproach(actor, 1.2 + rng() * 3.0);
       } else if (rivalCrew || (p.snitch || 0.5) > 0.58 || (actor.playerGrudge || 0) > 5) {
         actor.playerGrudge = Math.min(14, (actor.playerGrudge || 0) + Math.min(0.40, strength * 0.015));
-        hurryApproach(actor, 1.6 + rng() * 3.0);
       }
     } else if (kind === "debt" && strength > 8 && actor.gang >= 0) {
       if (!sameCrew && !protectedHere && (standing < 12 || greedy)) {
         actor.playerGrudge = Math.min(14, (actor.playerGrudge || 0) + Math.min(0.38, strength * 0.014));
-        hurryApproach(actor, 1.1 + rng() * 2.7);
-      } else if ((sameCrew || protectedHere) && loyal) {
-        hurryApproach(actor, 2.4 + rng() * 3.0);
       }
     }
   }
@@ -638,12 +577,8 @@
     guardClean: ["Try that again, you're in the hole.",
                  "Put that away. Walk.",
                  "Wrong officer."],
-    /* THE SECOND TIME HE TURNS YOU DOWN. PHONE_TEACH is the once-only version
-       and it is a paragraph because it is teaching; these are what a man says
-       when he has already explained himself and you came back anyway. */
-    guardNoPhone: ["Not smokes. A number I can call.",
-                   "No phone, no business. Walk.",
-                   "Get me a number."],
+    // a bent one with no reason to do you a favour
+    guardNo: ["No.", "Walk."],
     guardPaid: ["I'm on my break.",
                 "Never saw you.",
                 "Ten minutes. Go."],
@@ -747,62 +682,6 @@
   };
   function whyLine(reasons) { return (reasons && reasons.length && WHY[reasons[0]]) || ""; }
 
-  /* ==========================================================================
-     THE BRIDGE — CAN YOU REACH THE STREET?
-
-     hasPhoneAccess() is the whole of it. A Burner Phone in the bag is a line
-     out you own; PHONE TIME is a line out you rented, and it is a WINDOW
-     rather than an item because that is what renting a handset in a prison
-     actually is — ninety seconds of somebody standing over you while you make
-     your call. One deep transaction spends it (consumePhoneTime), the same
-     way one call spends the shift you paid for.
-
-     phoneGate(actor) is the ONE gate. It returns a refusal or null, so no
-     caller anywhere has to know the flag exists, re-derive the rule, or
-     invent its own words for the no — entities/guards.js calls exactly this.
-     The refusal TEACHES, once per officer: the first time a given man turns
-     you down he explains WHY tobacco is not the instrument, and after that he
-     is a man who has already said his piece and gives you the short version.
-     ========================================================================== */
-  const PHONE_TIME_SECS = 90;
-  // He says the terms in his own mouth: what the money is, and where it goes.
-  const PHONE_TERMS = "Not smokes. Send it to my sister.";
-  // Once per officer. Long, because it is the only time the game explains it.
-  const PHONE_TEACH = "What am I doing with cigarettes?";
-  function hasPhoneAccess() { return hasItem("Burner Phone") || (g.phoneTimeT || 0) > 0; }
-  function phoneTerms() { return phoneBridge() ? PHONE_TERMS : ""; }
-  function grantPhoneTime(secs) {
-    g.phoneTimeT = Math.max(g.phoneTimeT || 0, secs || PHONE_TIME_SECS);
-    return g.phoneTimeT;
-  }
-  /* A RENTED SHIFT IS SPENT BY THE CALL, NOT BY THE CLOCK ALONE. A phone you
-     OWN is not consumed — that is the entire difference between the 18-cig
-     item and the 8-cig service, and it is what makes owning one worth it. */
-  function consumePhoneTime() {
-    if (hasItem("Burner Phone") || (g.phoneTimeT || 0) <= 0) return false;
-    g.phoneTimeT = 0;
-    return true;
-  }
-  function phoneGate(actor) {
-    if (!phoneBridge() || hasPhoneAccess()) return null;
-    const said = (actor && actor._saidNoPhone) || 0;
-    if (actor) actor._saidNoPhone = said + 1;
-    return { ok: false, phone: "none", msg: said ? pick(VOICE.guardNoPhone) : PHONE_TEACH };
-  }
-  /* THE HONEST LINE, ONCE A RUN. The cigarette counter dropped, because that
-     is the magnitude of the favour — but tobacco is not what the officer was
-     paid in, and the very first deep transaction of a run says so out of his
-     own mouth before going on to its own business. A CLAUSE rather than a
-     whole line so that whichever verb gets there first (a payoff at the till,
-     a racket cut, a bought statement, a name off the log) can wear it in
-     front of the words that carry the actual result. Empty every time after,
-     and empty always with the flag off. */
-  function outsidePaidLine() {
-    if (!phoneBridge() || g._phoneBridgeSaid) return "";
-    g._phoneBridgeSaid = 1;
-    return "Sister got it.";
-  }
-  function outsidePaidPrefix() { const s = outsidePaidLine(); return s ? s + " " : ""; }
 
   // ---------- TRADE: buy the actor's current offer for cigarettes ----------
   function trade(actor) {
@@ -827,13 +706,7 @@
       return { ok: false, msg: `${price} for the ${offer.item}. You're short.` };
     }
     addCigs(-price);
-    /* A SERVICE IS NOT A THING YOU CARRY. Phone Time buys a WINDOW, so it
-       skips the bag, skips the pickup feed (nothing landed in it) and skips
-       isRare's flourish — what you actually got is ninety seconds of being
-       able to reach the street, and the only report on it is the man's own
-       terms as he hands the handset over. */
-    const service = isService(offer.item);
-    if (service) grantPhoneTime(); else addItem(offer.item, 1);
+    addItem(offer.item, 1);
     g.trades++;
     const seller = nm(actor);
     noteRead("wealth", Math.min(11, 2 + price * 0.18), seller, 12);
@@ -861,36 +734,12 @@
     if (actor.corrupt || guardish) addLoyalty(actor, 2);
     // The thing you bought lands where every other thing you pick up lands.
     // The seller SPEAKS; the transaction is shown, not narrated.
-    if (!service && CBZ.pickupNote) CBZ.pickupNote(offer.item, { rare: isRare(offer.item) });
-    // HE HANDS IT OVER WITH THE TERMS ON IT. A rented phone is the one thing
-    // in this shop the seller does not let out of his sight, and saying so is
-    // the whole difference between buying a handset and buying a shift on one.
-    if (service) return { ok: true, msg: "Ten minutes. It stays where I can see it." };
+    if (CBZ.pickupNote) CBZ.pickupNote(offer.item, { rare: isRare(offer.item) });
     // ...and he names it on the way out too, so the sale reads as a sale and
     // not as a number leaving your pocket. The discount/markup reason, when
     // he has one, is the second half — his voice, not a spreadsheet row.
     const why = whyLine(priced.reasons);
     return { ok: true, msg: why ? `${offer.item}, ${price}. ${why}` : `${offer.item}, ${price}.` };
-  }
-
-  /* A MAN YOU HAVE ALREADY PAID IS CHEAPER, AND HE STAYS CHEAPER.
-     Published because systems/interact.js prints this number on the button
-     ("Slip 10 to look away") — a price the menu computes separately from the
-     till is a price that lies the moment loyalty moves it. One function. */
-  function bribeCost(actor) {
-    if (!actor) return 10;
-    // Under the bridge doctrine no officer takes cigarettes AT ALL (see
-    // bribe()), so there is no cig price to print — the chip shows 0 and the
-    // transaction runs on loyalty or a name. Flag off restores the old till.
-    if (phoneBridge()) return 0;
-    // GUARDS ONLY — the warden refuses cigarettes outright (see bribe()), so
-    // he has no bribe price to print anywhere.
-    const base = actor.corrupt ? 5 : 10;                  // bent officers come cheap
-    const l = loyaltyOf(actor);
-    // up to 40% off a standing arrangement; a count makes everything dearer
-    let cost = Math.round(base * (1 - Math.min(0.40, l / 250)));
-    if (counting()) cost += 4;
-    return Math.max(2, cost);
   }
 
   /* ---------- BRIBE: make a guard look away ----------
@@ -903,7 +752,7 @@
      SUPPLIERS, cartons in at $16, packs out at 500% markup. The bent man is
      not a customer. He is the mint.)
 
-     So under PRISON_PHONE_BRIDGE the bottom rung is SOCIAL, the way it
+     So the bottom rung is SOCIAL, the way it
      really is. Three ways a moment of blindness happens, none of them a
      payment in goods:
        · a NAME — you hold a snitch's name (n.snitchKnown, the same knowledge
@@ -913,7 +762,7 @@
          shelf and feeding him names) gets the favour free, and SPENDS a
          little goodwill each time, so the arrangement needs upkeep.
        · nothing else. A clean officer refuses, remembers, and the attempt
-         itself is heat. Flag off = the old cigs-for-blindness till. */
+         itself is heat. */
   function bribe(actor) {
     /* THE WARDEN IS NOT FOR SALE IN CIGARETTES (owner, 2026-08-19: "he should
        not accept cigs... he legit acted like an inmate"). He used to take 25
@@ -931,74 +780,46 @@
       // clipboard and a supervisor; nothing turns him round right now.
       if (counting() && !bought(actor)) return { ok: false, msg: pick(VOICE.guardBusy) };
       const who = nm(actor);
-      if (phoneBridge()) {
-        if (!actor.corrupt) {
-          // A CLEAN OFFICER REFUSES AND REMEMBERS. The offer itself is the
-          // mistake: he files your face, and the wing gets a little warmer.
-          actor.alert = Math.max(actor.alert || 0, 0.6);
-          addLoyalty(actor, -4);
-          if (CBZ.addHeat) CBZ.addHeat(3);
-          noteRead("heat", 5, who, 12);
-          return { ok: false, msg: pick(VOICE.guardClean) };
-        }
-        // A NAME BUYS A MOMENT. The one thing an inmate holds that a uniform
-        // can use — and handing it over is quiet business at the bars.
-        let known = null;
-        for (const n of CBZ.npcs || []) {
-          if (n && !n.dead && !n.escaped && n.snitchKnown && !n._nameSold) { known = n; break; }
-        }
-        if (known) {
-          known._nameSold = true;   // the racket has him now; the name spends once
-          // the racket leans on its new asset: his reporting cools, and the
-          // arrangement notices you fed it
-          known.reportedPlayerT = Math.max(0, (known.reportedPlayerT || 0) * 0.4);
-          addLoyalty(actor, 12);
-          actor.bribed = Math.round(12 * (1 + loyaltyOf(actor) / 160));
-          actor.alert = 0;
-          if (CBZ.addRacketStanding) CBZ.addRacketStanding(2);
-          noteRead("badge", 6, who, 13);
-          CBZ.sfx("coin");
-          return { ok: true, msg: `${nm(known)}? Good. Go.` };
-        }
-        if (bought(actor)) {
-          // A RELATIONSHIP FAVOUR. Free at the point of use, and it draws the
-          // account down — the arrangement wants feeding (his shelf, a name).
-          addLoyalty(actor, -4);
-          actor.bribed = Math.round(14 * (1 + loyaltyOf(actor) / 160));
-          actor.alert = 0;
-          if (CBZ.addHeat) CBZ.addHeat(-6);
-          g.racketProtectionT = Math.max(g.racketProtectionT || 0, 8);
-          noteRead("badge", 6, who, 13);
-          return { ok: true, msg: pick(VOICE.guardPaid) };
-        }
-        // he sells; he does not buy — teach it once, in his own voice
-        if (!actor._saidNoCigs) {
-          actor._saidNoCigs = true;
-          return { ok: false, msg: "What am I going to do with prison smokes?" };
-        }
-        return { ok: false, msg: "No. Buy something or walk." };
+      if (!actor.corrupt) {
+        // A CLEAN OFFICER REFUSES AND REMEMBERS. The offer itself is the
+        // mistake: he files your face, and the wing gets a little warmer.
+        actor.alert = Math.max(actor.alert || 0, 0.6);
+        addLoyalty(actor, -4);
+        if (CBZ.addHeat) CBZ.addHeat(3);
+        noteRead("heat", 5, who, 12);
+        return { ok: false, msg: pick(VOICE.guardClean) };
       }
-      const cost = bribeCost(actor);
-      if (g.cigs < cost) return { ok: false, msg: `${cost}. ${pick(VOICE.guardShort)}` };
-      addCigs(-cost);
-      // A BOUGHT MAN LOOKS AWAY LONGER. `bribed` stays what it always was —
-      // seconds of blindness — and `loyalty` is the thing that persists, so a
-      // second visit to the same officer buys more than the first did.
-      actor.bribed = Math.round(14 * (1 + loyaltyOf(actor) / 160));
-      addLoyalty(actor, 14);
-      actor.alert = 0;
-      if (actor.corrupt) {
-        if (CBZ.addHeat) CBZ.addHeat(-10);
-        addRacketDebt(Math.max(1, Math.ceil(cost * 0.45)));
-        g.racketProtectionT = Math.max(g.racketProtectionT || 0, 8 + cost);
+      // A NAME BUYS A MOMENT. The one thing an inmate holds that a uniform
+      // can use — and handing it over is quiet business at the bars.
+      let known = null;
+      for (const n of CBZ.npcs || []) {
+        if (n && !n.dead && !n.escaped && n.snitchKnown && !n._nameSold) { known = n; break; }
+      }
+      if (known) {
+        known._nameSold = true;   // the racket has him now; the name spends once
+        // the racket leans on its new asset: his reporting cools, and the
+        // arrangement notices you fed it
+        known.reportedPlayerT = Math.max(0, (known.reportedPlayerT || 0) * 0.4);
+        addLoyalty(actor, 12);
+        actor.bribed = Math.round(12 * (1 + loyaltyOf(actor) / 160));
+        actor.alert = 0;
         if (CBZ.addRacketStanding) CBZ.addRacketStanding(2);
-        noteRead("badge", 8 + cost * 0.55, who, 15);
-        if (CBZ.addCasePressure) CBZ.addCasePressure(4 + cost * 0.55, { type: "bribe", heardOnly: true }, actor, { corruptHold: true });
-      } else {
-        noteRead("heat", 3, who, 11);
+        noteRead("badge", 6, who, 13);
+        CBZ.sfx("coin");
+        return { ok: true, msg: `${nm(known)}? Good. Go.` };
       }
-      CBZ.sfx("coin");
-      return { ok: true, msg: pick(VOICE.guardPaid) };
+      if (bought(actor)) {
+        // A RELATIONSHIP FAVOUR. Free at the point of use, and it draws the
+        // account down — the arrangement wants feeding (his shelf, a name).
+        addLoyalty(actor, -4);
+        actor.bribed = Math.round(14 * (1 + loyaltyOf(actor) / 160));
+        actor.alert = 0;
+        if (CBZ.addHeat) CBZ.addHeat(-6);
+        g.racketProtectionT = Math.max(g.racketProtectionT || 0, 8);
+        noteRead("badge", 6, who, 13);
+        return { ok: true, msg: pick(VOICE.guardPaid) };
+      }
+      return { ok: false, msg: pick(VOICE.guardNo) };
     }
     // inmates: a small gift earns goodwill + sometimes a free item/tip
     const cost = 3;
@@ -1022,13 +843,9 @@
   }
 
   /* ---------- PAYOFF: corrupt authority can clean up heat ----------
-     `opts.cost` — THE NUMBER HE QUOTED IS THE NUMBER HE TAKES. When this is
-     reached through a bent officer's approach (entities/guards.js), the card
-     has already advertised a frozen price and HAGGLE has already had its go
-     at moving it. Recomputing payoffCost() at the till threw all of that away:
-     the chip said one number, the pocket lost another, and haggling a payoff
-     down was pure theatre because the discount never reached the money. The
-     menu's own PAYOFF verb passes nothing and still gets the live price. */
+     `opts.cost`: a caller that already showed the player a price passes it,
+     so the number on the chip is the number that leaves the pocket. The
+     PAYOFF verb passes nothing and gets the live price. */
   function payoff(actor, opts) {
     // The warden's sheet is not for sale either — his clean-up is bought with
     // a NAME (snitch() below), never with cigarettes.
@@ -1042,26 +859,13 @@
       return { ok: false, msg: pick(VOICE.guardClean) };
     }
 
-    /* THIS IS THE DEEP END, AND THE DEEP END NEEDS A LINE OUT.
-       Losing a man's paperwork is the thing that ends the officer's career,
-       not the inmate's day — so it is never bought with what an inmate is
-       holding. The gate sits AFTER the clean-officer branch on purpose: a
-       straight man refuses on principle, and that refusal outranks any
-       question of how you were proposing to pay him. */
-    const noPhone = phoneGate(actor);
-    if (noPhone) return noPhone;
-
     const heat = g.detection || 0;
     const complaints = g.complaints || 0;
     const quoted = opts && opts.cost > 0 ? Math.max(1, Math.round(opts.cost)) : 0;
     const cost = quoted || payoffCost(actor);
-    // A REFUSAL NAMES THE THING AND THE NUMBER — and, now, the instrument.
-    if (g.cigs < cost) return { ok: false, msg: phoneBridge()
-      ? `${cost}. ${PHONE_TERMS}`
-      : `${cost}. ${pick(VOICE.guardShort)}` };
+    if (g.cigs < cost) return { ok: false, msg: `${cost}. ${pick(VOICE.guardShort)}` };
 
     addCigs(-cost);
-    consumePhoneTime();          // one call, one shift — a rented line is spent
     actor.bribed = Math.max(actor.bribed || 0, 20);
     actor.alert = 0;
     actor.hunt = 0;
@@ -1090,10 +894,7 @@
     // PAYING A MAN OFF IS THE PUREST FORM OF BUYING HIM. It is the one act in
     // the game that makes a screw yours for the rest of the run.
     addLoyalty(actor, 22);
-    // ONE HONEST LINE, THE FIRST TIME. The counter dropped by `cost` because
-    // that is the magnitude of the favour — but the officer was not paid in
-    // tobacco and says so, once, and then the game stops explaining itself.
-    return { ok: true, msg: outsidePaidPrefix() + (g.role === "cop"
+    return { ok: true, msg: (g.role === "cop"
       ? "Complaint's gone."
       : "You're off the sheet. Don't make me look stupid.") };
   }
@@ -1662,15 +1463,6 @@
     mintLoadouts();
   });
 
-  /* THE RENTED SHIFT BURNS IN REAL SECONDS, like every other window in the
-     prison (systems/detection.js runs racketProtectionT the same way and on
-     the same clock). Ninety seconds is long enough to walk across a yard to
-     the man you wanted and short enough that you cannot bank it. */
-  CBZ.onUpdate(44.6, function (dt) {
-    if (g.mode !== "escape" || !(g.phoneTimeT > 0)) return;
-    g.phoneTimeT = Math.max(0, g.phoneTimeT - (dt || 0));
-  });
-
   /* ------------------------------------------------------------------
      THE ONE DROP ROLL.
 
@@ -1801,17 +1593,10 @@
         // bought screw stays bought — so the new run is the only place it can
         // possibly be cleared. `flashlightLost` is the same shape: a stolen
         // torch is gone until the man is issued a new one, which is a restart.
-        // ...and so is "this officer has already explained the phone to me
-        // once": a new run is a man who has not had that conversation yet.
-        a.loyalty = 0; a.flashlightLost = false; a._friendGift = 0; a._saidNoPhone = 0;
+        a.loyalty = 0; a.flashlightLost = false; a._friendGift = 0;
       }
     }
     _deathFrisks = 0; _koFrisks = 0; _pickpockets = 0; _rolls = 0;
-    // A RENTED PHONE DOES NOT SURVIVE THE RUN THAT RENTED IT. systems/state.js
-    // zeroes the racket fields on a new run but knows nothing about this one,
-    // so the window and the once-a-run honest line are cleared here, beside
-    // the loyalty ledger they belong with.
-    g.phoneTimeT = 0; g._phoneBridgeSaid = 0;
     // a new run draws a new armory sergeant, and the bent copy is uncut
     _sergeant = null; g._cageKeyCopy = 0;
     for (let i = 0; CBZ.guards && i < CBZ.guards.length; i++) {
@@ -1898,19 +1683,12 @@
       loyal, bought: bought_, respectCeil: RESPECT_CEIL,
       block: blockId(), counting: counting(), night: afterDark(),
       groundCigs: (CBZ.coins || []).length,
-      // the bridge, so a probe can ask the game rather than infer it
-      phoneBridge: phoneBridge(),
-      phoneAccess: hasPhoneAccess(),
-      phoneOwned: hasItem("Burner Phone"),
-      phoneTimeT: Math.round((g.phoneTimeT || 0) * 10) / 10,
       racketDebt: Math.round(g.racketDebt || 0),
       racketDebtCeil: RACKET_DEBT_CEIL,
     };
   };
 
-  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, dealMod, itemValue, addRespect, addLoyalty, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, armorySergeant, pickArmorySergeant, keyHolders, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, SERVICES, isService, rng, reseed,
-    // the phone bridge — ask these, never re-derive the rule or the words
-    hasPhoneAccess, phoneGate, phoneTerms, grantPhoneTime, consumePhoneTime, phoneBridge, outsidePaidPrefix, PHONE_TIME_SECS,
+  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, dealMod, itemValue, addRespect, addLoyalty, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, rollLoadout, rollDrops, lootActor, armorySergeant, pickArmorySergeant, keyHolders, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, rng, reseed,
     // the one writer on g.racketDebt (also CBZ.addRacketDebt)
     addRacketDebt, RACKET_DEBT_CEIL,
     // the social layer — read these, never re-derive them

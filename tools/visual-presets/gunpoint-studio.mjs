@@ -343,8 +343,9 @@ async function stageGunpointStudio(input) {
     if (a.target && a.target.set) a.target.set(x, 0, z);
     a.hp = a.hp != null ? Math.max(a.hp, 60) : 60;
     a.aiState = null; a.fleeT = 0; a.foe = null; a.hunt = 0; a.huntPlayer = 0;
-    a.approach = null;
-    a._intimidInit = true;                   // we own hasGun for this shot
+    if (CBZ.prisonDemand) CBZ.prisonDemand.cancel(a);
+    a._intimidInit = true;
+                   // we own hasGun for this shot
     a.hasGun = cast.arm === "gun" || (cast.arm === "mixed" && i % 2 === 1);
     placed.push(a);
   }

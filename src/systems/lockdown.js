@@ -199,9 +199,10 @@
   // a count never interrupts a fight
   function busy(n) {
     const s = n.aiState;
-    return !!((n.huntPlayer || 0) > 0 || n.foe || n.approach || n.intimidMode ||
-      s === "fight" || s === "snitch" || s === "flee" || s === "approachPlayer" ||
-      s === "pressurePlayer" || s === "interceptThreat" || s === "diversion" ||
+    return !!((n.huntPlayer || 0) > 0 || n.foe || n._demand || n.intimidMode ||
+      s === "fight" || s === "snitch" || s === "flee" || s === "demandPlayer" ||
+      s === "interceptThreat" || s === "diversion" ||
+
       s === "rumorHuddle");
   }
   // the centre of the wing, and how far out an inmate may be and still be

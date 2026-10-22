@@ -523,26 +523,25 @@ async function moveTo(expr, ticks) {
   }
 }
 {
-  // A NARRATION NOW HAS A MOUTH. Drive a real debt-collector approach to
-  // EXPIRY beside the player and assert ai.js spoke instead of going mute.
+  // A DEBT YOU OWE HAS A MOUTH. Start a real collection (the demand ladder,
+  // ai.js CBZ.prisonDemand) beside the player and assert the collector says it.
   const r = await evl(`
     var n = null;
     for (var i = 0; i < CBZ.npcs.length; i++) { var c = CBZ.npcs[i]; if (c && !c.dead && c.gang >= 0) { n = c; break; } }
-    if (!n) return { no: true };
+    if (!n || !CBZ.prisonDemand) return { no: true };
     CBZ.player.pos.set(n.group.position.x + 1.2, 0, n.group.position.z);
-    var before = CBZ.aiNarrationAudit();
-    n.aiState = "approachPlayer";
-    n.approach = { kind: "debtCollect", t: 0.05, cost: 6, gang: n.gang };
+    var began = CBZ.prisonDemand.begin(n, "debt", { gang: n.gang, cost: 6 });
     for (var k = 0; k < 40; k++) CBZ.stepSim(1/60);
     var live = CBZ.speech ? CBZ.speech.audit().lines : [];
-    var mine = live.filter(function (l) { return l.who && n.data && l.who === n.data.name; })[0] || live[0] || null;
-    return { before: before, after: CBZ.aiNarrationAudit(), line: mine ? mine.text : null };
+    var mine = live.filter(function (l) { return l.who && n.data && l.who === n.data.name; })[0] || null;
+    return { began: began, line: mine ? mine.text : null };
   `);
-  if (bad(r) || r.no) check("world: a narration finds a mouth", false, why(r));
+  if (bad(r) || r.no) check("world: a debt finds a mouth", false, why(r));
   else {
-    check("world: the collector SAYS the debt", r.after.spoken > r.before.spoken, JSON.stringify({ spoken: r.after.spoken, mute: r.after.mute, line: r.line }));
+    check("world: the collector SAYS the debt", r.began && !!r.line, JSON.stringify(r));
     check("world: the spoken line is a person talking", !!r.line && !/^the (Reds|Blues|block)\b/.test(r.line), JSON.stringify(r.line));
   }
+
 }
 {
   // A SNITCH YOU HAVE NOT MADE IS JUST ANOTHER INMATE.

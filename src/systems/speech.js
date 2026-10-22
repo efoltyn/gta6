@@ -95,6 +95,8 @@
   function engaged(s) {
     if (!s) return false;
     if (s.approach && (typeof s.approach !== "object" || s.approach.t == null || s.approach.t > 0)) return true;
+    if (s._demand) return true;               // a prison man collecting from you (entities/ai.js)
+
     if (s.reportState) return true;
     const reg = CBZ.interactions;
     try { const cur = reg && reg.current ? reg.current() : null; if (cur && cur.target === s) return true; } catch (e) {}

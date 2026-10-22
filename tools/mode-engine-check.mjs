@@ -244,7 +244,7 @@ const PASS = `(() => {
     CBZ.player.pos.set(c.maxX + 1.4, 0, cz);
     CBZ.playerChar.group.position.copy(CBZ.player.pos);
     gd.group.position.set(c.minX - 1.8, 0, cz);
-    gd.hunt = 6; gd.alert = 1; gd.investigate = null; gd.approach = null;
+    gd.hunt = 6; gd.alert = 1; gd.investigate = null;
     gd._acX = null; gd._acProbeT = 0;
     let maxSpd = 0, moved = 0;
     for (let f = 0; f < 40; f++) {

@@ -94,8 +94,8 @@
   function important(n) {
     const s = n.aiState;
     return !!(n.intimidMode || n.huntPlayer > 0 ||
-      s === "fight" || s === "approachPlayer" || s === "snitch" ||
-      s === "pressurePlayer" || s === "tailPlayer" || s === "interceptThreat" || s === "diversion");
+      s === "fight" || s === "demandPlayer" || s === "snitch" ||
+      s === "tailPlayer" || s === "interceptThreat" || s === "diversion");
   }
 
   /* ---- THE STEP: CBZ.moves (entities/moves.js) -----------------------------
@@ -170,7 +170,8 @@
   // between walking somewhere, holding a post, and a visible in-place task.
   function calmForRoutine(n, imp) {
     const s = n.aiState;
-    return !imp && !n.dead && !(n.ko > 0) && !n.rage && !n.approach && !n.intimidMode &&
+    return !imp && !n.dead && !(n.ko > 0) && !n.rage && !n._demand && !n.intimidMode &&
+
       (!s || s === "wander");
   }
 

@@ -125,9 +125,9 @@
     g.gangProtection = [0, 0];
     g.gangJob = null;
     g.lowProfileT = 0;
-    g.racketProtectionT = 0; g.racketGuard = null; g.racketDebt = 0; g.racketStanding = 0; g.racketPressureT = 0; g.racketHintT = 0; g.phoneTimeT = 0;
-    g.blockRumor = null; g.socialDirectorT = 0; g.socialDirectorLast = null; g.watcherDirectorT = 0; g.watcherLast = null; g.gossipHuddleT = 0; g.gangTierT = [0, 0]; g.turfCheckpointT = [0, 0];
-    g.socialProfile = { paid: 0, threatened: 0, refused: 0, helped: 0, listened: 0, bargained: 0, exploited: 0, last: "" };
+    g.racketProtectionT = 0; g.racketDebt = 0; g.racketStanding = 0;
+    g.blockRumor = null; g.watcherDirectorT = 0; g.watcherLast = null; g.gossipHuddleT = 0; g.gangTierT = [0, 0]; g.debtDemandT = null;
+
     g.witnessReportT = 0; g.snitchReports = 0; g.lastKnown = null; g.caseSearchCD = 0;
     g.caseFile = { heat: 0, reports: [], lastSource: "", lastType: "", corrupt: 0 };
     // g.snitchIntelT is GONE (2026-08-04). It was a 30-second countdown whose
@@ -187,7 +187,7 @@
     }
 
     CBZ.guards.forEach((gd) => {
-      gd.wi = 0; gd.alert = 0; gd.bribed = 0; gd.ko = 0; gd.dead = false; gd.hp = null; gd.rep = 0; gd.quest = null; gd.approach = null; gd.investigate = null; gd.state = "patrol"; gd.approachCD = 3 + Math.random() * 5;
+      gd.wi = 0; gd.alert = 0; gd.bribed = 0; gd.ko = 0; gd.dead = false; gd.hp = null; gd.rep = 0; gd.quest = null; gd.investigate = null; gd.state = "patrol";
       // radio-window + gunpoint state (detection.js / intimidate.js): a new
       // run unties every screw and forgets every call, landed or pending.
       gd.tied = false; gd.radioT = null; gd._radioed = false; gd.intimidMode = null; gd.intimidT = 0; gd.poseHandsUp = false; gd._gunpointCD = 0;

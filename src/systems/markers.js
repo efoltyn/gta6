@@ -116,8 +116,9 @@
         if (CBZ.npcAvert) CBZ.npcAvert(a, 0.6);
         continue;
       }
-      // a man with an offer looks at you for the whole walk-up
-      if (a.approach && a.approach.t > 0 && CBZ.npcStare) CBZ.npcStare(a, 0.6);
+      // a man come to collect looks at you for the whole walk-up
+      if (a._demand && CBZ.npcStare) CBZ.npcStare(a, 0.6);
+
     }
   }
 

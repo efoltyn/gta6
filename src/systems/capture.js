@@ -973,7 +973,7 @@
       screws.unshift(opts.lead);
       if (screws.length > 2) screws.length = 2;
     }
-    for (const gd of screws) { gd._escort = true; gd.approach = null; }
+    for (const gd of screws) { gd._escort = true; }
     let cx = Math.sin(CBZ.playerChar.group.rotation.y + Math.PI * 0.5), cz = Math.cos(CBZ.playerChar.group.rotation.y + Math.PI * 0.5);
     if (screws[0]) {
       const ax = player.pos.x - screws[0].group.position.x, az = player.pos.z - screws[0].group.position.z, al = Math.hypot(ax, az);
@@ -1988,7 +1988,7 @@
         cellWatchCD = 9 + Math.random() * 6;
         let best = null, bd = Infinity;
         for (const gd of CBZ.guards) {
-          if (gd.dead || gd.ko > 0 || gd.corrupt || gd.bribed > 0 || gd.hunt > 0 || gd.approach || gd._escort || (gd.investigate && gd.investigate.t > 0)) continue;
+          if (gd.dead || gd.ko > 0 || gd.corrupt || gd.bribed > 0 || gd.hunt > 0 || gd._escort || (gd.investigate && gd.investigate.t > 0)) continue;
           const dx = watchX - gd.group.position.x, dz = watchZ - gd.group.position.z;
           const d2 = dx * dx + dz * dz;
           if (d2 < bd) { bd = d2; best = gd; }

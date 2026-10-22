@@ -1147,7 +1147,6 @@
     // he calls it in; his officers run (anything that landed on him after
     // guards.js handed him to body() this frame)
     handOff(w);
-    if (w.approach && !(CBZ.cityCampaignPrisonVerbs && CBZ.cityCampaignPrisonVerbs(w))) w.approach = null;
   }
 
   /* THE WARDEN'S BODY, FRAME BY FRAME. entities/guards.js calls this after

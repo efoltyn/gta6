@@ -52,10 +52,8 @@
   const KEYS = ["E", "J", "K", "L"];
   const MAX_VERBS = 4;
 
-  function approachAction(a, action) {
-    if ((a.kind === "guard" || a.kind === "warden") && CBZ.resolveGuardApproach) return CBZ.resolveGuardApproach(a, action);
-    return CBZ.resolveNpcApproach ? CBZ.resolveNpcApproach(a, action) : { ok: false, msg: "" };
-  }
+  function PD() { return CBZ.prisonDemand || null; }
+  function demandOn(a) { const D = PD(); return D ? D.of(a) : null; }
   function warnActor(a) {
     a.aiState = "flee";
     a.fleeT = 1.8;
@@ -90,7 +88,9 @@
   const VERB = {
     // NO TALK VERB (owner 2026-10-09: "You shouldn't have to press Talk").
     // What a man has to say he SAYS as you come up to him (speakOnApproach
-    // below, systems/quests.js onTalk with auto): a job, a debt, a sale.
+    // below, systems/quests.js onTalk with auto), when he has something real.
+    // Nobody walks up to you with a pitch (owner 2026-10-22); what you can do
+    // with him is here, and every one of these is a decision.
     // offered, never browsed (systems/prisonfriends.js decides when he owes you)
     befriend: { label: "Befriend",  fn: (a) => (CBZ.prisonFriendAccept ? CBZ.prisonFriendAccept(a) : { ok: false, msg: "" }) },
     // the way out of a grudge: cigs scaled to how sore he is (entities/ai.js)
@@ -101,20 +101,12 @@
       return { ok: !!CBZ.prisonContract.offer(a), msg: "" };
     } },
     settle:   { label: "Settle",    fn: (a) => (CBZ.prisonContract ? CBZ.prisonContract.settle(a) : { ok: false, msg: "" }) },
-    work:     { label: "Work",      fn: (a) => approachAction(a, "work") },
-    // THE TABLE (systems/prisontrade.js). A man who walked up selling puts his
-    // thing on it already.
-    trade:    { label: "Trade",     fn: (a) => {
-      const T = CBZ.prisonTrade;
-      if (!T) return CBZ.econ.trade(a);
-      const res = T.open(a);
-      if (res && res.ok && a.approach && a.approach.kind === "deal") {
-        const o = a.data && a.data.offer;
-        if (o && o.item) T.put("theirs", o.item, 1);
-        if (CBZ.clearNpcApproach) CBZ.clearNpcApproach(a);
-      }
-      return res;
-    } },
+    // the cornered debtor's few smokes, taken (ai.js takeDodge)
+    take:     { label: "Take",      fn: (a) => (CBZ.prisonContract && CBZ.prisonContract.takeDodge ? CBZ.prisonContract.takeDodge(a) : { ok: false, msg: "" }) },
+    // a job for his crew (ai.js crewWork): yours, or one that trusts you
+    work:     { label: "Work",      fn: (a) => (CBZ.prisonCrewWork ? CBZ.prisonCrewWork.take(a) : { ok: false, msg: "" }) },
+    // THE TABLE (systems/prisontrade.js)
+    trade:    { label: "Trade",     fn: (a) => (CBZ.prisonTrade ? CBZ.prisonTrade.open(a) : CBZ.econ.trade(a)) },
     bribe:    { label: "Bribe",     fn: (a) => CBZ.econ.bribe(a) },
     payoff:   { label: "Payoff",    fn: (a) => CBZ.econ.payoff(a) },
     // PICKPOCKET (owner 2026-10-19: "I want the pickpocket button back"). The
@@ -196,22 +188,19 @@
     wthreat:  { label: "Threaten",  fn: (a) => wardenAct("wthreat", a) },
     whand:    { label: "Give",      fn: (a) => wardenAct("whand", a) },
     join:     { label: "Join",      fn: (a) => CBZ.joinGang(a) },
-    // ---- a man who walked up with something (entities/ai.js approach kinds)
-    accept:   { label: "Accept",    fn: (a) => approachAction(a, "accept") },
-    respect:  { label: "Back off",  fn: (a) => approachAction(a, "respect") },
-    pay:      { label: "Pay",       fn: (a) => approachAction(a, "pay") },
-    haggle:   { label: "Haggle",    fn: (a) => approachAction(a, "haggle") },
-    threaten: { label: "Threaten",  fn: (a) => approachAction(a, "threaten") },
-    refuse:   { label: "Refuse",    fn: (a) => approachAction(a, "refuse") },
+    // ---- a crew collecting a debt you really owe (ai.js CBZ.prisonDemand):
+    // pay it, or take the work that clears it. Walking off, running, swinging
+    // and drawing are your body, not buttons.
+    pay:      { label: "Pay",       fn: (a) => (PD() ? PD().pay(a) : { ok: false, msg: "" }) },
+    workOff:  { label: "Work",      fn: (a) => (PD() ? PD().workOff(a) : { ok: false, msg: "" }) },
     // ---- the man who reported you, once you know it (entities/ai.js)
     confrontReport: { label: "Confront", fn: (a) => CBZ.resolveKnownSnitch ? CBZ.resolveKnownSnitch(a, "confront") : { ok: false, msg: "" } },
     paySilence: { label: "Pay",     fn: (a) => CBZ.resolveKnownSnitch ? CBZ.resolveKnownSnitch(a, "paySilence") : { ok: false, msg: "" } },
     // ---- the officer's own (cop role)
-    warn:     { label: "Warn",      fn: (a) => a.approach ? approachAction(a, "warn") : warnActor(a) },
+    warn:     { label: "Warn",      fn: (a) => warnActor(a) },
     detain:   { label: "Cuff",      fn: (a) => {
-      if (a.approach && /^cop[A-Z]/.test(a.approach.kind || "")) return approachAction(a, "detain");
       if (!cuffOk(a)) return { ok: false, msg: "" };
-      dropPitch(a);
+      if (PD()) PD().cancel(a);
       const surrendered = a.intimidMode === "scared";
       if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);   // the hold ends in the cuffs
       const justified = CBZ.game.role === "cop" && (surrendered || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight");
@@ -233,7 +222,7 @@
       return { ok: true, msg: "" };   // he goes down; that is the receipt
     } },
     search:   { label: "Search",    fn: (a) => {
-      dropPitch(a);
+      if (PD()) PD().cancel(a);
       const justified = a.intimidMode === "scared" || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight";
       if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);
       const found = (justified ? 2 : 1) + Math.floor(CBZ.econ.rng() * (justified ? 6 : 4));
@@ -304,11 +293,6 @@
     const AR = CBZ.arrest;
     return !(AR && AR.cuffable) || !!AR.cuffable(a);
   }
-  function dropPitch(a) {
-    if (!a || !a.approach || /^cop[A-Z]/.test(a.approach.kind || "")) return;
-    a.approach = null;
-    if (a.aiState === "approachPlayer") a.aiState = "wander";
-  }
 
   /* ==========================================================================
      WHAT YOU CAN DO TO THIS MAN, RIGHT NOW. Every verb below changes the sim;
@@ -343,28 +327,14 @@
     // YOU ARE SNITCHING TO HIM: the card is what you know
     const telling = CBZ.prisonSnitch && CBZ.prisonSnitch.menu ? CBZ.prisonSnitch.menu(a) : null;
     if (telling) return telling;
-    const copPitch = !!(a.approach && /^cop[A-Z]/.test(a.approach.kind || ""));
-    const badge = CBZ.game.role === "cop" && !staff(a) && !copPitch;
-    /* HE WALKED UP WITH SOMETHING: take it, push back, walk away. His pitch is
-       spoken over his head when you reach him (autoListen). */
-    if (a.approach && a.approach.t > 0 && !badge) {
-      const k = a.approach.kind;
-      const press = pressureVerb(a);
-      if (k === "contract") return ["accept", "haggle", "refuse"];
-      if (k === "debtorDodge") return (a.approach.partial > 0) ? ["accept", "threaten", "refuse"] : ["threaten", "refuse"];
-      if (k === "debtCollect" && CBZ.prisonContract && CBZ.prisonContract.canWorkOff(a)) return ["pay", "work", "refuse"];
-      if (k === "gangInvite" || k === "gangJob" || k === "favor") return ["accept", "refuse"];
-      if (k === "copTip" || k === "copPlea") return ["accept", "refuse"];
-      if (k === "gangParley") return [a.approach.cost > 0 ? "pay" : "accept", "respect", "refuse"];
-      if (k === "crewBackup" || k === "coverStory" || k === "heatWarning") return ["accept", "threaten", "refuse"];
-      if (k === "crewDues" || k === "stickUp" || k === "alibiDeal" || k === "witnessFix" || k === "recantOffer") return ["pay", press, "refuse"];
-      if (k === "buyItem") return ["accept", "haggle", "refuse"];
-      if (k === "copBribe") return ["accept", "detain", "refuse"];
-      if (k === "copTaunt") return ["warn", "detain", "refuse"];
-      if (k === "turfWarning") return ["respect", "threaten", "refuse"];
-      if (a.approach.cost > 0) return ["pay", press, "refuse"];
-      if (k === "deal" && a.data && a.data.offer) return ["trade", "refuse"];
-      return ["refuse"];
+    /* HE IS COLLECTING WHAT YOU OWE HIS CREW (ai.js CBZ.prisonDemand): pay
+       it, or take the work that clears it, or answer with your hands. */
+    const dem = CBZ.game.role !== "cop" ? demandOn(a) : null;
+    if (dem && dem.kind === "debt") {
+      const out = [];
+      if ((CBZ.game.cigs || 0) > 0) out.push("pay");
+      if (PD().canWorkOff(a)) out.push("workOff");
+      if (out.length) { out.push("grab", "punch"); return out; }
     }
     // A COP'S THREE: ask, toss, cuff (cuff only on a man who gave up or is down)
     if (CBZ.game.role === "cop" && !staff(a)) return cuffOk(a) ? ["search", "detain"] : ["search"];
@@ -401,27 +371,29 @@
     const offering = !!(CBZ.prisonFriendOffered && CBZ.prisonFriendOffered(a));
     const sore = !!CBZ.squashGrudge && (a.playerGrudge || 0) >= 4;
     const PCs = CBZ.prisonCars;
-    const recruiting = a.gang >= 0 && CBZ.player.gang == null && (a.rep || 0) >= 40 &&
-      (!PCs || (a.yardCar === PCs.playerCar() && (CBZ.game || {}).carClaim !== "out"));
+    // JOIN is yours to ask, of a man of your own car (systems/prisoncars.js:
+    // the car your heritage puts you in; nobody's once it cast you out)
+    const recruiting = a.gang >= 0 && CBZ.player.gang == null &&
+      (!PCs || (PCs.playerCar() >= 0 && a.yardCar === PCs.playerCar() && !(PCs.isOut && PCs.isOut())));
     const C = CBZ.prisonContract;
     const settling = !!(C && C.forCreditor(a) && (C.satisfied(C.live()) || (C.live() && C.live().dead)));
     const claiming = !!(C && C.canOffer(a));
+    const cornered = !!(C && C.dodgeOffer && C.dodgeOffer(a) > 0);
+    const crewWork = !!(CBZ.prisonCrewWork && CBZ.prisonCrewWork.can(a));
     const head = settling ? "settle"
+      : cornered ? "take"
       : offering ? "befriend"
       : sore ? "squash"
       : claiming ? "collect"
       : recruiting ? "join"
+      : crewWork ? "work"
       : null;
     // FOUR SEATS, ALWAYS FILLED (owner on iPad: "there's not enough"): with no
     // headline the fourth is your fist on him. Trade stays first because it is
     // the E key, and E on a man you happen to face must never be an assault.
     return head ? [head, "trade", "steal", "grab"] : ["trade", "steal", "grab", "punch"];
   }
-  // HAGGLE and THREATEN are the same rung: the one this man answers to
-  function pressureVerb(a) {
-    const fear = a.playerFear || 0, grudge = a.playerGrudge || 0;
-    return (fear >= 6 && fear > grudge) ? "threaten" : "haggle";
-  }
+
   // a payoff cleans heat; with nothing on your file it would buy nothing
   function guardPayoffWorthIt() {
     const g = CBZ.game || {};
@@ -435,14 +407,16 @@
       const authored = CBZ.cityCampaignPrisonSub(a, v);
       if (authored != null) return authored;
     }
-    const ap = a.approach || {};
     switch (v) {
-      case "bribe": {
-        const c = CBZ.econ.bribeCost ? CBZ.econ.bribeCost(a) : 0;
-        return c > 0 ? c + "" : "";
-      }
       case "payoff": return (CBZ.econ.payoffCost ? CBZ.econ.payoffCost(a) : 6) + "";
-      case "pay": return ap.cost ? ap.cost + "" : "";
+      case "pay": {
+        const c = PD() ? PD().cost(a) : 0;
+        return c > 0 ? Math.min(c, CBZ.game.cigs || 0) + "" : "";
+      }
+      case "take": {
+        const t = CBZ.prisonContract && CBZ.prisonContract.dodgeOffer ? CBZ.prisonContract.dodgeOffer(a) : 0;
+        return t > 0 ? t + "" : "";
+      }
       case "squash": return CBZ.squashGrudgeCost ? CBZ.squashGrudgeCost(a) + "" : "";
       case "paySilence": return CBZ.knownSnitchCost ? CBZ.knownSnitchCost(a) + "" : "";
       case "collect": {
@@ -456,21 +430,12 @@
         if (c.kind === "roughUp") return "";
         return (c.got || 0) + "/" + c.amt;
       }
-      case "work": {
-        const c = CBZ.prisonContract && CBZ.prisonContract.ripeTab(a);
-        return c ? Math.round(c.amt) + "" : "";
-      }
+
       case "steal": {
         const want = CBZ.prisonContract && CBZ.prisonContract.wantedItem(a);
         return want ? shortText(want, 12) : "";
       }
       case "join": return gangShort(a);
-      case "accept":
-        if (ap.kind === "favor") return "+" + (ap.gift || 3);
-        if (ap.kind === "buyItem" || ap.kind === "copBribe") return "+" + (ap.price || 0);
-        if (ap.kind === "gangJob") return "+" + ((ap.job && ap.job.reward) || 5);
-        if (ap.kind === "gangInvite") return gangShort(a);
-        return "";
       default: return "";
     }
   }
@@ -510,7 +475,7 @@
   const EAR = 12, EAR_ENGAGED = 18;
   function speak(actor, msg, secs, force) {
     if (!actor || !msg || !CBZ.speech || !CBZ.game || CBZ.game.mode !== "escape") return false;
-    const eng = force || (actor.approach && (actor.approach.t || 0) > 0);
+    const eng = force || !!demandOn(actor);
     return CBZ.speech.say(actor, msg, { secs: secs, force: !!force, ear: eng ? EAR_ENGAGED : EAR, headY: 1.85 });
   }
   function sayResult(actor, msg, secs) {
@@ -529,7 +494,7 @@
     opts = opts || {};
     const t = sayClock();
     if (line === lastLine && actor !== lastLineBy && t - lastLineAt < SAME_GAP) return false;
-    const engaged = !!opts.force || !!(actor && actor.approach && (actor.approach.t || 0) > 0);
+    const engaged = !!opts.force || !!(actor && demandOn(actor));
     if (!engaged && t - lastAmbientAt < AMBIENT_GAP) return false;
     const ok = speak(actor, line, opts.secs || 2.2, !!opts.force);
     if (ok) {
@@ -545,7 +510,7 @@
      WHO WEARS THE VERBS
      ========================================================================== */
   let current = null, cooldown = 0, selected = null, faceT = 0;
-  let shownVerbs = [], shownFor = null, lastGreeted = null;
+  let shownVerbs = [], shownFor = null;
 
   function touchUI() { return !!CBZ.touchMode; }
   function up(a) {
@@ -603,23 +568,12 @@
     }
     return best;
   }
-  // the nearest man who has walked up to you with something, so he speaks
-  function approacher() {
-    let best = null, bd = RANGE * RANGE;
-    candidates(_cand);
-    for (let i = 0; i < _cand.length; i++) {
-      const a = _cand[i];
-      if (!up(a) || !a.approach || !(a.approach.t > 0) || a.approach.greeted) continue;
-      const d2 = d2Of(a);
-      if (d2 < bd) { bd = d2; best = a; }
-    }
-    return best;
-  }
-  /* HE SPEAKS AS YOU COME UP (the Talk verb is gone). Once per approach: the
-     man you turn to (or tap) says the one real thing he has for you, a job,
-     its status, a sale, a share, over his head. A man with nothing real to
-     say says nothing. The same man does not repeat himself on every glance:
-     a 40 s hold per man, and a new approach only after you looked away. */
+  /* HE SPEAKS WHEN YOU COME UP TO HIM (the Talk verb is gone). Once: the man
+     you turn to (or tap) says the one real thing he has for you, a job you
+     took from him, what is in front of him, over his head. A man with
+     nothing real to say says nothing. The same man does not repeat himself
+     on every glance: a 40 s hold per man, and again only after you looked away. */
+
   let spokeTo = null;
   function speakOnApproach(a) {
     if (a === spokeTo) return;
@@ -630,13 +584,6 @@
     let r = null;
     try { r = CBZ.quests.onTalk(a, { auto: true }); } catch (e) { r = null; }
     if (r && r.msg) { a._spokeAt = now; sayResult(a, r.msg, 3.0); }
-  }
-  function autoListen(a) {
-    if (!a || !a.approach || !(a.approach.t > 0) || a.approach.greeted) return;
-    if (!CBZ.resolveNpcApproach) return;
-    let res = null;
-    try { res = approachAction(a, "listen"); } catch (e) { return; }
-    if (res && res.ok && res.msg) sayResult(a, res.msg, 3.2);
   }
   function heldTarget() {
     const H = CBZ.handVerbs ? CBZ.handVerbs.held() : null;
@@ -742,10 +689,8 @@
       selected = null;
       return;
     }
-    // a man who came over to say something says it as he arrives
-    const ap = approacher();
-    if (ap && ap !== lastGreeted) { lastGreeted = ap; autoListen(ap); }
     const a = pickCurrent(dt);
+
     current = a;
     speakOnApproach(a);
     const trading = !!(CBZ.prisonTrade && CBZ.prisonTrade.isOpen());
