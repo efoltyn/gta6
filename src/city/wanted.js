@@ -820,6 +820,8 @@
       crew: function () { return CBZ.cityPlayerGangMembers ? CBZ.cityPlayerGangMembers() : []; },
       // where the escort walks you: the arc sets it (the cruiser door, the gate, the desk)
       to: function () { return arrestScene && arrestScene._goal ? arrestScene._goal : null; },
+      // stuck against a wall or a crowd: clear the way, re-plan, try the far door
+      onStall: function (hh) { stalled(hh); },
       onCuffed: function (hh) {
         if (opts.arcWalk || (arrestScene && arrestScene.take === hh)) return;    // the arc's own walk-in
         if (CBZ.playerChar) CBZ.playerChar.handsUp = false;
@@ -958,7 +960,7 @@
   CBZ.arrestCount = function (k, n) { if (k in TALLY) TALLY[k] += (n == null ? 1 : n) | 0; };
 
   const HANDS_T = 0.9, CUFF_T = 0.8, DOOR_T = 1.15, LEG_T = 3.6, ARRIVE_T = 1.3;
-  const WALK_SPD = 1.45, MARCH_MAX = 11, RIDE_SPD = 11.5, ARC_MAX = 60;
+  const WALK_SPD = 1.45, MARCH_MAX = 11, RIDE_SPD = 11.5, ARC_MAX = 120;
   // car-local rear-bench + driver offsets. The ONE copy lives in
   // city/cinematics.js (its RIDE scene's seatLocal); we ask for it and only
   // fall back to a literal if that file is absent.
@@ -1048,6 +1050,7 @@
   }
   function clearArc(sc, keepCuffs) {
     dropHolds(sc);
+    endCarJob(sc);
     if (sc && sc.take && !sc.take.done) { try { sc.take.cancel(); } catch (e) {} }
     if (sc) sc.take = null;
     if (sc && sc.cop) sc.cop._arrestingPlayer = false;
@@ -1198,6 +1201,7 @@
       } catch (e) { console.error("[arrest] booking", e); took = false; }
     }
     sc.finished = true;
+    endCarJob(sc);
     if (took) {
       TALLY.bookings++;
       // custody is the jail's now: the officer stands down, the input lock and
@@ -1498,31 +1502,80 @@
     if (sc.phase === "walk") {
       const car = sc.car;
       if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc); if (!sc.gate) { if (sc.take) sc.take.finish(); bookIn(sc); } return; }
-      // the kerb-side rear door, in the car's own frame
-      const door = seatAt(car, { x: seatOf("rear").x - 1.35, z: seatOf("rear").z });
+      // THE DOOR OF A REAL BACK SEAT: the kerb side first (the car's right),
+      // where you stand to be put through it (city/boarding.js seatFor)
+      if (!sc._seatId) sc._seatId = arrestSeatId(car, null);
+      const door = (sc._seatId && seatStand(car, sc._seatId)) || seatAt(car, { x: seatOf("rear").x - 1.35, z: seatOf("rear").z });
+      const dd = P ? Math.hypot(door.x - P.pos.x, door.z - P.pos.z) : 0;
       if (sc.take) {
         // THE TAKE WALKS YOU (arrest.js): his hand on your arm, the other on
-        // the cuffs. Dead weight slows him; pulling away is a fight.
+        // the cuffs, round the walls on the nav grid. Dead weight slows him;
+        // pulling away is a fight; a crowd in the way is told to move and a
+        // walled-off door is given up for the far one (stalled, below).
         sc._goal = door;
         // the walk gets as long as the walk is (a unit parked 40 m off is a
-        // half-minute perp walk at his pace, not a cut into the back seat)
-        if (sc._cap == null && P) sc._cap = Math.max(MARCH_MAX * 2.2, Math.hypot(door.x - P.pos.x, door.z - P.pos.z) / WALK_SPD * 1.8 + 6);
-        if (sc.take.phase === "arrived" || sc.t >= (sc._cap || MARCH_MAX * 2.2)) {
+        // half-minute perp walk at his pace)
+        if (sc._cap == null && P) sc._cap = Math.max(MARCH_MAX * 2.2, dd / WALK_SPD * 1.8 + 6);
+        // at the door, or near enough that the last steps are your own walk
+        // to the handle (CBZ.moves.board's walk): never a cut into the seat
+        if (sc.take.phase === "arrived" || (sc.t >= sc._cap && dd < 12)) {
           sc.take.finish(); sc.take = null; sc._goal = null;
           sc.phase = "door"; sc.t = 0;
+        } else if (sc.t >= sc._cap) {
+          if (!sc._farTry) {
+            // the whole walk and still nowhere near it: the far door, a fresh clock
+            sc._farTry = true;
+            const alt = arrestSeatId(car, sc._seatId === "rearR" ? "rearL" : "rearR");
+            if (alt) sc._seatId = alt;
+            sc._cap = sc.t + Math.max(MARCH_MAX * 2.2, dd / WALK_SPD * 1.8 + 6);
+            sc.take.path = null;
+          } else {
+            // no way to that car on foot: he walks you in instead
+            car._arrestRide = false; car.ai = !!car.road;
+            sc.car = null;
+            sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc);
+            if (!sc.gate) { sc.take.finish(); sc.take = null; bookIn(sc); }
+          }
         }
         return;
       }
       const moved = marchTo(P, ch, cop, door.x, door.z, dt);
-      if (moved <= 0.0001 || sc.t >= MARCH_MAX) { sc.phase = "door"; sc.t = 0; }
+      if (moved <= 0.0001 || (sc.t >= MARCH_MAX && moved < 12)) { sc.phase = "door"; sc.t = 0; }
+      else if (sc.t >= MARCH_MAX * 3) { sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc); if (!sc.gate) bookIn(sc); }
       return;
     }
 
-    // ---------- 4. THE DOOR: it opens, you go in, it shuts ----------
+
+    // ---------- 4. THE DOOR: he opens it, you go in, he shuts it ----------
+    /* A REAL BACK SEAT THROUGH A REAL DOOR. The officer stands at the door
+       he has opened; you go through it on the one posture layer every car
+       door uses (CBZ.moves.board: the step to the sill, the duck, the hips
+       down onto the cushion) and the seat holds you there for the ride
+       (vehicles.js's seat solve, CBZ.carSeatPlayer). His hands put you
+       through it: yours are behind your back, so the beat touches nothing.
+       This used to set your position onto the bench half a second in. */
     if (sc.phase === "door") {
       dropHolds(sc);                                 // he lets go of your arm at the door
-      if (ch) { ch.cuffed = true; if (CBZ.animChar) CBZ.animChar(ch, 0, dt); }
+      if (ch) ch.cuffed = true;
       const car = sc.car;
+      if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc); if (!sc.gate) bookIn(sc); return; }
+      if (cop && !cop.dead) cop._pulling = true;     // police.js: his beat stands down while he works the car
+      if (sc._board == null) sc._board = (sc._seatId && startBoard(sc)) || false;
+      if (sc._board) {
+        // the officer by the open door, watching you in
+        const spot = doorSpot(car, sc._seatId);
+        if (cop && !cop.dead && spot && P) copWalkTo(cop, spot.x, spot.z, dt, P.pos.x, P.pos.z);
+        if (sc._board.done) {
+          sc.seated = sc._seatId; sc._inSeat = true;
+          seatHold(sc, dt);
+          sc.phase = "load"; sc.t = 0;
+          return;
+        }
+        if (!sc._board.fail && sc.t < 16) return;
+        sc._board = false; sc.t = 0;                 // the beat broke off: the bench pin below
+      }
+      if (ch && CBZ.animChar) CBZ.animChar(ch, 0, dt);
+      // NO SEAT MODEL OR NO DOOR BEAT (a body with no cabin): the bench pin
       if (car && !car.dead && sc.t >= DOOR_T * 0.5 && P) {
         const w = seatAt(car, seatOf("rear"));
         P.pos.x = w.x; P.pos.z = w.z; P.vy = 0;
@@ -1537,29 +1590,58 @@
       return;
     }
 
+    // ---------- 4b. HE SHUTS YOU IN, WALKS ROUND AND GETS IN HIMSELF ----------
+    if (sc.phase === "load") {
+      const car = sc.car;
+      if (!car || car.dead) { endCarJob(sc); sc.phase = "walkin"; sc.t = 0; sc.gate = gateFor(sc); if (!sc.gate) bookIn(sc); return; }
+      seatHold(sc, dt);
+      if (sc.t < 0.4) { if (CBZ.boarding && CBZ.boarding.door) CBZ.boarding.door(car, sc.seated, 1 - sc.t / 0.4); }
+      else if (!sc._slam) { sc._slam = true; if (CBZ.sfxAt && car.pos) { try { CBZ.sfxAt("door_close", car.pos.x, car.pos.z, {}); } catch (e) {} } }
+      const r = sc.t < 0.4 ? "busy" : copBoardTick(sc, dt);
+      if (r === "busy") return;
+      if (r === "fallback" && cop && !cop.dead) sitRig(cop, car, seatOf("driver"));
+      sc.phase = "ride"; sc.t = 0; sc.legB = false;
+      sc.gate = gateFor(sc);
+      startRideCamera(sc);
+      return;
+    }
+
     // ---------- 5. THE RIDE ----------
     if (sc.phase === "ride") { ride(sc, P, ch, cop, dt); return; }
 
     // ---------- 6. ARRIVAL: out of the car at the jail gate ----------
+    // out through the door you went in by (CBZ.moves.alight), and the officer
+    // out of his (city/boarding.js's door arc)
     if (sc.phase === "arrive") {
       const car = sc.car;
+      if (sc._inSeat && !sc._out) seatHold(sc, dt);
       if (sc.t >= ARRIVE_T * 0.45 && car && P && !sc._out) {
         sc._out = true;
-        const w = seatAt(car, { x: seatOf("rear").x - 1.5, z: seatOf("rear").z });
-        P.pos.x = w.x; P.pos.z = w.z; P.vy = 0; P.grounded = true;
-        if (ch && ch.group) ch.group.position.set(w.x, 0, w.z);
-        if (cop && !cop.dead && cop.group) {
-          const cw = seatAt(car, { x: seatOf("driver").x + 1.5, z: seatOf("driver").z });
-          cop.pos.set(cw.x, 0, cw.z); cop.group.position.set(cw.x, 0, cw.z);
+        sc._alighting = !!(sc.seated && startAlight(sc));
+        if (!sc._alighting) {
+          releaseSeat(sc);
+          const w = seatAt(car, { x: seatOf("rear").x - 1.5, z: seatOf("rear").z });
+          P.pos.x = w.x; P.pos.z = w.z; P.vy = 0; P.grounded = true;
+          if (ch && ch.group) ch.group.position.set(w.x, 0, w.z);
+        }
+        if (cop && !cop.dead) {
+          if (cop._cbzSeat && cop._cbzSeat.veh === car && CBZ.boarding && CBZ.boarding.alight) CBZ.boarding.alight(cop);
+          else if (cop.group) {
+            const cw = seatAt(car, { x: seatOf("driver").x + 1.5, z: seatOf("driver").z });
+            cop.pos.set(cw.x, 0, cw.z); cop.group.position.set(cw.x, 0, cw.z);
+          }
         }
       }
-      if (ch) { ch.cuffed = true; if (CBZ.animChar) CBZ.animChar(ch, 0, dt); }
-      if (sc.t >= ARRIVE_T) {
+      if (ch) { ch.cuffed = true; if (!sc._alighting && CBZ.animChar) CBZ.animChar(ch, 0, dt); }
+      const youBusy = sc._alighting && CBZ.moves && CBZ.moves.carBeat && CBZ.moves.carBeat(P);
+      const copBusy = cop && !cop.dead && (cop._cbzArc || (cop._cbzSeat && cop._cbzSeat.veh === car));
+      if (sc.t >= ARRIVE_T && !youBusy && (!copBusy || sc.t >= ARRIVE_T + 5)) {
         if (sc.cine && CBZ.cineAbort) { try { CBZ.cineAbort(); } catch (e) {} }
         sc.cine = false;
         // the unit stays PARKED at the jail (ai stays off) rather than rejoining
         // traffic from a place it was never routed to.
         if (sc.car) { sc.car._arrestRide = false; sc.car.ai = false; sc.car.v = 0; }
+        endCarJob(sc);
         sc.phase = "walkin"; sc.t = 0;
         sc._escTried = false;                        // his hand goes back on your arm for the walk-in
       }
@@ -1568,6 +1650,7 @@
 
     // ---------- 7. THROUGH THE GATE TO THE DESK ----------
     if (sc.phase === "walkin") {
+      if (cop) cop._pulling = false;
       const gate = sc.gate || (sc.gate = gateFor(sc));
       if (!gate) { if (sc.take) sc.take.finish(); bookIn(sc); return; }
       // A GATE WITH A WAY IN (an island station: the step, inside the door,
@@ -1676,45 +1759,225 @@
       cop.speed = 0;
       return d;
     }
+    /* NO HANDS ON YOU, NO MARCH. This branch used to walk the player himself
+       toward the goal (bodyMove with nobody holding him) with the officer
+       trailing behind: a man in cuffs gliding down the street on his own.
+       Now the officer comes to you and takes your arm — the hold above is
+       tried again every half second — and until he has it you stand. */
+    if (ch && CBZ.animChar) CBZ.animChar(ch, 0, dt);
     if (d <= 0.55) {
-      if (ch && CBZ.animChar) CBZ.animChar(ch, 0, dt);
       if (cop && !cop.dead && CBZ.animChar && cop.char) CBZ.animChar(cop.char, 0, dt);
       return 0;
     }
-    const step = Math.min(d - 0.4, WALK_SPD * dt);
-    const ux = dx / d, uz = dz / d;
-    // walked by the collar through the one mover (systems/bodymove.js)
-    if (CBZ.bodyMove) CBZ.bodyMove(P, ux * step, 0, uz * step, _walkO);
-    else { P.pos.x += ux * step; P.pos.z += uz * step; }
-    P.vy = 0; P.grounded = true;
-    if (ch && ch.group) {
-      ch.group.position.set(P.pos.x, 0, P.pos.z);
-      ch.group.rotation.y = Math.atan2(ux, uz);
-      if (CBZ.animChar) CBZ.animChar(ch, step / Math.max(dt, 1e-4), dt);
-    }
-    // ease the lens toward where you are being taken — slowly enough that the
-    // player can still look around while marched (never a locked camera).
-    if (CBZ.cam) {
-      const want = Math.atan2(ux, uz) + Math.PI;
-      CBZ.cam.yaw = CBZ.lerpAngle ? CBZ.lerpAngle(CBZ.cam.yaw, want, 1 - Math.pow(0.55, dt)) : want;
+    const sc0 = arrestScene;
+    if (sc0) {
+      sc0._escRetry = (sc0._escRetry || 0) - dt;
+      if (sc0._escRetry <= 0) { sc0._escRetry = 0.5; if (!(sc0.escS && !sc0.escS.done)) sc0._escTried = false; }
     }
     if (cop && !cop.dead && cop.group && CBZ.moves) {
-      // the officer holds the slot behind you through the motor, fed forward
-      // with the pace he is marching you at: no chase-and-stop, no heading snap
-      const back = (CBZ.cityRestrain && CBZ.cityRestrain.ESCORT_D) || 0.9;
-      const bx = P.pos.x - ux * (back + 0.55), bz = P.pos.z - uz * (back + 0.55);
-      const m = CBZ.moves.motor(cop);
-      const v = step / Math.max(dt, 1e-4);
-      _copEscort.vffX = ux * v; _copEscort.vffZ = uz * v;
-      _copEscort.face = Math.atan2(ux, uz);
-      CBZ.moves.step(m, cop.pos, cop.group.rotation.y, bx, bz, _copEscort, dt);
-      cop.group.rotation.y = m.yaw;
-      cop.pos.y = 0; cop.speed = 0;
-      cop.group.position.set(cop.pos.x, 0, cop.pos.z);
-      if (cop.target) cop.target.set(cop.pos.x, 0, cop.pos.z);
-      if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, m.gs, dt);
+      const ux = d > 0.01 ? dx / d : 0, uz = d > 0.01 ? dz / d : 1;
+      copWalkTo(cop, P.pos.x - ux * 0.75, P.pos.z - uz * 0.75, dt, P.pos.x, P.pos.z);
     }
+    return Math.max(d, 0.0002);
+  }
+
+  /* ============================================================
+     THE UNIT'S BACK SEAT — the door, the seat, the officer at the car
+     ============================================================ */
+  const seats = () => CBZ.carSeats || null;
+  // car-local (x, z) -> world, in the car's own heading (carseats.js's frame)
+  function carPt(car, lx, lz) {
+    const h = car.heading || 0;
+    return { x: car.pos.x + lx * Math.cos(h) + lz * Math.sin(h), z: car.pos.z - lx * Math.sin(h) + lz * Math.cos(h) };
+  }
+  function carLocal(car, wx, wz) {
+    const h = car.heading || 0, dx = wx - car.pos.x, dz = wz - car.pos.z;
+    return { x: dx * Math.cos(h) - dz * Math.sin(h), z: dx * Math.sin(h) + dz * Math.cos(h) };
+  }
+  // the kerb-side back seat (the car's right), else the other back seat, else up front
+  function arrestSeatId(car, prefer) {
+    const S = seats(); if (!S || !car) return null;
+    const order = prefer === "rearL" ? ["rearL", "rearR", "shotgun"] : ["rearR", "rearL", "shotgun"];
+    for (let i = 0; i < order.length; i++) {
+      if (S.seat(car, order[i]) && !S.occupant(car, order[i])) return order[i];
+    }
+    return null;
+  }
+  // where you stand to be put through that seat's door
+  function seatStand(car, id) {
+    const B = CBZ.boarding;
+    const f = id && B && B.seatFor ? B.seatFor(car, id) : null;
+    return f ? { x: f.x, z: f.z } : null;
+  }
+  // beside the open door's back edge, out of its swing: where he holds it
+  function doorSpot(car, id) {
+    const S = seats(); const st = S && S.seat(car, id);
+    const d = st && st.doorId ? S.door(car, st.doorId) : null;
+    if (!d) return null;
+    return carPt(car, d.side * (Math.abs(d.x) + 0.6), d.z0 - 0.45);
+  }
+  // a crowd between you and the car is told to move, and moves
+  let wayT = -1e9;
+  function clearWay(cop) {
+    const P = CBZ.player; if (!P) return;
+    const peds = CBZ.cityPeds || [];
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (!p || p.dead || p.restraint || p.inCar || p._npcAttached || p._cbzArc || p.culled || !p.pos || !p.target || !p.target.set) continue;
+      const dx = p.pos.x - P.pos.x, dz = p.pos.z - P.pos.z, d = Math.hypot(dx, dz);
+      if (d > 2.8 || d < 0.01) continue;
+      p.state = "walk"; p.path = null; p.pause = 0;
+      p.target.set(p.pos.x + dx / d * 3.2, 0, p.pos.z + dz / d * 3.2);
+      p.fear = Math.max(p.fear || 0, 2);
+    }
+    if (cop && !cop.dead && CBZ.citySay && (CBZ.now || 0) - wayT > 5000) {
+      wayT = CBZ.now || 0;
+      try { CBZ.citySay(cop, "Move!", "#9fc3ff", { secs: 1.4, force: true }); } catch (e) {}
+    }
+  }
+  // the take has not moved you for a while (arrest.js onStall)
+  function stalled(hh) {
+    const sc = arrestScene;
+    if (!sc || sc.take !== hh) return;
+    sc._stalls = (sc._stalls | 0) + 1;
+    clearWay(hh.officer);
+    hh.path = null; hh.pathT = 0;                  // a fresh plan from where you are
+    // twice stuck on the way to one door: the other side of the car
+    if (sc.phase === "walk" && sc.car && sc._stalls % 2 === 0) {
+      const alt = arrestSeatId(sc.car, sc._seatId === "rearR" ? "rearL" : "rearR");
+      if (alt) sc._seatId = alt;
+    }
+  }
+  // an officer walking to a point through the one motor (CBZ.moves)
+  const _copWalk = { speed: 1.6, stop: 0.2, face: null, lod: 1 };
+  function copWalkTo(cop, x, z, dt, faceX, faceZ) {
+    if (!cop || cop.dead || !cop.group || !CBZ.moves) return 0;
+    const d = Math.hypot(x - cop.pos.x, z - cop.pos.z);
+    const m = CBZ.moves.motor(cop);
+    const want = faceX != null ? Math.atan2(faceX - cop.pos.x, faceZ - cop.pos.z) : null;
+    if (d > 0.25) {
+      _copWalk.face = d < 1.2 ? want : null;
+      CBZ.moves.step(m, cop.pos, cop.group.rotation.y, x, z, _copWalk, dt);
+      cop.group.rotation.y = m.yaw;
+    } else if (want != null) cop.group.rotation.y = CBZ.moves.face(m, cop.group.rotation.y, want, dt);
+    cop.group.position.set(cop.pos.x, cop.pos.y || 0, cop.pos.z);
+    if (cop.target && cop.target.set) cop.target.set(cop.pos.x, 0, cop.pos.z);
+    cop.speed = 0;
+    if (CBZ.animChar && cop.char) CBZ.animChar(cop.char, d > 0.25 ? (m.gs || 0) : 0, dt);
     return d;
+  }
+  // the door leaf through a beat, with no hand of yours on it (yours are tied)
+  function leafBeat(car, id) {
+    const B = CBZ.boarding;
+    return function (name, u) {
+      let t = 0;
+      if (name === "pull") t = 0.55 * u;
+      else if (name === "swing") t = 0.55 + 0.45 * u;
+      else if (name === "open") t = u;
+      else if (name === "wait" || name === "in" || name === "out" || name === "step") t = 1;
+      else if (name === "shut") t = 1 - u;
+      if (B && B.door) B.door(car, id, t);
+    };
+  }
+  function startBoard(sc) {
+    const P = CBZ.player, car = sc.car, B = CBZ.boarding, MV = CBZ.moves, id = sc._seatId;
+    if (!P || !car || !id || !B || !B.pullSpec || !MV || !MV.board) return null;
+    const V = B.pullSpec(car, id, P, {});
+    if (!V) return null;
+    V.beat = leafBeat(car, id);
+    const job = { done: false, fail: false };
+    const ok = MV.board(P, V, {
+      onDone: function () { job.done = true; },
+      onAbort: function () { job.fail = true; },
+    });
+    return ok ? job : null;
+  }
+  // you, in that seat, for as long as the scene holds you (the seat solve
+  // vehicles.js runs for any seat: city/carseats.js's `scene` claim)
+  function seatHold(sc, dt) {
+    const P = CBZ.player, car = sc.car, S = seats();
+    if (!P || !car || !sc.seated || !S) return false;
+    if (!S.occupant(car, sc.seated)) S.claim(car, sc.seated, { kind: "player", ref: P, scene: true });
+    const st = S.seat(car, sc.seated);
+    if (st) { const w = carPt(car, st.x, st.z); P.pos.x = w.x; P.pos.z = w.z; }
+    P.vy = 0; P.grounded = true; P.speed = 0;
+    if (CBZ.playerChar) CBZ.playerChar.cuffed = true;
+    return !!(CBZ.carSeatPlayer && CBZ.carSeatPlayer(car, dt));
+  }
+  function releaseSeat(sc) {
+    const S = seats(), car = sc && sc.car, P = CBZ.player;
+    if (sc) sc._inSeat = false;
+    if (S && car && sc.seated) { const o = S.occupant(car, sc.seated); if (o && o.ref === P) S.release(car, sc.seated); }
+    if (CBZ.carDriverRelease) { try { CBZ.carDriverRelease(); } catch (e) {} }
+  }
+  // view.js asks before standing a seated rig up (nobody driving = no seat)
+  CBZ.cityArrestSeated = function () { const sc = arrestScene; return !!(sc && !sc.finished && sc.seated && sc._inSeat); };
+  function startAlight(sc) {
+    const P = CBZ.player, car = sc.car, B = CBZ.boarding, MV = CBZ.moves, id = sc.seated;
+    releaseSeat(sc);
+    if (!P || !car || !B || !B.pullSpec || !MV || !MV.alight) return false;
+    const V = B.pullSpec(car, id, P, { alight: true });
+    if (!V) return false;
+    V.beat = leafBeat(car, id);
+    return !!MV.alight(P, V, {});
+  }
+  /* HE GETS IN HIMSELF: round the car to his own door (the tail or the nose,
+     whichever is nearer), the same door beats as anybody (CBZ.moves.board),
+     and the seat holds him (city/boarding.js load: npclife). Returns
+     "busy" | "done" | "fallback". */
+  function copBoardTick(sc, dt) {
+    const cop = sc.cop, car = sc.car, S = seats(), B = CBZ.boarding, MV = CBZ.moves;
+    if (!cop || cop.dead) return "done";
+    if (cop._cbzSeat && cop._cbzSeat.veh === car) return "done";
+    const J = sc._cb || (sc._cb = { phase: "go", t: 0, wp: null, wi: 0, mv: 0, seat: null });
+    J.t += dt;
+    if (J.t > 14 || !S || !B || !B.pullSpec || !B.load || !MV || !MV.board) return "fallback";
+    if (!J.seat) {
+      const busyDrv = car.npcDriver && !car.npcDriver.dead;
+      J.seat = (!busyDrv && S.seat(car, "driver") && !S.occupant(car, "driver")) ? "driver"
+        : (S.seat(car, "shotgun") && !S.occupant(car, "shotgun") ? "shotgun" : null);
+      if (!J.seat) return "fallback";
+    }
+    if (J.phase === "go") {
+      if (!J.wp) {
+        const st = S.seat(car, J.seat), m = S.of(car);
+        const side = (st && st.side) || 1;
+        const here = carLocal(car, cop.pos.x, cop.pos.z);
+        J.wp = [];
+        if (here.x * side < 0.4) {
+          // the far flank: round the end of the car he is nearer
+          const half = ((m && m.ci && m.ci.w) || 1.8) / 2 + 0.9;
+          const dims = car.group && car.group.userData && car.group.userData.vehicleDims;
+          const end = (((dims && dims.length) || 4.6) / 2 + 0.9) * (here.z < 0 ? -1 : 1);
+          J.wp.push(carPt(car, -side * half, end), carPt(car, side * half, end));
+        }
+      }
+      const w = J.wp[J.wi];
+      if (w) {
+        if (copWalkTo(cop, w.x, w.z, dt) < 0.6) J.wi++;
+        return "busy";
+      }
+      const V = B.pullSpec(car, J.seat, cop, {});
+      if (!V || !MV.board(cop, V, { onDone: function () { J.mv = 1; }, onAbort: function () { J.mv = -1; } })) return "fallback";
+      J.phase = "board";
+      return "busy";
+    }
+    if (J.mv === 1) return B.load(cop, car, J.seat) ? "done" : "fallback";
+    if (J.mv === -1) return "fallback";
+    return "busy";
+  }
+  // the car job is over (the ride ended, or the arc did): you out of the
+  // seat's hold, him back on his beat
+  function endCarJob(sc) {
+    if (!sc) return;
+    if (sc._inSeat) releaseSeat(sc);
+    const cop = sc.cop;
+    if (cop) {
+      cop._pulling = false;
+      if (cop._cbzSeat && sc.car && cop._cbzSeat.veh === sc.car && CBZ.boarding && CBZ.boarding.alight) {
+        try { CBZ.boarding.alight(cop); } catch (e) {}
+      }
+    }
   }
 
   // THE RIDE'S CAMERA — three shots on city/cinematics.js's director. It also
@@ -1788,15 +2051,19 @@
     }
     // both bodies ride WITH the car, written after it moves so neither trails it
     if (P) {
-      const w = seatAt(car, seatOf("rear"));
-      P.pos.x = w.x; P.pos.z = w.z; P.vy = 0; P.grounded = true; P.speed = 0;
-      if (ch) {
-        ch.cuffed = true;
-        if (ch.group) { ch.group.position.set(w.x, -0.62, w.z); ch.group.rotation.y = car.heading; }
-        if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
+      if (!(sc.seated && sc._inSeat && seatHold(sc, dt))) {
+        // (no seat model: the old pin on the back bench)
+        const w = seatAt(car, seatOf("rear"));
+        P.pos.x = w.x; P.pos.z = w.z; P.vy = 0; P.grounded = true; P.speed = 0;
+        if (ch) {
+          ch.cuffed = true;
+          if (ch.group) { ch.group.position.set(w.x, -0.62, w.z); ch.group.rotation.y = car.heading; }
+          if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
+        }
       }
     }
-    if (cop && !cop.dead) sitRig(cop, car, seatOf("driver"));
+    // the officer sat himself at the wheel (npclife holds him there)
+    if (cop && !cop.dead && !(cop._cbzSeat && cop._cbzSeat.veh === car)) sitRig(cop, car, seatOf("driver"));
   }
 
   function drive(car, heading, spd, dt) {

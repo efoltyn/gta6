@@ -108,14 +108,14 @@
   var R = function () { return CBZ.cityRestrain || null; };
 
   // state -> human label
-  function holdStatus(state) {
+  function holdStatus(state, r) {
+    // city/cartrunk.js: a body put in a car's trunk (or a pickup's bed)
+    if (state === "in_vehicle" && r && r.trunk) return "In the trunk";
     switch (state) {
       case "cuffed": return "Cuffed";
       case "escorted": return "Marching";
-      // "In the trunk" was true of the old hidden rig snapped to the car's
-      // origin. city/boarding.js walks him to a door and sits him on the rear
-      // bench, where he is visible through the glass and shootable — so the
-      // ledger now says where he actually is.
+      // a back seat (city/boarding.js) or a real trunk (city/cartrunk.js,
+      // above): the ledger says where he actually is.
       case "boarding": return "Getting in";
       case "in_vehicle": return "In the back seat";
       case "grappled": return "In your hands";
@@ -155,7 +155,7 @@
         ped: p,
         name: nm(p, "Captive"),
         state: r.state,
-        status: holdStatus(r.state),
+        status: holdStatus(r.state, r),
         icon: holdIcon(r.state),
         dist: dist2D(pp, pos.x, pos.z),
         x: num(pp.x, pos.x), z: num(pp.z, pos.z),
@@ -421,11 +421,10 @@
     var taken = gatherTaken();
 
     // ---- transition toasts ------------------------------------------------
+    // (no "captive in the back, press U" toast: the badge is the news, and a
+    // line telling you which key to press is a tutorial nobody asked for)
     var inVehNow = 0;
     for (var i = 0; i < held.length; i++) if (held[i].state === "in_vehicle") inVehNow++;
-    if (inVehNow > lastInVehicle) {
-      toast("Captive in the back, press [" + KEY_LABEL + "] to track them.", 4.5);
-    }
     lastInVehicle = inVehNow;
     lastHeldCount = held.length;
 

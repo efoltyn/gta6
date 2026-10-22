@@ -426,7 +426,9 @@
     // through either — and a rig left folded at 0.6 scale with no head is the
     // worst possible failure mode. One idempotent call, on the frame that
     // already owns this rig's visibility.
-    if (CBZ.carDriverSeated && CBZ.carDriverSeated()) CBZ.carDriverRelease();
+    // (a scene holding him in a back seat — the arrest ride, city/wanted.js —
+    // is a seat with nobody driving, and stays one)
+    if (CBZ.carDriverSeated && CBZ.carDriverSeated() && !(CBZ.cityArrestSeated && CBZ.cityArrestSeated())) CBZ.carDriverRelease();
     if ((cc && cc.death) || P.dead) { if (fpsOn && CBZ.fpsApplyView) CBZ.fpsApplyView(false); ch.group.visible = true; return; }
     ch.group.visible = !fpsOn;             // FP → hidden body (no face-clip)
   });

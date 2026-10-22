@@ -474,7 +474,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
      in front of him (threat by sight, the one line picker, panic by sight).
      Before read.js / peds.js / prisonvoice.js, which all call it. -->
-<script src="src/systems/voice.js?v=mmmoneygoods1"></script>
+<script src="src/systems/voice.js?v=trunk1022"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -618,7 +618,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=peak1014c"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=butt1022"></script>
+  <script src="src/entities/character.js?v=trunk1022"></script>
   <script src="src/entities/headwear.js?v=armourm1011"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -1508,7 +1508,7 @@ document.body.appendChild(b);}}catch(e){}})();
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->
 <script src="src/city/law.js?v=people1022"></script>
-<script src="src/city/wanted.js?v=people1022"></script>
+<script src="src/city/wanted.js?v=trunk1022"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=boot1013"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
@@ -1518,7 +1518,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gangs.js?v=rounds1013m"></script>
 <script src="src/city/social.js?v=voice1022"></script>
 <script src="src/city/realestate.js?v=tap0929"></script>
-<script src="src/city/view.js?v=hands1022"></script>
+<script src="src/city/view.js?v=trunk1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
 <script src="src/city/peds.js?v=people1022"></script>
@@ -1572,14 +1572,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/aircraft.js?v=rounds1013m"></script>
 <script src="src/city/traffic.js?v=islelaw1022"></script>
-<script src="src/city/carparts.js?v=emg1019"></script>
-<script src="src/city/carbody.js?v=cars2"></script>
+<script src="src/city/carparts.js?v=trunk1022"></script>
+<script src="src/city/carbody.js?v=trunk1022"></script>
 <script src="src/city/carwheels.js?v=cars2"></script>
 <!-- city/carseats.js: the ONE seat model (layouts per body, doors, the
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
-<script src="src/city/carseats.js?v=mrg10200048"></script>
-<script src="src/city/playercars.js?v=mrg10200048"></script>
+<script src="src/city/carseats.js?v=trunk1022"></script>
+<script src="src/city/playercars.js?v=trunk1022"></script>
 <!-- systems/volfx.js: the volumetric fireball / smoke / fire (raymarched boxes
      fitted to the room) + spark streaks, and THE shared 3D noise atlas
      (CBZ.volNoise) that city/nukefx.js also marches. Before crashfx (its
@@ -1587,7 +1587,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/volfx.js?v=mrg10200048"></script>
 <script src="src/city/crashfx.js?v=mrg10200048"></script>
 <script src="src/city/crashdeform.js?v=cardraws1020"></script>
-<script src="src/city/emergencykit.js?v=mrg10200048"></script>
+<script src="src/city/emergencykit.js?v=trunk1022"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
 <script src="src/city/cardyn.js?v=emg1019"></script>
@@ -1595,7 +1595,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=mrg10200048"></script>
-<script src="src/city/vehicles.js?v=mislelaprotes"></script>
+<script src="src/city/vehicles.js?v=trunk1022"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
 <script src="src/city/playeraircraft.js?v=mlandblisles1"></script>
@@ -1675,7 +1675,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
-<script src="src/city/boarding.js?v=ijkl1022"></script>
+<script src="src/city/boarding.js?v=trunk1022"></script>
 <!-- city/pullout.js: THE ONE PULL-OUT VERB. Any human drags whoever sits in
      a stopped car seat out through the real door (CBZ.moves.board beats,
      boarding.js carSpec): the player carjacking, a cop pulling the player or
@@ -1845,7 +1845,9 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=vault1013"></script>
-<script src="src/city/restrain.js?v=people1022"></script>
+<script src="src/city/restrain.js?v=trunk1022"></script>
+<!-- the trunk: a lid that opens, a body that rides in it (restrain.js's stow puts him there) -->
+<script src="src/city/cartrunk.js?v=trunk1022"></script>
 <script src="src/city/custody.js?v=people1022"></script>
 <script src="src/city/combat.js?v=mpeoplegoods1"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
@@ -1984,7 +1986,7 @@ document.body.appendChild(b);}}catch(e){}})();
      crews and feeds zone control). Flag: RACKET_V1. -->
 <script src="src/city/racket.js?v=verbs2b"></script>
 <script src="src/city/aim_dossier.js?v=popup1009b"></script>
-<script src="src/city/captives.js?v=hands1022"></script>
+<script src="src/city/captives.js?v=trunk1022"></script>
 <script src="src/city/millionaires.js?v=ladder1022"></script>
 <script src="src/city/regionlife.js?v=street1009"></script>
 <script src="src/city/modshop.js?v=cd0929"></script>

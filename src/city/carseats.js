@@ -305,6 +305,9 @@
     if (!o) return false;
     if (o.kind === "player") {
       const P = CBZ.player;
+      // `scene`: a seat a scene holds him in without him driving it (the
+      // arrest ride's back seat, city/wanted.js) is his until it lets go
+      if (o.scene) return !!(P && !P.dead);
       return !!(P && !P.dead && P.driving && P._vehicle === car);
     }
     if (o.ambient) {

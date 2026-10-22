@@ -610,9 +610,21 @@
     const beltY = ctx.beltY || (ctx.roofY - 0.45);
     sides(function (s) { sideDecal(root, "body", D.unit(unit, "#f2f4f6"), s, qz, qz - 0.34, beltY - 0.27, beltY - 0.09); });
     // the tailgate / boot lid: POLICE in white over the black paint
-    const tTop = Math.min((ctx.tailTopY || ctx.tailY + 0.2) - 0.04, ctx.tailY + 0.17), tBot = tTop - 0.09;
-    const body = zoneMesh(root, "body");
-    if (body) addSkinDecal(root, body.geometry, D.word("POLICE", "#f2f4f6"), { axis: "z", sign: -1, u0: 0.36, u1: -0.36, v0: tBot, v1: tTop });
+    let tTop = Math.min((ctx.tailTopY || ctx.tailY + 0.2) - 0.04, ctx.tailY + 0.17), tBot = tTop - 0.09;
+    // A LID THAT OPENS carries the word (playercars.js loftLid): laid on the
+    // lid's own skin, in the lid's frame, so it lifts with the boot
+    let lidG = null;
+    for (let i = 0; i < root.children.length; i++) { const o = root.children[i]; if (o.userData && o.userData.carLid) { lidG = o; break; } }
+    const lidSkin = lidG ? zoneMesh(lidG, "lid") : null;
+    if (lidSkin && ctx.lidCutY != null) {
+      const hy = lidG.position.y;
+      tBot = ctx.lidCutY + 0.015;
+      tTop = Math.max(tBot + 0.04, Math.min((ctx.tailTopY || ctx.tailY + 0.2) - 0.025, tBot + 0.09));
+      addSkinDecal(lidG, lidSkin.geometry, D.word("POLICE", "#f2f4f6"), { axis: "z", sign: -1, u0: 0.36, u1: -0.36, v0: tBot - hy, v1: tTop - hy });
+    } else {
+      const body = zoneMesh(root, "body");
+      if (body) addSkinDecal(root, body.geometry, D.word("POLICE", "#f2f4f6"), { axis: "z", sign: -1, u0: 0.36, u1: -0.36, v0: tBot, v1: tTop });
+    }
     // the roof number, for the helicopter
     const upper = zoneMesh(root, "upper");
     const rz = ctx.roofZ || 0, rl = ctx.roofLen || 1;
@@ -635,7 +647,9 @@
         R.lamp(s > 0 ? "r" : "b", s > 0 ? "B" : "A", x, gy, z + 0.005, 0.13, 0.035, 0, false);
       });
       // rear: a pair in the tail, inboard of the lamps
-      const ty = (ctx.tailTopY || ctx.tailY + 0.2) - 0.03;
+      // (under the lip of an opening lid: the bar is one merged rig, it cannot lift with it)
+      let ty = (ctx.tailTopY || ctx.tailY + 0.2) - 0.03;
+      if (ctx.lidCutY != null) ty = Math.min(ty, ctx.lidCutY - 0.035);
       sides(function (s) {
         const x = s * w * 0.17, z = PT.surfZ(ctx, -1, x, ty);
         R.lamp(s > 0 ? "r" : "b", s > 0 ? "B" : "A", x, ty + 0.01, z - 0.005, 0.12, 0.03, Math.PI, false);

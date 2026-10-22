@@ -281,6 +281,8 @@
   }
   function unseatBody(ped, car) {
     dropCaptive(car, ped);
+    // in a trunk: out over the sill (city/cartrunk.js), where he was put
+    if (ped._inTrunk && CBZ.carTrunk) { CBZ.carTrunk.out(ped, {}); return; }
     // a body city/boarding.js seated (or is walking to the door) leaves
     // through its door arc: CBZ.cityUnseat is the ONE sanctioned exit
     if ((ped._cbzSeat || ped._cbzArc) && CBZ.boarding && CBZ.boarding.alight) {
@@ -433,7 +435,7 @@
     I.refresh();
   }
 
-  /* ---- THE MAN IN YOUR HANDS GOES IN THE BACK (stow) ------------------------
+  /* ---- THE MAN IN YOUR HANDS GOES IN THE TRUNK, OR THE BACK (stow) --------
      OWNER (2026-10-22): "when I press E to drive a car but I'm holding a
      person over my shoulder, it should put them in the trunk or backseat: my
      character should physically open it and throw them in, unless I drop
@@ -441,26 +443,30 @@
 
      Every way into a car ends in CBZ.cityEnterVehicle (F, the ride router,
      the door pin, a tap on the car, the pad's Y), so this is one wrap on it.
-     With a man in your hands (a grip, a carry, a drag) and a free seat that
-     is not the wheel, the press becomes: you walk to that seat's door (the
-     back first: CBZ.boarding.seatFor), its real door swings open
-     (CBZ.boarding.door), you set him down into it and he is on the seat
-     (CBZ.boarding.load: the one seat placement every boarding ends in), the
-     door shuts, and then the ordinary entry runs (your own door, the wheel).
-     Drop him first (tap E) and F is just F. A full car, or one somebody is
-     driving: F is just F, and he drops when you get in.
+     With a man in your hands (a grip, a carry, a drag) the press becomes a
+     beat at whichever of the car's two places for him you are nearer:
 
-     NO TRUNK. No car body has a lid that opens, and a man put in a shut box
-     nobody can see is exactly the hidden-rig bug this file deleted ("they
-     just disappear"). The back seat is behind glass, through a real door.
+       THE TRUNK   (city/cartrunk.js: a boot, a tailgate's cargo floor, a
+                   pickup's bed) you walk to the back of the car, the lid
+                   comes up, he goes in off your shoulder and the lid slams.
+       THE BACK    a free seat that is not the wheel: you walk to its door
+                   (CBZ.boarding.seatFor), the real door swings open
+                   (CBZ.boarding.door), you set him down into it
+                   (CBZ.boarding.load), the door shuts.
 
-     He rides as cargo: restraint "in_vehicle" with `loose` (no ties on him).
-     Drag out (E on the car, rs-unseat) takes him out again a free man; a
-     wreck lets him go. A cuffed man is not carried: he is marched, then
-     Stuffed in (rs-stuff). */
+     Then the ordinary entry runs (your own door, the wheel), unless it was
+     the trunk's own pin ("Trunk") that started it. Drop him first (tap E)
+     and F is just F. A car with neither (a full coupe, one somebody is
+     driving): F is just F, and he drops when you get in.
+
+     He rides as cargo: restraint "in_vehicle" with `loose` (no ties on him;
+     `trunk` when he is in one). Drag out (the back seat) / Take out (the
+     trunk) has him out again a free man; a wreck lets him go. A cuffed man is
+     not carried: he is marched, then Stuffed in (rs-stuff). */
   const STOW_WALK_MAX = 6;        // s: the walk to the door gives up after this
   const STOW_REACH = 0.85;        // m from the stand point that counts as at the door
   const STOW_OPEN_T = 0.4, STOW_PUT_MAX = 1.4, STOW_SHUT_T = 0.35;
+  const LID_UP_MAX = 0.9, LID_LAND_T = 0.45;
   let stowJob = null;
   function stowSeat(car) {
     const B = CBZ.boarding;
@@ -469,15 +475,27 @@
     if (CBZ.carNpcDriven && CBZ.carNpcDriven(car)) return null;
     return B.seatFor(car);
   }
-  function stowStart(car) {
+  function stowTrunkAt(car) {
+    const TR = CBZ.carTrunk;
+    if (!car || car.dead || car.player || !TR || !TR.of(car) || !TR.room(car)) return null;
+    if ((car.npcDriver && !car.npcDriver.dead) || (CBZ.carNpcDriven && CBZ.carNpcDriven(car))) return null;
+    return TR.standAt(car);
+  }
+  // opts.trunk: only the trunk; opts.enter === false: do not get in after
+  function stowStart(car, opts) {
+    opts = opts || {};
     const P = CBZ.player;
     if (stowJob || !P || P.dead || P.driving || P._aircraft || !CBZ.economyMode()) return false;
     const t = handTarget();
     if (!t || t.dead || t !== handPed || st(t) !== "grappled") return false;
-    const seat = stowSeat(car);
-    if (!seat) return false;
+    const T = stowTrunkAt(car);
+    const seat = opts.trunk ? null : stowSeat(car);
+    let trunk = !!T && (!!opts.trunk || !seat);
+    // both: the nearer of the two, so F at the back of the car is the trunk
+    if (T && seat && !opts.trunk) trunk = Math.hypot(T.x - P.pos.x, T.z - P.pos.z) < Math.hypot(seat.x - P.pos.x, seat.z - P.pos.z);
+    if (!trunk && !seat) return false;
     t._stowing = true;
-    stowJob = { car: car, seatId: seat.id, ped: t, phase: "walk", t: 0 };
+    stowJob = { car: car, seatId: trunk ? null : seat.id, trunk: trunk, ped: t, phase: "walk", t: 0, enter: opts.enter !== false };
     return true;
   }
   function stowKeys(on) { const k = CBZ.keys; if (k) { k.w = !!on; if (!on) k.shift = false; } }
@@ -498,6 +516,7 @@
     if (j.phase === "walk") stowKeys(false);
     const p = j.ped;
     p._stowing = false;
+    if (j.trunk && j.car && !p._inTrunk && CBZ.carTrunk) CBZ.carTrunk.lid(j.car, 0);
     if (st(p) === "grappled" && !held(p)) { if (p === handPed) { handPed = null; handT = null; } letLoose(p); }
   }
   function stowSeatIn(j) {
@@ -515,6 +534,22 @@
     I.refresh();
     return true;
   }
+  // off your shoulder and into the trunk (city/cartrunk.js put: the carry
+  // ends in his throw into the box, never a set-down on the road first)
+  function stowTrunkIn(j) {
+    const p = j.ped, car = j.car;
+    p._stowing = false;
+    if (p === handPed) { handPed = null; handT = null; }
+    const r0 = p.restraint;
+    if (!CBZ.carTrunk || !CBZ.carTrunk.put(p, car)) {
+      if (st(p) === "grappled") { if (held(p)) letGo(p, "set"); letLoose(p); }
+      return false;
+    }
+    p.restraint = { state: "in_vehicle", by: (r0 && r0.by) || "player", t: 0, vehicle: car, loose: true, trunk: true };
+    track(p);
+    I.refresh();
+    return true;
+  }
   CBZ.onUpdate(33.2, function (dt) {
     const j = stowJob;
     if (!j) return;
@@ -522,7 +557,11 @@
     if (!CBZ.economyMode() || g.state !== "playing" || !P || P.dead || P.driving || p.dead ||
       !car || car.dead || !car.group || !car.group.parent) { stowAbort(); return; }
     j.t += dt;
-    const S = CBZ.boarding.seatFor(car, j.seatId);
+    const TR = CBZ.carTrunk;
+    // where you stand, and what you face: the back of the car, or the door
+    let S = null;
+    if (j.trunk) { const T = TR ? TR.standAt(car) : null; if (T) S = { x: T.x, z: T.z, doorX: T.faceX, doorZ: T.faceZ }; }
+    else S = CBZ.boarding.seatFor(car, j.seatId);
     if (!S) { stowAbort(); return; }
     if (j.phase === "walk") {
       if (!held(p)) { stowAbort(); return; }                 // he was dropped on the way
@@ -530,12 +569,38 @@
       if (d <= STOW_REACH || (j.t > STOW_WALK_MAX && d < 2.2)) {
         stowKeys(false);
         j.phase = "open"; j.t = 0;
-        if (CBZ.sfx) { try { CBZ.sfx("door_open"); } catch (e) {} }
+        if (!j.trunk && CBZ.sfx) { try { CBZ.sfx("door_open"); } catch (e) {} }
         return;
       }
       if (j.t > STOW_WALK_MAX) { stowAbort(); return; }
       faceTo(S.x, S.z, dt, 9);
       stowKeys(true);
+      return;
+    }
+    if (j.trunk) {
+      faceTo(S.doorX, S.doorZ, dt, 12);
+      const T = TR.of(car), hasLid = !!(T && T.lid);
+      if (j.phase === "open") {
+        if (!held(p)) { stowAbort(); return; }
+        // the free hand lifts the lid (a bed has none) and he goes in
+        if (hasLid) TR.lid(car, 1);
+        if (!hasLid || TR.openT(car) >= 0.85 || j.t >= LID_UP_MAX) {
+          j.phase = stowTrunkIn(j) ? "land" : "enter"; j.t = 0;
+        }
+        return;
+      }
+      if (j.phase === "land") {
+        if (j.t < LID_LAND_T) return;                            // he lands in the box
+        if (hasLid) TR.lid(car, 0);                              // and it slams
+        j.phase = "shut"; j.t = 0;
+        return;
+      }
+      if (j.phase === "shut") {
+        if (hasLid && TR.openT(car) > 0.02 && j.t < 0.6) return;
+        j.phase = "enter";
+      }
+      stowJob = null;
+      if (j.enter && CBZ.cityEnterVehicle) CBZ.cityEnterVehicle(car);
       return;
     }
     if (j.phase === "open") {
@@ -560,7 +625,7 @@
     }
     // and now you get in, through your own door
     stowJob = null;
-    if (CBZ.cityEnterVehicle) CBZ.cityEnterVehicle(car);
+    if (j.enter && CBZ.cityEnterVehicle) CBZ.cityEnterVehicle(car);
   });
   // one wrap on the one way into a car (after city/boarding.js's door arc)
   let stowWrapTries = 0;
@@ -733,6 +798,12 @@
         } else ped.speed = 0;
       }
 
+      if (r.state === "in_vehicle" && r.trunk) {
+        // city/cartrunk.js holds him (the lid, the crash, the water, the law);
+        // a trunk that let him out without saying so has ended the record
+        if (!ped._inTrunk) release(ped, { silent: true });
+        continue;
+      }
       if (r.state === "in_vehicle") {
         const car = r.vehicle;
         // car blown up / despawned → they tumble out at the wreck, still tied
@@ -1001,6 +1072,9 @@
     stateOf: st, isWanted, bountyFor,
     cuff, escort, stand, release, seat, unseat, turnIn, handOff,
     releaseAll,
+    // the man in your hands into this car's trunk (city/cartrunk.js's pin)
+    stowTrunk: function (car, opts) { return stowStart(car, Object.assign({ trunk: true }, opts || {})); },
+    stowBusy: function () { return !!stowJob; },
     // the player side of the same verbs (city/wanted.js's arrest arc)
     cuffPlayer, playerCuffed, posePlayerCuffs,
     // the march-one-pace-ahead offset, so the perp walk does not re-type it

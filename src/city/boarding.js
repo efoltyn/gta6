@@ -111,7 +111,9 @@
   function ordersOn() { return CF.FOLLOWER_ORDERS_V1 !== false; }
   function carArcOn() { return on() && CF.CAR_DOOR_ARC !== false; }
   function G() { return CBZ.game; }
-  function inCity() { return CBZ.game && CBZ.game.mode === "city"; }
+  // wherever the cars are: Gang City and the islands (a hostage boards a
+  // car on the archipelago exactly as he does in the city)
+  function inCity() { return !!(CBZ.economyMode && CBZ.economyMode()); }
   function note(s, t) { if (CBZ.city && CBZ.city.note) CBZ.city.note(s, t || 1.6); }
   function nameOf(p) { return (p && (p.name || p.job)) || "They"; }
 
@@ -1560,7 +1562,8 @@
   const _dwT = { x: 0, y: 0, z: 0 };
   CBZ.onUpdate(33.3, function () {
     doorCar = null;
-    if (!carArcOn() || !inCity() || !CBZ.prisonPrompt || pArc) return;
+    // (the city's pin: the islands pin their own "Drive" on the car, world/island_vehicles.js)
+    if (!carArcOn() || !CBZ.game || CBZ.game.mode !== "city" || !CBZ.prisonPrompt || pArc) return;
     const P = CBZ.player;
     if (!P || P.dead || P.driving || P._aircraft || P._doorArc) return;
     const S = CBZ.carSeats, list = CBZ.cityCars;
