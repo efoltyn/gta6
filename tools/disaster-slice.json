@@ -4097,6 +4097,7 @@
   "src/city/nukefx.js",
   "src/city/aircraftimpact.js",
   "src/city/shops.js",
+  "src/city/shopfloor.js",
   "src/city/gunstore.js",
   "src/city/gunmods.js",
   "src/systems/sights.js",

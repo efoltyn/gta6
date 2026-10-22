@@ -490,7 +490,10 @@
   // ---- per-frame: maintain the dressed set (cheap, ≤60), time-slice the scan ----
   let cursor = 0;
   CBZ.onUpdate(34.7, function (dt) {
-    if (g.mode !== "city") {
+    // YOUR ice is worn wherever money is real (Gang City and the islands,
+    // CBZ.economyMode): a watch bought on an island is on your wrist there.
+    // The street's dressed peds below are Gang City's alone.
+    if (!(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) {
       if (dressed.length) clearAll();
       if (_pMeshes) undressPlayer();           // jail jumpsuit wears no city ice
       if (CBZ.jewel && CBZ.jewel.setPlayerRing) CBZ.jewel.setPlayerRing(null);
@@ -502,6 +505,7 @@
     // a signature compare, so an unchanged inventory costs ~nothing.
     _pT -= dt || 0.016;
     if (_pDirty || _pT <= 0) { _pT = 1; _pDirty = false; syncPlayer(); syncPlayerRag(false); syncPlayerHat(false); }
+    if (g.mode !== "city") { if (dressed.length) clearAll(); return; }
     // lazy idempotent wrapping — load order with peds.js/social.js doesn't matter,
     // wrappers chain through whatever is current.
     if (!_wRob) _wRob = wrapStrip("cityRobPed");

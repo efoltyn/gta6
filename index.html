@@ -474,7 +474,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
      in front of him (threat by sight, the one line picker, panic by sight).
      Before read.js / peds.js / prisonvoice.js, which all call it. -->
-<script src="src/systems/voice.js?v=money1022"></script>
+<script src="src/systems/voice.js?v=goods1022"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -1018,9 +1018,9 @@ document.body.appendChild(b);}}catch(e){}})();
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
 <script src="src/city/itemicons.js?v=vit3"></script>
-<script src="src/systems/hotbar_model.js?v=onebar0930"></script>
+<script src="src/systems/hotbar_model.js?v=goods1022"></script>
 <script src="src/systems/helditem_model.js?v=mil0929"></script>
-<script src="src/systems/inventory.js?v=haskbd1014"></script>
+<script src="src/systems/inventory.js?v=goods1022"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
@@ -1049,7 +1049,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
 <script src="src/systems/runstats.js?v=end1"></script>
-<script src="src/systems/touch.js?v=tch1022b"></script>
+<script src="src/systems/touch.js?v=goods1022"></script>
 <script src="src/systems/touch_vehicle.js?v=deck1011"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
@@ -1060,7 +1060,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ijkl1022"></script>
-<script src="src/systems/fpsmode.js?v=venue1022"></script>
+<script src="src/systems/fpsmode.js?v=goods1022"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=voice1022"></script>
 
@@ -1499,7 +1499,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/moves_posture.js?v=jailai1020"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=hands1022"></script>
-<script src="src/city/economy.js?v=venue1022"></script>
+<script src="src/city/economy.js?v=goods1022"></script>
 <script src="src/city/clothes.js?v=shoulder1014"></script>
 <script src="src/city/outfits.js?v=armourm1011"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
@@ -1551,7 +1551,7 @@ document.body.appendChild(b);}}catch(e){}})();
      bump), peds.js (trade + greet). -->
 <script src="src/city/read.js?v=voice1022"></script>
 <script src="src/city/sizeup.js?v=lvl1y"></script>
-<script src="src/city/bling.js?v=shades1009b"></script>
+<script src="src/city/bling.js?v=goods1022"></script>
 <script src="src/city/club.js?v=ladder1022"></script>
 <!-- THE STREET (city/streetlife.js): the people on every city pavement,
      density by place and hour from the zoning field, in pairs and groups, on
@@ -1733,7 +1733,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/aircraftimpact.js?v=mrg10200048"></script>
 <script src="src/city/metro_promote.js?v=mrg10200048"></script>
 <script src="src/city/shops.js?v=venue1022"></script>
-<script src="src/city/gunstore.js?v=venue1022"></script>
+<!-- city/shopfloor.js: what every counter shop shares (the clerk, the till of
+     goods in your hands not yet paid for, hot goods, the islands' shop rooms
+     and showcase glass). Before gunstore.js, jewelry.js, pawnshop.js. -->
+<script src="src/city/shopfloor.js?v=goods1022"></script>
+<script src="src/city/gunstore.js?v=goods1022"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <script src="src/city/gunmods.js?v=me6f1ee"></script>
@@ -1744,7 +1748,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
-<script src="src/city/jewelry.js?v=venue1022"></script>
+<script src="src/city/jewelry.js?v=goods1022"></script>
 <script src="src/city/careers.js?v=dismiss1014"></script>
 <script src="src/city/activities.js?v=nored0930"></script>
 <script src="src/city/heists.js?v=ijkl1022"></script>
@@ -1755,7 +1759,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=ijkl1022"></script>
+<script src="src/city/verbwheel.js?v=goods1022"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1837,7 +1841,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/roleverbs.js?v=vault1013"></script>
 <script src="src/city/restrain.js?v=islelaw1022"></script>
 <script src="src/city/custody.js?v=islelaw1022"></script>
-<script src="src/city/combat.js?v=butt1022"></script>
+<script src="src/city/combat.js?v=goods1022"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
      entries above). Loads right after city/combat.js, whose lightAttack/
@@ -1857,7 +1861,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/zillow.js?v=fac1009"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <script src="src/city/bank.js?v=money1022"></script>
-<script src="src/city/pawnshop.js?v=venue1022"></script>
+<script src="src/city/pawnshop.js?v=goods1022"></script>
 <script src="src/city/clothingstore.js?v=shops1022"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores

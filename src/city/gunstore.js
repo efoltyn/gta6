@@ -1,15 +1,23 @@
 /* ============================================================
-   city/gunstore.js — the WALK-IN gun store: the wall IS the menu.
+   city/gunstore.js — THE GUN STORE: the guns are the goods.
 
-   WHY: a status gun deserves a counter, a wall, and a clerk. Walking into
-   the store, SEEING the actual AK standing in the rack behind the register,
-   and walking out holding it IS the purchase fantasy; menus are for
-   groceries. The guns lot's shell (buildings.js stamps lot.building.gunstore)
-   gets the city's real purchasable stock as the REAL appearance models
-   (CBZ.buildActorWeapon, the same wood-and-steel AK every NPC carries).
-   Walk up, look at the piece, [E]: cash leaves, the gun's in your hands with
-   starter rounds, and the rack shows an empty yoke until the restock truck
-   refills it. The clerk is the SAME vendor ped peds.js already posts.
+   Owner (2026-10-22): "In a gun store, the products are the physical guns
+   that you can pick up... like the armory in the jail game: real stuff in
+   there." Every gun on the wall and under the glass is the REAL appearance
+   model (CBZ.buildActorWeapon, the same wood-and-steel AK every NPC
+   carries). [Take] lifts it off its yoke with your hand (CBZ.verbs.pickup)
+   and it is in your hands; the register rings up what you are holding
+   ([Buy] at the counter, the clerk alive behind it); [Put back] hangs it up
+   again; walking out of the door with it is stealing it — the clerk shouts,
+   it is reported, it is hot, and the shopkeeper brings up the shotgun from
+   under the counter (city/shopfloor.js). Rounds, frags, charges and plates
+   are sold over the counter.
+
+   ONE STORE PER SHOP: Gang City's (its lot stamped lot.building.gunstore by
+   city/buildings.js) and one per island gun shop (CBZ.islandVenue "guns":
+   the ground floor cleared, a back room with the safe behind a partition,
+   the rack on the partition, the counter in front of it, a shopkeeper at
+   his post). Both are the same code below.
 
    WHAT THE ROOM IS (de-slop pass, 2026-09-27). Everything here is built
    from parts at real dimensions and merged per material (one draw call per
@@ -29,18 +37,11 @@
      • an open wooden grenade crate with a divider tray of real frags.
      • the armoury: character rigs in studio cream on round display bases,
        wearing armor.js's real kit.
-     • the gunsmith bench: butcher-block top on a steel frame, pegboard with
-       tools, a bench vise, a cleaning mat and an articulated lamp.
-   Deleted as slop: the flat 12 cm-proud pegboard box, the glowing green
-   "trade accent" strip, the glowing glass box and green under-glow slab,
-   two olive boxes posing as ammo, the olive boxes under the frags and the
-   C4, a four-box bench with a GLOWING vise, and every floating label sprite.
-   Rifles, carbines, SMGs and the LMG used to be sorted into the COUNTER
-   CASE (only weaponSlot "long" went on the wall), so an AK and an M249 lay
-   in a 36 cm glass box: only pistol/utility pieces go under glass now.
+     • the gunsmith bench (Gang City): butcher-block top on a steel frame,
+       pegboard with tools, a bench vise, a cleaning mat and a lamp.
 
-   Prices/stock come from cityEcon (buyPrice/stockFor). Perf: built once per
-   city on a single group; fixtures merge to a handful of meshes; the whole
+   Prices/stock come from cityEcon (buyPrice/stockFor). Perf: built when you
+   come down the street; fixtures merge to a handful of meshes; the whole
    display is visibility-gated by distance.
 ============================================================ */
 (function () {
@@ -344,18 +345,23 @@
     CBZ.storeFixtureKit = { create: function () { return new Kit(); }, yawOf, seat, counterOf, dressCounter, till, showcase, tagCard, tentCard, rng };
   })();
   const KIT = CBZ.storeFixtureKit;
+  const SF = function () { return CBZ.shopFloor || null; };
 
   const RESTOCK = 150;       // seconds a SOLD slot stays a gap (the truck's coming)
   const VIS_R = 55;          // display group draws only when you're near the shop
-  const RACK_REACH = 6.0;    // long guns are bought ACROSS the counter (real gun-store style)
+  const DRESS_R = 110;       // past the draw gate, with room to build it unseen
+  const RACK_REACH = 6.0;    // long guns come ACROSS the counter (real gun-store style)
   const CASE_REACH = 3.0;    // counter glass / ammo shelf: walk right up
   const RACK_DOT = 0.60;     // look-cone for the wall (farther away, more central)
-  const CASE_DOT = 0.82;     // tighter cone up close so the clerk's E ("Shop here") isn't stolen
+  const CASE_DOT = 0.82;     // tighter cone up close
   const LEAN = 0.06;         // radians a racked long gun leans back into its yoke
 
-  const S = { lot: null, gs: null, group: null, slots: [], built: false,
-              near: false, cx: 0, cz: 0,
-              arena: null, noLotArena: null };
+  /* ONE STORE PER SHOP. Gang City's (its lot from city/buildings.js) and one
+     per island gun shop (CBZ.islandVenue "guns"). Every function below takes
+     the store it works on; the fixtures ask whichever store you are in. */
+  const STORES = [];
+  let cityStore = null;
+  const CITY = { noLotArena: null, arena: null };
 
   function econ() { return CBZ.cityEcon || null; }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
@@ -393,16 +399,53 @@
     return best;
   }
 
-  // ---- build the displays once per city ------------------------------------
-  function buildDisplays() {
+  /* ---- A STORE ---------------------------------------------------------
+     o: { kind: "city"|"island", lot, gs (the buildings.js gunstore shape),
+          fy (finished floor, world y), root (parent for the displays),
+          clerk (city/shopfloor.js adapter), where, bench, arena,
+          inStore(x, z), nearDoor?(x, z), behind?(x, z) } */
+  function makeStore(o) {
+    const gs = o.gs;
+    const S = {
+      kind: o.kind, lot: o.lot, gs: gs, FY: o.fy, root: o.root, where: o.where, arena: o.arena || null,
+      bench: o.bench !== false, armorSpots: o.armorSpots || null, group: null, slots: [], dressed: false, near: false, dead: false,
+      cx: (gs.bounds.minX + gs.bounds.maxX) / 2, cz: (gs.bounds.minZ + gs.bounds.maxZ) / 2,
+      clerk: o.clerk, inStore: o.inStore, cols: [], tillCand: null, till: null,
+    };
+    const SFx = SF();
+    S.till = SFx ? SFx.till({ clerk: o.clerk, inStore: o.inStore, nearDoor: o.nearDoor, behind: o.behind, where: o.where }) : null;
+    // the register: where you pay for what you are holding (the counter's
+    // customer edge, in front of the till)
+    const C = gs.counter;
+    const cust = { x: -C.tz, z: C.tx };                 // the kit frame's +Z (toward the customer)
+    const L = Math.max(C.w, C.d), D = Math.min(C.w, C.d);
+    S.tillCand = { till: true, store: S, name: "", x: C.x + C.tx * (-L / 2 + 0.55) + cust.x * (D / 2 + 0.35), y: (C.top || 1.2) + 0.1,
+                   z: C.z + C.tz * (-L / 2 + 0.55) + cust.z * (D / 2 + 0.35), reach: CASE_REACH + 0.6, dot: 0.4 };
+    STORES.push(S);
+    return S;
+  }
+  function disposeStore(S) {
+    if (!S || S.dead) return;
+    S.dead = true;
+    if (S.till) S.till.dropAll();
+    const i = STORES.indexOf(S); if (i >= 0) STORES.splice(i, 1);
+    if (S.group) {
+      if (S.group.parent) S.group.parent.remove(S.group);
+      if (SF()) SF().disposeTree(S.group);
+    }
+    if (SF()) SF().dropCols(S.cols);
+    if (S.clerk && S.clerk.dispose) S.clerk.dispose();
+    S.group = null; S.slots = [];
+  }
+
+  // ---- build the displays once per store (when you come down the street) ----
+  function buildDisplays(S) {
     const e = econ(), gs = S.gs;
     const group = new THREE.Group();
+    group.name = "gun-store";
     S.group = group;
-    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
-    root.add(group);
-    S.cx = (gs.bounds.minX + gs.bounds.maxX) / 2;
-    S.cz = (gs.bounds.minZ + gs.bounds.maxZ) / 2;
-    const FY = floorY(S.lot.building);
+    (S.root || CBZ.scene).add(group);
+    const FY = S.FY;
     const R0 = CBZ.storeFixtureKit.rng(Math.round(S.cx * 13) ^ Math.round(S.cz * 7));
 
     // partition the shop's REAL stock: stocked guns → the back-wall rack,
@@ -414,11 +457,11 @@
       if (!it || !it.gun) continue;
       const model = buildModel(n);
       if (!model) continue;
-      const slot = { name: n, model: null, raw: model, sold: false, restockT: 0, card: null, x: 0, y: 0, z: 0, reach: 3, dot: CASE_DOT };
+      const slot = { name: n, gun: true, store: S, model: null, raw: model, sold: false, held: false, restockT: 0, card: null, x: 0, y: 0, z: 0, reach: 3, dot: CASE_DOT };
       (isHandgun(model) ? pistols : longs).push(slot);
     }
 
-    buildRack(group, longs, FY);
+    buildRack(S, group, longs, FY);
     const C = gs.counter;
     const L = Math.max(C.w, C.d), D = Math.min(C.w, C.d);
     const ck = KIT.create().frame(C.x, 0, C.z, KIT.yawOf(C.tx, C.tz));
@@ -427,29 +470,39 @@
     // the counter's + end holds the C4 hard case when there's room for it
     const c4Zone = L >= 3.0 ? 0.48 : 0;
     const z0 = Math.max(-L / 2 + 1.15, 0.05), z1 = L / 2 - c4Zone - 0.06;
-    buildShowcase(group, ck, pistols, C, top, (z0 + z1) / 2, Math.max(0.8, Math.min(2.2, z1 - z0)), Math.min(0.62, D + 0.02));
+    buildShowcase(S, group, ck, pistols, C, top, (z0 + z1) / 2, Math.max(0.8, Math.min(2.2, z1 - z0)), Math.min(0.62, D + 0.02));
     // the + end of the floor: the ammo gondola, then the grenade crate
-    const ends = buildEnd(group, C, L, D, FY, R0);
+    const ends = buildEnd(S, group, C, L, D, FY, R0);
     if (e.ITEMS["C4 Charge"]) {
-      if (c4Zone) buildC4(group, ck, L / 2 - 0.25, top, 0.02, C);
-      else buildC4(group, ends.kit, ends.ammoX, FY + 1.535, 0, C);   // tiny counter: the case sits on the gondola
+      if (c4Zone) buildC4(S, ck, L / 2 - 0.25, top, 0.02);
+      else buildC4(S, ends.kit, ends.ammoX, FY + 1.535, 0);   // tiny counter: the case sits on the gondola
     }
     ck.build(group);
     ends.kit.build(group);
+    // the counter is solid where the island has no counter box of its own
+    if (S.kind === "island") solidBox(S, C.x, C.z, (Math.abs(C.tx) > 0.5 ? L : D) + 0.08, (Math.abs(C.tx) > 0.5 ? D : L) + 0.1, FY, C.top + 0.05);
 
     // ---- THE ARMOURY (the counter's - end) ----
-    buildArmorRack(group, C, L, FY);
+    buildArmorRack(S, group, C, L, FY);
 
     // ---- THE GUNSMITH BENCH ----
-    if (CBZ.gunModsOpenBench) buildBench(group, C, L, D, FY);
-    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("gun-store", S.lot.building, group);
+    if (S.bench && CBZ.gunModsOpenBench) buildBench(S, group, C, L, D, FY);
+    if (S.kind === "city" && CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("gun-store", S.lot.building, group);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  // an axis-aligned solid the store owns (removed with it)
+  function solidBox(S, x, z, w, d, y0, y1) {
+    const c = { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, y0: y0, y1: y1 };
+    CBZ.colliders.push(c);
+    S.cols.push(c);
+    return c;
   }
 
   /* ---- THE BACK-WALL RACK ----------------------------------------------
      gs.rack is a point 0.18 m off the back wall's inner face, with the
      normal (nx, nz) pointing back into the room. Everything is laid out in
      a frame whose origin is ON the wall face at floor level. */
-  function buildRack(group, longs, FY) {
+  function buildRack(S, group, longs, FY) {
     const R = S.gs.rack;
     const wx = R.x - R.nx * 0.18, wz = R.z - R.nz * 0.18;
     const yaw = KIT.yawOf(R.tx, R.tz);
@@ -565,7 +618,7 @@
      the clerk side, an LED strip under the lid's front rail. Handguns lie on
      their right side, muzzle toward the + end, grip toward the customer,
      each with a tent card in front of it. */
-  function buildShowcase(group, ck, pistols, C, top, xc, len, wid) {
+  function buildShowcase(S, group, ck, pistols, C, top, xc, len, wid) {
     const yd = KIT.showcase(ck, xc, top, len, wid, { felt: 0x1f3327 });
 
     // the handguns, lying on the felt
@@ -598,7 +651,7 @@
      is a real shelving unit (uprights, pegboard back, four boards with a
      price-channel lip, a top cap) stocked two deep with printed boxes of
      rounds, steel ammo cans on the bottom board. */
-  function buildEnd(group, C, L, D, FY, R0) {
+  function buildEnd(S, group, C, L, D, FY, R0) {
     const e = econ();
     const yaw = KIT.yawOf(C.tx, C.tz);
     const k = KIT.create().frame(C.x, 0, C.z, yaw);
@@ -645,16 +698,17 @@
       k.box(cx + 0.146, y0 + 0.14, 0.02, 0.012, 0.09, 0.05, 0x3a4028, "metal");
       k.box(cx, y0 + 0.1, 0.0955, 0.12, 0.018, 0.001, 0xd9b23a);
     }
-    const ammo = { name: "Ammo Box", ammo: true, sold: false, x: 0, y: FY + 0.9, z: 0, reach: CASE_REACH, dot: CASE_DOT };
+    const ammo = { name: "Ammo Box", ammo: true, store: S, sold: false, x: 0, y: FY + 0.9, z: 0, reach: CASE_REACH, dot: CASE_DOT };
     const ap = k.world(ax, 0.1); ammo.x = ap.x; ammo.z = ap.z;
     S.slots.push(ammo);
+    if (S.kind === "island") { const gc = k.world(ax, 0); solidBox(S, gc.x, gc.z, Math.abs(C.tx) > 0.5 ? UW : UD, Math.abs(C.tx) > 0.5 ? UD : UW, FY, TOPY); }
 
     // ---- the grenade crate: an open OD-painted plank crate, rope handles,
     //      a kraft divider tray with the frags standing in it ----
     if (e.ITEMS["Grenade"]) {
       const CW = 0.56, CD = 0.4, CH = 0.32;
-      let fx = ax + UW / 2 + 0.14 + CW / 2, fy = FY, onTop = false;
-      if (fx + CW / 2 > room) { fx = ax; fy = TOPY + 0.03; onTop = true; }
+      let fx = ax + UW / 2 + 0.14 + CW / 2, fy = FY;
+      if (fx + CW / 2 > room) { fx = ax; fy = TOPY + 0.03; }
       {
         const OD = 0x4d5634, ODD = 0x3f472b;
         k.box(fx, fy + 0.01, 0, CW, 0.02, CD, ODD);
@@ -673,8 +727,7 @@
         }
       }
       const gp = k.world(fx, 0.05);
-      const gren = { name: "Grenade", boom: true, sold: false, x: gp.x, y: fy + CH, z: gp.z, reach: CASE_REACH, dot: CASE_DOT };
-      S.slots.push(gren);
+      S.slots.push({ name: "Grenade", boom: true, store: S, sold: false, x: gp.x, y: fy + CH, z: gp.z, reach: CASE_REACH, dot: CASE_DOT });
     }
     return { kit: k, ammoX: ax };
   }
@@ -682,7 +735,7 @@
   /* ---- the C4: an open black hard case, egg-crate foam in the lid, two
      charges bedded in the base foam. `k` is a kit whose frame has +Z toward
      the customer; (x, y) is where the case's foot sits. */
-  function buildC4(group, k, x, y, z, C) {
+  function buildC4(S, k, x, y, z) {
     const W = 0.36, D = 0.27, BH = 0.075;
     k.box(x, y + BH / 2, z, W, BH, D, 0x1b1c1e, "gloss");
     for (let i = -1; i <= 1; i += 2) k.box(x + i * 0.12, y + BH / 2, z + D / 2 + 0.004, 0.05, BH - 0.02, 0.008, 0x151618, "gloss");
@@ -700,7 +753,7 @@
       if (cm) k.absorb(cm, x - 0.075 + i * 0.15, y + BH - 0.012, z + 0.02, 0, Math.PI / 2, 0);
     }
     const wp = k.world(x, z);
-    S.slots.push({ name: "C4 Charge", boom: true, sold: false, x: wp.x, y: y + 0.1, z: wp.z, reach: CASE_REACH, dot: CASE_DOT });
+    S.slots.push({ name: "C4 Charge", boom: true, store: S, sold: false, x: wp.x, y: y + 0.1, z: wp.z, reach: CASE_REACH, dot: CASE_DOT });
   }
 
   // which kits the store SELLS, in display order. swatVest is intentionally NOT
@@ -750,12 +803,31 @@
   // the armoury row past the counter's - end, facing the customer side. The
   // pitch tightens to fit the room; forms that still don't fit step into a
   // second row in front.
-  function buildArmorRack(group, C, L, FY) {
+  function buildArmorRack(S, group, C, L, FY) {
     if (!CBZ.ARMOR_KITS) return;
     const sells = ARMOR_FOR_SALE.filter((sp) => armorKit(sp.kit));
     if (!sells.length) return;
-    let inx = S.cx - C.x, inz = S.cz - C.z;
-    const il = Math.hypot(inx, inz) || 1; inx /= il; inz /= il;
+    // a store that named its spots (an island shop: down the side wall, so
+    // the way round the counter to the back room stays open) stands them there
+    if (S.armorSpots) {
+      const k0 = KIT.create().frame(0, 0, 0, 0);
+      sells.forEach((sp, i) => {
+        const at = S.armorSpots[i];
+        if (!at) return;
+        k0.cyl(at.x, FY + 0.012, at.z, 0.3, 0.31, 0.024, 0x111214);
+        k0.cyl(at.x, FY + 0.04, at.z, 0.28, 0.28, 0.032, 0x23262b, "gloss", 0, 0, 0, 32);
+        k0.torus(at.x, FY + 0.056, at.z, 0.28, 0.006, 0xa7abb0, "metal", Math.PI / 2, 0, 0, null, 32);
+        const rig = armorMannequin(group, at.x, at.z, at.face, sp.kit, FY + 0.056);
+        const isHelmet = (armorKit(sp.kit) || {}).slot === "head" || sp.kit === "helmet";
+        solidBox(S, at.x, at.z, 0.6, 0.6, FY, FY + 1.8);
+        S.slots.push({ name: sp.label, armor: true, store: S, kit: sp.kit, price: sp.price, rig: rig,
+                       sold: false, x: at.x, y: FY + (isHelmet ? 1.75 : 1.40), z: at.z, reach: CASE_REACH, dot: CASE_DOT });
+      });
+      k0.build(group);
+      return;
+    }
+    // toward the customers: the counter frame's +Z
+    let inx = -C.tz, inz = C.tx;
     const faceY = Math.atan2(inx, inz);
     const room = latRoom(S.gs.bounds, C.x, C.z, C.tx, C.tz, -1) - 0.4;
     const first = L / 2 + 0.72;
@@ -774,14 +846,17 @@
       k.torus(x, FY + 0.056, z, 0.28, 0.006, 0xa7abb0, "metal", Math.PI / 2, 0, 0, null, 32);
       const rig = armorMannequin(group, x, z, faceY, sp.kit, FY + 0.056);
       const isHelmet = (armorKit(sp.kit) || {}).slot === "head" || sp.kit === "helmet";
-      S.slots.push({ name: sp.label, armor: true, kit: sp.kit, price: sp.price, rig: rig,
+      if (S.kind === "island") solidBox(S, x, z, 0.6, 0.6, FY, FY + 1.8);
+      S.slots.push({ name: sp.label, armor: true, store: S, kit: sp.kit, price: sp.price, rig: rig,
                      sold: false, x: x, y: FY + (isHelmet ? 1.75 : 1.40), z: z, reach: CASE_REACH, dot: CASE_DOT });
     });
     k.build(group);
   }
   // headless / harness handle: what the armoury row is actually WEARING.
   CBZ.cityGunstoreArmoury = function () {
-    if (ensure()) dress();
+    const S = ensureCity();
+    if (!S) return [];
+    dress(S);
     const out = [];
     for (const s of S.slots) {
       if (!s.armor) continue;
@@ -800,7 +875,7 @@
      hung on it, a bench vise, a cleaning mat with a rod, a screwdriver and
      an oil bottle, an articulated lamp. Kept off the room's centre line,
      which is the customer's walk from the door to the counter. */
-  function buildBench(group, C, L, D, FY) {
+  function buildBench(S, group, C, L, D, FY) {
     let inx = S.cx - C.x, inz = S.cz - C.z; const il = Math.hypot(inx, inz) || 1; inx /= il; inz /= il;
     let lat = L * 0.28;
     let wx = C.x + C.tx * lat + inx * 1.6, wz = C.z + C.tz * lat + inz * 1.6;
@@ -857,7 +932,7 @@
     k.cyl(lx + 0.32, T + 0.42, lz + 0.1, 0.03, 0.065, 0.08, 0x22252a, "metal", 0.35, 0, -0.5);
     k.cyl(lx + 0.34, T + 0.385, lz + 0.115, 0.055, 0.055, 0.004, 0xfff1d8, "glow", 0.35, 0, -0.5);
     k.build(group);
-    S.slots.push({ name: "Gunsmith Bench", mod: true, sold: false, x: wx, y: T + 0.1, z: wz, reach: CASE_REACH + 0.6, dot: CASE_DOT - 0.08 });
+    S.slots.push({ name: "Gunsmith Bench", mod: true, store: S, sold: false, x: wx, y: T + 0.1, z: wz, reach: CASE_REACH + 0.6, dot: CASE_DOT - 0.08 });
   }
 
   // ---- SOLD gap / restock ----------------------------------------------------
@@ -869,76 +944,134 @@
     if (on) s.restockT = RESTOCK * (0.8 + Math.random() * 0.5);
   }
 
-  // ---- buying ----------------------------------------------------------------
-  function buySlot(s) {
+  /* ---- A GUN IN YOUR HANDS, NOT YET YOURS ----------------------------------
+     [Take] lifts the piece off the rack (CBZ.verbs.pickup: the hand goes to
+     it, it comes away in the hand) and it is in your hands to look at, the
+     same gun you will carry. The register rings up what you hold ([Buy] at
+     the counter); [Put back] returns it; walking out of the door with it is
+     stealing it (city/shopfloor.js's till). */
+  function gunIdOf(name) { return (CBZ.cityGunIdOf && CBZ.cityGunIdOf(name)) || null; }
+  function takeSlot(s) {
+    const S = s.store;
+    if (!S || !S.till || s.sold || s.held || s._taking || !CBZ.player) return;
+    const e = econ(); if (!e) return;
+    s._taking = true;
+    const done = function () {
+      s._taking = false;
+      if (S.dead || s.sold) return;
+      const id = gunIdOf(s.name);
+      s.had = !!(id && CBZ.hasWeapon && CBZ.hasWeapon(id));
+      s.held = true;
+      if (s.model) s.model.visible = false;
+      if (s.card) s.card.visible = false;
+      if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(s.name);
+      S.till.hold({ name: s.name, price: e.buyPrice(s.name), slot: s,
+        onPay: function () { paid(S, s); },
+        onSteal: function () { stolen(S, s); },
+        onReturn: function (silent) { putBack(S, s, silent); } });
+    };
+    if (CBZ.verbs && CBZ.verbs.pickup && s.model) CBZ.verbs.pickup(CBZ.player, s.model, { pose: "grip", keep: true, onTaken: done });
+    else done();
+  }
+  // the gun leaves your hands (unless you owned one like it already) and goes
+  // back on its yoke
+  function putBack(S, s, silent) {
+    s.held = false;
+    const id = gunIdOf(s.name);
+    if (id && !s.had && CBZ.lockWeapon) CBZ.lockWeapon(id);
+    const show = function () { if (s.sold) return; if (s.model) s.model.visible = true; if (s.card) s.card.visible = true; };
+    if (!silent && CBZ.verbs && CBZ.verbs.putDown && s.model && CBZ.player) CBZ.verbs.putDown(CBZ.player, s.model, null, { pose: "grip", onPlaced: show });
+    else show();
+    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+  function returnSlot(s) {
+    const S = s.store;
+    if (!S || !S.till) return;
+    const it = S.till.holding(s);
+    if (!it) return;
+    S.till.release(it);
+    putBack(S, s, false);
+  }
+  // rung up: yours, with two magazines (a launcher gets a spare round)
+  function paid(S, s) {
+    const e = econ(); if (!e) return;
+    const meta = e.ITEMS[s.name] || {};
+    s.held = false;
+    e.add(s.name, 1);
+    if (CBZ.cityAddAmmo) CBZ.cityAddAmmo(Math.max(2, (meta.ammo | 0) * 2));
+    setSold(s, true);
+    const price = e.buyPrice(s.name);
+    if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(price >= 3000 ? 3 : 1);
+  }
+  // out of the door with it: it is yours the way stolen things are
+  function stolen(S, s) {
     const e = econ();
+    s.held = false;
+    if (e) e.add(s.name, 1);
+    setSold(s, true);
+  }
+
+  // ---- over the counter: rounds, frags, charges, plates, the bench ---------
+  function buySlot(s) {
+    const e = econ(), S = s && s.store;
     if (!s || !e || !CBZ.city) return;
-    if (s.mod) { if (CBZ.gunModsOpenBench) CBZ.gunModsOpenBench(); return; }   // open the gunsmith menu
+    if (s.mod) { if (CBZ.gunModsOpenBench) CBZ.gunModsOpenBench(); return; }
+    const open = !!(S && S.till && S.till.open());
     if (s.ammo) {
       const meta = e.ITEMS["Ammo Box"] || {}, price = e.buyPrice("Ammo Box");
-      if (!CBZ.city.spend(price)) { CBZ.city.note("Ammo runs " + fmt$(price) + " a box.", 1.6); return; }
+      if (open && !CBZ.city.spend(price)) { CBZ.city.note(fmt$(price), 1.4); return; }
       if (CBZ.cityAddAmmo) CBZ.cityAddAmmo(meta.rounds || 60);
-      if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city.note("+" + (meta.rounds || 60) + " rounds over the counter.", 1.6);
+      if (!open) grabbed(S, "Ammo Box", price);
+      if (CBZ.sfx) CBZ.sfx(open ? "coin" : "pickup");
       return;
     }
-    // ARMOR: a kit off the rack. Charge, then route through armor.js's equip
-    // (sets the player's armor bar + mesh). Never "sells out" — you can re-buy
-    // to top your plate back up after it's been shot off. swatVest isn't here.
+    // ARMOR: a kit off the form, strapped on (armor.js's equip: the armor bar
+    // and the mesh). Re-buyable to top your plate back up after it's been shot.
     if (s.armor) {
-      if (!CBZ.cityEquipArmor) { CBZ.city.note("Body armor's not stocked right now.", 1.8); return; }
+      if (!CBZ.cityEquipArmor || !open) return;
       const price = armorPrice({ kit: s.kit, label: s.name, price: s.price });
-      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + ", come back with the money.", 2); return; }
+      if (!CBZ.city.spend(price)) { CBZ.city.note(fmt$(price), 1.4); return; }
       CBZ.cityEquipArmor(s.kit);
       if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city.note("Strapped on the " + s.name + " for " + fmt$(price) + ", you're plated up.", 2.2);
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return;
     }
-    // explosive consumables: bought by COUNT, never sell out (crates restock
-    // off-screen). Counts mirror to g.cityGrenades / g.cityC4 for HUD readers.
+    // explosives: by COUNT, never sell out (the crates restock off-screen).
+    // Counts mirror to g.cityGrenades / g.cityC4 for HUD readers.
     if (s.boom) {
       const price = e.buyPrice(s.name);
-      if (!CBZ.city.spend(price)) { CBZ.city.note("The " + s.name + " runs " + fmt$(price) + ", come back with the money.", 2); return; }
+      if (open && !CBZ.city.spend(price)) { CBZ.city.note(fmt$(price), 1.4); return; }
       e.add(s.name, 1);
       const n = e.count ? e.count(s.name) : 0;
       if (s.name === "Grenade") g.cityGrenades = n;
       if (s.name === "C4 Charge") g.cityC4 = n;
-      if (CBZ.sfx) CBZ.sfx("coin");
-      CBZ.city.note(s.name === "C4 Charge"
-        ? "C4 in the bag (" + n + " carried)."
-        : "Frag in the bag (" + n + " carried). [G] throws it.", 2.4);
+      if (!open) grabbed(S, s.name, price);
+      if (CBZ.sfx) CBZ.sfx(open ? "coin" : "pickup");
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
       return;
     }
-    if (s.sold) { CBZ.city.note("That slot's sold out, restock truck's rolling.", 1.8); return; }
+    // a gun: straight to the register (the harness handle; the floor goes
+    // through takeSlot + the till)
+    if (s.sold || s.held) return;
     const meta = e.ITEMS[s.name];
     if (!meta) return;
-    const price = e.buyPrice(s.name);   // the SAME price the counter menu reads
-    if (!CBZ.city.spend(price)) {
-      CBZ.city.note("The " + s.name + " runs " + fmt$(price) + ", come back with the money.", 2);
-      return;
-    }
-    e.add(s.name, 1);
+    const price = e.buyPrice(s.name);
+    if (!CBZ.city.spend(price)) { CBZ.city.note(fmt$(price), 1.4); return; }
     if (CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(s.name);
-    // starter ammo: two mags so the piece leaves the store LOADED (launchers
-    // get a spare rocket) — small enough next to the sticker price to never
-    // beat the $60 ammo box as an economy exploit.
-    const rounds = Math.max(2, (meta.ammo | 0) * 2);
-    if (CBZ.cityAddAmmo) CBZ.cityAddAmmo(rounds);
-    setSold(s, true);
+    paid(S, s);
     if (CBZ.sfx) CBZ.sfx("coin");
-    if (CBZ.city.addRespect) CBZ.city.addRespect(price >= 3000 ? 3 : 1);   // walking out heavy IS the flex
-    if (price >= 3000 && CBZ.city.big) CBZ.city.big(s.name + ", straight off the wall!");
-    CBZ.city.note("Bought the " + s.name + " for " + fmt$(price) + " (+" + rounds + " starter rounds).", 2.2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+  // off the shelf with nobody at the till: stolen, charged to whoever saw it
+  function grabbed(S, name, price) {
+    CBZ.cityMarkHot && CBZ.cityMarkHot(name, 1, S ? S.where : null);
+    if (S && S.till) S.till.report(Math.min(120, 50 + (price | 0) / 40), false);
   }
 
   // ---- THE WALL IS A SET OF CANDIDATES (city/interactions.js registerFixtures)
-  // Every gun, box, vest and the bench is a thing in the registry: E buys the
-  // one you are looking at, Q / a tap on it shows its verbs, and a finger can
-  // pick it off the wall from across the shop. No private prompt, no private
-  // E listener: the card and the tap pipeline are the only ways in.
+  // Every gun, box, vest, the bench and the register are things in the
+  // registry: E does the obvious verb on the one you are looking at, Q / a tap
+  // shows its verbs, a finger can pick it off the wall from across the shop.
   function priceOf(s) {
     const e = econ();
     if (!e) return 0;
@@ -946,109 +1079,177 @@
     if (s.armor) return armorPrice({ kit: s.kit, label: s.name, price: s.price });
     return e.buyPrice(s.name);
   }
-  function inStore(px, pz) {
+  function inBounds(S, px, pz) {
     const B = S.gs && S.gs.bounds;
     return !!B && px >= B.minX - 1.5 && px <= B.maxX + 1.5 && pz >= B.minZ - 1.5 && pz <= B.maxZ + 1.5;
   }
+  // the store you are standing in (its displays dressed and drawn)
+  function storeAt(px, pz) {
+    for (const S of STORES) if (!S.dead && S.dressed && S.near && inBounds(S, px, pz)) return S;
+    return null;
+  }
+  const _list = [];
   let fixturesWired = false;
   function wireFixtures() {
     if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
     fixturesWired = true;
+    const open = (s) => !!(s.store && s.store.till && s.store.till.open());
     CBZ.interactions.registerFixtures({
       id: "gunwall", kind: "gunwall", prio: 9, islands: true,
-      list: function (ctx, px, pz) { return S.built && S.near && inStore(px, pz) ? S.slots : null; },
+      list: function (ctx, px, pz) {
+        const S = storeAt(px, pz);
+        if (!S) return null;
+        _list.length = 0;
+        for (const s of S.slots) _list.push(s);
+        if (S.tillCand) _list.push(S.tillCand);
+        return _list;
+      },
       reach: function (s) { return s.reach || 3; },
       dot: function (s) { return s.dot || CASE_DOT; },
-      name: function (s) { return s.mod ? "" : s.name; },
+      name: function (s) { return s.mod || s.till ? "" : s.name; },
       verbs: [
+        // the register: everything you are holding, rung up
+        { id: "gunwall-pay", slot: "e", prio: 8, label: (s) => "Buy " + fmt$(s.store.till.total()),
+          canShow: (s) => !!s.till && !!s.store.till && s.store.till.held.length > 0 && open(s), onSelect: (s) => s.store.till.pay() },
+        { id: "gunwall-take", slot: "e", prio: 6, label: "Take",
+          canShow: (s) => !!s.gun && !s.sold && !s.held && !s._taking, onSelect: takeSlot },
+        { id: "gunwall-return", slot: "e", prio: 6, label: "Put back",
+          canShow: (s) => !!s.gun && s.held && !!(s.store.till && s.store.till.holding(s)), onSelect: returnSlot },
         { id: "gunwall-mod", slot: "e", prio: 5, label: "Modify", canShow: (s) => !!s.mod, onSelect: buySlot },
-        { id: "gunwall-armor", slot: "e", prio: 5, label: (s) => "Put on " + fmt$(priceOf(s)), canShow: (s) => !!s.armor, onSelect: buySlot },
+        { id: "gunwall-armor", slot: "e", prio: 5, label: (s) => "Put on " + fmt$(priceOf(s)), canShow: (s) => !!s.armor && open(s), onSelect: buySlot },
         { id: "gunwall-buy", slot: "e", prio: 5, label: (s) => "Buy " + fmt$(priceOf(s)),
-          canShow: (s) => !s.mod && !s.armor && !s.sold, onSelect: buySlot },
+          canShow: (s) => (!!s.ammo || !!s.boom) && open(s), onSelect: buySlot },
+        { id: "gunwall-grab", slot: "e", prio: 5, bad: true, label: "Take",
+          canShow: (s) => (!!s.ammo || !!s.boom) && !open(s), onSelect: buySlot },
       ],
     });
   }
 
-  // ---- find the lot + build once (self-healing, clubLot pattern) -------------
+  // ---- GANG CITY's store: its lot (self-healing, clubLot pattern) ----------
   // PERF: the fallback lot scan is O(all lots) — fine ONCE, but this runs from a
   // per-frame updater, so a city with no gun-store lot must not rescan forever.
-  // The gunstore stamp + arena.gunShopLot land synchronously at build
-  // (buildings.js), so one failed scan per arena is a true answer — remember it.
   // An arena REBUILD (new run) also invalidates a previously-built wall: the old
   // display group died with the old root, so tear down and rebuild on the new one.
-  function ensure() {
+  function ensureCity() {
     const arena = CBZ.city && CBZ.city.arena;
-    if (S.built) {
-      if (S.arena === arena) return true;
-      S.built = false; S.dressed = false; S.group = null; S.slots = []; S.near = false; S.lot = null; S.gs = null;
+    if (cityStore) {
+      if (CITY.arena === arena) return cityStore;
+      disposeStore(cityStore); cityStore = null;
     }
-    if (!arena || !econ() || !CBZ.buildActorWeapon) return false;
-    if (S.noLotArena === arena) return false;          // this city has no gun wall — answered once
+    if (!arena || !econ() || !CBZ.buildActorWeapon) return null;
+    if (CITY.noLotArena === arena) return null;          // this city has no gun wall — answered once
     let lot = arena.gunShopLot || null;
     if (!(lot && lot.building && lot.building.gunstore)) {
       lot = null;
       const lots = arena.lots || [];
       for (let i = 0; i < lots.length; i++) { const L = lots[i]; if (L && L.building && L.building.gunstore) { lot = L; break; } }
-      if (!lot && lots.length) { S.noLotArena = arena; return false; }
+      if (!lot && lots.length) { CITY.noLotArena = arena; return null; }
     }
-    if (!lot) return false;
-    S.lot = lot; S.gs = lot.building.gunstore; S.arena = arena;
-    // the wall is DRESSED when you come down the street (dress() below), not
-    // at the boot: its merged racks and cases were ~2 MB of geometry held
-    // hidden, never uploaded, for a shop that is usually a district away
-    S.cx = (S.gs.bounds.minX + S.gs.bounds.maxX) / 2;
-    S.cz = (S.gs.bounds.minZ + S.gs.bounds.maxZ) / 2;
-    S.dressed = false;
-    S.built = true;
-    return true;
+    if (!lot) return null;
+    CITY.arena = arena;
+    const gs = lot.building.gunstore, B = gs.bounds;
+    const clerk = SF() ? SF().cityClerk(lot) : null;
+    cityStore = makeStore({
+      kind: "city", lot: lot, gs: gs, fy: floorY(lot.building), root: arena.root || CBZ.scene, clerk: clerk, where: "city",
+      inStore: function (x, z) { return x >= B.minX - 0.6 && x <= B.maxX + 0.6 && z >= B.minZ - 0.6 && z <= B.maxZ + 0.6; },
+    });
+    return cityStore;
   }
-  const DRESS_R = 110;        // past the 55 m draw gate, with room to build it unseen
-  function dress() {
-    if (!S.built || S.dressed) return;
+  function dress(S) {
+    if (!S || S.dressed || S.dead) return;
     S.dressed = true;
-    buildDisplays();
+    buildDisplays(S);
   }
 
+  /* ---- THE ISLANDS: one store per gun shop (CBZ.islandVenue "guns") --------
+     The ground floor is cleared of the house furniture, a partition stands a
+     back room behind the counter with the safe in it, the rack goes on the
+     partition, the counter across the room in front of it, and a shopkeeper
+     takes his post behind the counter with a shotgun under it. */
+  function islandFit(b, lot, job) {
+    const F = SF(), IV = CBZ.islandVenue;
+    if (!F || !IV || !econ()) return null;
+    const P0 = F.plan(b, { backRoom: true });
+    if (!P0) return null;
+    IV.clear(b, 0);
+    const shell = F.shell(P0, lot, { goods: "ammo", wall: 0xcfc8ba, trim: 0x4a4440, safeGrade: "floor", safeOf: 6000 });
+    const desc = F.gunDescriptor(P0);
+    const zone = F.counterZone(P0, desc);
+    const where = F.whereKey(lot.island);
+    const clerk = F.postedClerk({ b: b, lot: lot, lx: zone.post.lx, lz: zone.post.lz, face: zone.post.face,
+      armed: "Shotgun", job: "gunsmith" });
+    F.register(P0, desc, clerk, -desc.counter.L / 2 + 0.55, (lot.name || "gun store") + " register");
+    // the armoury's forms down the +x side wall, facing into the shop
+    const armorSpots = [], inward = P0.v(-1, 0);
+    for (let lz = desc.counter.zL - desc.counter.D / 2 - 0.9; lz > P0.z0 + 2.7 && armorSpots.length < 3; lz -= 0.9) {
+      const p = P0.w(P0.x1 - 0.5, lz);
+      armorSpots.push({ x: p.x, z: p.z, face: Math.atan2(inward.x, inward.z) });
+    }
+    const S = makeStore({
+      kind: "island", lot: lot, gs: desc, fy: P0.fy, root: CBZ.scene, clerk: clerk, where: where, bench: false, armorSpots: armorSpots,
+      arena: job && job.arena, inStore: function (x, z) { return P0.inside(x, z, 0.4); },
+      nearDoor: P0.nearDoor, behind: zone.behind,
+    });
+    return function () { disposeStore(S); shell.dispose(); };
+  }
+  if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on("guns", islandFit);
+
   // ---- per-frame --------------------------------------------------------------
-  CBZ.onUpdate(37, function (dt) {
-    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; return; }
-    // (the islands: this store's island lot comes through CBZ.islandVenue; until then
-    //  Gang City's own lot is the only one, and it is never reached from the islands)
-    if (!(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; return; }
-    if (!ensure()) return;
-    wireFixtures();
+  function tickStore(S, dt, live) {
+    const P = CBZ.player;
+    if (!live || !P) {
+      if (S.group && S.group.visible) S.group.visible = false;
+      S.near = false;
+      return;
+    }
     // restock timers keep ticking — the street keeps moving while you're away
     for (const s of S.slots) {
       if (!s.sold) continue;
       s.restockT -= dt;
-      if (s.restockT <= 0) {
-        setSold(s, false);
-        const P = CBZ.player;
-        if (P && CBZ.city && Math.hypot(P.pos.x - s.x, P.pos.z - s.z) < 30)
-          CBZ.city.note("Fresh steel on the rack, the " + s.name + " is back in stock.", 2.2);
-      }
+      if (s.restockT <= 0) setSold(s, false);
     }
-    // distance VIS-GATE: the dozen display models draw only when you're near
-    const P = CBZ.player;
-    const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
-    if (!S.dressed && dx * dx + dz * dz < DRESS_R * DRESS_R) dress();
-    const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
+    const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz, d2 = dx * dx + dz * dz;
+    if (!S.dressed && d2 < DRESS_R * DRESS_R) dress(S);
+    const near = d2 < VIS_R * VIS_R;
     if (S.group && S.group.visible !== near) S.group.visible = near;
     S.near = near;
+    // the man behind the counter watches whoever is in his shop
+    if (S.clerk && S.clerk.look) { if (S.inStore(P.pos.x, P.pos.z)) S.clerk.look(P.pos.x, P.pos.z); else S.clerk.look(null); }
+    if (S.clerk) S.clerk.tick(dt, d2 < DRESS_R * DRESS_R);
+    if (S.till) S.till.tick(dt);
+  }
+  CBZ.onUpdate(37, function (dt) {
+    const econMode = !!g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city");
+    const cityLive = econMode && !!(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"));
+    if (cityLive) ensureCity();
+    if (econMode) wireFixtures();
+    for (let i = STORES.length - 1; i >= 0; i--) {
+      const S = STORES[i];
+      tickStore(S, dt, S.kind === "city" ? cityLive : (econMode && g.mode !== "city"));
+    }
   });
 
   // ---- public hooks -------------------------------------------------------------
   // is the wall live (for this lot)? shops.js trims firearms off the counter
   // menu when it is, so the wall is the ONE way to buy a gun here.
-  CBZ.cityGunWallLive = function (lot) { return !!(S.built && S.lot && (!lot || lot === S.lot)); };
+  CBZ.cityGunWallLive = function (lot) { return !!(cityStore && !cityStore.dead && (!lot || lot === cityStore.lot)); };
   // headless/harness handle: buy a named display off the wall ("AK-47", "Ammo Box")
   CBZ.cityGunstoreBuy = function (name) {
-    if (!ensure()) return false;
-    dress();
+    const S = ensureCity();
+    if (!S) return false;
+    dress(S);
     const s = S.slots.find((x) => x.name === name);
     if (!s) return false;
     buySlot(s);
     return true;
   };
-  CBZ.cityGunstoreLot = function () { return (S.built && S.lot) || null; };
+  CBZ.cityGunstoreLot = function () { return (cityStore && cityStore.lot) || null; };
+  // every live gun store (Gang City's and the islands'), as numbers
+  CBZ.gunStores = function () {
+    return STORES.map(function (S) {
+      return { kind: S.kind, name: (S.lot && S.lot.name) || (S.gs && S.gs.name) || null, dressed: S.dressed, near: S.near,
+        guns: S.slots.filter(function (s) { return s.gun; }).length, holding: S.till ? S.till.held.length : 0,
+        clerk: !!(S.clerk && S.clerk.alive()), x: Math.round(S.cx), z: Math.round(S.cz) };
+    });
+  };
 })();

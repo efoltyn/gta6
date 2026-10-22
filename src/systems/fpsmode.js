@@ -193,16 +193,18 @@
     if (!(CBZ.islandModeOn && CBZ.islandModeOn(m))) return false;
     return !(CBZ.economyMode && CBZ.economyMode(m));
   }
+  // money is real (CBZ.economyMode: Gang City and the islands): one holster
+  function econHands(m) { m = m || CBZ.game.mode; return CBZ.economyMode ? CBZ.economyMode(m) : m === "city"; }
   function holstered() {
-    if (CBZ.game.mode === "city") return !!CBZ.game.cityHolstered;
+    if (econHands()) return !!CBZ.game.cityHolstered;
     if (CBZ.game.mode === "escape") return !!CBZ.game.prisonHolstered;
     return false;
   }
   CBZ.playerHolster = function (on) {
     const mode = CBZ.game.mode;
-    if (mode !== "city" && mode !== "escape") return false;
+    if (!econHands(mode) && mode !== "escape") return false;
     const old = armed() ? CBZ.currentWeaponId : null;
-    const key = mode === "city" ? "cityHolstered" : "prisonHolstered";
+    const key = mode === "escape" ? "prisonHolstered" : "cityHolstered";
     CBZ.game[key] = (on === undefined) ? !CBZ.game[key] : !!on;
     const next = armed() ? CBZ.currentWeaponId : null;
     if (old !== next) markWeaponTransition(old, next, next ? "draw" : "holster");
@@ -211,7 +213,7 @@
     return true;
   };
   CBZ.cityHolster = function (on) {
-    if (CBZ.game.mode !== "city") return false;
+    if (!econHands()) return false;
     return CBZ.playerHolster(on);
   };
   /* CUFFED: THE HANDS ARE BEHIND YOUR BACK (CBZ.arrest.playerCuffed, the
@@ -229,7 +231,7 @@
   function armed() {
     if (holstered()) return false;
     if (cuffedHands()) return false;   // holstered = read as unarmed (fists show; city also de-escalates)
-    return availableIndices().length > 0 && !(CBZ.game.mode === "city" && CBZ.game.cityMeleeWeapon);
+    return availableIndices().length > 0 && !(econHands() && CBZ.game.cityMeleeWeapon);
   }
   CBZ.fpsArmed = armed;   // systems/helditems.js: a drawn gun puts the held charge/frag away
   // ---- YOU ARE THE ANIMAL: NO HANDS ------------------------------------
@@ -342,7 +344,7 @@
   }
 
   function resetWeapons() {
-    if (CBZ.game.mode === "city") CBZ.game.cityHolstered = false;   // a fresh run / respawn is never holstered (PROG also zeroes it)
+    if (econHands()) CBZ.game.cityHolstered = false;   // a fresh run / respawn is never holstered (PROG also zeroes it)
     if (CBZ.game.mode === "escape") CBZ.game.prisonHolstered = false;
     fps.weapon = CBZ.currentWeaponId ? Math.max(0, weaponIndex(CBZ.currentWeaponId)) : 0;
     normalizeWeapon();
@@ -3968,7 +3970,10 @@
       // muzzle `origin` while resolveShot measures `hit.dist` from the camera `eye`
       // — different frames; the pane's world point is origin+shotDir*lastShatterDist.
       let glassPockSuppress = false;
-      if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
+      // the islands' panes (city/shopfloor.js: a jeweller's cases) answer the
+      // same ray through CBZ.islandGlassRay, same arguments, same distance field
+      const glassRay = CBZ.game.mode === "city" ? CBZ.cityShatterRay : (econHands() ? CBZ.islandGlassRay : null);
+      if (glassRay) {
         // POINT-BLANK FIX (owner: "shoot a window close-up → it shoots through
         // it"). The muzzle `origin` sits ~0.6-0.9m FORWARD of the eye, so pressing
         // the barrel to a pane puts the muzzle PAST the glass. cityShatterRay only
@@ -3988,7 +3993,7 @@
         if (segReach == null && fps.active && CBZ.camera) gback = Math.min(6.5, origin.distanceTo(CBZ.camera.position));
         const gox = origin.x - shotDir.x * gback, goy = origin.y - shotDir.y * gback, goz = origin.z - shotDir.z * gback;
         const reach = (segReach != null ? segReach + 0.5 : (hit.dist != null ? hit.dist + 0.5 : w.range)) + gback;
-        CBZ.cityShatterRay(gox, goy, goz, shotDir.x, shotDir.y, shotDir.z, reach,
+        glassRay(gox, goy, goz, shotDir.x, shotDir.y, shotDir.z, reach,
           true, { directPlayer: true });
         const sd = CBZ.cityLastShatterDist;
         if (sd != null && sd >= 0 && hit.wall && hit.point) {
@@ -4291,8 +4296,9 @@
            window mid-flight and carries on has no landRound call to do it, so
            the pane would survive a rifle round passing through it. Same ray,
            city only, once per segment. */
-        if (CBZ.game.mode === "city" && CBZ.cityShatterRay) {
-          CBZ.cityShatterRay(_bPrev.x, _bPrev.y, _bPrev.z, _bDir.x, _bDir.y, _bDir.z, seg,
+        const segGlass = CBZ.game.mode === "city" ? CBZ.cityShatterRay : (econHands() ? CBZ.islandGlassRay : null);
+        if (segGlass) {
+          segGlass(_bPrev.x, _bPrev.y, _bPrev.z, _bDir.x, _bDir.y, _bDir.z, seg,
             true, { directPlayer: true });
         }
         /* THE GROUND STOPS IT. The shot resolver tests walls, cars and bodies;
@@ -5035,7 +5041,7 @@
   function selectWeaponSlot(slot) {
     if (cuffedHands()) return false;
     const oldId = armed() ? (CBZ.currentWeaponId || weaponIdOf(fps.weapon)) : null;
-    if (CBZ.game.mode === "city") CBZ.game.cityHolstered = false;   // drawing a gun un-holsters (re-arms)
+    if (econHands()) CBZ.game.cityHolstered = false;   // drawing a gun un-holsters (re-arms)
     if (CBZ.game.mode === "escape") CBZ.game.prisonHolstered = false;
     const av = availableIndices();
     if (slot < 0 || slot >= av.length) return false;

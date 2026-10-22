@@ -45,7 +45,7 @@
   const SELECTABLE = { gun: 1, melee: 1, throwable: 1, detonator: 1, bandage: 1, flashlight: 1, phone: 1 };
   const DOOR_KEYS = ["Gun-Room Key", "Gate Key", "Corridor Key", "Cell Key"];
   // the games whose belt (cards, door keys) rides the bar
-  const BELT_MODES = { escape: 1, city: 1 };
+  const BELT_MODES = { escape: 1, city: 1, archipelago: 1 };
 
   /* s = {
        mode, guns:[id...], held:id|null, holstered:bool,

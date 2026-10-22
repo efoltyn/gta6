@@ -74,7 +74,9 @@
   function I() { return CBZ.interactions || null; }
   function live() {
     const P = CBZ.player;
-    return !!(g && g.mode === "city" && g.state === "playing" && !CBZ.cityMenuOpen && P && !P.dead && !P._aircraft);
+    // Gang City and the islands (CBZ.economyMode): the same counters and racks
+    const where = g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city");
+    return !!(where && g.state === "playing" && !CBZ.cityMenuOpen && P && !P.dead && !P._aircraft);
   }
   function typing(e) {
     const t = e && e.target;

@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 433
+     Natural Disaster Survival, standing alone: index.html minus the 434
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -472,7 +472,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
      in front of him (threat by sight, the one line picker, panic by sight).
      Before read.js / peds.js / prisonvoice.js, which all call it. -->
-<script src="src/systems/voice.js?v=money1022"></script>
+<script src="src/systems/voice.js?v=goods1022"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -919,7 +919,7 @@ document.body.appendChild(b);}}catch(e){}})();
      C4 — are covered structurally), plus its verb and its worth. Loads
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
-<script src="src/systems/hotbar_model.js?v=onebar0930"></script>
+<script src="src/systems/hotbar_model.js?v=goods1022"></script>
 <script src="src/systems/helditem_model.js?v=mil0929"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
@@ -947,7 +947,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
-<script src="src/systems/touch.js?v=tch1022b"></script>
+<script src="src/systems/touch.js?v=goods1022"></script>
 <script src="src/systems/touch_vehicle.js?v=deck1011"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
@@ -1317,7 +1317,7 @@ document.body.appendChild(b);}}catch(e){}})();
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=jailai1020"></script>
-<script src="src/city/economy.js?v=venue1022"></script>
+<script src="src/city/economy.js?v=goods1022"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
@@ -1499,6 +1499,9 @@ document.body.appendChild(b);}}catch(e){}})();
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
 <script src="src/systems/tornado.js?v=bodymove1022"></script>
 <script src="src/city/metro_promote.js?v=mrg10200048"></script>
+<!-- city/shopfloor.js: what every counter shop shares (the clerk, the till of
+     goods in your hands not yet paid for, hot goods, the islands' shop rooms
+     and showcase glass). Before gunstore.js, jewelry.js, pawnshop.js. -->
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
@@ -1513,7 +1516,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=ijkl1022"></script>
+<script src="src/city/verbwheel.js?v=goods1022"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
