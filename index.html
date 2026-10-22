@@ -21,7 +21,7 @@
 <link rel="stylesheet" href="css/mobile.css?v=deck1011">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
 <link rel="stylesheet" href="css/city.css?v=spec1014">
-<link rel="stylesheet" href="css/campaign.css?v=neck1001b">
+<link rel="stylesheet" href="css/campaign.css?v=cine1022">
 <link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
 </head>
@@ -1040,7 +1040,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
-<script src="src/systems/gamepad.js?v=ekey2"></script>
+<script src="src/systems/gamepad.js?v=cine1022"></script>
 <script src="src/systems/fpsmode.js?v=mrg10200039"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=jailai1020"></script>
@@ -2031,12 +2031,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/hitman.js?v=w09290219"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=w09290219"></script>
-<script src="src/city/agency.js?v=leave1014"></script>
+<script src="src/city/agency.js?v=cine1022"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
-<script src="src/city/campaign_ui.js?v=slotkey1013"></script>
-<script src="src/city/campaign.js?v=ekey2"></script>
-<script src="src/city/cinematics.js?v=btn1011"></script>
+<script src="src/city/campaign_ui.js?v=cine1022"></script>
+<script src="src/city/campaign.js?v=cine1022"></script>
+<script src="src/city/cinematics.js?v=cine1022"></script>
 <script src="src/systems/humancontact.js?v=jailai1020"></script>
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
      (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
@@ -2480,7 +2480,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=football1014"></script>
+<script src="src/city/presidency.js?v=cine1022"></script>
 <script src="src/city/politics.js?v=btn1011"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
@@ -2490,7 +2490,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=leave1014"></script>
+<script src="src/city/president_office.js?v=cine1022"></script>
 <script src="src/city/motorcade.js?v=leave1014"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
@@ -2517,6 +2517,7 @@ document.body.appendChild(b);}}catch(e){}})();
      NEWS ONE and the phone first; concede, crack down, relieve the General or
      get to a bunker. After presidency/warroom/civilwar; reads them lazily. -->
 <script src="src/city/dissent.js?v=army1013m"></script>
+<script src="src/city/coup.js?v=cine1022"></script>
 <script src="src/city/president_regime.js?v=flagm1001"></script>
 <!-- THE CROWD THAT MOVES (city/mob.js): rallies, marches, police lines, gas,
      breaches. The one mass crowd for every political crowd (the gate protest,

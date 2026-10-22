@@ -1083,13 +1083,18 @@
     // the answers ride on the man who asked, or on the handset in your hand
     // (campaign_ui.js pins them in the verb registry: E, hold E, the wheel)
     const meta = by === "phone" ? { phone: true, at: phoneWorld() } : { actor: by };
+    // A MATTER OF STATE IS A CINEMATIC DECISION (campaign_ui.js): the answers
+    // round the d-pad, a bar running out. Silence lets it lapse (ignore()).
+    if (m.topic !== "schedule" && (m.kind === "security" || m.urgent || /^(general|bureau|foreign)$/.test(m.who.role))) {
+      meta.cinematic = true;
+    }
     const UI = CBZ.campaignUI;
     if (!UI || !UI.say || !by) { ignore(m, source); if (onDone) onDone(null); return; }
     const tok0 = SAY_TOKEN;
     const ask = function (last) {
       if (tok0 !== SAY_TOKEN) return;          // another conversation took over
       let pr = null;
-      try { pr = UI.say(who, last, choices, meta); } catch (e) { pr = null; }
+      try { pr = UI.say(who, last, choices.map(function (c) { return Object.assign({ dir: c.id === "yes" ? "left" : "right" }, c); }), meta); } catch (e) { pr = null; }
       if (!pr || !pr.then) { ignore(m, source); if (onDone) onDone(null); return; }
       pr.then(answered);
     };

@@ -533,7 +533,7 @@
     ROOM.board = null; ROOM.pads = []; ROOM.rect = null; ROOM.doorPt = null; ROOM.builtFor = null;
     ROOM.seats = 0; ROOM.stateSymbols = 0;
     // the screen and the war table go with the room (their verbs read these)
-    ROOM.redPhones = null; ROOM.mapPt = null;
+    ROOM.redPhones = null; ROOM.mapPt = null; ROOM.table = null;
   }
   // is THIS person entitled through the door? The sitting head of state.
   function doorOpensFor() { return !!seat(); }
@@ -767,6 +767,11 @@
     // and the map at the head of the table is where a strike is aimed.
     ROOM.redPhones = [along(-len * 0.42, -0.5), along(len * 0.42, -0.5)];
     ROOM.mapPt = along(far * 0.4, 0);
+    // the table's frame, for anyone staging people round it (city/coup.js):
+    // spot(a, b) = a metres along the table toward its head, b across it
+    ROOM.table = { x: tcx, z: tcz, len: len, alongX: alongX, far: far,
+      head: { x: headX, z: headZ },
+      spot: function (a, b) { return along(far * a, b); } };
 
     // ---- THE VIDEO WALL at the far end: the country's live board, a screen
     // either side, a row of clocks over them, the seal above the board
@@ -1735,7 +1740,11 @@
       if (CONV !== conv) return;               // you walked off mid-sentence
       let pending = null;
       try {
-        pending = ui.say(c.display, last, [{ id: "yes", label: pr.yes }, { id: "no", label: pr.no }], { actor: ped });
+        // an order of state is put to the President as a cinematic decision
+        // (campaign_ui.js). He asks as you come up to him, so silence is not
+        // a refusal: it leaves the matter on the table, unsaid
+        pending = ui.say(c.display, last, [{ id: "yes", dir: "left", label: pr.yes }, { id: "no", dir: "right", label: pr.no }],
+          { actor: ped, cinematic: true, silent: status().approval < 30 ? "Think it over." : "Think it over, sir." });
       } catch (e) { pending = null; }
       if (!pending || !pending.then) { CONV = null; return; }
       pending.then(answered);
@@ -3469,6 +3478,14 @@
     cabinet: cabinet,
     vacateCabinet: vacateCabinet, fillCabinet: fillCabinet,
     roomDoor: function () { return ROOM.doorPt ? { x: ROOM.doorPt.x, z: ROOM.doorPt.z } : null; },
+    // THE SITUATION ROOM, for a scene staged in it (city/coup.js): built on
+    // demand; its floor, its rect, its table frame, the door outside
+    sitRoom: function () {
+      if (CFG.PRESIDENCY_SITROOM && (!ROOM.group || ROOM.builtFor !== CBZ.govComplexes)) buildRoom();
+      if (!ROOM.group || !ROOM.rect || !ROOM.table) return null;
+      return { rect: ROOM.rect, floorY: ROOM.floorY || 0, table: ROOM.table, doorPt: ROOM.doorPt, inRoom: inRoom,
+        stations: (ROOM.stations || []).slice() };
+    },
     // the live, saved record of one post (loyalty / trait / refused live here;
     // city/president_staff.js reads and writes them)
     cabinetRecord: function (role) { cabinet(); const S = st(); return (S.cabinet && S.cabinet[role]) || null; },

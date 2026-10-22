@@ -58,8 +58,6 @@
   let screen = null;
   let appTitle = null;
   let clockEl = null;
-  let dialogueEl = null;
-  let dialogueChoices = null;
   let choiceResolve = null;
   let ownsMenuLock = false;
   let pulseTimer = 0;
@@ -580,18 +578,6 @@
       if (button) selectApp(button.getAttribute("data-app"));
     });
 
-    // THE ANSWERS, NOT THE LINE. What a person says goes over his head
-    // (systems/speech.js); this panel only carries the player's reply buttons.
-    dialogueEl = make("section", "campaign-dialogue");
-    dialogueEl.id = "campaignDialogue";
-    dialogueEl.innerHTML = "<div class='campaign-dialogue-choices'></div>";
-    document.body.appendChild(dialogueEl);
-    dialogueChoices = dialogueEl.querySelector(".campaign-dialogue-choices");
-    dialogueChoices.addEventListener("click", function (event) {
-      const button = event.target.closest && event.target.closest("[data-choice]");
-      if (button) choose(button.getAttribute("data-choice"));
-    });
-
     render();
     syncMode();
     return root;
@@ -1018,6 +1004,7 @@
         label: textOf(choice.label || choice.text, "Choice " + (i + 1)),
         value: choice.value !== undefined ? choice.value : (choice.id !== undefined ? choice.id : i),
         onSelect: typeof choice.onSelect === "function" ? choice.onSelect : (typeof choice.callback === "function" ? choice.callback : null),
+        dir: choice.dir === "up" || choice.dir === "left" || choice.dir === "right" ? choice.dir : null,
       };
     });
   }
@@ -1028,8 +1015,9 @@
     state.dialogue = null;
     choiceResolve = null;
     unpinReplies();
+    closeCine();
+    hideSubtitle();
     if (lineTimer) { clearTimeout(lineTimer); lineTimer = 0; }
-    if (dialogueEl) dialogueEl.classList.remove("show");
     document.body.classList.remove("campaign-dialogue-active");
     if (runCallback && pending && result && result.onSelect) {
       try { result.onSelect(result.value, result); } catch (e) { setTimeout(function () { throw e; }, 0); }
@@ -1081,8 +1069,8 @@
        Q / tap  all of them (city/verbwheel.js)
      so a reply is the same act as every other verb: look at the man who
      asked, answer him. Nothing is drawn along the bottom of the screen.
-     Only a voice with no place in the world at all (a handler on the phone)
-     still gets the old reply strip. */
+     A question that changes things, or one with no place in the world at all
+     (a handler on the phone), is the cinematic prompt below. */
   const REPLY = { actor: null, at: null, opts: [], zone: null };
   function replyOptions(list) {
     const VW = CBZ.cityVerbWord;
@@ -1144,6 +1132,166 @@
     if (had && CBZ.interactions && CBZ.interactions.refresh) CBZ.interactions.refresh();
   }
 
+  /* ============================================================
+     THE CINEMATIC PROMPT (owner 2026-10-22, the Call of Duty frame: a general
+     over a map table, her line as a subtitle, three answers round a d-pad
+     and a thin bar running out under them).
+
+     A conversation that CHANGES THINGS (the President told something by his
+     General, a coup put to you at gunpoint, a handler's order you can refuse)
+     is asked this way:
+
+       say(speaker, line, choices, { cinematic: true, actor, timeout, silent })
+
+     and so is any question asked while city/cinematics.js holds the camera
+     (the lens is framed on the speaker). Ordinary talk stays on the person
+     (pinReplies: E / hold E / the wheel).
+
+       layout     three answers UP / LEFT / RIGHT round a d-pad glyph; two sit
+                  LEFT / RIGHT. A choice may name its own { dir }.
+       the line   framed by the scene camera: a subtitle, low and centred.
+                  Otherwise it is said over the speaker's head (speech.js) and
+                  the subtitle stays empty: one place for one line.
+       answers    fade in after the line has landed; the bar starts then.
+       timer      meta.timeout seconds (default 8; false = none). Running out
+                  is an answer: the promise resolves "silence". meta.silent
+                  says what silence means: a line the asker says to it, a
+                  function, or { line, as: "<choice id>" } to count it as one
+                  of the answers.
+       input      pad d-pad up/left/right (systems/gamepad.js asks
+                  CBZ.padPrompt; the pad drives nothing else while it is up),
+                  arrows, W/A/D, 1/2/3 left to right, a tap or click. Movement
+                  keys are held while it is up.
+     It is also where a question with nobody and nothing to pin its answers
+     on lands (a voice on the phone): the old bottom reply strip is gone. */
+  const DIRS = ["up", "left", "right"];
+  const CP = { el: null, sub: null, who: null, line: null, bar: null, pad: null, btn: {}, open: false, ready: false,
+    t: 0, delay: 0, dur: 0, slots: {}, meta: null, speaker: null, picked: null };
+  function cineFramed() { return !!(CBZ.cineActive && CBZ.cineActive()); }
+  function ensureCine() {
+    if (CP.el || !document.body) return CP.el;
+    const el = make("section", "cine-prompt");
+    el.id = "cinePrompt";
+    el.setAttribute("aria-live", "polite");
+    el.innerHTML =
+      "<div class='cine-deck'>" +
+      "<button type='button' class='cine-ans' data-slot='up'></button>" +
+      "<button type='button' class='cine-ans' data-slot='left'></button>" +
+      "<svg class='cine-pad' viewBox='0 0 48 48' aria-hidden='true'>" +
+      "<path class='arm arm-up' d='M18 3h12v13l-6 6-6-6z'/>" +
+      "<path class='arm arm-left' d='M3 18h13l6 6-6 6H3z'/>" +
+      "<path class='arm arm-right' d='M45 18H32l-6 6 6 6h13z'/>" +
+      "<path class='arm arm-down' d='M18 45h12V32l-6-6-6 6z'/>" +
+      "</svg>" +
+      "<button type='button' class='cine-ans' data-slot='right'></button>" +
+      "</div>" +
+      "<div class='cine-timer'><i></i></div>" +
+      "<p class='cine-sub'><b class='cine-who'></b><span class='cine-line'></span></p>";
+    document.body.appendChild(el);
+    CP.el = el;
+    CP.sub = el.querySelector(".cine-sub");
+    CP.who = el.querySelector(".cine-who");
+    CP.line = el.querySelector(".cine-line");
+    CP.bar = el.querySelector(".cine-timer i");
+    CP.pad = el.querySelector(".cine-pad");
+    DIRS.forEach(function (d) { CP.btn[d] = el.querySelector(".cine-ans[data-slot='" + d + "']"); });
+    el.addEventListener("click", function (event) {
+      const b = event.target.closest && event.target.closest("[data-slot]");
+      if (b) { event.preventDefault(); cinePick(b.getAttribute("data-slot")); }
+    });
+    return el;
+  }
+  function slotsFor(list) {
+    const out = {};
+    const order = list.length >= 3 ? ["up", "left", "right"] : list.length === 2 ? ["left", "right"] : ["up"];
+    const top = list.slice(0, 3);
+    top.forEach(function (c) { if (c.dir && !out[c.dir]) out[c.dir] = c; });
+    top.forEach(function (c) {
+      if (c.dir && out[c.dir] === c) return;
+      let d = null;
+      for (let j = 0; j < order.length && !d; j++) if (!out[order[j]]) d = order[j];
+      for (let j = 0; j < DIRS.length && !d; j++) if (!out[DIRS[j]]) d = DIRS[j];
+      if (d) out[d] = c;
+    });
+    return out;
+  }
+  function openCine(meta, speaker, text, list, framed) {
+    if (!ensureCine()) return false;
+    CP.slots = slotsFor(list);
+    CP.meta = meta || {};
+    CP.speaker = speaker;
+    CP.picked = null;
+    DIRS.forEach(function (d) {
+      const b = CP.btn[d], c = CP.slots[d];
+      b.textContent = c ? c.label : "";
+      b.classList.toggle("empty", !c);
+      b.classList.remove("picked");
+      if (CP.pad) CP.pad.classList.toggle("has-" + d, !!c);
+    });
+    const line = framed ? textOf(text, "") : "";
+    CP.who.textContent = line ? speakerName(speaker) : "";
+    CP.line.textContent = line;
+    CP.sub.classList.toggle("empty", !line);
+    const chars = textOf(text, "").length;
+    CP.delay = chars ? Math.max(0.6, Math.min(2.4, 0.5 + chars * 0.03)) : 0.25;
+    const to = CP.meta.timeout;
+    CP.dur = to === false || to === 0 ? 0 : (isFinite(to) && to > 0 ? +to : 8);
+    CP.t = 0; CP.ready = false; CP.open = true;
+    CP.el.classList.remove("ready", "line-only");
+    CP.subOnly = false;
+    CP.el.classList.toggle("timed", CP.dur > 0);
+    if (CP.bar) CP.bar.style.transform = "scaleX(1)";
+    CP.el.classList.add("show");
+    document.body.classList.add("campaign-dialogue-active", "cine-prompt-open");
+    clearMovementKeys();
+    return true;
+  }
+  function closeCine() {
+    if (!CP.open) return;
+    CP.open = false; CP.ready = false; CP.slots = {}; CP.meta = null; CP.speaker = null;
+    if (CP.el) CP.el.classList.remove("show", "ready");
+    if (document.body) document.body.classList.remove("cine-prompt-open");
+  }
+  function cinePick(dir) {
+    if (!CP.open || !CP.ready || CP.picked) return false;
+    const c = CP.slots[dir];
+    if (!c) return false;
+    CP.picked = dir;
+    if (CP.btn[dir]) CP.btn[dir].classList.add("picked");
+    return choose(c.id) !== false;
+  }
+  // the answers in the order a row of number keys reads them: left to right
+  function cineByNumber(n) {
+    const row = ["left", "up", "right"].filter(function (d) { return !!CP.slots[d]; });
+    return row[n - 1] ? cinePick(row[n - 1]) : false;
+  }
+  function cineSilence() {
+    const meta = CP.meta || {}, s = meta.silent, who = CP.speaker;
+    const dlg = state.dialogue;
+    const line = typeof s === "string" ? s : (s && typeof s === "object" ? s.line : "");
+    const as = s && typeof s === "object" && s.as != null && dlg ? dlg.choices.find(function (c) { return c.id === String(s.as); }) : null;
+    if (as) finishDialogue(as, true);
+    else finishDialogue({ id: "silence", value: "silence", onSelect: typeof s === "function" ? s : null }, true);
+    // he says it AFTER the prompt is down, so it is his line, not ours
+    if (line && !state.dialogue) speakLine(meta, who, line, false);
+  }
+  function tickCine(dt) {
+    if (!CP.open) return;
+    if (g.state !== "playing" || state.open) return;     // a pause or the phone holds the clock
+    CP.t += Math.min(0.1, dt || 0.016);
+    if (!CP.ready && CP.t >= CP.delay) { CP.ready = true; CP.el.classList.add("ready"); }
+    if (!CP.ready || !CP.dur || CP.picked) return;
+    const left = 1 - (CP.t - CP.delay) / CP.dur;
+    if (CP.bar) CP.bar.style.transform = "scaleX(" + Math.max(0, left).toFixed(4) + ")";
+    if (left <= 0) cineSilence();
+  }
+  // the pad's door in (systems/gamepad.js): while this says active, the pad
+  // moves nobody and the d-pad answers
+  CBZ.padPrompt = {
+    active: function () { return CP.open; },
+    pick: function (dir) { return cinePick(dir); },
+  };
+
   // say(speaker, text, choices?|meta?, meta?) -> Promise<choice|null>
   function say(speaker, text, choices, meta4) {
     ensureDom();
@@ -1156,31 +1304,47 @@
       choices: normalized,
       actor: metadata && metadata.actor ? metadata.actor : null,
     };
-    const spoke = speakLine(metadata, speaker, state.dialogue.text, normalized.length > 0);
-    if (normalized.length && pinReplies(metadata, normalized)) {
+    const framed = cineFramed();
+    const cinematic = normalized.length > 0 && (framed || !!(metadata && metadata.cinematic));
+    // framed by the scene camera, the line is the subtitle; otherwise it is
+    // said by the body that says it
+    const spoke = framed && state.dialogue.text ? true : speakLine(metadata, speaker, state.dialogue.text, normalized.length > 0);
+    if (normalized.length && !cinematic && pinReplies(metadata, normalized)) {
       state.dialogue.pinned = true;
       return new Promise(function (resolve) { choiceResolve = resolve; });
     }
-    if (dialogueChoices) {
-      dialogueChoices.textContent = "";
-      normalized.forEach(function (choice, i) {
-        const button = make("button", "campaign-dialogue-choice");
-        button.type = "button";
-        button.setAttribute("data-choice", choice.id);
-        button.appendChild(make("span", "campaign-dialogue-key", String(i + 1)));
-        button.appendChild(make("span", "campaign-dialogue-choice-text", choice.label));
-        dialogueChoices.appendChild(button);
-      });
-    }
     if (normalized.length) {
-      if (dialogueEl) { dialogueEl.classList.add("has-choices"); dialogueEl.classList.add("show"); }
-      document.body.classList.add("campaign-dialogue-active");
+      // a question that changes things, or one with nowhere to pin its answers
+      openCine(metadata, speaker, state.dialogue.text, normalized, framed);
+      state.dialogue.cinematic = true;
+    } else if (framed && state.dialogue.text) {
+      // a line said inside a framed scene is the subtitle too
+      showSubtitle(speaker, state.dialogue.text);
+      const hold = Math.min(4.5, 1.6 + state.dialogue.text.length * 0.05) * 1000;
+      lineTimer = setTimeout(function () { lineTimer = 0; finishDialogue(null, false); }, hold);
     } else {
       // a plain line is done when it has been said (or, unspoken, at once)
       const hold = spoke ? Math.min(4, 1.4 + state.dialogue.text.length * 0.05) * 1000 : 0;
       lineTimer = setTimeout(function () { lineTimer = 0; finishDialogue(null, false); }, hold);
     }
     return new Promise(function (resolve) { choiceResolve = resolve; });
+  }
+  // the subtitle alone (no answers): a framed scene's line
+  function showSubtitle(speaker, text) {
+    if (!ensureCine()) return;
+    CP.slots = {};
+    DIRS.forEach(function (d) { CP.btn[d].textContent = ""; CP.btn[d].classList.add("empty"); if (CP.pad) CP.pad.classList.remove("has-" + d); });
+    CP.who.textContent = speakerName(speaker);
+    CP.line.textContent = textOf(text, "");
+    CP.sub.classList.remove("empty");
+    CP.el.classList.remove("ready", "timed");
+    CP.el.classList.add("show", "line-only");
+    CP.subOnly = true;
+  }
+  function hideSubtitle() {
+    if (!CP.subOnly) return;
+    CP.subOnly = false;
+    if (CP.el) CP.el.classList.remove("show", "line-only");
   }
 
   function choice(def) {
@@ -1323,6 +1487,22 @@
     // (systems/inventory.js) and draw a gun mid-conversation. The physical
     // key (CBZ.digitKey, systems/input.js), so Shift+1 on a Mac still picks 1.
     const digit = CBZ.digitKey ? CBZ.digitKey(event) : 0;
+    // THE CINEMATIC PROMPT owns the arrows, W/A/D, 1-3 and every movement
+    // key while it is up: you answer, you do not walk off.
+    if (!state.open && CP.open && key !== "escape") {
+      const code = event.code || "";
+      const dir = (key === "arrowup" || code === "KeyW") ? "up"
+        : (key === "arrowleft" || code === "KeyA") ? "left"
+        : (key === "arrowright" || code === "KeyD") ? "right" : null;
+      const held = dir || digit || CINE_EATS[key] || /^Key[WASDEQF]$|^Space$|^Arrow/.test(code);
+      if (!held) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.repeat) return;
+      if (dir) cinePick(dir);
+      else if (digit) cineByNumber(digit);
+      return;
+    }
     if (!state.open && state.dialogue && state.dialogue.choices.length && digit) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -1350,7 +1530,13 @@
     else if (digit >= 1 && digit <= 3) selectApp(APPS[digit - 1]);
   }
 
+  const CINE_EATS = { w: 1, a: 1, s: 1, d: 1, e: 1, q: 1, f: 1, " ": 1, shift: 1, arrowup: 1, arrowdown: 1, arrowleft: 1, arrowright: 1 };
   function keyup(event) {
+    if (CP.open && !state.open) {
+      const k = String(event.key || "").toLowerCase();
+      if (CINE_EATS[k] && CBZ.keys) CBZ.keys[k] = false;
+      return;
+    }
     if (!state.open) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -1371,6 +1557,14 @@
     choice: choice,
     choose: choose,
     clearDialogue: clearDialogue,
+    // the cinematic prompt: what stands on it now, and answer it by direction
+    cinematic: function () {
+      if (!CP.open) return null;
+      const slots = {};
+      for (const d in CP.slots) slots[d] = CP.slots[d].label;
+      return { ready: CP.ready, slots: slots, left: CP.dur ? Math.max(0, CP.dur - Math.max(0, CP.t - CP.delay)) : null };
+    },
+    pick: cinePick,
     takeover: takeover,
     open: open,
     close: close,
@@ -1407,6 +1601,11 @@
   if (document.body) ensureDom();
   else document.addEventListener("DOMContentLoaded", ensureDom, { once: true });
 
-  if (typeof CBZ.onAlways === "function") CBZ.onAlways(999.75, syncMode);
-  else setInterval(syncMode, 250);
+  if (typeof CBZ.onAlways === "function") {
+    CBZ.onAlways(999.75, syncMode);
+    CBZ.onAlways(999.74, tickCine);
+  } else {
+    setInterval(syncMode, 250);
+    setInterval(function () { tickCine(0.05); }, 50);
+  }
 })();
