@@ -98,6 +98,13 @@
        + opts.tackleRange (m, default 3.2)  + opts.tackles (attempts per case, default 2)
        + opts.silent (the game speaks the lines)  + opts.complyHold (s, default 0.6)
 
+     + demand.begin(actor, target, kind, opts) -> case   (THE DEMAND LADDER:
+       demand -> warn -> show -> act; kinds rob | trespass | bouncer | turf |
+       security | cop, where "cop" IS the authority case above)
+     + demand.step(actor, dt, s) -> { kind, step, say, act, verb, outcome, x, z }
+     + demand.cancel(actor)  + demand.caseOf(actor)  + demand.answer(victim, s)
+       + demand.KINDS  + demand.line(actor, topic)   (see the DEMAND block)
+
      + brain.dismiss(actor, { from, fromFaction, familiar[], to:{x,z}, line, nod, faction, archetype, arrive, max }) -> leave record
        LET GO OF A MAN WHO WORKED FOR SOMEBODY (a crewman, a staffer, a guard):
        every job-held thing in his head goes (the principal he covered, an
@@ -268,6 +275,11 @@
     threat: { cover: 0.25, fight: 0.15 },
     authority: "lethal",
     authorityOpts: { warnRange: 12, orderRange: 7, cuffRange: 1.6, patience: 1.5 },
+    lines: {
+      warn: ["Police! Don't move!", "Hands! Show me your hands!"],
+      order: ["Get on the ground!", "Down! Down! Down!", "Hands up! Now!"],
+      lethal: ["Surrender now or die!", "Drop it or you're dead!"],
+    },
   });
   define("ganger", {
     viewDist: 35, fovHalf: 1.2, faction: "gang", cq: "thug",
@@ -1773,13 +1785,13 @@
      beat cop 6 s, SWAT 1.5 s); an order past 15 m is void. */
   const LINES = {
     warn: ["Stop right there!", "Hey! Stop!", "Police! Hold it!"],
-    order: ["On the ground! Now!", "Get on your knees!", "Down! Get down!", "Hands up!"],
-    orderArmed: ["Drop it! Drop the weapon!", "Gun! Drop it!"],
+    order: ["Hands up!", "Get on the ground!", "Put your hands up!", "On your knees!"],
+    orderArmed: ["Put the gun down!", "Drop the gun!", "Gun down! Now!"],
     approach: ["Easy now, hold still.", "Don't move."],
     cuff: ["Hands behind your back.", "Don't move."],
     escalate: ["Last warning!", "Stop resisting!"],
     force: ["Taser! Taser!", "Get down!"],
-    lethal: ["Drop it or I shoot!"],
+    lethal: ["Drop it or I shoot!", "Put it down or I shoot!"],
     done: ["You're done.", "Move along."],
     released: ["Keep it holstered.", "Put it away and keep it away.", "Alright. Move along."],
     frisk: ["Hands on the wall.", "Arms out."],
@@ -1796,7 +1808,16 @@
      waits on the REAL verb (a session or an arrest take: done + outcome):
      cuffs that were fought off are an escalation, not a "cuffed". */
   const ARREST = { COMPLY_SPD: 0.6, COMPLY_HOLD: 0.6, FLEE_SPD: 2.2, FLEE_HOLD: 0.55, TASE_R: 5.5, TACKLE_R: 2.6, GRAB_R: 1.5, AFTER_TASE: 3.0, LOSE_R: 15, CUFF_T: 1.5, CUFF_MAX: 14, FRISK_T: 1.1, ESC_T: 0.4, TASE_RELOAD: 2.6, RUN_FOR: 9 };
+  // the cop's rung as a ladder step, for the voice book (systems/voice.js)
+  const COP_STEP = { observe: "demand", warn: "demand", order: "warn", approach: "comply", cuff: "comply", frisk: "comply",
+    escalate: "show", force: "act", lethal: "show", done: "comply", released: "comply", warned: "comply", orderArmed: "warn" };
   function line(b, key) {
+    const VO = CBZ.voice;
+    if (VO && typeof VO.line === "function" && b.case) {
+      let s = null;
+      try { s = VO.line(b.actor, COP_STEP[key] || key, { ladder: { kind: b.archId === "guard" || b.archId === "warden" ? "guard" : "cop", step: COP_STEP[key] || key, rung: key, armed: true }, target: b.case.suspect }); } catch (e) { s = null; }
+      if (s) return s;
+    }
     const L = (b.arch.lines && b.arch.lines[key]) || LINES[key];
     return L && L.length ? L[(b.id + (b.case ? b.case.n : 0)) % L.length] : null;
   }
@@ -2043,6 +2064,361 @@
     begin: begin, step: step, LINES: LINES, ARREST: ARREST,
     cancel: function (officer) { const b = officer && officer._brain; if (b && b.case) { b.case.active = false; b.case.outcome = "cancelled"; b.case.phase = "done"; } },
     caseOf: function (officer) { const b = officer && officer._brain; return b && b.case && b.case.active ? b.case : null; },
+  };
+
+  /* ================================================================ DEMAND
+     THE DEMAND LADDER: one mechanism for every "somebody wants something
+     from you and it gets worse if you don't give it":
+       DEMAND  "Give me your money." / "Can I help you?" / "Not tonight."
+       WARN    "Don't make me pull my gun." (only if he carries one) /
+               "I'll beat your ass." / "You can't be in here."
+       SHOW    the gun comes out / he squares up and closes / "Last chance."
+       ACT     shoots / swings / grabs you and throws you out / opens fire
+     The TARGET's answer is what he DOES, read from the state the caller
+     hands step() every frame, never a word button:
+       comply (paid / walked out / gun away)   -> resolved ("Smart." or nothing)
+       ignore / stay                           -> the next step after patience
+       walk away                               -> resolved ("Yeah, keep walking.")
+       run                                     -> shouted after, or chased by a hard man
+       swing at him                            -> straight to ACT
+       draw on him                             -> the threat flips: a man with no gun
+                                                  or no nerve backs off ("Whoa, easy")
+                                                  and goes; an armed brave one draws too
+                                                  = STANDOFF until someone acts or backs down
+     Who he is decides the shape: a coward stalls at WARN and gives up, a
+     hardened man skips WARN, friends of his within 10 m make him bolder.
+     kind "cop" IS authority (the arrest ladder above): begin/step/cancel go
+     straight through to it, so a cop has one case, not two.
+
+     demand.begin(actor, target, kind, opts) -> case
+       kind: "rob" | "trespass" | "bouncer" | "turf" | "security" | "cop"
+       opts: { armed (he carries a gun; default threat.capability),
+               hard, coward (force the temper), friends (n; default counted),
+               patience (s per step, or [demand, warn, show]), start ("show"),
+               silent (the game speaks), leaveR (m that counts as walked off),
+               act (fix the ACT: "beat" | "throw" | "shoot" | ...),
+               startArmed (the step an already-armed target opens at; false: ask first),
+               lines ({ step: [..] } over the kind's table), + any cop opts }
+     demand.step(actor, dt, s) -> { kind, step, say, act, verb, outcome, x, z }
+       s: { dist, speed, armed, aiming (at HIM), attacking (swung / fired at
+            him), paid, inside (still where he must not be), complied (the
+            caller's own test, overrides the kind's), fled, handsUp }
+       act: approach | hold | draw | close | aim | shoot | beat | throw |
+            shove | chase | flee | leave | null   (the caller's body does it)
+       outcome on step "done": complied | left | fled | backed | gaveup |
+            acted | dead | cancelled  (+ the cop outcomes)
+     demand.cancel(actor)  demand.caseOf(actor)  demand.answer(victim, s)
+     demand.KINDS (the per-kind tables)  demand.line(actor, topic)
+  ============================================================== */
+  const D_STEPS = ["demand", "warn", "show", "act"];
+  const D_TABLE = {
+    rob: {
+      patience: [3.2, 3.0, 2.2], leaveR: 10, talkR: 1.8,
+      comply: function (s) { return !!s.paid; },
+      lines: {
+        demand: ["Give me your money.", "Wallet. Now.", "Run your pockets.", "Let me get that money."],
+        warnGun: ["Don't make me pull my gun.", "Don't make me pull it out."],
+        warn: ["I'll kill you.", "I'll beat your ass.", "Don't make me hurt you."],
+        showGun: ["Last chance.", "You think I'm playing?"],
+        show: ["Last chance.", "Alright. You want it?"],
+        comply: ["Smart.", "Now get lost."],
+        left: ["Yeah, keep walking."],
+        fled: ["Yeah, run!", "That's right, run!"],
+        backoff: ["Whoa, easy, easy.", "Okay, okay. I'm going."],
+        standoff: ["Put it down!", "You put it down first!"],
+        gaveup: ["Forget it.", "Whatever, man."],
+      },
+    },
+    trespass: {
+      patience: [3.0, 3.0, 2.4], leaveR: 0, talkR: 2.2,
+      comply: function (s) { return s.inside === false; },
+      lines: {
+        demand: ["Can I help you?", "You lost?", "Who let you up here?"],
+        warn: ["You can't be in here.", "This is private. Out."],
+        showGun: ["Get out. Now.", "I'm not asking again."],
+        show: ["Get out. Now.", "I'm not asking again."],
+        act: ["Out!"],
+        comply: ["Thank you."],
+        backoff: ["Whoa. Easy.", "Okay. Okay."],
+        standoff: ["Put it down!", "Drop it!"],
+        gaveup: ["Fine. I'm calling it in."],
+      },
+    },
+    bouncer: {
+      patience: [2.4, 2.6, 2.0], leaveR: 0, talkR: 1.6,
+      comply: function (s) { return s.inside === false; },
+      lines: {
+        demand: ["Not tonight.", "Line's back there."],
+        warn: ["Walk away.", "I said walk away."],
+        show: ["Don't make me do this.", "Last time."],
+        act: ["And stay out!"],
+        backoff: ["Whoa. Easy, man.", "Alright, alright."],
+        standoff: ["Put it down!"],
+      },
+    },
+    turf: {
+      patience: [4.5, 3.5, 1.8], leaveR: 18, talkR: 0,
+      // inside: the caller's "he is on our block in a way we don't allow"
+      // (armed, or any stranger once the set is hostile)
+      comply: function (s) { return s.inside === false || (s.inside == null && !s.armed); },
+      hold: true,
+      lines: {
+        demand: ["You lost?", "Ay. Wrong block.", "You don't live here."],
+        demandAtGun: ["Ay. Put that away.", "Wrong corner to be waving that."],
+        warn: ["I'm not saying it again. Walk.", "Last time. Turn around."],
+        show: ["You got about two seconds."],
+        actGun: ["Light him up!", "He wants it. Get him!"],
+        act: ["Get him!", "Run him off!"],
+        comply: ["Yeah. Keep walking.", "Smart.", "That's what I thought."],
+        left: ["Yeah. Keep walking.", "That's what I thought."],
+        fled: ["Yeah, run!"],
+        standoff: ["Put it down!", "Drop it!"],
+      },
+    },
+    security: {
+      patience: [2.4, 2.2, 4.0], leaveR: 0, talkR: 0, keepR: 4,
+      // an armed man near the principal is already past asking: the gun is out
+      startArmed: "show", aimIsAct: true, hold: true,
+      // inside: the caller's own "still a problem"; without one, the gun
+      // away and a step back from what he guards
+      comply: function (s, c) { return s.inside === false || (s.inside == null && !s.armed && s.dist != null && s.dist >= c.keepR); },
+      lines: {
+        demand: ["Sir, step back.", "Back up, please."],
+        warn: ["Step back. Now.", "Hands where I can see them."],
+        show: ["Back off!", "Last warning. Back off."],
+        showAtGun: ["Drop the gun!", "Drop it! Now!", "Gun down! Now!"],
+        comply: ["Thank you, sir.", "Keep moving."],
+        standoff: ["Drop it! Drop it!"],
+        backoff: ["Easy. Easy."],
+      },
+    },
+  };
+  const D_RUN = 2.2;
+  function dPick(L, b, c) { return L && L.length ? L[(b.id + c.n) % L.length] : null; }
+  function dLine(c, topic) {
+    const b = of(c.actor);
+    const VO = CBZ.voice;
+    if (VO && typeof VO.line === "function") {
+      let s = null;
+      try { s = VO.line(c.actor, topic, { ladder: { kind: c.kind, step: c.step, armed: c.armed, targetArmed: !!c.tArmed }, target: c.target }); } catch (e) { s = null; }
+      if (s) return s;
+    }
+    const own = c.lines, T = D_TABLE[c.kind] && D_TABLE[c.kind].lines;
+    // "...AtGun": said to a man holding a gun; "...Gun": said by a man who has one
+    const kt = c.tArmed ? topic + "AtGun" : null, k = c.armed ? topic + "Gun" : topic;
+    const L = (own && ((kt && own[kt]) || own[k] || own[topic])) || (T && ((kt && T[kt]) || T[k] || T[topic]));
+    return dPick(L, b, c);
+  }
+  function dFriends(actor, b) {
+    const L = near(ax(actor), az(actor), 10);
+    let n = 0;
+    for (let i = 0; i < L.length; i++) {
+      const o = L[i];
+      if (o === b || isDead(o.actor) || blind(o.actor)) continue;
+      if (o.faction && o.faction === b.faction && b.faction !== "civilians") n++;
+    }
+    return n;
+  }
+  function dBegin(actor, target, kind, opts) {
+    opts = opts || {};
+    if (kind === "cop") {
+      const ac = begin(actor, target, opts.reason || null, opts);
+      ac.kind = "cop";
+      const b0 = of(actor); if (b0.dcase) b0.dcase.active = false;
+      return ac;
+    }
+    const b = of(actor);
+    if (b.case && b.case.active) { b.case.active = false; b.case.outcome = "cancelled"; b.case.phase = "done"; }
+    const K = D_TABLE[kind] || D_TABLE.rob;
+    const c = b.dcase || (b.dcase = { n: 0, out: { kind: null, step: null, say: null, act: null, verb: null, outcome: null, x: 0, z: 0 } });
+    c.actor = actor; c.target = target; c.kind = D_TABLE[kind] ? kind : "rob"; c.K = K;
+    c.n++; c.active = true; c.outcome = null; c.t = 0; c.stepT = 0; c.said = null; c.lastD = -1; c.flee = 0;
+    c.armed = opts.armed != null ? !!opts.armed : capability(actor) === "gun";
+    const P = b.personality;
+    c.friends = opts.friends != null ? opts.friends | 0 : dFriends(actor, b);
+    // nerve: his courage, pushed up by his people around him
+    c.nerve = clamp01(P.courage + Math.min(3, c.friends) * 0.12 + (c.armed ? 0.1 : 0));
+    c.hard = opts.hard != null ? !!opts.hard : (P.aggression >= 0.78 && c.nerve >= 0.6);
+    c.coward = opts.coward != null ? !!opts.coward : (!c.hard && c.nerve < 0.35);
+    const pt = opts.patience;
+    c.pat = Array.isArray(pt) ? pt : pt != null ? [pt, pt, pt] : K.patience;
+    c.leaveR = opts.leaveR != null ? opts.leaveR : K.leaveR;
+    c.keepR = opts.keepR != null ? opts.keepR : (K.keepR || 3);
+    c.talkR = opts.talkR != null ? opts.talkR : K.talkR;
+    c.hold = opts.hold != null ? !!opts.hold : !!K.hold;
+    c.silent = !!opts.silent;
+    c.lines = opts.lines || null;
+    c.start = opts.start || null;
+    c.actAs = opts.act || null;
+    c.startArmed = opts.startArmed !== undefined ? opts.startArmed : (K.startArmed || null);   // an armed target opens at this step   // the caller fixes the act ("beat" for a gang house)
+    c.armed0 = null;           // was the target armed when it started (a later draw is the flip)
+    c.prev = null;             // the step a standoff came from
+    c.acted = 0;
+    c.step = c.start && D_STEPS.indexOf(c.start) >= 0 ? c.start : "demand";
+    return c;
+  }
+  function dGo(c, step) { c.prev = c.step; c.step = step; c.stepT = 0; c.said = null; }
+  function dEnd(c, outcome, topic) {
+    c.active = false; c.outcome = outcome; c.step = "done"; c.stepT = 0;
+    const out = c.out;
+    out.say = topic ? dLine(c, topic) : null;
+    out.step = "done"; out.outcome = outcome;
+    return out;
+  }
+  // what his ACT is: the kind and what he carries
+  function dActOf(c, s) {
+    if (c.actAs) return c.actAs === "beat" && c.armed && s.armed ? "shoot" : c.actAs;
+    if (c.kind === "bouncer" || c.kind === "trespass") {
+      // a man who swung at him is beaten; an armed man is shot (if he is armed)
+      if (s.attacking || c.acted > 0) return c.armed && s.armed ? "shoot" : "beat";
+      return c.armed && s.armed ? "shoot" : "throw";
+    }
+    if (c.kind === "security") return s.armed ? "shoot" : "shove";
+    return c.armed ? "shoot" : "beat";
+  }
+  const _dss = { dist: 99, speed: 0, armed: false, aiming: false, attacking: false, paid: false, inside: true };
+  function dStep(actor, dt, s) {
+    const b = actor && actor._brain;
+    if (!b) return null;
+    if (b.case && b.case.active && !(b.dcase && b.dcase.active)) {
+      const r = step(actor, dt, s);
+      if (r) { r.kind = "cop"; r.step = COP_STEP[r.phase] || r.phase; if (r.phase === "lethal") r.step = "show"; if (r.phase === "done") r.step = "done"; r.outcome = b.case.outcome; }
+      return r;
+    }
+    const c = b.dcase;
+    if (!c || !c.active) return null;
+    s = s || _dss;
+    const out = c.out;
+    out.kind = c.kind; out.say = null; out.act = null; out.verb = null; out.outcome = null;
+    const tg = c.target;
+    if (!tg || isDead(tg) || isDead(actor)) return dEnd(c, tg && isDead(tg) ? "dead" : "cancelled", null);
+    if (blind(actor)) return dEnd(c, "cancelled", null);
+    c.t += dt; c.stepT += dt;
+    const d = s.dist != null ? s.dist : Math.hypot(ax(tg) - ax(actor), az(tg) - az(actor));
+    const opening = c.lastD >= 0 && d > c.lastD + 0.001;
+    c.lastD = d;
+    c.tArmed = !!s.armed;
+    out.x = ax(tg); out.z = az(tg);
+    if (c.armed0 == null) {
+      c.armed0 = !!s.armed;
+      if (s.armed && c.startArmed && c.step === "demand") dGo(c, c.startArmed);
+    }
+    const K = c.K;
+    // ---- the target swung at him / fired on him: straight to the act
+    if (s.attacking && c.step !== "act") {
+      if (!c.armed && s.armed && !c.hard) return dEndAct(c, "flee", "backed", "backoff");
+      dGo(c, "act");
+    }
+    // ---- he DREW: the threat flips
+    const drew = c.step !== "act" && (s.aiming || (s.armed && !c.armed0 && c.kind !== "turf" && c.kind !== "security"));
+    if (drew && c.step !== "standoff") {
+      if (K.aimIsAct && s.aiming) dGo(c, "act");
+      else if (!c.armed || c.nerve < 0.5) return dEndAct(c, "flee", "backed", "backoff");
+      else { dGo(c, "standoff"); }
+    }
+    // ---- he did what was asked
+    const complied = s.complied != null ? !!s.complied : K.comply(s, c);
+    if (complied && c.step !== "act" && c.step !== "standoff") return dEndAct(c, "leave", "complied", "comply");
+    // ---- he walked off / ran
+    const running = (s.speed || 0) > D_RUN && opening;
+    c.flee = running ? c.flee + dt : Math.max(0, c.flee - dt);
+    if (c.step !== "act" && c.step !== "standoff") {
+      if (c.flee > 0.5 || s.fled) {
+        if (c.hard && c.kind === "rob") { dGo(c, "act"); out.act = "chase"; }
+        else return dEndAct(c, "leave", "fled", "fled");
+      } else if (c.leaveR > 0 && d > c.leaveR && opening) return dEndAct(c, "leave", "left", "left");
+    }
+    // ---- the steps
+    const st = c.step;
+    if (st === "standoff") {
+      out.act = "aim";
+      if (c.said !== st) { out.say = dLine(c, "standoff"); c.said = st; }
+      if (s.attacking) { dGo(c, "act"); }
+      else if (!s.armed && c.stepT > 0.4) {
+        // he put it away: back on the ladder where it was, one step harder
+        dGo(c, "show");
+      } else if (c.stepT > (c.hard ? 2.6 : 6)) {
+        if (c.hard) dGo(c, "act");
+        else return dEndAct(c, "leave", "backed", "backoff");
+      }
+    }
+    if (c.step === "demand") {
+      out.act = c.hold || d <= c.talkR ? "hold" : "approach";
+      if (c.said !== "demand") { out.say = dLine(c, "demand"); c.said = "demand"; }
+      if (c.stepT >= c.pat[0]) dGo(c, c.hard ? "show" : "warn");
+    }
+    if (c.step === "warn") {
+      out.act = c.hold || d <= c.talkR ? "hold" : "approach";
+      if (c.said !== "warn") { out.say = dLine(c, "warn"); c.said = "warn"; }
+      if (c.stepT >= c.pat[1]) {
+        // a coward says it and never does it
+        if (c.coward) return dEndAct(c, "leave", "gaveup", "gaveup");
+        dGo(c, "show");
+      }
+    }
+    if (c.step === "show") {
+      out.act = c.armed ? "draw" : "close";
+      if (c.said !== "show") { out.say = dLine(c, "show"); c.said = "show"; }
+      if (c.stepT >= c.pat[2]) dGo(c, "act");
+    }
+    if (c.step === "act") {
+      const a = out.act === "chase" ? "chase" : dActOf(c, s);
+      out.act = a;
+      if (c.said !== "act") { out.say = dLine(c, "act"); c.said = "act"; }
+      c.acted++;
+      c.active = false; c.outcome = "acted";
+      out.step = "act"; out.outcome = "acted";
+      if (out.say && !c.silent) say(actor, out.say, _sayForce);
+      return out;
+    }
+    out.step = c.step;
+    if (out.say && !c.silent) say(actor, out.say, _sayForce);
+    return out;
+  }
+  function dEndAct(c, act, outcome, topic) {
+    const out = dEnd(c, outcome, topic);
+    out.act = act;
+    if (out.say && !c.silent) say(c.actor, out.say, _sayForce);
+    return out;
+  }
+  // THE OTHER SIDE: a man being robbed, asked, pushed. What he DOES is read
+  // off the same things: under a gun pointed at him he gives it up unless he
+  // is armed and hard; with no gun shown a tough one refuses (and a very
+  // aggressive one swings), the meek pay or run.
+  //   s: { armed (the demander has a gun out), aiming (at him), shown (it was
+  //        SHOWN: drawn or fired), armedSelf (he carries one), pressed (n
+  //        times already leaned on) }  ->  "comply" | "refuse" | "fight" | "flee"
+  function dAnswer(victim, s) {
+    const b = of(victim);
+    const P = b.personality;
+    s = s || _dss;
+    const own = s.armedSelf != null ? !!s.armedSelf : capability(victim) === "gun";
+    // every time he is leaned on again he is more fed up than scared
+    const nerve = clamp01(P.courage + (own ? 0.2 : 0) + (s.pressed | 0) * 0.08);
+    if (s.aiming || s.shown) {
+      if (own && nerve > 0.8 && P.aggression > 0.7) return "fight";
+      return "comply";
+    }
+    if (s.armed) return nerve > 0.75 ? "refuse" : "comply";
+    if (nerve > 0.55) return P.aggression > 0.7 ? "fight" : "refuse";
+    return nerve < 0.25 ? "flee" : "comply";
+  }
+  const demand = {
+    begin: dBegin, step: dStep, answer: dAnswer, KINDS: D_TABLE, STEPS: D_STEPS,
+    cancel: function (actor) {
+      const b = actor && actor._brain;
+      if (!b) return;
+      if (b.dcase && b.dcase.active) { b.dcase.active = false; b.dcase.outcome = "cancelled"; b.dcase.step = "done"; }
+      else if (b.case && b.case.active) authority.cancel(actor);
+    },
+    caseOf: function (actor) {
+      const b = actor && actor._brain;
+      if (!b) return null;
+      if (b.dcase && b.dcase.active) return b.dcase;
+      if (b.case && b.case.active) { b.case.kind = "cop"; return b.case; }
+      return null;
+    },
+    line: function (actor, topic) { const b = actor && actor._brain; return b && b.dcase ? dLine(b.dcase, topic) : null; },
   };
 
   /* ================================================================ TICK
@@ -2321,7 +2697,7 @@
     list: function () { return registered; }, near: near,
     personalityFromBehavior: personalityFromBehavior,
     perception: perception, memory: memory, rep: rep, needs: needs, social: social,
-    threat: threat, morale: morale, authority: authority, act: act,
+    threat: threat, morale: morale, authority: authority, demand: demand, act: act,
     dismiss: dismiss, familiar: familiar, employ: employ,
     job: function (a) { const b = a && a._brain; return (b && b.job) || null; },
     leaving: function (a) { const b = a && a._brain; return (b && b.leave) || null; },

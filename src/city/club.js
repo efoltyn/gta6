@@ -221,6 +221,7 @@
   function holdBouncer() {
     const b = S.bouncer, club = S.club;
     if (!b || b.dead || !club) return;
+    if (b._ladder || b.rage) return;          // he is dealing with you (city/ladder.js)
     const bs = club.bouncerSpot;
     b.controlled = true; b.state = "idle"; b.speed = 0;
     b.fear = 0; b.alarmed = 0;
@@ -329,8 +330,32 @@
     S.bottleCD = 6;
   }
 
+  // TURNED AWAY IS THE FIRST STEP OF THE BOUNCER'S LADDER (CBZ.brain.demand
+  // "bouncer"): "Not tonight. Not in those rags." -> "Walk away." -> "Last
+  // time." -> his hands in your collar and you are thrown out onto the
+  // pavement ("And stay out!"). Walk away and it is over. Swing at him and he
+  // beats you; draw on him and he draws too.
+  function atTheDoor() {
+    const c = S.club, P = CBZ.player;
+    if (!c || !P || P.dead || S.admitted) return false;
+    return dist2(P.pos.x, P.pos.z, c.bouncerSpot.x, c.bouncerSpot.z) < 4.2 * 4.2 ||
+      dist2(P.pos.x, P.pos.z, c.insideSpot.x, c.insideSpot.z) < 7 * 7;
+  }
+  function outward() {
+    const c = S.club;
+    const dx = c.bouncerSpot.x - c.insideSpot.x, dz = c.bouncerSpot.z - c.insideSpot.z, d = Math.hypot(dx, dz) || 1;
+    return { x: dx / d, z: dz / d };
+  }
   function rejectPlayer(drip, need) {
     S.rejectCD = 3.2;
+    const b = S.bouncer;
+    if (b && !b.dead && CBZ.cityLadder) {
+      if (b._ladder) return;
+      if (CBZ.cityLadder.begin(b, "bouncer", {
+        lines: { demand: ["Not tonight. Not in those rags.", "Not tonight."] },
+        inside: atTheDoor, outDir: outward,
+      })) return;
+    }
     bouncerSay("Not tonight. Not in those rags.", 2.6, true);
   }
 

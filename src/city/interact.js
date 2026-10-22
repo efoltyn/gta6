@@ -202,16 +202,32 @@
     const prior = p._shakeCount | 0;
     const sinceLast = now - (p._shakeT || 0);
     const fearNow = (relOf(p) && relOf(p).fear) || p.fear * 10 || 0;
-    // base refusal chance climbs with each prior shakedown and with low fear.
-    let refuse = 0.04 + prior * 0.12 + Math.max(0, (40 - fearNow)) * 0.004;
-    if (shakeBraveEnough(p)) refuse += 0.35;
-    if (refuse > 0.92) refuse = 0.92;
-    if (Math.random() < refuse) {
+    // HIS ANSWER IS THE DEMAND LADDER'S OTHER SIDE (CBZ.brain.demand.answer):
+    // under a gun pointed at him he gives it up unless he is armed and hard;
+    // with no gun shown a tough one refuses (a very aggressive one swings)
+    // until you SHOW it; the meek pay or run. Every squeeze on the same man
+    // makes him more fed up than scared.
+    const DM = CBZ.brain && CBZ.brain.demand;
+    const gunOut = !!(CBZ.cityHasGun && CBZ.cityHasGun());
+    const onHim = gunOut && !!p._covered && !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon());
+    let answer;
+    if (DM) {
+      answer = DM.answer(p, { armed: gunOut, aiming: onHim, shown: onHim, armedSelf: !!(p.armed || p._holster), pressed: prior });
+    } else {
+      let refuse = 0.04 + prior * 0.12 + Math.max(0, (40 - fearNow)) * 0.004;
+      if (shakeBraveEnough(p)) refuse += 0.35;
+      answer = Math.random() < Math.min(0.92, refuse) ? (shakeBraveEnough(p) ? "fight" : "flee") : "comply";
+    }
+    if (answer !== "comply") {
       // they don't pay — and it costs YOU. Grudge/fear shift, heat, witnesses.
       if (CBZ.cityRelShift) CBZ.cityRelShift(p, "threatened");
       p.alarmed = Math.max(p.alarmed || 0, 8);
       const pa = CBZ.city && CBZ.city.playerActor;
-      if (shakeBraveEnough(p) && pa) {
+      if (answer === "refuse") {
+        // he stands there and says no: show him the gun, or walk away
+        if (CBZ.citySayTopic) CBZ.citySayTopic(p, "refusePay", { force: true });
+        p.state = "idle"; p.speed = 0;
+      } else if (answer === "fight" && pa) {
         // a hard mark squares up — now you've got a fight on your hands.
         p.rage = pa; p.state = "fight"; p.fear = 0;
         if (CBZ.citySayTopic) CBZ.citySayTopic(p, "refusePay", { force: true });

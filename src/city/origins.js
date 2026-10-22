@@ -1297,14 +1297,22 @@
       // back up. (The old kx/kz knockback only integrates for a player who
       // is ALREADY knocked down — a standing player ignores it completely,
       // so it never visibly threw anyone.)
+      // THE DEMAND LADDER'S LAST RUNG, the bouncer kind's ACT (CBZ.brain.demand,
+      // city/ladder.js): his hands in your collar (CBZ.verbs grab, held a beat,
+      // thrown out the door). No verbs on the page: the ballistic toss below.
       const P = CBZ.player;
-      const ph = P._phys = P._phys || {};
-      ph.air = true; ph.down = 0;
-      ph.vx = s.nx * T.tossSpeedXZ; ph.vz = s.nz * T.tossSpeedXZ;
-      ph.vy = T.tossSpeedY; ph.spin = T.tossSpin;
+      const V = CBZ.verbs, PA = CBZ.city && CBZ.city.playerActor;
+      let S0 = null;
+      if (s.bouncer && PA && V && V.start) { try { S0 = V.start("grab", s.bouncer, PA, { holdFor: 0.5, then: "throw", dir: { x: s.nx, z: s.nz } }); } catch (e) { S0 = null; } }
+      if (!S0) {
+        const ph = P._phys = P._phys || {};
+        ph.air = true; ph.down = 0;
+        ph.vx = s.nx * T.tossSpeedXZ; ph.vz = s.nz * T.tossSpeedXZ;
+        ph.vy = T.tossSpeedY; ph.spin = T.tossSpin;
+      }
       if (CBZ.shake) CBZ.shake(T.shakeAmt);
-      if (s.bouncer && CBZ.speech) CBZ.speech.say(s.bouncer, "AND STAY OUT!", { secs: 2.6, force: true });
-      if (s.bouncer && s.bouncer.group) s.bouncer.group.rotation.y = Math.atan2(-s.nx, -s.nz);
+      if (s.bouncer && CBZ.speech) CBZ.speech.say(s.bouncer, "And stay out!", { secs: 2.6, force: true });
+      if (!S0 && s.bouncer && s.bouncer.group) s.bouncer.group.rotation.y = Math.atan2(-s.nx, -s.nz);
       return;
     }
     if (s.phase === "toss") {

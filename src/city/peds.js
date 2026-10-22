@@ -4434,9 +4434,17 @@
     const s = CBZ.cityLine ? CBZ.cityLine(ped, topic) : null;
     if (s) citySayBark(ped, s, secs);
   }
-  // a ped that reached the player lifts some cash (the NPC-initiated mirror of the
-  // player's own pickpocket verb in interact.js). Light touch; turns you hot-ish.
+  // a ped that reached the player wants your money. A hard or armed one MUGS
+  // you: the demand ladder (city/ladder.js) — "Give me your money." -> "Don't
+  // make me pull my gun." (only if he has one) / "I'll beat your ass." ->
+  // the gun comes out / he squares up -> he shoots or swings. You answer
+  // with what you do: pay him (a decision on him), walk off, run, swing,
+  // draw. A soft one is a pickpocket: the lift and the bolt.
   function pedSteal(ped) {
+    const B = A0();
+    if (CBZ.cityLadder && (ped.armed || ped._holster || ped.aggr >= (B.bold || 0.5)) && (g.cash | 0) > 0) {
+      if (CBZ.cityLadder.begin(ped, "rob", {})) { ped.reactCD = 12; return; }
+    }
     const P = CBZ.player;
     const have = g.cash | 0;
     const take = Math.max(5, Math.min(have, 15 + ((rng() * 60) | 0)));
@@ -4963,6 +4971,10 @@
     if (ped.companion) { if (!ped.restraint) companionThink(ped, dt, active); return; }
     if (ped.dead || ped.vendor || ped.ko > 0) return;
     if (ped.controlled) return;     // city/social.js drives companions/hostages/kidnap victims
+    // ON THE DEMAND LADDER (city/ladder.js -> CBZ.brain.demand): a mugger, a
+    // doorman, a crew on its corner mid "give me your money" — the ladder
+    // steps him every frame; the routine brain keeps off him meanwhile
+    if (ped._ladder && CBZ.cityLadder && CBZ.cityLadder.hold(ped, dt)) return;
     if (ped.staffPost) { staffThink(ped, dt); return; }   // posted package staff: rooted brain, gunpoint-aware
     const B = A0();
     const P = CBZ.player, px = P.pos.x, pz = P.pos.z;
@@ -5613,46 +5625,36 @@
     return null;
   }
 
-  // ---- TURF STANDOFF: notice, warn, warn again, then fight ----
-  // turfIntruder only ever fired once the set was ALREADY provoked (or you were
-  // wanted and armed), so a stranger could stroll through a corner crew with a
-  // rifle out and nobody looked up, and the first sign of life was a volley.
-  // Now the crew reads the gun: whoever sees you first squares up, gun levelled,
-  // and says so; the rest of the set on that post turns and holds. A second,
-  // harder warning follows if you stay; if you stay after THAT (or walk right
-  // up on them) the set is provoked and turfIntruder's rally takes it from
-  // there. Put the gun away or leave the block and the clock resets. The state
-  // is per GANG (one voice, one ladder), not per member, so a crew of six does
-  // not bark six warnings. Cost: a few compares per guard think, no scans.
-  const TW_WARN = [
-    ["Ay. Put that away.", "You lost?", "Wrong corner to be waving that."],
-    ["I'm not saying it again. Walk.", "Last time. Turn around.", "You got about two seconds."],
-    ["Light him up!", "He wants it. Get him!", "That's it. Run him off!"],
-  ];
-  const TW_EASE = ["Yeah. Keep walking.", "Smart.", "That's what I thought."];
+  // ---- TURF STANDOFF: the crew's DEMAND LADDER ("turf", CBZ.brain.demand) --
+  // A stranger walking a corner crew's block with a gun out (or any stranger,
+  // once the set is hostile) gets the ladder from whoever sees him first:
+  // "Ay. Put that away." -> "I'm not saying it again. Walk." -> "You got
+  // about two seconds." -> "Light him up!" and the set is provoked and rallied.
+  // Put it away or leave the block and it is over ("Yeah. Keep walking.").
+  // Draw ON them and the ladder's threat flip decides (a hard armed one holds
+  // a standoff). One voice per GANG (gang._tw.voice), not six; the rest of
+  // the set on that post squares up and holds. At open WAR the asking is
+  // done: the ladder starts at the gun.
   function standDown(ped) { if (ped._twPose) { ped._twPose = false; ped.poseAimBack = false; } }
+  function turfOn(ped, gang) {
+    const G = ped.guard, P = CBZ.player;
+    if (!G || P.dead) return false;
+    const playerArmed = !!(CBZ.cityHasGun && CBZ.cityHasGun());
+    const host = gangHostility(ped);
+    const gdx = P.pos.x - G.x, gdz = P.pos.z - G.z;
+    const dpl = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z);
+    return !gang.isPlayer && !gang.playerFriendly && host >= 0 &&
+      gdx * gdx + gdz * gdz < 16 * 16 && dpl < 15 && (playerArmed || host >= 1);
+  }
   function turfStandoff(ped, px, pz, dpl, playerArmed) {
     if (!ped.gang || CBZ.player.dead || ped.surrender || ped.restraint) { standDown(ped); return false; }
     const gang = CBZ.cityGangById ? CBZ.cityGangById(ped.gang) : null;
     const host = gang ? gangHostility(ped) : 0;
     if (!gang || gang.isPlayer || gang.playerFriendly || host < 0) { standDown(ped); return false; }
-    const G = ped.guard;
-    const now = (CBZ.now || 0) / 1000;
-    const W = gang._tw || (gang._tw = { stage: 0, t: 0, seen: -1e9, eased: false });
-    const gdx = px - G.x, gdz = pz - G.z;
-    const trespass = gdx * gdx + gdz * gdz < 16 * 16 && dpl < 15 && (playerArmed || host >= 1);
-    if (W.stage > 0 && W.stage < 3 && now - W.seen > 4) {
-      W.stage = 0;                       // nobody on the set has seen the gun for 4 s: the visit is over
-    }
+    const W = gang._tw || (gang._tw = { stage: 0, voice: null });
     if (W.stage >= 3 && (CBZ.cityGangProvoked ? CBZ.cityGangProvoked(ped.gang) : 0) < 0.2) W.stage = 0;   // the grudge cooled off
-    if (!trespass) {
-      // you put it away (or backed off) mid-warning: one of them says so, once
-      if (ped.state === "confront" && W.stage > 0 && W.stage < 3 && !W.eased && !playerArmed && dpl < 20) { W.eased = true; citySayBark(ped, pick(TW_EASE, rng()), 1.4); }
-      standDown(ped); return false;
-    }
-    W.seen = now;
-    // at open WAR there is nothing to warn about: you are the enemy on sight
-    if (host === 2 && W.stage < 2) { W.stage = 2; W.t = -1e9; }
+    if (W.voice && (W.voice.dead || !W.voice._ladder)) W.voice = null;
+    if (!turfOn(ped, gang)) { standDown(ped); return false; }
     if (W.stage >= 3) { standDown(ped); ped.rage = CBZ.city.playerActor; ped.state = "fight"; return true; }
     // HOLD THE CORNER: square up where you stand, face him, gun levelled if you have one
     ped.state = "confront"; ped.path = null; ped.speed = 0;
@@ -5660,19 +5662,22 @@
     ped.pause = Math.max(ped.pause, 0.6);
     faceTo(ped, px, pz, 1.5);
     if (ped.armed && !ped._twPose) { ped._twPose = true; ped.poseAimBack = true; }
-    if (W.stage === 0) {
-      W.stage = 1; W.t = now; W.eased = false;
-      citySayBark(ped, pick(TW_WARN[0], rng()), 2.2);
-    } else if (W.stage === 1 && (now - W.t > 4.5 || dpl < 4)) {
-      W.stage = 2; W.t = now;
-      citySayBark(ped, pick(TW_WARN[1], rng()), 2.0);
-    } else if (W.stage === 2 && (now - W.t > 3.5 || dpl < 3)) {
-      W.stage = 3; W.t = now;
-      citySayBark(ped, pick(TW_WARN[2], rng()), 1.6);
-      if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(ped.gang, 0.5);
-      standDown(ped);
-      ped.rage = CBZ.city.playerActor; ped.state = "fight";
-      if ((ped._rallyT || 0) <= 0) { rallyGang(ped, CBZ.city.playerActor, 0.7); ped._rallyT = 6; }   // "Light him up!"
+    if (!W.voice && CBZ.cityLadder) {
+      const gid = ped.gang;
+      const e = CBZ.cityLadder.begin(ped, "turf", {
+        hold: true, start: host === 2 ? "show" : null, hard: host === 2 ? true : undefined,
+        inside: function () { return turfOn(ped, gang); },
+        onAct: function (p) {
+          W.stage = 3;
+          if (CBZ.cityGangProvoke) CBZ.cityGangProvoke(gid, 0.5);
+          standDown(p);
+          p.rage = CBZ.city.playerActor; p.state = "fight";
+          if ((p._rallyT || 0) <= 0) { rallyGang(p, CBZ.city.playerActor, 0.7); p._rallyT = 6; }   // "Light him up!"
+          return true;
+        },
+        onEnd: function (p) { if (W.voice === p) W.voice = null; if (W.stage < 3) standDown(p); },
+      });
+      if (e) { W.voice = ped; W.stage = 1; }
     }
     return true;
   }

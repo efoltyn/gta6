@@ -710,7 +710,7 @@ document.body.appendChild(b);}}catch(e){}})();
      memory, witnesses, morale, the authority ladder). Pure logic with no
      parse-time dependencies, so it loads before its first consumers
      (entities/security.js, entities/guards.js). -->
-<script src="src/systems/brain.js?v=dismiss1014"></script>
+<script src="src/systems/brain.js?v=ladder1022"></script>
 <script src="src/entities/security.js?v=jas1020"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
@@ -1490,7 +1490,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->
-<script src="src/city/law.js?v=brainmoves1"></script>
+<script src="src/city/law.js?v=ladder1022"></script>
 <script src="src/city/wanted.js?v=dogs1009b"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=boot1013"></script>
@@ -1504,18 +1504,22 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=leave1014"></script>
+<script src="src/city/peds.js?v=ladder1022"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
 <script src="src/city/brain_city.js?v=dismiss1014"></script>
+<!-- city/ladder.js: CBZ.cityLadder, the city body for CBZ.brain.demand (the
+     demand ladder: a mugger, a doorman, a corner crew, a guard asking first).
+     peds.js think() yields to it; nothing runs at parse. -->
+<script src="src/city/ladder.js?v=ladder1022"></script>
 <script src="src/entities/pedinstance.js?v=peak1014c"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
-<script src="src/city/occupy.js?v=leave1014"></script>
+<script src="src/city/occupy.js?v=ladder1022"></script>
 <!-- CHILDHOOD: age bands, the growth curve, child proportions and gait. After
      peds.js (the ped factory) and after the character rig it extends. Without
      this tag children get correct proportions but never grow. -->
@@ -1531,7 +1535,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/read.js?v=presreal1013"></script>
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=shades1009b"></script>
-<script src="src/city/club.js?v=deslop1"></script>
+<script src="src/city/club.js?v=ladder1022"></script>
 <!-- THE STREET (city/streetlife.js): the people on every city pavement,
      density by place and hour from the zoning field, in pairs and groups, on
      the crowd store (entities/crowdstore.js) drawn by crowdgpu; the nearest
@@ -1545,9 +1549,9 @@ document.body.appendChild(b);}}catch(e){}})();
      READS the fleet at order 37.7, after vehicles.js has moved it at 37. -->
 <script src="src/city/carlamps.js?v=cardraws1020"></script>
 <script src="src/city/medics.js?v=emg1019"></script>
-<script src="src/city/security.js?v=verbs2b"></script>
-<script src="src/city/vips.js?v=popup1009b"></script>
-<script src="src/city/police.js?v=emg1019"></script>
+<script src="src/city/security.js?v=ladder1022"></script>
+<script src="src/city/vips.js?v=ladder1022"></script>
+<script src="src/city/police.js?v=ladder1022"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/aircraft.js?v=rounds1013m"></script>
 <script src="src/city/traffic.js?v=emg1019"></script>
@@ -1791,7 +1795,7 @@ document.body.appendChild(b);}}catch(e){}})();
      with real per-segment limits it wins automatically with no edit here.
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <script src="src/city/carcluster.js?v=speedunit1"></script>
-<script src="src/city/interact.js?v=pin1013"></script>
+<script src="src/city/interact.js?v=ladder1022"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
 <script src="src/city/orders.js?v=hold1020"></script>
@@ -1920,7 +1924,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/racket.js?v=verbs2b"></script>
 <script src="src/city/aim_dossier.js?v=popup1009b"></script>
 <script src="src/city/captives.js?v=hands1022"></script>
-<script src="src/city/millionaires.js?v=popup1009b"></script>
+<script src="src/city/millionaires.js?v=ladder1022"></script>
 <script src="src/city/regionlife.js?v=street1009"></script>
 <script src="src/city/modshop.js?v=cd0929"></script>
 <script src="src/city/stuntjumps.js?v=metro0929"></script>
@@ -2024,7 +2028,7 @@ document.body.appendChild(b);}}catch(e){}})();
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=leave1014"></script>
+<script src="src/city/origins.js?v=ladder1022"></script>
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
@@ -2273,7 +2277,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/brain_protection.js: CBZ.detailBrain, the close-protection detail's
      decisions (roles, stable slots, smoothed follow, sector scans, the panic
      protocol, counter-snipers) for every detail in the city. -->
-<script src="src/city/brain_protection.js?v=standdown1009b"></script>
+<script src="src/city/brain_protection.js?v=ladder1022"></script>
 <script src="src/city/protection.js?v=leave1014"></script>
 <script src="src/city/officials.js?v=leave1014"></script>
 <script src="src/city/approval.js?v=boot1013"></script>
@@ -2428,7 +2432,7 @@ document.body.appendChild(b);}}catch(e){}})();
      still bolt or put hands up through cityScare. After police, militia,
      checkpoints, citystaff and power: it posts bodies those files already
      cast. -->
-<script src="src/city/garrison.js?v=intent1008"></script>
+<script src="src/city/garrison.js?v=ladder1022"></script>
 <!-- FORT RESPONSE. A base that answers for itself: one alert bus rung from the
      two names every loud thing in the game already goes through (cityAlarm,
      cityCrime — installed as wraps, so no call site is edited), a section that

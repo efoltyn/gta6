@@ -87,10 +87,35 @@
     }
     const actor = CBZ.city && CBZ.city.playerActor;
     // a guard you paid (city/roles.js Bribe) looks the other way until it runs out
-    const paid = (guard._lookAwayUntil || 0) > ((typeof CBZ.now === "number" ? CBZ.now : Date.now()) / 1000);
+    const tNow = (typeof CBZ.now === "number" ? CBZ.now : Date.now()) / 1000;
+    const paid = (guard._lookAwayUntil || 0) > tNow;
     if (actor && !actor.dead && !paid && (CBZ.game.wanted | 0) >= 1) {
       const dx = actor.pos.x - guard.pos.x, dz = actor.pos.z - guard.pos.z, d2 = dx * dx + dz * dz;
       if (d2 < bd) best = actor;
+    }
+    // A GUN AT HIS DOOR (not wanted, just carrying it out in the open): a shop
+    // guard asks first, the demand ladder ("security", CBZ.brain.demand,
+    // city/ladder.js): "Sir. Put the gun away." -> "Put it away. Now." ->
+    // "Drop the gun!" -> he opens fire. Put it away (or walk on) and it is
+    // over. Point it at him and the ladder skips to the end.
+    if (!best && actor && !actor.dead && !paid && guard.protectLot && !guard._ladder && CBZ.cityLadder &&
+        (guard._askedAt || -1e9) < tNow - 20 && CBZ.cityHasGun && CBZ.cityHasGun() && !(CBZ.player && CBZ.player.driving)) {
+      const dx = actor.pos.x - guard.pos.x, dz = actor.pos.z - guard.pos.z;
+      if (dx * dx + dz * dz < 8 * 8) {
+        guard._askedAt = tNow;
+        CBZ.cityLadder.begin(guard, "security", {
+          startArmed: false, armed: !!guard.armed,
+          lines: {
+            demandAtGun: ["Sir. Put the gun away.", "Whoa. Put that away, sir."],
+            warnAtGun: ["Put it away. Now.", "I'm not going to ask again."],
+            showAtGun: ["Drop the gun!", "Drop it! Now!"],
+          },
+          inside: function () {
+            const P = CBZ.player;
+            return !!(P && CBZ.cityHasGun && CBZ.cityHasGun() && Math.hypot(P.pos.x - guard.pos.x, P.pos.z - guard.pos.z) < 12);
+          },
+        });
+      }
     }
     return best;
   };
