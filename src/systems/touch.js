@@ -471,6 +471,9 @@
     if (!route) {
       if (gunOwnsTrigger() && CBZ.fpsFire) route = "gun";
       else if (CBZ.islandModeOn(CBZ.game.mode)) route = "grapple";
+      // Gang City with a man in your hands: FIRE throws him, the disaster
+      // game's grammar (grapple.punch throws while holding), never a punch
+      else if (CBZ.game.mode === "city" && CBZ.grapple && CBZ.grapple.holding()) route = "grapple";
       else if (CBZ.melee && CBZ.melee.trigger) route = "melee";
       else route = "punch";
     }

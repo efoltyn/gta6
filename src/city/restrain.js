@@ -6,9 +6,12 @@
    → STUFF them in your back seat → drive to the precinct desk → HAND
    THEM OVER for a payday. WHY: bounty-hunting is money + show-off — you
    parade a Lv.40 enforcer through downtown in zip ties and the block
-   watches. Mid-fight there's a GRAPPLE: clinch a swinging ped, then
-   slam them into the pavement, shove them off, or wear their struggle
-   down and tie them.
+   watches. THE HANDS are the disaster game's (systems/handverbs.js +
+   grapple.js): hold E (or the thumb dock) grabs anybody, the hold set swaps
+   in (Throw / Carry / Drop), a man who is down is picked up or dragged. A man
+   in your hands is "grappled" on the enum below for as long as the grip
+   lasts, which is what keeps the street's AI off him; hold him long enough
+   and his struggle is worn down far enough to tie him.
 
    THE ONE RULE (learned from the big RP frameworks' famous gating bug):
    every option gates on ONE explicit enum —
@@ -24,9 +27,9 @@
    THE HANDS ARE CBZ.verbs' (systems/verbs.js). This file keeps the RULES —
    the enum, the bounty, the back seat, the desk — and asks the shared verbs
    for every body: the zip ties (on the WRISTS, hands behind the back, solved
-   every frame for any rig in any game), the clinch (a collar grip, the man's
-   hands on your wrists), the march (a hand on his arm, one on the ties), the
-   slam and the shove (the world in front of him decides where he goes).
+   every frame for any rig in any game) and the march (a hand on his arm, one
+   on the ties). The grip, the carry, the drag and the throw are the hands'
+   (systems/handverbs.js), the same set the disaster game and the prison use.
 
    Registers through CBZ.interactions only — interact.js untouched.
    police.js provides the desk: CBZ.cityPoliceStation() (the intake
@@ -101,9 +104,6 @@
     if (!ctx.gunDrawn) return true;
     const n = CBZ.cityCurrentWeaponName ? CBZ.cityCurrentWeaponName() : "";
     return !!ONE_HAND[n];
-  }
-  function fightingYou(p) {
-    return !p.dead && (p.rage === pa() || p.state === "fight");
   }
   // a body that's stopped resisting: hands already up, knocked down, stunned,
   // guard broken, or your gunpoint hostage. Earned — never free on a walker.
@@ -302,83 +302,129 @@
     return true;
   }
 
-  // ---- GRAPPLE: the clinch ---------------------------------------------------
-  function grapple(ped) {
-    if (!cuffablePed(ped)) return false;
-    // THE CLINCH IS A COLLAR GRIP: both fists in his shirt, his hands on your
-    // wrists (CBZ.verbs.grab). No grip, no clinch.
-    const v = VB();
-    // he FIGHTS the grip (CBZ.verbs struggle), as well as your read of each
-    // other says he can: a better man than you tears loose sooner
-    if (!v || !pa() || !v.grab(pa(), ped, { far: true, struggle: clinchFight(ped) })) return false;
-    ped.restraint = { state: "grappled", by: "player", t: 0, vehicle: null };
-    track(ped);
-    ped.controlled = true; ped.rage = null; ped.state = "walk"; ped.speed = 0;
-    ped.path = null; ped.finalGoal = null;
-    // their offense stops while you've got them wrapped (refreshed per frame)
-    ped.attackCD = Math.max(ped.attackCD || 0, 1);
-    if (CBZ.sfx) CBZ.sfx("punch");
-    if (CBZ.shake) CBZ.shake(0.2);
-    I.refresh();
-    return true;
-  }
-  // how well he fights your clinch, 0..1: your read vs theirs (sizeup levels)
+  // ---- THE HANDS (systems/handverbs.js games.city) ----------------------------
+  /* The street used to have a grab of its own here: "Grapple" on a man
+     swinging at you, a collar grip with Slam and Shove bolted on. It was the
+     disaster game's grab with fewer verbs and its own throw. It is gone; the
+     hands are one set for every game, and this file only says what they mean
+     on this street: who they may take, how hard a man fights the grip (your
+     read of each other), what a landing does to him, and what the city sees. */
   function clinchFight(ped) {
     const mine = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 10;
     const theirs = CBZ.cityLevel ? CBZ.cityLevel(ped) : 10;
     return Math.max(0.1, Math.min(1, 0.45 + (theirs - mine) * 0.03));
   }
-  function breakFree(ped) {
-    letGo(ped, "drop");
-    release(ped, { silent: true });
-    ped.rage = pa(); ped.state = "fight";
-    if (CBZ.citySay) CBZ.citySay(ped, "Get OFF me!", "#ff9a9a", 1.8);
-    if (CBZ.shake) CBZ.shake(0.3);
-    I.refresh();
+  // a body nothing else is moving: not in a seat, a car, a stall, a cell of
+  // somebody else's job, and not already in ties (the march verbs have him)
+  function handable(p) {
+    if (!p || p.dead || p.isPlayer || p.player || p.culled || p.animal || p.kind === "dog") return false;
+    if (!p.group || !p.group.parent || p.group.visible === false || !p.char) return false;
+    if (p.inCar || p._cbzSeat || p._cbzArc || p._boardOwn || p._parked || p._propSeat || p._propLie || p._npcAttached) return false;
+    if (p.vendor || p.staffPost || p._iOnly || p.hostage || p === g.cityHostage || p._custody) return false;
+    if (p.restraint && p.restraint.state !== "grappled") return false;
+    return true;
   }
-  // SLAM: a heave out of the clinch into whatever is in front of him — the
-  // pavement, a wall, over a rail, into the harbour (the world decides, the
-  // verb says which); the damage lands when he does.
-  function slam(ped) {
-    if (st(ped) !== "grappled") return false;
-    const v = VB();
+  function handsFree() {
+    const P = CBZ.player;
+    if (!P || P.dead || P.driving || P._aircraft || P._mountedAnimal) return false;
+    if (CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) return false;
+    const sw = CBZ.citySwimState ? CBZ.citySwimState() : null;
+    return !(sw && sw.swimming);
+  }
+  function castInto(out, list) {
+    if (!list) return;
+    for (let i = 0; i < list.length; i++) if (handable(list[i])) out.push(list[i]);
+  }
+  function lawfulHold(p) { return !!(CBZ.custody && CBZ.custody.jobOf && CBZ.custody.jobOf(p)); }
+  function seen(p, amount, type) {
+    if (!p || !p.pos || !CBZ.cityCrime) return;
+    CBZ.cityCrime(amount, { x: p.pos.x, z: p.pos.z, type: type });
+  }
+  // what the street makes of hands on somebody (the harm funnel: social.js)
+  function onHands(p, kind) {
+    if (!p || p.dead) return;
+    const rel = CBZ.cityRelShift;
+    const cop = p.kind === "cop";
+    if (kind === "held") {
+      if (rel) rel(p, "threatened");
+      if (cop) seen(p, 60, "assault");
+    } else if (kind === "carried") {
+      if (rel) rel(p, "passengerTaken");
+      if (cop) seen(p, 80, "assault");
+      else if (!isWanted(p) && !lawfulHold(p)) seen(p, 40, "kidnapping");
+    } else if (kind === "thrown" || kind === "tackled") {
+      if (rel) rel(p, "beaten");
+      if (kind === "tackled") seen(p, cop ? 60 : 30, "assault");
+    } else if (kind === "shoved") {
+      if (rel) rel(p, "intimidated");
+    }
+  }
+  // the landing is the blow: the pavement, a wall, the harbour (the world
+  // decided where he went; this is what it costs him, and what the block saw)
+  function thrownHurt(ped) {
     const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
-    const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
-    ped.restraint = null; untrack(ped);
-    ped.controlled = false;
-    if (ped.char) ped.char.guardBroke = 0;
-    const hurt = function (S, kind) {
-      if (ped.dead) return;
+    return function (S, kind) {
+      if (!S || S.verb !== "throw" || ped.dead) return;
+      if (kind !== "water" && kind !== "wall" && kind !== "open" && kind !== "ledge" && kind !== "rail") return;
       ped.hp -= kind === "water" ? 8 : kind === "wall" ? 38 : 30;
       if (ped.hp <= 0) {
-        CBZ.cityKillPed && CBZ.cityKillPed(ped, { fromX: fx, fromZ: fz, force: 7 }, kind === "wall" ? "slammed into a wall" : "slammed into the pavement");
+        if (ped.kind === "cop") { if (CBZ.cityHurtCop) CBZ.cityHurtCop(ped, 200, { fromX: fx, fromZ: fz }); }
+        else if (CBZ.cityKillPed) CBZ.cityKillPed(ped, { fromX: fx, fromZ: fz, force: 7 }, kind === "wall" ? "slammed into a wall" : "slammed into the pavement");
       } else {
-        ped.ko = Math.max(ped.ko || 0, kind === "water" ? 0 : 3.5);
-        CBZ.cityCrime && CBZ.cityCrime(45, { x: ped.pos.x, z: ped.pos.z, type: "assault" });
-        CBZ.cityAlarm && CBZ.cityAlarm(ped.pos.x, ped.pos.z, 12, 0.8, pa());
+        if (kind !== "water") ped.ko = Math.max(ped.ko || 0, 3.5);
+        seen(ped, ped.kind === "cop" ? 70 : 45, "assault");
+        if (CBZ.cityAlarm) CBZ.cityAlarm(ped.pos.x, ped.pos.z, 12, 0.8, pa());
       }
+      CBZ.player._fighting = 1.5;
     };
-    const S = v && pa() ? v.throw(pa(), ped, { dir: { x: -Math.sin(yaw), z: -Math.cos(yaw) }, power: 1, onOutcome: hurt }) : null;
-    if (!S) { hurt(null, "open"); if (CBZ.body) CBZ.body.hit(ped, { fromX: fx, fromZ: fz, force: 9, knockdown: 1.5 }); }
-    if (CBZ.shake) CBZ.shake(0.5);
-    CBZ.player._fighting = 1.5;
-    I.refresh();
-    return true;
   }
-  // SHOVE: both palms out of the clinch; a shove near a ledge is a fall
-  function shove(ped) {
-    if (st(ped) !== "grappled") return false;
-    const v = VB();
-    const fx = CBZ.player.pos.x, fz = CBZ.player.pos.z;
-    ped.restraint = null; untrack(ped);
+  if (CBZ.handVerbs && CBZ.handVerbs.games) {
+    CBZ.handVerbs.games.city = {
+      can: handsFree,
+      cands: function (out) { castInto(out, CBZ.cityPeds); castInto(out, CBZ.cityCops); return out; },
+      // he fights a collar grip as well as your read of each other says he can
+      grabOpts: function (t, opts, up) { if (up) opts.struggle = clinchFight(t); return opts; },
+      onHands: onHands,
+      thrown: thrownHurt,
+    };
+  }
+
+  /* THE OWNED BODY. While your hands have him (a grip, a carry, a drag) he is
+     "grappled" on the enum, so the street leaves him alone: no swing, no
+     flight, no march, cops skip him (CBZ.verbs owns his root through
+     _phys.heldBy, which every mover already skips). The grip ending sets him
+     loose; a thrown man is the air's until he lands. */
+  const HOLDS = { grab: 1, carry: 1, drag: 1 };
+  let handT = null, handPed = null;
+  function handTarget() {
+    const v = VB(), me = pa();
+    const S = v && me ? v.sessionOf(me) : null;
+    // a grip becoming a carry walks in again (an approach beat): still his
+    return S && S.a === me && HOLDS[S.verb] && !S.tFree && (S.phase !== "approach" || S.t === handT) ? S.t : null;
+  }
+  function letLoose(ped) {
+    if (st(ped) === "grappled") { ped.restraint = null; untrack(ped); }
     ped.controlled = false;
     if (ped.char) ped.char.guardBroke = 0;
-    const S = v && pa() ? v.shove(pa(), ped, { power: 0.7 }) : null;
-    if (!S && CBZ.body) CBZ.body.hit(ped, { fromX: fx, fromZ: fz, force: 5 });
-    ped.fear = 6; ped.state = "flee";
-    if (CBZ.sfx) CBZ.sfx("punch");
+    if (ped.dead || (ped.ko || 0) > 0) return;
+    // a hard man squares up; anybody else gets away from you
+    if (ped.kind !== "cop" && (ped.gang || ped.armed || (ped.aggr || 0) >= 0.6)) { ped.rage = pa(); ped.state = "fight"; }
+    else if (ped.kind !== "cop") { ped.fear = Math.max(ped.fear || 0, 6); ped.state = "flee"; }
+  }
+  function bindHands() {
+    const t = handTarget();
+    if (t === handT) return;
+    handT = t;
+    if (handPed && handPed !== t) { letLoose(handPed); handPed = null; }
+    if (t && !t.dead && t.kind !== "cop" && !t.restraint && (CBZ.cityPeds || []).indexOf(t) >= 0) {
+      t.restraint = { state: "grappled", by: "player", t: 0, vehicle: null };
+      track(t);
+      t.controlled = true; t.rage = null; t.state = "walk"; t.speed = 0;
+      t.path = null; t.finalGoal = null;
+      t.attackCD = Math.max(t.attackCD || 0, 1);
+      handPed = t;
+    }
     I.refresh();
-    return true;
   }
 
   // ---- TURN IN: the desk pays for paper, and only for paper ------------------
@@ -471,12 +517,14 @@
     // the pen (escape) and takes them off itself, so there they are posed, not
     // cut. Every other mode still strips them.
     if (g.mode !== "city") {
+      handT = null; handPed = null;
       if (restrained.length) releaseAll();
       // the prison's haul scene ties the player itself and takes them off
       // itself; every other mode strips them
       if (g.mode !== "escape" && playerCuffed()) cuffPlayer(false);
       return;
     }
+    bindHands();
     if (!restrained.length) return;
     const P = CBZ.player;
     pleadCD -= dt; copSuspectCD -= dt;
@@ -511,9 +559,10 @@
       if (r.state !== "grappled" && CBZ.boardingHolds && CBZ.boardingHolds(ped) && ped._cbzArc) continue;
 
       if (r.state === "grappled") {
-        // player death / driving off mid-clinch / the grip gone = they're loose
-        if (P.dead || P.driving || !held(ped)) { breakFree(ped); continue; }
-        // CBZ.verbs.grab holds him (hands in his collar, his on your wrists)
+        // player death / driving off with him in hand / the grip gone = loose
+        if (P.dead || P.driving) letGo(ped, "drop");
+        if (P.dead || P.driving || ped !== handPed || !held(ped)) { if (ped === handPed) handPed = null; letLoose(ped); continue; }
+        // CBZ.verbs holds him (a collar grip, a shoulder, a drag)
         ped.target.set(ped.pos.x, 0, ped.pos.z); ped.speed = 0;
         ped.attackCD = Math.max(ped.attackCD || 0, 0.5);   // no swings from inside the clinch
         ped.pause = Math.max(ped.pause || 0, 0.5);
@@ -634,40 +683,59 @@
   });
   I.register("ped", {
     id: "rs-cuff", slot: "e", prio: 80, bad: true,
-    // slot-e prio beats the grapple record, so a downed/broken fighter reads
-    // "Cuff" while one still swinging reads "Grapple" — no
-    // loose-boolean cross-gating (the framework bug this file exists to avoid).
+    // a downed/broken man reads "Cuff" on E; the hands (hold E) are the
+    // other record on the same key, no loose-boolean cross-gating (the
+    // framework bug this file exists to avoid).
     canShow: (p, ctx) => !ctx.gunDrawn && cuffablePed(p) && subdued(p),
     label: "Cuff",
     onSelect: (p) => cuff(p),
   });
 
-  // ---- GRAPPLE: only on someone actually swinging, only with a free hand ----
+  // ---- THE HANDS ON THE STREET (the one grab: systems/handverbs.js) ----------
+  // HOLD E on a person: Grab (Pick up on a man who is down). E stays his tap
+  // verb; the hands are the heavier one. A clinch only works empty-handed or
+  // with a one-hand gun: you cannot take a man by the collar around a rifle.
+  const HV = () => CBZ.handVerbs || null;
+  function downed(p) { const v = VB(), B = v && v.body ? v.body(p) : null; return !!(B && B.down && B.down()); }
   I.register("ped", {
-    id: "rs-grapple", slot: "e", prio: 78, bad: true,
-    canShow: (p, ctx) => cuffablePed(p) && fightingYou(p) && canClinch(ctx),
-    label: "Grapple",
-    onSelect: (p) => grapple(p),
+    id: "rs-hand-grab", slot: "e", hold: true, prio: 20, bad: true,
+    canShow: (p, ctx) => !ctx.driving && canClinch(ctx) && handsFree() && handable(p) && !held(p) &&
+      !(VB() && VB().holding(pa())),
+    label: (p) => downed(p) ? "Pick up" : "Grab",
+    onSelect: (p) => { const G = CBZ.grapple, H = HV(); if (G) G.grab(p, H && H.farOpts ? H.farOpts(p) : undefined); },
   });
-  // clinched: wear them down to tie, or end it ugly
-  I.register("ped", {
-    id: "rs-clinch-cuff", slot: "e", prio: 90, bad: true,
-    canShow: (p) => st(p) === "grappled" && p.restraint.t >= WEAR_T,
+  // THE MAN IN YOUR HANDS owns the card (a zero-distance source, like the
+  // duffel on your shoulder): tap E lets him down; hold E ties him once his
+  // struggle is worn down; the wheel has the rest of the hold set.
+  function heldNow() { const H = HV(); return H ? H.held() : null; }
+  I.registerSource({
+    id: "src-hands", kind: "pedheld", layers: ["pedheld"], prio: 45, driving: false,
+    find: function (px, pz, ctx, push) { const H = heldNow(); if (H && H.t && !H.t.dead) push(H.t, 0); },
+  });
+  I.describe("pedheld", function (t) { return { label: (t && t.name) || "" }; });
+  I.register("pedheld", {
+    id: "rs-hand-drop", slot: "e", prio: 100,
+    label: () => { const H = heldNow(); return H && H.kind === "drag" ? "Let go" : "Drop"; },
+    onSelect: () => { if (CBZ.grapple) CBZ.grapple.release(false); },
+  });
+  I.register("pedheld", {
+    id: "rs-hand-cuff", slot: "e", hold: true, prio: 90, bad: true,
+    canShow: (p) => { const H = heldNow(); return !!(H && H.kind === "hold") && st(p) === "grappled" && p.restraint.t >= WEAR_T; },
     label: "Cuff",
     // the collar grip lets go and the cuff turns him (CBZ.verbs.cuff)
-    onSelect: (p) => { if (st(p) === "grappled") { p.restraint = null; untrack(p); cuff(p); } },
+    onSelect: (p) => { if (st(p) === "grappled") { p.restraint = null; untrack(p); if (p === handPed) handPed = null; cuff(p); } },
   });
-  I.register("ped", {
-    id: "rs-slam", slot: "i", prio: 90, bad: true,
-    canShow: (p) => st(p) === "grappled",
-    label: "Slam",
-    onSelect: (p) => slam(p),
+  I.register("pedheld", {
+    id: "rs-hand-throw", wheel: true, prio: 80, bad: true,
+    label: () => (HV() ? HV().throwWord() : "Throw"),
+    canShow: () => { const H = heldNow(); return !!(H && H.kind !== "drag"); },
+    onSelect: () => { if (CBZ.grapple) CBZ.grapple.release(true); },
   });
-  I.register("ped", {
-    id: "rs-shove", slot: "j", prio: 90, bad: true,
-    canShow: (p) => st(p) === "grappled",
-    label: "Shove",
-    onSelect: (p) => shove(p),
+  I.register("pedheld", {
+    id: "rs-hand-carry", wheel: true, prio: 70,
+    canShow: () => { const H = heldNow(); return !!(H && H.kind === "hold"); },
+    label: "Carry",
+    onSelect: (p) => { const v = VB(); if (v && pa()) v.carry(pa(), p); },
   });
 
   // ---- CUFFED: march / halt / stuff / cut loose ----
@@ -774,7 +842,7 @@
   // ---- exports: the net layer calls these, same as the keys do --------------
   CBZ.cityRestrain = {
     stateOf: st, isWanted, bountyFor,
-    cuff, grapple, escort, stand, release, seat, unseat, turnIn, slam, shove, handOff,
+    cuff, escort, stand, release, seat, unseat, turnIn, handOff,
     releaseAll,
     // the player side of the same verbs (city/wanted.js's arrest arc)
     cuffPlayer, playerCuffed, posePlayerCuffs,

@@ -798,13 +798,19 @@
     return floorAt(grp.position.x, grp.position.z, grp.position.y + 0.3) + FLAT_LIFT * flat;
   }
 
-  /* ---- THE PLAYER'S VERBS (survival). CBZ.verbs owns all of them: the grab,
+  /* ---- THE PLAYER'S VERBS (every game's hands: the disaster game's keys
+     below, its dock, the prison's cluster, Gang City's hold E and dock).
+     CBZ.verbs owns all of them: the grab,
      the carry, the throw and the shove are two-person choreography with the
      hands on the body (systems/verbs.js), the punch is the contact-resolved
      blow (systems/verbs_strike.js). This file only maps the keys. The old
      1.5 m position lerp in front of the camera, the hang pose and the swing
      resolver that used to live here are gone. ---- */
   const VB = () => CBZ.verbs || null;
+  // a game's say over the hands (systems/handverbs.js games[mode])
+  const HK = () => (CBZ.handVerbs && CBZ.handVerbs.game ? CBZ.handVerbs.game() : null);
+  const CANDS = () => (CBZ.handVerbs && CBZ.handVerbs.cands ? CBZ.handVerbs.cands() : undefined);
+  let eDown = false;            // the E key is physically down (a grab it started ends with it)
   function me() {
     const v = VB();
     return v && v.playerActor ? v.playerActor() : (CBZ.surv && CBZ.surv.playerActor) || null;
@@ -821,6 +827,8 @@
   function grab(who, opts) {
     const v = VB(), pa = me();
     if (!v || !pa || v.holding(pa)) return null;
+    const hk = HK();
+    if (hk && hk.can && !hk.can()) return null;
     // a man on his feet is taken by the collar; a man already down is lifted
     let t = null, up = false;
     if (who && typeof who === "object" && !who.dead) {
@@ -828,8 +836,9 @@
       up = !(B && B.down && B.down());
       t = who;
     } else {
-      const u = v.pick(pa, "grab", { look: true });
-      t = u || v.pick(pa, "carry", { down: true, look: true });
+      const C = CANDS();
+      const u = v.pick(pa, "grab", { look: true, candidates: C });
+      t = u || v.pick(pa, "carry", { down: true, look: true, candidates: C });
       up = !!u;
       // nobody at arm's length: the man the card is about (you looked at him
       // a few steps off), and you walk in to take him
@@ -837,8 +846,10 @@
       if (H && H.t && H.far > 0) { t = H.t; up = H.kind === "free"; opts = { far: H.far + 0.5 }; }
     }
     if (!t) return null;
+    if (hk && hk.grabOpts) { try { opts = hk.grabOpts(t, opts ? Object.assign({}, opts) : {}, up) || opts; } catch (e) {} }
     const S = up ? v.grab(pa, t, opts) : v.carry(pa, t, opts);
     if (S && CBZ.sfx) CBZ.sfx("whoosh");
+    if (S) S._byE = eDown;
     return S || null;
     // NO caption (owner: "I know that I have grabbed"). The body in your hands
     // is the feedback; survival_interact.js shows what you can do with it.
@@ -849,6 +860,13 @@
     const S = v.sessionOf(pa);
     if (!S || S.a !== pa) return;
     if (thrown) {
+      // what the landing does to him is the game's (Gang City: the street's
+      // hurt and the assault it saw); chained onto whatever the hold carried
+      const hk = HK(), oc = hk && hk.thrown ? hk.thrown(S.t) : null;
+      if (oc && S.opts) {
+        const prev = S.opts.onOutcome;
+        S.opts.onOutcome = prev ? function (a, b) { try { prev(a, b); } catch (e) {} oc(a, b); } : oc;
+      }
       CBZ.fpsPunchAnim && CBZ.fpsPunchAnim(true);   // silent: "ko" is the voice here
       v.release(S, "throw");
       CBZ.sfx && CBZ.sfx("ko");
@@ -883,6 +901,13 @@
     const v = VB(), pa = me();
     if (!v || !pa) return;
     if (v.holding(pa)) { release(true); return; }   // LMB while holding = throw
+    // GANG CITY'S FISTS are its own (systems/melee.js through city/combat.js:
+    // stamina, posture, the street's damage and law). The dock's Punch is a
+    // tap of that one button, never a second punch.
+    if (CBZ.game.mode === "city") {
+      if (CBZ.melee && CBZ.melee.trigger) { CBZ.melee.trigger(true); CBZ.melee.trigger(false); }
+      return;
+    }
     if (!v.strike) return;
     CBZ.fpsPunchAnim && CBZ.fpsPunchAnim();        // the first-person hand swings
     // alternating fists, every third blow inside a combo winding into a hook
@@ -900,8 +925,8 @@
     CBZ.fpsPunchAnim && CBZ.fpsPunchAnim(true);
     CBZ.sfx && CBZ.sfx("whoosh");
     // out of a grip: shove the man you hold; otherwise whoever is in reach
-    const t = v.holding(pa) || v.pick(pa, "shove");
-    if (t && v.shove(pa, t, { force: true })) return;
+    const t = v.holding(pa) || v.pick(pa, "shove", { candidates: CANDS() });
+    if (t && v.shove(pa, t, { force: true })) { if (CBZ.handVerbs && CBZ.handVerbs.touched) CBZ.handVerbs.touched(t, "shoved"); return; }
     // nobody there: the palms go out at the air
     if (v.strike) v.strike(pa, null, { kind: "shove", candidates: botsInReach });
   }
@@ -915,6 +940,7 @@
   };
   CBZ.grapple = {
     grab, release, punch, push,
+    // the player has somebody in his hands (a grab, a carry, a drag)
     holding() { const v = VB(), pa = me(); return !!(v && pa && v.holding(pa)); },
   };
 
@@ -932,6 +958,37 @@
   addEventListener("keyup", function (e) {
     if (CBZ.game.mode !== "survival") return;
     if (e.key.toLowerCase() === "e") release(false);   // let go = set down safely
+  });
+
+  /* ---- GANG CITY'S KEYS. E belongs to the city's interaction registry
+     (city/interactions.js): HOLD E on a person is Grab (Pick up on a man who
+     is down), registered by city/restrain.js, and tap E on the man in your
+     hands is Drop. What is left for this file is the disaster game's other
+     two: a grab that HOLD E started ends when E comes up (set down), and LMB
+     with him in your hands throws him instead of throwing a punch. A drawn
+     gun keeps the trigger (you shoot from behind him). */
+  function cityHands() {
+    return CBZ.game.mode === "city" && CBZ.game.state === "playing" && !CBZ.cityMenuOpen &&
+      !(CBZ.player && (CBZ.player.dead || CBZ.player.driving));
+  }
+  addEventListener("keydown", function (e) { if (String(e.key || "").toLowerCase() === "e") eDown = true; }, true);
+  addEventListener("keyup", function (e) {
+    if (String(e.key || "").toLowerCase() !== "e") return;
+    eDown = false;
+    if (CBZ.game.mode !== "city") return;
+    const v = VB(), pa = me();
+    const S = v && pa ? v.sessionOf(pa) : null;
+    if (S && S.a === pa && S._byE && (S.verb === "grab" || S.verb === "carry" || S.verb === "drag")) release(false);
+  });
+  addEventListener("blur", function () { eDown = false; });
+  document.addEventListener("mousedown", function (e) {
+    if (e.button !== 0 || !document.pointerLockElement || !cityHands()) return;
+    const v = VB(), pa = me();
+    if (!v || !pa || !v.holding(pa)) return;
+    if (CBZ.cityHasGun && CBZ.cityHasGun()) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();          // city/combat.js's punch never sees it
+    release(true);
   });
 
   // ---- LATE-WRITE REGISTRY: only a handful of freshly-hit upright bodies ever

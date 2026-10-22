@@ -1178,6 +1178,37 @@
   }
 
   // ---- public API ---------------------------------------------------------------
+  /* ---- THE HANDS BY THE THUMB (touch) ------------------------------------
+     OWNER (2026-10-22): "The nat disaster game grabbing is really really
+     good" — on his phone and iPad. That is the disaster game's dock: the
+     man you look at gets Grab / Punch / Shove / Tackle by the right thumb,
+     Grab swaps in Throw / Carry / Drop while you hold him, a man who is down
+     offers Pick up / Drag. The street now shows the SAME dock from the same
+     table (systems/handverbs.js: held() / near() / dock). Everything else a
+     person offers stays where it is: tap him, his wheel. The free set steps
+     back while a gun is out (the gunpoint demands own that moment); the hold
+     set never does (he is in your hands). Who the hands may take on this
+     street, and what it costs, is city/restrain.js's (handVerbs.games.city). */
+  let handDock = false;
+  function handsDockOff() { if (handDock) { handDock = false; const H = CBZ.handVerbs; if (H && H.dock) H.dock.hide(); } }
+  CBZ.onUpdate(46.3, function () {
+    const H = CBZ.handVerbs;
+    if (!H || !H.dock) return;
+    if (g.mode !== "city" || !CBZ.touchMode) { handsDockOff(); return; }
+    const P = CBZ.player;
+    const hk = H.game ? H.game() : null;
+    if (g.state !== "playing" || !P || P.dead || CBZ.cityMenuOpen || pilotingAircraft() ||
+      (CBZ.verbWheel && CBZ.verbWheel.isOpen()) || (hk && hk.can && !hk.can())) { handsDockOff(); return; }
+    let r = H.held();
+    if (!r && !(CBZ.cityHasGun && CBZ.cityHasGun())) r = H.near();
+    if (!r || !r.t) { handsDockOff(); return; }
+    const t = r.t;
+    const nm = t.name || (t.data && t.data.name) || "";
+    H.dock.show(r.set, { name: typeof nm === "string" ? nm : "", off: r.off });
+    handDock = true;
+  });
+  CBZ.onAlways(96.1, function () { if (handDock && (g.mode !== "city" || g.state !== "playing")) handsDockOff(); });
+
   CBZ.interactions = {
     REACH,
     register, registerFor, registerZone, registerSource, describe, unregister,

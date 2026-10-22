@@ -69,52 +69,16 @@
 
   // ---- TOUCH: the same verbs as tappable BUTTONS docked by the right-thumb
   //      cluster (left of #tbtns), instead of a floating card you'd have to
-  //      reach across the screen for. Fixed spot + fixed order = muscle
-  //      memory. Desktop keeps the #interact card unchanged. ----
-  let dock = null, dockMode = "";        // "" hidden · "free" · "held"
-  // The dock's LOOK is css/interact_touch.css (#survVerbs / .svbtn). It used
-  // to be a <style> string injected from right here, which meant the best
-  // button in the repo was invisible to every stylesheet and the prison could
-  // only imitate it by hand. Now both wear the same class. This file builds
-  // the element and nothing else.
-  function ensureDock() {
-    if (dock) return;
-    dock = document.createElement("div");
-    dock.id = "survVerbs";
-    document.body.appendChild(dock);
+  //      reach across the screen for. Desktop keeps the #interact card. The
+  //      dock itself (element, rebuild, tap) is CBZ.handVerbs.dock
+  //      (systems/handverbs.js), the one copy Gang City docks its hands with
+  //      too; this file only decides what goes on it in the disaster game.
+  const DK = () => (CBZ.handVerbs && CBZ.handVerbs.dock) || null;
+  function renderDock(set, swim) {
+    const d = DK();
+    if (d) d.show(set, { name: swim ? "" : nameOf(tgt), off: off, swim: swim });
   }
-  // `set` is the live verb list; `key` is what decides a rebuild. The key
-  // carries the LABELS, not just the set name, because the water's verb renames
-  // itself between "Climb out" and "Climb aboard" without the set changing —
-  // keying on the name alone would leave the old word on the button.
-  function renderDock(set, key) {
-    ensureDock();
-    if (dockMode !== key) {
-      dockMode = key;
-      // column-reverse: the last child sits on top, so the name rides above
-      // the buttons (none in the water: the swim verb has no person)
-      const nm = key.indexOf("swim:") === 0 ? "" : nameOf(tgt);
-      dock.innerHTML = set.map((v, i) =>
-        '<button class="svbtn' + (off[v.id] ? " off" : "") + '" type="button" data-i="' + i + '">' + v.label + "</button>").join("") +
-        (nm ? '<div class="sv-who"></div>' : "");
-      if (nm) dock.querySelector(".sv-who").textContent = nm;
-      dock.classList.toggle("swim", key.indexOf("swim:") === 0);
-    }
-    dock.classList.add("show");
-  }
-  function hideDock() { if (dock) { dock.classList.remove("show"); dockMode = ""; } }
-  document.addEventListener("touchstart", (e) => {
-    const b = e.target && e.target.closest && e.target.closest("#survVerbs .svbtn");
-    if (!b) return;
-    e.preventDefault();
-    doAction(+b.dataset.i);
-  }, { passive: false });
-  document.addEventListener("mousedown", (e) => {
-    const b = e.target && e.target.closest && e.target.closest("#survVerbs .svbtn");
-    if (!b) return;
-    e.preventDefault();
-    doAction(+b.dataset.i);
-  });
+  function hideDock() { const d = DK(); if (d) d.hide(); }
 
   // who the hands can reach right now: the man you hold, the nearest man on
   // his feet in front (the grab's own reach and cone), or a man already down
@@ -188,7 +152,7 @@
     const swim = (live && CBZ.touchMode) ? swimOffer() : null;
     if (swim) {
       verbs = swim; off = NO_OFF;
-      renderDock(swim, "swim:" + swim[0].label);
+      renderDock(swim, true);
       el.interact.classList.remove("show");
       shown = true;
       return;
@@ -198,7 +162,7 @@
     verbs = t.set;
     if (CBZ.touchMode) {
       // touch: tappable verb buttons by the thumb cluster, no reach-across card
-      renderDock(verbs, keyOf(verbs));
+      renderDock(verbs, false);
       el.interact.classList.remove("show");
     } else {
       render(verbs);

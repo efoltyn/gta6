@@ -118,7 +118,7 @@
       // ledger now says where he actually is.
       case "boarding": return "Getting in";
       case "in_vehicle": return "In the back seat";
-      case "grappled": return "In a clinch";
+      case "grappled": return "In your hands";
       default: return "Held";
     }
   }
