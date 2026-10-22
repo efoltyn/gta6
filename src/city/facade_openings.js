@@ -833,7 +833,17 @@
      face is pushed 20 mm OUT of it instead (the dressing replaces the wall
      surface it lies on, it never shares it). In place on `recs`
      ([x,y,z,w,h,d,col,...]); returns the number of faces moved.            */
+  /* resolveCoplanarSteps is the same pass as a generator: it yields every
+     few thousand face pairs, so a streamed island (world/archipelago.js
+     through world/disaster_arena.js) can spread one building's pass over
+     frames. resolveCoplanar runs it to the end, as it always ran. */
   FO.resolveCoplanar = function (recs, walls, tol) {
+    const it = FO.resolveCoplanarSteps(recs, walls, tol);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  };
+  FO.resolveCoplanarSteps = function* (recs, walls, tol) {
     tol = tol == null ? 0.0068 : tol;   // a hair over the 5 mm the census holds us to
     /* THE STEP IS SET BY THE DEPTH BUFFER, NOT BY THE CENSUS. A face this
        resolver moved used to land 10 mm from the one it cleared, and 10 mm is
@@ -933,7 +943,7 @@
       }
       return true;
     }
-    let moved = 0;
+    let moved = 0, work = 0;
     const CELL = 0.02;
     const pos = new Int32Array(n);                 // a face's place in its cluster's plane order
     // rounds over all three axes: settling a face on one axis can make a box
@@ -1012,6 +1022,7 @@
             for (let x = 0; x < L.length; x++) pos[L[x]] = x;
             const byU = L.slice().sort(function (p, q) { return B[p * 6 + u * 2] - B[q * 6 + u * 2]; });
             for (let xp = 0; xp < byU.length; xp++) for (let yp = xp + 1; yp < byU.length; yp++) {
+              if (++work >= 2500) { work = 0; yield 0; }
               const pp = byU[xp], qq = byU[yp];
               if (B[qq * 6 + u * 2] >= B[pp * 6 + u * 2 + 1]) break;   // no u overlap from here on
               const i = pos[pp] < pos[qq] ? pp : qq, j = i === pp ? qq : pp;
@@ -1049,12 +1060,14 @@
             }
           }
           c0 = c1;
+          if ((work += 8) >= 2500) { work = 0; yield 0; }
         }
         // a deco face lying in a fixed face (a wall's, a slab's): out of it,
         // to the nearest free plane in EPS (20 mm) steps (never onto another face)
         if (W.length) {
           const outDir = s === 1 ? 1 : -1;
           for (let i = 0; i < n; i++) {
+            if ((work += 4) >= 2500) { work = 0; yield 0; }
             const p0 = B[i * 6 + a * 2 + s];
             if (!fixedAt(i, p0)) continue;
             for (let k = 1; k <= 12; k++) {

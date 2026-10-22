@@ -69,8 +69,15 @@
   const LEAD = 9;                  // s of travel an island is built ahead of
   const FADE_S = 1.2;              // the far/near crossfade
   const WARM_S = 0.35;             // a built island's programs link before it is drawn
-  const BUDGET_MS = SMALL ? 4 : 6; // build time a frame, at rest
-  const BUDGET_MAX = 28;           // ... and when you are closing on it faster than it builds
+  /* THE FRAME'S SHARE. Every piece of streaming work (the build, joining the
+     physics, the people, the sea life moving over, the teardown) is a
+     resumable step, and all of it together gets this many milliseconds a
+     frame, measured, never a slice count: 4 on a phone or tablet, 6 on a
+     desktop, rising to at most 8 / 12 only while an island would otherwise
+     arrive before it is whole. The build starts early enough for that: the
+     lead is learned from how long the last island actually took here. */
+  const BUDGET_MS = SMALL ? 4 : 6;
+  const BUDGET_MAX = SMALL ? 8 : 12;
   const SWITCH_HYST = 250;         // m nearer another whole island must be to become THE island
   const PEOPLE = SMALL ? 14 : 28;
 
@@ -82,6 +89,9 @@
     active: null,
     camSave: null,
     vel: { x: 0, z: 0, px: 0, pz: 0, has: false, t: 0 },
+    chores: [],          // resumable work besides the build: { it, label }
+    workMs: SMALL ? 9000 : 4000,   // what one island's build costs on this device (learned)
+    lifeArena: null,     // the stand-in the sea life was stocked under
     lastT: 0,
   };
   // the far forms' crossfade: distance never decides it (a swap a world
@@ -306,11 +316,22 @@
     }
     I.arena = job.arena;
     if (!I.terrain) I.terrain = job.terrain;
-    // its far form, redrawn from what it actually stood
-    try { makeFar(I, farGeometry(I.terrain || job.terrain, realBlocks(I.arena), realTrees(I.arena))); I.refined = true; } catch (e) { console.error("[archipelago far]", e); }
-    try { if (CBZ.shaderQueue) CBZ.shaderQueue(I.arena.root, { full: true }); } catch (e) {}
-    I.state = "warming"; I.t = 0;
+    ST.workMs = ST.workMs * 0.5 + job.ms * 0.5;
+    // what is left before it can be shown, each its own step: its far form
+    // redrawn from what it actually stood, its programs queued, its walls
+    // joining the physics
+    I.state = "warming"; I.t = 0; I.warmDone = false;
+    chore(I.id + ":warm", (function* () {
+      try { makeFar(I, farGeometry(I.terrain || job.terrain, realBlocks(I.arena), realTrees(I.arena))); I.refined = true; } catch (e) { console.error("[archipelago far]", e); }
+      yield 0;
+      try { if (CBZ.shaderQueue) CBZ.shaderQueue(I.arena.root, { full: true }); } catch (e) {}
+      yield 0;
+      if (job.attachSteps) yield* job.attachSteps(); else if (job.attach) job.attach();
+      I.warmDone = true;
+    })());
   }
+  // resumable work, run under the frame's share (tick below)
+  function chore(label, it) { ST.chores.push({ label: label, it: it }); }
   // the far form wins its ties with the near one while they dissolve into each other
   function cover(I, on) {
     const m = I.farMat;
@@ -320,8 +341,7 @@
     m.polygonOffsetUnits = on ? -4 : 0;
   }
   function showNear(I) {
-    // its walls, floors and sight lines join the world (it built them aside)
-    if (I.job && I.job.attach) I.job.attach();
+    // (its walls, floors and sight lines joined the world while it warmed)
     I.arena.root.visible = true;
     I.ready.value = 0;
     if (I.far) I.far.visible = true;
@@ -347,7 +367,9 @@
   function dropNear(I) {
     if (I === ST.active) return;
     if (I.arena) rescue(I.arena.root);
-    try { CBZ.islandDispose(I.job); } catch (e) { console.error("[archipelago dispose]", e); }
+    // taken down a frame's share at a time (registries first, then the GPU)
+    const job = I.job;
+    if (job) chore(I.id + ":drop", CBZ.islandDisposeSteps ? CBZ.islandDisposeSteps(job) : (function* () { CBZ.islandDispose(job); })());
     I.job = null; I.arena = null;
     I.ready.value = 0;
     cover(I, false);
@@ -365,8 +387,12 @@
     // the sea learns this island's shore (a slice a frame, water_spec.js)
     if (ST.sea && CBZ.waterSetField && A.bakeShoreField) { const f = A.bakeShoreField(); if (f) CBZ.waterSetField(ST.sea, f); }
     // its people: the last island's leave with it, this one's are stood
-    // where nobody is looking
-    if (prev !== I) populate(A);
+    // where nobody is looking, one at a time; its sea fills from the last one's
+    if (prev !== I) {
+      if (CBZ.clearSurvivorBots) CBZ.clearSurvivorBots();
+      chore(I.id + ":people", populate(A));
+      if (prev) chore(I.id + ":sealife", migrateLife(A));
+    }
   }
   const _v = new THREE.Vector3();
   function unseen(x, y, z) {
@@ -377,16 +403,62 @@
     const onScreen = _v.z > -1 && _v.z < 1 && Math.abs(_v.x) < 1.25 && Math.abs(_v.y) < 1.25;
     return !onScreen || Math.hypot(cam.position.x - x, cam.position.z - z) > ST.map.view.fogFar;
   }
-  function populate(A) {
-    if (CBZ.clearSurvivorBots) CBZ.clearSurvivorBots();
+  function* populate(A) {
     if (!CBZ.spawnSurvivorBotAt || !A.randomPoint) return;
     const minD = A.hills && A.hills[0] ? 12 : 0;
     let placed = 0;
     for (let k = 0; k < PEOPLE * 6 && placed < PEOPLE; k++) {
+      if (ST.active && ST.active.arena !== A) return;        // the island changed again
       const p = A.randomPoint(minD, A.radius * 0.82);
       const y = A.groundHeightAt(p.x, p.z);
       if (!unseen(p.x, y + 1, p.z)) continue;
-      try { CBZ.spawnSurvivorBotAt(p.x, p.z); placed++; } catch (e) { break; }
+      try { CBZ.spawnSurvivorBotAt(p.x, p.z); placed++; } catch (e) { return; }
+      yield 0;
+    }
+  }
+  /* THE SEA LIFE (city/wildlife.js, the shark sim's and the disaster island's
+     own population) is stocked ONCE for the archipelago, round the spawn
+     island, under the archipelago's own root. When another island takes
+     over, every school still round the last one and out of anybody's sight
+     is moved across to water round the new one, a few a step: the same
+     animals, never a second stocking. */
+  function stockLife(A) {
+    if (!CBZ.cityWildlifeStock || !ST.root) return;
+    ST.lifeArena = { root: ST.root, center: { x: A.center.x, z: A.center.z }, radius: A.radius, archipelago: true };
+    try { CBZ.cityWildlifeStock(ST.lifeArena); } catch (e) { console.error("[archipelago sea life]", e); }
+  }
+  function* migrateLife(A) {
+    const L = CBZ.cityWildlife, WF = CBZ.waterField;
+    if (!L || !L.length || !WF || !WF.randomWaterPoint) return;
+    const cam = CBZ.camera;
+    const far = function (x, z) { return !cam || Math.hypot(cam.position.x - x, cam.position.z - z) > 1200; };
+    const seen = new Set();
+    let rs = 0x5eed;
+    const rnd = function () { rs = (Math.imul(rs, 1103515245) + 12345) & 0x7fffffff; return rs / 0x7fffffff; };
+    for (let i = 0; i < L.length; i++) {
+      const a = L[i];
+      if (!a || a.dead || !a.species || !a.species.aquatic || !a.pos) continue;
+      const hr = a.herd;
+      if (hr && seen.has(hr)) continue;
+      if (hr) seen.add(hr);
+      const members = hr ? hr.members : [a];
+      // a school round the new island already, or one somebody can see, stays
+      if (Math.hypot(a.pos.x - A.center.x, a.pos.z - A.center.z) < A.radius + 1800) continue;
+      if (!members.every(function (m) { return far(m.pos.x, m.pos.z); })) continue;
+      let to = null;
+      for (let t = 0; t < 6 && !to; t++) {
+        const q = WF.randomWaterPoint(rnd, { cx: A.center.x, cz: A.center.z, r0: A.radius + 60, r1: A.radius + 1400, clearance: 12 });
+        if (q && far(q.x, q.z)) to = q;
+      }
+      if (!to) continue;
+      const dx = to.x - a.pos.x, dz = to.z - a.pos.z;
+      for (const m of members) {
+        if (!m || !m.pos) continue;
+        m.pos.x += dx; m.pos.z += dz;
+        if (m.home) { m.home.x += dx; m.home.z += dz; }
+      }
+      if (hr) { hr.cx = (hr.cx || 0) + dx; hr.cz = (hr.cz || 0) + dz; }
+      yield 0;
     }
   }
 
@@ -406,6 +478,9 @@
     spawnI.job.finish();
     if (spawnI.job.arena) {
       spawnI.job.attach();
+      // what an island costs to build on THIS device, first measured here (a
+      // first build pays for every cache, so a warm one is ~0.7 of it)
+      ST.workMs = Math.max(1500, spawnI.job.ms * 0.7);
       spawnI.arena = spawnI.job.arena;
       spawnI.terrain = spawnI.job.terrain;
       spawnI.arena.root.visible = true;
@@ -423,7 +498,9 @@
       if (I.state === "near" && I.far) { I.far.visible = false; I.ready.value = 1; }
     }
     ST.built = true;
-    if (spawnI.arena) activate(spawnI);
+    if (spawnI.arena) { activate(spawnI); stockLife(spawnI.arena); }
+    // the boot is behind the loading card: do its people now
+    for (const c of ST.chores.splice(0)) { for (let r = c.it.next(); !r.done; r = c.it.next()) {} }
   }
   // leaving the mode takes the whole archipelago down (systems/state.js
   // setMode calls CBZ.archipelagoExit before the next mode builds, so the
@@ -439,6 +516,8 @@
     // cars, the helipad and its stair, if they stand on one of these islands
     const IV = CBZ.islandVehicles;
     if (IV && IV.leave && IV.arenaOf && mine(IV.arenaOf())) { try { IV.leave(); } catch (e) { console.error("[archipelago machines]", e); } }
+    // (work that was mid-way finishes now: a half-taken-down island is not left behind)
+    for (const c of ST.chores.splice(0)) { try { for (let r = c.it.next(); !r.done; r = c.it.next()) {} } catch (e) {} }
     const ownSurv = CBZ.surv && mine(CBZ.surv.arena);
     const ownActive = CBZ.islandActive && mine(CBZ.islandActive());
     for (const I of ST.isles) {
@@ -494,14 +573,16 @@
       const d = Math.hypot(I.x - px, I.z - pz), shore = d - I.R;
       // heading at it: the ground the next LEAD seconds cover counts
       const toward = speed > 3 && d > 1 ? Math.max(0, (Vl.x * (I.x - px) + Vl.z * (I.z - pz)) / (speed * d)) : 0;
-      const want = shore < V.build + speed * LEAD * toward;
+      // the lead: what the last island took here, at the frame's share, in seconds
+      const leadS = Math.max(LEAD, ST.workMs / (BUDGET_MS * 60) * 1.15);
+      const want = shore < V.build + Math.min(V.fogFar, speed * leadS * toward);
       I._shore = shore; I._closing = speed * toward;
       if (I.state === "far") {
         if (want && !(I.failedAt && now - I.failedAt < 20000)) { if (!building) { startJob(I); building = I; } }
         else if (I.far && !I.far.visible) I.far.visible = true;
       } else if (I.state === "warming") {
         I.t += fdt;
-        if (I.t >= WARM_S) showNear(I);
+        if (I.t >= WARM_S && I.warmDone) showNear(I);
       } else if (I.state === "fadeIn") {
         I.t += fdt;
         I.ready.value = Math.min(1, I.t / FADE_S);
@@ -515,20 +596,30 @@
         else if (I.ready.value <= 0) dropNear(I);
       }
     }
-    // one build at a time, a few ms a frame; more when it would arrive first
-    if (building && building.state === "building") {
+    // THE FRAME'S SHARE, measured: the chores, then the build in what is left
+    let ms = BUDGET_MS;
+    if (building && building.state === "building" && building._closing > 3) {
       const I = building, job = I.job;
-      let ms = BUDGET_MS;
-      if (I._closing > 3) {
-        const eta = Math.max(0.5, (I._shore - 600) / I._closing);       // s until it is in plain view
-        const total = Math.max(40, ((I.terrain && I.terrain.plan) ? I.terrain.plan.lots.length : 120) + 60);
-        const left = Math.max(1, total - job.steps);
-        const perStep = job.steps > 2 ? job.ms / job.steps : 6;          // ms a slice costs here
-        const need = left * perStep / (eta * 60);                         // ms a frame to finish in time
-        ms = Math.min(BUDGET_MAX, Math.max(ms, need * 1.25));
-      }
-      job.step(ms);
-      if (job.done) jobDone(I);
+      const eta = Math.max(0.5, (I._shore - 600) / I._closing);         // s until it is in plain view
+      const left = Math.max(0, ST.workMs - job.ms);                     // ms of building left (learned)
+      ms = Math.min(BUDGET_MAX, Math.max(ms, left / (eta * 60) * 1.25));
+    }
+    const until = now + ms;
+    // (a teardown waits while a build is mid-building: it unregisters stair
+    // links, and a half-built building turns its own by their index)
+    const midBuild = !!(building && building.state === "building");
+    while (performance.now() < until) {
+      const k = ST.chores.findIndex(function (c) { return !(midBuild && /:drop$/.test(c.label)); });
+      if (k < 0) break;
+      const c = ST.chores[k];
+      let r;
+      try { r = c.it.next(); } catch (e) { console.error("[archipelago " + c.label + "]", e); r = { done: true }; }
+      if (r.done) ST.chores.splice(k, 1);
+    }
+    if (building && building.state === "building") {
+      const left = until - performance.now();
+      if (left > 0.5) building.job.step(left);
+      if (building.job.done) jobDone(building);
     }
     // the island in force: the nearest whole one
     let best = ST.active, bd = best && best.arena ? Math.hypot(best.x - px, best.z - pz) - best.R : 1e9;
@@ -618,7 +709,7 @@
       }
       if (CBZ.cam) { CBZ.cam.yaw = sp.face + Math.PI; CBZ.cam.pitch = 0.42; }
       if (CBZ.resetZoom) CBZ.resetZoom();
-      if (!(CBZ.bots && CBZ.bots.length)) populate(A);
+      if (!(CBZ.bots && CBZ.bots.length)) { const it = populate(A); for (let r = it.next(); !r.done; r = it.next()) {} }
       if (CBZ.killFeedReset) CBZ.killFeedReset();
     },
     // the island's own verbs and buses (survival's actor model: people are
@@ -672,6 +763,7 @@
             draws: I.far ? 1 : 0 };
         }),
         speed: Math.round(Math.hypot(ST.vel.x, ST.vel.z)),
+        chores: ST.chores.map(function (c) { return c.label; }), workMs: Math.round(ST.workMs),
         at: P && P.pos ? [Math.round(P.pos.x), Math.round(P.pos.z)] : null,
       };
     },
