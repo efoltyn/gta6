@@ -900,11 +900,9 @@
   // prisonPrompt, bound to its key in the capture phase, so no other [E]
   // listener fires on the same press) and on touch the same pill is the tap.
   // One control per verb: the registry zone is deleted.
+  // IN THE CAR the floor buttons are the one lift panel (systems/liftpanel.js,
+  // shared with the island towers): every landing, any of them in one input.
   const LiftCore = CBZ.liftCore;
-  // the car's floor buttons, in panel order: E is the obvious one (the other
-  // end), the rest are their panel numbers. Q is never a floor: Q is the
-  // city's verb wheel (city/verbwheel.js).
-  const ROW_KEYS = ["e", "2", "3", "4"];
   function rideTime(el, from, to) {
     const d = Math.abs(el.stops[to].no - el.stops[from].no);
     return Math.max(3.0, Math.min(6.0, 2.0 + d * 0.18));
@@ -970,37 +968,6 @@
     r.open = 0; r.target = 0; r.autoClose = null; r.autoCloseAudible = false;
     for (const L of r.leaves) { L.m.position.x = L.baseX; L.m.position.z = L.baseZ; }
     gateDoor(r);
-  }
-
-  // ---- the tiny floor-ticker chip (one DOM node, hidden when idle) ----------
-  // STATUS ONLY: the floor ticker while a car runs, nothing else. It is in
-  // css/city.css's live-world declutter list (a keyboard player reads the
-  // ride off the shake and the ding); mobile.css shows it on a touchscreen.
-  // It once carried a call pill as well, and for a day the lift had TWO touch
-  // buttons (a chip pill beside a registry card). The call lives on the
-  // button in the world now; this chip is never a control again.
-  let chip = null;
-  function dom() {
-    if (chip || typeof document === "undefined" || !document.body) return;
-    try {
-      chip = document.createElement("div");
-      chip.id = "elevChip";
-      chip.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:248px;z-index:24;display:none;" +
-        "padding:6px 12px;border-radius:9px;background:rgba(8,14,22,.78);border:1px solid rgba(130,180,255,.28);" +
-        "color:#cfe6ff;font:600 13px/1.2 'Fredoka',system-ui,sans-serif;pointer-events:none;text-shadow:0 1px 2px #000";
-      document.body.appendChild(chip);
-    } catch (e) { chip = null; }
-  }
-  // PERF: callers run at frame rate (the ride ticker): skip the DOM writes
-  // unless the text actually changed.
-  let _chipLast;
-  function chipText(t) {
-    if (t === _chipLast) return;
-    dom(); if (!chip) return;
-    _chipLast = t;
-    if (!t) { chip.style.display = "none"; return; }
-    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
-    chip.style.display = "block"; chip.innerHTML = t;
   }
 
   // the nearest call pad the player stands at (on that landing's floor, out
@@ -1096,7 +1063,7 @@
 
   // one trip leg for the machine: an empty car coming to a call (a beat,
   // scaled by distance) or the rider's ride (hum, shake, the swap halfway)
-  let shakeT = 0, humT = 0, ticker = null;
+  let shakeT = 0, humT = 0;
   function travel(el, m, dt, P) {
     const riding = m.st === "ride", from = m.at, to = m.dest;
     const dur = riding ? rideTime(el, from, to) : comeTime(el, from, to);
@@ -1108,11 +1075,9 @@
     humT += dt;
     if (humT > (1.4 - 0.5 * env) && CBZ.sfx) { humT = 0; CBZ.sfx("rumble"); }
     if (!m.moved && m.t >= dur * 0.5 && P) { swap(el, from, to, P); m.moved = true; }
-    // floor ticker: count THROUGH toward the destination
-    const f0 = el.stops[from].no, f1 = el.stops[to].no, up = f1 > f0;
-    const fl = Math.round(f0 + (f1 - f0) * p);
-    const fn = (n) => (n <= 0 ? "G" : n + "F");
-    ticker = (up ? "▲ " : "▼ ") + fn(fl) + "  →  " + fn(f1);
+    // the panel's floor display counts THROUGH toward the destination
+    const f0 = el.stops[from].no, f1 = el.stops[to].no;
+    el.tick = { fl: Math.round(f0 + (f1 - f0) * p), up: f1 > f0 };
     return m.t >= dur;
   }
 
@@ -1124,25 +1089,19 @@
       door: (i, open) => setDoorTarget(el.stops[i].rig, open, nearStop(el.stops[i], P)),
       seal: (i) => gateDoor(el.stops[i].rig),
       travel: (m, dt) => travel(el, m, dt, P),
-      arrive: (i, rode) => {
-        if (!rode) return;
-        if (CBZ.shake) CBZ.shake(0.25);
-        const s = el.stops[i];
-        if (CBZ.city && CBZ.city.note) {
-          CBZ.city.note(i === el.stops.length - 1 && s.roof ? ("" + s.no + " floors up, the roof is yours.")
-            : i === 0 ? "Ground floor." : s.name + ".", 2);
-        }
-      },
+      // riding: a new floor is taken until the halfway swap (the sealed cab
+      // has not "passed" anything before it)
+      reach: (m, j) => !m.moved && j !== m.at,
+      arrive: (i, rode) => { if (rode && CBZ.shake) CBZ.shake(0.25); },
       lit: (on) => setLit(el, on),
       sfx: (s) => { if (CBZ.sfx && nearStop(el.stops[el.m.at], P)) CBZ.sfx(s); },
     };
   }
 
-  // ---- the controls: the verb pinned over the thing, one control per verb --
+  // ---- the controls: Call pinned over the button; the car's panel inside --
   // Armed every frame from the update below; the pill (tap) and the bound key
-  // both land in these named functions (a pill must name a CBZ function).
-  let callArm = null;
-  const goArm = [];
+  // both land in the named functions (a pill must name a CBZ function).
+  let callArm = null, carArm = null;
   /* A BUTTON IS PRESSED BY A FINGER (systems/verbs_pickup.js CBZ.verbs.touch
      "press"): the index pad goes onto the button's own face, pressing along
      its normal. A landing that published no normal (an older record) is
@@ -1163,38 +1122,60 @@
     if (st) liftPress(st.btnFace, st.btnAt, st.btnN || st.fwd, P, "lift-call");
     return LiftCore.call(a.el.m, a.i, ioFor(a.el, P));
   };
-  for (let r = 0; r < ROW_KEYS.length; r++) {
-    CBZ["cityLiftGo" + r] = function () {
-      const a = goArm[r], P = CBZ.player;
-      if (!a || !P || P.dead || P.driving) return false;
-      const here = a.el.stops[a.el.m.at];
-      if (here) liftPress(here.panelFace, here.panelAt, here.panelN, P, "lift-go");
-      return LiftCore.go(a.el.m, a.j, ioFor(a.el, P));
-    };
+  // the car's floor button j (the panel's pick; also a scripted ride)
+  CBZ.cityLiftGoTo = function (j) {
+    const el = carArm, P = CBZ.player;
+    if (!el || !P || P.dead || P.driving) return false;
+    const here = el.stops[el.m.at];
+    if (el.m.st !== "ride" && here) liftPress(here.panelFace, here.panelAt, here.panelN, P, "lift-go");
+    return LiftCore.go(el.m, j, ioFor(el, P));
+  };
+  // what the panel prints: G, the floor number, R; the building's own word
+  // for a landing (the Penthouse) beside its button
+  function panelStops(el) {
+    if (el.panelStops) return el.panelStops;
+    return (el.panelStops = el.stops.map(function (s, i) {
+      const named = s.name && !/^(ground|roof|floor \d+)$/i.test(s.name) ? s.name : "";
+      if (i === 0) return { label: "G", name: "", num: 0, roof: false };
+      if (s.roof) return { label: "R", name: "", num: s.no, roof: true };
+      return { label: String(s.no), name: named, num: s.no, roof: false };
+    }));
   }
-  // the car's floor buttons from stop `at`: the natural trip first (down to
-  // the ground from anywhere above it, up to the top from the ground), then
-  // the rest top-down, the way a lift panel reads
-  function destOrder(el, at) {
-    const n = el.stops.length, first = at === 0 ? n - 1 : 0, out = [first];
-    for (let j = n - 1; j >= 0; j--) if (j !== at && j !== first) out.push(j);
-    return out.slice(0, ROW_KEYS.length);
+  function floorLabel(el, n) {
+    if (n <= 0) return "G";
+    const top = el.stops[el.stops.length - 1];
+    return top.roof && n >= top.no ? "R" : String(n);
+  }
+  const pickFloor = (j) => CBZ.cityLiftGoTo(j);
+  function carPanel(el) {
+    const m = el.m, riding = m.st === "ride";
+    const tk = riding ? el.tick : null;
+    const spec = el.panelSpec || (el.panelSpec = { stops: null, pick: pickFloor, reach: (j) => !el.m.moved && j !== el.m.at });
+    spec.stops = panelStops(el);
+    spec.at = m.at;
+    spec.dest = m.dest;
+    spec.riding = riding;
+    spec.up = tk ? tk.up : false;
+    spec.display = tk ? floorLabel(el, tk.fl) : null;
+    const here = el.stops[m.at];
+    spec.at3 = here && here.panelAt;
+    CBZ.liftPanel.show("city:" + elevators.indexOf(el), spec);
   }
   function armControls(P) {
-    callArm = null; goArm.length = 0;
-    if (!P || P.dead || P.driving || !CBZ.prisonPrompt || CBZ.cityMenuOpen) return;
-    for (const el of elevators) {
-      const m = el.m;
-      if ((m.st === "open" || m.st === "idle") && insideCab(el, m.at, P)) {
-        const here = el.stops[m.at], order = destOrder(el, m.at);
-        for (let row = 0; row < order.length; row++) {
-          goArm[row] = { el: el, j: order[row] };
-          CBZ.prisonPrompt("lift-go-" + row, "@cityLiftGo" + row, el.stops[order[row]].name,
-            { at: here.panelAt, key: ROW_KEYS[row], bind: true, group: "lift-car", row: row, d2: 0.01, city: true });
-        }
+    callArm = null; carArm = null;
+    if (!P || P.dead || P.driving || CBZ.cityMenuOpen) return;
+    if (CBZ.liftPanel) {
+      for (const el of elevators) {
+        const m = el.m;
+        const aboard = m.st === "ride" ? (insideCab(el, m.at, P) || insideCab(el, m.dest, P))
+          : (m.st === "open" || m.st === "idle" || m.st === "close") && insideCab(el, m.at, P);
+        if (!aboard) continue;
+        carArm = el;
+        carPanel(el);
         return;
       }
     }
+    if (!CBZ.prisonPrompt) return;
     const near = padNear(P);
     if (near && callOffered(near.el.m, near.i)) {
       callArm = near;
@@ -1203,8 +1184,7 @@
     }
   }
   (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
-    { id: "lift-call", act: "@cityLiftCall", was: "CALL THE LIFT card (zone-lift), hidden in campaigns and beaten to [E] by the ride router", now: "Call, over the call button" },
-    { id: "lift-go-0", act: "@cityLiftGo0", was: "walking in rode you to the only other end", now: "the landing's name, on the car's floor panel" }
+    { id: "lift-call", act: "@cityLiftCall", was: "CALL THE LIFT card (zone-lift), hidden in campaigns and beaten to [E] by the ride router", now: "Call, over the call button" }
   );
 
   CBZ.onUpdate(36.6, function (dt) {
@@ -1222,7 +1202,6 @@
         setLit(el, false);
         for (const s of el.stops) closeNow(s.rig);
       }
-      chipText(null);
       return;
     }
     if (!built) { const A = CBZ.city && CBZ.city.arena; if (A && A.lots) buildAll(A); if (!built) return; }
@@ -1233,7 +1212,6 @@
       for (const s of el.stops) { animRig(s.rig, dt); gateDoor(s.rig); }
     }
 
-    ticker = null;
     for (const el of elevators) {
       const m = el.m;
       if (m.st === "idle") {
@@ -1260,7 +1238,6 @@
       }
       LiftCore.step(m, dt, ioFor(el, P));
     }
-    chipText(ticker);
     armControls(P);
   });
 

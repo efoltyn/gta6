@@ -9,12 +9,12 @@
       open -> step in -> floor button -> doors close -> ride -> arrive ->
       doors open -> step out -> doors close; the doorway hold, the cancelled
       trip, the mashed call, a call queued while the car is busy, and the
-      island car's Stop (retarget mid-ride).
+      island car re-targeted mid-ride to a floor it can still brake for.
 
    2. city/elevators.js, the real file, loaded with a stub THREE and a stub
       building: the lift builds, the call is a pinned "Call" pill over the
       button (NOT a registry card), pressing it opens the ground doors and
-      their collider goes passable, the car's panel offers "Roof", the ride
+      their collider goes passable, the car's lift panel offers G and R, the ride
       relocates the rider to the roof cab and opens those doors, stepping
       out closes them and the collider is solid again. With a floor landing
       of its own (the Executive walnut core) the car's panel offers every
@@ -25,6 +25,9 @@
       key fires its act in the capture phase and stops the press, so the
       city's [E] ride router (a bubble-phase listener that boards any car
       within 4.8 m) never sees an [E] pressed at a lift call panel.
+
+   4. systems/liftpanel.js, the real file, with a DOM stub: typing a floor,
+      the highlight's natural start, arrows, G / R, E sending.
 */
 import fs from "node:fs";
 import path from "node:path";
@@ -111,6 +114,7 @@ const LiftCore = require(path.join(ROOT, "src/systems/liftcore.js"));
   const m = LiftCore.create(stops.length, 0);
   const W = { inside: true, open: stops.map(() => 0), target: stops.map(() => 0) };
   const io = {
+    reach: (mm, j) => (car.v < 0.05 ? stops[j] !== car.y : (stops[j] - car.y) * (stops[mm.dest] > car.y ? 1 : -1) >= car.v * car.v / (2 * 3.2) + 0.05),
     inside: (i) => W.inside && m.at === i && car.y === stops[i],
     doorOpen: (i) => W.open[i],
     door: (i, o) => { W.target[i] = o ? 1 : 0; },
@@ -128,15 +132,20 @@ const LiftCore = require(path.join(ROOT, "src/systems/liftcore.js"));
     }
   };
   LiftCore.call(m, 0, io); tick(0.6);
-  ok(LiftCore.go(m, 4, io), "island: Up from the lobby (express to the top)");
-  tick(1.0);
-  // Stop: the next floor it can still brake for
+  ok(LiftCore.go(m, 2, io), "island: floor 2 from the lobby, straight from the panel");
+  tick(4);
+  ok(m.st === "open" && m.at === 2 && car.y === stops[2] && W.target[2] === 1, "island: the car climbs to floor 2 (a middle stop) and opens there");
+  tick(0.6);
+  ok(LiftCore.go(m, 4, io), "island: then the top");
+  tick(0.9);
+  const behind = stops.findIndex((y) => y < car.y);
+  ok(m.st === "ride" && !LiftCore.go(m, behind, io), "island: riding up, a floor behind the car is refused");
   const brake = car.v * car.v / (2 * 3.2) + 0.05;
   let k = -1;
   for (let i = 0; i < stops.length; i++) { const a = stops[i] - car.y; if (a >= brake && (k < 0 || a < stops[k] - car.y)) k = i; }
-  ok(m.st === "ride" && k > 0 && k < 4, "island: riding, a brakeable floor ahead (" + k + ")");
-  m.dest = k; tick(4);
-  ok(m.st === "open" && m.at === k && car.y === stops[k] && W.target[k] === 1, "island: Stop lands the car on that floor and opens its doors");
+  ok(k > 2 && k < 4 && LiftCore.go(m, k, io), "island: riding, a floor it can still brake for re-targets it (" + k + ")");
+  tick(4);
+  ok(m.st === "open" && m.at === k && car.y === stops[k] && W.target[k] === 1, "island: it lands on that floor and opens its doors");
 }
 
 // ===================================================================== 2
@@ -148,22 +157,27 @@ function makeEnv() {
     copy(v) { this.x = v.x; this.y = v.y; this.z = v.z; return this; }
   }
   class Geo {
-    constructor() { this.attributes = { position: { count: 24 } }; }
+    constructor() {
+      this.attributes = { position: { count: 24, array: new Float32Array(72) }, normal: { array: new Float32Array(72) } };
+      this.index = { array: new Uint16Array(36) };
+    }
     translate() { return this; } rotateX() { return this; } rotateZ() { return this; }
-    setAttribute(k, v) { this.attributes[k] = v; } dispose() {}
+    setAttribute(k, v) { this.attributes[k] = v; } setIndex(i) { this.index = i; } computeBoundingSphere() {} dispose() {}
   }
   class Mesh {
     constructor(g, m) { this.geometry = g; this.material = m; this.position = new V3(); this.scale = new V3(1, 1, 1); this.rotation = new V3(); this.userData = {}; this.children = []; }
-    add(c) { this.children.push(c); }
+    add(c) { this.children.push(c); c.parent = this; }
+    updateMatrix() {}
   }
   const THREE = {
-    BoxGeometry: Geo, Mesh, Vector3: V3,
+    BoxGeometry: Geo, BufferGeometry: Geo, Mesh, Vector3: V3,
     MeshLambertMaterial: class { constructor(o) { Object.assign(this, o || {}); } },
     Color: class { constructor() { this.r = 1; this.g = 1; this.b = 1; } setHex() { return this; } },
     BufferAttribute: class { constructor(a) { this.array = a; } },
   };
   const ups = [];
   const prompts = [];
+  const panels = [];
   const notes = [];
   const CBZ = {
     game: { mode: "city", state: "playing" },
@@ -176,6 +190,7 @@ function makeEnv() {
     player: { pos: new V3(), vy: 0, dead: false, driving: false },
     cam: { yaw: 0 },
     prisonPrompt: (id, act, verb, opts) => { prompts.push({ id, act, verb, opts }); return true; },
+    liftPanel: { show: (key, spec) => { panels.push({ key, spec }); return true; } },
   };
   const win = { CBZ, THREE };
   const ctx = vm.createContext({ window: win, console, Math, Object, Array, Set, Map, JSON, isFinite, Number, String });
@@ -183,8 +198,8 @@ function makeEnv() {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), ctx, { filename: f });
   }
   ups.sort((a, b) => a.o - b.o);
-  const frame = (dt = 1 / 60) => { prompts.length = 0; for (const u of ups) u.fn(dt); };
-  return { CBZ, THREE, V3, frame, prompts, notes, Mesh };
+  const frame = (dt = 1 / 60) => { prompts.length = 0; panels.length = 0; for (const u of ups) u.fn(dt); };
+  return { CBZ, THREE, V3, frame, prompts, panels, notes, Mesh };
 }
 function stubBuilding(env, h, extra) {
   const storeys = Math.round(h / 3.2);
@@ -212,7 +227,7 @@ function stubBuilding(env, h, extra) {
   ok(!!call && call.act === "@cityLiftCall" && call.verb === "Call" && call.opts.bind && call.opts.key === "e" && call.opts.city,
     "at the pad: ONE pinned prompt, the verb \"Call\", over the button, bound to [E]");
   ok(call && Math.abs(call.opts.at.x - g0.btnAt.x) < 1e-9 && Math.abs(call.opts.at.y - g0.btnAt.y) < 1e-9, "the prompt is pinned on the call button itself");
-  ok(!env.prompts.some((p) => /lift-go/.test(p.id)), "no floor buttons outside the car");
+  ok(!env.panels.length, "no floor panel outside the car");
   CBZ.cityLiftCall();
   ok(el.m.st === "open" && g0.rig.target === 1 && g0.btn.material.hex === 0xffc14a, "pressing Call OPENS the doors and lights the button");
   for (let i = 0; i < 40; i++) env.frame();
@@ -222,19 +237,22 @@ function stubBuilding(env, h, extra) {
   const inPt = g0.pt(0, 1.0);
   P.pos.set(inPt.x, 0.16, inPt.z);
   env.frame();
-  const go = env.prompts.filter((p) => /^lift-go-/.test(p.id));
-  ok(go.length === 1 && go[0].verb === "Roof" && go[0].act === "@cityLiftGo0" && go[0].opts.group === "lift-car", "in the car: the panel's button says where it goes (\"Roof\")");
+  const pn = env.panels[0];
+  ok(env.panels.length === 1 && pn.spec.stops.map((s) => s.label).join(",") === "G,R" && pn.spec.at === 0 && !env.prompts.some((p) => /^lift-go/.test(p.id)),
+    "in the car: the lift panel is just there, G and R, the car at G (no pinned rows)");
   for (let i = 0; i < 300; i++) env.frame();
   ok(el.m.st === "open", "standing in the car does not ride you anywhere by itself");
-  CBZ.cityLiftGo0();
-  let rode = false;
-  for (let i = 0; i < 600 && !(el.m.st === "open" && el.m.at === 1); i++) { env.frame(); if (el.m.st === "ride") rode = true; }
+  ok(env.panels[0].spec.pick(1), "the panel's R button takes");
+  let rode = false, shown = "";
+  for (let i = 0; i < 600 && !(el.m.st === "open" && el.m.at === 1); i++) {
+    env.frame(); if (el.m.st === "ride") { rode = true; if (env.panels[0] && env.panels[0].spec.display) shown = env.panels[0].spec.display; }
+  }
   ok(rode && el.m.st === "open" && el.m.at === 1, "the doors close, it rides, and it arrives at the roof");
+  ok(!!shown, "the panel's display ticks during the ride (" + shown + ")");
   ok(approx(P.pos.y, r0.floor + 0.04) && approx(P.pos.x, inPt.x) && approx(P.pos.z, inPt.z), "the rider stands in the roof cab, same spot in the room");
   ok(g0.rig.target === 0 && g0.rig.solid, "the ground doors are shut and solid behind him");
   for (let i = 0; i < 40; i++) env.frame();
   ok(r0.rig.open === 1 && !r0.rig.solid, "the roof doors open at arrival");
-  ok(env.notes.some((t) => /roof/.test(t)), "arrival note");
   // step out onto the roof
   P.pos.set(r0.pad.x, b.h, r0.pad.z);
   for (let i = 0; i < 120; i++) env.frame();
@@ -273,10 +291,10 @@ function stubBuilding(env, h, extra) {
   ok(el.m.st === "open" && el.m.at === 1 && rig.open === 1 && rig.col.y0 >= 1e9, "...and the walnut core's doors OPEN, its collider passable");
   P.pos.set(104.2, Y + 0.02, backZ - 1.0);
   env.frame();
-  const rows = env.prompts.filter((p) => /^lift-go-/.test(p.id)).map((p) => p.verb + ":" + p.opts.key);
-  ok(rows.length === 2 && rows[0] === "Ground:e" && rows.includes("Roof:2"), "the car's panel offers every other stop, Ground on [E] (" + rows.join(", ") + ")");
+  const labels = env.panels.length ? env.panels[0].spec.stops.map((s) => s.label + (s.num != null ? "#" + s.num : "")).join(",") : "";
+  ok(labels === "G#0,5#5,R#10" && env.panels[0].spec.at === 1, "the car's panel offers every stop, labelled and numbered (" + labels + ")");
   CBZ.cam.yaw = 0.3;
-  CBZ.cityLiftGo0();
+  env.panels[0].spec.pick(0);
   for (let i = 0; i < 700 && !(el.m.st === "open" && el.m.at === 0); i++) env.frame();
   const Lg = g0.loc(P.pos.x, P.pos.z);
   ok(el.m.at === 0 && approx(P.pos.y, g0.floor + 0.04) && Lg.dep > 0.18 && Lg.dep < g0.door - 0.15 && Math.abs(Lg.lat) < 0.9,
@@ -303,7 +321,7 @@ console.log("3. systems/interactions.js: a bound pill owns its key");
   const CBZ = { game: { mode: "city", state: "playing" }, CONFIG: {}, onAlways: (o, fn) => alw.push({ o, fn }), onUpdate: (o, fn) => ups.push({ o, fn }) };
   const ctx = vm.createContext({
     window: { CBZ }, document: doc, console, Math, Object, Array, Set, Map, JSON, isFinite, Number, String,
-    THREE: { Vector3: class { set() { return this; } project() { return this; } } },
+    THREE: { Vector3: class { set() { return this; } project() { return this; } }, Box3: class { setFromObject() { return this; } } },
     addEventListener: (type, fn, cap) => listeners.push({ type, fn, cap: !!cap }),
   });
   vm.runInContext(fs.readFileSync(path.join(ROOT, "src/systems/interactions.js"), "utf8"), ctx, { filename: "interactions.js" });
@@ -344,6 +362,61 @@ console.log("3. systems/interactions.js: a bound pill owns its key");
   frame();
   press("2");
   ok(called === 101, "a panel group shows both buttons and [2] presses the second one");
+}
+
+// ===================================================================== 4
+console.log("4. systems/liftpanel.js: any floor in one or two inputs");
+{
+  class El {
+    constructor(tag) { this.tag = tag; this.children = []; this.style = { setProperty() {} }; this.className = ""; this.textContent = ""; this.id = "";
+      const cl = new Set(); this.classList = { add: (...c) => c.forEach((x) => cl.add(x)), remove: (...c) => c.forEach((x) => cl.delete(x)), contains: (c) => cl.has(c), toggle: (c, on) => (on ? cl.add(c) : cl.delete(c)) }; }
+    appendChild(c) { this.children.push(c); return c; }
+    addEventListener() {}
+  }
+  const doc = { body: new El("body"), head: new El("head"), getElementById: () => null, createElement: (t) => new El(t), createTextNode: (t) => ({ t }) };
+  const listeners = [], alw = [];
+  const CBZ = { game: { mode: "survival", state: "playing" }, onAlways: (o, fn) => alw.push(fn) };
+  let t = 0;
+  const timers = [];
+  const ctx = vm.createContext({
+    window: { CBZ }, document: doc, console, Math, Object, Array, Set, Map, JSON, isFinite, Number, String, innerHeight: 800,
+    performance: { now: () => t }, Date: { now: () => t },
+    setTimeout: (fn, ms) => { timers.push({ fn, at: t + ms }); return timers.length; }, clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
+    addEventListener: (type, fn, cap) => listeners.push({ type, fn }),
+  });
+  vm.runInContext(fs.readFileSync(path.join(ROOT, "src/systems/liftpanel.js"), "utf8"), ctx, { filename: "liftpanel.js" });
+  const picks = [];
+  const stops = [{ label: "G", name: "Lobby", num: 0 }];
+  for (let k = 1; k <= 14; k++) stops.push({ label: String(k), name: "", num: k });
+  stops.push({ label: "R", name: "", num: 15, roof: true });
+  const spec = { stops, at: 0, dest: -1, riding: false, pick: (j) => { picks.push(j); return true; } };
+  function press(key) {
+    const ev = { key, repeat: false, isTrusted: true, _stop: false, preventDefault() {}, stopImmediatePropagation() { this._stop = true; } };
+    for (const l of listeners) if (l.type === "keydown") l.fn(ev);
+    return ev._stop;
+  }
+  const arm = () => { spec.dest = -1; CBZ.liftPanel.show("isle:0", spec); };
+  const wait = (ms) => { t += ms; for (const x of timers) if (x.fn && x.at <= t) { const f = x.fn; x.fn = null; f(); } };
+  arm();
+  ok(CBZ.liftPanel.isOpen(), "the panel opens on show()");
+  ok(press("e") && picks.pop() === 15, "from the ground, E sends the natural trip: the roof");
+  arm(); press("1"); press("2");
+  ok(picks.pop() === 12, "typing 1, 2 is floor 12, sent at once (no floor starts with 12)");
+  arm(); press("1"); wait(1000);
+  ok(picks.pop() === 1, "typing 1 and waiting is floor 1");
+  arm(); press("7");
+  ok(picks.pop() === 7, "typing 7 is floor 7 at once");
+  arm(); press("r");
+  ok(picks.pop() === 15, "R is the roof");
+  spec.at = 9; arm();
+  ok(press("e") && picks.pop() === 0, "from floor 9 the highlight starts on the ground");
+  arm(); press("arrowup"); press("arrowup"); press("e");
+  ok(picks.pop() === 2, "Up twice from the ground highlight, E: floor 2");
+  arm(); press("g");
+  ok(picks.pop() === 0, "G is the ground");
+  ok(!press("q") && !picks.length, "Q is never the panel's");
+  t += 500; for (const f of alw) f(0.016);
+  ok(!CBZ.liftPanel.isOpen() && !press("e"), "not re-armed: the panel goes and E is free again");
 }
 
 console.log("\n" + pass + " passed, " + fail + " failed");

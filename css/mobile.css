@@ -375,8 +375,8 @@ body.touch #citySwimPrompt {
   background: transparent !important; border: none !important; padding: 0 !important;
   pointer-events: none !important; max-width: 78vw;
 }
-/* #elevChip, #roofStashChip and #beachLootChip are STATUS PROSE, not controls:
-   the lift's floor ticker / boarding coach, "Prying it open…", "Going through
+/* #roofStashChip and #beachLootChip are STATUS PROSE, not controls:
+   "Prying it open…", "Going through
    it…" — running commentary the interaction card has no channel for. The verb
    buttons themselves (call the lift, pry the stash, rifle the bag) live on
    the #interact card, which has its own touch restore below — these chips no
@@ -386,8 +386,6 @@ body.touch #citySwimPrompt {
    Both campaign.css and city.css hide these with !important; these selectors
    out-specify both (3 classes + attribute + id beats 2 classes + id)
    regardless of mobile.css loading first. */
-body.touch.mode-city.state-playing #elevChip[style*="display: block"],
-body.touch.campaign-active.mode-city #elevChip[style*="display: block"],
 body.touch.mode-city.state-playing #roofStashChip[style*="display: block"],
 body.touch.mode-city.state-playing #beachLootChip[style*="display: block"],
 body.touch.campaign-active.mode-city #roofStashChip[style*="display: block"],
@@ -398,7 +396,7 @@ body.touch.campaign-active.mode-city #beachLootChip[style*="display: block"] {
 /* The proximity chips in the walk-up band: thumb-reachable, and the container
    never eats the tap (they are pure prose now). Their desktop bottoms (252/278) are stacked to keep prose lines
    apart; on touch they share the band like every other walk-up prompt. */
-body.touch #elevChip, body.touch #roofStashChip, body.touch #beachLootChip {
+body.touch #roofStashChip, body.touch #beachLootChip {
   bottom: calc(168px + env(safe-area-inset-bottom, 0px)) !important;
   z-index: 30; pointer-events: none; max-width: 78vw;
 }

@@ -220,7 +220,7 @@ try {
     // but city policy wins without removing any input handlers or actions.
     const passiveIds = [
       "hint", "toast", "interact", "roofStashChip", "beachLootChip",
-      "elevChip", "adChip", "realtyPrompt",
+      "adChip", "realtyPrompt",
       "modshopHud", "cityOrders", "cityHeistHud",
       "cFeed", "cKill", "cKillFeed", "cRel", "cMemb", "cTurfMeta",
       "streakHud", "streakMeter"
