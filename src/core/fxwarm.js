@@ -325,6 +325,111 @@
     return queue(objs, opts);
   };
   CBZ.shaderQueueStats = function () { return lastReport; };
+
+  /* THE BUFFERS, BEFORE THE FIRST DRAW. r128 uploads a geometry's vertex
+     buffers (gl.bufferData, every attribute, then the index) the first time
+     anything draws it, and a texture the first time a material samples it.
+     A streamed island (world/archipelago.js) is built hidden and shown in
+     one frame: that frame uploaded the whole island, hundreds of MB of
+     vertices on a downtown, which is a hitch no build slicing can hide.
+     CBZ.uploadSteps(root, {bytes}) is a generator that uploads them ahead,
+     a few MB a step, while the root is still hidden: each batch of the
+     root's geometries is drawn once by stand-in meshes (one shared colour-
+     write-off material, its one program compiled once) into a 1x1 target
+     with an empty draw range, which is what makes three upload them and
+     draw nothing; its textures go through
+     renderer.initTexture. The real meshes then find their buffers there
+     (three keys them by attribute and version), so the frame the island
+     appears uploads nothing. Nothing about the pixels changes: the stand-
+     ins write no colour and no depth, into a target nobody reads. */
+  const UP = { scene: null, cam: null, rt: null, pool: [], mat: null, done: new WeakSet() };
+  function upRig() {
+    if (UP.scene) return UP;
+    UP.mat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false });
+    UP.mat.name = "upload-stand-in";
+    UP.mat._shared = true;
+    UP.scene = new THREE.Scene();
+    UP.scene.autoUpdate = false;
+    UP.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    UP.cam.updateMatrixWorld();
+    UP.rt = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false });
+    return UP;
+  }
+  function geoBytes(g) {
+    let n = 0;
+    for (const k in g.attributes) { const a = g.attributes[k]; if (a && a.array && !a.isInterleavedBufferAttribute) n += a.array.byteLength; }
+    if (g.index && g.index.array) n += g.index.array.byteLength;
+    return n;
+  }
+  CBZ.uploadSteps = function* (root, opts) {
+    const r = CBZ.renderer;
+    if (!r || !root || !r.render || (CBZ.CONFIG && CBZ.CONFIG.RENDER_FRAMES === false)) return 0;
+    const limit = (opts && opts.bytes) || 4e6, BATCH = 48;
+    const late = CBZ.sliceLate || function () { return false; };
+    const U = upRig();
+    // what the root draws (the shared ones were drawn long ago)
+    const geos = [], texs = [], seenT = new Set();
+    const stack = [root];
+    let walked = 0;
+    while (stack.length) {
+      const o = stack.pop();
+      for (let c = o.children.length - 1; c >= 0; c--) stack.push(o.children[c]);
+      const g = o.geometry;
+      if (g && g.isBufferGeometry && g.attributes && g.attributes.position && !g._shared && !UP.done.has(g)) { UP.done.add(g); geos.push(g); }
+      const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : null;
+      if (ms) for (const m of ms) {
+        if (!m) continue;
+        for (const k in m) { const t = m[k]; if (t && t.isTexture && !t.isRenderTargetTexture && !seenT.has(t) && !UP.done.has(t)) { seenT.add(t); UP.done.add(t); texs.push(t); } }
+      }
+      if ((++walked & 1023) === 1023 && late()) yield 0;
+    }
+    let sent = 0, total = 0;
+    const draw = function (list) {
+      while (U.pool.length < list.length) {
+        const m = new THREE.Mesh(undefined, U.mat);
+        m.frustumCulled = false; m.matrixAutoUpdate = false;
+        U.pool.push(m); U.scene.add(m);
+      }
+      for (let i = 0; i < U.pool.length; i++) { const m = U.pool[i]; m.visible = i < list.length; if (i < list.length) m.geometry = list[i]; }
+      // (an empty draw range: three files the buffers and the index, then
+      // finds nothing to draw; the stand-ins cost no vertex work at all)
+      const counts = list.map(function (g) { const c = g.drawRange.count; g.drawRange.count = 0; return c; });
+      const prev = r.getRenderTarget(), ac = r.autoClear, sm = r.shadowMap ? r.shadowMap.autoUpdate : false;
+      try {
+        r.autoClear = false;
+        if (r.shadowMap) r.shadowMap.autoUpdate = false;
+        r.setRenderTarget(U.rt);
+        r.render(U.scene, U.cam);
+      } catch (e) { /* a geometry three cannot draw: it uploads on its own first draw, as before */ }
+      finally {
+        r.setRenderTarget(prev); r.autoClear = ac;
+        if (r.shadowMap) r.shadowMap.autoUpdate = sm;
+        for (let i = 0; i < list.length; i++) list[i].drawRange.count = counts[i];
+        // (the stand-ins let go: a disposed island's buffers are not kept alive here)
+        for (let i = 0; i < U.pool.length; i++) { U.pool[i].geometry = undefined; U.pool[i].visible = false; }
+      }
+    };
+    let batch = [];
+    for (let i = 0; i < geos.length; i++) {
+      const g = geos[i];
+      if (g.attributes.position.count < 1) continue;
+      batch.push(g);
+      const b = geoBytes(g);
+      sent += b; total += b;
+      if (batch.length >= BATCH || sent >= limit || late()) { draw(batch); batch = []; if (sent >= limit || late()) { sent = 0; yield 0; } }
+    }
+    if (batch.length) { draw(batch); batch = []; }
+    for (let i = 0; i < texs.length; i++) {
+      const t = texs[i];
+      if (!r.initTexture) break;
+      try { r.initTexture(t); } catch (e) {}
+      const im = t.image;
+      const b = im && im.width && im.height ? im.width * im.height * 4 : 65536;
+      sent += b; total += b;
+      if (sent >= limit || late()) { sent = 0; yield 0; }
+    }
+    return total;
+  };
   /* THE WHOLE ACTIVE WORLD, NOW. What the play-start prewarm above walks on
      the first playing frame (hidden FX pools, the viewmodel, jewellery, the
      ped instancing pools...) was compiled in that frame's render, a few

@@ -108,7 +108,7 @@
      ====================================================================== */
   const WALLS = [0xeadfc6, 0xe9d2ad, 0xd8e1dc, 0xf1e6d2, 0xe6cfc1];
   const TRIMS = [0x2f6f73, 0x8a2f2f, 0x2c4a6e, 0x5d7f35, 0x9a6a2a];
-  function motel(l, ctx) {
+  function* motel(l, ctx) {
     const m = l.motel;
     if (!m || !CBZ.islandFit) return null;
     const W = l.w, D = l.d;
@@ -127,6 +127,7 @@
     // the kerb of the walk along the car park
     K.lbox((xo0 + xe) / 2, FY0 - 0.06, zb0 + 0.06, xe - xo0, 0.14, 0.14, 0xc9c5bb);
 
+    if (late()) yield 0;
     // ---- THE OFFICE (single storey, glass to the car park) --------------
     K.lbox(xo0 + T / 2, OH / 2, (zb0 + zb1) / 2, T, OH, zb1 - zb0, WALL, WS);
     K.lbox((xo0 + xr0) / 2, OH / 2, zb1 - T / 2, xr0 - xo0, OH, T, WALL, WS);
@@ -145,6 +146,7 @@
     K.lbox((xo0 + xr0) / 2, FY0 + 0.006, (zb0 + zb1) / 2, xr0 - xo0 - 2 * T, 0.012, zb1 - zb0 - 2 * T, TILE);
     K.lbox((xo0 + xr0) / 2, OH - 0.04, (zb0 + zb1) / 2, 0.6, 0.04, 0.6, 0xf6efe0, { glow: true });
 
+    if (late()) yield 0;
     // ---- THE ROOMS BLOCK -------------------------------------------------
     K.lbox((xr0 + xr1) / 2, roofY / 2, zb1 - T / 2, xr1 - xr0, roofY, T, WALL, WS);
     K.lbox(xr0, roofY / 2, (zr0 + zb1) / 2, T, roofY, zb1 - zr0, WALL, WS);
@@ -164,6 +166,7 @@
     for (let k = 0; k < 2; k++) {
       const fk = k ? f1 : FY0, ya = k ? f1 - 0.25 : 0, yb = k ? roofY : f1 - 0.25;
       for (let i = 0; i < m.rooms; i++) {
+        if (late()) yield 0;
         const rx0 = xr0 + i * m.roomW, rx1 = rx0 + m.roomW;
         const d0 = rx0 + 0.35, d1 = d0 + DW, w0 = rx0 + 1.85, w1 = rx1 - 0.45;
         wallX(K, rx0 + (i === 0 ? T / 2 : 0.075), rx1 - (i === m.rooms - 1 ? T / 2 : 0.075), zr0 + T / 2, T, ya, yb,
@@ -213,6 +216,7 @@
       }
     }
 
+    if (late()) yield 0;
     // ---- THE GALLERY: posts, the upper deck's rail --------------------
     for (let i = 0; i <= m.rooms; i++) K.lbox(xr0 + i * m.roomW, roofY / 2, zb0 + 0.12, 0.18, roofY, 0.18, RAIL, S);
     K.lbox(xr1 + 1.45, roofY / 2, zb0 + 0.12, 0.18, roofY, 0.18, RAIL, S);
@@ -226,6 +230,7 @@
     K.lbox(xr1 + 1.52, f1 + 0.55, zb0 + 1.4, 0.1, 1.1, 2.8, 0, { solid: true, noVis: true });
     for (let z = zb0 + 0.4; z < zb0 + 2.8; z += 0.5) K.lbox(xr1 + 1.52, f1 + 0.5, z, 0.035, 1.0, 0.035, RAIL);
 
+    if (late()) yield 0;
     // ---- THE STAIR: a straight flight down the end, up to the landing ----
     const n = 17, rise = (f1 - FY0) / n, go = 0.27;
     const xL = xr1 + 0.78, zt = zb0 + 2.8, zB = zt + n * go;
@@ -250,11 +255,12 @@
       K.lbox(xL + 0.6, y0 + 0.12, (z0 + z1) / 2, 0.06, 0.24 + 3 * rise, z1 - z0, 0x6d6a65);
     }
 
+    if (late()) yield 0;
     // ---- THE OFFICE'S SIGN, lit over its door ----------------------------
     const T0 = CBZ.islandFit.text(["OFFICE"], { bg: "#1d2a36", fg: "#ffe6a8", w: 256, h: 64 });
     if (T0) CBZ.islandFit.panel(b, ctx.root, (dx0 + dx1) / 2, FY0 + 2.75, zb0 - 0.66, 1.5, 0.38, Math.PI, T0, true);
 
-    K.flush();
+    yield* K.flushSteps();
     b.colliders.push.apply(b.colliders, K.cols);
     b.floorTop = b.gy + FY0;
     b.interior = {
@@ -314,7 +320,7 @@
      ====================================================================== */
   const USED = ["Kotori Sprout", "Kotori Pip", "Bison Vista", "Bison Hauler", "Bison Rampart", "Bison Frontier", "Kotori Kaze", "Metro Cab"];
   const FADED = [0xb9b2a6, 0x8c8f8a, 0x6f7f8c, 0x9b6b5a, 0x7d8a6c, 0xc8c2ad, 0x5f6670, 0xa89a7e, 0x7b6d8a, 0xd2cbbb];
-  function carlot(l, ctx) {
+  function* carlot(l, ctx) {
     if (!CBZ.islandFit) return null;
     const W = l.w, D = l.d, zf = -D / 2, TOP = 0.08;
     const CONC = 0xb7b2a6, KERB = 0xd0ccc2;
@@ -331,6 +337,7 @@
     for (let x = -W / 2 + 4; x < W / 2; x += 4) K.lbox(x, TOP + 0.002, 0, 0.03, 0.004, D - 0.4, 0x8c887f);
     for (let z = zf + 4; z < D / 2; z += 4) K.lbox(0, TOP + 0.002, z, W - 0.4, 0.004, 0.03, 0x8c887f);
 
+    if (late()) yield 0;
     // ---- THE CABIN, back corner ------------------------------------------
     const cx0 = W / 2 - 5.2, cx1 = W / 2 - 0.6, cz0 = D / 2 - 4.0, cz1 = D / 2 - 0.6;
     const T = 0.15, PL = 0.22, CH = 2.8;
@@ -353,6 +360,7 @@
       ctx.furnish("chair", host, cx0 + 0.6, PL, cz1 - 0.6, Math.PI / 2, {});
     }
 
+    if (late()) yield 0;
     // ---- THE FLAGS AND THE BUNTING -----------------------------------------
     const poles = [];
     for (let i = 0; i < 5; i++) poles.push({ x: ex1 + 0.6 + i * (W / 2 - 0.6 - ex1 - 0.6) / 4, z: zf + 0.45, h: 5.0 });
@@ -383,6 +391,7 @@
     for (let i = 0; i + 1 < 5; i++) string(poles[i], poles[i + 1]);
     string(poles[0], poles[5]); string(poles[4], poles[6]); string(poles[2], poles[5]); string(poles[2], poles[6]);
 
+    if (late()) yield 0;
     // ---- THE CARS, two rows facing the road --------------------------------
     const spots = [];
     if (ctx.makeCar) {
@@ -401,7 +410,7 @@
       }
     }
 
-    K.flush();
+    yield* K.flushSteps();
     b.colliders.push.apply(b.colliders, K.cols);
     b.floorTop = b.gy + PL;
     b.interior = { kind: "carlot", x0: cx0 + T, x1: cx1 - T, z0: cz0 + T, z1: cz1 - T,
@@ -413,13 +422,22 @@
     return b;
   }
 
-  function build(l, ctx) {
+  // (steps: the same build as a generator on the island build's slice clock,
+  // world/disaster_arena.js; build runs it to the end)
+  function late() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
+  function* steps(l, ctx) {
     if (!l || !ctx || !ctx.root) return null;
     try {
-      if (l.kind === "motel") return motel(l, ctx);
-      if (l.kind === "carlot") return carlot(l, ctx);
+      if (l.kind === "motel") return yield* motel(l, ctx);
+      if (l.kind === "carlot") return yield* carlot(l, ctx);
     } catch (e) { console.error("[island lots " + l.kind + "]", e); }
     return null;
   }
-  CBZ.islandLots = { build: build };
+  function build(l, ctx) {
+    const it = steps(l, ctx);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  }
+  CBZ.islandLots = { build: build, steps: steps };
 })();

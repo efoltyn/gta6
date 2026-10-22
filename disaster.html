@@ -537,7 +537,7 @@ document.body.appendChild(b);}}catch(e){}})();
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=peak1014"></script>
 <script src="src/world/materials.js?v=nostep1013"></script>
-<script src="src/world/fuel_station.js?v=mem1014"></script>
+<script src="src/world/fuel_station.js?v=stutter1022"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
@@ -980,14 +980,14 @@ document.body.appendChild(b);}}catch(e){}})();
      world/island_building.js is each building's stairs, landings, slabs and
      roof as data (node-checkable by tools/island-stairs-check.mjs); the
      builder lays exactly what it says, so it loads first. -->
-<script src="src/world/island_roads.js?v=isleleak1022"></script>
+<script src="src/world/island_roads.js?v=stutter1022"></script>
 <script src="src/world/island_plan.js?v=civic1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=isleleak1022"></script>
-<script src="src/world/island_dressing.js?v=lampglow1022"></script>
+<script src="src/world/disaster_arena.js?v=stutter1022"></script>
+<script src="src/world/island_dressing.js?v=stutter1022"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
-<script src="src/world/island_venue.js?v=isleleak1022"></script>
+<script src="src/world/island_venue.js?v=stutter1022"></script>
 <script src="src/world/island_night.js?v=lampglow1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
 <script src="src/entities/survivorbot.js?v=people1022"></script>
@@ -1126,13 +1126,13 @@ document.body.appendChild(b);}}catch(e){}})();
      the-hole rects, the facade scan + cut, the no-shared-plane pass and the
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
-<script src="src/city/facade_openings.js?v=isles1023"></script>
+<script src="src/city/facade_openings.js?v=stutter1022"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
      govcomplex.js does to this same office shell: a spec at the call site.
      Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
-<script src="src/city/facade_kit.js?v=mrg10200048"></script>
+<script src="src/city/facade_kit.js?v=stutter1022"></script>
 <script src="src/city/facades/brick.js?v=mrg10200048"></script>
 <script src="src/city/facades/stone.js?v=mrg10200048"></script>
 <script src="src/city/facades/mosque.js?v=mrg10200048"></script>
@@ -1418,7 +1418,7 @@ document.body.appendChild(b);}}catch(e){}})();
      each one and dropped behind you. archipelago_map.js is the map as data;
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
-<script src="src/world/island_lodging.js?v=fitout1022"></script>
+<script src="src/world/island_lodging.js?v=stutter1022"></script>
 <!-- THE ISLANDS' PEOPLE (world/island_people.js): Gang City's street crowd
      (city/peds.js) on the island in force, with homes and work in its
      buildings, the trades' hours and shutters, and the posted staff
@@ -1611,7 +1611,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ISLANDS' SHOPS (world/island_shops.js): every island outfitter, tailor,
      optician, phone shop and trade fitted with the store systems above, per
      building, through CBZ.islandVenue; a counter and a clerk in each. -->
-<script src="src/world/island_shops.js?v=fitout1022"></script>
+<script src="src/world/island_shops.js?v=stutter1022"></script>
 <!-- THE ISLANDS' MONEY (city/islandmoney.js): every island bank a banking hall
      with tellers, a manager's loan desk, an ATM, guards and the strongroom
      (city/bank.js cityVaultRoom); a safe or a cash box in every building with

@@ -1166,13 +1166,16 @@
      back room behind the counter with the safe in it, the rack goes on the
      partition, the counter across the room in front of it, and a shopkeeper
      takes his post behind the counter with a shotgun under it. */
-  function islandFit(b, lot, job) {
+  // (the island fit-out is a generator on the island build's slice clock, CBZ.sliceLate)
+  function lateFit() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
+  function* islandFit(b, lot, job) {
     const F = SF(), IV = CBZ.islandVenue;
     if (!F || !IV || !econ()) return null;
     const P0 = F.plan(b, { backRoom: true });
     if (!P0) return null;
     IV.clear(b, 0);
-    const shell = F.shell(P0, lot, { goods: "ammo", wall: 0xcfc8ba, trim: 0x4a4440, safeGrade: "floor", safeOf: 6000 });
+    const shell = F.shellSteps ? yield* F.shellSteps(P0, lot, { goods: "ammo", wall: 0xcfc8ba, trim: 0x4a4440, safeGrade: "floor", safeOf: 6000 }) : F.shell(P0, lot, { goods: "ammo", wall: 0xcfc8ba, trim: 0x4a4440, safeGrade: "floor", safeOf: 6000 });
+    if (lateFit()) yield 0;
     const desc = F.gunDescriptor(P0);
     const zone = F.counterZone(P0, desc);
     const where = F.whereKey(lot.island);
@@ -1191,7 +1194,8 @@
       nearDoor: P0.nearDoor, behind: zone.behind,
     });
     // the rest of a real gun shop round the counter (city/shopfloor.js)
-    if (F.dressShop) { try { F.dressShop(P0, lot, "guns", desc); } catch (e) { console.error("[gun store dress]", e); } }
+    if (lateFit()) yield 0;
+    if (F.dressShop) { try { if (F.dressShopSteps) yield* F.dressShopSteps(P0, lot, "guns", desc); else F.dressShop(P0, lot, "guns", desc); } catch (e) { console.error("[gun store dress]", e); } }
     return function () { disposeStore(S); shell.dispose(); };
   }
   if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on("guns", islandFit);

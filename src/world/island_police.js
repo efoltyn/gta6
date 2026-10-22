@@ -323,17 +323,18 @@
     }
     const mesh = B.mesh("island-police:fit");
     if (mesh) grp.add(mesh);
-    for (const c of cols) CBZ.colliders.push(c);
+    // (filed in the physics grid in place: a dirty mark here rebuilt every
+    // wall on the sea in one frame, as the island arrived)
+    if (CBZ.colliderAddMany) CBZ.colliderAddMany(cols); else for (const c of cols) CBZ.colliders.push(c);
     S.cols = cols;
     // a shut door is its collider; an open one is not
     for (const c of S.cells) setCol(c, false);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (!CBZ.colliderAddMany && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
   function setCol(cell, on) {
     const L = CBZ.colliders, i = L.indexOf(cell.collider);
-    if (on && i < 0) L.push(cell.collider);
-    else if (!on && i >= 0) L.splice(i, 1);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (on && i < 0) { if (CBZ.colliderAdd) CBZ.colliderAdd(cell.collider); else { L.push(cell.collider); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); } }
+    else if (!on && i >= 0) { if (CBZ.colliderRemove) CBZ.colliderRemove(cell.collider, i); else { L.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); } }
   }
 
   /* ---- THE STREET IN FRONT ----------------------------------------------- */
@@ -579,10 +580,13 @@
   function dropStation(S) {
     if (!S) return;
     if (S.cols && S.cols.length) {
-      const live = S.cols.filter(function (c) { return CBZ.colliders.indexOf(c) >= 0; });
-      if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(live);
-      else for (const c of live) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      // (colliderRemoveMany takes out what is there and keeps the grid; the
+      // old indexOf per collider was a walk of every wall on the sea each)
+      if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(S.cols);
+      else {
+        for (const c of S.cols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      }
     }
     S.cols = [];
     for (const bay of S.bays) bay.car = null;

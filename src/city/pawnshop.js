@@ -897,13 +897,16 @@
   }
 
   /* ---- THE ISLANDS: one pawn shop per building (CBZ.islandVenue "pawn") --- */
-  function islandFit(b, lot, job) {
+  // (the island fit-out is a generator on the island build's slice clock, CBZ.sliceLate)
+  function lateFit() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
+  function* islandFit(b, lot, job) {
     const F = SF(), IV = CBZ.islandVenue, K = CBZ.storeFixtureKit;
     if (!F || !IV || !K || !econ()) return null;
     const P0 = F.plan(b, { backRoom: true });
     if (!P0) return null;
     IV.clear(b, 0);
-    const shell = F.shell(P0, lot, { goods: "boxes", wall: 0xd6cdb8, trim: 0x5a4a38, safeGrade: "office", safeOf: 12000 });
+    const shell = F.shellSteps ? yield* F.shellSteps(P0, lot, { goods: "boxes", wall: 0xd6cdb8, trim: 0x5a4a38, safeGrade: "office", safeOf: 12000 }) : F.shell(P0, lot, { goods: "boxes", wall: 0xd6cdb8, trim: 0x5a4a38, safeGrade: "office", safeOf: 12000 });
+    if (lateFit()) yield 0;
     const gd = F.gunDescriptor(P0);                         // the same counter line as the gun shop
     const zone = F.counterZone(P0, gd);
     const c = P0.cust, wp = P0.w(P0.xc, P0.wallFace);
@@ -917,7 +920,8 @@
       inStore: function (x, z) { return P0.inside(x, z, 0.4); }, nearDoor: P0.nearDoor, behind: zone.behind,
     });
     // the rest of a real pawn shop round the counter (city/shopfloor.js)
-    if (F.dressShop) { try { F.dressShop(P0, lot, "pawn", gd); } catch (e) { console.error("[pawn shop dress]", e); } }
+    if (lateFit()) yield 0;
+    if (F.dressShop) { try { if (F.dressShopSteps) yield* F.dressShopSteps(P0, lot, "pawn", gd); else F.dressShop(P0, lot, "pawn", gd); } catch (e) { console.error("[pawn shop dress]", e); } }
     return function () { disposeStore(S); shell.dispose(); };
   }
   if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on("pawn", islandFit);

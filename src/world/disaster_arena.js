@@ -228,6 +228,252 @@
   let _s = 1337;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
 
+  /* THE SLICE CLOCK. A streamed island is built a slice at a time
+     (CBZ.islandBuild's job.step: every gen.next() is one slice), and a slice
+     used to end only where the code had a `yield`, so a slice was as long as
+     whatever ran between two of them: one wall's window cut, one farm's
+     fence, a row of the land grid (16-76 ms in a node dry run, which is a
+     phone's speed). Now the heavy loops ask the clock instead: sliceLate()
+     is true once the running slice has had SLICE_Q ms, and they yield there.
+     A slice is then ~1 ms whatever the work is. CBZ.sliceBegin() starts a
+     slice (job.step does; so does every other stepped piece of streaming
+     work: the venue fit-outs, the archipelago's chores). Yields never change
+     what is built, only when: the disaster island, built in one go, is the
+     same island to the byte. */
+  const SLICE_Q = 1.0;
+  let sliceT0 = -1e9, syncN = 0;
+  CBZ.sliceBegin = function () { sliceT0 = performance.now(); };
+  CBZ.sliceLate = function () { return syncN === 0 && performance.now() - sliceT0 > SLICE_Q; };
+  /* CBZ.sliceSync(fn): fn runs stepped work to the end in one go (a boot's
+     spawn island, a fit-out registered while islands stand): the clock never
+     calls for a yield inside it, so nothing pays a step's bookkeeping (the
+     venue census) per yield for a run that never hands the frame back. */
+  CBZ.sliceSync = function (fn) { syncN++; try { return fn(); } finally { syncN--; } };
+  const late = CBZ.sliceLate;
+  function noop() {}
+  const MAP_MEAN = new WeakMap();      // a surface map -> its mean linear colour (islandSteps mapMean)
+
+  /* MERGED BOXES, WRITTEN STRAIGHT INTO THEIR ARRAYS. What
+     BufferGeometryUtils.mergeBufferGeometries(boxes.map(b => BoxGeometry(w, h, d)
+     less its uv, translated to (x, y, z))) returns, without the boxes: a
+     facade's trim is thousands of boxes a building, and making a BoxGeometry
+     each (six buildPlane calls into JS arrays, three typed copies, a
+     translate through Vector3 and a normal-matrix inverse) and then copying
+     them all again into the merge was most of a building's build. Same
+     arithmetic as three r128 (buildPlane's expressions, float32 storage,
+     Vector3.applyMatrix4's translation on the stored values, the normals of a
+     real translated BoxGeometry, the index type rule), so the geometry is the
+     same to the bit; city/buildings.js mergedBoxGeometry is the city's lazy,
+     uv-carrying twin of the same thing. A generator: it yields on the slice
+     clock. flat: [x, y, z, w, h, d, ...], n boxes. */
+  const _bxNrm = new Map();
+  let _bxIdx = null, _bxUv = null;
+  function boxNormals(bw, bh, bd) {
+    const key = (bw > 0 ? 1 : 0) | (bh > 0 ? 2 : 0) | (bd > 0 ? 4 : 0) | (-bw > 0 ? 8 : 0) | (-bh > 0 ? 16 : 0) | (-bd > 0 ? 32 : 0);
+    let n = _bxNrm.get(key);
+    if (!n) {
+      const g = new THREE.BoxGeometry(bw, bh, bd);
+      g.translate(1.5, -2.25, 3.125);
+      n = new Float32Array(g.attributes.normal.array);
+      if (!_bxIdx) { _bxIdx = Array.from(g.index.array); _bxUv = new Float32Array(g.attributes.uv.array); }
+      _bxNrm.set(key, n);
+      g.dispose();
+    }
+    return n;
+  }
+  const _bxp = new Float64Array(3);
+  function boxPlane(P, o, u, v, w, udir, vdir, width, height, depth) {
+    const segmentWidth = width / 1, segmentHeight = height / 1;
+    const widthHalf = width / 2, heightHalf = height / 2, depthHalf = depth / 2;
+    for (let iy = 0; iy < 2; iy++) {
+      const y = iy * segmentHeight - heightHalf;
+      for (let ix = 0; ix < 2; ix++) {
+        const x = ix * segmentWidth - widthHalf;
+        _bxp[u] = x * udir; _bxp[v] = y * vdir; _bxp[w] = depthHalf;
+        P[o] = _bxp[0]; P[o + 1] = _bxp[1]; P[o + 2] = _bxp[2];
+        o += 3;
+      }
+    }
+    return o;
+  }
+  function* boxMergeSteps(flat, n, withUv) {
+    const nv = n * 24;
+    const P = new Float32Array(n * 72), N = new Float32Array(n * 72), U = withUv ? new Float32Array(n * 48) : null;
+    const I = nv - 1 > 65535 ? new Uint32Array(n * 36) : new Uint16Array(n * 36);
+    boxNormals(flat[3], flat[4], flat[5]);
+    const ti = _bxIdx;
+    for (let b = 0; b < n; b++) {
+      if ((b & 63) === 63 && late()) yield 0;
+      const k = b * 6, lx = flat[k], ly = flat[k + 1], lz = flat[k + 2];
+      const bw = flat[k + 3], bh = flat[k + 4], bd = flat[k + 5];
+      const o0 = b * 72;
+      let o = o0;
+      o = boxPlane(P, o, 2, 1, 0, -1, -1, bd, bh, bw);     // px
+      o = boxPlane(P, o, 2, 1, 0, 1, -1, bd, bh, -bw);     // nx
+      o = boxPlane(P, o, 0, 2, 1, 1, 1, bw, bd, bh);       // py
+      o = boxPlane(P, o, 0, 2, 1, 1, -1, bw, bd, -bh);     // ny
+      o = boxPlane(P, o, 0, 1, 2, 1, -1, bw, bh, bd);      // pz
+      o = boxPlane(P, o, 0, 1, 2, -1, -1, bw, bh, -bd);    // nz
+      for (let i = o0; i < o; i += 3) {
+        const x = P[i], y = P[i + 1], z = P[i + 2];
+        const w = 1 / (0 * x + 0 * y + 0 * z + 1);
+        P[i] = (1 * x + 0 * y + 0 * z + lx) * w;
+        P[i + 1] = (0 * x + 1 * y + 0 * z + ly) * w;
+        P[i + 2] = (0 * x + 0 * y + 1 * z + lz) * w;
+      }
+      N.set(boxNormals(bw, bh, bd), o0);
+      if (U) U.set(_bxUv, b * 48);
+      const io = b * 36, vo = b * 24;
+      for (let j = 0; j < 36; j++) I[io + j] = ti[j] + vo;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setIndex(new THREE.BufferAttribute(I, 1));
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    if (U) g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+    return g;
+  }
+  // one box as it always was (a colour with a single box is not merged)
+  function oneBox(flat) {
+    const g = new THREE.BoxGeometry(flat[3], flat[4], flat[5]);
+    g.deleteAttribute("uv");
+    g.translate(flat[0], flat[1], flat[2]);
+    return g;
+  }
+
+  /* geometry.computeBoundingSphere(), on the slice clock: three r128's own
+     two passes (the box of the positions, its centre, the farthest vertex),
+     the same sphere. CBZ.sphereSteps(geo) for the island venue and dressing
+     files. (No morph targets on anything an island builds.) */
+  function* sphereSteps(geo, withBox) {
+    const P = geo.attributes.position;
+    if (!P || P.isGLBufferAttribute || P.isInterleavedBufferAttribute || P.itemSize !== 3 || (geo.morphAttributes && geo.morphAttributes.position)) { geo.computeBoundingSphere(); if (withBox) geo.computeBoundingBox(); return; }
+    if (geo.boundingSphere === null) geo.boundingSphere = new THREE.Sphere();
+    const a = P.array, n = P.count;
+    let minX = +Infinity, minY = +Infinity, minZ = +Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (let i = 0; i < n; i++) {
+      if ((i & 8191) === 8191 && late()) yield 0;
+      const x = a[i * 3], y = a[i * 3 + 1], z = a[i * 3 + 2];
+      if (x < minX) minX = x; if (y < minY) minY = y; if (z < minZ) minZ = z;
+      if (x > maxX) maxX = x; if (y > maxY) maxY = y; if (z > maxZ) maxZ = z;
+    }
+    // (withBox: computeBoundingBox's box too, the same min and max)
+    if (withBox) { if (geo.boundingBox === null) geo.boundingBox = new THREE.Box3(); geo.boundingBox.min.set(minX, minY, minZ); geo.boundingBox.max.set(maxX, maxY, maxZ); }
+    const C = geo.boundingSphere.center;
+    if (maxX < minX || maxY < minY || maxZ < minZ) C.set(0, 0, 0);
+    else C.set((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5);
+    const cx = C.x, cy = C.y, cz = C.z;
+    let maxR = 0;
+    for (let i = 0; i < n; i++) {
+      if ((i & 8191) === 8191 && late()) yield 0;
+      const dx = cx - a[i * 3], dy = cy - a[i * 3 + 1], dz = cz - a[i * 3 + 2];
+      maxR = Math.max(maxR, dx * dx + dy * dy + dz * dz);
+    }
+    geo.boundingSphere.radius = Math.sqrt(maxR);
+  }
+  CBZ.sphereSteps = sphereSteps;
+  // a JS array into a Float32Array (or any typed array), on the slice clock
+  function* typedSteps(arr, Ctor) {
+    const out = new (Ctor || Float32Array)(arr.length);
+    for (let i = 0; i < arr.length; ) {
+      const e = Math.min(arr.length, i + 16384);
+      for (let j = i; j < e; j++) out[j] = arr[j];
+      i = e;
+      if (i < arr.length && late()) yield 0;
+    }
+    return out;
+  }
+  CBZ.typedSteps = typedSteps;
+  // a JS index array as setIndex(array) makes it (Uint16 unless an entry
+  // passes 65535), on the slice clock
+  function* indexSteps(arr) {
+    let max = arr.length ? arr[0] : -Infinity;
+    for (let i = 1; i < arr.length; i++) { if (arr[i] > max) max = arr[i]; if ((i & 32767) === 32767 && late()) yield 0; }
+    return new THREE.BufferAttribute(yield* typedSteps(arr, max > 65535 ? Uint32Array : Uint16Array), 1);
+  }
+
+  /* BufferGeometryUtils.mergeBufferGeometries(geos, false), on the slice
+     clock: the same attributes in the same order, the index offset the same
+     way and typed by the same rule (Uint16 unless an entry passes 65535).
+     Anything unusual (morph targets, interleaved or mismatched attributes)
+     goes to three's own merge. (Its mergedUserData, a list of every part's
+     empty userData that nothing reads, is not kept.) */
+  function* mergeSteps(geos) {
+    const BGU = THREE.BufferGeometryUtils;
+    if (!geos.length) return null;
+    const g0 = geos[0], indexed = g0.index !== null, names = Object.keys(g0.attributes);
+    let odd = false;
+    for (const g of geos) {
+      if ((g.index !== null) !== indexed || (g.morphAttributes && Object.keys(g.morphAttributes).length)) { odd = true; break; }
+      if (Object.keys(g.attributes).length !== names.length) { odd = true; break; }
+      for (const k of names) {
+        const a = g.attributes[k], a0 = g0.attributes[k];
+        if (!a || a.isInterleavedBufferAttribute || a0.isInterleavedBufferAttribute || a.itemSize !== a0.itemSize || a.normalized !== a0.normalized || a.array.constructor !== a0.array.constructor) { odd = true; break; }
+      }
+      if (odd) break;
+    }
+    if (odd) return BGU.mergeBufferGeometries(geos, false);
+    const out = new THREE.BufferGeometry();
+    if (indexed) {
+      let n = 0;
+      for (const g of geos) n += g.index.count;
+      const tmp = new Uint32Array(n);
+      let k = 0, off = 0, max = -Infinity;
+      for (const g of geos) {
+        const I = g.index;
+        for (let j = 0; j < I.count; j++) { const v = I.getX(j) + off; tmp[k++] = v; if (v > max) max = v; }
+        off += g.attributes.position.count;
+        if (late()) yield 0;
+      }
+      out.setIndex(new THREE.BufferAttribute(max > 65535 ? tmp : new Uint16Array(tmp), 1));
+    }
+    for (const k of names) {
+      const a0 = g0.attributes[k];
+      let len = 0;
+      for (const g of geos) len += g.attributes[k].array.length;
+      const arr = new a0.array.constructor(len);
+      let o = 0;
+      for (const g of geos) { const src = g.attributes[k].array; arr.set(src, o); o += src.length; if (late()) yield 0; }
+      out.setAttribute(k, new THREE.BufferAttribute(arr, a0.itemSize, a0.normalized));
+    }
+    return out;
+  }
+
+  /* geometry.computeVertexNormals(), on the slice clock: three r128's own
+     loop (float32 accumulation in the normal attribute, cb x ab per face,
+     then normalizeNormals), the same numbers. Indexed geometry only (the
+     non-indexed case falls back to three's). */
+  function* vertexNormalsSteps(geo) {
+    const P = geo.attributes.position, I = geo.index;
+    if (!P) return;
+    if (!I) { geo.computeVertexNormals(); return; }
+    let Nattr = geo.attributes.normal;
+    if (Nattr === undefined) { Nattr = new THREE.BufferAttribute(new Float32Array(P.count * 3), 3); geo.setAttribute("normal", Nattr); }
+    else for (let i = 0, il = Nattr.count; i < il; i++) Nattr.setXYZ(i, 0, 0, 0);
+    const pa = P.array, na = Nattr.array, ia = I.array, ic = I.count;
+    if (P.itemSize !== 3 || P.isInterleavedBufferAttribute || Nattr.itemSize !== 3 || na.length < P.count * 3) { geo.computeVertexNormals(); return; }
+    let w = 0;
+    for (let i = 0; i < ic; i += 3) {
+      if (++w === 2048) { w = 0; if (late()) yield 0; }
+      const a = ia[i] * 3, b = ia[i + 1] * 3, c = ia[i + 2] * 3;
+      const bx = pa[b], by = pa[b + 1], bz = pa[b + 2];
+      const cbx = pa[c] - bx, cby = pa[c + 1] - by, cbz = pa[c + 2] - bz;
+      const abx = pa[a] - bx, aby = pa[a + 1] - by, abz = pa[a + 2] - bz;
+      const nx = cby * abz - cbz * aby, ny = cbz * abx - cbx * abz, nz = cbx * aby - cby * abx;
+      na[a] = na[a] + nx; na[a + 1] = na[a + 1] + ny; na[a + 2] = na[a + 2] + nz;
+      na[b] = na[b] + nx; na[b + 1] = na[b + 1] + ny; na[b + 2] = na[b + 2] + nz;
+      na[c] = na[c] + nx; na[c + 1] = na[c + 1] + ny; na[c + 2] = na[c + 2] + nz;
+    }
+    for (let i = 0, il = Nattr.count; i < il; i++) {
+      if ((i & 4095) === 4095 && late()) yield 0;
+      const q = i * 3, x = na[q], y = na[q + 1], z = na[q + 2];
+      const s = 1 / (Math.sqrt(x * x + y * y + z * z) || 1);
+      na[q] = x * s; na[q + 1] = y * s; na[q + 2] = z * s;
+    }
+    Nattr.needsUpdate = true;
+  }
+  CBZ.normalsSteps = vertexNormalsSteps;
+
   // THE BUILDING'S NUMBERS AND ITS PLAN (world/island_building.js): floor
   // height, wall, the stair strip down the -x wall, the street door; the
   // stairs, landings, slabs, guards and roof every makeBuilding lays
@@ -514,10 +760,11 @@
        scan works in the shell's local axes (t = local x on faces 0/1, z on
        2/3); this file's faces run u = t * tx (or tz). */
     const FOP = CBZ.facadeOpenings;
-    const found = FOP ? FOP.scan(o.recs, { w: o.w, d: o.d, storeys: o.storeys, fh: o.fh, doorSide: 0,
-      doorHalf: o.doorHalf, tower: !!o.tower, isGlass: o.isGlass || isGlassHex }) : [];
+    const scanO = { w: o.w, d: o.d, storeys: o.storeys, fh: o.fh, doorSide: 0,
+      doorHalf: o.doorHalf, tower: !!o.tower, isGlass: o.isGlass || isGlassHex };
+    const found = !FOP ? [] : FOP.scanSteps ? yield* FOP.scanSteps(o.recs, scanO, late) : FOP.scan(o.recs, scanO);
     for (const op of found) {
-      yield 0;
+      if (late()) yield 0;
       const f = faces[op.s];
       const sg = f.horiz ? f.tx : f.tz;
       const ua = op.t0 * sg, ub = op.t1 * sg;
@@ -571,11 +818,13 @@
     // it where it lies in the wall's plane, forced openings through every
     // layer laid against the wall)
     if (holes.length && FOP) {
-      FOP.cutRecs(o.recs, holes.map(function (h) { return { s: h.s, t0: h.a0, t1: h.a1, y0: h.y0, y1: h.y1, forced: h.forced, reach: h.reach }; }),
-        { w: o.w, d: o.d, wt: WT_, isGlass: o.isGlass || isGlassHex });
-      if (o.walls) for (const wl of o.walls) cutWall(wl, holes.filter(function (h) { return h.s === wl.face; }));
+      const cutH = holes.map(function (h) { return { s: h.s, t0: h.a0, t1: h.a1, y0: h.y0, y1: h.y1, forced: h.forced, reach: h.reach }; });
+      const cutO = { w: o.w, d: o.d, wt: WT_, isGlass: o.isGlass || isGlassHex };
+      if (FOP.cutRecsSteps) yield* FOP.cutRecsSteps(o.recs, cutH, cutO, late); else FOP.cutRecs(o.recs, cutH, cutO);
+      if (late()) yield 0;
+      if (o.walls) for (const wl of o.walls) { yield* cutWall(wl, holes.filter(function (h) { return h.s === wl.face; })); if (late()) yield 0; }
     }
-    for (const fr of frames) o.dbox(fr[0], fr[1], fr[2], fr[3], fr[4], fr[5], fr[6]);
+    for (let i = 0; i < frames.length; i++) { const fr = frames[i]; o.dbox(fr[0], fr[1], fr[2], fr[3], fr[4], fr[5], fr[6]); if ((i & 127) === 127 && late()) yield 0; }
 
     // ---- merge each kind into one mesh ----------------------------------
     const meshes = {};
@@ -584,11 +833,11 @@
       const k = kinds[K];
       if (!k.i.length) continue;
       const g2 = new THREE_.BufferGeometry();
-      g2.setAttribute("position", new THREE_.Float32BufferAttribute(k.p, 3));
-      g2.setAttribute("normal", new THREE_.Float32BufferAttribute(k.n, 3));
-      g2.setAttribute("color", new THREE_.Float32BufferAttribute(k.c, 3));
-      g2.setIndex(k.i);
-      g2.computeBoundingSphere();
+      g2.setAttribute("position", new THREE_.BufferAttribute(yield* typedSteps(k.p), 3));
+      g2.setAttribute("normal", new THREE_.BufferAttribute(yield* typedSteps(k.n), 3));
+      g2.setAttribute("color", new THREE_.BufferAttribute(yield* typedSteps(k.c), 3));
+      g2.setIndex(yield* indexSteps(k.i));
+      yield* sphereSteps(g2);
       const m = new THREE_.Mesh(g2, G[K]);
       m.castShadow = false; m.receiveShadow = K === "room";
       if (K === "glass") m.renderOrder = 2;
@@ -597,7 +846,7 @@
       meshes[K] = { mesh: m, orig: Float32Array.from(k.p) };
     }
     for (const rec of panes) {
-      yield 0;
+      if (late()) yield 0;
       // the pane's own glass material: what its shards are made of
       rec.mat = meshes.glass ? meshes.glass.mesh.material : null;
       rec.hide = function () {
@@ -633,7 +882,7 @@
      are real faces and the sun comes in through them. The collider is left
      whole on purpose: glass is not a doorway. geometry.parameters is kept as
      the original box's, because the tsunami picks walls to tear off by it. */
-  function cutWall(wl, hs) {
+  function* cutWall(wl, hs) {
     if (!hs.length || !wl.mesh) return;
     const horiz = wl.face < 2;
     const a0 = horiz ? wl.lx - wl.bw / 2 : wl.lz - wl.bd / 2, a1 = horiz ? wl.lx + wl.bw / 2 : wl.lz + wl.bd / 2;
@@ -645,20 +894,18 @@
       return horiz ? [r[0], r[1], r[2], r[3], wl.lz - wl.bd / 2, wl.lz + wl.bd / 2]
                    : [wl.lx - wl.bw / 2, wl.lx + wl.bw / 2, r[2], r[3], r[0], r[1]];
     });
-    const geos = [];
+    const flat = [];
     const th = horiz ? wl.bd : wl.bw;
     for (const r of rects) {
       const ra0 = r[0], ra1 = r[1], ry0 = r[2], ry1 = r[3];
-      const g2 = horiz ? new THREE.BoxGeometry(ra1 - ra0, ry1 - ry0, th) : new THREE.BoxGeometry(th, ry1 - ry0, ra1 - ra0);
       const ca = (ra0 + ra1) / 2 - (horiz ? wl.lx : wl.lz), cy = (ry0 + ry1) / 2 - wl.ly;
-      if (horiz) g2.translate(ca, cy, 0); else g2.translate(0, cy, ca);
-      geos.push(g2);
+      if (horiz) flat.push(ca, cy, 0, ra1 - ra0, ry1 - ry0, th);
+      else flat.push(0, cy, ca, th, ry1 - ry0, ra1 - ra0);
     }
-    const BGU = THREE.BufferGeometryUtils;
-    if (!geos.length || !BGU || !BGU.mergeBufferGeometries) return;
-    const merged = BGU.mergeBufferGeometries(geos, false);
-    for (const g2 of geos) g2.dispose();
-    if (!merged) return;
+    if (!flat.length) return;
+    if (late()) yield 0;
+    // (a BoxGeometry has a uv; the merge kept it)
+    const merged = yield* boxMergeSteps(flat, flat.length / 6, true);
     merged.parameters = { width: wl.bw, height: wl.bh, depth: wl.bd };
     wl.mesh.geometry.dispose();
     wl.mesh.geometry = merged;
@@ -713,12 +960,9 @@
     }
     // the shell's own merge-able pieces (treads, slabs, landings) join the
     // deco merge, so they cost one draw call per colour
-    if (o.shellMerge) for (const it of o.shellMerge) {
-      const g2 = new THREE.BoxGeometry(it[3], it[4], it[5]);
-      g2.deleteAttribute("uv");
-      g2.translate(it[0], it[1], it[2]);
-      it.push(g2);
-    }
+    // (marked taken now: flushLateShell lays only the pieces queued after this)
+    const shellNow = o.shellMerge ? o.shellMerge.length : 0;
+    for (let i = 0; i < shellNow; i++) o.shellMerge[i].push(null);
     function addMesh(geo, col, lx, ly, lz, emissive) {
       const m = new THREE.Mesh(geo, emissive ? mat(col, { emissive: col, ei: 0.8 }) : finishMat(col, gy));
       m.position.set(lx, ly, lz);
@@ -790,20 +1034,15 @@
     });
     yield 0;
 
-    // ---- flush: one mesh per colour ----
-    const BGU = THREE.BufferGeometryUtils;
-    function flush(geos, m2, cast) {
-      if (!geos.length) return null;
-      const merged = geos.length > 1 && BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(geos) : null;
-      if (merged) for (const g2 of geos) g2.dispose();
-      const list = merged ? [merged] : geos;
-      let last = null;
-      for (const g2 of list) {
-        last = new THREE.Mesh(g2, m2);
-        last.castShadow = !!cast; last.receiveShadow = true;
-        group.add(last);
-      }
-      return last;
+    // ---- flush: one mesh per colour (flat [x,y,z,w,h,d,...] boxes) ----
+    function* flushBoxes(flat, m2, cast) {
+      const n = flat.length / 6;
+      if (!n) return null;
+      const g2 = n === 1 ? oneBox(flat) : yield* boxMergeSteps(flat, n);
+      const m = new THREE.Mesh(g2, m2);
+      m.castShadow = !!cast; m.receiveShadow = true;
+      group.add(m);
+      return m;
     }
     /* NO TWO SURFACES IN ONE PLANE (city/facade_openings.js). The island used
        to settle every tie between two colours' coplanar faces with a
@@ -817,39 +1056,39 @@
         if (wl.pieces) for (const pc of wl.pieces) fixed.push(pc);
         else fixed.push([wl.lx - wl.bw / 2, wl.lx + wl.bw / 2, wl.ly - wl.bh / 2, wl.ly + wl.bh / 2, wl.lz - wl.bd / 2, wl.lz + wl.bd / 2]);
       }
-      if (CBZ.facadeOpenings.resolveCoplanarSteps) yield* CBZ.facadeOpenings.resolveCoplanarSteps(recs, fixed);
+      if (CBZ.facadeOpenings.resolveCoplanarSteps) yield* CBZ.facadeOpenings.resolveCoplanarSteps(recs, fixed, undefined, late);
       else CBZ.facadeOpenings.resolveCoplanar(recs, fixed);
       yield 0;
     }
+    // (no uv: the finish shader works in world space; no map ever reads these)
     const byColour = new Map();
-    let nBox = 0;
-    for (const r of recs) {
-      if (++nBox % 300 === 0) yield 0;
-      const g2 = new THREE.BoxGeometry(r[3], r[4], r[5]);
-      g2.deleteAttribute("uv");      // the finish shader works in world space; no map ever reads these
-      g2.translate(r[0], r[1], r[2]);
+    for (let i = 0; i < recs.length; i++) {
+      if ((i & 255) === 255 && late()) yield 0;
+      const r = recs[i];
       let list = byColour.get(r[6]);
       if (!list) { list = []; byColour.set(r[6], list); }
-      list.push(g2);
+      list.push(r[0], r[1], r[2], r[3], r[4], r[5]);
     }
     recs.length = 0;
 
     for (const col of colOrder) {
-      const geos = byColour.get(col);
-      if (geos) { flush(geos, isGlassHex(col) ? glassBoxMat(col) : finishMat(col, gy), false); yield 0; }
+      const L = byColour.get(col);
+      if (L) { yield* flushBoxes(L, isGlassHex(col) ? glassBoxMat(col) : finishMat(col, gy), false); yield 0; }
     }
-    if (o.shellMerge && o.shellMerge.length) {
+    if (shellNow) {
       const byCol = new Map();
-      for (const it of o.shellMerge) {
+      for (let i = 0; i < shellNow; i++) {
+        const it = o.shellMerge[i];
         const k = it[6] + (it[7] ? "|los" : "");
         let b = byCol.get(k);
-        if (!b) { b = { col: it[6], los: it[7], geos: [] }; byCol.set(k, b); }
-        b.geos.push(it[8]);
+        if (!b) { b = { col: it[6], los: it[7], flat: [] }; byCol.set(k, b); }
+        b.flat.push(it[0], it[1], it[2], it[3], it[4], it[5]);
       }
-      byCol.forEach(function (b) {
-        const m = flush(b.geos, finishMat(b.col, gy), b.los);
+      for (const b of byCol.values()) {
+        const m = yield* flushBoxes(b.flat, finishMat(b.col, gy), b.los);
         if (m && b.los) CBZ.losBlockers.push(m);
-      });
+        if (late()) yield 0;
+      }
     }
     // holes: every window opening cut through the shell (building-local,
     // {s, a0, a1, y0, y1}); crown: every box the grammar stood on the roof
@@ -860,28 +1099,25 @@
 
   /* SHELL PIECES QUEUED AFTER THE FACADE FLUSH (a tower's crown deck, a
      house's roof bulkhead): one more merged mesh per colour, same finish. */
-  function flushLateShell(group, shellMerge, gy) {
-    const late = new Map();
+  function* flushLateShell(group, shellMerge, gy) {
+    const byKey = new Map();
     for (const it of shellMerge) {
       if (it.length !== 8) continue;              // already flushed with the facade
       const k = it[6] + (it[7] ? "|los" : "");
-      let bk = late.get(k);
-      if (!bk) { bk = { col: it[6], los: it[7], geos: [] }; late.set(k, bk); }
-      const g2 = new THREE.BoxGeometry(it[3], it[4], it[5]);
-      g2.deleteAttribute("uv");
-      g2.translate(it[0], it[1], it[2]);
-      bk.geos.push(g2);
+      let bk = byKey.get(k);
+      if (!bk) { bk = { col: it[6], los: it[7], flat: [] }; byKey.set(k, bk); }
+      bk.flat.push(it[0], it[1], it[2], it[3], it[4], it[5]);
       it.push(null);                               // flushed: never twice
     }
-    const BGU = THREE.BufferGeometryUtils;
-    late.forEach(function (bk) {
-      const geo = bk.geos.length > 1 && BGU ? BGU.mergeBufferGeometries(bk.geos) : bk.geos[0];
-      if (geo !== bk.geos[0]) for (const g2 of bk.geos) g2.dispose();
+    for (const bk of byKey.values()) {
+      const n = bk.flat.length / 6;
+      const geo = n === 1 ? oneBox(bk.flat) : yield* boxMergeSteps(bk.flat, n);
       const m = new THREE.Mesh(geo, finishMat(bk.col, gy));
       m.castShadow = true; m.receiveShadow = true;
       group.add(m);
       if (bk.los) CBZ.losBlockers.push(m);
-    });
+      if (late()) yield 0;
+    }
   }
 
   /* THE BUILD IS ONE SYNCHRONOUS BLOCK, SO IT REPORTS ON ITSELF.
@@ -980,16 +1216,33 @@
        off (tier 0), surfaceMaps answers null, the colour stays white and the
        vertex colours alone are still the right island. */
     const h01g = CBZ.hash01 || function () { return 0.5; };
+    /* (a direct-mapped memo of lattice CELLS: neighbouring vertices of the
+       land grid, the beach ring and the volcano ask the same cell's four
+       corners over and over, twelve squirrel rounds each time. A slot keeps
+       the last cell it saw and its corners: the same values, asked once.
+       Per build, so a changed world seed can never answer from it.) */
+    const VN = 8192, vnIx = new Int32Array(VN), vnIz = new Int32Array(VN), vnS = new Int32Array(VN), vnOk = new Uint8Array(VN);
+    const vnC = new Float64Array(VN * 4);
     function vnoise(x, z, cell, salt) {
       const gx = x / cell, gz = z / cell, ix = Math.floor(gx), iz = Math.floor(gz);
       const fx = gx - ix, fz = gz - iz, ux = fx * fx * (3 - 2 * fx), uz = fz * fz * (3 - 2 * fz);
-      const a = h01g(ix, iz, salt), b = h01g(ix + 1, iz, salt), c = h01g(ix, iz + 1, salt), d = h01g(ix + 1, iz + 1, salt);
+      let a, b, c, d;
+      const ok = ix === (ix | 0) && iz === (iz | 0);
+      const slot = ok ? (Math.imul(ix, 73856093) ^ Math.imul(iz, 19349663) ^ Math.imul(salt | 0, 83492791)) & (VN - 1) : 0;
+      if (ok && vnOk[slot] && vnIx[slot] === ix && vnIz[slot] === iz && vnS[slot] === (salt | 0)) {
+        const q = slot * 4; a = vnC[q]; b = vnC[q + 1]; c = vnC[q + 2]; d = vnC[q + 3];
+      } else {
+        a = h01g(ix, iz, salt); b = h01g(ix + 1, iz, salt); c = h01g(ix, iz + 1, salt); d = h01g(ix + 1, iz + 1, salt);
+        if (ok && salt === (salt | 0)) { vnOk[slot] = 1; vnIx[slot] = ix; vnIz[slot] = iz; vnS[slot] = salt; const q = slot * 4; vnC[q] = a; vnC[q + 1] = b; vnC[q + 2] = c; vnC[q + 3] = d; }
+      }
       return a + (b - a) * ux + (c - a) * uz + (a - b - c + d) * ux * uz;
     }
     function fbm2(x, z, cell, salt) {
       return vnoise(x, z, cell, salt) * 0.6 + vnoise(x, z, cell * 0.43, salt + 7) * 0.28 + vnoise(x, z, cell * 0.17, salt + 13) * 0.12;
     }
-    const _mapMean = new Map();
+    // (the session's: every island skins with the same shared maps, and a
+    // map's mean is a read of its whole canvas)
+    const _mapMean = MAP_MEAN;
     function mapMean(tex) {
       if (_mapMean.has(tex)) return _mapMean.get(tex);
       let out = [1, 1, 1];
@@ -1001,7 +1254,8 @@
         for (let i = 0; i < d.length; i += 4 * 7) { r += s2l(d[i]); g += s2l(d[i + 1]); b += s2l(d[i + 2]); n++; }
         out = [r / n, g / n, b / n];
       } catch (e) { /* headless: no canvas pixels — leave the map un-normalised */ }
-      _mapMean.set(tex, out);
+      // (a canvas already handed to the GPU and let go is 1x1: not its colour)
+      if (!(tex.image && tex.image.width <= 1)) _mapMean.set(tex, out);
       return out;
     }
     // a Lambert that wears `surface`'s colour map, normalised to mean 1
@@ -1020,6 +1274,16 @@
       const p = g.attributes.position, uv = new Float32Array(p.count * 2);
       const w = { x: 0, z: 0 };
       for (let i = 0; i < p.count; i++) {
+        toWorld(p, i, w);
+        uv[i * 2] = (w.x + ox) / tile; uv[i * 2 + 1] = (w.z + oz) / tile;
+      }
+      g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    }
+    function* worldUVSteps(g, tile, ox, oz, toWorld) {
+      const p = g.attributes.position, uv = new Float32Array(p.count * 2);
+      const w = { x: 0, z: 0 };
+      for (let i = 0; i < p.count; i++) {
+        if ((i & 4095) === 4095 && late()) yield 0;
         toWorld(p, i, w);
         uv[i * 2] = (w.x + ox) / tile; uv[i * 2 + 1] = (w.z + oz) / tile;
       }
@@ -1701,8 +1965,8 @@
       geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
       geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
       geo.setIndex(idx);
-      geo.computeVertexNormals();
-      geo.computeBoundingSphere();
+      yield* vertexNormalsSteps(geo);
+      yield* sphereSteps(geo);
       const bedMat = new THREE.MeshLambertMaterial({
         color: 0xffffff, vertexColors: true, side: THREE.DoubleSide,
       });
@@ -1926,8 +2190,8 @@
         kgeo.setAttribute("position", new THREE.BufferAttribute(kp.subarray(0, kv * 3), 3));
         kgeo.setAttribute("color", new THREE.BufferAttribute(kc.subarray(0, kv * 3), 3));
         kgeo.setIndex(kidx);
-        kgeo.computeVertexNormals();
-        kgeo.computeBoundingSphere();
+        yield* vertexNormalsSteps(kgeo);
+        yield* sphereSteps(kgeo);
         const kmat = new THREE.MeshLambertMaterial({
           color: 0xffffff, vertexColors: true, side: THREE.DoubleSide,
         });
@@ -1976,7 +2240,7 @@
       const DRY = new THREE.Color().setRGB(0.40, 0.325, 0.205), BED = new THREE.Color(0xcdbb8f);
       const c = new THREE.Color();
       for (let i = 0; i < vn; i++) {
-        if (i && i % 400 === 0) yield 0;
+        if ((i & 15) === 15 && late()) yield 0;
         const lx = sa[i * 3], ly = sa[i * 3 + 1];
         const dist = Math.hypot(lx, ly);
         const h = dist <= R ? -0.03 : coastHeightAt(dist);
@@ -1999,9 +2263,9 @@
       function ss(e0, e1, x2) { let t = (x2 - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
       sp.needsUpdate = true;
       shoreGeo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
-      shoreGeo.computeVertexNormals();
-      shoreGeo.computeBoundingSphere();
-      worldUV(shoreGeo, 2.6, cx, cz, function (pp, i, w) { w.x = pp.getX(i); w.z = -pp.getY(i); });
+      yield* vertexNormalsSteps(shoreGeo);
+      yield* sphereSteps(shoreGeo);
+      yield* worldUVSteps(shoreGeo, 2.6, cx, cz, function (pp, i, w) { w.x = pp.getX(i); w.z = -pp.getY(i); });
       const shoreMat = CBZ.groundSkin
         ? CBZ.groundSkin({ name: "survival-beach-shore", tile: { sand: 2.6 }, chroma: 1, mottle: 0.5, far: 300, sandY: [1.2, 2.4] })
         : skinMat("sand");
@@ -2056,7 +2320,8 @@
       const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), inR = new Uint8Array(nv);
       const c3 = [0, 0, 0];
       const BED = [0.085, 0.074, 0.060], STONE = [0.120, 0.112, 0.100];
-      for (let j = 0; j <= N; j++) { if (j && j % 4 === 0) yield 0; for (let i = 0; i <= N; i++) {
+      for (let j = 0; j <= N; j++) { for (let i = 0; i <= N; i++) {
+        if ((i & 15) === 15 && late()) yield 0;
         const k = j * (N + 1) + i;
         let x = cx - R + i * STEP, z = cz - R + j * STEP;
         const dx = x - cx, dz = z - cz, d = Math.sqrt(dx * dx + dz * dz);
@@ -2078,6 +2343,7 @@
       } }
       const idx = [];
       for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+        if (i === 0 && late()) yield 0;
         const a = j * (N + 1) + i, b2 = a + 1, c = a + N + 1, e = c + 1;
         if (!(inR[a] || inR[b2] || inR[c] || inR[e])) continue;
         idx.push(a, c, b2, b2, c, e);
@@ -2085,10 +2351,10 @@
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
       g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-      g.setIndex(idx);
-      g.computeVertexNormals();
-      g.computeBoundingSphere();
-      worldUV(g, GRASS_TILE, 0, 0, function (pp, i, w) { w.x = pp.getX(i); w.z = pp.getZ(i); });
+      g.setIndex(yield* indexSteps(idx));
+      yield* vertexNormalsSteps(g);
+      yield* sphereSteps(g);
+      yield* worldUVSteps(g, GRASS_TILE, 0, 0, function (pp, i, w) { w.x = pp.getX(i); w.z = pp.getZ(i); });
       return g;
     })();
     const island = new THREE.Mesh(islandGeo, grassMat);
@@ -2151,8 +2417,8 @@
       geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
       geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
       geo.setIndex(idx);
-      geo.computeVertexNormals();
-      worldUV(geo, GRASS_TILE, hl.x, hl.z, function (pp, i, w) { w.x = pp.getX(i); w.z = pp.getZ(i); });
+      yield* vertexNormalsSteps(geo);
+      yield* worldUVSteps(geo, GRASS_TILE, hl.x, hl.z, function (pp, i, w) { w.x = pp.getX(i); w.z = pp.getZ(i); });
       const cone = new THREE.Mesh(geo, grassMat);
       cone.position.set(hl.x, 0, hl.z);
       cone.castShadow = true; cone.receiveShadow = true;
@@ -2280,6 +2546,7 @@
         if ((++__dn & 3) === 0) yield 0;
         const d = ringR[k], skirt = k === RINGS;
         for (let s = 0; s < SEC; s++) {
+          if ((s & 7) === 7 && late()) yield 0;
           const ang = (s / SEC) * Math.PI * 2;
           const vi0 = 1 + (k - 1) * SEC + s, o = vi0 * 3;
           const y = skirt ? -0.55 : volcanoHeightAt(d, ang);
@@ -2310,7 +2577,7 @@
       geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
       geo.setAttribute("aVol", new THREE.BufferAttribute(aux, 2));
       geo.setIndex(new THREE.BufferAttribute(idx, 1));
-      geo.computeVertexNormals();
+      yield* vertexNormalsSteps(geo);
 
       const volMat = new THREE.MeshStandardMaterial({
         color: 0xffffff, vertexColors: true, roughness: 0.94, metalness: 0,
@@ -2680,12 +2947,12 @@
           const k = bk[key];
           if (!k.i.length) continue;
           const g2 = new THREE.BufferGeometry();
-          g2.setAttribute("position", new THREE.Float32BufferAttribute(k.p, 3));
-          g2.setAttribute("normal", new THREE.Float32BufferAttribute(k.n, 3));
-          g2.setAttribute("color", new THREE.Float32BufferAttribute(k.c, 3));
-          if (k.tex) g2.setAttribute("uv", new THREE.Float32BufferAttribute(k.u, 2));
-          g2.setIndex(k.i);
-          g2.computeBoundingSphere();
+          g2.setAttribute("position", new THREE.BufferAttribute(yield* typedSteps(k.p), 3));
+          g2.setAttribute("normal", new THREE.BufferAttribute(yield* typedSteps(k.n), 3));
+          g2.setAttribute("color", new THREE.BufferAttribute(yield* typedSteps(k.c), 3));
+          if (k.tex) g2.setAttribute("uv", new THREE.BufferAttribute(yield* typedSteps(k.u), 2));
+          g2.setIndex(yield* indexSteps(k.i));
+          yield* sphereSteps(g2);
           const m = new THREE.Mesh(g2, inMat(key));
           m.castShadow = !!cast && key === "flat";
           m.receiveShadow = key !== "glow";
@@ -3533,23 +3800,32 @@
       group.updateMatrixWorld(true);
       const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
       const keep = new Set();
-      for (const c of CBZ.colliders) if (c.ref && c.ref.isMesh) keep.add(c.ref);
+      const CL = CBZ.colliders;
+      for (let i = 0; i < CL.length; i++) { const c = CL[i]; if (c.ref && c.ref.isMesh) keep.add(c.ref); if ((i & 2047) === 2047 && late()) yield 0; }
       const losSet = new Set(CBZ.losBlockers || []);
       const take = [];
       let total = 0;
       const rooms = group.userData.rooms || (group.userData.rooms = []);
-      group.traverse(function (o) {
-        if (!o.isMesh) return;
+      // (group.traverse's own order, depth first, on the slice clock)
+      const stack = [group];
+      let seen = 0;
+      while (stack.length) {
+        const o = stack.pop();
+        for (let c = o.children.length - 1; c >= 0; c--) stack.push(o.children[c]);
+        if ((++seen & 63) === 63 && late()) yield 0;
+        if (!o.isMesh) continue;
         total++;
         // the interior's own meshes (floors, plaster, furniture, fixtures):
         // nobody sees them from 60 m, so the LOD tick sleeps them out there
         if (o.name && o.name.indexOf("island-interior") === 0) rooms.push(o);
-        if (o.isInstancedMesh || !_finSet.has(o.material)) return;
-        for (let a = o; a && a !== group; a = a.parent) if (a.userData && a.userData.noBake) return;
+        if (o.isInstancedMesh || !_finSet.has(o.material)) continue;
+        let skip = false;
+        for (let a = o; a && a !== group; a = a.parent) if (a.userData && a.userData.noBake) { skip = true; break; }
+        if (skip) continue;
         const g = o.geometry;
-        if (!g || !g.attributes.position || !g.attributes.normal) return;
+        if (!g || !g.attributes.position || !g.attributes.normal) continue;
         take.push(o);
-      });
+      }
       if (take.length < 2) return;
       yield 0;
       let nv = 0, ni = 0;
@@ -3560,20 +3836,21 @@
       const ranges = new Map();          // original -> [first index entry, count] in the merged copy
       let since = 0;
       for (const o of take) {
-        if (since > 6000) { since = 0; yield 0; }
+        if (since > 600) { since = 0; if (late()) yield 0; }
         const g = o.geometry, P = g.attributes.position, N = g.attributes.normal, c = o.material.color;
         since += g.attributes.position.count;
         ranges.set(o, [k, g.index ? g.index.count : P.count]);
         _bm.multiplyMatrices(inv, o.matrixWorld);
         _bn.getNormalMatrix(_bm);
         for (let i = 0; i < P.count; i++) {
+          if ((i & 1023) === 1023 && late()) yield 0;
           _bv.set(P.getX(i), P.getY(i), P.getZ(i)).applyMatrix4(_bm);
           pos[(v + i) * 3] = _bv.x; pos[(v + i) * 3 + 1] = _bv.y; pos[(v + i) * 3 + 2] = _bv.z;
           _bv.set(N.getX(i), N.getY(i), N.getZ(i)).applyMatrix3(_bn).normalize();
           nor[(v + i) * 3] = _bv.x; nor[(v + i) * 3 + 1] = _bv.y; nor[(v + i) * 3 + 2] = _bv.z;
           col[(v + i) * 3] = c.r; col[(v + i) * 3 + 1] = c.g; col[(v + i) * 3 + 2] = c.b;
         }
-        if (g.index) { const I = g.index.array; for (let i = 0; i < I.length; i++) idx[k++] = I[i] + v; }
+        if (g.index) { const I = g.index.array; for (let i = 0; i < I.length; i++) { idx[k++] = I[i] + v; if ((i & 8191) === 8191 && late()) yield 0; } }
         else for (let i = 0; i < P.count; i++) idx[k++] = v + i;
         v += P.count;
       }
@@ -3582,14 +3859,16 @@
       geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
       geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
       geo.setIndex(new THREE.BufferAttribute(idx, 1));
-      geo.computeBoundingSphere();
+      yield* sphereSteps(geo);
       const mesh = new THREE.Mesh(geo, bakedMat(gy));
       mesh.name = "island-shell";
       mesh.castShadow = true; mesh.receiveShadow = true;
       group.add(mesh);
       let hidden = 0;
       const hid = group.userData.bakedHidden || (group.userData.bakedHidden = []);
-      for (const o of take) {
+      for (let ti = 0; ti < take.length; ti++) {
+        const o = take[ti];
+        if ((ti & 31) === 31 && late()) yield 0;
         if (keep.has(o) || losSet.has(o)) {
           o.visible = false; hidden++; hid.push(o);
           /* ITS TRIANGLES CAN LEAVE THE MERGED COPY. A disaster that takes this
@@ -3632,7 +3911,7 @@
       const L = CBZ.stairs && CBZ.stairs.links ? CBZ.stairs.links() : null;
       return { c: CBZ.colliders.length, p: CBZ.platforms.length, l: L ? L.length : 0, g: allGlass.length };
     }
-    function orientRecords(snap, ox, oz, yaw, extra) {
+    function* orientRecords(snap, ox, oz, yaw, extra) {
       const co = Math.round(Math.cos(yaw)), si = Math.round(Math.sin(yaw));
       if (co === 1 && si === 0) return;
       // three.js rotation.y: local (dx, dz) -> (dx cos + dz sin, -dx sin + dz cos)
@@ -3646,12 +3925,14 @@
       const done = new Set();
       const C = CBZ.colliders;
       for (let i = snap.c; i < C.length; i++) {
+        if ((i & 255) === 255 && late()) yield 0;
         const c = C[i]; if (done.has(c)) continue; done.add(c);
         box(c);
         if (c.cx != null && c.yaw != null) { T(c.cx, c.cz, a); c.cx = a.x; c.cz = a.z; c.yaw += yaw; }
       }
       const P = CBZ.platforms;
       for (let i = snap.p; i < P.length; i++) {
+        if ((i & 255) === 255 && late()) yield 0;
         const p = P[i]; if (done.has(p)) continue; done.add(p);
         const xc = (p.minX + p.maxX) / 2, zc = (p.minZ + p.maxZ) / 2;
         box(p);
@@ -3891,7 +4172,7 @@
         plan: PL, flights: PL.flights, landings: PL.landings, cols: cols, late: shellMerge,
         holes: dressed.holes, crown: dressed.crown, crownsRoof: dressed.crownsRoof,
       });
-      flushLateShell(bgroup, shellMerge, gy);
+      yield* flushLateShell(bgroup, shellMerge, gy);
 
       /* THE ROOF, as data: the slab you can stand on (everything but the
          stair strip, which carries the bulkhead), when the stair reaches it.
@@ -3903,7 +4184,7 @@
       // turn it to face its street (records and all), then draw its static
       // shell in one call (see bakeShell)
       bgroup.rotation.y = yaw;
-      orientRecords(snap, ox, oz, yaw, covers.concat([roofPt]));
+      yield* orientRecords(snap, ox, oz, yaw, covers.concat([roofPt]));
       const quarter = Math.abs(Math.round(Math.sin(yaw))) === 1;
       const roofHalf = function (lx0, lx1, lz0, lz1) {
         const p0 = { x: 0, z: 0 }, p1 = { x: 0, z: 0 };
@@ -4429,7 +4710,7 @@
       });
       // the deck, rail and headhouse are shell pieces queued AFTER the facade
       // pass flushed the rest: one more merged mesh per colour for them
-      flushLateShell(g, shellMerge, gy);
+      yield* flushLateShell(g, shellMerge, gy);
 
       // h stays the SHELL's height (the collapse proxy and the ash roofs are
       // built off h / storeys); the lift's top stop is published beside it
@@ -4657,15 +4938,16 @@
        lot's front edge on the back of the sidewalk. The station reports its
        driveways (roadCuts: the sidewalk becomes a ramped apron there) and its
        raised slabs (raisePads: the walkable floor follows the forecourt). */
-    function makeGasStation(site) {
+    function* makeGasStation(site) {
       if (!CBZ.buildFuelStation) return null;
-      return CBZ.buildFuelStation({
+      const so = {
         parent: root, x: site.x, z: site.z, y: site.y, rotY: site.rotY,
         deck: 0.15, walkRise: 0.15, apron: 0,
         onGlass: function (mesh, wx, wy, wz, span) { allGlass.push({ mesh: mesh, x: wx, y: wy, z: wz, span: span, shattered: false }); },
         onCut: function (a) { roadCuts.push(a); },
         onPad: function (a, top) { raisePads.push({ x0: a.x0, x1: a.x1, z0: a.z0, z1: a.z1, top: top }); },
-      });
+      };
+      return CBZ.buildFuelStationSteps ? yield* CBZ.buildFuelStationSteps(so, late) : CBZ.buildFuelStation(so);
     }
     // (the plan picked the stations' lots, a block frontage each, front to the
     // street; the town section below stands them, one a step)
@@ -4816,7 +5098,7 @@
       stationSites.push({ x: l.x, z: l.z, y: l.gy, rotY: l.rotY, lot: l });
       placed.push({ x: l.x, z: l.z, w: l.wx, d: l.wz, lot: l });
     }
-    for (const site of stationSites) { makeGasStation(site); yield 0; }
+    for (const site of stationSites) { yield* makeGasStation(site); yield 0; }
     let dl1 = null, built = 0;
     if (PLAN) for (const l of PLAN.lots) {
       if (l.kind === "station") continue;                 // placeStations built it
@@ -4834,8 +5116,9 @@
         // the motel and the used car lot (world/island_lots.js): venue sites,
         // not `fragile` (the quake and the far form know buildings only);
         // `b` for the record lines below and the motel's kept beds
-        b = CBZ.islandLots.build(l, { root: root, makeCar: makeCar, addGlass: addGlass,
-          furnish: function (name, host, x, y, z, yaw, o) { return furnish(name, host, x, y, z, yaw, o); } });
+        const lo = { root: root, makeCar: makeCar, addGlass: addGlass,
+          furnish: function (name, host, x, y, z, yaw, o) { return furnish(name, host, x, y, z, yaw, o); } };
+        b = CBZ.islandLots.steps ? yield* CBZ.islandLots.steps(l, lo) : CBZ.islandLots.build(l, lo);
         if (b) sites.push(b);
       } else if (l.kind === "tower" || l.kind === "hotel") {
         b = yield* makeTower(l.x, l.z, l.w, l.d, l.storeys * FH, color, l.style, l.lot, { helipad: !!l.helipad });
@@ -5175,6 +5458,7 @@
           const t1 = Math.min(br.b, t + 2), tm = (t + t1) / 2, len = t1 - t;
           const c0 = along(tm, 0), deck = PLAN.plainBaseAt(c0.x, c0.z);
           dMin = Math.min(dMin, deck); dMax = Math.max(dMax, deck);
+          if (late()) yield 0;
           piece(cParts, tm, 0, deck - 0.42, WALK * 2 + 0.4, 0.8, len, FACE);              // the slab
           piece(aParts, tm, 0, deck + LIFT / 2, HW * 2, LIFT, len, ASPH);                   // the carriageway
           for (const s2 of [-1, 1]) {
@@ -5186,20 +5470,20 @@
           const c0 = along(te, 0), deck = PLAN.plainBaseAt(c0.x, c0.z);
           piece(cParts, te, 0, deck - 2.2, WALK * 2 + 0.8, 4.0, 1.2, FACE);               // an abutment
         }
-        const mk = function (parts, m2, name) {
+        const mk = function* (parts, m2, name) {
           if (!parts.length || !BGU) return null;
-          const g = BGU.mergeBufferGeometries(parts, false);
+          const g = yield* mergeSteps(parts);
           parts.forEach(function (p) { p.dispose(); });
           const P2 = g.attributes.position, uv = new Float32Array(P2.count * 2);
-          for (let i = 0; i < P2.count; i++) { uv[i * 2] = (P2.getX(i) + mid.x) / 2.4; uv[i * 2 + 1] = (P2.getZ(i) + mid.z + P2.getY(i)) / 2.4; }
+          for (let i = 0; i < P2.count; i++) { uv[i * 2] = (P2.getX(i) + mid.x) / 2.4; uv[i * 2 + 1] = (P2.getZ(i) + mid.z + P2.getY(i)) / 2.4; if ((i & 2047) === 2047 && late()) yield 0; }
           g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-          g.computeBoundingSphere();
+          yield* sphereSteps(g);
           const m = new THREE.Mesh(g, m2); m.name = name; m.castShadow = true; m.receiveShadow = true;
           grp.add(m);
           return m;
         };
-        mk(cParts, concM, "island-bridge-concrete");
-        mk(aParts, asphM, "island-bridge-deck");
+        yield* mk(cParts, concM, "island-bridge-concrete");
+        yield* mk(aParts, asphM, "island-bridge-deck");
         const cols = [];
         for (const s2 of [-1, 1]) {
           const p0 = along(br.a, s2 * (WALK + 0.05)), p1 = along(br.b, s2 * (WALK + 0.05));
@@ -5285,10 +5569,11 @@
       function cyl(A, x, y0, z, r0, r1, h, seg, rgb) { put(A, new THREE.CylinderGeometry(r1, r0, h, seg || 10), x, y0 + h / 2, z, 0, rgb); }
       // world-planar UVs by each triangle's dominant axis, so a map reads at
       // real scale on every face
-      function planarUV(g, tile) {
+      function* planarUV(g, tile) {
         const p = g.attributes.position, n = p.count, uv = new Float32Array(n * 2);
         const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
         for (let i = 0; i < n; i += 3) {
+          if (i % 768 === 765 && late()) yield 0;
           a.fromBufferAttribute(p, i); b.fromBufferAttribute(p, i + 1); c.fromBufferAttribute(p, i + 2);
           e1.subVectors(b, a); e2.subVectors(c, a); e1.cross(e2);
           const ax = Math.abs(e1.x), ay = Math.abs(e1.y), az = Math.abs(e1.z);
@@ -5301,12 +5586,12 @@
         }
         g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
       }
-      function flush(A, m2, name, cast) {
+      function* flush(A, m2, name, cast) {
         if (!A.parts.length) return null;
-        const g = BGU.mergeBufferGeometries(A.parts, false);
+        const g = yield* mergeSteps(A.parts);
         A.parts.forEach(function (p) { p.dispose(); });
-        planarUV(g, A.tile);
-        g.computeBoundingSphere();
+        yield* planarUV(g, A.tile);
+        yield* sphereSteps(g);
         const mesh = new THREE.Mesh(g, m2);
         mesh.name = name; mesh.castShadow = !!cast; mesh.receiveShadow = true;
         mesh.matrixAutoUpdate = false; mesh.updateMatrix();
@@ -5494,10 +5779,10 @@
       const rockMat = skinMat("rock"); rockMat.name = "island-harbour-rock";
       const woodMat = skinMat("wood"); woodMat.name = "island-harbour-timber";
       const paintMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }); paintMat.name = "island-harbour-paint";
-      flush(conc, concMat, "island-harbour-concrete", true); yield 0;
-      flush(rock, rockMat, "island-breakwater", true); yield 0;
-      flush(wood, woodMat, "island-harbour-timber", true); yield 0;
-      flush(paint, paintMat, "island-harbour-ironwork", true); yield 0;
+      yield* flush(conc, concMat, "island-harbour-concrete", true); yield 0;
+      yield* flush(rock, rockMat, "island-breakwater", true); yield 0;
+      yield* flush(wood, woodMat, "island-harbour-timber", true); yield 0;
+      yield* flush(paint, paintMat, "island-harbour-ironwork", true); yield 0;
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
       if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
 
@@ -5540,7 +5825,7 @@
     yield 0;
     // THE AIRSTRIP (island_plan.js cfg.airstrip): its fill is ground already
     // (the plan's madeAt); this draws it
-    if (PLAN && PLAN.airstrip) buildAirstrip(PLAN.airstrip, root, OCEAN_Y);
+    if (PLAN && PLAN.airstrip) yield* buildAirstrip(PLAN.airstrip, root, OCEAN_Y);
     // the town between the buildings: yards, the square, the car parks, the
     // hydrants, the farm, the rocks (world/island_dressing.js; result also at
     // CBZ.islandDressing.current). It reads the plan for where each goes.
@@ -6286,7 +6571,7 @@
      rock armour down into the shelf, the concrete apron, the asphalt, the
      paint. One merged mesh, vertex-coloured (linear albedo).
      ============================================================ */
-  function buildAirstrip(A, root, seaY) {
+  function* buildAirstrip(A, root, seaY) {
     const parts = [];
     function piece(x0, x1, y0, y1, z0, z1, rgb) {
       const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0);
@@ -6315,9 +6600,10 @@
       }
     }
     const BGU = THREE.BufferGeometryUtils;
-    const geo = BGU && parts.length > 1 ? BGU.mergeBufferGeometries(parts) : parts[0];
+    if (late()) yield 0;
+    const geo = BGU && parts.length > 1 ? yield* mergeSteps(parts) : parts[0];
     if (geo !== parts[0]) for (const g of parts) g.dispose();
-    geo.computeBoundingSphere();
+    yield* sphereSteps(geo);
     const m = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
     m.name = "island-airstrip";
     const mesh = new THREE.Mesh(geo, m);
@@ -6370,12 +6656,45 @@
     const n = arr.length;
     return { arr: arr, n: n, tail: n ? arr.slice(Math.max(0, n - ANCHORS)) : null };
   };
+  /* WHICH CBZ PROPERTIES ARE LISTS, remembered. CBZ carries ~4,000
+     properties on a full page; walking them all (for-in plus a read each)
+     twice a frame for the census was ~1.5 ms of a phone's 4 ms streaming
+     share before any building got built. The list of lists is kept, and each
+     census only checks it still holds: every remembered key still names the
+     same array, no empty key has become a list, and CBZ has the same number
+     of keys (a new key is a new candidate). Any change and it is walked
+     again, exactly as before. */
+  const CEN = { n: -1, keys: [], vals: [], maybe: [], lists: [] };
+  function cbzLists() {
+    let ok = CEN.n >= 0;
+    if (ok) { const ks = CEN.keys, vs = CEN.vals; for (let i = 0; i < ks.length; i++) if (CBZ[ks[i]] !== vs[i]) { ok = false; break; } }
+    if (ok) { const ms = CEN.maybe; for (let i = 0; i < ms.length; i++) if (Array.isArray(CBZ[ms[i]])) { ok = false; break; } }
+    if (ok && Object.keys(CBZ).length !== CEN.n) ok = false;
+    if (ok) return CEN.lists;
+    const keys = [], vals = [], maybe = [], lists = [], seen = new Set();
+    let n = 0;
+    for (const k in CBZ) {
+      n++;
+      const v = CBZ[k];
+      if (Array.isArray(v)) { keys.push(k); vals.push(v); if (!seen.has(v)) { seen.add(v); lists.push(v); } }
+      else if (v == null) maybe.push(k);
+    }
+    CEN.n = n; CEN.keys = keys; CEN.vals = vals; CEN.maybe = maybe; CEN.lists = lists;
+    return lists;
+  }
   CBZ.listMarks = function (extra) {
-    const marks = [], seen = new Set();
-    for (const k in CBZ) { const v = CBZ[k]; if (Array.isArray(v) && !seen.has(v)) { seen.add(v); marks.push(CBZ.listMark(v)); } }
+    const marks = [], seen = new Set(), L = cbzLists();
+    for (let i = 0; i < L.length; i++) { seen.add(L[i]); marks.push(CBZ.listMark(L[i])); }
     if (extra) for (const v of extra) if (v && !seen.has(v)) { seen.add(v); marks.push(CBZ.listMark(v)); }
     marks.seen = seen;
     return marks;
+  };
+  // the CBZ lists that are not in `marks` and hold something: lists made
+  // since the marks were taken (CBZ.camColliders on a fresh page)
+  CBZ.listNew = function (marks) {
+    const out = [], L = cbzLists();
+    for (let i = 0; i < L.length; i++) { const v = L[i]; if (v.length && !marks.seen.has(v)) { marks.seen.add(v); out.push(v); } }
+    return out;
   };
   CBZ.listGained = function (m) {
     const a = m.arr, n = m.n, len = a.length;
@@ -6414,6 +6733,7 @@
       own: census ? { colliders: [], platforms: [], losBlockers: [], camColliders: [] } : null, attached: false };
     function slice() {
       let r = null;
+      sliceT0 = performance.now();
       try { r = gen.next(); }
       catch (e) { job.failed = e; job.done = true; console.error("[island build " + (ISL.id || "disaster") + "]", e); }
       job.steps++;
@@ -6425,18 +6745,26 @@
     // the slices of a step, so what the lists gained is all this island's
     function run(until) {
       const marks = census ? CBZ.listMarks([envWanting]) : [];
-      const seen = census ? marks.seen : new Set();
       const g0 = {};
       for (const k of OWN_GLOBALS) g0[k] = CBZ[k];
       const DA = CBZ.debrisAuditSources, da0 = DA ? DA.island : undefined;
       const DR = CBZ.islandDressing, dr0 = DR ? DR.current : undefined;
       const O = job.own, world = O ? {} : null;
       if (O) for (const k in O) { world[k] = CBZ[k]; CBZ[k] = O[k]; }
+      /* (and the world's broadphase grids are not this island's business
+         while it keeps its own lists: a building turned to face its street
+         edits its own records in place and used to mark the WORLD's collider
+         and platform grids dirty, a full rebuild of every wall on the sea on
+         the next query, once a building, every frame of a stream. They join
+         the grids in step at attach, colliderAddMany / platformAddMany.) */
+      const mcd = CBZ.markCollidersDirty, mpd = CBZ.markPlatformsDirty;
+      if (O) { CBZ.markCollidersDirty = noop; CBZ.markPlatformsDirty = noop; CBZ.islandOwnLists = true; }
       const t0 = performance.now();
       try {
         do { slice(); } while (!job.done && performance.now() < until);
       } finally {
         job.ms += performance.now() - t0;
+        if (O) { CBZ.markCollidersDirty = mcd; CBZ.markPlatformsDirty = mpd; CBZ.islandOwnLists = false; }
         if (O) for (const k in O) CBZ[k] = world[k];
         for (const m of marks) {
           const got = CBZ.listGained(m);
@@ -6446,12 +6774,7 @@
           for (let i = 0; i < got.length; i++) L.push(got[i]);
         }
         // a list the build CREATED (CBZ.camColliders on a fresh page): all of it is the island's
-        if (census) for (const k in CBZ) {
-          const v = CBZ[k];
-          if (!Array.isArray(v) || seen.has(v) || !v.length) continue;
-          seen.add(v);
-          job.buses.set(v, v.slice());
-        }
+        if (census) for (const v of CBZ.listNew(marks)) job.buses.set(v, v.slice());
         for (const k of OWN_GLOBALS) if (CBZ[k] !== g0[k]) { job.globals[k] = CBZ[k]; CBZ[k] = g0[k]; }
         const DA2 = CBZ.debrisAuditSources;
         if (DA2 && DA2.island !== da0) { job.globals["#debris"] = DA2.island; DA2.island = da0; }
@@ -6467,27 +6790,32 @@
     job.finish = function () { if (!job.done) run(Infinity); return job.arena; };
     // the island joins the world's physics, sight lines and camera
     job.attach = function () {
-      const it = job.attachSteps();
-      for (let r = it.next(); !r.done; r = it.next()) {}
+      CBZ.sliceSync(function () {
+        const it = job.attachSteps();
+        for (let r = it.next(); !r.done; r = it.next()) {}
+      });
     };
     // (in steps: ten thousand walls into the broadphase is a frame's work)
     job.attachSteps = function* () {
       if (!job.own || job.attached || !job.done) return;
       job.attached = true;
-      const O = job.own, CH = 1500;
+      // (on the slice clock; colliderAddMany / platformAddMany file each
+      // record in the grids in place, so nothing is marked dirty after)
+      const O = job.own, CH = 200;
       for (let i = 0; i < O.colliders.length; i += CH) {
         const part = O.colliders.slice(i, i + CH);
         if (CBZ.colliderAddMany) CBZ.colliderAddMany(part); else for (const c of part) CBZ.colliders.push(c);
-        yield 0;
+        if (late()) yield 0;
       }
       for (let i = 0; i < O.platforms.length; i += CH) {
         const part = O.platforms.slice(i, i + CH);
         if (CBZ.platformAddMany) CBZ.platformAddMany(part); else for (const p of part) CBZ.platforms.push(p);
-        yield 0;
+        if (late()) yield 0;
       }
       for (const m of O.losBlockers) (CBZ.losBlockers || (CBZ.losBlockers = [])).push(m);
       for (const c of O.camColliders) (CBZ.camColliders || (CBZ.camColliders = [])).push(c);
-      if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+      if (!CBZ.platformAddMany && CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+      yield 0;
       // an archipelago island's venues fit out now: whole, in the world, and
       // still hidden (world/island_venue.js; disposed with the island)
       if (ISL.world === "archipelago" && CBZ.islandVenue && CBZ.islandVenue.fitSteps) yield* CBZ.islandVenue.fitSteps(job);
@@ -6498,6 +6826,7 @@
         for (const r of I.beds) {
           r.rec = CBZ.propRegisterBed(r.x, r.y, r.z, r.hx, r.hz, r.len, r.top, r.kind, null);
           if (r.rec) { r.rec._lotR = true; r.rec.home = r.b; }
+          if (late()) yield 0;
         }
       }
     };
@@ -6554,10 +6883,21 @@
     // meshes; their GPU buffers still go back with the island's)
     const root0 = (A && A.root) || job.root;
     const held = [];
-    if (root0) root0.traverse(function (o) { if (o.geometry || o.material) held.push(o); });
+    if (root0) {
+      // (root0.traverse's order, on the slice clock)
+      const stack = [root0];
+      let seen = 0;
+      while (stack.length) {
+        const o = stack.pop();
+        if (o.geometry || o.material) held.push(o);
+        for (let c = o.children.length - 1; c >= 0; c--) stack.push(o.children[c]);
+        if ((++seen & 255) === 255 && late()) yield 0;
+      }
+    }
     // its venues' fit-outs first (their own disposers; what they pushed onto
     // the shared lists rides job.buses with the rest)
-    if (CBZ.islandVenue && CBZ.islandVenue.drop) { try { CBZ.islandVenue.drop(job); } catch (e) { console.error("[island venue drop]", e); } }
+    if (CBZ.islandVenue && CBZ.islandVenue.dropSteps) { try { yield* CBZ.islandVenue.dropSteps(job); } catch (e) { console.error("[island venue drop]", e); } }
+    else if (CBZ.islandVenue && CBZ.islandVenue.drop) { try { CBZ.islandVenue.drop(job); } catch (e) { console.error("[island venue drop]", e); } }
     if (A && arena === A) CBZ.islandActivate(null, null);
     // its beds leave the bed registry with it
     const islBeds = A && A.island && A.island.beds;
@@ -6613,21 +6953,26 @@
     return false;
   }
   CBZ.freeObjectsSteps = function* (objs) {
-    const geos = new Set(), texs = new Set();
-    for (const o of objs) {
+    const geos = new Set(), texs = new Set(), mseen = new Set();
+    for (let i = 0; i < objs.length; i++) {
+      const o = objs[i];
+      if ((i & 127) === 127 && late()) yield 0;
       if (!o || inScene(o)) continue;
       if (o.isInstancedMesh && o.dispose) { try { o.dispose(); } catch (e) {} }
       const g = o.geometry;
       if (g && g.dispose && !g._shared && !(g.userData && g.userData._shared)) geos.add(g);
       const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : null;
       if (mats) for (const m of mats) {
-        if (!m) continue;
+        // (each material's maps once: a shared material is on thousands of meshes)
+        if (!m || mseen.has(m)) continue;
+        mseen.add(m);
         for (const k in m) { const t = m[k]; if (t && t.isTexture && !t._shared && !t._cbzFreed) texs.add(t); }
       }
     }
     let n = 0;
-    for (const g of geos) { try { g.dispose(); } catch (e) {} if (++n % 250 === 0) yield 0; }
+    for (const g of geos) { try { g.dispose(); } catch (e) {} if ((++n & 31) === 31 && late()) yield 0; }
     for (const t of texs) {
+      if ((++n & 15) === 15 && late()) yield 0;
       try {
         if (t._cbzLazy) { t.dispose(); if (t._cbzRelease) t._cbzRelease(); continue; }
         // (a canvas core/texfree.js already released could only come back as 1x1)

@@ -370,7 +370,18 @@
     return k < 0 ? 0 : k > 1 ? 1 : k;
   };
 
+  /* buildFuelStationSteps is the same build as a generator, yielding on the
+     island build's slice clock (CBZ.sliceLate) between its sections, so a
+     streamed island's forecourt is laid over frames; buildFuelStation runs it
+     to the end, as it always ran. */
   CBZ.buildFuelStation = function (opts) {
+    const it = CBZ.buildFuelStationSteps(opts, function () { return false; });
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  };
+  CBZ.buildFuelStationSteps = function* (opts, lateFn) {
+    const late = lateFn || CBZ.sliceLate || function () { return false; };
     opts = opts || {};
     const m = mats();
     const deck = opts.deck != null ? opts.deck : 0.15;
@@ -466,6 +477,7 @@
       }
     });
 
+    if (late()) yield 0;
     // ---- CANOPY: columns on the islands, thick banded fascia, lit soffit ---
     const CX0 = -8, CX1 = 8, CZ0 = -10.2, CZ1 = -1.8, CH = 4.7, FH = 1.15;
     const ccx = (CX0 + CX1) / 2, ccz = (CZ0 + CZ1) / 2, cw = CX1 - CX0, cd = CZ1 - CZ0;
@@ -487,9 +499,12 @@
     }
     solid(CX0, CX1, CZ0, CZ1, deck + CH, deck + CH + FH);
 
+    if (late()) yield 0;
     // ---- PUMP ISLANDS + DISPENSERS -------------------------------------------
     const IY = deck + 0.18;
-    [-4, 4].forEach(function (ix, k) {
+    for (let k = 0; k < 2; k++) {
+      const ix = k ? 4 : -4;
+      if (late()) yield 0;
       const z0 = -9.3, z1 = -2.7, zc = (z0 + z1) / 2, L = z1 - z0 - 1.3;
       bx("solid", ix, deck + 0.09, zc, 1.3, 0.18, L, C.island);
       cy("solid", ix, deck + 0.09, zc - L / 2, 0.65, 0.65, 0.18, C.island, 12, Math.PI / 2, Math.PI);
@@ -510,7 +525,9 @@
       bx("solid", ix, IY + DH - 0.02, dz, 0.7, 0.08, 1.4, C.stripe);
       bx("solid", ix, IY + 0.04, dz, 0.7, 0.08, 1.4, C.black);                      // plinth
       solid(ix - 0.35, ix + 0.35, dz - 0.7, dz + 0.7, 0, IY + DH);
-      [-1, 1].forEach(function (sd, si) {
+      for (let si = 0; si < 2; si++) {
+        const sd = si ? 1 : -1;
+        if (late()) yield 0;
         const fx = ix + sd * 0.332, face = sd > 0 ? "px" : "nx";
         quad("sign", fx + sd * 0.004, IY + 1.62, dz - 0.2, 0.42, 0.28, face, [1, 1, 1], uvRect(R.lcd));
         quad("sign", fx + sd * 0.004, IY + 1.3, dz - 0.2, 0.52, 0.13, face, [1, 1, 1], uvRect(R.buttons));
@@ -518,7 +535,9 @@
         quad("sign", fx + sd * 0.004, IY + 1.84, dz + 0.36, 0.16, 0.16, face, [1, 1, 1],
           uvRect(R.num, [((k * 2 + si) % 4) / 4, 0, 0.25, 1]));
         // two nozzles in their boots, hoses looping from the head
-        [-0.42, 0.42].forEach(function (nz, ni) {
+        for (let ni = 0; ni < 2; ni++) {
+          const nz = ni ? 0.42 : -0.42;
+          if (late()) yield 0;
           const bz = dz + nz, by = IY + 0.95;
           bx("solid", fx + sd * 0.05, by, bz, 0.1, 0.34, 0.14, C.black);                  // boot
           bx("solid", fx + sd * 0.12, by + 0.1, bz, 0.08, 0.1, 0.26, ni ? C.stripe : C.rubber);   // grip
@@ -530,9 +549,9 @@
             [fx + sd * 0.34, IY + 0.3, bz],
             [fx + sd * 0.2, by + 0.02, bz + 0.13],
           ], 0.019, C.rubber);
-        });
-      });
-    });
+        }
+      }
+    }
     // oil stains where cars stand at the pumps, and a few in the lane
     [[-6.2, -7.2], [-6.1, -4.4], [-1.9, -7.6], [-2.0, -4.9], [1.9, -6.8], [2.1, -4.2], [6.1, -7.4], [6.2, -4.6], [-0.2, -12.0], [0.4, 0.6]]
       .forEach(function (p, i) {
@@ -540,6 +559,7 @@
         quad("decal", p[0], deck + 0.004, p[1], s * 1.2, s * 1.6, "up", C.stain, uvRect(i & 1 ? R.stain2 : R.stain));
       });
 
+    if (late()) yield 0;
     // ---- STORE ----------------------------------------------------------------
     const SX0 = -11.2, SX1 = 2.2, SZ0 = 7.6, SZ1 = 12.6, WALL = 0.25, SH = 4.2, PAR = 4.9;
     const fy = deck + rise;                               // store / walk floor
@@ -595,6 +615,7 @@
     quad("label", -2.8, fy + 2.35, SZ0 + 0.13, 0.7, 0.36, "nz", [1, 1, 1], uvRect(R.hours));
     // store-front bollards (a car can't reach the glass)
     for (let x = SX0 + 0.8; x < SX1; x += 2.2) if (x < DOOR0 - 0.6 || x > DOOR1 + 0.6) bollard(x, SZ0 - 1.22, fy);
+    if (late()) yield 0;
     // ---- interior (lit from inside: unlit Basic colours) ----
     const IX0 = SX0 + WALL + 0.01, IX1 = SX1 - WALL - 0.01, IZ1 = SZ1 - WALL - 0.01, IZ0 = SZ0 + 0.2;
     const ixc = (IX0 + IX1) / 2, izc = (IZ0 + IZ1) / 2, iw = IX1 - IX0, id = IZ1 - IZ0, CEIL = fy + 3.2;
@@ -629,6 +650,7 @@
     solid(-0.8, 0, 8.2, 11.2, 0, fy + 1.05);
     solid(1.3, 1.7, 8.3, 11.7, 0, fy + 2.4);
 
+    if (late()) yield 0;
     // ---- ICE merchandiser, PROPANE cage, AIR machine, dumpster --------------
     bx("solid", -10.2, fy + 0.62, SZ0 - 0.45, 1.6, 1.24, 0.75, C.iceWhite);
     bx("solid", -10.2, fy + 1.27, SZ0 - 0.45, 1.64, 0.06, 0.79, C.blue);
@@ -682,6 +704,7 @@
       solid(dx - 1.7, dx + 1.7, dz - 0.6, dz + 1.3, 0, deck + 1.8);
     }
 
+    if (late()) yield 0;
     // ---- PAINT: parking stalls + wheel stops in front of the store ----------
     const WHITE = uvRect(R.white);
     for (let i = 0; i <= 4; i++) {
@@ -696,6 +719,7 @@
     quad("decal", 0, deck + 0.003, -10.9, 5.0, 0.3, "up", C.paintW, WHITE);
     [-4, 4].forEach(function (ix) { quad("decal", ix, deck + 0.003, -6, 1.7, 7.4, "up", C.paintY, WHITE); });
 
+    if (late()) yield 0;
     // ---- PRICE PYLON at the front corner --------------------------------------
     {
       const px = -10.6, pz = -11.8, PH = 6.4;
@@ -708,15 +732,18 @@
       solid(px - 0.85, px + 0.85, pz - 0.45, pz + 0.45, 0, deck + PH);
     }
 
+    if (late()) yield 0;
     // ---- NIGHT: light pools on the concrete ----------------------------------
     const pools = [];
     { const g = new THREE.PlaneGeometry(cw + 5, cd + 5); g.rotateX(-Math.PI / 2); g.translate(ccx, deck + 0.01, ccz); pools.push(g); }
     { const g = new THREE.PlaneGeometry(sw + 2, 4.6); g.rotateX(-Math.PI / 2); g.translate(sxc, deck + 0.01, SZ0 - 2.0); pools.push(g); }
 
+    if (late()) yield 0;
     // ---- build the meshes ----------------------------------------------------
     const BGU = THREE.BufferGeometryUtils;
     let ref = null;
-    Object.keys(acc).forEach(function (key) {
+    for (const key of Object.keys(acc)) {
+      if (late()) yield 0;
       const geo = BGU.mergeBufferGeometries(acc[key], false);
       acc[key].forEach(function (g) { g.dispose(); });
       geo.computeBoundingSphere();
@@ -728,7 +755,7 @@
       if (key === "decal") mesh.renderOrder = 1;
       group.add(mesh);
       if (key === "solid") ref = mesh;
-    });
+    }
     const glassMesh = new THREE.Mesh(BGU.mergeBufferGeometries(gl, false), m.glass);
     gl.forEach(function (g) { g.dispose(); });
     glassMesh.name = "fuel-glass"; glassMesh.renderOrder = 2; glassMesh.userData.fuelStation = true;
@@ -743,6 +770,7 @@
       opts.onGlass(glassMesh, c[0], oy + (GY0 + GY1) / 2, c[1], sw / 2);
     }
 
+    if (late()) yield 0;
     // ---- colliders -------------------------------------------------------------
     const colliders = opts.colliders || CBZ.colliders;
     if (colliders) cols.forEach(function (c) {

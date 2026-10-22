@@ -410,6 +410,15 @@
   // city/islandmoney.js's CBZ.islandVenue.safe, the safe every island
   // building keeps, set where this room wants it). Returns { group, dispose }.
   function shell(P0, lot, o) {
+    const it = shellSteps(P0, lot, o);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  }
+  // the same as a generator on the island build's slice clock (a venue
+  // fit-out that is a generator takes it with yield*)
+  function shellLate() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
+  function* shellSteps(P0, lot, o) {
     o = o || {};
     const B = lot.building, lb = B.lbox;
     const out = { group: new THREE.Group(), cols: [], dispose: null, safe: null };
@@ -440,6 +449,7 @@
         catch (e) { console.error("[shop safe]", e); }
       }
       // steel shelving along the back wall, loaded with what a back room holds
+      if (shellLate()) yield 0;
       const k = kit();
       const shx = P0.x0 + 1.4 + 0.6, shw = Math.min(2.4, P0.W - 3.4);
       if (k && shw > 0.9) {
@@ -448,6 +458,7 @@
         k.frame(sp2.x, 0, sp2.z, yawToward(P0, 0, -1));
         for (const s of [-1, 1]) for (const zz of [-0.18, 0.18]) k.box(s * (shw / 2 - 0.02), Y + 0.95, zz, 0.035, 1.9, 0.035, 0x6a7078, "metal");
         for (const sy of [0.12, 0.62, 1.12, 1.62]) {
+          if (shellLate()) yield 0;
           k.box(0, Y + sy, 0, shw, 0.02, 0.4, 0x8a9096, "metal");
           const items = Math.floor(shw / 0.34);
           for (let i = 0; i < items; i++) {
@@ -462,6 +473,7 @@
             }
           }
         }
+        if (shellLate()) yield 0;
         k.build(out.group);
         CBZ.scene.add(out.group);
         // it sleeps and wakes with the building's own rooms (disaster_arena.js)
@@ -470,8 +482,9 @@
         if (ud.roomsOn === false) out.group.visible = false;
         const c0w = P0.w(shx - 0.6, P0.z1 - 0.46), c1w = P0.w(shx - 0.6 + shw, P0.z1 - 0.04);
         const cs = { minX: Math.min(c0w.x, c1w.x), maxX: Math.max(c0w.x, c1w.x), minZ: Math.min(c0w.z, c1w.z), maxZ: Math.max(c0w.z, c1w.z), y0: P0.fy, y1: P0.fy + 1.9 };
-        CBZ.colliders.push(cs); out.cols.push(cs);
-        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        // (colliderAddMany files it in the grid in step: no full rebuild)
+        if (CBZ.colliderAddMany) CBZ.colliderAddMany([cs]); else { CBZ.colliders.push(cs); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+        out.cols.push(cs);
       }
     }
     out.dispose = function () {
@@ -496,7 +509,7 @@
     if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(cols);
     else for (const c of cols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
     cols.length = 0;
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (!CBZ.colliderRemoveMany && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
 
   // the gun store's descriptor (city/buildings.js's lot.building.gunstore
@@ -545,6 +558,14 @@
      islands' one room dresser (world/island_fitkit.js CBZ.islandFit.dress).
      o: { keep: [building-local rects the venue's own pieces stand on] } */
   function dressShop(P0, lot, kind, desc, o) {
+    const it = dressShopSteps(P0, lot, kind, desc, o);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  }
+  // the same as a generator, on the island build's slice clock (a venue
+  // fit-out that is a generator takes it with yield*)
+  function* dressShopSteps(P0, lot, kind, desc, o) {
     o = o || {};
     const FIT = CBZ.islandFit;
     if (!FIT || !FIT.dress || !P0) return null;
@@ -605,12 +626,12 @@
       };
     }
     if (o.walls) spec.walls = o.walls;
-    return FIT.dress(P0.b, spec);
+    return FIT.dressSteps ? yield* FIT.dressSteps(P0.b, spec) : FIT.dress(P0.b, spec);
   }
 
   CBZ.shopFloor = {
     till: till, cityClerk: cityClerk, postedClerk: postedClerk,
-    plan: plan, shell: shell, gunDescriptor: gunDescriptor, counterZone: counterZone, register: register, dressShop: dressShop,
+    plan: plan, shell: shell, shellSteps: shellSteps, gunDescriptor: gunDescriptor, counterZone: counterZone, register: register, dressShop: dressShop, dressShopSteps: dressShopSteps,
     whereKey: whereKey, disposeTree: disposeTree, dropCols: dropCols, yawToward: yawToward, fmt$: fmt$,
     audit: function () { return { glass: IG.length, hot: Object.keys(hotMap()).length }; },
   };

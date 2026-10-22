@@ -98,11 +98,11 @@
   // a big JS array into a Float32Array a slice a step (a streamed island's
   // largest single allocations, world/archipelago.js)
   function* f32Steps(arr) {
-    const out = new Float32Array(arr.length), CH = 60000;
+    const out = new Float32Array(arr.length), CH = 16384;
     for (let i = 0; i < arr.length; i += CH) {
       const e = Math.min(arr.length, i + CH);
       for (let j = i; j < e; j++) out[j] = arr[j];
-      yield 0;
+      if (CBZ.sliceLate && CBZ.sliceLate()) yield 0;
     }
     return out;
   }
@@ -233,6 +233,7 @@
       emitTri(A, vv, nn, col, o || {});
     }
   }
+  function drain(it) { let r = it.next(); while (!r.done) r = it.next(); return r.value; }
   function shade(col, f) { return [col[0] * f, col[1] * f, col[2] * f]; }
   function vary(col, h, amt) { const f = 1 + (h - 0.5) * 2 * amt; return [col[0] * f, col[1] * f, col[2] * f]; }
 
@@ -266,6 +267,9 @@
   }
   function* steps(ctx) {
     let __dn = 0;      // the seam counter (a yield every few loop turns)
+    // the island build's slice clock (world/disaster_arena.js): true once
+    // this slice has had its millisecond; the heavy loops yield there
+    const late = CBZ.sliceLate || function () { return false; };
     THREE = G.THREE;
     if (!THREE || !ctx || !ctx.root) return null;
     initTemps();
@@ -297,9 +301,49 @@
       if (c.maxX < cx - R - 80 || c.minX > cx + R + 80 || c.maxZ < cz - R - 80 || c.minZ > cz + R + 80) continue;
       near.push(c);
     }
+    /* WHAT STANDS NEAR A POINT, on grids. Every fence bay, bale, bench and
+       field asked "is anything here?" of EVERY collider on the island (and,
+       for each small one, of every tree): a farm's four fence runs were
+       ~45 ms of one build step. A sparse 8 m grid of the colliders (and 4 m
+       grids of the trees and rocks) gives each question the few that can
+       touch it. Same answers: blocked() is "is there any", and the tree /
+       rock asked for is still the first in its list that is near enough. */
+    const GC = 8, GBIG = 160, cgrid = new Map(), cbig = [];
+    const gkey = function (i, j) { return (i + 32768) * 65536 + (j + 32768); };
+    function gridCol(c) {
+      if (c.maxX - c.minX > GBIG || c.maxZ - c.minZ > GBIG) { cbig.push(c); return; }
+      const i0 = Math.floor(c.minX / GC), i1 = Math.floor(c.maxX / GC), j0 = Math.floor(c.minZ / GC), j1 = Math.floor(c.maxZ / GC);
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+        const k = gkey(i, j); let L = cgrid.get(k); if (!L) { L = []; cgrid.set(k, L); } L.push(c);
+      }
+    }
+    for (let i = 0; i < near.length; i++) { gridCol(near[i]); if ((i & 255) === 255 && late()) yield 0; }
+    let cstamp = 0;
+    function blockedBy(c, x0, x1, z0, z1, gy, allowTrees) {
+      if (c.maxX <= x0 || c.minX >= x1 || c.maxZ <= z0 || c.minZ >= z1) return false;
+      if (c.y1 != null && c.y1 < gy + 0.1) return false;
+      if (c.y0 != null && c.y0 > gy + 2.0) return false;
+      if (allowTrees && (c.maxX - c.minX) < 0.8 && (c.maxZ - c.minZ) < 0.8 && treeNear((c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2, 0.6)) return false;
+      return true;
+    }
     // allowTrees: a tree trunk inside the box does not count (a square or a
     // car park keeps the trees that grew there and paves round them)
     function blocked(x0, x1, z0, z1, gy, allowTrees) {
+      for (let i = 0; i < cbig.length; i++) if (blockedBy(cbig[i], x0, x1, z0, z1, gy, allowTrees)) return true;
+      const i0 = Math.floor(x0 / GC), i1 = Math.floor(x1 / GC), j0 = Math.floor(z0 / GC), j1 = Math.floor(z1 / GC);
+      if ((i1 - i0 + 1) * (j1 - j0 + 1) > 400) return blockedScan(x0, x1, z0, z1, gy, allowTrees);
+      const st = ++cstamp;
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+        const L = cgrid.get(gkey(i, j)); if (!L) continue;
+        for (let q = 0; q < L.length; q++) {
+          const c = L[q];
+          if (c._dnS === st) continue; c._dnS = st;
+          if (blockedBy(c, x0, x1, z0, z1, gy, allowTrees)) return true;
+        }
+      }
+      return false;
+    }
+    function blockedScan(x0, x1, z0, z1, gy, allowTrees) {
       for (let i = 0; i < near.length; i++) {
         const c = near[i];
         if (c.maxX <= x0 || c.minX >= x1 || c.maxZ <= z0 || c.minZ >= z1) continue;
@@ -313,7 +357,7 @@
     function addCol(x0, x1, z0, z1, y0, y1, tag) {
       const c = { minX: x0, maxX: x1, minZ: z0, maxZ: z1, y0: y0, y1: y1, ref: null, noCam: true, dressing: tag };
       if (CBZ.colliders) CBZ.colliders.push(c);
-      near.push(c);
+      near.push(c); gridCol(c);
       out.colliders.push(c);
       return c;
     }
@@ -349,13 +393,35 @@
       }
       return false;
     }
+    // (point grids: an entry's list index rides with it, so "the first one
+    // near enough" is still the first in the list)
+    const PC = 4;
+    function pointGrid(L) {
+      const m = new Map();
+      for (let i = 0; i < L.length; i++) {
+        const k = gkey(Math.floor(L[i].x / PC), Math.floor(L[i].z / PC));
+        let B = m.get(k); if (!B) { B = []; m.set(k, B); } B.push(i);
+      }
+      return m;
+    }
+    const tgrid = pointGrid(trees), rgrid = pointGrid(rockSites);
+    let rockS = 0;
+    for (const k of rockSites) if (k.s > rockS) rockS = k.s;
+    function nearest(L, m, x, z, reach, hit) {
+      if (reach > PC * 6) { for (let i = 0; i < L.length; i++) if (hit(L[i])) return L[i]; return null; }
+      const i0 = Math.floor((x - reach) / PC), i1 = Math.floor((x + reach) / PC), j0 = Math.floor((z - reach) / PC), j1 = Math.floor((z + reach) / PC);
+      let best = -1;
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+        const B = m.get(gkey(i, j)); if (!B) continue;
+        for (let q = 0; q < B.length; q++) { const n = B[q]; if ((best < 0 || n < best) && hit(L[n])) best = n; }
+      }
+      return best < 0 ? null : L[best];
+    }
     function treeNear(x, z, r) {
-      for (let i = 0; i < trees.length; i++) { const t = trees[i]; if (Math.hypot(t.x - x, t.z - z) < r) return t; }
-      return null;
+      return nearest(trees, tgrid, x, z, r + 1e-6, function (t) { return Math.hypot(t.x - x, t.z - z) < r; });
     }
     function rockNear(x, z, r) {
-      for (let i = 0; i < rockSites.length; i++) { const k = rockSites[i]; if (Math.hypot(k.x - x, k.z - z) < r + k.s * 0.8) return k; }
-      return null;
+      return nearest(rockSites, rgrid, x, z, r + rockS * 0.8 + 1e-6, function (k) { return Math.hypot(k.x - x, k.z - z) < r + k.s * 0.8; });
     }
     const dC = function (x, z) { return Math.hypot(x - cx, z - cz); };
 
@@ -456,7 +522,7 @@
     /* A straight run along an axis from (x0,z0) to (x1,z1), with optional
        gate gaps [{at, w}] measured along it. Bays that would stand in a
        street, a building, a tree, a rock or another collider are skipped. */
-    function fenceRun(style, x0, z0, x1, z1, gates, tone, owner, skipIn) {
+    function* fenceRun(style, x0, z0, x1, z1, gates, tone, owner, skipIn) {
       const axis = Math.abs(x1 - x0) >= Math.abs(z1 - z0) ? "x" : "z";
       const a0 = axis === "x" ? Math.min(x0, x1) : Math.min(z0, z1);
       const a1 = axis === "x" ? Math.max(x0, x1) : Math.max(z0, z1);
@@ -495,6 +561,7 @@
           if (blocked(Math.min(bx0, bx1) + inX, Math.max(bx0, bx1) - inX, Math.min(bz0, bz1) + inZ, Math.max(bz0, bz1) - inZ, Math.min(gA, gB))) continue;
           fenceBay(style, bx0, bz0, bx1, bz1, tone, owner);
           laid++;
+          if (late()) yield 0;
         }
       }
       runs.push({ axis: axis, c: c, a0: a0, a1: a1 });
@@ -613,8 +680,9 @@
       addCol(x - 0.14, x + 0.14, z - 0.14, z + 0.14, gy, gy + 4, "lamp");
       lanternHeads.push({ x: x, y: y + 0.28, z: z, gy: gy, r: 4.2, s: 1.3 });
     }
-    function shrubs(x, z, rx, rz, n, salt, surfY, flowers) {
+    function* shrubs(x, z, rx, rz, n, salt, surfY, flowers) {
       for (let i = 0; i < n; i++) {
+        if (late()) yield 0;
         const a = h01(x + i, z, salt) * Math.PI * 2, d = Math.sqrt(h01(x, z + i, salt + 1));
         const px = x + Math.cos(a) * rx * d * 0.7, pz = z + Math.sin(a) * rz * d * 0.7;
         const gy = surfY != null ? surfY : gh(px, pz);
@@ -635,7 +703,7 @@
       box(A.mason, x - s / 2 + t / 2, gy + h / 2, z, t, h, s - 2 * t, 0, COL.concrete, { ao: gy });
       box(A.mason, x + s / 2 - t / 2, gy + h / 2, z, t, h, s - 2 * t, 0, COL.concrete, { ao: gy });
       box(A.soil, x, gy + h - 0.08, z, s - 2 * t, 0.04, s - 2 * t, 0, COL.mulch, {});
-      shrubs(x, z, s * 0.3, s * 0.3, 3, 0x7c1 + ((x * 3) | 0), gy + h - 0.06, true);
+      drain(shrubs(x, z, s * 0.3, s * 0.3, 3, 0x7c1 + ((x * 3) | 0), gy + h - 0.06, true));
       addCol(x - s / 2, x + s / 2, z - s / 2, z + s / 2, gy, gy + h, "planter");
     }
     function hydrant(x, z, gy, red) {
@@ -858,7 +926,7 @@
         box(A.mason, x + Math.cos(a) * rm, cy + 0.47, z + Math.sin(a) * rm, w + 0.02, 0.05, RO - RI + 0.1, -a + Math.PI / 2, COL.capstone, {});
       }
       cylY(A.soil, x, cy, z, RI, RI, 0.4, 20, COL.mulch, {});
-      shrubs(x, z, RI * 0.9, RI * 0.9, 9, 0x5a1, cy + 0.4, true);
+      yield* shrubs(x, z, RI * 0.9, RI * 0.9, 9, 0x5a1, cy + 0.4, true);
       addCol(x - RO * 0.8, x + RO * 0.8, z - RO * 0.8, z + RO * 0.8, cy - 0.1, cy + 0.5, "planter");
       // benches facing it, a bin beside two of them
       for (let k = 0; k < 4; k++) {
@@ -979,7 +1047,7 @@
         const st = k === frontKey || onStreet(e);
         if (st) { x0 -= e.out[0] * 0.3; x1 -= e.out[0] * 0.3; z0 -= e.out[1] * 0.3; z1 -= e.out[1] * 0.3; }
         if (k !== frontKey && st) continue;
-        const laid = fenceRun(k === frontKey && style === "hedge" ? "picket" : style, x0, z0, x1, z1, k === frontKey ? gates : [], tone, owner, null);
+        const laid = yield* fenceRun(k === frontKey && style === "hedge" ? "picket" : style, x0, z0, x1, z1, k === frontKey ? gates : [], tone, owner, null);
         if (laid) any = true;
         if (k === frontKey) gatePosts(style === "hedge" ? "picket" : style, alongX ? pathAt : x0, alongX ? z0 : pathAt, alongX, 1.2, tone);
       }
@@ -1007,7 +1075,7 @@
           const ex = alongX ? w : 0.85, ez = alongX ? 0.85 : w;
           box(A.soil, m[0], gy - 0.02, m[1], ex, 0.08, ez, 0, COL.mulch, {});
           yield 0;
-          shrubs(m[0], m[1], ex * 0.5, ez * 0.5, Math.max(1, Math.round(w / 0.9)), 0x3e1 + ((Math.abs(b.x * 13) | 0) % 911), undefined, true);
+          yield* shrubs(m[0], m[1], ex * 0.5, ez * 0.5, Math.max(1, Math.round(w / 0.9)), 0x3e1 + ((Math.abs(b.x * 13) | 0) % 911), undefined, true);
         }
       }
       // a mailbox on a post by the gate, facing the street
@@ -1143,17 +1211,17 @@
         if (!best) break;
         fields.push(best);
       }
-      { const __L = fields; for (let __i = 0; __i < __L.length; __i++) { (function (F, fi) {
+      { const __L = fields; for (let __i = 0; __i < __L.length; __i++) { yield* (function* (F, fi) {
         const x0 = F.x - F.w / 2, x1 = F.x + F.w / 2, z0 = F.z - F.d / 2, z1 = F.z + F.d / 2;
         // the gate faces the town
         const toC = [cx - F.x, cz - F.z];
         const gateRun = Math.abs(toC[0]) > Math.abs(toC[1]) ? (toC[0] > 0 ? "R" : "L") : (toC[1] > 0 ? "B" : "F");
         const gAt = gateRun === "L" || gateRun === "R" ? F.z : F.x;
         const owner = { field: fi };
-        fenceRun("rail", x0, z0, x1, z0, gateRun === "F" ? [{ at: gAt, w: 3.8 }] : [], null, owner);
-        fenceRun("rail", x0, z1, x1, z1, gateRun === "B" ? [{ at: gAt, w: 3.8 }] : [], null, owner);
-        fenceRun("rail", x0, z0, x0, z1, gateRun === "L" ? [{ at: gAt, w: 3.8 }] : [], null, owner);
-        fenceRun("rail", x1, z0, x1, z1, gateRun === "R" ? [{ at: gAt, w: 3.8 }] : [], null, owner);
+        yield* fenceRun("rail", x0, z0, x1, z0, gateRun === "F" ? [{ at: gAt, w: 3.8 }] : [], null, owner);
+        yield* fenceRun("rail", x0, z1, x1, z1, gateRun === "B" ? [{ at: gAt, w: 3.8 }] : [], null, owner);
+        yield* fenceRun("rail", x0, z0, x0, z1, gateRun === "L" ? [{ at: gAt, w: 3.8 }] : [], null, owner);
+        yield* fenceRun("rail", x1, z0, x1, z1, gateRun === "R" ? [{ at: gAt, w: 3.8 }] : [], null, owner);
         // the field gate, a galvanised five-bar, swung open against the fence
         {
           const alongX = gateRun === "F" || gateRun === "B";
@@ -1187,6 +1255,7 @@
             const qx1 = Math.min(rx1, px + cell), qz1 = Math.min(rz1, pz + cell);
             if (inBarn((px + qx1) / 2, (pz + qz1) / 2)) continue;
             quad(A.soil, new V3(px, gh(px, pz) + 0.03, pz), new V3(px, gh(px, qz1) + 0.03, qz1), new V3(qx1, gh(qx1, qz1) + 0.03, qz1), new V3(qx1, gh(qx1, pz) + 0.03, pz), vary(COL.soil, h01(px, pz, 0xf32), 0.1), { faceUp: true });
+            if (late()) yield 0;
           }
           const span0 = rowsAlongX ? rz0 : rx0, span1 = rowsAlongX ? rz1 : rx1;
           const run0 = rowsAlongX ? rx0 : rz0, run1 = rowsAlongX ? rx1 : rz1;
@@ -1200,6 +1269,7 @@
               // the furrow ridge, then the crop on it
               beam(A.soil, pa[0], ya + 0.06, pa[1], pb[0], yb + 0.06, pb[1], 0.14, 0.42, shade(COL.soil, 0.85), {});
               beam(A.plant, pa[0], ya + 0.26, pa[1], pb[0], yb + 0.26, pb[1], 0.34, 0.26, c, { ao: Math.min(ya, yb) + 0.1, aoK: 0.5, aoH: 0.35 });
+              if (late()) yield 0;
             }
           }
         }
@@ -1299,7 +1369,7 @@
     yield* (function* rocks() {
       const ico = new THREE.IcosahedronGeometry(1, 2);
       const icoS = new THREE.IcosahedronGeometry(1, 1);
-      function rock(x, y, z, sx, sy, sz, yaw, tilt, salt, small) {
+      function* rock(x, y, z, sx, sy, sz, yaw, tilt, salt, small) {
         const g = small ? icoS : ico;
         const P = g.attributes.position.array, cnt = g.attributes.position.count;
         // three cleavage planes: the flat broken faces that make a rock a rock
@@ -1312,6 +1382,7 @@
         const pos = new Float32Array(cnt * 3);
         const v = new V3();
         for (let i = 0; i < cnt; i++) {
+          if ((i & 63) === 63 && late()) yield 0;
           let px = P[i * 3], py = P[i * 3 + 1], pz = P[i * 3 + 2];
           const r = 1 + 0.2 * (vn3(px * 1.5 + salt, py * 1.5, pz * 1.5, 11) - 0.5) + 0.08 * (vn3(px * 4.1, py * 4.1 + salt, pz * 4.1, 12) - 0.5);
           px *= r; py *= r; pz *= r;
@@ -1328,6 +1399,7 @@
         const fnA = new Float32Array(cnt * 3);
         const key = new Map();
         for (let i = 0; i < cnt; i += 3) {
+          if ((i % 96) === 93 && late()) yield 0;
           _e1.set(pos[i * 3 + 3] - pos[i * 3], pos[i * 3 + 4] - pos[i * 3 + 1], pos[i * 3 + 5] - pos[i * 3 + 2]);
           _e2.set(pos[i * 3 + 6] - pos[i * 3], pos[i * 3 + 7] - pos[i * 3 + 1], pos[i * 3 + 8] - pos[i * 3 + 2]);
           _fn.crossVectors(_e1, _e2).normalize();
@@ -1344,6 +1416,7 @@
         const gyl = y - sy * 0.55;
         const vv = [new V3(), new V3(), new V3()], nn = [new V3(), new V3(), new V3()];
         for (let i = 0; i < cnt; i += 3) {
+          if ((i % 96) === 93 && late()) yield 0;
           let lichen = 0, up = 0;
           for (let k = 0; k < 3; k++) {
             const j = i + k;
@@ -1363,11 +1436,11 @@
           emitTri(A.rock, vv, nn, c, { ao: gyl, aoK: 0.45, aoH: Math.max(0.35, sy * 0.5) });
         }
       }
-      { const __L = rockSites; for (let __i = 0; __i < __L.length; __i++) { (function (s, i) {
+      { const __L = rockSites; for (let __i = 0; __i < __L.length; __i++) { yield* (function* (s, i) {
         const gy = gh(s.x, s.z);
         const salt = (i * 7919 + 17) & 0xffff;
         const sx = s.s * 0.5 * s.kx, sy = s.s * 0.5 * s.ky, sz = s.s * 0.5 * s.kz;
-        rock(s.x, gy + sy * 0.3, s.z, sx, sy, sz, s.yaw, s.tilt, salt, false);
+        yield* rock(s.x, gy + sy * 0.3, s.z, sx, sy, sz, s.yaw, s.tilt, salt, false);
         const c = addCol(s.x - Math.max(sx, sz) * 0.8, s.x + Math.max(sx, sz) * 0.8, s.z - Math.max(sx, sz) * 0.8, s.z + Math.max(sx, sz) * 0.8, gy - 0.2, gy + sy * 1.2, "rock");
         out.rocks.push({ x: s.x, z: s.z, r: Math.max(sx, sz), collider: c });
         // one or two fallen pieces beside the big one
@@ -1378,7 +1451,7 @@
           if (inStreet(px, pz, 0.3) || isWalk(px, pz)) continue;
           const k2 = 0.22 + 0.2 * ih(salt, k, 10);
           const g2 = gh(px, pz);
-          rock(px, g2 + sy * k2 * 0.25, pz, sx * k2, sy * k2 * 0.8, sz * k2, a, 0.2, salt + 101 * (k + 1), true);
+          yield* rock(px, g2 + sy * k2 * 0.25, pz, sx * k2, sy * k2 * 0.8, sz * k2, a, 0.2, salt + 101 * (k + 1), true);
         }
       })(__L[__i], __i); yield 0; } }
     })();
@@ -1536,7 +1609,7 @@
       g.setAttribute("normal", new THREE.BufferAttribute(yield* f32Steps(a.n), 3));
       g.setAttribute("color", new THREE.BufferAttribute(yield* f32Steps(a.c), 3));
       g.setAttribute("uv", new THREE.BufferAttribute(yield* f32Steps(a.uv), 2));
-      g.computeBoundingSphere();
+      if (CBZ.sphereSteps) yield* CBZ.sphereSteps(g); else g.computeBoundingSphere();
       yield 0;
       const mat = MATS[k];
       mat.name = "island-dressing-" + a.name;

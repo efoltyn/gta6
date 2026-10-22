@@ -436,7 +436,10 @@
       return !!bb && !handsUp(bb) && !gunOut() && !(V && V.alarmed && (CBZ.now || 0) - V.alarmed < 60);
     };
   }
-  function fitBank(b, lot) {
+  // (the fit-outs are generators on the island build's slice clock,
+  // world/disaster_arena.js CBZ.sliceLate: a stage of the room a step)
+  function late() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
+  function* fitBank(b, lot) {
     const IV = CBZ.islandVenue;
     IV.clear(b, 0);
     const F = IV.floor(b, 0), L = F.local, fy = F.yLocal;
@@ -458,6 +461,7 @@
       try { v = CBZ.cityVaultRoom(shim, { tier: hq ? "reserve" : "count", kind: "bank", name: name, lat: -99, till: { src: till, point: "vault" } }); }
       catch (e) { v = null; console.error("[island bank vault]", e); }
     }
+    if (late()) yield 0;
     made.vault = v;
     let zPart, doorX, doorW;
     if (v) { zPart = v.plz; doorX = v.plx; doorW = v.dw; claim(b, 0, { x0: v.plx - v.rw / 2 - 0.3, x1: v.plx + v.rw / 2 + 0.3, z0: v.plz - 0.3, z1: L.z1 }); }
@@ -516,6 +520,7 @@
       }
     }
 
+    if (late()) yield 0;
     // ---- THE MANAGER'S OFFICE: glass walls in the front +x corner, the loan desk
     const ox0 = Math.max(1.7, L.x1 - 3.4), ox1 = L.x1, oz0 = L.z0 + 2.6, oz1 = Math.min(oz0 + 3.2, zc - 1.0);
     let manager = null;
@@ -553,6 +558,7 @@
       }
     }
 
+    if (late()) yield 0;
     // ---- THE ATM on the street wall, right of the door, with its own cassette
     const ldh = lot.building.d / 2;
     const ax = Math.min(L.x1 - 0.5, 2.0);
@@ -570,6 +576,7 @@
     const ap = F.toWorld(ax, -ldh - 1.0);
     CBZ.bankStations.push({ kind: "atm", x: ap.x, y: b.gy + fy, z: ap.z, reach: 2.2, name: name, box: cas });
 
+    if (late()) yield 0;
     // ---- THE GUARDS: one at the strongroom door (two at the HQ), one on the hall at the HQ
     let guards = 0;
     for (const gz of [zPart - 0.95, zPart - 1.5]) for (const s of [-1, 1]) {
@@ -588,7 +595,8 @@
       }
     }
     // the hall itself: stone, the queue, the desks, the lights, the name
-    dressHall(b, { zc: zc, runs: runs, zPart: zPart, name: name, hq: hq });
+    if (late()) yield 0;
+    yield* dressHall(b, { zc: zc, runs: runs, zPart: zPart, name: name, hq: hq });
     // a strongroom blown or opened: the building's alarm
     if (v) v._venue = V;
     b._safeDone = true;
@@ -608,7 +616,7 @@
      wall, brochure racks, benches, the plants, panel lights. Everything the
      fit-out above stood (the line, the glass, the office, the guards) and
      claimed stays clear. */
-  function dressHall(b, h) {
+  function* dressHall(b, h) {
     const FIT = CBZ.islandFit, IV = CBZ.islandVenue;
     if (!FIT || !FIT.dress) return null;
     const R = FIT.room(b, 0), P = FIT.PAL;
@@ -618,7 +626,7 @@
     let run = null;
     for (const r of h.runs || []) if (!run || r[1] - r[0] > run[1] - run[0]) run = r;
     try {
-      return FIT.dress(b, {
+      return yield* FIT.dressSteps(b, {
         kind: "bank", room: hall,
         floor: { col: 0xd6cfc2, border: 0x5a4a3a, rect: hall },
         lights: "panel",
@@ -694,14 +702,14 @@
      and deal trays at each position, a camera in the corner, plastic chairs
      against the wall, the name over the glass. Behind it the cashier's side:
      filing cabinets, a wall of box files. */
-  function dressLoans(b, h) {
+  function* dressLoans(b, h) {
     const FIT = CBZ.islandFit;
     if (!FIT || !FIT.dress) return null;
     const R = FIT.room(b, 0), P = FIT.PAL;
     const front = { x0: R.x0, x1: R.x1, z0: R.z0, z1: Math.min(R.z1, h.zc - 0.32) };
     if (front.z1 - front.z0 < 2) return null;
     try {
-      FIT.dress(b, {
+      yield* FIT.dressSteps(b, {
         kind: "loans", room: front,
         floor: { col: 0x8a8a82, rect: front },
         lights: "tube",
@@ -737,7 +745,7 @@
         },
       });
       // the cashier's side: box files and cabinets on the office wall
-      FIT.dress(b, {
+      yield* FIT.dressSteps(b, {
         kind: "loans-back", room: { x0: R.x0, x1: h.cx1, z0: h.zc + 0.4, z1: h.zp - 0.08 }, lights: false,
         walls: [{ edge: "z1", mods: ["cabinets", FIT.MODS.shelf && function (D, Fr, a, w, d, o) { FIT.MODS.shelf(D, Fr, a, w, d, Object.assign({}, o, { style: "files", pal: P.paper, back: 0x8a8273 })); }], w: 1.0, d: 0.45, front: 0.6 }],
       });
@@ -812,7 +820,7 @@
     VIG_WEEK: VIG_WEEK, TERM_DAYS: TERM_DAYS,
   };
 
-  function fitLoans(b, lot) {
+  function* fitLoans(b, lot) {
     const IV = CBZ.islandVenue;
     IV.clear(b, 0);
     const F = IV.floor(b, 0), L = F.local, fy = F.yLocal;
@@ -866,7 +874,8 @@
     // his strongbox, in the office corner
     const sf = placeSafe(b, { grade: "office", k: 0, of: 20000 + h01(b, "sharkbox") * 40000, name: name + "'s safe", venue: V.kind, zMin: zp + 0.6 });
     if (sf) made.safes.push(sf);
-    dressLoans(b, { zc: zc, cx0: cx0, cx1: cx1, zp: zp, name: name });
+    if (late()) yield 0;
+    yield* dressLoans(b, { zc: zc, cx0: cx0, cx1: cx1, zp: zp, name: name });
     const st = F.toWorld(deskX, deskZ - 1.0);
     SHARK_DESKS.push({ x: st.x, y: F.y, z: st.z, key: key, name: name, rec: shark, V: V });
     b._safeDone = true;

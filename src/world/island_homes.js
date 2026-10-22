@@ -34,6 +34,9 @@
 
   const flats = [];            // the let flat of every apartments building standing
   function live() { return !!(g && g.mode === "archipelago"); }
+  // the island build's slice clock (world/disaster_arena.js): the fit-out
+  // yields there, a room or a floor a step
+  function late() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
   function homes() { return g.isleHomes || (g.isleHomes = {}); }
   function islandId(b) { const I = CBZ.islandVenue && CBZ.islandVenue.island(b); return (I && I.arena && I.arena.id) || "isle"; }
   function fmt(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
@@ -49,7 +52,7 @@
 
   /* ---- ONE FLAT on storey k of b ------------------------------------------ */
   const WALLC = [0xe7e1d6, 0xdfe4e2, 0xeee3cf, 0xe3dbe6];
-  function flat(b, k, K, let_) {
+  function* flat(b, k, K, let_) {
     const IV = CBZ.islandVenue, FIT = CBZ.islandFit;
     const F = IV.floor(b, k), I = b.interior || {};
     let sx = F.local.x0;
@@ -100,6 +103,7 @@
     // the flat's number on the landing side
     K.lbox(PX - 0.07, y + 1.6, dz1 + 0.25, 0.02, 0.14, 0.2, 0xb08d4a);
 
+    if (late()) yield 0;
     // THE BATHROOM: the far corner by the front wall, its door open
     const bz = zB - s * 2.2, bx = xa + 2.3;
     K.lbox(xa + 0.3 / 2, y + H / 2, bz, 0.3, H, 0.1, WC, { solid: true });
@@ -115,6 +119,7 @@
     K.lbox(xa + 0.5, y + 1.45, zB - s * 0.03, 0.55, 0.7, 0.02, 0xb9c4c9);
     K.lbox(xa + 1.4, y + 0.05, (bz + zB) / 2, 0.9, 0.1, 0.9, 0xeeeeea);
 
+    if (late()) yield 0;
     // THE BEDROOM at the far end: the bed's head to the end wall
     const bcx = (bx + 0.2 + xb) / 2, bcz = zB - s * 1.12;
     const bedR = K.furnish("bed", bcx, bcz, y, s > 0 ? 0 : Math.PI, { len: 2.1, wide: 1.6, tone: "auto" });
@@ -129,6 +134,7 @@
     const wz = zB - s * 3.0;
     K.furnish("wardrobe", xb - 0.32, wz, y, -Math.PI / 2, { len: 1.4, tone: "auto" });
 
+    if (late()) yield 0;
     // THE LIVING ROOM: the sofa facing the TV on the front wall
     const mz = (zA + zB) / 2 + s * 0.4;
     K.furnish("sofa", xa + 3.3, mz, y, -Math.PI / 2, { len: 2.2, tone: "auto" });
@@ -137,6 +143,7 @@
     K.lbox(xa + 0.13, y + 1.2, mz, 0.05, 0.66, 1.15, 0x0e1013);
     K.lbox((xa + xa + 4.2) / 2, y + 0.005, mz, 3.4, 0.01, 2.4, 0x7a5a4a);
 
+    if (late()) yield 0;
     // THE KITCHEN along the outside wall at the door end
     const kz = zA + s * 1.9;
     K.furnish("counter", xb - 0.4, kz, y, -Math.PI / 2, { len: 2.4, deep: 0.65 });
@@ -158,25 +165,26 @@
   }
 
   /* ---- THE BUILDING ---------------------------------------------------- */
-  function fitFlats(b, lot, job) {
+  function* fitFlats(b, lot, job) {
     const IV = CBZ.islandVenue, FIT = CBZ.islandFit;
     if (!IV || !FIT || !b.interior || (b.storeys | 0) < 2) return null;
     const K = FIT.kit(b, { name: "flats" });
     const top = (b.storeys | 0) - 1;
     let L = null;
     for (let k = 1; k <= top; k++) {
+      if (late()) yield 0;
       IV.clear(b, k);
-      const f = flat(b, k, K, k === top);
+      const f = yield* flat(b, k, K, k === top);
       if (f && k === top) L = f;
     }
-    if (!L) { K.flush(); return null; }
+    if (!L) { yield* K.flushSteps(); return null; }
     const key = islandId(b) + ":" + (b.planId != null ? b.planId : (Math.round(b.ox) + "," + Math.round(b.oz)));
     const storeys = b.storeys | 0;
     const F = { b: b, key: key, flat: L, rent: 50 * Math.round((150 + storeys * 20 + top * 15) / 50),
       price: 1000 * Math.round((16000 + storeys * 3500 + top * 2500) / 1000), board: null };
     for (const r of L.beds) { r.isMine = function () { return mine(F); }; r.home = b; }
     // THE LETTING BOARD on the front wall, beside the street door
-    K.flush();
+    yield* K.flushSteps();
     const ld = b.ld || b.d, lw = b.lw || b.w;
     const bx = Math.min(lw / 2 - 0.5, 1.75), bz = -ld / 2 - 0.05;
     const tex = FIT.text(["TO LET", "FLAT " + (top + 1)], { bg: "#f4f1e8", fg: "#8a1d1d", w: 256, h: 160 });

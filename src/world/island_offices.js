@@ -35,9 +35,12 @@
   const FIRMS = ["Meridian Capital", "Windward Shipping Co.", "Island Mutual", "Caribe Holdings", "Coral Bay Trust",
     "Halyard & Pike LLP", "Trade Wind Partners", "Leeward Assurance", "Ashby Consolidated", "Saltmarsh Group"];
   function hsh(s) { return CBZ.islandFit ? CBZ.islandFit.hash(s) : 0.5; }
+  // the island build's slice clock (world/disaster_arena.js): a fit-out is a
+  // generator that yields there, a floor or a few pieces a step
+  function late() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
 
   /* ---- A TOWER FLOOR, round its core -------------------------------------- */
-  function towerFloor(b, k, K, MK, staffOut) {
+  function* towerFloor(b, k, K, MK, staffOut) {
     const IV = CBZ.islandVenue, FIT = CBZ.islandFit, P = CBZ.cityMeshKit.pieces;
     const I = b.interior, iw = I.x1, id = I.z1;
     const s = Math.min(iw, id) * 0.42, so = s + 0.15, lz = so + 0.95;
@@ -50,6 +53,7 @@
     for (let i = 0; i < nD; i++) {
       const z = -lz + 0.85 + i * (2 * lz - 1.7) / Math.max(1, nD - 1);
       K.furnish("desk", (bx0 + bx1) / 2 - 0.1, z, y, -Math.PI / 2, { len: 1.4, deep: 0.7, tone: "cool" });
+      if (late()) yield 0;
     }
     // ---- the corner office behind glass, down the +x band
     const gx = lz - 0.05;
@@ -62,11 +66,15 @@
     // (the desk across the band: his back to the lift side of the room, the
     // window to his right, the visitors between him and the glass door)
     const dz = 1.5;
+    if (late()) yield 0;
     if (MK) {
       MK.at(ox, dz, 0, y); P.execDesk(MK, 2.2, 0.95);
+      if (late()) yield 0;
       MK.at(ox, dz + 0.78, Math.PI, y); P.swivelChair(MK, 0.5, { channels: true, back: 0.9 });
-      for (const x of [-0.6, 0.6]) { MK.at(ox + x, dz - 1.15, 0, y); P.guestChair(MK, 0.47); }
+      if (late()) yield 0;
+      for (const x of [-0.6, 0.6]) { MK.at(ox + x, dz - 1.15, 0, y); P.guestChair(MK, 0.47); if (late()) yield 0; }
       MK.at(ox + 0.5, dz - 0.22, 0, y + 0.75); P.monitor(MK, (salt + 1) % 6, 0.52, 0.3);
+      if (late()) yield 0;
       if (k === 1) { MK.at(iw - 0.45, -lz + 0.45, 0, y); P.figTree(MK, salt, 0.9); }
       else { MK.at(iw - 0.45, -lz + 0.45, 0, y); P.snakePlanter(MK, salt + 5, 0.34, 0.42); }
       FIT.solid(b, ox - 1.1, ox + 1.1, dz - 0.48, dz + 0.48, y, y + 0.76, { noStep: true });
@@ -78,6 +86,7 @@
       for (const x of [-0.6, 0.6]) K.furnish("chair", ox + x, dz - 1.2, y, 0, { tone: "exec" });
       K.furnish("planter", iw - 0.45, -lz + 0.45, y, 0, { kind: "tree", s: 1.1 });
     }
+    if (late()) yield 0;
     // ---- the meeting room behind glass, across the back band
     const gz = lz - 0.05;
     K.lbox((-lz + dg0) / 2, y + 1.4, gz, dg0 + lz, 2.8, 0.03, 0xcfe0e6, { glass: true, solid: true });
@@ -89,10 +98,13 @@
     K.lbox(0, y + 1.5, id - 0.04, 1.6, 0.9, 0.05, 0x0e1013);
     K.lbox(0, y + 1.5, id - 0.07, 1.5, 0.82, 0.01, 0x22344a, { glow: true });
     // ---- the waiting corner by the lift, plants in the corners
+    if (late()) yield 0;
     if (MK) {
-      for (const x of [-lz + 0.6, lz - 0.6]) { MK.at(x, -id + 0.5, 0, y); P.snakePlanter(MK, salt + (x > 0 ? 7 : 3), 0.36, 0.45); }
+      for (const x of [-lz + 0.6, lz - 0.6]) { MK.at(x, -id + 0.5, 0, y); P.snakePlanter(MK, salt + (x > 0 ? 7 : 3), 0.36, 0.45); if (late()) yield 0; }
       MK.at(-iw + 0.45, -id + 0.45, 0, y); P.snakePlanter(MK, salt + 11, 0.4, 0.5);
+      if (late()) yield 0;
       MK.at(-iw + 0.45, id - 0.45, 0, y); P.snakePlanter(MK, salt + 17, 0.4, 0.5);
+      if (late()) yield 0;
       MK.at(iw - 1.6, -id + 0.9, 0, y); P.loungeChair(MK, 0.42);
       MK.at(iw - 2.6, -id + 0.9, 0, y); P.loungeChair(MK, 0.42);
       FIT.seat(b, iw - 1.6, -id + 0.9, y, 0, "armchair", 0.42);
@@ -128,7 +140,7 @@
   }
 
   /* ---- A SMALL OFFICE'S RECEPTION (the ground floor of a house plan) ---- */
-  function smallLobby(b, K, MK, firm) {
+  function* smallLobby(b, K, MK, firm) {
     const IV = CBZ.islandVenue, FIT = CBZ.islandFit, P = CBZ.cityMeshKit && CBZ.cityMeshKit.pieces;
     IV.clear(b, 0);
     const R = FIT.room ? FIT.room(b, 0) : null;
@@ -148,9 +160,10 @@
     const tex = FIT.text([firm.toUpperCase()], { bg: "#20252b", fg: "#e2c98a", w: 512, h: 96, border: false });
     if (tex) FIT.panel(b, null, cx, y + 2.25, R.z1 - 0.03, 2.2, 0.41, Math.PI, tex, false);
     K.lbox(cx, y + 2.25, R.z1 - 0.015, 2.3, 0.5, 0.02, 0x20252b);
+    if (late()) yield 0;
     if (FIT.dress) {
       try {
-        FIT.dress(b, { kind: "office-lobby", K: K, keep: [{ x0: cx - 1.6, x1: cx + 1.6, z0: rz - 1.4, z1: R.z1 }], lights: "panel",
+        yield* FIT.dressSteps(b, { kind: "office-lobby", K: K, keep: [{ x0: cx - 1.6, x1: cx + 1.6, z0: rz - 1.4, z1: R.z1 }], lights: "panel",
           walls: [{ edge: "x1", mods: ["cabinets"], w: 0.96, d: 0.5, front: 0.9, max: 3, col: 0x6a7078 }],
           floor: { col: 0x3a4250 },
           extra: function (D) {
@@ -168,7 +181,7 @@
     return { k: 0, lx: cx, lz: rz + 0.8, face: Math.PI };
   }
 
-  function fitOffice(b, lot, job) {
+  function* fitOffice(b, lot, job) {
     const IV = CBZ.islandVenue, FIT = CBZ.islandFit;
     if (!IV || !FIT || !b.interior) return null;
     const K = FIT.kit(b, { name: "office" });
@@ -199,21 +212,23 @@
       // ---- EVERY FLOOR the lift serves: the executive pieces on the first
       // three, the furniture kit's on the floors above
       for (let k = 1; k <= n - 1; k++) {
+        if (late()) yield 0;
         IV.clear(b, k);
-        towerFloor(b, k, K, k <= 3 ? MK : null, work);
+        yield* towerFloor(b, k, K, k <= 3 ? MK : null, work);
       }
     } else {
-      const rec = smallLobby(b, K, MK, firm);
+      const rec = yield* smallLobby(b, K, MK, firm);
       if (rec) posts.push(IV.staff(b, rec.lx, rec.lz, rec.face, { job: "receptionist", hours: [8, 18], near: 150,
         dress: { archetype: "office", job: "receptionist" } }));
       for (let k = 1; k < n; k++) {
+        if (late()) yield 0;
         IV.clear(b, k);
         const w = smallFloor(b, k, K, MK);
         if (w && k === 1) work.push(Object.assign(w, { job: "harbour clerk" }));
       }
     }
-    if (MK) FIT.flushMesh(b, MK, "island-office");
-    K.flush();
+    if (MK) yield* FIT.flushMeshSteps(b, MK, "island-office");
+    yield* K.flushSteps();
     // the people upstairs, at their desks by day; the cleaner by night. They
     // go at the end of the day the way they came: the lift, or the stair.
     const exitUp = isTower ? { lx: 0, lz: -(Math.min(b.interior.x1, b.interior.z1) * 0.42 + 0.15) - 0.8 } : null;

@@ -102,12 +102,15 @@
     K.lbox(lx, ly, lz + 3 * t, r * 0.5, r * 0.5, 0.03, 0xf2c14e);
   }
   function frameLW(b) { return CBZ.islandFit.frame(b); }
+  // the island build's slice clock (world/disaster_arena.js): the fit-outs
+  // are generators that yield there, a few pieces a step
+  function late() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
 
   /* ======================================================================
      THE TOWN HALL
      ====================================================================== */
   const halls = [];
-  function fitHall(b, lot, job) {
+  function* fitHall(b, lot, job) {
     const IV = CBZ.islandVenue, FIT = CBZ.islandFit;
     if (!IV || !FIT || !b.interior) return null;
     const iid = islandId(b);
@@ -127,6 +130,7 @@
         const w = Math.min(TS, X1 - x), d = Math.min(TS, Z1 - z);
         const dark = (Math.round((x - X0) / TS) + Math.round((z - Z0) / TS)) % 2 === 1;
         K.lbox(x + w / 2, y0 + 0.004, z + d / 2, w, 0.008, d, dark ? 0x8e8a84 : 0xebe5d8);
+        if (late()) yield 0;
       }
       const mz = (Z0 + Z1) / 2 + 0.4;
       K.lbox(cx, y0 + 0.01, mz, 2.6, 0.006, 2.6, 0xb08d4a);
@@ -191,6 +195,7 @@
     }
 
     // ---- FIRST FLOOR: THE COUNCIL CHAMBER -----------------------------------
+    if (late()) yield 0;
     if (n >= 2) {
       IV.clear(b, 1);
       const R = roomOf(b, 1), y = R.y, X0 = R.X0, X1 = R.X1, Z0 = R.Z0, Z1 = R.Z1, cx = R.cx;
@@ -218,6 +223,7 @@
         FIT.seat(b, sx, bz + 0.75, by, Math.PI, "office chair", 0.5);
         if (i !== 2 && H.posts.length < 12) H.posts.push(IV.staff(b, sx, bz + 0.8, Math.PI, { k: 1, job: "council member", hours: [9, 16], near: 150,
           dress: { job: "council member" }, name: "Cllr. " + nameOf(iid + "cllr" + i), exit: landingExit(b, 1) }));
+        if (late()) yield 0;
       }
       flag(K, cx - dw / 2 + 0.3, Z1 - 0.35, by);
       flag(K, cx + dw / 2 - 0.3, Z1 - 0.35, by, [0xc8102e, 0xf2f2f2, 0x1d4e89]);
@@ -234,11 +240,13 @@
           const x = cx + i * 0.72;
           if (x - 0.3 < X0 || x + 0.3 > X1) continue;
           K.furnish("chair", x, rz, y, 0, { tone: { cloth: 0x7a2a2a, wood: 0x3a2b1e } });
+          if (late()) yield 0;
         }
       }
     }
 
     // ---- SECOND FLOOR: THE MAYOR'S OFFICE -----------------------------------
+    if (late()) yield 0;
     if (n >= 3) {
       IV.clear(b, 2);
       const R = roomOf(b, 2), y = R.y, X0 = R.X0, X1 = R.X1, Z0 = R.Z0, Z1 = R.Z1, cx = R.cx;
@@ -267,15 +275,21 @@
         MK.at(cx, dz - s * 0.4, 0, y);
         MK.box(MK.M.rug, 0, 0.004, 0, 3.6, 0.008, 3.0, 0xffffff);
         MK.at(cx, dz, s > 0 ? 0 : Math.PI, y); P.execDesk(MK, 2.4, 1.0);
+        if (late()) yield 0;
         MK.at(cx, dz + s * 0.75, s > 0 ? Math.PI : 0, y); P.swivelChair(MK, 0.5, { channels: true, back: 0.95 });
-        for (const sx of [-0.7, 0.7]) { MK.at(cx + sx, dz - s * 1.15, s > 0 ? 0 : Math.PI, y); P.guestChair(MK, 0.47); }
+        if (late()) yield 0;
+        for (const sx of [-0.7, 0.7]) { MK.at(cx + sx, dz - s * 1.15, s > 0 ? 0 : Math.PI, y); P.guestChair(MK, 0.47); if (late()) yield 0; }
         // the credenza against the wall behind him, a fig in each corner
         MK.at(cx, zO - s * 0.3, s > 0 ? Math.PI : 0, y); P.credenza(MK, 2.0, 0.72, 0.5, 4);
+        if (late()) yield 0;
         MK.at(X1 - 0.5, zO - s * 0.5, 0, y); P.figTree(MK, 0x51a, 1.0);
+        if (late()) yield 0;
         MK.at(X0 + 0.5, zO - s * 0.5, 0, y); P.snakePlanter(MK, 0x51b, 0.38, 0.5);
+        if (late()) yield 0;
         // the sitting corner
         MK.at(X1 - 1.0, pz + s * 1.3, -Math.PI / 2, y); P.loungeChair(MK, 0.42);
         MK.at(X1 - 1.0, pz + s * 2.4, -Math.PI / 2, y); P.loungeChair(MK, 0.42);
+        if (late()) yield 0;
         FIT.solid(b, cx - 1.2, cx + 1.2, dz - 0.5, dz + 0.5, y, y + 0.76, { noStep: true });
         FIT.solid(b, cx - 1.0, cx + 1.0, zO - s * 0.55, zO - s * 0.05, y, y + 0.72, { noStep: true });
         FIT.seat(b, cx, dz + s * 0.75, y, s > 0 ? Math.PI : 0, "office chair", 0.5);
@@ -296,12 +310,12 @@
       H.office = { k: 2, X0: X0, X1: X1, z0: Math.min(pz, zO), z1: Math.max(pz, zO), y: b.gy + y };
     }
     // the chamber's chairs and the mayor's office: one merge per material
-    if (MK) FIT.flushMesh(b, MK, "island-cityhall");
-    K.flush();
+    if (MK) yield* FIT.flushMeshSteps(b, MK, "island-cityhall");
+    yield* K.flushSteps();
     // the hall's walls panelled to the dado, its ceiling lit by panels
     if (FIT.dress) {
       try {
-        FIT.dress(b, { kind: "cityhall", room: { x0: R0.X0, x1: R0.X1, z0: R0.Z0, z1: R0.Z1 }, lights: "panel",
+        yield* FIT.dressSteps(b, { kind: "cityhall", room: { x0: R0.X0, x1: R0.X1, z0: R0.Z0, z1: R0.Z1 }, lights: "panel",
           walls: [{ edge: "x0", mods: ["panel"], w: 1.2, d: 0.06, front: 0, back: 0x6b4a33, upper: 0xe4ded2, mirror: false },
                   { edge: "x1", mods: ["panel"], w: 1.2, d: 0.06, front: 0, back: 0x6b4a33, upper: 0xe4ded2, mirror: false }] });
       } catch (e) { console.error("[town hall dress]", e); }
@@ -407,7 +421,7 @@
     cache[key] = t;
     return t;
   }
-  function fitRecruit(b, lot, job) {
+  function* fitRecruit(b, lot, job) {
     const IV = CBZ.islandVenue, FIT = CBZ.islandFit;
     if (!IV || !FIT || !b.interior) return null;
     const iid = islandId(b);
@@ -436,7 +450,7 @@
       const quarter = Math.abs(Math.round(Math.sin(s[3]))) === 1;
       K.lbox(s[0], s[1], s[2], quarter ? 0.02 : pw + 0.06, ph + 0.06, quarter ? pw + 0.06 : 0.02, 0x1a1a1a);
     }
-    K.flush();
+    yield* K.flushSteps();
     // the rest of a recruiting office: filing cabinets and brochure racks
     // down the walls, the corporal's desk at the back, the television on the
     // wall playing the service's film, panel lights (the posters keep their wall)
@@ -447,7 +461,7 @@
           { x0: X1 - 0.7, x1: X1, z0: (Z0 + Z1) / 2 - 0.45, z1: (Z0 + Z1) / 2 + 0.45 },
           { x0: cx - 1.6, x1: cx + 1.6, z0: dz - 1.7, z1: dz + 1.1 },
         ];
-        FIT.dress(b, {
+        yield* FIT.dressSteps(b, {
           kind: "recruit", room: { x0: X0, x1: X1, z0: Z0, z1: Z1 }, keep: keep, lights: "panel",
           walls: [{ edge: "x0", mods: ["brochures", "cabinets", "cabinets"], w: 0.96, d: 0.5, front: 0.9, col: 0x4b5234, pal: [0x3e4a2f, 0x1d2a44, 0xe9e2cf, 0xc9a24a] },
                   { edge: "x1", mods: ["cabinets"], w: 0.96, d: 0.5, front: 0.9, col: 0x6a7078 }],

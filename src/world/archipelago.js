@@ -149,6 +149,15 @@
   const _c = new THREE.Color();
   function lin(hex) { _c.setHex(hex); return [_c.r, _c.g, _c.b]; }
   function farGeometry(T, blocks, trees) {
+    const it = farSteps(T, blocks, trees, false);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  }
+  // (the same, on the island build's slice clock: the warm chore redraws an
+  // arriving island's far form from what it stood a few rings a step)
+  function* farSteps(T, blocks, trees, stepped) {
+    const late = stepped && CBZ.sliceLate ? CBZ.sliceLate : function () { return false; };
     const pos = [], col = [], idx = [];
     const sea = T.oceanY, cx = T.cx, cz = T.cz, R = T.R;
     // the land: rings dense at the coast, 64 sectors
@@ -158,6 +167,7 @@
     const c3 = [0, 0, 0], SAND = [0.40, 0.325, 0.205], ROCK = [0.075, 0.064, 0.052], WET = [0.18, 0.15, 0.10];
     const base = pos.length / 3;
     for (let i = 0; i < rings.length; i++) {
+      if (late()) yield 0;
       const r = rings[i], n = i === 0 ? 1 : SECT;
       for (let j = 0; j < n; j++) {
         const a = j / SECT * Math.PI * 2;
@@ -197,7 +207,7 @@
         idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
       }
     }
-    for (const B of blocks) box(B.x0, B.x1, B.y0, B.y1, B.z0, B.z1, B.wall, B.roof);
+    for (let i = 0; i < blocks.length; i++) { const B = blocks[i]; box(B.x0, B.x1, B.y0, B.y1, B.z0, B.z1, B.wall, B.roof); if ((i & 63) === 63 && late()) yield 0; }
     const P = T.plan;
     if (P && P.harbour) {
       const Q = P.harbour.quay, CON = [0.22, 0.21, 0.195];
@@ -212,7 +222,9 @@
     }
     // trees: a squat crown on a stalk (an octahedron), canopy green
     const LEAF = [0.030, 0.065, 0.020];
-    for (const t of trees) {
+    for (let ti = 0; ti < trees.length; ti++) {
+      const t = trees[ti];
+      if ((ti & 255) === 255 && late()) yield 0;
       const b = pos.length / 3, r = t.r, y = t.y;
       pos.push(t.x, y + r * 2.1, t.z, t.x + r, y + r, t.z, t.x, y + r, t.z + r, t.x - r, y + r, t.z, t.x, y + r, t.z - r, t.x, y, t.z);
       for (let k = 0; k < 6; k++) col.push(LEAF[0], LEAF[1], LEAF[2]);
@@ -223,8 +235,9 @@
     geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
     geo.setIndex(idx);
-    geo.computeVertexNormals();
-    geo.computeBoundingSphere();
+    if (late()) yield 0;
+    if (stepped && CBZ.normalsSteps) yield* CBZ.normalsSteps(geo); else geo.computeVertexNormals();
+    if (stepped && CBZ.sphereSteps) yield* CBZ.sphereSteps(geo); else geo.computeBoundingSphere();
     return geo;
   }
   // the plan's version: every lot to its storeys, in the colour its shell will wear
@@ -385,22 +398,31 @@
     }
     I.arena = job.arena;
     if (!I.terrain) I.terrain = job.terrain;
-    ST.workMs = ST.workMs * 0.5 + job.ms * 0.5;
+    // (what an island costs is its build AND its warm-up: the venues fit out
+    // in the warm chore, and the island is shown only once they are in)
+    I.warmMs = 0;
     // what is left before it can be shown, each its own step: its far form
     // redrawn from what it actually stood, its programs queued, its walls
     // joining the physics
     I.state = "warming"; I.t = 0; I.warmDone = false;
     chore(I.id + ":warm", (function* () {
-      try { makeFar(I, farGeometry(I.terrain || job.terrain, realBlocks(I.arena), realTrees(I.arena))); I.refined = true; } catch (e) { console.error("[archipelago far]", e); }
+      try { makeFar(I, yield* farSteps(I.terrain || job.terrain, realBlocks(I.arena), realTrees(I.arena), true)); I.refined = true; } catch (e) { console.error("[archipelago far]", e); }
       yield 0;
       try { if (CBZ.shaderQueue) CBZ.shaderQueue(I.arena.root, { full: true }); } catch (e) {}
       yield 0;
       if (job.attachSteps) yield* job.attachSteps(); else if (job.attach) job.attach();
+      // its vertex buffers and textures go up to the GPU a few MB a step
+      // while it is still hidden (core/fxwarm.js): the frame it appears in
+      // uploads nothing
+      if (CBZ.uploadSteps) { try { yield* CBZ.uploadSteps(I.arena.root, { bytes: SMALL ? 1.5e6 : 4e6 }); } catch (e) { console.error("[archipelago upload]", e); } }
       I.warmDone = true;
-    })());
+      ST.workMs = ST.workMs * 0.5 + (job.ms + (I.warmMs || 0)) * 0.5;
+    })(), I);
   }
   // resumable work, run under the frame's share (tick below)
-  function chore(label, it) { ST.chores.push({ label: label, it: it }); }
+  // (isle: the island whose arrival waits on it; its steps' time is counted
+  // on isle.warmMs, the rest of what that island costs to bring in)
+  function chore(label, it, isle) { ST.chores.push({ label: label, it: it, isle: isle || null }); }
   // the far form wins its ties with the near one while they dissolve into each other
   function cover(I, on) {
     const m = I.farMat;
@@ -554,10 +576,12 @@
     spawnI.job = CBZ.islandBuild(islandOpts(spawnI));
     spawnI.job.finish();
     if (spawnI.job.arena) {
+      const a0 = performance.now();
       spawnI.job.attach();
-      // what an island costs to build on THIS device, first measured here (a
-      // first build pays for every cache, so a warm one is ~0.7 of it)
-      ST.workMs = Math.max(1500, spawnI.job.ms * 0.7);
+      // what an island costs to build and fit out on THIS device, first
+      // measured here (a first build pays for every cache, so a warm one is
+      // ~0.7 of it)
+      ST.workMs = Math.max(1500, (spawnI.job.ms + performance.now() - a0) * 0.7);
       spawnI.arena = spawnI.job.arena;
       spawnI.terrain = spawnI.job.terrain;
       spawnI.arena.root.visible = true;
@@ -573,6 +597,19 @@
         I.refined = !!I.arena;
       } catch (e) { console.error("[archipelago far " + I.id + "]", e); }
       if (I.state === "near" && I.far) { I.far.visible = false; I.ready.value = 1; }
+    }
+    // every hull any harbour moors, built once now, behind the loading card
+    // (world/water_hulls.js keeps one template a hull and clones it; the first
+    // build of a hull is a lofted mesh in one call, a frame's hitch when an
+    // island's harbour streamed in a type the spawn island had not moored)
+    const MH = CBZ.marineHulls;
+    if (MH && MH.build) {
+      const keys = new Set();
+      for (const I of ST.isles) {
+        const H = I.terrain && I.terrain.plan && I.terrain.plan.harbour;
+        if (H && H.berths) for (const bt of H.berths) if (bt && bt.key) keys.add(bt.key);
+      }
+      keys.forEach(function (k) { try { MH.build(k); } catch (e) {} });
     }
     ST.built = true;
     if (spawnI.arena) { activate(spawnI); stockLife(spawnI.arena); }
@@ -690,11 +727,19 @@
     }
     // THE FRAME'S SHARE, measured: the chores, then the build in what is left
     let ms = BUDGET_MS;
-    if (building && building.state === "building" && building._closing > 3) {
-      const I = building, job = I.job;
-      const eta = Math.max(0.5, (I._shore - 600) / I._closing);         // s until it is in plain view
-      const left = Math.max(0, ST.workMs - job.ms);                     // ms of building left (learned)
-      ms = Math.min(BUDGET_MAX, Math.max(ms, left / (eta * 60) * 1.25));
+    // (the island coming in: still building, or built and warming up)
+    let coming = building && building.state === "building" ? building : null;
+    if (!coming) for (const I of ST.isles) if (I.state === "warming" && !I.warmDone) { coming = I; break; }
+    if (coming && coming.job) {
+      const I = coming, job = I.job;
+      const left = Math.max(0, ST.workMs - job.ms - (I.warmMs || 0));   // ms of its work left (learned)
+      // already in plain view (arrived, circling, slowed down off its shore):
+      // the most the frame can give, until it is whole
+      if (I._shore < 900) ms = BUDGET_MAX;
+      else if (I._closing > 3) {
+        const eta = Math.max(0.5, (I._shore - 600) / I._closing);       // s until it is in plain view
+        ms = Math.min(BUDGET_MAX, Math.max(ms, left / (eta * 60) * 1.25));
+      }
     }
     const until = now + ms;
     // (a teardown waits while a build is mid-building: it unregisters stair
@@ -705,7 +750,11 @@
       if (k < 0) break;
       const c = ST.chores[k];
       let r;
+      // (each chore step is a slice on the build's clock: its loops yield on CBZ.sliceLate)
+      if (CBZ.sliceBegin) CBZ.sliceBegin();
+      const c0 = c.isle ? performance.now() : 0;
       try { r = c.it.next(); } catch (e) { console.error("[archipelago " + c.label + "]", e); r = { done: true }; }
+      if (c.isle) c.isle.warmMs = (c.isle.warmMs || 0) + performance.now() - c0;
       if (r.done) ST.chores.splice(k, 1);
     }
     if (building && building.state === "building") {

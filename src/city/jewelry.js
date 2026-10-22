@@ -555,13 +555,16 @@
      the jeweller's post, the office safe in the back room. The rest (the
      dark panelling and the mirrors, the carpet, the pin-spots, the seats by
      the window, the name) is city/shopfloor.js dressShop. */
-  function islandFit(b, lot, job) {
+  // (the island fit-out is a generator on the island build's slice clock, CBZ.sliceLate)
+  function lateFit() { return !!(CBZ.sliceLate && CBZ.sliceLate()); }
+  function* islandFit(b, lot, job) {
     const F = SF(), IV = CBZ.islandVenue;
     if (!F || !IV || !econ() || !CBZ.islandGlass) return null;
     const P0 = F.plan(b, { backRoom: true });
     if (!P0) return null;
     IV.clear(b, 0);
-    const shell = P0.back ? F.shell(P0, lot, { goods: "boxes", wall: 0x3a2a20, trim: 0x2a1a10, safeGrade: "office", safeOf: 16000, safeName: "safe" }) : null;
+    const shell = P0.back ? (F.shellSteps ? yield* F.shellSteps(P0, lot, { goods: "boxes", wall: 0x3a2a20, trim: 0x2a1a10, safeGrade: "office", safeOf: 16000, safeName: "safe" }) : F.shell(P0, lot, { goods: "boxes", wall: 0x3a2a20, trim: 0x2a1a10, safeGrade: "office", safeOf: 16000, safeName: "safe" })) : null;
+    if (lateFit()) yield 0;
     const gd = F.gunDescriptor(P0);
     const zone = F.counterZone(P0, gd);
     const C = gd.counter;
@@ -611,7 +614,8 @@
       C: { x: C.x, z: C.z, w: C.w, d: C.d, top: C.top, tx: C.tx, tz: C.tz },
       inStore: function (x, z) { return P0.inside(x, z, 0.4); },
     });
-    if (F.dressShop) { try { F.dressShop(P0, lot, "jewelry", gd, { keep: keep }); } catch (e) { console.error("[jeweller dress]", e); } }
+    if (lateFit()) yield 0;
+    if (F.dressShop) { try { if (F.dressShopSteps) yield* F.dressShopSteps(P0, lot, "jewelry", gd, { keep: keep }); else F.dressShop(P0, lot, "jewelry", gd, { keep: keep }); } catch (e) { console.error("[jeweller dress]", e); } }
     return function () { disposeStore(S); if (shell) shell.dispose(); };
   }
   if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on("jewelry", islandFit);
