@@ -216,9 +216,10 @@
     } catch (e) {}
     return out;
   }
-  // which nation stands at a world point (the polity's own map), the
-  // Republic when nobody claims it
+  // which nation stands at a world point (city/borders.js, the map's own
+  // partition), the Republic at sea
   function nationAt(x, z) {
+    if (CBZ.countryAt) { try { const id = CBZ.countryAt(x, z); if (id) return id; } catch (e) {} }
     const P = CBZ.polity;
     if (P && P.of && P.countryOf) {
       try {

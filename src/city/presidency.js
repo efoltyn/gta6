@@ -2922,10 +2922,9 @@
   }
   function inCountry(rec) {
     const P = CBZ.player;
-    if (!P || !P.pos || !CBZ.polity || !CBZ.polity.of) return true;
-    const loc = CBZ.polity.of(P.pos.x, P.pos.z);
-    const c = loc && CBZ.polity.countryOf ? CBZ.polity.countryOf(loc.id) : null;
-    return !!(c && rec && c.id === rec.id);
+    if (!P || !P.pos || !CBZ.countryAt) return true;
+    const id = CBZ.countryAt(P.pos.x, P.pos.z);
+    return !!(id && rec && id === rec.id);
   }
   function tickFallsDay(d) {
     if (!on() || !CFG.PRESIDENCY_FALLS) return;

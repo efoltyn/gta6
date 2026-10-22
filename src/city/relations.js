@@ -381,9 +381,8 @@
         if (!rec || !CBZ.polity || !CBZ.polity.countryOf) return;
         const victim = CBZ.polity.countryOf(rec.id);
         if (!victim || victim.id === "republic") return;
-        const soilRec = (ped && ped.pos && CBZ.polity.of) ? CBZ.polity.of(ped.pos.x, ped.pos.z) : null;
-        const soil = soilRec ? CBZ.polity.countryOf(soilRec.id) : null;
-        if (!soil || soil.id !== "republic") return;   // "if it happened on republic soil"
+        const soil = (ped && ped.pos && CBZ.countryAt) ? CBZ.countryAt(ped.pos.x, ped.pos.z) : null;
+        if (soil !== "republic") return;   // "if it happened on republic soil"
         event(victim.id, "republic", "insult", 15);
         if (CBZ.cityFeed) CBZ.cityFeed("" + nameOf(victim.id) + "-Republic relations sour after the killing", "#ff9a5e");
       } catch (e) {}

@@ -926,6 +926,88 @@
   }
   function viewBox(p) { return { x0: p.wx(0), x1: p.wx(W), z0: p.wz(0), z1: p.wz(H) }; }
 
+  // ---- COUNTRIES (city/borders.js) ------------------------------------------
+  // The land borders are ONE Path2D in world metres per partition version
+  // (normal and at-war apart), stroked through the view transform: one
+  // stroke a frame at any zoom, crisp, never a magnified baked line. The
+  // wash under them is baked into the base plate (drawTerrainBasemap).
+  let borderPaths = null;
+  function countryPaths() {
+    if (!CBZ.countryBorders || !CBZ.countryVersion) return null;
+    let list;
+    try { list = CBZ.countryBorders(); } catch (e) { return null; }
+    let key = CBZ.countryVersion() + ":";
+    for (const b of list) key += b.war ? "1" : "0";
+    if (borderPaths && borderPaths.key === key) return borderPaths;
+    const peace = new Path2D(), war = new Path2D();
+    let n = 0;
+    for (const b of list) {
+      const pts = b.pts; if (!pts || pts.length < 4) continue;
+      const P2 = b.war ? war : peace;
+      P2.moveTo(pts[0], pts[1]);
+      for (let i = 2; i < pts.length; i += 2) P2.lineTo(pts[i], pts[i + 1]);
+      n++;
+    }
+    borderPaths = { key: key, peace: peace, war: war, n: n, hasWar: list.some(function (b) { return b.war; }) };
+    return borderPaths;
+  }
+  function drawCountryBorders(p) {
+    const BP = countryPaths(); if (!BP || !BP.n) return;
+    const sc = p.sc;
+    ctx.save();
+    ctx.translate(p.left - p.bounds.minX * sc, p.top - p.bounds.minZ * sc);
+    ctx.scale(sc, sc);
+    ctx.lineJoin = "round"; ctx.lineCap = "butt";
+    const pass = function (path, casingW, w, col, dash) {
+      ctx.setLineDash([]);
+      ctx.strokeStyle = "rgba(10,12,16,.5)"; ctx.lineWidth = casingW / sc; ctx.stroke(path);
+      ctx.setLineDash([dash[0] / sc, dash[1] / sc]);
+      ctx.strokeStyle = col; ctx.lineWidth = w / sc; ctx.stroke(path);
+    };
+    pass(BP.peace, 3.6, 1.7, "rgba(246,238,220,.9)", [9, 5]);
+    // a border at war: red, heavier, longer dashes (a front line)
+    if (BP.hasWar) {
+      pass(BP.war, 5, 2.6, "rgba(255,84,70,.95)", [14, 4]);
+    }
+    ctx.restore();
+    ctx.setLineDash([]);
+  }
+  // country names, lettered across the land at country scale: biggest on the
+  // world view, gone by the time you are reading streets
+  function drawCountryNames(p) {
+    if (!CBZ.countries) return;
+    const zm = map.view.z;
+    const fade = Math.max(0, Math.min(1, (3.6 - zm) / 2));
+    if (fade <= 0.02) return;
+    let list;
+    try { list = CBZ.countries(); } catch (e) { return; }
+    const homeId = (list.find(function (c) { return c.home; }) || {}).id;
+    const own = [];
+    const prevA = ctx.globalAlpha;
+    for (const c of list) {
+      const L = c.label; if (!L) continue;
+      const nx = p.x(L.x), ny = p.z(L.z);
+      const name = String(c.name || c.id).toUpperCase();
+      const wpx = Math.min(L.w, (L.extent.maxX - L.extent.minX)) * p.sc;
+      if (wpx < 70) continue;
+      if (nx < -wpx || nx > W + wpx || ny < -40 || ny > H + 40) continue;
+      const size = Math.max(13, Math.min(34, wpx / Math.max(7, name.length * 1.05)));
+      const foe = homeId && c.atWar.indexOf(homeId) >= 0;
+      ctx.globalAlpha = prevA * fade;
+      if ("letterSpacing" in ctx) ctx.letterSpacing = (size * 0.32).toFixed(1) + "px";
+      mapLabel(name, nx, ny, {
+        size: size, weight: 800,
+        fill: c.home ? "rgba(255,224,146,.92)" : foe ? "rgba(255,150,132,.9)" : "rgba(244,238,224,.8)",
+        haloC: "rgba(8,10,14,.6)", haloW: 3.4,
+        sub: c.home ? "Your country" : foe ? "At war" : null,
+        subFill: c.home ? "rgba(255,224,146,.7)" : "rgba(255,150,132,.75)",
+        boxes: own, force: true,
+      });
+      if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    }
+    ctx.globalAlpha = prevA;
+  }
+
   function drawLots(lots, p) {
     for (const lot of lots || []) {
       ctx.fillStyle = lot.kind === "park" ? "rgba(76,153,82,.62)" : (lot.kind === "abandoned" ? "rgba(146,77,67,.75)" : "rgba(112,127,147,.72)");
@@ -1653,6 +1735,14 @@
       return { r: r * grain, g: g * grain, b: b * grain };
     }
 
+    // COUNTRIES: each nation's land carries a faint wash of its own flag
+    // colour (city/borders.js decides whose ground every sample is), so the
+    // terrain reads as a political map without losing its relief.
+    const nTint = Object.create(null);
+    const ownAt = typeof CBZ.countryAtExact === "function" ? CBZ.countryAtExact : null;
+    if (ownAt && CBZ.countries) {
+      try { for (const c of CBZ.countries()) nTint[c.id] = { rgb: hexRgb(c.color), a: c.home ? 0.13 : 0.2 }; } catch (e) {}
+    }
     for (let py = y0; py < y1; py += STEP) {
       const wz = p.wz(py + STEP * 0.5);
       for (let px = x0; px < x1; px += STEP) {
@@ -1707,6 +1797,12 @@
           r = Math.max(0, Math.min(255, Math.round(r * k)));
           g = Math.max(0, Math.min(255, Math.round(g * k)));
           b = Math.max(0, Math.min(255, Math.round(b * k)));
+        }
+        if (ownAt) {
+          let cid = null;
+          try { cid = ownAt(wx, wz, true); } catch (e) { cid = null; }
+          const T = cid && nTint[cid];
+          if (T) { r = mix(r, T.rgb[0], T.a); g = mix(g, T.rgb[1], T.a); b = mix(b, T.rgb[2], T.a); }
         }
         for (let oy = 0; oy < STEP && py + oy < H; oy++) {
           for (let ox = 0; ox < STEP && px + ox < W; ox++) {
@@ -2716,6 +2812,7 @@
       for (const a of CBZ.cityWildlife || []) if (a && !a.dead && CBZ.cityTargetsPlayer && CBZ.cityTargetsPlayer(a)) dot(a.pos.x, a.pos.z, p, "#ff3b35", 3.0);
     }
     compositePlate(plates.marks, p);  // baked ink (region names only when MAP_ICONS_V2 is off)
+    drawCountryBorders(p);           // whose ground: one stroked path, crisp at any zoom
     seedPlateBoxes(p);                // …and its label boxes, so live text avoids them
     // ---- MAP_V2 LIVE GLYPH LAYER: fixed-size at the current zoom so nothing
     //      balloons. POI icons + settlements always; climb marks + board ticks
@@ -2727,6 +2824,7 @@
     // so nothing can ever be drawn on top of anything else.
     // Outside the MAP_V2 gate because these names are BAKED when MAP_ICONS_V2
     // is off — exactly one of the two paths must run, whatever the other says.
+    drawCountryNames(p);             // nations under every place name (they fade as you zoom in)
     if (ICONS_V2()) drawCityTitle(p, A);
     if (MAP_V2()) {
       if (detail) drawCityPoisLive(p, A); // city services only at city scale

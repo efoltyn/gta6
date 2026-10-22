@@ -1112,7 +1112,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
-<script src="src/city/flags.js?v=btn1011m"></script>
+<script src="src/city/flags.js?v=borders1022"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1799,7 +1799,7 @@ document.body.appendChild(b);}}catch(e){}})();
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=football1014"></script>
+<script src="src/systems/fullmap.js?v=borders1022"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -1980,6 +1980,8 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.addLandmass so load order isn't strictly load-bearing today, but
      this keeps the "assets define before buildTown reads them" contract
      honest for any future eager caller. -->
+<!-- WHOSE GROUND IS THIS (city/borders.js): every point to one country, derived from the claims the world already makes; CBZ.countryAt / CBZ.countries / CBZ.countryBorders for the map, the radar and every rule that cares. -->
+<script src="src/city/borders.js?v=borders1022"></script>
 <!-- REAL CASINOS — order-90 dress pass over every casino lot (mainland Golden
      Ace + composed town casinos): marquee/mast exterior, felt tables with
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after
@@ -2180,7 +2182,7 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=football1014"></script>
+<script src="src/city/warroom.js?v=borders1022"></script>
 <script src="src/city/frontline.js?v=army1013m"></script>
 <script src="src/city/perimeter.js?v=protestcpu1022"></script>
 <script src="src/city/president_public.js?v=protestcpu1022"></script>

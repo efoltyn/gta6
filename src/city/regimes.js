@@ -490,8 +490,7 @@
     curfewT -= dt; if (curfewT > 0) return;
     curfewT = 1.0;
     const P = CBZ.player; if (!P || P.dead) return;
-    const loc = (CBZ.polity && CBZ.polity.of) ? CBZ.polity.of(P.pos.x, P.pos.z) : null;
-    const country = loc && CBZ.polity.countryOf ? CBZ.polity.countryOf(loc.id) : countryRec(REPUBLIC_ID);
+    const country = (CBZ.countryRecAt && CBZ.countryRecAt(P.pos.x, P.pos.z)) || countryRec(REPUBLIC_ID);
     if (!country || !isAuthoritarian(country.govType)) return;
     const hr = CBZ.citySunHour ? CBZ.citySunHour() : 12;
     const night = hr >= CURFEW_LO || hr < CURFEW_HI;
@@ -513,8 +512,7 @@
   // ============================================================
   CBZ.regimeHeatMul = function () {
     const P = CBZ.player;
-    const loc = (P && P.pos && CBZ.polity && CBZ.polity.of) ? CBZ.polity.of(P.pos.x, P.pos.z) : null;
-    const country = loc && CBZ.polity.countryOf ? CBZ.polity.countryOf(loc.id) : countryRec(REPUBLIC_ID);
+    const country = (P && P.pos && CBZ.countryRecAt && CBZ.countryRecAt(P.pos.x, P.pos.z)) || countryRec(REPUBLIC_ID);
     return (country && isAuthoritarian(country.govType)) ? HEAT_MUL : 1;
   };
   function gangBoostMul() {

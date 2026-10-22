@@ -144,8 +144,8 @@
   function capFirst(s) { s = String(s || ""); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
   function line(path, key) { const L = A() && A().lines; const v = L && L[path]; return v && typeof v === "object" ? (v[key] || "") : (v || ""); }
 
-  // WHOSE GROUND IS THIS. A city/base rect first (polity.of), then a state's
-  // rect (the republic's mainland is one), then nobody's — open sea.
+  // THE PLACE (for a name): a city/base rect first (polity.of), then a
+  // state's rect. Which COUNTRY a point is in is nationAt, below.
   function inRect(r, x, z) { return r && Math.abs(x - r.cx) <= r.hx && Math.abs(z - r.cz) <= r.hz; }
   function placeAt(x, z) {
     const P = CBZ.polity; if (!P) return null;
@@ -157,7 +157,9 @@
     }
     return rec;
   }
+  // whose ground: city/borders.js, the same partition the map draws
   function nationAt(x, z) {
+    if (CBZ.countryAt) { try { return CBZ.countryAt(x, z); } catch (e) {} }
     const rec = placeAt(x, z);
     if (!rec) return null;
     const c = CBZ.polity.countryOf ? CBZ.polity.countryOf(rec.id) : null;

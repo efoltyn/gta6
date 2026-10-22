@@ -351,6 +351,39 @@
         ctx.beginPath(); ctx.moveTo(u(A.bridge.minX), v(bz)); ctx.lineTo(u(A.bridge.maxX), v(bz)); ctx.stroke();
       }
     }
+    // ---- COUNTRY BORDERS (city/borders.js): a thin dashed line where one
+    //      is near, the same line the [M] map draws. Shapes come from the
+    //      cached partition (ifReady: never builds it on a radar frame).
+    if (CBZ.countryBorders) {
+      let BL = null;
+      try { BL = CBZ.countryBorders(true); } catch (e) { BL = null; }
+      if (BL && BL.length) {
+        const reach = R + 40;
+        ctx.save(); ctx.scale(sc, sc); ctx.translate(-px, -pz);
+        ctx.lineJoin = "round";
+        for (const b of BL) {
+          const pts = b.pts; if (!pts || pts.length < 4) continue;
+          let bb = b._bb;
+          if (!bb || b._bbPts !== pts) {
+            bb = b._bb = [Infinity, -Infinity, Infinity, -Infinity]; b._bbPts = pts;
+            for (let i = 0; i < pts.length; i += 2) { const x = pts[i], z = pts[i + 1]; if (x < bb[0]) bb[0] = x; if (x > bb[1]) bb[1] = x; if (z < bb[2]) bb[2] = z; if (z > bb[3]) bb[3] = z; }
+          }
+          if (bb[0] > px + reach || bb[1] < px - reach || bb[2] > pz + reach || bb[3] < pz - reach) continue;
+          if (!b._path || b._pathPts !== pts) {
+            const P2 = new Path2D(); P2.moveTo(pts[0], pts[1]);
+            for (let i = 2; i < pts.length; i += 2) P2.lineTo(pts[i], pts[i + 1]);
+            b._path = P2; b._pathPts = pts;
+          }
+          ctx.setLineDash([]);
+          ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.lineWidth = 3 / sc; ctx.stroke(b._path);
+          ctx.setLineDash([6 / sc, 4 / sc]);
+          ctx.strokeStyle = b.war ? "rgba(255,90,76,.95)" : "rgba(240,232,212,.85)";
+          ctx.lineWidth = (b.war ? 2 : 1.4) / sc; ctx.stroke(b._path);
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+    }
     ctx.restore();   // drop rotation — blips/labels draw upright from here
 
     // soft vignette: the rim darkens so the centre (you) carries the eye — the
@@ -359,6 +392,26 @@
     const vg = ctx.createRadialGradient(cx, cy, W * 0.30, cx, cy, W / 2);
     vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.45)");
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    // ---- THE CROSSING: the country's name, once, as you enter it — fades
+    //      in, holds, fades out over 4 s, low in the dial
+    const XC = CBZ.countryCrossing ? CBZ.countryCrossing() : null;
+    if (XC && XC.name) {
+      const age = (performance.now() - XC.at) / 1000;
+      if (age >= 0 && age < 4) {
+        const a = Math.min(1, age / 0.35, (4 - age) / 0.8);
+        const nm = String(XC.name).toUpperCase();
+        let fs = 11;
+        ctx.font = "800 " + fs + "px Fredoka, sans-serif";
+        const maxW = W * 0.74;
+        const mw = ctx.measureText(nm).width;
+        if (mw > maxW) { fs = Math.max(7, Math.floor(fs * maxW / mw)); ctx.font = "800 " + fs + "px Fredoka, sans-serif"; }
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.globalAlpha = a;
+        ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,.75)"; ctx.strokeText(nm, cx, H * 0.76);
+        ctx.fillStyle = "#f4ecd8"; ctx.fillText(nm, cx, H * 0.76);
+        ctx.globalAlpha = 1; ctx.textBaseline = "alphabetic";
+      }
+    }
 
     // a blip helper that clamps off-map targets to the rim (so danger off-screen
     // still shows a bearing). draw(x,y,onRim) does the icon.
