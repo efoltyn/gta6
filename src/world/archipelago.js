@@ -112,6 +112,8 @@
     const o = M.origin || { x: 0, z: 0 };
     const v = Object.assign({ fogNear: 420, fogFar: 5600, build: 2100, drop: 3300 }, M.view || {});
     let spawn = M.spawn;
+    // a saved game comes back on the island it was left on (world/isles_save.js)
+    try { const s = CBZ.islesSave && CBZ.islesSave.island ? CBZ.islesSave.island() : null; if (s && (M.islands || []).some(function (d) { return d.id === s; })) spawn = s; } catch (e) {}
     try { const q = new URLSearchParams(location.search).get("isles"); if (q) spawn = q; } catch (e) {}
     const isles = (M.islands || []).map(function (d) {
       return { def: d, id: d.id, name: d.name || d.id, x: o.x + (+d.x || 0), z: o.z + (+d.z || 0), R: +d.R || 240,

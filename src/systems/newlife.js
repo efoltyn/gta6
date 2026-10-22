@@ -62,7 +62,7 @@
     try {
       agreed = !window.confirm || window.confirm(
         "Start a completely new life?\n\n" +
-        "This permanently clears every saved city character and city progression. " +
+        "This permanently clears every saved character and everything they have, in the city and on the Isles. " +
         "Graphics, controls, and non-city records will stay unchanged."
       );
     } catch (e) {}

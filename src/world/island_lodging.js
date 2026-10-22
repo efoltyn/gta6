@@ -64,6 +64,7 @@
     rooms: [],                 // every fitted venue
     fitted: new WeakSet(),     // buildings already fitted
     rent: null,                // { room, until (CBZ.dayTime), wake }
+    keep: null,                // a rental whose building is not standing: { key, until, wake }
     sleeping: false,
     tres: null,                // a trespass case in progress
     scanT: 0,
@@ -437,14 +438,42 @@
     room.own.attach();
     for (const r of room.beds) { r.isMine = mineFn(room); r.lodging = room; }
     S.rooms.push(room);
+    adopt(room);
     return room;
   }
   function mineFn(room) { return function () { return rented(room); }; }
+  /* THE ROOM IS STILL YOURS WHEN ITS ISLAND IS NOT STANDING. A rental is kept
+     as plain data (island id + lot id, the checkout, where you get up) while
+     its building is not in the world: an island streamed out behind you, or
+     a game loaded from the save (world/isles_save.js), and given back to the
+     room when that building is fitted again. */
+  function roomKey(room) {
+    const b = room && room.b;
+    if (!b) return null;
+    const A = room.A || (CBZ.islandVenue && CBZ.islandVenue.island && CBZ.islandVenue.island(b) && CBZ.islandVenue.island(b).arena);
+    const iid = (A && A.id) || "isle";
+    return iid + ":" + (b.planId != null ? b.planId : (Math.round(b.ox) + "," + Math.round(b.oz)));
+  }
+  function adopt(room) {
+    const K = S.keep;
+    if (!K || K.key !== roomKey(room)) return;
+    S.keep = null;
+    if (!(dayNow() < K.until)) return;
+    S.rent = { room: room, until: K.until };
+    if (K.wake) S.wake = { room: room, at: K.wake };
+  }
+  function keepOf() {
+    if (S.rent && S.rent.room) {
+      return { key: roomKey(S.rent.room), until: S.rent.until,
+        wake: S.wake && S.wake.room === S.rent.room && S.wake.at ? { x: S.wake.at.x, y: S.wake.at.y, z: S.wake.at.z, face: S.wake.at.face || 0 } : null };
+    }
+    return S.keep && dayNow() < S.keep.until ? S.keep : null;
+  }
   function drop(room) {
     const i = S.rooms.indexOf(room);
     if (i >= 0) S.rooms.splice(i, 1);
     room.own.dispose();
-    if (S.rent && S.rent.room === room) S.rent = null;
+    if (S.rent && S.rent.room === room) { S.keep = keepOf(); S.rent = null; }
     if (room.clerk) { room.clerk._lodgeClerk = null; room.clerk = null; }
   }
   // the venue seam, when it is on main (world/island_venue.js)
@@ -600,7 +629,7 @@
     if (!clerk) return false;
     if (!room.beds.length) { say(clerk, "We're full tonight."); return false; }
     if (!spend(room.price)) { say(clerk, "It's $" + room.price + " a night."); return false; }
-    S.rent = { room: room, until: checkout() };
+    S.rent = { room: room, until: checkout() }; S.keep = null;
     const fl = (room.floor | 0) + 1;            // the street is the first floor
     if (room.use === "hotel") say(clerk, "Room " + room.number + ", " + (ORD[fl] || (fl + "th")) + " floor. Checkout's noon.");
     else say(clerk, "Upstairs. Checkout's noon.");
@@ -912,6 +941,14 @@
     rooms: function () { return S.rooms; },
     rental: function () { return S.rent ? { use: S.rent.room.use, number: S.rent.room.number, floor: S.rent.room.floor, until: S.rent.until } : null; },
     wakeSpot: wakeSpot,
+    // the save (world/isles_save.js): the rental as plain data, and back
+    snapshot: function () { const K = keepOf(); return K ? { key: K.key, until: K.until, wake: K.wake || null } : null; },
+    restore: function (K) {
+      S.rent = null; S.wake = null; S.keep = null;
+      if (!K || typeof K.key !== "string" || !isFinite(+K.until)) return;
+      S.keep = { key: K.key, until: +K.until, wake: K.wake && isFinite(+K.wake.x) ? { x: +K.wake.x, y: +K.wake.y || 0, z: +K.wake.z, face: +K.wake.face || 0 } : null };
+      for (const room of S.rooms) adopt(room);
+    },
     rent: rent,
     fit: fit,
     state: function () {

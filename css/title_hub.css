@@ -245,7 +245,8 @@ body.touch #title .mode-escape-only .controls .keys-touch{display:grid;}
 #title #playBtn:focus-visible{outline:3px solid #fff; outline-offset:3px;}
 
 #title .new-life-btn{display:none;}
-body.mode-city #title .new-life-btn{
+body.mode-city #title .new-life-btn,
+body.mode-archipelago #title .new-life-btn{
   display:flex; flex-direction:column; align-items:center; gap:2px; width:100%; margin:0;
   pointer-events:auto; cursor:pointer; padding:8px 12px; border-radius:10px;
   background:transparent; color:#ffb2a6; border:1px solid rgba(255,120,104,.32);

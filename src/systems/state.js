@@ -679,7 +679,8 @@
     // (seconds on an iPad: the OPFS worker and the wasm), and a Play pressed
     // before it settled ran on the stale localStorage mirror (city/
     // worldstate.js cityWorldStoreReady). Wait for it, capped, then start.
-    if (g.mode === "city" && CBZ.cityWorldStoreReady) {
+    // The Isles save to the same ledger (world/isles_save.js): the same wait.
+    if ((g.mode === "city" || g.mode === "archipelago") && CBZ.cityWorldStoreReady) {
       bootBusy = true;
       CBZ.cityWorldStoreReady(6000).then(function () {
         bootBusy = false;

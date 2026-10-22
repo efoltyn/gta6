@@ -31,7 +31,8 @@
        hands up under a gun, robbable, killable). He is stood where nobody is
        looking while his building is open and you are near; at closing he
        walks out of his door and home (CBZ.leave); one who was KILLED stays
-       dead (post.lost) until the island is built again.
+       dead (post.lost, g.isleDead: saved, and kept when the island is built
+       again) until a week later somebody new has the job.
        world/island_venue.js CBZ.islandVenue.staff is this.
    THE HOURS  every trade keeps its hours on the clock (isOpen(b)); a shop
        front has a roller shutter that comes down at closing once the shop
@@ -371,8 +372,23 @@
       back: function () { P.at = null; },
       on: function () { return open(P); },
     };
+    // ONE WHO WAS KILLED STAYS DEAD: across the island going and coming back,
+    // and across a saved game (g.isleDead rides world/isles_save.js), until
+    // the place has had a week to hire somebody new
+    P.key = deadKey(b, P);
+    const died = P.key ? deadBook()[P.key] : null;
+    if (died != null && dayNum() - died < REHIRE_DAYS) P.lost = true;
     posts.add(P);
     return P;
+  }
+  const REHIRE_DAYS = 7;
+  function deadBook() { return g.isleDead || (g.isleDead = {}); }
+  function dayNum() { return CBZ.dayCount ? CBZ.dayCount() : 0; }
+  function deadKey(b, P) {
+    const I = CBZ.islandVenue && CBZ.islandVenue.island ? CBZ.islandVenue.island(b) : null;
+    const iid = I && I.arena && I.arena.id;
+    if (!iid) return null;
+    return iid + ":" + (b.planId != null ? b.planId : (Math.round(b.ox) + "," + Math.round(b.oz))) + ":" + P.job + ":" + Math.round(P.x) + "," + Math.round(P.z);
   }
   function unpost(P) {
     if (!P) return;
@@ -447,7 +463,7 @@
       const p = P.ped;
       const here = under(P.b.group, A.root);
       if (p) {
-        if (p.dead) { P.lost = true; P.ped = null; continue; }
+        if (p.dead) { P.lost = true; P.ped = null; if (P.key) deadBook()[P.key] = dayNum(); continue; }
         if (CBZ.cityPeds.indexOf(p) < 0) { P.ped = null; continue; }
         // the venue has him (riding in a car): hands off
         if (P.hold) continue;

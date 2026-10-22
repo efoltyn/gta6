@@ -117,6 +117,10 @@
       // city/cashstore.js's slice: {owned, escrow, bags:[{a,dyed}], homes,
       // crewDebt, crewPaid, banked, deposits}. null until the first deposit.
       cashStore: null,
+      // THE ISLES' slice (world/isles_save.js): the island you are on and where,
+      // the clock, your cars, flats, rentals, the army, the shark's book. Plain
+      // data keyed by island id + lot id; the wallet rides the fields above.
+      isles: null,
       lastSaved: now(),
     };
   }
@@ -234,8 +238,11 @@
   // kick it off at parse: by the time anybody presses Play it is usually done
   setTimeout(function () { try { CBZ.cityWorldStoreReady(); } catch (e) {} }, 0);
 
-  function commit() {
-    const w = ensure();
+  /* THE WALLET: what a character carries from one place to the next (cash,
+     bank, debts, what is in his pockets, his guns). Gang City's full commit
+     and The Isles' own (CBZ.cityWorldIsles below) both write it through
+     here, so it is one character whichever world he is standing in. */
+  function walletOut(w) {
     w.cash = g.cash || 0;
     w.bank = g.cityBank || 0;
     w.debt = g.cityDebt || w.debt || 0;
@@ -248,6 +255,42 @@
     w.cityPawnTickets = copy(g.cityPawnTickets || []);
     w.cityOutfit = copy(g.cityOutfit || {});
     w.cityFenceRep = g.cityFenceRep || 0;
+    const stowed = g._copStow;
+    w.weapons = (stowed && stowed.inv ? stowed.inv : (CBZ.weaponInventory || [])).slice();
+    w.currentWeapon = (stowed && stowed.cur) || CBZ.currentWeaponId || null;
+    w.meleeWeapon = g.cityMeleeWeapon || g.cityMeleeStowed || null;   // a bat put away on the bar is still yours
+    w.weapon = (CBZ.cityCurrentWeaponName && CBZ.cityCurrentWeaponName()) || w.meleeWeapon || null;
+  }
+  function walletIn(w) {
+    const restoreWeapon = w.weapon || null;
+    g.cash = w.cash || 0;
+    g.cityBank = w.bank || 0;
+    g.cityDebt = w.debt || 0;
+    g.respect = w.respect || 0;
+    g.cityInv = copy(w.inventory || {});
+    // restore loans/tickets/worn-outfit/fence-rep on reload (cityWorldBeginRun)
+    // AND MP rejoin (cityWorldAdopt) — both funnel through here. bank.js /
+    // pawnshop.js ALSO rehydrate g.cityLoans / g.cityPawnTickets off a g.cityWorld
+    // reference change, but doing it here removes the dependency on those modules
+    // being loaded + their once-per-ledger guard firing (same restored data, so
+    // the later sibling hydrate is a harmless idempotent re-copy).
+    g.cityLoans = copy(w.cityLoans || []);
+    g.cityPawnTickets = copy(w.cityPawnTickets || []);
+    g.cityOutfit = copy(w.cityOutfit || {});
+    g.cityFenceRep = w.cityFenceRep || 0;
+    g.cityMeleeWeapon = w.meleeWeapon || null; g.cityMeleeStowed = null;
+    const weapons = Array.isArray(w.weapons) ? w.weapons : [];
+    if (weapons.length && CBZ.unlockWeapon) {
+      for (let i = 0; i < weapons.length; i++) CBZ.unlockWeapon(weapons[i], { select: false });
+      if (w.currentWeapon && CBZ.setCurrentWeapon) CBZ.setCurrentWeapon(w.currentWeapon);
+    } else if (restoreWeapon && CBZ.cityGiveWeapon) {
+      CBZ.cityGiveWeapon(restoreWeapon);     // migrate legacy single-name saves
+    }
+  }
+
+  function commit() {
+    const w = ensure();
+    walletOut(w);
     // dialogue.js CONTACTS — people you met in person who may text/call later.
     // Records are plain JSON-safe data by that file's contract (live ped refs
     // stay in its module map, never in g.cityContacts).
@@ -289,11 +332,6 @@
     if (CBZ.cityCampaignSnapshot) {
       try { w.campaign = copy(CBZ.cityCampaignSnapshot()); } catch (e) {}
     }
-    const stowed = g._copStow;
-    w.weapons = (stowed && stowed.inv ? stowed.inv : (CBZ.weaponInventory || [])).slice();
-    w.currentWeapon = (stowed && stowed.cur) || CBZ.currentWeaponId || null;
-    w.meleeWeapon = g.cityMeleeWeapon || g.cityMeleeStowed || null;   // a bat put away on the bar is still yours
-    w.weapon = (CBZ.cityCurrentWeaponName && CBZ.cityCurrentWeaponName()) || w.meleeWeapon || null;
     w.criminalRecord.wantedPeak = Math.max(w.criminalRecord.wantedPeak || 0, g.wanted || 0);
     w.criminalRecord.heatPeak = Math.max(w.criminalRecord.heatPeak || 0, g.heat || 0);
     if (CBZ.cityIdentities && CBZ.cityIdentities.serialize) try { w.identities = CBZ.cityIdentities.serialize(); } catch (e) {}
@@ -305,24 +343,8 @@
   function applyToGame() {
     runBegun = true;
     const w = ensure();
-    const restoreWeapon = w.weapon || null;
-    g.cash = w.cash || 0;
-    g.cityBank = w.bank || 0;
-    g.cityDebt = w.debt || 0;
-    g.respect = w.respect || 0;
-    g.cityInv = copy(w.inventory || {});
-    // restore loans/tickets/worn-outfit/fence-rep on reload (cityWorldBeginRun)
-    // AND MP rejoin (cityWorldAdopt) — both funnel through here. bank.js /
-    // pawnshop.js ALSO rehydrate g.cityLoans / g.cityPawnTickets off a g.cityWorld
-    // reference change, but doing it here removes the dependency on those modules
-    // being loaded + their once-per-ledger guard firing (same restored data, so
-    // the later sibling hydrate is a harmless idempotent re-copy).
-    g.cityLoans = copy(w.cityLoans || []);
-    g.cityPawnTickets = copy(w.cityPawnTickets || []);
-    g.cityOutfit = copy(w.cityOutfit || {});
-    g.cityFenceRep = w.cityFenceRep || 0;
+    walletIn(w);
     g.cityContacts = copy(w.cityContacts || []);
-    g.cityMeleeWeapon = w.meleeWeapon || null; g.cityMeleeStowed = null;
     // ---- property ladder + gang identity (LEDGER GAP fix). Restoring these
     // here covers the MP-adopt path and any future caller of applyToGame()
     // directly; the NORMAL single-player run path additionally relies on
@@ -357,18 +379,39 @@
     g.cityTransport = w.transport;
     g.cityPolitics = w.politics;
     g.cityFactions = w.factions;
-    const weapons = Array.isArray(w.weapons) ? w.weapons : [];
-    if (weapons.length && CBZ.unlockWeapon) {
-      for (let i = 0; i < weapons.length; i++) CBZ.unlockWeapon(weapons[i], { select: false });
-      if (w.currentWeapon && CBZ.setCurrentWeapon) CBZ.setCurrentWeapon(w.currentWeapon);
-    } else if (restoreWeapon && CBZ.cityGiveWeapon) {
-      CBZ.cityGiveWeapon(restoreWeapon);     // migrate legacy single-name saves
-    }
     if (w.identities && CBZ.cityIdentities && CBZ.cityIdentities.apply) try { CBZ.cityIdentities.apply(w.identities); } catch (e) {}
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return w;
   }
   CBZ.cityWorldBeginRun = applyToGame;
+
+  /* THE ISLES ON THE SAME LEDGER. The archipelago is the same character in
+     another place, so it saves to this one slot (sqlite + the localStorage
+     mirror, the permadeath block, New Life's wipe) and never a second store.
+     It does NOT run commit(): the wraps on commit stamp Gang City's live
+     systems (the home lot, walls, regimes...), which are not standing on the
+     islands, and would write their absence over the city's save. The Isles
+     write the wallet and their own slice, nothing else. */
+  CBZ.cityWorldIsles = {
+    read: function () { const w = ensure(); return w.isles ? copy(w.isles) : null; },
+    begin: function () {
+      runBegun = true;
+      const w = ensure();
+      walletIn(w);
+      if (CBZ.cityWardrobeHydrate) { try { CBZ.cityWardrobeHydrate(); } catch (e) {} }
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      return w.isles ? copy(w.isles) : null;
+    },
+    commit: function (slice) {
+      if (g._cityGameOver || g._citySaveBlocked) return false;
+      const w = ensure();
+      walletOut(w);
+      if (CBZ.cityWardrobeStamp) { try { CBZ.cityWardrobeStamp(); } catch (e) {} }
+      w.isles = slice || null;
+      save(w);
+      return true;
+    },
+  };
 
   CBZ.cityWorldReset = function () {
     g.cityWorld = fresh();

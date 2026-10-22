@@ -23,7 +23,7 @@
 <link rel="stylesheet" href="css/city.css?v=lpanel1022">
 <link rel="stylesheet" href="css/campaign.css?v=cinelp1022">
 <link rel="stylesheet" href="css/interact_touch.css?v=feel1020">
-<link rel="stylesheet" href="css/title_hub.css?v=end1">
+<link rel="stylesheet" href="css/title_hub.css?v=islesave1022">
 </head>
 <body class="campaign-build">
 <script>
@@ -1026,7 +1026,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=mmhandsnopitc"></script>
+<script src="src/systems/state.js?v=islesave1022"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1501,7 +1501,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/mode.js?v=hands1022"></script>
 <script src="src/city/economy.js?v=goods1022"></script>
 <script src="src/city/clothes.js?v=shoulder1014"></script>
-<script src="src/city/outfits.js?v=armourm1011"></script>
+<script src="src/city/outfits.js?v=islesave1022"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <script src="src/city/hunger.js?v=stam1009"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
@@ -1510,7 +1510,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/law.js?v=people1022"></script>
 <script src="src/city/wanted.js?v=people1022"></script>
 <script src="src/city/identity.js?v=perm1"></script>
-<script src="src/city/worldstate.js?v=boot1013"></script>
+<script src="src/city/worldstate.js?v=islesave1022"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
@@ -1642,8 +1642,8 @@ document.body.appendChild(b);}}catch(e){}})();
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
 <script src="src/world/archipelago_map.js?v=isles1022"></script>
-<script src="src/world/archipelago.js?v=isleleak1022"></script>
-<script src="src/world/island_lodging.js?v=fitout1022"></script>
+<script src="src/world/archipelago.js?v=islesave1022"></script>
+<script src="src/world/island_lodging.js?v=islesave1022"></script>
 <script src="src/world/island_town.js?v=isledaylife1022"></script>
 <script src="src/world/island_police.js?v=isledaylife1022"></script>
 <!-- THE ISLANDS' PEOPLE (world/island_people.js): Gang City's street crowd
@@ -1651,7 +1651,7 @@ document.body.appendChild(b);}}catch(e){}})();
      buildings, the trades' hours and shutters, and the posted staff
      (CBZ.islandVenue.staff). After island_town.js, island_venue.js, peds.js
      and archipelago.js. -->
-<script src="src/world/island_people.js?v=isledaylife1022"></script>
+<script src="src/world/island_people.js?v=islesave1022"></script>
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the
@@ -1885,7 +1885,7 @@ document.body.appendChild(b);}}catch(e){}})();
      a use (city/bank.js citySafe); the loan shark's office and his collectors
      (CBZ.loanShark, the demand ladder). After bank.js, island_venue.js,
      interactions.js and island_shops.js (whose counters it gives a till). -->
-<script src="src/city/islandmoney.js?v=fitout1022"></script>
+<script src="src/city/islandmoney.js?v=islesave1022"></script>
 <!-- THE ISLES' CIVIC WAVE: the fit-out kit (world/island_fitkit.js: one merge per
      room, the exec floor's pieces, signs), the motel and the used car lot as
      built places (world/island_lots.js, called by disaster_arena.js's build),
@@ -1899,6 +1899,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_civic.js?v=fitout1022"></script>
 <script src="src/world/island_homes.js?v=civic1022"></script>
 <script src="src/world/island_offices.js?v=fitout1022"></script>
+<!-- THE ISLES REMEMBER (world/isles_save.js): the archipelago's slice of the one
+     character ledger (city/worldstate.js CBZ.cityWorldIsles): the island and
+     where you stood, the clock, cars, flats, the room, the army, the shark's
+     book, hot goods, the dead. After archipelago.js, island_lodging.js,
+     island_people.js, islandmoney.js, island_dealers/civic/homes. -->
+<script src="src/world/isles_save.js?v=islesave1022"></script>
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
      in or at the door of is fitted out for real (finished floors, bathrooms,
      kitchens, bedrooms, stockrooms, a gang's count room, baked light from
@@ -2662,7 +2668,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/games/government.js?v=peak1014c"></script>
 <script src="src/games/police.js?v=dogs1009b"></script>
 <script src="src/games/jail.js?v=nostep1013"></script>
-<script src="src/systems/newlife.js?v=newlife1"></script>
+<script src="src/systems/newlife.js?v=islesave1022"></script>
 
 <!-- 5. quality + loop + boot -->
 <script src="src/core/quality.js?v=safeboot1014"></script>

@@ -35,7 +35,9 @@
        strongbox. He lends with no questions at twenty a week, three days to
        pay (CBZ.loanShark). Miss it and his collectors find you, through the
        ONE demand ladder (CBZ.brain.demand, mood "debt"): they ask, they warn,
-       they beat it out of you and take what you carry. Kill him and the
+       they beat it out of you and take what you carry; behind again, they
+       want the keys: your car (driven off in front of you), then your flat
+       (the lock changed, the wardrobe emptied). Kill him and the
        debt dies with him. The bank (city/bank.js creditRefusal) will not
        lend to a man who is behind with him.
      • THE PEOPLE are Gang City's (city/peds.js, on the islands through
@@ -810,6 +812,25 @@
     inDefault: function () { for (const l of loans()) if (overdue(l)) return true; return false; },
     creditCap: creditCap,
     VIG_WEEK: VIG_WEEK, TERM_DAYS: TERM_DAYS,
+    // the save (world/isles_save.js): the book as plain data, and back. The
+    // vig runs on the pace clock, which the save restores, so a debt grows by
+    // the time played and never by the time the game was shut.
+    snapshot: function () {
+      return { repaid: +g.sharkRepaid || 0, loans: loans().filter(function (l) { return l.owed > 1; }).map(function (l) {
+        return { key: l.key, shark: l.shark, principal: l.principal, owed: l.owed, t0: l.t0, due: l.due, next: l.next, stage: l.stage | 0, visits: l.visits | 0 };
+      }) };
+    },
+    restore: function (s) {
+      const out = [];
+      for (const l of (s && Array.isArray(s.loans) ? s.loans : [])) {
+        if (!l || typeof l.key !== "string" || !(+l.owed > 1) || !isFinite(+l.owed) || !isFinite(+l.due)) continue;
+        out.push({ key: l.key, shark: String(l.shark || ""), principal: +l.principal || +l.owed, owed: +l.owed, t0: +l.t0 || 0,
+          due: +l.due, next: isFinite(+l.next) ? +l.next : +l.due, stage: l.stage | 0, visits: l.visits | 0 });
+      }
+      g.sharkLoans = out;
+      g.sharkRepaid = s && isFinite(+s.repaid) ? +s.repaid : 0;
+      _lastPace = null;
+    },
   };
 
   function fitLoans(b, lot) {
@@ -915,11 +936,246 @@
   function crewLadder(c) {
     const l = c.loan;
     if (!CBZ.cityLadder || c.ped.dead) return null;
+    if (c.lead) c.want = wantOf(l);
     return CBZ.cityLadder.begin(c.ped, "rob", {
       mood: "debt", armed: !!c.ped.armed, hard: l.stage >= 1, leaveR: 0, silent: !c.lead,
       patience: [60, 4.5, 3.5], take: Math.max(10, owedNow(l)),
-      lines: { demand: ["You owe " + l.shark + ".", l.shark + " wants his money."] },
+      lines: { demand: c.want ? [askFor(c.want)] : ["You owe " + l.shark + ".", l.shark + " wants his money."] },
     });
+  }
+
+  /* ---- WHEN THE CASH IS NOT ENOUGH: THE CAR, THEN THE FLAT ----------------
+     Behind for the second visit and on, they want property: a car of yours
+     first (g.isleCars, world/island_dealers.js), then your flat (g.isleHomes,
+     world/island_homes.js). The lead asks for the keys. Handing them over is
+     the decision on him ("Give the keys", beside "Pay $N"); refuse and you
+     get the beating, and they take them anyway. A car of yours that is
+     standing near is driven off by him in front of you (one that is not is
+     simply gone from your list); the flat's lock is changed (its door no
+     longer opens for you) and what you kept in its wardrobe goes with it.
+     A piece comes off the debt at half what it is worth. Paying the loan off
+     is the end of it. */
+  const KEY_STAGE = 2;
+  function askFor(want) { return want === "car" ? "Keys." : "Keys to the flat."; }
+  function islandNow() { const A = CBZ.surv && CBZ.surv.arena; return A ? (A.id || null) : null; }
+  function carLive(c) { return !!(c && !c._scrapped && !c.dead && (CBZ.cityCars || []).indexOf(c) >= 0); }
+  function carValue(r) {
+    const E = CBZ.cityEcon, m = E && E.carByName && r && r.model ? E.carByName(r.model) : null;
+    return (m && +m.value) || 4000;
+  }
+  function carToTake() {
+    const L = g.isleCars;
+    if (!L || !L.length) return null;
+    const id = islandNow(), p = P();
+    let best = null, bs = -1;
+    for (const r of L) {
+      if (!r || (r.car && r.car.player)) continue;                 // not out from under you
+      // the one standing near first (they drive it away), else the dearest
+      const near = !!(p && carLive(r.car) && r.island === id && Math.hypot(r.car.pos.x - p.pos.x, r.car.pos.z - p.pos.z) < 160);
+      const s = (near ? 1e9 : 0) + carValue(r);
+      if (s > bs) { bs = s; best = r; }
+    }
+    return best;
+  }
+  function inFlat(F) {
+    const p = P(), B = F && F.flat && F.flat.box;
+    return !!(p && B && p.pos.x > B.minX && p.pos.x < B.maxX && p.pos.z > B.minZ && p.pos.z < B.maxZ && p.pos.y > B.y0 && p.pos.y < B.y1);
+  }
+  function flatToTake() {
+    const H = g.isleHomes;
+    if (!H) return null;
+    const standing = CBZ.islandHomes && CBZ.islandHomes.flats ? CBZ.islandHomes.flats() : [];
+    let best = null;
+    for (const k in H) {
+      const r = H[k];
+      if (!r || (r.mode !== "own" && r.mode !== "rent")) continue;
+      let F = null;
+      for (const f of standing) if (f.key === k) { F = f; break; }
+      if (F && inFlat(F)) continue;                                // never locking you in
+      if (!best || (r.mode === "own" && best.r.mode !== "own")) best = { key: k, r: r, F: F };
+    }
+    return best;
+  }
+  function wantOf(l) {
+    if ((l.stage | 0) < KEY_STAGE) return null;
+    if (carToTake()) return "car";
+    if (flatToTake()) return "flat";
+    return null;
+  }
+  function credit(l, v) {
+    if (!(v > 0)) return;
+    l.owed -= v;
+    if (l.owed <= 1) { l.owed = 0; const L = loans(), k = L.indexOf(l); if (k >= 0) L.splice(k, 1); }
+    else for (const o of CREW) if (o.loan === l && o.ped._ladder) o.ped._ladder.take = Math.max(10, owedNow(l));
+  }
+  function takeCar(l, ped) {
+    const r = carToTake();
+    if (!r) return false;
+    const L = g.isleCars, i = L.indexOf(r);
+    if (i >= 0) L.splice(i, 1);
+    credit(l, carValue(r) * 0.5);
+    const c = r.car;
+    if (carLive(c)) {
+      c._playerOwned = false; c.owned = false; c.stolen = false; c._forSale = null; c._islandSpot = null;
+      c._repo = true;
+      if (!repoDrive(ped, c)) REPO_CARS.push(c);                 // nobody to drive it: it goes where nobody sees
+    }
+    note("They took the car.", 2.6);
+    return true;
+  }
+  function takeFlat(l) {
+    const f = flatToTake();
+    if (!f) return false;
+    const r = f.r, S = r.stash || {};
+    const worth = r.mode === "own" ? ((f.F && f.F.price) || 20000) * 0.5 : 0;
+    credit(l, worth + (+S.cash || 0) + ((S.guns && S.guns.length) || 0) * 150);
+    r.mode = null; r.seized = true; r.paidTo = 0;
+    r.stash = { cash: 0, guns: [] };
+    note("They took the flat.", 2.6);
+    return true;
+  }
+  function seizeProperty(c) {
+    const w = c.want;
+    c.want = null;
+    if (w === "car") return takeCar(c.loan, c.ped);
+    if (w === "flat") return takeFlat(c.loan);
+    return false;
+  }
+  // "Give the keys": the decision on the man who asked for them
+  function giveKeys(ped) {
+    let c = null;
+    for (const o of CREW) if (o.ped === ped && o.lead && !o.done) { c = o; break; }
+    if (!c || !c.want || c.taken) return false;
+    c.taken = true;
+    const l = c.loan;
+    if (!seizeProperty(c)) return false;
+    for (const o of CREW) if (o.loan === l && o.ped._ladder) o.ped._ladder.paid = true;
+    return true;
+  }
+
+  /* ---- THE REPO: the lead walks to your car, gets in and drives it away --
+     His own legs to the driver's door (the controlled path, CBZ.leave's way
+     of walking a city ped), the driver's seat (npcLife.attach on the car's
+     seat placement), then the car steered away from you by the same loop
+     giglife.js / boarding.js drive with (road null: the ambient traffic AI
+     leaves it alone; the shared wall resolver). Car and man leave the world
+     only where nobody sees them. */
+  const REPO = [];          // { ped, car, phase, t, nudge, dest, off }
+  const REPO_CARS = [];     // seized cars with no driver: scrapped unseen
+  function repoDrive(ped, car) {
+    const p = P();
+    if (!ped || ped.dead || ped._repo || !car || car.player || !p) return false;
+    if (Math.hypot(car.pos.x - ped.pos.x, car.pos.z - ped.pos.z) > 160) return false;
+    const R = { ped: ped, car: car, phase: "walk", t: 0, nudge: 0, dest: null, off: 0 };
+    ped._repo = R;
+    REPO.push(R);
+    return true;
+  }
+  function driverDoor(car) {
+    // the driver sits on the car's +x (LHD); +x in the world is (cos h, -sin h)
+    const h = car.heading || 0;
+    return { x: car.pos.x + Math.cos(h) * 1.6, z: car.pos.z - Math.sin(h) * 1.6 };
+  }
+  function awayPoint(car) {
+    const A = CBZ.surv && CBZ.surv.arena, p = P();
+    let best = null, bd = -1;
+    for (let i = 0; i < 24 && A && A.randomPoint; i++) {
+      let q = null;
+      try { q = A.randomPoint(0, A.radius * 0.8); } catch (e) { q = null; }
+      if (!q || (A.groundHeightAt && A.groundHeightAt(q.x, q.z) < 0.4)) continue;
+      const d = p ? Math.hypot(q.x - p.pos.x, q.z - p.pos.z) : 0;
+      if (d > bd) { bd = d; best = { x: q.x, z: q.z }; }
+    }
+    if (best) return best;
+    let hx = p ? car.pos.x - p.pos.x : 1, hz = p ? car.pos.z - p.pos.z : 0;
+    const L = Math.hypot(hx, hz) || 1;
+    return { x: car.pos.x + hx / L * 300, z: car.pos.z + hz / L * 300 };
+  }
+  function seatOff(ped, car) {
+    try { if (ped._npcAttached && CBZ.npcLife && CBZ.npcLife.detach) CBZ.npcLife.detach(ped, {}); } catch (e) {}
+    ped._aboard = false; ped.inCar = null;
+    const d = driverDoor(car), A = CBZ.surv && CBZ.surv.arena;
+    if (ped.pos) ped.pos.set(d.x, A && A.groundHeightAt ? A.groundHeightAt(d.x, d.z) : car.pos.y, d.z);
+    if (ped.char) ped.char.sitting = false;
+  }
+  function repoEnd(R, gone) {
+    const i = REPO.indexOf(R);
+    if (i >= 0) REPO.splice(i, 1);
+    const ped = R.ped, car = R.car;
+    if (ped && ped._repo === R) ped._repo = null;
+    if (car && car.npcDriver === ped) { car.npcDriver = null; car.ai = false; car.v = 0; car.vx = car.vz = 0; }
+    if (gone) {
+      if (ped && CBZ.cityPeds.indexOf(ped) >= 0) { if (ped.inCar) seatOff(ped, car); despawn(ped); }
+      if (carLive(car) && !car.player) CBZ.cityScrapCar(car);
+      return;
+    }
+    // it did not come off (he was shot, you took the wheel): the car stays
+    // where it is, his now, and he is the street's
+    if (ped && ped.inCar && car) seatOff(ped, car);
+    if (ped) ped.controlled = false;
+    if (ped && !ped.dead && CBZ.cityPeds.indexOf(ped) >= 0 && CBZ.leave && CBZ.leave.go) CBZ.leave.go(ped, { remove: despawn, tag: "isle:collector" });
+    if (car) car._repo = false;
+  }
+  function repoTick(dt) {
+    const p = P();
+    for (let i = REPO.length - 1; i >= 0; i--) {
+      const R = REPO[i], ped = R.ped, car = R.car;
+      if (!carLive(car)) { repoEnd(R, true); continue; }
+      if (!ped || ped.dead || CBZ.cityPeds.indexOf(ped) < 0 || car.player || car.dead) { repoEnd(R, false); continue; }
+      R.t += dt;
+      if (R.phase === "walk") {
+        const d = driverDoor(car), dist = Math.hypot(ped.pos.x - d.x, ped.pos.z - d.z);
+        if (dist < 1.3 || (R.t > 25 && unseen(ped.pos.x, ped.pos.y, ped.pos.z) && unseen(d.x, car.pos.y, d.z))) {
+          const seat = CBZ.carSeatPlacement ? CBZ.carSeatPlacement(car, "driver") : null;
+          let ok = false;
+          if (seat && CBZ.npcLife && CBZ.npcLife.attach) { try { ok = !!CBZ.npcLife.attach(ped, seat.parent, seat.anchor); } catch (e) { ok = false; } }
+          if (!ok) { repoEnd(R, false); REPO_CARS.push(car); continue; }
+          ped._aboard = true; ped.inCar = car; ped.controlled = true; ped.state = "idle"; ped.path = null;
+          car.npcDriver = ped; car.ai = true; car.road = null; car.pullover = 0;
+          car._parkX = car._parkZ = car._parkH = null; car._terrY = car._terrPitch = car._terrRoll = null;
+          const A = CBZ.surv && CBZ.surv.arena;
+          R.off = car.group ? car.group.position.y - (A && A.groundHeightAt ? A.groundHeightAt(car.pos.x, car.pos.z) : car.group.position.y) : 0;
+          R.dest = awayPoint(car); R.phase = "drive"; R.t = 0;
+          continue;
+        }
+        if (R.t > 50) { repoEnd(R, false); REPO_CARS.push(car); continue; }
+        if ((R.nudge -= dt) <= 0) {
+          R.nudge = 0.6;
+          ped.controlled = true; ped.staffPost = null; ped.rage = null; ped.vendor = false;
+          ped.path = [{ x: d.x, z: d.z }]; ped.finalGoal = { x: d.x, z: d.z };
+          if (ped.target && ped.target.set) ped.target.set(d.x, 0, d.z);
+          ped.state = "walk"; ped.pause = 0;
+        }
+        continue;
+      }
+      // ---- driving it away
+      const dx = R.dest.x - car.pos.x, dz = R.dest.z - car.pos.z, dist = Math.hypot(dx, dz);
+      const far = !p || Math.hypot(car.pos.x - p.pos.x, car.pos.z - p.pos.z) > 45;
+      if (R.t > 2 && far && unseen(car.pos.x, car.pos.y, car.pos.z)) { repoEnd(R, true); continue; }
+      const want = dist < 8 ? 0 : (dist < 20 ? dist * 0.6 : 11);
+      if (CBZ.lerpAngle) car.heading = CBZ.lerpAngle(car.heading || 0, Math.atan2(dx, dz), 1 - Math.pow(0.0009, dt));
+      else car.heading = Math.atan2(dx, dz);
+      car.v = Math.max(0, (car.v || 0) + Math.max(-22 * dt, Math.min(9 * dt, want - (car.v || 0))));
+      car.vx = Math.sin(car.heading) * car.v; car.vz = Math.cos(car.heading) * car.v;
+      car.pos.x += car.vx * dt; car.pos.z += car.vz * dt;
+      if (CBZ.cityCollideVehicle) { try { CBZ.cityCollideVehicle(car); } catch (e) {} }
+      const A = CBZ.surv && CBZ.surv.arena;
+      const gy = A && A.groundHeightAt ? A.groundHeightAt(car.pos.x, car.pos.z) : null;
+      if (car.group) {
+        car.group.position.set(car.pos.x, gy != null ? gy + R.off : car.group.position.y, car.pos.z);
+        car.group.rotation.y = car.heading;
+      }
+      if (gy != null) car.pos.y = gy + R.off;
+      // there and still in sight: a new way to go
+      if (dist < 8) R.dest = awayPoint(car);
+    }
+    for (let i = REPO_CARS.length - 1; i >= 0; i--) {
+      const c = REPO_CARS[i];
+      if (!carLive(c) || !c._repo) { REPO_CARS.splice(i, 1); continue; }
+      if (c.player) { c._repo = false; REPO_CARS.splice(i, 1); continue; }   // you took it back: a stolen car now
+      const far = !p || Math.hypot(c.pos.x - p.pos.x, c.pos.z - p.pos.z) > 30;
+      if (far && unseen(c.pos.x, c.pos.y, c.pos.z)) { REPO_CARS.splice(i, 1); CBZ.cityScrapCar(c); }
+    }
   }
   function sendCrew(l) {
     const p = P(), PP = CBZ.islandPeople;
@@ -966,6 +1222,7 @@
     if (CBZ.cityLadder && ped._ladder) { try { CBZ.cityLadder.cancel(ped); } catch (e) {} }
     if (ped.dead) return;
     ped.rage = null;
+    if (ped._repo) return;                 // he is leaving in your car (repoTick)
     if (CBZ.leave && CBZ.leave.go) CBZ.leave.go(ped, { remove: despawn, tag: "isle:collector" });
   }
   function crewTick(dt) {
@@ -997,7 +1254,7 @@
       }
       // he says it to your face, not from across the street
       const d = Math.hypot(p.pos.x - ped.pos.x, p.pos.z - ped.pos.z);
-      if (c.lead && !c.said && d < 3.2) { c.said = true; say(ped, "You owe " + l.shark + "."); }
+      if (c.lead && !c.said && d < 3.2) { c.said = true; say(ped, c.want ? askFor(c.want) : "You owe " + l.shark + "."); }
       const e = ped._ladder;
       if (e) {
         // one paid, they all were
@@ -1009,8 +1266,11 @@
       if (ped.rage && c.t < 90) continue;
       if (!c.taken && c.lead && l.owed > 1 && l.stage >= 1 && ped.rage == null && c.t > 4) {
         c.taken = true;
-        const it = seizeItem();
-        if (it) { l.owed -= it.value * 0.5; note("They took your " + it.name + ".", 2.6); }
+        // the keys they asked for, else the best thing in your pockets
+        if (!(c.want && seizeProperty(c))) {
+          const it = seizeItem();
+          if (it) { l.owed -= it.value * 0.5; note("They took your " + it.name + ".", 2.6); }
+        }
       }
       l.stage++;
       l.next = pace() + REVISIT_DAYS;
@@ -1028,6 +1288,7 @@
     sharkTick(dp);
     if (!isles()) return;
     crewTick(Math.min(0.1, dt || 0));
+    if (REPO.length || REPO_CARS.length) repoTick(Math.min(0.1, dt || 0));
     // a loan past its day, and nobody has come yet: they come
     const p = P();
     if (!p || p.dead) return;
@@ -1099,6 +1360,17 @@
     const I = CBZ.interactions;
     if (verbsWired || !I || !I.registerFixtures) return;
     verbsWired = true;
+    // ---- the shark's collector asking for your keys: handing them over is a decision
+    if (I.register) I.register("ped", {
+      id: "collector-keys", slot: "i", prio: 94,
+      canShow: function (p) {
+        if (!p || !p._ladder || p.dead) return false;
+        for (const o of CREW) if (o.ped === p && o.lead && !o.done && o.want && !o.taken) return true;
+        return false;
+      },
+      label: function () { return "Give the keys"; },
+      onSelect: function (p) { giveKeys(p); },
+    });
     // ---- the loan shark's desk
     I.registerFixtures({
       id: "loan-shark", kind: "loan-shark", prio: 9, islands: true,

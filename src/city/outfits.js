@@ -2527,6 +2527,9 @@
   // drawn this same frame would flash the pre-restore look (the reported
   // "resets to a white shirt after reload" symptom).
   CBZ.cityWardrobeHydrate = hydrateFitFromLedger;
+  // and the stamp on its own: The Isles' save (worldstate.js cityWorldIsles)
+  // writes the wardrobe without running Gang City's whole commit chain
+  CBZ.cityWardrobeStamp = stampFit;
   CBZ.cityOutfitApplyPlayer = applyPlayer;
 
   // ============================================================
