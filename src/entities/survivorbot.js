@@ -94,7 +94,9 @@
      body stands, which the water test subtracts: a dry first floor is dry. */
   function standY(b) {
     const bed = bedAt(b.pos.x, b.pos.z);
-    if (!CBZ.groundAt || !CBZ.game || CBZ.game.mode !== "survival") { b._lift = 0; return bed; }
+    // (a posted worker, world/island_venue.js staff, stands on the shop floor
+    // he works on, whatever the mode)
+    if (!CBZ.groundAt || !CBZ.game || (CBZ.game.mode !== "survival" && !b.post)) { b._lift = 0; return bed; }
     // groundAt only knows the terrain the mode registered, not the sinkholes
     // surv.floorAt cuts into it: take its answer only when it is a PLATFORM
     // (above the bare terrain), otherwise the hole-aware bed stands
@@ -519,21 +521,31 @@
     return b;
   };
 
-  CBZ.clearSurvivorBots = function () {
-    for (const b of CBZ.bots) {
-      if (b._survBrain && BR) { BR.unregister(b); b._survBrain = false; }
-      if (b.group) {
-        if (b.group.parent) b.group.parent.remove(b.group);
-        b.group.traverse(function (o) {
-          // characters now share cached geometry + materials (world/materials.js)
-          // across the whole crowd — NEVER dispose anything tagged `_shared`, or
-          // every other actor loses it. Only the per-actor head material is fresh.
-          if (o.geometry && !o.geometry._shared && o.geometry.dispose) try { o.geometry.dispose(); } catch (e) {}
-          if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose()); else if (!m._shared && m.dispose) m.dispose(); }
-        });
-      }
+  function dropBot(b) {
+    if (b._survBrain && BR) { BR.unregister(b); b._survBrain = false; }
+    if (b.group) {
+      if (b.group.parent) b.group.parent.remove(b.group);
+      b.group.traverse(function (o) {
+        // characters now share cached geometry + materials (world/materials.js)
+        // across the whole crowd — NEVER dispose anything tagged `_shared`, or
+        // every other actor loses it. Only the per-actor head material is fresh.
+        if (o.geometry && !o.geometry._shared && o.geometry.dispose) try { o.geometry.dispose(); } catch (e) {}
+        if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose()); else if (!m._shared && m.dispose) m.dispose(); }
+      });
     }
+  }
+  CBZ.clearSurvivorBots = function () {
+    for (const b of CBZ.bots) dropBot(b);
     CBZ.bots.length = 0;
+  };
+  // ONE body out of the crowd (a shop's clerk when his island is taken down,
+  // world/island_venue.js): the same teardown the whole crowd gets
+  CBZ.removeSurvivorBot = function (b) {
+    const i = b ? CBZ.bots.indexOf(b) : -1;
+    if (i < 0) return false;
+    CBZ.bots.splice(i, 1);
+    dropBot(b);
+    return true;
   };
 
   /* HOW FAR OUT YOU HAVE TO SWIM BEFORE YOU ARE SWIMMING. Walked outward along
@@ -1225,6 +1237,16 @@
       const reach = 14 + urgent * 16;
       b.target.set(b.pos.x + (fx / m) * reach, 0, b.pos.z + (fz / m) * reach);
       b.pause = 0;
+    } else if (b.post) {
+      // A POSTED WORKER (world/island_venue.js staff: the clerk behind a
+      // shop counter) does not wander: he goes back to his spot and faces
+      // his counter, or whoever the venue says he is looking at. He still
+      // runs from a disaster and a killing (above) like anybody.
+      const p = b.post;
+      b.state = "look"; b.urg = 0; b.pause = 0;
+      b.target.set(p.x, 0, p.z);
+      if (p.look) { b._lookX = p.look.x; b._lookZ = p.look.z; }
+      else { b._lookX = p.x + Math.sin(p.face || 0) * 4; b._lookZ = p.z + Math.cos(p.face || 0) * 4; }
     } else {
       // wander the island
       b.state = "wander";
