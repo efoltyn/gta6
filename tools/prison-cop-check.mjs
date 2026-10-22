@@ -143,7 +143,7 @@ const snap = `(function(){
     hp: p.hp, dead: p.dead, capture: p.captureState, cuffed: !!(CBZ.playerChar && CBZ.playerChar.cuffed),
     weapons: (CBZ.weaponInventory||[]).slice(), current: CBZ.currentWeaponId,
     detection: g.detection, complaints: g.complaints, hunted: hunted,
-    objective: (document.getElementById('objective')||{}).textContent || '',
+    objective: (CBZ.objectiveText ? CBZ.objectiveText() : ''),
   };
 })()`;
 const s0 = await ev(snap);

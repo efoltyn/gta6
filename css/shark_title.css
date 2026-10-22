@@ -146,7 +146,6 @@ body.touch #sharkIntro .si-keys .si-touch{display:inline-flex;}
    button. */
 body.mode-sharksim #topright,
 body.mode-sharksim #survBars,
-body.mode-sharksim #objective,
 body.mode-sharksim #cityKillFeed,
 body.mode-sharksim #minimap,
 body.mode-sharksim #simHud,

@@ -917,7 +917,7 @@
     arrestScene = { t: 0, dur: opts.peaceful ? 2.2 : 3.0, opts: opts, cop: cop, finished: false,
       phase: opts.take ? "cuffed" : (arcOn() && !scripted) ? "hands" : "legacy", total: 0, car: null, ourCar: false,
       take: opts.take || null, _goal: null,
-      cine: false, legB: false, gate: null, lost: 0, charged: false, seat: null,
+      cine: false, route: undefined, gate: null, lost: 0, charged: false, seat: null,
       stars0: stars0, petty: petty,
       // what was IN YOUR HAND when the collar landed (the hands phase holsters
       // you, so this has to be read now, not at the desk)
@@ -1583,7 +1583,7 @@
       }
       if (cop && !cop.dead && car) sitRig(cop, car, seatOf("driver"));
       if (sc.t >= DOOR_T) {
-        sc.phase = "ride"; sc.t = 0; sc.legB = false;
+        sc.phase = "ride"; sc.t = 0; sc.route = undefined;
         sc.gate = gateFor(sc);
         startRideCamera(sc);
       }
@@ -1600,7 +1600,7 @@
       const r = sc.t < 0.4 ? "busy" : copBoardTick(sc, dt);
       if (r === "busy") return;
       if (r === "fallback" && cop && !cop.dead) sitRig(cop, car, seatOf("driver"));
-      sc.phase = "ride"; sc.t = 0; sc.legB = false;
+      sc.phase = "ride"; sc.t = 0; sc.route = undefined;
       sc.gate = gateFor(sc);
       startRideCamera(sc);
       return;
@@ -2008,46 +2008,116 @@
     sc.cine = CBZ.cinePlay(steps, { ride: sc }, function () { sc.cine = false; }, { noHolster: false });
   }
 
+  /* THE RIDE DRIVES THE STREETS (owner, 2026-10-22: "when a cop car is taking
+     you to the station they drive straight through buildings"). It used to
+     steer on the BEARING of the station for 3.6 s and then roll a straight
+     line at the door: through every house in between, on the islands most of
+     all. Now the unit asks the one road router (systems/roadgraph.js plan,
+     the same one the motorcade and the convoys drive) for the way from where
+     it is parked to the station kerb, junction to junction in the right-hand
+     lane, and follows that path: the bends cap its speed, it brakes for a car
+     or a body in the lane ahead like traffic does, and it stops at the kerb.
+     The sealed cut (you are on the back bench, the camera inside the car)
+     still shortens a long drive, but only ALONG the route: the car is moved
+     to the last stretch of the same road path, never off it. */
+  const RIDE_LAT = 3.2, RIDE_BRAKE = 2.6, RIDE_ACC = 4.5, RIDE_TAIL = 60, RIDE_MAX = 45;
+  function rideWorld() {
+    const RG = CBZ.roadGraph;
+    if (!RG || !RG.plan) return null;
+    const E = CBZ.econArena ? CBZ.econArena() : null;
+    const roads = (E && E.roads) || (CBZ.city && CBZ.city.arena && CBZ.city.arena.roads) || null;
+    // the islands' gate is already the kerb in front of the door; the city's
+    // station point is the building, made drivable through its way in
+    const entryAt = !onIsles() && CBZ.cityNav && CBZ.cityNav.driveEntry ? CBZ.cityNav.driveEntry : null;
+    return roads && roads.length ? { roads: roads, entryAt: entryAt } : null;
+  }
+  function ridePlan(sc, car) {
+    const RG = CBZ.roadGraph, gate = sc.gate;
+    if (!gate || !RG) return null;
+    const W = rideWorld();
+    if (!W) return null;
+    let pl = null;
+    try { pl = RG.plan(W, { x: car.pos.x, z: car.pos.z }, { x: gate.x, z: gate.z }, { r: 1.8, offRoad: 80 }); } catch (e) { pl = null; }
+    if (!pl || !pl.ok || pl.kind !== "road" || !pl.pts || pl.pts.length < 2) return null;
+    const P = RG.path(pl.pts, pl.radii, null);
+    P.capC = P.caps(RIDE_SPD, RIDE_LAT, RIDE_BRAKE, 1);
+    return P;
+  }
+  // the nearest thing in the lane ahead (a car, a person): metres to it, or 1e9
+  function laneAhead(car, cop) {
+    const h = car.heading, fx = Math.sin(h), fz = Math.cos(h);
+    let best = 1e9;
+    function look(o, half) {
+      if (!o || o === car || o.dead || !o.pos) return;
+      const dx = o.pos.x - car.pos.x, dz = o.pos.z - car.pos.z;
+      const a = dx * fx + dz * fz;
+      if (a <= 0 || a > 22) return;
+      if (Math.abs(dx * fz - dz * fx) > 1.3 + half) return;
+      const d = a - 2.4 - half;
+      if (d < best) best = d;
+    }
+    const cars = CBZ.cityCars || [];
+    for (let i = 0; i < cars.length; i++) look(cars[i], 1.0);
+    const peds = CBZ.cityPeds || [];
+    for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (p === cop || (p && p._cbzSeat && p._cbzSeat.veh === car)) continue;
+      look(p, 0.3);
+    }
+    return best;
+  }
+  function placeOnPath(car, R, s, dt) {
+    const q = CBZ.roadGraph.pathAt(R, s);
+    car.pos.x = q.x; car.pos.z = q.z;
+    car.heading = dt > 0 && CBZ.lerpAngle ? CBZ.lerpAngle(car.heading, q.h, 1 - Math.pow(0.0005, dt)) : q.h;
+    if (car.group) { car.group.position.set(q.x, car.group.position.y || 0, q.z); car.group.rotation.y = car.heading; }
+  }
+
   function ride(sc, P, ch, cop, dt) {
     const car = sc.car;
     if (!car || car.dead) { sc.phase = "walkin"; sc.t = 0; sc.gate = sc.gate || gateFor(sc); if (!sc.gate) bookIn(sc); return; }
     car._arrestRide = true; car.ai = false;
-
-    // ---- LEG A: pull away down the road you were arrested on, easing onto the
-    //      bearing of the jail so the unit at least leaves in the right
-    //      direction rather than reversing into the kerb it was parked at. ----
-    if (!sc.legB) {
-      const gate0 = sc.gate;
-      if (gate0) {
-        const want0 = Math.atan2(gate0.x - car.pos.x, gate0.z - car.pos.z);
-        car.heading = CBZ.lerpAngle ? CBZ.lerpAngle(car.heading, want0, 1 - Math.pow(0.35, dt)) : want0;
+    const gate = sc.gate || (sc.gate = gateFor(sc));
+    if (!gate) { sc.phase = "arrive"; sc.t = 0; return; }
+    if (sc.route === undefined) {
+      sc.route = ridePlan(sc, car);
+      sc.rs = 0; sc.rv = 0; sc.cut = false; sc.rideT = 0;
+      if (sc.route) sc.rs = CBZ.roadGraph.projectS(sc.route, car.pos.x, car.pos.z, 0, 40);
+    }
+    sc.rideT += dt;
+    const R = sc.route;
+    if (R) {
+      // ---- THE SEALED CUT, along the route: a long drive skips to its last
+      // stretch while the camera is on the back bench (the elevator law) ----
+      if (!sc.cut && sc.rideT >= LEG_T) {
+        sc.cut = true;
+        if (R.len - sc.rs > RIDE_TAIL + 25) {
+          sc.rs = R.len - RIDE_TAIL;
+          sc.rv = Math.min(sc.rv, CBZ.roadGraph.capAt(R, sc.rs, R.capC));
+          placeOnPath(car, R, sc.rs, 0);
+          car._parkX = car._parkZ = car._parkH = null;     // vehicles.js re-seats it on the new ground
+        }
       }
-      const spd = Math.min(RIDE_SPD, sc.t * 7.0);
-      drive(car, car.heading, spd, dt);
-      if (sc.t >= LEG_T) {
-        // ---- THE SEALED CUT. You are inside a closed car with the camera on
-        // the bench: the vehicle (and everyone in it) is relocated onto the
-        // jail's approach in ONE frame. Nothing visible teleports — this is
-        // exactly how city/elevators.js hides a floor change.
-        const gate = sc.gate || (sc.gate = gateFor(sc));
-        if (!gate) { sc.phase = "arrive"; sc.t = 0; return; }
-        const ax = gate.x + (gate.nx || 0) * 34, az = gate.z + (gate.nz || 1) * 34;
-        car.pos.x = ax; car.pos.z = az;
-        car.heading = Math.atan2(gate.x - ax, gate.z - az);
-        if (car.group) { car.group.position.set(ax, car.group.position.y || 0, az); car.group.rotation.y = car.heading; }
-        car._parkX = car._parkZ = car._parkH = null;      // vehicles.js re-seats it on the new ground
-        sc.legB = true; sc.t = 0;
-      }
+      let want = Math.min(CBZ.roadGraph.capAt(R, sc.rs, R.capC), Math.sqrt(2 * RIDE_BRAKE * Math.max(0, R.len - 0.5 - sc.rs)));
+      const ahead = laneAhead(car, cop);
+      if (ahead < 1e8) want = Math.min(want, Math.max(0, ahead - 1.5) * 1.2);
+      sc.rv = want > sc.rv ? Math.min(want, sc.rv + RIDE_ACC * dt) : Math.max(want, sc.rv - RIDE_BRAKE * 3 * dt);
+      sc.rs = Math.min(R.len, sc.rs + sc.rv * dt);
+      car.v = sc.rv;
+      placeOnPath(car, R, sc.rs, dt);
+      if ((R.len - sc.rs < 1.2 && sc.rv < 0.8) || sc.rideT >= RIDE_MAX) { car.v = 0; sc.phase = "arrive"; sc.t = 0; return; }
     } else {
-      // ---- LEG B: roll up to the gate and stop. ----
-      const gate = sc.gate || (sc.gate = gateFor(sc));
-      if (!gate) { sc.phase = "arrive"; sc.t = 0; return; }
+      // no road under either end (a map with no streets): straight in, slowly
       const dx = gate.x - car.pos.x, dz = gate.z - car.pos.z, d = Math.hypot(dx, dz);
       const want = Math.atan2(dx, dz);
-      car.heading = CBZ.lerpAngle ? CBZ.lerpAngle(car.heading, want, 1 - Math.pow(0.02, dt)) : want;
-      const spd = Math.max(0, Math.min(RIDE_SPD, (d - 6) * 1.4));
-      drive(car, car.heading, spd, dt);
-      if (d < 7.5 || sc.t >= LEG_T * 1.6) { sc.phase = "arrive"; sc.t = 0; return; }
+      car.heading = CBZ.lerpAngle ? CBZ.lerpAngle(car.heading, want, 1 - Math.pow(0.05, dt)) : want;
+      const ahead = laneAhead(car, cop);
+      let spd = Math.max(0, Math.min(RIDE_SPD * 0.6, (d - 6) * 1.2));
+      if (ahead < 1e8) spd = Math.min(spd, Math.max(0, ahead - 1.5) * 1.2);
+      car.v = spd;
+      car.pos.x += Math.sin(car.heading) * spd * dt; car.pos.z += Math.cos(car.heading) * spd * dt;
+      if (car.group) { car.group.position.set(car.pos.x, car.group.position.y || 0, car.pos.z); car.group.rotation.y = car.heading; }
+      if (d < 7.5 || sc.rideT >= RIDE_MAX) { car.v = 0; sc.phase = "arrive"; sc.t = 0; return; }
     }
     // both bodies ride WITH the car, written after it moves so neither trails it
     if (P) {
@@ -2065,18 +2135,8 @@
     // the officer sat himself at the wheel (npclife holds him there)
     if (cop && !cop.dead && !(cop._cbzSeat && cop._cbzSeat.veh === car)) sitRig(cop, car, seatOf("driver"));
   }
-
-  function drive(car, heading, spd, dt) {
-    car.group.rotation.y = heading;
-    car.v = spd;
-    car.pos.x += Math.sin(heading) * spd * dt;
-    car.pos.z += Math.cos(heading) * spd * dt;
-    // vehicles.js's parkSeat() re-seats any non-AI car onto the terrain each
-    // frame (ride height + pitch + roll) at order 37, i.e. AFTER us, so the
-    // ride obeys the same ground the player drives on — we never write
-    // group.position.y ourselves, only x/z (which it then re-writes anyway).
-    if (car.group) car.group.position.set(car.pos.x, car.group.position.y || 0, car.pos.z);
-  }
+  // (vehicles.js's parkSeat() re-seats any non-AI car onto the terrain each
+  // frame at order 37, AFTER us: the ride writes x/z and heading only.)
 
   function toJail() {
     if (arrestScene) clearArc(arrestScene);

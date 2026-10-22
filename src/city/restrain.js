@@ -732,7 +732,6 @@
         if (CBZ.sfx) CBZ.sfx("coin");
         CBZ.city && CBZ.city.big("COLLAR + $" + pay + (tag ? " — " + tag : ""));
       }
-      if (CBZ.pushKill) CBZ.pushKill(nm(ped) + " was turned in", "#7ed957");
       I.refresh();
       return true;
     }
@@ -750,7 +749,6 @@
       CBZ.city && CBZ.city.addRespect(4);
       if (CBZ.sfx) CBZ.sfx("coin");
       CBZ.city && CBZ.city.big("COLLAR + $" + pay + (tag ? " — " + tag : ""));
-      if (CBZ.pushKill) CBZ.pushKill(nm(ped) + " was turned in", "#7ed957");
     } else {
       // dragging in a clean citizen: the desk doesn't pay — it CHARGES you.
       ped.controlled = false;

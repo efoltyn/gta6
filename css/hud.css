@@ -41,15 +41,6 @@
   border-radius:16px;
   box-shadow:0 6px 0 rgba(0,0,0,.18);
 }
-#objective{
-  position:absolute; top:18px; left:18px; max-width:min(60vw,420px);
-  padding:12px 16px; font-size:17px; font-weight:500; line-height:1.25;
-  letter-spacing:.2px; transition:opacity .5s ease;
-}
-#objective .tag{
-  display:inline-block; font-size:11px; font-weight:700; letter-spacing:2px;
-  color:var(--orange); text-transform:uppercase; margin-bottom:3px; opacity:.95;
-}
 #topright{position:absolute; top:18px; right:18px; display:flex; gap:10px; align-items:stretch;}
 #topright .pill{padding:10px 14px; font-weight:600; font-size:18px; display:flex; align-items:center; gap:8px;}
 #cigs .ic{width:22px;height:13px;border-radius:2px;background:linear-gradient(180deg,#fff,#e7e0d0);box-shadow:inset 0 -2px 0 rgba(0,0,0,.15); position:relative;}
@@ -248,8 +239,7 @@ body.quiet-toasts #toast.pop{animation:toastBanner 1.5s cubic-bezier(.2,.9,.3,1)
    THE PICKUP FEED (#pickupFeed, systems/hud.js) — what a pickup gets
    INSTEAD of the centre toast: the corner-killfeed grammar, on the left.
    Small dark pill, item name in ink, newest at the bottom, gone in 2.5 s.
-   Same visual family as `#objective .kfeed` at the foot of this sheet and
-   city/killfeed.js's corner strips, on purpose — three feeds, one language.
+   Same visual family as city/killfeed.js's corner strips, on purpose.
 
    ---------------------------------------------------------------------------
    THE FLOOR IS MEASURED OFF THE CLUSTER IT MUST CLEAR, NOT CHOSEN. Same method
@@ -616,12 +606,6 @@ body.mode-survival #compass { display:none !important; }
 body.mode-survival #topright #survTop{ display:flex; }
 body.mode-survival #survBars{ display:block; }
 
-/* THE OBJECTIVE PANEL IS SILENT IN SURVIVAL. Nothing sets an objective string
-   in the disaster mode, so the top-left corner carried an empty box with the
-   word OBJECTIVE printed over it for the whole match — a label with nothing to
-   label. It still opens for the degrade-safe casualty list (.killfeed), which
-   relabels itself "Casualties" and has actual lines in it. */
-body.mode-survival #objective:not(.killfeed){ display:none; }
 
 /* alive counter — top RIGHT, in the #topright rail beside the clock. It takes
    #topright .pill's padding and font size verbatim (including the phone step
@@ -640,22 +624,6 @@ body.mode-survival #objective:not(.killfeed){ display:none; }
 #stamBar{ height:100%; width:100%; border-radius:10px; background:#5bc8ff; transition:width .12s linear; }
 /* X2: survival/escape hunger meter (city mode already has its own #cFood bar) */
 
-/* ============================================================
-   survival KILL FEED — the objective panel turns into a running
-   list of casualties ("Nova47 — struck by lightning"). Only the
-   panel carrying .killfeed (set on survival start) is affected.
-============================================================ */
-#objective.killfeed{ max-width:min(46vw,340px); }
-#objective.killfeed #objText{ display:flex; flex-direction:column; gap:3px; margin-top:4px; }
-#objective .kfeed{
-  font-size:12.5px; font-weight:600; line-height:1.25; letter-spacing:.2px;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  opacity:0; transform:translateX(-10px); transition:opacity .25s ease, transform .25s ease;
-  border-left:2px solid rgba(255,90,90,.7); padding-left:7px;
-}
-#objective .kfeed.in{ opacity:.96; transform:translateX(0); }
-#objective .kfeed.out{ opacity:0; transform:translateX(8px); }
-#objective .kfeed-you{ font-weight:700; border-left-color:#ff3b3b; text-shadow:0 1px 2px rgba(0,0,0,.5); }
 
 /* ============================================================
    THE PROMPT IS ON THE THING (systems/interactions.js prisonPrompt)
@@ -801,7 +769,6 @@ body.touch .wprompt.wdock .wname .wrole{font-size:12px;}
    not on screen. The functions behind the two tap targets that go (minimap =
    open map, Ranks = rankings) are buttons in the open plan.
 ============================================================ */
-body.prison-bare #objective,
 body.prison-bare #topright,
 body.prison-bare #keycard,
 body.prison-bare #inventory,
