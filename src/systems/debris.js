@@ -1877,13 +1877,58 @@
     out.worst = +out.worst.toFixed(2);
     return out;
   }
+  /* A FROZEN PIECE IS APPENDED, NOT RE-MERGED. A bucket's mesh is built with
+     headroom (drawn up to its live count): a piece that freezes into it is
+     written onto the end and only that span is uploaded. The whole 16 m cell
+     is merged again only when something left it (eviction, a revive, a clear
+     — the drawn parts are then no longer a prefix of its list) or the
+     headroom ran out. A collapse's pile used to re-merge its cell per piece. */
+  const bucketStat = { appends: 0, rebuilds: 0 };
+  function bucketFits(bk, n) {
+    const m = bk.mesh, D = bk.drawn;
+    if (!m || !m.parent || !D || n > bk.cap || D.length > bk.parts.length) return false;
+    for (let i = 0; i < D.length; i++) if (bk.parts[i] !== D[i]) return false;
+    return true;
+  }
+  function growSphere(s, p) {
+    const c = s.center;
+    for (let i = 0; i < p.length; i += 3) {
+      const dx = p[i] - c.x, dy = p[i + 1] - c.y, dz = p[i + 2] - c.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d <= s.radius) continue;
+      const nr = (s.radius + d) / 2, k = (nr - s.radius) / d;
+      c.x += dx * k; c.y += dy * k; c.z += dz * k; s.radius = nr;
+    }
+  }
   function rebuildBucket(bk) {
     bk.dirty = false;
     let n = 0;
     for (const q of bk.parts) n += q.p.length / 3;
+    if (n && bucketFits(bk, n)) {
+      const g = bk.mesh.geometry, A = g.attributes, o0 = bk.nv;
+      let o = o0;
+      for (let i = bk.drawn.length; i < bk.parts.length; i++) {
+        const q = bk.parts[i];
+        A.position.array.set(q.p, o * 3); A.normal.array.set(q.n, o * 3); A.uv.array.set(q.u, o * 2); A.color.array.set(q.c, o * 3);
+        growSphere(g.boundingSphere, q.p);
+        bk.drawn.push(q);
+        o += q.p.length / 3;
+      }
+      if (o > o0) {
+        const up = function (a, k) { a.updateRange.offset = o0 * k; a.updateRange.count = (o - o0) * k; a.needsUpdate = true; };
+        up(A.position, 3); up(A.normal, 3); up(A.color, 3); up(A.uv, 2);
+      }
+      bk.nv = o;
+      g.setDrawRange(0, o);
+      bucketStat.appends++;
+      return;
+    }
     if (bk.mesh) { if (bk.mesh.parent) bk.mesh.parent.remove(bk.mesh); bk.mesh.geometry.dispose(); bk.mesh = null; }
+    bk.drawn = null;
     if (!n) { buckets.delete(bk.key); return; }
-    const P = new Float32Array(n * 3), N = new Float32Array(n * 3), U = new Float32Array(n * 2), C = new Float32Array(n * 3);
+    // headroom for the pieces still to come: a quarter again, never less than
+    // a few pieces' worth
+    const cap = n + Math.max(512, n >> 2);
+    const P = new Float32Array(cap * 3), N = new Float32Array(cap * 3), U = new Float32Array(cap * 2), C = new Float32Array(cap * 3);
     let o = 0;
     for (const q of bk.parts) { P.set(q.p, o * 3); N.set(q.n, o * 3); U.set(q.u, o * 2); C.set(q.c, o * 3); o += q.p.length / 3; }
     const g = new THREE.BufferGeometry();
@@ -1891,14 +1936,26 @@
     g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
     g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
     g.setAttribute("color", new THREE.BufferAttribute(C, 3));
-    g.computeBoundingSphere();
+    g.setDrawRange(0, n);
+    // the sphere of what is drawn (the headroom is zeros at the origin)
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (let i = 0; i < n * 3; i += 3) {
+      const x = P[i], y = P[i + 1], z = P[i + 2];
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z; if (z > z1) z1 = z;
+    }
+    const sph = new THREE.Sphere(new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2), 0);
+    let r2 = 0;
+    for (let i = 0; i < n * 3; i += 3) { const dx = P[i] - sph.center.x, dy = P[i + 1] - sph.center.y, dz = P[i + 2] - sph.center.z, d = dx * dx + dy * dy + dz * dz; if (d > r2) r2 = d; }
+    sph.radius = Math.sqrt(r2);
+    g.boundingSphere = sph;
     const mesh = new THREE.Mesh(g, bk.mat);
     mesh.matrixAutoUpdate = false; mesh.updateMatrix();
     mesh.castShadow = !PHONE && !TABLET; mesh.receiveShadow = true;
     if (seeThrough(bk.mat)) drawAsGlass(mesh);
     mesh.userData.debrisRubble = true;
     (bk.root || CBZ.scene).add(mesh);
-    bk.mesh = mesh;
+    bk.mesh = mesh; bk.cap = cap; bk.nv = n; bk.drawn = bk.parts.slice();
+    bucketStat.rebuilds++;
   }
   function camD2(x, z) {
     const c = CBZ.camera && CBZ.camera.position; if (!c) return 0;
@@ -3348,7 +3405,7 @@
       let gritLive = 0; if (grit) for (const v of grit.variants) for (const s of v.slots) if (s) gritLive++;
       let dustLive = 0; if (dustSys) for (const m of dustSys.motes) if (m) dustLive++;
       let asleep = 0; for (const b of live) if (b.asleep) asleep++;
-      return { live: live.length, asleep, static: staticCount, kept: kept.length, watched: recs.size, revived: revivedN, dissolved: dissolvedN, buckets: buckets.size, staticTris: tris, grit: gritLive, dust: dustLive,
+      return { live: live.length, asleep, static: staticCount, kept: kept.length, watched: recs.size, revived: revivedN, dissolved: dissolvedN, buckets: buckets.size, bucketAppends: bucketStat.appends, bucketRebuilds: bucketStat.rebuilds, staticTris: tris, grit: gritLive, dust: dustLive,
         caps: { live: LIVE_CAP, static: STATIC_CAP, grit: GRIT_CAP, perCall: PER_CALL_CAP }, device: DEVICE };
     },
     // test hooks (node checks drive the fracture without a scene)
