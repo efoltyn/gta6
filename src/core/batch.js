@@ -372,11 +372,15 @@
   // mark, applied when the room is built (buildRoom)
   const ROOM_HIDDEN = { room: true };
   function roomUnbuilt(e) { const R = e.mesh._cbzRoom; return !!(R && !R.built); }
-  CBZ.batchHideGroup = function (top) {
+  /* keep (optional): a Set of this group's entries left as they are — the
+     ones city/collapse.js goes on drawing a struck building's coarse storeys
+     from (it hides what it cut out of them itself, batchTriHide / batchWallHide) */
+  CBZ.batchHideGroup = function (top, keep) {
     const arr = groupRanges.get(top);
     if (!arr) return 0;
     let n = 0;
     for (const e of arr) {
+      if (keep && keep.has(e)) continue;
       if (e.whole) { if (e.mesh.visible) { e.mesh.visible = false; n++; } continue; }
       if (e._stash) continue;                       // already hidden
       if (roomUnbuilt(e)) { e._stash = ROOM_HIDDEN; n++; continue; }
@@ -700,6 +704,76 @@
     return rec ? sliceSet(rec, false) : false;
   };
 
+  // the merged shell a wall was baked into (city/collapse.js: a wall whose
+  // storey the cut leaves coarse keeps drawing from that shell)
+  CBZ.batchWallSliceOf = function (wall) { return wallSlices.get(wall) || null; };
+
+  /* TRIANGLES HIDDEN BY THEIR INDICES. city/collapse.js leaves a struck
+     tower's untouched storeys drawing from the merged meshes they were baked
+     into (its rooms, its deco) and takes a triangle out only when the piece
+     it belongs to comes away. The hide writes the run's indices as one
+     repeated vertex (zero-area triangles, nothing rasterizes): it never
+     touches the vertices, so it composes with the position-zeroing slice
+     hides above (batchHideGroup / batchShowGroup / batchWallHide) in any
+     order. `orig` is the caller's copy of the run's indices (it read them
+     when it cut the building), written back by batchTriShow. In the
+     streamed city a merged index buffer keeps no CPU copy once uploaded:
+     the run is written into the GPU buffer through COPY_WRITE_BUFFER (no
+     vertex array object is disturbed). A room that is only its recipe keeps
+     the hide as a mark, applied to every bake of it (buildRoom). */
+  function idxWrite(g, i0, vals) {
+    const ix = g && g.index;
+    if (!ix) return false;
+    if (ix.array) {
+      if (i0 + vals.length > ix.array.length) return false;
+      ix.array.set(vals, i0);
+      uploadRange(ix, i0, vals.length);
+      return true;
+    }
+    const R = CBZ.renderer, gl = R && R.getContext && R.getContext();
+    const M = self.__cbzGLAttr, K = M && gl && M.get(gl), b = K && K.get(ix);
+    if (!b || !b.buffer || typeof WebGL2RenderingContext === "undefined" || !(gl instanceof WebGL2RenderingContext)) return false;
+    const T = b.type === 5125 ? Uint32Array : b.type === 5123 ? Uint16Array : b.type === 5121 ? Uint8Array : null;
+    if (!T) return false;
+    const data = vals instanceof T ? vals : T.from(vals);
+    try {
+      gl.bindBuffer(gl.COPY_WRITE_BUFFER, b.buffer);
+      gl.bufferSubData(gl.COPY_WRITE_BUFFER, i0 * data.BYTES_PER_ELEMENT, data);
+      gl.bindBuffer(gl.COPY_WRITE_BUFFER, null);
+    } catch (e) { return false; }
+    return true;
+  }
+  let _degen = new Uint32Array(0);
+  function degenOf(orig) {
+    const n = orig.length;
+    if (_degen.length < n) _degen = new Uint32Array(Math.max(n, _degen.length * 2));
+    const d = _degen.subarray(0, n);
+    d.fill(orig[0]);
+    return d;
+  }
+  CBZ.batchTriHide = function (mesh, i0, orig) {
+    if (!mesh || !orig || !orig.length) return false;
+    const R = mesh._cbzRoom;
+    if (R) (R.triHides || (R.triHides = new Map())).set(i0, orig);
+    if (R && !R.built) return true;
+    return idxWrite(mesh.geometry, i0, degenOf(orig));
+  };
+  CBZ.batchTriShow = function (mesh, i0, orig) {
+    if (!mesh || !orig || !orig.length) return false;
+    const R = mesh._cbzRoom;
+    if (R && R.triHides) R.triHides.delete(i0);
+    if (R && !R.built) return true;
+    return idxWrite(mesh.geometry, i0, orig);
+  };
+  // a room's triangles as they are baked, with their arrays, for a caller
+  // that needs them while the room is only its recipe (a struck tower's
+  // piece coming away while nobody is near enough to have built the room)
+  CBZ.batchRoomBake = function (mesh) {
+    const R = mesh && mesh._cbzRoom;
+    if (!R) return null;
+    try { return bakeMergeV2(roomProxies(R)).geometry; } catch (e) { return null; }
+  };
+
   // Merge eligible meshes found under `target`. When `recurse` is true we walk
   // the whole subtree (used for the city, whose thousands of static boxes live
   // nested inside building groups under one root that loads AFTER the page —
@@ -960,7 +1034,7 @@
         }
         // the bucket key is per-building ("W<gi>|…") — the whole merged copy
         // belongs to ONE top group; register it for batchHideGroup/ShowGroup.
-        addRange(b.tops[0], { mesh, whole: true });
+        addRange(b.tops[0], v2 ? { mesh, whole: true, walls: meshes.slice() } : { mesh, whole: true });
         wallMerged++;
       } else {
         // INERT deco: nothing references these — remove + dispose outright.
@@ -1156,6 +1230,11 @@
     // (slice hides then write the GPU buffer, rangeSet), as for every merged mesh
     const gpuOnly = CBZ.CONFIG && CBZ.CONFIG.CITY_STREAM === true && CBZ.batchGpuSliceable && CBZ.batchGpuSliceable();
     for (const k in r.attributes) { const a = r.attributes[k]; if (gpuOnly) a.onUpload(dropUploaded); g.setAttribute(k, a); }
+    // a struck tower's triangles taken out of this room (batchTriHide)
+    if (R.triHides && R.triHides.size) {
+      const ia = r.index.array;
+      R.triHides.forEach(function (orig, i0) { if (i0 + orig.length <= ia.length) ia.fill(orig[0], i0, i0 + orig.length); });
+    }
     if (gpuOnly) r.index.onUpload(dropUploaded);
     g.setIndex(r.index);
     g._cbzNoDraw = false;

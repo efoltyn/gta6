@@ -550,7 +550,7 @@
     let b = 0;
     for (const ms of S.meshes) { const A = ms.geometry.attributes; for (const k in A) if (A[k].array) b += A[k].array.byteLength; }
     for (const p of S.pristine) b += p.byteLength;
-    return b;
+    return b + (S.liveBytes || 0);
   }
   C.liveBytes = function () { let b = 0; for (const S of structs) if (!S.disposed) b += S.bytes || 0; return b; };
   function regionOf(D, hint) {
@@ -567,6 +567,7 @@
   // the region is a SET of storeys (a second strike lower down adds its own
   // storeys, never the untouched ones between the two)
   function fineLevel(S, s) { return S.region.all || S.region.fine[s] === 1; }
+  function coarseSpan(S, a, b) { if (S.region.all) return false; for (let s = a; s <= b; s++) if (S.region.fine[s] === 1) return false; return true; }
   function fineSpan(S, a, b) { if (S.region.all) return true; for (let s = a; s <= b; s++) if (S.region.fine[s] !== 1) return false; return true; }
   function makeStruct(D, hint) {
     const P = C.profile({ w: D.w, d: D.d, h: D.h, storeys: D.storeys, FH: D.FH, style: D.style, masonry: D.masonry, material: D.material });
@@ -600,6 +601,7 @@
       levelLost: new Uint8Array(ns + 1), deadCols: [], deadPlats: [], newCols: [], newPlats: [], surgQ: [], surgI: 0,
       instHide: [], origCols: null, coreMat: null, topY: D.h,
       region: regionOf(D, hint), livePanes: [], liveInst: [], readback: null,
+      liveSrc: [], liveWalls: new Set(), triHid: [], wallHid: [], xv: null, xT: 0, liveBytes: 0, spans: [], promo: [], collect: null, promoting: false, spanMode: false,
       stats: { chunks: 0, tris: 0, crushed: 0, blasted: 0, detached: 0, bodies: 0, pieces: 0, baked: 0, carsCrushed: 0,
         tipped: 0, maxTilt: 0, pancaked: 0, firstFall: -1, lastSettle: -1, cutMs: 0, born: nowT,
         foot: { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, cells: new Set() } },
@@ -724,6 +726,11 @@
     const D = S.D, grp = D.grp, out = [];
     const solids = new Set(D.solids || []);
     const bld = D.b;
+    // the merged shells (core/batch.js wall pass) that know their walls: a
+    // wall in one of them can go on drawing from it (see LIVE)
+    const R = CBZ.batchRangesOf ? CBZ.batchRangesOf(grp) : null;
+    const shells = new Map();
+    if (R && CBZ.batchWallSliceOf && CBZ.batchWallHide) for (const e of R) if (e && e.whole && e.walls && e.mesh) shells.set(e.mesh, e);
     const skinnable = !!(bld && CBZ.citySkin && CBZ.cityIsShellMat);
     grp.updateWorldMatrix(true, true);
     const objs = [];
@@ -762,17 +769,32 @@
           if (sk) mt = sk;
         }
       }
-      out.push({ k: "own", geo: geo, mat: mt, M: new THREE.Matrix4().multiplyMatrices(S.Linv, o.matrixWorld), glass: isGlass(mats[0]), col: null });
+      const los = solids.has(o) && !o.visible;
+      const src = { k: los ? "los" : "own", geo: geo, mat: mt, M: new THREE.Matrix4().multiplyMatrices(S.Linv, o.matrixWorld), glass: isGlass(mats[0]), col: null };
+      // a wall baked into its shell keeps drawing from it, triangle by
+      // triangle, where its storey is coarse: its triangles are the shell's
+      // run of the index at the wall's place in the bake (see shellRun)
+      if (los && !o._breached && !Array.isArray(mt) && shells.size) {
+        const sl = CBZ.batchWallSliceOf(o), sh = sl && shells.get(sl.mesh);
+        const io = sh ? shellRun(sh, o) : -1;
+        if (io >= 0) { src.wall = o; src.entry = sh; src.mesh = sl.mesh; src.off = io; src.vbase = sl.start; src.live = true; }
+      }
+      out.push(src);
     }
     yield;
     // the merged deco core/batch.js took out of the group (world space)
-    const R = CBZ.batchRangesOf ? CBZ.batchRangesOf(grp) : null;
     if (R) for (const e of R) {
       if (!e || e.whole || e._stash || !e.mesh || (e.mesh._cbzRoom && !e.mesh._cbzRoom.built)) continue;
       const g = e.mesh.geometry;
       if (!g || !g.attributes || !g.attributes.position || e.mesh._cbzPacked) continue;
       if (!readable(S, g)) continue;
-      out.push({ k: e.mesh._cbzRoom ? "room" : "batch", geo: g, mat: e.mesh.material, M: new THREE.Matrix4().multiplyMatrices(S.Linv, e.mesh.matrixWorld), glass: false, col: null, start: e.start, count: e.count });
+      // e.start / e.count count VERTICES; the cut walks triangles, so the
+      // slice is its run of the index (the merge keeps each source's indices
+      // together, in vertex order). It used to read the index at the vertex
+      // offsets: two thirds of a room, or another building's deco.
+      const tr = triRun(g, e.start, e.count);
+      out.push({ k: e.mesh._cbzRoom ? "room" : "batch", geo: g, mat: e.mesh.material, M: new THREE.Matrix4().multiplyMatrices(S.Linv, e.mesh.matrixWorld), glass: false, col: null,
+        start: tr[0], count: tr[1] - tr[0], entry: e, mesh: e.mesh, live: !!(g.index && CBZ.batchTriHide && !Array.isArray(e.mesh.material)) });
     }
     /* THE PANES (instanced pools, world records), cut from what the pool
        DRAWS: the pool's own geometry (its front and back faces and two edge
@@ -881,6 +903,7 @@
       const ka = levelOf(S, y0 + EPS), kb = levelOf(S, y1 - EPS);
       if (!fineSpan(S, ka, kb)) {
         if (kb <= ka || y1 - y0 <= 0.02) return null;
+        if (S.spanMode && coarseSpan(S, ka, kb)) return null;
         const k0 = Math.max(1, Math.floor((y0 + SL) / S.FH) + 1);
         const k1 = Math.min(S.ns, Math.ceil((y1 + SL) / S.FH) - 1);
         if (k0 <= k1) {
@@ -926,7 +949,17 @@
     if (hi.length >= 3) clipEmit(S, hi, mat, glass, depth + 1);
   }
   const _ct = new Float32Array(3);
+  /* S.collect (a Set): the cut is LEARNING where a live span triangle's
+     pieces would go (everything is accounted, nothing is copied; the pieces
+     are collected). S.promoting: a span is being cut for real, long after the
+     cut accounted it (everything is copied, nothing accounted twice). */
   function emitPoly(S, P, mat, glass) {
+    if (S.spanMode) {
+      let y0 = Infinity, y1 = -Infinity;
+      for (const v of P) { if (v[1] < y0) y0 = v[1]; if (v[1] > y1) y1 = v[1]; }
+      const ka = levelOf(S, y0 + EPS), kb = levelOf(S, y1 - EPS);
+      if (kb > ka && y1 - y0 > 0.02 && coarseSpan(S, ka, kb)) { spanEmit(S, P, mat, glass); return; }
+    }
     let cx = 0, cy = 0, cz = 0;
     for (const v of P) { cx += v[0]; cy += v[1]; cz += v[2]; }
     cx /= P.length; cy /= P.length; cz /= P.length;
@@ -935,9 +968,13 @@
     // a refine files only into its own storeys' standing (or empty) pieces:
     // a piece that has already come away does not get its slab back
     if (S.refining && (!c.refine || (!c.standing && !c.void))) return;
-    if (!c.bufs) c.bufs = new Map();
-    let B = c.bufs.get(mat);
-    if (!B) { B = new Buf(); c.bufs.set(mat, B); }
+    const col = S.collect, acc = !S.promoting;
+    let B = null;
+    if (!col) {
+      if (!c.bufs) c.bufs = new Map();
+      B = c.bufs.get(mat);
+      if (!B) { B = new Buf(); c.bufs.set(mat, B); }
+    }
     const out = c.kind === 0 ? outN(S, c.f) : null;
     for (let i = 1; i + 1 < P.length; i++) {
       const a = P[0], b = P[i], d = P[i + 1];
@@ -946,31 +983,365 @@
       const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
       const ar2 = Math.sqrt(nx * nx + ny * ny + nz * nz);
       if (ar2 < 1e-7) continue;
-      if (out) {
+      if (out && acc) {
         const dn = (nx * out[0] + nz * out[2]) / ar2;
         if (glass) c.glA += ar2 * 0.5 * Math.abs(dn);
         else if (dn > 0.6) c.opA += ar2 * 0.5;
       }
-      B.need(ST * 3);
-      const A = B.a;
+      if (B) B.need(ST * 3);
       for (const v of [a, b, d]) {
-        const o = B.n;
-        for (let k = 0; k < ST; k++) A[o + k] = v[k];
-        const l = Math.hypot(v[3], v[4], v[5]) || 1;
-        A[o + 3] /= l; A[o + 4] /= l; A[o + 5] /= l;
-        B.n += ST;
+        if (B) {
+          const A = B.a, o = B.n;
+          for (let k = 0; k < ST; k++) A[o + k] = v[k];
+          const l = Math.hypot(v[3], v[4], v[5]) || 1;
+          A[o + 3] /= l; A[o + 4] /= l; A[o + 5] /= l;
+          B.n += ST;
+        }
+        if (!acc) continue;
         if (!c.gb) c.gb = [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity];
         const g = c.gb;
         if (v[0] < g[0]) g[0] = v[0]; if (v[0] > g[1]) g[1] = v[0];
         if (v[1] < g[2]) g[2] = v[1]; if (v[1] > g[3]) g[3] = v[1];
         if (v[2] < g[4]) g[4] = v[2]; if (v[2] > g[5]) g[5] = v[2];
       }
+      if (!acc) continue;
       c.tris++;
+      const ok = (S._srcK || "?") + (col ? "L" : fineLevel(S, c.s) ? "F" : "C"), OK = S.stats.outK || (S.stats.outK = {});
+      OK[ok] = (OK[ok] || 0) + 1;
+      if (col) { c.ltris = (c.ltris || 0) + 1; col.add(c); }
     }
-    if (cy > S.topY) S.topY = cy;
+    if (acc && cy > S.topY) S.topY = cy;
   }
   const OUTN = [[0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]];
   function outN(S, f) { return OUTN[f]; }
+
+  /* ============================================================
+     LIVE — what the bounded cut leaves where it is drawn. A coarse storey
+     (outside the region) is never clipped down its piers, so a triangle of
+     it that sits inside one storey is filed WHOLE into the piece its centre
+     is in: copying it into the standing bands was a second copy of the
+     building's own geometry (~10 MB of a 38-storey tower's rooms and walls,
+     JS and GPU) to draw what was already drawing. Such a triangle now stays
+     in the merged mesh it came from (a room's furniture, the deco, a wall in
+     its merged shell) and only its piece knows it is there: its run of the
+     index (or its wall) is taken out of that mesh the moment the piece comes
+     away (hideChunk), and read back as geometry for the body / the pieces /
+     the rubble it becomes (geoOf), or for the fine cut a later hit makes of
+     its storey (refineGen). Everything the cut did take — the region, a
+     triangle across a storey line, a wall across two pieces — is taken out
+     of those meshes at the swap. Index runs (core/batch.js batchTriHide)
+     never touch the vertices, so they compose with every position-zeroing
+     hide a demolition or a rebuild does to the same building.
+     ============================================================ */
+  const DEAD = { dead: true };
+  // where a wall's indices start in its merged shell: the bake writes each
+  // wall's indices (or one per vertex) in the order of the shell's walls
+  function shellRun(sh, wall) {
+    let M = sh._cbzRun;
+    if (!M) {
+      M = sh._cbzRun = new Map();
+      let io = 0;
+      for (const w of sh.walls) {
+        const g = w.geometry, pa = g && g.attributes && g.attributes.position;
+        if (!pa) { M = sh._cbzRun = new Map(); break; }
+        M.set(w, io);
+        io += g.index ? g.index.count : pa.count;
+      }
+      const ix = sh.mesh.geometry && sh.mesh.geometry.index;
+      if (!ix || ix.count !== io) M.clear();            // not the bake this was read from
+    }
+    const r = M.get(wall);
+    return r == null ? -1 : r;
+  }
+  // the index run of a merged slice of vertices [vs, vs + vc): the first
+  // triangle at or past each end (indices come in source order)
+  function triRun(g, vs, vc) {
+    const I = g.index && g.index.array;
+    if (!I) return [vs, vs + vc];
+    const first = function (v) {
+      let lo = 0, hi = (I.length / 3) | 0;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (I[m * 3] < v) lo = m + 1; else hi = m; }
+      return lo * 3;
+    };
+    return [first(vs), first(vs + vc)];
+  }
+  // the coarse piece a triangle sits wholly inside (it would be filed there
+  // unsplit), or null
+  /* (a floor-to-ceiling partition, a column, a stair flight reaches the
+     storey line under the next floor by the slab's depth: it is its own
+     storey's whole, as long as what it reaches into is coarse too) */
+  const LIVE_TOL = 0.45;
+  function liveChunk(S, P) {
+    let y0 = Infinity, y1 = -Infinity;
+    for (let j = 0; j < 3; j++) { const y = P[j][1]; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    const cx = (P[0][0] + P[1][0] + P[2][0]) / 3, cy = (P[0][1] + P[1][1] + P[2][1]) / 3, cz = (P[0][2] + P[1][2] + P[2][2]) / 3;
+    const s = levelOf(S, cy);
+    if (fineLevel(S, s)) {
+      // in the region: only what the cutter would not split at all (a desk,
+      // a wall panel between two piers) — it goes whole to its piece either way
+      const sm = S.spanMode;
+      S.spanMode = false;
+      const sp = findSplit(S, P);
+      S.spanMode = sm;
+      if (sp) return null;
+      const c = chunkAt(S, cx, cy, cz);
+      return c && c.s === s ? c : null;
+    }
+    const lo = ylo(S, s), hi = yhi(S, s);
+    if (lo - y0 > LIVE_TOL || y1 - hi > LIVE_TOL) return null;
+    if (y0 < lo - EPS && s > 0 && fineLevel(S, s - 1)) return null;
+    if (y1 > hi + EPS && s < S.ns && fineLevel(S, s + 1)) return null;
+    const c = chunkAt(S, cx, cy, cz);
+    return c && c.s === s ? c : null;
+  }
+  // what emitPoly learns from a triangle (bounds, solidity, the count),
+  // without the copy
+  function fileLive(S, c, P, glass) {
+    const a = P[0], b = P[1], d = P[2];
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const ar2 = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (ar2 >= 1e-7 && c.kind === 0) {
+      const out = OUTN[c.f], dn = (nx * out[0] + nz * out[2]) / ar2;
+      if (glass) c.glA += ar2 * 0.5 * Math.abs(dn);
+      else if (dn > 0.6) c.opA += ar2 * 0.5;
+    }
+    if (!c.gb) c.gb = [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity];
+    const g = c.gb;
+    for (let j = 0; j < 3; j++) {
+      const v = P[j];
+      if (v[0] < g[0]) g[0] = v[0]; if (v[0] > g[1]) g[1] = v[0];
+      if (v[1] < g[2]) g[2] = v[1]; if (v[1] > g[3]) g[3] = v[1];
+      if (v[2] < g[4]) g[4] = v[2]; if (v[2] > g[5]) g[5] = v[2];
+    }
+    c.tris++; c.ltris = (c.ltris || 0) + 1;
+    const cy = (a[1] + b[1] + d[1]) / 3;
+    if (cy > S.topY) S.topY = cy;
+    const OK = S.stats.outK || (S.stats.outK = {}), ok = (S._srcK || "?") + "L";
+    OK[ok] = (OK[ok] || 0) + 1;
+  }
+  // one triangle of a merged slice: live in its piece, or cut (and so taken
+  // out of the mesh at the swap)
+  function liveTri(S, L, k, P, mt, glass) {
+    const c = P ? liveChunk(S, P) : null;
+    if (c) fileLive(S, c, P, glass);
+    else if (P) clipEmit(S, P, mt, glass, 0);
+    const h = c || DEAD;
+    if (h !== L.cur) { closeRun(L, k); L.cur = h; L.a = k; }
+  }
+  function closeRun(L, k) {
+    const c = L.cur;
+    if (!c || k <= L.a) return;
+    if (c === DEAD) L.dead.push(L.a, k);
+    else { (c.lr || (c.lr = [])).push(L, L.a, k); L.nLive += (k - L.a) / 3; }
+  }
+  /* A SPAN: a polygon across coarse storeys (a stair core's wall, a lift
+     shaft, an atrium's glass run the height of the tower) used to be cut at
+     every storey line it crossed — ~70 triangles of copy for one — though
+     nothing there may ever break. The cut (S.spanMode) stops at the coarse
+     run and files it WHOLE in a span: one band range, every piece it would
+     have been cut into accounted as if it had been and told it is there.
+     The first of those pieces to leave cuts it for real (promote), into all
+     of them at once. */
+  function spanEmit(S, P, mat, glass) {
+    const got = S.collect = new Set();
+    S.spanMode = false;
+    try { clipEmit(S, P, mat, glass, 0); } finally { S.collect = null; S.spanMode = true; }
+    if (!got.size) return;
+    const H = { span: true, bufs: new Map(), rg: null, chunks: Array.from(got), mt: mat, glass: glass, done: false };
+    const B = new Buf();
+    H.bufs.set(mat, B);
+    for (let i = 1; i + 1 < P.length; i++) {
+      B.need(ST * 3);
+      for (const v of [P[0], P[i], P[i + 1]]) {
+        const A = B.a, o = B.n;
+        for (let k = 0; k < ST; k++) A[o + k] = v[k];
+        const l = Math.hypot(v[3], v[4], v[5]) || 1;
+        A[o + 3] /= l; A[o + 4] /= l; A[o + 5] /= l;
+        B.n += ST;
+      }
+    }
+    for (const ch of H.chunks) (ch.sp || (ch.sp = [])).push(H);
+    S.spans.push(H);
+  }
+  // a piece with spans leaves: they are cut for real (batched: the first
+  // read or hide after it flushes the lot)
+  function queueSpans(S, c) {
+    if (!c.sp) return;
+    for (const sp of c.sp) if (!sp.done) { sp.done = true; S.promo.push(sp); }
+  }
+  function flushSpans(S) {
+    // (never inside a cut or a refine: those own the pieces' buffers until
+    // they are banded; the spans wait for the next frame after it)
+    if (!S.promo.length || S.disposed || S.gen || S.refining) return;
+    const list = S.promo.splice(0);
+    const V = new Float32Array(ST * 3);
+    const P = [V.subarray(0, ST), V.subarray(ST, ST * 2), V.subarray(ST * 2, ST * 3)];
+    S.promoting = true;
+    try {
+      for (const sp of list) {
+        const rg = sp.rg;
+        if (!rg) continue;
+        for (let r = 0; r < rg.length; r += 3) {
+          const mesh = S.meshes[rg[r]], st = rg[r + 1], n = rg[r + 2];
+          if (!mesh) continue;
+          const Aa = mesh.geometry.attributes, pp = S.pristine[rg[r]], nn = Aa.normal.array, uu = Aa.uv.array, cc = Aa.color ? Aa.color.array : null;
+          for (let t = 0; t + 2 < n; t += 3) {
+            for (let j = 0; j < 3; j++) {
+              const q = st + t + j, v = P[j];
+              v[0] = pp[q * 3]; v[1] = pp[q * 3 + 1]; v[2] = pp[q * 3 + 2];
+              v[3] = nn[q * 3]; v[4] = nn[q * 3 + 1]; v[5] = nn[q * 3 + 2];
+              v[6] = uu[q * 2]; v[7] = uu[q * 2 + 1];
+              if (cc) { v[8] = cc[q * 3]; v[9] = cc[q * 3 + 1]; v[10] = cc[q * 3 + 2]; } else { v[8] = 1; v[9] = 1; v[10] = 1; }
+            }
+            clipEmit(S, P, mesh.material, sp.glass, 0);
+          }
+          // the whole span's range goes dark: its pieces draw it now
+          mesh.geometry.attributes.position.array.fill(0, st * 3, (st + n) * 3);
+          S.dirty.add(mesh);
+        }
+        sp.rg = null;
+      }
+    } finally { S.promoting = false; }
+    // (every piece that took some: a storey refined since is cut down its piers too)
+    const made = [], before = new Map();
+    for (const ch of S.chunks) if (ch.bufs) { made.push(ch); before.set(ch, ch.rg ? ch.rg.length : 0); }
+    if (!made.length) return;
+    makeBands(S, made, S.root);
+    for (const ch of made) {
+      ch.bufs = null;
+      // a piece already gone from the picture draws none of it
+      if (ch.hidden && ch.rg) for (let k = before.get(ch) || 0; k < ch.rg.length; k += 3) {
+        const mesh = S.meshes[ch.rg[k]];
+        if (!mesh) continue;
+        mesh.geometry.attributes.position.array.fill(0, ch.rg[k + 1] * 3, (ch.rg[k + 1] + ch.rg[k + 2]) * 3);
+        S.dirty.add(mesh);
+      }
+    }
+    S.bytes = bandBytes(S);
+    stats.spans = (stats.spans || 0) + list.length;
+  }
+  // take a run / a wall out of the mesh that draws it (remembered: a rebuild
+  // puts it back)
+  function triHide(S, L, a, b) {
+    if (CBZ.batchTriHide(L.mesh, a, L.orig.subarray(a - L.ia, b - L.ia))) S.triHid.push(L, a, b);
+  }
+  function wallHide(S, w) {
+    if (CBZ.batchWallHide(w)) S.wallHid.push(w);
+  }
+  function hideLive(S, c) {
+    if (c.lHid) return;
+    c.lHid = true;
+    if (c.lr) for (let r = 0; r < c.lr.length; r += 3) triHide(S, c.lr[r], c.lr[r + 1], c.lr[r + 2]);
+  }
+  function restoreLive(tri, walls) {
+    for (let r = 0; r < tri.length; r += 3) {
+      const L = tri[r], a = tri[r + 1], b = tri[r + 2];
+      try { CBZ.batchTriShow(L.mesh, a, L.orig.subarray(a - L.ia, b - L.ia)); } catch (e) {}
+    }
+    for (const w of walls) { try { CBZ.batchWallShow(w); } catch (e) {} }
+  }
+  /* The arrays a live source is read from, when its piece comes away: what
+     the geometry holds; read back from the GPU for this (the streamed city
+     keeps none once uploaded) or unpacked from its parked 16-bit form, the
+     geometry itself left as it was; a room that is only its recipe again,
+     baked for this. Kept for a burst (a storey coming away is many pieces
+     over a few frames), dropped two seconds after the last read. */
+  function viewOf(S, src) {
+    const key = src.wall ? src.geo : (src.mesh || src.geo);
+    let v = S.xv ? S.xv.get(key) : undefined;
+    if (v !== undefined) { S.xT = nowT; return v; }
+    v = null;
+    let g = src.geo;
+    const R = !src.wall && src.mesh && src.mesh._cbzRoom;
+    if (R && !R.built) g = CBZ.batchRoomBake ? CBZ.batchRoomBake(src.mesh) : null;
+    const A = g && g.attributes;
+    if (A && A.position) {
+      const back = [];
+      for (const k in A) if (A[k] && !A[k].array && !A[k]._cbzQ && !A[k]._cbzQn) back.push(A[k]);
+      if (g.index && !g.index.array) back.push(g.index);
+      const ok = !back.length || (CBZ.batchReadbackGeo && CBZ.batchReadbackGeo(g));
+      const pa = A.position, na = A.normal, ua = A.uv, ca = A.color;
+      let P = pa.array;
+      if (!P && pa._cbzQ) {
+        const Q = pa._cbzQ, q = Q.q;
+        P = new Float32Array(q.length);
+        for (let i = 0; i < q.length; i += 3) { P[i] = Q.o[0] + q[i] * Q.s[0]; P[i + 1] = Q.o[1] + q[i + 1] * Q.s[1]; P[i + 2] = Q.o[2] + q[i + 2] * Q.s[2]; }
+      }
+      const C = ca && ca.array;
+      if (ok && P) v = { P: P, N: na ? (na.array || na._cbzQn || null) : null, U: ua ? ua.array : null, C: C || null, I: g.index ? g.index.array : null,
+        cs: C && ca.normalized && !(C instanceof Float32Array) ? 1 / (C instanceof Int8Array ? 127 : C instanceof Uint16Array ? 65535 : C instanceof Int16Array ? 32767 : 255) : 1 };
+      for (const a of back) a.array = null;
+    }
+    (S.xv || (S.xv = new Map())).set(key, v);
+    S.xT = nowT;
+    return v;
+  }
+  // a chunk's live triangles, building-local, appended per material (ST floats)
+  const _lm3 = HAS3 ? new THREE.Matrix3() : null;
+  function liveTris(S, c, byMat) {
+    const put = function (src, vw, ids, k0, k1, viaIdx) {
+      const e = src.M.elements, q = _lm3.getNormalMatrix(src.M).elements;
+      const mt = src.mat;
+      let B = byMat.get(mt); if (!B) { B = new Buf(); byMat.set(mt, B); }
+      const Pp = vw.P, N = vw.N, U = vw.U, Cc = vw.C, cs = vw.cs;
+      B.need(Math.max(0, k1 - k0) * ST);
+      for (let k = k0; k + 2 < k1; k += 3) {
+        for (let j = 0; j < 3; j++) {
+          const i = viaIdx ? ids[k + j] : k + j, o = B.n, A = B.a;
+          const px = Pp[i * 3], py = Pp[i * 3 + 1], pz = Pp[i * 3 + 2];
+          A[o] = e[0] * px + e[4] * py + e[8] * pz + e[12];
+          A[o + 1] = e[1] * px + e[5] * py + e[9] * pz + e[13];
+          A[o + 2] = e[2] * px + e[6] * py + e[10] * pz + e[14];
+          if (N) {
+            const a = N[i * 3], b = N[i * 3 + 1], d = N[i * 3 + 2];
+            let x = q[0] * a + q[3] * b + q[6] * d, y = q[1] * a + q[4] * b + q[7] * d, z = q[2] * a + q[5] * b + q[8] * d;
+            const l = Math.hypot(x, y, z) || 1;
+            A[o + 3] = x / l; A[o + 4] = y / l; A[o + 5] = z / l;
+          } else { A[o + 3] = 0; A[o + 4] = 1; A[o + 5] = 0; }
+          if (U) { A[o + 6] = U[i * 2]; A[o + 7] = U[i * 2 + 1]; } else { A[o + 6] = 0; A[o + 7] = 0; }
+          if (src.col) { A[o + 8] = src.col[0]; A[o + 9] = src.col[1]; A[o + 10] = src.col[2]; }
+          else if (Cc) { A[o + 8] = Cc[i * 3] * cs; A[o + 9] = Cc[i * 3 + 1] * cs; A[o + 10] = Cc[i * 3 + 2] * cs; }
+          else { A[o + 8] = 1; A[o + 9] = 1; A[o + 10] = 1; }
+          B.n += ST;
+        }
+      }
+    };
+    if (c.lr) for (let r = 0; r < c.lr.length; r += 3) {
+      const L = c.lr[r], vw = viewOf(S, L);
+      if (!vw) continue;
+      const a = c.lr[r + 1] - L.ia, b = c.lr[r + 2] - L.ia;
+      // a wall is read from its own geometry (its own material, the skin the
+      // cut gives it), a room / deco slice from the merged mesh
+      if (L.wall) { if (vw.I) put(L, vw, vw.I, a, b, true); else put(L, vw, null, a, b, false); }
+      else put(L, vw, L.orig, a, b, true);
+    }
+  }
+  // ST buffers (per material) as meshes, about `off`
+  function bufMeshes(byMat, off) {
+    const out = [];
+    byMat.forEach(function (B, mt) {
+      const nv = B.n / ST;
+      if (!nv || !mt) return;
+      const vc = !!mt.vertexColors, A = B.a;
+      const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), Cc = vc ? new Float32Array(nv * 3) : null;
+      for (let v = 0; v < nv; v++) {
+        const s = v * ST;
+        P[v * 3] = A[s] - off.x; P[v * 3 + 1] = A[s + 1] - off.y; P[v * 3 + 2] = A[s + 2] - off.z;
+        N[v * 3] = A[s + 3]; N[v * 3 + 1] = A[s + 4]; N[v * 3 + 2] = A[s + 5];
+        U[v * 2] = A[s + 6]; U[v * 2 + 1] = A[s + 7];
+        if (Cc) { Cc[v * 3] = A[s + 8]; Cc[v * 3 + 1] = A[s + 9]; Cc[v * 3 + 2] = A[s + 10]; }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+      if (Cc) g.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
+      g.computeBoundingSphere();
+      out.push(glassDraw(new THREE.Mesh(g, mt)));
+    });
+    return out;
+  }
 
   /* The generator: every source's triangles through the cutter, yielding to
      the frame every ~1500 triangles. */
@@ -988,6 +1359,7 @@
     // clipped makes new vertices
     const V = new Float32Array(ST * 3);
     const P = [V.subarray(0, ST), V.subarray(ST, ST * 2), V.subarray(ST * 2, ST * 3)];
+    S.spanMode = !S.region.all;
     for (const src of srcs) {
       const geo = src.geo || src.ig;
       if (!geo) continue;
@@ -1002,6 +1374,22 @@
       const runs = (mats && geo.groups && geo.groups.length)
         ? geo.groups.map(function (g) { return [g.start, Math.min(total, g.start + g.count), mats[g.materialIndex || 0]]; })
         : [[src.start != null ? src.start : 0, src.count != null ? src.start + src.count : total, mats ? mats[0] : src.mat]];
+      // a merged room / deco slice and a wall in its merged shell, triangle
+      // by triangle: what a piece holds unsplit stays where it is drawn (LIVE)
+      const LR = src.live && !S.region.all && runs.length === 1 && (idx || src.wall) ? src : null;
+      const off = LR ? (LR.off || 0) : 0;
+      if (LR) {
+        LR.ia = runs[0][0] + off; LR.ib = runs[0][1] + off;
+        if (src.wall) {
+          // the shell's indices for this wall, as the bake wrote them
+          const n0 = runs[0][0], nn = runs[0][1] - n0, o = new Uint32Array(Math.max(0, nn));
+          for (let k = 0; k < nn; k++) o[k] = (idx ? idx.array[n0 + k] : n0 + k) + src.vbase;
+          LR.orig = o;
+        } else LR.orig = idx.array.slice(LR.ia, LR.ib);
+        LR.dead = []; LR.cur = null; LR.a = LR.ia; LR.nLive = 0;
+      }
+      // a normalized colour attribute (the merged meshes keep 8-bit colour)
+      const cs = col && col.normalized && !(col.array instanceof Float32Array) ? 1 / (col.array instanceof Int8Array ? 127 : col.array instanceof Uint16Array ? 65535 : col.array instanceof Int16Array ? 32767 : 255) : 1;
       for (const run of runs) {
         const mt = run[2];
         if (!mt || mt.visible === false) continue;
@@ -1021,20 +1409,29 @@
             } else { v[3] = 0; v[4] = 1; v[5] = 0; }
             if (uv) { v[6] = uv.getX(i); v[7] = uv.getY(i); } else { v[6] = 0; v[7] = 0; }
             if (src.col) { v[8] = src.col[0]; v[9] = src.col[1]; v[10] = src.col[2]; }
-            else if (col) { v[8] = col.getX(i); v[9] = col.getY(i); v[10] = col.getZ(i); }
+            else if (col) { v[8] = col.getX(i) * cs; v[9] = col.getY(i) * cs; v[10] = col.getZ(i) * cs; }
             else { v[8] = 1; v[9] = 1; v[10] = 1; }
             if (!isFinite(v[0] + v[1] + v[2])) bad = true;
           }
+          S._srcK = src.k;
+          if (LR) { liveTri(S, LR, k + off, bad ? null : P, mt, glass); if ((++n & CUT_STEP) === 0) yield; continue; }
           if (bad) continue;
           clipEmit(S, P, mt, glass, 0);
           if ((++n & CUT_STEP) === 0) yield;
         }
+      }
+      if (LR) {
+        closeRun(LR, LR.ib);
+        if (LR.nLive) { S.liveSrc.push(LR); S.liveBytes += LR.orig.byteLength; if (LR.wall) S.liveWalls.add(LR.wall); }
+        else LR.orig = null;
+        LR.cur = null;
       }
       doneReadback(S, geo);
       const sk = S.stats.srcK || (S.stats.srcK = {});
       sk[src.k || "?"] = (sk[src.k || "?"] || 0) + n - (S._nPrev || 0);
       S._nPrev = n;
     }
+    S.spanMode = false;
     S.stats.tris = n;
     releaseReadback(S);
     yield* finishCut(S);
@@ -1298,6 +1695,7 @@
       for (const c of list) c.bufs = null;
       yield;
     }
+    if (S.spans.length) { makeBands(S, S.spans, root); for (const H of S.spans) H.bufs = null; }
     for (const c of S.chunks) c.bufs = null;
     S.root = root;
     S.bytes = bandBytes(S);
@@ -1371,7 +1769,7 @@
     const old = mesh.geometry, A = old.attributes, pp = S.pristine[mi];
     const keep = [];
     let nv = 0;
-    for (const c of S.chunks) {
+    for (const c of S.chunks.concat(S.spans)) {
       const rg = c.rg;
       if (rg) for (let k = 0; k < rg.length; k += 3) if (rg[k] === mi) { keep.push(c, k); nv += rg[k + 2]; }
     }
@@ -1416,12 +1814,17 @@
     const lv = [];
     for (let s = s0; s <= s1; s++) if (!fineLevel(S, s)) { lv.push(s); S.region.fine[s] = 1; }
     if (S.region.fine.every(function (v) { return v === 1; })) S.region = { all: true, fine: null };
-    // 1) every standing piece of those storeys gives its triangles back
+    // 1) every standing piece of those storeys gives its triangles back (a
+    // span through them is cut into its pieces first)
+    for (const s of lv) for (const c of S.levels[s]) if (c.sp) queueSpans(S, c);
+    flushSpans(S);
     const byMat = new Map(), touched = new Set();
     for (const s of lv) {
       for (const c of S.levels[s]) {
-        if (!c.standing || !c.rg) continue;
-        const rg = c.rg;
+        if (!c.standing || (!c.rg && !c.lr)) continue;
+        // what it left drawing in the merged meshes comes out of them, into the cut
+        if (c.lr) { liveTris(S, c, byMat); hideLive(S, c); c.lr = null; c.ltris = 0; }
+        const rg = c.rg || [];
         for (let k = 0; k < rg.length; k += 3) {
           const mi = rg[k], st = rg[k + 1], n = rg[k + 2];
           const mesh = S.meshes[mi];
@@ -1493,6 +1896,7 @@
   /* A set of chunks' own geometry, building-local minus `off`, one geometry
      per material. */
   function geoOf(S, list, off) {
+    if (S.promo.length) flushSpans(S);
     const byMat = new Map();
     for (const c of list) {
       const rg = c.rg;
@@ -1545,6 +1949,10 @@
       if (c.liveInst) for (const it of c.liveInst) live.push({ geo: it.im.geometry, mat: it.mat, M: new THREE.Matrix4().fromArray(it.m), col: it.col });
     }
     if (live.length) for (const ms of liveMeshes(S, live, off)) out.push(ms);
+    // ... and so are the triangles it left in the merged meshes (LIVE)
+    const lm = new Map();
+    for (const c of list) if (c.lr) liveTris(S, c, lm);
+    if (lm.size) for (const ms of bufMeshes(lm, off)) out.push(ms);
     return out;
   }
   /* Live panes (never cut) as building-local glass meshes, one per material,
@@ -1624,8 +2032,16 @@
     S.stats.born = nowT;
     const D = S.D, grp = S.grp;
     (D.root || CBZ.scene).add(S.root);
-    try { if (CBZ.batchHideGroup) CBZ.batchHideGroup(grp); } catch (e) {}
+    // the merged meshes the coarse storeys go on drawing from stay up; what
+    // the cut took out of them goes (LIVE)
+    const keep = new Set();
+    for (const L of S.liveSrc) keep.add(L.entry);
+    try { if (CBZ.batchHideGroup) CBZ.batchHideGroup(grp, keep.size ? keep : undefined); } catch (e) {}
     grp.visible = false;
+    try {
+      for (const L of S.liveSrc) for (let r = 0; r < L.dead.length; r += 2) triHide(S, L, L.dead[r], L.dead[r + 1]);
+      keep.forEach(function (e) { if (e.whole) for (const w of e.walls) if (!S.liveWalls.has(w)) wallHide(S, w); });
+    } catch (e) { console.warn("[collapse] live", e); }
     evictReplaced(S);
     for (const gp of S.panes || []) {
       if (gp.shattered) continue;
@@ -1760,6 +2176,7 @@
   }
   function markGone(S, c) {
     c.standing = false;
+    if (c.sp) queueSpans(S, c);
     S.standingCount--; S.standingMass -= c.mass;
     if (c.tris) S.standingReal--;
     S.levelLost[c.s] = 1;
@@ -1816,7 +2233,9 @@
   }
   function hideChunk(S, c) {
     if (c.hidden || S.disposed) return;
+    if (S.promo.length) flushSpans(S);
     c.hidden = true;
+    if (c.lr) hideLive(S, c);
     if (c.livePanes) for (const gp of c.livePanes) hidePane(gp);
     if (c.liveInst) {
       for (const it of c.liveInst) {
@@ -3515,6 +3934,7 @@
       const touched = new Set();
       for (const r of R.inst) { r.im.instanceMatrix.array.set(r.m, r.i * 16); touched.add(r.im); }
       touched.forEach(function (im) { im.instanceMatrix.needsUpdate = true; });
+      restoreLive(R.tri || [], R.walls || []);
       retired.delete(D.grp);
     }
     return true;
@@ -3547,7 +3967,12 @@
       for (const ms of S.meshes) ms.geometry.dispose();
     }
     S.meshes.length = 0; S.pristine.length = 0;
-    if (S.swapped && S.instHide.length && !forRebuild) retired.set(S.grp, { inst: S.instHide });
+    // what still stands in the merged meshes goes with the bands (a rebuild
+    // puts back all that was taken out of them)
+    if (S.swapped) for (const c of S.chunks) if (c.lr && !c.lHid) { try { hideLive(S, c); } catch (e) {} }
+    S.xv = null;
+    if (S.swapped && forRebuild) restoreLive(S.triHid, S.wallHid);
+    if (S.swapped && !forRebuild && (S.instHide.length || S.triHid.length || S.wallHid.length)) retired.set(S.grp, { inst: S.instHide, tri: S.triHid, walls: S.wallHid });
     else if (S.swapped && S.instHide.length && forRebuild) {
       const touched = new Set();
       for (const r of S.instHide) { r.im.instanceMatrix.array.set(r.m, r.i * 16); touched.add(r.im); }
@@ -3798,6 +4223,8 @@
       if (S.wantRefine && !S.gen) { const w = S.wantRefine; S.wantRefine = null; S.ready = false; S.gen = refineGen(S, w[0], w[1]); continue; }
       while (S.pending.length) { const q = S.pending.shift(); try { applyReq(S, q); } catch (e) { console.warn("[collapse] request", e); } }
       if (!S.swapped) continue;
+      if (S.promo.length) flushSpans(S);
+      if (S.xv && nowT - S.xT > 2) S.xv = null;           // the live sources' read-back arrays (viewOf)
       S.tick += dt;
       if (S.active > 0 && S.tick >= TICK) {
         S.tick = 0;
@@ -3861,7 +4288,8 @@
       region: S.region.all ? "all" : (function () { const r = []; let a = -1; for (let s = 0; s <= S.ns + 1; s++) { const f = s <= S.ns && S.region.fine[s] === 1; if (f && a < 0) a = s; if (!f && a >= 0) { r.push(a + "-" + (s - 1)); a = -1; } } return r.join(","); })(),
       vertsFine: S.meshes.length ? S.chunks.reduce(function (a, c) { if (!c.rg || !fineLevel(S, c.s)) return a; for (let k = 2; k < c.rg.length; k += 3) a += c.rg[k]; return a; }, 0) : 0,
       vertsCoarse: S.meshes.length ? S.chunks.reduce(function (a, c) { if (!c.rg || fineLevel(S, c.s)) return a; for (let k = 2; k < c.rg.length; k += 3) a += c.rg[k]; return a; }, 0) : 0,
-      livePanes: S.livePanes.length, liveInst: S.liveInst.length, srcTris: st.srcK || null,
+      livePanes: S.livePanes.length, liveInst: S.liveInst.length, srcTris: st.srcK || null, outTris: st.outK || null,
+      liveTris: S.chunks.reduce(function (a, c) { return a + (c.lHid ? 0 : (c.ltris || 0)); }, 0), spans: S.spans.length, spansCut: S.spans.filter(function (sp) { return sp.done; }).length, liveWalls: S.liveWalls.size, liveKB: Math.round((S.liveBytes || 0) / 1024),
       outcome: st.maxTilt > 0.75 ? "topple" : st.pancaked >= 2 ? "pancake" : st.detached > 0 ? "partial" : st.crushed + st.blasted > 0 ? "holed" : "intact",
     };
   }
@@ -4084,6 +4512,63 @@
      facade grammars that have not declared what they are built of, and are
      therefore relying on this file's inference instead of on their author's
      knowledge. It only goes down. */
+  /* liveAudit(building): is what the merged meshes draw of a cut building
+     what its pieces say? Every run the cut took (dead), every run of a piece
+     that has come away (gone) must be zero-area in the index the GPU draws;
+     every run of a standing piece (up) its own indices. Reads the index
+     buffers back (a tool's question, not a frame's). */
+  C.liveAudit = function (bld) {
+    const S = bld && bld.chunks ? bld : structFor(bld, false);
+    if (!S) return null;
+    const R = CBZ.renderer, gl = R && R.getContext && R.getContext(), M = self.__cbzGLAttr, K = M && gl && M.get(gl);
+    const cur = new Map();
+    const idxOf = function (mesh) {
+      if (cur.has(mesh)) return cur.get(mesh);
+      const ix = mesh.geometry && mesh.geometry.index;
+      let a = ix && ix.array;
+      if (!a && ix && K && K.get(ix)) {
+        const b = K.get(ix), T = b.type === 5125 ? Uint32Array : b.type === 5123 ? Uint16Array : Uint8Array;
+        a = new T(ix.count);
+        gl.bindBuffer(gl.COPY_READ_BUFFER, b.buffer); gl.getBufferSubData(gl.COPY_READ_BUFFER, 0, a); gl.bindBuffer(gl.COPY_READ_BUFFER, null);
+      }
+      cur.set(mesh, a || null);
+      return a || null;
+    };
+    const out = { sources: S.liveSrc.length, walls: S.liveWalls.size, spans: S.spans.length, spansCut: 0, dead: [0, 0], gone: [0, 0], up: [0, 0], unread: 0 };
+    const check = function (L, a, b, want, slot) {
+      const I = idxOf(L.mesh);
+      if (!I) { out.unread++; return; }
+      for (let k = a; k + 2 < b; k += 3) {
+        const o = L.orig, i = k - L.ia;
+        const degen = I[k] === I[k + 1] && I[k] === I[k + 2];
+        const same = I[k] === o[i] && I[k + 1] === o[i + 1] && I[k + 2] === o[i + 2];
+        if (want === "degen" ? degen : same) slot[0]++; else slot[1]++;
+      }
+    };
+    for (const L of S.liveSrc) for (let r = 0; r < L.dead.length; r += 2) check(L, L.dead[r], L.dead[r + 1], "degen", out.dead);
+    for (const c of S.chunks) if (c.lr) for (let r = 0; r < c.lr.length; r += 3) check(c.lr[r], c.lr[r + 1], c.lr[r + 2], c.lHid ? "degen" : "same", c.lHid ? out.gone : out.up);
+    for (const sp of S.spans) if (sp.done) out.spansCut++;
+    // what a piece's live triangles read back as lies in that piece, with
+    // colours a material can show
+    out.read = { chunks: 0, tris: 0, outside: 0, badColour: 0, noView: 0 };
+    for (const L of S.liveSrc) if (!viewOf(S, L)) out.read.noView++;
+    for (const c of S.chunks) {
+      if (!c.lr || out.read.chunks >= 400) continue;
+      const m = new Map();
+      liveTris(S, c, m);
+      out.read.chunks++;
+      const g = c.gb;
+      m.forEach(function (B) {
+        for (let o = 0; o < B.n; o += ST) {
+          const A = B.a;
+          if (A[o] < g[0] - 0.05 || A[o] > g[1] + 0.05 || A[o + 1] < g[2] - 0.05 || A[o + 1] > g[3] + 0.05 || A[o + 2] < g[4] - 0.05 || A[o + 2] > g[5] + 0.05) out.read.outside++;
+          if (A[o + 8] > 1.001 || A[o + 9] > 1.001 || A[o + 10] > 1.001 || A[o + 8] < 0) out.read.badColour++;
+        }
+        out.read.tris += B.n / ST / 3;
+      });
+    }
+    return out;
+  };
   C.audit = function () {
     const list = CBZ.facadeList ? CBZ.facadeList() : [];
     let undeclared = 0;
