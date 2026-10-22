@@ -267,7 +267,7 @@
     if (want !== D.open) {
       D.open = want;
       if (want) { D.col.y0 = -1e4; D.col.y1 = -1e4 + 0.01; } else { D.col.y0 = D.y0; D.col.y1 = D.y1; }
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      // (a y-gate edit: the grid files boxes by x/z, nothing to re-index)
     }
     const tw = D.open ? 1 : 0;
     if (D.t !== tw) {

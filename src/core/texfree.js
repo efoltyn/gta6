@@ -187,19 +187,52 @@
     opts = opts || {};
     const t = new Orig(undefined);          // not Watched: this one frees itself
     t._cbzOwner = CBZ._texOwner || null;
-    let cv = null;
+    let cv = null, job = null;
+    /* A PAINTER MAY BE A GENERATOR (yield between its passes): read .image
+       and it runs to the end, as always; t._cbzPaintSteps() is the same
+       painting a pass at a time, for an upload that is sliced (core/fxwarm.js
+       uploadSteps paints an arriving island's canvases in its slices instead
+       of in one uncut call). Either way the picture is the same one. */
+    /* A SMALL ONE PAINTS ON THE CPU (willReadFrequently). Its painter may
+       read back what it drew (city/clothes.js shades the shell under a cover
+       off its own pixels) and entities/pedinstance.js copies it into a ped
+       page: on a canvas the browser draws on the GPU each read is a full GPU
+       pipeline flush, measured 0.15-0.6 s for one read while an island
+       uploads (4x-throttled). A garment atlas (128 x 256) or smaller paints on
+       the CPU in a millisecond or two and uploads from memory; a bigger sheet
+       (a 320 x 160 ink chart of thousands of strokes: 0.6 s of CPU raster)
+       stays on the GPU, where entities/pedinstance.js copies it GPU to GPU. */
+    const cpu = w * h <= 32768;
+    const begin = function () {
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      let r = null;
+      try { r = paint(cpu ? c.getContext("2d", { willReadFrequently: true }) : c.getContext("2d"), c); } catch (e) { console.error("[lazy canvas]", t.name || "", e); }
+      job = { c: c, it: r && typeof r.next === "function" ? r : null };
+    };
+    const end = function () { cv = job.c; job = null; A.lazyPainted++; };
     Object.defineProperty(t, "image", {
       configurable: true, enumerable: true,
       get: function () {
         if (!cv) {
-          cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-          try { paint(cv.getContext("2d"), cv); } catch (e) { console.error("[lazy canvas]", t.name || "", e); }
-          A.lazyPainted++;
+          if (!job) begin();
+          if (job.it) { try { while (!job.it.next().done) {} } catch (e) { console.error("[lazy canvas]", t.name || "", e); } }
+          end();
         }
         return cv;
       },
       set: function (v) { if (v && typeof v.getContext === "function") cv = v; },
     });
+    t._cbzPaintSteps = function* () {
+      if (cv) return;
+      if (!job) { begin(); yield 0; }
+      while (job && job.it) {
+        let s;
+        try { s = job.it.next(); } catch (e) { console.error("[lazy canvas]", t.name || "", e); break; }
+        if (s.done) break;
+        yield 0;
+      }
+      if (job) end();
+    };
     t._cbzLazy = true; t._cbzLazyW = w; t._cbzLazyH = h;   // (sizes for censuses: reading .image paints)
     t._cbzLazyPaint = { w: w, h: h, paint: paint, opts: opts };   // (clone() makes another lazy one)
     // a reader that copied the pixels out (entities/pedinstance.js's atlas)
@@ -264,8 +297,11 @@
      if the baker picked another size), then the baker's canvas is dropped.
      bake must be pure (seeded). */
   CBZ.lazyBaked = function (w, h, bake, opts) {
-    return CBZ.lazyCanvasTexture(w, h, function (ctx) {
-      const r = bake();
+    // (a baker may hand back a generator whose return value is its picture:
+    // a sliced upload then bakes it a pass at a time)
+    return CBZ.lazyCanvasTexture(w, h, function* (ctx) {
+      let r = bake();
+      if (r && typeof r.next === "function") { let s = r.next(); while (!s.done) { yield 0; s = r.next(); } r = s.value; }
       const src = r && r.isTexture ? r.image : r;
       if (src && src.width) ctx.drawImage(src, 0, 0, src.width, src.height, 0, 0, w, h);
       if (r && r.isTexture) { if (src && src.getContext) { src.width = 1; src.height = 1; } r.dispose(); }

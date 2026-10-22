@@ -107,12 +107,15 @@
     let t;
     if (CBZ.lazyCanvasTexture) {
       // painted the first frame it is drawn (a closed office costs no canvas)
-      t = CBZ.lazyCanvasTexture(w, h, function (g) { paint(g, w, h); }, { name: "exec-" + key });
+      // (a painter is a generator: the island's sliced upload paints it a
+      // pass at a time, core/fxwarm.js uploadSteps; a draw paints it whole)
+      t = CBZ.lazyCanvasTexture(w, h, function (g) { return paint(g, w, h); }, { name: "exec-" + key });
     } else {
       const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
       const g = cv.getContext("2d");
       if (!g) return null;
-      paint(g, w, h);
+      const it = paint(g, w, h);
+      if (it && typeof it.next === "function") while (!it.next().done) {}
       t = new THREE.CanvasTexture(cv);
     }
     if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; }
@@ -124,10 +127,11 @@
   // WALNUT: straight-grained veneer, one tile = 1 m. Every stroke's period
   // divides the canvas so the tile repeats without a seam.
   function walnutTex() {
-    return canvasTex("walnut", 512, 512, function (g, W, H) {
+    return canvasTex("walnut", 512, 512, function* (g, W, H) {
       const R = rng(71);
       g.fillStyle = "#5b3b25"; g.fillRect(0, 0, W, H);
       for (let i = 0; i < 260; i++) {
+        if ((i & 255) === 255) yield 0;
         const y0 = R() * H, amp = 1 + R() * 5, k = 1 + ((R() * 3) | 0), ph = R() * 6.28;
         const dark = R() < 0.55;
         g.strokeStyle = dark ? "rgba(38,22,12," + (0.06 + R() * 0.22) + ")" : "rgba(140,98,62," + (0.05 + R() * 0.16) + ")";
@@ -143,6 +147,7 @@
       }
       // pores: short dark dashes along the grain
       for (let i = 0; i < 1400; i++) {
+        if ((i & 255) === 255) yield 0;
         g.fillStyle = "rgba(25,14,8," + (0.12 + R() * 0.2) + ")";
         g.fillRect(R() * W, R() * H, 2 + R() * 5, 1);
       }
@@ -151,7 +156,7 @@
   // HONED LIMESTONE: 1200 x 600 tiles in running bond; one tile of the
   // texture = 2.4 m square (4 courses, 2 tiles each).
   function stoneTex() {
-    return canvasTex("stone", 1024, 1024, function (g, W, H) {
+    return canvasTex("stone", 1024, 1024, function* (g, W, H) {
       const R = rng(19);
       const TW = 512, TH = 256;
       for (let r = 0; r < 4; r++) {
@@ -164,11 +169,13 @@
       }
       // cloudy mottling + fossil flecks
       for (let i = 0; i < 900; i++) {
+        if ((i & 255) === 255) yield 0;
         const x = R() * W, y = R() * H, rr = 4 + R() * 26;
         g.fillStyle = (R() < 0.5 ? "rgba(120,112,100," : "rgba(235,230,220,") + (0.03 + R() * 0.05) + ")";
         g.beginPath(); g.arc(x, y, rr, 0, 6.2832); g.fill();
       }
       for (let i = 0; i < 2600; i++) {
+        if ((i & 255) === 255) yield 0;
         g.fillStyle = "rgba(90,84,76," + (0.08 + R() * 0.18) + ")";
         g.fillRect(R() * W, R() * H, 1 + R() * 2, 1 + R() * 2);
       }
@@ -194,10 +201,11 @@
   // WOOL RUG: heathered charcoal field, a taupe border band. Mapped 0..1 over
   // each rug (not tiled).
   function rugTex() {
-    return canvasTex("rug", 512, 512, function (g, W, H) {
+    return canvasTex("rug", 512, 512, function* (g, W, H) {
       const R = rng(5);
       g.fillStyle = "#3b3a39"; g.fillRect(0, 0, W, H);
       for (let i = 0; i < 26000; i++) {
+        if ((i & 255) === 255) yield 0;
         const v = 40 + ((R() * 34) | 0);
         g.fillStyle = "rgba(" + v + "," + (v - 1) + "," + (v - 3) + ",0.55)";
         g.fillRect(R() * W, R() * H, 1 + R() * 2, 1);
@@ -208,6 +216,7 @@
       g.strokeStyle = "rgba(133,123,111,0.7)"; g.lineWidth = 3;
       g.strokeRect(inset + bw + 12, inset + bw + 12, W - 2 * (inset + bw + 12), H - 2 * (inset + bw + 12));
       for (let i = 0; i < 9000; i++) {
+        if ((i & 255) === 255) yield 0;
         g.fillStyle = "rgba(20,20,20," + (0.05 + R() * 0.08) + ")";
         g.fillRect(R() * W, R() * H, 1, 1);
       }
@@ -215,7 +224,7 @@
   }
   // BRUSHED STAINLESS: vertical hairline streaks, one tile = 0.6 m.
   function steelTex() {
-    return canvasTex("steel", 256, 256, function (g, W, H) {
+    return canvasTex("steel", 256, 256, function* (g, W, H) {
       const R = rng(33);
       g.fillStyle = "#a7abb0"; g.fillRect(0, 0, W, H);
       for (let x = 0; x < W; x++) {
@@ -224,6 +233,7 @@
         g.fillRect(x, 0, 1, H);
       }
       for (let i = 0; i < 300; i++) {
+        if ((i & 255) === 255) yield 0;
         g.fillStyle = "rgba(255,255,255," + (R() * 0.12) + ")";
         g.fillRect(R() * W, R() * H, 1, 10 + R() * 60);
       }
@@ -240,7 +250,7 @@
              v1: 1 - (r * SLOT_H + pad) / Ht, v0: 1 - ((r + 1) * SLOT_H - pad) / Ht };
   }
   function screenAtlas() {
-    return canvasTex("screens", SLOT_W * ATLAS_C, SLOT_H * ATLAS_R, function (g) {
+    return canvasTex("screens", SLOT_W * ATLAS_C, SLOT_H * ATLAS_R, function* (g) {
       const slots = [paintCandles, paintHeatmap, paintWatchlist, paintInbox, paintBoardroom, paintLiftIndicator];
       for (let i = 0; i < slots.length; i++) {
         const c = i % ATLAS_C, r = (i / ATLAS_C) | 0;
@@ -248,6 +258,7 @@
         g.beginPath(); g.rect(0, 0, SLOT_W, SLOT_H); g.clip();
         slots[i](g, SLOT_W, SLOT_H, rng(101 + i * 17));
         g.restore();
+        yield 0;
       }
     }, false);
   }
@@ -528,7 +539,18 @@
       for (let i = 0; i < p.count; i++) { uv[i * 2] = (p.getX(i) - bb.min.x) / sx; uv[i * 2 + 1] = (p.getZ(i) - bb.min.z) / sz; }
       g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
     }
-    function add(mat, geo, m4, hex, keepUV) {
+    /* A PART IS NOTED, THEN MADE AT THE FLUSH. A piece (a swivel chair, a
+       monitor, a desk) used to build every part's geometry on the spot: a
+       rounded box is a subdivided cube pushed onto a sphere, then de-indexed,
+       UV'd, transformed and tinted, 5-8 ms for one chair, in one call. Now a
+       part is a note (its material, how to make its shape, the frame it
+       stands in, its tint) and flush/flushSteps make the notes in order,
+       which is the same work in the same order: the same buckets, the same
+       merged meshes. flushSteps yields between parts. */
+    const notes = [];
+    function add(mat, geo, m4, hex, keepUV) { notes.push(mat, geo, m4.clone(), hex, keepUV); }
+    function make(mat, geo, m4, hex, keepUV) {
+      if (typeof geo === "function") geo = geo();
       let g = geo.index ? geo.toNonIndexed() : geo;
       if (!g.attributes.normal) g.computeVertexNormals();
       const ud = mat.userData || {};
@@ -550,14 +572,13 @@
       // set the furniture frame: building-local (x, z), yaw, optional lift
       at: function (x, z, yaw, y) { _e.set(0, yaw || 0, 0, "YXZ"); _q.setFromEuler(_e); P.compose(_p.set(x, Y + (y || 0), z), _q, _s); return K; },
       world: function () { P.makeTranslation(0, Y, 0); return K; },
-      box: function (mat, x, y, z, w, h, d, hex, rx, ry, rz) { add(mat, new THREE.BoxGeometry(w, h, d), local(x, y, z, rx, ry, rz), hex); },
-      rbox: function (mat, x, y, z, w, h, d, r, hex, rx, ry, rz, seg) { add(mat, roundedBoxGeo(w, h, d, r, seg), local(x, y, z, rx, ry, rz), hex); },
-      cyl: function (mat, x, y, z, rt, rb, h, seg, hex, rx, ry, rz, open) { add(mat, new THREE.CylinderGeometry(rt, rb, h, seg || 16, 1, !!open), local(x, y, z, rx, ry, rz), hex); },
+      box: function (mat, x, y, z, w, h, d, hex, rx, ry, rz) { add(mat, function () { return new THREE.BoxGeometry(w, h, d); }, local(x, y, z, rx, ry, rz), hex); },
+      rbox: function (mat, x, y, z, w, h, d, r, hex, rx, ry, rz, seg) { add(mat, function () { return roundedBoxGeo(w, h, d, r, seg); }, local(x, y, z, rx, ry, rz), hex); },
+      cyl: function (mat, x, y, z, rt, rb, h, seg, hex, rx, ry, rz, open) { add(mat, function () { return new THREE.CylinderGeometry(rt, rb, h, seg || 16, 1, !!open); }, local(x, y, z, rx, ry, rz), hex); },
       sphere: function (mat, x, y, z, r, hex, sx, sy, sz) {
-        const g = new THREE.SphereGeometry(r, 12, 8); g.scale(sx || 1, sy || 1, sz || 1);
-        add(mat, g, local(x, y, z), hex);
+        add(mat, function () { const g = new THREE.SphereGeometry(r, 12, 8); g.scale(sx || 1, sy || 1, sz || 1); return g; }, local(x, y, z), hex);
       },
-      torus: function (mat, x, y, z, r, tube, arc, hex, rx, ry, rz) { add(mat, new THREE.TorusGeometry(r, tube, 6, 14, arc || Math.PI * 2), local(x, y, z, rx, ry, rz), hex); },
+      torus: function (mat, x, y, z, r, tube, arc, hex, rx, ry, rz) { add(mat, function () { return new THREE.TorusGeometry(r, tube, 6, 14, arc || Math.PI * 2); }, local(x, y, z, rx, ry, rz), hex); },
       geo: function (mat, g, x, y, z, hex, rx, ry, rz, keepUV) { add(mat, g, local(x, y, z, rx, ry, rz), hex, keepUV); },
       // a lit screen quad mapped onto atlas slot i (faces the frame's +z)
       screen: function (slot, x, y, z, w, h, rx, ry) {
@@ -586,6 +607,13 @@
       flushSteps: function* (group, name, whole) {
         const late = whole || !CBZ.sliceLate ? function () { return false; } : CBZ.sliceLate;
         const out = [];
+        // the noted parts, made in the order they were noted
+        for (let i = 0; i < notes.length; i += 5) {
+          make(notes[i], notes[i + 1], notes[i + 2], notes[i + 3], notes[i + 4]);
+          notes[i + 1] = null; notes[i + 2] = null;
+          if (late()) yield 0;
+        }
+        notes.length = 0;
         for (const [mat, parts] of buckets) {
           let nv = 0;
           for (const g of parts) nv += g.attributes.position.count;

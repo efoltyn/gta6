@@ -241,7 +241,7 @@
     // nearest the player first: the street you are standing in is real at once
     const Pl = P(), px = Pl && Pl.pos ? Pl.pos.x : 0, pz = Pl && Pl.pos ? Pl.pos.z : 0;
     S.queue.sort(function (a, b) { return ((b.x - px) * (b.x - px) + (b.z - pz) * (b.z - pz)) - ((a.x - px) * (a.x - px) + (a.z - pz) * (a.z - pz)); });
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // (cars live outside CBZ.colliders: nothing here for the collider grid)
   }
   // a few cars a frame off the end of the queue (the nearest is last)
   /* A SOLD SPOT STAYS SOLD. A dealer's spot whose car you bought (your car
@@ -268,7 +268,11 @@
   function buildSome() {
     const A = S.arena;
     if (!A || !S.queue.length || !CBZ.cityAddParkedCar) return;
+    // (a car is a few ms on a desktop and 25-40 on a phone-class core: the
+    // next one waits for the next frame once this frame's cars took 2 ms)
+    const t0 = performance.now();
     for (let n = 0; n < BUILD_PER_FRAME && S.queue.length; n++) {
+      if (n > 0 && performance.now() - t0 > 2) break;
       const spot = S.queue.pop();
       if (spotTaken(spot)) { held.push(spot); continue; }
       const car = standCar(spot);
@@ -716,8 +720,9 @@
         width: sw, steps: nSteps, owner: owner, plats: plats, kind: "stair",
       });
     }
-    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // (everything above was PUSHED: the broadphase grids file a pushed tail
+    // in place, where a dirty mark was a rebuild of every wall and floor on
+    // the sea in the frame the island arrived)
 
     // merge nothing else: ~40 small meshes once per island; the island's
     // static freeze pass (core/staticfreeze.js) owns their matrices
@@ -725,7 +730,7 @@
     root.updateMatrixWorld(true);
 
     return {
-      b: b, e: e, root: root, plats: plats, cols: cols, owner: owner, flight: fl, dropped: false,
+      b: b, e: e, root: root, plats: plats, cols: cols, owner: owner, flight: fl, dropped: false, listed: true,
       // world points the rest of this file and the lab read
       centre: { x: b.ox, y: W + deckY, z: b.oz + cz },
       deckY: W + deckY, roofY: W + roofY,
@@ -742,11 +747,8 @@
     const pad = S.pad; if (!pad || pad.dropped) return;
     pad.dropped = true;
     pad.root.visible = false;
-    for (const p of pad.plats) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
-    for (const c of pad.cols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+    padLists(pad, false);
     if (CBZ.stairs && CBZ.stairs.setOwnerActive) CBZ.stairs.setOwnerActive(pad.owner, false);
-    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     // a parked helicopter comes down with the roof
     const c = S.heli;
     if (c && !c.destroyed && P() && P()._aircraft !== c) {
@@ -759,11 +761,25 @@
     const pad = S.pad; if (!pad || !pad.dropped) return;
     pad.dropped = false;
     pad.root.visible = true;
-    for (const p of pad.plats) if (CBZ.platforms.indexOf(p) < 0) CBZ.platforms.push(p);
-    for (const c of pad.cols) if (CBZ.colliders.indexOf(c) < 0) CBZ.colliders.push(c);
+    padLists(pad, true);
     if (CBZ.stairs && CBZ.stairs.setOwnerActive) CBZ.stairs.setOwnerActive(pad.owner, true);
-    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  /* The pad's floors and walls in or out of the world's lists, edited in the
+     broadphase grids in place (a dirty mark rebuilt the whole sea's grids on
+     every island arrival: raisePad runs on each one, pad standing or not). */
+  function padLists(pad, on) {
+    if (pad.listed === !!on) return;
+    pad.listed = !!on;
+    const PL = CBZ.platforms, CL = CBZ.colliders;
+    if (on) {
+      if (CBZ.platformAddMany) CBZ.platformAddMany(pad.plats); else for (const p of pad.plats) PL.push(p);
+      if (CBZ.colliderAddMany) CBZ.colliderAddMany(pad.cols); else for (const c of pad.cols) CL.push(c);
+      return;
+    }
+    if (CBZ.platformRemoveMany) CBZ.platformRemoveMany(pad.plats);
+    else { for (const p of pad.plats) { const i = PL.indexOf(p); if (i >= 0) PL.splice(i, 1); } if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty(); }
+    if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(pad.cols);
+    else { for (const c of pad.cols) { const i = CL.indexOf(c); if (i >= 0) CL.splice(i, 1); } if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
   }
 
   /* ============================================================
@@ -922,11 +938,8 @@
     // its deck, girders and lights leave the GPU too (the island it stood on
     // is walked for its buffers later, and the pad is no longer under it)
     if (pad.root && CBZ.freeTree) { try { CBZ.freeTree(pad.root); } catch (e) {} }
-    if (CBZ.platformRemoveMany) CBZ.platformRemoveMany(pad.plats); else for (const p of pad.plats) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
-    if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(pad.cols); else for (const c of pad.cols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+    padLists(pad, false);
     if (CBZ.stairs && CBZ.stairs.removeOwner) CBZ.stairs.removeOwner(pad.owner);
-    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
   function parkJet(A) {
     const st = A.airstrip && A.airstrip.stand;

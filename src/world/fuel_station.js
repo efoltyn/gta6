@@ -101,7 +101,11 @@
 
   function lcg(seed) { let s = seed >>> 0 || 1; return function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; }
 
-  function bakeAtlas() {
+  /* The atlas is painted a panel at a time (a generator: the island's sliced
+     upload paints it across slices, core/texfree.js lazyBaked); bakeAtlas()
+     is the same picture in one go. */
+  function bakeAtlas() { const it = bakeAtlasSteps(); let r = it.next(); while (!r.done) r = it.next(); return r.value; }
+  function* bakeAtlasSteps() {
     const cv = document.createElement("canvas"); cv.width = cv.height = AT;
     const g = cv.getContext("2d");
     g.clearRect(0, 0, AT, AT);
@@ -128,6 +132,7 @@
         g.restore();
       });
     })();
+    yield 0;
     // PUMP LCD
     (function () {
       const [x, y, w, h] = R.lcd;
@@ -136,12 +141,14 @@
       text("$", x + 30, y + 38, 28, "#1b2a1b"); text("0.00", x + 120, y + 38, 40, "#1b2a1b", "center", "bold");
       text("GAL", x + 34, y + 90, 20, "#1b2a1b"); text("0.000", x + 124, y + 90, 30, "#1b2a1b", "center", "bold");
     })();
+    yield 0;
     // PUMP NUMBERS 1..4 (tiles side by side in one 96 px row: 4 x 96 = 384)
     for (let i = 0; i < 4; i++) {
       const x = R.num[0] + i * 96, y = R.num[1];
       g.fillStyle = "#173a78"; g.fillRect(x + 4, y + 4, 88, 88);
       text(String(i + 1), x + 48, y + 50, 64, "#ffffff");
     }
+    yield 0;
     // GRADE BUTTONS
     (function () {
       const [x, y, w, h] = R.buttons;
@@ -153,6 +160,7 @@
         text(t, bx + 27, y + h / 2, 22, "#111");
       });
     })();
+    yield 0;
     function label(r, bg, fg, t, px) {
       const [x, y, w, h] = r;
       g.fillStyle = bg; g.fillRect(x, y, w, h);
@@ -171,6 +179,7 @@
       g.strokeRect(x + 14, y + 12, w - 28, h - 24);
       text("OPEN", x + w / 2, y + h / 2 + 2, 52, "#ff6a5a"); g.restore();
     })();
+    yield 0;
     // GOODS: four shelves of packaged stock, 64 px per shelf
     (function () {
       const [x, y, w, h] = R.goods;
@@ -195,6 +204,7 @@
         for (let t = x + 10; t < x + w; t += 40 + ((rnd() * 30) | 0)) { g.fillStyle = "#f7f3a0"; g.fillRect(t, sy + 57, 14, 6); }
       }
     })();
+    yield 0;
     // COOLER DOORS: bottles behind glass, lit
     (function () {
       const [x, y, w, h] = R.cooler;
@@ -221,13 +231,15 @@
       gr.addColorStop(0, "rgba(255,255,255,0)"); gr.addColorStop(0.5, "rgba(255,255,255,0.18)"); gr.addColorStop(0.56, "rgba(255,255,255,0)");
       g.fillStyle = gr; g.fillRect(x, y, w, h);
     })();
+    yield 0;
     // STAINS (alpha) and WHITE paint
-    function stain(r, seed) {
+    function* stain(r, seed) {
       const [x, y, w, h] = r, r2 = lcg(seed);
       const id = g.createImageData(w, h), d = id.data;
       const blobs = [];
       for (let i = 0; i < 7; i++) blobs.push([w * (0.3 + r2() * 0.4), h * (0.3 + r2() * 0.4), w * (0.08 + r2() * 0.2)]);
       for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+        if (i === 0 && (j & 15) === 15) yield 0;
         let a = 0;
         for (const b of blobs) { const dd = Math.hypot(i - b[0], j - b[1]) / b[2]; a += Math.max(0, 1 - dd * dd); }
         a = Math.min(1, a) * (0.75 + 0.25 * r2());
@@ -236,7 +248,7 @@
       }
       g.putImageData(id, x, y);
     }
-    stain(R.stain, 0x0113); stain(R.stain2, 0x0a51);
+    yield* stain(R.stain, 0x0113); yield* stain(R.stain2, 0x0a51);
     g.fillStyle = "#ffffff"; g.fillRect(R.white[0], R.white[1], R.white[2], R.white[3]);
     const t = new THREE.CanvasTexture(cv);
     t.encoding = THREE.sRGBEncoding;
@@ -245,7 +257,14 @@
   }
 
   // broom-finished concrete, 8 m tile, saw-cut joints every 4 m, stains
-  function bakeSlab() {
+  /* The slab is a million noise texels (~130 ms of CPU, 530 ms on a 4x
+     throttled phone-class core). It is painted as a resumable job, eight rows
+     a step: in the background once the run is playing (slabStep below), or,
+     if a station is uploaded first, in that island's sliced upload. The
+     picture is uploaded once and kept (every station on every island shares
+     the texture, so no island teardown frees it). */
+  function bakeSlab() { const it = bakeSlabSteps(); let r = it.next(); while (!r.done) r = it.next(); return r.value; }
+  function* bakeSlabSteps() {
     const N = (CBZ.qualityLevel != null && CBZ.qualityLevel <= 1) ? 512 : 1024;
     const cv = document.createElement("canvas"); cv.width = cv.height = N;
     const g = cv.getContext("2d");
@@ -258,12 +277,15 @@
       const a = h01(w(ix), w(iy), salt), b = h01(w(ix + 1), w(iy), salt), c = h01(w(ix), w(iy + 1), salt), e = h01(w(ix + 1), w(iy + 1), salt);
       return a + (b - a) * ux + (c - a) * uy + (a - b - c + e) * ux * uy;
     }
-    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-      const blot = vn(i, j, N / 8, 11) * 0.6 + vn(i, j, N / 32, 12) * 0.4;
-      const broom = (h01(i, j >> 1, 13) - 0.5) * 10;        // fine broom streaks run across
-      let v = 150 + (blot - 0.5) * 26 + broom + (rnd() - 0.5) * 10;
-      const o = (j * N + i) * 4;
-      d[o] = v + 1; d[o + 1] = v - 1; d[o + 2] = v - 5; d[o + 3] = 255;
+    for (let j = 0; j < N; j++) {
+      for (let i = 0; i < N; i++) {
+        const blot = vn(i, j, N / 8, 11) * 0.6 + vn(i, j, N / 32, 12) * 0.4;
+        const broom = (h01(i, j >> 1, 13) - 0.5) * 10;        // fine broom streaks run across
+        let v = 150 + (blot - 0.5) * 26 + broom + (rnd() - 0.5) * 10;
+        const o = (j * N + i) * 4;
+        d[o] = v + 1; d[o + 1] = v - 1; d[o + 2] = v - 5; d[o + 3] = 255;
+      }
+      if ((j & 7) === 7) yield 0;
     }
     g.putImageData(id, 0, 0);
     // saw-cut joints: dark line with a light chipped lip
@@ -308,6 +330,46 @@
     return new THREE.CanvasTexture(cv);
   }
 
+  /* THE SLAB, PAINTED IN THE BACKGROUND. Once the run is playing on the
+     islands, every frame gives bakeSlabSteps about a millisecond (eight rows
+     a step) until the picture is done, a few seconds after the start; the
+     first station you fly to then uploads a finished canvas (slabBake hands
+     it over: a copy, not a bake) inside the island's hidden upload. A
+     station drawn before that finishes the job in its own upload, exactly
+     as before. (Idle callbacks were not enough: a phone-class frame at full
+     load has no idle time to give.) */
+  let slabJob = null, slabDone = null, slabArmed = false;
+  // the lazy slab's baker (core/texfree.js lazyBaked): the finished picture,
+  // or the job (the one the background started, carried on) to finish there
+  function slabBake() {
+    slabArmed = false;
+    if (slabDone) { const v = slabDone; slabDone = null; return v; }
+    const it = slabJob || bakeSlabSteps();
+    slabJob = null;
+    return it;
+  }
+  function onGpu(t) {
+    const R = CBZ.renderer, pr = R && R.properties && R.properties.get(t);
+    return !!(pr && pr.__webglInit);
+  }
+  function slabStep() {
+    if (!slabArmed) return;
+    const g = CBZ.game;
+    if (!g || g.state !== "playing" || g.mode !== "archipelago") return;
+    if (!CBZ.renderer || !CBZ.lazyBaked || (CBZ.CONFIG && CBZ.CONFIG.RENDER_FRAMES === false)) { slabArmed = false; return; }
+    const tex = mats().slab.map;
+    // drawn already, or already baked: nothing left to do here
+    if (!tex || onGpu(tex) || slabDone) { slabArmed = false; slabJob = null; return; }
+    if (!slabJob) slabJob = bakeSlabSteps();
+    const t0 = performance.now();
+    do {
+      const r = slabJob.next();
+      if (r.done) { slabDone = r.value; slabJob = null; slabArmed = false; return; }
+    } while (performance.now() - t0 < 1);
+  }
+  if (CBZ.onAlways) { slabArmed = true; CBZ.onAlways(97.5, slabStep); }
+  CBZ.fuelSlabAudit = function () { return { armed: slabArmed, baking: !!slabJob, baked: !!slabDone, onGpu: !!(M && M.slab.map && onGpu(M.slab.map)) }; };
+
   let M = null;
   function mats() {
     if (M) return M;
@@ -318,9 +380,13 @@
     try {
       if (CBZ.lazyBaked) {
         const NS = (CBZ.qualityLevel != null && CBZ.qualityLevel <= 1) ? 512 : 1024;
-        atlas = CBZ.lazyBaked(AT, AT, bakeAtlas, { name: "fuel-atlas" }); atlas.encoding = THREE.sRGBEncoding; atlas.anisotropy = 8;
-        slab = CBZ.lazyBaked(NS, NS, bakeSlab, { name: "fuel-slab" });
+        atlas = CBZ.lazyBaked(AT, AT, bakeAtlasSteps, { name: "fuel-atlas" }); atlas.encoding = THREE.sRGBEncoding; atlas.anisotropy = 8;
+        slab = CBZ.lazyBaked(NS, NS, slabBake, { name: "fuel-slab" });
         slab.encoding = THREE.sRGBEncoding; slab.wrapS = slab.wrapT = THREE.RepeatWrapping; slab.anisotropy = 8;
+        // every station on every island draws these two through M: an
+        // island's teardown must not free them (a freed one was painted again,
+        // 0.5 s of noise, on the arrival of the next island with a station)
+        atlas._shared = true; slab._shared = true;
       } else {
         atlas = bakeAtlas(); slab = bakeSlab();
         if (CBZ.freeCanvasAfterUpload) { CBZ.freeCanvasAfterUpload(atlas); CBZ.freeCanvasAfterUpload(slab); }

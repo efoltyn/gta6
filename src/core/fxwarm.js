@@ -422,9 +422,21 @@
     for (let i = 0; i < texs.length; i++) {
       const t = texs[i];
       if (!r.initTexture) break;
+      // a lazy canvas is painted first, a pass at a time on the slice clock
+      // (core/texfree.js: a generator painter yields between passes), so its
+      // upload below is only the upload
+      const tp = t._cbzPaintSteps && r.properties ? r.properties.get(t) : null;
+      if (t._cbzPaintSteps && !(tp && tp.__webglInit && tp.__version === t.version)) {
+        const pit = t._cbzPaintSteps();
+        for (let s = pit.next(); !s.done; s = pit.next()) if (late()) yield 0;
+      }
       try { r.initTexture(t); } catch (e) {}
-      const im = t.image;
-      const b = im && im.width && im.height ? im.width * im.height * 4 : 65536;
+      // (a lazy canvas texture, core/texfree.js, is sized by its numbers:
+      // reading .image after the upload gave its canvas back PAINTS IT AGAIN,
+      // which was the forecourt slab baked twice in one step and a second
+      // canvas kept alive for nothing)
+      const im = t._cbzLazyW > 0 ? null : t.image;
+      const b = t._cbzLazyW > 0 ? t._cbzLazyW * t._cbzLazyH * 4 : im && im.width && im.height ? im.width * im.height * 4 : 65536;
       sent += b; total += b;
       if (sent >= limit || late()) { sent = 0; yield 0; }
     }

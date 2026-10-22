@@ -958,7 +958,19 @@
     return out;
   };
 
+  /* CBZ.facadeLiftTop(ctx, shaft, o) answers in one go; CBZ.facadeLiftTopSteps
+     is the same answer as a generator (return value) that yields on the
+     slice clock between the dry run, each candidate level's cover sample and
+     the deck's growth rings: a streamed island's tower asks it mid-build. */
   CBZ.facadeLiftTop = function (ctx, shaft, o) {
+    const it = liftTopSteps(ctx, shaft, o, false);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  };
+  CBZ.facadeLiftTopSteps = function (ctx, shaft, o) { return liftTopSteps(ctx, shaft, o, true); };
+  function* liftTopSteps(ctx, shaft, o, sliced) {
+    const late = sliced && CBZ.sliceLate ? CBZ.sliceLate : function () { return false; };
     o = o || {};
     const rTop = ctx.rTop, ring = o.ring != null ? o.ring : 1.1, thin = o.thin != null ? o.thin : 0.6;
     const wt = ctx.WT || 0.3;
@@ -967,6 +979,7 @@
       z0: Math.max(-ctx.d / 2 + wt, shaft.z0 - ring), z1: Math.min(ctx.d / 2 - wt, shaft.z1 + ring),
     };
     const all = CBZ.facadeCrownProbe(ctx);
+    if (late()) yield 0;
     // massive pieces only: a mast or a finial is not something to stand on;
     // and only those over the deck's reach (every point asked below lies in
     // the shaft or in lim: the rest of the facade can never answer, and the
@@ -994,6 +1007,7 @@
     cands.sort(function (a, b) { return b - a; });
     let y = rTop;
     for (let i = 0; i < cands.length; i++) {
+      if (late()) yield 0;
       if (cover(cands[i] - 0.05, shaft) >= 0.5) { y = cands[i]; break; }
     }
     const raised = y > rTop + 0.3;
@@ -1026,6 +1040,7 @@
     }
     const deck = { x0: shaft.x0, x1: shaft.x1, z0: shaft.z0, z1: shaft.z1 };
     for (let grew = true, guard = 0; grew && guard < 40; guard++) {
+      if (late()) yield 0;
       grew = false;
       if (deck.x0 - 0.25 >= lim.x0 - 1e-6 && clear(deck.x0 - 0.25, deck.x0, deck.z0, deck.z1)) { deck.x0 -= 0.25; grew = true; }
       if (deck.x1 + 0.25 <= lim.x1 + 1e-6 && clear(deck.x1, deck.x1 + 0.25, deck.z0, deck.z1)) { deck.x1 += 0.25; grew = true; }
@@ -1037,14 +1052,32 @@
       const p = all[i];
       if (p[3] > y + HEAD + 0.05 && p[1] > shaft.x0 && p[0] < shaft.x1 && p[5] > shaft.z0 && p[4] < shaft.z1) spire = true;
     }
+    if (raised && late()) yield 0;
     return { y: y, raised: raised, deck: deck, keepClear: keepClear, head: HEAD,
       // something stands over the shaft above the headroom: the host roofs the
       // car's top stop with a headhouse for it to stand on
       headhouse: spire,
       roofBuried: raised && cover(rTop + 1.2, lim) > 0.3 };
-  };
+  }
 
+  /* CBZ.dressFacade(ctx) -> def, in one go (every host). CBZ.dressFacadeSteps
+     (ctx) is the same dressing as a generator for a host that streams (the
+     Isles' island build, world/disaster_arena.js): it yields on the slice
+     clock (CBZ.sliceLate) between the grammar's own run and the replay of
+     what it emitted, and inside the replay (RECORD, THEN REPLAY below); its
+     return value is the def. A ctx with emitters whose answers a grammar
+     reads (solid, flag: city/buildings.js) is dressed in one go there too. */
+  const REPLAY = ["dbox", "lbox", "plat", "ball", "column", "cone", "dome", "lamp", "disc", "plaque", "seal"];
   CBZ.dressFacade = function (ctx) {
+    const it = dressSteps(ctx, false);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  };
+  CBZ.dressFacadeSteps = function (ctx) {
+    return dressSteps(ctx, typeof ctx.solid !== "function" && typeof ctx.flag !== "function");
+  };
+  function* dressSteps(ctx, sliced) {
     const r = resolve(ctx.dress, ctx.hash, ctx.storeys);
     if (!r) return null;
 
@@ -1166,8 +1199,37 @@
       if (y0 < 0) put(Math.max(t0, -HW), Math.min(t1, HW), y0, 0);     // under the sill
     };
 
-    try { r.def.build(ctx, ctx.grid ? gridF(ctx) : F, r.spec); }
-    catch (e) { if (window.console) console.warn("facade " + r.spec.style + ": " + e.message); }
+    if (!sliced) {
+      try { r.def.build(ctx, ctx.grid ? gridF(ctx) : F, r.spec); }
+      catch (e) { if (window.console) console.warn("facade " + r.spec.style + ": " + e.message); }
+    } else {
+      /* RECORD, THEN REPLAY (dressFacadeSteps). The grammar is pure: ctx in,
+         emitter calls out, nothing it reads back. So it runs once against
+         recorders (its own arithmetic only), and the calls it made are then
+         played, in order and with the same receivers, through the very
+         emitters it would have called (the carves above, then the host's):
+         the same boxes, platforms and meshes in the same order, a slice at
+         a time. A throw stops the replay where the build stopped. */
+      const late = CBZ.sliceLate || function () { return false; };
+      const calls = [], live = {};
+      for (let i = 0; i < REPLAY.length; i++) {
+        const k = REPLAY[i], f = ctx[k];
+        if (typeof f !== "function") continue;
+        live[k] = f;
+        ctx[k] = function () { calls.push(k, this, Array.prototype.slice.call(arguments)); };
+      }
+      let threw = null;
+      try { r.def.build(ctx, ctx.grid ? gridF(ctx) : F, r.spec); } catch (e) { threw = e; }
+      for (const k in live) ctx[k] = live[k];
+      yield 0;
+      try {
+        for (let i = 0; i < calls.length; i += 3) {
+          live[calls[i]].apply(calls[i + 1], calls[i + 2]);
+          if (((i / 3) & 15) === 15 && late()) yield 0;
+        }
+      } catch (e) { threw = threw || e; }
+      if (threw && window.console) console.warn("facade " + r.spec.style + ": " + threw.message);
+    }
     // the carves are build-time only
     ctx.dbox = origDbox;
     if (origLbox) ctx.lbox = origLbox;
@@ -1218,7 +1280,7 @@
       try { F.door(ctx, { proj: doorProj, wall: wallCol }); } catch (e) {}
     }
     return r.def;
-  };
+  }
 
   /* A HOST'S OWN BAY GRID. ctx.grid = [n0, n1, n2, n3], bays per face (0 -z,
      1 +z, 2 -x, 3 +x), corner to corner. A host whose wall already HAS
