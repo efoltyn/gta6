@@ -14,7 +14,9 @@
      go(j)    a floor button in the car. Only a rider standing in the car
               can press it; the doors close and the car goes to stop j,
               and the doors open there. A rider who steps back out while
-              the doors close cancels the trip.
+              the doors close cancels the trip. Pressed while the car runs,
+              it re-targets to j if the owner's io.reach(m, j) says the car
+              can still stop there (no reach = a running car ignores it).
      park(i)  an empty car goes home with its doors shut.
 
    States:  idle   parked at `at`, doors shut
@@ -33,6 +35,7 @@
      doorOpen(i)            0..1 how far the doors at stop i are open
      door(i, open)          drive the doors at stop i
      seal(i)                the doors at stop i are fully shut (collider)
+     reach(m, j)            riding: can the car still stop at j
      travel(m, dt)          move the car along m.at -> m.dest; true on arrival.
                             m.t is the time in the state, m.moved is scratch
                             the owner may use (reset on entry)
@@ -99,7 +102,14 @@
 
   // A FLOOR BUTTON in the car.
   function go(m, j, io) {
-    if (j < 0 || j >= m.n || j === m.at) return false;
+    if (j < 0 || j >= m.n) return false;
+    if (m.st === "ride") {
+      if (j === m.dest || !has(io, "reach") || !io.reach(m, j)) return false;
+      m.dest = j;
+      sfx(io, "switch");
+      return true;
+    }
+    if (j === m.at) return false;
     if (!inside(io, m.at)) return false;
     if (m.st === "open") {
       m.dest = j; m.arrived = false;

@@ -4,8 +4,8 @@
    The walk is the player's own physics (the "player" ingredient holds W and
    points the camera, nothing teleports): the street in front of the tower ->
    through the lobby door -> the lift landing. Then the island's own lift
-   verbs, the calls [E] / a tap make: Call (CBZ.islandLiftCall), in the car Up
-   (CBZ.islandLiftGo0), the ride to the roof stop. Out onto the roof, up the
+   verbs, the calls [E] / a tap make: Call (CBZ.islandLiftCall), in the car
+   (CBZ.islandLiftGoTo, the roof on the car's panel), the ride to the roof stop. Out onto the roof, up the
    helipad stair (CBZ.stairs walk surface, world/island_vehicles.js), across
    the deck to the helicopter, Board (CBZ.islandHeliBoard: the door arc, then
    the seat), then the flight on city/playeraircraft.js's controls held as
@@ -78,7 +78,7 @@ CBZ.lab.kit("heli-roof", {
       if (M.phase === "board-lift") {
         walking();
         if (inCar() && M.phaseT > 0.6) {
-          if (CBZ.islandLiftGo0 && CBZ.islandLiftGo0()) { pl.stop(); go("ride"); }
+          if (CBZ.islandLiftGoTo && CBZ.islandLiftGoTo(pad.roofStop)) { pl.stop(); go("ride"); }
         }
         if (M.phaseT > 15) fail("never sent the lift up");
         return;

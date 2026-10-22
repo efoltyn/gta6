@@ -5557,11 +5557,11 @@
 
          * "Call" pinned over the landing's call button ([E], or tap it): the
            button lights, the car comes to your floor and its doors OPEN.
-         * in the car, "Up" / "Down" ([E] / [Q], or tap): the doors close and
-           it runs express towards the top of the crown or the lobby.
-         * while it runs, "Stop" ([E], or tap) with the floor it can still
-           brake for: it stops there and the doors open. That is how you pick
-           any floor with one button: ride, and stop where you want.
+         * in the car, the lift panel (systems/liftpanel.js, the same one the
+           city's cabs use): every floor, the roof and the crown as buttons;
+           tap one, type its number, or move the highlight and press it. The
+           doors close, the car climbs the shaft to that floor and opens.
+           Pressed while it runs, a floor it can still brake for re-targets it.
          * the doors hold while you stand in the doorway or in the car; an
            empty car shuts its doors, and after a while goes home to the lobby.
 
@@ -5613,11 +5613,6 @@
       if (i < D.n) return { x: e.ox - e.dw / 2 - 0.26, y: e.gy + D.fy[i] + 1.12, z: e.oz - e.so - 0.03 };
       return { x: e.ox, y: deckY(e, i) + 1.4, z: e.oz - e.so - 0.1 };
     }
-    function floorWord(e, i) {
-      if (i === 0) return "lobby";
-      if (i < e.storeys) return "floor " + i;
-      return i === e.stops.length - 1 ? "the top" : "the roof";
-    }
     function setDoor(e, i, open, P) {
       const D = e.doors, t = open ? 1 : 0;
       if (D.target[i] === t) return;
@@ -5633,16 +5628,15 @@
       D.solid[i] = solid;
       if (solid) { c.y0 = c.cy0; c.y1 = c.cy1; } else { c.y0 = 1e9; c.y1 = 1e9 + 1; }
     }
-    // the next stop the car can still brake for, in its direction of travel
-    function brakeStop(e) {
-      const S = e.stops, goal = S[e.m.dest], dir = goal > e.y ? 1 : -1;
-      const brake = e.v * e.v / (2 * LIFT_A) + 0.05;
-      let best = -1;
-      for (let k = 0; k < S.length; k++) {
-        const ahead = (S[k] - e.y) * dir;
-        if (ahead >= brake && (best < 0 || ahead < (S[best] - e.y) * dir)) best = k;
-      }
-      return best;
+    // riding: can the car still stop at stop k? Ahead of it in its
+    // direction of travel and past its braking distance (a car at rest can
+    // go either way).
+    function canBrakeFor(e, k) {
+      const S = e.stops, goal = S[e.m.dest];
+      if (k < 0 || k >= S.length) return false;
+      if (e.v < 0.05) return Math.abs(S[k] - e.y) > 0.01;
+      const dir = goal > e.y ? 1 : -1;
+      return (S[k] - e.y) * dir >= e.v * e.v / (2 * LIFT_A) + 0.05;
     }
     // trapezoid: accelerate, cruise, brake to land exactly on the stop
     function driveCar(e, dt) {
@@ -5662,69 +5656,78 @@
         door: (i, open) => setDoor(e, i, open, P),
         seal: (i) => gate(e, i),
         travel: (m, dt) => driveCar(e, dt),
+        reach: (m, j) => canBrakeFor(e, j),
         lit: (on) => { e.litOn = on; },
         sfx: (s) => { if (CBZ.sfx && nearTower(e, P)) CBZ.sfx(s); },
       };
     }
 
-    // ---- the controls: the verb pinned over the thing (systems/interactions.js
-    //      prisonPrompt, bound to its key; on touch the same pill is the tap)
-    let callArm = null, stopArm = null;
-    const goArm = [];
+    // ---- the controls: "Call" pinned over the landing's button
+    //      (systems/interactions.js prisonPrompt, bound to [E]; on touch the
+    //      pill is the tap), and in the car the lift panel
+    let callArm = null, carArm = null;
     CBZ.islandLiftCall = function () {
       const a = callArm, P = CBZ.player;
       if (!a || !P || P.dead) return false;
       a.e.litAt = a.i;
       return LiftCore.call(a.e.m, a.i, ioFor(a.e, P));
     };
-    for (let r = 0; r < 2; r++) {
-      CBZ["islandLiftGo" + r] = function () {
-        const a = goArm[r], P = CBZ.player;
-        if (!a || !P || P.dead) return false;
-        a.e.litAt = -1;
-        return LiftCore.go(a.e.m, a.j, ioFor(a.e, P));
-      };
-    }
-    CBZ.islandLiftStop = function () {
-      const a = stopArm;
-      if (!a || a.e.m.st !== "ride") return false;
-      const k = brakeStop(a.e);
-      if (k < 0) return false;
-      a.e.m.dest = k;
-      if (CBZ.sfx) CBZ.sfx("switch");
-      return true;
+    // the car's floor button j (the panel's pick; also a scripted ride)
+    CBZ.islandLiftGoTo = function (j) {
+      const e = carArm, P = CBZ.player;
+      if (!e || !P || P.dead) return false;
+      e.litAt = -1;
+      return LiftCore.go(e.m, j, ioFor(e, P));
     };
     (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
-      { id: "island-lift-call", act: "@islandLiftCall", was: "no button: standing near the shaft summoned the car", now: "Call, over the call button" },
-      { id: "island-lift-go-0", act: "@islandLiftGo0", was: "standing on the car sent it; walking on it stopped it", now: "Up / Down, then Stop, in the car" }
+      { id: "island-lift-call", act: "@islandLiftCall", was: "no button: standing near the shaft summoned the car", now: "Call, over the call button" }
     );
+    // what the panel prints: G (the lobby), each floor's number, R, and the
+    // crown above the roof
+    function panelStops(e) {
+      if (e.panelStops) return e.panelStops;
+      const S = e.stops, out = [];
+      for (let k = 0; k < S.length; k++) {
+        if (k === 0) out.push({ label: "G", name: "Lobby", num: 0, roof: false });
+        else if (k < e.storeys) out.push({ label: String(k), name: "", num: k, roof: false });
+        else if (k === e.storeys) out.push({ label: "R", name: "", num: k, roof: true });
+        else out.push({ label: "C", name: "Crown", num: k, roof: false });
+      }
+      return (e.panelStops = out);
+    }
+    // the floor the moving car is passing, for the panel's display
+    function passing(e) {
+      const S = e.stops;
+      let best = 0;
+      for (let k = 1; k < S.length; k++) if (Math.abs(S[k] - e.y) < Math.abs(S[best] - e.y)) best = k;
+      return best;
+    }
+    const pickFloor = (j) => CBZ.islandLiftGoTo(j);
+    function carPanel(e, q) {
+      const m = e.m, riding = m.st === "ride", L = panelStops(e);
+      const spec = e.panelSpec || (e.panelSpec = { stops: L, pick: pickFloor, reach: (j) => canBrakeFor(e, j) });
+      spec.at = m.at;
+      spec.dest = m.dest;
+      spec.riding = riding;
+      spec.up = riding && m.dest >= 0 && e.stops[m.dest] > e.y;
+      spec.display = riding ? L[passing(e)].label : null;
+      spec.at3 = { x: e.ox + e.s - 0.25, y: e.gy + e.y + e.slabTop + 1.3, z: e.oz - e.s + 0.35 };
+      CBZ.liftPanel.show("isle:" + q, spec);
+    }
     function armControls(P) {
-      callArm = null; stopArm = null; goArm.length = 0;
-      if (!P || !P.pos || P.dead || P._mountedAnimal || !CBZ.prisonPrompt || CBZ.game.mode !== "survival") return;
+      callArm = null; carArm = null;
+      if (!P || !P.pos || P.dead || P._mountedAnimal || CBZ.game.mode !== "survival") return;
       for (let q = 0; q < elevators.length; q++) {
         const e = elevators[q], m = e.m;
         if (!m || e.b.fallen || !inCar(e, P)) continue;
-        const at = { x: e.ox + e.s - 0.25, y: e.gy + e.y + e.slabTop + 1.3, z: e.oz - e.s + 0.35 };
-        if (m.st === "ride") {
-          const k = brakeStop(e);
-          if (k >= 0 && k !== m.dest) {
-            stopArm = { e: e };
-            CBZ.prisonPrompt("island-lift-stop", "@islandLiftStop", "Stop", { at: at, sub: floorWord(e, k), key: "e", bind: true, d2: 0.01 });
-          }
-          return;
-        }
-        if ((m.st === "open" || m.st === "idle") && Math.abs(e.y - e.stops[m.at]) < 0.01) {
-          const last = e.stops.length - 1, rows = [];
-          if (m.at < last) rows.push({ j: last, verb: "Up" });
-          if (m.at > 0) rows.push({ j: 0, verb: "Down" });
-          for (let r = 0; r < rows.length; r++) {
-            goArm[r] = { e: e, j: rows[r].j };
-            CBZ.prisonPrompt("island-lift-go-" + r, "@islandLiftGo" + r, rows[r].verb,
-              { at: at, key: r ? "q" : "e", bind: true, group: "island-lift-car", row: r, d2: 0.01 });
-          }
+        const atStop = Math.abs(e.y - e.stops[m.at]) < 0.01;
+        if (CBZ.liftPanel && (m.st === "ride" || ((m.st === "open" || m.st === "idle" || m.st === "close") && atStop))) {
+          carArm = e;
+          carPanel(e, q);
         }
         return;
       }
+      if (!CBZ.prisonPrompt) return;
       let best = null;
       for (let q = 0; q < elevators.length; q++) {
         const e = elevators[q], m = e.m;
