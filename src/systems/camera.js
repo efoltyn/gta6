@@ -28,17 +28,13 @@
   // Also under V2: hold [B] on foot to swing the camera around and view your
   // character from the FRONT (outfit check); release to swing back.
   // FIRST PERSON IS UNTOUCHED: every FP path returns before this tier runs.
-  // CAM_VEHICLE_RESTORE: city/view.js force-exits FP when you enter a car and
-  // nothing put you back — remember the on-foot view and restore FP on exit.
   if (CBZ.CONFIG.CAM_TP_V2 == null) CBZ.CONFIG.CAM_TP_V2 = true;
-  if (CBZ.CONFIG.CAM_VEHICLE_RESTORE == null) CBZ.CONFIG.CAM_VEHICLE_RESTORE = true;
 
   // ---- CAMERA POLISH PASS (2026-07-19) — each item behind its own flag, all
   // one-line reverts. The V2 personality (rigid boom, constant lens, decisive
   // clamp) is PRESERVED; these remove its rough edges, they don't soften it.
   if (CBZ.CONFIG.CAM_TOUCH_PITCH == null) CBZ.CONFIG.CAM_TOUCH_PITCH = true;         // widened touch-look pitch range hook (touch.js consults it)
   if (CBZ.CONFIG.CAM_OCCLUDE_FADE == null) CBZ.CONFIG.CAM_OCCLUDE_FADE = true;       // occlusion: FOLLOW the wall (floor 3.0→1.6) instead of ballooning; true occluder fade deferred (merged-batch materials can't fade per-group)
-  if (CBZ.CONFIG.CAM_TOGGLE_BLEND == null) CBZ.CONFIG.CAM_TOGGLE_BLEND = true;       // FP<->TP toggle: short eased dolly instead of a teleport
   if (CBZ.CONFIG.CAM_VEHICLE_FREELOOK == null) CBZ.CONFIG.CAM_VEHICLE_FREELOOK = true; // driving: mouse-look suspends auto-recenter; hold MMB = look back
   if (CBZ.CONFIG.CAM_AIR_BANK == null) CBZ.CONFIG.CAM_AIR_BANK = true;               // chase cam leans into a fraction of aircraft roll (cars stay level)
   if (CBZ.CONFIG.CAM_SPRINT_FOV == null) CBZ.CONFIG.CAM_SPRINT_FOV = false;          // opt-in sprint FOV swell (+7° over 0.4s). SHIPS DARK — owner disliked auto-zoom; one flag flip to try it
@@ -503,10 +499,6 @@
     shoulderSign = (v === -1 || v === 1) ? v : -shoulderSign;
     return shoulderSign;
   };
-  // FP<->TP toggle blend state (a short eased dolly instead of a teleport).
-  let fpPrev = null, blendT = 0;
-  const BLEND_T = 0.30;
-  const blendFrom = new THREE.Vector3(), blendLook = new THREE.Vector3(), _blScratch = new THREE.Vector3();
   // Draw/holster body-facing ramp: 0→1 over 0.25s after an armed flip, so the
   // body-yaw ease RATE ramps in instead of whipping to its new owner's target.
   let facingArmedPrev = null, facingT = 1, sprintFovK = 0;
@@ -747,8 +739,6 @@
   let smYaw = 0, smYawOn = false;
   // one-shot: settle the orbit pitch to the CITY_TP near-level default on city entry
   let _cityPitchInit = false;
-  // vehicle view memory (CAM_VEHICLE_RESTORE): was the player in FP on foot?
-  let _drvPrev = false, _fpOnFoot = false, _preDriveFP = false;
 
   // cinematic spawn intro: far reveal -> push in -> 180 orbit handoff
   let introT = 0;
@@ -1228,124 +1218,13 @@
     return Math.max(INT_DIST_MIN, Math.min(INT_DIST_MAX, roomSpan * 0.5 - ROOM_CLEAR));
   }
 
-  /* ==========================================================================
-     A CELL IS TOO SMALL FOR A BOOM (CAM_TIGHT_FP).
-
-     OWNER: "test my camera idea — third person mixed with first person for when
-     they are in small rooms or cells etc where 3rd person gets messed up.
-     maybe that's dumb but we will try it."
-
-     It is not dumb; it is the only answer the geometry allows. A prison cell in
-     world/cellblock.js is about 2.4 m across. A third-person camera needs the
-     boom LENGTH plus the camera's own radius behind the character's back — call
-     it 1.5 + 0.34 — and there is 1.2 m of room behind him. Every third-person
-     camera ever written does one of two things with that: clip through the wall
-     (you photograph the corridor and the cell disappears) or slam the lens into
-     the back of his skull (you photograph the inside of a head). Both are what
-     "3rd person gets messed up" means, and no amount of tuning fixes it because
-     the space is smaller than the shot.
-
-     So below a threshold the rig stops pretending. First person needs no room
-     behind the character at all, and this game already has a good one — the
-     standing owner mandate is FIRST PERSON IS SACRED, so nothing here touches
-     it: this calls CBZ.setFPS exactly the way [V] and the touch eye button do,
-     and systems/fpsmode.js runs unchanged and unaware. The switch even inherits
-     the existing CAM_TOGGLE_BLEND dolly, so a doorway reads as a ~0.3 s move in
-     rather than a cut.
-
-     TWO RULES KEEP IT HONEST:
-       · HYSTERESIS, not a threshold. In at 3.0 m of floor span, back out at
-         4.6 m, so standing in a doorway cannot strobe the view.
-       · THE PLAYER OUTRANKS IT. Toggling the view by hand (or fpsmode changing
-         it for its own reasons) drops the claim immediately, and the claim can
-         only be re-armed after the room has opened back up. If you want third
-         person in your cell, you press the button once and you keep it.
-     It gives back ONLY what it took: leaving a tight space restores first
-     person if that is where it found you, and never forces third person on a
-     player who chose first.
-
-     Scoped to the prison (mode "escape") on purpose. The city has its own
-     interior camera — the room-aware boom below, which the owner has already
-     signed off — and the arenas have no rooms. Flag false = nothing at all.
-     ========================================================================== */
-  if (CBZ.CONFIG.CAM_TIGHT_FP == null) CBZ.CONFIG.CAM_TIGHT_FP = true;
-  // MEASURED, not guessed (tools/prison-polish-check.mjs): a world/cellblock.js
-  // cell probes at span 3.20 / ceiling 1.90, the wing's central hall at 18.0
-  // with no lid at all (the block is open-topped, so only the cell roof slabs
-  // read as a ceiling). 3.6 clears the cell with margin and is still nowhere
-  // near a corridor; 5.2 is the release, wide enough that a doorway cannot
-  // strobe and narrow enough that the hall always trips it.
-  const FP_SPAN_IN = 3.6;      // narrow floor span that means "no room for a boom"
-  const FP_SPAN_OUT = 5.2;     // …and the span that hands third person back
-  const FP_CEIL_IN = 2.9;      // a lid too: a narrow alley is not a cell
-  let autoFP = false;          // WE put the player in first person
-  let autoFPWas = false;       // …and this is the view we found him in
-  let tfpPrev = null;          // last frame's fps.active, to spot a manual flip
-  let autoFPBlock = false;     // a manual toggle parks us until the room opens
-  let _selfFlip = false;       // the setFPS call about to land is ours
-  function tightFP(fdt) {
-    const on = CBZ.CONFIG.CAM_TIGHT_FP !== false && !!CBZ.setFPS && !!CBZ.fps;
-    const live = on && (CBZ.game.mode === "escape" || CBZ.game.mode === "survival") && CBZ.game.state === "playing" &&
-      !player.dead && !player.driving && !(CBZ.simView && CBZ.simView.active) &&
-      !(CBZ.cineCam && CBZ.cineCam.active);
-    if (!live) {
-      // hand the view back on the way out of play (death/pause/mode change), so
-      // a run can never end with a camera nobody asked for latched on.
-      if (autoFP && CBZ.setFPS) { autoFP = false; CBZ.setFPS(autoFPWas); }
-      autoFP = false; autoFPBlock = false;
-      tfpPrev = !!(CBZ.fps && CBZ.fps.active);
-      return;
-    }
-    const nowFP = !!CBZ.fps.active;
-    // SOMEBODY ELSE MOVED IT. Any change we did not make is the player's (or
-    // fpsmode's) and outranks us until the room opens up again. `null` is the
-    // FIRST observation, not a change: escape mode arms first person after the
-    // intro (state.js -> armFPSAfterIntro), so a `false` seed would read that
-    // as a hand toggle on frame one and park the rule for the whole run.
-    if (tfpPrev !== null && nowFP !== tfpPrev && !_selfFlip) { autoFP = false; autoFPBlock = true; }
-    _selfFlip = false;
-
-    senseRoom(player.pos.x, player.pos.y + roomProbeH(), player.pos.z, fdt);
-    const tight = roomSpan <= FP_SPAN_IN && roomCeil <= FP_CEIL_IN;
-    const open = roomSpan >= FP_SPAN_OUT;
-    if (open) autoFPBlock = false;
-
-    if (!autoFP && tight && !autoFPBlock && !nowFP) {
-      autoFP = true; autoFPWas = false;
-      _selfFlip = true; CBZ.setFPS(true);
-    } else if (autoFP && open) {
-      autoFP = false;
-      _selfFlip = true; CBZ.setFPS(autoFPWas);
-    }
-    tfpPrev = !!CBZ.fps.active;
-  }
-  // the numbers, for a probe: `span`/`ceil` are the live measurement, `auto` is
-  // whether THIS rule owns the current view.
+  // the numbers, for a probe: `span`/`ceil` are the live room measurement.
   CBZ.camRoomAudit = function () {
     return {
-      on: CBZ.CONFIG.CAM_TIGHT_FP !== false, span: roomSpan, ceil: roomCeil,
-      enc: encK, boom: roomBoom(), auto: autoFP, blocked: autoFPBlock,
+      span: roomSpan, ceil: roomCeil, enc: encK, boom: roomBoom(),
       fp: !!(CBZ.fps && CBZ.fps.active),
     };
   };
-
-  // FP<->TP TOGGLE BLEND (CAM_TOGGLE_BLEND): the eye and the 4m boom used to
-  // hard-teleport on [V]/the touch eye button. While blendT runs, the frame
-  // eases from the captured outgoing transform to the incoming rig's live
-  // target (smoothstep) — a ~0.3s dolly. Runs on the wall clock so a low frame
-  // rate can't stretch it into a cutscene.
-  function applyToggleBlend() {
-    if (blendT <= 0) return;
-    blendT -= (CBZ.wallDt != null ? CBZ.wallDt : 0.016);
-    if (blendT <= 0) { blendT = 0; return; }
-    const p = 1 - blendT / BLEND_T;
-    const k = p * p * (3 - 2 * p);
-    _blScratch.copy(camera.position);
-    camera.position.copy(blendFrom).lerp(_blScratch, k);
-    _blScratch.copy(look);
-    look.copy(blendLook).lerp(_blScratch, k);
-    camera.lookAt(look);
-  }
 
   function updateCamera(dt) {
     // FEEL-DT: the real-wall-clock present delta for camera settle (graceful —
@@ -1387,21 +1266,6 @@
       else if (armedNow !== facingArmedPrev) { facingArmedPrev = armedNow; facingT = 0; }
       if (facingT < 1) facingT = Math.min(1, facingT + fdt);
     }
-    // ---- VEHICLE VIEW MEMORY: city/view.js force-drops FP the moment you
-    // drive (the car owns the camera) and nothing ever restored it — every
-    // car ride silently dumped an FP player into third person. Track the
-    // on-foot view each frame; on the enter-edge remember it (the previous
-    // frame's value — captured BEFORE view.js's forced setFPS(false)), on the
-    // exit-edge give FP back. Guard-called; CAM_VEHICLE_RESTORE=false reverts.
-    if (CBZ.CONFIG.CAM_VEHICLE_RESTORE !== false && CBZ.game.mode === "city") {
-      const drv = !!player.driving;
-      if (drv && !_drvPrev) _preDriveFP = _fpOnFoot;
-      if (!drv && _drvPrev && _preDriveFP && !player.dead &&
-          CBZ.game.state === "playing" && !(CBZ.cityCam && CBZ.cityCam.death) &&
-          CBZ.setFPS && CBZ.fps && !CBZ.fps.active) CBZ.setFPS(true);
-      if (!drv) _fpOnFoot = !!(CBZ.fps && CBZ.fps.active);
-      _drvPrev = drv;
-    } else _drvPrev = !!player.driving;
     // BIRD'S-EYE SOCIETY VIEW: a strategic camera for the math-only mass
     // simulation. It intentionally bypasses spring-arm collision and close
     // camera effects; the player remains frozen while the prison keeps living.
@@ -1499,10 +1363,6 @@
     // synced so the 3rd-person hand-off on toggle-off doesn't spike velocity or
     // replay the intro.) fpsmode positions the FP camera in ALL modes, so this is
     // safe for jail/escape FP too — they had the identical race.
-    // CAM_TIGHT_FP — decided BEFORE the first-person hand-off below, because
-    // once fps.active is true this function returns and the room would never be
-    // measured again (so nothing could ever hand third person back).
-    tightFP(fdt);
     if (CBZ.fps && CBZ.fps.active && !player.dead && !player.driving) {
       introT = 0; prev.copy(player.pos);
       return;
@@ -1639,23 +1499,11 @@
       return;
     }
 
-    // CITY camera: first-person by default, a third-person cinematic orbit on
-    // death (the "WASTED" replay), and plain third-person when you toggle it or
-    // hop in a car. city/view.js owns the cityCam state + rig visibility.
+    // CITY camera: the third-person cinematic orbit on death (the "WASTED"
+    // replay). First person is fpsmode's lens (it returned above); which one
+    // you are in is decided by what is in your hands (handsFrame, below).
     if (CBZ.game.mode === "city" && CBZ.cityCam) {
       const cc = CBZ.cityCam;
-      // arm the FP<->TP blend on the toggle edge (never during death/intro/scope)
-      if (CBZ.CONFIG.CAM_TOGGLE_BLEND !== false) {
-        const fpNow = !!(cc.fp && !player.dead && !player.driving);
-        if (fpPrev === null) fpPrev = fpNow;
-        else if (fpNow !== fpPrev) {
-          fpPrev = fpNow;
-          const scoped = CBZ.fpsScoped && CBZ.fpsScoped();
-          if (!cc.death && introT <= 0 && !scoped) {
-            blendT = BLEND_T; blendFrom.copy(camera.position); blendLook.copy(look);
-          }
-        }
-      } else { fpPrev = null; blendT = 0; }
       if (cc.death) {                              // cinematic death replay: orbit your body — or your KILLER while spectating
         introT = 0; shakeAmt = 0; cc.death.t += dt;
         // city/death.js sets cc.death.spectate to the live actor that killed you
@@ -1667,42 +1515,6 @@
         // a planned shot that never looks through a wall (deathView, above)
         deathView(cc.death, subj, watching, dt, cc.death.ang0 || 0);
         fov = smoothDamp(fov, 48, fovV, 0.2, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
-        return;
-      }
-      if (cc.fp && !player.dead && !player.driving) {   // first-person
-        introT = 0; prev.copy(player.pos);
-        const eye = player.pos.y + (player.prone ? 0.60 : player.crouch ? 1.22 : 1.66);   // prone (physics stance) = cheek on the deck
-        const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
-        const fX = -Math.sin(cam.yaw), fZ = -Math.cos(cam.yaw);
-        // sit AT the head (not ahead of it) and keep horizontal follow tight so
-        // looking around is responsive, but EASE the eye height so stair treads
-        // and the door-step don't jolt the whole view up and down.
-        camera.position.x = player.pos.x;
-        camera.position.z = player.pos.z;
-        camera.position.y = smoothDamp(camera.position.y, eye, camV.y, 0.06, fdt);
-        const ey = camera.position.y;
-        look.set(player.pos.x + fX * cp * 6, ey - sp * 6, player.pos.z + fZ * cp * 6);
-        camera.lookAt(look);
-        if (shakeAmt > 0.001) { const s = shakeAmt; camera.position.x += (Math.random() - 0.5) * s; camera.position.y += (Math.random() - 0.5) * s; shakeAmt *= Math.pow(0.0006, sdt); if (shakeAmt < 0.01) shakeAmt = 0; }
-        // FOV must be ADS-AWARE so this writer and fpsmode.js's ADS writer AGREE.
-        // Both run every frame in city first-person (this at onAlways(50), fpsmode
-        // at onAlways(52)). If this always eased toward the 70° hip while fpsmode
-        // eased toward hip-14 (=56°) on RMB, they tug-of-war'd: the zoom never
-        // settled and any per-shot perturbation tipped the unstable equilibrium
-        // back toward hip — the "left-click unzooms while holding RMB" bug. Easing
-        // toward the SAME 56° target during ADS makes both writers converge, so the
-        // zoom holds rock-steady through firing. (Hip 70 / drop 14 mirror fpsmode.)
-        // A LIVE SCOPE outranks the hip/ADS pair for the same reason: while the
-        // factory sniper's real scope (lockon.js, fpsScopeFov) or a fitted
-        // gunsmith optic (sights.js) is up, easing toward 70/56
-        // here while fpsmode eased toward the scope's lens was the EXACT same
-        // tug-of-war — the zoom never landed, "holding the scope but just looking
-        // down the sights". Same precedence as fpsmode's block: lockon returns
-        // null whenever a gunsmith optic owns the weapon, so exactly one wins.
-        const fpScopeF = (CBZ.fpsScopeFov && CBZ.fpsScopeFov()) || (CBZ.cityScopeFov && CBZ.cityScopeFov());
-        const fpHipFov = fpScopeF ? fpScopeF : ((CBZ.isADS && CBZ.isADS()) ? 70 - 14 : 70);
-        fov = smoothDamp(fov, fpHipFov, fovV, 0.18, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
-        applyToggleBlend();          // ease in from the third-person boom on toggle
         return;
       }
     }
@@ -2277,15 +2089,18 @@
         );
         keepIntroCamInRoom(baseX, baseY, baseZ, introPos);
         const handoff = easeInOut(Math.max(0, Math.min(1, (k - 0.70) / 0.30)));
-        // Legacy intros finish by pushing all the way into the player's eyes,
-        // ready for fpsmode's handoff.  Campaign prison uses one continuous
-        // third-person grammar, so retain the close orbit instead of briefly
-        // becoming a first-person camera before springing back out.
-        if (handoff > 0 && !(introOpts && introOpts.keepThirdPerson)) {
+        // The arrival ends where the hands say: armed, the orbit pushes all
+        // the way into the eyes — fpsmode's eye, at fpsmode's height and
+        // pitch — so the hand-over to first person is not a cut; empty-handed
+        // (or a scripted keepThirdPerson) it keeps the close orbit.
+        const introFP = !(introOpts && introOpts.keepThirdPerson) &&
+          (CBZ.handsPick ? CBZ.handsPick() === "fp" : false);
+        if (handoff > 0 && introFP) {
           const finalYaw = introYaw0 + Math.PI;
-          const fpPitch = Math.max(-0.05, Math.min(0.26, cam.pitch * 0.55));
+          // the eye is UP-positive, cam.pitch DOWN-positive
+          const fpPitch = Math.max(-1.3, Math.min(1.3, -cam.pitch));
           const fcp = Math.cos(fpPitch);
-          introEye.set(player.pos.x, player.pos.y + (player.crouch ? 1.45 : 2.05), player.pos.z);
+          introEye.set(player.pos.x, player.pos.y + (player.prone ? 0.55 : player.crouch ? 1.18 : 1.65), player.pos.z);
           introAim.set(
             introEye.x - Math.sin(finalYaw) * fcp,
             introEye.y + Math.sin(fpPitch),
@@ -2353,7 +2168,6 @@
     look.y = smoothDamp(look.y, lty, lookV.y, lookS * 1.2, fdt);
     look.z = smoothDamp(look.z, ltz, lookV.z, lookS, fdt);
     camera.lookAt(look);
-    applyToggleBlend();          // ease out from the first-person eye on toggle
 
     // screen shake offset, decaying (applied after positioning). City on-foot
     // TP takes shake at 60% unless actively presenting a weapon — FP never
@@ -2458,8 +2272,153 @@
     };
   };
 
+  /* ==========================================================================
+     WHAT'S IN YOUR HANDS PICKS THE CAMERA — and the switch is one motion.
+
+     The rule itself is systems/fpsmode.js's CBZ.viewForHands() (a firearm, a
+     lit torch or binoculars = first person; melee, a grip on a man or empty
+     hands = third). This is the half that MOVES: when the gun comes up the
+     lens travels from over the shoulder into the head over HANDS_T, eased,
+     and only once it is inside does fpsmode take the eye; holstering hands
+     the eye back at once and the lens travels out the same way. The body
+     hides the moment the lens is within OWN_HEAD_CLEAR of the head and not
+     before — you never see the inside of the face — and shows again on the
+     way out once the lens has left it.
+
+     HOW IT BLENDS WITHOUT A SECOND RIG. The third-person rig below integrates
+     ON camera.position (its smoothDamps read where the lens was last frame),
+     so writing the blend straight over it would feed the blend back into the
+     rig. The rig's own pose is parked before the blend is laid on and put
+     back before the rig runs again, so the rig never sees it.
+
+     NO THRASH. The answer has to hold for HANDS_SETTLE before the lens
+     starts to move, so spinning the wheel past an empty slot does nothing,
+     and the motion is a single 0..1 value that can turn round mid-flight.
+     Gun to gun is first person to first person: nothing moves.
+
+     Another camera's turn (car, aircraft, mount, swim, cinematic, intro,
+     death, spectator) is `null`: hands off, and on the way back the view
+     lands where the rule says without a fly-in (you step out of a car with
+     a gun and you are behind its sights).
+     ========================================================================== */
+  const HANDS_T = 0.26;        // s: the push in / pull out, about a draw
+  const HANDS_SETTLE = 0.08;   // s the answer must hold before the lens moves
+  const FP_HIP_FOV = 75;       // fpsmode's first-person hip lens
+  const hb = {
+    k: 0, target: null, pend: null, pendT: 0, owned: true,
+    applied: false, hid: false, fovOut: FP_HIP_FOV, pUp: 0,
+    rigPos: new THREE.Vector3(), rigQ: new THREE.Quaternion(),
+    eye: new THREE.Vector3(), aim: new THREE.Vector3(), q: new THREE.Quaternion(),
+    m: new THREE.Matrix4(), up: new THREE.Vector3(0, 1, 0),
+  };
+  function fpOn() { return !!(CBZ.fps && CBZ.fps.active); }
+  // code set the view directly (CBZ.setFPS): no motion, just be there
+  CBZ.camHandsSnap = function () {
+    hb.k = fpOn() ? 1 : 0;
+    hb.target = fpOn() ? "fp" : "tp";
+    hb.pend = null; hb.pendT = 0;
+    handsUnhide();
+  };
+  function handsUnhide() {
+    if (!hb.hid) return;
+    hb.hid = false;
+    const rig = CBZ.playerChar && CBZ.playerChar.group;
+    if (rig && !fpOn() && !_ownHid) rig.visible = true;   // (unless the boom is in the head)
+  }
+  function handsEye(out) {
+    const P = player;
+    const carEye = CBZ.moves && CBZ.moves.eyeY ? CBZ.moves.eyeY(P) : null;
+    const eyeH = P.prone ? 0.55 : P.crouch ? 1.18 : 1.65;     // fpsmode's own eye
+    return out.set(P.pos.x, carEye != null ? carEye : P.pos.y + eyeH, P.pos.z);
+  }
+  function handsDrive(dt) {
+    const want = CBZ.viewForHands ? CBZ.viewForHands() : null;
+    if (want === null) {
+      // somebody else's lens: keep the motion parked on whatever is live
+      hb.owned = false;
+      hb.k = fpOn() ? 1 : 0; hb.target = null; hb.pend = null; hb.pendT = 0;
+      handsUnhide();
+      return;
+    }
+    if (!hb.owned || hb.target === null) {
+      // handed back (or first frame): land on the answer, no fly-in
+      hb.owned = true;
+      hb.target = want; hb.pend = null; hb.pendT = 0;
+      if (CBZ.fpsApplyView) CBZ.fpsApplyView(want === "fp");
+      hb.k = want === "fp" ? 1 : 0;
+      return;
+    }
+    if (want !== hb.target) {
+      if (hb.pend !== want) { hb.pend = want; hb.pendT = 0; }
+      hb.pendT += dt;
+      if (hb.pendT >= HANDS_SETTLE) {
+        hb.target = want; hb.pend = null; hb.pendT = 0;
+        // the eye leaves at once — the third-person body takes the gun to
+        // its holster while the lens backs out of the head
+        if (want === "tp" && fpOn()) leaveEye();
+        else if (want === "fp") { hb.pUp = 0; if (hb.k <= 0) hb.fovOut = FP_HIP_FOV; }
+      }
+    } else { hb.pend = null; hb.pendT = 0; }
+    if (hb.target === "fp") {
+      if (!fpOn()) {
+        hb.k = Math.min(1, hb.k + dt / HANDS_T);
+        if (hb.k >= 1 && CBZ.fpsApplyView) CBZ.fpsApplyView(true);
+      } else hb.k = 1;
+    } else {
+      // (code may have dropped the eye in between: only a live eye is left)
+      if (fpOn()) leaveEye();
+      hb.k = Math.max(0, hb.k - dt / HANDS_T);
+    }
+  }
+  // out of the head: the orbit's pitch range is narrower than the eye's, so
+  // the part of the look it cannot hold (pUp) is kept on the lens and let go
+  // of as the lens backs out — no snap on a steep look up or down
+  function leaveEye() {
+    hb.fovOut = camera.fov;
+    const fp0 = CBZ.fps ? CBZ.fps.fp : 0;
+    if (CBZ.fpsApplyView) CBZ.fpsApplyView(false);
+    hb.pUp = fp0 + (cam.pitch || 0);
+  }
+  function handsBlend() {
+    if (fpOn() || hb.k <= 0 || !hb.owned || player.dead || player.driving) { handsUnhide(); return; }
+    const k = hb.k, s = k * k * (3 - 2 * k);
+    hb.rigPos.copy(camera.position); hb.rigQ.copy(camera.quaternion); hb.applied = true;
+    const eye = handsEye(hb.eye);
+    // the eye looks where the orbit aims: cam.pitch is DOWN-positive, the
+    // eye's pitch UP-positive (see `const cam` above)
+    const p = Math.max(-1.3, Math.min(1.3, -(cam.pitch || 0) + hb.pUp * s)), cp = Math.cos(p);
+    hb.aim.set(eye.x - Math.sin(cam.yaw) * cp, eye.y + Math.sin(p), eye.z - Math.cos(cam.yaw) * cp);
+    hb.q.setFromRotationMatrix(hb.m.lookAt(eye, hb.aim, hb.up));
+    camera.position.lerp(eye, s);
+    camera.quaternion.slerp(hb.q, s);
+    const f = fov + (hb.fovOut - fov) * s;
+    if (Math.abs(camera.fov - f) > 0.01) { camera.fov = f; camera.updateProjectionMatrix(); }
+    // the lens is in the head: no body around it
+    const rig = CBZ.playerChar && CBZ.playerChar.group;
+    if (rig) {
+      const near = camera.position.distanceToSquared(eye) < OWN_HEAD_CLEAR * OWN_HEAD_CLEAR;
+      if (near) { rig.visible = false; hb.hid = true; }
+      else handsUnhide();
+    }
+  }
+  function handsFrame(dt) {
+    // give the rig back its own pose before it integrates from it
+    if (hb.applied) {
+      hb.applied = false;
+      if (!fpOn()) { camera.position.copy(hb.rigPos); camera.quaternion.copy(hb.rigQ); }
+    }
+    const wdt = Math.max(0, Math.min(0.1, CBZ.wallDt != null ? CBZ.wallDt : (dt || 0.016)));
+    handsDrive(wdt);
+    updateCamera(dt);
+    handsBlend();
+  }
+  CBZ.camHandsAudit = function () {
+    return { k: hb.k, target: hb.target, pending: hb.pend, owned: hb.owned, hid: hb.hid,
+      fp: fpOn(), want: CBZ.viewForHands ? CBZ.viewForHands() : null };
+  };
+
   CBZ.updateCamera = updateCamera;
-  CBZ.onAlways(50, updateCamera);
+  CBZ.onAlways(50, handsFrame);
 
   camera.position.set(CBZ.SPAWN.x, 3.0, CBZ.SPAWN.z + 7);
   camera.lookAt(CBZ.SPAWN.x, 1.0, CBZ.SPAWN.z);

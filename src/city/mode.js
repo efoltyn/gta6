@@ -691,7 +691,7 @@
       if (campaignMode && CBZ.fpsAddAmmo) CBZ.fpsAddAmmo(48, "sidearm");
       if (CBZ.cityWorldBeginRun) CBZ.cityWorldBeginRun(game);
 
-      // THIRD-PERSON by default (the jail follow camera); [V] toggles FP. The
+      // The hands pick first or third person (CBZ.viewForHands). The
       // death replay flips to a 3rd-person orbit.
       CBZ.cityCam = CBZ.cityCam || { fp: false, death: null };
       CBZ.cityCam.fp = false; CBZ.cityCam.death = null;
@@ -896,12 +896,8 @@
       if (airportSpawn && !introLive) {
         airportPlaced = placePreferredCitySpawn(A, true);
       }
-      // THIRD PERSON by default, everywhere. The sandbox used to switch
-      // first-person on for every non-intro start, which (with the random yaw
-      // above and a restore that often lands indoors) made the first frame
-      // after PLAY a wall filling the screen. The shoulder rig (city/camera.js
-      // CBZ.CITY_TP) is the tuned default; [V] still toggles first person.
-      if (CBZ.setFPS) CBZ.setFPS(false);
+      // The view is the hands' call (systems/fpsmode.js CBZ.viewForHands):
+      // a drawn gun starts you in first person, empty hands in third.
       // FACE THE STREET. An authored origin scene sets its own staged facing
       // and an explicit airport anchor carries its own yaw; every other start
       // (rooftop, restored returning character, legacy adoption) looks down

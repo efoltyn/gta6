@@ -366,7 +366,7 @@
      BINOCULARS
      ================================================================ */
   const bino = {
-    on: false, wasFP: null, fov: 9, owned: true,
+    on: false, fov: 9, owned: true,
     toggle: function (on) {
       on = !!on;
       if (on === bino.on) return;
@@ -376,13 +376,11 @@
       const D = ensureDom();
       if (on) {
         if (CBZ.hmHold.isOpen()) holdClose();
-        bino.wasFP = !!(CBZ.fps && CBZ.fps.active);
-        if (!bino.wasFP && CBZ.setFPS) { try { CBZ.setFPS(true); } catch (e) {} }
+        // first person comes with them: binoculars up are an optic in your
+        // hands (systems/fpsmode.js CBZ.viewForHands reads bino.on)
         bino.prevHolster = !!g.cityHolstered; g.cityHolstered = true;
         if (D) D.bino.classList.add("hm-on");
       } else {
-        if (bino.wasFP === false && CBZ.setFPS) { try { CBZ.setFPS(false); } catch (e) {} }
-        bino.wasFP = null;
         if (bino.prevHolster != null) g.cityHolstered = bino.prevHolster;
         bino.prevHolster = null;
         if (D) D.bino.classList.remove("hm-on");

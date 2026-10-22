@@ -289,7 +289,19 @@
   let legacy = false;        // ?gunplay=old
   let THREE = null, micro = null;
   let camMode = "fps";
-  const CAMS = ["fps", "third", "cmd"];
+  /* TWO SEATS, NOT THREE. On foot the hands pick the view (systems/fpsmode.js
+     CBZ.handsPick: a firearm is first person, empty hands third) — there is
+     no first/third toggle any more, on any device. What is left to choose is
+     the gun or the command chair. */
+  const CAMS = ["fps", "cmd"];
+  function handsSeat() {
+    const v = CBZ.handsPick ? CBZ.handsPick() : "fp";
+    return v === "tp" ? "third" : "fps";
+  }
+  function eyeOn(on) {
+    if (CBZ.fpsApplyView) CBZ.fpsApplyView(on);
+    else if (CBZ.fpsSetActive) CBZ.fpsSetActive(on);
+  }
   let alwaysFn = null, ledgerFn = null;
   let touchBtns = [];
   let enemies = [];          // the array CBZ.npcs / CBZ.cityPeds point at
@@ -313,7 +325,7 @@
     A = api;
     THREE = api.THREE; micro = api.micro;
     on = true;
-    camMode = api.coarse ? "third" : "fps";
+    camMode = "fps";                       // resolved off the hands in setCam
     legacy = flag() === "old";
     /* ?gunplay=0 — NO PLAYER GUN AT ALL, which is only a coherent thing to ask
        for from the command seat: without a controller nobody drives the
@@ -569,7 +581,6 @@
 
     buildTouch();
     setCam(camMode);
-    if (CBZ.fpsSetActive) CBZ.fpsSetActive(camMode === "fps");
 
     /* ---- THE FRAME SEAT. 51.5, immediately before fpsmode's own onAlways(52)
        and after microboot's light pin at 9 — the same slot systems/camera.js
@@ -794,7 +805,7 @@
 
     // ---- the player record fpsmode reads
     CBZ.player.dead = !!you.dead;
-    if (you.dead && !wasDead) { wasDead = true; if (CBZ.fpsSetActive) safe(function () { CBZ.fpsSetActive(false); }); }
+    if (you.dead && !wasDead) { wasDead = true; safe(function () { eyeOn(false); }); }
     CBZ.game.state = "playing";
     if (you.dead) return;
 
@@ -880,13 +891,10 @@
       } else if (mouseHeld) { mouseHeld = false; if (CBZ.fpsFire) CBZ.fpsFire(false); }
     }
 
-    /* ---- AND [V] STILL MEANS WHAT IT MEANS. fpsmode binds V to
-       CBZ.toggleFPS() outside the city, which flips fps.active straight past
-       this file — so the seat would change and camMode would still say "fps",
-       and the next setCam would put it back. Follow the gun rather than fight
-       it: fps.active IS the first/third switch, so read it back. */
-    if (camMode !== "cmd" && CBZ.fpsActive) {
-      const want = CBZ.fpsActive() ? "fps" : "third";
+    /* ---- THE HANDS PICK THE SEAT. Whatever is in his hands decides first
+       or third every frame (CBZ.handsPick — the one rule every mode reads). */
+    if (camMode !== "cmd") {
+      const want = handsSeat();
       if (want !== camMode) setCam(want);
     }
 
@@ -1022,6 +1030,7 @@
 
   /* ============================================================ CAMERAS */
   function setCam(mode) {
+    if (mode !== "cmd" && on && !legacy) mode = handsSeat();
     camMode = mode;
     if (!on) return camMode;
     if (legacy) return legacySetCam(mode);
@@ -1030,7 +1039,7 @@
        on, and falls to shoulderActive() — the carried gun in the rig's hands,
        wider assist, the two-ray muzzle aim — when it is off. One boolean, both
        seats, no second code path. */
-    if (CBZ.fpsSetActive) safe(function () { CBZ.fpsSetActive(mode === "fps"); });
+    safe(function () { eyeOn(mode === "fps"); });
     if (mode !== "cmd" && A && A.live()) safe(function () { placeCamera(0.016); });
     if (mode === "cmd" && CBZ.fpsSetAim) CBZ.fpsSetAim(false);
     syncTouchVisible();
@@ -1186,7 +1195,7 @@
     alwaysFn = null; ledgerFn = null;
     pickOn = false; pickLbl = "";
     clearTouch();
-    if (CBZ.fpsSetActive) safe(function () { CBZ.fpsSetActive(false); });
+    safe(function () { eyeOn(false); });
     if (CBZ.fpsSetAim) CBZ.fpsSetAim(false);
     if (CBZ.fpsHoldBreath) CBZ.fpsHoldBreath(false);
     if (CBZ.fpsFire) safe(function () { CBZ.fpsFire(false); });

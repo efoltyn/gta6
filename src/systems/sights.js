@@ -46,8 +46,9 @@
         engine, systems/actorweapons.js CBZ.holds). character.js
         raises a long gun to a cheek weld (stock up, head down and over onto
         the comb) and pushes a pistol / Uzi out to a locked arm, one-handed.
-        A magnified scope still takes you to the eye (first person) while it
-        is up — that is what a scope is for.
+        (A drawn gun is already first person — systems/fpsmode.js
+        CBZ.viewForHands — so third person here is only the moment the lens
+        is travelling into or out of the head.)
 
    ANCHORS. The contract is the one at the top of
    weapons/appearances/sidearm.js (model.userData.anchors): sight.pos = the
@@ -703,7 +704,7 @@
   CBZ.fpsAdsK = S.fpAdsK;
 
   // ---- the optic API other systems read (was lockon.js section 2) --------
-  let manual = false, scopedNow = false, forcedFP = false;
+  let manual = false, scopedNow = false;
   const BREATH_HOLD = 4.0, BREATH_DEBT = 3.0, BREATH_STEADY = 0.2, BREATH_PUNISH = 2.2;
   let breathKey = false, breathT = BREATH_HOLD, breathDebt = 0, breathK = 1;
   let swayYaw = 0, swayPitch = 0, driftY = 0, driftP = 0, driftTY = 0, driftTP = 0, driftClock = 0;
@@ -735,18 +736,12 @@
     const r = want ? sightRec() : null;
     if (want && !scopedNow) {
       scopedNow = true;
-      // a magnified optic is looked THROUGH: it takes the eye to the glass
-      if (magnified(r) && !fpOn() && CBZ.fpsSetActive) {
-        const P = CBZ.player;
-        if (P && !P.driving && !P.dead) { CBZ.fpsSetActive(true); forcedFP = true; }
-      }
       if (magnified(r) && CBZ.sfx) { try { CBZ.sfx("rack", { pitch: 1.25, volume: 0.2 }); } catch (e) {} }
     } else if (!want && scopedNow) {
       scopedNow = false;
       if (CBZ.cam) CBZ.cam.yaw -= swayYaw;
       if (CBZ.fps && CBZ.fps.active) CBZ.fps.fp = Math.max(-1.3, Math.min(1.3, CBZ.fps.fp - swayPitch));
       swayYaw = 0; swayPitch = 0;
-      if (forcedFP) { if (fpOn() && CBZ.fpsSetActive) CBZ.fpsSetActive(false); forcedFP = false; }
     }
     return scopedNow;
   }

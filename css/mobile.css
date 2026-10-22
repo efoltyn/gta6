@@ -269,9 +269,9 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   .tbtn.tjump { width: 58px; height: 58px; }
   .tbtn.tbig { width: 70px; height: 70px; }
   /* WHICH buttons spill is not left to chance. Wrapping in DOM order would put
-     RELOAD in the outer column on a 375px SE and keep VIEW — the third-person
-     toggle — in the corner, which is the wrong verb to have promoted on the
-     screen where this bug was reported. `order` (short viewports ONLY, so the
+     RELOAD in the outer column on a 375px SE and keep a situational verb in
+     the corner, which is the wrong one to have promoted on the screen where
+     this bug was reported. `order` (short viewports ONLY, so the
      iPad and this same phone in portrait keep the column they have) lifts
      RELOAD to third from the thumb, where it is inside the corner column on
      every landscape phone; what spills is the situational half — AIM, SCOPE,
@@ -280,7 +280,6 @@ html, body { touch-action: none; -webkit-user-select: none; user-select: none; }
   #tbtns #tjump   { order: 2; }
   #tbtns #treload { order: 3; }
   #tbtns #tswap   { order: 4; }
-  #tbtns #tview   { order: 5; }
   #tbtns #taim    { order: 6; }
   #tbtns #tscope  { order: 7; }
   /* AIM PRINTED ON TOP OF SWAP (owner screenshot, iPhone landscape,

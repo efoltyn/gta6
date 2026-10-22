@@ -3076,7 +3076,9 @@
      THE COMMAND SEAT stays here because it is not a gun: it is the Bannerlord
      chair over your own army, it belongs to the battle, and gunplay.js hands
      the lens back the moment the mode is "cmd". */
-  const CAMS = ["fps", "third", "cmd"];
+  // the gun's seat or the command chair: first vs third on foot is not a
+  // choice any more — the hands pick it (warlord/gunplay.js handsSeat)
+  const CAMS = ["fps", "cmd"];
   let camMode = "fps";
   let hudSyncOrders = null;      // set by buildHud; keeps the order rail honest
   /* THE COMMAND SEAT'S DEFAULTS, and the first draft's were a satellite photo:
@@ -3318,7 +3320,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
   // what the toggle takes you to next, named for the seat you will land in
   function camLabel(m) {
     const to = nextCam(m);
-    return to === "fps" ? "FIRST PERSON" : to === "third" ? "OVER SHOULDER" : "COMMAND";
+    return to === "fps" ? "FIGHT" : "COMMAND";
   }
 
   /* ============================================================ THE FLOOR
@@ -3868,7 +3870,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
        system that is not there yet. */
     const gp = GP();
     if (gp) safe(function () { gp.mount(gunplayApi()); });
-    setCam(ctx.coarse ? "third" : "fps");
+    setCam("fps");
     paintOrders();
     // no opening banner: the enemy line in front of you is the announcement
     wake(4);
