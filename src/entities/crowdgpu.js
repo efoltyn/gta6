@@ -136,6 +136,11 @@
     { id: "rifleRun", gait: true, speed: 4.2, n: 20, impOf: "run", soldier: { carry: "low" } },
     { id: "crouchRun", gait: true, speed: 2.6, n: 20, impOf: "run", soldier: { carry: "low", stance: "rush" } },
     { id: "proneCrawl", gait: true, speed: 0.5, n: 20, impOf: "crawl", soldier: { carry: "low", stance: "prone" } },
+    // THE PROTEST (city/mob.js): a leader on a bullhorn, and someone filming.
+    // `grip`: the bake measures where that fist is (per body), so the
+    // instanced horn / phone is drawn IN the hand that holds it.
+    { id: "bullhorn", gait: false, pose: "pubBullhorn", period: FIST_P, n: 12, impOf: "fist", grip: "r" },
+    { id: "film", gait: false, pose: "film", period: 4.0, n: 6, impOf: "idle", grip: "r" },
   ];
   const CLIP_IX = Object.create(null);
   let ROWS = 0, IMP_ROWS = 0;
@@ -368,6 +373,11 @@
           for (let w = 0; w < C.n; w++) { CBZ.animChar(ch, 0, dtF); if (C.sit && C.pose) snapPose(ch, C.pose, w * dtF); }
           for (let k = 0; k < C.n; k++) {
             if (C.pose) snapPose(ch, C.pose, k * dtF);
+            if (C.grip && k === 0 && CBZ.charGripAt) {
+              ch.group.updateMatrixWorld(true);
+              const gp = CBZ.charGripAt(ch, C.grip, new THREE.Vector3());
+              if (gp) { ch.group.worldToLocal(gp); (C.gripAt || (C.gripAt = []))[b] = { x: gp.x, y: gp.y, z: gp.z }; }
+            }
             record(R, row0 + k, C.down ? DOWN : null);
             CBZ.animChar(ch, 0, dtF);
           }
@@ -650,9 +660,13 @@
     const slook = new Int32Array(cap), sclip = new Uint8Array(cap), sph = new Float32Array(cap), srate = new Float32Array(cap), sscale = new Float32Array(cap);
     const svx = new Float32Array(cap), svz = new Float32Array(cap), sgear = new Float32Array(cap);
     const sbin = new Uint16Array(cap), order = new Int32Array(cap), binCount = new Int32Array(NBIN + 1);
+    // shown[i] = 1 when the last commit drew instance i (in range, in front,
+    // inside a tier's cap): a caller hangs a held prop ONLY on a body that is
+    // drawn, never a sign in the air where a body is not (crowdstore S.drawn)
+    const shown = new Uint8Array(cap);
     let n = 0, built = false, group = null, meshes = null, dead = false;
     const L = {
-      name: opts.name || "crowd", cap: cap, drawn: [0, 0, 0, 0],
+      name: opts.name || "crowd", cap: cap, drawn: [0, 0, 0, 0], shown: shown,
       maxDraw: opts.maxDraw || 400,
       begin: function () { n = 0; },
       // scale: optional uniform size (1 = the real body); warlord's map zoom reads it
@@ -668,7 +682,7 @@
       },
       count: function () { return n; },
       commit: commit,
-      clear: function () { n = 0; if (meshes) for (let i = 0; i < meshes.length; i++) { meshes[i].P.n = 0; meshes[i].P.geo.instanceCount = 0; meshes[i].mesh.visible = false; } L.drawn = [0, 0, 0, 0]; },
+      clear: function () { shown.fill(0, 0, Math.max(n, 1)); n = 0; if (meshes) for (let i = 0; i < meshes.length; i++) { meshes[i].P.n = 0; meshes[i].P.geo.instanceCount = 0; meshes[i].mesh.visible = false; } L.drawn = [0, 0, 0, 0]; },
       dispose: function () {
         dead = true;
         if (group && group.parent) group.parent.remove(group);
@@ -723,6 +737,7 @@
     let cutT = 0;
     // cam: optional THREE camera or {x,y,z, fx,fz} in WORLD space; defaults to CBZ.camera
     function commit(cam) {
+      shown.fill(0, 0, n);
       if (dead) return 0;
       if (!LOOKS.length) look({});
       if (!build()) return 0;
@@ -771,9 +786,9 @@
         const dx = sx[i] - cx, dz = sz[i] - cz, d = Math.sqrt(dx * dx + dz * dz);
         const P1 = meshes[body * 2].P, P2 = meshes[body * 2 + 1].P;
         const row = body * ROWS + Cl.row0;
-        if (d < TIER.d1 && P1.n < P1.cap) { put(P1, i, row, Cl.n, body); n1++; }
-        else if ((d < TIER.d2 || !imp) && P2.n < P2.cap) { put(P2, i, row, Cl.n, body); n2++; }
-        else if (imp && imp.n < imp.cap) { put(imp, i, Cl.imp0, Cl.imp, body); n3++; }
+        if (d < TIER.d1 && P1.n < P1.cap) { put(P1, i, row, Cl.n, body); n1++; shown[i] = 1; }
+        else if ((d < TIER.d2 || !imp) && P2.n < P2.cap) { put(P2, i, row, Cl.n, body); n2++; shown[i] = 1; }
+        else if (imp && imp.n < imp.cap) { put(imp, i, Cl.imp0, Cl.imp, body); n3++; shown[i] = 1; }
       }
       for (let k = 0; k < meshes.length; k++) {
         const M = meshes[k], P = M.P;
@@ -829,7 +844,7 @@
       const c = typeof id === "number" ? CLIPS[id] : CLIP_IX[id];
       if (!c) return null;
       if (c.gait && !c.radPerM && !BAKE) bake();
-      return { id: c.id, index: c.index, n: c.n, period: c.period, radPerM: c.radPerM, phase0: c.phase0, speed: c.speed || 0 };
+      return { id: c.id, index: c.index, n: c.n, period: c.period, radPerM: c.radPerM, phase0: c.phase0, speed: c.speed || 0, grip: c.gripAt || null };
     },
     look: look,
     lookOf: function (id) { const l = LOOKS[id]; return l ? { build: BODIES[l.body].build, skin: l.skin, shirt: l.shirt, pants: l.pants, hair: l.hair, shoes: l.shoes, sleeve: l.sleeve } : null; },

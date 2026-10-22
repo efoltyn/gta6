@@ -6912,7 +6912,7 @@
     // Each body it goes through costs it a little speed.
     if (vmag > 4 && CBZ.crowds && CBZ.crowds.runOver) {
       let n = 0;
-      try { n = CBZ.crowds.runOver(car.pos.x, car.pos.z, 1.8, vmag, { byPlayer: !!car.player }); } catch (e) { n = 0; }
+      try { n = CBZ.crowds.runOver(car.pos.x, car.pos.z, 1.8, vmag, { byPlayer: !!car.player, car: car }); } catch (e) { n = 0; }
       if (n > 0) {
         car.v *= Math.max(0.7, Math.pow(0.94, n));
         if (car.player && CBZ.shake) CBZ.shake(0.2 + Math.min(0.5, vmag * 0.02));

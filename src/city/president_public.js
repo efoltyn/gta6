@@ -847,6 +847,28 @@
     if (ped.char) { ped.char._pubProp = pr; ped.char._pubPh = Math.random() * 6; }
     setPose(ped, "pubFlag");
   }
+  // THE BULLHORN: a protest leader's megaphone. Origin = the fist on the
+  // handle, +z = the way the horn speaks; poses.js pubBullhorn holds it at
+  // the mouth every frame (mob.js draws the same thing instanced)
+  let _bhHorn = null, _bhGrip = null;
+  function giveBullhorn(ped) {
+    if (!ped || !ped.group) return;
+    if (!_bhHorn) {
+      _bhHorn = new THREE.CylinderGeometry(0.105, 0.045, 0.28, 10);
+      _bhHorn.rotateX(Math.PI / 2);                 // the wide mouth to +z
+      _bhGrip = new THREE.BoxGeometry(0.035, 0.12, 0.045);
+    }
+    const pr = new THREE.Group();
+    pr.name = "bullhorn";
+    const horn = new THREE.Mesh(_bhHorn, cm(0xe6e1d3)); horn.position.set(0, 0.075, 0.13); pr.add(horn);
+    const grip = new THREE.Mesh(_bhGrip, cm(0x26282c)); grip.position.set(0, 0.0, 0.05); pr.add(grip);
+    pr.position.set(0, 1.5, 0.3);
+    ped.group.add(pr);
+    ped._pubProp = pr;
+    if (ped.char) { ped.char._pubProp = pr; ped.char._pubPh = Math.random() * 6; }
+    setPose(ped, "pubBullhorn");
+    if (CBZ.heldPropWatch) { try { CBZ.heldPropWatch(ped); } catch (e) {} }
+  }
   // a sign carried home: the stick in the hand at the side, sloped back,
   // the board edge-on behind the hip (the gait owns the arms); a flag stays
   // upright at the side
@@ -1408,36 +1430,26 @@
   // Where any crowd at the Mansion stands (a protest, the balcony speech's
   // public). city/perimeter.js owns the plan (where the racks go, the crowd's
   // front row, the officers' spots, the apron the crowd may not enter);
-  // protection.js mans the officers; this draws the racks while the pen is
-  // open. One InstancedMesh for every rack, one thin collider each.
-  const PEN = { users: {}, group: null, cols: [], plan: null };
-  let _rackGeo = null;
-  function rackGeo() {
-    if (_rackGeo) return _rackGeo;
-    // a 2.4 m galvanised crowd barrier: end tubes, top and bottom rails,
-    // eleven pickets, two splayed flat feet; local x along the run
-    const parts = [];
+  // protection.js mans the officers; this sets the racks out while the pen is
+  // open. A RACK IS A LOOSE 15 kg STEEL BARRIER, NOT A WALL (owner: "you can't
+  // drive a car through the crowd, it's like there's a wall in front of
+  // them"): each one is a systems/pushables.js piece — one instanced mesh for
+  // all of them, a collider tagged pushProp that vehicles.js never walls a
+  // car on. A body leans on it and shoves it; a car knocks it flying and over.
+  // The crowd's own line is the perimeter's apron clamp, not these boxes.
+  const PEN = { users: {}, group: null, recs: [], plan: null };
+  const RACK_HEX = 0xa4a9ad;
+  // a 2.4 m galvanised crowd barrier in the piece's frame: end tubes, top and
+  // bottom rails, eleven pickets, two splayed flat feet; local x along the run
+  function rackBuild(box) {
     const L = 2.3, H = 1.08, t = 0.034;
-    function add(w, h, d, x, y, z) { const g = new THREE.BoxGeometry(w, h, d).toNonIndexed(); g.translate(x, y, z); parts.push(g); }
     for (const s of [-1, 1]) {
-      add(t * 1.3, H - 0.1, t * 1.3, s * L / 2, 0.1 + (H - 0.1) / 2, 0);
-      add(0.07, 0.03, 0.62, s * (L / 2 - 0.1), 0.015, 0);            // the foot
+      box(s * L / 2, 0.1 + (H - 0.1) / 2, 0, t * 1.3, H - 0.1, t * 1.3, RACK_HEX);
+      box(s * (L / 2 - 0.1), 0.015, 0, 0.07, 0.03, 0.62, RACK_HEX);       // the foot
     }
-    add(L, t * 1.3, t * 1.3, 0, H, 0);
-    add(L, t, t, 0, 0.2, 0);
-    for (let k = 1; k <= 11; k++) add(0.02, H - 0.2, 0.02, -L / 2 + k * (L / 12), 0.2 + (H - 0.2) / 2, 0);
-    let n = 0; for (let i = 0; i < parts.length; i++) n += parts[i].attributes.position.count;
-    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
-    let o = 0;
-    for (let i = 0; i < parts.length; i++) {
-      pos.set(parts[i].attributes.position.array, o * 3); nor.set(parts[i].attributes.normal.array, o * 3);
-      o += parts[i].attributes.position.count; parts[i].dispose();
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
-    g.computeBoundingSphere();
-    return (_rackGeo = g);
+    box(0, H, 0, L, t * 1.3, t * 1.3, RACK_HEX);
+    box(0, 0.2, 0, L, t, t, RACK_HEX);
+    for (let k = 1; k <= 11; k++) box(-L / 2 + k * (L / 12), 0.2 + (H - 0.2) / 2, 0, 0.02, H - 0.2, 0.02, RACK_HEX);
   }
   function penUse(who, on) {
     const P = CBZ.perimeter;
@@ -1452,32 +1464,30 @@
   function buildPen() {
     const P = CBZ.perimeter, root = arenaRoot();
     const plan = P && P.pen("execmansion");
-    if (!plan || !root) return;
+    const PU = CBZ.pushables;
+    if (!plan || !root || !PU || !PU.piece) return;
     PEN.plan = plan;
     const grp = new THREE.Group(); grp.name = "mansion-protest-pen";
+    root.add(grp); PEN.group = grp;
+    // the pieces live in the pen group (world-aligned under the arena root)
+    root.updateMatrixWorld(true);
     const R = plan.barricades;
-    const im = new THREE.InstancedMesh(rackGeo(), cm(0xa4a9ad), R.length);
-    const d = new THREE.Object3D();
     for (let i = 0; i < R.length; i++) {
       const b = R[i], y = CBZ.floorAt ? CBZ.floorAt(b.x, b.z) : 0;
-      d.position.set(b.x, isFinite(y) ? y : 0, b.z); d.rotation.set(0, b.yaw - Math.PI / 2, 0); d.updateMatrix();
-      im.setMatrixAt(i, d.matrix);
-      // the rack's footprint as an axis-aligned sliver (racks run along x or z)
-      const ax = Math.abs(Math.sin(b.yaw)) > 0.7;
-      const hx = ax ? b.len / 2 : 0.18, hz = ax ? 0.18 : b.len / 2;
-      col(PEN.cols, b.x - hx, b.x + hx, b.z - hz, b.z + hz, (isFinite(y) ? y : 0), (isFinite(y) ? y : 0) + 1.1);
+      let rec = null;
+      try {
+        rec = PU.piece({ key: "pen-rack", build: rackBuild, parent: grp, ox: 0, oz: 0, oy: 0,
+          lx: b.x, lz: b.z, y: isFinite(y) ? y : 0, yaw: b.yaw - Math.PI / 2,
+          mass: 15, tip: true, owner: "mansion-pen", leash: 30, mode: "city", kind: "barrier" });
+      } catch (e) { rec = null; }
+      if (rec) PEN.recs.push(rec);
     }
-    im.instanceMatrix.needsUpdate = true; im.castShadow = true; im.receiveShadow = true;
-    im.computeBoundingSphere && im.computeBoundingSphere();
-    grp.add(im); root.add(grp); PEN.group = grp;
-    dirtyCols();
   }
   function dropPen() {
+    if (PEN.recs.length && CBZ.pushables && CBZ.pushables.removeOwner) { try { CBZ.pushables.removeOwner("mansion-pen"); } catch (e) {} }
+    PEN.recs = [];
     if (PEN.group && PEN.group.parent) PEN.group.parent.remove(PEN.group);
     PEN.group = null; PEN.plan = null;
-    for (let i = 0; i < PEN.cols.length; i++) uncol(PEN.cols[i]);
-    if (PEN.cols.length) dirtyCols();
-    PEN.cols = [];
   }
   function penReset() {
     for (const k in PEN.users) if (CBZ.perimeter) CBZ.perimeter.closePen("execmansion", k);
@@ -2066,7 +2076,7 @@
     // nearest of them ordinary people you can walk up to.
     PROT.mob = null;
     if (CBZ.mob && CBZ.mob.form) {
-      const souls = Math.round(300 + a * a * 16000 + (size != null ? size * 200 : 0));
+      const souls = Math.round(1500 + a * 22000 + a * a * 40000 + (size != null ? size * 400 : 0));
       let G = null;
       const A = CBZ.address;
       if (A && A.groups) { try { G = A.groups().filter(function (q) { return q.loyalty < 45; }).map(function (q) { return { id: q.id, name: q.name, share: q.share, color: q.color, cap: 0.2, shirt: 0.35 }; }); } catch (e) { G = null; } }
@@ -2074,11 +2084,11 @@
       PROT.mob = CBZ.mob.form({
         at: { x: pen.at.x, z: pen.at.z }, face: pen.face, size: souls, side: "opposition", kind: "protest", place: "the Mansion", hold: true, quiet: true,
         slogans: PROT.slogans, chants: PROT.slogans.map(chantOf),
-        groups: G && G.length ? G : null, violent: 0.04 + a * 0.18, anger: a, width: 20,
+        groups: G && G.length ? G : null, violent: 0.04 + a * 0.18, anger: a, width: 34, aspect: 1.7,
       });
     }
     emit("protest", { phase: "start", size: PROT.mob ? PROT.souls : PROT.size, at: { x: PROT.at.x, z: PROT.at.z }, group: PROT.group, groupName: PROT.group ? angriest.name : null });
-    news((PROT.mob ? PROT.souls >= 3000 : PROT.size >= 14) ? "A large crowd of protesters fills the road outside the Executive Mansion." : "Protesters gather outside the Executive Mansion gate.");
+    news((PROT.mob ? PROT.souls >= 10000 : PROT.size >= 14) ? "A large crowd of protesters fills the road outside the Executive Mansion." : "Protesters gather outside the Executive Mansion gate.");
     fillProtest(force);
     return true;
   }
@@ -2620,7 +2630,7 @@
     // THE PROPS AND THE ROAR ARE SHARED (city/mob.js, city/address.js): a
     // marcher's sign, a supporter's flag, the placard and cheer poses, the
     // card the sign is lettered on, and the speech crowd's answer.
-    props: { sign: giveSign, flag: giveFlag, lower: lowerProp, hype: hype, pose: setPose, signMats: signMats, signTex: signTex, placard: PLACARD },
+    props: { sign: giveSign, flag: giveFlag, bullhorn: giveBullhorn, lower: lowerProp, hype: hype, pose: setPose, signMats: signMats, signTex: signTex, placard: PLACARD },
     react: function (kind) { if (CROWD.members.length) react(kind === "boo" ? "boo" : "cheer", false); return CROWD.members.length; },
     // harness/test hooks only, not part of the public contract
     _startNow: function (kind) {

@@ -21,6 +21,8 @@
      life             0 free, 1 alive, 2 hurt, 3 dead
      own              1 = the group's owner moves it (mob.js); 0 = this file does
      hide             1 = drawn elsewhere (promoted to a full rig) and not hit here
+     drawn            1 = the last cut DREW this body (crowdgpu layer.shown): an owner
+                      hangs what the person holds on it only then (no floating signs)
      panicT fleeX fleeZ   running from a danger point
    THE FRONT LINE IS REAL. Whoever can be interacted with is a full rig
    with a brain before it matters; that promotion stays with the owner
@@ -50,7 +52,12 @@
                                 the rest by the measured lethality curve
      ray(ox,oy,oz, dx,dy,dz, maxT)  a round vs every body's capsule (spatial hash)
      shoot(row, o)              that round lands
-     runOver(x, z, r, speed, o) a car through them (vehicles.js runOver)
+     runOver(x, z, r, speed, o) a car through them (vehicles.js runOver; o.car = its real footprint)
+     carPass (every frame)      every car near the lens among the rows: the lane ahead
+                                clears (a dodge group's own walk: S.dodgeT/X/Z), a crawl
+                                pushes a body aside, a jog's pace knocks it down; never
+                                a wall, never a ghost. cars(), footprint(car) read it.
+     flee(r, x, z, secs)        an owner's own scatter: run from (x, z), no onPanic
      crush(x, z, r, o)          a collapse, a tornado core, a crash on the street
    Survivors panic away from the point; a stampede in a dense crowd knocks
    people down and tramples the fallen. A row added with {prot: true} is a
@@ -95,6 +102,8 @@
     panicT: new Float32Array(CAP), fleeX: new Float32Array(CAP), fleeZ: new Float32Array(CAP),
     hurtT: new Float32Array(CAP), deadT: new Float32Array(CAP), evt: new Int32Array(CAP),
     posT: new Float32Array(CAP),     // store clock when an owner last wrote x/z (a sleeping far walker is drawn on from there)
+    drawn: new Uint8Array(CAP),      // 1 = the last cut DREW this body (crowdgpu layer.shown): what it holds may be drawn with it
+    dodgeT: new Float32Array(CAP), dodgeX: new Float32Array(CAP), dodgeZ: new Float32Array(CAP),   // a car coming: step this way (world unit dir)
     wx: new Float32Array(CAP), wy: new Float32Array(CAP), wz: new Float32Array(CAP),
   };
   const gpos = new Int32Array(CAP);                // row's index in its group's list
@@ -110,7 +119,7 @@
   }
   function freeRow(r) {
     S.life[r] = FREE; S.grp[r] = -1; S.hide[r] = 0; S.own[r] = 0; S.panicT[r] = 0; S.vx[r] = 0; S.vz[r] = 0;
-    S.evt[r] = 0; S.look[r] = -1; S.prot[r] = 0;
+    S.evt[r] = 0; S.look[r] = -1; S.prot[r] = 0; S.drawn[r] = 0; S.dodgeT[r] = 0;
     freeRows[nFree++] = r; live--;
     if (inAct[r]) inAct[r] = 0;
   }
@@ -223,6 +232,7 @@
       cap: Math.max(1, Math.min(CAP, o.cap | 0 || 4096)), maxDraw: o.maxDraw || 300,
       own: !!o.own, lifeOn: o.life !== false, frame: !!o.frame, aff: aff(o.aff || 0),
       onLife: o.onLife || null, onPanic: o.onPanic || null, beforeCut: o.beforeCut || null, promote: o.promote || null,
+      dodge: !!o.dodge,                // the owner steps its people out of a car's way itself (reads S.dodgeT)
       moving: !!o.moving, cutDt: o.cutDt || (o.own ? 0.1 : 0.25),
       rows: [], layer: null, dirty: true, lastCut: -1e9, cutX: 1e9, cutZ: 1e9, m: null,
       released: false, dead: 0, hurt: 0, k: 0, gone: false, shown: true,
@@ -235,7 +245,7 @@
     G.anim = function (r, clip, phase, rate, now) { S.clip[r] = clipIx(clip); S.phase[r] = phase || 0; S.rate[r] = rate || 0; S.pnow[r] = now ? 1 : 0; };
     G.markDirty = function () { G.dirty = true; };
     // out of sight entirely (a venue the player is far from): not cut, not drawn; still there
-    G.show = function (v) { v = !!v; if (v === G.shown) return; G.shown = v; if (!v && G.layer) G.layer.clear(); G.dirty = true; };
+    G.show = function (v) { v = !!v; if (v === G.shown) return; G.shown = v; if (!v) { if (G.layer) G.layer.clear(); undrawn(G); } G.dirty = true; };
     G.kill = function (r, cause, opts) { return casualty(r, DEAD, cause || "violence", opts || {}); };
     G.hurt = function (r, cause, opts) { return casualty(r, HURT, cause || "violence", opts || {}); };
     // the owner is done with the living (a mob went home): the hurt and the
@@ -829,12 +839,14 @@
   }
   let lastShotPanic = -1e9, lspX = 0, lspZ = 0, shotPed = null;
 
-  // a car through them: o: speed (m/s), byPlayer, heading {x,z}
+  // a car through them: o: speed (m/s), byPlayer, car (its footprint: the
+  // hull it really has, heading and dims, not a circle round its centre)
   function runOver(x, z, r, speed, o) {
     o = o || {};
     if (live <= 0 || !(speed > 4)) return 0;
     ensureHash();
-    const q = ++qid, R = r || 1.7, salt = SEQ++;
+    const fp = o.car && o.car.pos ? footprint(o.car, _fpR) : null;
+    const q = ++qid, R = fp ? Math.hypot(fp.hl + 0.6, fp.hw + 0.3) + 0.2 : (r || 1.7), salt = SEQ++;
     let n = 0;
     const ev = { byPlayer: !!o.byPlayer, by: o.by || null, fromX: x, fromZ: z, x: x, z: z };
     const c0x = Math.floor((x - R) / CELL), c1x = Math.floor((x + R) / CELL), c0z = Math.floor((z - R) / CELL), c1z = Math.floor((z + R) / CELL);
@@ -845,7 +857,8 @@
         if (stamp[rr] !== q) {
           stamp[rr] = q;
           const dx = S.wx[rr] - x, dz = S.wz[rr] - z;
-          if (dx * dx + dz * dz < R * R && (S.life[rr] === ALIVE || S.life[rr] === HURT)) {
+          const inHull = fp ? inFoot(fp, dx, dz, 0.25, 0.6) : dx * dx + dz * dz < R * R;
+          if (inHull && (S.life[rr] === ALIVE || S.life[rr] === HURT)) {
             const u = h01(rr, salt, 8);
             const to = speed >= 13 ? (u < 0.8 ? DEAD : HURT) : speed >= 8 ? (u < 0.3 ? DEAD : HURT) : HURT;
             // near the lens: a real body goes over the bonnet
@@ -861,6 +874,143 @@
     }
     if (n) panic(x, z, 25, { secs: 8 });
     return n;
+  }
+
+  // ---------------------------------------------------------------- A CAR AMONG THEM
+  /* Every car near the lens against the people round it, every frame (the
+     hash is the 10 Hz one), by the car's own footprint (carstrike.js dims,
+     its heading), never a circle round its centre. A crowd is PEOPLE, not a
+     wall and not ghosts:
+       IN ITS PATH  the lane ahead of the bumper, longer the faster it comes:
+                    they step out of it, to the side they already stand on
+                    (an owner with `dodge` walks its own people by S.dodgeT;
+                    anyone else runs a few steps out of the lane)
+       UNDER IT     a body the hull reaches: at a crawl he is pushed aside (he
+                    steps; a car is 1.4 t); from a jog's pace up he is knocked
+                    down and hurt (near the lens the full rig takes it:
+                    realize, then vehicles.js creepInto/runOver strike that
+                    body), the car pays the momentum, and the people round
+                    him run (a small panic, not the whole crowd)
+     Past 6 m/s vehicles.js runOver owns the hit (runOver above, the same
+     footprint); the lane still clears. A parked car only pushes. */
+  const DEF_DIMS = { width: 2, length: 4.4 };
+  const _fp = { x: 0, z: 0, fx: 0, fz: 1, hw: 1, hl: 2.2, sp: 0, v: 0 }, _fpR = { x: 0, z: 0, fx: 0, fz: 1, hw: 1, hl: 2.2, sp: 0, v: 0 };
+  function footprint(c, out) {
+    const CS = CBZ.carStrike;
+    const d = (CS && CS.dims ? CS.dims(c) : (c._visualDims || c.dims)) || DEF_DIMS;
+    const v = +c.v || 0, h = c.heading || 0, sg = v < 0 ? -1 : 1;
+    out.x = c.pos.x; out.z = c.pos.z; out.v = v; out.sp = Math.abs(v);
+    out.fx = Math.sin(h) * sg; out.fz = Math.cos(h) * sg;            // the way it is going
+    out.hw = Math.max(0.5, (+d.width || 2) * 0.5); out.hl = Math.max(1, (+d.length || 4.4) * 0.5);
+    return out;
+  }
+  // (dx, dz) from the car's centre inside its hull (padded at the side / the front)
+  function inFoot(F, dx, dz, padS, padF) {
+    const a = dx * F.fx + dz * F.fz, s = dx * F.fz - dz * F.fx;
+    return Math.abs(s) < F.hw + padS && a > -F.hl - 0.2 && a < F.hl + padF;
+  }
+  const _cars = [];
+  function carList() {
+    _cars.length = 0;
+    const L = CBZ.cityCars, cam = camPos();
+    if (!L || !L.length || !cam) return _cars;
+    for (let i = 0; i < L.length; i++) {
+      const c = L[i];
+      if (!c || c.dead || !c.pos) continue;
+      if (c.group && c.group.visible === false && !c._proxy && !c.player) continue;   // pooled away
+      const dx = c.pos.x - cam.x, dz = c.pos.z - cam.z;
+      if (dx * dx + dz * dz > 100 * 100) continue;
+      _cars.push(c);
+    }
+    return _cars;
+  }
+  // a world displacement of a row (through the one mover)
+  function moveWorld(G, r, wdx, wdz) {
+    const l = Math.hypot(wdx, wdz); if (l < 1e-4) return;
+    mw(G); const d = dirLocal(G, wdx / l, wdz / l, _dl); rowMove(G, r, d[0] * l, d[1] * l);
+  }
+  function carPass() {
+    if (live <= 0) return;
+    const md = G_().mode; if (md && md !== "city") { _cars.length = 0; return; }
+    const M = carList(); if (!M.length) return;
+    ensureHash();
+    for (let k = 0; k < M.length; k++) carAmong(M[k], footprint(M[k], _fp));
+  }
+  let carSalt = 1;
+  function carAmong(c, F) {
+    const sp = F.sp, look = sp > 0.4 ? Math.min(22, 1.5 + sp * 1.5) : 0;
+    const mx = F.x + F.fx * look * 0.5, mz = F.z + F.fz * look * 0.5;
+    const R = Math.hypot(F.hl + look * 0.5, F.hw + 1.2) + 0.5;
+    const q = ++qid, salt = carSalt++;
+    const lx = F.fz, lz = -F.fx;                  // the car's left-right axis
+    let knocked = 0, real = 0;
+    const ev = { byPlayer: !!c.player, by: c.player ? null : (c.npcDriver || null), fromX: F.x, fromZ: F.z, x: F.x, z: F.z };
+    const c0x = Math.floor((mx - R) / CELL), c1x = Math.floor((mx + R) / CELL), c0z = Math.floor((mz - R) / CELL), c1z = Math.floor((mz + R) / CELL);
+    for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
+      let rr = head[cellKey(cx, cz)];
+      while (rr >= 0) {
+        const nx_ = nxt[rr];
+        if (stamp[rr] !== q && !S.hide[rr]) {
+          stamp[rr] = q;
+          const lf = S.life[rr];
+          const dx = S.wx[rr] - F.x, dz = S.wz[rr] - F.z;
+          const a = dx * F.fx + dz * F.fz, s = dx * lx + dz * lz;
+          const G = GROUPS[S.grp[rr]];
+          if (G && (lf === ALIVE || lf === HURT)) {
+            const side = Math.abs(s) > 0.12 ? (s > 0 ? 1 : -1) : (h01(rr, 5, 77) < 0.5 ? 1 : -1);
+            if (Math.abs(s) < F.hw + 0.3 && a > -F.hl - 0.3 && a < F.hl + 0.35) {
+              // ---- UNDER IT
+              if (sp > 6 && lf === ALIVE) { /* vehicles.js runOver has him this frame */ }
+              else if (lf === ALIVE && (sp < 2.4 || S.prot[rr] || !(c.player || c.reckless || c.pullover || sp > 4.5))) {
+                // pushed aside: out to the hull's side, and he keeps stepping
+                const out = F.hw + 0.4 - Math.abs(s);
+                moveWorld(G, rr, lx * side * out, lz * side * out);
+                S.wx[rr] += lx * side * out; S.wz[rr] += lz * side * out;
+                dodge(G, rr, lx * side, lz * side, F, a, 0.9, true);
+              } else if (lf === ALIVE) {
+                // knocked down; near the lens the rig takes it (the car's strike runs on the body)
+                const ped = G.promote && real < REAL_MAX && camNear(rr, REAL_R) >= 0 ? realize(rr, "car") : null;
+                if (ped) real++;
+                else {
+                  const th = 0.5 + sp * 0.12;
+                  moveWorld(G, rr, (F.fx * 0.7 + lx * side * 0.7) * th, (F.fz * 0.7 + lz * side * 0.7) * th);
+                  const to = sp >= 5 && h01(rr, salt, 9) < 0.12 ? DEAD : HURT;
+                  if (casualty(rr, to, "car crash", ev)) { knocked++; if (to === DEAD) goreAt(rr, false); }
+                }
+              } else if (sp > 1.2) {
+                // a hurt man on the ground under a moving car
+                if (sp >= 3 && casualty(rr, DEAD, "car crash", ev)) knocked++;
+                else moveWorld(G, rr, lx * side * 0.5, lz * side * 0.5);
+              }
+            } else if (look && lf === ALIVE && a > 0 && a < F.hl + look && Math.abs(s) < F.hw + 1.0) {
+              // ---- IN ITS PATH: out of the lane, the near side
+              // (a pavement crowd crossing on the walk signal is braked for by
+              // the driver, never sent running: only a car that will not stop)
+              if (G.dodge || ((c.player || c.reckless || c.pullover) && sp > 3)) dodge(G, rr, lx * side, lz * side, F, a, 0.5 + Math.min(1, sp * 0.08), false);
+            }
+          }
+        }
+        rr = nx_;
+      }
+    }
+    if (knocked) {
+      const CS = CBZ.carStrike;
+      for (let k = 0; k < knocked; k++) { if (CS && CS.cheapLoss) CS.cheapLoss(c, 60); else c.v *= 0.96; }
+      panic(F.x + F.fx * F.hl, F.z + F.fz * F.hl, 9 + sp, { secs: 6 });
+      if (c.player && CBZ.cityCrime && !(c._crowdCrimeT > CLOCK)) { c._crowdCrimeT = CLOCK + 3; try { CBZ.cityCrime(28, { x: F.x, z: F.z, type: "vehicular-assault" }); } catch (e) {} }
+      if (c.player && CBZ.shake) { try { CBZ.shake(0.12 + Math.min(0.3, sp * 0.03)); } catch (e) {} }
+    }
+  }
+  // step out of a car's way: the owner's own walk (dodge groups), else a few running steps
+  function dodge(G, r, dx, dz, F, a, secs, under) {
+    if (G.dodge) {
+      S.dodgeT[r] = Math.max(S.dodgeT[r], secs); S.dodgeX[r] = dx; S.dodgeZ[r] = dz;
+      return;
+    }
+    if (S.panicT[r] > 0.3 || (under && S.own[r])) return;           // pushed aside: the owner walks on from there
+    S.panicT[r] = Math.max(S.panicT[r], secs + 0.6 + h01(r, 3, 31) * 0.6);
+    S.fleeX[r] = F.x + F.fx * a; S.fleeZ[r] = F.z + F.fz * a;     // the lane's centre line: run sideways off it
+    activate(r);
   }
 
   /* crush(x, z, r, o): everything inside the disc comes down at once (a
@@ -1139,25 +1289,30 @@
 
   // ---------------------------------------------------------------- THE CUT (drawing through crowdgpu)
   function camPos() { const c = CBZ.camera; return c && c.position ? c.position : null; }
+  // nobody in this group is drawn (no layer yet, out of its mode, hidden)
+  function undrawn(G) { const rows = G.rows; for (let k = 0; k < rows.length; k++) S.drawn[rows[k]] = 0; }
+  // layer instance -> row, for the cut that is being written
+  const LROW = new Int32Array(CAP);
   function cut(G, cam) {
     const CG = CBZ.crowdGPU;
-    if (!CG || !CG.layer) return 0;
+    if (!CG || !CG.layer) { undrawn(G); return 0; }
     if (!G.layer) {
-      if (CG.ok && !CG.ok()) return 0;
+      if (CG.ok && !CG.ok()) { undrawn(G); return 0; }
       G.layer = CG.layer({ name: G.name, cap: G.cap, parent: G.parent || CBZ.scene, maxDraw: G.maxDraw });
-      if (!G.layer) return 0;
+      if (!G.layer) { undrawn(G); return 0; }
       gaits();
     }
-    if (!modeOk(G)) { G.layer.clear(); G.lastCut = CLOCK; return 0; }
+    if (!modeOk(G)) { G.layer.clear(); undrawn(G); G.lastCut = CLOCK; return 0; }
     if (G.beforeCut) { try { G.beforeCut(); } catch (e) {} }
     const L = G.layer, now = gpuNow();
     L.begin();
     const rows = G.rows;
     for (let k = 0; k < rows.length; k++) {
       const r = rows[k];
+      S.drawn[r] = 0;
       if (S.hide[r] || S.look[r] < 0) continue;
       const lf = S.life[r];
-      if (lf === DEAD) { L.add(S.x[r], S.y[r], S.z[r], S.yaw[r], S.look[r], CLIP.down, 0, 0, S.scale[r]); continue; }
+      if (lf === DEAD) { const li = L.add(S.x[r], S.y[r], S.z[r], S.yaw[r], S.look[r], CLIP.down, 0, 0, S.scale[r]); if (li >= 0) LROW[li] = r; continue; }
       const rate = S.rate[r];
       let ph = S.pnow[r] ? S.phase[r] - now * rate : S.phase[r];
       let x = S.x[r], z = S.z[r];
@@ -1168,9 +1323,13 @@
         const age = Math.min(0.6, Math.max(0, CLOCK - S.posT[r]));
         x += S.vx[r] * age; z += S.vz[r] * age; ph += age * rate;
       }
-      L.add(x, S.y[r], z, S.yaw[r], S.look[r], S.clip[r], ph, rate, S.scale[r], S.vx[r], S.vz[r]);
+      const li = L.add(x, S.y[r], z, S.yaw[r], S.look[r], S.clip[r], ph, rate, S.scale[r], S.vx[r], S.vz[r]);
+      if (li >= 0) LROW[li] = r;
     }
     L.commit(cam && cam.isCamera ? cam : null);
+    // who the GPU actually drew this cut: what they hold is drawn with them, never before them
+    const sh = L.shown, nl = L.count ? L.count() : 0;
+    if (sh) for (let li = 0; li < nl; li++) if (sh[li]) S.drawn[LROW[li]] = 1;
     G.dirty = false; G.lastCut = CLOCK;
     const c = camPos(); if (c) { G.cutX = c.x; G.cutZ = c.z; }
     return rows.length;
@@ -1209,6 +1368,7 @@
     if (!live && !EVENTS.length) return;
     actAcc += dt;
     if (actAcc >= 0.1) { const d = actAcc; actAcc = 0; if (nAct) tickActive(d); }
+    carPass();
     repAcc += dt;
     if (repAcc >= 0.5) { repAcc = 0; tickEvents(); }
     cleanT += dt;
@@ -1223,6 +1383,16 @@
     cap: function () { return CAP; }, device: DEVICE, clock: function () { return CLOCK; }, hi: function () { return hi; }, live: function () { return live; }, room: function () { return nFree; },
     group: group, aff: aff, affOf: function (i) { return AFFS[i] || null; }, clip: clipIx,
     blast: blast, ring: ring, nuke: nuke, ray: ray, shoot: shoot, runOver: runOver, panic: panic, noteDead: noteDead,
+    // run row r from (x, z) for `secs` without telling its owner (the owner's
+    // own scatter: city/mob.js), counted for the stampede like any runner
+    flee: function (r, x, z, secs) {
+      if (r < 0 || r >= CAP || S.life[r] !== ALIVE) return false;
+      S.panicT[r] = Math.max(S.panicT[r], secs || 8); S.fleeX[r] = x; S.fleeZ[r] = z; activate(r);
+      return true;
+    },
+    // the cars near the lens this frame, and a car's footprint {x,z,fx,fz,hw,hl,sp}
+    cars: function () { return _cars; },
+    footprint: function (c, out) { return c && c.pos ? footprint(c, out || {}) : null; },
     crush: crush, ahead: ahead,
     // the hand-over: a struck row as a real body (null = the store resolves it)
     realize: realize, roundOnPed: roundOnPed, lastShotPed: function () { return shotPed; },
