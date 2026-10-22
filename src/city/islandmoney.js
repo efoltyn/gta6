@@ -1030,6 +1030,7 @@
     const worth = r.mode === "own" ? ((f.F && f.F.price) || 20000) * 0.5 : 0;
     credit(l, worth + (+S.cash || 0) + ((S.guns && S.guns.length) || 0) * 150);
     r.mode = null; r.seized = true; r.paidTo = 0;
+    r.seizedDay = CBZ.dayCount ? CBZ.dayCount() : 0;     // off the market a while (world/island_homes.js offMarket)
     r.stash = { cash: 0, guns: [] };
     note("They took the flat.", 2.6);
     return true;

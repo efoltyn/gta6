@@ -39,6 +39,16 @@
   function fmt(n) { return "$" + Math.round(n).toLocaleString("en-US"); }
   function pace() { return CBZ.paceTime ? CBZ.paceTime() : 0; }
   function mine(F) { const r = homes()[F.key]; return !!(r && (r.mode === "own" || r.mode === "rent")); }
+  /* A FLAT THE SHARK TOOK (city/islandmoney.js: r.seized, r.seizedDay) is off
+     the market for a few days, and never yours again while you still owe him. */
+  const SEIZED_DAYS = 3;
+  function offMarket(F) {
+    const r = homes()[F.key];
+    if (!r || !r.seized) return false;
+    const day = CBZ.dayCount ? CBZ.dayCount() : 0;
+    if (day - (+r.seizedDay || 0) < SEIZED_DAYS) return true;
+    return !!(CBZ.loanShark && CBZ.loanShark.owed && CBZ.loanShark.owed() > 0);
+  }
   function landingOf(b, k) {
     const IB = CBZ.islandBuilding;
     if (!IB || !IB.plan) return null;
@@ -194,10 +204,11 @@
   /* ---- RENT, BUY, THE DOOR, THE STASH -------------------------------------- */
   function rent(f) {
     const F = f && f.F;
-    if (!F || mine(F)) return;
+    if (!F || mine(F) || offMarket(F)) return;
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(F.rent))) return;
     const H = homes();
     const r = H[F.key] || (H[F.key] = { stash: { cash: 0, guns: [] } });
+    r.seized = false; r.seizedDay = null;
     r.mode = "rent"; r.rent = F.rent; r.paidTo = pace() + 7;
     if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
   }
@@ -205,9 +216,10 @@
     const F = f && f.F;
     if (!F) return;
     const H = homes(), r0 = H[F.key];
-    if (r0 && r0.mode === "own") return;
+    if ((r0 && r0.mode === "own") || offMarket(F)) return;
     if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(F.price))) return;
     const r = r0 || (H[F.key] = { stash: { cash: 0, guns: [] } });
+    r.seized = false; r.seizedDay = null;
     r.mode = "own"; r.paidTo = Infinity;
     if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
   }
@@ -278,15 +290,15 @@
       prio: 8,
       list: function (ctx, px, pz) {
         if (!live() || !flats.length) return null;
-        return near(flats.map(function (F) { return F.board; }), px, pz, CBZ.player.pos.y, 3);
+        return near(flats.filter(function (F) { return !offMarket(F); }).map(function (F) { return F.board; }), px, pz, CBZ.player.pos.y, 3);
       },
       reach: function () { return 2.4; }, dot: function () { return 0.3; },
       name: function () { return "To let"; },
       verbs: [
         { id: "flat-rent", slot: "e", prio: 5, label: function (f) { return "Rent " + fmt(f.F.rent) + "/wk"; },
-          canShow: function (f) { return !!(f && !mine(f.F)); }, onSelect: rent },
+          canShow: function (f) { return !!(f && !mine(f.F) && !offMarket(f.F)); }, onSelect: rent },
         { id: "flat-buy", slot: "i", prio: 5, label: function (f) { return "Buy " + fmt(f.F.price); },
-          canShow: function (f) { const r = f && homes()[f.F.key]; return !!(f && !(r && r.mode === "own")); }, onSelect: buy },
+          canShow: function (f) { const r = f && homes()[f.F.key]; return !!(f && !(r && r.mode === "own") && !offMarket(f.F)); }, onSelect: buy },
       ],
     });
     CBZ.islandFit.fixtures("flat-stash", {

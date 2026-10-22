@@ -286,9 +286,32 @@
     c._forSale = null; c.owned = true; c.stolen = false; c._playerOwned = true;
     unCard(c);
     own(c, spot.model, spot.color, L.isNew ? L : null);
+    soldBook()[spotKey(spot)] = CBZ.dayCount ? CBZ.dayCount() : 0;
     if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
     sayAt(L.post, L.isNew ? "She's yours." : "Pleasure.");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  }
+
+  /* ---- A SOLD SPOT STAYS SOLD ---------------------------------------------
+     g.isleSold["<island>:<x>,<z>"] = the day a dealer's spot was sold off.
+     world/island_vehicles.js asks spotTaken before it stands a car on a
+     dealer's spot: never while a car of yours stands on it, never the day it
+     was sold; after that the dealer restocks it once it is empty and out of
+     sight (island_vehicles.js holds the spot until then). Saved with the
+     game (world/isles_save.js). */
+  const RESTOCK_DAYS = 1;
+  function soldBook() { return g.isleSold || (g.isleSold = {}); }
+  function spotKey(spot) { return (arenaId() || "isle") + ":" + Math.round(spot.x) + "," + Math.round(spot.z); }
+  function spotTaken(spot) {
+    if (!spot) return false;
+    const id = arenaId();
+    for (const r of cars()) {
+      if (!r || r.island !== id) continue;
+      const x = r.car && r.car.pos ? r.car.pos.x : r.x, z = r.car && r.car.pos ? r.car.pos.z : r.z;
+      if (Math.abs(x - spot.x) < 3.2 && Math.abs(z - spot.z) < 3.2) return true;
+    }
+    const d = soldBook()[spotKey(spot)];
+    return d != null && (CBZ.dayCount ? CBZ.dayCount() : 0) - d < RESTOCK_DAYS;
   }
 
   /* ---- YOUR CARS (g.isleCars): where you left them, island to island ---- */
@@ -444,5 +467,6 @@
   CBZ.islandDealers = {
     lots: function () { return lots.slice(); }, owned: cars, test: function () { return TD; },
     price: function (spot) { return spot && spot.sale ? priceOf(spot) : 0; },
+    spotTaken: spotTaken,
   };
 })();

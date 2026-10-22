@@ -122,7 +122,8 @@
       const mode = r.mode === "own" || r.mode === "rent" ? r.mode : null;
       const st = stashOut(r.stash);
       if (!mode && !r.seized && !st.cash && !st.guns.length) continue;
-      out[k] = { mode: mode, rent: num(r.rent, 0), paidTo: mode === "own" ? null : num(r.paidTo, 0), seized: !!r.seized, stash: st };
+      out[k] = { mode: mode, rent: num(r.rent, 0), paidTo: mode === "own" ? null : num(r.paidTo, 0), seized: !!r.seized,
+        seizedDay: r.seized ? num(r.seizedDay, 0) : null, stash: st };
     }
     return out;
   }
@@ -146,6 +147,12 @@
     }
     return out;
   }
+  // the dealers' sold spots (world/island_dealers.js): kept a couple of days
+  function soldOut() {
+    const D = g.isleSold || {}, out = {}, day = CBZ.dayCount ? CBZ.dayCount() : 0;
+    for (const k in D) { const d = num(D[k], null); if (d != null && day - d < 2) out[k] = d; }
+    return out;
+  }
   function collect() {
     const prev = lastSlice || {};
     const s = { v: V, island: islandId() || prev.island || null, pos: where() };
@@ -159,6 +166,7 @@
     s.lodging = CBZ.islandLodging && CBZ.islandLodging.snapshot ? CBZ.islandLodging.snapshot() : null;
     s.hot = hotOut();
     s.dead = deadOut();
+    s.sold = soldOut();
     return s;
   }
 
@@ -200,7 +208,7 @@
         if (!r || typeof k !== "string") continue;
         const mode = r.mode === "own" || r.mode === "rent" ? r.mode : null;
         H[k] = { mode: mode, rent: num(r.rent, 0), paidTo: mode === "own" ? Infinity : num(r.paidTo, 0), stash: stashOut(r.stash) };
-        if (r.seized) H[k].seized = true;
+        if (r.seized) { H[k].seized = true; H[k].seizedDay = num(r.seizedDay, 0); }
       }
       g.isleHomes = H;
     });
@@ -226,6 +234,11 @@
       const D = {}, src = s.dead && typeof s.dead === "object" ? s.dead : {};
       for (const k in src) if (isFinite(+src[k])) D[k] = +src[k];
       g.isleDead = D;
+    });
+    step("sold", function () {
+      const D = {}, src = s.sold && typeof s.sold === "object" ? s.sold : {};
+      for (const k in src) if (isFinite(+src[k])) D[k] = +src[k];
+      g.isleSold = D;
     });
   }
   // the first start of The Isles on this page: the wallet and the slice
@@ -343,7 +356,13 @@
     if (wasPlaying && !on && loaded) save("stop");
     wasPlaying = on;
   });
-  function onHide() { if (g.mode === MODE && loaded && g.state === "playing") save("hide"); }
+  /* THE PAGE GOING AWAY. Synchronous, in the handler itself: collect() is
+     plain reads and worldstate.js's save() writes the localStorage copy with
+     setItem before it returns (sqlite is handed the same blob alongside), so
+     nothing here waits on a frame, a promise or a timer. Paused or playing:
+     a blur pauses the game before the page is hidden, and a hidden page
+     runs no more frames for the "stop" save above. */
+  function onHide() { if (g.mode === MODE && loaded) save("hide"); }
   try {
     document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") onHide(); });
     window.addEventListener("pagehide", onHide);
