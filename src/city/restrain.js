@@ -550,6 +550,48 @@
     I.refresh();
     return true;
   }
+  /* ROUND THE CAR, NOT THROUGH IT. From the trunk to your own door is a walk
+     past the back corner and up the flank: two points off the car's
+     footprint (behind the corner on the driver's side, then level with the
+     back of his door), walked through the one body mover (CBZ.bodyMove
+     sweeps the body against the cars and the walls, so even a bad line
+     slides off the bodywork). The door's own beats (city/boarding.js) take
+     over from beside it, a short straight walk along the flank. */
+  function carPt(car, lx, lz) {
+    const h = car.heading || 0;
+    return { x: car.pos.x + lx * Math.cos(h) + lz * Math.sin(h), z: car.pos.z - lx * Math.sin(h) + lz * Math.cos(h) };
+  }
+  function roundVias(car) {
+    const S = CBZ.carSeats;
+    const st = S && S.seat(car, "driver");
+    const d = st && st.doorId ? S.door(car, st.doorId) : null;
+    if (!d) return [];
+    const dims = car.group && car.group.userData && car.group.userData.vehicleDims;
+    const half = Math.abs(d.x) + 0.8, zTail = -(((dims && dims.length) || 4.6) / 2) - 0.75;
+    return [carPt(car, d.side * half, zTail), carPt(car, d.side * half, d.z0 - 0.25)];
+  }
+  const _roundO = { posture: "stand", radius: 0.3, floor: true };
+  function stepRound(j, P, dt) {
+    const w = j.vias && j.vias[j.vi];
+    if (!w || j.t > 8) return false;
+    const dx = w.x - P.pos.x, dz = w.z - P.pos.z, d = Math.hypot(dx, dz);
+    if (d < 0.35 || j.stuck > 0.8) { j.vi++; j.stuck = 0; return !!(j.vias[j.vi]); }
+    const ux = dx / d, uz = dz / d, step = Math.min(d, 1.9 * dt);
+    const x0 = P.pos.x, z0 = P.pos.z;
+    P.stun = Math.max(P.stun || 0, 0.12);           // the stick stands aside while this walks you
+    if (CBZ.bodyMove) CBZ.bodyMove(P, ux * step, 0, uz * step, _roundO);
+    else { P.pos.x += ux * step; P.pos.z += uz * step; }
+    const moved = Math.hypot(P.pos.x - x0, P.pos.z - z0);
+    j.stuck = moved < step * 0.2 ? j.stuck + dt : 0;
+    const ch = CBZ.playerChar;
+    if (ch && ch.group) {
+      ch.group.position.set(P.pos.x, P.pos.y || 0, P.pos.z);
+      ch.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(ch.group.rotation.y, Math.atan2(ux, uz), Math.min(1, dt * 10)) : Math.atan2(ux, uz);
+      if (CBZ.animChar) CBZ.animChar(ch, moved / Math.max(dt, 1e-4), dt);
+    }
+    faceTo(w.x, w.z, dt, 5);
+    return true;
+  }
   CBZ.onUpdate(33.2, function (dt) {
     const j = stowJob;
     if (!j) return;
@@ -597,8 +639,10 @@
       }
       if (j.phase === "shut") {
         if (hasLid && TR.openT(car) > 0.02 && j.t < 0.6) return;
-        j.phase = "enter";
+        if (!j.enter) { stowJob = null; return; }
+        j.phase = "round"; j.t = 0; j.vias = roundVias(car); j.vi = 0; j.stuck = 0;
       }
+      if (j.phase === "round" && stepRound(j, P, dt)) return;
       stowJob = null;
       if (j.enter && CBZ.cityEnterVehicle) CBZ.cityEnterVehicle(car);
       return;

@@ -618,7 +618,8 @@
     const lidSkin = lidG ? zoneMesh(lidG, "lid") : null;
     if (lidSkin && ctx.lidCutY != null) {
       const hy = lidG.position.y;
-      tBot = ctx.lidCutY + 0.015;
+      // above the tail lamps (a tailgate runs down past them to the plate)
+      tBot = Math.max(ctx.lidCutY + 0.015, ctx.tailY + 0.08);
       tTop = Math.max(tBot + 0.04, Math.min((ctx.tailTopY || ctx.tailY + 0.2) - 0.025, tBot + 0.09));
       addSkinDecal(lidG, lidSkin.geometry, D.word("POLICE", "#f2f4f6"), { axis: "z", sign: -1, u0: 0.36, u1: -0.36, v0: tBot - hy, v1: tTop - hy });
     } else {
@@ -646,14 +647,27 @@
         const x = s * w * 0.14, z = PT.surfZ(ctx, 1, x, gy);
         R.lamp(s > 0 ? "r" : "b", s > 0 ? "B" : "A", x, gy, z + 0.005, 0.13, 0.035, 0, false);
       });
-      // rear: a pair in the tail, inboard of the lamps
-      // (under the lip of an opening lid: the bar is one merged rig, it cannot lift with it)
-      let ty = (ctx.tailTopY || ctx.tailY + 0.2) - 0.03;
-      if (ctx.lidCutY != null) ty = Math.min(ty, ctx.lidCutY - 0.035);
-      sides(function (s) {
-        const x = s * w * 0.17, z = PT.surfZ(ctx, -1, x, ty);
-        R.lamp(s > 0 ? "r" : "b", s > 0 ? "B" : "A", x, ty + 0.01, z - 0.005, 0.12, 0.03, Math.PI, false);
-      });
+      // rear: THE INTERIOR REAR BAR, as a real Charger/Explorer pursuit unit
+      // carries it — a row of heads up under the headliner against the top
+      // of the back glass, flashing out through it. It is the car's (not the
+      // boot lid's or the tailgate's: the bar is one merged rig, and an
+      // opening lid lifts nothing of it). A body with no opening lid keeps
+      // the older pair in the tail face.
+      if (ctx.lidKind && ctx.roofZ != null && ctx.roofLen) {
+        const zr = ctx.roofZ - ctx.roofLen / 2 + 0.07;            // just inside the roof's rear edge
+        const yr = ctx.roofY - 0.13;                               // under the headliner
+        sides(function (s) {
+          [0.12, 0.28].forEach(function (fx, i) {
+            R.lamp(s > 0 ? "r" : "b", (s > 0) === (i === 0) ? "B" : "A", s * fx, yr, zr, 0.13, 0.04, Math.PI, true);
+          });
+        });
+      } else {
+        const ty = (ctx.tailTopY || ctx.tailY + 0.2) - 0.03;
+        sides(function (s) {
+          const x = s * w * 0.17, z = PT.surfZ(ctx, -1, x, ty);
+          R.lamp(s > 0 ? "r" : "b", s > 0 ? "B" : "A", x, ty + 0.01, z - 0.005, 0.12, 0.03, Math.PI, false);
+        });
+      }
       // ---- the push bumper (the heads ride its top tube) ----
       const pbTop = Math.min(ctx.noseTopY - 0.03, ctx.headY + 0.04), pbBot = ctx.baseY - 0.04;
       const zf = Math.max(PT.surfZ(ctx, 1, 0, pbBot + 0.08), PT.surfZ(ctx, 1, 0, ctx.headY), PT.surfZ(ctx, 1, w * 0.2, pbBot + 0.08)) + 0.09;
