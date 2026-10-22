@@ -388,16 +388,34 @@
   // merged tile into a real shell (city/metro_promote.js) registers its lot
   // here, so every blast, fire and collapse finds it the same way.
   S.extraLots = [];
-  function lotAt(x, z, margin) {
+  /* EVERY LOT THE LEDGER CAN HOLD: the arena's own, its ANNEX (the tower
+     district east of downtown lives there: a 38-storey block on the annex was
+     invisible to every blast, fire and plane strike because this file only
+     ever walked A.lots), and the promoted metro lots. One list, rebuilt only
+     when one of the three changes length — every walker below reads it. */
+  let _allSig = "", _all = [];
+  function allLots() {
     const A = arena();
+    const L0 = (A && A.lots) || [];
+    const L1 = (A && A.annex && Array.isArray(A.annex.lots)) ? A.annex.lots : null;
     const XL = S.extraLots;
-    if ((!A || !A.lots) && !XL.length) return null;
+    const sig = L0.length + ":" + (L1 ? L1.length : 0) + ":" + XL.length + ":" + (A && A.root ? A.root.uuid : "");
+    if (sig !== _allSig) {
+      _allSig = sig;
+      _all = L0.slice();
+      if (L1) for (let i = 0; i < L1.length; i++) _all.push(L1[i]);
+      for (let i = 0; i < XL.length; i++) _all.push(XL[i]);
+    }
+    return _all;
+  }
+  S.allLots = allLots;
+  function lotAt(x, z, margin) {
+    const LL = allLots();
+    if (!LL.length) return null;
     margin = margin == null ? 3 : margin;
     let best = null, bd = 1e9;
-    const L0 = (A && A.lots) || [];
-    const NL = L0.length + XL.length;
-    for (let i = 0; i < NL; i++) {
-      const lot = i < L0.length ? L0[i] : XL[i - L0.length], b = lot.building;
+    for (let i = 0; i < LL.length; i++) {
+      const lot = LL[i], b = lot.building;
       if (!b || lot.demolished) continue;
       /* NaN IS NOT A DISTANCE. With an incomplete footprint `d` comes out NaN,
          and NaN passes BOTH guards below (`NaN > margin` is false, `NaN >= bd`
@@ -728,9 +746,10 @@
       out = S.hit(x, y, z, L.deposit(W) * fall * (opts.scale > 0 ? opts.scale : 1), o);
     }
     // the blast wave on the NEIGHBOURS of a bomb-class charge
-    if (guts && A && A.lots) {
-      for (let i = 0; i < A.lots.length; i++) {
-        const lot = A.lots[i], b = lot.building;
+    if (guts && A) {
+      const LL = allLots();
+      for (let i = 0; i < LL.length; i++) {
+        const lot = LL[i], b = lot.building;
         if (!b || lot === primary || lot.demolished) continue;
         if (y > (b.h || 12) + 4) continue;
         const d = footDist(b, x, z);
@@ -823,10 +842,9 @@
      function exposes admission only and does not become a second ledger. */
   S.radialTargets = function (x, y, z, radius) {
     if (!inCity() || !(radius > 0)) return [];
-    const A = arena(), out = [];
-    if (!A || !A.lots) return out;
-    for (let i = 0; i < A.lots.length; i++) {
-      const lot = A.lots[i], b = lot && lot.building;
+    const out = [], LL = allLots();
+    for (let i = 0; i < LL.length; i++) {
+      const lot = LL[i], b = lot && lot.building;
       if (!b || lot.demolished) continue;
       if (y != null && y > b.h + 4) continue;
       const d = Math.hypot(b.ox - x, b.oz - z);
@@ -842,8 +860,8 @@
   S.sweep = function (x, z, r0, r1, amount, opts) {
     opts = opts || {};
     if (!inCity() || !(amount > 0)) return 0;
-    const A = arena();
-    if (!A || !A.lots) return 0;
+    const LL = allLots();
+    if (!LL.length) return 0;
     // Partial-load safety: without the shared updater there is nobody to drain
     // a queue, so execute immediately just as the pre-queue build did.
     const defer = !!opts.defer && !!opts.waveId && !!CBZ.onUpdate;
@@ -852,8 +870,8 @@
       pending = deferredByWave.get(opts.waveId);
       if (!pending) { pending = new Set(); deferredByWave.set(opts.waveId, pending); }
     }
-    for (let i = 0; i < A.lots.length; i++) {
-      const lot = A.lots[i], b = lot.building;
+    for (let i = 0; i < LL.length; i++) {
+      const lot = LL[i], b = lot.building;
       if (!b || lot.demolished) continue;
       const d = Math.hypot(b.ox - x, b.oz - z);
       // the footprint straddles the front if the ring passes anywhere through it
@@ -1736,10 +1754,10 @@
     return { v: 1, r: out };
   };
   S.apply = function (blob) {
-    const A = arena();
-    if (!blob || !blob.r || !A || !A.lots) return 0;
+    const LL = allLots();
+    if (!blob || !blob.r || !LL.length) return 0;
     const byKey = new Map();
-    for (let i = 0; i < A.lots.length; i++) { const l = A.lots[i]; byKey.set(Math.round(l.cx) + "," + Math.round(l.cz), l); }
+    for (let i = 0; i < LL.length; i++) { const l = LL[i]; byKey.set(Math.round(l.cx) + "," + Math.round(l.cz), l); }
     let n = 0;
     for (let i = 0; i < blob.r.length; i++) {
       const row = blob.r[i], lot = byKey.get(row.k);

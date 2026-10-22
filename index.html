@@ -1162,7 +1162,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:wildfire — systems/wildfire.js owns the fuel bed (grass, brush, litter)
      and its wind/slope spread, crown fire, spotting, ember attack on houses,
      burning cars, the killing plume, ash and the persistent burn scar. -->
-<script src="src/systems/wildfire.js?v=realcars1020"></script>
+<script src="src/systems/wildfire.js?v=jetstrike1022"></script>
 <!-- seam:tornado        — systems/tornado.js, tagged with the city systems -->
 <!-- seam:volcano        — world/volcanofx.js, tagged above -->
 <!-- seam:blizzard — systems/blizzard.js owns the windchill clock, the windbreak
@@ -1587,7 +1587,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (CBZ.volNoise) that city/nukefx.js also marches. Before crashfx (its
      blasts and fires draw through it) and nukefx (reads the atlas). -->
 <script src="src/systems/volfx.js?v=mrg10200048"></script>
-<script src="src/city/crashfx.js?v=mrg10200048"></script>
+<script src="src/city/crashfx.js?v=jetstrike1022"></script>
 <script src="src/city/crashdeform.js?v=cardraws1020"></script>
 <script src="src/city/emergencykit.js?v=mtrunk1trunk1"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
@@ -1600,7 +1600,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/vehicles.js?v=mmisleotrunk1"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playerair.js?v=f35one1022"></script>
-<script src="src/city/playeraircraft.js?v=f35two1022"></script>
+<script src="src/city/playeraircraft.js?v=mf35twojetstr"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1728,9 +1728,9 @@ document.body.appendChild(b);}}catch(e){}})();
      skin on buildings that are still standing. Reverts: ?cfg_COLLAPSE_V2=0
      (callers fall back to their snap) · ?cfg_COLLAPSE_FRAGMENTS=0 (chunks
      turn to dust instead of pieces) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
-<script src="src/city/collapse.js?v=debris1015"></script>
+<script src="src/city/collapse.js?v=jetstrike1022b"></script>
 <script src="src/systems/strike.js?v=strike1013m"></script>
-<script src="src/city/structural.js?v=mrg10200048"></script>
+<script src="src/city/structural.js?v=jetstrike1022"></script>
 <script src="src/city/nukefx.js?v=mrg10200048"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
@@ -1738,7 +1738,7 @@ document.body.appendChild(b);}}catch(e){}})();
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
 <script src="src/systems/tornado.js?v=bodymove1022"></script>
-<script src="src/city/aircraftimpact.js?v=mrg10200048"></script>
+<script src="src/city/aircraftimpact.js?v=jetstrike1022"></script>
 <script src="src/city/metro_promote.js?v=mrg10200048"></script>
 <script src="src/city/shops.js?v=isleclose1022"></script>
 <!-- city/shopfloor.js: what every counter shop shares (the clerk, the till of
