@@ -239,7 +239,7 @@
       "#endif\n";
     THREE.ShaderChunk.fog_pars_fragment = parsF +
       "\n#ifdef USE_FOG\n  varying float cbzFogY;\n  varying float cbzFogRaw;\n" +
-      "  varying float cbzFogUp;\n  uniform float cbzUwAniso;\n  uniform float cbzUwSil;\n#endif\n";
+      "  varying float cbzFogUp;\n  uniform float cbzUwAniso;\n  uniform float cbzUwSil;\n  uniform vec4 cbzFarAir;\n#endif\n";
 
     const H = Math.max(1, +CBZ.CONFIG.RENDER_FOG_HEIGHT || 110);
     const FLOOR = Math.max(0, Math.min(0.95, +CBZ.CONFIG.RENDER_FOG_FLOOR));
@@ -333,6 +333,30 @@
       "    float cbzFogFactor = 1.0 - exp( - fogDensity * fogDensity * cbzFogD * cbzFogD );",
       "  #else",
       "    float cbzFogFactor = smoothstep( fogNear, fogFar, cbzFogD );",
+      "  #endif",
+      /* ---- THE OPEN-SEA AIR (cbzFarAir; CBZ.setFarAir below) ----------------
+         Where the world is a sea with land standing in it kilometres apart
+         (The Isles, world/archipelago.js) the scene's near fog would finish
+         at fogFar and turn everything past it, the sea included, into the
+         sky's colour, while the next island stood 7-15 km out: the sea
+         visibly ENDED in a pale band and the islands floated above it. Owner,
+         2026-10-22: "There's no reason to do fake horizons." So there the air
+         is ONE law for everything drawn (the sea, its floor, the island you
+         are on, every far island, a boat): the near fog up to fraction x of
+         the slab, then a slow exponential toward the same horizon colour
+         with extinction length y, and the visibility limit melting it onto
+         exactly fog.color between z and w metres of view depth (the seam law
+         at the END of the air, not at fogFar). y = 0 everywhere else, and
+         then this is not even entered: every other frame in the game is bit
+         for bit what it was. Never under water (a short fog is the water
+         column's). */
+      "  float cbzTailOn = ( cbzFarAir.y > 0.0 && fogFar >= 2000.0 ) ? 1.0 : 0.0;",
+      "  #ifndef FOG_EXP2",
+      "  if ( cbzTailOn > 0.5 ) {",
+      "    float cbzTd1 = mix( fogNear, fogFar, cbzFarAir.x );",
+      "    float cbzTa = smoothstep( fogNear, fogFar, cbzTd1 );",
+      "    if ( cbzFogD > cbzTd1 ) cbzFogFactor = 1.0 - ( 1.0 - cbzTa ) * exp( -( cbzFogD - cbzTd1 ) / cbzFarAir.y );",
+      "  }",
       "  #endif"];
 
     if (wantHeight) {
@@ -450,10 +474,16 @@
           // Lift the FACTOR, not the haze: a builder that scaled its own
           // fogDepth has already forced the base smoothstep to zero, so
           // multiplying it by anything is still zero.
-          "  cbzFogFactor = mix( cbzFogFactor, 1.0, cbzAir * cbzMelt );"
+          // (the open-sea air melts at the end of the air instead, below)
+          "  cbzFogFactor = mix( cbzFogFactor, 1.0, cbzAir * cbzMelt * ( 1.0 - cbzTailOn ) );"
         );
       }
     }
+    // the open-sea air's visibility limit: from any height, everything at or
+    // past w metres of depth IS fog.color (the dome's horizon and everything
+    // below it), so the sea's far edge, wherever the camera's far plane cuts
+    // it, can only ever cut sky-coloured sea
+    body.push("  if ( cbzTailOn > 0.5 ) cbzFogFactor = mix( cbzFogFactor, 1.0, smoothstep( cbzFarAir.z, cbzFarAir.w, cbzFogRaw ) );");
 
     body.push("  vec3 cbzFogCol = fogColor;");
     if (wantGrade) {
@@ -587,6 +617,40 @@
       }
       try { renderer.state.useProgram(null); } catch (e) {}
       sentA = a; sentS = b; sentLen = list.length;
+    };
+  })();
+
+  /* CBZ.setFarAir(a, L, d0, d1) — the open-sea air (installFog's cbzFarAir),
+     pushed to every program the same way as the two floats above: (0, 0, 0,
+     0), a GLSL uniform's own default, is "off", so only a mode that wants it
+     ever pushes. world/archipelago.js calls it every frame while The Isles
+     are up and CBZ.setFarAir(0) when they come down; a program compiled
+     since the last push (the cache grew, or its newest entry changed) gets
+     it on the next call. */
+  (function installFarAir() {
+    const gl = renderer.getContext();
+    const sent = [0, 0, 0, 0];
+    let sentLen = -1, sentLast = null;
+    CBZ.setFarAir = function (a, L, d0, d1) {
+      const v = [+a || 0, +L || 0, +d0 || 0, +d1 || 0];
+      if (!(v[1] > 0)) { v[0] = v[1] = v[2] = v[3] = 0; }
+      const list = renderer.info && renderer.info.programs;
+      if (!list) return;
+      const last = list.length ? list[list.length - 1] : null;
+      const same = v[0] === sent[0] && v[1] === sent[1] && v[2] === sent[2] && v[3] === sent[3];
+      if (same && (v[1] === 0 || (list.length === sentLen && last === sentLast))) return;
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        if (!p || !p.program || !p.getUniforms) continue;
+        let m;
+        try { m = p.getUniforms().map; } catch (e) { continue; }
+        if (!m || !m.cbzFarAir) continue;
+        gl.useProgram(p.program);
+        gl.uniform4f(m.cbzFarAir.addr, v[0], v[1], v[2], v[3]);
+      }
+      try { renderer.state.useProgram(null); } catch (e) {}
+      sent[0] = v[0]; sent[1] = v[1]; sent[2] = v[2]; sent[3] = v[3];
+      sentLen = list.length; sentLast = last;
     };
   })();
 

@@ -87,7 +87,6 @@
   const BUDGET_MAX = SMALL ? 8 : 12;
   const SWITCH_HYST = 250;         // m nearer another whole island must be to become THE island
   const ISLES_STAKE = 2500;        // $ in your pocket when you first land (see reset)
-  const FAR_REACH_MAX = 30000;     // m: the far plane never runs past this
 
   const ST = {
     built: false,
@@ -288,56 +287,52 @@
     return out;
   }
 
-  /* ---- THE FAR HAZE: the next island stands in the air, never behind a wall
+  /* ---- THE AIR: one law for the sea, the island under you and every other
      The near world wears the scene's fog (view.fogNear..fogFar, 420..5600 m),
      which is what keeps the island you are on cheap; but the islands are
-     6.8 to 15 km apart, so under that fog every other island was solid fog
-     colour (and past the old far plane, not drawn at all). Owner: "putting
-     them far on the horizon". The far forms wear their own aerial
-     perspective instead: the scene's fog up to the point where it reaches
+     6.8 to 15 km apart. Under that fog alone every other island was solid
+     fog colour, so the far forms once wore a private haze of their own,
+     while the sea (a 6 km disc fogged out by 5.6 km) did not: from a plane
+     the sea ENDED in a pale band of sky colour and the next island stood in
+     that band, above the water. Owner, 2026-10-22: "it looks like the
+     islands are floating in the distance, above the horizon ... There's no
+     reason to do fake horizons."
+     Now the air is one law, in the shared fog chunk itself (core/
+     renderer.js, CBZ.setFarAir), so everything fogged obeys it at the same
+     distance: the sea, the abyssal plain, the island you are on, every far
+     form, a boat, a plane. The scene's fog up to the point where it reaches
      FAR_A of the way (so a far form and its near form dissolve into each
-     other in the same air), and from there a slow exponential toward the
-     same horizon colour with extinction length FAR_L, capped at FAR_MAX.
+     other in the same air), from there a slow exponential toward the same
+     horizon colour with extinction length FAR_L, thinned with height like
+     all the game's air, and the visibility limit melting it onto exactly
+     the sky's horizon colour between AIR_D0 and AIR_D1 of view depth. The
+     sea runs out to SEA_R, past the visibility limit at every corner of the
+     frame, and the camera sees to AIR_D1: the water reaches every island
+     you can see and goes on past it until it is the sky.
      The next island is a silhouette in the haze by day and, the dark being
      the fog colour, a cluster of its own lights by night (core/lodlights.js,
      whose isles' air uses the same length). The same law in JS:
-     CBZ.archipelago.farHazeAt(d). Never applied when the fog is short (under
-     water: the water column owns the fog then). */
-  const FAR_A = 0.45, FAR_L = 25000, FAR_MAX = 0.85;
-  const FAR_U = { cbzFarHaze: { value: new THREE.Vector3(FAR_A, FAR_L, FAR_MAX) } };
+     CBZ.archipelago.farHazeAt(d[, eyeY]). */
+  const FAR_A = 0.45, FAR_L = 25000;
+  const AIR_D0 = 16000, AIR_D1 = 42000;   // m of view depth: the visibility limit
+  // the sea's radius: AIR_D1 is planar depth, and at the frame's corner (a
+  // wide lens, ~66 degrees off the axis) the same depth is 2.5x the radius
+  const SEA_R = AIR_D1 * 2.5;
   function sstep(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
-  function farHazeAt(d, near, far) {
-    const nf = sstep(near, far, d);
-    if (far < 2000) return nf;
+  function farHazeAt(d, near, far, eyeY) {
+    let f = sstep(near, far, d);
+    if (far < 2000) return f;
     const d1 = near + (far - near) * FAR_A, a = sstep(near, far, d1);
-    const ff = Math.min(FAR_MAX, 1 - (1 - a) * Math.exp(-(d - d1) / FAR_L));
-    return Math.max(0, Math.min(nf, ff));
-  }
-  function farHazeHook(sh) {
-    const OUT = "#include <fog_fragment>";
-    if (sh.fragmentShader.indexOf(OUT) < 0) return;
-    sh.uniforms.cbzFarHaze = FAR_U.cbzFarHaze;
-    // the scene fog's own output transform (core/renderer.js grades the fog
-    // colour through tone map + encode when it patches the chunk)
-    const chunk = String(THREE.ShaderChunk.fog_fragment || "");
-    const grade = chunk.indexOf("linearToOutputTexel") >= 0;
-    const mine = [
-      "#ifdef USE_FOG",
-      "#ifdef FOG_EXP2",
-      chunk,
-      "#else",
-      "  float cbzNf = smoothstep( fogNear, fogFar, fogDepth );",
-      "  float cbzD1 = mix( fogNear, fogFar, cbzFarHaze.x );",
-      "  float cbzA = smoothstep( fogNear, fogFar, cbzD1 );",
-      "  float cbzFf = min( cbzFarHaze.z, 1.0 - ( 1.0 - cbzA ) * exp( -( fogDepth - cbzD1 ) / cbzFarHaze.y ) );",
-      "  float cbzHf = fogFar < 2000.0 ? cbzNf : clamp( min( cbzNf, cbzFf ), 0.0, 1.0 );",
-      "  vec3 cbzHc = fogColor;",
-      grade ? "  #ifdef TONE_MAPPING\n    cbzHc = toneMapping( cbzHc );\n  #endif\n  cbzHc = linearToOutputTexel( vec4( cbzHc, 1.0 ) ).rgb;" : "",
-      "  gl_FragColor.rgb = mix( gl_FragColor.rgb, cbzHc, cbzHf );",
-      "#endif",
-      "#endif",
-    ].join("\n");
-    sh.fragmentShader = "uniform vec3 cbzFarHaze;\n" + sh.fragmentShader.replace(OUT, mine);
+    if (d > d1) f = 1 - (1 - a) * Math.exp(-(d - d1) / FAR_L);
+    // the height thinning (core/renderer.js RENDER_FOG_HEIGHT/FLOOR), for a
+    // sea-level fragment seen from eyeY
+    const C = CBZ.CONFIG || {};
+    if (C.RENDER_HEIGHT_FOG_V1 !== false) {
+      const H = Math.max(1, +C.RENDER_FOG_HEIGHT || 110), FL = Math.max(0, Math.min(0.95, +C.RENDER_FOG_FLOOR || 0.3));
+      f *= FL + (1 - FL) * Math.exp(-Math.max(0, (eyeY || 0) * 0.5) / H);
+    }
+    f = f + (1 - f) * sstep(AIR_D0, AIR_D1, d);
+    return Math.max(0, Math.min(1, f));
   }
   function makeFar(I, geo) {
     if (I.far) {
@@ -348,8 +343,6 @@
     }
     const m = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
     m.name = "archipelago-far-" + I.id;
-    m.onBeforeCompile = farHazeHook;
-    m.customProgramCacheKey = function () { return "archipelago-far-haze"; };
     // (no permanent polygon offset: it would lift the far form's drowned
     // beach through the sea; cover() pulls it forward only while the two
     // forms of one island overlap, during a crossfade)
@@ -366,13 +359,14 @@
   // list of seas for good, so a second visit reuses it)
   let seaKeep = null, seaSpan = 0;
   function buildSea(view) {
-    const span = Math.max(2048, (view.fogFar + 400) / 0.78);
+    // (waterBuildDisasterGeometry's disc reaches 0.78 of the span)
+    const span = Math.max(2048, SEA_R / 0.78);
     if (!seaKeep || seaSpan !== span) { seaKeep = CBZ.islandMakeSea ? CBZ.islandMakeSea(span) : null; seaSpan = span; }
     const sea = seaKeep;
     if (sea) ST.root.add(sea);
     ST.sea = sea;
     // the abyssal plain: one disc under the whole visible sea, on the camera
-    const fg = new THREE.CircleGeometry(view.fogFar + 600, 48);
+    const fg = new THREE.CircleGeometry(SEA_R, 64);
     fg.rotateX(-Math.PI / 2);
     const fm = new THREE.MeshLambertMaterial({ color: 0x060d15 });
     fm.name = "archipelago-abyss";      // never water/ocean/sea (test contract)
@@ -657,6 +651,7 @@
       CBZ.camera.updateProjectionMatrix();
     }
     ST.camSave = null;
+    if (CBZ.setFarAir) CBZ.setFarAir(0);
   }
 
   /* ---- THE TICK: once a frame, on the always-chain ---------------------- */
@@ -670,17 +665,11 @@
       const air = !!(P && P._aircraft);
       // (the near plane buys depth precision at range: a waterline 2 km off
       // flickers on a 0.1 m plane; nothing in a seat or a cockpit is closer)
-      // THE FAR PLANE REACHES THE LAST ISLAND. Depth precision is the near
+      // THE FAR PLANE IS THE END OF THE AIR. Depth precision is the near
       // plane's (dz ~ d^2 / (near * 2^24), whatever the far plane), so the far
-      // plane can stand past every island at no cost to the waterline: the
-      // far forms are the only thing out there the fog has not finished.
-      let reach = V.fogFar + 700;
-      for (const I of ST.isles) {
-        if (!I.far || !I.far.visible) continue;
-        const r = Math.hypot(I.x - cam.position.x, I.z - cam.position.z) + I.R + 900;
-        if (r > reach) reach = r;
-      }
-      const wantFar = Math.min(FAR_REACH_MAX, Math.ceil(reach / 250) * 250);
+      // plane can stand where the air has finished every pixel (AIR_D1) at no
+      // cost to the waterline: whatever it cuts is already the sky's colour.
+      const wantFar = AIR_D1 + 500;
       const wantNear = air ? 0.75 : (P && P.driving ? 0.5 : 0.2);
       if (cam.far !== wantFar || cam.near !== wantNear) { cam.far = wantFar; cam.near = wantNear; cam.updateProjectionMatrix(); }
     }
@@ -860,6 +849,7 @@
     if (!ST.built || g.mode !== MODE) return;
     const V = ST.map.view;
     if (CBZ.scene.fog) { CBZ.scene.fog.near = V.fogNear; CBZ.scene.fog.far = V.fogFar; }
+    if (CBZ.setFarAir) CBZ.setFarAir(FAR_A, FAR_L, AIR_D0, AIR_D1);
     // (the DIRECTION is the clock's: survival.js aimed the sun, or the moon
     // after dark, at the island in force; the same aim is carried over to you)
     const P = CBZ.player, T = CBZ.sunTarget;
@@ -999,7 +989,7 @@
   CBZ.archipelagoExit = function () { teardown(true); };
   CBZ.archipelago = {
     groundAt: groundAt,
-    farHazeAt: function (d) { const V = ST.map ? ST.map.view : { fogNear: 420, fogFar: 5600 }; return farHazeAt(d, V.fogNear, V.fogFar); },
+    farHazeAt: function (d, eyeY) { const V = ST.map ? ST.map.view : { fogNear: 420, fogFar: 5600 }; return farHazeAt(d, V.fogNear, V.fogFar, eyeY); },
     isles: function () { return ST.isles; },
     state: function () {
       const P = CBZ.player;
