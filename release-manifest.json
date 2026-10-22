@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "be250257e061e56e9926f7cf8dc66cdeab270198",
-  "createdAt": "2026-10-22T06:52:06.541Z",
+  "sourceCommit": "d6e7e1e5f62f03b418732008e2a1cf53b118625b",
+  "createdAt": "2026-10-22T06:54:33.624Z",
   "fileCount": 1449,
-  "totalBytes": 52172626,
+  "totalBytes": 52193825,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -643,8 +643,8 @@
     },
     {
       "file": "src/city/carstrike.js",
-      "bytes": 26202,
-      "sha256": "ba2fca5058ffe6856540b170aa0971b3d1745251a1a133bd28cdf8e4725b63f5"
+      "bytes": 26242,
+      "sha256": "e54a4df5b74dc6c0fc9bca1db4e34e4412ee51ee8283177c01e17ca26a93ad66"
     },
     {
       "file": "src/city/carwheels.js",
@@ -1498,8 +1498,8 @@
     },
     {
       "file": "src/city/mob.js",
-      "bytes": 58273,
-      "sha256": "2fdbf64f9b125a0e753201da55c9f6d479e2ac03320f93a8ae4a7be87f40cf2f"
+      "bytes": 73199,
+      "sha256": "bfbcdfbc584dc490ee8e3a588b7e0cb7c4f5a2d59b4d63af1a7c92600233974a"
     },
     {
       "file": "src/city/mode.js",
@@ -1693,8 +1693,8 @@
     },
     {
       "file": "src/city/president_public.js",
-      "bytes": 81244,
-      "sha256": "de4d232512f8852006ddff5f1c58125fbf724c8c7e4570983ba9f651a0f397f4"
+      "bytes": 81175,
+      "sha256": "319a2d94063a60c932da3b0ed5dab3bfd64d4d3d5dbcd8798e7c1fef2ef06c05"
     },
     {
       "file": "src/city/president_regime.js",
@@ -1968,8 +1968,8 @@
     },
     {
       "file": "src/city/vehicles.js",
-      "bytes": 179184,
-      "sha256": "6becf9ffe09deb532d2238eff2c813d3069994963cffb799197c70f5fb08b178"
+      "bytes": 179188,
+      "sha256": "9392971ad65edc0bb97fb247eb6d33b516b9e2fcb753a2b9586b4aadab09bd7b"
     },
     {
       "file": "src/city/verbwheel.js",
@@ -2363,13 +2363,13 @@
     },
     {
       "file": "src/entities/crowdgpu.js",
-      "bytes": 29000,
-      "sha256": "35a2adc49733ea0d482bafe9d841f53f602313785bb4d3d5e08b60acd782d1be"
+      "bytes": 29501,
+      "sha256": "7bf1e3a9a07ee040d9d304d13760a44bc8f30783b801db9a581e07579792f8d2"
     },
     {
       "file": "src/entities/crowdstore.js",
-      "bytes": 34355,
-      "sha256": "8d383505df3df29c20625093b40a01a796922a529d1efdc208bd8e1a718f0e65"
+      "bytes": 38821,
+      "sha256": "e76ed7060c3bf2605d5ce00de7a86753aeb556c31186800796affa75d152e61c"
     },
     {
       "file": "src/entities/dutykit.js",
@@ -2458,8 +2458,8 @@
     },
     {
       "file": "src/entities/poses.js",
-      "bytes": 6164,
-      "sha256": "54614710416e32411265f0223ae8f5399b7141c3c25442fa204decf305c890b3"
+      "bytes": 7475,
+      "sha256": "24232abf27b220dd4cfd7ebf6baacc5d024fb85910003f5cb7531dcaab4ba392"
     },
     {
       "file": "src/entities/searchlight.js",
@@ -7143,28 +7143,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 65147,
-      "sha256": "17381237113c808c61037a0504e31b932eb9d7537baf5c61f0f5031346beb39a"
+      "bytes": 65151,
+      "sha256": "33b7d62586abbfad74167ec604abc1f5db613d5ed5ce751f13514ece3e0ab263"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 65190,
-      "sha256": "b03855d31c8089a79d0180683761d329b05354f8873fd1883011ce0e1346d99a"
+      "bytes": 65194,
+      "sha256": "255cd5884143102b45277d406d5dd59acffe2cca49bb0c78ed1c98b708bae079"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 65159,
-      "sha256": "cb9f49b8a402cec2e29261ac0061f988b80dd317c63bbbdf85da290e0ceb2418"
+      "bytes": 65163,
+      "sha256": "135ed2754256d7832c7ec49641302fc3decbb95cccaf5170c3eda19a8b8b55c7"
     },
     {
       "file": "gang-city.html",
-      "bytes": 65114,
-      "sha256": "01cff564163db1e8f671cd3d832b12db33dec98b6b1ad31000e3858270bafb74"
+      "bytes": 65118,
+      "sha256": "d37095ea212c4984d53a820a23c5eb40503a3368e85ef5a72010baa52eeaaa3e"
     },
     {
       "file": "gun-game.html",
-      "bytes": 65136,
-      "sha256": "b0b51d741752c83de988701763eed19e968d23a39207c5afae060a90cb40a06c"
+      "bytes": 65140,
+      "sha256": "08b6113c36c5a86cfb46614f0a56235e8d6962070b8a39df4c79312e3ac3de74"
     },
     {
       "file": "games/battle.html",
