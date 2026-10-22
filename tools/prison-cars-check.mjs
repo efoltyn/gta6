@@ -48,8 +48,10 @@ const DT = 1 / 30;
   check(!/"the Reds"|"the Blues"|'Reds'|"Reds"|"Blues"/.test(ai), "ai.js: no Reds/Blues names in code");
   const fm = read("src/systems/fullmap.js");
   check(!/n\.gang === 0 \?/.test(fm), "fullmap.js: inmates are not dotted by gang colour");
-  const db = read("src/systems/dashboard.js");
+  let db = "";
+  try { db = read("src/systems/dashboard.js"); } catch (e) { db = ""; }   // the dashboard is gone
   check(!/f-red|f-blue|"Reds"|"Blues"/.test(db), "dashboard.js: no red/blue team rows");
+
   const it = read("src/systems/interact.js");
   check(!/\["Reds", "Blues"\]/.test(it), "interact.js: the name plate's role is not a colour gang");
   const npc = read("src/entities/npc.js");
@@ -66,7 +68,8 @@ CBZ.npcPickTarget = () => {}; CBZ.addHeat = () => {};
 CBZ.WORLD = { northYard: { x0: -30, x1: 30, z0: -8, z1: 52 } };
 const said = [];
 CBZ.prisonSay = (a, text) => { said.push({ a, text }); return true; };
-for (const f of ["src/entities/heritage.js", "src/systems/prisoncars.js", "src/entities/ai.js"]) {
+// the demand ladder the rules enforcer runs (brain.js), its words (voice.js)
+for (const f of ["src/systems/voice.js", "src/systems/brain.js", "src/entities/heritage.js", "src/systems/prisoncars.js", "src/entities/ai.js"]) {
   vm.runInContext(read(f), W.ctx, { filename: f });
 }
 const PC = CBZ.prisonCars;
@@ -185,17 +188,22 @@ check(mine === PC.IDX.white, "the default convict (fair skin, no heritage) is re
 // the player sits at the Black car's end of a table
 CBZ.player.pos.set(blackSeat.x, 0, blackSeat.z);
 CBZ.player._propSeat = blackSeat;
+const asking = (n) => !!(CBZ.prisonDemand && CBZ.prisonDemand.of(n) && CBZ.prisonDemand.of(n).kind === "rules");
+const stopAsking = () => { for (const n of CBZ.npcs) if (CBZ.prisonDemand) CBZ.prisonDemand.cancel(n); };
 for (const n of CBZ.npcs) {           // everybody close enough to see it, nobody busy
-  n.approach = null; n.aiState = "wander"; n.huntPlayer = 0;
+  n._demand = null; n.aiState = "wander"; n.huntPlayer = 0;
   n.group.position.set(blackSeat.x + (rr() - 0.5) * 12, 0, blackSeat.z + (rr() - 0.5) * 12);
 }
 let warnedBy = null;
 for (let t = 0; t < 4; t += DT) {
   PC.tick(DT);
-  if (!warnedBy) warnedBy = CBZ.npcs.find((n) => n.approach && n.approach.carRule === "seat") || null;
+  if (!warnedBy) warnedBy = CBZ.npcs.find(asking) || null;
 }
 check(!!warnedBy, "sitting at another car's table: somebody walks up about it");
 check(!!warnedBy && warnedBy.yardCar === PC.IDX.black, "...and he is from the car whose table it is (" + (warnedBy ? PC.label(warnedBy.yardCar) : "-") + ")");
+// his ladder runs in aiThink, which this sim does not drive: it ending (he
+// asked, warned, and you stayed) is the yard's cue to put hands on you
+stopAsking();
 const t0 = PC.tension(mine, PC.IDX.black);
 for (let t = 0; t < 9; t += DT) PC.tick(DT);
 check(PC.tension(mine, PC.IDX.black) > t0, "staying put after the warning goes on both cars' books (tension " + t0.toFixed(1) + " -> " + PC.tension(mine, PC.IDX.black).toFixed(1) + ")");
@@ -207,12 +215,13 @@ const other = CBZ.npcs.find((n) => n.yardCar !== mine && n.yardCar >= 0);
 PC.noteShare(other);
 check(said.some((s) => s.a && s.a.yardCar === mine && /share/i.test(s.text)), "handing smokes to another car: your own car sees it and says so");
 
-// --------------------------------------------------------------- 5. the claim
-for (const n of CBZ.npcs) { n.approach = null; n.aiState = "wander"; n.huntPlayer = 0; }
-CBZ.player.pos.set(0, 0, 20);
-for (const n of CBZ.npcs) n.group.position.set((rr() - 0.5) * 20, 0, 20 + (rr() - 0.5) * 20);
-const cl = PC.claimer();
-check(!!cl && cl.yardCar === mine, "the new man's claimer is from his own car (" + (cl ? PC.label(cl.yardCar) : "-") + ")");
+// --------------------------------------------------------------- 5. joining
+// nobody walks up to claim the new man any more; Join is his to ask, of a
+// man of his own car
+stopAsking();
+for (const n of CBZ.npcs) { n.aiState = "wander"; n.huntPlayer = 0; }
+const cl = CBZ.npcs.find((n) => n.yardCar === mine) || null;
+check(!!cl, "a man of the player's own car is on the yard");
 const stranger = CBZ.npcs.find((n) => n.yardCar !== mine && n.yardCar >= 0);
 if (stranger.gang < 0) stranger.gang = stranger.yardCar;
 check(!CBZ.joinGang(stranger).ok && CBZ.player.gang == null, "another car's man cannot take you in");
@@ -227,7 +236,8 @@ check(CBZ.player.car === undefined, "the player's `car` (a VEHICLE in the city) 
 // and shower turn are somebody else's, his OLD car answers at its own table,
 // and no car takes him back.
 {
-  for (const n of CBZ.npcs) { n.approach = null; n.aiState = "wander"; n.huntPlayer = 0; }
+  stopAsking();
+  for (const n of CBZ.npcs) { n.aiState = "wander"; n.huntPlayer = 0; }
   const ownSeat = seats.find((s) => s._car === mine);
   CBZ.player.pos.set(ownSeat.x, 0, ownSeat.z);
   CBZ.player._propSeat = ownSeat;
@@ -237,10 +247,11 @@ check(CBZ.player.car === undefined, "the player's `car` (a VEHICLE in the city) 
   check(CBZ.player._carOutcast === true && CBZ.player.gang == null, "the old _carOutcast flag mirrors it and the gang comes off");
   const v = PC.playerViolation();
   check(!!v && v.kind === "seat" && v.yardCar === mine, "an outcast at his OLD car's table is breaking its rule (" + JSON.stringify(v) + ")");
-  for (const n of CBZ.npcs) { n.approach = null; n.group.position.set(ownSeat.x + (rr() - 0.5) * 10, 0, ownSeat.z + (rr() - 0.5) * 10); }
+  for (const n of CBZ.npcs) { n.group.position.set(ownSeat.x + (rr() - 0.5) * 10, 0, ownSeat.z + (rr() - 0.5) * 10); }
   said.length = 0;
   let by = null;
-  for (let t = 0; t < 4 && !by; t += DT) { PC.tick(DT); by = CBZ.npcs.find((n) => n.approach && n.approach.carRule === "seat") || null; }
+  for (let t = 0; t < 4 && !by; t += DT) { PC.tick(DT); by = CBZ.npcs.find(asking) || null; }
+
   check(!!by && by.yardCar === mine, "...and his old car is the one that walks up (" + (by ? PC.label(by.yardCar) : "-") + ")");
   CBZ.player._propSeat = null;
   const ph = PC.PHONES[PC.CARS[mine].phone];

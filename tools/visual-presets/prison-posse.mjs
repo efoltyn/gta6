@@ -261,7 +261,8 @@ async function stagePrisonPosse(input) {
     const m = marks[i], s = SPOTS[i], gy = groundAt(s[0], s[1]);
     m.dead = false; m.ko = 0; m.hp = m.maxHp || 100; m.escaped = false; m.cuffed = false;
     m.aiState = "idle"; m.foe = null; m.huntPlayer = 0; m.hitCD = 0;
-    m.approach = null; m.approachCD = 30; m.standingOffer = null; m.intimidMode = null;
+    if (CBZ.prisonDemand) CBZ.prisonDemand.cancel(m);
+    m.intimidMode = null;
     m.group.visible = true;
     m.group.position.set(s[0], gy, s[1]);
     m.group.rotation.y = faceFrom(s[0], s[1], PX, PZ);
@@ -279,8 +280,8 @@ async function stagePrisonPosse(input) {
     for (const n of rest) {
       if (!n || !n.group || marks.indexOf(n) >= 0) continue;
       n.group.visible = false;
-      n.huntPlayer = 0; n.standingOffer = null; n.approachCD = 9999;
-      if (n.approach) { try { if (CBZ.clearNpcApproach) CBZ.clearNpcApproach(n); else n.approach = null; } catch (_) { n.approach = null; } }
+      n.huntPlayer = 0;
+      if (CBZ.prisonDemand) { try { CBZ.prisonDemand.cancel(n); } catch (_) {} }
       if (n.hunt != null) n.hunt = 0;
       if (n.alert != null) n.alert = 0;
       // ...and the yard's opinion of you stays clamped. renown() reads the
@@ -320,10 +321,10 @@ async function stagePrisonPosse(input) {
     for (const m of marks) {
       if (!m) continue;
       if (!m.pfFriend && m.rep > 12) m.rep = 12;
-      m.playerGrudge = 0; m.huntPlayer = 0; m.standingOffer = null; m.approachCD = 9999;
+      m.playerGrudge = 0; m.huntPlayer = 0;
       m.dead = false; m.ko = 0; m.escaped = false;
       if (m.hp < 40) m.hp = m.maxHp || 100;
-      if (m.approach) { try { if (CBZ.clearNpcApproach) CBZ.clearNpcApproach(m); else m.approach = null; } catch (_) { m.approach = null; } }
+      if (CBZ.prisonDemand) { try { CBZ.prisonDemand.cancel(m); } catch (_) {} }
     }
   };
   const pinPlayer = () => {
@@ -571,7 +572,8 @@ async function stagePrisonPosse(input) {
       offered: !!(CBZ.prisonFriendOffered && CBZ.prisonFriendOffered(fourth)),
       pitchT: Math.round((fourth.pfPitchT || 0) * 100) / 100,
       heldSaid: !!fourth.pfHeldSaid, saved: !!fourth.pfSaved,
-      state: fourth.aiState || "", approach: !!(fourth.approach && fourth.approach.t > 0),
+      state: fourth.aiState || "", demand: !!(CBZ.prisonDemand && CBZ.prisonDemand.of(fourth)),
+
       d: Math.round(Math.hypot(fourth.group.position.x - PX, fourth.group.position.z - PZ) * 10) / 10,
     } : null,
     where: marks.map((m) => ({

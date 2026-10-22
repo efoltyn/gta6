@@ -14,8 +14,9 @@
                 top of anything of HIS you ask for is the same ledger his stall
                 price reads (econ.dealMod: trust, grudge, fear, his car's
                 standing, heat on risky goods, the racket tab).
-     doctrine   no officer takes cigarettes (economy.js's phone bridge); a clean
-                officer does not deal with you at all. A bent one sells.
+     doctrine   no officer takes cigarettes (your smokes never go on his
+                table); a clean officer does not deal with you at all. A bent
+                one sells.
      the move   Accept moves the items for real: econ.takeItem/addItem on your
                 side, his loadout on his. A deal he takes is trust; a gift is
                 more of it.
@@ -53,7 +54,7 @@
   function myPocket() {
     const out = {};
     const inv = (g && g.inventory) || {};
-    for (const k in inv) if ((inv[k] | 0) > 0 && !(E() && E().isService && E().isService(k))) out[k] = inv[k] | 0;
+    for (const k in inv) if ((inv[k] | 0) > 0) out[k] = inv[k] | 0;
     return out;
   }
   function myCigs() { return (g && g.cigs) | 0; }
@@ -68,7 +69,7 @@
     if (L) for (let i = 0; i < L.items.length; i++) out[L.items[i]] = (out[L.items[i]] || 0) + 1;
     // the stall: the thing he sells is on him too
     const o = a && a.data && a.data.offer;
-    if (o && o.item && !(E() && E().isService && E().isService(o.item))) out[o.item] = (out[o.item] || 0) + 1;
+    if (o && o.item) out[o.item] = (out[o.item] || 0) + 1;
     return out;
   }
   function hisCigs(a) { const L = hisLoadout(a); return L ? (L.cigs | 0) : 0; }
@@ -152,7 +153,6 @@
     no: ["Not for that.", "No.", "Come on. More than that."],
     nothing: ["For what?"],
     cover: ["You can't cover it."],
-    noCigs: ["Not smokes. Not from you."],
     clean: ["Walk away."],
   };
   let seq = 0;
@@ -164,7 +164,6 @@
     if (!a) return;
     T.counter = null;
     if (clean(a)) { say(a, pick(LINE.clean)); return; }
-    if (guardish(a) && (T.mine.cigs | 0) > 0) { say(a, pick(LINE.noCigs)); return; }
     const give = giving(), ask = asking(a);
     if (!give && !ask) { say(a, pick(LINE.nothing)); return; }
     if (give >= ask) {
@@ -273,6 +272,7 @@
   // a tap puts one more of it on the table; past what there is it goes back to none.
   // cigarettes go on in handfuls once there are more than a few
   function bump(side, item) {
+    if (side === "mine" && item === "cigs" && guardish(T.a)) return;   // an officer takes no smokes
     const deal = side === "mine" ? T.mine : T.theirs;
     const have = side === "mine"
       ? (item === "cigs" ? myCigs() : (myPocket()[item] | 0))
@@ -287,7 +287,7 @@
   function render() {
     if (!T.root || !T.a) return;
     const mine = myPocket(), his = hisPocket(T.a);
-    const html = sideHTML("mine", mine, myCigs(), T.mine) + "\u0001" + sideHTML("theirs", his, hisCigs(T.a), T.theirs);
+    const html = sideHTML("mine", mine, guardish(T.a) ? 0 : myCigs(), T.mine) + "\u0001" + sideHTML("theirs", his, hisCigs(T.a), T.theirs);
     const sig = html + "|" + (T.counter ? 1 : 0) + "|" + nameOf(T.a);
     if (sig === T.sig) return;
     T.sig = sig;

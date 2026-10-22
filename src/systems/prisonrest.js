@@ -671,7 +671,7 @@
     if (!w || w.dead) return;
     const p = w.group.position;
     const night = (id === "night" || id === "secure");
-    const hot = (w.hunt || 0) > 0 || (w.alert || 0) > 0.25 || w.approach || (w.ko | 0) > 0;
+    const hot = (w.hunt || 0) > 0 || (w.alert || 0) > 0.25 || (w.ko | 0) > 0;
     const P = CBZ.player && CBZ.player.pos;
     const seen = P && (P.x - wardenBed.x) * (P.x - wardenBed.x) + (P.z - wardenBed.z) * (P.z - wardenBed.z) < WAKE_R * WAKE_R;
 

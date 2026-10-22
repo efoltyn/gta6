@@ -252,604 +252,6 @@
     return CBZ.game.racketStanding;
   }
 
-  function racketPriceMod(scale) {
-    const s = racketStanding();
-    scale = scale || 1;
-    return s < 0 ? Math.ceil(Math.abs(s) / (12 / scale)) : -Math.floor(s / (16 / scale));
-  }
-
-  /* THE LOCAL payoffCost() IS GONE (defect fix, 2026-08-25).
-     It was a SECOND sum for the SAME purchase. This file quoted you its own
-     number on the approach card — startPayoffApproach() below writes it into
-     `g.approach.msg` and systems/interact.js prints it on the button — and
-     then `action:"pay"` handed the transaction to CBZ.econ.payoff(), whose
-     payoffCost() charged a DIFFERENT number. The two disagreed on both terms
-     that matter: this one priced the racket ledger with racketPriceMod(0.75)
-     while economy.js prices it off racketStanding/racketDebt/protection, and
-     this one still carried a +14 WARDEN premium for a transaction the warden
-     refuses outright (economy.js's payoff() turns him down before any price
-     is read, owner 2026-08-19). A man who quotes nine and takes fourteen is
-     a bug, not a character. The till sets the price; ask the till. */
-
-  function contrabandCount() {
-    const inv = (CBZ.game && CBZ.game.inventory) || {};
-    return Object.keys(inv).filter((k) => (inv[k] || 0) > 0 && k !== "Gun").length;
-  }
-
-  function racketCost(g, extra) {
-    const game = CBZ.game || {};
-    const armed = CBZ.hasAnyWeapon ? CBZ.hasAnyWeapon() : (CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Gun"));
-    const debt = (extra && extra.debt) || game.racketDebt || 0;
-    return Math.max(5,
-      3 +
-      Math.ceil((game.cigs || 0) / 9) +
-      contrabandCount() * 2 +
-      (armed ? 3 : 0) +
-      (game.gangJob ? 3 : 0) +
-      Math.ceil(debt * 0.45) +
-      (g.kind === "warden" ? 8 : 0) +
-      racketPriceMod(1.15)
-    );
-  }
-
-  function findSnitchLead() {
-    let best = null, bt = 0;
-    for (const n of CBZ.npcs || []) {
-      if (!n || n.dead || n.escaped || !n.data) continue;
-      if ((n.reportedPlayerT || 0) > bt) { best = n; bt = n.reportedPlayerT || 0; }
-    }
-    if (best) return best;
-    const source = CBZ.game && CBZ.game.lastKnown && CBZ.game.lastKnown.source;
-    if (!source) return null;
-    return (CBZ.npcs || []).find((n) => n && n.data && nameOf(n) === source && !n.dead && !n.escaped) || null;
-  }
-
-  function snitchIntelCost(g, target) {
-    const game = CBZ.game || {};
-    const heat = game.detection || 0;
-    const reports = game.snitchReports || 0;
-    const grudge = target ? Math.max(0, target.playerGrudge || 0) : 0;
-    return Math.max(3, Math.ceil(heat / 18) + reports + Math.ceil(grudge / 3) + (g.kind === "warden" ? 3 : 1) + racketPriceMod(0.65));
-  }
-
-  function startCleanSweep(source, amount) {
-    const game = CBZ.game || {};
-    let best = null, bd = Infinity;
-    for (const gd of CBZ.guards || []) {
-      if (!gd || gd === source || gd.corrupt || gd.dead || gd.ko > 0 || gd.bribed > 0) continue;
-      const dx = player.pos.x - gd.group.position.x;
-      const dz = player.pos.z - gd.group.position.z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < bd) { bd = d2; best = gd; }
-    }
-    game.lastKnown = {
-      x: player.pos.x,
-      z: player.pos.z,
-      t: 10,
-      amount: amount || 14,
-      type: "racket tip",
-      heardOnly: false,
-      source: nameOf(source),
-    };
-    if (CBZ.addCasePressure) CBZ.addCasePressure(amount || 14, { type: "racket tip" }, source, { corruptHold: true });
-    game.witnessReportT = Math.max(game.witnessReportT || 0, 8);
-    if (best) {
-      best.investigate = { x: player.pos.x, z: player.pos.z, t: 7.5, scan: 0, type: "racket tip" };
-      best.alert = Math.max(best.alert || 0, 0.9);
-    }
-  }
-
-  function clearGuardApproach(g) {
-    // answering the deal he was actually pitching settles his standing copy
-    // of it too (entities/ai.js has the same contract for inmates)
-    if (g.standingOffer && (!g.approach || g.approach.kind === g.standingOffer.kind)) g.standingOffer = null;
-    g.approach = null;
-    g.approachCD = 12 + CBZ.econ.rng() * 12;
-  }
-
-  function startPayoffApproach(g, kind, extra) {
-    kind = kind || "payoffOffer";
-    extra = extra || {};
-    const cost = kind === "racketOffer" ? racketCost(g, extra)
-      : kind === "snitchIntel" ? snitchIntelCost(g, extra.snitch)
-      : CBZ.econ.payoffCost(g);          // the till's price, never a second sum
-    const finalCost = extra.cost || (kind === "witnessBlackmail" ? Math.max(4, Math.ceil((extra.amount || 14) / 6) + Math.ceil(((CBZ.game && CBZ.game.detection) || 0) / 14) + 3 + racketPriceMod(0.7)) : cost);
-    const msg = kind === "witnessBlackmail"
-      ? (extra.source ? `${extra.source} talked. ${finalCost} and it goes away.` : `Somebody talked. ${finalCost} and it goes away.`)
-      : kind === "racketOffer"
-      ? `${finalCost} and I don't toss your cell.`
-      : kind === "snitchIntel"
-      ? `${finalCost} and I give you a name.`
-      : `${cost} and your sheet stays clean.`;
-    g.approach = {
-      kind,
-      cost: finalCost,
-      t: 10,
-      greeted: false,
-      msg,
-    };
-    if (extra) Object.assign(g.approach, extra);
-    g.approachCD = 0;
-  }
-
-  function nudgeCleanGuard(g) {
-    let best = null, bd = Infinity;
-    for (const gd of CBZ.guards) {
-      if (!gd || gd === g || gd.corrupt || gd.dead || gd.ko > 0) continue;
-      const dx = gd.group.position.x - g.group.position.x;
-      const dz = gd.group.position.z - g.group.position.z;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < bd) { bd = d2; best = gd; }
-    }
-    if (best && ((CBZ.game && CBZ.game.detection) || 0) > 26) {
-      best.alert = Math.max(best.alert || 0, 1.2);
-      best.hunt = Math.max(best.hunt || 0, 1.8);
-    }
-  }
-
-  function expireGuardApproach(g, reason) {
-    if (!g.approach) return;
-    const a = g.approach;
-    const near = Math.hypot(player.pos.x - g.group.position.x, player.pos.z - g.group.position.z) < 20;
-    /* A bent screw's SALES PITCH keeps, the way an inmate's offer keeps
-       (entities/ai.js OFFER_STANDS): walking off to think about buying a name
-       or a clean sheet is not an answer, and punishing it made the offer read
-       as a glitch. Only refusing him to his face — or true extortion
-       (racketOffer, witnessBlackmail) — has walk-away teeth. */
-    if ((a.kind === "payoffOffer" || a.kind === "snitchIntel") && reason !== "refuse") {
-      const prev = g.standingOffer;
-      const sameDeal = prev && prev.kind === a.kind;
-      g.standingOffer = {
-        kind: a.kind,
-        saved: Object.assign({}, a),
-        t: sameDeal ? prev.t : 90,
-        walks: (sameDeal ? prev.walks : 0) + 1,
-        needsLeave: reason === "timeout",
-      };
-      g.approach = null;
-      g.approachCD = 3 + CBZ.econ.rng() * 3;
-      if (near && CBZ.prisonSay && g.standingOffer.walks === 1) {
-        CBZ.prisonSay(g, a.kind === "snitchIntel"
-          ? "You know where I am."
-          : "Offer stands. For now.", { force: true });
-      }
-      return;
-    }
-    clearGuardApproach(g);
-    if (CBZ.game.role === "cop") {
-      CBZ.addComplaint && CBZ.addComplaint(reason === "refuse" ? 12 : 7);
-    } else {
-      if (a.kind === "racketOffer") {
-        CBZ.econ.addRacketDebt(Math.ceil((a.cost || 5) * (reason === "refuse" ? 0.8 : 0.45)));
-        addRacketStanding(reason === "refuse" ? -8 : -4);
-        startCleanSweep(g, 12 + Math.ceil((a.cost || 5) * 0.7));
-        if (CBZ.player && CBZ.player.gang != null && CBZ.addGangStanding) CBZ.addGangStanding(CBZ.player.gang, -2);
-      } else if (a.kind === "witnessBlackmail" || a.kind === "payoffOffer" || a.kind === "snitchIntel") {
-        addRacketStanding(reason === "refuse" ? -6 : -3);
-      }
-      CBZ.addHeat && CBZ.addHeat(a.kind === "racketOffer" ? (reason === "refuse" ? 18 : 11) : (reason === "refuse" ? 14 : 8));
-      nudgeCleanGuard(g);
-    }
-    // He is a man ending a conversation, so he ends it out loud — ONCE per
-    // kind of business. A man does not deliver the same exit line every
-    // shakedown; the second time he just goes back to his round.
-    const seen = g._saidClosers || (g._saidClosers = {});
-    if (near && CBZ.prisonSay && !seen[a.kind]) {
-      seen[a.kind] = 1;
-      CBZ.prisonSay(g, a.kind === "racketOffer" ? "You still owe the tab." : "We're done.",
-        { force: true });
-    }
-  }
-
-  function wardenNear() {
-    const W = CBZ.warden;
-    if (!W || typeof W.presence !== "function") return false;
-    try { return (+W.presence() || 0) > 0.5; } catch (e) { return false; }
-  }
-  CBZ.guardsWardenNear = wardenNear;
-  function considerPayoffApproach(g, dt) {
-    if (!g.corrupt || g.approach || g.bribed > 0 || g.ko > 0 || g.dead || g.hunt > 0) return;
-    if (wardenNear()) return;                 // nobody takes money with the boss on the floor
-    // his standing offer only ages while he is NOT pitching it
-    if (g.standingOffer) {
-      g.standingOffer.t -= dt;
-      if (g.standingOffer.t <= 0) g.standingOffer = null;   // he quietly stops holding the door
-    }
-    if (CBZ.playerApproachBusy && CBZ.playerApproachBusy(g)) return;
-    g.approachCD = (g.approachCD || 0) - dt;
-    if (g.approachCD > 0 || !CBZ.game || CBZ.game.state !== "playing") return;
-    g.approachCD = 1.4 + CBZ.econ.rng() * 2.6;
-    if (g.standingOffer) {
-      /* While his offer stands he pitches nothing new — he re-opens THE SAME
-         deal, in words that show he remembers making it, or he waits. */
-      const s = g.standingOffer;
-      const sdx = player.pos.x - g.group.position.x, sdz = player.pos.z - g.group.position.z;
-      const sd = Math.hypot(sdx, sdz);
-      if (s.needsLeave) {
-        if (sd > 17 || sd < 3.4) s.needsLeave = false;
-        else return;
-      }
-      if (sd >= 3.4 && sd <= 15) {
-        const a = Object.assign({}, s.saved);
-        a.t = 12;
-        a.greeted = false;
-        a.msg = a.kind === "snitchIntel"
-          ? `Still got that name. ${a.cost}.`
-          : `Still ${a.cost}. Your sheet stays clean.`;
-        g.approach = a;
-        g.approachCD = 0;
-      }
-      return;
-    }
-    const heat = CBZ.game.role === "cop" ? (CBZ.game.complaints || 0) : (CBZ.game.detection || 0);
-    const cigs = CBZ.game.cigs || 0;
-    const dx = player.pos.x - g.group.position.x, dz = player.pos.z - g.group.position.z;
-    const dist = Math.hypot(dx, dz);
-    const stash = CBZ.game && CBZ.game.inventory ? Object.keys(CBZ.game.inventory).filter((k) => (CBZ.game.inventory[k] || 0) > 0 && k !== "Gun").length : 0;
-    const armed = CBZ.hasAnyWeapon ? CBZ.hasAnyWeapon() : (CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Gun"));
-    const sideWork = !!(CBZ.game && CBZ.game.gangJob);
-    const witness = CBZ.game && CBZ.game.lastKnown && CBZ.game.lastKnown.t > 0;
-    const snitch = findSnitchLead();
-    const protectedCut = (CBZ.game.racketProtectionT || 0) > 0;
-    const unpaidCut = (CBZ.game.racketDebt || 0) > 0;
-    const ledger = racketStanding();
-    const ledgerHeat = Math.max(0, -ledger);
-    const ledgerTrust = Math.max(0, ledger);
-    const racket = (unpaidCut || ledger < -14 || stash > 1 || armed || cigs >= 18 || sideWork) && dist >= 3.5 && dist <= 12;
-    if ((unpaidCut || ledger < -22) && !protectedCut && cigs >= 3 && dist <= 18 && CBZ.startRacketRunner && CBZ.econ.rng() <= 0.026 + Math.min(0.032, ledgerHeat * 0.0012)) {
-      if (CBZ.startRacketRunner(g)) {
-        g.approachCD = 8 + CBZ.econ.rng() * 8;
-        g.alert = Math.max(g.alert || 0, 0.35);
-        return;
-      }
-    }
-    if (cigs < 4 || dist < 3.5 || dist > 15) return;
-    if (snitch && (snitch.reportedPlayerT || 0) > 0 && !protectedCut && CBZ.econ.rng() <= 0.030 + Math.min(0.020, ledgerTrust * 0.001)) startPayoffApproach(g, "snitchIntel", {
-      snitch,
-      source: nameOf(snitch),
-    });
-    else if (witness && !protectedCut && CBZ.econ.rng() <= 0.028 + Math.min(0.026, ledgerHeat * 0.0014)) startPayoffApproach(g, "witnessBlackmail", {
-      amount: CBZ.game.lastKnown.amount || 12,
-      source: CBZ.game.lastKnown.source || "a witness",
-    });
-    else if (heat >= 18 && CBZ.econ.rng() <= 0.020 + Math.min(0.014, ledgerTrust * 0.0007)) startPayoffApproach(g, "payoffOffer");
-    else if (racket && !protectedCut && CBZ.econ.rng() <= (unpaidCut ? 0.050 : 0.018) + Math.min(0.032, ledgerHeat * 0.0012) - Math.min(0.010, ledgerTrust * 0.0004)) startPayoffApproach(g, "racketOffer", { debt: CBZ.game.racketDebt || 0 });
-  }
-
-  function bestBentGuard(maxDist) {
-    let best = null, bs = -Infinity;
-    for (const gd of CBZ.guards || []) {
-      if (!gd || !gd.corrupt || gd.dead || gd.ko > 0 || gd.approach || gd.hunt > 0) continue;
-      const dx = player.pos.x - gd.group.position.x;
-      const dz = player.pos.z - gd.group.position.z;
-      const d = Math.hypot(dx, dz);
-      if (d > (maxDist || 18)) continue;
-      const score = (maxDist || 18) - d + Math.max(0, gd.bribed || 0) * 0.08 + (gd.kind === "warden" ? 1.4 : 0);
-      if (score > bs) { bs = score; best = gd; }
-    }
-    return best;
-  }
-
-  /* ---- THE RACKET SPEAKS FOR ITSELF ---------------------------------------
-     This was `racketHint(text)` — a `flashHint` caption narrating, in the
-     third person, what a named guard standing in front of you was doing. It
-     was the last third-person narration lane left in the prison after the
-     show-don't-tell sweep, and its two callers wanted opposite things:
-
-       "X leans on the racket tab."  A PURE DUPLICATE. It fired on the same
-       line as startPayoffApproach(), which already writes `g.approach.msg`
-       and sends the man WALKING AT YOU with a bubble over his head. The
-       approach is the signal; a caption on it is the caption on the camera
-       cone. Deleted outright, nothing put in its place.
-
-       "X leaks your trail to clean guards."  A REAL EVENT WITH AN INVISIBLE
-       CAUSE. startCleanSweep already produces the consequence — the nearest
-       clean screw turns and walks to where you were — but nothing said WHO
-       sold you, so a sweep arrived out of a clear sky. That one needs a
-       carrier, and there is a man standing right there who did it. He says
-       it, out of his own mouth, through the shipped in-world speech surface
-       (CBZ.prisonSay: 16 m, ranked, silent when he is dead or out cold) —
-       and what he says is what a bent screw actually says, into his radio,
-       rather than a description of the mechanic. Out of earshot you get the
-       sweep with no explanation, which is correct: you were not there. */
-  const RADIO = [
-    "Post four. Got him for you.",
-    "He's yours. Same spot.",
-    "Control, I got eyes on him.",
-  ];
-  function racketBark(g) {
-    const game = CBZ.game || {};
-    game.racketHintT = Math.max(0, (game.racketHintT || 0) - 1);
-    if (game.racketHintT > 0) return;
-    game.racketHintT = 3;
-    if (!CBZ.prisonSay || !g) return;
-    const i = ((g.id || 0) + ((game.caughtCount || 0) | 0)) % RADIO.length;
-    try { CBZ.prisonSay(g, RADIO[i]); } catch (e) {}
-  }
-
-  function tagNearbyBadgeRumor(source, strength) {
-    if (!CBZ.rememberBlockRead || !CBZ.npcs) return;
-    const sx = source && source.group ? source.group.position.x : player.pos.x;
-    const sz = source && source.group ? source.group.position.z : player.pos.z;
-    for (const n of CBZ.npcs) {
-      if (!n || !n.group || n.dead || n.ko > 0 || n.escaped || n.role === "merchant") continue;
-      const d = Math.hypot(n.group.position.x - sx, n.group.position.z - sz);
-      if (d > 16) continue;
-      CBZ.rememberBlockRead(n, "badge", (strength || 18) * (1 - d / 24), source ? nameOf(source) : "bent cops");
-    }
-  }
-
-  function updateRacketPressure(dt) {
-    const game = CBZ.game || {};
-    if (game.state !== "playing" || game.role === "cop") return;
-    game.racketPressureT = Math.max(0, (game.racketPressureT || 0) - dt);
-    if (game.racketPressureT > 0) return;
-    game.racketPressureT = 4.8 + CBZ.econ.rng() * 4.2;
-
-    const debt = game.racketDebt || 0;
-    const ledger = racketStanding();
-    const cigs = game.cigs || 0;
-    const stash = contrabandCount();
-    const protectedCut = (game.racketProtectionT || 0) > 0;
-    const heat = game.detection || 0;
-    const witness = game.lastKnown && game.lastKnown.t > 0;
-    const snitch = findSnitchLead();
-    const armed = CBZ.hasAnyWeapon ? CBZ.hasAnyWeapon() : (CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Gun"));
-    const squeeze = debt >= 18 || ledger <= -24;
-    const valuable = cigs >= 22 || stash >= 2 || armed || game.gangJob;
-    const caseTrouble = witness || (snitch && snitch.reportedPlayerT > 0) || heat >= 32;
-    if (!squeeze && !valuable && !caseTrouble) return;
-
-    const bent = bestBentGuard(squeeze ? 22 : 16);
-    if (!bent) return;
-    const dist = Math.hypot(player.pos.x - bent.group.position.x, player.pos.z - bent.group.position.z);
-    const canApproach = cigs >= 3 && dist >= 3.2 && dist <= 18 && !(CBZ.playerApproachBusy && CBZ.playerApproachBusy(bent));
-
-    if (!protectedCut && canApproach) {
-      if (snitch && snitch.reportedPlayerT > 0 && cigs >= 4 && CBZ.econ.rng() < 0.58) {
-        startPayoffApproach(bent, "snitchIntel", { snitch, source: nameOf(snitch), thresholdPressure: true });
-      } else if (witness && cigs >= 4 && CBZ.econ.rng() < 0.62) {
-        startPayoffApproach(bent, "witnessBlackmail", {
-          amount: game.lastKnown.amount || 12,
-          source: game.lastKnown.source || "a witness",
-          thresholdPressure: true,
-        });
-      } else if (squeeze || valuable) {
-        startPayoffApproach(bent, "racketOffer", { debt, thresholdPressure: true });
-      } else {
-        startPayoffApproach(bent, "payoffOffer", { thresholdPressure: true });
-      }
-      tagNearbyBadgeRumor(bent, 18 + Math.min(20, debt + Math.max(0, -ledger) * 0.5));
-      // no caption: startPayoffApproach above already sends him at you with a
-      // bubble and his own line. See racketBark's note.
-      game.racketPressureT = 8.5 + CBZ.econ.rng() * 5;
-      return;
-    }
-
-    if (!protectedCut && (debt >= 26 || ledger <= -34 || (caseTrouble && ledger <= -18))) {
-      startCleanSweep(bent, 16 + Math.min(18, debt * 0.45 + Math.max(0, -ledger) * 0.28));
-      addRacketStanding(-2);
-      tagNearbyBadgeRumor(bent, 24);
-      racketBark(bent);                       // he says it into his radio, in the world
-      game.racketPressureT = 11 + CBZ.econ.rng() * 7;
-      return;
-    }
-
-    if (!protectedCut && debt >= 12 && cigs >= 3 && CBZ.startRacketRunner && CBZ.econ.rng() < 0.52) {
-      if (CBZ.startRacketRunner(bent)) {
-        tagNearbyBadgeRumor(bent, 16);
-        game.racketPressureT = 9 + CBZ.econ.rng() * 5;
-      }
-    }
-  }
-
-  /* The three approaches that are career-ending favours rather than a moment
-     of blindness — the ones the phone bridge gates. `payoffOffer` is a deep
-     service too, but it is transacted by CBZ.econ.payoff(), which gates
-     itself, so listing it here would run the gate twice and burn two lines
-     out of the once-per-officer refusal. */
-  function deepKind(a) {
-    return !!a && (a.kind === "racketOffer" || a.kind === "witnessBlackmail" || a.kind === "snitchIntel");
-  }
-  /* The once-a-run honest clause, worn in front of whichever deep purchase
-     happens first. It LATCHES when it returns non-empty, so it may only be
-     called on a path that has already taken the money — never speculatively. */
-  function paidPrefix() { return CBZ.econ.outsidePaidPrefix ? CBZ.econ.outsidePaidPrefix() : ""; }
-
-  function resolveGuardApproach(g, action) {
-    const a = g && g.approach;
-    if (!a) return { ok: false, msg: "Not now." };
-    if (action === "listen") {
-      // NO NAME, NO COLON. These four were the last of the `Name: line` shape
-      // in the prison: the line floats over the speaker's own head
-      // (systems/speech.js), so a name stapled to the front is the same man
-      // introduced twice.
-      /* AND HE STATES THE INSTRUMENT. Asking a bent officer what the deal is
-         is the one moment the outside-money fiction belongs in a mouth: he
-         says where the money actually goes, and asks the only question that
-         decides whether you are in the conversation at all. Empty string when
-         PRISON_PHONE_BRIDGE is off, so these four lines revert exactly. */
-      const terms = deepKind(a) && CBZ.econ.phoneTerms ? CBZ.econ.phoneTerms() : "";
-      const tail = terms ? " " + terms : "";
-      return { ok: true, msg: a.kind === "witnessBlackmail"
-        ? `${a.source || "Somebody"} saw you. Pay and it goes away.${tail}`
-        : a.kind === "racketOffer"
-        ? `Pay the cut. Nobody finds your stuff.${tail}`
-        : a.kind === "snitchIntel"
-        ? `Pay and I tell you who's talking.${tail}`
-        : `${a.cost} and it goes away.` };
-    }
-    if (action === "pay" && wardenNear()) {
-      return { ok: false, msg: "Not now." };
-    }
-    if (action === "pay") {
-      /* NOBODY SELLS A CAREER FOR TOBACCO (PRISON_PHONE_BRIDGE).
-         A racket's protection, a buried statement and a name off the log are
-         the three deep services on this file's side of the counter, and all
-         three are paid the way staff corruption is really paid: your people
-         to his people. The cigarettes still leave your pocket at the same
-         magnitude — they stand for what your people sent — but you cannot
-         reach your people without a line out, so this is the precondition for
-         the conversation and it is checked before the money is counted.
-         `payoffOffer` is deliberately absent: it falls through to
-         CBZ.econ.payoff() below, which runs the same gate at the till. */
-      if (deepKind(a)) {
-        const gate = CBZ.econ.phoneGate ? CBZ.econ.phoneGate(g) : null;
-        if (gate) return gate;
-      }
-      if (a.kind === "snitchIntel") {
-        // A REFUSAL NAMES THE THING AND THE NUMBER, and never opens on a bare
-        // numeral — these three said "12. Come back with it or don't come
-        // back", which is a price tag with a full stop after it.
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back when you have it.` };
-        CBZ.econ.addCigs(-a.cost);
-        CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
-        const snitch = (a.snitch && !a.snitch.dead && !a.snitch.escaped) ? a.snitch : findSnitchLead();
-        g.bribed = Math.max(g.bribed || 0, 14);
-        if (snitch && snitch.data) {
-          snitch.reportedPlayerT = Math.max(snitch.reportedPlayerT || 0, 48);
-          snitch.reportedPlayerAmount = Math.max(snitch.reportedPlayerAmount || 0, a.amount || 12);
-          snitch.reportedPlayerKind = snitch.reportedPlayerKind || "paid intel";
-          snitch.reportedPlayerGuard = nameOf(g);
-          snitch.reportedPlayerLastKnown = snitch.reportedPlayerLastKnown || {
-            x: snitch.group.position.x,
-            z: snitch.group.position.z,
-            type: "snitch intel",
-            heardOnly: false,
-          };
-          snitch.playerGrudge = Math.min(14, (snitch.playerGrudge || 0) + 1);
-          if (CBZ.npcEmote) CBZ.npcEmote(snitch, "!");
-          if (CBZ.addHeat) CBZ.addHeat(-5);
-          // THIS IS WHAT THE CIGS ACTUALLY BUY NOW (JAIL_SNITCH_KNOWLEDGE).
-          // Before, the purchase set a 30-second countdown that was read by one
-          // HUD chip and nothing else, while the snitch verbs were already
-          // offered on every reporter for free — you were paying a bent screw
-          // for information the HUD gave away. `learnSnitch` is the fact: this
-          // name, permanently, and the verbs that go with it.
-          if (CBZ.learnSnitch) CBZ.learnSnitch(snitch, "paid");
-          addRacketStanding(1);
-          CBZ.sfx && CBZ.sfx("coin");
-          clearGuardApproach(g);
-          return { ok: true, msg: paidPrefix() + `It was ${nameOf(snitch)}. I never said it.` };
-        }
-        if (CBZ.addHeat) CBZ.addHeat(-3);
-        addRacketStanding(1);
-        CBZ.sfx && CBZ.sfx("coin");
-        clearGuardApproach(g);
-        return { ok: true, msg: paidPrefix() + "Trail's cold. I keep the fee." };
-      }
-      if (a.kind === "witnessBlackmail") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back when you have it.` };
-        CBZ.econ.addCigs(-a.cost);
-        CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
-        g.bribed = Math.max(g.bribed || 0, 22);
-        g.alert = 0; g.hunt = 0; g.investigate = null;
-        if (CBZ.addHeat) CBZ.addHeat(-(12 + (a.amount || 12) * 0.65));
-        if (CBZ.reduceCasePressure) CBZ.reduceCasePressure(10 + (a.amount || 12) * 0.7, a.source);
-        if (CBZ.addComplaint) CBZ.addComplaint(-8);
-        if (CBZ.game) {
-          CBZ.game.witnessReportT = Math.max(0, (CBZ.game.witnessReportT || 0) - 10);
-          if (CBZ.game.lastKnown && (!a.source || CBZ.game.lastKnown.source === a.source || CBZ.game.lastKnown.type !== "visual")) CBZ.game.lastKnown = null;
-        }
-        for (const gd of CBZ.guards || []) {
-          if (gd.corrupt || ((CBZ.game && CBZ.game.detection) || 0) < 28) {
-            gd.hunt = 0;
-            gd.alert = Math.min(gd.alert || 0, 0.25);
-            gd.investigate = null;
-          }
-        }
-        addRacketStanding(3);
-        CBZ.sfx && CBZ.sfx("coin");
-        clearGuardApproach(g);
-        return { ok: true, msg: paidPrefix() + "That statement's gone." };
-      }
-      if (a.kind === "racketOffer") {
-        if ((CBZ.game.cigs || 0) < a.cost) return { ok: false, msg: `${a.cost}. Come back when you have it.` };
-        CBZ.econ.addCigs(-a.cost);
-        CBZ.econ.consumePhoneTime && CBZ.econ.consumePhoneTime();
-        g.bribed = Math.max(g.bribed || 0, 24);
-        g.alert = 0; g.hunt = 0;
-        CBZ.game.racketProtectionT = Math.max(CBZ.game.racketProtectionT || 0, 32 + Math.min(28, a.cost * 2));
-        CBZ.game.racketGuard = nameOf(g);
-        CBZ.econ.addRacketDebt(-(a.cost * 2 + 5));
-        for (const gd of CBZ.guards || []) if (gd.corrupt) {
-          gd.bribed = Math.max(gd.bribed || 0, 10);
-          gd.alert = 0;
-          gd.hunt = 0;
-        }
-        if (CBZ.addHeat) CBZ.addHeat(-(18 + a.cost * 0.9));
-        if (CBZ.reduceCasePressure) CBZ.reduceCasePressure(8 + a.cost * 0.5);
-        if (CBZ.addComplaint) CBZ.addComplaint(-10);
-        if (CBZ.game.lastKnown && (CBZ.game.detection || 0) < 38) CBZ.game.lastKnown = null;
-        if (CBZ.player && CBZ.player.gang != null && CBZ.addGangStanding) CBZ.addGangStanding(CBZ.player.gang, -2);
-        addRacketStanding(6);
-        CBZ.sfx && CBZ.sfx("coin");
-        clearGuardApproach(g);
-        return { ok: true, msg: paidPrefix() + "You're covered. For a while." };
-      }
-      // the price on the card, not a second one computed at the till — see the
-      // note on econ.payoff()'s opts.cost. HAGGLE writes a.cost; this is what
-      // makes that discount reach the money instead of only the chip.
-      const res = CBZ.econ.payoff(g, { cost: a.cost });
-      if (res && res.ok) { addRacketStanding(3); clearGuardApproach(g); }
-      return res;
-    }
-    if (action === "haggle") {
-      if (a.haggled || a.cost <= 3) return { ok: false, msg: "That's the price." };
-      a.haggled = true;
-      const heat = (CBZ.game && CBZ.game.detection) || 0;
-      const chance = Math.max(0.18, Math.min(0.72, (g.corrupt ? 0.45 : 0.24) - heat * 0.002 + ((CBZ.game.cigs || 0) < a.cost ? 0.12 : 0)));
-      if (CBZ.econ.rng() < chance) {
-        a.cost = Math.max(3, a.cost - 2 - Math.floor(CBZ.econ.rng() * 3));
-        a.t = Math.max(a.t || 0, 7);
-        addRacketStanding(-1);
-        return { ok: true, msg: `Fine. ${a.cost}.` };
-      }
-      a.cost += 2;
-      if (a.kind === "racketOffer") CBZ.econ.addRacketDebt(1);
-      addRacketStanding(-2);
-      if (CBZ.addHeat) CBZ.addHeat(4);
-      return { ok: false, msg: `Now it's ${a.cost}.` };
-    }
-    if (action === "threaten") {
-      const armed = (CBZ.playerArmed && CBZ.playerArmed()) || (CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Shiv"));
-      const chance = g.corrupt ? (armed ? 0.42 : 0.20) : (armed ? 0.18 : 0.05);
-      if (CBZ.econ.rng() < chance) {
-        const snitch = a.kind === "snitchIntel" ? (a.snitch || findSnitchLead()) : null;
-        clearGuardApproach(g);
-        g.bribed = Math.max(g.bribed || 0, 6);
-        if (snitch && snitch.data) {
-          snitch.reportedPlayerT = Math.max(snitch.reportedPlayerT || 0, 24);
-          snitch.reportedPlayerGuard = nameOf(g);
-        }
-        if (CBZ.addHeat) CBZ.addHeat(8);
-        addRacketStanding(-5);
-        return { ok: true, msg: snitch && snitch.data ? `${nameOf(snitch)}. Now get away from me.` : "You just bought trouble." };
-      }
-      clearGuardApproach(g);
-      g.bribed = 0;
-      g.alert = Math.max(g.alert || 0, 1.4);
-      addRacketStanding(-10);
-      if (!g.corrupt) g.hunt = Math.max(g.hunt || 0, 2.6);
-      if (a.kind === "racketOffer") {
-        CBZ.econ.addRacketDebt(Math.ceil((a.cost || 5) * 0.7));
-        startCleanSweep(g, 18 + Math.ceil((a.cost || 5) * 0.6));
-      }
-      if (a.kind === "snitchIntel" && CBZ.game) {
-        CBZ.game.witnessReportT = Math.max(CBZ.game.witnessReportT || 0, 8);
-        CBZ.econ.addRacketDebt(2);
-      }
-      if (CBZ.addHeat) CBZ.addHeat(g.corrupt ? 12 : 28);
-      nudgeCleanGuard(g);
-      return { ok: false, msg: "Wrong answer." };
-    }
-    if (action === "refuse") {
-      expireGuardApproach(g, "refuse");
-      return { ok: false, msg: "Suit yourself." };
-    }
-    return { ok: false, msg: "" };
-  }
-
   /* ---- TORCH DISCIPLINE ---------------------------------------------------
      A DUTY TORCH IS A TOOL, AND WHAT MAKES IT A TOOL IS THAT IT COSTS A HAND.
      Ungated, the search branch below lit the beam the instant a screw started
@@ -1090,13 +492,6 @@
       if (CBZ.game) CBZ.game.witnessReportT = Math.max(0, (CBZ.game.witnessReportT || 0) - 2.5);
       if (CBZ.challengeCaseSource) CBZ.challengeCaseSource(null, 3.5 + Math.max(0, trust) * 0.35 + (protectedByGang ? 2 : 0), { reason: "stonewalled questioning" });
       if (CBZ.rememberBlockRead) CBZ.rememberBlockRead(n, "heat", Math.max(10, (read && read.score) || 0) * 0.55, "stonewall");
-      n.coverDebt = {
-        t: 24 + rng() * 14,
-        guard: nameOf(g),
-        heat: 7 + (memory ? Math.min(8, memory.amount || 0) : 0) + (knownReport ? 4 : 0),
-        source: who,
-      };
-      n.approachCD = Math.min(n.approachCD || 2, 0.9 + rng() * 2.0);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "?");
       if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "He went that way.", { force: true });
       return;
@@ -1148,7 +543,6 @@
           lastKnown: n.reportedPlayerLastKnown,
         });
       }
-      n.approachCD = Math.min(n.approachCD || 2.5, 1.0 + rng() * 2.4);
       n.playerGrudge = Math.min(14, grudge + 1);
       if (CBZ.npcEmote) CBZ.npcEmote(n, "!");
       if (nearPlayer && CBZ.prisonSay) CBZ.prisonSay(n, "Boss! He's right there.", { force: true });
@@ -1790,12 +1184,12 @@
     // rig draw range rides the LIVE quality tier (mid-tier ≈ the old fixed 52u)
     const nr = CBZ.qScale ? CBZ.qScale(34, 73) : 52;
     const renderNear = pdx * pdx + pdz * pdz < nr * nr;
-    const renderImportant = g.alert > 0 || g.hunt > 0 || g.approach || g.investigate || g.kind === "warden";
+    const renderImportant = g.alert > 0 || g.hunt > 0 || g.investigate || g.kind === "warden";
     g.group.visible = renderNear || renderImportant;
     g.seesPlayer = false; g.spotted = false;
     if (g.dead) {
       noteState(g, "dead");
-      g.hunt = 0; g.alert = 0; g.approach = null; g.investigate = null; g._chase = null; g.sus = 0;
+      g.hunt = 0; g.alert = 0; g.investigate = null; g._chase = null; g.sus = 0;
       // systems/prisoncorpse.js owns the body: lie direction, walls, sprawl.
       // While it does, animChar must NOT run (the idle pose would fight the
       // sprawl for the same four pivots every frame).
@@ -1810,7 +1204,6 @@
 
     if (g.bribed > 0) g.bribed -= dt;
     if (g._earCD > 0) g._earCD -= dt;
-    considerPayoffApproach(g, dt);
 
     // OFF SHIFT AND ASLEEP (systems/prisonrest.js sets and clears `asleep`;
     // city/propuse.js owns the body while it is set, including its lie roll).
@@ -1832,7 +1225,7 @@
       // the probes ran out, and the man got up before he arrived.
       if (g.state !== "escort") still(g);
       noteState(g, "escort");
-      g.hunt = 0; g.alert = 0; g.investigate = null; g.approach = null; g._chase = null; g.sus = 0;
+      g.hunt = 0; g.alert = 0; g.investigate = null; g._chase = null; g.sus = 0;
       updateFlashlight(g, dt);
       return false;
     }
@@ -1863,32 +1256,6 @@
       noteState(g, "heldup");
       faceTo(g, player.pos.x, player.pos.z, 0.0006, dt);
       stand(g, dt);
-      updateFlashlight(g, dt);
-      return true;
-    }
-
-    if (g.approach) {
-      noteState(g, "social");
-      const a = g.approach;
-      a.t -= dt;
-      const dist = Math.hypot(pdx, pdz);
-      if (dist > 20 || a.t <= 0 || CBZ.game.state !== "playing") {
-        if (CBZ.game.state === "playing") expireGuardApproach(g, dist > 20 ? "walkedAway" : "timeout");
-        else clearGuardApproach(g);
-        updateFlashlight(g, dt);
-        return true;
-      }
-      if (dist > 2.4) walkTo(g, player.pos.x, player.pos.z, g.speed * 1.18, dt, 2.3);
-      else {
-        faceTo(g, player.pos.x, player.pos.z, 0.0001, dt);
-        stand(g, dt);
-        if (!a.greeted) {
-          a.greeted = true;
-          // He has walked over to you and the head icon is up (markers.js):
-          // the invitation is already on screen, no instruction bolted on.
-          if (CBZ.prisonSay) CBZ.prisonSay(g, a.msg, { secs: 2.6, force: true });
-        }
-      }
       updateFlashlight(g, dt);
       return true;
     }
@@ -2106,7 +1473,7 @@
   function updateGuard(g, dt) {
     g._lookWant = 0;
     // a man down, asleep, held up or on another job does not keep a pistol out
-    if (g._sidearm && (g.dead || g.ko > 0 || g.asleep || g._escort || g.intimidMode === "scared" || g.approach)) holsterSidearm(g);
+    if (g._sidearm && (g.dead || g.ko > 0 || g.asleep || g._escort || g.intimidMode === "scared")) holsterSidearm(g);
     if (think(g, dt)) neckTurn(g, dt);
   }
 
@@ -2126,7 +1493,7 @@
     const list = [];
     for (const g of CBZ.guards || []) {
       if (!g || !g.group || g.dead || g.ko > 0 || g.asleep || g._escort || g.tied || g.bribed > 0 ||
-          g.intimidMode === "scared" || g.approach || g._yardCase) continue;   // a screw with a man on the ground stays with him
+          g.intimidMode === "scared" || g._yardCase) continue;   // a screw with a man on the ground stays with him
       if (opts.player && g.corrupt && (G0.racketProtectionT || 0) > 0) continue;
       const d = Math.hypot(x - g.group.position.x, z - g.group.position.z);
       if (d > radius) continue;
@@ -2293,8 +1660,6 @@
 
   CBZ.updateGuard = updateGuard;
   CBZ.updateGuardFlashlight = updateFlashlight;
-  CBZ.resolveGuardApproach = resolveGuardApproach;
-  CBZ.startGuardPayoffApproach = startPayoffApproach;
   CBZ.addRacketStanding = addRacketStanding;
   CBZ.racketStanding = racketStanding;
   CBZ.guardSees = guardSees;
@@ -2337,6 +1702,5 @@
       updateGuard(g, dt);
     }
   });
-  CBZ.onUpdate(20.5, function (dt) { if (CBZ.game.mode !== "escape") return; updateRacketPressure(dt); });
   });
 })();

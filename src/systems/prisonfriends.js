@@ -214,7 +214,8 @@
     if (a.kind === "warden") return false;                  // he is not your friend
     if (CBZ.game && CBZ.game.role === "cop") return false;   // wrong side of the badge
     if (a.intimidMode === "scared") return false;            // not at gunpoint, obviously
-    if (a.approach && a.approach.t > 0) return false;        // he is mid-pitch about something else
+    if (a._demand) return false;                             // he is collecting from you
+
     if ((a.playerGrudge || 0) >= GRUDGE_BLOCK) return false; // bad blood outranks any ledger
     if (a.aiState === "fight" && a.foe === CBZ.player) return false;
     if (CBZ.playerKnowsSnitch && CBZ.playerKnowsSnitch(a)) return false;  // he put your name in

@@ -1467,7 +1467,7 @@
   // the propuse arc engine exists to prevent — so the seat is released the
   // instant he has anything to do, and retaken when he settles again.
   function busy(g) {
-    return !!(g.hunt > 0 || g.alert > 0 || g.approach || (g.investigate && g.investigate.t > 0) ||
+    return !!(g.hunt > 0 || g.alert > 0 || (g.investigate && g.investigate.t > 0) ||
       g.dead || (g.ko | 0) > 0 || g.asleep);
   }
   function sitAtDesk(g) {

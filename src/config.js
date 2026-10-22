@@ -108,7 +108,7 @@
     lastKnown: null,        // latest reported player position for guard searches
     caseSearchCD: 0,        // cooldown between evidence-driven follow-up searches
     caseFile: { heat: 0, reports: [], lastSource: "", lastType: "", corrupt: 0 },
-    socialProfile: { paid: 0, threatened: 0, refused: 0, helped: 0, listened: 0, bargained: 0, exploited: 0, last: "" },
+
     watcherDirectorT: 0,     // cooldown for NPCs deciding to tail/watch the player
   };
 

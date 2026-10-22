@@ -170,10 +170,11 @@ async function stageStealMark(input) {
       if (holdActor) pinActor();
       if (subject.beat === "guard") { actor.alert = 0.5; actor.hunt = 0; actor.investigate = null; actor.flashlightOn = false; }
       // the snitch beat is about ONE fact (he has talked). His wander brain
-      // rolls approaches, flees and vendettas on its own clock and each of
+      // rolls flees and vendettas on its own clock and each of
       // those changes the frame run to run; pin the state so the pair is a
       // pair. (Real fields, the ones his brain reads — not a bone.)
-      if (subject.beat === "snitch") { actor.aiState = "wander"; actor.approach = null; actor.hunt = 0; actor.huntPlayer = 0; }
+      if (subject.beat === "snitch") { actor.aiState = "wander"; actor.hunt = 0; actor.huntPlayer = 0; }
+
       CBZ.stepSim(1 / 60);
       pinPlayer();
       if (holdActor) pinActor();

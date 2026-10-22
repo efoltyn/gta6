@@ -11,7 +11,7 @@
 
    Now a man only asks for what the yard really has going on with him:
      1. a debt between real people (entities/ai.js prisonContract tabs),
-        which ai.js pitches itself;
+        which is his Collect verb (interact.js), never a pitch;
      2. a named man coming for HIM (someone holding beef against him, or
         squared up on him right now): "put him down first";
      3. a named man HE holds beef against.
@@ -112,17 +112,8 @@
       return { ok: true, msg: actor.quest.text };
     }
 
-    // a real debt he holds (PRISON_CONTRACTS, entities/ai.js). ai.js speaks
-    // the pitch itself; returning words here would print a second copy.
-    const CT = CBZ.prisonContract;
-    if (!auto && CT && CT.canOffer(actor)) {
-      const c = CT.offer(actor);
-      if (c) return { ok: true, msg: "" };
-    }
-    if (!auto && CT && CT.forCreditor(actor) && CT.satisfied(CT.live())) {
-      const res = CT.settle(actor);
-      if (res && res.ok) return { ok: true, msg: "" };     // he counts it out loud
-    }
+    // a real debt he holds (PRISON_CONTRACTS) is his Collect / Settle verbs
+    // (interact.js), not something he says at you
 
     // a man does not hand his business to somebody he doesn't know, or hates
     const social = econ.socialRead ? econ.socialRead(actor) : null;

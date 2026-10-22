@@ -93,7 +93,7 @@ const bench = await evl(`
   CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT = false;
   (CBZ.cameras || []).forEach(function (c) { c.offline = true; });
   (CBZ.guards || []).forEach(function (gd) {
-    gd.speed = 0; gd.hunt = 0; gd.alert = 0; gd.investigate = null; gd.approach = null;
+    gd.speed = 0; gd.hunt = 0; gd.alert = 0; gd.investigate = null;
     gd.radioT = null; gd._radioed = false; gd.ko = 0; gd.dead = false;
     gd.group.position.set(-60, 0, -60);
   });

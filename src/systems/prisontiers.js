@@ -629,14 +629,8 @@
       const r = n.rep || 0;
       if (r) bag.rep.push([i, r * 0.8]);
     }
-    /* AND THE YARD'S READ ON YOU GOES WITH IT. Whether you stood up to your
-       first test, paid, ran or talked is in the file the receiving yard reads
-       before you walk in (ai.js g.yardRep), so the tough jail knows who you
-       are. What the two cars thought of you comes along at half weight:
-       word travels, it just loses something on the bus. */
-    const yr = g.yardRep;
-    if (yr) bag.yard = { respect: (yr.respect || 0) * 0.8, fear: (yr.fear || 0) * 0.8,
-      payer: (yr.payer || [0, 0]).slice(), snitch: yr.snitch || 0, ran: yr.ran || 0 };
+    /* What the two cars thought of you comes along at half weight: word
+       travels, it just loses something on the bus. */
     bag.standing = (g.gangStanding || [0, 0]).map(function (v) { return Math.round((v || 0) * 0.5); });
     return bag;
   }
@@ -650,7 +644,7 @@
       const row = bag.rep[i], a = list[row[0]];
       if (a) { a.rep = row[1]; n++; }
     }
-    if (bag.yard) { g.yardRep = Object.assign({ respect: 0, fear: 0, payer: [0, 0], snitch: 0, ran: 0 }, bag.yard); n++; }
+
     if (bag.standing) g.gangStanding = bag.standing.slice();
     return n;
   }
@@ -712,15 +706,13 @@
          systems/state.js calls as the LAST thing resetGame does.
      ========================================================== */
   let arrivals = 0;
-  /* EVERY RUN IS AN ARRIVAL (2026-09-27). ai.js runs the new-fish arc off
-     g.newFish: a test or two in the first minutes, a shot-caller sizing you
-     up, the yard's attitude shaped by how you answered. A fresh run gets a
-     fresh file; a transfer gets one stamped with the new wing's tier, and
-     keeps the yard's memory of you (unpackProperty, above). */
+  /* EVERY RUN IS AN ARRIVAL. (The "new fish" tests that used to run off
+     g.newFish, strangers walking up on a timer to tax the new man, are gone:
+     nobody comes at you without a real reason.) */
   function stampArrival() {
     g._arrivalT = CBZ.now || 0;
-    g.newFish = CBZ.prisonNewFish ? CBZ.prisonNewFish(level()) : { tier: level(), tested: 0, outcome: null, t: 0, tests: [], outcomes: [] };
   }
+
   function reset() {
     if (!on()) return;
     applyRegime();

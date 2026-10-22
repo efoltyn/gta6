@@ -15,7 +15,8 @@
    everything the cap dropped, so the surface the game is actually played on
    was the one with no cap at all — a bent guard's stall put five under a thumb.
 
-   This walks EVERY context verbsFor() can produce (every approach kind, every
+   This walks EVERY context verbsFor() can produce (a crew collecting a debt,
+   a cornered debtor, every
    role, every merchant/gang/friendship combination) and asserts the menu is
    three or fewer BEFORE the cap has to save it — because a cap that fires is a
    verb the player silently lost, and the curated lists are supposed to make it
@@ -59,11 +60,14 @@ vm.createContext(sandbox);
 vm.runInContext(
   extract("cuffOk", "function cuffOk(a)") + "\n" +
   extract("verbsFor", "function verbsFor(a)") + "\n" +
-  extract("pressureVerb", "function pressureVerb(a)") + "\n" +
+  extract("PD", "function PD()") + "\n" +
+  extract("demandOn", "function demandOn(a)") + "\n" +
   extract("guardPayoffWorthIt", "function guardPayoffWorthIt()") + "\n" +
   extract("staff", "function staff(a)") + "\n" +
   extract("isHand", "function isHand(v)") + "\n" +
+  extract("hasRope", "function hasRope()") + "\n" +
   extract("capVerbs", "function capVerbs(v)") + "\n" +
+
   // MAX_VERBS is the const capVerbs closes over
   (SRC.match(/const MAX_VERBS = \d+;/) || ["const MAX_VERBS = 4;"])[0] + "\n" +
   "this.verbsFor = verbsFor; this.capVerbs = capVerbs; this.MAX_VERBS = MAX_VERBS;",
@@ -76,18 +80,10 @@ const VERB_IDS = new Set(
   [...SRC.slice(SRC.indexOf("const VERB = {"), SRC.indexOf("function wardenAct"))
     .matchAll(/^\s{4}([a-zA-Z]+):\s*\{/gm)].map((m) => m[1]));
 
-const APPROACH_KINDS = [
-  "gangInvite", "gangJob", "gangParley", "crewBackup", "crewDues", "stickUp",
-  "coverStory", "heatWarning", "alibiDeal", "witnessFix", "recantOffer", "favor",
-  "buyItem", "copBribe", "copTip", "copPlea", "copTaunt", "turfWarning", "deal",
-  "tax", "debtCollect", "snitchThreat", "lookout", "diversion", "infoSell",
-  "stashCover", "racketCover", "coverDebt", "jobThreat", "reputation", "nonsense",
-];
-
 function actor(over) {
   return Object.assign({
     kind: "inmate", rep: 0, gang: -1, corrupt: false, data: { name: "Marcus" },
-    playerFear: 0, playerGrudge: 0, playerTrust: 0, approach: null, intimidMode: null,
+    playerFear: 0, playerGrudge: 0, playerTrust: 0, _demand: null, intimidMode: null,
   }, over || {});
 }
 
@@ -107,22 +103,30 @@ function assess(label, a) {
   for (const v of raw) {
     if (!VERB_IDS.has(v) && !/^h:/.test(v)) { failed++; console.log(`  FAIL ${label}: "${v}" has no entry in the VERB table`); }
   }
-  if (raw.indexOf("listen") >= 0) { failed++; console.log(`  FAIL ${label}: LISTEN is back — the pitch is spoken now (autoListen)`); }
+  // NOBODY PITCHES (owner 2026-10-22): the card of a man who walked up with
+  // a deal (Accept / Haggle / Threaten / Refuse / Listen) is gone for good
+  for (const dead of ["listen", "accept", "haggle", "threaten", "refuse", "respect"]) {
+    if (raw.indexOf(dead) >= 0) { failed++; console.log(`  FAIL ${label}: "${dead}" is back — nobody walks up with a pitch`); }
+  }
   if (raw.indexOf("befriend") >= 0) sawBefriend++;
   return raw;
 }
 
 console.log("interact-verbs-check  (max " + MAX_VERBS + " buttons)");
 
-// ---- every approach kind, priced and unpriced, calm and feared -------------
-for (const kind of APPROACH_KINDS) {
-  for (const cost of [0, 12]) {
-    for (const fear of [0, 9]) {
-      assess(`approach:${kind} cost=${cost} fear=${fear}`,
-        actor({ approach: { kind, t: 4, cost, msg: "x" }, playerFear: fear, data: { name: "Marcus", offer: { item: "Shiv", price: 8 } } }));
-    }
+// ---- a crew collecting a debt you owe: with smokes, broke, work on offer ----
+for (const cigs of [0, 12]) {
+  for (const work of [false, true]) {
+    sandbox.CBZ.game = { role: "inmate", heat: 0, cigs };
+    sandbox.CBZ.prisonDemand = { of: (a) => a._demand || null, canWorkOff: () => work };
+    const raw = assess(`debt demand cigs=${cigs} work=${work}`, actor({ gang: 1, _demand: { kind: "debt", cost: 6 } }));
+    if (cigs > 0 && raw[0] !== "pay") { failed++; console.log(`  FAIL debt demand cigs=${cigs}: Pay is not the first decision (${raw.join("/")})`); }
+    if (!cigs && !work && (raw[0] === "punch" || raw[0] === "grab")) { failed++; console.log(`  FAIL debt demand, nothing to decide: E must not be your hands (${raw.join("/")})`); }
   }
 }
+sandbox.CBZ.prisonDemand = null;
+sandbox.CBZ.game = { role: "inmate", heat: 0 };
+
 
 // ---- gunpoint, the warden, a known snitch, the player as a cop -------------
 assess("gunpoint", actor({ intimidMode: "scared" }));

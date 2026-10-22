@@ -54,8 +54,7 @@ function world(opts) {
     player: { pos: V(0, 0), gang: null },
     npcs, guards,
     prisonSay(a, line) { said.push({ who: a && a.data ? a.data.name : "?", line }); return true; },
-    econ: { rng, addCigs(n) { CBZ.game.cigs = (CBZ.game.cigs || 0) + n; }, announceLoot() {}, hasPhoneAccess() { return false },
-      grantPhoneTime(s) { CBZ.game.phoneTimeT = s; }, PHONE_TIME_SECS: 90 },
+    econ: { rng, addCigs(n) { CBZ.game.cigs = (CBZ.game.cigs || 0) + n; }, announceLoot() {} },
     prisonBrain: {
       crime() { return 0; }, memberDown() {},
       beginCase(gd, n) { n.cuffed = true; n._lawBy = gd; gd._yardCase = n; CBZ._cases.push({ gd, n }); return true; },

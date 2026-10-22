@@ -66,7 +66,6 @@
                     phone, his car's shower turn. ai.js's wander calls it.
      rules          the player breaking them (another car's seat, phone or
                     shower; sharing across cars) and what happens next.
-     the claim      data for ai.js's arrival: his car comes to get him.
 
    SHOW, DON'T TELL: nothing is printed. You learn the rules the way a new
    man does: somebody walks up and tells you, once.
@@ -145,8 +144,9 @@
      The state lives HERE now. `leave(why)` puts the player out ("outcast":
      his car turned on him); `rejoin()` is the new-run reset. While he is out:
        playerCar()   -1. Every consumer that asks "which car is he" (the
-                     rules below, ai.js's recruit/claim/hostility, interact.js's
-                     offer) gets NOBODY'S, which is what a cast-out man is.
+                     rules below, ai.js's hostility, interact.js's Join)
+                     gets NOBODY'S
+, which is what a cast-out man is.
        bloodCar()    the car his heritage puts him in, for the few callers that
                      need where he CAME from (the old car's grudge).
        the rules     every car's seat is somebody else's seat, every phone is
@@ -522,7 +522,7 @@
     let best = null, bs = -Infinity;
     for (const n of CBZ.npcs || []) {
       if (!live(n) || !n.group || n === not || carOf(n) !== car) continue;
-      if (n.approach || n.aiState === "fight" || (n.huntPlayer || 0) > 0 || n.cuffed) continue;
+      if (n._demand || n.aiState === "fight" || (n.huntPlayer || 0) > 0 || n.cuffed) continue;
       if (n.role === "merchant" || n.role === "dealer") continue;
       const d = pdist(n);
       if (d > maxD) continue;
@@ -571,20 +571,29 @@
     viol.t += dt;
     const g = CBZ.game;
     const mine = playerCar();
-    // once: somebody of theirs walks up and says it
+    // once: somebody of theirs walks up and says it (the demand ladder,
+    // entities/ai.js CBZ.prisonDemand: he asks, he warns, he puts hands on you;
+    // get up / walk off and it is over)
     if (!viol.warned && viol.t > 2.5) {
       const m = enforcerOf(v.yardCar, 16);
-      if (m && CBZ.prisonStartApproach) {
+      const PD = CBZ.prisonDemand;
+      if (m && PD && !PD.busy(m)) {
         const exiled = isOut() && v.yardCar === member.from;
-        const ok = CBZ.prisonStartApproach(m, "turfWarning", 0, { forced: true, shove: true, carRule: v.kind,
-          msg: pick((exiled ? OUTCAST_LINE : RULE_LINE)[v.kind]), motive: exiled ? "outcast" : "yard rules" });
+        const kind = v.kind, car = v.yardCar;
+        const ok = PD.begin(m, "rules", {
+          gang: m.gang,
+          lines: { demand: [pick((exiled ? OUTCAST_LINE : RULE_LINE)[kind])], comply: ["Yeah."], gaveup: ["Next time."] },
+          inside: function () { const w = playerViolation(); return !!(w && w.kind === kind && w.yardCar === car); },
+        });
         if (ok) { viol.warned = 1; viol.warnAt = viol.t; viol.by = m; }
       } else if (viol.t > 6) { viol.warned = 1; viol.warnAt = viol.t; }
     }
     // still there: hands, and it goes on both cars' books. His OLD car gives
-    // a man it put out half the patience: he knows why.
+    // a man it put out half the patience: he knows why. (While the man who
+    // came is still saying it, it is his ladder's call.)
     const patience = isOut() && v.yardCar === member.from ? 3.5 : 7;
-    if (viol.warned && !viol.hands && viol.t - viol.warnAt > patience) {
+    const asking = !!(viol.by && CBZ.prisonDemand && CBZ.prisonDemand.of(viol.by));
+    if (viol.warned && !viol.hands && !asking && viol.t - viol.warnAt > patience) {
       viol.hands = true;
       strikes.rules++;
       addTension(mine, v.yardCar, 6);
@@ -612,16 +621,6 @@
     if (CBZ.addGangStanding && g.carClaim === "in") CBZ.addGangStanding(mine, -4);
     // twice is a lesson: a short correction from your own
     if (strikes.share >= 2 && CBZ.requestInmateHunt) { CBZ.requestInmateHunt(own, 4, "rules"); strikes.share = 0; }
-  }
-
-  // ---- 7. THE CLAIM: who from his car comes to get the new man ---------------
-  function claimer() {
-    const mine = playerCar();
-    if (mine < 0) return null;
-    const L = CBZ.prisonCarLeader ? CBZ.prisonCarLeader(mine) : null;
-    // an approach only survives from inside ~16 m (ai.js APPROACH_FAR + 5)
-    if (L && live(L) && !L.approach && !(L.huntPlayer > 0) && pdist(L) < 16) return L;
-    return enforcerOf(mine, 16);
   }
 
   /* THE HORN CALLS CHOW. The errand used to be offered only on a man's own
@@ -695,7 +694,8 @@
     allotMess, allotYard, seatOwner, maySit, messSpot,
     PHONES, SHOWER, showerTurn,
     errand, release, onYardSpot,
-    playerViolation, noteShare, claimer,
+    playerViolation, noteShare,
+
     reset, audit, tick,
   };
 })();

@@ -210,7 +210,7 @@
     P.hp = hp;
     if (P.provokedT > 0) P.provokedT -= dt;
     if (P.engageT > 0) P.engageT -= dt;
-    if (g.ko > 0 || g._escort || g.intimidMode === "scared" || g.approach || g.tied || g.asleep || g.pause > 0) return false;
+    if (g.ko > 0 || g._escort || g.intimidMode === "scared" || g.tied || g.asleep || g.pause > 0) return false;
 
     const T = P.T, up = onDeck(P);
     const pDeck = playerOnDeck(T);

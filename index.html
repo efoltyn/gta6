@@ -444,7 +444,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=isles1022"></script>
+<script src="src/config.js?v=misles1nopitc"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=peak1014c"></script>
@@ -470,11 +470,11 @@ document.body.appendChild(b);}}catch(e){}})();
      A spoken line is a few words pinned above the speaker in world space; there
      is no subtitle band. Loads before every caller (social.js, interact.js,
      campaign_ui.js, the Hitman/President rooms). -->
-<script src="src/systems/speech.js?v=phone2b"></script>
+<script src="src/systems/speech.js?v=nopitch1022"></script>
 <!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
      in front of him (threat by sight, the one line picker, panic by sight).
      Before read.js / peds.js / prisonvoice.js, which all call it. -->
-<script src="src/systems/voice.js?v=voice1022"></script>
+<script src="src/systems/voice.js?v=nopitch1022"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -590,7 +590,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/pushables.js?v=loose1013"></script>
 <script src="src/world/carfx.js?v=speed1014"></script>
 <script src="src/world/ground.js?v=dsl3"></script>
-<script src="src/world/cellblock.js?v=voice1022"></script>
+<script src="src/world/cellblock.js?v=nopitch1022"></script>
 <script src="src/world/yard.js?v=tow929"></script>
 <script src="src/world/razorwire.js?v=dsl3"></script>
 <script src="src/world/towers.js?v=tow929"></script>
@@ -719,13 +719,13 @@ document.body.appendChild(b);}}catch(e){}})();
      memory, witnesses, morale, the authority ladder). Pure logic with no
      parse-time dependencies, so it loads before its first consumers
      (entities/security.js, entities/guards.js). -->
-<script src="src/systems/brain.js?v=ladder1022"></script>
+<script src="src/systems/brain.js?v=nopitch1022"></script>
 <script src="src/entities/security.js?v=jas1020"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=silt1020"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
-<script src="src/systems/economy.js?v=mrope10voice1"></script>
+<script src="src/systems/economy.js?v=nopitch1022"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=slotkey1013"></script>
@@ -785,7 +785,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=voice1022"></script>
+<script src="src/entities/guards.js?v=nopitch1022"></script>
 <script src="src/entities/searchlight.js?v=tow929"></script>
 <script src="src/entities/keycard.js?v=jas1020"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
@@ -797,9 +797,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/heritage.js?v=w09290250"></script>
 <!-- THE CARS: the yard sorts itself by race (heritage -> car), no colours.
      Before npc.js (its key holders are indexed by car) and ai.js. -->
-<script src="src/systems/prisoncars.js?v=jailv1001"></script>
-<script src="src/entities/npc.js?v=voice1022"></script>
-<script src="src/entities/ai.js?v=voice1022"></script>
+<script src="src/systems/prisoncars.js?v=nopitch1022"></script>
+<script src="src/entities/npc.js?v=nopitch1022"></script>
+<script src="src/entities/ai.js?v=nopitch1022"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -807,7 +807,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=jas1020"></script>
+<script src="src/world/adminwing.js?v=nopitch1022"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -881,7 +881,7 @@ document.body.appendChild(b);}}catch(e){}})();
      AFTER prisonschedule.js (it reads that clock and never its own) and after
      cellblock/guards/npc; propuse.js is in the CITY block far below, so every
      call into it happens inside the per-frame sweep, never at parse. -->
-<script src="src/systems/prisonrest.js?v=cars1"></script>
+<script src="src/systems/prisonrest.js?v=nopitch1022"></script>
 
 <!-- FOUR SECURITY LEVELS OVER ONE COMPOUND. Getting caught escaping used to
      end the run on a card that said TRANSFERRED and then handed you the same
@@ -895,10 +895,10 @@ document.body.appendChild(b);}}catch(e){}})();
      (it turns their tables), after entities/guards.js, entities/security.js
      and systems/economy.js (it turns their records), and BEFORE capture.js
      and state.js, which call CBZ.prisonTier at runtime. -->
-<script src="src/systems/prisontiers.js?v=jas1020"></script>
+<script src="src/systems/prisontiers.js?v=nopitch1022"></script>
 
 <!-- 4b. remaining systems -->
-<script src="src/systems/quests.js?v=verbs2b"></script>
+<script src="src/systems/quests.js?v=nopitch1022"></script>
 <script src="src/systems/prisonvoice.js?v=voice1022"></script>
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
@@ -910,7 +910,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
-<script src="src/entities/towerwatch.js?v=voice1022"></script>
+<script src="src/entities/towerwatch.js?v=nopitch1022"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -933,7 +933,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=voice1022"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
-<script src="src/systems/detection.js?v=jailv1001"></script>
+<script src="src/systems/detection.js?v=nopitch1022"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
 <!-- HOW WELL A PERSON FIGHTS (NPC_COMBAT_IQ). The ONE competence model —
      role x weapon -> reaction, settle, burst, accuracy, cover quality — plus
@@ -954,19 +954,19 @@ document.body.appendChild(b);}}catch(e){}})();
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
-<script src="src/systems/capture.js?v=jailai1020"></script>
+<script src="src/systems/capture.js?v=nopitch1022"></script>
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
-<script src="src/systems/brain_prison.js?v=jailai1020"></script>
-<script src="src/systems/markers.js?v=allmain2"></script>
+<script src="src/systems/brain_prison.js?v=nopitch1022"></script>
+<script src="src/systems/markers.js?v=nopitch1022"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=leave1014"></script>
-<script src="src/systems/lockdown.js?v=nored0930"></script>
+<script src="src/systems/lockdown.js?v=nopitch1022"></script>
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=jailai1020"></script>
+<script src="src/systems/prisonwarden.js?v=nopitch1022"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
-<script src="src/systems/prisonsnitch.js?v=jailv1001"></script>
+<script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
 <script src="src/systems/reactions.js?v=pf0930c"></script>
 <script src="src/systems/facial.js?v=tvanchor1020"></script>
@@ -975,9 +975,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/combat.js?v=mvoice1butt10"></script>
 <script src="src/systems/killstreaks.js?v=jailv1001"></script>
-<script src="src/systems/interact.js?v=mmrope1butt10"></script>
+<script src="src/systems/interact.js?v=nopitch1022"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
-<script src="src/systems/prisontrade.js?v=jailside1001"></script>
+<script src="src/systems/prisontrade.js?v=nopitch1022"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
      card as a permanent button that actually opened the FAVOUR loop (it is
      called TALK now, which is what it does). This owns the real thing: an NPC
@@ -987,7 +987,7 @@ document.body.appendChild(b);}}catch(e){}})();
      shadowPlayer, off its rental timer). Loads after interact.js (which reads
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
-<script src="src/systems/prisonfriends.js?v=jailv1001"></script>
+<script src="src/systems/prisonfriends.js?v=nopitch1022"></script>
 <!-- THE LIFT CAR'S FLOOR PANEL (one for the city cabs and the island towers):
      shows the stops it is handed, calls back the chosen one. BEFORE
      interactions.js: its capture-phase keys must run ahead of the pinned
@@ -1021,7 +1021,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=mhands1isles1"></script>
+<script src="src/systems/state.js?v=mmhandsnopitc"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors

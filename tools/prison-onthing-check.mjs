@@ -161,7 +161,8 @@ await ev(`(function(){
 const inmate = await ev(`(function(){
   var p = CBZ.player, best = null, bd = 1e9;
   (CBZ.npcs||[]).forEach(function(n){ if (n.dead || n.ko > 0 || n.escaped || !n.group || n.kind !== 'inmate' || n._crowd) return;
-    if (n.approach && n.approach.t > 0) return;
+    if (n._demand) return;
+
     var d = Math.hypot(n.group.position.x - p.pos.x, n.group.position.z - p.pos.z); if (d < bd) { bd = d; best = n; } });
   if (!best) return { err: 'no inmate' };
   window.__inmate = best;

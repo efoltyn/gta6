@@ -2197,16 +2197,21 @@
   function dPick(L, b, c) { return L && L.length ? L[(b.id + c.n) % L.length] : null; }
   function dLine(c, topic) {
     const b = of(c.actor);
-    const VO = CBZ.voice;
-    if (VO && typeof VO.line === "function") {
-      let s = null;
-      try { s = VO.line(c.actor, topic, { ladder: { kind: c.kind, step: c.step, armed: c.armed, targetArmed: !!c.tArmed }, target: c.target }); } catch (e) { s = null; }
-      if (s) return s;
-    }
     const own = c.lines, T = D_TABLE[c.kind] && D_TABLE[c.kind].lines;
     // "...AtGun": said to a man holding a gun; "...Gun": said by a man who has one
     const kt = c.tArmed ? topic + "AtGun" : null, k = c.armed ? topic + "Gun" : topic;
-    const L = (own && ((kt && own[kt]) || own[k] || own[topic])) || (T && ((kt && T[kt]) || T[k] || T[topic]));
+    // the caller's own words for this case outrank the shared book
+    const mine = own && ((kt && own[kt]) || own[k] || own[topic]);
+    if (mine) return dPick(mine, b, c);
+    const VO = CBZ.voice;
+    if (VO && typeof VO.line === "function") {
+      let s = null;
+      // `mood` (opts.mood: "debt" ...) picks the voice's pool for WHY he is
+      // asking, so a man collecting a tab does not say a mugger's line
+      try { s = VO.line(c.actor, topic, { ladder: { kind: c.kind, step: c.step, armed: c.armed, targetArmed: !!c.tArmed }, target: c.target, mood: c.mood || undefined }); } catch (e) { s = null; }
+      if (s) return s;
+    }
+    const L = T && ((kt && T[kt]) || T[k] || T[topic]);
     return dPick(L, b, c);
   }
   function dFriends(actor, b) {
@@ -2248,6 +2253,8 @@
     c.hold = opts.hold != null ? !!opts.hold : !!K.hold;
     c.silent = !!opts.silent;
     c.lines = opts.lines || null;
+    c.mood = opts.mood || null;
+
     c.start = opts.start || null;
     c.actAs = opts.act || null;
     c.startArmed = opts.startArmed !== undefined ? opts.startArmed : (K.startArmed || null);   // an armed target opens at this step   // the caller fixes the act ("beat" for a gang house)

@@ -343,7 +343,9 @@
     },
     dontWantTrouble: { "*": ["I don't want no trouble.", "We're good. We're good.", "Easy. I'm walking."] },
     comply: {
+      debt: ["Good.", "Smart."],
       "*": ["Okay! Okay!", "Don't shoot!", "Please. Please don't.", "Easy. Easy.", "I'm not doing anything!"],
+
       inmate: ["Easy. Easy.", "Alright, alright.", "Don't."],
       gangster: ["Easy. Easy.", "Alright. Alright."],
       kid: ["Please! Please!", "Don't hurt me!"],
@@ -426,15 +428,18 @@
     getHim: { "*": ["Get him!", "There he is! Get him!", "Grab him!"] },
     security: { "*": ["Security!", "Security! Over here!", "Get him away from me!"] },
     // the demand ladder (a robber, a heavy, a cop): escalation order
+    // (mood "debt": a crew collecting a tab you really owe, prison)
     demand: {
       "*": ["Give me your money.", "Wallet. Now.", "Don't make me ask again.", "Last time. Give it."],
       cop: ["Hands where I can see them.", "Drop it. Now.", "Last warning!"],
+      debt: ["You owe us.", "Time to pay.", "Pay what you owe."],
     },
     warn: {
       "*": ["Back off.", "I said back off.", "Last warning."],
       law: ["Step back.", "Back up. Now.", "Last warning!"],
+      debt: ["I'm not asking twice.", "Don't make me take it."],
     },
-    show: { "*": ["See this?", "You see this?"] },
+    show: { "*": ["See this?", "You see this?"], debt: ["Alright. Hard way.", "Last chance."] },
     // the street book, folded in from city/read.js
     windupKill: { "*": ["You picked the wrong day.", "You shoulda kept walking."], gangster: ["Wrong block.", "You shoulda stayed home."] },
     windupBeat: { "*": ["You wanna do this?", "Square up, then.", "Walk away."] },

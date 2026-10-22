@@ -627,12 +627,6 @@
       g.witnessReportT = Math.max(g.witnessReportT || 0, 6);
       guard.alert = Math.max(guard.alert || 0, 0.65);
       guard.investigate = null;
-      if (CBZ.startGuardPayoffApproach && !guard.approach && guard.bribed <= 0) {
-        CBZ.startGuardPayoffApproach(guard, "witnessBlackmail", {
-          amount,
-          source: lk.source || "a witness",
-        });
-      }
       return lk;
     }
     CBZ.addCasePressure(amount, meta, reporter, { credibility: witnessCredibility(reporter, meta) });

@@ -25,7 +25,7 @@
                A stash gets raided, a bent officer loses his racket, a runner
                never runs. Nothing: the lie is caught, and it comes back.
      FAVORS    paid when it checks out: time off (or the warden's ear toward
-               walking out), a phone call, an officer who looks away once,
+               walking out), an officer who looks away once,
                cigarettes.
      THE COST  inmates who SEE you talking to staff know. A guard's mouth
                leaks. Information only you had points at you once it is
@@ -81,11 +81,10 @@
     }
     // does the man it is about know it was you
     function targetKnows(f, o) { return !!(o.leaked || (f.sole && o.acted) || o.targetSaw || o.lieCaught); }
-    function favor(val, to, st) {
-      st = st || {};
+    function favor(val, to) {
       if (to !== "warden") return val >= 2.5 ? "pass" : "cigs";
       if (val >= 8.5) return "time";
-      if (val >= 5.5) return st.phone ? "pass" : "phone";
+      if (val >= 5.5) return "pass";
       if (val >= 1.5) return "cigs";
       return "none";
     }
@@ -169,7 +168,6 @@
     goOn: ["Go on.", "Talk."],
     wardenHears: {
       time: "If it checks out, it's time off.",
-      phone: "If it checks out, you get a call.",
       pass: "If it checks out, my officers owe you one.",
       cigs: "If it checks out, there's something in it.",
       none: "Noted.",
@@ -276,8 +274,6 @@
     const br = g.blockRumor || (g.blockRumor = { fear: 0, wealth: 0, heat: 0, badge: 0, snitch: 0, debt: 0, last: "" });
     br.snitch = Math.min(100, (br.snitch || 0) + n * 0.8);
     br.last = why || "snitch";
-    const yr = CBZ.prisonYardRep ? CBZ.prisonYardRep() : null;
-    if (yr) yr.snitch = Math.max(yr.snitch || 0, Math.floor(rep() / 20));
   }
   function know(m, why) {
     if (!m || isStaff(m) || m === CBZ.player || S.knowers.has(m)) return false;
@@ -394,8 +390,7 @@
       if (!gd || gd.kind === "warden" || !alive(gd)) continue;
       // a clean officer who took your street money is bent too
       const paid = (gd.bribed || 0) > 0 && dist(gd, CBZ.player) < 6;
-      const pitched = !!(gd.corrupt && gd.approach && /racket|payoff/i.test(String(gd.approach.kind || "")) && dist(gd, CBZ.player) < 5);
-      if (paid || pitched) learn({ kind: "bent", whoA: gd, sole: true });
+      if (paid) learn({ kind: "bent", whoA: gd, sole: true });
     }
     // YOUR CAR'S STASH: running with a set means knowing where its things are
     const c = carOf(CBZ.player);
@@ -566,8 +561,7 @@
     // his mouth
     const leaked = rng() < CORE.leakChance(to, !!a.corrupt);
     addRep(CORE.exposure(f, { witnesses: seen.length, leaked: false }), "seen talking");
-    const st = { phone: !!(CBZ.econ && CBZ.econ.hasPhoneAccess && CBZ.econ.hasPhoneAccess()) };
-    const fav = CORE.favor(val, to, st);
+    const fav = CORE.favor(val, to);
     const job = { f: f, to: to, val: val, fav: fav, listener: a, leaked: leaked, targetSaw: targetSaw,
       witnesses: seen.length, at: S.now };
     order(job);
@@ -584,7 +578,7 @@
   function freeOfficer(gd) {
     return !!(gd && gd.group && gd.kind !== "warden" && !gd.dead && !(gd.ko > 0) && !gd.asleep && !gd.tied &&
       !(gd.hunt > 0) && !gd._escort && !gd._wardenEscort && !gd._wardenCall && !gd._shakedown && !gd._snitchTask &&
-      !gd._pcEscort && !gd._yardCase && gd.intimidMode !== "scared" && !gd.approach);
+      !gd._pcEscort && !gd._yardCase && gd.intimidMode !== "scared");
   }
   function nearestOfficer(x, z, maxD, not) {
     let best = null, bd = (maxD || 120) * (maxD || 120);
@@ -728,7 +722,6 @@
     if (gd && PB && PB.beginCase && !n.cuffed) { try { PB.beginCase(gd, n, "report"); } catch (e) {} }
     if (hours > 0) S.seg.push({ n: n, hours: hours, walkAt: S.now + 5, gone: false, until: 0 });
     else if (CBZ.econ && n.loadout) n.loadout.cigs = Math.floor((n.loadout.cigs || 0) * 0.5);
-    if (CBZ.prisonNoteSnitched) { try { CBZ.prisonNoteSnitched(n); } catch (e) {} }
   }
   // a man moved out of the yard: in seg for a while, or on a bus for good
   const SEG_AT = { x: 84, z: 20 };
@@ -769,7 +762,7 @@
       return;
     }
     if (gd) {
-      gd.corrupt = false; gd.bribed = 0; gd.approach = null; gd.standingOffer = null;
+      gd.corrupt = false; gd.bribed = 0;
       gd._reassigned = true;
       if (CBZ.addRacketStanding) { try { CBZ.addRacketStanding(-20); } catch (e) {} }
     }
@@ -827,8 +820,6 @@
       if (E && E.announceLoot) { try { E.announceLoot(c, []); } catch (e) {} }
     } else if (fav === "pass") {
       g.snitchPass = Math.min(2, (g.snitchPass || 0) + 1);
-    } else if (fav === "phone") {
-      if (E && E.grantPhoneTime) E.grantPhoneTime(E.PHONE_TIME_SECS || 90);
     } else if (fav === "time") {
       if ((+g.jailSentence || 0) > 0) g.jailSentence = Math.max(1, (+g.jailSentence) - (60 + val * 12));
       else {
