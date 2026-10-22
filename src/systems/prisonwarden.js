@@ -23,30 +23,50 @@
                fires itself off a heat number, it reports the alarm here).
      SUMMONS   after your trouble, the next morning or when the hole lets you
                out, an officer comes to your door and walks you to his office.
-               Follow him or it is an offense. In the office: DEAL (a name),
-               FAVOR (a real errand), THREATEN (only works with leverage from
-               his safe; otherwise it is the hole), or walk out (a warning).
+               Follow him or it is an offense. In the office he wants a NAME
+               (Snitch, when you know one); with nothing to sell him he gives
+               you an ORDER: there is a blade buried in his yard, bring it
+               (Give). Not done by the next day, he remembers. Walk out on
+               him and that is a warning.
      PRESENCE  presence() 1 when he is on the floor near you or the trouble,
                0.3 in the building, 0 off shift. entities/guards.js reads it
                to sharpen his officers.
      NOT A PUNCHING BAG  a hand on him is an assault: every officer in range
                comes, and the block locks down. He never chases anyone himself;
                he calls it in. On rounds his escort takes the hit for him.
-     ORDERS    (2026-09-28, owner: "the warden just acts like a normal cop")
+     ORDERS    (2026-09-28, owner: "the warden just acts like a normal cop";
+               2026-10-22: "the current warden saying dumb shit is dumb... all
+               dialogue, much of it needs to be commands that are either
+               followed or not")
                He is the warden, not a patrol. entities/guards.js hands his
                body to body() below every frame: a hunt, a search, a yard case
                that lands on him is turned into an ORDER to the nearest free
-               officer, who stops, turns to him ("Sir."), and goes. He never
-               frisks, cuffs or chases anyone; he stands and watches it done.
-               On rounds he stops at cell doors (the inspection), and a blade
-               he sees on the tier is an order to toss that man.
+               officer through systems/command.js: the officer stops and turns
+               to him and then DECIDES (obey, "Sir?" and the order again,
+               "No, sir."). An officer who walks off his orders sours the rest;
+               when enough of them stop taking his word (command's "mutiny")
+               the yard sees it and goes up. He never frisks, cuffs or chases
+               anyone; he stands and watches it done. On rounds he stops at
+               cell doors (the inspection), and a blade he sees on the tier is
+               an order to toss that man.
+               HIS WORD TO YOU is an order too, read from what you do: steel
+               out in front of him ("Drop it."), out of your cell after lock-in
+               ("Back to your cell."), off the wing at the count ("On your
+               door."), the shakedown's "Hands on the wall.", the yard he took
+               ("No yard for you. Inside."). Do it and that is the end of it;
+               don't, and his officers come (CBZ.command.toPlayer on the
+               brain's demand ladder). In uniform (the cop role) he hands YOU
+               the job: "Break that up.", "Toss that man.", and a cop who lets
+               it ride gets written up.
      THE GATE  a new arrival (a run's start, a transfer) finds him at the wing's
                mouth, watching the new man walk in.
      GRUDGE / FAVOR  g.wardenStanding. Down at -4 he takes your yard; up at +5
                his officers owe you one. A lie to his face costs you both.
-     TELL      systems/prisonsnitch.js: in his office the card is TELL (what
-               you know), FAVOR (an errand) or PROTECTION, THREATEN. On the
-               floor "Snitch" gets you "My office." and an officer comes for you.
+     TELL      systems/prisonsnitch.js: Snitch on him is what you know; on the
+               floor it gets you "My office." and an officer comes for you. In
+               the office: Snitch, Transfer (once he owes you), Give (the blade
+               he sent you for). Nothing else: no asking, begging or
+               threatening him with words.
      HIS GUN   (world/adminwing.js, the prison-slop lead's pickup; feature-
                detected, never built here) a real threat in or by his office
                sends him for it. If it walks, the prison locks down and every
@@ -164,8 +184,10 @@
     take: ["Take him.", "Officer. Him."],
     breakup: ["Break that up.", "Officer. Over there."],
     toss: ["Officer. That one.", "Toss that man."],
+    youBreak: ["Officer. Break that up.", "Officer. I said break it up.", "Now, officer."],
+    youToss: ["Officer. Toss that man.", "I said toss him.", "Now, officer."],
     look: ["Go and look."],
-    sir: ["Sir.", "Yes, sir."],
+    push: ["I said go.", "Officer. Now."],
     inspect: ["Stand up.", "Bunk's a mess.", "Let me see your hands."],
     arrival: ["Another one. Walk him in."],
     paYard: {
@@ -177,21 +199,16 @@
     gunDraw: ["Down. On the floor.", "Don't."],
     lied: ["You lied to me.", "Nothing on him. You wasted my time."],
     checked: ["It checked out.", "Good. It was there."],
-    noYard: ["No yard for you. Inside."],
-    protect: ["You'll have an officer on you."],
-    favorAsk: ["Somebody buried a blade in my yard. Find it."],
+    noYard: ["No yard for you. Inside.", "I said inside.", "Inside. Now."],
+    favorAsk: ["Somebody buried a blade in my yard. Bring it to me."],
     handOver: ["Good. We're square."],
-    threatWin: ["Get out of my office."],
-    threatLose: ["Officer. Take him down."],
     silent: ["Next time you talk.", "Suit yourself. Next time it's the hole."],
-    hands: ["Hands on the wall.", "Hands. Wall. Now."],
+    hands: ["Hands on the wall.", "Hands. Wall. Now.", "Last time. Wall."],
     clean: ["Clean. Go on."],
     trespass1: ["This is my office. Out.", "Wrong room."],
     trespass2: ["I won't say it twice. Out."],
     trespass3: ["Officers. My office."],
     office: ["My office.", "Not here. My office."],
-    begYes: ["One more chance. Yard's yours.", "Fine. Go on out."],
-    begNo: ["No.", "You had your chance."],
     transfer: ["Fine. You're reclassified.", "Paperwork's signed. You move down."],
   };
   let lineSeq = 0;
@@ -224,7 +241,7 @@
   const S = {
     now: 0,
     incidents: [],
-    log: { incidents: 0, lockdowns: 0, shakedowns: 0, summons: 0, deals: 0, favors: 0, threats: 0,
+    log: { incidents: 0, lockdowns: 0, shakedowns: 0, summons: 0, deals: 0, favors: 0,
       warnings: 0, ignored: 0, pa: 0, assaults: 0, found: 0 },
     lastShake: -1e9, lastLockEnd: -1e9, lockdownMine: false,
     blockSeq: 0, lastBlock: null, wakeSeq: -1,
@@ -237,10 +254,12 @@
     paQueue: null, paDay: -1, paToday: 0, morningSaid: -1, morningT: 0,
     favor: null,          // {x,z,shiv0,seq,picked}
     owes: false,          // a done favor buys one pass
-    immuneSeq: -1,        // leverage used: no summons before this block seq
     holeWas: false, cuffWas: false, hpWas: null, koWas: 0,
     arrival: null, lastDecision: null,
-    orders: [],           // an officer standing to hear his order ("Sir.")
+    orders: [],           // an officer standing to hear his order
+    push: [],             // an officer who said "Sir?": the order again
+    staffSour: 0,         // what his officers think of his orders (command.js standing)
+    you: null,            // his standing order on YOU (command.toPlayer record)
     insp: { t: 0, stop: 0, side: 1 },
     seeT: 0, sayT: 0,
     noYard: -1,           // block seq until which your yard is gone
@@ -434,14 +453,22 @@
       if (gd.waypoints && gd.waypoints[0]) { gd.waypoints[0].set(p.x, 0, p.z); gd.wi = 0; }
       if (d < 2.2) {
         sh.phase = "search"; sh.hold = 0;
-        say(gd, pick(LINE.hands), 1.8);
-        if (CBZ.player) CBZ.player.stun = Math.max(CBZ.player.stun || 0, 1.4);
+        // HIS ORDER: hands on the wall. Stand for it and it is a pat-down;
+        // walk off on it and it is a chase and a write-up
+        const CMD = CBZ.command;
+        if (CMD && CMD.toPlayer) {
+          CMD.toPlayer(gd, "search", {
+            complied: function () { return !S.shake || sh.hold >= 1.4; }, maxDist: 7, patience: [3, 2.5, 2],
+            lines: LINE.hands,
+            onForce: function () { S.log.ignored++; sendFor("search", 1); endShakedown(); },
+          });
+        } else say(gd, pick(LINE.hands), 1.8);
       }
       return;
     }
     // hands on the wall: he stands over you for a beat, then turns the pockets
     gd.alert = Math.max(gd.alert || 0, 0.3);
-    sh.hold += dt;
+    if (d < 2.8) sh.hold += dt;
     if (sh.hold < 1.4) return;
     const took = contrabandTake();
     if (took.length) {
@@ -465,7 +492,6 @@
     // a man who did him a favor gets one pass
     const asked = reason === "favor" || reason === "tell";       // you came to him; nothing to excuse
     if (S.owes && !asked && (REASON_RANK[reason] || 0) <= 2) { S.owes = false; return false; }
-    if (S.blockSeq < S.immuneSeq && !asked) return false;
     const cur = S.pending;
     if (cur && (REASON_RANK[cur.reason] || 0) >= (REASON_RANK[reason] || 0) && !opts.now) return true;
     S.pending = { reason: reason, seq: S.blockSeq, now: !!opts.now, hole: false };
@@ -564,6 +590,9 @@
       const SN = CBZ.prisonSnitch;
       if (m.reason === "tell") say(w, pick(LINE.tellAsk), 2);
       else if (SN && SN.canTell && SN.canTell(w)) say(w, pick(LINE.dealAsk), 2.6);
+      // nothing to sell him: he gives you an order instead, and the trouble
+      // you were called in for waits on it
+      else if (!S.favor && giveErrand(w)) { S.meet = null; return; }
     }
     // walked out, or stood there saying nothing: that is an answer too
     if ((m.opened && !inside) || (m.opened && m.t > 40) || (!m.opened && m.t > 60)) {
@@ -577,40 +606,18 @@
       S.meet = null;
     }
   }
-  function leverage() {
-    // something out of HIS safe, and he knows it is gone
-    const A = CBZ.adminWingAudit ? CBZ.adminWingAudit() : null;
-    const robbed = !!(A && A.safeOpen);
-    if (has("Gun-Room Key")) return "Gun-Room Key";
-    if (robbed && has("Contraband Map")) return "Contraband Map";
-    if (robbed && has("Luxury Watch")) return "Luxury Watch";
-    return null;
-  }
-  /* ---- WHAT YOU CAN ASK OF HIM (owner, 2026-09-30: "for the warden it's
-     just Snitch. That's dumb") -------------------------------------------
-     Every one of these moves something he already keeps:
-       ASK       on the floor, with nothing to sell him: he sends for you
-                 (the same summons a name gets). His office is where the
-                 errand, protection, a threat and a transfer live.
-       BEG       only while he has taken your yard (g.wardenStanding fell to
-                 -4): he gives it back unless he is furious or you lied to him.
-                 Once a day; the second time is a no.
+  /* ---- WHAT YOU CAN DO WITH HIM (owner 2026-10-22: the warden's talk
+     buttons were words: Ask, Beg, Work, Protect, Threaten. Gone). What is
+     left changes something he keeps:
+       SNITCH    a name you really have (systems/prisonsnitch.js)
        TRANSFER  in his office, once he owes you (standing 5+) and you are not
                  already in the lowest wing: one security level down
-                 (systems/prisontiers.js runs the softer regime around you),
-                 and it spends what he owed you. */
-  function yardTaken() { return S.blockSeq < S.noYard; }
-  function canBeg() { return yardTaken() && S.begSeq !== S.wakeSeq; }
+                 (systems/prisontiers.js), and it spends what he owed you
+       GIVE      the blade he ordered you to bring him
+     The errand is HIS ORDER now, not a button you press to ask for work. */
   function canTransfer() {
     const T = CBZ.prisonTier;
     return !!(T && T.enabled && T.enabled() && T.level() > 0 && (g.wardenStanding || 0) >= 5);
-  }
-  function beg(w) {
-    S.begSeq = S.wakeSeq;
-    const mood = CORE.moodOf(S.incidents, S.now, hourLen());
-    if (mood === "furious" || (g.wardenLies || 0) > 0) { standing(-1); return { handled: true, ok: false, msg: pick(LINE.begNo) }; }
-    S.noYard = -1;
-    return { handled: true, ok: true, msg: pick(LINE.begYes) };
   }
   function transferDown() {
     const T = CBZ.prisonTier;
@@ -621,36 +628,23 @@
     S.owes = false;
     return { handled: true, ok: true, msg: pick(LINE.transfer) };
   }
+  // HIS ORDER IN THE OFFICE: nothing to sell him, so you do something for him
+  function giveErrand(w) {
+    if (S.favor) return false;
+    S.log.favors++;
+    const spot = FAVOR_SPOTS[(CBZ.dayCount ? CBZ.dayCount() | 0 : 0) % FAVOR_SPOTS.length];
+    let inst = null;
+    if (CBZ.prisonDropOne) { try { inst = CBZ.prisonDropOne("Shiv", spot[0], 0.3, spot[1], { speed: 0, up: 0 }); } catch (e) { inst = null; } }
+    if (inst && inst.data) inst.data.life = Infinity;
+    S.favor = { x: spot[0], z: spot[1], shiv0: inv().Shiv | 0, seq: S.blockSeq, picked: false, placed: !!inst };
+    say(w, pick(LINE.favorAsk), 2.6);
+    return true;
+  }
   function act(v, a) {
-    const m = S.meet;
-    if (a && a.kind === "warden") {
-      if (v === "wask") {
-        summon("tell", { now: true });
-        return { handled: true, ok: true, msg: pick(LINE.office) };
-      }
-      if (v === "wbeg" && canBeg()) return beg(a);
-      if (v === "wtransfer") return transferDown();
-    }
-    if (!a || a.kind !== "warden" || !m || !m.opened) return { handled: false, ok: false, msg: "" };
-    const w = a;
-    if (v === "protect") {
-      S.meet = null;
-      const SN = CBZ.prisonSnitch;
-      const ok = !!(SN && SN.protect && SN.protect(10));
-      if (ok) { standing(-1); S.pending = null; }
-      return { handled: true, ok: ok, msg: ok ? pick(LINE.protect) : pick(LINE.silent) };
-    }
-    if (v === "wfavor") {
-      S.meet = null;
-      S.log.favors++;
-      const spot = FAVOR_SPOTS[(CBZ.dayCount ? CBZ.dayCount() | 0 : 0) % FAVOR_SPOTS.length];
-      let inst = null;
-      if (CBZ.prisonDropOne) { try { inst = CBZ.prisonDropOne("Shiv", spot[0], 0.3, spot[1], { speed: 0, up: 0 }); } catch (e) { inst = null; } }
-      if (inst && inst.data) inst.data.life = Infinity;
-      S.favor = { x: spot[0], z: spot[1], shiv0: inv().Shiv | 0, seq: S.blockSeq, picked: false, placed: !!inst };
-      return { handled: true, ok: true, msg: pick(LINE.favorAsk) };
-    }
+    if (!a || a.kind !== "warden") return { handled: false, ok: false, msg: "" };
+    if (v === "wtransfer") return transferDown();
     if (v === "whand") {
+      if (!S.favor) return { handled: true, ok: false, msg: "" };
       S.meet = null;
       const took = CBZ.econ && CBZ.econ.takeItem ? CBZ.econ.takeItem("Shiv") : false;
       if (!took) return { handled: true, ok: false, msg: pick(LINE.silent) };
@@ -660,56 +654,29 @@
       if (CBZ.addHeat) CBZ.addHeat(-(g.detection || 0));
       return { handled: true, ok: true, msg: pick(LINE.handOver) };
     }
-    if (v === "wthreat") {
-      S.meet = null;
-      S.log.threats++;
-      const lev = leverage();
-      if (lev) {
-        g.wardenLeverage = { item: lev, t: g.elapsed || 0 };
-        S.immuneSeq = S.blockSeq + 8;                 // he leaves you alone for a day
-        S.pending = null;
-        standing(-4);
-        if (CBZ.addHeat) CBZ.addHeat(-(g.detection || 0));
-        // it rattles him, and a rattled warden runs a tight block
-        S.incidents.push({ kind: "riot", at: S.now, player: false, seen: false, found: false, x: null, z: null });
-        return { handled: true, ok: true, msg: pick(LINE.threatWin) };
-      }
-      // no leverage: a threat to the warden in his own office
-      standing(-3);
-      // an offense for the screws (cuffs and the hole), not an incident for
-      // him: a threat in his own office does not lock the prison down
-      offense("minor", { by: w, seenBy: w, severity: 2, why: "threat", hole: true,
-        at: P() ? { x: P().x, z: P().z } : null });
-      if (!CBZ.prisonOffense && CBZ.haulToCell) { try { CBZ.haulToCell("", { strike: false }); } catch (e) {} }
-      return { handled: true, ok: false, msg: pick(LINE.threatLose) };
-    }
     return { handled: false, ok: false, msg: "" };
   }
-  // the three buttons on his card while you are in his office. TELL is what
-  // you know (systems/prisonsnitch.js turns the card into it); PROTECTION
-  // takes the errand's slot once the yard has you down as a man who talks.
+  // HIS CARD IN THE OFFICE: what you know, the transfer he owes you, the
+  // blade he sent you for
   function verbs(a) {
     if (!a || a.kind !== "warden") return null;
     const m = S.meet;
     if (!m || !m.opened) return null;
-    if (m.reason === "favor") return has("Shiv") ? ["whand"] : null;
     const SN = CBZ.prisonSnitch;
     const out = [];
     if (SN && SN.canTell && SN.canTell(a)) out.push("tell");
     if (canTransfer()) out.push("wtransfer");
-    else if (canBeg()) out.push("wbeg");
-    out.push(SN && SN.protectionOffered && SN.protectionOffered() ? "protect" : "wfavor");
-    out.push("wthreat");
-    return out;
+    if (S.favor && has("Shiv")) out.push("whand");
+    return out.length ? out : null;
   }
-  // OFF THE MEETING: the man on his rounds or at his desk. Snitch (or Ask)
-  // gets you his office; Beg only while your yard is gone.
+  // OFF THE MEETING: the man on his rounds or at his desk. Snitch gets you
+  // his office; the blade he sent you for can be handed over anywhere.
   function floor(a) {
     if (!a || a.kind !== "warden") return null;
     const SN = CBZ.prisonSnitch;
     const out = [];
-    out.push(SN && SN.canTell && SN.canTell(a) ? "tell" : "wask");
-    if (canBeg()) out.push("wbeg");
+    if (SN && SN.canTell && SN.canTell(a)) out.push("tell");
+    if (S.favor && has("Shiv")) out.push("whand");
     return out;
   }
   /* ---- what systems/prisonsnitch.js tells him back ---- */
@@ -815,22 +782,48 @@
     S.sayT = S.now;
     return true;
   }
-  // THE ORDER, SEEN: he says it, the officer stops, turns to him, "Sir.", goes.
-  // guards.js's `pause` branch holds the officer and faces him at _facePt.
-  function orderOfficer(gd, line, fn) {
+  /* THE ORDER, SEEN (systems/command.js). He says it; the officer stops and
+     turns to him and DECIDES. Obeyed: a beat, then he goes (a routine order
+     gets no word back). "Sir?": the warden says it again and that settles
+     it. "No, sir.": he stays where he is, and the warden turns to the next
+     man. guards.js's `pause` branch holds the officer and faces him at
+     _facePt. `order` is command's word for it (take / search / go). */
+  function queueOrder(gd, fn) {
+    S.orders.push({ gd: gd, fn: fn, at: S.now + 1.0 });
+    return true;
+  }
+  function orderOfficer(gd, line, fn, order, target) {
     const w = wardenG();
     if (!gd || !w || !fn) return false;
     if (line) say(w, line, 1.8);
     gd.pause = Math.max(gd.pause || 0, 1.1);
     gd._facePt = { x: w.group.position.x, z: w.group.position.z };
-    S.orders.push({ gd: gd, fn: fn, at: S.now + 1.0, said: false });
     S.log.orders = (S.log.orders || 0) + 1;
+    const CMD = CBZ.command;
+    if (!CMD || !CMD.issue) return queueOrder(gd, fn);
+    const o = order || "go", t = target || null;
+    const r = CMD.issue(w, gd, o, t, { say: false, exec: function () { return queueOrder(gd, fn); } });
+    if (r.answer === "hesitate") { S.push.push({ gd: gd, fn: fn, order: o, target: t, at: S.now + 1.4 }); return true; }
+    if (r.answer !== "obey") { gd._refusedAt = S.now; S.log.refused = (S.log.refused || 0) + 1; return false; }
     return true;
   }
+  // "Sir?" -> the order again; this time it is yes or no
+  function drivePush() {
+    const w = wardenG();
+    for (let i = S.push.length - 1; i >= 0; i--) {
+      const q = S.push[i];
+      if (S.now < q.at) continue;
+      S.push.splice(i, 1);
+      if (!w || w.dead || !able(q.gd) || !CBZ.command) continue;
+      say(w, pick(LINE.push), 1.4);
+      const r = CBZ.command.issue(w, q.gd, q.order, q.target, { say: false, exec: function () { return queueOrder(q.gd, q.fn); } });
+      if (r.answer !== "obey") { q.gd._refusedAt = S.now; S.log.refused = (S.log.refused || 0) + 1; }
+    }
+  }
   function driveOrders() {
+    drivePush();
     for (let i = S.orders.length - 1; i >= 0; i--) {
       const o = S.orders[i];
-      if (!o.said && S.now > o.at - 0.75) { o.said = true; say(o.gd, pick(LINE.sir), 1.1); }
       if (S.now < o.at) continue;
       S.orders.splice(i, 1);
       o.gd._facePt = null;
@@ -841,9 +834,46 @@
   }
   function ordered(gd) {
     for (let i = 0; i < S.orders.length; i++) if (S.orders[i].gd === gd) return true;
+    for (let i = 0; i < S.push.length; i++) if (S.push[i].gd === gd) return true;
     return false;
   }
-  function freeForOrder(x) { return free(x) && !ordered(x); }
+  // a man who just told him no is not asked again for a while
+  function freeForOrder(x) { return free(x) && !ordered(x) && !(S.now - (x._refusedAt || -1e9) < 25); }
+  // THE NEAREST WHO WILL: a refusal sends him to the next officer (two tries)
+  function orderSomeone(x, z, maxD, line, fn, order, target) {
+    for (let k = 0; k < 2; k++) {
+      const gd = pickNear(x, z, maxD, freeForOrder);
+      if (!gd) return false;
+      if (orderOfficer(gd, k === 0 ? line : (sayGap(2) ? pick(LINE.push) : ""), fn, order, target)) return true;
+    }
+    return false;
+  }
+  /* IN UNIFORM, THE JOB IS YOURS. A cop (the player's cop role) nearer the
+     trouble than any officer gets the order himself. He answers by doing it
+     (command.toPlayer reads it); a cop who lets it ride is written up, and the
+     warden hands it to somebody who will. */
+  function youGetIt(x, z, order, target, lines, done, fn) {
+    if (g.role !== "cop" || !CBZ.command || !CBZ.command.toPlayer) return false;
+    const w = wardenG(), p = P();
+    if (!w || !p || !playerFree()) return false;
+    const dYou = Math.hypot(p.x - x, p.z - z);
+    if (dYou > 18) return false;
+    const gd = pickNear(x, z, 45, freeForOrder);
+    if (gd && Math.hypot(gd.group.position.x - x, gd.group.position.z - z) < dYou) return false;
+    const live = CBZ.command.playerOrders();
+    for (let i = 0; i < live.length; i++) if (live[i].from === w) return true;   // you already have one of his
+    CBZ.command.toPlayer(w, order, {
+      target: target, lines: lines, maxDist: 40, patience: [6, 5, 4],
+      complied: done,
+      onForce: function () {
+        if (CBZ.addComplaint) CBZ.addComplaint(4);
+        standing(-1);
+        orderSomeone(x, z, 60, "", fn, order, target);
+      },
+    });
+    S.log.orders = (S.log.orders || 0) + 1;
+    return true;
+  }
   // HANDS OFF: whatever lands on him (a hunt, a search, a yard case) becomes
   // an order to an officer. He never runs it himself.
   function handOff(w) {
@@ -856,9 +886,12 @@
           return able(x) && !x._escort && !x._snitchTask && !x._pcEscort;
         });
         if (gd) {
-          gd.hunt = Math.max(gd.hunt || 0, h, 3);
-          gd.alert = Math.max(gd.alert || 0, 1);
           if (sayGap(6)) say(w, pick(LINE.take), 1.6);
+          const go = function () { gd.hunt = Math.max(gd.hunt || 0, h, 3); gd.alert = Math.max(gd.alert || 0, 1); return true; };
+          // the order on YOU is the one an officer is least likely to refuse
+          // (you put hands on the man), but it is still his to take
+          if (CBZ.command && CBZ.command.issue) CBZ.command.issue(w, gd, "take", CBZ.player, { say: false, quiet: true, exec: go });
+          else go();
         }
       }
     }
@@ -866,10 +899,9 @@
       const iv = w.investigate;
       w.investigate = null;
       if (isFinite(iv.x) && isFinite(iv.z)) {
-        const gd = pickNear(iv.x, iv.z, 80, freeForOrder);
-        if (gd) orderOfficer(gd, sayGap() ? pick(LINE.look) : "", function (o) {
+        orderSomeone(iv.x, iv.z, 80, sayGap() ? pick(LINE.look) : "", function (o) {
           o.investigate = { x: iv.x, z: iv.z, t: iv.t || 8, scan: 0, type: iv.type || "report", looking: !!iv.looking, player: !!iv.player };
-        });
+        }, "go", null);
       }
     }
     if (w._yardCase) {
@@ -885,9 +917,11 @@
     const PB = CBZ.prisonBrain;
     if (!PB || !PB.beginCase) return false;
     const p = n.group.position;
-    const gd = pickNear(p.x, p.z, 45, freeForOrder);
-    if (!gd) return false;
-    return orderOfficer(gd, sayGap(4) ? pick(LINE.breakup) : "", function (o) { PB.beginCase(o, n, "fight"); });
+    const fn = function (o) { PB.beginCase(o, n, "fight"); };
+    if (youGetIt(p.x, p.z, "take", n, LINE.youBreak, function () {
+      return !n.group || n.dead || n.cuffed || (n.ko || 0) > 0 || !!n._lawBy || n.aiState !== "fight";
+    }, fn)) return true;
+    return orderSomeone(p.x, p.z, 45, sayGap(4) ? pick(LINE.breakup) : "", fn, "take", n);
   }
   // WHAT HE SEES ON THE FLOOR: a fight is an order; steel is a toss
   function watchFloor(w, dt) {
@@ -914,15 +948,200 @@
         if (!st._lawBy) orderBreakup(st);
       } else {
         const SN = CBZ.prisonSnitch;
-        const gd = pickNear(q.x, q.z, 45, freeForOrder);
-        if (gd && SN && SN.search) {
+        if (SN && SN.search) {
           n._wardenToss = S.now + 120;
-          orderOfficer(gd, sayGap(4) ? pick(LINE.toss) : "", function (o) { SN.search(n, "blade", o); });
+          const fn = function (o) { SN.search(n, "blade", o); };
+          const s0 = n._copSearched | 0;
+          if (!youGetIt(q.x, q.z, "search", n, LINE.youToss, function () {
+            return !n.group || n.dead || n.cuffed || (n._copSearched | 0) > s0;
+          }, fn)) orderSomeone(q.x, q.z, 45, sayGap(4) ? pick(LINE.toss) : "", fn, "search", n);
         }
       }
       return;                                           // one order a look
     }
   }
+  /* ==========================================================
+     4b'. HIS WORD TO YOU (systems/command.js toPlayer). What he sees you
+          doing decides the order; what you do next is the answer: put the
+          steel away, walk into your cell, get on the wing for the count.
+          Ignore him and it climbs (the order, again, the last word), then
+          his officers come and it goes on your record.
+     ========================================================== */
+  function youArmed() {
+    const V = CBZ.voice;
+    try { return !!(V && V.capability && V.capability(CBZ.player) !== "none"); } catch (e) { return false; }
+  }
+  function seesYou(w, range) {
+    const p = P();
+    if (!p || !w) return false;
+    const wp = w.group.position;
+    const d = Math.hypot(p.x - wp.x, p.z - wp.z);
+    if (d > range) return false;
+    if (d < 4) return true;
+    const per = CBZ.brain && CBZ.brain.perception;
+    if (!per || !per.seesPoint) return true;
+    try { return !!per.seesPoint(w, p.x, 0, p.z, { range: range }); } catch (e) { return false; }
+  }
+  // his officers come for a man who would not do as he was told
+  function sendFor(why, sev) {
+    const p = P();
+    if (!p) return;
+    offense("minor", { by: wardenG(), seenBy: wardenG(), severity: sev || 1, why: why, at: { x: p.x, z: p.z } });
+    const gd = pickNear(p.x, p.z, 60, able);
+    if (gd) { gd.hunt = Math.max(gd.hunt || 0, 3); gd.alert = Math.max(gd.alert || 0, 1); }
+    standing(-1);
+  }
+  function youOrder(from, order, complied, why, opts) {
+    const CMD = CBZ.command;
+    if (!CMD || !CMD.toPlayer || !from) return null;
+    if (S.you && S.you.outcome == null) return S.you;          // one order of his at a time
+    opts = opts || {};
+    S.you = CMD.toPlayer(from, order, {
+      complied: complied, lines: opts.lines || null, patience: opts.patience || null, maxDist: opts.maxDist || 30,
+      alive: function () { return playerFree() && g.mode === "escape"; },
+      onForce: function (r, out) {
+        S.log.defied = (S.log.defied || 0) + 1;
+        if (opts.force) opts.force(out); else sendFor(why, opts.sev);
+      },
+      onDone: function () { S.youAt = S.now; },
+    });
+    if (S.you) S.log.toYou = (S.log.toYou || 0) + 1;
+    return S.you;
+  }
+  function watchYou(w, dt) {
+    S.youT = (S.youT || 0) - dt;
+    if (S.youT > 0) return;
+    S.youT = 0.4;
+    if (g.role === "cop" || !w || w.dead || w.asleep || (w.ko | 0) > 0 || !playerFree()) return;
+    if (S.call || S.meet || S.shake) return;
+    if (S.you && S.you.outcome == null) return;
+    if (S.now - (S.youAt || -1e9) < 20) return;                 // a breath after the last one
+    const p = P();
+    if (!p) return;
+    // STEEL OUT in front of him (a blade at arm's length is his detail's,
+    // 4e below; this is the man across the tier with it in his hand)
+    if (youArmed() && seesYou(w, 14)) {
+      youOrder(w, "drop", function () { return !youArmed(); }, "weapon", {
+        sev: 2,
+        force: function () {
+          incident("contraband", { player: true, seen: true, seenBy: w, at: { x: p.x, z: p.z } });
+          sendFor("weapon", 2);
+        },
+      });
+      return;
+    }
+    if (!onFloor()) return;
+    const b = String(blockId() || "");
+    // LOCKED IN: after lock-in, or in a lockdown, a man out of his cell
+    if ((b === "secure" || b === "night" || lockdownOn()) && CBZ.playerInOwnCell && !CBZ.playerInOwnCell() && seesYou(w, 16)) {
+      youOrder(w, "cell", function () { return !!CBZ.playerInOwnCell(); }, "cell", { maxDist: 60, patience: [8, 7, 6] });
+      return;
+    }
+    // THE COUNT: off the wing while it runs
+    if ((b === "count" || b === "wake") && !inRect(CB, p.x, p.z) && seesYou(w, 18)) {
+      youOrder(w, "line", function () { const q = P(); return !!q && inRect(CB, q.x, q.z); }, "count", { maxDist: 60, patience: [8, 7, 6] });
+    }
+  }
+
+  /* ---- THE CHAIN OF COMMAND (systems/command.js hooks for the prison):
+     the warden over his officers and every inmate, an officer (you, in the
+     cop role) over inmates. Who listens is what they think of the man
+     giving it: an officer's loyalty under what the warden's orders have
+     cost him (staffSour), an inmate's fear and respect of you, or of the
+     uniform. ---- */
+  function staffK(a) { return !!a && (a.kind === "guard" || a.kind === "warden"); }
+  function isYou(a) { return !!a && (a === CBZ.player || a.isPlayer); }
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  if (CBZ.command && CBZ.command.use) CBZ.command.use("prison", {
+    authority: function (from, man) {
+      if (!from || !man || isYou(man)) return null;
+      const fw = from.kind === "warden", fg = from.kind === "guard" || (isYou(from) && g.role === "cop");
+      if (staffK(man)) return fw && man.kind === "guard" ? 1 : 0;
+      if (fw) return 0.8;
+      if (fg) return 0.6;
+      return null;                     // con to con: the brain's own (his clique's leader)
+    },
+    standing: function (man, from) {
+      if (man.kind === "guard" && from && from.kind === "warden") {
+        const B = man._brain && man._brain.personality;
+        const l = B ? B.loyalty : (man.corrupt ? 0.3 : 0.8);
+        return clamp01(0.15 + l * 0.8 - S.staffSour);
+      }
+      if (staffK(man)) return null;
+      if (isYou(from)) {
+        const R = CBZ.socialRead ? CBZ.socialRead(man) : null;
+        const fear = (man.playerFear || 0) / 14, grudge = (man.playerGrudge || 0) / 14;
+        const resp = R ? Math.max(-1, Math.min(1, R.respect / 100)) : 0;
+        return clamp01(0.4 + fear * 0.4 + resp * 0.25 - grudge * 0.45);
+      }
+      const nerve = man.personality && typeof man.personality.nerve === "number" ? man.personality.nerve : 0.5;
+      return clamp01(0.62 - (nerve - 0.5) * 0.5 - S.staffSour * 0.5);
+    },
+    law: function (man) { return staffK(man) || (isYou(man) && g.role === "cop"); },
+    kin: function (man, t) {
+      if (!t) return false;
+      if (staffK(man)) return staffK(t);
+      return man.gang >= 0 && t.gang === man.gang;
+    },
+    lead: function (man) { return man.isLeader ? 1 : 0; },
+    // an inmate told by an officer (you): his body does it. Officers carry
+    // the warden's own closure (opts.exec), never this.
+    exec: function (man, o) {
+      if (staffK(man)) return null;
+      if (o === "back") { man.aiState = "flee"; man.fleeT = 2.2; man.foe = null; return true; }
+      if (o === "drop") { if (!man._shankOut) return false; man._shankOut = false; man._steelT = 0; return true; }
+      if (o === "hold" || o === "line" || o === "search") { man.pause = Math.max(man.pause || 0, 4); man.aiState = "wander"; man.foe = null; return true; }
+      return false;
+    },
+    turn: function (man, from) {
+      if (staffK(man)) {
+        // an officer walks off the warden's order: he stops working for him today
+        man.pause = 0; man.alert = 0; man._refusedAt = S.now + 240;
+        return true;
+      }
+      man.playerGrudge = Math.min(14, (man.playerGrudge || 0) + 3);
+      if (isYou(from) && CBZ.requestInmateHunt) return !!CBZ.requestInmateHunt(man, 6, "wronged");
+      if (from && from.group) { man.foe = from; man.aiState = "fight"; return true; }
+      return false;
+    },
+    cost: function (man, from, kind) {
+      if (from && from.kind === "warden" && man.kind === "guard") S.staffSour = Math.min(0.6, S.staffSour + (kind === "turn" ? 0.08 : kind === "refuse" ? 0.03 : 0.01));
+    },
+  });
+  /* THE OFFICERS STOP TAKING HIS WORD, AND THE YARD SEES IT. Command's
+     mutiny against the warden: his officers' regard falls through the
+     floor for the rest of the shift, and the hardest men on the floor go
+     for the nearest uniform. That is a riot, and it is reported like one. */
+  if (CBZ.command && CBZ.command.on) CBZ.command.on("mutiny", function (m) {
+    if (!m || m.game !== "prison" || g.mode !== "escape") return;
+    const w = wardenG();
+    if (!w || m.from !== w) return;
+    S.staffSour = 0.6;
+    S.log.mutiny = (S.log.mutiny || 0) + 1;
+    const wp = w.group.position;
+    const npcs = CBZ.npcs || [], guards = CBZ.guards || [];
+    let n = 0;
+    for (let i = 0; i < npcs.length && n < 6; i++) {
+      const c = npcs[i];
+      if (!c || !c.group || c.dead || c.escaped || c.cuffed || (c.ko || 0) > 0) continue;
+      const q = c.group.position;
+      if (Math.hypot(q.x - wp.x, q.z - wp.z) > 35) continue;
+      const nerve = c.personality && typeof c.personality.nerve === "number" ? c.personality.nerve : 0.5;
+      if (nerve < 0.55) continue;
+      let gd = null, bd = 1e9;
+      for (let k = 0; k < guards.length; k++) {
+        const x = guards[k];
+        if (!able(x)) continue;
+        const dd = Math.hypot(x.group.position.x - q.x, x.group.position.z - q.z);
+        if (dd < bd) { bd = dd; gd = x; }
+      }
+      if (!gd || bd > 25) continue;
+      c.foe = gd; c.aiState = "fight"; c.aiTimer = 8;
+      n++;
+    }
+    if (n) incident("riot", { player: false, at: { x: wp.x, z: wp.z } });
+  });
+
   // THE INSPECTION: on rounds he stops at a cell front, looks in, moves on
   function inspectBody(w, dt) {
     const I = S.insp;
@@ -1099,9 +1318,13 @@
     S.noYardT = (S.noYardT || 0) - dt;
     const nt = S.noYardGd;
     if (nt && able(nt) && Math.hypot(nt.group.position.x - p.x, nt.group.position.z - p.z) < 3.2 && !nt._noYardSaid) {
+      // the officer's ORDER: inside. Walk in and that is that; stay out on
+      // him and he takes you in
       nt._noYardSaid = true;
-      say(nt, pick(LINE.noYard), 1.8);
-      if (CBZ.addHeat) CBZ.addHeat(4);
+      youOrder(nt, "go", function () { const q = P(); return !!q && q.z < -8; }, "yard", {
+        lines: LINE.noYard, maxDist: 40, patience: [6, 5, 4],
+        force: function () { if (CBZ.addHeat) CBZ.addHeat(4); sendFor("yard", 1); },
+      });
     }
     if (S.noYardT > 0) return;
     S.noYardT = 30;
@@ -1331,15 +1554,15 @@
   function reset() {
     endShakedown(); endCall(); releaseEscorts(); releaseDetail(); S.detail.until = 0; S.detail.alarmAt = -1e9;
     S.incidents.length = 0; S.pending = null; S.meet = null; S.favor = null; S.owes = false;
-    S.lastShake = -1e9; S.lastLockEnd = -1e9; S.lockdownMine = false; S.immuneSeq = -1;
-    S.blockSeq = 0; S.lastBlock = null; S.wakeSeq = -1; S.begSeq = null; S.paQueue = null; S.lastInc = null; S.morningT = 0;
+    S.lastShake = -1e9; S.lastLockEnd = -1e9; S.lockdownMine = false;
+    S.blockSeq = 0; S.lastBlock = null; S.wakeSeq = -1; S.paQueue = null; S.lastInc = null; S.morningT = 0;
     S.holeWas = false; S.cuffWas = false; S.hpWas = null; S.koWas = 0; S.now = 0; S.lastDecision = null;
     for (const k in S.log) S.log[k] = 0;
     for (let i = 0; i < S.orders.length; i++) if (S.orders[i].gd) S.orders[i].gd._facePt = null;
-    S.orders.length = 0; S.noYard = -1; S.standWas = 0; S.ack = null; S.lies = 0; S.hitAt = null;
+    S.orders.length = 0; S.push.length = 0; S.staffSour = 0; S.you = null; S.noYard = -1; S.standWas = 0; S.ack = null; S.lies = 0; S.hitAt = null;
     S.gun.phase = ""; S.gun.armed = false; S.gun.missing = false; S.gun.invWas = -1; S.gun.pendingGone = false;
     S.gunToss = false; S.yardPaSeq = -1; S.runT = 0; S.arrivalAt = null; S.arrivalSaid = false;
-    g.wardenLeverage = null; g.wardenStanding = 0; g.wardenWarnings = 0; g.wardenLies = 0;
+    g.wardenStanding = 0; g.wardenWarnings = 0; g.wardenLies = 0;
   }
   const pollNewRun = CBZ.jailBoost ? CBZ.jailBoost.newRunWatcher(0.5) : null;
   if (CBZ.jailBoost && CBZ.jailBoost.onStateExit) CBZ.jailBoost.onStateExit(reset, ["title", "won", "lost"]);
@@ -1362,6 +1585,7 @@
     if (b !== S.lastBlock) {
       S.lastBlock = b; S.blockSeq++;
       if (b === "wake") { S.wakeSeq = S.blockSeq; S.morningT = 2.5; }
+      S.staffSour *= 0.85;                     // a new shift forgets a little
       // THE YARD OPENS WITH HIS VOICE: what kind of day it is, from his mood
       if (b === "yard" && S.yardPaSeq !== S.blockSeq && onShift()) {
         S.yardPaSeq = S.blockSeq;
@@ -1423,6 +1647,7 @@
     driveOrders();
     watchGun(dt);
     drivePrivilege(dt);
+    if (w && !w.dead) watchYou(w, dt);
     // THE GATE: a new man walks in past him
     if (w && !w.dead && !S.arrivalSaid && arriving() && P() && Math.hypot(P().x - w.group.position.x, P().z - w.group.position.z) < 12) {
       S.arrivalSaid = true;
@@ -1527,7 +1752,7 @@
       incidents: S.log.incidents,
       recent: CORE.recent(S.incidents, S.now, hourLen(), CORE.WINDOW_H).map(function (i) { return i.kind + (i.player ? "*" : ""); }),
       lockdowns: S.log.lockdowns, shakedowns: S.log.shakedowns, summons: S.log.summons,
-      deals: S.log.deals, favors: S.log.favors, threats: S.log.threats, warnings: S.log.warnings,
+      deals: S.log.deals, favors: S.log.favors, warnings: S.log.warnings,
       ignored: S.log.ignored, found: S.log.found, assaults: S.log.assaults,
       paAddresses: S.log.pa,
       pending: S.pending ? S.pending.reason : null,

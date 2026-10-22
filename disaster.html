@@ -472,7 +472,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
      in front of him (threat by sight, the one line picker, panic by sight).
      Before read.js / peds.js / prisonvoice.js, which all call it. -->
-<script src="src/systems/voice.js?v=nopitch1022"></script>
+<script src="src/systems/voice.js?v=cmd1022"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -697,6 +697,9 @@ document.body.appendChild(b);}}catch(e){}})();
      parse-time dependencies, so it loads before its first consumers
      (entities/security.js, entities/guards.js). -->
 <script src="src/systems/brain.js?v=nopitch1022"></script>
+<!-- systems/command.js: CBZ.command, orders obeyed or not (every game). Pure
+     logic over CBZ.brain + CBZ.voice; games register their bodies (use). -->
+<script src="src/systems/command.js?v=cmd1022"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=silt1020"></script>
@@ -874,7 +877,7 @@ document.body.appendChild(b);}}catch(e){}})();
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
-<script src="src/systems/prisonwarden.js?v=nopitch1022"></script>
+<script src="src/systems/prisonwarden.js?v=cmd1022"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=nopitch1022"></script>
 <script src="src/systems/weather.js?v=pace1015"></script>
@@ -1566,7 +1569,7 @@ document.body.appendChild(b);}}catch(e){}})();
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=hold1020"></script>
+<script src="src/city/orders.js?v=cmd1022"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,

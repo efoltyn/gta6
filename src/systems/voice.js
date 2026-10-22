@@ -40,6 +40,9 @@
      voice.say(actor, topic, ctx?)   -> bool            (line + mouth)
         ctx.ladder {kind, step}: a demand ladder's rung; the pool is in
         escalation order and the step walks it
+        COMMANDS (systems/command.js): topics order / obey / hesitate /
+        refuse / turn, ctx { order, from, to, target }; "order" takes
+        ctx.again 0..2 (the order, again, the last word)
      voice.role(actor) -> civilian | gangster | cop | guard | warden |
                           security | soldier | vip | inmate | vagrant | kid |
                           vendor | worker | player
@@ -449,6 +452,53 @@
     scoffFight: { "*": ["You threatening me?", "Big mistake.", "Now we got a problem."] },
     scared: { "*": ["Okay! I'm going!", "I'm leaving!", "Alright, alright!"] },
     witness: { "*": ["Somebody call the cops!", "Did you see that?", "Oh my God."] },
+    // ---- COMMANDS (systems/command.js). An order is three rungs: the order,
+    // the order again, the last word (ctx.again 0..2). The answers are a word
+    // or nothing: routine obedience is silence (command.js decides when).
+    order: {
+      kill: ["Take him out.", "I said take him out.", "Now."],
+      take: ["Get him.", "I said get him.", "Now!"],
+      detain: ["Cuff him.", "I said cuff him.", "Now."],
+      back: ["Back off.", "I said back off.", "Back off. Now."],
+      hold: ["Hold here.", "Hold it here.", "Hold."],
+      come: ["With me.", "I said with me.", "Now."],
+      go: ["Go.", "Go. Now.", "Move."],
+      guard: ["Cover him.", "Cover him.", "Cover him."],
+      cell: ["Back to your cell.", "I said back to your cell.", "Last time. Cell."],
+      line: ["On your door.", "I said on your door.", "Door. Now."],
+      drop: ["Drop it.", "I said drop it.", "Drop it. Last time."],
+      search: ["Hands on the wall.", "Hands. Wall. Now.", "Last time. Wall."],
+    },
+    obey: {
+      law: ["Yes, sir.", "On it.", "Copy."],
+      soldier: ["Yes, sir.", "Sir."],
+      gangster: ["Say less.", "On it.", "Bet."],
+      security: ["Understood.", "On it."],
+      inmate: ["Alright.", "Yeah, yeah.", "Okay."],
+      "*": ["Okay.", "On it."],
+    },
+    hesitate: {
+      law: ["Sir?", "Sir, are you sure?"],
+      soldier: ["Sir?", "Sir, say again?"],
+      gangster: ["You sure?", "Him?", "Right here?"],
+      inmate: ["For what?", "What'd I do?"],
+      "*": ["You sure?", "Him?"],
+    },
+    refuse: {
+      law: ["No, sir.", "Not him, sir.", "I can't do that."],
+      soldier: ["No, sir.", "Not this, sir."],
+      gangster: ["Nah.", "Not him.", "Do it yourself."],
+      security: ["Not my job.", "No."],
+      inmate: ["No.", "Make me.", "Nah."],
+      "*": ["No.", "Not him."],
+    },
+    turn: {
+      law: ["Not anymore.", "That's enough."],
+      soldier: ["No more, sir.", "Not anymore."],
+      gangster: ["Nah. You're done.", "Not anymore."],
+      inmate: ["Not anymore."],
+      "*": ["Not anymore.", "That's enough."],
+    },
   };
   // topics with a different name in an older caller
   const ALIAS = { contact: "bumped", mugged: "robbed", refusePay: "refuse", cower: "comply", seeRun: "whatsHappening", aimedAt: "comply", repeated: "shoveBack" };
@@ -508,6 +558,14 @@
   let _lines = 0, _said = 0, _silent = 0, _reacts = 0, _spread = 0;
   function line(a, topic, ctx) {
     if (!a || !topic) return null;
+    // AN ORDER is said on its rung, every time it is given: no walk, no
+    // "somebody said it a minute ago" (the warden repeats himself)
+    if (topic === "order") {
+      const O = ctx && ctx.order ? LINES.order[ctx.order] : null;
+      if (!O || !O.length) return null;
+      _lines++;
+      return O[Math.min(O.length - 1, Math.max(0, (ctx.again | 0)))];
+    }
     const pool = poolFor(topic, a, ctx);
     if (!pool) return null;
     const lad = ctx && ctx.ladder;
