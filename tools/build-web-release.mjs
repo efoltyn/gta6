@@ -34,6 +34,7 @@ const thumbs=arg('--thumbs',null);
    page copied as-is. hook = the one line under the title. heavy = a warning on
    the card, because Gang City builds a 25 km world before it draws a frame. */
 const GAMES=[
+  {slug:'the-isles',        mode:'archipelago', name:'The Isles',        hook:'Five islands. One sea. Every building is for something.', desc:'Five islands kilometres apart on one sea: real shops, banks with vaults, police, hotels, night, and people who react to what they see. Fly or sail between them.'},
   {slug:'shark-sim',        mode:'sharksim', name:'Shark Sim',          hook:'Eat. Grow. Become the megalodon.', desc:'Become the shark. Hunt, grow, evolve into a megalodon, and survive the orca pod. Play free in your browser.'},
   {slug:'disaster-survival',mode:'survival', name:'Disaster Survival',  hook:'100 on an island. One disaster. Last one alive.', desc:'A hundred survivors on a procedurally generated island. A tsunami, a volcano, a quake, a wildfire or a nuke. Be the last one standing.'},
   {slug:'prison-escape',    mode:'escape',   name:'Prison Escape',      hook:'Cell Block Z. Get out.', desc:'Inmate or cop in a working prison: cells, yard, corridors, contraband, guards with tasers. Escape, or keep them in.'},
