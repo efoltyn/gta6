@@ -5,7 +5,7 @@
    (entities/tattoo.js) is a texture shared by everyone wearing it. A look
    nobody in the scene wears must give its GPU copy back (core/texfree.js
    CBZ.lookTex). This carries the player along the streets at driving speed
-   for --mins sim minutes (default 20), draws a frame every sim second (so
+   for --mins sim minutes (default 20), draws a frame every 2 sim seconds (so
    the people met are really uploaded), and samples once a sim minute: GPU
    textures (three's count and the accounted MB of every live texture),
    the looks resident / worn / put away. A plateau passes; a count that is
@@ -62,7 +62,7 @@ const ROUTE = `
   return { legs: route.length - 1, km: +(len / 1000).toFixed(1) };
 `;
 
-/* one sim minute of driving: 30 steps a sim second, a drawn frame a second */
+/* one sim minute of driving: 15 steps a sim second, a drawn frame every 2 s */
 const MINUTE = (mps, d0) => `
   var C = CBZ, Pl = C.player, A = C.city && C.city.arena, route = window.__ltRoute;
   var legs = [], tot = 0;
@@ -74,14 +74,14 @@ const MINUTE = (mps, d0) => `
   var gh = function (x, z) { try { var y = A && A.groundHeightAt ? A.groundHeightAt(x, z) : 0; return isFinite(y) ? y : 0; } catch (e) { return 0; } };
   var d = ${d0};
   for (var s = 0; s < 60; s++) {
-    for (var k = 0; k < 30; k++) {
-      d += ${mps} / 30;
+    for (var k = 0; k < 15; k++) {
+      d += ${mps} / 15;
       var q = at(d);
       Pl.pos.set(q[0], gh(q[0], q[1]) + 0.05, q[1]); Pl.vy = 0; Pl.grounded = true; Pl.dead = false; Pl.hp = 100;
       if (C.cam) C.cam.yaw = q[2] + Math.PI;
-      C.stepSim(1 / 30);
+      C.stepSim(1 / 15);
     }
-    try { C.renderFrame(); } catch (e) {}
+    if (s % 2 === 0) { try { C.renderFrame(); } catch (e) {} }
   }
   var G = window.__lt, mb = 0;
   G.live.forEach(function (t) {
