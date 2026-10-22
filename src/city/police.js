@@ -2295,7 +2295,6 @@
         if (CBZ.cityCopKilled) CBZ.cityCopKilled();          // big heat spike (caps at 4★ for a lone act; 5★ only via a long spree — see wanted.js)
         else if (CBZ.cityCrime) CBZ.cityCrime(120, { instant: true, x: cop.pos.x, z: cop.pos.z, type: "cop-kill" });
       }
-      if (CBZ.pushKill) CBZ.pushKill("An officer was killed", "#ff6b6b");
     } else if (imp && (imp.point || imp.shot) && shotOnRig(cop, imp, 1)) {
       // a round into a living officer: zone, caliber and steps on his rig
     } else if (CBZ.body && imp) CBZ.body.hit(cop, { fromX: imp.fromX, fromZ: imp.fromZ, dir: imp.dir, force: imp.force || 3 });

@@ -32,7 +32,6 @@
   const CBZ = window.CBZ;
 
   const el = {
-    objText: document.getElementById("objText"),
     cigText: document.getElementById("cigText"),
     timer: document.getElementById("timer"),
     detectLabel: document.querySelector("#detectWrap .lab span:first-child"),
@@ -131,21 +130,16 @@
     return true;
   }
 
-  // The objective text is still WRITTEN in every mode (the escape plan reads
-  // it back as its headline); in escape the panel itself is hidden by
-  // body.prison-bare, so an objective change never becomes a popup.
+  /* NO OBJECTIVE ON SCREEN, IN ANY MODE (owner, 2026-10-22: "the 'find a
+     keycard and escape' pop-up is in the top left ... that shouldn't even be
+     in the jail game either"). Nobody tells you the way out, the keycard or
+     the gun room. The objective is a STRING the game's own logic can still
+     set (a guard's job, the lockdown, the sentence clock) — it is never
+     painted. In the city a mission line still goes to the phone. */
   let objective = "";
   function setObjective(t) {
-    if (routeCityText(t, "missions", "Dispatch")) {
-      if (el.objText) el.objText.textContent = "";
-      if (objEl) objEl.style.display = "none";
-      return;
-    }
-    // a normal objective string also exits kill-feed mode (e.g. starting an
-    // escape match after a survival one) so the panel reads correctly again
-    if (objEl && objEl.classList.contains("killfeed")) { objEl.classList.remove("killfeed"); if (objTag) objTag.textContent = "Objective"; }
+    if (routeCityText(t, "missions", "Dispatch")) return;
     objective = String(t == null ? "" : t);
-    el.objText.textContent = objective;
   }
 
   /* THE HINT. On touch, and always in the prison, it wears the no-box
@@ -193,43 +187,6 @@
   }
   CBZ.onAlways(95, function (dt) {
     if (_hintT > 0) { _hintT -= dt; if (_hintT <= 0) hideHint(); }
-  });
-
-  // ---- survival KILL FEED: the objective panel becomes a running list of
-  //      who just died and how. Lines age out. Escape mode never calls these. ----
-  const objEl = document.getElementById("objective");
-  const objTag = objEl ? objEl.querySelector(".tag") : null;
-  let feed = [];
-  function killFeedReset() {
-    feed = [];
-    if (el.objText) el.objText.innerHTML = "";
-    if (objEl) objEl.classList.remove("killfeed");
-  }
-  function pushKill(text, color, big) {
-    if (CBZ.game && (CBZ.game.mode === "city" || CBZ.game.mode === "escape")) return;
-    if (!el.objText) return;
-    if (objTag) objTag.textContent = "Casualties";
-    if (objEl) objEl.classList.add("killfeed");
-    const line = document.createElement("div");
-    line.className = "kfeed" + (big ? " kfeed-you" : "");
-    line.textContent = text;
-    if (color) line.style.color = color;
-    el.objText.appendChild(line);
-    void line.offsetWidth;            // reflow so the slide-in plays
-    line.classList.add("in");
-    feed.push({ el: line, t: 0 });
-    while (feed.length > 6) { const old = feed.shift(); if (old.el.parentNode) old.el.parentNode.removeChild(old.el); }
-  }
-  // exported as survKillFeedReset: city/killfeed.js claims killFeedReset.
-  CBZ.survKillFeedReset = killFeedReset;
-  CBZ.pushKill = pushKill;
-  CBZ.onAlways(94, function (dt) {
-    if (!feed.length) return;
-    for (let i = feed.length - 1; i >= 0; i--) {
-      const f = feed[i]; f.t += dt;
-      if (f.t > 7 && !f.fading) { f.fading = true; f.el.classList.add("out"); }
-      if (f.t > 9) { if (f.el.parentNode) f.el.parentNode.removeChild(f.el); feed.splice(i, 1); }
-    }
   });
 
   // ============================================================
@@ -374,7 +331,7 @@
      panelsVisible counts the always-on HUD panels that are actually painted
      right now (display/visibility/opacity), so a CSS regression shows up as
      a number rather than a screenshot. */
-  const PANEL_IDS = ["objective", "topright", "timer", "cigs", "keycard", "inventory", "detectWrap", "gangHud",
+  const PANEL_IDS = ["topright", "timer", "cigs", "keycard", "inventory", "detectWrap", "gangHud",
     "compass", "minimap", "simHud", "runStats", "pickupFeed", "crateChip", "streakHud", "streakMeter",
     "waypointGuide", "escapePlan", "weaponStrip", "ammo", "hitfx", "toast"];
   function painted(e) {

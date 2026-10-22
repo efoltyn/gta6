@@ -544,7 +544,6 @@ body.touch .cine-deck { column-gap: 12px; }
    are. The physical world, crosshair, ammo, effects, and speech remain. The
    prison #hotbar is an instrument (the guns, the light, the card you carry),
    so it stays. */
-body.campaign-active #objective,
 body.campaign-active #topright,
 body.campaign-active #keycard,
 body.campaign-active #inventory,

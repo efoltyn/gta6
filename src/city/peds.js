@@ -3056,7 +3056,6 @@
     // CHAINED FEUD: an NPC killer earns the dead ped's partner/crew as enemies
     // (the player has the wanted/gang-provoke systems already — chain NPC↔NPC only).
     if (att && att !== CBZ.city.playerActor && CBZ.cityNpcFriendDeath) CBZ.cityNpcFriendDeath(ped, att);
-    if (CBZ.pushKill) CBZ.pushKill((ped.name || "A civilian") + " was killed", "#ff6b6b");
   };
 
   // bodies carry a real haul — cash plus whatever they were holding. The big one:

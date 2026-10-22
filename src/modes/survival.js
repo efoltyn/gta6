@@ -58,28 +58,14 @@
     }
   }
 
-  // colour by how grim the cause is, so the feed reads at a glance
-  function causeColor(cause) {
-    const c = cause || "";
-    if (/lava|burn|incinerat|nuclear|vaporiz|fallout|meteor|bomb/.test(c)) return "#ff8a3a";
-    if (/lightning/.test(c)) return "#9fd0ff";
-    if (/ash|choked/.test(c)) return "#c9c2b6";
-    if (/drown|swept|flood/.test(c)) return "#6fc6ff";
-    if (/frozen|blizzard/.test(c)) return "#bfe6ff";
-    if (/rubble|sinkhole|crushed|fell/.test(c)) return "#cbb89a";
-    if (/beaten|thrown|debris|tornado/.test(c)) return "#ffd06b";
-    return "#e6ecf5";
-  }
   /* ---- ONE DEATH BUS ------------------------------------------------------
      OWNER DOCTRINE (scrolls/claude/engine-systems.md): every death funnels
      through city/killfeed.js, and it owns the ONLY sanctioned HUD popup —
      the corner feed. This mode used to run a FIFTH parallel text channel
-     instead: CBZ.pushKill (systems/hud.js) rewriting the prison objective
-     panel into a "Casualties" list, with its own colours, its own ageing and
-     its own DOM. So a survival death never reached the bus every other death
-     in the game uses, and the mode carried a killfeed nobody else could read.
+     instead (a "Casualties" list in the prison objective panel; deleted
+     2026-10-22 with that panel).
 
-     CBZ.cityLogDeath is the migration. The one thing we do NOT accept from it
+     CBZ.cityLogDeath is the one bus. The one thing we do NOT accept from it
      is the cause NORMALISATION — its label table is written for the city, so
      "incinerated by lava" comes back as "explosion" and "burned alive in the
      wildfire" comes back the same, which throws away exactly the detail that
@@ -92,10 +78,6 @@
     if (CBZ.cityLogDeath) {
       const e = CBZ.cityLogDeath(who, label, { you: !!actor.isPlayer });
       if (e) { e.cause = label; e.name = who; }
-    } else if (CBZ.pushKill) {
-      // degrade-safe: the old panel, byte-identical, if killfeed.js is absent
-      const verb = actor.isPlayer ? "were" : "was";
-      CBZ.pushKill(who + " " + verb + " " + label, actor.isPlayer ? "#ff6b6b" : causeColor(cause), actor.isPlayer);
     }
     /* ---- BLOOD IS EARNED, NOT ANNOUNCED --------------------------------
        This used to be an unconditional CBZ.gore() on EVERY death at a flat
@@ -624,11 +606,8 @@
       // the shelter checks now.
       if (CBZ.disasters) CBZ.disasters.start();
       // ONE FEED. Deaths go to city/killfeed.js's corner feed like every other
-      // death in the game, so the reset is ITS reset. The old prison-objective
-      // "Casualties" panel is no longer written to at all; clearing it too
-      // keeps a stale line from a previous match off the screen.
+      // death in the game, so the reset is ITS reset.
       if (CBZ.killFeedReset) CBZ.killFeedReset();
-      if (CBZ.survKillFeedReset) CBZ.survKillFeedReset();
     },
     winStats(game) {
       return [

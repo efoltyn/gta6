@@ -20,7 +20,6 @@ body.mode-city .mode-survival-only { display: none; }
    of the title screen in css/title_hub.css. */
 
 /* hide the prison + survival HUD panels in the city (city has its own) */
-body.mode-city #objective,
 body.mode-city #topright,
 body.mode-city #keycard,
 body.mode-city #inventory,

@@ -783,7 +783,6 @@ body.touch{
 }
 /* ---- responsive scaling for small / portrait screens ---- */
 @media (max-width: 820px) {
-  #objective { font-size: 14px; max-width: 56vw; padding: 9px 12px; }
   #topright .pill { font-size: 15px; padding: 8px 11px; }
   #inventory { font-size: 12px; max-width: 200px; }
   /* 46vw -> 62vw: the phone block above drops the "WANTED" caption and gives
@@ -809,7 +808,6 @@ body.touch{
   }
 }
 @media (max-width: 520px) {
-  #objective { max-width: 58vw; font-size: 13px; }
   #inventory { transform: translateY(104px); font-size: 11px; max-width: 160px; }
   #keycard { transform: translateY(58px); }
 }
