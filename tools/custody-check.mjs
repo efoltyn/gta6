@@ -61,7 +61,7 @@ function world(o) {
     return p;
   };
   const regs = W.regs = [];
-  const I = { register: (kind, r) => { regs.push(Object.assign({ kind }, r)); }, registerZone() {}, describe() {}, refresh() {} };
+  const I = { register: (kind, r) => { regs.push(Object.assign({ kind }, r)); }, registerZone() {}, registerSource() {}, describe() {}, refresh() {} };
   const mkCar = W.mkCar = function (x, z, heading) {
     const pos = new V3(x, 0, z);
     const c = { pos, heading: heading || 0, v: 0, ai: true, group: { position: pos, rotation: { y: heading || 0 }, parent: root, visible: true }, dead: false };
