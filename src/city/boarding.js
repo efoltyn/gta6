@@ -1164,6 +1164,30 @@
       let n = 0; for (let i = 0; i < s.length; i++) if (!seatTaken(veh, s[i])) n++;
       return n;
     },
+    /* A BODY PUT IN BY SOMEBODY ELSE'S HANDS (city/restrain.js stow: the man
+       you carried to the open door). seatFor(veh, id?) answers which car seat
+       he goes in (the back first; never the wheel) and where its door is in
+       the world: `x,z` where you stand to open it, `doorX,doorZ` the aperture.
+       null = a full car, or not a car. load() puts him on that seat through
+       sit(), the same seat placement every arc ends in: no walk of his own,
+       the carrier is already standing at the open door. */
+    seatFor: function (veh, seatId) {
+      if (!on() || !veh) return null;
+      const grp = veh.group || veh;
+      if (veh.airClass || veh.aircraft || (grp && grp.userData && (grp.userData.cabin || grp.userData.cargoHold))) return null;
+      const seat = seatId ? seatById(veh, seatId) : pickSeat(veh, null, "captive");
+      if (!seat || !carSeatKind(seat) || seat.id === "driver") return null;
+      if (!seatId && seatTaken(veh, seat)) return null;
+      const w = worldOf(veh, seat.outX, 0, seat.outZ, new THREE.Vector3());
+      const d = worldOf(veh, seat.doorX, 0, seat.doorZ, new THREE.Vector3());
+      return (w && d) ? { id: seat.id, x: w.x, z: w.z, doorX: d.x, doorZ: d.z } : null;
+    },
+    load: function (ped, veh, seatId) {
+      if (!on() || !usable(ped) || !veh || ped._cbzSeat || ped._cbzArc) return false;
+      const seat = seatById(veh, seatId);
+      if (!seat || !carSeatKind(seat) || seatTaken(veh, seat)) return false;
+      return sit({ ped: ped, veh: veh, seat: seat, role: "captive" });
+    },
   };
 
   // ============================================================

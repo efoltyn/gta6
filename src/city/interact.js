@@ -1302,11 +1302,16 @@
   I.register("ped:civ", { id: "gp-rob", slot: "i", needsGunDrawn: true, bad: true, label: "Rob", onSelect: (p) => mug(p) });
   I.register("ped:civ", { id: "gp-hostage", slot: "j", needsGunDrawn: true, bad: true, label: "Grab", onSelect: (p) => CBZ.cityTakeHostage && CBZ.cityTakeHostage(p) });
   I.register("ped:civ", { id: "gp-ransom", slot: "k", needsGunDrawn: true, bad: true, label: "Ransom", onSelect: (p) => demandRansom(p) });
-  I.register("ped:civ", { id: "gp-execute", slot: "l", needsGunDrawn: true, bad: true, label: "Execute", onSelect: (p) => execute(p) });
+  // A VERB THE ATTACK BUTTON ALREADY DOES IS NEVER A KEY (owner 2026-10-22:
+  // "Punch as one of IJKL is dumb because pressing the attack button is
+  // already punch"). Execute (the trigger), Punch and Sucker-punch (LMB) are
+  // `wheel:true`: on the Q wheel / a tap, never on I J K L.
+  I.register("ped:civ", { id: "gp-execute", wheel: true, needsGunDrawn: true, bad: true, label: "Execute", onSelect: (p) => execute(p) });
 
-  // ---- LIVING PED, slot I: your soldier > NPC crew-mate > anyone (mug) ----
-  // Slot exclusivity does the branch work: per key the highest-prio PASSING
-  // option wins, so "Mug" can't surface on your own soldier.
+  // ---- LIVING PED: your soldier > NPC crew-mate > anyone (mug) ----
+  // The `slot` letters below are history: city/interactions.js keys a
+  // person's options I J K L in priority order (best first), and who sees
+  // which verb at all is city/roles.js's table plus each canShow.
   // GRAMMAR LAW (owner): an option label is a BUTTON — a bare verb phrase,
   // never the target's name (the card TITLE already says it once; "Mug Marcus"
   // under a card titled Marcus said it twice). Names live only in describe()
@@ -1321,7 +1326,7 @@
   // ---- LIVING PED, slot J ----
   // (your gang member's Hold / Follow are city/orders.js's, one verb each)
   I.register("ped:civ", { id: "ped-put-in-work", slot: "j", prio: 50, canShow: (p) => crewmate(p), label: "Check in", onSelect: (p) => prospectOrWork(p) });
-  I.register("ped:civ", { id: "ped-swing", slot: "j", prio: 10, bad: true, label: "Punch", onSelect: (p) => attack(p) });
+  I.register("ped:civ", { id: "ped-swing", wheel: true, prio: 10, bad: true, label: "Punch", onSelect: (p) => attack(p) });
 
   // ---- LIVING PED, slot K: the crew ladder (claim-crew > prospect >
   //      shakedown > recruit > sell). Which of these a person can offer at
@@ -1385,7 +1390,7 @@
   I.register("ped:cop", { id: "cop-surrender", slot: "i", canShow: (c, ctx) => ctx.wanted >= 1 || !!(c && c._challenged && !c.dead), label: "Surrender", onSelect: (c) => copSurrender(c) });
   I.register("ped:cop", { id: "cop-alibi", slot: "j", canShow: (c, ctx) => ctx.wanted >= 1 && ctx.wanted <= 2, label: "Bluff", onSelect: (c) => copAlibi(c) });
   // the design rule: there's ALWAYS a malicious option — here, assault
-  I.register("ped:cop", { id: "cop-punch", slot: "l", bad: true, label: "Sucker-punch", onSelect: (c) => copAssault(c) });
+  I.register("ped:cop", { id: "cop-punch", wheel: true, bad: true, label: "Sucker-punch", onSelect: (c) => copAssault(c) });
 
   // ---- VENDOR COUNTER ----
   // CONTEXTUAL VERBS: the old flat "Shop here" said nothing about WHY you'd

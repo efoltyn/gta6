@@ -2643,6 +2643,8 @@
     window.addEventListener("keydown", function (e) {
       if (e.code !== "KeyJ" || e.repeat || !playing()) return;
       const t = e.target; if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      // a person you are looking at has an option on J (city/interactions.js): his
+      if (e.defaultPrevented || (CBZ.cityInteractHasSlot && CBZ.cityInteractHasSlot("j"))) return;
       if (currentFile()) openFile();
     });
   }

@@ -14,8 +14,11 @@
      • A            sprint           • Start        pause
      • X            jump
      • B            reload
-     • Y            enter/interact
+     • Y            enter/interact (Gang City: F, into or out of any vehicle)
      • D-pad Up     map              • Back         city power (Tab)
+     • D-pad Right  E (Gang City), held as long as the button is: a tap uses
+                    the thing / a person's first option, a hold is the grab
+     • D-pad Left   Q, the wheel: every option a person or thing has
      • Start        pause/resume
 
    A CINEMATIC QUESTION (city/campaign_ui.js, CBZ.padPrompt): while three
@@ -117,6 +120,17 @@
     } catch (e) {}
   }
 
+  // E HELD ON THE PAD. Gang City's hold E is the hands' grab
+  // (city/interactions.js), so D-pad right is a real press and release, not
+  // a 60 ms tap: down sends keydown, up sends keyup, exactly like the key.
+  let padEDown = false;
+  function padE(on) {
+    if (on === padEDown) return;
+    padEDown = on;
+    try { document.dispatchEvent(new KeyboardEvent(on ? "keydown" : "keyup", { key: "e", bubbles: true })); } catch (e) {}
+    if (CBZ.keys) CBZ.keys.e = on;
+  }
+
   // aim / fire are level-driven but only emitted on CHANGE, so a mouse player
   // is never overridden by a resting trigger.
   let prevAim = false, prevFire = false;
@@ -128,13 +142,14 @@
   // ==========================================================================
   CBZ.onAlways(2, function (dt) {
     const pad = activePad();
-    if (!pad) { if (Object.keys(held).length) releaseAllKeys(); setAim(false); setFire(false); return; }
+    if (!pad) { if (Object.keys(held).length) releaseAllKeys(); setAim(false); setFire(false); padE(false); return; }
     dt = Math.min(dt || 0.016, 0.05);
 
     // ---- menu / flow (works on the title + pause screens) ----
     if (g.state !== "playing") {
       // release any gameplay holds while not playing
       if (Object.keys(held).length) releaseAllKeys();
+      padE(false);
       setAim(false); setFire(false);
       const startE = edge(pad, B.START), aE = edge(pad, B.A);
       if (g.state === "title") {
@@ -153,6 +168,7 @@
     // menu overlay open (shop/bench/map) → don't drive the world, but let Start pause
     if (CBZ.cityMenuOpen) {
       if (Object.keys(held).length) releaseAllKeys();
+      padE(false);
       setAim(false); setFire(false);
       if (edge(pad, B.START) && CBZ.setState) CBZ.setState("paused");
       if (edge(pad, B.B) || edge(pad, B.Y)) tapKey("Escape");   // back out of a menu
@@ -168,6 +184,7 @@
     const PR = CBZ.padPrompt;
     if (PR && PR.active && PR.active()) {
       if (Object.keys(held).length) releaseAllKeys();
+      padE(false);
       setAim(false); setFire(false);
       if (edge(pad, B.DUP)) PR.pick("up");
       if (edge(pad, B.DLEFT)) PR.pick("left");
@@ -217,6 +234,7 @@
       // keep non-driving edges fresh
       if (edge(pad, B.DLEFT)) tapKey("q");      // the wheel on your own car
       edge(pad, B.LB); edge(pad, B.B); edge(pad, B.X); edge(pad, B.DUP); edge(pad, B.BACK);
+      padE(false);
       if (edge(pad, B.DRIGHT) && CBZ.verbWheel && CBZ.verbWheel.isOpen()) tapKey("e");
       setAim(false); setFire(false);
     } else {
@@ -237,13 +255,15 @@
       if (edge(pad, B.B) && CBZ.fpsReload) CBZ.fpsReload();          // reload
       if (edge(pad, B.LB) && CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); // next weapon
       if (edge(pad, B.RB) && CBZ.fpsPrevWeapon) CBZ.fpsPrevWeapon(); // prev weapon
-      // THE KEYBOARD MAP ON A PAD: Y = F (get in / get out), D-pad right = E
-      // (the obvious verb on what you look at), D-pad left = Q (the verb wheel;
-      // D-pad right then fires its highlighted verb).
+      // THE KEYBOARD MAP ON A PAD: Y = F (get in / get out of anything),
+      // D-pad right = E held as long as the button is (use the thing; a hold
+      // is the grab), D-pad left = Q (the verb wheel: a person's I J K L and
+      // the rest; D-pad right then fires its highlighted verb).
       // (Gang City only; the other games keep Y as their one hand key, E)
       const city = CBZ.game && CBZ.game.mode === "city";
       if (edge(pad, B.Y) && !(CBZ.seatExit && CBZ.seatExit())) tapKey(city ? "f" : "e");
-      if (edge(pad, B.DRIGHT) && city) tapKey("e");
+      edge(pad, B.DRIGHT);
+      padE(!!city && pressed(pad, B.DRIGHT));
       if (edge(pad, B.DLEFT) && city) tapKey("q");
       if (edge(pad, B.DUP)) tapKey("m");                            // map
       if (edge(pad, B.BACK)) tapKey("Tab");                        // city power
