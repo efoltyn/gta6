@@ -149,7 +149,10 @@
   CBZ.onUpdate(38.5, function (dt) {
     if (CFG.WATER_BUOYANCY === false || CFG.WATER_V2 === false) return;
     const g = CBZ.game;
-    if (!g || g.mode !== "city") return;
+    // (the archipelago floats its speedboats on its own sea: cityWaterAt /
+    // citySeaHeightAt answer the island water there, world/water_survival.js)
+    const arch = !!g && g.mode === "archipelago";
+    if (!g || (g.mode !== "city" && !arch)) return;
     const cars = CBZ.cityCars;
     if (!cars || !cars.length) return;
     const surfaceY = CBZ.citySeaHeightAt;
@@ -159,6 +162,7 @@
       const car = cars[i];
       if (!car || car.dead || !car.group || !car.pos) continue;
       if (!isMarine(car)) continue;
+      if (arch && car._world !== "archipelago") continue;   // a Gang City boat is not in this sea
       const x = car.pos.x, z = car.pos.z;
       if (!overWater(x, z)) { car._waveHeave = 0; continue; }
 

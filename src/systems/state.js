@@ -56,22 +56,27 @@
       // this file parses (and boot calls setMode) before modes/shark_sim.js
       // has had the chance to register its descriptor.
       : (id === "sharksim" ? "sharksim"
-      : (id === "gungame" && CBZ.modes.gungame ? "gungame" : "escape")));
+      : (id === "archipelago" ? "archipelago"
+      : (id === "gungame" && CBZ.modes.gungame ? "gungame" : "escape"))));
     // leaving GUN GAME must scrub everything it borrowed: bots out of the
     // shared npc/bot lists, the prison cast un-hidden, rung weapons wiped.
     // Runs BEFORE the root-visibility lines below so they settle the final
     // look for the mode we are ENTERING.
     if (prev === "gungame" && g.mode !== "gungame" && CBZ.gungameExit) { try { CBZ.gungameExit(); } catch (e) { console.error("[gungame exit]", e); } }
+    // leaving the ARCHIPELAGO takes its islands, sea and crowd down before
+    // the next mode stands its own (world/archipelago.js)
+    if (prev === "archipelago" && g.mode !== "archipelago" && CBZ.archipelagoExit) { try { CBZ.archipelagoExit(); } catch (e) { console.error("[archipelago exit]", e); } }
     if (g.mode !== "escape" && CBZ.setSimulationView) CBZ.setSimulationView(false);
     modeButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.mode === g.mode));
     // sharksim keeps the island HUD family: body carries BOTH mode-survival
     // (what hud.css keys the island chrome on) and its own mode-sharksim.
     document.body.classList.toggle("mode-survival", CBZ.islandModeOn(g.mode));
     document.body.classList.toggle("mode-sharksim", g.mode === "sharksim");
+    document.body.classList.toggle("mode-archipelago", g.mode === "archipelago");
     document.body.classList.toggle("mode-city", g.mode === "city");
     document.body.classList.toggle("mode-gungame", g.mode === "gungame");
     const m = CBZ.modes[g.mode];
-    if ((g.mode === "survival" || g.mode === "sharksim" || g.mode === "city" || g.mode === "gungame") && m && m.build) { try { m.build(); } catch (e) { console.error("[mode build]", e); } }
+    if ((g.mode === "survival" || g.mode === "sharksim" || g.mode === "archipelago" || g.mode === "city" || g.mode === "gungame") && m && m.build) { try { m.build(); } catch (e) { console.error("[mode build]", e); } }
     // GUN GAME borrows worlds it never builds: the prison stays visible when
     // its JAIL map is chosen, the disaster island when ISLAND is (the match
     // reset re-applies this per the picker; CBZ.gungameWorlds is the truth).
@@ -97,12 +102,13 @@
     if (CBZ.bootStep) CBZ.bootStep("boot:reset");
     CBZ.hitstop = 0;
     CBZ.slowmo = 0;
-    const mode = g.mode === "survival" ? "survival" : (g.mode === "sharksim" ? "sharksim" : (g.mode === "city" ? "city" : (g.mode === "gungame" ? "gungame" : "escape")));
+    const mode = g.mode === "survival" ? "survival" : (g.mode === "sharksim" ? "sharksim" : (g.mode === "archipelago" ? "archipelago" : (g.mode === "city" ? "city" : (g.mode === "gungame" ? "gungame" : "escape"))));
     if (CBZ.setSimulationView) CBZ.setSimulationView(false);
     if (CBZ.clearGore) CBZ.clearGore();   // wipe blood/gibs from the prior match
     g.detection = 0; g.invuln = 0; g.elapsed = 0;
     document.body.classList.toggle("mode-survival", CBZ.islandModeOn(mode));
     document.body.classList.toggle("mode-sharksim", mode === "sharksim");
+    document.body.classList.toggle("mode-archipelago", mode === "archipelago");
     document.body.classList.toggle("mode-city", mode === "city");
     document.body.classList.toggle("mode-gungame", mode === "gungame");
     if (mode === "escape") {
@@ -657,7 +663,9 @@
     if (bootBusy) return;
     // an unbuilt prison is a ~1 s build: it goes behind the card like the city
     const prisonHeavy = CBZ.prisonNeededBy && CBZ.prisonNeededBy(id);
-    const heavy = prisonHeavy || (id === "city" && CBZ.modes && CBZ.modes.city && !(CBZ.city && CBZ.city.built));
+    const heavy = prisonHeavy || (id === "city" && CBZ.modes && CBZ.modes.city && !(CBZ.city && CBZ.city.built))
+      // the archipelago stands its spawn island whole on first selection
+      || (id === "archipelago" && CBZ.archipelago && !CBZ.archipelago.state().built);
     if (!heavy || !bootMeterOn()) { setMode(id); return; }
     present(id, true, function () { setMode(id); });
   }

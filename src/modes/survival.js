@@ -509,7 +509,9 @@
 
   // ---- the mode descriptor ----
   function build() {
-    if (surv.built) return;
+    // (built: the disaster island takes the stage back, as surv.arena and as
+    // the island the shared sea and ground answer for, from the archipelago)
+    if (surv.built) { surv.arena = CBZ.buildDisasterArena(); CBZ.island = surv.arena.island; return; }
     surv.arena = CBZ.buildDisasterArena();
     /* The BASE is the island with nothing subtracted. The holes are carvings
        now (world/groundshaft.js registers them), so this must NOT be

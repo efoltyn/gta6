@@ -81,7 +81,11 @@
     h ^= h >>> 15;
     return (h >>> 0) / 4294967296;
   }
-  function wh(x, z, s) { return ihash(Math.round(x * 10), Math.round(z * 10), s); }
+  // SEEDX salts every placement hash (make() sets it from cfg.seed): seed 0
+  // is the disaster island exactly as it always was; any other seed is the
+  // same town grammar laid out with different lot widths, heights and styles
+  let SEEDX = 0;
+  function wh(x, z, s) { return ihash(Math.round(x * 10), Math.round(z * 10), s ^ SEEDX); }
   const clamp = function (v, a, b) { return v < a ? a : v > b ? b : v; };
   function ss(e0, e1, x) { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); }
   function rectHit(a, b, pad) {
@@ -154,10 +158,31 @@
   };
 
   /* ======================================================================
+     ISLAND STYLES. The same harbour town grammar (streets, lots, places,
+     cars, berths) with its districts built as something else. `remap` says
+     which district's RULE a district's frontages are built by (a "core"
+     rule builds shops and towers, "estates" villas, "industrial" sheds);
+     the district itself keeps its name and its streets. harbour is the
+     disaster island: no remap, the five-tower cap.
+     ====================================================================== */
+  const STYLES = {
+    harbour: {},
+    // a downtown island: towers wherever the frontage faces its street
+    downtown: { remap: { midtown: "core", northside: "core", westside: "core" }, maxTowers: 14, towerU: 0.12, volcanoPeak: 0.62 },
+    // a residential island: villas and houses, no towers
+    estates: { remap: { core: "midtown", midtown: "westside", northside: "westside", industrial: "estates" }, maxTowers: 0, volcanoPeak: 0.8 },
+    // a works / port island: sheds and yards, one tower
+    works: { remap: { westside: "industrial", northside: "industrial", midtown: "industrial", estates: "industrial" }, maxTowers: 1, volcanoPeak: 0.5 },
+  };
+
+  /* ======================================================================
      make()
      ====================================================================== */
   function make(cfg) {
     cfg = cfg || {};
+    SEEDX = (cfg.seed | 0) ? Math.imul(cfg.seed | 0, 0x9e3779b1) | 0 : 0;
+    const ST = STYLES[cfg.style] || STYLES.harbour;
+    const REMAP = ST.remap || {};
     const cx = cfg.cx || 0, cz = cfg.cz || 0, R = cfg.R || BASE_R;
     const K = R / BASE_R;                       // every layout number scales with the island
     const RC = roadC(), WALK = RC.WALK, HW = RC.HW;
@@ -225,8 +250,22 @@
     // a pier is a deck on piles, not fill: madeAt answers it only for the
     // solid cargo pier; the timber jetties are walk platforms (dressing)
     function quayTop(x, z) { return Math.max(Q.top, plainBaseAt(x, z) + 0.03); }
+    /* THE AIRSTRIP (cfg.airstrip): reclaimed land off the east coast, the
+       way small island airports are built: a 40 m fill, a 30 m runway on
+       it, north-south, touching the beach mid-island. Its deck is ground
+       (madeAt), so you walk, drive, land and take off on the one height
+       field. Off by default: the disaster island has none. */
+    const AIR = cfg.airstrip ? (function () {
+      const len = Math.min(330, 1.3 * R);
+      const a = { x0: cx + R + 2, x1: cx + R + 42, z0: cz - len / 2, z1: cz + len / 2, deck: 0.45, width: 30 };
+      a.x = (a.x0 + a.x1) / 2; a.z = cz; a.len = len;
+      // where a plane waits: the north threshold, nose down the runway (+z)
+      a.stand = { x: a.x, z: a.z0 + 22, heading: 0 };
+      return a;
+    })() : null;
     function madeAt(x, z) {
       let h = -Infinity;
+      if (AIR && x >= AIR.x0 && x <= AIR.x1 && z >= AIR.z0 && z <= AIR.z1) h = AIR.deck;
       if (x >= Q.x0 && x <= Q.x1 && z >= Q.z0 && z <= Q.z1) h = quayTop(x, z);
       for (let i = 0; i < PIERS.length; i++) {
         const p = PIERS[i];
@@ -244,7 +283,7 @@
 
     /* ---- HILLS -------------------------------------------------------- */
     const V = L.volcano;
-    const volcano = { x: W(V.u), z: Z(V.v), r: V.r * K, peak: V.peak, volcano: true };
+    const volcano = { x: W(V.u), z: Z(V.v), r: V.r * K, peak: V.peak * (cfg.volcanoPeak || ST.volcanoPeak || 1), volcano: true };
     // the breach faces the town: the thing everyone in it looks up at
     const town = { x: W(20), z: Z(170) };
     volcano.breachA = Math.atan2(town.z - volcano.z, town.x - volcano.x);
@@ -600,9 +639,11 @@
       estates: { front: [32, 38], depth: 28, setback: 9.0, side: 4.0, rear: 4.0, kinds: "villa" },
     };
     let towers = 0, nLots = 0;
-    const MAX_TOWERS = cfg.maxTowers != null ? cfg.maxTowers : 5;
+    const MAX_TOWERS = cfg.maxTowers != null ? cfg.maxTowers : (ST.maxTowers != null ? ST.maxTowers : 5);
+    const TOWER_U = ST.towerU != null ? ST.towerU : 0.5;
     for (const f of fronts) {
-      const rule = RULE[f.district];
+      const dRule = REMAP[f.district] || f.district;
+      const rule = RULE[dRule];
       if (!rule) continue;
       // walk the frontage from the end nearer the core
       const fromLow = Math.abs(f.t0 - (f.vertical ? coreC.z : coreC.x)) <= Math.abs(f.t1 - (f.vertical ? coreC.z : coreC.x));
@@ -621,7 +662,7 @@
         if (kind === "shop") {
           // TOWERS: only where the door can face its street (their builder's
           // door is on -z: a lot on the + side of a cross street), in the core
-          const towerOk = !f.vertical && f.side > 0 && f.district === "core" && U > 0.5 && towers < MAX_TOWERS && hs < 0.8;
+          const towerOk = !f.vertical && f.side > 0 && dRule === "core" && U > TOWER_U && towers < MAX_TOWERS && hs < 0.8;
           if (towerOk) {
             kind = "tower";
             style = pickStyle(STYLE.tower, midX, midZ, 0x503, 99);
@@ -630,7 +671,7 @@
             spec = { front: 18 * K, depth: 18 * K, setback: 2.5, side: 2.5, rear: 2.5 };
           } else {
             storeys = Math.max(2, Math.min(6, Math.round(2 + U * 4 + (hs - 0.5) * 1.6)));
-            if (f.district === "midtown") storeys = Math.min(storeys, 4);
+            if (dRule === "midtown") storeys = Math.min(storeys, 4);
             style = pickStyle(STYLE.shop, midX, midZ, 0x504, storeys);
             spec = { front: front, depth: Math.min(rule.depth, 13 + storeys * 0.4), setback: rule.setback, side: rule.side, rear: rule.rear };
           }
@@ -944,6 +985,7 @@
       lots: lots, places: places, plaza: places.plaza, parking: places.parking, showroom: places.showroom,
       stations: places.stations, helipad: places.helipad, fields: fields, beaches: beaches, trees: trees, cars: cars,
       districts: districts, lowGround: lowGround, rejects: why,
+      airstrip: AIR, style: cfg.style || "harbour", seed: cfg.seed | 0,
     };
   }
 
@@ -998,5 +1040,5 @@
     return out;
   }
 
-  CBZ.islandPlan = { make: make, check: check, LAYOUT: L, STYLE: STYLE };
+  CBZ.islandPlan = { make: make, check: check, LAYOUT: L, STYLE: STYLE, STYLES: STYLES };
 })();

@@ -43,7 +43,18 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
 
+  /* TWO NAMES FOR TWO THINGS. `home` is the disaster island (what
+     CBZ.buildDisasterArena builds, once). `arena` is the island the shared
+     queries below answer for RIGHT NOW: home in Disaster Survival and Shark
+     Sim, whichever island you are on in the archipelago (world/archipelago.js
+     hands it over through CBZ.islandActivate). One island package, any number
+     of copies; one set of sea/ground answers, for the island in force. */
+  let home = null;
   let arena = null;
+  // the archipelago's ground between and across its islands (null: the
+  // active island's own field answers everywhere, as it always did)
+  let groundOverride = null;
+  function groundQ(x, z) { return groundOverride ? groundOverride(x, z) : arena.groundHeightAt(x, z); }
   // Live roughness of the arena sea, mirrored from whatever a disaster is
   // driving into the shader so the CPU height query matches the displacement.
   const arenaWave = { amp: 0.86, chop: 0.72, foam: 0.34, opacity: 1 };
@@ -109,7 +120,7 @@
      stops being true. */
   CBZ.survFloodDepthAt = function (x, z) {
     if (!arena) return 0;
-    return CBZ.survSeaHeightAt(x, z) - arena.groundHeightAt(x, z);
+    return CBZ.survSeaHeightAt(x, z) - groundQ(x, z);
   };
   /* THE SAME WATER COLUMN, MEASURED AGAINST MEAN SEA LEVEL INSTEAD OF THE LIVE
      CREST — and the swimmer's entry test must use THIS one.
@@ -130,7 +141,7 @@
      and the BED question goes flat. One water, two honest readings of it. */
   CBZ.survFloodDepthMeanAt = function (x, z) {
     if (!arena) return 0;
-    return arena_meanY() - frontDrop(x, z) - arena.groundHeightAt(x, z);
+    return arena_meanY() - frontDrop(x, z) - groundQ(x, z);
   };
   // "is this point in the water" — the survival twin of CBZ.cityWaterAt. Reads
   // the MEAN column for the same reason: a swell crest lapping over a kerb does
@@ -140,7 +151,7 @@
   // World Y of the seabed — what a renderer and a camera boom actually want.
   // The survival twin of CBZ.citySeaBedYAt.
   CBZ.survSeaBedYAt = function (x, z) {
-    return arena ? arena.groundHeightAt(x, z) : 0;
+    return arena ? groundQ(x, z) : 0;
   };
   // The shore's static facts (band width, dry sand, wade band, live wet line)
   // — what tools/visual-presets/beach-shores.mjs prints as its measurements.
@@ -877,14 +888,38 @@
      weights each one by how long it took last time ON THIS DEVICE, so the
      second launch on the player's phone is accurate about the player's phone
      rather than about the machine this was written on. */
-  CBZ.buildDisasterArena = function () {
-    if (arena) return arena;
+  /* ONE ISLAND, ANY NUMBER OF COPIES (2026-10-22). The builder below is a
+     generator: every `yield` is a seam where a streamed build may hand the
+     frame back (world/archipelago.js runs it a few milliseconds a frame), and
+     CBZ.buildDisasterArena runs it to the end in one go, which is the build it
+     always was. ISL (all optional; none = the disaster island, byte for byte):
+       cx, cz, R     where the island stands and how big it is
+       seed, style   island_plan.js's placement salt and district style
+       airstrip      true: the reclaimed runway off the east coast
+       sea           an ocean Mesh this island SHARES (the archipelago's one
+                     sea): no own ocean, no far coast, no islets, a shelf that
+                     falls to the abyssal plain on every side
+       id            a name for tools
+     The FIRST yield hands out the island as pure data before any mesh exists
+     ({phase: "terrain", ground function, plan, colours}) — what the
+     archipelago's far silhouettes are drawn from without building anything. */
+  function* islandSteps(ISL) {
+    ISL = ISL || {};
     const S = CBZ.SURV.arena;
-    const cx = S.cx, cz = S.cz, R = S.radius;
-    _s = 20240531;
+    const cx = ISL.cx != null ? ISL.cx : S.cx, cz = ISL.cz != null ? ISL.cz : S.cz, R = ISL.R || S.radius;
+    const SHARED = !!ISL.sea;
+    // the game mode this copy belongs to (its lift verbs and camera lids ask it)
+    const WORLD = ISL.world || "survival";
+    _s = (ISL.seed | 0) ? (20240531 ^ Math.imul(ISL.seed | 0, 0x9e3779b1)) & 0x7fffffff : 20240531;
+    // this island's own descriptor and live rigs (CBZ.islandActivate publishes
+    // them to the module-level names the shared queries and ticks read)
+    let arena = null;
+    let shoreRig = null, shoreFacts = null, kelpRig = null;
+    let arena_meanY = function () { return -0.8; };
 
     const root = new THREE.Group();
-    CBZ.scene.add(root);
+    // a streamed copy builds out of sight: its owner shows it when it is whole
+    if (ISL.hidden) root.visible = false;
     const mat = CBZ.mat;
 
     /* ---- THE PLAN (world/island_plan.js) --------------------------------
@@ -903,7 +938,8 @@
       if (def.maxStoreys && def.maxStoreys !== Infinity) facLow[id] = def.maxStoreys;
     }
     const PLAN = CBZ.islandPlan
-      ? CBZ.islandPlan.make({ cx: cx, cz: cz, R: R, facades: facadeIds, tall: facTall, low: facLow })
+      ? CBZ.islandPlan.make({ cx: cx, cz: cz, R: R, facades: facadeIds, tall: facTall, low: facLow,
+        seed: ISL.seed, style: ISL.style, airstrip: !!ISL.airstrip })
       : null;
 
     // pull addBox results into the arena group (keeps world transform; root @ origin)
@@ -1151,6 +1187,16 @@
        underwater treatment has long since faded to black anyway.
 
        `?cfg_SURV_SEABED=0` restores the flat floor — and the walk-on-water. */
+    const OCEAN_Y = -0.8;              // mean sea (the ocean section below explains the sheet)
+    // the building palettes (used by the town below and by the terrain phase's
+    // lotColor, so a far silhouette wears the colour the real shell will)
+    const PALETTE = [0xb3a48e, 0x8a5a4c, 0xd2cabb, 0x8e8a80, 0xb89c7c, 0x7e897d, 0x9e7462, 0xc9bea9];
+    const TOWER_PALETTE = [0x5b6b82, 0x6f7e96, 0x8a98ac, 0x49566b, 0x7a6f8c, 0x5e7d86];
+    const HOUSE_PALETTE = [0xd8cdb8, 0xc9bea9, 0xb3a48e, 0xe0d6c4, 0x9eb0a2, 0xc8b08c, 0xb7c0c6, 0xd2b49a, 0xa8b89a];
+    const VILLA_PALETTE = [0xe4dccb, 0xd8cdb8, 0xcbb89a, 0xe8e2d4, 0xd9c9a8];
+    const WORKS_PALETTE = [0x8e8a80, 0x7d7a72, 0x9a948a, 0x6f746f, 0x8a6e5a];
+    const KIND_PAL = { house: HOUSE_PALETTE, villa: VILLA_PALETTE, shop: PALETTE, civic: VILLA_PALETTE, hotel: PALETTE,
+      works: WORKS_PALETTE, shed: WORKS_PALETTE, market: PALETTE, office: PALETTE, tower: TOWER_PALETTE };
     const SHELF_SLOPE = 0.34;          // m of depth per m past the shore band
     /* SURV_BEACH_V2 — THE BEACH BECOMES A SHORE, NOT A STRIPE (2026-08-16).
        The old coast was an 8 m flat sand annulus at y=-0.02 whose outer rim
@@ -1214,7 +1260,9 @@
        oracle), and navigated (survFloodDepthMeanAt goes to zero there, which
        is what the island mover's shore law runs on) — no second fence to
        keep in step. */
-    const FAR_WL = R + 2400;           // the far coast's waterline radius — THE SIZE OF THE SEA
+    // (a shared sea has no far coast: the shelf falls to the abyssal plain on
+    // every side and the next island is the next coast)
+    const FAR_WL = SHARED ? 1e7 : R + 2400;   // the far coast's waterline radius — THE SIZE OF THE SEA
     const FAR_FORE = 26;               // its foreshore width — the island's own
     const FAR_RISE = 0.66;             // underwater climb toward it, mirror of SHELF_DEEP
     const FAR_TOUCH = FAR_FORE + (DEEP - FORE_DROP) / FAR_RISE;  // ~117 m out: where the climb leaves the plain
@@ -1302,6 +1350,7 @@
        the grounding and beaching laws hold on all of them unchanged. */
     const islets = [];
     (function placeIslets() {
+      if (SHARED) return;              // the archipelago's islands ARE the islets
       let s3 = 771177;
       const r3 = () => { s3 = (s3 * 1103515245 + 12345) & 0x7fffffff; return s3 / 0x7fffffff; };
       for (let tries = 0; tries < 700 && islets.length < 11; tries++) {
@@ -1385,12 +1434,20 @@
       return h;
     }
 
+    // THE ISLAND AS DATA (see islandSteps): the ground function, the plan and
+    // the colours the build paints with, before a single mesh is made
+    yield {
+      phase: "terrain", id: ISL.id || null, cx: cx, cz: cz, R: R, plan: PLAN, hills: hills,
+      groundAt: groundHeightAt, grassColorAt: function (x, z, out) { return grassColorAt(x, z, out || [0, 0, 0]); },
+      lotColor: function (l) { const pal = KIND_PAL[l.kind] || PALETTE; return pal[(h01g(l.x, l.z, 0x7a1) * pal.length) | 0]; },
+      FH: FH, oceanY: OCEAN_Y, root: root,
+    };
+    CBZ.scene.add(root);
     if (CBZ.bootStep) CBZ.bootStep("island:ground");
     // ---- island ground + ocean ----
     // big ocean plane. Exposed on the descriptor (arena.ocean / arena.oceanY)
     // so the tsunami can pull the whole sea OUT during its warning and surge
     // it back in as the flood — reset() always parks it back at OCEAN_Y.
-    const OCEAN_Y = -0.8;
     /* The displaced sheet is 2 km on a side and FOLLOWS THE CAMERA (see the
        47.9 update below) — the sea runs to a real far coast ~2.4 km out
        (FAR_WL / arena.seaR), so a tile parked on the island's centre would
@@ -1401,29 +1458,14 @@
        the same way the island always has. */
     const OCEAN_SPAN = 2048;
     const sharedWater = !!(CBZ.waterBuildDisasterGeometry && CBZ.makeDisasterWaterMaterial);
-    const oceanGeo = sharedWater ? CBZ.waterBuildDisasterGeometry(OCEAN_SPAN)
-      : new THREE.PlaneGeometry(OCEAN_SPAN, OCEAN_SPAN);
-    const oceanMat = sharedWater ? CBZ.makeDisasterWaterMaterial({
-      name: "Survival Ocean Water", color: 0x155878, shallowColor: 0x3195a7,
-      amp: 0.86, chop: 0.72, foam: 0.34,
-    }) : new THREE.MeshLambertMaterial({ color: 0x2f6f9e });
-    const ocean = new THREE.Mesh(oceanGeo, oceanMat);
-    if (!sharedWater) ocean.rotation.x = -Math.PI / 2;
-    // The shared sea is a camera-centred radial disc (world/water_spec.js
-    // re-centres it in the vertex program), so the mesh sits at x = z = 0.
+    // a SHARED sea is the archipelago's (world/archipelago.js makes it with
+    // CBZ.islandMakeSea, the same sheet as below): this island only reads it
+    const oceanGeo = SHARED ? ISL.sea.geometry : (sharedWater ? CBZ.waterBuildDisasterGeometry(OCEAN_SPAN)
+      : new THREE.PlaneGeometry(OCEAN_SPAN, OCEAN_SPAN));
+    const oceanMat = SHARED ? ISL.sea.material : makeSeaMaterial(sharedWater);
+    const ocean = SHARED ? ISL.sea : new THREE.Mesh(oceanGeo, oceanMat);
     const oceanRadial = !!(oceanGeo.userData && oceanGeo.userData.waterDisasterGrid && oceanGeo.userData.waterDisasterGrid.radial);
-    if (oceanRadial) ocean.position.set(0, OCEAN_Y, 0);
-    else ocean.position.set(cx, OCEAN_Y, cz);
-    ocean.receiveShadow = false; root.add(ocean);
-    ocean.name = "survival-ocean";
-    // SEA_TRANSLUCENT: the sea blends now, so it joins the transparent list —
-    // pinned first (city/world.js has the same line and the same reason) so it
-    // can never be sorted on top of the spray and foam that ride on it.
-    ocean.renderOrder = -1;
-    ocean.frustumCulled = false;
-    ocean.userData.waterSurface = true;
-    ocean.userData.surfaceOwner = "survival-water";
-    ocean.userData.waterMode = sharedWater ? "shared-disaster-fresnel" : "lambert-fallback";
+    if (!SHARED) { dressSea(ocean, sharedWater, oceanRadial, cx, cz, OCEAN_Y); root.add(ocean); }
 
     /* ---- THE ARENA'S SEA *IS* THE GAME'S SEA (SURV_SHARED_WATER) ----------
        CBZ.waterSurgeSet(m) (world/water_spec.js) is the ONE way water rises in
@@ -1465,7 +1507,10 @@
        calm sea, and only while the sea is calm: a flood (surge over half a
        metre) turns it off, because then the water on the island is real. */
     let dryR = R;
-    for (let r = R * 0.6; r < R + 60; r += 0.5) { if (groundHeightAt(cx + r, cz) < OCEAN_Y + 0.35) { dryR = r; break; } }
+    // (measured down the west side when the east coast carries an airstrip:
+    // its fill would stretch the disc over open water everywhere else)
+    const dryDir = PLAN && PLAN.airstrip ? -1 : 1;
+    for (let r = R * 0.6; r < R + 60; r += 0.5) { if (groundHeightAt(cx + dryDir * r, cz) < OCEAN_Y + 0.35) { dryR = r; break; } }
     const dryU = oceanMat.uniforms && oceanMat.uniforms.uDwDryDisc;
     /* THE SHORE FIELD (WATER V3). The island sea had no idea where the land
        was: no surf line, no turquoise over the sand, no caustics in the
@@ -1475,13 +1520,14 @@
        distance), a slice per frame while the sea is driven, so it never lands
        on the load path. Covers the island and its shelf; past that the sea is
        open water, which is what it is. */
-    if (sharedWater && CBZ.waterBakeField && CBZ.waterSetField) {
+    if (!SHARED && sharedWater && CBZ.waterBakeField && CBZ.waterSetField) {
       CBZ.waterSetField(ocean, CBZ.waterBakeField({
         cx: cx, cz: cz, half: R + 700, size: 512, seaY: OCEAN_Y,
         groundAt: function (x, z) { return groundHeightAt(x, z); },
       }));
     }
-    if (CBZ.onUpdate) CBZ.onUpdate(47.9, function () {
+    // (a shared sea is driven by its owner, for whichever island is in force)
+    if (!SHARED && CBZ.onUpdate) CBZ.onUpdate(47.9, function () {
       if (!arena || !CBZ.game || !CBZ.islandModeOn(CBZ.game.mode)) return;
       ocean.position.y = arena_meanY();
       if (dryU) {
@@ -1496,6 +1542,7 @@
       if (sharedWater) CBZ.waterDriveDisasterSurface(ocean, arenaWave);
     });
 
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     // the SEABED shelf under the sea: invisible in normal play (the opaque
     // ocean covers it), revealed as a shocking ring of wet sand when the
     // tsunami recedes the ocean below it — the classic dread beat. Its own
@@ -1539,7 +1586,7 @@
        world's visible edge is dry sand you cannot see past, not a rim of
        floating water. The size of the OCEAN itself is FAR_WL above; this is
        just how much of its far shore gets drawn. */
-    const BED_R1 = FAR_WL + 260;
+    const BED_R1 = SHARED ? SHORE_R + 420 : FAR_WL + 260;
     /* RING RADII ARE A LIST, NOT A FORMULA. The old squared distribution was
        right for a bed that only ever got flatter with distance — fine rings
        at the island beach, ~50 m at the horizon. But the far coast puts a
@@ -1552,11 +1599,13 @@
        shoulder, crest. */
     const bedRadii = [];
     (function () {
-      const powEnd = FAR_WL - FAR_TOUCH - 60;    // where the plain hands over
-      const POW_RINGS = 74;
+      // (a shared sea: the shelf alone, out to where it has long reached the
+      // plain; the archipelago's abyssal floor carries on from there)
+      const powEnd = SHARED ? BED_R1 : FAR_WL - FAR_TOUCH - 60;    // where the plain hands over
+      const POW_RINGS = SHARED ? 40 : 74;
       for (let i = 0; i <= POW_RINGS; i++)
         bedRadii.push(BED_R0 + (powEnd - BED_R0) * Math.pow(i / POW_RINGS, 1.7));
-      for (const o of [-117, -84, -55, -34, -26, -18, -10, -4, 0, 5, 12, 20, 26, 42, 66, 96, 132, 180, 260])
+      if (!SHARED) for (const o of [-117, -84, -55, -34, -26, -18, -10, -4, 0, 5, 12, 20, 26, 42, 66, 96, 132, 180, 260])
         bedRadii.push(FAR_WL + o);
     })();
     const BED_RINGS = bedRadii.length - 1, BED_SECT = 128;
@@ -1649,6 +1698,7 @@
       root.add(seabed);
     })();
 
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     /* ---- THE ARCHIPELAGO'S MESHES: one fine radial patch per islet, all
        merged into ONE draw call. Built straight in world-space XZ (no
        rotated-ring gymnastics), every vertex on isletHeightAt — the same
@@ -1713,6 +1763,7 @@
       root.add(mesh);
     })();
 
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     /* ---- DRESSING: THIS IS A SEA FLOOR, NOT A GRADIENT --------------------
        Two draw calls total, both built once, both deterministic (CBZ.hash01 and
        the private rng2 stream, so the island's seeded layout is untouched).
@@ -1871,6 +1922,7 @@
       }
     })();
 
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     // the island disc (grass) with a sandy beach ring. Flag off: the old flat
     // 8 m stripe. Flag on: the ring is DRAPED over coastHeightAt — the berm,
     // the foreshore, the walk into the water — with vertex colours that carry
@@ -1965,6 +2017,7 @@
         wetLive: shoreRig ? 1 : 0,
       };
     })();
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     /* THE LAND. It was a flat polar disc at y 0; the island now has a plain
        that climbs ~4 m inland, a ghaut cut through it and every lot graded
        to its pad, so the land is a 2.5 m grid draped on the SAME function
@@ -1975,13 +2028,14 @@
        ghaut's bed and banks are bare scree and boulder gravel, graded in by
        how deep the cut is. The hills and the volcano are their own meshes
        standing on it. */
-    const islandGeo = (function () {
+    // (a generator: the 2.5 m grid is ~37k vertices, laid 24 rows a step)
+    const islandGeo = yield* (function* () {
       const STEP = 2.5, N = Math.ceil(2 * R / STEP);
       const nv = (N + 1) * (N + 1);
       const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), inR = new Uint8Array(nv);
       const c3 = [0, 0, 0];
       const BED = [0.085, 0.074, 0.060], STONE = [0.120, 0.112, 0.100];
-      for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+      for (let j = 0; j <= N; j++) { if (j && j % 24 === 0) yield 0; for (let i = 0; i <= N; i++) {
         const k = j * (N + 1) + i;
         let x = cx - R + i * STEP, z = cz - R + j * STEP;
         const dx = x - cx, dz = z - cz, d = Math.sqrt(dx * dx + dz * dz);
@@ -2000,7 +2054,7 @@
           }
         }
         col[k * 3] = c3[0]; col[k * 3 + 1] = c3[1]; col[k * 3 + 2] = c3[2];
-      }
+      } }
       const idx = [];
       for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
         const a = j * (N + 1) + i, b2 = a + 1, c = a + N + 1, e = c + 1;
@@ -2020,6 +2074,7 @@
     island.name = "survival-land";
     island.receiveShadow = true; root.add(island);
 
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     if (CBZ.bootStep) CBZ.bootStep("island:mountains");
     // ---- mountains as cones sitting on the floor ----
     /* EVERY ONE OF THESE IS TERRAIN, SO EVERY ONE OF THEM TAKES SNOW.
@@ -2112,6 +2167,7 @@
        Colours are LINEAR albedos (see the linear-hex trap): basalt really is
        this dark. The last ring is pushed out past the footprint and DOWN
        below y=0, buried under the island plate so the base has no seam. */
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     const VOL_FUMAROLES = [];
     (function buildVolcano() {
       const SEC = 128, CR = 8, FR = 27;
@@ -2301,6 +2357,7 @@
       root.add(mtn);
     })();
 
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     /* AT REST THE MOUNTAIN BREATHES. A faint steam wisp off each fumarole —
        world/volcanofx.js's V.fumarole, one instanced draw — built lazily on
        the first island frame (volcanofx loads after this file) and ticked
@@ -2334,7 +2391,7 @@
     // was sky blue, pink, mint and canary, and every grammar that lets the
     // host wall show wore it.) Still eight, so the rng stream and the town
     // plan are exactly what they were.
-    const PALETTE = [0xb3a48e, 0x8a5a4c, 0xd2cabb, 0x8e8a80, 0xb89c7c, 0x7e897d, 0x9e7462, 0xc9bea9];
+    // (PALETTE is declared with the other palettes, above the terrain phase)
 
     // ---- SHATTERABLE GLASS -------------------------------------------------
     // Every window pane is registered here so a quake/blast can burst it: the
@@ -3513,7 +3570,7 @@
       return { x0: Math.min(a[0], b[0]), x1: Math.max(a[0], b[0]), z0: Math.min(a[1], b[1]), z1: Math.max(a[1], b[1]) };
     }
 
-    function makeBuilding(ox, oz, w, d, storeys, color, gy, style, yaw, bo) {
+    function* makeBuilding(ox, oz, w, d, storeys, color, gy, style, yaw, bo) {
       yaw = yaw || 0; bo = bo || {};
       const snap = recSnap();
       const bgroup = new THREE.Group();
@@ -3615,6 +3672,7 @@
          roof you can stand on. Then every slab, landing, flight, guard,
          parapet and roof collider below is laid from the plan, the plan
          tools/island-stairs-check.mjs audits in node. */
+      yield 0;   // (a seam inside the building: see islandSteps)
       const rTop = storeys * FH;
       const dressing = !!(style && CBZ.facadeCrownProbe && !(CBZ.CONFIG && CBZ.CONFIG.SURV_FACADES === false));
       let crown0 = [];
@@ -3691,6 +3749,7 @@
 
       // THE FACADE. Emitted last so it dresses the finished shell, and into
       // this building's own group so the quake still topples it as one piece.
+      yield 0;   // (a seam inside the building: see islandSteps)
       const dressed = dressIslandFacade({
         group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
         fh: FH, wt: WT, rTop: rTop, pp: 0.7, doorSide: 0,   // the door is on -z
@@ -3702,6 +3761,7 @@
 
       // THE INSIDE (see THE INSIDE OF A BUILDING), then the shell pieces it
       // laid on the roof after the facade flushed
+      yield 0;   // (a seam inside the building: see islandSteps)
       const covers = houseInterior({
         group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, color: color,
         ixMin: ixMin, ixMax: ixMax, izMin: izMin, izMax: izMax,
@@ -4009,7 +4069,7 @@
       return g2;
     }
 
-    function makeTower(ox, oz, w, d, h, color, style, lot, to) {
+    function* makeTower(ox, oz, w, d, h, color, style, lot, to) {
       to = to || {};
       const gy = groundHeightAt(ox, oz);
       const g = new THREE.Group();
@@ -4103,6 +4163,7 @@
       // island towers actually reach, so they get the skyline half of the kit.
       // The lift shaft goes in with it: the kit keeps the shaft hollow through
       // the crown and says where the top of the crown is (THE LIFT TOP).
+      yield 0;   // (a seam inside the building: see islandSteps)
       const dressedT = dressIslandFacade({
         group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
         fh: FH, wt: TW, rTop: realH, pp: 0.6, doorSide: 0,
@@ -4208,6 +4269,7 @@
         }
       }
       // THE INSIDE (see THE TOWER INTERIOR)
+      yield 0;   // (a seam inside the building: see islandSteps)
       const towerCovers = towerInterior({
         group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, iw: iw, id: id, s: s, TW: TW,
         DW: DW, DOORH: DOORH, lobbyTop: lobbyTop, cols: cols, holes: dressedT.holes, plant: plant,
@@ -4318,7 +4380,7 @@
       // ceiling and the third-person boom flew out over it. Not a physics
       // wall (colliders push sideways; a lid must never shove a jumper out of
       // the car). Ridden with the car below.
-      e.camLid = { minX: ox - s, maxX: ox + s, minZ: oz - s, maxZ: oz + s, y0: gy + stop0 + 2.3, y1: gy + stop0 + 2.38, mode: "survival" };
+      e.camLid = { minX: ox - s, maxX: ox + s, minZ: oz - s, maxZ: oz + s, y0: gy + stop0 + 2.3, y1: gy + stop0 + 2.38, mode: WORLD };
       (CBZ.camColliders || (CBZ.camColliders = [])).push(e.camLid);
       elevators.push(e);
 
@@ -4385,10 +4447,10 @@
       return y;
     }
     // lay the streets (after the stations have pushed roadCuts / raisePads)
-    function finishRoads() {
+    function* finishRoads() {
       const kit = CBZ.islandRoadKit;
       if (roadNet || !kit || !roadPlan) return;
-      roadNet = kit.build({
+      const roadCtx = ({
         THREE: THREE, root: root, cx: cx, cz: cz, R: R, plan: roadPlan,
         ground: roadGround, cuts: roadCuts, pads: raisePads,
         // a bridge draws its own deck (so a span that fails takes it along)
@@ -4397,6 +4459,7 @@
         onUpdate: CBZ.onUpdate,
         modeOn: function () { return !!(CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)); },
       });
+      roadNet = kit.steps ? yield* kit.steps(roadCtx) : kit.build(roadCtx);
       CBZ.survRoadStats = roadNet.stats;
     }
 
@@ -4450,17 +4513,8 @@
         onPad: function (a, top) { raisePads.push({ x0: a.x0, x1: a.x1, z0: a.z0, z1: a.z1, top: top }); },
       });
     }
-    // the plan picked the stations' lots (a block frontage each, front to the street)
-    function placeStations() {
-      const sites = [];
-      if (PLAN) for (const l of PLAN.stations) {
-        const site = { x: l.x, z: l.z, y: l.gy, rotY: l.rotY, lot: l };
-        sites.push(site);
-        placed.push({ x: l.x, z: l.z, w: l.wx, d: l.wz, lot: l });
-      }
-      sites.forEach(makeGasStation);
-      return sites;
-    }
+    // (the plan picked the stations' lots, a block frontage each, front to the
+    // street; the town section below stands them, one a step)
 
     // ---- CAR SHOWROOM (GTA dealership): no normal doors — the whole front is
     // a giant glass showroom with a central roll-up GARAGE-DOOR bay you can
@@ -4593,13 +4647,13 @@
        sunk. The facade flag (SURV_FACADES) dresses or undresses; it never
        moves a building. */
     const placed = [];
-    const stationSites = placeStations();   // the stations' forecourts report their driveways first
-    const TOWER_PALETTE = [0x5b6b82, 0x6f7e96, 0x8a98ac, 0x49566b, 0x7a6f8c, 0x5e7d86];
-    const HOUSE_PALETTE = [0xd8cdb8, 0xc9bea9, 0xb3a48e, 0xe0d6c4, 0x9eb0a2, 0xc8b08c, 0xb7c0c6, 0xd2b49a, 0xa8b89a];
-    const VILLA_PALETTE = [0xe4dccb, 0xd8cdb8, 0xcbb89a, 0xe8e2d4, 0xd9c9a8];
-    const WORKS_PALETTE = [0x8e8a80, 0x7d7a72, 0x9a948a, 0x6f746f, 0x8a6e5a];
-    const KIND_PAL = { house: HOUSE_PALETTE, villa: VILLA_PALETTE, shop: PALETTE, civic: VILLA_PALETTE, hotel: PALETTE,
-      works: WORKS_PALETTE, shed: WORKS_PALETTE, market: PALETTE, office: PALETTE, tower: TOWER_PALETTE };
+    // the stations' forecourts report their driveways first (one a step)
+    const stationSites = [];
+    if (PLAN) for (const l of PLAN.stations) {
+      stationSites.push({ x: l.x, z: l.z, y: l.gy, rotY: l.rotY, lot: l });
+      placed.push({ x: l.x, z: l.z, w: l.wx, d: l.wz, lot: l });
+    }
+    for (const site of stationSites) { makeGasStation(site); yield 0; }
     let dl1 = null, built = 0;
     if (PLAN) for (const l of PLAN.lots) {
       if (l.kind === "station") continue;                 // placeStations built it
@@ -4611,9 +4665,9 @@
         makeShowroom(l.x, l.z);
         dl1 = { x: l.x, z: l.z };
       } else if (l.kind === "tower" || l.kind === "hotel") {
-        b = makeTower(l.x, l.z, l.w, l.d, l.storeys * FH, color, l.style, l.lot, { helipad: !!l.helipad });
+        b = yield* makeTower(l.x, l.z, l.w, l.d, l.storeys * FH, color, l.style, l.lot, { helipad: !!l.helipad });
       } else {
-        b = makeBuilding(l.x, l.z, l.w, l.d, l.storeys, color, l.gy, l.style, l.yaw, { helipad: !!l.helipad, lot: l.lot });
+        b = yield* makeBuilding(l.x, l.z, l.w, l.d, l.storeys, color, l.gy, l.style, l.yaw, { helipad: !!l.helipad, lot: l.lot });
       }
       if (b) {
         b.lot = l.lot; b.district = l.district; b.kind = l.kind; b.name = l.name || null; b.planId = l.id;
@@ -4622,8 +4676,10 @@
       }
       placed.push({ x: l.x, z: l.z, w: l.wx, d: l.wz, lot: l.lot, b: b });
       if (CBZ.bootStep && built % 12 === 0) CBZ.bootStep("island:town");
+      yield 0;   // one building a step
     }
-    finishRoads();
+    yield* finishRoads();
+    yield 0;
 
     /* THE PARKED CARS, where the plan stood them: against the kerb on the
        residential and industrial streets (facing the way their lane runs,
@@ -4634,6 +4690,7 @@
       makeCar(c.x, c.z, c.yaw, CAR_COLORS[(h01g(c.x, c.z, 0xca9) * CAR_COLORS.length) | 0]);
     }
 
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     if (CBZ.bootStep) CBZ.bootStep("island:trees");
     /* ---- THE ISLAND'S TREES: kit trees, not green cubes on sticks ----------
        Every tree here used to be two addBox cuboids — a 0.5 m square post and
@@ -4794,6 +4851,7 @@
       proxyTree(rec, palm);
       flammable.push({ x, z, trunk: rec.trunk, foliage: rec.foliage, trunkCol: rec.trunkCol, palm: palm,
         leafHex: rec.leafHex, barkHex: rec.barkHex, burning: 0, burnt: false });
+      if (flammable.length % 48 === 0) yield 0;
     }
     // ---- the archipelago's palms, on their OWN rng stream so the main
     // island's layout stays byte-identical. They join `flammable`, so they
@@ -4820,6 +4878,7 @@
     })();
     if (treeProxy) treeProxy.build();
 
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     if (CBZ.bootStep) CBZ.bootStep("island:rocks");
     // ---- rocks / cover ----
     /* The boulders were 26 separate meshes (26 draws), each a 12-face
@@ -4893,6 +4952,7 @@
        One merged mesh per material (concrete, rock, timber, paint), plus the
        lens. Every piece is placed off the plan's numbers: nothing here is a
        coordinate. */
+    yield 0;   // (a seam: a streamed build may hand the frame back here)
     const harbourOut = { boats: [], lens: null, points: [], jetties: [], bridges: [] };
     /* THE BRIDGES. Every street that crosses the ghaut does it on a beam
        bridge at the plain's own level: a concrete deck slab 0.8 m deep with
@@ -5283,14 +5343,30 @@
       });
     })();
 
+    yield 0;
+    // THE AIRSTRIP (island_plan.js cfg.airstrip): its fill is ground already
+    // (the plan's madeAt); this draws it
+    if (PLAN && PLAN.airstrip) buildAirstrip(PLAN.airstrip, root, OCEAN_Y);
     // the town between the buildings: yards, the square, the car parks, the
     // hydrants, the farm, the rocks (world/island_dressing.js; result also at
     // CBZ.islandDressing.current). It reads the plan for where each goes.
-    const islandDress = CBZ.islandDressing ? CBZ.islandDressing.build({ root: root, cx: cx, cz: cz, R: R, plan: PLAN, ROADW: ROADW, groundHeightAt: groundHeightAt, surfaceHeightAt: surfaceHeightAt, onRoad: onRoad, placed: placed, fragile: fragile, roadSegs: roadSegs, h01: h01g, trees: flammable, rocks: rockSites, cars: cars, makeCar: makeCar, showroom: dl1 ? { x: dl1.x, z: dl1.z, w: 18, d: 13 } : null, stations: stationSites, oceanY: OCEAN_Y }) : null;
+    const dressCtx = { root: root, cx: cx, cz: cz, R: R, plan: PLAN, ROADW: ROADW, groundHeightAt: groundHeightAt, surfaceHeightAt: surfaceHeightAt, onRoad: onRoad, placed: placed, fragile: fragile, roadSegs: roadSegs, h01: h01g, trees: flammable, rocks: rockSites, cars: cars, makeCar: makeCar, showroom: dl1 ? { x: dl1.x, z: dl1.z, w: 18, d: 13 } : null, stations: stationSites, oceanY: OCEAN_Y };
+    const islandDress = CBZ.islandDressing
+      ? (CBZ.islandDressing.steps ? yield* CBZ.islandDressing.steps(dressCtx) : CBZ.islandDressing.build(dressCtx)) : null;
+    yield 0;
 
     arena = {
       root, center: { x: cx, z: cz }, radius: R,
       ocean, oceanY: OCEAN_Y,
+      // THE PACKAGE'S OWN NUMBERS (world/archipelago.js): its name, the sea it
+      // shares (null: its own), its dry disc, the runway, its live rigs (what
+      // CBZ.islandActivate publishes), and a shore field baker for a shared sea
+      id: ISL.id || null, sharedSea: SHARED, dryR: dryR, airstrip: PLAN ? PLAN.airstrip : null,
+      _rigs: { shore: shoreRig, facts: shoreFacts, kelp: kelpRig, meanY: arena_meanY },
+      bakeShoreField: function () {
+        return CBZ.waterBakeField ? CBZ.waterBakeField({ cx: cx, cz: cz, half: R + 700, size: 512, seaY: OCEAN_Y,
+          groundAt: function (x, z) { return groundHeightAt(x, z); } }) : null;
+      },
       // the far coast's WATERLINE radius — where the sea visibly ends in
       // sand. water_survival.js reads it for its flood backstop (seaR + 150,
       // buried under the far dunes); the actual wall is the beach itself,
@@ -5700,7 +5776,7 @@
     );
     function armControls(P) {
       callArm = null; stopArm = null; goArm.length = 0;
-      if (!P || !P.pos || P.dead || P._mountedAnimal || !CBZ.prisonPrompt || CBZ.game.mode !== "survival") return;
+      if (!P || !P.pos || P.dead || P._mountedAnimal || !CBZ.prisonPrompt || CBZ.game.mode !== WORLD) return;
       for (let q = 0; q < elevators.length; q++) {
         const e = elevators[q], m = e.m;
         if (!m || e.b.fallen || !inCar(e, P)) continue;
@@ -5935,5 +6011,331 @@
     })();
 
     return arena;
+  }
+
+  /* ============================================================
+     THE SEA SHEET — one law for an island's own ocean and a shared one
+     ============================================================ */
+  function makeSeaMaterial(sharedWater) {
+    return sharedWater ? CBZ.makeDisasterWaterMaterial({
+      name: "Survival Ocean Water", color: 0x155878, shallowColor: 0x3195a7,
+      amp: 0.86, chop: 0.72, foam: 0.34,
+    }) : new THREE.MeshLambertMaterial({ color: 0x2f6f9e });
+  }
+  function dressSea(ocean, sharedWater, radial, cx, cz, y) {
+    if (!sharedWater) ocean.rotation.x = -Math.PI / 2;
+    // The shared sea is a camera-centred radial disc (world/water_spec.js
+    // re-centres it in the vertex program), so the mesh sits at x = z = 0.
+    if (radial) ocean.position.set(0, y, 0);
+    else ocean.position.set(cx, y, cz);
+    ocean.receiveShadow = false;
+    ocean.name = "survival-ocean";
+    // SEA_TRANSLUCENT: the sea blends now, so it joins the transparent list —
+    // pinned first (city/world.js has the same line and the same reason) so it
+    // can never be sorted on top of the spray and foam that ride on it.
+    ocean.renderOrder = -1;
+    ocean.frustumCulled = false;
+    ocean.userData.waterSurface = true;
+    ocean.userData.surfaceOwner = "survival-water";
+    ocean.userData.waterMode = sharedWater ? "shared-disaster-fresnel" : "lambert-fallback";
+  }
+  /* A SEA FOR MANY ISLANDS (world/archipelago.js): the island's own sheet,
+     sized to the haze it has to reach, owned by the caller (it adds it to
+     its root and drives it with CBZ.islandDriveSea every frame). Islands
+     built with { sea: thisMesh } read it and make none of their own. */
+  CBZ.islandMakeSea = function (span) {
+    const sharedWater = !!(CBZ.waterBuildDisasterGeometry && CBZ.makeDisasterWaterMaterial);
+    const geo = sharedWater ? CBZ.waterBuildDisasterGeometry(span || 2048) : new THREE.PlaneGeometry(span || 2048, span || 2048);
+    const sea = new THREE.Mesh(geo, makeSeaMaterial(sharedWater));
+    const radial = !!(geo.userData && geo.userData.waterDisasterGrid && geo.userData.waterDisasterGrid.radial);
+    dressSea(sea, sharedWater, radial, 0, 0, -0.8);
+    sea.userData.sharedWater = sharedWater;
+    sea.userData.radial = radial;
+    const grid = geo.userData && geo.userData.waterDisasterGrid;
+    sea.userData.pitch = grid ? grid.span / grid.segments : 16;
+    return sea;
   };
+  // one frame of a shared sea for the island in force (A; null between
+  // islands): exactly what an island's own 47.9 tick does for its own sheet
+  CBZ.islandDriveSea = function (sea, A) {
+    if (!sea) return;
+    sea.position.y = arena_meanY();
+    const dryU = sea.material && sea.material.uniforms && sea.material.uniforms.uDwDryDisc;
+    if (dryU) {
+      if (A) {
+        const sg = CBZ.waterSurge ? CBZ.waterSurge() : 0;
+        dryU.value.set(A.center.x, A.center.z, A.dryR || A.radius, 3 * Math.max(0, Math.min(1, 1 - Math.max(0, sg) / 0.5)));
+      } else dryU.value.set(0, 0, 0, 0);
+    }
+    const cam = CBZ.camera, pitch = sea.userData.pitch || 16;
+    if (cam && !sea.userData.radial) {
+      sea.position.x = Math.round(cam.position.x / pitch) * pitch;
+      sea.position.z = Math.round(cam.position.z / pitch) * pitch;
+    }
+    if (sea.userData.sharedWater && CBZ.waterDriveDisasterSurface) CBZ.waterDriveDisasterSurface(sea, arenaWave);
+  };
+
+  /* ============================================================
+     THE AIRSTRIP — the reclaimed runway island_plan.js lays (cfg.airstrip).
+     Its deck is ground (the plan's madeAt), so this only DRAWS it: the
+     rock armour down into the shelf, the concrete apron, the asphalt, the
+     paint. One merged mesh, vertex-coloured (linear albedo).
+     ============================================================ */
+  function buildAirstrip(A, root, seaY) {
+    const parts = [];
+    function piece(x0, x1, y0, y1, z0, z1, rgb) {
+      const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0);
+      g.deleteAttribute("uv");
+      g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+      const n = g.attributes.position.count, c = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { c[i * 3] = rgb[0]; c[i * 3 + 1] = rgb[1]; c[i * 3 + 2] = rgb[2]; }
+      g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+      parts.push(g);
+    }
+    const top = A.deck, hw = A.width / 2, xm = A.x;
+    const ARMOUR = [0.085, 0.080, 0.072], APRON = [0.25, 0.24, 0.225], ASPH = [0.042, 0.043, 0.046], PAINT = [0.70, 0.70, 0.68];
+    const rz0 = A.z0 + 6, rz1 = A.z1 - 6;
+    piece(A.x0 - 2.5, A.x1 + 2.5, seaY - 40, top - 0.4, A.z0 - 2.5, A.z1 + 2.5, ARMOUR);   // the rock mound
+    piece(A.x0, A.x1, top - 0.4, top, A.z0, A.z1, APRON);                                  // the apron slab
+    piece(xm - hw, xm + hw, top, top + 0.012, rz0, rz1, ASPH);                             // the runway
+    const py0 = top + 0.012, py1 = top + 0.02;
+    // edge lines, the centreline dashes (30 m on, 20 off), the threshold bars
+    piece(xm - hw + 0.6, xm - hw + 1.5, py0, py1, rz0 + 2, rz1 - 2, PAINT);
+    piece(xm + hw - 1.5, xm + hw - 0.6, py0, py1, rz0 + 2, rz1 - 2, PAINT);
+    for (let z = rz0 + 60; z + 30 < rz1 - 60; z += 50) piece(xm - 0.45, xm + 0.45, py0, py1, z, z + 30, PAINT);
+    for (const e of [rz0 + 6, rz1 - 36]) {
+      for (let k = 0; k < 8; k++) {
+        const x = xm - hw + 3 + k * ((A.width - 8) / 8) + (k >= 4 ? 1.6 : 0);
+        piece(x, x + 1.8, py0, py1, e, e + 30, PAINT);
+      }
+    }
+    const BGU = THREE.BufferGeometryUtils;
+    const geo = BGU && parts.length > 1 ? BGU.mergeBufferGeometries(parts) : parts[0];
+    if (geo !== parts[0]) for (const g of parts) g.dispose();
+    geo.computeBoundingSphere();
+    const m = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+    m.name = "island-airstrip";
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.name = "island-airstrip";
+    mesh.receiveShadow = true;
+    root.add(mesh);
+    return mesh;
+  }
+
+  /* ============================================================
+     THE ISLAND AS A PACKAGE: build anywhere, in slices, and take it all back
+     ============================================================
+     CBZ.islandBuild(ISL) -> job
+       job.step(ms)    run the build until `ms` of this frame are spent (at
+                       least one slice); true once the island is whole
+       job.finish()    run it to the end now
+       job.terrain     the terrain phase (the island as data, no meshes)
+       job.arena       the descriptor once done (null until then)
+     CBZ.islandDispose(job)  the island leaves: every collider, platform, LOS
+                       blocker, frame hook and registry entry its build added
+                       is taken out again, its stairs and lifts unregistered,
+                       its root removed and its GPU buffers released
+     CBZ.islandActivate(arena, groundFn)  the island the shared sea/ground
+                       answers (CBZ.survSeaHeightAt ...) speak for; groundFn
+                       (optional) answers the ground everywhere instead
+     CBZ.islandTerrain(ISL)  the terrain phase alone (nothing is built)
+
+     WHAT A BUILD LEAVES BEHIND is measured, not listed: every top-level CBZ
+     array is marked before each slice and whatever was appended during it
+     is the island's (core/citystream.js runCaptured does the same for a
+     city job). The few globals a build publishes (the lift verbs, the glass
+     burst, CBZ.island) are taken off the page after each slice and kept on
+     the job, so an island built in the background never hijacks the one you
+     are standing on; activating an island puts its own back. */
+  const OWN_GLOBALS = ["shatterGlass", "islandLiftCall", "islandLiftGo0", "islandLiftGo1", "islandLiftStop", "survRoadStats", "island"];
+  function dropItems(arr, items) {
+    if (!arr || !items || !items.length) return;
+    const drop = new Set(items);
+    let w = 0; for (let i = 0; i < arr.length; i++) if (!drop.has(arr[i])) arr[w++] = arr[i];
+    arr.length = w;
+  }
+  CBZ.islandBuild = function (ISL, how) {
+    ISL = ISL || {};
+    // how.keep: an island that is never disposed (the disaster island) skips
+    // the list census: it costs a walk of CBZ per step, for nothing
+    const census = !(how && how.keep);
+    const gen = islandSteps(ISL);
+    const job = { opts: ISL, terrain: null, arena: null, root: null, done: false, failed: null, ms: 0, steps: 0,
+      buses: new Map(), globals: {}, disposed: false,
+      // A STREAMED ISLAND KEEPS ITS WALLS TO ITSELF until it is shown: while
+      // its slices run, CBZ.colliders / platforms / losBlockers / camColliders
+      // ARE these lists, so a half-built building (whose records are turned
+      // to face their street only when the building is finished) is never in
+      // the world's physics, and nothing the world pushes between two slices
+      // can land in a building's record range. job.attach() hands them over.
+      own: census ? { colliders: [], platforms: [], losBlockers: [], camColliders: [] } : null, attached: false };
+    function slice() {
+      let r = null;
+      try { r = gen.next(); }
+      catch (e) { job.failed = e; job.done = true; console.error("[island build " + (ISL.id || "disaster") + "]", e); }
+      job.steps++;
+      if (!r) return;
+      if (r.value && r.value.phase === "terrain") { job.terrain = r.value; job.root = r.value.root; }
+      if (r.done) { job.done = true; job.arena = r.value || null; }
+    }
+    // one frame's worth of slices under ONE census: nothing else runs between
+    // the slices of a step, so what the lists gained is all this island's
+    function run(until) {
+      const marks = [], seen = new Set();
+      if (census) {
+        for (const k in CBZ) { const v = CBZ[k]; if (Array.isArray(v) && !seen.has(v)) { seen.add(v); marks.push({ arr: v, n: v.length }); } }
+        marks.push({ arr: envWanting, n: envWanting.length }); seen.add(envWanting);
+      }
+      const g0 = {};
+      for (const k of OWN_GLOBALS) g0[k] = CBZ[k];
+      const DA = CBZ.debrisAuditSources, da0 = DA ? DA.island : undefined;
+      const DR = CBZ.islandDressing, dr0 = DR ? DR.current : undefined;
+      const O = job.own, world = O ? {} : null;
+      if (O) for (const k in O) { world[k] = CBZ[k]; CBZ[k] = O[k]; }
+      const t0 = performance.now();
+      try {
+        do { slice(); } while (!job.done && performance.now() < until);
+      } finally {
+        job.ms += performance.now() - t0;
+        if (O) for (const k in O) CBZ[k] = world[k];
+        for (const m of marks) {
+          if (m.arr.length <= m.n) continue;
+          let L = job.buses.get(m.arr);
+          if (!L) job.buses.set(m.arr, (L = []));
+          for (let i = m.n; i < m.arr.length; i++) L.push(m.arr[i]);
+        }
+        // a list the build CREATED (CBZ.camColliders on a fresh page): all of it is the island's
+        if (census) for (const k in CBZ) {
+          const v = CBZ[k];
+          if (!Array.isArray(v) || seen.has(v) || !v.length) continue;
+          seen.add(v);
+          job.buses.set(v, v.slice());
+        }
+        for (const k of OWN_GLOBALS) if (CBZ[k] !== g0[k]) { job.globals[k] = CBZ[k]; CBZ[k] = g0[k]; }
+        const DA2 = CBZ.debrisAuditSources;
+        if (DA2 && DA2.island !== da0) { job.globals["#debris"] = DA2.island; DA2.island = da0; }
+        const DR2 = CBZ.islandDressing;
+        if (DR2 && DR2.current !== dr0) { job.globals["#dressing"] = DR2.current; DR2.current = dr0; }
+        if (job.arena) { job.arena._globals = job.globals; job.arena._job = job; }
+      }
+    }
+    job.step = function (ms) {
+      if (!job.done) run(performance.now() + Math.max(0, +ms || 0));
+      return job.done;
+    };
+    job.finish = function () { if (!job.done) run(Infinity); return job.arena; };
+    // the island joins the world's physics, sight lines and camera
+    job.attach = function () {
+      if (!job.own || job.attached || !job.done) return;
+      job.attached = true;
+      const O = job.own;
+      if (CBZ.colliderAddMany) CBZ.colliderAddMany(O.colliders); else for (const c of O.colliders) CBZ.colliders.push(c);
+      if (CBZ.platformAddMany) CBZ.platformAddMany(O.platforms); else for (const p of O.platforms) CBZ.platforms.push(p);
+      for (const m of O.losBlockers) (CBZ.losBlockers || (CBZ.losBlockers = [])).push(m);
+      for (const c of O.camColliders) (CBZ.camColliders || (CBZ.camColliders = [])).push(c);
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    };
+    return job;
+  };
+  CBZ.islandTerrain = function (ISL) {
+    const gen = islandSteps(ISL || {});
+    let t = null;
+    try { t = gen.next().value; } finally { try { gen.return(); } catch (e) {} }
+    return t;
+  };
+  CBZ.islandActivate = function (A, groundFn) {
+    arena = A || null;
+    groundOverride = typeof groundFn === "function" ? groundFn : null;
+    if (!A) { shoreRig = null; kelpRig = null; return; }
+    const r = A._rigs || {};
+    shoreRig = r.shore || null; shoreFacts = r.facts || null; kelpRig = r.kelp || null;
+    if (r.meanY) arena_meanY = r.meanY;
+    const G = A._globals || {};
+    for (const k of OWN_GLOBALS) if (Object.prototype.hasOwnProperty.call(G, k)) CBZ[k] = G[k];
+    if (Object.prototype.hasOwnProperty.call(G, "#debris")) (CBZ.debrisAuditSources || (CBZ.debrisAuditSources = {})).island = G["#debris"];
+    if (Object.prototype.hasOwnProperty.call(G, "#dressing") && CBZ.islandDressing) CBZ.islandDressing.current = G["#dressing"];
+  };
+  CBZ.islandActive = function () { return arena; };
+  /* NO ISLAND IN FORCE (the archipelago left and no disaster island was ever
+     built this session): the globals go back to never having been set, so
+     nothing keeps a disposed island alive through a closure. With the
+     disaster island built, it takes the stage back instead. */
+  CBZ.islandForget = function () {
+    if (home) { CBZ.islandActivate(home, null); return; }
+    CBZ.islandActivate(null, null);
+    for (const k of OWN_GLOBALS) CBZ[k] = undefined;
+    if (CBZ.debrisAuditSources) CBZ.debrisAuditSources.island = undefined;
+    if (CBZ.islandDressing) CBZ.islandDressing.current = null;
+  };
+  CBZ.islandDispose = function (job) {
+    if (!job || job.disposed) return false;
+    if (!job.done) job.finish();             // never left half-registered
+    const A = job.arena;
+    if (A && A === home) return false;       // the disaster island stays for the session
+    job.disposed = true;
+    if (A && arena === A) CBZ.islandActivate(null, null);
+    if (A) {
+      for (const e of A.elevators || []) if (e.rig && e.rig.release) { try { e.rig.release(); } catch (err) {} }
+      if (CBZ.stairs && CBZ.stairs.removeOwner) for (const b of A.fragile || []) { try { CBZ.stairs.removeOwner(b.group); } catch (err) {} }
+    }
+    const root = (A && A.root) || job.root;
+    if (root && root.parent) root.parent.remove(root);
+    const buses = job.buses;
+    // the island's own walls, if they had joined the world
+    if (job.own && job.attached) {
+      const O = job.own;
+      buses.set(CBZ.colliders, (buses.get(CBZ.colliders) || []).concat(O.colliders));
+      buses.set(CBZ.platforms, (buses.get(CBZ.platforms) || []).concat(O.platforms));
+      if (CBZ.losBlockers) buses.set(CBZ.losBlockers, (buses.get(CBZ.losBlockers) || []).concat(O.losBlockers));
+      if (CBZ.camColliders) buses.set(CBZ.camColliders, (buses.get(CBZ.camColliders) || []).concat(O.camColliders));
+    }
+    job.own = null;
+    job.buses = new Map(); job.globals = {}; job.terrain = null; job.arena = null; job.root = null;
+    // the shared lists (frame hooks included) are edited AFTER this frame's
+    // loop has finished iterating them
+    Promise.resolve().then(function () {
+      buses.forEach(function (items, arr) {
+        if (arr === CBZ.colliders && CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(items);
+        else if (arr === CBZ.platforms && CBZ.platformRemoveMany) CBZ.platformRemoveMany(items);
+        else dropItems(arr, items);
+      });
+      if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+      if (!root) return;
+      const geos = new Set(), texs = new Set();
+      root.traverse(function (o) {
+        if (o.isInstancedMesh && o.dispose) { try { o.dispose(); } catch (e) {} }
+        const g = o.geometry;
+        if (g && g.dispose && !g._shared && !(g.userData && g.userData._shared)) geos.add(g);
+        const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : null;
+        if (mats) for (const m of mats) {
+          if (!m) continue;
+          for (const k in m) { const t = m[k]; if (t && t.isTexture && !t._shared && !t._cbzFreed) texs.add(t); }
+        }
+      });
+      geos.forEach(function (g) { try { g.dispose(); } catch (e) {} });
+      texs.forEach(function (t) {
+        try {
+          if (t._cbzLazy) { t.dispose(); if (t._cbzRelease) t._cbzRelease(); return; }
+          // (a canvas core/texfree.js already released could only come back as 1x1)
+          if (t.isCanvasTexture) { const im = t.image; if (!im || typeof im.getContext !== "function" || !(im.width > 1)) return; }
+          t.dispose();
+        } catch (e) {}
+      });
+    });
+    return true;
+  };
+
+  // THE DISASTER ISLAND: the package at its defaults, built once, in one go
+  CBZ.buildDisasterArena = function () {
+    if (home) { if (arena !== home || groundOverride) CBZ.islandActivate(home, null); return home; }
+    const job = CBZ.islandBuild({}, { keep: true });
+    job.finish();
+    if (job.failed) throw job.failed;
+    home = job.arena;
+    CBZ.islandActivate(home, null);
+    return home;
+  };
+  CBZ.disasterArenaBuilt = function () { return home; };
 })();
+

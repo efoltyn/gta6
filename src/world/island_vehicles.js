@@ -87,7 +87,15 @@
   const CFG = CBZ.CONFIG || (CBZ.CONFIG = {});
   if (CFG.ISLAND_HELIPAD == null) CFG.ISLAND_HELIPAD = true;
 
-  const WORLD = "survival";
+  /* THE WORLDS THESE MACHINES SERVE: the disaster island, and every island of
+     the archipelago (world/archipelago.js swaps CBZ.surv.arena as you cross
+     to the next one; setup() below follows it). A record is tagged with the
+     world it was built in (config.js CBZ.vehicleInWorld). */
+  const WORLDS = { survival: 1, archipelago: 1 };
+  // the archipelago's own machines, island to island: the jet on the
+  // airstrip and the speedboat on the quay (world/island_plan.js airstrip,
+  // the harbour's quay face). Not on the disaster island.
+  function islandHopping() { return g && g.mode === "archipelago"; }
   const CAR_REACH = 1.6;           // m from the car's flank to offer "Drive"
   const HELI_REACH = 4.2;          // m from the cabin to offer "Board"
   const PAD_RISE = 3.0;            // deck walk surface over the roof walk surface (clears the lift car)
@@ -106,13 +114,15 @@
     queue: [],                     // spots still to stand a car on
     pad: null,                     // the helipad record (built once per arena)
     heli: null,                    // the parked craft
+    jet: null,                     // the archipelago's parked jet (the airstrip)
+    boats: [],                     // { car, spot } the archipelago's speedboat on the quay
     fallenSeen: new Set(),         // towers already handled as fallen this match
     armCar: null, armHeli: null,   // what the pinned verb would act on
     drivenLift: 0, drivenFloat: 0, // driven-car weather state
     heliAsh: 0,
   };
 
-  function on() { return g && g.mode === WORLD && CBZ.surv && CBZ.surv.arena; }
+  function on() { return g && !!WORLDS[g.mode] && CBZ.surv && CBZ.surv.arena; }
   function P() { return CBZ.player; }
   function groundAt(x, z) {
     const A = CBZ.surv && CBZ.surv.arena;
@@ -144,7 +154,7 @@
      is solid through the car resolvers in physics.js and vehicles.js) and the
      `flung` flag, which on a vehicle IS the disaster door. */
   function dressRecord(car, spot) {
-    car._world = WORLD;
+    car._world = g.mode;
     car.owned = true;                 // an island car is anybody's: no theft, no witnesses
     car._islandCar = true;
     car._islandSpot = spot;
@@ -202,10 +212,13 @@
     if (car.group && car.group.parent) car.group.parent.remove(car.group);
     const i = CBZ.cityCars.indexOf(car); if (i >= 0) CBZ.cityCars.splice(i, 1);
   }
-  function scrapFleet() {
-    for (let i = 0; i < S.cars.length; i++) scrapCar(S.cars[i].car);
+  // keep: the one machine the player is in (crossing to the next island in it)
+  function scrapFleet(keep) {
+    for (let i = 0; i < S.cars.length; i++) if (S.cars[i].car !== keep) scrapCar(S.cars[i].car);
     S.cars.length = 0; S.queue.length = 0;
     if (S.arena && S.arena.cars) S.arena.cars.length = 0;
+    for (let i = 0; i < S.boats.length; i++) if (S.boats[i].car !== keep) scrapCar(S.boats[i].car);
+    S.boats.length = 0;
   }
   /* A NEW MATCH: every untouched car is put back on its spot as it stands;
      every car the last match touched (thrown, floated, burnt, crushed,
@@ -240,6 +253,33 @@
       if (A.cars) A.cars.push(car);
     }
   }
+  /* THE SPEEDBOAT (archipelago): broadside to the quay face between the
+     marina jetties and the cargo pier, where a man on the quay steps down
+     into it. A real cityCars record (city/vehicles.js) on the hull model
+     the city sells, driven by world/water_helm.js and floated by
+     world/water_buoyancy.js, exactly as a city boat. */
+  function boatSpot(A) {
+    const P0 = A.plan;
+    if (!P0 || !P0.harbour || !P0.harbour.quay) return null;
+    const Q = P0.harbour.quay, K = P0.K || 1;
+    const x = P0.cx + 26 * K, z = Q.z1 + 1.9;
+    if (x < Q.x0 + 4 || x > Q.x1 - 4) return null;
+    return { x: x, z: z, y: A.oceanY != null ? A.oceanY : -0.8, heading: Math.PI / 2, boat: true };
+  }
+  function standBoat(spot) {
+    if (!CBZ.cityAddParkedCar) return null;
+    let car = null;
+    try { car = CBZ.cityAddParkedCar(spot.x, spot.z, spot.heading, { force: true, modelName: "Speedboat" }); } catch (e) { car = null; }
+    if (!car) return null;
+    car._world = g.mode;
+    car.owned = true;
+    car._islandCar = true;
+    car._islandBoat = true;
+    car.ai = false;
+    if (car.group) car.group.position.set(spot.x, spot.y, spot.z);
+    return car;
+  }
+
   // the driven car is out of the arena list, so no disaster writes its group
   function liftEntry(r) {
     const A = S.arena; if (!A || !A.cars || r.out) return;
@@ -815,6 +855,15 @@
       const gap = carGap(c, px, pz);
       if (gap < bd) { bd = gap; best = r; }
     }
+    // a boat lies a step down off the quay (or alongside you in the shallows)
+    for (let i = 0; i < S.boats.length; i++) {
+      const r = S.boats[i], c = r.car;
+      if (!c || !c.pos || Math.abs(c.pos.x - px) > 8 || Math.abs(c.pos.z - pz) > 8) continue;
+      if (!drivable(c) || c.player || !c.group) continue;
+      if (Math.abs(c.pos.y - py) > 2.4) continue;
+      const gap = carGap(c, px, pz);
+      if (gap < Math.max(bd, 2.2)) { bd = gap; best = r; }
+    }
     if (best) {
       S.armCar = best;
       const c = best.car;
@@ -822,34 +871,82 @@
       if (CBZ.prisonPrompt) CBZ.prisonPrompt("island-car-drive", "@islandCarDrive", "Drive",
         { at: { x: c.pos.x, y: c.pos.y + 1.7, z: c.pos.z }, key: "e", bind: true, d2: bd * bd });
     }
-    const h = S.heli;
-    if (h && !h.destroyed && h.group && h.group.visible !== false) {
+    // the helicopter, and the archipelago's jet: whichever you stand at
+    let hb = null, hd = 1e9;
+    for (const h of [S.heli, S.jet]) {
+      if (!h || h.destroyed || !h.group || h.group.visible === false) continue;
       const dy = (h.pos.y - (h.groundOffset || 0)) - py;
       const d = Math.hypot(h.pos.x - px, h.pos.z - pz);
-      if (d < HELI_REACH && Math.abs(dy) < 1.4) {
-        S.armHeli = h;
-        if (CBZ.prisonPrompt) CBZ.prisonPrompt("island-heli-board", "@islandHeliBoard", "Board",
-          { at: { x: h.pos.x, y: h.pos.y + 1.2, z: h.pos.z }, key: "e", bind: true, d2: Math.max(0.01, (d - 2) * (d - 2)) });
-      }
+      if (d < HELI_REACH && Math.abs(dy) < 1.4 && d < hd) { hd = d; hb = h; }
+    }
+    if (hb) {
+      S.armHeli = hb;
+      if (CBZ.prisonPrompt) CBZ.prisonPrompt("island-heli-board", "@islandHeliBoard", "Board",
+        { at: { x: hb.pos.x, y: hb.pos.y + 1.2, z: hb.pos.z }, key: "e", bind: true, d2: Math.max(0.01, (hd - 2) * (hd - 2)) });
     }
   }
 
   /* ============================================================
      LIFECYCLE
      ============================================================ */
+  // the pad of an island being left: its deck, walls and stair go with it
+  function retirePad() {
+    const pad = S.pad;
+    S.pad = null;
+    if (!pad) return;
+    if (pad.root && pad.root.parent) pad.root.parent.remove(pad.root);
+    if (CBZ.platformRemoveMany) CBZ.platformRemoveMany(pad.plats); else for (const p of pad.plats) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
+    if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(pad.cols); else for (const c of pad.cols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+    if (CBZ.stairs && CBZ.stairs.removeOwner) CBZ.stairs.removeOwner(pad.owner);
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  function parkJet(A) {
+    const st = A.airstrip && A.airstrip.stand;
+    if (!st || !CBZ.airParkFlyable) return null;
+    return CBZ.airParkFlyable({ kind: "jet", x: st.x, y: A.airstrip.deck, z: st.z, heading: st.heading,
+      name: "Island Jet", livery: { body: 0xd9dde2, belly: 0x2a3a4e, accent: 0xb8862a } });
+  }
   function setup() {
     const A = CBZ.surv.arena;
+    const Pl = P();
+    const flown = Pl && Pl._aircraft ? Pl._aircraft : null;
+    const ridden = Pl && Pl.driving ? Pl._vehicle : null;
     if (S.arena !== A) {
-      // a new island (first match, or a rebuilt arena): the pad and the fleet are per arena
-      if (S.pad && S.pad.root && S.pad.root.parent) S.pad.root.parent.remove(S.pad.root);
-      S.pad = null;
-      scrapFleet();
+      // a new island (first match, a rebuilt arena, or the next island of the
+      // archipelago): the pad, the fleet, the jet and the boat are per arena.
+      // The machine you are in comes with you; the rest of the last island's go.
+      retirePad();
+      scrapFleet(ridden);
+      // the boat you crossed in is this island's boat now: it moves under the
+      // new island's root (vehicles.js retires a parked fixture whose root
+      // is not the live one) and is tracked with its machines
+      if (ridden && ridden._islandCar) {
+        ridden._arenaRoot = A.root;
+        if (ridden.group && A.root && ridden.group.parent !== A.root) A.root.add(ridden.group);
+        if (ridden._islandBoat) S.boats.push({ car: ridden, spot: null, out: false });
+      }
+      if (flown && flown.group && A.root && flown.group.parent !== A.root) A.root.add(flown.group);
+      if (S.heli && S.heli !== flown) unparkHeli();
+      if (S.jet && S.jet !== flown) { if (CBZ.airUnpark) { try { CBZ.airUnpark(S.jet); } catch (e) {} } S.jet = null; }
       S.arena = A;
       if (CFG.ISLAND_HELIPAD !== false) { try { S.pad = buildPad(A); } catch (e) { console.error("[island helipad]", e); S.pad = null; } }
     }
     if (S.pad) { if (S.pad.b.fallen) dropPad(); else raisePad(); }
     try { resetFleet(A); } catch (e) { console.error("[island cars]", e); }
-    if (S.pad && !S.pad.dropped) { try { S.heli = parkHeli(); } catch (e) { console.error("[island heli]", e); S.heli = null; } }
+    // (a helicopter you are flying stays yours: no second one on the new pad)
+    if (S.pad && !S.pad.dropped && !(S.heli && S.heli === flown)) { try { S.heli = parkHeli(); } catch (e) { console.error("[island heli]", e); S.heli = null; } }
+    if (islandHopping()) {
+      if (!(S.jet && S.jet === flown) && A.airstrip) {
+        if (S.jet && CBZ.airUnpark) { try { CBZ.airUnpark(S.jet); } catch (e) {} }
+        try { S.jet = parkJet(A); } catch (e) { console.error("[island jet]", e); S.jet = null; }
+      }
+      if (!(ridden && ridden._islandBoat) && !S.boats.length) {
+        const sp = boatSpot(A);
+        const b = sp ? standBoat(sp) : null;
+        if (b) S.boats.push({ car: b, spot: sp, out: false });
+      }
+    }
     S.fallenSeen.clear();
     S.drivenLift = 0; S.drivenFloat = 0;
   }
@@ -860,6 +957,11 @@
     }
     if (Pl && Pl.driving && Pl._vehicle && Pl._vehicle._islandCar && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
     unparkHeli();
+    if (S.jet && CBZ.airUnpark) { try { CBZ.airUnpark(S.jet); } catch (e) {} }
+    S.jet = null;
+    // a new match puts the boat back on the quay (setup stands a fresh one)
+    for (let i = 0; i < S.boats.length; i++) scrapCar(S.boats[i].car);
+    S.boats.length = 0;
   }
 
   // before the driven car (11) and the flight (12) read their inputs
@@ -867,7 +969,7 @@
     if (!on()) {
       // leaving the island in a seat: out first (a world switch never keeps you in an island machine)
       const Pl = P();
-      if (Pl && Pl.driving && Pl._vehicle && Pl._vehicle._world === WORLD && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
+      if (Pl && Pl.driving && Pl._vehicle && Pl._vehicle._islandCar && CBZ.cityExitVehicle) { try { CBZ.cityExitVehicle(); } catch (e) {} }
       return;
     }
     const st = CBZ.surv.stats;
@@ -882,7 +984,7 @@
     const Pl = P();
     // dead at the wheel: out, so the death's own fall plays (physics.js
     // yields the body to a vehicle while P.driving)
-    if (Pl && Pl.dead && Pl.driving && Pl._vehicle && Pl._vehicle._world === WORLD && CBZ.cityExitVehicle) {
+    if (Pl && Pl.dead && Pl.driving && Pl._vehicle && Pl._vehicle._islandCar && CBZ.cityExitVehicle) {
       try { CBZ.cityExitVehicle(); } catch (e) {}
     }
     carsTick(dt);
@@ -964,7 +1066,18 @@
     },
     cars: function () { return S.cars.map(function (r) { return r.car; }); },
     heli: function () { return S.heli; },
+    jet: function () { return S.jet; },
+    boats: function () { return S.boats.map(function (r) { return r.car; }); },
     pad: function () { return S.pad; },
     rebuild: function () { if (S.stats) teardown(); scrapFleet(); S.stats = null; },
+    // the island world is going away (world/archipelago.js leaving its mode):
+    // every machine, the pad and its stair go with it
+    arenaOf: function () { return S.arena; },
+    leave: function () {
+      teardown();
+      scrapFleet();
+      retirePad();
+      S.arena = null; S.stats = null; S.armCar = null; S.armHeli = null;
+    },
   };
 })();

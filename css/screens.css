@@ -87,6 +87,13 @@ body.mode-sharksim .mode-escape-only{display:none;}
 body.mode-sharksim .mode-survival-only{display:none;}
 body.mode-sharksim .mode-sharksim-only{display:block;}
 body.campaign-canonical-title #title .mode-sharksim-only{display:none !important;}
+/* THE ISLES carries body.mode-survival too (the island HUD family): its own
+   card replaces the disaster card */
+.mode-archipelago-only{display:none;}
+body.mode-archipelago .mode-escape-only{display:none;}
+body.mode-archipelago .mode-survival-only{display:none;}
+body.mode-archipelago .mode-archipelago-only{display:block;}
+body.campaign-canonical-title #title .mode-archipelago-only{display:none !important;}
 
 /* ============================================================
    settings panel (src/systems/settings.js) — pause-screen overlay with
