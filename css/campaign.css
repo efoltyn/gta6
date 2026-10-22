@@ -448,74 +448,94 @@ body.campaign-phone-open .campaign-phone-peek { display: none !important; }
 .campaign-feed-time { flex: none; color: #697680; font-size: 9px; font-variant-numeric: tabular-nums; }
 .campaign-feed-body { margin: 6px 0 0; color: #bcc8cf; font-size: 12px; line-height: 1.43; white-space: pre-wrap; }
 
-/* ---------- the one allowed prose surface outside the phone: speech ---------- */
-/* THE REPLY BUTTONS WERE LOST IN THE TOP-LEFT CORNER. 12bc4fb9 moved the
-   panel's position/left/bottom/width out of this rule and the speech rewrite
-   deleted where they went, so the section fell into normal flow at the top
-   of <body> (y = 0) and translate(-50%) pushed its left half off the glass.
-   The key chip and the reply word are left-aligned, so both were off screen:
-   the owner saw two EMPTY dark bars behind the pause button and the radar
-   (iPad, 2026-09-29), which were a live question waiting for an answer. The
-   panel is placed here again, and on touch it sits above the stick ring and
-   between the thumbs instead of under them. */
-.campaign-dialogue {
+/* ---------- THE CINEMATIC PROMPT (city/campaign_ui.js openCine) ----------
+   The Call of Duty frame: the line as a subtitle, low and centred; the
+   answers round a d-pad glyph (UP over it, LEFT and RIGHT beside it); a
+   hairline bar under them running out. No boxes, no key chips: thin type on
+   a soft shadow, the way a film puts words on a picture. */
+.cine-prompt {
   position: fixed;
   left: 50%;
-  bottom: calc(36px + env(safe-area-inset-bottom, 0px));
-  width: min(520px, calc(100vw - 32px));
+  bottom: calc(5vh + env(safe-area-inset-bottom, 0px));
+  width: min(980px, calc(100vw - 32px));
   z-index: 125;
   display: flex;
-  visibility: hidden;
   flex-direction: column;
-  gap: 8px;
-  transform: translate(-50%, 12px);
+  align-items: center;
+  gap: 14px;
+  transform: translateX(-50%);
+  visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: opacity .16s ease, transform .16s ease, visibility 0s linear .18s;
+  transition: opacity .35s ease, visibility 0s linear .36s;
+  font-family: "Inter", "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+  color: #f2f2ee;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .9), 0 0 18px rgba(0, 0, 0, .55);
 }
-.campaign-dialogue.show {
-  visibility: visible;
-  transform: translate(-50%, 0);
-  opacity: 1;
-  transition: opacity .16s ease, transform .16s ease;
-}
-.campaign-dialogue.has-choices { text-align: left; }
-/* touch: above the fixed stick (top at safe+232) and clear of the right
-   cluster, thumb-sized rows, no keyboard number chips */
-body.touch .campaign-dialogue {
-  bottom: calc(252px + env(safe-area-inset-bottom, 0px));
-  width: min(360px, calc(100vw - 32px));
-}
-body.touch .campaign-dialogue-choice { min-height: 48px; font-size: 16px; padding: 10px 16px; border-radius: 24px; justify-content: center; text-align: center; }
-body.touch .campaign-dialogue-key { display: none; }
-.campaign-dialogue-choices { display: grid; gap: 6px; pointer-events: auto; }
-.campaign-dialogue-choices:empty { display: none; }
-.campaign-dialogue-choice {
-  display: flex;
+.cine-prompt.show { visibility: visible; opacity: 1; transition: opacity .35s ease; }
+.cine-deck {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  grid-template-areas: ". up ." "left pad right";
   align-items: center;
-  gap: 10px;
+  column-gap: 22px;
+  row-gap: 8px;
   width: 100%;
-  padding: 9px 12px;
-  border: 1px solid rgba(255, 255, 255, .15);
-  border-radius: 11px;
-  color: #dce6eb;
-  background: rgba(7, 11, 15, .88);
-  font: 600 13px/1.3 Fredoka, ui-rounded, system-ui, sans-serif;
-  text-align: left;
-  cursor: pointer;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .45s ease, transform .45s ease;
 }
-.campaign-dialogue-choice:hover { border-color: rgba(130, 215, 255, .62); background: rgba(24, 45, 56, .92); }
-.campaign-dialogue-key {
-  display: inline-flex;
-  width: 23px;
-  height: 23px;
-  flex: 0 0 23px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(130, 215, 255, .48);
-  border-radius: 6px;
-  color: var(--campaign-blue);
-  font-size: 10px;
+.cine-prompt.ready .cine-deck { opacity: 1; transform: none; }
+.cine-prompt.line-only .cine-deck,
+.cine-prompt.line-only .cine-timer { display: none; }
+.cine-ans {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: .01em;
+  text-shadow: inherit;
+  cursor: pointer;
+  pointer-events: none;
+  transition: color .2s ease, opacity .2s ease;
+}
+.cine-prompt.ready .cine-ans { pointer-events: auto; }
+.cine-ans[data-slot="up"] { grid-area: up; text-align: center; justify-self: center; width: min(420px, 44vw); margin-bottom: 2px; }
+.cine-ans[data-slot="left"] { grid-area: left; text-align: right; justify-self: end; }
+.cine-ans[data-slot="right"] { grid-area: right; text-align: left; justify-self: start; }
+.cine-ans.empty { visibility: hidden; }
+.cine-ans:hover { color: #fff; }
+.cine-ans.picked { color: #ffd27a; }
+.cine-prompt.ready .cine-ans:not(.picked) { opacity: 1; }
+.cine-deck:has(.picked) .cine-ans:not(.picked) { opacity: .35; }
+.cine-pad { grid-area: pad; width: 48px; height: 48px; justify-self: center; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .8)); }
+.cine-pad .arm { fill: rgba(255, 255, 255, .08); stroke: rgba(255, 255, 255, .38); stroke-width: 1.2; stroke-linejoin: round; }
+.cine-pad.has-up .arm-up,
+.cine-pad.has-left .arm-left,
+.cine-pad.has-right .arm-right { fill: rgba(255, 255, 255, .82); stroke: rgba(255, 255, 255, .95); }
+.cine-timer { width: min(360px, 60vw); height: 2px; background: rgba(255, 255, 255, .16); opacity: 0; transition: opacity .45s ease; }
+.cine-prompt.ready.timed .cine-timer { opacity: 1; }
+.cine-timer i { display: block; height: 100%; background: rgba(255, 255, 255, .85); transform-origin: left center; transform: scaleX(1); }
+.cine-sub { margin: 2px 0 0; max-width: min(820px, 100%); font-size: 19px; line-height: 1.4; font-weight: 400; text-align: center; }
+.cine-sub.empty { display: none; }
+.cine-who { margin-right: .5em; font-weight: 600; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: #ffd27a; vertical-align: 1px; }
+/* touch: above the fixed stick ring, answers sized for a thumb */
+body.touch .cine-prompt { bottom: calc(244px + env(safe-area-inset-bottom, 0px)); gap: 10px; }
+body.touch .cine-ans { font-size: 17px; padding: 10px 4px; min-height: 44px; }
+body.touch .cine-deck { column-gap: 12px; }
+@media (max-width: 720px) {
+  .cine-ans { font-size: 15px; }
+  .cine-sub { font-size: 16px; }
+  .cine-deck { grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr); column-gap: 12px; }
+  .cine-pad { width: 36px; height: 36px; }
 }
 
 /* ---------- CITY declutter contract ----------
@@ -613,7 +633,7 @@ body.campaign-active.mode-city > div[style*="bottom: 132px"][style*="z-index: 15
 
 /* Prison/escape mode intentionally keeps #interact and its character dialogue
    intact. Campaign notifications still never create a global toast. */
-body.campaign-phone-open #campaignDialogue { opacity: .18; pointer-events: none; }
+body.campaign-phone-open #cinePrompt { opacity: .18; pointer-events: none; }
 
 @media (max-width: 720px), (max-height: 650px) {
   .campaign-phone-device {
@@ -625,13 +645,13 @@ body.campaign-phone-open #campaignDialogue { opacity: .18; pointer-events: none;
   }
   .campaign-phone-layer.open .campaign-phone-device { transform: translate(50%, 0) rotate(0) scale(1); }
   .campaign-phone-scrim { background: rgba(1, 4, 7, .22); }
-  body:not(.touch) .campaign-dialogue { bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .campaign-phone-layer,
   .campaign-phone-device,
-  .campaign-dialogue { transition: none; }
+  .cine-prompt,
+  .cine-deck { transition: none; }
   .campaign-phone-peek.campaign-phone-pulse { animation: none; }
 }
 

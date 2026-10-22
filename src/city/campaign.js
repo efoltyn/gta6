@@ -1303,12 +1303,14 @@
     const order = c.flags.familySaved
       ? "You saved them once. Everyone in the concourse. All of them."
       : "No names this time. Everyone in the concourse. All of them.";
+    // a decision the story turns on: the cinematic prompt (campaign_ui.js).
+    // Saying nothing to an order like that is saying no.
     const ui = UI();
     if (ui && ui.say) {
       ui.say(cHandler(), order, [
-        { id: "comply", label: "Comply", onSelect: function () { CBZ.cityCampaignChoose("comply"); } },
-        { id: "refuse", label: "Refuse", onSelect: function () { CBZ.cityCampaignChoose("refuse"); } },
-      ], { phone: true });
+        { id: "comply", dir: "left", label: "It'll be done.", onSelect: function () { CBZ.cityCampaignChoose("comply"); } },
+        { id: "refuse", dir: "right", label: "Find someone else.", onSelect: function () { CBZ.cityCampaignChoose("refuse"); } },
+      ], { phone: true, cinematic: true, timeout: 10, silent: { line: "Then you're no use to me.", as: "refuse" } });
     }
   }
 

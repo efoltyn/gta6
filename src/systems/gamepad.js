@@ -18,6 +18,10 @@
      • D-pad Up     map              • Back         city power (Tab)
      • Start        pause/resume
 
+   A CINEMATIC QUESTION (city/campaign_ui.js, CBZ.padPrompt): while three
+   answers stand round the d-pad, d-pad up / left / right answer it and the
+   pad moves, aims and fires nothing.
+
    It never introduces a new input path: it feeds the SAME `CBZ.keys` map the
    keyboard/touch layers use for movement + hold actions, writes `CBZ.cam` /
    `CBZ.fps.fp` for look exactly like touch.js, and calls the public gameplay
@@ -158,6 +162,19 @@
 
     // ---- START = pause ----
     if (edge(pad, B.START) && CBZ.setState) { CBZ.setState("paused"); return; }
+
+    // ---- A CINEMATIC QUESTION IS UP (city/campaign_ui.js): the d-pad answers
+    // it and the pad drives nothing else (no walk, no look, no trigger) ----
+    const PR = CBZ.padPrompt;
+    if (PR && PR.active && PR.active()) {
+      if (Object.keys(held).length) releaseAllKeys();
+      setAim(false); setFire(false);
+      if (edge(pad, B.DUP)) PR.pick("up");
+      if (edge(pad, B.DLEFT)) PR.pick("left");
+      if (edge(pad, B.DRIGHT)) PR.pick("right");
+      for (const k in B) edge(pad, B[k]);
+      return;
+    }
 
     const P = CBZ.player;
     const driving = !!(P && P.driving);

@@ -62,7 +62,14 @@
   }
 
   // startScene(steps, ctx, onEnd, opts)
+  //   a step: { dur, cam, cut, track, hideRig, enter(ctx), tick(ctx, t, dt),
+  //             until(ctx, t) }  until: hold the shot past dur until true
   //   opts.noHolster — DON'T disarm the player for this scene.
+  //
+  // A QUESTION ASKED IN A SCENE (CBZ.campaignUI.say with answers while the
+  // lens is ours) is the cinematic prompt: the line is the subtitle and the
+  // answers stand round the d-pad. Give that step an until() that waits for
+  // the answer.
   //
   // WHY THE OPTION EXISTS: this director was written for authored dialogue
   // scenes, where force-holstering is exactly right (a jumpy trigger finger
@@ -142,7 +149,10 @@
     CINE.t += dt;
     if (st.cam && st.track) camTo(st.cam, CINE.ctx);   // per-frame tracking shots
     if (st.tick) { try { st.tick(CINE.ctx, CINE.t, dt); } catch (e) {} }
-    if (CINE.t >= (st.dur || 2)) { CINE.step++; stepEnter(); }
+    // a step with until() holds its shot past dur until it says go: a scene
+    // that has just asked a question waits for the answer (campaign_ui.js's
+    // cinematic prompt), whatever the answer and however long the bar runs
+    if (CINE.t >= (st.dur || 2) && (!st.until || st.until(CINE.ctx, CINE.t))) { CINE.step++; stepEnter(); }
   });
 
   // ---- tiny scene-construction kit (self-owned; campaign cleanup can't

@@ -254,7 +254,7 @@ const speech = [];   // {file, line, s}
 const labels = [];   // {file, line, s}
 const seen = new Set();
 function addSpeech(file, t) { const key = file + ":" + t.line + ":" + t.value; if (seen.has(key)) return; seen.add(key); speech.push({ file, line: t.line, s: t.value }); }
-function addLabel(file, t, decision) { const key = "L" + file + ":" + t.line + ":" + t.value; if (seen.has(key)) return; seen.add(key); labels.push({ file, line: t.line, s: t.value, decision: !!decision }); }
+function addLabel(file, t, decision, spoken) { const key = "L" + file + ":" + t.line + ":" + t.value; if (seen.has(key)) return; seen.add(key); labels.push({ file, line: t.line, s: t.value, decision: !!decision || !!spoken, spoken: !!spoken }); }
 // an ANSWER record (`yes: { label }` / `no: { label }`): a decision about a
 // matter, so its object may ride along ("Raise taxes", "Hold calls")
 function opener(toks, k) {
@@ -277,6 +277,25 @@ function isSayChoice(toks, k) {
   if (c < 0 || toks[c].value !== "(") return false;
   const fn = toks[c - 1];
   return !!fn && fn.type === "id" && fn.value === "say";
+}
+// a CINEMATIC ANSWER ({ id, dir: "up"|"left"|"right", label }, campaign_ui.js's
+// d-pad prompt): what you SAY back to the man in front of you, a short line
+// of your own (owner 2026-10-22, the Call of Duty frame). Banned shapes still
+// apply; the one-verb rule does not.
+function inDirRecord(toks, k) {
+  const o = opener(toks, k);
+  if (o < 0 || toks[o].value !== "{") return false;
+  let depth = 0;
+  for (let j = o + 1; j < toks.length; j++) {
+    const u = toks[j];
+    if (u.type === "punc") {
+      if (u.value === "{" || u.value === "(" || u.value === "[") depth++;
+      else if (u.value === "}" || u.value === ")" || u.value === "]") { if (!depth) return false; depth--; }
+      continue;
+    }
+    if (!depth && u.type === "id" && u.value === "dir" && toks[j + 1] && toks[j + 1].value === ":") return true;
+  }
+  return false;
 }
 function isDecisionRecord(toks, k) {
   let depth = 0;
@@ -338,7 +357,7 @@ for (const abs of FILES) {
     // an answer given as a bare string: `yes: "Raid", no: "Watch"`
     if (t.type === "id" && (t.value === "yes" || t.value === "no") && toks[k + 1] && toks[k + 1].value === ":" && toks[k + 2] && toks[k + 2].type === "str" && /campaignUI|ui\.say|UI\.say/.test(src)) addLabel(rel, toks[k + 2], true);
     if (t.type === "id" && (t.value === "label") && toks[k + 1] && toks[k + 1].value === ":" && !LABEL_EXEMPT.test(rel) &&
-        ((registers && isOptionRecord(toks, k)) || isDecisionRecord(toks, k) || isSayChoice(toks, k))) {
+        ((registers && isOptionRecord(toks, k)) || isDecisionRecord(toks, k) || isSayChoice(toks, k) || inDirRecord(toks, k))) {
       // read the expression to the next comma / closing brace at depth 0
       let depth = 0, j = k + 2;
       for (; j < toks.length; j++) {
@@ -350,7 +369,8 @@ for (const abs of FILES) {
         }
       }
       const dec = isDecisionRecord(toks, k) || isSayChoice(toks, k);
-      for (const s of valueStrings(toks, k + 2, j)) addLabel(rel, s, dec);
+      const spoken = inDirRecord(toks, k);
+      for (const s of valueStrings(toks, k + 2, j)) addLabel(rel, s, dec, spoken);
     }
   }
   // named pools referenced by a mouth, plus hinted pool names, plus the
@@ -418,6 +438,18 @@ function labelVerdict(s, decision) {
   }
   return null;
 }
+// a spoken answer: a sentence of your own, short, no dashes, emoji, UI words
+// or narration shape
+function spokenVerdict(s) {
+  const clean = s.trim();
+  if (!clean) return null;
+  if (DASHES.test(s)) return "dash or dot";
+  if (EMOJI.test(s)) return "emoji";
+  if (UI_WORDS.test(clean)) return "UI word";
+  if (clean.length > 60) return "a speech, not an answer (over 60 chars)";
+  if (/^(talk|ask|threaten|say|tell|chat|greet|flirt|compliment|insult)$/i.test(clean)) return "words, not a decision (" + clean + ")";
+  return null;
+}
 // THE RENDERER'S OWN RULE: a whole, static label must come out of
 // city/verbword.js unchanged (what is authored is what is printed). Fragments
 // of a concatenation ("Rob $" + n) are judged by the verdict above only.
@@ -425,7 +457,7 @@ const require = createRequire(import.meta.url);
 const verbWord = require(path.join(ROOT, "src/city/verbword.js"));
 for (const r of labels) {
   if (verbWord.WHOLE.includes(r.s.trim())) continue;   // a verb that needs its object, printed as authored
-  const why = labelVerdict(r.s, r.decision);
+  const why = r.spoken ? spokenVerdict(r.s) : labelVerdict(r.s, r.decision);
   if (why) { flag("label", r, why); continue; }
   if (r.decision) continue;               // an answer prints as authored (verbword keep)
   const whole = r.s.trim();

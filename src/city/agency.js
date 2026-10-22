@@ -2680,6 +2680,8 @@
       }
     },
     step: function () { const a = arc(); return a ? a.step : null; },
+    // how the arc ended: "turned" (you shot Voss: the President's man) or null
+    ending: function () { const a = arc(); return a ? (a.ending || null) : null; },
     file: currentFile,
     openFile: openFile,
     kit: function () { const a = arc(); return a ? { vial: a.kit.vial | 0, charge: a.kit.charge | 0 } : { vial: 0, charge: 0 }; },
