@@ -34,8 +34,11 @@
      CBZ.countryRecAt(x, z)   -> the polity country record | null
      CBZ.countryAtExact(x, z, land?) -> id | null       (uncached, for bakers)
      CBZ.countries()          -> [{id, name, color, home, polygons, label,
-                                   atWar:[ids]}]  polygons = [[x,z,x,z,...]]
-     CBZ.countryBorders()     -> [{a, b, war, pts:[x,z,...]}]  land borders
+                                   atWar (at war with YOUR country), wars:[ids]}]
+                                   polygons = [[x,z,x,z,...]]
+     CBZ.countryBorders()     -> [{a, b, war, lines:[[x,z,...]], pts}]: one
+                                   entry per neighbour pair, its land pieces
+                                   in lines (pts = the longest)
      CBZ.countryHome()        -> the player's country id
      CBZ.countryCrossing()    -> {id, name, at} the last border you crossed
      CBZ.countryVersion()     -> bumps whenever the partition changed
@@ -244,7 +247,7 @@
     try {
       const W = CBZ.polwar && CBZ.polwar.allWars ? CBZ.polwar.allWars() : [];
       for (const w of W || []) {
-        const s = w && w.sides; if (!s || s.length < 2) continue;
+        const s = w && w.sides; if (!s || s.length < 2 || !s[0] || !s[1] || s[0] === s[1]) continue;
         out.add(pairKey(s[0], s[1]));
       }
     } catch (e) {}
@@ -372,11 +375,15 @@
       for (const e of run) pts.push(vx(e.t), vz(e.t));
       return pts;
     };
-    const wars = warPairs();
+    const wars = warPairs(), byPair = Object.create(null);
     for (const run of chain(bord)) {
       if (run.length < 2) continue;
       const a = names[Math.floor(run[0].tag / 256) - 1], b = names[(run[0].tag % 256) - 1];
-      out.borders.push({ a: a, b: b, war: wars.has(pairKey(a, b)), pts: chaikin(toPts(run), false, 2) });
+      const k = pairKey(a, b), pts = chaikin(toPts(run), false, 2);
+      let e = byPair[k];
+      if (!e) { e = byPair[k] = { a: a, b: b, war: wars.has(k), pts: pts, lines: [] }; out.borders.push(e); }
+      e.lines.push(pts);
+      if (pts.length > e.pts.length) e.pts = pts;     // pts: the longest piece (a label anchor)
     }
     const home = countryHome();
     for (let ci = 0; ci < cs.length; ci++) {
@@ -425,9 +432,7 @@
           extent: { minX: B.minX + mnI * cell, maxX: B.minX + (mxI + 1) * cell, minZ: B.minZ + mnJ * cell, maxZ: B.minZ + (mxJ + 1) * cell },
         };
       }
-      const atWar = [];
-      for (const k of wars) { const pr = k.split("|"); if (pr[0] === c.id) atWar.push(pr[1]); else if (pr[1] === c.id) atWar.push(pr[0]); }
-      out.countries.push({ id: c.id, name: c.name || c.id, color: colorOf(c.id), home: c.id === home, polygons: polys, label: label, atWar: atWar, cells: n });
+      out.countries.push({ id: c.id, name: c.name || c.id, color: colorOf(c.id), home: c.id === home, polygons: polys, label: label, atWar: false, wars: [], cells: n });
     }
     out.cell = cell;
     return out;
@@ -454,8 +459,11 @@
     for (const c of G.countries) {
       c.home = c.id === home;
       c.color = colorOf(c.id);
-      c.atWar = [];
-      for (const k of wars) { const pr = k.split("|"); if (pr[0] === c.id) c.atWar.push(pr[1]); else if (pr[1] === c.id) c.atWar.push(pr[0]); }
+      // wars: everyone this country is fighting; atWar: fighting YOUR
+      // country (never true of your own)
+      c.wars = [];
+      for (const k of wars) { const pr = k.split("|"); if (pr[0] === c.id) c.wars.push(pr[1]); else if (pr[1] === c.id) c.wars.push(pr[0]); }
+      c.atWar = !c.home && !!home && c.wars.indexOf(home) >= 0;
     }
     return G.countries;
   }

@@ -245,6 +245,9 @@
     plan(which, from, to) {
       if (!from || !to) return null;
       if (which === "city") return cityRoute(from, to);
+      // the isles: you cross open water between them, so the course is the
+      // straight line (the island clamp below would stop it at your own shore)
+      if (which === "archipelago") return direct("archipelago", from, to, "course");
       if (CBZ.islandModeOn(which)) return survivalRoute(from, to);
       return escapeRoute(from, to);
     },

@@ -41,7 +41,7 @@
   const arrow = document.getElementById("waypointArrow");
   const distEl = document.getElementById("waypointDist");
   const labelEl = document.getElementById("waypointLabel");
-  const MODE_TITLE = { escape: "PRISON MAP", survival: "ISLAND MAP", city: "WORLD MAP" };
+  const MODE_TITLE = { escape: "PRISON MAP", survival: "ISLAND MAP", city: "WORLD MAP", archipelago: "THE ISLES" };
 
   const map = {
     active: false,
@@ -53,6 +53,8 @@
 
   // sharksim reads as "survival" here on purpose: the island map IS its map.
   function mode() { const m = CBZ.game.mode || "escape"; return m === "sharksim" ? "survival" : m; }
+  // the two charts you pan and zoom: Gang City's world and the isles
+  function panMode(m) { m = m || mode(); return m === "city" || m === "archipelago"; }
   function patriotContext() {
     if (mode() !== "city" || (CBZ.CONFIG && CBZ.CONFIG.PATRIOT_V1 === false)) return false;
     try { const r = CBZ.cityArmorRec && CBZ.cityArmorRec(); return !!(r && r.kind === "patriot"); }
@@ -146,6 +148,7 @@
       const r = (A ? A.radius : S.radius) + 8;
       return { minX: c.x - r, maxX: c.x + r, minZ: c.z - r, maxZ: c.z + r };
     }
+    if (which === "archipelago") return islesBounds();
     if (which === "city") {
       const A = CBZ.city && CBZ.city.arena;
       if (A) {
@@ -189,7 +192,7 @@
   function makeProjection(bounds) {
     const sw = bounds.maxX - bounds.minX, sh = bounds.maxZ - bounds.minZ;
     const sc0 = Math.min((W - PAD * 2) / sw, (H - PAD * 2) / sh);
-    const useView = (mode() === "city");
+    const useView = panMode();
     const z = useView ? map.view.z : 1;
     const sc = sc0 * z;
     let left, top;
@@ -222,11 +225,12 @@
       wz(mz) { return bounds.minZ + (mz - top) / sc; },
     };
   }
-  function clampZoom(z) { return Math.max(0.6, Math.min(12, z)); }
+  // the isles are 15 km of sea round islands 500 m across: they need the deeper zoom
+  function clampZoom(z) { return Math.max(0.6, Math.min(mode() === "archipelago" ? 30 : 12, z)); }
   // keep the panned centre within the bounds (+ a margin) so you can never
   // scroll the land off into the void.
   function clampPan() {
-    const b = boundsFor("city"), m = 120;
+    const b = boundsFor(panMode() ? mode() : "city"), m = 120;
     map.view.ox = Math.max(b.minX - m, Math.min(b.maxX + m, map.view.ox));
     map.view.oz = Math.max(b.minZ - m, Math.min(b.maxZ + m, map.view.oz));
   }
@@ -250,7 +254,7 @@
   }
   // frame the view on the player (default) or fit the whole archipelago (F).
   function setCityView(fitAll) {
-    const b = boundsFor("city");
+    const b = boundsFor(panMode() ? mode() : "city");
     if (fitAll) {
       map.view.z = 1;
       map.view.ox = (b.minX + b.maxX) * 0.5;
@@ -261,11 +265,13 @@
     const pos = CBZ.player && CBZ.player.pos;
     map.view.ox = pos ? pos.x : 0;
     map.view.oz = pos ? pos.z : -700;
-    // base scale that fits the whole map → choose z so ~250 world units frame
-    // the canvas (zoomed-in on the player, like dropping M on GTA's pause map)
+    // the open view frames you at the scale where you can tell where you
+    // are: in Gang City the country round you (its name, its borders, the
+    // neighbours), on the isles your island and the water round it. Zoom in
+    // for the streets, out (or F) for the whole world.
     const sw = b.maxX - b.minX, sh = b.maxZ - b.minZ;
     const sc0 = Math.min((W - PAD * 2) / sw, (H - PAD * 2) / sh);
-    const wantSc = (W - PAD * 2) / 250;
+    const wantSc = (W - PAD * 2) / (mode() === "archipelago" ? 1500 : 4200);
     map.view.z = clampZoom(wantSc / sc0);
     map.view.fitted = true;
     clampPan();
@@ -383,6 +389,16 @@
         const door = best.lot.building && best.lot.building.door;
         return { x: door ? door.x : best.lot.cx, z: door ? door.z : best.lot.cz, label: best.info.label };
       }
+    } else if (which === "archipelago") {
+      // a venue near the click names it; else the island it is on; else sea
+      let best = null, bd = 30;
+      for (const I of islesList()) for (const v of isleVenues(I)) {
+        const d = Math.hypot(v.x - x, v.z - z);
+        if (d < bd) { bd = d; best = v; }
+      }
+      if (best) return { x: best.x, z: best.z, label: best.name };
+      for (const I of islesList()) if (Math.hypot(x - I.x, z - I.z) < I.R + 60) return { x: x, z: z, label: I.name || "Island" };
+      return { x: x, z: z, label: "Open water" };
     } else if (which === "escape") {
       let best = null, bd = 5.5;
       for (const vent of CBZ.vents || []) {
@@ -477,7 +493,7 @@
     if (CBZ.cityClosePhone) { try { CBZ.cityClosePhone(); } catch (e) {} }
     clearMoveKeys();
     plates.a = null;   // re-render the static city plates fresh each open (ownership/renovations may have moved)
-    if (mode() === "city") setCityView(false);   // drop the view on the player, zoomed-in
+    if (panMode()) setCityView(false);   // drop the view on the player
     map._cursor = null; map._sel = null; map._hoverKey = "";
     root.setAttribute("aria-hidden", "false");
     document.body.classList.add("full-map-open");
@@ -485,7 +501,7 @@
     // touch zoom chips: only the city map runs the pan/zoom view (other modes
     // ignore map.view entirely), so the chips hide with it. Desktop never sees
     // them regardless — CSS only reveals the stack under body.touch.
-    if (zoomWrap) zoomWrap.style.display = (mode() === "city" && (!CBZ.CONFIG || CBZ.CONFIG.MAP_ZOOM_BUTTONS !== false)) ? "" : "none";
+    if (zoomWrap) zoomWrap.style.display = (panMode() && (!CBZ.CONFIG || CBZ.CONFIG.MAP_ZOOM_BUTTONS !== false)) ? "" : "none";
     if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
     sizeCanvas(true);
     draw();
@@ -926,6 +942,178 @@
   }
   function viewBox(p) { return { x0: p.wx(0), x1: p.wx(W), z0: p.wz(0), z1: p.wz(H) }; }
 
+
+  // ---- THE ISLES (world/archipelago.js) -------------------------------------
+  // The archipelago's chart: every island's real coast and relief from its
+  // own terrain phase (the same ground function the island is built from),
+  // its name, its streets and buildings from its plan, its venues by use,
+  // the sea between and you on it. Each island's land is painted ONCE to its
+  // own small canvas (4 m a pixel, cached for the session: the islands do
+  // not move) and composited at the view's scale; the island you are on gets
+  // its streets and buildings drawn crisp over it once you are close enough
+  // to read them.
+  function islesList() {
+    try { return (CBZ.archipelago && CBZ.archipelago.isles && CBZ.archipelago.isles()) || []; } catch (e) { return []; }
+  }
+  function isleExtent(I) {
+    let x0 = I.x - I.R - 140, x1 = I.x + I.R + 140, z0 = I.z - I.R - 140, z1 = I.z + I.R + 140;
+    const P = I.terrain && I.terrain.plan, A = P && P.airstrip;
+    if (A && isFinite(A.x0)) { x0 = Math.min(x0, A.x0 - 40); x1 = Math.max(x1, A.x1 + 40); z0 = Math.min(z0, A.z0 - 40); z1 = Math.max(z1, A.z1 + 40); }
+    return { x0: x0, x1: x1, z0: z0, z1: z1 };
+  }
+  function islesBounds() {
+    const L = islesList();
+    if (!L.length) return { minX: -500, maxX: 500, minZ: 29500, maxZ: 30500 };
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const I of L) {
+      const e = isleExtent(I);
+      minX = Math.min(minX, e.x0); maxX = Math.max(maxX, e.x1); minZ = Math.min(minZ, e.z0); maxZ = Math.max(maxZ, e.z1);
+    }
+    const m = 900;   // open water round the outermost coasts
+    return { minX: minX - m, maxX: maxX + m, minZ: minZ - m, maxZ: maxZ + m };
+  }
+  const ISLE_MPP = 4;
+  const isleArt = new Map();   // id -> { cv, ext, T }
+  function isleArtFor(I) {
+    const T = I.terrain; if (!T || typeof T.groundAt !== "function") return null;
+    const have = isleArt.get(I.id);
+    if (have && have.T === T) return have;
+    const ext = isleExtent(I);
+    const w = Math.max(8, Math.ceil((ext.x1 - ext.x0) / ISLE_MPP)), h = Math.max(8, Math.ceil((ext.z1 - ext.z0) / ISLE_MPP));
+    const sea = isFinite(T.oceanY) ? T.oceanY : 0;
+    const H0 = new Float32Array(w * h);
+    for (let j = 0; j < h; j++) {
+      const z = ext.z0 + (j + 0.5) * ISLE_MPP;
+      for (let i = 0; i < w; i++) {
+        let y;
+        try { y = +T.groundAt(ext.x0 + (i + 0.5) * ISLE_MPP, z); } catch (e) { y = -60; }
+        H0[j * w + i] = isFinite(y) ? y - sea : -60;
+      }
+    }
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const g = c.getContext("2d"), img = g.createImageData(w, h), d = img.data;
+    const sand = [196, 178, 128], lowG = [86, 122, 64], highG = [70, 98, 56], rock = [128, 118, 102];
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      const k = j * w + i, y = H0[k], q = k * 4;
+      if (y <= 0.05) {
+        // shallows: turquoise over the shelf, fading to the open sea
+        const t = Math.max(0, Math.min(1, -y / 14));
+        d[q] = 54; d[q + 1] = 150; d[q + 2] = 160; d[q + 3] = Math.round(200 * (1 - t));
+        continue;
+      }
+      let r, gg, b;
+      if (y < 1.4) { r = sand[0]; gg = sand[1]; b = sand[2]; }
+      else {
+        const t = Math.min(1, y / 24), u = Math.max(0, Math.min(1, (y - 16) / 26));
+        r = lowG[0] + (highG[0] - lowG[0]) * t; gg = lowG[1] + (highG[1] - lowG[1]) * t; b = lowG[2] + (highG[2] - lowG[2]) * t;
+        r += (rock[0] - r) * u; gg += (rock[1] - gg) * u; b += (rock[2] - b) * u;
+      }
+      // hillshade from the north-west, off the same heights
+      const hW = i > 0 ? H0[k - 1] : y, hN = j > 0 ? H0[k - w] : y;
+      const sh = Math.max(0.74, Math.min(1.22, 1 + ((hW - y) + (hN - y)) * 0.05));
+      d[q] = Math.min(255, r * sh); d[q + 1] = Math.min(255, gg * sh); d[q + 2] = Math.min(255, b * sh); d[q + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    // what the plan made on it, at the chart's own scale: quay, runway,
+    // streets, then every building's footprint
+    const P = T.plan;
+    const R = function (x0, x1, z0, z1) { g.fillRect((x0 - ext.x0) / ISLE_MPP, (z0 - ext.z0) / ISLE_MPP, Math.max(1, (x1 - x0) / ISLE_MPP), Math.max(1, (z1 - z0) / ISLE_MPP)); };
+    if (P) {
+      g.fillStyle = "rgba(150,148,140,.95)";
+      const Q = P.harbour && P.harbour.quay; if (Q) R(Q.x0, Q.x1, Q.z0, Q.z1);
+      const AS = P.airstrip; if (AS && isFinite(AS.x0)) { g.fillStyle = "rgba(52,54,58,.95)"; R(AS.x0, AS.x1, AS.z0, AS.z1); }
+      g.fillStyle = "rgba(196,200,206,.8)";
+      for (const s of P.streetRects || []) if (isFinite(s.x0)) R(s.x0, s.x1, s.z0, s.z1);
+      g.fillStyle = "rgba(34,38,46,.85)";
+      for (const l of P.lots || []) if (isFinite(l.bx0)) R(l.bx0, l.bx1, l.bz0, l.bz1);
+    }
+    const art = { cv: c, ext: ext, T: T };
+    isleArt.set(I.id, art);
+    return art;
+  }
+  // which island you are on (or nearest to)
+  function isleHere() {
+    const L = islesList(), pos = CBZ.player && CBZ.player.pos;
+    if (!pos) return null;
+    let best = null, bd = Infinity;
+    for (const I of L) { const d = Math.hypot(pos.x - I.x, pos.z - I.z) - I.R; if (d < bd) { bd = d; best = I; } }
+    return best && bd < 900 ? best : null;
+  }
+  // a building's use to the chart's pictogram
+  const USE_ICON = {
+    police: "police", hospital: "hospital", firestation: "fire", bank: "bank", bankhq: "bank", loans: "bank",
+    guns: "guns", usedcars: "carlot", bar: "bar", jewelry: "jewelry", pawn: "pawn",
+    clothing: "clothing", suits: "clothing", boutiques: "clothing", eyewear: "clothing",
+    phones: "electronics", hotel: "hotel", motel: "hotel", cityhall: "cityhall",
+  };
+  function isleVenues(I) {
+    const P = I.terrain && I.terrain.plan; if (!P) return [];
+    if (P._mapVenues) return P._mapVenues;
+    const out = [];
+    for (const l of P.lots || []) {
+      const kind = l.use && USE_ICON[l.use]; if (!kind) continue;
+      const x = isFinite(l.bx0) ? (l.bx0 + l.bx1) / 2 : l.x, z = isFinite(l.bz0) ? (l.bz0 + l.bz1) / 2 : l.z;
+      if (!isFinite(x) || !isFinite(z)) continue;
+      out.push({ x: x, z: z, kind: kind, name: l.name || iconSpec(kind).n });
+    }
+    P._mapVenues = out;
+    return out;
+  }
+  let isleArtBudget = 0;
+  function drawIsles(p) {
+    const L = islesList();
+    const here = isleHere();
+    const spanM = W / p.sc;
+    isleArtBudget = 2;   // at most two islands painted per frame: the chart fills in, never stalls
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    for (const I of L) {
+      const e = isleExtent(I);
+      const sx0 = p.x(e.x0), sx1 = p.x(e.x1), sy0 = p.z(e.z0), sy1 = p.z(e.z1);
+      if (sx1 < 0 || sx0 > W || sy1 < 0 || sy0 > H) continue;
+      let art = isleArt.get(I.id);
+      if ((!art || art.T !== I.terrain) && isleArtBudget > 0) { isleArtBudget--; try { art = isleArtFor(I); } catch (err) { art = null; } }
+      if (art && art.T === I.terrain) ctx.drawImage(art.cv, sx0, sy0, sx1 - sx0, sy1 - sy0);
+      else {   // not painted yet: its footprint, so the chart is never empty
+        ctx.fillStyle = "rgba(86,122,64,.85)";
+        ctx.beginPath(); ctx.arc(p.x(I.x), p.z(I.z), I.R * p.sc, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    // the island you are on, crisp once its streets are readable
+    if (here && spanM < 2600 && here.terrain && here.terrain.plan) {
+      const P = here.terrain.plan;
+      const rect = function (x0, x1, z0, z1) { ctx.fillRect(p.x(x0), p.z(z0), Math.max(1, (x1 - x0) * p.sc), Math.max(1, (z1 - z0) * p.sc)); };
+      ctx.fillStyle = "rgba(204,208,214,.9)";
+      for (const s of P.streetRects || []) if (isFinite(s.x0)) rect(s.x0, s.x1, s.z0, s.z1);
+      ctx.fillStyle = "rgba(28,32,40,.92)";
+      for (const l of P.lots || []) if (isFinite(l.bx0)) rect(l.bx0, l.bx1, l.bz0, l.bz1);
+    }
+    ctx.restore();
+    // names: every island, under its coast
+    for (const I of L) {
+      const nx = p.x(I.x), ny = p.z(I.z + I.R) + 16;
+      if (nx < -100 || nx > W + 100 || ny < -30 || ny > H + 40) continue;
+      if ("letterSpacing" in ctx) ctx.letterSpacing = "1.5px";
+      mapLabel(String(I.name || I.id).toUpperCase(), nx, ny, {
+        size: spanM > 6000 ? 12 : 15, weight: 800, force: true,
+        fill: I === here ? "rgba(255,224,146,.95)" : "rgba(236,242,250,.9)", haloC: "rgba(4,10,18,.75)",
+      });
+      if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+    }
+    // venues by use: landmarks at island scale, every trade once you are close
+    for (const I of L) {
+      for (const v of isleVenues(I)) {
+        const notable = iconSpec(v.kind).r >= LANDMARK || v.kind === "police" || v.kind === "hotel";
+        if (spanM > 3200) continue;
+        if (!notable && spanM > 1400) continue;
+        const sx = p.x(v.x), sy = p.z(v.z);
+        if (sx < -12 || sx > W + 12 || sy < -12 || sy > H + 12) continue;
+        drawIcon(ctx, sx, sy, v.kind, { size: notable ? 7 : 6, tier: notable }); stats.icons++;
+        pickAdd(sx, sy, 9, v.kind, v.name, I.name, v.x, v.z);
+      }
+    }
+  }
+
   // ---- COUNTRIES (city/borders.js) ------------------------------------------
   // The land borders are ONE Path2D in world metres per partition version
   // (normal and at-war apart), stroked through the view transform: one
@@ -942,14 +1130,36 @@
     const peace = new Path2D(), war = new Path2D();
     let n = 0;
     for (const b of list) {
-      const pts = b.pts; if (!pts || pts.length < 4) continue;
       const P2 = b.war ? war : peace;
-      P2.moveTo(pts[0], pts[1]);
-      for (let i = 2; i < pts.length; i += 2) P2.lineTo(pts[i], pts[i + 1]);
-      n++;
+      for (const pts of b.lines || [b.pts]) {
+        if (!pts || pts.length < 4) continue;
+        P2.moveTo(pts[0], pts[1]);
+        for (let i = 2; i < pts.length; i += 2) P2.lineTo(pts[i], pts[i + 1]);
+        n++;
+      }
     }
     borderPaths = { key: key, peace: peace, war: war, n: n, hasWar: list.some(function (b) { return b.war; }) };
     return borderPaths;
+  }
+  // the country you are standing in, named in the chart's corner
+  function drawWhereChip() {
+    const pos = CBZ.player && CBZ.player.pos;
+    if (!pos || !CBZ.countryRecAt) return;
+    let rec = null;
+    try { rec = CBZ.countryRecAt(pos.x, pos.z); } catch (e) { rec = null; }
+    if (!rec) return;
+    let col = "#d8d2c2";
+    try { const c = (CBZ.countries(true) || []).find(function (q) { return q.id === rec.id; }); if (c) col = c.color; } catch (e) {}
+    const nm = String(rec.name || rec.id);
+    ctx.save();
+    ctx.font = "800 12px Fredoka, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    const w = ctx.measureText(nm).width + 34, x0 = 14, y0 = 14;
+    ctx.fillStyle = "rgba(8,14,22,.72)"; rrect(ctx, x0, y0, w, 24, 7); ctx.fill();
+    ctx.fillStyle = col; ctx.fillRect(x0 + 9, y0 + 7, 12, 10);
+    ctx.strokeStyle = "rgba(255,255,255,.6)"; ctx.lineWidth = 1; ctx.strokeRect(x0 + 9, y0 + 7, 12, 10);
+    ctx.fillStyle = "#f2ecdc"; ctx.fillText(nm, x0 + 27, y0 + 12.5);
+    ctx.restore();
+    stats.furniture++;
   }
   function drawCountryBorders(p) {
     const BP = countryPaths(); if (!BP || !BP.n) return;
@@ -976,12 +1186,11 @@
   // world view, gone by the time you are reading streets
   function drawCountryNames(p) {
     if (!CBZ.countries) return;
-    const zm = map.view.z;
-    const fade = Math.max(0, Math.min(1, (3.6 - zm) / 2));
+    const spanM = W / p.sc;   // metres across the chart
+    const fade = Math.max(0, Math.min(1, (spanM - 1400) / 1600));
     if (fade <= 0.02) return;
     let list;
     try { list = CBZ.countries(); } catch (e) { return; }
-    const homeId = (list.find(function (c) { return c.home; }) || {}).id;
     const own = [];
     const prevA = ctx.globalAlpha;
     for (const c of list) {
@@ -992,7 +1201,7 @@
       if (wpx < 70) continue;
       if (nx < -wpx || nx > W + wpx || ny < -40 || ny > H + 40) continue;
       const size = Math.max(13, Math.min(34, wpx / Math.max(7, name.length * 1.05)));
-      const foe = homeId && c.atWar.indexOf(homeId) >= 0;
+      const foe = c.atWar === true;
       ctx.globalAlpha = prevA * fade;
       if ("letterSpacing" in ctx) ctx.letterSpacing = (size * 0.32).toFixed(1) + "px";
       mapLabel(name, nx, ny, {
@@ -1097,6 +1306,8 @@
     dumbbell: function (g) { bars(g, [[-8.2, -4.4, 3, 8.8], [5.2, -4.4, 3, 8.8], [-5.6, -1.6, 11.2, 3.2]]); },
     shield: function (g) { poly(g, [0, -7.4, 7, -4.4, 7, 0.6, 3.6, 5.4, 0, 7.6, -3.6, 5.4, -7, 0.6, -7, -4.4]); },
     cross: function (g) { bars(g, [[-2.6, -7.4, 5.2, 14.8], [-7.4, -2.6, 14.8, 5.2]]); },
+    flame: function (g) { g.beginPath(); g.moveTo(0, -8); g.quadraticCurveTo(7.4, -1, 5.4, 3.6); g.quadraticCurveTo(3.6, 7.8, 0, 7.8); g.quadraticCurveTo(-3.6, 7.8, -5.4, 3.6); g.quadraticCurveTo(-6.4, -0.6, -2.2, -3.4); g.quadraticCurveTo(-1.4, 0.4, 0.6, 1.2); g.quadraticCurveTo(1.6, -4, 0, -8); g.closePath(); g.fill(); },
+    bed: function (g) { bars(g, [[-8, -6, 2.6, 13], [-8, 1.4, 16, 3.6], [5.4, 1.4, 2.6, 5.6], [-4.4, -2.6, 5, 3.2], [1.6, -2, 6.4, 3.2]]); },
     pole: function (g) { rrect(g, -3.6, -8, 7.2, 16, 2.6); g.fill(); g.save(); g.clip(); g.strokeStyle = "rgba(255,255,255,.72)"; g.lineWidth = 2.4; strokes(g, [[-8, 2, 8, -6], [-8, 7, 8, -1], [-8, 12, 8, 4]]); g.restore(); },
     bolt: function (g) { poly(g, [1.6, -8, -5.4, 1.2, -0.6, 1.2, -1.6, 8, 5.4, -1.6, 0.6, -1.6]); },
     car: function (g) { poly(g, [-8, 2, -5.6, -1.4, -2.6, -4.4, 2.6, -4.4, 5.6, -1.4, 8, 2, 8, 4, -8, 4]); disc(g, -4.4, 4.6, 2); disc(g, 4.4, 4.6, 2); },
@@ -1147,6 +1358,9 @@
     chop:      { c: "#d0a23c", r: 61, n: "Chop Shop",          g: GLYPH.wrench,   poi: 1 },
     realtor:   { c: "#4fd0a0", r: 60, n: "Realtor",            g: GLYPH.houseOpen, poi: 1 },
     security:  { c: "#9aa6c2", r: 60, n: "Security",           g: GLYPH.shield,   poi: 1 },
+    police:    { c: "#4a86e8", r: 80, n: "Police",             g: GLYPH.shield,   poi: 1 },
+    fire:      { c: "#ff7a3d", r: 79, n: "Fire Station",       g: GLYPH.flame,    poi: 1 },
+    hotel:     { c: "#e0b3ff", r: 63, n: "Hotel",              g: GLYPH.bed,      poi: 1 },
     // --- ordinary trades (below LANDMARK): revealed once you zoom in ---
     gas:       { c: "#ff6b6b", r: 50, n: "Gas Station",        g: GLYPH.pump,     poi: 1 },
     food:      { c: "#ff9e6b", r: 48, n: "Food",               g: GLYPH.cutlery,  poi: 1 },
@@ -1964,7 +2178,7 @@
   }
   function drawScaleBar(p) {
     let m = 100;
-    for (const cand of [25, 50, 100, 200, 400, 800, 1600]) { m = cand; if (cand * p.sc >= 70) break; }
+    for (const cand of [25, 50, 100, 200, 400, 800, 1600, 3200, 6400, 12800]) { m = cand; if (cand * p.sc >= 70) break; }
     const px = m * p.sc, x0 = 22, y0 = H - 24, seg = px / 4;
     ctx.save();
     ctx.fillStyle = "rgba(8,16,24,.55)";
@@ -1976,7 +2190,7 @@
     ctx.strokeStyle = "rgba(230,240,250,.7)"; ctx.lineWidth = 1;
     ctx.strokeRect(x0, y0 - 3, px, 5);
     ctx.fillStyle = "rgba(230,240,250,.85)"; ctx.font = "700 10px Fredoka, sans-serif"; ctx.textAlign = "left";
-    ctx.fillText(m + " m", x0 + px + 7, y0 + 2); stats.furniture++;
+    ctx.fillText(m >= 1000 ? (m / 1000) + " km" : m + " m", x0 + px + 7, y0 + 2); stats.furniture++;
     ctx.restore();
   }
   // Only explicitly named links are links. `pad<=1` used to misclassify the
@@ -2942,7 +3156,8 @@
     if (!ctx) return;
     const which = mode(), p = map.projection = makeProjection(boundsFor(which));
     const fireControl = !PICK && patriotContext();
-    if (titleEl) titleEl.textContent = PICK ? PICK.title : fireControl ? "PATRIOT FIRE CONTROL" : (MODE_TITLE[which] || "AREA MAP");
+    const mapName = which === "archipelago" && CBZ.ARCHIPELAGO_MAP && CBZ.ARCHIPELAGO_MAP.name ? String(CBZ.ARCHIPELAGO_MAP.name).toUpperCase() : null;
+    if (titleEl) titleEl.textContent = PICK ? PICK.title : fireControl ? "PATRIOT FIRE CONTROL" : (mapName || MODE_TITLE[which] || "AREA MAP");
     if (placeHint && fireControl) placeHint.textContent = CBZ.touchMode ? "Tap the map to designate an impact point" : "Click the map to designate an impact point";
     if (placeHint && PICK && placeHint.textContent) placeHint.textContent = "";
     if (launchBtn) {
@@ -2960,10 +3175,10 @@
     // rather than an opinion.
     stats.icons = stats.labels = stats.overlaps = stats.hoverable = 0;
     stats.merged = stats.skipped = stats.furniture = stats.plate = 0;
-    stats.zoom = which === "city" ? map.view.z : 1; stats.mode = which;
+    stats.zoom = panMode(which) ? map.view.z : 1; stats.mode = which;
     labelBoxes = []; map._picks = [];
     ctx.clearRect(0, 0, W, H);
-    if (which === "city" || which === "survival") {
+    if (which === "city" || which === "survival" || which === "archipelago") {
       // OCEAN: the archipelago floats on water, not a black void — depth
       // gradient + pre-seeded wave glyphs so the sea reads as sea.
       drawOcean();
@@ -2972,17 +3187,19 @@
     }
     // The city view is a geographic terrain map, not graph paper. Prison and
     // survival retain their small tactical grid.
-    if (which !== "city") drawGrid(p);
+    if (!panMode(which)) drawGrid(p);
     if (which === "survival") drawSurvival(p);
     else if (which === "city") drawCity(p);
+    else if (which === "archipelago") drawIsles(p);
     else drawEscape(p);
     drawWaypoint(p); drawPlayer(p);
     drawVignette();   // soft dark edges pull the eye to the chart, not the frame
     // THE ONE LABEL YOU ASKED FOR, last so nothing can paint over it.
     drawHoverTip(p);
-    if (which === "city") {
+    if (panMode(which)) {
       drawCompassRose();
       drawScaleBar(p);
+      if (which === "city") drawWhereChip();
       if (MAP_V2()) drawWantedStars(starCount());   // only rendered when > 0
     } else {
       ctx.fillStyle = "rgba(223,250,255,.82)"; ctx.font = "700 14px Fredoka, sans-serif"; ctx.textAlign = "center"; ctx.fillText("N", W / 2, 18); stats.furniture++;
@@ -3010,8 +3227,21 @@
         legend.innerHTML = html;
       };
       const common = "<span><i style='background:#ff9b3d'></i>You</span><span><i style='background:#7de7ff'></i>Route</span>";
+      const countriesKey = (CBZ.countries ? "<span style='opacity:.55;font-weight:700;letter-spacing:.5px;margin-left:6px'>COUNTRIES</span>" +
+        "<span><i style='width:16px;height:3px;border-radius:0;box-shadow:none;background:repeating-linear-gradient(90deg,#f6eedc 0 5px,transparent 5px 8px)'></i>Border</span>" +
+        "<span><i style='width:16px;height:4px;border-radius:0;box-shadow:none;background:repeating-linear-gradient(90deg,#ff5446 0 8px,transparent 8px 10px)'></i>At war</span>" +
+        "<span><i style='background:#ffe092'></i>Your country</span>" : "");
       if (which === "escape") {
         setLegend(common + "<span><i style='background:#c792ea'></i>Hatch</span><span><i style='background:#ffd451'></i>Guard</span><span><i style='background:#39ff88'></i>Exit</span>");
+      } else if (which === "archipelago") {
+        const key = function (kind, label) {
+          const u = iconDataURL(kind);
+          return u ? "<span><i style=\"width:14px;height:14px;border-radius:3px;box-shadow:none;background:url(" + u + ") center/contain no-repeat\"></i>" + esc(label) + "</span>"
+            : "<span><i style='background:" + iconSpec(kind).c + "'></i>" + esc(label) + "</span>";
+        };
+        setLegend(common + key("police", "Police") + key("hospital", "Hospital") + key("fire", "Fire") + key("bank", "Bank") +
+          key("hotel", "Hotel") + key("guns", "Guns") + key("carlot", "Cars") + key("bar", "Bar") + key("clothing", "Clothes") +
+          "<span style='opacity:.6;font-style:italic;margin-left:6px'>" + (CBZ.touchMode ? "tap an island to set a course" : "click an island to set a course") + "</span>");
       } else if (which === "survival") {
         setLegend(common + "<span><i style='background:#ffe38a'></i>High ground</span><span><i style='background:#e8eef5'></i>Survivor</span>");
       } else {
@@ -3023,7 +3253,7 @@
             "<span><i style='background:#d4a04c'></i>Desert</span>" +
             "<span><i style='background:#3f7043'></i>Forest</span>" +
             "<span><i style='background:#e7f2fb'></i>Snow</span>" +
-            "<span><i style='background:#277e8f'></i>Water</span>" +
+            "<span><i style='background:#277e8f'></i>Water</span>" + countriesKey +
             (ICONS_V2() ? "<span style='opacity:.6;font-style:italic;margin-left:6px'>" +
               (CBZ.touchMode ? "tap an icon for its name" : "hover an icon for its name") + "</span>" : ""));
           return;
@@ -3041,7 +3271,7 @@
           }
           return "<span><i style='background:" + (fallbackColor || iconSpec(kind).c) + "'></i>" + esc(label) + "</span>";
         };
-        let html = grp("GO") + common + key("home", "Home") + key("mission", "Job");
+        let html = grp("GO") + common + key("home", "Home") + key("mission", "Job") + countriesKey;
         html += grp("HEAT") + "<span><i style='background:#ff6a5a'></i>Police</span>" + key("chopper", "Chopper 3★+") + key("seen", "Last seen");
         html += grp("EMPIRE") + "<span><i style='background:#ffd451;border-radius:50%'></i>Your turf / owned</span>" + key("board", "Boards you rent");
         // ways onto a roof — plan the climb before the chase starts
@@ -3149,7 +3379,7 @@
   // drops a waypoint while a drag pans the camera (and never sets a waypoint).
   let drag = null;   // { startX, startY, button, ox, oz, moved }
   cv.addEventListener("mousedown", function (e) {
-    if (mode() !== "city") { placeFromEvent(e); return; }
+    if (!panMode()) { placeFromEvent(e); return; }
     if (e.button !== 0 && e.button !== 2) return;
     e.preventDefault();
     const c = evCanvas(e);
@@ -3170,7 +3400,7 @@
         if (key !== was) { map._hoverKey = key; draw(); }
         else if (!had) draw();
       }
-    } else if (mode() === "city") map._cursor = { x: c.x, y: c.y };
+    } else if (panMode()) map._cursor = { x: c.x, y: c.y };
     if (!drag) return;
     const dx = c.x - drag.startX, dy = c.y - drag.startY;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;   // still a potential click
@@ -3185,12 +3415,12 @@
   function endDrag(e) {
     if (!drag) return;
     const d = drag; drag = null;
-    if (mode() !== "city") return;
+    if (!panMode()) return;
     if (!d.moved && (e.button === 0 || e.button === 2)) {
       const c = evCanvas(e);
       if (touchTap(c)) return;   // touch: this tap was asking WHAT that icon is
       // a clean click → place the waypoint (left OR right, as before)
-      const p = map.projection || makeProjection(boundsFor("city"));
+      const p = map.projection || makeProjection(boundsFor(mode()));
       setWaypoint(p.wx(c.x), p.wz(c.y));
     }
   }
@@ -3204,7 +3434,7 @@
   // ZOOM-TO-CURSOR wheel: keep the world point under the cursor fixed while the
   // zoom changes (the standard map-zoom feel), then re-clamp the pan.
   cv.addEventListener("wheel", function (e) {
-    if (mode() !== "city" || !map.active) return;
+    if (!panMode() || !map.active) return;
     e.preventDefault();
     const c = evCanvas(e);
     const p = map.projection; if (!p) return;
@@ -3215,7 +3445,7 @@
     map.view.z = nz;
     // recompute the projection at the new zoom, then shift ox/oz so (wx,wz)
     // lands back under the cursor.
-    const np = makeProjection(boundsFor("city"));
+    const np = makeProjection(boundsFor(mode()));
     map.view.ox += wx - np.wx(c.x);
     map.view.oz += wz - np.wz(c.y);
     clampPan();
@@ -3233,7 +3463,7 @@
   const ZOOM_STEP = 1.25, ZOOM_HOLD_MS = 320, ZOOM_REPEAT_MS = 110;
   let zoomHoldT = 0, zoomTickT = 0;
   function zoomStep(dir) {
-    if (!map.active || mode() !== "city") return;
+    if (!map.active || !panMode()) return;
     const nz = clampZoom(map.view.z * (dir > 0 ? ZOOM_STEP : 1 / ZOOM_STEP));
     if (nz === map.view.z) return;   // pinned at the clamp — nothing to redraw
     map.view.z = nz;
@@ -3260,7 +3490,12 @@
         }, ZOOM_REPEAT_MS);
       }, ZOOM_HOLD_MS);
     };
+    let pressedAt = -1e9;
     const stop = function (e) { if (e.cancelable) e.preventDefault(); zoomRepeatStop(); };
+    // a click that no press came before it (a keyboard, an accessibility
+    // tool, a scripted click) is still one step
+    b.addEventListener("click", function (e) { if (performance.now() - pressedAt > 600) zoomStep(dir); e.preventDefault(); });
+    b.addEventListener("pointerdown", function () { pressedAt = performance.now(); });
     b.addEventListener("touchstart", start, { passive: false });
     b.addEventListener("touchend", stop, { passive: false });
     b.addEventListener("touchcancel", stop, { passive: false });
@@ -3335,7 +3570,9 @@
     else if (map.active && e.key === "Escape") { close(); e.preventDefault(); }
     else if (map.active && PICK && e.key === "Enter") { pickConfirm(); e.preventDefault(); }
     else if (map.active && (e.key === "Backspace" || e.key === "Delete")) { clearWaypoint(); e.preventDefault(); }
-    else if (map.active && mode() === "city" && k === "f") { setCityView(true); draw(); e.preventDefault(); }   // F = fit the whole archipelago
+    else if (map.active && panMode() && k === "f") { setCityView(true); draw(); e.preventDefault(); }   // F = fit the whole world
+    else if (map.active && panMode() && (k === "-" || k === "_")) { zoomStep(-1); e.preventDefault(); }
+    else if (map.active && panMode() && (k === "=" || k === "+")) { zoomStep(1); e.preventDefault(); }
   });
 
   let redraw = 0, reroute = 0;

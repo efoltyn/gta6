@@ -362,17 +362,21 @@
         ctx.save(); ctx.scale(sc, sc); ctx.translate(-px, -pz);
         ctx.lineJoin = "round";
         for (const b of BL) {
-          const pts = b.pts; if (!pts || pts.length < 4) continue;
+          const L = b.lines || (b.pts ? [b.pts] : null); if (!L || !L.length) continue;
           let bb = b._bb;
-          if (!bb || b._bbPts !== pts) {
-            bb = b._bb = [Infinity, -Infinity, Infinity, -Infinity]; b._bbPts = pts;
-            for (let i = 0; i < pts.length; i += 2) { const x = pts[i], z = pts[i + 1]; if (x < bb[0]) bb[0] = x; if (x > bb[1]) bb[1] = x; if (z < bb[2]) bb[2] = z; if (z > bb[3]) bb[3] = z; }
+          if (!bb || b._bbL !== L) {
+            bb = b._bb = [Infinity, -Infinity, Infinity, -Infinity]; b._bbL = L;
+            for (const pts of L) for (let i = 0; i < pts.length; i += 2) { const x = pts[i], z = pts[i + 1]; if (x < bb[0]) bb[0] = x; if (x > bb[1]) bb[1] = x; if (z < bb[2]) bb[2] = z; if (z > bb[3]) bb[3] = z; }
           }
           if (bb[0] > px + reach || bb[1] < px - reach || bb[2] > pz + reach || bb[3] < pz - reach) continue;
-          if (!b._path || b._pathPts !== pts) {
-            const P2 = new Path2D(); P2.moveTo(pts[0], pts[1]);
-            for (let i = 2; i < pts.length; i += 2) P2.lineTo(pts[i], pts[i + 1]);
-            b._path = P2; b._pathPts = pts;
+          if (!b._path || b._pathL !== L) {
+            const P2 = new Path2D();
+            for (const pts of L) {
+              if (pts.length < 4) continue;
+              P2.moveTo(pts[0], pts[1]);
+              for (let i = 2; i < pts.length; i += 2) P2.lineTo(pts[i], pts[i + 1]);
+            }
+            b._path = P2; b._pathL = L;
           }
           ctx.setLineDash([]);
           ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.lineWidth = 3 / sc; ctx.stroke(b._path);
