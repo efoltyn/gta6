@@ -442,7 +442,7 @@
      list, recs (the facade's deco boxes, local [x,y,z,w,h,d,col], CUT in
      place), walls (the shell's wall meshes, see cutWall), dbox (deco
      emitter), frameCol, sillCol, sillStain, tower }. */
-  function glazeBuilding(o) {
+  function* glazeBuilding(o) {
     const THREE_ = window.THREE;
     const G = islandGlassMats();
     const h01 = function (a, b, s) { return CBZ.hash01 ? CBZ.hash01(o.ox + a, o.oz + b, s) : 0.5; };
@@ -517,6 +517,7 @@
     const found = FOP ? FOP.scan(o.recs, { w: o.w, d: o.d, storeys: o.storeys, fh: o.fh, doorSide: 0,
       doorHalf: o.doorHalf, tower: !!o.tower, isGlass: o.isGlass || isGlassHex }) : [];
     for (const op of found) {
+      yield 0;
       const f = faces[op.s];
       const sg = f.horiz ? f.tx : f.tz;
       const ua = op.t0 * sg, ub = op.t1 * sg;
@@ -579,6 +580,7 @@
     // ---- merge each kind into one mesh ----------------------------------
     const meshes = {};
     for (const K in kinds) {
+      yield 0;
       const k = kinds[K];
       if (!k.i.length) continue;
       const g2 = new THREE_.BufferGeometry();
@@ -595,6 +597,7 @@
       meshes[K] = { mesh: m, orig: Float32Array.from(k.p) };
     }
     for (const rec of panes) {
+      yield 0;
       // the pane's own glass material: what its shards are made of
       rec.mat = meshes.glass ? meshes.glass.mesh.material : null;
       rec.hide = function () {
@@ -666,7 +669,9 @@
   //      doorHalf, walls (shell wall meshes the glazing cuts windows through),
   //      liftShaft (a tower's shaft rect: see THE LIFT TOP) }
   // Returns { def, lift }: lift is CBZ.facadeLiftTop's answer, or null.
-  function dressIslandFacade(o) {
+  // (a generator: world/archipelago.js streams an island a few ms a frame,
+  // and this is most of a building's cost; see the seams below)
+  function* dressIslandFacade(o) {
     const THREE = window.THREE;
     const mat = CBZ.mat;
     // every deco box as a RECORD, local [x,y,z,w,h,d,col], so the glazing pass
@@ -767,13 +772,14 @@
     if (dressed && o.keepClear) ctx.keepClear = (ctx.keepClear || []).concat(o.keepClear);
     const def = dressed ? CBZ.dressFacade(ctx) : null;
     if (!def) lift = null;
+    yield 0;
 
     // ---- the windows, read off what the grammar left open ------------------
     const fh = (CBZ.hash01 ? CBZ.hash01(ox, oz, 0xf4a3) : 0.3);
     // the grammar's own frame colour (facade_kit F.windowFrame) when it named one
     const frameCol = o.frameCol != null ? o.frameCol : ctx.__winFrame != null ? ctx.__winFrame
       : [0xe6e1d6, 0x34312d, 0x6b6f73, 0xe6e1d6, 0x2c3a33][(fh * 5) | 0];
-    const panes = glazeBuilding({
+    const panes = yield* glazeBuilding({
       group: group, ox: ox, oz: oz, gy: gy, w: o.w, d: o.d, storeys: o.storeys,
       fh: o.fh, wt: o.wt, doorHalf: o.doorHalf || 1.3, list: o.glassList, recs: recs, walls: o.walls,
       tower: !!o.tower, dbox: dbox, frameCol: frameCol,
@@ -782,6 +788,7 @@
       sillCol: shadeHex(0xd6cfbf, 0.94 + fh * 0.1),
       sillStain: shadeHex(o.color, 0.72),
     });
+    yield 0;
 
     // ---- flush: one mesh per colour ----
     const BGU = THREE.BufferGeometryUtils;
@@ -810,10 +817,14 @@
         if (wl.pieces) for (const pc of wl.pieces) fixed.push(pc);
         else fixed.push([wl.lx - wl.bw / 2, wl.lx + wl.bw / 2, wl.ly - wl.bh / 2, wl.ly + wl.bh / 2, wl.lz - wl.bd / 2, wl.lz + wl.bd / 2]);
       }
-      CBZ.facadeOpenings.resolveCoplanar(recs, fixed);
+      if (CBZ.facadeOpenings.resolveCoplanarSteps) yield* CBZ.facadeOpenings.resolveCoplanarSteps(recs, fixed);
+      else CBZ.facadeOpenings.resolveCoplanar(recs, fixed);
+      yield 0;
     }
     const byColour = new Map();
+    let nBox = 0;
     for (const r of recs) {
+      if (++nBox % 300 === 0) yield 0;
       const g2 = new THREE.BoxGeometry(r[3], r[4], r[5]);
       g2.deleteAttribute("uv");      // the finish shader works in world space; no map ever reads these
       g2.translate(r[0], r[1], r[2]);
@@ -825,7 +836,7 @@
 
     for (const col of colOrder) {
       const geos = byColour.get(col);
-      if (geos) flush(geos, isGlassHex(col) ? glassBoxMat(col) : finishMat(col, gy), false);
+      if (geos) { flush(geos, isGlassHex(col) ? glassBoxMat(col) : finishMat(col, gy), false); yield 0; }
     }
     if (o.shellMerge && o.shellMerge.length) {
       const byCol = new Map();
@@ -905,6 +916,7 @@
      archipelago's far silhouettes are drawn from without building anything. */
   function* islandSteps(ISL) {
     ISL = ISL || {};
+    let __dn = 0;      // the seam counter (a yield every few loop turns)
     const S = CBZ.SURV.arena;
     const cx = ISL.cx != null ? ISL.cx : S.cx, cz = ISL.cz != null ? ISL.cz : S.cz, R = ISL.R || S.radius;
     const SHARED = !!ISL.sea;
@@ -937,10 +949,11 @@
       if (def.minStoreys > 0) facTall[id] = def.minStoreys;
       if (def.maxStoreys && def.maxStoreys !== Infinity) facLow[id] = def.maxStoreys;
     }
-    const PLAN = CBZ.islandPlan
-      ? CBZ.islandPlan.make({ cx: cx, cz: cz, R: R, facades: facadeIds, tall: facTall, low: facLow,
-        seed: ISL.seed, style: ISL.style, airstrip: !!ISL.airstrip })
-      : null;
+    // (a streamed copy lays its plan out in steps too)
+    const planCfg = { cx: cx, cz: cz, R: R, facades: facadeIds, tall: facTall, low: facLow,
+      seed: ISL.seed, style: ISL.style, airstrip: !!ISL.airstrip };
+    const PLAN = !CBZ.islandPlan ? null
+      : (CBZ.islandPlan.makeSteps ? yield* CBZ.islandPlan.makeSteps(planCfg) : CBZ.islandPlan.make(planCfg));
 
     // pull addBox results into the arena group (keeps world transform; root @ origin)
     function box(x, y, z, w, h, d, color, opts) {
@@ -1610,7 +1623,7 @@
     })();
     const BED_RINGS = bedRadii.length - 1, BED_SECT = 128;
     function bss(e0, e1, x2) { let t = (x2 - e0) / (e1 - e0); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); }
-    (function seaFloor() {
+    yield* (function* seaFloor() {
       const flat = CBZ.CONFIG.SURV_SEABED === false;
       const nv = (BED_RINGS + 1) * (BED_SECT + 1);
       const pos = new Float32Array(nv * 3);
@@ -1632,6 +1645,7 @@
       const c = new THREE.Color();
       let v = 0;
       for (let i = 0; i <= BED_RINGS; i++) {
+        if ((++__dn & 3) === 0) yield 0;
         const rr = bedRadii[i];
         for (let j = 0; j <= BED_SECT; j++) {
           const a = (j / BED_SECT) * Math.PI * 2;
@@ -1674,6 +1688,7 @@
       }
       const stride = BED_SECT + 1;
       for (let i = 0; i < BED_RINGS; i++) {
+        if ((++__dn & 3) === 0) yield 0;
         for (let j = 0; j < BED_SECT; j++) {
           const a = i * stride + j, b = a + 1, d = a + stride, e = d + 1;
           idx.push(a, b, d, b, e, d);
@@ -1776,7 +1791,7 @@
        KELP: one merged mesh of tapered double-sided ribbons in the 3-13 m band,
        which is exactly the water a shark-sim player swims in. It sways, but
        only while the camera is actually under water — see the tick below. */
-    (function seaDressing() {
+    yield* (function* seaDressing() {
       if (CBZ.CONFIG.SURV_SEABED === false) return;
       const bedY = (x, z) => groundHeightAt(x, z);
 
@@ -1808,6 +1823,7 @@
       const rockHi = new THREE.Color(0x2b2823), rockLo = new THREE.Color(0x080d12);
       const rcol = new THREE.Color();
       for (let i = 0; i < ROCKS; i++) {
+        if ((++__dn & 3) === 0) yield 0;
         const a = rng2() * Math.PI * 2;
         // biased inward: most rocks where the player can actually see them
         const t = rng2();
@@ -1854,6 +1870,7 @@
       const kcol = new THREE.Color();
       let kv = 0, placed = 0;
       for (let s = 0; s < CLUMPS * 8 && placed < CLUMPS; s++) {
+        if ((++__dn & 3) === 0) yield 0;
         const a = rng2() * Math.PI * 2;
         const rr = SHORE_R + 2 + rng2() * 34;
         const hx = cx + Math.cos(a) * rr, hz = cz + Math.sin(a) * rr;
@@ -1935,7 +1952,7 @@
         new THREE.MeshLambertMaterial({ color: 0xe6d49a }));
       beach.rotation.x = -Math.PI / 2; beach.position.set(cx, -0.02, cz);
       beach.receiveShadow = true; root.add(beach);
-    } else (function shoreRing() {
+    } else yield* (function* shoreRing() {
       /* R-3 (tucked 3 m under the grass disc, 3 cm down so the grass wins the
          overlap) out to SHORE_R-1, which is exactly the seabed ring's inner
          rim — SAME 96 theta segments, so the two meshes share their boundary
@@ -1956,6 +1973,7 @@
       const DRY = new THREE.Color().setRGB(0.40, 0.325, 0.205), BED = new THREE.Color(0xcdbb8f);
       const c = new THREE.Color();
       for (let i = 0; i < vn; i++) {
+        if (i && i % 400 === 0) yield 0;
         const lx = sa[i * 3], ly = sa[i * 3 + 1];
         const dist = Math.hypot(lx, ly);
         const h = dist <= R ? -0.03 : coastHeightAt(dist);
@@ -2035,7 +2053,7 @@
       const pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), inR = new Uint8Array(nv);
       const c3 = [0, 0, 0];
       const BED = [0.085, 0.074, 0.060], STONE = [0.120, 0.112, 0.100];
-      for (let j = 0; j <= N; j++) { if (j && j % 24 === 0) yield 0; for (let i = 0; i <= N; i++) {
+      for (let j = 0; j <= N; j++) { if (j && j % 4 === 0) yield 0; for (let i = 0; i <= N; i++) {
         const k = j * (N + 1) + i;
         let x = cx - R + i * STEP, z = cz - R + j * STEP;
         const dx = x - cx, dz = z - cz, d = Math.sqrt(dx * dx + dz * dz);
@@ -2095,8 +2113,8 @@
        island, with the crown worn thin to bare soil and rock where the turf
        would really give out. */
     const HILL_ROCK = [0.085, 0.070, 0.050];
-    hills.forEach((hl) => {
-      if (hl.volcano) return;     // the mountain builds itself, below
+    for (const hl of hills) {
+      if (hl.volcano) continue;   // the mountain builds itself, below
       const SEC = 48, RINGS = 14;
       const VC = 1 + (RINGS + 1) * SEC;
       const pos = new Float32Array(VC * 3), col = new Float32Array(VC * 3), c3 = [0, 0, 0];
@@ -2110,6 +2128,7 @@
       }
       put(0, 0, hl.peak, 0);
       for (let k = 1; k <= RINGS + 1; k++) {
+        yield 0;
         const skirt = k === RINGS + 1;
         const d = skirt ? hl.r + 0.6 : hl.r * (k / RINGS);
         for (let s = 0; s < SEC; s++) {
@@ -2136,7 +2155,8 @@
       cone.castShadow = true; cone.receiveShadow = true;
       cone.userData.coat = true;
       root.add(cone);
-    });
+      yield 0;
+    }
 
     /* ---- THE VOLCANO MESH — the height field, drawn --------------------
        One polar grid, 128 sectors by 36 rings, and EVERY vertex is placed by
@@ -2169,7 +2189,7 @@
        below y=0, buried under the island plate so the base has no seam. */
     yield 0;   // (a seam: a streamed build may hand the frame back here)
     const VOL_FUMAROLES = [];
-    (function buildVolcano() {
+    yield* (function* buildVolcano() {
       const SEC = 128, CR = 8, FR = 27;
       const RINGS = CR + FR + 1;                 // last one is the buried skirt
       const ringR = new Float32Array(RINGS + 1);
@@ -2201,6 +2221,7 @@
          one just outside the rim. Their ground wears a sulphur stain, and
          world/volcanofx.js's V.fumarole breathes a wisp off each at rest. */
       for (let k = 0; k < 2; k++) {
+        if ((++__dn & 3) === 0) yield 0;
         const a = VOL_BREACH_A + 2.2 + k * 1.9 + (h01(VOL.x, VOL.z, 0x560a + k) - 0.5) * 0.6;
         const d = k === 0 ? VOL_RIM * 0.72 : VOL_RIM + 1.6;
         const fx = VOL.x + Math.cos(a) * d, fz = VOL.z + Math.sin(a) * d;
@@ -2253,6 +2274,7 @@
       paint(0, 0, pos[1], _a, _x);
       col[0] = _a[0]; col[1] = _a[1]; col[2] = _a[2]; aux[0] = _x[0]; aux[1] = _x[1];
       for (let k = 1; k <= RINGS; k++) {
+        if ((++__dn & 3) === 0) yield 0;
         const d = ringR[k], skirt = k === RINGS;
         for (let s = 0; s < SEC; s++) {
           const ang = (s / SEC) * Math.PI * 2;
@@ -2272,6 +2294,7 @@
         idx[n++] = 0; idx[n++] = vi(1, s + 1); idx[n++] = vi(1, s);
       }
       for (let k = 1; k < RINGS; k++) {
+        if ((++__dn & 3) === 0) yield 0;
         for (let s = 0; s < SEC; s++) {
           const a = vi(k, s), b = vi(k, s + 1), c = vi(k + 1, s + 1), e = vi(k + 1, s);
           idx[n++] = a; idx[n++] = c; idx[n++] = e;
@@ -2638,8 +2661,16 @@
         };
       }
       function flush(group, cast) {
+        const it = flushSteps(group, cast);
+        let r = it.next();
+        while (!r.done) r = it.next();
+        return r.value;
+      }
+      // one material's merge a step (a streamed island's interiors)
+      function* flushSteps(group, cast) {
         const out = [];
         for (const key in bk) {
+          yield 0;
           const k = bk[key];
           if (!k.i.length) continue;
           const g2 = new THREE.BufferGeometry();
@@ -2663,7 +2694,7 @@
         return out;
       }
       return { quad: quad, box: box, hexa: hexa, disc: disc, plane: plane, light: light,
-        floorLit: floorLit, ceilLit: ceilLit, flush: flush, lights: lights };
+        floorLit: floorLit, ceilLit: ceilLit, flush: flush, flushSteps: flushSteps, lights: lights };
     }
 
     /* THE ROOM-SIDE SKIN OF ONE WALL FACE, one storey tall: painted plaster
@@ -2926,7 +2957,7 @@
        into its own kit, flushes into the building group, and returns the
        sturdy pieces the quake's drop-cover-hold-on can use:
        [{x, y, z, r}] in world space. */
-    function houseInterior(H) {
+    function* houseInterior(H) {
       const ox = H.ox, oz = H.oz, gy = H.gy, w = H.w, d = H.d, storeys = H.storeys;
       const ixMin = H.ixMin, ixMax = H.ixMax, izMin = H.izMin, izMax = H.izMax;
       const PL = H.plan, sEdge = PL.sEdge, laneW = SW / 2, rTop = storeys * FH;
@@ -2978,11 +3009,14 @@
         const TIERS = [{ len: 1.6, deep: 0.9, seats: 4 }, { len: 1.2, deep: 0.8, seats: 2 }, { len: 0.9, deep: 0.7, seats: 0 }];
         let table = null;
         for (const T of TIERS) {
+          yield 0;
           let best = null;
           for (let yi = 0; yi < 2 && !best; yi++) {
+            yield 0;
             const hx0 = T.len / 2 + 0.05, hz0 = T.deep / 2 + (T.seats ? 0.42 + 0.28 : 0.05);
             const hx = (yi ? hz0 : hx0) + 0.3, hz = (yi ? hx0 : hz0) + 0.3;
             for (let x = R.x0 + hx; x <= R.x1 - hx + 1e-6; x += 0.1) {
+              yield 0;
               for (let z = R.z0 + hz; z <= R.z1 - hz + 1e-6; z += 0.1) {
                 const r = { x0: x - hx, x1: x + hx, z0: z - hz, z1: z + hz };
                 if (rectHit(r, blocks)) continue;
@@ -2997,6 +3031,7 @@
         }
         if (table) {
           const P = table.p, T = table.T;
+          yield 0;
           furnish("table", host, P.x, fy, P.z, P.yaw, { seats: T.seats, len: T.len, deep: T.deep, tone: tone });
           blocks.push(P.rect);
           covers.push({ x: ox + P.x, y: gy + fy, z: oz + P.z, r: T.seats ? 1.0 : 0.75 });
@@ -3009,6 +3044,7 @@
         let sofa = null;
         if (sofaLen) sofa = placeOnWalls(R, blocks, ["z1", "x1"], sofaLen, 0.87, 1.3, holes, null, 0.5);
         if (sofa) {
+          yield 0;
           furnish("sofa", host, sofa.x, fy, sofa.z, sofa.yaw, { len: sofaLen, tone: tone });
           blocks.push(sofa.use);
           const fx = Math.sin(sofa.yaw), fz = Math.cos(sofa.yaw);
@@ -3018,11 +3054,13 @@
           const rugA = sofaLen + 0.3, rugB = 1.7;
           const along = Math.abs(fx) < 0.5;       // sofa along x (back on a z wall)
           K.box("flat", sofa.x + fx * 0.95, fy + 0.006, sofa.z + fz * 0.95, along ? rugA : rugB, 0.012, along ? rugB : rugA, rugC, 63 & ~8);
+          yield 0;
           furnish("coffee", host, cx, fy + 0.012, cz, sofa.yaw, { len: cl, deep: 0.55, tone: tone });
           // floor lamp at the sofa's left end, if there is floor there
           const lx = sofa.x + (along ? -(sofaLen / 2 + 0.3) : 0), lz = sofa.z + (along ? 0 : -(sofaLen / 2 + 0.3));
           const lr = { x0: lx - 0.2, x1: lx + 0.2, z0: lz - 0.2, z1: lz + 0.2 };
           if (lr.x0 >= R.x0 && lr.x1 <= R.x1 && lr.z0 >= R.z0 && lr.z1 <= R.z1 && !rectHit(lr, blocks)) {
+            yield 0;
             furnish("lamp", host, lx, fy, lz, 0, { h: 1.5, ei: 0.6 });
             K.light(lx, fy + 1.5, lz, 2.0, 0.18);
             blocks.push(lr);
@@ -3033,8 +3071,10 @@
         const bc = placeOnWalls(R, blocks, ["x1", "z1"], 0.9, 0.36, 0.6, holes, [0.1, 1.95], 0.85);
         if (bc) {
           const yawB = bc.yaw;
+          yield 0;
           furnish("shelf", furnHost(K, ox, oz, gy, cols, fy, { 0x49505b: WALNUT, 0x8a939c: 0x6f5139 }), bc.x, fy, bc.z, yawB, { len: 0.9, deep: 0.34, h: 1.9 });
           const gap = (1.9 - 0.35) / 4;
+          yield 0;
           books(K, bc.x, fy, bc.z, yawB, 0.9, 0.34, [0.30, 0.30 + gap + 0.05, 0.30 + 2 * gap + 0.05, 0.30 + 3 * gap + 0.05], 0x5b00 + (hh(0x1a12) * 999 | 0));
           blocks.push(bc.use);
         }
@@ -3042,9 +3082,11 @@
         fixtures.push({ kind: "dome", x: 0, z: izMin + 1.0, L: 0 });
         if (!sofa && !table) fixtures.push({ kind: "dome", x: (R.x0 + R.x1) / 2, z: (R.z0 + R.z1) / 2, L: 0 });
       }
+      yield 0;
       // UPPER FLOORS: a bedroom, then a study. The landing and the way off
       // it stay clear.
       for (let L = 1; L < storeys; L++) {
+        yield 0;
         const fy = fyOf(L);
         const R = { x0: sEdge + 0.12, x1: ixMax, z0: izMin, z1: izMax };
         const lg = landingAt(L);
@@ -3060,6 +3102,7 @@
             const yawBed = bed.yaw + Math.PI;           // yaw points at the pillow = at the wall
             const fx = Math.sin(bed.yaw), fz = Math.cos(bed.yaw);
             const bx = bed.x + fx * 0.06, bz = bed.z + fz * 0.06;
+            yield 0;
             furnish("bed", host, bx, fy, bz, yawBed, { len: BL, wide: wide, tone: tone });
             blocks.push(bed.use);
             // nightstands either side of the head, each with a small lamp
@@ -3068,6 +3111,7 @@
             const toHead = (BL + 0.13) / 2 + 0.03 - 0.25;
             const headX = bed.x - fx * toHead, headZ = bed.z - fz * toHead;
             for (let sd = -1; sd <= 1; sd += 2) {
+              yield 0;
               const off = wide / 2 + 0.34;
               const nx = headX + (along ? sd * off : 0), nz = headZ + (along ? 0 : sd * off);
               const nr = { x0: nx - 0.23, x1: nx + 0.23, z0: nz - 0.23, z1: nz + 0.23 };
@@ -3095,6 +3139,7 @@
             const fxp = wd.x + fx * 0.302, fzp = wd.z + fz * 0.302;
             K.box("flat", fxp, fy + 1.02, fzp, along ? 0.01 : 0.006, 1.9, along ? 0.006 : 0.01, 0x2b2622);
             for (let sd = -1; sd <= 1; sd += 2) {
+              yield 0;
               const hx = fxp + fx * 0.012 + (along ? sd * 0.07 : 0), hz = fzp + fz * 0.012 + (along ? 0 : sd * 0.07);
               K.box("flat", hx, fy + 1.05, hz, 0.02, 0.22, 0.02, 0x8d8f91);
             }
@@ -3106,6 +3151,7 @@
         // a desk to work at (and to get under), under or beside a window
         desk = placeOnWalls(R, blocks, ["x1", "z1", "z0"], 1.3, 0.62, 0.95, holes, null, 0.5);
         if (desk) {
+          yield 0;
           furnish("desk", host, desk.x, fy, desk.z, desk.yaw + Math.PI, { len: 1.3, deep: 0.62 });
           blocks.push(desk.use);
           covers.push({ x: ox + desk.x, y: gy + fy, z: oz + desk.z, r: 0.75 });
@@ -3114,8 +3160,10 @@
           // a study: a bookcase and an armchair to read in
           const bc = placeOnWalls(R, blocks, ["z1", "x1", "z0"], 0.9, 0.36, 0.6, holes, [fy + 0.1, fy + 1.95], 0.2);
           if (bc) {
+            yield 0;
             furnish("shelf", furnHost(K, ox, oz, gy, cols, fy, { 0x49505b: WALNUT, 0x8a939c: 0x6f5139 }), bc.x, fy, bc.z, bc.yaw, { len: 0.9, deep: 0.34, h: 1.9 });
             const gap = (1.9 - 0.35) / 4;
+            yield 0;
             books(K, bc.x, fy, bc.z, bc.yaw, 0.9, 0.34, [0.30, 0.30 + gap + 0.05, 0.30 + 2 * gap + 0.05, 0.30 + 3 * gap + 0.05], 0x5c00 + L);
             blocks.push(bc.use);
           }
@@ -3123,10 +3171,12 @@
           if (ac) { furnish("armchair", host, ac.x, fy, ac.z, ac.yaw, { tone: tone }); blocks.push(ac.use); }
         }
         fixtures.push({ kind: "dome", x: (R.x0 + R.x1) / 2, z: (R.z0 + R.z1) / 2, L: L });
+        yield 0;
       }
       // lay the ceiling fixtures (and their light) before the floors are laid
       const domes = [];
       for (const fx of fixtures) {
+        yield 0;
         // two domes closer than 1.4 m are one
         if (fx.kind === "dome" && domes.some(function (o) { return o.L === fx.L && Math.hypot(o.x - fx.x, o.z - fx.z) < 1.4; })) continue;
         if (fx.kind === "dome") domes.push(fx);
@@ -3138,9 +3188,11 @@
       // a light under every landing, for the flight below it
       for (const lg of H.landings) domeLight(K, (lg.x0 + lg.x1) / 2, lg.y - 0.2, (lg.z0 + lg.z1) / 2, 2.6, 0.2);
 
+      yield 0;
       /* ---- FLOORS AND CEILINGS ----------------------------------------- */
       K.plane(groundKey, ixMin, izMin, ixMax, izMax, 0.08, groundTint, false, K.floorLit(0.08));
       for (let L = 1; L <= storeys; L++) {
+        yield 0;
         const roof = L === storeys, y = L * FH;
         const lg = landingAt(L);
         // a roof nobody climbs to is closed over the stair strip: one slab
@@ -3175,6 +3227,7 @@
       }
       // a dog-leg's half landings: floor, ceiling and their two edges
       for (const lg of H.landings) {
+        yield 0;
         if (lg.L % 1 === 0) continue;
         const y = lg.y, yc = y - 0.2;
         K.plane("wood", lg.x0, lg.z0, lg.x1, lg.z1, y, upTint, false, K.floorLit(y));
@@ -3191,11 +3244,14 @@
         { s: 3, n: w / 2 - WT, inward: -1, a0: izMin, a1: izMax, glassN: w / 2 - 0.07 },
       ];
       for (let L = 0; L < storeys; L++) {
+        yield 0;
+        yield 0;
         const lg = L > 0 ? landingAt(L) : null;
         const y0 = L === 0 ? 0.08 : L * FH - 0.2;
         const y1 = L === storeys - 1 ? rTop : ceilOf(L);
         const paint = L === 0 ? paint0 : paintUp;
         for (const f of faces) {
+          yield 0;
           let skirt = null;
           if (L > 0) {
             if (f.s === 2) skirt = lg ? [[lg.z0, lg.z1]] : [];
@@ -3205,6 +3261,7 @@
               if (lg && ((f.s === 0 && lg.z0 <= izMin + 0.01) || (f.s === 1 && lg.z1 >= izMax - 0.01))) skirt.push([ixMin, sEdge]);
             }
           }
+          yield 0;
           skinFace(K, { s: f.s, n: f.n, inward: f.inward, a0: f.a0, a1: f.a1, y0: y0, y1: y1, skirt: skirt,
             glassN: f.glassN, floor: L === 0 ? 0.08 : L * FH }, holes, paint, IN_TRIM);
         }
@@ -3237,7 +3294,9 @@
           K.box("flat", xr, (yb + yt) / 2, zn, 0.025, yt - yb, 0.025, IN_TRIM, 1 | 2 | 16 | 32);
         }
       };
+      yield 0;
       for (const F of H.flights) {
+        yield 0;
         const dir = F.dir, g = F.going, rise = F.rise, n = F.risers;
         const xa = F.x0 + 0.04, xb = F.x1 - 0.04;
         // the pitch line, through every nosing (riser i's top edge)
@@ -3245,6 +3304,7 @@
         const floorClamp = F.L0 === 0 ? 0.08 : F.yb - 0.2;
         const ySoff = function (z) { return Math.max(floorClamp, pitch(z) - 0.32); };
         for (let i = 1; i < n; i++) {
+          yield 0;
           const z0 = F.zb + dir * (i - 1) * g, z1 = F.zb + dir * i * g;
           const top = F.yb + i * rise;
           // the body under this tread: flat top, sloped bottom (the soffit)
@@ -3260,6 +3320,7 @@
         // stringers both sides: a sloped board from the soffit to over the nosings
         const zS = F.zb, zE = F.zt;
         for (let sd = 0; sd < 2; sd++) {
+          yield 0;
           const x0 = sd ? xb : F.x0 + 0.005, x1 = sd ? F.x1 - 0.005 : xa;
           const b0 = ySoff(zS) - 0.02, b1 = ySoff(zE) - 0.02, t0 = pitch(zS) + 0.07, t1 = pitch(zE) + 0.07;
           K.hexa("flat", [[x0, b0, zS], [x1, b0, zS], [x1, b1, zE], [x0, b1, zE],
@@ -3274,6 +3335,7 @@
       // landing's edge over the well. The plan's guards; makeBuilding laid
       // their colliders.
       for (const gd of PL.guards) {
+        yield 0;
         if (gd.kind === "rail") continue;
         const yb = gd.y0, h = gd.y1 - gd.y0 - 0.04;
         const along = gd.z1 - gd.z0 > gd.x1 - gd.x0;
@@ -3363,7 +3425,8 @@
         CBZ.colliders.push(c); cols.push(c);
       }
 
-      K.flush(H.group, false);
+      yield 0;
+      yield* K.flushSteps(H.group, false);
       return covers;
     }
 
@@ -3409,7 +3472,7 @@
     const _finSet = new Set();
     const _bm = new THREE.Matrix4(), _bn = new THREE.Matrix3(), _bv = new THREE.Vector3();
     let bakeStats = { buildings: 0, meshesIn: 0, meshesOut: 0, hidden: 0 };
-    function bakeShell(group, gy) {
+    function* bakeShell(group, gy) {
       _finSet.clear();
       finMats.forEach(function (m) { _finSet.add(m); });
       group.updateMatrixWorld(true);
@@ -3433,14 +3496,18 @@
         take.push(o);
       });
       if (take.length < 2) return;
+      yield 0;
       let nv = 0, ni = 0;
       for (const o of take) { const g = o.geometry; nv += g.attributes.position.count; ni += g.index ? g.index.count : g.attributes.position.count; }
       const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
       const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
       let v = 0, k = 0;
       const ranges = new Map();          // original -> [first index entry, count] in the merged copy
+      let since = 0;
       for (const o of take) {
+        if (since > 6000) { since = 0; yield 0; }
         const g = o.geometry, P = g.attributes.position, N = g.attributes.normal, c = o.material.color;
+        since += g.attributes.position.count;
         ranges.set(o, [k, g.index ? g.index.count : P.count]);
         _bm.multiplyMatrices(inv, o.matrixWorld);
         _bn.getNormalMatrix(_bm);
@@ -3750,7 +3817,7 @@
       // THE FACADE. Emitted last so it dresses the finished shell, and into
       // this building's own group so the quake still topples it as one piece.
       yield 0;   // (a seam inside the building: see islandSteps)
-      const dressed = dressIslandFacade({
+      const dressed = yield* dressIslandFacade({
         group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
         fh: FH, wt: WT, rTop: rTop, pp: 0.7, doorSide: 0,   // the door is on -z
         color: color, style: style, plats: plats,
@@ -3762,7 +3829,7 @@
       // THE INSIDE (see THE INSIDE OF A BUILDING), then the shell pieces it
       // laid on the roof after the facade flushed
       yield 0;   // (a seam inside the building: see islandSteps)
-      const covers = houseInterior({
+      const covers = yield* houseInterior({
         group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, color: color,
         ixMin: ixMin, ixMax: ixMax, izMin: izMin, izMax: izMax,
         plan: PL, flights: PL.flights, landings: PL.landings, cols: cols, late: shellMerge,
@@ -3827,7 +3894,7 @@
         },
       };
       b._wallMat = finishMat(color, gy);   // what its rubble is made of (disasters.js wallMatOf)
-      bakeShell(bgroup, gy);
+      yield* bakeShell(bgroup, gy);
       fragile.push(b);
       return b;
     }
@@ -3848,7 +3915,7 @@
        Now the shaft is walled, with a steel-framed opening facing the front
        door on every floor. Furnished at the lobby and the first two floors;
        the floors above are fitted out and empty, to let. */
-    function towerInterior(T) {
+    function* towerInterior(T) {
       const ox = T.ox, oz = T.oz, gy = T.gy, w = T.w, d = T.d, storeys = T.storeys;
       const iw = T.iw, id = T.id, s = T.s, TW = T.TW, realH = storeys * FH, lobbyTop = T.lobbyTop;
       const hh = function (sl) { return h01g(ox, oz, sl); };
@@ -3894,12 +3961,15 @@
           { len: 0.8, deep: 0.6, seats: 0, gap: 0.12 }];
         let done = false;
         for (const T2 of TIERS) {
+          yield 0;
           if (done) break;
           for (let yi = 0; yi < 2 && !done; yi++) {
+            yield 0;
             const hx0 = T2.len / 2 + 0.05, hz0 = T2.deep / 2 + (T2.seats ? 0.7 : 0.05);
             const hx = (yi ? hz0 : hx0) + T2.gap, hz = (yi ? hx0 : hz0) + T2.gap;
             let best = null;
             for (let x = R.x0 + hx + 0.1; x <= R.x1 - hx - 0.1 + 1e-6; x += 0.2) {
+              yield 0;
               for (let z = R.z0 + hz + 0.1; z <= R.z1 - hz - 0.1 + 1e-6; z += 0.2) {
                 const r = { x0: x - hx, x1: x + hx, z0: z - hz, z1: z + hz };
                 if (rectHit(r, blocks)) continue;
@@ -3908,6 +3978,7 @@
               }
             }
             if (best) {
+              yield 0;
               furnish("table", host, best.x, fy, best.z, best.yaw, { seats: T2.seats, len: T2.len, deep: T2.deep, tone: tone });
               blocks.push(best.r);
               covers.push({ x: ox + best.x, y: gy + fy, z: oz + best.z, r: T2.seats ? 1.0 : 0.75 });
@@ -3919,13 +3990,17 @@
         const sofa = placeOnWalls(R, blocks, ["x0", "x1", "z1"], 1.8, 0.87, 0.8, holes, null, 0.5);
         if (sofa) { furnish("sofa", host, sofa.x, fy, sofa.z, sofa.yaw, { len: 1.8, tone: tone }); blocks.push(sofa.use); }
       }
+      yield 0;
       for (let k = 1; k <= Math.min(2, storeys - 1); k++) {
+        yield 0;
         const fy = fyOf(k);
         const host = furnHost(K, ox, oz, gy, cols, fy, null);
         const blocks = [liftZone, apron];
         for (let n = 0; n < 3; n++) {
+          yield 0;
           const dk = placeOnWalls(R, blocks, ["x1", "x0", "z1", "z0"], 1.4, 0.7, 1.0, holes, null, n * 0.35 + 0.15);
           if (!dk) break;
+          yield 0;
           furnish("desk", host, dk.x, fy, dk.z, dk.yaw + Math.PI, { len: 1.4, deep: 0.7 });
           blocks.push(dk.use);
           covers.push({ x: ox + dk.x, y: gy + fy, z: oz + dk.z, r: 0.75 });
@@ -3933,17 +4008,21 @@
       }
 
       /* ---- CEILING FIXTURES: troffers on a 2.4 m grid, clear of the shaft */
+      yield 0;
       const trof = [];
       const nX = Math.max(1, Math.floor((2 * iw - 1.2) / 2.4)), nZ = Math.max(1, Math.floor((2 * id - 1.2) / 2.4));
       for (let i = 0; i <= nX; i++) for (let j = 0; j <= nZ; j++) {
+        yield 0;
         const x = -nX * 1.2 + i * 2.4, z = -nZ * 1.2 + j * 2.4;
         if (Math.abs(x) > iw - 0.7 || Math.abs(z) > id - 0.5) continue;
         if (Math.abs(x) < so + 0.75 && Math.abs(z) < so + 0.45) continue;
         trof.push([x, z]);
       }
       for (let k = 0; k < storeys; k++) {
+        yield 0;
         const yc = ceilOf(k);
         for (const t of trof) {
+          yield 0;
           K.box("flat", t[0], yc - 0.015, t[1], 1.26, 0.03, 0.66, 0xd6d8d6, 63 & ~4);
           K.quad("glow", [t[0] - 0.6, yc - 0.037, t[1] - 0.3], [t[0] + 0.6, yc - 0.037, t[1] - 0.3], [t[0] + 0.6, yc - 0.037, t[1] + 0.3], [t[0] - 0.6, yc - 0.037, t[1] + 0.3], [0, -1, 0], 0xf1f3f0);
           K.light(t[0], yc, t[1], 3.0, 0.16);
@@ -3952,6 +4031,7 @@
 
       /* ---- FLOORS AND CEILINGS ------------------------------------------ */
       for (let k = 0; k <= storeys; k++) {
+        yield 0;
         const roof = k === storeys, y = roof ? realH + 0.1 : fyOf(k);
         const key = k === 0 ? "terrazzo" : roof ? "concrete" : "carpet";
         const tint = k === 0 ? 0xffffff : roof ? 0x9a978f : carpet;
@@ -3973,6 +4053,7 @@
         { s: 3, n: w / 2 - TW, inward: -1, a0: -id, a1: id },
       ];
       for (let k = 0; k < storeys; k++) {
+        yield 0;
         const y0 = k === 0 ? lobbyTop : k * FH - 0.1, y1 = ceilOf(k);
         for (const f of faces)
           skinFace(K, { s: f.s, n: f.n, inward: f.inward, a0: f.a0, a1: f.a1, y0: y0, y1: y1, floor: fyOf(k), glassN: null }, holes, paint, 0x6e6a64);
@@ -3995,6 +4076,7 @@
       K.box("plaster", px, syc, -s - SWT / 2, pw, syh, SWT, paint, 1 | 2 | 16 | 32);
       shaftCol(-s, -dw / 2, -so, -s); shaftCol(dw / 2, s, -so, -s);
       for (let k = 0; k < storeys; k++) {
+        yield 0;
         const fy = fyOf(k), top = Math.min(fy + DH, k + 1 < storeys ? fyOf(k + 1) - 0.2 : sy1);
         const hy1 = k + 1 < storeys ? fyOf(k + 1) : sy1;
         K.box("plaster", 0, (top + hy1) / 2, -s - SWT / 2, dw, hy1 - top, SWT, paint, 8 | 16 | 32);
@@ -4014,12 +4096,14 @@
         K.box("flat", P.x, y + 0.05, P.z, P.w + 0.1, 0.1, P.d + 0.1, 0x55585c, 63 & ~8);
         K.box("flat", P.x, y + 0.66, P.z, P.w, 1.12, P.d, 0xb4b6b3, 63 & ~8);
         for (let j = 0; j < 7; j++) {
+          yield 0;
           const yy = y + 0.25 + j * 0.12;
           K.box("flat", P.x, yy, P.z - P.d / 2 - 0.003, P.w - 0.1, 0.02, 0.006, 0x3a3d40, 32);
           K.box("flat", P.x, yy, P.z + P.d / 2 + 0.003, P.w - 0.1, 0.02, 0.006, 0x3a3d40, 16);
         }
         const nf = Math.max(1, Math.floor(P.w / 1.1));
         for (let i = 0; i < nf; i++) {
+          yield 0;
           const fx = P.x - P.w / 2 + (i + 0.5) * P.w / nf;
           K.disc("flat", fx, y + 1.223, P.z, Math.min(0.42, P.d * 0.38), 16, false, 0x2a2c2f);
           K.disc("flat", fx, y + 1.226, P.z, 0.09, 8, false, 0x6d7073);
@@ -4027,7 +4111,8 @@
         const c = { minX: ox + P.x - P.w / 2, maxX: ox + P.x + P.w / 2, minZ: oz + P.z - P.d / 2, maxZ: oz + P.z + P.d / 2, ref: null, y0: gy + y, y1: gy + y + 1.22 };
         CBZ.colliders.push(c); cols.push(c);
       }
-      K.flush(T.group, false);
+      yield 0;
+      yield* K.flushSteps(T.group, false);
       return covers;
     }
 
@@ -4164,7 +4249,7 @@
       // The lift shaft goes in with it: the kit keeps the shaft hollow through
       // the crown and says where the top of the crown is (THE LIFT TOP).
       yield 0;   // (a seam inside the building: see islandSteps)
-      const dressedT = dressIslandFacade({
+      const dressedT = yield* dressIslandFacade({
         group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys,
         fh: FH, wt: TW, rTop: realH, pp: 0.6, doorSide: 0,
         color: color, style: style, plats: plats,
@@ -4270,7 +4355,7 @@
       }
       // THE INSIDE (see THE TOWER INTERIOR)
       yield 0;   // (a seam inside the building: see islandSteps)
-      const towerCovers = towerInterior({
+      const towerCovers = yield* towerInterior({
         group: g, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, iw: iw, id: id, s: s, TW: TW,
         DW: DW, DOORH: DOORH, lobbyTop: lobbyTop, cols: cols, holes: dressedT.holes, plant: plant,
       });
@@ -4385,7 +4470,7 @@
       elevators.push(e);
 
       b._wallMat = finishMat(color, gy);
-      bakeShell(g, gy);
+      yield* bakeShell(g, gy);
       return b;
     }
 
@@ -4964,7 +5049,7 @@
        fails a bridge by pulling those and setting record.failed, and the
        walkable floor drops to the ravine's there); arena.reset() puts it
        back. */
-    function buildBridges() {
+    function* buildBridges() {
       if (!PLAN || !PLAN.bridges.length) return;
       const C = CBZ.islandRoadKit && CBZ.islandRoadKit.C ? CBZ.islandRoadKit.C : { HW: 3.5, WALK: 5.5, CURB: 0.15, LIFT: 0.04 };
       const HW = C.HW, WALK = C.WALK, CURB = C.CURB, LIFT = C.LIFT;
@@ -4972,6 +5057,7 @@
       const asphM = skinMat("asphalt"); asphM.name = "island-bridge-asphalt";
       const BGU = THREE.BufferGeometryUtils;
       for (const br of PLAN.bridges) {
+        yield 0;
         const along = function (t, off) { return br.vertical ? { x: br.at + off, z: t } : { x: t, z: br.at + off }; };
         const mid = along((br.a + br.b) / 2, 0);
         const deckMid = PLAN.plainBaseAt(mid.x, mid.z);
@@ -5087,7 +5173,7 @@
       if (t.trunkCol && CBZ.colliders.indexOf(t.trunkCol) < 0) CBZ.colliders.push(t.trunkCol);
       t._tsuUproot = 0;
     }
-    (function harbourAndBridges() {
+    yield* (function* harbourAndBridges() {
       if (!PLAN) return;
       const BGU = THREE.BufferGeometryUtils;
       if (!BGU || !BGU.mergeBufferGeometries) return;
@@ -5148,12 +5234,14 @@
         const nx = Math.ceil((Q.x1 - Q.x0) / 2), nz = Math.ceil((Q.z1 - Q.z0) / 2);
         const pos = [], col = [], idx = [];
         for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
+          yield 0;
           const x = Q.x0 + (Q.x1 - Q.x0) * i / nx, z = Q.z0 + (Q.z1 - Q.z0) * j / nz;
           pos.push(x, PLAN.quayTop(x, z) + 0.004, z);
           const k = 0.92 + 0.12 * h01g(Math.round(x / 2), Math.round(z / 2), 0xa71);
           col.push(C_DECK[0] * k, C_DECK[1] * k, C_DECK[2] * k);
         }
         for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+          yield 0;
           const a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, e = c + 1;
           idx.push(a, c, b, b, c, e);
         }
@@ -5167,14 +5255,17 @@
         // the face and the two ends: wall slabs 2 m long down to the foot
         const top = function (x, z) { return PLAN.quayTop(x, z); };
         for (let x = Q.x0; x < Q.x1 - 1e-6; x += 2) {
+          yield 0;
           const x1 = Math.min(Q.x1, x + 2), mx = (x + x1) / 2, t = top(mx, Q.z1);
           box(conc, mx, (t + FOOT) / 2, Q.z1 + 0.3, x1 - x, t - FOOT, 0.6, C_FACE);
           box(conc, mx, t + 0.11, Q.z1 + 0.15, x1 - x, 0.22, 0.9, C_COPE);
           harbourOut.points.push({ x: mx, z: Q.z1 });
         }
         for (const side of [-1, 1]) {
+          yield 0;
           const xe = side < 0 ? Q.x0 : Q.x1;
           for (let z = Q.z0; z < Q.z1 - 1e-6; z += 2) {
+            yield 0;
             const z1 = Math.min(Q.z1, z + 2), mz = (z + z1) / 2;
             const t = top(xe, mz), g0 = groundHeightAt(xe + side * 1.5, mz);
             if (t - g0 < 0.12) continue;                 // flush with the land there
@@ -5184,10 +5275,12 @@
         }
         // fenders, bollards, ladders along the face
         for (let x = Q.x0 + 3; x < Q.x1 - 2; x += 6) {
+          yield 0;
           const t = top(x, Q.z1);
           box(wood, x, t - 0.9, Q.z1 + 0.68, 0.3, 1.8, 0.16, C_FEND);
         }
         for (let x = Q.x0 + 6; x < Q.x1 - 3; x += 12) {
+          yield 0;
           const t = top(x, Q.z1 - 0.8);
           cyl(paint, x, t, Q.z1 - 0.7, 0.2, 0.17, 0.55, 10, C_IRON);
           cyl(paint, x, t + 0.55, Q.z1 - 0.7, 0.26, 0.26, 0.07, 10, C_IRON);
@@ -5195,6 +5288,7 @@
           CBZ.colliders.push(c);
         }
         for (let x = Q.x0 + 15; x < Q.x1 - 5; x += 30) {
+          yield 0;
           const t = top(x, Q.z1);
           for (const s2 of [-0.25, 0.25]) box(paint, x + s2, (t + seaY - 1.5) / 2, Q.z1 + 0.66, 0.05, t - seaY + 1.5, 0.05, C_RUST);
           for (let y = seaY - 1.2; y < t; y += 0.3) box(paint, x, y, Q.z1 + 0.66, 0.5, 0.035, 0.035, C_RUST);
@@ -5203,10 +5297,13 @@
 
       // ---- THE CARGO PIER and THE JETTIES ----
       for (const p of H.piers) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         if (p.kind === "cargo") {
           box(conc, (p.x0 + p.x1) / 2, (p.deck + FOOT) / 2, (p.z0 + p.z1) / 2 + 0.2, p.x1 - p.x0, p.deck - FOOT, p.z1 - p.z0 - 0.4, C_FACE);
           box(conc, (p.x0 + p.x1) / 2, p.deck + 0.002, (p.z0 + p.z1) / 2, p.x1 - p.x0 - 0.2, 0.01, p.z1 - p.z0, C_DECK);
           for (let z = p.z0 + 4; z < p.z1 - 1; z += 8) for (const xe of [p.x0 + 0.6, p.x1 - 0.6]) {
+            yield 0;
             cyl(paint, xe, p.deck, z, 0.2, 0.17, 0.55, 10, C_IRON);
             cyl(paint, xe, p.deck + 0.55, z, 0.26, 0.26, 0.07, 10, C_IRON);
             CBZ.colliders.push({ minX: xe - 0.25, maxX: xe + 0.25, minZ: z - 0.25, maxZ: z + 0.25, y0: p.deck, y1: p.deck + 0.62, ref: null, noCam: true });
@@ -5216,11 +5313,13 @@
           const D = p.deck, w = p.x1 - p.x0;
           // planks across, two stringers, piles every 3 m
           for (let z = p.z0 + 0.15; z < p.z1; z += 0.3) {
+            yield 0;
             const k = 0.9 + 0.18 * h01g(p.x0, Math.round(z * 10), 0xa72);
             box(wood, (p.x0 + p.x1) / 2, D - 0.03, z, w, 0.06, 0.27, [C_TIMB[0] * k, C_TIMB[1] * k, C_TIMB[2] * k]);
           }
           for (const xe of [p.x0 + 0.2, p.x1 - 0.2]) box(wood, xe, D - 0.2, (p.z0 + p.z1) / 2, 0.2, 0.28, p.z1 - p.z0, C_FEND);
           for (let z = p.z0 + 1.5; z < p.z1; z += 3) for (const xe of [p.x0 + 0.15, p.x1 - 0.15]) {
+            yield 0;
             cyl(wood, xe, FOOT, z, 0.16, 0.14, D + 0.45 - FOOT, 8, C_FEND);
             CBZ.colliders.push({ minX: xe - 0.16, maxX: xe + 0.16, minZ: z - 0.16, maxZ: z + 0.16, y0: D, y1: D + 0.45, ref: null, noCam: true });
           }
@@ -5237,6 +5336,7 @@
         const lowY = seaY - 4.5;
         const run = half + (crest - lowY) * slope;
         for (const sg of H.breakwater) {
+          yield 0;
           const dx = sg.bx - sg.ax, dz = sg.bz - sg.az, L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L;
           const nx = -uz, nz = ux, yaw = Math.atan2(ux, uz);
           // the core as a trapezoid prism (a cross-section swept down the arm)
@@ -5249,6 +5349,7 @@
           box(conc, (sg.ax + sg.bx) / 2, crest - 0.12, (sg.az + sg.bz) / 2, half * 2, 0.24, L + half * 2, C_COPE, yaw);
           // armour: rough blocks down both slopes, staggered
           for (let t = -half; t < L + half; t += 2.6) for (const s2 of [-1, 1]) for (let row = 0; row < 3; row++) {
+            yield 0;
             const e = half + 0.8 + row * 2.4;
             const y = crest - 0.2 - (e - half) / slope;
             const jit = h01g(Math.round(sg.ax + t), row * 7 + s2, 0xa73);
@@ -5267,6 +5368,7 @@
         cyl(paint, lh.x, g0 + 4.0, lh.z, 1.42, 1.38, 1.4, 16, [0.42, 0.05, 0.04]);
         cyl(paint, lh.x, g0 + 9.2, lh.z, 1.75, 1.75, 0.18, 16, C_IRON);         // gallery
         for (let k = 0; k < 12; k++) {
+          yield 0;
           const a = k / 12 * Math.PI * 2;
           box(paint, lh.x + Math.cos(a) * 1.68, g0 + 9.85, lh.z + Math.sin(a) * 1.68, 0.05, 1.1, 0.05, C_IRON);
         }
@@ -5295,22 +5397,23 @@
       }
 
       // ---- THE BRIDGES over the ghaut: each its own group (see below) ----
-      buildBridges();
+      yield* buildBridges();
 
       const concMat = skinMat("concrete"); concMat.name = "island-harbour-concrete";
       const rockMat = skinMat("rock"); rockMat.name = "island-harbour-rock";
       const woodMat = skinMat("wood"); woodMat.name = "island-harbour-timber";
       const paintMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }); paintMat.name = "island-harbour-paint";
-      flush(conc, concMat, "island-harbour-concrete", true);
-      flush(rock, rockMat, "island-breakwater", true);
-      flush(wood, woodMat, "island-harbour-timber", true);
-      flush(paint, paintMat, "island-harbour-ironwork", true);
+      flush(conc, concMat, "island-harbour-concrete", true); yield 0;
+      flush(rock, rockMat, "island-breakwater", true); yield 0;
+      flush(wood, woodMat, "island-harbour-timber", true); yield 0;
+      flush(paint, paintMat, "island-harbour-ironwork", true); yield 0;
       if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
       if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
 
       // ---- THE BOATS, moored at their berths (world/water_hulls.js hulls) ----
       const MH = CBZ.marineHulls;
       if (MH && MH.build) for (const bt of H.berths) {
+        if ((++__dn & 3) === 0) yield 0;
         let g = null;
         try { g = MH.build(bt.key); } catch (e) { g = null; }
         if (!g) continue;
@@ -6229,14 +6332,26 @@
     job.finish = function () { if (!job.done) run(Infinity); return job.arena; };
     // the island joins the world's physics, sight lines and camera
     job.attach = function () {
+      const it = job.attachSteps();
+      for (let r = it.next(); !r.done; r = it.next()) {}
+    };
+    // (in steps: ten thousand walls into the broadphase is a frame's work)
+    job.attachSteps = function* () {
       if (!job.own || job.attached || !job.done) return;
       job.attached = true;
-      const O = job.own;
-      if (CBZ.colliderAddMany) CBZ.colliderAddMany(O.colliders); else for (const c of O.colliders) CBZ.colliders.push(c);
-      if (CBZ.platformAddMany) CBZ.platformAddMany(O.platforms); else for (const p of O.platforms) CBZ.platforms.push(p);
+      const O = job.own, CH = 1500;
+      for (let i = 0; i < O.colliders.length; i += CH) {
+        const part = O.colliders.slice(i, i + CH);
+        if (CBZ.colliderAddMany) CBZ.colliderAddMany(part); else for (const c of part) CBZ.colliders.push(c);
+        yield 0;
+      }
+      for (let i = 0; i < O.platforms.length; i += CH) {
+        const part = O.platforms.slice(i, i + CH);
+        if (CBZ.platformAddMany) CBZ.platformAddMany(part); else for (const p of part) CBZ.platforms.push(p);
+        yield 0;
+      }
       for (const m of O.losBlockers) (CBZ.losBlockers || (CBZ.losBlockers = [])).push(m);
       for (const c of O.camColliders) (CBZ.camColliders || (CBZ.camColliders = [])).push(c);
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
       if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
     };
     return job;
@@ -6244,7 +6359,10 @@
   CBZ.islandTerrain = function (ISL) {
     const gen = islandSteps(ISL || {});
     let t = null;
-    try { t = gen.next().value; } finally { try { gen.return(); } catch (e) {} }
+    try {
+      // (the plan's own seams come first: run to the terrain phase)
+      for (let r = gen.next(); !r.done; r = gen.next()) if (r.value && r.value.phase === "terrain") { t = r.value; break; }
+    } finally { try { gen.return(); } catch (e) {} }
     return t;
   };
   CBZ.islandActivate = function (A, groundFn) {
@@ -6272,6 +6390,14 @@
     if (CBZ.islandDressing) CBZ.islandDressing.current = null;
   };
   CBZ.islandDispose = function (job) {
+    const it = CBZ.islandDisposeSteps(job);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  };
+  // the same, a frame's share at a time (world/archipelago.js): the
+  // registries first, then the GPU buffers a few hundred at a time
+  CBZ.islandDisposeSteps = function* (job) {
     if (!job || job.disposed) return false;
     if (!job.done) job.finish();             // never left half-registered
     const A = job.arena;
@@ -6280,7 +6406,7 @@
     if (A && arena === A) CBZ.islandActivate(null, null);
     if (A) {
       for (const e of A.elevators || []) if (e.rig && e.rig.release) { try { e.rig.release(); } catch (err) {} }
-      if (CBZ.stairs && CBZ.stairs.removeOwner) for (const b of A.fragile || []) { try { CBZ.stairs.removeOwner(b.group); } catch (err) {} }
+      if (CBZ.stairs && CBZ.stairs.removeOwner) for (const b of A.fragile || []) { try { CBZ.stairs.removeOwner(b.group); } catch (err) {} yield 0; }
     }
     const root = (A && A.root) || job.root;
     if (root && root.parent) root.parent.remove(root);
@@ -6304,28 +6430,30 @@
         else dropItems(arr, items);
       });
       if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
-      if (!root) return;
-      const geos = new Set(), texs = new Set();
-      root.traverse(function (o) {
-        if (o.isInstancedMesh && o.dispose) { try { o.dispose(); } catch (e) {} }
-        const g = o.geometry;
-        if (g && g.dispose && !g._shared && !(g.userData && g.userData._shared)) geos.add(g);
-        const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : null;
-        if (mats) for (const m of mats) {
-          if (!m) continue;
-          for (const k in m) { const t = m[k]; if (t && t.isTexture && !t._shared && !t._cbzFreed) texs.add(t); }
-        }
-      });
-      geos.forEach(function (g) { try { g.dispose(); } catch (e) {} });
-      texs.forEach(function (t) {
-        try {
-          if (t._cbzLazy) { t.dispose(); if (t._cbzRelease) t._cbzRelease(); return; }
-          // (a canvas core/texfree.js already released could only come back as 1x1)
-          if (t.isCanvasTexture) { const im = t.image; if (!im || typeof im.getContext !== "function" || !(im.width > 1)) return; }
-          t.dispose();
-        } catch (e) {}
-      });
     });
+    if (!root) return true;
+    yield 0;
+    const geos = new Set(), texs = new Set();
+    root.traverse(function (o) {
+      if (o.isInstancedMesh && o.dispose) { try { o.dispose(); } catch (e) {} }
+      const g = o.geometry;
+      if (g && g.dispose && !g._shared && !(g.userData && g.userData._shared)) geos.add(g);
+      const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : null;
+      if (mats) for (const m of mats) {
+        if (!m) continue;
+        for (const k in m) { const t = m[k]; if (t && t.isTexture && !t._shared && !t._cbzFreed) texs.add(t); }
+      }
+    });
+    let n = 0;
+    for (const g of geos) { try { g.dispose(); } catch (e) {} if (++n % 250 === 0) yield 0; }
+    for (const t of texs) {
+      try {
+        if (t._cbzLazy) { t.dispose(); if (t._cbzRelease) t._cbzRelease(); continue; }
+        // (a canvas core/texfree.js already released could only come back as 1x1)
+        if (t.isCanvasTexture) { const im = t.image; if (!im || typeof im.getContext !== "function" || !(im.width > 1)) continue; }
+        t.dispose();
+      } catch (e) {}
+    }
     return true;
   };
 

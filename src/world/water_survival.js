@@ -168,6 +168,9 @@
      enough to swim over, and it is what keeps that shark inside the drawn
      world instead of sailing off its edge. */
   function seaFenceR(A) {
+    // (an archipelago island shares an open sea: the next coast is the
+    // next island, there is no fence to run into)
+    if (A.sharedSea) return Infinity;
     return (+A.seaR > 0 ? +A.seaR + 150 : A.radius + 150);
   }
   function islandShore(x, z) {
@@ -232,6 +235,29 @@
       return survOn() ? islandMove(x, z, heading, distance, clearance, t, out)
         : cityMove(x, z, heading, distance, clearance, t, out);
     };
+    /* THE SHORELINE A BOAT GROUNDS ON (world/water_helm.js marineShoreBlock)
+       in the archipelago: the island's own depth field, so a speedboat
+       stops at the beach it can see instead of reading Gang City's coast.
+       Archipelago only — the disaster island and Shark Sim keep what they
+       had, byte for byte. */
+    const archOn = function () { return survOn() && CBZ.game.mode === "archipelago"; };
+    if (typeof wf.shoreAt === "function") {
+      const cityShore = wf.shoreAt;
+      wf.shoreAt = function (x, z) { return archOn() ? islandShore(x, z) : cityShore.apply(wf, arguments); };
+    }
+    if (typeof wf.shoreGradient === "function") {
+      const cityGrad = wf.shoreGradient;
+      wf.shoreGradient = function (x, z, step, out) {
+        if (!archOn()) return cityGrad.apply(wf, arguments);
+        step = Math.max(2, +step || 8);
+        const gx = islandShore(x + step, z) - islandShore(x - step, z);
+        const gz = islandShore(x, z + step) - islandShore(x, z - step);
+        const d = Math.hypot(gx, gz) || 1;
+        out = out || {};
+        out.x = gx / d; out.z = gz / d;     // points from water toward land
+        return out;
+      };
+    }
     if (typeof wf.isNavigableWater === "function") {
       const cityNav = wf.isNavigableWater;
       wf.isNavigableWater = function (x, z, clearance) {
@@ -367,7 +393,9 @@
     const need = -Math.max(0, +clearance || 0) * 0.6;
     // Scan past the fence, wherever it is: capped at radius*3+400 this would
     // have silently clipped the measured ring to 760 m under a 3 km fence.
-    const far = seaFenceR(A) + 24;
+    // (an open archipelago sea has no fence: the ring is the water round
+    // the island in force, out to where its far forms take over)
+    const far = A.sharedSea ? A.radius + 1600 : seaFenceR(A) + 24;
     const STEP = 6;
     let inR = -1, outR = -1;
     for (let rr = A.radius * 0.85; rr <= far; rr += STEP) {

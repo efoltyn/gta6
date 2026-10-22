@@ -737,6 +737,17 @@
   /* ======================================================================
      GEOMETRY ACCUMULATOR (non-indexed, flat normals, winding self-checked)
      ====================================================================== */
+  // a big JS array into a Float32Array a slice a step (a streamed island's
+  // largest single allocations, world/archipelago.js)
+  function* f32Steps(arr) {
+    const out = new Float32Array(arr.length), CH = 60000;
+    for (let i = 0; i < arr.length; i += CH) {
+      const e = Math.min(arr.length, i + CH);
+      for (let j = i; j < e; j++) out[j] = arr[j];
+      yield 0;
+    }
+    return out;
+  }
   function Acc() { this.p = []; this.n = []; this.uv = []; this.c = []; }
   // V = [x, y, z, u, v, r, g, b]; N = intended outward normal
   Acc.prototype.tri = function (A, B, C, nx, ny, nz) {
@@ -776,6 +787,7 @@
     return r.value;
   }
   function* steps(o) {
+    let __dn = 0;      // the seam counter (a yield every few loop turns)
     const THREE = o.THREE, P = o.plan, ground = o.ground;
     // o.skip(x, z): true where something else draws the street (a bridge
     // deck carries its own asphalt and walks, so a failed span takes them
@@ -819,6 +831,7 @@
       return V(x, base(x, z) + LIFT, z, (off + HW) / 7, (t + vOff) / TEX_V, c[0], c[1], c[2]);
     }
     for (const p of P.pieces) {
+      if ((++__dn & 3) === 0) yield 0;
       const vOff = Math.floor(wh(p.fixed, p.a, 0x7011) * 8) * 3.5;
       const ta = p.jA ? p.a : p.a + GUT, tb = p.jB ? p.b : p.b - GUT;
       const n = Math.max(1, Math.ceil((tb - ta) / 2));
@@ -846,6 +859,7 @@
     /* ---------------- JUNCTIONS ---------------- */
     yield 0;
     for (const jn of P.junctions) {
+      if ((++__dn & 3) === 0) yield 0;
       const X = jn.x, Zc = jn.z;
       const x0 = X - HW + (jn.W ? 0 : GUT), x1 = X + HW - (jn.E ? 0 : GUT);
       const z0 = Zc - HW + (jn.S ? 0 : GUT), z1 = Zc + HW - (jn.N ? 0 : GUT);
@@ -899,6 +913,7 @@
       return pts;   // from (HW, HW+FIL) to (HW+FIL, HW) in local |u|,|w|
     }
     for (const zn of Z.zones) {
+      if ((++__dn & 3) === 0) yield 0;
       if (!zn.fillet) continue;
       const f = zn.fillet, pts = arcPts(f);
       const cxp = f.jx + f.sx * HW, czp = f.jz + f.sz * HW;
@@ -1049,7 +1064,7 @@
         face(A[0], A[1], base(A[0], A[1]) + CURB, B[0], B[1], base(B[0], B[1]) + CURB, nx, nz, kind, k * 0.3);
       }
     }
-    for (const zn of Z.zones) { if (zn.fillet) buildFilletZone(zn); else buildRectZone(zn); }
+    for (const zn of Z.zones) { if (zn.fillet) buildFilletZone(zn); else buildRectZone(zn); yield 0; }
 
     /* ---------------- PAINT + DECALS (one mesh) ---------------- */
     yield 0;
@@ -1090,6 +1105,7 @@
       return false;
     };
     for (const p of P.pieces) {
+      if ((++__dn & 3) === 0) yield 0;
       const len = p.b - p.a;
       // centre line: double yellow approaching each junction, broken elsewhere
       const dbl = [];
@@ -1274,6 +1290,7 @@
     const RECT = function (w, h) { return [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]; };
     let nSigns = 0;
     for (const f of furn) {
+      if ((++__dn & 3) === 0) yield 0;
       const y0 = surfY(f.x, f.z);
       if (f.kind === "barricade") {
         const rx = f.nz, rz = -f.nx;
@@ -1305,6 +1322,7 @@
     const POLE_H = 7.6, ARM = 2.0;
     const colliders = o.colliders;
     for (const L of lights) {
+      if ((++__dn & 3) === 0) yield 0;
       const p = L.p, y0 = surfY(L.x, L.z);
       const dx = -L.side * p.Cx, dz = -L.side * p.Cz;          // toward the road
       obox(furA, L.x, y0 + 0.12, L.z, dx, dz, 0.2, 0.2, 0.14, 5, CONC);   // footing
@@ -1374,9 +1392,15 @@
     poolMat.color.setRGB(1.0, 0.72, 0.42); poolMat.name = "survival-streetlight-pool";
 
     const meshes = {};
-    function add(name, acc, mat, setup) {
-      const g = acc.geo(THREE);
-      if (!g) return null;
+    function* add(name, acc, mat, setup) {
+      if (!acc.p.length) return null;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(yield* f32Steps(acc.p), 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(yield* f32Steps(acc.n), 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(yield* f32Steps(acc.uv), 2));
+      g.setAttribute("color", new THREE.BufferAttribute(yield* f32Steps(acc.c), 3));
+      g.computeBoundingSphere(); g.computeBoundingBox();
+      yield 0;
       const m = new THREE.Mesh(g, mat);
       m.name = name;
       m.userData.dynamic = true;             // never batch-merged (own maps / live materials)
@@ -1386,13 +1410,13 @@
       meshes[name] = m;
       return m;
     }
-    add("survival-roads", roadA, roadMat, function (m) { m.receiveShadow = true; });
-    add("survival-junctions", juncA, juncMat, function (m) { m.receiveShadow = true; });
-    add("survival-sidewalks", walkA, walkMat, function (m) { m.receiveShadow = true; });
-    add("survival-road-paint", decA, decMat, function (m) { m.renderOrder = 1; m.userData.roadPaint = true; m.receiveShadow = true; });
-    add("survival-street-furniture", furA, furMat, function (m) { m.castShadow = true; m.receiveShadow = true; });
-    const lensMesh = add("survival-streetlight-lens", lensA, lensMat, function (m) { m.userData.roadPaint = true; m.userData.noCoat = true; });
-    const poolMesh = add("survival-streetlight-pools", poolA, poolMat, function (m) { m.renderOrder = 2; m.visible = false; m.userData.roadPaint = true; });
+    yield* add("survival-roads", roadA, roadMat, function (m) { m.receiveShadow = true; });
+    yield* add("survival-junctions", juncA, juncMat, function (m) { m.receiveShadow = true; });
+    yield* add("survival-sidewalks", walkA, walkMat, function (m) { m.receiveShadow = true; });
+    yield* add("survival-road-paint", decA, decMat, function (m) { m.renderOrder = 1; m.userData.roadPaint = true; m.receiveShadow = true; });
+    yield* add("survival-street-furniture", furA, furMat, function (m) { m.castShadow = true; m.receiveShadow = true; });
+    const lensMesh = yield* add("survival-streetlight-lens", lensA, lensMat, function (m) { m.userData.roadPaint = true; m.userData.noCoat = true; });
+    const poolMesh = yield* add("survival-streetlight-pools", poolA, poolMat, function (m) { m.renderOrder = 2; m.visible = false; m.userData.roadPaint = true; });
 
     // night: lenses glow, pools fade in. One colour + one opacity per frame.
     let lastK = -1;

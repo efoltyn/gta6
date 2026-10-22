@@ -178,7 +178,17 @@
   /* ======================================================================
      make()
      ====================================================================== */
+  /* makeSteps(cfg) is make as a generator: a streamed island
+     (world/archipelago.js) lays its town out a few loop turns a step.
+     make(cfg) runs it to the end, as it always ran. */
   function make(cfg) {
+    const it = makeSteps(cfg);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  }
+  function* makeSteps(cfg) {
+    let __dn = 0;      // the seam counter (a yield every few loop turns)
     cfg = cfg || {};
     SEEDX = (cfg.seed | 0) ? Math.imul(cfg.seed | 0, 0x9e3779b1) | 0 : 0;
     const ST = STYLES[cfg.style] || STYLES.harbour;
@@ -256,7 +266,13 @@
        (madeAt), so you walk, drive, land and take off on the one height
        field. Off by default: the disaster island has none. */
     const AIR = cfg.airstrip ? (function () {
-      const len = Math.min(330, 1.3 * R);
+      /* LONG ENOUGH TO LEAVE. The jet (city/playeraircraft.js WING_V2.jet:
+         13 m/s2 at full throttle from the 0.35 idle the parked craft is
+         handed, Vr 55 m/s) reaches rotate speed 122 m down the runway and
+         is 15 m up by 182 m (city/aircraftphysics.js planeStep, integrated).
+         400 m from a stand 22 m in leaves ~370 m: twice what it needs, for a
+         pilot who does not pull back the instant the nose can lift. */
+      const len = 400;
       const a = { x0: cx + R + 2, x1: cx + R + 42, z0: cz - len / 2, z1: cz + len / 2, deck: 0.45, width: 30 };
       a.x = (a.x0 + a.x1) / 2; a.z = cz; a.len = len;
       // where a plane waits: the north threshold, nose down the runway (+z)
@@ -324,11 +340,13 @@
     }
     const streets = { ave: [], cross: [] };
     for (const l of L.ave) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const at = W(l.at), runs = [];
       for (const r of l.runs) for (const c of clipRun(true, at, Z(r[0]), Z(r[1]))) runs.push(c);
       if (runs.length) streets.ave.push({ at: at, runs: runs, name: l.name });
     }
     for (const l of L.cross) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const at = Z(l.at), runs = [];
       for (const r of l.runs) for (const c of clipRun(false, at, W(r[0]), W(r[1]))) runs.push(c);
       if (runs.length) streets.cross.push({ at: at, runs: runs, name: l.name });
@@ -354,6 +372,7 @@
     /* ---- BRIDGES: wherever a street corridor crosses the ghaut -------- */
     const bridges = [];
     if (roads) for (const p of roads.pieces) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       let t0 = null, t1 = null;
       for (let t = p.a; t <= p.b; t += 1) {
         let cut = 0;
@@ -470,6 +489,7 @@
     // every frontage of every street piece, both sides, in priority order
     const fronts = [];
     if (roads) for (const p of roads.pieces) for (const side of [-1, 1]) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       // the lot line starts clear of the junction's corner returns
       const t0 = p.a + (p.jA ? (WALK - HW) + 0.2 : 2.2), t1 = p.b - (p.jB ? (WALK - HW) + 0.2 : 2.2);
       if (t1 - t0 < 10) continue;
@@ -642,6 +662,7 @@
     const MAX_TOWERS = cfg.maxTowers != null ? cfg.maxTowers : (ST.maxTowers != null ? ST.maxTowers : 5);
     const TOWER_U = ST.towerU != null ? ST.towerU : 0.5;
     for (const f of fronts) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const dRule = REMAP[f.district] || f.district;
       const rule = RULE[dRule];
       if (!rule) continue;
@@ -760,6 +781,7 @@
       return false;
     }
     if (roads) for (const p of roads.pieces) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const mx = p.vertical ? p.fixed : (p.a + p.b) / 2, mz = p.vertical ? (p.a + p.b) / 2 : p.fixed;
       const dist = districtAt(mx, mz);
       if (dist !== "westside" && dist !== "northside" && dist !== "industrial" && dist !== "midtown") continue;
@@ -787,9 +809,11 @@
       }
     }
     for (const P of places.parking) for (const b of P.bays) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       if (wh(b.x, b.z, 0x60b) < 0.62) cars.push({ x: b.x, z: b.z, yaw: b.yaw, alongX: !b.alongX, where: "park", lot: P.name });
     }
     for (const l of lots) if (l.driveway && l.driveway.car) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const c = l.driveway.car;
       cars.push({ x: c.x, z: c.z, yaw: c.yaw, alongX: c.alongX, where: "drive", lot: l.id });
     }
@@ -803,6 +827,7 @@
     const MARINA = ["dinghy", "boat", "console", "diveboat", "boat", "cruiser", "console", "dinghy"];
     let mi = 0;
     for (const p of PIERS) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       if (p.kind === "jetty") {
         for (const side of [-1, 1]) {
           let z = p.z0 + 2;
@@ -832,6 +857,7 @@
     ];
     const fields = [];
     for (const fz of [[66, 104, -150, -100], [-10, 28, -112, -72]]) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const r = { x0: W(fz[0]), x1: W(fz[1]), z0: Z(fz[2]), z1: Z(fz[3]) };
       if (inStreet(r, 1) || claimed(r, 2) || !groundOk(r, 3)) continue;
       fields.push(r); claims.push(r);
@@ -856,6 +882,7 @@
     function addTree(x, z, kind) { if (treeOk(x, z, 0.8)) trees.push({ x: x, z: z, kind: kind }); }
     // the ghaut park: both banks, every ~11 m
     for (let i = 0; i + 1 < GH.pts.length; i++) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const a = GH.pts[i], b = GH.pts[i + 1], len = Math.hypot(b.x - a.x, b.z - a.z);
       const nx = -(b.z - a.z) / len, nz = (b.x - a.x) / len;
       for (let s = 4; s < len; s += 11) for (const side of [-1, 1]) {
@@ -865,6 +892,7 @@
     }
     // street trees between the kerb parking on residential verges (behind the walk)
     if (roads) for (const p of roads.pieces) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const mx = p.vertical ? p.fixed : (p.a + p.b) / 2, mz = p.vertical ? (p.a + p.b) / 2 : p.fixed;
       const dist = districtAt(mx, mz);
       const palms = dist === "waterfront" || dist === "core";
@@ -878,6 +906,7 @@
     }
     // the coast: palms on the grass edge where the beaches are open
     for (let a = 0; a < Math.PI * 2; a += 0.045) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const open = beaches.some(function (b) { return a >= b.a0 && a <= b.a1; });
       if (!open && wh(a * 100, 3, 0x804) > 0.25) continue;
       const rr = R - 5 - wh(a * 100, 7, 0x805) * 9;
@@ -885,6 +914,7 @@
     }
     // the volcano's lower skirt and the hills' feet: bush and broadleaf
     for (const hl of hills) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const n = hl.volcano ? 46 : 14;
       for (let i = 0; i < n; i++) {
         const a = wh(hl.x, i, 0x806) * Math.PI * 2, rr = hl.r * (hl.volcano ? 0.78 + 0.32 * wh(i, hl.z, 0x807) : 0.9 + 0.4 * wh(i, hl.z, 0x807));
@@ -893,6 +923,7 @@
     }
     // the countryside between the farm fields and the hills
     for (let i = 0; i < 60; i++) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const x = W(-200 + wh(i, 1, 0x808) * 400), z = Z(-220 + wh(i, 2, 0x809) * 230);
       if (districtAt(x, z) !== "rural") continue;
       addTree(x, z, "broad");
@@ -922,6 +953,7 @@
       return P;
     }
     for (const l of lots) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const st = l.street;
       // the middle of the lot's street edge
       const fx = st.vertical ? st.at + st.side * WALK : (l.lot.x0 + l.lot.x1) / 2;
@@ -936,6 +968,7 @@
     const PCELL = 16;
     const padGrid = new Map();
     for (const P of pads) {
+      if ((++__dn & 3) === 0) { const __sx = SEEDX; yield 0; SEEDX = __sx; }
       const i0 = Math.floor(P.lot.x0 / PCELL), i1 = Math.floor(P.lot.x1 / PCELL), k0 = Math.floor(P.lot.z0 / PCELL), k1 = Math.floor(P.lot.z1 / PCELL);
       for (let i = i0; i <= i1; i++) for (let k = k0; k <= k1; k++) {
         const key = i * 100003 + k;
@@ -1040,5 +1073,5 @@
     return out;
   }
 
-  CBZ.islandPlan = { make: make, check: check, LAYOUT: L, STYLE: STYLE, STYLES: STYLES };
+  CBZ.islandPlan = { make: make, makeSteps: makeSteps, check: check, LAYOUT: L, STYLE: STYLE, STYLES: STYLES };
 })();

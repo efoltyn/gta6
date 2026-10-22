@@ -980,12 +980,12 @@ document.body.appendChild(b);}}catch(e){}})();
      world/island_building.js is each building's stairs, landings, slabs and
      roof as data (node-checkable by tools/island-stairs-check.mjs); the
      builder lays exactly what it says, so it loads first. -->
-<script src="src/world/island_roads.js?v=isles1022"></script>
-<script src="src/world/island_plan.js?v=isles1022"></script>
+<script src="src/world/island_roads.js?v=isles1023"></script>
+<script src="src/world/island_plan.js?v=isles1023"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=mlpanelisles1"></script>
-<script src="src/world/island_dressing.js?v=isles1022"></script>
+<script src="src/world/disaster_arena.js?v=isles1023"></script>
+<script src="src/world/island_dressing.js?v=isles1023"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
 <script src="src/entities/survivorbot.js?v=misles1bodymo"></script>
 <script src="src/modes/survival.js?v=isles1022"></script>
@@ -1123,7 +1123,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the-hole rects, the facade scan + cut, the no-shared-plane pass and the
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
-<script src="src/city/facade_openings.js?v=mrg10200048"></script>
+<script src="src/city/facade_openings.js?v=isles1023"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -2268,7 +2268,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (publishes the bathymetry pair); it retries on the update bus if either is
      still missing, so a future reorder degrades to a late install rather than a
      silent no-op. Revert with ?cfg_SURV_SHARED_WATER_FX=0. -->
-<script src="src/world/water_survival.js?v=sweep0929"></script>
+<script src="src/world/water_survival.js?v=isles1023"></script>
 
 <!-- WORLD DRESSING (5 layers) — the "lived-in" pass: street furniture, power
      poles + catenary-sagging wires, road wear/paint/puddles, and rooftop and

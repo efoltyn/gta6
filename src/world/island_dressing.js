@@ -95,6 +95,17 @@
      world-metre UVs projected per triangle on its dominant axis (so a map
      reads at real scale on every face) and a ground-contact darkening.
      ====================================================================== */
+  // a big JS array into a Float32Array a slice a step (a streamed island's
+  // largest single allocations, world/archipelago.js)
+  function* f32Steps(arr) {
+    const out = new Float32Array(arr.length), CH = 60000;
+    for (let i = 0; i < arr.length; i += CH) {
+      const e = Math.min(arr.length, i + CH);
+      for (let j = i; j < e; j++) out[j] = arr[j];
+      yield 0;
+    }
+    return out;
+  }
   function Acc(name, tile) { this.name = name; this.tile = tile; this.p = []; this.n = []; this.c = []; this.uv = []; }
   Acc.prototype.count = function () { return this.p.length / 3; };
 
@@ -254,6 +265,7 @@
     return r.value;
   }
   function* steps(ctx) {
+    let __dn = 0;      // the seam counter (a yield every few loop turns)
     THREE = G.THREE;
     if (!THREE || !ctx || !ctx.root) return null;
     initTemps();
@@ -640,7 +652,7 @@
        1. THE SHOWROOM'S CAR LOT (first: it claims the showroom's own ground)
        ================================================================== */
     yield 0;
-    (function carLot() {
+    yield* (function* carLot() {
       const S = ctx.showroom;
       if (!S) return;
       const sp = placedOf(S) || S;
@@ -648,14 +660,19 @@
       const tries = [];
       // the deepest lot that fits on each side (a single display row needs 5.8 m)
       for (let ld = 12; ld >= 5.8 - 1e-6; ld -= 0.5) for (const lw of [18, 14, 11, 8.5]) for (const sl of [0, -3, 3, -6, 6]) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         tries.push({ x: S.x + sl, z: S.z - D / 2 - 1.2 - ld / 2, w: lw, d: ld, rowAxis: "x", face: -1 });      // in front of the bay
         tries.push({ x: S.x - W / 2 - 1.2 - ld / 2, z: S.z + sl, w: ld, d: lw, rowAxis: "z", face: -1 });
         tries.push({ x: S.x + W / 2 + 1.2 + ld / 2, z: S.z + sl, w: ld, d: lw, rowAxis: "z", face: 1 });
       }
       let L = null;
       for (const t of tries) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         let ok = true, lo = 1e9, hi = -1e9;
         for (let i = -t.w / 2; i <= t.w / 2 + 1e-6 && ok; i += 1.5) for (let j = -t.d / 2; j <= t.d / 2 + 1e-6; j += 1.5) {
+          yield 0;
           const px = t.x + i, pz = t.z + j;
           if (inStreet(px, pz, 0.05) || isWalk(px, pz) || inPlaced(px, pz, 0.6, sp) || rockNear(px, pz, 0.8)) { ok = false; break; }
           const g = gh(px, pz); if (g < lo) lo = g; if (g > hi) hi = g;
@@ -670,9 +687,12 @@
       const isl = trees.filter(function (t) { return Math.abs(t.x - L.x) < L.w / 2 + 0.3 && Math.abs(t.z - L.z) < L.d / 2 + 0.3; });
       const inIsl = function (px, pz, r) { for (const t of isl) if (Math.abs(t.x - px) < 1.0 + r && Math.abs(t.z - pz) < 1.0 + r) return true; return false; };
       for (const t of isl) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const gy = gh(t.x, t.z);
         box(A.soil, t.x, gy + 0.04, t.z, 1.9, 0.1, 1.9, 0, COL.mulch, {});
         for (const s of [-1, 1]) {
+          yield 0;
           box(A.mason, t.x + s * 1.0, gy + 0.08, t.z, 0.15, 0.2, 2.15, 0, COL.concrete, {});
           box(A.mason, t.x, gy + 0.08, t.z + s * 1.0, 1.85, 0.2, 0.15, 0, COL.concrete, {});
         }
@@ -680,6 +700,8 @@
       // asphalt in 2 m cells following the ground, a concrete kerb round it
       const nX = Math.max(1, Math.round(L.w / 2)), nZ = Math.max(1, Math.round(L.d / 2));
       for (let i = 0; i < nX; i++) for (let j = 0; j < nZ; j++) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const x0 = L.x - L.w / 2 + L.w * i / nX, x1 = L.x - L.w / 2 + L.w * (i + 1) / nX;
         const z0 = L.z - L.d / 2 + L.d * j / nZ, z1 = L.z - L.d / 2 + L.d * (j + 1) / nZ;
         if (inIsl((x0 + x1) / 2, (z0 + z1) / 2, 0)) continue;
@@ -687,6 +709,8 @@
       }
       const k = 0.15;
       for (const s of [-1, 1]) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         beam(A.mason, L.x - L.w / 2 - k / 2, gh(L.x - L.w / 2, L.z + s * (L.d / 2 + k / 2)) + 0.03, L.z + s * (L.d / 2 + k / 2), L.x + L.w / 2 + k / 2, gh(L.x + L.w / 2, L.z + s * (L.d / 2 + k / 2)) + 0.03, L.z + s * (L.d / 2 + k / 2), 0.2, k, COL.concrete, {});
         beam(A.mason, L.x + s * (L.w / 2 + k / 2), gh(L.x + s * L.w / 2, L.z - L.d / 2) + 0.03, L.z - L.d / 2, L.x + s * (L.w / 2 + k / 2), gh(L.x + s * L.w / 2, L.z + L.d / 2) + 0.03, L.z + L.d / 2, 0.2, k, COL.concrete, {});
       }
@@ -701,6 +725,8 @@
       const lineY = function (px, pz) { return gh(px, pz) + top + 0.008; };
       const bays = [];
       for (let i = 0; i <= nB; i++) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const a = a0 + i * 2.6;
         const px0 = alongX ? L.x + a : base, pz0 = alongX ? base : L.z + a;
         const px1 = alongX ? px0 : base - rowSide * deep, pz1 = alongX ? base - rowSide * deep : pz0;
@@ -708,7 +734,7 @@
         quad(A.asph, new V3(px0 - hwx, lineY(px0, pz0), pz0 - hwz), new V3(px1 - hwx, lineY(px1, pz1), pz1 - hwz), new V3(px1 + hwx, lineY(px1, pz1), pz1 + hwz), new V3(px0 + hwx, lineY(px0, pz0), pz0 + hwz), lineC, { faceUp: true });
         if (i < nB) bays.push(a + 1.3);
       }
-      bays.forEach(function (a, i) {
+      { const __L = bays; for (let __i = 0; __i < __L.length; __i++) { (function (a, i) {
         const cxb = alongX ? L.x + a : base - rowSide * 0.55, czb = alongX ? base - rowSide * 0.55 : L.z + a;
         const g = gh(cxb, czb) + top;
         box(A.mason, cxb, g + 0.06, czb, alongX ? 1.7 : 0.14, 0.12, alongX ? 0.14 : 1.7, 0, COL.concrete, {});
@@ -717,7 +743,7 @@
           const pal = [0xc9ccd1, 0x1f2328, 0x7a1d1d, 0x23395b, 0xe6e6e3, 0x55595e];
           ctx.makeCar(px, pz, alongX, pal[(h01(px, pz, 0xc04) * pal.length) | 0]);
         }
-      });
+      })(__L[__i], __i); yield 0; } }
       out.lot = { x: L.x, z: L.z, w: L.w, d: L.d, bays: bays.length };
       claims.push({ x: L.x, z: L.z, w: L.w + 0.4, d: L.d + 0.4 });
     })();
@@ -728,25 +754,29 @@
        lines, a wheel stop in every bay. The plan parks the cars in them.
        ================================================================== */
     yield 0;
-    if (PL) PL.parking.forEach(function (P) {
+    if (PL) { const __L = PL.parking; for (let __i = 0; __i < __L.length; __i++) { yield* (function* (P) {
       const r = P.rect, top = 0.05;
       const Y = function (px, pz) { return gh(px, pz) + top; };
       const nX = Math.max(1, Math.round((r.x1 - r.x0) / 2)), nZ = Math.max(1, Math.round((r.z1 - r.z0) / 2));
       for (let i = 0; i < nX; i++) for (let j = 0; j < nZ; j++) {
+        yield 0;
         const x0 = r.x0 + (r.x1 - r.x0) * i / nX, x1 = r.x0 + (r.x1 - r.x0) * (i + 1) / nX;
         const z0 = r.z0 + (r.z1 - r.z0) * j / nZ, z1 = r.z0 + (r.z1 - r.z0) * (j + 1) / nZ;
         quad(A.asph, new V3(x0, Y(x0, z0), z0), new V3(x0, Y(x0, z1), z1), new V3(x1, Y(x1, z1), z1), new V3(x1, Y(x1, z0), z0), vary(COL.asphalt, h01(x0, z0, 0xc11), 0.08), { faceUp: true });
       }
       const k = 0.15;
       for (const sg of [-1, 1]) {
+        yield 0;
         beam(A.mason, r.x0 - k / 2, gh(r.x0, sg < 0 ? r.z0 : r.z1) + 0.04, sg < 0 ? r.z0 - k / 2 : r.z1 + k / 2, r.x1 + k / 2, gh(r.x1, sg < 0 ? r.z0 : r.z1) + 0.04, sg < 0 ? r.z0 - k / 2 : r.z1 + k / 2, 0.2, k, COL.concrete, {});
         beam(A.mason, sg < 0 ? r.x0 - k / 2 : r.x1 + k / 2, gh(sg < 0 ? r.x0 : r.x1, r.z0) + 0.04, r.z0, sg < 0 ? r.x0 - k / 2 : r.x1 + k / 2, gh(sg < 0 ? r.x0 : r.x1, r.z1) + 0.04, r.z1, 0.2, k, COL.concrete, {});
       }
       // bay lines between bays (and at each row's ends), wheel stops at the head
       for (const b of P.bays) {
+        yield 0;
         const across = b.alongX;                 // the row runs along x: lines run along z
         const nose = { x: -Math.sin(b.yaw), z: -Math.cos(b.yaw) };
         for (const sd of [-1, 1]) {
+          yield 0;
           const lx = across ? b.x + sd * 1.3 : b.x, lz = across ? b.z : b.z + sd * 1.3;
           const hx = across ? 0.05 : 2.6, hz = across ? 2.6 : 0.05;
           const y = Y(lx, lz) + 0.008;
@@ -757,13 +787,13 @@
       }
       out.carParks.push({ x: P.x, z: P.z, w: P.w, d: P.d, name: P.name, bays: P.bays.length });
       claims.push({ x: P.x, z: P.z, w: P.w + 0.4, d: P.d + 0.4 });
-    });
+    })(__L[__i]); yield 0; } }
 
     /* ==================================================================
        2. THE TOWN SQUARE
        ================================================================== */
     yield 0;
-    (function square() {
+    yield* (function* square() {
       const PZ = PL && PL.plaza;
       if (!PZ) return;
       const best = { x: PZ.x, z: PZ.z, H: Math.min(PZ.w, PZ.d) / 2, HX: PZ.w / 2, HZ: PZ.d / 2, gy: PZ.gy != null ? PZ.gy : gh(PZ.x, PZ.z) };
@@ -779,6 +809,8 @@
       // pavers: 1.0 m running bond, hashed tones; a 0.6 m granite sett border
       const P = 1.0, B = 0.6;
       for (let i = -HX + B; i < HX - B - 1e-6; i += P) for (let j = -HZ + B; j < HZ - B - 1e-6; j += P / 2) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const shift = (Math.round((j + HZ) / (P / 2)) & 1) ? P / 2 : 0;
         let a0 = i + shift, a1 = Math.min(HX - B, a0 + P);
         if (a0 >= HX - B) continue;
@@ -791,17 +823,24 @@
       }
       // the granite sett border: along x on the two long edges, along z on the ends
       for (let k = -HX; k < HX - 1e-6; k += 0.3) for (const s of [-1, 1]) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const c1 = vary(COL.granite, h01(x + k, z + s, 0xa22), 0.14);
         for (let r = 0; r < 2; r++) box(A.mason, x + k + 0.15, YT - 0.3, z + s * (HZ - 0.15 - r * 0.3), 0.29, 0.6, 0.29, 0, c1, {});
       }
       for (let k = -HZ + 0.6; k < HZ - 0.6 - 1e-6; k += 0.3) for (const s of [-1, 1]) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const c2 = vary(COL.granite, h01(x + s, z + k, 0xa23), 0.14);
         for (let r = 0; r < 2; r++) box(A.mason, x + s * (HX - 0.15 - r * 0.3), YT - 0.3, z + k + 0.15, 0.29, 0.6, 0.29, 0, c2, {});
       }
       for (const t of pits) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const gy = gh(t.x, t.z), mt = YT - 0.04;
         box(A.soil, t.x, (mt + gy - 0.1) / 2, t.z, 1.7, mt - gy + 0.1, 1.7, 0, COL.mulch, {});
         for (const s of [-1, 1]) {
+          yield 0;
           box(A.paint, t.x + s * 0.88, YT - 0.03, t.z, 0.04, 0.08, 1.8, 0, COL.steelDark, {});
           box(A.paint, t.x, YT - 0.03, t.z + s * 0.88, 1.8, 0.08, 0.04, 0, COL.steelDark, {});
         }
@@ -809,6 +848,8 @@
       // the round raised planter in the middle
       const cy = Y(x, z), RO = 2.4, RI = 2.1, SEG = 20;
       for (let k = 0; k < SEG; k++) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const a = (k + 0.5) / SEG * Math.PI * 2, w = 2 * Math.PI * (RO + RI) / 2 / SEG + 0.04;
         const rm = (RO + RI) / 2;
         box(A.mason, x + Math.cos(a) * rm, cy + 0.22, z + Math.sin(a) * rm, w, 0.46, RO - RI, -a + Math.PI / 2, COL.concrete, { ao: cy });
@@ -819,6 +860,8 @@
       addCol(x - RO * 0.8, x + RO * 0.8, z - RO * 0.8, z + RO * 0.8, cy - 0.1, cy + 0.5, "planter");
       // benches facing it, a bin beside two of them
       for (let k = 0; k < 4; k++) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const a = k * Math.PI / 2 + Math.PI / 4;
         const bx = x + Math.cos(a) * 4.4, bz = z + Math.sin(a) * 4.4;
         if (inPit(bx, bz) || treeNear(bx, bz, 1.4)) continue;
@@ -833,19 +876,26 @@
       }
       // lanterns on the axes, planters in the corners
       for (let k = 0; k < 4; k++) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const a = k * Math.PI / 2;
         const lx = x + Math.cos(a) * (HX - 2.2), lz = z + Math.sin(a) * (HZ - 2.2);
         if (!treeNear(lx, lz, 1.2)) lantern(lx, lz, Y(lx, lz));
       }
       for (const s of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         const px = x + s[0] * (HX - 1.9), pz = z + s[1] * (HZ - 1.9);
         if (!treeNear(px, pz, 1.3)) planterBox(px, pz, 1.3, 0.55, Y(px, pz));
       }
       // bollards along every edge that meets a sidewalk
       for (const s of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         if (!isWalk(x + s[0] * (HX + 1.2), z + s[1] * (HZ + 1.2))) continue;
         const HK = s[0] ? HZ : HX;
         for (let k = -HK + 1.2; k <= HK - 1.2 + 1e-6; k += 1.8) {
+          yield 0;
           const bx = s[0] ? x + s[0] * (HX - 0.35) : x + k, bz = s[1] ? z + s[1] * (HZ - 0.35) : z + k;
           const gy = Y(bx, bz);
           cylY(A.paint, bx, gy - 0.05, bz, 0.1, 0.1, 0.95, 10, COL.steelDark, {});
@@ -884,7 +934,7 @@
       return null;
     }
     let nYards = 0;
-    houses.forEach(function (b) {
+    { const __L = houses; for (let __i = 0; __i < __L.length; __i++) { yield* (function* (b) {
       if (b.kind !== "house" && b.kind !== "villa") return;      // shops and civic buildings meet their street
       const lot = PL && b.planId != null ? PL.lots[b.planId] : null;
       if (!lot || !lot.lot) return;
@@ -920,6 +970,7 @@
       };
       let any = false;
       for (const k of ["x0", "x1", "z0", "z1"]) {
+        yield 0;
         const e = edges[k];
         // pull the run 0.3 m inside the lot line on a street side
         let x0 = e.x0, z0 = e.z0, x1 = e.x1, z1 = e.z1;
@@ -944,6 +995,7 @@
       const setback = Math.abs((alongX ? front.z0 : front.x0) - (alongX ? door[1] : door[0]));
       if (setback >= 1.6) {
         for (const sd of [-1, 1]) {
+          yield 0;
           const lx0 = sd * 1.0, lx1 = sd * (lw / 2 - 0.35);
           const w = Math.abs(lx1 - lx0);
           if (w < 0.8) continue;
@@ -952,6 +1004,7 @@
           const gy = gh(m[0], m[1]);
           const ex = alongX ? w : 0.85, ez = alongX ? 0.85 : w;
           box(A.soil, m[0], gy - 0.02, m[1], ex, 0.08, ez, 0, COL.mulch, {});
+          yield 0;
           shrubs(m[0], m[1], ex * 0.5, ez * 0.5, Math.max(1, Math.round(w / 0.9)), 0x3e1 + ((Math.abs(b.x * 13) | 0) % 911), undefined, true);
         }
       }
@@ -979,10 +1032,12 @@
           if (!treeNear(wx, wz, 1.6)) {
             cylY(A.paint, wx, gy - 0.2, wz, 0.03, 0.025, 2.1, 6, COL.galv, {});
             for (let k = 0; k < 4; k++) {
+              yield 0;
               const a = k * Math.PI / 2 + 0.3;
               rod(A.paint, wx, gy + 1.8, wz, wx + Math.cos(a) * 1.15, gy + 1.72, wz + Math.sin(a) * 1.15, 0.012, 4, COL.galv, {});
             }
             for (const rr of [0.5, 0.85]) for (let k = 0; k < 4; k++) {
+              yield 0;
               const a0 = k * Math.PI / 2 + 0.3, a1 = a0 + Math.PI / 2;
               rod(A.paint, wx + Math.cos(a0) * rr, gy + 1.76, wz + Math.sin(a0) * rr, wx + Math.cos(a1) * rr, gy + 1.76, wz + Math.sin(a1) * rr, 0.006, 3, COL.paintWhite, {});
             }
@@ -990,27 +1045,29 @@
           }
         }
       }
-    });
+    })(__L[__i]); yield 0; } }
 
     /* ==================================================================
        4. TOWER FORECOURTS: two planters flanking the door where they fit
        ================================================================== */
     yield 0;
-    towers.forEach(function (b) {
+    { const __L = towers; for (let __i = 0; __i < __L.length; __i++) { yield* (function* (b) {
       const dz = b.z - b.d / 2;
       for (const s of [-1, 1]) {
+        yield 0;
         const px = b.x + s * 2.3, pz = dz - 0.95;
         if (inStreet(px, pz, -0.1) || isWalk(px, pz) || inPlaced(px, pz, 0.6, placedOf(b))) continue;
         if (Math.abs(gh(px, pz) - b.gy) > 0.3 || treeNear(px, pz, 1.2) || blocked(px - 0.7, px + 0.7, pz - 0.7, pz + 0.7, b.gy)) continue;
+        yield 0;
         planterBox(px, pz, 1.1, 0.55);
       }
-    });
+    })(__L[__i]); yield 0; } }
 
     /* ==================================================================
        5. HYDRANTS: one per road piece, behind the kerb
        ================================================================== */
     yield 0;
-    (ctx.roadSegs || []).forEach(function (seg) {
+    { const __L = (ctx.roadSegs || []); for (let __i = 0; __i < __L.length; __i++) { yield* (function* (seg) {
       if (seg.len < 18) return;
       const side = h01(seg.x, seg.z, 0xe01) < 0.5 ? -1 : 1;
       const along = (h01(seg.x, seg.z, 0xe02) - 0.5) * seg.len * 0.5;
@@ -1019,8 +1076,9 @@
       if (!isWalk(x, z)) return;
       const gy = sh(x, z);
       if (blocked(x - 0.7, x + 0.7, z - 0.7, z + 0.7, gy)) return;
+      yield 0;
       hydrant(x, z, gy, h01(x, z, 0xe03) < 0.7);
-    });
+    })(__L[__i]); yield 0; } }
 
     /* ==================================================================
        6. THE WATERFRONT is the harbour (world/disaster_arena.js builds the
@@ -1033,7 +1091,7 @@
        7. THE FARM, out past the last street
        ================================================================== */
     yield 0;
-    (function farm() {
+    yield* (function* farm() {
       const fields = [];
       // the plan's fields (out past the town, between the hills)
       const planned = PL ? PL.fields.map(function (r) { return { x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2, w: r.x1 - r.x0, d: r.z1 - r.z0 }; }) : null;
@@ -1051,10 +1109,14 @@
         return v;
       };
       for (let f = 0; f < want.length; f++) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         let best = null;
         for (const rot of [0, 1]) {
+          yield 0;
           const W = rot ? want[f][1] : want[f][0], D = rot ? want[f][0] : want[f][1];
           for (let x = cx - R; x <= cx + R; x += 4) for (let z = cz - R; z <= cz + R; z += 4) {
+            yield 0;
             const d = dC(x, z);
             if (d < 58) continue;
             if (inPlaced(x, z, Math.max(W, D) / 2 + 2.5) && inPlaced(x, z, Math.min(W, D) / 2 + 2.5)) continue;
@@ -1065,6 +1127,7 @@
             if (overl) continue;
             let ok = true, lo = 1e9, hi = -1e9;
             for (let i = -W / 2 - 1; i <= W / 2 + 1 + 1e-6 && ok; i += 2) for (let j = -D / 2 - 1; j <= D / 2 + 1 + 1e-6; j += 2) {
+              yield 0;
               const g = farmGround(x + i, z + j);
               if (g !== g) { ok = false; break; }
               if (g < lo) lo = g; if (g > hi) hi = g;
@@ -1078,7 +1141,7 @@
         if (!best) break;
         fields.push(best);
       }
-      fields.forEach(function (F, fi) {
+      { const __L = fields; for (let __i = 0; __i < __L.length; __i++) { (function (F, fi) {
         const x0 = F.x - F.w / 2, x1 = F.x + F.w / 2, z0 = F.z - F.d / 2, z1 = F.z + F.d / 2;
         // the gate faces the town
         const toC = [cx - F.x, cz - F.z];
@@ -1162,7 +1225,7 @@
           out.bales.push(rec); out.flammable.push(rec);
         });
         out.fields.push({ x: F.x, z: F.z, w: F.w, d: F.d, crops: crops, barn: barn });
-      });
+      })(__L[__i], __i); yield 0; } }
 
       function makeBarn(bx, bz, w, d, gateRun) {
         const gy = Math.max(gh(bx - w / 2, bz - d / 2), gh(bx + w / 2, bz - d / 2), gh(bx - w / 2, bz + d / 2), gh(bx + w / 2, bz + d / 2));
@@ -1231,7 +1294,7 @@
        8. ROCKS (sites from the arena's own boulder stream)
        ================================================================== */
     yield 0;
-    (function rocks() {
+    yield* (function* rocks() {
       const ico = new THREE.IcosahedronGeometry(1, 2);
       const icoS = new THREE.IcosahedronGeometry(1, 1);
       function rock(x, y, z, sx, sy, sz, yaw, tilt, salt, small) {
@@ -1298,7 +1361,7 @@
           emitTri(A.rock, vv, nn, c, { ao: gyl, aoK: 0.45, aoH: Math.max(0.35, sy * 0.5) });
         }
       }
-      rockSites.forEach(function (s, i) {
+      { const __L = rockSites; for (let __i = 0; __i < __L.length; __i++) { (function (s, i) {
         const gy = gh(s.x, s.z);
         const salt = (i * 7919 + 17) & 0xffff;
         const sx = s.s * 0.5 * s.kx, sy = s.s * 0.5 * s.ky, sz = s.s * 0.5 * s.kz;
@@ -1315,7 +1378,7 @@
           const g2 = gh(px, pz);
           rock(px, g2 + sy * k2 * 0.25, pz, sx * k2, sy * k2 * 0.8, sz * k2, a, 0.2, salt + 101 * (k + 1), true);
         }
-      });
+      })(__L[__i], __i); yield 0; } }
     })();
 
     /* ==================================================================
@@ -1329,7 +1392,7 @@
        (systems/hurricane.js reads out.signs: {x, z, y, w, h, mesh, hex}).
        ================================================================== */
     yield 0;
-    (function signs() {
+    yield* (function* signs() {
       if (!PL || typeof document === "undefined") return;
       const SHOPS = ["BAKERY", "CHEMIST", "HARDWARE", "CAFE", "GROCER", "BARBER", "BOOKS", "TAILOR", "DINER", "DELI",
         "FLORIST", "OPTICIAN", "SURF SHOP", "DIVE SHOP", "BUTCHER", "ICE CREAM", "LAUNDRY", "NEWSAGENT"];
@@ -1337,6 +1400,8 @@
       const list = [];
       const used = new Set();
       for (const l of PL.lots) {
+        yield 0;
+        if ((++__dn & 3) === 0) yield 0;
         let text = null;
         if (l.name && l.kind !== "station") text = l.name.toUpperCase();
         else if (l.kind === "shop" && h01(l.x, l.z, 0x5c1) < 0.55) {
@@ -1354,7 +1419,7 @@
       cvs.width = COLS * SW; cvs.height = ROWS * SH2;
       const g2 = cvs.getContext("2d");
       if (!g2) return;
-      list.forEach(function (it, i) {
+      { const __L = list; for (let __i = 0; __i < __L.length; __i++) { (function (it, i) {
         const cxs = (i % COLS) * SW, cys = ((i / COLS) | 0) * SH2;
         const pal = BG[(h01(it.l.x, it.l.z, 0x5c3) * BG.length) | 0];
         it.hex = pal[0];
@@ -1370,14 +1435,14 @@
         it.u0 = (cxs + 2) / cvs.width; it.u1 = (cxs + SW - 2) / cvs.width;
         it.v1 = 1 - (cys + 2) / cvs.height; it.v0 = 1 - (cys + SH2 - 2) / cvs.height;
         it.chars = it.text.length;
-      });
+      })(__L[__i], __i); yield 0; } }
       const tex = new THREE.CanvasTexture(cvs);
       if (THREE.sRGBEncoding != null) tex.encoding = THREE.sRGBEncoding;
       tex.anisotropy = 4;
       const mat = new THREE.MeshLambertMaterial({ map: tex });
       mat.name = "island-signs";
       const RC2 = roadC();
-      list.forEach(function (it) {
+      { const __L = list; for (let __i = 0; __i < __L.length; __i++) { (function (it) {
         const l = it.l, st = l.street;
         if (!st) return;
         const yaw = l.yaw || 0;
@@ -1417,7 +1482,7 @@
         mesh.name = "island-sign";
         ctx.root.add(mesh);
         out.signs.push({ x: x, z: z, y: gy + H + h / 2, w: w, h: h, mesh: mesh, hex: it.hex, text: it.text, yaw: yaw, facing: { x: fdx, z: fdz } });
-      });
+      })(__L[__i]); yield 0; } }
       out.draws += out.signs.length;
     })();
 
@@ -1452,15 +1517,16 @@
       asph: lam("asphalt"), soil: lam("dirt"), rock: std("rock"), lens: lensMat,
     };
     const sharedRef = {};
-    Object.keys(A).forEach(function (k) {
+    for (const k of Object.keys(A)) {
       const a = A[k];
-      if (!a.p.length) return;
+      if (!a.p.length) continue;
       const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.Float32BufferAttribute(a.p, 3));
-      g.setAttribute("normal", new THREE.Float32BufferAttribute(a.n, 3));
-      g.setAttribute("color", new THREE.Float32BufferAttribute(a.c, 3));
-      g.setAttribute("uv", new THREE.Float32BufferAttribute(a.uv, 2));
+      g.setAttribute("position", new THREE.BufferAttribute(yield* f32Steps(a.p), 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(yield* f32Steps(a.n), 3));
+      g.setAttribute("color", new THREE.BufferAttribute(yield* f32Steps(a.c), 3));
+      g.setAttribute("uv", new THREE.BufferAttribute(yield* f32Steps(a.uv), 2));
       g.computeBoundingSphere();
+      yield 0;
       const mat = MATS[k];
       mat.name = "island-dressing-" + a.name;
       const m = new THREE.Mesh(g, mat);
@@ -1474,7 +1540,7 @@
       sharedRef[k] = m;
       out.draws++;
       out.stats[k] = a.count();
-    });
+    }
     // colliders point at the mesh they belong to (physics asks .ref.visible)
     for (const c of out.colliders) {
       const k = c.dressing === "rock" ? "rock" : c.dressing === "fence" ? null : c.dressing === "bale" ? "plant" : c.dressing === "barn" ? "wood" : "paint";
