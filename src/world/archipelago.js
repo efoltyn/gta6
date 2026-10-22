@@ -87,6 +87,7 @@
   const BUDGET_MAX = SMALL ? 8 : 12;
   const SWITCH_HYST = 250;         // m nearer another whole island must be to become THE island
   const ISLES_STAKE = 2500;        // $ in your pocket when you first land (see reset)
+  const FAR_REACH_MAX = 30000;     // m: the far plane never runs past this
 
   const ST = {
     built: false,
@@ -271,6 +272,58 @@
     }
     return out;
   }
+
+  /* ---- THE FAR HAZE: the next island stands in the air, never behind a wall
+     The near world wears the scene's fog (view.fogNear..fogFar, 420..5600 m),
+     which is what keeps the island you are on cheap; but the islands are
+     6.8 to 15 km apart, so under that fog every other island was solid fog
+     colour (and past the old far plane, not drawn at all). Owner: "putting
+     them far on the horizon". The far forms wear their own aerial
+     perspective instead: the scene's fog up to the point where it reaches
+     FAR_A of the way (so a far form and its near form dissolve into each
+     other in the same air), and from there a slow exponential toward the
+     same horizon colour with extinction length FAR_L, capped at FAR_MAX.
+     The next island is a silhouette in the haze by day and, the dark being
+     the fog colour, a cluster of its own lights by night (core/lodlights.js,
+     whose isles' air uses the same length). The same law in JS:
+     CBZ.archipelago.farHazeAt(d). Never applied when the fog is short (under
+     water: the water column owns the fog then). */
+  const FAR_A = 0.45, FAR_L = 25000, FAR_MAX = 0.85;
+  const FAR_U = { cbzFarHaze: { value: new THREE.Vector3(FAR_A, FAR_L, FAR_MAX) } };
+  function sstep(a, b, x) { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
+  function farHazeAt(d, near, far) {
+    const nf = sstep(near, far, d);
+    if (far < 2000) return nf;
+    const d1 = near + (far - near) * FAR_A, a = sstep(near, far, d1);
+    const ff = Math.min(FAR_MAX, 1 - (1 - a) * Math.exp(-(d - d1) / FAR_L));
+    return Math.max(0, Math.min(nf, ff));
+  }
+  function farHazeHook(sh) {
+    const OUT = "#include <fog_fragment>";
+    if (sh.fragmentShader.indexOf(OUT) < 0) return;
+    sh.uniforms.cbzFarHaze = FAR_U.cbzFarHaze;
+    // the scene fog's own output transform (core/renderer.js grades the fog
+    // colour through tone map + encode when it patches the chunk)
+    const chunk = String(THREE.ShaderChunk.fog_fragment || "");
+    const grade = chunk.indexOf("linearToOutputTexel") >= 0;
+    const mine = [
+      "#ifdef USE_FOG",
+      "#ifdef FOG_EXP2",
+      chunk,
+      "#else",
+      "  float cbzNf = smoothstep( fogNear, fogFar, fogDepth );",
+      "  float cbzD1 = mix( fogNear, fogFar, cbzFarHaze.x );",
+      "  float cbzA = smoothstep( fogNear, fogFar, cbzD1 );",
+      "  float cbzFf = min( cbzFarHaze.z, 1.0 - ( 1.0 - cbzA ) * exp( -( fogDepth - cbzD1 ) / cbzFarHaze.y ) );",
+      "  float cbzHf = fogFar < 2000.0 ? cbzNf : clamp( min( cbzNf, cbzFf ), 0.0, 1.0 );",
+      "  vec3 cbzHc = fogColor;",
+      grade ? "  #ifdef TONE_MAPPING\n    cbzHc = toneMapping( cbzHc );\n  #endif\n  cbzHc = linearToOutputTexel( vec4( cbzHc, 1.0 ) ).rgb;" : "",
+      "  gl_FragColor.rgb = mix( gl_FragColor.rgb, cbzHc, cbzHf );",
+      "#endif",
+      "#endif",
+    ].join("\n");
+    sh.fragmentShader = "uniform vec3 cbzFarHaze;\n" + sh.fragmentShader.replace(OUT, mine);
+  }
   function makeFar(I, geo) {
     if (I.far) {
       const old = I.far.geometry;
@@ -280,6 +333,8 @@
     }
     const m = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
     m.name = "archipelago-far-" + I.id;
+    m.onBeforeCompile = farHazeHook;
+    m.customProgramCacheKey = function () { return "archipelago-far-haze"; };
     // (no permanent polygon offset: it would lift the far form's drowned
     // beach through the sea; cover() pulls it forward only while the two
     // forms of one island overlap, during a crossfade)
@@ -549,7 +604,18 @@
       const air = !!(P && P._aircraft);
       // (the near plane buys depth precision at range: a waterline 2 km off
       // flickers on a 0.1 m plane; nothing in a seat or a cockpit is closer)
-      const wantFar = V.fogFar + 700, wantNear = air ? 0.75 : (P && P.driving ? 0.5 : 0.2);
+      // THE FAR PLANE REACHES THE LAST ISLAND. Depth precision is the near
+      // plane's (dz ~ d^2 / (near * 2^24), whatever the far plane), so the far
+      // plane can stand past every island at no cost to the waterline: the
+      // far forms are the only thing out there the fog has not finished.
+      let reach = V.fogFar + 700;
+      for (const I of ST.isles) {
+        if (!I.far || !I.far.visible) continue;
+        const r = Math.hypot(I.x - cam.position.x, I.z - cam.position.z) + I.R + 900;
+        if (r > reach) reach = r;
+      }
+      const wantFar = Math.min(FAR_REACH_MAX, Math.ceil(reach / 250) * 250);
+      const wantNear = air ? 0.75 : (P && P.driving ? 0.5 : 0.2);
       if (cam.far !== wantFar || cam.near !== wantNear) { cam.far = wantFar; cam.near = wantNear; cam.updateProjectionMatrix(); }
     }
     if (ST.floor && cam) { ST.floor.position.x = cam.position.x; ST.floor.position.z = cam.position.z; }
@@ -634,10 +700,80 @@
   }
   CBZ.onAlways(4.5, tick);
 
+  /* THE SEA FOLLOWS THE SKY. The shared sheet's body colour (uSeaColor /
+     uShallowColor) is an albedo the water shader never lights (it carries
+     itself, for a sunlit sea), so at 23:00 under a black sky the ocean was
+     noon turquoise. The isles grade it with the same clock survival.js
+     grades their light with (CBZ.survIslandDayF): day teal, a dimmed
+     slate-violet through dusk and dawn, near-black blue at night. What
+     lights a night sea is what really does: the moon's path (water_spec.js
+     uMoon, by the moon's phase), the sky it mirrors (already the night
+     fog / dome), and the shore's lamps (uSeaLamps, below). The sun's
+     glitter and sheen follow the sun's own share of the light, and the
+     foam (an unlit albedo too) dims with the dark instead of glowing. */
+  const SEA_DAY = new THREE.Color(0x155878), SEA_DAY_SH = new THREE.Color(0x3195a7);
+  const SEA_DUSK = new THREE.Color(0x1c2234), SEA_DUSK_SH = new THREE.Color(0x2a3646);
+  const SEA_NIGHT = new THREE.Color(0x010409), SEA_NIGHT_SH = new THREE.Color(0x02080e);
+  const LAMP_RGB = new THREE.Color(1.0, 0.72, 0.42);
+  const seaG = { lampT: 0, shore: null, shoreOf: null };
+  function seaGrade(sea) {
+    const u = sea && sea.material && sea.material.userData && sea.material.userData.waterUniforms;
+    if (!u || !u.uSeaColor) return;
+    const ang = Number.isFinite(CBZ.sunAngle) ? CBZ.sunAngle : 0.95, up = Math.sin(ang);
+    const dayF = CBZ.survIslandDayF ? CBZ.survIslandDayF(up) : 1;
+    const dusk = Math.max(0, 1 - Math.abs(up) * 3) * (1 - Math.abs(dayF - 0.5) * 1.2);
+    const illum = Number.isFinite(CBZ.moonIllum) ? Math.max(0, Math.min(1, CBZ.moonIllum)) : 0.8;
+    u.uSeaColor.value.copy(SEA_NIGHT).lerp(SEA_DAY, dayF).lerp(SEA_DUSK, Math.max(0, dusk) * 0.6);
+    if (u.uShallowColor) u.uShallowColor.value.copy(SEA_NIGHT_SH).lerp(SEA_DAY_SH, dayF).lerp(SEA_DUSK_SH, Math.max(0, dusk) * 0.6);
+    if (u.uSunColor) u.uSunColor.value.multiplyScalar(dayF);
+    if (u.uMoon) u.uMoon.value = (1 - dayF) * (0.15 + 0.85 * illum);
+    if (u.uFoamColor) u.uFoamColor.value.multiplyScalar(0.05 + 0.1 * illum + (0.85 - 0.1 * illum) * dayF);
+    seaLamps(u, sea, dayF);
+  }
+  // the lamps on the waterfront of the island in force, the nearest few
+  function shoreLamps(A, seaY) {
+    const out = [], L = (A.island && A.island.streetLights) || [];
+    const ga = A.groundHeightAt;
+    if (!ga) return out;
+    for (const l of L) {
+      let wet = false;
+      for (let k = 0; k < 8 && !wet; k++) {
+        const a = k / 8 * Math.PI * 2;
+        if (ga(l.x + Math.cos(a) * 28, l.z + Math.sin(a) * 28) < seaY - 0.3) wet = true;
+      }
+      if (wet) out.push({ x: l.x, y: ga(l.x, l.z) + 7.4, z: l.z });
+    }
+    return out;
+  }
+  const _near = [];
+  function seaLamps(u, sea, dayF) {
+    if (!u.uSeaLamps || !u.uSeaLampC) return;
+    const on = CBZ.islandNight && CBZ.islandNight.lampUniforms ? CBZ.islandNight.lampUniforms.uLampOn.value : 1 - dayF;
+    const A = ST.active && ST.active.arena, cam = CBZ.camera;
+    if (on < 0.02 || !A || !cam) { u.uSeaLampC.value.w = 0; return; }
+    if (seaG.shoreOf !== A) { seaG.shoreOf = A; seaG.shore = shoreLamps(A, sea.position.y); }
+    const now = performance.now();
+    if (now - seaG.lampT > 250) {
+      seaG.lampT = now;
+      const cx = cam.position.x, cz = cam.position.z;
+      _near.length = 0;
+      for (const l of seaG.shore) {
+        const d = Math.hypot(l.x - cx, l.z - cz);
+        if (d < 1400) _near.push({ l: l, d: d });
+      }
+      _near.sort(function (a, b) { return a.d - b.d; });
+      const n = Math.min(_near.length, u.uSeaLamps.value.length);
+      for (let i = 0; i < n; i++) { const l = _near[i].l; u.uSeaLamps.value[i].set(l.x, l.y, l.z, 1); }
+      seaG.n = n;
+    }
+    u.uSeaLampC.value.set(LAMP_RGB.r * on, LAMP_RGB.g * on, LAMP_RGB.b * on, seaG.n || 0);
+  }
+
   // the sea, for the island in force (where an island's own sheet would tick)
   CBZ.onUpdate(47.9, function () {
     if (!ST.built || g.mode !== MODE || !ST.sea) return;
     if (CBZ.islandDriveSea) CBZ.islandDriveSea(ST.sea, ST.active ? ST.active.arena : null);
+    seaGrade(ST.sea);
   });
   // the haze is the archipelago's, and the sun stands over YOU (the shadow
   // box follows the body from island to island), after survival.js's island
@@ -784,6 +920,7 @@
   CBZ.archipelagoExit = function () { teardown(true); };
   CBZ.archipelago = {
     groundAt: groundAt,
+    farHazeAt: function (d) { const V = ST.map ? ST.map.view : { fogNear: 420, fogFar: 5600 }; return farHazeAt(d, V.fogNear, V.fogFar); },
     isles: function () { return ST.isles; },
     state: function () {
       const P = CBZ.player;

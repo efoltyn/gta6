@@ -1321,6 +1321,7 @@
     yield 0;
     const POLE_H = 7.6, ARM = 2.0;
     const colliders = o.colliders;
+    const heads = [];             // the glow at each head (world/island_night.js)
     for (const L of lights) {
       if ((++__dn & 3) === 0) yield 0;
       const p = L.p, y0 = surfY(L.x, L.z);
@@ -1342,9 +1343,10 @@
       const ex = -dz, ez = dx, ly = hy - 0.075 - 0.004;
       const lv = function (a, s) { return V(hx + dx * a * 0.3 + ex * s * 0.13, ly, hz + dz * a * 0.3 + ez * s * 0.13, 0, 0, 1, 1, 1); };
       lensA.quad(lv(-1, -1), lv(1, -1), lv(1, 1), lv(-1, 1), 0, -1, 0);
+      heads.push({ x: hx, y: ly - 0.06, z: hz });
       // pool on the ground under the head: road part + sidewalk part
       const tC = L.t, oC = L.side * (4.25 - ARM - 0.2);
-      const RAD = 4.6;
+      const RAD = 6.2;          // a cobra head at 7.5 m throws ~12 m of usable light
       const tRows = [tC - RAD, tC - RAD / 3, tC + RAD / 3, tC + RAD];
       const clampHW = function (v) { return Math.max(-HW + 0.001, Math.min(HW - 0.001, v)); };
       const far = oC - L.side * RAD;               // the pool's edge across the road
@@ -1424,8 +1426,8 @@
       const k = clamp01((n - 0.3) / 0.4);
       if (Math.abs(k - lastK) < 0.003) return;
       lastK = k;
-      lensMat.color.setRGB(0.3 + 0.75 * k, 0.3 + 0.6 * k, 0.29 + 0.36 * k);
-      poolMat.opacity = 0.5 * k;
+      lensMat.color.setRGB(0.3 + 1.5 * k, 0.3 + 1.15 * k, 0.29 + 0.65 * k);
+      poolMat.opacity = 0.78 * k;
       if (poolMesh) poolMesh.visible = k > 0.01;
     }
     if (o.onUpdate) o.onUpdate(48.3, function () {
@@ -1436,6 +1438,9 @@
       night(CBZ.lightsOnAmount ? CBZ.lightsOnAmount() : (CBZ.nightAmount || 0));
     });
     void lensMesh;
+    // the heads glow from every side, not only from under the lens
+    const glow = CBZ.islandLampGlow ? CBZ.islandLampGlow(o.root, heads) : null;
+    if (glow) meshes["survival-streetlight-glow"] = glow.points;
 
     const stats = {
       pieces: P.pieces.length, junctions: P.junctions.length,

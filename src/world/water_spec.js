@@ -517,6 +517,9 @@
   // array that a GLSL ES 1.0 loop can iterate with a constant bound.
   const MAX_INLAND = 4;
   CBZ.WATER_MAX_INLAND = MAX_INLAND;
+  // shore lamps a sea can reflect (uSeaLamps; a cheap point-light glint each)
+  const SEA_LAMPS = 6;
+  CBZ.WATER_SEA_LAMPS = SEA_LAMPS;
 
   // ---- THE SEA'S BODY COLOUR, ONE TABLE -----------------------------------
   // city/world.js drives uSeaColor from these across the day/night cycle and
@@ -1594,6 +1597,11 @@
     u.uMoonDir = { value: new THREE.Vector3(0.34, -0.84, -0.42).normalize() };
     u.uMoonColor = { value: new THREE.Color(0xa8c0e2) };
     u.uMoon = { value: 0 };
+    // SHORE LIGHTS ON THE WATER (world/archipelago.js fills them after dark):
+    // up to SEA_LAMPS lamp heads, xyz + gain, and their colour + count (w)
+    u.uSeaLamps = { value: [] };
+    for (let i = 0; i < SEA_LAMPS; i++) u.uSeaLamps.value.push(new THREE.Vector4(0, -1e4, 0, 0));
+    u.uSeaLampC = { value: new THREE.Vector4(1.0, 0.72, 0.42, 0) };
     u.uSunDir = { value: new THREE.Vector3(-0.34, 0.84, 0.42).normalize() };
     u.uSunColor = { value: new THREE.Color(0xfff4e0) };
     // SHALLOW WATER SEEN FROM ABOVE. 0x24a89a was a saturated bottle-green
@@ -2664,6 +2672,27 @@
       "  float st = smoothstep(0.60, 0.80, s0 * w0 + s1 * (1.0 - w0)) * 0.30 * fd;",
       "  return vec4(nrm, st);",
       "}",
+      // --- SHORE LIGHTS ON THE WATER ---------------------------------------
+      // The street lamps along a waterfront, mirrored by the same rough
+      // surface that makes the moon path: a Blinn lobe per lamp off the live
+      // ripple normal, so each one lays a broken vertical streak toward you.
+      // Inert (one compare) unless a caller fills uSeaLampC.w.
+      "uniform vec4 uSeaLamps[" + SEA_LAMPS + "];",
+      "uniform vec4 uSeaLampC;",
+      "vec3 cbzLampGlints(vec3 N, vec3 V, vec3 P, float fres) {",
+      "  float acc = 0.0;",
+      "  for (int i = 0; i < " + SEA_LAMPS + "; i++) {",
+      "    if (float(i) >= uSeaLampC.w) break;",
+      "    vec4 Lp = uSeaLamps[i];",
+      "    vec3 Ld = Lp.xyz - P;",
+      "    float dl = length(Ld);",
+      "    vec3 H = normalize(Ld / max(dl, 0.01) + V);",
+      "    float nh = max(dot(N, H), 0.0);",
+      "    float s = pow(nh, 36.0) * 0.30 + pow(nh, 320.0) * 2.2;",
+      "    acc += s * Lp.w / (1.0 + dl * 0.012);",
+      "  }",
+      "  return uSeaLampC.rgb * (acc * (0.25 + fres * 1.6));",
+      "}",
       "vec4 cbzShadeSea(vec3 P, vec3 Ng, float hN, float fold, float dist, float fade,",
       "                 vec4 field, float inland, float under, vec3 deepCol, vec3 tirCol) {",
       "  vec2 p = P.xz;",
@@ -2707,6 +2736,7 @@
       "  vec3 outColor = mix(base, sky, fres * 0.90 * mix(1.0, 0.55, inland));",
       "  outColor += cbzSunGlitter(N, V, L, fres, fade) * mix(1.0, 0.30, inland);",
       "  outColor += cbzSheen(N, V, L, lane, dist, fres) * mix(1.0, 0.35, inland);",
+      "  if (uSeaLampC.w > 0.5 && under < 0.5) outColor += cbzLampGlints(N, V, P, fres) * mix(1.0, 0.5, inland);",
       // ---- foam: what the waves make, what the shore makes, what things make
       "  float n = texture2D(uSeaNormal, p * 0.13 + vec2(uSeaTime * 0.011, -uSeaTime * 0.007)).g;",
       "  float surf = cbzSurf(p, field, hN, fade);",

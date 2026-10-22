@@ -598,6 +598,7 @@
       const rec = { x: x, z: z, yaw: yaw, collider: c, flammable: true };
       out.benches.push(rec); out.flammable.push(rec);
     }
+    const lanternHeads = [];      // glow + pool after dark (world/island_night.js)
     function lantern(x, z, surfY) {
       const gy = surfY != null ? surfY : gh(x, z);
       cylY(A.paint, x, gy, z, 0.16, 0.16, 0.35, 10, COL.steelDark, {});
@@ -610,6 +611,7 @@
       box(A.paint, x, y + 0.02, z, 0.36, 0.05, 0.36, 0, COL.steelDark, {});
       cylY(A.paint, x, y + 0.5, z, 0.26, 0.02, 0.26, 8, COL.steelDark, {});
       addCol(x - 0.14, x + 0.14, z - 0.14, z + 0.14, gy, gy + 4, "lamp");
+      lanternHeads.push({ x: x, y: y + 0.28, z: z, gy: gy, r: 4.2, s: 1.3 });
     }
     function shrubs(x, z, rx, rz, n, salt, surfY, flowers) {
       for (let i = 0; i < n; i++) {
@@ -1570,6 +1572,10 @@
       });
     }
     out.lensMaterial = lensMat;
+    if (CBZ.islandLampGlow && lanternHeads.length) {
+      const gl = CBZ.islandLampGlow(ctx.root, lanternHeads);
+      if (gl) { out.meshes.glow = gl.points; if (gl.pool) out.meshes.pool = gl.pool; out.draws += gl.pool ? 2 : 1; }
+    }
     out.stats.yards = nYards;
     out.stats.verts = Object.keys(A).reduce(function (s, k) { return s + A[k].count(); }, 0);
     api.current = out;

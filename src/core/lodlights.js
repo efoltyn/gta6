@@ -66,18 +66,19 @@
   // the haze every far surface wears (metro_fabric FOG_SCALE, metro_ground,
   // the continent plate) and the aerial extinction length (terrain_overhaul
   // HAZE.L0)
-  const FOG_SCALE = 0.10, HAZE_L0 = 7500;
+  const FOG_SCALE = 0.10, HAZE_L0 = 7500, ISLE_HAZE_L = 24000;
 
   const U = {
     uNight: { value: 0 }, uTime: { value: 0 }, uLate: { value: 0 },
     uProj: { value: 1000 }, uMinPx: { value: 2 },
     uFogNear: { value: 4000 }, uFogFar: { value: 10000 },
     uCamFar: { value: 1400 }, uNear: { value: 0.2 }, uDensity: { value: 0.8 }, uWinKeep: { value: 1 },
+    uHazeL: { value: HAZE_L0 },
   };
 
   /* ---- the shared vertex tail: size, energy, hand-over, haze, depth ---- */
   const COMMON = [
-    "uniform float uNight, uTime, uLate, uProj, uMinPx, uFogNear, uFogFar, uCamFar, uNear, uDensity, uWinKeep;",
+    "uniform float uNight, uTime, uLate, uProj, uMinPx, uFogNear, uFogFar, uCamFar, uNear, uDensity, uWinKeep, uHazeL;",
     "varying vec3 vC;",
     "varying float vSharp;",
     "void lodCull() { gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 ); gl_PointSize = 0.0; vC = vec3( 0.0 ); vSharp = 0.0; }",
@@ -92,7 +93,7 @@
     "  float e = min( 1.0, gain * k * k );",
     "  if ( fade > 0.0 ) e *= smoothstep( fade, fade * 2.2, d );",
     "  else if ( fade < 0.0 ) e *= 1.0 - smoothstep( -fade, -fade * 2.4, px );",
-    "  e *= ( 1.0 - smoothstep( uFogNear, uFogFar, d ) ) * exp( -d * " + (1 / HAZE_L0).toFixed(8) + " ) * uNight;",
+    "  e *= ( 1.0 - smoothstep( uFogNear, uFogFar, d ) ) * exp( -d / uHazeL ) * uNight;",
     "  if ( e < 0.004 ) { lodCull(); return; }",
     // out of its own fixture / facade by the depth buffer's resolution there
     // (dz ~ d^2 / (near * 2^24)), so a window dot never z-fights its wall
@@ -459,6 +460,9 @@
       U.uFogFar.value = Math.max(U.uFogNear.value + 1, fog.far / k);
     }
     U.uWinKeep.value = windowKeep();
+    // the isles' night air is the clear sea air the far islands stand in
+    // (world/archipelago.js FAR_HAZE): a town's lights carry to the next island
+    U.uHazeL.value = isles ? ISLE_HAZE_L : HAZE_L0;
     const dens = CBZ.trafficHourDensity ? CBZ.trafficHourDensity() : 0.8;
     U.uDensity.value = Math.max(0, Math.min(1, dens / 1.25));
   }
