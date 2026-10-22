@@ -152,13 +152,27 @@
   function penOpen(siteId) { const W = PENS[siteId || "execmansion"]; if (!W) return false; for (const k in W) if (W[k]) return true; return false; }
 
   // ---- THE CLAMP -------------------------------------------------------------
+  // the secured grounds out of every complex (a mob asks this for each
+  // marcher it steps, thousands a second: the full complex list, filtered
+  // per call, was a third of a millisecond a frame at the Mansion protest)
+  // (re-read every few thousand asks too: a complex being built in place
+  // gains its rect after it is listed)
+  const _sec = { L: null, n: -1, calls: 0, list: [] };
+  function securedList() {
+    const L = list();
+    if (L !== _sec.L || L.length !== _sec.n || ++_sec.calls > 4096) {
+      _sec.L = L; _sec.n = L.length; _sec.calls = 0; _sec.list = [];
+      for (let i = 0; i < L.length; i++) if (secured(L[i])) _sec.list.push(L[i]);
+    }
+    return _sec.list;
+  }
   function clampOut(x, z, o, pad) {
     o = o || {};
     o.x = x; o.z = z; o.moved = false;
-    const p = pad == null ? PAD : pad, L = list();
+    const p = pad == null ? PAD : pad, L = securedList();
     for (let i = 0; i < L.length; i++) {
       const s = L[i];
-      if (secured(s) && inRect(s.rect, o.x, o.z, p)) pushOut(s.rect, o.x, o.z, p, o);
+      if (s.rect && inRect(s.rect, o.x, o.z, p)) pushOut(s.rect, o.x, o.z, p, o);
     }
     const PL = pens();
     for (let i = 0; i < PL.length; i++) {

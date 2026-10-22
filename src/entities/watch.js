@@ -281,15 +281,27 @@
       }
     }
   };
-  function finish(kit) {
+  /* ONE DRAW PER MATERIAL, NOT PER SLOT. Every group is its own draw call,
+     and most styles paint several slots with the same finish (a steel watch
+     is steel in five of its six). `names` (the style's material per slot):
+     a slot whose material an earlier slot already uses is drawn in that
+     slot's group, so a watch costs one draw per finish it shows. Same
+     triangles, same materials: a steel head went from five draws to two. */
+  function finish(kit, names) {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(kit.p, 3));
     const idx = [];
+    const done = [];
     for (let s = 0; s < kit.slots.length; s++) {
-      const L = kit.slots[s];
-      if (!L || !L.length) continue;
-      g.addGroup(idx.length, L.length, s);
-      for (let i = 0; i < L.length; i++) idx.push(L[i]);
+      if (done[s]) continue;
+      const start = idx.length;
+      for (let s2 = s; s2 < kit.slots.length; s2++) {
+        if (done[s2] || (s2 !== s && !(names && names[s2] === names[s]))) continue;
+        done[s2] = true;
+        const L = kit.slots[s2];
+        if (L) for (let i = 0; i < L.length; i++) idx.push(L[i]);
+      }
+      if (idx.length > start) g.addGroup(start, idx.length - start, s);
     }
     g.setIndex(idx);
     g.computeVertexNormals();
@@ -436,7 +448,7 @@
       k.cyl(SL.accent, [R * 0.25, -(ry + 0.0015), hc * 0.55], [0, -1, 0], EX, EZ, 0.0028, 0.0015, 14);
       k.box(SL.accent, [-R * 0.30, -(ry + 0.0005), hc * 0.55], EX, EY, EZ, 0.0038, 0.0008, 0.0013);
     }
-    return (_headGeo[style] = finish(k));
+    return (_headGeo[style] = finish(k, S.m));
   }
 
   /* ------------------------------------------------------------ the strap
@@ -493,7 +505,7 @@
   function q4(x) { return Math.round(x * 1e4) / 1e4; }
   function strapGeometry(style, fit) {
     const S = STYLES[style], kind = S.strap;
-    const key = kind + "|" + S.strapW + "|" + q4(fit.a) + "|" + q4(fit.b) + "|" + q4(fit.rc) + "|" + q4(fit.s);
+    const key = kind + "|" + (S.m[SL.strap] === S.m[SL.accent] ? "1|" : "2|") + S.strapW + "|" + q4(fit.a) + "|" + q4(fit.b) + "|" + q4(fit.rc) + "|" + q4(fit.s);
     if (_strapGeo[key]) return _strapGeo[key];
     const s = fit.s, k = new Kit();
     const A = fit.a + CLEAR * s, B = fit.b + CLEAR * s;
@@ -525,7 +537,7 @@
       k.box(acc, [0, 0, zb], EX, EY, EZ, bl * 0.9, 0.0005 * s, bt * 0.7);
       k.box(SL.strap, [-0.013 * s, 0, zb + 0.0002 * s], EX, EY, EZ, 0.0022 * s, W * 0.47, 0.0012 * s);   // keeper
     }
-    const sg = finish(k);
+    const sg = finish(k, S.m);
     sg._strapKey = key;
     return (_strapGeo[key] = sg);
   }

@@ -207,6 +207,7 @@
   const atim = new Float32Array(CAP);
   const acd = new Float32Array(CAP);                                   // a thrower's / fighter's next go
   const aclimb = new Float32Array(CAP);                                // metres up a barricade
+  const aflx = new Float32Array(CAP).fill(NaN), aflz = new Float32Array(CAP).fill(NaN), afly = new Float32Array(CAP);   // where the floor was last asked, and its height
   const asign = new Uint8Array(CAP);                                   // slogan index in the mob
   const arig = new Int16Array(CAP).fill(-1);
   const askin = new Int32Array(CAP), ashirt = new Int32Array(CAP), apants = new Int32Array(CAP), ahair = new Int32Array(CAP);
@@ -1108,7 +1109,14 @@
       if (aclimb[i] > 0 && (arole[i] !== ROLE.climber || !L)) aclimb[i] = Math.max(0, aclimb[i] - ddt * 1.2);
       // (a cover-taker crouches on his own feet: the coverHead clip; only the
       // old seated stand-in sat 0.45 below its chair)
-      if (!coarse || (stepN & 7) === 0 || aact[i] === ACT.cover) ay[i] = floorAt(ax[i], az[i]) + aclimb[i] - (aact[i] === ACT.cover && CL.coverHead == null ? 0.45 : 0);
+      if (!coarse || (stepN & 7) === 0 || aact[i] === ACT.cover) {
+        // the floor under a body that has not moved is the floor it had (a
+        // packed knot shuffles in place: thousands of floor queries a second
+        // for the same few centimetres), asked again every 32 steps anyway
+        const fdx = ax[i] - aflx[i], fdz = az[i] - aflz[i];
+        if (!(fdx * fdx + fdz * fdz <= 4e-4) || ((stepN + i) & 31) === 0) { afly[i] = floorAt(ax[i], az[i]); aflx[i] = ax[i]; aflz[i] = az[i]; }
+        ay[i] = afly[i] + aclimb[i] - (aact[i] === ACT.cover && CL.coverHead == null ? 0.45 : 0);
+      }
       if (aside[i] === 1) { const Lo = lineOf(i); if (Lo && !Lo.broken) ahd[i] = Math.atan2(Lo.nx, Lo.nz); }
     }
     if (m._culled) cull(m);
@@ -1574,12 +1582,13 @@
      of interaction), and a PROTECTED rig (hurt, down, fighting, struck, the
      man an order is against) is never let go for budget. A hit on an
      instanced person promotes on the spot (realize, from crowdstore). */
-  const VERB_R = 7, FRONT_R = 90, FRONT_DEPTH = 2.4, ENGAGE_R = 30, AIM_R = 160, KEEP_T = 3.5, HIT_KEEP = 12, FAR_DROP = 160;
+  const VERB_R = 7, FRONT_R = 90, FRONT_DEPTH = 2.4, ENGAGE_R = 30, AIM_R = 160, KEEP_T = 3.5, HIT_KEEP = 12, FAR_DROP = 160, RIG_STICK = 3;
   const T_AIM = 1, T_VERB = 2, T_FRONT = 3, T_NEAR = 4, T_NONE = 9;
   const akeep = new Float32Array(CAP);      // hold this rig until (mob clock)
   const atier = new Uint8Array(CAP).fill(T_NONE);
+  const ahold = new Uint8Array(CAP).fill(T_NONE);   // the tier a rig's hold was earned at
   const awant = new Int32Array(CAP);        // the rig tick that last wanted it
-  let rigTick = 0, rigAcc = 0;
+  let rigTick = 0, rigAcc = 0, aimPrev = -1, aimRun = 0;
   function lying(p) {
     if (!p) return false;
     if (p.ko > 0 || p.restraint) return true;
@@ -1636,6 +1645,7 @@
     R.hitT = CLOCK; R.why = why || "hit";
     akeep[i] = CLOCK + HIT_KEEP;
     if (atier[i] > T_FRONT) atier[i] = T_FRONT;
+    ahold[i] = Math.min(ahold[i], T_FRONT);
     STATS.realized++;
     // the instanced copy and its sign are gone from this very frame
     S.drawn[i] = 0;
@@ -1687,12 +1697,22 @@
     if (cam && cam.matrixWorld && cam.position) {
       const e = cam.matrixWorld.elements;
       const h = ST.ray(cam.position.x, cam.position.y, cam.position.z, -e[8], -e[9], -e[10], AIM_R);
-      if (h && amob[h.row] >= 0) aimRow = h.row;
+      // THE CROSSHAIR HAS TO REST ON SOMEBODY: a lens drifting across a
+      // packed crowd crossed a new face every tick, and every one became a
+      // rig for its hold and went back (five builds a second at the gate).
+      // Two ticks (0.4 s) on the same person, or a person already real.
+      const hr = h && amob[h.row] >= 0 ? h.row : -1;
+      if (hr !== aimPrev) { aimPrev = hr; aimRun = 0; }
+      aimRun++;
+      if (hr >= 0 && (aimRun >= 2 || arig[hr] >= 0)) aimRow = hr;
     }
     let crew = null;
     if (CBZ.cityOrders2 && CBZ.cityOrders2.force) { try { crew = CBZ.cityOrders2.force(); } catch (e) { crew = null; } }
     if (P && city) {
       const NR2 = BUD.near * BUD.near, VR2 = VERB_R * VERB_R;
+      // a held rig keeps its tier a little past the line (the same hysteresis
+      // as RIG_STICK: stepping 10 cm out of verb range is not a demotion)
+      const VR2h = (VERB_R + RIG_STICK * 0.5) * (VERB_R + RIG_STICK * 0.5);
       for (let mi = 0; mi < MOBS.length; mi++) {
         const M = MOBS[mi]; if (!M) continue;
         const reach = Math.sqrt(M.agents.length) * 2 + 40;
@@ -1704,16 +1724,31 @@
           const dx = ax[i] - P.x, dz = az[i] - P.z, d2 = dx * dx + dz * dz;
           let t = T_NONE;
           if (i === aimRow) t = T_AIM;
-          else if (d2 < VR2) t = T_VERB;
+          else if (d2 < VR2 || (arig[i] >= 0 && d2 < VR2h)) t = T_VERB;
           else if (d2 < FRONT_R * FRONT_R && inFront(F, i)) t = T_FRONT;
           else if (crew && crew.length && d2 < (ENGAGE_R + 45) * (ENGAGE_R + 45)) {        // the detail is within 45 m of you (orders.js force)
             for (let c = 0; c < crew.length; c++) { const q = crew[c]; if (q && q.pos && Math.abs(q.pos.x - ax[i]) < ENGAGE_R && Math.abs(q.pos.z - az[i]) < ENGAGE_R && Math.hypot(q.pos.x - ax[i], q.pos.z - az[i]) < ENGAGE_R) { t = T_FRONT; break; } }
           }
           if (t === T_NONE && d2 < NR2 && aact[i] !== ACT.inside) t = T_NEAR;
+          // HELD MEANS HELD: a rig inside its KEEP_T hold ranks at the tier
+          // that made it (the crosshair flicking between two faces in a packed
+          // crowd built one, let the other go, and built it again, five rigs
+          // a second); the hold itself is only renewed by the real tier
+          let held = false;
+          if (t > T_FRONT && arig[i] >= 0 && CLOCK < akeep[i] && ahold[i] < t) { t = ahold[i]; held = true; }
           atier[i] = t;
           if (t === T_NONE) continue;
-          if (t <= T_FRONT) akeep[i] = Math.max(akeep[i], CLOCK + KEEP_T);
-          CAND[CN++] = candKey(t, d2) + i;
+          if (t <= T_FRONT && !held) { akeep[i] = Math.max(akeep[i], CLOCK + KEEP_T); ahold[i] = t; }
+          // A RIG HOLDS ITS PLACE IN THE QUEUE. Pressed against the Mansion's
+          // racks 60 people stand in verb range for 48 rigs, all within a
+          // metre of each other in distance: as the crowd shuffled, 49th and
+          // 48th swapped every tick and 91 rigs were built and thrown away
+          // in five seconds (a cityPostNpc, a dressing, a page paint each).
+          // A held rig ranks as if RIG_STICK m nearer: a newcomer has to be
+          // clearly closer, in the same tier, to take its slot.
+          let dk = d2;
+          if (arig[i] >= 0) { const dd = Math.max(0, Math.sqrt(d2) - RIG_STICK); dk = dd * dd; }
+          CAND[CN++] = candKey(t, dk) + i;
         }
       }
     }
@@ -1732,7 +1767,7 @@
       const R = RIGS[k]; if (!R) continue;
       const i = R.i;
       if (amob[i] < 0 || !P || !city) { dropRig(i); continue; }
-      if (awant[i] === rigTick) { if (atier[i] <= T_FRONT) akeep[i] = Math.max(akeep[i], CLOCK + KEEP_T); continue; }
+      if (awant[i] === rigTick) continue;              // (its hold was renewed above, by its real tier only)
       const d = Math.hypot(ax[i] - P.x, az[i] - P.z);
       if (protectedRig(R, tgt)) { if (d > FAR_DROP && R.ped !== tgt) dropRig(i); continue; }
       if (CLOCK < akeep[i]) continue;
@@ -2117,8 +2152,13 @@
   function shared() {
     if (SH_) return SH_;
     const hg = new THREE.CylinderGeometry(0.105, 0.045, 0.28, 8); hg.rotateX(Math.PI / 2);
+    // a flag's cloth: the two printed faces (slot 0) and the four edges
+    // (slot 1) as two groups, two draws (a six-group box was six)
+    const fg = new THREE.BoxGeometry(1, 1, 1), fi = fg.index.array, idx = [];
+    for (let i = 0; i < 36; i++) idx.push(fi[i]);
+    fg.setIndex(idx); fg.clearGroups(); fg.addGroup(0, 12, 0); fg.addGroup(12, 24, 1);
     SH_ = {
-      box: new THREE.BoxGeometry(1, 1, 1), horn: hg,
+      box: new THREE.BoxGeometry(1, 1, 1), horn: hg, flag: fg,
       shield: new THREE.MeshLambertMaterial({ color: 0xc8d6e2, transparent: true, opacity: 0.55, depthWrite: false }),
       stick: new THREE.MeshLambertMaterial({ color: 0x8a6a44 }),
       hornM: new THREE.MeshLambertMaterial({ color: 0xe6e1d3 }), phoneM: new THREE.MeshLambertMaterial({ color: 0x15171a }),
@@ -2177,18 +2217,22 @@
     if (r && r.radPerM > 0) GAIT.run = r.radPerM;
     GAIT.read = true;
   }
+  // THE SAME PLACARD THE RIGS HOLD (president_public.js placardGeo: stick +
+  // board as one geometry, wood and faces as two draws), origin at the grip:
+  // one instanced mesh per slogan draws the whole sign, stick and all
   function signMesh(set, text, support) {
     const key = (support ? "s:" : "p:") + text;
     if (set.signs[key]) return set.signs[key];
-    const X = shared();
+    const X = shared(), props = PP();
+    const geo = props && props.placardGeo ? props.placardGeo() : null;
+    if (!geo) return null;
     let mats = X.signMats[key];
     if (!mats) {
-      const props = PP();
-      if (props && props.signMats) { try { mats = props.signMats(text, support); } catch (e) { mats = null; } }
-      if (!mats) { const e = new THREE.MeshLambertMaterial({ color: 0xefe6cf }); mats = [e, e, e, e, e, e]; }
+      if (props.signMats) { try { mats = props.signMats(text, support); } catch (e) { mats = null; } }
+      if (!mats) { const e = new THREE.MeshLambertMaterial({ color: 0xefe6cf }); mats = [e, e]; }
       X.signMats[key] = mats;
     }
-    const m = instanced(X.box, mats, PROP_CAP);
+    const m = instanced(geo, mats, PROP_CAP);
     set.root.add(m);
     set.signs[key] = m;
     return m;
@@ -2205,9 +2249,9 @@
       const face = new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex || null, side: THREE.DoubleSide });
       if (!tex) face.color.setHex(0x1d3c7a);
       const edge = new THREE.MeshLambertMaterial({ color: 0xdedad0 });
-      mats = X.flagMats[key] = [face, face, edge, edge, edge, edge];
+      mats = X.flagMats[key] = [face, edge];
     }
-    const m = instanced(X.box, mats, PROP_CAP);
+    const m = instanced(X.flag, mats, PROP_CAP);
     set.root.add(m);
     set.flags[key] = m;
     return m;
@@ -2337,10 +2381,13 @@
         // where poses.js pubPlacard puts it: the stick upright in both fists
         // in front of the chest, the board over the head
         const L = placard();
-        const sm = signMesh(H, m.slogans[asign[i] % m.slogans.length], m.support);
+        // (per slogan, not per string: no key built per sign per frame)
+        if (H.slo !== m.slogans || H.sup !== m.support) { H.slo = m.slogans; H.sup = m.support; H.bySlo = []; }
+        const si = asign[i] % m.slogans.length;
+        let sm = H.bySlo[si];
+        if (sm === undefined) sm = H.bySlo[si] = signMesh(H, m.slogans[si], m.support);
         const gy = L.gripY + Math.sin(t * 1.4 + i) * 0.017, gz = L.gripZ;
-        if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, x, y, z, 0, gy + L.boardY, gz + L.boardZ, 0, 0, L.boardW, L.boardH, L.boardT); sm.count++; }
-        if (P.stick.count < STICK_CAP) { putBox(P.stick, P.stick.count, x, y, z, 0, gy + L.stickBot + L.stickLen / 2, gz, 0, 0, L.stickW, L.stickLen, L.stickW * 0.6); P.stick.count++; }
+        if (sm && sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, x, y, z, 0, gy, gz, 0, 0, 1, 1, 1); sm.count++; }
       } else if (r === ROLE.flag) {
         if (cl !== CL.flag && cl !== CL.flagWalk) continue;
         const fm = flagMesh(H, m.flag);
@@ -2377,10 +2424,8 @@
       if (f.k === "shield") { if (P.shield.count < P.shield.instanceMatrix.count) { putBox(P.shield, P.shield.count++, f.x, f.y, f.z, 0.3, 0.5, 0.03, 0, 0, 0.6, 1.0, 0.04); } continue; }
       if (f.k === "sign") {
         // face up, the board resting on its own stick (the laid rig prop's frame)
-        const L = placard(), y0 = f.y + 0.016;
-        if (P.stick.count < STICK_CAP) { putBox(P.stick, P.stick.count++, f.x, y0, f.z, 0, L.stickBot + L.stickLen / 2, 0, 0, 0, L.stickW, L.stickLen, L.stickW * 0.6); }
         const sm = signMesh(R_, f.text, f.support);
-        if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, f.x, y0, f.z, 0, L.boardY, L.boardZ, 0, 0, L.boardW, L.boardH, L.boardT); sm.count++; }
+        if (sm && sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, f.x, f.y + 0.016, f.z, 0, 0, 0, 0, 0, 1, 1, 1); sm.count++; }
         continue;
       }
       if (P.stick.count < STICK_CAP) { putBox(P.stick, P.stick.count++, f.x, f.y, f.z, 0.45, 0.35, 0.02, 0, 0, 0.034, 1.0, 0.034); }

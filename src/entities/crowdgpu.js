@@ -776,7 +776,11 @@
       }
       const par = group.parent;
       if (par && par !== CBZ.scene) {
-        par.updateMatrixWorld();
+        // the parent's own world matrix (and its ancestors'), not its whole
+        // subtree: a mob's layer hangs off the arena root, and
+        // updateMatrixWorld() recomposed every node of the arena ten times a
+        // second to turn one camera point into the layer's space
+        par.updateWorldMatrix(true, false);
         _v.set(cx, cy, cz); par.worldToLocal(_v); cx = _v.x; cy = _v.y; cz = _v.z;
         const e = par.matrixWorld.elements, yaw = Math.atan2(e[8], e[10]);
         const c = Math.cos(-yaw), s = Math.sin(-yaw), nfx = c * fx + s * fz, nfz = -s * fx + c * fz; fx = nfx; fz = nfz;

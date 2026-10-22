@@ -335,9 +335,19 @@
     const sw = CBZ.citySwimState ? CBZ.citySwimState() : null;
     return !(sw && sw.swimming);
   }
+  // WHO YOUR HANDS COULD REACH: no hand verb picks past 8 m (verbs.js reach:
+  // pullReach 8; grab/carry/shove far less; handverbs' look reach 5.5), and
+  // the whole roster (500+ in Gang City) went through handable() every frame
+  // and then through four verbs.pick walks. A body out of reach is out first.
+  const HAND_R2 = 9 * 9;
   function castInto(out, list) {
     if (!list) return;
-    for (let i = 0; i < list.length; i++) if (handable(list[i])) out.push(list[i]);
+    const P = CBZ.player, pp = P && P.pos;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (pp && p && p.pos) { const dx = p.pos.x - pp.x, dz = p.pos.z - pp.z; if (dx * dx + dz * dz > HAND_R2) continue; }
+      if (handable(p)) out.push(p);
+    }
   }
   function lawfulHold(p) { return !!(CBZ.custody && CBZ.custody.jobOf && CBZ.custody.jobOf(p)); }
   function seen(p, amount, type) {

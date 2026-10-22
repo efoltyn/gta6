@@ -920,7 +920,11 @@
       if (cam) {
         for (let i = 0; i < peds.length && list.length < 170; i++) {
           const p = peds[i];
-          if (!p || p.dead || !p.pos || !p.char || p._parked) continue;
+          // a protester in a mob's front rows (city/mob.js) has his place and
+          // his friends from the crowd: kinship pairing him off for a stroll
+          // fought the mob's own move orders (9 of 48 at the Mansion gate),
+          // and the packed rows made the greeting scan its densest grid
+          if (!p || p.dead || !p.pos || !p.char || p._parked || p._mob) continue;
           if (d2(p.pos.x, p.pos.z, cam.x, cam.z) > NEAR_R * NEAR_R) continue;
           list.push(p);
         }

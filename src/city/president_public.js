@@ -349,9 +349,10 @@
     const key = (support ? "s:" : "p:") + text;
     if (SIGN_MATS[key]) return SIGN_MATS[key];
     const face = new THREE.MeshLambertMaterial({ map: signTex(text, support) });
-    const edge = cm(0x9a7a52);                       // the board's cut edge
-    // lettered both sides: a sign is read coming and going
-    SIGN_MATS[key] = [edge, edge, edge, edge, face, face];
+    const edge = cm(0x9a7a52);                       // the board's cut edge (and the furring strip: the same pine)
+    // lettered both sides: a sign is read coming and going. Slot 0 = the
+    // wood (stick + the board's four edges), slot 1 = both faces: see placardGeo
+    SIGN_MATS[key] = [edge, face];
     return SIGN_MATS[key];
   }
   let _glassMat = null;
@@ -814,19 +815,53 @@
      adopt, whole "all"). */
   const PLACARD = { stickBot: -0.30, stickLen: 1.25, stickW: 0.03, boardW: 0.72, boardH: 0.50, boardT: 0.012, boardY: 0.72, boardZ: 0.026,
                     gripY: 1.29, gripZ: 0.35 };          // the grip on an adult, in metres over the feet (poses.js PLACARD, measured)
-  let _plStickGeo = null, _plBoardGeo = null;
+  /* THE PLACARD IS ONE MESH, TWO DRAWS: the stick and the board's edges are
+     the same pine (slot 0), the lettered faces are slot 1. It was a stick
+     mesh plus a six-material box: seven draw calls a sign, and a protest's
+     front rows hold dozens. Origin = the lower fist's grip (as above);
+     mob.js draws the same geometry instanced (props.placardGeo). */
+  let _plGeo = null;
+  function placardGeo() {
+    if (_plGeo) return _plGeo;
+    const P = PLACARD;
+    const st = new THREE.BoxGeometry(P.stickW, P.stickLen, P.stickW * 0.6); st.translate(0, P.stickBot + P.stickLen / 2, 0);
+    const bd = new THREE.BoxGeometry(P.boardW, P.boardH, P.boardT); bd.translate(0, P.boardY, P.boardZ);
+    const pos = [], nor = [], uv = [], idx = [], faces = [];
+    const add = function (g) {
+      const o = pos.length / 3, a = g.attributes;
+      for (let i = 0; i < a.position.count; i++) {
+        pos.push(a.position.getX(i), a.position.getY(i), a.position.getZ(i));
+        nor.push(a.normal.getX(i), a.normal.getY(i), a.normal.getZ(i));
+        uv.push(a.uv.getX(i), a.uv.getY(i));
+      }
+      return o;
+    };
+    const so = add(st), bo = add(bd);
+    const si = st.index.array, bi = bd.index.array;
+    // BoxGeometry: six faces of six indices, in +x -x +y -y +z -z order
+    for (let i = 0; i < si.length; i++) idx.push(si[i] + so);
+    for (let i = 0; i < 24; i++) idx.push(bi[i] + bo);
+    for (let i = 24; i < 36; i++) faces.push(bi[i] + bo);
+    const wood = idx.length;
+    for (let i = 0; i < faces.length; i++) idx.push(faces[i]);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.addGroup(0, wood, 0); g.addGroup(wood, idx.length - wood, 1);
+    g.computeBoundingSphere();
+    st.dispose(); bd.dispose();
+    g._shared = true;
+    return (_plGeo = g);
+  }
   function giveSign(ped, text, support) {
     if (!ped || !ped.group) return;
     text = String(text || "ENOUGH").toUpperCase();
     const pr = new THREE.Group();
     pr.name = "placard";
     pr.position.set(0, PLACARD.gripY, PLACARD.gripZ);  // until the pose puts it on the fists
-    if (!_plStickGeo) _plStickGeo = new THREE.BoxGeometry(PLACARD.stickW, PLACARD.stickLen, PLACARD.stickW * 0.6);
-    if (!_plBoardGeo) _plBoardGeo = new THREE.BoxGeometry(PLACARD.boardW, PLACARD.boardH, PLACARD.boardT);
-    const st = new THREE.Mesh(_plStickGeo, cm(0x9c7a4e));
-    st.position.y = PLACARD.stickBot + PLACARD.stickLen / 2; pr.add(st);
-    const bd = new THREE.Mesh(_plBoardGeo, signMats(text, support));
-    bd.position.set(0, PLACARD.boardY, PLACARD.boardZ); pr.add(bd);
+    pr.add(new THREE.Mesh(placardGeo(), signMats(text, support)));
     ped.group.add(pr);
     ped._pubProp = pr; ped._sign = text;
     if (ped.char) { ped.char._pubProp = pr; ped.char._pubPh = Math.random() * 6; }
@@ -2635,7 +2670,7 @@
     // THE PROPS AND THE ROAR ARE SHARED (city/mob.js, city/address.js): a
     // marcher's sign, a supporter's flag, the placard and cheer poses, the
     // card the sign is lettered on, and the speech crowd's answer.
-    props: { sign: giveSign, flag: giveFlag, bullhorn: giveBullhorn, lower: lowerProp, hype: hype, pose: setPose, signMats: signMats, signTex: signTex, placard: PLACARD },
+    props: { sign: giveSign, flag: giveFlag, bullhorn: giveBullhorn, lower: lowerProp, hype: hype, pose: setPose, signMats: signMats, signTex: signTex, placard: PLACARD, placardGeo: placardGeo },
     react: function (kind) { if (CROWD.members.length) react(kind === "boo" ? "boo" : "cheer", false); return CROWD.members.length; },
     // harness/test hooks only, not part of the public contract
     _startNow: function (kind) {
