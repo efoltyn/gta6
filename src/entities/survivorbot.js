@@ -473,7 +473,9 @@
      it for a mode that restocks what gets eaten. stats.total keeps the
      spectate line honest about how many people this match has seen. */
   CBZ.spawnSurvivorBotAt = function (x, z) {
-    const arena = CBZ.buildDisasterArena();
+    // (the archipelago's townsfolk live on the island they were met on:
+    // world/archipelago.js passes through here with that island in force)
+    const arena = (CBZ.game && CBZ.game.mode === "archipelago" && CBZ.surv && CBZ.surv.arena) || CBZ.buildDisasterArena();
     const b = makeBot(x, z, brnd);
     arena.root.add(b.group);
     CBZ.bots.push(b);

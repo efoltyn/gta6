@@ -244,7 +244,16 @@
   /* ======================================================================
      BUILD
      ====================================================================== */
+  /* steps(ctx) is the build as a generator: each `yield` a seam where a
+     streamed island (world/archipelago.js) hands the frame back. build(ctx)
+     runs it to the end, as it always ran. */
   function build(ctx) {
+    const it = steps(ctx);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  }
+  function* steps(ctx) {
     THREE = G.THREE;
     if (!THREE || !ctx || !ctx.root) return null;
     initTemps();
@@ -630,6 +639,7 @@
     /* ==================================================================
        1. THE SHOWROOM'S CAR LOT (first: it claims the showroom's own ground)
        ================================================================== */
+    yield 0;
     (function carLot() {
       const S = ctx.showroom;
       if (!S) return;
@@ -717,6 +727,7 @@
        asphalt on the lot's graded pad, a concrete kerb round it, white bay
        lines, a wheel stop in every bay. The plan parks the cars in them.
        ================================================================== */
+    yield 0;
     if (PL) PL.parking.forEach(function (P) {
       const r = P.rect, top = 0.05;
       const Y = function (px, pz) { return gh(px, pz) + top; };
@@ -751,6 +762,7 @@
     /* ==================================================================
        2. THE TOWN SQUARE
        ================================================================== */
+    yield 0;
     (function square() {
       const PZ = PL && PL.plaza;
       if (!PZ) return;
@@ -859,6 +871,7 @@
        in the house's own frame (its door on its local -z) and turned to
        face the street with it.
        ================================================================== */
+    yield 0;
     const houses = [], towers = [];
     for (let i = 0; i < fragile.length; i++) {
       const b = fragile[i];
@@ -982,6 +995,7 @@
     /* ==================================================================
        4. TOWER FORECOURTS: two planters flanking the door where they fit
        ================================================================== */
+    yield 0;
     towers.forEach(function (b) {
       const dz = b.z - b.d / 2;
       for (const s of [-1, 1]) {
@@ -995,6 +1009,7 @@
     /* ==================================================================
        5. HYDRANTS: one per road piece, behind the kerb
        ================================================================== */
+    yield 0;
     (ctx.roadSegs || []).forEach(function (seg) {
       if (seg.len < 18) return;
       const side = h01(seg.x, seg.z, 0xe01) < 0.5 ? -1 : 1;
@@ -1017,6 +1032,7 @@
     /* ==================================================================
        7. THE FARM, out past the last street
        ================================================================== */
+    yield 0;
     (function farm() {
       const fields = [];
       // the plan's fields (out past the town, between the hills)
@@ -1214,6 +1230,7 @@
     /* ==================================================================
        8. ROCKS (sites from the arena's own boulder stream)
        ================================================================== */
+    yield 0;
     (function rocks() {
       const ico = new THREE.IcosahedronGeometry(1, 2);
       const icoS = new THREE.IcosahedronGeometry(1, 1);
@@ -1311,6 +1328,7 @@
        shared atlas material), so a storm can lean it and tear it off
        (systems/hurricane.js reads out.signs: {x, z, y, w, h, mesh, hex}).
        ================================================================== */
+    yield 0;
     (function signs() {
       if (!PL || typeof document === "undefined") return;
       const SHOPS = ["BAKERY", "CHEMIST", "HARDWARE", "CAFE", "GROCER", "BARBER", "BOOKS", "TAILOR", "DINER", "DELI",
@@ -1406,6 +1424,7 @@
     /* ==================================================================
        MESHES: one per material
        ================================================================== */
+    yield 0;
     const mapMean = CBZ.surfaceMapMean || function () { return [1, 1, 1]; };
     function lam(surface, extra) {
       const m = new THREE.MeshLambertMaterial(Object.assign({ color: 0xffffff, vertexColors: true }, extra || {}));
@@ -1482,5 +1501,5 @@
     return out;
   }
 
-  const api = CBZ.islandDressing = { build: build, current: null };
+  const api = CBZ.islandDressing = { build: build, steps: steps, current: null };
 })();

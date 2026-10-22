@@ -766,7 +766,16 @@
      o = { THREE, root, cx, cz, R, plan, ground, cuts, pads, quality,
            renderer, colliders, onUpdate, modeOn }
      ====================================================================== */
+  /* steps(o) is the build as a generator (a `yield` is a seam where a
+     streamed island hands the frame back, world/archipelago.js); build(o)
+     runs it to the end, as it always ran. */
   function build(o) {
+    const it = steps(o);
+    let r = it.next();
+    while (!r.done) r = it.next();
+    return r.value;
+  }
+  function* steps(o) {
     const THREE = o.THREE, P = o.plan, ground = o.ground;
     // o.skip(x, z): true where something else draws the street (a bridge
     // deck carries its own asphalt and walks, so a failed span takes them
@@ -835,6 +844,7 @@
       if (!p.jB) endPan(p.b, 1);
     }
     /* ---------------- JUNCTIONS ---------------- */
+    yield 0;
     for (const jn of P.junctions) {
       const X = jn.x, Zc = jn.z;
       const x0 = X - HW + (jn.W ? 0 : GUT), x1 = X + HW - (jn.E ? 0 : GUT);
@@ -878,6 +888,7 @@
       if (!jn.W) pan(X - HW, X - HW + GUT, z0, z1, "x", X - HW);
     }
     /* ---------------- CORNER RETURNS: arcs shared by road + walk ------- */
+    yield 0;
     const ARC = 6;
     function arcPts(f) {
       const pts = [];
@@ -901,6 +912,7 @@
     }
 
     /* ---------------- SIDEWALKS ---------------- */
+    yield 0;
     const walkA = new Acc();
     function tone(x, z, salt) {
       const k = (0.86 + 0.2 * wh(Math.floor(x / 1.5), Math.floor(z / 1.5), salt)) * (0.9 + 0.14 * wnoise(x, z, 9, 0x6b1));
@@ -1040,6 +1052,7 @@
     for (const zn of Z.zones) { if (zn.fillet) buildFilletZone(zn); else buildRectZone(zn); }
 
     /* ---------------- PAINT + DECALS (one mesh) ---------------- */
+    yield 0;
     const decA = new Acc();
     const WHITE = [0.56, 0.56, 0.54], YELLOW = [0.56, 0.36, 0.035];
     const DN = 4;
@@ -1213,6 +1226,7 @@
     }
 
     /* ---------------- FURNITURE (signs, posts, poles) ---------------- */
+    yield 0;
     const furA = new Acc(), lensA = new Acc(), poolA = new Acc();
     const SN = 4;
     const STEEL = [0.3, 0.31, 0.32], DARK = [0.06, 0.065, 0.07], CONC = [0.24, 0.235, 0.225];
@@ -1287,6 +1301,7 @@
       nSigns++;
     }
     // cobra-head poles: tapered hex shaft, footing, arm, head; lens + pool
+    yield 0;
     const POLE_H = 7.6, ARM = 2.0;
     const colliders = o.colliders;
     for (const L of lights) {
@@ -1332,6 +1347,7 @@
     }
 
     /* ---------------- MATERIALS + MESHES ---------------- */
+    yield 0;
     const roadTex = bakeRoad(THREE, lo, o.renderer), juncTex = bakeJunction(THREE, lo, o.renderer);
     const walkTex = bakeWalk(THREE, lo, o.renderer), decTex = bakeDecals(THREE, lo, o.renderer), signTex = bakeSigns(THREE, lo, o.renderer);
     const lam = function (map, extra) {
@@ -1410,7 +1426,7 @@
   }
 
   CBZ.islandRoadKit = {
-    plan: plan, build: build, makeZones: makeZones,
+    plan: plan, build: build, steps: steps, makeZones: makeZones,
     bakeRoad: bakeRoad, bakeJunction: bakeJunction, bakeWalk: bakeWalk, bakeDecals: bakeDecals, bakeSigns: bakeSigns,
     C: { HW: HW, WALK: WALK, GUT: GUT, LIFT: LIFT, CURB: CURB, RAMP: RAMP, APP: APP },
   };

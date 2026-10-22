@@ -126,7 +126,7 @@
      or a URL asks for it (?mode=survival). systems/state.js already starts
      with `setMode(g.mode || "escape")`, so this is the whole mechanism. An
      unknown value is ignored rather than guessed at. */
-  const MODES = { city: 1, escape: 1, survival: 1, gungame: 1, sharksim: 1 };
+  const MODES = { city: 1, escape: 1, survival: 1, gungame: 1, sharksim: 1, archipelago: 1 };
   let startMode = CBZ.START_MODE;
   try {
     const q = typeof location !== "undefined" && location.search
@@ -144,7 +144,8 @@
      WORLD plumbing — ground, water, swim, bots, HUD, camera — and the systems
      gating that support ask this predicate. The disaster DIRECTOR itself is
      survival's alone and keeps asking g.mode === "survival". */
-  CBZ.ISLAND_MODES = { survival: 1, sharksim: 1 };
+  // (archipelago: world/archipelago.js, many copies of the same island on one sea)
+  CBZ.ISLAND_MODES = { survival: 1, sharksim: 1, archipelago: 1 };
   CBZ.islandModeOn = function (m) { return !!CBZ.ISLAND_MODES[m || (CBZ.game && CBZ.game.mode)]; };
   /* WHERE YOU CAN DRIVE AND FLY. The vehicle stack (city/vehicles.js's
      driven-car loop, city/playeraircraft.js's flight loop, the chase camera,
@@ -158,7 +159,7 @@
      car left in CBZ.cityCars from an earlier session must never be solid on
      the island. Untagged records are Gang City's; a record built while
      another vehicle world was live carries `_world` = that mode. */
-  CBZ.VEHICLE_MODES = { city: 1, survival: 1 };
+  CBZ.VEHICLE_MODES = { city: 1, survival: 1, archipelago: 1 };
   CBZ.vehicleModeOn = function (m) { return !!CBZ.VEHICLE_MODES[m || (CBZ.game && CBZ.game.mode)]; };
   CBZ.vehicleInWorld = function (v, m) {
     return ((v && v._world) || "city") === (m || (CBZ.game && CBZ.game.mode) || "city");

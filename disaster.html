@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 428
+     Natural Disaster Survival, standing alone: index.html minus the 430
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -25,7 +25,7 @@
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=feel1020">
 <link rel="stylesheet" href="css/survival_hud.css?v=pace1015">
-<link rel="stylesheet" href="css/screens.css?v=deathcam1009">
+<link rel="stylesheet" href="css/screens.css?v=isles1022">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=mob1022b">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
@@ -59,7 +59,7 @@
 try{m=new URLSearchParams(location.search).get("mode");}catch(e){}
 if(!m)m=C.START_MODE;
 if(!m){try{m=localStorage.getItem("cbz.hub.last");}catch(e){}}
-var cls={city:["mode-city"],survival:["mode-survival"],gungame:["mode-gungame"],sharksim:["mode-survival","mode-sharksim"],escape:[]}[m];
+var cls={city:["mode-city"],survival:["mode-survival"],gungame:["mode-gungame"],sharksim:["mode-survival","mode-sharksim"],archipelago:["mode-survival","mode-archipelago"],escape:[]}[m];
 if(!cls)return;
 for(var i=0;i<cls.length;i++)document.body.classList.add(cls[i]);
 if(m==="sharksim"){document.documentElement.classList.add("boot-sharksim");
@@ -233,6 +233,13 @@ document.body.appendChild(b);}}catch(e){}})();
           <div class="row"><span class="keycol"><span class="kbd">Mouth</span></span><span class="lab">Bite is automatic. Point it at food</span></div>
         </div>
       </details>
+    </div>
+
+    <!-- THE ISLES (world/archipelago.js): islands far apart on one sea -->
+    <div class="mode-archipelago-only">
+      <div class="hub-kicker">Five islands, one sea</div>
+      <div class="logo">THE <span class="z">ISLES</span></div>
+      <div class="sub">Take the jet. Take the boat.</div>
     </div>
 
     <!-- GUN GAME mode (map buttons are built by src/modes/gungame.js from its
@@ -435,7 +442,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=feel1020"></script>
+<script src="src/config.js?v=isles1022"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=peak1014c"></script>
@@ -914,7 +921,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=hands1022"></script>
+<script src="src/systems/state.js?v=mhands1isles1"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -968,15 +975,15 @@ document.body.appendChild(b);}}catch(e){}})();
      world/island_building.js is each building's stairs, landings, slabs and
      roof as data (node-checkable by tools/island-stairs-check.mjs); the
      builder lays exactly what it says, so it loads first. -->
-<script src="src/world/island_roads.js?v=roads2town"></script>
-<script src="src/world/island_plan.js?v=plan1"></script>
+<script src="src/world/island_roads.js?v=isles1022"></script>
+<script src="src/world/island_plan.js?v=isles1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=lpanel1022"></script>
-<script src="src/world/island_dressing.js?v=dress2town"></script>
+<script src="src/world/disaster_arena.js?v=mlpanelisles1"></script>
+<script src="src/world/island_dressing.js?v=isles1022"></script>
 <script src="src/systems/grapple.js?v=landblood1022"></script>
-<script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
-<script src="src/modes/survival.js?v=island1014"></script>
+<script src="src/entities/survivorbot.js?v=isles1022"></script>
+<script src="src/modes/survival.js?v=isles1022"></script>
 <!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
      instant death, i-frames, no chip, physical shelter, regen. survival.js's
      surv.hurt hands the player to it. -->
@@ -1364,7 +1371,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carlod.js?v=mrg10200048"></script>
 <script src="src/city/vehicles.js?v=voice1022"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
-<script src="src/city/playeraircraft.js?v=landblood1022"></script>
+<script src="src/city/playeraircraft.js?v=mlandblisles1"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1397,7 +1404,12 @@ document.body.appendChild(b);}}catch(e){}})();
      cars (vehicles.js), a rooftop helipad with a flyable helicopter
      (playeraircraft.js CBZ.airParkFlyable), the island's weather fed into both.
      After vehicles.js, playeraircraft.js, bailout.js and aircraft_doors.js. -->
-<script src="src/world/island_vehicles.js?v=realcars1021"></script>
+<script src="src/world/island_vehicles.js?v=isles1022"></script>
+<!-- THE ARCHIPELAGO (mode "archipelago"): the disaster island's package built
+     many times over on one sea, kilometres apart, streamed in as you near
+     each one and dropped behind you. archipelago_map.js is the map as data;
+     archipelago.js the sea, the far forms, the streamer and the mode. After
+     disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the
@@ -2225,7 +2237,7 @@ document.body.appendChild(b);}}catch(e){}})();
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
 <script src="src/world/water_underwater.js?v=silt1020"></script>
-<script src="src/world/water_buoyancy.js?v=waterv2"></script>
+<script src="src/world/water_buoyancy.js?v=isles1022"></script>
 <!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
      over, and a hull that goes over stays over — inverted, keel up, its people
      in the water — then floods and sinks or drifts. Registers at order 38.4,

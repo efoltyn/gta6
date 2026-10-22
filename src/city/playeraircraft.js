@@ -1035,9 +1035,12 @@
   }
   function parkFlyable(o) {
     o = o || {};
-    if (!arenaRoot() || !CBZ.airframes) return null;
-    const grp = buildHeliAirframe({ variant: o.variant || "vip", name: o.name || "Helicopter", livery: o.livery, pilot: false });
-    const craft = makeCraft("heli", { group: grp, armed: false, name: o.name || "Helicopter" });
+    // kind "jet": the owned fighter's airframe (buildJet), unarmed, parked on
+    // a runway threshold (the archipelago's airstrips); default the heli
+    const isJet = o.kind === "jet";
+    if (!arenaRoot() || (!isJet && !CBZ.airframes)) return null;
+    const grp = isJet ? buildJet() : buildHeliAirframe({ variant: o.variant || "vip", name: o.name || "Helicopter", livery: o.livery, pilot: false });
+    const craft = makeCraft(isJet ? "jet" : "heli", { group: grp, armed: false, name: o.name || (isJet ? "Jet" : "Helicopter") });
     if (!craft) return null;
     craft.externalGroup = false;          // ours, built here: no airport registry behind it
     craft.rotorParts = null;
@@ -1046,7 +1049,9 @@
     // THE SKIDS ON THE DECK. The flight clamp's default rest height is the
     // belly plus GROUND_PAD, a margin for typed belly numbers; this
     // airframe's belly is MEASURED (buildHeliAirframe), so it rests on its skids.
-    craft.groundOffset = craft.belly + 0.02;
+    // A jet sits on its gear the way the hangar jet does (placeJet).
+    craft.groundOffset = isJet ? craft.belly + 0.4 : craft.belly + 0.02;
+    if (isJet) { craft.speed = JET_MIN; craft.throttle = JET_MIN; craft.airspeed = 0; craft.thr = null; craft.sag = 0; craft.onGround = true; }
     craft.heading = o.heading || 0; craft.pitch = 0; craft.roll = 0;
     craft.pos.set(o.x, (o.y || 0) + craft.groundOffset, o.z);
     craft.group.position.copy(craft.pos);
