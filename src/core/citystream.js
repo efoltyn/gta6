@@ -258,9 +258,10 @@
     const buses = busList();
     const marks = busHooks.map(function (h) { try { return h.mark(); } catch (e) { return null; } });
     const t0 = performance.now();
-    const outer = capturing; capturing = job;
+    // (core/texfree.js stamps every canvas / data texture born meanwhile as this job's)
+    const outer = capturing, ownerWas = CBZ._texOwner; capturing = job; CBZ._texOwner = job;
     try { body(); } catch (e) { console.error("[stream job " + (job.name || "?") + "]", e); }
-    capturing = outer;
+    capturing = outer; CBZ._texOwner = ownerWas;
     // late pools (glass, room deco, masonry) of what it built: now, so they are this job's
     if (!(opt && opt.noPost) && CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
     const R = { ms: performance.now() - t0, bus: [], data: [], hooks: [], objs: [], cols: null, plats: null };
@@ -582,10 +583,16 @@
       removeFrom(jobs, kids);
     }
     if (job.state === "built") park(job);
-    // (its textures leave the GPU too: three uploads a texture again from its
-    // image the next time anything draws it, so this is safe for a shared one;
-    // a texture whose canvas core/texfree.js already released is left alone,
-    // it could only come back as 1x1)
+    /* ITS TEXTURES LEAVE THE GPU TOO, by the one rule (core/texfree.js
+       CBZ.texDisposable): one three can upload again goes even if shared
+       (the next draw brings it back); one that cannot (a released canvas,
+       packed splat bytes, a render target's texture) goes only when THIS
+       job made it and no _shared (cached) material holds it. That second
+       half was missing: every free left the job's released canvases and
+       packed splats on the GPU for good, and each re-run made new ones (the
+       Cape Harbor airfield's 4096 ground, 42 MB, once per drive past it; a
+       town's two splats per round trip). A self-painting canvas is never
+       READ here (that would paint it just to throw the GPU copy away). */
     const texDone = new Set();
     for (const it of job.objs || []) {
       if (it.o.parent) it.o.parent.remove(it.o);
@@ -595,21 +602,12 @@
         const mats = c.material ? (Array.isArray(c.material) ? c.material : [c.material]) : null;
         if (mats) for (const m of mats) {
           if (!m) continue;
+          const opts = { shared: true, owner: m._shared ? null : job };
           for (const k in m) {
             const t = m[k];
-            // ONLY a canvas texture whose canvas is intact: a render target's
-            // texture (the environment map, a feed) has no pixels to upload
-            // again, and disposing one made every later render throw (the
-            // world stopped drawing after a drive: orchestrator, 8540e9bc)
-            if (!t || !t.isCanvasTexture || texDone.has(t) || t._cbzFreed) continue;
-            // a self-painting canvas (core/texfree.js lazyCanvasTexture) repaints
-            // on its next upload: reading .image here would PAINT it, just to
-            // throw the GPU copy away, and keep that canvas while parked
-            if (t._cbzLazy) { texDone.add(t); t.dispose(); if (t._cbzRelease) t._cbzRelease(); continue; }
-            const im = t.image;
-            if (!im || typeof im.getContext !== "function" || !(im.width > 1)) continue;
+            if (!t || !t.isTexture || texDone.has(t)) continue;
             texDone.add(t);
-            t.dispose();
+            if (CBZ.texDisposable && CBZ.texDisposable(t, opts)) CBZ.texDispose(t);
           }
         }
       });

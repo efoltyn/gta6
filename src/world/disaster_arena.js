@@ -6966,19 +6966,18 @@
         // (each material's maps once: a shared material is on thousands of meshes)
         if (!m || mseen.has(m)) continue;
         mseen.add(m);
-        for (const k in m) { const t = m[k]; if (t && t.isTexture && !t._shared && !t._cbzFreed) texs.add(t); }
+        for (const k in m) { const t = m[k]; if (t && t.isTexture && !t._shared) texs.add(t); }
       }
     }
     let n = 0;
     for (const g of geos) { try { g.dispose(); } catch (e) {} if ((++n & 31) === 31 && late()) yield 0; }
+    // (the one rule, core/texfree.js CBZ.texDisposable: an island owns the data
+    // textures under its root, its splats among them, even once their bytes
+    // are packed away; a released canvas could only come back as 1x1)
+    const opts = { dataGone: true };
     for (const t of texs) {
       if ((++n & 15) === 15 && late()) yield 0;
-      try {
-        if (t._cbzLazy) { t.dispose(); if (t._cbzRelease) t._cbzRelease(); continue; }
-        // (a canvas core/texfree.js already released could only come back as 1x1)
-        if (t.isCanvasTexture) { const im = t.image; if (!im || typeof im.getContext !== "function" || !(im.width > 1)) continue; }
-        t.dispose();
-      } catch (e) {}
+      try { if (CBZ.texDisposable(t, opts)) CBZ.texDispose(t); } catch (e) {}
     }
   };
   CBZ.freeTree = function (root) {
