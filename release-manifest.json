@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "fc075397f2730ce9203bc831ccb869283cba559c",
-  "createdAt": "2026-10-22T08:20:07.819Z",
+  "sourceCommit": "0e2c2f5af4f19051858aacb2f4c53f889e619363",
+  "createdAt": "2026-10-22T10:00:39.332Z",
   "fileCount": 1458,
-  "totalBytes": 52437598,
+  "totalBytes": 52441232,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -1913,8 +1913,8 @@
     },
     {
       "file": "src/city/streetlife.js",
-      "bytes": 65337,
-      "sha256": "49a5a49e80a30a8e43185ad91b301227caef5d86db5364d0a43d1cfedd741162"
+      "bytes": 66228,
+      "sha256": "9ea9b9f975fa3e06648b6976398cfa7b86f2eaa091f27fee5df0c26efd4297b6"
     },
     {
       "file": "src/city/structural.js",
@@ -2268,8 +2268,8 @@
     },
     {
       "file": "src/core/prisonlazy.js",
-      "bytes": 7617,
-      "sha256": "05f34da62cd191f1be282dde9a86d205f053de43c8aa09f9a8b1a143b927cb75"
+      "bytes": 7654,
+      "sha256": "00bbf0decf391aa7a51f834c63f7b0aaa734cc34000161e73b67630d5d450af9"
     },
     {
       "file": "src/core/profile.js",
@@ -2458,8 +2458,8 @@
     },
     {
       "file": "src/entities/pedinstance.js",
-      "bytes": 25755,
-      "sha256": "e1a292738fdf480c7fa61df38758ea95f9509b69436ec0217f61ebce16ee4b10"
+      "bytes": 25845,
+      "sha256": "f1419fb45e5d4aee00f7b48dd053fcf9bea539a997c927476298b23dc46e8a2e"
     },
     {
       "file": "src/entities/player.js",
@@ -2513,8 +2513,8 @@
     },
     {
       "file": "src/entities/watch.js",
-      "bytes": 41314,
-      "sha256": "2e477b1593368b4d4195df066d278a5124c034cc3af04a9370d9c7ef20e4cb09"
+      "bytes": 41767,
+      "sha256": "160c7873b3f63f88d0e8ac8de1c919b5e78917c8e3be183f4666b01c03539ec1"
     },
     {
       "file": "src/games/_template.js",
@@ -4613,8 +4613,8 @@
     },
     {
       "file": "src/world/archipelago.js",
-      "bytes": 24681,
-      "sha256": "c4540efd4cab315b6951c975e26509271254a40190d3c3b27762c6c99883317d"
+      "bytes": 25350,
+      "sha256": "c4eafe181346992dbd5a4d4d69037a1521449b25e6474c49305ec155312c0ba6"
     },
     {
       "file": "src/world/archipelago_map.js",
@@ -4658,8 +4658,8 @@
     },
     {
       "file": "src/world/corridorkit.js",
-      "bytes": 26552,
-      "sha256": "8476dde51193b1c8ba6054316521200167f4ef920db7af67d5365204d95b982c"
+      "bytes": 26618,
+      "sha256": "f07cdc2dbc8a1ad1198d62fe2b1134f5f4840f226d377ed0a6ddd5c524dcb4c7"
     },
     {
       "file": "src/world/corridors.js",
@@ -4678,8 +4678,8 @@
     },
     {
       "file": "src/world/disaster_arena.js",
-      "bytes": 162766,
-      "sha256": "255382b42de0f07043326110636a2cd6cbc7d91763b3049a85506b876bc36613"
+      "bytes": 163907,
+      "sha256": "6f568bbcf01c5fcfcf8838774a538979dc03ee640dfbaeb8b8d314d27f0f7cd1"
     },
     {
       "file": "src/world/door.js",
@@ -4808,8 +4808,8 @@
     },
     {
       "file": "src/world/island_roads.js",
-      "bytes": 44054,
-      "sha256": "c085e2331132d3fea736c5750ec424c12ffd3896acfaea5f9367320de124c326"
+      "bytes": 44121,
+      "sha256": "792d10c16a554aaf763572556d239ebf063cf775e2d7fc07797edfb923d45021"
     },
     {
       "file": "src/world/island_shops.js",
@@ -4823,13 +4823,13 @@
     },
     {
       "file": "src/world/island_vehicles.js",
-      "bytes": 28354,
-      "sha256": "4dda68bf15f4df5b68bdcb31c3c6b241a7619729b1f1337fab48f507881d167d"
+      "bytes": 28414,
+      "sha256": "9a6592edc773edfdf1303ec177f93cbbce61a84771027e821040d830a40b453b"
     },
     {
       "file": "src/world/island_venue.js",
-      "bytes": 8360,
-      "sha256": "cb462603a27cb2c3870e7c4f756d266f62a667d75b1989ff896eb688c4e8f162"
+      "bytes": 8440,
+      "sha256": "2fa7174f3fc4dc9b1dfd282ba16d1e92b2d2ac788399117a8d43d6e1cdc73f77"
     },
     {
       "file": "src/world/ladderkit.js",
@@ -7188,28 +7188,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 65783,
-      "sha256": "880060a1540547203bfb38b5d4f048a4603254f39ae7771d39da1c0122034712"
+      "bytes": 65799,
+      "sha256": "0c141ae9b1227f8b5c3f843ce65ae102fc0f40045521388ccd08a02b313feca0"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 65826,
-      "sha256": "123e1385ca5d7137ee96b1cc3d214083782f1d8a6bfca778333da32487b4a3d8"
+      "bytes": 65842,
+      "sha256": "3cd5adaf4f6c966fb60ffdc8c4ad8a7f5c64975eff27bf2138b7881f0502e09c"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 65795,
-      "sha256": "0f15ad7db9b7cfb30bcf9d042044ad1dae04bb7b37f393cdd29d6b2c2c0b7f5b"
+      "bytes": 65811,
+      "sha256": "82502c57310833ecbf7531b221c4e91fd456b022a44481cbeacf87f9d5ea07b7"
     },
     {
       "file": "gang-city.html",
-      "bytes": 65750,
-      "sha256": "cee1a0a12e7df619c9c4dd393237ebca8aa61393deab9e1e5017681881159343"
+      "bytes": 65766,
+      "sha256": "9a73278451b789fee9b4ce532f96dcf28070b7b77f62b02beaee807a189dd9c6"
     },
     {
       "file": "gun-game.html",
-      "bytes": 65772,
-      "sha256": "1ccdfc84a0f47d442786153bb5ad3092b3df64c61146d3f61dab6ae0c9c3fdf4"
+      "bytes": 65788,
+      "sha256": "d364b86fb00bc52c943ff426cf7baa95e17b7a136f8a5be42105ac9b48c9b883"
     },
     {
       "file": "games/battle.html",
