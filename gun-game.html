@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=feel1020">
 <link rel="stylesheet" href="css/survival_hud.css?v=pace1015">
-<link rel="stylesheet" href="css/screens.css?v=deathcam1009">
+<link rel="stylesheet" href="css/screens.css?v=isles1022">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=mob1022b">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
@@ -42,7 +42,7 @@
 try{m=new URLSearchParams(location.search).get("mode");}catch(e){}
 if(!m)m=C.START_MODE;
 if(!m){try{m=localStorage.getItem("cbz.hub.last");}catch(e){}}
-var cls={city:["mode-city"],survival:["mode-survival"],gungame:["mode-gungame"],sharksim:["mode-survival","mode-sharksim"],escape:[]}[m];
+var cls={city:["mode-city"],survival:["mode-survival"],gungame:["mode-gungame"],sharksim:["mode-survival","mode-sharksim"],archipelago:["mode-survival","mode-archipelago"],escape:[]}[m];
 if(!cls)return;
 for(var i=0;i<cls.length;i++)document.body.classList.add(cls[i]);
 if(m==="sharksim"){document.documentElement.classList.add("boot-sharksim");
@@ -193,6 +193,13 @@ document.body.appendChild(b);}}catch(e){}})();
           <div class="row"><span class="keycol"><span class="kbd">Mouth</span></span><span class="lab">Bite is automatic. Point it at food</span></div>
         </div>
       </details>
+    </div>
+
+    
+    <div class="mode-archipelago-only">
+      <div class="hub-kicker">Five islands, one sea</div>
+      <div class="logo">THE <span class="z">ISLES</span></div>
+      <div class="sub">Take the jet. Take the boat.</div>
     </div>
 
     
@@ -365,7 +372,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 
 
-<script src="src/config.js?v=feel1020"></script>
+<script src="src/config.js?v=isles1022"></script>
 
 <script src="src/core/texfree.js?v=peak1014c"></script>
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
@@ -685,7 +692,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/inventory.js?v=haskbd1014"></script>
 
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=hands1022"></script>
+<script src="src/systems/state.js?v=mhands1isles1"></script>
 
 <script src="src/systems/glcontext.js?v=safeboot1014"></script>
 
@@ -712,15 +719,15 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 
-<script src="src/world/island_roads.js?v=roads2town"></script>
-<script src="src/world/island_plan.js?v=plan1"></script>
+<script src="src/world/island_roads.js?v=isles1022"></script>
+<script src="src/world/island_plan.js?v=isles1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=lpanel1022"></script>
-<script src="src/world/island_dressing.js?v=dress2town"></script>
+<script src="src/world/disaster_arena.js?v=mlpanelisles1"></script>
+<script src="src/world/island_dressing.js?v=isles1022"></script>
 <script src="src/systems/grapple.js?v=landblood1022"></script>
-<script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
-<script src="src/modes/survival.js?v=island1014"></script>
+<script src="src/entities/survivorbot.js?v=isles1022"></script>
+<script src="src/modes/survival.js?v=isles1022"></script>
 
 <script src="src/systems/disasterhurt.js?v=feel1020"></script>
 <script src="src/modes/shark_sim.js?v=nored0930"></script>
@@ -1020,7 +1027,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/vehicles.js?v=voice1022"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
-<script src="src/city/playeraircraft.js?v=landblood1022"></script>
+<script src="src/city/playeraircraft.js?v=mlandblisles1"></script>
 
 <script src="src/city/cockpit_panel.js?v=cockpit1"></script>
 <script src="src/city/cockpit_shapes.js?v=cockpit1x0"></script>
@@ -1031,7 +1038,10 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <script src="src/city/aircraft_doors.js?v=island1014"></script>
 
-<script src="src/world/island_vehicles.js?v=realcars1021"></script>
+<script src="src/world/island_vehicles.js?v=isles1022"></script>
+
+<script src="src/world/archipelago_map.js?v=isles1022"></script>
+<script src="src/world/archipelago.js?v=isles1022"></script>
 
 <script src="src/city/vehicle_hold.js?v=cd0929"></script>
 
@@ -1430,7 +1440,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 
 <script src="src/world/water_underwater.js?v=silt1020"></script>
-<script src="src/world/water_buoyancy.js?v=waterv2"></script>
+<script src="src/world/water_buoyancy.js?v=isles1022"></script>
 
 <script src="src/world/water_stability.js?v=capsize1"></script>
 <script src="src/world/water_wake.js?v=water1011"></script>
