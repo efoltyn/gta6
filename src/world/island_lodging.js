@@ -187,11 +187,15 @@
       { n: [-1, 0], w: In.x1, a0: In.z0, a1: In.z1 },
       { n: [0, -1], w: In.z1, a0: In.x0, a1: In.x1 },
     ];
+    // a third of the way in first (seen from the door and across the lobby),
+    // then out from there
+    const TS = [];
+    for (let t = 0.12; t <= 0.88 + 1e-6; t += 0.08) TS.push(t);
+    TS.sort(function (p, q) { return Math.abs(p - 0.36) - Math.abs(q - 0.36); });
     for (const Wl of walls) {
       const span = Wl.a1 - Wl.a0;
       if (span < L + 0.6) continue;
-      // nearer the front first (a desk faces the people coming in)
-      for (let t = 0.12; t <= 0.88; t += 0.08) {
+      for (const t of TS) {
         const a = Wl.a0 + 0.3 + L / 2 + (span - 0.6 - L) * t;
         const along = Wl.n[0] !== 0 ? "z" : "x";
         const w0 = Wl.w + (Wl.n[0] || Wl.n[1]) * 0.03, w1 = Wl.w + (Wl.n[0] || Wl.n[1]) * DEEP;
@@ -425,7 +429,7 @@
     const pr = PRICE[use];
     room.price = pr[0] === pr[1] ? pr[0] : pr[0] + 5 * Math.round(h01(b.oz, b.ox, 0x9e1) * (pr[1] - pr[0]) / 5);
     try {
-      room.site = deskSite(b);
+      room.site = b._lodgeSite || deskSite(b);
       if (room.site) buildDesk(room, room.own);
       if (use === "hotel") buildHotelRoom(room, room.own);
       else if (A) motelRoom(room, A);
@@ -455,10 +459,89 @@
         // (the fit itself waits for the island to join the world: scan()
         // below; this hook only gives the room back when the venue goes)
         V.on(use, function (b) {
-          return function () { for (const room of S.rooms.slice()) if (room.b === b) drop(room); };
+          // a hotel's lobby is a hotel lobby: furnished here, while the island
+          // joins the world (the front desk itself is fit() below, on the
+          // spot chosen now and kept clear)
+          if (use === "hotel") { try { dressLobby(b); } catch (e) { console.error("[hotel lobby]", e); } }
+          return function () { b._lodgeSite = null; for (const room of S.rooms.slice()) if (room.b === b) drop(room); };
         });
       } catch (e) {}
     }
+  }
+
+  /* ---- THE HOTEL LOBBY ---------------------------------------------------
+     The tower's lobby furniture out (CBZ.islandVenue.clear), the desk's
+     spot chosen and kept, and the lobby round it (world/island_fitkit.js
+     dress): a stone floor, a runner from the street door to the lifts, the
+     sitting group on the far side (a sofa, two armchairs, the low table on
+     a rug), palms in the corners, the luggage trolley by the desk, the
+     hotel's name on the wall over the desk. */
+  function dressLobby(b) {
+    const IV = CBZ.islandVenue, FIT = CBZ.islandFit;
+    if (!IV || !FIT || !FIT.dress || !b.interior || b._lodgeSite) return;
+    IV.clear(b, 0);
+    const site = deskSite(b);
+    b._lodgeSite = site;
+    const In = b.interior, F0 = IV.floor(b, 0), y = F0.yLocal;
+    const keep = [];
+    let signAt = null;
+    if (site) {
+      const n = site.n, L = site.L;
+      const P = function (off, a) { return site.along === "z" ? [site.wall + n[0] * off, a] : [a, site.wall + n[1] * off]; };
+      const c0 = P(0, site.a - L / 2 - 0.5), c1 = P(3.2, site.a + L / 2 + 0.9);
+      keep.push({ x0: Math.min(c0[0], c1[0]), x1: Math.max(c0[0], c1[0]), z0: Math.min(c0[1], c1[1]), z1: Math.max(c0[1], c1[1]) });
+      const sp = P(0.02, site.a);
+      signAt = { lx: sp[0], lz: sp[1], ly: FIT.ceil(b, 0) - 0.5, lyaw: Math.atan2(n[0], n[1]), w: 2.0 };
+      // the hotel's office safe behind the desk, at its far end from the trolley
+      if (IV.safe && !b._safeDone) {
+        const q = P(0.42, site.a - L / 2 - 0.5);
+        const inside = q[0] - 0.45 > In.x0 && q[0] + 0.45 < In.x1 && q[1] - 0.45 > In.z0 && q[1] + 0.45 < In.z1;
+        if (inside) try { IV.safe(b, { k: 0, lx: q[0], lz: q[1], yaw: Math.atan2(n[0], n[1]), grade: "office", of: 6000 + 9000 * FIT.hash(b.name || "hotel"), name: "office safe" }); } catch (e) {}
+        keep.push({ x0: q[0] - 0.6, x1: q[0] + 0.6, z0: q[1] - 0.6, z1: q[1] + 0.6 });
+      }
+    }
+    const lift = (In.keepOut || []).filter(function (r) { return r.why === "lift"; })[0] || null;
+    FIT.dress(b, {
+      kind: "hotel-lobby", keep: keep, lights: false,
+      floor: { col: 0xd8d0c0, border: 0x6b5a48 },
+      sign: b.name || null, signAt: signAt, signBg: "#1a120c", signFg: "#e2c98a", signBack: 0x2a1a10,
+      extra: function (D) {
+        const K = D.K, R = D.R;
+        // the runner from the street door to the lifts
+        const zr1 = lift ? lift.z0 : R.z0 + 4;
+        K.lbox(0, y + 0.011, (R.z0 + zr1) / 2, 1.4, 0.006, zr1 - R.z0 - 0.2, 0x6b1f28);
+        K.lbox(0, y + 0.013, (R.z0 + zr1) / 2, 1.2, 0.006, zr1 - R.z0 - 0.4, 0x8a2a32);
+        // the sitting group, on the side away from the desk
+        const far = site && site.n[0] > 0 ? 1 : -1;     // desk on the -x wall: sit on the +x side
+        const sx = far > 0 ? R.x1 : R.x0;
+        for (const zc of [(R.z0 + R.z1) / 2, R.z0 + (R.z1 - R.z0) * 0.3, R.z0 + (R.z1 - R.z0) * 0.7]) {
+          const r = { x0: far > 0 ? sx - 3.1 : sx, x1: far > 0 ? sx : sx + 3.1, z0: zc - 1.4, z1: zc + 1.4 };
+          if (!D.place(r)) continue;
+          const fx = -far;                                   // facing into the lobby
+          K.lbox(sx + fx * 1.55, y + 0.012, zc, 2.4, 0.006, 2.4, 0x3a4a5a);
+          D.furnish("sofa", sx + fx * 0.48, zc, fx > 0 ? Math.PI / 2 : -Math.PI / 2, { len: 2.1, tone: { cloth: 0x6b4a33, wood: 0x2a1a10 } });
+          D.furnish("coffee", sx + fx * 1.55, zc, fx > 0 ? Math.PI / 2 : -Math.PI / 2, { len: 1.0, deep: 0.55, tone: { wood: 0x2a1a10 } });
+          for (const dz of [-0.6, 0.6]) D.furnish("armchair", sx + fx * 2.6, zc + dz, fx > 0 ? -Math.PI / 2 : Math.PI / 2, { tone: { cloth: 0x3a4a5a, wood: 0x2a1a10, frame: 0x2a1a10 } });
+          break;
+        }
+        // palms in the corners
+        for (const c of [[R.x0 + 0.45, R.z0 + 0.45], [R.x1 - 0.45, R.z0 + 0.45], [R.x0 + 0.45, R.z1 - 0.45], [R.x1 - 0.45, R.z1 - 0.45]]) {
+          if (D.place({ x0: c[0] - 0.4, x1: c[0] + 0.4, z0: c[1] - 0.4, z1: c[1] + 0.4 })) D.furnish("planter", c[0], c[1], 0, { kind: "tree", s: 1.3 });
+        }
+        // the luggage trolley by the desk
+        if (site) {
+          const n = site.n, a = site.a + site.L / 2 + 0.6;
+          const p = site.along === "z" ? [site.wall + n[0] * 0.6, a] : [a, site.wall + n[1] * 0.6];
+          if (D.place({ x0: p[0] - 0.45, x1: p[0] + 0.45, z0: p[1] - 0.45, z1: p[1] + 0.45 })) {
+            K.lbox(p[0], y + 0.12, p[1], 0.9, 0.04, 0.55, 0x8a6a3a, { solid: true, y1: y + 1.9 });
+            for (const sx2 of [-0.42, 0.42]) K.lbox(p[0] + (site.along === "z" ? 0 : sx2), y + 1.0, p[1] + (site.along === "z" ? sx2 : 0), 0.04, 1.8, 0.04, 0xc9a44a);
+            K.lbox(p[0], y + 1.88, p[1], site.along === "z" ? 0.05 : 0.9, 0.05, site.along === "z" ? 0.9 : 0.05, 0xc9a44a);
+            K.lbox(p[0], y + 0.36, p[1], 0.5, 0.44, 0.3, 0x2a3a5a);
+            K.lbox(p[0], y + 0.68, p[1], 0.4, 0.2, 0.26, 0x6b2a2a);
+          }
+        }
+      },
+    });
   }
 
   // the islands in the world: fit what is new, drop what has gone

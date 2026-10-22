@@ -255,15 +255,18 @@
     const KIT = CBZ.storeFixtureKit;
     const tx = jw.tx, tz = jw.tz;
     const yaw = KIT.yawOf(tx, tz);
-    // long side of every case faces the aisle (runs along the wall tangent)
-    const gw = Math.abs(tx) * CASE_W + Math.abs(tz) * CASE_D;
-    const gd = Math.abs(tz) * CASE_W + Math.abs(tx) * CASE_D;
+    // long side of every case faces the aisle (the counter's tangent, or the
+    // side wall it stands along)
     const k = KIT.create();
     const BRASS = 0xc9a44a;
 
     jw.cases.forEach((anchor, idx) => {
       const vault = !!anchor.vault;
-      k.frame(anchor.x, 0, anchor.z, yaw);
+      // a case on a side wall faces into the room (anchor.fx, fz: its front)
+      const aT = anchor.fx != null ? { x: anchor.fz, z: -anchor.fx } : { x: tx, z: tz };
+      const yawA = anchor.fx != null ? KIT.yawOf(aT.x, aT.z) : yaw;
+      const gwA = Math.abs(aT.x) * CASE_W + Math.abs(aT.z) * CASE_D, gdA = Math.abs(aT.z) * CASE_W + Math.abs(aT.x) * CASE_D;
+      k.frame(anchor.x, 0, anchor.z, yawA);
       const W = CASE_W, Dp = CASE_D, BODY = vault ? 0x2c313a : 0x3a2618, VEL = vault ? 0x141016 : 0x3c1420;
       k.box(0, FY + 0.05, 0, W - 0.06, 0.1, Dp - 0.06, 0x111214);                            // recessed kick
       k.box(0, FY + 0.1 + (DECK - 0.12) / 2, 0, W, DECK - 0.12, Dp, BODY, vault ? "metal" : "solid");
@@ -288,15 +291,15 @@
         k.cyl(0, gy1 - 0.014, STEP_Z, 0.005, 0.005, W - 0.06, BRASS, "metal", 0, 0, PI / 2);  // the pin-spot rod
         props++;
       }
-      const pane = addPane(S, group, anchor.x, FY + DECK + GLASS_H / 2, anchor.z, gw - 0.04, GLASS_H, gd - 0.04);
+      const pane = addPane(S, group, anchor.x, FY + DECK + GLASS_H / 2, anchor.z, gwA - 0.04, GLASS_H, gdA - 0.04);
       // keep the body solid for walkers
-      const col = { minX: anchor.x - gw / 2 - 0.04, maxX: anchor.x + gw / 2 + 0.04,
-                    minZ: anchor.z - gd / 2 - 0.04, maxZ: anchor.z + gd / 2 + 0.04, y0: FY - 0.1, y1: FY + DECK + GLASS_H };
+      const col = { minX: anchor.x - gwA / 2 - 0.04, maxX: anchor.x + gwA / 2 + 0.04,
+                    minZ: anchor.z - gdA / 2 - 0.04, maxZ: anchor.z + gdA / 2 + 0.04, y0: FY - 0.1, y1: FY + DECK + GLASS_H };
       CBZ.colliders.push(col); S.cols.push(col);
 
       const cs = { idx, store: S, x: anchor.x, z: anchor.z, tier: anchor.tier | 0, vault,
                    pane, pieces: [], smashed: false, charged: false, restockT: 0 };
-      const slots = STOCK[Math.min(idx, STOCK.length - 1)] || [];
+      const slots = STOCK[anchor.stock != null ? anchor.stock : Math.min(idx, STOCK.length - 1)] || [];
       const resolved = [];
       for (let s = 0; s < slots.length; s++) { const r = resolvePiece(slots[s]); if (r) resolved.push(r); }
       const stepTop = FY + DECK + 0.012 + STEP_H;
@@ -307,7 +310,7 @@
         const model = buildPiece(r.kind);
         const wp = k.world(lat, mt.z);
         model.position.set(wp.x, mt.y, wp.z);
-        model.rotation.y = yaw;
+        model.rotation.y = yawA;
         group.add(model);
         if (vault) {                                                                          // one pin-spot per jackpot piece
           k.cyl(lat, gy1 - 0.028, STEP_Z, 0.016, 0.012, 0.018, 0x2a2d31, "metal");
@@ -317,7 +320,7 @@
         const card = KIT.tentCard();
         const cp = k.world(lat, Dp / 2 - 0.08);
         card.position.set(cp.x, FY + DECK + 0.012, cp.z);
-        card.rotation.y = yaw;
+        card.rotation.y = yawA;
         group.add(card);
         props++;
         cs.pieces.push({ name: r.name, label: r.label, value: r.value, drip: r.drip, visualId: r.visualId,
@@ -546,36 +549,59 @@
   }
 
   /* ---- THE ISLANDS: a jeweller per building (CBZ.islandVenue "jewelry") ---
-     Two retail cases either side of the aisle up front, the feature island
-     between them and the counter, the counter across the room, the vault
-     behind it beside the jeweller's post. */
+     A real jeweller's floor: a row of lit cases down each side wall, long
+     side to the aisle, the feature island with the headline watches in the
+     middle, the counter across the room, the vault case behind it beside
+     the jeweller's post, the office safe in the back room. The rest (the
+     dark panelling and the mirrors, the carpet, the pin-spots, the seats by
+     the window, the name) is city/shopfloor.js dressShop. */
   function islandFit(b, lot, job) {
     const F = SF(), IV = CBZ.islandVenue;
     if (!F || !IV || !econ() || !CBZ.islandGlass) return null;
-    const P0 = F.plan(b, { backRoom: false });
+    const P0 = F.plan(b, { backRoom: true });
     if (!P0) return null;
     IV.clear(b, 0);
+    const shell = P0.back ? F.shell(P0, lot, { goods: "boxes", wall: 0x3a2a20, trim: 0x2a1a10, safeGrade: "office", safeOf: 16000, safeName: "safe" }) : null;
     const gd = F.gunDescriptor(P0);
     const zone = F.counterZone(P0, gd);
     const C = gd.counter;
     const zFront = C.zL - C.D / 2;                         // the counter's customer face (local z)
-    const zCase = P0.z0 + 3.4;
-    const off = Math.max(1.2, Math.min(1.9, P0.W / 2 - 0.75 - CASE_W / 2));
-    const zMid = Math.min(zFront - 1.3, Math.max(zCase + 1.7, (zCase + zFront) / 2));
-    // the aisle runs in from the door (local x 0) when the room allows it
-    const edge = off + CASE_W / 2 + 0.7;
-    const ax = P0.x0 + edge <= P0.x1 - edge ? Math.max(P0.x0 + edge, Math.min(P0.x1 - edge, 0)) : P0.xc;
-    const cases = [
-      Object.assign(P0.w(ax - off, zCase), { tier: 0 }),
-      Object.assign(P0.w(ax + off, zCase), { tier: 0 }),
-      Object.assign(P0.w(ax, zMid), { tier: 1 }),
-      Object.assign(P0.w(P0.xc - Math.min(1.6, P0.W / 2 - 0.8), P0.wallFace - 0.62), { tier: 2, vault: true }),
-    ];
-    if (zMid > zFront - 1.0) cases.splice(2, 1);                                 // too shallow for the island case
+    const cases = [], keep = [];
+    const caseAt = function (lx, lz, o, along) {
+      cases.push(Object.assign(P0.w(lx, lz), o));
+      const hx = (along ? CASE_D : CASE_W) / 2 + 0.06, hz = (along ? CASE_W : CASE_D) / 2 + 0.06;
+      keep.push({ x0: lx - hx, x1: lx + hx, z0: lz - hz, z1: lz + hz });
+    };
+    // THE SIDE ROWS: from past the front walk to an aisle short of the counter
+    const z0c = P0.z0 + 1.45 + CASE_W / 2, z1c = zFront - 1.0 - CASE_W / 2, step = CASE_W + 0.3;
+    const nRow = z1c >= z0c ? Math.min(3, 1 + Math.floor((z1c - z0c) / step)) : 0;
+    const roomFor = P0.W - 2 * (0.12 + CASE_D) >= CASE_W + 2.0;
+    if (nRow && roomFor) {
+      for (const side of [-1, 1]) {
+        const lx = side < 0 ? P0.x0 + 0.12 + CASE_D / 2 : P0.x1 - 0.12 - CASE_D / 2;
+        const inn = P0.v(-side, 0);
+        for (let i = 0; i < nRow; i++) caseAt(lx, z0c + i * step, { tier: 0, stock: (i + (side > 0 ? 1 : 0)) % 2, fx: inn.x, fz: inn.z }, true);
+      }
+      const zMid = Math.min(zFront - 1.3, Math.max(z0c, (z0c + zFront) / 2));
+      if (zFront - zMid >= 1.3) caseAt(P0.xc, zMid, { tier: 1, stock: 2 }, false);
+    } else {
+      // a narrow shop: two retail cases either side of the aisle up front,
+      // the feature island between them and the counter
+      const zCase = P0.z0 + 3.4;
+      const off = Math.max(1.2, Math.min(1.9, P0.W / 2 - 0.75 - CASE_W / 2));
+      const zMid = Math.min(zFront - 1.3, Math.max(zCase + 1.7, (zCase + zFront) / 2));
+      const edge = off + CASE_W / 2 + 0.7;
+      const ax = P0.x0 + edge <= P0.x1 - edge ? Math.max(P0.x0 + edge, Math.min(P0.x1 - edge, 0)) : P0.xc;
+      caseAt(ax - off, zCase, { tier: 0, stock: 0 }, false);
+      caseAt(ax + off, zCase, { tier: 0, stock: 1 }, false);
+      if (zMid <= zFront - 1.0) caseAt(ax, zMid, { tier: 1, stock: 2 }, false);
+    }
+    caseAt(P0.xc - Math.min(1.6, P0.W / 2 - 0.8), P0.wallFace - 0.62, { tier: 2, vault: true, stock: 3 }, false);
     const clerk = F.postedClerk({ b: b, lot: lot, lx: zone.post.lx, lz: zone.post.lz, face: zone.post.face, armed: null, job: "jeweller" });
-    // the register in the counter, and the office safe behind it (city/islandmoney.js)
+    // the register in the counter, and the office safe (city/islandmoney.js):
+    // in the back room when there is one (the shell put it there)
     F.register(P0, gd, clerk, -C.L / 2 + 0.55, (lot.name || "jeweller") + " register");
-    if (IV.safe) {
+    if (!P0.back && IV.safe) {
       try { IV.safe(b, { k: 0, lx: P0.x1 - 0.5, lz: P0.wallFace - 0.55, yaw: -Math.PI / 2, grade: "office", of: 16000, name: "safe" }); }
       catch (e) { console.error("[jeweller safe]", e); }
     }
@@ -585,7 +611,8 @@
       C: { x: C.x, z: C.z, w: C.w, d: C.d, top: C.top, tx: C.tx, tz: C.tz },
       inStore: function (x, z) { return P0.inside(x, z, 0.4); },
     });
-    return function () { disposeStore(S); };
+    if (F.dressShop) { try { F.dressShop(P0, lot, "jewelry", gd, { keep: keep }); } catch (e) { console.error("[jeweller dress]", e); } }
+    return function () { disposeStore(S); if (shell) shell.dispose(); };
   }
   if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on("jewelry", islandFit);
 

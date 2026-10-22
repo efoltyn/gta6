@@ -117,6 +117,8 @@
       for (const col of cols) if (rectHits(wr, { x0: col.minX, x1: col.maxX, z0: col.minZ, z1: col.maxZ })) return false;
     }
     for (const t of (b._moneyRects || [])) if (t.k === k && rectHits(r, t)) return false;
+    // what a venue's dressing stood (world/island_fitkit.js dress claims it)
+    for (const t of (b._claims || [])) if ((t.k | 0) === k && rectHits(r, t)) return false;
     // what the building's other fit-outs stood there (a counter, a rack, a
     // cell): its colliders on this storey that are not its walls
     const bc = b.colliders;
@@ -585,6 +587,8 @@
         post(b, hx, L.z0 + 2.9, 0, { venue: V, job: "security guard", armed: true, hp: 150 });
       }
     }
+    // the hall itself: stone, the queue, the desks, the lights, the name
+    dressHall(b, { zc: zc, runs: runs, zPart: zPart, name: name, hq: hq });
     // a strongroom blown or opened: the building's alarm
     if (v) v._venue = V;
     b._safeDone = true;
@@ -594,6 +598,151 @@
       for (const sf of made.safes) if (CBZ.citySafeDrop) CBZ.citySafeDrop(sf);
       for (const dr of made.drawers) { const i = DRAWERS.indexOf(dr); if (i >= 0) DRAWERS.splice(i, 1); }
     };
+  }
+  /* ---- THE BANKING HALL'S FURNISHING (world/island_fitkit.js dress) -----
+     A banking hall, not a living room with a counter in it: a stone floor
+     with its border, the teller counter faced in walnut with a brass rail,
+     the bank's name hung over the windows, the rope-and-post queue that
+     leads to them, the check-writing stand in the middle, the customer
+     desks (an adviser's desk and the chair you sit in) down the stair-side
+     wall, brochure racks, benches, the plants, panel lights. Everything the
+     fit-out above stood (the line, the glass, the office, the guards) and
+     claimed stays clear. */
+  function dressHall(b, h) {
+    const FIT = CBZ.islandFit, IV = CBZ.islandVenue;
+    if (!FIT || !FIT.dress) return null;
+    const R = FIT.room(b, 0), P = FIT.PAL;
+    const hall = { x0: R.x0, x1: R.x1, z0: R.z0, z1: Math.min(R.z1, h.zc - 0.45) };
+    if (hall.z1 - hall.z0 < 3) return null;
+    // the teller run nearest the door's line carries the name
+    let run = null;
+    for (const r of h.runs || []) if (!run || r[1] - r[0] > run[1] - run[0]) run = r;
+    try {
+      return FIT.dress(b, {
+        kind: "bank", room: hall,
+        floor: { col: 0xd6cfc2, border: 0x5a4a3a, rect: hall },
+        lights: "panel",
+        sign: h.name, signBg: "#1d2a44", signFg: "#e2c98a", signBack: 0x15203a,
+        signAt: run ? { lx: (run[0] + run[1]) / 2, lz: h.zc + 0.16, ly: FIT.ceil(b, 0) - 0.4, w: Math.min(2.8, (run[1] - run[0]) * 0.7) } : null,
+        walls: [
+          { edge: "x0", mods: ["brochures"], w: 0.8, d: 0.3, front: 0.9, max: 1, from: hall.z0 + 1.4, pal: P.paper },
+          { edge: "x1", mods: ["brochures"], w: 0.8, d: 0.3, front: 0.9, max: 1, from: hall.z0 + 1.4, pal: P.paper },
+        ],
+        extra: function (D) {
+          const K = D.K, y = D.y;
+          // the counter's public face: walnut panels, a brass rail at the top
+          for (const r of h.runs || []) {
+            const len = r[1] - r[0], cx = (r[0] + r[1]) / 2, zf = h.zc - 0.35 - 0.012;
+            K.lbox(cx, y + 0.55, zf, len, 1.0, 0.024, 0x4a2e1c);
+            const n = Math.max(1, Math.round(len / 0.9));
+            for (let i = 0; i < n; i++) K.lbox(r[0] + len * (i + 0.5) / n, y + 0.55, zf - 0.014, len / n - 0.12, 0.72, 0.008, 0x5a3a22);
+            K.lbox(cx, y + 1.06, zf - 0.02, len, 0.03, 0.03, 0xb8963e);
+            K.lbox(cx, y + 0.05, zf - 0.01, len, 0.1, 0.03, 0x15110c);
+          }
+          // the queue: posts and ropes in a lane up to the windows
+          if (run) {
+            const qx0 = Math.max(D.R.x0 + 0.6, (run[0] + run[1]) / 2 - 1.6), qx1 = Math.min(D.R.x1 - 0.6, qx0 + 3.2);
+            for (const zq of [h.zc - 1.6, h.zc - 2.6]) {
+              const r = { x0: qx0 - 0.1, x1: qx1 + 0.1, z0: zq - 0.1, z1: zq + 0.1 };
+              if (!D.place(r)) continue;
+              const n = Math.max(2, Math.round((qx1 - qx0) / 1.05) + 1);
+              for (let i = 0; i < n; i++) {
+                const x = qx0 + (qx1 - qx0) * i / (n - 1);
+                K.lbox(x, y + 0.015, zq, 0.3, 0.03, 0.3, 0x8a7a5a);
+                K.lbox(x, y + 0.48, zq, 0.05, 0.94, 0.05, 0xb8963e);
+                K.lbox(x, y + 0.96, zq, 0.08, 0.04, 0.08, 0xb8963e);
+                if (i) K.lbox(x - (qx1 - qx0) / (n - 1) / 2, y + 0.86, zq, (qx1 - qx0) / (n - 1) - 0.06, 0.035, 0.035, 0x7a1f28);
+              }
+            }
+          }
+          // the check-writing stand in the middle of the hall
+          const sx = (D.R.x0 + D.R.x1) / 2 + 0.3, sz = h.zc - 4.0;
+          if (D.place({ x0: sx - 1.0, x1: sx + 1.0, z0: sz - 0.7, z1: sz + 0.7 })) {
+            K.lbox(sx, y + 0.5, sz, 0.3, 1.0, 0.3, 0x4a2e1c, { solid: true });
+            K.lbox(sx, y + 1.04, sz, 1.3, 0.05, 0.62, 0x2a1a10);
+            K.lbox(sx, y + 1.075, sz, 1.24, 0.01, 0.56, 0xdcecf2, { glass: true });
+            for (const s of [-0.4, 0, 0.4]) K.lbox(sx + s, y + 1.09, sz, 0.18, 0.012, 0.24, 0xf2efe6);
+            K.lbox(sx, y + 0.02, sz, 0.7, 0.04, 0.5, 0x2a1a10);
+          }
+          // the advisers' desks down the stair-side wall, the chair you sit in
+          let n = 0;
+          for (let z = D.R.z0 + 2.4; z < h.zc - 2.2 && n < 2; z += 0.3) {
+            const r = { x0: D.R.x0, x1: D.R.x0 + 2.5, z0: z - 0.85, z1: z + 0.85 };
+            if (!D.place(r)) continue;
+            // (the adviser sits between the wall and his desk, facing you)
+            D.furnish("desk", D.R.x0 + 1.15, z, Math.PI / 2, { len: 1.4, deep: 0.7, tone: "exec" });
+            D.furnish("chair", D.R.x0 + 2.05, z - 0.32, -Math.PI / 2, { tone: "exec" });
+            D.furnish("chair", D.R.x0 + 2.05, z + 0.32, -Math.PI / 2, { tone: "exec" });
+            n++; z += 1.7;
+          }
+          // benches facing the windows, plants in the front corners
+          for (const bx of [D.R.x0 + 1.4, D.R.x1 - 1.4]) {
+            const r = { x0: bx - 1.0, x1: bx + 1.0, z0: D.R.z0 + 1.35, z1: D.R.z0 + 2.2 };
+            if (D.place(r)) D.furnish("bench", bx, D.R.z0 + 1.75, 0, { len: 1.6, tone: "exec" });
+          }
+          for (const px of [D.R.x0 + 0.4, D.R.x1 - 0.4]) {
+            const r = { x0: px - 0.35, x1: px + 0.35, z0: h.zc - 1.2, z1: h.zc - 0.5 };
+            if (D.place(r)) D.furnish("planter", px, h.zc - 0.85, 0, { kind: "tree", s: 1.2 });
+          }
+        },
+      });
+    } catch (e) { console.error("[island bank hall]", e); return null; }
+  }
+  /* ---- THE CHEQUE CASHER'S FRONT (the loan shark's shop) ------------------
+     Grim on purpose: grey vinyl, bare tube lights, the counter clad in steel
+     with the thick glass framed in black mullions over it, speaker grilles
+     and deal trays at each position, a camera in the corner, plastic chairs
+     against the wall, the name over the glass. Behind it the cashier's side:
+     filing cabinets, a wall of box files. */
+  function dressLoans(b, h) {
+    const FIT = CBZ.islandFit;
+    if (!FIT || !FIT.dress) return null;
+    const R = FIT.room(b, 0), P = FIT.PAL;
+    const front = { x0: R.x0, x1: R.x1, z0: R.z0, z1: Math.min(R.z1, h.zc - 0.32) };
+    if (front.z1 - front.z0 < 2) return null;
+    try {
+      FIT.dress(b, {
+        kind: "loans", room: front,
+        floor: { col: 0x8a8a82, rect: front },
+        lights: "tube",
+        sign: h.name, signBg: "#1a1a1a", signFg: "#f2c230",
+        signAt: { lx: (h.cx0 + h.cx1) / 2, lz: h.zc + 0.12, ly: FIT.ceil(b, 0) - 0.3, w: Math.min(2.6, (h.cx1 - h.cx0) * 0.6) },
+        extra: function (D) {
+          const K = D.K, y = D.y, len = h.cx1 - h.cx0;
+          if (len > 1.4) {
+            const cxm = (h.cx0 + h.cx1) / 2, zf = h.zc - 0.31;
+            // the steel cladding and the kick
+            K.lbox(cxm, y + 0.55, zf - 0.01, len, 1.0, 0.02, 0x7a7e84);
+            K.lbox(cxm, y + 0.05, zf - 0.02, len, 0.1, 0.02, 0x2a2c30);
+            // the glass's frame: black mullions every position, a head rail
+            const n = Math.max(1, Math.round(len / 1.1));
+            for (let i = 0; i <= n; i++) K.lbox(h.cx0 + len * i / n, y + 2.0, h.zc + 0.05, 0.07, 1.72, 0.08, 0x15171b);
+            K.lbox(cxm, y + 2.88, h.zc + 0.05, len, 0.08, 0.1, 0x15171b);
+            for (let i = 0; i < n; i++) {
+              const x = h.cx0 + len * (i + 0.5) / n;
+              K.lbox(x, y + 1.55, h.zc + 0.02, 0.12, 0.12, 0.02, 0x3a3d42);        // the speaker grille
+              K.lbox(x, y + 1.13, h.zc - 0.2, 0.36, 0.04, 0.22, 0x8a9096);         // the deal tray
+            }
+          }
+          // the camera in the corner, watching the door
+          K.lbox(D.R.x1 - 0.2, D.ceil - 0.12, D.R.z0 + 0.25, 0.12, 0.1, 0.22, 0xe8e4da);
+          K.lbox(D.R.x1 - 0.22, D.ceil - 0.06, D.R.z0 + 0.2, 0.04, 0.12, 0.04, 0xe8e4da);
+          // plastic chairs along the stair-side wall
+          for (let i = 0; i < 3; i++) {
+            const z = D.R.z0 + 1.62 + i * 0.54;
+            const r = { x0: D.R.x0, x1: D.R.x0 + 0.65, z0: z - 0.26, z1: z + 0.26 };
+            if (z + 0.3 > D.R.z1 || !D.place(r)) continue;
+            D.furnish("chair", D.R.x0 + 0.3, z, Math.PI / 2, { tone: { wood: 0x3a5a7a, frame: 0x8a9096, cloth: 0x3a5a7a } });
+          }
+        },
+      });
+      // the cashier's side: box files and cabinets on the office wall
+      FIT.dress(b, {
+        kind: "loans-back", room: { x0: R.x0, x1: h.cx1, z0: h.zc + 0.4, z1: h.zp - 0.08 }, lights: false,
+        walls: [{ edge: "z1", mods: ["cabinets", FIT.MODS.shelf && function (D, Fr, a, w, d, o) { FIT.MODS.shelf(D, Fr, a, w, d, Object.assign({}, o, { style: "files", pal: P.paper, back: 0x8a8273 })); }], w: 1.0, d: 0.45, front: 0.6 }],
+      });
+    } catch (e) { console.error("[island loans front]", e); }
+    return null;
   }
   // the island branches' drawers (the city's are city/bank.js's own list)
   const DRAWERS = [];
@@ -717,6 +866,7 @@
     // his strongbox, in the office corner
     const sf = placeSafe(b, { grade: "office", k: 0, of: 20000 + h01(b, "sharkbox") * 40000, name: name + "'s safe", venue: V.kind, zMin: zp + 0.6 });
     if (sf) made.safes.push(sf);
+    dressLoans(b, { zc: zc, cx0: cx0, cx1: cx1, zp: zp, name: name });
     const st = F.toWorld(deskX, deskZ - 1.0);
     SHARK_DESKS.push({ x: st.x, y: F.y, z: st.z, key: key, name: name, rec: shark, V: V });
     b._safeDone = true;

@@ -29,9 +29,21 @@
          strip, the door band on the ground floor), keepOutWorld,
          toWorld(lx, lz) -> {x, z}, toLocal(x, z), yaw }
      CBZ.islandVenue.clear(b, k)  takes storey k's default furniture out
-         (the house's sofa, table and bookcase, a tower lobby's seats): its
-         triangles, its colliders and its drop-cover-hold-on covers. A shop
-         fit-out calls it first: no sofa in a gun store.
+         (the house's sofa, table, rug, bookcase, the lamps and the pendant
+         over the table; a tower lobby's seats): its triangles, its colliders
+         and its drop-cover-hold-on covers. A shop fit-out calls it first: no
+         sofa in a gun store. On the ground floor it also walls the stair
+         off (stairwell below): the shop is one room, the flats upstairs keep
+         their stair.
+     CBZ.islandVenue.stairwell(b) -> { face, door } | null   the house stair
+         behind a wall: a full-height partition along the stair strip's room
+         edge, painted like the room, with the residents' doorway at the foot
+         of the stair (the front end, by the street door) and its door
+         standing open inside. Its room-side face (building-local x) is
+         where a shop's room starts. Once per building; a narrow building
+         whose stair strip runs into the street door's band keeps it open.
+     CBZ.islandVenue.claim(b, k, rect)   a venue's floor space (building-
+         local), so the dressing (world/island_fitkit.js dress) keeps off it
      CBZ.islandVenue.island(b)    the island record (CBZ.island shape) b is on
      CBZ.islandVenue.staff(b, lx, lz, face, opts)   a worker posted on b's
          ground floor (the clerk behind a counter); see THE PEOPLE WHO WORK
@@ -175,10 +187,53 @@
     };
   }
 
+  /* ---- THE STAIRWELL: the house stair behind a wall ---------------------- */
+  function stairwell(b) {
+    if (!b || b._stairwell !== undefined) return b ? b._stairwell : null;
+    b._stairwell = null;
+    const I = b.interior, S = I && I.stair;
+    if (!S || I.kind !== "house" || !b.group) return null;
+    const ib = IB(), T = 0.12;
+    const xw = S.sEdge + 0.2, face = xw + T / 2;
+    // the street door's band (and its leaves hooked back inside) stays clear
+    if (face > -((ib.DOORW || 1.8) / 2) - 0.3) return null;
+    const fy = floorLocal(b, 0), top = S.ceil != null ? S.ceil : ib.FH - 0.2;
+    const z0 = S.izMin, z1 = S.izMax;
+    const dz0 = z0 + 0.2, dz1 = dz0 + 1.0, DH = 2.12;     // the doorway, at the foot of the stair
+    const paint = I.paint != null ? I.paint : 0xe4ded2, trim = 0xf1eee6, leaf = 0x6b5a48;
+    const FIT = CBZ.islandFit;
+    const K = FIT && FIT.kit ? FIT.kit(b, { name: "stairwell", los: true }) : null;
+    const box = K ? function (lx, ly, lz, w, h, d, col, o) { return K.lbox(lx, ly, lz, w, h, d, col, o); }
+      : (function () { const lb = lotFor(b).building.lbox; return function (lx, ly, lz, w, h, d, col, o) { return lb(lx, ly, lz, w, h, d, col, o); }; })();
+    const H = top - fy;
+    // the wall either side of the doorway, and over it
+    box(xw, fy + H / 2, (z0 + dz0) / 2, T, H, dz0 - z0, paint, { solid: true });
+    box(xw, fy + H / 2, (dz1 + z1) / 2, T, H, z1 - dz1, paint, { solid: true });
+    box(xw, fy + DH + (H - DH) / 2, (dz0 + dz1) / 2, T, H - DH, dz1 - dz0, paint);
+    // skirting along the room side, the casing round the doorway
+    box(face + 0.006, fy + 0.05, (dz1 + z1) / 2, 0.012, 0.1, z1 - dz1, 0xcfc8ba);
+    for (const z of [dz0 - 0.035, dz1 + 0.035]) box(face + 0.01, fy + DH / 2, z, 0.02, DH, 0.07, trim);
+    box(face + 0.01, fy + DH + 0.035, (dz0 + dz1) / 2, 0.02, 0.07, dz1 - dz0 + 0.14, trim);
+    box(xw, fy - 0.002, (dz0 + dz1) / 2, T + 0.04, 0.012, dz1 - dz0, 0x8a8478);          // the threshold
+    // the door, open: swung back inside against the wall (the stair side)
+    box(xw - T / 2 - 0.025, fy + 0.03 + 1.02, dz1 + 0.49, 0.04, 2.04, 0.92, leaf);
+    box(xw - T / 2 - 0.05, fy + 1.0, dz1 + 0.88, 0.02, 0.03, 0.12, 0xc8ccd2);
+    if (K) K.flush();
+    b._stairwell = { face: face, x: xw, door: { z0: dz0, z1: dz1 } };
+    return b._stairwell;
+  }
+
+  // a venue's floor space, kept clear by the dressing and the money pass
+  function claim(b, k, r) {
+    if (!b || !r) return;
+    (b._claims || (b._claims = [])).push({ k: k | 0, x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1 });
+  }
+
   // fold storey k's furniture away (see disaster_arena.js furnEnd)
   function clear(b, k) {
     k = k | 0;
     const I = b && b.interior;
+    if (k === 0 && I && I.stair) { try { stairwell(b); } catch (e) { console.error("[island stairwell]", e); } }
     if (!I || !I.furn) return false;
     const recs = I.furn.filter(function (r) { return r.L === k && !r.cleared; });
     if (!recs.length) return true;
@@ -256,7 +311,7 @@
     const U = job._venueUndo || [];
     job._venueUndo = null;
     for (let i = U.length - 1; i >= 0; i--) { try { U[i](); } catch (e) { console.error("[island venue dispose]", e); } }
-    for (const b of recordsOf(job)) if (b) b._venueLot = null;
+    for (const b of recordsOf(job)) if (b) { b._venueLot = null; b._stairwell = undefined; b._claims = null; b._posts = null; }
   }
   function on(use, fn) {
     if (!use || typeof fn !== "function") return;
@@ -294,11 +349,13 @@
     const PP = CBZ.islandPeople;
     if (!b || !PP || !PP.post) return null;
     const post = PP.post(b, { lx: lx, lz: lz, face: face || 0 }, opts || {});
+    // where he stands is his: nothing is dressed over his spot
+    (b._posts || (b._posts = [])).push({ k: (opts && opts.k) | 0, lx: lx, lz: lz });
     const job = jobOf(b);
     if (post && job) (job._venueUndo || (job._venueUndo = [])).push(function () { PP.unpost(post); });
     return post;
   }
 
   CBZ.islandVenue = { on: on, list: list, lotFor: lotFor, floor: floor, clear: clear, island: island,
-    staff: staff, fitSteps: fitSteps, drop: drop, has: has };
+    staff: staff, fitSteps: fitSteps, drop: drop, has: has, stairwell: stairwell, claim: claim };
 })();

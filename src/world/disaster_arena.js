@@ -3018,6 +3018,7 @@
       holes.push({ s: 0, a0: -DOORW / 2, a1: DOORW / 2, y0: 0, y1: FH - 0.7 });
 
       const paint0 = IN_PAINTS[(hh(0x1a01) * IN_PAINTS.length) | 0];
+      if (H.meta) H.meta.paint = paint0;     // the ground floor's wall colour (a venue's stairwell wall matches it)
       const paintUp = IN_PAINTS[(hh(0x1a02) * IN_PAINTS.length) | 0];
       const groundKey = hh(0x1a03) < 0.55 ? "wood" : "tile";
       const groundTint = groundKey === "wood"
@@ -3234,7 +3235,9 @@
         if (fx.kind === "dome") domes.push(fx);
         const yc = ceilOf(fx.L);
         const x = Math.max(sEdge + 0.3, Math.min(ixMax - 0.3, fx.x)), z = Math.max(izMin + 0.3, Math.min(izMax - 0.3, fx.z));
-        if (fx.kind === "pendant") pendant(K, x, yc, z, 1.15);   // shade ~1 m over the table top
+        // a pendant hangs over the table it lights: it is that floor's
+        // furniture (island_venue clear() takes it out with the table)
+        if (fx.kind === "pendant") { const fp = furnBegin(K, cols, covers); pendant(K, x, yc, z, 1.15); furnEnd(H.furn, fx.L, fp, K, cols, covers); }
         else domeLight(K, x, yc, z);
       }
       // a light under every landing, for the flight below it
@@ -3881,9 +3884,9 @@
       // THE INSIDE (see THE INSIDE OF A BUILDING), then the shell pieces it
       // laid on the roof after the facade flushed
       yield 0;   // (a seam inside the building: see islandSteps)
-      const furn = [];
+      const furn = [], inMeta = {};
       const covers = yield* houseInterior({
-        group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, color: color, furn: furn,
+        group: bgroup, ox: ox, oz: oz, gy: gy, w: w, d: d, storeys: storeys, color: color, furn: furn, meta: inMeta,
         ixMin: ixMin, ixMax: ixMax, izMin: izMin, izMax: izMax,
         plan: PL, flights: PL.flights, landings: PL.landings, cols: cols, late: shellMerge,
         holes: dressed.holes, crown: dressed.crown, crownsRoof: dressed.crownsRoof,
@@ -3946,6 +3949,11 @@
           covers: covers,
           // each floor's furniture (see furnEnd): what island_venue clear() takes out
           furn: furn, fyOf: [0.08, FH],
+          // the stair strip's facts (island_venue's stairwell walls it off
+          // from a shop floor): its room-side edge, the mode, the ceiling
+          paint: inMeta.paint != null ? inMeta.paint : null,
+          stair: PL.flights.length ? { sEdge: sEdge, mode: PL.mode, ixMin: ixMin, izMin: izMin, izMax: izMax, lane: IB.LANE,
+            approach: PL.approach ? { z0: PL.approach.z0, z1: PL.approach.z1 } : null, ceil: FH - 0.2 } : null,
         },
       };
       b._wallMat = finishMat(color, gy);   // what its rubble is made of (disasters.js wallMatOf)

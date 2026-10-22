@@ -11,14 +11,18 @@
    per material per building, and city/furniture.js's desks and chairs:
      THE LOBBY      a reception desk off the walk to the lifts, the firm's
                     name on the wall behind it, the receptionist at it.
-     EVERY FLOOR    (a tower: round its lift core, the first three floors
-                    the lift serves) the open-plan desks down one
+     EVERY FLOOR    (a tower: round its lift core, every floor the lift
+                    serves; the executive pieces on the first three, the
+                    furniture kit's above) the open-plan desks down one
                     side, each with its chair and its screen; the corner
                     office down the other behind a glass wall (the walnut
                     desk, his chair with its back to the window, two for
                     visitors, a fig); the meeting room across the back
                     behind glass (the long table, its chairs, the screen on
                     the wall); a waiting corner by the lift with plants.
+   A SMALL OFFICE (a house-plan building: the harbour office, an office over
+   the shops) has its reception on the ground floor too: the desk facing the
+   door, the firm's name over it, chairs to wait in, the plants, the files.
    The people: by day the receptionist, two at their desks and the boss in
    his corner office on the first floor; by night a cleaner on his rounds.
    ============================================================ */
@@ -68,6 +72,11 @@
       FIT.solid(b, ox - 1.1, ox + 1.1, dz - 0.48, dz + 0.48, y, y + 0.76, { noStep: true });
       FIT.seat(b, ox, dz + 0.78, y, Math.PI, "office chair", 0.5);
       for (const x of [-0.6, 0.6]) FIT.seat(b, ox + x, dz - 1.15, y, 0, "chair", 0.47);
+    } else {
+      // (the floors above the first three: the furniture kit's pieces)
+      K.furnish("desk", ox, dz, y, Math.PI, { len: 1.8, deep: 0.85, tone: "exec" });
+      for (const x of [-0.6, 0.6]) K.furnish("chair", ox + x, dz - 1.2, y, 0, { tone: "exec" });
+      K.furnish("planter", iw - 0.45, -lz + 0.45, y, 0, { kind: "tree", s: 1.1 });
     }
     // ---- the meeting room behind glass, across the back band
     const gz = lz - 0.05;
@@ -89,6 +98,11 @@
       FIT.seat(b, iw - 1.6, -id + 0.9, y, 0, "armchair", 0.42);
       FIT.seat(b, iw - 2.6, -id + 0.9, y, 0, "armchair", 0.42);
       FIT.solid(b, iw - 3.0, iw - 1.2, -id + 0.45, -id + 1.35, y, y + 0.5, { noStep: true });
+    } else {
+      K.furnish("planter", -iw + 0.45, -id + 0.45, y, 0, { s: 1.2 });
+      K.furnish("planter", -iw + 0.45, id - 0.45, y, 0, { s: 1.2 });
+      K.furnish("armchair", iw - 1.6, -id + 0.9, y, 0, { tone: "cool" });
+      K.furnish("armchair", iw - 2.6, -id + 0.9, y, 0, { tone: "cool" });
     }
     if (k === 1 && staffOut) staffOut.push(
       { k: 1, lx: (bx0 + bx1) / 2 + 0.75, lz: -lz + 0.85, face: -Math.PI / 2, job: "office worker" },
@@ -111,6 +125,47 @@
     K.furnish("shelf", x0 + 0.3, (z0 + z1) / 2, y, Math.PI / 2, { len: 1.8, tone: "exec" });
     if (MK) { MK.at(x1 - 0.4, z1 - 0.4, 0, y); P.snakePlanter(MK, (b.planId | 0) + k, 0.36, 0.45); }
     return { k: k, lx: x1 - 0.6 - 0.75, lz: z0 + 2.0, face: Math.PI / 2 };
+  }
+
+  /* ---- A SMALL OFFICE'S RECEPTION (the ground floor of a house plan) ---- */
+  function smallLobby(b, K, MK, firm) {
+    const IV = CBZ.islandVenue, FIT = CBZ.islandFit, P = CBZ.cityMeshKit && CBZ.cityMeshKit.pieces;
+    IV.clear(b, 0);
+    const R = FIT.room ? FIT.room(b, 0) : null;
+    if (!R || R.x1 - R.x0 < 3 || R.z1 - R.z0 < 5) return null;
+    const F = IV.floor(b, 0), y = F.yLocal + 0.015;
+    const cx = (R.x0 + R.x1) / 2 + 0.3, rz = R.z1 - 1.6;
+    // the reception desk facing the door: a walnut front, a stone top, his screen
+    K.lbox(cx, y + 0.55, rz, 2.4, 1.1, 0.7, 0x5a3b26, { solid: true });
+    K.lbox(cx, y + 1.12, rz - 0.04, 2.5, 0.04, 0.8, 0xe9e4d8);
+    K.lbox(cx, y + 0.55, rz - 0.36, 2.3, 0.9, 0.02, 0x6b4a33);
+    if (MK && P) {
+      MK.at(cx - 0.4, rz + 0.1, Math.PI, y + 0.75); P.monitor(MK, (b.planId | 0) % 6, 0.48, 0.28);
+      MK.at(cx, rz + 0.8, Math.PI, y); P.swivelChair(MK, 0.5, {});
+      FIT.seat(b, cx, rz + 0.8, y, Math.PI, "office chair", 0.5);
+      MK.at(R.x1 - 0.45, R.z1 - 0.45, 0, y); P.figTree(MK, (b.planId | 0) + 3, 0.9);
+    }
+    const tex = FIT.text([firm.toUpperCase()], { bg: "#20252b", fg: "#e2c98a", w: 512, h: 96, border: false });
+    if (tex) FIT.panel(b, null, cx, y + 2.25, R.z1 - 0.03, 2.2, 0.41, Math.PI, tex, false);
+    K.lbox(cx, y + 2.25, R.z1 - 0.015, 2.3, 0.5, 0.02, 0x20252b);
+    if (FIT.dress) {
+      try {
+        FIT.dress(b, { kind: "office-lobby", K: K, keep: [{ x0: cx - 1.6, x1: cx + 1.6, z0: rz - 1.4, z1: R.z1 }], lights: "panel",
+          walls: [{ edge: "x1", mods: ["cabinets"], w: 0.96, d: 0.5, front: 0.9, max: 3, col: 0x6a7078 }],
+          floor: { col: 0x3a4250 },
+          extra: function (D) {
+            // chairs to wait in, along the stairwell wall, a low table
+            for (let i = 0; i < 3; i++) {
+              const z = D.R.z0 + 2.0 + i * 0.75;
+              if (D.place({ x0: D.R.x0, x1: D.R.x0 + 0.85, z0: z - 0.36, z1: z + 0.36 })) D.furnish("armchair", D.R.x0 + 0.42, z, Math.PI / 2, { tone: "cool" });
+            }
+            if (D.place({ x0: D.R.x0 + 0.95, x1: D.R.x0 + 1.75, z0: D.R.z0 + 2.2, z1: D.R.z0 + 3.4 })) D.furnish("coffee", D.R.x0 + 1.35, D.R.z0 + 2.8, Math.PI / 2, { len: 0.9, deep: 0.5 });
+            if (D.place({ x0: D.R.x0, x1: D.R.x0 + 0.6, z0: D.R.z1 - 0.6, z1: D.R.z1 })) D.furnish("planter", D.R.x0 + 0.3, D.R.z1 - 0.3, 0, { kind: "tree", s: 1.1 });
+          },
+        });
+      } catch (e) { console.error("[office lobby dress]", e); }
+    }
+    return { k: 0, lx: cx, lz: rz + 0.8, face: Math.PI };
   }
 
   function fitOffice(b, lot, job) {
@@ -141,14 +196,16 @@
       if (tex) FIT.panel(b, null, -iw + 0.03, y0 + 2.2, rz, 2.4, 0.45, Math.PI / 2, tex, false);
       posts.push(IV.staff(b, rx - 0.75, rz - 0.4, Math.PI / 2, { job: "receptionist", hours: [8, 18], near: 150,
         dress: { archetype: "office", job: "receptionist" } }));
-      // ---- THE LET FLOORS the lift serves: the first three (the floors
-      // above are fitted out and empty, to let: the tower's own pass)
-      const top = Math.min(n - 1, 3);
-      for (let k = 1; k <= top; k++) {
+      // ---- EVERY FLOOR the lift serves: the executive pieces on the first
+      // three, the furniture kit's on the floors above
+      for (let k = 1; k <= n - 1; k++) {
         IV.clear(b, k);
-        towerFloor(b, k, K, MK, work);
+        towerFloor(b, k, K, k <= 3 ? MK : null, work);
       }
     } else {
+      const rec = smallLobby(b, K, MK, firm);
+      if (rec) posts.push(IV.staff(b, rec.lx, rec.lz, rec.face, { job: "receptionist", hours: [8, 18], near: 150,
+        dress: { archetype: "office", job: "receptionist" } }));
       for (let k = 1; k < n; k++) {
         IV.clear(b, k);
         const w = smallFloor(b, k, K, MK);

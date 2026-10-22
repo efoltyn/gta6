@@ -36,9 +36,12 @@
        the islands' showcase glass, shot through by the same rounds
        (systems/fpsmode.js calls it where Gang City calls cityShatterRay).
    ISLAND ROOMS: CBZ.shopFloor.plan(b, o) -> the shop's frame in an island
-       building (the room clear of the stair strip, a back room behind a
-       partition, the counter line), and CBZ.shopFloor.shell(plan, lot, o)
-       -> the partition, the back room and its safe.
+       building (the stair behind its stairwell wall, a back room behind a
+       partition, the counter line), CBZ.shopFloor.shell(plan, lot, o)
+       -> the partition, the back room and its safe, and
+       CBZ.shopFloor.dressShop(plan, lot, kind, desc, o) -> the rest of a
+       real shop of that kind round the counter (world/island_fitkit.js
+       dress: its walls lined, its gondolas, its lights, its name).
 ============================================================ */
 (function () {
   "use strict";
@@ -361,9 +364,11 @@
     const IV = CBZ.islandVenue;
     if (!IV || !b || !b.group) return null;
     const F = IV.floor(b, 0), L = F.local;
+    // the stair goes behind its wall first: the shop starts at the wall's face
+    const sw = IV.stairwell ? IV.stairwell(b) : null;
     let xs = L.x0;
     for (const r of F.keepOut) {
-      if (r.why === "stairs") { if (r.x0 <= L.x0 + 0.05) xs = Math.max(xs, r.x1 + 0.08); else return null; }
+      if (r.why === "stairs") { if (r.x0 <= L.x0 + 0.05) xs = Math.max(xs, sw ? sw.face + 0.02 : r.x1 + 0.08); else return null; }
       else if (r.why === "lift" || r.why === "door to lift") return null;   // a tower lobby: not a counter room
     }
     const x0 = xs, x1 = L.x1, z0 = L.z0, z1 = L.z1;
@@ -412,7 +417,12 @@
     const fyL = P0.fyL, H = 2.85, T = 0.12;
     const PLASTER = o.wall || 0xd9d3c6, TRIM = o.trim || 0x6b6258;
     if (P0.back && lb) {
-      const dw = 0.95, dx = P0.x1 - 0.85;                    // the staff door, at the + end
+      // the staff door, at the + end (o.door "x0": the stair end, where a
+      // clothes shop keeps its cash wrap and its fitting room is at the +)
+      const left = o.door === "x0";
+      const dw = 0.95, dx = left ? P0.x0 + 0.85 : P0.x1 - 0.85;
+      // the way to it stays clear of whatever the shop floor is dressed with
+      if (CBZ.islandVenue && CBZ.islandVenue.claim) CBZ.islandVenue.claim(P0.b, 0, { x0: dx - 0.65, x1: dx + 0.65, z0: P0.wallFace - 1.3, z1: P0.wallFace });
       const a0 = P0.x0, a1 = dx - dw / 2, c0 = dx + dw / 2, c1 = P0.x1;
       if (a1 - a0 > 0.1) lb((a0 + a1) / 2, fyL + H / 2, P0.zP, a1 - a0, H, T, PLASTER, { solid: true, los: true });
       if (c1 - c0 > 0.05) lb((c0 + c1) / 2, fyL + H / 2, P0.zP, c1 - c0, H, T, PLASTER, { solid: true, los: true });
@@ -420,11 +430,13 @@
       for (const s of [-1, 1]) lb(dx + s * (dw / 2 + 0.03), fyL + 1.05, P0.zP, 0.06, 2.1, T + 0.04, TRIM);   // the frame
       lb(dx, fyL + 2.13, P0.zP, dw + 0.12, 0.06, T + 0.04, TRIM);
       lb((a0 + c1) / 2, fyL + 0.05, P0.zP - T / 2 - 0.006, c1 - a0, 0.1, 0.012, TRIM);           // skirting
-      if (P0.x0 > P0.F.local.x0 + 0.2) lb(P0.x0 + 0.06, fyL + H / 2, (P0.zP + P0.z1) / 2, T, H, P0.z1 - P0.zP, PLASTER, { solid: true, los: true });
+      // (the stair strip beside the back room: closed off here unless the
+      // stairwell wall already runs the building's depth)
+      if (P0.x0 > P0.F.local.x0 + 0.2 && !P0.b._stairwell) lb(P0.x0 + 0.06, fyL + H / 2, (P0.zP + P0.z1) / 2, T, H, P0.z1 - P0.zP, PLASTER, { solid: true, los: true });
       // the safe, in the back corner opposite the door, its door to the partition
       const IV = CBZ.islandVenue;
       if (IV && IV.safe) {
-        try { out.safe = IV.safe(P0.b, { k: 0, lx: P0.x0 + 0.62, lz: P0.z1 - 0.5, yaw: Math.PI, grade: o.safeGrade || "floor", of: o.safeOf, name: o.safeName || "safe" }); }
+        try { out.safe = IV.safe(P0.b, { k: 0, lx: left ? P0.x1 - 0.62 : P0.x0 + 0.62, lz: P0.z1 - 0.5, yaw: Math.PI, grade: o.safeGrade || "floor", of: o.safeOf, name: o.safeName || "safe" }); }
         catch (e) { console.error("[shop safe]", e); }
       }
       // steel shelving along the back wall, loaded with what a back room holds
@@ -527,9 +539,78 @@
     catch (e) { console.error("[shop register]", e); return null; }
   }
 
+  /* THE REST OF THE SHOP. A counter shop's plan is the counter across the
+     room, the clerk and the stock wall behind it: this dresses everything
+     in front of that band like the real shop of its kind, through the
+     islands' one room dresser (world/island_fitkit.js CBZ.islandFit.dress).
+     o: { keep: [building-local rects the venue's own pieces stand on] } */
+  function dressShop(P0, lot, kind, desc, o) {
+    o = o || {};
+    const FIT = CBZ.islandFit;
+    if (!FIT || !FIT.dress || !P0) return null;
+    const C = desc && desc.counter;
+    const R = { x0: P0.x0, x1: P0.x1, z0: P0.z0, z1: P0.wallFace };
+    const band = C ? C.zL - C.D / 2 - 0.95 : P0.wallFace - 2.6;
+    const keep = [{ x0: R.x0, x1: R.x1, z0: band, z1: R.z1 }].concat(o.keep || []);
+    const name = (lot && lot.name) || (P0.b && P0.b.name) || null;
+    const P = FIT.PAL;
+    const spec = { kind: kind, room: R, keep: keep, sign: name, signAt: { ly: FIT.ceil(P0.b, 0) - 0.36, w: Math.min(2.4, P0.W * 0.4) } };
+    if (kind === "guns") {
+      // the armoury's forms stand down the +x wall in front of the counter
+      keep.push({ x0: R.x1 - 1.05, x1: R.x1, z0: band - 3.2, z1: band });
+      spec.walls = [
+        { edge: "x0", mods: ["safes"], w: 1.6, d: 0.62, front: 0.9, max: 1, from: R.z0 + 1.4 },
+        { edge: "x0", mods: ["slat", "slat"], w: 1.2, d: 0.42, style: "bags", pal: P.tactical, rows: [0.8, 1.35, 1.9] },
+        { edge: "x1", mods: ["slat"], w: 1.2, d: 0.42, style: "holsters", pal: P.tactical },
+        { edge: "x1", mods: ["slat"], w: 1.2, d: 0.42, style: "cards", pal: P.ammo },
+      ];
+      spec.centre = { mod: "gondola", len: [3.0, 2.4, 1.8], d: 0.9, h: 1.5, style: "ammo", pal: P.ammo, max: 2 };
+      spec.lights = "track";
+      spec.window = { style: "cases", pal: P.tactical };
+      spec.signBg = "#20251f"; spec.signFg = "#e2c98a";
+      const posters = [];
+      for (const edge of ["x0", "x1"]) for (let i = 0; i < 3; i++) {
+        posters.push({ edge: edge, a: R.z0 + (R.z1 - R.z0) * (0.22 + i * 0.25), y: 2.78, w: 0.28, h: 0.42, tex: FIT.targetTex(i + (edge === "x1" ? 1 : 0)) });
+      }
+      spec.posters = posters;
+    } else if (kind === "pawn") {
+      spec.walls = [
+        { edge: "x0", mods: ["guitars", "tvs", "shelf"], w: 1.3, d: 0.45, style: "tech", pal: P.pawn },
+        { edge: "x1", mods: ["shelf", "shelf"], w: 1.2, d: 0.45, style: "tools", pal: P.pawn, accent: 0x5a4632 },
+      ];
+      spec.centre = [
+        { mod: "showcase", len: [2.0, 1.4], d: 0.7, aisle: 1.0, endAisle: 0.8, style: "tech", pal: P.pawn, max: 3, base: 0x5a4632 },
+      ];
+      spec.lights = "tube";
+      spec.window = { style: "tech", pal: P.pawn };
+      spec.signBg = "#141414"; spec.signFg = "#f2c230";
+    } else if (kind === "jewelry") {
+      spec.walls = [
+        { edge: "x0", mods: ["panel"], w: 1.2, d: 0.06, front: 0, back: 0x2a1a10, upper: 0x4a2e1c },
+        { edge: "x1", mods: ["panel"], w: 1.2, d: 0.06, front: 0, back: 0x2a1a10, upper: 0x4a2e1c },
+      ];
+      spec.floor = { col: 0x3a2228, border: 0xb8963e };
+      spec.lights = "pin";
+      spec.signBg = "#1a120c"; spec.signFg = "#e2c98a"; spec.signBack = 0x2a1a10;
+      // a seat for the man buying the ring: two armchairs and a low table by the window
+      spec.extra = function (D) {
+        const x1 = R.x1 - 0.7, z = R.z0 + 1.9;
+        for (const t of [0, 1.6]) {
+          const r = { x0: x1 - 0.75, x1: R.x1, z0: z + t - 0.6, z1: z + t + 0.75 };
+          if (!D.place(r)) continue;
+          D.furnish("armchair", x1 - 0.1, z + t, -Math.PI / 2, { tone: { cloth: 0x4a1f28, wood: 0x2a1a10, frame: 0x2a1a10 } });
+        }
+        const c = { x0: R.x1 - 2.0, x1: R.x1 - 1.1, z0: z + 0.3, z1: z + 1.3 };
+        if (D.place(c)) D.furnish("coffee", R.x1 - 1.55, z + 0.8, Math.PI / 2, { len: 0.8, deep: 0.5, tone: { wood: 0x2a1a10 } });
+      };
+    }
+    if (o.walls) spec.walls = o.walls;
+    return FIT.dress(P0.b, spec);
+  }
+
   CBZ.shopFloor = {
     till: till, cityClerk: cityClerk, postedClerk: postedClerk,
-    plan: plan, shell: shell, gunDescriptor: gunDescriptor, counterZone: counterZone, register: register,
+    plan: plan, shell: shell, gunDescriptor: gunDescriptor, counterZone: counterZone, register: register, dressShop: dressShop,
     whereKey: whereKey, disposeTree: disposeTree, dropCols: dropCols, yawToward: yawToward, fmt$: fmt$,
     audit: function () { return { glass: IG.length, hot: Object.keys(hotMap()).length }; },
   };

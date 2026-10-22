@@ -916,6 +916,8 @@
       runMax: Math.min(6.4, P0.W - 1.6), bounds: P0.room,
       inStore: function (x, z) { return P0.inside(x, z, 0.4); }, nearDoor: P0.nearDoor, behind: zone.behind,
     });
+    // the rest of a real pawn shop round the counter (city/shopfloor.js)
+    if (F.dressShop) { try { F.dressShop(P0, lot, "pawn", gd); } catch (e) { console.error("[pawn shop dress]", e); } }
     return function () { disposeStore(S); shell.dispose(); };
   }
   if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on("pawn", islandFit);

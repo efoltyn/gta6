@@ -1190,6 +1190,8 @@
       arena: job && job.arena, inStore: function (x, z) { return P0.inside(x, z, 0.4); },
       nearDoor: P0.nearDoor, behind: zone.behind,
     });
+    // the rest of a real gun shop round the counter (city/shopfloor.js)
+    if (F.dressShop) { try { F.dressShop(P0, lot, "guns", desc); } catch (e) { console.error("[gun store dress]", e); } }
     return function () { disposeStore(S); shell.dispose(); };
   }
   if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on("guns", islandFit);
