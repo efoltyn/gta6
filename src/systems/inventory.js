@@ -252,7 +252,7 @@
   const bar = document.createElement("div");
   bar.id = "hotbar";
   document.body.appendChild(bar);
-  let shown = [], sig = "", seen = Object.create(null), missingFace = false;
+  let shown = [], sig = "", seen = Object.create(null), missingFace = false, iconV = 0;
 
   function render(list) {
     let html = "", firstPassive = true, missing = false, digit = 0;
@@ -479,7 +479,9 @@
     // booting) is retried, but at 2 s, not every poll: a failed offscreen
     // renderer boot is not free.
     retryT -= 0.1;
-    if (s !== sig || (missingFace && retryT <= 0)) { render(list); sig = s; retryT = 2; }
+    // a photograph that landed (city/itemicons.js's idle-time studio) is a new face
+    const iv = CBZ.itemIconVersion | 0;
+    if (s !== sig || iv !== iconV || (missingFace && retryT <= 0)) { render(list); sig = s; iconV = iv; retryT = 2; }
     const want = list.length ? "flex" : "none";
     if (bar.style.display !== want) bar.style.display = want;
   });

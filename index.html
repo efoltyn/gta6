@@ -682,7 +682,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
      player (hands on, two wrists, the escort) every game's law calls. -->
-<script src="src/systems/arrest.js?v=people1022"></script>
+<script src="src/systems/arrest.js?v=stall1022"></script>
 <!-- systems/cuffedplayer.js: what a cuffed player can do (hands gate at the window's capture
      phase, speed/stamina/get-up numbers, the grey bar) and how the room treats him; reads
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
@@ -756,7 +756,7 @@ document.body.appendChild(b);}}catch(e){}})();
      inventory thumbnail all consume this factory. -->
 <script src="src/weapons/flashlight.js?v=anchor1"></script>
 <script src="src/systems/actorweapons.js?v=hmove1011"></script>
-<script src="src/city/weapon_thumbnails.js?v=duty1"></script>
+<script src="src/city/weapon_thumbnails.js?v=stall1022"></script>
 <script src="src/systems/holsterprops.js?v=bodyfix1009b"></script>
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
      support arm onto the drawn weapon's own authored handguard every
@@ -937,7 +937,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=voice1022"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
-<script src="src/systems/detection.js?v=nopitch1022"></script>
+<script src="src/systems/detection.js?v=stall1022"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
 <!-- HOW WELL A PERSON FIGHTS (NPC_COMBAT_IQ). The ONE competence model —
      role x weapon -> reaction, settle, burst, accuracy, cover quality — plus
@@ -962,7 +962,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
-<script src="src/systems/brain_prison.js?v=mnopitcbodymo"></script>
+<script src="src/systems/brain_prison.js?v=stall1022"></script>
 <script src="src/systems/markers.js?v=nopitch1022"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=leave1014"></script>
@@ -979,7 +979,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/combat.js?v=mvoice1butt10"></script>
 <script src="src/systems/killstreaks.js?v=jailv1001"></script>
-<script src="src/systems/interact.js?v=cmd1022o"></script>
+<script src="src/systems/interact.js?v=stall1022"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
 <script src="src/systems/prisontrade.js?v=nopitch1022"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
@@ -997,7 +997,7 @@ document.body.appendChild(b);}}catch(e){}})();
      interactions.js: its capture-phase keys must run ahead of the pinned
      prompts' bound keys while you stand in a car. -->
 <script src="src/systems/liftpanel.js?v=lpanel1022"></script>
-<script src="src/systems/interactions.js?v=cmd1022p"></script>
+<script src="src/systems/interactions.js?v=stall1022"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=jailv1001"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
@@ -1016,10 +1016,10 @@ document.body.appendChild(b);}}catch(e){}})();
      C4 — are covered structurally), plus its verb and its worth. Loads
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
-<script src="src/city/itemicons.js?v=vit3"></script>
+<script src="src/city/itemicons.js?v=stall1022"></script>
 <script src="src/systems/hotbar_model.js?v=goods1022"></script>
 <script src="src/systems/helditem_model.js?v=mil0929"></script>
-<script src="src/systems/inventory.js?v=goods1022"></script>
+<script src="src/systems/inventory.js?v=stall1022"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
@@ -1059,9 +1059,9 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=cmd1022p"></script>
-<script src="src/systems/fpsmode.js?v=mpeoplegoods1"></script>
+<script src="src/systems/fpsmode.js?v=stall1022"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
-<script src="src/systems/intimidate.js?v=voice1022"></script>
+<script src="src/systems/intimidate.js?v=stall1022"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
      Additive: registers its own updaters (gated by game.mode) and builds
@@ -1194,7 +1194,7 @@ document.body.appendChild(b);}}catch(e){}})();
      nothing they need. ?cfg_SURVNET_V1=0 makes it inert. -->
 <script src="src/net/survnet.js?v=survnet1"></script>
 <!-- GUN GAME ladder HUD (mode-gated; shares #survBars with survival) -->
-<script src="src/systems/gungamehud.js?v=deathcam1009"></script>
+<script src="src/systems/gungamehud.js?v=stall1022"></script>
 
 <!-- 4d. CITY — open-world GTA-style mode (a third game mode). Additive:
      registers its own updaters (gated by game.mode==="city") and builds its
@@ -1596,7 +1596,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=mrg10200048"></script>
-<script src="src/city/vehicles.js?v=mmisleotrunk1"></script>
+<script src="src/city/vehicles.js?v=stall1022"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playerair.js?v=f35one1022"></script>
 <script src="src/city/playeraircraft.js?v=mf35twojetstr"></script>
@@ -2076,7 +2076,7 @@ document.body.appendChild(b);}}catch(e){}})();
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
-<script src="src/city/inventory.js?v=money1022"></script>
+<script src="src/city/inventory.js?v=stall1022"></script>
 <!-- THE PHONE: a real handset in your hand, one for every Gang City player.
      phone_apps.js is what it does (News is NEWS ONE's store, Calls are real
      people running real verbs, Holler is the social feed where a post is the

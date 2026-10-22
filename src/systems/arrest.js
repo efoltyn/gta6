@@ -190,7 +190,15 @@
     if (a.surrender || a.poseHandsUp || a.intimidMode === "scared") return true;
     const b = a._brain;
     const r = b && b.response;
-    return r === "surrender" || r === "comply";
+    if (r !== "surrender" && r !== "comply") return false;
+    // A DECISION IS NOW, NOT FOREVER: b.response is the last answer his brain
+    // gave a threat, and it stays written after the threat is gone. A man who
+    // put his hands up to a muzzle a minute ago and walked off is on his feet
+    // again; only an answer that is still being given (re-settled within the
+    // last beat) counts as giving up.
+    const B = CBZ.brain;
+    const t = B && B.now ? B.now() : null;
+    return t == null || b.responseT == null || t - b.responseT < 3;
   };
   function playerArmed() {
     try {

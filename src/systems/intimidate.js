@@ -422,7 +422,8 @@
     let target = null, guardTarget = null;
     if (aiming && CBZ.aimedActor) {
       const hit = CBZ.aimedActor(gun ? gun.range : 40);
-      if (hit && hit.actor && alive(hit.actor)) {
+      // a man already in cuffs has nothing left to answer a muzzle with
+      if (hit && hit.actor && alive(hit.actor) && !hit.actor.cuffed) {
         const k = hit.actor.kind;
         if (k === "inmate") target = hit.actor;
         // an OFFICER's sights crossing a colleague is not a hold-up: the cop
@@ -438,6 +439,7 @@
       const n = npcs[i];
       if (!n || !n.group) continue;
       if (!n._intimidInit) initN(n);
+      if (n.cuffed) { if (n.intimidMode) endIntimid(n); n.intimidT = 0; continue; }
 
       const aimedHere = (n === target);
       if (aimedHere) n.intimidT = HOLD;            // pin the reaction while pointed at

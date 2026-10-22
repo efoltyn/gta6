@@ -2779,10 +2779,11 @@
     agSetCap(G, cap);
     // the held gun's silhouette: the hotbar's own cached render
     const gid = weaponIdOf(i) || "";
-    if (G.gunId !== gid) {
-      G.gunId = gid;
+    // (asked again until the photograph lands: city/itemicons.js shoots in idle time)
+    if (G.gunId !== gid || (G.gun.hidden && G.iconV !== (CBZ.itemIconVersion | 0))) {
+      G.gunId = gid; G.iconV = CBZ.itemIconVersion | 0;
       let src = "";
-      try { src = (CBZ.itemIconGun && CBZ.itemIconGun(gid)) || (CBZ.weaponThumbnail && CBZ.weaponThumbnail(gid)) || ""; } catch (e) { src = ""; }
+      try { src = (CBZ.itemIconGun && CBZ.itemIconGun(gid)) || ""; } catch (e) { src = ""; }
       if (src) G.gun.src = src;
       G.gun.hidden = !src;
     }

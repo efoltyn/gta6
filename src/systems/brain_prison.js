@@ -261,6 +261,7 @@
     n._brokenUpT = Math.max(n._brokenUpT || 0, 30);
     sendHome(n, 1.0);
   }
+  PB.cuff = cuffInmate;       // (n, by, quiet) the cuffed hold, whoever closed them (a screw, the officer player)
   PB.uncuff = uncuffInmate;
   function taseInmate(n, gd) {
     if (!n || n.dead || isPlayer(n)) return false;
