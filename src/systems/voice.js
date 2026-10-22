@@ -462,6 +462,15 @@
     scoffFight: { "*": ["You threatening me?", "Big mistake.", "Now we got a problem."] },
     scared: { "*": ["Okay! I'm going!", "I'm leaving!", "Alright, alright!"] },
     witness: { "*": ["Somebody call the cops!", "Did you see that?", "Oh my God."] },
+    // ---- A SHOPKEEPER behind his counter (systems/shopfloor.js: the gun
+    // store, the pawn shop, the jeweller). Goods walking to the door unpaid
+    // are a ladder: the warning, then the shout.
+    shoplift: { "*": ["You gotta pay for that.", "Hey. Pay for that first.", "Put it back or pay for it."] },
+    thief: { "*": ["Thief!", "Stop! Thief!", "Get back here!"] },
+    behindCounter: { "*": ["You can't be back here.", "Out front. Now."] },
+    // the broker's number for what you put on his counter ({price})
+    offer: { "*": ["I'll give you {price}.", "{price}. Best I can do.", "{price} for it."] },
+    offerHot: { "*": ["This is hot. {price}.", "I know where this came from. {price}.", "Hot goods. {price}."] },
     // ---- COMMANDS (systems/command.js). An order is three rungs: the order,
     // the order again, the last word (ctx.again 0..2). The answers are a word
     // or nothing: routine obedience is silence (command.js decides when).

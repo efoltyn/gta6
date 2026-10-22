@@ -103,7 +103,9 @@
   /* ---------------- state -> entries ---------------- */
   function g() { return CBZ.game || {}; }
   function mode() { return g().mode; }
-  function city() { return mode() === "city"; }
+  // where money is real: Gang City and the islands (CBZ.economyMode) carry the
+  // same pocket (g.cityInv), the same belt and the same holster
+  function city() { const m = mode(); return CBZ.economyMode ? CBZ.economyMode(m) : m === "city"; }
   function weaponRow(id) {
     const T = CBZ.FPS_WEAPONS;
     if (!T) return -1;
@@ -285,7 +287,7 @@
 
   // the games that carry things on this bar. Warlord/shark/others own their
   // digit keys and have nothing to carry here.
-  const BAR_MODES = { escape: 1, city: 1, gungame: 1, survival: 1, teammatch: 1 };
+  const BAR_MODES = { escape: 1, city: 1, archipelago: 1, gungame: 1, survival: 1, teammatch: 1 };
   function barMode() { return !!BAR_MODES[mode()]; }
   function cuffed() { const C = CBZ.cuffedPlayer; try { return !!(C && C.on && C.on()); } catch (e) { return false; } }
   // a city panel, the map or the verb wheel owns the keys and the glass
@@ -342,14 +344,14 @@
       // city have a holster; other modes simply keep it drawn)
       if (e.active) {
         if (m === "escape" && CBZ.playerHolster) { CBZ.playerHolster(true); return true; }
-        if (m === "city" && CBZ.cityHolster) { CBZ.cityHolster(true); return true; }
+        if (city() && CBZ.cityHolster) { CBZ.cityHolster(true); return true; }
       }
-      if (m === "city") stowMelee();
+      if (city()) stowMelee();
       const okSel = !!(CBZ.fpsSelectWeaponId && CBZ.fpsSelectWeaponId(e.id));
-      if (okSel && m === "city") hudDirty();
+      if (okSel && city()) hudDirty();
       return okSel;
     }
-    if (e.kind === "melee") return m === "city" ? useMelee(e) : false;
+    if (e.kind === "melee") return city() ? useMelee(e) : false;
     if (e.kind === "flashlight") {
       const F = CBZ.playerFlashlight;
       if (F && F.toggle) { F.toggle(); return true; }
@@ -359,12 +361,12 @@
     if ((e.kind === "throwable" || e.kind === "detonator" || e.kind === "bandage") && CBZ.heldItem) {
       const held = e.kind === "bandage" ? "bandage" : e.held;
       if (held) {
-        if (m === "city") stowMelee();
+        if (city()) stowMelee();
         return !!CBZ.heldItem.select(held);
       }
     }
     // a throwable with no held form still leaves on the pick (city)
-    if (e.kind === "throwable" && m === "city" && CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
+    if (e.kind === "throwable" && city() && CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
     return false;
   }
   function stepGun(dir) {

@@ -1,62 +1,38 @@
 /* ============================================================
-   city/jewelry.js — THE JEWELRY STORE: buy the ice OR smash the case.
+   city/jewelry.js — THE JEWELLER: real pieces under real glass. Buy the
+   ice, or break the case.
 
-   WHY: the loot economy's crown pieces (Diamond Necklace, the $5M
-   Engagement Ring) only spawned in pockets — you had to get LUCKY to touch
-   the jackpot tier. A glass case downtown holding them in plain sight is
-   the purest make-money-show-off loop in the game: you WALK PAST your next
-   score every day. But the store is also a real STORE: the front cases hold
-   the buyable catalog (a steel diver, a two-tone gold case, a fully iced-out
-   bust-down, gold + iced chains, a diamond ring + grill) — pay the clerk and
-   it goes STRAIGHT ON YOUR BODY (the same bling.js wrist/neck/hand meshes the
-   whole street reads), AND it's a wearable ASSET you can pawn back later.
-   Case → fence (or buy → flex → pawn): every piece is money on your neck.
+   Owner (2026-10-22): "every gun, or piece of jewelry. It's actual
+   jewelry." Every piece in the cases is the piece you wear (entities/
+   jewelry_kit.js, entities/watch.js make both): the watches drawn distinct
+   at real size over velvet pillows (a steel dress watch, a diver, a two-tone
+   gold chrono, a bust-down), chains on velvet neck forms, rings on ivory
+   finger cones, the grill and the tiara on cushions. Names, prices and looks
+   come from cityEcon.itemsByTag("jewelry"), so the case, the price and the
+   piece on your body are the same record.
 
-   The watches are drawn distinct per visualId at REAL size (40-42 mm cases)
-   lying over velvet pillows: a steel dress watch with baton markers, a diver
-   with a dark bezel insert, blue dial and lume, a two-tone gold chrono with
-   three subdials, and a bust-down paved in stones. Chains drape round velvet
-   neck forms, rings sit on ivory finger cones, the grill and the tiara on
-   cushions. Names/prices/visualIds come from CBZ.cityEcon.itemsByTag("jewelry")
-   so the case, the prompt and the equipped body reference the same catalog.
+   THE CASES are counter-height showcases (kick plinth, walnut — the vault:
+   gunmetal — cabinet with a brass inlay and clerk-side doors, a velvet deck
+   and a raised step, the glass box framed in brass, lit inside only). Two
+   retail cases up front, a feature island with the headline watches, and
+   the VAULT behind the counter at the clerk's back with the steal-only crown
+   pieces. THREE ways in:
+   • BUY — [Buy] the piece you are looking at in a case the clerk is behind:
+     cash (then bank) leaves, the REAL item is yours and city/bling.js puts
+     it on your body the same frame. Pawn it later for a haircut.
+   • LOUD — a bullet, a swing or [Smash] breaks the glass (Gang City's panes
+     are city glass, CBZ.cityRegisterGlass; the islands' are CBZ.islandGlass,
+     the same rounds break both). The alarm screams, the burglary is
+     reported (CBZ.cityCrime: the clerk is an eyewitness), and [Grab] scoops
+     the case. Everything taken this way is hot.
+   • QUIET — at night, on a case the clerk can't see, a slow pry takes one
+     piece without the alarm; every pull risks him turning round.
+   Cases restock on a ~10-minute timer.
 
-   THE CASES (de-slop pass 2026-09-27) are counter-height showcases: kick
-   plinth, walnut cabinet (the vault: gunmetal) with a brass inlay and clerk-
-   side doors, brass rim, velvet deck and a raised step, the registered glass
-   box framed in brass posts and rails, lit INSIDE only (an LED strip under
-   the front rail; the vault's pin-spots hang from a rod under its lid).
-   Deleted: the glowing slab lying under every case's velvet, 12 cm watches
-   floating above their rolls, 11 cm rings, price cards hovering a centimetre
-   over the velvet, the vault's "beams" floating in mid-case, and the
-   STORE_DRESS_V2 flag. The counter the clerk stands behind is dressed here
-   too (walnut, brass, stone top, till, mirror, loupe).
-
-   The jewelry lot's shell (door/counter/clerk) already exists; buildings.js
-   stamps lot.building.jewelry with four pre-clamped WORLD case anchors (two
-   front, one mid-aisle feature island, the back VAULT case). TWO ways in:
-   • LOUD — any bullet (fpsmode already rays every city shot through
-     cityShatterRay) or melee swing breaks the case glass: the panes are
-     registered as REAL city glass via CBZ.cityRegisterGlass, so cracks,
-     shards, blasts and the new-run re-glaze are all the existing pane
-     systems. Breaking one screams the alarm + charges burglary through
-     CBZ.cityCrime (witnesses + cop-LOS → the NORMAL wanted flow, zero
-     special-case police code). Then [E] scoops that case's pieces.
-   • QUIET — at night, on a case the clerk can't see (the SAME posted
-     vendor ped; their gaze + line-of-sight checked live — the vault sits
-     at their BACK by design), [E] starts a slow pry: one piece, no alarm,
-     but every pull risks the clerk turning around.
-   • BUY — a clerk-watched, intact buyable case ([E] Buy) charges cash-then-
-     bank, drops the REAL economy item into your inventory (so bling.js renders
-     it the same frame), and equips the matching wardrobe visualId (contract
-     [B] cityGrantItem + cityWear) so the look persists / serializes. No alarm,
-     no crime — it's a legit purchase. You can pawn it back later for a haircut.
-   Cases restock on a ~10-minute timer (the insurance payout re-stocks the
-   shop — and the re-glazed glass invites you back).
-
-   Loot/buys are the REAL economy items (econ.add) so fencing/wearing/drip all
-   work untouched. Perf: built ONCE per city on one group, shared geometries
-   + materials for every ring/watch/bust, whole display vis-gated at 55m.
-   Mode-gated + headless-guarded. The gunstore architecture, applied to ice.
+   ONE STORE PER SHOP: Gang City's (its case anchors stamped
+   lot.building.jewelry by city/buildings.js) and one per island jeweller
+   (CBZ.islandVenue "jewelry": the floor cleared, the counter across the
+   room, the vault behind it, a jeweller at his post).
 ============================================================ */
 (function () {
   "use strict";
@@ -67,6 +43,7 @@
 
   const RESTOCK = 600;       // seconds an EMPTIED case stays bare (insurance re-stock)
   const VIS_R = 55;          // display group draws only when you're near the shop
+  const DRESS_R = 110;
   const REACH = 2.8;         // you smash/grab/pry at arm's length
   const LOOK_DOT = 0.55;     // you act on the case you're LOOKING at
   const PRY_TIME = 4.2;      // seconds a quiet pry takes (slow = the price of silence)
@@ -76,14 +53,9 @@
   const CASE_W = 1.35, CASE_D = 0.85;   // glass case footprint (long side faces the aisle)
 
   // What each case HOLDS, value-tiered front → vault. Two kinds of slot:
-  //   { id }   — a BUYABLE catalog piece (visualId from cityEcon jewelry tag):
-  //              [E] Buy it (clerk-watched + intact case), it equips on your body
-  //              and persists; OR smash + grab/pry it like anything else.
+  //   { id }   — a BUYABLE catalog piece (visualId from cityEcon jewelry tag)
   //   { loot } — a steal-ONLY jackpot (a $250k necklace / $5M rock isn't on the
   //              retail floor): smash-and-grab or pry only, fenced at the pawn.
-  // The two front cases are the buyable RETAIL floor; the feature island holds
-  // the two headline watches (gold two-tone + the iced bust-down); the VAULT is
-  // the steal-only crown set. Names/prices come from the catalog at build time.
   const STOCK = [
     [{ id: "watch_steel" }, { id: "chain_gold" }, { id: "ring_diamond" }],   // front: entry retail
     [{ id: "watch_diver" }, { id: "grill_diamond" }, { id: "chain_iced" }],  // front: sport + iced retail
@@ -92,16 +64,14 @@
   ];
   const RING_RESTOCK_ODDS = 0.35;   // the $5M rock returns to the vault this often
 
-  const S = { lot: null, jw: null, group: null, cases: [], built: false,
-              near: false, pry: null, alarmT: 0, beepT: 0, cx: 0, cz: 0 };
+  const STORES = [];
+  let cityStore = null;
 
   function econ() { return CBZ.cityEcon || null; }
+  function SF() { return CBZ.shopFloor || null; }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
-  function note(t, s) { if (CBZ.city && CBZ.city.note) CBZ.city.note(t, s); }
 
   // ---- the BUYABLE catalog, keyed by visualId -------------------------------
-  // Pulled ONCE from CBZ.cityEcon.itemsByTag("jewelry") so the case model, the
-  // price tag and the equipped wardrobe item all agree on name/price/visualId.
   let CAT = null;
   function catalog() {
     if (CAT) return CAT;
@@ -111,24 +81,11 @@
     for (let i = 0; i < arr.length; i++) { const it = arr[i]; if (it && it.visualId) CAT[it.visualId] = it; }
     return CAT;
   }
-  // a flat WHY line for the buyable pieces (these are wearable ASSETS).
-  function dripWord(drip) {
-    drip = drip | 0;
-    if (drip >= 22) return "drips INSANE";
-    if (drip >= 12) return "drips hard";
-    if (drip >= 7) return "real drip";
-    return "clean drip";
-  }
-  // Resolve a STOCK slot into a normalized piece descriptor. Buyable pieces
-  // carry their catalog record (id/price/drip/visualId); loot pieces fall back
-  // to the legacy valuable name + its pawn value. `kind` selects the display
-  // model (the four distinct watches key off the visualId).
   function resolvePiece(slot) {
     const e = econ(); if (!e) return null;
     if (slot && slot.id) {
       const cat = catalog(); const rec = cat && cat[slot.id];
       if (!rec) return null;
-      // strip the catalog's "(Composable)" disambiguation suffix for the tag/prompt
       const label = (rec.label || rec.name || "").replace(/\s*\(Composable\)\s*$/i, "");
       return { name: rec.name, label, value: rec.value | 0,
                drip: rec.drip | 0, visualId: rec.visualId, kind: rec.visualId, buyable: true };
@@ -141,33 +98,16 @@
              showpiece: name === "Engagement Ring" };
   }
 
-  /* ---- THE PIECES, at real size (x DISPLAY) ------------------------------
-     Every piece is its own small Group (it leaves the case when bought or
-     taken) over shared geometry. Real dimensions: a watch case is 40-42 mm,
-     a ring 18 mm inside, a necklace hangs in a ~14 cm loop. DISPLAY scales
-     the piece a hair (a display case is lit and looked at from 1.5 m) without
-     going back to the old 12 cm watches and 11 cm rings. */
+  /* ---- THE PIECES, at real size (x DISPLAY) ------------------------------ */
   const DISPLAY = 1.2;
   const PI = Math.PI;
-
-  // A watch lying over a cushion: the bracelet wraps the pillow (radius PR),
-  // the head sits on the pillow's front shoulder 35 degrees up, dial facing
-  // out. Origin = pillow axis; the mount (buildMount) draws the pillow itself.
   const PR = 0.03;
-  // The watch in the case IS the watch you wear (entities/watch.js): the same
-  // case, bezel, dial and bracelet, wrapped round the pillow, dial tilted 35
-  // degrees up at the customer, hands at 10:10 like every shop window.
   const DISPLAY_STYLE = { watch_steel: "steel", watch_diver: "diver", watch_gold: "gold", watch_iced: "iced" };
   function buildWatch(visualId, grp) {
     const W = CBZ.wristwatch;
     if (W && W.display) grp.add(W.display(DISPLAY_STYLE[visualId] || "steel", PR, 35 * PI / 180));
     return grp;
   }
-
-  // the small model for a piece; `kind` = the visualId (buyable) or the loot
-  // name (vault). Origin = where it meets its mount (see MOUNT_H). THE PIECE
-  // IN THE CASE IS THE PIECE YOU WEAR: entities/jewelry_kit.js makes both —
-  // the same links, brilliants, settings and metal, laid on a velvet form.
   const DISPLAY_KIT = {
     chain_gold: ["necklace", "curb"], chain_iced: ["necklace", "cuban"], "Diamond Necklace": ["necklace", "riviera"],
     ring_diamond: ["ring", "solitaire"], "Engagement Ring": ["ring", "rock"],
@@ -178,7 +118,6 @@
     const D = CBZ.jewel && CBZ.jewel.display, how = DISPLAY_KIT[kind] || ["ring", "pinky"];
     if (kind === "watch_steel" || kind === "watch_diver" || kind === "watch_gold" || kind === "watch_iced") buildWatch(kind, grp);
     else if (D) {
-      // the neck form's column is ~36 mm radius at the chain's resting height
       if (how[0] === "necklace") grp.add(D.necklace(how[1], 0.036 / DISPLAY));
       else if (how[0] === "ring") grp.add(D.ring(how[1]));
       else if (how[0] === "grill") grp.add(D.grill());
@@ -188,18 +127,8 @@
     return grp;
   }
 
-  /* ---- THE CASE: a counter-height showcase -------------------------------
-     Kick plinth, a walnut (vault: gunmetal) cabinet with a brass inlay line
-     and panel reveals on the customer face and two storage doors on the
-     clerk's side, a brass rim and a velvet deck at 0.68 m, a raised velvet
-     step at the back, then the glass box (the registered city pane) framed
-     by brass corner posts and top rails. Retail cases light the stock with an
-     LED strip under the front top rail; the vault drops that and hangs one
-     pin-spot per piece from a rod under the lid, so it is the darker, harder
-     lit case you actually came for. Everything is drawn in a frame whose +X
-     runs along the case and +Z faces the customer (see the kit in gunstore.js). */
+  /* ---- THE CASE: a counter-height showcase ------------------------------- */
   const DECK = 0.68, GLASS_H = 0.34, STEP_H = 0.05, STEP_D = 0.3, STEP_Z = -0.14;
-  // where each mount kind stands and how tall it is (the piece sits on top)
   const MOUNT = { chain_gold: "neck", chain_iced: "neck", "Diamond Necklace": "neck", ring_diamond: "finger",
                   "Engagement Ring": "finger", "Diamond Tiara": "pillow", grill_diamond: "pillow",
                   watch_steel: "watch", watch_diver: "watch", watch_gold: "watch", watch_iced: "watch" };
@@ -207,7 +136,6 @@
     const mk = MOUNT[kind] || "pillow";
     const VEL = vault ? 0x141016 : 0x2a1016, IVORY = 0xe6e0d2;
     if (mk === "neck") {
-      // a velvet neck form: a flat foot, a shoulder flare, the neck, a cap
       k.box(x, y + 0.006, z, 0.16, 0.012, 0.09, VEL);
       k.cyl(x, y + 0.062, z, 0.05, 0.1, 0.1, VEL, "solid", 0, 0, 0, 18);
       k.cyl(x, y + 0.165, z, 0.034, 0.042, 0.11, VEL, "solid", 0, 0, 0, 16);
@@ -220,8 +148,6 @@
       return { y: y + 0.042, z: z };
     }
     if (mk === "watch") {
-      // a watch pillow held in a cradle by its two ends, high enough that
-      // the bracelet wrapped round it clears the velvet; axis along the case
       const ax = y + 0.047;
       for (const s of [-1, 1]) k.box(x + s * 0.0435, y + 0.026, z, 0.012, 0.052, 0.05, 0x1a1a1c, "gloss");
       k.cyl(x, ax, z, PR * DISPLAY, PR * DISPLAY, 0.075, VEL, "solid", 0, 0, PI / 2, 16);
@@ -234,10 +160,10 @@
   // the dressed jewellery counter: walnut cladding, brass trim, a white stone
   // worktop, the till and card reader at one end, a velvet service mat and a
   // loupe where the jeweller shows you the piece, a countertop mirror.
-  function dressCounter(group, FY) {
+  function dressCounter(S, group, FY) {
     const K = CBZ.storeFixtureKit;
-    const C = K && K.counterOf(S.lot);
-    if (!C) return;
+    const C = S.C;
+    if (!C || !K) return;
     const L = Math.max(C.w, C.d), D = Math.min(C.w, C.d);
     const k = K.create().frame(C.x, 0, C.z, K.yawOf(C.tx, C.tz));
     const top = K.dressCounter(k, L, D, C.top, FY, { clad: 0x3a2618, trim: 0xc9a44a, work: 0xe9e5dc, kick: 0x151210 });
@@ -251,19 +177,81 @@
     k.cyl(mx, top + 0.24, 0.15, 0.115, 0.115, 0.018, 0xc9a44a, "metal", PI / 2, 0, 0, 28);
     k.cyl(mx, top + 0.24, 0.16, 0.105, 0.105, 0.004, 0xd8e2e8, "metal", PI / 2, 0, 0, 28);
     k.build(group);
+    if (S.kind === "island") {
+      const a = k.world(-L / 2 - 0.04, -D / 2 - 0.06), b = k.world(L / 2 + 0.04, D / 2 + 0.06);
+      const c = { minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x), minZ: Math.min(a.z, b.z), maxZ: Math.max(a.z, b.z), y0: FY, y1: C.top + 0.05 };
+      CBZ.colliders.push(c); S.cols.push(c);
+    }
   }
 
-  // ---- build the four cases once per city -----------------------------------
-  function buildDisplays() {
+  /* ---- THE GLASS --------------------------------------------------------
+     Gang City's case panes are city glass (city/buildings.js: bullets,
+     blasts, the re-glaze). The islands' are CBZ.islandGlass panes
+     (city/shopfloor.js): the same rounds break them (fpsmode calls
+     CBZ.islandGlassRay where the city calls cityShatterRay). */
+  let ISLE_GLASS_MAT = null;
+  function isleGlassMat() {
+    if (!ISLE_GLASS_MAT) {
+      ISLE_GLASS_MAT = new THREE.MeshPhongMaterial({ color: 0xdcecf2, specular: 0xffffff, shininess: 120, transparent: true, opacity: 0.16, depthWrite: false });
+      ISLE_GLASS_MAT._shared = true;
+    }
+    return ISLE_GLASS_MAT;
+  }
+  function addPane(S, group, x, y, z, w, h, d) {
+    if (S.kind === "city") return CBZ.cityRegisterGlass ? CBZ.cityRegisterGlass(group, x, y, z, w, h, d, 0, 0, null) : null;
+    if (!CBZ.islandGlass) return null;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), isleGlassMat());
+    m.position.set(x, y, z); m.renderOrder = 1; m.castShadow = false;
+    group.add(m);
+    const rec = CBZ.islandGlass.add({ x: x, y: y, z: z, hw: w / 2, hh: h / 2, hd: d / 2, mesh: m });
+    S.panes.push(rec);
+    return rec;
+  }
+  function breakPane(S, cs) {
+    if (!cs.pane || cs.pane.shattered) return;
+    if (S.kind === "city") { if (CBZ.cityShatter) CBZ.cityShatter(cs.x, cs.z, 0.8, { directPlayer: true }); }
+    else if (CBZ.islandGlass) CBZ.islandGlass.burst(cs.pane, null);
+  }
+  function mendPane(S, cs) {
+    if (!cs.pane) return;
+    if (S.kind === "city") { cs.pane.shattered = false; cs.pane.cracked = false; if (cs.pane.mesh) cs.pane.mesh.visible = true; }
+    else if (CBZ.islandGlass) CBZ.islandGlass.mend(cs.pane);
+  }
+
+  /* ---- A STORE -----------------------------------------------------------
+     d: { kind, lot, jw (bounds, tx, tz, cases [{x, z, tier, vault}], name),
+          C (the counter: x, z, w, d, top, tx, tz), FY, root, clerk, where,
+          inStore(x, z) } */
+  function makeStore(d) {
+    const jw = d.jw;
+    const S = {
+      kind: d.kind, lot: d.lot, jw: jw, C: d.C, FY: d.FY, root: d.root, clerk: d.clerk, where: d.where, inStore: d.inStore,
+      group: null, cases: [], panes: [], cols: [], dressed: false, near: false, dead: false, pry: null, alarmT: 0,
+      cx: (jw.bounds.minX + jw.bounds.maxX) / 2, cz: (jw.bounds.minZ + jw.bounds.maxZ) / 2,
+    };
+    STORES.push(S);
+    return S;
+  }
+  function disposeStore(S) {
+    if (!S || S.dead) return;
+    S.dead = true;
+    const i = STORES.indexOf(S); if (i >= 0) STORES.splice(i, 1);
+    for (const p of S.panes) if (CBZ.islandGlass) CBZ.islandGlass.remove(p);
+    S.panes.length = 0;
+    if (S.group) { if (S.group.parent) S.group.parent.remove(S.group); if (SF()) SF().disposeTree(S.group); }
+    if (SF()) SF().dropCols(S.cols);
+    if (S.clerk && S.clerk.dispose) S.clerk.dispose();
+    S.group = null; S.cases = [];
+  }
+
+  // ---- build the four cases once per store ----------------------------------
+  function buildDisplays(S) {
     const jw = S.jw;
     const group = new THREE.Group();
+    group.name = "jewelry-store";
     S.group = group;
-    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
-    root.add(group);
-    S.cx = (jw.bounds.minX + jw.bounds.maxX) / 2;
-    S.cz = (jw.bounds.minZ + jw.bounds.maxZ) / 2;
-    const b = S.lot.building;
-    const FY = ((b && Array.isArray(b.floorTops) && b.floorTops[0] != null) ? b.floorTops[0] : 0.14) + 0.06;   // the fit-out's finished floor
+    (S.root || CBZ.scene).add(group);
+    const FY = S.FY;
     const KIT = CBZ.storeFixtureKit;
     const tx = jw.tx, tz = jw.tz;
     const yaw = KIT.yawOf(tx, tz);
@@ -288,7 +276,6 @@
       k.box(0, FY + DECK - 0.01, 0, W + 0.02, 0.02, Dp + 0.02, BRASS, "metal");               // brass rim
       k.box(0, FY + DECK + 0.006, 0, W - 0.04, 0.012, Dp - 0.04, VEL);                        // velvet deck
       k.box(0, FY + DECK + 0.012 + STEP_H / 2, STEP_Z, W - 0.16, STEP_H, STEP_D, VEL);        // the raised step
-      // brass frame round the glass: corner posts + top rails
       const gy0 = FY + DECK, gy1 = FY + DECK + GLASS_H;
       for (const sx of [-1, 1]) for (const sz of [-1, 1]) k.box(sx * (W / 2 - 0.02), (gy0 + gy1) / 2, sz * (Dp / 2 - 0.02), 0.018, GLASS_H, 0.018, BRASS, "metal");
       for (const sz of [-1, 1]) k.box(0, gy1 - 0.008, sz * (Dp / 2 - 0.02), W - 0.04, 0.016, 0.016, BRASS, "metal");
@@ -301,21 +288,14 @@
         k.cyl(0, gy1 - 0.014, STEP_Z, 0.005, 0.005, W - 0.06, BRASS, "metal", 0, 0, PI / 2);  // the pin-spot rod
         props++;
       }
-      // the GLASS — registered as REAL city glass: bullets crack-then-burst
-      // it (cityShatterRay), blasts/crashes pop it (cityShatter), a new run
-      // re-glazes it (cityGlassReset). No bespoke shatter code at all.
-      const pane = CBZ.cityRegisterGlass
-        ? CBZ.cityRegisterGlass(group, anchor.x, FY + DECK + GLASS_H / 2, anchor.z, gw - 0.04, GLASS_H, gd - 0.04, 0, 0, null)
-        : null;
+      const pane = addPane(S, group, anchor.x, FY + DECK + GLASS_H / 2, anchor.z, gw - 0.04, GLASS_H, gd - 0.04);
       // keep the body solid for walkers
       const col = { minX: anchor.x - gw / 2 - 0.04, maxX: anchor.x + gw / 2 + 0.04,
-                    minZ: anchor.z - gd / 2 - 0.04, maxZ: anchor.z + gd / 2 + 0.04, y0: 0, y1: FY + DECK + GLASS_H };
-      if (CBZ.colliders) CBZ.colliders.push(col);
+                    minZ: anchor.z - gd / 2 - 0.04, maxZ: anchor.z + gd / 2 + 0.04, y0: FY - 0.1, y1: FY + DECK + GLASS_H };
+      CBZ.colliders.push(col); S.cols.push(col);
 
-      const cs = { idx, x: anchor.x, z: anchor.z, tier: anchor.tier | 0, vault,
+      const cs = { idx, store: S, x: anchor.x, z: anchor.z, tier: anchor.tier | 0, vault,
                    pane, pieces: [], smashed: false, charged: false, restockT: 0 };
-      // the pieces stand on the step along the case's long side, each on the
-      // mount made for it, a tent card at the front edge in front of each.
       const slots = STOCK[Math.min(idx, STOCK.length - 1)] || [];
       const resolved = [];
       for (let s = 0; s < slots.length; s++) { const r = resolvePiece(slots[s]); if (r) resolved.push(r); }
@@ -341,93 +321,66 @@
         group.add(card);
         props++;
         cs.pieces.push({ name: r.name, label: r.label, value: r.value, drip: r.drip, visualId: r.visualId,
-                         buyable: !!r.buyable, model, card, taken: false,
-                         showpiece: !!r.showpiece });   // the $5M exhibit
+                         buyable: !!r.buyable, model, card, taken: false, showpiece: !!r.showpiece });
       });
       cs.props = props;
       S.cases.push(cs);
     });
     k.build(group);
-    dressCounter(group, FY);
+    dressCounter(S, group, FY);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("jewelry-store", S.lot.building, group);
+    if (S.kind === "city" && CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("jewelry-store", S.lot.building, group);
   }
 
   // ---- piece/case state ------------------------------------------------------
   function setTaken(p, on) {
     p.taken = !!on;
     if (p.model) p.model.visible = !on;
-    // the card goes with the piece and comes BACK with the re-stock — a priced
-    // card standing over an empty mount would be advertising stock that is on
-    // your neck. The MOUNT deliberately stays either way.
     if (p.card) p.card.visible = !on;
   }
-
   function piecesLeft(cs) { let n = 0; for (const p of cs.pieces) if (!p.taken) n++; return n; }
   function caseEmptied(cs) { cs.restockT = RESTOCK * (0.9 + Math.random() * 0.3); }
   function restock(cs) {
     cs.restockT = 0; cs.smashed = false; cs.charged = false;
-    // re-glaze the case's own pane (mirrors cityGlassReset for one rec)
-    if (cs.pane) { cs.pane.shattered = false; cs.pane.cracked = false; if (cs.pane.mesh) cs.pane.mesh.visible = true; }
+    mendPane(cs.store, cs);
     for (const p of cs.pieces) {
       // the $5M showpiece only SOMETIMES returns — scarcity keeps it a jackpot
       if (p.showpiece && Math.random() > RING_RESTOCK_ODDS) { setTaken(p, true); continue; }
       setTaken(p, false);
     }
-    const P = CBZ.player;
-    if (P && Math.hypot(P.pos.x - cs.x, P.pos.z - cs.z) < 30)
-      note("Fresh ice under new glass at " + S.jw.name + ".", 2.2);
   }
 
-  // ---- the ALARM + the charge (normal wanted flow, no special cop code) ------
-  function startAlarm(cs) {
-    if (S.alarmT <= 0) {
-      note("Alarm at " + S.jw.name + "! Every head on the block just turned.", 2.2);
-      S.beepT = 1.4;
-    }
+  // ---- the ALARM + the charge (the normal wanted flow) -----------------------
+  function startAlarm(S, cs) {
+    if (S.alarmT <= 0 && CBZ.sfx) CBZ.sfx("alarm");
     S.alarmT = ALARM_TIME;
-    chargeCase(cs, 140, "burglary");
+    chargeCase(S, cs, 140, "burglary");
+    if (S.clerk && S.clerk.sees(cs.x, cs.z)) S.clerk.say("thief");
   }
-  function chargeCase(cs, sev, type) {
+  function chargeCase(S, cs, sev, type) {
     if (cs.charged) return;
     const P = CBZ.player;
-    // only YOUR hit gets charged to you — a stray NPC firefight or runaway car
+    // only YOUR hit gets charged to you — a stray firefight or runaway car
     // popping a case from across the map shouldn't frame the player.
     if (!P || Math.hypot(P.pos.x - cs.x, P.pos.z - cs.z) > 30) return;
     cs.charged = true;
-    if (CBZ.cityCrime) CBZ.cityCrime(sev, { type, x: cs.x, z: cs.z });   // tags witnesses + cop-LOS → wanted
+    const eye = !!(S.clerk && S.clerk.sees(P.pos.x, P.pos.z));
+    if (CBZ.cityCrime) CBZ.cityCrime(sev, { type, x: cs.x, z: cs.z, instant: eye });
   }
 
-  // ---- the CLERK's eyes (the existing posted vendor ped) ----------------------
-  // gaze = alive, close, the case is in their forward cone, and no wall between.
-  // The vault lives behind their counter post, at their BACK — by design.
-  function clerkSees(x, z) {
-    const v = S.lot && S.lot.building && S.lot.building.vendor;
-    if (!v || v.dead || !v.pos) return false;
-    const dx = x - v.pos.x, dz = z - v.pos.z, d = Math.hypot(dx, dz);
-    if (d > 16) return false;
-    if (d > 0.4) {
-      const ry = v.group ? v.group.rotation.y : 0;
-      const fx = Math.sin(ry), fz = Math.cos(ry);               // ped forward
-      if ((dx / d) * fx + (dz / d) * fz < 0.3) return false;    // behind their back
-    }
-    if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(v.pos.x, (v.pos.y || 0) + 1.6, v.pos.z, x, 1.2, z)) return false;
-    return true;
-  }
+  // ---- the CLERK's eyes ---------------------------------------------------------
+  function clerkSees(S, x, z) { return !!(S.clerk && S.clerk.sees(x, z)); }
+  function clerkAlive(S) { return !!(S.clerk && S.clerk.alive()); }
   function isNight() { return (CBZ.nightAmount || 0) >= NIGHT_MIN; }
   function pryEligible(cs) {
-    return !cs.smashed && (!cs.pane || !cs.pane.shattered) && piecesLeft(cs) > 0 && isNight() && !clerkSees(cs.x, cs.z);
+    const S = cs.store;
+    return !cs.smashed && (!cs.pane || !cs.pane.shattered) && piecesLeft(cs) > 0 && isNight() && !clerkSees(S, cs.x, cs.z);
   }
-  // the store is OPEN to sell when a live clerk is posted (you pay them across
-  // the counter). A dead clerk's store can only be robbed, never bought from.
-  function clerkAlive() { const v = S.lot && S.lot.building && S.lot.building.vendor; return !!(v && !v.dead); }
-  function clerkName() { const v = S.lot && S.lot.building && S.lot.building.vendor; return (v && v.name) || "Jeweler"; }
 
   // ---- BUY: pay the clerk, the piece goes on your body ------------------------
-  // The buyable piece in the case nearest your aim (so you buy what you point at,
-  // not a random one). Skips taken pieces + loot-only jackpots.
   function buyTarget(cs) {
-    if (!clerkAlive() || (cs.pane && cs.pane.shattered)) return null;
+    const S = cs.store;
+    if (!clerkAlive(S) || (cs.pane && cs.pane.shattered)) return null;
     const P = CBZ.player; if (!P) return null;
     const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
     let best = null, bestDot = -2;
@@ -442,7 +395,6 @@
   }
   function affordPrice() { return (CBZ.game.cash || 0) + (CBZ.game.cityBank || 0); }
   function chargeCashThenBank(price) {
-    // mirrors realestate.js: spend cash first, then dip into the bank for the rest
     let owe = price;
     const fromCash = Math.min(CBZ.game.cash || 0, owe); CBZ.game.cash = (CBZ.game.cash || 0) - fromCash; owe -= fromCash;
     if (owe > 0) CBZ.game.cityBank = (CBZ.game.cityBank || 0) - owe;
@@ -453,36 +405,21 @@
     if (!p || p.taken || !p.buyable) return false;
     const e = econ(); if (!e) return false;
     const price = p.value | 0;
-    if (affordPrice() < price) { note("Need " + fmt$(price) + " (cash + bank) for the " + p.label + ".", 2); return false; }
+    if (affordPrice() < price) return false;
     chargeCashThenBank(price);
-    // 1) the REAL econ item lands in inventory → it's an owned, PAWNABLE asset
-    //    with the right identity + value (pawnshop/fence read g.cityInv by name).
+    // the REAL econ item: an owned, PAWNABLE asset bling.js renders by ownership
     e.add(p.name, 1);
-    // 2) wardrobe contract [B]: own + WEAR the matching visualId so the look is
-    //    persisted/serialized, the drip counts toward club status, and the body
-    //    renders the piece the instant the composable jewelry parts exist (see
-    //    DEVIATION: the watch_*/chain_*/ring_*/grill_* visualIds have no render
-    //    spec yet in clothes.js COMP or bling.js — they're catalog-only today).
-    // jewelry RENDERS (bling reads g.cityInv ownership) and COUNTS for drip
-    // (best-owned-per-slot) by OWNERSHIP — it is not a clothing composite, so it
-    // does NOT route through cityWear (that's the shirt/blazer/tie fit, and a
-    // jewelry id there is inert clutter). Grant marks it owned for the wardrobe
-    // list; cityBlingPlayerDirty (below) seats it on the body this frame.
     if (p.visualId && CBZ.cityGrantItem) CBZ.cityGrantItem(p.visualId);
-    if (CBZ.cityBlingPlayerDirty) CBZ.cityBlingPlayerDirty();   // re-seat worn ice this frame
-    // bought pieces are off the display (it's now on YOU); restock returns it.
+    if (CBZ.cityBlingPlayerDirty) CBZ.cityBlingPlayerDirty();   // on your body this frame
     setTaken(p, true);
     if (piecesLeft(cs) === 0) caseEmptied(cs);
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Bought the " + p.label + ", " + fmt$(price) + ". " + dripWord(p.drip) + ". (pawn it later)", 2.6);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(p.drip >= 20 ? 3 : 1);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;
   }
 
-  // ---- LOUD: scoop a smashed case ---------------------------------------------
-  // TAKEN WITH A HAND (systems/verbs_pickup.js): the hand goes into the
-  // broken case and comes out with the ice; the haul lands on the grab frame
+  // ---- LOUD: scoop a smashed case (TAKEN WITH A HAND, systems/verbs_pickup.js)
   function scoop(cs) {
     const e = econ();
     if (!e || piecesLeft(cs) === 0 || cs._taking) return;
@@ -494,76 +431,65 @@
     else took();
   }
   function scoopNow(cs) {
-    const e = econ();
+    const e = econ(), S = cs.store;
     if (!e || piecesLeft(cs) === 0) return;
     // grabbing from someone ELSE's broken case is still theft if you weren't
     // already charged for the smash (witnesses decide, as always)
-    chargeCase(cs, 90, "theft");
-    let total = 0; const names = [];
+    chargeCase(S, cs, 90, "theft");
+    let total = 0;
     for (const p of cs.pieces) {
       if (p.taken) continue;
       setTaken(p, true);
       e.add(p.name, 1);
-      total += p.value; names.push(p.name);
+      if (CBZ.cityMarkHot) CBZ.cityMarkHot(p.name, 1, S.where);
+      total += p.value;
     }
     if (CBZ.sfx) CBZ.sfx("coin");
-    note("Scooped: " + names.join(" + ") + ", " + fmt$(total) + " in ice.", 2.6);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(total >= 90000 ? 8 : 3);   // the grab IS the flex
-    if (total >= 200000 && CBZ.city && CBZ.city.big) CBZ.city.big("" + fmt$(total) + " SMASH-AND-GRAB!");
+    if (CBZ.cityBlingPlayerDirty) CBZ.cityBlingPlayerDirty();
     caseEmptied(cs);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
   // ---- QUIET: the slow pry ----------------------------------------------------
   function startPry(cs) {
-    const P = CBZ.player;
+    const P = CBZ.player, S = cs.store;
     S.pry = { cs, t: 0, px: P.pos.x, pz: P.pos.z };
-    note("Working the lock, stay still, stay quiet…", 1.4);
   }
-  function cancelPry(why) {
-    if (!S.pry) return;
-    S.pry = null;
-    if (why) note(why, 1.2);
-  }
-  function finishPry(cs) {
+  function cancelPry(S) { S.pry = null; }
+  function finishPry(S, cs) {
     S.pry = null;
     const e = econ();
     if (!e) return;
     let best = null;                       // you came for the priciest piece
     for (const p of cs.pieces) if (!p.taken && (!best || p.value > best.value)) best = p;
     if (!best) return;
-    // TAKEN WITH A HAND (systems/verbs_pickup.js): the piece comes out of the
-    // case in the hand; it is yours (and the clerk's chance to turn) on the
-    // grab frame
     if (CBZ.verbs && CBZ.verbs.pickup && best.model) {
-      CBZ.verbs.pickup(CBZ.player, best.model, { pose: "card", onTaken: function () { pryTaken(cs, best); } });
-    } else pryTaken(cs, best);
+      CBZ.verbs.pickup(CBZ.player, best.model, { pose: "card", onTaken: function () { pryTaken(S, cs, best); } });
+    } else pryTaken(S, cs, best);
   }
-  function pryTaken(cs, best) {
+  function pryTaken(S, cs, best) {
     const e = econ();
     if (!e || best.taken) return;
     setTaken(best, true);
     e.add(best.name, 1);
-    if (CBZ.sfx) CBZ.sfx("coin");
-    note("Slipped the " + best.name + " (" + fmt$(best.value) + ") out clean, no alarm.", 2.4);
+    if (CBZ.cityMarkHot) CBZ.cityMarkHot(best.name, 1, S.where);
+    if (CBZ.sfx) CBZ.sfx("pickup");
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(best.value >= 90000 ? 6 : 2);
     if (piecesLeft(cs) === 0) caseEmptied(cs);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     // every pull risks the clerk turning around mid-lift
-    const v = S.lot && S.lot.building && S.lot.building.vendor;
-    if (v && !v.dead && Math.random() < PRY_RISK) {
-      note("The " + (v.name || "Jeweler") + " spun around, you're MADE!", 2.2);
-      startAlarm(cs);
-    }
+    if (clerkAlive(S) && Math.random() < PRY_RISK) startAlarm(S, cs);
   }
 
   // ---- THE CASES ARE CANDIDATES (city/interactions.js registerFixtures) -----
-  // Each case is a thing in the registry: E does the obvious verb on the case
-  // you look at (grab the loose ice, buy the piece, pry the lock), Q / a tap
-  // shows every verb it has. No private prompt and no private E listener.
-  function inStore(px, pz) {
+  function inBounds(S, px, pz) {
     const B = S.jw && S.jw.bounds;
     return !!B && px >= B.minX - 1.5 && px <= B.maxX + 1.5 && pz >= B.minZ - 1.5 && pz <= B.maxZ + 1.5;
+  }
+  function storeAt(px, pz) {
+    for (const S of STORES) if (!S.dead && S.dressed && S.near && inBounds(S, px, pz)) return S;
+    return null;
   }
   const loose = (cs) => !!(cs.pane && cs.pane.shattered) && piecesLeft(cs) > 0;
   let fixturesWired = false;
@@ -572,7 +498,7 @@
     fixturesWired = true;
     CBZ.interactions.registerFixtures({
       id: "jewel-case", kind: "jewel-case", prio: 9, islands: true,
-      list: function (ctx, px, pz) { return S.built && S.near && !S.pry && inStore(px, pz) ? S.cases : null; },
+      list: function (ctx, px, pz) { const S = storeAt(px, pz); return S && !S.pry ? S.cases : null; },
       reach: function () { return REACH; },
       dot: function () { return LOOK_DOT; },
       verbs: [
@@ -580,120 +506,163 @@
         { id: "jewel-buy", slot: "e", prio: 6,
           label: (cs) => { const p = buyTarget(cs); return p ? "Buy " + fmt$(p.value) : "Buy"; },
           canShow: (cs) => { const p = buyTarget(cs); return !!p && affordPrice() >= (p.value | 0); },
-          onSelect: (cs) => { if (!S.pry) { const p = buyTarget(cs); if (p) buyPiece(cs, p); } } },
-        { id: "jewel-pry", slot: "e", prio: 5, bad: true, label: "Pry", canShow: pryEligible, onSelect: (cs) => { if (!S.pry) startPry(cs); } },
+          onSelect: (cs) => { if (!cs.store.pry) { const p = buyTarget(cs); if (p) buyPiece(cs, p); } } },
+        { id: "jewel-pry", slot: "e", prio: 5, bad: true, label: "Pry", canShow: pryEligible, onSelect: (cs) => { if (!cs.store.pry) startPry(cs); } },
         // the bat's swing, for a thumb: the glass goes, the alarm follows
         { id: "jewel-smash", prio: 3, bad: true, label: "Smash",
           canShow: (cs) => !(cs.pane && cs.pane.shattered) && piecesLeft(cs) > 0,
-          onSelect: smashCase },
+          onSelect: (cs) => breakPane(cs.store, cs) },
       ],
     });
   }
 
-  // ---- find the lot + build once (self-healing, gunstore pattern) ------------
-  function ensure() {
-    if (S.built) return true;
+  // ---- GANG CITY's store --------------------------------------------------------
+  function ensureCity() {
+    if (cityStore && !cityStore.dead) return cityStore;
     const arena = CBZ.city && CBZ.city.arena;
-    if (!arena || !econ() || !CBZ.cityRegisterGlass) return false;
+    if (!arena || !econ() || !CBZ.cityRegisterGlass) return null;
     let lot = arena.jewelryLot || null;
     if (!(lot && lot.building && lot.building.jewelry)) {
       lot = null;
       const lots = arena.lots || [];
       for (let i = 0; i < lots.length; i++) { const L = lots[i]; if (L && L.building && L.building.jewelry) { lot = L; break; } }
     }
-    if (!lot) return false;
-    S.lot = lot; S.jw = lot.building.jewelry;
-    buildDisplays();
-    S.built = true;
-    return true;
+    if (!lot) return null;
+    const b = lot.building, K = CBZ.storeFixtureKit;
+    const FY = ((b && Array.isArray(b.floorTops) && b.floorTops[0] != null) ? b.floorTops[0] : 0.14) + 0.06;   // the fit-out's finished floor
+    cityStore = makeStore({ kind: "city", lot: lot, jw: b.jewelry, C: K ? K.counterOf(lot) : null, FY: FY,
+      root: arena.root || CBZ.scene, clerk: SF() ? SF().cityClerk(lot) : null, where: "city",
+      inStore: function (x, z) { return inBounds(cityStore, x, z); } });
+    // the city glass is built with the run (a re-glaze restores it), so the
+    // showroom stands from the first look
+    cityStore.dressed = true;
+    buildDisplays(cityStore);
+    return cityStore;
+  }
+  function dress(S) {
+    if (!S || S.dressed || S.dead) return;
+    S.dressed = true;
+    buildDisplays(S);
   }
 
-  // ---- per-frame ---------------------------------------------------------------
-  CBZ.onUpdate(38, function (dt) {
-    if (!g || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; S.pry = null; return; }
-    // (the islands: this store's island lot comes through CBZ.islandVenue; until then
-    //  Gang City's own lot is the only one, and it is never reached from the islands)
-    if (!(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"))) { if (S.group && S.group.visible) S.group.visible = false; S.near = false; S.pry = null; return; }
-    if (!ensure()) return;
-    wireFixtures();
-    const P = CBZ.player;
+  /* ---- THE ISLANDS: a jeweller per building (CBZ.islandVenue "jewelry") ---
+     Two retail cases either side of the aisle up front, the feature island
+     between them and the counter, the counter across the room, the vault
+     behind it beside the jeweller's post. */
+  function islandFit(b, lot, job) {
+    const F = SF(), IV = CBZ.islandVenue;
+    if (!F || !IV || !econ() || !CBZ.islandGlass) return null;
+    const P0 = F.plan(b, { backRoom: false });
+    if (!P0) return null;
+    IV.clear(b, 0);
+    const gd = F.gunDescriptor(P0);
+    const zone = F.counterZone(P0, gd);
+    const C = gd.counter;
+    const zFront = C.zL - C.D / 2;                         // the counter's customer face (local z)
+    const zCase = P0.z0 + 3.4;
+    const off = Math.max(1.2, Math.min(1.9, P0.W / 2 - 0.75 - CASE_W / 2));
+    const zMid = Math.min(zFront - 1.3, Math.max(zCase + 1.7, (zCase + zFront) / 2));
+    // the aisle runs in from the door (local x 0) when the room allows it
+    const edge = off + CASE_W / 2 + 0.7;
+    const ax = P0.x0 + edge <= P0.x1 - edge ? Math.max(P0.x0 + edge, Math.min(P0.x1 - edge, 0)) : P0.xc;
+    const cases = [
+      Object.assign(P0.w(ax - off, zCase), { tier: 0 }),
+      Object.assign(P0.w(ax + off, zCase), { tier: 0 }),
+      Object.assign(P0.w(ax, zMid), { tier: 1 }),
+      Object.assign(P0.w(P0.xc - Math.min(1.6, P0.W / 2 - 0.8), P0.wallFace - 0.62), { tier: 2, vault: true }),
+    ];
+    if (zMid > zFront - 1.0) cases.splice(2, 1);                                 // too shallow for the island case
+    const clerk = F.postedClerk({ b: b, lot: lot, lx: zone.post.lx, lz: zone.post.lz, face: zone.post.face, armed: null, job: "jeweller" });
+    // the register in the counter, and the office safe behind it (city/islandmoney.js)
+    F.register(P0, gd, clerk, -C.L / 2 + 0.55, (lot.name || "jeweller") + " register");
+    if (IV.safe) {
+      try { IV.safe(b, { k: 0, lx: P0.x1 - 0.5, lz: P0.wallFace - 0.55, yaw: -Math.PI / 2, grade: "office", of: 16000, name: "safe" }); }
+      catch (e) { console.error("[jeweller safe]", e); }
+    }
+    const S = makeStore({
+      kind: "island", lot: lot, FY: P0.fy, root: CBZ.scene, clerk: clerk, where: F.whereKey(lot.island),
+      jw: { name: b.name || null, bounds: P0.room, tx: C.tx, tz: C.tz, inx: C.inx, inz: C.inz, cases: cases },
+      C: { x: C.x, z: C.z, w: C.w, d: C.d, top: C.top, tx: C.tx, tz: C.tz },
+      inStore: function (x, z) { return P0.inside(x, z, 0.4); },
+    });
+    return function () { disposeStore(S); };
+  }
+  if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on("jewelry", islandFit);
 
+  // ---- per-frame ---------------------------------------------------------------
+  function tickStore(S, dt, live) {
+    const P = CBZ.player;
+    if (!live || !P) {
+      if (S.group && S.group.visible) S.group.visible = false;
+      S.near = false; S.pry = null;
+      return;
+    }
+    const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz, d2 = dx * dx + dz * dz;
+    if (!S.dressed && d2 < DRESS_R * DRESS_R) dress(S);
     for (const cs of S.cases) {
       // someone (you, a bullet, a bumper) just broke this case's glass → ALARM.
-      if (cs.pane && cs.pane.shattered && !cs.smashed) {
-        cs.smashed = true;
-        startAlarm(cs);
-      }
+      if (cs.pane && cs.pane.shattered && !cs.smashed) { cs.smashed = true; startAlarm(S, cs); }
       // a full city re-glaze (new run) restored the pane under us → fresh store
       if (cs.smashed && cs.pane && !cs.pane.shattered) restock(cs);
-      // insurance re-stock keeps ticking while you're away
       if (cs.restockT > 0) { cs.restockT -= dt; if (cs.restockT <= 0) restock(cs); }
     }
-
-    // the alarm screams in bursts until it times out (cops come via wanted flow)
-    if (S.alarmT > 0) {
-      S.alarmT -= dt;
-    }
-
-    // distance VIS-GATE: the showroom draws only when you're near the shop
-    const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
-    const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
+    if (S.alarmT > 0) S.alarmT -= dt;
+    const near = d2 < VIS_R * VIS_R;
     if (S.group && S.group.visible !== near) S.group.visible = near;
     S.near = near;
-    if (!near || g.state !== "playing" || P.dead || P.driving || CBZ.cityMenuOpen) { cancelPry(); return; }
-
+    const inside = S.inStore(P.pos.x, P.pos.z);
+    if (S.clerk && S.clerk.look) S.clerk.look(inside ? P.pos.x : null, P.pos.z);
+    if (S.clerk) S.clerk.tick(dt);
+    if (!near || g.state !== "playing" || P.dead || P.driving || CBZ.cityMenuOpen) { cancelPry(S); return; }
     // a live pry: stand still, stay close, and the case must stay intact
     if (S.pry) {
       const pr = S.pry, cs = pr.cs;
       const moved = Math.hypot(P.pos.x - pr.px, P.pos.z - pr.pz) > 0.5;
       const away = Math.hypot(P.pos.x - cs.x, P.pos.z - cs.z) > REACH + 0.8;
-      if (moved || away) cancelPry("The pry slipped, you moved.");
-      else if ((cs.pane && cs.pane.shattered) || piecesLeft(cs) === 0) cancelPry();
+      if (moved || away || (cs.pane && cs.pane.shattered) || piecesLeft(cs) === 0) cancelPry(S);
       else {
         pr.t += dt;
-        // the slow pry IS the price of silence, so it keeps its time; the
-        // readout is a hairline on the case lid, not a "Prying... N%" line
+        // the readout is a hairline on the case lid, not a "Prying... N%" line
         if (CBZ.workLine) CBZ.workLine("jewel-pry", { x: cs.x, y: P.pos.y + 1.25, z: cs.z }, pr.t / PRY_TIME);
-        if (pr.t >= PRY_TIME) finishPry(cs);
+        if (pr.t >= PRY_TIME) finishPry(S, cs);
       }
+    }
+  }
+  CBZ.onUpdate(38, function (dt) {
+    const econMode = !!g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city");
+    const cityLive = econMode && !!(CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"));
+    if (cityLive) ensureCity();
+    if (econMode) wireFixtures();
+    for (let i = STORES.length - 1; i >= 0; i--) {
+      const S = STORES[i];
+      tickStore(S, dt, S.kind === "city" ? cityLive : (econMode && g.mode !== "city"));
     }
   });
 
   // a MELEE swing (fists/bat/knife — no gun drawn) on the case you're facing
-  // smashes its glass: bullets already break it through fpsmode's
-  // cityShatterRay pass, this gives the bat the same one-swing payoff.
+  // smashes its glass: bullets already break it, this gives the swing the same
+  // payoff. A clerk-watched case you can BUY from takes the click as a sale.
   addEventListener("mousedown", function (e) {
-    if (e.button !== 0 || !S.built || !g || g.mode !== "city" || g.state !== "playing") return;
+    if (e.button !== 0 || !g || g.state !== "playing" || !(CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city")) return;
     if (CBZ.cityMenuOpen || !CBZ.player || CBZ.player.driving || CBZ.player.dead) return;
     if (CBZ.cityHasGun && CBZ.cityHasGun()) return;        // gunfire path handles glass itself
     const cur = CBZ.interactions && CBZ.interactions.currentCand ? CBZ.interactions.currentCand() : null;
     const cs = cur && cur.kind === "jewel-case" ? cur.t : null;
-    if (!cs || (cs.pane && cs.pane.shattered)) return;
-    // OPEN STORE: a left-click at a clerk-watched, intact case you can BUY from is
-    // a purchase, NOT a smash — browsing the counter shouldn't frame you for
-    // burglary. Robbing in daylight still works via a GUN; the bat smashes when
-    // the clerk can't see (night / their blind side) or is down. (E-key buys too.)
-    if (buyTarget(cs) && clerkSees(cs.x, cs.z)) { const p = buyTarget(cs); if (p && !S.pry) buyPiece(cs, p); return; }
-    smashCase(cs);
+    if (!cs || !cs.store || (cs.pane && cs.pane.shattered)) return;
+    if (buyTarget(cs) && clerkSees(cs.store, cs.x, cs.z)) { const p = buyTarget(cs); if (p && !cs.store.pry) buyPiece(cs, p); return; }
+    breakPane(cs.store, cs);
   });
-  // pop just THIS case's pane through the shared glass system (sfx + shards
-  // + the alarm transition above all follow from the pane state change)
-  function smashCase(cs) { if (CBZ.cityShatter) CBZ.cityShatter(cs.x, cs.z, 0.8, { directPlayer: true }); }
 
   // ---- public hooks (headless/harness handles, gunstore-style) ----------------
-  // FEATURE-DETECT (contract [F], mirrors cityGunWallLive): interact.js trims the
-  // generic "Shop here" vendor verb on the jewelry clerk when this is true, so
-  // the in-world cases ARE the store (buy/smash/pry — no text menu). ensure()
-  // builds-on-approach so the very first walk-up reports live.
   CBZ.cityJewelryLive = function (lot) {
     if (!g || g.mode !== "city") return false;
-    if (!ensure()) return false;
-    return !!(S.lot && (!lot || lot === S.lot));
+    const S = ensureCity();
+    return !!(S && (!lot || lot === S.lot));
   };
-  CBZ.cityJewelryLot = function () { return (S.built && S.lot) || null; };
-  // headless/harness handle: buy a named buyable display by visualId or label.
+  CBZ.cityJewelryLot = function () { return (cityStore && cityStore.lot) || null; };
   CBZ.cityJewelryBuy = function (idOrLabel) {
-    if (!ensure()) return false;
+    const S = ensureCity();
+    if (!S) return false;
     for (const cs of S.cases) for (const p of cs.pieces) {
       if (p.taken || !p.buyable) continue;
       if (p.visualId === idOrLabel || p.label === idOrLabel || p.name === idOrLabel) return buyPiece(cs, p);
@@ -701,37 +670,35 @@
     return false;
   };
   CBZ.cityJewelrySmash = function (i) {
-    if (!ensure()) return false;
-    const cs = S.cases[i | 0];
+    const S = ensureCity();
+    const cs = S && S.cases[i | 0];
     if (!cs || (cs.pane && cs.pane.shattered)) return false;
-    if (CBZ.cityShatter) CBZ.cityShatter(cs.x, cs.z, 0.8);
+    breakPane(S, cs);
     return true;
   };
   CBZ.cityJewelryScoop = function (i) {
-    if (!ensure()) return false;
-    const cs = S.cases[i | 0];
+    const S = ensureCity();
+    const cs = S && S.cases[i | 0];
     if (!cs || !(cs.pane && cs.pane.shattered) || piecesLeft(cs) === 0) return false;
     scoop(cs);
     return true;
   };
-  CBZ.cityJewelryState = function () {
-    if (!S.built) return null;
+  function stateOf(S) {
     return {
-      alarm: S.alarmT > 0, clerkAlive: clerkAlive(),
+      kind: S.kind, name: (S.jw && S.jw.name) || null, alarm: S.alarmT > 0, clerkAlive: clerkAlive(S),
       cases: S.cases.map((cs) => ({ tier: cs.tier, vault: !!cs.vault, x: cs.x, z: cs.z,
         smashed: !!(cs.pane && cs.pane.shattered), left: piecesLeft(cs), restockT: cs.restockT,
         pieces: cs.pieces.map((p) => ({ name: p.name, label: p.label, value: p.value, drip: p.drip,
           visualId: p.visualId, buyable: !!p.buyable, taken: !!p.taken })) })),
     };
-  };
-  // EXPORT ONLY (a gate/probe calls this; nothing in the game does). What each
-  // case actually STANDS — pieces, display props (riser, mounts, lamp, cards) —
-  // plus the group's real mesh count, which is the perf ceiling this showroom
-  // has to live under. The theft block re-states the mechanics this must never
-  // have touched: every case still owns a registered pane, and the vault still
-  // sits at the clerk's back.
+  }
+  CBZ.cityJewelryState = function () { return cityStore && cityStore.dressed ? stateOf(cityStore) : null; };
+  CBZ.jewelryStores = function () { return STORES.map(stateOf); };
+  // EXPORT ONLY (a gate/probe calls this): what each case actually STANDS,
+  // plus the group's real mesh count (the showroom's perf ceiling).
   CBZ.cityJewelryDressAudit = function () {
-    if (!S.built) return null;
+    const S = cityStore;
+    if (!S || !S.dressed) return null;
     let meshes = 0, sprites = 0;
     if (S.group) S.group.traverse(function (o) { if (o.isMesh) meshes++; else if (o.isSprite) sprites++; });
     let panes = 0, cards = 0;
@@ -741,10 +708,8 @@
     });
     return {
       meshes: meshes, sprites: sprites, cards: cards,
-      cases: S.cases.map(function (cs) {
-        return { tier: cs.tier, vault: !!cs.vault, pieces: cs.pieces.length, props: cs.props | 0 };
-      }),
-      theft: { panes: panes, cases: S.cases.length, clerkAlive: clerkAlive() },
+      cases: S.cases.map(function (cs) { return { tier: cs.tier, vault: !!cs.vault, pieces: cs.pieces.length, props: cs.props | 0 }; }),
+      theft: { panes: panes, cases: S.cases.length, clerkAlive: clerkAlive(S) },
     };
   };
 })();

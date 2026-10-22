@@ -132,6 +132,18 @@
     Laptop:        { value: 380,  tag: "valuable" },
     "Cash Stack":  { value: 500,  tag: "valuable" },
     "Gold Bar":    { value: 3000, tag: "valuable" },
+    // --- WHAT PEOPLE PAWN (city/pawnshop.js): the goods on a broker's shelves,
+    // each a real model you take off the shelf and pay for, or fence back ---
+    "Electric Guitar": { value: 480, tag: "valuable" },
+    "Acoustic Guitar": { value: 260, tag: "valuable" },
+    "Flat TV":         { value: 340, tag: "valuable" },
+    "Guitar Amp":      { value: 190, tag: "valuable" },
+    "Power Drill":     { value: 120, tag: "valuable" },
+    Toolbox:           { value: 90,  tag: "valuable" },
+    Camera:            { value: 260, tag: "valuable" },
+    "Game Console":    { value: 210, tag: "valuable" },
+    Boombox:           { value: 80,  tag: "valuable" },
+    Speakers:          { value: 150, tag: "valuable" },
     // --- LUXURY VALUABLES (the wealth catalog: the jackpot fences) ----------
     // tag:"valuable" with a real pawn `value`. `luxe:true` marks the >=$90k
     // mega-items so other systems can gate their rarity + flag them as jackpots.

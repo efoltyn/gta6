@@ -242,6 +242,9 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
   CBZ.cityGiveWeapon = giveWeapon;
+  // the engine weapon id a city gun name is (a shop taking a display gun
+  // back, a pawn broker buying one: CBZ.lockWeapon wants the id)
+  CBZ.cityGunIdOf = function (name) { return GUN_MAP[name] || null; };
   CBZ.cityAddAmmo = function (n) {
     if (CBZ.fpsAddAmmo) CBZ.fpsAddAmmo(n);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

@@ -455,7 +455,10 @@
   function gunOwnsTrigger() {
     if (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive()) return true;
     if (!(CBZ.fps && CBZ.fps.active)) return false;
-    if (CBZ.game.mode === "city") return !!(CBZ.fpsArmed && CBZ.fpsArmed());
+    // where money is real (Gang City and the islands, CBZ.economyMode) a gun
+    // is a thing you hold: FIRE is the gun only while one is in your hands,
+    // empty hands are the fists / the grapple below
+    if (CBZ.economyMode ? CBZ.economyMode(CBZ.game.mode) : CBZ.game.mode === "city") return !!(CBZ.fpsArmed && CBZ.fpsArmed());
     return true;
   }
   function fireAction(down) {
@@ -1249,7 +1252,8 @@
     // A body the ray hit (a car, a person) keeps its own flow below (the
     // President's column, walk-to-a-car); anything else in reach opens its
     // verbs, and anything farther is walked to and opened on arrival.
-    if (CBZ.game.mode === "city" && CBZ.interactions && CBZ.interactions.tapPick && CBZ.verbWheel) {
+    // (the islands too: their counters, racks and cases are the same registry)
+    if ((CBZ.economyMode ? CBZ.economyMode(CBZ.game.mode) : CBZ.game.mode === "city") && CBZ.interactions && CBZ.interactions.tapPick && CBZ.verbWheel) {
       const pk = CBZ.interactions.tapPick(x, y, {
         ray: tapRay.ray, under: target ? target.rec : null, underPoint: target && hits.length ? hits[0].point : null,
       });
