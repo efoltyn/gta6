@@ -572,6 +572,7 @@
     C.ped = null;
     if (!p || p.dead) return;
     p.staffPost = null; p._islandPost = null;
+    if (C.seat && CBZ.propStand) CBZ.propStand(p);           // up off the stool first
     const L = C.b._venueLot, D = L && L.building && L.building.door;
     const route = D ? [{ x: D.x + D.nx * 1.0, z: D.z + D.nz * 1.0 }, { x: D.x, z: D.z, door: true }, { x: D.x - D.nx * 3, z: D.z - D.nz * 3 }] : null;
     if (CBZ.leave && CBZ.leave.go) CBZ.leave.go(p, { route: route, remove: despawn, tag: "isle:customer" });
@@ -584,7 +585,8 @@
     let n = 0;
     for (const C of Array.from(custs)) {
       const p = C.ped;
-      if (!p || p.dead || CBZ.cityPeds.indexOf(p) < 0 || !p.staffPost) { custs.delete(C); if (p && !p.dead && p._islandPost === C) p._islandPost = null; continue; }
+      const held = p && (C.seat ? p._propSeat === C.seat || (CBZ.propArcActive && CBZ.propArcActive(p)) : !!p.staffPost);
+      if (!p || p.dead || CBZ.cityPeds.indexOf(p) < 0 || !held) { custs.delete(C); if (p && !p.dead && p._islandPost === C) p._islandPost = null; continue; }
       const d = Math.hypot(p.pos.x - Pl.x, p.pos.z - Pl.z);
       const here = under(C.b.group, A.root);
       if (!here || (d > CUST_NEAR + 60 && unseen(p.pos.x, p.pos.y, p.pos.z))) { custs.delete(C); despawn(p); continue; }
@@ -607,6 +609,23 @@
     }
     if (!best) return;
     best._custNext = now + 8 + rnd() * 20;
+    // A BAR'S CROWD SITS: on a stool at the counter or in a booth (city/
+    // propuse.js seats, world/island_bar.js finds a free one); stood on it
+    // where nobody is looking, seated at once
+    if (best.use === "bar" && CBZ.islandBars && CBZ.islandBars.freeSeat && CBZ.propSit) {
+      const seat = CBZ.islandBars.freeSeat(best);
+      if (seat) {
+        const Fb = CBZ.islandVenue.floor(best, 0);
+        if (!unseen(seat.x, Fb.y, seat.z)) return;
+        const ped = stand(A, PA, seat.x, seat.z, { staff: true, _y: Fb.y, cash: 20 + ((rnd() * 120) | 0) });
+        if (!ped) return;
+        if (!CBZ.propSit(ped, seat, { instant: true })) { despawn(ped); return; }
+        const C = { b: best, spot: null, seat: seat, ped: ped, until: now + 90 + rnd() * 150 };
+        ped._islandPost = C; ped._customer = "bar";
+        custs.add(C);
+        return;
+      }
+    }
     const spots = custSpots(best);
     if (!spots.length) return;
     const taken = [];

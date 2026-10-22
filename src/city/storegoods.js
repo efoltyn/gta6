@@ -36,9 +36,10 @@
      - THE REAL, BUYABLE STOCK (cityEcon.stockFor(kind)) as the game's real
        item models (CBZ.itemAsset) at their real size, at waist height: cold
        drinks in the cooler, hot food in the warmer, coffee on the coffee
-       station, everything else on the wall bays. [E] buys, [I] pockets (the
-       clerk who can see it calls it in), and the unit leaves the shelf until
-       the daily restock.
+       station, everything else on the wall bays. [E] takes it off the shelf
+       (in your hand until you pay at the counter or put it back; out of the
+       door with it is a theft, through CBZ.shopFloor.till), and a bought
+       unit leaves the shelf until the daily restock.
 
    COST. Nothing here is eager: a store's fixtures, goods and real stock are
    built only for the few stores near you (MAX_LIVE), as ~2 merged fixture
@@ -767,11 +768,6 @@
     if (b.group) RECTS.set(b.group, plan.rects);
 
     refreshWorld(plan);
-    // THE OLD SHOPLIFT STOPS HERE: buildings.js's flavour-word grab enumerates
-    // lot.building.shoplift, and a dressed store has exactly one way to take
-    // something off its shelf, which hands you a real object.
-    b.storeShelves = b.shoplift || null;
-    b.shoplift = null;
     BY_LOT.set(lot, plan);
     return plan;
   }
@@ -1382,8 +1378,9 @@
     // world/island_shops.js through CBZ.storeGoodsMount) wherever money is real
     const econ = !!g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city");
     const cityOn = econ && (CBZ.cityArenaLive ? CBZ.cityArenaLive() : (g.mode === "city"));
-    if (!econ) { if (S.live.length) teardownAll(); return; }
+    if (!econ) { if (S.live.length) teardownAll(); for (const p of PLANS) if (p.till) p.till.dropAll(); return; }
     if (!PLANS.length) return;
+    ledgersTick(dt);
     if (S.live.length) {
       const night = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
       LIT.value = 0.12 + 0.42 * Math.max(0, Math.min(1, night));
@@ -1448,6 +1445,7 @@
     return {
       plan: p,
       dispose: function () {
+        if (p.till) { p.till.dropAll(); if (p.till.clerk && p.till.clerk.standDown) p.till.clerk.standDown(); }
         teardownPlan(p);
         const i = PLANS.indexOf(p); if (i >= 0) PLANS.splice(i, 1);
         const k = S.live.indexOf(p); if (k >= 0) S.live.splice(k, 1);
@@ -1467,9 +1465,16 @@
       if (Math.abs(p.cx - px) > 40 || Math.abs(p.cz - pz) > 40) continue;
       for (let k = 0; k < p.slots.length; k++) {
         const sl = p.slots[k];
-        if (!sl.obj) continue;
+        if (!sl.obj && !sl._held) continue;
         const d = Math.hypot(sl.x - px, sl.z - pz);
         if (d < bd) { bd = d; best = sl; }
+      }
+      // the counter, while something of this store is in your hands
+      const pa = p.payAt;
+      if (pa && p.till && p.till.held.length) {
+        if (pa.byClerk) { const v = p.till.clerk && p.till.clerk.body(); if (v) { pa.x = v.pos.x; pa.z = v.pos.z; } }
+        const d = Math.hypot(pa.x - px, pa.z - pz) - 0.8;          // (a counter is reached across)
+        if (d < bd) { bd = d; best = pa; }
       }
     }
     return best;
@@ -1511,22 +1516,100 @@
     });
   }
 
+  // (the harness's straight purchase: the unit off the shelf, paid for)
   function buySlot(sl) {
-    if (!sl || !sl.obj || sl._taking) return;
-    if (!CBZ.cityShopAcquire) { note("The clerk waves you to the counter.", 1.6); return; }
-    if (!CBZ.cityShopAcquire(sl.lot, sl.name, 1, null)) return;   // failed spend keeps the goods
+    if (!sl || !sl.obj || sl._taking || !CBZ.cityShopAcquire) return;
+    if (!CBZ.cityShopAcquire(sl.lot, sl.name, 1, null)) return;
     byHand(sl, function () { clearSlot(sl); });
   }
 
+  /* THE SHELF IS A REAL SHOP'S SHELF. You take the unit off it (it is in
+     your hand, the shelf a gap) and you PAY at the counter, or put it back.
+     What you are holding is the store's ledger, the one every shop keeps
+     (city/shopfloor.js CBZ.shopFloor.till): head for the door with it and
+     the clerk says so (an island clerk comes out from behind his counter to
+     stand in the doorway); walk out with it and it is stolen — in your bag,
+     the clerk calls it in, the goods are hot. The same law as the gun store,
+     the pawn shop, the jeweller and the outfitter: one theft system. */
+  function ledgerOf(p) {
+    if (p.till) return p.till;
+    const SF = CBZ.shopFloor, b = p.lot.building, F = p.F;
+    if (!SF || !SF.till || !F) return null;
+    // the room in the world (quarter turns: the corners' box is the room)
+    const cs = [[0, -F.halfTan], [2 * F.halfIn, -F.halfTan], [0, F.halfTan], [2 * F.halfIn, F.halfTan]].map(function (c) {
+      const w = p.toWorld(F.x(c[0], c[1]), p.FY, F.z(c[0], c[1])); return { x: w.x, z: w.z };
+    });
+    const box = { x0: Math.min.apply(null, cs.map(function (c) { return c.x; })), x1: Math.max.apply(null, cs.map(function (c) { return c.x; })),
+      z0: Math.min.apply(null, cs.map(function (c) { return c.z; })), z1: Math.max.apply(null, cs.map(function (c) { return c.z; })) };
+    const dw = p.toWorld(F.x(0.3, 0), p.FY, F.z(0.3, 0));
+    const door = { x: dw.x, z: dw.z };
+    // where you pay: the customer's side of the counter, else by the clerk
+    if (p.K) {
+      const q = p.toWorld(F.x(p.K.cIn - p.K.hIn - 0.45, p.K.cLat), p.FY, F.z(p.K.cIn - p.K.hIn - 0.45, p.K.cLat));
+      p.payAt = { plan: p, pay: true, x: q.x, z: q.z };
+    } else p.payAt = { plan: p, pay: true, x: door.x, z: door.z, byClerk: true };
+    const clerk = b.clerkPost && SF.postedClerk
+      ? SF.postedClerk({ post: b.clerkPost, b: b.clerkB, via: b.clerkVia, door: b.clerkDoor, armed: null })
+      : SF.cityClerk(p.lot);
+    p.till = SF.till({
+      clerk: clerk, where: b.where || (p._island ? "isle" : "city"),
+      inStore: function (x, z) { return x > box.x0 - 0.5 && x < box.x1 + 0.5 && z > box.z0 - 0.5 && z < box.z1 + 0.5; },
+      nearDoor: function (x, z) { return Math.hypot(x - door.x, z - door.z) < 2.4; },
+    });
+    return p.till;
+  }
+  function itemOf(sl) {
+    const lot = sl.plan.lot, name = sl.name;
+    return {
+      name: name, price: priceOf(name), slot: sl,
+      // rung up: the goods in your bag the way the counter menu hands them over
+      onPay: function () { sl._held = false; if (CBZ.cityShopAcquire) CBZ.cityShopAcquire(lot, name, 1, { free: true, bought: true }); },
+      onSteal: function () { sl._held = false; if (CBZ.cityShopAcquire) CBZ.cityShopAcquire(lot, name, 1, { free: true }); },
+      // back on the shelf (put back, or you went down with it)
+      onReturn: function () { sl._held = false; restoreSlot(sl); },
+    };
+  }
+  function restoreSlot(sl) {
+    sl.taken = false; sl.tookDay = -1;
+    const p = sl.plan;
+    if (p && p.built) buildReal(p, sl.name);
+  }
   function takeSlot(sl) {
     if (!sl || !sl.obj || sl._taking) return;
-    // one theft model for the whole city: the shoplift system's own charge
-    if (CBZ.cityShopTheftSeen && CBZ.cityShopTheftSeen(sl.lot, sl.x, sl.z)) return;
+    const T = ledgerOf(sl.plan);
+    if (!T) return;
+    // one store's goods in your hands at a time: the last store's go back
+    for (const q of PLANS) if (q !== sl.plan && q.till && q.till.held.length) q.till.dropAll();
     byHand(sl, function () {
-      if (!CBZ.cityShopAcquire || !CBZ.cityShopAcquire(sl.lot, sl.name, 1, { free: true })) return;
-      if (CBZ.sfx) CBZ.sfx("coin");
       clearSlot(sl);
+      sl._held = true;
+      T.hold(itemOf(sl));
+      if (CBZ.sfx) CBZ.sfx("pickup");
     });
+  }
+  function putBack(sl) {
+    const T = sl && sl.plan && sl.plan.till;
+    if (!T) return;
+    const it = T.holding(sl);
+    if (!it) return;
+    T.release(it);
+    it.onReturn();
+  }
+  function payAt(p) {
+    const T = p && p.till;
+    if (!T || !T.held.length) return;
+    // nobody behind the counter at all: the money is left by the till
+    const nobody = !T.clerk || !T.clerk.body();
+    T.pay(nobody);
+  }
+  // the ledger's turn: every store whose goods are in your hands
+  function ledgersTick(dt) {
+    for (let i = 0; i < PLANS.length; i++) {
+      const p = PLANS[i];
+      if (!p.till) continue;
+      if (p.till.held.length || (p.till.clerk && p.till.clerk.out && p.till.clerk.out())) p.till.tick(dt);
+      if (p.till.clerk && p.till.clerk.tick) p.till.clerk.tick(dt);
+    }
   }
 
   const I = CBZ.interactions;
@@ -1540,19 +1623,28 @@
       },
       options: [
         {
-          id: "storegoods-buy", slot: "e",
-          label: function (sl) { return "Buy " + fmt$(priceOf(sl.name)); },
-          onSelect: function (sl) { buySlot(sl); },
+          id: "storegoods-pay", slot: "e", prio: 8,
+          label: function (t) { return "Pay " + fmt$(t.plan.till.total()); },
+          canShow: function (t) { return !!(t && t.pay && t.plan.till && t.plan.till.held.length); },
+          onSelect: function (t) { payAt(t.plan); },
         },
         {
-          id: "storegoods-take", slot: "i", bad: true,
-          label: "Pocket",
-          onSelect: function (sl) { takeSlot(sl); },
+          id: "storegoods-take", slot: "e",
+          label: "Take",
+          canShow: function (t) { return !!(t && !t.pay && t.obj); },
+          onSelect: function (t) { takeSlot(t); },
+        },
+        {
+          id: "storegoods-putback", slot: "e",
+          label: "Put back",
+          canShow: function (t) { return !!(t && !t.pay && t._held); },
+          onSelect: function (t) { putBack(t); },
         },
       ],
     });
-    if (I.describe) I.describe("storegoods", function (sl) {
-      return { label: sl.name, note: fmt$(priceOf(sl.name)) };
+    if (I.describe) I.describe("storegoods", function (t) {
+      if (t && t.pay) return { label: "Counter" };
+      return { label: t.name, note: fmt$(priceOf(t.name)) };
     });
   }
 

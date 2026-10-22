@@ -963,10 +963,61 @@
     return { road: r0, dir: dir, sx: sx, sz: sz, route: route };
   }
 
+  /* PARKED AT ITS STATION (the islands, world/island_emergency.js): a real
+     unit standing in the station's bay, enterable and stealable like any
+     car, until a call comes; then it is the one that rolls out. */
+  const parked = [];
+  CBZ.cityEmergencyPark = function (kind, x, z, heading) {
+    if (!emgOn() || !CBZ.cityMakeCar) return null;
+    const model = emgModel(kind); if (!model) return null;
+    let e = null;
+    try { e = CBZ.cityMakeCar(x, z, heading, Math.abs(Math.cos(heading)) > 0.7, model, 0.2); } catch (er) { e = null; }
+    if (!e) return null;
+    e.ai = false; e.v = 0; e.baseV = 0; e._persist = true; e._emergency = kind; e.kind = kind;
+    e.state = "parked"; e.heading = heading; e._parkedUnit = true;
+    parked.push(e);
+    return e;
+  };
+  CBZ.cityEmergencyUnpark = function (e) {
+    const i = parked.indexOf(e); if (i < 0) return;
+    parked.splice(i, 1);
+    if (!e.player && !e.stolen) despawnEmergency(e);
+  };
+  // the parked unit of that kind on this street, ready to roll
+  function takeParked(A, kind) {
+    for (let i = 0; i < parked.length; i++) {
+      const e = parked[i];
+      if (e.kind !== kind || e.dead || e._reap || e.player || e.stolen || !e.group || !e.group.parent) continue;
+      if (A.root && !CBZ.islandTownUnder(e, A.root)) continue;
+      parked.splice(i, 1);
+      e._parkedUnit = false;
+      return e;
+    }
+    return null;
+  }
+  function rollOut(e, A, tx, tz) {
+    const r0 = nearestRoad(A, e.pos.x, e.pos.z, 4), r1 = nearestRoad(A, tx, tz, 3);
+    const route = r0 && r1 ? roadRoute(A, r0, r1) : null;
+    if (!route) return false;
+    e.road = r0; e.route = route; e.routeI = 0;
+    const ga = legGoal(e, tx, tz), pa = alongOf(r0, e.pos.x, e.pos.z);
+    e.roadDir = ga >= pa ? 1 : -1;
+    e.tx = tx; e.tz = tz; e.v = 0;
+    e.state = "drive"; e.t = 0; e.beaconT = Math.random() * 2; e.siren = 0; e.target = null;
+    e.cx = null; e.cz = null; e.stuckT = 0; e.ai = false; e._emgBar = null; e.grp = e.group;
+    emg.push(e);
+    return true;
+  }
+
   function spawnEmergency(kind, tx, tz) {
     const A = streetArena(); if (!A || !CBZ.cityMakeCar) return null;
     const model = emgModel(kind); if (!model) return null;
     const isle = !!A.noGrid;
+    // the islands: the unit standing at the station drives out first
+    if (isle) {
+      const u = takeParked(A, kind);
+      if (u) { if (rollOut(u, A, tx, tz)) return u; despawnEmergency(u); }
+    }
     const ap = isle ? (stationStart(A, kind, tx, tz) || roadApproach(A, tx, tz)) : offDowntown(A, tx, tz) ? roadApproach(A, tx, tz) : null;
     if (isle && !ap) return null;                 // no road reaches it: nobody drives through the houses
     // downtown: enter from the city edge along a road far from the incident
@@ -1021,6 +1072,8 @@
   CBZ.cityEmergencyReset = function () {
     for (let i = emg.length - 1; i >= 0; i--) despawnEmergency(emg[i]);
     emg.length = 0;
+    for (let i = parked.length - 1; i >= 0; i--) if (!parked[i].player) despawnEmergency(parked[i]);
+    parked.length = 0;
     // stolen units: despawn any the player ISN'T currently driving (they're
     // cityCars records — but persist:true means clearCars won't reap them, so
     // this reset owns their teardown). A player-driven one stays with the
@@ -1041,6 +1094,7 @@
   // as this file does. Nobody outside owns the lifecycle; despawnEmergency
   // still does.
   CBZ.cityEmergencyUnits = function () { return emg; };
+  CBZ.cityEmergencyParked = function () { return parked; };
 
   function incidentTarget(kind, x, z, opts) {
     opts = opts || {};
@@ -1398,7 +1452,7 @@
     if (!emgOn()) { if (emg.length || liveHonks.length) CBZ.cityEmergencyReset(); return; }
     const A = streetArena(); if (!A) return;
     // a new island in force (or back to Gang City): the units of the last go
-    if (emgArena && emgArena !== A && emg.length) CBZ.cityEmergencyReset();
+    if (emgArena && emgArena !== A && (emg.length || parked.length)) CBZ.cityEmergencyReset();
     emgArena = A;
     // new life / replay wipes the arena root out from under us → drop our refs
     if (g.elapsed + 0.001 < emgLastElapsed) CBZ.cityEmergencyReset();
@@ -1408,6 +1462,13 @@
     emgScanT -= dt;
     if (emgScanT <= 0) { emgScanT = 1.5; dispatchScan(); }
 
+    // a unit at its station that was taken (you drove it off) or wrecked is
+    // nobody's to dispatch: an ordinary stolen truck from then on
+    for (let i = parked.length - 1; i >= 0; i--) {
+      const e = parked[i];
+      if (e.player || e.stolen) { parked.splice(i, 1); e._parkedUnit = false; stolenEmg.push(e); }
+      else if (e.dead || e._reap || !e.group || !e.group.parent) parked.splice(i, 1);
+    }
     // stolen trucks: dispatch AI is off them — just keep the lightbar alive.
     for (let i = stolenEmg.length - 1; i >= 0; i--) {
       const e = stolenEmg[i];

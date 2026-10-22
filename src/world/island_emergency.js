@@ -22,6 +22,13 @@
    station(kind) for the door it pulls out of, and drives the island's
    streets from there.
 
+   THE UNIT AT ITS STATION: each stands its own vehicle (the fire truck, the
+   ambulance: city/traffic.js CBZ.cityEmergencyPark, a real enterable car)
+   in its bay: nose out on the forecourt when the lot has one, else at the
+   kerb in front of the door. A call takes that one out
+   (traffic.js spawnEmergency); a new one is stood in the bay, where nobody
+   is looking, once it has gone.
+
    API: CBZ.islandEmergency = { station(kind "fire" | "ambulance") ->
         { x, z, b } (the door, on the island in force) | null, list() }
    ============================================================ */
@@ -100,9 +107,9 @@
       IV.staff(b, dx, dz + 0.65, Math.PI, { job: "firefighter", hours: [7, 19], near: 120, dress: { archetype: "worker", job: "firefighter" } });
       IV.staff(b, dx, dz + 0.65, Math.PI, { job: "firefighter", hours: [19, 7], near: 120, dress: { archetype: "worker", job: "firefighter" } });
     }
-    const st = { b: b, kind: "fire" };
+    const st = { b: b, kind: "fire", unit: null, bay: null };
     stations.push(st);
-    return function () { const i = stations.indexOf(st); if (i >= 0) stations.splice(i, 1); };
+    return function () { dropUnit(st); const i = stations.indexOf(st); if (i >= 0) stations.splice(i, 1); };
   }
 
   /* ---- THE HOSPITAL -------------------------------------------------------- */
@@ -161,9 +168,9 @@
       IV.staff(b, tx + 0.25, tz, -Math.PI / 2, { job: "nurse", hours: [7, 19], near: 120, dress: { archetype: "worker", job: "nurse" } });
       IV.staff(b, tx + 0.25, tz, -Math.PI / 2, { job: "nurse", hours: [19, 7], near: 120, dress: { archetype: "worker", job: "nurse" } });
     }
-    const st = { b: b, kind: "ambulance" };
+    const st = { b: b, kind: "ambulance", unit: null, bay: null };
     stations.push(st);
-    return function () { const i = stations.indexOf(st); if (i >= 0) stations.splice(i, 1); };
+    return function () { dropUnit(st); const i = stations.indexOf(st); if (i >= 0) stations.splice(i, 1); };
   }
 
   // the door the unit of that kind rolls out of, on the island in force
@@ -178,9 +185,72 @@
     return null;
   }
 
+  /* ---- THE BAY ------------------------------------------------------------ */
+  function bayOf(st) {
+    const IV = CBZ.islandVenue, A = active();
+    const T = A && CBZ.islandTown ? CBZ.islandTown.of(A) : null;
+    const L = IV.lotFor(st.b), d = L && L.building && L.building.door;
+    if (!T || !d) return null;
+    // the street the door faces (the road out along its normal)
+    let road = null, dist = 1e9;
+    for (const r of T.roads) {
+      const along = r.vertical ? d.z - r.z : d.x - r.x;
+      if (Math.abs(along) > r.len / 2 - 4) continue;
+      if (r.vertical ? Math.abs(d.nx) < 0.7 : Math.abs(d.nz) < 0.7) continue;
+      const off = r.vertical ? (r.x - d.x) * -d.nx : (r.z - d.z) * -d.nz;          // out from the door, to the road
+      if (off > 0 && off < dist) { dist = off; road = r; }
+    }
+    if (!road) return null;
+    const out = { x: -d.nx, z: -d.nz };
+    if (dist - 5.5 >= 6.5) {
+      // a forecourt: nose out to the street, its tail by the door
+      const k = 1.2 + 3.0;
+      return { x: d.x + out.x * k, z: d.z + out.z * k, heading: Math.atan2(out.x, out.z) };
+    }
+    // at the kerb in front of the door, in the lane on the station's side,
+    // facing the way that lane runs (config.js roadLaneCenter: keep right)
+    const sgn = road.vertical ? Math.sign(d.x - road.x) || 1 : Math.sign(d.z - road.z) || 1;
+    const lc = CBZ.roadLaneCenter ? CBZ.roadLaneCenter(road, 1, 0) : 1.75;
+    const dir = Math.sign(lc) === sgn ? 1 : -1;
+    const lat = sgn * (3.5 * 0.5 + 0.25);
+    const x = road.vertical ? road.x + lat : d.x, z = road.vertical ? d.z : road.z + lat;
+    const heading = road.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
+    return { x: x, z: z, heading: heading };
+  }
+  function unseen(x, z) { return CBZ.leave && CBZ.leave.unseen ? CBZ.leave.unseen({ x: x, y: 1, z: z }) : true; }
+  let tickT = 0;
+  if (CBZ.onUpdate) CBZ.onUpdate(36.8, function (dt) {
+    const g = CBZ.game;
+    if (!g || g.mode !== "archipelago" || g.state !== "playing" || !CBZ.cityEmergencyPark) return;
+    tickT -= dt;
+    if (tickT > 0) return;
+    tickT = 1.5;
+    const A = active(), P = CBZ.player && CBZ.player.pos;
+    if (!A || !P) return;
+    const parkedNow = CBZ.cityEmergencyParked ? CBZ.cityEmergencyParked() : [];
+    for (const st of stations) {
+      if (st.b.fallen || !st.b.group || !under(st.b.group, A.root)) continue;
+      const u = st.unit;
+      // it rolled out, was taken or was wrecked: the bay is empty
+      if (u && parkedNow.indexOf(u) < 0) st.unit = null;
+      if (st.unit) continue;
+      if (!st.bay) st.bay = bayOf(st);
+      const B = st.bay;
+      if (!B || Math.hypot(B.x - P.x, B.z - P.z) < 30 || !unseen(B.x, B.z)) continue;
+      if (CBZ.queryCollidersNear) {
+        const hit = (CBZ.queryCollidersNear(B.x, B.z, 2.6, []) || []).some(function (c) { return c && c.y1 > (st.b.gy || 0) + 0.5 && !c.noCam; });
+        if (hit) continue;
+      }
+      for (const c of CBZ.cityCars || []) if (c && Math.hypot(c.pos.x - B.x, c.pos.z - B.z) < 4) { st.blocked = true; break; }
+      if (st.blocked) { st.blocked = false; continue; }
+      st.unit = CBZ.cityEmergencyPark(st.kind === "fire" ? "firetruck" : "ambulance", B.x, B.z, B.heading);
+    }
+  });
+  function dropUnit(st) { if (st.unit && CBZ.cityEmergencyUnpark) CBZ.cityEmergencyUnpark(st.unit); st.unit = null; }
+
   CBZ.islandEmergency = {
     station: station,
-    list: function () { return stations.map(function (s) { return { kind: s.kind, name: s.b.name || null, x: Math.round(s.b.x), z: Math.round(s.b.z) }; }); },
+    list: function () { return stations.map(function (s) { return { kind: s.kind, name: s.b.name || null, x: Math.round(s.b.x), z: Math.round(s.b.z), parked: !!s.unit, bay: s.bay }; }); },
   };
   if (CBZ.islandVenue && CBZ.islandVenue.on) {
     CBZ.islandVenue.on("firestation", fitFire);

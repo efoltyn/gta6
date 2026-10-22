@@ -369,6 +369,8 @@
     cs.charged = true;
     const eye = !!(S.clerk && S.clerk.sees(P.pos.x, P.pos.z));
     if (CBZ.cityCrime) CBZ.cityCrime(sev, { type, x: cs.x, z: cs.z, instant: eye });
+    // he saw it: out from behind the counter to stand in the doorway
+    if (eye && S.clerk.confront) S.clerk.confront();
   }
 
   // ---- the CLERK's eyes ---------------------------------------------------------
@@ -597,7 +599,11 @@
       if (zMid <= zFront - 1.0) caseAt(ax, zMid, { tier: 1, stock: 2 }, false);
     }
     caseAt(P0.xc - Math.min(1.6, P0.W / 2 - 0.8), P0.wallFace - 0.62, { tier: 2, vault: true, stock: 3 }, false);
-    const clerk = F.postedClerk({ b: b, lot: lot, lx: zone.post.lx, lz: zone.post.lz, face: zone.post.face, armed: null, job: "jeweller", via: zone.route.via, door: zone.route.door });
+    // HIS WAY TO THE DOOR runs down the shop's aisle, not across its cases:
+    // round the counter's end, along the widest clear lane between the
+    // cases the fit-out planned (keep), then across the front band
+    const route = aisleRoute(P0, zone.route, keep, zFront);
+    const clerk = F.postedClerk({ b: b, lot: lot, lx: zone.post.lx, lz: zone.post.lz, face: zone.post.face, armed: null, job: "jeweller", via: route.via, door: route.door });
     // the register in the counter, and the office safe (city/islandmoney.js):
     // in the back room when there is one (the shell put it there)
     F.register(P0, gd, clerk, -C.L / 2 + 0.55, (lot.name || "jeweller") + " register");
@@ -613,6 +619,28 @@
     });
     if (F.dressShop) { try { F.dressShop(P0, lot, "jewelry", gd, { keep: keep }); } catch (e) { console.error("[jeweller dress]", e); } }
     return function () { disposeStore(S); if (shell) shell.dispose(); };
+  }
+  // the clear lane through the cases (building-local), from the counter's end
+  // to the front band: of the x's whose column from the front band to the
+  // counter misses every case by the most, the one nearest the counter's end
+  function aisleRoute(P0, base, keep, zFront) {
+    if (!base || !base.via || !base.via.length || !base.door) return base;
+    const za = P0.z0 + 1.6, zb = zFront - 0.6;
+    let best = null, bs = -1e9;
+    const ex = base.via[base.via.length - 1].lx;
+    for (let x = P0.x0 + 0.45; x <= P0.x1 - 0.45 + 1e-6; x += 0.1) {
+      let clr = 9;
+      for (const r of keep) {
+        if (r.z1 < za || r.z0 > zb) continue;
+        const dx = x < r.x0 ? r.x0 - x : x > r.x1 ? x - r.x1 : -1;
+        clr = Math.min(clr, dx);
+      }
+      if (clr < 0.45) continue;
+      const sc = Math.min(clr, 1.2) * 4 - Math.abs(x - ex);
+      if (sc > bs) { bs = sc; best = x; }
+    }
+    if (best == null) return base;
+    return { via: base.via.concat([{ lx: best, lz: zb }, { lx: best, lz: za }]), door: base.door };
   }
   if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on("jewelry", islandFit);
 
@@ -640,6 +668,9 @@
     const inside = S.inStore(P.pos.x, P.pos.z);
     if (S.clerk && S.clerk.look) S.clerk.look(inside ? P.pos.x : null, P.pos.z);
     if (S.clerk) S.clerk.tick(dt);
+    // the thief gone from his shop: back behind the counter
+    if (S.clerk && S.clerk.out && S.clerk.out() && !inside) { S.outT = (S.outT || 0) + dt; if (S.outT > 6) { S.outT = 0; S.clerk.standDown(); } }
+    else S.outT = 0;
     if (!near || g.state !== "playing" || P.dead || P.driving || CBZ.cityMenuOpen) { cancelPry(S); return; }
     // a live pry: stand still, stay close, and the case must stay intact
     if (S.pry) {

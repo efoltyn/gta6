@@ -387,6 +387,14 @@
         },
       };
       Object.defineProperty(shim.building, "vendor", { get: function () { return L.vendor; } });
+      // the clerk's post and his way round the counter to the street door (the
+      // store's ledger, CBZ.shopFloor.till: he comes out when you head off
+      // with something you have not paid for)
+      const SFk = CBZ.shopFloor;
+      const rt = SFk && SFk.clerkRoute ? SFk.clerkRoute(R.x0, R.x1, R.z0, K.local.x - K.local.w / 2, K.local.x + K.local.w / 2,
+        K.local.z, K.local.d / 2, K.local.x, R.z1 - 0.5) : { via: [], door: null };
+      shim.building.clerkPost = K.post; shim.building.clerkB = b; shim.building.clerkVia = rt.via; shim.building.clerkDoor = rt.door;
+      shim.building.where = SFk && SFk.whereKey ? SFk.whereKey(IV.island ? IV.island(b) : null) : "isle";
       m = CBZ.storeGoodsMount(shim);
     }
     // what the store stood, in the building's frame, for the dresser
