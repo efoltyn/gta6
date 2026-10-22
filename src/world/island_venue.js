@@ -19,7 +19,8 @@
          islands standing now), or every one with a use
      CBZ.islandVenue.lotFor(b)    a Gang-City-shaped lot for building b:
          { x, z, w, d, use, name, island, b,
-           building: { door:{x,z,nx,nz}, floorTops (local), lbox, w, d, wt,
+           building: { door:{x,z,nx,nz} (nx/nz INWARD, the city's way),
+                       floorTops (local), lbox, w, d, wt,
                        ox, oz, gy, group, rotY, interior } }
          lbox(lx, ly, lz, w, h, d, colour, {solid, los, plat, cast, outside})
          draws a box in the building's own frame (door on local -z) and
@@ -160,7 +161,9 @@
       x: b.x, z: b.z, w: b.w, d: b.d, use: b.use || null, name: b.name || null, b: b,
       island: job ? islandOf(job) : null,
       building: {
-        door: { x: door.x, z: door.z, nx: -Math.sin(F.yaw), nz: -Math.cos(F.yaw) },
+        // the INWARD normal (from the street into the room), Gang City's
+        // convention (city/buildings.js lot.building.door)
+        door: { x: door.x, z: door.z, nx: Math.sin(F.yaw), nz: Math.cos(F.yaw) },
         floorTops: tops, lbox: makeLbox(b), w: lw, d: ld, wt: ib.WT,
         ox: b.ox, oz: b.oz, gy: b.gy, group: b.group, rotY: F.yaw, interior: b.interior || null,
         storeys: b.storeys || 1, name: b.name || null, use: b.use || null,

@@ -21,12 +21,19 @@
          item: { name, price, slot?, onPay(), onSteal(), onReturn() }
          o:    { clerk, inStore(x, z), nearDoor?(x, z), behind?(x, z),
                  where (an island key, or "city"), sev? }
+       Heading for the door with it, the clerk says so once and (an island
+       clerk) comes out to block the doorway; settled, he goes back.
+       pay(force): force rings it up with nobody at the counter to take it.
    CBZ.shopFloor.cityClerk(lot)   the posted Gang City vendor (peds.js)
    CBZ.shopFloor.postedClerk(o)   an island shopkeeper: one of the island's
        own people posted behind the counter (CBZ.islandVenue.staff), a gun
        under it when o.armed. o: { b, lot, lx, lz, face (local), armed, job }.
+       o.post wraps a post the venue already stood; o.via / o.door his way
+       out round the counter and the doorway he blocks (clerkRoute).
        alive() / sees(x, z) / say(topic, ctx) / look(x, z) / defend() /
-       tick(dt) / dispose().
+       confront() / standDown() / out() / tick(dt) / dispose().
+   CBZ.shopFloor.clerkRoute(x0, x1, z0, xA, xB, zC, hd, postX, postZ)
+       -> { via, door }: the clerk's way round a counter to the door.
    HOT GOODS (g.cityHot): CBZ.cityMarkHot(name, n, where),
        CBZ.cityHotCount(name), CBZ.cityHotNewest(name),
        CBZ.cityHotDrop(name, n). Every theft through a till marks what it
@@ -136,38 +143,78 @@
      put back with the island's crowd, gone with the island). Published as
      lot.building.vendor too, the way Gang City's posted vendor is, so every
      shop system asks the same field. o: { b, lot, lx, lz, face (local),
-     armed (a gun under the counter, or null), job }. */
+     armed (a gun under the counter, or null), job } — or o.post, a post the
+     venue already stood (world/island_shops.js's counter clerk), to wrap.
+       o.via    [{lx, lz}] building-local: his way out from behind the
+                counter (round its end), walked in order
+       o.door   {lx, lz} building-local: where he stands to block the door
+     confront() — somebody is heading for the door with goods he has not
+     paid for: he comes out from behind the counter and plants himself in the
+     doorway, facing him, his gun drawn when he keeps one; standDown() — it
+     is settled (paid, put back, gone): he puts it away and walks back to his
+     post. */
   const SHOT_R = 24;
   function postedClerk(o) {
     const IV = CBZ.islandVenue;
-    let aggro = 0, fireCD = 0.6, drawn = false, lookAt = null;
-    const post = IV && IV.staff ? IV.staff(o.b, o.lx, o.lz, o.face, { job: o.job || "clerk",
-      look: function () { return lookAt; } }) : null;
+    let aggro = 0, fireCD = 0.6, drawn = false, lookAt = null, out = false;
+    let post = o.post || null;
+    if (post) {
+      const own = post.look;
+      post.look = function (Pp, p, dt) { if (lookAt) return lookAt; return own ? own(Pp, p, dt) : null; };
+    } else if (IV && IV.staff) {
+      post = IV.staff(o.b, o.lx, o.lz, o.face, { job: o.job || "clerk", look: function () { return lookAt; } });
+    }
     function live() { const p = post ? post.body() : null; return p && !p.dead ? p : null; }
     if (o.lot && o.lot.building) {
       try { Object.defineProperty(o.lot.building, "vendor", { configurable: true, get: live }); } catch (e) {}
     }
+    // his way out and back, in the world
+    const F = IV && IV.floor && o.b ? IV.floor(o.b, 0) : null;
+    const via = F && o.via ? o.via.map(function (q) { return F.toWorld(q.lx, q.lz); }) : [];
+    const doorW = F && o.door ? F.toWorld(o.door.lx, o.door.lz) : null;
     const C = {
       kind: "island", post: post,
       body: live,
       alive: function () { const b = live(); return !!(b && !((b.ko || 0) > 0) && !(CBZ.body && CBZ.body.busy && CBZ.body.busy(b))); },
       sees: function (x, z) { return C.alive() && faceSees(live(), x, z, 18); },
       say: function (topic, ctx) { return C.alive() && speak(live(), topic, ctx); },
-      look: function (x, z) { if (!aggro) lookAt = x == null ? null : { x: x, z: z }; },
+      look: function (x, z) { if (!aggro && !out) lookAt = x == null ? null : { x: x, z: z }; },
       defend: function () { if (o.armed && C.alive()) { aggro = 14; fireCD = Math.max(fireCD, 0.9); } },
       busy: function () { return aggro > 0; },
+      out: function () { return out; },
+      confront: function () {
+        const b = live(), Pl = P();
+        if (!b || !doorW || !post || !Pl || C.cowed()) return false;
+        out = true;
+        lookAt = { x: Pl.pos.x, z: Pl.pos.z };
+        post.goTo(doorW.x, doorW.z, Math.atan2(Pl.pos.x - doorW.x, Pl.pos.z - doorW.z), via);
+        if (o.armed && !drawn) draw(b);
+        return true;
+      },
+      standDown: function () {
+        if (!out) return;
+        out = false;
+        if (!aggro) { lookAt = null; const b = live(); if (b && drawn) holster(b); }
+        if (post) post.back(via.slice().reverse());
+      },
       // hands up with a gun on him (city/islandmoney.js's hold-up): he rings
       // nothing up and reaches for nothing while it lasts
       cowed: function () { const b = live(); return !!(b && b._upT > 0); },
       tick: function (dt) {
         const b = live();
-        if (!b) { aggro = 0; drawn = false; return; }
+        if (!b) { aggro = 0; drawn = false; out = false; return; }
         if (aggro > 0 && C.alive() && !C.cowed()) fight(b, dt);
         else if (aggro > 0 && C.alive()) aggro = Math.max(aggro, 2);   // the moment the gun leaves him
-        else { aggro = 0; if (drawn) holster(b); }
+        else {
+          aggro = 0;
+          // out in the doorway: he keeps his eyes on you
+          if (out) { const Pl = P(); if (Pl) lookAt = { x: Pl.pos.x, z: Pl.pos.z }; }
+          else if (drawn) holster(b);
+        }
       },
       dispose: function () {},        // the island takes him (island_venue.js unstaff)
     };
+    function draw(b) { drawn = true; b.armed = true; b.weapon = o.armed; }
     function holster(b) {
       drawn = false;
       b.armed = false;
@@ -179,7 +226,7 @@
       const Pl = P();
       aggro -= dt;
       if (!Pl || Pl.dead) { aggro = 0; return; }
-      if (!drawn) { drawn = true; b.armed = true; b.weapon = o.armed; }
+      if (!drawn) draw(b);
       lookAt = { x: Pl.pos.x, z: Pl.pos.z };
       if (b.post) b.post.look = lookAt;
       if (CBZ.actorAimAt) { try { CBZ.actorAimAt(b, Pl, dt); } catch (e) {} }
@@ -187,6 +234,8 @@
       const d = Math.hypot(Pl.pos.x - b.pos.x, Pl.pos.z - b.pos.z);
       const see = faceSees(b, Pl.pos.x, Pl.pos.z, SHOT_R);
       if (see) aggro = Math.max(aggro, 3);       // he keeps on you while you are in his sights
+      // the fight over (you are gone): back behind his counter
+      if (aggro <= 0 && out) C.standDown();
       if (fireCD > 0 || !see || d > SHOT_R) return;
       fireCD = 1.05 + Math.random() * 0.5;
       let from = null;
@@ -195,11 +244,26 @@
       const hit = Math.random() < (d < 6 ? 0.8 : d < 12 ? 0.55 : 0.3);
       const to = hit ? { x: Pl.pos.x, y: (Pl.pos.y || 0) + 1.2, z: Pl.pos.z }
                      : { x: Pl.pos.x + (Math.random() - 0.5) * 2.2, y: (Pl.pos.y || 0) + 0.6 + Math.random() * 1.6, z: Pl.pos.z + (Math.random() - 0.5) * 2.2 };
-      if (CBZ.tracer) { try { CBZ.tracer(from, to, { hit: hit, shooter: b, weapon: "shotgun", targetActor: Pl, muzzleScale: 1.3 }); } catch (e) {} }
-      if (CBZ.gunVoice) { try { CBZ.gunVoice("shotgun", d); } catch (e) {} } else if (CBZ.sfx) CBZ.sfx("report");
+      const wpn = /shotgun/i.test(String(o.armed || "")) ? "shotgun" : "pistol";
+      if (CBZ.tracer) { try { CBZ.tracer(from, to, { hit: hit, shooter: b, weapon: wpn, targetActor: Pl, muzzleScale: 1.3 }); } catch (e) {} }
+      if (CBZ.gunVoice) { try { CBZ.gunVoice(wpn, d); } catch (e) {} } else if (CBZ.sfx) CBZ.sfx("report");
       if (hit) hurtYou(Math.max(12, 42 - d * 2.2), b);
     }
     return C;
+  }
+  // the clerk's way out from behind a counter (building-local): round the
+  // counter's end nearer his post that has room, then to just inside the
+  // door. The room runs x0..x1 from the door at z0; the counter from xA to xB
+  // at depth zC (half depth hd); his post at (postX, postZ). -> { via, door }
+  function clerkRoute(x0, x1, z0, xA, xB, zC, hd, postX, postZ) {
+    const right = x1 - (xB + 0.55), left = (xA - 0.55) - x0;
+    const goRight = right >= 0.35 && (left < 0.35 || Math.abs(xB - postX) <= Math.abs(postX - xA));
+    if (!goRight && left < 0.35) return { via: [], door: null };
+    const ex = goRight ? Math.min(x1 - 0.35, xB + 0.55) : Math.max(x0 + 0.35, xA - 0.55);
+    return {
+      via: [{ lx: ex, lz: postZ }, { lx: ex, lz: zC - hd - 0.6 }],
+      door: { lx: 0, lz: z0 + 1.15 },
+    };
   }
   function hurtYou(dmg, by) {
     const x = by.pos.x, z = by.pos.z;
@@ -220,8 +284,8 @@
       total: function () { let n = 0; for (const it of T.held) n += it.price | 0; return n; },
       open: function () { return !!(T.clerk && T.clerk.alive() && !T.clerk.busy() && !(T.clerk.cowed && T.clerk.cowed())); },
       // the clerk rings it all up
-      pay: function () {
-        if (!T.held.length || !T.open()) return false;
+      pay: function (force) {
+        if (!T.held.length || (!force && !T.open())) return false;
         const tot = T.total();
         if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(tot))) {
           if (CBZ.city && CBZ.city.note) CBZ.city.note(fmt$(tot), 1.4);
@@ -265,6 +329,8 @@
       tick: function (dt) {
         const Pl = P();
         if (!Pl) return;
+        // settled (paid, put back, gone with it): the clerk goes back to his post
+        if (!T.held.length && T.clerk && T.clerk.out && T.clerk.out() && !T.clerk.busy()) T.clerk.standDown();
         if (T.clerk && o.behind) {
           const back = o.behind(Pl.pos.x, Pl.pos.z);
           if (back && !T.behindSaid && T.clerk.sees(Pl.pos.x, Pl.pos.z)) { T.behindSaid = true; T.clerk.say("behindCounter"); }
@@ -277,6 +343,8 @@
         if (!T.warned && o.nearDoor && o.nearDoor(Pl.pos.x, Pl.pos.z) && T.clerk && T.clerk.sees(Pl.pos.x, Pl.pos.z)) {
           T.warned = 1;
           T.clerk.say("shoplift", { ladder: { kind: "shoplift", step: 0 } });
+          // and he comes out from behind the counter to stand in the doorway
+          if (T.clerk.confront) T.clerk.confront();
         }
       },
     };
@@ -520,10 +588,13 @@
   // between the counter and the back wall), and the clerk's post
   function counterZone(P0, desc) {
     const zC = desc.counter.zL, half = desc.counter.D / 2;
+    const L = desc.counter.L, postX = P0.xc + 0.4, postZ = zC + half + 0.55;
     return {
+      // his way round the counter's end to the door (postedClerk o.via / o.door)
+      route: clerkRoute(P0.x0, P0.x1, P0.z0, P0.xc - L / 2, P0.xc + L / 2, zC, half, postX, postZ),
       behind: function (x, z) { const p = P0.loc(x, z); return p.z > zC + half + 0.05 && p.z < P0.wallFace && p.x > P0.x0 && p.x < P0.x1; },
       // the clerk's spot, building-local (CBZ.islandVenue.staff), facing the door
-      post: { lx: P0.xc + 0.4, lz: zC + half + 0.55, face: Math.PI },
+      post: { lx: postX, lz: postZ, face: Math.PI },
     };
   }
 
@@ -609,7 +680,7 @@
   }
 
   CBZ.shopFloor = {
-    till: till, cityClerk: cityClerk, postedClerk: postedClerk,
+    till: till, cityClerk: cityClerk, postedClerk: postedClerk, clerkRoute: clerkRoute,
     plan: plan, shell: shell, gunDescriptor: gunDescriptor, counterZone: counterZone, register: register, dressShop: dressShop,
     whereKey: whereKey, disposeTree: disposeTree, dropCols: dropCols, yawToward: yawToward, fmt$: fmt$,
     audit: function () { return { glass: IG.length, hot: Object.keys(hotMap()).length }; },

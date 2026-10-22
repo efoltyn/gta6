@@ -38,7 +38,9 @@
        front has a roller shutter that comes down at closing once the shop
        is empty and goes up in the morning. A shut shutter is solid and
        locked: "Break in" forces it (the alarm rings: a burglary, for whoever
-       saw or heard it).
+       saw or heard it). A tower (an office tower, the bank's) has sliding
+       glass doors instead, locked the same way, and a night guard in its
+       lobby from closing to opening.
 
    API  CBZ.islandPeople = {
           arena()                the people arena of the island in force
@@ -93,13 +95,14 @@
     butcher: [7, 18], chemist: [8, 21], newsagent: [6, 20], books: [9, 19], florist: [8, 18],
     laundry: [7, 22], barber: [9, 19], hardware: [8, 18], surfshop: [9, 19], diveshop: [8, 18],
     market: [6, 14], shop: [8, 20],
+    bar: [16, 2],                       // (wraps past midnight)
   };
   function hours(b) { return (b && b.use && HOURS[b.use]) || null; }
   function isOpen(b) {
     const H = hours(b);
     if (!H) return true;
     const h = hour();
-    return h >= H[0] && h < H[1];
+    return H[0] <= H[1] ? (h >= H[0] && h < H[1]) : (h >= H[0] || h < H[1]);
   }
 
   /* ---- THE STREET AS LOTS ------------------------------------------------- */
@@ -110,7 +113,8 @@
     clothing: "clothing", suits: "clothing", eyewear: "clothing", surfshop: "clothing", diveshop: "clothing",
     phones: "electronics", bank: "bank", loans: "bank", cityhall: "cityhall", recruit: "cityhall",
     office: "office", guns: "guns", pawn: "pawn", jewelry: "jewelry", barber: "barber",
-    cardealer: "carlot", usedcars: "carlot", hotel: "hotel", motel: "hotel", fuel: "gas",
+    cardealer: "carlot", usedcars: "carlot", hotel: "hotel", motel: "hotel", fuel: "gas", bar: "bar",
+    hospital: "hospital",
   };
   // the island plan's districts, as the city's casting reads a district
   const DIST = {
@@ -130,8 +134,8 @@
     return {
       kind: home ? "home" : (KIND[b.use] || b.use || "shop"), use: b.use || null, name: b.name || null, b: b,
       cx: b.x, cz: b.z, w: b.w, d: b.d, district: DIST[b.district] || DIST.rural, isle: true,
-      // the city's lots carry the INWARD normal (venue's lotFor names the outward one)
-      building: { door: { x: d.x, z: d.z, nx: -d.nx, nz: -d.nz }, w: b.w, d: b.d, ox: b.ox, oz: b.oz, group: b.group },
+      // (lotFor's door carries the INWARD normal, as the city's lots do)
+      building: { door: { x: d.x, z: d.z, nx: d.nx, nz: d.nz }, w: b.w, d: b.d, ox: b.ox, oz: b.oz, group: b.group },
       // a building that came down, or a shop that is shut, is nobody's errand
       get demolished() { return !!b.fallen || (!home && !isOpen(b)); },
     };
@@ -436,7 +440,7 @@
     }
     p.staffPost = null; p.controlled = true;
     p.path = [{ x: tx, z: tz }]; p.finalGoal = { x: tx, z: tz };
-    if (p.target && p.target.set) p.target.set(tx, 0, tz);
+    if (p.target && p.target.set) p.target.set(p.path[0].x, 0, p.path[0].z);
     p.state = "walk"; p.pause = 0;
   }
   function goHome(P) {
@@ -453,7 +457,7 @@
     const L = P.b && P.b._venueLot ? P.b._venueLot : null;
     const D = L && L.building && L.building.door;
     const route = [];
-    if (D) { route.push({ x: D.x - D.nx * 1.0, z: D.z - D.nz * 1.0 }); route.push({ x: D.x, z: D.z, door: true }); route.push({ x: D.x + D.nx * 3, z: D.z + D.nz * 3 }); }
+    if (D) { route.push({ x: D.x + D.nx * 1.0, z: D.z + D.nz * 1.0 }); route.push({ x: D.x, z: D.z, door: true }); route.push({ x: D.x - D.nx * 3, z: D.z - D.nz * 3 }); }
     if (CBZ.leave && CBZ.leave.go) CBZ.leave.go(p, { route: route.length ? route : null, remove: despawn, tag: "isle:closing" });
     else despawn(p);
   }
@@ -500,7 +504,19 @@
     guns: 1, pawn: 1, jewelry: 1, eyewear: 1, clothing: 1, suits: 1, phones: 1, bank: 3, loans: 1, cityhall: 3, recruit: 1,
     cafe: 2, diner: 3, deli: 2, bakery: 2, grocer: 2, chemist: 2, hardware: 1, books: 1, barber: 1, newsagent: 1, florist: 1,
     butcher: 1, icecream: 2, laundry: 1, chandlery: 1, shop: 1, surfshop: 1, diveshop: 1, market: 2,
+    bar: 6, hospital: 2,
   };
+  // how many a shop has in it at this hour: by day the street's rhythm; a
+  // bar's crowd is the evening's (a few from six, full from eight to
+  // midnight, the last of them out by two)
+  function custWant(b) {
+    const want = CUST_USES[b.use] || 0;
+    if (b.use !== "bar") return Math.max(1, Math.round(want * hourMul()));
+    const h = hour();
+    if (h >= 20 || h < 1) return want;
+    if (h >= 18 || h < 2) return Math.round(want * 0.5);
+    return 1;
+  }
   const CUST_NEAR = CBZ.deviceClass === "phone" ? 38 : SMALL ? 46 : 58;
   const CUST_CAP = CBZ.deviceClass === "phone" ? 5 : SMALL ? 7 : 11;
   const custs = new Set();
@@ -557,7 +573,7 @@
     if (!p || p.dead) return;
     p.staffPost = null; p._islandPost = null;
     const L = C.b._venueLot, D = L && L.building && L.building.door;
-    const route = D ? [{ x: D.x - D.nx * 1.0, z: D.z - D.nz * 1.0 }, { x: D.x, z: D.z, door: true }, { x: D.x + D.nx * 3, z: D.z + D.nz * 3 }] : null;
+    const route = D ? [{ x: D.x + D.nx * 1.0, z: D.z + D.nz * 1.0 }, { x: D.x, z: D.z, door: true }, { x: D.x - D.nx * 3, z: D.z - D.nz * 3 }] : null;
     if (CBZ.leave && CBZ.leave.go) CBZ.leave.go(p, { route: route, remove: despawn, tag: "isle:customer" });
     else despawn(p);
   }
@@ -585,7 +601,7 @@
       if (d >= bd) continue;
       let have = 0;
       for (const C of custs) if (C.b === b) have++;
-      if (have >= Math.max(1, Math.round(want * hourMul()))) continue;
+      if (have >= custWant(b)) continue;
       if ((b._custNext || 0) > now) continue;
       bd = d; best = b;
     }
@@ -640,6 +656,12 @@
     return function () { setCol(S, false); shutters.delete(S); };
   }
   function pose(S) {
+    if (S.kind === "doors") {
+      // the leaves slide shut toward the middle, open out over the jambs
+      const k = Math.max(0, Math.min(1, S.k)), e = k * k * (3 - 2 * k);
+      for (const l of S.leaves) l.g.position.x = l.s * (S.lw / 2 + (1 - e) * (S.lw - 0.02));
+      return;
+    }
     const k = Math.max(0, Math.min(1, S.k)), h = Math.max(0.001, S.H * k);
     S.curtain.visible = k > 0.002;
     S.curtain.scale.y = h;
@@ -668,7 +690,8 @@
     for (const p of CBZ.cityPeds) {
       if (!p || p.dead || !p.pos) continue;
       if (Math.abs(p.pos.x - S.x) < 2 && Math.abs(p.pos.z - S.z) < 2) return false;
-      if (p._islandPost && p._islandPost.b === S.b) return false;            // the staff is still in
+      // the staff is still in (a man whose shift is the night is meant to be)
+      if (p._islandPost && p._islandPost.b === S.b && !(p._islandPost.hours && p._islandPost.on && p._islandPost.on())) return false;
     }
     return true;
   }
@@ -731,6 +754,106 @@
   }
   for (const u of SHUT_USES) if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on(u, shutterFit);
 
+  /* ---- THE TOWERS' NIGHT DOORS ---------------------------------------------
+     An office tower and the bank's tower keep business hours too (HOURS), but
+     a tower's front is not a shop front: it has a pair of sliding glass doors
+     in a bronze frame across its street door. By day they stand slid open
+     either side of the doorway; at closing, once the lobby is empty, they
+     run shut and lock (solid, like a shutter: "Break in" forces them and the
+     alarm rings). The night guard comes on as they lock: posted in the lobby
+     just inside the doors, armed, until the morning. Anyone in the building
+     after hours that he sees is told once, and called in if he stays.
+     The hotel's lobby stays open all night (no hours: its front desk has a
+     night porter, world/island_lodging.js). */
+  const GLASS = (function () { let m = null; return function () {
+    if (!m) { m = new window.THREE.MeshLambertMaterial({ color: 0x9fb8c4, transparent: true, opacity: 0.34, depthWrite: false }); m._shared = true; m.name = "isle-tower-door-glass"; }
+    return m; }; })();
+  const BRONZE = (function () { let m = null; return function () {
+    if (!m) { m = new window.THREE.MeshLambertMaterial({ color: 0x3a3127 }); m._shared = true; m.name = "isle-tower-door-frame"; }
+    return m; }; })();
+  const UNIT = (function () { let gg = null; return function () { if (!gg) { gg = new window.THREE.BoxGeometry(1, 1, 1); gg._shared = true; } return gg; }; })();
+  function piece(parent, mat, x, y, z, w, h, d) {
+    const m = new window.THREE.Mesh(UNIT(), mat);
+    m.scale.set(w, h, d); m.position.set(x, y, z);
+    m.castShadow = false; m.receiveShadow = true;
+    parent.add(m);
+    return m;
+  }
+  function towerDoorFit(b, lot) {
+    if (!b || !b.group || !b.interior || b.interior.kind !== "tower" || b.ox == null || !hours(b)) return null;
+    const IB = CBZ.islandBuilding || {}, IV = CBZ.islandVenue;
+    const FH = IB.FH || 3.4, DW = IB.DOORW || 1.8;
+    const L = lot && lot.building;
+    if (!L || !L.lbox || !IV) return null;
+    const ld = b.ld || b.d, z = -ld / 2 - 0.05;
+    const H = FH - 0.7, lw = DW / 2 + 0.04;
+    // the frame round the doorway: the transom over it, a jamb each side, a sill
+    L.lbox(0, H + 0.06, z, DW + 0.5, 0.12, 0.1, 0x3a3127, { outside: true });
+    for (const s of [-1, 1]) L.lbox(s * (DW / 2 + 0.05), H / 2, z, 0.1, H, 0.12, 0x3a3127, { outside: true });
+    L.lbox(0, 0.01, z, DW + 0.5, 0.02, 0.16, 0x2a2622, { outside: true });
+    // the two leaves: glass in a bronze rim, a pull bar on each
+    const leaves = [];
+    for (const s of [-1, 1]) {
+      const g0 = new window.THREE.Group();
+      g0.name = "isle-tower-door";
+      piece(g0, GLASS(), 0, H / 2, 0, lw - 0.08, H - 0.1, 0.02);
+      piece(g0, BRONZE(), 0, 0.06, 0, lw, 0.12, 0.05);
+      piece(g0, BRONZE(), 0, H - 0.03, 0, lw, 0.06, 0.05);
+      for (const e of [-1, 1]) piece(g0, BRONZE(), e * (lw / 2 - 0.02), H / 2, 0, 0.04, H, 0.05);
+      piece(g0, BRONZE(), -s * (lw / 2 - 0.12), 1.05, -0.05, 0.03, 0.9, 0.03);
+      g0.position.set(s * lw / 2, 0, z - 0.03 * s);
+      b.group.add(g0);
+      leaves.push({ g: g0, s: s });
+    }
+    const F = IV.floor(b, 0);
+    const a = F.toWorld(-DW / 2 - 0.1, -ld / 2 - 0.12), c = F.toWorld(DW / 2 + 0.1, -ld / 2 + 0.2);
+    const col = { minX: Math.min(a.x, c.x), maxX: Math.max(a.x, c.x), minZ: Math.min(a.z, c.z), maxZ: Math.max(a.z, c.z),
+      ref: null, y0: b.gy, y1: b.gy + H, shutter: true };
+    const door = L.door;
+    const S = { b: b, kind: "doors", leaves: leaves, lw: lw, DW: DW, H: H, k: isOpen(b) ? 0 : 1, col: col, colOn: false, forced: false,
+      x: door.x, z: door.z, nx: door.nx, nz: door.nz, F: F, wasOpen: isOpen(b), guard: null, warnT: 0, warned: false };
+    // THE NIGHT GUARD: in the lobby beside the doors, facing them, from
+    // closing to opening
+    const Hh = hours(b);
+    if (IV.staff) {
+      S.guard = IV.staff(b, DW / 2 + 1.1, F.local.z0 + 1.3, Math.PI, {
+        job: "night guard", hours: [Hh[1], Hh[0]], near: 120, armed: true, archetype: "security",
+        look: function (P, p) { const Pl = CBZ.player && CBZ.player.pos; return Pl && Math.hypot(Pl.x - p.pos.x, Pl.z - p.pos.z) < 14 ? { x: Pl.x, z: Pl.z } : null; },
+      });
+    }
+    pose(S);
+    setCol(S, S.k > 0.7);
+    shutters.add(S);
+    return function () {
+      setCol(S, false); shutters.delete(S);
+      for (const l of leaves) if (l.g.parent) l.g.parent.remove(l.g);
+    };
+  }
+  // in the building after its hours, where the night guard can see you: he
+  // says so once; still in there after a while, he calls it in
+  function guardTick(S, dt) {
+    const Pl = CBZ.player && CBZ.player.pos, gp = S.guard;
+    if (!Pl || !gp || isOpen(S.b)) { S.warned = false; S.warnT = 0; return; }
+    const g0 = gp.body ? gp.body() : null;
+    const q = S.F.toLocal(Pl.x, Pl.z), I = S.F.local;
+    const inside = q.x > I.x0 - 0.2 && q.x < I.x1 + 0.2 && q.z > I.z0 - 0.2 && q.z < I.z1 + 0.2 && Pl.y > S.b.gy - 1 && Pl.y < S.b.gy + (S.b.h || 40);
+    if (!inside || !g0 || g0.dead || (g0._upT > 0)) { if (!inside) { S.warned = false; S.warnT = 0; } return; }
+    const d = Math.hypot(Pl.x - g0.pos.x, Pl.z - g0.pos.z);
+    if (d > 16 || Math.abs(Pl.y - g0.pos.y) > 2.5) return;
+    if (!S.warned) {
+      S.warned = true; S.warnT = 0;
+      if (CBZ.speech && CBZ.speech.say) { try { CBZ.speech.say(g0, "We're closed.", { force: true }); } catch (e) {} }
+      return;
+    }
+    S.warnT += dt;
+    if (S.warnT > 9 && S.warnT - dt <= 9) {
+      if (CBZ.speech && CBZ.speech.say) { try { CBZ.speech.say(g0, "That's it. I'm calling it in.", { force: true }); } catch (e) {} }
+      if (CBZ.cityCrime) { try { CBZ.cityCrime(35, { type: "trespass", x: Pl.x, z: Pl.z, instant: true }); } catch (e) {} }
+    }
+  }
+  for (const u of ["office", "bank"]) if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on(u, towerDoorFit);
+
+
   /* ---- THE TICK ----------------------------------------------------------- */
   CBZ.onUpdate(35.6, function (dt) {
     const m = g.mode;
@@ -760,6 +883,7 @@
       custTick(A, PA);
     }
     shutterTick(A, d, decide);
+    for (const S of shutters) if (S.guard && under(S.b.group, A.root)) guardTick(S, d);
   });
 
   /* ---- AN ISLAND GOES, THE ISLANDS ARE LEFT ------------------------------- */

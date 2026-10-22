@@ -179,6 +179,10 @@
     //     government strongroom (city/govcomplex.js) and is what the office
     //     contract on the hitman wall reads.
     "City Seal":   { value: 1500, tag: "key" },
+    // the key to the room you rented for the night (world/island_lodging.js):
+    // handed over at the desk, it opens that door, it goes back at checkout
+    "Room Keycard":{ value: 0, tag: "key" },
+    "Motel Key":   { value: 0, tag: "key" },
     Lockpick:      { value: 90,   tag: "tool" },
     Crowbar:       { value: 70,   tag: "tool" },
     // a hand torch: its use is LIGHT (systems/playerflashlight.js), never a swing

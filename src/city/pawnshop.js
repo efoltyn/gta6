@@ -907,7 +907,7 @@
     const gd = F.gunDescriptor(P0);                         // the same counter line as the gun shop
     const zone = F.counterZone(P0, gd);
     const c = P0.cust, wp = P0.w(P0.xc, P0.wallFace);
-    const clerk = F.postedClerk({ b: b, lot: lot, lx: zone.post.lx, lz: zone.post.lz, face: zone.post.face, armed: "Shotgun", job: "pawnbroker" });
+    const clerk = F.postedClerk({ b: b, lot: lot, lx: zone.post.lx, lz: zone.post.lz, face: zone.post.face, armed: "Shotgun", job: "pawnbroker", via: zone.route.via, door: zone.route.door });
     F.register(P0, gd, clerk, gd.counter.L * 0.27, (lot.name || "pawn shop") + " register");   // behind the teller cage
     const S = makeStore({
       kind: "island", lot: lot, FY: P0.fy, root: CBZ.scene, clerk: clerk, where: F.whereKey(lot.island),

@@ -27,24 +27,31 @@
    HOTELS AND MOTELS. An island building whose use is "hotel" or "motel"
    (lot.use from world/island_plan.js, published as b.use; the helipad
    tower, kind "hotel", is a hotel either way) gets, fitted by this file:
-     - a front desk in its ground floor, where its clerk stands: a real
-       person of the island (a survivor bot from entities/survivorbot.js)
-       posted behind the counter, stood there only where nobody is looking;
+     - a front desk in its ground floor, where its clerk stands: one of the
+       island's own people (CBZ.islandVenue.staff) posted behind the
+       counter, the receptionist by day and the night porter through the
+       night: the lobby never shuts;
      - [E] Rent $N on the desk while he is at it (hotel $120..250 a night by
        island, motel $40): the room is yours until noon tomorrow (at least
-       six hours out), its door opens for you and nobody else;
+       six hours out). He hands you its KEY, a real thing in your pockets
+       (g.cityInv "Room Keycard" at a hotel, "Motel Key" at a motel): the
+       door opens for whoever carries it and nobody else, and it is gone from
+       your pockets at checkout (noon, or [E] Check out at the desk);
      - the room: a hotel's is a real guest room built on an upper floor of
        the tower (the floors above the second are fitted and empty): two
        partition walls with a door that opens on your key, a queen bed,
        nightstands with lamps, a TV on its cabinet, a bathroom with its door
        open. A motel's room is the building's own bedroom, upstairs.
-   If world/island_venue.js's CBZ.islandVenue.on(use, fn) is up the fit-out
-   rides it; either way this file also finds the venues on the islands in
-   the world itself, once each, and takes everything back when one leaves.
+   ONE PATH: the fit-out rides world/island_venue.js (CBZ.islandVenue.on
+   "hotel" / "motel"): the venue is fitted when its island joins the world
+   and given back when the island goes (the polling scan of the
+   archipelago that ran beside it, and the venue hook that only handed the
+   room back, are gone).
 
    API: CBZ.islandLodging = { rooms(), rental(), wakeSpot(arena), rent(room),
-        fit(b, arena), state() }   and the prompt verbs CBZ.islandBedLie,
-        CBZ.islandBedSleep, CBZ.islandLodgeRent, CBZ.islandLodgeDoor.
+        checkOut(room), fit(b, arena), state() }   and the prompt verbs
+        CBZ.islandBedLie, CBZ.islandBedSleep, CBZ.islandLodgeRent,
+        CBZ.islandLodgeCheckout, CBZ.islandLodgeDoor.
 ============================================================ */
 (function () {
   "use strict";
@@ -248,6 +255,7 @@
     const post = P(0.55, site.a), front = P(2.2, site.a);
     const pw = toW(F, post[0], post[1]), fw = toW(F, front[0], front[1]);
     room.post = { x: pw.x, y: site.fy, z: pw.z, face: yawW(F, n[0], n[1]) };
+    room.postL = { lx: post[0], lz: post[1], face: Math.atan2(n[0], n[1]) };
     room.front = { x: fw.x, y: site.fy, z: fw.z };
     const top = toW(F, P(1.3, site.a)[0], P(1.3, site.a)[1]);
     room.deskTop = { x: top.x, y: site.fy + 1.35, z: top.z };
@@ -426,7 +434,7 @@
     if (!b || (use !== "hotel" && use !== "motel") || S.fitted.has(b) || b.fallen || !b.group) return null;
     S.fitted.add(b);
     const room = { b: b, A: A || null, use: use, seed: (h01(b.ox, b.oz, 0x1d9) * 997) | 0, beds: [], door: null,
-      post: null, front: null, clerk: null, own: new Own(b.group), price: 0, site: null };
+      post: null, postL: null, posts: null, front: null, own: new Own(b.group), price: 0, site: null };
     const pr = PRICE[use];
     room.price = pr[0] === pr[1] ? pr[0] : pr[0] + 5 * Math.round(h01(b.oz, b.ox, 0x9e1) * (pr[1] - pr[0]) / 5);
     try {
@@ -437,10 +445,29 @@
     } catch (e) { console.error("[island lodging]", e); }
     room.own.attach();
     for (const r of room.beds) { r.isMine = mineFn(room); r.lodging = room; }
+    // THE PEOPLE AT THE DESK: the island's own (CBZ.islandVenue.staff, a city
+    // ped held on his spot behind the counter): the clerk by day, the night
+    // porter through the night. The desk never shuts.
+    const IV = CBZ.islandVenue;
+    if (room.postL && IV && IV.staff) {
+      const look = function (Pp, p) {
+        const Pl = CBZ.player && CBZ.player.pos;
+        return Pl && Math.hypot(Pl.x - p.pos.x, Pl.z - p.pos.z) < 7 ? { x: Pl.x, z: Pl.z } : null;
+      };
+      const q = room.postL;
+      room.posts = [
+        IV.staff(b, q.lx, q.lz, q.face, { job: use === "hotel" ? "receptionist" : "motel clerk", hours: [7, 23], near: 110, look: look }),
+        IV.staff(b, q.lx, q.lz, q.face, { job: "night porter", hours: [23, 7], near: 110, look: look }),
+      ].filter(Boolean);
+    }
     S.rooms.push(room);
     adopt(room);
+    // the room you paid for, on an island built again since: still yours
+    const R = S.rent;
+    if (R && !R.room && R.where === placeKey(room)) R.room = room;
     return room;
   }
+  function placeKey(room) { return roomKey(room); }
   function mineFn(room) { return function () { return rented(room); }; }
   /* THE ROOM IS STILL YOURS WHEN ITS ISLAND IS NOT STANDING. A rental is kept
      as plain data (island id + lot id, the checkout, where you get up) while
@@ -459,10 +486,11 @@
     if (!K || K.key !== roomKey(room)) return;
     S.keep = null;
     if (!(dayNow() < K.until)) return;
-    S.rent = { room: room, until: K.until };
+    S.rent = { room: room, until: K.until, key: keyName(room), where: placeKey(room) };
     if (K.wake) S.wake = { room: room, at: K.wake };
   }
   function keepOf() {
+    if (S.rent && !S.rent.room && S.rent.where) return { key: S.rent.where, until: S.rent.until, wake: null };
     if (S.rent && S.rent.room) {
       return { key: roomKey(S.rent.room), until: S.rent.until,
         wake: S.wake && S.wake.room === S.rent.room && S.wake.at ? { x: S.wake.at.x, y: S.wake.at.y, z: S.wake.at.z, face: S.wake.at.face || 0 } : null };
@@ -473,31 +501,32 @@
     const i = S.rooms.indexOf(room);
     if (i >= 0) S.rooms.splice(i, 1);
     room.own.dispose();
-    if (S.rent && S.rent.room === room) { S.keep = keepOf(); S.rent = null; }
+    // (the island going does not end your night: the rental waits for the
+    // venue to stand again, the key stays in your pocket)
+    if (S.rent && S.rent.room === room) S.rent.room = null;
     if (room.clerk) { room.clerk._lodgeClerk = null; room.clerk = null; }
+    room.posts = null;          // (their posts go with the venue: island_venue.js unposts them)
   }
-  // the venue seam, when it is on main (world/island_venue.js)
-  let venueHooked = false;
+  /* THE VENUE SEAM (world/island_venue.js) is the one path: a hotel's lobby
+     is dressed and its desk and room fitted while its island joins the
+     world, a motel's office and room the same; the dispose gives it back. */
   function hookVenue() {
-    if (venueHooked) return;
     const V = CBZ.islandVenue;
     if (!V || typeof V.on !== "function") return;
-    venueHooked = true;
     for (const use of ["hotel", "motel"]) {
-      try {
-        // (the fit itself waits for the island to join the world: scan()
-        // below; this hook only gives the room back when the venue goes)
-        V.on(use, function (b) {
-          // a hotel's lobby is a hotel lobby: furnished here, while the island
-          // joins the world (the front desk itself is fit() below, on the
-          // spot chosen now and kept clear)
-          if (use === "hotel") { try { dressLobby(b); } catch (e) { console.error("[hotel lobby]", e); } }
-          return function () { b._lodgeSite = null; for (const room of S.rooms.slice()) if (room.b === b) drop(room); };
-        });
-      } catch (e) {}
+      V.on(use, function (b, lot, job) {
+        if (use === "hotel") { try { dressLobby(b); } catch (e) { console.error("[hotel lobby]", e); } }
+        let room = null;
+        try { room = fit(b, job && job.arena ? job.arena : null); } catch (e) { console.error("[island lodging]", e); }
+        return function () {
+          b._lodgeSite = null;
+          S.fitted.delete(b);
+          if (room) drop(room);
+          for (const r of S.rooms.slice()) if (r.b === b) drop(r);
+        };
+      });
     }
   }
-
   /* ---- THE HOTEL LOBBY ---------------------------------------------------
      The tower's lobby furniture out (CBZ.islandVenue.clear), the desk's
      spot chosen and kept, and the lobby round it (world/island_fitkit.js
@@ -573,39 +602,25 @@
     });
   }
 
-  // the islands in the world: fit what is new, drop what has gone
-  function scan() {
-    hookVenue();
-    const AR = CBZ.archipelago;
-    const isles = AR && AR.isles ? AR.isles() : [];
-    const arenas = new Set();
-    for (const I of isles) if (I && I.arena && I.arena.island) arenas.add(I.arena);
+  // a motel whose beds were not in the registry when it was fitted finds
+  // them now; a venue that came down is nobody's room
+  function upkeep() {
     for (let i = S.rooms.length - 1; i >= 0; i--) {
       const room = S.rooms[i];
-      if (!room.A) { for (const A of arenas) if ((A.island.buildings || []).indexOf(room.b) >= 0 || (A.island.sites || []).indexOf(room.b) >= 0) { room.A = A; break; } }
-      if ((room.A && !arenas.has(room.A)) || room.b.fallen) drop(room);
-    }
-    arenas.forEach(function (A) {
-      if (A._job && !A._job.attached) return;          // not in the world yet
-      // (the motel is a venue site: world/island_lots.js builds it as one)
-      const L = (A.island.buildings || []).concat(A.island.sites || []);
-      for (const b of L) {
-        const u = useOf(b);
-        if ((u === "hotel" || u === "motel") && !S.fitted.has(b)) fit(b, A);
-      }
-      // a motel fitted before its beds were in the registry finds them now
-      for (const room of S.rooms) if (room.A === A && room.use === "motel" && !room.beds.length && motelRoom(room, A)) {
+      if (room.b.fallen) { drop(room); continue; }
+      if (room.use === "motel" && !room.beds.length && room.A && motelRoom(room, room.A)) {
         for (const r of room.beds) { r.isMine = mineFn(room); r.lodging = room; }
       }
-    });
+    }
   }
 
   /* ---- THE RENTAL -------------------------------------------------------- */
+  // the room is yours tonight AND its key is in your pocket
   function rented(room) {
     const R = S.rent;
     if (!R || R.room !== room) return false;
-    if (dayNow() > R.until) { S.rent = null; return false; }
-    return true;
+    if (dayNow() > R.until) { endRental(); return false; }
+    return hasKey(R);
   }
   function checkout() {
     // noon tomorrow, or the day after if tomorrow's noon is under six hours off
@@ -613,6 +628,32 @@
     let until = d + NOON + (ph < NOON ? 0 : 1);
     if (until - t < 0.25) until += 1;
     return until;
+  }
+  /* THE KEY: an inventory item while the night lasts (city/economy.js
+     "Room Keycard" / "Motel Key", tagged "key": no shop stocks one) */
+  function keyName(room) { return room && room.use === "motel" ? "Motel Key" : "Room Keycard"; }
+  function econ() { return CBZ.cityEcon || null; }
+  function hasKey(R) { const e = econ(); return !e || !R || !R.key || e.count(R.key) > 0; }
+  function giveKey(R) { const e = econ(); if (e && R && R.key) e.add(R.key, 1); }
+  function takeKey(R) { const e = econ(); if (e && R && R.key && e.count(R.key) > 0) e.take(R.key, 1); }
+  // the night is over (noon, or you handed it in): the key goes back to the desk
+  function endRental() {
+    const R = S.rent;
+    if (!R) return;
+    S.rent = null;
+    takeKey(R);
+    if (R.room && R.room.door && R.room.door.open) {
+      const P = CBZ.player, B = R.room.box;
+      const inside = P && P.pos && B && P.pos.x > B.minX && P.pos.x < B.maxX && P.pos.z > B.minZ && P.pos.z < B.maxZ;
+      if (!inside) doorSet(R.room, false);
+    }
+    if (CBZ.cityHudDirty) { try { CBZ.cityHudDirty(); } catch (e) {} }
+  }
+  function checkOut(room) {
+    if (!room || !S.rent || S.rent.room !== room) return false;
+    endRental();
+    say(clerkOf(room), "Thank you.");
+    return true;
   }
   function cash() { return (g && g.cash) || 0; }
   function spend(n) {
@@ -625,11 +666,14 @@
   const ORD = ["", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth"];
   function rent(room) {
     if (!room || rented(room)) return false;
-    const clerk = clerkReady(room) ? room.clerk : null;
+    const clerk = clerkReady(room) ? clerkOf(room) : null;
     if (!clerk) return false;
     if (!room.beds.length) { say(clerk, "We're full tonight."); return false; }
     if (!spend(room.price)) { say(clerk, "It's $" + room.price + " a night."); return false; }
-    S.rent = { room: room, until: checkout() }; S.keep = null;
+    if (S.rent) endRental();                     // one room at a time: the old key goes back
+    S.rent = { room: room, until: checkout(), key: keyName(room), where: placeKey(room) };
+    S.keep = null;
+    giveKey(S.rent);
     const fl = (room.floor | 0) + 1;            // the street is the first floor
     if (room.use === "hotel") say(clerk, "Room " + room.number + ", " + (ORD[fl] || (fl + "th")) + " floor. Checkout's noon.");
     else say(clerk, "Upstairs. Checkout's noon.");
@@ -639,45 +683,15 @@
   }
 
   /* ---- THE CLERK: a person of the island, at his post -------------------- */
-  const _v3 = new THREE.Vector3();
-  function unseen(x, y, z) {
-    const cam = CBZ.camera;
-    if (!cam) return true;
-    const d = Math.hypot(cam.position.x - x, cam.position.z - z);
-    if (d < 4) return false;
-    _v3.set(x, y + 1, z).project(cam);
-    const onScreen = _v3.z > -1 && _v3.z < 1 && Math.abs(_v3.x) < 1.2 && Math.abs(_v3.y) < 1.2;
-    return !onScreen || d > 70;
+  function clerkOf(room) {
+    for (const q of room.posts || []) { const p = q && q.body ? q.body() : null; if (p && !p.dead) return p; }
+    return null;
   }
-  function alive(b) { return !!(b && !b.dead && b.group && b.group.parent && CBZ.bots && CBZ.bots.indexOf(b) >= 0); }
-  function scared(b) { return b.state === "panic" || b.state === "flee" || (b.panicT || 0) > 0; }
+  function alive(p) { return !!(p && !p.dead); }
   function clerkReady(room) {
-    const c = room.clerk;
-    if (!alive(c) || scared(c) || !room.post) return false;
+    const c = clerkOf(room);
+    if (!c || !room.post || (c.ko || 0) > 0 || c._upT > 0 || c.state === "flee" || c.rage) return false;
     return Math.hypot(c.pos.x - room.post.x, c.pos.z - room.post.z) < 1.2;
-  }
-  function tendClerk(room) {
-    if (!room.post) return;
-    let c = room.clerk;
-    if (c && !alive(c)) { if (c) c._lodgeClerk = null; c = room.clerk = null; }
-    if (!c) {
-      if (!CBZ.spawnSurvivorBotAt || !unseen(room.post.x, room.post.y, room.post.z)) return;
-      try { c = CBZ.spawnSurvivorBotAt(room.post.x, room.post.z); } catch (e) { c = null; }
-      if (!c) return;
-      c._lodgeClerk = room;
-      if (c.pos) c.pos.y = room.post.y;
-      if (c.group) c.group.rotation.y = room.post.face;
-      room.clerk = c;
-    }
-    if (S.tres && S.tres.bot === c) return;      // the ladder has him
-    if (scared(c) || !c.target) return;          // he runs like anybody; he comes back after
-    const d = Math.hypot(c.pos.x - room.post.x, c.pos.z - room.post.z);
-    c.target.set(room.post.x, 0, room.post.z);
-    c.pause = Math.max(c.pause || 0, 2);
-    if (d < 0.5) {
-      // at the counter, facing the door side of it
-      c.state = "look"; c._lookX = room.front.x; c._lookZ = room.front.z;
-    } else if (c.state !== "move") { c.state = "move"; c._arrived = false; }
   }
 
   /* ---- THE DOOR ---------------------------------------------------------- */
@@ -731,6 +745,7 @@
     return true;
   };
   CBZ.islandLodgeRent = function () { return live() && armRoom ? rent(armRoom) : false; };
+  CBZ.islandLodgeCheckout = function () { return live() && armRoom ? checkOut(armRoom) : false; };
   CBZ.islandLodgeDoor = function () {
     const room = armDoor;
     if (!live() || !room || !room.door) return false;
@@ -875,11 +890,13 @@
     // the desk, while its clerk is at it
     for (const room of S.rooms) {
       if (room.A !== A || !room.front) continue;
-      if (rented(room) || !sameFloor(room.front.y, P)) continue;
+      if (!sameFloor(room.front.y, P)) continue;
       const d = Math.hypot(P.pos.x - room.front.x, P.pos.z - room.front.z);
       if (d > DESK_REACH || !clerkReady(room)) continue;
       armRoom = room;
-      CBZ.prisonPrompt("isle-desk-rent", "@islandLodgeRent", "Rent $" + room.price, { at: room.deskTop, key: "E", bind: true, d2: d * d });
+      // the key handed back early is the night given up
+      if (S.rent && S.rent.room === room) CBZ.prisonPrompt("isle-desk-out", "@islandLodgeCheckout", "Check out", { at: room.deskTop, key: "E", bind: true, d2: d * d });
+      else CBZ.prisonPrompt("isle-desk-rent", "@islandLodgeRent", "Rent $" + room.price, { at: room.deskTop, key: "E", bind: true, d2: d * d });
       break;
     }
     // a room's door: yours opens, any open one shuts
@@ -906,19 +923,17 @@
     }
   }
 
+  hookVenue();
   if (CBZ.onUpdate) CBZ.onUpdate(22.5, function (dt) {
     if (!g || g.mode !== MODE) {
       if (S.tres) endTrespass();
       return;
     }
     dt = Math.min(0.1, Math.max(0, +dt || 0));
-    if ((S.scanT -= dt) <= 0) { S.scanT = 0.5; try { scan(); } catch (e) { console.error("[island lodging scan]", e); } }
+    if ((S.scanT -= dt) <= 0) { S.scanT = 0.5; try { upkeep(); } catch (e) { console.error("[island lodging]", e); } }
     const A = CBZ.surv && CBZ.surv.arena;
-    for (const room of S.rooms) {
-      tickDoor(room, dt);
-      if (room.A === A) tendClerk(room);
-    }
-    if (S.rent && dayNow() > S.rent.until) S.rent = null;
+    for (const room of S.rooms) tickDoor(room, dt);
+    if (S.rent && dayNow() > S.rent.until) endRental();
     // lying in somebody's bed where somebody can see you is the ladder
     const P = CBZ.player, bed = P && P._propBed;
     if (bed && !S.tres && !S.sleeping && !(bed.isMine && bed.isMine()) && (S.seeT = (S.seeT || 0) - dt) <= 0) {
@@ -939,7 +954,11 @@
 
   CBZ.islandLodging = {
     rooms: function () { return S.rooms; },
-    rental: function () { return S.rent ? { use: S.rent.room.use, number: S.rent.room.number, floor: S.rent.room.floor, until: S.rent.until } : null; },
+    rental: function () {
+      const R = S.rent, r = R && R.room;
+      return R ? { use: r ? r.use : null, number: r ? r.number : null, floor: r ? r.floor : null, until: R.until, key: R.key, keyHeld: hasKey(R), where: R.where } : null;
+    },
+    checkOut: checkOut,
     wakeSpot: wakeSpot,
     // the save (world/isles_save.js): the rental as plain data, and back
     snapshot: function () { const K = keepOf(); return K ? { key: K.key, until: K.until, wake: K.wake || null } : null; },
@@ -955,7 +974,7 @@
       return {
         rooms: S.rooms.map(function (r) {
           return { use: r.use, price: r.price, desk: !!r.site, door: !!r.door, beds: r.beds.length, floor: r.floor,
-            number: r.number, clerk: alive(r.clerk), active: !!(CBZ.surv && r.A === CBZ.surv.arena) };
+            number: r.number, clerk: alive(clerkOf(r)), active: !!(CBZ.surv && r.A === CBZ.surv.arena) };
         }),
         rented: !!S.rent, sleeping: S.sleeping, trespass: !!S.tres,
         beds: CBZ.propBeds ? CBZ.propBeds.length : 0,

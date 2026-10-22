@@ -438,7 +438,14 @@
       // the door band and the walk to the stairs stay clear; +lat is local -x
       walk: WT + 2.45, fitSide: -1, heroSide: -1,
     };
-    const mnt = CBZ.clothingStoreMount(shim, { cs: cs, tailor: tailor, root: job && job.arena && job.arena.root });
+    // the clerk at the cash wrap, and his way round it to the street door
+    // when somebody heads out holding what he has not paid for
+    const SFk = CBZ.shopFloor;
+    const rt = SFk && SFk.clerkRoute ? SFk.clerkRoute(R.x0, R.x1, R.z0, K.local.x - K.local.w / 2, K.local.x + K.local.w / 2,
+      K.local.z, K.local.d / 2, K.local.x, R.z1 - 0.5) : { via: [], door: null };
+    const isle = IV.island ? IV.island(b) : null;
+    const mnt = CBZ.clothingStoreMount(shim, { cs: cs, tailor: tailor, root: job && job.arena && job.arena.root,
+      post: K.post, b: b, via: rt.via, door: rt.door, where: SFk && SFk.whereKey ? SFk.whereKey(isle) : "isle" });
     // what the store stands (it dresses when you come near: its plan, kept
     // here in the building's frame): the side runs, the spine, the forms
     // by the door, the folded table, the cash wrap, the fitting room

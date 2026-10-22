@@ -353,7 +353,9 @@
       if (runs.length) streets.cross.push({ at: at, runs: runs, name: l.name });
     }
     const kit = CBZ.islandRoadKit;
-    const roads = kit && kit.plan ? kit.plan({ lines: streets }) : null;
+    // (an archipelago town's main crossings are signalled; the disaster
+    // island's stay signed STOP, exactly as they always were)
+    const roads = kit && kit.plan ? kit.plan({ lines: streets, signals: !!cfg.venues }) : null;
     // every rectangle of street (carriageway + both sidewalks), world AABBs
     const streetRects = [];
     if (roads) {
@@ -1122,6 +1124,9 @@
     recruit: ["Army Recruiting"],
     usedcars: ["Used Cars", "Island Auto Sales", "Quay Motors"],
     bankhq: ["Island Bank"],
+    bar: ["The Anchor", "Rum Runner", "The Crow's Nest", "Harbour Tavern", "Blue Marlin", "The Lantern", "Salt & Barrel", "The Tide Inn"],
+    hospital: ["General Hospital", "Island Hospital", "St. Luke's Hospital"],
+    firestation: ["Fire Station"],
   };
   /* EVERY ISLAND'S HOTEL HAS ITS OWN NAME. The disaster island's is the
      Harbour Hotel, as it always was; an archipelago island's is its own,
@@ -1142,12 +1147,15 @@
   // what each kind of island has, in the order it chooses (the rarer and
   // pickier first). [use, how many]
   const WANT = {
-    harbour: [["police", 1], ["usedcars", 1], ["motel", 1], ["recruit", 1], ["guns", 1], ["pawn", 1], ["loans", 1],
-      ["jewelry", 1], ["suits", 1], ["eyewear", 1], ["clothing", 1], ["phones", 1], ["apartments", 3]],
-    downtown: [["bankhq", 1], ["police", 1], ["jewelry", 1], ["suits", 1], ["phones", 1], ["eyewear", 1],
-      ["clothing", 1], ["apartments", 3]],
-    estates: [["police", 1], ["motel", 1], ["boutiques", 1]],
-    works: [["police", 1], ["usedcars", 1], ["motel", 1], ["recruit", 1], ["guns", 1], ["pawn", 1], ["loans", 1]],
+    // (every town has its emergency services: the fire station's engine bay
+    // and the hospital the ambulance runs from; and its bars, where the
+    // evening goes)
+    harbour: [["police", 1], ["firestation", 1], ["hospital", 1], ["usedcars", 1], ["motel", 1], ["recruit", 1], ["guns", 1], ["pawn", 1], ["loans", 1],
+      ["jewelry", 1], ["suits", 1], ["eyewear", 1], ["clothing", 1], ["phones", 1], ["bar", 2], ["apartments", 3]],
+    downtown: [["bankhq", 1], ["police", 1], ["firestation", 1], ["hospital", 1], ["jewelry", 1], ["suits", 1], ["phones", 1], ["eyewear", 1],
+      ["clothing", 1], ["bar", 1], ["apartments", 3]],
+    estates: [["police", 1], ["firestation", 1], ["hospital", 1], ["motel", 1], ["boutiques", 1], ["bar", 1]],
+    works: [["police", 1], ["firestation", 1], ["hospital", 1], ["usedcars", 1], ["motel", 1], ["recruit", 1], ["guns", 1], ["pawn", 1], ["loans", 1], ["bar", 2]],
   };
   // the use a lot is by what was built there (the places the plan named)
   function fixedUse(l) {
@@ -1208,6 +1216,15 @@
       phones: [shop, function (l) { return l.U * 2; }],
       apartments: [function (l) { return l.kind === "shop" && l.storeys >= 4; }, function (l) { return l.storeys; }],
       bankhq: [function (l) { return l.kind === "tower"; }, function (l) { return l.storeys + l.U; }],
+      // the engine bay: a works shed first (its big door), else a low wide shop, never the very centre
+      firestation: [shopOrWorks, function (l) { return (l.kind === "works" ? 3 : 0) + (l.storeys <= 2 ? 1 : 0) + l.w * 0.12 + (1 - Math.abs(l.U - 0.45)); }],
+      // the hospital: a broad building of a few storeys, near the middle of town
+      hospital: [shop, function (l) { return (l.storeys >= 2 && l.storeys <= 4 ? 2 : 0) + l.w * 0.15 + l.d * 0.05 + (1 - Math.abs(l.U - 0.6)) * 1.5; }],
+      // a bar: a low shop between the middle and the edge, the waterfront first;
+      // a second one is kept off the first one's street
+      // (a works town's bar can be an old shed on the yard road)
+      bar: [function (l) { return shopOrWorks(l) && l.storeys <= 4 && !lots.some(function (o) { return o.use === "bar" && sname(o) && sname(o) === sname(l); }); },
+        function (l) { return (l.kind === "shop" ? 3 : 0) + (l.district === "waterfront" ? 1.5 : 0) + (l.storeys <= 3 ? 1 : 0) + (1 - Math.abs(l.U - 0.45)) * 1.5 + l.w * 0.04; }],
     };
     function place(use, n) {
       const sc = SCORE[use];
@@ -1217,7 +1234,13 @@
         const l = pick(sc[0], sc[1]);
         if (!l) return;
         l.use = use === "bankhq" ? "bank" : use;
-        const nm = nameOf(use, l);
+        let nm = nameOf(use, l);
+        // a town's second bar is not called what its first one is
+        const a = USE_NAMES[use];
+        if (nm && a && lots.some(function (o) { return o !== l && o.name === nm; })) {
+          const k0 = a.indexOf(nm);
+          for (let k = 1; k < a.length; k++) { const c = a[(k0 + k) % a.length]; if (!lots.some(function (o) { return o.name === c; })) { nm = c; break; } }
+        }
         if (nm) l.name = nm;
       }
     }

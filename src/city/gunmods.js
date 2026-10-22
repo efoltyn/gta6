@@ -22,8 +22,10 @@
        bought is what you SEE — first person, third person, every instance.
      • the GUNSMITH BENCH menu the gun store opens ([E] at the bench).
 
-   Self-contained + city-gated: no effect (all muls === 1, supp false) when
-   nothing's fitted or this file never loaded, so jail/survival stay identical.
+   Self-contained + economy-gated (CBZ.economyMode: Gang City and the Isles,
+   where every island gun store keeps the bench in its back room): no effect
+   (all muls === 1, supp false) when nothing's fitted or this file never
+   loaded, so jail/survival stay identical.
 ============================================================ */
 (function () {
   "use strict";
@@ -31,6 +33,8 @@
   if (!CBZ) return;
   const THREE = window.THREE;
   const g = CBZ.game;
+  // the one gate for money and the shops: Gang City and the islands
+  function econOn() { return !!g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city"); }
 
   // ---- weapon groups (compatibility) ---------------------------------------
   const PISTOLS = { sidearm: 1, revolver: 1, deagle: 1 };
@@ -401,7 +405,7 @@
     if (c) c.addEventListener("click", closeBench);
   }
   function openBench() {
-    if (!g || g.mode !== "city") return;
+    if (!econOn()) return;
     ensurePanel();
     if (!panel) return;
     panel.style.display = "block";
@@ -431,7 +435,7 @@
   // ---- dress owned guns once the weapon models exist (idempotent) ----------
   let dressed = false;
   CBZ.onUpdate(38, function () {
-    if (!g || g.mode !== "city") return;
+    if (!econOn()) return;
     if (!dressed && CBZ.fpsWeaponModels && CBZ.fpsWeaponModels.length) { dressAll(); dressed = true; }
   });
   // safety: never leave the bench menu (and its cityMenuOpen soft-lock) up if the
@@ -439,7 +443,7 @@
   // so it fires even once state leaves "playing".
   CBZ.onAlways(38, function () {
     if (panel && panel.style.display === "block") {
-      if (!g || g.mode !== "city" || g.state !== "playing" || (CBZ.player && CBZ.player.dead)) closeBench();
+      if (!econOn() || g.state !== "playing" || (CBZ.player && CBZ.player.dead)) closeBench();
     }
   });
   // a fresh run wipes fitted mods (weapons reset too) — re-dress clean next time

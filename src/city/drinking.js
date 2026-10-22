@@ -68,12 +68,14 @@
 
   // ---- state ------------------------------------------------------------
   const state = { level: 0, blackout: false };
+  // Gang City and the islands' bars (world/island_bar.js): CBZ.economyMode
+  function econOn() { return !!g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city"); }
   CBZ.cityDrunk = state;
 
   CBZ.cityDrink = function (units) {
     const u = (typeof units === "number" && isFinite(units) && units > 0) ? units : 1;
     state.level = Math.min(MAX_LEVEL, state.level + u);
-    if (g.mode === "city" && CBZ.cityHudDirty) CBZ.cityHudDirty();
+    if (econOn() && CBZ.cityHudDirty) CBZ.cityHudDirty();
     return state.level;
   };
 
@@ -251,7 +253,7 @@
   // ---- master per-frame update --------------------------------------------
   CBZ.onUpdate(34, function (dt) {
     const P = CBZ.player;
-    const inCity = g.mode === "city";
+    const inCity = econOn();
     // out of city: nothing should be left smeared on screen. A stray
     // mid-blackout state (e.g. the player quit to the menu mid-fade) also
     // can't be left hanging — snap back to awake so re-entering city never

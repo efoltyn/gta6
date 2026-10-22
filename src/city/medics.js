@@ -52,7 +52,7 @@
   const WORK_T = 2.2;            // the beat spent over the body before it is lifted
   const LOAD_T = 1.1;            // the beat at the van's rear doors
   const medics = [];
-  let lastElapsed = 0;
+  let lastElapsed = 0, lastStreet = null;
 
   // EXPOSED: fpsmode's findActorHit scans this exactly like cityPeds/cityCops,
   // so a paramedic is a legitimate hit-scan target (records carry hp/dead/group
@@ -60,7 +60,11 @@
   // murder heat + the witness flow, ragdoll via CBZ.body).
   CBZ.cityMedics = medics;
 
-  function root() { return (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene; }
+  // the street world the crew works in: Gang City, or the island in force
+  // (world/island_town.js CBZ.econArena: its root, its containment)
+  function street() { return (CBZ.econArena && CBZ.econArena()) || (CBZ.city && CBZ.city.arena) || null; }
+  function root() { const A = street(); return (A && A.root) || CBZ.scene; }
+  function econOn() { return !!g && (CBZ.economyMode ? CBZ.economyMode(g.mode) : g.mode === "city"); }
   function emsOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.EMS_RESPONSE !== false && CBZ.morgueUnitScene); }
 
   const _probe = { x: 0, y: 0, z: 0 };
@@ -194,7 +198,7 @@
       for (let pass = 0; pass < 3; pass++) {
         const bx = m.pos.x, bz = m.pos.z;
         CBZ.collide(m.pos, MEDIC_R, m.pos.y, m.pos.y + 1.7);
-        if (CBZ.city && CBZ.city.arena && CBZ.city.arena.clampToCity) CBZ.city.arena.clampToCity(m.pos, MEDIC_R);
+        { const A = street(); if (A && A.clampToCity) A.clampToCity(m.pos, MEDIC_R); }
         if (Math.abs(m.pos.x - bx) < 0.002 && Math.abs(m.pos.z - bz) < 0.002) break;   // converged
       }
     }
@@ -277,7 +281,9 @@
   }
 
   CBZ.onUpdate(34.7, function (dt) {
-    if (g.mode !== "city") { if (medics.length) clearAll(); return; }
+    if (!econOn()) { if (medics.length) clearAll(); return; }
+    // a new island in force (or back to Gang City): the last world's crew goes
+    { const A = street(); if (A !== lastStreet) { if (medics.length) clearAll(); lastStreet = A; } }
     if (g.state !== "playing") return;
     if (g.elapsed + 0.001 < lastElapsed) clearAll();   // new life → wipe
     lastElapsed = g.elapsed;

@@ -597,7 +597,7 @@
       if (zMid <= zFront - 1.0) caseAt(ax, zMid, { tier: 1, stock: 2 }, false);
     }
     caseAt(P0.xc - Math.min(1.6, P0.W / 2 - 0.8), P0.wallFace - 0.62, { tier: 2, vault: true, stock: 3 }, false);
-    const clerk = F.postedClerk({ b: b, lot: lot, lx: zone.post.lx, lz: zone.post.lz, face: zone.post.face, armed: null, job: "jeweller" });
+    const clerk = F.postedClerk({ b: b, lot: lot, lx: zone.post.lx, lz: zone.post.lz, face: zone.post.face, armed: null, job: "jeweller", via: zone.route.via, door: zone.route.door });
     // the register in the counter, and the office safe (city/islandmoney.js):
     // in the back room when there is one (the shell put it there)
     F.register(P0, gd, clerk, -C.L / 2 + 0.55, (lot.name || "jeweller") + " register");

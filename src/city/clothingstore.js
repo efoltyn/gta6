@@ -6,8 +6,8 @@
    go and get, and this is where. Everything on the floor is stock: walk up
    to a garment or a dressed form and TAKE it (it is in your hands), try it
    on at the full-length mirror or in the fitting room, and PAY at the
-   counter. Walk out with it unpaid and the clerk calls it (the demand
-   ladder, then the police). The mirror also opens your wardrobe (mix what
+   counter. Walk out with it unpaid and it is a theft, through the one shop
+   ledger every store keeps (city/shopfloor.js CBZ.shopFloor.till). The mirror also opens your wardrobe (mix what
    you own; the tuxedo is taken off its form there).
 
    ONE FILE, EVERY STORE: Gang City's outfitter is one instance; every island
@@ -481,7 +481,7 @@
   function newStore(o) {
     return Object.assign({ lot: null, cs: null, group: null, winGroup: null, root: null, slots: [], built: false,
       dressed: false, near: false, cx: 0, cz: 0, cols: [], tux: null, tailor: false, mult: 1,
-      island: false, arena: null, clerk: null, till: null }, o || {});
+      island: false, arena: null, clerk: null, till: null, ledger: null, clerkOpts: null }, o || {});
   }
 
   // ---- build the displays (lazily, when you come down the street) ----------
@@ -773,16 +773,20 @@
 
   // ============================================================
   //  TAKE IT OFF THE RACK, TRY IT ON, PAY AT THE COUNTER.
-  //  A garment you pick up is in your hands (HELD); the mirror or the
-  //  fitting room puts what you hold on your back (the look you came in
-  //  with is kept, and comes back if you put the piece down); the till
-  //  takes the money and it is yours. Walk out holding it and the clerk
-  //  calls it: the demand ladder (CBZ.brain.demand: "Hey!" -> "Bring it
-  //  back." -> the police). Come back in and it is over; keep going and it
-  //  is stolen: yours, and a theft on your record.
+  //  A garment you pick up is in your hands; the mirror or the fitting room
+  //  puts what you hold on your back (the look you came in with is kept, and
+  //  comes back if you put the piece down); the till takes the money and it
+  //  is yours. What you are holding is the store's LEDGER, the one every
+  //  shop keeps (city/shopfloor.js CBZ.shopFloor.till): head for the door
+  //  with it and the clerk says so (an island clerk comes out from behind
+  //  the cash wrap and stands in the doorway); walk out with it and it is
+  //  stolen: yours, the clerk calls it, and it is a theft on your record,
+  //  exactly as in the gun store, the pawn shop and the jeweller.
   // ============================================================
   const HAND_MAX = 4;
-  const HELD = { store: null, items: [], snap: null, theft: null };
+  const NONE = [];
+  // the store whose things are in your hands, and the look you walked in with
+  const HELD = { store: null, snap: null, get items() { const S = HELD.store; return S && S.ledger ? S.ledger.held : NONE; } };
   function priceOf(S, name) { return Math.round(e_buy(name) * (S && S.mult || 1)); }
   function heldTotal() { let t = 0; for (const h of HELD.items) t += h.price; return t; }
   function holding(vid) { for (const h of HELD.items) if (h.visualId === vid) return h; return null; }
@@ -795,20 +799,64 @@
     const v = clerkOf(S);
     if (v && line && CBZ.speech && CBZ.speech.say) { try { CBZ.speech.say(v, line, { force: true }); } catch (e) {} }
   }
+  function SF() { return CBZ.shopFloor || null; }
+
+  // THE LEDGER: one per store, made with the store. Its clerk is the posted
+  // vendor (Gang City) or the island's counter clerk (world/island_shops.js
+  // hands his post over: he walks out round the cash wrap to the door).
+  function ledgerFor(S, o) {
+    const F = SF();
+    if (!F) return null;
+    o = o || {};
+    const clerk = o.post && F.postedClerk ? F.postedClerk({ post: o.post, b: o.b, via: o.via, door: o.door, armed: null })
+      : F.cityClerk(S.lot);
+    const cs = S.cs;
+    return F.till({
+      clerk: clerk, where: o.where || (S.island ? "isle" : "city"),
+      inStore: function (x, z) { return inStore(S, x, z, 0.6); },
+      // the last couple of metres to the street door
+      nearDoor: function (x, z) {
+        const dx = x - cs.dwx, dz = z - cs.dwz;
+        const inn = dx * cs.inx + dz * cs.inz, lat = Math.abs(dx * cs.tx + dz * cs.tz);
+        return inn < 2.3 && lat < 2.6;
+      },
+    });
+  }
+  // a garment off the rack as a ledger item: paid for, it is yours and you
+  // wear it; walked out with, it is yours all the same (and a theft); put
+  // down, the look you came in with comes back
+  function itemOf(S, slot) {
+    const h = { name: slot.name, visualId: slot.visualId, label: slot.label, price: priceOf(S, slot.name), tried: false, slot: slot.visualId,
+      // worn, not carried: nothing a pawnbroker is ever offered
+      hot: false,
+      onPay: function () {
+        if (CBZ.cityGrantItem) CBZ.cityGrantItem(h.visualId);
+        if (CBZ.cityWear) CBZ.cityWear(h.visualId);
+      },
+      onSteal: function () {
+        if (CBZ.cityGrantItem) CBZ.cityGrantItem(h.visualId);
+        if (h.tried && CBZ.cityWear) CBZ.cityWear(h.visualId);
+        HELD.snap = null;                 // what you walked out in is the look now
+      },
+    };
+    return h;
+  }
 
   function take(slot) {
     const S = slot.store;
+    if (!S.ledger) S.ledger = ledgerFor(S, S.clerkOpts);
+    if (!S.ledger) return;
     if (HELD.store && HELD.store !== S) dropAll(false);
     if (holding(slot.visualId)) return;
     if (HELD.items.length >= HAND_MAX) { note("Your hands are full.", 1.4); return; }
     HELD.store = S;
-    HELD.items.push({ name: slot.name, visualId: slot.visualId, label: slot.label, price: priceOf(S, slot.name), tried: false });
+    S.ledger.hold(itemOf(S, slot));
     if (CBZ.sfx) CBZ.sfx("pickup");
   }
   function putBack(slot) {
     const h = holding(slot.visualId);
-    if (!h) return;
-    HELD.items.splice(HELD.items.indexOf(h), 1);
+    if (!h || !HELD.store) return;
+    HELD.store.ledger.release(h);
     if (h.tried) {
       const still = HELD.items.filter(function (o) { return o.tried; });
       restoreLook();
@@ -852,121 +900,42 @@
     for (const h of HELD.items) if (!h.tried) wearTrial(h);
     if (CBZ.sfx) CBZ.sfx("cloth");
   }
-  function clearHeld() { HELD.store = null; HELD.items.length = 0; HELD.snap = null; HELD.theft = null; }
-  // down they go (left the shop by a door that is not a theft: the store
-  // went away, you drove off in a car the clerk never saw you reach)
+  function clearHeld() { HELD.store = null; HELD.snap = null; }
+  // down they go, back on the rack (the store went away, you died with them)
   function dropAll(keepTried) {
+    const S = HELD.store;
     if (!keepTried) restoreLook();
+    if (S && S.ledger) S.ledger.dropAll();
     clearHeld();
   }
 
   function pay(S) {
-    if (!HELD.items.length || HELD.store !== S || !CBZ.city) return;
-    const total = heldTotal();
-    if (!CBZ.city.spend(total)) {
-      note(fmt$(total) + ". You don't have it.", 1.8);
-      return;
-    }
+    if (!HELD.items.length || HELD.store !== S || !CBZ.city || !S.ledger) return;
+    const items = HELD.items.slice(), total = heldTotal();
+    // nobody behind the counter at all: the money is left by the till
+    const nobody = !S.ledger.clerk || !S.ledger.clerk.body();
+    if (!S.ledger.pay(nobody)) return;      // (short of it: the till says the price)
     let respect = 0, big = null;
-    for (const h of HELD.items) {
-      if (CBZ.cityGrantItem) CBZ.cityGrantItem(h.visualId);
-      if (CBZ.cityWear) CBZ.cityWear(h.visualId);
-      if (h.price >= 600) { respect += 3; big = h.label || h.name; } else respect += 1;
-    }
+    for (const h of items) { if (h.price >= 600) { respect += 3; big = h.label || h.name; } else respect += 1; }
     if (CBZ.city.addRespect) CBZ.city.addRespect(respect);
-    if (CBZ.sfx) CBZ.sfx("coin");
     clerkSay(S, S.tailor ? "It suits you." : "Thank you.");
     if (big && CBZ.city.big) CBZ.city.big(big + ", paid for.");
     else note("Paid " + fmt$(total) + ".", 1.6);
-    HELD.snap = null;                       // the new look is the look now
-    clearHeld();
+    clearHeld();                            // the new look is the look now
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
   }
-
-  // the goods leave with you, unpaid: they are yours now, and it is a theft
-  function stolen(S, seen, armed) {
-    for (const h of HELD.items) {
-      if (CBZ.cityGrantItem) CBZ.cityGrantItem(h.visualId);
-      if (h.tried && CBZ.cityWear) CBZ.cityWear(h.visualId);
+  // the ledger's turn each frame, for the store in your hands; its theft
+  // leaves the ledger empty, and the store lets go of you
+  function ledgerTick(dt) {
+    const S = HELD.store;
+    if (!S || !S.ledger) return;
+    const had = S.ledger.held.length;
+    S.ledger.tick(dt);
+    if (had && !S.ledger.held.length) {
+      clearHeld();
+      if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
     }
-    const P = CBZ.player;
-    if (seen && CBZ.cityCrime && P) CBZ.cityCrime(armed ? 90 : 65, { type: armed ? "robbery" : "theft", x: P.pos.x, z: P.pos.z, instant: true });
-    HELD.snap = null;
-    clearHeld();
-    if (CBZ.cityWorldCommit) CBZ.cityWorldCommit();
-  }
-
-  const THEFT_LINES = {
-    demand: ["Hey! You didn't pay for that.", "Hey! You have to pay for that."],
-    warn: ["Bring it back. Now.", "Bring that back in here."],
-    show: ["I'm calling the police.", "Last chance."],
-    showAtGun: ["Okay! Okay!"],
-    act: ["Police! I've been robbed!", "Somebody call the police!"],
-    comply: ["Thank you.", "Pay at the counter."],
-    gaveup: ["I'm calling the police."],
-    backoff: ["Okay! Take it! Take it!"],
-    standoff: ["Please. Just go."],
-  };
-  function playerActor() { return (CBZ.city && CBZ.city.playerActor) || (CBZ.surv && CBZ.surv.playerActor) || CBZ.player; }
-  function armedNow() { return !!(CBZ.cityHasGun && CBZ.cityHasGun()); }
-  // he walked out holding it. The clerk who can see the door starts the
-  // ladder; nobody at the counter (dead, gone) and it simply goes with you.
-  function beginTheft(S) {
-    const v = clerkOf(S), pa = playerActor();
-    const outsideWith = function () { return HELD.store === S && HELD.items.length > 0 && !inStore(S, CBZ.player.pos.x, CBZ.player.pos.z, 0.6); };
-    if (!v || !pa) { stolen(S, false, false); return; }
-    const T = { S: S, v: v, t: 0, case: null, city: false, done: false };
-    HELD.theft = T;
-    const finish = function (outcome) {
-      if (T.done) return;
-      T.done = true;
-      if (outcome === "complied" || outsideWith() === false) { HELD.theft = null; return; }
-      stolen(S, true, outcome === "backed");
-    };
-    // Gang City's clerk is a city ped: the city body for the ladder walks him
-    if (!S.island && CBZ.cityLadder && CBZ.cityLadder.begin) {
-      const e = CBZ.cityLadder.begin(v, "trespass", {
-        lines: THEFT_LINES, hold: true, patience: [2.6, 2.6, 1.6], inside: outsideWith,
-        onAct: function () { finish("acted"); return true; },
-        onEnd: function (ped, r) { finish(r && r.outcome); },
-      });
-      if (e) { T.city = true; T.finish = finish; return; }
-    }
-    const DM = CBZ.brain && CBZ.brain.demand;
-    if (DM) {
-      try { T.case = DM.begin(v, pa, "trespass", { lines: THEFT_LINES, hold: true, patience: [2.6, 2.6, 1.6] }); } catch (e) { T.case = null; }
-    }
-    if (!T.case) { clerkSay(S, THEFT_LINES.demand[0]); T.fallback = true; }
-    T.outsideWith = outsideWith; T.finish = finish;
-  }
-  const _ts = { dist: 0, speed: 0, armed: false, aiming: false, attacking: false, paid: false, inside: true, complied: false, fled: false, handsUp: false };
-  function theftTick(dt) {
-    const T = HELD.theft;
-    if (!T || T.done) return;
-    T.t += dt;
-    // the city ladder runs itself; one that never closes (its man swept away)
-    // is a theft nobody finished calling
-    if (T.city) { if (T.t > 30) T.finish("gaveup"); return; }
-    const P = CBZ.player, v = T.v;
-    if (!v || v.dead) { T.finish("gaveup"); return; }
-    if (T.fallback) {
-      if (!T.outsideWith()) T.finish("complied");
-      else if (T.t > 4) { clerkSay(T.S, THEFT_LINES.act[0]); T.finish("acted"); }
-      return;
-    }
-    const DM = CBZ.brain.demand;
-    _ts.dist = Math.hypot(P.pos.x - v.pos.x, P.pos.z - v.pos.z);
-    _ts.speed = P.driving ? 12 : (+P.speed || 0);
-    _ts.armed = armedNow();
-    _ts.aiming = _ts.armed && !!(CBZ.isAimingWeapon && CBZ.isAimingWeapon());
-    _ts.inside = T.outsideWith();
-    _ts.complied = !_ts.inside;
-    _ts.fled = !!P.driving;
-    let r = null;
-    try { r = DM.step(v, dt, _ts); } catch (e) { r = null; }
-    if (!r) { T.finish("gaveup"); return; }
-    if (r.step === "act" || r.step === "done") T.finish(r.outcome || (r.step === "act" ? "acted" : "gaveup"));
   }
 
   // ---- THE RACKS ARE CANDIDATES (city/interactions.js registerFixtures) -----
@@ -1121,7 +1090,8 @@
     if (S.built) {
       if (S.arena === arena) return true;
       undress(S);
-      S.built = false; S.lot = null; S.cs = null; S.tux = null;
+      if (HELD.store === S) dropAll(false);
+      S.built = false; S.lot = null; S.cs = null; S.tux = null; S.ledger = null;
       const i = STORES.indexOf(S); if (i >= 0) STORES.splice(i, 1);
     }
     if (!arena || !econ() || !CBZ.cityComposableSpec) return false;
@@ -1186,18 +1156,23 @@
          offsets from ox/oz), ox, oz }
        opts.cs: the room's frame, the same record ensureCity derives ({cx, cz,
          inx, inz, tx, tz, halfIn, halfTan, wt, ff, ceil, dwx, dwz, bounds,
-         walk, fitSide, heroSide}); opts.tailor; opts.root (the island's). */
+         walk, fitSide, heroSide}); opts.tailor; opts.root (the island's);
+       opts.post / b / via / door / where: the clerk at the cash wrap (CBZ.
+         islandVenue.staff's post), the building, his way round the wrap to
+         the street door (CBZ.shopFloor.clerkRoute), the island's key. */
   CBZ.clothingStoreMount = function (lot, opts) {
     opts = opts || {};
     if (!lot || !lot.building || !opts.cs) return null;
     const S = newStore({ lot: lot, cs: opts.cs, root: opts.root || null, island: true,
-      tailor: !!opts.tailor, mult: opts.tailor ? 1.4 : 1 });
+      tailor: !!opts.tailor, mult: opts.tailor ? 1.4 : 1,
+      clerkOpts: opts.post ? { post: opts.post, b: opts.b, via: opts.via, door: opts.door, where: opts.where } : null });
     S.cx = S.cs.cx; S.cz = S.cs.cz; S.built = true;
     STORES.push(S);
     return {
       store: S,
       dispose: function () {
         if (HELD.store === S) dropAll(false);
+        if (S.ledger && S.ledger.clerk && S.ledger.clerk.standDown) S.ledger.clerk.standDown();
         if (UI.open && UI.store === S) closePanel();
         undress(S);
         S.built = false;
@@ -1253,9 +1228,10 @@
     const H = HELD.store;
     if (H) {
       if (P.dead || STORES.indexOf(H) < 0) dropAll(false);
-      else if (!HELD.theft && HELD.items.length && !inStore(H, P.pos.x, P.pos.z, 0.6)) beginTheft(H);
-      else theftTick(dt);
+      else ledgerTick(dt);
     }
+    // the island clerks keep their own time (out in the doorway, back again)
+    for (const S of STORES) if (S.ledger && S.ledger.clerk && S.near) S.ledger.clerk.tick(dt);
   });
 
   // the wardrobe panel is modal: it owns every key while it is up
@@ -1276,7 +1252,8 @@
   // what you are holding and haven't paid for (the HUD, a probe)
   CBZ.clothingHeld = function () {
     return { items: HELD.items.map(function (h) { return { name: h.name, label: h.label, price: h.price, tried: h.tried }; }),
-             total: heldTotal(), theft: !!HELD.theft, store: HELD.store ? (HELD.store.island ? "island" : "city") : null };
+             total: heldTotal(), theft: !!(HELD.store && HELD.store.ledger && HELD.store.ledger.warned),
+             store: HELD.store ? (HELD.store.island ? "island" : "city") : null };
   };
   // headless/harness handle: take a named piece off the nearest dressed store's
   // floor and pay for it at its counter (the same two verbs a player uses).
