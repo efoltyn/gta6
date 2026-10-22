@@ -36,6 +36,16 @@
   const tmp = new THREE.Vector3();
 
   const COP_R = 0.5, ANIM_D2 = 70 * 70;
+  /* THE WORLD THE FORCE POLICES. Gang City's arena, or the island in force
+     presented as a town (world/island_town.js): the same department, its
+     bodies hung on that world's root and walking that world's streets. The
+     one gate is the economy's (CBZ.economyMode: the city and the islands). */
+  function econ() { return CBZ.economyMode ? !!CBZ.economyMode() : (g.mode === "city" || g.mode === "archipelago"); }
+  function arenaW() {
+    if (g.mode === "city") return (CBZ.city && CBZ.city.arena) || null;
+    return CBZ.econArena ? CBZ.econArena() : null;
+  }
+  function onIsles() { return g.mode === "archipelago"; }
   // how close a blind cop must be before it'll SHOOT OUT a glass wall between it
   // and the target (matches combat.js BREACH_REACH; a cop only breaches glass it
   // could plausibly reach, so it never plinks distant storefronts).
@@ -886,7 +896,7 @@
   }
 
   function spawnCop(swat, ambient) {
-    const A = CBZ.city.arena; if (!A) return;
+    const A = arenaW(); if (!A) return;
     // FINITE FORCE: dispatch can only field an officer the city still has on its
     // books. When the reserve is exhausted (player wiped the force), no patrol or
     // response unit rolls — the streets stay quiet even at 5★ until the academy
@@ -898,8 +908,14 @@
     // officer, however, must leave the physical precinct and cross the city;
     // never roll a random road point around the suspect.  The outward nudge
     // places the body just beyond the door collider rather than inside City Hall.
-    let station = !ambient && CBZ.cityPoliceStation ? CBZ.cityPoliceStation() : null;
-    if (station) {
+    // (on the islands the beat starts there too: every officer of an island
+    // town walks out of its station's door)
+    let station = (!ambient || onIsles()) && CBZ.cityPoliceStation ? CBZ.cityPoliceStation() : null;
+    if (station && station.inside) {
+      // a station with a hall: he comes from inside and walks out of the door
+      x = station.inside.x + (rng() - 0.5) * 1.0;
+      z = station.inside.z + (rng() - 0.5) * 1.0;
+    } else if (station) {
       const lot = station.lot || {}, ox = station.x - (lot.cx == null ? station.x : lot.cx), oz = station.z - (lot.cz == null ? station.z : lot.cz);
       const ol = Math.hypot(ox, oz) || 1;
       x = station.x + ox / ol * 1.8 + (rng() - 0.5) * 1.2;
@@ -908,6 +924,7 @@
       do { const p = A.randomRoadPoint(); x = p.x; z = p.z; tries++; } while (tries < 8 && !ambient && Math.hypot(x - P.pos.x, z - P.pos.z) < 90);
     }
     const c = makeCop(x, z, swat, ambient);
+    if (station && station.inside && station.inside.y != null) c.pos.y = station.inside.y;   // on the station's floor
     if (!ambient) { c._dispatched = true; c._dispatchOrigin = station ? { x: station.x, z: station.z, name: "precinct" } : { x, z, name: "remote post" }; }
     c._force = true;            // drawn from the finite roster (vs scripted guards)
     forcePool--;               // one officer moves from reserve → deployed
@@ -927,7 +944,10 @@
   // keeps them out of liveCops(), so posting them can never starve a chase.
   function standWatch() {
     if (!commandOn() || g.state !== "playing") return;
-    const A = CBZ.city && CBZ.city.arena; if (!A || !A.root) return;
+    // an island station is a desk sergeant's (world/island_police.js posts
+    // him at the counter), not the city's chain of command on the step
+    if (onIsles()) return;
+    const A = arenaW(); if (!A || !A.root) return;
     const st = CBZ.cityPoliceStation ? CBZ.cityPoliceStation() : null;
     if (!st) return;                                   // no precinct, no watch
     // prune bodies the world has reaped
@@ -995,7 +1015,7 @@
 
   // spawn a cop at a specific spot (used by the car-biz police RAID in empire.js)
   CBZ.citySpawnCop = function (x, z, swat) {
-    const A = CBZ.city.arena; if (!A) return null;
+    const A = arenaW(); if (!A) return null;
     const c = makeCop(x + (rng() - 0.5) * 5, z + (rng() - 0.5) * 5, !!swat, false);
     A.root.add(c.group); CBZ.cityCops.push(c);
     return c;
@@ -1032,6 +1052,55 @@
     for (const k in vacancy) delete vacancy[k];
   };
 
+  /* ONE OFFICER OFF THE BOARD, not the whole force: an island officer whose
+     island is no longer the one in force (world/island_town.js) goes home
+     where nobody sees him go. He was never killed, so he goes back on the
+     books (the finite force counts the living). */
+  CBZ.cityDismissCop = function (c) {
+    const cops = CBZ.cityCops;
+    const i = cops.indexOf(c);
+    if (i < 0) return false;
+    if (STOP.cop === c) { STOP.cop = null; STOP.case = null; }
+    if (dutyCop === c) dutyCop = null;
+    const w = watch.indexOf(c); if (w >= 0) watch.splice(w, 1);
+    const r = RB.cops.indexOf(c); if (r >= 0) RB.cops.splice(r, 1);
+    cops.splice(i, 1);
+    LAW.discharge(c);
+    if (c._force && !c.dead) forcePool = Math.min(POLICE_FORCE_MAX(), forcePool + 1);
+    c.culled = true;
+    if (c.group) {
+      if (c.group.parent) c.group.parent.remove(c.group);
+      c.group.traverse(function (o) {
+        if (o.isSprite) return;
+        if (o.geometry && !o.geometry._shared && o.geometry.dispose) try { o.geometry.dispose(); } catch (e) {}
+        if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && x.dispose && x.dispose()); else if (!m._shared && m.dispose) m.dispose(); }
+      });
+    }
+    return true;
+  };
+  // the islands: the last island's officers stand down out of sight; Air-1
+  // (the one unit that can cross the water) follows a chase to the next
+  // island, and otherwise goes home with its own
+  function isleSweep() {
+    if (!onIsles() || !CBZ.islandTownForeign) return;
+    const A = arenaW();
+    const seenAt = function (p) { return !!(p && CBZ.sightCanSee && CBZ.sightCanSee(p.x, (p.y || 0) + 1, p.z, 3)); };
+    const cops = CBZ.cityCops;
+    for (let i = cops.length - 1; i >= 0; i--) {
+      const c = cops[i];
+      if (!c || c._airPilot || c._swatPassenger || c._arrestingPlayer || c._arresting || c._custodyJob) continue;
+      if (!CBZ.islandTownForeign(c)) continue;
+      if (!seenAt(c.pos)) CBZ.cityDismissCop(c);
+    }
+    if (chopper && chopper.group && A && A.root && CBZ.islandTownForeign(chopper)) {
+      const flying = chopper.phase !== "idle" && chopper.phase !== "down";
+      if (flying && (g.wanted | 0) >= 3) {
+        A.root.add(chopper.group);
+        if (chopper.pool) A.root.add(chopper.pool);
+      } else if (!seenAt(chopper.pos)) { despawnChopper(); chopperRebuildT = 0; }
+    }
+  }
+
   // posted roadblock officers don't count toward the response total: the wall is
   // pressure AHEAD of you, layered ON TOP of the chase — it must never starve it.
   function liveCops() { let n = 0; for (const c of CBZ.cityCops) if (!c.dead && !c._post) n++; return n; }
@@ -1043,7 +1112,7 @@
   //      now takes a real spin-up beat + a pushed-out launch distance (config:
   //      POLICE_HELI_SLOW_RESPONSE) before it ever reaches "orbit". -------------
   function makeChopper() {
-    const A = CBZ.city.arena; if (!A) return null;
+    const A = arenaW(); if (!A) return null;
     // THE AIRFRAME is city/airframes.js's light twin in the police fit:
     // white over near-black (the cruisers' palette), belly searchlight, chin
     // camera ball, loudspeaker, real window holes you see the crew through.
@@ -1327,7 +1396,7 @@
   // cruise altitude for the pushed point (groundYForChopper/chopperCruiseY, both
   // above) so a hilly launch point can't leave the takeoff climb clipping terrain.
   function policeHeliLaunchPoint(P) {
-    const A = CBZ.city.arena;
+    const A = arenaW();
     const px = P.pos.x, pz = P.pos.z;
     let dx = chopper.homeX - px, dz = chopper.homeZ - pz;
     let d = Math.hypot(dx, dz);
@@ -1592,7 +1661,7 @@
       for (let i = cn.children.length - 1; i >= 0; i--) {
         const kid = cn.children[i];
         cn.remove(kid);
-        if (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) CBZ.city.arena.root.add(kid);
+        { const AW = arenaW(); if (AW && AW.root) AW.root.add(kid); }
       }
       if (cn.parent) cn.parent.remove(cn);
       chopper.group.userData._crewNode = null;
@@ -1618,6 +1687,12 @@
     // its state; it never pops into existence relative to the player.
     if (!chopper && g.state !== "playing") return;
     if (!chopper && chopperRebuildT > 0) { chopperRebuildT -= dt; return; }   // destroyed airframe: the pad stays empty for a beat
+    // an island station keeps a bird only where it has a roof to stand it on
+    // (a flat roof the stair reaches); a pitched one has no pad
+    if (!chopper && onIsles()) {
+      const st = CBZ.cityPoliceStation ? CBZ.cityPoliceStation() : null;
+      if (!st || !st.lot || !st.lot.building || !st.lot.building.flatRoof) return;
+    }
     if (!chopper) { chopper = makeChopper(); if (!chopper) return; }
     // a dying bird ignores ALL dispatch/orbit AI — it's a ballistic wreck now
     // (this also runs playerless, so the fall always finishes).
@@ -1961,6 +2036,9 @@
   // the LIVE arena so a rebuilt world can't leave a stale point behind.
   let _station = null;
   CBZ.cityPoliceStation = function () {
+    // on the islands the law has a building: the island's police station
+    // (world/island_police.js), its front door on the street
+    if (onIsles()) return CBZ.islandPolice && CBZ.islandPolice.station ? CBZ.islandPolice.station() : null;
     const A = CBZ.city && CBZ.city.arena;
     if (!A || !A.shopLots || !A.shopLots.length) return null;
     if (_station && A.shopLots.indexOf(_station.lot) >= 0) return _station;
@@ -2145,6 +2223,7 @@
   function patrolCap() {
     if (!(CBZ.CONFIG && CBZ.CONFIG.CITY_PATROL_CARS)) return 0;
     let cap = (CBZ.CITY && CBZ.CITY.patrolCars != null) ? (CBZ.CITY.patrolCars | 0) : 4;
+    if (onIsles()) cap = Math.min(cap, 2);          // an island town runs a unit or two
     // weak-GPU governor: fewer driving cruisers (same discipline as traffic.js)
     const q = CBZ.qualityLevel != null ? CBZ.qualityLevel : 2;
     if (q <= 1) cap = Math.min(cap, 1);
@@ -2199,6 +2278,25 @@
   }
   function spawnPatrolCar(A) {
     if (!CBZ.cityMakeCar) return null;
+    // ON THE ISLANDS A UNIT PULLS OUT OF THE STATION YARD: one of the cruisers
+    // parked at the island's police station (world/island_police.js) is put
+    // on the street it fronts and drives off on the lane AI
+    if (onIsles() && CBZ.islandPolice && CBZ.islandPolice.takeCruiser) {
+      const yc = CBZ.islandPolice.takeCruiser();
+      if (yc) {
+        const yr = nearestRoadSeg(A, yc.pos.x, yc.pos.z);
+        if (!yr) return null;
+        const dir = rng() < 0.5 ? 1 : -1;
+        yc.road = yr; yc.lane = laneCenterP(yr, dir, 0); yc.dirSign = dir; yc.laneIdx = 0; yc.vertical = yr.vertical;
+        yc.baseV = (TRP().cruise ? TRP().cruise[0] : 7) + 2.5;
+        yc.v = 1.5; yc.reckless = false; yc.ai = true; yc.owned = false;
+        yc._propParked = false; yc._parkX = yc._parkZ = yc._parkH = null;
+        yc._patrolCar = true;
+        _patrolCars.push(yc);
+        return yc;
+      }
+      return null;                                         // no unit in the yard: none on the street
+    }
     const p = patrolSeedPoint(A); if (!p) return null;
     const r = nearestRoadSeg(A, p.x, p.z); if (!r) return null;
     const dir = (p.vertical != null ? p.vertical : r.vertical) ? (rng() < 0.5 ? 1 : -1)
@@ -2321,7 +2419,7 @@
     }
     if (stars < 4 || g.state !== "playing" || swatVan || swatVanCD > 0) return;
     if (!CBZ.cityMakeCar || forcePool < 2) return;
-    const A = CBZ.city && CBZ.city.arena; if (!A || !A.randomRoadPoint) return;
+    const A = arenaW(); if (!A || !A.randomRoadPoint) return;
     const swatTarget = Math.round((g.cityCopTarget || 0) * (SWAT_FRAC[Math.min(5, stars)] || 0));
     if (liveSwat() >= swatTarget) return;
     const P = CBZ.player;
@@ -2416,6 +2514,7 @@
     // top-ups while it holds (city/regimes.js already zeroed forcePool).
     if (CBZ.regimes && CBZ.regimes.policeAllowed && !CBZ.regimes.policeAllowed()) return;
     standWatch();               // the chain of command repairs itself, like the roster
+    isleSweep();
     const stars = g.wanted | 0;
     // ESCAPED CONVICT all-points bulletin: the first maintain tick after you hit
     // the street as a jailbreaker, dispatch puts your description out — sells WHY
@@ -2425,7 +2524,8 @@
       convictHailed = true;
       if (CBZ.city && CBZ.city.big) CBZ.city.big("ALL UNITS: ESCAPED CONVICT AT LARGE");
     }
-    const ambientWant = CBZ.CITY.ambientCops || 0;
+    // an island town's beat is a pair or two, not the city's seven
+    const ambientWant = onIsles() ? (CBZ.deviceClass === "phone" ? 2 : 3) : (CBZ.CITY.ambientCops || 0);
     const playerWant = g.cityCopTarget || 0;
 
     // ---- RADIO BEAT: escalation gets CALLED IN before the response rolls.
@@ -2501,7 +2601,7 @@
     // patrol cruisers cruise the city on lane AI — top the pool up here (1.1s
     // beat). Skipped while you're driving with heat up so we never pop a fresh
     // cruiser into a tense chase (the chase units are spawned by the ramp above).
-    if (!(P && P.driving && stars >= 2)) { const A = CBZ.city && CBZ.city.arena; if (A) maintainPatrolCars(A); }
+    if (!(P && P.driving && stars >= 2)) { const A = arenaW(); if (A) maintainPatrolCars(A); }
   }
 
   // PIT: draft a real traffic car into a pursuit cruiser that rams a fleeing
@@ -2550,7 +2650,7 @@
       // (the bare 1.0 circle let a long cruiser nose clip through corners)
       if (CBZ.cityCollideVehicle) CBZ.cityCollideVehicle(c);
       else if (CBZ.collide) CBZ.collide(c.pos, 1.0);
-      if (CBZ.city.arena) CBZ.city.arena.clampToCity(c.pos, 1.0);
+      { const AW = arenaW(); if (AW) AW.clampToCity(c.pos, 1.0); }
       c.group.position.set(c.pos.x, 0, c.pos.z);
       c.group.rotation.y = c.heading;
     }
@@ -2670,7 +2770,7 @@
   // fresh makeCop. Always a real record in CBZ.cityCops so damage/death/disarm
   // and the corpse flow all just work.
   function rbCop(x, z, swat) {
-    const A = CBZ.city.arena; if (!A) return null;
+    const A = arenaW(); if (!A) return null;
     let c = null;
     while (RB.copPool.length && !c) { const r = RB.copPool.pop(); if (r && !r.dead && !r.culled) c = r; }
     if (c) {
@@ -2720,7 +2820,7 @@
   // snapped to the street's centre-line and kept out of the intersection box so
   // it reads as a deliberate wall, not parked cross-traffic.
   function rbStage(stars) {
-    const A = CBZ.city.arena, P = CBZ.player;
+    const A = arenaW(), P = CBZ.player;
     if (!A || !P || !P.driving || !P._vehicle || P._vehicle.dead || !A.xLines) return false;
     const car = P._vehicle;
     const dx = car.vx || 0, dz = car.vz || 0;
@@ -2834,7 +2934,7 @@
       // same wall contract as every driven car (oriented hull + front probe)
       if (CBZ.cityCollideVehicle) CBZ.cityCollideVehicle(c);
       else if (CBZ.collide) CBZ.collide(c.pos, 1.2);
-      if (CBZ.city.arena) CBZ.city.arena.clampToCity(c.pos, 1.2);
+      { const AW = arenaW(); if (AW) AW.clampToCity(c.pos, 1.2); }
       c.group.position.set(c.pos.x, 0, c.pos.z);
       c.group.rotation.y = c.heading;
       // keep rolling until clear of the PLAYER's eyes — never despawn on camera
@@ -3020,7 +3120,7 @@
 
   // ---- per-frame update --------------------------------------------------
   CBZ.onUpdate(35, function (dt) {
-    if (g.mode !== "city") return;
+    if (!econ()) return;
     if (CBZ.net && CBZ.net.noSim()) return;   // multiplayer guest: cops are host-synced puppets
     if (g.state === "playing") maintain(dt);
     frame++;
@@ -3029,7 +3129,7 @@
 
     const P = CBZ.player, camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     const stars = g.wanted | 0;
-    const A = CBZ.city.arena;
+    const A = arenaW();
     const cops = CBZ.cityCops;
     for (let i = cops.length - 1; i >= 0; i--) {
       const c = cops[i];
@@ -3766,8 +3866,12 @@
     // a crossing taken back by the net before the push-out (systems/bodymove.js)
     if (CBZ.bodyNet) CBZ.bodyNet.settle(c);
     if (CBZ.collide) CBZ.collide(c.pos, COP_R, c.pos.y, c.pos.y + 1.7);
-    if (CBZ.city.arena) CBZ.city.arena.clampToCity(c.pos, COP_R);
-    c.pos.y = 0;
+    { const AW = arenaW(); if (AW) AW.clampToCity(c.pos, COP_R); }
+    // Gang City's street is its datum; an island is hills, steps and floors:
+    // there an officer stands on the ground under him (CBZ.moves' feet, the
+    // player's own rule)
+    if (g.mode !== "city" && CBZ.moves && CBZ.moves.feet) { if (CBZ.moves.feet(c, c.pos, _dt) == null) c.pos.y = 0; }
+    else c.pos.y = 0;
   }
 
   // (GUN-PROP VISIBILITY used to live here: hideOccludedGuns flipped every

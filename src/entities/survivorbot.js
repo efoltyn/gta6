@@ -355,7 +355,8 @@
      is the nearer danger), a few freeze; a body under a slab stays there. */
   const GTH = { kind: "gunshot", weapon: "gun", x: 0, z: 0, distance: 0, armed: true, aimingAtMe: false, source: null };
   function hearShot(x, z, src) {
-    if (!BR || !survOn()) return 0;
+    // (the archipelago's townsfolk are this crowd too: they hear the island's guns)
+    if (!BR || !(survOn() || (CBZ.game && CBZ.game.mode === "archipelago"))) return 0;
     const list = BR.near(x, z, 45, _wit);
     let n = 0;
     for (let i = 0; i < list.length; i++) {
@@ -373,6 +374,39 @@
     return n;
   }
   CBZ.survivorsHearShot = hearShot;
+
+  /* A CRIME IN FRONT OF THE CROWD (the archipelago, where the townsfolk are
+     this crowd: city/peds.js cityTagWitnesses asks). Everybody who could see
+     the spot answers it the way they answer a death they saw (rattle, then
+     threat.respond: the timid run from it, a few freeze, the steady carry
+     on); the answer is who saw it, nearest first, for the law to take calls
+     from. Nothing here draws a random number. */
+  const _cw = [];
+  function witnessCrime(x, z, perp, out, y) {
+    out = out || [];
+    out.length = 0;
+    if (!BR) return out;
+    const yy = y != null ? y : 1;
+    const list = BR.near(x, z, WIT.range, _cw);
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i].actor;
+      if (!o || o === perp || !o._survBrain || o.dead) continue;
+      if (!BR.perception.seesPoint(o, x, yy, z, WIT)) continue;
+      const dd = Math.hypot(o.pos.x - x, o.pos.z - z);
+      BR.morale.rattle(o, 0.2 + 0.4 * Math.max(0, 1 - dd / WIT.range));
+      TH.x = x; TH.z = z; TH.distance = dd; TH.sheltered = o.state === "hide";
+      const resp = BR.threat.respond(o, TH);
+      if (resp === "flee" || resp === "freeze") {
+        const sc = o._scare || (o._scare = { x: 0, z: 0, t: 0, resp: null, hold: 0 });
+        sc.x = x; sc.z = z; sc.t = simT; sc.resp = resp; sc.hold = SCARE_HOLD[resp]; sc.gun = true;   // away from it, not down the hazard
+      }
+      o._sawD = dd;
+      out.push(o);
+    }
+    out.sort(function (a, b) { return a._sawD - b._sawD; });
+    return out;
+  }
+  CBZ.survivorsWitness = witnessCrime;
 
   /* one think of the nerves: true = it owns the body this tick */
   function panicThink(b) {

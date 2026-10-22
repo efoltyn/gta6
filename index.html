@@ -683,7 +683,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
      player (hands on, two wrists, the escort) every game's law calls. -->
-<script src="src/systems/arrest.js?v=jailai1020"></script>
+<script src="src/systems/arrest.js?v=islelaw1022"></script>
 <!-- systems/cuffedplayer.js: what a cuffed player can do (hands gate at the window's capture
      phase, speed/stamina/get-up numbers, the grey bar) and how the room treats him; reads
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
@@ -1092,7 +1092,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/disaster_arena.js?v=isles1023"></script>
 <script src="src/world/island_dressing.js?v=isles1023"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
-<script src="src/entities/survivorbot.js?v=misles1bodymo"></script>
+<script src="src/entities/survivorbot.js?v=islelaw1022"></script>
 <script src="src/modes/survival.js?v=isles1022"></script>
 <!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
      instant death, i-frames, no chip, physical shelter, regen. survival.js's
@@ -1504,8 +1504,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->
-<script src="src/city/law.js?v=ladder1022"></script>
-<script src="src/city/wanted.js?v=bodymove1022"></script>
+<script src="src/city/law.js?v=islelaw1022"></script>
+<script src="src/city/wanted.js?v=islelaw1022"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=boot1013"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
@@ -1518,7 +1518,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=hands1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=bodymove1022"></script>
+<script src="src/city/peds.js?v=islelaw1022"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1565,10 +1565,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=bodymove1022"></script>
 <script src="src/city/security.js?v=ladder1022"></script>
 <script src="src/city/vips.js?v=mladdervoice1"></script>
-<script src="src/city/police.js?v=bodymove1022"></script>
+<script src="src/city/police.js?v=islelaw1022"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/aircraft.js?v=rounds1013m"></script>
-<script src="src/city/traffic.js?v=bodymove1022"></script>
+<script src="src/city/traffic.js?v=islelaw1022"></script>
 <script src="src/city/carparts.js?v=emg1019"></script>
 <script src="src/city/carbody.js?v=cars2"></script>
 <script src="src/city/carwheels.js?v=cars2"></script>
@@ -1592,7 +1592,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=mrg10200048"></script>
-<script src="src/city/vehicles.js?v=voice1022"></script>
+<script src="src/city/vehicles.js?v=islelaw1022"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
 <script src="src/city/playeraircraft.js?v=mlandblisles1"></script>
@@ -1639,7 +1639,14 @@ document.body.appendChild(b);}}catch(e){}})();
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
 <script src="src/world/archipelago_map.js?v=isles1022"></script>
-<script src="src/world/archipelago.js?v=isles1023"></script>
+<script src="src/world/archipelago.js?v=islelaw1022"></script>
+<!-- THE ISLES' STREETS AND THEIR LAW: island_town.js presents the island in
+     force as a Gang-City street (its roads in the city's road record shape)
+     so city/vehicles.js, traffic.js, police.js and wanted.js run on it;
+     island_police.js is the island's police station (the counter, the desk
+     sergeant, the lock-up, the cruisers in its yard). After archipelago.js. -->
+<script src="src/world/island_town.js?v=islelaw1022"></script>
+<script src="src/world/island_police.js?v=islelaw1022"></script>
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the
@@ -1774,7 +1781,7 @@ document.body.appendChild(b);}}catch(e){}})();
      consume them; pops once per context and stays until dismissed; [?] reopens.
      Revert with ?cfg_CONTROLS_CARD=0. -->
 <script src="src/systems/controls.js?v=feel1020"></script>
-<script src="src/city/roadrules.js?v=metro0929"></script>
+<script src="src/city/roadrules.js?v=islelaw1022"></script>
 <!-- AIRSIDE GROUND TRAFFIC (owner: "cars spawning randomly inside airport near
      runway — it's dumb"). Two halves of one fix. roadrules.js now CLOSES the
      airfield to ambient city traffic; this file gives the airfield the traffic
@@ -1829,8 +1836,8 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=vault1013"></script>
-<script src="src/city/restrain.js?v=ijkl1022"></script>
-<script src="src/city/custody.js?v=bodymove1022"></script>
+<script src="src/city/restrain.js?v=islelaw1022"></script>
+<script src="src/city/custody.js?v=islelaw1022"></script>
 <script src="src/city/combat.js?v=butt1022"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe

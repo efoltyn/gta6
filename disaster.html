@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 430
+     Natural Disaster Survival, standing alone: index.html minus the 432
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -661,7 +661,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
      player (hands on, two wrists, the escort) every game's law calls. -->
-<script src="src/systems/arrest.js?v=jailai1020"></script>
+<script src="src/systems/arrest.js?v=islelaw1022"></script>
 <!-- systems/cuffedplayer.js: what a cuffed player can do (hands gate at the window's capture
      phase, speed/stamina/get-up numbers, the grey bar) and how the room treats him; reads
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
@@ -987,7 +987,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/disaster_arena.js?v=isles1023"></script>
 <script src="src/world/island_dressing.js?v=isles1023"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
-<script src="src/entities/survivorbot.js?v=misles1bodymo"></script>
+<script src="src/entities/survivorbot.js?v=islelaw1022"></script>
 <script src="src/modes/survival.js?v=isles1022"></script>
 <!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
      instant death, i-frames, no chip, physical shelter, regen. survival.js's
@@ -1374,7 +1374,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=mrg10200048"></script>
-<script src="src/city/vehicles.js?v=voice1022"></script>
+<script src="src/city/vehicles.js?v=islelaw1022"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playeraircraft.js?v=mlandblisles1"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1415,6 +1415,11 @@ document.body.appendChild(b);}}catch(e){}})();
      each one and dropped behind you. archipelago_map.js is the map as data;
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
+<!-- THE ISLES' STREETS AND THEIR LAW: island_town.js presents the island in
+     force as a Gang-City street (its roads in the city's road record shape)
+     so city/vehicles.js, traffic.js, police.js and wanted.js run on it;
+     island_police.js is the island's police station (the counter, the desk
+     sergeant, the lock-up, the cruisers in its yard). After archipelago.js. -->
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the

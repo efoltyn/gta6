@@ -64,6 +64,9 @@
 
   function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
   function mode() { return (g && g.mode) || ""; }
+  // the economy's worlds (Gang City and the islands) are policed by the city's
+  // force: its officers, its gun law
+  function econ() { return CBZ.economyMode ? !!CBZ.economyMode() : (mode() === "city" || mode() === "archipelago"); }
   const V = () => CBZ.verbs || null;
 
   /* ============================================================
@@ -191,7 +194,7 @@
   };
   function playerArmed() {
     try {
-      if (mode() === "city") return !!(CBZ.cityHasGun && CBZ.cityHasGun());
+      if (econ()) return !!(CBZ.cityHasGun && CBZ.cityHasGun());
       return !!(CBZ.fps && CBZ.fps.active) || !!(CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive());
     } catch (e) { return false; }
   }
@@ -454,7 +457,7 @@
      ============================================================ */
   function officers() {
     const m = mode();
-    if (m === "city") return CBZ.cityCops || [];
+    if (m === "city" || econ()) return CBZ.cityCops || [];
     if (m === "escape") return CBZ.guards || [];
     return A._officers ? (A._officers() || []) : [];
   }

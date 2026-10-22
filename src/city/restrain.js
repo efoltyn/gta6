@@ -660,7 +660,8 @@
     // are a different matter: systems/capture.js's haul scene puts them on in
     // the pen (escape) and takes them off itself, so there they are posed, not
     // cut. Every other mode still strips them.
-    if (g.mode !== "city") {
+    // (the islands are policed by the same force: the cuffs stay on there too)
+    if (!(CBZ.economyMode ? CBZ.economyMode() : (g.mode === "city" || g.mode === "archipelago"))) {
       handT = null; handPed = null;
       if (restrained.length) releaseAll();
       // the prison's haul scene ties the player itself and takes them off

@@ -2615,7 +2615,9 @@
   CBZ.vehicleRoot = vehicleRoot;
   function makeCar(x, z, heading, vertical, model, aggr) {
     const S = CBZ.slice;
-    if (S && S.stream && CBZ.sliceKeeps && CBZ.sliceAt && !CBZ.sliceKeeps(x, z, 12)) {
+    // (Gang City's streamed slice only: a stale city slice must never defer an
+    // island car into a cell that will never be built)
+    if (g.mode === "city" && S && S.stream && CBZ.sliceKeeps && CBZ.sliceAt && !CBZ.sliceKeeps(x, z, 12)) {
       const grp = new THREE.Group();
       grp.position.set(x, 0, z); grp.rotation.y = heading;
       grp.visible = false;
@@ -7388,13 +7390,17 @@
   CBZ.onUpdate(37, function (dt) {
     if (!CBZ.vehicleModeOn(g.mode)) return;
     const cityWorld = g.mode === "city";
-    const A = cityWorld ? (CBZ.city && CBZ.city.arena) : null;
+    /* THE LANE WORLD: Gang City's arena, or the island in force presented as
+       a street (world/island_town.js CBZ.econArena). Either one is a road
+       list the lane keeper below drives; a vehicle world with no streets
+       (the disaster island in survival) keeps the parked half only. */
+    const A = cityWorld ? (CBZ.city && CBZ.city.arena) : (CBZ.econArena ? CBZ.econArena() : null);
     if (cityWorld && !A) return;
-    if (cityWorld) hookScareBus();
+    if (A) hookScareBus();
     const baseDt = dt;
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     _vframe++;
-    if (cityWorld) {
+    if (A) {
       rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
       bodyGrids();        // the ped index for the lane-brake scan and runOver (wildGrid builds on demand)
     }
@@ -7591,7 +7597,7 @@
         if (c.wreckT <= 0 && c.abandoned) c.ai = false;   // settle as an abandoned wreck
         continue;
       }
-      if (!cityWorld) continue;          // lanes, signals and the grid below are the city's
+      if (!A) continue;                  // lanes, signals and the grid below need a street world
       if (c.playerHitCD > 0) c.playerHitCD = Math.max(0, c.playerHitCD - dt);
       if (c.npcDriver && c.roadRageTarget && advanceRoadRage(c, dt, A)) continue;
       if (c.ranRedCD > 0) c.ranRedCD -= dt;
@@ -7665,7 +7671,8 @@
       // intersection, so nearestIntersection can return null — treat that as
       // "no signal ahead" (open highway) instead of dereferencing undefined.
       let it = A.nearestIntersection(c.pos.x, c.pos.z);
-      const offGrid = c.pos.x < gridX0 || c.pos.x > gridX1 || c.pos.z < gridZ0 || c.pos.z > gridZ1;
+      // an island town has no signal grid at all: every junction is a derived one
+      const offGrid = !!A.noGrid || c.pos.x < gridX0 || c.pos.x > gridX1 || c.pos.z < gridZ0 || c.pos.z > gridZ1;
       // Off the grid, the clamped edge intersection only counts when this car's
       // road actually runs through it (a road leaving downtown on a grid line).
       // A car kilometres away whose along-coordinate happened to match an edge
@@ -7736,6 +7743,26 @@
           // ramp down to the line.
           if (useIdm) idmA = Math.min(idmA, idmAccel(c.v, Math.max(0.5, c.baseV), Math.max(0.4, distToInt - stopBack + IDM.s0), c.v, c));
         }
+      }
+
+      /* THE STOP SIGN. An island town (world/island_town.js) has no signals:
+         every crossing is signed STOP (world/island_roads.js paints the bar
+         and plants the sign). A calm driver comes to a full stop with his
+         bumper at the bar, counts a beat, and goes; a reckless one rolls it. */
+      if (A.noGrid && !panicking && CBZ.roadJunctionAt && (!c.reckless || c.driver.aggr < 0.8) && c.pullover !== 4) {
+        const sfx = r.vertical ? 0 : c.dirSign, sfz = r.vertical ? c.dirSign : 0;
+        const SJ = CBZ.roadJunctionAt(c.pos.x + sfx * 13, c.pos.z + sfz * 13, 0);
+        if (SJ && (SJ.a === r || SJ.b === r)) {
+          if (SJ !== c._stopJ) {
+            const dJ = r.vertical ? (SJ.z - c.pos.z) * c.dirSign : (SJ.x - c.pos.x) * c.dirSign;
+            const stopAt = (r.vertical ? SJ.hb : SJ.ha) + 1.6 + halfLen;
+            if (dJ > stopAt - 1.2) {
+              target = Math.min(target, Math.max(0, (dJ - stopAt) * 1.2));
+              if (useIdm) idmA = Math.min(idmA, idmAccel(c.v, Math.max(0.5, c.baseV), Math.max(0.4, dJ - stopAt + IDM.s0), c.v, c));
+              if (c.v < 0.4 && dJ - stopAt < 1.6) { c._stopT = (c._stopT || 0) + dt; if (c._stopT > 1.1) { c._stopJ = SJ; c._stopT = 0; } }
+            } else c._stopJ = SJ;              // already over the bar: this one is behind him
+          }
+        } else if (c._stopJ) { c._stopJ = null; c._stopT = 0; }
       }
 
       // Car-following. THE LEADER GAP AND CLOSING RATE ARE THE SAME TWO
