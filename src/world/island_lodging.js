@@ -487,6 +487,8 @@
     S.keep = null;
     if (!(dayNow() < K.until)) return;
     S.rent = { room: room, until: K.until, key: keyName(room), where: placeKey(room) };
+    // (a game loaded from the save: the key comes back with the night)
+    if (!hasKey(S.rent)) giveKey(S.rent);
     if (K.wake) S.wake = { room: room, at: K.wake };
   }
   function keepOf() {
@@ -808,6 +810,20 @@
       }
       if (sees && d < bd) { bd = d; best = b; }
     }
+    // THE ISLANDS' OWN PEOPLE (Gang City's street crowd: the family whose
+    // house it is, the hotel's porter, whoever walks in): their eyes are the
+    // street's (a forward cone, the room's own walls between)
+    for (const p of CBZ.cityPeds || []) {
+      if (!p || p.dead || !p.pos || p.inCar || (p.ko || 0) > 0 || p.restraint || p.surrender) continue;
+      const dx = P.pos.x - p.pos.x, dz = P.pos.z - p.pos.z, d = Math.hypot(dx, dz);
+      if (d > SEE.range || d >= bd || Math.abs((p.pos.y || 0) - P.pos.y) > 3) continue;
+      if (d > 0.6) {
+        const ry = p.group ? p.group.rotation.y : 0;
+        if ((dx / d) * Math.sin(ry) + (dz / d) * Math.cos(ry) < 0.25) continue;      // his back to you
+      }
+      if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(p.pos.x, (p.pos.y || 0) + 1.6, p.pos.z, P.pos.x, P.pos.y + 0.6, P.pos.z)) continue;
+      bd = d; best = p;
+    }
     return best;
   }
   function insideOf(b) {
@@ -819,6 +835,14 @@
   function trespass(bot, b) {
     const D = CBZ.brain && CBZ.brain.demand;
     if (S.tres) endTrespass();
+    // one of the island's people: the city's body for the ladder walks him
+    // ("You lost?" ... "Get out." ... the throw), and it ends when you are out
+    if (!bot._brain && CBZ.cityPeds && CBZ.cityPeds.indexOf(bot) >= 0 && CBZ.cityLadder && CBZ.cityLadder.begin) {
+      let e = null;
+      try { e = CBZ.cityLadder.begin(bot, "trespass", { inside: function () { return b ? insideOf(b) : true; } }); } catch (err) { e = null; }
+      if (!e) say(bot, "Get out of my house.");
+      return;
+    }
     if (!D || !bot._brain) { say(bot, "Get out of my house."); return; }
     let c = null;
     try { c = D.begin(bot, playerActor(), "trespass", {}); } catch (e) { c = null; }

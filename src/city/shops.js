@@ -588,7 +588,7 @@
   //  take the same money and put the goods in the same bag — because they call
   //  the same function. `free` is the shoplift branch: the goods land exactly
   //  where a bought unit would, no money moves.
-  function acquire(lot, it, n, each, free) {
+  function acquire(lot, it, n, each, free, bought) {
     const econ = CBZ.cityEcon, meta = econ.ITEMS[it];
     if (!meta || !CBZ.city) return false;
     const kind = (lot && lot.kind) || "";
@@ -626,9 +626,9 @@
       // counts toward your drip (the club gate). The drip preview becomes real.
       econ.add(it, n);
       if (isBoutique(kind)) equip(it);
-      else CBZ.city.note((free ? "Pocketed " : "Bought ") + (n > 1 ? n + "× " : "") + it, 1.4);
+      else CBZ.city.note((free && !bought ? "Pocketed " : "Bought ") + (n > 1 ? n + "× " : "") + it, 1.4);
     }
-    else { econ.add(it, n); CBZ.city.note((free ? "Pocketed " : "Bought ") + (n > 1 ? n + "× " : "") + it, 1.4); }
+    else { econ.add(it, n); CBZ.city.note((free && !bought ? "Pocketed " : "Bought ") + (n > 1 ? n + "× " : "") + it, 1.4); }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     return true;
   }
@@ -657,8 +657,10 @@
     if (!meta || !CBZ.city) return false;
     const single = !!(meta.gun || meta.melee || meta.armor);
     const cnt = single ? 1 : Math.max(1, n | 0);
+    // opts.free: no money moves here (pocketed, or already rung up at the
+    // shop's till: opts.bought, city/storegoods.js through CBZ.shopFloor.till)
     const free = !!(opts && opts.free);
-    return acquire(lot || openLot, name, cnt, free ? 0 : CBZ.cityEcon.buyPrice(name), free);
+    return acquire(lot || openLot, name, cnt, free ? 0 : CBZ.cityEcon.buyPrice(name), free, !!(opts && opts.bought));
   };
 
   // Put a wearable you OWN onto your body via the shared outfit model

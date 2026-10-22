@@ -194,6 +194,7 @@
       b: b, post: post, F: F, stools: stools, booths: booths, pool: !!pool, isle: isle,
       // where you order: the counter top over each stool
       spots: stools.map(function (s) { const w = F.toWorld(cx - 0.1, s.lz); return { bar: null, x: w.x, y: F.y + CH + 0.1, z: w.z, reach: 2.2, dot: 0.35 }; }),
+      box: F.bounds, fy: F.y,
       inside: function (x, z) { const q = F.toLocal(x, z); return q.x > R.x0 - 0.2 && q.x < R.x1 + 0.2 && q.z > R.z0 - 0.2 && q.z < R.z1 + 0.2; },
       fightT: 40 + hsh(salt + "f") * 80,
     };
@@ -254,13 +255,28 @@
   function drinkersIn(bar) {
     const out = [];
     for (const p of CBZ.cityPeds || []) {
-      if (!p || p.dead || p._customer !== "bar" || !p._islandPost || p._islandPost.b !== bar.b || !p.staffPost) continue;
+      if (!p || p.dead || p._customer !== "bar" || !p._islandPost || p._islandPost.b !== bar.b || !(p.staffPost || p._propSeat)) continue;
       out.push(p);
     }
     return out;
   }
+  /* A SEAT FOR A DRINKER (world/island_people.js stands the evening's crowd
+     on them): a free stool or booth seat in this bar (city/propuse.js's
+     seats, the ones the stools and benches registered), stools first */
+  const _seats = [];
+  function freeSeat(b) {
+    const bar = bars.find(function (x) { return x.b === b; });
+    if (!bar || !CBZ.propSeatsIn) return null;
+    const B = bar.box;
+    CBZ.propSeatsIn(B.x0, B.x1, B.z0, B.z1, bar.fy, _seats);
+    const free = _seats.filter(function (r) { return !r.occupant && !r.tipped; });
+    if (!free.length) return null;
+    free.sort(function (a, c) { return (a.kind === "stool" ? 0 : 1) - (c.kind === "stool" ? 0 : 1) || Math.random() - 0.5; });
+    return free[0];
+  }
   function brawl(a, c) {
     for (const p of [a, c]) {
+      if (p._propSeat && CBZ.propStand) CBZ.propStand(p, { instant: true });
       p.staffPost = null; p._islandPost = null; p.controlled = false; p.path = null;
     }
     a.rage = c; a.state = "fight";
@@ -292,7 +308,7 @@
 
   CBZ.islandBars = {
     list: function () { return bars.slice(); },
-    drink: drink,
+    drink: drink, freeSeat: freeSeat,
     state: function () {
       return bars.map(function (bar) {
         return { name: bar.b.name || null, stools: bar.stools.length, booths: bar.booths.length, pool: bar.pool,
