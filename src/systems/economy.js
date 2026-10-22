@@ -1203,7 +1203,9 @@
   function steal(actor) {
     const guardish = actor.kind === "guard" || actor.kind === "warden";
     const load = rollLoadout(actor);
-    const chance = wardenShielded(actor) ? 0 : stealOdds(actor);
+    // the warden on his feet with an officer near is a long shot, never a
+    // locked pocket: a hand that gets caught is the guards' business
+    const chance = wardenShielded(actor) ? Math.max(0.05, stealOdds(actor) * 0.25) : stealOdds(actor);
     playerReach(actor, guardish ? 0 : 0.15);     // the hand moves either way
     if (rng() < chance) {
       // the grab is bounded by the ROLL and by his actual pockets

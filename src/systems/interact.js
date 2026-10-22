@@ -376,7 +376,9 @@
       const meet = W && W.verbs ? W.verbs(a) : null;
       if (meet) return meet;
       const out = (W && W.floor ? W.floor(a) : null) || (canTell ? ["tell"] : []);
-      if (W && W.exposed && W.exposed()) out.push("steal");
+      // his pockets are always worth a try (owner 2026-10-22); economy.js
+      // makes it a long shot with an officer at his shoulder
+      out.push("steal");
       out.push("grab");
       return out;
     }
@@ -457,8 +459,6 @@
         const want = CBZ.prisonContract && CBZ.prisonContract.wantedItem(a);
         return want ? shortText(want, 12) : "";
       }
-      case "restrain":
-        return CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Bedsheet Rope") ? "" : "Rope";
       case "join": return gangShort(a);
       case "accept":
         if (ap.kind === "favor") return "+" + (ap.gift || 3);
@@ -481,7 +481,12 @@
     // the head of the line, whole: a button word is never ellipsised
     return raw.split(/\s+[—–-]\s+/)[0];
   }
+  // TIE needs a rope in the bag. Owner (2026-10-22): the rope is the
+  // CONDITION for the button, not a word printed on it, so without one there
+  // is no Tie at all.
+  function hasRope() { return !!(CBZ.econ && CBZ.econ.hasItem && CBZ.econ.hasItem("Bedsheet Rope")); }
   function capVerbs(v) {
+    if (v.indexOf("restrain") >= 0 && !hasRope()) v = v.filter(function (x) { return x !== "restrain"; });
     // CUFFED (CBZ.arrest.playerCuffed): only what a mouth can do
     const C = CBZ.cuffedPlayer;
     if (C && C.on()) v = v.filter(function (x) { return !isHand(x) && x !== "grab" && C.verbAllowed(x); });
