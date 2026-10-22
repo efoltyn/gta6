@@ -42,6 +42,13 @@
          Make it: you are paid. Miss it: it is held against you; three and
          you are out of the army. Rank comes with the musters you make.
      g.isleArmy = { rank, island, musters, strikes, lastDay, since }
+
+   THE MOTOR POOL. An island with a recruiting office has its army's trucks
+   at the muster point: a Humvee and a JLTV nose-in in two free bays of the
+   quay's car park, beside the lieutenant. They are NPC War's own units
+   (units/vehicles/hmmwv.js, jltv.js, through city/unitmodels.js: the same
+   M1151 and JLTV Fort Brandt parks), solid, crew out. Their files load when
+   the island comes up; two hulls, shared geometry and materials per type.
    ============================================================ */
 (function () {
   "use strict";
@@ -648,14 +655,74 @@
     CBZ.islandVenue.on("cityhall", fitHall);
     CBZ.islandVenue.on("recruit", fitRecruit);
   }
+  /* ---- THE MOTOR POOL ------------------------------------------------------ */
+  const POOL_UNITS = ["hmmwv", "jltv"];
+  const POOL = { arena: null, list: [], asked: false, t: 0 };
+  function poolClear() {
+    for (const v of POOL.list) {
+      if (v.group && v.group.parent) v.group.parent.remove(v.group);
+      const i = CBZ.colliders ? CBZ.colliders.indexOf(v.col) : -1;
+      if (i >= 0) CBZ.colliders.splice(i, 1);
+    }
+    if (POOL.list.length && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    POOL.list.length = 0;
+    POOL.arena = null;
+  }
+  function poolTick() {
+    const A = CBZ.surv && CBZ.surv.arena, I = CBZ.island;
+    if (POOL.arena && POOL.arena !== A) poolClear();
+    if (POOL.arena || !A || !A.root || !I || I.arena !== A) return;
+    // an island with a recruiting office, and the quay's car park to muster in
+    if (!(I.buildings || []).concat(I.sites || []).some(function (b) { return b && b.use === "recruit"; })) { POOL.arena = A; return; }
+    const lot = (I.parking || []).find(function (p) { return /Quay/.test(p.name || ""); });
+    if (!lot || !lot.bays || lot.bays.length < 2) { POOL.arena = A; return; }
+    const M = CBZ.milModels;
+    if (!M || !M.build) { POOL.arena = A; return; }
+    if (!POOL_UNITS.every(function (id) { return M.has(id); })) {
+      if (!POOL.asked) { POOL.asked = true; M.load(POOL_UNITS).then(function () { POOL.asked = false; }, function () { POOL.asked = false; }); }
+      return;
+    }
+    POOL.arena = A;
+    // the two free bays nearest the lot's centre (the officer stands in the
+    // aisle there): a bay is free when no car of the island stands in it
+    const spots = A.carSpots || [];
+    const cx = (lot.rect.x0 + lot.rect.x1) / 2, cz = (lot.rect.z0 + lot.rect.z1) / 2;
+    const free = lot.bays.filter(function (b) {
+      for (let i = 0; i < spots.length; i++) { const s = spots[i]; if (Math.abs(s.x - b.x) < 1.4 && Math.abs(s.z - b.z) < 1.4) return false; }
+      return true;
+    }).sort(function (a, b) { return Math.hypot(a.x - cx, a.z - cz) - Math.hypot(b.x - cx, b.z - cz); });
+    const ground = I.groundAt || CBZ.floorAt || function () { return 0; };
+    for (let k = 0; k < POOL_UNITS.length && k < free.length; k++) {
+      const bay = free[k];
+      let made = null;
+      try { made = M.build(POOL_UNITS[k], { seed: k + 1, ground: "city" }); } catch (e) { made = null; }
+      if (!made || !made.group) continue;
+      const gp = made.group, yaw = bay.yaw + Math.PI;        // a body's +z front, nose to the aisle
+      const y = (+ground(bay.x, bay.z) || 0) + 0.045;
+      gp.position.set(bay.x, y, bay.z);
+      gp.rotation.y = yaw;
+      gp.userData.hwKind = "ground";
+      A.root.add(gp);
+      // the hull is solid (its footprint, square to the bay)
+      const across = Math.abs(Math.sin(yaw)) > 0.5;
+      const hw = (across ? made.footL : made.footW) / 2, hl = (across ? made.footW : made.footL) / 2;
+      const col = { minX: bay.x - hw, maxX: bay.x + hw, minZ: bay.z - hl, maxZ: bay.z + hl, y0: y, y1: y + (made.height || 2), ref: gp, veh: gp };
+      if (CBZ.colliders) CBZ.colliders.push(col);
+      POOL.list.push({ group: gp, col: col, unitId: made.unitId });
+    }
+    if (POOL.list.length && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+
   let acc = 0, accA = 0;
   if (CBZ.onUpdate) CBZ.onUpdate(36.45, function (dt) {
-    if (!live()) return;
+    if (!live()) { if (POOL.list.length || POOL.arena) poolClear(); return; }
+    if ((POOL.t -= dt || 0) <= 0) { POOL.t = 1; try { poolTick(); } catch (e) { console.error("[isle motor pool]", e); POOL.arena = CBZ.surv && CBZ.surv.arena; } }
     acc += dt || 0;
     if (acc >= 0.1) { const s = acc; acc = 0; for (const H of halls) hallTick(H, s); }
     accA += dt || 0;
     if (accA >= 1) { accA = 0; armyTick(); }
   });
 
-  CBZ.islandCivic = { halls: function () { return halls.slice(); }, offices: function () { return offices.slice(); }, army: army };
+  CBZ.islandCivic = { halls: function () { return halls.slice(); }, offices: function () { return offices.slice(); }, army: army,
+    motorPool: function () { return POOL.list.slice(); } };
 })();

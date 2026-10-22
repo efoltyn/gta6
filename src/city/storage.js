@@ -67,7 +67,7 @@
     { id: "garage1",   name: "Two-Bay Garage",   emoji: "", kind: "garage",    cost: 35000,   vehCap: 2,  anchor: "carlot",  off: { dx: -7, dz: 0 }, blurb: "A lock-up off the car lot. Two stalls, stash a hot ride and it's yours." },
     { id: "garage2",   name: "Ten-Car Block",    emoji: "", kind: "garage",    cost: 140000,  vehCap: 10, anchor: "carlot",  off: { dx: 7, dz: 0 },  blurb: "A whole storage block. Ten bays for the collection." },
     { id: "warehouse", name: "Dockside Warehouse", emoji: "", kind: "warehouse", cost: 450000,  vehCap: 6, ammoCap: 600, anchor: "beach", blurb: "A waterfront unit, six vehicle bays AND a steel AMMO LOCKER. Your armory." },
-    { id: "hangar",    name: "Private Hangar",   emoji: "", kind: "hangar",    cost: 1200000, vehCap: 0,  anchor: "airport", blurb: "An apron hangar. The home a stolen F-22 needs, land it inside to keep it." },
+    { id: "hangar",    name: "Private Hangar",   emoji: "", kind: "hangar",    cost: 1200000, vehCap: 0,  anchor: "airport", blurb: "An apron hangar. The home a stolen F-35 needs, land it inside to keep it." },
     /* THE FREEPORT — the top of this ladder, and the first property in the
        game that is a PLACE ON ITS OWN LAND rather than a spot on somebody
        else's. It is city/govcomplex.js's `freeport` COMPLEXES row: a bonded
@@ -367,7 +367,8 @@
     const sx = P.pos.x + ox, sz = P.pos.z + oz;
     let spawned = false, berthed = null;
     if (v.kind === "jet") {
-      if (CBZ.citySpawnStolenJet) { try { CBZ.citySpawnStolenJet(sx, sz, 0, { owned: true }); spawned = true; } catch (e) {} }
+      // null while the F-35's file is still loading (it has been asked for): try again
+      if (CBZ.citySpawnStolenJet) { try { spawned = !!CBZ.citySpawnStolenJet(sx, sz, 0, { owned: true }); } catch (e) {} }
     } else if (CBZ.cityBerth && CBZ.cityBerth.isMarine && CBZ.cityBerth.isMarine(v.model)) {
       // A BERTH, not a bay. Every storage spot in this file is on LAND, so a
       // boat pulled out of the Dockside Warehouse used to appear beached in a
@@ -387,7 +388,7 @@
     if (berthed) {
       note("Your " + v.model + " is in the water at " + (berthed.label || berthed.id) + ".", 2.8);
       if (CBZ.fullMap && CBZ.fullMap.setWaypoint) { try { CBZ.fullMap.setWaypoint(berthed.x, berthed.z, v.model); } catch (e) {} }
-    } else note("Your " + (v.kind === "jet" ? "F-22" : v.model) + " is out front.", 2.4);
+    } else note("Your " + (v.kind === "jet" ? "F-35" : v.model) + " is out front.", 2.4);
     persist();
     close();
   }
@@ -474,11 +475,11 @@
         actions.push({ label: "Store the vehicle you're driving", fn: storeCurrentVehicle });
         const s = state();
         s.vehicles.forEach((v, i) => {
-          actions.push({ label: "Pull out: " + (v.kind === "jet" ? "F-22 RAPTOR" : v.model), fn: () => retrieveVehicle(i) });
+          actions.push({ label: "Pull out: " + (v.kind === "jet" ? "F-35A" : v.model), fn: () => retrieveVehicle(i) });
         });
       }
       if (prop.kind === "hangar") {
-        html += "<div style='font-size:13px;color:#cfe0f5;margin-bottom:6px'>" + (g.cityOwnsJet ? "Your F-22 lives here." : "Land a STOLEN F-22 inside to keep it.") + "</div>";
+        html += "<div style='font-size:13px;color:#cfe0f5;margin-bottom:6px'>" + (g.cityOwnsJet ? "Your F-35 lives here." : "Land a STOLEN F-35 inside to keep it.") + "</div>";
       }
       /* THE STASH. The Freeport is the only property whose contents are
          MONEY, and the desk reports it the way it reports vehicles: what is

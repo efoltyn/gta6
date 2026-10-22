@@ -135,24 +135,36 @@
   //  consoles land 0.45-0.55 m to each side (arm's reach).
   // ============================================================
   const CLASS = {
+    // THE FIGHTER IS THE F-35A (the one fighter in the game: the hangar's,
+    // the island runway's, Fort Brandt's). Its cockpit is not a classic
+    // one: no HUD glass and no round gauges. One panoramic touchscreen (the
+    // 20 x 8 inch PCD) fills the panel under a low coaming, the flight
+    // symbology is drawn on the helmet visor (the HMDS: it turns with your
+    // head), the stick is a side-stick on the right console and the throttle
+    // is on the left one.
     fighter: {
       layout: "fighter",
       // `h` is DERIVED from the layout's canvas aspect (see the generator) —
       // the value here is only a fallback if the layout goes missing.
-      panel: { w: 0.98, h: 0.37, dist: 0.72, drop: 0.34, tilt: 0.30 },
-      glare: { depth: 0.20, rise: 0.10, w: 0.98 },
+      panel: { w: 0.88, h: 0.35, dist: 0.66, drop: 0.36, tilt: 0.34 },
+      glare: { depth: 0.14, rise: 0.07, w: 0.92 },
       tub: { w: 1.02, h: 1.30, d: 1.70, floorDrop: 1.02 },
-      // fighters get a frameless-ish bubble: ONE overhead bow, NO centre post
+      // the one-piece canopy: ONE overhead bow, NO centre post
       frame: { railY: 0.30, railHalfW: 0.50, bows: 1, bowR: 0.035, postW: 0, windscreenTilt: 0.62 },
       consoleL: { w: 0.24, h: 0.20, d: 0.72, x: -0.50, y: -0.44, z: 0.28 },
       consoleR: { w: 0.24, h: 0.20, d: 0.72, x: 0.50, y: -0.44, z: 0.28 },
       pedestal: null,
       overhead: null,
-      stick: { type: "center", x: 0, y: -0.62, z: 0.30, len: 0.34, throwDeg: 15 },
+      // side-stick on the right console, throttle on the left (HOTAS)
+      stick: { type: "side", x: 0.44, y: -0.42, z: 0.30, len: 0.20, throwDeg: 10 },
       lever: { type: "throttle", x: -0.46, y: -0.36, z: 0.34, len: 0.24, throwDeg: 38 },
       pedals: { x: 0, y: -0.92, z: 0.86, sep: 0.24, travel: 0.075 },
       seat: { w: 0.56, h: 0.72, d: 0.24, backDrop: 0.62, railH: 0.34 },
-      hud: { w: 0.40, h: 0.34, dist: 0.40, drop: 0.06 },
+      // the HMDS: the same symbology, projected on the visor. `hmd` puts the
+      // pane in front of the EYE every frame (cockpit_view.js) instead of on a
+      // combiner bracket; 0.36 x 0.315 at 0.52 m is ~34 deg tall, the scale
+      // the ladder is drawn at, so the horizon line lies on the horizon.
+      hud: { hmd: true, w: 0.36, h: 0.315, dist: 0.52, drop: 0 },
       pal: { hull: 0x22262b, trim: 0x14171b, panelTop: 0x1b2027, panelBot: 0x0e1116,
              bezel: 0x2a323c, dialFace: 0x0b0d10, ink: 0xc8d4e0, backlight: 0x2f6b4a },
     },
@@ -690,8 +702,9 @@
     // a second one (a light that lies is worse than no light).
     const gearMesh = craft.group && craft.group.userData && craft.group.userData.gear;
     S.gear = gearMesh ? !!gearMesh.visible : (Math.max(0, y - surf) < 9);
-    S.bayOpen = !!(craft.group && craft.group.userData &&
-      (craft.group.userData.bayOpen || (craft.group.userData.bay && craft.group.userData.bay.open)));
+    const udB = craft.group && craft.group.userData;
+    S.bayOpen = !!(udB && (udB.bayOpen || (udB.bay && udB.bay.open) ||
+      (udB.rig && udB.rig.state && udB.rig.state.bay > 0.5)));          // a unit's own bays (the F-35)
     // real lock state from the shared lock-on bus (systems/lockon.js) — the
     // same acquisition the missiles actually fly at. A LOCK cue that lights
     // without a lock is exactly the decorative gauge this file forbids.
@@ -1026,8 +1039,11 @@
     CBZ.cockpitPaintPanel(rec.ctx, rec.base, rec.W, rec.H, S, palFor(rec.spec.pal), rec.layout);
     if (rec.tex) rec.tex.needsUpdate = true;
     if (rec.hudCtx && CBZ.cockpitHudDraw) {
+      // a helmet display draws the aircraft's symbology where the aircraft
+      // is pointing: offset by how far the head is turned (cockpit_view.js)
+      const hm = rec.spec.hud && rec.spec.hud.hmd ? (rec.hmdLook || null) : null;
       CBZ.cockpitHudDraw(rec.hudCtx, HUD_CANVAS.w, HUD_CANVAS.h, S,
-        { mode: S.lock ? "LOCK" : (S.maxAmmo > 0 ? "A/A" : "NAV") });
+        { mode: S.lock ? "LOCK" : (S.maxAmmo > 0 ? "A/A" : "NAV"), hmd: !!hm, lookYaw: hm ? hm.yaw : 0, lookPitch: hm ? hm.pitch : 0 });
       if (rec.hudTex) rec.hudTex.needsUpdate = true;
     }
     return S;

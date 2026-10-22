@@ -262,742 +262,115 @@
      1) THE B-2 — model, placement, registration, hatch, feel stamp, bay.
   ========================================================================== */
 
-  // Vehicle-material wrapper. The SECOND argument is the COLOUR and it must be
-  // forwarded — island_military.js documents what happens when a vmat swallows
-  // its hex: every canopy in the world wears whatever tint the first vehicle
-  // built happened to ask for. Glass goes through the role so the cockpit reads
-  // as the same see-through pane the rest of the fleet got.
-  function vmat(role, hex, opts) {
-    if (CBZ.vehicleMat) {
-      try { const m = CBZ.vehicleMat(role, hex, opts); if (m && m.isMaterial) return m; } catch (e) {}
-    }
-    return cm(hex != null ? hex : 0x2b2f35, opts);
-  }
-
   /* ==========================================================================
-     THE B-2 SPIRIT, REBUILT (2026-10-09, owner: "redo the B-2 bomber").
+     THE B-2 SPIRIT IS THE UNIT (units/vehicles/b2_spirit.js, through
+     city/unitmodels.js): one model per machine. The airframe NPC War flies is
+     the one parked on Fort Brandt's pad, flown by you, flown on a sortie and
+     parked at a nation's war-room station: the real planform (two edge
+     directions, the double-W trailing edge), the four-pane windscreen, the
+     two bays with their rotary launchers of 2,000 lb weapons, the split drag
+     rudders, the gear that retracts. The 700 lines of loft this file used to
+     draw its own B-2 with are deleted.
 
-     What the old build still faked, and what each line below replaces:
-       • blue-grey top, near-black belly, no panels -> ONE dark gunship-grey
-         radar-absorbent skin, top and belly the same paint, with the panel
-         seams, sawtooth access-door outlines, the lighter leading-edge
-         treatment and the heat tiles of the exhaust decks painted into a
-         planform-mapped texture (one 1024² canvas, no extra draws);
-       • box "inlet humps" and three-box "troughs" laid ON the wing -> the
-         nacelle swells and the exhaust decks are part of the LOFT itself, so
-         the body really blends; the inlet mouth is a long slit whose lip is
-         serrated in plan (the B-2's W-shaped intake lip), the exhaust is a
-         recessed deck on top of the wing with the nozzle slot at its head;
-       • one rounded glass patch with three rails -> the FOUR-PANE windscreen:
-         two big front panes and two smaller side panes, framed;
-       • one 3.9 m bay with two doors -> the real arrangement: TWO bomb bays
-         side by side, each with two doors that swing down (sawtooth ends);
-       • gear welded on for the whole flight -> gear and gear doors in their
-         own group that retracts once the aeroplane is airborne
-         (userData.gear, the hook playeraircraft.js already honours, plus
-         userData.setGear/setBay for the sortie and the tools).
-     Span 52.4 m, length 21.0 m, LE sweep 33 deg, the double-W trailing edge:
-     unchanged, because those were already right.
+     makeB2() is the adapter: it hands back { group, dims } and hangs the
+     handles this file and the sorties drive on the group (setBay(k),
+     setGear(k), bayOpen, gearDown, bayLocal, b2Spend()). It is null until
+     the unit file is on the page, and asks for it.
   ========================================================================== */
-  const B2C = {
-    skin: 0x4a5057, belly: 0x41464c, panel: 0x50565d, skinD: 0x2a2e33,
-    glass: 0x1d2a36, gear: 0x8e9399, tire: 0x141618, well: 0x2c3036,
-    deck: 0x0e1216, instr: 0x0c1a1c,
-  };
-
-  /* ==========================================================================
-     THE PLANFORM — read off b2code.html, which is the real aeroplane.
-       • LE sweep 16.6/26.2 = 33 deg, the B-2's actual leading edge.
-       • The trailing edge is the double-W: five breakpoints per side. It is
-         not drawn as teeth — it falls out of the planform, crisp at every
-         station, because the stations sit ON the breakpoints.
-       • Thickness is a gaussian centrebody plus a chord term — 3.9 m deep
-         at the root, a knife edge at the tip; the aerofoil is t^0.42(1-t)^0.95
-         normalised to peak 1, 80% above the chord plane: a flying wing is
-         nearly flat underneath.
-       • The cockpit blister is a second gaussian, windowed to ZERO at the
-         leading edge so the two sheets meet at the apex.
-     The aircraft stands 2.55 m up on its gear because the player has to WALK
-     UNDER THIS WING to reach the crew hatch.
-  ========================================================================== */
-  const B2_HALF = 26.2;                        // HALF span; the aircraft is 52.4 wide
-  const B2_SWEEP = 16.6 / 26.2;                // leading edge: cz = |x| * SWEEP
-  const B2_APEX = 10.5;                        // model z of the nose apex (length 21 → ±10.5)
-  const B2_CY = 2.55;                          // chord plane above the tarmac (gear height)
-  const B2_TMUL = 0.78;                        // thickness scale: reference 4.97 m → real 3.88 m
-  const B2_TE = [[0, 21.0], [6.0, 16.8], [11.0, 20.6], [17.0, 15.8], [26.2, 18.1]];
-  function b2TE(x) {
-    x = Math.abs(x);
-    for (let i = 1; i < B2_TE.length; i++) {
-      if (x <= B2_TE[i][0]) {
-        const a = B2_TE[i - 1], b = B2_TE[i];
-        return a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]);
-      }
-    }
-    return B2_TE[B2_TE.length - 1][1];
-  }
-  function b2LE(x) { return Math.abs(x) * B2_SWEEP; }
-  function b2Chord(x) { return Math.max(0.35, b2TE(x) - b2LE(x)); }
-  function b2Thick(x) {
-    return (2.15 * Math.exp(-Math.pow(Math.abs(x) / 8.2, 2)) + 0.095 * b2Chord(x)) * B2_TMUL;
-  }
-  function b2Foil(t) {
-    if (!(t > 0) || t >= 1) return 0;
-    return Math.pow(t, 0.42) * Math.pow(1 - t, 0.95) / 0.4298;
-  }
-  function b2Blister(x, t) {
-    if (!(t > 0)) return 0;
-    return Math.exp(-Math.pow(x / 3.4, 2)) *
-           Math.exp(-Math.pow((t - 0.20) / 0.13, 2)) *
-           Math.min(1, t / 0.09) * 0.95;
-  }
-  function sm(a, b, v) { const u = Math.max(0, Math.min(1, (v - a) / (b - a))); return u * u * (3 - 2 * u); }
-  // THE ENGINE NACELLES are swells in the wing, not parts on it: two F118s a
-  // side sit under a long hump outboard of the flight deck. Its front is the
-  // inlet face (t 0.17 → 0.215 rises 0.55 m — the slit), it crests at about a
-  // third of the chord and melts back into the wing by 70%.
-  const B2_ENG_X = 4.9, B2_ENG_W = 1.35;
-  const B2_INLET_T0 = 0.17, B2_INLET_T1 = 0.215;
-  const B2_EXH_T0 = 0.60, B2_EXH_T1 = 0.66;
-  function b2EngX(x) { return Math.exp(-Math.pow((Math.abs(x) - B2_ENG_X) / B2_ENG_W, 2)); }
-  function b2Hump(x, t) {
-    if (!(t > 0)) return 0;
-    const rise = sm(B2_INLET_T0, B2_INLET_T1, t);
-    const fall = 1 - sm(0.36, 0.70, t);
-    return 0.55 * b2EngX(x) * rise * fall;
-  }
-  // THE EXHAUST DECK: aft of the engines the upper skin steps DOWN into a
-  // shallow open trough that runs to the trailing edge — the hot gas is laid
-  // along the top of the wing where nothing below can see it.
-  function b2Trough(x, t) {
-    if (!(t > B2_EXH_T0)) return 0;
-    const ex = Math.exp(-Math.pow((Math.abs(x) - B2_ENG_X) / 1.05, 4));
-    return 0.32 * ex * sm(B2_EXH_T0, B2_EXH_T1, t);
-  }
-  function b2TopAt(x, t) {
-    if (!(t > 0) || t >= 1) return B2_CY;
-    const th = b2Thick(x), f = b2Foil(t);
-    const top = B2_CY + th * f * 0.80 + b2Blister(x, t) + b2Hump(x, t) - b2Trough(x, t);
-    return Math.max(top, B2_CY - th * f * 0.22 + 0.025);
-  }
-  function b2BotAt(x, t) {
-    if (!(t > 0) || t >= 1) return B2_CY;
-    return B2_CY - b2Thick(x) * b2Foil(t) * 0.22;
-  }
-  // chord fraction at a model-local (x, z) — so every fitting is placed ON
-  // the real surface instead of at a guessed height
-  function b2T(x, z) { return (B2_APEX - z - b2LE(x)) / b2Chord(x); }
-  function b2Z(x, t) { return B2_APEX - (b2LE(x) + t * b2Chord(x)); }
-  function b2TopY(x, z) { return b2TopAt(x, b2T(x, z)); }
-  function b2BotY(x, z) { return b2BotAt(x, b2T(x, z)); }
-
-  // THE FOUR-PANE WINDSCREEN, in the loft's own parameter space: two front
-  // panes either side of the centre post (|x| < 0.8) and two side panes
-  // (0.8 → 1.5), the side panes shallower — the B-2's mask-shaped glazing.
-  const B2_GLASS_XC = 0.8, B2_GLASS_X = 1.5;
-  function b2Glass(xa, xb, t0, t1) {
-    const ax = Math.max(Math.abs(xa), Math.abs(xb));
-    if (ax <= B2_GLASS_XC + 1e-6) return t0 >= 0.07 - 1e-6 && t1 <= 0.215 + 1e-6;
-    if (ax <= B2_GLASS_X + 1e-6) return t0 >= 0.095 - 1e-6 && t1 <= 0.19 + 1e-6;
-    return false;
-  }
-
-  // SEAT A FORE-AND-AFT BOX ON THE SKIN: both ends land ON the lofted
-  // surface and the rake is the surface's own slope between them.
-  function b2Seat(gp, m, x, z0, z1, w, h, lift) {
-    const y0 = b2TopY(x, z0), y1 = b2TopY(x, z1);
-    const len = Math.hypot(z1 - z0, y1 - y0);
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, len), m);
-    b.position.set(x, (y0 + y1) / 2 + (lift || 0), (z0 + z1) / 2);
-    b.rotation.x = Math.atan2(y0 - y1, z1 - z0);
-    b.castShadow = true; b.receiveShadow = true;
-    gp.add(b);
-    return b;
-  }
-  // and the general case: a strip from one surface point to another, any
-  // direction (the windscreen's cross frames)
-  const _sa = new THREE.Vector3(), _sb = new THREE.Vector3();
-  function b2Strip(gp, m, x0, z0, x1, z1, w, h, lift) {
-    _sa.set(x0, b2TopY(x0, z0) + (lift || 0), z0);
-    _sb.set(x1, b2TopY(x1, z1) + (lift || 0), z1);
-    const len = _sa.distanceTo(_sb);
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, len), m);
-    b.position.copy(_sa).add(_sb).multiplyScalar(0.5);
-    b.lookAt(_sb);
-    b.castShadow = false; b.receiveShadow = true;
-    gp.add(b);
-    return b;
-  }
-
-  // Span stations: fine through the flight deck and the nacelles (where the
-  // shape changes fastest), coarser outboard; the breakpoints and the glass
-  // edges are IN the list so the sawtooth and the panes are exact.
-  function b2Stations() {
-    const half = [];
-    for (let x = 0; x <= 8.0001; x += 0.5) half.push(+x.toFixed(3));
-    for (let x = 8.9; x < 26.2; x += 0.9) half.push(+x.toFixed(3));
-    half.push(B2_GLASS_XC, B2_GLASS_X, 6.0, 11.0, 17.0, 26.2);
-    const u = Array.from(new Set(half.map(function (v) { return Math.round(v * 1000) / 1000; }))).sort(function (a, b) { return a - b; });
-    const out = [];
-    for (let i = u.length - 1; i >= 1; i--) out.push(-u[i]);
-    for (let i = 0; i < u.length; i++) out.push(u[i]);
-    return out;
-  }
-  // chord stations: dense at the nose (the blister and the LE radius), on
-  // the inlet face and on the exhaust step
-  const B2_TS = [0, 0.01, 0.025, 0.045, 0.07, 0.095, 0.12, 0.145, 0.17, 0.19, 0.215, 0.24,
-    0.27, 0.30, 0.34, 0.38, 0.43, 0.48, 0.53, 0.58, 0.60, 0.63, 0.66, 0.70, 0.75, 0.80,
-    0.85, 0.90, 0.95, 1.0];
-
-  // Planform UV: the panel texture is painted in plan view (u across the
-  // span, v along the length), top half of the atlas for the upper skin,
-  // bottom half for the belly.
-  function b2UV(x, z, belly) {
-    const u = (x + B2_HALF) / (2 * B2_HALF), v = (B2_APEX - z) / 21;
-    return [u, belly ? 0.5 - v * 0.5 : 1 - v * 0.5];
-  }
-
-  function b2Loft() {
-    const S = b2Stations(), NS = S.length, TS = B2_TS, NC = TS.length - 1;
-    const vt = [], vb = [], ut = [], ub = [], iTop = [], iGlass = [], iBot = [];
-    const topRow = [], botRow = [];
-    for (let s = 0; s < NS; s++) {
-      const x = S[s];
-      const tip = Math.abs(Math.abs(x) - B2_HALF) < 1e-6;
-      const rt = [], rb = [];
-      for (let k = 0; k <= NC; k++) {
-        const t = TS[k];
-        const z = b2Z(x, t);
-        vt.push(x, tip ? B2_CY : b2TopAt(x, t), z);
-        vb.push(x, tip ? B2_CY : b2BotAt(x, t), z);
-        const a = b2UV(x, z, false), b = b2UV(x, z, true);
-        ut.push(a[0], a[1]); ub.push(b[0], b[1]);
-        rt.push(vt.length / 3 - 1);
-        rb.push(vb.length / 3 - 1);
-      }
-      topRow.push(rt); botRow.push(rb);
-    }
-    for (let s = 0; s < NS - 1; s++) {
-      const xa = S[s], xb = S[s + 1];
-      for (let k = 0; k < NC; k++) {
-        const a = topRow[s][k], b = topRow[s][k + 1], c2 = topRow[s + 1][k], d = topRow[s + 1][k + 1];
-        // stations run -x -> +x and chord nose -> tail: (a, c2, b) faces UP
-        (b2Glass(xa, xb, TS[k], TS[k + 1]) ? iGlass : iTop).push(a, c2, b, b, c2, d);
-        const e = botRow[s][k], f2 = botRow[s][k + 1], gg = botRow[s + 1][k], h = botRow[s + 1][k + 1];
-        iBot.push(e, f2, gg, f2, h, gg);
-      }
-    }
-    function mk(verts, uvs, idx, lift) {
-      if (!idx.length) return null;
-      const arr = lift ? verts.slice() : verts;
-      if (lift) for (let i = 1; i < arr.length; i += 3) arr[i] += lift;
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.Float32BufferAttribute(arr, 3));
-      geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-      geo.setIndex(idx);
-      geo.computeVertexNormals();
-      geo.computeBoundingSphere();
-      return geo;
-    }
-    return { top: mk(vt, ut, iTop, 0), glass: mk(vt, ut, iGlass, 0.015), bot: mk(vb, ub, iBot, 0), S: S };
-  }
-
-  /* THE SKIN TEXTURE — painted once per page in plan view. Everything here is
-     drawn from the same planform functions the loft uses, so a seam is where
-     the surface says it is. Dark lines are panel seams; the B-2's access
-     doors and bay doors have SAWTOOTH ends (radar returns go sideways, not
-     back), so every door outline below is a zigzag fore-and-aft. */
-  let _b2Tex = null;
-  function b2SkinTexture() {
-    if (_b2Tex) return _b2Tex;
-    const N = 1024, cv = document.createElement("canvas");
-    cv.width = N; cv.height = N;
-    const c = cv.getContext("2d");
-    function hex(h) { return "#" + h.toString(16).padStart(6, "0"); }
-    // plan (x, z) -> canvas px in the top (belly=false) or bottom half
-    function P(x, z, belly) { const uv = b2UV(x, z, belly); return [uv[0] * N, (1 - uv[1]) * N]; }
-    function path(pts, belly) { c.beginPath(); for (let i = 0; i < pts.length; i++) { const p = P(pts[i][0], pts[i][1], belly); if (i) c.lineTo(p[0], p[1]); else c.moveTo(p[0], p[1]); } }
-    function outline(belly) {
-      const pts = [];
-      for (let x = -B2_HALF; x <= B2_HALF + 1e-6; x += 0.5) pts.push([x, B2_APEX - b2LE(x)]);
-      for (let x = B2_HALF; x >= -B2_HALF - 1e-6; x -= 0.5) pts.push([x, B2_APEX - b2TE(x)]);
-      return pts;
-    }
-    function zigRect(x0, x1, z0, z1, teeth) {   // a door: straight sides, sawtooth ends
-      const pts = [], n = teeth || 3, w = (x1 - x0) / n;
-      for (let i = 0; i <= n * 2; i++) pts.push([x0 + w * i / 2, z1 + (i % 2 ? 0.35 : 0)]);
-      for (let i = n * 2; i >= 0; i--) pts.push([x0 + w * i / 2, z0 - (i % 2 ? 0.35 : 0)]);
-      pts.push(pts[0]);
-      return pts;
-    }
-    for (let half = 0; half < 2; half++) {
-      const belly = half === 1;
-      // base paint, clipped to the planform
-      c.save();
-      path(outline(belly), belly); c.closePath();
-      c.fillStyle = hex(belly ? B2C.belly : B2C.skin); c.fill();
-      c.clip();
-      // RAM mottling: very low-contrast blotches (the coating ages in patches)
-      let seed = 1337 + half * 71;
-      function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
-      for (let i = 0; i < 220; i++) {
-        const x = (rnd() * 2 - 1) * 24, z = B2_APEX - rnd() * 20.5, r = 0.6 + rnd() * 2.6;
-        const p = P(x, z, belly);
-        c.fillStyle = rnd() < 0.5 ? "rgba(255,255,255,0.016)" : "rgba(0,0,0,0.022)";
-        c.beginPath(); c.ellipse(p[0], p[1], r * N / 52.4, r * N / 42, 0, 0, 6.2832); c.fill();
-      }
-      // leading-edge treatment: a band one step lighter all along the LE
-      c.lineWidth = 1.1 * N / 52.4;
-      c.strokeStyle = "rgba(200,206,214,0.10)";
-      const le = []; for (let x = -B2_HALF; x <= B2_HALF + 1e-6; x += 0.5) le.push([x, B2_APEX - b2LE(x) - 0.45]);
-      path(le, belly); c.stroke();
-      // trailing-edge control surfaces (elevons + the beaver tail): hinge
-      // lines 1.6 m ahead of the TE, outboard of the centre section
-      c.lineWidth = 1.2; c.strokeStyle = "rgba(10,12,14,0.55)";
-      const te = []; for (let x = -B2_HALF + 0.6; x <= B2_HALF - 0.6 + 1e-6; x += 0.25) te.push([x, B2_APEX - b2TE(x) + 1.6]);
-      path(te, belly); c.stroke();
-      for (const sx of [-21.5, -17, -13.2, -11, -7.5, -3.2, 3.2, 7.5, 11, 13.2, 17, 21.5]) {
-        path([[sx, B2_APEX - b2TE(sx)], [sx, B2_APEX - b2TE(sx) + 1.6]], belly); c.stroke();
-      }
-      // spanwise structure seams, parallel to the leading edge
-      c.strokeStyle = "rgba(12,14,17,0.30)"; c.lineWidth = 1;
-      for (const off of [2.2, 5.0, 8.4]) {
-        const ln = [];
-        for (let x = -B2_HALF; x <= B2_HALF + 1e-6; x += 0.5) {
-          const z = B2_APEX - b2LE(x) - off;
-          if (z > B2_APEX - b2TE(x) + 0.8) ln.push([x, z]);
-        }
-        if (ln.length > 2) { path(ln, belly); c.stroke(); }
-      }
-      // centreline seam
-      path([[0, B2_APEX - 0.5], [0, B2_APEX - 20.5]], belly); c.stroke();
-      if (!belly) {
-        // the cockpit surround: a sawtooth-edged panel around the glazing
-        c.strokeStyle = "rgba(10,12,14,0.55)"; c.lineWidth = 1.3;
-        path(zigRect(-2.4, 2.4, B2_APEX - 5.6, B2_APEX - 1.0, 4), false); c.stroke();
-        // nacelle panels + the exhaust decks (heat tiles: lighter, gridded)
-        for (const s of [-1, 1]) {
-          const ex = s * B2_ENG_X;
-          path(zigRect(ex - 1.9, ex + 1.9, b2Z(ex, 0.58), b2Z(ex, 0.24), 3), false); c.stroke();
-          const z0 = b2Z(ex, B2_EXH_T0 + 0.01), z1 = B2_APEX - b2TE(ex) + 0.05;
-          const pa = P(ex - 1.05, z0, false), pb = P(ex + 1.05, z1, false);
-          c.fillStyle = "#77736b"; c.fillRect(Math.min(pa[0], pb[0]), Math.min(pa[1], pb[1]), Math.abs(pb[0] - pa[0]), Math.abs(pb[1] - pa[1]));
-          c.strokeStyle = "rgba(40,38,34,0.55)"; c.lineWidth = 1;
-          for (let zz = z0; zz > z1; zz -= 0.55) { path([[ex - 1.05, zz], [ex + 1.05, zz]], false); c.stroke(); }
-          for (let xx = ex - 1.05; xx <= ex + 1.06; xx += 0.42) { path([[xx, z0], [xx, z1]], false); c.stroke(); }
-          // soot fanning off the deck onto the trailing edge
-          const g = c.createLinearGradient(0, pa[1], 0, pb[1]);
-          g.addColorStop(0, "rgba(20,18,16,0)"); g.addColorStop(1, "rgba(20,18,16,0.35)");
-          c.fillStyle = g; c.fillRect(Math.min(pa[0], pb[0]), Math.min(pa[1], pb[1]), Math.abs(pb[0] - pa[0]), Math.abs(pb[1] - pa[1]));
-          // the dark inlet slit and the aux door ahead of it
-          c.strokeStyle = "rgba(8,9,10,0.6)"; c.lineWidth = 1.2;
-          path(zigRect(ex - 0.7, ex + 0.7, b2Z(ex, 0.13), b2Z(ex, 0.10), 2), false); c.stroke();
-          // refuelling-receptacle / access doors outboard, sawtoothed
-          path(zigRect(s * 9.6 - 0.9, s * 9.6 + 0.9, b2Z(s * 9.6, 0.45), b2Z(s * 9.6, 0.32), 2), false); c.stroke();
-        }
-        // the refuelling receptacle on the spine, aft of the deck
-        path(zigRect(-0.45, 0.45, B2_APEX - 7.6, B2_APEX - 6.9, 1), false); c.stroke();
-      } else {
-        c.strokeStyle = "rgba(8,9,11,0.65)"; c.lineWidth = 1.3;
-        // the two bomb bays: four door outlines, sawtooth ends
-        for (const s of [-1, 1]) {
-          path(zigRect(s > 0 ? 0.15 : -2.05, s > 0 ? 2.05 : -0.15, B2_BAY_Z - B2_BAY_L / 2, B2_BAY_Z + B2_BAY_L / 2, 3), true); c.stroke();
-          path([[s * 1.1, B2_BAY_Z - B2_BAY_L / 2], [s * 1.1, B2_BAY_Z + B2_BAY_L / 2]], true); c.stroke();
-          // main gear wells
-          path(zigRect(s * B2_MAIN_X - 1.0, s * B2_MAIN_X + 1.0, -2.6, 2.0, 2), true); c.stroke();
-        }
-        // nose gear well
-        path(zigRect(-0.55, 0.55, 4.6, 7.6, 1), true); c.stroke();
-      }
-      c.restore();
-    }
-    const tex = new THREE.CanvasTexture(cv);
-    if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
-    tex.anisotropy = 4;
-    tex.needsUpdate = true;
-    // painted once per page: the 4 MB canvas goes once the skin is on the GPU
-    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);
-    _b2Tex = tex;
-    return tex;
-  }
-  function b2SkinMat(tex) {
-    // the shared white material of whichever family the tier wants
-    // (Lambert or its PBR twin), copied and given the painted map
-    const base = cm(0xffffff);
-    const m = base.clone();
-    m._shared = false;
-    m.map = tex;
-    if ("roughness" in m) { m.roughness = 0.78; m.metalness = 0.05; }
-    m.needsUpdate = true;
-    return m;
-  }
-
-  /* ==========================================================================
-     THE FLIGHT DECK. A windscreen is only a windscreen if there is ROOM
-     behind it: the loft is hollow, the quads over the cockpit are re-emitted
-     as glass, and the volume they look into is furnished here. Two seats
-     abreast (pilot left, mission commander right). Every part is measured
-     against b2TopY at ITS OWN station.
-  ========================================================================== */
-  function b2Deck(gp) {
-    const D = 4.30;                            // cabin floor top, model-local
-    const TRIM = vmat("interior", B2C.deck);
-    const SKIN = cm(B2C.skinD);
-    const GLOW = cm(B2C.instr, { emissive: 0x2f6f6a, ei: 0.55 });
-    function put(x, y, z, w, h, d, m, rx) {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
-      b.position.set(x, y, z);
-      if (rx) b.rotation.x = rx;
-      b.castShadow = false; b.receiveShadow = false;
-      gp.add(b);
-      return b;
-    }
-    put(0, D - 0.03, 6.25, 2.90, 0.12, 3.40, SKIN);                    // floor
-    put(0, D + 0.575, 4.60, 2.90, 1.15, 0.14, SKIN);                   // rear bulkhead
-    for (let i = 0; i < 2; i++) {
-      put(i ? 1.44 : -1.44, D + 0.39, 5.85, 0.12, 0.78, 2.50, SKIN);   // side walls
-    }
-    put(0, D + 0.82, 7.45, 1.80, 0.13, 0.46, SKIN, 0.42);              // glareshield
-    put(0, D + 0.52, 7.30, 1.72, 0.50, 0.09, GLOW, 0.42);              // main panel face
-    for (let i = 0; i < 2; i++) {
-      put(i ? 0.52 : -0.52, D + 0.56, 7.18, 0.32, 0.26, 0.06, GLOW, 0.42);
-    }
-    for (let i = 0; i < 2; i++) {
-      const s = i ? 0.62 : -0.62;
-      put(s, D + 0.20, 6.05, 0.62, 0.16, 0.66, TRIM);                  // cushion
-      put(s, D + 0.66, 5.68, 0.60, 0.94, 0.14, TRIM, -0.14);           // back
-      put(s, D + 1.16, 5.62, 0.34, 0.22, 0.16, TRIM);                  // headrest
-    }
-    put(0, D + 0.26, 6.30, 0.40, 0.30, 1.30, SKIN);                    // centre console
-    put(0, D + 0.44, 6.72, 0.30, 0.10, 0.34, GLOW, 0.25);              // throttle quadrant
-    put(0, D + 1.42, 5.85, 1.20, 0.10, 0.76, GLOW, -0.20);             // overhead panel
-    // THE FOUR-PANE FRAME. Fore-and-aft posts on the centreline and between
-    // each front and side pane; the outer frame; and the cross frames along
-    // the aperture's forward and aft edges, all seated on the skin.
-    const FR = cm(0x16191d);
-    const zf = function (x, t) { return b2Z(x, t); };
-    b2Seat(gp, FR, 0, zf(0, 0.215), zf(0, 0.07), 0.09, 0.07, 0.035);
-    for (const s of [-1, 1]) {
-      const xc = s * B2_GLASS_XC, xo = s * B2_GLASS_X;
-      b2Seat(gp, FR, xc, zf(xc, 0.215), zf(xc, 0.07), 0.11, 0.07, 0.035);
-      b2Seat(gp, FR, xo, zf(xo, 0.19), zf(xo, 0.095), 0.11, 0.07, 0.035);
-      b2Strip(gp, FR, 0, zf(0, 0.07), xc, zf(xc, 0.07), 0.08, 0.06, 0.03);        // front panes, forward edge
-      b2Strip(gp, FR, 0, zf(0, 0.215), xc, zf(xc, 0.215), 0.08, 0.06, 0.03);      // front panes, aft edge
-      b2Strip(gp, FR, xc, zf(xc, 0.095), xo, zf(xo, 0.095), 0.08, 0.06, 0.03);    // side panes, forward edge
-      b2Strip(gp, FR, xc, zf(xc, 0.19), xo, zf(xo, 0.19), 0.08, 0.06, 0.03);      // side panes, aft edge
-    }
-  }
-
-  // bay + gear stations (shared by the paint and the parts)
-  const B2_BAY_Z = 0.55, B2_BAY_L = 5.6, B2_MAIN_X = 6.1;
-
-  /* ==========================================================================
-     THE AIRFRAME. Nose +Z, wheels on y=0, no group scale (so the
-     aircraft_doors hatch walk-point lands exactly at the hatch).
-  ========================================================================== */
-  function makeB2() {
-    const gp = new THREE.Group();
-    const cy = B2_CY;
-    const tex = b2SkinTexture();
-    const SKIN = b2SkinMat(tex);
-    const PANEL = cm(B2C.panel);
-    // the inlet mouths and nozzle slots are thin sheets seen from both sides
-    const MOUTH = new THREE.MeshBasicMaterial({ color: 0x050607, side: THREE.DoubleSide });
-    const HOLE = new THREE.MeshBasicMaterial({ color: 0x15171a });
-    const GEAR = cm(B2C.gear), TIRE = cm(B2C.tire), BELLYC = cm(0x2e3237);
-    const GLASS = vmat("glass", B2C.glass);
-
-    // ---- THE ONE SURFACE (one material, top and belly share the paint) ----
-    const L = b2Loft();
-    const top = new THREE.Mesh(L.top, SKIN);
-    top.castShadow = true; top.receiveShadow = true; gp.add(top);
-    const bot = new THREE.Mesh(L.bot, SKIN);
-    bot.castShadow = true; bot.receiveShadow = true; gp.add(bot);
-    gp.userData.b2Skin = [top, bot];
-    if (L.glass) {
-      const gl = new THREE.Mesh(L.glass, GLASS);
-      gl.castShadow = false; gl.receiveShadow = false; gp.add(gl);
-      gp.userData.b2Glass = gl;
-    }
-    b2Deck(gp);
-
-    // ---- INLETS: the slit across the nacelle's face, serrated lip ---------
-    // The mouth is the face the loft already has (t 0.17 → 0.215 climbs the
-    // nacelle's full height). A dark sheet sits on it, and its TOP edge — the
-    // lip — zigzags fore and aft in plan, the B-2's W-shaped inlet lip. It
-    // tapers to nothing at both ends because the nacelle does.
-    function inlet(s) {
-      const pos = [], idx = [];
-      const N = 16;
-      for (let i = 0; i <= N; i++) {
-        const x = s * B2_ENG_X + (i / N - 0.5) * 2 * 1.75;
-        const zig = (i % 2 ? 1 : -1) * 0.22 * b2EngX(x);
-        const tb = B2_INLET_T0 - 0.004, tl = B2_INLET_T1 + 0.004;
-        const zb = b2Z(x, tb), zl = b2Z(x, tl) + zig;
-        pos.push(x, b2TopAt(x, tb) + 0.012, zb);
-        pos.push(x, b2TopY(x, zl) + 0.03, zl);
-      }
-      for (let i = 0; i < N; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-      geo.setIndex(idx); geo.computeVertexNormals();
-      gp.add(new THREE.Mesh(geo, MOUTH));
-      // the boundary-layer splitter plate: a thin sawtooth strip ahead of it
-      b2Seat(gp, cm(B2C.skinD), s * B2_ENG_X, b2Z(s * B2_ENG_X, 0.165), b2Z(s * B2_ENG_X, 0.13), 2.4, 0.05, 0.02);
-    }
-    // ---- EXHAUST: the nozzle slot at the head of each deck ----------------
-    function nozzle(s) {
-      const pos = [], idx = [];
-      const N = 10;
-      for (let i = 0; i <= N; i++) {
-        const x = s * B2_ENG_X + (i / N - 0.5) * 2 * 1.0;
-        pos.push(x, b2TopAt(x, B2_EXH_T0 - 0.004) + 0.012, b2Z(x, B2_EXH_T0 - 0.004));
-        pos.push(x, b2TopAt(x, B2_EXH_T1) + 0.012, b2Z(x, B2_EXH_T1));
-      }
-      for (let i = 0; i < N; i++) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-      geo.setIndex(idx); geo.computeVertexNormals();
-      gp.add(new THREE.Mesh(geo, MOUTH));
-    }
-    for (const s of [-1, 1]) { inlet(s); nozzle(s); }
-
-    // ---- ENGINE FIRE (owner: "when active it should have rocket in back").
-    // Two additive sprites per deck, parked invisible, lit by the 12.35
-    // updater only while a player flies it.
-    if (CBZ.CONFIG.STRAT_B2_PLUME !== false) {
-      const cv = document.createElement("canvas"); cv.width = cv.height = 32;
-      const c2 = cv.getContext("2d");
-      const grd = c2.createRadialGradient(16, 16, 1, 16, 16, 15);
-      grd.addColorStop(0, "rgba(255,244,214,1)");
-      grd.addColorStop(0.35, "rgba(255,170,64,0.85)");
-      grd.addColorStop(1, "rgba(255,90,20,0)");
-      c2.fillStyle = grd; c2.fillRect(0, 0, 32, 32);
-      const ptex = new THREE.Texture(cv); ptex.needsUpdate = true;
-      gp.userData.plumes = [];
-      for (let i = 0; i < 2; i++) {
-        const s = i ? 1 : -1, px = s * B2_ENG_X;
-        const zt = B2_APEX - b2TE(px);
-        for (let k = 0; k < 2; k++) {
-          const pm = new THREE.SpriteMaterial({ map: ptex, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0 });
-          const sp = new THREE.Sprite(pm);
-          sp.position.set(px, b2TopAt(px, 0.97) + 0.15, zt - 0.6 - k * 1.05);
-          sp.visible = false;
-          gp.add(sp);
-          gp.userData.plumes.push({ s: sp, core: k === 0, bx: 1.5 - k * 0.3, by: 0.9 + k * 0.9 });
-        }
-      }
-    }
-
-    // ---- TWO BOMB BAYS, FOUR DOORS ----------------------------------------
-    // Side by side on the centreline, each with a rotary launcher's worth of
-    // room and two doors hinged on its outer edges that swing straight down.
-    // Doors have sawtooth ends, cut from one Shape and extruded.
-    function doorGeo(w, len) {
-      const sh = new THREE.Shape();
-      const n = 3, tw = w / n;
-      sh.moveTo(0, -len / 2);
-      for (let i = 1; i <= n * 2; i++) sh.lineTo(tw * i / 2, -len / 2 - (i % 2 ? 0.3 : 0));
-      for (let i = n * 2; i >= 0; i--) sh.lineTo(tw * i / 2, len / 2 + (i % 2 ? 0.3 : 0));
-      const g = new THREE.ExtrudeGeometry(sh, { depth: 0.07, bevelEnabled: false });
-      g.rotateX(Math.PI / 2);            // shape XY -> model XZ, thickness down
-      return g;
-    }
-    const bayDoors = [], bayHoles = [];
-    const bayY = b2BotY(0, B2_BAY_Z);
-    for (const s of [-1, 1]) {
-      const cx = s * 1.1;
-      // the open bay, seen from below: the belly is a closed sheet, so the
-      // hole is a dark plane a hair under it, shown only while doors are open
-      const hg = new THREE.PlaneGeometry(1.84, B2_BAY_L - 0.1);
-      hg.rotateX(Math.PI / 2);
-      const hole = new THREE.Mesh(hg, HOLE);
-      hole.position.set(cx, bayY - 0.012, B2_BAY_Z);
-      hole.visible = false; hole.userData.bayDoor = true;
-      gp.add(hole); bayHoles.push(hole);
-      for (const side of [-1, 1]) {
-        // hinge on the bay's outer (side=+1 for the starboard edge) line
-        const hingeX = cx + side * 0.93;
-        const g = doorGeo(0.93, B2_BAY_L);
-        // geometry runs x 0..0.93 from the hinge INWARD
-        if (side > 0) g.translate(-0.93, 0, 0);
-        const d = new THREE.Mesh(g, BELLYC);
-        d.position.set(hingeX, bayY - 0.005, B2_BAY_Z);
-        d.castShadow = true; gp.add(d);
-        d.userData.bayDoor = true;
-        // swinging the free edge down: the hinge is OUTBOARD of the leaf for
-        // side=+1 (leaf at negative local x) so +z rotation lowers it... and
-        // the mirror for side=-1
-        d.userData.openSign = side > 0 ? 1 : -1;
-        bayDoors.push(d);
-      }
-    }
-    gp.userData.bayDoors = bayDoors;
-    // the two names the cockpit/class code has always read
-    gp.userData.bayL = bayDoors[0]; gp.userData.bayR = bayDoors[3];
-    gp.userData.bombBay = true;
-    gp.userData.cockpitClass = "bomber";
-    gp.userData.setBay = function (k) {
+  function makeB2(o) {
+    const M = CBZ.milModels;
+    if (!(M && M.has && M.has("b2_spirit"))) { if (M && M.load) { try { M.load(["b2_spirit"]); } catch (e) {} } return null; }
+    const made = M.build("b2_spirit", { nation: o && o.nation });
+    if (!made || !made.group) return null;
+    const gp = made.group, ud = gp.userData, rig = made.rig, R = rig && rig.state;
+    // the doors and the gear, driven by this file (the player's drop window,
+    // a sortie's run-in) and posed by the unit's own rig
+    ud.bayOpen = 0; ud.gearDown = 1;
+    ud.setBay = function (k) {
       k = Math.max(0, Math.min(1, +k || 0));
-      const e = k * k * (3 - 2 * k);
-      for (let i = 0; i < bayDoors.length; i++) bayDoors[i].rotation.z = bayDoors[i].userData.openSign * e * 1.45;
-      for (let i = 0; i < bayHoles.length; i++) bayHoles[i].visible = k > 0.02;
-      gp.userData.bayOpen = k;
+      if (rig && rig.setBay) rig.setBay(k);
+      // the unit's own tick (it runs while somebody flies it) holds the doors
+      // where this file left them: open until we start closing them
+      if (R && R.bays) for (let i = 0; i < R.bays.length; i++) R.bays[i].hold = k > 0.98 ? 1e9 : 0;
+      ud.bayOpen = k;
     };
-
-    // ---- CREW HATCH + drop ladder ------------------------------------------
-    // Under the port wing at local (-5.2, 1.25), OUTSIDE the parked body
-    // collider so the aircraft_doors walk-up beat can reach it, under 2 m of
-    // wing so the player can stand there.
-    const HATCH_Y = b2BotY(-5.2, 1.25) - 0.07;
-    const hgeo = new THREE.BoxGeometry(1.05, 0.12, 1.55);
-    hgeo.translate(0, 0, -0.775);                   // hinge on the forward edge
-    const hatch = new THREE.Mesh(hgeo, PANEL);
-    hatch.position.set(-5.2, HATCH_Y, 1.25);
-    hatch.castShadow = true; gp.add(hatch);
-    const ladder = new THREE.Group();
-    for (let i = 0; i < 4; i++) {
-      const rung = new THREE.Mesh(bg(0.7, 0.08, 0.1), GEAR);
-      rung.position.set(0, -0.3 - i * 0.32, 0); ladder.add(rung);
-    }
-    for (let i = 0; i < 2; i++) {
-      const rail = new THREE.Mesh(bg(0.08, 1.4, 0.08), GEAR);
-      rail.position.set(i ? 0.35 : -0.35, -0.7, 0); ladder.add(rail);
-    }
-    ladder.position.set(-5.2, HATCH_Y, 0.85);
-    ladder.visible = false;
-    gp.add(ladder);
-    gp.userData.b2Hatch = hatch; gp.userData.b2Ladder = ladder;
-    gp.userData.b2HatchBase = { rx: hatch.rotation.x };
-    gp.userData.doorRig = { panel: hatch, doorX: -5.2, doorZ: 0.5 };
-
-    // ---- LANDING GEAR (own group: it retracts) -----------------------------
-    // A twin-wheel nose leg under the flight deck and two FOUR-WHEEL BOGIES
-    // on the real 12.2 m track, each main well closed by a big door that
-    // hangs vertical OUTBOARD of the leg while the gear is down, the B-2's
-    // signature profile on the ground. Every strut starts at the belly
-    // height the loft actually has above it.
-    const gearG = new THREE.Group(); gearG.name = "gear";
-    const HUB = cm(0xa4a9b0);
-    function wheel(x, z, r, w) {
-      const t = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w || 0.36, 18), TIRE);
-      t.rotation.z = Math.PI / 2; t.position.set(x, r, z);
-      t.castShadow = true; gearG.add(t);
-      const h = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.55, r * 0.55, (w || 0.36) + 0.02, 12), HUB);
-      h.rotation.z = Math.PI / 2; h.position.set(x, r, z); gearG.add(h);
-    }
-    function rod(x0, y0, z0, x1, y1, z1, r, m) {
-      _sa.set(x0, y0, z0); _sb.set(x1, y1, z1);
-      const len = _sa.distanceTo(_sb);
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 10), m || GEAR);
-      c.position.copy(_sa).add(_sb).multiplyScalar(0.5);
-      c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _sb.clone().sub(_sa).normalize());
-      c.castShadow = true; gearG.add(c);
-    }
-    // nose: oleo, torque link, drag brace, twin wheels, a forward door
-    {
-      const z = 6.3, yb = b2BotY(0, z);
-      rod(0, yb, z, 0, 0.45, z, 0.13);
-      rod(0, 0.75, z, 0, yb - 0.1, z - 1.3, 0.06);
-      rod(-0.32, 0.45, z, 0.32, 0.45, z, 0.07);
-      wheel(-0.36, z, 0.45, 0.3); wheel(0.36, z, 0.45, 0.3);
-      for (const s of [-1, 1]) {
-        const d = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.9, 2.6), BELLYC);
-        d.position.set(s * 0.58, yb - 0.45, 6.1); d.castShadow = true; gearG.add(d);
-      }
-    }
-    for (const s of [-1, 1]) {
-      const x = s * B2_MAIN_X, z = -0.3, yb = b2BotY(x, z);
-      rod(x, yb, z, x, 0.9, z, 0.2);                           // oleo
-      rod(x, 1.4, z, x - s * 0.1, yb - 0.05, z - 1.6, 0.08);   // drag brace
-      rod(x, yb - 0.1, z + 0.2, x + s * 0.9, yb - 0.1, z + 0.2, 0.06);   // side brace
-      rod(x, 0.62, z - 1.25, x, 0.62, z + 1.25, 0.15);         // bogie beam
-      for (const a of [-1, 1]) {
-        const wz = z + a * 0.95;
-        wheel(x - 0.42, wz, 0.58); wheel(x + 0.42, wz, 0.58);
-      }
-      // the main gear door: hangs vertical, outboard, sawtooth-ended
-      const dg = doorGeo(1.9, 4.2);
-      dg.rotateZ(-Math.PI / 2);
-      const door = new THREE.Mesh(dg, BELLYC);
-      door.position.set(x + s * 1.15, yb - 0.02, -0.3);
-      door.castShadow = true; gearG.add(door);
-      // the open well over the leg (a dark plane a hair under the belly)
-      const wg = new THREE.PlaneGeometry(1.9, 4.3); wg.rotateX(Math.PI / 2);
-      const well = new THREE.Mesh(wg, HOLE);
-      well.position.set(x, yb - 0.012, -0.3); gearG.add(well);
-    }
-    gp.add(gearG);
-    gp.userData.gear = gearG;
-    gp.userData.setGear = function (k) {
+    ud.setGear = function (k) {
       k = Math.max(0, Math.min(1, +k || 0));
-      gearG.visible = k > 0.02;
-      // the last third of the travel is the legs folding up into the wells
-      gearG.position.y = (1 - k) * 1.2;
-      gearG.scale.y = 0.35 + 0.65 * k;
-      gp.userData.gearDown = k;
+      if (rig && rig.setGear) rig.setGear(k);
+      ud.gearDown = k;
     };
-
-    // ---- LIGHTS ------------------------------------------------------------
-    for (let i = 0; i < 2; i++) {
-      const s = i ? 1 : -1, tx = s * 25.6;
-      const tz = B2_APEX - (b2LE(tx) + 0.5 * b2Chord(tx));
-      const nl = new THREE.Mesh(bg(0.22, 0.16, 0.22), cm(s < 0 ? 0xff4a3d : 0x37d67a,
-        { emissive: s < 0 ? 0xff4a3d : 0x37d67a, ei: 0.9 }));
-      nl.position.set(tx, b2TopY(tx, tz) + 0.04, tz); gp.add(nl);
+    // a store this file released leaves the launcher: the bottom weapon of
+    // the next bay goes, and that launcher indexes round to the next one
+    let side = 0;
+    ud.b2Spend = function () {
+      if (!R || !R.bays) return;
+      for (let n = 0; n < R.bays.length; n++) {
+        const B = R.bays[(side + n) % R.bays.length];
+        if (B.next < 8 && B.bombs && B.bombs[B.next]) {
+          B.bombs[B.next].mesh.visible = false;
+          B.next++; B.hold = 3;
+          side = (side + n + 1) % R.bays.length;
+          return;
+        }
+      }
+    };
+    // the release point: under the rotary launcher, below the bay doors
+    if (R && R.bays && R.bays[0] && R.bays[0].rla) {
+      gp.updateMatrixWorld(true);
+      const w = R.bays[0].rla.getWorldPosition(new THREE.Vector3());
+      gp.worldToLocal(w);
+      ud.bayLocal = new THREE.Vector3(0, w.y - 1.3, w.z);
     }
-    const wl = new THREE.Mesh(bg(0.26, 0.2, 0.26), cm(0xf2f4ff, { emissive: 0xf2f4ff, ei: 0.9 }));
-    wl.position.set(0, b2TopY(0, -9.6) + 0.06, -9.6); gp.add(wl);
-
-    const muzzle = new THREE.Object3D(); muzzle.position.set(0, cy + 0.15, 9.9); gp.add(muzzle);
-    gp.userData.muzzle = muzzle; gp.userData.muzzleLocal = muzzle.position.clone();
-    const dims = { family: "B-2-stealth", length: 21, span: 52.4, height: 6.0 };
-    gp.userData.aircraftDims = dims;
-    // one draw per material for everything that never moves; the doors, the
-    // hatch, the glass, the plumes and the skin keep theirs
-    if (CBZ.milAir && CBZ.milAir.kit.mergeStatic) {
-      CBZ.milAir.kit.mergeStatic(gp, function (o) {
-        return o === gp.userData.b2Glass || o === gp.userData.b2Hatch || (o.userData && o.userData.bayDoor) ||
-          o === top || o === bot;
-      });
-      CBZ.milAir.kit.mergeStatic(gearG);
-    }
-    return { group: gp, dims };
+    ud.cockpitClass = "bomber";
+    const D = ud.aircraftDims || { family: "B-2-stealth", length: 20.9, span: 52.43, height: 5.18 };
+    return { group: gp, dims: D };
   }
 
   // ---- PLACEMENT + REGISTRATION (landmass order 41 — right after the
   // bunkers so the whole strategic kit builds together; the apron slot is
   // clear of every authored Fort Brandt prop: jets end ~x -627, the heavy
   // bomber starts ~x -495, helipads sit at z -670).
-  /* ---- THE AEROPLANE, PUBLISHED ------------------------------------------
-     makeB2() is 260 lines of loft: a real planform (52.4 m span, 33° leading
-     edge, the double-W trailing edge falling out of the geometry rather than
-     drawn as teeth), an aerofoil thickness law, a cockpit blister windowed to
-     close at the apex, and the flight-deck trick of re-emitting the hull
-     quads over the cockpit in glass so the windscreen IS the hull.
-
-     None of that needs the city. What needed the city was everything after
-     this line — the apron slot, the hatch, the payload chain, the bay. So the
-     aeroplane is exported on its own, and `world/airbase.js` asks for it
-     before it falls back to its own flying wing. A standalone page that loads
-     this file gets the REAL B-2 and the replacement is never built.
-
-     makeB2 returns {group, …}; the adopter in airbase.js unwraps it. -------- */
+  /* ---- THE AEROPLANE, PUBLISHED: CBZ.strategicModels.b2() -> { group, dims }
+     | null (the war room parks a nation's bombers with it; world/airbase.js
+     asks for it before CBZ.milModels.bomber). -------------------------------- */
   CBZ.strategicModels = { b2: makeB2 };
 
-  let b2rec = null, _b2Reg = false;
-  // guarded: see CBZ.milModels in city/island_military.js for why
+  /* THE PAD'S B-2 ARRIVES WITH ITS FILE. The unit file loads when the base
+     wakes (the player within 1.5 km of the pad, or something asking for Fort
+     Brandt's machines: the pilot origin, the air response, the war room),
+     and the aeroplane parks the frame after it lands. */
+  let b2rec = null, _b2Reg = false, _b2Want = null, _b2T = 0;
+  const B2_NEAR = 1500;
+  // guarded: see CBZ.milModels in city/unitmodels.js for why
   if (CBZ.addLandmass) CBZ.addLandmass(function (city) {
-    b2rec = null; _b2Reg = false;
+    b2rec = null; _b2Reg = false; _b2Want = null;
     if (CBZ.CONFIG.STRAT_B2 === false) return;
-    const root = city.root || CBZ.scene;
-    const made = makeB2();
     // THE PAD RIDES THE BASE. This was the authored literal (-560, -566):
     // once the layout dial moved Fort Brandt (dx -900, dz -480) that spot was
     // Gang City West, and the B-2 parked between its office blocks. The spot
     // is protected land now, published once by city/zoning.js.
     const pad = (CBZ.protectedSite && CBZ.protectedSite("b2-pad")) ||
       (function () { const o = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 }; return { cx: -560 + o.dx, cz: -566 + o.dz }; })();
+    _b2Want = { city: city, root: city.root || CBZ.scene, pad: pad };
+    // keep the apron under it clear of wandering spawns (runway idiom)
+    if (CBZ.registerNoSpawnZone) CBZ.registerNoSpawnZone(city, { minX: pad.cx - 6.6, maxX: pad.cx + 6.6, minZ: pad.cz - 12.5, maxZ: pad.cz + 12.5, label: "b2-apron" });
+  }, 41);
+  function b2Wanted() {
+    const W = _b2Want; if (!W) return false;
+    const F = CBZ.fortBrandtFleet;
+    if (F && F.state && F.state() !== "idle") return true;
+    const P = CBZ.player;
+    if (!P || !P.pos) return false;
+    const dx = P.pos.x - W.pad.cx, dz = P.pos.z - W.pad.cz;
+    return dx * dx + dz * dz < B2_NEAR * B2_NEAR;
+  }
+  function placeB2() {
+    const W = _b2Want;
+    if (!W || b2rec) return !!b2rec;
+    const made = makeB2();
+    if (!made) return false;
+    _b2Want = null;
+    const root = W.root, pad = W.pad;
     // nose to the taxiway: the stand's own heading from the base plan (models face +z)
     const wx = pad.cx, wz = pad.cz, rotY = pad.yaw != null ? pad.yaw : 0;
     made.group.position.set(wx, 0, wz);
@@ -1006,14 +379,11 @@
     made.group.userData.milName = "B-2 SPIRIT";
     made.group.userData.dynamic = true;                // never frozen/merged: it flies
     root.add(made.group);
-    // the parked SOLID is the centre BODY only (9.2×21): a full 52.4u-span box
-    // would wall off half the apron and stand between the player and the crew
-    // hatch under the wing — which is now literally true, because the hatch is
-    // at local x -5.2 and a span-wide collider would swallow the walk-up point.
-    // UNCHANGED at ±4.6 by the wider re-loft on purpose: the airframe grew, the
-    // block you cannot walk through did not, so boarding behaves exactly as it
-    // did. footW stays the TRUE span (boarding range + the footprint-scaled
-    // chase cam read it); colliderW/L feed the re-park.
+    // the parked SOLID is the centre BODY only (9.2 m wide): a full 52.4 m
+    // span box would wall off half the apron and stand between the player and
+    // the walk-up point under the wing. footW stays the TRUE span (boarding
+    // range + the footprint-scaled chase cam read it); colliderW/L feed the
+    // re-park.
     const solid = { minX: wx - 4.6, maxX: wx + 4.6, minZ: wz - made.dims.length / 2, maxZ: wz + made.dims.length / 2, y0: 0, y1: made.dims.height, ref: made.group };
     CBZ.colliders.push(solid);
     b2rec = {
@@ -1024,12 +394,16 @@
       footW: made.dims.span, footL: made.dims.length, taken: false, hot: true,
       b2: true,
     };
-    // keep the apron under it clear of wandering spawns (runway idiom)
-    if (CBZ.registerNoSpawnZone) CBZ.registerNoSpawnZone(city, { minX: solid.minX - 2, maxX: solid.maxX + 2, minZ: solid.minZ - 2, maxZ: solid.maxZ + 2, label: "b2-apron" });
-  }, 41);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    return true;
+  }
   // registry hand-off — deferred one tick exactly like the islands (55.1);
   // ours at 55.15 so the base fleet lists first.
-  CBZ.onUpdate(55.15, function () {
+  CBZ.onUpdate(55.15, function (dt) {
+    if (!b2rec && _b2Want && (_b2T -= (dt || 0)) <= 0) {
+      _b2T = 0.5;
+      if (b2Wanted()) placeB2();
+    }
     if (_b2Reg || !b2rec || CBZ.CONFIG.STRAT_B2 === false) return;
     if (!CBZ.cityRegisterMilitaryVehicle) return;
     CBZ.cityRegisterMilitaryVehicle(b2rec);
@@ -1744,19 +1118,16 @@
   const _bp = { x: 0, y: 0, z: 0, vy: 0 };
 
   // THE BAY, in world space. localToWorld off the actual model is exact and
-  // banks with the aircraft. The old release spawned the bomb 1.6 m BELOW the
-  // group origin — which is the WHEELS, so every round appeared a metre and a
-  // half under the landing gear instead of dropping out of the bay doors. This
-  // is DERIVED from the loft rather than typed: b2BotY(0, bayZ) is the belly
-  // height the surface actually has over the bay, so re-lofting the airframe
-  // can never leave the release point buried inside the wing again.
-  const BAY_LOCAL = new THREE.Vector3(0, b2BotY(0, 0.70) - 0.20, 0.70);
+  // banks with the aircraft. The B-2 names its own (makeB2: under the rotary
+  // launcher, measured off the unit's bay); another airframe (a B-52) names
+  // its own on the record; the fallback is a belly point over the wheels.
+  const BAY_LOCAL = new THREE.Vector3(0, 1.0, 0.35);
   const _bayWorld = new THREE.Vector3();
   function bayPoint(c) {
     const grp = c && c.group;
     if (grp && grp.localToWorld) {
-      // another airframe (a B-52) names its own bay; the B-2 loft owns this one
-      try { return grp.localToWorld(_bayWorld.copy((c && c.bayLocal) || BAY_LOCAL)); } catch (e) {}
+      const bl = (c && c.bayLocal) || (grp.userData && grp.userData.bayLocal) || BAY_LOCAL;
+      try { return grp.localToWorld(_bayWorld.copy(bl)); } catch (e) {}
     }
     return _bayWorld.set(c.pos.x, c.pos.y + 0.6, c.pos.z);
   }
@@ -1953,6 +1324,7 @@
     // never disagree, and owned by aircraft.js's ordnance law so "straight down"
     // is a single flag for every bomb bay this game will ever grow.
     releaseStore(kind, bayPoint(c), releaseVel(c, kind), { cine: true, crime: c.pos });
+    if (c.group && c.group.userData.b2Spend) c.group.userData.b2Spend();   // off the launcher
     return true;
   }
 
@@ -2931,6 +2303,7 @@
       _sv.vx = rv.vx; _sv.vy = rv.vy; _sv.vz = rv.vz;
       let b = null;
       try { b = releaseStore(s.kind, p, _sv, { by: s.by, byPlayer: s.byPlayer, stateAct: s.stateAct }); } catch (e) { b = null; }
+      if (s.group.userData.b2Spend) s.group.userData.b2Spend();
       if (typeof s.onRelease === "function") { try { s.onRelease(b, k, s); } catch (e) {} }
     }
     if (s.kind === "nuke") note("WEAPON AWAY.", 2.4, { from: "Strategic Command", app: "messages" });

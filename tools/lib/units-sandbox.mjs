@@ -1,7 +1,8 @@
 /* tools/lib/units-sandbox.mjs — NPC War's vehicle units, as Gang City builds
    them, in plain node: three.js r128 (math and scene graph), the airframe kit
    (city/mil_air.js), the unit registry and kits (src/units/*), every vehicle
-   file, then city/island_military.js (CBZ.milModels / unitBuild, the fleet)
+   file, then city/unitmodels.js (CBZ.milModels, the one unit build), then
+   city/island_military.js (the fleet)
    and city/strategic.js (the B-2). No browser, no city.
 
    sandbox() -> { G, CBZ, THREE, errors }  errors: files that threw at load
@@ -49,6 +50,7 @@ export function sandbox(opts) {
   const dir = path.join(ROOT, "src/units/vehicles");
   for (const f of readdirSync(dir).filter((x) => x.endsWith(".js")).sort()) run("src/units/vehicles/" + f, true);
   run("src/world/basekit.js", true);
+  run("src/city/unitmodels.js");
   run("src/city/island_military.js");
   if (opts.strategic) run("src/city/strategic.js", true);
   return { G, CBZ: G.CBZ, THREE, errors };

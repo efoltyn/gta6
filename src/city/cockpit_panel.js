@@ -446,41 +446,77 @@
   CBZ.cockpitNormalizeState = normalizeState;
 
   const LAYOUTS = {
-    // ---- FIGHTER: two MFDs and an up-front control panel. The pilot flies
-    // off the HUD; the panel is for stores, systems and a standby horizon.
+    // ---- FIGHTER = THE F-35A's PANORAMIC COCKPIT DISPLAY. One 20 x 8 inch
+    // touchscreen across the whole panel, no round gauges, no up-front
+    // control: four portals under a strip of soft-key titles. The pilot flies
+    // off the helmet; the glass is for the tactical picture, the flight
+    // reference, the stores and the engine. Black glass, the F-35's palette
+    // (cyan and white symbology, green for "good", amber and red for trouble).
     fighter: {
       // Layouts draw in ABSOLUTE pixels, so each declares the canvas it was
       // composed for. cockpit.js sizes the texture and the panel mesh's
       // aspect ratio from this — nobody hand-measures a layout again.
-      size: [1024, 384],
+      size: [1280, 512],
       base: function (ctx, W, H, PAL) {
         panelBackdrop(ctx, W, H, PAL);
-        screen(ctx, 40, 70, 250, 250, { title: "TSD", bezel: PAL.bezel });
-        screen(ctx, W - 290, 70, 250, 250, { title: "STORES", bezel: PAL.bezel });
-        txt(ctx, "UP-FRONT CONTROL", W / 2, 44, 12, "#59677a");
-        ctx.strokeStyle = "#2a323c"; ctx.lineWidth = 2;
-        ctx.strokeRect(W / 2 - 150, 62, 300, 96);
+        // the one sheet of glass
+        const gx = 26, gy = 34, gw = W - 52, gh = H - 64;
+        ctx.fillStyle = "#14181d"; ctx.fillRect(gx - 8, gy - 8, gw + 16, gh + 16);
+        ctx.fillStyle = "#020405"; ctx.fillRect(gx, gy, gw, gh);
+        const pw = gw / 4;
+        ctx.strokeStyle = "#1d2a33"; ctx.lineWidth = 2;
+        for (let i = 1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(gx + pw * i, gy + 34); ctx.lineTo(gx + pw * i, gy + gh); ctx.stroke(); }
+        // the soft-key strip: each portal's page name
+        ctx.fillStyle = "#081016"; ctx.fillRect(gx, gy, gw, 30);
+        ["TSD", "PFD", "SMS", "ENG"].forEach(function (t, i) {
+          ctx.strokeStyle = "#24404e"; ctx.lineWidth = 1.5;
+          ctx.strokeRect(gx + pw * i + pw / 2 - 40, gy + 5, 80, 20);
+          txt(ctx, t, gx + pw * i + pw / 2, gy + 15, 13, "#7fd8f0", "center", 700);
+        });
+        // the jet on the stores page: a plan view, the two bays
+        const sx = gx + pw * 2 + pw / 2, sy = gy + 230;
+        ctx.strokeStyle = "#3d6e80"; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 120); ctx.lineTo(sx + 22, sy - 60); ctx.lineTo(sx + 26, sy - 10);
+        ctx.lineTo(sx + 110, sy + 40); ctx.lineTo(sx + 110, sy + 62); ctx.lineTo(sx + 30, sy + 58);
+        ctx.lineTo(sx + 26, sy + 80); ctx.lineTo(sx + 62, sy + 108); ctx.lineTo(sx + 62, sy + 120);
+        ctx.lineTo(sx - 62, sy + 120); ctx.lineTo(sx - 62, sy + 108); ctx.lineTo(sx - 26, sy + 80);
+        ctx.lineTo(sx - 30, sy + 58); ctx.lineTo(sx - 110, sy + 62); ctx.lineTo(sx - 110, sy + 40);
+        ctx.lineTo(sx - 26, sy - 10); ctx.lineTo(sx - 22, sy - 60); ctx.closePath(); ctx.stroke();
+        ctx.strokeStyle = "#2a4a57"; ctx.lineWidth = 1.5;
+        ctx.strokeRect(sx - 20, sy - 30, 16, 70); ctx.strokeRect(sx + 4, sy - 30, 16, 70);
       },
       draw: function (ctx, W, H, S, PAL) {
-        // standby attitude + speed/alt read-out on the centre panel
-        adi(ctx, W / 2, 236, 82, S.pitch, S.roll, { face: "#0a0d11", symbol: "#ffcf4a" });
-        txt(ctx, "STBY ADI", W / 2, 330, 11, "#59677a");
-        // up-front control: the four numbers a fighter pilot reads without the HUD
-        txt(ctx, (S.ias | 0) + " KT", W / 2 - 74, 88, 26, "#67ff9c", "center", 700);
-        txt(ctx, (S.alt | 0) + " FT", W / 2 + 74, 88, 26, "#67ff9c", "center", 700);
-        txt(ctx, "M " + S.mach.toFixed(2), W / 2 - 74, 126, 20, "#67ff9c");
-        txt(ctx, "G " + S.g.toFixed(1), W / 2 + 74, 126, 20, S.g > 7 ? "#ff8a5a" : "#67ff9c");
-        // LEFT MFD — tactical situation: heading rose + the live target ring
-        compassCard(ctx, 165, 195, 100, S.hdg, { face: "#04140a", bezel: "#1d3626", ink: "#59d97e", symbol: "#9dffbd" });
-        txt(ctx, "AGL " + (S.agl | 0), 165, 300, 13, "#59d97e");
-        // RIGHT MFD — stores and systems
-        statusRow(ctx, W - 250, 130, 170, S, PAL);
-        txt(ctx, S.name, W - 165, 96, 13, "#7fb4ff");
-        vsi(ctx, W - 165, 250, 58, S.vsi, { face: "#04140a", bezel: "#1d3626", ink: "#59d97e", needle: "#9dffbd" });
-        // master caution strip
-        caution(ctx, W / 2 - 150, 268, 300, 62, [
+        const gx = 26, gy = 34, gw = W - 52, gh = H - 64, pw = gw / 4;
+        const cyan = "#7fd8f0", white = "#e8f2f6", green = "#5ce08a", amber = "#f0b43c", red = "#ff5a3c";
+        // ---- TSD: the tactical situation, north-up rose under your heading
+        const t0 = gx + pw / 2;
+        compassCard(ctx, t0, gy + 210, 120, S.hdg, { face: "#020405", bezel: "#163038", ink: cyan, symbol: white });
+        txt(ctx, "AGL " + (S.agl | 0), t0, gy + 360, 15, cyan);
+        txt(ctx, S.lock ? "TRACK" : "SCAN", t0, gy + 390, 14, S.lock ? amber : cyan, "center", 700);
+        // ---- PFD: the flight reference (the helmet is primary, this is the backup)
+        const p0 = gx + pw + pw / 2;
+        adi(ctx, p0, gy + 205, 96, S.pitch, S.roll, { square: true, halfW: 92, halfH: 118, face: "#020405", symbol: amber, pxPerDeg: 3.2 });
+        tape(ctx, p0 - pw / 2 + 8, gy + 90, 40, 230, S.ias, { span: 160, step: 20, ink: white, title: "KCAS" });
+        tape(ctx, p0 + pw / 2 - 48, gy + 90, 40, 230, S.alt, { span: 1600, step: 200, right: true, ink: white, title: "ALT" });
+        txt(ctx, "M " + S.mach.toFixed(2), p0 - 50, gy + 360, 16, white);
+        txt(ctx, "G " + S.g.toFixed(1), p0 + 50, gy + 360, 16, S.g > 7 ? red : white);
+        txt(ctx, "VS " + Math.round(S.vsi), p0, gy + 390, 14, cyan);
+        // ---- SMS: the stores, the bays and the gun
+        const s0 = gx + pw * 2 + pw / 2;
+        txt(ctx, S.bayOpen ? "BAYS OPEN" : "BAYS CLOSED", s0, gy + 58, 15, S.bayOpen ? amber : green, "center", 700);
+        txt(ctx, S.maxAmmo > 0 ? "AIM-120  " + S.ammo + " / " + S.maxAmmo : "UNARMED", s0, gy + 82, 14, white);
+        if (S.maxAmmo > 0) bar(ctx, s0 - 70, gy + 98, 140, 10, S.ammo / S.maxAmmo, { color: cyan });
+        txt(ctx, S.name, s0, gy + 390, 13, cyan);
+        // ---- ENG: the F135 and the airframe, then the warnings
+        const e0 = gx + pw * 3 + pw / 2;
+        bar(ctx, e0 - 60, gy + 70, 150, 14, S.thr, { color: S.thr > 0.9 ? amber : green, label: "PWR", value: Math.round(S.thr * 100) + "%" });
+        bar(ctx, e0 - 60, gy + 100, 150, 14, S.hp, { color: S.hp < 0.35 ? red : green, label: "AIRFRM", value: Math.round(S.hp * 100) + "%" });
+        txt(ctx, S.thr > 0.9 ? "AB" : "MIL", e0, gy + 140, 18, S.thr > 0.9 ? amber : white, "center", 700);
+        txt(ctx, S.gear ? "GEAR DN" : "GEAR UP", e0, gy + 175, 16, S.gear ? green : white, "center", 700);
+        caution(ctx, e0 - 120, gy + 300, 240, 100, [
           { text: "STALL", on: S.stalled, color: "#c8341f" },
-          { text: "GEAR", on: S.gear, color: "#1f7a3a" },
+          { text: "PULL UP", on: S.agl < 60 && !S.onGround && S.vsi < -500, color: "#c8341f" },
           { text: "LOW ALT", on: S.agl < 60 && !S.onGround, color: "#c07a1f" },
           { text: "DAMAGE", on: S.hp < 0.45, color: "#c8341f" },
         ]);
@@ -712,9 +748,16 @@
     const cx = W / 2, cy = H / 2;
     // ---- pitch ladder + horizon, rolled and pitched about boresight ----
     const pxPerDeg = H / 34;
+    // ON A HELMET the pane turns with the head: the aircraft's marks (ladder,
+    // velocity vector, gun cross) slide the other way so they stay on the
+    // aircraft's line; the boxes and the heading tape stay on the visor.
+    // Looking left (+yaw) puts the nose to the right of view, looking up puts
+    // it below.
+    const bx = o.hmd ? clamp((o.lookYaw || 0) * 57.29578 * pxPerDeg, -W, W) : 0;
+    const by = o.hmd ? clamp((o.lookPitch || 0) * 57.29578 * pxPerDeg, -H, H) : 0;
     ctx.save();
     ctx.beginPath(); ctx.rect(W * 0.06, H * 0.06, W * 0.88, H * 0.88); ctx.clip();
-    ctx.translate(cx, cy); ctx.rotate(-S.roll);
+    ctx.translate(cx + bx, cy + by); ctx.rotate(-S.roll);
     const off = S.pitch * pxPerDeg;
     ctx.beginPath();
     ctx.moveTo(-W * 0.46, off); ctx.lineTo(-W * 0.1, off);
@@ -740,18 +783,18 @@
     ctx.restore();
     // ---- velocity vector: where the jet is actually GOING, not pointing.
     // The gap between it and the boresight cross is the whole point of a HUD.
-    const vvx = cx + clamp(S.slipDeg, -14, 14) * pxPerDeg;
-    const vvy = cy + clamp(S.aoa, -18, 18) * pxPerDeg;
+    const vvx = cx + bx + clamp(S.slipDeg, -14, 14) * pxPerDeg;
+    const vvy = cy + by + clamp(S.aoa, -18, 18) * pxPerDeg;
     ctx.beginPath();
     ctx.arc(vvx, vvy, 11, 0, TAU);
     ctx.moveTo(vvx - 11, vvy); ctx.lineTo(vvx - 26, vvy);
     ctx.moveTo(vvx + 11, vvy); ctx.lineTo(vvx + 26, vvy);
     ctx.moveTo(vvx, vvy - 11); ctx.lineTo(vvx, vvy - 22);
     ctx.stroke();
-    // ---- boresight gun cross (fixed) ----
+    // ---- boresight gun cross (fixed to the airframe) ----
     ctx.beginPath();
-    ctx.moveTo(cx - 16, cy - H * 0.2); ctx.lineTo(cx + 16, cy - H * 0.2);
-    ctx.moveTo(cx, cy - H * 0.2 - 12); ctx.lineTo(cx, cy - H * 0.2 + 12);
+    ctx.moveTo(cx + bx - 16, cy + by - H * 0.2); ctx.lineTo(cx + bx + 16, cy + by - H * 0.2);
+    ctx.moveTo(cx + bx, cy + by - H * 0.2 - 12); ctx.lineTo(cx + bx, cy + by - H * 0.2 + 12);
     ctx.stroke();
     // ---- speed box (left) / altitude box (right) ----
     ctx.lineWidth = 2;

@@ -55,8 +55,11 @@
    ground, side), rig.muzzleWorld(out, shot), rig.fire(shot), rig.canFire(shot)
    (bays / gun door open, one bomb per mark), rig.damage(vs, res),
    def.animate(veh, dt, ctx), def.moves(veh, tgt, ctx) (YOUR weapon for the
-   mark), def.tactics. rig.pose({ bay, gun, gear }) stages the doors for a
-   studio shot.
+   mark), def.tactics. rig.pose({ bay, gun, gear, canopy }) stages the doors for a
+   studio shot; rig.canopy(t) opens the hinged canopy (a host's boarding),
+   rig.rearm() puts the stores back. The pilot is his own node
+   (group.userData.pilot, tagged crewFigure) so a host can empty a parked
+   jet; veh.flownBy === "player" lights the burner off ctx.throttle.
 
    Every geometry and material is built once per page and shared; per jet:
    one group of meshes, one InstancedMesh for the SDBs, two plume materials,
@@ -388,7 +391,14 @@
     // =================================================================
     const CAN = [[5.15, 0.28, 0.03], [4.75, 0.41, 0.27], [4.15, 0.47, 0.48], [3.45, 0.48, 0.60], [2.75, 0.46, 0.55], [2.15, 0.40, 0.38], [1.75, 0.26, 0.17], [1.48, 0.05, 0.02]];
     function canY(z) { return 2.34 + (5.15 - z) * 0.012; }
-    put("body", K.loft(CAN.map(function (c) { return { z: c[0], y: canY(c[0]), w: c[1], t: c[2], b: 0.06, p: 2.25 }; }), { n: 26 }), null, "glass");
+    // the canopy is ONE piece hinged at its front edge (the F-35's opens
+    // upward from the windscreen arch, it does not slide): its glass and its
+    // frame ride the "canopy" node, which swings about the hinge line
+    node("canopy", [0, canY(5.15) + 0.02, 5.15]);
+    // the pilot is his own node so a host can seat or empty the jet (a
+    // parked F-35 in the city has nobody in it)
+    node("pilot", [0, 0, 0]);
+    put("canopy", K.loft(CAN.map(function (c) { return { z: c[0], y: canY(c[0]), w: c[1], t: c[2], b: 0.06, p: 2.25 }; }), { n: 26 }), null, "glass");
     {
       const fr = [];
       // the sill both sides, and the bow between windscreen and canopy
@@ -408,17 +418,17 @@
         }
         for (let k = 0; k < P.length - 1; k++) fr.push(rod(P[k], P[k + 1], z > 4 ? 0.035 : 0.025, 5));
       });
-      put("body", fr, { paint: 0.82 });
+      put("canopy", fr, { paint: 0.82 });
     }
     // the cockpit inside: coaming, panel (one big touchscreen), the US16E seat, the pilot in a Gen III HMDS helmet
     put("body", [at(box(0.70, 0.14, 0.45), 0, 2.36, 4.55), at(box(0.62, 0.30, 0.06), 0, 2.30, 4.33, 0.35)], C.dark);
     put("body", at(box(0.52, 0.17, 0.03), 0, 2.33, 4.30, 0.35), 0x203040, "lamp");
     put("body", [at(box(0.54, 0.12, 0.56), 0, 2.02, 3.40), at(box(0.54, 0.80, 0.15), 0, 2.42, 3.02, -0.22), at(box(0.40, 0.22, 0.18), 0, 2.76, 2.92, -0.22),
       at(box(0.06, 0.36, 0.5), 0.29, 2.20, 3.30), at(box(0.06, 0.36, 0.5), -0.29, 2.20, 3.30)], C.seat);
-    put("body", [at(box(0.40, 0.52, 0.26), 0, 2.38, 3.20, -0.18), rod([0.13, 2.10, 3.30], [0.12, 1.95, 3.85], 0.07, 6), rod([-0.13, 2.10, 3.30], [-0.12, 1.95, 3.85], 0.07, 6),
+    put("pilot", [at(box(0.40, 0.52, 0.26), 0, 2.38, 3.20, -0.18), rod([0.13, 2.10, 3.30], [0.12, 1.95, 3.85], 0.07, 6), rod([-0.13, 2.10, 3.30], [-0.12, 1.95, 3.85], 0.07, 6),
       rod([0.22, 2.56, 3.20], [0.18, 2.25, 3.62], 0.05, 6), rod([-0.22, 2.56, 3.20], [-0.18, 2.25, 3.62], 0.05, 6)], C.suit);
-    put("body", at(new THREE.SphereGeometry(0.15, 14, 10), 0, 2.74, 3.27), C.helmet);
-    put("body", [at(box(0.24, 0.09, 0.06), 0, 2.72, 3.41), at(box(0.06, 0.05, 0.12), 0, 2.88, 3.30)], C.visor);
+    put("pilot", at(new THREE.SphereGeometry(0.15, 14, 10), 0, 2.74, 3.27), C.helmet);
+    put("pilot", [at(box(0.24, 0.09, 0.06), 0, 2.72, 3.41), at(box(0.06, 0.05, 0.12), 0, 2.88, 3.30)], C.visor);
 
     // =================================================================
     //  SENSORS + FITTINGS: EOTS, DAS, the boom receptacle, antennas, gun
@@ -706,7 +716,7 @@
       group: root, body: body, nodes: N, lamps: lamps, aims: aims, jdams: jdams, sdb: sdb, sdbPos: sdbPos, sdbOrder: sdbOrder,
       ab: ab, abOuterM: abOuterM, abCoreM: abCoreM, dias: dias, glowM: glowM, flags: flags,
       clock: 0, px: 0, py: 0, pz: 0, h0: 0, r0: 0, p0: 0, vx: 0, vy: 0, vz: 0, seeded: false,
-      cr: 0, cp: 0, cy: 0, bay: 0, gunDoor: 0, gearK: 1, abK: 0, rec: 0, bayHold: -1, gunHold: -1,
+      cr: 0, cp: 0, cy: 0, bay: 0, gunDoor: 0, gearK: 1, abK: 0, canopyK: 0, rec: 0, bayHold: -1, gunHold: -1,
       nA: 0, nJ: 0, nS: 0, nG: 0, load: null, veh: null, dead: false, broken: false,
       hurt: 0, puffT: 0, fallers: null, flight: [], flightN: 0,
       force: null,
@@ -730,6 +740,15 @@
         return !!m;
       },
       setNation: function (id, design) { return rig.mark(id, null, { flag: design }); },
+      // the canopy, 0 shut .. 1 open (the boarding arc drives it frame by frame)
+      canopy: function (t) { R.canopyK = clamp(+t || 0, 0, 1); poseCanopy(R); },
+      // the stores back on their racks (a host's rearm: a jet landed at its base)
+      rearm: function () {
+        R.nA = 0; R.nJ = 0; R.nS = 0;
+        const m = new window.THREE.Matrix4();
+        for (let i = 0; i < 8; i++) R.sdb.setMatrixAt(i, m.makeTranslation(R.sdbPos[i][0], R.sdbPos[i][1], R.sdbPos[i][2]));
+        R.sdb.instanceMatrix.needsUpdate = true;
+      },
       // studio: hold the doors / gear where asked ({ bay, gun, gear } 0..1), null = let the flight decide
       pose: function (o) { R.force = o || null; tick(R, true, 0, null, R.veh); },
       state: R,
@@ -738,6 +757,21 @@
     root.userData.rig = rig;
     root.userData.aircraftDims = { family: "F-35A", length: DIM.length, span: DIM.span, height: DIM.height, bodyW: 2.9, bodyL: DIM.length };
     root.userData.crewSeats = [{ job: "Pilot", x: 0, y: 2.14, z: 3.40, yaw: 0, cushionH: 0.42, floorBelow: 0.42 }];
+    /* THE HOST'S HANDLES (city/playeraircraft.js, aircraft_doors.js,
+       cockpit.js). `pilot` is this jet's own crew figure (suit, HMDS
+       helmet): a host shows him when somebody is flying it and hides him in
+       the seat view. `canopy` is the hinged canopy node, posed through
+       canopyPose(t) (0 shut, 1 open), and canopySill is where you stand to
+       climb in (the port side, where the F-35's boarding ladder hangs). The
+       cockpit view's eye is the helmet's visor line; the cockpit costume is
+       the F-35's own (one wide touchscreen, a head-mounted display, the
+       side-stick on the right). */
+    N.pilot.userData.crewFigure = true;
+    root.userData.pilot = N.pilot;
+    root.userData.canopy = N.canopy;
+    root.userData.canopyPose = function (t) { rig.canopy(t); };
+    root.userData.canopySill = { x: 1.75, z: 3.3, out: 2.6 };
+    root.userData.cockpit = { eye: { x: 0, y: 2.72, z: 3.36 } };
     if (ctx && (ctx.nation || ctx.flag)) rig.mark(ctx.nation || ctx.flagId, ctx.ground, { flag: ctx.flag });
     tick(R, true, 0, null, null);
     return { group: root, rig: rig, footW: DIM.span, footL: DIM.length, height: DIM.height };
@@ -894,6 +928,11 @@
   }
   const _want = { bay: false, gun: false };
 
+  // the canopy swings up about its front hinge, eased like a strut does
+  function poseCanopy(R) {
+    const k = R.canopyK, e = k * k * (3 - 2 * k);
+    R.nodes.canopy.rotation.x = 0.85 * e;
+  }
   // ---- the rig: every moving part, once per animate (the battle clock) --------------------
   function tick(R, snap, dt, ctx, veh) {
     if (!(dt > 0)) dt = 0;
@@ -926,7 +965,10 @@
     wantDoors(R, veh, ctx, _want);
     let bayT = (_want.bay || R.clock < R.bayHold) ? 1 : 0, gunT = (_want.gun || R.clock < R.gunHold) ? 1 : 0;
     let gearT = agl < 8 && !dead ? 1 : 0;
-    if (F) { if (F.bay != null) bayT = F.bay; if (F.gun != null) gunT = F.gun; if (F.gear != null) gearT = F.gear; }
+    if (F) {
+      if (F.bay != null) bayT = F.bay; if (F.gun != null) gunT = F.gun; if (F.gear != null) gearT = F.gear;
+      if (F.canopy != null) { R.canopyK = clamp(F.canopy, 0, 1); poseCanopy(R); }
+    }
     if (dead) { bayT = R.bay; gunT = R.gunDoor; }
     if (snap) { R.bay = bayT; R.gunDoor = gunT; R.gearK = gearT; }
     else {
@@ -950,11 +992,16 @@
       N.stabL.rotation.x = pit + ail * 0.4; N.stabR.rotation.x = -pit + ail * 0.4;
       N.rudL.rotation.x = yaw; N.rudR.rotation.x = yaw;
     }
-    // ---- the engine: the nozzle throat glows with power, afterburner in a climb or going home
+    // ---- the engine: the nozzle throat glows with power, afterburner in a climb or going home.
+    // The player at the stick (a city host's flight, veh.flownBy) lights it
+    // with his own throttle: the last tenth of the travel is the burner
+    // detent, and on the ground at idle the throat barely glows.
+    const you = !!(veh && veh.flownBy === "player");
+    const pthr = you ? clamp(ctx && ctx.throttle != null ? +ctx.throttle || 0 : 0, 0, 1) : 0;
     const climbing = ctx && ctx.air && (ctx.gamma > 0.12 || (veh && veh.egress));
-    const abT = !dead && climbing ? 1 : 0;
+    const abT = !dead && (you ? pthr > 0.9 && agl > 0.5 : climbing) ? 1 : 0;
     R.abK += clamp(abT - R.abK, -dt * 1.5, dt * 2.5);
-    const thr = dead ? 0 : (ctx && ctx.air ? 0.55 + 0.45 * R.abK : 0.15);
+    const thr = dead ? 0 : (you ? 0.12 + 0.6 * pthr + 0.28 * R.abK : (ctx && ctx.air ? 0.55 + 0.45 * R.abK : 0.15));
     R.glowM.color.setRGB(0.06 + 0.8 * thr * thr, 0.03 + 0.38 * thr * thr * thr, 0.02 + 0.1 * R.abK);
     R.ab.visible = R.abK > 0.03;
     if (R.ab.visible) {

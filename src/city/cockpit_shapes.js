@@ -1362,11 +1362,19 @@
       // is what keeps CBZ.cockpitSightAudit()'s raycast honest (the side
       // panes carry userData.glass for the same reason).
       hudMesh.userData.seeThrough = true;
-      const brGeo = taper(hW + 0.06, 0.05, 0.1, { top: 0.7, bot: 0.9 });
-      const brY = hy - hH / 2 - 0.03, brZ = hz + 0.01;
-      // the combiner's mount is part of the canopy structure, not a prop
-      if (V2) frameW.add(brGeo, ex, brY, brZ);
-      else { const bracket = put(brGeo, mFrame); bracket.position.set(ex, brY, brZ); bracket.name = "cockpit-hud-bracket"; }
+      if (hd.hmd) {
+        // A HELMET DISPLAY has no glass in the cockpit: the pane rides the
+        // eye (cockpit_view.js poses it every frame), so no bracket, no recline
+        hudMesh.userData.hmd = true;
+        hudMesh.name = "cockpit-hmd";
+        hudMesh.rotation.set(0, Math.PI, 0);
+      } else {
+        const brGeo = taper(hW + 0.06, 0.05, 0.1, { top: 0.7, bot: 0.9 });
+        const brY = hy - hH / 2 - 0.03, brZ = hz + 0.01;
+        // the combiner's mount is part of the canopy structure, not a prop
+        if (V2) frameW.add(brGeo, ex, brY, brZ);
+        else { const bracket = put(brGeo, mFrame); bracket.position.set(ex, brY, brZ); bracket.name = "cockpit-hud-bracket"; }
+      }
     }
 
     // ---- and finally the ONE canopy structure everything above fed ---------

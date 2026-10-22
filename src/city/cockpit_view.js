@@ -118,6 +118,7 @@
   let oScene = null, oCam = null, oSun = null, oAmb = null, wrapped = false;
   const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
   const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _e = new THREE.Euler();
+  const _qh = new THREE.Quaternion(), _eh = new THREE.Euler();
 
   function ensureOverlay() {
     if (oScene) return oScene;
@@ -413,6 +414,20 @@
     // ---- eye position, body-local ---------------------------------------
     const eye = rec.spec.eye;
     _v.set(eye.x + head.x, eye.y + head.y + head._g + head.buzz, eye.z + head.z);
+
+    // ---- THE HELMET DISPLAY (the F-35's HMDS): the symbology pane rides the
+    // eye, straight ahead of wherever you look, and the aircraft's own marks
+    // on it (ladder, velocity vector, gun cross) are offset by the head turn
+    // so they stay on the aircraft's line (cockpit.js paintPanel reads it)
+    const hmd = rec.parts && rec.parts.hudMesh;
+    if (hmd && hmd.userData.hmd) {
+      const d = fin(rec.spec.hud && rec.spec.hud.dist, 0.5);
+      _qh.setFromEuler(_eh.set(hp, hyC, 0, "YXZ"));
+      hmd.quaternion.copy(_qh);
+      hmd.position.set(0, 0, -d).applyQuaternion(_qh).add(_v);
+      const L = rec.hmdLook || (rec.hmdLook = { yaw: 0, pitch: 0 });
+      L.yaw = hy; L.pitch = hp;
+    }
 
     // ---- overlay camera lives in the same body-local frame --------------
     if (overlayWanted() && oCam) {

@@ -1403,7 +1403,7 @@ document.body.appendChild(b);}}catch(e){}})();
      their gear/surface/door/light animation and a distance LOD. Before every
      module that parks, flies or boards one. -->
 <script src="src/city/airframe_kit.js?v=af0929b"></script>
-<script src="src/city/airframes.js?v=af0929b"></script>
+<script src="src/city/airframes.js?v=f35one1022"></script>
 <script src="src/city/island_airport.js?v=ijkl1022"></script>
 <!-- THE AIRFIELD KIT: CBZ.buildAirfield draws EVERY airfield from one spec
      (runway + ICAO paint, lights, approach lights, PAPI, taxiways, nose-in
@@ -1419,8 +1419,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ONE BASE PLANNER + KIT (world/basekit.js): every military base's layout and its hangars, shelters, tower, fuel farm, HESCO. Before island_military (Fort Brandt is laid out by it). -->
 <script src="src/world/basekit.js?v=lodlight1012"></script>
 <!-- ONE ARMY (city/army.js): the door to NPC War's battle core, sim and unit kit. Only the API + loader ride the page; the unit files and the war engine load when a force or Fort Brandt's motor pool needs them. -->
-<script src="src/city/army.js?v=rounds1013"></script>
-<script src="src/city/island_military.js?v=speed1014"></script>
+<script src="src/city/army.js?v=f35one1022"></script>
+<!-- ONE UNIT, BUILT FOR THE CITY (city/unitmodels.js): CBZ.milModels, the one path that builds a units/vehicles machine outside the battle (Fort Brandt, the player's F-35, the airbase, The Isles' army). After army.js (its loader), before island_military. -->
+<script src="src/city/unitmodels.js?v=f35one1022"></script>
+<script src="src/city/island_military.js?v=f35one1022"></script>
 <script src="src/city/biome_desert.js?v=sink1011"></script>
 <script src="src/city/biome_forest.js?v=noblock1013"></script>
 <script src="src/city/biome_farmland.js?v=layout2b"></script>
@@ -1517,7 +1519,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/factions.js?v=verbs2b"></script>
 <script src="src/city/gangs.js?v=rounds1013m"></script>
 <script src="src/city/social.js?v=voice1022"></script>
-<script src="src/city/realestate.js?v=tap0929"></script>
+<script src="src/city/realestate.js?v=f35one1022"></script>
 <script src="src/city/view.js?v=trunk1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
@@ -1597,8 +1599,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carlod.js?v=mrg10200048"></script>
 <script src="src/city/vehicles.js?v=mmisleotrunk1"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
-<script src="src/city/playerair.js?v=phone1001"></script>
-<script src="src/city/playeraircraft.js?v=mlandblisles1"></script>
+<script src="src/city/playerair.js?v=f35one1022"></script>
+<script src="src/city/playeraircraft.js?v=f35one1022"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1609,10 +1611,10 @@ document.body.appendChild(b);}}catch(e){}})();
      is INSIDE the world near plane. cockpit_panel (2D glass) and
      cockpit_shapes (geometry — needs CBZ.taperBox from world/carfx.js:353)
      must precede cockpit.js; cockpit_view.js must be last of the four. -->
-<script src="src/city/cockpit_panel.js?v=cockpit1"></script>
-<script src="src/city/cockpit_shapes.js?v=cockpit1x0"></script>
-<script src="src/city/cockpit.js?v=af0929"></script>
-<script src="src/city/cockpit_view.js?v=nocine1011"></script>
+<script src="src/city/cockpit_panel.js?v=f35one1022"></script>
+<script src="src/city/cockpit_shapes.js?v=f35one1022"></script>
+<script src="src/city/cockpit.js?v=f35one1022"></script>
+<script src="src/city/cockpit_view.js?v=f35one1022"></script>
 <!-- BAILOUT: stepping out of a FLYING aircraft. exitAircraft() was written for
      a parked machine — it zeroes attitude and velocity and forces onGround, so
      bailing at 500m teleported the plane flat and landed it. This file owns
@@ -1630,12 +1632,12 @@ document.body.appendChild(b);}}catch(e){}})();
      control hands over (and the reverse on exit). Wired behind the existing
      board/enter APIs — militaryvehicles.js + playeraircraft.js call into it,
      island_airport.js panel/airstair easing honours its open flag. -->
-<script src="src/city/aircraft_doors.js?v=island1014"></script>
+<script src="src/city/aircraft_doors.js?v=f35one1022"></script>
 <!-- THE DISASTER ISLAND'S REAL MACHINES: a share of the parked cars become real
      cars (vehicles.js), a rooftop helipad with a flyable helicopter
      (playeraircraft.js CBZ.airParkFlyable), the island's weather fed into both.
      After vehicles.js, playeraircraft.js, bailout.js and aircraft_doors.js. -->
-<script src="src/world/island_vehicles.js?v=islesold1022"></script>
+<script src="src/world/island_vehicles.js?v=f35one1022"></script>
 <!-- THE ARCHIPELAGO (mode "archipelago"): the disaster island's package built
      many times over on one sea, kilometres apart, streamed in as you near
      each one and dropped behind you. archipelago_map.js is the map as data;
@@ -1898,7 +1900,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_fitkit.js?v=stutter1022"></script>
 <script src="src/world/island_lots.js?v=stutter1022"></script>
 <script src="src/world/island_dealers.js?v=misleopisleso"></script>
-<script src="src/world/island_civic.js?v=stutter1022"></script>
+<script src="src/world/island_civic.js?v=f35one1022"></script>
 <script src="src/world/island_homes.js?v=mislesostutte"></script>
 <script src="src/world/island_offices.js?v=stutter1022"></script>
 <!-- THE ISLES REMEMBER (world/isles_save.js): the archipelago's slice of the one
@@ -1948,7 +1950,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
      seam above), the bunker-buster and the nuke. Conventional blasts use the
      wrapped explosion chain; the nuke uses impactbus's analytic field. -->
-<script src="src/city/strategic.js?v=mem1014"></script>
+<script src="src/city/strategic.js?v=f35one1022"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=cd0929"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
@@ -1999,7 +2001,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/regionlife.js?v=street1009"></script>
 <script src="src/city/modshop.js?v=cd0929"></script>
 <script src="src/city/stuntjumps.js?v=metro0929"></script>
-<script src="src/city/storage.js?v=tap0929"></script>
+<script src="src/city/storage.js?v=f35one1022"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
      at its own dock. Buying reuses zillow.js's cash AND financed paths (no 7th
@@ -2081,7 +2083,7 @@ document.body.appendChild(b);}}catch(e){}})();
      people running real verbs, Holler is the social feed where a post is the
      act); phone.js draws it in 3D on a canvas screen and routes taps onto
      the glass. Also the city's one text sink (CBZ.cityPhoneNotify). -->
-<script src="src/city/phone_apps.js?v=cmd1022p"></script>
+<script src="src/city/phone_apps.js?v=f35one1022"></script>
 <script src="src/city/phone.js?v=phone2b"></script>
 <script src="src/city/killfeed.js?v=street1009"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death

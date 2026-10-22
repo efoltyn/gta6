@@ -18,7 +18,8 @@
      bizjet       super-midsize business jet  20.92 x 21.00 m, h  6.10
      single       C172-class high-wing single  8.28 x 11.00 m, h  2.72
      heli         light twin helicopter        rotor 9.44 m (civil, police,
-                  news, medical, VIP and the player's own gunship variant)
+                  news, medical and VIP; the player's armed helicopter is
+                  the AH-64, units/vehicles/ah64_apache.js)
    Each has a lofted fuselage with its real nose and tail cone and REAL window
    holes (cells cut through the skin with a reveal and glass), NACA-section
    wings with the right planform, flaps and ailerons on hinges, turbofans with
@@ -1521,9 +1522,9 @@
     const S = stations.map(function (s) { return { le: [s.o[0] + C3[0] * s.c / 2, s.o[1] + C3[1] * s.c / 2, s.o[2] + C3[2] * s.c / 2], c: s.c, t: s.t / s.c }; });
     return KT.wing(S, { M: 14, chordDir: [-C3[0], -C3[1], -C3[2]], up: T3 });
   }
-  // variant: "civil" | "police" | "news" | "medical" | "vip" | "gunship"
+  // variant: "civil" | "police" | "news" | "medical" | "vip"
   function heliTemplate(variant) {
-    const vip = variant === "vip", armed = variant === "gunship";
+    const vip = variant === "vip";
     const wheels = vip;
     const C = new Ctx("heli-" + variant);
     const H = KT.body(heliStations(vip));
@@ -1645,15 +1646,6 @@
     } else if (variant === "medical") {
       C.put("all", "metal", KT.xf(KT.rbox(0.18, 0.22, 0.5, 0.04, 2), -0.9, 0.6, 0.2));          // hoist
       C.put("all", "dark", KT.tube([[-0.9, 0.6, 0.2], [-1.35, 0.8, 0.2]], 0.04, 4, 6));
-    } else if (armed) {
-      for (const s of [1, -1]) {
-        C.put("all", "metal", plate([{ o: [s * 0.95, 0.00, 0.35], c: 0.95, t: 0.16 }, { o: [s * 1.95, 0.08, 0.28], c: 0.70, t: 0.11 }], [0, 0, 1], [0, 1, 0]));
-        const POD = KT.body([[1.30, -0.28, 0.03, 0.03, 0.03, 2], [1.05, -0.28, 0.22, 0.22, 0.22, 2], [-0.30, -0.28, 0.25, 0.25, 0.25, 2], [-0.55, -0.28, 0.20, 0.20, 0.20, 2]], s * 1.62);
-        C.put("all", "dark", KT.patch(POD, 1.30, -0.55, -HP, 3 * HP, 0, 16, 14));
-        C.put("all", "dark", KT.xf(new THREE.BoxGeometry(0.1, 0.22, 0.6), s * 1.62, -0.08, 0.35));
-      }
-      C.put("all", "dark", KT.xf(new THREE.SphereGeometry(0.24, 16, 12), 0, -0.48, 2.85));
-      C.put("all", "metal", KT.xf(new THREE.CylinderGeometry(0.045, 0.05, 0.9, 10), 0, -0.52, 3.3, HP, 0, 0));
     }
     // interior: floor, two crew seats up front, passenger bench/club behind,
     // panel under the glareshield (the live panel replaces it in first person)
@@ -1715,13 +1707,13 @@
     C.movers.push(r1, r2, disc, t1, t2);
     // lights: port red (+X), starboard green, white tail, beacons, strobes
     lights(C, {
-      navR: [[armed ? 2.0 : 1.12, armed ? 0.08 : 0.55, armed ? 0.28 : -0.3]], navG: [[armed ? -2.0 : -1.12, armed ? 0.08 : 0.55, armed ? 0.28 : -0.3]],
+      navR: [[1.12, 0.55, -0.3]], navG: [[-1.12, 0.55, -0.3]],
       navW: [[0, 1.0, -6.5]], beacon: [[0, 1.3, -2.2 - (vip ? 0.45 : 0)], [0, -0.78, 0.2]], strobe: [[0, 1.95, FZ - 0.6], [1.13, 0.95, SZ - 0.1], [-1.13, 0.95, SZ - 0.1]],
       land: [[0.2, -0.72, 2.6], [-0.2, -0.72, 2.6]],
     });
     const out = C.finish();
     out.meta.body = H;
-    out.meta.heli = { hubY: HUBY, R: Rr, vip: vip, armed: armed, wheels: wheels };
+    out.meta.heli = { hubY: HUBY, R: Rr, vip: vip, wheels: wheels };
     out.meta.cabin = { floorY: -0.5, seats: paxSeats, pilots: [{ x: -0.42, z: 1.55, id: "seat-captain", job: "pilot" }, { x: 0.42, z: 1.55, id: "seat-firstofficer", job: "co-pilot" }], cushion: 0.42, pilotCushion: 0.42 };
     out.meta.dims = { family: "light twin helicopter", length: 10.14 + 0.45, span: Rr * 2, height: 3.0, fuselage: 2.2 };
     return out;
@@ -2036,7 +2028,7 @@
     hideDeck: function (grp, on) { const r = rigOf(grp); if (r) { r.deckHidden = !!on; if (r.deck) r.deck.visible = !on && !!r.lodInt; } },
     cabin: cabinSpec, toRoot: toRoot, dispose: dispose, lodTick: lodTick,
     template: template, types: Object.keys(TYPES).concat(["heli"]), liveries: LIVERIES, livery: livery,
-    heliVariants: ["civil", "police", "news", "medical", "vip", "gunship"],
+    heliVariants: ["civil", "police", "news", "medical", "vip"],
     dims: DIMS, NEAR_R: NEAR_R, INTERIOR_R: INTERIOR_R,
   };
 })();

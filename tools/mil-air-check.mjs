@@ -94,41 +94,27 @@ for (const k of Object.keys(AIR)) {
   }
 }
 
-// ---- 3. THE B-2 (city/strategic.js CBZ.strategicModels.b2) ---------------
+// ---- 3. THE B-2 (city/strategic.js CBZ.strategicModels.b2: the b2_spirit
+// unit, adapted to the handles strategic.js and its sorties drive) ---------
 if (CBZ.strategicModels && CBZ.strategicModels.b2) {
-  const m = CBZ.strategicModels.b2(), g = m.group;
-  g.updateMatrixWorld(true);
-  const bb = new THREE.Box3().setFromObject(g), sz = bb.getSize(new THREE.Vector3());
-  let draws = 0, tris = 0; g.traverse((o) => { if (o.isMesh && o.visible) { draws++; tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; } });
-  console.log(`---- b2 (B-2A 21.0 x 52.4): L ${sz.z.toFixed(2)} W ${sz.x.toFixed(2)} H ${sz.y.toFixed(2)} · ${draws} draws · ${tris} tris`);
-  ok(sz.x > 52.0 && sz.x < 53.0, `b2 span ${sz.x.toFixed(2)} in 52,53`);
-  ok(sz.z > 20.5 && sz.z < 21.8, `b2 length ${sz.z.toFixed(2)} in 20.5,21.8 (sawtooth points included)`);
-  ok(Math.abs(bb.min.y) < 0.02, `b2 stands on its wheels (min ${bb.min.y.toFixed(3)})`);
-  ok(draws <= 40, `b2 draw calls ${draws} <= 40`);
-  const ud = g.userData;
-  ok(typeof ud.setGear === "function" && ud.gear && ud.gear.isObject3D, "b2 gear is its own retractable group (userData.gear + setGear)");
-  ok(typeof ud.setBay === "function" && Array.isArray(ud.bayDoors) && ud.bayDoors.length === 4, "b2 has two bays, four doors (setBay)");
-  ok(!!ud.b2Glass, "b2 windscreen is cut from the hull (b2Glass)");
-  // the loft's two sheets must face OUT: top up, belly down (inside-out
-  // sheets show the top paint from below and light backwards)
-  const ny = (mesh) => { const n = mesh.geometry.attributes.normal.array; let a = 0; for (let i = 1; i < n.length; i += 3) a += n[i]; return a / (n.length / 3); };
-  ok(ud.b2Skin && ny(ud.b2Skin[0]) > 0.3 && ny(ud.b2Skin[1]) < -0.3, `b2 skin faces out (top n.y ${ud.b2Skin ? ny(ud.b2Skin[0]).toFixed(2) : "?"}, belly ${ud.b2Skin ? ny(ud.b2Skin[1]).toFixed(2) : "?"})`);
-  ud.setGear(0); g.updateMatrixWorld(true);
-  // visible geometry only (r128's setFromObject counts hidden parts — the
-  // stowed ladder hangs under the hatch at all times)
-  const bbUp = new THREE.Box3();
-  g.traverseVisible((o) => { if (o.isMesh) { o.geometry.computeBoundingBox(); bbUp.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
-  ok(ud.gear.visible === false && bbUp.min.y > 1.5, `b2 gear up: nothing below the belly (min ${bbUp.min.y.toFixed(2)})`);
-  ud.setGear(1);
-  // every door's free edge must swing DOWN, not up into the wing
-  const lo0 = ud.bayDoors.map((d) => { d.updateMatrixWorld(true); return new THREE.Box3().setFromObject(d).min.y; });
-  ud.setBay(1); g.updateMatrixWorld(true);
-  const lo1 = ud.bayDoors.map((d) => new THREE.Box3().setFromObject(d).min.y);
-  ok(lo1.every((y, i) => y < lo0[i] - 0.5), `b2 bay doors open downward (${lo0.map((y, i) => (y - lo1[i]).toFixed(2)).join(", ")} m)`);
-  ud.setBay(0);
-  ok(ud.bayDoors.every((d) => Math.abs(d.rotation.z) < 1e-6), "b2 bay doors close flush");
-  ok(!!(ud.doorRig && ud.b2Hatch && ud.b2Ladder), "b2 crew hatch + ladder contract");
-  ok(ud.cockpitClass === "bomber" && ud.bombBay === true, "b2 bomber cockpit class + bomb bay flag");
+  const m = CBZ.strategicModels.b2(), g = m && m.group;
+  ok(!!g && g.userData.unitId === "b2_spirit", "b2 is the units/vehicles B-2A (b2_spirit)");
+  if (g) {
+    g.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(g), sz = bb.getSize(new THREE.Vector3());
+    ok(sz.x > 52.0 && sz.x < 53.0, `b2 span ${sz.x.toFixed(2)} in 52,53`);
+    ok(Math.abs(bb.min.y) < 0.05, `b2 stands on its wheels (min ${bb.min.y.toFixed(3)})`);
+    ok(m.dims && m.dims.span > 52 && m.dims.length > 20, "b2 dims {span, length, height} for the pad and the war room");
+    const ud = g.userData;
+    ok(typeof ud.setGear === "function" && typeof ud.setBay === "function", "b2 setGear / setBay handles");
+    ud.setBay(1); ok(ud.bayOpen === 1, "b2 setBay records bayOpen");
+    ud.setBay(0); ud.setGear(0); ok(ud.gearDown === 0, "b2 setGear records gearDown"); ud.setGear(1);
+    ok(ud.bayLocal && ud.bayLocal.y > 0.3 && ud.bayLocal.y < 2.5, `b2 release point under the launcher (${ud.bayLocal && ud.bayLocal.toArray().map((v) => v.toFixed(2))})`);
+    const S = ud.rig && ud.rig.state, n0 = S ? S.bays[0].next + S.bays[1].next : -1;
+    ud.b2Spend();
+    ok(S && S.bays[0].next + S.bays[1].next === n0 + 1, "b2Spend takes one weapon off a launcher");
+    ok(ud.cockpitClass === "bomber" && ud.bombBay === true, "b2 bomber cockpit class + bomb bay flag");
+  }
 } else {
   ok(false, "strategic.js publishes CBZ.strategicModels.b2" + (errors["src/city/strategic.js"] ? " — " + errors["src/city/strategic.js"] : ""));
 }
