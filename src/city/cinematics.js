@@ -123,6 +123,105 @@
   }
 
   CBZ.cinePlay = startScene;
+
+  /* ---- THE WRONG ANSWER: he draws and shoots you (owner 2026-10-22: "one of
+     the cinematic prompt answers might make the person immediately draw his
+     gun and shoot you").
+
+     CBZ.cinematicShoot(asker, target?, opts) -> handle
+       target     the player by default (or any ped)
+       opts.drawn your gun was already up when you answered: you get a beat
+                  to fire first (~0.85 s). Holstered, you get his draw
+                  (~0.35 s), and nothing in this game draws that fast.
+       opts.followers  men who open fire with him after his first round
+       opts.window / opts.rounds / opts.dmg  override the beat, the rounds
+                  (2) and the damage of each (point-blank pistol, 70)
+     His hand goes to the holster at once and he squares up; when the beat
+     is out he fires real rounds: his muzzle, his gun's voice, the tracer, the
+     line-of-fire test, and the player's ONE damage path (cityHurtPlayer:
+     armour, wounds, death.js). Kill him, put him down or break the line in
+     that beat and he never fires. After it he is in a plain gunfight (his
+     rage is on you), like any armed man. A scene that is still running is
+     ended on the first round: the shot is never under a held camera. */
+  const SHOTS = [];
+  function shotAt(a) {
+    const t = a.target;
+    if (!t || !t.pos) return null;
+    return { x: t.pos.x, y: (t.pos.y || 0) + (t === CBZ.player || t.isPlayer ? 1.45 : 1.35), z: t.pos.z };
+  }
+  CBZ.cinematicShoot = function (asker, target, opts) {
+    if (!asker || asker.dead || !asker.pos) return null;
+    opts = opts || {};
+    const P = CBZ.player;
+    const tgtActor = target || (CBZ.city && CBZ.city.playerActor) || P;
+    const tgt = target || P;
+    if (!tgt) return null;
+    // the gun comes out of the holster now
+    if (!asker.armed || !asker.weapon) { asker.armed = true; asker.weapon = asker.weapon || asker._beltGun || "Pistol"; }
+    if ((asker.ammo | 0) < 6) asker.ammo = 12;
+    if (CBZ.actorHolster) { try { CBZ.actorHolster(asker, false); } catch (e) {} }
+    if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(asker); } catch (e) {} }
+    asker.staffPost = null; asker.controlled = false; asker.pause = 0;
+    asker.rage = tgtActor; asker.state = "fight"; asker.aggr = Math.max(asker.aggr || 0, 0.95);
+    if (!target) asker.mem = P;
+    asker.attackCD = 9;                       // his rounds are ours until the beat is out
+    const h = {
+      asker: asker, target: tgt, t: 0, fired: 0, rounds: opts.rounds || 2, dmg: opts.dmg || 70,
+      window: opts.window != null ? opts.window : (opts.drawn ? 0.85 : 0.35), nextT: 0,
+      followers: (opts.followers || []).slice(), done: false, blockedT: 0,
+    };
+    h.nextT = h.window;
+    SHOTS.push(h);
+    return h;
+  };
+  function fireRound(h) {
+    const a = h.asker, to = shotAt(h);
+    if (!to) return false;
+    if (CBZ.actorAimAt) { try { CBZ.actorAimAt(a, h.target); } catch (e) {} }
+    if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(a.pos.x, (a.pos.y || 0) + 1.4, a.pos.z, to.x, to.y, to.z)) return false;
+    const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(a) : { x: a.pos.x, y: (a.pos.y || 0) + 1.4, z: a.pos.z };
+    const P = CBZ.player, isP = h.target === P;
+    if (CBZ.tracer) { try { CBZ.tracer(from, to, { muzzleScale: 1.0, hit: true, shooter: a, weapon: a.weapon, targetActor: h.target }); } catch (e) {} }
+    if (CBZ.gunVoice) { try { CBZ.gunVoice(a.weapon, P ? Math.hypot(from.x - P.pos.x, from.z - P.pos.z) : 0); } catch (e) {} }
+    a.ammo = Math.max(0, (a.ammo | 0) - 1);
+    if (isP) {
+      if (CBZ.cityHurtPlayer) CBZ.cityHurtPlayer(h.dmg, a.pos.x, a.pos.z, "shot point-blank", h.fired === 0, a, false);
+    } else if (!h.target.dead) {
+      if (CBZ.cityKillPed) CBZ.cityKillPed(h.target, { attacker: a, fromX: a.pos.x, fromZ: a.pos.z, point: to, cal: 1 }, "shot");
+    }
+    return true;
+  }
+  CBZ.onUpdate(14.55, function (dt) {
+    for (let i = SHOTS.length - 1; i >= 0; i--) {
+      const h = SHOTS[i], a = h.asker;
+      // beaten to it: he is dead, down, tied, or you are already dead
+      const off = !a || a.dead || a.ko > 0 || a.restraint || a.surrender || !h.target || h.target.dead ||
+        (h.target === CBZ.player && CBZ.player.dead) || g.mode !== "city";
+      if (off || h.done) { if (a && !a.dead) a.attackCD = 0; SHOTS.splice(i, 1); continue; }
+      h.t += dt;
+      if (CBZ.actorAimAt) { try { CBZ.actorAimAt(a, h.target, dt); } catch (e) {} }
+      a.attackCD = 9;
+      if (h.t < h.nextT) continue;
+      if (CINE.playing) endScene(true);        // the camera is yours again before the round lands
+      if (!fireRound(h)) {
+        h.blockedT += dt;                      // no line (you got behind something): he moves on it
+        if (h.blockedT > 1.5) h.done = true;
+        continue;
+      }
+      if (h.fired++ === 0) {
+        for (let k = 0; k < h.followers.length; k++) {
+          const f = h.followers[k];
+          if (!f || f.dead) continue;
+          if (CBZ.actorHolster) { try { CBZ.actorHolster(f, false); } catch (e) {} }
+          f.staffPost = null; f.controlled = false; f.pause = 0;
+          f.rage = a.rage; f.state = "fight"; f.aggr = Math.max(f.aggr || 0, 0.95);
+          if (a.mem) f.mem = a.mem;
+        }
+      }
+      h.nextT = h.t + 0.2;
+      if (h.fired >= h.rounds) h.done = true;
+    }
+  });
   CBZ.cineAbort = function () { endScene(true); };
   // is a scene running right now? Combat/AI systems ask this before starting
   // their own staged beat so two directors can never fight over the lens.

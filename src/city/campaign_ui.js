@@ -1005,6 +1005,8 @@
         value: choice.value !== undefined ? choice.value : (choice.id !== undefined ? choice.id : i),
         onSelect: typeof choice.onSelect === "function" ? choice.onSelect : (typeof choice.callback === "function" ? choice.callback : null),
         dir: choice.dir === "up" || choice.dir === "left" || choice.dir === "right" ? choice.dir : null,
+        // the answer he shoots you for (CBZ.cinematicShoot, city/cinematics.js)
+        fatal: !!choice.fatal,
       };
     });
   }
@@ -1019,6 +1021,17 @@
     hideSubtitle();
     if (lineTimer) { clearTimeout(lineTimer); lineTimer = 0; }
     document.body.classList.remove("campaign-dialogue-active");
+    // A FATAL ANSWER: the man who asked goes for his gun the instant you say
+    // it (city/cinematics.js CBZ.cinematicShoot: a real draw and real rounds,
+    // and a split second to beat him if your own gun was already up)
+    if (runCallback && pending && result && result.fatal && CBZ.cinematicShoot) {
+      const m = pending.meta || {};
+      const asker = m.actor || pending.actor;
+      if (asker && !asker.dead) {
+        const drawn = typeof m.drawn === "boolean" ? m.drawn : !!(CBZ.cityHasGun && CBZ.cityHasGun());
+        try { CBZ.cinematicShoot(asker, null, { drawn: drawn, followers: m.followers || null }); } catch (e) {}
+      }
+    }
     if (runCallback && pending && result && result.onSelect) {
       try { result.onSelect(result.value, result); } catch (e) { setTimeout(function () { throw e; }, 0); }
     }
@@ -1158,6 +1171,11 @@
                   says what silence means: a line the asker says to it, a
                   function, or { line, as: "<choice id>" } to count it as one
                   of the answers.
+       fatal      a choice { fatal: true } is the answer the asker shoots you
+                  for: the moment it is picked he draws and fires
+                  (CBZ.cinematicShoot). meta.drawn says whether your gun was
+                  up when you answered (default: is it up now); meta.followers
+                  are the men who join him.
        input      pad d-pad up/left/right (systems/gamepad.js asks
                   CBZ.padPrompt; the pad drives nothing else while it is up),
                   arrows, W/A/D, 1/2/3 left to right, a tap or click. Movement
@@ -1303,6 +1321,7 @@
       text: textOf(text, ""),
       choices: normalized,
       actor: metadata && metadata.actor ? metadata.actor : null,
+      meta: metadata,
     };
     const framed = cineFramed();
     const cinematic = normalized.length > 0 && (framed || !!(metadata && metadata.cinematic));

@@ -26,9 +26,13 @@
      UP     "I'm with you, General."   you are his man. He sends you out; the
             President's guards turn on you; the coup holds (civilwar.coup
             success: he is the head of state, the body at the Mansion door).
-     LEFT   "You killed him."          the room is a firefight now: he and
-            his soldiers draw on you, the guards on him. Kill him and the
-            coup is crushed (the Vice President holds); die and it holds.
+     LEFT   "You killed him."          the wrong thing to say: his hand is on
+            his gun as you say it and he fires point-blank
+            (CBZ.cinematicShoot); his soldiers follow his first round. Only a
+            gun already up when you walked in gives you the beat to shoot
+            first. Survive and the room is a firefight, the guards on him:
+            kill him and the coup is crushed (the Vice President holds); die
+            and it holds.
      RIGHT  "I didn't see anything."   "Prove it." The coup holds and he gives
             you an order: tomorrow at ten, the Mansion steps, at his shoulder.
             For a minute there you stand next to the new head of state with
@@ -293,10 +297,12 @@
     const R = rec();
     R.choice = "turn"; R.side = "loyal";
     const gen = CAST.gen;
-    fight(gen, PA());
-    for (let i = 0; i < CAST.men.length; i++) fight(CAST.men[i], PA());
+    // he and his soldiers are cinematicShoot's (the draw, the rounds, the men
+    // who follow his first one); the President's guards go for him
+    if (gen && !gen.dead && CBZ.speech && CBZ.speech.say) { try { CBZ.speech.say(gen, "Then die with him.", { force: true, important: true }); } catch (e) {} }
+    // (an answer that never went through the prompt: he still draws)
+    if (gen && !gen.dead && gen.rage !== PA() && CBZ.cinematicShoot) CBZ.cinematicShoot(gen, null, { followers: CAST.men.slice() });
     for (let i = 0; i < CAST.guards.length; i++) fight(CAST.guards[i], i === 0 ? gen : (CAST.men[0] || gen));
-    g.cityHolstered = false;
     R.fight = { t: 0 };
     commit();
   }
@@ -364,14 +370,16 @@
   }
   const ANSWERS = [
     { id: "join", dir: "up", label: "I'm with you, General." },
-    { id: "turn", dir: "left", label: "You killed him." },
+    // the wrong thing to say to an armed man who has just killed: he draws on
+    // you the instant it is said (CBZ.cinematicShoot, city/cinematics.js)
+    { id: "turn", dir: "left", label: "You killed him.", fatal: true },
     { id: "stall", dir: "right", label: "I didn't see anything." },
   ];
   function ask(ctx) {
     const ui = UI(), gen = CAST.gen;
     if (!ui || !ui.say || !gen || gen.dead) { ctx.answer = "turn"; branch(ctx); return; }
     let pr = null;
-    try { pr = ui.say(gen.name, "He's gone. The army is with me. Are you?", ANSWERS, { actor: gen, cinematic: true, timeout: 8 }); } catch (e) { pr = null; }
+    try { pr = ui.say(gen.name, "He's gone. The army is with me. Are you?", ANSWERS, { actor: gen, cinematic: true, timeout: 8, drawn: !!ctx.drawn, followers: CAST.men.slice() }); } catch (e) { pr = null; }
     if (!pr || !pr.then) { ctx.answer = "silence"; branch(ctx); return; }
     pr.then(function (v) {
       if (ctx.answer != null) return;
@@ -392,7 +400,9 @@
       L2.push(Object.assign({ dur: 2.4, enter: function () { line(CAST.gen, "Good. Get out there and hold the gate."); } }, close));
       ctx.after = join;
     } else if (ctx.answer === "turn") {
-      L2.push(Object.assign({ dur: 1.4, enter: function () { line(CAST.gen, "Then you die with him."); } }, close));
+      // no last shot, no held beat: the scene is over the moment it is said
+      // and he is already drawing (the round is fired by cinematicShoot)
+      CAST.hold = false;
       ctx.after = turn;
     } else if (ctx.answer === "stall") {
       L2.push(Object.assign({ dur: 1.6, enter: function () { line(CAST.gen, "Prove it."); } }, close));
@@ -414,11 +424,14 @@
 
   function begin(R) {
     if (!CBZ.cinePlay || (CBZ.cineBusy && CBZ.cineBusy())) return false;
+    // was your gun already up when you walked in? (the scene holsters it;
+    // the answer that gets you shot reads this: drawn, you have a beat)
+    const drawn = !!(CBZ.cityHasGun && CBZ.cityHasGun());
     const room = stage();
     if (!room) return false;
     R.stage = "scene"; commit();
     unpin();
-    const ctx = { room: room, answer: null, after: null, list: null };
+    const ctx = { room: room, answer: null, after: null, list: null, drawn: drawn };
     const ok = CBZ.cinePlay(steps(ctx), ctx, function (aborted) {
       CAST.hold = false;
       if (aborted && ctx.answer == null) {
