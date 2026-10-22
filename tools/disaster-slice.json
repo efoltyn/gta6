@@ -4306,7 +4306,8 @@
   "src/world/archipelago_map.js",
   "src/world/archipelago.js",
   "src/world/island_town.js",
-  "src/world/island_police.js"
+  "src/world/island_police.js",
+  "src/world/island_people.js"
  ],
  "needed": [
   "src/city/facade_kit.js",

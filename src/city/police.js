@@ -40,7 +40,7 @@
      presented as a town (world/island_town.js): the same department, its
      bodies hung on that world's root and walking that world's streets. The
      one gate is the economy's (CBZ.economyMode: the city and the islands). */
-  function econ() { return CBZ.economyMode ? !!CBZ.economyMode() : (g.mode === "city" || g.mode === "archipelago"); }
+  function econ() { return CBZ.economyMode(); }
   function arenaW() {
     if (g.mode === "city") return (CBZ.city && CBZ.city.arena) || null;
     return CBZ.econArena ? CBZ.econArena() : null;

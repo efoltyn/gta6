@@ -61,6 +61,8 @@
   const CBZ = window.CBZ;
   if (!CBZ || CBZ.cityOrders2) return;
   const g = CBZ.game || (CBZ.game = {});
+  // the worlds your orders reach: Gang City and the islands (CBZ.economyMode)
+  function econ() { return !!(CBZ.economyMode && CBZ.economyMode()); }
 
   const GUARD_R = 1.8, TAIL_R = 9, RUN_R = 8;
   const LIVE = new Set();
@@ -152,7 +154,7 @@
     if (CBZ.protection && CBZ.protection.moveToward) CBZ.protection.moveToward(a, t.pos.x, t.pos.z, d > RUN_R ? 5.0 : 2.4, dt);
   }
   if (CBZ.onUpdate) CBZ.onUpdate(36.4, function (dt) {
-    if (!LIVE.size || g.mode !== "city") return;
+    if (!LIVE.size || !econ()) return;
     LIVE.forEach(function (a) {
       const o = a._order;
       if (!o || a.dead) { clear(a); return; }
@@ -449,7 +451,7 @@
      coup), and the man who leads it walks off the detail. Your own crew turns
      on you: the one the rest look to takes it, and they come for you. */
   if (CBZ.command && CBZ.command.on) CBZ.command.on("mutiny", function (m) {
-    if (!m || m.game !== "city" || !youAre(m.from) || g.mode !== "city") return;
+    if (!m || m.game !== "city" || !youAre(m.from) || !econ()) return;
     const men = (m.men || []).filter(function (q) { return q && !q.dead && q.kind !== "dog"; });
     if (!men.length) return;
     const state = men.filter(stateMan), own = men.filter(function (q) { return !stateMan(q); });
@@ -1035,7 +1037,7 @@
     BOSS.rec = C.toPlayer(boss, "kill", {
       target: t, maxDist: 60, patience: [6, 6, 5],
       complied: function () { return downed(t); },
-      alive: function () { return g.mode === "city" && !boss.dead; },
+      alive: function () { return econ() && !boss.dead; },
       onForce: function () {
         BOSS.refusals++;
         if (CBZ.cityGangAddStanding) { try { CBZ.cityGangAddStanding(M.gangId, -8 * BOSS.refusals); } catch (e) {} }
@@ -1044,7 +1046,7 @@
       onDone: function (r, out) { if (out === "complied") BOSS.refusals = Math.max(0, BOSS.refusals - 1); },
     });
   }
-  if (CBZ.onUpdate) CBZ.onUpdate(36.42, function (dt) { if (g.mode === "city" && g.state === "playing") bossOrders(dt); });
+  if (CBZ.onUpdate) CBZ.onUpdate(36.42, function (dt) { if (econ() && g.state === "playing") bossOrders(dt); });
 
   CBZ.cityOrders2 = {
     give: give, clear: clear, worksForYou: worksForYou, attackerOf: attackerOf,

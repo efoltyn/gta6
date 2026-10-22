@@ -11,16 +11,18 @@
 
      THE STATION   found once per island: its front door on the street, the
                    street it fronts, the kerb a unit pulls up at.
-     THE FIT-OUT   inside, built under the building's own group (so it goes
-                   with the island): a front counter with the desk sergeant
-                   behind it (a real officer of the force, posted there), and
-                   along the back wall a lock-up of two or three holding
-                   cells, solid side walls to the ceiling, a barred front,
-                   a barred door that swings on its hinge, a bench and a
-                   steel toilet in each. Whatever the building's generic
-                   furnishing had put where the counter and the cells stand
-                   is taken out (its triangles and its colliders), so a cell
-                   never shares its floor with a sofa.
+     THE FIT-OUT   a venue fit-out (CBZ.islandVenue.on("police")): it runs
+                   when the island is built and goes when the island does.
+                   Inside, under the building's own group: a front counter
+                   with the desk sergeant behind it (a real officer of the
+                   force, posted there), and along the back wall a lock-up of
+                   two or three holding cells, solid side walls to the
+                   ceiling, a barred front, a barred door that swings on its
+                   hinge, a bench and a steel toilet in each. The ground
+                   floor's house furniture is folded away first
+                   (CBZ.islandVenue.clear): no sofa in a station. An island
+                   with no police lot gets its Town Hall's the first time the
+                   force asks for a station.
      THE YARD      cruisers parked out front (nose-in in the forecourt where
                    there is one, else along the kerb). A patrol unit is one
                    of these pulling out (city/police.js spawnPatrolCar takes
@@ -205,78 +207,6 @@
     }
   }
 
-  /* ---- TAKE THE HOUSE FURNITURE OUT OF THE WAY ----------------------------
-     The generic interior pass furnished every ground floor as a living room,
-     merged into the building's "island-interior:flat"/"glow" meshes. A
-     triangle whose three corners all stand inside one of the clear boxes
-     (building-local, floor to 2.6 m) is folded to nothing; the colliders of
-     the pieces that stood there are lifted out of the world. */
-  function clearFurniture(b, F, boxes, fy) {
-    const rooms = (b.group.userData && b.group.userData.rooms) || [];
-    const inv = new THREE.Matrix4().copy(b.group.matrixWorld).invert();
-    const _m = new THREE.Matrix4(), _v = new THREE.Vector3();
-    for (const m of rooms) {
-      if (!m || !m.isMesh || !m.material || !/island-interior:(flat|glow)/.test(m.material.name || "")) continue;
-      const geo = m.geometry, P = geo && geo.attributes.position;
-      if (!P) continue;
-      m.updateMatrixWorld(true);
-      _m.multiplyMatrices(inv, m.matrixWorld);
-      const L = new Float32Array(P.count * 3);
-      for (let i = 0; i < P.count; i++) {
-        _v.set(P.getX(i), P.getY(i), P.getZ(i)).applyMatrix4(_m);
-        L[i * 3] = _v.x; L[i * 3 + 1] = _v.y; L[i * 3 + 2] = _v.z;
-      }
-      const inside = function (i, bx) {
-        const x = L[i * 3], y = L[i * 3 + 1], z = L[i * 3 + 2];
-        return y > fy - 0.02 && y < fy + 2.6 && x >= bx.x0 && x <= bx.x1 && z >= bx.z0 && z <= bx.z1;
-      };
-      const idx = geo.index;
-      let changed = false;
-      if (idx) {
-        const I = idx.array;
-        for (let t = 0; t + 2 < I.length; t += 3) {
-          const a = I[t], b2 = I[t + 1], c = I[t + 2];
-          if (a === b2 && b2 === c) continue;
-          for (const bx of boxes) if (inside(a, bx) && inside(b2, bx) && inside(c, bx)) { I[t + 1] = a; I[t + 2] = a; changed = true; break; }
-        }
-        if (changed) idx.needsUpdate = true;
-      } else {
-        const A = P.array;
-        for (let t = 0; t + 2 < P.count; t += 3) {
-          for (const bx of boxes) if (inside(t, bx) && inside(t + 1, bx) && inside(t + 2, bx)) {
-            for (const k of [1, 2]) { A[(t + k) * 3] = A[t * 3]; A[(t + k) * 3 + 1] = A[t * 3 + 1]; A[(t + k) * 3 + 2] = A[t * 3 + 2]; }
-            changed = true; break;
-          }
-        }
-        if (changed) P.needsUpdate = true;
-      }
-    }
-    // the furniture's colliders (ref-less, standing on the ground floor)
-    const W = boxes.map(function (bx) {
-      const p = [F.w(bx.x0, 0, bx.z0), F.w(bx.x1, 0, bx.z0), F.w(bx.x0, 0, bx.z1), F.w(bx.x1, 0, bx.z1)];
-      return { x0: Math.min(p[0].x, p[1].x, p[2].x, p[3].x), x1: Math.max(p[0].x, p[1].x, p[2].x, p[3].x),
-        z0: Math.min(p[0].z, p[1].z, p[2].z, p[3].z), z1: Math.max(p[0].z, p[1].z, p[2].z, p[3].z) };
-    });
-    const floorY = b.gy + fy;
-    const gone = [];
-    for (const c of b.colliders || []) {
-      if (!c || c.ref || c.y0 == null || c.y0 > floorY + 0.5 || c.y1 > floorY + 2.6) continue;
-      const r = { x0: c.minX, x1: c.maxX, z0: c.minZ, z1: c.maxZ };
-      for (const w of W) {
-        // the piece has to stand INSIDE the box (a wall is never ref-less, but
-        // a long skirting collider along a wall would be)
-        if (r.x0 >= w.x0 - 0.05 && r.x1 <= w.x1 + 0.05 && r.z0 >= w.z0 - 0.05 && r.z1 <= w.z1 + 0.05) { gone.push(c); break; }
-      }
-    }
-    if (gone.length) {
-      if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(gone);
-      else for (const c of gone) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
-      for (const c of gone) { const i = b.colliders.indexOf(c); if (i >= 0) b.colliders.splice(i, 1); }
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    }
-    return gone.length;
-  }
-
   /* ---- THE FIT-OUT ------------------------------------------------------- */
   function buildFit(S) {
     const b = S.b, F = S.F, PL = S.plan;
@@ -297,11 +227,9 @@
       cols.push(c);
       return c;
     }
-    // ---- clear the floor first
-    const clear = [];
-    if (PL.lock) clear.push({ x0: PL.lock.x0 - 0.12, x1: PL.lock.x1 + 0.05, z0: PL.lock.z0 - 0.4, z1: PL.lock.z1 + 0.05 });
-    if (PL.desk) clear.push({ x0: PL.desk.box.x0 - 0.3, x1: PL.desk.box.x1 + 0.3, z0: PL.desk.box.z0 - 0.1, z1: PL.desk.box.z1 + 0.6 });
-    S.cleared = clearFurniture(b, F, clear, fy);
+    // ---- clear the floor first: a station, not a living room
+    const IV = CBZ.islandVenue;
+    S.cleared = IV && IV.clear ? !!IV.clear(b, 0) : false;
 
     // ---- THE LOCK-UP
     S.cells = [];
@@ -459,8 +387,8 @@
   }
 
   /* ---- THE STATION, PER ISLAND -------------------------------------------- */
-  function make(A) {
-    const b = findStationBuilding(A);
+  function make(A, bIn) {
+    const b = bIn || findStationBuilding(A);
     if (!b || !b.group) return null;
     const F = frameOf(b);
     const I = b.interior;
@@ -501,6 +429,18 @@
     }
     return S;
   }
+
+  // the island's police lot is fitted out with the island (and taken down
+  // with it): city/police.js finds it standing the first time it asks
+  if (CBZ.islandVenue && CBZ.islandVenue.on) CBZ.islandVenue.on("police", function (b, lot, job) {
+    const A = job && job.arena;
+    if (!A || !A.root || STATIONS.get(A)) return null;
+    let S = null;
+    try { S = make(A, b); } catch (e) { console.error("[island police]", e); S = null; }
+    if (!S) return null;
+    STATIONS.set(A, S);
+    return function () { dropStation(S); if (STATIONS.get(A) === S) STATIONS.delete(A); };
+  });
 
   /* ---- THE YARD ---------------------------------------------------------- */
   function seen(x, y, z) { return !!(CBZ.sightCanSee && CBZ.sightCanSee(x, y + 1, z, 3)); }
@@ -598,7 +538,7 @@
     if (wired || !I || !I.registerZone) return;
     wired = true;
     I.registerZone({
-      id: "isle-cell-door", kind: "celldoor", radius: 2.2, prio: 2,
+      id: "isle-cell-door", kind: "celldoor", radius: 2.2, prio: 2, islands: true,
       find: function (px, pz) {
         const S = active;
         if (!S || !onIsles()) return null;

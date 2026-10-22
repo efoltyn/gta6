@@ -94,9 +94,7 @@
      body stands, which the water test subtracts: a dry first floor is dry. */
   function standY(b) {
     const bed = bedAt(b.pos.x, b.pos.z);
-    // (a posted worker, world/island_venue.js staff, stands on the shop floor
-    // he works on, whatever the mode)
-    if (!CBZ.groundAt || !CBZ.game || (CBZ.game.mode !== "survival" && !b.post)) { b._lift = 0; return bed; }
+    if (!CBZ.groundAt || !CBZ.game || CBZ.game.mode !== "survival") { b._lift = 0; return bed; }
     // groundAt only knows the terrain the mode registered, not the sinkholes
     // surv.floorAt cuts into it: take its answer only when it is a PLATFORM
     // (above the bare terrain), otherwise the hole-aware bed stands
@@ -357,8 +355,7 @@
      is the nearer danger), a few freeze; a body under a slab stays there. */
   const GTH = { kind: "gunshot", weapon: "gun", x: 0, z: 0, distance: 0, armed: true, aimingAtMe: false, source: null };
   function hearShot(x, z, src) {
-    // (the archipelago's townsfolk are this crowd too: they hear the island's guns)
-    if (!BR || !(survOn() || (CBZ.game && CBZ.game.mode === "archipelago"))) return 0;
+    if (!BR || !survOn()) return 0;
     const list = BR.near(x, z, 45, _wit);
     let n = 0;
     for (let i = 0; i < list.length; i++) {
@@ -377,38 +374,6 @@
   }
   CBZ.survivorsHearShot = hearShot;
 
-  /* A CRIME IN FRONT OF THE CROWD (the archipelago, where the townsfolk are
-     this crowd: city/peds.js cityTagWitnesses asks). Everybody who could see
-     the spot answers it the way they answer a death they saw (rattle, then
-     threat.respond: the timid run from it, a few freeze, the steady carry
-     on); the answer is who saw it, nearest first, for the law to take calls
-     from. Nothing here draws a random number. */
-  const _cw = [];
-  function witnessCrime(x, z, perp, out, y) {
-    out = out || [];
-    out.length = 0;
-    if (!BR) return out;
-    const yy = y != null ? y : 1;
-    const list = BR.near(x, z, WIT.range, _cw);
-    for (let i = 0; i < list.length; i++) {
-      const o = list[i].actor;
-      if (!o || o === perp || !o._survBrain || o.dead) continue;
-      if (!BR.perception.seesPoint(o, x, yy, z, WIT)) continue;
-      const dd = Math.hypot(o.pos.x - x, o.pos.z - z);
-      BR.morale.rattle(o, 0.2 + 0.4 * Math.max(0, 1 - dd / WIT.range));
-      TH.x = x; TH.z = z; TH.distance = dd; TH.sheltered = o.state === "hide";
-      const resp = BR.threat.respond(o, TH);
-      if (resp === "flee" || resp === "freeze") {
-        const sc = o._scare || (o._scare = { x: 0, z: 0, t: 0, resp: null, hold: 0 });
-        sc.x = x; sc.z = z; sc.t = simT; sc.resp = resp; sc.hold = SCARE_HOLD[resp]; sc.gun = true;   // away from it, not down the hazard
-      }
-      o._sawD = dd;
-      out.push(o);
-    }
-    out.sort(function (a, b) { return a._sawD - b._sawD; });
-    return out;
-  }
-  CBZ.survivorsWitness = witnessCrime;
 
   /* one think of the nerves: true = it owns the body this tick */
   function panicThink(b) {
@@ -537,15 +502,6 @@
   CBZ.clearSurvivorBots = function () {
     for (const b of CBZ.bots) dropBot(b);
     CBZ.bots.length = 0;
-  };
-  // ONE body out of the crowd (a shop's clerk when his island is taken down,
-  // world/island_venue.js): the same teardown the whole crowd gets
-  CBZ.removeSurvivorBot = function (b) {
-    const i = b ? CBZ.bots.indexOf(b) : -1;
-    if (i < 0) return false;
-    CBZ.bots.splice(i, 1);
-    dropBot(b);
-    return true;
   };
 
   /* HOW FAR OUT YOU HAVE TO SWIM BEFORE YOU ARE SWIMMING. Walked outward along
@@ -1237,16 +1193,6 @@
       const reach = 14 + urgent * 16;
       b.target.set(b.pos.x + (fx / m) * reach, 0, b.pos.z + (fz / m) * reach);
       b.pause = 0;
-    } else if (b.post) {
-      // A POSTED WORKER (world/island_venue.js staff: the clerk behind a
-      // shop counter) does not wander: he goes back to his spot and faces
-      // his counter, or whoever the venue says he is looking at. He still
-      // runs from a disaster and a killing (above) like anybody.
-      const p = b.post;
-      b.state = "look"; b.urg = 0; b.pause = 0;
-      b.target.set(p.x, 0, p.z);
-      if (p.look) { b._lookX = p.look.x; b._lookZ = p.look.z; }
-      else { b._lookX = p.x + Math.sin(p.face || 0) * 4; b._lookZ = p.z + Math.cos(p.face || 0) * 4; }
     } else {
       // wander the island
       b.state = "wander";

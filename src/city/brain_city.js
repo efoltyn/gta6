@@ -55,6 +55,7 @@
   const CBZ = W && W.CBZ;
   if (!CBZ) { if (typeof module !== "undefined") module.exports = null; return; }
   const GAME = "city";
+  function econ() { return !!(CBZ.economyMode && CBZ.economyMode()); }
   const g = CBZ.game || (CBZ.game = {});
 
   function BR() { return CBZ.brain || null; }
@@ -651,7 +652,7 @@
   // for CBZ.brain.threat.capability: the city answers for the player; a ped's
   // own fields (armed / weapon / a holstered gun) the core reads itself
   function capabilityOf(a) {
-    if (!a || g.mode !== "city") return null;
+    if (!a || !econ()) return null;
     return isPlayerActor(a) ? playerWeapon() : null;
   }
   function fillShooter(th, src) {
@@ -915,7 +916,7 @@
       if (d && isFinite(d.x)) return { x: d.x, z: d.z };
       if (isFinite(h.cx)) return { x: h.cx, z: h.cz };
     }
-    const A = CBZ.city && CBZ.city.arena;
+    const A = CBZ.cityPedArena ? CBZ.cityPedArena() : (CBZ.city && CBZ.city.arena);
     const fp = posOf(from) || p.pos;
     if (A && typeof A.randomSidewalkPoint === "function") {
       // a street a block or two off, AWAY from the man he just left
@@ -1293,7 +1294,10 @@
   }
   function update(dt) {
     const b = BR(); if (!b) return;
-    if (g.mode !== GAME) return;
+    // the street brain runs wherever the street is: Gang City and the
+    // islands (the crowd is city/peds.js's in both; GAME is the brain's
+    // namespace, not the mode)
+    if (!econ()) return;
     ensureExec(); subscribe(); defineOnce();
     b.clock(typeof g.elapsed === "number" ? g.elapsed : (CBZ.now || 0) / 1000);
     if (b.morale && b.morale.tick) b.morale.tick(dt);

@@ -33,6 +33,10 @@
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
   const g = CBZ.game;
+  // the NPC side of a gunfight (line of fire, aim, posture) runs wherever the
+  // street's people do: Gang City and the islands. The player's own melee and
+  // grenades below stay Gang City's (the islands' hands are systems/handverbs.js).
+  function econ() { return !!(CBZ.economyMode && CBZ.economyMode()); }
   const P = CBZ.player;
 
   // city weapon name → engine (fpsmode) weapon id
@@ -1067,7 +1071,7 @@
   // Side-effect: lowers/raises the gun prop to match (so it never pokes a wall).
   CBZ.cityNpcCanFire = function (att, tgt) {
     if (!att || !tgt || !tgt.pos) return true;
-    if (g.mode !== "city") return true;
+    if (!econ()) return true;
     if (!CBZ.clearLineOfFire) return true;
     _muzGate = true;   // suppress the muzzle wrap's own LOS test (we do it here)
     const m = (CBZ.actorMuzzle ? CBZ.actorMuzzle(att, _mz) : null) || { x: att.pos.x, y: 1.42, z: att.pos.z };
@@ -1161,7 +1165,7 @@
   const _origAim = CBZ.actorAimAt;
   if (typeof _origAim === "function") {
     CBZ.actorAimAt = function (actor, target, dt) {
-      const cityShooter = g.mode === "city" && actor && !actor.isPlayer && actor.char &&
+      const cityShooter = econ() && actor && !actor.isPlayer && actor.char &&
                           target && target.pos;
       if (cityShooter && isCityNpc(actor)) { actor._fireTgt = target; actor._fireTgtT = 0.5; }   // LOS gate memory (cops self-gate)
       if (cityShooter) { actor._aimTgt = target; actor._aimTgtT = AIM_HOLD; }                    // visual-aim memory (INCLUDES cops)
@@ -1186,10 +1190,10 @@
       // tracer wrap can identify the shooter + weapon (fire paths call
       // actorMuzzle → tracer back-to-back with this exact point). Gate/breach
       // probes run under _muzGate and never mark a pending shot.
-      if (!_muzGate && g.mode === "city" && res && actor && !actor.isPlayer && actor._weaponProp) {
+      if (!_muzGate && econ() && res && actor && !actor.isPlayer && actor._weaponProp) {
         _pendingShot.a = actor; _pendingShot.x = res.x; _pendingShot.y = res.y; _pendingShot.z = res.z;
       }
-      if (!_muzGate && g.mode === "city" && isCityNpc(actor) && actor && actor._fireTgt && (actor._fireTgtT || 0) > 0) {
+      if (!_muzGate && econ() && isCityNpc(actor) && actor && actor._fireTgt && (actor._fireTgtT || 0) > 0) {
         const t = actor._fireTgt;
         if (t && t.pos && !t.dead && CBZ.clearLineOfFire && res) {
           const ty = t.isPlayer ? 1.55 : 1.3;
@@ -1224,7 +1228,7 @@
   const _origTracer = CBZ.tracer;
   if (typeof _origTracer === "function") {
     CBZ.tracer = function (from, to, opts) {
-      if (g.mode === "city" && from && to) {
+      if (econ() && from && to) {
         if (CBZ.clearLineOfFire &&
             !CBZ.clearLineOfFire(from.x, from.y, from.z, to.x, to.y, to.z)) {
           _pendingShot.a = null;
@@ -1263,7 +1267,7 @@
   // age out the stale aim-target memory so a wandering ped doesn't keep a
   // long-dead "I was shooting at X" flag (cheap, sliced across the crowd).
   CBZ.onUpdate(13, function (dt) {
-    if (g.mode !== "city") return;
+    if (!econ()) return;
     const lists = [CBZ.cityPeds, CBZ.cityCops];
     for (let li = 0; li < lists.length; li++) {
       const L = lists[li]; if (!L) continue;
@@ -1281,7 +1285,7 @@
   // so the aimed pose is what actually draws. Cheap: early-outs on !armed and
   // on actors that aren't engaging (see applyAimPose's `engaged` gate).
   CBZ.onUpdate(90.5, function (dt) {
-    if (g.mode !== "city" || !CBZ.CONFIG.NPC_AIM_V2) return;
+    if (!econ() || !CBZ.CONFIG.NPC_AIM_V2) return;
     const lists = [CBZ.cityPeds, CBZ.cityCops];
     for (let li = 0; li < lists.length; li++) {
       const L = lists[li]; if (!L) continue;
@@ -1299,7 +1303,7 @@
   // case is a couple of cheap field checks. (Bleeding is systems/vitals.js's:
   // the blade's private hp drain that used to live here is gone.)
   CBZ.onUpdate(14, function (dt) {
-    if (g.mode !== "city") return;
+    if (!econ()) return;
     const peds = CBZ.cityPeds, cops = CBZ.cityCops;
     const tickActor = function (a) {
       if (!a || a.dead) return;

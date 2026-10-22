@@ -1,4 +1,4 @@
-      let kdx/* ============================================================
+/* ============================================================
    city/peds.js — the city's people, driven by ONE personality
    spectrum: `aggr` ∈ [0,1], from meek (flees everything) to violent
    (full agency — mugs, brawls, carjacks, fights cops, snatches a downed
@@ -41,6 +41,18 @@
   const g = CBZ.game;
   const A0 = () => (CBZ.CITY && CBZ.CITY.aggro) || {};
   const tmp = new THREE.Vector3();
+  /* THE STREET THESE PEOPLE WALK. Gang City's arena, or on the islands the
+     island in force presented as a town with its buildings as lots
+     (world/island_people.js CBZ.islandPeople.arena(): doors, homes,
+     workplaces, districts). Everything in this file that asks "where" asks
+     here; outside the islands it is exactly the city's arena. */
+  function pedArena() {
+    if (g.mode === "archipelago") return (CBZ.islandPeople && CBZ.islandPeople.arena) ? CBZ.islandPeople.arena() : null;
+    return (CBZ.city && CBZ.city.arena) || null;
+  }
+  CBZ.cityPedArena = pedArena;
+  // the worlds this crowd lives in: Gang City and the islands (CBZ.economyMode)
+  function econ() { return !!(CBZ.economyMode && CBZ.economyMode()); }
   // WALL-STEER scratch: cityNav.contextSteer writes the chosen unit dir here
   // (move() asks it for the WALL half only; neighbours go through CBZ.moves).
   const _ctxOut = { x: 0, z: 0 };
@@ -634,7 +646,7 @@
     const spec = COVERED_JOBS[String(ped.job || "").toLowerCase()];
     if (!spec) { ped._coverDone = 1; return false; }
     ped._coverDone = 1;
-    const A = CBZ.city && CBZ.city.arena;
+    const A = pedArena();
     const d = (A && A.districtAt) ? A.districtAt(ped.pos.x, ped.pos.z) : null;
     const pool = (d && DISTRICT_JOBS[d.kind]) || JOB_RECAST;
     const cover = pool[(roleHash(ped, 0xC0FE) * pool.length) | 0] || pool[0];
@@ -866,7 +878,7 @@
     if (!ped || ped.dead) return false;
     if (thugRepair(ped)) return true;              // affiliated, unranked, unemployed
     if (hasRole(ped)) return false;
-    const A = CBZ.city && CBZ.city.arena;
+    const A = pedArena();
     const d = (A && A.districtAt) ? A.districtAt(ped.pos.x, ped.pos.z) : null;
     // UNEMPLOYMENT BEFORE EMPLOYMENT. Both are checked before the trade pool,
     // because the trade deal is the thing that was erasing them.
@@ -1291,6 +1303,7 @@
     return ped;
   }
   CBZ.cityMakePed = makePed;        // used by gangs.js / social.js
+  CBZ.cityCastFor = function (d, r) { return castForDistrict(d, r || rng); };   // world/island_people.js: who a district puts on its street
   CBZ.cityMintName = name;          // W12: exposed so births.js can mint a gendered
                                      // first name, then swap in a parent's surname.
 
@@ -1575,7 +1588,7 @@
     if (ped.rage || ped.surrender || ped.state === "fight" || ped.state === "flee" ||
         (ped.npcWanted | 0) || ped.bounty || ped._clubLine || ped._clubGoingIn) return false;
     if (ped._castNight === _nightShift) return false;    // already cast for this phase
-    const A = CBZ.city && CBZ.city.arena;
+    const A = pedArena();
     const d = A && A.districtAt ? A.districtAt(ped.pos.x, ped.pos.z) : null;
     if (_nightShift && !d) return false;                 // night cast needs a district read
     ped._castNight = _nightShift;
@@ -1621,7 +1634,7 @@
   //      hourly dial — one hysteresis check per 0.8s tick, never per-frame. ----
   let _hourT = 0, _hourScan = 0;
   CBZ.onUpdate(34.6, function (dt) {
-    if (g.mode !== "city") return;
+    if (!econ()) return;
     _hourT -= dt; if (_hourT > 0) return;
     _hourT = 0.8;
     const n = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
@@ -1782,7 +1795,7 @@
     if (m.speed > 0.01) {
       if (CBZ.bodyNet) CBZ.bodyNet.settle(p);          // a crossing taken back before the push-out
       if (CBZ.collide) CBZ.collide(p.pos, PED_R, p.pos.y + PED_FOOT, p.pos.y + 1.7);
-      const A = CBZ.city && CBZ.city.arena;
+      const A = pedArena();
       if (A && A.clampToCity) A.clampToCity(p.pos, PED_R);
       settleFeet(p, dt);
     }
@@ -1934,7 +1947,7 @@
   // ============================================================
   let _killerPed = null, _killerArena = null, _killerRetry = 0;
   function serialKiller(dt) {
-    const A = CBZ.city && CBZ.city.arena;
+    const A = pedArena();
     if (_killerArena === A && _killerPed) return _killerPed.dead ? null : _killerPed;  // caught → there is only one
     // The scan is O(cast) and the early-boot answer is legitimately "nobody
     // yet" (the roster is still filling), so back off instead of re-scanning
@@ -2483,13 +2496,19 @@
     });
     if (packsHeat) { ped.nerve = 0.85; ped.ammo = 40; }
     ped.group.rotation.y = vs.face;
-    const root = (CBZ.city && CBZ.city.arena && CBZ.city.arena.root) || CBZ.scene;
+    const root = (pedArena() && pedArena().root) || CBZ.scene;
     root.add(ped.group);
     CBZ.cityPeds.push(ped);
     b.vendor = ped;
     return ped;
   }
+  /* ONE BODY OFF THE ROSTER (a vendor whose shop shut, an island townsman
+     the camera left behind): his brain lets go, his lease goes back, every
+     index built from the roster forgets him, his rig is freed. The caller
+     has already made sure nobody can see him go (systems/leave.js's rule). */
   function removeVendor(ped) {
+    if (CBZ.cityBrain && CBZ.cityBrain.release) { try { CBZ.cityBrain.release(ped); } catch (e) {} }
+    if (CBZ.cityHomeRelease) { try { CBZ.cityHomeRelease(ped); } catch (e) {} }
     const i = CBZ.cityPeds.indexOf(ped);
     if (i >= 0) CBZ.cityPeds.splice(i, 1);
     _corpseDrop(ped);          // off the roster ⇒ off every index built from it
@@ -2502,10 +2521,11 @@
       if (o.material) { const m = o.material; if (Array.isArray(m)) m.forEach((x) => x && !x._shared && !x._cbzClothKey && x.dispose && x.dispose()); else if (!m._shared && !m._cbzClothKey && m.dispose) m.dispose(); }
     });
   }
+  CBZ.cityDespawnPed = removeVendor;
   CBZ.onUpdate(35.4, function () {
     if (!CBZ.CONFIG.LAZY_VENDORS) return;
     if (CBZ.game && CBZ.game.mode !== "city") return;
-    const A = CBZ.city && CBZ.city.arena;
+    const A = pedArena();
     const shops = A && A.shopLots;
     if (!shops || !shops.length) return;
     const P = CBZ.player; if (!P || !P.pos || P.dead) return;
@@ -2626,32 +2646,8 @@
   // LAW router turns into stars (the ONLY way the player gets them). `perp`
   // defaults to the player — an NPC's crime (a rampage, an NPC heist) MUST
   // pass its NPC: the old tagger pinned every crime in earshot on the player.
-  /* THE ISLANDS' WITNESSES. On the archipelago the townsfolk are the island
-     crowd (entities/survivorbot.js), not this roster. The ones who could see
-     it answer it with their bodies (CBZ.survivorsWitness: the timid run, a
-     few freeze), the nearest says a few real words (CBZ.voice), and the
-     nearest two ring it in: city/law.js takes the calls exactly as it takes a
-     street witness's, and dispatch raises the stars after its own delay. */
-  const _isleW = [];
-  function isleWitnesses(x, z, sev, type, who) {
-    if (g.mode !== "archipelago" || !CBZ.survivorsWitness) return false;
-    const py = who && who.pos ? (who.pos.y || 0) : 0;
-    const W = CBZ.survivorsWitness(x, z, who, _isleW, py + 1);
-    const L = CBZ.cityLaw;
-    let calls = 0;
-    for (let i = 0; i < W.length; i++) {
-      const b = W[i];
-      if (i === 0 && CBZ.voice && CBZ.voice.say) { try { CBZ.voice.say(b, "witness", { by: who }); } catch (e) {} }
-      if (calls < 2 && L && L.onWitnessReport && who) {
-        try { if (L.onWitnessReport({ perp: who, witness: b, x: x, z: z, heat: sev, type: type })) calls++; } catch (e) {}
-      }
-    }
-    _isleW.length = 0;
-    return true;
-  }
   CBZ.cityTagWitnesses = function (x, z, sev, type, perp) {
     const who = perp || CBZ.city.playerActor;
-    if (isleWitnesses(x, z, sev, type, who)) return;
     if (CBZ.cityBrain && CBZ.cityBrain.crime(type, x, z, who, sev) >= 0) return;
     // no brain loaded (a stripped slice): remember and fear, nobody calls
     const r2 = 30 * 30;
@@ -2796,7 +2792,7 @@
   // him there and vitals does the wrap). Walks vitals' short live list only.
   let _aidT = 0;
   CBZ.onUpdate(58, function (dt) {
-    if (g.mode !== "city" || !CBZ.vitals) return;
+    if (!econ() || !CBZ.vitals) return;
     _aidT -= dt; if (_aidT > 0) return; _aidT = 1;
     const V = CBZ.vitals, L = V.list, peds = CBZ.cityPeds;
     if (!L || !L.length || !peds) return;
@@ -3132,7 +3128,7 @@
     const y = (typeof opts.y === "number" && isFinite(opts.y)) ? opts.y
       : (CBZ.floorAt ? CBZ.floorAt(x, z) : 0);
     let mesh = null;
-    if (CBZ.city && CBZ.city.arena) {
+    if (pedArena()) {
       // Inventory V2 swaps this compatibility proxy for the authored weapon
       // model before presentation. Keep even the fallback neutral: a dropped
       // gun must never become a glowing green pickup marker for one frame.
@@ -3152,7 +3148,7 @@
         mesh.position.set(x, y + 0.08, z);
       }
       mesh.userData.transient = true;
-      CBZ.city.arena.root.add(mesh);
+      pedArena().root.add(mesh);
     }
     CBZ.cityDrops.push({
       x, y, z, weapon: weapon || "Pistol", ammo: ammo || 24, t: 0, mesh,
@@ -3296,6 +3292,30 @@
     } else if (melee || !streetShot(tgt, fx, fz, _hurtWP, 0.9)) { if (CBZ.body) CBZ.body.hit(tgt, { fromX: fx, fromZ: fz, force: 3 }); }
     if (!lawfulSecurityAct(att, tgt) && CBZ.cityNpcOffense) CBZ.cityNpcOffense(att, melee ? 18 : 36, "assault");
   }
+  /* A HIT FROM THE WORLD'S BUS (CBZ.hurtWorldActor on the islands: a blast,
+     a car, a falling wall, a hand of yours from the island's verbs). Gang
+     City sends its blasts straight to cityKillPed; on the islands a blow
+     that does not finish him is a blow: he loses the hp, the hit lands on his
+     rig, and a man you hit knows who did it (struck) and is an assault for
+     the witnesses (cityKillPed reports a killing itself). */
+  CBZ.cityHurtPed = function (ped, dmg, imp) {
+    if (!ped || ped.dead || !(dmg > 0)) return;
+    imp = imp || {};
+    const P = CBZ.player, PA = CBZ.city && CBZ.city.playerActor;
+    const byP = !!(imp.byPlayer || imp.by === P || (imp.by && imp.by.isPlayer) || imp.attacker === P || (PA && imp.attacker === PA));
+    const att = byP ? PA : (imp.attacker && imp.attacker.pos ? imp.attacker : null);
+    const fx = imp.fromX != null ? imp.fromX : (att ? att.pos.x : ped.pos.x);
+    const fz = imp.fromZ != null ? imp.fromZ : (att ? att.pos.z : ped.pos.z);
+    if ((ped.hp || 0) - dmg <= 0) {
+      CBZ.cityKillPed(ped, { fromX: fx, fromZ: fz, dir: imp.dir, force: imp.force, fling: imp.fling, attacker: att, byPlayer: byP }, imp.cause || "killed");
+      return;
+    }
+    ped.hp -= dmg;
+    if (CBZ.body && CBZ.body.hit && (fx !== ped.pos.x || fz !== ped.pos.z)) CBZ.body.hit(ped, { fromX: fx, fromZ: fz, dir: imp.dir, force: imp.force || 3 });
+    if (att) struck(att, ped, false);
+    else { ped.alarmed = Math.max(ped.alarmed || 0, 4); ped.fear = Math.min(10, (ped.fear || 0) + 2); }
+    if (byP && CBZ.cityCrime) CBZ.cityCrime(50, { x: ped.pos.x, z: ped.pos.z, type: "assault" });
+  };
   /* A STREET ROUND INTO A LIVING MAN (NPC or cop fire): CBZ.verbs.shot, the
      same answer on his rig as a player's round. False = no rig (a far,
      instanced body): the caller keeps the old impulse. Shared by police.js. */
@@ -4110,7 +4130,7 @@
 
   // ---- routine waypoint picking (route through an intersection to cross) ----
   function pickRoutineGoal(ped) {
-    const A = CBZ.city.arena;
+    const A = pedArena();
     // ===== SCHED-1: EMERGE first-leg ========================================
     // A place-spawned resident (SPAWN-1 / H5 set ped._emerge at their home door)
     // first walks a SHORT leg AWAY from that door into the street — so they read
@@ -4911,7 +4931,7 @@
       // nobody in reach — prowl toward the densest part of the map (the centre) to
       // find more victims rather than standing still.
       ped.rage = null; ped.state = "walk";
-      const A = CBZ.city && CBZ.city.arena;
+      const A = pedArena();
       if (A && (!ped.path || !ped.path.length) && ped.pause <= 0) {
         const c = A.center || { x: 0, z: 0 };
         ped.target.set(c.x + (rng() - 0.5) * 40, 0, c.z + (rng() - 0.5) * 40);
@@ -5302,7 +5322,7 @@
     // changes routine choices and movement rhythm.
     if (active && ped.drugUser && ped.erratic > 0 && ped.tweakT <= 0 && !ped.rage) {
       ped.tweakT = 3 + rng() * 7;
-      const A = CBZ.city.arena;
+      const A = pedArena();
       const trap = A && A.shopLots && A.shopLots.find((l) => l.kind === "drugs" && !l.demolished);
       if (trap && rng() < 0.42) {
         ped.path = null; ped.finalGoal = { x: trap.building.door.x, z: trap.building.door.z, enter: true };
@@ -5422,7 +5442,7 @@
     // cheap archetype micro-flavour (linger at a food stall, rest near a bench) so
     // the crowd reads as distinct lives — soft, never forces a goal (active only).
     if (active && !ped.vendor && ped.pause <= 0 && (!ped.path || !ped.path.length) &&
-        CBZ.city && CBZ.city.arena && microBehaviour(ped, CBZ.city.arena)) return;
+        pedArena() && microBehaviour(ped, pedArena())) return;
     if (ped.pause <= 0 && (!ped.path || !ped.path.length)) pickRoutineGoal(ped);
   }
 
@@ -5434,7 +5454,7 @@
   function probeBlocked(x, z, y) {
     tmp.set(x, y, z);
     if (CBZ.collide) { const bx = tmp.x, bz = tmp.z; CBZ.collide(tmp, PED_R, y + PED_FOOT, y + 1.7); if (Math.abs(tmp.x - bx) > 0.05 || Math.abs(tmp.z - bz) > 0.05) return true; }
-    if (CBZ.city && CBZ.city.arena && CBZ.city.arena.clampToCity) { const cx = tmp.x, cz = tmp.z; CBZ.city.arena.clampToCity(tmp, PED_R); if (Math.abs(tmp.x - cx) > 0.05 || Math.abs(tmp.z - cz) > 0.05) return true; }
+    if (pedArena() && pedArena().clampToCity) { const cx = tmp.x, cz = tmp.z; pedArena().clampToCity(tmp, PED_R); if (Math.abs(tmp.x - cx) > 0.05 || Math.abs(tmp.z - cz) > 0.05) return true; }
     return false;
   }
   function dirClear(ped, ux, uz, dist) {
@@ -5459,7 +5479,9 @@
   function fleeFrom(ped, x, z) {
     ped.state = "flee";
     let routed = false;
-    const NAV = CBZ.cityNav;
+    // (the islands have no city nav graph: their own doors and walls, the
+    // clear-path sampler below)
+    const NAV = g.mode === "archipelago" ? null : CBZ.cityNav;
     if (NAV) {
       // INDOORS: head for THIS building's door, then 2m out along -inwardNormal.
       const lot = NAV.indoorLotAt ? NAV.indoorLotAt(ped.pos.x, ped.pos.z) : null;
@@ -5523,7 +5545,7 @@
       const cop = nearestCop(ped.pos.x, ped.pos.z, 50);
       if (cop) refuge = { x: cop.pos.x, z: cop.pos.z };
       else {
-        const A = CBZ.city && CBZ.city.arena;
+        const A = pedArena();
         if (A && A.shopLots && A.shopLots.length) {
           let bd = 40 * 40, best = null;
           for (let i = 0; i < A.shopLots.length; i++) {
@@ -5555,8 +5577,8 @@
     // VET it with dirClear so we don't just pick a fresh target straight through a
     // building. Try a few; if none is reachable, hold position (better to freeze a
     // beat than to bolt into a wall — the next think pass re-picks).
-    if (!found && CBZ.city && CBZ.city.arena) {
-      const A = CBZ.city.arena;
+    if (!found && pedArena()) {
+      const A = pedArena();
       let placed = false;
       for (let t = 0; t < 4; t++) {
         const p = A.randomSidewalkPoint();
@@ -6750,9 +6772,9 @@
     // the city bounds; a bounds clamp that moved him is cleared once more.
     if (CBZ.bodyNet) CBZ.bodyNet.settle(ped);
     if (CBZ.collide) CBZ.collide(ped.pos, PED_R, ped.pos.y + PED_FOOT, ped.pos.y + 1.7);
-    if (CBZ.city && CBZ.city.arena) {
+    if (pedArena()) {
       const bx = ped.pos.x, bz = ped.pos.z;
-      CBZ.city.arena.clampToCity(ped.pos, PED_R);
+      pedArena().clampToCity(ped.pos, PED_R);
       if (CBZ.collide && (Math.abs(ped.pos.x - bx) > 0.002 || Math.abs(ped.pos.z - bz) > 0.002)) CBZ.collide(ped.pos, PED_R, ped.pos.y + PED_FOOT, ped.pos.y + 1.7);
     }
     settleFeet(ped, dt);
@@ -6949,7 +6971,7 @@
   const SIM_MIN_THINKS = 8;
   CBZ.onUpdate(34, function (dtFrame) {
     let dt = dtFrame;
-    if (g.mode !== "city") return;
+    if (!econ()) return;
     // A few specialist modules may cast their own actors after the canonical
     // roster was deferred. They remain parked logically until the street layer
     // is observed, so the prologue never grows a second hidden simulation.

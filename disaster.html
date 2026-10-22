@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 432
+     Natural Disaster Survival, standing alone: index.html minus the 433
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -472,7 +472,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
      in front of him (threat by sight, the one line picker, panic by sight).
      Before read.js / peds.js / prisonvoice.js, which all call it. -->
-<script src="src/systems/voice.js?v=ord1022b"></script>
+<script src="src/systems/voice.js?v=people1022"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -661,7 +661,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
      player (hands on, two wrists, the escort) every game's law calls. -->
-<script src="src/systems/arrest.js?v=islelaw1022"></script>
+<script src="src/systems/arrest.js?v=people1022"></script>
 <!-- systems/cuffedplayer.js: what a cuffed player can do (hands gate at the window's capture
      phase, speed/stamina/get-up numbers, the grey bar) and how the room treats him; reads
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
@@ -987,10 +987,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/disaster_arena.js?v=mvenue1night1"></script>
 <script src="src/world/island_dressing.js?v=venue1022"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
-<script src="src/world/island_venue.js?v=shops1022"></script>
+<script src="src/world/island_venue.js?v=people1022"></script>
 <script src="src/world/island_night.js?v=night1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
-<script src="src/entities/survivorbot.js?v=mislelashops1"></script>
+<script src="src/entities/survivorbot.js?v=people1022"></script>
 <script src="src/modes/survival.js?v=night1022"></script>
 <!-- THE ONE WAY A DISASTER HURTS THE PLAYER (CBZ.disasterHurt): warning before an
      instant death, i-frames, no chip, physical shelter, regen. survival.js's
@@ -1333,7 +1333,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/ladder.js: CBZ.cityLadder, the city body for CBZ.brain.demand (the
      demand ladder: a mugger, a doorman, a corner crew, a guard asking first).
      peds.js think() yields to it; nothing runs at parse. -->
-<script src="src/city/ladder.js?v=ladder1022"></script>
+<script src="src/city/ladder.js?v=people1022"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1419,6 +1419,11 @@ document.body.appendChild(b);}}catch(e){}})();
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
 <script src="src/world/island_lodging.js?v=night1022"></script>
+<!-- THE ISLANDS' PEOPLE (world/island_people.js): Gang City's street crowd
+     (city/peds.js) on the island in force, with homes and work in its
+     buildings, the trades' hours and shutters, and the posted staff
+     (CBZ.islandVenue.staff). After island_town.js, island_venue.js, peds.js
+     and archipelago.js. -->
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the
@@ -1575,7 +1580,7 @@ document.body.appendChild(b);}}catch(e){}})();
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=ord1022b"></script>
+<script src="src/city/orders.js?v=people1022"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
