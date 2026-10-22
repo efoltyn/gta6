@@ -6817,6 +6817,7 @@
   }
   const _gaitBody = {};
   function animChar(ch, speed, dt) {
+    ch._animAt = CBZ.now;              // this rig's legs were stepped this frame (systems/verbs.js asks)
     animCharBody(ch, speed, dt);
     // THE THIGHS HANG FROM THE PELVIS, IN EVERY POSE: the walk's bob, the
     // crouch's drop, the counter-rotation and every posed branch move `body`

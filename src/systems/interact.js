@@ -123,6 +123,12 @@
     // PUNCH on the man whose verbs you tapped (the fire button swings at
     // whoever is in front). combat.js punch writes the blow into the jail's law.
     punch:    { label: "Punch",     fn: (a) => (CBZ.punch ? CBZ.punch(a) : { ok: false, msg: "" }) },
+    // HANDS BEHIND YOUR BACK the blow is the forehead (combat.js punch in
+    // cuffs; walked by the man you hit, the back of the head: melee.js butt)
+    headbutt: { label: "Headbutt",  fn: (a) => {
+      if (CBZ.melee && CBZ.melee.butt && CBZ.melee.butt()) return { ok: true, msg: "" };
+      return CBZ.punch ? CBZ.punch(a, { butt: true }) : { ok: false, msg: "" };
+    } },
     // ---- A MAN ON THE FLOOR (knocked down, knocked out): the disaster game's
     // DOWN set (systems/handverbs.js) plus his pockets and your boot
     // over the shoulder: grapple.grab on a man who is down is CBZ.verbs.carry
@@ -488,7 +494,12 @@
     if (v.indexOf("restrain") >= 0 && !hasRope()) v = v.filter(function (x) { return x !== "restrain"; });
     // CUFFED (CBZ.arrest.playerCuffed): only what a mouth can do
     const C = CBZ.cuffedPlayer;
-    if (C && C.on()) v = v.filter(function (x) { return !isHand(x) && x !== "grab" && C.verbAllowed(x); });
+    if (C && C.on()) {
+      // the blow survives the cuffs as a headbutt, in the punch's place
+      const hit = v.indexOf("punch") >= 0 ? v.indexOf("punch") : v.indexOf("kick");
+      if (hit >= 0 && v.indexOf("headbutt") < 0) { v = v.slice(); v[hit] = "headbutt"; }
+      v = v.filter(function (x) { return !isHand(x) && x !== "grab" && C.verbAllowed(x); });
+    }
     return v.length > MAX_VERBS ? v.slice(0, MAX_VERBS) : v;
   }
 

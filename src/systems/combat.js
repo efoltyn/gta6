@@ -263,7 +263,9 @@
     // CHEST TO CHEST the heavy beat is the HEADBUTT: there is no room to
     // turn a hook over, so the forehead goes through his nose instead
     const close = !cuffs && !blade && !picked && heavy && closeFoe(hasTarget ? actor : null) < 0.82;
-    const kind = cuffs ? "kick" : picked ? (blade && (picked === "slash" || picked === "stab") ? picked : blade ? "stab" : picked)
+    // cuffed: the forehead for a man chest to chest, the foot further out
+    const butt = cuffs && (!!(opts && opts.butt) || closeFoe(hasTarget ? actor : null) < ((CBZ.melee && CBZ.melee.BUTT_D) || 1.0));
+    const kind = cuffs ? (butt ? "headbutt" : "kick") : picked ? (blade && (picked === "slash" || picked === "stab") ? picked : blade ? "stab" : picked)
       : blade ? "stab" : (heavy ? (close ? "headbutt" : "hook") : (next % 2 ? "jab" : "cross"));
     // no man named: square up to where you are looking; the swing finds
     // whoever is actually there
@@ -292,7 +294,7 @@
       weapon: blade ? BLADE_W : null,
       candidates: hasTarget ? null : candidates,
       maxLunge,
-      onLand: function (res) { landPunch(res, attack); },
+      onLand: function (res) { landPunch(res, attack); if (butt) hurtSelf(); },
       onBlocked: function (res) { blockedPunch(res, attack); },
       onWhiff: whiffPunch,
     });
@@ -308,6 +310,13 @@
     // a swing is a swing: systems/capture.js reads it as resisting an order
     CBZ.game._lawSwingT = CBZ.game.elapsed || 0;
     return { ok: true, msg: "" };
+  }
+
+  // a headbutt in cuffs: the skull that does it rings too
+  function hurtSelf() {
+    const P = CBZ.player;
+    if (P && typeof P.hp === "number" && P.hp > 6) P.hp -= 4;
+    if (CBZ.shake) CBZ.shake(0.35);
   }
 
   // WHO YOU HIT, AND WHERE, DECIDES WHAT IT COSTS THEM. `attack.dmg` is the
@@ -661,6 +670,18 @@
         return punch(null, spec.verb === "ground" ? null : spec).ok;
       },
       guard(on) { CBZ.player._blocking = on ? 1 : 0; if (CBZ.playerChar) CBZ.playerChar.fightStance = !!on; },
+      // walked in cuffs: the back of the head into the screw holding you
+      // (verbs.js V.headbuttHold), landed as any blow on him: his hp, his
+      // vitals, the assault on an officer (theLaw -> prisonOffense)
+      landButt(res) {
+        const actor = res.target;
+        if (!actor || actor.dead) { res.reaction = "none"; return; }
+        if (actor.hp == null) actor.hp = maxHpOf(actor);
+        stamina = Math.max(0, stamina - 0.3);
+        lastPunch = CBZ.now;
+        CBZ.game._lawSwingT = CBZ.game.elapsed || 0;
+        landPunch(res, { heavy: true, kind: "headbutt", blade: false, fresh: 0.35 + 0.65 * stamina, dmg: 11 * (KIND_DMG.headbutt || 1.3) * 0.9 });
+      },
     });
   }
   addEventListener("mousedown", (e) => {

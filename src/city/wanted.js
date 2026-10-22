@@ -843,8 +843,16 @@
   // Both default to the existing generic text when omitted — fully backward
   // compatible with every other bust() caller.
   function bust(opts) {
-    if (busting || g.busted) return;
     opts = opts || {};
+    // a real pair of cuffs just closed (opts.take) with no scene running: the
+    // latch is stale (an arc torn down by a mode change, a booking that never
+    // cleared it) and must not eat this arrest. Before, it did: the cuffs
+    // stayed on, the escort had nowhere to walk you, and every unit on the
+    // street closed in and stood there.
+    if (busting || g.busted) {
+      if (!(opts.take && (!arrestScene || arrestScene.finished))) return;
+      busting = false; g.busted = false;
+    }
     // AN ARREST THE WORLD MADE IS HANDS ON YOU, OR IT IS NOTHING. With no
     // cuffs on yet this is a take (he walks up and cuffs you; the arc starts
     // when the cuffs close and comes back through here with opts.take). If
@@ -1050,7 +1058,9 @@
     // once no officer is near for a while); the collar is off, not the charge
     clearArc(sc, reason === "broke");
     arrestScene = null; busting = false;
-    if (reason === "broke" || reason === "escaped") g.busted = false;
+    // the collar is over, whatever ended it: a latch left set (a cancel, a
+    // mode change) stood every unit down and refused every later arrest
+    g.busted = false;
     if (reason === "dead") return;                   // death.js owns the slate
   }
   CBZ.cityArrestAbort = function () { abortArc("cancel"); };
@@ -1249,7 +1259,7 @@
     if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(false); } catch (e) {} }
     if (CBZ.player) CBZ.player._cityArrested = false;
     if (CBZ.playerChar) { CBZ.playerChar.handsUp = false; CBZ.playerChar.cuffed = false; }
-    busting = false;
+    busting = false; g.busted = false;
   };
 
   // an officer squares up on you by TURNING, not by snapping 180 degrees in a
@@ -1262,6 +1272,9 @@
   }
   CBZ.onUpdate(32.8, function (dt) {
     const sc = arrestScene;
+    // NO COLLAR, NO LATCH: busted with no scene and nothing booking you in
+    // (busting is held through the booking) is a latch nobody cleared
+    if (!sc && !busting && g.busted && g.mode === "city") g.busted = false;
     if (!sc || sc.finished) return;
     if (g.mode !== "city") { abortArc("mode"); return; }
     if (!(dt > 0) || dt > 0.4) dt = 0.05;
@@ -1403,7 +1416,10 @@
         // THE TAKE WALKS YOU (arrest.js): his hand on your arm, the other on
         // the cuffs. Dead weight slows him; pulling away is a fight.
         sc._goal = door;
-        if (sc.take.phase === "arrived" || sc.t >= MARCH_MAX * 2.2) {
+        // the walk gets as long as the walk is (a unit parked 40 m off is a
+        // half-minute perp walk at his pace, not a cut into the back seat)
+        if (sc._cap == null && P) sc._cap = Math.max(MARCH_MAX * 2.2, Math.hypot(door.x - P.pos.x, door.z - P.pos.z) / WALK_SPD * 1.8 + 6);
+        if (sc.take.phase === "arrived" || sc.t >= (sc._cap || MARCH_MAX * 2.2)) {
           sc.take.finish(); sc.take = null; sc._goal = null;
           sc.phase = "door"; sc.t = 0;
         }

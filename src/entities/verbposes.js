@@ -518,9 +518,12 @@
       const k = p.phase === "hold" ? 1 : smooth(p.k);
       const escort = p.verb === "escort";
       const bend = escort ? 0.16 : 0.34;
-      stance(ch, T, 0.03 * k, 0.04, 0.16, -0.04, 0.16);
-      torso(T, bend * k, 0, 0);
-      head(T, 0.30 * k);
+      // THE REAR HEADBUTT (verbs.js V.headbuttHold): chin down and forward,
+      // then the skull and shoulders thrown back into the face behind
+      const bf = p.buttF || 0, bs = p.buttS || 0;
+      stance(ch, T, 0.03 * k + 0.04 * bf, 0.04, 0.16, -0.04, 0.16);
+      torso(T, bend * k + 0.30 * bf - 0.50 * bs, 0, 0);
+      head(T, 0.30 * k + 0.30 * bf - 1.05 * bs);
       return p.moving ? G_BODY : (G_BODY | G_LEGS);
     },
     // FRISKED: hands up by the head, legs spread

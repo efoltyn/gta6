@@ -1729,7 +1729,13 @@
       if ((k === " " || k === "w" || k === "spacebar") && playerHeld()) markPress();
     }, true);
     // a click or tap only counts while somebody actually has you
-    window.addEventListener("mousedown", function (e) { if (e && e.button === 0 && playerHeld()) markPress(); }, true);
+    window.addEventListener("mousedown", function (e) {
+      if (!(e && e.button === 0 && playerHeld())) return;
+      // walked in cuffs, the attack button is the headbutt (systems/melee.js
+      // CBZ.melee.butt hands it to the game); anything else held, a wrench
+      if (CBZ.melee && CBZ.melee.butt && CBZ.melee.butt()) return;
+      markPress();
+    }, true);
     window.addEventListener("touchstart", function () { if (playerHeld()) markPress(); }, { passive: true, capture: true });
   }
   function gripOf(S) {
@@ -2163,6 +2169,74 @@
     else if (quiet && S.opts.onEnd && !S._handover) { try { S.opts.onEnd(S); } catch (e) {} }
   }
 
+  /* ---- THE REAR HEADBUTT -------------------------------------------------
+     OWNER: "If I hit with hands behind my back, headbutt should be an
+     option." Walked in cuffs, the man holding you is right behind you: the
+     one weapon you have left is the back of your skull. Chin down and
+     forward (the cock), then the head and the shoulders thrown back into his
+     face, your weight going back into him with it (the snap). It lands only
+     if his face is really there (the two heads, on the live rigs, right
+     behind you); the game's own landing (opts.onLand(res), the punch-on-an-
+     officer consequences) runs, he takes the blow on his rig (V.react) and a
+     man with a broken nose lets go: you tear out of the hold, still cuffed.
+     It hurts you too.
+       V.headbuttHold(a, { onLand(res), onWhiff() }) -> session | null
+       (a held from behind in an escort; null when he is not) */
+  const BUTT = { DUR: 0.62, HIT: 0.58, IN: 0.24, REACH: 0.58, SELF: 4 };
+  V.BUTT = BUTT;
+  function buttCock(b) { const u = b.t / BUTT.DUR; return smooth(u / 0.45) * (1 - smooth((u - 0.45) / 0.13)); }
+  function buttSnap(b) { const u = b.t / BUTT.DUR; return smooth((u - 0.45) / 0.13) * (1 - smooth((u - 0.7) / 0.3)); }
+  V.headbuttHold = function (a, opts) {
+    a = norm(a);
+    const S = sessionOf(a);
+    if (!S || S.t !== a || S.tFree || S.verb !== "escort" || S.phase === "approach" || S.ground) return null;
+    if (S.butt) return S;
+    S.butt = { t: 0, done: false, opts: opts || {} };
+    return S;
+  };
+  const _bh = new THREE.Vector3(), _bf = new THREE.Vector3();
+  const _bres = { landed: false, blocked: false, slipped: false, zone: "head", dmgMul: 1, reaction: "stagger", point: null,
+    dir: { x: 0, z: 0 }, power: 0.85, kind: "headbutt", target: null, attacker: null, heavy: true, weapon: null, stagger: true,
+    blood: 0, force: 0, counter: false, blind: true, parried: false, guardBroken: false, ko: false };
+  function stepButt(S, dt) {
+    const b = S.butt, A = S.A, T = S.T;
+    const was = b.t;
+    b.t += dt;
+    if (was < BUTT.HIT * BUTT.DUR && b.t >= BUTT.HIT * BUTT.DUR) {
+      // where his face is, against where the back of your head went
+      const th = T.ch.head || (T.ch.parts && T.ch.parts.head);
+      let hit = false;
+      if (th && contactPoint(A.ch, "headCenter", _bf, true)) {
+        th.getWorldPosition(_bh);
+        const yaw = T.yaw(), bx = -Math.sin(yaw), bz = -Math.cos(yaw);
+        const dx = _bf.x - _bh.x, dy = _bf.y - _bh.y, dz = _bf.z - _bh.z;
+        const d = Math.hypot(dx, dy, dz), behind = (dx * bx + dz * bz) / (Math.hypot(dx, dz) || 1);
+        hit = d < BUTT.REACH * (A.scale / 0.7 || 1) && behind > 0.4 && Math.abs(dy) < 0.35;
+      }
+      const o = b.opts;
+      if (!hit) { if (o.onWhiff) { try { o.onWhiff(); } catch (e) {} } return; }
+      const r = _bres;
+      r.landed = true; r.zone = "head"; r.dmgMul = 1; r.reaction = "stagger"; r.point = _bf;
+      const yaw = T.yaw();
+      r.dir.x = -Math.sin(yaw); r.dir.z = -Math.cos(yaw);
+      r.target = S.a; r.attacker = S.t; r.blood = 0;
+      if (o.onLand) { try { o.onLand(r); } catch (e) { if (CBZ.CONFIG && CBZ.CONFIG.DEBUG) console.error("[verbs] butt", e); } }
+      if (S.done) return;
+      const off = S.a;
+      escape(S);                       // a broken nose lets go: out of his hands (still in the cuffs)
+      if (r.reaction === "knockdown" && typeof V.knockdown === "function") {
+        try { V.knockdown(off, { dir: r.dir, dur: 1.6, ko: false }); } catch (e) {}
+      } else if (r.reaction !== "none" && r.reaction !== "dead" && typeof V.react === "function") {
+        try { V.react(off, { zone: "head", kind: "headbutt", power: 0.85, dir: r.dir, reaction: "stagger", heavy: true }); } catch (e) {}
+      }
+      // it hurts you too: the skull that did it rings
+      if (T.isPlayer && CBZ.player && typeof CBZ.player.hp === "number" && CBZ.player.hp > BUTT.SELF + 1) CBZ.player.hp -= BUTT.SELF;
+      if (T.isPlayer && CBZ.shake) CBZ.shake(0.45);
+      return;
+    }
+    if (b.t >= BUTT.DUR) S.butt = null;
+  }
+
   /* ---- THE PER-FRAME STEP OF ONE SESSION -------------------------------- */
   function stepSession(S, dt) {
     const A = body(S.a), T = body(S.t), def = S.def;
@@ -2191,6 +2265,16 @@
     }
     if (S.done) return;
     S.k = S.dur > 0 && isFinite(S.dur) ? clamp01(S.pt / S.dur) : 1;
+    /* THE HOLDER'S LEGS WALK. A man the verb moves (the walk up to you, V.walk:
+       an escort, a march to the cell or the car) has been handed over by his
+       own game (police.js skips an officer who is _arresting, guards.js a
+       screw on _escort): nobody stepped his legs, so the hold pose left them
+       frozen and he slid across the floor. A rig nobody animated this frame,
+       the verb animates, at the ground he covered (entities/gait.js measures
+       it; the _verbWalk stamp keeps a "stand" call from treating it as
+       being carried). */
+    if (!A.isPlayer && CBZ.animChar && A.ch._animAt !== CBZ.now) CBZ.animChar(A.ch, S.aSpeed || 0, dt);
+    if (!S.ground) A.ch._verbWalk = CBZ.now;
     if (S.phase === "approach") return;
     // on the floor: he got up before the knee went down (his own clock ran
     // out on the walk over), or something else stood him up: not cuffed
@@ -2200,6 +2284,7 @@
     if (grabberHit(S)) return;
     struggle(S, dt);
     if (S.done) return;
+    if (S.butt) { stepButt(S, dt); if (S.done) return; }
 
     const vp = VP();
     if (S.aLock && S.phase !== "approach" && S.phase !== "align") {
@@ -2239,6 +2324,9 @@
     } else if (!S.tFree) {
       if (S.ownT && CBZ.animChar && !T.isPlayer) CBZ.animChar(T.ch, S.tSpeed, dt);
       placeTarget(S, A, T, dt, yawA);
+      // walked on his own feet (not lifted, not dragged): his legs follow the
+      // ground covered even while his own controller says "stand" (gait.js)
+      if (!S.pl.anchor && !S.pl.drag && !S.pl.ground) T.ch._verbWalk = CBZ.now;
       poseSide(S, T, def.poseT(S), dt);
       // his own arms: behind the back for the cuff / escort
       const selfK = def.selfT ? def.selfT(S) : 0;
@@ -2343,13 +2431,15 @@
     _pp.writhe = B === S.T ? S.writhe : 0;
     _pp.moving = B === S.A ? S.aSpeed > 0.4 : S.tSpeed > 0.4;
     _pp.knee = null;
+    _pp.buttF = 0; _pp.buttS = 0;
+    if (S.butt && B === S.T) { _pp.buttF = buttCock(S.butt); _pp.buttS = buttSnap(S.butt); }
     if (S.ground && B === S.A && S.gs) { _pp.knee = groundKnee(S); _pp.kneeSide = S.gs.side; _pp.twist = S.gs.twist; }
     _pp.ground = S.verb === "tackle" && (S.phase === "outcome" || S.phase === "release") && S.result && S.result.outcome === "open" && (B === S.T || S.phase === "outcome" || S.k < 0.5);
     if (S.verb === "carry" && B === S.A && (S.phase === "drive" || S.phase === "contact" || S.phase === "release")) {
       _pp.k = S.phase === "contact" ? 0.3 * smooth(S.k) : S.phase === "drive" ? S.k : 1 - S.k;
     }
     if (S.verb === "carry" && B === S.T && S.phase === "release") _pp.k = 1 - S.k;
-    vp.set(B.ch, name, _pp, S.verb === "tackle" || S.verb === "shove" || S.verb === "throw" ? 16 : 11);
+    vp.set(B.ch, name, _pp, S.butt && B === S.T ? 26 : S.verb === "tackle" || S.verb === "shove" || S.verb === "throw" ? 16 : 11);
     vp.write(B.ch, dt);
   }
 
@@ -2442,6 +2532,7 @@
     o.lx = 0; o.lz = S.work; o.dy = 0; o.relYaw = 0; o.pitch = 0; o.pitchA = 0;
     o.anchor = null; o.anchorK = 0; o.anchorPitch = 0; o.anchorBack = null; o.liftUp = 0; o.ground = false; o.drag = false;
     S.def.place(S, o);
+    if (S.butt) o.lz -= BUTT.IN * buttSnap(S.butt) - 0.05 * buttCock(S.butt);
     const fx = fwdX(yawA), fz = fwdZ(yawA);
     // a man fighting the grip wrenches away from it
     if (S.writhe > 0 && !o.ground && !o.drag && !o.anchor) o.lz += 0.05 * S.writhe;
