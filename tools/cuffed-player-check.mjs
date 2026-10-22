@@ -209,7 +209,8 @@ for (const html of ["index.html", "disaster.html"]) {
 }
 check(/if \(ctx\.cuffed && !o\.cuffOk\) return false;/.test(read("src/city/interactions.js")), "city registry: only cuffOk options in cuffs");
 check(/cuffOk: true/.test(read("src/games/jail.js")), "the booking desk stays usable in cuffs");
-check(/kind = cuffs \? "kick"/.test(read("src/systems/combat.js")), "prison: the punch is a kick in cuffs");
+check(/kind = cuffs \? \(butt \? "headbutt" : "kick"\)/.test(read("src/systems/combat.js")), "prison: the punch is a headbutt (close) or a kick in cuffs");
+check(/V\.headbuttHold = function/.test(read("src/systems/verbs.js")) && /M\.butt = function/.test(read("src/systems/melee.js")), "walked in cuffs: the attack is the rear headbutt");
 check(/function cuffKick\(\)/.test(read("src/city/combat.js")), "city: the swing is a kick in cuffs");
 check(/opts\.instant[^;]*cuffedPlayer/.test(read("src/city/vehicles.js")), "city: no getting into a car in cuffs (scripted seats aside)");
 check(/cuffedPlayer && CBZ\.cuffedPlayer\.on\(\)\) return \{ open: false/.test(read("src/city/loyalty.js")), "no card reader or key opens for a cuffed man");

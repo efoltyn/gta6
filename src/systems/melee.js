@@ -685,11 +685,15 @@
            down (the man in front is on the floor), weapon {kind, blade},
            cuffed, n (how many quick strikes in this run) } */
   const _pk = { verb: "strike", kind: "jab", heavy: false, arm: null, lunge: null };
+  const BUTT_D = 1.0;          // m centre to centre: inside this a cuffed man headbutts
+  M.BUTT_D = BUTT_D;
   M.pick = function (c) {
     const P = _pk;
     P.verb = "strike"; P.heavy = false; P.arm = null; P.lunge = null;
     const power = c.mode === "power";
-    if (c.cuffed) { P.kind = "kick"; return P; }
+    // hands behind the back: a man chest to chest gets the forehead, further
+    // out the foot is all there is
+    if (c.cuffed) { P.kind = (c.dist != null ? c.dist : 99) < BUTT_D ? "headbutt" : "kick"; P.heavy = P.kind === "headbutt"; return P; }
     if (c.down) { P.verb = "ground"; P.kind = power ? "gnpElbow" : "gnp"; P.heavy = power; return P; }
     const fwd = c.fwd > 0.5, back = c.back > 0.5, side = Math.abs(c.side || 0) > 0.5 ? (c.side > 0 ? 1 : -1) : 0;
     const dist = c.dist != null ? c.dist : 99;
@@ -757,7 +761,28 @@
     return c;
   }
   function wallS() { return (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000; }
+  /* WALKED IN CUFFS, THE BUTTON IS THE BACK OF YOUR HEAD. The man holding
+     you is right behind you (CBZ.verbs.headbuttHold); the game's adapter
+     lands it as it lands any blow on an officer (adapter.landButt(res)).
+     Called from the trigger here (touch FIRE, the pad) and from verbs.js's
+     click while held (the mouse). true = thrown (the press is spent). */
+  let buttAt = -9;
+  M.butt = function () {
+    const V = CBZ.verbs, C = CBZ.cuffedPlayer;
+    if (!V || !V.headbuttHold || !V.playerActor || !(C && C.on())) return false;
+    const g = CBZ.game;
+    if (!g || g.state !== "playing" || (CBZ.player && CBZ.player.dead)) return false;
+    const ad = adapterNow();
+    if (!ad || !ad.landButt) return false;
+    const t = wallS();
+    if (t - buttAt < 0.9) return !!(V.playerHeld && V.playerHeld());   // one at a time: the last is still coming back
+    const S = V.headbuttHold(V.playerActor(), { onLand: function (res) { ad.landButt(res); } });
+    if (!S) return false;
+    buttAt = t;
+    return true;
+  };
   M.trigger = function (down) {
+    if (down && M.butt()) return true;
     const ad = adapterNow();
     if (!ad || (ad.ready && !ad.ready())) { PC.down = false; if (PC.guard) setGuard(ad, false); return false; }
     const t = wallS();

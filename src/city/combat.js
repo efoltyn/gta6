@@ -1419,28 +1419,40 @@
   function handsFree() { return !(CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld()); }
   function active() { return g.mode === "city" && g.state === "playing" && document.pointerLockElement && !P.driving && handsFree(); }
   // CUFFED (CBZ.arrest.playerCuffed): no fists, no guard, no finisher, no
-  // weapon. What is left is a foot: one front kick, slow to throw, with a
-  // real gap before the next, off-balance so it lands soft and costs wind.
+  // weapon. What is left is the forehead for a man chest to chest, and a foot
+  // for one further out: slow to throw, a real gap before the next,
+  // off-balance so it lands soft and costs wind. (Walked in cuffs, the man
+  // behind you gets the back of your head: melee.js CBZ.melee.butt.)
   function cuffedNow() { return !!(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()); }
   function cuffKick() {
     if (pBrokenT > 0 || staggerT > 0 || tired()) return;
     const V = CBZ.verbs, pa = playerActor();
     if (!V || !V.strike || !pa) return;
+    if (CBZ.melee && CBZ.melee.butt && CBZ.melee.butt()) { markFighting(); spend(12); fireCD = 0.95; return; }
     markFighting();
     combo = 0; comboT = 0;
     const special = aimSpecial(2.1, 0.3);
     faceLook();
-    const dmg = 13;
-    const S = V.strike(pa, special, {
-      kind: "kick", heavy: false, speed: 0.8,
-      candidates: special ? null : cityCandidates,
-      onLand: function (res) { landCity(res, dmg, "light", "kick"); },
-      onBlocked: function (res) { blockedCity(res, dmg, "kick"); },
+    const near = aimTarget(1.6, 0.45);
+    const butt = !special && near && Math.hypot(near.pos.x - P.pos.x, near.pos.z - P.pos.z) < ((CBZ.melee && CBZ.melee.BUTT_D) || 1.0);
+    const kind = butt ? "headbutt" : "kick";
+    const dmg = butt ? 15 : 13;
+    const S = V.strike(pa, butt ? near : special, {
+      kind: kind, heavy: butt, speed: 0.8,
+      candidates: special || butt ? null : cityCandidates,
+      onLand: function (res) { landCity(res, dmg, butt ? "heavy" : "light", kind); if (butt) hurtSelf(); },
+      onBlocked: function (res) { blockedCity(res, dmg, kind); },
       onBeat: special ? function () { landSpecial(special, dmg, "light"); } : null,
     });
     if (!S) return;
     spend(10);
     fireCD = 0.95;
+  }
+
+  // the skull that does it rings: a little off you too (a headbutt in cuffs)
+  function hurtSelf() {
+    if (typeof P.hp === "number" && P.hp > 6) P.hp -= 4;
+    if (CBZ.shake) CBZ.shake(0.35);
   }
 
   document.addEventListener("mousedown", function (e) {
@@ -1487,6 +1499,9 @@
      Holding the button is the same guard RMB raises (parry window and all). */
   if (CBZ.melee && CBZ.melee.adapt) {
     CBZ.melee.adapt("city", {
+      // walked in cuffs: the back of the head into the officer holding you,
+      // landed as any blow on him (his own meleeHit: the assault on an officer)
+      landButt(res) { markFighting(); spend(12); landCity(res, 16, "heavy", "headbutt"); },
       ready() {
         if (g.mode !== "city" || g.state !== "playing" || P.dead || P.driving || !handsFree()) return false;
         if (CBZ.cityMenuOpen || CBZ.cityHasGun()) return false;

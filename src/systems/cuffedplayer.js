@@ -21,8 +21,12 @@
               cuffed, so every listener and every polled key in the game
               agrees without each learning about cuffs. Space (the struggle,
               systems/arrest.js), WASD, Shift, the camera and the menus are
-              never touched. A kick replaces the punch (systems/combat.js,
-              city/combat.js). The CITY's E is not swallowed: city/
+              never touched. The punch becomes a HEADBUTT on a man chest to
+              chest and a kick further out (systems/combat.js, city/combat.js,
+              systems/melee.js pick); walked in cuffs, the attack button is
+              the back of your head into the officer behind you, and a clean
+              one breaks his grip (systems/verbs.js V.headbuttHold,
+              CBZ.melee.butt). The card shows it as "Headbutt". The CITY's E is not swallowed: city/
               interactions.js is the one registry there and it passes only
               options marked cuffOk (the booking desk), and refuses the rest.
      THE BAR  dimmed, grey and dead to clicks (body.cuffed, css/inventory.css)
@@ -91,7 +95,7 @@
   C.barDisabled = function (cuffed) { return !!cuffed; };
   // prison card verbs that need hands (hand over, take, search, tie, cuff)
   const HAND_VERBS = { trade: 1, steal: 1, bribe: 1, payoff: 1, pay: 1, rob: 1, restrain: 1, detain: 1,
-    search: 1, settle: 1, whand: 1, squash: 1, paySilence: 1, punch: 1, shove: 1, frisk: 1, pickUp: 1, drag: 1, kick: 1, befriend: 0 };
+    search: 1, settle: 1, whand: 1, squash: 1, paySilence: 1, punch: 1, shove: 1, frisk: 1, pickUp: 1, drag: 1, kick: 1, befriend: 0, headbutt: 0 };
   C.verbAllowed = function (v) { return !HAND_VERBS[v]; };
 
   // ---- the room ----

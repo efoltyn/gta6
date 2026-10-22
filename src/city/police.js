@@ -3257,10 +3257,22 @@
           (c._firedUponT != null && (copClock - c._firedUponT) < 25));
         const roe = LAW.roe(c, tgt, isPlayer, stars, firedUpon, arrestFirst());
         let wantShoot = false, law = null;
-        if (isPlayer && g.busted) {
-          // A COLLAR IN PROGRESS IS NOT A FIREFIGHT: the arrest arc (wanted.js)
-          // owns the scene and every other unit stands down.
+        const collar = isPlayer ? collarIsAnothers(c) : false;
+        if (collar) {
+          // A COLLAR IN PROGRESS IS NOT A FIREFIGHT, AND IT IS ONE OFFICER'S.
+          // The man with his hands on you (arrest.js's take) or the arc's
+          // officer (wanted.js) finishes it; every other unit stands down.
+          // They used to keep their approach and close to 1.5 m, every one of
+          // them, a ring of bodies the escort could not walk through: the
+          // owner's "they all surround me and don't finish the job".
           LAW.release(c); c.arrestT = 0;
+          standBy(c, dx, dz, dist, dt, near, collar === "cover");
+          continue;
+        } else if (isPlayer && g.busted) {
+          // the arc's own officer between its beats: the scene places him
+          LAW.release(c); c.arrestT = 0;
+          holdFace(c, dx, dz, dt, near);
+          continue;
         } else if (isPlayer && P.driving) {
           // a driving suspect is pursued; the cuffs only go on a man on foot.
           // Once the car is STOPPED (boxed in, crashed, parked) one officer
@@ -3612,6 +3624,45 @@
     const A = c._lawReg ? brainAct() : null;
     if (A) { _mv.speed = spd; if (A.moveTo(c, c.pos.x + dx, c.pos.z + dz, _mv)) return; }
     rawStep(c, dx, dz, spd, dt, near);
+  }
+  /* WHOSE COLLAR. The player is in somebody's hands (arrest.js's live take),
+     in the cuffs under the arc (g.busted), or walking off in cuffs nobody
+     holds yet: an officer who is not the one doing it is a perimeter. */
+  function collarIsAnothers(c) {
+    if (c._arrestingPlayer) return false;              // the arc's own officer: wanted.js has him
+    if (g.busted) return "walk";
+    const AR = CBZ.arrest, h = AR && AR.active ? AR.active() : null;
+    if (!(h && h.officer && h.officer !== c && !h.done)) return false;
+    // while the cuffs are still going on, backup COVERS him close (arrest.js
+    // counts it against your struggle); once they are on, the ring opens out
+    return h.phase === "reach" || h.phase === "cuffing" ? "cover" : "walk";
+  }
+  /* THE PERIMETER, THEN THE BEAT. A loose ring 5-9 m out, facing the
+     collar (in case it goes wrong), for a few seconds; then he goes back to
+     work the way a stood-down officer does (giveUp: back toward the precinct
+     and his unit, off the street once he is out of your world). A man who
+     tears loose and runs is the hunt again: _standByT clears the moment the
+     collar is not another man's. */
+  const STANDBY_T = 7, RING_IN = 5, RING_OUT = 9, COVER_IN = 1.8, COVER_OUT = 2.5;
+  function standBy(c, dx, dz, dist, dt, near, cover) {
+    if (c._standByAt == null || copClock - c._standByAt > 1) c._standByT = 0;   // a fresh collar, a fresh wait
+    c._standByAt = copClock;
+    if (cover) {
+      // the cuffs are going on: close cover, not a second pair of hands
+      if (dist < COVER_IN) stepTo(c, -dx, -dz, c.baseSpeed * 0.5, dt, near);
+      else if (dist > COVER_OUT) stepTo(c, dx, dz, c.baseSpeed, dt, near);
+      else holdFace(c, dx, dz, dt, near);
+      return;
+    }
+    c._standByT += dt;
+    if (c._standByT > STANDBY_T && !c.swat) {
+      c._standByT = 0; c.curTarget = null; c.sees = false; c.giveUp = true;
+      if (c.armed) holsterGun(c);
+      return;
+    }
+    if (dist < RING_IN) stepTo(c, -dx, -dz, c.baseSpeed * 0.55, dt, near);
+    else if (dist > RING_OUT) stepTo(c, dx, dz, c.baseSpeed * 0.8, dt, near);
+    else holdFace(c, dx, dz, dt, near);
   }
   // stand still, squared up on (dx,dz)
   function holdFace(c, dx, dz, dt, near) {

@@ -267,6 +267,12 @@
     G.yawRate = damp(G.yawRate, clamp(dyaw / dt, -9, 9), 14, dt);
     const meas = Math.sqrt(dx * dx + dz * dz) / dt;
     const told = speed > 0.2 ? speed : 0;
+    /* WALKED BY A HOLD (systems/verbs.js stamps ch._verbWalk on both bodies a
+       standing hold moves: an escort, a march, a man led by the arm). His own
+       controller still says "stand" (the player's stick is the struggle, the
+       officer's AI is off duty), but the root goes where the hands send it:
+       those legs walk the ground covered, they are not carried like a deck. */
+    const led = told === 0 && ch._verbWalk != null && Math.abs((CBZ.now || 0) - ch._verbWalk) < 250;
     // A ROOT THAT NEVER MOVES BUT IS TOLD TO WALK: the ground runs under him
     // (several zero-motion frames in a row, so a body animated twice in one
     // frame does not flip into it on the second call)
@@ -289,7 +295,7 @@
     }
     // CARRIED: told to stand, yet the root moves (a deck, a lift, a mount, a
     // shove): the planted feet ride with it instead of being left behind
-    G.carried = !tread && told === 0 && meas > 0.35;
+    G.carried = !tread && told === 0 && !led && meas > 0.35;
     if (G.carried) {
       for (let i = 0; i < 2; i++) {
         const F = G.feet[i];
