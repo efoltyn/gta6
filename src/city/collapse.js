@@ -462,7 +462,12 @@
   };
 
   // ---- which building, in what frame ---------------------------------------
-  function arenaLots() { const A = CBZ.city && (CBZ.city.arena || CBZ.city); return (A && A.lots) || null; }
+  // the ledger's one lot list (arena + annex + promoted), so an annex tower's
+  // key is its lot's like every other building's
+  function arenaLots() {
+    if (CBZ.structure && CBZ.structure.allLots) return CBZ.structure.allLots();
+    const A = CBZ.city && (CBZ.city.arena || CBZ.city); return (A && A.lots) || null;
+  }
   function norm(x) {
     if (!x) return null;
     if (x.building && x.building.group) x = x.building;           // a lot
@@ -632,6 +637,35 @@
   /* A generator, like the cut it feeds: a tower's group holds thousands of
      meshes and its pools tens of thousands of instances, so reading them
      yields to the frame every few hundred instead of landing on one. */
+  /* A GPU-ONLY GEOMETRY HAS NO TRIANGLES TO CUT. The streamed city drops a
+     merged mesh's JS arrays once they are uploaded (core/batch.js
+     dropUploaded, core/citystream.js), so the cut read `index.array` as
+     null, threw, and the building was marked failed for good: every annex
+     and downtown tower whose deco or rooms had been merged could take no
+     damage at all — a plane into its 30th floor carved nothing. The
+     arrays are read back from the GPU for the cut (once, for this one
+     building: core/batch.js batchReadbackGeo) and dropped again when the
+     cut is done (releaseReadback). A geometry that cannot be read back is
+     left out of the cut rather than failing it. */
+  function readable(S, g) {
+    const pos = g.attributes.position;
+    let need = !pos.array || (g.index && !g.index.array);
+    if (!need) for (const k in g.attributes) { const a = g.attributes[k]; if (a && !a.array && !a.isInterleavedBufferAttribute) { need = true; break; } }
+    if (!need) return true;
+    // a packed (quantised) attribute is citystream's to restore, not ours
+    for (const k in g.attributes) { const a = g.attributes[k]; if (a && (a._cbzQ || a._cbzQn)) return false; }
+    const gone = [];
+    for (const k in g.attributes) { const a = g.attributes[k]; if (a && !a.array) gone.push(a); }
+    if (g.index && !g.index.array) gone.push(g.index);
+    if (!CBZ.batchReadbackGeo || !CBZ.batchReadbackGeo(g)) return false;
+    (S.readback || (S.readback = [])).push.apply(S.readback, gone);
+    return !!(pos.array && (!g.index || g.index.array));
+  }
+  function releaseReadback(S) {
+    if (!S.readback) return;
+    for (const a of S.readback) a.array = null;
+    S.readback = null;
+  }
   function* gatherSources(S) {
     const D = S.D, grp = D.grp, out = [];
     const solids = new Set(D.solids || []);
@@ -648,6 +682,7 @@
       if (o._breached && !solids.has(o) && !o.visible) continue;
       const geo = o.geometry;
       if (!geo || !geo.attributes || !geo.attributes.position) continue;
+      if (!readable(S, geo)) continue;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       let any = false;
       for (const mm of mats) if (mm && mm.visible !== false && !(mm.transparent && mm.opacity < 0.05)) any = true;
@@ -682,6 +717,7 @@
       if (!e || e.whole || e._stash || !e.mesh || (e.mesh._cbzRoom && !e.mesh._cbzRoom.built)) continue;
       const g = e.mesh.geometry;
       if (!g || !g.attributes || !g.attributes.position || e.mesh._cbzPacked) continue;
+      if (!readable(S, g)) continue;
       out.push({ geo: g, mat: e.mesh.material, M: new THREE.Matrix4().multiplyMatrices(S.Linv, e.mesh.matrixWorld), glass: false, col: null, start: e.start, count: e.count });
     }
     /* THE PANES (instanced pools, world records), cut from what the pool
@@ -865,6 +901,7 @@
       if (!geo) continue;
       const pos = geo.attributes.position, nrm = geo.attributes.normal, uv = geo.attributes.uv, col = geo.attributes.color;
       const idx = geo.index;
+      if (!pos.array || (idx && !idx.array) || (nrm && !nrm.array) || (uv && !uv.array) || (col && !col.array)) continue;
       const M = src.M, e = M.elements;
       nm.getNormalMatrix(M);
       const q = nm.elements;
@@ -903,6 +940,7 @@
       }
     }
     S.stats.tris = n;
+    releaseReadback(S);
     yield* finishCut(S);
     S.stats.cutMs = Math.round(performance.now() - t0);
     stats.cuts++; stats.tris += n;
@@ -2855,7 +2893,7 @@
           const r = S.gen.next();
           if (r.done) { S.gen = null; break; }
         }
-      } catch (e) { console.warn("[collapse] cut failed", e); S.gen = null; S.failed = true; }
+      } catch (e) { console.warn("[collapse] cut failed", e); S.gen = null; S.failed = true; releaseReadback(S); }
       if (performance.now() - t0 >= budgetMs) break;
     }
   }

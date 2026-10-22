@@ -120,6 +120,10 @@
   function qs(lo, hi) { return CBZ.qScale ? CBZ.qScale(lo, hi) : (lo + hi) * 0.5; }
   function qi(lo, hi) { return Math.max(0, Math.round(qs(lo, hi))); }
   function inCity() { return CBZ.game && CBZ.game.mode === "city"; }
+  // The Isles / the disaster island: the same airframes crash into the same
+  // collapse engine there (no city ledger, no city blast chain)
+  function islandOn() { return !!(CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode)); }
+  function inWorld() { return inCity() || islandOn(); }
   function floorAt(x, z) { const v = CBZ.floorAt ? +CBZ.floorAt(x, z) : 0; return isFinite(v) ? v : 0; }
   function camDist(x, z) {
     const c = CBZ.camera && CBZ.camera.position;
@@ -680,7 +684,7 @@
        mesh  posed in WORLD space (parent it to the arena root first)
        opts  { spin, burning, hazard, dmg, by, byPlayer, own } */
   CBZ.cityWreckDebris = A.debris = function (mesh, vx, vy, vz, opts) {
-    if (!mesh || !inCity() || !CBZ.debris) return false;
+    if (!mesh || !inWorld() || !CBZ.debris) return false;
     opts = opts || {};
     const spin = opts.spin || (Math.random() - 0.5) * 5;
     let r = null;
@@ -713,6 +717,19 @@
     if (h.hurtT > 0) return;
     h.hurtT = 0.1;
     const cause = "crushed by falling debris";
+    if (!inCity()) {
+      const SV = CBZ.surv;
+      if (SV && SV.forEachActor && SV.hurt) {
+        try {
+          SV.forEachActor(function (a) {
+            if (!a || a.dead || !a.pos) return;
+            if (Math.abs(a.pos.x - h.x) > HAZ_R || Math.abs(a.pos.z - h.z) > HAZ_R || Math.abs(a.pos.y - h.y) > 3.5) return;
+            SV.hurt(a, Math.max(35, h.dmg), { fromX: h.x, fromZ: h.z, fromY: h.y, force: 9, fling: 4, cause: cause });
+          });
+        } catch (e) {}
+      }
+      return;
+    }
     try {
       if (CBZ.crowds && CBZ.crowds.crush) CBZ.crowds.crush(h.x, h.z, HAZ_R, { cause: cause, byPlayer: !!h.byPlayer });
     } catch (e) {}
@@ -809,7 +826,8 @@
     if (s.handled || isDone(s.obj)) return null;
     s.handled = true;
     markDone(s.obj);
-    if (!CBZ.CONFIG.AIR_IMPACT_V1 || !inCity()) return null;
+    if (!CBZ.CONFIG.AIR_IMPACT_V1 || !inWorld()) return null;
+    const city = inCity();
 
     const v = s.speed;
     // travel direction: velocity first (it is what actually hit), heading as
@@ -825,10 +843,16 @@
     // city/airspace.js): a live collider or a far building RECORD, which has
     // no collider at all. Only a caller with no hit falls back to asking the
     // collider set.
-    const hit = s.hit || (s.obj && s.obj._airHit) || null;
-    const building = hit
-      ? (hit.building != null ? !!hit.building : !!(hit.rec || (hit.collider && tallCollider(hit.collider))))
-      : !!facadeAt(x, y, z);
+    // The detector's own verdict is NOT trusted on its own: a tower is
+    // registered as storey-high wall pieces and 1.3 m floor slabs, so a jet
+    // that met a slab at the 30th floor was handed over as "not a building"
+    // (the slab is under the 2.5 m tall-collider bar) and got the ground
+    // crash: no hole, no fire, no ledger. What was hit is decided HERE, from
+    // the point, against the buildings themselves (A.buildingAt).
+    const hit0 = s.hit || (s.obj && s.obj._airHit) || null;
+    const where = A.buildingAt(x, y, z, hit0);
+    const building = !!where || !!(hit0 && hit0.building && hit0.collider && tallCollider(hit0.collider));
+    const hit = where ? Object.assign({}, hit0 || {}, { lot: where.lot, rec: where.rec, isle: where.isle, building: true }) : hit0;
     // A NaN speed from a half-initialised record must not poison the kinetic
     // arithmetic downstream. (The bus degrades a non-finite energy to
     // multiplier 1 rather than NaN, so this is belt-and-braces — but a NaN
@@ -855,7 +879,12 @@
 
     if (strike) {
       const kind = ROW[s.cls] || "crashSmall";
-      if (CBZ.detonate) {
+      if (!city) {
+        // off the city the crash path has already detonated through the
+        // mode's own blast route (playeraircraft.js crashCraft); a direct
+        // caller with no blast gets that same one here
+        if (!blastOpts && CBZ.detonate) { try { CBZ.detonate(x, y, z, "missile", { scale: s.cls === "airliner" ? 1.3 : 0.7 }); } catch (e) {} }
+      } else if (CBZ.detonate) {
         try {
           CBZ.detonate(x, y, z, kind, {
             by: s.byPlayer ? CBZ.player : null,
@@ -867,6 +896,9 @@
             dirx: dx, dirz: dz,
             entryDrawn: !!blastOpts,        // the crash path already drew a fireball
             building: building,
+            // the struck building, so the ledger books the hit on IT (and
+            // never on the nearest downtown lot to a tower it cannot see)
+            lot: (hit && hit.lot) || undefined,
             _airImpact: true,
           });
         } catch (e) {}
@@ -883,7 +915,10 @@
       // THE BUILDING TAKES THE AIRFRAME (see BUILDING STRIKE below): the
       // collapse system carves the hole the fuselage and wings cut, the fuel
       // burns the struck floors, the people on them die.
-      if (building) { try { buildingStrike(s, x, y, z, dx, dz, vImp, mass, hit); } catch (e) {} }
+      if (building) {
+        if (hit && hit.isle) { try { isleStrike(s, x, y, z, dx, dz, vImp, mass, hit.isle); } catch (e) {} }
+        else if (city) { try { buildingStrike(s, x, y, z, dx, dz, vImp, mass, hit); } catch (e) {} }
+      }
       else { try { killZone(x, y, z, Math.max(6, s.dims.span * 0.6), s, "plane crash"); } catch (e) {} }
     }
 
@@ -900,6 +935,13 @@
           });
       } catch (e) {}
     }
+
+    // THE AIRFRAME COMES APART IN THE BUILDING. What the deformation left of
+    // the hull (fuselage, engines, the other wing) is handed to the one
+    // rigid-body sim as pieces of itself, carrying what is left of the
+    // airframe's momentum on into the wound and down the face. A lodged,
+    // whole hull hanging off a tower was the "toy plane" read.
+    if (strike && building && grp) { try { breakUp(s, grp, dx, dz, vImp); } catch (e) {} }
 
     // The cartwheel is a GROUND-impact beat only.
     if (strike && !building && grp) {
@@ -930,7 +972,7 @@
     // the shell course under a facade skin is never seen: the pieces wear the
     // skin of the struck face (buildings.js CBZ.citySkin)
     const bld = c.ref.parent && c.ref.parent.userData && c.ref.parent.userData.bld;
-    if (bld && CBZ.cityIsShellMat && CBZ.cityIsShellMat(bld, mat)) {
+    if (bld && CBZ.cityIsShellMat && CBZ.citySkin && CBZ.cityIsShellMat(bld, mat)) {
       const sk = CBZ.citySkin(bld, x, z);
       if (sk) mat = sk;
     }
@@ -1040,25 +1082,34 @@
                  _impact: true, _airImpact: true, kind: "fuel" });
     } catch (e) {}
   }
-  function carveAndBurn(lot, s, x, y, z, dx, dz, E, depth) {
-    const d = s.dims, cls = s.cls;
-    const bld = lot && lot.building;
+  // THE CUT the airframe makes in a building, through the one collapse
+  // model: the fuselage at the face, both wings either side of it, and the
+  // deepest point the wreck reached — all at the height it actually hit.
+  // `bld` is anything CBZ.collapse.damage takes (a Gang City record, an
+  // island building record).
+  function carveSeats(bld, s, x, y, z, dx, dz, E, depth) {
+    if (!bld || !CBZ.collapse || !CBZ.collapse.damage) return 0;
+    const d = s.dims;
     let carved = 0;
-    if (bld && CBZ.collapse && CBZ.collapse.damage) {
-      const rx = -dz, rz = dx;
-      const Rc = Math.max(2.2, d.height * 0.45 + 1);
-      const Rw = Math.max(1.6, d.span * 0.14);
-      const wing = d.span * 0.32;
-      const dir = { x: dx, y: -0.1, z: dz };
-      // [depth into the face, offset across it, radius, share of E]
-      const seats = [[0.6, 0, Rc, 0.38], [0.6, wing, Rw, 0.16], [0.6, -wing, Rw, 0.16], [Math.max(1.2, depth), 0, Rc * 0.85, 0.30]];
-      for (let i = 0; i < seats.length; i++) {
-        const q = seats[i];
-        if (q[1] && Math.abs(q[1]) < 1.2) continue;           // a light single's wings are the fuselage seat
-        const p = { x: x + dx * q[0] + rx * q[1], y: y - (q[1] ? 0.3 : 0), z: z + dz * q[0] + rz * q[1] };
-        try { if (CBZ.collapse.damage(bld, p, q[2], E * q[3], dir)) carved++; } catch (e) {}
-      }
+    const rx = -dz, rz = dx;
+    const Rc = Math.max(2.2, d.height * 0.45 + 1);
+    const Rw = Math.max(1.6, d.span * 0.14);
+    const wing = d.span * 0.32;
+    const dir = { x: dx, y: -0.1, z: dz };
+    // [depth into the face, offset across it, radius, share of E]
+    const seats = [[0.6, 0, Rc, 0.38], [0.6, wing, Rw, 0.16], [0.6, -wing, Rw, 0.16], [Math.max(1.2, depth), 0, Rc * 0.85, 0.30]];
+    for (let i = 0; i < seats.length; i++) {
+      const q = seats[i];
+      if (q[1] && Math.abs(q[1]) < 1.2) continue;           // a light single's wings are the fuselage seat
+      const p = { x: x + dx * q[0] + rx * q[1], y: y - (q[1] ? 0.3 : 0), z: z + dz * q[0] + rz * q[1] };
+      try { if (CBZ.collapse.damage(bld, p, q[2], E * q[3], dir)) carved++; } catch (e) {}
     }
+    return carved;
+  }
+  function carveAndBurn(lot, s, x, y, z, dx, dz, E, depth) {
+    const cls = s.cls;
+    const bld = lot && lot.building;
+    const carved = carveSeats(bld, s, x, y, z, dx, dz, E, depth);
     // ---- the struck floors burn
     const S = CBZ.structure;
     if (lot && S && S.ignite) {
@@ -1119,6 +1170,7 @@
     vb = vb || 6;
     const by = s.byPlayer ? CBZ.player : null;
     let n = 0;
+    if (!inCity()) return isleKillZone(x, y, z, R, s, cause, vb);
     try {
       const peds = CBZ.cityPeds || [];
       for (let i = 0; i < peds.length && n < 40; i++) {
@@ -1140,6 +1192,162 @@
       if (y - floorAt(x, z) < 8 && CBZ.crowds && CBZ.crowds.crush) CBZ.crowds.crush(x, z, R * 0.7, { cause: cause, byPlayer: !!s.byPlayer });
     } catch (e) {}
     return n;
+  }
+
+  // The island's people on the struck floors: the mode's own kill bus
+  // (CBZ.surv), held to the same vertical band. The player in the cockpit is
+  // the crash path's business, as in the city.
+  function isleKillZone(x, y, z, R, s, cause, vb) {
+    const SV = CBZ.surv;
+    if (!SV || !SV.forEachActor || !SV.hurt) return 0;
+    let n = 0;
+    try {
+      SV.forEachActor(function (a) {
+        if (!a || a.dead || !a.pos || n >= 40) return;
+        if (a.isPlayer && s.byPlayer) return;
+        const ex = a.pos.x - x, ez = a.pos.z - z;
+        if (ex * ex + ez * ez > R * R || Math.abs(a.pos.y - y) > vb) return;
+        SV.hurt(a, 1e6, { fromX: x, fromZ: z, fromY: y, fling: 6, force: 14, cause: cause, lethal: true });
+        n++;
+      });
+    } catch (e) {}
+    return n;
+  }
+
+  /* ============================================================
+     WHAT BUILDING IS AT THIS POINT — A.buildingAt(x, y, z, hit)
+
+     The one answer to "did this airframe hit a building, and which one",
+     asked of the buildings themselves rather than of whichever collider
+     happened to be first along the sweep:
+       Gang City   the struck far/near record (city/airspace.js: every lot,
+                   annex tower and metro building, with its lot when it has
+                   one), else the ledger's lot whose footprint holds the
+                   point below its roof, else a tall facade collider
+       the island  the island building whose footprint (in its own yaw)
+                   holds the point between its base and its roof
+     Returns { lot, rec, isle } (any may be null) or null for open ground.
+     ============================================================ */
+  const _recs = [];
+  function islandBuildings() {
+    const I = CBZ.island;
+    if (I && Array.isArray(I.buildings)) return I.buildings;
+    const a = CBZ.surv && CBZ.surv.arena;
+    return (a && (a.buildings || a.fragile)) || null;
+  }
+  function islandBuildingAt(x, y, z, pad) {
+    const L = islandBuildings();
+    if (!L) return null;
+    let best = null, bd = 1e9;
+    for (let i = 0; i < L.length; i++) {
+      const b = L[i];
+      if (!b || b.fallen || !b.group) continue;
+      const bx = b.ox != null ? b.ox : b.x, bz = b.oz != null ? b.oz : b.z;
+      if (!isFinite(bx) || !isFinite(bz)) continue;
+      const gy = b.gy || 0, h = b.h || (b.storeys || 1) * (b.FH || 3.2);
+      if (y < gy - pad || y > gy + h + pad) continue;
+      const yaw = (b.group.rotation && b.group.rotation.y) || 0;
+      const co = Math.cos(yaw), si = Math.sin(yaw);
+      const rx = x - bx, rz = z - bz;
+      const lx = rx * co - rz * si, lz = rx * si + rz * co;
+      const ex = Math.max(0, Math.abs(lx) - (b.w || 8) / 2), ez = Math.max(0, Math.abs(lz) - (b.d || 8) / 2);
+      const d = Math.hypot(ex, ez);
+      if (d > pad || d >= bd) continue;
+      bd = d; best = b;
+    }
+    return best;
+  }
+  A.buildingAt = function (x, y, z, hit) {
+    if (!isFinite(x) || !isFinite(y) || !isFinite(z)) return null;
+    if (inCity()) {
+      if (hit && hit.lot && hit.lot.building) return { lot: hit.lot, rec: hit.rec || null, isle: null };
+      let rec = (hit && hit.rec) || null;
+      if (!rec && CBZ.airspace && CBZ.airspace.recordsAt) {
+        let rs = null;
+        try { rs = CBZ.airspace.recordsAt(x, y, z, 2.5, _recs); } catch (e) { rs = null; }
+        // the record that carries a lot (a real shell) wins over a bare plan
+        if (rs) for (let i = 0; i < rs.length; i++) { if (!rec || (!rec.lot && rs[i].lot)) rec = rs[i]; }
+      }
+      if (rec) return { lot: rec.lot || null, rec: rec, isle: null };
+      const S = CBZ.structure;
+      const lot = S && S.lotAt ? S.lotAt(x, z, 2.5) : null;
+      if (lot && lot.building && y <= (lot.building.h || 12) + 2) return { lot: lot, rec: null, isle: null };
+      return facadeAt(x, y, z) ? { lot: null, rec: null, isle: null } : null;
+    }
+    if (islandOn()) {
+      const b = (hit && hit.isle) || islandBuildingAt(x, y, z, 2.5);
+      return b ? { lot: null, rec: null, isle: b } : null;
+    }
+    return null;
+  };
+
+  /* ISLAND STRIKE — the same building strike on the disaster island's own
+     buildings (world/disaster_arena.js records), through the same collapse
+     engine the quake, the meteor and the tsunami use. The cut is the city's
+     (carveSeats, at the height it hit); the island has no city ledger, so the
+     part of the strike the ledger would price is the collapse engine's own
+     fraction (the meteor's scale: 1 = it comes down). A building's share is
+     its storeys x footprint against the strike's megajoules: a Cessna into a
+     cottage wounds it, a jet into a tower guts its struck floors, an airliner
+     at speed brings the top down. The struck floors burn on the island's one
+     fire (systems/wildfire.js). */
+  function isleStrike(s, x, y, z, dx, dz, v, mass, b) {
+    const cls = s.cls;
+    const E = strikeMJ(cls, mass, v);
+    const row = CBZ.impact && CBZ.impact.row ? CBZ.impact.row(ROW[cls] || "crashSmall") : null;
+    const pen = row && row.pen > 0 ? row.pen : (cls === "airliner" ? 26 : cls === "jet" ? 12 : 4);
+    const through = Math.abs(dx) * (b.w || 8) + Math.abs(dz) * (b.d || 8);
+    const depth = Math.min(LAMBDA * Math.log(1 + pen), through * 0.6);
+    const carved = carveSeats(b, s, x, y, z, dx, dz, E, depth);
+    const FH = b.FH || ((b.h && b.storeys) ? b.h / b.storeys : 3.2);
+    const storeys = Math.max(1, b.storeys || Math.round((b.h || 6) / FH));
+    const killMJ = Math.max(40, 0.25 * (b.w || 8) * (b.d || 8) * storeys);
+    const frac = E / killMJ;
+    if (frac >= 0.3 && CBZ.collapse && CBZ.collapse.damage) {
+      try {
+        CBZ.collapse.damage(b, { x: x + dx * depth * 0.5, y: y, z: z + dz * depth * 0.5 },
+          Math.max(2.5, s.dims.span * 0.3), Math.min(1.6, frac), { x: dx, y: -0.1, z: dz }, { frac: true });
+      } catch (e) {}
+    }
+    const W = CBZ.wildfire;
+    if (W && W.igniteFloor) {
+      const f0 = Math.max(0, Math.floor((y - (b.gy || 0)) / FH));
+      const span = cls === "airliner" ? 2 : cls === "jet" ? 1 : 0;
+      for (let k = -span; k <= span; k++) { try { W.igniteFloor(b, f0 + k, "impact"); } catch (e) {} }
+    }
+    isleKillZone(x + dx * depth * 0.5, y, z + dz * depth * 0.5,
+      Math.max(6, s.dims.span * 0.55 + depth * 0.5), s, "killed in the plane strike", FH * (cls === "airliner" ? 2.5 : 1.5) + 2);
+    return { energyMJ: E, carved: carved, frac: frac };
+  }
+
+  /* THE AIRFRAME BREAKS UP. What is left of the hull after the deformation
+     (crashdeform.js has already sheared the struck wing and torn the parts
+     nearest the contact) becomes pieces of itself in CBZ.debris — the
+     fuselage, the engines, the other wing, biggest first, the small
+     fittings as grit — and the hull is hidden. Most of the airframe's
+     momentum went into the building; the pieces carry the rest on into the
+     wound and fall down the face, burning, and kill what they land on.
+     Budget: the sim's own per-call and live caps (a phone gets a handful
+     of bodies), tracked by this file's capped wreck list. */
+  function breakUp(s, grp, dx, dz, v) {
+    if (!grp || !grp.parent || grp.visible === false || !CBZ.debris || !CBZ.debris.adopt || !window.THREE) return;
+    const carry = 0.14;
+    const vx = dx * v * carry, vz = dz * v * carry;
+    const vy = Math.max(-12, Math.min(4, (s.vy || 0) * carry)) + 1.2;
+    let r = null;
+    try {
+      grp.updateWorldMatrix(true, true);
+      r = CBZ.debris.adopt(grp, {
+        velocity: new THREE.Vector3(vx, vy, vz),
+        angular: new THREE.Vector3((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 3),
+        owner: "wreck", maxPieces: qi(4, 10), maxUp: 5, grit: 0.6,
+      });
+    } catch (e) { r = null; }
+    if (!r || !r.bodies) return;
+    const by = s.byPlayer ? CBZ.player : null;
+    for (let i = 0; i < r.bodies.length; i++) {
+      track(r.bodies[i], { burning: i < 3, hazard: true, dmg: 60, by: by, byPlayer: s.byPlayer });
+    }
   }
 
   /* PUBLIC: an airframe has met a building (or the ground) — run the whole
@@ -1254,7 +1462,7 @@
       wrapBoom("cityExplosion");
       wrapBoom("cityAirstrikeExplosion");
       wireRows();
-      if (!inCity()) { if (samples.size) samples.clear(); return; }
+      if (!inWorld()) { if (samples.size) samples.clear(); return; }
       stepTracker(dt > 0.25 ? 0.25 : dt);
     });
 

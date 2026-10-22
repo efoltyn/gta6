@@ -1868,8 +1868,11 @@
     // detonation seat, from the REAL ground: air-bursts (a missile caught a
     // wall) sit higher, ground hits low
     const gy = floorAt(x, z);
+    // The fireball blooms WHERE IT HIT. This used to be gy + 1.2 + seat/2: a
+    // jet into a tower's 30th floor (~97 m) drew its fireball at ~50 m, in
+    // open air halfway down the face. Low seats keep the old ground lift.
     const seat = opts.y != null ? Math.max(0, +opts.y - gy) : 0;
-    const cy = gy + 1.2 + seat * 0.5;
+    const cy = gy + Math.max(1.2 + seat * 0.5, seat);
 
     /* A nuke has its own physically staged dome/fireball/cloud composer. Before
        `noVisual`, this generic prefab still added roughly 400 independent

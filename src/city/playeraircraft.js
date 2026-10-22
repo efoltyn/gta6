@@ -2207,13 +2207,23 @@
     const y = impact && impact.y != null ? impact.y : craft.pos.y;
     const z = impact && impact.z != null ? impact.z : craft.pos.z;
     const heavy = craft.airClass === "airliner";
-    const buildingHit = !!(impact && ((impact.collider && !aircraftColliderRef(impact.collider) &&
-      ((impact.collider.y1 == null ? 18 : impact.collider.y1) - (impact.collider.y0 || 0)) > 2.5) || impact.record));
+    // WHAT WAS HIT is the building at the contact point, not the collider the
+    // sweep met first: a tower is storey-high wall pieces and 1.3 m slabs, and
+    // a slab under the old "taller than 2.5 m" bar turned a strike on the
+    // 30th floor into a crash on open ground. city/aircraftimpact.js
+    // buildingAt answers it from the buildings themselves (Gang City records
+    // and lots, the island's buildings).
+    const AI = CBZ.cityAircraftImpact;
+    const touched = impact && (impact.collider || impact.record) && !(impact.collider && aircraftColliderRef(impact.collider));
+    const where = touched && AI && AI.buildingAt ? AI.buildingAt(x, y, z, { rec: impact.record || null, lot: impact.lot || null }) : null;
+    const buildingHit = !!where || !!(touched && (impact.record ||
+      ((impact.collider.y1 == null ? 18 : impact.collider.y1) - (impact.collider.y0 || 0)) > 2.5));
     // what was hit, for city/aircraftimpact.js's building strike (the blast
     // below is what it claims; a far-building RECORD has no collider for it
     // to find on its own)
     if (impact && (impact.collider || impact.record)) craft._airHit = { x: x, y: y, z: z, nx: impact.nx, nz: impact.nz, collider: impact.collider || null,
-      rec: impact.record || null, lot: impact.lot || null, building: buildingHit };
+      rec: (where && where.rec) || impact.record || null, lot: (where && where.lot) || impact.lot || null,
+      isle: (where && where.isle) || null, building: buildingHit };
     const major = buildingHit && impactSpeed >= (heavy ? 24 : 30);
     const power = heavy ? 3.2 : 2.4, radius = heavy ? 18 : 13;
     // outside Gang City the crash is the shared ordnance bus's blast
@@ -2222,25 +2232,19 @@
     if (g.mode !== "city" && CBZ.detonate) { try { CBZ.detonate(x, y, z, "missile", { scale: heavy ? 1.3 : 0.7 }); } catch (e) {} }
     else if (CBZ.cityAirstrikeExplosion) { try { CBZ.cityAirstrikeExplosion(x, z, { power, radius, byPlayer: true, y }); } catch (e) {} }
     else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(x, z, { power: heavy ? 2.7 : 2.0, radius: heavy ? 15 : 10, byPlayer: true, y }); } catch (e) {} }
-    if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, radius + 5); } catch (e) {} }
-    if (buildingHit && CBZ.cityDamageBuilding) {
+    if (g.mode === "city" && CBZ.cityShatter) { try { CBZ.cityShatter(x, z, radius + 5); } catch (e) {} }
+    /* THE BUILDING TAKES THE AIRFRAME through city/aircraftimpact.js (the hole
+       at the struck storey, the fire there, the ejecta, the airframe breaking
+       up, the ledger and the collapse engine). In the city it claimed the
+       blast above already; anywhere else (The Isles, the disaster island) it
+       is handed the hit here, while the velocity it hit with still exists.
+       The legacy beats that stood here — three cityDamageBuilding seats and a
+       burst of grey boxes — were a second, weaker damage path beside it. */
+    if (AI && CBZ.cityAircraftStrike && impact) {
       try {
-        // One deep primary wound plus neighboring facade seats. A heavy
-        // airliner does not leave a single bullet-sized scorch in a tower: its
-        // nose/body/wing mass tears a broad, persistent structural scar.
-        CBZ.cityDamageBuilding(x, y, z, heavy ? 4.4 : 3.0);
-        if (major) {
-          const rx = Math.cos(craft.heading || 0), rz = -Math.sin(craft.heading || 0);
-          CBZ.cityDamageBuilding(x + rx * 2.4, y + 2.0, z + rz * 2.4, heavy ? 3.1 : 2.1);
-          CBZ.cityDamageBuilding(x - rx * 2.4, Math.max(1, y - 1.8), z - rz * 2.4, heavy ? 2.8 : 1.9);
-        }
-      } catch (e) {}
-    }
-    if (CBZ.cityChunk) {
-      try {
-        const fx = Math.sin(craft.heading || 0), fz = Math.cos(craft.heading || 0);
-        CBZ.cityChunk(x, y, z, { count: heavy ? 16 : 10, force: Math.min(16, 7 + impactSpeed * 0.08),
-          dirx: fx, dirz: fz, color: 0x747b82 });
+        CBZ.cityAircraftStrike(craft, craft._airHit || { x: x, y: y, z: z, nx: impact.nx, nz: impact.nz },
+          { group: craft.group, vx: craft.vx, vy: craft.vy, vz: craft.vz, speed: impactSpeed,
+            heading: craft.heading, byPlayer: true, heli: craft.kind === "heli", entryDrawn: true });
       } catch (e) {}
     }
     if (buildingHit && impactSpeed > 16 && CBZ.cityReportMajorIncident) {

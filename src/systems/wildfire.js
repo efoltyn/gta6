@@ -2428,6 +2428,14 @@
     // the fire as a service (see "THE FIRE AS A SERVICE")
     attach, igniteAt: igniteAtPublic, igniteTree: igniteTreePublic,
     igniteBuilding: igniteBuildingPublic, igniteCar: igniteCarPublic,
+    // one STOREY lit from inside (an airframe in the 12th floor burns the
+    // 12th floor, not the attic or the lobby)
+    igniteFloor(b, k, why) {
+      if (!b || b.fallen || !serve()) return false;
+      igniteFloor(b, k | 0, why || "impact");
+      litBy(why || "impact");
+      return true;
+    },
     serving() { return F.svc; },
     threat, safeDir, smokeAt, emberAt, refuge, hazards, size, douse,
     wind() { return { x: F.wx, z: F.wz, speed: F.wspd }; },
