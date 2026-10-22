@@ -444,7 +444,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=venue1022"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
-<script src="src/core/texfree.js?v=gpuleak1022"></script>
+<script src="src/core/texfree.js?v=arrive1022"></script>
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=beach1020"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
@@ -536,7 +536,7 @@ document.body.appendChild(b);}}catch(e){}})();
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=peak1014"></script>
 <script src="src/world/materials.js?v=nostep1013"></script>
-<script src="src/world/fuel_station.js?v=stutter1022"></script>
+<script src="src/world/fuel_station.js?v=arrive1022"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
@@ -631,7 +631,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- SOLDIER KIT (entities/combatkit.js): plate carriers, helmets, eye pro,
      gloves, knee pads, real camouflage (warlord/camo.js, shared) fitted to the
      body; and what the kit stops (systems/armour.js, CBZ.armour.resolve). -->
-<script src="src/warlord/camo.js?v=armourm1011"></script>
+<script src="src/warlord/camo.js?v=arrive1022"></script>
 <script src="src/systems/armour.js?v=armourm1011"></script>
 <script src="src/entities/combatkit.js?v=kitfix1013"></script>
 <script src="src/entities/soldier.js?v=drone1012"></script>
@@ -833,7 +833,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/camera.js?v=hands1022"></script>
-<script src="src/systems/physics.js?v=bodymove1022"></script>
+<script src="src/systems/physics.js?v=arrive1022"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- THE ONE MOVER (CBZ.bodyMove) every human body is moved through, and the per-frame net (onUpdate 99.97) that puts back anything that crossed a wall. After physics.js (sweepCircle/collide/walkGroundAt). -->
 <script src="src/systems/bodymove.js?v=bodymove1022"></script>
@@ -983,7 +983,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_plan.js?v=isleopen1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=gpuleak1022"></script>
+<script src="src/world/disaster_arena.js?v=arrive1022"></script>
 <script src="src/world/island_dressing.js?v=misleopstutte"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
 <script src="src/world/island_venue.js?v=misleopstutte"></script>
@@ -1014,7 +1014,7 @@ document.body.appendChild(b);}}catch(e){}})();
      builders. Must precede systems/disasters.js so the roster finds
      CBZ.volcanoFx (and its VOLCANO_* flag defaults) at load. REQUIRED: the
      old additive-stream fallback in disasters.js was deleted 2026-09-28. -->
-<script src="src/world/volcanofx.js?v=plume1020"></script>
+<script src="src/world/volcanofx.js?v=arrive1022"></script>
 <!-- THE ERUPTION'S SEQUENCE: world/eruption.js (CBZ.eruption) runs unrest,
      phreatic blast, Plinian column + umbrella, bombs, lightning, lava,
      collapse and lahar on volcanofx's builders, mode-agnostic (the lab's
@@ -1131,7 +1131,7 @@ document.body.appendChild(b);}}catch(e){}})();
      register ONE style and must load after it. The generalisation of what
      govcomplex.js does to this same office shell: a spec at the call site.
      Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
-<script src="src/city/facade_kit.js?v=stutter1022"></script>
+<script src="src/city/facade_kit.js?v=arrive1022"></script>
 <script src="src/city/facades/brick.js?v=mrg10200048"></script>
 <script src="src/city/facades/stone.js?v=mrg10200048"></script>
 <script src="src/city/facades/mosque.js?v=mrg10200048"></script>
@@ -1413,13 +1413,13 @@ document.body.appendChild(b);}}catch(e){}})();
      cars (vehicles.js), a rooftop helipad with a flyable helicopter
      (playeraircraft.js CBZ.airParkFlyable), the island's weather fed into both.
      After vehicles.js, playeraircraft.js, bailout.js and aircraft_doors.js. -->
-<script src="src/world/island_vehicles.js?v=f35one1022"></script>
+<script src="src/world/island_vehicles.js?v=arrive1022"></script>
 <!-- THE ARCHIPELAGO (mode "archipelago"): the disaster island's package built
      many times over on one sea, kilometres apart, streamed in as you near
      each one and dropped behind you. archipelago_map.js is the map as data;
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
-<script src="src/world/island_lodging.js?v=misleclstutte"></script>
+<script src="src/world/island_lodging.js?v=arrive1022"></script>
 <!-- THE ISLANDS' PEOPLE (world/island_people.js): Gang City's street crowd
      (city/peds.js) on the island in force, with homes and work in its
      buildings, the trades' hours and shutters, and the posted staff

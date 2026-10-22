@@ -955,7 +955,12 @@
     let c = canvasCache.get(key);
     if (c) return c;
     c = document.createElement("canvas"); c.width = c.height = N;
-    const cc = c.getContext("2d");
+    /* willReadFrequently: meanOf reads this tile back (through a 1x1 draw).
+       A tile the browser rasterised on the GPU made that read a full GPU
+       pipeline flush, waiting on everything queued before it: 2.8 s of one
+       4x-throttled frame, the first soldier stood on an island in mid-upload.
+       A 256 px tile paints just as well on the CPU, and uploads from memory. */
+    const cc = c.getContext("2d", { willReadFrequently: true });
     /* ONE stream per (pattern, palette, res). Not per call, not per wearer:
        two men in the same uniform must be wearing the SAME cloth, and a
        stream seeded off the key is the cheapest possible way to guarantee
@@ -971,9 +976,9 @@
   }
 
   /* MEAN COLOUR OF A TILE — the only property of a pattern that survives to
-     200 m (see the header arithmetic). Taken by letting the browser box
-     -filter the tile down to 1x1, which is the same average the GPU's top
-     mip level computes, so this number IS what the distant rank shows. */
+     200 m (see the header arithmetic). The plain average of the tile's
+     texels, which is what the GPU's top mip level computes, so this number
+     IS what the distant rank shows. */
   function meanOf(id, opts) {
     const rec = PAT_BY_ID[id];
     if (!rec) return 0x808080;
@@ -982,11 +987,16 @@
     if (meanCache.has(key)) return meanCache.get(key);
     const src = bake(id, opts);
     if (!src) return 0x808080;
-    const c = document.createElement("canvas"); c.width = c.height = 1;
-    const g = c.getContext("2d");
-    g.drawImage(src, 0, 0, 1, 1);
-    const d = g.getImageData(0, 0, 1, 1).data;
-    const m = (d[0] << 16) | (d[1] << 8) | d[2];
+    // the tile's true mean, read off its own (CPU) pixels: no second canvas,
+    // no GPU read (see bake)
+    let m = 0x808080;
+    try {
+      const d = src.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, src.width, src.height).data;
+      let r = 0, gg = 0, b = 0;
+      for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; }
+      const n = d.length / 4 || 1;
+      m = (Math.round(r / n) << 16) | (Math.round(gg / n) << 8) | Math.round(b / n);
+    } catch (e) { /* the grey stands in */ }
     meanCache.set(key, m);
     return m;
   }

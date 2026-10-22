@@ -194,8 +194,18 @@
     if (!pool.length) pool = PA.shopLots;
     return pickBy(pool);
   }
+  /* ONE NEW PERSON A FRAME. A first-of-its-kind body (a hat, a uniform, a
+     rig shape nobody on the island wore yet) costs tens of ms to make; the
+     staff of every open shop you walk up to, the crowd's top-up and the
+     arrival's population each used to stand theirs in the same frame. In
+     play, a person is stood only in a frame nobody else was (the frame clock
+     is core/loop.js's per-frame stamp); the rest wait a tick, out of sight. */
+  let standFrame = -1;
+  function frameNo() { return CBZ._matrixOwnStamp | 0; }
+  function canStand() { return g.state !== "playing" || standFrame !== frameNo(); }
   function stand(A, PA, x, z, opts) {
     if (!CBZ.cityMakePed) return null;
+    if (g.state === "playing") standFrame = frameNo();
     const d = PA.districtAt(x, z);
     const cast = Object.assign(CBZ.cityCastFor ? CBZ.cityCastFor(d, rnd) : {}, opts || {});
     let ped = null;
@@ -297,10 +307,48 @@
     const want = Math.round(target() * 0.7);
     for (let k = 0; k < want * 4 && n < want; k++) {
       if (active() && active() !== A) return;                  // the island changed again
+      // somebody was stood this frame already: the next frame (a chore that
+      // yields "frame" is not stepped again this frame, world/archipelago.js;
+      // a loop that runs it to the end just goes on)
+      if (!canStand()) yield "frame";
       if (spawnOne(A, PA, g.state !== "playing")) n++;
-      yield 0;
+      yield g.state === "playing" ? "frame" : 0;
     }
   }
+
+  /* ---- WARM IN IDLE TIME: THE HATS ----------------------------------------
+     A hat is fitted to the real head once per kind, form and detail level
+     (entities/headwear.js geometry(), cached): the first deputy on an island
+     cost ~200 ms of a 4x-throttled frame for his campaign hat alone. The
+     hats the islands' trades wear are fitted in the browser's idle time once
+     the run is playing, one per idle callback, so the first one stood on the
+     island you fly to is a cache hit. */
+  const WARM_HATS = ["campaign:sheriff", "campaign", "peaked:police", "peaked:captain", "peaked:chauffeur", "hardhat", "milcap", "ballcap", "bucket"];
+  (function warmHats() {
+    const H = CBZ.headwear;
+    if (!H || !H.geometry || typeof setTimeout !== "function") return;
+    const todo = [];
+    for (const s of WARM_HATS) {
+      const i = s.indexOf(":"), kind = i < 0 ? s : s.slice(0, i), variant = i < 0 ? "" : s.slice(i + 1);
+      for (const form of ["m", "f"]) for (const lod of [0, 1]) todo.push([kind, form, variant, lod]);
+    }
+    const idle = typeof requestIdleCallback === "function"
+      ? function (f) { requestIdleCallback(f, { timeout: 4000 }); } : function (f) { setTimeout(f, 200); };
+    const step = function (dl) {
+      if (!todo.length) return;
+      if (!dl || dl.didTimeout || dl.timeRemaining() > 6) {
+        const h = todo.shift();
+        try { H.geometry(h[0], h[1], h[2], h[3]); } catch (e) { /* the wearer builds it, as before */ }
+      }
+      idle(step);
+    };
+    let t = 0;
+    const wait = function () {
+      if (onIsles() && g.state === "playing") { if (++t >= 2) { idle(step); return; } } else t = 0;
+      setTimeout(wait, 500);
+    };
+    setTimeout(wait, 500);
+  })();
 
   /* ---- THE CROWD'S UPKEEP ------------------------------------------------- */
   let tickT = 0, lastMode = null, clk = 0;
@@ -328,8 +376,7 @@
       if (d > GONE && unseen(p.pos.x, p.pos.y, p.pos.z)) { despawn(p); live--; }
     }
     if (g.state !== "playing") return;
-    if (live < want) spawnOne(A, PA, false);
-    if (live < want * 0.5) spawnOne(A, PA, false);
+    if (live < want && canStand()) spawnOne(A, PA, false);
   }
 
   /* ---- THE STAFF ---------------------------------------------------------- */
@@ -485,11 +532,24 @@
         p.staffPost.face = at ? Math.atan2(at.x - p.pos.x, at.z - p.pos.z) : (P.at && P.at.face != null ? P.at.face : P.face);
         continue;
       }
-      if (P.lost || !here || P.b.fallen || !open(P) || g.state !== "playing") continue;
-      if (Pl && Math.hypot(P.x - Pl.x, P.z - Pl.z) > (P.near || STAFF_IN)) continue;
-      if (!unseen(P.x, P.y, P.z)) continue;
-      mint(P, A, PA);
+      fill(P, A, PA, here, Pl);
     }
+  }
+  // an empty post near you is staffed where nobody sees it, one a frame:
+  // one the frame's single new person could not take waits for the next
+  // frame (staffFill), not for the next 0.4 s tick
+  let staffWaiting = false;
+  function fill(P, A, PA, here, Pl) {
+    if (P.ped || P.lost || !here || P.b.fallen || !open(P) || g.state !== "playing") return;
+    if (Pl && Math.hypot(P.x - Pl.x, P.z - Pl.z) > (P.near || STAFF_IN)) return;
+    if (!unseen(P.x, P.y, P.z)) return;
+    if (!canStand()) { staffWaiting = true; return; }
+    mint(P, A, PA);
+  }
+  function staffFill(A, PA) {
+    staffWaiting = false;
+    const Pl = CBZ.player && CBZ.player.pos;
+    for (const P of posts) if (!P.ped) fill(P, A, PA, under(P.b.group, A.root), Pl);
   }
 
   /* ---- THE CUSTOMERS -------------------------------------------------------
@@ -593,7 +653,7 @@
       if (!isOpen(C.b) || C.b.fallen || now > C.until) { custLeave(C); continue; }
       n++;
     }
-    if (g.state !== "playing" || n >= CUST_CAP) return;
+    if (g.state !== "playing" || n >= CUST_CAP || !canStand()) return;
     // the nearest open shop short of its people gets one, where nobody sees him come
     let best = null, bd = CUST_NEAR;
     for (const l of PA.shopLots) {
@@ -672,7 +732,7 @@
     pose(S);
     setCol(S, S.k > 0.7);
     shutters.add(S);
-    return function () { setCol(S, false); shutters.delete(S); };
+    return function () { unCol(S); shutters.delete(S); };
   }
   function pose(S) {
     if (S.kind === "doors") {
@@ -687,15 +747,31 @@
     S.curtain.position.y = S.H - h / 2;
     S.rail.position.y = S.H - h + 0.04;
   }
+  /* THE Y-GATE. A shutter's box joins the collider list once, the first time
+     it comes down, and stays there; up and down only move its y-gate (the
+     grid files boxes by x/z, so nothing re-indexes). A push/splice plus a
+     dirty mark rebuilt the whole collider grid every time a shop opened or
+     closed. unCol takes it out for good (teardown), in place. */
   function setCol(S, on) {
-    if (S.colOn === !!on) return;
-    S.colOn = !!on;
-    const Lc = CBZ.colliders;
-    if (!Lc) return;
-    const i = Lc.indexOf(S.col);
-    if (on && i < 0) Lc.push(S.col);
-    else if (!on && i >= 0) Lc.splice(i, 1);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    on = !!on;
+    if (S.colOn === on) return;
+    S.colOn = on;
+    const c = S.col;
+    if (S.cy0 == null) { S.cy0 = c.y0; S.cy1 = c.y1; }
+    if (on) { c.y0 = S.cy0; c.y1 = S.cy1; } else { c.y0 = -1e4; c.y1 = -1e4 + 0.01; }
+    if (on && !S.colIn && CBZ.colliders) {
+      S.colIn = true;
+      if (CBZ.colliderAdd) CBZ.colliderAdd(c); else CBZ.colliders.push(c);
+    }
+  }
+  function unCol(S) {
+    setCol(S, false);
+    if (!S.colIn) return;
+    S.colIn = false;
+    const Lc = CBZ.colliders, i = Lc ? Lc.indexOf(S.col) : -1;
+    if (i < 0) return;
+    if (CBZ.colliderRemove) CBZ.colliderRemove(S.col, i);
+    else { Lc.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
   }
   // nobody inside, nobody in the doorway: then it may come down
   function shopEmpty(S) {
@@ -844,7 +920,7 @@
     setCol(S, S.k > 0.7);
     shutters.add(S);
     return function () {
-      setCol(S, false); shutters.delete(S);
+      unCol(S); shutters.delete(S);
       for (const l of leaves) if (l.g.parent) l.g.parent.remove(l.g);
     };
   }
@@ -898,9 +974,10 @@
       tickT = 0.4;
       if (CBZ.net && CBZ.net.noSim && CBZ.net.noSim()) return;
       upkeep(A, PA);
+      staffWaiting = false;
       staffTick(A, PA, 0.4);
       custTick(A, PA);
-    }
+    } else if (staffWaiting && canStand()) staffFill(A, PA);
     shutterTick(A, d, decide);
     for (const S of shutters) if (S.guard && under(S.b.group, A.root)) guardTick(S, d);
   });
@@ -925,7 +1002,7 @@
   function drop(A) {
     if (!A || !A.root) return;
     dropUnder(A.root);
-    for (const S of Array.from(shutters)) if (under(S.b.group, A.root)) { setCol(S, false); shutters.delete(S); }
+    for (const S of Array.from(shutters)) if (under(S.b.group, A.root)) { unCol(S); shutters.delete(S); }
     A._people = null;
   }
   function leave() {
@@ -943,7 +1020,7 @@
         if (isle) { if (m.parent) m.parent.remove(m); D.splice(i, 1); }
       }
     }
-    for (const S of shutters) setCol(S, false);
+    for (const S of shutters) unCol(S);
     shutters.clear();
   }
 

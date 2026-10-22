@@ -2216,6 +2216,19 @@
   const platGiant = [];
   const EMPTY_PLATS = [];
   let platCount = -1, platDirty = true;
+  // the record at platCount - 1 when the grid last matched the array (the
+  // collider grid's tailMark): a plain push leaves it where it was, so the
+  // pushed tail is filed as a rebuild would file it instead of a rebuild
+  let platTail = null;
+  function platTailMark() { platTail = platCount > 0 ? CBZ.platforms[platCount - 1] : null; }
+  function platFresh() {
+    const plats = CBZ.platforms;
+    if (!platDirty && platCount === plats.length) return;
+    if (!platDirty && platCount > 0 && platTail && plats.length > platCount && plats[platCount - 1] === platTail) {
+      for (let i = platCount; i < plats.length; i++) if (plats[i]) platInsert(plats[i]);
+      platCount = plats.length; platTailMark();
+    } else rebuildPlatformGrid();
+  }
 
   function rebuildPlatformGrid() {
     platBuckets.clear(); platGiant.length = 0;
@@ -2235,6 +2248,7 @@
     }
     platCount = plats.length;
     platDirty = false;
+    platTailMark();
   }
   /* A PLATFORM THAT MOVES NEEDS THE SAME DOORBELL A COLLIDER HAS. The grid
      above re-buckets when the ARRAY LENGTH changes, which catches every build
@@ -2290,7 +2304,7 @@
       else plats[w++] = p;
     }
     plats.length = w;
-    if (sync && !platDirty) platCount = w;
+    if (sync && !platDirty) { platCount = w; platTailMark(); }
     return n;
   };
   CBZ.platformAddMany = function (list) {
@@ -2298,12 +2312,11 @@
     if (!plats || !list || !list.length) return;
     const sync = platInSync();
     for (let i = 0; i < list.length; i++) { plats.push(list[i]); if (sync && list[i]) platInsert(list[i]); }
-    if (sync) platCount = plats.length;
+    if (sync) { platCount = plats.length; platTailMark(); }
   };
   // The candidate list under a point: one Map lookup plus the giants.
   function platsAt(x, z) {
-    const plats = CBZ.platforms;
-    if (platDirty || platCount !== plats.length) rebuildPlatformGrid();
+    platFresh();
     const b = platBuckets.get(colKey(Math.floor(x / PLAT_CELL), Math.floor(z / PLAT_CELL)));
     if (!b) return platGiant.length ? platGiant : EMPTY_PLATS;
     if (!platGiant.length) return b;

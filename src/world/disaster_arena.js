@@ -1007,14 +1007,17 @@
     // a roof kept clear (the helipad tower's) is clear for the lift probe too:
     // with no crown over the shaft the lift's top stop is the roof itself
     if (dressed && o.keepClear) ctx.keepClear = o.keepClear.slice();
+    // (both asked as generators when the kit has them: the dry run, the lift
+    // samplers and the grammar's replay are slices, not one call)
     if (dressed && o.liftShaft && CBZ.facadeLiftTop) {
       try {
-        lift = CBZ.facadeLiftTop(ctx, o.liftShaft, { ring: 1.2 });
+        lift = CBZ.facadeLiftTopSteps ? yield* CBZ.facadeLiftTopSteps(ctx, o.liftShaft, { ring: 1.2 }) : CBZ.facadeLiftTop(ctx, o.liftShaft, { ring: 1.2 });
         ctx.keepClear = lift.keepClear;
       } catch (e) { lift = null; }
+      if (late()) yield 0;
     }
     if (dressed && o.keepClear) ctx.keepClear = (ctx.keepClear || []).concat(o.keepClear);
-    const def = dressed ? CBZ.dressFacade(ctx) : null;
+    const def = dressed ? (CBZ.dressFacadeSteps ? yield* CBZ.dressFacadeSteps(ctx) : CBZ.dressFacade(ctx)) : null;
     if (!def) lift = null;
     yield 0;
 

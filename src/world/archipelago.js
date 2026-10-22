@@ -655,6 +655,7 @@
   }
 
   /* ---- THE TICK: once a frame, on the always-chain ---------------------- */
+  const _rested = [];
   function tick(dt) {
     if (!ST.built) return;
     if (g.mode !== MODE) { teardown(false); return; }
@@ -736,8 +737,11 @@
     // (a teardown waits while a build is mid-building: it unregisters stair
     // links, and a half-built building turns its own by their index)
     const midBuild = !!(building && building.state === "building");
+    // (a chore that yields "frame" is done for this frame: the island's people
+    // are stood one a frame, world/island_people.js)
+    const rested = _rested; rested.length = 0;
     while (performance.now() < until) {
-      const k = ST.chores.findIndex(function (c) { return !(midBuild && /:drop$/.test(c.label)); });
+      const k = ST.chores.findIndex(function (c) { return !(midBuild && /:drop$/.test(c.label)) && rested.indexOf(c) < 0; });
       if (k < 0) break;
       const c = ST.chores[k];
       let r;
@@ -747,7 +751,9 @@
       try { r = c.it.next(); } catch (e) { console.error("[archipelago " + c.label + "]", e); r = { done: true }; }
       if (c.isle) c.isle.warmMs = (c.isle.warmMs || 0) + performance.now() - c0;
       if (r.done) ST.chores.splice(k, 1);
+      else if (r.value === "frame") rested.push(c);
     }
+    rested.length = 0;
     if (building && building.state === "building") {
       const left = until - performance.now();
       if (left > 0.5) building.job.step(left);

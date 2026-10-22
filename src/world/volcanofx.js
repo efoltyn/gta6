@@ -3170,7 +3170,10 @@
     if (_puffTex[k]) return _puffTex[k];
     const S = 128, cv = document.createElement("canvas");
     cv.width = cv.height = S;
-    const g = cv.getContext("2d");
+    // (willReadFrequently: the shading pass below reads the lobes back; on a
+    // GPU-drawn canvas that read waited for the whole GPU queue, 0.5 s a puff
+    // with an island uploading)
+    const g = cv.getContext("2d", { willReadFrequently: true });
     let seed = (0x2f6e2b1d + k * 0x9e3779b9) >>> 0;
     const rnd = function () { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
     // a lump lit from above-left: the gradient's centre is offset toward the

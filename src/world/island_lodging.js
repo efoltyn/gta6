@@ -155,9 +155,13 @@
   Own.prototype.dispose = function () {
     if (this.done) return;
     this.done = true;
+    // (colliderRemoveMany edits the grid in place: a dirty mark on top of it
+    // was a full rebuild of every wall on the sea at teardown)
     if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(this.cols);
-    else for (const c of this.cols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    else {
+      for (const c of this.cols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    }
     if (CBZ.propUnregister) CBZ.propUnregister(this.recs);
     for (const m of this.meshes) {
       if (m.parent) m.parent.remove(m);
@@ -704,7 +708,7 @@
     D.open = open;
     if (open) { D.col.y0 = -1e4; D.col.y1 = -1e4 + 0.01; }
     else { D.col.y0 = D.y0; D.col.y1 = D.y1; }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // (a y-gate edit: the grid files boxes by x/z, nothing to re-index)
     if (CBZ.sfx) { try { CBZ.sfx(open ? "door" : "doorClose"); } catch (e) {} }
   }
   function tickDoor(room, dt) {

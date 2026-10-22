@@ -641,8 +641,107 @@
 
   // copy the source into its slot (1:1 body + edge-texel gutter) in the page
   // array, then to the GPU. `px` = sourcePixels(). Returns false if unreadable.
+  /* A SOURCE THE BROWSER DRAWS ON THE GPU IS COPIED THERE, NEVER READ BACK.
+     getImageData on an accelerated canvas (one made without
+     willReadFrequently: a clothes yoke, a lazily painted face or tattoo
+     sheet) is a full GPU pipeline flush: the read waits for everything queued
+     before it, and on an arriving island that is the island's whole upload
+     (measured 2.4-5.4 s for ONE read, 4x-throttled headless). So such a
+     source goes up the way three uploads every canvas texture (texImage2D
+     from the canvas, flipY, straight alpha) into a scratch texture of its
+     class, and is blitted into its slot on the GPU: the body 1:1, each
+     gutter strip stretched from its edge row / column / corner texel, NEAREST
+     (the same texels paintSlot's array path writes), then the page's mips.
+     WebGL2 only (blitFramebuffer); a willReadFrequently canvas (the clothes
+     atlases: their reads are free) and every WebGL1 page keep the array
+     path. Framebuffer completeness is checked once per scratch and per page
+     size (the check is a round trip), and the read/draw bindings are put
+     back as they were. */
+  function gpuSource(t, C) {
+    const R = CBZ.renderer;
+    if (!R || !R.capabilities || !R.capabilities.isWebGL2 || !R.getContext || !gpuPagesOk()) return false;
+    const im = t && t.image;
+    if (!im || im.width !== C.w || im.height !== C.h || typeof im.getContext !== "function") return false;
+    try {
+      const c = im.getContext("2d");
+      const a = c && c.getContextAttributes ? c.getContextAttributes() : null;
+      return !!a && !a.willReadFrequently;
+    } catch (e) { return false; }
+  }
+  function gpuCopy(s) {
+    const P = s.page, C = P.cls, R = CBZ.renderer, T = P.tex;
+    if (!P.gpuOnly) return false;
+    const gl = R.getContext(), st = R.state;
+    const pr = R.properties.get(T);
+    if (!gl || !gl.blitFramebuffer || !pr || !pr.__webglTexture || !pr.__webglInit || pr.__version !== T.version) return false;
+    const im = s.tex && s.tex.image;
+    if (!im || im.width !== C.w || im.height !== C.h) return false;
+    const S = C.scr || (C.scr = { tex: gl.createTexture(), fb: gl.createFramebuffer(), att: false, ok: false });
+    // (the page stays attached across a grow: the attachment is the texture
+    // object, and an RGBA8 level 0 is complete at any height, so the check,
+    // a round trip that waits on the whole GPU queue, is made once a page)
+    const F = P.fb || (P.fb = { fb: gl.createFramebuffer(), tex: null, ok: false });
+    const prevR = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING), prevD = gl.getParameter(gl.DRAW_FRAMEBUFFER_BINDING);
+    let ok = false;
+    try {
+      st.activeTexture(gl.TEXTURE0);
+      st.bindTexture(gl.TEXTURE_2D, S.tex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+      if (!S.att) {
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      }
+      st.unbindTexture();
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, S.fb);
+      if (!S.att) { gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, S.tex, 0); S.att = true; }
+      if (!S.ok) { if (gl.checkFramebufferStatus(gl.READ_FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) return false; S.ok = true; }
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, F.fb);
+      if (F.tex !== pr.__webglTexture) {
+        gl.framebufferTexture2D(gl.DRAW_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pr.__webglTexture, 0);
+        F.tex = pr.__webglTexture; F.ok = false;
+      }
+      if (!F.ok) { if (gl.checkFramebufferStatus(gl.DRAW_FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) return false; F.ok = true; }
+      st.disable(gl.SCISSOR_TEST);
+      const w = C.w, h = C.h, g = C.g, X = s.x, Y = P.PH - s.y - C.sh, N = gl.NEAREST, B = gl.COLOR_BUFFER_BIT;
+      const X1 = X + g, X2 = X + g + w, X3 = X + C.sw, Y1 = Y + g, Y2 = Y + g + h, Y3 = Y + C.sh;
+      gl.blitFramebuffer(0, 0, w, h, X1, Y1, X2, Y2, B, N);                 // the body
+      gl.blitFramebuffer(0, 0, 1, h, X, Y1, X1, Y2, B, N);                  // left gutter
+      gl.blitFramebuffer(w - 1, 0, w, h, X2, Y1, X3, Y2, B, N);             // right
+      gl.blitFramebuffer(0, 0, w, 1, X1, Y, X2, Y1, B, N);                  // bottom (image bottom row)
+      gl.blitFramebuffer(0, h - 1, w, h, X1, Y2, X2, Y3, B, N);             // top
+      gl.blitFramebuffer(0, 0, 1, 1, X, Y, X1, Y1, B, N);                   // the four corners
+      gl.blitFramebuffer(w - 1, 0, w, 1, X2, Y, X3, Y1, B, N);
+      gl.blitFramebuffer(0, h - 1, 1, h, X, Y2, X1, Y3, B, N);
+      gl.blitFramebuffer(w - 1, h - 1, w, h, X2, Y2, X3, Y3, B, N);
+      ok = true;
+    } catch (e) {
+      ok = false;
+    } finally {
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, prevR);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, prevD);
+    }
+    if (!ok) return false;
+    if (T.generateMipmaps) {
+      st.activeTexture(gl.TEXTURE0);
+      st.bindTexture(gl.TEXTURE_2D, pr.__webglTexture);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      st.unbindTexture();
+    }
+    // a self-painting canvas (core/texfree.js) is not needed once it is on the page
+    if (s.tex._cbzRelease) s.tex._cbzRelease();
+    s.ver = s.tex.version;
+    pageCopies++; pageGpuCopies++;
+    return true;
+  }
   function paintSlot(s, px) {
     const P = s.page, C = P.cls;
+    if (!px && gpuSource(s.tex, C) && gpuCopy(s)) return true;
     px = px || sourcePixels(s.tex, C);
     if (!px) return false;
     const w = C.w, h = C.h, g = C.g, sw = C.sw, sh = C.sh, B = C.block;
@@ -718,6 +817,9 @@
     if (best && best.tex) freeSlotOf(best.tex);
     return best;
   }
+  const DEFER = { deferred: true };
+  const PAGE_MS = 2;
+  let _pageNew = 0, _pageMs = 0, pageDeferred = 0, pageGpuCopies = 0;
   function slotFor(t) {
     let s = slotOf.get(t.uuid);
     if (s && s.tex === t) {
@@ -727,19 +829,35 @@
     }
     const C = pageClass(t);
     if (!C) return null;
-    const px = sourcePixels(t, C);
-    if (!px) { pageRefused++; return null; }      // unreadable or blank: its own exact-map pool draws it as-is
+    /* NEW SOURCES ARE PAGED A FEW A FRAME. Reading a source's pixels can be
+       a GPU round trip (a canvas the browser rasterises on the GPU: the read
+       waits for everything queued before it), and an arriving island brings
+       dozens of first-seen outfits, faces and hats at once: 5.4 s of one
+       4x-throttled frame on the Isles. Past PAGE_MS of new-slot work in a
+       frame (the first one always goes), the body waits: it draws itself
+       whole this frame (placeRig's one-mechanism rule) and is paged on a
+       later one. */
+    if (_pageNew > 0 && _pageMs >= PAGE_MS) { pageDeferred++; return DEFER; }
+    const pt0 = performance.now();
+    // a GPU-drawn source is copied on the GPU (gpuCopy): its pixels are never read here
+    const gpu = gpuSource(t, C);
+    const px = gpu ? null : sourcePixels(t, C);
+    if (!gpu && !px) { _pageNew++; _pageMs += performance.now() - pt0; pageRefused++; return null; }   // unreadable or blank: its own exact-map pool draws it as-is
     s = takeCell(C) || reuseSlot(C, true);
     // grow before opening a new page: every page is a pool per shape
     for (let i = 0; !s && i < C.pages.length; i++) if (growPage(C.pages[i])) s = takeCell(C);
     if (!s && C.pages.length < PAGES_PER_CLASS && newPage(C)) s = takeCell(C);
     if (!s) s = reuseSlot(C, false);
-    if (!s) return null;
+    if (!s) { _pageNew++; _pageMs += performance.now() - pt0; return null; }
     s.tex = t;
     s.uv = slotUv(s);
     slotOf.set(t.uuid, s);
     if (!t._cbzPageHooked) { t._cbzPageHooked = true; t.addEventListener("dispose", onSourceDispose); }
-    paintSlot(s, px);
+    const ok = paintSlot(s, px);
+    _pageNew++; _pageMs += performance.now() - pt0;
+    // a GPU copy that could not be made and pixels that could not be read:
+    // the slot goes back and the source draws as-is (its exact-map pool)
+    if (!ok && gpu) { freeSlotOf(t); pageRefused++; return null; }
     return s;
   }
 
@@ -1070,6 +1188,7 @@
   function bind(rig, o) {
     const L = boxLocal(o.geometry);
     const ps = pageable(o.material) ? slotFor(o.material.map) : null;
+    if (ps === DEFER) return null;          // paged on a later frame (slotFor); the body draws itself meanwhile
     const key = keyOf(o, L, ps);
     let p = pools.get(key);
     if (!p) {
@@ -1083,7 +1202,7 @@
     const rec = {
       mesh: o, pool: p, rig: rig, slot: -1, hidden: false, savedMask: 1,
       parked: true, dead: false, stamp: stamp,
-      geo: o.geometry, mat: m, map: m.map || null, L: L,
+      geo: o.geometry, mat: m, map: m.map || null, L: L, Ld: diagOf(L),       // (Ld: putInstance)
       cr: -1, cg: -1, cb: -1,                                  // last uploaded tint
       er: m.emissive ? m.emissive.r : 0, eg: m.emissive ? m.emissive.g : 0,
       eb: m.emissive ? m.emissive.b : 0,
@@ -1235,6 +1354,46 @@
     rec.stamp = stamp;
     return rec;
   }
+  /* THE INSTANCE, WRITTEN IN PLACE. setMatrixAt is a Matrix4.toArray into
+     the pool's Float32Array, and a box part's world * L went through a
+     scratch Matrix4 first: two passes, a polymorphic store (toArray is fed
+     plain arrays all over the game) and the measured largest single cost of
+     this pass. Here the product lands straight in the array. A unit box's L
+     is a scale plus a translation (boxLocal: rec.Ld), so world * L is each
+     axis column scaled and the translation column carried through, in the
+     same multiply-add order Matrix4.multiplyMatrices uses (the same floats);
+     any other L (a lofted limb's) takes the full product. */
+  function putInstance(a, k, w, rec) {
+    const L = rec.L;
+    if (!L) {
+      a[k] = w[0]; a[k + 1] = w[1]; a[k + 2] = w[2]; a[k + 3] = w[3];
+      a[k + 4] = w[4]; a[k + 5] = w[5]; a[k + 6] = w[6]; a[k + 7] = w[7];
+      a[k + 8] = w[8]; a[k + 9] = w[9]; a[k + 10] = w[10]; a[k + 11] = w[11];
+      a[k + 12] = w[12]; a[k + 13] = w[13]; a[k + 14] = w[14]; a[k + 15] = w[15];
+      return;
+    }
+    const d = rec.Ld;
+    if (d) {
+      const sx = d[0], sy = d[1], sz = d[2], tx = d[3], ty = d[4], tz = d[5];
+      a[k] = w[0] * sx; a[k + 1] = w[1] * sx; a[k + 2] = w[2] * sx; a[k + 3] = w[3] * sx;
+      a[k + 4] = w[4] * sy; a[k + 5] = w[5] * sy; a[k + 6] = w[6] * sy; a[k + 7] = w[7] * sy;
+      a[k + 8] = w[8] * sz; a[k + 9] = w[9] * sz; a[k + 10] = w[10] * sz; a[k + 11] = w[11] * sz;
+      a[k + 12] = w[0] * tx + w[4] * ty + w[8] * tz + w[12];
+      a[k + 13] = w[1] * tx + w[5] * ty + w[9] * tz + w[13];
+      a[k + 14] = w[2] * tx + w[6] * ty + w[10] * tz + w[14];
+      a[k + 15] = w[3] * tx + w[7] * ty + w[11] * tz + w[15];
+      return;
+    }
+    const e = _inst.multiplyMatrices(rec.mesh.matrixWorld, L).elements;
+    for (let i = 0; i < 16; i++) a[k + i] = e[i];
+  }
+  // L as [sx, sy, sz, tx, ty, tz] when it is exactly a scale plus a translation
+  function diagOf(L) {
+    if (!L) return null;
+    const e = L.elements;
+    if (e[1] !== 0 || e[2] !== 0 || e[3] !== 0 || e[4] !== 0 || e[6] !== 0 || e[7] !== 0 || e[8] !== 0 || e[9] !== 0 || e[11] !== 0 || e[15] !== 1) return null;
+    return L._cbzDiag || (L._cbzDiag = [e[0], e[5], e[10], e[12], e[13], e[14]]);
+  }
   function placeRig(rig) {
     let whole = true, stamped = 0;
     for (let i = 0; i < _parts.length; i++) {
@@ -1269,7 +1428,7 @@
          transform (walk() wrote it a moment ago), because gore.js decomposes
          it for the flying limb and getWorldPosition callers read it; folding L
          into it would hand them a body-sized object at a corner offset. */
-      p.mesh.setMatrixAt(rec.slot, rec.L ? _inst.multiplyMatrices(o.matrixWorld, rec.L) : o.matrixWorld);
+      putInstance(p.mesh.instanceMatrix.array, rec.slot << 4, o.matrixWorld.elements, rec);
       p.mDirty = true;
       rec.parked = false;
       p.live++;
@@ -1492,6 +1651,7 @@
     stamp++;
     _lastParent = null;
     fallbackMeshes = 0;
+    _pageNew = 0; _pageMs = 0;
     const P = CBZ.player;
     _stagger = !!(P && P.pos) && CBZ.CONFIG.PED_SYNC_STAGGER !== false;
     if (_stagger) { _px = P.pos.x; _pz = P.pos.z; }
@@ -1558,6 +1718,65 @@
     for (let i = 0; i < before.length; i += 997) if (before[i] !== after[off + i]) diff++;
     return { ok: diff === 0, rows: ph0 + "->" + P.PH, wasGpuOnly: gpu0, gpuOnly: !!P.gpuOnly, sampledDiffs: diff };
   };
+  /* CBZ.pedPageCopyCheck(tex): pages a pageable canvas texture whose canvas
+     draws on the GPU (gpuCopy, no readback), reads its slot back off the
+     page and compares it with the block the array path would have written
+     from the same canvas's pixels (gutters included). A check hook, never
+     called by the game: it reads pixels, which is the cost gpuCopy avoids. */
+  CBZ.pedPageCopyCheck = function (tex) {
+    const R = CBZ.renderer;
+    if (!tex || !R || !pageable({ map: tex, type: "MeshLambertMaterial" })) return { ok: false, why: "not pageable" };
+    const C = pageClass(tex);
+    if (!C) return { ok: false, why: "no class" };
+    const gpu = gpuSource(tex, C);
+    const im = tex.image, px = im.getContext("2d").getImageData(0, 0, C.w, C.h).data;
+    _pageNew = 0; _pageMs = 0;
+    const s = slotFor(tex);
+    if (!s || s === DEFER) return { ok: false, why: "not paged", gpu: gpu };
+    const P = s.page, gl = R.getContext(), pr = R.properties.get(P.tex);
+    const fb = gl.createFramebuffer(), prev = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const got = new Uint8Array(C.sw * C.sh * 4);
+    try {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pr.__webglTexture, 0);
+      gl.readPixels(s.x, P.PH - s.y - C.sh, C.sw, C.sh, gl.RGBA, gl.UNSIGNED_BYTE, got);
+    } finally { gl.bindFramebuffer(gl.FRAMEBUFFER, prev); gl.deleteFramebuffer(fb); }
+    let diff = 0, maxd = 0;
+    for (let j = 0; j < C.sh; j++) {
+      const sy = Math.min(C.h - 1, Math.max(0, C.sh - 1 - j - C.g));
+      for (let bx = 0; bx < C.sw; bx++) {
+        const si = (sy * C.w + Math.min(C.w - 1, Math.max(0, bx - C.g))) * 4, bi = (j * C.sw + bx) * 4;
+        for (let k = 0; k < 4; k++) { const d = Math.abs(px[si + k] - got[bi + k]); if (d > 1) diff++; if (d > maxd) maxd = d; }
+      }
+    }
+    return { ok: diff === 0, gpu: gpu, gpuCopies: pageGpuCopies, slot: [s.x, s.y], cls: C.key, diffs: diff, maxDelta: maxd };
+  };
+  /* CBZ.pedInstanceMatrixCheck(): every instance drawn this frame against the
+     product it stands for, recomputed from scratch (the rig root's parent
+     world, then every local matrix down to the part, times its L): the proof
+     that putInstance writes what setMatrixAt(world * L) would. A check hook,
+     never called by the game. */
+  CBZ.pedInstanceMatrixCheck = function () {
+    const W = new THREE.Matrix4(), I = new THREE.Matrix4(), chain = [];
+    let n = 0, bad = 0, worst = 0;
+    rigs.forEach(function (r) {
+      if (r.parked || r.selfDrawn) return;
+      for (let i = 0; i < r.recs.length; i++) {
+        const rec = r.recs[i];
+        if (rec.dead || rec.parked || rec.slot < 0 || rec.stamp !== stamp || !rec.pool.mesh) continue;
+        chain.length = 0;
+        for (let o = rec.mesh; o && o !== r.group.parent; o = o.parent) chain.push(o);
+        W.copy(r.group.parent ? r.group.parent.matrixWorld : I.identity());
+        for (let k = chain.length - 1; k >= 0; k--) W.multiply(chain[k].matrix);
+        if (rec.L) W.multiply(rec.L);
+        const a = rec.pool.mesh.instanceMatrix.array, o = rec.slot * 16, e = W.elements;
+        let d = 0;
+        for (let k = 0; k < 16; k++) d = Math.max(d, Math.abs(a[o + k] - e[k]) / Math.max(1, Math.abs(e[k])));   // (relative: the array is float32)
+        n++; if (d > 1e-5) bad++; if (d > worst) worst = d;
+      }
+    });
+    return { ok: bad === 0, instances: n, mismatched: bad, worst: worst };
+  };
   CBZ.pedInstanceAudit = function () {
     let active = 0, capacity = 0, live = 0, boxPools = 0, unitPools = 0, blackPools = 0, pagedPools = 0;
     let pages = 0, pageSlots = 0, pageTexels = 0;
@@ -1587,6 +1806,8 @@
       pageList: pageList,               // per page: source size, slots used / capacity, height
       pageCopies: pageCopies, pageFullUploads: pageFullUploads,
       pageRefused: pageRefused,         // sources left unpaged: unreadable, or read back with no opaque texel (a dead canvas)
+      pageGpuCopies: pageGpuCopies,     // slots copied GPU to GPU (a GPU-drawn source: never read back)
+      pageDeferred: pageDeferred,       // new sources put off to a later frame by the per-frame paging budget (PAGE_MS)
       blackPools: blackPools,           // RATCHET: pools that would render black. Pin at 0.
       poolsTotal: pools.size,
       instancesLive: live,
