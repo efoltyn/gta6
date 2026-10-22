@@ -247,6 +247,13 @@
   // the built version: the records the island stood (footprint, roof, shell colour)
   function realBlocks(A) {
     const out = [];
+    // a venue site that is not a building (world/island_lots.js: the motel's
+    // row, the car lot's cabin) says which of it stands up: s.far, world boxes
+    const S = (A.island && A.island.sites) || [];
+    for (const s of S) if (s && s.far) for (const f of s.far) {
+      const wall = lin(s.color != null ? s.color : 0x9a948a), rf = s.roofHex != null ? lin(s.roofHex) : wall;
+      out.push({ x0: f.x0, x1: f.x1, z0: f.z0, z1: f.z1, y0: s.gy - 0.4, y1: f.y1 + 0.3, wall: wall, roof: [rf[0] * 0.62, rf[1] * 0.62, rf[2] * 0.62] });
+    }
     for (const b of A.fragile || []) {
       if (!b || b.fallen) continue;
       const wall = lin(b.color != null ? b.color : 0x9a948a), rf = b.roofHex != null ? lin(b.roofHex) : wall;

@@ -326,18 +326,47 @@
 
   /* ---- THE STAFF ---------------------------------------------------------- */
   const posts = new Set();
+  /* A POST may also be (world/island_civic.js, island_dealers.js,
+     island_offices.js): up the building (opts.k, the storey: the mayor at
+     his desk, the councillors on the dais), on its own shift (opts.hours
+     [on, off] on the clock, wrapping past midnight: the night guard at a
+     door the day shuts), only while you are this near (opts.near), cast as
+     somebody (opts.archetype: "military" for the recruiting sergeant, "exec"
+     for the boss; opts.name), with its own way out at the end of the shift
+     (opts.exit {lx, lz, k}: a worker upstairs walks to the stair or the lift
+     and goes from there once nobody sees him). post.goTo(x, z, face) walks
+     him to a world spot and roots him there (a salesman over to the car
+     you are looking at); post.back() walks him home to his post; post.hold
+     leaves him to the venue (riding in a car); post.on() his shift is on. */
+  function inHours(H) {
+    const h = hour(), a = H[0], z = H[1];
+    return a <= z ? (h >= a && h < z) : (h >= a || h < z);
+  }
+  function open(P) { return P.hours ? inHours(P.hours) : isOpen(P.b); }
   function post(b, spot, opts) {
     if (!b || !spot) return null;
     opts = opts || {};
     const IV = CBZ.islandVenue;
-    const F = IV && IV.floor ? IV.floor(b, 0) : null;
+    const k = opts.k | 0;
+    const F = IV && IV.floor ? IV.floor(b, k) : null;
     let x = spot.x, z = spot.z, face = spot.face || 0;
     if (spot.lx != null && F) { const w = F.toWorld(spot.lx, spot.lz); x = w.x; z = w.z; face = (spot.face || 0) + F.yaw; }
     if (x == null || z == null) return null;
+    let exit = null;
+    if (opts.exit && F && opts.exit.lx != null) {
+      const Fe = (opts.exit.k | 0) === k ? F : IV.floor(b, opts.exit.k | 0);
+      const w = Fe.toWorld(opts.exit.lx, opts.exit.lz);
+      exit = { x: w.x, z: w.z, y: Fe.y };
+    }
     const P = {
-      b: b, x: x, z: z, y: F ? F.y : (b.gy || 0), face: face,
+      b: b, x: x, z: z, y: F ? F.y : (b.gy || 0), face: face, k: k,
       job: opts.job || "clerk", look: opts.look || null, armed: opts.armed, ped: null, lost: false,
+      hours: opts.hours || null, near: opts.near || 0, name: opts.name || null,
+      archetype: opts.archetype || (opts.dress && opts.dress.archetype) || null, exit: exit, at: null, hold: false,
       body: function () { const p = P.ped; return p && !p.dead ? p : null; },
+      goTo: function (gx, gz, f) { P.at = { x: gx, z: gz, face: f != null ? f : null }; },
+      back: function () { P.at = null; },
+      on: function () { return open(P); },
     };
     posts.add(P);
     return P;
@@ -354,7 +383,7 @@
     const b = P.b, use = b.use || "";
     const armed = P.armed != null ? !!P.armed : !!PACKS[use];
     const ped = stand(A, PA, P.x, P.z, {
-      staff: true, _y: P.y, job: P.job, archetype: "merchant", wealth: 0.55,
+      staff: true, _y: P.y, job: P.job, archetype: P.archetype || "merchant", wealth: 0.55,
       aggr: armed ? 0.5 : 0.3, armed: armed, weapon: armed ? "Pistol" : null,
       cash: 60 + ((rnd() * 160) | 0),
     });
@@ -364,15 +393,44 @@
     ped._venueStaff = use || true;
     ped._work = PA.all.find(function (l) { return l.b === b; }) || null;
     if (armed) { ped.nerve = 0.85; ped.ammo = 30; }
+    if (P.name) ped.name = P.name;
     if (ped.group) ped.group.rotation.y = P.face;
     P.ped = ped;
     return ped;
+  }
+  // a walk the venue asked for: off his spot, along a controlled path (the
+  // way systems/leave.js walks a city ped), rooted again where he arrives
+  function walkTick(P, p) {
+    const want = P.at;
+    const tx = want ? want.x : P.x, tz = want ? want.z : P.z;
+    const W = p._isleWalk;
+    if (!W) {
+      const R = p.staffPost;
+      if (R && Math.abs(R.x - tx) < 0.05 && Math.abs(R.z - tz) < 0.05) return;     // rooted where he should be
+      if (Math.hypot(p.pos.x - tx, p.pos.z - tz) < 0.5) { p.staffPost = { x: tx, z: tz, face: want && want.face != null ? want.face : P.face }; return; }
+      p._isleWalk = { x: tx, z: tz };
+    } else if (W.x !== tx || W.z !== tz) { W.x = tx; W.z = tz; }
+    if (Math.hypot(p.pos.x - tx, p.pos.z - tz) < 0.6) {
+      p._isleWalk = null; p.controlled = false; p.path = null; p.finalGoal = null;
+      p.staffPost = { x: tx, z: tz, face: want && want.face != null ? want.face : P.face };
+      return;
+    }
+    p.staffPost = null; p.controlled = true;
+    p.path = [{ x: tx, z: tz }]; p.finalGoal = { x: tx, z: tz };
+    if (p.target && p.target.set) p.target.set(tx, 0, tz);
+    p.state = "walk"; p.pause = 0;
   }
   function goHome(P) {
     const p = P.ped;
     P.ped = null;
     if (!p || p.dead) return;
-    p._islandPost = null;
+    p._islandPost = null; p._isleWalk = null;
+    // a post upstairs: to the stair or the lift, and gone from there unseen
+    if (P.exit) {
+      if (CBZ.leave && CBZ.leave.go) CBZ.leave.go(p, { route: [{ x: P.exit.x, z: P.exit.z }], remove: despawn, tag: "isle:closing" });
+      else despawn(p);
+      return;
+    }
     const L = P.b && P.b._venueLot ? P.b._venueLot : null;
     const D = L && L.building && L.building.door;
     const route = [];
@@ -388,20 +446,24 @@
       if (p) {
         if (p.dead) { P.lost = true; P.ped = null; continue; }
         if (CBZ.cityPeds.indexOf(p) < 0) { P.ped = null; continue; }
+        // the venue has him (riding in a car): hands off
+        if (P.hold) continue;
         // a man who left his post (he ran, he fought, he was taken) is the
         // street's now: the post waits for him or a new hire
-        if (!p.staffPost) { p._islandPost = null; P.ped = null; continue; }
+        if (!p.staffPost && !p._isleWalk) { p._islandPost = null; P.ped = null; continue; }
         const d = Pl ? Math.hypot(P.x - Pl.x, P.z - Pl.z) : 0;
         if (!here) { if (unseen(p.pos.x, p.pos.y, p.pos.z)) { despawn(p); P.ped = null; } continue; }
-        if (!isOpen(P.b)) { goHome(P); continue; }
-        if (d > STAFF_OUT && unseen(p.pos.x, p.pos.y, p.pos.z)) { despawn(p); P.ped = null; continue; }
+        if (!open(P)) { goHome(P); continue; }
+        if (d > (P.near ? P.near + 75 : STAFF_OUT) && unseen(p.pos.x, p.pos.y, p.pos.z)) { despawn(p); P.ped = null; continue; }
+        walkTick(P, p);
+        if (!p.staffPost) continue;
         let at = null;
         if (P.look) { try { at = P.look(P, p, dt); } catch (e) { at = null; } }
-        p.staffPost.face = at ? Math.atan2(at.x - p.pos.x, at.z - p.pos.z) : P.face;
+        p.staffPost.face = at ? Math.atan2(at.x - p.pos.x, at.z - p.pos.z) : (P.at && P.at.face != null ? P.at.face : P.face);
         continue;
       }
-      if (P.lost || !here || P.b.fallen || !isOpen(P.b) || g.state !== "playing") continue;
-      if (Pl && Math.hypot(P.x - Pl.x, P.z - Pl.z) > STAFF_IN) continue;
+      if (P.lost || !here || P.b.fallen || !open(P) || g.state !== "playing") continue;
+      if (Pl && Math.hypot(P.x - Pl.x, P.z - Pl.z) > (P.near || STAFF_IN)) continue;
       if (!unseen(P.x, P.y, P.z)) continue;
       mint(P, A, PA);
     }
@@ -412,7 +474,7 @@
   const SHUT_USES = Object.keys(HOURS);
   const STEEL = 0x9aa0a6, HOUSING = 0x6d737a, RAIL = 0x4f555c;
   function shutterFit(b, lot) {
-    if (!b || !b.group || !b.interior || b.kind === "tower" || b.kind === "hotel" || b.ox == null) return null;
+    if (!b || !b.group || !b.interior || b.kind === "tower" || b.kind === "hotel" || b.kind === "carlot" || b.kind === "showroom" || b.ox == null) return null;
     const IB = CBZ.islandBuilding || {}, IV = CBZ.islandVenue;
     const FH = IB.FH || 3.4, DW = IB.DOORW || 1.8;
     const L = lot && lot.building;

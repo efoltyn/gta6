@@ -4309,7 +4309,13 @@
   "src/world/archipelago.js",
   "src/world/island_town.js",
   "src/world/island_police.js",
-  "src/world/island_people.js"
+  "src/world/island_people.js",
+  "src/world/island_fitkit.js",
+  "src/world/island_lots.js",
+  "src/world/island_dealers.js",
+  "src/world/island_civic.js",
+  "src/world/island_homes.js",
+  "src/world/island_offices.js"
  ],
  "needed": [
   "src/city/facade_kit.js",

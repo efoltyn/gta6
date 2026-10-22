@@ -536,7 +536,7 @@
       const t0 = Math.max(f.t0, W(100) - spec.front / 2);
       if (t0 + spec.front > f.t1 + 1e-6) return;
       const l = accept(frontLot(f, t0, spec), { district: "core", kind: "hotel", storeys: 9, helipad: true,
-        style: pickStyle(["brutalist", "hightech", "stone"], W(100), Z(156), 0x4e1, 9), name: "Harbour Hotel" });
+        style: pickStyle(["brutalist", "hightech", "stone"], W(100), Z(156), 0x4e1, 9), name: hotelName(cfg) });
       if (l) places.helipad = l;
     })();
     // CAR PARKS: downtown (behind Customs Street), the quay's west end, the beach
@@ -644,6 +644,75 @@
         const t0 = Math.max(f.t0, Math.min(f.t1 - front, w[3] - front / 2));
         accept(frontLot(f, t0, spec), { district: districtAt(f.mx, f.mz), kind: w[10], storeys: w[8], style: w[9], name: w[11] });
       }
+    })();
+
+    /* THE MOTEL AND THE USED CAR LOT (an archipelago island whose trades
+       include them: WANT below). Neither is a building on a shop lot. A motel
+       is long and low on the ring road: two storeys of rooms in a row with
+       an open gallery along the front, every room's door off it, a stair at
+       the end, the office at the other end, and its own car park in front,
+       nose-in to the rooms. A used car lot is a forecourt: the cars stand on
+       it in rows, a little sales cabin at the back. Both claim their ground
+       before the street fronts fill in (the lot's footprint is the whole
+       graded forecourt; world/island_lots.js builds them). */
+    function wantsUse(u) {
+      const w = WANT[cfg.style || "harbour"] || WANT.harbour;
+      for (let i = 0; i < w.length; i++) if (w[i][0] === u) return true;
+      return false;
+    }
+    function ruleOf(f) { return REMAP[f.district] || f.district; }
+    function onFronts(ok, order, spec, extra) {
+      const cands = fronts.filter(ok).sort(order);
+      for (const f of cands) {
+        if (f.t1 - f.t0 < spec.front + 0.5) continue;
+        const mid = (f.t0 + f.t1) / 2 - spec.front / 2;
+        for (const t0 of [mid, f.t0 + 0.2, f.t1 - spec.front - 0.2]) {
+          const L0 = frontLot(f, t0, spec);
+          const l = accept(L0, Object.assign({ district: f.district, tol: 1.8 }, extra));
+          if (l) return l;
+        }
+      }
+      return null;
+    }
+    // a building-local rect (door on -z) of lot l, in world coordinates
+    function lotRect(l, x0, x1, z0, z1) {
+      const co = Math.cos(l.yaw), si = Math.sin(l.yaw);
+      const ax = l.x + x0 * co + z0 * si, az = l.z - x0 * si + z0 * co;
+      const bx = l.x + x1 * co + z1 * si, bz = l.z - x1 * si + z1 * co;
+      return { x0: Math.min(ax, bx), x1: Math.max(ax, bx), z0: Math.min(az, bz), z1: Math.max(az, bz) };
+    }
+    if (cfg.venues && wantsUse("motel")) (function motel() {
+      const ring = function (f) { return /Ring/.test(f.name); };
+      const spec = { front: 38, depth: 25, setback: 0.6, side: 2.5, rear: 1.5, w: 33, d: 22.9 };
+      const l = onFronts(function (f) { return ruleOf(f) !== "core" && ruleOf(f) !== "waterfront"; },
+        function (a, b) { return (ring(b) - ring(a)) || (a.u - b.u); }, spec, { kind: "motel", storeys: 2, style: null });
+      if (!l) return;
+      // the plan of it, building-local: the car park across the front, the
+      // block behind it (a gallery 1.7 m deep, rooms 7.6 m deep), the office
+      // at the -x end of the block, the stair at the +x end
+      const parkD = l.d - 9.6;
+      l.motel = { parkD: parkD, blockD: 9.6, galleryD: 1.7, officeW: 5.4, stairW: 1.6, roomW: 4.0, rooms: 6 };
+      const P = { rect: lotRect(l, -l.w / 2, l.w / 2, -l.d / 2, -l.d / 2 + parkD), name: "Motel car park", bays: [], motel: true };
+      P.x = (P.rect.x0 + P.rect.x1) / 2; P.z = (P.rect.z0 + P.rect.z1) / 2; P.w = P.rect.x1 - P.rect.x0; P.d = P.rect.z1 - P.rect.z0;
+      // nose-in to the rooms: one row against the block, a bay per room front
+      const co = Math.cos(l.yaw), si = Math.sin(l.yaw);
+      const alongX = Math.abs(co) > 0.5;
+      const bz = -l.d / 2 + parkD - 2.9;
+      for (let i = 0; i < l.motel.rooms; i++) {
+        const bx = -l.w / 2 + l.motel.officeW + l.motel.roomW * (i + 0.5);
+        P.bays.push({ x: l.x + bx * co + bz * si, z: l.z - bx * si + bz * co, yaw: l.yaw + Math.PI, alongX: alongX });
+      }
+      places.parking.push(P);
+      // the way in off the street: the footway drops to a crossing there
+      l.entry = lotRect(l, l.w / 2 - 7, l.w / 2 - 1, -l.d / 2 - 0.6 - WALK + HW, -l.d / 2 - 0.6);
+    })();
+    if (cfg.venues && wantsUse("usedcars")) (function carlot() {
+      const spec = { front: 30, depth: 22, setback: 0.5, side: 1, rear: 1, w: 28, d: 20.5 };
+      const l = onFronts(function (f) { return ruleOf(f) !== "core" && ruleOf(f) !== "waterfront" && ruleOf(f) !== "estates"; },
+        function (a, b) { return ((ruleOf(b) === "industrial") - (ruleOf(a) === "industrial")) || (b.u - a.u); },
+        spec, { kind: "carlot", storeys: 1, style: null });
+      if (!l) return;
+      l.entry = lotRect(l, -l.w / 2 + 1, -l.w / 2 + 8, -l.d / 2 - 0.5 - WALK + HW, -l.d / 2 - 0.5);
     })();
 
     /* THE STREET FRONTS. Per district: frontage, depth, setback, side and
@@ -1054,6 +1123,17 @@
     usedcars: ["Used Cars", "Island Auto Sales", "Quay Motors"],
     bankhq: ["Island Bank"],
   };
+  /* EVERY ISLAND'S HOTEL HAS ITS OWN NAME. The disaster island's is the
+     Harbour Hotel, as it always was; an archipelago island's is its own,
+     by island (cfg.id), else picked by its seed from the pool. */
+  const HOTEL_NAMES = { "port-royal": "The Admiralty", "highgate": "Highgate Grand", "palm-cay": "Palm Cay Beach Hotel",
+    "ironworks": "Foundry Inn", "saint-anne": "Saint Anne Bay Hotel" };
+  const HOTEL_POOL = ["Windward Hotel", "Crown & Anchor", "Royal Palm Hotel", "Coral Bay Hotel", "The Belvedere", "Trade Winds Hotel"];
+  function hotelName(cfg) {
+    if (!cfg || !cfg.venues) return "Harbour Hotel";
+    if (cfg.id && HOTEL_NAMES[cfg.id]) return HOTEL_NAMES[cfg.id];
+    return HOTEL_POOL[Math.abs(cfg.seed | 0) % HOTEL_POOL.length];
+  }
   // the ordinary trades a town's other shops are (the sign words the
   // dressing always had), and where a dive shop makes sense
   const TRADES = ["Bakery", "Chemist", "Hardware", "Cafe", "Grocer", "Barber", "Books", "Diner", "Deli",
@@ -1073,6 +1153,8 @@
   function fixedUse(l) {
     if (l.kind === "hotel") return "hotel";
     if (l.kind === "showroom") return "cardealer";
+    if (l.kind === "motel") return "motel";
+    if (l.kind === "carlot") return "usedcars";
     if (l.kind === "station") return "fuel";
     if (l.kind === "market") return "market";
     if (l.kind === "shed") return "warehouse";
@@ -1087,7 +1169,11 @@
     const want = WANT[style] || WANT.harbour;
     const h = function (l, s) { return wh(l.x, l.z, s); };
     const nameOf = function (use, l) { const a = USE_NAMES[use]; return a ? a[(h(l, 0x7c1) * a.length) | 0] : null; };
-    for (const l of lots) { l.use = fixedUse(l); l.U = urban(l.x, l.z); }
+    for (const l of lots) {
+      l.use = fixedUse(l); l.U = urban(l.x, l.z);
+      // the motel and the car lot the plan laid as places take their trade's name
+      if ((l.kind === "motel" || l.kind === "carlot") && !l.name) l.name = nameOf(l.use, l);
+    }
     const free = function (l) { return l.use == null; };
     const sname = function (l) { return (l.street && l.street.name) || ""; };
     const ring = function (l) { return /Ring/.test(sname(l)); };
@@ -1125,6 +1211,8 @@
     };
     function place(use, n) {
       const sc = SCORE[use];
+      // a motel or a car lot the plan already laid out is the island's one
+      if ((use === "motel" || use === "usedcars") && lots.some(function (l) { return l.use === use; })) return;
       for (let i = 0; i < n; i++) {
         const l = pick(sc[0], sc[1]);
         if (!l) return;

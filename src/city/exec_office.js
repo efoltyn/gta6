@@ -621,6 +621,16 @@
   CBZ.cityMeshKit.rounded = roundedBoxGeo;
   CBZ.cityMeshKit.leaf = leafGeo;
   CBZ.cityMeshKit.hash = hsh;
+  // THE PIECES ARE PUBLIC TOO (world/island_civic.js, island_offices.js: the
+  // islands' offices, the mayor's office and the council chamber are built
+  // from these same desks, chairs, credenzas and plants, one merge per room):
+  //   CBZ.cityMeshKit.pieces.execDesk(K, len, deep) ... after K.at(x, z, yaw, y)
+  CBZ.cityMeshKit.palette = C;
+  CBZ.cityMeshKit.pieces = {
+    swivelChair: function (K, seatTop, o) { return swivelChair(K, seatTop, o || {}); },
+    guestChair: guestChair, loungeChair: loungeChair, monitor: monitor,
+    snakePlanter: snakePlanter, figTree: figTree, credenza: credenza, execDesk: execDesk,
+  };
 
   // =========================================================================
   //  FURNITURE — each builder draws in the kit's current frame: local +z is

@@ -951,7 +951,7 @@
     }
     // (a streamed copy lays its plan out in steps too)
     const planCfg = { cx: cx, cz: cz, R: R, facades: facadeIds, tall: facTall, low: facLow,
-      seed: ISL.seed, style: ISL.style, airstrip: !!ISL.airstrip,
+      seed: ISL.seed, style: ISL.style, airstrip: !!ISL.airstrip, id: ISL.id || null,
       // an archipelago island's lots each have a use (the plan's assignUses);
       // the disaster island's plan stays exactly as it was
       venues: WORLD === "archipelago" };
@@ -4813,6 +4813,7 @@
     if (PLAN) for (const l of PLAN.lots) {
       if (l.kind === "station") continue;                 // placeStations built it
       if (l.driveway) roadCuts.push(l.driveway.cut);     // the sidewalk drops to a crossing there
+      if (l.entry) roadCuts.push(l.entry);                // (the motel's car park, the car lot)
       const pal = KIND_PAL[l.kind] || PALETTE;
       const color = pal[(h01g(l.x, l.z, 0x7a1) * pal.length) | 0];
       let b = null;
@@ -4821,6 +4822,13 @@
         const sr = makeShowroom(l.x, l.z);
         dl1 = { x: l.x, z: l.z };
         if (sr && l.use) { sr.use = l.use; sr.name = l.name || null; sr.district = l.district; sr.street = l.street ? l.street.name : null; sr.planId = l.id; sr.lot = l.lot; sites.push(sr); }
+      } else if ((l.kind === "motel" || l.kind === "carlot") && CBZ.islandLots) {
+        // the motel and the used car lot (world/island_lots.js): venue sites,
+        // not `fragile` (the quake and the far form know buildings only);
+        // `b` for the record lines below and the motel's kept beds
+        b = CBZ.islandLots.build(l, { root: root, makeCar: makeCar, addGlass: addGlass,
+          furnish: function (name, host, x, y, z, yaw, o) { return furnish(name, host, x, y, z, yaw, o); } });
+        if (b) sites.push(b);
       } else if (l.kind === "tower" || l.kind === "hotel") {
         b = yield* makeTower(l.x, l.z, l.w, l.d, l.storeys * FH, color, l.style, l.lot, { helipad: !!l.helipad });
       } else {

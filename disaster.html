@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 435
+     Natural Disaster Survival, standing alone: index.html minus the 441
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -981,10 +981,10 @@ document.body.appendChild(b);}}catch(e){}})();
      roof as data (node-checkable by tools/island-stairs-check.mjs); the
      builder lays exactly what it says, so it loads first. -->
 <script src="src/world/island_roads.js?v=isles1023"></script>
-<script src="src/world/island_plan.js?v=venue1022"></script>
+<script src="src/world/island_plan.js?v=civic1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=mvenue1night1"></script>
+<script src="src/world/disaster_arena.js?v=civic1022"></script>
 <script src="src/world/island_dressing.js?v=venue1022"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
 <script src="src/world/island_venue.js?v=mmoney1people"></script>
@@ -1412,13 +1412,13 @@ document.body.appendChild(b);}}catch(e){}})();
      cars (vehicles.js), a rooftop helipad with a flyable helicopter
      (playeraircraft.js CBZ.airParkFlyable), the island's weather fed into both.
      After vehicles.js, playeraircraft.js, bailout.js and aircraft_doors.js. -->
-<script src="src/world/island_vehicles.js?v=isles1022"></script>
+<script src="src/world/island_vehicles.js?v=civic1022"></script>
 <!-- THE ARCHIPELAGO (mode "archipelago"): the disaster island's package built
      many times over on one sea, kilometres apart, streamed in as you near
      each one and dropped behind you. archipelago_map.js is the map as data;
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
-<script src="src/world/island_lodging.js?v=night1022"></script>
+<script src="src/world/island_lodging.js?v=civic1022"></script>
 <!-- THE ISLANDS' PEOPLE (world/island_people.js): Gang City's street crowd
      (city/peds.js) on the island in force, with homes and work in its
      buildings, the trades' hours and shutters, and the posted staff
@@ -1618,6 +1618,13 @@ document.body.appendChild(b);}}catch(e){}})();
      a use (city/bank.js citySafe); the loan shark's office and his collectors
      (CBZ.loanShark, the demand ladder). After bank.js, island_venue.js,
      interactions.js and island_shops.js (whose counters it gives a till). -->
+<!-- THE ISLES' CIVIC WAVE: the fit-out kit (world/island_fitkit.js: one merge per
+     room, the exec floor's pieces, signs), the motel and the used car lot as
+     built places (world/island_lots.js, called by disaster_arena.js's build),
+     the car dealers (island_dealers.js), the town hall and the army recruiting
+     office (island_civic.js), the flats over the shops (island_homes.js) and
+     the office towers (island_offices.js). After island_venue.js (the seam),
+     exec_office.js, furniture.js, propuse.js and city/interactions.js. -->
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
      in or at the door of is fitted out for real (finished floors, bathrooms,
      kitchens, bedrooms, stockrooms, a gang's count room, baked light from

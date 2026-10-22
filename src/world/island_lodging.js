@@ -386,6 +386,24 @@
   /* ---- A MOTEL'S ROOM: the building's own bedroom, upstairs ------------- */
   function motelRoom(room, A) {
     const I = A && A.island;
+    /* A MOTEL BUILT AS ONE (world/island_lots.js: a row of rooms off a
+       gallery): the office lets the one room of the row whose door is on
+       its hinge; its bed is the bed in that room; the door opens for you. */
+    const M = room.b && room.b.motel;
+    if (M && M.rooms && M.rooms[M.rent]) {
+      const R = M.rooms[M.rent], B = R.box;
+      const beds = (I && I.beds || []).filter(function (r) {
+        return r.b === room.b && r.rec && r.x > B.minX && r.x < B.maxX && r.z > B.minZ && r.z < B.maxZ && Math.abs(r.y - R.y) < 1;
+      });
+      if (!beds.length) return false;
+      room.beds = beds.map(function (r) { return r.rec; });
+      room.floor = R.k; room.number = R.n;
+      room.door = R.door || null;
+      room.box = B;
+      const r0 = beds[0];
+      room.wake = { x: r0.x - r0.hz * 1.0, y: r0.y, z: r0.z + r0.hx * 1.0, face: Math.atan2(-r0.hx, -r0.hz) };
+      return true;
+    }
     const mine = (I && I.beds || []).filter(function (r) { return r.b === room.b && r.rec; });
     if (!mine.length) return false;
     mine.sort(function (a, b2) { return b2.y - a.y; });
@@ -452,12 +470,13 @@
     for (const I of isles) if (I && I.arena && I.arena.island) arenas.add(I.arena);
     for (let i = S.rooms.length - 1; i >= 0; i--) {
       const room = S.rooms[i];
-      if (!room.A) { for (const A of arenas) if ((A.island.buildings || []).indexOf(room.b) >= 0) { room.A = A; break; } }
+      if (!room.A) { for (const A of arenas) if ((A.island.buildings || []).indexOf(room.b) >= 0 || (A.island.sites || []).indexOf(room.b) >= 0) { room.A = A; break; } }
       if ((room.A && !arenas.has(room.A)) || room.b.fallen) drop(room);
     }
     arenas.forEach(function (A) {
       if (A._job && !A._job.attached) return;          // not in the world yet
-      const L = A.island.buildings || [];
+      // (the motel is a venue site: world/island_lots.js builds it as one)
+      const L = (A.island.buildings || []).concat(A.island.sites || []);
       for (const b of L) {
         const u = useOf(b);
         if ((u === "hotel" || u === "motel") && !S.fitted.has(b)) fit(b, A);

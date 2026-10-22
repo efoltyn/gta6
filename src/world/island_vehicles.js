@@ -175,7 +175,8 @@
   }
   function standCar(spot) {
     if (!CBZ.cityAddParkedCar) return null;
-    const model = TOWN_MODELS[(hash01(spot.x, spot.z, 11) * TOWN_MODELS.length) | 0];
+    // (a dealer's spot names its own model: world/island_dealers.js, island_lots.js)
+    const model = spot.model || TOWN_MODELS[(hash01(spot.x, spot.z, 11) * TOWN_MODELS.length) | 0];
     let car = null;
     try { car = CBZ.cityAddParkedCar(spot.x, spot.z, spot.heading, { force: true, modelName: model, color: spot.color }); } catch (e) { car = null; }
     if (!car) return null;
