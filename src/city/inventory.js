@@ -134,11 +134,10 @@
   // This used to call weapon_thumbnails.js directly — a second offscreen
   // renderer with its own 180x100 frame — so the grid could show the same
   // pistol two ways depending on which store held it. itemicons.js photographs
-  // everything now, guns included; weaponThumbnail stays as the degrade.
+  // everything now, guns included (in idle time: "" until it lands, then the item face).
   function weaponFace(id, name, className) {
     let src = "";
     try { if (CBZ.itemIconGun) src = CBZ.itemIconGun(id || name); } catch (e) {}
-    if (!src) { try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id || name); } catch (e) {} }
     return src ? "<img class='" + (className || "gunThumb") + "' src='" + src + "' alt=''>"
       : itemFace(name, "");
   }
@@ -1376,84 +1375,10 @@
   installCorpseLootWraps();
   registerChestItem();
 
-  // ============================================================
-  //  ICON CENSUS — CBZ.itemIconAudit()
-  // ------------------------------------------------------------
-  //  OWNER: "we have guns all with actual icons — every single item that can
-  //  show in inventory should have an icon, not just a generic thing."
-  //  This counts, against the REAL resolution path this file renders with,
-  //  how many catalog entries still fall through to GENERIC.
-  //    • a GUN resolves through weaponFace() -> CBZ.weaponThumbnail(id): an
-  //      offscreen orthographic render of CBZ.buildActorWeapon(id), cached as
-  //      one data URL per weapon (city/weapon_thumbnails.js). That is the
-  //      style the purge must match — a drawn thing, not a letter.
-  //    • everything else resolves through iconFor() -> iconGlyph(), which is
-  //      the ICON / TAG_ICON tables above.
-  //  The item catalog is read LIVE (cityEcon.ITEMS is exported by reference
-  //  and six other files register into it at runtime — wildlife pelts/meat,
-  //  farm goods, C4, strategic ordnance, dog food, the chest), so a species
-  //  or a good added later shows up here with no edit.
-  //  Pass {noRender:true} to skip the GL round-trip (answers from the presence
-  //  of the thumbnail API instead) when a caller must not touch the renderer.
-  //  RATCHET: `generic` may only ever go DOWN. `items`/`withIcon` are printed
-  //  beside it so a "fix" that just shrinks the catalog cannot pass.
-  // ============================================================
-  function familyOf(name) {
-    const it = items()[name] || {};
-    if (it.pelt) return it.pristine ? "wildlife:pristine" : "wildlife:pelt";
-    if (it.meat) return "wildlife:meat";
-    if (it.tag === "weapon") return it.melee ? "weapon:melee" : "weapon:gun";
-    if (it.tag === "ordnance" || it.tag === "throwable" || it.tag === "ammo") return "ordnance";
-    if (it.tag === "clothing" || it.tag === "jewelry" || it.tag === "wearable") return "apparel:" + it.tag;
-    return it.tag ? String(it.tag) : "untagged";
-  }
-  // "" = falls through to GENERIC. "gun" = a real weapon render. "glyph" = a
-  // declared pictogram. Mirrors weaponFace()/iconFor() exactly.
-  function iconKindOf(name, noRender) {
-    const it = items()[name], gid = it && it.gun;
-    if (gid) {
-      if (noRender) return CBZ.weaponThumbnail ? "gun" : (iconGlyph(name) ? "glyph" : "");
-      let src = "";
-      try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(gid); } catch (e) { src = ""; }
-      if (src) return "gun";
-    }
-    return iconGlyph(name) ? "glyph" : "";
-  }
-  CBZ.itemIconAudit = function (opts) {
-    const noRender = !!(opts && opts.noRender);
-    const IT = items();
-    const out = { items: 0, withIcon: 0, generic: 0, genericNames: [], guns: 0, glyphs: 0, byFamily: {}, bag: null };
-    for (const name in IT) {
-      if (!Object.prototype.hasOwnProperty.call(IT, name)) continue;
-      out.items++;
-      const kind = iconKindOf(name, noRender);
-      if (kind === "gun") { out.withIcon++; out.guns++; continue; }
-      if (kind === "glyph") { out.withIcon++; out.glyphs++; continue; }
-      out.generic++;
-      out.genericNames.push(name);
-      const fam = familyOf(name);
-      out.byFamily[fam] = (out.byFamily[fam] || 0) + 1;
-    }
-    out.genericNames.sort();
-    // The ESCAPE/PRISON stash (systems/inventory.js over systems/economy.js) is
-    // a SECOND inventory surface with its own catalog and its own equally empty
-    // glyph table. Reported separately so the purge cannot "finish" by fixing
-    // one screen, and so the city number stays the thing that is pinned.
-    const eIT = CBZ.econ && CBZ.econ.ITEMS;
-    if (eIT) {
-      const bag = { items: 0, generic: 0, genericNames: [] };
-      for (const n in eIT) {
-        if (!Object.prototype.hasOwnProperty.call(eIT, n)) continue;
-        bag.items++;
-        let gl = "";
-        try { gl = CBZ.escapeBagIcon ? CBZ.escapeBagIcon(n) : ""; } catch (e) { gl = ""; }
-        if (!gl) { bag.generic++; bag.genericNames.push(n); }
-      }
-      bag.genericNames.sort();
-      out.bag = bag;
-    }
-    return out;
-  };
+  // (The ICON CENSUS that lived here was a second CBZ.itemIconAudit that loaded
+  // after city/itemicons.js's and replaced it, and it called an iconGlyph()
+  // deleted with the empty glyph tables: every call threw. itemicons.js's is
+  // the one census.)
 
   // ============================================================
   //  PUBLIC SURFACE — charpanel.js hosts the [I] grid through this

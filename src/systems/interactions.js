@@ -1756,6 +1756,8 @@
         }
 
         if (!cam.active || cam.offline) continue;
+        // the officer is staff: the lens watches inmates, it builds no case on him
+        if (CBZ.game && CBZ.game.role === "cop") continue;
 
         // A LENS IS AN EYE. The 9 m reach is a lit-room figure; after
         // lights-out the cell-wing camera is staring into the same black the

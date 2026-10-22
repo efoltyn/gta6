@@ -15,7 +15,8 @@
        alive, not captured, not cuffed, dressed as corrections
      · the cop loadout is real items (sidearm + taser on the weapon list)
      · the interact card on a standing inmate has no CUFF (arrest.js's rule:
-       down or surrendered only); hands up it does, and CUFF lands
+       down or surrendered only); hands up it does, CUFF lands and holds
+       (brain_prison.js's cuffed hold, not a knock-out), and Uncuff is offered
      · no guard is hunting / arresting the player officer
 
      node tools/prison-cop-check.mjs [--port 9812] [--steps 3600]
@@ -181,6 +182,8 @@ const cuff = await ev(`(function(){
   // a PLAIN inmate: not the dealer or a merchant with a stall, nobody collecting from you
   (CBZ.npcs||[]).forEach(function(n){ if (n.dead || n.ko > 0 || n.escaped || !n.group || n.kind !== 'inmate') return;
     if (n.role === 'dealer' || n.role === 'merchant' || n._demand) return;
+    // nobody a screw already has in hand (cuffed, or mid-order) from the 60 s above
+    if (n.cuffed || n._lawBy) return;
 
     var d = Math.hypot(n.group.position.x - p.pos.x, n.group.position.z - p.pos.z); if (d < bd) { bd = d; best = n; } });
   if (!best) return { err: 'no inmate' };
@@ -197,7 +200,19 @@ const cuff = await ev(`(function(){
   // THE RULE (systems/arrest.js): a man on his feet who has not given up is
   // not cuffed. Standing: no Cuff on his card. Then he puts his hands up (the
   // surrender a drawn weapon gets out of him) and Cuff is there.
+  // The officer walks up with his sidearm out, and a man in its sights may
+  // already have put his hands up (systems/intimidate.js): that man HAS given
+  // up and Cuff is right for him. Let him go first, so "standing" is a man on
+  // his feet who has not surrendered, which is what this asks about.
+  var gaveUp = !!(CBZ.arrest && CBZ.arrest.surrendered && CBZ.arrest.surrendered(best));
+  var verbsOnApproach = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
+  if (CBZ.intimidateRelease) CBZ.intimidateRelease(best);
+  best.intimidMode = null; best.intimidT = 0; best.poseHandsUp = false; best.surrender = false;
+  if (best.char) { best.char.handsUp = false; best.char.surrender = false; }
+  if (best._brain) best._brain.responseT = -1e9;   // the answer he gave the muzzle is over (arrest.js: a decision is now)
+  best._verbs = null;
   var standingVerbs = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
+  if (CBZ.arrest && CBZ.arrest.surrendered && CBZ.arrest.surrendered(best)) standingVerbs = ['(still surrendered: brain response)'].concat(standingVerbs || []);
   best.intimidMode = 'scared'; best.poseHandsUp = true; if (best.char) best.char.handsUp = true;
   best._verbs = null; CBZ.stepSim(1/60);
   var verbs = CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(best) : null;
@@ -206,16 +221,18 @@ const cuff = await ev(`(function(){
   if (on !== best) r = 'card is on ' + (on ? (on.kind || '') + ' ' + (on.data && on.data.name) : 'nobody');
   else if (idx >= 0) { try { CBZ.doInteract(idx); r = 'pressed'; } catch (e) { return { err: 'detain threw: ' + e.message, verbs: verbs }; } }
   window.__copTarget = best;
-  return { name: best.data && best.data.name, dist: +bd.toFixed(1), standingVerbs: standingVerbs, verbs: verbs, result: r };
+  return { name: best.data && best.data.name, dist: +bd.toFixed(1), gaveUpOnApproach: gaveUp, verbsOnApproach: verbsOnApproach, standingVerbs: standingVerbs, verbs: verbs, result: r };
 })()`);
 log("  cuff: " + JSON.stringify(cuff));
 for (let i = 0; i < 6; i++) await ev(`(function(){ for (var i=0;i<60;i++) CBZ.stepSim(1/60); return true; })()`);
 const after = await ev(`(function(){ var a = window.__copTarget; if (!a) return null; var V = CBZ.verbs;
-  return { ko: +(a.ko||0).toFixed(1), cuffed: !!(V && V.cuffed && V.cuffed(a)), ai: a.aiState }; })()`);
+  return { ko: +(a.ko||0).toFixed(1), cuffed: !!(V && V.cuffed && V.cuffed(a)) && !!a.cuffed, ai: a.aiState,
+    verbs: CBZ.prisonVerbsFor ? CBZ.prisonVerbsFor(a) : null }; })()`);
 log("  target after 6s: " + JSON.stringify(after));
 check("a standing inmate who has not given up offers no Cuff", cuff && Array.isArray(cuff.standingVerbs) && !cuff.standingVerbs.includes("detain"), cuff && cuff.standingVerbs);
 check("hands up, the card offers Cuff", cuff && Array.isArray(cuff.verbs) && cuff.verbs.includes("detain"), cuff && cuff.verbs);
-check("CUFF lands on an inmate", !cuff.err && after && (after.cuffed || after.ko > 0), after);
+check("CUFF lands on an inmate", !cuff.err && after && after.cuffed, after);
+check("in cuffs, the officer's card offers Uncuff", after && after.verbs && after.verbs.includes("uncuff"), after && after.verbs);
 
 // ---- THE KEYS, AND A DOOR OFF THE CLOCK (systems/prisondoorwatch.js) --------
 // The officer's keys open the yard gate and a racked cell; a cell he opens
@@ -232,7 +249,7 @@ for (let i = 0; i < 6; i++) await ev(`(function(){ if (CBZ.dayPhase) CBZ.dayPhas
 const setup = await ev(`(function(){
   var S = CBZ.prisonSchedule, cb = CBZ.cellblock;
   if (!S || !cb || !cb.cells) return { err: 'no schedule/cellblock' };
-  if (window.__copTarget) { window.__copTarget.cuffed = false; }
+  if (window.__copTarget && window.__copTarget.cuffed && CBZ.prisonBrain && CBZ.prisonBrain.uncuff) CBZ.prisonBrain.uncuff(window.__copTarget);
   var c = null;
   for (var i = 0; i < cb.cells.length; i++) { var k = cb.cells[i]; if (k.locked && !k.tier && k.leafClosed && !k.player) { c = k; break; } }
   // the wing can still be holding leaves for stragglers: rack one ourselves

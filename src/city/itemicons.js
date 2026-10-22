@@ -1082,9 +1082,20 @@
     });
   }
 
+  /* NO PHOTOGRAPH IS TAKEN ON THE PATH THAT ASKED FOR IT. shoot() used to end
+     in toDataURL: a synchronous readback + PNG encode, and the first one also
+     paid for this context and its shader programs, 1.6-1.7 s on a 4x-throttled
+     core, the moment the hotbar first drew. Now the asking path gets what is
+     cached (or the sprite, or "" for a hotbar face, which the bar retries) and
+     the shot is QUEUED: the pump below takes one per idle slice, renders it,
+     and the canvas goes out through toBlob (encoded off the main thread) as a
+     short blob: URL. The studio itself is opened in the idle time after load,
+     on the title card, so the context and its programs are paid for before
+     anybody plays. Blob URLs are also ~60 bytes where a data: URI was ~4 KB in
+     every innerHTML rebuild of every grid cell. */
   function shoot(obj) {
     const T = window.THREE;
-    if (!boot3()) return "";
+    if (!boot3()) { dropAsset(obj); return false; }
     let swapped = null;
     try {
       while (RHOLD.children.length) RHOLD.remove(RHOLD.children[0]);
@@ -1105,7 +1116,7 @@
       });
 
       let box = new T.Box3().setFromObject(RHOLD);
-      if (!isFinite(box.min.x) || box.min.x > box.max.x) return "";
+      if (!isFinite(box.min.x) || box.min.x > box.max.x) return false;
       const cx = (box.min.x + box.max.x) * 0.5, cyy = (box.min.y + box.max.y) * 0.5, cz = (box.min.z + box.max.z) * 0.5;
       RHOLD.position.set(-cx, -cyy, -cz);
       RHOLD.updateMatrixWorld(true);
@@ -1135,9 +1146,9 @@
       RCAM.updateMatrixWorld(true);
 
       R3.render(RSCENE, RCAM);
-      return R3.domElement.toDataURL("image/png");
+      return true;
     } catch (e) {
-      return "";
+      return false;
     } finally {
       if (swapped) for (let i = 0; i < swapped.length; i++) swapped[i][0].material = swapped[i][1];
       dropAsset(obj);
@@ -1157,13 +1168,87 @@
   }
   function photo(kind, name, row, forceKind) {
     const k = renderKey(kind, name, row);
-    let uri = rcache[k];
+    const uri = rcache[k];
     if (uri !== undefined) return uri;
-    let obj = null;
-    try { obj = CBZ.itemAsset(name, row, forceKind ? { kind: forceKind } : null); } catch (e) { obj = null; }
-    uri = rcache[k] = obj ? shoot(obj) : "";
-    return uri;
+    queueShot(k, function () { return CBZ.itemAsset(name, row, forceKind ? { kind: forceKind } : null); });
+    return "";
   }
+
+  // ---- THE PUMP: one photograph per idle slice, never on the asking path ----
+  const queue = [], queued = Object.create(null);
+  let busy = false, pumpArmed = false;
+  CBZ.itemIconVersion = 0;          // bumps when a photograph lands (the hotbar repaints on it)
+  function queueShot(k, build) {
+    if (queued[k] || rcache[k] !== undefined) return;
+    queued[k] = 1;
+    queue.push({ k: k, build: build });
+    armPump();
+  }
+  function armPump() {
+    if (pumpArmed || busy || !queue.length) return;
+    pumpArmed = true;
+    const go = function () { pumpArmed = false; pumpOne(); };
+    if (window.requestIdleCallback) window.requestIdleCallback(go, { timeout: 250 });
+    else setTimeout(go, 16);
+  }
+  function landed(k, url) {
+    rcache[k] = url;
+    delete queued[k];
+    for (const h in htmlCache) delete htmlCache[h];   // the next draw of that cell carries the photograph
+    CBZ.itemIconVersion++;
+    busy = false;
+    armPump();
+  }
+  function pumpOne() {
+    const job = queue.shift();
+    if (!job) return;
+    busy = true;
+    let obj = null;
+    try { obj = job.build(); } catch (e) { obj = null; }
+    if (!obj || !shoot(obj)) { landed(job.k, ""); return; }
+    const cv = R3.domElement;
+    if (!cv.toBlob || !window.URL || !URL.createObjectURL) { landed(job.k, cv.toDataURL("image/png")); return; }
+    try {
+      cv.toBlob(function (b) { landed(job.k, b ? URL.createObjectURL(b) : ""); }, "image/png");
+    } catch (e) { landed(job.k, ""); }
+  }
+  /* THE TORCH AND THE WEAPON-SLOT FACES (city/weapon_thumbnails.js used to run
+     a SECOND offscreen WebGL context for these, with its own toDataURL). One
+     studio: the same queue, the same camera, the same lamps. */
+  CBZ.iconStudio = {
+    // (key, build) -> blob URL once photographed, "" until then (queued)
+    photo: function (key, build) {
+      const k = "$" + key;
+      const uri = rcache[k];
+      if (uri !== undefined) return uri;
+      if (!rendersOn() || glDead) return "";
+      queueShot(k, build);
+      return "";
+    },
+    pending: function () { return queue.length + (busy ? 1 : 0); },
+    forget: function (key) {
+      if (key == null) { for (const k in rcache) if (k.charAt(0) === "$") delete rcache[k]; }
+      else delete rcache["$" + key];
+      for (const h in htmlCache) delete htmlCache[h];
+    },
+  };
+  // open the studio while the title card is up: the context and its programs
+  // are paid for before PLAY, and the officer's belt is already photographed
+  function warm() {
+    if (!on() || !rendersOn()) return;
+    const go = function () {
+      try {
+        if (!boot3()) return;
+        if (CBZ.itemIconGun) { CBZ.itemIconGun("sidearm"); CBZ.itemIconGun("taser"); }
+        if (CBZ.flashlightThumbnail) CBZ.flashlightThumbnail();
+        CBZ.itemIcon("Keycard", {});
+      } catch (e) {}
+    };
+    if (window.requestIdleCallback) window.requestIdleCallback(go, { timeout: 4000 });
+    else setTimeout(go, 1500);
+  }
+  if (document.readyState === "complete") warm();
+  else window.addEventListener("load", warm, { once: true });
 
   // ============================================================
   //  4. THE CLASSIFIER — row facts, then the name, then the tag. Every tag

@@ -923,6 +923,8 @@
     if (!g || !g.attributes || !g.attributes.position || g._cbzFar || (g.groups && g.groups.length)) return null;
     if (g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length) return null;
     if (!m || Array.isArray(m) || m.visible === false || isTailMat(m)) return null;
+    // the paint is the CAR'S OWN (recolorBody swaps it per car after the body is cloned)
+    if (m._bodyPaint || (m._cbzTwin && m._cbzTwin._bodyPaint)) return null;
     if (_lampF === undefined) {
       _lampF = _lampT = null;
       try { if (CBZ.vehicleMat) { _lampF = CBZ.vehicleMat("lightFront"); _lampT = CBZ.vehicleMat("lightTail"); } } catch (e) { /* headless */ }
@@ -2404,34 +2406,104 @@
     return { mass, armor, repair };
   }
 
-  // UNIFIED car visual: build the SAME detailed model the player drives, painted
-  // for THIS car, so it looks identical parked, in traffic, and while driven —
-  // no more swap-on-entry (a car was a small box rig until you stole it, then
-  // popped into a different hero mesh of a different colour). Falls back to the
-  // lightweight box rig when the visual system isn't loaded (headless / gallery).
-  function buildCar(model) {
-    if (!CBZ.cityBuildPlayerCarVisual || !CBZ.cityInferCarStyle) return buildCarBox(model);
-    const grp = new THREE.Group();
-    const bt = modelBodyKind(model);
-    const s = model ? (model.s || 1) : 1;
-    const baseColor = model ? model.color : 0x3c6fd6;
-    // per-car clearcoat tint so a row of one model still reads as varied
-    const tint = 0.86 + rng() * 0.28;
-    const paintHex = new THREE.Color(baseColor).multiplyScalar(tint).getHex();
+  /* ONE FINISHED BODY PER LOOK, CLONED PER CAR. A road car's visual used to
+     be finished per spawn: playercars.js handed out a clone of its style
+     template, then THIS car's brand face and fleet livery were bolted on
+     (carparts.js; a police cruiser's skin decals copy the door's own
+     triangles), the seams sealed, the interior shell added, every part merged
+     into its buckets (the merge itself was cached, its key and the walk were
+     not) and the doors baked shut. 100-230 ms a cruiser, ambulance or parked
+     car on a 4x-throttled core, at the moment it arrived.
+     Everything in that list is a pure function of the LOOK: the silhouette,
+     its marque, the fleet livery and the model's design bolt-ons. Only the
+     paint is the car's own. So the finished body is built once per look,
+     kept off the scene, every geometry and material on it marked _shared
+     (crashdeform.js copies a _shared geometry before it dents it, every
+     teardown skips _shared), and each car is a clone(true) of it with its
+     door rig cloned beside it and its own paint minted by recolorBody. */
+  const _bodyTpl = new Map();
+  function lookKey(style, model) {
+    const P = CBZ.carParts;
+    const brand = (model && model.brand) || (P && P.brandForStyle ? P.brandForStyle(style) : "");
+    // the catalog NAME and the fleet UNIT number (a cruiser's door and roof
+    // carry it, emergencykit.js) are part of the look; the colour never is
+    return style + "|" + brand + "|" + (model ? (model.name || "?") : "") + "|" + ((model && model.livery) || "") +
+      "|" + ((model && model.designStyle) || "") + "|" + ((model && model.unit) || "") + "|" + (model ? (model.s || 1) : 1);
+  }
+  function lookOf(model) {
     const style = CBZ.cityInferCarStyle(model) || "tesla-3";
+    const key = lookKey(style, model);
+    let tpl = _bodyTpl.get(key);
+    if (tpl === undefined) { tpl = finishBody(style, model); _bodyTpl.set(key, tpl); }
+    return { style: style, tpl: tpl };
+  }
+  /* THE FIRST OF A LOOK IS BUILT BEFORE IT IS NEEDED. Finishing a look the
+     first time is the expensive part (the style's loft, cabin and doors in
+     playercars.js, its face and livery): a cruiser was ~0.5 s on a 4x core.
+     The emergency fleet (every police unit, the ambulance, the pumper, the
+     SWAT truck) is finished while the city loads (spawnCityTraffic), so the
+     first cruiser of a chase is a clone; the street catalogue is finished
+     one look per idle slice, starting with the first car any world builds. */
+  function fleetModels() {
+    const EK = CBZ.emergencyKit, M = EK && EK.models;
+    if (!M) return [];
+    const out = [];
+    (M.interceptor || []).forEach(function (m) { out.push(m); });
+    (M.pursuit || []).forEach(function (m) { out.push(m); });
+    ["ambulance", "firetruck", "bearcat"].forEach(function (k) { if (M[k]) out.push(M[k]); });
+    return out;
+  }
+  function warmNow(list) {
+    if (!CBZ.cityBuildPlayerCarVisual || !CBZ.cityInferCarStyle) return;
+    for (let i = 0; i < list.length; i++) { try { lookOf(list[i]); } catch (e) {} }
+  }
+  let warmQ = null;
+  function warmIdle() {
+    if (warmQ) return;
+    const E = CBZ.cityEcon;
+    warmQ = fleetModels().concat((E && Array.isArray(E.CARS)) ? E.CARS : []);
+    const step = function (dl) {
+      // one look per slice, and only into a slice with room for it
+      if (dl && !dl.didTimeout && dl.timeRemaining() < 8) { schedule(); return; }
+      while (warmQ.length) {
+        const m = warmQ.shift();
+        if (!m || !CBZ.cityInferCarStyle) continue;
+        const key = lookKey(CBZ.cityInferCarStyle(m) || "tesla-3", m);
+        if (_bodyTpl.has(key)) continue;
+        try { lookOf(m); } catch (e) {}
+        break;
+      }
+      if (warmQ.length) schedule();
+    };
+    const schedule = function () {
+      if (window.requestIdleCallback) window.requestIdleCallback(step, { timeout: 3000 });
+      else setTimeout(step, 200);
+    };
+    schedule();
+  }
+  CBZ.cityWarmCarLooks = function (list) { if (list) warmNow(list); else warmIdle(); };
+  function markShared(root) {
+    root.traverse(function (o) {
+      if (o.geometry) o.geometry._shared = true;
+      const m = o.material;
+      if (Array.isArray(m)) m.forEach(function (x) { if (x) x._shared = true; });
+      else if (m) m._shared = true;
+    });
+  }
+  function finishBody(style, model) {
     let visual = null;
     // model rides along so carparts.js can apply the BRAND face + per-model
     // identity (incl. the taxi roof sign the unified path used to drop).
-    try { visual = CBZ.cityBuildPlayerCarVisual(style, paintHex, null, model); } catch (e) { visual = null; }
-    if (!visual) return buildCarBox(model);
-    grp.add(visual);
+    try { visual = CBZ.cityBuildPlayerCarVisual(style, null, null, model); } catch (e) { visual = null; }
+    if (!visual) return null;
     // Wheels stay as individual meshes (tagged playerWheel) so the driven car can
     // spin them; everything else merges into a few meshes — the city is draw-call
     // bound (core/profile.js), and an unmerged hero mesh per car would blow that.
     const keep = new Set();
     visual.traverse(function (o) { if (o.userData && o.userData.playerWheel) keep.add(o); });
-    const dims = visual.userData.vehicleDims ||
-      { width: 2, length: 4.4 * s, height: 1.5, wheelbase: 2.7 };
+    const s = model ? (model.s || 1) : 1;
+    if (!visual.userData.vehicleDims) visual.userData.vehicleDims = { width: 2, length: 4.4 * s, height: 1.5, wheelbase: 2.7 };
+    const dims = visual.userData.vehicleDims;
     // hole-proof the panel work before it gets baked into the merge buckets
     // (bikes/aircraft/boats have open frames by design — no shell, no sealing)
     if (!/motorcycle|helicopter|boat/.test(style)) {
@@ -2443,11 +2515,60 @@
     }
     if (mergeStaticCarParts) mergeStaticCarParts(visual, keep);
     bakeShutDoors(visual);
+    markShared(visual);
+    const rig = visual._cbzDoorRig;
+    if (rig) { rig.doors.forEach(markShared); if (rig.lid) markShared(rig.lid); }
+    return visual;
+  }
+  function cloneBody(tpl) {
+    const v = tpl.clone(true);
+    // the handles playercars.js re-resolves on its own clones, re-resolved on ours
+    const u = tpl.userData;
+    if (u.mainRotor) v.userData.mainRotor = v.getObjectByName("heli_mainRotor");
+    if (u.tailRotor) v.userData.tailRotor = v.getObjectByName("heli_tailRotor");
+    if (u.boatProp) v.userData.boatProp = v.getObjectByName("boat_prop");
+    if (u.leanRider) v.userData.leanRider = v.getObjectByName("moto_rider");
+    // the door rig lives OFF the graph (bakeShutDoors): clone it beside the body
+    const rig = tpl._cbzDoorRig;
+    if (rig) {
+      const shut = [];
+      for (const o of v.children) if (o.userData && o.userData.doorsShut) shut.push(o);
+      const lid = rig.lid ? rig.lid.clone(true) : null;
+      if (lid) lid._cbzOpenT = 0;
+      v._cbzDoorRig = {
+        doors: rig.doors.map(function (d) { const c = d.clone(true); c._cbzOpenT = 0; return c; }),
+        lid: lid, shut: shut, split: false,
+      };
+    }
+    return v;
+  }
+  CBZ.cityCarBodyTemplates = function () { return { looks: _bodyTpl.size }; };
+
+  // UNIFIED car visual: build the SAME detailed model the player drives, painted
+  // for THIS car, so it looks identical parked, in traffic, and while driven —
+  // no more swap-on-entry (a car was a small box rig until you stole it, then
+  // popped into a different hero mesh of a different colour). Falls back to the
+  // lightweight box rig when the visual system isn't loaded (headless / gallery).
+  function buildCar(model) {
+    if (!CBZ.cityBuildPlayerCarVisual || !CBZ.cityInferCarStyle) return buildCarBox(model);
+    const grp = new THREE.Group();
+    const bt = modelBodyKind(model);
+    const baseColor = model ? model.color : 0x3c6fd6;
+    // per-car clearcoat tint so a row of one model still reads as varied
+    const tint = 0.86 + rng() * 0.28;
+    const paintHex = new THREE.Color(baseColor).multiplyScalar(tint).getHex();
+    // (the street catalogue is a vehicle world's: the jail's yard van is not a reason to build it)
+    if (!warmQ && (g.mode === "city" || (CBZ.islandModeOn && CBZ.islandModeOn(g.mode)))) warmIdle();
+    const L = lookOf(model), style = L.style, tpl = L.tpl;
+    if (!tpl) return buildCarBox(model);
+    const visual = cloneBody(tpl);
+    if (CBZ.cityRecolorCarBody) CBZ.cityRecolorCarBody(visual, paintHex);
+    grp.add(visual);
     grp.userData.carVisual = visual;
     grp.userData.carStyle = style;
     grp.userData.bodyKind = bt;
     grp.userData.designStyle = (model && model.designStyle) || bt;
-    grp.userData.vehicleDims = dims;
+    grp.userData.vehicleDims = visual.userData.vehicleDims;
     if (CBZ.carLodPrepare) CBZ.carLodPrepare(grp);   // city/carlod.js: queue this style's far-LOD twins (built over frames, once per style)
     return grp;
   }
@@ -2749,6 +2870,7 @@
   CBZ.spawnCityTraffic = function (n) {
     clearCars();
     const A = CBZ.city.arena; if (!A) return;
+    warmNow(fleetModels());          // under the load: the first unit of a chase is a clone
     _s = 1234 + n;
     const econ = CBZ.cityEcon;
     const reckFrac = TR().recklessFrac != null ? TR().recklessFrac : 0.18;

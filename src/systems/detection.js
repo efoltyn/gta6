@@ -184,6 +184,10 @@
   // state.js resetGame().
   CBZ.addHeat = function (n) {
     if (!prisonSim()) return;             // no ledger outside the scenario that reads it
+    // THE OFFICER HAS NO WANTED LEDGER. His is g.complaints (addComplaint,
+    // the Badge bar). Every heat source in the jail (cameras, doors, contraband,
+    // schedule) calls this; refusing it here is one rule instead of forty.
+    if (g.role === "cop") { if (g.detection) g.detection = 0; return; }
     const floor = g.strikeHeatFloor || 0;
     g.detection = Math.max(floor, Math.min(100, g.detection + n));
   };

@@ -108,8 +108,7 @@
     if (iconCache[id] !== undefined) return iconCache[id];
     let src = "";
     try { if (CBZ.itemIconGun) src = CBZ.itemIconGun(id) || ""; } catch (e) { src = ""; }
-    if (!src) { try { if (CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id) || ""; } catch (e) { src = ""; } }
-    iconCache[id] = src;
+    if (src) iconCache[id] = src;     // "" = not photographed yet (itemicons.js idle studio): ask again
     return src;
   }
 

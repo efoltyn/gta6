@@ -200,28 +200,49 @@
     paySilence: { label: "Pay",     fn: (a) => CBZ.resolveKnownSnitch ? CBZ.resolveKnownSnitch(a, "paySilence") : { ok: false, msg: "" } },
     // ---- the officer's own (cop role)
     warn:     { label: "Warn",      fn: (a) => warnActor(a) },
+    /* CUFF: only ever on a man who gave up or is down (arrest.js cuffable;
+       the card never offers it otherwise). YOUR HANDS DO IT (CBZ.verbs.cuff):
+       turned round, wrists behind his back. The hold that follows is the
+       prison's own (systems/brain_prison.js PB.cuff, the same one a screw's
+       cuffs start): kneeling, hands behind him, until you let him up (Uncuff)
+       or his time runs out and he is sent home.
+       The surrender is NOT released first: that is what made him cuffable,
+       and releasing it before the hands went on used to fail the rule check,
+       skip the animation and fall back to a 5.5 s knock-out with cuffs that
+       fell off when he got up. */
     detain:   { label: "Cuff",      fn: (a) => {
       if (!cuffOk(a)) return { ok: false, msg: "" };
       if (PD()) PD().cancel(a);
-      const surrendered = a.intimidMode === "scared";
-      if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);   // the hold ends in the cuffs
-      const justified = CBZ.game.role === "cop" && (surrendered || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight");
-      a.hp = Math.max(a.hp || 0, 45); a.aiState = "flee"; a.foe = null;
+      const cop = CBZ.game.role === "cop";
+      const justified = cop && (a.intimidMode === "scared" || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight");
+      a.foe = null;
       if (a.copMarked > 0) a.copMarked = 0;
-      // YOUR HANDS DO IT (CBZ.verbs.cuff): turned round, wrists behind his
-      // back, the cuffs ON them; then he goes down for a beat, cuffed
-      const V = CBZ.verbs;
+      const V = CBZ.verbs, PB = CBZ.prisonBrain;
+      let done = false;
       const land = function () {
-        a.ko = Math.max(a.ko || 0, 5.5);
-        if (V && V.setCuffs) V.setCuffs(a, true, { whileKo: true });   // off again when he is let up
+        if (done || a.dead) return;
+        done = true;
+        if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);   // the hold ends in the cuffs
+        if (PB && PB.cuff) PB.cuff(a, CBZ.player, true);
+        else if (V && V.setCuffs) V.setCuffs(a, true);
+        if (cop && CBZ.addComplaint) CBZ.addComplaint(justified ? -2 : 5);
+        if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(a, "detain");
       };
       // a man already on the floor is cuffed where he lies (knee on his back)
-      const S = V && V.cuff && (!(a.ko > 0) || V.cuffDown) ? V.cuff(V.playerActor(), a, { far: true, onEnd: land }) : null;
-      if (!S) { land(); CBZ.sfx("punch"); CBZ.shake && CBZ.shake(0.45); }
-      CBZ.game.kos = (CBZ.game.kos || 0) + 1;
-      if (CBZ.game.role === "cop" && CBZ.addComplaint) CBZ.addComplaint(justified ? -2 : 5);
-      if (CBZ.killstreakOnDown) CBZ.killstreakOnDown(a, "detain");
-      return { ok: true, msg: "" };   // he goes down; that is the receipt
+      const S = V && V.cuff && (!(a.ko > 0) || V.cuffDown)
+        ? V.cuff(V.playerActor(), a, { far: true, onOutcome: function (S2, k) { if (k === "cuffed") land(); } })
+        : null;
+      if (!S) { land(); CBZ.sfx("reload"); }
+      return { ok: true, msg: "" };   // the cuffs closing is the receipt
+    } },
+    // UNCUFF: you let him up; he goes back to his cell (PB.uncuff)
+    uncuff:   { label: "Uncuff",    fn: (a) => {
+      if (!a.cuffed) return { ok: false, msg: "" };
+      const V = CBZ.verbs, PB = CBZ.prisonBrain;
+      const free = function () { if (PB && PB.uncuff) PB.uncuff(a); else { a.cuffed = false; if (V && V.setCuffs) V.setCuffs(a, false); } };
+      const S = V && V.uncuff && !(a.ko > 0) ? V.uncuff(V.playerActor(), a, { far: true, onOutcome: function () { free(); } }) : null;
+      if (!S) free();
+      return { ok: true, msg: "" };
     } },
     search:   { label: "Search",    fn: (a) => {
       if (PD()) PD().cancel(a);
@@ -366,6 +387,8 @@
     // A COP: toss him, cuff him (only a man who gave up or is down), and the
     // orders a uniform gives: steel out is "Drop it", trouble is "Back off"
     if (CBZ.game.role === "cop" && !staff(a)) {
+      // a man in your cuffs: toss him, or let him up
+      if (a.cuffed) return ["search", "uncuff"];
       const out = cuffOk(a) ? ["search", "detain"] : ["search"];
       if (a._shankOut) out.unshift("odrop");
       else if (a.aiState === "fight" || (a.huntPlayer || 0) > 0 || (a.playerGrudge || 0) >= 6) out.push("oback");
