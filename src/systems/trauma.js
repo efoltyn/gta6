@@ -329,7 +329,7 @@
       const heavy = Math.min(1, r.bleedFor / 6);
       if (CBZ.goreDrip) {
         CBZ.goreDrip(p.x + (Math.random() - 0.5) * 0.5, p.z + (Math.random() - 0.5) * 0.5,
-          (0.12 + heavy * 0.24 + Math.random() * 0.08) * (r.dripMul || 1));
+          (0.12 + heavy * 0.24 + Math.random() * 0.08) * (r.dripMul || 1), p.y);
       }
     }
   }

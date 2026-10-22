@@ -112,6 +112,7 @@
 
   /* ---- is a straight lie from the hips clear of walls? ---- */
   const _pt = { x: 0, y: 0, z: 0 };
+  const _bfSw = { hit: false, nx: 0, nz: 0, c: null };
   function blockedAt(x, z, y, r) {
     if (!CBZ.collide) return false;
     _pt.x = x; _pt.y = y; _pt.z = z;
@@ -352,12 +353,20 @@
       R.vx *= ns / sp; R.vz *= ns / sp;
       const n = Math.max(1, Math.ceil(ns * dt / 0.25));
       for (let i = 0; i < n; i++) {
+        // SWEPT (physics.js CBZ.sweepMove): the skid stops on the wall or the
+        // shut door it runs into and slides along it; a push-out alone let a
+        // body that crossed a thin leaf's middle out the far side
+        if (CBZ.sweepMove) {
+          const sw = CBZ.sweepMove(pos, R.vx * dt / n, R.vz * dt / n, 0.3, pos.y + 0.05, pos.y + (onFloor ? 0.5 : 1.6), _bfSw);
+          if (sw.hit) { const vn = R.vx * sw.nx + R.vz * sw.nz; if (vn < 0) { R.vx -= vn * sw.nx; R.vz -= vn * sw.nz; } }
+        }
         const bx = pos.x, bz = pos.z;
-        pos.x += R.vx * dt / n; pos.z += R.vz * dt / n;
+        if (!CBZ.sweepMove) { pos.x += R.vx * dt / n; pos.z += R.vz * dt / n; }
         if (CBZ.collide) {
           CBZ.collide(pos, 0.3, pos.y + 0.05, pos.y + (onFloor ? 0.5 : 1.6));
           // the wall took it: the normal part of the velocity is gone
-          const cx = pos.x - bx - R.vx * dt / n, cz = pos.z - bz - R.vz * dt / n;
+          const mvx = CBZ.sweepMove ? 0 : R.vx * dt / n, mvz = CBZ.sweepMove ? 0 : R.vz * dt / n;
+          const cx = pos.x - bx - mvx, cz = pos.z - bz - mvz;
           const cl = Math.hypot(cx, cz);
           if (cl > 1e-4) { const nx = cx / cl, nz = cz / cl, vn = R.vx * nx + R.vz * nz; if (vn < 0) { R.vx -= vn * nx; R.vz -= vn * nz; } }
         }
@@ -710,7 +719,7 @@
     // what comes out of the cut: a short wet spatter along the blade, then
     // the drip where it lands (gore.js's own drops, never a painted blob)
     if (CBZ.gore && CBZ.gore.spray) { try { CBZ.gore.spray(point, 0.3, dir || null, { exit: false }); } catch (e) { /* gore off */ } }
-    else if (CBZ.goreDrip) { try { CBZ.goreDrip(point.x, point.z, 0.25); } catch (e) { /* gore off */ } }
+    else if (CBZ.goreDrip) { try { CBZ.goreDrip(point.x, point.z, 0.25, point.y); } catch (e) { /* gore off */ } }
     ooze(target, "stab", point, o);
     return true;
   };
