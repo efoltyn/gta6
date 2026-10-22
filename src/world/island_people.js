@@ -47,6 +47,9 @@
                                  opts { job, look(post, ped, dt) -> {x,z}|null, armed }
           unpost(post)
           isOpen(b) / hours(b)   [open, close] in clock hours, null = always open
+          spawnAt(x, z, opts)    one of them stood at (x, z) on the island in force
+                                 (a loan shark's collectors, city/islandmoney.js)
+          despawn(ped)           take one away (call it only where nobody sees)
           drop(A) / leave()      an island goes / the islands are left
           state()
         }
@@ -597,6 +600,12 @@
   CBZ.islandPeople = {
     arena: arena, arenaOf: arenaOf, populate: populate,
     post: post, unpost: unpost, isOpen: isOpen, hours: hours,
+    spawnAt: function (x, z, opts) {
+      const A = active(), PA = A ? arenaOf(A) : null;
+      if (!A || !PA) return null;
+      return stand(A, PA, x, z, Object.assign({ staff: true, _y: groundY(A, x, z) }, opts || {}));
+    },
+    despawn: despawn,
     drop: drop, leave: leave,
     state: function () {
       const A = active();

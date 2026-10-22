@@ -38,14 +38,13 @@
        they beat it out of you and take what you carry. Kill him and the
        debt dies with him. The bank (city/bank.js creditRefusal) will not
        lend to a man who is behind with him.
-     • THE PEOPLE: tellers, managers, guards, the shark and his muscle are
-       the island's own people posted through CBZ.islandVenue.staff (one
-       poster for every island venue); the collectors are the island's own
-       people sent out. Aim a gun at any posted, unarmed worker (a teller, a
-       shop clerk) and his hands go up and he walks where you walk him; a
-       guard answers a drawn gun in his building through the demand ladder's
-       "security" kind, draws, and shoots once it is a robbery. A man shot at
-       his post stays vacant.
+     • THE PEOPLE are Gang City's (city/peds.js, on the islands through
+       world/island_people.js): tellers, managers, guards, the shark and his
+       muscle posted with CBZ.islandVenue.staff (hands up under a gun, the
+       building's hours, home at closing); guards step up through the city's
+       demand ladder ("security") and fight with the city's ped combat once it
+       is a robbery; the collectors are stood with CBZ.islandPeople.spawnAt
+       and run the city ladder's "rob" kind with the tab as their take.
 
    Everything a fit-out builds is under the building's group and leaves with
    its island (the fit-out's dispose).
@@ -138,48 +137,39 @@
 
   /* ======================================================================
      THE PEOPLE AT THEIR POSTS. The body is world/island_venue.js's
-     (CBZ.islandVenue.staff: one of the island's own people holding his spot,
-     stood where nobody is looking, gone with the island, a dead one stays
-     dead). This file only adds what a bank's and a shark's people DO:
-       • any posted, unarmed island worker (a teller, a shop clerk, the
-         shark) with a gun on him puts his hands up, and walks where the
-         gun walks him;
-       • an armed one (a guard, the muscle) answers a drawn gun in his
-         building through the demand ladder's "security" kind, and once it
-         is a robbery he shoots.
+     CBZ.islandVenue.staff: a Gang City ped (world/island_people.js) held on
+     his spot, who already throws his hands up under a gun, can be robbed and
+     killed, keeps his building's hours and walks home at closing. This file
+     only adds what a bank's and a shark's people DO beyond that:
+       • a guard answers a drawn gun in his building through the city's
+         demand ladder (CBZ.cityLadder, kind "security");
+       • once it is a robbery (a hold-up, a blown door, a man shot) every
+         armed man in the building fights: he leaves his post and the city's
+         ped combat takes him (his gun, his aim, his cover).
      ====================================================================== */
   const POSTS = [];
   const VENUES = [];
-  const _v3 = new THREE.Vector3();
   function unseen(x, y, z) {
     if (CBZ.leave && CBZ.leave.unseen) { try { return !!CBZ.leave.unseen({ x: x, y: y, z: z }); } catch (e) {} }
-    const cam = CBZ.camera;
-    if (!cam) return true;
-    const d = Math.hypot(cam.position.x - x, cam.position.z - z);
-    if (d < 22) return false;
-    _v3.set(x, y + 1, z).project(cam);
-    const on = _v3.z > -1 && _v3.z < 1 && Math.abs(_v3.x) < 1.2 && Math.abs(_v3.y) < 1.2;
-    return !on || d > 160;
+    return true;
   }
-  function removeBot(bot) {
-    if (!bot) return;
-    if (CBZ.removeSurvivorBot) { try { if (CBZ.removeSurvivorBot(bot)) return; } catch (e) {} }
-    const L = CBZ.bots;
-    if (L) { const i = L.indexOf(bot); if (i >= 0) L.splice(i, 1); }
-    if (CBZ.brain && CBZ.brain.unregister && bot._survBrain) { try { CBZ.brain.unregister(bot); } catch (e) {} bot._survBrain = false; }
-    if (bot.group && bot.group.parent) bot.group.parent.remove(bot.group);
+  function despawn(ped) {
+    if (!ped) return;
+    const PP = CBZ.islandPeople;
+    if (PP && PP.despawn) { PP.despawn(ped); return; }
+    if (CBZ.cityDespawnPed) CBZ.cityDespawnPed(ped);
   }
+  function PA() { return (CBZ.city && CBZ.city.playerActor) || CBZ.player; }
   // post(b, lx, lz, face, spec): face is building-local (0 = into the room,
-  // PI = toward the street door); spec { venue, job, armed, hp, name }
+  // PI = toward the street door); spec { venue, job, armed, name }
   function post(b, lx, lz, face, spec) {
     const IV = CBZ.islandVenue;
     if (!IV || !IV.staff) return null;
     const rec = {
       venue: spec.venue || null, job: spec.job || "staff", name: spec.name || null,
-      armed: !!spec.armed, hp: spec.hp || 0, ps: null, setFor: null, lostSeen: false,
-      hostile: false, case: null, fireT: 0, calmT: 0, cdT: 0, lookAt: null,
+      armed: !!spec.armed, ps: null, setFor: null, lostSeen: false, upSeen: false, cdT: 0,
     };
-    rec.ps = IV.staff(b, lx, lz, face, { job: rec.job, look: function () { return rec.lookAt; } });
+    rec.ps = IV.staff(b, lx, lz, face, { job: rec.job, armed: rec.armed });
     if (!rec.ps) return null;
     claim(b, 0, { x0: lx - 0.3, x1: lx + 0.3, z0: lz - 0.3, z1: lz + 0.3 });
     POSTS.push(rec);
@@ -187,175 +177,57 @@
     return rec;
   }
   function body(rec) { return rec && rec.ps ? rec.ps.body() : null; }
-  // walk a posted man somewhere else (his post moves with him), or home
-  function steer(bot, x, z) {
-    const p = bot.post;
-    if (!p) { bot.target.set(x, 0, z); bot.pause = Math.max(bot.pause, 1); return; }
-    if (!bot._postHome) bot._postHome = { x: p.x, z: p.z };
-    p.x = x; p.z = z;
-    bot.target.set(x, 0, z);
-  }
-  function sendHome(bot) {
-    const h = bot._postHome;
-    if (!h || !bot.post) return;
-    bot.post.x = h.x; bot.post.z = h.z;
-    bot._postHome = null;
-  }
-  function sameFloor(bot, py) { return Math.abs((bot.pos.y || 0) - py) < 2.4; }
-  function aimedAt(bot, maxD) {
-    const p = P(); if (!p || !aiming()) return false;
-    const dx = bot.pos.x - p.pos.x, dz = bot.pos.z - p.pos.z, d = Math.hypot(dx, dz);
-    if (d > maxD || d < 0.05 || !sameFloor(bot, p.pos.y)) return false;
-    const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
-    return (dx / d) * -Math.sin(yaw) + (dz / d) * -Math.cos(yaw) > 0.9;
-  }
-
-  // ---- THE GUARD: the demand ladder's "security" kind, then the gun -------
-  function D() { return CBZ.brain && CBZ.brain.demand; }
-  const _s = { dist: 99, speed: 0, armed: false, aiming: false, attacking: false, paid: false, inside: true, fled: false };
-  // the gun on his hip, or in his hand (systems/actorweapons.js: the real model)
-  function holster(bot, on) {
-    if (!bot || !bot.armed || !!bot._holstered === !!on) return;
-    bot._holstered = !!on;
-    if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(bot); } catch (e) {} }
-    if (on && bot.char) bot.char.aimingPose = false;
-  }
-  const _mz = new THREE.Vector3();
-  function guardShoot(st, bot, dt) {
-    const p = P();
+  // hands up: the city's gunpoint path (peds.js markGunpoint) put them there
+  function handsUp(p) { return !!(p && (p.surrender || p.gunpoint || p.state === "surrender" || (p.surrenderT || 0) > 0)); }
+  // a man who fights leaves his post: the city's combat has him now
+  function fightNow(p) {
     if (!p || p.dead) return;
-    const dx = p.pos.x - bot.pos.x, dz = p.pos.z - bot.pos.z, d = Math.hypot(dx, dz);
-    bot.group.rotation.y = Math.atan2(dx, dz);
-    holster(bot, false);
-    if (bot.char) bot.char.aimingPose = true;
-    st.fireT -= dt;
-    if (st.fireT > 0 || d > 38) return;
-    st.fireT = 0.85 + Math.random() * 0.6;
-    let mx = bot.pos.x + (dx / (d || 1)) * 0.5, my = (bot.pos.y || 0) + 1.45, mz = bot.pos.z + (dz / (d || 1)) * 0.5;
-    if (CBZ.actorMuzzle) { try { const m = CBZ.actorMuzzle(bot, _mz); if (m) { mx = m.x; my = m.y; mz = m.z; } } catch (e) {} }
-    const ty = (p.pos.y || 0) + 1.2;
-    // a wall between them stops the round
-    if (CBZ.rayColliders) {
-      try { const hit = { hit: false }; if (CBZ.rayColliders(mx, my, mz, p.pos.x - mx, ty - my, p.pos.z - mz, 1, hit, { any: true })) return; } catch (e) {}
-    }
-    const hitP = Math.max(0.12, 0.6 - d * 0.014);
-    const hit = Math.random() < hitP;
-    const tx = p.pos.x + (hit ? 0 : (Math.random() - 0.5) * 1.6), tz = p.pos.z + (hit ? 0 : (Math.random() - 0.5) * 1.6);
-    if (CBZ.tracer) { try { CBZ.tracer({ x: mx, y: my, z: mz }, { x: tx, y: ty, z: tz }, {}); } catch (e) {} }
-    if (CBZ.gunVoice) { try { CBZ.gunVoice("sidearm", d); } catch (e) {} } else if (CBZ.sfx) CBZ.sfx("report");
-    if (CBZ.survivorsHearShot) { try { CBZ.survivorsHearShot(mx, mz, bot); } catch (e) {} }
-    if (hit && CBZ.surv && CBZ.surv.hurt && CBZ.surv.playerActor) {
-      try { CBZ.surv.hurt(CBZ.surv.playerActor, 14 + Math.random() * 8, { fromX: bot.pos.x, fromZ: bot.pos.z, cause: "shot" }); } catch (e) {}
-    }
+    if (CBZ.cityLadder && p._ladder) { try { CBZ.cityLadder.cancel(p); } catch (e) {} }
+    if (p.staffPost) { p._occupyPost = p._occupyPost || { x: p.staffPost.x, z: p.staffPost.z, face: p.staffPost.face }; p.staffPost = null; }
+    const pa = PA();
+    p.mem = pa; p.rage = pa; p.state = "fight"; p.alarmed = Math.max(p.alarmed || 0, 4);
+    if (p.target && pa && pa.pos) p.target.set(pa.pos.x, 0, pa.pos.z);
   }
-  // his nerve does not run him off his job
-  function steady(bot) { bot._scare = null; bot.panicT = 0; }
-  function guardTick(rec, bot, dt) {
-    const p = P(); if (!p) return false;
-    const V = rec.venue;
-    const dx = p.pos.x - bot.pos.x, dz = p.pos.z - bot.pos.z, d = Math.hypot(dx, dz);
-    if (rec.hostile) {
-      if (p.dead || d > 90) {
-        rec.calmT += dt;
-        if (rec.calmT > 12) { rec.hostile = false; rec.calmT = 0; rec.lookAt = null; holster(bot, true); sendHome(bot); }
-        return true;
-      }
-      rec.calmT = 0;
-      steady(bot);
-      rec.lookAt = { x: p.pos.x, z: p.pos.z };
-      // close to pistol range, then stand and shoot
-      if (d > 12) steer(bot, p.pos.x, p.pos.z); else steer(bot, bot.pos.x, bot.pos.z);
-      guardShoot(rec, bot, dt);
-      return true;
-    }
-    const DM = D();
-    rec.cdT = Math.max(0, rec.cdT - dt);
-    // a drawn gun inside his building: he steps up (the security ladder)
-    if (!rec.case && DM && V && V.inside(p) && gunOut() && d < 14 && rec.cdT <= 0) {
-      try { rec.case = DM.begin(bot, p, "security", { armed: true }); } catch (e) { rec.case = null; }
-    }
-    if (!rec.case || !DM) return false;
-    _s.dist = d; _s.speed = +p.speed || 0; _s.armed = gunOut(); _s.aiming = aimedAt(bot, 30);
-    _s.attacking = ((p._fighting || 0) > 0 && d < 2.6); _s.paid = false;
-    _s.inside = V ? (V.inside(p) && gunOut()) : undefined; _s.fled = false;
-    let r = null;
-    try { r = DM.step(bot, dt, _s); } catch (e) { r = null; }
-    if (!r) { rec.case = null; rec.lookAt = null; sendHome(bot); return false; }
-    steady(bot);
-    rec.lookAt = { x: p.pos.x, z: p.pos.z };
-    const act = r.act;
-    if (act === "shoot" || act === "aim") { rec.case = null; if (V) V.alarm("guard"); return true; }
-    // SHOW is the gun coming out of the leather; below it, it stays there
-    holster(bot, !(act === "draw" || r.step === "show" || r.step === "standoff"));
-    if (act === "shove" || act === "beat") {
-      if (d < 1.7 && CBZ.verbs && CBZ.verbs.strike) { try { CBZ.verbs.strike(bot, p, { kind: "shove" }); } catch (e) {} }
-      else steer(bot, p.pos.x, p.pos.z);
-    } else if (act === "approach" || act === "close") steer(bot, p.pos.x, p.pos.z);
-    else steer(bot, bot.pos.x, bot.pos.z);
-    if (r.step === "done") { rec.case = null; rec.cdT = 6; rec.lookAt = null; holster(bot, true); sendHome(bot); return false; }
-    return true;
-  }
-
-  // HANDS UP: any posted, unarmed island worker with a gun on him
-  function handsUpTick(bot, dt) {
-    const p = P();
-    if (aimedAt(bot, 11)) {
-      if (!(bot._upT > 0)) {
-        let line = null;
-        if (CBZ.voice && CBZ.voice.line) { try { line = CBZ.voice.line(bot, "comply", {}); } catch (e) { line = null; } }
-        say(bot, line || "Okay! Okay!");
-        const rec = bot._moneyRec;
-        if (rec && rec.venue) rec.venue.alarm("holdup", rec);
-      }
-      bot._upT = 2.5;
-    }
-    if (!(bot._upT > 0)) return false;
-    bot._upT -= dt;
-    if (bot.char) bot.char.handsUp = true;
-    bot.surrender = true;
-    steady(bot);
-    // he goes where the gun walks him: a step ahead of you, never away
-    const dx = bot.pos.x - p.pos.x, dz = bot.pos.z - p.pos.z, d = Math.hypot(dx, dz);
-    if (d > 2.4 && d < 9 && sameFloor(bot, p.pos.y)) steer(bot, p.pos.x + (dx / d) * 1.6, p.pos.z + (dz / d) * 1.6);
-    else steer(bot, bot.pos.x, bot.pos.z);
-    if (bot._upT <= 0) { if (bot.char) bot.char.handsUp = false; bot.surrender = false; sendHome(bot); }
-    return true;
-  }
-
-  CBZ.onUpdate(23.2, function (dt) {
-    if (!isles()) return;
+  function gunIn(V) { const p = P(); return !!(p && V && V.inside(p) && gunOut()); }
+  CBZ.onUpdate(34.6, function (dt) {
+    if (!isles() || !POSTS.length) return;
     dt = Math.min(0.1, dt || 0);
-    const p = P();
-    if (!p) return;
-    // the bank's and the shark's people: who they are, and the guards' work
     for (let i = 0; i < POSTS.length; i++) {
       const rec = POSTS[i];
-      const bot = body(rec);
-      if (!bot) {
-        // SHOT STAYS VACANT (island_venue.js keeps him dead): the room knows
+      const p = body(rec);
+      if (!p) {
+        // SHOT STAYS VACANT (island_people.js keeps him dead): the room knows
         if (rec.ps && rec.ps.lost && !rec.lostSeen) { rec.lostSeen = true; if (rec.venue) rec.venue.alarm("killed", rec); }
         continue;
       }
-      if (rec.setFor !== bot) {
-        rec.setFor = bot;
-        bot._moneyRec = rec;
-        if (rec.name) bot.name = rec.name;
-        if (rec.armed) { bot.armed = true; bot.weapon = "Pistol"; bot._holstered = false; holster(bot, true); }
-        if (rec.hp) { bot.hp = rec.hp; bot.maxHp = rec.hp; }
-        if (rec.venue) bot._venueStaff = rec.venue.kind;
+      if (rec.setFor !== p) {
+        rec.setFor = p;
+        if (rec.name) p.name = rec.name;
+        if (rec.venue) p._venueStaff = rec.venue.kind;
+        rec.upSeen = false;
       }
-      if (rec.armed) guardTick(rec, bot, dt);
-    }
-    // every posted worker on the island, the shops' clerks too
-    const L = CBZ.bots || [];
-    for (let i = 0; i < L.length; i++) {
-      const bot = L[i];
-      if (!bot || bot.dead || !bot.post || bot.armed) continue;
-      handsUpTick(bot, dt);
+      // a hold-up at a window is a robbery: the building's alarm
+      if (handsUp(p)) { if (!rec.upSeen) { rec.upSeen = true; if (rec.venue) rec.venue.alarm("holdup", rec); } }
+      else rec.upSeen = false;
+      // the guard: a drawn gun inside his building, he steps up
+      rec.cdT = Math.max(0, rec.cdT - dt);
+      if (rec.armed && !p._ladder && !p.rage && rec.cdT <= 0 && gunIn(rec.venue) && CBZ.cityLadder) {
+        const V = rec.venue;
+        const pl = P();
+        if (pl && Math.hypot(pl.pos.x - p.pos.x, pl.pos.z - p.pos.z) < 14) {
+          rec.cdT = 8;
+          try {
+            CBZ.cityLadder.begin(p, "security", {
+              armed: true, inside: function () { return gunIn(V); },
+              onAct: function (ped, r) { if (r && (r.act === "shoot" || r.act === "aim")) { V.alarm("guard"); return true; } return false; },
+            });
+          } catch (e) {}
+        }
+      }
     }
   });
 
-  CBZ.islandStaff = { post: post, posts: function () { return POSTS.slice(); }, unseen: unseen };
+  CBZ.islandStaff = { post: post, posts: function () { return POSTS.slice(); } };
 
   /* ---- A VENUE: whose staff these are, where its floor is, its alarm ------ */
   function venue(kind, b, F) {
@@ -368,7 +240,7 @@
       // a robbery in progress: every armed man here takes it up, the street hears
       alarm: function (why, who) {
         const t = CBZ.now || 0;
-        for (const r of V.staff) { const bb = body(r); if (r.armed && bb) { r.hostile = true; r.case = null; if (D()) { try { D().cancel(bb); } catch (e) {} } } }
+        for (const r of V.staff) { const bb = body(r); if (r.armed && bb && !bb.rage) fightNow(bb); }
         if (t - V.alarmed < 8) return;
         V.alarmed = t;
         const c = F.toWorld(0, 0);
@@ -380,7 +252,7 @@
     return V;
   }
   function dropVenue(V) {
-    for (const r of V.staff) { const i = POSTS.indexOf(r); if (i >= 0) POSTS.splice(i, 1); if (r.case && r.ps && r.ps.body() && D()) { try { D().cancel(r.ps.body()); } catch (e) {} } }
+    for (const r of V.staff) { const i = POSTS.indexOf(r); if (i >= 0) POSTS.splice(i, 1); }
     V.staff.length = 0;
     const i = VENUES.indexOf(V);
     if (i >= 0) VENUES.splice(i, 1);
@@ -388,7 +260,7 @@
   // a clerk is one of ours (a record with .ps) or anybody's island_venue post
   function clerkBody(c) { return !c ? null : c.ps ? c.ps.body() : c.body ? c.body() : null; }
   function present(c) { return !!clerkBody(c); }
-  function cowed(c) { const b = clerkBody(c); return !b || (b._upT > 0); }
+  function cowed(c) { const b = clerkBody(c); return !b || handsUp(b); }
 
   /* ======================================================================
      TILLS — a register on a counter, a real balance (CBZ.cityTill.declare)
@@ -556,7 +428,11 @@
   // a window is open while its teller is behind it, not with his hands up,
   // and nobody is waving a gun at the bank
   function open(rec) {
-    return function () { const bb = body(rec); return !!bb && !(bb._upT > 0) && !gunOut() && !(rec.venue && rec.venue.alarmed && (CBZ.now || 0) - rec.venue.alarmed < 60); };
+    return function () {
+      const bb = body(rec), V = rec.venue;
+      if (V && CBZ.islandPeople && CBZ.islandPeople.isOpen && !CBZ.islandPeople.isOpen(V.b)) return false;   // banking hours
+      return !!bb && !handsUp(bb) && !gunOut() && !(V && V.alarmed && (CBZ.now || 0) - V.alarmed < 60);
+    };
   }
   function fitBank(b, lot) {
     const IV = CBZ.islandVenue;
@@ -860,8 +736,14 @@
     }
   }
 
-  /* ---- THE COLLECTORS: the demand ladder, mood "debt" ------------------- */
-  const CREW = [];          // { bot, loan, phase, t, beatT, hitT, armed, case }
+  /* ---- THE COLLECTORS: the city's demand ladder, mood "debt" -------------
+     Two (then three, one armed) of the island's people sent out to you. Each
+     is on CBZ.cityLadder's "rob" kind with the tab as his take: he walks up,
+     asks for it by name, warns, and beats it out of you (the ladder's act:
+     the city's ped combat, and the pockets of a man on the floor). Paying is
+     the ladder's own decision on him ("Pay $N"). Whatever ends up in their
+     pockets comes off the debt. */
+  const CREW = [];          // { ped, loan, cash0, lead, t, done }
   function collectorsOut(l) { for (const c of CREW) if (c.loan === l) return true; return false; }
   function pickSpawn(minD, maxD) {
     const A = CBZ.surv && CBZ.surv.arena, p = P();
@@ -880,32 +762,35 @@
     }
     return best;
   }
+  function crewLadder(c) {
+    const l = c.loan;
+    if (!CBZ.cityLadder || c.ped.dead) return null;
+    return CBZ.cityLadder.begin(c.ped, "rob", {
+      mood: "debt", armed: !!c.ped.armed, hard: l.stage >= 1, leaveR: 0, silent: !c.lead,
+      patience: [60, 4.5, 3.5], take: Math.max(10, owedNow(l)),
+      lines: { demand: ["You owe " + l.shark + ".", l.shark + " wants his money."] },
+    });
+  }
   function sendCrew(l) {
-    const p = P(); if (!p || p.dead || p.driving || !CBZ.spawnSurvivorBotAt) return false;
+    const p = P(), PP = CBZ.islandPeople;
+    if (!p || p.dead || p.driving || !PP || !PP.spawnAt) return false;
     const n = l.stage >= 2 ? 3 : 2;
     let sent = 0;
     for (let i = 0; i < n; i++) {
       const q = pickSpawn(28, 75);
       if (!q) break;
-      let bot = null;
-      try { bot = CBZ.spawnSurvivorBotAt(q.x, q.z); } catch (e) { bot = null; }
-      if (!bot) break;
-      bot._venueStaff = "collector"; bot.job = "collector";
       const armed = l.stage >= 2 && i === 0;
-      if (armed) { bot.armed = true; bot.weapon = "Pistol"; holster(bot, true); }
-      bot.hp = 140; bot.maxHp = 140;
-      CREW.push({ bot: bot, loan: l, phase: "walk", t: 0, beatT: 0, hitT: 0, armed: armed, lead: i === 0, rec: { fireT: 0.6 } });
+      let ped = null;
+      try { ped = PP.spawnAt(q.x, q.z, { job: "collector", archetype: "thug", aggr: 0.8, armed: armed, weapon: armed ? "Pistol" : null }); } catch (e) { ped = null; }
+      if (!ped) break;
+      ped._venueStaff = "collector"; ped.job = "collector";
+      const c = { ped: ped, loan: l, cash0: ped.cash || 0, lead: i === 0, t: 0, said: false, done: false };
+      CREW.push(c);
+      if (!crewLadder(c)) { despawn(ped); CREW.pop(); break; }
       sent++;
     }
     if (sent) { l.visits++; l.next = pace() + REVISIT_DAYS; }
     return sent > 0;
-  }
-  function crewLeave(c) {
-    c.phase = "leave"; c.t = 0;
-    if (CBZ.brain && CBZ.brain.demand) { try { CBZ.brain.demand.cancel(c.bot); } catch (e) {} }
-    const p = P(), bot = c.bot;
-    const dx = bot.pos.x - (p ? p.pos.x : 0), dz = bot.pos.z - (p ? p.pos.z : 0), d = Math.hypot(dx, dz) || 1;
-    c.away = { x: bot.pos.x + (dx / d) * 70, z: bot.pos.z + (dz / d) * 70 };
   }
   // the most a man carries that they can sell: his best item
   function seizeItem() {
@@ -924,123 +809,63 @@
     if (!gone) inv[best] = Math.max(0, (inv[best] | 0) - 1);
     return { name: best, value: bv };
   }
-  function crewTake(c) {
-    const l = c.loan;
-    let took = 0;
-    const cash = g.cash | 0;
-    if (cash > 0 && l.owed > 1) {
-      took = Math.min(cash, owedNow(l));
-      g.cash = cash - took; l.owed -= took;
-      g.sharkRepaid = (g.sharkRepaid || 0) + took * 0.5;
-    }
-    let item = null;
-    if (l.owed > 1 && l.stage >= 1) {
-      item = seizeItem();
-      if (item) l.owed -= item.value * 0.5;
-    }
-    if (took > 0 || item) note("They took " + (took > 0 ? fmt$(took) : "") + (took > 0 && item ? " and " : "") + (item ? "your " + item.name : "") + ".", 2.6);
-    if (l.owed <= 1) { const L = loans(), i = L.indexOf(l); if (i >= 0) L.splice(i, 1); }
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+  function crewLeave(c) {
+    if (c.done) return;
+    c.done = true;
+    const ped = c.ped;
+    if (CBZ.cityLadder && ped._ladder) { try { CBZ.cityLadder.cancel(ped); } catch (e) {} }
+    if (ped.dead) return;
+    ped.rage = null;
+    if (CBZ.leave && CBZ.leave.go) CBZ.leave.go(ped, { remove: despawn, tag: "isle:collector" });
   }
-  const _cs = { dist: 99, speed: 0, armed: false, aiming: false, attacking: false, paid: false, inside: undefined, fled: false };
   function crewTick(dt) {
     const p = P();
     for (let i = CREW.length - 1; i >= 0; i--) {
-      const c = CREW[i], bot = c.bot;
-      const gone = !bot || (CBZ.bots && CBZ.bots.indexOf(bot) < 0);
-      if (gone) { CREW.splice(i, 1); continue; }
-      if (bot.dead) {
-        // you fought them off: the rest finish it, and the next crew comes harder
-        CREW.splice(i, 1);
-        c.loan.stage = Math.max(c.loan.stage, 2);
-        for (const o of CREW) if (o.loan === c.loan && o.phase !== "leave" && !o.bot.dead) { o.phase = "beat"; o.beatT = 0; o.fight = true; }
-        continue;
-      }
-      if (!p) continue;
-      const dx = p.pos.x - bot.pos.x, dz = p.pos.z - bot.pos.z, d = Math.hypot(dx, dz);
-      bot.panicT = 0; bot.pause = 1;
+      const c = CREW[i], ped = c.ped, l = c.loan;
+      if (!ped || CBZ.cityPeds.indexOf(ped) < 0) { CREW.splice(i, 1); continue; }
       c.t += dt;
-      if (c.phase === "leave") {
-        bot.state = "wander";
-        bot.target.set(c.away.x, 0, c.away.z);
-        if ((d > 45 && unseen(bot.pos.x, bot.pos.y, bot.pos.z)) || c.t > 60) { removeBot(bot); CREW.splice(i, 1); }
+      // what is in his pockets now that was not when he came is yours, paid
+      const got = Math.max(0, (ped.cash || 0) - c.cash0);
+      if (got > 0) {
+        c.cash0 = ped.cash || 0;
+        l.owed -= got;
+        g.sharkRepaid = (g.sharkRepaid || 0) + got * 0.5;
+        if (l.owed <= 1) { l.owed = 0; const L = loans(), k = L.indexOf(l); if (k >= 0) L.splice(k, 1); }
+        else for (const o of CREW) if (o.loan === l && o.ped._ladder) o.ped._ladder.take = Math.max(10, owedNow(l));
+      }
+      if (ped.dead) {
+        // you fought them off: the rest go for you, and the next crew comes harder
+        CREW.splice(i, 1);
+        l.stage = Math.max(l.stage, 2);
+        for (const o of CREW) if (o.loan === l && !o.done && !o.ped.dead) fightNow(o.ped);
         continue;
       }
-      const l = c.loan;
-      if (p.dead) { crewLeave(c); continue; }
-      if (!(l.owed > 1) || loans().indexOf(l) < 0) {
-        if (c.phase !== "leave") { if (c.lead) say(bot, "We're done here."); crewLeave(c); }
+      if (c.done) { if (c.t > 120) CREW.splice(i, 1); continue; }
+      if (!p || p.dead || !(l.owed > 1) || loans().indexOf(l) < 0) {
+        if (c.lead && p && !p.dead) say(ped, "We're done here.");
+        crewLeave(c); continue;
+      }
+      // he says it to your face, not from across the street
+      const d = Math.hypot(p.pos.x - ped.pos.x, p.pos.z - ped.pos.z);
+      if (c.lead && !c.said && d < 3.2) { c.said = true; say(ped, "You owe " + l.shark + "."); }
+      const e = ped._ladder;
+      if (e) {
+        // one paid, they all were
+        if (e.paid) for (const o of CREW) if (o.loan === l && o.ped._ladder) o.ped._ladder.paid = true;
         continue;
       }
-      if (c.phase === "walk") {
-        bot.state = "move";
-        bot.target.set(p.pos.x, 0, p.pos.z);
-        if (c.t > 90) { crewLeave(c); continue; }
-        if (d < 4.5) {
-          c.phase = "ask";
-          if (c.lead && D()) {
-            try {
-              c.case = D().begin(bot, p, "rob", { mood: "debt", armed: c.armed, hard: l.stage >= 2, leaveR: 30, patience: [4.5, 4, 3],
-                lines: { demand: ["You owe " + l.shark + ".", l.shark + " wants his money."] } });
-            } catch (e) { c.case = null; }
-          }
-        }
-        continue;
+      // the ladder is over: a beating goes through your pockets (the ladder's
+      // own after-act), then they take what you carry and go
+      if (ped.rage && c.t < 90) continue;
+      if (!c.taken && c.lead && l.owed > 1 && l.stage >= 1 && ped.rage == null && c.t > 4) {
+        c.taken = true;
+        const it = seizeItem();
+        if (it) { l.owed -= it.value * 0.5; note("They took your " + it.name + ".", 2.6); }
       }
-      if (c.phase === "ask") {
-        bot.state = "move";
-        if (!c.lead) {
-          // the second man squares up behind the first and waits
-          bot.target.set(p.pos.x + (bot.pos.x - p.pos.x) / (d || 1) * 1.8, 0, p.pos.z + (bot.pos.z - p.pos.z) / (d || 1) * 1.8);
-          bot.group.rotation.y = Math.atan2(dx, dz);
-          continue;
-        }
-        const DM = D();
-        if (!DM || !c.case) { c.phase = "beat"; c.beatT = 0; continue; }
-        _cs.dist = d; _cs.speed = p.driving ? 12 : (+p.speed || 0); _cs.armed = gunOut(); _cs.aiming = aimedAt(bot, 25);
-        _cs.attacking = ((p._fighting || 0) > 0 && d < 2.6); _cs.paid = !!c.paid; _cs.fled = !!p.driving && d > 12;
-        let r = null;
-        try { r = DM.step(bot, dt, _cs); } catch (e) { r = null; }
-        if (!r) { c.phase = "beat"; c.beatT = 0; continue; }
-        if (r.act === "approach" || r.act === "close" || r.act === "chase") bot.target.set(p.pos.x, 0, p.pos.z);
-        else { bot.target.set(bot.pos.x, 0, bot.pos.z); bot.group.rotation.y = Math.atan2(dx, dz); }
-        if (r.step === "done" || r.step === "act") {
-          const out = r.outcome;
-          if (out === "complied") { for (const o of CREW) if (o.loan === l) crewLeave(o); continue; }
-          if (out === "acted") { for (const o of CREW) if (o.loan === l && o.phase !== "leave") { o.phase = "beat"; o.beatT = 0; } continue; }
-          // he walked, he ran, they backed off: they will be back, harder
-          l.stage++; l.next = pace() + REVISIT_DAYS * 0.6;
-          for (const o of CREW) if (o.loan === l) crewLeave(o);
-        }
-        continue;
-      }
-      if (c.phase === "beat") {
-        c.beatT += dt;
-        bot.state = "move";
-        if (c.armed && (l.stage >= 3 || c.fight)) {
-          bot.target.set(d > 10 ? p.pos.x : bot.pos.x, 0, d > 10 ? p.pos.z : bot.pos.z);
-          guardShoot(c.rec, bot, dt);
-        } else if (d > 1.3) bot.target.set(p.pos.x, 0, p.pos.z);
-        else {
-          bot.target.set(bot.pos.x, 0, bot.pos.z);
-          bot.group.rotation.y = Math.atan2(dx, dz);
-          c.hitT -= dt;
-          if (c.hitT <= 0) {
-            c.hitT = 0.7 + Math.random() * 0.5;
-            let s = null;
-            const kinds = ["jab", "cross", "hook", "uppercut"];
-            if (CBZ.verbs && CBZ.verbs.strike) { try { s = CBZ.verbs.strike(bot, p, { kind: kinds[(Math.random() * kinds.length) | 0], heavy: Math.random() < 0.4 }); } catch (e) { s = null; } }
-            if (!s && CBZ.surv && CBZ.surv.hurt && CBZ.surv.playerActor) { try { CBZ.surv.hurt(CBZ.surv.playerActor, 9, { fromX: bot.pos.x, fromZ: bot.pos.z, cause: "beaten" }); } catch (e) {} }
-          }
-        }
-        const done = c.fight ? c.beatT > 14 : c.beatT > 5.5;
-        if (done) {
-          if (c.lead) { crewTake(c); say(bot, "Same time next week."); }
-          l.stage++;
-          l.next = pace() + REVISIT_DAYS;
-          crewLeave(c);
-        }
-      }
+      l.stage++;
+      l.next = pace() + REVISIT_DAYS;
+      if (c.lead && l.owed > 1) say(ped, "Same time next week.");
+      crewLeave(c);
     }
   }
   let _lastPace = null;
@@ -1153,28 +978,6 @@
           onSelect: function (d) { payLoan(loanOf(d.key), g.cash | 0, body(d.rec)); } },
       ],
     });
-    // ---- a collector in your face: pay him
-    I.registerFixtures({
-      id: "debt-collector", kind: "debt-collector", prio: 10, islands: true,
-      list: function (ctx, px, pz) {
-        if (g.mode === "city" || !CREW.length) return null;
-        _out.length = 0;
-        for (const c of CREW) if (c.lead && c.phase === "ask" && c.bot && !c.bot.dead) { c.x = c.bot.pos.x; c.z = c.bot.pos.z; c.y = c.bot.pos.y; if (Math.hypot(c.x - px, c.z - pz) < 5) _out.push(c); }
-        return _out.length ? _out.slice() : null;
-      },
-      reach: function () { return 4.5; }, dot: function () { return 0.3; },
-      name: function (c) { return c.loan.shark + "'s man"; },
-      verbs: [
-        { id: "debt-pay", slot: "e", prio: 8,
-          label: function (c) { return "Pay " + fmt$(owedNow(c.loan)); },
-          canShow: function (c) { return (g.cash | 0) >= owedNow(c.loan); },
-          onSelect: function (c) { payLoan(c.loan, 1e12, c.bot); c.paid = true; } },
-        { id: "debt-pay-part", slot: "i", prio: 7,
-          label: function () { return "Pay " + fmt$(g.cash | 0); },
-          canShow: function (c) { return (g.cash | 0) > 0 && (g.cash | 0) < owedNow(c.loan); },
-          onSelect: function (c) { payLoan(c.loan, g.cash | 0, c.bot); c.paid = true; } },
-      ],
-    });
     // ---- a register
     I.registerFixtures({
       id: "island-till", kind: "island-till", prio: 7, islands: true,
@@ -1245,7 +1048,7 @@
   function sharkHere(d) {
     const r = d && d.rec;
     const bot = body(r);
-    if (!bot || bot._upT > 0) return false;
+    if (!bot || handsUp(bot) || bot.rage) return false;
     const p = P();
     return !!p && !gunOut() && Math.abs((bot.pos.y || 0) - (p.pos.y || 0)) < 2.4;
   }

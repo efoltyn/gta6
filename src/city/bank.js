@@ -1624,16 +1624,10 @@
     return v;
   };
 
-  // the people who can work a door: Gang City's peds, and on the islands the
-  // island's own people (entities/survivorbot.js), posted by city/islandmoney.js
-  const _staff = [];
-  function staffBodies() {
-    _staff.length = 0;
-    const a = CBZ.cityPeds, b = g && g.mode !== "city" ? CBZ.bots : null;
-    if (a && g && g.mode === "city") for (let i = 0; i < a.length; i++) _staff.push(a[i]);
-    if (b) for (let i = 0; i < b.length; i++) if (b[i] && b[i]._venueStaff) _staff.push(b[i]);
-    return _staff;
-  }
+  // the people who can work a door: Gang City's peds, which on the islands
+  // are the island's people too (world/island_people.js)
+  const _none = [];
+  function staffBodies() { return CBZ.cityPeds || _none; }
   // ---- WHO IS IN THE ROOM WITH YOU -------------------------------------------
   // "Only NPCs or physical bombs can open them." This is the NPC half: a member
   // of this bank's own staff, within reach of the door, with their hands up.
