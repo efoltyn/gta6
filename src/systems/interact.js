@@ -179,14 +179,15 @@
     tellB:    { label: "",          fn: (a) => (CBZ.prisonSnitch ? CBZ.prisonSnitch.pick(a, "tellB") : { ok: false, msg: "" }) },
     tellC:    { label: "",          fn: (a) => (CBZ.prisonSnitch ? CBZ.prisonSnitch.pick(a, "tellC") : { ok: false, msg: "" }) },
     tellNo:   { label: "Nothing",   fn: () => (CBZ.prisonSnitch ? CBZ.prisonSnitch.close() : { ok: true, msg: "" }) },
-    // ---- THE WARDEN (systems/prisonwarden.js owns every one of these)
-    wask:     { label: "Ask",       fn: (a) => wardenAct("wask", a) },
-    wbeg:     { label: "Beg",       fn: (a) => wardenAct("wbeg", a) },
+    // ---- THE WARDEN (systems/prisonwarden.js owns both). Only decisions:
+    // the transfer he owes you, the blade he ordered you to bring him. His
+    // own word is an ORDER (systems/command.js), never a button of yours.
     wtransfer:{ label: "Transfer",  fn: (a) => wardenAct("wtransfer", a) },
-    wfavor:   { label: "Work",      fn: (a) => wardenAct("wfavor", a) },
-    protect:  { label: "Protect",   fn: (a) => wardenAct("protect", a) },
-    wthreat:  { label: "Threaten",  fn: (a) => wardenAct("wthreat", a) },
     whand:    { label: "Give",      fn: (a) => wardenAct("whand", a) },
+    // ---- AN OFFICER'S ORDERS to an inmate (the cop role): he decides
+    // (systems/command.js: the uniform, what he thinks of you, his nerve)
+    oback:    { label: "Back off",  fn: (a) => orderCon(a, "back") },
+    odrop:    { label: "Drop it",   fn: (a) => orderCon(a, "drop") },
     join:     { label: "Join",      fn: (a) => CBZ.joinGang(a) },
     // ---- a crew collecting a debt you really owe (ai.js CBZ.prisonDemand):
     // pay it, or take the work that clears it. Walking off, running, swinging
@@ -223,6 +224,7 @@
     } },
     search:   { label: "Search",    fn: (a) => {
       if (PD()) PD().cancel(a);
+      a._copSearched = (a._copSearched | 0) + 1;      // the warden's "toss that man", done
       const justified = a.intimidMode === "scared" || a.copMarked > 0 || a.huntPlayer > 0 || a.aiState === "fight";
       if (a.intimidMode && CBZ.intimidateRelease) CBZ.intimidateRelease(a);
       const found = (justified ? 2 : 1) + Math.floor(CBZ.econ.rng() * (justified ? 6 : 4));
@@ -246,6 +248,18 @@
     restrain: { label: "Tie",       fn: (a) => { if (CBZ.prisonRestrainTarget) CBZ.prisonRestrainTarget(a); return { ok: true, msg: "" }; } },
     release:  { label: "Release",   fn: (a) => { if (CBZ.intimidateRelease) CBZ.intimidateRelease(a); return { ok: true, msg: "" }; } },
   };
+  // the order is said over YOUR head (you are the officer giving it); his
+  // answer is his (command.js speaks it), and his body carries it out
+  function orderCon(a, order) {
+    const C = CBZ.command;
+    if (!C || !C.issue) return order === "back" ? warnActor(a) : { ok: false, msg: "" };
+    const V = CBZ.voice;
+    const line = V && V.line ? V.line(CBZ.player, "order", { order: order }) : "";
+    if (line && CBZ.prisonSay) { try { CBZ.prisonSay(CBZ.player, line, { force: true, secs: 1.6 }); } catch (e) {} }
+    const r = C.issue(CBZ.player, a, order, null, { game: "prison" });
+    if (r.answer === "refuse" || r.answer === "turn") { a.playerGrudge = Math.min(14, (a.playerGrudge || 0) + 1); }
+    return { ok: r.answer === "obey", msg: "" };
+  }
   function wardenAct(v, a) {
     const W = CBZ.warden;
     const r = W && W.act ? W.act(v, a) : null;
@@ -336,16 +350,22 @@
       if (PD().canWorkOff(a)) out.push("workOff");
       if (out.length) { out.push("grab", "punch"); return out; }
     }
-    // A COP'S THREE: ask, toss, cuff (cuff only on a man who gave up or is down)
-    if (CBZ.game.role === "cop" && !staff(a)) return cuffOk(a) ? ["search", "detain"] : ["search"];
+    // A COP: toss him, cuff him (only a man who gave up or is down), and the
+    // orders a uniform gives: steel out is "Drop it", trouble is "Back off"
+    if (CBZ.game.role === "cop" && !staff(a)) {
+      const out = cuffOk(a) ? ["search", "detain"] : ["search"];
+      if (a._shankOut) out.unshift("odrop");
+      else if (a.aiState === "fight" || (a.huntPlayer || 0) > 0 || (a.playerGrudge || 0) >= 6) out.push("oback");
+      return out;
+    }
     // THE MAN WHO REPORTED YOU, once you know it: lean on him, pay him, or take hold of him
     const knowsRat = CBZ.playerKnowsSnitch ? CBZ.playerKnowsSnitch(a) : (a.reportedPlayerT || 0) > 0;
     if (CBZ.game.role !== "cop" && knowsRat) return ["confrontReport", "paySilence", "grab"];
     const canTell = !!(CBZ.prisonSnitch && CBZ.prisonSnitch.canTell && CBZ.prisonSnitch.canTell(a));
-    /* THE WARDEN. In his office on his summons: Snitch, Transfer (or Beg),
-       Work (or Protect), Threaten. On the floor: Snitch (or Ask) gets you his
-       office, Beg while he has your yard, his keys only when nobody guards
-       him, and your hands, which is an assault. */
+    /* THE WARDEN. In his office: Snitch, Transfer (once he owes you), Give
+       (the blade he sent you for). On the floor: Snitch gets you his office,
+       his pockets, and your hands, which is an assault. Everything he says
+       to you is an order you answer by doing it (systems/prisonwarden.js). */
     if (a.kind === "warden") {
       const W = CBZ.warden;
       const meet = W && W.verbs ? W.verbs(a) : null;

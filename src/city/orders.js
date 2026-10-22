@@ -13,18 +13,26 @@
    person I want attacked"). Look at anyone (or tap him) while you have
    people and his own verbs carry the orders about him:
 
-     Attack     hold E: everyone with you goes for him
-     Detain     the President's: two agents take him in (city/custody.js)
-     Escort out the President's: two agents walk him off
-     Tail       your nearest free man follows him, then tells you where
-     Stand down on him while the order stands: everyone comes back
+     Kill       (I J K L) everyone with you goes for him, guns out
+     Take him   hands, not guns: they beat him down / grab him, then stop
+     Detain     law hands only (agents, police, soldiers): two of them take
+                him in (city/custody.js)
+     Back off   whoever of yours is on him lets him be
+     Escort out (wheel) the President's: two agents walk him off
+     Tail       (wheel) your nearest free man follows him, then tells you where
 
-   ONE ORDER PATH. Every one of those is order({ by, verb, target }) below:
-   who obeys (your detail, the uniforms near a seated President, your crew,
-   hired guards, your dog), who refuses, what it costs. A net player or an AI
-   boss hands the same record in. On your own man only his own verbs remain:
-   Hold, Follow, Stand down, Clear room. The old agent-first flow (open your
-   guard's wheel, pick Attack, then point at the mark) is gone.
+   ONE ORDER PATH, DECIDED (2026-10-22, owner: "commands that are either
+   followed or not, and occasionally that lead to coups and fight-backs").
+   Every one of those is order({ by, verb, target }) below; who is with you
+   is force(), and whether each man DOES it is systems/command.js's: the
+   claim you have on him, what he thinks of you (relPlayer, or his
+   institution's loyalty to the seat), what the order asks of him (an
+   unarmed man in public, a child, one of his own), the danger. He obeys,
+   says "Sir?" (give it again to push him), refuses, or turns on you. Enough
+   of that and command calls a mutiny: your crew comes for you, the
+   President's institutions climb the dissent ladder toward the coup. On your
+   own man: Stand down, Hold here, Come; Dismiss and Clear room on the wheel.
+   As a patched member of somebody's crew, YOUR BOSS orders you (bossOrders).
 
    Bodies: tail and a crewman's "go after" are CBZ.followerOrder's (boarding.js).
    Guard, and "go after" for an agent, run here through the shared seams:
@@ -107,6 +115,7 @@
     if (!a) return;
     if (a.kind === "dog") { if (CBZ.cityDogOrder) CBZ.cityDogOrder(a, "standdown"); return; }
     const w = a._orderWas;
+    if (a._order && a._order.kind === "take" && CBZ.cityBrain && CBZ.cityBrain.unholster) { try { CBZ.cityBrain.unholster(a); } catch (e) {} }
     a._order = null; a._orderWas = null;
     LIVE.delete(a);
     if (a.dead) return;
@@ -148,7 +157,9 @@
       if (!t || t.dead) { if (o.kind === "attack" && !o.force) say(a, "Done."); clear(a); return; }
       if (o.kind === "detain") { detainStep(a, o, t, dt); return; }
       if (o.kind === "escort") { escortStep(a, o, t, dt); return; }
-      if (o.kind === "attack") {
+      if (o.kind === "attack" || o.kind === "take") {
+        // TAKE HIM: hands until he is down, then it is over
+        if (o.kind === "take" && downed(t)) { if (a.rage === t) { a.rage = null; if (a.state === "fight") a.state = "idle"; } clear(a); return; }
         if (a.rage !== t) { a.rage = t; a.state = "fight"; }
         return;
       }
@@ -273,41 +284,172 @@
   }
   // one of their own: an agent told to kill an agent, a soldier a soldier
   function brother(q, t) { return !!(t && institution(q) === institution(t) && (stateBody(t) || t._protUnit || t._presOfficer || t.kind === "cop" || t.organization === "military")); }
-  function refuses(q, t) {
-    if (q.kind === "dog") return false;
-    // your own man (crew, a hired guard, the gang): only one who hates you says no
-    if (!stateMan(q)) {
-      const r = q.relPlayer;
-      return !!(r && r.loyalty != null && r.loyalty < 20 && (r.grudge || 0) > 40);
-    }
-    // the model's loyalty of his institution, when it exists (0..100)
+  function PA() { return (CBZ.city && CBZ.city.playerActor) || CBZ.player; }
+  function youAre(a) { return !!a && (a === CBZ.player || a.isPlayer || a === (CBZ.city && CBZ.city.playerActor)); }
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+  /* ---- WHO OBEYS IS DECIDED (systems/command.js). These are the city's
+     answers to its questions: the claim you have on a man, what he thinks of
+     you, who his own are, how his body carries the order out. ---- */
+  // the institution's loyalty to the seat, 0..1 (the one political model
+  // first; the staff's loyalty and the army ladder without it)
+  function instLoyalty(q) {
     const PM = CBZ.politics;
-    let L = null;
     if (PM) {
+      let L = null;
       try {
         if (typeof PM.institutionLoyalty === "function") L = PM.institutionLoyalty(institution(q));
         else if (typeof PM.loyalty === "function") L = PM.loyalty(institution(q));
       } catch (e) { L = null; }
-      if (L != null && !isFinite(L)) L = null;
+      if (L != null && isFinite(L)) return clamp01(L / 100);
     }
-    if (L != null) {
-      let p = Math.max(0, Math.min(0.95, (55 - L) / 55));
-      if (brother(q, t)) p = 0.6 + 0.4 * p;          // much more likely to refuse to kill his own
-      return Math.random() < p;
-    }
-    // without the model: the staff's loyalty and the army ladder
     const S = CBZ.presidentStaff, D = CBZ.dissent;
     const sour = function (role) { try { return !!(S && S.vacant && !S.vacant(role) && S.loyalty && S.loyalty(role) < 35); } catch (e) { return false; } };
-    if (brother(q, t) && Math.random() < 0.7) return true;
-    if (soldier(q)) {
-      let st = 0; try { st = D && D.stage ? D.stage() : 0; } catch (e) { st = 0; }
-      return sour("general") || st >= 3;
-    }
-    if (policeman(q)) return sour("police");
-    if (q.organizationLoyalty != null && q.organizationLoyalty < 30) return true;
-    const r = q.relPlayer;
-    return !!(r && r.loyalty != null && r.loyalty < 20 && (r.grudge || 0) > 40);
+    if (soldier(q)) { let st = 0; try { st = D && D.stage ? D.stage() : 0; } catch (e) { st = 0; } return sour("general") || st >= 3 ? 0.2 : 0.72; }
+    if (policeman(q)) return sour("police") ? 0.25 : 0.72;
+    if (q.organizationLoyalty != null && isFinite(q.organizationLoyalty)) return clamp01(q.organizationLoyalty / 100);
+    return 0.78;
   }
+  // your own man (crew, a hired guard, the gang): he took the job, and then
+  // what he thinks of you (city/social.js relPlayer)
+  function relStanding(q) {
+    const r = CBZ.cityRel ? CBZ.cityRel(q) : q.relPlayer;
+    let s = 0.45;
+    if (r) s += (r.loyalty || 0) / 100 * 0.45 + (r.respect || 0) / 100 * 0.2 + (r.fear || 0) / 100 * 0.15 - (r.grudge || 0) / 100 * 0.7;
+    if (CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(q)) s += 0.08;
+    return clamp01(s);
+  }
+  function downed(t) {
+    if (!t || t.dead) return true;
+    if (t.restraint || (t.ko || 0) > 0 || (t.surrender && !t.rage)) return true;
+    try { if (CBZ.vitals && CBZ.vitals.cuffable && CBZ.vitals.cuffable(t)) return true; } catch (e) {}
+    return false;
+  }
+  function mark(q, kind, t) {
+    if (!q._order) q._orderWas = { companion: !!q.companion };
+    q._order = { kind: kind, target: t, t: 0 };
+    q.companion = false;
+    LIVE.add(q);
+    return true;
+  }
+  // HOLD HERE / COME: the follower engine for a man walking with you
+  // (boarding.js "wait" / "follow"), the _order spot for everyone else
+  function holdHere(a) {
+    if (a.companion && CBZ.followerOrder && CBZ.followerOrder(a, "wait", {})) return true;
+    if (!a._order) a._orderWas = { companion: !!a.companion };
+    a._order = { kind: "hold", spot: { pos: { x: a.pos.x, y: a.pos.y, z: a.pos.z } }, t: 0 };
+    a.companion = false; LIVE.add(a);
+    return true;
+  }
+  function comeWithMe(a) {
+    if (a._protUnit === "mansion") {
+      // off his post and at the President's shoulder: the guard order
+      // (follows him, fights whoever goes for him)
+      if (a._order) clear(a);
+      return give(a, "guard", PA(), true);
+    }
+    if (a._cbzWait && CBZ.followerOrder) CBZ.followerOrder(a, "follow", {});
+    if (a._order) clear(a);
+    if (CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(a)) { a.companion = true; a.guard = null; a.rage = null; }
+    else if (a.recruited || a.kind === "crew") a.companion = true;
+    return true;
+  }
+  // THE BODY OF AN OBEYED ORDER, through the city's real seams
+  function cityExec(q, o, t) {
+    if (!q || q.dead) return false;
+    switch (o) {
+      case "kill": if (!t || t.dead) return false; drawFor(q, t); engage(q, t, "attack"); return true;
+      case "take":
+        // hands, not a gun: the piece goes on his belt until it is over
+        if (!t || t.dead) return false;
+        if (CBZ.cityBrain && CBZ.cityBrain.holster) { try { CBZ.cityBrain.holster(q); } catch (e) {} }
+        engage(q, t, "take"); return true;
+      case "detain": case "escort": return t ? mark(q, o, t) : false;
+      case "back": if (q._cbzJob) { q._cbzJob = null; q._sicOn = null; q._boardRun = false; } clear(q); drawFor(q, null); return true;
+      case "hold": return holdHere(q);
+      case "come": return comeWithMe(q);
+      case "guard": return give(q, "guard", t || PA(), true);
+      default: return false;
+    }
+  }
+  // HE TURNS: on you with his gun, or off the job and into the papers
+  function turnOn(q, how) {
+    if (!q || q.dead || q.kind === "dog") return false;
+    const state = stateMan(q), pres = !!presSeat();
+    if (CBZ.cityDismiss) { try { CBZ.cityDismiss(q, { nod: how === "fight" ? 0 : 1.1 }); } catch (e) {} }
+    else { clear(q); q.companion = false; q.recruited = false; }
+    q._turned = true;
+    const P = PA();
+    if (how === "fight" && P) {
+      if (CBZ.cityBrain && CBZ.cityBrain.unholster) { try { CBZ.cityBrain.unholster(q); } catch (e) {} }
+      q.rage = P; q.mem = P; q.state = "fight";
+      q._drawWhy = { why: "order", by: "self", target: P };
+      if (typeof CBZ.npcDrawReason === "function") { try { CBZ.npcDrawReason(q, "order", P); } catch (e) {} }
+    }
+    if (state && pres && CBZ.news && CBZ.news.push) {
+      try {
+        CBZ.news.push(how === "fight" ? institution(q) + " officer turns his gun on the President"
+          : institution(q) + " officer walks off the President's detail", { cat: "SECURITY", phone: true });
+      } catch (e) {}
+    }
+    return true;
+  }
+  if (CBZ.command && CBZ.command.use) CBZ.command.use("city", {
+    authority: function (from, q) {
+      if (!youAre(from)) return null;
+      if (!q || q.dead || q.player || q._turned) return 0;
+      if (q.kind === "dog") return q.tamed ? 1 : 0;
+      if (presSeat() && (stateBody(q) || (q._protUnit && q._protUnit === presDetailId()))) return q.kind === "cop" ? 0.9 : 1;
+      return worksForYou(q) ? 1 : 0;
+    },
+    standing: function (q, from) {
+      if (!youAre(from)) return null;
+      if (q.kind === "dog") return 0.9;
+      return stateMan(q) && presSeat() ? instLoyalty(q) : relStanding(q);
+    },
+    law: function (q) { return stateMan(q); },
+    kin: function (q, t) { return brother(q, t) || (!!t && !!q.gang && t.gang === q.gang); },
+    notable: function (t) { return !!(t && (t._presOfficer || t._presStaff || t.organization === "state" || t._foreignLeader)); },
+    lead: function (q) { return q._protRole === "shift-leader" ? 1 : q.rank === "lt" ? 0.8 : 0; },
+    exec: function (q, o, t) { return cityExec(q, o, t); },
+    turn: function (q, from, how) { return turnOn(q, how); },
+    // pushing a man past "Sir?" or hearing his "No" costs what he thinks of you
+    cost: function (q, from, kind) {
+      if (!youAre(from) || stateMan(q)) return;
+      const r = CBZ.cityRel ? CBZ.cityRel(q) : null;
+      if (!r) return;
+      if (kind === "push") r.loyalty = Math.max(0, (r.loyalty || 0) - 3);
+      else if (kind === "refuse") { r.loyalty = Math.max(0, (r.loyalty || 0) - 2); r.grudge = Math.min(100, (r.grudge || 0) + 2); }
+    },
+  });
+  /* MUTINY (command.js: the men under you have carried and refused enough of
+     your orders and think little of you). The President's institutions hear
+     it: the army line climbs toward the coup (city/dissent.js -> civilwar.js
+     coup), and the man who leads it walks off the detail. Your own crew turns
+     on you: the one the rest look to takes it, and they come for you. */
+  if (CBZ.command && CBZ.command.on) CBZ.command.on("mutiny", function (m) {
+    if (!m || m.game !== "city" || !youAre(m.from) || g.mode !== "city") return;
+    const men = (m.men || []).filter(function (q) { return q && !q.dead && q.kind !== "dog"; });
+    if (!men.length) return;
+    const state = men.filter(stateMan), own = men.filter(function (q) { return !stateMan(q); });
+    if (state.length && presSeat()) {
+      if (CBZ.dissent && CBZ.dissent.bump) { try { CBZ.dissent.bump(2, 4, state.some(soldier) ? 14 : 7); } catch (e) {} }
+      const L = state.indexOf(m.leader) >= 0 ? m.leader : state[0];
+      if (CBZ.voice && CBZ.voice.say) CBZ.voice.say(L, "turn", { order: m.order, force: true });
+      turnOn(L, "walk");
+      const Pz = CBZ.presidency;
+      if (Pz && Pz.emit) { try { Pz.emit("guards-mutiny", { n: state.length, institution: institution(L) }); } catch (e) {} }
+    }
+    if (own.length) {
+      const L = own.indexOf(m.leader) >= 0 ? m.leader : own[0];
+      if (CBZ.voice && CBZ.voice.say) CBZ.voice.say(L, "turn", { order: m.order, force: true });
+      for (let i = 0; i < own.length; i++) {
+        const q = own[i];
+        const armed = q.armed || !!q._holster;
+        turnOn(q, armed || q === L ? "fight" : "walk");
+      }
+    }
+  });
   function drawFor(q, t) {
     if (q.kind === "dog") return;
     q._drawWhy = t ? { why: "order", by: PF.by || "player", target: t } : null;
@@ -325,16 +467,17 @@
   }
   /* THE ONE ORDER PATH: { by, verb, target }. `by` is who gives it (the
      local player today: "president" when he holds the seat, else "player");
-     verb is attack | detain | escort | tail. The engine below picks who
-     obeys from force(), so the same record from a net player or an AI boss
-     would run the same bodies. */
+     verb is kill | take | detain | escort | tail (attack = kill). The engine
+     below picks who is with you (force()) and command.js decides who obeys,
+     so the same record from a net player or an AI boss runs the same
+     bodies. */
   function order(o) {
-    const verb = (o && o.verb) || "attack", t = o && o.target;
+    let verb = (o && o.verb) || "kill";
+    if (verb === "attack") verb = "kill";
+    const t = o && o.target;
     if (!t || t.dead || t.player || t.isPlayer) return { ok: false, why: "" };
-    const pres = !!presSeat();
-    if ((verb === "detain" || verb === "escort") && !pres) return { ok: false, why: "" };
     if (verb === "tail") return tailOrder(t);
-    return takeDown(t, verb, pres);
+    return takeDown(t, verb);
   }
   // TAIL: the nearest free man of yours follows him (the follower engine's
   // tail: the walk, the distance, the report back)
@@ -348,30 +491,35 @@
       if (d < bd) { bd = d; best = q; }
     }
     if (!best) return { ok: false, why: "" };
+    if (CBZ.command && CBZ.command.issue) {
+      const r = CBZ.command.issue(PA(), best, "go", t, { game: "city", exec: function (q) { return give(q, "tail", t, true); } });
+      return { ok: r.answer === "obey", n: r.obey.length, refused: r.refuse.length };
+    }
     return { ok: give(best, "tail", t), n: 1, refused: 0 };
   }
   // the attack body for one man under a force order: straight onto the brain
   // (a companion is not sent through the follower "sic" run, whose job ends
   // on its own and would leave the order with nobody on it)
-  function engage(q, t) {
+  function engage(q, t, kind) {
     if (q.kind === "dog") { give(q, "attack", t, true); return; }
-    if (!q._order) q._orderWas = { companion: !!q.companion };
-    q._order = { kind: "attack", target: t, t: 0 };
-    q.companion = false;
-    LIVE.add(q);
+    mark(q, kind || "attack", t);
     if (CBZ.cityBrain && CBZ.cityBrain.exec && CBZ.cityBrain.exec.verb) CBZ.cityBrain.exec.verb("attack", q, t);
     else { q.rage = t; q.state = "fight"; }
   }
   function takeDown(t, mode, pres) {
-    mode = mode || "attack";
+    mode = mode === "attack" ? "kill" : (mode || "kill");
     if (pres == null) pres = !!presSeat();
     if (!t || t.dead || t.player) return { ok: false, why: "" };
-    if ((mode === "detain" || mode === "escort") && !pres) return { ok: false, why: "" };
+    if ((mode === "escort") && !pres) return { ok: false, why: "" };
     if (PF.target && PF.target !== t) standDown(true);
-    let all = force().filter(function (q) { return q !== t; });
-    // detain and escort are the state's hands, never your crew's or a dog's
-    if (mode !== "attack") all = all.filter(stateMan);
-    if (!all.length) return { ok: false, why: pres ? "Nobody's with you, sir." : "" };
+    // the men already on him stay on him; the order goes to the rest
+    const already = PF.target === t ? PF.crew.filter(function (q) { return q && !q.dead && q._order && q._order.force; }) : [];
+    let all = force().filter(function (q) { return q !== t && already.indexOf(q) < 0; });
+    // detain and escort are law hands (the state's), never your crew's or a dog's
+    if (mode === "detain" || mode === "escort") all = all.filter(stateMan);
+    // a dog bites; taking a man by the hands is a man's job
+    if (mode === "take") all = all.filter(function (q) { return q.kind !== "dog"; });
+    if (!all.length && !already.length) return { ok: false, why: "" };
     // the aide with the football (q._carries, city/warroom.js) stays with the
     // case while anybody else can go; only when he is all you have does he set
     // it down and take the order (the gun discipline releases it on "order")
@@ -379,64 +527,62 @@
     if (free.length) all = free;
     // a detention or an escort takes the two nearest pairs of hands
     let pool = all;
-    if (mode !== "attack") {
+    if (mode === "detain" || mode === "escort") {
       // hands that can walk to him: not a man in a seat of the motorcade, not
       // a counter-sniper on a roof (sent, never moved; the man stood there
       // with his hands up and nobody came)
       const walkers = all.filter(function (q) { return !q.inCar && !q._cbzSeat && !q._cbzArc && q._protRole !== "counter-sniper"; });
       if (walkers.length) all = walkers;
-      pool = all.slice().sort(function (a, b) { return hyp(a.pos.x, a.pos.z, t.pos.x, t.pos.z) - hyp(b.pos.x, b.pos.z, t.pos.x, t.pos.z); }).slice(0, 2);
+      pool = all.slice().sort(function (a, b) { return hyp(a.pos.x, a.pos.z, t.pos.x, t.pos.z) - hyp(b.pos.x, b.pos.z, t.pos.x, t.pos.z); }).slice(0, Math.max(0, 2 - already.length));
     }
-    const crew = [], no = [];
-    for (let i = 0; i < pool.length; i++) { const q = pool[i]; if (refuses(q, t)) no.push(q); else crew.push(q); }
-    if (no.length) {
-      // a refusal is said to your face, never shown as a number
-      for (let i = 0; i < Math.min(2, no.length); i++) say(no[i], pres ? (i ? "Not like this." : "Sir, I can't.") : (i ? "Not me." : "Do it yourself."));
-      if (pres && no.some(stateMan)) {
-        const took = polAct("refuse", t, no[0]);
-        if (!took && CBZ.dissent && CBZ.dissent.bump) { try { CBZ.dissent.bump(1, 2, no.some(soldier) ? 4 : 1); } catch (e) {} }
-      }
+    // a dog does as it is told; the men decide (systems/command.js)
+    const crew = already.slice(), no = [];
+    let hes = 0;
+    const dogs = pool.filter(function (q) { return q.kind === "dog"; }), men = pool.filter(function (q) { return q.kind !== "dog"; });
+    if (mode === "kill") for (let i = 0; i < dogs.length; i++) { engage(dogs[i], t); crew.push(dogs[i]); }
+    if (men.length) {
+      const C = CBZ.command;
+      if (C && C.issue) {
+        // an escort is a detention's hands without the cuffs
+        const r = C.issue(PA(), men, mode === "escort" ? "detain" : mode, t, {
+          game: "city", exec: mode === "escort" ? function (q) { return mark(q, "escort", t); } : null,
+        });
+        for (let i = 0; i < r.obey.length; i++) crew.push(r.obey[i]);
+        for (let i = 0; i < r.refuse.length; i++) no.push(r.refuse[i]);
+        for (let i = 0; i < r.turn.length; i++) no.push(r.turn[i]);
+        hes = r.hesitate.length;
+      } else for (let i = 0; i < men.length; i++) if (cityExec(men[i], mode, t)) crew.push(men[i]);
     }
-    if (!crew.length) return { ok: false, why: "" };
+    if (pres && no.some(stateMan) && CBZ.dissent && CBZ.dissent.bump) {
+      try { CBZ.dissent.bump(0, 1, no.some(soldier) ? 3 : 1); } catch (e) {}
+    }
+    if (crew.length === already.length && !already.length) return { ok: false, why: "", hesitate: hes, refused: no.length };
     // a detention is priced when the cuffs go on (custody fires the act, with
     // the witnesses who saw it), never at the word
-    if (pres && mode !== "detain") polAct(mode === "attack" ? "take-down" : mode, t, crew[0]);
+    if (pres && mode !== "detain" && crew.length > already.length) polAct(mode === "escort" ? "escort" : "take-down", t, crew[0]);
     PF.target = t; PF.mode = mode; PF.crew = crew; PF.billed = false; PF.by = pres ? "president" : "player";
-    for (let i = 0; i < crew.length; i++) {
-      const q = crew[i];
-      if (mode === "attack") { drawFor(q, t); engage(q, t); }
-      else {
-        if (!q._order) q._orderWas = { companion: !!q.companion };
-        q._order = { kind: mode, target: t, t: 0 };
-        q.companion = false;
-        LIVE.add(q);
-      }
-      if (q._order) q._order.force = true;
-    }
-    if (mode === "detain") {
+    for (let i = 0; i < crew.length; i++) if (crew[i]._order) crew[i]._order.force = true;
+    if (mode === "detain" && !(CBZ.custody && CBZ.custody.jobOf && CBZ.custody.jobOf(t))) {
       // THE ONE ARREST PIPELINE (city/custody.js). The agents keep their
       // force order (protection.js leaves them be) until custody hands them back.
       const CU = CBZ.custody;
       const j = CU && CU.take ? CU.take(t, {
-        by: "ss", verb: "detain", officers: crew, owner: "president", act: true, actBy: "president",
+        by: crew.some(policeman) && !pres ? "police" : "ss", verb: "detain", officers: crew,
+        owner: pres ? "president" : "player", act: pres, actBy: pres ? "president" : "player",
         // HELD, NOT SHIPPED: he stays with you, cuffed, until you choose
         // Jail / Search / Execute / Release on him (city/custody.js)
         hold: true,
         actOpts: { ideology: (t && t.ideology) || null, institution: institution(crew[0]) },
         onCuffed: function () {
-          const L = lead(PF.crew.filter(function (q) { return q && !q.dead; }));
-          if (L) say(L, "He's secured, sir.");
           if (CBZ.presidency && CBZ.presidency.emit) { try { CBZ.presidency.emit("guards-detain", { name: t.name || null }); } catch (e) {} }
         },
         onRelease: function (q) { if (q && q._order && q._order.force) clear(q); },
       }) : null;
       if (!j) { standDown(true); return { ok: false, why: "" }; }
     }
-    const L0 = lead(crew.filter(function (q) { return q.kind !== "dog"; }));
-    if (mode !== "detain" && L0) say(L0, mode === "attack" ? (pres ? "Yes, sir." : "On it.") : "Sir. This way, please.");
     const Pz = CBZ.presidency;
-    if (pres && Pz && Pz.emit) { try { Pz.emit("guards-order", { mode: mode, name: t.name || null, n: crew.length, refused: no.length }); } catch (e) {} }
-    return { ok: true, n: crew.length, refused: no.length };
+    if (pres && Pz && Pz.emit) { try { Pz.emit("guards-order", { mode: mode === "kill" ? "attack" : mode, name: t.name || null, n: crew.length, refused: no.length }); } catch (e) {} }
+    return { ok: true, n: crew.length, refused: no.length, hesitate: hes };
   }
   // STAND DOWN ENDS THE INCIDENT, not just the order: the crew drops the
   // order and holsters (drawFor null -> CBZ.gunDiscipline), forgets the man,
@@ -486,7 +632,6 @@
       backOff(p);
     }
     if (wasPres && CBZ.protection && CBZ.protection.standDown) { try { CBZ.protection.standDown("president"); } catch (e) {} }
-    if (!quiet) { const L = lead(crew.filter(function (q) { return q && !q.dead && q.kind !== "dog"; })); if (L) say(L, wasPres ? "Sir." : "Okay."); }
     return crew.length;
   }
   // a detention is city/custody.js's from the order on: it walks the agents,
@@ -576,102 +721,109 @@
     if (!busy) standDown(true);
   });
 
-  // ---- THE VERBS ------------------------------------------------------------
+  // ---- THE ORDERS ON THE KEYS ------------------------------------------------
   // ON THE MAN THEY ARE ABOUT, while you have people with you (`anyone` lets
   // them through to a person who otherwise offers only his job's verbs: a
-  // staffer, an agent, a General at the table). Attack is hold E; the rest
-  // ride his wheel / his tap. On YOUR OWN man only his own orders remain:
-  // Stand down, Hold, Follow, and the detail's Clear room.
+  // staffer, an agent, a General at the table): Kill, Take him, Detain (law
+  // hands only), Back off. They take I J K L ahead of his own options
+  // (city/interactions.js gives a living thing's first four rows the keys).
+  // Escort out and Tail are on his wheel. On YOUR OWN man: Stand down, Hold
+  // here, Come; Dismiss and Clear room on the wheel. Every one is an order
+  // (systems/command.js): the men decide, a "Sir?" is pushed by giving it
+  // again, a "No" stays a no.
   function wire() {
     const I = CBZ.interactions;
     if (!I || !I.register) return false;
     const on = function (p) { return worksForYou(p); };
-    // a man your people can be sent at: not you, not one of yours, not the
-    // man they are already on
-    const mark = function (t) {
-      if (!t || t.dead || t.player || t.isPlayer || PF.target === t || worksForYou(t)) return false;
+    // a man your people can be sent at: not you, not one of yours
+    const markable = function (t) {
+      if (!t || t.dead || t.player || t.isPlayer || worksForYou(t)) return false;
       const f = force();
       return f.length > 0 && f.indexOf(t) < 0;
     };
-    const stateHands = function () {
-      if (!presSeat()) return false;
+    const lawHands = function () {
       const f = force();
       for (let i = 0; i < f.length; i++) if (stateMan(f[i])) return true;
       return false;
     };
+    const men = function () {
+      const f = force();
+      for (let i = 0; i < f.length; i++) if (f[i].kind !== "dog") return true;
+      return false;
+    };
+    const stateHands = function () { return !!presSeat() && lawHands(); };
     const freeMan = function () {
       const f = force();
       for (let i = 0; i < f.length; i++) { const q = f[i]; if (q.kind !== "dog" && !stateMan(q) && !q._order && !q._cbzJob) return true; }
       return false;
     };
     const by = function () { return presSeat() ? "president" : "player"; };
-    I.register("ped", { id: "order-attack", hold: true, prio: 60, bad: true, campaignSafe: true, forceYes: true, anyone: true,
-      canShow: mark, label: "Attack",
-      onSelect: function (t) { order({ by: by(), verb: "attack", target: t }); } });
-    I.register("ped", { id: "order-detain", wheel: true, prio: 59, campaignSafe: true, forceYes: true, anyone: true,
-      canShow: function (t) { return mark(t) && stateHands() && !t.restraint && !t.vendor && t.kind !== "cop" && !(CBZ.custody && CBZ.custody.jobOf(t)); },
-      label: "Detain", onSelect: function (t) { order({ by: "president", verb: "detain", target: t }); } });
+    // anybody of yours on him right now (an order, or a fight that is his)
+    const onHim = function (t) {
+      if (!t) return false;
+      if (PF.target === t && !(PF.mode === "detain" && CBZ.custody && CBZ.custody.cuffed(t))) return true;
+      const f = force();
+      for (let i = 0; i < f.length; i++) if (f[i].rage === t) return true;
+      return false;
+    };
+    const busyOn = function (t) { return PF.target === t && PF.mode === "kill"; };
+    I.register("ped", { id: "order-kill", prio: 66, bad: true, campaignSafe: true, forceYes: true, anyone: true,
+      canShow: function (t) { return markable(t) && !busyOn(t); }, label: "Kill",
+      onSelect: function (t) { order({ by: by(), verb: "kill", target: t }); } });
+    I.register("ped", { id: "order-take", prio: 65, bad: true, campaignSafe: true, forceYes: true, anyone: true,
+      canShow: function (t) { return markable(t) && men() && !t.restraint && !(PF.target === t && PF.mode === "take"); }, label: "Take him",
+      onSelect: function (t) { order({ by: by(), verb: "take", target: t }); } });
+    I.register("ped", { id: "order-detain", prio: 64, campaignSafe: true, forceYes: true, anyone: true,
+      canShow: function (t) { return markable(t) && lawHands() && !t.restraint && !t.vendor && t.kind !== "cop" && !(CBZ.custody && CBZ.custody.jobOf(t)); },
+      label: "Detain", onSelect: function (t) { order({ by: by(), verb: "detain", target: t }); } });
+    // BACK OFF: whoever of yours is on him lets him be
+    I.register("ped", { id: "order-call-off", prio: 80, campaignSafe: true, forceYes: true, anyone: true,
+      canShow: onHim, label: "Back off",
+      onSelect: function (t) {
+        const crew = force().filter(function (q) { return q.kind !== "dog" && (q.rage === t || (PF.target === t && PF.crew.indexOf(q) >= 0)); });
+        if (CBZ.command && CBZ.command.issue && crew.length) {
+          CBZ.command.issue(PA(), crew, "back", t, { game: "city", exec: function (q) { if (q.rage === t && !q._custodyJob) { q.rage = null; if (q.state === "fight") q.state = "idle"; } return true; } });
+        }
+        if (PF.target === t) standDown(false);
+      } });
     I.register("ped", { id: "order-escort", wheel: true, prio: 25, campaignSafe: true, forceYes: true, anyone: true,
-      canShow: function (t) { return mark(t) && stateHands() && !t.restraint && !stateBody(t) && !t._presOfficer && !t._presStaff && t.kind !== "cop"; },
+      canShow: function (t) { return markable(t) && stateHands() && !t.restraint && !stateBody(t) && !t._presOfficer && !t._presStaff && t.kind !== "cop"; },
       label: "Escort out", onSelect: function (t) { order({ by: "president", verb: "escort", target: t }); } });
     I.register("ped", { id: "order-tail", wheel: true, prio: 20, campaignSafe: true, anyone: true,
-      canShow: function (t) { return mark(t) && !!CBZ.followerOrder && freeMan(); },
+      canShow: function (t) { return markable(t) && !!CBZ.followerOrder && freeMan(); },
       label: "Tail", onSelect: function (t) { order({ by: by(), verb: "tail", target: t }); } });
-    // the man they are on: call it off from him too
-    I.register("ped", { id: "order-call-off", prio: 80, campaignSafe: true, forceYes: true, anyone: true,
-      canShow: function (t) { return !!(t && PF.target === t && !(PF.mode === "detain" && CBZ.custody && CBZ.custody.cuffed(t))); }, label: "Stand down",
-      onSelect: function () { standDown(false); } });
 
-    // ---- on your own man ----
+    // ---- on your own man: his orders, decided like any other ----
+    const tell = function (a, o) {
+      if (CBZ.command && CBZ.command.issue) return CBZ.command.issue(PA(), a, o, null, { game: "city" });
+      return { answer: cityExec(a, o, null) ? "obey" : "refuse" };
+    };
     I.register("ped", { id: "order-stand-down", prio: 70, campaignSafe: true, anyone: true,
-      canShow: function (p) { return !!(p && (p._order || p._cbzJob)); }, label: "Stand down",
+      canShow: function (p) { return !!(p && on(p) && (p._order || p._cbzJob)); }, label: "Stand down",
       onSelect: function (a) {
-        if (a._order && a._order.force) { standDown(false); return; }
-        if (a._cbzJob) { a._cbzJob = null; a._sicOn = null; a._boardRun = false; }
-        clear(a); say(a, "Sir.");
+        if (a._order && a._order.force) { tell(a, "back"); standDown(false); return; }
+        tell(a, "back");
       } });
-    // HOLD / FOLLOW: one of your men keeps a spot (a door, a corridor), or
-    // comes back to you. A follower (your crew walking with you) holds through
-    // the follower engine (boarding.js "wait"), everyone else through _order.
-    // A MAN ON HIS OWN POST (the Mansion's gate, its wall walk): he is
-    // already holding it, so his one decision is to leave it and walk with
-    // the President. Stand down (above) sends him back: protection.js hands
-    // his body to this file while the order stands, and takes it back after.
+    // HOLD HERE / COME: one of your men keeps a spot (a door, a corridor), or
+    // comes back to you. A MAN ON HIS OWN POST (the Mansion's gate, its wall
+    // walk) is already holding it, so his one decision is to leave it and
+    // walk with the President. Stand down sends him back: protection.js
+    // hands his body to this file while the order stands, and takes it back.
     const posted = function (p) { return !!(p && !p.dead && p._protUnit === "mansion" && p._protRole !== "counter-sniper" && !p._order); };
     I.register("ped", { id: "order-hold", prio: 27, campaignSafe: true, anyone: true,
-      canShow: function (p) { return on(p) && !posted(p) && !(p._order && p._order.kind === "hold") && !p._cbzWait && !p._cbzSeat; }, label: "Hold",
-      onSelect: function (a) {
-        if (a.companion && CBZ.followerOrder && CBZ.followerOrder(a, "wait", {})) { say(a, "I'll hold here."); return; }
-        if (!a._order) a._orderWas = { companion: !!a.companion };
-        a._order = { kind: "hold", spot: { pos: { x: a.pos.x, y: a.pos.y, z: a.pos.z } }, t: 0 };
-        a.companion = false; LIVE.add(a);
-        say(a, "I'll hold here.");
-      } });
-    I.register("ped", { id: "order-follow", prio: 72, campaignSafe: true, anyone: true,
+      canShow: function (p) { return on(p) && !posted(p) && !(p._order && p._order.kind === "hold") && !p._cbzWait && !p._cbzSeat; }, label: "Hold here",
+      onSelect: function (a) { tell(a, "hold"); } });
+    I.register("ped", { id: "order-come", prio: 72, campaignSafe: true, anyone: true,
       canShow: function (p) {
         if (!p || p.dead) return false;
         if ((p._order && p._order.kind === "hold") || (p._cbzWait && on(p))) return true;
         if (posted(p) && on(p)) return true;
         // a gang member at his own post walks with you on the word
         return !p.companion && !p._order && !!(CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p));
-      }, label: "Follow",
-      onSelect: function (a) {
-        if (a._protUnit === "mansion") {
-          // off his post and at the President's shoulder: the guard order
-          // (follows him, fights whoever goes for him)
-          if (a._order) clear(a);
-          give(a, "guard", (CBZ.city && CBZ.city.playerActor) || CBZ.player, true);
-          say(a, "With you, sir.");
-          return;
-        }
-        if (a._cbzWait && CBZ.followerOrder) CBZ.followerOrder(a, "follow", {});
-        if (a._order) clear(a);
-        if (CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(a)) { a.companion = true; a.guard = null; a.rage = null; }
-        say(a, "With you.");
-      } });
+      }, label: "Come",
+      onSelect: function (a) { tell(a, "come"); } });
     // DISMISS: let one of your own people go (a crewman you recruited, a
-    // soldier of your gang). There was no way to undo a Recruit but to get him
-    // killed or miss his pay. CBZ.cityDismiss (city/brain_city.js) is the one
+    // soldier of your gang). CBZ.cityDismiss (city/brain_city.js) is the one
     // let-go: his post and side end, he nods, says one line and walks home.
     // Not the President's guns (the Service owns them) and not a dog.
     const LET_GO = ["Alright. I'm gone.", "Your call.", "See you around.", "Fair enough."];
@@ -689,7 +841,7 @@
       } });
     // CLEAR ROOM: the President's agents walk everyone who is not staff out
     // of the room you are in (10 m, your storey)
-    I.register("ped", { id: "pv-clear-room", prio: 26, campaignSafe: true, anyone: true,
+    I.register("ped", { id: "pv-clear-room", wheel: true, prio: 26, campaignSafe: true, anyone: true,
       canShow: function (p) { return !!(p && p._protUnit && p._protUnit === presDetailId() && !p.dead && clearable().length); },
       label: "Clear room",
       onSelect: function (a) {
@@ -712,13 +864,49 @@
   }
   if (!wire()) { const t = setInterval(function () { if (wire()) clearInterval(t); }, 250); }
 
+  /* ---- YOUR BOSS ORDERS YOU (you are patched into somebody's crew,
+     g.cityMembership). When he is in a fight and you are standing there, the
+     man he is fighting is your order: "Take him out." You answer by doing it
+     (systems/command.js toPlayer reads it off the man: down or dead). Stand
+     there and watch and the crew remembers: your standing with them drops,
+     and a second time the boss says so to your face. ---- */
+  const BOSS = { t: 0, rec: null, refusals: 0 };
+  function bossOrders(dt) {
+    BOSS.t -= dt || 0;
+    if (BOSS.t > 0) return;
+    BOSS.t = 0.5;
+    const C = CBZ.command, M = g.cityMembership, P = CBZ.player;
+    if (!C || !C.toPlayer || !M || !M.gangId || !P || !P.pos || P.dead || P.driving) return;
+    if (BOSS.rec && BOSS.rec.outcome == null) return;
+    const list = CBZ.cityGangs || [];
+    let rec = null;
+    for (let i = 0; i < list.length; i++) if (list[i] && list[i].id === M.gangId) { rec = list[i]; break; }
+    const boss = rec && rec.boss;
+    if (!boss || boss.dead || !boss.pos || hyp(boss.pos.x, boss.pos.z, P.pos.x, P.pos.z) > 25) return;
+    const t = boss.rage;
+    if (!t || t.dead || t.player || t.isPlayer || !t.pos || (t.gang && t.gang === M.gangId)) return;
+    if (hyp(t.pos.x, t.pos.z, P.pos.x, P.pos.z) > 30) return;
+    BOSS.rec = C.toPlayer(boss, "kill", {
+      target: t, maxDist: 60, patience: [6, 6, 5],
+      complied: function () { return downed(t); },
+      alive: function () { return g.mode === "city" && !boss.dead; },
+      onForce: function () {
+        BOSS.refusals++;
+        if (CBZ.cityGangAddStanding) { try { CBZ.cityGangAddStanding(M.gangId, -8 * BOSS.refusals); } catch (e) {} }
+        if (BOSS.refusals >= 2) say(boss, "You just stood there.");
+      },
+      onDone: function (r, out) { if (out === "complied") BOSS.refusals = Math.max(0, BOSS.refusals - 1); },
+    });
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(36.42, function (dt) { if (g.mode === "city" && g.state === "playing") bossOrders(dt); });
+
   CBZ.cityOrders2 = {
     give: give, clear: clear, worksForYou: worksForYou, attackerOf: attackerOf,
     order: order, standDown: standDown,
     // a man executed in the President's custody: the same bill as a death under the order
     billKill: function (t) { if (t && presSeat()) bill(t); },
     // the same order, by its old name (president_public.js escorts a protester)
-    takeDown: function (t, mode) { return order({ by: presSeat() ? "president" : "player", verb: mode || "attack", target: t }); },
+    takeDown: function (t, mode) { return order({ by: presSeat() ? "president" : "player", verb: mode || "kill", target: t }); },
     force: function () { return force().slice(); },
     forceOrder: function () { return PF.target ? { target: PF.target, mode: PF.mode, by: PF.by, crew: PF.crew.slice(), billed: PF.billed } : null; },
     list: function () { const out = []; LIVE.forEach(function (a) { out.push({ name: a.name || null, kind: a._order && a._order.kind }); }); return out; },
