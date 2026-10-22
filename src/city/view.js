@@ -1,18 +1,18 @@
 /* ============================================================
-   city/view.js — the CITY view controller. First-person by DEFAULT
-   (camera.js reads CBZ.cityCam), a [V] toggle to third-person, and the
+   city/view.js — the CITY view controller. On foot there is no view key:
+   what is in your hands picks the camera (systems/fpsmode.js
+   CBZ.viewForHands, driven by systems/camera.js). This file owns the
    rig-visibility rule that fixes "seeing inside your own face": in
    first-person the whole player rig is hidden, so the camera never sits
    inside the head mesh. On death the camera flips to a third-person
    cinematic orbit (CBZ.cityCam.death, set by city/death.js).
 
-   NEW: the [V] this file has refused mid-drive since it was written now
-   does something when the thing you are driving is a CAR or a BOAT — see
-   THE DRIVER'S SEAT below (a hull's eye comes off its registered helm
-   station instead of a cabin frame). Aircraft keep their own owner
-   (city/cockpit_view.js claims the key whenever P._aircraft is set, and
-   returns immediately when it is not), so the two listeners can never both
-   fire.
+   [V] is the SEAT key: behind the wheel of a CAR or a BOAT it puts you in
+   the driver's seat — see THE DRIVER'S SEAT below (a hull's eye comes off
+   its registered helm station instead of a cabin frame). Aircraft keep
+   their own owner (city/cockpit_view.js claims the key whenever
+   P._aircraft is set, and returns immediately when it is not), so the two
+   listeners can never both fire.
 
    Also owns THE CITY AT NIGHT pass: at dusk every storefront sign, neon
    trim, window band and lit interior gets ONE emissive lift (and ONE
@@ -31,9 +31,8 @@
   // the only part that does, so it is the only part that checks.
   const THREE = window.THREE;
 
-  // DEFAULT to third-person — the jail's SmoothDamp follow camera is the good
-  // one, and camera.js runs that exact rig for the city when fp is off. [V]
-  // toggles first-person.
+  // cityCam carries the death replay (city/death.js); `fp` is never set —
+  // first person on foot is fpsmode's, chosen by the hands rule.
   CBZ.cityCam = CBZ.cityCam || { fp: false, death: null };
 
   /* ONE PRESS IS ONE PRESS.
@@ -64,23 +63,13 @@
     const G = CBZ.game || g;
     if (!G || G.mode !== "city" || G.state !== "playing") return;
     if (CBZ.cityMenuOpen) return;
-    if (e.key && e.key.toLowerCase() === "v" && !e.repeat && vFreshPress()) {
-      if (CBZ.player.driving) {
-        // A CAR — AND NOW A BOAT — ANSWERS [V]. Aircraft do not reach here:
-        // cockpit_view.js owns the key while P._aircraft is set. carFpToggle
-        // still refuses anything without an eye to sit at (bikes, an
-        // unregistered hull), so the old early return stays the outcome for
-        // those.
-        if (CBZ.player._aircraft) return;
-        if (carFpToggle()) e.preventDefault();
-        return;
-      }
-      e.preventDefault();
-      // Use the JAIL's real first-person system (systems/fpsmode.js) — the good
-      // one: eye height 2.05, head-bob, full-range pitch, weapon viewmodel. The
-      // old custom city FP camera (cam.pitch, eye 1.66) felt broken.
-      if (CBZ.toggleFPS) CBZ.toggleFPS();
-      CBZ.city && CBZ.city.note((CBZ.fps && CBZ.fps.active) ? "First-person" : "Third-person", 1.0);
+    // A CAR or a BOAT answers [V]; on foot it does nothing (the hands pick
+    // the view). Aircraft do not reach here: cockpit_view.js owns the key
+    // while P._aircraft is set. carFpToggle still refuses anything without
+    // an eye to sit at (bikes, an unregistered hull).
+    if (e.key && e.key.toLowerCase() === "v" && !e.repeat && CBZ.player.driving && vFreshPress()) {
+      if (CBZ.player._aircraft) return;
+      if (carFpToggle()) e.preventDefault();
     }
   });
 
@@ -430,7 +419,7 @@
     const cc = CBZ.cityCam, P = CBZ.player, ch = CBZ.playerChar;
     if (!ch || !ch.group) return;
     const fpsOn = !!(CBZ.fps && CBZ.fps.active);
-    if (P.driving) { if (fpsOn && CBZ.setFPS) CBZ.setFPS(false); return; }       // car owns visibility
+    if (P.driving) { if (fpsOn && CBZ.fpsApplyView) CBZ.fpsApplyView(false); return; }       // car owns visibility
     // NOT DRIVING, so nothing may still be holding the rig in a seat. The
     // drive loop and cityExitVehicle both release, but a death, a teleport, a
     // mode change or a mid-session flag flip can all end a drive without going
@@ -438,7 +427,7 @@
     // worst possible failure mode. One idempotent call, on the frame that
     // already owns this rig's visibility.
     if (CBZ.carDriverSeated && CBZ.carDriverSeated()) CBZ.carDriverRelease();
-    if ((cc && cc.death) || P.dead) { if (fpsOn && CBZ.setFPS) CBZ.setFPS(false); ch.group.visible = true; return; }
+    if ((cc && cc.death) || P.dead) { if (fpsOn && CBZ.fpsApplyView) CBZ.fpsApplyView(false); ch.group.visible = true; return; }
     ch.group.visible = !fpsOn;             // FP → hidden body (no face-clip)
   });
 

@@ -67,6 +67,8 @@
   // way to its physical back/hip mount instead of teleporting it there.
   let weaponTransitionSeq = 0;
   let fpSwapT = 0, fpSwapDur = 0.34, fpSwapFrom = null, fpSwapTo = null, fpSwapP = 1;
+  const FP_RISE = 0.18;   // s: the gun rising into the frame as the eye arrives
+  let fpRiseT = 0;
   function markWeaponTransition(from, to, reason) {
     if (from === to) return;
     const now = (window.performance && performance.now) ? performance.now() : Date.now();
@@ -1676,7 +1678,6 @@
   let aimHeld = false;     // third-person ADS (right mouse): raise the gun to aim
   let switchCD = 0;        // debounce weapon switching so mashing Q can't spam/stall
   let qWasDown = false;    // edge-detect Q in the frame loop (not per keydown event)
-  let introWantsFPS = false;
 
   /* ---- THE ROUND YOU FIRED, SEEN (systems/gunfx.js) ----
      This file used to keep its own 22 cylinders and draw every shot as one,
@@ -5061,7 +5062,16 @@
 
   const fpBody = { on: false, hid: [] };   // YOUR BODY UNDER THE LENS, below
   function setActive(on) {
+    // INTO the head the look carries over: the orbit's DOWN-positive
+    // cam.pitch becomes the eye's UP-positive fps.fp (the way out, below,
+    // already hands it back the same way). Raising a gun never snaps where
+    // you were looking.
+    const was = fps.active;
+    if (on && !was && CBZ.cam && typeof CBZ.cam.pitch === "number") {
+      fps.fp = Math.max(-1.3, Math.min(1.3, -CBZ.cam.pitch));
+    }
     fps.active = on;
+    if (on && !was) fpRiseT = FP_RISE;
     if (!on && fpBody.on) fpBodyOff();
     if (CBZ.playerChar) CBZ.playerChar.group.visible = !on;
     // Same owner as the per-frame pass below (aquaticRide): the eye toggle can
@@ -5084,8 +5094,7 @@
     }
     document.body.classList.toggle("fps", on);
     setAmmoHud();
-    if (on && fps.fp === 0) fps.fp = 0.06;
-    if (!on) {
+    if (!on && was) {
       triggerHeld = false;
       // hand the FP look pitch to the third-person orbit so toggling out of
       // first person keeps looking where you were looking — the orbit used to
@@ -5099,6 +5108,7 @@
       // (-0.9 = look up, 0.6 = look down) rather than fps.fp's.
       if (CBZ.cam && typeof fps.fp === "number") CBZ.cam.pitch = Math.max(-0.9, Math.min(0.6, -fps.fp));
     }
+    if (!on) triggerHeld = false;
     // toggling FPS on hides the body; clear the 3PS present-weapon/carry poses
     // so the rig's arms are not stuck raised when the body re-appears
     // unarmed/holstered.
@@ -5172,29 +5182,80 @@
     ch.group.position.z = P.pos.z - Math.cos(yaw) * back;
   });
 
-  CBZ.toggleFPS = function () { setActive(!fps.active); };
-  CBZ.setFPS = function (on) { setActive(!!on); };
-  CBZ.armFPSAfterIntro = function () {
-    introWantsFPS = true;
-    if (fps.active) setActive(false);
-  };
-  // Campaign prison runs deliberately stay in the same over-the-shoulder
-  // language as the city.  State.js calls this before starting the prison
-  // reveal so a stale one-shot arm from an earlier run cannot flip the camera
-  // back to first person when camera.js announces intro completion.
-  CBZ.disarmFPSAfterIntro = function () {
-    introWantsFPS = false;
-    if (fps.active) setActive(false);
-  };
-  const prevIntroComplete = CBZ.onIntroComplete;
-  CBZ.onIntroComplete = function () {
-    if (prevIntroComplete) prevIntroComplete();
-    if (introWantsFPS && CBZ.game.state === "playing") {
-      introWantsFPS = false;
-      setActive(true);
-      fps.fp = Math.max(fps.fp, 0.06);
+  /* ---- WHAT'S IN YOUR HANDS PICKS THE CAMERA (owner, 2026-10-22) ---------
+     "First person when a gun is out should be 100 percent in the game, and
+     melee weapons should make the character third person." There is no view
+     button any more. This is the ONE place the rule lives; systems/camera.js
+     drives the eased push into / pull out of the head off it, and every mode
+     that seats its own lens (warlord/gunplay.js) asks the same question.
+
+       a person in your grip ........................ third
+       a FIREARM drawn (not holstered, not melee) .... FIRST
+       a melee weapon (bat, knife, shank) ............ third
+       a lit flashlight, or binoculars up ............ FIRST
+       empty hands .................................... third
+
+     Being hit or knocked down does not change it: armed is first person,
+     period (the owner rejected cutting out to third on a knockdown).
+
+     null = another camera owns the lens and the rule keeps its hands off:
+     the car seat / chase, aircraft, boats, an animal under you, swimming, a
+     cinematic, the arrival intro, the death cam and the spectator. */
+  function handsPick() {
+    if (CBZ.grapple && CBZ.grapple.holding && CBZ.grapple.holding()) return "tp";
+    if (cuffedHands()) return "tp";
+    const g = CBZ.game;
+    // the island games have no gunplay (fpsmode's trigger stands down there)
+    const guns = !(CBZ.islandModeOn && CBZ.islandModeOn(g && g.mode));
+    if (guns && armed()) {
+      const w = weapon();
+      return (w && w.melee) ? "tp" : "fp";
     }
+    if (g && g.mode === "city" && g.cityMeleeWeapon) return "tp";
+    if (CBZ.playerFlashlight && CBZ.playerFlashlight.on && CBZ.playerFlashlight.on()) return "fp";
+    if (CBZ.hmBinoculars && CBZ.hmBinoculars.active && CBZ.hmBinoculars.active()) return "fp";
+    return "tp";
+  }
+  function handsView() {
+    const g = CBZ.game, P = CBZ.player;
+    if (!g || g.state !== "playing" || !P) return null;
+    if (g.mode === "sharksim") return null;
+    if (P.dead || P.driving || P._aircraft || P._swim || P._aquaticMount || P._mountedAnimal) return null;
+    const ch = CBZ.playerChar;
+    if (ch && (ch.riding || ch.skydiving)) return null;
+    if (CBZ.cityCam && CBZ.cityCam.death) return null;
+    if (CBZ.cineCam && CBZ.cineCam.active) return null;
+    if (CBZ.cineActive && CBZ.cineActive()) return null;
+    if (CBZ.camIntroActive && CBZ.camIntroActive()) return null;
+    if (CBZ.spectator && CBZ.spectator.owns && CBZ.spectator.owns()) return null;
+    if (CBZ.simView && CBZ.simView.active) return null;
+    if (CBZ.cityChuteState && CBZ.cityChuteState()) return null;
+    return handsPick();
+  }
+  /* CODE MAY STILL SET THE VIEW (a probe, a scripted beat): CBZ.setFPS /
+     toggleFPS / fpsSetActive keep working and the choice HOLDS until the
+     hands change (or another camera takes the lens and gives it back). The
+     player has no such switch; the rule's own flips go through
+     CBZ.fpsApplyView, which never holds. */
+  let viewHold = null;
+  function codeSetView(on) {
+    on = !!on;
+    viewHold = { on: on, base: handsView() };
+    setActive(on);
+    if (CBZ.camHandsSnap) CBZ.camHandsSnap();
+  }
+  CBZ.handsPick = handsPick;
+  CBZ.viewForHands = function () {
+    const raw = handsView();
+    if (viewHold) {
+      if (raw === viewHold.base) return raw === null ? null : (viewHold.on ? "fp" : "tp");
+      viewHold = null;
+    }
+    return raw;
   };
+  CBZ.fpsApplyView = function (on) { if (!!on !== fps.active) setActive(!!on); };
+  CBZ.toggleFPS = function () { codeSetView(!fps.active); };
+  CBZ.setFPS = codeSetView;
   CBZ.fpsFire = fireControl;
   CBZ.fpsReload = reload;
   CBZ.fpsNextWeapon = function () { switchWeapon(1); };
@@ -5209,7 +5270,7 @@
     setAmmoHud();
   };
   CBZ.fpsActive = function () { return fps.active; };
-  CBZ.fpsSetActive = setActive;                       // programmatic FP enter/exit (scope snap)
+  CBZ.fpsSetActive = codeSetView;                     // programmatic FP enter/exit (holds until the hands change)
   // ---- gamepad + weapon-mod hooks ----
   // let a controller (systems/gamepad.js) drive ADS the same as holding RMB.
   CBZ.fpsSetAim = function (on) { aimHeld = !!on; };
@@ -5261,14 +5322,7 @@
     carriedModels.forEach((m, i) => { m.visible = i === fps.weapon; });
     setAmmoHud();
     if (CBZ.game.mode === "city" && CBZ.cityHudDirty) CBZ.cityHudDirty();
-    // Auto-drop into FIRST-PERSON the moment you actually pick up a gun in
-    // third person — FPS-with-a-gun is the intended way to shoot. Only on a
-    // brand-new acquisition (first), only mid-play, never in survival.
-    if (first && !fps.active && CBZ.game.state === "playing" && !CBZ.islandModeOn(CBZ.game.mode) && CBZ.game.mode !== "city") {
-      setActive(true);
-      fps.fp = Math.max(fps.fp, 0.06);
-      // (no announcement — the camera dropping into first person IS the message)
-    }
+    // (the view follows the gun on its own: CBZ.viewForHands)
   };
 
   // ---- input ----
@@ -5330,9 +5384,8 @@
   addEventListener("keydown", (e) => {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
-    // city owns [V] via city/view.js; Shark Sim has one camera and no [V]
-    if (k === "v" && CBZ.game.mode !== "city" && CBZ.game.mode !== "sharksim") CBZ.toggleFPS();
-    else if (k === "r" && (fps.active || shoulderActive())) reload();
+    // (no [V]: what is in your hands picks the view — CBZ.viewForHands)
+    if (k === "r" && (fps.active || shoulderActive())) reload();
     else if (k === "x" && (fps.active || shoulderActive()) && weapon().explosive &&
       !CBZ.cityMenuOpen && !(CBZ.fullMap && CBZ.fullMap.active) &&
       !(CBZ.buildMode && CBZ.buildMode.active)) {
@@ -5503,6 +5556,7 @@
     if (dryCD > 0) dryCD = Math.max(0, dryCD - dt);
     if (punchCD > 0) punchCD = Math.max(0, punchCD - dt);
     if (switchCD > 0) switchCD = Math.max(0, switchCD - dt);
+    if (fpRiseT > 0) fpRiseT = Math.max(0, fpRiseT - dt);
     if (fpSwapT > 0) {
       fpSwapT = Math.max(0, fpSwapT - dt);
       fpSwapP = 1 - fpSwapT / fpSwapDur;
@@ -5798,6 +5852,15 @@
         const dip = Math.sin(Math.PI * fpSwapP) * 0.08;
         vm.position.y -= dip;
         vm.rotation.x += dip * 0.9;
+      }
+      // the eye has just arrived in the head (systems/camera.js hands
+      // blend): the gun finishes coming up into the frame instead of
+      // appearing there
+      if (fpRiseT > 0) {
+        const r = fpRiseT / FP_RISE, e = r * r;
+        vm.position.y -= 0.32 * e;
+        vm.position.x += 0.06 * e;
+        vm.rotation.x += 0.28 * e;
       }
       carriedGun.visible = false;
     } else {

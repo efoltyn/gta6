@@ -919,7 +919,7 @@
       t: 0, landed: false, seed: rand() * 6.28,
     };
     if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
-    if (CBZ.fpsSetActive) CBZ.fpsSetActive(false);
+    if (CBZ.fpsApplyView) CBZ.fpsApplyView(false);   // the death cam takes the lens
     // your gun leaves your hand too, and lies where you fell (fpsmode's shared drop)
     if (CBZ.fpsDeathDrop) { try { CBZ.fpsDeathDrop(); } catch (e) {} }
     if (CBZ.shake) CBZ.shake(1.0);
@@ -941,7 +941,6 @@
     CBZ.player.hp = 100; CBZ.player.dead = false; CBZ.player.ko = 0; CBZ.player.stun = 0;
     CBZ.player._death = null;
     if (CBZ.vitals) CBZ.vitals.reset(CBZ.player);
-    koFp = null;
     if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
     CBZ.player.stamina = (CBZ.SURV && CBZ.SURV.staminaMax) || 100;
     CBZ.playerChar.group.position.copy(CBZ.player.pos);
@@ -966,7 +965,8 @@
     if (CBZ.resetWeaponInventory) CBZ.resetWeaponInventory();
     if (!r.melee && CBZ.unlockWeapon) CBZ.unlockWeapon(r.id, { select: true });
     if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
-    if (r.melee && CBZ.fpsSetActive && !CBZ.player.dead) CBZ.fpsSetActive(true);
+    // the camera follows the rung on its own: a gun is first person, the
+    // bare-fists rung third (CBZ.viewForHands)
   }
   function advancePlayer() {
     if (!gg.match || gg.match.over) return;
@@ -1189,8 +1189,8 @@
      long as vitals says, and gets up when it lets him. A death vitals hands
      out (bled out, a round to the head it decided) is a gun-game death with
      the player's credit when he did it. You, knocked out: flat on your back
-     for the count, third person, and the next bot to reach you finishes it. */
-  let koFp = null;
+     for the count — in whatever view your hands give you (armed is first
+     person, knocked down or not) — and the next bot to reach you finishes it. */
   if (CBZ.vitals) CBZ.vitals.on("gungame", {
     hold(a, secs, o) {
       if (!CBZ.body || !a || !a._ggBot) return false;
@@ -1212,13 +1212,9 @@
       if (on) {
         ph.down = Math.max(ph.down, (o && o.secs) || 3);
         P.stun = Math.max(P.stun || 0, (o && o.secs) || 3);        // no trigger, no legs
-        if (koFp == null) koFp = !!(CBZ.fps && CBZ.fps.active);
-        if (CBZ.fpsSetActive) CBZ.fpsSetActive(false);
       } else {
         if (ph.down > 0.3) ph.down = 0.3;
         if (P.stun > 0.3) P.stun = 0.3;
-        if (koFp && CBZ.fpsSetActive && !P.dead) CBZ.fpsSetActive(true);
-        koFp = null;
       }
     },
   });
@@ -1947,7 +1943,6 @@
     CBZ.player.hp = 100; CBZ.player.dead = false; CBZ.player.ko = 0; CBZ.player.stun = 0;
     CBZ.player._death = null;
     if (CBZ.vitals) CBZ.vitals.reset(CBZ.player);
-    koFp = null;
     if (CBZ.player._phys) { CBZ.player._phys.air = false; CBZ.player._phys.down = 0; CBZ.player._phys.kx = CBZ.player._phys.kz = 0; }
     CBZ.player.stamina = (CBZ.SURV && CBZ.SURV.staminaMax) || 100;
     CBZ.player.sprint = false; CBZ.player.crouch = false;

@@ -18,7 +18,7 @@
 <link rel="stylesheet" href="css/survival_hud.css?v=pace1015">
 <link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
-<link rel="stylesheet" href="css/mobile.css?v=lpanel1022">
+<link rel="stylesheet" href="css/mobile.css?v=mob1022b">
 <link rel="stylesheet" href="css/inventory.css?v=haskbd1014">
 <link rel="stylesheet" href="css/city.css?v=lpanel1022">
 <link rel="stylesheet" href="css/campaign.css?v=cinelp1022">
@@ -168,7 +168,6 @@ document.body.appendChild(b);}}catch(e){}})();
           <div class="row"><span class="keycol"><span class="tcap">Fire</span></span><span class="lab">Punch or fire</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Jump</span></span><span class="lab">Jump, vault</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Reload</span></span><span class="lab">Reload</span></div>
-          <div class="row"><span class="keycol"><span class="tcap">Eye</span></span><span class="lab">First-person</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Word pills</span></span><span class="lab">Interact, the pill names the action</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Minimap</span></span><span class="lab">Tap it for the map</span></div>
           <div class="row"><span class="keycol"><span class="tcap">Ranks</span></span><span class="lab">Yard rankings</span></div>
@@ -182,7 +181,6 @@ document.body.appendChild(b);}}catch(e){}})();
           <div class="row"><span class="keycol"><span class="kbd">F</span> / <span class="kbd">R</span></span><span class="lab">Fire, reload</span></div>
           <div class="row"><span class="keycol"><span class="kbd">M</span></span><span class="lab">Map</span></div>
           <div class="row"><span class="keycol"><span class="kbd">Tab</span></span><span class="lab">Rankings</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person</span></div>
         </div>
       </details>
     </div>
@@ -238,7 +236,6 @@ document.body.appendChild(b);}}catch(e){}})();
           <div class="row"><span class="keycol"><span class="kbd">L-Click</span></span><span class="lab">Fire, punch</span></div>
           <div class="row"><span class="keycol"><span class="kbd">R-Click</span></span><span class="lab">Aim</span></div>
           <div class="row"><span class="keycol"><span class="kbd">R</span></span><span class="lab">Reload</span></div>
-          <div class="row"><span class="keycol"><span class="kbd">V</span></span><span class="lab">First-person</span></div>
         </div>
       </details>
     </div>
@@ -895,7 +892,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=mrg10202050"></script>
+<script src="src/systems/camera.js?v=hands1022"></script>
 <script src="src/systems/physics.js?v=mrg10202050"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
@@ -1012,7 +1009,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=rpgblast1013"></script>
+<script src="src/systems/state.js?v=hands1022"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1035,7 +1032,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
 <script src="src/systems/runstats.js?v=end1"></script>
-<script src="src/systems/touch.js?v=hands1022"></script>
+<script src="src/systems/touch.js?v=tch1022b"></script>
 <script src="src/systems/touch_vehicle.js?v=deck1011"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
@@ -1046,7 +1043,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=cine1022"></script>
-<script src="src/systems/fpsmode.js?v=mrg10200039"></script>
+<script src="src/systems/fpsmode.js?v=hands1022"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
 <script src="src/systems/intimidate.js?v=jailai1020"></script>
 
@@ -1091,7 +1088,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/title_hub.js?v=spec1014"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
-<script src="src/modes/gungame.js?v=ghost1020"></script>
+<script src="src/modes/gungame.js?v=hands1022"></script>
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
@@ -1481,7 +1478,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=jailai1020"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
-<script src="src/city/mode.js?v=ghost1020"></script>
+<script src="src/city/mode.js?v=hands1022"></script>
 <script src="src/city/economy.js?v=vit3"></script>
 <script src="src/city/clothes.js?v=shoulder1014"></script>
 <script src="src/city/outfits.js?v=armourm1011"></script>
@@ -1501,7 +1498,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gangs.js?v=rounds1013m"></script>
 <script src="src/city/social.js?v=verbs2b"></script>
 <script src="src/city/realestate.js?v=tap0929"></script>
-<script src="src/city/view.js?v=cars1"></script>
+<script src="src/city/view.js?v=hands1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
 <script src="src/city/peds.js?v=ladder1022"></script>
@@ -1713,7 +1710,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
      person, reticles at infinity on red-dot glass, a real scope (magnified
      second camera in the ocular), sway + breath, the 3P cheek weld. -->
-<script src="src/systems/sights.js?v=mc9fb2f"></script>
+<script src="src/systems/sights.js?v=hands1022"></script>
 <!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
@@ -2035,7 +2032,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The hitman's world is physical (2026-09-27): paper he reads, hands that
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
-<script src="src/city/hitman_hands.js?v=tap0929"></script>
+<script src="src/city/hitman_hands.js?v=hands1022"></script>
 <script src="src/city/hitman_room.js?v=mem1014"></script>
 <script src="src/city/hitman.js?v=w09290219"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
@@ -2044,7 +2041,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
 <script src="src/city/campaign_ui.js?v=fatal1022"></script>
-<script src="src/city/campaign.js?v=cine1022"></script>
+<script src="src/city/campaign.js?v=camp1022b"></script>
 <script src="src/city/cinematics.js?v=fatal1022"></script>
 <script src="src/systems/humancontact.js?v=jailai1020"></script>
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows

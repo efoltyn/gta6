@@ -545,18 +545,10 @@
     // check neutralizes it instantly (unchanged legacy behavior).
     const cityIntro = g.mode === "city" && CBZ.cityOriginIntroActive && CBZ.cityOriginIntroActive();
     const campaignEscapeTP = g.mode === "escape" && !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
-    if (campaignEscapeTP) {
-      // The campaign keeps one camera grammar across the rooftop, prison and
-      // contracts.  Explicitly cancel fpsmode's one-shot handoff before the
-      // prison reveal; legacy escape runs retain the original armed-FPS path.
-      if (CBZ.setSimulationView) CBZ.setSimulationView(false);
-      if (CBZ.disarmFPSAfterIntro) CBZ.disarmFPSAfterIntro();
-      else if (CBZ.setFPS) CBZ.setFPS(false);
-    } else if ((g.mode === "escape" || g.mode === "gungame" || cityIntro) && CBZ.armFPSAfterIntro) {
-      // gungame spawns you armed — a shooting mode opens in first person,
-      // exactly like the escape run's armed start.
-      CBZ.armFPSAfterIntro();
-    }
+    // Where the camera lands when the reveal ends is the hands' call
+    // (systems/fpsmode.js CBZ.viewForHands): armed lands in first person,
+    // empty-handed in third, in every mode — nothing to arm here.
+    if (campaignEscapeTP && CBZ.setSimulationView) CBZ.setSimulationView(false);
     let introOpts = cityIntro && CBZ.cityOriginIntroOpts ? CBZ.cityOriginIntroOpts() : undefined;
     if (campaignEscapeTP) introOpts = Object.assign({}, introOpts || {}, { keepThirdPerson: true });
     // A normal CITY sandbox start is already placed and camera-initialized by

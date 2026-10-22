@@ -654,7 +654,6 @@
         CBZ.playerChar.group.visible = true;
       }
     }
-    if (CBZ.setFPS) CBZ.setFPS(false);
     // BIND WITH A RETRY WINDOW. The reset wrap stages this phase before the
     // crowd systems have necessarily populated the street, so a one-shot bind
     // could skip the whole motel beat on every fresh run. tickMotelMark
@@ -758,7 +757,6 @@
         CBZ.playerChar.group.visible = true;
       }
     }
-    if (CBZ.setFPS) CBZ.setFPS(false);
     setMission({
       id: "drop-point",
       title: "THE HANDOFF",
@@ -985,7 +983,6 @@
         CBZ.playerChar.group.visible = true;
       }
     }
-    if (CBZ.setFPS) CBZ.setFPS(false);
     setMission({
       id: "black-rotor",
       title: "BLACK ROTOR",
@@ -2177,7 +2174,6 @@
         }
         if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
         if (CBZ.fpsAddAmmo) CBZ.fpsAddAmmo(48, "sidearm");
-        if (CBZ.setFPS) CBZ.setFPS(false);
         R.key = "";
         activatePhase(true);
       }

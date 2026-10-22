@@ -217,7 +217,6 @@
   const SVG = {
     fire: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>',
     jump: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M6.5 8.5 12 3l5.5 5.5"/><path d="M4 21h16"/></svg>',
-    eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
     swap: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h13"/><path d="M14 6l3 3-3 3"/><path d="M20 15H7"/><path d="M10 12l-3 3 3 3"/></svg>',
     reload: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.5V9h-4.5"/></svg>',
     scope: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v6M12 16.5v6M1.5 12h6M16.5 12h6"/></svg>',
@@ -259,7 +258,6 @@
       // pseudo-element). Both are inert until a finger is actually holding it.
       btn("tfire", "tbtn tbig tfire", SVG.fire + (FIREPAD ? '<span class="tpknob" aria-hidden="true"></span>' : ""), "Fire") +
       btn("tjump", "tbtn tjump", SVG.jump, "Jump") +
-      btn("tview", "tbtn tsm", SVG.eye, "First-person view") +
       btn("tswap", "tbtn tsm", SVG.swap, "Next weapon") +
       btn("treload", "tbtn tsm", SVG.reload, "Reload") +
       btn("taim", "tbtn tsm", SVG.aim, "Aim") +
@@ -281,7 +279,6 @@
     // aims. That is the whole point — an automatic weapon is fired by holding
     // one button, so that button has to be the one that can also steer.
     holdBtn("tfire", fireHold, { drag: FIREPAD });
-    tapBtn(document.getElementById("tview"), () => { if (CBZ.toggleFPS) CBZ.toggleFPS(); });
     tapBtn(document.getElementById("tswap"), () => { if (CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); });
     tapBtn(document.getElementById("treload"), () => { if (CBZ.fpsReload) CBZ.fpsReload(); });
     // AIM (ADS) — the missing iPad right-mouse: it pulls the camera in /
@@ -824,7 +821,7 @@
     // Reload is the requested first-row landmark. When the player is unarmed
     // and that slot is absent, fall back through the neighbouring stable
     // controls instead of leaving the choices floating in the old centre band.
-    const ids = ["treload", "tswap", "tview", "tjump"];
+    const ids = ["treload", "tswap", "tjump"];
     let anchor = null;
     for (const id of ids) {
       const el = document.getElementById(id);
@@ -845,7 +842,7 @@
     // supplies the top landmark; FIRE is wider, so its left edge supplies the
     // safe horizontal boundary for lower rows.
     let flowLeft = r.left;
-    for (const id of ["treload", "tswap", "tview", "tjump", "tfire"]) {
+    for (const id of ["treload", "tswap", "tjump", "tfire"]) {
       const el = document.getElementById(id);
       if (!el || !el.getClientRects().length) continue;
       flowLeft = Math.min(flowLeft, el.getBoundingClientRect().left);
@@ -1760,7 +1757,7 @@
   if (CBZ.isTouchDevice()) enable();
 
   // controls only show while actually playing; weapon buttons only while armed
-  const SHARK_SIM_HIDE = ["tfire", "tjump", "tview"];
+  const SHARK_SIM_HIDE = ["tfire", "tjump"];
   CBZ.onAlways(98, function () {
     if (!built) return;
     const root = document.getElementById("touch");
@@ -1898,7 +1895,6 @@
   CBZ.touchVerb("scope", { ctx: "foot", key: "RMB/scope", hook: "fpsCanScope" });
   CBZ.touchVerb("reload", { ctx: "foot", key: "R", hook: "fpsReload" });
   CBZ.touchVerb("weapon-next", { ctx: "foot", key: "Q/wheel", hook: "fpsNextWeapon" });
-  CBZ.touchVerb("view-toggle", { ctx: "foot", key: "V", hook: "toggleFPS" });
   CBZ.touchVerb("interact", { ctx: "foot", key: "E", hook: null });
   // C4 — the exact "keyboard verb with no thumb" this ledger was built to
   // catch: plant AND detonate lived on [B] alone, so on an iPad the charge in
@@ -1940,7 +1936,6 @@
   CBZ.touchVerbWired("scope", "#tscope");
   CBZ.touchVerbWired("reload", "#treload");
   CBZ.touchVerbWired("weapon-next", "#tswap");
-  CBZ.touchVerbWired("view-toggle", "#tview");
   CBZ.touchVerbWired("interact", "world tap / .tpill");
   // The lift's Call (and its in-car floor buttons) is a pinned .tpill on the
   // call panel itself (city/elevators.js + systems/liftcore.js), one control
