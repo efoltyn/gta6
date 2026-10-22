@@ -2870,12 +2870,17 @@
   ];
   const INNER_R = 1.6;
   // Outer radius clears the flight fog: from altitude city/mode.js closes the
-  // world at up to 11 km of view DEPTH, which at the frame's corners is ~14 km
-  // of radius, so the rim is always inside pure fog. (It was 4500 m while the
-  // flight fog ended at 4200 m.) The rings grow geometrically, so the reach
-  // costs rings only out there: RING_REF keeps every ring inside 4.5 km
-  // exactly where it was.
-  const OUTER_R = 15000, RING_REF_R = 4500;
+  // world at up to 11 km of view DEPTH, and the fog is a DEPTH (planar), so
+  // at a frame corner ~55 degrees off the axis that depth is ~19 km of
+  // radius. 32 km keeps the rim past it at any lens the game uses, so the
+  // fog finishes the sea (onto the sky's horizon colour) before the rim or
+  // the far plane can show; nothing paints the far sea to the fog by hand.
+  // (It was 15 km behind a "horizon fuse" that forced the sea to fog colour
+  // by 6.4 km while the land fogged out at 11: the coast across the water
+  // stood in a pale band above the sea's end, a fake horizon.) The rings
+  // grow geometrically, so the reach costs rings only out there: RING_REF
+  // keeps every ring inside 4.5 km exactly where it was.
+  const OUTER_R = 32000, RING_REF_R = 4500;
 
   CBZ.waterTierParams = function (tier) {
     if (!Number.isFinite(tier)) tier = CBZ.qualityLevel != null ? CBZ.qualityLevel : 2;
@@ -3060,7 +3065,9 @@
   //               page that owns its own swell function.
   //
   // opts: { kind, name, fieldTex, fieldBounds, uniforms, vertexDecl, vertexTail,
-  //         fragDecl, fragTail, fogScale, horizonFuse, transparent }
+  //         fragDecl, fragTail, fogScale, horizonFuse (page seas only), transparent }
+  // (no horizon fuse: the sea wears the scene's one air like the land does,
+  // core/renderer.js's fog chunk, and the air itself ends on the sky colour)
   // Returns the ShaderMaterial; its live uniform block is mat.userData.waterUniforms.
   CBZ.waterSeaMaterial = function (opts) {
     opts = opts || {};
@@ -3142,10 +3149,10 @@
       // a tail's own coverage (a flood's shallow margin): 1 = the sea's alpha
       "  float outAlpha = 1.0;",
       opts.fragTail || "",
-      // HORIZON FUSE (aerial seam): converge on fogColor before the far clip so
-      // the disc's rim lands exactly on the dome's below-horizon band.
-      opts.horizonFuse === false ? "" :
-        "  #ifdef USE_FOG\n  outColor = mix(outColor, fogColor, smoothstep(3600.0, 6400.0, vSeaMisc.y));\n  #endif",
+      // (an adopted page sea, water_pages.js, still asks for the old fuse:
+      // NPC War's plates were sized against it)
+      opts.horizonFuse === true ?
+        "  #ifdef USE_FOG\n  outColor = mix(outColor, fogColor, smoothstep(3600.0, 6400.0, vSeaMisc.y));\n  #endif" : "",
       "  gl_FragColor = vec4(outColor, uSeaOpacity * cbzSeaAlpha(V, vSeaMisc.y, under, solid) * outAlpha);",
       "  #include <tonemapping_fragment>",
       "  #include <encodings_fragment>",
@@ -3804,7 +3811,7 @@
         kind: "arena", uniforms: U, name: overlay ? "CBZ Run-up Water" : (opts.name || "CBZ Disaster Water"),
         vertexDecl: vDecl, vertexTail: vTail, fragDecl: fDeclAll, fragTail: fTail,
         fragHead: overlay ? fHeadOverlay : fHead, cutGuard: "dwRun.w < 0.5", worldXZ: overlay,
-        horizonFuse: false, transparent: opts.transparent === true,
+        transparent: opts.transparent === true,
         depthWrite: opts.depthWrite == null ? (U.uSeaOpacity.value >= 0.999) : !!opts.depthWrite,
       });
     };

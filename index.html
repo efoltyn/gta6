@@ -517,7 +517,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
 <script src="src/core/prisonlazy.js?v=isleleak1022"></script>
-<script src="src/core/renderer.js?v=safeboot1014"></script>
+<script src="src/core/renderer.js?v=onesea1022"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
@@ -1207,7 +1207,7 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=looks1022b"></script>
+<script src="src/world/water_spec.js?v=onesea1022"></script>
 <!-- the tsunami kit shared by the island and the city: the run-up (the flood on the land as a shallow-water flow), the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_runup.js?v=tsudir1020"></script>
 <!-- where the water is brown: the silt the run-up scoured off the land, carried out to sea by the backwash, spread and settled (the sea shader's turbidity mask), and CBZ.waterTurbidAt, the one turbidity + current query the underwater medium and the swimmer read -->
@@ -1219,7 +1219,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/tsunami_scene.js?v=bore1020b"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
-<script src="src/city/world.js?v=lodlight1012"></script>
+<script src="src/city/world.js?v=onesea1022"></script>
 <!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
 <script src="src/city/flags.js?v=borders1022"></script>
 <script src="src/city/interior_programs.js?v=leave1014"></script>
@@ -1642,7 +1642,7 @@ document.body.appendChild(b);}}catch(e){}})();
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
 <script src="src/world/archipelago_map.js?v=isles1022"></script>
-<script src="src/world/archipelago.js?v=mislesastutte"></script>
+<script src="src/world/archipelago.js?v=onesea1022"></script>
 <script src="src/world/island_lodging.js?v=misleclstutte"></script>
 <script src="src/world/island_town.js?v=isleopen1022"></script>
 <script src="src/world/island_police.js?v=misleopstutte"></script>

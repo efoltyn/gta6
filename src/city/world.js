@@ -94,10 +94,6 @@
     //      Revert: CBZ.CONFIG.SEA_OVERHAUL = false (old plane returns). ----
     const CFGW = (CBZ.CONFIG = CBZ.CONFIG || {});
     if (CFGW.SEA_OVERHAUL == null) CFGW.SEA_OVERHAUL = true;
-    // SEA_HORIZON_FUSE — the far sea converges on the live fog colour before
-    // the flight far plane clips the disc, closing the hard sea/sky edge seen
-    // from any altitude. `?cfg_SEA_HORIZON_FUSE=0` reverts.
-    if (CFGW.SEA_HORIZON_FUSE == null) CFGW.SEA_HORIZON_FUSE = true;
     const SEA_Y = -0.48;                 // mean surface (three swells ride ±0.355)
     CBZ.SEA_Y = SEA_Y;                   // single source of truth for tooling
     // Publish the actual rendered sea footprint before cityWorldGeo runs.
@@ -1099,8 +1095,12 @@
          field. "city" mode: camera-centred disc, coast/lake/depth swell. */
       seaMat2 = CBZ.waterSeaMaterial({
         kind: "city", uniforms: U, name: "CBZ Ocean Water",
-        horizonFuse: CFGW.SEA_HORIZON_FUSE !== false,
       });
+      // THE SEA WEARS THE LAND'S AIR. From a plane the coast across the bay
+      // is blue-grey with distance (world/terrain_overhaul.js aerialHaze);
+      // the water it stands in must be the same blue-grey at the same
+      // distance, or the land reads as lifted off its own sea.
+      if (CBZ.aerialHaze) CBZ.aerialHaze(seaMat2);
       // Preserve the old material.color update contract used by the day/night
       // loop above; it aliases the actual shader uniform.
       seaMat2.color = U.uSeaColor.value;
