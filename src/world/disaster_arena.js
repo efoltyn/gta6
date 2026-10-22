@@ -6179,6 +6179,8 @@
         bridges: harbourOut.bridges,
         manholes: roadNet && roadNet.manholes ? roadNet.manholes : [],
         streetLights: roadNet && roadNet.lights ? roadNet.lights.map(function (l) { return { x: l.x, z: l.z }; }) : [],
+        // the kerb's sign posts and barricades (island_roads.js posts)
+        streetPosts: roadNet && roadNet.posts ? roadNet.posts : [],
         // every bed in a building, in the world: { x, y, z, hx, hz (to the
         // pillow), len, top (mattress), kind, b (its building), rec (the
         // propuse record while the island is in the world, isles only) }
@@ -6351,6 +6353,44 @@
      the job, so an island built in the background never hijacks the one you
      are standing on; activating an island puts its own back. */
   const OWN_GLOBALS = ["shatterGlass", "islandLiftCall", "islandLiftGo0", "islandLiftGo1", "islandLiftStop", "survRoadStats", "island"];
+  /* WHAT A STEP ADDED TO A SHARED LIST, measured even when the step also
+     took things OUT of it. A length mark alone misses that: a shop fit-out
+     clears the room's default furniture (CBZ.colliderRemoveMany compacts
+     CBZ.colliders) and then stands its counters, so the list ends no longer
+     than it began and the counters' colliders were never the island's; they
+     outlived every island that built them (tools/probes/isles-leak.mjs:
+     ~1,800 colliders a round trip). So the mark keeps the list's last few
+     items as anchors. Removal compacts in order and additions append, so
+     everything after the latest anchor still standing in the old part of the
+     list is new.
+       CBZ.listMark(arr) -> mark      CBZ.listGained(mark) -> the new items
+       CBZ.listMarks(extra[]) -> a mark for every top-level CBZ array (+ extra) */
+  const ANCHORS = 8;
+  CBZ.listMark = function (arr) {
+    const n = arr.length;
+    return { arr: arr, n: n, tail: n ? arr.slice(Math.max(0, n - ANCHORS)) : null };
+  };
+  CBZ.listMarks = function (extra) {
+    const marks = [], seen = new Set();
+    for (const k in CBZ) { const v = CBZ[k]; if (Array.isArray(v) && !seen.has(v)) { seen.add(v); marks.push(CBZ.listMark(v)); } }
+    if (extra) for (const v of extra) if (v && !seen.has(v)) { seen.add(v); marks.push(CBZ.listMark(v)); }
+    marks.seen = seen;
+    return marks;
+  };
+  CBZ.listGained = function (m) {
+    const a = m.arr, n = m.n, len = a.length;
+    if (!n) return len ? a.slice(0) : null;
+    const T = m.tail;
+    // the common case: nothing taken out, the old last item is where it was
+    if (len >= n && a[n - 1] === T[T.length - 1]) return len > n ? a.slice(n) : null;
+    const top = Math.min(len, n) - 1;
+    for (let t = T.length - 1; t >= 0; t--) {
+      const anchor = T[t];
+      for (let j = top; j >= 0; j--) if (a[j] === anchor) return j + 1 < len ? a.slice(j + 1) : null;
+    }
+    // every anchor gone (a step that emptied the list's tail): the old rule
+    return len > n ? a.slice(n) : null;
+  };
   function dropItems(arr, items) {
     if (!arr || !items || !items.length) return;
     const drop = new Set(items);
@@ -6384,11 +6424,8 @@
     // one frame's worth of slices under ONE census: nothing else runs between
     // the slices of a step, so what the lists gained is all this island's
     function run(until) {
-      const marks = [], seen = new Set();
-      if (census) {
-        for (const k in CBZ) { const v = CBZ[k]; if (Array.isArray(v) && !seen.has(v)) { seen.add(v); marks.push({ arr: v, n: v.length }); } }
-        marks.push({ arr: envWanting, n: envWanting.length }); seen.add(envWanting);
-      }
+      const marks = census ? CBZ.listMarks([envWanting]) : [];
+      const seen = census ? marks.seen : new Set();
       const g0 = {};
       for (const k of OWN_GLOBALS) g0[k] = CBZ[k];
       const DA = CBZ.debrisAuditSources, da0 = DA ? DA.island : undefined;
@@ -6402,10 +6439,11 @@
         job.ms += performance.now() - t0;
         if (O) for (const k in O) CBZ[k] = world[k];
         for (const m of marks) {
-          if (m.arr.length <= m.n) continue;
+          const got = CBZ.listGained(m);
+          if (!got) continue;
           let L = job.buses.get(m.arr);
           if (!L) job.buses.set(m.arr, (L = []));
-          for (let i = m.n; i < m.arr.length; i++) L.push(m.arr[i]);
+          for (let i = 0; i < got.length; i++) L.push(got[i]);
         }
         // a list the build CREATED (CBZ.camColliders on a fresh page): all of it is the island's
         if (census) for (const k in CBZ) {
@@ -6512,6 +6550,11 @@
     const A = job.arena;
     if (A && A === home) return false;       // the disaster island stays for the session
     job.disposed = true;
+    // everything it stood, listed now (the fit-outs below detach their own
+    // meshes; their GPU buffers still go back with the island's)
+    const root0 = (A && A.root) || job.root;
+    const held = [];
+    if (root0) root0.traverse(function (o) { if (o.geometry || o.material) held.push(o); });
     // its venues' fit-outs first (their own disposers; what they pushed onto
     // the shared lists rides job.buses with the rest)
     if (CBZ.islandVenue && CBZ.islandVenue.drop) { try { CBZ.islandVenue.drop(job); } catch (e) { console.error("[island venue drop]", e); } }
@@ -6549,10 +6592,30 @@
       });
       if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
     });
-    if (!root) return true;
+    if (!held.length) return true;
     yield 0;
+    yield* CBZ.freeObjectsSteps(held);
+    return true;
+  };
+  /* THE GPU SIDE OF A TEARDOWN. Every geometry and texture of these objects
+     goes back (InstancedMesh buffers too), except what is marked _shared and
+     what still stands in the scene (a gun the player carried off an island's
+     shelf is in his hand, not in the island). The venue disposers detach
+     their own meshes before the island's root is walked, so the island's
+     objects are listed BEFORE anything runs (islandDisposeSteps): the safes,
+     the vault doors and the counters a fit-out stood were otherwise never
+     released (tools/probes/isles-leak.mjs: ~300 geometries a round trip).
+       CBZ.freeObjectsSteps(objs) (a generator, a few hundred a step)
+       CBZ.freeTree(root)         the same for a detached subtree, at once */
+  function inScene(o) {
+    const S = CBZ.scene;
+    for (let p = o; p; p = p.parent) if (p === S) return true;
+    return false;
+  }
+  CBZ.freeObjectsSteps = function* (objs) {
     const geos = new Set(), texs = new Set();
-    root.traverse(function (o) {
+    for (const o of objs) {
+      if (!o || inScene(o)) continue;
       if (o.isInstancedMesh && o.dispose) { try { o.dispose(); } catch (e) {} }
       const g = o.geometry;
       if (g && g.dispose && !g._shared && !(g.userData && g.userData._shared)) geos.add(g);
@@ -6561,7 +6624,7 @@
         if (!m) continue;
         for (const k in m) { const t = m[k]; if (t && t.isTexture && !t._shared && !t._cbzFreed) texs.add(t); }
       }
-    });
+    }
     let n = 0;
     for (const g of geos) { try { g.dispose(); } catch (e) {} if (++n % 250 === 0) yield 0; }
     for (const t of texs) {
@@ -6572,7 +6635,13 @@
         t.dispose();
       } catch (e) {}
     }
-    return true;
+  };
+  CBZ.freeTree = function (root) {
+    if (!root) return;
+    const objs = [];
+    root.traverse(function (o) { objs.push(o); });
+    const it = CBZ.freeObjectsSteps(objs);
+    for (let r = it.next(); !r.done; r = it.next()) {}
   };
 
   // THE DISASTER ISLAND: the package at its defaults, built once, in one go

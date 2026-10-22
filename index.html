@@ -516,7 +516,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
-<script src="src/core/prisonlazy.js?v=ghost1020"></script>
+<script src="src/core/prisonlazy.js?v=isleleak1022"></script>
 <script src="src/core/renderer.js?v=safeboot1014"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
@@ -553,7 +553,7 @@ document.body.appendChild(b);}}catch(e){}})();
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
 <script src="src/world/ladderkit.js?v=lad1"></script>
-<script src="src/world/corridorkit.js?v=jdeb1001"></script>
+<script src="src/world/corridorkit.js?v=isleleak1022"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -625,7 +625,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <!-- sunglasses FITTED to the head they are worn on (every pair: bling, the detail kit, the portrait, warlord); after character.js + jewelry_kit.js (its street environment) -->
   <script src="src/entities/eyewear.js?v=armourm1011"></script>
   <!-- the wristwatch: every body's left wrist (by role) + the FP arm's; after character.js + fphands.js -->
-  <script src="src/entities/watch.js?v=sl0930a"></script>
+  <script src="src/entities/watch.js?v=isleleak1022"></script>
   <!-- WHAT A BODY WEIGHS, and therefore what a punch to it is worth. Every
        melee site in the game handed the ATTACKER's own number straight to the
        target, so a fist did the same to a 190 kg silverback as to a 62 kg
@@ -1085,14 +1085,14 @@ document.body.appendChild(b);}}catch(e){}})();
      world/island_building.js is each building's stairs, landings, slabs and
      roof as data (node-checkable by tools/island-stairs-check.mjs); the
      builder lays exactly what it says, so it loads first. -->
-<script src="src/world/island_roads.js?v=lampglow1022"></script>
+<script src="src/world/island_roads.js?v=isleleak1022"></script>
 <script src="src/world/island_plan.js?v=civic1022"></script>
 <script src="src/world/island_building.js?v=mrg10200048"></script>
 <script src="src/world/instance_proxy.js?v=mrg10200048"></script>
-<script src="src/world/disaster_arena.js?v=fitout1022"></script>
+<script src="src/world/disaster_arena.js?v=isleleak1022"></script>
 <script src="src/world/island_dressing.js?v=lampglow1022"></script>
 <!-- what each island building is for, made real: the venue seam (lot.use -> fit-outs) -->
-<script src="src/world/island_venue.js?v=fitout1022"></script>
+<script src="src/world/island_venue.js?v=isleleak1022"></script>
 <script src="src/world/island_night.js?v=lampglow1022"></script>
 <script src="src/systems/grapple.js?v=bodymove1022"></script>
 <script src="src/entities/survivorbot.js?v=people1022"></script>
@@ -1532,7 +1532,7 @@ document.body.appendChild(b);}}catch(e){}})();
      demand ladder: a mugger, a doorman, a corner crew, a guard asking first).
      peds.js think() yields to it; nothing runs at parse. -->
 <script src="src/city/ladder.js?v=people1022"></script>
-<script src="src/entities/pedinstance.js?v=peak1014c"></script>
+<script src="src/entities/pedinstance.js?v=isleleak1022"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1558,7 +1558,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the crowd store (entities/crowdstore.js) drawn by crowdgpu; the nearest
      few promoted to real peds. Replaced city/crowd.js (48 lone rigs). After
      peds.js (cityPanic / clearCityPeds / cityMakePed it wraps and uses). -->
-<script src="src/city/streetlife.js?v=isledaylife1022"></script>
+<script src="src/city/streetlife.js?v=isleleak1022"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
      no dynamic lights); pushes the shared lamp emissives up after dark.
@@ -1635,14 +1635,14 @@ document.body.appendChild(b);}}catch(e){}})();
      cars (vehicles.js), a rooftop helipad with a flyable helicopter
      (playeraircraft.js CBZ.airParkFlyable), the island's weather fed into both.
      After vehicles.js, playeraircraft.js, bailout.js and aircraft_doors.js. -->
-<script src="src/world/island_vehicles.js?v=civic1022"></script>
+<script src="src/world/island_vehicles.js?v=isleleak1022"></script>
 <!-- THE ARCHIPELAGO (mode "archipelago"): the disaster island's package built
      many times over on one sea, kilometres apart, streamed in as you near
      each one and dropped behind you. archipelago_map.js is the map as data;
      archipelago.js the sea, the far forms, the streamer and the mode. After
      disaster_arena.js, survivorbot.js, modes/survival.js and island_vehicles.js. -->
 <script src="src/world/archipelago_map.js?v=isles1022"></script>
-<script src="src/world/archipelago.js?v=isledaylife1022"></script>
+<script src="src/world/archipelago.js?v=isleleak1022"></script>
 <script src="src/world/island_lodging.js?v=fitout1022"></script>
 <script src="src/world/island_town.js?v=isledaylife1022"></script>
 <script src="src/world/island_police.js?v=isledaylife1022"></script>

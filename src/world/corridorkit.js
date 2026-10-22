@@ -713,6 +713,9 @@
       resetHooked = true;
       CBZ.jailBoost.onStateExit(resetDoors, ["title", "won", "lost"]);
     }
+    // the prison's doors work while the prison is the world (escape, a gun
+    // game on the jail map): on the islands or in the city nobody is there
+    if (!doors.length || !CBZ.prisonRoot || !CBZ.prisonRoot.visible) return;
     const P = CBZ.player && CBZ.player.pos;
     for (let i = 0; i < doors.length; i++) {
       const d = doors[i];

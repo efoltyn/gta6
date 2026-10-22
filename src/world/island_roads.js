@@ -1451,7 +1451,10 @@
       verts: { road: roadA.count(), junc: juncA.count(), walk: walkA.count(), paint: decA.count(), furniture: furA.count(), pools: poolA.count() },
       draws: Object.keys(meshes).length,
     };
-    return { surfaceHeightAt: surfaceHeightAt, walkAt: Z.walkAt, meshes: meshes, stats: stats, night: night, manholes: manholes, lights: lights };
+    // (the posts the kerb stands: stop / yield / speed signs and the dead-end
+    // barricades, for whoever walks the footway round them: city/streetlife.js)
+    const posts = furn.map(function (f) { return { kind: f.kind, x: f.x, z: f.z }; });
+    return { surfaceHeightAt: surfaceHeightAt, walkAt: Z.walkAt, meshes: meshes, stats: stats, night: night, manholes: manholes, lights: lights, posts: posts };
   }
 
   CBZ.islandRoadKit = {

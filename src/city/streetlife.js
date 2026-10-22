@@ -386,7 +386,7 @@
     for (let e = 0; e < site.nE; e++) per.push(null);
     for (const p of props) {
       if (!p || !isFinite(p.x) || !isFinite(p.z)) continue;
-      const r = PROP_R[p.type]; if (r == null) continue;
+      const r = p.r > 0 ? p.r : PROP_R[p.type]; if (r == null) continue;
       const q = nearestSide(site, p.x, p.z, 3);
       if (!q) continue;
       if (Math.abs(q.v) > site.ehw[q.e] + r) continue;
@@ -575,11 +575,34 @@
     }
     return out;
   }
+  /* WHAT STANDS ON AN ISLAND'S FOOTWAY, in the city's prop shape ({x, z,
+     type}): the street lights and the kerb's sign posts (world/island_roads.js),
+     every tree (binObstacles keeps only those on a pavement), and the town's
+     dressing (world/island_dressing.js): its benches, bins, hydrants and
+     mailboxes, and everything else it gave a collider (the square's lanterns,
+     planters, bollards, sign posts, utility poles). */
+  const ISLE_TAG = { bench: "bench", bin: "bin", bollard: "meter", lamp: "lamp", planter: "planter", pole: "lamp", signpost: "sign" };
+  function isleProps(A) {
+    const out = [], I = A.island || {}, D = A.dressing || {};
+    for (const l of I.streetLights || []) out.push({ x: l.x, z: l.z, type: "lamp" });
+    for (const p of I.streetPosts || []) out.push({ x: p.x, z: p.z, type: p.kind === "barricade" ? "bikerack" : "sign" });
+    for (const t of A.flammable || []) if (t && !t.collider) out.push({ x: t.x, z: t.z, type: "tree" });
+    for (const h of D.hydrants || []) out.push({ x: h.x, z: h.z, type: "hydrant" });
+    for (const m of D.mailboxes || []) out.push({ x: m.x, z: m.z, type: "mailbox" });
+    for (const c of D.colliders || []) {
+      const ty = c && ISLE_TAG[c.dressing];
+      if (!ty) continue;
+      const x = (c.minX + c.maxX) / 2, z = (c.minZ + c.maxZ) / 2;
+      if (ty === "planter") { out.push({ x: x, z: z, type: "planter", r: Math.max(c.maxX - c.minX, c.maxZ - c.minZ) / 2 }); continue; }
+      out.push({ x: x, z: z, type: ty });
+    }
+    return out;
+  }
   function siteForIsle(A) {
     const rings = isleRings(A);
     if (!rings.length) return null;
     const s = buildSite("isle", A, rings, null);
-    binObstacles(s, []);
+    binObstacles(s, isleProps(A));
     // the doors: every island building on a ring's pavement
     const PA = CBZ.islandPeople && CBZ.islandPeople.arenaOf ? CBZ.islandPeople.arenaOf(A) : null;
     for (const l of (PA && PA.all) || []) {
@@ -2282,7 +2305,7 @@
   }
   CBZ.streetLife = {
     reset: reset, audit: audit, inspect: inspect, budget: function () { return Object.assign({ device: DEVICE }, BUD); },
-    sites: function () { return SITES.filter(Boolean).map(function (s) { return { key: s.key, rings: s.rings.length, edges: s.nE, crossings: s.crossings, spots: s.spots.length }; }); },
+    sites: function () { return SITES.filter(Boolean).map(function (s) { return { key: s.key, rings: s.rings.length, edges: s.nE, crossings: s.crossings, spots: s.spots.length, obstacles: s.obsU ? s.obsU.length : 0 }; }); },
     // a scare on the street (a gunshot, a scene): the pavement runs, not the rallies
     retire: retire,
     panic: function (x, z, r, secs) { const G = GS; if (!G || G.gone) return 0; return ST.panic(x, z, r || 30, { only: G, secs: secs || 8 }); },

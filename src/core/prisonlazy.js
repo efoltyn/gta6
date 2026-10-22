@@ -128,7 +128,14 @@
      part right here, at its parse point, exactly as before laziness existed:
      the replay below is only ever used by a city-first page, which pays for
      the prison when an arrest (or the menu) first takes it there. */
-  const EAGER = !(CBZ.game && CBZ.game.mode === "city") || /[?&]prison=eager\b/.test(location.search);
+  /* ..AND UNLESS IT STARTS ON THE ISLES. An Isles page built the whole jail
+     at its parse point and held it, hidden, for the session: 92 inmates, 39
+     guards and the compound's meshes, colliders and frame work, in a world
+     30 km away that nobody on the islands can reach except through an
+     arrest, which switches to the jail and builds it then (state.js setMode
+     -> ensurePrison), exactly as a city-first page always has. */
+  const LAZY_START = { city: 1, archipelago: 1 };
+  const EAGER = !(CBZ.game && LAZY_START[CBZ.game.mode]) || /[?&]prison=eager\b/.test(location.search);
   CBZ.prisonLazy = !EAGER;
   CBZ.definePrison = function (name, fn) {
     if (EAGER) {

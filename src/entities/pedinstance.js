@@ -931,6 +931,7 @@
     const p = {
       key: key, geo: geo, mat: mat, paged: !!ps, page: ps ? ps.page : null, uv: null, uDirty: false,
       box: !!L && !o.geometry._cbzUnit, unit: !!(L && o.geometry._cbzUnit),
+      ownGeo: !L && geo !== o.geometry,      // a wrapper of this look's own (killPool frees it)
       cast: !!o.castShadow, recv: !!o.receiveShadow, order: o.renderOrder | 0,
       mesh: null, cap: 0, next: 0, free: [],
       recs: [], mDirty: false, cDirty: false, live: 0, idleAt: -1,
@@ -1387,6 +1388,14 @@
   function killPool(p) {
     if (p.mesh) { if (poolRoot) poolRoot.remove(p.mesh); p.mesh.dispose(); p.mesh = null; }
     if (p.mat) { p.mat.dispose(); p.mat = null; }   // the pool's own clone (makePool); maps are not ours
+    /* ..and the pool's own geometry wrapper (tintGeo's white-tinted twin or a
+       paged pool's pagedGeo): marked _shared so no rig sweep disposes it, so
+       nothing ever did, and every idle pool left one on the GPU for good
+       (tools/probes/isles-leak.mjs: ~30 a round trip between two islands).
+       The box pools share ONE wrapper of the unit cube, and a look that was
+       tintable already draws its own geometry: those stay. A later pool of
+       the same look re-uploads its wrapper. */
+    if (p.ownGeo && p.geo && p.geo.dispose) { try { p.geo.dispose(); } catch (e) {} }
   }
   function teardown() {
     rigs.forEach(emptyRig);

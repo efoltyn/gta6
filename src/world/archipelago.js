@@ -477,11 +477,33 @@
     ST.lifeArena = { root: ST.root, center: { x: A.center.x, z: A.center.z }, radius: A.radius, archipelago: true };
     try { CBZ.cityWildlifeStock(ST.lifeArena); } catch (e) { console.error("[archipelago sea life]", e); }
   }
+  /* OUT OF SIGHT is out of the view, not only far away: the water round the
+     island you are standing on is all within 1.2 km of you, so a school
+     could never be moved anywhere you might see and the far test alone left
+     every one of them behind, swimming round an island that was gone (the
+     leak check: 22 animals on a dropped Port Royal). Behind the camera, or
+     past 1.2 km, or under 6 m of sea 300 m off, nobody sees it arrive. */
+  const _fr = new THREE.Frustum(), _pm = new THREE.Matrix4(), _sp = new THREE.Sphere();
+  function unseenFn() {
+    const cam = CBZ.camera;
+    if (!cam) return function () { return true; };
+    cam.updateMatrixWorld();
+    _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse.copy(cam.matrixWorld).invert());
+    _fr.setFromProjectionMatrix(_pm);
+    const cx = cam.position.x, cz = cam.position.z;
+    return function (x, z) {
+      const d = Math.hypot(cx - x, cz - z);
+      if (d > 1200) return true;
+      if (d < 60) return false;
+      _sp.center.set(x, A_SEA_Y(), z); _sp.radius = 12;
+      return !_fr.intersectsSphere(_sp) || d > 300;
+    };
+  }
+  function A_SEA_Y() { return ST.active && ST.active.arena && Number.isFinite(ST.active.arena.oceanY) ? ST.active.arena.oceanY - 6 : -6; }
   function* migrateLife(A) {
     const L = CBZ.cityWildlife, WF = CBZ.waterField;
     if (!L || !L.length || !WF || !WF.randomWaterPoint) return;
-    const cam = CBZ.camera;
-    const far = function (x, z) { return !cam || Math.hypot(cam.position.x - x, cam.position.z - z) > 1200; };
+    let far = unseenFn();
     const seen = new Set();
     let rs = 0x5eed;
     const rnd = function () { rs = (Math.imul(rs, 1103515245) + 12345) & 0x7fffffff; return rs / 0x7fffffff; };
@@ -495,10 +517,15 @@
       // a school round the new island already, or one somebody can see, stays
       if (Math.hypot(a.pos.x - A.center.x, a.pos.z - A.center.z) < A.radius + 1800) continue;
       if (!members.every(function (m) { return far(m.pos.x, m.pos.z); })) continue;
+      // (the new island's water may still be baking: try again next step,
+      // a few times, rather than leave the school behind)
       let to = null;
-      for (let t = 0; t < 6 && !to; t++) {
-        const q = WF.randomWaterPoint(rnd, { cx: A.center.x, cz: A.center.z, r0: A.radius + 60, r1: A.radius + 1400, clearance: 12 });
-        if (q && far(q.x, q.z)) to = q;
+      for (let tries = 0; tries < 8 && !to; tries++) {
+        for (let t = 0; t < 8 && !to; t++) {
+          const q = WF.randomWaterPoint(rnd, { cx: A.center.x, cz: A.center.z, r0: A.radius + 60, r1: A.radius + 1400, clearance: 12 });
+          if (q && Math.hypot(q.x - A.center.x, q.z - A.center.z) < A.radius + 1800 && far(q.x, q.z)) to = q;
+        }
+        if (!to) { yield 0; far = unseenFn(); }
       }
       if (!to) continue;
       const dx = to.x - a.pos.x, dz = to.z - a.pos.z;

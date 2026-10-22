@@ -271,17 +271,26 @@
      One fit-out at a time under a census of the shared CBZ lists (the same
      measure disaster_arena.js's islandBuild takes of a build slice): what a
      fit-out appended is the island's, and its dispose takes it back. */
-  function census() {
-    const marks = [], seen = new Set();
-    for (const k in CBZ) { const v = CBZ[k]; if (Array.isArray(v) && !seen.has(v)) { seen.add(v); marks.push({ arr: v, n: v.length }); } }
-    return marks;
-  }
+  // (CBZ.listMarks / listGained, world/disaster_arena.js: a fit-out that
+  // clears a room's furniture out of CBZ.colliders before it stands its own
+  // is still measured right)
+  function census() { return CBZ.listMarks(); }
   function settle(job, marks) {
     for (const m of marks) {
-      if (m.arr.length <= m.n) continue;
+      const got = CBZ.listGained(m);
+      if (!got) continue;
       let L = job.buses.get(m.arr);
       if (!L) job.buses.set(m.arr, (L = []));
-      for (let i = m.n; i < m.arr.length; i++) L.push(m.arr[i]);
+      for (let i = 0; i < got.length; i++) L.push(got[i]);
+    }
+    // a list the fit-out CREATED is all the island's
+    for (const k in CBZ) {
+      const v = CBZ[k];
+      if (!Array.isArray(v) || marks.seen.has(v) || !v.length) continue;
+      marks.seen.add(v);
+      let L = job.buses.get(v);
+      if (!L) job.buses.set(v, (L = []));
+      for (let i = 0; i < v.length; i++) L.push(v[i]);
     }
   }
   function runOne(job, b, fn) {

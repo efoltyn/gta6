@@ -66,6 +66,14 @@ export const WORLDS = {
     engine: "!!window.__battle", enter: "0", noFreeze: true,   // the battle runs on rAF: drive it with __battle.speed()
     ready: "!!(window.__battle && __battle.audit().started)",
   },
+  /* THE ISLES (mode "archipelago", src/world/archipelago.js): islands far
+     apart on one sea, the spawn island built whole at boot. `isles=<id>`
+     in the query picks the spawn island. */
+  isles: {
+    page: "index.html", seed: 1, query: "mode=archipelago",
+    enter: "(function(){ if (CBZ.game.state==='playing') return; var m=document.querySelector('[data-mode=\"archipelago\"]'); if (m && !m.classList.contains('active')) m.click(); var b=document.getElementById('playBtn'); if (b) b.click(); })()",
+    ready: "CBZ.game.state==='playing' && CBZ.game.mode==='archipelago' && !!(CBZ.archipelago && CBZ.archipelago.state().built && CBZ.archipelago.state().active)",
+  },
   /* NPC War on the cheapest venue (the empty kill box, no packs): what the
      shot service (tools/shot/) keeps warm for the animal and battle agents.
      Frozen through the page's own seam (__battle.freeze), stepped with
@@ -91,6 +99,7 @@ export const WORLDS = {
 };
 WORLDS.disaster = WORLDS.survival;
 WORLDS.prison = WORLDS.escape;
+WORLDS.archipelago = WORLDS.isles;
 
 export function worldKey(name, seed, query) {
   const W = WORLDS[name];

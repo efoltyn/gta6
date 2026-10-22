@@ -525,7 +525,9 @@
       k.box(acc, [0, 0, zb], EX, EY, EZ, bl * 0.9, 0.0005 * s, bt * 0.7);
       k.box(SL.strap, [-0.013 * s, 0, zb + 0.0002 * s], EX, EY, EZ, 0.0022 * s, W * 0.47, 0.0012 * s);   // keeper
     }
-    return (_strapGeo[key] = finish(k));
+    const sg = finish(k);
+    sg._strapKey = key;
+    return (_strapGeo[key] = sg);
   }
 
   /* ------------------------------------------------------------ near detail */
@@ -649,13 +651,29 @@
     return (_styleMats[key] = out);
   }
 
+  /* A STRAP IS FITTED TO ONE FOREARM (its key carries the wrist's section to
+     0.1 mm), so the cache above holds one per body that ever wore a watch
+     near the camera. Counted by the instances wearing it: the last one taken
+     off gives it back (tools/probes/isles-leak.mjs found them piling up on
+     the GPU as the street crowd turned over). */
+  const _strapUse = Object.create(null);
+  function strapTake(g) { const k = g && g._strapKey; if (k) _strapUse[k] = (_strapUse[k] | 0) + 1; return g; }
+  function strapGive(inst) {
+    const strap = inst && inst.children && inst.children[0];
+    const g = strap && strap.geometry, k = g && g._strapKey;
+    if (!k || !_strapUse[k]) return;
+    if (--_strapUse[k] > 0) return;
+    delete _strapUse[k];
+    if (_strapGeo[k] === g) delete _strapGeo[k];
+    try { g.dispose(); } catch (e) {}
+  }
   /* ------------------------------------------------------------ an instance */
   function buildInstance(style, fit, fp) {
     const S = STYLES[style], Mt = styleMats(style, fp);
     const g = new THREE.Group();
     g.name = "wristwatch";
     g.userData.wristwatch = style;
-    const strap = new THREE.Mesh(strapGeometry(style, fit), Mt.arr);
+    const strap = new THREE.Mesh(strapTake(strapGeometry(style, fit)), Mt.arr);
     const head = new THREE.Mesh(headGeometry(style), Mt.arr);
     head.position.set(0, 0, fit.b + CLEAR * fit.s);
     head.scale.setScalar(fit.s);
@@ -1038,6 +1056,7 @@
     if (r.inst) {
       if (r.inst.userData.ww.near) setNear(r.inst, false);
       if (r.inst.parent) r.inst.parent.remove(r.inst);
+      strapGive(r.inst);
       r.inst = null;
     }
     mounted.delete(r);
@@ -1194,7 +1213,7 @@
     const fitR = makeFit(a, b, 0.7, kk);          // the head at the hand's scale
     const key = style + "|" + fitR.key;
     if (!st.inst || st.key !== key) {
-      if (st.inst) { if (st.inst.userData.ww.near) setNear(st.inst, false); arm.remove(st.inst); }
+      if (st.inst) { if (st.inst.userData.ww.near) setNear(st.inst, false); arm.remove(st.inst); strapGive(st.inst); }
       const fore = P.fore;
       const inst = buildInstance(style, fitR, !!(fore.material && fore.material.transparent));
       inst.renderOrder = fore.renderOrder || 0;

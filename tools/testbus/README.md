@@ -24,7 +24,7 @@ node tools/testbus/status.mjs <id>                      # instant: QUEUED / RUNN
 - `--probe FILE [args]` runs against a booted world (repeatable; put args in the
   quotes: `--probe "tools/probes/president.mjs --quick"`).
 - `--check tools/x.mjs [args]` is a plain node check run in the merged tree (repeatable).
-- `--world city|president|escape|survival|battle` is the default world for probes
+- `--world city|president|escape|survival|battle|isles` is the default world for probes
   that don't name one in their `meta`.
 - `--seed N`, `--query "cfg_FLAG=1"`, `--branch B`, `--commit SHA`.
 - `--now` asks for a batch at once (skips the batching window).

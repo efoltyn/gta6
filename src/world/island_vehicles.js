@@ -896,6 +896,9 @@
     S.pad = null;
     if (!pad) return;
     if (pad.root && pad.root.parent) pad.root.parent.remove(pad.root);
+    // its deck, girders and lights leave the GPU too (the island it stood on
+    // is walked for its buffers later, and the pad is no longer under it)
+    if (pad.root && CBZ.freeTree) { try { CBZ.freeTree(pad.root); } catch (e) {} }
     if (CBZ.platformRemoveMany) CBZ.platformRemoveMany(pad.plats); else for (const p of pad.plats) { const i = CBZ.platforms.indexOf(p); if (i >= 0) CBZ.platforms.splice(i, 1); }
     if (CBZ.colliderRemoveMany) CBZ.colliderRemoveMany(pad.cols); else for (const c of pad.cols) { const i = CBZ.colliders.indexOf(c); if (i >= 0) CBZ.colliders.splice(i, 1); }
     if (CBZ.stairs && CBZ.stairs.removeOwner) CBZ.stairs.removeOwner(pad.owner);
