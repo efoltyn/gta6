@@ -225,6 +225,38 @@
       const beat = b0 * b0 * (3 - 2 * b0);              // eased, no kink at the bottom of the beat
       crowdArms(ch, dt, -0.15, ch.armOutZ || 0.08, -2.25 - beat * 0.6, -0.12, -0.35, -1.1 + beat * 0.9);
     },
+    // THE BULLHORN (a protest's leaders, city/mob.js): the right fist round
+    // the handle at the mouth, the horn out in front of the face; the free
+    // arm punches the beat of the chant. The prop (president_public.js
+    // giveBullhorn: origin = the grip, +z = the horn's mouth) rides the fist.
+    pubBullhorn(ch, dt) {
+      ch._pubT = (ch._pubT || 0) + dt;
+      const m = M(ch);
+      const b0 = Math.max(0, Math.sin(ch._pubT * 5 + (ch._pubPh || 0)));
+      const beat = b0 * b0 * (3 - 2 * b0);
+      const la = ch.parts && ch.parts.la, J = ch.low || {};
+      if (la) { la.rotation.x = damp(la.rotation.x, -1.55 - beat * 0.75, 12, dt); la.rotation.z = damp(la.rotation.z, 0.14, 12, dt); la.rotation.y = damp(la.rotation.y, 0, 12, dt); }
+      elbow(J.la, -1.0 + beat * 0.8, dt, 12);
+      if (!m || !ch.body) { const ra = ch.parts && ch.parts.ra; if (ra) { ra.rotation.x = damp(ra.rotation.x, -1.5, 12, dt); ra.rotation.z = damp(ra.rotation.z, -0.35, 12, dt); } elbow(J.ra, -2.0, dt, 12); return; }
+      gripPole(ch, "r", sideOf(ch, "r") * 0.05, m.sh + 0.24, 0.30, 14, dt);
+      const pr = ch._pubProp;
+      if (pr && pr.parent && gripAt(ch, "r", _ikW)) {
+        pr.parent.updateWorldMatrix(true, false);
+        pr.position.copy(pr.parent.worldToLocal(_ikW));
+        ch.body.getWorldQuaternion(_plA); pr.parent.getWorldQuaternion(_plB);
+        pr.quaternion.copy(_plB.invert().multiply(_plA));
+      }
+    },
+    // FILMING: a phone held up in front of the face, screen to the eyes,
+    // the other arm easy (a fight in the street, a crowd's ring round it)
+    film(ch, dt) {
+      const m = M(ch), J = ch.low || {};
+      const la = ch.parts && ch.parts.la;
+      if (la) { la.rotation.x = damp(la.rotation.x, -0.1, 10, dt); la.rotation.z = damp(la.rotation.z, 0.08, 10, dt); }
+      elbow(J.la, -0.3, dt, 10);
+      if (!m || !ch.body) { const ra = ch.parts && ch.parts.ra; if (ra) { ra.rotation.x = damp(ra.rotation.x, -1.45, 12, dt); ra.rotation.z = damp(ra.rotation.z, -0.2, 12, dt); } elbow(J.ra, -1.1, dt, 12); return; }
+      gripPole(ch, "r", sideOf(ch, "r") * 0.08, m.sh + 0.16, 0.44, 12, dt);
+    },
     // ---- THE STREET'S ARMS (city/streetlife.js). People on a pavement talk
     // with their hands, hold a phone to the ear, smoke outside the office.
     // Rows here for the same reason as the crowd's: crowdgpu.js BAKES them, so
@@ -275,6 +307,9 @@
   POSES.dealer = POSES.deal;
 
   CBZ.charPoses = POSES;
+  // where a rig's fist grip is, world (crowdgpu.js measures a held prop's
+  // place from the bake rig with it, so the instanced copy holds it there)
+  CBZ.charGripAt = function (ch, arm, out) { return gripAt(ch, arm, out) ? out : null; };
 
   // THE ONE ENTRY POINT both peds.js and packages.js use to set a rig's held
   // pose. Translates the verb vocabulary onto the rig flags animChar reads:

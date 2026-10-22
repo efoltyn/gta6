@@ -74,7 +74,7 @@
                one damage path, and the dead and hurt are the store's to lie
                there and crawl away. This file keeps only what a crowd
                member does in a mob (role, action, formation slot).
-     BUDGET    agents: desktop 12000, tablet 4500, phone 1800. Rigs: 72/48/20
+     BUDGET    agents: desktop 16000, tablet 6500, phone 2400. Rigs: 72/48/20
                civilians plus 14/10/6 officers (THE FRONT LINE IS REAL below). The step is banded by distance
                (every step inside 60 m, every 2nd to 120 m, every 4th to
                200 m, every 8th past it) and a body standing at its slot
@@ -85,8 +85,22 @@
                player keeps moving (the march still reaches the Capitol) but
                skips the contact solve.
 
+   THE CROWD LIVES (2026-10-22, owner: "they behave very stupidly"): in a
+   standing knot each person has a place of their own, friends who came with
+   them (a clique the shared brain reads), a temper and a few traits; they
+   shuffle, a few drift between groups, people at the fringe come and go
+   (out of sight), a few leaders on bullhorns face the crowd and call the
+   chant, and the chant is ONE rhythm. They react: a car's lane clears
+   (crowdstore carPass -> S.dodgeT; a slow car nosing in gets its hood
+   banged); a gun out scatters whoever sees it; gunfire anywhere near is a
+   stampede (the brave get low first); hit one and his friends and the
+   hot-headed fight you through the city brain while the rest ring it,
+   filming and shouting; panic spreads by sight (neighbours bolting).
+   Props are drawn only on a body the GPU drew, in the clip that holds them.
+
    PUBLIC: CBZ.mob = { form(spec), march(id, route), line(id, spec), gas(x,z,r),
-     react(kind, id?), chant(id, text), disperse(id, flee), panic(x, z),
+     react(kind, id?), chant(id, text), disperse(id, flee, from?), panic(x, z),
+     alarm(x, z, r) (r >= 40 = gunfire/blast: a stampede), shots(x, z),
      openFire(id, secs) (the line shoots into the crowd),
      stage(id), get(id), list(), near(x,z,r), budget(), audit() }
      + _step(dt) (tests). Bus: CBZ.presidency.emit("mob", {id, phase, size,
@@ -106,10 +120,13 @@
   // cops = full-rig officers on a line, per = promotions per rig tick (5 Hz),
   // near = the plain ring round the player. Everyone else is the instanced
   // copy of the same person (crowdgpu).
+  // (owner 2026-10-22: "it could be a much, much, much bigger crowd": a held
+  // knot past 30 m sleeps on the slowest band and is drawn as impostors, so
+  // the head count is mostly typed-array rows the step barely touches)
   const BUDGETS = {
-    desktop: { agents: 12000, rigs: 72, cops: 14, draw: 320, near: 32, per: 8 },
-    tablet: { agents: 4500, rigs: 48, cops: 10, draw: 240, near: 28, per: 6 },
-    phone: { agents: 1800, rigs: 20, cops: 6, draw: 180, near: 22, per: 3 },
+    desktop: { agents: 16000, rigs: 72, cops: 14, draw: 340, near: 32, per: 8 },
+    tablet: { agents: 6500, rigs: 48, cops: 10, draw: 260, near: 28, per: 6 },
+    phone: { agents: 2400, rigs: 20, cops: 6, draw: 190, near: 22, per: 3 },
   };
   const BUD = Object.assign({}, BUDGETS[DEVICE] || BUDGETS.desktop);
   if (CFG.MOB_AGENTS > 0) BUD.agents = CFG.MOB_AGENTS | 0;
@@ -154,6 +171,25 @@
     if (walled(m)) return CBZ.perimeter.clampOut(x, z, _KO);
     _KO.x = x; _KO.z = z; _KO.moved = false; return _KO;
   }
+  // a spot inside a building, a wall or a parked thing tall enough to matter
+  // (a crowd stands in the street, never in the shop across it)
+  const _bq = [];
+  function blockedAt(x, z) {
+    if (!CBZ.queryCollidersNear) return false;
+    let L = null;
+    try { L = CBZ.queryCollidersNear(x, z, 0.4, _bq); } catch (e) { L = null; }
+    if (!L || !L.length) return false;
+    const fy = floorAt(x, z);
+    for (let k = 0; k < L.length; k++) {
+      const c = L[k];
+      if (!c || c.minX == null || c.yaw != null || c.pushProp) continue;
+      if (x < c.minX - 0.25 || x > c.maxX + 0.25 || z < c.minZ - 0.25 || z > c.maxZ + 0.25) continue;
+      if (c.y1 != null && c.y1 < fy + 1.0) continue;          // a kerb, a step
+      if (c.y0 != null && c.y0 > fy + 1.6) continue;          // an awning overhead
+      return true;
+    }
+    return false;
+  }
 
   // ---------------------------------------------------------------- agents (SoA)
   // position, heading and velocity are the store's own arrays (one record per
@@ -174,8 +210,24 @@
   const arig = new Int16Array(CAP).fill(-1);
   const askin = new Int32Array(CAP), ashirt = new Int32Array(CAP), apants = new Int32Array(CAP), ahair = new Int32Array(CAP);
   const ashoes = new Int32Array(CAP), asleeve = new Int32Array(CAP), abody = new Uint8Array(CAP), alook = S.look;
+  // WHO THEY ARE IN THE CROWD (owner: "they behave very stupidly"): a place
+  // of their own in the knot (b*: the rally slot is that plus a shuffle), the
+  // friends they came with (afr: a little knot of neighbours, the clique the
+  // shared brain reads when one of them is hit), a temper (who answers a fist
+  // with fists), and traits: brave (gets low instead of running at the first
+  // shot), mover (drifts between groups), edge (comes and goes at the fringe),
+  // films (the phone comes out when something happens)
+  const brx = new Float32Array(CAP), brz = new Float32Array(CAP);
+  const ashuf = new Float32Array(CAP);                                 // mob clock of the next shuffle
+  const afr = new Int32Array(CAP);                                     // friends: who came together
+  const atmp = new Float32Array(CAP);                                  // temper 0..1
+  const atrait = new Uint8Array(CAP);
+  const TR_BRAVE = 1, TR_MOVER = 2, TR_EDGE = 4, TR_FILM = 8;
   const ROLE = { plain: 0, leader: 1, flag: 2, sign: 3, fist: 4, thrower: 5, climber: 6, fighter: 7, officer: 8 };
-  const ACT = { none: 0, throw: 1, climb: 2, fight: 3, flee: 4, down: 5, inside: 6, cheer: 7, push: 8 };
+  // wait: startled, about to run (a shot heard, the run reaching them);
+  // cover: down low where they are (the brave at the first shots); ring:
+  // round a fight, watching / filming / shouting; leave: walking off the fringe
+  const ACT = { none: 0, throw: 1, climb: 2, fight: 3, flee: 4, down: 5, inside: 6, cheer: 7, push: 8, wait: 9, cover: 10, ring: 11, leave: 12 };
   let agentsN = 0;                                                      // live agents across every mob
   function room() { return Math.max(0, Math.min(BUD.agents - agentsN, ST.room())); }
   // a new person in mob m: a row of the mob's store group
@@ -314,6 +366,7 @@
   /* form(spec) -> id
        at {x,z}            where they muster
        size                souls: how many people came (the news number)
+       aspect              the knot this many times wider along its front than deep (1)
        face                the way the knot faces while it rallies (rad)
        side                "supporters" | "opposition" (whose crowd it is)
        groups [{name, share, color, cap, shirt}]   who came, and how they dress
@@ -340,7 +393,8 @@
       color: spec.color || null, slogans: (spec.slogans || ["HEAR US"]).slice(0, 6).map(function (s) { return String(s).toUpperCase().slice(0, 22); }),
       chants: null, flag: spec.flag || null, violent: clamp(+spec.violent || 0, 0, 1), anger: clamp(spec.anger != null ? +spec.anger : 0.4, 0, 1),
       seed: (h01(SEQ, size, 3) * 1e9) | 0, agents: [], pressure: 0, frontContacts: 0, quiet: !!spec.quiet, line: null, inside: 0, door: spec.door || null,
-      insideAt: spec.insideAt || null, hold: !!spec.hold, chantT: 2 + rng() * 2, voiceT: 0.5, chantPulse: 0,
+      insideAt: spec.insideAt || null, hold: !!spec.hold, chantT: 2 + rng() * 2, voiceT: 0.5, chantPulse: 0, chantT0: 0,
+      alarm: 0, alarmX: spec.at.x, alarmZ: spec.at.z, fleeFrom: null, stampT: -1e9, fight: null, fightT: -1e9, fightAg: null, hoodT: 0, sayT: 0,
       coarse: false, centroid: { x: spec.at.x, z: spec.at.z }, gone: false, events: [], width: spec.width || 16,
       support: spec.side !== "opposition",
     };
@@ -351,7 +405,8 @@
     m.G = ST.group({
       name: m.id, kind: m.kind, place: m.place, who: m.support ? "supporters" : "protesters", side: m.side,
       parent: arenaRoot(), mode: "city", cap: BUD.agents, maxDraw: BUD.draw, own: true, cutDt: 0.1,
-      onLife: onLife, promote: function (r, why) { return realize(r, why); }, onPanic: function (x, z, r) { if (!m.gone && Math.hypot(m.centroid.x - x, m.centroid.z - z) < r + 80) disperse(m.id, true); },
+      onLife: onLife, promote: function (r, why) { return realize(r, why); }, onPanic: function (x, z, r) { if (!m.gone) alarmAt(m, x, z, r); },
+      dodge: true,                       // a car coming: this file walks them out of its lane (S.dodgeT)
       beforeCut: function () { cutClips(m); },
     });
     if (!m.G) { MOBS[slot] = null; return null; }
@@ -362,26 +417,47 @@
     const want = Math.min(size, Math.floor(BUD.agents * 0.9));
     if (room() < want) reclaim(want, m);
     const n = Math.min(want, room());
-    // a packed disk (~1.8 people per square metre) whose front edge is the muster point
+    // A PACKED KNOT (~1.8 people per square metre) whose front edge is the
+    // muster point: an ellipse `aspect` times wider along the front than deep
+    // (a protest lines a road, it does not make a ball). Nobody is placed in
+    // a building or on secured ground; a spot that is, is tried again.
+    const aspect = clamp(+spec.aspect || 1, 1, 3);
     const R = Math.sqrt(n) * 0.42 + 1;
+    const RA = R * Math.sqrt(aspect), RB = R / Math.sqrt(aspect);
     const fx = Math.sin(m.face), fz = Math.cos(m.face);
+    // THE LEADERS: a few on bullhorns just in front of the crowd, facing it
+    const nLead = Math.max(2, Math.min(12, Math.round(n * 0.004)));
+    m.knotR = Math.max(RA, RB);
+    m.kc = { x: -fx * RB * 0.9, z: -fz * RB * 0.9 };     // the knot's middle, from the muster point
     for (let k = 0; k < n; k++) {
-      // a disk, packed toward the front (the face direction)
-      const a = h01(k, m.seed, 2) * Math.PI * 2, rr = R * Math.sqrt(h01(k, m.seed, 3));
-      const lx = Math.cos(a) * rr, lz = Math.sin(a) * rr;
-      const ox = lx * fz + lz * fx - fx * R * 0.9, oz = -lx * fx + lz * fz - fz * R * 0.9;
-      const q = keepOut(m, m.at.x + ox, m.at.z + oz);   // never spawn inside a secured fence (perimeter.js)
+      let lx = 0, lz = 0, ox = 0, oz = 0, q = null, ok = false, rr = 0;
+      for (let t = 0; t < 4 && !ok; t++) {
+        if (k < nLead) {
+          lx = ((k + 0.5) / nLead - 0.5) * RA * 1.5 + (h01(k, m.seed, 9 + t) - 0.5) * 1.2;
+          lz = RB + 0.9 + h01(k, m.seed, 10 + t) * 0.5; rr = 1;
+        } else {
+          const a = h01(k, m.seed, 2 + t * 40) * Math.PI * 2;
+          rr = Math.sqrt(h01(k, m.seed, 3 + t * 40));
+          lx = Math.cos(a) * rr * RA; lz = Math.sin(a) * rr * RB;
+        }
+        ox = lx * fz + lz * fx - fx * RB * 0.9; oz = -lx * fx + lz * fz - fz * RB * 0.9;
+        q = keepOut(m, m.at.x + ox, m.at.z + oz);   // never spawn inside a secured fence (perimeter.js)
+        ok = !blockedAt(q.x, q.z);
+        if (ok && q.moved) { ox = q.x - m.at.x; oz = q.z - m.at.z; }
+      }
+      if (!ok) continue;
       const i = alloc(m, q.x, q.z, m.face); if (i < 0) break;
-      arx[i] = ox; arz[i] = oz;
+      brx[i] = ox; brz[i] = oz; arx[i] = ox; arz[i] = oz;
       amob[i] = slot; aside[i] = 0; aact[i] = 0; atim[i] = 0; acd[i] = h01(k, m.seed, 1) * 4; arig[i] = -1; aclimb[i] = 0;
-      avx[i] = 0; avz[i] = 0; ahd[i] = m.face; aph[i] = h01(k, m.seed, 4) * 6.28; asp[i] = 0;
+      avx[i] = 0; avz[i] = 0; ahd[i] = k < nLead ? m.face + Math.PI : m.face; aph[i] = h01(k, m.seed, 4) * 6.28; asp[i] = 0;
+      S.dodgeT[i] = 0;
       // the column slot used when they march: leaders in the first rows
       const cols = Math.max(4, Math.round(m.width / 0.95));
       aox[i] = ((k % cols) - (cols - 1) / 2) * (m.width / cols) + (h01(k, m.seed, 5) - 0.5) * 0.4;
       aoz[i] = Math.floor(k / cols) * 0.95 + (h01(k, m.seed, 6) - 0.5) * 0.4;
       const r = h01(k, m.seed, 7);
       let role = ROLE.plain;
-      if (k < Math.max(2, n * 0.03)) role = ROLE.leader;
+      if (k < nLead) role = ROLE.leader;
       else if (r < 0.17) role = ROLE.flag;
       else if (r < 0.40) role = ROLE.sign;
       else if (r < 0.62) role = ROLE.fist;
@@ -390,6 +466,16 @@
       else if (r < 0.62 + 0.26 * m.violent) role = ROLE.fighter;
       arole[i] = role;
       asign[i] = (h01(k, m.seed, 8) * m.slogans.length) | 0;
+      // friends: neighbours in a 2.6 m cell of the knot came together
+      afr[i] = ((Math.floor(lx / 2.6) + 512) << 10) | ((Math.floor(lz / 2.6) + 512) & 1023);
+      atmp[i] = role === ROLE.fighter ? 0.85 + h01(k, m.seed, 44) * 0.15 : h01(k, m.seed, 44);
+      let tr = 0;
+      if (h01(k, m.seed, 40) < 0.06) tr |= TR_BRAVE;
+      if ((role === ROLE.plain || role === ROLE.fist) && h01(k, m.seed, 41) < 0.03) tr |= TR_MOVER;
+      if (k >= nLead && rr > 0.82 && h01(k, m.seed, 42) < 0.3) tr |= TR_EDGE;
+      if (h01(k, m.seed, 43) < 0.24) tr |= TR_FILM;
+      atrait[i] = tr;
+      ashuf[i] = 3 + h01(k, m.seed, 45) * 14;
       dressAgent(i, m, k);
       m.agents.push(i);
     }
@@ -433,7 +519,8 @@
       case "gas": return m._gasSaid ? null : (m._gasSaid = true, { h: "Police fire tear gas" + at_(m), holler: [{ kind: "citizen", text: "Gas. Can't breathe. Get back." }] });
       case "breach": return { h: who + " break through police lines" + at_(m), breaking: true, holler: [{ kind: "press", text: "Police lines have broken" + at_(m) + "." }, { kind: "citizen", text: "They're through. They're actually through." }] };
       case "door": return { h: who + " force their way into " + (m.place || "the building"), breaking: true, holler: [{ kind: "citizen", text: "They're inside. Somebody do something." }] };
-      case "disperse": return extra && extra.flee ? { h: "The crowd is cleared" + at_(m) } : null;
+      case "disperse": return extra && extra.flee && !m.fleeFrom ? { h: "The crowd is cleared" + at_(m) } : null;
+      case "stampede": return { h: "Gunfire sends the crowd running" + at_(m), breaking: m.size >= 200, holler: [{ kind: "citizen", text: "Everybody ran. People went down in the crush." }] };
       default: return null;
     }
   }
@@ -653,9 +740,22 @@
       return L.advance > 0 ? Math.max(SPD.police, L.advance * 1.5) : SPD.police;
     }
     if (m.stage === "disperse") {
-      const dx = ax[i] - m.centroid.x, dz = az[i] - m.centroid.z, d = Math.hypot(dx, dz) || 1;
-      atx[i] = ax[i] + dx / d * 30; atz[i] = az[i] + dz / d * 30;
+      // home is away from the centre, and away from whatever broke it up
+      let dx = ax[i] - m.centroid.x, dz = az[i] - m.centroid.z, d = Math.hypot(dx, dz) || 1;
+      dx /= d; dz /= d;
+      if (m.fleeFrom) {
+        let ex = ax[i] - m.fleeFrom.x, ez = az[i] - m.fleeFrom.z; const e = Math.hypot(ex, ez) || 1;
+        dx = dx * 0.4 + ex / e * 0.6; dz = dz * 0.4 + ez / e * 0.6; d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
+      }
+      atx[i] = ax[i] + dx * 30; atz[i] = az[i] + dz * 30;
       return m.flee ? SPD.flee : SPD.walk * 1.2;
+    }
+    if (aact[i] === ACT.ring && m.fight) {
+      // round the fight: their own side of it, a few metres off, looking in
+      let dx = ax[i] - m.fight.x, dz = az[i] - m.fight.z; const d = Math.hypot(dx, dz) || 1;
+      const r = 2.8 + h01(i, 7, 3) * 3.2;
+      atx[i] = m.fight.x + dx / d * r; atz[i] = m.fight.z + dz / d * r;
+      return SPD.walk;
     }
     if (m.stage === "rally" || (m.hold && m.stage !== "breach")) {
       // a knot behind the muster point, facing what they came for
@@ -698,6 +798,12 @@
       for (let k = 0; k < m.agents.length; k += 4) { const i = m.agents[k]; if (aside[i] === 0) { cx += ax[i]; cz += az[i]; cn++; } }
       if (cn) { m.centroid.x = cx / cn; m.centroid.z = cz / cn; }
       m.coarse = !P || Math.hypot(P.x - m.centroid.x, P.z - m.centroid.z) > COARSE;
+      if (m.alarm > 0) m.alarm = Math.max(0, m.alarm - dt * 0.05);
+      if (m.fight) {
+        const ag = m.fightAg;
+        if (m.t - m.fightT > 14 || !ag || ag.dead || !ag.pos) m.fight = null;
+        else { m.fight.x += (ag.pos.x - m.fight.x) * Math.min(1, dt * 0.8); m.fight.z += (ag.pos.z - m.fight.z) * Math.min(1, dt * 0.8); }
+      }
       headAdvance(m, dt);
       tickLines(m, dt);
       if (m.stage === "breach" && m.route && m.ri >= m.route.length && m.insideAt) setStage(m, "inside");
@@ -853,7 +959,7 @@
       if (P && arig[i] < 0) {
         const dpx = ax[i] - P.x, dpz = az[i] - P.z, d2 = dpx * dpx + dpz * dpz;
         let band = d2 > 40000 ? 7 : d2 > 14400 ? 3 : d2 > 3600 ? 1 : 0;
-        if (band < 7 && d2 > 900 && asp[i] < 0.05 && aact[i] === 0 && S.panicT[i] <= 0) {
+        if (band < 7 && d2 > 900 && asp[i] < 0.05 && aact[i] === 0 && S.panicT[i] <= 0 && S.dodgeT[i] <= 0 && m.t < ashuf[i]) {
           const qx = atx[i] - ax[i], qz = atz[i] - az[i];
           if (qx * qx + qz * qz < 0.09 && (m.stage === "rally" || m.hold)) band = 7;
         }
@@ -876,8 +982,38 @@
       if (aact[i] === ACT.throw && atim[i] <= 0) aact[i] = 0;
       if (aact[i] === ACT.fight && atim[i] <= 0) aact[i] = 0;
       if (aact[i] === ACT.cheer && atim[i] <= 0) aact[i] = 0;
+      if (aact[i] === ACT.ring && (atim[i] <= 0 || !m.fight)) aact[i] = 0;
+      // STARTLED: the shot heard, the run reaching them; then they go
+      if (aact[i] === ACT.wait || aact[i] === ACT.cover) {
+        if (atim[i] <= 0) {
+          const f = m.fleeFrom || { x: m.alarmX, z: m.alarmZ };
+          aact[i] = 0;
+          ST.flee(i, f.x, f.z, 8 + h01(i, stepN, 53) * 7);
+          aact[i] = ACT.flee; atim[i] = S.panicT[i];
+          const fx = ax[i] - f.x, fz = az[i] - f.z, fd = Math.hypot(fx, fz) || 1;
+          atx[i] = ax[i] + fx / fd * 12; atz[i] = az[i] + fz / fd * 12; vmax = SPD.flee;
+        } else { atx[i] = ax[i]; atz[i] = az[i]; vmax = 0.5; }
+      }
+      const holdish = aside[i] === 0 && (m.stage === "rally" || m.hold) && m.stage !== "breach" && m.stage !== "disperse";
+      // THE CROWD LIVES: a shuffle on the spot, a mover off to other friends,
+      // someone at the fringe leaving (and someone else coming)
+      if (holdish && aact[i] === 0 && m.t >= ashuf[i]) shuffle(i, m);
+      if (aact[i] === ACT.leave) leaving(i, m);
+      // A CAR COMING (crowdstore carPass): out of its lane, the near side,
+      // and their place in the knot goes with them (the crowd parts round it)
+      let dodging = false;
+      if (S.dodgeT[i] > 0 && aact[i] !== ACT.flee) {
+        S.dodgeT[i] -= ddt;
+        dodging = true;
+        atx[i] = ax[i] + S.dodgeX[i] * 2.5; atz[i] = az[i] + S.dodgeZ[i] * 2.5;
+        vmax = Math.max(vmax, 2.2);
+      }
+      // a sign or a flag is carried, never run with (the run drops it): the
+      // holder steps briskly instead
+      if ((arole[i] === ROLE.sign || arole[i] === ROLE.flag) && aact[i] !== ACT.flee && vmax > RUN_AT - 0.2) vmax = RUN_AT - 0.2;
       // the rig walks itself; its body IS this agent
       if (arig[i] >= 0) { rigFollow(i, m, vmax); continue; }
+      const ox0 = ax[i], oz0 = az[i];
       // ---- seek (arrive), slowed by how packed it is round them
       let dx = atx[i] - ax[i], dz = atz[i] - az[i];
       const d = Math.hypot(dx, dz);
@@ -889,7 +1025,7 @@
       if (useGrid && aact[i] !== ACT.inside) {
         // density + separation in one pass over the 3x3 cells
         const gx = ((ax[i] - minX) / cs) | 0, gz = ((az[i] - minZ) / cs) | 0;
-        let near = 0, sx = 0, sz = 0;
+        let near = 0, sx = 0, sz = 0, nf = 0;
         for (let oz = -1; oz <= 1; oz++) {
           const rz = gz + oz; if (rz < 0 || rz >= gd) continue;
           for (let ox = -1; ox <= 1; ox++) {
@@ -898,7 +1034,7 @@
             while (j >= 0 && guard++ < 24) {
               if (j !== i) {
                 const qx = ax[i] - ax[j], qz = az[i] - az[j], q2 = qx * qx + qz * qz;
-                if (q2 < 2.25) near++;
+                if (q2 < 2.25) { near++; if (aact[j] === ACT.flee) nf++; }
                 if (q2 < SEP * SEP && q2 > 1e-6) { const q = Math.sqrt(q2), o = (SEP - q) / q; sx += qx * o; sz += qz * o; }
               }
               j = GN[j];
@@ -911,6 +1047,15 @@
         vx *= slow; vz *= slow;
         ax[i] += sx * 0.5; az[i] += sz * 0.5;
         if (aside[i] === 0 && near > 9 && m.stage === "confront") aact[i] = aact[i] || ACT.push;
+        // PANIC IS SEEN: the people running past you are the news. A neighbour
+        // bolting starts you with a chance that grows with how scared the
+        // crowd is and how many are running round you (systems/voice.js's
+        // sight contagion, crowd-sized)
+        if (nf && aside[i] === 0 && m.alarm > 0.05 && (aact[i] === 0 || aact[i] === ACT.push || aact[i] === ACT.cheer || aact[i] === ACT.ring) &&
+            h01(i, stepN, 61) < m.alarm * 0.16 * nf * (ddt / dt)) {
+          const f = m.fleeFrom || { x: m.alarmX, z: m.alarmZ };
+          ST.flee(i, f.x, f.z, 3 + m.alarm * 7 + h01(i, stepN, 62) * 3);
+        }
       }
       // smooth the velocity (people do not turn on a pin)
       avx[i] += (vx - avx[i]) * Math.min(1, ddt * 4); avz[i] += (vz - avz[i]) * Math.min(1, ddt * 4);
@@ -932,18 +1077,77 @@
         if (q.moved) { nx = q.x; nz = q.z; avx[i] *= 0.3; avz[i] *= 0.3; }
       }
       ax[i] = nx; az[i] = nz;
+      if (dodging && holdish) { const mx = nx - ox0, mz = nz - oz0; brx[i] += mx; brz[i] += mz; arx[i] += mx; arz[i] += mz; }
       const sp = Math.hypot(avx[i], avz[i]);
       asp[i] = sp;
       if (sp > 0.15) ahd[i] = Math.atan2(avx[i], avz[i]);
-      else if (m.stage === "rally" || m.hold) ahd[i] += (((m.face - ahd[i] + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, ddt * 2);
+      else if (aact[i] === ACT.ring && m.fight) ahd[i] = Math.atan2(m.fight.x - ax[i], m.fight.z - az[i]);
+      else if ((aact[i] === ACT.wait || aact[i] === ACT.cover) && (m.fleeFrom || m.alarm > 0)) { const f = m.fleeFrom || { x: m.alarmX, z: m.alarmZ }; ahd[i] = Math.atan2(f.x - ax[i], f.z - az[i]); }
+      else if (m.stage === "rally" || m.hold) { const want = faceOf(i, m); ahd[i] += (((want - ahd[i] + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, ddt * 2); }
       else if (L && aside[i] === 0) ahd[i] = Math.atan2(-L.nx, -L.nz);
       aph[i] += ddt * (sp > 0.15 ? sp * (sp > RUN_AT ? GAIT.run : GAIT.walk) : 0);     // the baked stride: feet do not skate
       S.posT[i] = ST.clock();
       if (aclimb[i] > 0 && (arole[i] !== ROLE.climber || !L)) aclimb[i] = Math.max(0, aclimb[i] - ddt * 1.2);
-      if (!coarse || (stepN & 7) === 0) ay[i] = floorAt(ax[i], az[i]) + aclimb[i];
+      if (!coarse || (stepN & 7) === 0 || aact[i] === ACT.cover) ay[i] = floorAt(ax[i], az[i]) + aclimb[i] - (aact[i] === ACT.cover ? 0.45 : 0);
       if (aside[i] === 1) { const Lo = lineOf(i); if (Lo && !Lo.broken) ahd[i] = Math.atan2(Lo.nx, Lo.nz); }
     }
     if (m._culled) cull(m);
+  }
+  // which way a person in a standing crowd looks: at what they came for; a
+  // leader on the bullhorn at the people he leads
+  function faceOf(i, m) { return arole[i] === ROLE.leader ? m.face + Math.PI : m.face; }
+  // a few seconds' life in a standing crowd
+  function shuffle(i, m) {
+    ashuf[i] = m.t + 6 + h01(i, stepN, 71) * 14;
+    if (arole[i] === ROLE.leader) {                                   // pacing along the front
+      const w = (h01(i, stepN, 74) - 0.5) * 2.4;
+      arx[i] = brx[i] + Math.cos(m.face) * w; arz[i] = brz[i] - Math.sin(m.face) * w;
+      return;
+    }
+    const tr = atrait[i];
+    if ((tr & TR_MOVER) && h01(i, stepN, 72) < 0.6 && m.agents.length > 8) {
+      // off to another bunch: trade places with someone there (the density holds)
+      const j = m.agents[(h01(i, stepN, 75) * m.agents.length) | 0];
+      if (j !== i && amob[j] === m.slot && aside[j] === 0 && aact[j] === 0 && arole[j] !== ROLE.leader && arig[j] < 0) {
+        const tx = brx[i], tz = brz[i]; brx[i] = brx[j]; brz[i] = brz[j]; brx[j] = tx; brz[j] = tz;
+        arx[i] = brx[i]; arz[i] = brz[i]; arx[j] = brx[j]; arz[j] = brz[j];
+        return;
+      }
+    }
+    if ((tr & TR_EDGE) && m.stage === "rally" && arig[i] < 0 && h01(i, stepN, 73) < 0.12) {
+      // somebody at the fringe has had enough (somebody else turns up below)
+      // away from the middle, never toward what they face (that is the gate)
+      const kc = m.kc || { x: 0, z: 0 };
+      let ux = brx[i] - kc.x, uz = brz[i] - kc.z; const d = Math.hypot(ux, uz) || 1; ux /= d; uz /= d;
+      const ffx = Math.sin(m.face), ffz = Math.cos(m.face), fw = ux * ffx + uz * ffz;
+      if (fw > 0.2) { ux -= ffx * (fw + 0.3); uz -= ffz * (fw + 0.3); const l = Math.hypot(ux, uz) || 1; ux /= l; uz /= l; }
+      aact[i] = ACT.leave; atim[i] = 45;
+      arx[i] = brx[i] + ux * 48; arz[i] = brz[i] + uz * 48;
+      return;
+    }
+    // the weight from one foot to the other, half a step this way or that
+    arx[i] = brx[i] + (h01(i, stepN, 76) - 0.5) * 0.7; arz[i] = brz[i] + (h01(i, stepN, 77) - 0.5) * 0.7;
+  }
+  // walking off the fringe; out of sight, the same person comes back in from
+  // somewhere else (people come and go: nobody pops in view)
+  const _lp = { x: 0, y: 0, z: 0 };
+  function leaving(i, m) {
+    const qx = m.at.x + arx[i] - ax[i], qz = m.at.z + arz[i] - az[i];
+    const there = qx * qx + qz * qz < 4 || atim[i] <= 0;
+    if (!there || (stepN + i) % 8) return;
+    if (arig[i] >= 0 || !unseenRow(i)) { if (atim[i] <= 0) { aact[i] = 0; arx[i] = brx[i]; arz[i] = brz[i]; } return; }
+    const kc = m.kc || { x: 0, z: 0 };
+    const bx = brx[i] - kc.x, bz = brz[i] - kc.z;
+    const d = Math.hypot(bx, bz) || 1;
+    const a = Math.atan2(bz, bx) + (h01(i, stepN, 81) - 0.5) * 2.2;
+    const r = d + 30 + h01(i, stepN, 82) * 15;
+    const px = m.at.x + kc.x + Math.cos(a) * r, pz = m.at.z + kc.z + Math.sin(a) * r;
+    _lp.x = px; _lp.y = floorAt(px, pz); _lp.z = pz;
+    const q = keepOut(m, px, pz);
+    if ((CBZ.leave && CBZ.leave.unseen && !CBZ.leave.unseen(_lp)) || q.moved || blockedAt(px, pz)) { atim[i] = 2; arx[i] = ax[i] - m.at.x; arz[i] = az[i] - m.at.z; return; }
+    ax[i] = px; az[i] = pz; ay[i] = _lp.y; avx[i] = 0; avz[i] = 0; S.posT[i] = ST.clock();
+    aact[i] = 0; arx[i] = brx[i]; arz[i] = brz[i];
+    ashuf[i] = m.t + 20 + h01(i, stepN, 83) * 20;
   }
   // the front rank: throw, climb, fight
   function frontActs(i, m, L, dt) {
@@ -1022,19 +1226,23 @@
     if (!ped) return false;
     ped.staffPost = null;
     ped._mob = m.id; ped._mobAgent = i;
+    // the friends he came with are his clique (city/brain_city.js reads it)
+    if (!cop) ped.cliqueId = m.id + ":" + afr[i];
     if (!cop) {
       const props = PP();
       if (props) {
         try {
           if (arole[i] === ROLE.sign) props.sign(ped, m.slogans[asign[i] % m.slogans.length], m.support);
           else if (arole[i] === ROLE.flag) props.flag(ped);
+          else if (arole[i] === ROLE.leader && props.bullhorn) props.bullhorn(ped);
         } catch (e) {}
       }
     }
     let k = RIGS.indexOf(null); if (k < 0) { k = RIGS.length; RIGS.push(null); }
-    RIGS[k] = { i: i, ped: ped, cop: cop, t: 0 };
+    RIGS[k] = { i: i, ped: ped, cop: cop, t: 0, hp0: null, ko0: false, dead0: false, bang: false };
     arig[i] = k;
     S.hide[i] = 1;                    // the rig IS this person now (drawn and hit as a ped)
+    S.drawn[i] = 0;                   // and the instanced copy (and what it held) is gone with it
     STATS.peakRigs = Math.max(STATS.peakRigs, rigCount(false));
     return true;
   }
@@ -1073,6 +1281,10 @@
   function rigFollow(i, m, vmax) {
     const R = RIGS[arig[i]]; const ped = R && R.ped;
     if (!ped) { arig[i] = -1; return; }
+    // YOU HIT ONE (or anybody did): his friends and the hot-headed answer
+    const hp = ped.hp, ko = (ped.ko || 0) > 0;
+    if (R.hp0 != null && aside[i] === 0 && ((hp != null && hp < R.hp0 - 0.5) || (ko && !R.ko0) || (ped.dead && !R.dead0))) hitOn(i, m, ped);
+    R.hp0 = hp; R.ko0 = ko; R.dead0 = !!ped.dead;
     if (ped.dead) {
       // a marcher who dies stays down, out of the mob: the body is the rig's,
       // the count is the crowd's (crowdstore.js joins it to whatever is
@@ -1087,8 +1299,12 @@
       return;
     }
     ax[i] = ped.pos.x; az[i] = ped.pos.z; ay[i] = ped.pos.y || 0;
-    const busy = ped.state === "flee" || ped.state === "fight" || ped.ko || ped.restraint || ped.poseCower > 0;
+    const busy = ped.state === "flee" || ped.state === "fight" || ped.state === "confront" || ped.state === "film" || ped.ko || ped.restraint || ped.poseCower > 0;
     if (busy && aact[i] !== ACT.flee) { ped.moveOrder = null; return; }      // the brain has him; his own reaction wins
+    // a car: out of its lane; a slow one nosing into him gets the hood banged
+    const cr = rigCar(i, m, ped, R);
+    if (cr === 1) { ped.moveOrder = { x: atx[i], z: atz[i], speed: 2.4, stop: 0.3, t: now() }; return; }
+    if (cr === 2) return;
     const L = m.line;
     if (L && !L.broken && aside[i] === 0) {
       // the officers are bodies too, but a target past them would grind into them
@@ -1100,9 +1316,221 @@
     // facing what the crowd faces (the brain does not wander off between)
     const dx = atx[i] - ax[i], dz = atz[i] - az[i];
     const there = Math.hypot(dx, dz) < 0.6;
-    const face = L && !L.broken && aside[i] === 0 ? Math.atan2(-L.nx, -L.nz) : (m.stage === "rally" || m.hold ? m.face : ahd[i]);
+    const face = L && !L.broken && aside[i] === 0 ? Math.atan2(-L.nx, -L.nz)
+      : aact[i] === ACT.ring && m.fight ? Math.atan2(m.fight.x - ax[i], m.fight.z - az[i])
+      : (m.stage === "rally" || m.hold ? faceOf(i, m) : ahd[i]);
     ped.moveOrder = { x: there ? ax[i] : atx[i], z: there ? az[i] : atz[i], speed: there ? 0 : Math.min(vmax, vmax > 3 ? vmax : 1.6), stop: 0.5, face: there ? face : undefined, t: now() };
   }
+  /* ---------------------------------------------------------------- WHAT THE CROWD DOES WHEN SOMETHING HAPPENS
+     (owner: "If I start beating someone up, some people in the crowd should
+     start fighting me. If my agents start shooting, they should run away.")
+     ALARM     how scared this crowd is (0..1). A scare near them (a car into
+               somebody, a man going down) raises it where it happened; the
+               people who saw it run (crowdstore panic), and the running is
+               itself what the rest see: a neighbour bolting starts you, with
+               a chance that grows with the alarm (stepAgents).
+     A GUN OUT the people who can see it (close, in front of it, or in its
+               line) scatter from it at once; the alarm carries the rest.
+     SHOTS     gunfire near the crowd (any gun: yours, your detail's, the
+               line's, an assassin's) is a STAMPEDE: the near ones run at
+               once, the far ones a beat later as the run reaches them, the
+               brave few get down low first and go after; the packed runners
+               knock each other over (crowdstore trample). The crowd is done:
+               it disperses away from where the shots were.
+     A FIGHT   a protester hit: his friends (the clique) answer through the
+               shared brain (city/brain_city.js retaliate: real melee), the
+               hot-headed close in and fight, others shout; everyone within a
+               dozen metres turns to it and makes a ring, a few filming. A gun
+               in the fight makes it the gun's story instead. */
+  function knot(m) { return (m.knotR || Math.sqrt(m.agents.length) * 0.5) + 2; }
+  function alarmAt(m, x, z, r) {
+    if (m.gone || m.stage === "disperse") return;
+    if (Math.hypot(m.centroid.x - x, m.centroid.z - z) > r + knot(m) + 30) return;
+    if (r >= 40) { stampede(m, x, z); return; }       // gunfire (crowdstore shoot), a blast
+    m.alarm = Math.max(m.alarm, clamp(0.25 + r * 0.012, 0.25, 0.6));
+    m.alarmX = x; m.alarmZ = z;
+  }
+  function stampede(m, x, z) {
+    if (m.gone || m.stage === "disperse" && m.fleeFrom) return;
+    if (m.t - m.stampT < 3) return;
+    m.stampT = m.t;
+    m.alarm = 1; m.alarmX = x; m.alarmZ = z; m.fleeFrom = { x: x, z: z };
+    const A = m.agents, B = CBZ.cityBrain;
+    for (let k = 0; k < A.length; k++) {
+      const i = A[k];
+      if (amob[i] !== m.slot || aside[i] !== 0 || S.life[i] !== ST.ALIVE) continue;
+      if (aact[i] === ACT.flee || aact[i] === ACT.wait || aact[i] === ACT.cover || aact[i] === ACT.inside) continue;
+      const d = Math.hypot(ax[i] - x, az[i] - z);
+      // the near ones go at the bang; the run reaches the rest a beat later
+      const delay = d / 70 + h01(i, stepN, 51) * (0.25 + d / 90);
+      const ped = arig[i] >= 0 ? rigPed(i) : null;
+      if ((atrait[i] & TR_BRAVE) && d < 45 && arole[i] !== ROLE.leader) {
+        aact[i] = ACT.cover; atim[i] = delay + 2.5 + h01(i, stepN, 52) * 4;
+        if (ped && B && B.perform) { try { B.perform(ped, "cover", { x: x, z: z, armed: true }); } catch (e) {} }
+      } else {
+        aact[i] = ACT.wait; atim[i] = delay;
+        if (ped && B && B.perform && d < 30) { try { B.perform(ped, "flee", { x: x, z: z, armed: true }); } catch (e) {} }
+      }
+    }
+    disperse(m.id, true, { x: x, z: z });
+    note(m, "stampede", { at: { x: x, z: z } });
+  }
+  // a gun fired somewhere: the crowds that heard it
+  let _shotT = -1e9;
+  function heardShot(x, z, loud) {
+    if (!isFinite(x) || !isFinite(z) || CLOCK - _shotT < 0.25) return;
+    _shotT = CLOCK;
+    for (let mi = 0; mi < MOBS.length; mi++) {
+      const m = MOBS[mi]; if (!m || m.gone) continue;
+      const d = Math.hypot(m.centroid.x - x, m.centroid.z - z) - knot(m);
+      if (d < (loud || 60)) stampede(m, x, z);
+    }
+  }
+  // THE EARS: every round in the city is a tracer (gunfx), every bang goes
+  // through the brain's hearing (law.js gunshot, peds.js cityPanic): both are
+  // heard here, once each wired, whoever fired
+  function wireEars() {
+    if (CBZ.tracer && !CBZ.tracer._mobEar) {
+      const o = CBZ.tracer;
+      const w = function (from) { const r = o.apply(this, arguments); try { if (from && inCity()) heardShot(from.x, from.z, 60); } catch (e) {} return r; };
+      w._mobEar = true; CBZ.tracer = w;
+    }
+    const CB = CBZ.cityBrain;
+    if (CB && CB.hearBang && !CB.hearBang._mobEar) {
+      const o = CB.hearBang;
+      const w = function (x, z, radius, kind) {
+        const r = o.apply(this, arguments);
+        try { if ((kind === "gunshot" || kind === "explosion") && inCity()) heardShot(x, z, Math.max(40, (radius || 48) * 1.2)); } catch (e) {}
+        return r;
+      };
+      w._mobEar = true; CB.hearBang = w;
+    }
+  }
+  // A GUN OUT: the people who can see it get away from it
+  const _PF = { x: 0, z: 1 };
+  function gunOut(P) {
+    const LP = CBZ.cityLaw && CBZ.cityLaw.player;
+    const armed = LP ? !!LP.armed : !!(CBZ.cityHasGun && CBZ.cityHasGun());
+    if (!armed || !P || (CBZ.player && CBZ.player.driving)) return;
+    const aim = !!(LP && LP.aimAny);
+    const pc = CBZ.playerChar, h = pc && pc.group ? pc.group.rotation.y : 0;
+    _PF.x = Math.sin(h); _PF.z = Math.cos(h);
+    const R = aim ? 30 : 16, R2 = R * R;
+    for (let mi = 0; mi < MOBS.length; mi++) {
+      const m = MOBS[mi]; if (!m || m.gone || m.stage === "disperse") continue;
+      if (Math.hypot(m.centroid.x - P.x, m.centroid.z - P.z) > R + knot(m)) continue;
+      let n = 0;
+      const A = m.agents;
+      for (let k = 0; k < A.length; k++) {
+        const i = A[k];
+        if (amob[i] !== m.slot || aside[i] !== 0 || arig[i] >= 0 || aact[i] === ACT.flee || S.life[i] !== ST.ALIVE) continue;
+        const dx = ax[i] - P.x, dz = az[i] - P.z, d2 = dx * dx + dz * dz;
+        if (d2 > R2) continue;
+        const d = Math.sqrt(d2) || 1;
+        // sees it: close, or in front of it, or looking this way
+        const front = (dx * _PF.x + dz * _PF.z) / d;
+        const looks = -(dx * Math.sin(ahd[i]) + dz * Math.cos(ahd[i])) / d;
+        if (d > 6 && front < (aim ? 0.55 : 0.25) && looks < 0.2) continue;
+        ST.flee(i, P.x, P.z, 4 + h01(i, stepN, 91) * 5 + (aim ? 3 : 0));
+        n++;
+      }
+      if (n) { m.alarm = Math.max(m.alarm, aim ? 0.75 : 0.5); m.alarmX = P.x; m.alarmZ = P.z; }
+    }
+  }
+  const SHOUT = ["Hey!", "Get off him!", "Leave him alone!", "Hey, stop!"];
+  function hitOn(i, m, ped) {
+    const PA = CBZ.city && CBZ.city.playerActor, P = player();
+    if (ped.restraint) return;                                       // detained, not beaten: the arrest's business
+    let ag = ped.mem && ped.mem.pos && !ped.mem.dead && ped.mem !== ped ? ped.mem : null;
+    if (!ag && PA && P && Math.hypot(P.x - ped.pos.x, P.z - ped.pos.z) < 6) ag = PA;
+    if (!ag || !ag.pos) return;
+    if (ag._mob === m.id) return;                                   // one of their own, or the line: not a stranger hitting them
+    const gun = ag === PA ? !!(CBZ.cityHasGun && CBZ.cityHasGun()) : !!ag.armed;
+    if (gun) { alarmAt(m, ag.pos.x, ag.pos.z, 20); return; }                         // the gun is the story (gunOut, the shots)
+    const fresh = !m.fight || m.t - m.fightT > 1.5 || m.fightAg !== ag;
+    m.fight = m.fight || { x: ped.pos.x, z: ped.pos.z };
+    m.fightT = m.t; m.fightAg = ag;
+    m.anger = clamp(m.anger + 0.02, 0, 1);
+    m.alarm = Math.max(m.alarm, 0.12);
+    if (!fresh) return;
+    const B = CBZ.cityBrain;
+    const fx = ped.pos.x, fz = ped.pos.z;
+    const friends = [], hot = [], watch = [];
+    for (let k = 0; k < RIGS.length; k++) {
+      const R = RIGS[k]; if (!R || R.cop || !R.ped || R.ped === ped || R.ped.dead || amob[R.i] !== m.slot) continue;
+      const q = R.ped, d = Math.hypot(q.pos.x - fx, q.pos.z - fz);
+      if (d > 14 || lying(q) || q.restraint) continue;
+      if (afr[R.i] === afr[i] && d < 10) friends.push(q);
+      else if (d < 9 && atmp[R.i] > 0.9 - m.anger * 0.3) hot.push(q);
+      else watch.push(R);
+    }
+    // the clique: the brain reads friends by it, and decides who of them answers and how
+    const clq = m.id + ":" + afr[i];
+    ped.cliqueId = clq; ped.friends = friends.slice();
+    for (let k = 0; k < friends.length; k++) { friends[k].cliqueId = clq; friends[k].friends = friends.filter(function (o) { return o !== friends[k]; }).concat([ped]); }
+    if (B && B.retaliate) { try { B.retaliate(ped.dead && friends.length ? friends[0] : ped, ag, ped.dead ? 1 : null); } catch (e) {} }
+    // the hot-headed ones are in it too (real melee, the city combat)
+    const nHot = Math.min(hot.length, 1 + Math.round(m.anger * 4));
+    for (let k = 0; k < nHot; k++) { if (B && B.perform) { try { B.perform(hot[k], "fight", { x: ag.pos.x, z: ag.pos.z, src: ag, armed: false }); } catch (e) {} } }
+    // the rest turn to it: a ring, a few filming, somebody shouting
+    for (let k = 0; k < watch.length; k++) {
+      const R = watch[k];
+      aact[R.i] = ACT.ring; atim[R.i] = 10 + h01(R.i, stepN, 93) * 6;
+      if ((atrait[R.i] & TR_FILM) && B && B.perform) { try { B.perform(R.ped, "film", { x: fx, z: fz }); } catch (e) {} }
+    }
+    if (m.t - m.sayT > 2.5) {
+      m.sayT = m.t;
+      const loud = hot[0] || friends[0] || (watch[0] && watch[0].ped);
+      if (loud) say(loud, SHOUT[(h01(i, stepN, 94) * SHOUT.length) | 0], "#ffd6c8", 1.8);
+    }
+    const A = m.agents;
+    for (let k = 0; k < A.length; k++) {
+      const j = A[k];
+      if (amob[j] !== m.slot || aside[j] !== 0 || arig[j] >= 0) continue;
+      if (aact[j] !== 0 && aact[j] !== ACT.ring && aact[j] !== ACT.cheer && aact[j] !== ACT.push) continue;
+      const dx = ax[j] - fx, dz = az[j] - fz;
+      if (dx * dx + dz * dz > 13 * 13) continue;
+      aact[j] = ACT.ring; atim[j] = 10 + h01(j, stepN, 95) * 6;
+    }
+  }
+  // A RIG AND A CAR. 1: he steps out of its lane (atx/atz set); 2: a slow
+  // car (yours) nosing into him: he faces it and bangs the hood; 0: neither
+  const _rf = {};
+  const HOOD = ["Hey!", "Back up!", "Move it!", "Watch it!"];
+  function rigCar(i, m, ped, R) {
+    const L = ST.cars ? ST.cars() : null;
+    let out = 0;
+    if (L && L.length) {
+      for (let k = 0; k < L.length && !out; k++) {
+        const c = L[k];
+        const dx0 = ped.pos.x - c.pos.x, dz0 = ped.pos.z - c.pos.z;
+        if (dx0 * dx0 + dz0 * dz0 > 900) continue;
+        const F = ST.footprint(c, _rf); if (!F) continue;
+        const lx = F.fz, lz = -F.fx;
+        const a = dx0 * F.fx + dz0 * F.fz, sd = dx0 * lx + dz0 * lz;
+        const side = sd >= 0 ? 1 : -1;
+        const look = F.sp > 0.4 ? Math.min(26, 1.5 + F.sp * 1.5) : 0;
+        if (F.sp > 1.0 && a > -F.hl && a < F.hl + look && Math.abs(sd) < F.hw + 1.0) {
+          atx[i] = ped.pos.x + lx * side * 3; atz[i] = ped.pos.z + lz * side * 3;
+          out = 1;
+        } else if (c.player && F.sp <= 1.0 && a > F.hl - 0.3 && a < F.hl + 1.3 && Math.abs(sd) < F.hw + 0.1 && aside[i] === 0 && atmp[i] > 0.35) {
+          out = 2;
+          if (CBZ.cityBrain && CBZ.cityBrain.exec && CBZ.cityBrain.exec.face) { try { CBZ.cityBrain.exec.face(ped, c.pos.x, c.pos.z); } catch (e) {} }
+          ped.moveOrder = null;
+          if (!ped._pubProp && PP()) { try { PP().pose(ped, "pubFist"); PP().hype(ped, 1.2); } catch (e) {} R.bang = true; }
+          if (m.t - m.hoodT > 0.7) {
+            m.hoodT = m.t;
+            if (CBZ.shake) { try { CBZ.shake(0.05); } catch (e) {} }
+            // at your windscreen: heard in the car (citySay mutes the street while you drive)
+            if (m.t - m.sayT > 2.2 && CBZ.speech && CBZ.speech.say) { m.sayT = m.t; try { CBZ.speech.say(ped, HOOD[(h01(i, stepN, 97) * HOOD.length) | 0], { secs: 1.6 }); } catch (e) {} }
+          }
+        }
+      }
+    }
+    if (out !== 2 && R.bang) { R.bang = false; if (!ped._pubProp && PP()) { try { PP().pose(ped, "stand"); } catch (e) {} } }
+    return out;
+  }
+
   /* ---------------------------------------------------------------- THE FRONT LINE IS REAL
      Five times a second every agent near enough to matter gets a TIER:
        1 AIM    the crosshair is on them (a ray from the lens through the store)
@@ -1364,9 +1792,13 @@
   const DROPS = { phys: 0, flat: 0, laid: 0, physT: 0, physN: 0 };
   let fallenTtl = 0;
   const _wp = new THREE.Vector3(), _wq = new THREE.Quaternion();
+  // a stampede drops hundreds of boards in a second: the runners' boards take
+  // at most half the second's rigid bodies, the rest is kept for the ones
+  // that matter (a man shot or knocked flat, a rig in front of you)
+  let _runnerDrop = false;
   function physRoom() {
     if (CLOCK - DROPS.physT >= 1) { DROPS.physT = CLOCK; DROPS.physN = 0; }
-    return DROPS.physN < PHYS_PER_S;
+    return DROPS.physN < (_runnerDrop ? PHYS_PER_S >> 1 : PHYS_PER_S);
   }
   function loosen(pr, vx, vz) {
     const parent = pr.parent;
@@ -1421,6 +1853,7 @@
     // the person is plain now: the instanced copy never grows the sign back
     const i = ped._mobAgent;
     if (i != null && i >= 0 && i < CAP && rigPed(i) === ped && (arole[i] === ROLE.sign || arole[i] === ROLE.flag)) arole[i] = ROLE.plain;
+    else if (i != null && i >= 0 && i < CAP && rigPed(i) === ped && arole[i] === ROLE.leader) arole[i] = ROLE.fist;
     // pushed away from whatever put him down, a little
     let vx = 0, vz = 0;
     const px = ped.pos ? ped.pos.x : 0, pz = ped.pos ? ped.pos.z : 0;
@@ -1495,12 +1928,19 @@
     if (m.chantT <= 0 && m.chants.length && m.stage !== "disperse") {
       m.chantT = 5.5 + rng() * 3;
       m.chantPulse = 2.4;
+      m.chantT0 = gpuNow();
       const line_ = m.chants[(rng() * m.chants.length) | 0];
       m.lastChant = line_;
-      // the voices that carry are the rigs near you; a leader starts it
+      // the voices that carry are the rigs near you; a leader on the
+      // bullhorn calls it, the crowd answers
       let said = 0;
+      for (let k = 0; k < RIGS.length && !said; k++) {
+        const R = RIGS[k]; if (!R || R.cop || !R.ped || amob[R.i] !== m.slot || arole[R.i] !== ROLE.leader) continue;
+        say(R.ped, line_, m.support ? "#f3e2b8" : "#ffb4a8", 2.6); said++;
+      }
       for (let k = 0; k < RIGS.length && said < 3; k++) {
         const R = RIGS[k]; if (!R || R.cop || !R.ped || amob[R.i] !== m.slot) continue;
+        if (aact[R.i] !== 0 && aact[R.i] !== ACT.push) continue;
         if (said === 0 || rng() < 0.35) { say(R.ped, line_, m.support ? "#f3e2b8" : "#ffb4a8", 2.6); said++; }
         const props = PP(); if (props && props.hype) { try { props.hype(R.ped, 2.4); } catch (e) {} }
       }
@@ -1542,15 +1982,18 @@
   }
 
   // ---------------------------------------------------------------- endings
-  function disperse(id, flee) {
+  // from {x,z}: what broke it up (shots, a blast): they go away from it
+  function disperse(id, flee, from) {
     const m = mobById(id); if (!m || m.stage === "disperse") return false;
     m.flee = !!flee;
+    if (from && isFinite(from.x)) m.fleeFrom = { x: from.x, z: from.z };
     setStage(m, "disperse", { flee: !!flee });
     if (flee) {
-      const B = CBZ.cityBrain;
+      const B = CBZ.cityBrain, f = m.fleeFrom || m.centroid;
       for (let k = 0; k < RIGS.length; k++) {
         const R = RIGS[k]; if (!R || R.cop || amob[R.i] !== m.slot) continue;
-        if (B && B.perform) { try { B.perform(R.ped, "flee", { x: m.centroid.x, z: m.centroid.z }); } catch (e) {} }
+        if (aact[R.i] === ACT.cover) continue;                     // down low first; the brain sends him after
+        if (B && B.perform) { try { B.perform(R.ped, "flee", { x: f.x, z: f.z, armed: !!m.fleeFrom }); } catch (e) {} }
       }
     }
     return true;
@@ -1597,7 +2040,7 @@
     let n = 0;
     for (let mi = 0; mi < MOBS.length; mi++) {
       const m = MOBS[mi]; if (!m) continue;
-      if (Math.hypot(m.centroid.x - x, m.centroid.z - z) < 90) { disperse(m.id, true); n++; }
+      if (Math.hypot(m.centroid.x - x, m.centroid.z - z) < 90) { disperse(m.id, true, { x: x, z: z }); n++; }
     }
     return n;
   }
@@ -1635,6 +2078,11 @@
     R_.parts = P;
     R_.shots = instanced(new THREE.BoxGeometry(0.09, 0.22, 0.09), new THREE.MeshLambertMaterial({ color: 0x5a7a4a }), 32);
     grp.add(R_.shots);
+    // a leader's bullhorn and a filmer's phone, in the hand the bake measured
+    const hg = new THREE.CylinderGeometry(0.105, 0.045, 0.28, 8); hg.rotateX(Math.PI / 2);
+    R_.horn = instanced(hg, new THREE.MeshLambertMaterial({ color: 0xe6e1d3 }), 64);
+    R_.phone = instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0x15171a }), 256);
+    grp.add(R_.horn); grp.add(R_.phone);
     readGait();
     return true;
   }
@@ -1698,7 +2146,7 @@
   }
   // which baked clip a crowd member is playing, from what they are doing
   const TAU = Math.PI * 2;
-  const POSE_RATE = { idle: 0.25, cheer: 8 / TAU, fist: 5 / TAU, sign: 1.4 / TAU, flag: 2.2 / TAU };
+  const POSE_RATE = { idle: 0.25, cheer: 8 / TAU, fist: 5 / TAU, sign: 1.4 / TAU, flag: 2.2 / TAU, bullhorn: 5 / TAU, film: 0.25, sit: 0.25 };
   let _clip = "idle", _phase = 0, _rate = 0, _now = 0;
   // the store is about to re-cut this mob: each person's clip, from what they are doing
   function cutClips(m) {
@@ -1714,6 +2162,7 @@
   function clipFor(i, m) {
     const r = arole[i], act = aact[i], sp = asp[i];
     if (act === ACT.down) { _clip = "down"; _phase = 0; _rate = 0; return; }
+    if (act === ACT.cover) { _clip = "sit"; _phase = h01(i, 3, 9); _rate = 0.25; _now = 0; return; }
     if (sp > 0.3 || act === ACT.flee) {
       const run = sp > RUN_AT || act === ACT.flee;
       _clip = run ? "run" : (r === ROLE.sign ? "signWalk" : r === ROLE.flag ? "flagWalk" : "walk");
@@ -1723,16 +2172,25 @@
       return;
     }
     _now = 0;
-    const pulse = m.chantPulse > 0;
+    const pulse = m.chantPulse > 0 && m.stage !== "disperse";
     if (r === ROLE.sign) _clip = "sign";
     else if (r === ROLE.flag) _clip = "flag";
     else if (r === ROLE.officer) _clip = "idle";
+    else if (act === ACT.ring) _clip = (atrait[i] & TR_FILM) ? "film" : atmp[i] > 0.6 ? "fist" : "idle";
+    else if (act === ACT.wait) _clip = "idle";
     else if (act === ACT.cheer || act === ACT.climb) _clip = "cheer";
     else if (act === ACT.fight || act === ACT.throw) _clip = "fist";
-    else if (pulse && (r === ROLE.fist || r === ROLE.leader || r === ROLE.plain)) _clip = r === ROLE.leader ? "cheer" : "fist";
+    else if (r === ROLE.leader && (m.stage === "rally" || m.hold || m.stage === "confront")) _clip = "bullhorn";
+    else if (pulse && (r === ROLE.fist || r === ROLE.plain)) _clip = "fist";
     else _clip = "idle";
-    _phase = h01(i, 3, 9); _rate = POSE_RATE[_clip] || 0.25;
+    _rate = POSE_RATE[_clip] || 0.25;
+    // THE CHANT IS ONE RHYTHM: everyone pumping on it is on the same beat
+    // (the phase "as of now" from the chant's start, a hair of human slop)
+    if ((_clip === "fist" || _clip === "bullhorn") && pulse && !act && m.chantT0) {
+      _now = 1; _phase = (gpuNow() - m.chantT0) * _rate + h01(i, 3, 9) * 0.06;
+    } else _phase = h01(i, 3, 9);
   }
+  function gpuNow() { const G = CBZ.crowdGPU; return G && G.now ? G.now() : 0; }
   function draw(t) {
     if (!R_.built) build();
     if (!R_.root) return;
@@ -1744,7 +2202,7 @@
     const pp = player(), cam = CBZ.camera;
     const cx = cam && cam.position ? cam.position.x : (pp ? pp.x : 0), cz = cam && cam.position ? cam.position.z : (pp ? pp.z : 0);
     const PROP2 = 130 * 130;                   // props past this are a pixel or two
-    let bodies = 0;
+    let bodies = 0, nh = 0, np = 0;
     for (let mi = 0; mi < MOBS.length; mi++) {
      const m = MOBS[mi]; if (!m) continue;
      const A = m.agents;
@@ -1757,14 +2215,27 @@
       if (amob[i] !== mi || arig[i] >= 0) continue;
       const x = ax[i], y = ay[i], z = az[i];
       const dx = x - cx, dz = z - cz;
-      // a runner lets go of the sign as they break (it drops, it never vanishes in the air)
-      if (aact[i] === ACT.flee && (arole[i] === ROLE.sign || arole[i] === ROLE.flag)) dropAgentProp(i, S.panicT[i] > 0 ? S.fleeX[i] : m.centroid.x, S.panicT[i] > 0 ? S.fleeZ[i] : m.centroid.z);
-      if (dx * dx + dz * dz > PROP2 || aact[i] === ACT.down || aact[i] === ACT.flee) continue;
-      const r = arole[i];
+      // a runner lets go of the sign as they break (it drops, it never vanishes
+      // in the air); so does somebody getting down low
+      if ((aact[i] === ACT.flee || aact[i] === ACT.cover) && (arole[i] === ROLE.sign || arole[i] === ROLE.flag)) {
+        _runnerDrop = true;
+        dropAgentProp(i, S.panicT[i] > 0 ? S.fleeX[i] : m.centroid.x, S.panicT[i] > 0 ? S.fleeZ[i] : m.centroid.z);
+        _runnerDrop = false;
+      }
+      if (dx * dx + dz * dz > PROP2 || aact[i] === ACT.down || aact[i] === ACT.flee || aact[i] === ACT.cover) continue;
+      // A SIGN IS ONLY EVER IN A HAND THAT IS THERE (owner: "their signs
+      // generate before the people generate, so it looks like there's floating
+      // signs"). The store marks who the GPU actually drew on its last cut
+      // (crowdgpu layer.shown: in range, in front, inside a tier's cap) and
+      // with which clip; the prop is drawn only on that body, in the pose
+      // that holds it. No body yet, no sign.
+      if (!S.drawn[i]) continue;
+      const r = arole[i], cl = S.clip[i];
       base(ahd[i], 0);
       if (r === ROLE.officer && n.shield < P.shield.instanceMatrix.count) {
         putBox(P.shield, n.shield, x, y, z, -0.1, 1.05, 0.42, 0, 0, 0.6, 1.0, 0.04); n.shield++;
       } else if (r === ROLE.sign) {
+        if (cl !== CL.sign && cl !== CL.signWalk) continue;
         // the same placard a full rig holds (president_public.js giveSign),
         // where poses.js pubPlacard puts it: the stick upright in both fists
         // in front of the chest, the board over the head
@@ -1774,15 +2245,24 @@
         if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, x, y, z, 0, gy + L.boardY, gz + L.boardZ, 0, 0, L.boardW, L.boardH, L.boardT); sm.count++; }
         if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, x, y, z, 0, gy + L.stickBot + L.stickLen / 2, gz, 0, 0, L.stickW, L.stickLen, L.stickW * 0.6); n.stick++; }
       } else if (r === ROLE.flag) {
+        if (cl !== CL.flag && cl !== CL.flagWalk) continue;
         const fm = flagMesh(m.flag);
         if (fm.count < fm.instanceMatrix.count) {
           const wv = Math.sin(t * 2.2 + i * 0.7) * 0.1;
           putBox(fm, fm.count, x, y, z, -0.22, 2.2, 0.0, wv, 0, 0.02, 0.4, 0.62); fm.count++;
         }
         if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, x, y, z, -0.22, 1.92, 0.3, 0, 0, 0.034, 0.9, 0.034); n.stick++; }
+      } else if (cl === CL.bullhorn) {
+        const g = gripOf("bullhorn", abody[i]);
+        if (g && nh < R_.horn.instanceMatrix.count) { putBox(R_.horn, nh++, x, y, z, g.x, g.y + 0.075, g.z + 0.13, 0, 0, 1, 1, 1); }
+      } else if (cl === CL.film) {
+        const g = gripOf("film", abody[i]);
+        if (g && np < R_.phone.instanceMatrix.count) { putBox(R_.phone, np++, x, y, z, g.x, g.y + 0.05, g.z + 0.02, 0, 0, 0.072, 0.145, 0.012); }
       }
      }
     }
+    R_.horn.count = nh; R_.horn.instanceMatrix.needsUpdate = nh > 0;
+    R_.phone.count = np; R_.phone.instanceMatrix.needsUpdate = np > 0;
     // WHAT WAS DROPPED, lying flat where it fell (past the rigid-body range):
     // local (a, b, c) -> (a, c, -b) under Ry(h) Rx(-pi/2): the stick along the
     // ground, the board's face to the sky
@@ -1817,8 +2297,18 @@
     STATS.drawn = bodies;
     if (t0) STATS.drawMs = STATS.drawMs * 0.9 + ((performance.now() - t0) * 0.1);
   }
+  // the store's clip indices, and where a clip's hand is (crowdgpu measured it at the bake)
+  const CL = ST.CLIP;
+  const GRIP = Object.create(null);
+  function gripOf(id, body) {
+    let g = GRIP[id];
+    if (g === undefined) { const c = CBZ.crowdGPU && CBZ.crowdGPU.clip(id); g = c && c.grip ? c.grip : null; if (g) GRIP[id] = g; }
+    return g ? (g[body] || g[0] || null) : null;
+  }
   function blank() {
     if (!R_.root) return;
+    if (R_.horn) R_.horn.count = 0;
+    if (R_.phone) R_.phone.count = 0;
     for (const k in R_.parts) R_.parts[k].count = 0;
     for (const k in R_.signs) R_.signs[k].count = 0;
     for (const k in R_.flags) R_.flags[k].count = 0;
@@ -1826,7 +2316,7 @@
   }
 
   // ---------------------------------------------------------------- the frame
-  let acc = 0, CLOCK = 0;
+  let acc = 0, CLOCK = 0, gunT = 0;
   function frame(dt) {
     dt = Math.min(0.25, Math.max(0, dt || 0));
     CLOCK += dt;
@@ -1845,6 +2335,9 @@
     while (acc >= SIM_DT && steps < MAX_STEPS) { simStep(SIM_DT); acc -= SIM_DT; steps++; }
     if (steps >= MAX_STEPS) acc = 0;
     for (let i = 0; i < MOBS.length; i++) if (MOBS[i]) tickVoices(MOBS[i], dt);
+    wireEars();
+    gunT -= dt;
+    if (gunT <= 0) { gunT = 0.25; if (inCity()) gunOut(player()); }
     manageRigs(dt);
     tickRigProps();
     if (t0) STATS.stepMs = STATS.stepMs * 0.9 + ((performance.now() - t0) * 0.1);
@@ -1877,6 +2370,9 @@
     react: react,
     chant: chant,
     disperse: disperse,
+    // something happened at (x, z): r >= 40 is gunfire / a blast (a stampede)
+    alarm: function (x, z, r) { let n = 0; for (let i = 0; i < MOBS.length; i++) if (MOBS[i]) { alarmAt(MOBS[i], x, z, r || 20); n++; } return n; },
+    shots: function (x, z) { heardShot(x, z, 80); },
     panic: panic,
     stage: function (id) { const m = mobById(id); return m ? m.stage : null; },
     get: function (id) { const m = mobById(id); return m ? summary(m) : null; },

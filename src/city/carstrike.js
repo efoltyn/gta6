@@ -903,6 +903,10 @@
     return _moving;
   }
   const _lp = CORE.setPose({}, 0, 0, 0, 0, 0, 0);
+  // the car's dims (the numbers every system reads) and the moving cars near
+  // the lens: the crowd store reads both for its contact with cars
+  CS.dims = dimsOf;
+  CS.movingCars = movingCars;
   CS.lyingInPath = function (s, RAD) {
     if (!s || s.strike || s.pin) return false;
     const M = movingCars();
