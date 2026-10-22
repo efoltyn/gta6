@@ -338,7 +338,15 @@
       gd.alert = 1.0;
       if (!gd._radioed && gd.radioT == null) gd.radioT = 3.2;
       gd._gunpointCD = 6;   // he made his read; re-aiming does not re-roll it
+      // "Drop it!" — his words through the one picker (systems/voice.js)
+      if (CBZ.voice) CBZ.voice.react(gd, "aimedAt", { by: CBZ.player, how: "draw", force: true });
     }
+  }
+  // the body above is decided; this is what (if anything) he says about it
+  const AIM_HOW = { scared: "handsUp", draw: "draw", run: "sprint", charge: "fight" };
+  function voiceAim(n) {
+    const how = AIM_HOW[n.intimidMode];
+    if (how && CBZ.voice) CBZ.voice.react(n, "aimedAt", { by: CBZ.player, how: how, why: "gun" });
   }
   // pose off, nothing else — for a hold that ended because he is down or tied
   function clearGuardHoldup(gd) {
@@ -436,7 +444,7 @@
 
       if (n.intimidT > 0) {
         if (!alive(n)) { endIntimid(n); continue; }
-        if (n.intimidMode == null) decideReaction(n, lethal);
+        if (n.intimidMode == null) { decideReaction(n, lethal); voiceAim(n); }
 
         if (n.intimidMode === "run") {
           // still in the sights: he keeps running (ai.js's flee owns the legs)

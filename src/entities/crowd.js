@@ -127,7 +127,7 @@
     const actor = {
       _crowd: true, _id: -1, _synced: false, _pi: pi, _corpseT: 0, gang: null,
       kind: "inmate", role: "inmate", char: rig, group: rig.group, _chain: chain,
-      data: { name: "an inmate", pool: "goods", offer: null, talk: ["What do you want?", "Back off.", "I ain't lookin' for trouble."] },
+      data: { name: "an inmate", pool: "goods", offer: null },
       personality: { nerve: 0.5, greed: 0.5, loyalty: 0.5, snitch: 0.3 },
       ratings: { fighting: 45, toughness: 45 }, behavior: "defensive",
       hp: 70, maxHp: 70, ko: 0, dead: true, escaped: false, looted: false,

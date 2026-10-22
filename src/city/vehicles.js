@@ -6787,7 +6787,22 @@
         p.alarmed = Math.max(p.alarmed || 0, 4);
         if (CBZ.cityRelShift) CBZ.cityRelShift(p, "nearMiss", 1);
         if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(p.pos.x, p.pos.z, 0.35);
-        if (CBZ.cityScare && CBZ.city) CBZ.cityScare(p, CBZ.city.playerActor, { bias: 0.14 });
+        const sc = CBZ.cityScare && CBZ.city ? CBZ.cityScare(p, CBZ.city.playerActor, { bias: 0.14 }) : "hold";
+        // the jump back, and what he yells after you (systems/voice.js)
+        if (CBZ.voice && CBZ.city) CBZ.voice.react(p, "nearMiss", { by: CBZ.city.playerActor, speed: vmag,
+          how: sc === "bolt" ? "sprint" : sc === "freeze" ? "freeze" : undefined });
+      }
+      /* CUT OFF. A car nosing slowly across a man's path a couple of metres
+         in front of him is not danger, it is rudeness: he stops, squares up
+         to the bonnet, and some people tell you so ("I'm walking here!"). */
+      else if (!hitInfo && car.player && vmag > 1.2 && vmag <= 10 && _d2 < 20 && CBZ.voice && CBZ.city &&
+          (p._cutT || 0) <= (CBZ.now || 0) && !p.inCar && p.state !== "flee") {
+        const hx = Math.sin(car.heading || 0) * ((car.v || 0) >= 0 ? 1 : -1), hz = Math.cos(car.heading || 0) * ((car.v || 0) >= 0 ? 1 : -1);
+        const dd = Math.sqrt(_d2) || 1;
+        if ((dx * hx + dz * hz) / dd > 0.35) {
+          p._cutT = (CBZ.now || 0) + 6000;
+          CBZ.voice.react(p, "carCutoff", { by: CBZ.city.playerActor, speed: vmag });
+        }
       }
       if (hitInfo) {
         if ((p._carHitUntil || 0) > (CBZ.now || 0)) continue;
@@ -6847,6 +6862,7 @@
           }
           if (CS) struck = CS.strike(p, car, hitInfo, vmag);
           if (!struck && CBZ.body) CBZ.body.hit(p, { fromX: car.pos.x, fromZ: car.pos.z, force: 5 + vmag * 0.45, knockdown: true });
+          if (offender && CBZ.voice) CBZ.voice.witness(p.pos.x, p.pos.z, "seeHit", { by: offender, victim: p }, 18);
           if (car.player) {
             CBZ.cityAlarm && CBZ.cityAlarm(p.pos.x, p.pos.z, 14, 0.8, CBZ.city.playerActor);
             // only a genuinely HARD impact is the 2★ vehicular-assault; a light

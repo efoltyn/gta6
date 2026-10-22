@@ -629,6 +629,10 @@
 
   // ---------- threat: who is the detail fighting? ---------------------------
   function engage(slot, th) {
+    // the man they are paid to keep alive calls them, once per threat
+    if (slot.threat !== th && slot.principal && !slot.principal.dead && CBZ.voice) {
+      CBZ.voice.say(slot.principal, "security", { by: th, force: true });
+    }
     slot.threat = th; slot.threatT = 10;
     for (const gd of slot.guards) if (gd && !gd.dead) {
       gd.rage = th; gd.state = "fight";

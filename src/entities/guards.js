@@ -236,7 +236,6 @@
     g.data.pool = "goods";
     g.data.offer = CBZ.econ.pickOffer("goods");
     g.data.name += " (bent)";
-    g.data.talk = ["You didn't see me.", "Need something brought in?", "Later. When it's quiet."];
   });
 
   function nameOf(g) {

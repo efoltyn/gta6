@@ -203,25 +203,13 @@ const PASS = await evl(`(() => {
   const audit = CBZ.cityReadAudit();
   out.notes.audit = audit;
   if (!REVERT) {
-    if (!audit.contacts) F("contact produced no line (audit.contacts = 0)");
-    if (!visible) F("no over-head line (CBZ.speech) after a contact");
+    // CBZ.voice: silence is the default; a shove must get an ANSWER (a body,
+    // sometimes words), not necessarily a line
+    const va = CBZ.voice && CBZ.voice.audit ? CBZ.voice.audit() : null;
+    out.notes.voice = va;
+    if (!va || !va.reacts) F("contact produced no reaction (CBZ.voice.audit().reacts = 0)");
   } else {
     if (audit.contacts) F("REVERT: contact still spoke with CITY_READ_V1=0");
-  }
-
-  // ---------- 6. what you ARE changes the pitch ----------
-  if (!REVERT) {
-    const asCiv = CBZ.cityLine(p, "trade");
-    const realNot = CBZ.cityNotoriety;
-    CBZ.cityNotoriety = function () { return { xp: 99999, idx: 4, name: "Boss", cut: 2 }; };
-    const asHit = CBZ.cityLine(p, "trade");
-    CBZ.cityNotoriety = realNot;
-    out.notes.tradeCiv = asCiv; out.notes.tradeHitman = asHit;
-    if (!asCiv || !asHit) F("trade line missing");
-    if (asCiv === asHit) F("pitch did not change when the player became a known hitman");
-    if (CBZ.cityPlayerRole().key !== "civilian" && CBZ.cityPlayerRole().key !== "crew" && CBZ.cityPlayerRole().key !== "boss") {
-      out.notes.playerRole = CBZ.cityPlayerRole().key;
-    }
   }
 
   // ---------- 7. the limp lost its caption and kept its body ----------

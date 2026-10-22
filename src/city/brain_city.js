@@ -257,7 +257,7 @@
       if (name === "shove") {
         a.state = "confront"; if (a.target && a.target.set && bp) a.target.set(bp.x, 0, bp.z);
         a._cbShoveT = 2.5;
-        say(a, pickLine(a, SHOVE_LINES), 1.6);
+        vsay(a, "warn", b);
         return true;
       }
       return false;
@@ -276,10 +276,8 @@
     else EXEC.say(a, line, { secs: secs, color: color });
   }
 
-  const SHOVE_LINES = ["Back up.", "Get off him.", "Step off!"];
-  const GLARE_LINES = ["You got a problem?", "Watch yourself.", "Keep walking.", "What?"];
-  const STOP_LINES = ["Hey! HEY! Stop that!", "Leave him alone!", "Knock it off!", "I'm calling the cops!"];
-  function pickLine(a, L) { return L[(hash01(a, 0x51A7 + ((now() * 3) | 0)) * L.length) | 0]; }
+  // THE WORDS ARE CBZ.voice's (systems/voice.js): one picker for the street
+  function vsay(a, topic, by) { if (CBZ.voice) CBZ.voice.say(a, topic, { by: by || null, force: true }); }
 
   // ============================================================
   //  REACTION TIMING — no same-frame crowds.
@@ -318,6 +316,9 @@
         p.rage = null;
         if (CBZ.cityFleeFrom) CBZ.cityFleeFrom(p, th.x, th.z); else p.state = "flee";
         p.fear = Math.max(p.fear || 0, 6);
+        // the body who saw the gun and ran: sometimes "He's got a gun!"; always
+        // news to the people who see him run (CBZ.voice's sight contagion)
+        if (CBZ.voice && src) CBZ.voice.react(p, th.armed ? "seeGun" : "seeRun", { by: src, how: "sprint", why: th.armed ? "gun" : null, ring: 0 });
         // CONTAGION: a runner is itself news — the panic field it raises is
         // what the NEXT body's morale reads (threat()).
         if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(p.pos.x, p.pos.z, 0.55);
@@ -384,7 +385,7 @@
           p.state = "confront"; if (p.target && p.target.set) p.target.set(sp.x, 0, sp.z);
           hold(p, "intervene", 2.2);
         }
-        say(p, pickLine(p, STOP_LINES), 1.8);
+        vsay(p, "stop", src);
         return true;
       }
       case "film": {
@@ -1104,7 +1105,7 @@
       if (lvl === "glare") {
         if (!m.rage && ap) {
           EXEC.face(m, ap.x, ap.z); m.pause = Math.max(m.pause || 0, 1.5); m.state = "idle"; m.speed = 0;
-          if (!barked) { barked = true; say(m, pickLine(m, GLARE_LINES), 1.6); }
+          if (!barked) { barked = true; vsay(m, "glare", null); }
         }
       } else if (lvl === "shove") {
         if (!m.rage) {

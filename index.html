@@ -463,6 +463,10 @@ document.body.appendChild(b);}}catch(e){}})();
      is no subtitle band. Loads before every caller (social.js, interact.js,
      campaign_ui.js, the Hitman/President rooms). -->
 <script src="src/systems/speech.js?v=phone2b"></script>
+<!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
+     in front of him (threat by sight, the one line picker, panic by sight).
+     Before read.js / peds.js / prisonvoice.js, which all call it. -->
+<script src="src/systems/voice.js?v=voice1022"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -578,7 +582,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/pushables.js?v=loose1013"></script>
 <script src="src/world/carfx.js?v=speed1014"></script>
 <script src="src/world/ground.js?v=dsl3"></script>
-<script src="src/world/cellblock.js?v=fac1009"></script>
+<script src="src/world/cellblock.js?v=voice1022"></script>
 <script src="src/world/yard.js?v=tow929"></script>
 <script src="src/world/razorwire.js?v=dsl3"></script>
 <script src="src/world/towers.js?v=tow929"></script>
@@ -713,7 +717,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=silt1020"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
-<script src="src/systems/economy.js?v=rope1022"></script>
+<script src="src/systems/economy.js?v=mrope10voice1"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=slotkey1013"></script>
@@ -773,7 +777,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=jailai1020"></script>
+<script src="src/entities/guards.js?v=voice1022"></script>
 <script src="src/entities/searchlight.js?v=tow929"></script>
 <script src="src/entities/keycard.js?v=jas1020"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
@@ -786,8 +790,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE CARS: the yard sorts itself by race (heritage -> car), no colours.
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=jailv1001"></script>
-<script src="src/entities/npc.js?v=mrg10200039"></script>
-<script src="src/entities/ai.js?v=mrg10200039"></script>
+<script src="src/entities/npc.js?v=voice1022"></script>
+<script src="src/entities/ai.js?v=voice1022"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -887,7 +891,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. remaining systems -->
 <script src="src/systems/quests.js?v=verbs2b"></script>
-<script src="src/systems/prisonvoice.js?v=jailai1020"></script>
+<script src="src/systems/prisonvoice.js?v=voice1022"></script>
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/reality.js?v=support1"></script>
@@ -898,7 +902,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
-<script src="src/entities/towerwatch.js?v=jailai1020"></script>
+<script src="src/entities/towerwatch.js?v=voice1022"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -919,7 +923,7 @@ document.body.appendChild(b);}}catch(e){}})();
      restores the legacy feet-pivot flop. -->
 <script src="src/systems/prisoncorpse.js?v=fallreal1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
-<script src="src/entities/crowd.js?v=jtv1019c"></script>
+<script src="src/entities/crowd.js?v=voice1022"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
 <script src="src/systems/detection.js?v=jailv1001"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
@@ -961,9 +965,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=pace1015"></script>
 <script src="src/systems/compass.js"></script>
-<script src="src/systems/combat.js?v=jtv1019b"></script>
+<script src="src/systems/combat.js?v=voice1022"></script>
 <script src="src/systems/killstreaks.js?v=jailv1001"></script>
-<script src="src/systems/interact.js?v=rope1022"></script>
+<script src="src/systems/interact.js?v=mrope10voice1"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
 <script src="src/systems/prisontrade.js?v=jailside1001"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
@@ -1045,7 +1049,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/gamepad.js?v=cine1022"></script>
 <script src="src/systems/fpsmode.js?v=hands1022"></script>
 <script src="src/systems/gunfx.js?v=rounds1013m"></script>
-<script src="src/systems/intimidate.js?v=jailai1020"></script>
+<script src="src/systems/intimidate.js?v=voice1022"></script>
 
 <!-- 4c. SURVIVAL — natural-disaster battle royale (a second game mode).
      Additive: registers its own updaters (gated by game.mode) and builds
@@ -1496,18 +1500,18 @@ document.body.appendChild(b);}}catch(e){}})();
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=verbs2b"></script>
 <script src="src/city/gangs.js?v=rounds1013m"></script>
-<script src="src/city/social.js?v=verbs2b"></script>
+<script src="src/city/social.js?v=voice1022"></script>
 <script src="src/city/realestate.js?v=tap0929"></script>
 <script src="src/city/view.js?v=hands1022"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=ladder1022"></script>
+<script src="src/city/peds.js?v=mladdervoice1"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
-<script src="src/city/brain_city.js?v=dismiss1014"></script>
+<script src="src/city/brain_city.js?v=voice1022"></script>
 <!-- city/ladder.js: CBZ.cityLadder, the city body for CBZ.brain.demand (the
      demand ladder: a mugger, a doorman, a corner crew, a guard asking first).
      peds.js think() yields to it; nothing runs at parse. -->
@@ -1529,7 +1533,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (cityRel/cityBond/citySay); every consumer resolves it lazily at call
      time, so nothing below needs reordering. Consumers: humancontact.js (the
      bump), peds.js (trade + greet). -->
-<script src="src/city/read.js?v=presreal1013"></script>
+<script src="src/city/read.js?v=voice1022"></script>
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=shades1009b"></script>
 <script src="src/city/club.js?v=ladder1022"></script>
@@ -1547,7 +1551,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carlamps.js?v=cardraws1020"></script>
 <script src="src/city/medics.js?v=emg1019"></script>
 <script src="src/city/security.js?v=ladder1022"></script>
-<script src="src/city/vips.js?v=ladder1022"></script>
+<script src="src/city/vips.js?v=mladdervoice1"></script>
 <script src="src/city/police.js?v=ladder1022"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/aircraft.js?v=rounds1013m"></script>
@@ -1575,7 +1579,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=mrg10200048"></script>
-<script src="src/city/vehicles.js?v=cardraws1020"></script>
+<script src="src/city/vehicles.js?v=voice1022"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
 <script src="src/city/playeraircraft.js?v=planes1020"></script>
@@ -1805,7 +1809,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=vault1013"></script>
-<script src="src/city/restrain.js?v=hands1022"></script>
+<script src="src/city/restrain.js?v=mhands1voice1"></script>
 <script src="src/city/custody.js?v=hold1020"></script>
 <script src="src/city/combat.js?v=rounds1013m"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
@@ -2043,7 +2047,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/campaign_ui.js?v=fatal1022"></script>
 <script src="src/city/campaign.js?v=camp1022b"></script>
 <script src="src/city/cinematics.js?v=fatal1022"></script>
-<script src="src/systems/humancontact.js?v=jailai1020"></script>
+<script src="src/systems/humancontact.js?v=voice1022"></script>
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
      (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
      the army's "route" order) route on it. Pure maths, loads first. -->
@@ -2169,7 +2173,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- kinship.js — the BODY for the family/friends arithmetic: bonded walkers,
      greetings, grief, homecoming. Loads after familypanel (reads the whole
      family cluster lazily; only hard dep is entities/poses.js far above). -->
-<script src="src/city/kinship.js?v=street1009"></script>
+<script src="src/city/kinship.js?v=voice1022"></script>
 <!-- tells.js — body-language tells: maps already-tracked ped scalars (fear,
      grudge, bond, wealth, aggr) onto CBZ.charPoses rows so internal state is
      legible as posture. Loads after kinship (reuses kinWave; yields to kin
@@ -2274,7 +2278,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/brain_protection.js: CBZ.detailBrain, the close-protection detail's
      decisions (roles, stable slots, smoothed follow, sector scans, the panic
      protocol, counter-snipers) for every detail in the city. -->
-<script src="src/city/brain_protection.js?v=ladder1022"></script>
+<script src="src/city/brain_protection.js?v=mladdervoice1"></script>
 <script src="src/city/protection.js?v=leave1014"></script>
 <script src="src/city/officials.js?v=leave1014"></script>
 <script src="src/city/approval.js?v=boot1013"></script>

@@ -201,7 +201,6 @@
     confrontReport: { label: "Confront", fn: (a) => CBZ.resolveKnownSnitch ? CBZ.resolveKnownSnitch(a, "confront") : { ok: false, msg: "" } },
     paySilence: { label: "Pay",     fn: (a) => CBZ.resolveKnownSnitch ? CBZ.resolveKnownSnitch(a, "paySilence") : { ok: false, msg: "" } },
     // ---- the officer's own (cop role)
-    question: { label: "Question",  fn: (a) => CBZ.econ.talk(a) },
     warn:     { label: "Warn",      fn: (a) => a.approach ? approachAction(a, "warn") : warnActor(a) },
     detain:   { label: "Cuff",      fn: (a) => {
       if (a.approach && /^cop[A-Z]/.test(a.approach.kind || "")) return approachAction(a, "detain");
@@ -362,7 +361,7 @@
       return ["refuse"];
     }
     // A COP'S THREE: ask, toss, cuff (cuff only on a man who gave up or is down)
-    if (CBZ.game.role === "cop" && !staff(a)) return cuffOk(a) ? ["question", "search", "detain"] : ["question", "search"];
+    if (CBZ.game.role === "cop" && !staff(a)) return cuffOk(a) ? ["search", "detain"] : ["search"];
     // THE MAN WHO REPORTED YOU, once you know it: lean on him, pay him, or take hold of him
     const knowsRat = CBZ.playerKnowsSnitch ? CBZ.playerKnowsSnitch(a) : (a.reportedPlayerT || 0) > 0;
     if (CBZ.game.role !== "cop" && knowsRat) return ["confrontReport", "paySilence", "grab"];

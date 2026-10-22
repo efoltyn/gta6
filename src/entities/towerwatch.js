@@ -67,7 +67,6 @@
   const LINES = {
     ladder: ["Off my ladder.", "Get down. Now.", "Stay off it."],
     shot: ["Shots fired!", "Contact, yard side!"],
-    talk: ["Nobody comes up here.", "Back off my tower."],
     over: ["Man over the wall!", "Jumper! Over the side!", "He's over! Hit the alarm!"],
   };
   function say(g, list, secs) {
@@ -84,7 +83,6 @@
     if (!g) return;
     g.armed = true; g.weapon = "Rifle";
     g.flashlightPatrol = false;
-    g.data.talk = LINES.talk.slice();
     // where he stands at roll: out of his shaft's door, a few metres off it
     const sd = T.shaftDoor || T.foot, ox = sd.x - T.x, oz = sd.z - T.z, ol = Math.hypot(ox, oz) || 1;
     const P = {

@@ -2360,13 +2360,6 @@
   const BEH = ["defensive", "pacifist", "opportunist", "hothead", "unpredictable", "protector"];
   const SKIN = [0xf0c39a, 0xe8b58c, 0xc08a5a, 0x8a5a3a, 0x6b4a32, 0xd8a177, 0xb5825a];
   const HAIR = [0x2a2018, 0x4a3526, 0x101820, 0xb9b1a6, 0x7a4a2e, 0x222222, 0xdedede];
-  const TALK = [
-    ["Bunk's mine. Floor's yours.", "Don't be loud."],
-    ["Six years in this cell.", "Keep your stuff off my side."],
-    ["Don't snore.", "Those are my girls. Don't look."],
-    ["Third time in this box.", "Don't touch my shelf."],
-    ["Lights out. Shut up.", "Sleep light."],
-  ];
   function jump(skin, hair) {
     return { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a,
       skin: skin, hair: hair, stripes: 0xc85c00, shoes: 0x2b2b2b };
@@ -2567,7 +2560,7 @@
             : jump(pick(SKIN, c.x, c.z, 6003), pick(HAIR, c.x, c.z, 6004)),
           data: {
             name: pick(NAMES, c.x, c.z, 6005), pool: "goods",
-            cell: c.tag, talk: pick(TALK, c.x, c.z, 6006),
+            cell: c.tag,
           },
         });
       } catch (e) { n = null; }

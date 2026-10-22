@@ -462,6 +462,10 @@ document.body.appendChild(b);}}catch(e){}})();
      is no subtitle band. Loads before every caller (social.js, interact.js,
      campaign_ui.js, the Hitman/President rooms). -->
 <script src="src/systems/speech.js?v=phone2b"></script>
+<!-- systems/voice.js: CBZ.voice, what a person does and says is the situation
+     in front of him (threat by sight, the one line picker, panic by sight).
+     Before read.js / peds.js / prisonvoice.js, which all call it. -->
+<script src="src/systems/voice.js?v=voice1022"></script>
 <!-- THE CHARGE TABLE: real US Army urban-breaching arithmetic (2 lb mousehole /
      5 lb one man / 7 lb two abreast) plus the CONTACT-vs-STANDOFF law, published
      once so the prison door, the bank vault and every wall price themselves in
@@ -565,7 +569,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
 <script src="src/world/carfx.js?v=speed1014"></script>
-<script src="src/world/cellblock.js?v=fac1009"></script>
+<script src="src/world/cellblock.js?v=voice1022"></script>
 <!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
      CBZ.spawnPiece at parse time, so they must load after chunks.js/
      pieces.js define it. Nothing else in this file's original 283-284 slot
@@ -816,7 +820,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and state.js, which call CBZ.prisonTier at runtime. -->
 
 <!-- 4b. remaining systems -->
-<script src="src/systems/prisonvoice.js?v=jailai1020"></script>
+<script src="src/systems/prisonvoice.js?v=voice1022"></script>
 <script src="src/systems/input.js?v=haskbd1014"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/camera.js?v=hands1022"></script>
@@ -825,7 +829,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=speedway1009"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
-<script src="src/entities/towerwatch.js?v=jailai1020"></script>
+<script src="src/entities/towerwatch.js?v=voice1022"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -1358,7 +1362,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=mrg10200048"></script>
-<script src="src/city/vehicles.js?v=cardraws1020"></script>
+<script src="src/city/vehicles.js?v=voice1022"></script>
 <script src="src/city/carinstances.js?v=cardraws1020"></script>
 <script src="src/city/playeraircraft.js?v=planes1020"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1723,7 +1727,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/agency.js?v=cine1022"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
-<script src="src/systems/humancontact.js?v=jailai1020"></script>
+<script src="src/systems/humancontact.js?v=voice1022"></script>
 <!-- THE ONE ROAD ROUTER (systems/roadgraph.js): the motorcade, the map arrows
      (navigation.js) and every military column (systems/convoy.js, CBZ.convoy:
      the army's "route" order) route on it. Pure maths, loads first. -->
