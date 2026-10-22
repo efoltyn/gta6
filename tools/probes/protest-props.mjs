@@ -10,6 +10,15 @@ export const meta = { world: "city", fresh: true, dirties: true, timeoutMs: 4 * 
 
 export default async function (t) {
   await t.step(60);
+  await t.fn(`
+    window.__hides = [];
+    var O = THREE.Object3D.prototype;
+    CBZ.scene.traverse(function (o) { if (o.name && o.name.indexOf("crowdgpu:") === 0) { var v = o.visible; delete o.visible; o.__vis = v; } });
+    Object.defineProperty(O, "visible", { configurable: true, get: function () { return this.__vis !== false; }, set: function (x) {
+      if (!x && this.__vis !== false && this.name && this.name.indexOf("crowdgpu:") === 0 && window.__hides.length < 8) window.__hides.push(this.name + " " + String(new Error().stack).split("\n").slice(1, 7).join(" | "));
+      this.__vis = !!x; } });
+    return true;
+  `);
   const a0 = await t.fn(`
     var PP = CBZ.presidentPublic; if (!PP || !PP._protestNow) return { err: "no _protestNow" };
     PP._protestNow(14);
@@ -18,16 +27,6 @@ export default async function (t) {
     return { ok: true, pen: pen ? [pen.at.x, pen.at.z] : null };
   `);
   if (!a0 || a0.err || a0.__err) return { ok: false, summary: "setup: " + JSON.stringify(a0) };
-  await t.step(30);
-  await t.fn(`
-    window.__hides = [];
-    CBZ.scene.traverse(function (o) {
-      if (!o.name || o.name.indexOf("crowdgpu:") !== 0 || o.__spy) return;
-      o.__spy = true; var v = o.visible;
-      Object.defineProperty(o, "visible", { configurable: true, get: function () { return v; }, set: function (x) { if (!x && v && window.__hides.length < 6) window.__hides.push(o.name + " " + String(new Error().stack).split("\n").slice(1, 6).join(" | ")); v = x; } });
-    });
-    return true;
-  `);
   await t.step(240);
   const a = await t.fn(`
     var ST = CBZ.crowds, S = ST.S, M = CBZ.mob, G = CBZ.crowdGPU;
